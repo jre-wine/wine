@@ -23,7 +23,7 @@ use strict;
 
 # base URLs for www.unicode.org files
 my $MAPPINGS = "http://www.unicode.org/Public/MAPPINGS";
-my $UNIDATA = "http://www.unicode.org/Public/5.2.0/ucd";
+my $UNIDATA = "http://www.unicode.org/Public/6.0.0/ucd";
 
 # Sort keys file
 my $SORTKEYS = "http://www.unicode.org/reports/tr10/allkeys.txt";
@@ -111,41 +111,42 @@ my %ctype =
     "cntrl"  => 0x0020,
     "blank"  => 0x0040,
     "xdigit" => 0x0080,
-    "alpha"  => 0x0100
+    "alpha"  => 0x0100,
+    "defin"  => 0x0200
 );
 
 my %categories =
 (
-    "Lu" => $ctype{"alpha"}|$ctype{"upper"}, # Letter, Uppercase
-    "Ll" => $ctype{"alpha"}|$ctype{"lower"}, # Letter, Lowercase
-    "Lt" => $ctype{"alpha"},    # Letter, Titlecase
-    "Mn" => $ctype{"punct"},    # Mark, Non-Spacing
-    "Mc" => $ctype{"punct"},    # Mark, Spacing Combining
-    "Me" => $ctype{"punct"},    # Mark, Enclosing
-    "Nd" => $ctype{"digit"},    # Number, Decimal Digit
-    "Nl" => $ctype{"punct"},    # Number, Letter
-    "No" => $ctype{"punct"},    # Number, Other
-    "Zs" => $ctype{"space"},    # Separator, Space
-    "Zl" => $ctype{"space"},    # Separator, Line
-    "Zp" => $ctype{"space"},    # Separator, Paragraph
-    "Cc" => $ctype{"cntrl"},    # Other, Control
-    "Cf" => 0,                  # Other, Format
-    "Cs" => 0,                  # Other, Surrogate
-    "Co" => 0,                  # Other, Private Use
-    "Cn" => 0,                  # Other, Not Assigned
-    "Lm" => $ctype{"punct"},    # Letter, Modifier
-    "Lo" => $ctype{"alpha"},    # Letter, Other
-    "Pc" => $ctype{"punct"},    # Punctuation, Connector
-    "Pd" => $ctype{"punct"},    # Punctuation, Dash
-    "Ps" => $ctype{"punct"},    # Punctuation, Open
-    "Pe" => $ctype{"punct"},    # Punctuation, Close
-    "Pi" => $ctype{"punct"},    # Punctuation, Initial quote
-    "Pf" => $ctype{"punct"},    # Punctuation, Final quote
-    "Po" => $ctype{"punct"},    # Punctuation, Other
-    "Sm" => $ctype{"punct"},    # Symbol, Math
-    "Sc" => $ctype{"punct"},    # Symbol, Currency
-    "Sk" => $ctype{"punct"},    # Symbol, Modifier
-    "So" => $ctype{"punct"}     # Symbol, Other
+    "Lu" => $ctype{"defin"}|$ctype{"alpha"}|$ctype{"upper"}, # Letter, Uppercase
+    "Ll" => $ctype{"defin"}|$ctype{"alpha"}|$ctype{"lower"}, # Letter, Lowercase
+    "Lt" => $ctype{"defin"}|$ctype{"alpha"}|$ctype{"upper"}|$ctype{"lower"},    # Letter, Titlecase
+    "Mn" => $ctype{"defin"},                    # Mark, Non-Spacing
+    "Mc" => $ctype{"defin"},                    # Mark, Spacing Combining
+    "Me" => $ctype{"defin"},                    # Mark, Enclosing
+    "Nd" => $ctype{"defin"}|$ctype{"digit"},    # Number, Decimal Digit
+    "Nl" => $ctype{"defin"}|$ctype{"alpha"},    # Number, Letter
+    "No" => $ctype{"defin"},                    # Number, Other
+    "Zs" => $ctype{"defin"}|$ctype{"space"},    # Separator, Space
+    "Zl" => $ctype{"defin"}|$ctype{"space"},    # Separator, Line
+    "Zp" => $ctype{"defin"}|$ctype{"space"},    # Separator, Paragraph
+    "Cc" => $ctype{"defin"}|$ctype{"cntrl"},    # Other, Control
+    "Cf" => $ctype{"defin"}|$ctype{"cntrl"},    # Other, Format
+    "Cs" => $ctype{"defin"},                    # Other, Surrogate
+    "Co" => $ctype{"defin"},                    # Other, Private Use
+    "Cn" => $ctype{"defin"},                    # Other, Not Assigned
+    "Lm" => $ctype{"defin"}|$ctype{"alpha"},    # Letter, Modifier
+    "Lo" => $ctype{"defin"}|$ctype{"alpha"},    # Letter, Other
+    "Pc" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Connector
+    "Pd" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Dash
+    "Ps" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Open
+    "Pe" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Close
+    "Pi" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Initial quote
+    "Pf" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Final quote
+    "Po" => $ctype{"defin"}|$ctype{"punct"},    # Punctuation, Other
+    "Sm" => $ctype{"defin"},                    # Symbol, Math
+    "Sc" => $ctype{"defin"},                    # Symbol, Currency
+    "Sk" => $ctype{"defin"},                    # Symbol, Modifier
+    "So" => $ctype{"defin"}                     # Symbol, Other
 );
 
 # a few characters need additional categories that cannot be determined automatically
@@ -155,10 +156,14 @@ my %special_categories =
                   0xff10..0xff19, 0xff21..0xff26, 0xff41..0xff46 ],
     "space"  => [ 0x09..0x0d, 0x85 ],
     "blank"  => [ 0x09, 0x20, 0xa0, 0x3000, 0xfeff ],
-    "cntrl"  => [ 0x070f, 0x180b, 0x180c, 0x180d, 0x180e, 0x200c, 0x200d,
+    "cntrl"  => [ 0x070f, 0x200c, 0x200d,
                   0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
                   0x206a, 0x206b, 0x206c, 0x206d, 0x206e, 0x206f, 0xfeff,
-                  0xfff9, 0xfffa, 0xfffb ]
+                  0xfff9, 0xfffa, 0xfffb ],
+    "punct"  => [ 0x24, 0x2b, 0x3c..0x3e, 0x5e, 0x60, 0x7c, 0x7e, 0xa2..0xbe,
+                  0xd7, 0xf7 ],
+    "digit"  => [ 0xb2, 0xb3, 0xb9 ],
+    "lower"  => [ 0x2071, 0x207f ]
 );
 
 my %directions =
@@ -290,12 +295,10 @@ sub READ_DEFAULTS($)
         if ($lower ne "")
         {
             $tolower_table[$src] = hex $lower;
-            $category_table[$src] |= $ctype{"upper"}|$ctype{"alpha"};
         }
         if ($upper ne "")
         {
             $toupper_table[$src] = hex $upper;
-            $category_table[$src] |= $ctype{"lower"}|$ctype{"alpha"};
         }
         if ($dec ne "")
         {

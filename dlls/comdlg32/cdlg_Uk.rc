@@ -27,7 +27,7 @@
 
 LANGUAGE LANG_UKRAINIAN, SUBLANG_DEFAULT
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Відкрити"
 FONT 8, "MS Shell Dlg"
@@ -49,7 +49,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Зберегти як..."
 FONT 8, "MS Shell Dlg"
@@ -71,7 +71,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Друк"
 FONT 8, "MS Shell Dlg"
@@ -94,7 +94,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT_SETUP DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Параметри друку"
 FONT 8, "MS Shell Dlg"
@@ -120,7 +120,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Шрифт"
 FONT 8, "MS Shell Dlg"
@@ -205,7 +205,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Заміна"
 FONT 8, "MS Shell Dlg"
@@ -224,7 +224,7 @@ FONT 8, "MS Shell Dlg"
  PUSHBUTTON "&Довідка", pshHelp	 , 174, 75, 50, 14, WS_GROUP | WS_TABSTOP
 }
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Друк"
@@ -264,7 +264,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "&до:",           stc3, 104,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Параметри друку"
@@ -299,7 +299,7 @@ BEGIN
     CONTROL         "&Альбомна",      rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Параметри сторінки"
 FONT 8, "MS Shell Dlg"
@@ -329,7 +329,7 @@ BEGIN
   PUSHBUTTON "П&ринтер...", psh3, 184, 220, 48, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "Відкрити"
 FONT 8, "MS Shell Dlg"
@@ -351,135 +351,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"&Відкрити",		 IDOK,222,110,50,14
     PUSHBUTTON		"Скасувати",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"&Довідка",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "&Про тест ВибірТеки"
-    IDS_DOCUMENTFOLDERS     "Теки документів"
-    IDS_PERSONAL            "Мої документи"
-    IDS_FAVORITES           "Закладки"
-    IDS_PATH                "Системний шлях"
-    IDS_DESKTOP             "Робочий стіл"
-    IDS_FONTS               "Шрифти"
-    IDS_MYCOMPUTER          "Мій комп'ютер"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "Системні теки"
-    IDS_LOCALHARDRIVES      "Локальні жорсткі диски"
-    IDS_FILENOTFOUND        "Файл не знайдено"
-    IDS_VERIFYFILE          "Перевірте, чи правильно вказано ім'я файлу"
-    IDS_CREATEFILE          "Файл не існує\nЧи хочете Ви його створити?"
-    IDS_OVERWRITEFILE       "Файл уже існує.\nЗамінити його?"
-    IDS_INVALID_FILENAME_TITLE "Невірний символ в запису шляху"
-    IDS_INVALID_FILENAME    "Ім'я файлу не може містити наступні символи:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "Шлях не існує"
-    IDS_FILENOTEXISTING     "Файл не існує"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "Вгору на один рівень"
-    IDS_NEWFOLDER        "Створити нову теку"
-    IDS_LISTVIEW         "Список"
-    IDS_REPORTVIEW       "Подробиці"
-    IDS_TODESKTOP        "Перехід на Робочий стіл"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "Друк"
-
-    PD32_VALUE_UREADABLE                  "Нечитаємий елемент"
-    PD32_INVALID_PAGE_RANGE "Це значення не лежить у діапазоні сторінок\n\
-Введіть значенне між %d та %d"
-    PD32_FROM_NOT_ABOVE_TO                "Значення ВІД не повинно перевищувати ДО:"
-    PD32_MARGINS_OVERLAP                  "Межі перекривають чи перевищують \
-розміри паперу.\nВведіть їх наново"
-    PD32_NR_OF_COPIES_EMPTY               "Значення Числа Копій не може бути \
-пустим"
-    PD32_TOO_LARGE_COPIES                 "Така велика кількість копій не \
-може бути надрукована Вашим принтером.\nВведіть значення між 1 та %d"
-    PD32_PRINT_ERROR                      "Виникла помилка принтера"
-    PD32_NO_DEFAULT_PRINTER               "Немає принтера, поставленого за обумовленням"
-    PD32_CANT_FIND_PRINTER                "Не вдалось знайти принтер"
-    PD32_OUT_OF_MEMORY                    "Мало пам'яті"
-    PD32_GENERIC_ERROR                    "Виникла(и) помилка(и)"
-    PD32_DRIVER_UNKNOWN                   "Невідомий драйвер принтера"
-    PD32_NO_DEVICES                       "Перед запуском таких дій як налаштування \
-сторінки чи друкування вам треба встановити принтер. \
-Встановіть принтер та спробуйте знов."
-
-    PD32_DEFAULT_PRINTER                  "Принтер за обумовленням; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "%d документів у черзі"
-    PD32_MARGINS_IN_INCHES                "Межі  [дюйми]"
-    PD32_MARGINS_IN_MILLIMETERS           "Межі [мм]"
-    PD32_MILLIMETERS                      "мм"
-
-    PD32_PRINTER_STATUS_READY             "Готово"
-    PD32_PRINTER_STATUS_PAUSED            "Призупинено; "
-    PD32_PRINTER_STATUS_ERROR             "Помилка; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "Чекання видалення; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "Папір застряг; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "Не вистачає паперу; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Поставте папір вручну; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "Проблема с папером; "
-    PD32_PRINTER_STATUS_OFFLINE           "Принтер в режимі offline; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "Ввід/Вивід активний; "
-    PD32_PRINTER_STATUS_BUSY              "Зайнятий; "
-    PD32_PRINTER_STATUS_PRINTING          "Йде друк; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "Лоток переповнений папером; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "Не доступний; "
-    PD32_PRINTER_STATUS_WAITING           "Очікування; "
-    PD32_PRINTER_STATUS_PROCESSING        "Обробка; "
-    PD32_PRINTER_STATUS_INITIALIZING      "Готування; "
-    PD32_PRINTER_STATUS_WARMING_UP        "Прогрів; "
-    PD32_PRINTER_STATUS_TONER_LOW         "Тонер при кінці; "
-    PD32_PRINTER_STATUS_NO_TONER          "Нема тонера; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Page punt; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "Перервано користувачем; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "Мало пам'яті; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "Кришка принтера відкрита; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "Невідомий сервер принтера; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "Живлення в безпечному режимі; "
-}
-
-STRINGTABLE DISCARDABLE /* Font styles */
-{
-    IDS_FONT_REGULAR       "Нормальний"
-    IDS_FONT_BOLD          "Жирний"
-    IDS_FONT_ITALIC        "Курсив"
-    IDS_FONT_BOLD_ITALIC   "Жирний курсив"
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "Чорний"
-    IDS_COLOR_MAROON    "Коричневий"
-    IDS_COLOR_GREEN     "Зелений"
-    IDS_COLOR_OLIVE     "Оливковий"
-    IDS_COLOR_NAVY      "Темно-синій"
-    IDS_COLOR_PURPLE    "Пурпуровий"
-    IDS_COLOR_TEAL      "Синьо-зелений"
-    IDS_COLOR_GRAY      "Сірий"
-    IDS_COLOR_SILVER    "Сріблястий"
-    IDS_COLOR_RED       "Червоний"
-    IDS_COLOR_LIME      "Салатовий"
-    IDS_COLOR_YELLOW    "Жовтий"
-    IDS_COLOR_BLUE      "Синій"
-    IDS_COLOR_FUCHSIA   "Малиновий"
-    IDS_COLOR_AQUA      "Блакитний"
-    IDS_COLOR_WHITE     "Білий"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_FONT_SIZE   "Биберіть шрифт розміром %d - %d пунктів."
-    IDS_SAVE_BUTTON "&Зберегти"
-    IDS_SAVE_IN     "Зберегти &в:"
-    IDS_SAVE        "Зберегти"
-    IDS_SAVE_AS     "Зберегти як"
-    IDS_OPEN_FILE   "Відкрити файл"
 }

@@ -243,7 +243,8 @@ UINT WINAPI RegisterClipboardFormatA(LPCSTR formatName)
  */
 INT WINAPI GetClipboardFormatNameW(UINT wFormat, LPWSTR retStr, INT maxlen)
 {
-    return USER_Driver->pGetClipboardFormatName(wFormat, retStr, maxlen);
+    if (wFormat < MAXINTATOM) return 0;
+    return GlobalGetAtomNameW( wFormat, retStr, maxlen );
 }
 
 
@@ -252,16 +253,8 @@ INT WINAPI GetClipboardFormatNameW(UINT wFormat, LPWSTR retStr, INT maxlen)
  */
 INT WINAPI GetClipboardFormatNameA(UINT wFormat, LPSTR retStr, INT maxlen)
 {
-    INT ret;
-    LPWSTR p = HeapAlloc( GetProcessHeap(), 0, maxlen*sizeof(WCHAR) );
-    if(p == NULL) return 0; /* FIXME: is this the correct failure value? */
-
-    ret = GetClipboardFormatNameW( wFormat, p, maxlen );
-
-    if (ret && maxlen > 0 && !WideCharToMultiByte( CP_ACP, 0, p, -1, retStr, maxlen, 0, 0))
-        retStr[maxlen-1] = 0;
-    HeapFree( GetProcessHeap(), 0, p );
-    return ret;
+    if (wFormat < MAXINTATOM) return 0;
+    return GlobalGetAtomNameA( wFormat, retStr, maxlen );
 }
 
 
@@ -291,7 +284,7 @@ BOOL WINAPI CloseClipboard(void)
 {
     BOOL bRet = FALSE;
 
-    TRACE("(%d)\n", bCBHasChanged);
+    TRACE("() Changed=%d\n", bCBHasChanged);
 
     if (CLIPBOARD_CloseClipboard())
     {
@@ -301,10 +294,10 @@ BOOL WINAPI CloseClipboard(void)
 
             USER_Driver->pEndClipboardUpdate();
 
+            bCBHasChanged = FALSE;
+
             if (hWndViewer)
                 SendMessageW(hWndViewer, WM_DRAWCLIPBOARD, (WPARAM) GetClipboardOwner(), 0);
-
-            bCBHasChanged = FALSE;
         }
 
         bRet = TRUE;

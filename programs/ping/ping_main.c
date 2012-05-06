@@ -17,7 +17,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#ifdef HAVE_UNISTD_H
 #include <unistd.h>
+#endif
+
 #include <windows.h>
 
 #include "wine/debug.h"
@@ -26,15 +34,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(ping);
 
 static void usage(void)
 {
-    WINE_MESSAGE( "Usage: ping [-n count] [-w timeout] target_name\n\n" );
-    WINE_MESSAGE( "Options:\n" );
-    WINE_MESSAGE( "    -n  Number of echo requests to send.\n" );
-    WINE_MESSAGE( "    -w  Timeout in milliseconds to wait for each reply.\n" );
+    printf("Usage: ping [-n count] [-w timeout] target_name\n\n"
+           "Options:\n"
+           "    -n  Number of echo requests to send.\n"
+           "    -w  Timeout in milliseconds to wait for each reply.\n");
 }
 
 int main(int argc, char** argv)
 {
-    int n = 0;
+    unsigned int n = 0;
     int optc;
 
     WINE_FIXME( "this command currently just sleeps based on -n parameter\n" );
@@ -44,7 +52,12 @@ int main(int argc, char** argv)
         switch(optc)
         {
             case 'n':
-                n = atoi( optarg );
+                n = atoi(optarg);
+                if (n == 0)
+                {
+                  printf("Bad value for option -n, valid range is from 1 to 4294967295.\n");
+                  exit(1);
+                }
                 break;
             case '?':
                 usage();
@@ -56,6 +69,8 @@ int main(int argc, char** argv)
         }
     }
 
-    Sleep(n * 1000);
+    if (n != 0)
+      Sleep((n - 1) * 1000);
+
     return 0;
 }

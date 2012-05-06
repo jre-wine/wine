@@ -23,104 +23,10 @@
 LANGUAGE LANG_TURKISH, SUBLANG_DEFAULT
 
 /*
- * Menu
- */
-
-IDR_REGEDIT_MENU MENU DISCARDABLE
-BEGIN
-    POPUP "&Kayýt"
-    BEGIN
-        MENUITEM "Kayýt Dosyasý &Al...",        ID_REGISTRY_IMPORTREGISTRYFILE
-        MENUITEM "Kayýt Dosyasý &Kaydet...",    ID_REGISTRY_EXPORTREGISTRYFILE
-        MENUITEM SEPARATOR
-        MENUITEM "A&ð Kaydýna Baðlan...",       ID_REGISTRY_CONNECTNETWORKREGISTRY, GRAYED
-        MENUITEM "Að Kaydý Baðlantýsýný Kopar...", ID_REGISTRY_DISCONNECTNETWORKREGISTRY, GRAYED
-        MENUITEM SEPARATOR
-        MENUITEM "Ya&zdýr\tCtrl+P",             ID_REGISTRY_PRINT, GRAYED
-        MENUITEM SEPARATOR
-        MENUITEM "&Çýkýþ",                      ID_REGISTRY_EXIT
-    END
-    POPUP "&Düzen"
-    BEGIN
-        MENUITEM "&Deðiþtir",                   ID_EDIT_MODIFY
-        MENUITEM SEPARATOR
-        POPUP "&Yeni"
-        BEGIN
-            MENUITEM "&Anahtar",                ID_EDIT_NEW_KEY
-            MENUITEM SEPARATOR
-            MENUITEM "&Dizge Deðeri",           ID_EDIT_NEW_STRINGVALUE
-            MENUITEM "&Ýkili Deðer",            ID_EDIT_NEW_BINARYVALUE
-            MENUITEM "&Çift Sözcük Deðeri",     ID_EDIT_NEW_DWORDVALUE
-            MENUITEM "&Multi String Value",     ID_EDIT_NEW_MULTI_STRINGVALUE
-        END
-        MENUITEM SEPARATOR
-        MENUITEM "&Sil\tDel",                   ID_EDIT_DELETE
-        MENUITEM "&Yeniden Adlandýr\tF2",       ID_EDIT_RENAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Anahtar Adýný Kopyala",      ID_EDIT_COPYKEYNAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Bul\tCtrl+F",                ID_EDIT_FIND, GRAYED
-        MENUITEM "&Sonrakini Bul\tF3",          ID_EDIT_FINDNEXT, GRAYED
-    END
-    POPUP "&Görünüm"
-    BEGIN
-        MENUITEM "Durum &Çubuðu",               ID_VIEW_STATUSBAR
-        MENUITEM SEPARATOR
-        MENUITEM "A&yraç",                       ID_VIEW_SPLIT
-        MENUITEM SEPARATOR
-        MENUITEM "&Yenile\tF5",                 ID_VIEW_REFRESH
-    END
-    POPUP "&Sýk Kullanýlanlar"
-    BEGIN
-        MENUITEM "Sýk Kullanýlanlara Ekle...",     ID_FAVORITES_ADDTOFAVORITES
-        MENUITEM "Sýk Kullanýlanlardan Sil...",    ID_FAVORITES_REMOVEFAVORITE
-    END
-    POPUP "&Yardým"
-    BEGIN
-        MENUITEM "&Yardým Konularý\tF1",        ID_HELP_HELPTOPICS
-        MENUITEM SEPARATOR
-        MENUITEM "Sistem Kayýt Düzenleyicisi &Hakkýnda",      ID_HELP_ABOUT
-    END
-END
-
-IDR_POPUP_MENUS MENU DISCARDABLE
-BEGIN
-  POPUP ""
-  BEGIN
-	MENUITEM "&Deðiþtir",                   ID_EDIT_MODIFY
-	MENUITEM "Ýkili Veriyi Deðiþtir",       ID_EDIT_MODIFY_BIN
-	MENUITEM SEPARATOR
-	MENUITEM "&Sil\tDel",                   ID_EDIT_DELETE
-	MENUITEM "&Yeniden Adlandýr",           ID_EDIT_RENAME
-  END
-  POPUP ""
-  BEGIN
-        POPUP "&Yeni"
-        BEGIN
-            MENUITEM "&Anahtar",                    ID_EDIT_NEW_KEY
-            MENUITEM SEPARATOR
-            MENUITEM "&Dizge Deðeri",               ID_EDIT_NEW_STRINGVALUE
-            MENUITEM "&Ýkili Deðer",                ID_EDIT_NEW_BINARYVALUE
-            MENUITEM "&Çift Sözcük Deðeri",         ID_EDIT_NEW_DWORDVALUE
-            MENUITEM "&Multi String Value",         ID_EDIT_NEW_MULTI_STRINGVALUE
-        END
-        MENUITEM SEPARATOR
-        MENUITEM "&Sil\tDel",                   ID_EDIT_DELETE
-        MENUITEM "&Yeniden Adlandýr\tF2",       ID_EDIT_RENAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Export...",                  ID_EDIT_EXPORT
-        MENUITEM "&Anahtar Adýný Kopyala",      ID_EDIT_COPYKEYNAME
-        MENUITEM SEPARATOR
-        MENUITEM "&Bul\tCtrl+F",                ID_EDIT_FIND, GRAYED
-  END
-END
-
-
-/*
  * Dialog
  */
 
-IDD_FIND DIALOG DISCARDABLE  22, 17, 210, 85
+IDD_FIND DIALOG  22, 17, 210, 85
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Bul"
 FONT 8, "MS Shell Dlg"
@@ -136,7 +42,7 @@ BEGIN
     PUSHBUTTON      "Kapat",IDCANCEL,175,22,30,11, WS_GROUP
 END
 
-IDD_ADDFAVORITE DIALOG DISCARDABLE  22, 17, 210, 55
+IDD_ADDFAVORITE DIALOG  22, 17, 210, 55
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Sýk Kullanýlanlara Ekle"
 FONT 8, "MS Shell Dlg"
@@ -147,7 +53,7 @@ BEGIN
     PUSHBUTTON      "Ýptal",IDCANCEL,175,40,30,11, WS_GROUP
 END
 
-IDD_DELFAVORITE DIALOG DISCARDABLE  22, 17, 210, 90
+IDD_DELFAVORITE DIALOG  22, 17, 210, 90
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Sýk Kullanýlanlardan Sil"
 FONT 8, "MS Shell Dlg"
@@ -158,7 +64,7 @@ BEGIN
     PUSHBUTTON      "Ýptal",IDCANCEL,175,73,30,11, WS_GROUP
 END
 
-IDD_EDIT_STRING DIALOG DISCARDABLE  22, 17, 210, 75
+IDD_EDIT_STRING DIALOG  22, 17, 210, 75
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Dizgeyi Düzenle"
 FONT 8, "MS Shell Dlg"
@@ -171,7 +77,7 @@ BEGIN
     PUSHBUTTON   "Ýptal",IDCANCEL,175,60,30,11,WS_GROUP
 END
 
-IDD_EDIT_DWORD DIALOG DISCARDABLE  22, 17, 210, 100
+IDD_EDIT_DWORD DIALOG  22, 17, 210, 100
 STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Çift Dizgeyi Düzenle"
 FONT 8, "MS Shell Dlg"
@@ -187,7 +93,7 @@ BEGIN
     PUSHBUTTON   "Ýptal",IDCANCEL,175,80,30,11,WS_GROUP
 END
 
-IDD_EDIT_BINARY DIALOG DISCARDABLE  22, 17, 210, 100
+IDD_EDIT_BINARY DIALOG  22, 17, 210, 100
 STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Ýkiliyi Düzenle"
 FONT 8, "MS Shell Dlg"
@@ -200,88 +106,13 @@ BEGIN
     PUSHBUTTON   "Ýptal",IDCANCEL,175,80,30,11,WS_GROUP
 END
 
-/*
- * String Table
- */
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_LIST_COLUMN_NAME    "Ad"
-    IDS_LIST_COLUMN_TYPE    "Tür"
-    IDS_LIST_COLUMN_DATA    "Veri"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_APP_TITLE           "Kayýt DÜzenleyici"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    ID_REGISTRY_MENU        "Tüm kayýtlarla çalýþmak için komutlarý içerir"
-    ID_EDIT_MENU            "Deðerleri veya anahtarlarý düzenlemek için komutlarý içerir"
-    ID_VIEW_MENU            "Kayýt penceresini özelleþtirmek için komutlarý içerir"
-    ID_FAVORITES_MENU       "Sýk kullanýlan anahtarlara eriþmek için komutlarý içerir"
-    ID_HELP_MENU            "Kayýt düzenleyici hakkýnda yardým ve bilgi göstermek için komutlarý içerir"
-    ID_EDIT_NEW_MENU        "Yeni anahtarlar ve deðerler üretmek için komutlarý içerir"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    ID_EDIT_MODIFY          "Deðer verisini deðiþtirir"
-    ID_EDIT_NEW_KEY         "Yeni bir anahtar ekler"
-    ID_EDIT_NEW_STRINGVALUE "Yeni bir dize deðeri ekler"
-    ID_EDIT_NEW_BINARYVALUE "Yeni bir ikili deðer ekler"
-    ID_EDIT_NEW_DWORDVALUE  "Yeni bir çift sözcük deðeri ekler"
-    ID_REGISTRY_IMPORTREGISTRYFILE "Sistem kaydýna bir metin dosyasýný aktarýr"
-    ID_REGISTRY_EXPORTREGISTRYFILE
-                            "Sistem kaydýnýn bir kýsmýný veya tümünü bir metin dosyasýna aktarýr"
-    ID_REGISTRY_CONNECTNETWORKREGISTRY
-                            "Uzak bir bilgisayarýn kaydýna baðlanýr"
-    ID_REGISTRY_DISCONNECTNETWORKREGISTRY
-                            "Uzak bir bilgisayarýn kaydýna olan baðlantýyý keser"
-    ID_REGISTRY_PRINT       "Sistem kaydýnýn bir kýsmýný veya tümünü yazdýrýr"
-/*    ID_HELP_HELPTOPICS      "Opens registry editor help" */
-    ID_HELP_ABOUT           "Program bilgisini, sürüm numarasýný ve telif hakkýný gösterir"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    ID_REGISTRY_EXIT        "Kayýt düzenleyicisinden çýkar"
-    ID_FAVORITES_ADDTOFAVORITES "Sýk kullanýlanlar listesine anahtarlarý ekler"
-    ID_FAVORITES_REMOVEFAVORITE "Sýk kullanýlanlar listesinden anahtarlarý siler"
-    ID_VIEW_STATUSBAR       "Durum çubuðunu gösterir veya gizler"
-    ID_VIEW_SPLIT           "Ýki panel arasýndaki ayracýn konumunu deðiþtirir"
-    ID_VIEW_REFRESH         "Pencereyi yeniler"
-    ID_EDIT_DELETE          "Seçimi siler"
-    ID_EDIT_RENAME          "Seçimi yeniden adlandýr"
-    ID_EDIT_COPYKEYNAME     "Seçili anahtar adýný panoya kopyalar"
-    ID_EDIT_FIND            "Bir anahtar, deðer veya veri içerisindeki metin dizesini bulur"
-    ID_EDIT_FINDNEXT        "Önceki aramada belirlenen metnin bir sonraki eþleþmesini bulur"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_ERROR		    "Hata"
-    IDS_BAD_KEY		    "'%s' anahtarý sorgulanamadý"
-    IDS_BAD_VALUE           "'%s' deðeri sorgulanamadý"
-    IDS_UNSUPPORTED_TYPE    "Bu tür (%u) anahtarlar deðiþtirilemez"
-    IDS_TOO_BIG_VALUE       "Deðer çok büyük (%u)"
-    IDS_DELETE_BOX_TITLE    "Deðer silmeyi onayla"
-    IDS_DELETE_BOX_TEXT     "'%s' deðerini silmek istediðinizden emin misiniz?"
-    IDS_DELETE_BOX_TEXT_MULTIPLE "Are you sure you want to delete these values?"
-    IDS_NEWKEY              "Yeni Anahtar #%d"
-    IDS_NEWVALUE            "Yeni Deðer #%d"
-    IDS_NOTFOUND            "Arama dizesi '%s' bulunamadý"
-END
-
 /*****************************************************************/
 
 /*
  * TEXTINCLUDE
  */
 
-1 TEXTINCLUDE DISCARDABLE
+1 TEXTINCLUDE
 BEGIN
     "resource.h\0"
 END

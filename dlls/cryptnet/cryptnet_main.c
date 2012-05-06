@@ -740,11 +740,16 @@ static void CRYPT_CacheURL(LPCWSTR pszURL, const CRYPT_BLOB_ARRAY *pObject,
             if (ret)
                 lstrcpyW(cacheFileName, info->lpszLocalFileName);
             /* Check if the existing cache entry is up to date.  If it isn't,
-             * overwite it with the new value.
+             * remove the existing cache entry, and create a new one with the
+             * new value.
              */
             GetSystemTimeAsFileTime(&ft);
             if (CompareFileTime(&info->ExpireTime, &ft) < 0)
+            {
                 create = TRUE;
+                DeleteUrlCacheEntryW(pszURL);
+                DeleteFileW(cacheFileName);
+            }
             CryptMemFree(info);
         }
         else
@@ -1582,7 +1587,7 @@ static DWORD verify_cert_revocation_with_crl(PCCERT_CONTEXT cert,
 
 static DWORD verify_cert_revocation_from_dist_points_ext(
  const CRYPT_DATA_BLOB *value, PCCERT_CONTEXT cert, DWORD index,
- FILETIME *pTime, DWORD dwFlags, PCERT_REVOCATION_PARA pRevPara,
+ FILETIME *pTime, DWORD dwFlags, const CERT_REVOCATION_PARA *pRevPara,
  PCERT_REVOCATION_STATUS pRevStatus)
 {
     DWORD error = ERROR_SUCCESS, cbUrlArray;

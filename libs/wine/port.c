@@ -54,36 +54,11 @@ void wine_pthread_set_functions( const struct wine_pthread_functions *functions,
  *
  * Switch to the specified stack and call the function.
  */
-#if defined(__sparc__) && defined(__GNUC__)
-__ASM_GLOBAL_FUNC( wine_switch_to_stack,
-                   "mov %o0, %l0\n\t" /* store first argument */
-                   "mov %o1, %l1\n\t" /* store second argument */
-                   "sub %o2, 96, %sp\n\t" /* store stack */
-                   "call %l0, 0\n\t" /* call func */
-                   "mov %l1, %o0\n\t" /* delay slot:  arg for func */
-                   "ta 0x01") /* breakpoint - we never get here */
-#elif defined(__powerpc__) && defined(__APPLE__)
-__ASM_GLOBAL_FUNC( wine_switch_to_stack,
-                   "mtctr r3\n\t" /* func -> ctr */
-                   "mr r3,r4\n\t" /* args -> function param 1 (r3) */
-                   "mr r1,r5\n\t" /* stack */
-                   "subi r1,r1,0x100\n\t" /* adjust stack pointer */
-                   "bctrl\n" /* call ctr */
-                   "1:\tb 1b") /* loop */
-#elif defined(__ALPHA__) && defined(__GNUC__)
-__ASM_GLOBAL_FUNC( wine_switch_to_stack,
-                   "mov $16,$0\n\t" /* func */
-                   "mov $17,$16\n\t" /* arg */
-                   "mov $18,$30\n\t" /* stack */
-                   "jsr $31,($0),0\n\t" /* call func */
-                   "L1:\tbr $31,L1") /* loop */
-#else
 void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void *), void *arg, void *stack )
 {
     wine_call_on_stack( (int (*)(void *))func, arg, stack );
     abort();
 }
-#endif
 
 
 /***********************************************************************
@@ -171,20 +146,30 @@ __ASM_GLOBAL_FUNC( wine_call_on_stack,
                    "lwz 0, 4(1)\n\t"    /* fetch return address */
                    "mtlr 0\n\t"         /* return address -> lr */
                    "blr")               /* return */
-#elif defined(__arm__)
+#elif defined(__arm__) && defined(__GNUC__)
 __ASM_GLOBAL_FUNC( wine_call_on_stack,
-                   "str r14, [r13, #4]\n\t"     /* save return address on stack */
-                   "sub r2, r2, #16\n\t"        /* reserve space on new stack */
-                   "str r13, [r2, #12]\n\t"     /* store old sp */
-                   "mov r3, r0\n\t"             /* func */
-                   "mov r0, r1\n\t"             /* arg */
-                   "mov r13, r2\n\t"            /* stack */
-                   "mov r2, #0\n\t"             /* zero */
-                   "str r2, [r13]\n\t"          /* bottom of stack */
-                   "sub r13, r13, #16\n\t"      /* create a frame for this function */
-                   "blx r3\n\t"                 /* call func */
-                   "ldr r13, [r13, #28]\n\t"    /* fetch old sp */
-                   "ldr r15, [r13, #4]")        /* fetch return address and return */
+                   "push {r4,LR}\n\t"   /* save return address on stack */
+                   "mov r4, sp\n\t"     /* store old sp in local var */
+                   "mov sp, r2\n\t"     /* stack */
+                   "mov r2, r0\n\t"     /* func -> scratch register */
+                   "mov r0, r1\n\t"     /* arg */
+                   "mov LR, PC\n\t"     /* return after branch */
+                   "mov PC, r2\n\t"     /* call func */
+                   "mov sp, r4\n\t"     /* restore old sp from local var */
+                   "pop {r4,PC}")       /* fetch return address into pc */
+#elif defined(__sparc__) && defined(__GNUC__)
+__ASM_GLOBAL_FUNC( wine_call_on_stack,
+                   "save %sp, -96, %sp\n\t" /* push: change register window */
+                   "mov %sp, %l2\n\t"       /* store old sp in local var */
+                   "mov %i0, %l0\n\t"       /* func */
+                   "mov %i1, %l1\n\t"       /* arg */
+                   "sub %i2, 96, %sp\n\t"   /* stack */
+                   "call %l0, 0\n\t"        /* call func */
+                   "mov %l1, %o0\n\t"       /* delay slot:  arg for func */
+                   "mov %l2, %sp\n\t"       /* restore old sp from local var */
+                   "mov %o0, %i0\n\t"       /* move return value to right register window */
+                   "ret\n\t"                /* return */
+                   "restore\n\t")           /* delay slot: pop */
 #else
-#error You must implement wine_switch_to_stack for your platform
+#error You must implement wine_call_on_stack for your platform
 #endif

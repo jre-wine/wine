@@ -37,6 +37,9 @@
 #include "winetest.h"
 #include "resource.h"
 
+/* Don't submit the results if more than SKIP_LIMIT tests have been skipped */
+#define SKIP_LIMIT 10
+
 struct wine_test
 {
     char *name;
@@ -48,22 +51,32 @@ struct wine_test
 };
 
 char *tag = NULL;
+char *description = NULL;
+char *url = NULL;
 char *email = NULL;
 BOOL aborting = FALSE;
 static struct wine_test *wine_tests;
-static int nr_of_files, nr_of_tests;
+static int nr_of_files, nr_of_tests, nr_of_skips;
 static int nr_native_dlls;
 static const char whitespace[] = " \t\r\n";
 static const char testexe[] = "_test.exe";
 static char build_id[64];
+static BOOL is_wow64;
 
 /* filters for running only specific tests */
 static char *filters[64];
 static unsigned int nb_filters = 0;
+static BOOL exclude_tests = FALSE;
 
 /* Needed to check for .NET dlls */
 static HMODULE hmscoree;
 static HRESULT (WINAPI *pLoadLibraryShim)(LPCWSTR, LPCWSTR, LPVOID, HMODULE *);
+
+/* For SxS DLLs e.g. msvcr90 */
+static HANDLE (WINAPI *pCreateActCtxA)(PACTCTXA);
+static BOOL (WINAPI *pActivateActCtx)(HANDLE, ULONG_PTR *);
+static BOOL (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
+static void (WINAPI *pReleaseActCtx)(HANDLE);
 
 /* To store the current PATH setting (related to .NET only provided dlls) */
 static char *curpath;
@@ -80,17 +93,18 @@ static BOOL test_filtered_out( LPCSTR module, LPCSTR testname )
     if (p) *p = 0;
     len = strlen(dllname);
 
-    if (!nb_filters) return FALSE;
+    if (!nb_filters) return exclude_tests;
     for (i = 0; i < nb_filters; i++)
     {
         if (!strncmp( dllname, filters[i], len ))
         {
-            if (!filters[i][len]) return FALSE;
+            if (!filters[i][len]) return exclude_tests;
             if (filters[i][len] != ':') continue;
-            if (!testname || !strcmp( testname, &filters[i][len+1] )) return FALSE;
+            if (testname && !strcmp( testname, &filters[i][len+1] )) return exclude_tests;
+            if (!testname && !exclude_tests) return FALSE;
         }
     }
-    return TRUE;
+    return !exclude_tests;
 }
 
 static char * get_file_version(char * file_name)
@@ -136,25 +150,34 @@ static int running_under_wine (void)
 
 static int check_mount_mgr(void)
 {
-    if (running_under_wine())
-    {
-        HANDLE handle = CreateFileA( "\\\\.\\MountPointManager", GENERIC_READ,
-                                     FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
-        if (handle == INVALID_HANDLE_VALUE) return FALSE;
-        CloseHandle( handle );
-    }
+    HANDLE handle = CreateFileA( "\\\\.\\MountPointManager", GENERIC_READ,
+                                 FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
+    if (handle == INVALID_HANDLE_VALUE) return FALSE;
+    CloseHandle( handle );
     return TRUE;
+}
+
+static int check_wow64_registry(void)
+{
+    char buffer[MAX_PATH];
+    DWORD type, size = MAX_PATH;
+    HKEY hkey;
+    BOOL ret;
+
+    if (!is_wow64) return TRUE;
+    if (RegOpenKeyA( HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion", &hkey ))
+        return FALSE;
+    ret = !RegQueryValueExA( hkey, "ProgramFilesDir (x86)", NULL, &type, (BYTE *)buffer, &size );
+    RegCloseKey( hkey );
+    return ret;
 }
 
 static int check_display_driver(void)
 {
-    if (running_under_wine())
-    {
-        HWND hwnd = CreateWindowA( "STATIC", "", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, CW_USEDEFAULT, 0,
-                                   0, 0, GetModuleHandleA(0), 0 );
-        if (!hwnd) return FALSE;
-        DestroyWindow( hwnd );
-    }
+    HWND hwnd = CreateWindowA( "STATIC", "", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, CW_USEDEFAULT, 0,
+                               0, 0, GetModuleHandleA(0), 0 );
+    if (!hwnd) return FALSE;
+    DestroyWindow( hwnd );
     return TRUE;
 }
 
@@ -185,6 +208,86 @@ static int running_on_visible_desktop (void)
     return IsWindowVisible(desktop);
 }
 
+static int running_as_admin (void)
+{
+    PSID administrators = NULL;
+    SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
+    HANDLE token;
+    DWORD groups_size;
+    PTOKEN_GROUPS groups;
+    DWORD group_index;
+
+    /* Create a well-known SID for the Administrators group. */
+    if (! AllocateAndInitializeSid(&nt_authority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                   DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
+                                   &administrators))
+        return -1;
+
+    /* Get the process token */
+    if (! OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        FreeSid(administrators);
+        return -1;
+    }
+
+    /* Get the group info from the token */
+    groups_size = 0;
+    GetTokenInformation(token, TokenGroups, NULL, 0, &groups_size);
+    groups = heap_alloc(groups_size);
+    if (groups == NULL)
+    {
+        CloseHandle(token);
+        FreeSid(administrators);
+        return -1;
+    }
+    if (! GetTokenInformation(token, TokenGroups, groups, groups_size, &groups_size))
+    {
+        heap_free(groups);
+        CloseHandle(token);
+        FreeSid(administrators);
+        return -1;
+    }
+    CloseHandle(token);
+
+    /* Now check if the token groups include the Administrators group */
+    for (group_index = 0; group_index < groups->GroupCount; group_index++)
+    {
+        if (EqualSid(groups->Groups[group_index].Sid, administrators))
+        {
+            heap_free(groups);
+            FreeSid(administrators);
+            return 1;
+        }
+    }
+
+    /* If we end up here we didn't find the Administrators group */
+    heap_free(groups);
+    FreeSid(administrators);
+    return 0;
+}
+
+static int running_elevated (void)
+{
+    HANDLE token;
+    TOKEN_ELEVATION elevation_info;
+    DWORD size;
+
+    /* Get the process token */
+    if (! OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+        return -1;
+
+    /* Get the elevation info from the token */
+    if (! GetTokenInformation(token, TokenElevation, &elevation_info,
+                              sizeof(TOKEN_ELEVATION), &size))
+    {
+        CloseHandle(token);
+        return -1;
+    }
+    CloseHandle(token);
+
+    return elevation_info.TokenIsElevated;
+}
+
 /* check for native dll when running under wine */
 static BOOL is_native_dll( HMODULE module )
 {
@@ -213,15 +316,16 @@ static void print_version (void)
     static const char platform[] = "alpha";
 #elif defined(__powerpc__)
     static const char platform[] = "powerpc";
+#elif defined(__arm__)
+    static const char platform[] = "arm";
 #else
 # error CPU unknown
 #endif
     OSVERSIONINFOEX ver;
-    BOOL ext, wow64;
-    int is_win2k3_r2;
+    BOOL ext;
+    int is_win2k3_r2, is_admin, is_elevated;
     const char *(CDECL *wine_get_build_id)(void);
     void (CDECL *wine_get_host_version)( const char **sysname, const char **release );
-    BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, PBOOL Wow64Process);
     BOOL (WINAPI *pGetProductInfo)(DWORD, DWORD, DWORD, DWORD, DWORD *);
 
     ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
@@ -231,13 +335,23 @@ static void print_version (void)
 	if (!GetVersionEx ((OSVERSIONINFO *) &ver))
 	    report (R_FATAL, "Can't get OS version.");
     }
-    pIsWow64Process = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"IsWow64Process");
-    if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &wow64 )) wow64 = FALSE;
-
-    xprintf ("    Platform=%s%s\n", platform, wow64 ? " (WOW64)" : "");
+    xprintf ("    Platform=%s%s\n", platform, is_wow64 ? " (WOW64)" : "");
     xprintf ("    bRunningUnderWine=%d\n", running_under_wine ());
     xprintf ("    bRunningOnVisibleDesktop=%d\n", running_on_visible_desktop ());
+    is_admin = running_as_admin ();
+    if (0 <= is_admin)
+    {
+        xprintf ("    Account=%s", is_admin ? "admin" : "non-admin");
+        is_elevated = running_elevated ();
+        if (0 <= is_elevated)
+            xprintf(", %s", is_elevated ? "elevated" : "not elevated");
+        xprintf ("\n");
+    }
     xprintf ("    Submitter=%s\n", email );
+    if (description)
+        xprintf ("    Description=%s\n", description );
+    if (url)
+        xprintf ("    URL=%s\n", url );
     xprintf ("    dwMajorVersion=%u\n    dwMinorVersion=%u\n"
              "    dwBuildNumber=%u\n    PlatformId=%u\n    szCSDVersion=%s\n",
              ver.dwMajorVersion, ver.dwMinorVersion, ver.dwBuildNumber,
@@ -512,7 +626,6 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
         goto quit;
     }
 
-    extract_test (test, tempdir, res_name);
     cmd = strmake (NULL, "%s --list", test->exename);
     if (test->maindllpath) {
         /* We need to add the path (to the main dll) to PATH */
@@ -561,8 +674,7 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
             test->subtests = heap_realloc (test->subtests,
                                            allocated * sizeof(char*));
         }
-        if (!test_filtered_out( test->name, index ))
-            test->subtests[test->subtest_count++] = heap_strdup(index);
+        test->subtests[test->subtest_count++] = heap_strdup(index);
         index = strtok (NULL, whitespace);
     }
     test->subtests = heap_realloc (test->subtests,
@@ -578,14 +690,24 @@ get_subtests (const char *tempdir, struct wine_test *test, LPTSTR res_name)
 static void
 run_test (struct wine_test* test, const char* subtest, HANDLE out_file, const char *tempdir)
 {
-    int status;
     const char* file = get_test_source_file(test->name, subtest);
-    char *cmd = strmake (NULL, "%s %s", test->exename, subtest);
 
-    xprintf ("%s:%s start %s -\n", test->name, subtest, file);
-    status = run_ex (cmd, out_file, tempdir, 120000);
-    heap_free (cmd);
-    xprintf ("%s:%s done (%d)\n", test->name, subtest, status);
+    if (test_filtered_out( test->name, subtest ))
+    {
+        report (R_STEP, "Skipping: %s:%s", test->name, subtest);
+        xprintf ("%s:%s skipped %s -\n", test->name, subtest, file);
+        nr_of_skips++;
+    }
+    else
+    {
+        int status;
+        char *cmd = strmake (NULL, "%s %s", test->exename, subtest);
+        report (R_STEP, "Running: %s:%s", test->name, subtest);
+        xprintf ("%s:%s start %s -\n", test->name, subtest, file);
+        status = run_ex (cmd, out_file, tempdir, 120000);
+        heap_free (cmd);
+        xprintf ("%s:%s done (%d)\n", test->name, subtest, status);
+    }
 }
 
 static BOOL CALLBACK
@@ -677,14 +799,41 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
     WCHAR dllnameW[MAX_PATH];
     HMODULE dll;
     DWORD err;
+    HANDLE actctx;
+    ULONG_PTR cookie;
 
     if (aborting) return TRUE;
-    if (test_filtered_out( lpszName, NULL )) return TRUE;
 
     /* Check if the main dll is present on this system */
     CharLowerA(lpszName);
     strcpy(dllname, lpszName);
     *strstr(dllname, testexe) = 0;
+
+    if (test_filtered_out( lpszName, NULL ))
+    {
+        nr_of_skips++;
+        xprintf ("    %s=skipped\n", dllname);
+        return TRUE;
+    }
+    extract_test (&wine_tests[nr_of_files], tempdir, lpszName);
+
+    if (pCreateActCtxA != NULL && pActivateActCtx != NULL &&
+        pDeactivateActCtx != NULL && pReleaseActCtx != NULL)
+    {
+        ACTCTXA actctxinfo;
+        memset(&actctxinfo, 0, sizeof(ACTCTXA));
+        actctxinfo.cbSize = sizeof(ACTCTXA);
+        actctxinfo.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+        actctxinfo.lpSource = wine_tests[nr_of_files].exename;
+        actctxinfo.lpResourceName = CREATEPROCESS_MANIFEST_RESOURCE_ID;
+        actctx = pCreateActCtxA(&actctxinfo);
+        if (actctx != INVALID_HANDLE_VALUE &&
+            ! pActivateActCtx(actctx, &cookie))
+        {
+            pReleaseActCtx(actctx);
+            actctx = INVALID_HANDLE_VALUE;
+        }
+    } else actctx = INVALID_HANDLE_VALUE;
 
     wine_tests[nr_of_files].maindllpath = NULL;
     strcpy(filename, dllname);
@@ -707,6 +856,11 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
     if (!dll)
     {
         xprintf ("    %s=dll is missing\n", dllname);
+        if (actctx != INVALID_HANDLE_VALUE)
+        {
+            pDeactivateActCtx(0, cookie);
+            pReleaseActCtx(actctx);
+        }
         return TRUE;
     }
     if (is_native_dll(dll))
@@ -714,6 +868,11 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
         FreeLibrary(dll);
         xprintf ("    %s=load error Configured as native\n", dllname);
         nr_native_dlls++;
+        if (actctx != INVALID_HANDLE_VALUE)
+        {
+            pDeactivateActCtx(0, cookie);
+            pReleaseActCtx(actctx);
+        }
         return TRUE;
     }
     FreeLibrary(dll);
@@ -728,6 +887,12 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
     {
         xprintf ("    %s=load error %u\n", dllname, err);
     }
+
+    if (actctx != INVALID_HANDLE_VALUE)
+    {
+        pDeactivateActCtx(0, cookie);
+        pReleaseActCtx(actctx);
+    }
     return TRUE;
 }
 
@@ -740,6 +905,7 @@ run_tests (char *logname, char *outdir)
     SECURITY_ATTRIBUTES sa;
     char tmppath[MAX_PATH], tempdir[MAX_PATH+4];
     DWORD needed;
+    HMODULE kernel32;
 
     /* Get the current PATH only once */
     needed = GetEnvironmentVariableA("PATH", NULL, 0);
@@ -831,11 +997,17 @@ run_tests (char *logname, char *outdir)
     pLoadLibraryShim = NULL;
     if (hmscoree)
         pLoadLibraryShim = (void *)GetProcAddress(hmscoree, "LoadLibraryShim");
+    kernel32 = GetModuleHandleA("kernel32.dll");
+    pCreateActCtxA = (void *)GetProcAddress(kernel32, "CreateActCtxA");
+    pActivateActCtx = (void *)GetProcAddress(kernel32, "ActivateActCtx");
+    pDeactivateActCtx = (void *)GetProcAddress(kernel32, "DeactivateActCtx");
+    pReleaseActCtx = (void *)GetProcAddress(kernel32, "ReleaseActCtx");
 
     report (R_STATUS, "Extracting tests");
     report (R_PROGRESS, 0, nr_of_files);
     nr_of_files = 0;
     nr_of_tests = 0;
+    nr_of_skips = 0;
     if (!EnumResourceNames (NULL, "TESTRES", extract_test_proc, (LPARAM)tempdir))
         report (R_FATAL, "Can't enumerate test files: %d",
                 GetLastError ());
@@ -866,9 +1038,7 @@ run_tests (char *logname, char *outdir)
 
 	for (j = 0; j < test->subtest_count; j++) {
             if (aborting) break;
-            report (R_STEP, "Running: %s:%s", test->name,
-                    test->subtests[j]);
-	    run_test (test, test->subtests[j], logfile, tempdir);
+            run_test (test, test->subtests[j], logfile, tempdir);
         }
 
         if (test->maindllpath) {
@@ -952,17 +1122,21 @@ usage (void)
 " -d DIR    Use DIR as temp directory (default: %%TEMP%%\\wct)\n"
 " -e        preserve the environment\n"
 " -h        print this message and exit\n"
+" -i INFO   an optional description of the test platform\n"
 " -m MAIL   an email address to enable developers to contact you\n"
+" -n        exclude the specified tests\n"
 " -p        shutdown when the tests are done\n"
 " -q        quiet mode, no output at all\n"
 " -o FILE   put report into FILE, do not submit\n"
 " -s FILE   submit FILE, do not run tests\n"
 " -t TAG    include TAG of characters [-.0-9a-zA-Z] in the report\n"
+" -u URL    include TestBot URL in the report\n"
 " -x DIR    Extract tests to DIR (default: .\\wct) and exit\n");
 }
 
 int main( int argc, char *argv[] )
 {
+    BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, PBOOL Wow64Process);
     char *logname = NULL, *outdir = NULL;
     const char *extract = NULL;
     const char *cp, *submit = NULL;
@@ -972,6 +1146,9 @@ int main( int argc, char *argv[] )
     int i;
 
     if (!LoadStringA( 0, IDS_BUILD_ID, build_id, sizeof(build_id) )) build_id[0] = 0;
+
+    pIsWow64Process = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"IsWow64Process");
+    if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
 
     for (i = 1; i < argc && argv[i]; i++)
     {
@@ -1003,12 +1180,22 @@ int main( int argc, char *argv[] )
         case '?':
             usage ();
             exit (0);
+        case 'i':
+            if (!(description = argv[++i]))
+            {
+                usage();
+                exit( 2 );
+            }
+            break;
         case 'm':
             if (!(email = argv[++i]))
             {
                 usage();
                 exit( 2 );
             }
+            break;
+        case 'n':
+            exclude_tests = TRUE;
             break;
         case 'p':
             poweroff = 1;
@@ -1050,6 +1237,13 @@ int main( int argc, char *argv[] )
                 exit (2);
             }
             break;
+        case 'u':
+            if (!(url = argv[++i]))
+            {
+                usage();
+                exit( 2 );
+            }
+            break;
         case 'x':
             report (R_TEXTMODE);
             if (!(extract = argv[++i]))
@@ -1067,16 +1261,27 @@ int main( int argc, char *argv[] )
         }
     }
     if (!submit && !extract) {
+        int is_win9x = (GetVersion() & 0x80000000) != 0;
+
         report (R_STATUS, "Starting up");
+
+        if (is_win9x)
+            report (R_WARNING, "Running on win9x is not supported. You won't be able to submit results.");
 
         if (!running_on_visible_desktop ())
             report (R_FATAL, "Tests must be run on a visible desktop");
 
-        if (!check_mount_mgr())
-            report (R_FATAL, "Mount manager not running, most likely your WINEPREFIX wasn't created correctly.");
+        if (running_under_wine())
+        {
+            if (!check_mount_mgr())
+                report (R_FATAL, "Mount manager not running, most likely your WINEPREFIX wasn't created correctly.");
 
-        if (!check_display_driver())
-            report (R_FATAL, "Unable to create a window, the display driver is not working.");
+            if (!check_wow64_registry())
+                report (R_FATAL, "WoW64 keys missing, most likely your WINEPREFIX wasn't created correctly.");
+
+            if (!check_display_driver())
+                report (R_FATAL, "Unable to create a window, the display driver is not working.");
+        }
 
         SetConsoleCtrlHandler(ctrl_handler, TRUE);
 
@@ -1088,27 +1293,24 @@ int main( int argc, char *argv[] )
             SetEnvironmentVariableA( "WINETEST_REPORT_SUCCESS", "0" );
         }
 
-        if (!nb_filters)  /* don't submit results when filtering */
-        {
-            while (!tag) {
-                if (!interactive)
-                    report (R_FATAL, "Please specify a tag (-t option) if "
-                            "running noninteractive!");
-                if (guiAskTag () == IDABORT) exit (1);
-            }
-            report (R_TAG);
-
-            while (!email) {
-                if (!interactive)
-                    report (R_FATAL, "Please specify an email address (-m option) to enable developers\n"
-                            "    to contact you about your report if necessary.");
-                if (guiAskEmail () == IDABORT) exit (1);
-            }
-
-            if (!build_id[0])
-                report( R_WARNING, "You won't be able to submit results without a valid build id.\n"
-                        "To submit results, winetest needs to be built from a git checkout." );
+        while (!tag) {
+            if (!interactive)
+                report (R_FATAL, "Please specify a tag (-t option) if "
+                        "running noninteractive!");
+            if (guiAskTag () == IDABORT) exit (1);
         }
+        report (R_TAG);
+
+        while (!email) {
+            if (!interactive)
+                report (R_FATAL, "Please specify an email address (-m option) to enable developers\n"
+                        "    to contact you about your report if necessary.");
+            if (guiAskEmail () == IDABORT) exit (1);
+        }
+
+        if (!build_id[0])
+            report( R_WARNING, "You won't be able to submit results without a valid build id.\n"
+                    "To submit results, winetest needs to be built from a git checkout." );
 
         if (!logname) {
             logname = run_tests (NULL, outdir);
@@ -1116,7 +1318,7 @@ int main( int argc, char *argv[] )
                 DeleteFileA(logname);
                 exit (0);
             }
-            if (build_id[0] && !nb_filters && !nr_native_dlls &&
+            if (build_id[0] && nr_of_skips <= SKIP_LIMIT && !nr_native_dlls && !is_win9x &&
                 report (R_ASK, MB_YESNO, "Do you want to submit the test results?") == IDYES)
                 if (!send_file (logname) && !DeleteFileA(logname))
                     report (R_WARNING, "Can't remove logfile: %u", GetLastError());

@@ -1,9 +1,4 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = itircl.dll
-IMPORTS   = kernel32
 
 C_SRCS = \
 	itircl_main.c

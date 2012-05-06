@@ -233,14 +233,14 @@ print_command:
 break_command:
       tBREAK '*' expr_lvalue    { break_add_break_from_lvalue(&$3, TRUE); }
     | tBREAK identifier         { break_add_break_from_id($2, -1, TRUE); }
-    | tBREAK identifier ':' tNUM { break_add_break_from_id($2, $4, TRUE); }
-    | tBREAK tNUM     	        { break_add_break_from_lineno($2, TRUE); }
-    | tBREAK                    { break_add_break_from_lineno(-1, TRUE); }
+    | tBREAK pathname ':' tNUM  { break_add_break_from_lineno($2, $4, TRUE); }
+    | tBREAK tNUM               { break_add_break_from_lineno(NULL, $2, TRUE); }
+    | tBREAK                    { break_add_break_from_lineno(NULL, -1, TRUE); }
     | tHBREAK '*' expr_lvalue   { break_add_break_from_lvalue(&$3, FALSE); }
     | tHBREAK identifier        { break_add_break_from_id($2, -1, FALSE); }
-    | tHBREAK identifier ':' tNUM { break_add_break_from_id($2, $4, FALSE); }
-    | tHBREAK tNUM     	        { break_add_break_from_lineno($2, FALSE); }
-    | tHBREAK                   { break_add_break_from_lineno(-1, FALSE); }
+    | tHBREAK pathname ':' tNUM { break_add_break_from_lineno($2, $4, FALSE); }
+    | tHBREAK tNUM              { break_add_break_from_lineno(NULL, $2, FALSE); }
+    | tHBREAK                   { break_add_break_from_lineno(NULL, -1, FALSE); }
     | tENABLE tNUM              { break_enable_xpoint($2, TRUE); }
     | tENABLE tBREAK tNUM     	{ break_enable_xpoint($3, TRUE); }
     | tDISABLE tNUM             { break_enable_xpoint($2, FALSE); }
@@ -290,10 +290,11 @@ info_command:
     | tINFO '*' tWND expr_rvalue { info_win32_window((HWND)$4, TRUE); }
     | tINFO tPROCESS            { info_win32_processes(); }
     | tINFO tTHREAD             { info_win32_threads(); }
-    | tINFO tEXCEPTION          { info_win32_exceptions(dbg_curr_tid); }
-    | tINFO tEXCEPTION expr_rvalue { info_win32_exceptions($3); }
+    | tINFO tFRAME              { info_win32_frame_exceptions(dbg_curr_tid); }
+    | tINFO tFRAME expr_rvalue  { info_win32_frame_exceptions($3); }
     | tINFO tMAPS               { info_win32_virtual(dbg_curr_pid); }
     | tINFO tMAPS expr_rvalue   { info_win32_virtual($3); }
+    | tINFO tEXCEPTION          { info_win32_exception(); }
     ;
 
 maintenance_command:

@@ -145,7 +145,7 @@ typedef union
 /* supported CPU types */
 enum cpu_type
 {
-    CPU_x86, CPU_x86_64, CPU_ALPHA, CPU_POWERPC, CPU_SPARC
+    CPU_x86, CPU_x86_64, CPU_ALPHA, CPU_POWERPC, CPU_ARM, CPU_SPARC
 };
 typedef int cpu_type_t;
 
@@ -162,6 +162,7 @@ typedef struct
         struct { unsigned __int64 fir;
                  unsigned int psr, __pad; } alpha_regs;
         struct { unsigned int iar, msr, ctr, lr, dar, dsisr, trap, __pad; } powerpc_regs;
+        struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
         struct { unsigned int psr, pc, npc, y, wim, tbr; } sparc_regs;
     } ctl;  /* selected by SERVER_CTX_CONTROL */
     union
@@ -172,6 +173,7 @@ typedef struct
         struct { unsigned __int64 v0, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12,
                                   s0, s1, s2, s3, s4, s5, s6, a0, a1, a2, a3, a4, a5, at; } alpha_regs;
         struct { unsigned int gpr[32], cr, xer; } powerpc_regs;
+        struct { unsigned int r[13]; } arm_regs;
         struct { unsigned int g[8], o[8], l[8], i[8]; } sparc_regs;
     } integer;  /* selected by SERVER_CTX_INTEGER */
     union
@@ -297,7 +299,7 @@ struct hardware_msg_data
     int             x;         /* x position */
     int             y;         /* y position */
     unsigned int    hw_id;     /* unique id */
-    int             __pad;
+    unsigned int    flags;     /* hook flags */
 };
 
 struct callback_msg_data
@@ -317,6 +319,36 @@ struct winevent_msg_data
 
 typedef union
 {
+    int type;
+    struct
+    {
+        int            type;    /* INPUT_KEYBOARD */
+        unsigned short vkey;    /* virtual key code */
+        unsigned short scan;    /* scan code */
+        unsigned int   flags;   /* event flags */
+        unsigned int   time;    /* event time */
+        lparam_t       info;    /* extra info */
+    } kbd;
+    struct
+    {
+        int            type;    /* INPUT_MOUSE */
+        int            x;       /* coordinates */
+        int            y;
+        unsigned int   data;    /* mouse data */
+        unsigned int   flags;   /* event flags */
+        unsigned int   time;    /* event time */
+        lparam_t       info;    /* extra info */
+    } mouse;
+    struct
+    {
+        int            type;    /* INPUT_HARDWARE */
+        unsigned int   msg;     /* message code */
+        lparam_t       lparam;  /* message param */
+    } hw;
+} hw_input_t;
+
+typedef union
+{
     unsigned char            bytes[1];   /* raw data for sent messages */
     struct hardware_msg_data hardware;
     struct callback_msg_data callback;
@@ -329,6 +361,14 @@ typedef struct
     WCHAR          ch;
     unsigned short attr;
 } char_info_t;
+
+/* structure returned in filesystem events */
+struct filesystem_event
+{
+    int         action;
+    data_size_t len;
+    char        name[1];
+};
 
 typedef struct
 {
@@ -1018,7 +1058,7 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
     obj_handle_t handle;        /* handle to the file */
 @REPLY
     int          type;          /* file type (see below) */
-    int          removable;     /* is file removable? */
+    int          cacheable;     /* can fd be cached in the client? */
     unsigned int access;        /* file access rights */
     unsigned int options;       /* file open options */
 @END
@@ -1089,6 +1129,13 @@ enum server_fd_type
 @END
 
 
+/* Accept into an initialized socket */
+@REQ(accept_into_socket)
+    obj_handle_t lhandle;       /* handle to the listening socket */
+    obj_handle_t ahandle;       /* handle to the accepting socket */
+@END
+
+
 /* Set socket event parameters */
 @REQ(set_socket_event)
     obj_handle_t  handle;        /* handle to the socket */
@@ -1130,6 +1177,7 @@ enum server_fd_type
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
     process_id_t pid;           /* pid of process which shall be attached to the console */
+    int          input_fd;      /* if pid=-1 (bare console to current process), fd for input */
 @REPLY
     obj_handle_t handle_in;     /* handle to console input */
     obj_handle_t event;         /* handle to renderer events change notification */
@@ -1287,6 +1335,7 @@ struct console_renderer_event
     unsigned int access;        /* wanted access rights */
     unsigned int attributes;    /* object attributes */
     unsigned int share;         /* sharing credentials */
+    int          fd;            /* for bare consoles, fd the screen-buffer is attached to */
 @REPLY
     obj_handle_t handle_out;    /* handle to the screen buffer */
 @END
@@ -1437,8 +1486,7 @@ enum char_info_mode
 @REQ(read_change)
     obj_handle_t handle;
 @REPLY
-    int          action;        /* type of change */
-    VARARG(name,string);        /* name of directory entry that changed */
+    VARARG(events,filesystem_event);  /* collected filesystem events */
 @END
 
 
@@ -1976,26 +2024,21 @@ enum message_type
     MSG_OTHER_PROCESS,  /* sent from other process, may include vararg data, always Unicode */
     MSG_POSTED,         /* posted message (from PostMessageW), always Unicode */
     MSG_HARDWARE,       /* hardware message */
-    MSG_WINEVENT        /* winevent message */
+    MSG_WINEVENT,       /* winevent message */
+    MSG_HOOK_LL         /* low-level hardware hook */
 };
 #define SEND_MSG_ABORT_IF_HUNG  0x01
 
 
 /* Send a hardware message to a thread queue */
 @REQ(send_hardware_message)
-    thread_id_t     id;        /* thread id */
     user_handle_t   win;       /* window handle */
-    unsigned int    msg;       /* message code */
-    lparam_t        wparam;    /* parameters */
-    lparam_t        lparam;    /* parameters */
-    lparam_t        info;      /* extra info */
-    int             x;         /* x position */
-    int             y;         /* y position */
-    unsigned int    time;      /* message time */
+    hw_input_t      input;     /* input data */
+    unsigned int    flags;     /* flags (see below) */
 @REPLY
-    user_handle_t   cursor;    /* current cursor for the target thread input */
-    int             count;     /* current cursor count */
+    int             wait;      /* do we need to wait for a reply? */
 @END
+#define SEND_HWMSG_INJECTED    0x01
 
 
 /* Get a message from the current queue */
@@ -2322,9 +2365,9 @@ enum message_type
     unsigned int   flags;         /* SWP_* flags */
     user_handle_t  handle;        /* handle to the window */
     user_handle_t  previous;      /* previous window in Z order */
-    rectangle_t    window;        /* window rectangle */
-    rectangle_t    client;        /* client rectangle */
-    VARARG(valid,rectangles);     /* valid rectangles from WM_NCCALCSIZE */
+    rectangle_t    window;        /* window rectangle (in parent coords) */
+    rectangle_t    client;        /* client rectangle (in parent coords) */
+    VARARG(valid,rectangles);     /* valid rectangles from WM_NCCALCSIZE (in parent coords) */
 @REPLY
     unsigned int   new_style;     /* new window style */
     unsigned int   new_ex_style;  /* new window extended style */
@@ -2334,11 +2377,19 @@ enum message_type
 /* Get the window and client rectangles of a window */
 @REQ(get_window_rectangles)
     user_handle_t  handle;        /* handle to the window */
+    int            relative;      /* coords relative to (see below) */
 @REPLY
     rectangle_t    window;        /* window rectangle */
     rectangle_t    visible;       /* visible part of the window rectangle */
     rectangle_t    client;        /* client rectangle */
 @END
+enum coords_relative
+{
+    COORDS_CLIENT,   /* relative to client area */
+    COORDS_WINDOW,   /* relative to whole window area */
+    COORDS_PARENT,   /* relative to parent's client area */
+    COORDS_SCREEN    /* relative to screen origin */
+};
 
 
 /* Get the window text */
@@ -2363,6 +2414,7 @@ enum message_type
 @REPLY
     int            x;             /* x coordinate offset */
     int            y;             /* y coordinate offset */
+    int            mirror;        /* whether to mirror the x coordinate */
 @END
 
 
@@ -2384,7 +2436,7 @@ enum message_type
     user_handle_t  window;        /* handle to the window */
 @REPLY
     data_size_t    total_size;    /* total size of the resulting region */
-    VARARG(region,rectangles);    /* list of rectangles for the region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
 
@@ -2392,7 +2444,7 @@ enum message_type
 @REQ(set_window_region)
     user_handle_t  window;        /* handle to the window */
     int            redraw;        /* redraw the window? */
-    VARARG(region,rectangles);    /* list of rectangles for the region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
 
@@ -2405,7 +2457,7 @@ enum message_type
     user_handle_t  child;         /* child to repaint (or window itself) */
     unsigned int   flags;         /* resulting update flags (see below) */
     data_size_t    total_size;    /* total size of the resulting region */
-    VARARG(region,rectangles);    /* list of rectangles for the region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in screen coords) */
 @END
 #define UPDATE_NONCLIENT       0x01  /* get region for repainting non-client area */
 #define UPDATE_ERASE           0x02  /* get region for erasing client area */
@@ -2420,7 +2472,7 @@ enum message_type
 /* Update the z order of a window so that a given rectangle is fully visible */
 @REQ(update_window_zorder)
     user_handle_t  window;        /* handle to the window */
-    rectangle_t    rect;          /* rectangle that must be visible */
+    rectangle_t    rect;          /* rectangle that must be visible (in client coords) */
 @END
 
 
@@ -2428,7 +2480,7 @@ enum message_type
 @REQ(redraw_window)
     user_handle_t  window;        /* handle to the window */
     unsigned int   flags;         /* RDW_* flags */
-    VARARG(region,rectangles);    /* list of rectangles for the region */
+    VARARG(region,rectangles);    /* list of rectangles for the region (in window coords) */
 @END
 
 
@@ -3263,9 +3315,17 @@ enum message_type
     unsigned int   flags;         /* flags for fields to set (see below) */
     user_handle_t  handle;        /* handle to the cursor */
     int            show_count;    /* show count increment/decrement */
+    int            x;             /* cursor position */
+    int            y;
+    rectangle_t    clip;          /* cursor clip rectangle */
 @REPLY
     user_handle_t  prev_handle;   /* previous handle */
     int            prev_count;    /* previous show count */
+    int            new_x;         /* new position */
+    int            new_y;
+    rectangle_t    new_clip;      /* new clip rectangle */
 @END
 #define SET_CURSOR_HANDLE 0x01
 #define SET_CURSOR_COUNT  0x02
+#define SET_CURSOR_POS    0x04
+#define SET_CURSOR_CLIP   0x08

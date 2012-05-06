@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = gphoto2.ds
-IMPORTS   = comctl32 user32 gdi32 advapi32 kernel32
+IMPORTS   = comctl32 user32 gdi32 advapi32
 EXTRALIBS = @GPHOTO2LIBS@
 EXTRAINCL = @GPHOTO2INCL@
 
@@ -19,6 +15,7 @@ RC_SRCS = \
 	gphoto2_En.rc \
 	gphoto2_Es.rc \
 	gphoto2_Fr.rc \
+	gphoto2_He.rc \
 	gphoto2_Hu.rc \
 	gphoto2_It.rc \
 	gphoto2_Ja.rc \

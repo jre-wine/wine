@@ -335,6 +335,13 @@ static void test_create_delete_svc(void)
     ok(!svc_handle1, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
+    /* Test if ServiceType can be a combined one for drivers */
+    SetLastError(0xdeadbeef);
+    svc_handle1 = CreateServiceA(scm_handle, servicename, NULL, 0, SERVICE_KERNEL_DRIVER | SERVICE_FILE_SYSTEM_DRIVER,
+                                 SERVICE_BOOT_START, 0, pathname, NULL, NULL, NULL, NULL, NULL);
+    ok(!svc_handle1, "Expected failure\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
     /* The service already exists (check first, just in case) */
     svc_handle1 = OpenServiceA(scm_handle, spooler, GENERIC_READ);
     if (svc_handle1)
@@ -601,7 +608,7 @@ static void test_get_displayname(void)
     ok(ret, "Expected success, got error %u\n", GetLastError());
     /* Test that shows that if the buffersize is enough, it's not changed */
     ok(displaysize == tempsize * 2, "Expected no change for the needed buffer size\n");
-    ok(lstrlen(displayname) == tempsize/2,
+    ok(strlen(displayname) == tempsize/2,
        "Expected the buffer to be twice the length of the string\n") ;
 
     /* Do the buffer(size) tests also for GetServiceDisplayNameW */
@@ -671,7 +678,7 @@ static void test_get_displayname(void)
     displaysize = -1;
     ret = GetServiceDisplayNameA(scm_handle, servicename, NULL, &displaysize);
     ok(!ret, "Expected failure\n");
-    ok(displaysize == lstrlen(servicename) * 2,
+    ok(displaysize == strlen(servicename) * 2,
        "Expected the displaysize to be twice the size of the servicename\n");
     ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
@@ -856,7 +863,7 @@ static void test_get_servicekeyname(void)
     ok(ret, "Expected success, got error %u\n", GetLastError());
     if (ret)
     {
-        ok(lstrlen(servicename) == tempsize/2,
+        ok(strlen(servicename) == tempsize/2,
            "Expected the buffer to be twice the length of the string\n") ;
         ok(!lstrcmpi(servicename, spooler), "Expected %s, got %s\n", spooler, servicename);
         ok(servicesize == (tempsize * 2),
@@ -870,7 +877,7 @@ static void test_get_servicekeyname(void)
     ok(ret, "Expected success, got error %u\n", GetLastError());
     if (ret)
     {
-        ok(lstrlen(servicename) == tempsize/2,
+        ok(strlen(servicename) == tempsize/2,
            "Expected the buffer to be twice the length of the string\n") ;
         ok(servicesize == lstrlenW(servicenameW),
            "Expected servicesize not to change if buffer not insufficient\n") ;
@@ -1037,14 +1044,20 @@ static void test_enum_svc(void)
     DWORD tempneeded, tempreturned, missing;
     DWORD servicecountactive, servicecountinactive;
     ENUM_SERVICE_STATUS *services;
+    ENUM_SERVICE_STATUSW *servicesW;
     ENUM_SERVICE_STATUS_PROCESS *exservices;
-    INT i;
+    UINT i;
 
     /* All NULL or wrong  */
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(NULL, 1, 0, NULL, 0, NULL, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
+    ok(GetLastError() == ERROR_INVALID_HANDLE,
+       "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(NULL, 1, 0, NULL, 0, NULL, NULL, NULL);
+    ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
 
@@ -1055,7 +1068,13 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(scm_handle, 1, 0, NULL, 0, NULL, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
+    ok(GetLastError() == ERROR_INVALID_ADDRESS ||
+       GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
+       "Unexpected last error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, 1, 0, NULL, 0, NULL, NULL, NULL);
+    ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
@@ -1066,7 +1085,15 @@ static void test_enum_svc(void)
     ret = EnumServicesStatusA(scm_handle, 0, 0, NULL, 0, NULL, &returned, NULL);
     ok(!ret, "Expected failure\n");
     ok(returned == 0xdeadbeef, "Expected no change to the number of services variable\n");
-    todo_wine
+    ok(GetLastError() == ERROR_INVALID_ADDRESS ||
+       GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
+       "Unexpected last error %d\n", GetLastError());
+
+    returned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, 0, 0, NULL, 0, NULL, &returned, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(returned == 0xdeadbeef, "Expected no change to the number of services variable\n");
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
@@ -1078,7 +1105,16 @@ static void test_enum_svc(void)
     ok(!ret, "Expected failure\n");
     ok(needed == 0xdeadbeef || broken(needed != 0xdeadbeef), /* nt4 */
        "Expected no change to the needed buffer variable\n");
-    todo_wine
+    ok(GetLastError() == ERROR_INVALID_ADDRESS ||
+       GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
+       "Unexpected last error %d\n", GetLastError());
+
+    needed = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, 0, 0, NULL, 0, &needed, NULL, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(needed == 0xdeadbeef || broken(needed != 0xdeadbeef), /* nt4 */
+       "Expected no change to the needed buffer variable\n");
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
@@ -1089,59 +1125,93 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(scm_handle, 0, 0, NULL, 0, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of services to be set to 0, got %d\n", returned);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
-    /* No valid servicetype and servicestate */
+    needed = 0xdeadbeef;
+    returned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, 0, 0, NULL, 0, &needed, &returned, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(needed == 0 || broken(needed != 0), /* nt4 */
+       "Expected needed buffer size to be set to 0, got %d\n", needed);
+    ok(returned == 0 || broken(returned != 0), /* nt4 */
+       "Expected number of services to be set to 0, got %d\n", returned);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    /* No valid servicestate */
     needed = 0xdeadbeef;
     returned = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, 0, NULL, 0, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of services to be set to 0, got %d\n", returned);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
-    /* No valid servicetype and servicestate */
     needed = 0xdeadbeef;
     returned = 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    ret = EnumServicesStatusA(scm_handle, 0, SERVICE_STATE_ALL, NULL, 0,
-                              &needed, &returned, NULL);
+    ret = EnumServicesStatusW(scm_handle, SERVICE_WIN32, 0, NULL, 0, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
+    ok(needed == 0 || broken(needed != 0), /* nt4 */
+       "Expected needed buffer size to be set to 0, got %d\n", needed);
+    ok(returned == 0 || broken(returned != 0), /* nt4 */
+       "Expected number of services to be set to 0, got %d\n", returned);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    /* No valid servicetype */
+    needed = 0xdeadbeef;
+    returned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusA(scm_handle, 0, SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL);
+    ok(!ret, "Expected failure\n");
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of services to be set to 0, got %d\n", returned);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
+
+    needed = 0xdeadbeef;
+    returned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, 0, SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(needed == 0 || broken(needed != 0), /* nt4 */
+       "Expected needed buffer size to be set to 0, got %d\n", needed);
+    ok(returned == 0 || broken(returned != 0), /* nt4 */
+       "Expected number of services to be set to 0, got %d\n", returned);
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
 
     /* All parameters are correct but our access rights are wrong */
     needed = 0xdeadbeef;
     returned = 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0,
-                              &needed, &returned, NULL);
+    ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of services to be set to 0, got %d\n", returned);
-    }
+    ok(GetLastError() == ERROR_ACCESS_DENIED,
+       "Expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+
+    needed = 0xdeadbeef;
+    returned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(needed == 0 || broken(needed != 0), /* nt4 */
+       "Expected needed buffer size to be set to 0, got %d\n", needed);
+    ok(returned == 0 || broken(returned != 0), /* nt4 */
+       "Expected number of services to be set to 0, got %d\n", returned);
     ok(GetLastError() == ERROR_ACCESS_DENIED,
        "Expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
 
@@ -1153,22 +1223,24 @@ static void test_enum_svc(void)
     needed = 0xdeadbeef;
     returned = 0xdeadbeef;
     SetLastError(0xdeadbeef);
-    ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0,
-                              &needed, &returned, NULL);
+    ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size for this one service\n");
     ok(returned == 0, "Expected no service returned, got %d\n", returned);
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Test to show we get the same needed buffer size for the W-call */
     neededW = 0xdeadbeef;
-    ret = EnumServicesStatusW(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0,
-                              &neededW, &returnedW, NULL);
+    returnedW = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &neededW, &returnedW, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(neededW != 0xdeadbeef && neededW > 0, "Expected the needed buffer size for this one service\n");
     ok(neededW == needed, "Expected needed buffersize to be the same for A- and W-calls\n");
+    ok(returnedW == 0, "Expected no service returned, got %d\n", returnedW);
+    ok(GetLastError() == ERROR_MORE_DATA,
+       "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
 
     /* Store the needed bytes */
     tempneeded = needed;
@@ -1181,16 +1253,25 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL,
                               services, bufsize, &needed, &returned, NULL);
-    todo_wine
-    {
     ok(ret, "Expected success, got error %u\n", GetLastError());
     ok(needed == 0, "Expected needed buffer to be 0 as we are done\n");
     ok(returned != 0xdeadbeef && returned > 0, "Expected some returned services\n");
-    }
     HeapFree(GetProcessHeap(), 0, services);
 
     /* Store the number of returned services */
     tempreturned = returned;
+
+    servicesW = HeapAlloc(GetProcessHeap(), 0, neededW);
+    bufsize = neededW;
+    neededW = 0xdeadbeef;
+    returnedW = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = EnumServicesStatusW(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL,
+                              servicesW, bufsize, &neededW, &returnedW, NULL);
+    ok(ret, "Expected success, got error %u\n", GetLastError());
+    ok(neededW == 0, "Expected needed buffer to be 0 as we are done\n");
+    ok(returnedW != 0xdeadbeef && returnedW > 0, "Expected some returned services\n");
+    HeapFree(GetProcessHeap(), 0, servicesW);
 
     /* Allocate less than the needed bytes and don't specify a resume handle */
     services = HeapAlloc(GetProcessHeap(), 0, tempneeded);
@@ -1201,13 +1282,10 @@ static void test_enum_svc(void)
     ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL,
                               services, bufsize, &needed, &returned, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size for this one service\n");
     ok(returned < tempreturned, "Expected fewer services to be returned\n");
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Allocate less than the needed bytes, this time with a correct resume handle */
     bufsize = (tempreturned - 1) * sizeof(ENUM_SERVICE_STATUS);
@@ -1218,14 +1296,11 @@ static void test_enum_svc(void)
     ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL,
                               services, bufsize, &needed, &returned, &resume);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size for this one service\n");
     ok(returned < tempreturned, "Expected fewer services to be returned\n");
-    ok(resume, "Expected a resume handle\n");
+    todo_wine ok(resume, "Expected a resume handle\n");
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Fetch the missing services but pass a bigger buffer size */
     missing = tempreturned - returned;
@@ -1235,12 +1310,9 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = EnumServicesStatusA(scm_handle, SERVICE_WIN32, SERVICE_STATE_ALL,
                               services, bufsize, &needed, &returned, &resume);
-    todo_wine
-    {
     ok(ret, "Expected success, got error %u\n", GetLastError());
     ok(needed == 0, "Expected needed buffer to be 0 as we are done\n");
     ok(returned == missing, "Expected %u services to be returned\n", missing);
-    }
     ok(resume == 0, "Expected the resume handle to be 0\n");
     HeapFree(GetProcessHeap(), 0, services);
 
@@ -1285,7 +1357,6 @@ static void test_enum_svc(void)
     HeapFree(GetProcessHeap(), 0, services);
 
     /* Check if total is the same as active and inactive win32 services */
-    todo_wine
     ok(returned == (servicecountactive + servicecountinactive),
        "Something wrong in the calculation\n");
 
@@ -1322,11 +1393,8 @@ static void test_enum_svc(void)
     }
     HeapFree(GetProcessHeap(), 0, services);
 
-    todo_wine
-    {
     ok(servicecountactive == 0, "Active services mismatch %u\n", servicecountactive);
     ok(servicecountinactive == 0, "Inactive services mismatch %u\n", servicecountinactive);
-    }
 
     CloseServiceHandle(scm_handle);
 
@@ -1336,7 +1404,6 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(NULL, 1, 0, 0, NULL, 0, NULL, NULL, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_LEVEL,
        "Expected ERROR_INVALID_LEVEL, got %d\n", GetLastError());
 
@@ -1344,7 +1411,6 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(NULL, 0, 0, 0, NULL, 0, NULL, NULL, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
 
@@ -1355,7 +1421,6 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(scm_handle, 0, 0, 0, NULL, 0, NULL, NULL, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
@@ -1367,7 +1432,6 @@ static void test_enum_svc(void)
     ok(!ret, "Expected failure\n");
     ok(needed == 0xdeadbeef || broken(needed != 0xdeadbeef), /* nt4 */
        "Expected no change to the needed buffer variable\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
@@ -1377,13 +1441,10 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(scm_handle, 0, 0, 0, NULL, 0, NULL, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(returned == 0xdeadbeef, "Expected no change to the number of services variable\n");
     ok(GetLastError() == ERROR_INVALID_ADDRESS ||
        GetLastError() == ERROR_INVALID_PARAMETER /* NT4 */,
        "Unexpected last error %d\n", GetLastError());
-    }
 
     /* No valid servicetype and servicestate */
     needed = 0xdeadbeef;
@@ -1392,13 +1453,10 @@ static void test_enum_svc(void)
     ret = pEnumServicesStatusExA(scm_handle, 0, 0, 0, NULL, 0, &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* No valid servicestate */
     needed = 0xdeadbeef;
@@ -1408,13 +1466,10 @@ static void test_enum_svc(void)
                                  &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* No valid servicetype */
     needed = 0xdeadbeef;
@@ -1424,13 +1479,10 @@ static void test_enum_svc(void)
                                  &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* No valid servicetype and servicestate and unknown service group */
     needed = 0xdeadbeef;
@@ -1440,13 +1492,10 @@ static void test_enum_svc(void)
                                  &returned, NULL, "deadbeef_group");
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
-    todo_wine
-    {
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-    }
 
     /* All parameters are correct but our access rights are wrong */
     needed = 0xdeadbeef;
@@ -1455,7 +1504,6 @@ static void test_enum_svc(void)
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  NULL, 0, &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
@@ -1471,7 +1519,6 @@ static void test_enum_svc(void)
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  NULL, 0, &needed, &returned, NULL, "deadbeef_group");
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(needed == 0 || broken(needed != 0), /* nt4 */
        "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
@@ -1490,12 +1537,9 @@ static void test_enum_svc(void)
                                  NULL, 0, &needed, &returned, NULL, "deadbeef_group");
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected number of service to be set to 0, got %d\n", returned);
-    todo_wine
-    {
     ok(needed == 0, "Expected needed buffer size to be set to 0, got %d\n", needed);
     ok(GetLastError() == ERROR_SERVICE_DOES_NOT_EXIST,
        "Expected ERROR_SERVICE_DOES_NOT_EXIST, got %d\n", GetLastError());
-    }
 
     /* TODO: Create a test that makes sure we enumerate all services that don't
      * belong to a group. (specifying "").
@@ -1509,17 +1553,15 @@ static void test_enum_svc(void)
                                  NULL, 0, &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
     ok(returned == 0, "Expected no service returned, got %d\n", returned);
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size\n");
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Test to show we get the same needed buffer size for the W-call */
     neededW = 0xdeadbeef;
     ret = pEnumServicesStatusExW(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  NULL, 0, &neededW, &returnedW, NULL, NULL);
+    ok(!ret, "Expected failure\n");
     ok(neededW == needed, "Expected needed buffersize to be the same for A- and W-calls\n");
 
     /* Store the needed bytes */
@@ -1533,12 +1575,9 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  (BYTE*)exservices, bufsize, &needed, &returned, NULL, NULL);
-    todo_wine
-    {
     ok(ret, "Expected success, got error %u\n", GetLastError());
     ok(needed == 0, "Expected needed buffer to be 0 as we are done\n");
     ok(returned == tempreturned, "Expected the same number of service from this function\n");
-    }
     HeapFree(GetProcessHeap(), 0, exservices);
 
     /* Store the number of returned services */
@@ -1553,13 +1592,10 @@ static void test_enum_svc(void)
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  (BYTE*)exservices, bufsize, &needed, &returned, NULL, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size\n");
     ok(returned < tempreturned, "Expected fewer services to be returned\n");
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Allocate less than the needed bytes, this time with a correct resume handle */
     bufsize = (tempreturned - 1) * sizeof(ENUM_SERVICE_STATUS);
@@ -1570,14 +1606,11 @@ static void test_enum_svc(void)
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  (BYTE*)exservices, bufsize, &needed, &returned, &resume, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
-    {
     ok(needed != 0xdeadbeef && needed > 0, "Expected the needed buffer size\n");
     ok(returned < tempreturned, "Expected fewer services to be returned\n");
-    ok(resume, "Expected a resume handle\n");
+    todo_wine ok(resume, "Expected a resume handle\n");
     ok(GetLastError() == ERROR_MORE_DATA,
        "Expected ERROR_MORE_DATA, got %d\n", GetLastError());
-    }
 
     /* Fetch that last service but pass a bigger buffer size */
     missing = tempreturned - returned;
@@ -1587,11 +1620,8 @@ static void test_enum_svc(void)
     SetLastError(0xdeadbeef);
     ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32, SERVICE_STATE_ALL,
                                  (BYTE*)exservices, bufsize, &needed, &returned, &resume, NULL);
-    todo_wine
-    {
     ok(ret, "Expected success, got error %u\n", GetLastError());
     ok(needed == 0, "Expected needed buffer to be 0 as we are done\n");
-    }
     ok(returned == missing, "Expected %u services to be returned\n", missing);
     ok(resume == 0, "Expected the resume handle to be 0\n");
     HeapFree(GetProcessHeap(), 0, exservices);
@@ -1631,17 +1661,18 @@ static void test_enum_svc(void)
        "Something wrong in the calculation\n");
 
     /* Get all drivers and services */
-    pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32 | SERVICE_DRIVER,
-                           SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL, NULL);
+    ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32 | SERVICE_DRIVER,
+                                 SERVICE_STATE_ALL, NULL, 0, &needed, &returned, NULL, NULL);
+    ok(!ret, "Expected failure\n");
     exservices = HeapAlloc(GetProcessHeap(), 0, needed);
-    pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32 | SERVICE_DRIVER,
-                           SERVICE_STATE_ALL, (BYTE*)exservices, needed, &needed, &returned, NULL, NULL);
+    ret = pEnumServicesStatusExA(scm_handle, 0, SERVICE_WIN32 | SERVICE_DRIVER,
+                                 SERVICE_STATE_ALL, (BYTE*)exservices, needed, &needed, &returned, NULL, NULL);
+    ok(ret, "Expected success %u\n", GetLastError());
 
     /* Loop through all those returned drivers and services */
     for (i = 0; i < returned; i++)
     {
         SERVICE_STATUS_PROCESS status = exservices[i].ServiceStatusProcess;
-
 
         /* lpServiceName and lpDisplayName should always be filled */
         ok(lstrlenA(exservices[i].lpServiceName) > 0, "Expected a service name\n");
@@ -1810,9 +1841,10 @@ static void test_sequence(void)
     }
     ok(!strcmp(config->lpServiceStartName, localsystem), "Expected 'LocalSystem', got '%s'\n", config->lpServiceStartName);
     ok(!strcmp(config->lpDisplayName, displayname), "Expected '%s', got '%s'\n", displayname, config->lpDisplayName);
-    
-    ok(ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_ERROR_NORMAL, NULL, "TestGroup2", NULL, NULL, NULL, NULL, displayname2),
-        "ChangeServiceConfig failed (err=%d)\n", GetLastError());
+
+    ret = ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_ERROR_NORMAL, NULL, "TestGroup2",
+                               NULL, NULL, NULL, NULL, displayname2);
+    ok(ret, "ChangeServiceConfig failed (err=%d)\n", GetLastError());
 
     QueryServiceConfigA(svc_handle, NULL, 0, &needed);
     config = HeapReAlloc(GetProcessHeap(), 0, config, needed);

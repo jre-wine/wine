@@ -27,15 +27,27 @@
 #include <msi.h>
 #include <msiquery.h>
 #include <srrestoreptapi.h>
+#include <shlobj.h>
 
 #include "wine/test.h"
 
+static BOOL is_wow64;
 static const char msifile[] = "winetest-package.msi";
-char CURR_DIR[MAX_PATH];
+static char CURR_DIR[MAX_PATH];
 
 static UINT (WINAPI *pMsiApplyMultiplePatchesA)(LPCSTR, LPCSTR, LPCSTR);
+static INSTALLSTATE (WINAPI *pMsiGetComponentPathExA)(LPCSTR, LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPSTR, LPDWORD);
+static HRESULT (WINAPI *pSHGetFolderPathA)(HWND, int, HANDLE, DWORD, LPSTR);
 
 static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR*);
+static BOOL (WINAPI *pGetTokenInformation)( HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD );
+static BOOL (WINAPI *pOpenProcessToken)( HANDLE, DWORD, PHANDLE );
+static LONG (WINAPI *pRegDeleteKeyExA)(HKEY, LPCSTR, REGSAM, DWORD);
+static LONG (WINAPI *pRegDeleteKeyExW)(HKEY, LPCWSTR, REGSAM, DWORD);
+static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static void (WINAPI *pGetSystemInfo)(LPSYSTEM_INFO);
+static void (WINAPI *pGetNativeSystemInfo)(LPSYSTEM_INFO);
+static UINT (WINAPI *pGetSystemWow64DirectoryA)(LPSTR, UINT);
 
 static BOOL (WINAPI *pSRRemoveRestorePoint)(DWORD);
 static BOOL (WINAPI *pSRSetRestorePointA)(RESTOREPOINTINFOA*, STATEMGRSTATUS*);
@@ -44,14 +56,26 @@ static void init_functionpointers(void)
 {
     HMODULE hmsi = GetModuleHandleA("msi.dll");
     HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
+    HMODULE hshell32 = GetModuleHandleA("shell32.dll");
     HMODULE hsrclient;
 
 #define GET_PROC(mod, func) \
     p ## func = (void*)GetProcAddress(mod, #func);
 
     GET_PROC(hmsi, MsiApplyMultiplePatchesA);
+    GET_PROC(hmsi, MsiGetComponentPathExA);
+    GET_PROC(hshell32, SHGetFolderPathA);
 
     GET_PROC(hadvapi32, ConvertSidToStringSidA);
+    GET_PROC(hadvapi32, GetTokenInformation);
+    GET_PROC(hadvapi32, OpenProcessToken);
+    GET_PROC(hadvapi32, RegDeleteKeyExA)
+    GET_PROC(hadvapi32, RegDeleteKeyExW)
+    GET_PROC(hkernel32, IsWow64Process)
+    GET_PROC(hkernel32, GetNativeSystemInfo)
+    GET_PROC(hkernel32, GetSystemInfo)
+    GET_PROC(hkernel32, GetSystemWow64DirectoryA)
 
     hsrclient = LoadLibraryA("srclient.dll");
     GET_PROC(hsrclient, SRRemoveRestorePoint);
@@ -59,6 +83,31 @@ static void init_functionpointers(void)
 #undef GET_PROC
 }
 
+static BOOL is_process_limited(void)
+{
+    HANDLE token;
+
+    if (!pOpenProcessToken || !pGetTokenInformation) return FALSE;
+
+    if (pOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        BOOL ret;
+        TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
+        DWORD size;
+
+        ret = pGetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
+        CloseHandle(token);
+        return (ret && type == TokenElevationTypeLimited);
+    }
+    return FALSE;
+}
+
+static LONG delete_key( HKEY key, LPCSTR subkey, REGSAM access )
+{
+    if (pRegDeleteKeyExA)
+        return pRegDeleteKeyExA( key, subkey, access, 0 );
+    return RegDeleteKeyA( key, subkey );
+}
 
 static LPSTR get_user_sid(LPSTR *usersid)
 {
@@ -85,7 +134,7 @@ static LPSTR get_user_sid(LPSTR *usersid)
 }
 
 /* RegDeleteTreeW from dlls/advapi32/registry.c */
-static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
+static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey, REGSAM access)
 {
     LONG ret;
     DWORD dwMaxSubkeyLen, dwMaxValueLen;
@@ -95,7 +144,7 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
 
     if(lpszSubKey)
     {
-        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        ret = RegOpenKeyExW(hKey, lpszSubKey, 0, access, &hSubKey);
         if (ret) return ret;
     }
 
@@ -123,12 +172,17 @@ static LSTATUS package_RegDeleteTreeW(HKEY hKey, LPCWSTR lpszSubKey)
         if (RegEnumKeyExW(hSubKey, 0, lpszName, &dwSize, NULL,
                           NULL, NULL, NULL)) break;
 
-        ret = package_RegDeleteTreeW(hSubKey, lpszName);
+        ret = package_RegDeleteTreeW(hSubKey, lpszName, access);
         if (ret) goto cleanup;
     }
 
     if (lpszSubKey)
-        ret = RegDeleteKeyW(hKey, lpszSubKey);
+    {
+        if (pRegDeleteKeyExW)
+            ret = pRegDeleteKeyExW(hKey, lpszSubKey, access, 0);
+        else
+            ret = RegDeleteKeyW(hKey, lpszSubKey);
+    }
     else
         while (TRUE)
         {
@@ -210,6 +264,10 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
     CHAR path[MAX_PATH];
     LPCSTR prod = NULL;
     HKEY hkey;
+    REGSAM access = KEY_ALL_ACCESS;
+
+    if (is_wow64)
+        access |= KEY_WOW64_64KEY;
 
     MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
     squash_guid(guidW, squashedW);
@@ -248,7 +306,7 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
                 "7D2F387510109040002000060BECB6AB", usersid);
     }
 
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, comppath, &hkey);
+    RegCreateKeyExA(HKEY_LOCAL_MACHINE, comppath, 0, NULL, 0, access, NULL, &hkey, NULL);
 
     lstrcpyA(path, CURR_DIR);
     lstrcatA(path, "\\");
@@ -257,7 +315,7 @@ static void set_component_path(LPCSTR filename, MSIINSTALLCONTEXT context,
     RegSetValueExA(hkey, prod, 0, REG_SZ, (LPBYTE)path, lstrlenA(path));
     RegCloseKey(hkey);
 
-    RegCreateKeyA(HKEY_LOCAL_MACHINE, prodpath, &hkey);
+    RegCreateKeyExA(HKEY_LOCAL_MACHINE, prodpath, 0, NULL, 0, access, NULL, &hkey, NULL);
     RegCloseKey(hkey);
 }
 
@@ -269,6 +327,10 @@ static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR 
     CHAR squashed[MAX_PATH];
     CHAR comppath[MAX_PATH];
     CHAR prodpath[MAX_PATH];
+    REGSAM access = KEY_ALL_ACCESS;
+
+    if (is_wow64)
+        access |= KEY_WOW64_64KEY;
 
     MultiByteToWideChar(CP_ACP, 0, guid, -1, guidW, MAX_PATH);
     squash_guid(guidW, squashedW);
@@ -305,10 +367,10 @@ static void delete_component_path(LPCSTR guid, MSIINSTALLCONTEXT context, LPSTR 
     }
 
     MultiByteToWideChar(CP_ACP, 0, comppath, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW, access);
 
     MultiByteToWideChar(CP_ACP, 0, prodpath, -1, substrW, MAX_PATH);
-    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW);
+    package_RegDeleteTreeW(HKEY_LOCAL_MACHINE, substrW, access);
 }
 
 static UINT do_query(MSIHANDLE hdb, const char *query, MSIHANDLE *phrec)
@@ -574,10 +636,6 @@ make_add_entry(appsearch,
                "INSERT INTO `AppSearch` "
                "(`Property`, `Signature_`) VALUES( %s )")
 
-make_add_entry(reglocator,
-               "INSERT INTO `RegLocator` "
-               "(`Signature_`, `Root`, `Key`, `Name`, `Type`) VALUES( %s )")
-
 make_add_entry(signature,
                "INSERT INTO `Signature` "
                "(`Signature`, `FileName`, `MinVersion`, `MaxVersion`,"
@@ -615,6 +673,23 @@ make_add_entry(inilocator,
                "INSERT INTO `IniLocator` "
                "(`Signature_`, `FileName`, `Section`, `Key`, `Field`, `Type`) "
                "VALUES( %s )")
+
+static UINT add_reglocator_entry( MSIHANDLE hdb, const char *sig, UINT root, const char *path,
+                                  const char *name, UINT type )
+{
+    const char insert[] =
+        "INSERT INTO `RegLocator` (`Signature_`, `Root`, `Key`, `Name`, `Type`) "
+        "VALUES( '%s', %u, '%s', '%s', %u )";
+    char *query;
+    UINT sz, r;
+
+    sz = strlen( sig ) + 10 + strlen( path ) + strlen( name ) + 10 + sizeof( insert );
+    query = HeapAlloc( GetProcessHeap(), 0, sz );
+    sprintf( query, insert, sig, root, path, name, type );
+    r = run_query( hdb, query );
+    HeapFree( GetProcessHeap(), 0, query );
+    return r;
+}
 
 static UINT set_summary_info(MSIHANDLE hdb)
 {
@@ -670,7 +745,7 @@ static MSIHANDLE create_package_db(void)
 
     /* create an empty database */
     res = MsiOpenDatabase(msifile, MSIDBOPEN_CREATE, &hdb );
-    ok( res == ERROR_SUCCESS , "Failed to create database\n" );
+    ok( res == ERROR_SUCCESS , "Failed to create database %u\n", res );
     if( res != ERROR_SUCCESS )
         return hdb;
 
@@ -678,6 +753,7 @@ static MSIHANDLE create_package_db(void)
     ok( res == ERROR_SUCCESS , "Failed to commit database\n" );
 
     res = set_summary_info(hdb);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
 
     res = run_query( hdb,
             "CREATE TABLE `Directory` ( "
@@ -690,22 +766,29 @@ static MSIHANDLE create_package_db(void)
     return hdb;
 }
 
-static MSIHANDLE package_from_db(MSIHANDLE hdb)
+static UINT package_from_db(MSIHANDLE hdb, MSIHANDLE *handle)
 {
     UINT res;
-    CHAR szPackage[10];
+    CHAR szPackage[12];
     MSIHANDLE hPackage;
 
-    sprintf(szPackage,"#%i",hdb);
-    res = MsiOpenPackage(szPackage,&hPackage);
+    sprintf(szPackage, "#%u", hdb);
+    res = MsiOpenPackage(szPackage, &hPackage);
     if (res != ERROR_SUCCESS)
-        return 0;
+    {
+        MsiCloseHandle(hdb);
+        return res;
+    }
 
     res = MsiCloseHandle(hdb);
     if (res != ERROR_SUCCESS)
-        return 0;
+    {
+        MsiCloseHandle(hPackage);
+        return res;
+    }
 
-    return hPackage;
+    *handle = hPackage;
+    return ERROR_SUCCESS;
 }
 
 static void create_test_file(const CHAR *name)
@@ -809,8 +892,14 @@ static void test_createpackage(void)
     MSIHANDLE hPackage = 0;
     UINT res;
 
-    hPackage = package_from_db(create_package_db());
-    ok( hPackage != 0, " Failed to create package\n");
+    res = package_from_db(create_package_db(), &hPackage);
+    if (res == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( res == ERROR_SUCCESS, " Failed to create package %u\n", res );
 
     res = MsiCloseHandle( hPackage);
     ok( res == ERROR_SUCCESS , "Failed to close package\n" );
@@ -825,8 +914,14 @@ static void test_doaction( void )
     r = MsiDoAction( -1, NULL );
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiDoAction(hpkg, NULL);
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
@@ -851,8 +946,14 @@ static void test_gettargetpath_bad(void)
     DWORD sz;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiGetTargetPath( 0, NULL, NULL, NULL );
     ok( r == ERROR_INVALID_PARAMETER, "wrong return val\n");
@@ -971,8 +1072,16 @@ static void test_settargetpath(void)
     r = add_file_entry( hdb, "'TestFile', 'TestComp', 'testfile.txt', 0, '', '1033', 8192, 1" );
     ok( r == S_OK, "cannot add file to the File table: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction( hpkg, "CostInitialize");
     ok( r == ERROR_SUCCESS, "cost init failed\n");
@@ -1060,11 +1169,21 @@ static void test_settargetpath(void)
 
 static void test_condition(void)
 {
+    static const WCHAR cond1[] = {'\"','a',0x30a,'\"','<','\"',0xe5,'\"',0};
+    static const WCHAR cond2[] = {'\"','a',0x30a,'\"','>','\"',0xe5,'\"',0};
+    static const WCHAR cond3[] = {'\"','a',0x30a,'\"','<','>','\"',0xe5,'\"',0};
+    static const WCHAR cond4[] = {'\"','a',0x30a,'\"','=','\"',0xe5,'\"',0};
     MSICONDITION r;
     MSIHANDLE hpkg;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiEvaluateCondition(0, NULL);
     ok( r == MSICONDITION_ERROR, "wrong return val\n");
@@ -1773,6 +1892,22 @@ static void test_condition(void)
     r = MsiEvaluateCondition(hpkg, "A <= X");
     ok( r == MSICONDITION_FALSE, "wrong return val (%d)\n", r);
 
+    r = MsiEvaluateConditionW(hpkg, cond1);
+    ok( r == MSICONDITION_TRUE || broken(r == MSICONDITION_FALSE),
+        "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateConditionW(hpkg, cond2);
+    ok( r == MSICONDITION_FALSE || broken(r == MSICONDITION_TRUE),
+        "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateConditionW(hpkg, cond3);
+    ok( r == MSICONDITION_TRUE || broken(r == MSICONDITION_FALSE),
+        "wrong return val (%d)\n", r);
+
+    r = MsiEvaluateConditionW(hpkg, cond4);
+    ok( r == MSICONDITION_FALSE || broken(r == MSICONDITION_TRUE),
+        "wrong return val (%d)\n", r);
+
     MsiCloseHandle( hpkg );
     DeleteFile(msifile);
 }
@@ -1810,8 +1945,14 @@ static void test_props(void)
             "VALUES( 'MetadataCompName', 'Photoshop.dll' )");
     ok( r == ERROR_SUCCESS , "Failed\n" );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     /* test invalid values */
     r = MsiGetProperty( 0, NULL, NULL, NULL );
@@ -2014,8 +2155,14 @@ static void test_property_table(void)
     hdb = create_package_db();
     ok( hdb, "failed to create package\n");
 
-    hpkg = package_from_db(hdb);
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -2068,8 +2215,8 @@ static void test_property_table(void)
     r = add_property_entry(hdb, "'prop', 'val'");
     ok(r == ERROR_SUCCESS, "cannot add property: %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -2190,6 +2337,11 @@ static void test_msipackage(void)
 
     /* empty szPackagePath */
     r = MsiOpenPackage("", &hpack);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     todo_wine
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -2274,8 +2426,14 @@ static void test_formatrecord2(void)
     DWORD sz;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     r = MsiSetProperty(hpkg, "Manufacturer", " " );
     ok( r == ERROR_SUCCESS, "set property failed\n");
@@ -2289,9 +2447,12 @@ static void test_formatrecord2(void)
     buffer[0] = 0;
     sz = sizeof buffer;
     r = MsiFormatRecord( hpkg, hrec, buffer, &sz );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
 
     r = MsiRecordSetString(hrec, 0, "[foo][1]");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "hoo");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2299,6 +2460,7 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "x[~]x");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2306,7 +2468,9 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[foo.$%}][1]");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "hoo");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2314,6 +2478,7 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[\\[]");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 1, "size wrong\n");
@@ -2322,6 +2487,7 @@ static void test_formatrecord2(void)
 
     SetEnvironmentVariable("FOO", "BAR");
     r = MsiRecordSetString(hrec, 0, "[%FOO]");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2329,7 +2495,9 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[[1]]");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "%FOO");
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2352,6 +2520,12 @@ static void test_states(void)
     static const CHAR msifile3[] = "winetest3-package.msi";
     static const CHAR msifile4[] = "winetest4-package.msi";
 
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+
     hdb = create_package_db();
     ok ( hdb, "failed to create package database\n" );
 
@@ -2361,7 +2535,7 @@ static void test_states(void)
     r = create_property_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Property table: %d\n", r );
 
-    r = add_property_entry( hdb, "'ProductCode', '{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}'" );
+    r = add_property_entry( hdb, "'ProductCode', '{7262AC98-EEBD-4364-8CE3-D654F6A425B9}'" );
     ok( r == ERROR_SUCCESS, "cannot add property entry: %d\n", r );
 
     r = add_property_entry( hdb, "'ProductLanguage', '1033'" );
@@ -2371,6 +2545,9 @@ static void test_states(void)
     ok( r == ERROR_SUCCESS, "cannot add property entry: %d\n", r );
 
     r = add_property_entry( hdb, "'ProductVersion', '1.1.1'" );
+    ok( r == ERROR_SUCCESS, "cannot add property entry: %d\n", r );
+
+    r = add_property_entry( hdb, "'MSIFASTINSTALL', '1'" );
     ok( r == ERROR_SUCCESS, "cannot add property entry: %d\n", r );
 
     r = create_install_execute_sequence_table( hdb );
@@ -2542,6 +2719,13 @@ static void test_states(void)
     r = add_component_entry( hdb, "'chi', '{E6B539AB-5DA9-4236-A2D2-E341A50B4C38}', 'TARGETDIR', 1, '', 'chi_file'" );
     ok( r == ERROR_SUCCESS, "cannot add component: %d\n", r );
 
+    /* msidbFeatureAttributesUIDisallowAbsent */
+    r = add_feature_entry( hdb, "'eleven', '', '', '', 2, 1, '', 16" );
+    ok( r == ERROR_SUCCESS, "cannot add feature: %d\n", r );
+
+    r = add_component_entry( hdb, "'psi', '{A06B23B5-746B-427A-8A6E-FD6AC8F46A95}', 'TARGETDIR', 1, '', 'psi_file'" );
+    ok( r == ERROR_SUCCESS, "cannot add component: %d\n", r );
+
     r = create_feature_components_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create FeatureComponents table: %d\n", r );
 
@@ -2611,6 +2795,9 @@ static void test_states(void)
     r = add_feature_components_entry( hdb, "'ten', 'chi'" );
     ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
 
+    r = add_feature_components_entry( hdb, "'eleven', 'psi'" );
+    ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
+
     r = create_file_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create File table: %d\n", r );
 
@@ -2678,6 +2865,9 @@ static void test_states(void)
     r = add_file_entry( hdb, "'chi_file', 'chi', 'chi.txt', 100, '', '1033', 8192, 1" );
     ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
 
+    r = add_file_entry( hdb, "'psi_file', 'psi', 'psi.txt', 100, '', '1033', 8192, 1" );
+    ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
+
     MsiDatabaseCommit(hdb);
 
     /* these properties must not be in the saved msi file */
@@ -2696,8 +2886,14 @@ static void test_states(void)
     r = add_property_entry( hdb, "'REINSTALLMODE', 'omus'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -2777,6 +2973,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
@@ -2918,6 +3121,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -2997,6 +3207,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -3142,8 +3359,30 @@ static void test_states(void)
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
     r = MsiDoAction( hpkg, "FileCost");
     ok( r == ERROR_SUCCESS, "file cost failed\n");
+
+    r = MsiGetFeatureState(hpkg, "one", NULL, NULL);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "one", NULL, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+
+    state = 0xdeadbee;
+    r = MsiGetFeatureState( hpkg, "one", &state, NULL);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -3217,6 +3456,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -3358,6 +3604,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -3437,6 +3690,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
@@ -3582,7 +3842,16 @@ static void test_states(void)
     ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
     MsiCloseHandle( hpkg );
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     /* publish the features and components */
     r = MsiInstallProduct(msifile, "ADDLOCAL=one,four ADDSOURCE=two,three REMOVE=six,seven REINSTALL=eight,nine,ten");
@@ -3604,8 +3873,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'REINSTALL', 'eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -3681,6 +3950,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
@@ -3822,6 +4098,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -3901,6 +4184,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -4042,6 +4332,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -4259,6 +4556,13 @@ static void test_states(void)
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
     r = MsiDoAction( hpkg, "CostFinalize");
     ok( r == ERROR_SUCCESS, "cost finalize failed: %d\n", r);
 
@@ -4328,6 +4632,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "ten", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -4475,6 +4786,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -4496,8 +4814,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDLOCAL', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -4565,6 +4883,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "ten", &state, &action);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
     ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -4712,6 +5037,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -4791,6 +5123,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -4932,6 +5271,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -5011,6 +5357,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -5152,6 +5505,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -5231,6 +5591,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
@@ -5241,7 +5608,7 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "beta", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -5304,35 +5671,35 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "lambda", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "mu", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "nu", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "xi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "omicron", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -5346,35 +5713,42 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "rho", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "sigma", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "tau", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "phi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     MsiCloseHandle(hpkg);
 
@@ -5393,8 +5767,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDSOURCE', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -5462,6 +5836,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "ten", &state, &action);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
     ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -5609,6 +5990,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -5688,6 +6076,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -5829,6 +6224,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -5908,6 +6310,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -6053,6 +6462,13 @@ static void test_states(void)
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
     r = MsiDoAction( hpkg, "CostFinalize");
     ok( r == ERROR_SUCCESS, "cost finalize failed: %d\n", r);
 
@@ -6061,14 +6477,14 @@ static void test_states(void)
     r = MsiGetFeatureState(hpkg, "one", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "two", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6082,7 +6498,7 @@ static void test_states(void)
     r = MsiGetFeatureState(hpkg, "four", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6096,42 +6512,49 @@ static void test_states(void)
     r = MsiGetFeatureState(hpkg, "six", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "seven", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "eight", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "nine", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "ten", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6152,7 +6575,7 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "theta", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6201,7 +6624,7 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "lambda", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6222,14 +6645,14 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "xi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "omicron", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6250,28 +6673,35 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "sigma", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "tau", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "phi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     MsiCloseHandle(hpkg);
 
@@ -6286,8 +6716,8 @@ static void test_states(void)
     r = add_property_entry( hdb, "'ADDSOURCE', 'one,two,three,four,five,six,seven,eight,nine,ten'");
     ok( r == ERROR_SUCCESS, "cannot add property: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -6355,6 +6785,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "ten", &state, &action);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
     ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -6502,6 +6939,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
+    ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
+    ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %d\n", r );
     ok( state == 0xdeadbee, "Expected 0xdeadbee, got %d\n", state);
     ok( action == 0xdeadbee, "Expected 0xdeadbee, got %d\n", action);
@@ -6581,6 +7025,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -6722,6 +7173,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -6801,6 +7259,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
@@ -6942,6 +7407,13 @@ static void test_states(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", state);
     ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
@@ -7021,6 +7493,13 @@ static void test_states(void)
 
     state = 0xdeadbee;
     action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "eleven", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "alpha", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
@@ -7031,7 +7510,7 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "beta", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -7094,35 +7573,35 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "lambda", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "mu", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "nu", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "xi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "omicron", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -7136,35 +7615,42 @@ static void test_states(void)
     r = MsiGetComponentState(hpkg, "rho", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "sigma", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
-    ok( state == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "tau", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "phi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
-    ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetComponentState(hpkg, "chi", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetComponentState(hpkg, "psi", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
+    ok( action == INSTALLSTATE_UNKNOWN, "Expected INSTALLSTATE_UNKNOWN, got %d\n", action);
 
     MsiCloseHandle(hpkg);
 
@@ -7186,8 +7672,14 @@ static void test_getproperty(void)
     DWORD size;
     UINT r;
 
-    hPackage = package_from_db(create_package_db());
-    ok( hPackage != 0, " Failed to create package\n");
+    r = package_from_db(create_package_db(), &hPackage);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "Failed to create package %u\n", r );
 
     /* set the property */
     r = MsiSetProperty(hPackage, "Name", "Value");
@@ -7228,6 +7720,7 @@ static void test_removefiles(void)
     MSIHANDLE hpkg;
     UINT r;
     MSIHANDLE hdb;
+    INSTALLSTATE installed, action;
 
     hdb = create_package_db();
     ok ( hdb, "failed to create package database\n" );
@@ -7262,6 +7755,9 @@ static void test_removefiles(void)
     r = add_component_entry( hdb, "'carbon', '', 'TARGETDIR', 0, '', 'carbon_file'" );
     ok( r == ERROR_SUCCESS, "cannot add component: %d\n", r );
 
+    r = add_component_entry( hdb, "'oxygen', '', 'TARGETDIR', 0, '0', 'oxygen_file'" );
+    ok( r == ERROR_SUCCESS, "cannot add component: %d\n", r );
+
     r = create_feature_components_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create FeatureComponents table: %d\n", r );
 
@@ -7281,6 +7777,9 @@ static void test_removefiles(void)
     ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
 
     r = add_feature_components_entry( hdb, "'one', 'carbon'" );
+    ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
+
+    r = add_feature_components_entry( hdb, "'one', 'oxygen'" );
     ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
 
     r = create_file_table( hdb );
@@ -7304,11 +7803,20 @@ static void test_removefiles(void)
     r = add_file_entry( hdb, "'carbon_file', 'carbon', 'carbon.txt', 0, '', '1033', 16384, 1" );
     ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
 
+    r = add_file_entry( hdb, "'oxygen_file', 'oxygen', 'oxygen.txt', 0, '', '1033', 16384, 1" );
+    ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
+
     r = create_remove_file_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Remove File table: %d\n", r);
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
 
@@ -7318,24 +7826,42 @@ static void test_removefiles(void)
     create_test_file( "beryllium.txt" );
     create_test_file( "boron.txt" );
     create_test_file( "carbon.txt" );
+    create_test_file( "oxygen.txt" );
 
     r = MsiSetProperty( hpkg, "TARGETDIR", CURR_DIR );
     ok( r == ERROR_SUCCESS, "set property failed\n");
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiGetComponentState( hpkg, "oxygen", &installed, &action );
+    ok( r == ERROR_UNKNOWN_COMPONENT, "expected ERROR_UNKNOWN_COMPONENT, got %u\n", r );
 
     r = MsiDoAction( hpkg, "CostInitialize");
     ok( r == ERROR_SUCCESS, "cost init failed\n");
 
     r = MsiDoAction( hpkg, "FileCost");
-    ok( r == ERROR_SUCCESS, "cost finalize failed\n");
+    ok( r == ERROR_SUCCESS, "file cost failed\n");
+
+    installed = action = 0xdeadbeef;
+    r = MsiGetComponentState( hpkg, "oxygen", &installed, &action );
+    ok( r == ERROR_SUCCESS, "failed to get component state %u\n", r );
+    ok( installed == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", installed );
+    ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
 
     r = MsiDoAction( hpkg, "CostFinalize");
     ok( r == ERROR_SUCCESS, "cost finalize failed\n");
 
     r = MsiDoAction( hpkg, "InstallValidate");
-    ok( r == ERROR_SUCCESS, "cost finalize failed\n");
+    ok( r == ERROR_SUCCESS, "install validate failed\n");
 
     r = MsiSetComponentState( hpkg, "hydrogen", INSTALLSTATE_ABSENT );
     ok( r == ERROR_SUCCESS, "failed to set component state: %d\n", r);
+
+    installed = action = 0xdeadbeef;
+    r = MsiGetComponentState( hpkg, "hydrogen", &installed, &action );
+    ok( r == ERROR_SUCCESS, "failed to get component state %u\n", r );
+    ok( installed == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", installed );
+    todo_wine ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
 
     r = MsiSetComponentState( hpkg, "helium", INSTALLSTATE_LOCAL );
     ok( r == ERROR_SUCCESS, "failed to set component state: %d\n", r);
@@ -7352,8 +7878,29 @@ static void test_removefiles(void)
     r = MsiSetComponentState( hpkg, "carbon", INSTALLSTATE_SOURCE );
     ok( r == ERROR_SUCCESS, "failed to set component state: %d\n", r);
 
+    installed = action = 0xdeadbeef;
+    r = MsiGetComponentState( hpkg, "oxygen", &installed, &action );
+    ok( r == ERROR_SUCCESS, "failed to get component state %u\n", r );
+    ok( installed == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", installed );
+    ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
+
+    r = MsiSetComponentState( hpkg, "oxygen", INSTALLSTATE_ABSENT );
+    ok( r == ERROR_SUCCESS, "failed to set component state: %d\n", r);
+
+    installed = action = 0xdeadbeef;
+    r = MsiGetComponentState( hpkg, "oxygen", &installed, &action );
+    ok( r == ERROR_SUCCESS, "failed to get component state %u\n", r );
+    ok( installed == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", installed );
+    ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
+
     r = MsiDoAction( hpkg, "RemoveFiles");
     ok( r == ERROR_SUCCESS, "remove files failed\n");
+
+    installed = action = 0xdeadbeef;
+    r = MsiGetComponentState( hpkg, "oxygen", &installed, &action );
+    ok( r == ERROR_SUCCESS, "failed to get component state %u\n", r );
+    ok( installed == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", installed );
+    ok( action == INSTALLSTATE_UNKNOWN, "expected INSTALLSTATE_UNKNOWN, got %d\n", action );
 
     ok(DeleteFileA("hydrogen.txt"), "Expected hydrogen.txt to exist\n");
     ok(DeleteFileA("lithium.txt"), "Expected lithium.txt to exist\n");    
@@ -7361,6 +7908,7 @@ static void test_removefiles(void)
     ok(DeleteFileA("carbon.txt"), "Expected carbon.txt to exist\n");
     ok(DeleteFileA("helium.txt"), "Expected helium.txt to exist\n");
     ok(DeleteFileA("boron.txt"), "Expected boron.txt to exist\n");
+    ok(DeleteFileA("oxygen.txt"), "Expected oxygen.txt to exist\n");
 
     MsiCloseHandle( hpkg );
     DeleteFileA(msifile);
@@ -7372,7 +7920,7 @@ static void test_appsearch(void)
     UINT r;
     MSIHANDLE hdb;
     CHAR prop[MAX_PATH];
-    DWORD size = MAX_PATH;
+    DWORD size;
 
     hdb = create_package_db();
     ok ( hdb, "failed to create package database\n" );
@@ -7383,26 +7931,48 @@ static void test_appsearch(void)
     r = add_appsearch_entry( hdb, "'WEBBROWSERPROG', 'NewSignature1'" );
     ok( r == ERROR_SUCCESS, "cannot add entry: %d\n", r );
 
+    r = add_appsearch_entry( hdb, "'NOTEPAD', 'NewSignature2'" );
+    ok( r == ERROR_SUCCESS, "cannot add entry: %d\n", r );
+
     r = create_reglocator_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
 
-    r = add_reglocator_entry( hdb, "'NewSignature1', 0, 'htmlfile\\shell\\open\\command', '', 1" );
+    r = add_reglocator_entry( hdb, "NewSignature1", 0, "htmlfile\\shell\\open\\command", "", 1 );
+    ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
+
+    r = create_drlocator_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create DrLocator table: %d\n", r );
+
+    r = add_drlocator_entry( hdb, "'NewSignature2', 0, 'c:\\windows\\system32', 0" );
     ok( r == ERROR_SUCCESS, "cannot create RegLocator table: %d\n", r );
 
     r = create_signature_table( hdb );
     ok( r == ERROR_SUCCESS, "cannot create Signature table: %d\n", r );
 
     r = add_signature_entry( hdb, "'NewSignature1', 'FileName', '', '', '', '', '', '', ''" );
-    ok( r == ERROR_SUCCESS, "cannot create Signature table: %d\n", r );
+    ok( r == ERROR_SUCCESS, "cannot add signature: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = add_signature_entry( hdb, "'NewSignature2', 'NOTEPAD.EXE|notepad.exe', '', '', '', '', '', '', ''" );
+    ok( r == ERROR_SUCCESS, "cannot add signature: %d\n", r );
 
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
     MsiCloseHandle( hdb );
+    if (r != ERROR_SUCCESS)
+        goto done;
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction( hpkg, "AppSearch" );
     ok( r == ERROR_SUCCESS, "AppSearch failed: %d\n", r);
 
+    size = sizeof(prop);
     r = MsiGetPropertyA( hpkg, "WEBBROWSERPROG", prop, &size );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
     todo_wine
@@ -7410,6 +7980,11 @@ static void test_appsearch(void)
         ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
     }
 
+    size = sizeof(prop);
+    r = MsiGetPropertyA( hpkg, "NOTEPAD", prop, &size );
+    ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
+
+done:
     MsiCloseHandle( hpkg );
     DeleteFileA(msifile);
 }
@@ -7425,6 +8000,12 @@ static void test_appsearch_complocator(void)
 
     if (!get_user_sid(&usersid))
         return;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
 
     create_test_file("FileName1");
     create_test_file("FileName4");
@@ -7587,11 +8168,18 @@ static void test_appsearch_complocator(void)
     r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
 
     r = MsiSetPropertyA(hpkg, "SIGPROP8", "october");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -7686,6 +8274,9 @@ static void test_appsearch_complocator(void)
     delete_component_path("{EC30CE73-4CF9-4908-BABD-1ED82E1515FD}",
                           MSIINSTALLCONTEXT_MACHINE, NULL);
 
+    MsiCloseHandle(hpkg);
+
+error:
     DeleteFileA("FileName1");
     DeleteFileA("FileName2");
     DeleteFileA("FileName3");
@@ -7696,7 +8287,6 @@ static void test_appsearch_complocator(void)
     DeleteFileA("FileName8.dll");
     DeleteFileA("FileName9.dll");
     DeleteFileA("FileName10.dll");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
     LocalFree(usersid);
 }
@@ -7704,19 +8294,15 @@ static void test_appsearch_complocator(void)
 static void test_appsearch_reglocator(void)
 {
     MSIHANDLE hpkg, hdb;
-    CHAR path[MAX_PATH];
-    CHAR prop[MAX_PATH];
-    DWORD binary[2];
-    DWORD size, val;
-    BOOL space, version;
-    HKEY hklm, classes;
-    HKEY hkcu, users;
-    LPSTR pathdata;
-    LPSTR pathvar;
+    CHAR path[MAX_PATH], prop[MAX_PATH];
+    DWORD binary[2], size, val;
+    BOOL space, version, is_64bit = sizeof(void *) > sizeof(int);
+    HKEY hklm, classes, hkcu, users;
+    LPSTR pathdata, pathvar, ptr;
     LPCSTR str;
-    LPSTR ptr;
     LONG res;
-    UINT r;
+    UINT r, type = 0;
+    SYSTEM_INFO si;
 
     version = TRUE;
     if (!create_file_with_version("test.dll", MAKELONG(2, 1), MAKELONG(4, 3)))
@@ -7725,6 +8311,11 @@ static void test_appsearch_reglocator(void)
     DeleteFileA("test.dll");
 
     res = RegCreateKeyA(HKEY_CLASSES_ROOT, "Software\\Wine", &classes);
+    if (res == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegSetValueExA(classes, "Value1", 0, REG_SZ,
@@ -7834,11 +8425,13 @@ static void test_appsearch_reglocator(void)
     sprintf(path, "\"%s\\FileName1\" -option", CURR_DIR);
     res = RegSetValueExA(hklm, "value16", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
 
     space = (strchr(CURR_DIR, ' ')) ? TRUE : FALSE;
     sprintf(path, "%s\\FileName1 -option", CURR_DIR);
     res = RegSetValueExA(hklm, "value17", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
 
     hdb = create_package_db();
     ok(hdb, "Expected a valid database handle\n");
@@ -7939,154 +8532,152 @@ static void test_appsearch_reglocator(void)
     r = create_reglocator_table(hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeRawValue;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeRawValue, REG_SZ */
-    str = "'NewSignature1', 2, 'Software\\Wine', 'Value1', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature1", 2, "Software\\Wine", "Value1", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, positive DWORD */
-    str = "'NewSignature2', 2, 'Software\\Wine', 'Value2', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature2", 2, "Software\\Wine", "Value2", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, negative DWORD */
-    str = "'NewSignature3', 2, 'Software\\Wine', 'Value3', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature3", 2, "Software\\Wine", "Value3", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_EXPAND_SZ */
-    str = "'NewSignature4', 2, 'Software\\Wine', 'Value4', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature4", 2, "Software\\Wine", "Value4", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_EXPAND_SZ */
-    str = "'NewSignature5', 2, 'Software\\Wine', 'Value5', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature5", 2, "Software\\Wine", "Value5", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_MULTI_SZ */
-    str = "'NewSignature6', 2, 'Software\\Wine', 'Value6', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature6", 2, "Software\\Wine", "Value6", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_BINARY */
-    str = "'NewSignature7', 2, 'Software\\Wine', 'Value7', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature7", 2, "Software\\Wine", "Value7", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_SZ first char is # */
-    str = "'NewSignature8', 2, 'Software\\Wine', 'Value8', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature8", 2, "Software\\Wine", "Value8", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeFileName;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeFileName, signature, file exists */
-    str = "'NewSignature9', 2, 'Software\\Wine', 'Value9', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature9", 2, "Software\\Wine", "Value9", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, signature, file does not exist */
-    str = "'NewSignature10', 2, 'Software\\Wine', 'Value10', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature10", 2, "Software\\Wine", "Value10", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, no signature */
-    str = "'NewSignature11', 2, 'Software\\Wine', 'Value9', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature11", 2, "Software\\Wine", "Value9", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeDirectory;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeDirectory, no signature, file exists */
-    str = "'NewSignature12', 2, 'Software\\Wine', 'Value9', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature12", 2, "Software\\Wine", "Value9", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeDirectory, no signature, directory exists */
-    str = "'NewSignature13', 2, 'Software\\Wine', 'Value11', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature13", 2, "Software\\Wine", "Value11", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeDirectory, signature, file exists */
-    str = "'NewSignature14', 2, 'Software\\Wine', 'Value9', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature14", 2, "Software\\Wine", "Value9", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeRawValue;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKCR, msidbLocatorTypeRawValue, REG_SZ */
-    str = "'NewSignature15', 0, 'Software\\Wine', 'Value1', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature15", 0, "Software\\Wine", "Value1", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKCU, msidbLocatorTypeRawValue, REG_SZ */
-    str = "'NewSignature16', 1, 'Software\\Wine', 'Value1', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature16", 1, "Software\\Wine", "Value1", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKU, msidbLocatorTypeRawValue, REG_SZ */
-    str = "'NewSignature17', 3, 'S-1-5-18\\Software\\Wine', 'Value1', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature17", 3, "S-1-5-18\\Software\\Wine", "Value1", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_SZ, NULL Name */
-    str = "'NewSignature18', 2, 'Software\\Wine', '', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature18", 2, "Software\\Wine", "", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_SZ, key does not exist */
-    str = "'NewSignature19', 2, 'Software\\IDontExist', '', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature19", 2, "Software\\IDontExist", "", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeRawValue, REG_SZ, value is empty */
-    str = "'NewSignature20', 2, 'Software\\Wine', 'Value12', 2";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature20", 2, "Software\\Wine", "Value12", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeFileName;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeFileName, signature, file exists w/ version */
-    str = "'NewSignature21', 2, 'Software\\Wine', 'Value13', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature21", 2, "Software\\Wine", "Value13", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, file exists w/ version, version > max */
-    str = "'NewSignature22', 2, 'Software\\Wine', 'Value14', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature22", 2, "Software\\Wine", "Value14", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, file exists w/ version, sig->name ignored */
-    str = "'NewSignature23', 2, 'Software\\Wine', 'Value15', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature23", 2, "Software\\Wine", "Value15", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, no signature, directory exists */
-    str = "'NewSignature24', 2, 'Software\\Wine', 'Value11', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature24", 2, "Software\\Wine", "Value11", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFileName, no signature, file does not exist */
-    str = "'NewSignature25', 2, 'Software\\Wine', 'Value10', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature25", 2, "Software\\Wine", "Value10", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeDirectory;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeDirectory, signature, directory exists */
-    str = "'NewSignature26', 2, 'Software\\Wine', 'Value11', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature26", 2, "Software\\Wine", "Value11", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeDirectory, signature, file does not exist */
-    str = "'NewSignature27', 2, 'Software\\Wine', 'Value10', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature27", 2, "Software\\Wine", "Value10", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeDirectory, no signature, file does not exist */
-    str = "'NewSignature28', 2, 'Software\\Wine', 'Value10', 0";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature28", 2, "Software\\Wine", "Value10", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
+    type = msidbLocatorTypeFileName;
+    if (is_64bit)
+        type |= msidbLocatorType64bit;
+
     /* HKLM, msidbLocatorTypeFile, file exists, in quotes */
-    str = "'NewSignature29', 2, 'Software\\Wine', 'Value16', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature29", 2, "Software\\Wine", "Value16", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* HKLM, msidbLocatorTypeFile, file exists, no quotes */
-    str = "'NewSignature30', 2, 'Software\\Wine', 'Value17', 1";
-    r = add_reglocator_entry(hdb, str);
+    r = add_reglocator_entry(hdb, "NewSignature30", 2, "Software\\Wine", "Value17", type);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     r = create_signature_table(hdb);
@@ -8133,8 +8724,10 @@ static void test_appsearch_reglocator(void)
     r = add_signature_entry(hdb, str);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8155,28 +8748,34 @@ static void test_appsearch_reglocator(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(prop, "#-42"), "Expected \"#-42\", got \"%s\"\n", prop);
 
-    size = ExpandEnvironmentStringsA("%PATH%", NULL, 0);
-    if (size == 0 && GetLastError() == ERROR_INVALID_PARAMETER)
+    memset(&si, 0, sizeof(si));
+    if (pGetNativeSystemInfo) pGetNativeSystemInfo(&si);
+
+    if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
-        /* Workaround for Win95 */
-        CHAR tempbuf[1];
-        size = ExpandEnvironmentStringsA("%PATH%", tempbuf, 0);
+        size = ExpandEnvironmentStringsA("%PATH%", NULL, 0);
+        if (size == 0 && GetLastError() == ERROR_INVALID_PARAMETER)
+        {
+            /* Workaround for Win95 */
+            CHAR tempbuf[1];
+            size = ExpandEnvironmentStringsA("%PATH%", tempbuf, 0);
+        }
+        pathvar = HeapAlloc(GetProcessHeap(), 0, size);
+        ExpandEnvironmentStringsA("%PATH%", pathvar, size);
+
+        size = 0;
+        r = MsiGetPropertyA(hpkg, "SIGPROP4", NULL, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+        pathdata = HeapAlloc(GetProcessHeap(), 0, ++size);
+        r = MsiGetPropertyA(hpkg, "SIGPROP4", pathdata, &size);
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+        ok(!lstrcmpA(pathdata, pathvar),
+            "Expected \"%s\", got \"%s\"\n", pathvar, pathdata);
+
+        HeapFree(GetProcessHeap(), 0, pathvar);
+        HeapFree(GetProcessHeap(), 0, pathdata);
     }
-    pathvar = HeapAlloc(GetProcessHeap(), 0, size);
-    ExpandEnvironmentStringsA("%PATH%", pathvar, size);
-
-    size = 0;
-    r = MsiGetPropertyA(hpkg, "SIGPROP4", NULL, &size);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-
-    pathdata = HeapAlloc(GetProcessHeap(), 0, ++size);
-    r = MsiGetPropertyA(hpkg, "SIGPROP4", pathdata, &size);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    ok(!lstrcmpA(pathdata, pathvar),
-       "Expected \"%s\", got \"%s\"\n", pathvar, pathdata);
-
-    HeapFree(GetProcessHeap(), 0, pathvar);
-    HeapFree(GetProcessHeap(), 0, pathdata);
 
     size = MAX_PATH;
     r = MsiGetPropertyA(hpkg, "SIGPROP5", prop, &size);
@@ -8357,7 +8956,7 @@ static void test_appsearch_reglocator(void)
     RegDeleteValueA(hklm, "Value15");
     RegDeleteValueA(hklm, "Value16");
     RegDeleteValueA(hklm, "Value17");
-    RegDeleteKeyA(hklm, "");
+    RegDeleteKey(hklm, "");
     RegCloseKey(hklm);
 
     RegDeleteValueA(classes, "Value1");
@@ -8554,8 +9153,15 @@ static void test_appsearch_inilocator(void)
     r = add_signature_entry(hdb, "'NewSignature12', 'ignored', '1.1.1.1', '2.1.1.1', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8632,12 +9238,14 @@ static void test_appsearch_inilocator(void)
         ok(!lstrcmpA(prop, path), "Expected \"%s\", got \"%s\"\n", path, prop);
     }
 
+    MsiCloseHandle(hpkg);
+
+error:
     delete_win_ini("IniFile.ini");
     DeleteFileA("FileName1");
     DeleteFileA("FileName2.dll");
     DeleteFileA("FileName3.dll");
     DeleteFileA("FileName4.dll");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
 }
 
@@ -8807,7 +9415,7 @@ static void test_appsearch_drlocator(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* parent */
-    r = add_reglocator_entry(hdb, "'NewSignature12', 2, 'htmlfile\\shell\\open\\nonexistent', '', 1");
+    r = add_reglocator_entry(hdb, "NewSignature12", 2, "htmlfile\\shell\\open\\nonexistent", "", 1);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* parent is in RegLocator, no path, depth 0, no signature */
@@ -8850,8 +9458,15 @@ static void test_appsearch_drlocator(void)
     r = add_signature_entry(hdb, str);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "Expected a valid package handle\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package handle %u\n", r);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -8927,6 +9542,9 @@ static void test_appsearch_drlocator(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!prop[0], "Expected \"\", got \"%s\"\n", prop);
 
+    MsiCloseHandle(hpkg);
+
+error:
     DeleteFileA("FileName1");
     DeleteFileA("FileName3.dll");
     DeleteFileA("FileName4.dll");
@@ -8936,7 +9554,6 @@ static void test_appsearch_drlocator(void)
     RemoveDirectoryA("one\\two");
     RemoveDirectoryA("one");
     RemoveDirectoryA("another");
-    MsiCloseHandle(hpkg);
     DeleteFileA(msifile);
 }
 
@@ -8975,6 +9592,10 @@ static void test_featureparents(void)
 
     /* msidbFeatureAttributesFavorLocal */
     r = add_feature_entry( hdb, "'orion', '', '', '', 2, 1, '', 0" );
+    ok( r == ERROR_SUCCESS, "cannot add feature: %d\n", r );
+
+    /* msidbFeatureAttributesUIDisallowAbsent */
+    r = add_feature_entry( hdb, "'lyra', '', '', '', 2, 1, '', 16" );
     ok( r == ERROR_SUCCESS, "cannot add feature: %d\n", r );
 
     /* disabled because of install level */
@@ -9027,6 +9648,7 @@ static void test_featureparents(void)
 
     /* msidbFeatureAttributesFavorLocal:msidbComponentAttributesOptional */
     r = add_component_entry( hdb, "'lepus', '', 'TARGETDIR', 2, '', 'lepus_file'" );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
 
     r = add_feature_components_entry( hdb, "'zodiac', 'leo'" );
     ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
@@ -9112,10 +9734,18 @@ static void test_featureparents(void)
     r = add_file_entry( hdb, "'hydrus_file', 'hydrus', 'hydrus.txt', 0, '', '1033', 8192, 1" );
     ok( r == ERROR_SUCCESS, "cannot add file: %d\n", r);
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction( hpkg, "CostInitialize");
     ok( r == ERROR_SUCCESS, "cost init failed\n");
@@ -9143,6 +9773,13 @@ static void test_featureparents(void)
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "orion", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "lyra", &state, &action);
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_ABSENT, "Expected INSTALLSTATE_ABSENT, got %d\n", state);
     ok( action == INSTALLSTATE_LOCAL, "Expected INSTALLSTATE_LOCAL, got %d\n", action);
@@ -9241,6 +9878,12 @@ static void test_featureparents(void)
     r = MsiSetFeatureState(hpkg, "orion", INSTALLSTATE_ABSENT);
     ok( r == ERROR_SUCCESS, "failed to set feature state: %d\n", r);
 
+    r = MsiSetFeatureState(hpkg, "lyra", INSTALLSTATE_ABSENT);
+    ok( r == ERROR_SUCCESS, "failed to set feature state: %d\n", r);
+
+    r = MsiSetFeatureState(hpkg, "nosuchfeature", INSTALLSTATE_ABSENT);
+    ok( r == ERROR_UNKNOWN_FEATURE, "Expected ERROR_UNKNOWN_FEATURE, got %u\n", r);
+
     state = 0xdeadbee;
     action = 0xdeadbee;
     r = MsiGetFeatureState(hpkg, "zodiac", &state, &action);
@@ -9261,6 +9904,13 @@ static void test_featureparents(void)
     ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
     ok( state == INSTALLSTATE_ABSENT, "Expected orion INSTALLSTATE_ABSENT, got %d\n", state);
     ok( action == INSTALLSTATE_ABSENT, "Expected orion INSTALLSTATE_ABSENT, got %d\n", action);
+
+    state = 0xdeadbee;
+    action = 0xdeadbee;
+    r = MsiGetFeatureState(hpkg, "lyra", &state, &action);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r );
+    ok( state == INSTALLSTATE_ABSENT, "Expected lyra INSTALLSTATE_ABSENT, got %d\n", state);
+    ok( action == INSTALLSTATE_ABSENT, "Expected lyra INSTALLSTATE_ABSENT, got %d\n", action);
 
     state = 0xdeadbee;
     action = 0xdeadbee;
@@ -9346,13 +9996,17 @@ static void test_featureparents(void)
 static void test_installprops(void)
 {
     MSIHANDLE hpkg, hdb;
-    CHAR path[MAX_PATH];
-    CHAR buf[MAX_PATH];
+    CHAR path[MAX_PATH], buf[MAX_PATH];
     DWORD size, type;
     LANGID langid;
     HKEY hkey1, hkey2;
     int res;
     UINT r;
+    REGSAM access = KEY_ALL_ACCESS;
+    SYSTEM_INFO si;
+
+    if (is_wow64)
+        access |= KEY_WOW64_64KEY;
 
     GetCurrentDirectory(MAX_PATH, path);
     lstrcat(path, "\\");
@@ -9361,8 +10015,14 @@ static void test_installprops(void)
     hdb = create_package_db();
     ok( hdb, "failed to create database\n");
 
-    hpkg = package_from_db(hdb);
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle(hdb);
 
@@ -9372,8 +10032,7 @@ static void test_installprops(void)
     ok( !lstrcmp(buf, path), "Expected %s, got %s\n", path, buf);
 
     RegOpenKey(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\MS Setup (ACME)\\User Info", &hkey1);
-
-    RegOpenKey(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", &hkey2);
+    RegOpenKeyEx(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, access, &hkey2);
 
     size = MAX_PATH;
     type = REG_SZ;
@@ -9448,12 +10107,216 @@ static void test_installprops(void)
     res = GetSystemMetrics(SM_CXSCREEN);
     size = MAX_PATH;
     r = MsiGetProperty(hpkg, "ScreenX", buf, &size);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     ok(atol(buf) == res, "Expected %d, got %ld\n", res, atol(buf));
 
     res = GetSystemMetrics(SM_CYSCREEN);
     size = MAX_PATH;
     r = MsiGetProperty(hpkg, "ScreenY", buf, &size);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
     ok(atol(buf) == res, "Expected %d, got %ld\n", res, atol(buf));
+
+    if (pGetSystemInfo && pSHGetFolderPathA)
+    {
+        pGetSystemInfo(&si);
+        if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
+        {
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "MsiAMD64", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "Msix64", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "System64Folder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            GetSystemDirectoryA(path, MAX_PATH);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "SystemFolder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            pGetSystemWow64DirectoryA(path, MAX_PATH);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "ProgramFiles64Folder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "ProgramFilesFolder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, path);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "CommonFiles64Folder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES_COMMON, NULL, 0, path);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "CommonFilesFolder", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES_COMMONX86, NULL, 0, path);
+            if (size) buf[size - 1] = 0;
+            ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+            buf[0] = 0;
+            size = MAX_PATH;
+            r = MsiGetProperty(hpkg, "VersionNT64", buf, &size);
+            ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+            ok(buf[0], "property not set\n");
+        }
+        else if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
+        {
+            if (!is_wow64)
+            {
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "MsiAMD64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "Msix64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "System64Folder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "SystemFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                GetSystemDirectoryA(path, MAX_PATH);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "ProgramFiles64Folder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "ProgramFilesFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES, NULL, 0, path);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "CommonFiles64Folder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "CommonFilesFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES_COMMON, NULL, 0, path);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "VersionNT64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+            }
+            else
+            {
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "MsiAMD64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(buf[0], "property not set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "Msix64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(buf[0], "property not set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "System64Folder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                GetSystemDirectoryA(path, MAX_PATH);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "SystemFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                pGetSystemWow64DirectoryA(path, MAX_PATH);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "ProgramFilesFolder64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "ProgramFilesFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILESX86, NULL, 0, path);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "CommonFilesFolder64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(!buf[0], "property set\n");
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "CommonFilesFolder", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                pSHGetFolderPathA(NULL, CSIDL_PROGRAM_FILES_COMMONX86, NULL, 0, path);
+                if (size) buf[size - 1] = 0;
+                ok(!lstrcmpiA(path, buf), "expected \"%s\", got \"%s\"\n", path, buf);
+
+                buf[0] = 0;
+                size = MAX_PATH;
+                r = MsiGetProperty(hpkg, "VersionNT64", buf, &size);
+                ok(r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+                ok(buf[0], "property not set\n");
+            }
+        }
+    }
 
     CloseHandle(hkey1);
     CloseHandle(hkey2);
@@ -9482,13 +10345,21 @@ static void test_launchconditions(void)
     r = add_launchcondition_entry( hdb, "'X != \"1\"', 'one'" );
     ok( r == ERROR_SUCCESS, "cannot add launch condition: %d\n", r );
 
-    hpkg = package_from_db( hdb );
-    ok( hpkg, "failed to create package\n");
+    r = package_from_db( hdb, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok( r == ERROR_SUCCESS, "failed to create package %u\n", r );
 
     MsiCloseHandle( hdb );
 
     r = MsiSetProperty( hpkg, "X", "1" );
     ok( r == ERROR_SUCCESS, "failed to set property\n" );
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     /* invalid conditions are ignored */
     r = MsiDoAction( hpkg, "LaunchConditions" );
@@ -9512,8 +10383,6 @@ static void test_ccpsearch(void)
     DWORD size = MAX_PATH;
     UINT r;
 
-    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
-
     hdb = create_package_db();
     ok(hdb, "failed to create package database\n");
 
@@ -9529,7 +10398,7 @@ static void test_ccpsearch(void)
     r = create_reglocator_table(hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    r = add_reglocator_entry(hdb, "'CCP_random', 0, 'htmlfile\\shell\\open\\nonexistent', '', 1");
+    r = add_reglocator_entry(hdb, "CCP_random", 0, "htmlfile\\shell\\open\\nonexistent", "", 1);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     r = create_drlocator_table(hdb);
@@ -9541,10 +10410,18 @@ static void test_ccpsearch(void)
     r = create_signature_table(hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "CCPSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -9697,8 +10574,14 @@ static void test_complocator(void)
     r = add_signature_entry(hdb, "'labocania', 'labocania', '', '', '', '', '', '', ''");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -9735,6 +10618,8 @@ static void test_complocator(void)
                        "{8B1034B7-BD5E-41ac-B52C-0105D3DFD74D}", NULL, FALSE);
     set_component_path("neosodon", MSIINSTALLCONTEXT_MACHINE,
                        "{0B499649-197A-48EF-93D2-AF1C17ED6E90}", NULL, FALSE);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "AppSearch");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -9928,8 +10813,14 @@ static void test_MsiGetSourcePath(void)
     r = MsiDatabaseCommit(hdb);
     ok(r == ERROR_SUCCESS , "Failed to commit database\n");
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -9971,6 +10862,20 @@ static void test_MsiGetSourcePath(void)
        "Expected path to be unchanged, got \"%s\"\n", path);
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
     /* try SourceDir */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
@@ -9990,6 +10895,13 @@ static void test_MsiGetSourcePath(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -10014,6 +10926,8 @@ static void test_MsiGetSourcePath(void)
     ok(!lstrcmpA(path, "kiwi"),
        "Expected path to be unchanged, got \"%s\"\n", path);
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "CostInitialize");
     ok(r == ERROR_SUCCESS, "cost init failed\n");
@@ -10275,6 +11189,31 @@ static void test_MsiGetSourcePath(void)
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
     ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
+    /* remove property */
+    r = MsiSetProperty(hpkg, "SourceDir", NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* try SourceDir again */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetSourcePath(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    /* set property to a valid directory */
+    r = MsiSetProperty(hpkg, "SOURCEDIR", cwd);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+
+    /* try SOURCEDIR again */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetSourcePath(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
+    ok(!lstrcmpA(path, "kiwi"),
+       "Expected path to be unchanged, got \"%s\"\n", path);
+    ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
+
     MsiCloseHandle(hpkg);
 
     /* compressed source */
@@ -10284,8 +11223,8 @@ static void test_MsiGetSourcePath(void)
 
     set_suminfo_prop(hdb, PID_WORDCOUNT, msidbSumInfoSourceTypeCompressed);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     /* try TARGETDIR */
     size = MAX_PATH;
@@ -10618,13 +11557,21 @@ static void test_shortlongsource(void)
 
     MsiDatabaseCommit(hdb);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
     CreateDirectoryA("one", NULL);
     CreateDirectoryA("four", NULL);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "CostInitialize");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -10758,8 +11705,8 @@ static void test_shortlongsource(void)
 
     set_suminfo_prop(hdb, PID_WORDCOUNT, msidbSumInfoSourceTypeSFN);
 
-    hpkg = package_from_db(hdb);
-    ok(hpkg, "failed to create package\n");
+    r = package_from_db(hdb, &hpkg);
+    ok(r == ERROR_SUCCESS, "failed to create package %u\n", r);
 
     MsiCloseHandle(hdb);
 
@@ -10900,7 +11847,7 @@ static void test_shortlongsource(void)
 static void test_sourcedir(void)
 {
     MSIHANDLE hdb, hpkg;
-    CHAR package[10];
+    CHAR package[12];
     CHAR path[MAX_PATH];
     CHAR cwd[MAX_PATH];
     CHAR subsrc[MAX_PATH];
@@ -10920,8 +11867,13 @@ static void test_sourcedir(void)
     r = add_directory_entry(hdb, "'TARGETDIR', '', 'SourceDir'");
     ok(r == S_OK, "failed\n");
 
-    sprintf(package, "#%i", hdb);
+    sprintf(package, "#%u", hdb);
     r = MsiOpenPackage(package, &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     /* properties only */
@@ -10941,6 +11893,8 @@ static void test_sourcedir(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
     ok(size == 0, "Expected 0, got %d\n", size);
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiDoAction(hpkg, "CostInitialize");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -10998,6 +11952,23 @@ static void test_sourcedir(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
     ok(size == 0, "Expected 0, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetSourcePath(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_DIRECTORY, "Expected ERROR_DIRECTORY, got %d\n", r);
+    ok(!lstrcmpA(path, "kiwi"), "Expected \"kiwi\", got \"%s\"\n", path);
+    ok(size == MAX_PATH, "Expected %d, got %d\n", MAX_PATH, size);
+
+    /* SOURCEDIR after calling MsiGetSourcePath */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    todo_wine {
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+    }
 
     r = MsiDoAction(hpkg, "ResolveSource");
     ok(r == ERROR_SUCCESS, "file cost failed\n");
@@ -11225,8 +12196,10 @@ static void test_sourcedir(void)
        "Expected path to be unchanged, got \"%s\"\n", path);
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
-    MsiCloseHandle(hdb);
     MsiCloseHandle(hpkg);
+
+error:
+    MsiCloseHandle(hdb);
     DeleteFileA(msifile);
 }
 
@@ -11358,11 +12331,9 @@ static void test_access(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     test_file_access(msifile, create_commit);
-
     MsiCloseHandle(hdb);
 
     test_file_access(msifile, create_close);
-
     DeleteFileA(msifile);
 
     r = MsiOpenDatabaseA(msifile, MSIDBOPEN_CREATEDIRECT, &hdb);
@@ -11374,11 +12345,9 @@ static void test_access(void)
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
 
     test_file_access(msifile, create_commit);
-
     MsiCloseHandle(hdb);
 
     test_file_access(msifile, create_close);
-
     DeleteFileA(msifile);
 }
 
@@ -11392,6 +12361,11 @@ static void test_emptypackage(void)
     UINT r;
 
     r = MsiOpenPackageA("", &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        return;
+    }
     todo_wine
     {
         ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -11556,6 +12530,7 @@ static void test_MsiGetProductProperty(void)
     LONG res;
     UINT r;
     SC_HANDLE scm;
+    REGSAM access = KEY_ALL_ACCESS;
 
     scm = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
     if (!scm && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
@@ -11569,6 +12544,9 @@ static void test_MsiGetProductProperty(void)
     lstrcatA(path, "\\");
 
     create_test_guid(prodcode, prod_squashed);
+
+    if (is_wow64)
+        access |= KEY_WOW64_64KEY;
 
     r = MsiOpenDatabase(msifile, MSIDBOPEN_CREATE, &hdb);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
@@ -11608,14 +12586,20 @@ static void test_MsiGetProductProperty(void)
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
-    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
+    res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &prodkey, NULL);
+    if (res == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(keypath, "Software\\Microsoft\\Windows\\CurrentVersion\\");
     lstrcatA(keypath, "Installer\\UserData\\S-1-5-18\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
-    res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
+    res = RegCreateKeyExA(HKEY_LOCAL_MACHINE, keypath, 0, NULL, 0, access, NULL, &userkey, NULL);
     if (res == ERROR_ACCESS_DENIED)
     {
         skip("Not enough rights to perform tests\n");
@@ -11625,7 +12609,7 @@ static void test_MsiGetProductProperty(void)
     }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    res = RegCreateKeyA(userkey, "InstallProperties", &props);
+    res = RegCreateKeyExA(userkey, "InstallProperties", 0, NULL, 0, access, NULL, &props, NULL);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     lstrcpyA(val, path);
@@ -11760,11 +12744,11 @@ static void test_MsiGetProductProperty(void)
     MsiCloseHandle(hprod);
 
     RegDeleteValueA(props, "LocalPackage");
-    RegDeleteKeyA(props, "");
+    delete_key(props, "", access);
     RegCloseKey(props);
-    RegDeleteKeyA(userkey, "");
+    delete_key(userkey, "", access);
     RegCloseKey(userkey);
-    RegDeleteKeyA(prodkey, "");
+    delete_key(prodkey, "", access);
     RegCloseKey(prodkey);
     DeleteFileA(msifile);
 }
@@ -11777,8 +12761,14 @@ static void test_MsiSetProperty(void)
     DWORD size;
     UINT r;
 
-    hpkg = package_from_db(create_package_db());
-    ok(hpkg != 0, "Expected a valid package\n");
+    r = package_from_db(create_package_db(), &hpkg);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        DeleteFile(msifile);
+        return;
+    }
+    ok(r == ERROR_SUCCESS, "Expected a valid package %u\n", r);
 
     /* invalid hInstall */
     r = MsiSetPropertyA(0, "Prop", "Val");
@@ -11894,51 +12884,31 @@ static void test_MsiApplyMultiplePatches(void)
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA(";", NULL, NULL);
-    todo_wine
-    {
-        if (type == DRIVE_FIXED)
-            ok(r == ERROR_PATH_NOT_FOUND,
-               "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
-        else
-            ok(r == ERROR_INVALID_NAME,
-               "Expected ERROR_INVALID_NAME, got %u\n", r);
-    }
+    if (type == DRIVE_FIXED)
+        todo_wine ok(r == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
+    else
+        ok(r == ERROR_INVALID_NAME, "Expected ERROR_INVALID_NAME, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA("  ;", NULL, NULL);
-    todo_wine
-    {
-        if (type == DRIVE_FIXED)
-            ok(r == ERROR_PATCH_PACKAGE_OPEN_FAILED,
-               "Expected ERROR_PATCH_PACKAGE_OPEN_FAILED, got %u\n", r);
-        else
-            ok(r == ERROR_INVALID_NAME,
-               "Expected ERROR_INVALID_NAME, got %u\n", r);
-    }
+    if (type == DRIVE_FIXED)
+        todo_wine ok(r == ERROR_PATCH_PACKAGE_OPEN_FAILED, "Expected ERROR_PATCH_PACKAGE_OPEN_FAILED, got %u\n", r);
+    else
+        ok(r == ERROR_INVALID_NAME, "Expected ERROR_INVALID_NAME, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA(";;", NULL, NULL);
-    todo_wine
-    {
-        if (type == DRIVE_FIXED)
-            ok(r == ERROR_PATH_NOT_FOUND,
-               "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
-        else
-            ok(r == ERROR_INVALID_NAME,
-               "Expected ERROR_INVALID_NAME, got %u\n", r);
-    }
+    if (type == DRIVE_FIXED)
+        todo_wine ok(r == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
+    else
+        ok(r == ERROR_INVALID_NAME, "Expected ERROR_INVALID_NAME, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA("nosuchpatchpackage;", NULL, NULL);
     todo_wine ok(r == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA(";nosuchpatchpackage", NULL, NULL);
-    todo_wine
-    {
-        if (type == DRIVE_FIXED)
-            ok(r == ERROR_PATH_NOT_FOUND,
-               "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
-        else
-            ok(r == ERROR_INVALID_NAME,
-               "Expected ERROR_INVALID_NAME, got %u\n", r);
-    }
+    if (type == DRIVE_FIXED)
+        todo_wine ok(r == ERROR_PATH_NOT_FOUND, "Expected ERROR_PATH_NOT_FOUND, got %u\n", r);
+    else
+        ok(r == ERROR_INVALID_NAME, "Expected ERROR_INVALID_NAME, got %u\n", r);
 
     r = pMsiApplyMultiplePatchesA("nosuchpatchpackage;nosuchpatchpackage", NULL, NULL);
     todo_wine ok(r == ERROR_FILE_NOT_FOUND, "Expected ERROR_FILE_NOT_FOUND, got %u\n", r);
@@ -11965,12 +12935,18 @@ START_TEST(package)
 
     init_functionpointers();
 
+    if (pIsWow64Process)
+        pIsWow64Process(GetCurrentProcess(), &is_wow64);
+
     GetCurrentDirectoryA(MAX_PATH, CURR_DIR);
 
     /* Create a restore point ourselves so we circumvent the multitude of restore points
      * that would have been created by all the installation and removal tests.
+     *
+     * This is not needed on version 5.0 where setting MSIFASTINSTALL prevents the
+     * creation of restore points.
      */
-    if (pSRSetRestorePointA)
+    if (pSRSetRestorePointA && !pMsiGetComponentPathExA)
     {
         memset(&status, 0, sizeof(status));
         ret = notify_system_change(BEGIN_NESTED_SYSTEM_CHANGE, &status);
@@ -12008,7 +12984,7 @@ START_TEST(package)
     test_MsiApplyMultiplePatches();
     test_MsiApplyPatch();
 
-    if (pSRSetRestorePointA && ret)
+    if (pSRSetRestorePointA && !pMsiGetComponentPathExA && ret)
     {
         ret = notify_system_change(END_NESTED_SYSTEM_CHANGE, &status);
         if (ret)

@@ -316,7 +316,7 @@ static void make_tmp_file(LPSTR path)
 static void test_retrieveObjectByUrl(void)
 {
     BOOL ret;
-    char tmpfile[MAX_PATH * 2], *ptr, url[MAX_PATH + 8];
+    char tmpfile[MAX_PATH * 2], url[MAX_PATH + 8];
     CRYPT_BLOB_ARRAY *pBlobArray;
     PCCERT_CONTEXT cert;
     PCCRL_CONTEXT crl;
@@ -332,17 +332,7 @@ static void test_retrieveObjectByUrl(void)
        GetLastError(), GetLastError());
 
     make_tmp_file(tmpfile);
-    ptr = strchr(tmpfile, ':');
-    if (ptr)
-        ptr += 2; /* skip colon and first slash */
-    else
-        ptr = tmpfile;
-    snprintf(url, sizeof(url), "file:///%s", ptr);
-    do {
-        ptr = strchr(url, '\\');
-        if (ptr)
-            *ptr = '/';
-    } while (ptr);
+    snprintf(url, sizeof(url), "file://%s", tmpfile);
 
     pBlobArray = (CRYPT_BLOB_ARRAY *)0xdeadbeef;
     ret = CryptRetrieveObjectByUrlA(url, NULL, 0, 0, (void **)&pBlobArray,
@@ -367,6 +357,7 @@ static void test_retrieveObjectByUrl(void)
     cert = (PCCERT_CONTEXT)0xdeadbeef;
     ret = CryptRetrieveObjectByUrlA(url, CONTEXT_OID_CERTIFICATE, 0, 0,
      (void **)&cert, NULL, NULL, NULL, NULL);
+    ok(ret, "CryptRetrieveObjectByUrlA failed: %d\n", GetLastError());
     ok(cert && cert != (PCCERT_CONTEXT)0xdeadbeef, "Expected a cert\n");
     if (cert && cert != (PCCERT_CONTEXT)0xdeadbeef)
         CertFreeCertificateContext(cert);
@@ -374,12 +365,9 @@ static void test_retrieveObjectByUrl(void)
     SetLastError(0xdeadbeef);
     ret = CryptRetrieveObjectByUrlA(url, CONTEXT_OID_CRL, 0, 0, (void **)&crl,
      NULL, NULL, NULL, NULL);
-    /* w2k3,XP, newer w2k: CRYPT_E_NO_MATCH, 95: OSS_DATA_ERROR */
-    ok(!ret && (GetLastError() == CRYPT_E_NO_MATCH ||
-                GetLastError() == CRYPT_E_ASN1_BADTAG ||
-                GetLastError() == OSS_DATA_ERROR),
-       "got 0x%x/%u (expected CRYPT_E_NO_MATCH or CRYPT_E_ASN1_BADTAG or "
-       "OSS_DATA_ERROR)\n", GetLastError(), GetLastError());
+    /* w2k3,XP, newer w2k: CRYPT_E_NO_MATCH */
+    ok(!ret && (GetLastError() == CRYPT_E_NO_MATCH),
+        "got 0x%x/%u (expected CRYPT_E_NO_MATCH)\n", GetLastError(), GetLastError());
 
     /* only newer versions of cryptnet do the cleanup */
     if(!ret && GetLastError() != CRYPT_E_ASN1_BADTAG &&
@@ -417,9 +405,8 @@ static void test_retrieveObjectByUrl(void)
     cert = (PCCERT_CONTEXT)0xdeadbeef;
     ret = CryptRetrieveObjectByUrlA(url, CONTEXT_OID_CERTIFICATE, 0, 0,
      (void **)&cert, NULL, NULL, NULL, &aux);
-    /* w2k: success, 9x: fail with E_INVALIDARG */
-    ok(ret || (GetLastError() == E_INVALIDARG),
-       "got %u with 0x%x/%u (expected '!=0' or '0' with E_INVALIDARG)\n",
+    /* w2k: success */
+    ok(ret, "got %u with 0x%x/%u (expected '!=0' or '0' with E_INVALIDARG)\n",
        ret, GetLastError(), GetLastError());
     if (cert && cert != (PCCERT_CONTEXT)0xdeadbeef)
         CertFreeCertificateContext(cert);
@@ -428,9 +415,8 @@ static void test_retrieveObjectByUrl(void)
     aux.cbSize = sizeof(aux);
     ret = CryptRetrieveObjectByUrlA(url, CONTEXT_OID_CERTIFICATE, 0, 0,
      (void **)&cert, NULL, NULL, NULL, &aux);
-    /* w2k: success, 9x: fail with E_INVALIDARG */
-    ok(ret || (GetLastError() == E_INVALIDARG),
-       "got %u with 0x%x/%u (expected '!=0' or '0' with E_INVALIDARG)\n",
+    /* w2k: success */
+    ok(ret, "got %u with 0x%x/%u (expected '!=0' or '0' with E_INVALIDARG)\n",
        ret, GetLastError(), GetLastError());
     if (!ret) {
         /* no more tests useful */
@@ -545,7 +531,7 @@ static const BYTE rootSignedCRL[] = {
 0xd5,0xbc,0xb0,0xd5,0xa5,0x9c,0x1b,0x72,0xc3,0x0f,0xa3,0xe3,0x3c,0xf0,0xc3,
 0x91,0xe8,0x93,0x4f,0xd4,0x2f };
 
-BOOL (WINAPI *pCertVerifyRevocation)(DWORD, DWORD, DWORD, void **, DWORD,
+static BOOL (WINAPI *pCertVerifyRevocation)(DWORD, DWORD, DWORD, void **, DWORD,
  PCERT_REVOCATION_PARA, PCERT_REVOCATION_STATUS);
 
 /* Wednesday, Oct 1, 2007 */
@@ -570,7 +556,7 @@ static void test_verifyRevocation(void)
     if (0)
     {
         /* Crash */
-        ret = pCertVerifyRevocation(0, 0, 0, NULL, 0, NULL, NULL);
+        pCertVerifyRevocation(0, 0, 0, NULL, 0, NULL, NULL);
     }
     SetLastError(0xdeadbeef);
     ret = pCertVerifyRevocation(0, 0, 0, NULL, 0, NULL, &status);

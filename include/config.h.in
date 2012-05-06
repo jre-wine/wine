@@ -21,6 +21,10 @@
 /* Define to 1 if you have the <AL/al.h> header file. */
 #undef HAVE_AL_AL_H
 
+/* Define to 1 if you have the <ApplicationServices/ApplicationServices.h>
+   header file. */
+#undef HAVE_APPLICATIONSERVICES_APPLICATIONSERVICES_H
+
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #undef HAVE_ARPA_INET_H
 
@@ -36,6 +40,9 @@
 /* Define to 1 if you have the <AudioToolbox/AudioConverter.h> header file. */
 #undef HAVE_AUDIOTOOLBOX_AUDIOCONVERTER_H
 
+/* Define to 1 if you have the <AudioUnit/AudioComponent.h> header file. */
+#undef HAVE_AUDIOUNIT_AUDIOCOMPONENT_H
+
 /* Define to 1 if you have the <AudioUnit/AudioUnit.h> header file. */
 #undef HAVE_AUDIOUNIT_AUDIOUNIT_H
 
@@ -45,6 +52,9 @@
 /* Define to 1 if you have the <audio/soundlib.h> header file. */
 #undef HAVE_AUDIO_SOUNDLIB_H
 
+/* Define to 1 if you have the `AUGraphAddNode' function. */
+#undef HAVE_AUGRAPHADDNODE
+
 /* Define to 1 if you have the <capi20.h> header file. */
 #undef HAVE_CAPI20_H
 
@@ -53,6 +63,9 @@
 
 /* Define to 1 if you have the `chsize' function. */
 #undef HAVE_CHSIZE
+
+/* Define to 1 if you have the <CL/cl.h> header file. */
+#undef HAVE_CL_CL_H
 
 /* Define to 1 if you have the <CoreAudio/CoreAudio.h> header file. */
 #undef HAVE_COREAUDIO_COREAUDIO_H
@@ -193,6 +206,9 @@
 /* Define to 1 if you have the `getaddrinfo' function. */
 #undef HAVE_GETADDRINFO
 
+/* Define to 1 if you have the `getattrlist' function. */
+#undef HAVE_GETATTRLIST
+
 /* Define to 1 if you have the `getdirentries' function. */
 #undef HAVE_GETDIRENTRIES
 
@@ -223,8 +239,8 @@
 /* Define to 1 if you have the `getservbyport' function. */
 #undef HAVE_GETSERVBYPORT
 
-/* Define to 1 if you have the `gettid' function. */
-#undef HAVE_GETTID
+/* Define to 1 if you have the <gettext-po.h> header file. */
+#undef HAVE_GETTEXT_PO_H
 
 /* Define to 1 if you have the `gettimeofday' function. */
 #undef HAVE_GETTIMEOFDAY
@@ -349,11 +365,8 @@
 /* Define to 1 if you have the `ldap_parse_vlv_control' function. */
 #undef HAVE_LDAP_PARSE_VLV_CONTROL
 
-/* Define if you have libaudioIO */
-#undef HAVE_LIBAUDIOIO
-
-/* Define to 1 if you have the <libaudioio.h> header file. */
-#undef HAVE_LIBAUDIOIO_H
+/* Define to 1 if you have the `gettextpo' library (-lgettextpo). */
+#undef HAVE_LIBGETTEXTPO
 
 /* Define to 1 if you have the `i386' library (-li386). */
 #undef HAVE_LIBI386
@@ -369,6 +382,12 @@
 
 /* Define to 1 if you have the <libxml/parser.h> header file. */
 #undef HAVE_LIBXML_PARSER_H
+
+/* Define to 1 if you have the <libxml/SAX2.h> header file. */
+#undef HAVE_LIBXML_SAX2_H
+
+/* Define to 1 if you have the <libxml/xmlsave.h> header file. */
+#undef HAVE_LIBXML_XMLSAVE_H
 
 /* Define if you have the X Shape extension */
 #undef HAVE_LIBXSHAPE
@@ -462,6 +481,9 @@
 
 /* Define to 1 if you have the <mach-o/dyld_images.h> header file. */
 #undef HAVE_MACH_O_DYLD_IMAGES_H
+
+/* Define to 1 if you have the <mach-o/loader.h> header file. */
+#undef HAVE_MACH_O_LOADER_H
 
 /* Define to 1 if you have the <mach-o/nlist.h> header file. */
 #undef HAVE_MACH_O_NLIST_H
@@ -574,6 +596,9 @@
 /* Define to 1 if you have the <OpenAL/al.h> header file. */
 #undef HAVE_OPENAL_AL_H
 
+/* Define to 1 if you have the <OpenCL/opencl.h> header file. */
+#undef HAVE_OPENCL_OPENCL_H
+
 /* Define if OpenGL is present on the system */
 #undef HAVE_OPENGL
 
@@ -648,6 +673,9 @@
 
 /* Define to 1 if you have the `pwrite' function. */
 #undef HAVE_PWRITE
+
+/* Define to 1 if you have the <QuickTime/ImageCompression.h> header file. */
+#undef HAVE_QUICKTIME_IMAGECOMPRESSION_H
 
 /* Define to 1 if you have the `readdir' function. */
 #undef HAVE_READDIR
@@ -861,6 +889,9 @@
 
 /* Define to 1 if you have the <sys/asoundlib.h> header file. */
 #undef HAVE_SYS_ASOUNDLIB_H
+
+/* Define to 1 if you have the <sys/attr.h> header file. */
+#undef HAVE_SYS_ATTR_H
 
 /* Define to 1 if you have the <sys/cdio.h> header file. */
 #undef HAVE_SYS_CDIO_H
@@ -1099,11 +1130,23 @@
 /* Define if you have the XKB extension */
 #undef HAVE_XKB
 
+/* Define if libxml2 has the xmlDocProperties enum */
+#undef HAVE_XMLDOC_PROPERTIES
+
+/* Define if libxml2 has the xmlFirstElementChild function */
+#undef HAVE_XMLFIRSTELEMENTCHILD
+
 /* Define if libxml2 has the xmlNewDocPI function */
 #undef HAVE_XMLNEWDOCPI
 
 /* Define if libxml2 has the xmlReadMemory function */
 #undef HAVE_XMLREADMEMORY
+
+/* Define if libxml2 has the xmlSchemaSetParserStructuredErrors function */
+#undef HAVE_XMLSCHEMASSETPARSERSTRUCTUREDERRORS
+
+/* Define if libxml2 has the xmlSchemaSetValidStructuredErrors function */
+#undef HAVE_XMLSCHEMASSETVALIDSTRUCTUREDERRORS
 
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM

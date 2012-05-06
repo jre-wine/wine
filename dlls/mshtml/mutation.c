@@ -36,13 +36,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-enum {
-    MUTATION_BINDTOTREE,
-    MUTATION_COMMENT,
-    MUTATION_ENDLOAD,
-    MUTATION_SCRIPT
-};
-
 #define IE_MAJOR_VERSION 7
 #define IE_MINOR_VERSION 0
 
@@ -182,113 +175,78 @@ static BOOL handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *commen
     return TRUE;
 }
 
-static void add_script_runner(HTMLDocumentNode *This)
+static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_iface, nsISupports *arg2)
 {
-    nsIDOMNSDocument *nsdoc;
+    const PRUnichar *comment;
+    nsIDOMComment *nscomment;
+    nsAString comment_str;
+    BOOL remove_comment;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(This->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
+    nsres = nsISupports_QueryInterface(comment_iface, &IID_nsIDOMComment, (void**)&nscomment);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSDocument: %08x\n", nsres);
-        return;
+        ERR("Could not get nsIDOMComment iface:%08x\n", nsres);
+        return nsres;
     }
 
-    nsIDOMNSDocument_WineAddScriptRunner(nsdoc, NSRUNNABLE(This));
-    nsIDOMNSDocument_Release(nsdoc);
-}
+    nsAString_Init(&comment_str, NULL);
+    nsres = nsIDOMComment_GetData(nscomment, &comment_str);
+    if(NS_FAILED(nsres))
+        return nsres;
 
-#define NSRUNNABLE_THIS(iface) DEFINE_THIS(HTMLDocumentNode, IRunnable, iface)
+    nsAString_GetData(&comment_str, &comment);
+    remove_comment = handle_insert_comment(doc, comment);
+    nsAString_Finish(&comment_str);
 
-static nsresult NSAPI nsRunnable_QueryInterface(nsIRunnable *iface,
-        nsIIDRef riid, nsQIResult result)
-{
-    HTMLDocumentNode *This = NSRUNNABLE_THIS(iface);
+    if(remove_comment) {
+        nsIDOMNode *nsparent, *tmp;
+        nsAString magic_str;
 
-    if(IsEqualGUID(riid, &IID_nsISupports)) {
-        TRACE("(%p)->(IID_nsISupports %p)\n", This, result);
-        *result = NSRUNNABLE(This);
-    }else if(IsEqualGUID(riid, &IID_nsIRunnable)) {
-        TRACE("(%p)->(IID_nsIRunnable %p)\n", This, result);
-        *result = NSRUNNABLE(This);
-    }else {
-        *result = NULL;
-        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), result);
-        return NS_NOINTERFACE;
+        static const PRUnichar remove_comment_magicW[] =
+            {'#','!','w','i','n','e', 'r','e','m','o','v','e','!','#',0};
+
+        nsAString_InitDepend(&magic_str, remove_comment_magicW);
+        nsres = nsIDOMComment_SetData(nscomment, &magic_str);
+        nsAString_Finish(&magic_str);
+        if(NS_FAILED(nsres))
+            ERR("SetData failed: %08x\n", nsres);
+
+        nsIDOMComment_GetParentNode(nscomment, &nsparent);
+        if(nsparent) {
+            nsIDOMNode_RemoveChild(nsparent, (nsIDOMNode*)nscomment, &tmp);
+            nsIDOMNode_Release(nsparent);
+            nsIDOMNode_Release(tmp);
+        }
     }
 
-    nsISupports_AddRef((nsISupports*)*result);
+    nsIDOMComment_Release(nscomment);
     return NS_OK;
 }
 
-static nsrefcnt NSAPI nsRunnable_AddRef(nsIRunnable *iface)
-{
-    HTMLDocumentNode *This = NSRUNNABLE_THIS(iface);
-    return htmldoc_addref(&This->basedoc);
-}
-
-static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
-{
-    HTMLDocumentNode *This = NSRUNNABLE_THIS(iface);
-    return htmldoc_release(&This->basedoc);
-}
-
-static void push_mutation_queue(HTMLDocumentNode *doc, DWORD type, nsISupports *nsiface)
-{
-    mutation_queue_t *elem;
-
-    elem = heap_alloc(sizeof(mutation_queue_t));
-    if(!elem)
-        return;
-
-    elem->next = NULL;
-    elem->type = type;
-    elem->nsiface = nsiface;
-    if(nsiface)
-        nsISupports_AddRef(nsiface);
-
-    if(doc->mutation_queue_tail) {
-        doc->mutation_queue_tail = doc->mutation_queue_tail->next = elem;
-    }else {
-        doc->mutation_queue = doc->mutation_queue_tail = elem;
-        add_script_runner(doc);
-    }
-}
-
-static void pop_mutation_queue(HTMLDocumentNode *doc)
-{
-    mutation_queue_t *tmp = doc->mutation_queue;
-
-    if(!tmp)
-        return;
-
-    doc->mutation_queue = tmp->next;
-    if(!tmp->next)
-        doc->mutation_queue_tail = NULL;
-
-    if(tmp->nsiface)
-        nsISupports_Release(tmp->nsiface);
-    heap_free(tmp);
-}
-
-static void bind_to_tree(HTMLDocumentNode *doc, nsISupports *nsiface)
+static nsresult run_bind_to_tree(HTMLDocumentNode *doc, nsISupports *nsiface, nsISupports *arg2)
 {
     nsIDOMNode *nsnode;
     HTMLDOMNode *node;
     nsresult nsres;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p)\n", doc, nsiface);
 
     nsres = nsISupports_QueryInterface(nsiface, &IID_nsIDOMNode, (void**)&nsnode);
     if(NS_FAILED(nsres))
-        return;
+        return nsres;
 
-    node = get_node(doc, nsnode, TRUE);
+    hres = get_node(doc, nsnode, TRUE, &node);
     nsIDOMNode_Release(nsnode);
-    if(!node) {
+    if(FAILED(hres)) {
         ERR("Could not get node\n");
-        return;
+        return nsres;
     }
 
     if(node->vtbl->bind_to_tree)
         node->vtbl->bind_to_tree(node);
+
+    return nsres;
 }
 
 /* Calls undocumented 69 cmd of CGID_Explorer */
@@ -312,10 +270,8 @@ static void call_explorer_69(HTMLDocumentObj *doc)
         FIXME("handle result\n");
 }
 
-static void parse_complete_proc(task_t *task)
+static void parse_complete(HTMLDocumentObj *doc)
 {
-    HTMLDocumentObj *doc = ((docobj_task_t*)task)->doc;
-
     TRACE("(%p)\n", doc);
 
     if(doc->usermode == EDITMODE)
@@ -328,127 +284,122 @@ static void parse_complete_proc(task_t *task)
     call_explorer_69(doc);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
-
-    set_ready_state(doc->basedoc.window, READYSTATE_INTERACTIVE);
 }
 
-static void handle_end_load(HTMLDocumentNode *This)
+static nsresult run_end_load(HTMLDocumentNode *This, nsISupports *arg1, nsISupports *arg2)
 {
-    docobj_task_t *task;
-
-    TRACE("\n");
+    TRACE("(%p)\n", This);
 
     if(!This->basedoc.doc_obj)
-        return;
+        return NS_OK;
 
-    if(This != This->basedoc.doc_obj->basedoc.doc_node) {
-        set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
-        return;
+    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
+        /*
+         * This should be done in the worker thread that parses HTML,
+         * but we don't have such thread (Gecko parses HTML for us).
+         */
+        parse_complete(This->basedoc.doc_obj);
     }
 
-    task = heap_alloc(sizeof(docobj_task_t));
-    if(!task)
-        return;
+    set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
+    return NS_OK;
+}
 
-    task->doc = This->basedoc.doc_obj;
+static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_iface, nsISupports *arg)
+{
+    nsIDOMHTMLScriptElement *nsscript;
+    nsresult nsres;
 
-    /*
-     * This should be done in the worker thread that parses HTML,
-     * but we don't have such thread (Gecko parses HTML for us).
-     */
-    push_task(&task->header, &parse_complete_proc, This->basedoc.doc_obj->basedoc.task_magic);
+    TRACE("(%p)->(%p)\n", doc, script_iface);
+
+    nsres = nsISupports_QueryInterface(script_iface, &IID_nsIDOMHTMLScriptElement, (void**)&nsscript);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMHTMLScriptElement: %08x\n", nsres);
+        return nsres;
+    }
+
+    doc_insert_script(doc->basedoc.window, nsscript);
+    nsIDOMHTMLScriptElement_Release(nsscript);
+    return NS_OK;
+}
+
+typedef struct nsRunnable nsRunnable;
+
+typedef nsresult (*runnable_proc_t)(HTMLDocumentNode*,nsISupports*,nsISupports*);
+
+struct nsRunnable {
+    nsIRunnable  nsIRunnable_iface;
+
+    LONG ref;
+
+    runnable_proc_t proc;
+
+    HTMLDocumentNode *doc;
+    nsISupports *arg1;
+    nsISupports *arg2;
+};
+
+static inline nsRunnable *impl_from_nsIRunnable(nsIRunnable *iface)
+{
+    return CONTAINING_RECORD(iface, nsRunnable, nsIRunnable_iface);
+}
+
+static nsresult NSAPI nsRunnable_QueryInterface(nsIRunnable *iface,
+        nsIIDRef riid, void **result)
+{
+    nsRunnable *This = impl_from_nsIRunnable(iface);
+
+    if(IsEqualGUID(riid, &IID_nsISupports)) {
+        TRACE("(%p)->(IID_nsISupports %p)\n", This, result);
+        *result = &This->nsIRunnable_iface;
+    }else if(IsEqualGUID(riid, &IID_nsIRunnable)) {
+        TRACE("(%p)->(IID_nsIRunnable %p)\n", This, result);
+        *result = &This->nsIRunnable_iface;
+    }else {
+        *result = NULL;
+        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), result);
+        return NS_NOINTERFACE;
+    }
+
+    nsISupports_AddRef((nsISupports*)*result);
+    return NS_OK;
+}
+
+static nsrefcnt NSAPI nsRunnable_AddRef(nsIRunnable *iface)
+{
+    nsRunnable *This = impl_from_nsIRunnable(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
+{
+    nsRunnable *This = impl_from_nsIRunnable(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        htmldoc_release(&This->doc->basedoc);
+        if(This->arg1)
+            nsISupports_Release(This->arg1);
+        if(This->arg2)
+            nsISupports_Release(This->arg2);
+        heap_free(This);
+    }
+
+    return ref;
 }
 
 static nsresult NSAPI nsRunnable_Run(nsIRunnable *iface)
 {
-    HTMLDocumentNode *This = NSRUNNABLE_THIS(iface);
-    nsresult nsres;
+    nsRunnable *This = impl_from_nsIRunnable(iface);
 
-    TRACE("(%p)\n", This);
-
-    while(This->mutation_queue) {
-        switch(This->mutation_queue->type) {
-        case MUTATION_BINDTOTREE:
-            bind_to_tree(This, This->mutation_queue->nsiface);
-            break;
-
-        case MUTATION_COMMENT: {
-            nsIDOMComment *nscomment;
-            nsAString comment_str;
-            BOOL remove_comment = FALSE;
-
-            nsres = nsISupports_QueryInterface(This->mutation_queue->nsiface, &IID_nsIDOMComment, (void**)&nscomment);
-            if(NS_FAILED(nsres)) {
-                ERR("Could not get nsIDOMComment iface:%08x\n", nsres);
-                return NS_OK;
-            }
-
-            nsAString_Init(&comment_str, NULL);
-            nsres = nsIDOMComment_GetData(nscomment, &comment_str);
-            if(NS_SUCCEEDED(nsres)) {
-                const PRUnichar *comment;
-
-                nsAString_GetData(&comment_str, &comment);
-                remove_comment = handle_insert_comment(This, comment);
-            }
-
-            nsAString_Finish(&comment_str);
-
-            if(remove_comment) {
-                nsIDOMNode *nsparent, *tmp;
-                nsAString magic_str;
-
-                static const PRUnichar remove_comment_magicW[] =
-                    {'#','!','w','i','n','e', 'r','e','m','o','v','e','!','#',0};
-
-                nsAString_InitDepend(&magic_str, remove_comment_magicW);
-                nsres = nsIDOMComment_SetData(nscomment, &magic_str);
-                nsAString_Finish(&magic_str);
-                if(NS_FAILED(nsres))
-                    ERR("SetData failed: %08x\n", nsres);
-
-                nsIDOMComment_GetParentNode(nscomment, &nsparent);
-                if(nsparent) {
-                    nsIDOMNode_RemoveChild(nsparent, (nsIDOMNode*)nscomment, &tmp);
-                    nsIDOMNode_Release(nsparent);
-                    nsIDOMNode_Release(tmp);
-                }
-            }
-
-            nsIDOMComment_Release(nscomment);
-            break;
-        }
-
-        case MUTATION_ENDLOAD:
-            handle_end_load(This);
-            break;
-
-        case MUTATION_SCRIPT: {
-            nsIDOMHTMLScriptElement *nsscript;
-
-            nsres = nsISupports_QueryInterface(This->mutation_queue->nsiface, &IID_nsIDOMHTMLScriptElement,
-                                               (void**)&nsscript);
-            if(NS_FAILED(nsres)) {
-                ERR("Could not get nsIDOMHTMLScriptElement: %08x\n", nsres);
-                break;
-            }
-
-            doc_insert_script(This->basedoc.window, nsscript);
-            nsIDOMHTMLScriptElement_Release(nsscript);
-            break;
-        }
-
-        default:
-            ERR("invalid type %d\n", This->mutation_queue->type);
-        }
-
-        pop_mutation_queue(This);
-    }
-
-    return S_OK;
+    return This->proc(This->doc, This->arg1, This->arg2);
 }
-
-#undef NSRUNNABLE_THIS
 
 static const nsIRunnableVtbl nsRunnableVtbl = {
     nsRunnable_QueryInterface,
@@ -457,22 +408,61 @@ static const nsIRunnableVtbl nsRunnableVtbl = {
     nsRunnable_Run
 };
 
-#define NSDOCOBS_THIS(iface) DEFINE_THIS(HTMLDocumentNode, IDocumentObserver, iface)
+static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsISupports *arg1, nsISupports *arg2)
+{
+    nsIDOMNSDocument *nsdoc;
+    nsRunnable *runnable;
+    nsresult nsres;
+
+    runnable = heap_alloc_zero(sizeof(*runnable));
+    if(!runnable)
+        return;
+
+    runnable->nsIRunnable_iface.lpVtbl = &nsRunnableVtbl;
+    runnable->ref = 1;
+
+    htmldoc_addref(&This->basedoc);
+    runnable->doc = This;
+    runnable->proc = proc;
+
+    if(arg1)
+        nsISupports_AddRef(arg1);
+    runnable->arg1 = arg1;
+
+    if(arg2)
+        nsISupports_AddRef(arg2);
+    runnable->arg2 = arg2;
+
+    nsres = nsIDOMHTMLDocument_QueryInterface(This->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
+    if(NS_SUCCEEDED(nsres)) {
+        nsIDOMNSDocument_WineAddScriptRunner(nsdoc, &runnable->nsIRunnable_iface);
+        nsIDOMNSDocument_Release(nsdoc);
+    }else {
+        ERR("Could not get nsIDOMNSDocument: %08x\n", nsres);
+    }
+
+    nsIRunnable_Release(&runnable->nsIRunnable_iface);
+}
+
+static inline HTMLDocumentNode *impl_from_nsIDocumentObserver(nsIDocumentObserver *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDocumentNode, nsIDocumentObserver_iface);
+}
 
 static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
 
     if(IsEqualGUID(&IID_nsISupports, riid)) {
         TRACE("(%p)->(IID_nsISupports, %p)\n", This, result);
-        *result = NSDOCOBS(This);
+        *result = &This->nsIDocumentObserver_iface;
     }else if(IsEqualGUID(&IID_nsIMutationObserver, riid)) {
         TRACE("(%p)->(IID_nsIMutationObserver %p)\n", This, result);
-        *result = NSDOCOBS(This);
+        *result = &This->nsIDocumentObserver_iface;
     }else if(IsEqualGUID(&IID_nsIDocumentObserver, riid)) {
         TRACE("(%p)->(IID_nsIDocumentObserver %p)\n", This, result);
-        *result = NSDOCOBS(This);
+        *result = &This->nsIDocumentObserver_iface;
     }else {
         *result = NULL;
         TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), result);
@@ -485,13 +475,13 @@ static nsresult NSAPI nsDocumentObserver_QueryInterface(nsIDocumentObserver *ifa
 
 static nsrefcnt NSAPI nsDocumentObserver_AddRef(nsIDocumentObserver *iface)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
     return htmldoc_addref(&This->basedoc);
 }
 
 static nsrefcnt NSAPI nsDocumentObserver_Release(nsIDocumentObserver *iface)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
     return htmldoc_release(&This->basedoc);
 }
 
@@ -511,12 +501,12 @@ static void NSAPI nsDocumentObserver_AttributeWillChange(nsIDocumentObserver *if
 }
 
 static void NSAPI nsDocumentObserver_AttributeChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContent, PRInt32 aNameSpaceID, nsIAtom *aAttribute, PRInt32 aModType, PRUint32 aStateMask)
+        nsIContent *aContent, PRInt32 aNameSpaceID, nsIAtom *aAttribute, PRInt32 aModType)
 {
 }
 
 static void NSAPI nsDocumentObserver_ContentAppended(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContainer, PRInt32 aNewIndexInContainer)
+        nsIContent *aContainer, nsIContent *aFirstNewContent, PRInt32 aNewIndexInContainer)
 {
 }
 
@@ -526,7 +516,8 @@ static void NSAPI nsDocumentObserver_ContentInserted(nsIDocumentObserver *iface,
 }
 
 static void NSAPI nsDocumentObserver_ContentRemoved(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContainer, nsIContent *aChild, PRInt32 aIndexInContainer)
+        nsIContent *aContainer, nsIContent *aChild, PRInt32 aIndexInContainer,
+        nsIContent *aProviousSibling)
 {
 }
 
@@ -554,16 +545,24 @@ static void NSAPI nsDocumentObserver_BeginLoad(nsIDocumentObserver *iface, nsIDo
 
 static void NSAPI nsDocumentObserver_EndLoad(nsIDocumentObserver *iface, nsIDocument *aDocument)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
 
-    TRACE("\n");
+    TRACE("(%p)\n", This);
+
+    if(This->skip_mutation_notif)
+        return;
 
     This->content_ready = TRUE;
-    push_mutation_queue(This, MUTATION_ENDLOAD, NULL);
+    add_script_runner(This, run_end_load, NULL, NULL);
 }
 
 static void NSAPI nsDocumentObserver_ContentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
         nsIContent *aContent1, nsIContent *aContent2, PRInt32 aStateMask)
+{
+}
+
+static void NSAPI nsDocumentObserver_DocumentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
+        PRInt32 aStateMask)
 {
 }
 
@@ -600,7 +599,7 @@ static void NSAPI nsDocumentObserver_StyleRuleRemoved(nsIDocumentObserver *iface
 static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, nsIDocument *aDocument,
         nsIContent *aContent)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
     nsIDOMHTMLIFrameElement *nsiframe;
     nsIDOMHTMLFrameElement *nsframe;
     nsIDOMComment *nscomment;
@@ -619,7 +618,7 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
     if(NS_SUCCEEDED(nsres)) {
         TRACE("comment node\n");
 
-        push_mutation_queue(This, MUTATION_COMMENT, (nsISupports*)nscomment);
+        add_script_runner(This, run_insert_comment, (nsISupports*)nscomment, NULL);
         nsIDOMComment_Release(nscomment);
     }
 
@@ -627,7 +626,7 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
     if(NS_SUCCEEDED(nsres)) {
         TRACE("iframe node\n");
 
-        push_mutation_queue(This, MUTATION_BINDTOTREE, (nsISupports*)nsiframe);
+        add_script_runner(This, run_bind_to_tree, (nsISupports*)nsiframe, NULL);
         nsIDOMHTMLIFrameElement_Release(nsiframe);
     }
 
@@ -635,7 +634,7 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
     if(NS_SUCCEEDED(nsres)) {
         TRACE("frame node\n");
 
-        push_mutation_queue(This, MUTATION_BINDTOTREE, (nsISupports*)nsframe);
+        add_script_runner(This, run_bind_to_tree, (nsISupports*)nsframe, NULL);
         nsIDOMHTMLFrameElement_Release(nsframe);
     }
 }
@@ -643,7 +642,7 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 static void NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *iface, nsIContent *aContent,
         PRBool aHaveNotified)
 {
-    HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
+    HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
     nsIDOMHTMLScriptElement *nsscript;
     nsresult nsres;
 
@@ -653,12 +652,10 @@ static void NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *ifa
     if(NS_SUCCEEDED(nsres)) {
         TRACE("script node\n");
 
-        push_mutation_queue(This, MUTATION_SCRIPT, (nsISupports*)nsscript);
+        add_script_runner(This, run_insert_script, (nsISupports*)nsscript, NULL);
         nsIDOMHTMLScriptElement_Release(nsscript);
     }
 }
-
-#undef NSMUTATIONOBS_THIS
 
 static const nsIDocumentObserverVtbl nsDocumentObserverVtbl = {
     nsDocumentObserver_QueryInterface,
@@ -678,6 +675,7 @@ static const nsIDocumentObserverVtbl nsDocumentObserverVtbl = {
     nsDocumentObserver_BeginLoad,
     nsDocumentObserver_EndLoad,
     nsDocumentObserver_ContentStatesChanged,
+    nsDocumentObserver_DocumentStatesChanged,
     nsDocumentObserver_StyleSheetAdded,
     nsDocumentObserver_StyleSheetRemoved,
     nsDocumentObserver_StyleSheetApplicableStateChanged,
@@ -693,8 +691,7 @@ void init_mutation(HTMLDocumentNode *doc)
     nsIDOMNSDocument *nsdoc;
     nsresult nsres;
 
-    doc->lpIDocumentObserverVtbl  = &nsDocumentObserverVtbl;
-    doc->lpIRunnableVtbl          = &nsRunnableVtbl;
+    doc->nsIDocumentObserver_iface.lpVtbl = &nsDocumentObserverVtbl;
 
     nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
@@ -702,7 +699,7 @@ void init_mutation(HTMLDocumentNode *doc)
         return;
     }
 
-    nsIDOMNSDocument_WineAddObserver(nsdoc, NSDOCOBS(doc));
+    nsIDOMNSDocument_WineAddObserver(nsdoc, &doc->nsIDocumentObserver_iface);
     nsIDOMNSDocument_Release(nsdoc);
 }
 
@@ -717,6 +714,6 @@ void release_mutation(HTMLDocumentNode *doc)
         return;
     }
 
-    nsIDOMNSDocument_WineRemoveObserver(nsdoc, NSDOCOBS(doc));
+    nsIDOMNSDocument_WineRemoveObserver(nsdoc, &doc->nsIDocumentObserver_iface);
     nsIDOMNSDocument_Release(nsdoc);
 }

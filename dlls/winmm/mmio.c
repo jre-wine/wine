@@ -79,7 +79,7 @@ static LRESULT CALLBACK mmioDosIOProc(LPMMIOINFO lpmmioinfo, UINT uMessage,
                 lpmmioinfo->adwInfo[0] = OpenFile(szFileName, &ofs, lpmmioinfo->dwFlags & 0xFFFF);
             }
 	    if (lpmmioinfo->adwInfo[0] == HFILE_ERROR)
-		ret = MMIOERR_CANNOTOPEN;
+		ret = MMIOERR_FILENOTFOUND;
 	}
 	break;
 
@@ -383,39 +383,40 @@ static FOURCC MMIO_ParseExtA(LPCSTR szFileName)
     LPSTR extEnd;
     LPSTR extStart;
 
+    CHAR ext[5];
+
     TRACE("(%s)\n", debugstr_a(szFileName));
 
     if (!szFileName)
 	return ret;
 
-    /* Find the last '.' */
-    extStart = strrchr(szFileName,'.');
+    /* Find the last '+' */
+    extEnd = strrchr(szFileName,'+');
 
-    if (!extStart) {
-         ERR("No . in szFileName: %s\n", debugstr_a(szFileName));
+    if (!extEnd) {
+         /* No + so just an extension */
+         return ret;
     } else {
-        CHAR ext[5];
-
-        /* Find the '+' afterwards */
-        extEnd = strchr(extStart,'+');
-        if (extEnd) {
-
-            if (extEnd - extStart - 1 > 4)
-                WARN("Extension length > 4\n");
-            lstrcpynA(ext, extStart + 1, min(extEnd-extStart,5));
-
-        } else {
-            /* No + so just an extension */
-            if (strlen(extStart) > 4) {
-                WARN("Extension length > 4\n");
-            }
-            lstrcpynA(ext, extStart + 1, 5);
+        /* Find the first '.' before '+' */
+        extStart = extEnd - 1;
+        while (extStart >= szFileName && *extStart != '.') {
+            extStart--;
         }
-        TRACE("Got extension: %s\n", debugstr_a(ext));
-
-        /* FOURCC codes identifying file-extensions must be uppercase */
-        ret = mmioStringToFOURCCA(ext, MMIO_TOUPPER);
+        if (extStart < szFileName) {
+            ERR("No extension in szFileName: %s\n", debugstr_a(szFileName));
+            return ret;
+        }
     }
+
+    if (extEnd - extStart - 1 > 4)
+        WARN("Extension length > 4\n");
+    lstrcpynA(ext, extStart + 1, min(extEnd-extStart,5));
+
+    TRACE("Got extension: %s\n", debugstr_a(ext));
+
+    /* FOURCC codes identifying file-extensions must be uppercase */
+    ret = mmioStringToFOURCCA(ext, MMIO_TOUPPER);
+
     return ret;
 }
 
@@ -584,7 +585,7 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
     MMIOINFO    	mmioinfo;
     DWORD               pos;
 
-    TRACE("('%s', %p, %08X, %s);\n", szFileName, refmminfo, dwOpenFlags, is_unicode ? "unicode" : "ansi");
+    TRACE("(%s, %p, %08X, %s);\n", debugstr_a(szFileName), refmminfo, dwOpenFlags, is_unicode ? "unicode" : "ansi");
 
     if (!refmminfo) {
         refmminfo = &mmioinfo;
@@ -616,13 +617,13 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
     if (refmminfo->fccIOProc == 0 && refmminfo->pIOProc == NULL) {
 	wm->info.fccIOProc = MMIO_ParseExtA(szFileName);
 	/* Handle any unhandled/error case. Assume DOS file */
-	if (wm->info.fccIOProc == 0)
+	if (wm->info.fccIOProc == 0) {
 	    wm->info.fccIOProc = FOURCC_DOS;
-	if (!(wm->ioProc = MMIO_FindProcNode(wm->info.fccIOProc))) {
-	    /* If not found, retry with FOURCC_DOS */
-	    wm->info.fccIOProc = FOURCC_DOS;
-	    if (!(wm->ioProc = MMIO_FindProcNode(wm->info.fccIOProc)))
-		goto error2;
+	    wm->ioProc = &defaultProcs[0];
+	}
+	else if (!(wm->ioProc = MMIO_FindProcNode(wm->info.fccIOProc))) {
+	    /* If not found, assume DOS file */
+	    wm->ioProc = &defaultProcs[0];
 	}
 	wm->bTmpIOProc = FALSE;
     }
@@ -1058,7 +1059,7 @@ FOURCC WINAPI mmioStringToFOURCCA(LPCSTR sz, UINT uFlags)
     /* Pad with spaces */
     while (i < 4) cc[i++] = ' ';
 
-    TRACE("Got '%.4s'\n",cc);
+    TRACE("Got %s\n",debugstr_an(cc,4));
     return mmioFOURCC(cc[0],cc[1],cc[2],cc[3]);
 }
 
@@ -1173,8 +1174,8 @@ MMRESULT WINAPI mmioDescend(HMMIO hmmio, LPMMCKINFO lpck,
         srchType = lpck->fccType;
     }
 
-    TRACE("searching for %4.4s.%4.4s\n",
-          (LPCSTR)&srchCkId, srchType ? (LPCSTR)&srchType : "any");
+    TRACE("searching for %s.%s\n",
+          debugstr_an((LPCSTR)&srchCkId, 4), srchType ? debugstr_an((LPCSTR)&srchType, 4) : "<any>");
 
     while (TRUE)
     {
@@ -1189,9 +1190,9 @@ MMRESULT WINAPI mmioDescend(HMMIO hmmio, LPMMCKINFO lpck,
         }
 
         lpck->dwDataOffset = dwOldPos + 2 * sizeof(DWORD);
-        TRACE("ckid=%4.4s fcc=%4.4s cksize=%08X !\n",
-              (LPCSTR)&lpck->ckid,
-              srchType ? (LPCSTR)&lpck->fccType:"<na>",
+        TRACE("ckid=%s fcc=%s cksize=%08X !\n",
+              debugstr_an((LPCSTR)&lpck->ckid, 4),
+              srchType ? debugstr_an((LPCSTR)&lpck->fccType, 4) : "<na>",
               lpck->cksize);
         if ( (!srchCkId || (srchCkId == lpck->ckid)) &&
              (!srchType || (srchType == lpck->fccType)) )
@@ -1213,9 +1214,9 @@ MMRESULT WINAPI mmioDescend(HMMIO hmmio, LPMMCKINFO lpck,
 	mmioSeek(hmmio, lpck->dwDataOffset, SEEK_SET);
 	lpck->fccType = 0;
     }
-    TRACE("lpck: ckid=%.4s, cksize=%d, dwDataOffset=%d fccType=%08X (%.4s)!\n",
-	  (LPSTR)&lpck->ckid, lpck->cksize, lpck->dwDataOffset,
-	  lpck->fccType, srchType?(LPSTR)&lpck->fccType:"");
+    TRACE("lpck: ckid=%s, cksize=%d, dwDataOffset=%d fccType=%08X (%s)!\n",
+	  debugstr_an((LPSTR)&lpck->ckid, 4), lpck->cksize, lpck->dwDataOffset,
+	  lpck->fccType, srchType ? debugstr_an((LPSTR)&lpck->fccType, 4):"");
     return MMSYSERR_NOERROR;
 }
 
@@ -1272,7 +1273,7 @@ MMRESULT WINAPI mmioCreateChunk(HMMIO hmmio, MMCKINFO* lpck, UINT uFlags)
     else if (uFlags == MMIO_CREATERIFF)
 	lpck->ckid = FOURCC_RIFF;
 
-    TRACE("ckid=%.4s\n", (LPSTR)&lpck->ckid);
+    TRACE("ckid=%s\n", debugstr_an((LPSTR)&lpck->ckid, 4));
 
     size = 2 * sizeof(DWORD);
     lpck->dwDataOffset = dwOldPos + size;
@@ -1302,7 +1303,7 @@ MMRESULT WINAPI mmioRenameA(LPCSTR szFileName, LPCSTR szNewFileName,
     struct IOProcList   tmp;
     FOURCC              fcc;
 
-    TRACE("('%s', '%s', %p, %08X);\n",
+    TRACE("(%s, %s, %p, %08X);\n",
 	  debugstr_a(szFileName), debugstr_a(szNewFileName), lpmmioinfo, dwFlags);
 
     /* If both params are NULL, then parse the file name */
@@ -1314,7 +1315,7 @@ MMRESULT WINAPI mmioRenameA(LPCSTR szFileName, LPCSTR szNewFileName,
 
     /* Handle any unhandled/error case from above. Assume DOS file */
     if (!lpmmioinfo || (lpmmioinfo->fccIOProc == 0 && lpmmioinfo->pIOProc == NULL && ioProc == NULL))
-	ioProc = MMIO_FindProcNode(FOURCC_DOS);
+	ioProc = &defaultProcs[0];
     /* if just the four character code is present, look up IO proc */
     else if (lpmmioinfo->pIOProc == NULL)
         ioProc = MMIO_FindProcNode(lpmmioinfo->fccIOProc);

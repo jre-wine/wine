@@ -38,7 +38,7 @@
 DEFINE_GUID(CLSID_StdGlobalInterfaceTable,0x00000323,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
 /* functions that are not present on all versions of Windows */
-HRESULT (WINAPI * pCoInitializeEx)(LPVOID lpReserved, DWORD dwCoInit);
+static HRESULT (WINAPI * pCoInitializeEx)(LPVOID lpReserved, DWORD dwCoInit);
 
 /* helper macros to make tests a bit leaner */
 #define ok_more_than_one_lock() ok(cLocks > 0, "Number of locks should be > 0, but actually is %d\n", cLocks)
@@ -1437,14 +1437,8 @@ static DWORD CALLBACK bad_thread_proc(LPVOID p)
     /* Win9x returns E_NOINTERFACE, whilst NT returns RPC_E_WRONG_THREAD */
     trace("call to proxy's QueryInterface from wrong apartment returned 0x%08x\n", hr);
 
-    /* this statement causes Win9x DCOM to crash during CoUninitialize of
-     * other apartment, so don't test this on Win9x (signified by NT-only
-     * export of CoRegisterSurrogateEx) */
-    if (GetProcAddress(GetModuleHandle("ole32"), "CoRegisterSurrogateEx"))
-        /* now be really bad and release the proxy from the wrong apartment */
-        IUnknown_Release(cf);
-    else
-        skip("skipping test for releasing proxy from wrong apartment that will succeed, but cause a crash during CoUninitialize\n");
+    /* now be really bad and release the proxy from the wrong apartment */
+    IUnknown_Release(cf);
 
     CoUninitialize();
 
@@ -1703,9 +1697,14 @@ static void test_proxy_interfaces(void)
 
 typedef struct
 {
-    const IUnknownVtbl *lpVtbl;
+    IUnknown IUnknown_iface;
     ULONG refs;
 } HeapUnknown;
+
+static inline HeapUnknown *impl_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, HeapUnknown, IUnknown_iface);
+}
 
 static HRESULT WINAPI HeapUnknown_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
 {
@@ -1721,13 +1720,13 @@ static HRESULT WINAPI HeapUnknown_QueryInterface(IUnknown *iface, REFIID riid, v
 
 static ULONG WINAPI HeapUnknown_AddRef(IUnknown *iface)
 {
-    HeapUnknown *This = (HeapUnknown *)iface;
+    HeapUnknown *This = impl_from_IUnknown(iface);
     return InterlockedIncrement((LONG*)&This->refs);
 }
 
 static ULONG WINAPI HeapUnknown_Release(IUnknown *iface)
 {
-    HeapUnknown *This = (HeapUnknown *)iface;
+    HeapUnknown *This = impl_from_IUnknown(iface);
     ULONG refs = InterlockedDecrement((LONG*)&This->refs);
     if (!refs) HeapFree(GetProcessHeap(), 0, This);
     return refs;
@@ -1750,7 +1749,7 @@ static void test_proxybuffer(REFIID riid)
     CLSID clsid;
     HeapUnknown *pUnkOuter = HeapAlloc(GetProcessHeap(), 0, sizeof(*pUnkOuter));
 
-    pUnkOuter->lpVtbl = &HeapUnknown_Vtbl;
+    pUnkOuter->IUnknown_iface.lpVtbl = &HeapUnknown_Vtbl;
     pUnkOuter->refs = 1;
 
     hr = CoGetPSClsid(riid, &clsid);
@@ -1759,21 +1758,17 @@ static void test_proxybuffer(REFIID riid)
     hr = CoGetClassObject(&clsid, CLSCTX_INPROC_SERVER, NULL, &IID_IPSFactoryBuffer, (LPVOID*)&psfb);
     ok_ole_success(hr, CoGetClassObject);
 
-    hr = IPSFactoryBuffer_CreateProxy(psfb, (IUnknown*)pUnkOuter, riid, &proxy, &lpvtbl);
+    hr = IPSFactoryBuffer_CreateProxy(psfb, &pUnkOuter->IUnknown_iface, riid, &proxy, &lpvtbl);
     ok_ole_success(hr, IPSFactoryBuffer_CreateProxy);
     ok(lpvtbl != NULL, "IPSFactoryBuffer_CreateProxy succeeded, but returned a NULL vtable!\n");
 
     /* release our reference to the outer unknown object - the PS factory
      * buffer will have AddRef's it in the CreateProxy call */
-    refs = IUnknown_Release((IUnknown *)pUnkOuter);
+    refs = IUnknown_Release(&pUnkOuter->IUnknown_iface);
     ok(refs == 1, "Ref count of outer unknown should have been 1 instead of %d\n", refs);
 
-    refs = IPSFactoryBuffer_Release(psfb);
-    if (0)
-    {
-    /* not reliable on native. maybe it leaks references! */
-    ok(refs == 0, "Ref-count leak of %d on IPSFactoryBuffer\n", refs);
-    }
+    /* Not checking return, unreliable on native. Maybe it leaks references? */
+    IPSFactoryBuffer_Release(psfb);
 
     refs = IUnknown_Release((IUnknown *)lpvtbl);
     ok(refs == 0, "Ref-count leak of %d on IRpcProxyBuffer\n", refs);
@@ -1801,12 +1796,8 @@ static void test_stubbuffer(REFIID riid)
     hr = IPSFactoryBuffer_CreateStub(psfb, riid, (IUnknown*)&Test_ClassFactory, &stub);
     ok_ole_success(hr, IPSFactoryBuffer_CreateStub);
 
-    refs = IPSFactoryBuffer_Release(psfb);
-    if (0)
-    {
-    /* not reliable on native. maybe it leaks references */
-    ok(refs == 0, "Ref-count leak of %d on IPSFactoryBuffer\n", refs);
-    }
+    /* Not checking return, unreliable on native. Maybe it leaks references? */
+    IPSFactoryBuffer_Release(psfb);
 
     ok_more_than_one_lock();
 
@@ -1845,7 +1836,7 @@ static const IClassFactoryVtbl TestREClassFactory_Vtbl =
     Test_IClassFactory_LockServer
 };
 
-IClassFactory TestRE_ClassFactory = { &TestREClassFactory_Vtbl };
+static IClassFactory TestRE_ClassFactory = { &TestREClassFactory_Vtbl };
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -1917,6 +1908,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         * WM_QUIT message doesn't stop the call from succeeding */
         PostMessage(hwnd, WM_QUIT, 0, 0);
         hr = IClassFactory_CreateInstance(proxy, NULL, &IID_IUnknown, (void **)&object);
+	ok(hr == S_FALSE, "IClassFactory_CreateInstance returned 0x%08x, expected S_FALSE\n", hr);
 
         IClassFactory_Release(proxy);
 
@@ -2011,7 +2003,7 @@ static IClassFactoryVtbl TestMsgClassFactory_Vtbl =
     Test_IClassFactory_LockServer
 };
 
-IClassFactory TestMsg_ClassFactory = { &TestMsgClassFactory_Vtbl };
+static IClassFactory TestMsg_ClassFactory = { &TestMsgClassFactory_Vtbl };
 
 static void test_call_from_message(void)
 {
@@ -2645,6 +2637,7 @@ static HANDLE create_target_process(const char *arg)
 {
     char **argv;
     char cmdline[MAX_PATH];
+    BOOL ret;
     PROCESS_INFORMATION pi;
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);
@@ -2653,8 +2646,8 @@ static HANDLE create_target_process(const char *arg)
     pi.hProcess = NULL;
     winetest_get_mainargs( &argv );
     sprintf(cmdline, "%s %s %s", argv[0], argv[1], arg);
-    ok(CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
-                     &si, &pi) != 0, "CreateProcess failed with error: %u\n", GetLastError());
+    ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "CreateProcess failed with error: %u\n", GetLastError());
     if (pi.hThread) CloseHandle(pi.hThread);
     return pi.hProcess;
 }
@@ -3060,7 +3053,12 @@ START_TEST(marshal)
     int argc;
     char **argv;
 
-    if (!(pCoInitializeEx = (void*)GetProcAddress(hOle32, "CoInitializeEx"))) goto no_test;
+    if (!GetProcAddress(hOle32, "CoRegisterSurrogateEx")) {
+        win_skip("skipping test on win9x\n");
+        return;
+    }
+
+    pCoInitializeEx = (void*)GetProcAddress(hOle32, "CoInitializeEx");
 
     argc = winetest_get_mainargs( &argv );
     if (argc > 2 && (!strcmp(argv[2], "-Embedding")))
@@ -3127,9 +3125,4 @@ START_TEST(marshal)
     test_channel_hook();
 
     CoUninitialize();
-    return;
-
-no_test:
-    trace("You need DCOM95 installed to run this test\n");
-    return;
 }

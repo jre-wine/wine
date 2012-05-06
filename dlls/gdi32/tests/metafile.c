@@ -475,13 +475,17 @@ static int CALLBACK savedc_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
     ret = GetWorldTransform(hdc, &xform);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        ok(GetWindowOrgEx(hdc, &pt), "GetWindowOrgEx error %u\n", GetLastError());
+        ret = GetWindowOrgEx(hdc, &pt);
+        ok(ret, "GetWindowOrgEx error %u\n", GetLastError());
         trace("window org (%d,%d)\n", pt.x, pt.y);
-        ok(GetViewportOrgEx(hdc, &pt), "GetViewportOrgEx error %u\n", GetLastError());
+        ret = GetViewportOrgEx(hdc, &pt);
+        ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
         trace("vport org (%d,%d)\n", pt.x, pt.y);
-        ok(GetWindowExtEx(hdc, &size), "GetWindowExtEx error %u\n", GetLastError());
+        ret = GetWindowExtEx(hdc, &size);
+        ok(ret, "GetWindowExtEx error %u\n", GetLastError());
         trace("window ext (%d,%d)\n", size.cx, size.cy);
-        ok(GetViewportExtEx(hdc, &size), "GetViewportExtEx error %u\n", GetLastError());
+        ret = GetViewportExtEx(hdc, &size);
+        ok(ret, "GetViewportExtEx error %u\n", GetLastError());
         trace("vport ext (%d,%d)\n", size.cx, size.cy);
     }
     else
@@ -593,13 +597,17 @@ static int CALLBACK savedc_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
     ret = GetWorldTransform(hdc, &xform);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        ok(GetWindowOrgEx(hdc, &pt), "GetWindowOrgEx error %u\n", GetLastError());
+        ret = GetWindowOrgEx(hdc, &pt);
+        ok(ret, "GetWindowOrgEx error %u\n", GetLastError());
         trace("window org (%d,%d)\n", pt.x, pt.y);
-        ok(GetViewportOrgEx(hdc, &pt), "GetViewportOrgEx error %u\n", GetLastError());
+        ret = GetViewportOrgEx(hdc, &pt);
+        ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
         trace("vport org (%d,%d)\n", pt.x, pt.y);
-        ok(GetWindowExtEx(hdc, &size), "GetWindowExtEx error %u\n", GetLastError());
+        ret = GetWindowExtEx(hdc, &size);
+        ok(ret, "GetWindowExtEx error %u\n", GetLastError());
         trace("window ext (%d,%d)\n", size.cx, size.cy);
-        ok(GetViewportExtEx(hdc, &size), "GetViewportExtEx error %u\n", GetLastError());
+        ret = GetViewportExtEx(hdc, &size);
+        ok(ret, "GetViewportExtEx error %u\n", GetLastError());
         trace("vport ext (%d,%d)\n", size.cx, size.cy);
     }
     else
@@ -647,8 +655,10 @@ static void test_SaveDC(void)
     SetPixelV(hdcMetafile, 50, 50, 0);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 0,"Expecting ViewportOrg x of 0, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 120,"Expecting ViewportExt cx of 120, got %i\n",size.cx);
     ret = SaveDC(hdcMetafile);
     ok(ret == 1, "ret = %d\n", ret);
@@ -662,8 +672,10 @@ static void test_SaveDC(void)
     SetPixelV(hdcMetafile, 50, 50, 0);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 10,"Expecting ViewportOrg x of 10, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 200,"Expecting ViewportExt cx of 200, got %i\n",size.cx);
     ret = SaveDC(hdcMetafile);
     ok(ret == 2, "ret = %d\n", ret);
@@ -679,8 +691,10 @@ static void test_SaveDC(void)
     SetPixelV(hdcMetafile, 50, 50, 0);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 20,"Expecting ViewportOrg x of 20, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 300,"Expecting ViewportExt cx of 300, got %i\n",size.cx);
     ret = SaveDC(hdcMetafile);
     ok(ret == 3, "ret = %d\n", ret);
@@ -699,15 +713,19 @@ static void test_SaveDC(void)
     SetPixelV(hdcMetafile, 50, 50, 0);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 30,"Expecting ViewportOrg x of 30, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 400,"Expecting ViewportExt cx of 400, got %i\n",size.cx);
     ret = RestoreDC(hdcMetafile, -1);
     ok(ret, "ret = %d\n", ret);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 20,"Expecting ViewportOrg x of 20, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 300,"Expecting ViewportExt cx of 300, got %i\n",size.cx);
     ok( GetPolyFillMode( hdcMetafile ) == ALTERNATE, "PolyFillMode not restored\n" );
     ok( GetBkColor( hdcMetafile ) == 0, "Background color not restored\n" );
@@ -715,14 +733,18 @@ static void test_SaveDC(void)
     ok(ret == 3, "ret = %d\n", ret);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 20,"Expecting ViewportOrg x of 20, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 300,"Expecting ViewportExt cx of 300, got %i\n",size.cx);
     ret = RestoreDC(hdcMetafile, 1);
     ok(ret, "ret = %d\n", ret);
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 0,"Expecting ViewportOrg x of 0, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 120,"Expecting ViewportExt cx of 120, got %i\n",size.cx);
 
     SetWindowOrgEx(hdcMetafile, -4, -4, NULL);
@@ -734,15 +756,19 @@ static void test_SaveDC(void)
     SetPixelV(hdcMetafile, 50, 50, 0);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 40,"Expecting ViewportOrg x of 40, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 50,"Expecting ViewportExt cx of 50, got %i\n",size.cx);
     ret = SaveDC(hdcMetafile);
     ok(ret == 1, "ret = %d\n", ret);
 
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 40,"Expecting ViewportOrg x of 40, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 50,"Expecting ViewportExt cx of 50, got %i\n",size.cx);
     ret = SaveDC(hdcMetafile);
     ok(ret == 2, "ret = %d\n", ret);
@@ -770,8 +796,10 @@ static void test_SaveDC(void)
     ret = RestoreDC(hdcMetafile, 1);
     ok(ret, "ret = %d\n", ret);
     ret = GetViewportOrgEx(hdcMetafile, &pt);
+    ok(ret, "GetViewportOrgEx error %u\n", GetLastError());
     ok(pt.x == 40,"Expecting ViewportOrg x of 40, got %i\n",pt.x);
     ret = GetViewportExtEx(hdcMetafile, &size);
+    ok(ret, "GetViewportExtEx error %u\n", GetLastError());
     ok(size.cx == 50,"Expecting ViewportExt cx of 50, got %i\n",size.cx);
 
     hFontCheck = SelectObject(hdcMetafile, hFontOld);
@@ -1799,6 +1827,7 @@ static void test_SetMetaFileBits(void)
     ret = DeleteMetaFile(hmf);
     ok(ret, "DeleteMetaFile(%p) error %d\n", hmf, GetLastError());
 
+#ifndef _WIN64 /* Generates access violation on XP x64 and Win2003 x64 */
     /* Now with zeroed out mtSize field */
     memcpy(buf, MF_GRAPHICS_BITS, sizeof(MF_GRAPHICS_BITS));
     mh = (METAHEADER *)buf;
@@ -1816,6 +1845,7 @@ static void test_SetMetaFileBits(void)
 
     ret = DeleteMetaFile(hmf);
     ok(ret, "DeleteMetaFile(%p) error %d\n", hmf, GetLastError());
+#endif
 }
 
 /* Simple APIs from mfdrv/graphics.c
@@ -2121,6 +2151,7 @@ static int CALLBACK clip_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
         ok(ret == sizeof(rgn2.data.rdh) + sizeof(RECT), "expected sizeof(rgn), got %u\n", ret);
 
         ret = GetRegionData(hrgn, sizeof(rgn2), &rgn2.data);
+        ok(ret == sizeof(rgn2), "expected sizeof(rgn2), got %u\n", ret);
 
         trace("size %u, type %u, count %u, rgn size %u, bound (%d,%d-%d,%d)\n",
               rgn2.data.rdh.dwSize, rgn2.data.rdh.iType,

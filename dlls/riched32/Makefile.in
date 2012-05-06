@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = riched32.dll
-IMPORTS   = riched20 user32 kernel32
+IMPORTS   = riched20 user32
 
 C_SRCS = \
 	richedit.c

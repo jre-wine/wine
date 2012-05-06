@@ -192,7 +192,7 @@ static void test_SHGetRegPath(void)
 	ok( 0 == strcmp(sExpTestpath1, buf) , "Comparing (%s) with (%s) failed\n", buf, sExpTestpath1);
 }
 
-static void test_SHQUeryValueEx(void)
+static void test_SHQueryValueEx(void)
 {
 	HKEY hKey;
 	DWORD dwSize;
@@ -452,12 +452,19 @@ START_TEST(shreg)
         if (!hkey) return;
 
 	hshlwapi = GetModuleHandleA("shlwapi.dll");
+
+        /* SHCreateStreamOnFileEx was introduced in shlwapi v6.0 */
+        if(!GetProcAddress(hshlwapi, "SHCreateStreamOnFileEx")){
+            win_skip("Too old shlwapi version\n");
+            return;
+        }
+
         pSHCopyKeyA=(SHCopyKeyA_func)GetProcAddress(hshlwapi,"SHCopyKeyA");
         pSHRegGetPathA=(SHRegGetPathA_func)GetProcAddress(hshlwapi,"SHRegGetPathA");
         pSHRegGetValueA=(SHRegGetValueA_func)GetProcAddress(hshlwapi,"SHRegGetValueA");
 	test_SHGetValue();
         test_SHRegGetValue();
-	test_SHQUeryValueEx();
+	test_SHQueryValueEx();
 	test_SHGetRegPath();
 	test_SHCopyKey();
         test_SHDeleteKey();

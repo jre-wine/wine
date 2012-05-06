@@ -1760,6 +1760,7 @@ typedef enum wined3d_gl_extension
     ARB_SYNC,
     ARB_TEXTURE_BORDER_CLAMP,
     ARB_TEXTURE_COMPRESSION,
+    ARB_TEXTURE_COMPRESSION_RGTC,
     ARB_TEXTURE_CUBE_MAP,
     ARB_TEXTURE_ENV_ADD,
     ARB_TEXTURE_ENV_COMBINE,
@@ -1786,6 +1787,7 @@ typedef enum wined3d_gl_extension
     EXT_BLEND_FUNC_SEPARATE,
     EXT_BLEND_MINMAX,
     EXT_DRAW_BUFFERS2,
+    EXT_DEPTH_BOUNDS_TEST,
     EXT_FOG_COORD,
     EXT_FRAMEBUFFER_BLIT,
     EXT_FRAMEBUFFER_MULTISAMPLE,
@@ -1808,6 +1810,7 @@ typedef enum wined3d_gl_extension
     EXT_TEXTURE_FILTER_ANISOTROPIC,
     EXT_TEXTURE_LOD_BIAS,
     EXT_TEXTURE_SRGB,
+    EXT_TEXTURE_SRGB_DECODE,
     EXT_VERTEX_ARRAY_BGRA,
     /* NVIDIA */
     NV_DEPTH_CLAMP,
@@ -1818,6 +1821,7 @@ typedef enum wined3d_gl_extension
     NV_FRAGMENT_PROGRAM_OPTION,
     NV_HALF_FLOAT,
     NV_LIGHT_MAX_EXPONENT,
+    NV_POINT_SPRITE,
     NV_REGISTER_COMBINERS,
     NV_REGISTER_COMBINERS2,
     NV_TEXGEN_REFLECTION,
@@ -1831,12 +1835,12 @@ typedef enum wined3d_gl_extension
     NV_VERTEX_PROGRAM3,
     /* SGI */
     SGIS_GENERATE_MIPMAP,
-    SGI_VIDEO_SYNC,
     /* WGL extensions */
     WGL_ARB_PIXEL_FORMAT,
+    WGL_EXT_SWAP_CONTROL,
     WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,
     /* Internally used */
-    WINE_NORMALIZED_TEXRECT,
+    WINED3D_GL_NORMALIZED_TEXRECT,
     WINED3D_GL_VERSION_2_0,
 
     WINED3D_GL_EXT_COUNT,
@@ -2450,6 +2454,15 @@ typedef GLvoid (WINE_GLAPI *PGLFNGETSYNCIVPROC)(GLsync sync, GLenum pname, GLsiz
 #define GL_CLAMP_TO_BORDER_ARB                              0x812d
 #endif
 
+/* GL_ARB_texture_compression_rgtc */
+#ifndef GL_ARB_texture_compression_rgtc
+#define GL_ARB_texture_compression_rgtc 1
+#define GL_COMPRESSED_RED_RGTC1                             0x8dbb
+#define GL_COMPRESSED_SIGNED_RED_RGTC1                      0x8dbc
+#define GL_COMPRESSED_RED_GREEN_RGTC2                       0x8dbd
+#define GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2                0x8dbe
+#endif
+
 /* GL_ARB_texture_cube_map */
 #ifndef GL_ARB_texture_cube_map
 #define GL_ARB_texture_cube_map 1
@@ -2971,6 +2984,14 @@ typedef void (WINE_GLAPI *PGLFNBLENDEQUATIONSEPARATEEXTPROC)(GLenum modeRGB, GLe
 typedef void (WINE_GLAPI *PGLFNBLENDFUNCSEPARATEEXTPROC)(GLenum sfactorRGB, GLenum dfactorRGB,
         GLenum sfactorAlpha, GLenum dfactorAlpha);
 
+/* GL_EXT_depth_bounds_test */
+#ifndef GL_EXT_depth_bounds_test
+#define GL_EXT_depth_bounds_test 1
+#define GL_DEPTH_BOUNDS_TEST_EXT                            0x8890
+#define GL_DEPTH_BOUNDS_EXT                                 0x8891
+#endif
+typedef void (WINE_GLAPI *PGLFNDEPTHBOUNDSEXTPROC)(GLclampd zmin, GLclampd zmax);
+
 /* GL_EXT_draw_buffers2 */
 typedef GLvoid (WINE_GLAPI *PGLFNCOLORMASKINDEXEDEXTPROC)(GLuint buffer_idx, GLboolean r, GLboolean g,
         GLboolean b, GLboolean a);
@@ -3392,6 +3413,14 @@ typedef void (WINE_GLAPI *PGLFNGETCOMPRESSEDTEXIMAGEPROC)(GLenum target, GLint l
 #define GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT              0x8c4f
 #endif
 
+/* GL_EXT_texture_sRGB_decode */
+#ifndef GL_EXT_texture_sRGB_decode
+#define GL_EXT_texture_sRGB_decode 1
+#define GL_TEXTURE_SRGB_DECODE_EXT                          0x8a48
+#define GL_DECODE_EXT                                       0x8a49
+#define GL_SKIP_DECODE_EXT                                  0x8a4a
+#endif
+
 /* GL_NV_depth_clamp */
 #ifndef GL_NV_depth_clamp
 #define GL_NV_depth_clamp 1
@@ -3481,6 +3510,16 @@ typedef void (WINE_GLAPI *PGLFNVERTEXATTRIBS4HVNVPROC)(GLuint index, GLsizei n, 
 #define GL_MAX_SHININESS_NV                                 0x8504
 #define GL_MAX_SPOT_EXPONENT_NV                             0x8505
 #endif
+
+/* GL_NV_point_sprite */
+#ifndef GL_NV_point_sprite
+#define GL_NV_point_sprite 1
+#define GL_NV_POINT_SPRITE_NV                               0x8861
+#define GL_NV_COORD_REPLACE_NV                              0x8862
+#define GL_NV_POINT_SPRITE_R_MODE_NV                        0x8863
+#endif
+typedef void (WINE_GLAPI *PGLFNPOINTPARAMETERIVNVPROC)(GLenum pname, const GLint *params);
+typedef void (WINE_GLAPI *PGLFNPOINTPARAMETERINVPROC)(GLenum pname, GLint param);
 
 /* GL_NV_register_combiners */
 #ifndef GL_NV_register_combiners
@@ -3681,15 +3720,11 @@ typedef void (WINE_GLAPI *PGLFNGETCOMBINERSTAGEPARAMETERFVNVPROC)(GLenum stage, 
 #endif
 
 /* GL_SGIS_generate_mipmap */
-#ifndef GLX_SGIS_generate_mipmap
-#define GLX_SGIS_generate_mipmap 1
+#ifndef GL_SGIS_generate_mipmap
+#define GL_SGIS_generate_mipmap 1
 #define GL_GENERATE_MIPMAP_SGIS                             0x8191
 #define GL_GENERATE_MIPMAP_HINT_SGIS                        0x8192
 #endif
-
-/* GLX_SGI_video_sync */
-typedef int (WINE_GLAPI *PGLXFNGETVIDEOSYNCSGIPROC)(unsigned int *);
-typedef int (WINE_GLAPI *PGLXFNWAITVIDEOSYNCSGIPROC)(int, int, unsigned int *);
 
 /* WGL_ARB_extensions_string */
 typedef const char *(WINAPI *WINED3D_PFNWGLGETEXTENSIONSSTRINGARBPROC)(HDC hdc);
@@ -3770,6 +3805,8 @@ typedef BOOL (WINAPI *WINED3D_PFNWGLCHOOSEPIXELFORMATARBPROC)(HDC hdc, const int
 /* WGL_WINE_pixel_format_passthrough */
 typedef BOOL (WINAPI *WINED3D_PFNWGLSETPIXELFORMATWINE)(HDC hdc, int iPixelFormat,
         const PIXELFORMATDESCRIPTOR *ppfd);
+
+typedef BOOL (WINAPI *WINED3D_PFNWGLSWAPINTERVALEXTPROC)(int interval);
 
 #define GL_EXT_FUNCS_GEN \
     /* GL_APPLE_fence */ \
@@ -4200,6 +4237,9 @@ typedef BOOL (WINAPI *WINED3D_PFNWGLSETPIXELFORMATWINE)(HDC hdc, int iPixelForma
     /* GL_EXT_blend_func_separate */ \
     USE_GL_FUNC(PGLFNBLENDEQUATIONSEPARATEEXTPROC, \
             glBlendEquationSeparateEXT,                 EXT_BLEND_EQUATION_SEPARATE,    NULL) \
+    /* GL_EXT_depth_bounds_test */ \
+    USE_GL_FUNC(PGLFNDEPTHBOUNDSEXTPROC, \
+            glDepthBoundsEXT,                           EXT_DEPTH_BOUNDS_TEST,          NULL) \
     /* GL_EXT_draw_buffers2 */ \
     USE_GL_FUNC(PGLFNCOLORMASKINDEXEDEXTPROC, \
             glColorMaskIndexedEXT,                      EXT_DRAW_BUFFERS2,              NULL) \
@@ -4477,6 +4517,11 @@ typedef BOOL (WINAPI *WINED3D_PFNWGLSETPIXELFORMATWINE)(HDC hdc, int iPixelForma
             glVertexAttribs3hvNV,                       NV_HALF_FLOAT,                  NULL) \
     USE_GL_FUNC(PGLFNVERTEXATTRIBS4HVNVPROC, \
             glVertexAttribs4hvNV,                       NV_HALF_FLOAT,                  NULL) \
+    /* GL_NV_point_sprite */ \
+    USE_GL_FUNC(PGLFNPOINTPARAMETERIVNVPROC, \
+            glPointParameterivNV,                       NV_POINT_SPRITE,                NULL) \
+    USE_GL_FUNC(PGLFNPOINTPARAMETERINVPROC, \
+            glPointParameteriNV,                        NV_POINT_SPRITE,                NULL) \
     /* GL_NV_register_combiners */ \
     USE_GL_FUNC(PGLFNCOMBINERINPUTNVPROC, \
             glCombinerInputNV,                          NV_REGISTER_COMBINERS,          NULL) \
@@ -4492,17 +4537,13 @@ typedef BOOL (WINAPI *WINED3D_PFNWGLSETPIXELFORMATWINE)(HDC hdc, int iPixelForma
             glCombinerParameterivNV,                    NV_REGISTER_COMBINERS,          NULL) \
     USE_GL_FUNC(PGLFNFINALCOMBINERINPUTNVPROC, \
             glFinalCombinerInputNV,                     NV_REGISTER_COMBINERS,          NULL) \
-    /* GLX_SGI_video_sync */ \
-    USE_GL_FUNC(PGLXFNGETVIDEOSYNCSGIPROC, \
-            glXGetVideoSyncSGI,                         SGI_VIDEO_SYNC,                 NULL) \
-    USE_GL_FUNC(PGLXFNWAITVIDEOSYNCSGIPROC, \
-            glXWaitVideoSyncSGI,                        SGI_VIDEO_SYNC,                 NULL)
 
 #define WGL_EXT_FUNCS_GEN \
     USE_GL_FUNC(WINED3D_PFNWGLGETEXTENSIONSSTRINGARBPROC,       wglGetExtensionsStringARB,      0, NULL) \
     USE_GL_FUNC(WINED3D_PFNWGLGETPIXELFORMATATTRIBIVARBPROC,    wglGetPixelFormatAttribivARB,   0, NULL) \
     USE_GL_FUNC(WINED3D_PFNWGLGETPIXELFORMATATTRIBFVARBPROC,    wglGetPixelFormatAttribfvARB,   0, NULL) \
     USE_GL_FUNC(WINED3D_PFNWGLCHOOSEPIXELFORMATARBPROC,         wglChoosePixelFormatARB,        0, NULL) \
-    USE_GL_FUNC(WINED3D_PFNWGLSETPIXELFORMATWINE,               wglSetPixelFormatWINE,          0, NULL)
+    USE_GL_FUNC(WINED3D_PFNWGLSETPIXELFORMATWINE,               wglSetPixelFormatWINE,          0, NULL) \
+    USE_GL_FUNC(WINED3D_PFNWGLSWAPINTERVALEXTPROC,              wglSwapIntervalEXT,             0, NULL)
 
 #endif /* __WINE_WINED3D_GL */

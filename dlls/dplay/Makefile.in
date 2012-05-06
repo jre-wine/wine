@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = dplay.dll
 IMPORTLIB = dplay
-IMPORTS   = dplayx kernel32
+IMPORTS   = dplayx
 
 RC_SRCS = version.rc
 

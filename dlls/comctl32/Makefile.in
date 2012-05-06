@@ -1,11 +1,7 @@
 EXTRADEFS = -D_COMCTL32_
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = comctl32.dll
 IMPORTLIB = comctl32
-IMPORTS   = uuid user32 gdi32 advapi32 kernel32
+IMPORTS   = uuid user32 gdi32 advapi32
 DELAYIMPORTS = winmm uxtheme
 
 C_SRCS = \
@@ -47,6 +43,7 @@ C_SRCS = \
 	updown.c
 
 RC_SRCS = \
+	comctl32.rc \
 	comctl_Bg.rc \
 	comctl_Cs.rc \
 	comctl_Da.rc \
@@ -56,6 +53,7 @@ RC_SRCS = \
 	comctl_Eo.rc \
 	comctl_Es.rc \
 	comctl_Fr.rc \
+	comctl_He.rc \
 	comctl_Hu.rc \
 	comctl_It.rc \
 	comctl_Ja.rc \
@@ -74,8 +72,9 @@ RC_SRCS = \
 	comctl_Th.rc \
 	comctl_Tr.rc \
 	comctl_Uk.rc \
-	comctl_Zh.rc \
-	rsrc.rc
+	comctl_Zh.rc
+
+PO_SRCS = comctl32.rc
 
 SVG_SRCS = \
 	idb_hist_large.svg \

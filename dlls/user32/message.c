@@ -25,6 +25,8 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -2359,6 +2361,7 @@ static BOOL process_mouse_message( MSG *msg, UINT hw_id, ULONG_PTR extra_info, H
 
     /* find the window to dispatch this mouse message to */
 
+    info.cbSize = sizeof(info);
     GetGUIThreadInfo( GetCurrentThreadId(), &info );
     if (info.hwndCapture)
     {
@@ -2705,6 +2708,38 @@ static BOOL peek_message( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
                              msg_data->winevent.hook, info.msg.message, info.msg.hwnd, info.msg.wParam,
                              info.msg.lParam, msg_data->winevent.tid, info.msg.time);
             }
+            continue;
+        case MSG_HOOK_LL:
+            info.flags = ISMEX_SEND;
+            result = 0;
+            if (info.msg.message == WH_KEYBOARD_LL && size >= sizeof(msg_data->hardware))
+            {
+                KBDLLHOOKSTRUCT hook;
+
+                hook.vkCode      = LOWORD( info.msg.lParam );
+                hook.scanCode    = HIWORD( info.msg.lParam );
+                hook.flags       = msg_data->hardware.flags;
+                hook.time        = info.msg.time;
+                hook.dwExtraInfo = msg_data->hardware.info;
+                TRACE( "calling keyboard LL hook vk %x scan %x flags %x time %u info %lx\n",
+                       hook.vkCode, hook.scanCode, hook.flags, hook.time, hook.dwExtraInfo );
+                result = HOOK_CallHooks( WH_KEYBOARD_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
+            }
+            else if (info.msg.message == WH_MOUSE_LL && size >= sizeof(msg_data->hardware))
+            {
+                MSLLHOOKSTRUCT hook;
+
+                hook.pt.x        = msg_data->hardware.x;
+                hook.pt.y        = msg_data->hardware.y;
+                hook.mouseData   = info.msg.lParam;
+                hook.flags       = msg_data->hardware.flags;
+                hook.time        = info.msg.time;
+                hook.dwExtraInfo = msg_data->hardware.info;
+                TRACE( "calling mouse LL hook pos %d,%d data %x flags %x time %u info %lx\n",
+                       hook.pt.x, hook.pt.y, hook.mouseData, hook.flags, hook.time, hook.dwExtraInfo );
+                result = HOOK_CallHooks( WH_MOUSE_LL, HC_ACTION, info.msg.wParam, (LPARAM)&hook, TRUE );
+            }
+            reply_message( &info, result, TRUE );
             continue;
         case MSG_OTHER_PROCESS:
             info.flags = ISMEX_SEND;
@@ -3060,6 +3095,63 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
 
     SPY_ExitMessage( SPY_RESULT_OK, info->hwnd, info->msg, result, info->wparam, info->lparam );
     if (ret && res_ptr) *res_ptr = result;
+    return ret;
+}
+
+
+/***********************************************************************
+ *		send_hardware_message
+ */
+NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
+{
+    struct send_message_info info;
+    NTSTATUS ret;
+    BOOL wait;
+
+    info.type     = MSG_HARDWARE;
+    info.dest_tid = 0;
+    info.hwnd     = hwnd;
+    info.flags    = 0;
+    info.timeout  = 0;
+
+    SERVER_START_REQ( send_hardware_message )
+    {
+        req->win        = wine_server_user_handle( hwnd );
+        req->flags      = flags;
+        req->input.type = input->type;
+        switch (input->type)
+        {
+        case INPUT_MOUSE:
+            req->input.mouse.x     = input->u.mi.dx;
+            req->input.mouse.y     = input->u.mi.dy;
+            req->input.mouse.data  = input->u.mi.mouseData;
+            req->input.mouse.flags = input->u.mi.dwFlags;
+            req->input.mouse.time  = input->u.mi.time;
+            req->input.mouse.info  = input->u.mi.dwExtraInfo;
+            break;
+        case INPUT_KEYBOARD:
+            req->input.kbd.vkey  = input->u.ki.wVk;
+            req->input.kbd.scan  = input->u.ki.wScan;
+            req->input.kbd.flags = input->u.ki.dwFlags;
+            req->input.kbd.time  = input->u.ki.time;
+            req->input.kbd.info  = input->u.ki.dwExtraInfo;
+            break;
+        case INPUT_HARDWARE:
+            req->input.hw.msg    = input->u.hi.uMsg;
+            req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
+            break;
+        }
+        ret = wine_server_call( req );
+        wait = reply->wait;
+    }
+    SERVER_END_REQ;
+
+    if (wait)
+    {
+        LRESULT ignored;
+        wait_message_reply( 0 );
+        retrieve_reply( &info, 0, &ignored );
+    }
     return ret;
 }
 
@@ -3442,7 +3534,7 @@ void WINAPI PostQuitMessage( INT exit_code )
 /***********************************************************************
  *		PeekMessageW  (USER32.@)
  */
-BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
+BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     MSG msg;
 
@@ -3474,7 +3566,7 @@ BOOL WINAPI PeekMessageW( MSG *msg_out, HWND hwnd, UINT first, UINT last, UINT f
 /***********************************************************************
  *		PeekMessageA  (USER32.@)
  */
-BOOL WINAPI PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
+BOOL WINAPI DECLSPEC_HOTPATCH PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags )
 {
     if (get_pending_wmchar( msg, first, last, (flags & PM_REMOVE) )) return TRUE;
     if (!PeekMessageW( msg, hwnd, first, last, flags )) return FALSE;
@@ -3486,7 +3578,7 @@ BOOL WINAPI PeekMessageA( MSG *msg, HWND hwnd, UINT first, UINT last, UINT flags
 /***********************************************************************
  *		GetMessageW  (USER32.@)
  */
-BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
+BOOL WINAPI DECLSPEC_HOTPATCH GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     HANDLE server_queue = get_server_queue_handle();
     unsigned int mask = QS_POSTMESSAGE | QS_SENDMESSAGE;  /* Always selected */
@@ -3519,7 +3611,7 @@ BOOL WINAPI GetMessageW( MSG *msg, HWND hwnd, UINT first, UINT last )
 /***********************************************************************
  *		GetMessageA  (USER32.@)
  */
-BOOL WINAPI GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT last )
+BOOL WINAPI DECLSPEC_HOTPATCH GetMessageA( MSG *msg, HWND hwnd, UINT first, UINT last )
 {
     if (get_pending_wmchar( msg, first, last, TRUE )) return TRUE;
     GetMessageW( msg, hwnd, first, last );
@@ -4229,11 +4321,27 @@ BOOL WINAPI KillSystemTimer( HWND hwnd, UINT_PTR id )
 
 
 /**********************************************************************
+ *		IsGUIThread  (USER32.@)
+ */
+BOOL WINAPI IsGUIThread( BOOL convert )
+{
+    FIXME( "%u: stub\n", convert );
+    return TRUE;
+}
+
+
+/**********************************************************************
  *		GetGUIThreadInfo  (USER32.@)
  */
 BOOL WINAPI GetGUIThreadInfo( DWORD id, GUITHREADINFO *info )
 {
     BOOL ret;
+
+    if (info->cbSize != sizeof(*info))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
 
     SERVER_START_REQ( get_thread_input )
     {

@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winscard.dll
 IMPORTLIB = winscard
-IMPORTS   = kernel32 ntdll
 
 C_SRCS = \
 	winscard.c

@@ -777,3 +777,32 @@ DWORD WINAPI GetThreadErrorMode( void )
 {
     return rtlmode_to_win32mode( RtlGetThreadErrorMode() );
 }
+
+/***********************************************************************
+ *              GetThreadUILanguage (KERNEL32.@)
+ *
+ * Get the current thread's language identifier.
+ *
+ * PARAMS
+ *  None.
+ *
+ * RETURNS
+ *  The current thread's language identifier.
+ */
+LANGID WINAPI GetThreadUILanguage( void )
+{
+    LANGID lang;
+    NtQueryDefaultUILanguage( &lang );
+    FIXME(": stub, returning default language.\n");
+    return lang;
+}
+
+/***********************************************************************
+ *              GetThreadIOPendingFlag (KERNEL32.@)
+ */
+BOOL WINAPI GetThreadIOPendingFlag( HANDLE thread, PBOOL io_pending )
+{
+    FIXME("%p, %p\n", thread, io_pending);
+    *io_pending = FALSE;
+    return TRUE;
+}

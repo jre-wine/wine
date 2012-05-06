@@ -1,8 +1,4 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = security.dll
-IMPORTS   = secur32 kernel32
+IMPORTS   = secur32
 
 @MAKE_DLL_RULES@

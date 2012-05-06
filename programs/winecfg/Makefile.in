@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winecfg.exe
 APPMODE   = -mwindows
-IMPORTS   = uuid comdlg32 comctl32 shell32 ole32 winmm shlwapi uxtheme user32 gdi32 advapi32 kernel32
+IMPORTS   = uuid comdlg32 comctl32 shell32 ole32 winmm shlwapi uxtheme user32 gdi32 advapi32
 
 C_SRCS = \
 	about.c \
@@ -47,20 +43,12 @@ RC_SRCS = \
 	Zh.rc \
 	winecfg.rc
 
-MANPAGES = winecfg.man
+PO_SRCS = winecfg.rc
+
+MANPAGE = winecfg.man
 
 SVG_SRCS = \
 	logo.svg \
 	winecfg.svg
 
 @MAKE_PROG_RULES@
-
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) winecfg.man $(DESTDIR)$(mandir)/man$(prog_manext)/winecfg.$(prog_manext)
-
-@WOW64_DISABLE@ install install-lib:: install-man-pages
-
-uninstall::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/winecfg.$(prog_manext)

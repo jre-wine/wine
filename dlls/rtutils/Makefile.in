@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = rtutils.dll
 IMPORTLIB = rtutils
-IMPORTS   = kernel32
 
 C_SRCS = \
 	main.c \

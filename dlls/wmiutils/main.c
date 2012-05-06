@@ -26,23 +26,26 @@
 #include "winuser.h"
 #include "objbase.h"
 #include "wbemcli.h"
+#include "rpcproxy.h"
 
 #include "wine/debug.h"
 #include "wmiutils_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmiutils);
 
+static HINSTANCE instance;
+
 typedef HRESULT (*fnCreateInstance)( IUnknown *pUnkOuter, LPVOID *ppObj );
 
 typedef struct
 {
-    const struct IClassFactoryVtbl *vtbl;
+    IClassFactory IClassFactory_iface;
     fnCreateInstance pfnCreateInstance;
 } wmiutils_cf;
 
 static inline wmiutils_cf *impl_from_IClassFactory( IClassFactory *iface )
 {
-    return (wmiutils_cf *)((char *)iface - FIELD_OFFSET( wmiutils_cf, vtbl ));
+    return CONTAINING_RECORD(iface, wmiutils_cf, IClassFactory_iface);
 }
 
 static HRESULT WINAPI wmiutils_cf_QueryInterface( IClassFactory *iface, REFIID riid, LPVOID *ppobj )
@@ -109,7 +112,7 @@ static const struct IClassFactoryVtbl wmiutils_cf_vtbl =
     wmiutils_cf_LockServer
 };
 
-static wmiutils_cf status_code_cf = { &wmiutils_cf_vtbl, WbemStatusCodeText_create };
+static wmiutils_cf status_code_cf = { { &wmiutils_cf_vtbl }, WbemStatusCodeText_create };
 
 BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID lpv )
 {
@@ -118,6 +121,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID lpv )
     case DLL_WINE_PREATTACH:
         return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
+        instance = hinst;
         DisableThreadLibraryCalls( hinst );
         break;
     case DLL_PROCESS_DETACH:
@@ -134,13 +138,32 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
 
     if (IsEqualGUID( rclsid, &CLSID_WbemStatusCode ))
     {
-       cf = (IClassFactory *)&status_code_cf.vtbl;
+       cf = &status_code_cf.IClassFactory_iface;
     }
     if (!cf) return CLASS_E_CLASSNOTAVAILABLE;
     return IClassFactory_QueryInterface( cf, iid, ppv );
 }
 
+/***********************************************************************
+ *              DllCanUnloadNow (WMIUTILS.@)
+ */
 HRESULT WINAPI DllCanUnloadNow( void )
 {
     return S_FALSE;
+}
+
+/***********************************************************************
+ *		DllRegisterServer (WMIUTILS.@)
+ */
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return __wine_register_resources( instance, NULL );
+}
+
+/***********************************************************************
+ *		DllUnregisterServer (WMIUTILS.@)
+ */
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return __wine_unregister_resources( instance, NULL );
 }

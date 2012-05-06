@@ -60,6 +60,7 @@
 #endif
 #ifdef HAVE_OPENSSL_SSL_H
 # include <openssl/ssl.h>
+# include <openssl/opensslv.h>
 #undef FAR
 #undef DSA
 #endif
@@ -113,7 +114,11 @@ static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
 static void *OpenSSL_ssl_handle;
 static void *OpenSSL_crypto_handle;
 
+#if defined(OPENSSL_VERSION_NUMBER) && (OPENSSL_VERSION_NUMBER > 0x10000000)
+static const SSL_METHOD *meth;
+#else
 static SSL_METHOD *meth;
+#endif
 static SSL_CTX *ctx;
 static int hostname_idx;
 static int error_idx;
@@ -140,12 +145,13 @@ MAKE_FUNCPTR(SSL_get_ex_new_index);
 MAKE_FUNCPTR(SSL_get_ex_data);
 MAKE_FUNCPTR(SSL_set_ex_data);
 MAKE_FUNCPTR(SSL_get_ex_data_X509_STORE_CTX_idx);
-MAKE_FUNCPTR(SSL_get_verify_result);
 MAKE_FUNCPTR(SSL_get_peer_certificate);
 MAKE_FUNCPTR(SSL_CTX_get_timeout);
 MAKE_FUNCPTR(SSL_CTX_set_timeout);
 MAKE_FUNCPTR(SSL_CTX_set_default_verify_paths);
 MAKE_FUNCPTR(SSL_CTX_set_verify);
+MAKE_FUNCPTR(SSL_get_current_cipher);
+MAKE_FUNCPTR(SSL_CIPHER_get_bits);
 
 /* OpenSSL's libcrypto functions that we use */
 MAKE_FUNCPTR(BIO_new_fp);
@@ -222,13 +228,15 @@ static DWORD netconn_verify_cert(PCCERT_CONTEXT cert, HCERTSTORE store,
     PCCERT_CHAIN_CONTEXT chain;
     char oid_server_auth[] = szOID_PKIX_KP_SERVER_AUTH;
     char *server_auth[] = { oid_server_auth };
-    DWORD err = ERROR_SUCCESS;
+    DWORD err = ERROR_SUCCESS, chainFlags = 0;
 
     TRACE("verifying %s\n", debugstr_w(server));
     chainPara.RequestedUsage.Usage.cUsageIdentifier = 1;
     chainPara.RequestedUsage.Usage.rgpszUsageIdentifier = server_auth;
-    if ((ret = CertGetCertificateChain(NULL, cert, NULL, store, &chainPara, 0,
-        NULL, &chain)))
+    if (!(security_flags & SECURITY_FLAG_IGNORE_REVOCATION))
+        chainFlags |= CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+    if ((ret = CertGetCertificateChain(NULL, cert, NULL, store, &chainPara,
+        chainFlags, NULL, &chain)))
     {
         if (chain->TrustStatus.dwErrorStatus)
         {
@@ -240,7 +248,8 @@ static DWORD netconn_verify_cert(PCCERT_CONTEXT cert, HCERTSTORE store,
                 CERT_TRUST_IS_REVOKED |
                 CERT_TRUST_IS_NOT_VALID_FOR_USAGE;
 
-            if (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_TIME_VALID)
+            if (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_TIME_VALID &&
+                !(security_flags & SECURITY_FLAG_IGNORE_CERT_DATE_INVALID))
                 err = ERROR_INTERNET_SEC_CERT_DATE_INVALID;
             else if (chain->TrustStatus.dwErrorStatus &
                      CERT_TRUST_IS_UNTRUSTED_ROOT &&
@@ -278,6 +287,7 @@ static DWORD netconn_verify_cert(PCCERT_CONTEXT cert, HCERTSTORE store,
             sslExtraPolicyPara.u.cbSize = sizeof(sslExtraPolicyPara);
             sslExtraPolicyPara.dwAuthType = AUTHTYPE_SERVER;
             sslExtraPolicyPara.pwszServerName = server;
+            sslExtraPolicyPara.fdwChecks = security_flags;
             policyPara.cbSize = sizeof(policyPara);
             policyPara.dwFlags = 0;
             policyPara.pvExtraPolicyPara = &sslExtraPolicyPara;
@@ -289,11 +299,7 @@ static DWORD netconn_verify_cert(PCCERT_CONTEXT cert, HCERTSTORE store,
             if (ret && policyStatus.dwError)
             {
                 if (policyStatus.dwError == CERT_E_CN_NO_MATCH)
-                {
-                    if (!(security_flags &
-                          SECURITY_FLAG_IGNORE_CERT_CN_INVALID))
-                        err = ERROR_INTERNET_SEC_CERT_CN_INVALID;
-                }
+                    err = ERROR_INTERNET_SEC_CERT_CN_INVALID;
                 else
                     err = ERROR_INTERNET_SEC_INVALID_CERT;
             }
@@ -362,7 +368,7 @@ static int netconn_secure_verify(int preverify_ok, X509_STORE_CTX *ctx)
 
 DWORD NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 {
-    connection->useSSL = FALSE;
+    connection->useSSL = useSSL;
     connection->socketFD = -1;
     if (useSSL)
     {
@@ -421,12 +427,13 @@ DWORD NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 	DYNSSL(SSL_get_ex_data);
 	DYNSSL(SSL_set_ex_data);
 	DYNSSL(SSL_get_ex_data_X509_STORE_CTX_idx);
-	DYNSSL(SSL_get_verify_result);
 	DYNSSL(SSL_get_peer_certificate);
 	DYNSSL(SSL_CTX_get_timeout);
 	DYNSSL(SSL_CTX_set_timeout);
 	DYNSSL(SSL_CTX_set_default_verify_paths);
 	DYNSSL(SSL_CTX_set_verify);
+        DYNSSL(SSL_get_current_cipher);
+        DYNSSL(SSL_CIPHER_get_bits);
 #undef DYNSSL
 
 #define DYNCRYPTO(x) \
@@ -537,10 +544,7 @@ void NETCON_unload(void)
 
 BOOL NETCON_connected(WININET_NETCONNECTION *connection)
 {
-    if (connection->socketFD == -1)
-        return FALSE;
-    else
-        return TRUE;
+    return connection->socketFD != -1;
 }
 
 /* translate a unix error code into a winsock one */
@@ -618,7 +622,7 @@ DWORD NETCON_create(WININET_NETCONNECTION *connection, int domain,
 	      int type, int protocol)
 {
 #ifdef SONAME_LIBSSL
-    if (connection->useSSL)
+    if (connection->ssl_s)
         return ERROR_NOT_SUPPORTED;
 #endif
 
@@ -640,13 +644,11 @@ DWORD NETCON_close(WININET_NETCONNECTION *connection)
     if (!NETCON_connected(connection)) return ERROR_SUCCESS;
 
 #ifdef SONAME_LIBSSL
-    if (connection->useSSL)
+    if (connection->ssl_s)
     {
         pSSL_shutdown(connection->ssl_s);
         pSSL_free(connection->ssl_s);
         connection->ssl_s = NULL;
-
-        connection->useSSL = FALSE;
     }
 #endif
 
@@ -664,27 +666,26 @@ DWORD NETCON_close(WININET_NETCONNECTION *connection)
  */
 DWORD NETCON_secure_connect(WININET_NETCONNECTION *connection, LPWSTR hostname)
 {
+    void *ssl_s;
     DWORD res = ERROR_NOT_SUPPORTED;
-#ifdef SONAME_LIBSSL
-    long verify_res;
 
+#ifdef SONAME_LIBSSL
     /* can't connect if we are already connected */
-    if (connection->useSSL)
+    if (connection->ssl_s)
     {
         ERR("already connected\n");
         return ERROR_INTERNET_CANNOT_CONNECT;
     }
 
-    connection->ssl_s = pSSL_new(ctx);
-    if (!connection->ssl_s)
+    ssl_s = pSSL_new(ctx);
+    if (!ssl_s)
     {
         ERR("SSL_new failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
-        res = ERROR_OUTOFMEMORY;
-        goto fail;
+        return ERROR_OUTOFMEMORY;
     }
 
-    if (!pSSL_set_fd(connection->ssl_s, connection->socketFD))
+    if (!pSSL_set_fd(ssl_s, connection->socketFD))
     {
         ERR("SSL_set_fd failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
@@ -692,45 +693,37 @@ DWORD NETCON_secure_connect(WININET_NETCONNECTION *connection, LPWSTR hostname)
         goto fail;
     }
 
-    if (!pSSL_set_ex_data(connection->ssl_s, hostname_idx, hostname))
+    if (!pSSL_set_ex_data(ssl_s, hostname_idx, hostname))
     {
         ERR("SSL_set_ex_data failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
         res = ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
         goto fail;
     }
-    if (!pSSL_set_ex_data(connection->ssl_s, conn_idx, connection))
+    if (!pSSL_set_ex_data(ssl_s, conn_idx, connection))
     {
         ERR("SSL_set_ex_data failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
         res = ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
         goto fail;
     }
-    if (pSSL_connect(connection->ssl_s) <= 0)
+    if (pSSL_connect(ssl_s) <= 0)
     {
-        res = (DWORD_PTR)pSSL_get_ex_data(connection->ssl_s, error_idx);
+        res = (DWORD_PTR)pSSL_get_ex_data(ssl_s, error_idx);
         if (!res)
             res = ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
         ERR("SSL_connect failed: %d\n", res);
         goto fail;
     }
-    verify_res = pSSL_get_verify_result(connection->ssl_s);
-    if (verify_res != X509_V_OK)
-    {
-        ERR("couldn't verify the security of the connection, %ld\n", verify_res);
-        /* FIXME: we should set an error and return, but we only warn at
-         * the moment */
-    }
 
-    connection->useSSL = TRUE;
+    connection->ssl_s = ssl_s;
     return ERROR_SUCCESS;
 
 fail:
-    if (connection->ssl_s)
+    if (ssl_s)
     {
-        pSSL_shutdown(connection->ssl_s);
-        pSSL_free(connection->ssl_s);
-        connection->ssl_s = NULL;
+        pSSL_shutdown(ssl_s);
+        pSSL_free(ssl_s);
     }
 #endif
     return res;
@@ -777,6 +770,10 @@ DWORD NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len
     else
     {
 #ifdef SONAME_LIBSSL
+        if(!connection->ssl_s) {
+            FIXME("not connected\n");
+            return ERROR_NOT_SUPPORTED;
+        }
 	if (flags)
             FIXME("SSL_write doesn't support any flags (%08x)\n", flags);
 	*sent = pSSL_write(connection->ssl_s, msg, len);
@@ -811,6 +808,10 @@ DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int 
     else
     {
 #ifdef SONAME_LIBSSL
+        if(!connection->ssl_s) {
+            FIXME("not connected\n");
+            return ERROR_NOT_SUPPORTED;
+        }
 	*recvd = pSSL_read(connection->ssl_s, buf, len);
 
         /* Check if EOF was received */
@@ -853,7 +854,7 @@ BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *avail
     else
     {
 #ifdef SONAME_LIBSSL
-        *available = pSSL_pending(connection->ssl_s);
+        *available = connection->ssl_s ? pSSL_pending(connection->ssl_s) : 0;
 #endif
     }
     return TRUE;
@@ -865,7 +866,7 @@ LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection)
     X509* cert;
     LPCVOID r = NULL;
 
-    if (!connection->useSSL)
+    if (!connection->ssl_s)
         return NULL;
 
     cert = pSSL_get_peer_certificate(connection->ssl_s);
@@ -873,6 +874,28 @@ LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection)
     return r;
 #else
     return NULL;
+#endif
+}
+
+int NETCON_GetCipherStrength(WININET_NETCONNECTION *connection)
+{
+#ifdef SONAME_LIBSSL
+#if defined(OPENSSL_VERSION_NUMBER) && (OPENSSL_VERSION_NUMBER >= 0x0090707f)
+    const SSL_CIPHER *cipher;
+#else
+    SSL_CIPHER *cipher;
+#endif
+    int bits = 0;
+
+    if (!connection->ssl_s)
+        return 0;
+    cipher = pSSL_get_current_cipher(connection->ssl_s);
+    if (!cipher)
+        return 0;
+    pSSL_CIPHER_get_bits(cipher, &bits);
+    return bits;
+#else
+    return 0;
 #endif
 }
 

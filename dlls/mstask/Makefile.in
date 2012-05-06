@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = mstask.dll
-IMPORTS   = uuid ole32 kernel32 ntdll
+IMPORTS   = uuid ole32
 
 C_SRCS = \
 	factory.c \
@@ -12,8 +8,7 @@ C_SRCS = \
 	task_scheduler.c \
 	task_trigger.c
 
-RC_SRCS = rsrc.rc
-
 IDL_I_SRCS = mstask_local.idl
+IDL_R_SRCS = mstask_local.idl
 
 @MAKE_DLL_RULES@

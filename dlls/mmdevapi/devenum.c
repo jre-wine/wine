@@ -29,7 +29,6 @@
 #endif
 
 #define NONAMELESSUNION
-#define CINTERFACE
 #define COBJMACROS
 #include "windef.h"
 #include "winbase.h"
@@ -72,7 +71,7 @@ static HKEY key_capture;
 
 typedef struct MMDevPropStoreImpl
 {
-    const IPropertyStoreVtbl *lpVtbl;
+    IPropertyStore IPropertyStore_iface;
     LONG ref;
     MMDevice *parent;
     DWORD access;
@@ -80,7 +79,7 @@ typedef struct MMDevPropStoreImpl
 
 typedef struct MMDevEnumImpl
 {
-    const IMMDeviceEnumeratorVtbl *lpVtbl;
+    IMMDeviceEnumerator IMMDeviceEnumerator_iface;
     LONG ref;
 } MMDevEnumImpl;
 
@@ -96,19 +95,40 @@ static const IMMEndpointVtbl MMEndpointVtbl;
 
 typedef struct MMDevColImpl
 {
-    const IMMDeviceCollectionVtbl *lpVtbl;
+    IMMDeviceCollection IMMDeviceCollection_iface;
     LONG ref;
     EDataFlow flow;
     DWORD state;
 } MMDevColImpl;
 
 typedef struct IPropertyBagImpl {
-    const IPropertyBagVtbl *lpVtbl;
+    IPropertyBag IPropertyBag_iface;
     GUID devguid;
 } IPropertyBagImpl;
+
 static const IPropertyBagVtbl PB_Vtbl;
 
 static HRESULT MMDevPropStore_Create(MMDevice *This, DWORD access, IPropertyStore **ppv);
+
+static inline MMDevPropStore *impl_from_IPropertyStore(IPropertyStore *iface)
+{
+    return CONTAINING_RECORD(iface, MMDevPropStore, IPropertyStore_iface);
+}
+
+static inline MMDevEnumImpl *impl_from_IMMDeviceEnumerator(IMMDeviceEnumerator *iface)
+{
+    return CONTAINING_RECORD(iface, MMDevEnumImpl, IMMDeviceEnumerator_iface);
+}
+
+static inline MMDevColImpl *impl_from_IMMDeviceCollection(IMMDeviceCollection *iface)
+{
+    return CONTAINING_RECORD(iface, MMDevColImpl, IMMDeviceCollection_iface);
+}
+
+static inline IPropertyBagImpl *impl_from_IPropertyBag(IPropertyBag *iface)
+{
+    return CONTAINING_RECORD(iface, IPropertyBagImpl, IPropertyBag_iface);
+}
 
 /* Creates or updates the state of a device
  * If GUID is null, a random guid will be assigned
@@ -151,8 +171,8 @@ static void MMDevice_Create(MMDevice **dev, WCHAR *name, GUID *id, EDataFlow flo
         return;
     }
     lstrcpyW(cur->alname, name);
-    cur->lpVtbl = &MMDeviceVtbl;
-    cur->lpEndpointVtbl = &MMEndpointVtbl;
+    cur->IMMDevice_iface.lpVtbl = &MMDeviceVtbl;
+    cur->IMMEndpoint_iface.lpVtbl = &MMEndpointVtbl;
     cur->ref = 0;
     InitializeCriticalSection(&cur->crst);
     cur->crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": MMDevice.crst");
@@ -226,9 +246,14 @@ static void MMDevice_Destroy(MMDevice *This)
     HeapFree(GetProcessHeap(), 0, This);
 }
 
+static inline MMDevice *impl_from_IMMDevice(IMMDevice *iface)
+{
+    return CONTAINING_RECORD(iface, MMDevice, IMMDevice_iface);
+}
+
 static HRESULT WINAPI MMDevice_QueryInterface(IMMDevice *iface, REFIID riid, void **ppv)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     TRACE("(%p)->(%s,%p)\n", iface, debugstr_guid(riid), ppv);
 
     if (!ppv)
@@ -238,7 +263,7 @@ static HRESULT WINAPI MMDevice_QueryInterface(IMMDevice *iface, REFIID riid, voi
         || IsEqualIID(riid, &IID_IMMDevice))
         *ppv = This;
     else if (IsEqualIID(riid, &IID_IMMEndpoint))
-        *ppv = &This->lpEndpointVtbl;
+        *ppv = &This->IMMEndpoint_iface;
     if (*ppv)
     {
         IUnknown_AddRef((IUnknown*)*ppv);
@@ -250,7 +275,7 @@ static HRESULT WINAPI MMDevice_QueryInterface(IMMDevice *iface, REFIID riid, voi
 
 static ULONG WINAPI MMDevice_AddRef(IMMDevice *iface)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     LONG ref;
 
     ref = InterlockedIncrement(&This->ref);
@@ -260,7 +285,7 @@ static ULONG WINAPI MMDevice_AddRef(IMMDevice *iface)
 
 static ULONG WINAPI MMDevice_Release(IMMDevice *iface)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     LONG ref;
 
     ref = InterlockedDecrement(&This->ref);
@@ -273,7 +298,7 @@ static HRESULT WINAPI MMDevice_Activate(IMMDevice *iface, REFIID riid, DWORD cls
     HRESULT hr = E_NOINTERFACE;
 
 #ifdef HAVE_OPENAL
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
 
     TRACE("(%p)->(%p,%x,%p,%p)\n", iface, riid, clsctx, params, ppv);
 
@@ -308,8 +333,8 @@ static HRESULT WINAPI MMDevice_Activate(IMMDevice *iface, REFIID riid, DWORD cls
             {
                 /* ::Load cannot assume the interface stays alive after the function returns,
                  * so just create the interface on the stack, saves a lot of complicated code */
-                IPropertyBagImpl bag = { &PB_Vtbl, This->devguid };
-                hr = IPersistPropertyBag_Load(ppb, (IPropertyBag*)&bag, NULL);
+                IPropertyBagImpl bag = { { &PB_Vtbl }, This->devguid };
+                hr = IPersistPropertyBag_Load(ppb, &bag.IPropertyBag_iface, NULL);
                 IPersistPropertyBag_Release(ppb);
                 if (FAILED(hr))
                     IBaseFilter_Release((IBaseFilter*)*ppv);
@@ -365,7 +390,7 @@ static HRESULT WINAPI MMDevice_Activate(IMMDevice *iface, REFIID riid, DWORD cls
 
 static HRESULT WINAPI MMDevice_OpenPropertyStore(IMMDevice *iface, DWORD access, IPropertyStore **ppv)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     TRACE("(%p)->(%x,%p)\n", This, access, ppv);
 
     if (!ppv)
@@ -375,7 +400,7 @@ static HRESULT WINAPI MMDevice_OpenPropertyStore(IMMDevice *iface, DWORD access,
 
 static HRESULT WINAPI MMDevice_GetId(IMMDevice *iface, WCHAR **itemid)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     WCHAR *str;
     GUID *id = &This->devguid;
     static const WCHAR formatW[] = { '{','0','.','0','.','0','.','0','0','0','0','0','0','0','0','}','.',
@@ -398,7 +423,7 @@ static HRESULT WINAPI MMDevice_GetId(IMMDevice *iface, WCHAR **itemid)
 
 static HRESULT WINAPI MMDevice_GetState(IMMDevice *iface, DWORD *state)
 {
-    MMDevice *This = (MMDevice *)iface;
+    MMDevice *This = impl_from_IMMDevice(iface);
     TRACE("(%p)->(%p)\n", iface, state);
 
     if (!state)
@@ -418,32 +443,32 @@ static const IMMDeviceVtbl MMDeviceVtbl =
     MMDevice_GetState
 };
 
-static MMDevice *get_this_from_endpoint(IMMEndpoint *iface)
+static inline MMDevice *impl_from_IMMEndpoint(IMMEndpoint *iface)
 {
-    return (MMDevice*)((char*)iface - offsetof(MMDevice,lpEndpointVtbl));
+    return CONTAINING_RECORD(iface, MMDevice, IMMEndpoint_iface);
 }
 
 static HRESULT WINAPI MMEndpoint_QueryInterface(IMMEndpoint *iface, REFIID riid, void **ppv)
 {
-    MMDevice *This = get_this_from_endpoint(iface);
-    return IMMDevice_QueryInterface((IMMDevice*)This, riid, ppv);
+    MMDevice *This = impl_from_IMMEndpoint(iface);
+    return IMMDevice_QueryInterface(&This->IMMDevice_iface, riid, ppv);
 }
 
 static ULONG WINAPI MMEndpoint_AddRef(IMMEndpoint *iface)
 {
-    MMDevice *This = get_this_from_endpoint(iface);
-    return IMMDevice_AddRef((IMMDevice*)This);
+    MMDevice *This = impl_from_IMMEndpoint(iface);
+    return IMMDevice_AddRef(&This->IMMDevice_iface);
 }
 
 static ULONG WINAPI MMEndpoint_Release(IMMEndpoint *iface)
 {
-    MMDevice *This = get_this_from_endpoint(iface);
-    return IMMDevice_Release((IMMDevice*)This);
+    MMDevice *This = impl_from_IMMEndpoint(iface);
+    return IMMDevice_Release(&This->IMMDevice_iface);
 }
 
 static HRESULT WINAPI MMEndpoint_GetDataFlow(IMMEndpoint *iface, EDataFlow *flow)
 {
-    MMDevice *This = get_this_from_endpoint(iface);
+    MMDevice *This = impl_from_IMMEndpoint(iface);
     if (!flow)
         return E_POINTER;
     *flow = This->flow;
@@ -466,11 +491,11 @@ static HRESULT MMDevCol_Create(IMMDeviceCollection **ppv, EDataFlow flow, DWORD 
     *ppv = NULL;
     if (!This)
         return E_OUTOFMEMORY;
-    This->lpVtbl = &MMDevColVtbl;
+    This->IMMDeviceCollection_iface.lpVtbl = &MMDevColVtbl;
     This->ref = 1;
     This->flow = flow;
     This->state = state;
-    *ppv = (IMMDeviceCollection*)This;
+    *ppv = &This->IMMDeviceCollection_iface;
     return S_OK;
 }
 
@@ -481,7 +506,7 @@ static void MMDevCol_Destroy(MMDevColImpl *This)
 
 static HRESULT WINAPI MMDevCol_QueryInterface(IMMDeviceCollection *iface, REFIID riid, void **ppv)
 {
-    MMDevColImpl *This = (MMDevColImpl*)iface;
+    MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
 
     if (!ppv)
         return E_POINTER;
@@ -498,7 +523,7 @@ static HRESULT WINAPI MMDevCol_QueryInterface(IMMDeviceCollection *iface, REFIID
 
 static ULONG WINAPI MMDevCol_AddRef(IMMDeviceCollection *iface)
 {
-    MMDevColImpl *This = (MMDevColImpl*)iface;
+    MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
     LONG ref = InterlockedIncrement(&This->ref);
     TRACE("Refcount now %i\n", ref);
     return ref;
@@ -506,7 +531,7 @@ static ULONG WINAPI MMDevCol_AddRef(IMMDeviceCollection *iface)
 
 static ULONG WINAPI MMDevCol_Release(IMMDeviceCollection *iface)
 {
-    MMDevColImpl *This = (MMDevColImpl*)iface;
+    MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
     LONG ref = InterlockedDecrement(&This->ref);
     TRACE("Refcount now %i\n", ref);
     if (!ref)
@@ -516,7 +541,7 @@ static ULONG WINAPI MMDevCol_Release(IMMDeviceCollection *iface)
 
 static HRESULT WINAPI MMDevCol_GetCount(IMMDeviceCollection *iface, UINT *numdevs)
 {
-    MMDevColImpl *This = (MMDevColImpl*)iface;
+    MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
     DWORD i;
 
     TRACE("(%p)->(%p)\n", This, numdevs);
@@ -536,7 +561,7 @@ static HRESULT WINAPI MMDevCol_GetCount(IMMDeviceCollection *iface, UINT *numdev
 
 static HRESULT WINAPI MMDevCol_Item(IMMDeviceCollection *iface, UINT n, IMMDevice **dev)
 {
-    MMDevColImpl *This = (MMDevColImpl*)iface;
+    MMDevColImpl *This = impl_from_IMMDeviceCollection(iface);
     DWORD i = 0, j = 0;
 
     TRACE("(%p)->(%u, %p)\n", This, n, dev);
@@ -550,7 +575,7 @@ static HRESULT WINAPI MMDevCol_Item(IMMDeviceCollection *iface, UINT n, IMMDevic
             && (cur->state & This->state)
             && i++ == n)
         {
-            *dev = (IMMDevice *)cur;
+            *dev = &cur->IMMDevice_iface;
             IMMDevice_AddRef(*dev);
             return S_OK;
         }
@@ -906,7 +931,7 @@ HRESULT MMDevEnum_Create(REFIID riid, void **ppv)
         if (!This)
             return E_OUTOFMEMORY;
         This->ref = 1;
-        This->lpVtbl = &MMDevEnumVtbl;
+        This->IMMDeviceEnumerator_iface.lpVtbl = &MMDevEnumVtbl;
         MMDevEnumerator = This;
 
         ret = RegCreateKeyExW(HKEY_LOCAL_MACHINE, software_mmdevapi, 0, NULL, 0, KEY_WRITE|KEY_READ, NULL, &root, NULL);
@@ -930,7 +955,7 @@ HRESULT MMDevEnum_Create(REFIID riid, void **ppv)
             DWORD len;
             PROPVARIANT pv = { VT_EMPTY };
 
-            len = sizeof(guidvalue);
+            len = sizeof(guidvalue)/sizeof(guidvalue[0]);
             ret = RegEnumKeyExW(cur, i++, guidvalue, &len, NULL, NULL, NULL, NULL);
             if (ret == ERROR_NO_MORE_ITEMS)
             {
@@ -982,7 +1007,7 @@ void MMDevEnum_Free(void)
 
 static HRESULT WINAPI MMDevEnum_QueryInterface(IMMDeviceEnumerator *iface, REFIID riid, void **ppv)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
 
     if (!ppv)
         return E_POINTER;
@@ -999,7 +1024,7 @@ static HRESULT WINAPI MMDevEnum_QueryInterface(IMMDeviceEnumerator *iface, REFII
 
 static ULONG WINAPI MMDevEnum_AddRef(IMMDeviceEnumerator *iface)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     LONG ref = InterlockedIncrement(&This->ref);
     TRACE("Refcount now %i\n", ref);
     return ref;
@@ -1007,7 +1032,7 @@ static ULONG WINAPI MMDevEnum_AddRef(IMMDeviceEnumerator *iface)
 
 static ULONG WINAPI MMDevEnum_Release(IMMDeviceEnumerator *iface)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     LONG ref = InterlockedDecrement(&This->ref);
     if (!ref)
         MMDevEnum_Free();
@@ -1017,7 +1042,7 @@ static ULONG WINAPI MMDevEnum_Release(IMMDeviceEnumerator *iface)
 
 static HRESULT WINAPI MMDevEnum_EnumAudioEndpoints(IMMDeviceEnumerator *iface, EDataFlow flow, DWORD mask, IMMDeviceCollection **devices)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     TRACE("(%p)->(%u,%u,%p)\n", This, flow, mask, devices);
     if (!devices)
         return E_POINTER;
@@ -1031,7 +1056,7 @@ static HRESULT WINAPI MMDevEnum_EnumAudioEndpoints(IMMDeviceEnumerator *iface, E
 
 static HRESULT WINAPI MMDevEnum_GetDefaultAudioEndpoint(IMMDeviceEnumerator *iface, EDataFlow flow, ERole role, IMMDevice **device)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     TRACE("(%p)->(%u,%u,%p)\n", This, flow, role, device);
 
     if (!device)
@@ -1039,9 +1064,9 @@ static HRESULT WINAPI MMDevEnum_GetDefaultAudioEndpoint(IMMDeviceEnumerator *ifa
     *device = NULL;
 
     if (flow == eRender)
-        *device = (IMMDevice*)MMDevice_def_play;
+        *device = &MMDevice_def_play->IMMDevice_iface;
     else if (flow == eCapture)
-        *device = (IMMDevice*)MMDevice_def_rec;
+        *device = &MMDevice_def_rec->IMMDevice_iface;
     else
     {
         WARN("Unknown flow %u\n", flow);
@@ -1056,7 +1081,7 @@ static HRESULT WINAPI MMDevEnum_GetDefaultAudioEndpoint(IMMDeviceEnumerator *ifa
 
 static HRESULT WINAPI MMDevEnum_GetDevice(IMMDeviceEnumerator *iface, const WCHAR *name, IMMDevice **device)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     DWORD i=0;
     IMMDevice *dev = NULL;
 
@@ -1064,7 +1089,7 @@ static HRESULT WINAPI MMDevEnum_GetDevice(IMMDeviceEnumerator *iface, const WCHA
     for (i = 0; i < MMDevice_count; ++i)
     {
         WCHAR *str;
-        dev = (IMMDevice*)MMDevice_head[i];
+        dev = &MMDevice_head[i]->IMMDevice_iface;
         IMMDevice_GetId(dev, &str);
 
         if (str && !lstrcmpW(str, name))
@@ -1086,7 +1111,7 @@ static HRESULT WINAPI MMDevEnum_GetDevice(IMMDeviceEnumerator *iface, const WCHA
 
 static HRESULT WINAPI MMDevEnum_RegisterEndpointNotificationCallback(IMMDeviceEnumerator *iface, IMMNotificationClient *client)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     TRACE("(%p)->(%p)\n", This, client);
     FIXME("stub\n");
     return S_OK;
@@ -1094,7 +1119,7 @@ static HRESULT WINAPI MMDevEnum_RegisterEndpointNotificationCallback(IMMDeviceEn
 
 static HRESULT WINAPI MMDevEnum_UnregisterEndpointNotificationCallback(IMMDeviceEnumerator *iface, IMMNotificationClient *client)
 {
-    MMDevEnumImpl *This = (MMDevEnumImpl*)iface;
+    MMDevEnumImpl *This = impl_from_IMMDeviceEnumerator(iface);
     TRACE("(%p)->(%p)\n", This, client);
     FIXME("stub\n");
     return S_OK;
@@ -1123,10 +1148,10 @@ static HRESULT MMDevPropStore_Create(MMDevice *parent, DWORD access, IPropertySt
         return E_INVALIDARG;
     }
     This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
-    *ppv = (IPropertyStore*)This;
+    *ppv = &This->IPropertyStore_iface;
     if (!This)
         return E_OUTOFMEMORY;
-    This->lpVtbl = &MMDevPropVtbl;
+    This->IPropertyStore_iface.lpVtbl = &MMDevPropVtbl;
     This->ref = 1;
     This->parent = parent;
     This->access = access;
@@ -1140,7 +1165,7 @@ static void MMDevPropStore_Destroy(MMDevPropStore *This)
 
 static HRESULT WINAPI MMDevPropStore_QueryInterface(IPropertyStore *iface, REFIID riid, void **ppv)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
 
     if (!ppv)
         return E_POINTER;
@@ -1157,7 +1182,7 @@ static HRESULT WINAPI MMDevPropStore_QueryInterface(IPropertyStore *iface, REFII
 
 static ULONG WINAPI MMDevPropStore_AddRef(IPropertyStore *iface)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
     LONG ref = InterlockedIncrement(&This->ref);
     TRACE("Refcount now %i\n", ref);
     return ref;
@@ -1165,7 +1190,7 @@ static ULONG WINAPI MMDevPropStore_AddRef(IPropertyStore *iface)
 
 static ULONG WINAPI MMDevPropStore_Release(IPropertyStore *iface)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
     LONG ref = InterlockedDecrement(&This->ref);
     TRACE("Refcount now %i\n", ref);
     if (!ref)
@@ -1175,7 +1200,7 @@ static ULONG WINAPI MMDevPropStore_Release(IPropertyStore *iface)
 
 static HRESULT WINAPI MMDevPropStore_GetCount(IPropertyStore *iface, DWORD *nprops)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
     WCHAR buffer[50];
     DWORD i = 0;
     HKEY propkey;
@@ -1202,7 +1227,7 @@ static HRESULT WINAPI MMDevPropStore_GetCount(IPropertyStore *iface, DWORD *npro
 
 static HRESULT WINAPI MMDevPropStore_GetAt(IPropertyStore *iface, DWORD prop, PROPERTYKEY *key)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
     WCHAR buffer[50];
     DWORD len = sizeof(buffer)/sizeof(*buffer);
     HRESULT hr;
@@ -1231,7 +1256,7 @@ static HRESULT WINAPI MMDevPropStore_GetAt(IPropertyStore *iface, DWORD prop, PR
 
 static HRESULT WINAPI MMDevPropStore_GetValue(IPropertyStore *iface, REFPROPERTYKEY key, PROPVARIANT *pv)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
     TRACE("(%p)->(\"%s,%u\", %p\n", This, debugstr_guid(&key->fmtid), key ? key->pid : 0, pv);
 
     if (!key || !pv)
@@ -1256,7 +1281,7 @@ static HRESULT WINAPI MMDevPropStore_GetValue(IPropertyStore *iface, REFPROPERTY
 
 static HRESULT WINAPI MMDevPropStore_SetValue(IPropertyStore *iface, REFPROPERTYKEY key, REFPROPVARIANT pv)
 {
-    MMDevPropStore *This = (MMDevPropStore*)iface;
+    MMDevPropStore *This = impl_from_IPropertyStore(iface);
 
     if (!key || !pv)
         return E_POINTER;
@@ -1309,7 +1334,7 @@ static ULONG WINAPI PB_Release(IPropertyBag *iface)
 static HRESULT WINAPI PB_Read(IPropertyBag *iface, LPCOLESTR name, VARIANT *var, IErrorLog *log)
 {
     static const WCHAR dsguid[] = { 'D','S','G','u','i','d', 0 };
-    IPropertyBagImpl *This = (IPropertyBagImpl*)iface;
+    IPropertyBagImpl *This = impl_from_IPropertyBag(iface);
     TRACE("Trying to read %s, type %u\n", debugstr_w(name), var->n1.n2.vt);
     if (!lstrcmpW(name, dsguid))
     {

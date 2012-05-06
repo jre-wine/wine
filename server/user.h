@@ -53,15 +53,20 @@ struct winstation
 
 struct desktop
 {
-    struct object        obj;            /* object header */
-    unsigned int         flags;          /* desktop flags */
-    struct winstation   *winstation;     /* winstation this desktop belongs to */
-    struct list          entry;          /* entry in winstation list of desktops */
-    struct window       *top_window;     /* desktop window for this desktop */
-    struct window       *msg_window;     /* HWND_MESSAGE top window */
-    struct hook_table   *global_hooks;   /* table of global hooks on this desktop */
-    struct timeout_user *close_timeout;  /* timeout before closing the desktop */
-    unsigned int         users;          /* processes and threads using this desktop */
+    struct object        obj;              /* object header */
+    unsigned int         flags;            /* desktop flags */
+    struct winstation   *winstation;       /* winstation this desktop belongs to */
+    struct list          entry;            /* entry in winstation list of desktops */
+    struct window       *top_window;       /* desktop window for this desktop */
+    struct window       *msg_window;       /* HWND_MESSAGE top window */
+    struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
+    struct timeout_user *close_timeout;    /* timeout before closing the desktop */
+    struct thread_input *foreground_input; /* thread input of foreground thread */
+    unsigned int         users;            /* processes and threads using this desktop */
+    int                  cursor_x;         /* cursor position */
+    int                  cursor_y;
+    rectangle_t          cursor_clip;      /* cursor clip rectangle */
+    unsigned char        keystate[256];    /* asynchronous key state */
 };
 
 /* user handles functions */
@@ -82,6 +87,7 @@ extern void cleanup_clipboard_thread( struct thread *thread );
 
 extern void remove_thread_hooks( struct thread *thread );
 extern unsigned int get_active_hooks(void);
+extern struct thread *get_first_global_hook( int id );
 
 /* queue functions */
 
@@ -114,6 +120,7 @@ extern rectangle_t *get_region_data_and_free( struct region *region, data_size_t
 extern int is_region_empty( const struct region *region );
 extern void get_region_extents( const struct region *region, rectangle_t *rect );
 extern void offset_region( struct region *region, int x, int y );
+extern void mirror_region( const rectangle_t *client_rect, struct region *region );
 extern struct region *copy_region( struct region *dst, const struct region *src );
 extern struct region *intersect_region( struct region *dst, const struct region *src1,
                                         const struct region *src2 );
@@ -129,6 +136,7 @@ extern int rect_in_region( struct region *region, const rectangle_t *rect );
 /* window functions */
 
 extern struct process *get_top_window_owner( struct desktop *desktop );
+extern void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect );
 extern void close_desktop_window( struct desktop *desktop );
 extern void destroy_window( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
@@ -163,5 +171,24 @@ extern void set_process_default_desktop( struct process *process, struct desktop
                                          obj_handle_t handle );
 extern void close_process_desktop( struct process *process );
 extern void close_thread_desktop( struct thread *thread );
+
+/* mirror a rectangle respective to the window client area */
+static inline void mirror_rect( const rectangle_t *client_rect, rectangle_t *rect )
+{
+    int width = client_rect->right - client_rect->left;
+    int tmp = rect->left;
+    rect->left = width - rect->right;
+    rect->right = width - tmp;
+}
+
+/* compute the intersection of two rectangles; return 0 if the result is empty */
+static inline int intersect_rect( rectangle_t *dst, const rectangle_t *src1, const rectangle_t *src2 )
+{
+    dst->left   = max( src1->left, src2->left );
+    dst->top    = max( src1->top, src2->top );
+    dst->right  = min( src1->right, src2->right );
+    dst->bottom = min( src1->bottom, src2->bottom );
+    return (dst->left < dst->right && dst->top < dst->bottom);
+}
 
 #endif  /* __WINE_SERVER_USER_H */

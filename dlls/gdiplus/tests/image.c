@@ -516,6 +516,8 @@ static void test_LockBits(void)
     GpRect rect;
     BitmapData bd;
     const INT WIDTH = 10, HEIGHT = 20;
+    ARGB color;
+    int y;
 
     bm = NULL;
     stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
@@ -526,14 +528,32 @@ static void test_LockBits(void)
     rect.Width = 4;
     rect.Height = 5;
 
+    stat = GdipBitmapSetPixel(bm, 2, 3, 0xffc30000);
+    expect(Ok, stat);
+
+    stat = GdipBitmapSetPixel(bm, 2, 8, 0xff480000);
+    expect(Ok, stat);
+
     /* read-only */
     stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
     expect(Ok, stat);
 
     if (stat == Ok) {
+        expect(0xc3, ((BYTE*)bd.Scan0)[2]);
+        expect(0x48, ((BYTE*)bd.Scan0)[2 + bd.Stride * 5]);
+
+        ((char*)bd.Scan0)[2] = 0xff;
+
         stat = GdipBitmapUnlockBits(bm, &bd);
         expect(Ok, stat);
     }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    stat = GdipBitmapSetPixel(bm, 2, 3, 0xffc30000);
+    expect(Ok, stat);
 
     /* read-only, with NULL rect -> whole bitmap lock */
     stat = GdipBitmapLockBits(bm, NULL, ImageLockModeRead, PixelFormat24bppRGB, &bd);
@@ -542,9 +562,15 @@ static void test_LockBits(void)
     expect(bd.Height, HEIGHT);
 
     if (stat == Ok) {
+        ((char*)bd.Scan0)[2 + 2*3 + 3*bd.Stride] = 0xff;
+
         stat = GdipBitmapUnlockBits(bm, &bd);
         expect(Ok, stat);
     }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
 
     /* read-only, consecutive */
     stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
@@ -568,6 +594,102 @@ static void test_LockBits(void)
 
     stat = GdipBitmapUnlockBits(bm, &bd);
     expect(Ok, stat);
+
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat24bppRGB, NULL, &bm);
+    expect(Ok, stat);
+
+    stat = GdipBitmapSetPixel(bm, 2, 3, 0xffff0000);
+    expect(Ok, stat);
+
+    stat = GdipBitmapSetPixel(bm, 2, 8, 0xffc30000);
+    expect(Ok, stat);
+
+    /* write, no conversion */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite, PixelFormat24bppRGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        /* all bits are readable, inside the rect or not */
+        expect(0xff, ((BYTE*)bd.Scan0)[2]);
+        expect(0xc3, ((BYTE*)bd.Scan0)[2 + bd.Stride * 5]);
+
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    /* read, conversion */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        expect(0xff, ((BYTE*)bd.Scan0)[2]);
+        if (0)
+            /* Areas outside the rectangle appear to be uninitialized */
+            ok(0xc3 != ((BYTE*)bd.Scan0)[2 + bd.Stride * 5], "original image bits are readable\n");
+
+        ((BYTE*)bd.Scan0)[2] = 0xc3;
+
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    /* writes do not work in read mode if there was a conversion */
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
+    /* read/write, conversion */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead|ImageLockModeWrite, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        expect(0xff, ((BYTE*)bd.Scan0)[2]);
+        ((BYTE*)bd.Scan0)[1] = 0x88;
+        if (0)
+            /* Areas outside the rectangle appear to be uninitialized */
+            ok(0xc3 != ((BYTE*)bd.Scan0)[2 + bd.Stride * 5], "original image bits are readable\n");
+
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xffff8800, color);
+
+    /* write, conversion */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    if (stat == Ok) {
+        if (0)
+        {
+            /* This is completely uninitialized. */
+            ok(0xff != ((BYTE*)bd.Scan0)[2], "original image bits are readable\n");
+            ok(0xc3 != ((BYTE*)bd.Scan0)[2 + bd.Stride * 5], "original image bits are readable\n");
+        }
+
+        /* Initialize the buffer so the unlock doesn't access undefined memory */
+        for (y=0; y<5; y++)
+            memset(((BYTE*)bd.Scan0) + bd.Stride * y, 0, 12);
+
+        ((BYTE*)bd.Scan0)[0] = 0x12;
+        ((BYTE*)bd.Scan0)[1] = 0x34;
+        ((BYTE*)bd.Scan0)[2] = 0x56;
+
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xff563412, color);
+
+    stat = GdipBitmapGetPixel(bm, 2, 8, &color);
+    expect(Ok, stat);
+    expect(0xffc30000, color);
 
     stat = GdipDisposeImage((GpImage*)bm);
     expect(Ok, stat);
@@ -609,6 +731,10 @@ static void test_LockBits(void)
         expect(Ok, stat);
     }
 
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xffff0000, color);
+
     stat = GdipDisposeImage((GpImage*)bm);
     expect(Ok, stat);
 
@@ -617,6 +743,90 @@ static void test_LockBits(void)
     expect(Ok, stat);
     stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead, PixelFormat24bppRGB, &bd);
     expect(Ok, stat);
+    stat = GdipDisposeImage((GpImage*)bm);
+    expect(Ok, stat);
+}
+
+static void test_LockBits_UserBuf(void)
+{
+    GpStatus stat;
+    GpBitmap *bm;
+    GpRect rect;
+    BitmapData bd;
+    const INT WIDTH = 10, HEIGHT = 20;
+    DWORD bits[200];
+    ARGB color;
+
+    bm = NULL;
+    stat = GdipCreateBitmapFromScan0(WIDTH, HEIGHT, 0, PixelFormat32bppARGB, NULL, &bm);
+    expect(Ok, stat);
+
+    memset(bits, 0xaa, sizeof(bits));
+
+    rect.X = 2;
+    rect.Y = 3;
+    rect.Width = 4;
+    rect.Height = 5;
+
+    bd.Width = 4;
+    bd.Height = 6;
+    bd.Stride = WIDTH * 4;
+    bd.PixelFormat = PixelFormat32bppARGB;
+    bd.Scan0 = &bits[2+3*WIDTH];
+    bd.Reserved = 0xaaaaaaaa;
+
+    /* read-only */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead|ImageLockModeUserInputBuf, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    expect(0xaaaaaaaa, bits[0]);
+    expect(0, bits[2+3*WIDTH]);
+
+    bits[2+3*WIDTH] = 0xdeadbeef;
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0, color);
+
+    /* write-only */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeWrite|ImageLockModeUserInputBuf, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    expect(0xdeadbeef, bits[2+3*WIDTH]);
+    bits[2+3*WIDTH] = 0x12345678;
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0x12345678, color);
+
+    bits[2+3*WIDTH] = 0;
+
+    /* read/write */
+    stat = GdipBitmapLockBits(bm, &rect, ImageLockModeRead|ImageLockModeWrite|ImageLockModeUserInputBuf, PixelFormat32bppARGB, &bd);
+    expect(Ok, stat);
+
+    expect(0x12345678, bits[2+3*WIDTH]);
+    bits[2+3*WIDTH] = 0xdeadbeef;
+
+    if (stat == Ok) {
+        stat = GdipBitmapUnlockBits(bm, &bd);
+        expect(Ok, stat);
+    }
+
+    stat = GdipBitmapGetPixel(bm, 2, 3, &color);
+    expect(Ok, stat);
+    expect(0xdeadbeef, color);
+
     stat = GdipDisposeImage((GpImage*)bm);
     expect(Ok, stat);
 }
@@ -734,6 +944,115 @@ static void test_GdipGetImageFlags(void)
 
     stat = GdipGetImageFlags(img, NULL);
     expect(InvalidParameter, stat);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat1bppIndexed, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat4bppIndexed, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat8bppIndexed, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat16bppGrayScale, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsNone, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat16bppRGB555, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsNone, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat16bppRGB565, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsNone, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat16bppARGB1555, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat24bppRGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsNone, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat32bppRGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsNone, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat32bppARGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat32bppPARGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    stat = GdipGetImageFlags(img, &flags);
+    expect(Ok, stat);
+    expect(ImageFlagsHasAlpha, flags);
+    GdipDisposeImage(img);
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat48bppRGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    if (stat == Ok)
+    {
+        stat = GdipGetImageFlags(img, &flags);
+        expect(Ok, stat);
+        expect(ImageFlagsNone, flags);
+        GdipDisposeImage(img);
+    }
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat64bppARGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    if (stat == Ok)
+    {
+        expect(Ok, stat);
+        stat = GdipGetImageFlags(img, &flags);
+        expect(Ok, stat);
+        expect(ImageFlagsHasAlpha, flags);
+        GdipDisposeImage(img);
+    }
+
+    stat = GdipCreateBitmapFromScan0(10, 10, 10, PixelFormat64bppPARGB, NULL, (GpBitmap**)&img);
+    expect(Ok, stat);
+    if (stat == Ok)
+    {
+        expect(Ok, stat);
+        stat = GdipGetImageFlags(img, &flags);
+        expect(Ok, stat);
+        expect(ImageFlagsHasAlpha, flags);
+        GdipDisposeImage(img);
+    }
 }
 
 static void test_GdipCloneImage(void)
@@ -828,6 +1147,7 @@ static void test_fromhicon(void)
        expect(Ok, stat);
        expect(ImageTypeBitmap, type);
        stat = GdipGetImagePixelFormat((GpImage*)bitmap, &format);
+       expect(Ok, stat);
        expect(PixelFormat32bppARGB, format);
        /* raw format */
        expect_rawformat(&ImageFormatMemoryBMP, (GpImage*)bitmap, __LINE__, FALSE);
@@ -864,6 +1184,7 @@ static void test_fromhicon(void)
         expect(Ok, stat);
         expect(ImageTypeBitmap, type);
         stat = GdipGetImagePixelFormat((GpImage*)bitmap, &format);
+	expect(Ok, stat);
         expect(PixelFormat32bppARGB, format);
         /* raw format */
         expect_rawformat(&ImageFormatMemoryBMP, (GpImage*)bitmap, __LINE__, FALSE);
@@ -1459,7 +1780,7 @@ static void test_palette(void)
     expect(0xff000000, color);
 
     stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffffffff);
-    todo_wine ok((stat == Ok) ||
+    ok((stat == Ok) ||
        broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
 
     if (stat == Ok)
@@ -1492,7 +1813,7 @@ static void test_palette(void)
     expect(0xff000000, color);
 
     stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffff00ff);
-    todo_wine ok((stat == Ok) ||
+    ok((stat == Ok) ||
        broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
 
     if (stat == Ok)
@@ -1525,7 +1846,7 @@ static void test_palette(void)
     expect(0xff000000, color);
 
     stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffcccccc);
-    todo_wine ok((stat == Ok) ||
+    ok((stat == Ok) ||
        broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
 
     if (stat == Ok)
@@ -2141,6 +2462,29 @@ static void test_colorkey(void)
     GdipDisposeImageAttributes(imageattr);
 }
 
+static void test_dispose(void)
+{
+    GpStatus stat;
+    GpImage *image;
+    char invalid_image[256];
+
+    stat = GdipDisposeImage(NULL);
+    expect(InvalidParameter, stat);
+
+    stat = GdipCreateBitmapFromScan0(2, 2, 0, PixelFormat32bppARGB, NULL, (GpBitmap**)&image);
+    expect(Ok, stat);
+
+    stat = GdipDisposeImage(image);
+    expect(Ok, stat);
+
+    stat = GdipDisposeImage(image);
+    expect(ObjectBusy, stat);
+
+    memset(invalid_image, 0, 256);
+    stat = GdipDisposeImage((GpImage*)invalid_image);
+    expect(ObjectBusy, stat);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -2161,6 +2505,7 @@ START_TEST(image)
     test_SavingImages();
     test_encoders();
     test_LockBits();
+    test_LockBits_UserBuf();
     test_GdipCreateBitmapFromHBITMAP();
     test_GdipGetImageFlags();
     test_GdipCloneImage();
@@ -2180,6 +2525,7 @@ START_TEST(image)
     test_rotateflip();
     test_remaptable();
     test_colorkey();
+    test_dispose();
 
     GdiplusShutdown(gdiplusToken);
 }

@@ -88,9 +88,7 @@ typedef struct
 } WITHREADERROR, *LPWITHREADERROR;
 
 static DWORD g_dwTlsErrIndex = TLS_OUT_OF_INDEXES;
-static HMODULE WININET_hModule;
-
-#define HANDLE_CHUNK_SIZE 0x10
+HMODULE WININET_hModule;
 
 static CRITICAL_SECTION WININET_cs;
 static CRITICAL_SECTION_DEBUG WININET_cs_debug = 
@@ -101,9 +99,9 @@ static CRITICAL_SECTION_DEBUG WININET_cs_debug =
 };
 static CRITICAL_SECTION WININET_cs = { &WININET_cs_debug, -1, 0, 0, 0, 0 };
 
-static object_header_t **WININET_Handles;
-static UINT_PTR WININET_dwNextHandle;
-static UINT_PTR WININET_dwMaxHandles;
+static object_header_t **handle_table;
+static UINT_PTR next_handle;
+static UINT_PTR handle_table_size;
 
 typedef struct
 {
@@ -119,48 +117,70 @@ static const WCHAR szInternetSettings[] =
 static const WCHAR szProxyServer[] = { 'P','r','o','x','y','S','e','r','v','e','r', 0 };
 static const WCHAR szProxyEnable[] = { 'P','r','o','x','y','E','n','a','b','l','e', 0 };
 
-HINTERNET WININET_AllocHandle( object_header_t *info )
+void *alloc_object(object_header_t *parent, const object_vtbl_t *vtbl, size_t size)
 {
-    object_header_t **p;
     UINT_PTR handle = 0, num;
+    object_header_t *ret;
+    object_header_t **p;
+    BOOL res = TRUE;
 
-    list_init( &info->children );
+    ret = heap_alloc_zero(size);
+    if(!ret)
+        return NULL;
+
+    list_init(&ret->children);
 
     EnterCriticalSection( &WININET_cs );
-    if( !WININET_dwMaxHandles )
-    {
-        num = HANDLE_CHUNK_SIZE;
-        p = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, 
-                   sizeof (*WININET_Handles)* num);
-        if( !p )
-            goto end;
-        WININET_Handles = p;
-        WININET_dwMaxHandles = num;
-    }
-    if( WININET_dwMaxHandles == WININET_dwNextHandle )
-    {
-        num = WININET_dwMaxHandles + HANDLE_CHUNK_SIZE;
-        p = HeapReAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
-                   WININET_Handles, sizeof (*WININET_Handles)* num);
-        if( !p )
-            goto end;
-        WININET_Handles = p;
-        WININET_dwMaxHandles = num;
+
+    if(!handle_table_size) {
+        num = 16;
+        p = heap_alloc_zero(sizeof(handle_table[0]) * num);
+        if(p) {
+            handle_table = p;
+            handle_table_size = num;
+            next_handle = 1;
+        }else {
+            res = FALSE;
+        }
+    }else if(next_handle == handle_table_size) {
+        num = handle_table_size * 2;
+        p = heap_realloc_zero(handle_table, sizeof(handle_table[0]) * num);
+        if(p) {
+            handle_table = p;
+            handle_table_size = num;
+        }else {
+            res = FALSE;
+        }
     }
 
-    handle = WININET_dwNextHandle;
-    if( WININET_Handles[handle] )
-        ERR("handle isn't free but should be\n");
-    WININET_Handles[handle] = WININET_AddRef( info );
+    if(res) {
+        handle = next_handle;
+        if(handle_table[handle])
+            ERR("handle isn't free but should be\n");
+        handle_table[handle] = ret;
+        ret->valid_handle = TRUE;
 
-    while( WININET_Handles[WININET_dwNextHandle] && 
-           (WININET_dwNextHandle < WININET_dwMaxHandles ) )
-        WININET_dwNextHandle++;
-    
-end:
+        while(handle_table[next_handle] && next_handle < handle_table_size)
+            next_handle++;
+    }
+
     LeaveCriticalSection( &WININET_cs );
 
-    return info->hInternet = (HINTERNET) (handle+1);
+    if(!res) {
+        heap_free(ret);
+        return NULL;
+    }
+
+    ret->vtbl = vtbl;
+    ret->refs = 1;
+    ret->hInternet = (HINTERNET)handle;
+
+    if(parent) {
+        ret->lpfnStatusCB = parent->lpfnStatusCB;
+        ret->dwInternalFlags = parent->dwInternalFlags & INET_CALLBACKW;
+    }
+
+    return ret;
 }
 
 object_header_t *WININET_AddRef( object_header_t *info )
@@ -170,16 +190,15 @@ object_header_t *WININET_AddRef( object_header_t *info )
     return info;
 }
 
-object_header_t *WININET_GetObject( HINTERNET hinternet )
+object_header_t *get_handle_object( HINTERNET hinternet )
 {
     object_header_t *info = NULL;
     UINT_PTR handle = (UINT_PTR) hinternet;
 
     EnterCriticalSection( &WININET_cs );
 
-    if( (handle > 0) && ( handle <= WININET_dwMaxHandles ) && 
-        WININET_Handles[handle-1] )
-        info = WININET_AddRef( WININET_Handles[handle-1] );
+    if(handle > 0 && handle < handle_table_size && handle_table[handle] && handle_table[handle]->valid_handle)
+        info = WININET_AddRef(handle_table[handle]);
 
     LeaveCriticalSection( &WININET_cs );
 
@@ -188,12 +207,31 @@ object_header_t *WININET_GetObject( HINTERNET hinternet )
     return info;
 }
 
+static void invalidate_handle(object_header_t *info)
+{
+    object_header_t *child, *next;
+
+    if(!info->valid_handle)
+        return;
+    info->valid_handle = FALSE;
+
+    /* Free all children as native does */
+    LIST_FOR_EACH_ENTRY_SAFE( child, next, &info->children, object_header_t, entry )
+    {
+        TRACE("invalidating child handle %p for parent %p\n", child->hInternet, info);
+        invalidate_handle( child );
+    }
+
+    WININET_Release(info);
+}
+
 BOOL WININET_Release( object_header_t *info )
 {
     ULONG refs = InterlockedDecrement(&info->refs);
     TRACE( "object %p refcount = %d\n", info, refs );
     if( !refs )
     {
+        invalidate_handle(info);
         if ( info->vtbl->CloseConnection )
         {
             TRACE( "closing connection %p\n", info);
@@ -211,55 +249,22 @@ BOOL WININET_Release( object_header_t *info )
         if ( info->htype != WH_HINIT )
             list_remove( &info->entry );
         info->vtbl->Destroy( info );
+
+        if(info->hInternet) {
+            UINT_PTR handle = (UINT_PTR)info->hInternet;
+
+            EnterCriticalSection( &WININET_cs );
+
+            handle_table[handle] = NULL;
+            if(next_handle > handle)
+                next_handle = handle;
+
+            LeaveCriticalSection( &WININET_cs );
+        }
+
+        heap_free(info);
     }
     return TRUE;
-}
-
-BOOL WININET_FreeHandle( HINTERNET hinternet )
-{
-    BOOL ret = FALSE;
-    UINT_PTR handle = (UINT_PTR) hinternet;
-    object_header_t *info = NULL, *child, *next;
-
-    EnterCriticalSection( &WININET_cs );
-
-    if( (handle > 0) && ( handle <= WININET_dwMaxHandles ) )
-    {
-        handle--;
-        if( WININET_Handles[handle] )
-        {
-            info = WININET_Handles[handle];
-            TRACE( "destroying handle %ld for object %p\n", handle+1, info);
-            WININET_Handles[handle] = NULL;
-            ret = TRUE;
-        }
-    }
-
-    LeaveCriticalSection( &WININET_cs );
-
-    /* As on native when the equivalent of WININET_Release is called, the handle
-     * is already invalid, but if a new handle is created at this time it does
-     * not yet get assigned the freed handle number */
-    if( info )
-    {
-        /* Free all children as native does */
-        LIST_FOR_EACH_ENTRY_SAFE( child, next, &info->children, object_header_t, entry )
-        {
-            TRACE( "freeing child handle %ld for parent handle %ld\n",
-                   (UINT_PTR)child->hInternet, handle+1);
-            WININET_FreeHandle( child->hInternet );
-        }
-        WININET_Release( info );
-    }
-
-    EnterCriticalSection( &WININET_cs );
-
-    if( WININET_dwNextHandle > handle && !WININET_Handles[handle] )
-        WININET_dwNextHandle = handle;
-
-    LeaveCriticalSection( &WININET_cs );
-
-    return ret;
 }
 
 /***********************************************************************
@@ -598,12 +603,12 @@ static BOOL INTERNET_ConfigureProxy( appinfo_t *lpwai )
 
     if (wpi.dwProxyEnabled)
     {
-        lpwai->dwAccessType = INTERNET_OPEN_TYPE_PROXY;
-        lpwai->lpszProxy = wpi.lpszProxyServer;
+        lpwai->accessType = INTERNET_OPEN_TYPE_PROXY;
+        lpwai->proxy = wpi.lpszProxyServer;
         return TRUE;
     }
 
-    lpwai->dwAccessType = INTERNET_OPEN_TYPE_DIRECT;
+    lpwai->accessType = INTERNET_OPEN_TYPE_DIRECT;
     return FALSE;
 }
 
@@ -676,12 +681,11 @@ static VOID APPINFO_Destroy(object_header_t *hdr)
 
     TRACE("%p\n",lpwai);
 
-    HeapFree(GetProcessHeap(), 0, lpwai->lpszAgent);
-    HeapFree(GetProcessHeap(), 0, lpwai->lpszProxy);
-    HeapFree(GetProcessHeap(), 0, lpwai->lpszProxyBypass);
-    HeapFree(GetProcessHeap(), 0, lpwai->lpszProxyUsername);
-    HeapFree(GetProcessHeap(), 0, lpwai->lpszProxyPassword);
-    HeapFree(GetProcessHeap(), 0, lpwai);
+    HeapFree(GetProcessHeap(), 0, lpwai->agent);
+    HeapFree(GetProcessHeap(), 0, lpwai->proxy);
+    HeapFree(GetProcessHeap(), 0, lpwai->proxyBypass);
+    HeapFree(GetProcessHeap(), 0, lpwai->proxyUsername);
+    HeapFree(GetProcessHeap(), 0, lpwai->proxyPassword);
 }
 
 static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
@@ -707,14 +711,14 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
         bufsize = *size;
 
         if (unicode) {
-            DWORD len = ai->lpszAgent ? strlenW(ai->lpszAgent) : 0;
+            DWORD len = ai->agent ? strlenW(ai->agent) : 0;
 
             *size = (len + 1) * sizeof(WCHAR);
             if(!buffer || bufsize < *size)
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            if (ai->lpszAgent)
-                strcpyW(buffer, ai->lpszAgent);
+            if (ai->agent)
+                strcpyW(buffer, ai->agent);
             else
                 *(WCHAR *)buffer = 0;
             /* If the buffer is copied, the returned length doesn't include
@@ -722,15 +726,15 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
              */
             *size = len * sizeof(WCHAR);
         }else {
-            if (ai->lpszAgent)
-                *size = WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, NULL, 0, NULL, NULL);
+            if (ai->agent)
+                *size = WideCharToMultiByte(CP_ACP, 0, ai->agent, -1, NULL, 0, NULL, NULL);
             else
                 *size = 1;
             if(!buffer || bufsize < *size)
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            if (ai->lpszAgent)
-                WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, buffer, *size, NULL, NULL);
+            if (ai->agent)
+                WideCharToMultiByte(CP_ACP, 0, ai->agent, -1, buffer, *size, NULL, NULL);
             else
                 *(char *)buffer = 0;
             /* If the buffer is copied, the returned length doesn't include
@@ -748,10 +752,10 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             DWORD proxyBytesRequired = 0, proxyBypassBytesRequired = 0;
             LPWSTR proxy, proxy_bypass;
 
-            if (ai->lpszProxy)
-                proxyBytesRequired = (lstrlenW(ai->lpszProxy) + 1) * sizeof(WCHAR);
-            if (ai->lpszProxyBypass)
-                proxyBypassBytesRequired = (lstrlenW(ai->lpszProxyBypass) + 1) * sizeof(WCHAR);
+            if (ai->proxy)
+                proxyBytesRequired = (lstrlenW(ai->proxy) + 1) * sizeof(WCHAR);
+            if (ai->proxyBypass)
+                proxyBypassBytesRequired = (lstrlenW(ai->proxyBypass) + 1) * sizeof(WCHAR);
             if (*size < sizeof(INTERNET_PROXY_INFOW) + proxyBytesRequired + proxyBypassBytesRequired)
             {
                 *size = sizeof(INTERNET_PROXY_INFOW) + proxyBytesRequired + proxyBypassBytesRequired;
@@ -760,16 +764,16 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             proxy = (LPWSTR)((LPBYTE)buffer + sizeof(INTERNET_PROXY_INFOW));
             proxy_bypass = (LPWSTR)((LPBYTE)buffer + sizeof(INTERNET_PROXY_INFOW) + proxyBytesRequired);
 
-            pi->dwAccessType = ai->dwAccessType;
+            pi->dwAccessType = ai->accessType;
             pi->lpszProxy = NULL;
             pi->lpszProxyBypass = NULL;
-            if (ai->lpszProxy) {
-                lstrcpyW(proxy, ai->lpszProxy);
+            if (ai->proxy) {
+                lstrcpyW(proxy, ai->proxy);
                 pi->lpszProxy = proxy;
             }
 
-            if (ai->lpszProxyBypass) {
-                lstrcpyW(proxy_bypass, ai->lpszProxyBypass);
+            if (ai->proxyBypass) {
+                lstrcpyW(proxy_bypass, ai->proxyBypass);
                 pi->lpszProxyBypass = proxy_bypass;
             }
 
@@ -780,10 +784,10 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             DWORD proxyBytesRequired = 0, proxyBypassBytesRequired = 0;
             LPSTR proxy, proxy_bypass;
 
-            if (ai->lpszProxy)
-                proxyBytesRequired = WideCharToMultiByte(CP_ACP, 0, ai->lpszProxy, -1, NULL, 0, NULL, NULL);
-            if (ai->lpszProxyBypass)
-                proxyBypassBytesRequired = WideCharToMultiByte(CP_ACP, 0, ai->lpszProxyBypass, -1,
+            if (ai->proxy)
+                proxyBytesRequired = WideCharToMultiByte(CP_ACP, 0, ai->proxy, -1, NULL, 0, NULL, NULL);
+            if (ai->proxyBypass)
+                proxyBypassBytesRequired = WideCharToMultiByte(CP_ACP, 0, ai->proxyBypass, -1,
                         NULL, 0, NULL, NULL);
             if (*size < sizeof(INTERNET_PROXY_INFOA) + proxyBytesRequired + proxyBypassBytesRequired)
             {
@@ -793,16 +797,16 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             proxy = (LPSTR)((LPBYTE)buffer + sizeof(INTERNET_PROXY_INFOA));
             proxy_bypass = (LPSTR)((LPBYTE)buffer + sizeof(INTERNET_PROXY_INFOA) + proxyBytesRequired);
 
-            pi->dwAccessType = ai->dwAccessType;
+            pi->dwAccessType = ai->accessType;
             pi->lpszProxy = NULL;
             pi->lpszProxyBypass = NULL;
-            if (ai->lpszProxy) {
-                WideCharToMultiByte(CP_ACP, 0, ai->lpszProxy, -1, proxy, proxyBytesRequired, NULL, NULL);
+            if (ai->proxy) {
+                WideCharToMultiByte(CP_ACP, 0, ai->proxy, -1, proxy, proxyBytesRequired, NULL, NULL);
                 pi->lpszProxy = proxy;
             }
 
-            if (ai->lpszProxyBypass) {
-                WideCharToMultiByte(CP_ACP, 0, ai->lpszProxyBypass, -1, proxy_bypass,
+            if (ai->proxyBypass) {
+                WideCharToMultiByte(CP_ACP, 0, ai->proxyBypass, -1, proxy_bypass,
                         proxyBypassBytesRequired, NULL, NULL);
                 pi->lpszProxyBypass = proxy_bypass;
             }
@@ -842,7 +846,6 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
     LPCWSTR lpszProxy, LPCWSTR lpszProxyBypass, DWORD dwFlags)
 {
     appinfo_t *lpwai = NULL;
-    HINTERNET handle = NULL;
 
     if (TRACE_ON(wininet)) {
 #define FE(x) { x, #x }
@@ -872,43 +875,28 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
     /* Clear any error information */
     INTERNET_SetLastError(0);
 
-    lpwai = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(appinfo_t));
-    if (NULL == lpwai)
-    {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-	goto lend;
+    lpwai = alloc_object(NULL, &APPINFOVtbl, sizeof(appinfo_t));
+    if (!lpwai) {
+        SetLastError(ERROR_OUTOFMEMORY);
+        return NULL;
     }
 
     lpwai->hdr.htype = WH_HINIT;
-    lpwai->hdr.vtbl = &APPINFOVtbl;
     lpwai->hdr.dwFlags = dwFlags;
-    lpwai->hdr.refs = 1;
-    lpwai->dwAccessType = dwAccessType;
-    lpwai->lpszProxyUsername = NULL;
-    lpwai->lpszProxyPassword = NULL;
+    lpwai->accessType = dwAccessType;
+    lpwai->proxyUsername = NULL;
+    lpwai->proxyPassword = NULL;
 
-    handle = WININET_AllocHandle( &lpwai->hdr );
-    if( !handle )
-    {
-        HeapFree( GetProcessHeap(), 0, lpwai );
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-	goto lend;
-    }
-
-    lpwai->lpszAgent = heap_strdupW(lpszAgent);
+    lpwai->agent = heap_strdupW(lpszAgent);
     if(dwAccessType == INTERNET_OPEN_TYPE_PRECONFIG)
         INTERNET_ConfigureProxy( lpwai );
     else
-        lpwai->lpszProxy = heap_strdupW(lpszProxy);
-    lpwai->lpszProxyBypass = heap_strdupW(lpszProxyBypass);
-
-lend:
-    if( lpwai )
-        WININET_Release( &lpwai->hdr );
+        lpwai->proxy = heap_strdupW(lpszProxy);
+    lpwai->proxyBypass = heap_strdupW(lpszProxyBypass);
 
     TRACE("returning %p\n", lpwai);
 
-    return handle;
+    return lpwai->hdr.hInternet;
 }
 
 
@@ -1142,7 +1130,7 @@ HINTERNET WINAPI InternetConnectW(HINTERNET hInternet,
         return NULL;
     }
 
-    hIC = (appinfo_t*)WININET_GetObject( hInternet );
+    hIC = (appinfo_t*)get_handle_object( hInternet );
     if ( (hIC == NULL) || (hIC->hdr.htype != WH_HINIT) )
     {
         res = ERROR_INVALID_HANDLE;
@@ -1249,7 +1237,7 @@ BOOL WINAPI InternetFindNextFileW(HINTERNET hFind, LPVOID lpvFindData)
 
     TRACE("\n");
 
-    hdr = WININET_GetObject(hFind);
+    hdr = get_handle_object(hFind);
     if(!hdr) {
         WARN("Invalid handle\n");
         SetLastError(ERROR_INVALID_HANDLE);
@@ -1282,19 +1270,18 @@ BOOL WINAPI InternetFindNextFileW(HINTERNET hFind, LPVOID lpvFindData)
  */
 BOOL WINAPI InternetCloseHandle(HINTERNET hInternet)
 {
-    object_header_t *lpwh;
+    object_header_t *obj;
     
-    TRACE("%p\n",hInternet);
+    TRACE("%p\n", hInternet);
 
-    lpwh = WININET_GetObject( hInternet );
-    if (NULL == lpwh)
-    {
-        INTERNET_SetLastError(ERROR_INVALID_HANDLE);
+    obj = get_handle_object( hInternet );
+    if (!obj) {
+        SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
 
-    WININET_Release( lpwh );
-    WININET_FreeHandle( hInternet );
+    invalidate_handle(obj);
+    WININET_Release(obj);
 
     return TRUE;
 }
@@ -1370,8 +1357,9 @@ BOOL WINAPI InternetCrackUrlA(LPCSTR lpszUrl, DWORD dwUrlLength, DWORD dwFlags,
        InternetCrackUrlW should not include it                  */
   if (dwUrlLength == -1) nLength--;
 
-  lpwszUrl = HeapAlloc(GetProcessHeap(), 0, nLength * sizeof(WCHAR));
-  MultiByteToWideChar(CP_ACP,0,lpszUrl,dwUrlLength,lpwszUrl,nLength);
+  lpwszUrl = HeapAlloc(GetProcessHeap(), 0, (nLength + 1) * sizeof(WCHAR));
+  MultiByteToWideChar(CP_ACP,0,lpszUrl,dwUrlLength,lpwszUrl,nLength + 1);
+  lpwszUrl[nLength] = '\0';
 
   memset(&UCW,0,sizeof(UCW));
   UCW.dwStructSize = sizeof(URL_COMPONENTSW);
@@ -1788,7 +1776,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
      */
     if (lpszcp != 0 && lpszcp - lpszUrl < dwUrlLength && (!lpszParam || lpszcp <= lpszParam))
     {
-        INT len;
+        DWORD len;
 
         /* Only truncate the parameter list if it's already been saved
          * in lpUC->lpszExtraInfo.
@@ -1806,8 +1794,46 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
             else
                 len = dwUrlLength-(lpszcp-lpszUrl);
         }
-        SetUrlComponentValueW(&lpUC->lpszUrlPath, &lpUC->dwUrlPathLength,
-                                   lpszcp, len);
+        if (lpUC->dwUrlPathLength && lpUC->lpszUrlPath &&
+                lpUC->nScheme == INTERNET_SCHEME_FILE)
+        {
+            WCHAR tmppath[MAX_PATH];
+            if (*lpszcp == '/')
+            {
+                len = MAX_PATH;
+                PathCreateFromUrlW(lpszUrl_orig, tmppath, &len, 0);
+            }
+            else
+            {
+                WCHAR *iter;
+                memcpy(tmppath, lpszcp, len * sizeof(WCHAR));
+                tmppath[len] = '\0';
+
+                iter = tmppath;
+                while (*iter) {
+                    if (*iter == '/')
+                        *iter = '\\';
+                    ++iter;
+                }
+            }
+            /* if ends in \. or \.. append a backslash */
+            if (tmppath[len - 1] == '.' &&
+                    (tmppath[len - 2] == '\\' ||
+                     (tmppath[len - 2] == '.' && tmppath[len - 3] == '\\')))
+            {
+                if (len < MAX_PATH - 1)
+                {
+                    tmppath[len] = '\\';
+                    tmppath[len+1] = '\0';
+                    ++len;
+                }
+            }
+            SetUrlComponentValueW(&lpUC->lpszUrlPath, &lpUC->dwUrlPathLength,
+                                       tmppath, len);
+        }
+        else
+            SetUrlComponentValueW(&lpUC->lpszUrlPath, &lpUC->dwUrlPathLength,
+                                       lpszcp, len);
     }
     else
     {
@@ -1984,7 +2010,7 @@ INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackA(
 
     TRACE("%p\n", hInternet);
 
-    if (!(lpwh = WININET_GetObject(hInternet)))
+    if (!(lpwh = get_handle_object(hInternet)))
         return INTERNET_INVALID_STATUS_CALLBACK;
 
     retVal = set_status_callback(lpwh, lpfnIntCB, FALSE);
@@ -2012,7 +2038,7 @@ INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackW(
 
     TRACE("%p\n", hInternet);
 
-    if (!(lpwh = WININET_GetObject(hInternet)))
+    if (!(lpwh = get_handle_object(hInternet)))
         return INTERNET_INVALID_STATUS_CALLBACK;
 
     retVal = set_status_callback(lpwh, lpfnIntCB, TRUE);
@@ -2049,7 +2075,7 @@ BOOL WINAPI InternetWriteFile(HINTERNET hFile, LPCVOID lpBuffer,
 
     TRACE("(%p %p %d %p)\n", hFile, lpBuffer, dwNumOfBytesToWrite, lpdwNumOfBytesWritten);
 
-    lpwh = WININET_GetObject( hFile );
+    lpwh = get_handle_object( hFile );
     if (!lpwh) {
         WARN("Invalid handle\n");
         SetLastError(ERROR_INVALID_HANDLE);
@@ -2089,7 +2115,7 @@ BOOL WINAPI InternetReadFile(HINTERNET hFile, LPVOID lpBuffer,
 
     TRACE("%p %p %d %p\n", hFile, lpBuffer, dwNumOfBytesToRead, pdwNumOfBytesRead);
 
-    hdr = WININET_GetObject(hFile);
+    hdr = get_handle_object(hFile);
     if (!hdr) {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
@@ -2143,7 +2169,7 @@ BOOL WINAPI InternetReadFileExA(HINTERNET hFile, LPINTERNET_BUFFERSA lpBuffersOu
 
     TRACE("(%p %p 0x%x 0x%lx)\n", hFile, lpBuffersOut, dwFlags, dwContext);
 
-    hdr = WININET_GetObject(hFile);
+    hdr = get_handle_object(hFile);
     if (!hdr) {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
@@ -2175,7 +2201,7 @@ BOOL WINAPI InternetReadFileExW(HINTERNET hFile, LPINTERNET_BUFFERSW lpBuffer,
 
     TRACE("(%p %p 0x%x 0x%lx)\n", hFile, lpBuffer, dwFlags, dwContext);
 
-    hdr = WININET_GetObject(hFile);
+    hdr = get_handle_object(hFile);
     if (!hdr) {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
@@ -2266,7 +2292,7 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
             if (*size < sizeof(ULONG))
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            *(ULONG*)size = 4;
+            *(ULONG*)buffer = 4;
             *size = sizeof(ULONG);
 
             return ERROR_SUCCESS;
@@ -2401,7 +2427,7 @@ BOOL WINAPI InternetQueryOptionW(HINTERNET hInternet, DWORD dwOption,
     TRACE("%p %d %p %p\n", hInternet, dwOption, lpBuffer, lpdwBufferLength);
 
     if(hInternet) {
-        hdr = WININET_GetObject(hInternet);
+        hdr = get_handle_object(hInternet);
         if (hdr) {
             res = hdr->vtbl->QueryOption(hdr, dwOption, lpBuffer, lpdwBufferLength, TRUE);
             WININET_Release(hdr);
@@ -2434,7 +2460,7 @@ BOOL WINAPI InternetQueryOptionA(HINTERNET hInternet, DWORD dwOption,
     TRACE("%p %d %p %p\n", hInternet, dwOption, lpBuffer, lpdwBufferLength);
 
     if(hInternet) {
-        hdr = WININET_GetObject(hInternet);
+        hdr = get_handle_object(hInternet);
         if (hdr) {
             res = hdr->vtbl->QueryOption(hdr, dwOption, lpBuffer, lpdwBufferLength, FALSE);
             WININET_Release(hdr);
@@ -2467,7 +2493,7 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 
     TRACE("(%p %d %p %d)\n", hInternet, dwOption, lpBuffer, dwBufferLength);
 
-    lpwhh = (object_header_t*) WININET_GetObject( hInternet );
+    lpwhh = (object_header_t*) get_handle_object( hInternet );
     if(lpwhh && lpwhh->vtbl->SetOption) {
         DWORD res;
 
@@ -2725,7 +2751,7 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
         {
         object_header_t *lpwh;
 
-        if (!(lpwh = WININET_GetObject(hInternet)))
+        if (!(lpwh = get_handle_object(hInternet)))
         {
             INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
             return FALSE;
@@ -3340,7 +3366,7 @@ HINTERNET WINAPI InternetOpenUrlW(HINTERNET hInternet, LPCWSTR lpszUrl,
         goto lend;
     }
 
-    hIC = (appinfo_t*)WININET_GetObject( hInternet );
+    hIC = (appinfo_t*)get_handle_object( hInternet );
     if (NULL == hIC ||  hIC->hdr.htype != WH_HINIT) {
 	SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
  	goto lend;
@@ -3640,7 +3666,7 @@ BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
 
     TRACE("(%p %p %x %lx)\n", hFile, lpdwNumberOfBytesAvailble, dwFlags, dwContext);
 
-    hdr = WININET_GetObject( hFile );
+    hdr = get_handle_object( hFile );
     if (!hdr) {
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;

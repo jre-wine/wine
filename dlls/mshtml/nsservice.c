@@ -47,7 +47,7 @@ static const nsIID NS_TOOLTIPTEXTPROVIDER_CID =
     {0x0b666e3e,0x569a,0x462c,{0xa7,0xf0,0xb1,0x6b,0xb1,0x5d,0x42,0xff}};
 
 static nsresult NSAPI nsWindowCreator_QueryInterface(nsIWindowCreator2 *iface, nsIIDRef riid,
-                                               nsQIResult result)
+        void **result)
 {
     *result = NULL;
 
@@ -99,8 +99,7 @@ static nsresult NSAPI nsWindowCreator_CreateChromeWindow2(nsIWindowCreator2 *ifa
     if(cancel)
         *cancel = FALSE;
 
-    *_retval = NSWBCHROME(NSContainer_Create(NULL, (NSContainer*)parent));
-    return NS_OK;
+    return create_chrome_window(parent, _retval);
 }
 
 static const nsIWindowCreator2Vtbl nsWindowCreatorVtbl = {
@@ -114,7 +113,7 @@ static const nsIWindowCreator2Vtbl nsWindowCreatorVtbl = {
 static nsIWindowCreator2 nsWindowCreator = { &nsWindowCreatorVtbl };
 
 static nsresult NSAPI nsPromptService_QueryInterface(nsIPromptService *iface,
-                                                     nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
     *result = NULL;
 
@@ -158,7 +157,7 @@ static nsresult NSAPI nsPromptService_Alert(nsIPromptService *iface, nsIDOMWindo
     }
 
     text = SysAllocString(aText);
-    IHTMLWindow2_alert(HTMLWINDOW2(window), text);
+    IHTMLWindow2_alert(&window->IHTMLWindow2_iface, text);
     SysFreeString(text);
 
     return NS_OK;
@@ -280,7 +279,7 @@ static const nsIPromptServiceVtbl PromptServiceVtbl = {
 static nsIPromptService nsPromptService = { &PromptServiceVtbl };
 
 static nsresult NSAPI nsTooltipTextProvider_QueryInterface(nsITooltipTextProvider *iface,
-                                                          nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
     *result = NULL;
 
@@ -378,27 +377,28 @@ static const nsITooltipTextProviderVtbl nsTooltipTextProviderVtbl = {
 static nsITooltipTextProvider nsTooltipTextProvider = { &nsTooltipTextProviderVtbl };
 
 typedef struct {
-    const nsIFactoryVtbl *lpFactoryVtbl;
+    nsIFactory nsIFactory_iface;
     nsISupports *service;
 } nsServiceFactory;
 
-#define NSFACTORY(x)  ((nsIFactory*)  &(x)->lpFactoryVtbl)
-
-#define NSFACTORY_THIS(iface) DEFINE_THIS(nsServiceFactory, Factory, iface)
+static inline nsServiceFactory *impl_from_nsIFactory(nsIFactory *iface)
+{
+    return CONTAINING_RECORD(iface, nsServiceFactory, nsIFactory_iface);
+}
 
 static nsresult NSAPI nsServiceFactory_QueryInterface(nsIFactory *iface, nsIIDRef riid,
-                                                    nsQIResult result)
+        void **result)
 {
-    nsServiceFactory *This = NSFACTORY_THIS(iface);
+    nsServiceFactory *This = impl_from_nsIFactory(iface);
 
     *result = NULL;
 
     if(IsEqualGUID(&IID_nsISupports, riid)) {
         TRACE("(%p)->(IID_nsISupports %p)\n", This, result);
-        *result = NSFACTORY(This);
+        *result = &This->nsIFactory_iface;
     }else if(IsEqualGUID(&IID_nsIFactory, riid)) {
         TRACE("(%p)->(IID_nsIFactory %p)\n", This, result);
-        *result = NSFACTORY(This);
+        *result = &This->nsIFactory_iface;
     }
 
     if(*result)
@@ -421,7 +421,7 @@ static nsrefcnt NSAPI nsServiceFactory_Release(nsIFactory *iface)
 static nsresult NSAPI nsServiceFactory_CreateInstance(nsIFactory *iface,
         nsISupports *aOuter, const nsIID *iid, void **result)
 {
-    nsServiceFactory *This = NSFACTORY_THIS(iface);
+    nsServiceFactory *This = impl_from_nsIFactory(iface);
 
     TRACE("(%p)->(%p %s %p)\n", This, aOuter, debugstr_guid(iid), result);
 
@@ -430,12 +430,10 @@ static nsresult NSAPI nsServiceFactory_CreateInstance(nsIFactory *iface,
 
 static nsresult NSAPI nsServiceFactory_LockFactory(nsIFactory *iface, PRBool lock)
 {
-    nsServiceFactory *This = NSFACTORY_THIS(iface);
+    nsServiceFactory *This = impl_from_nsIFactory(iface);
     WARN("(%p)->(%x)\n", This, lock);
     return NS_OK;
 }
-
-#undef NSFACTORY_THIS
 
 static const nsIFactoryVtbl nsServiceFactoryVtbl = {
     nsServiceFactory_QueryInterface,
@@ -446,12 +444,12 @@ static const nsIFactoryVtbl nsServiceFactoryVtbl = {
 };
 
 static nsServiceFactory nsPromptServiceFactory = {
-    &nsServiceFactoryVtbl,
+    { &nsServiceFactoryVtbl },
     (nsISupports*)&nsPromptService
 };
 
 static nsServiceFactory nsTooltipTextFactory = {
-    &nsServiceFactoryVtbl,
+    { &nsServiceFactoryVtbl },
     (nsISupports*)&nsTooltipTextProvider
 };
 
@@ -461,7 +459,7 @@ void register_nsservice(nsIComponentRegistrar *registrar, nsIServiceManager *ser
     nsresult nsres;
 
     nsres = nsIComponentRegistrar_RegisterFactory(registrar, &NS_PROMPTSERVICE_CID,
-            "Prompt Service", NS_PROMPTSERVICE_CONTRACTID, NSFACTORY(&nsPromptServiceFactory));
+            "Prompt Service", NS_PROMPTSERVICE_CONTRACTID, &nsPromptServiceFactory.nsIFactory_iface);
     if(NS_FAILED(nsres))
         ERR("RegisterFactory failed: %08x\n", nsres);
 
@@ -479,7 +477,7 @@ void register_nsservice(nsIComponentRegistrar *registrar, nsIServiceManager *ser
 
     nsres = nsIComponentRegistrar_RegisterFactory(registrar, &NS_TOOLTIPTEXTPROVIDER_CID,
             NS_TOOLTIPTEXTPROVIDER_CLASSNAME, NS_TOOLTIPTEXTPROVIDER_CONTRACTID,
-            NSFACTORY(&nsTooltipTextFactory));
+            &nsTooltipTextFactory.nsIFactory_iface);
     if(NS_FAILED(nsres))
         ERR("RegisterFactory failed: %08x\n", nsres);
 }

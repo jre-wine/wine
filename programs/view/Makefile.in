@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = view.exe
 APPMODE   = -mwindows
-IMPORTS   = comdlg32 user32 gdi32 kernel32
+IMPORTS   = comdlg32 user32 gdi32
 
 C_SRCS = \
 	init.c \
@@ -20,6 +16,7 @@ RC_SRCS = \
 	Eo.rc \
 	Es.rc \
 	Fr.rc \
+	He.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
@@ -34,6 +31,9 @@ RC_SRCS = \
 	Sv.rc \
 	Tr.rc \
 	Uk.rc \
-	Zh.rc
+	Zh.rc \
+	view.rc
+
+PO_SRCS = view.rc
 
 @MAKE_PROG_RULES@

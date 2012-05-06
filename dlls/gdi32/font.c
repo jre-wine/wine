@@ -31,8 +31,8 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
-#include "wownt32.h"
 #include "gdi_private.h"
+#include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -317,7 +317,7 @@ HFONT WINAPI CreateFontIndirectExA( const ENUMLOGFONTEXDVA *penumexA )
 }
 
 /***********************************************************************
- *           CreateFontIndirectExA   (GDI32.@)
+ *           CreateFontIndirectExW   (GDI32.@)
  */
 HFONT WINAPI CreateFontIndirectExW( const ENUMLOGFONTEXDVW *penumex )
 {
@@ -1553,6 +1553,49 @@ UINT WINAPI GetOutlineTextMetricsW(
     return ret;
 }
 
+static LPSTR FONT_GetCharsByRangeA(HDC hdc, UINT firstChar, UINT lastChar, PINT pByteLen)
+{
+    INT i, count = lastChar - firstChar + 1;
+    UINT c;
+    LPSTR str;
+
+    if (count <= 0)
+        return NULL;
+
+    switch (GdiGetCodePage(hdc))
+    {
+    case 932:
+    case 936:
+    case 949:
+    case 950:
+    case 1361:
+        if (lastChar > 0xffff)
+            return NULL;
+        if ((firstChar ^ lastChar) > 0xff)
+            return NULL;
+        break;
+    default:
+        if (lastChar > 0xff)
+            return NULL;
+        break;
+    }
+
+    str = HeapAlloc(GetProcessHeap(), 0, count * 2 + 1);
+    if (str == NULL)
+        return NULL;
+
+    for(i = 0, c = firstChar; c <= lastChar; i++, c++)
+    {
+        if (c > 0xff)
+            str[i++] = (BYTE)(c >> 8);
+        str[i] = (BYTE)c;
+    }
+    str[i] = '\0';
+
+    *pByteLen = i;
+
+    return str;
+}
 
 /***********************************************************************
  *           GetCharWidthW      (GDI32.@)
@@ -1590,18 +1633,16 @@ BOOL WINAPI GetCharWidth32W( HDC hdc, UINT firstChar, UINT lastChar,
 BOOL WINAPI GetCharWidth32A( HDC hdc, UINT firstChar, UINT lastChar,
                                LPINT buffer )
 {
-    INT i, wlen, count = (INT)(lastChar - firstChar + 1);
+    INT i, wlen;
     LPSTR str;
     LPWSTR wstr;
     BOOL ret = TRUE;
 
-    if(count <= 0) return FALSE;
+    str = FONT_GetCharsByRangeA(hdc, firstChar, lastChar, &i);
+    if(str == NULL)
+        return FALSE;
 
-    str = HeapAlloc(GetProcessHeap(), 0, count);
-    for(i = 0; i < count; i++)
-	str[i] = (BYTE)(firstChar + i);
-
-    wstr = FONT_mbtowc(hdc, str, count, &wlen, NULL);
+    wstr = FONT_mbtowc(hdc, str, i, &wlen, NULL);
 
     for(i = 0; i < wlen; i++)
     {
@@ -1715,6 +1756,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
     LPWSTR reordered_str = (LPWSTR)str;
     WORD *glyphs = NULL;
     UINT align = GetTextAlign( hdc );
+    DWORD layout = GetLayout( hdc );
     POINT pt;
     TEXTMETRICW tm;
     LOGFONTW lf;
@@ -1755,17 +1797,23 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
 
     if (!lprect)
         flags &= ~ETO_CLIPPED;
-        
+
+    if (flags & ETO_RTLREADING) align |= TA_RTLREADING;
+    if (layout & LAYOUT_RTL)
+    {
+        if ((align & TA_CENTER) != TA_CENTER) align ^= TA_RIGHT;
+        align ^= TA_RTLREADING;
+    }
+
     if( !(flags & (ETO_GLYPH_INDEX | ETO_IGNORELANGUAGE)) && count > 0 )
     {
         INT cGlyphs;
         reordered_str = HeapAlloc(GetProcessHeap(), 0, count*sizeof(WCHAR));
 
         BIDI_Reorder( hdc, str, count, GCP_REORDER,
-                      ((flags&ETO_RTLREADING)!=0 || (GetTextAlign(hdc)&TA_RTLREADING)!=0)?
-                      WINE_GCPW_FORCE_RTL:WINE_GCPW_FORCE_LTR,
+                      (align & TA_RTLREADING) ? WINE_GCPW_FORCE_RTL : WINE_GCPW_FORCE_LTR,
                       reordered_str, count, NULL, &glyphs, &cGlyphs);
-    
+
         flags |= ETO_IGNORELANGUAGE;
         if (glyphs)
         {
@@ -1777,12 +1825,8 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
     else if(flags & ETO_GLYPH_INDEX)
         glyphs = reordered_str;
 
-    TRACE("%p, %d, %d, %08x, %p, %s, %d, %p)\n", hdc, x, y, flags,
-          lprect, debugstr_wn(str, count), count, lpDx);
-
-    if(lprect)
-        TRACE("rect: %d,%d - %d,%d\n", lprect->left, lprect->top, lprect->right,
-              lprect->bottom);
+    TRACE("%p, %d, %d, %08x, %s, %s, %d, %p)\n", hdc, x, y, flags,
+          wine_dbgstr_rect(lprect), debugstr_wn(str, count), count, lpDx);
     TRACE("align = %x bkmode = %x mapmode = %x\n", align, GetBkMode(hdc), GetMapMode(hdc));
 
     if(align & TA_UPDATECP)
@@ -1905,6 +1949,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
             LPtoDP(hdc, desired, 2);
             desired[1].x -= desired[0].x;
             desired[1].y -= desired[0].y;
+            if (layout & LAYOUT_RTL) desired[1].x = -desired[1].x;
 
             deltas[i].x = desired[1].x - width.x;
             deltas[i].y = desired[1].y - width.y;
@@ -1923,7 +1968,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
                 GetTextExtentPointW(hdc, reordered_str, count, &sz);
             done_extents = TRUE;
         }
-        width.x = INTERNAL_XWSTODS(dc, sz.cx);
+        width.x = abs(INTERNAL_XWSTODS(dc, sz.cx));
         width.y = 0;
     }
 
@@ -2027,7 +2072,7 @@ BOOL WINAPI ExtTextOutW( HDC hdc, INT x, INT y, UINT flags,
                         for(j = 1; j < count; j++)
                         {
                             GetTextExtentPointW(hdc, reordered_str + j - 1, 1, &tmpsz);
-                            offsets[j].x = offsets[j - 1].x + INTERNAL_XWSTODS(dc, tmpsz.cx);
+                            offsets[j].x = offsets[j - 1].x + abs(INTERNAL_XWSTODS(dc, tmpsz.cx));
                             offsets[j].y = 0;
                         }
                     }
@@ -2301,18 +2346,21 @@ BOOL WINAPI GetAspectRatioFilterEx( HDC hdc, LPSIZE pAspectRatio )
 BOOL WINAPI GetCharABCWidthsA(HDC hdc, UINT firstChar, UINT lastChar,
                                   LPABC abc )
 {
-    INT i, wlen, count = (INT)(lastChar - firstChar + 1);
+    INT i, wlen;
     LPSTR str;
     LPWSTR wstr;
     BOOL ret = TRUE;
 
-    if(count <= 0) return FALSE;
+    str = FONT_GetCharsByRangeA(hdc, firstChar, lastChar, &i);
+    if (str == NULL)
+        return FALSE;
 
-    str = HeapAlloc(GetProcessHeap(), 0, count);
-    for(i = 0; i < count; i++)
-	str[i] = (BYTE)(firstChar + i);
-
-    wstr = FONT_mbtowc(hdc, str, count, &wlen, NULL);
+    wstr = FONT_mbtowc(hdc, str, i, &wlen, NULL);
+    if (wstr == NULL)
+    {
+        HeapFree(GetProcessHeap(), 0, str);
+        return FALSE;
+    }
 
     for(i = 0; i < wlen; i++)
     {
@@ -2447,16 +2495,15 @@ DWORD WINAPI GetGlyphOutlineA( HDC hdc, UINT uChar, UINT fuFormat,
                                  LPGLYPHMETRICS lpgm, DWORD cbBuffer,
                                  LPVOID lpBuffer, const MAT2 *lpmat2 )
 {
-    LPWSTR p = NULL;
-    DWORD ret;
-    UINT c;
-
     if (!lpmat2) return GDI_ERROR;
 
     if(!(fuFormat & GGO_GLYPH_INDEX)) {
+        UINT cp;
         int len;
         char mbchs[2];
-        if(uChar > 0xff) { /* but, 2 bytes character only */
+
+        cp = GdiGetCodePage(hdc);
+        if (IsDBCSLeadByteEx(cp, uChar >> 8)) {
             len = 2;
             mbchs[0] = (uChar & 0xff00) >> 8;
             mbchs[1] = (uChar & 0xff);
@@ -2464,14 +2511,11 @@ DWORD WINAPI GetGlyphOutlineA( HDC hdc, UINT uChar, UINT fuFormat,
             len = 1;
             mbchs[0] = (uChar & 0xff);
         }
-        p = FONT_mbtowc(hdc, mbchs, len, NULL, NULL);
-	c = p[0];
-    } else
-        c = uChar;
-    ret = GetGlyphOutlineW(hdc, c, fuFormat, lpgm, cbBuffer, lpBuffer,
-			   lpmat2);
-    HeapFree(GetProcessHeap(), 0, p);
-    return ret;
+        MultiByteToWideChar(cp, 0, mbchs, len, (LPWSTR)&uChar, 1);
+    }
+
+    return GetGlyphOutlineW(hdc, uChar, fuFormat, lpgm, cbBuffer, lpBuffer,
+                            lpmat2);
 }
 
 /***********************************************************************
@@ -2984,19 +3028,16 @@ GetCharacterPlacementW(
  */
 BOOL WINAPI GetCharABCWidthsFloatA( HDC hdc, UINT first, UINT last, LPABCFLOAT abcf )
 {
-    INT i, wlen, count = (INT)(last - first + 1);
+    INT i, wlen;
     LPSTR str;
     LPWSTR wstr;
     BOOL ret = TRUE;
 
-    if (count <= 0) return FALSE;
+    str = FONT_GetCharsByRangeA(hdc, first, last, &i);
+    if (str == NULL)
+        return FALSE;
 
-    str = HeapAlloc(GetProcessHeap(), 0, count);
-
-    for(i = 0; i < count; i++)
-        str[i] = (BYTE)(first + i);
-
-    wstr = FONT_mbtowc( hdc, str, count, &wlen, NULL );
+    wstr = FONT_mbtowc( hdc, str, i, &wlen, NULL );
 
     for (i = 0; i < wlen; i++)
     {
@@ -3189,7 +3230,31 @@ BOOL WINAPI RemoveFontResourceW( LPCWSTR str )
  */
 HANDLE WINAPI AddFontMemResourceEx( PVOID pbFont, DWORD cbFont, PVOID pdv, DWORD *pcFonts)
 {
-    return WineEngAddFontMemResourceEx(pbFont, cbFont, pdv, pcFonts);
+    HANDLE ret;
+    DWORD num_fonts;
+
+    if (!pbFont || !cbFont || !pcFonts)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    ret = WineEngAddFontMemResourceEx(pbFont, cbFont, pdv, &num_fonts);
+    if (ret)
+    {
+        __TRY
+        {
+            *pcFonts = num_fonts;
+        }
+        __EXCEPT_PAGE_FAULT
+        {
+            WARN("page fault while writing to *pcFonts (%p)\n", pcFonts);
+            RemoveFontMemResourceEx(ret);
+            ret = 0;
+        }
+        __ENDTRY
+    }
+    return ret;
 }
 
 /***********************************************************************

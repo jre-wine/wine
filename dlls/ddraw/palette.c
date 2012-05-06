@@ -1,5 +1,4 @@
-/*		DirectDraw - IDirectPalette base interface
- *
+/*
  * Copyright 2006 Stefan Dösinger
  *
  * This library is free software; you can redistribute it and/or
@@ -18,13 +17,7 @@
  */
 
 #include "config.h"
-#include "winerror.h"
-#include "wine/debug.h"
-
-#define COBJMACROS
-
-#include <assert.h>
-#include <string.h>
+#include "wine/port.h"
 
 #include "ddraw_private.h"
 
@@ -49,8 +42,7 @@ IDirectDrawPaletteImpl_QueryInterface(IDirectDrawPalette *iface,
                                       REFIID refiid,
                                       void **obj)
 {
-    IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
-    TRACE("(%p)->(%s,%p)\n",This,debugstr_guid(refiid),obj);
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(refiid), obj);
 
     if (IsEqualGUID(refiid, &IID_IUnknown)
         || IsEqualGUID(refiid, &IID_IDirectDrawPalette))
@@ -81,7 +73,7 @@ IDirectDrawPaletteImpl_AddRef(IDirectDrawPalette *iface)
     IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)->() incrementing from %u.\n", This, ref - 1);
+    TRACE("%p increasing refcount to %u.\n", This, ref);
 
     return ref;
 }
@@ -101,12 +93,12 @@ IDirectDrawPaletteImpl_Release(IDirectDrawPalette *iface)
     IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)->() decrementing from %u.\n", This, ref + 1);
+    TRACE("%p decreasing refcount to %u.\n", This, ref);
 
     if (ref == 0)
     {
         EnterCriticalSection(&ddraw_cs);
-        IWineD3DPalette_Release(This->wineD3DPalette);
+        wined3d_palette_decref(This->wineD3DPalette);
         if(This->ifaceToRelease)
         {
             IUnknown_Release(This->ifaceToRelease);
@@ -139,7 +131,9 @@ IDirectDrawPaletteImpl_Initialize(IDirectDrawPalette *iface,
                                   DWORD Flags,
                                   PALETTEENTRY *ColorTable)
 {
-    TRACE("(%p)->(%p,%x,%p)\n", iface, DD, Flags, ColorTable);
+    TRACE("iface %p, ddraw %p, flags %#x, entries %p.\n",
+            iface, DD, Flags, ColorTable);
+
     return DDERR_ALREADYINITIALIZED;
 }
 
@@ -162,13 +156,14 @@ IDirectDrawPaletteImpl_GetCaps(IDirectDrawPalette *iface,
                                DWORD *Caps)
 {
     IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
-    HRESULT hr;
-    TRACE("(%p)->(%p): Relay\n", This, Caps);
+
+    TRACE("iface %p, caps %p.\n", iface, Caps);
 
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DPalette_GetCaps(This->wineD3DPalette, Caps);
+    *Caps = wined3d_palette_get_flags(This->wineD3DPalette);
     LeaveCriticalSection(&ddraw_cs);
-    return hr;
+
+    return D3D_OK;
 }
 
 /*****************************************************************************
@@ -198,13 +193,15 @@ IDirectDrawPaletteImpl_SetEntries(IDirectDrawPalette *iface,
 {
     IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
     HRESULT hr;
-    TRACE("(%p)->(%x,%d,%d,%p): Relay\n", This, Flags, Start, Count, PalEnt);
+
+    TRACE("iface %p, flags %#x, start %u, count %u, entries %p.\n",
+            iface, Flags, Start, Count, PalEnt);
 
     if(!PalEnt)
         return DDERR_INVALIDPARAMS;
 
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DPalette_SetEntries(This->wineD3DPalette, Flags, Start, Count, PalEnt);
+    hr = wined3d_palette_set_entries(This->wineD3DPalette, Flags, Start, Count, PalEnt);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
@@ -235,18 +232,20 @@ IDirectDrawPaletteImpl_GetEntries(IDirectDrawPalette *iface,
 {
     IDirectDrawPaletteImpl *This = (IDirectDrawPaletteImpl *)iface;
     HRESULT hr;
-    TRACE("(%p)->(%x,%d,%d,%p): Relay\n", This, Flags, Start, Count, PalEnt);
+
+    TRACE("iface %p, flags %#x, start %u, count %u, entries %p.\n",
+            iface, Flags, Start, Count, PalEnt);
 
     if(!PalEnt)
         return DDERR_INVALIDPARAMS;
 
     EnterCriticalSection(&ddraw_cs);
-    hr = IWineD3DPalette_GetEntries(This->wineD3DPalette, Flags, Start, Count, PalEnt);
+    hr = wined3d_palette_get_entries(This->wineD3DPalette, Flags, Start, Count, PalEnt);
     LeaveCriticalSection(&ddraw_cs);
     return hr;
 }
 
-const IDirectDrawPaletteVtbl IDirectDrawPalette_Vtbl =
+static const struct IDirectDrawPaletteVtbl ddraw_palette_vtbl =
 {
     /*** IUnknown ***/
     IDirectDrawPaletteImpl_QueryInterface,
@@ -258,3 +257,25 @@ const IDirectDrawPaletteVtbl IDirectDrawPalette_Vtbl =
     IDirectDrawPaletteImpl_Initialize,
     IDirectDrawPaletteImpl_SetEntries
 };
+
+HRESULT ddraw_palette_init(IDirectDrawPaletteImpl *palette,
+        IDirectDrawImpl *ddraw, DWORD flags, PALETTEENTRY *entries)
+{
+    HRESULT hr;
+
+    palette->lpVtbl = &ddraw_palette_vtbl;
+    palette->ref = 1;
+
+    hr = IWineD3DDevice_CreatePalette(ddraw->wineD3DDevice, flags,
+            entries, palette, &palette->wineD3DPalette);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d palette, hr %#x.\n", hr);
+        return hr;
+    }
+
+    palette->ifaceToRelease = (IUnknown *)&ddraw->IDirectDraw7_iface;
+    IUnknown_AddRef(palette->ifaceToRelease);
+
+    return DD_OK;
+}

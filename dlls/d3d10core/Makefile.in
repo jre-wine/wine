@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = d3d10core.dll
 IMPORTLIB = d3d10core
-IMPORTS   = dxguid uuid dxgi kernel32
+IMPORTS   = dxguid uuid dxgi wined3d
 
 C_SRCS = \
 	async.c \
@@ -14,7 +10,7 @@ C_SRCS = \
 	inputlayout.c \
 	shader.c \
 	state.c \
-	texture2d.c \
+	texture.c \
 	utils.c \
 	view.c
 

@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winemine.exe
 APPMODE   = -mwindows
-IMPORTS   = user32 gdi32 advapi32 kernel32
+IMPORTS   = user32 gdi32 advapi32
 DELAYIMPORTS = shell32
 
 C_SRCS = \
@@ -19,6 +15,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
@@ -34,20 +31,12 @@ RC_SRCS = \
 	Tr.rc \
 	Uk.rc \
 	Zh.rc \
-	rsrc.rc
+	winemine.rc
 
-MANPAGES = winemine.man
+PO_SRCS = winemine.rc
+
+MANPAGE = winemine.man
 
 SVG_SRCS = winemine.svg
 
 @MAKE_PROG_RULES@
-
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) winemine.man $(DESTDIR)$(mandir)/man$(prog_manext)/winemine.$(prog_manext)
-
-@WOW64_DISABLE@ install install-lib:: install-man-pages
-
-uninstall::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/winemine.$(prog_manext)

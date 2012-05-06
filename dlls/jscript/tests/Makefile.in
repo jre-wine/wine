@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = jscript.dll
-IMPORTS   = oleaut32 ole32 advapi32 kernel32
+IMPORTS   = oleaut32 ole32 advapi32
 
 C_SRCS = \
 	activex.c \

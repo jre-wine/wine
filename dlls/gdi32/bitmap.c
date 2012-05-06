@@ -510,18 +510,49 @@ LONG WINAPI SetBitmapBits(
  */
 HBITMAP BITMAP_CopyBitmap(HBITMAP hbitmap)
 {
-    HBITMAP res = 0;
-    BITMAP bm;
+    HBITMAP res;
+    DIBSECTION dib;
+    BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
 
-    if (!GetObjectW( hbitmap, sizeof(bm), &bm )) return 0;
-    res = CreateBitmapIndirect(&bm);
+    if (!bmp) return 0;
+    if (bmp->dib)
+    {
+        void *bits;
+        BITMAPINFO *bi;
+        HDC dc;
 
+        dib = *bmp->dib;
+        GDI_ReleaseObj( hbitmap );
+        dc = CreateCompatibleDC( NULL );
+
+        if (!dc) return 0;
+        if (!(bi = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET( BITMAPINFO, bmiColors[256] ))))
+        {
+            DeleteDC( dc );
+            return 0;
+        }
+        bi->bmiHeader = dib.dsBmih;
+
+        /* Get the color table or the color masks */
+        GetDIBits( dc, hbitmap, 0, 0, NULL, bi, DIB_RGB_COLORS );
+        bi->bmiHeader.biHeight = dib.dsBmih.biHeight;
+
+        res = CreateDIBSection( dc, bi, DIB_RGB_COLORS, &bits, NULL, 0 );
+        if (res) SetDIBits( dc, res, 0, dib.dsBm.bmHeight, dib.dsBm.bmBits, bi, DIB_RGB_COLORS );
+        HeapFree( GetProcessHeap(), 0, bi );
+        DeleteDC( dc );
+        return res;
+    }
+    dib.dsBm = bmp->bitmap;
+    dib.dsBm.bmBits = NULL;
+    GDI_ReleaseObj( hbitmap );
+
+    res = CreateBitmapIndirect( &dib.dsBm );
     if(res) {
-        char *buf = HeapAlloc( GetProcessHeap(), 0, bm.bmWidthBytes *
-			       bm.bmHeight );
-        GetBitmapBits (hbitmap, bm.bmWidthBytes * bm.bmHeight, buf);
-	SetBitmapBits (res, bm.bmWidthBytes * bm.bmHeight, buf);
-	HeapFree( GetProcessHeap(), 0, buf );
+        char *buf = HeapAlloc( GetProcessHeap(), 0, dib.dsBm.bmWidthBytes * dib.dsBm.bmHeight );
+        GetBitmapBits (hbitmap, dib.dsBm.bmWidthBytes * dib.dsBm.bmHeight, buf);
+        SetBitmapBits (res, dib.dsBm.bmWidthBytes * dib.dsBm.bmHeight, buf);
+        HeapFree( GetProcessHeap(), 0, buf );
     }
     return res;
 }
@@ -611,6 +642,10 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         dc->hBitmap = handle;
         GDI_inc_ref_count( handle );
         dc->dirty = 0;
+        dc->vis_rect.left   = 0;
+        dc->vis_rect.top    = 0;
+        dc->vis_rect.right  = bitmap->bitmap.bmWidth;
+        dc->vis_rect.bottom = bitmap->bitmap.bmHeight;
         SetRectRgn( dc->hVisRgn, 0, 0, bitmap->bitmap.bmWidth, bitmap->bitmap.bmHeight);
         GDI_ReleaseObj( handle );
         DC_InitDC( dc );

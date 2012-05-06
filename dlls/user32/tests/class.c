@@ -315,6 +315,7 @@ static void check_thread_instance( const char *name, HINSTANCE inst, HINSTANCE i
 static void test_instances(void)
 {
     WNDCLASSA cls, wc;
+    WNDCLASSEXA wcexA;
     HWND hwnd, hwnd2;
     const char *name = "__test__";
     HINSTANCE kernel32 = GetModuleHandleA("kernel32");
@@ -347,6 +348,25 @@ static void test_instances(void)
     check_instance( name, kernel32, kernel32, kernel32 );
     check_thread_instance( name, kernel32, kernel32, kernel32 );
     ok( UnregisterClassA( name, kernel32 ), "Unregister failed for kernel32\n" );
+
+    ZeroMemory(&wcexA, sizeof(wcexA));
+    wcexA.lpfnWndProc = DefWindowProcA;
+    wcexA.lpszClassName = "__classex_test__";
+    SetLastError(0xdeadbeef);
+    wcexA.cbSize = sizeof(wcexA) - 1;
+    ok( ((RegisterClassExA( &wcexA ) == 0) && (GetLastError() == ERROR_INVALID_PARAMETER)),
+          "Succeeded with invalid number of cbSize bytes\n");
+    SetLastError(0xdeadbeef);
+    wcexA.cbSize = sizeof(wcexA) + 1;
+    ok( ((RegisterClassExA( &wcexA ) == 0) && (GetLastError() == ERROR_INVALID_PARAMETER)),
+          "Succeeded with invalid number of cbSize bytes\n");
+    SetLastError(0xdeadbeef);
+    wcexA.cbSize = sizeof(wcexA);
+    ok( RegisterClassExA( &wcexA ), "Failed with valid number of cbSize bytes\n");
+    wcexA.cbSize = 0xdeadbeef;
+    ok( GetClassInfoEx(main_module, wcexA.lpszClassName, &wcexA), "GetClassInfoEx failed\n");
+    ok( wcexA.cbSize == 0xdeadbeef, "GetClassInfoEx returned wrong cbSize value %d\n", wcexA.cbSize);
+    UnregisterClassA(wcexA.lpszClassName, main_module);
 
     /* Bug 2631 - Supplying an invalid number of bytes fails */
     cls.cbClsExtra    = 0;
@@ -597,6 +617,7 @@ static void test_builtinproc(void)
     static const WCHAR classW[] = {'d','e','f','t','e','s','t',0};
     WCHAR unistring[] = {0x142, 0x40e, 0x3b4, 0};  /* a string that would be destroyed by a W->A->W conversion */
     WNDPROC pDefWindowProcA, pDefWindowProcW;
+    WNDPROC pNtdllDefWindowProcA, pNtdllDefWindowProcW;
     WNDPROC oldproc;
     WNDCLASSEXA cls;  /* the memory layout of WNDCLASSEXA and WNDCLASSEXW is the same */
     WCHAR buf[128];
@@ -606,45 +627,56 @@ static void test_builtinproc(void)
 
     pDefWindowProcA = (void *)GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcA");
     pDefWindowProcW = (void *)GetProcAddress(GetModuleHandle("user32.dll"), "DefWindowProcW");
+    pNtdllDefWindowProcA = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtdllDefWindowProc_A");
+    pNtdllDefWindowProcW = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtdllDefWindowProc_W");
 
-    for (i = 0; i < 4; i++)
+    /* On Vista+, the user32.dll export DefWindowProcA/W is forwarded to  */
+    /* ntdll.NtdllDefWindowProc_A/W. However, the wndproc returned by     */
+    /* GetClassLong/GetWindowLong points to an unexported user32 function */
+    if (pDefWindowProcA == pNtdllDefWindowProcA &&
+        pDefWindowProcW == pNtdllDefWindowProcW)
+        skip("user32.DefWindowProcX forwarded to ntdll.NtdllDefWindowProc_X\n");
+    else
     {
-        ZeroMemory(&cls, sizeof(cls));
-        cls.cbSize = sizeof(cls);
-        cls.hInstance = GetModuleHandle(NULL);
-        cls.hbrBackground = GetStockObject (WHITE_BRUSH);
-        if (i & 1)
-            cls.lpfnWndProc = pDefWindowProcA;
-        else
-            cls.lpfnWndProc = pDefWindowProcW;
-
-        if (i & 2)
+        for (i = 0; i < 4; i++)
         {
-            cls.lpszClassName = classA;
-            atom = RegisterClassExA(&cls);
+            ZeroMemory(&cls, sizeof(cls));
+            cls.cbSize = sizeof(cls);
+            cls.hInstance = GetModuleHandle(NULL);
+            cls.hbrBackground = GetStockObject (WHITE_BRUSH);
+            if (i & 1)
+                cls.lpfnWndProc = pDefWindowProcA;
+            else
+                cls.lpfnWndProc = pDefWindowProcW;
+
+            if (i & 2)
+            {
+                cls.lpszClassName = classA;
+                atom = RegisterClassExA(&cls);
+            }
+            else
+            {
+                cls.lpszClassName = (LPCSTR)classW;
+                atom = RegisterClassExW((WNDCLASSEXW *)&cls);
+            }
+            ok(atom != 0, "Couldn't register class, i=%d, %d\n", i, GetLastError());
+
+            hwnd = CreateWindowA(classA, NULL, 0, 0, 0, 100, 100, NULL, NULL, GetModuleHandle(NULL), NULL);
+            ok(hwnd != NULL, "Couldn't create window i=%d\n", i);
+
+            ok(GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == (LONG_PTR)pDefWindowProcA, "Wrong ANSI wndproc: %p vs %p\n",
+                (void *)GetWindowLongPtrA(hwnd, GWLP_WNDPROC), pDefWindowProcA);
+            ok(GetClassLongPtrA(hwnd, GCLP_WNDPROC) == (ULONG_PTR)pDefWindowProcA, "Wrong ANSI wndproc: %p vs %p\n",
+                (void *)GetClassLongPtrA(hwnd, GCLP_WNDPROC), pDefWindowProcA);
+
+            ok(GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == (LONG_PTR)pDefWindowProcW, "Wrong Unicode wndproc: %p vs %p\n",
+                (void *)GetWindowLongPtrW(hwnd, GWLP_WNDPROC), pDefWindowProcW);
+            ok(GetClassLongPtrW(hwnd, GCLP_WNDPROC) == (ULONG_PTR)pDefWindowProcW, "Wrong Unicode wndproc: %p vs %p\n",
+                (void *)GetClassLongPtrW(hwnd, GCLP_WNDPROC), pDefWindowProcW);
+
+            DestroyWindow(hwnd);
+            UnregisterClass((LPSTR)(DWORD_PTR)atom, GetModuleHandle(NULL));
         }
-        else
-        {
-            cls.lpszClassName = (LPCSTR)classW;
-            atom = RegisterClassExW((WNDCLASSEXW *)&cls);
-        }
-        ok(atom != 0, "Couldn't register class, i=%d, %d\n", i, GetLastError());
-
-        hwnd = CreateWindowA(classA, NULL, 0, 0, 0, 100, 100, NULL, NULL, GetModuleHandle(NULL), NULL);
-        ok(hwnd != NULL, "Couldn't create window i=%d\n", i);
-
-        ok(GetWindowLongPtrA(hwnd, GWLP_WNDPROC) == (LONG_PTR)pDefWindowProcA, "Wrong ANSI wndproc: %p vs %p\n",
-            (void *)GetWindowLongPtrA(hwnd, GWLP_WNDPROC), pDefWindowProcA);
-        ok(GetClassLongPtrA(hwnd, GCLP_WNDPROC) == (ULONG_PTR)pDefWindowProcA, "Wrong ANSI wndproc: %p vs %p\n",
-            (void *)GetClassLongPtrA(hwnd, GCLP_WNDPROC), pDefWindowProcA);
-
-        ok(GetWindowLongPtrW(hwnd, GWLP_WNDPROC) == (LONG_PTR)pDefWindowProcW, "Wrong Unicode wndproc: %p vs %p\n",
-            (void *)GetWindowLongPtrW(hwnd, GWLP_WNDPROC), pDefWindowProcW);
-        ok(GetClassLongPtrW(hwnd, GCLP_WNDPROC) == (ULONG_PTR)pDefWindowProcW, "Wrong Unicode wndproc: %p vs %p\n",
-            (void *)GetClassLongPtrW(hwnd, GCLP_WNDPROC), pDefWindowProcW);
-
-        DestroyWindow(hwnd);
-        UnregisterClass((LPSTR)(DWORD_PTR)atom, GetModuleHandle(NULL));
     }
 
     /* built-in winproc - window A/W type automatically detected */
@@ -880,10 +912,71 @@ static void test_extra_values(void)
     }
 }
 
+static void test_GetClassInfo(void)
+{
+    static const WCHAR staticW[] = {'s','t','a','t','i','c',0};
+    WNDCLASSA wc;
+    WNDCLASSEXA wcx;
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoA(0, "static", &wc);
+    ok(ret, "GetClassInfoA() error %d\n", GetLastError());
+
+if (0) { /* crashes under XP */
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoA(0, "static", NULL);
+    ok(ret, "GetClassInfoA() error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoW(0, staticW, NULL);
+    ok(ret, "GetClassInfoW() error %d\n", GetLastError());
+}
+
+    wcx.cbSize = sizeof(wcx);
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExA(0, "static", &wcx);
+    ok(ret, "GetClassInfoExA() error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExA(0, "static", NULL);
+    ok(!ret, "GetClassInfoExA() should fail\n");
+    ok(GetLastError() == ERROR_NOACCESS ||
+       broken(GetLastError() == 0xdeadbeef), /* win9x */
+       "expected ERROR_NOACCESS, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExW(0, staticW, NULL);
+    ok(!ret, "GetClassInfoExW() should fail\n");
+    ok(GetLastError() == ERROR_NOACCESS ||
+       broken(GetLastError() == 0xdeadbeef) /* NT4 */ ||
+       broken(GetLastError() == ERROR_CALL_NOT_IMPLEMENTED), /* win9x */
+       "expected ERROR_NOACCESS, got %d\n", GetLastError());
+
+    wcx.cbSize = 0;
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExA(0, "static", &wcx);
+    ok(ret, "GetClassInfoExA() error %d\n", GetLastError());
+    ok(wcx.cbSize == 0, "expected 0, got %u\n", wcx.cbSize);
+
+    wcx.cbSize = sizeof(wcx) - 1;
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExA(0, "static", &wcx);
+    ok(ret, "GetClassInfoExA() error %d\n", GetLastError());
+    ok(wcx.cbSize == sizeof(wcx) - 1, "expected sizeof(wcx)-1, got %u\n", wcx.cbSize);
+
+    wcx.cbSize = sizeof(wcx) + 1;
+    SetLastError(0xdeadbeef);
+    ret = GetClassInfoExA(0, "static", &wcx);
+    ok(ret, "GetClassInfoExA() error %d\n", GetLastError());
+    ok(wcx.cbSize == sizeof(wcx) + 1, "expected sizeof(wcx)+1, got %u\n", wcx.cbSize);
+}
+
 START_TEST(class)
 {
     HANDLE hInstance = GetModuleHandleA( NULL );
 
+    test_GetClassInfo();
     test_extra_values();
 
     if (!GetModuleHandleW(0))

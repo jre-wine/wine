@@ -71,7 +71,7 @@ void msi_parse_version_string(LPCWSTR verStr, PDWORD ms, PDWORD ls)
         x4 = atoiW(ptr + 1);
     /* FIXME: byte-order dependent? */
     *ms = x1 << 16 | x2;
-    *ls = x3 << 16 | x4;
+    if (ls) *ls = x3 << 16 | x4;
 }
 
 /* Fills in sig with the values from the Signature table, where name is the
@@ -89,7 +89,7 @@ static UINT ACTION_AppSearchGetSignature(MSIPACKAGE *package, MSISIGNATURE *sig,
         'S','i','g','n','a','t','u','r','e',' ',
         'w','h','e','r','e',' ','S','i','g','n','a','t','u','r','e',' ','=',' ',
         '\'','%','s','\'',0};
-    LPWSTR minVersion, maxVersion;
+    LPWSTR minVersion, maxVersion, p;
     MSIRECORD *row;
     DWORD time;
 
@@ -106,6 +106,12 @@ static UINT ACTION_AppSearchGetSignature(MSIPACKAGE *package, MSISIGNATURE *sig,
 
     /* get properties */
     sig->File = msi_dup_record_field(row,2);
+    if ((p = strchrW(sig->File, '|')))
+    {
+        p++;
+        memmove(sig->File, p, (strlenW(p) + 1) * sizeof(WCHAR));
+    }
+
     minVersion = msi_dup_record_field(row,3);
     if (minVersion)
     {
@@ -790,8 +796,8 @@ static UINT ACTION_RecurseSearchDirectory(MSIPACKAGE *package, LPWSTR *appValue,
         if (hFind != INVALID_HANDLE_VALUE)
         {
             if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY &&
-                lstrcmpW(findData.cFileName, szDot) &&
-                lstrcmpW(findData.cFileName, szDotDot))
+                strcmpW( findData.cFileName, szDot ) &&
+                strcmpW( findData.cFileName, szDotDot ))
             {
                 lstrcpyW(subpath, dir);
                 PathAppendW(subpath, findData.cFileName);
@@ -802,8 +808,8 @@ static UINT ACTION_RecurseSearchDirectory(MSIPACKAGE *package, LPWSTR *appValue,
             while (rc == ERROR_SUCCESS && !*appValue &&
                    FindNextFileW(hFind, &findData) != 0)
             {
-                if (!lstrcmpW(findData.cFileName, szDot) ||
-                    !lstrcmpW(findData.cFileName, szDotDot))
+                if (!strcmpW( findData.cFileName, szDot ) ||
+                    !strcmpW( findData.cFileName, szDotDot ))
                     continue;
 
                 lstrcpyW(subpath, dir);
@@ -958,7 +964,10 @@ static UINT ACTION_AppSearchDr(MSIPACKAGE *package, LPWSTR *appValue, MSISIGNATU
         rc = ACTION_AppSearchSigName(package, parentName, &parentSig, &parent);
         ACTION_FreeSignature(&parentSig);
         if (!parent)
+        {
+            msiobj_release(&row->hdr);
             return ERROR_SUCCESS;
+        }
     }
 
     sz = MAX_PATH;

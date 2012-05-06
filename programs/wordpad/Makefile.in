@@ -1,15 +1,12 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = wordpad.exe
 APPMODE   = -mwindows -mno-cygwin
-IMPORTS   = comdlg32 shell32 user32 gdi32 advapi32 kernel32 comctl32
-EXTRAINCL = -I$(TOPSRCDIR)/include/msvcrt
+IMPORTS   = comdlg32 uuid ole32 shell32 user32 gdi32 advapi32 comctl32
+EXTRAINCL = -I$(top_srcdir)/include/msvcrt
 EXTRADEFS = -DNO_LIBWINE_PORT
 MODCFLAGS = @BUILTINFLAG@
 
 C_SRCS = \
+	olecallback.c \
 	print.c \
 	registry.c \
 	wordpad.c
@@ -19,7 +16,7 @@ RC_SRCS = \
 	De.rc \
 	En.rc \
 	Fr.rc \
-	Hu.rc \
+	He.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
@@ -32,10 +29,11 @@ RC_SRCS = \
 	Ru.rc \
 	Si.rc \
 	Sv.rc \
-	Tr.rc \
 	Uk.rc \
 	Zh.rc \
-	rsrc.rc
+	wordpad.rc
+
+PO_SRCS = wordpad.rc
 
 SVG_SRCS = \
 	formatbar.svg \

@@ -26,6 +26,9 @@
 #include "winreg.h"
 #include "wininet.h"
 
+#define NO_SHLWAPI_REG
+#include "shlwapi.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
@@ -147,7 +150,7 @@ static HRESULT map_url_to_zone(LPCWSTR url, DWORD *zone, LPWSTR *ret_url)
     DWORD size=0;
     HRESULT hres;
 
-    *zone = -1;
+    *zone = URLZONE_INVALID;
 
     hres = CoInternetGetSecurityUrl(url, &secur_url, PSU_SECURITY_URL_ONLY, 0);
     if(hres != S_OK) {
@@ -190,11 +193,11 @@ static HRESULT map_url_to_zone(LPCWSTR url, DWORD *zone, LPWSTR *ret_url)
             case DRIVE_FIXED:
             case DRIVE_CDROM:
             case DRIVE_RAMDISK:
-                *zone = 0;
+                *zone = URLZONE_LOCAL_MACHINE;
                 hres = S_OK;
                 break;
             case DRIVE_REMOTE:
-                *zone = 3;
+                *zone = URLZONE_INTERNET;
                 hres = S_OK;
                 break;
             default:
@@ -203,7 +206,7 @@ static HRESULT map_url_to_zone(LPCWSTR url, DWORD *zone, LPWSTR *ret_url)
         }
     }
 
-    if(*zone == -1) {
+    if(*zone == URLZONE_INVALID) {
         WARN("domains are not yet implemented\n");
         hres = get_zone_from_reg(schema, zone);
     }
@@ -218,9 +221,9 @@ static HRESULT map_url_to_zone(LPCWSTR url, DWORD *zone, LPWSTR *ret_url)
 
 static HRESULT open_zone_key(HKEY parent_key, DWORD zone, HKEY *hkey)
 {
-    static const WCHAR wszFormat[] = {'%','s','%','l','d',0};
+    static const WCHAR wszFormat[] = {'%','s','%','u',0};
 
-    WCHAR key_name[sizeof(wszZonesKey)/sizeof(WCHAR)+8];
+    WCHAR key_name[sizeof(wszZonesKey)/sizeof(WCHAR)+12];
     DWORD res;
 
     wsprintfW(key_name, wszFormat, wszZonesKey, zone);
@@ -295,7 +298,7 @@ static HRESULT get_action_policy(DWORD zone, DWORD action, BYTE *policy, DWORD s
  *
  */
 typedef struct {
-    const IInternetSecurityManagerVtbl* lpInternetSecurityManagerVtbl;
+    IInternetSecurityManager IInternetSecurityManager_iface;
 
     LONG ref;
 
@@ -303,11 +306,14 @@ typedef struct {
     IInternetSecurityManager *custom_manager;
 } SecManagerImpl;
 
-#define SECMGR_THIS(iface) DEFINE_THIS(SecManagerImpl, InternetSecurityManager, iface)
+static inline SecManagerImpl *impl_from_IInternetSecurityManager(IInternetSecurityManager *iface)
+{
+    return CONTAINING_RECORD(iface, SecManagerImpl, IInternetSecurityManager_iface);
+}
 
 static HRESULT WINAPI SecManagerImpl_QueryInterface(IInternetSecurityManager* iface,REFIID riid,void** ppvObject)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
 
     TRACE("(%p)->(%s,%p)\n",This,debugstr_guid(riid),ppvObject);
 
@@ -337,7 +343,7 @@ static HRESULT WINAPI SecManagerImpl_QueryInterface(IInternetSecurityManager* if
 
 static ULONG WINAPI SecManagerImpl_AddRef(IInternetSecurityManager* iface)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%u\n", This, refCount);
@@ -347,7 +353,7 @@ static ULONG WINAPI SecManagerImpl_AddRef(IInternetSecurityManager* iface)
 
 static ULONG WINAPI SecManagerImpl_Release(IInternetSecurityManager* iface)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%u\n", This, refCount);
@@ -370,7 +376,7 @@ static ULONG WINAPI SecManagerImpl_Release(IInternetSecurityManager* iface)
 static HRESULT WINAPI SecManagerImpl_SetSecuritySite(IInternetSecurityManager *iface,
                                                      IInternetSecurityMgrSite *pSite)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
 
     TRACE("(%p)->(%p)\n", This, pSite);
 
@@ -405,7 +411,7 @@ static HRESULT WINAPI SecManagerImpl_SetSecuritySite(IInternetSecurityManager *i
 static HRESULT WINAPI SecManagerImpl_GetSecuritySite(IInternetSecurityManager *iface,
                                                      IInternetSecurityMgrSite **ppSite)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
 
     TRACE("(%p)->(%p)\n", This, ppSite);
 
@@ -423,7 +429,7 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
                                                   LPCWSTR pwszUrl, DWORD *pdwZone,
                                                   DWORD dwFlags)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     HRESULT hres;
 
     TRACE("(%p)->(%s %p %08x)\n", iface, debugstr_w(pwszUrl), pdwZone, dwFlags);
@@ -436,7 +442,7 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
     }
 
     if(!pwszUrl) {
-        *pdwZone = -1;
+        *pdwZone = URLZONE_INVALID;
         return E_INVALIDARG;
     }
 
@@ -449,7 +455,7 @@ static HRESULT WINAPI SecManagerImpl_MapUrlToZone(IInternetSecurityManager *ifac
 static HRESULT WINAPI SecManagerImpl_GetSecurityId(IInternetSecurityManager *iface, 
         LPCWSTR pwszUrl, BYTE *pbSecurityId, DWORD *pcbSecurityId, DWORD_PTR dwReserved)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     LPWSTR url, ptr, ptr2;
     DWORD zone, len;
     HRESULT hres;
@@ -529,7 +535,7 @@ static HRESULT WINAPI SecManagerImpl_ProcessUrlAction(IInternetSecurityManager *
                                                       BYTE *pContext, DWORD cbContext,
                                                       DWORD dwFlags, DWORD dwReserved)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     DWORD zone, policy;
     HRESULT hres;
 
@@ -584,7 +590,7 @@ static HRESULT WINAPI SecManagerImpl_QueryCustomPolicy(IInternetSecurityManager 
                                                        BYTE *pContext, DWORD cbContext,
                                                        DWORD dwReserved)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     HRESULT hres;
 
     TRACE("(%p)->(%s %s %p %p %p %08x %08x )\n", iface, debugstr_w(pwszUrl), debugstr_guid(guidKey),
@@ -604,7 +610,7 @@ static HRESULT WINAPI SecManagerImpl_QueryCustomPolicy(IInternetSecurityManager 
 static HRESULT WINAPI SecManagerImpl_SetZoneMapping(IInternetSecurityManager *iface,
                                                     DWORD dwZone, LPCWSTR pwszPattern, DWORD dwFlags)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     HRESULT hres;
 
     TRACE("(%p)->(%08x %s %08x)\n", iface, dwZone, debugstr_w(pwszPattern),dwFlags);
@@ -623,7 +629,7 @@ static HRESULT WINAPI SecManagerImpl_SetZoneMapping(IInternetSecurityManager *if
 static HRESULT WINAPI SecManagerImpl_GetZoneMappings(IInternetSecurityManager *iface,
         DWORD dwZone, IEnumString **ppenumString, DWORD dwFlags)
 {
-    SecManagerImpl *This = SECMGR_THIS(iface);
+    SecManagerImpl *This = impl_from_IInternetSecurityManager(iface);
     HRESULT hres;
 
     TRACE("(%p)->(%08x %p %08x)\n", iface, dwZone, ppenumString,dwFlags);
@@ -662,7 +668,7 @@ HRESULT SecManagerImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
     This = heap_alloc(sizeof(*This));
 
     /* Initialize the virtual function table. */
-    This->lpInternetSecurityManagerVtbl = &VT_SecManagerImpl;
+    This->IInternetSecurityManager_iface.lpVtbl = &VT_SecManagerImpl;
 
     This->ref = 1;
     This->mgrsite = NULL;
@@ -680,11 +686,16 @@ HRESULT SecManagerImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
  *
  */
 typedef struct {
-    const IInternetZoneManagerEx2Vtbl* lpVtbl;
+    IInternetZoneManagerEx2 IInternetZoneManagerEx2_iface;
     LONG ref;
     LPDWORD *zonemaps;
     DWORD zonemap_count;
 } ZoneMgrImpl;
+
+static inline ZoneMgrImpl *impl_from_IInternetZoneManagerEx2(IInternetZoneManagerEx2 *iface)
+{
+    return CONTAINING_RECORD(iface, ZoneMgrImpl, IInternetZoneManagerEx2_iface);
+}
 
 
 /***********************************************************************
@@ -750,7 +761,7 @@ cleanup:
  */
 static HRESULT WINAPI ZoneMgrImpl_QueryInterface(IInternetZoneManagerEx2* iface, REFIID riid, void** ppvObject)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
 
     TRACE("(%p)->(%s,%p)\n", This, debugstr_guid(riid), ppvObject);
 
@@ -783,7 +794,7 @@ static HRESULT WINAPI ZoneMgrImpl_QueryInterface(IInternetZoneManagerEx2* iface,
  */
 static ULONG WINAPI ZoneMgrImpl_AddRef(IInternetZoneManagerEx2* iface)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
@@ -796,7 +807,7 @@ static ULONG WINAPI ZoneMgrImpl_AddRef(IInternetZoneManagerEx2* iface)
  */
 static ULONG WINAPI ZoneMgrImpl_Release(IInternetZoneManagerEx2* iface)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
@@ -818,7 +829,7 @@ static HRESULT WINAPI ZoneMgrImpl_GetZoneAttributes(IInternetZoneManagerEx2* ifa
                                                     DWORD dwZone,
                                                     ZONEATTRIBUTES* pZoneAttributes)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     HRESULT hr;
     HKEY hcu;
     HKEY hklm = NULL;
@@ -957,7 +968,7 @@ static HRESULT WINAPI ZoneMgrImpl_CreateZoneEnumerator(IInternetZoneManagerEx2* 
                                                        DWORD* pdwCount,
                                                        DWORD dwFlags)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     LPDWORD * new_maps;
     LPDWORD data;
     DWORD i;
@@ -1012,7 +1023,7 @@ static HRESULT WINAPI ZoneMgrImpl_GetZoneAt(IInternetZoneManagerEx2* iface,
                                             DWORD dwIndex,
                                             DWORD* pdwZone)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     LPDWORD data;
 
     TRACE("(%p)->(0x%08x, %d, %p)\n", This, dwEnum, dwIndex, pdwZone);
@@ -1035,7 +1046,7 @@ static HRESULT WINAPI ZoneMgrImpl_GetZoneAt(IInternetZoneManagerEx2* iface,
 static HRESULT WINAPI ZoneMgrImpl_DestroyZoneEnumerator(IInternetZoneManagerEx2* iface,
                                                         DWORD dwEnum)
 {
-    ZoneMgrImpl* This = (ZoneMgrImpl*)iface;
+    ZoneMgrImpl* This = impl_from_IInternetZoneManagerEx2(iface);
     LPDWORD data;
 
     TRACE("(%p)->(0x%08x)\n", This, dwEnum);
@@ -1202,7 +1213,7 @@ HRESULT ZoneMgrImpl_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
     ZoneMgrImpl* ret = heap_alloc_zero(sizeof(ZoneMgrImpl));
 
     TRACE("(%p %p)\n", pUnkOuter, ppobj);
-    ret->lpVtbl = &ZoneMgrImplVtbl;
+    ret->IInternetZoneManagerEx2_iface.lpVtbl = &ZoneMgrImplVtbl;
     ret->ref = 1;
     *ppobj = (IInternetZoneManagerEx*)ret;
 
@@ -1235,86 +1246,209 @@ HRESULT WINAPI CoInternetCreateZoneManager(IServiceProvider* pSP, IInternetZoneM
     return ZoneMgrImpl_Construct(NULL, (void**)ppZM);
 }
 
+static HRESULT parse_security_url(const WCHAR *url, PSUACTION action, WCHAR **result) {
+    IInternetProtocolInfo *protocol_info;
+    WCHAR *tmp, *new_url = NULL, *alloc_url = NULL;
+    DWORD size, new_size;
+    HRESULT hres = S_OK, parse_hres;
+
+    while(1) {
+        TRACE("parsing %s\n", debugstr_w(url));
+
+        protocol_info = get_protocol_info(url);
+        if(!protocol_info)
+            break;
+
+        size = strlenW(url)+1;
+        new_url = CoTaskMemAlloc(size*sizeof(WCHAR));
+        if(!new_url) {
+            hres = E_OUTOFMEMORY;
+            break;
+        }
+
+        new_size = 0;
+        parse_hres = IInternetProtocolInfo_ParseUrl(protocol_info, url, PARSE_SECURITY_URL, 0, new_url, size, &new_size, 0);
+        if(parse_hres == S_FALSE) {
+            if(!new_size) {
+                hres = E_UNEXPECTED;
+                break;
+            }
+
+            tmp = CoTaskMemRealloc(new_url, new_size*sizeof(WCHAR));
+            if(!tmp) {
+                hres = E_OUTOFMEMORY;
+                break;
+            }
+            new_url = tmp;
+            parse_hres = IInternetProtocolInfo_ParseUrl(protocol_info, url, PARSE_SECURITY_URL, 0, new_url,
+                    new_size, &new_size, 0);
+            if(parse_hres == S_FALSE) {
+                hres = E_FAIL;
+                break;
+            }
+        }
+
+        if(parse_hres != S_OK || !strcmpW(url, new_url))
+            break;
+
+        CoTaskMemFree(alloc_url);
+        url = alloc_url = new_url;
+        new_url = NULL;
+    }
+
+    CoTaskMemFree(new_url);
+
+    if(hres != S_OK) {
+        WARN("failed: %08x\n", hres);
+        CoTaskMemFree(alloc_url);
+        return hres;
+    }
+
+    if(action == PSU_DEFAULT && (protocol_info = get_protocol_info(url))) {
+        size = strlenW(url)+1;
+        new_url = CoTaskMemAlloc(size * sizeof(WCHAR));
+        if(new_url) {
+            new_size = 0;
+            parse_hres = IInternetProtocolInfo_ParseUrl(protocol_info, url, PARSE_SECURITY_DOMAIN, 0,
+                    new_url, size, &new_size, 0);
+            if(parse_hres == S_FALSE) {
+                if(new_size) {
+                    tmp = CoTaskMemRealloc(new_url, new_size*sizeof(WCHAR));
+                    if(tmp) {
+                        new_url = tmp;
+                        parse_hres = IInternetProtocolInfo_ParseUrl(protocol_info, url, PARSE_SECURITY_DOMAIN, 0, new_url,
+                                new_size, &new_size, 0);
+                        if(parse_hres == S_FALSE)
+                            hres = E_FAIL;
+                    }else {
+                        hres = E_OUTOFMEMORY;
+                    }
+                }else {
+                    hres = E_UNEXPECTED;
+                }
+            }
+
+            if(hres == S_OK && parse_hres == S_OK) {
+                CoTaskMemFree(alloc_url);
+                url = alloc_url = new_url;
+                new_url = NULL;
+            }
+
+            CoTaskMemFree(new_url);
+        }else {
+            hres = E_OUTOFMEMORY;
+        }
+        IInternetProtocolInfo_Release(protocol_info);
+    }
+
+    if(FAILED(hres)) {
+        WARN("failed %08x\n", hres);
+        CoTaskMemFree(alloc_url);
+        return hres;
+    }
+
+    if(!alloc_url) {
+        size = strlenW(url)+1;
+        alloc_url = CoTaskMemAlloc(size * sizeof(WCHAR));
+        if(!alloc_url)
+            return E_OUTOFMEMORY;
+        memcpy(alloc_url, url, size * sizeof(WCHAR));
+    }
+
+    *result = alloc_url;
+    return S_OK;
+}
+
 /********************************************************************
  *      CoInternetGetSecurityUrl (URLMON.@)
  */
 HRESULT WINAPI CoInternetGetSecurityUrl(LPCWSTR pwzUrl, LPWSTR *ppwzSecUrl, PSUACTION psuAction, DWORD dwReserved)
 {
-    WCHAR buf1[INTERNET_MAX_URL_LENGTH], buf2[INTERNET_MAX_URL_LENGTH];
-    LPWSTR url, domain;
-    DWORD len;
+    WCHAR *secure_url;
     HRESULT hres;
 
     TRACE("(%p,%p,%u,%u)\n", pwzUrl, ppwzSecUrl, psuAction, dwReserved);
 
-    url = buf1;
-    domain = buf2;
-    strcpyW(url, pwzUrl);
-
-    while(1) {
-        hres = CoInternetParseUrl(url, PARSE_SECURITY_URL, 0, domain, INTERNET_MAX_URL_LENGTH, &len, 0);
-        if(hres!=S_OK || !strcmpW(url, domain))
-            break;
-
-        if(url == buf1) {
-            url = buf2;
-            domain = buf1;
-        } else {
-            url = buf1;
-            domain = buf2;
-        }
-    }
-
-    if(psuAction==PSU_SECURITY_URL_ONLY) {
-        len = lstrlenW(url)+1;
-        *ppwzSecUrl = CoTaskMemAlloc(len*sizeof(WCHAR));
-        if(!*ppwzSecUrl)
-            return E_OUTOFMEMORY;
-
-        memcpy(*ppwzSecUrl, url, len*sizeof(WCHAR));
-        return S_OK;
-    }
-
-    hres = CoInternetParseUrl(url, PARSE_SECURITY_DOMAIN, 0, domain,
-            INTERNET_MAX_URL_LENGTH, &len, 0);
-    if(SUCCEEDED(hres)) {
-        len++;
-        *ppwzSecUrl = CoTaskMemAlloc(len*sizeof(WCHAR));
-        if(!*ppwzSecUrl)
-            return E_OUTOFMEMORY;
-
-        memcpy(*ppwzSecUrl, domain, len*sizeof(WCHAR));
-        return S_OK;
-    }
-
-    hres = CoInternetParseUrl(url, PARSE_SCHEMA, 0, domain,
-            INTERNET_MAX_URL_LENGTH, &len, 0);
-    if(hres == S_OK){
-        const WCHAR fileW[] = {'f','i','l','e',0};
-        if(!strcmpW(domain, fileW)){
-            hres = CoInternetParseUrl(url, PARSE_ROOTDOCUMENT, 0, domain, INTERNET_MAX_URL_LENGTH, &len, 0);
-        }else{
-            domain[len] = ':';
-            hres = CoInternetParseUrl(url, PARSE_DOMAIN, 0, domain+len+1,
-                    INTERNET_MAX_URL_LENGTH-len-1, &len, 0);
-            if(hres == S_OK) {
-                len = lstrlenW(domain)+1;
-                *ppwzSecUrl = CoTaskMemAlloc(len*sizeof(WCHAR));
-                if(!*ppwzSecUrl)
-                    return E_OUTOFMEMORY;
-
-                memcpy(*ppwzSecUrl, domain, len*sizeof(WCHAR));
-                return S_OK;
-            }
-        }
-    }else
+    hres = parse_security_url(pwzUrl, psuAction, &secure_url);
+    if(FAILED(hres))
         return hres;
 
-    len = lstrlenW(url)+1;
-    *ppwzSecUrl = CoTaskMemAlloc(len*sizeof(WCHAR));
-    if(!*ppwzSecUrl)
-        return E_OUTOFMEMORY;
+    if(psuAction != PSU_SECURITY_URL_ONLY) {
+        PARSEDURLW parsed_url = { sizeof(parsed_url) };
+        DWORD size;
 
-    memcpy(*ppwzSecUrl, url, len*sizeof(WCHAR));
+        /* FIXME: Use helpers from uri.c */
+        if(SUCCEEDED(ParseURLW(secure_url, &parsed_url))) {
+            WCHAR *new_url;
+
+            switch(parsed_url.nScheme) {
+            case URL_SCHEME_FTP:
+            case URL_SCHEME_HTTP:
+            case URL_SCHEME_HTTPS:
+                size = strlenW(secure_url)+1;
+                new_url = CoTaskMemAlloc(size * sizeof(WCHAR));
+                if(new_url)
+                    hres = UrlGetPartW(secure_url, new_url, &size, URL_PART_HOSTNAME, URL_PARTFLAG_KEEPSCHEME);
+                else
+                    hres = E_OUTOFMEMORY;
+                CoTaskMemFree(secure_url);
+                if(hres != S_OK) {
+                    WARN("UrlGetPart failed: %08x\n", hres);
+                    CoTaskMemFree(new_url);
+                    return FAILED(hres) ? hres : E_FAIL;
+                }
+                secure_url = new_url;
+            }
+        }
+    }
+
+    *ppwzSecUrl = secure_url;
     return S_OK;
+}
+
+/********************************************************************
+ *      CoInternetGetSecurityUrlEx (URLMON.@)
+ */
+HRESULT WINAPI CoInternetGetSecurityUrlEx(IUri *pUri, IUri **ppSecUri, PSUACTION psuAction, DWORD_PTR dwReserved)
+{
+    URL_SCHEME scheme_type;
+    BSTR secure_uri;
+    WCHAR *ret_url;
+    HRESULT hres;
+
+    TRACE("(%p,%p,%u,%u)\n", pUri, ppSecUri, psuAction, (DWORD)dwReserved);
+
+    if(!pUri || !ppSecUri)
+        return E_INVALIDARG;
+
+    hres = IUri_GetDisplayUri(pUri, &secure_uri);
+    if(FAILED(hres))
+        return hres;
+
+    hres = parse_security_url(secure_uri, psuAction, &ret_url);
+    SysFreeString(secure_uri);
+    if(FAILED(hres))
+        return hres;
+
+    hres = CreateUri(ret_url, Uri_CREATE_ALLOW_IMPLICIT_WILDCARD_SCHEME, 0, ppSecUri);
+    if(FAILED(hres)) {
+        CoTaskMemFree(ret_url);
+        return hres;
+    }
+
+    /* File URIs have to hierarchical. */
+    hres = IUri_GetScheme(pUri, (DWORD*)&scheme_type);
+    if(SUCCEEDED(hres) && scheme_type == URL_SCHEME_FILE) {
+        const WCHAR *tmp = ret_url;
+
+        /* Check and see if a "//" is after the scheme name. */
+        tmp += sizeof(fileW)/sizeof(WCHAR);
+        if(*tmp != '/' || *(tmp+1) != '/')
+            hres = E_INVALIDARG;
+    }
+
+    if(SUCCEEDED(hres))
+        hres = CreateUri(ret_url, Uri_CREATE_ALLOW_IMPLICIT_WILDCARD_SCHEME, 0, ppSecUri);
+    CoTaskMemFree(ret_url);
+    return hres;
 }

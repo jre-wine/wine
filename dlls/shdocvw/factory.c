@@ -24,6 +24,7 @@
 #include "shdocvw.h"
 #include "winreg.h"
 #include "advpub.h"
+#include "rpcproxy.h"
 #include "isguids.h"
 
 #include "winver.h"
@@ -34,19 +35,20 @@ WINE_DEFAULT_DEBUG_CHANNEL(shdocvw);
 
 /**********************************************************************
  * Implement the WebBrowser class factory
- *
- * (Based on implementation in ddraw/main.c)
  */
-
-#define FACTORY(x) ((IClassFactory*) &(x)->lpClassFactoryVtbl)
 
 typedef struct
 {
     /* IUnknown fields */
-    const IClassFactoryVtbl *lpClassFactoryVtbl;
+    IClassFactory IClassFactory_iface;
     HRESULT (*cf)(LPUNKNOWN, REFIID, LPVOID *);
     LONG ref;
 } IClassFactoryImpl;
+
+static inline IClassFactoryImpl *impl_from_IClassFactory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, IClassFactoryImpl, IClassFactory_iface);
+}
 
 
 /**********************************************************************
@@ -131,28 +133,28 @@ static const IClassFactoryVtbl WBCF_Vtbl =
  */
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
 {
-    static IClassFactoryImpl WB1ClassFactory = {&WBCF_Vtbl, WebBrowserV1_Create};
-    static IClassFactoryImpl WB2ClassFactory = {&WBCF_Vtbl, WebBrowserV2_Create};
-    static IClassFactoryImpl CUHClassFactory = {&WBCF_Vtbl, CUrlHistory_Create};
-    static IClassFactoryImpl ISCClassFactory = {&WBCF_Vtbl, InternetShortcut_Create};
-    static IClassFactoryImpl TBLClassFactory = {&WBCF_Vtbl, TaskbarList_Create};
+    static IClassFactoryImpl WB1ClassFactory = {{&WBCF_Vtbl}, WebBrowserV1_Create};
+    static IClassFactoryImpl WB2ClassFactory = {{&WBCF_Vtbl}, WebBrowserV2_Create};
+    static IClassFactoryImpl CUHClassFactory = {{&WBCF_Vtbl}, CUrlHistory_Create};
+    static IClassFactoryImpl ISCClassFactory = {{&WBCF_Vtbl}, InternetShortcut_Create};
+    static IClassFactoryImpl TBLClassFactory = {{&WBCF_Vtbl}, TaskbarList_Create};
 
     TRACE("\n");
 
     if(IsEqualGUID(&CLSID_WebBrowser, rclsid))
-        return IClassFactory_QueryInterface(FACTORY(&WB2ClassFactory), riid, ppv);
+        return IClassFactory_QueryInterface(&WB2ClassFactory.IClassFactory_iface, riid, ppv);
 
     if(IsEqualGUID(&CLSID_WebBrowser_V1, rclsid))
-        return IClassFactory_QueryInterface(FACTORY(&WB1ClassFactory), riid, ppv);
+        return IClassFactory_QueryInterface(&WB1ClassFactory.IClassFactory_iface, riid, ppv);
 
     if(IsEqualGUID(&CLSID_CUrlHistory, rclsid))
-        return IClassFactory_QueryInterface(FACTORY(&CUHClassFactory), riid, ppv);
+        return IClassFactory_QueryInterface(&CUHClassFactory.IClassFactory_iface, riid, ppv);
 
     if(IsEqualGUID(&CLSID_InternetShortcut, rclsid))
-        return IClassFactory_QueryInterface(FACTORY(&ISCClassFactory), riid, ppv);
+        return IClassFactory_QueryInterface(&ISCClassFactory.IClassFactory_iface, riid, ppv);
 
     if(IsEqualGUID(&CLSID_TaskbarList, rclsid))
-        return IClassFactory_QueryInterface(FACTORY(&TBLClassFactory), riid, ppv);
+        return IClassFactory_QueryInterface(&TBLClassFactory.IClassFactory_iface, riid, ppv);
 
     /* As a last resort, figure if the CLSID belongs to a 'Shell Instance Object' */
     return SHDOCVW_GetShellInstanceObjectClassObject(rclsid, riid, ppv);
@@ -163,11 +165,12 @@ HRESULT register_class_object(BOOL do_reg)
     HRESULT hres;
 
     static DWORD cookie;
-    static IClassFactoryImpl IEClassFactory = {&WBCF_Vtbl, InternetExplorer_Create};
+    static IClassFactoryImpl IEClassFactory = {{&WBCF_Vtbl}, InternetExplorer_Create};
 
     if(do_reg) {
-        hres = CoRegisterClassObject(&CLSID_InternetExplorer, (IUnknown*)FACTORY(&IEClassFactory),
-                                     CLSCTX_SERVER, REGCLS_MULTIPLEUSE|REGCLS_SUSPENDED, &cookie);
+        hres = CoRegisterClassObject(&CLSID_InternetExplorer,
+                                     (IUnknown*)&IEClassFactory.IClassFactory_iface, CLSCTX_SERVER,
+                                     REGCLS_MULTIPLEUSE|REGCLS_SUSPENDED, &cookie);
         if (FAILED(hres)) {
             ERR("failed to register object %08x\n", hres);
             return hres;
@@ -200,11 +203,6 @@ static HRESULT reg_install(LPCSTR section, STRTABLEA *strtable)
     return hres;
 }
 
-static const GUID CLSID_MicrosoftBrowserArchitecture =
-    {0xa5e46e3a, 0x8849, 0x11d1, {0x9d, 0x8c, 0x00, 0xc0, 0x4f, 0xc9, 0x9d, 0x61}};
-static const GUID CLSID_MruLongList =
-    {0x53bd6b4e, 0x3780, 0x4693, {0xaf, 0xc3, 0x71, 0x61, 0xc2, 0xf3, 0xee, 0x9c}};
-
 #define INF_SET_CLSID(clsid)                  \
     do                                        \
     {                                         \
@@ -217,26 +215,14 @@ static const GUID CLSID_MruLongList =
 static HRESULT register_server(BOOL doregister)
 {
     STRTABLEA strtable;
-    STRENTRYA pse[15];
-    static CLSID const *clsids[15];
+    STRENTRYA pse[3];
+    static CLSID const *clsids[3];
     unsigned int i = 0;
     HRESULT hres;
 
-    INF_SET_CLSID(CUrlHistory);
     INF_SET_CLSID(Internet);
     INF_SET_CLSID(InternetExplorer);
     INF_SET_CLSID(InternetShortcut);
-    INF_SET_CLSID(MicrosoftBrowserArchitecture);
-    INF_SET_CLSID(MruLongList);
-    INF_SET_CLSID(SearchAssistantOC);
-    INF_SET_CLSID(ShellNameSpace);
-    INF_SET_CLSID(ShellSearchAssistantOC);
-    INF_SET_CLSID(ShellShellNameSpace);
-    INF_SET_CLSID(ShellUIHelper);
-    INF_SET_CLSID(ShellWindows);
-    INF_SET_CLSID(TaskbarList);
-    INF_SET_CLSID(WebBrowser);
-    INF_SET_CLSID(WebBrowser_V1);
 
     for(i = 0; i < sizeof(pse)/sizeof(pse[0]); i++) {
         pse[i].pszValue = HeapAlloc(GetProcessHeap(), 0, 39);
@@ -264,24 +250,13 @@ static HRESULT register_server(BOOL doregister)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    ITypeLib *typelib;
     HRESULT hres;
 
-    static const WCHAR shdocvwW[] = {'s','h','d','o','c','v','w','.','d','l','l',0};
-
-    hres = register_server(TRUE);
+    hres = __wine_register_resources( shdocvw_hinstance, NULL );
     if(FAILED(hres))
         return hres;
 
-    hres = LoadTypeLibEx(shdocvwW, REGKIND_REGISTER, &typelib);
-    if(FAILED(hres)) {
-        ERR("Could not load typelib: %08x\n", hres);
-        return hres;
-    }
-
-    ITypeLib_Release(typelib);
-
-    return hres;
+    return register_server(TRUE);
 }
 
 /***********************************************************************
@@ -295,7 +270,7 @@ HRESULT WINAPI DllUnregisterServer(void)
     if(FAILED(hres))
         return hres;
 
-    return UnRegisterTypeLib(&LIBID_SHDocVw, 1, 1, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
+    return __wine_unregister_resources( shdocvw_hinstance, NULL );
 }
 
 static BOOL check_native_ie(void)

@@ -877,7 +877,7 @@ static BOOL URLCache_LocalFileNameToPathW(
     }
 
     nRequired = (path_len + DIR_LENGTH + file_name_len + 1) * sizeof(WCHAR);
-    if (nRequired < *lpBufferSize)
+    if (nRequired <= *lpBufferSize)
     {
         int dir_len;
 
@@ -1090,7 +1090,7 @@ static DWORD URLCache_SetEntryInfo(URL_CACHEFILE_ENTRY * pUrlEntry, const INTERN
     if (dwFieldControl & CACHE_ENTRY_EXEMPT_DELTA_FC)
         pUrlEntry->dwExemptDelta = lpCacheEntryInfo->u.dwExemptDelta;
     if (dwFieldControl & CACHE_ENTRY_EXPTIME_FC)
-        FIXME("CACHE_ENTRY_EXPTIME_FC unimplemented\n");
+        FileTimeToDosDateTime(&lpCacheEntryInfo->ExpireTime, &pUrlEntry->wExpiredDate, &pUrlEntry->wExpiredTime);
     if (dwFieldControl & CACHE_ENTRY_HEADERINFO_FC)
         FIXME("CACHE_ENTRY_HEADERINFO_FC unimplemented\n");
     if (dwFieldControl & CACHE_ENTRY_HITRATE_FC)
@@ -2184,14 +2184,17 @@ BOOL WINAPI CreateUrlCacheEntryA(
 )
 {
     WCHAR *url_name;
-    WCHAR *file_extension;
+    WCHAR *file_extension = NULL;
     WCHAR file_name[MAX_PATH];
     BOOL bSuccess = FALSE;
     DWORD dwError = 0;
 
+    TRACE("(%s %d %s %p %d)\n", debugstr_a(lpszUrlName), dwExpectedFileSize,
+            debugstr_a(lpszFileExtension), lpszFileName, dwReserved);
+
     if (lpszUrlName && (url_name = heap_strdupAtoW(lpszUrlName)))
     {
-	if (lpszFileExtension && (file_extension = heap_strdupAtoW(lpszFileExtension)))
+	if (!lpszFileExtension || (file_extension = heap_strdupAtoW(lpszFileExtension)))
 	{
 	    if (CreateUrlCacheEntryW(url_name, dwExpectedFileSize, file_extension, file_name, dwReserved))
 	    {
@@ -2268,6 +2271,12 @@ BOOL WINAPI CreateUrlCacheEntryW(
     if (((lpszUrlEnd - lpszUrlName) > 1) && (*(lpszUrlEnd - 1) == '/' || *(lpszUrlEnd - 1) == '\\'))
         lpszUrlEnd--;
 
+    lpszUrlPart = memchrW(lpszUrlName, '?', lpszUrlEnd - lpszUrlName);
+    if (!lpszUrlPart)
+        lpszUrlPart = memchrW(lpszUrlName, '#', lpszUrlEnd - lpszUrlName);
+    if (lpszUrlPart)
+        lpszUrlEnd = lpszUrlPart;
+
     for (lpszUrlPart = lpszUrlEnd; 
         (lpszUrlPart >= lpszUrlName); 
         lpszUrlPart--)
@@ -2277,10 +2286,6 @@ BOOL WINAPI CreateUrlCacheEntryW(
             bFound = TRUE;
             lpszUrlPart++;
             break;
-        }
-        else if(*lpszUrlPart == '?' || *lpszUrlPart == '#')
-        {
-            lpszUrlEnd = lpszUrlPart;
         }
     }
     if (!lstrcmpW(lpszUrlPart, szWWW))
@@ -2327,7 +2332,13 @@ BOOL WINAPI CreateUrlCacheEntryW(
     CacheDir = (BYTE)(rand() % pHeader->DirectoryCount);
 
     lBufferSize = MAX_PATH * sizeof(WCHAR);
-    URLCache_LocalFileNameToPathW(pContainer, pHeader, szFile, CacheDir, lpszFileName, &lBufferSize);
+    if (!URLCache_LocalFileNameToPathW(pContainer, pHeader, szFile, CacheDir, lpszFileName, &lBufferSize))
+    {
+        WARN("Failed to get full path for filename %s, needed %u bytes.\n",
+                debugstr_a(szFile), lBufferSize);
+        URLCacheContainer_UnlockIndex(pContainer, pHeader);
+        return FALSE;
+    }
 
     URLCacheContainer_UnlockIndex(pContainer, pHeader);
 
@@ -3438,8 +3449,6 @@ BOOL WINAPI GetUrlCacheConfigInfoW(LPINTERNET_CACHE_CONFIG_INFOW CacheInfo, LPDW
 
 /***********************************************************************
  *           GetUrlCacheConfigInfoA (WININET.@)
- *
- * CacheInfo is some CACHE_CONFIG_INFO structure, with no MS info found by google
  */
 BOOL WINAPI GetUrlCacheConfigInfoA(LPINTERNET_CACHE_CONFIG_INFOA CacheInfo, LPDWORD size, DWORD bitmask)
 {

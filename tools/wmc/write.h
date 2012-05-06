@@ -24,5 +24,7 @@ void write_h_file(const char *fname);
 void write_rc_file(const char *fname);
 void write_bin_files(void);
 void write_res_file( const char *name );
+void write_pot_file( const char *outname );
+void add_translations( const char *po_dir );
 
 #endif

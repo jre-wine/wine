@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = vdmdbg.dll
 IMPORTLIB = vdmdbg
-IMPORTS   = kernel32
 
 C_SRCS = \
 	vdmdbg.c

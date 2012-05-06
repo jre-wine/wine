@@ -54,8 +54,6 @@ static const WCHAR IDispatchW[] = { 'I','D','i','s','p','a','t','c','h',0};
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 WINE_DECLARE_DEBUG_CHANNEL(olerelay);
 
-#define ICOM_THIS_MULTI(impl,field,iface) impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))
-
 static HRESULT TMarshalDispatchChannel_Create(
     IRpcChannelBuffer *pDelegateChannel, REFIID tmarshal_riid,
     IRpcChannelBuffer **ppChannel);
@@ -155,6 +153,7 @@ _unmarshal_interface(marshal_state *buf, REFIID riid, LPUNKNOWN *pUnk) {
     hres = IStream_Write(pStm,buf->base+buf->curoff,xsize,&res);
     if (hres) {
         ERR("stream write %x\n",hres);
+        IStream_Release(pStm);
         return hres;
     }
     
@@ -162,12 +161,14 @@ _unmarshal_interface(marshal_state *buf, REFIID riid, LPUNKNOWN *pUnk) {
     hres = IStream_Seek(pStm,seekto,SEEK_SET,&newpos);
     if (hres) {
         ERR("Failed Seek %x\n",hres);
+        IStream_Release(pStm);
         return hres;
     }
     
     hres = CoUnmarshalInterface(pStm,riid,(LPVOID*)pUnk);
     if (hres) {
 	ERR("Unmarshalling interface %s failed with %x\n",debugstr_guid(riid),hres);
+	IStream_Release(pStm);
 	return hres;
     }
     
@@ -429,7 +430,7 @@ typedef struct _TMAsmProxy {
 
 typedef struct _TMProxyImpl {
     LPVOID                             *lpvtbl;
-    const IRpcProxyBufferVtbl          *lpvtbl2;
+    IRpcProxyBuffer                     IRpcProxyBuffer_iface;
     LONG				ref;
 
     TMAsmProxy				*asmstubs;
@@ -441,6 +442,11 @@ typedef struct _TMProxyImpl {
     IDispatch				*dispatch;
     IRpcProxyBuffer			*dispatch_proxy;
 } TMProxyImpl;
+
+static inline TMProxyImpl *impl_from_IRpcProxyBuffer( IRpcProxyBuffer *iface )
+{
+    return CONTAINING_RECORD(iface, TMProxyImpl, IRpcProxyBuffer_iface);
+}
 
 static HRESULT WINAPI
 TMProxyImpl_QueryInterface(LPRPCPROXYBUFFER iface, REFIID riid, LPVOID *ppv)
@@ -458,7 +464,7 @@ TMProxyImpl_QueryInterface(LPRPCPROXYBUFFER iface, REFIID riid, LPVOID *ppv)
 static ULONG WINAPI
 TMProxyImpl_AddRef(LPRPCPROXYBUFFER iface)
 {
-    ICOM_THIS_MULTI(TMProxyImpl,lpvtbl2,iface);
+    TMProxyImpl *This = impl_from_IRpcProxyBuffer( iface );
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
@@ -469,7 +475,7 @@ TMProxyImpl_AddRef(LPRPCPROXYBUFFER iface)
 static ULONG WINAPI
 TMProxyImpl_Release(LPRPCPROXYBUFFER iface)
 {
-    ICOM_THIS_MULTI(TMProxyImpl,lpvtbl2,iface);
+    TMProxyImpl *This = impl_from_IRpcProxyBuffer( iface );
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
@@ -492,7 +498,7 @@ static HRESULT WINAPI
 TMProxyImpl_Connect(
     LPRPCPROXYBUFFER iface,IRpcChannelBuffer* pRpcChannelBuffer)
 {
-    ICOM_THIS_MULTI(TMProxyImpl, lpvtbl2, iface);
+    TMProxyImpl *This = impl_from_IRpcProxyBuffer( iface );
 
     TRACE("(%p)\n", pRpcChannelBuffer);
 
@@ -520,7 +526,7 @@ TMProxyImpl_Connect(
 static void WINAPI
 TMProxyImpl_Disconnect(LPRPCPROXYBUFFER iface)
 {
-    ICOM_THIS_MULTI(TMProxyImpl, lpvtbl2, iface);
+    TMProxyImpl *This = impl_from_IRpcProxyBuffer( iface );
 
     TRACE("()\n");
 
@@ -1560,12 +1566,17 @@ static HRESULT WINAPI ProxyIDispatch_Invoke(LPDISPATCH iface, DISPID dispIdMembe
 
 typedef struct
 {
-    const IRpcChannelBufferVtbl *lpVtbl;
+    IRpcChannelBuffer     IRpcChannelBuffer_iface;
     LONG                  refs;
     /* the IDispatch-derived interface we are handling */
-	IID                   tmarshal_iid;
+    IID                   tmarshal_iid;
     IRpcChannelBuffer    *pDelegateChannel;
 } TMarshalDispatchChannel;
+
+static inline TMarshalDispatchChannel *impl_from_IRpcChannelBuffer(IRpcChannelBuffer *iface)
+{
+    return CONTAINING_RECORD(iface, TMarshalDispatchChannel, IRpcChannelBuffer_iface);
+}
 
 static HRESULT WINAPI TMarshalDispatchChannel_QueryInterface(LPRPCCHANNELBUFFER iface, REFIID riid, LPVOID *ppv)
 {
@@ -1581,13 +1592,13 @@ static HRESULT WINAPI TMarshalDispatchChannel_QueryInterface(LPRPCCHANNELBUFFER 
 
 static ULONG WINAPI TMarshalDispatchChannel_AddRef(LPRPCCHANNELBUFFER iface)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     return InterlockedIncrement(&This->refs);
 }
 
 static ULONG WINAPI TMarshalDispatchChannel_Release(LPRPCCHANNELBUFFER iface)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     ULONG ref;
 
     ref = InterlockedDecrement(&This->refs);
@@ -1601,7 +1612,7 @@ static ULONG WINAPI TMarshalDispatchChannel_Release(LPRPCCHANNELBUFFER iface)
 
 static HRESULT WINAPI TMarshalDispatchChannel_GetBuffer(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE* olemsg, REFIID riid)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     TRACE("(%p, %s)\n", olemsg, debugstr_guid(riid));
     /* Note: we are pretending to invoke a method on the interface identified
      * by tmarshal_iid so that we can re-use the IDispatch proxy/stub code
@@ -1611,28 +1622,28 @@ static HRESULT WINAPI TMarshalDispatchChannel_GetBuffer(LPRPCCHANNELBUFFER iface
 
 static HRESULT WINAPI TMarshalDispatchChannel_SendReceive(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE *olemsg, ULONG *pstatus)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     TRACE("(%p, %p)\n", olemsg, pstatus);
     return IRpcChannelBuffer_SendReceive(This->pDelegateChannel, olemsg, pstatus);
 }
 
 static HRESULT WINAPI TMarshalDispatchChannel_FreeBuffer(LPRPCCHANNELBUFFER iface, RPCOLEMESSAGE* olemsg)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     TRACE("(%p)\n", olemsg);
     return IRpcChannelBuffer_FreeBuffer(This->pDelegateChannel, olemsg);
 }
 
 static HRESULT WINAPI TMarshalDispatchChannel_GetDestCtx(LPRPCCHANNELBUFFER iface, DWORD* pdwDestContext, void** ppvDestContext)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     TRACE("(%p,%p)\n", pdwDestContext, ppvDestContext);
     return IRpcChannelBuffer_GetDestCtx(This->pDelegateChannel, pdwDestContext, ppvDestContext);
 }
 
 static HRESULT WINAPI TMarshalDispatchChannel_IsConnected(LPRPCCHANNELBUFFER iface)
 {
-    TMarshalDispatchChannel *This = (TMarshalDispatchChannel *)iface;
+    TMarshalDispatchChannel *This = impl_from_IRpcChannelBuffer(iface);
     TRACE("()\n");
     return IRpcChannelBuffer_IsConnected(This->pDelegateChannel);
 }
@@ -1657,13 +1668,13 @@ static HRESULT TMarshalDispatchChannel_Create(
     if (!This)
         return E_OUTOFMEMORY;
 
-    This->lpVtbl = &TMarshalDispatchChannelVtbl;
+    This->IRpcChannelBuffer_iface.lpVtbl = &TMarshalDispatchChannelVtbl;
     This->refs = 1;
     IRpcChannelBuffer_AddRef(pDelegateChannel);
     This->pDelegateChannel = pDelegateChannel;
     This->tmarshal_iid = *tmarshal_riid;
 
-    *ppChannel = (IRpcChannelBuffer *)&This->lpVtbl;
+    *ppChannel = &This->IRpcChannelBuffer_iface;
     return S_OK;
 }
 
@@ -1774,7 +1785,7 @@ PSFacBuf_CreateProxy(
         CoTaskMemFree(proxy);
         return E_OUTOFMEMORY;
     }
-    proxy->lpvtbl2	= &tmproxyvtable;
+    proxy->IRpcProxyBuffer_iface.lpVtbl = &tmproxyvtable;
     /* one reference for the proxy */
     proxy->ref		= 1;
     proxy->tinfo	= tinfo;
@@ -1866,17 +1877,17 @@ PSFacBuf_CreateProxy(
     if (hres == S_OK)
     {
         *ppv = proxy;
-        *ppProxy = (IRpcProxyBuffer *)&(proxy->lpvtbl2);
+        *ppProxy = &proxy->IRpcProxyBuffer_iface;
         IUnknown_AddRef((IUnknown *)*ppv);
         return S_OK;
     }
     else
-        TMProxyImpl_Release((IRpcProxyBuffer *)&proxy->lpvtbl2);
+        TMProxyImpl_Release(&proxy->IRpcProxyBuffer_iface);
     return hres;
 }
 
 typedef struct _TMStubImpl {
-    const IRpcStubBufferVtbl   *lpvtbl;
+    IRpcStubBuffer              IRpcStubBuffer_iface;
     LONG			ref;
 
     LPUNKNOWN			pUnk;
@@ -1885,6 +1896,11 @@ typedef struct _TMStubImpl {
     IRpcStubBuffer		*dispatch_stub;
     BOOL			dispatch_derivative;
 } TMStubImpl;
+
+static inline TMStubImpl *impl_from_IRpcStubBuffer(IRpcStubBuffer *iface)
+{
+    return CONTAINING_RECORD(iface, TMStubImpl, IRpcStubBuffer_iface);
+}
 
 static HRESULT WINAPI
 TMStubImpl_QueryInterface(LPRPCSTUBBUFFER iface, REFIID riid, LPVOID *ppv)
@@ -1901,9 +1917,9 @@ TMStubImpl_QueryInterface(LPRPCSTUBBUFFER iface, REFIID riid, LPVOID *ppv)
 static ULONG WINAPI
 TMStubImpl_AddRef(LPRPCSTUBBUFFER iface)
 {
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
-        
+
     TRACE("(%p)->(ref before=%u)\n", This, refCount - 1);
 
     return refCount;
@@ -1912,7 +1928,7 @@ TMStubImpl_AddRef(LPRPCSTUBBUFFER iface)
 static ULONG WINAPI
 TMStubImpl_Release(LPRPCSTUBBUFFER iface)
 {
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n", This, refCount + 1);
@@ -1931,7 +1947,7 @@ TMStubImpl_Release(LPRPCSTUBBUFFER iface)
 static HRESULT WINAPI
 TMStubImpl_Connect(LPRPCSTUBBUFFER iface, LPUNKNOWN pUnkServer)
 {
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
 
     TRACE("(%p)->(%p)\n", This, pUnkServer);
 
@@ -1947,7 +1963,7 @@ TMStubImpl_Connect(LPRPCSTUBBUFFER iface, LPUNKNOWN pUnkServer)
 static void WINAPI
 TMStubImpl_Disconnect(LPRPCSTUBBUFFER iface)
 {
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
 
     TRACE("(%p)->()\n", This);
 
@@ -1968,7 +1984,7 @@ TMStubImpl_Invoke(
 #ifdef __i386__
     int		i;
     const FUNCDESC *fdesc;
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
     HRESULT	hres;
     DWORD	*args = NULL, res, *xargs, nrofargs;
     marshal_state	buf;
@@ -2144,7 +2160,7 @@ TMStubImpl_IsIIDSupported(LPRPCSTUBBUFFER iface, REFIID riid) {
 
 static ULONG WINAPI
 TMStubImpl_CountRefs(LPRPCSTUBBUFFER iface) {
-    TMStubImpl *This = (TMStubImpl *)iface;
+    TMStubImpl *This = impl_from_IRpcStubBuffer(iface);
 
     FIXME("()\n");
     return This->ref; /*FIXME? */
@@ -2194,14 +2210,14 @@ PSFacBuf_CreateStub(
     stub = CoTaskMemAlloc(sizeof(TMStubImpl));
     if (!stub)
 	return E_OUTOFMEMORY;
-    stub->lpvtbl	= &tmstubvtbl;
+    stub->IRpcStubBuffer_iface.lpVtbl = &tmstubvtbl;
     stub->ref		= 1;
     stub->tinfo		= tinfo;
     stub->dispatch_stub = NULL;
     stub->dispatch_derivative = FALSE;
     stub->iid		= *riid;
-    hres = IRpcStubBuffer_Connect((LPRPCSTUBBUFFER)stub,pUnkServer);
-    *ppStub 		= (LPRPCSTUBBUFFER)stub;
+    hres = IRpcStubBuffer_Connect(&stub->IRpcStubBuffer_iface,pUnkServer);
+    *ppStub = &stub->IRpcStubBuffer_iface;
     TRACE("IRpcStubBuffer: %p\n", stub);
     if (hres)
 	ERR("Connect to pUnkServer failed?\n");

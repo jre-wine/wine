@@ -19,7 +19,6 @@
 #define NONAMELESSUNION
 #include "wine/test.h"
 
-#define CINTERFACE
 #define COBJMACROS
 
 #ifdef STANDALONE
@@ -56,10 +55,12 @@ static void test_propertystore(IPropertyStore *store)
 
     pv.vt = VT_EMPTY;
     hr = IPropertyStore_GetValue(store, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_Enabled, &pv);
+    ok(hr == S_OK, "Failed with %08x\n", hr);
     ok(pv.vt == VT_EMPTY, "Key should not be found\n");
 
     pv.vt = VT_EMPTY;
     hr = IPropertyStore_GetValue(store, (const PROPERTYKEY*)&DEVPKEY_DeviceInterface_ClassGuid, &pv);
+    ok(hr == S_OK, "Failed with %08x\n", hr);
     ok(pv.vt == VT_EMPTY, "Key should not be found\n");
 }
 

@@ -149,7 +149,6 @@ static LRESULT IPADDRESS_Draw (const IPADDRESS_INFO *infoPtr, HDC hdc)
 {
     static const WCHAR dotW[] = { '.', 0 };
     RECT rect, rcPart;
-    POINT pt;
     COLORREF bgCol, fgCol;
     int i;
 
@@ -173,13 +172,11 @@ static LRESULT IPADDRESS_Draw (const IPADDRESS_INFO *infoPtr, HDC hdc)
 
     for (i = 0; i < 3; i++) {
         GetWindowRect (infoPtr->Part[i].EditHwnd, &rcPart);
-	pt.x = rcPart.right;
-	ScreenToClient(infoPtr->Self, &pt);
-	rect.left = pt.x;
+        MapWindowPoints( 0, infoPtr->Self, (POINT *)&rcPart, 2 );
+	rect.left = rcPart.right;
 	GetWindowRect (infoPtr->Part[i+1].EditHwnd, &rcPart);
-	pt.x = rcPart.left;
-	ScreenToClient(infoPtr->Self, &pt);
-	rect.right = pt.x;
+        MapWindowPoints( 0, infoPtr->Self, (POINT *)&rcPart, 2 );
+	rect.right = rcPart.left;
 	DrawTextW(hdc, dotW, 1, &rect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM);
     }
 
@@ -387,15 +384,16 @@ static void IPADDRESS_SetFocusToField (const IPADDRESS_INFO *infoPtr, INT index)
 
 static BOOL IPADDRESS_ConstrainField (const IPADDRESS_INFO *infoPtr, int currentfield)
 {
-    const IPPART_INFO *part = &infoPtr->Part[currentfield];
-    WCHAR field[10];
     static const WCHAR fmt[] = { '%', 'd', 0 };
+    const IPPART_INFO *part;
     int curValue, newValue;
+    WCHAR field[10];
 
     TRACE("(currentfield=%d)\n", currentfield);
 
     if (currentfield < 0 || currentfield > 3) return FALSE;
 
+    part = &infoPtr->Part[currentfield];
     if (!GetWindowTextW (part->EditHwnd, field, 4)) return FALSE;
 
     curValue = atoiW(field);

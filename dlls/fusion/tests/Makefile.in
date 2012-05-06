@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = fusion.dll
-IMPORTS   = user32 kernel32
+IMPORTS   = user32
 
 C_SRCS = \
 	asmcache.c \

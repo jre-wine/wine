@@ -18,14 +18,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "wine/winbase16.h"
 #include "winuser.h"
 #include "wincon.h"
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winevdm);
@@ -100,6 +105,119 @@ typedef struct {
 } pif386rec_t;
 
 #include "poppack.h"
+
+/***********************************************************************
+ *           find_dosbox
+ */
+static char *find_dosbox(void)
+{
+    const char *envpath = getenv( "PATH" );
+    struct stat st;
+    char *path, *p, *buffer, *dir;
+
+    if (!envpath) return NULL;
+    path = HeapAlloc( GetProcessHeap(), 0, strlen(envpath) );
+    buffer = HeapAlloc( GetProcessHeap(), 0, strlen(path) + sizeof("/dosbox") );
+    strcpy( path, envpath );
+    p = path;
+    while (*p)
+    {
+        while (*p == ':') p++;
+        if (!*p) break;
+        dir = p;
+        while (*p && *p != ':') p++;
+        *p++ = 0;
+        strcpy( buffer, dir );
+        strcat( buffer, "/dosbox" );
+        if (!stat( buffer, &st ))
+        {
+            HeapFree( GetProcessHeap(), 0, path );
+            return buffer;
+        }
+    }
+    HeapFree( GetProcessHeap(), 0, buffer );
+    HeapFree( GetProcessHeap(), 0, path );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *           start_dosbox
+ */
+static void start_dosbox( const char *appname, const char *args )
+{
+    static const WCHAR cfgW[] = {'c','f','g',0};
+    const char *config_dir = wine_get_config_dir();
+    WCHAR path[MAX_PATH], config[MAX_PATH];
+    HANDLE file;
+    char *p, *buffer;
+    int i;
+    int ret = 1;
+    DWORD written, drives = GetLogicalDrives();
+    char *dosbox = find_dosbox();
+
+    if (!dosbox) return;
+    if (!GetTempPathW( MAX_PATH, path )) return;
+    if (!GetTempFileNameW( path, cfgW, 0, config )) return;
+    if (!GetCurrentDirectoryW( MAX_PATH, path )) return;
+    file = CreateFileW( config, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    if (file == INVALID_HANDLE_VALUE) return;
+
+    buffer = HeapAlloc( GetProcessHeap(), 0, sizeof("[autoexec]") +
+                        25 * (strlen(config_dir) + sizeof("mount c /dosdevices/c:")) +
+                        4 * strlenW( path ) +
+                        6 + strlen( appname ) + strlen( args ) + 20 );
+    p = buffer;
+    p += sprintf( p, "[autoexec]\n" );
+    for (i = 0; i < 25; i++)
+        if (drives & (1 << i))
+            p += sprintf( p, "mount %c %s/dosdevices/%c:\n", 'a' + i, config_dir, 'a' + i );
+    p += sprintf( p, "%c:\ncd ", path[0] );
+    p += WideCharToMultiByte( CP_UNIXCP, 0, path + 2, -1, p, 4 * strlenW(path), NULL, NULL ) - 1;
+    p += sprintf( p, "\n%s %s\n", appname, args );
+    p += sprintf( p, "exit\n" );
+    if (WriteFile( file, buffer, strlen(buffer), &written, NULL ) && written == strlen(buffer))
+    {
+        const char *args[4];
+        char *config_file = wine_get_unix_file_name( config );
+        args[0] = dosbox;
+        args[1] = "-conf";
+        args[2] = config_file;
+        args[3] = NULL;
+        ret = spawnvp( _P_WAIT, args[0], args );
+    }
+    CloseHandle( file );
+    DeleteFileW( config );
+    HeapFree( GetProcessHeap(), 0, buffer );
+    ExitProcess( ret );
+}
+
+
+/***********************************************************************
+ *           start_dos_exe
+ */
+static void start_dos_exe( LPCSTR filename, LPCSTR cmdline )
+{
+    MEMORY_BASIC_INFORMATION mem_info;
+    const char *reason;
+
+    if (VirtualQuery( NULL, &mem_info, sizeof(mem_info) ) && mem_info.State != MEM_FREE)
+    {
+        __wine_load_dos_exe( filename, cmdline );
+        if (GetLastError() == ERROR_NOT_SUPPORTED)
+            reason = "because vm86 mode is not supported on this platform";
+        else
+            reason = wine_dbg_sprintf( "It failed with error code %u", GetLastError() );
+    }
+    else reason = "because the DOS memory range is unavailable";
+
+    start_dosbox( filename, cmdline );
+
+    WINE_MESSAGE( "winevdm: Cannot start DOS application %s\n", filename );
+    WINE_MESSAGE( "         %s.\n", reason );
+    WINE_MESSAGE( "         Try running this application with DOSBox.\n" );
+    ExitProcess(1);
+}
 
 /***********************************************************************
  *           read_pif_file
@@ -244,8 +362,7 @@ static VOID pif_cmd( char *filename, char *cmdline)
      * - hot key's
      * - etc.
      */ 
-    __wine_load_dos_exe( progpath, cmdline );
-    return;
+    start_dos_exe( progpath, cmdline );
 }
 
 /***********************************************************************
@@ -382,7 +499,6 @@ int main( int argc, char *argv[] )
     STARTUPINFOA info;
     char *cmdline, *appname, **first_arg;
     char *p;
-    MEMORY_BASIC_INFORMATION mem_info;
 
     if (!argv[1]) usage();
 
@@ -439,15 +555,9 @@ int main( int argc, char *argv[] )
                 pif_cmd( appname, cmdline + 1);
             else
             {
-                if (!VirtualQuery( NULL, &mem_info, sizeof(mem_info) ) || mem_info.State == MEM_FREE)
-                {
-                    WINE_MESSAGE( "winevdm: unable to exec '%s': DOS memory range unavailable\n", appname );
-                    ExitProcess(1);
-                }
-
                 /* try DOS format */
                 /* loader expects arguments to be regular C strings */
-                __wine_load_dos_exe( appname, cmdline + 1 );
+                start_dos_exe( appname, cmdline + 1 );
             }
             /* if we get back here it failed */
             instance = GetLastError();

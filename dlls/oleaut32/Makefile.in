@@ -1,13 +1,9 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = oleaut32.dll
 IMPORTLIB = oleaut32
-IMPORTS   = uuid ole32 rpcrt4 user32 gdi32 advapi32 kernel32 ntdll
+IMPORTS   = uuid ole32 rpcrt4 user32 gdi32 advapi32
 DELAYIMPORTS = comctl32 urlmon windowscodecs
 EXTRADEFS = -D_OLEAUT32_ -DCOM_NO_WINDOWS_H \
-    -DENTRY_PREFIX=OLEAUTPS_ -DPROXY_DELEGATION -DREGISTER_PROXY_DLL \
+    -DENTRY_PREFIX=OLEAUTPS_ -DPROXY_DELEGATION -DWINE_REGISTER_DLL \
     -DPROXY_CLSID_IS="{0xb196b286,0xbab4,0x101a,{0xb6,0x9c,0x00,0xaa,0x00,0x34,0x1d,0x07}}"
 
 C_SRCS = \
@@ -17,10 +13,9 @@ C_SRCS = \
 	oleaut.c \
 	olefont.c \
 	olepicture.c \
+	olepropframe.c \
 	recinfo.c \
-	regsvr.c \
 	safearray.c \
-	stubs.c \
 	tmarshal.c \
 	typelib.c \
 	typelib2.c \
@@ -29,37 +24,14 @@ C_SRCS = \
 	variant.c \
 	vartype.c
 
-RC_SRCS = \
-	oleaut32_Bg.rc \
-	oleaut32_Cy.rc \
-	oleaut32_Cz.rc \
-	oleaut32_Da.rc \
-	oleaut32_De.rc \
-	oleaut32_El.rc \
-	oleaut32_En.rc \
-	oleaut32_Eo.rc \
-	oleaut32_Es.rc \
-	oleaut32_Fr.rc \
-	oleaut32_Hu.rc \
-	oleaut32_It.rc \
-	oleaut32_Ko.rc \
-	oleaut32_Lt.rc \
-	oleaut32_Nl.rc \
-	oleaut32_No.rc \
-	oleaut32_Pl.rc \
-	oleaut32_Pt.rc \
-	oleaut32_Ro.rc \
-	oleaut32_Ru.rc \
-	oleaut32_Si.rc \
-	oleaut32_Sr.rc \
-	oleaut32_Sv.rc \
-	oleaut32_Th.rc \
-	oleaut32_Tr.rc \
-	oleaut32_Uk.rc \
-	oleaut32_Zh.rc \
-	version.rc
+RC_SRCS = oleaut32.rc
+PO_SRCS = oleaut32.rc
 
 IDL_P_SRCS = \
+	oleaut32_oaidl.idl \
+	oleaut32_ocidl.idl
+
+IDL_R_SRCS = \
 	oleaut32_oaidl.idl \
 	oleaut32_ocidl.idl
 

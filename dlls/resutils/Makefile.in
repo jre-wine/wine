@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = resutils.dll
 IMPORTLIB = resutils
-IMPORTS   = kernel32
 
 C_SRCS = \
 	resutils.c

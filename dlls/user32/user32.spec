@@ -62,8 +62,8 @@
 @ stdcall CheckMenuItem(long long long)
 @ stdcall CheckMenuRadioItem(long long long long long)
 @ stdcall CheckRadioButton(long long long long)
-@ stdcall ChildWindowFromPoint(long double)
-@ stdcall ChildWindowFromPointEx(long double long)
+@ stdcall ChildWindowFromPoint(long int64)
+@ stdcall ChildWindowFromPointEx(long int64 long)
 @ stub CliImmSetHotKey
 @ stub ClientThreadConnect
 @ stub ClientThreadSetup
@@ -175,7 +175,7 @@
 @ stdcall DlgDirSelectComboBoxExW(long ptr long long)
 @ stdcall DlgDirSelectExA(long ptr long long)
 @ stdcall DlgDirSelectExW(long ptr long long)
-@ stdcall DragDetect(long double)
+@ stdcall DragDetect(long int64)
 @ stub DragObject
 @ stdcall DrawAnimatedRects(long long ptr ptr)
 @ stdcall DrawCaption(long long ptr long)
@@ -290,6 +290,8 @@
 @ stdcall GetGUIThreadInfo(long ptr)
 @ stdcall GetGuiResources(long long)
 @ stdcall GetIconInfo(long ptr)
+@ stdcall GetIconInfoExA(long ptr)
+@ stdcall GetIconInfoExW(long ptr)
 @ stub GetInputDesktop
 @ stdcall GetInputState()
 @ stdcall GetInternalWindowPos(long ptr ptr)
@@ -434,7 +436,7 @@
 @ stdcall IsDialogMessageA(long ptr)
 @ stdcall IsDialogMessageW(long ptr)
 @ stdcall IsDlgButtonChecked(long long)
-# @ stub IsGUIThread
+@ stdcall IsGUIThread(long)
 @ stdcall IsHungAppWindow(long)
 # @ stub IsHungThread
 @ stdcall IsIconic(long)
@@ -487,7 +489,7 @@
 @ stdcall MapVirtualKeyExW(long long long)
 @ stdcall MapVirtualKeyW(long long)
 @ stdcall MapWindowPoints(long long ptr long)
-@ stdcall MenuItemFromPoint(long long double)
+@ stdcall MenuItemFromPoint(long long int64)
 @ stub MenuWindowProcA
 @ stub MenuWindowProcW
 @ stdcall MessageBeep(long)
@@ -502,7 +504,7 @@
 # @ stub ModifyAccess
 @ stdcall ModifyMenuA(long long long long ptr)
 @ stdcall ModifyMenuW(long long long long ptr)
-@ stdcall MonitorFromPoint(double long)
+@ stdcall MonitorFromPoint(int64 long)
 @ stdcall MonitorFromRect(ptr long)
 @ stdcall MonitorFromWindow(long long)
 @ stdcall MoveWindow(long long long long long long)
@@ -540,10 +542,10 @@
 @ stdcall PrivateExtractIconsW (wstr long long long ptr ptr long long)
 # @ stub PrivateSetDbgTag
 # @ stub PrivateSetRipFlags
-@ stdcall PtInRect(ptr double)
+@ stdcall PtInRect(ptr int64)
 @ stub QuerySendMessage
 # @ stub QueryUserCounters
-@ stdcall RealChildWindowFromPoint(long double)
+@ stdcall RealChildWindowFromPoint(long int64)
 @ stdcall RealGetWindowClass(long ptr long) RealGetWindowClassA
 @ stdcall RealGetWindowClassA(long ptr long)
 @ stdcall RealGetWindowClassW(long ptr long)
@@ -674,6 +676,7 @@
 @ stdcall SetWindowPos(long long long long long long long)
 @ stdcall SetWindowRgn(long long long)
 @ stdcall SetWindowStationUser(long long)
+@ stdcall SetWindowText(long str) SetWindowTextA
 @ stdcall SetWindowTextA(long str)
 @ stdcall SetWindowTextW(long wstr)
 @ stdcall SetWindowWord(long long long)
@@ -760,7 +763,7 @@
 @ stdcall WinHelpW(long wstr long long)
 # @ stub WinOldAppHackoMatic
 @ stdcall WindowFromDC(long)
-@ stdcall WindowFromPoint(double)
+@ stdcall WindowFromPoint(int64)
 # @ stub YieldTask
 # @ stub _SetProcessDefaultLayout
 @ stdcall keybd_event(long long long long)
@@ -769,6 +772,14 @@
 @ varargs wsprintfW(wstr wstr)
 @ stdcall wvsprintfA(ptr str ptr)
 @ stdcall wvsprintfW(ptr wstr ptr)
+
+################################################################
+# Wine internal extensions
+#
+# All functions must be prefixed with '__wine_' (for internal functions)
+# or 'wine_' (for user-visible functions) to avoid namespace conflicts.
+#
+@ cdecl __wine_send_input(long ptr)
 
 ################################################################
 # Wine dll separation hacks, these will go away, don't use them

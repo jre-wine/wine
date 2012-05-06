@@ -288,7 +288,7 @@ BOOL WINAPI FtpPutFileW(HINTERNET hConnect, LPCWSTR lpszLocalFile,
         return FALSE;
     }
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hConnect );
+    lpwfs = (ftp_session_t*) get_handle_object( hConnect );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -470,7 +470,7 @@ BOOL WINAPI FtpSetCurrentDirectoryW(HINTERNET hConnect, LPCWSTR lpszDirectory)
         goto lend;
     }
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hConnect );
+    lpwfs = (ftp_session_t*) get_handle_object( hConnect );
     if (NULL == lpwfs || WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
@@ -610,7 +610,7 @@ BOOL WINAPI FtpCreateDirectoryW(HINTERNET hConnect, LPCWSTR lpszDirectory)
     appinfo_t *hIC = NULL;
     BOOL r = FALSE;
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hConnect );
+    lpwfs = (ftp_session_t*) get_handle_object( hConnect );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -766,7 +766,7 @@ HINTERNET WINAPI FtpFindFirstFileW(HINTERNET hConnect,
     appinfo_t *hIC = NULL;
     HINTERNET r = NULL;
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hConnect );
+    lpwfs = (ftp_session_t*) get_handle_object( hConnect );
     if (NULL == lpwfs || WH_HFTPSESSION != lpwfs->hdr.htype)
     {
         INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
@@ -964,7 +964,7 @@ BOOL WINAPI FtpGetCurrentDirectoryW(HINTERNET hFtpSession, LPWSTR lpszCurrentDir
 
     TRACE("%p %p %p\n", hFtpSession, lpszCurrentDirectory, lpdwCurrentDirectory);
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hFtpSession );
+    lpwfs = (ftp_session_t*) get_handle_object( hFtpSession );
     if (NULL == lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -1127,8 +1127,6 @@ static void FTPFILE_Destroy(object_header_t *hdr)
     if (nResCode > 0 && nResCode != 226) WARN("server reports failed transfer\n");
 
     WININET_Release(&lpwh->lpFtpSession->hdr);
-
-    HeapFree(GetProcessHeap(), 0, lpwh);
 }
 
 static DWORD FTPFILE_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
@@ -1326,7 +1324,6 @@ static HINTERNET FTP_FtpOpenFileW(ftp_session_t *lpwfs,
     BOOL bSuccess = FALSE;
     ftp_file_t *lpwh = NULL;
     appinfo_t *hIC = NULL;
-    HINTERNET handle = NULL;
 
     TRACE("\n");
 
@@ -1347,14 +1344,10 @@ static HINTERNET FTP_FtpOpenFileW(ftp_session_t *lpwfs,
     /* Get data socket to server */
     if (bSuccess && FTP_GetDataSocket(lpwfs, &nDataSocket))
     {
-        lpwh = HeapAlloc(GetProcessHeap(), 0, sizeof(ftp_file_t));
+        lpwh = alloc_object(&lpwfs->hdr, &FTPFILEVtbl, sizeof(ftp_file_t));
         lpwh->hdr.htype = WH_HFILE;
-        lpwh->hdr.vtbl = &FTPFILEVtbl;
         lpwh->hdr.dwFlags = dwFlags;
         lpwh->hdr.dwContext = dwContext;
-        lpwh->hdr.dwInternalFlags = 0;
-        lpwh->hdr.refs = 1;
-        lpwh->hdr.lpfnStatusCB = lpwfs->hdr.lpfnStatusCB;
         lpwh->nDataSocket = nDataSocket;
         lpwh->cache_file = NULL;
         lpwh->cache_file_handle = INVALID_HANDLE_VALUE;
@@ -1364,10 +1357,6 @@ static HINTERNET FTP_FtpOpenFileW(ftp_session_t *lpwfs,
         lpwh->lpFtpSession = lpwfs;
         list_add_head( &lpwfs->hdr.children, &lpwh->hdr.entry );
 	
-        handle = WININET_AllocHandle( &lpwh->hdr );
-        if( !handle )
-            goto lend;
-
 	/* Indicate that a download is currently in progress */
 	lpwfs->download_in_progress = lpwh;
     }
@@ -1420,7 +1409,7 @@ static HINTERNET FTP_FtpOpenFileW(ftp_session_t *lpwfs,
 
 	if (lpwh)
 	{
-            iar.dwResult = (DWORD_PTR)handle;
+            iar.dwResult = (DWORD_PTR)lpwh->hdr.hInternet;
             iar.dwError = ERROR_SUCCESS;
             SendAsyncCallback(&lpwfs->hdr, lpwfs->hdr.dwContext, INTERNET_STATUS_HANDLE_CREATED,
                 &iar, sizeof(INTERNET_ASYNC_RESULT));
@@ -1436,11 +1425,13 @@ static HINTERNET FTP_FtpOpenFileW(ftp_session_t *lpwfs,
         }
     }
 
-lend:
-    if( lpwh )
-        WININET_Release( &lpwh->hdr );
+    if(!bSuccess) {
+        if(lpwh)
+            WININET_Release( &lpwh->hdr );
+        return FALSE;
+    }
 
-    return handle;
+    return lpwh->hdr.hInternet;
 }
 
 
@@ -1501,7 +1492,7 @@ HINTERNET WINAPI FtpOpenFileW(HINTERNET hFtpSession,
     TRACE("(%p,%s,0x%08x,0x%08x,0x%08lx)\n", hFtpSession,
         debugstr_w(lpszFileName), fdwAccess, dwFlags, dwContext);
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hFtpSession );
+    lpwfs = (ftp_session_t*) get_handle_object( hFtpSession );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -1624,7 +1615,7 @@ BOOL WINAPI FtpGetFileW(HINTERNET hInternet, LPCWSTR lpszRemoteFile, LPCWSTR lps
         return FALSE;
     }
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hInternet );
+    lpwfs = (ftp_session_t*) get_handle_object( hInternet );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -1818,7 +1809,7 @@ BOOL WINAPI FtpDeleteFileW(HINTERNET hFtpSession, LPCWSTR lpszFileName)
     appinfo_t *hIC = NULL;
     BOOL r = FALSE;
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hFtpSession );
+    lpwfs = (ftp_session_t*) get_handle_object( hFtpSession );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -1963,7 +1954,7 @@ BOOL WINAPI FtpRemoveDirectoryW(HINTERNET hFtpSession, LPCWSTR lpszDirectory)
     appinfo_t *hIC = NULL;
     BOOL r = FALSE;
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hFtpSession );
+    lpwfs = (ftp_session_t*) get_handle_object( hFtpSession );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -2113,7 +2104,7 @@ BOOL WINAPI FtpRenameFileW(HINTERNET hFtpSession, LPCWSTR lpszSrc, LPCWSTR lpszD
     appinfo_t *hIC = NULL;
     BOOL r = FALSE;
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hFtpSession );
+    lpwfs = (ftp_session_t*) get_handle_object( hFtpSession );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -2279,7 +2270,7 @@ BOOL WINAPI FtpCommandW( HINTERNET hConnect, BOOL fExpectResponse, DWORD dwFlags
         return FALSE;
     }
 
-    lpwfs = (ftp_session_t*) WININET_GetObject( hConnect );
+    lpwfs = (ftp_session_t*) get_handle_object( hConnect );
     if (!lpwfs)
     {
         INTERNET_SetLastError(ERROR_INVALID_HANDLE);
@@ -2353,7 +2344,6 @@ static void FTPSESSION_Destroy(object_header_t *hdr)
     HeapFree(GetProcessHeap(), 0, lpwfs->lpszPassword);
     HeapFree(GetProcessHeap(), 0, lpwfs->lpszUserName);
     HeapFree(GetProcessHeap(), 0, lpwfs->servername);
-    HeapFree(GetProcessHeap(), 0, lpwfs);
 }
 
 static void FTPSESSION_CloseConnection(object_header_t *hdr)
@@ -2449,7 +2439,6 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     UINT sock_namelen;
     BOOL bSuccess = FALSE;
     ftp_session_t *lpwfs = NULL;
-    HINTERNET handle = NULL;
     char szaddr[INET_ADDRSTRLEN];
 
     TRACE("%p  Server(%s) Port(%d) User(%s) Paswd(%s)\n",
@@ -2461,14 +2450,14 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     if ((!lpszUserName || !*lpszUserName) && lpszPassword && *lpszPassword)
     {
 	INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-        goto lerror;
+        return NULL;
     }
     
-    lpwfs = HeapAlloc(GetProcessHeap(), 0, sizeof(ftp_session_t));
+    lpwfs = alloc_object(&hIC->hdr, &FTPSESSIONVtbl, sizeof(ftp_session_t));
     if (NULL == lpwfs)
     {
         INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-        goto lerror;
+        return NULL;
     }
 
     if (nServerPort == INTERNET_INVALID_PORT_NUMBER)
@@ -2477,12 +2466,9 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
         lpwfs->serverport = nServerPort;
 
     lpwfs->hdr.htype = WH_HFTPSESSION;
-    lpwfs->hdr.vtbl = &FTPSESSIONVtbl;
     lpwfs->hdr.dwFlags = dwFlags;
     lpwfs->hdr.dwContext = dwContext;
-    lpwfs->hdr.dwInternalFlags = dwInternalFlags;
-    lpwfs->hdr.refs = 1;
-    lpwfs->hdr.lpfnStatusCB = hIC->hdr.lpfnStatusCB;
+    lpwfs->hdr.dwInternalFlags |= dwInternalFlags;
     lpwfs->download_in_progress = NULL;
     lpwfs->sndSocket = -1;
     lpwfs->lstnSocket = -1;
@@ -2492,18 +2478,10 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     lpwfs->lpAppInfo = hIC;
     list_add_head( &hIC->hdr.children, &lpwfs->hdr.entry );
 
-    handle = WININET_AllocHandle( &lpwfs->hdr );
-    if( !handle )
-    {
-        ERR("Failed to alloc handle\n");
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-        goto lerror;
-    }
-
-    if(hIC->lpszProxy && hIC->dwAccessType == INTERNET_OPEN_TYPE_PROXY) {
-        if(strchrW(hIC->lpszProxy, ' '))
+    if(hIC->proxy && hIC->accessType == INTERNET_OPEN_TYPE_PROXY) {
+        if(strchrW(hIC->proxy, ' '))
             FIXME("Several proxies not implemented.\n");
-        if(hIC->lpszProxyBypass)
+        if(hIC->proxyBypass)
             FIXME("Proxy bypass is ignored.\n");
     }
     if (!lpszUserName || !strlenW(lpszUserName)) {
@@ -2537,7 +2515,7 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     {
         INTERNET_ASYNC_RESULT iar;
 
-        iar.dwResult = (DWORD_PTR)handle;
+        iar.dwResult = (DWORD_PTR)lpwfs->hdr.hInternet;
         iar.dwError = ERROR_SUCCESS;
 
         SendAsyncCallback(&hIC->hdr, dwContext,
@@ -2600,15 +2578,14 @@ HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     }
 
 lerror:
-    if (lpwfs) WININET_Release( &lpwfs->hdr );
-
-    if (!bSuccess && handle)
+    if (!bSuccess)
     {
-        WININET_FreeHandle( handle );
-        handle = NULL;
+        if(lpwfs)
+            WININET_Release( &lpwfs->hdr );
+        return NULL;
     }
 
-    return handle;
+    return lpwfs->hdr.hInternet;
 }
 
 
@@ -3419,7 +3396,6 @@ static void FTPFINDNEXT_Destroy(object_header_t *hdr)
     }
 
     HeapFree(GetProcessHeap(), 0, lpwfn->lpafp);
-    HeapFree(GetProcessHeap(), 0, lpwfn);
 }
 
 static DWORD FTPFINDNEXT_FindNextFileProc(WININETFTPFINDNEXTW *find, LPVOID data)
@@ -3530,7 +3506,6 @@ static HINTERNET FTP_ReceiveFileList(ftp_session_t *lpwfs, INT nSocket, LPCWSTR 
     DWORD dwSize = 0;
     LPFILEPROPERTIESW lpafp = NULL;
     LPWININETFTPFINDNEXTW lpwfn = NULL;
-    HINTERNET handle = 0;
 
     TRACE("(%p,%d,%s,%p,%08lx)\n", lpwfs, nSocket, debugstr_w(lpszSearchFile), lpFindFileData, dwContext);
 
@@ -3539,14 +3514,11 @@ static HINTERNET FTP_ReceiveFileList(ftp_session_t *lpwfs, INT nSocket, LPCWSTR 
         if(lpFindFileData)
             FTP_ConvertFileProp(lpafp, lpFindFileData);
 
-        lpwfn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(WININETFTPFINDNEXTW));
+        lpwfn = alloc_object(&lpwfs->hdr, &FTPFINDNEXTVtbl, sizeof(WININETFTPFINDNEXTW));
         if (lpwfn)
         {
             lpwfn->hdr.htype = WH_HFTPFINDNEXT;
-            lpwfn->hdr.vtbl = &FTPFINDNEXTVtbl;
             lpwfn->hdr.dwContext = dwContext;
-            lpwfn->hdr.refs = 1;
-            lpwfn->hdr.lpfnStatusCB = lpwfs->hdr.lpfnStatusCB;
             lpwfn->index = 1; /* Next index is 1 since we return index 0 */
             lpwfn->size = dwSize;
             lpwfn->lpafp = lpafp;
@@ -3554,16 +3526,11 @@ static HINTERNET FTP_ReceiveFileList(ftp_session_t *lpwfs, INT nSocket, LPCWSTR 
             WININET_AddRef( &lpwfs->hdr );
             lpwfn->lpFtpSession = lpwfs;
             list_add_head( &lpwfs->hdr.children, &lpwfn->hdr.entry );
-
-            handle = WININET_AllocHandle( &lpwfn->hdr );
         }
     }
 
-    if( lpwfn )
-        WININET_Release( &lpwfn->hdr );
-
     TRACE("Matched %d files\n", dwSize);
-    return handle;
+    return lpwfn ? lpwfn->hdr.hInternet : NULL;
 }
 
 

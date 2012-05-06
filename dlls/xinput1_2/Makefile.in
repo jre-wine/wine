@@ -1,9 +1,4 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = xinput1_2.dll
-IMPORTS   = kernel32
 
 C_SRCS = \
 	xinput1_2_main.c

@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winenas.drv
-IMPORTS   = dxguid uuid winmm user32 kernel32
+IMPORTS   = dxguid uuid winmm user32
 EXTRAINCL = @X_CFLAGS@
 EXTRALIBS = @NASLIBS@
 

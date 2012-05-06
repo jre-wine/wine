@@ -3,7 +3,7 @@
  *
  * Copyright 2005 Oliver Stieber
  * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
- * Copyright 2009 Henri Verbeet for CodeWeavers.
+ * Copyright 2009-2010 Henri Verbeet for CodeWeavers.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -46,7 +46,7 @@ enum wined3d_event_query_result wined3d_event_query_test(struct wined3d_event_qu
 
     TRACE("(%p) : device %p\n", query, device);
 
-    if (query->context == NULL)
+    if (!query->context)
     {
         TRACE("Query not started\n");
         return WINED3D_EVENT_QUERY_NOT_STARTED;
@@ -230,83 +230,74 @@ void wined3d_event_query_issue(struct wined3d_event_query *query, IWineD3DDevice
     context_release(context);
 }
 
-/*
- * Occlusion Queries:
- * http://www.gris.uni-tuebingen.de/~bartz/Publications/paper/hww98.pdf
- * http://oss.sgi.com/projects/ogl-sample/registry/ARB/occlusion_query.txt
- */
-
-/* *******************************************
-   IWineD3DQuery IUnknown parts follow
-   ******************************************* */
-static HRESULT  WINAPI IWineD3DQueryImpl_QueryInterface(IWineD3DQuery *iface, REFIID riid, LPVOID *ppobj)
+ULONG CDECL wined3d_query_incref(struct wined3d_query *query)
 {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-    TRACE("(%p)->(%s,%p)\n",This,debugstr_guid(riid),ppobj);
-    if (IsEqualGUID(riid, &IID_IUnknown)
-        || IsEqualGUID(riid, &IID_IWineD3DBase)
-        || IsEqualGUID(riid, &IID_IWineD3DQuery)) {
-        IUnknown_AddRef(iface);
-        *ppobj = This;
-        return S_OK;
-    }
-    *ppobj = NULL;
-    return E_NOINTERFACE;
+    ULONG refcount = InterlockedIncrement(&query->ref);
+
+    TRACE("%p increasing refcount to %u.\n", query, refcount);
+
+    return refcount;
 }
 
-static ULONG  WINAPI IWineD3DQueryImpl_AddRef(IWineD3DQuery *iface) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-    TRACE("(%p) : AddRef increasing from %d\n", This, This->ref);
-    return InterlockedIncrement(&This->ref);
-}
+ULONG CDECL wined3d_query_decref(struct wined3d_query *query)
+{
+    ULONG refcount = InterlockedIncrement(&query->ref);
 
-static ULONG  WINAPI IWineD3DQueryImpl_Release(IWineD3DQuery *iface) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-    ULONG ref;
-    TRACE("(%p) : Releasing from %d\n", This, This->ref);
-    ref = InterlockedDecrement(&This->ref);
-    if (ref == 0) {
+    TRACE("%p decreasing refcount to %u.\n", query, refcount);
+
+    if (!refcount)
+    {
         /* Queries are specific to the GL context that created them. Not
          * deleting the query will obviously leak it, but that's still better
          * than potentially deleting a different query with the same id in this
          * context, and (still) leaking the actual query. */
-        if (This->type == WINED3DQUERYTYPE_EVENT)
+        if (query->type == WINED3DQUERYTYPE_EVENT)
         {
-            struct wined3d_event_query *query = This->extendedData;
-            if (query) wined3d_event_query_destroy(query);
+            struct wined3d_event_query *event_query = query->extendedData;
+            if (event_query) wined3d_event_query_destroy(event_query);
         }
-        else if (This->type == WINED3DQUERYTYPE_OCCLUSION)
+        else if (query->type == WINED3DQUERYTYPE_OCCLUSION)
         {
-            struct wined3d_occlusion_query *query = This->extendedData;
+            struct wined3d_occlusion_query *oq = query->extendedData;
 
-            if (query->context) context_free_occlusion_query(query);
-            HeapFree(GetProcessHeap(), 0, This->extendedData);
+            if (oq->context) context_free_occlusion_query(oq);
+            HeapFree(GetProcessHeap(), 0, query->extendedData);
         }
 
-        HeapFree(GetProcessHeap(), 0, This);
+        HeapFree(GetProcessHeap(), 0, query);
     }
-    return ref;
+
+    return refcount;
 }
 
-/* *******************************************
-   IWineD3DQuery IWineD3DQuery parts follow
-   ******************************************* */
-static HRESULT WINAPI IWineD3DQueryImpl_GetParent(IWineD3DQuery *iface, IUnknown **parent)
+HRESULT CDECL wined3d_query_get_data(struct wined3d_query *query,
+        void *data, UINT data_size, DWORD flags)
 {
-    TRACE("iface %p, parent %p.\n", iface, parent);
+    TRACE("query %p, data %p, data_size %u, flags %#x.\n",
+            query, data, data_size, flags);
 
-    *parent = (IUnknown *)parent;
-    IUnknown_AddRef(*parent);
-
-    TRACE("Returning %p.\n", *parent);
-
-    return WINED3D_OK;
+    return query->query_ops->query_get_data(query, data, data_size, flags);
 }
 
-static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *) iface;
-    struct wined3d_occlusion_query *query = This->extendedData;
-    IWineD3DDeviceImpl *device = This->device;
+UINT CDECL wined3d_query_get_data_size(const struct wined3d_query *query)
+{
+    TRACE("query %p.\n", query);
+
+    return query->data_size;
+}
+
+HRESULT CDECL wined3d_query_issue(struct wined3d_query *query, DWORD flags)
+{
+    TRACE("query %p, flags %#x.\n", query, flags);
+
+    return query->query_ops->query_issue(query, flags);
+}
+
+static HRESULT wined3d_occlusion_query_ops_get_data(struct wined3d_query *query,
+        void *pData, DWORD dwSize, DWORD flags)
+{
+    struct wined3d_occlusion_query *oq = query->extendedData;
+    IWineD3DDeviceImpl *device = query->device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     struct wined3d_context *context;
     DWORD* data = pData;
@@ -314,11 +305,12 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
     GLuint samples;
     HRESULT res;
 
-    TRACE("(%p) : type D3DQUERY_OCCLUSION, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, pData, dwSize, dwGetDataFlags);
+    TRACE("(%p) : type D3DQUERY_OCCLUSION, pData %p, dwSize %#x, flags %#x.\n", query, pData, dwSize, flags);
 
-    if (!query->context) This->state = QUERY_CREATED;
+    if (!oq->context)
+        query->state = QUERY_CREATED;
 
-    if (This->state == QUERY_CREATED)
+    if (query->state == QUERY_CREATED)
     {
         /* D3D allows GetData on a new query, OpenGL doesn't. So just invent the data ourselves */
         TRACE("Query wasn't yet started, returning S_OK\n");
@@ -326,7 +318,7 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
         return S_OK;
     }
 
-    if (This->state == QUERY_BUILDING)
+    if (query->state == QUERY_BUILDING)
     {
         /* Msdn says this returns an error, but our tests show that S_FALSE is returned */
         TRACE("Query is building, returning S_FALSE\n");
@@ -335,33 +327,33 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
 
     if (!gl_info->supported[ARB_OCCLUSION_QUERY])
     {
-        WARN("(%p) : Occlusion queries not supported. Returning 1.\n", This);
+        WARN("%p Occlusion queries not supported. Returning 1.\n", query);
         *data = 1;
         return S_OK;
     }
 
-    if (query->context->tid != GetCurrentThreadId())
+    if (oq->context->tid != GetCurrentThreadId())
     {
-        FIXME("%p Wrong thread, returning 1.\n", This);
+        FIXME("%p Wrong thread, returning 1.\n", query);
         *data = 1;
         return S_OK;
     }
 
-    context = context_acquire(This->device, query->context->current_rt);
+    context = context_acquire(query->device, oq->context->current_rt);
 
     ENTER_GL();
 
-    GL_EXTCALL(glGetQueryObjectuivARB(query->id, GL_QUERY_RESULT_AVAILABLE_ARB, &available));
+    GL_EXTCALL(glGetQueryObjectuivARB(oq->id, GL_QUERY_RESULT_AVAILABLE_ARB, &available));
     checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT_AVAILABLE)");
-    TRACE("(%p) : available %d.\n", This, available);
+    TRACE("available %#x.\n", available);
 
     if (available)
     {
         if (data)
         {
-            GL_EXTCALL(glGetQueryObjectuivARB(query->id, GL_QUERY_RESULT_ARB, &samples));
+            GL_EXTCALL(glGetQueryObjectuivARB(oq->id, GL_QUERY_RESULT_ARB, &samples));
             checkGLcall("glGetQueryObjectuivARB(GL_QUERY_RESULT)");
-            TRACE("(%p) : Returning %d samples.\n", This, samples);
+            TRACE("Returning %d samples.\n", samples);
             *data = samples;
         }
         res = S_OK;
@@ -378,23 +370,24 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
     return res;
 }
 
-static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *) iface;
-    struct wined3d_event_query *query = This->extendedData;
+static HRESULT wined3d_event_query_ops_get_data(struct wined3d_query *query,
+        void *pData, DWORD dwSize, DWORD flags)
+{
+    struct wined3d_event_query *event_query = query->extendedData;
     BOOL *data = pData;
     enum wined3d_event_query_result ret;
 
-    TRACE("(%p) : type D3DQUERY_EVENT, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, pData, dwSize, dwGetDataFlags);
+    TRACE("query %p, pData %p, dwSize %#x, flags %#x.\n", query, pData, dwSize, flags);
 
     if (!pData || !dwSize) return S_OK;
-    if (!query)
+    if (!event_query)
     {
-        WARN("(%p): Event query not supported by GL, reporting GPU idle\n", This);
+        WARN("Event query not supported by GL, reporting GPU idle.\n");
         *data = TRUE;
         return S_OK;
     }
 
-    ret = wined3d_event_query_test(query, This->device);
+    ret = wined3d_event_query_test(event_query, query->device);
     switch(ret)
     {
         case WINED3D_EVENT_QUERY_OK:
@@ -407,7 +400,7 @@ static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void
             break;
 
         case WINED3D_EVENT_QUERY_WRONG_THREAD:
-            FIXME("(%p) Wrong thread, reporting GPU idle.\n", This);
+            FIXME("(%p) Wrong thread, reporting GPU idle.\n", query);
             *data = TRUE;
             break;
 
@@ -419,77 +412,69 @@ static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void
     return S_OK;
 }
 
-static DWORD  WINAPI IWineD3DEventQueryImpl_GetDataSize(IWineD3DQuery* iface){
-    TRACE("(%p) : type D3DQUERY_EVENT\n", iface);
+WINED3DQUERYTYPE CDECL wined3d_query_get_type(const struct wined3d_query *query)
+{
+    TRACE("query %p.\n", query);
 
-    return sizeof(BOOL);
+    return query->type;
 }
 
-static DWORD  WINAPI IWineD3DOcclusionQueryImpl_GetDataSize(IWineD3DQuery* iface){
-    TRACE("(%p) : type D3DQUERY_OCCLUSION\n", iface);
+static HRESULT wined3d_event_query_ops_issue(struct wined3d_query *query, DWORD flags)
+{
+    TRACE("query %p, flags %#x.\n", query, flags);
 
-    return sizeof(DWORD);
-}
-
-static WINED3DQUERYTYPE  WINAPI IWineD3DQueryImpl_GetType(IWineD3DQuery* iface){
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-    return This->type;
-}
-
-static HRESULT  WINAPI IWineD3DEventQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-
-    TRACE("(%p) : dwIssueFlags %#x, type D3DQUERY_EVENT\n", This, dwIssueFlags);
-    if (dwIssueFlags & WINED3DISSUE_END)
+    TRACE("(%p) : flags %#x, type D3DQUERY_EVENT\n", query, flags);
+    if (flags & WINED3DISSUE_END)
     {
-        struct wined3d_event_query *query = This->extendedData;
+        struct wined3d_event_query *event_query = query->extendedData;
 
         /* Faked event query support */
-        if (!query) return WINED3D_OK;
+        if (!event_query) return WINED3D_OK;
 
-        wined3d_event_query_issue(query, This->device);
+        wined3d_event_query_issue(event_query, query->device);
     }
-    else if(dwIssueFlags & WINED3DISSUE_BEGIN)
+    else if (flags & WINED3DISSUE_BEGIN)
     {
         /* Started implicitly at device creation */
         ERR("Event query issued with START flag - what to do?\n");
     }
 
-    if(dwIssueFlags & WINED3DISSUE_BEGIN) {
-        This->state = QUERY_BUILDING;
-    } else {
-        This->state = QUERY_SIGNALLED;
-    }
+    if (flags & WINED3DISSUE_BEGIN)
+        query->state = QUERY_BUILDING;
+    else
+        query->state = QUERY_SIGNALLED;
 
     return WINED3D_OK;
 }
 
-static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags) {
-    IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
-    IWineD3DDeviceImpl *device = This->device;
+static HRESULT wined3d_occlusion_query_ops_issue(struct wined3d_query *query, DWORD flags)
+{
+    IWineD3DDeviceImpl *device = query->device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+
+    TRACE("query %p, flags %#x.\n", query, flags);
 
     if (gl_info->supported[ARB_OCCLUSION_QUERY])
     {
-        struct wined3d_occlusion_query *query = This->extendedData;
+        struct wined3d_occlusion_query *oq = query->extendedData;
         struct wined3d_context *context;
 
         /* This is allowed according to msdn and our tests. Reset the query and restart */
-        if (dwIssueFlags & WINED3DISSUE_BEGIN)
+        if (flags & WINED3DISSUE_BEGIN)
         {
-            if (This->state == QUERY_BUILDING)
+            if (query->state == QUERY_BUILDING)
             {
-                if (query->context->tid != GetCurrentThreadId())
+                if (oq->context->tid != GetCurrentThreadId())
                 {
                     FIXME("Wrong thread, can't restart query.\n");
 
-                    context_free_occlusion_query(query);
-                    context = context_acquire(This->device, NULL);
-                    context_alloc_occlusion_query(context, query);
+                    context_free_occlusion_query(oq);
+                    context = context_acquire(query->device, NULL);
+                    context_alloc_occlusion_query(context, oq);
                 }
                 else
                 {
-                    context = context_acquire(This->device, query->context->current_rt);
+                    context = context_acquire(query->device, oq->context->current_rt);
 
                     ENTER_GL();
                     GL_EXTCALL(glEndQueryARB(GL_SAMPLES_PASSED_ARB));
@@ -499,32 +484,33 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  D
             }
             else
             {
-                if (query->context) context_free_occlusion_query(query);
-                context = context_acquire(This->device, NULL);
-                context_alloc_occlusion_query(context, query);
+                if (oq->context) context_free_occlusion_query(oq);
+                context = context_acquire(query->device, NULL);
+                context_alloc_occlusion_query(context, oq);
             }
 
             ENTER_GL();
-            GL_EXTCALL(glBeginQueryARB(GL_SAMPLES_PASSED_ARB, query->id));
+            GL_EXTCALL(glBeginQueryARB(GL_SAMPLES_PASSED_ARB, oq->id));
             checkGLcall("glBeginQuery()");
             LEAVE_GL();
 
             context_release(context);
         }
-        if (dwIssueFlags & WINED3DISSUE_END) {
+        if (flags & WINED3DISSUE_END)
+        {
             /* Msdn says _END on a non-building occlusion query returns an error, but
              * our tests show that it returns OK. But OpenGL doesn't like it, so avoid
              * generating an error
              */
-            if (This->state == QUERY_BUILDING)
+            if (query->state == QUERY_BUILDING)
             {
-                if (query->context->tid != GetCurrentThreadId())
+                if (oq->context->tid != GetCurrentThreadId())
                 {
                     FIXME("Wrong thread, can't end query.\n");
                 }
                 else
                 {
-                    context = context_acquire(This->device, query->context->current_rt);
+                    context = context_acquire(query->device, oq->context->current_rt);
 
                     ENTER_GL();
                     GL_EXTCALL(glEndQueryARB(GL_SAMPLES_PASSED_ARB));
@@ -535,48 +521,33 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_Issue(IWineD3DQuery* iface,  D
                 }
             }
         }
-    } else {
-        FIXME("(%p) : Occlusion queries not supported\n", This);
+    }
+    else
+    {
+        FIXME("%p Occlusion queries not supported.\n", query);
     }
 
-    if(dwIssueFlags & WINED3DISSUE_BEGIN) {
-        This->state = QUERY_BUILDING;
-    } else {
-        This->state = QUERY_SIGNALLED;
-    }
+    if (flags & WINED3DISSUE_BEGIN)
+        query->state = QUERY_BUILDING;
+    else
+        query->state = QUERY_SIGNALLED;
+
     return WINED3D_OK; /* can be WINED3DERR_INVALIDCALL.    */
 }
 
-static const IWineD3DQueryVtbl IWineD3DEventQuery_Vtbl =
+static const struct wined3d_query_ops event_query_ops =
 {
-    /*** IUnknown methods ***/
-    IWineD3DQueryImpl_QueryInterface,
-    IWineD3DQueryImpl_AddRef,
-    IWineD3DQueryImpl_Release,
-    /*** IWineD3Dquery methods ***/
-    IWineD3DQueryImpl_GetParent,
-    IWineD3DEventQueryImpl_GetData,
-    IWineD3DEventQueryImpl_GetDataSize,
-    IWineD3DQueryImpl_GetType,
-    IWineD3DEventQueryImpl_Issue
+    wined3d_event_query_ops_get_data,
+    wined3d_event_query_ops_issue,
 };
 
-static const IWineD3DQueryVtbl IWineD3DOcclusionQuery_Vtbl =
+static const struct wined3d_query_ops occlusion_query_ops =
 {
-    /*** IUnknown methods ***/
-    IWineD3DQueryImpl_QueryInterface,
-    IWineD3DQueryImpl_AddRef,
-    IWineD3DQueryImpl_Release,
-    /*** IWineD3Dquery methods ***/
-    IWineD3DQueryImpl_GetParent,
-    IWineD3DOcclusionQueryImpl_GetData,
-    IWineD3DOcclusionQueryImpl_GetDataSize,
-    IWineD3DQueryImpl_GetType,
-    IWineD3DOcclusionQueryImpl_Issue
+    wined3d_occlusion_query_ops_get_data,
+    wined3d_occlusion_query_ops_issue,
 };
 
-HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
-        WINED3DQUERYTYPE type, IUnknown *parent)
+HRESULT query_init(struct wined3d_query *query, IWineD3DDeviceImpl *device, WINED3DQUERYTYPE type)
 {
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
@@ -589,7 +560,8 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
                 WARN("Unsupported in local OpenGL implementation: ARB_OCCLUSION_QUERY.\n");
                 return WINED3DERR_NOTAVAILABLE;
             }
-            query->lpVtbl = &IWineD3DOcclusionQuery_Vtbl;
+            query->query_ops = &occlusion_query_ops;
+            query->data_size = sizeof(DWORD);
             query->extendedData = HeapAlloc(GetProcessHeap(), 0, sizeof(struct wined3d_occlusion_query));
             if (!query->extendedData)
             {
@@ -609,7 +581,8 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
                  * lowering performance. */
                 FIXME("Event query: Unimplemented, but pretending to be supported.\n");
             }
-            query->lpVtbl = &IWineD3DEventQuery_Vtbl;
+            query->query_ops = &event_query_ops;
+            query->data_size = sizeof(BOOL);
             query->extendedData = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct wined3d_event_query));
             if (!query->extendedData)
             {
@@ -638,7 +611,6 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
     query->type = type;
     query->state = QUERY_CREATED;
     query->device = device;
-    query->parent = parent;
     query->ref = 1;
 
     return WINED3D_OK;

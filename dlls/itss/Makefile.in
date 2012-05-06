@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = itss.dll
-IMPORTS   = uuid urlmon shlwapi ole32 kernel32
+IMPORTS   = uuid urlmon shlwapi ole32
 EXTRADEFS = -DCOM_NO_WINDOWS_H
 
 C_SRCS = \
@@ -13,6 +9,8 @@ C_SRCS = \
 	moniker.c \
 	protocol.c \
 	storage.c
+
+IDL_R_SRCS = itss.idl
 
 RC_SRCS = rsrc.rc
 

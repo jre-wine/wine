@@ -31,14 +31,6 @@
 /* Czech strings in CP1250 */
 LANGUAGE LANG_CZECH, SUBLANG_DEFAULT
 
-IDR_WINECFG MENU DISCARDABLE
-BEGIN
-    POPUP ""
-    BEGIN
-        MENUITEM "Upravit", IDC_AUDIO_CONFIGURE
-    END
-END
-
 IDD_ABOUTCFG DIALOGEX 0, 0, 260, 220
 STYLE WS_CHILD
 FONT 8, "MS Shell Dlg"
@@ -56,7 +48,7 @@ BEGIN
     EDITTEXT        IDC_ABT_ORG, 75, 185, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
-IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_APPCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -71,7 +63,7 @@ BEGIN
     COMBOBOX        IDC_WINVER,83,194,163,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
-IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_GRAPHCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -98,7 +90,7 @@ BEGIN
     LTEXT       "This is a sample text using 10 point Tahoma",IDC_RES_FONT_PREVIEW,15,181,230,28
 END
 
-IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DLLCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -114,7 +106,7 @@ BEGIN
     PUSHBUTTON      "Odeb&rat DLL n·hradu",IDC_DLLS_REMOVEDLL,164,114,82,14
 END
 
-IDD_LOADORDER DIALOG DISCARDABLE 80, 110, 120, 92
+IDD_LOADORDER DIALOG 80, 110, 120, 92
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Edit Override"
 FONT 8, "MS Shell Dlg"
@@ -129,7 +121,7 @@ BEGIN
     PUSHBUTTON      "Storno",IDCANCEL,57,74,45,14,WS_GROUP
 END
 
-IDD_DRIVECFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DRIVECFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -162,7 +154,7 @@ BEGIN
     CONTROL         "Zobrazit soubory s teËkou na zaË·tku n·zvu",IDC_SHOW_DOT_FILES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,8,205,230,8
 END
 
-IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_AUDIOCFG DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -180,7 +172,7 @@ BEGIN
     COMBOBOX        IDC_DSOUND_BITS,220,195,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
-IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 220
+IDD_DESKTOP_INTEGRATION DIALOG  0, 0, 260, 220
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
@@ -206,108 +198,4 @@ BEGIN
     CONTROL         "Odkaz na:",IDC_LINK_SFPATH,"Button",BS_AUTOCHECKBOX|WS_TABSTOP|WS_DISABLED,15,195,50,13
     EDITTEXT         IDC_EDIT_SFPATH,65,195,145,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
     PUSHBUTTON      "Proch·zet",IDC_BROWSE_SFPATH,215,195,30,13,WS_DISABLED
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_TAB_APPLICATIONS    "Programy"
-    IDS_TAB_DLLS            "Knihovny"
-    IDS_TAB_DRIVES          "Disky"
-    IDS_CHOOSE_PATH         "Vyberte prosÌm unixov˝ cÌlov˝ adres·¯."
-    IDS_HIDE_ADVANCED       "Schovat rozöÌ¯enÈ moûnosti"
-    IDS_SHOW_ADVANCED       "Zobrazit rozöÌ¯enÈ moûnosti"
-    IDS_NOTHEME             "(Bez tÈmatu)"
-    IDS_TAB_GRAPHICS        "Obraz"
-    IDS_TAB_DESKTOP_INTEGRATION "ZaËlenÏnÌ do pracovnÌ plochy"
-    IDS_TAB_AUDIO           "Zvuk"
-    IDS_TAB_ABOUT           "O programu"
-    IDS_WINECFG_TITLE       "Konfigurace Wine"
-    IDS_WINECFG_TITLE_APP   "⁄prava Wine pro %s"
-    IDS_THEMEFILE           "Soubory s tÈmaty vzhledu (*.msstyles; *.theme)"
-    IDS_THEMEFILE_SELECT    "Zvolte soubor s tÈmatem vzhledu"
-    IDS_AUDIO_MISSING       "V registrech chybÌ z·znam o vybranÈm zvukovÈm ovladaËi.\n\nAutomaticky byl zvolen doporuËen˝ ovladaË.\nM˘ûete pouûÌt tento ovladaË nebo si z ostatnÌch dostupn˝ch vybrat jin˝.\n\nDokud nekliknete na tlaËÌtko ProvÈst, nebude vybran˝ ovladaË pouûit."
-    IDS_SHELL_FOLDER        "Dom·cÌ adres·¯e"
-    IDS_LINKS_TO            "Odkaz na"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_DLL_WARNING         "NedoporuËuje se mÏnit po¯adÌ nahr·v·nÌ tÈto knihovny.\nUrËitÏ to chcete udÏlat?"
-    IDS_DLL_WARNING_CAPTION "Varov·nÌ: systÈmov· knihovna"
-    IDS_DLL_NATIVE          "nativnÌ"
-    IDS_DLL_BUILTIN         "vestavÏn·"
-    IDS_DLL_NATIVE_BUILTIN  "nativnÌ, vestavÏn·"
-    IDS_DLL_BUILTIN_NATIVE  "vestavÏn·, nativnÌ"
-    IDS_DLL_DISABLED        "zak·zat"
-    IDS_DEFAULT_SETTINGS    "StandardnÌ nastavenÌ"
-    IDS_EXECUTABLE_FILTER   "Programy Wine (*.exe,*.exe.so)\0*.exe;*.exe.so\0"
-    IDS_USE_GLOBAL_SETTINGS "PouûÌt vöeobecn· nastavenÌ"
-    IDS_SELECT_EXECUTABLE   "Zvolte spustiteln˝ soubor"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_SHADER_MODE_HARDWARE    "Hardwarov˝"
-    IDS_SHADER_MODE_NONE        "é·dn˝"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_DRIVE_UNKNOWN           "Autodetekce"
-    IDS_DRIVE_FIXED             "MÌstnÌ pevn˝ disk"
-    IDS_DRIVE_REMOTE            "SÌùov˝ disk"
-    IDS_DRIVE_REMOVABLE         "Disketa"
-    IDS_DRIVE_CDROM             "CD-ROM"
-    IDS_DRIVE_LETTERS_EXCEEDED  "DalöÌ disk jiû nenÌ moûno p¯idat.\n\nKaûd˝ disk musÌ mÌt p¯i¯azeno pÌsmeno od A do Z, takûe nelze mÌt vÌce neû 26 disk˘"
-    IDS_SYSTEM_DRIVE_LABEL      "SystÈmov˝ disk"
-    IDS_CONFIRM_DELETE_C        "UrËitÏ chcete smazat disk C?\n\nVÏtöina aplikacÌ ve Windows Ëek·, ûe disk C existuje a tÏûce zkolabuje v p¯ÌpadÏ, ûe tomu tak nenÌ. Pokud smaûete disk C, nezapomeÚte jej znovu vytvo¯it!"
-    IDS_COL_DRIVELETTER         "PÌsmeno"
-    IDS_COL_DRIVEMAPPING        "P¯Ìpojn˝ bod"
-    IDS_NO_DRIVE_C              "Varov·nÌ: Vypad· to, ûe disk C nenÌ definov·n.\n\nKliknÏte na ëP¯idat...í v z·loûce Disky a vytvo¯te ho!\n"
-END
-
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDS_ACCEL_FULL              "Pln·"
-    IDS_ACCEL_STANDARD          "StandardnÌ"
-    IDS_ACCEL_BASIC             "Z·kladnÌ"
-    IDS_ACCEL_EMULATION         "Emulace"
-    IDS_DRIVER_ALSA             "OvladaË ALSA"
-    IDS_DRIVER_ESOUND           "OvladaË EsounD"
-    IDS_DRIVER_OSS              "OvladaË OSS"
-    IDS_DRIVER_JACK             "OvladaË JACK"
-    IDS_DRIVER_NAS              "OvladaË NAS"
-    IDS_DRIVER_AUDIOIO          "OvladaË Audio IO (Solaris)"
-    IDS_DRIVER_COREAUDIO        "OvladaË CoreAudio"
-    IDS_OPEN_DRIVER_ERROR       "Nemohu otev¯Ìt %s!"
-    IDS_SOUNDDRIVERS            "OvladaËe zvuku"
-    IDS_DEVICES_WAVEOUT         "Za¯ÌzenÌ Wave V˝stup"
-    IDS_DEVICES_WAVEIN          "Za¯ÌzenÌ Wave Vstup"
-    IDS_DEVICES_MIDIOUT         "Za¯ÌzenÌ MIDI V˝stup"
-    IDS_DEVICES_MIDIIN          "Za¯ÌzenÌ MIDI Vstup"
-    IDS_DEVICES_AUX             "Za¯ÌzenÌ Aux"
-    IDS_DEVICES_MIXER           "Za¯ÌzenÌ MÌch·nÌ"
-    IDS_UNAVAILABLE_DRIVER      "V registru byl nalezen ovladaË, kter˝ nenÌ k dispozici!\n\nOdstranit ì%sî z registru?"
-    IDS_WARNING                 "Varov·nÌ"
-END
-
-/* text - font or string ? */
-STRINGTABLE DISCARDABLE
-BEGIN
-    IDC_SYSPARAMS_BUTTON            "PozadÌ ovl·dacÌch prvk˘"
-    IDC_SYSPARAMS_BUTTON_TEXT       "PÌsmo ovl·dacÌch prvk˘"
-    IDC_SYSPARAMS_DESKTOP           "Plocha"
-    IDC_SYSPARAMS_MENU              "PozadÌ menu"
-    IDC_SYSPARAMS_MENU_TEXT         "PÌsmo menu"
-    IDC_SYSPARAMS_SCROLLBAR         "RolovacÌ pruh"
-    IDC_SYSPARAMS_SELECTION         "PozadÌ v˝bÏru"
-    IDC_SYSPARAMS_SELECTION_TEXT    "PÌsmo v˝bÏru"
-    IDC_SYSPARAMS_TOOLTIP           "PozadÌ tipu"
-    IDC_SYSPARAMS_TOOLTIP_TEXT      "PÌsmo tipu"
-    IDC_SYSPARAMS_WINDOW            "PozadÌ okna"
-    IDC_SYSPARAMS_WINDOW_TEXT       "PÌsmo okna"
-    IDC_SYSPARAMS_ACTIVE_TITLE      "PozadÌ titulku aktivnÌho okna"
-    IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "PÌsmo titulku aktivnÌho okna"
-    IDC_SYSPARAMS_INACTIVE_TITLE    "PozadÌ titulku neaktivnÈho okna"
-    IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "PÌsmo titulku neaktivnÌho okna"
 END

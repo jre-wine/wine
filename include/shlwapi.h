@@ -319,6 +319,12 @@ BOOL WINAPI AssocIsDangerous(LPCWSTR);
 
 #endif /* NO_SHLWAPI_REG */
 
+void WINAPI IUnknown_Set(IUnknown **ppunk, IUnknown *punk);
+void WINAPI IUnknown_AtomicRelease(IUnknown **punk);
+HRESULT WINAPI IUnknown_GetWindow(IUnknown *punk, HWND *phwnd);
+HRESULT WINAPI IUnknown_SetSite(IUnknown *punk, IUnknown *punkSite);
+HRESULT WINAPI IUnknown_GetSite(IUnknown *punk, REFIID riid, void **ppv);
+HRESULT WINAPI IUnknown_QueryService(IUnknown *punk, REFGUID guidService, REFIID riid, void **ppvOut);
 
 /* Path functions */
 #ifndef NO_SHLWAPI_PATH
@@ -579,6 +585,11 @@ typedef enum {
     URL_SCHEME_MSSHELLROOTED,
     URL_SCHEME_MSSHELLIDLIST,
     URL_SCHEME_MSHELP,
+    URL_SCHEME_MSSHELLDEVICE,
+    URL_SCHEME_WILDCARD,
+    URL_SCHEME_SEARCH_MS,
+    URL_SCHEME_SEARCH,
+    URL_SCHEME_KNOWNFOLDER,
     URL_SCHEME_MAXVALUE
 } URL_SCHEME;
 
@@ -869,6 +880,9 @@ LPWSTR WINAPI StrStrW(LPCWSTR,LPCWSTR);
 LPSTR  WINAPI StrStrIA(LPCSTR,LPCSTR);
 LPWSTR WINAPI StrStrIW(LPCWSTR,LPCWSTR);
 #define StrStrI WINELIB_NAME_AW(StrStrI)
+
+LPWSTR WINAPI StrStrNW(LPCWSTR,LPCWSTR,UINT);
+LPWSTR WINAPI StrStrNIW(LPCWSTR,LPCWSTR,UINT);
 
 int WINAPI StrToIntA(LPCSTR);
 int WINAPI StrToIntW(LPCWSTR);

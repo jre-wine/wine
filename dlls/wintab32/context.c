@@ -42,7 +42,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(wintab32);
  * http://www.csl.sony.co.jp/projects/ar/restricted/wintabl.html
  */
 
-static BOOL gLoaded;
 static LPOPENCONTEXT gOpenContexts;
 static HCTX gTopContext = (HCTX)0xc00;
 
@@ -151,11 +150,26 @@ static LPOPENCONTEXT TABLET_FindOpenContext(HCTX hCtx)
     return NULL;
 }
 
-static void LoadTablet(void)
+static inline BOOL LoadTablet(void)
 {
-    TRACE("Initializing the tablet to hwnd %p\n",hwndDefault);
-    gLoaded= TRUE;
-    pLoadTabletInfo(hwndDefault);
+    static enum {TI_START = 0, TI_OK, TI_FAIL} loaded = TI_START;
+
+    if (loaded == TI_START)
+    {
+        TRACE("Initializing the tablet to hwnd %p\n",hwndDefault);
+
+        if (pLoadTabletInfo && pLoadTabletInfo(hwndDefault))
+        {
+            loaded = TI_OK;
+        }
+        else
+        {
+            loaded = TI_FAIL;
+            ERR("LoadTabletInfo(%p) failed\n", hwndDefault);
+        }
+    }
+
+    return loaded == TI_OK;
 }
 
 int TABLET_PostTabletMessage(LPOPENCONTEXT newcontext, UINT msg, WPARAM wParam,
@@ -365,9 +379,9 @@ static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
 {
     UINT result;
 
+    if (!LoadTablet()) return 0;
+
     TRACE("(%d, %d, %p, %d)\n", wCategory, nIndex, lpOutput, bUnicode);
-    if (gLoaded == FALSE)
-         LoadTablet();
 
     /*
      *  Handle system extents here, as we can use user32.dll code to set them.
@@ -448,6 +462,8 @@ UINT WINAPI WTInfoW(UINT wCategory, UINT nIndex, LPVOID lpOutput)
 HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
 {
     LPOPENCONTEXT newcontext;
+
+    if (!LoadTablet()) return 0;
 
     TRACE("hWnd=%p, lpLogCtx=%p, fEnable=%u\n", hWnd, lpLogCtx, fEnable);
     DUMPCONTEXT(*lpLogCtx);
@@ -558,6 +574,11 @@ int WINAPI WTPacketsGet(HCTX hCtx, int cMaxPkts, LPVOID lpPkts)
     EnterCriticalSection(&csTablet);
 
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
 
     if (lpPkts != NULL)
         TABLET_BlankPacketData(context,lpPkts,cMaxPkts);
@@ -608,6 +629,11 @@ BOOL WINAPI WTPacket(HCTX hCtx, UINT wSerial, LPVOID lpPkt)
     EnterCriticalSection(&csTablet);
 
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
 
     rc = TABLET_FindPacket(context ,wSerial, &wtp);
 
@@ -642,6 +668,12 @@ BOOL WINAPI WTEnable(HCTX hCtx, BOOL fEnable)
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
+
     /* if we want to enable and it is not enabled then */
     if(fEnable && !context->enabled)
     {
@@ -742,6 +774,12 @@ BOOL WINAPI WTGetA(HCTX hCtx, LPLOGCONTEXTA lpLogCtx)
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
+
     LOGCONTEXTWtoA(&context->context, lpLogCtx);
     LeaveCriticalSection(&csTablet);
 
@@ -761,6 +799,12 @@ BOOL WINAPI WTGetW(HCTX hCtx, LPLOGCONTEXTW lpLogCtx)
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
+
     memmove(lpLogCtx,&context->context,sizeof(LOGCONTEXTW));
     LeaveCriticalSection(&csTablet);
 
@@ -888,7 +932,7 @@ int WINAPI WTPacketsPeek(HCTX hCtx, int cMaxPkts, LPVOID lpPkts)
 
     context = TABLET_FindOpenContext(hCtx);
 
-    if (context->PacketsQueued == 0)
+    if (!context || context->PacketsQueued == 0)
     {
         LeaveCriticalSection(&csTablet);
         return 0;
@@ -923,7 +967,7 @@ int WINAPI WTDataGet(HCTX hCtx, UINT wBegin, UINT wEnd,
 
     context = TABLET_FindOpenContext(hCtx);
 
-    if (context->PacketsQueued == 0)
+    if (!context || context->PacketsQueued == 0)
     {
         LeaveCriticalSection(&csTablet);
         return 0;
@@ -981,7 +1025,7 @@ int WINAPI WTDataPeek(HCTX hCtx, UINT wBegin, UINT wEnd,
 
     context = TABLET_FindOpenContext(hCtx);
 
-    if (context->PacketsQueued == 0)
+    if (!context || context->PacketsQueued == 0)
     {
         LeaveCriticalSection(&csTablet);
         return 0;
@@ -1028,7 +1072,7 @@ BOOL WINAPI WTQueuePacketsEx(HCTX hCtx, UINT *lpOld, UINT *lpNew)
 
     context = TABLET_FindOpenContext(hCtx);
 
-    if (context->PacketsQueued)
+    if (context && context->PacketsQueued)
     {
         *lpOld = context->PacketQueue[0].pkSerialNumber;
         *lpNew = context->PacketQueue[context->PacketsQueued-1].pkSerialNumber;
@@ -1050,14 +1094,18 @@ BOOL WINAPI WTQueuePacketsEx(HCTX hCtx, UINT *lpOld, UINT *lpNew)
 int WINAPI WTQueueSizeGet(HCTX hCtx)
 {
     LPOPENCONTEXT context;
+    int queueSize = 0;
+
     TRACE("(%p)\n", hCtx);
 
     if (!hCtx) return 0;
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
+    if (context)
+        queueSize = context->QueueSize;
     LeaveCriticalSection(&csTablet);
-    return context->QueueSize;
+    return queueSize;
 }
 
 /***********************************************************************
@@ -1074,6 +1122,11 @@ BOOL WINAPI WTQueueSizeSet(HCTX hCtx, int nPkts)
     EnterCriticalSection(&csTablet);
 
     context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return 0;
+    }
 
     context->PacketQueue = HeapReAlloc(GetProcessHeap(), 0,
                         context->PacketQueue, sizeof(WTPACKET)*nPkts);

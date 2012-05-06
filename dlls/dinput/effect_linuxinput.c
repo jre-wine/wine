@@ -49,9 +49,9 @@ static const IDirectInputEffectVtbl LinuxInputEffectVtbl;
 typedef struct LinuxInputEffectImpl LinuxInputEffectImpl;
 struct LinuxInputEffectImpl
 {
-    const void *lpVtbl;
-    LONG	ref;
-    GUID	guid;
+    IDirectInputEffect  IDirectInputEffect_iface;
+    LONG                ref;
+    GUID                guid;
 
     struct ff_effect    effect; /* Effect data */
     int                 gain;   /* Effect gain */
@@ -60,6 +60,10 @@ struct LinuxInputEffectImpl
     struct list        *entry;  /* Entry into the parent's list of effects */
 };
 
+static inline LinuxInputEffectImpl *impl_from_IDirectInputEffect(IDirectInputEffect *iface)
+{
+    return CONTAINING_RECORD(iface, LinuxInputEffectImpl, IDirectInputEffect_iface);
+}
 
 /******************************************************************************
  *      DirectInputEffect Functional Helper
@@ -244,14 +248,14 @@ static void _dump_DIEFFECT(LPCDIEFFECT eff, REFGUID guid)
 static ULONG WINAPI LinuxInputEffectImpl_AddRef(
 	LPDIRECTINPUTEFFECT iface)
 {
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
     return InterlockedIncrement(&(This->ref));
 }
 
 static HRESULT WINAPI LinuxInputEffectImpl_Download(
 	LPDIRECTINPUTEFFECT iface)
 {
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
 
     TRACE("(this=%p)\n", This);
 
@@ -281,12 +285,12 @@ static HRESULT WINAPI LinuxInputEffectImpl_GetEffectGuid(
         LPDIRECTINPUTEFFECT iface,
 	LPGUID pguid)
 {
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl*)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
 
     TRACE("(this=%p,%p)\n", This, pguid);
 
-    pguid = &This->guid;
-    
+    *pguid = This->guid;
+
     return DI_OK;
 }
 
@@ -312,7 +316,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_GetParameters(
 	DWORD dwFlags)
 {
     HRESULT diErr = DI_OK;
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
     TRACE("(this=%p,%p,%d)\n", This, peff, dwFlags);
 
     /* Major conversion factors are:
@@ -474,7 +478,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_QueryInterface(
 	REFIID riid,
 	void **ppvObject)
 {
-    LinuxInputEffectImpl* This = (LinuxInputEffectImpl*)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
 
     TRACE("(this=%p,%s,%p)\n", This, debugstr_guid(riid), ppvObject);
 
@@ -495,7 +499,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Start(
 	DWORD dwFlags)
 {
     struct input_event event;
-    LinuxInputEffectImpl* This = (LinuxInputEffectImpl*)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
 
     TRACE("(this=%p,%d,%d)\n", This, dwIterations, dwFlags);
 
@@ -527,8 +531,8 @@ static HRESULT WINAPI LinuxInputEffectImpl_SetParameters(
         LPDIRECTINPUTEFFECT iface,
         LPCDIEFFECT peff,
         DWORD dwFlags)
-{       
-    LinuxInputEffectImpl* This = (LinuxInputEffectImpl*)iface; 
+{
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
     DWORD type = _typeFromGUID(&This->guid);
     HRESULT retval = DI_OK;
 
@@ -727,7 +731,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Stop(
         LPDIRECTINPUTEFFECT iface)
 {
     struct input_event event;
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
 
     TRACE("(this=%p)\n", This);
 
@@ -743,7 +747,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Stop(
 static HRESULT WINAPI LinuxInputEffectImpl_Unload(
 	LPDIRECTINPUTEFFECT iface)
 {
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
     TRACE("(this=%p)\n", This);
 
     /* Erase the downloaded effect */
@@ -758,7 +762,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Unload(
 
 static ULONG WINAPI LinuxInputEffectImpl_Release(LPDIRECTINPUTEFFECT iface)
 {
-    LinuxInputEffectImpl *This = (LinuxInputEffectImpl *)iface;
+    LinuxInputEffectImpl *This = impl_from_IDirectInputEffect(iface);
     ULONG ref = InterlockedDecrement(&(This->ref));
 
     if (ref == 0)
@@ -786,7 +790,7 @@ HRESULT linuxinput_create_effect(
 	HEAP_ZERO_MEMORY, sizeof(LinuxInputEffectImpl));
     DWORD type = _typeFromGUID(rguid);
 
-    newEffect->lpVtbl = &LinuxInputEffectVtbl;
+    newEffect->IDirectInputEffect_iface.lpVtbl = &LinuxInputEffectVtbl;
     newEffect->ref = 1;
     newEffect->guid = *rguid;
     newEffect->fd = fd;
@@ -840,7 +844,7 @@ HRESULT linuxinput_create_effect(
 
     newEffect->entry = parent_list_entry;
 
-    *peff = (LPDIRECTINPUTEFFECT)newEffect; 
+    *peff = &newEffect->IDirectInputEffect_iface;
 
     TRACE("Creating linux input system effect (%p) with guid %s\n", 
 	  *peff, _dump_dinput_GUID(rguid));

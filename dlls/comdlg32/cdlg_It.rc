@@ -31,7 +31,7 @@
 
 LANGUAGE LANG_ITALIAN, SUBLANG_NEUTRAL
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Apri"
 FONT 8, "MS Shell Dlg"
@@ -53,7 +53,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Salva con nome..."
 FONT 8, "MS Shell Dlg"
@@ -75,7 +75,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Stampa"
 FONT 8, "MS Shell Dlg"
@@ -98,7 +98,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 274, 154
+PRINT_SETUP DIALOG 36, 24, 274, 154
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Configurazione Stampante"
 FONT 8, "MS Shell Dlg"
@@ -124,7 +124,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Carattere"
 FONT 8, "MS Shell Dlg"
@@ -156,7 +156,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_COLOR DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 300, 185
+CHOOSE_COLOR DIALOG 36, 24, 300, 185
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Colore"
 FONT 8, "MS Shell Dlg"
@@ -190,7 +190,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-FINDDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 236, 62
+FINDDLGORD DIALOG 36, 24, 236, 62
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Trova"
 FONT 8, "MS Shell Dlg"
@@ -209,7 +209,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Sostituisci"
 FONT 8, "MS Shell Dlg"
@@ -228,7 +228,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Stampa"
@@ -268,7 +268,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "&a:",           stc3, 100,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Configurazione Stampante"
@@ -303,7 +303,7 @@ BEGIN
     CONTROL         "V&erticale",     rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Setup di Pagina"
 FONT 8, "MS Shell Dlg"
@@ -333,7 +333,7 @@ BEGIN
   PUSHBUTTON "S&tampante...", psh3, 184, 220, 48, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "Apri"
 FONT 8, "MS Shell Dlg"
@@ -355,129 +355,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"&Apri",		 IDOK,222,110,50,14
     PUSHBUTTON		"Annulla",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"&Aiuto",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "&Informazioni sul test FolderPicker"
-    IDS_DOCUMENTFOLDERS     "Cartelle dei documenti"
-    IDS_PERSONAL            "Documenti"
-    IDS_FAVORITES           "Preferiti"
-    IDS_PATH                "Percorso di sistema"
-    IDS_DESKTOP             "Desktop"
-    IDS_FONTS               "Carattere"
-    IDS_MYCOMPUTER          "Risorse del computer"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "Cartelle di sistema"
-    IDS_LOCALHARDRIVES      "Dischi rigidi locali"
-    IDS_FILENOTFOUND        "File non trovato"
-    IDS_VERIFYFILE          "Controllare che il nome del file fornito sia corretto"
-    IDS_CREATEFILE          "Il file non esiste\nCreare il file"
-    IDS_OVERWRITEFILE       "Il file esiste già.\nSovrascriverlo?"
-    IDS_INVALID_FILENAME_TITLE "Caratteri invalidi nel percorso"
-    IDS_INVALID_FILENAME    "Il nome di un file non può contenere i seguenti caratteri:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "Il percorso specificato non esiste"
-    IDS_FILENOTEXISTING     "Il file non esiste"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "Su di un livello"
-    IDS_NEWFOLDER        "Crea nuova cartella"
-    IDS_LISTVIEW         "Lista"
-    IDS_REPORTVIEW       "Dettagli"
-    IDS_TODESKTOP        "Vai al desktop"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "Stampa"
-
-    PD32_VALUE_UREADABLE                  "Elemento non leggibile"
-    PD32_INVALID_PAGE_RANGE "Questo valore non si trova all'interno della pagina.\n\Usare un valore compreso tra %d e %d."
-    PD32_FROM_NOT_ABOVE_TO                "La voce 'da' non può eccedere la voce 'a'."
-    PD32_MARGINS_OVERLAP                  "I margini si sovrappongono o si trovano oltre il limite della carta.\nPer favore ridefinire i margini."
-    PD32_NR_OF_COPIES_EMPTY               "Il valore del numero 'Numero di copie' non può essere vuoto."
-    PD32_TOO_LARGE_COPIES                 "Questo alto numero di copie non è supportato dalla stampante.\nInserire un valore compreso tra 1 e %d"
-    PD32_PRINT_ERROR                      "Si è verificato un errore della stampante."
-    PD32_NO_DEFAULT_PRINTER               "Non è stata impostata una stampante predefinita."
-    PD32_CANT_FIND_PRINTER                "Stampante non trovata."
-    PD32_OUT_OF_MEMORY                    "Memoria esaurita."
-    PD32_GENERIC_ERROR                    "Si è verificato un errore."
-    PD32_DRIVER_UNKNOWN                   "Driver della stampante sconosciuto."
-    PD32_NO_DEVICES                       "Prima di svolgere compiti relativi alla stampante come impostare una pagina o stampare un documento, bisogna installare una stampante. Si consiglia di installare la stampante e poi ritentare."
-
-    PD32_DEFAULT_PRINTER                  "Stampante predefinita; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "Ci sono %d documenti nella coda di stampa"
-    PD32_MARGINS_IN_INCHES                "Margini [pollici]"
-    PD32_MARGINS_IN_MILLIMETERS           "Margini [mm]"
-    PD32_MILLIMETERS                      "mm"
-
-    PD32_PRINTER_STATUS_READY             "Pronto"
-    PD32_PRINTER_STATUS_PAUSED            "In pausa; "
-    PD32_PRINTER_STATUS_ERROR             "Errore; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "In attesa di annullamento; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "Carta inceppata; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "Carta esaurita; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Alimentazione manuale della carta; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "Si è verificato un problema con la carta; "
-    PD32_PRINTER_STATUS_OFFLINE           "Stampante offline; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "I/O Attivo; "
-    PD32_PRINTER_STATUS_BUSY              "Stampante occupata; "
-    PD32_PRINTER_STATUS_PRINTING          "Stampa in corso; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "Il vassoio di uscita è pieno; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "Non disponibile; "
-    PD32_PRINTER_STATUS_WAITING           "Attesa; "
-    PD32_PRINTER_STATUS_PROCESSING        "Elaborazione; "
-    PD32_PRINTER_STATUS_INITIALIZING      "Inizializzazione; "
-    PD32_PRINTER_STATUS_WARMING_UP        "La stampante si sta riscaldando; "
-    PD32_PRINTER_STATUS_TONER_LOW         "Il livello del toner è basso; "
-    PD32_PRINTER_STATUS_NO_TONER          "Manca il toner; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Punt della pagina; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "Interrotto dall'utente; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "Memoria esaurita; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "La porta stampante è aperta; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "Server di stampa sconosciuto; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "Modalità risparmio energetico; "
-}
-
-STRINGTABLE DISCARDABLE /* Font styles */
-{
-    IDS_FONT_REGULAR       "Regolare"
-    IDS_FONT_BOLD          "Grassetto"
-    IDS_FONT_ITALIC        "Corsivo"
-    IDS_FONT_BOLD_ITALIC   "Grassetto corsivo"
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "Nero"
-    IDS_COLOR_MAROON    "Marrone rossiccio"
-    IDS_COLOR_GREEN     "Verde"
-    IDS_COLOR_OLIVE     "Verde oliva"
-    IDS_COLOR_NAVY      "Blu oltremare"
-    IDS_COLOR_PURPLE    "Porpora"
-    IDS_COLOR_TEAL      "Tè blu"
-    IDS_COLOR_GRAY      "Grigio"
-    IDS_COLOR_SILVER    "Argento"
-    IDS_COLOR_RED       "Rosso"
-    IDS_COLOR_LIME      "Verde cedro"
-    IDS_COLOR_YELLOW    "Giallo"
-    IDS_COLOR_BLUE      "Blu"
-    IDS_COLOR_FUCHSIA   "Fucsia"
-    IDS_COLOR_AQUA      "Acqua"
-    IDS_COLOR_WHITE     "Bianco"
-}
-
-STRINGTABLE DISCARDABLE
-{
-IDS_FONT_SIZE   "Scegli la dimensione del carattere tra %d e %d punti."
-IDS_SAVE_BUTTON "Salva"
-IDS_SAVE_IN     "Salva &in:"
-IDS_SAVE        "Salva"
-IDS_SAVE_AS     "Salva come..."
-IDS_OPEN_FILE   "Apri file"
 }

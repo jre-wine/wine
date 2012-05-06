@@ -28,7 +28,7 @@
 
 LANGUAGE LANG_LITHUANIAN, SUBLANG_NEUTRAL
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Atverti"
 FONT 8, "MS Shell Dlg"
@@ -50,7 +50,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Išsaugoti kaip..."
 FONT 8, "MS Shell Dlg"
@@ -72,7 +72,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Spausdinti"
 FONT 8, "MS Shell Dlg"
@@ -95,7 +95,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT_SETUP DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Spausdintuvo nuostatos"
 FONT 8, "MS Shell Dlg"
@@ -121,7 +121,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Šriftas"
 FONT 8, "MS Shell Dlg"
@@ -153,7 +153,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_COLOR DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 300, 185
+CHOOSE_COLOR DIALOG 36, 24, 300, 185
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Spalva"
 FONT 8, "MS Shell Dlg"
@@ -187,7 +187,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-FINDDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 236, 62
+FINDDLGORD DIALOG 36, 24, 236, 62
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Ieškoti"
 FONT 8, "MS Shell Dlg"
@@ -206,7 +206,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Pakeisti"
 FONT 8, "MS Shell Dlg"
@@ -226,7 +226,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Spausdinti"
@@ -266,7 +266,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "iki:",           stc3, 100,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Spausdintuvo nuostatos"
@@ -301,7 +301,7 @@ BEGIN
     CONTROL         "&Gulsčias",     rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Puslapio nuostatos"
 FONT 8, "MS Shell Dlg"
@@ -331,7 +331,7 @@ BEGIN
   PUSHBUTTON "S&pausdintuvas...", psh3, 171, 220, 61, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "Atverti"
 FONT 8, "MS Shell Dlg"
@@ -353,134 +353,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"&Atverti",		 IDOK,222,110,50,14
     PUSHBUTTON		"Atsisakyti",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"&Žinynas",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "&Apie FolderPicker testą"
-    IDS_DOCUMENTFOLDERS     "Dokumentų aplankai"
-    IDS_PERSONAL            "Dokumentai"
-    IDS_FAVORITES           "Adresynas"
-    IDS_PATH                "Sistemos kelias"
-    IDS_DESKTOP             "Darbalaukis"
-    IDS_FONTS               "Šriftai"
-    IDS_MYCOMPUTER          "Kompiuteris"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "Sistemos aplankai"
-    IDS_LOCALHARDRIVES      "Vietiniai standieji diskai"
-    IDS_FILENOTFOUND        "Failas nerastas"
-    IDS_VERIFYFILE          "Prašome patikrinti ar buvo pateiktas korektiškas failo vardas"
-    IDS_CREATEFILE          "Failas neegzistuoja.\nAr norite sukurti failą?"
-    IDS_OVERWRITEFILE       "Failas jau egzistuoja.\nAr norite jį pakeisti?"
-    IDS_INVALID_FILENAME_TITLE "Kelyje yra netinkamų simbolių"
-    IDS_INVALID_FILENAME    "Failo vardas negali turėti šių simbolių:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "Kelias neegzistuoja"
-    IDS_FILENOTEXISTING     "Failas neegzistuoja"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "Aukštyn vienu lygiu"
-    IDS_NEWFOLDER        "Sukurti naują aplanką"
-    IDS_LISTVIEW         "Sąrašas"
-    IDS_REPORTVIEW       "Išsamiai"
-    IDS_TODESKTOP        "Pereiti į darbalaukį"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "Spausdinti"
-
-    PD32_VALUE_UREADABLE                  "Neperskaitomas įrašas"
-    PD32_INVALID_PAGE_RANGE               "Ši reikšmė nepatenka į puslapių rėžį.\n\
-                                          Prašome įvesti reikšmę tarp %d ir %d."
-    PD32_FROM_NOT_ABOVE_TO                "„Nuo“ reikšmė negali viršyti „iki“ reikšmės."
-    PD32_MARGINS_OVERLAP                  "Paraštės persidengia arba išeina už popieriaus ribų.\n\
-                                          Prašome įvesti paraštes iš naujo."
-    PD32_NR_OF_COPIES_EMPTY               "Skaitinė „kopijų skaičius“ reikšmė negali būti tuščia."
-    PD32_TOO_LARGE_COPIES                 "Toks didelis kopijų skaičius yra nepalaikomas jūsų spausdintuvo.\n\
-                                          Prašome įvesti reikšmę tarp 1 ir %d."
-    PD32_PRINT_ERROR                      "Įvyko spausdintuvo klaida."
-    PD32_NO_DEFAULT_PRINTER               "Nenurodytas pagrindinis spausdintuvas."
-    PD32_CANT_FIND_PRINTER                "Nepavyko rasti spausdintuvo."
-    PD32_OUT_OF_MEMORY                    "Trūksta atminties."
-    PD32_GENERIC_ERROR                    "Įvyko klaida."
-    PD32_DRIVER_UNKNOWN                   "Nežinoma spausdintuvo tvarkyklė."
-    PD32_NO_DEVICES                       "Prieš atlikdami su spausdintuvu susijusius veiksmus, \
-tokius kaip puslapio nuostatų keitimas ar dokumento spausdinimas, turite įdiegti spausdintuvą. \
-Prašome įdiegti spausdintuvą ir pakartoti."
-
-    PD32_DEFAULT_PRINTER                  "Pagrindinis spausdintuvas; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "Eilėje yra %d dokumentų"
-    PD32_MARGINS_IN_INCHES                "Paraštės [coliai]"
-    PD32_MARGINS_IN_MILLIMETERS           "Paraštės [mm]"
-    PD32_MILLIMETERS                      "mm"
-
-    PD32_PRINTER_STATUS_READY             "Parengtas"
-    PD32_PRINTER_STATUS_PAUSED            "Pristabdytas; "
-    PD32_PRINTER_STATUS_ERROR             "Klaida; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "Laukia pašalinimo; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "Užstrigęs popierius; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "Pasibaigęs popierius; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Rankinis popieriaus padavimas; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "Problema su popieriumi; "
-    PD32_PRINTER_STATUS_OFFLINE           "Spausdintuvas atjungtas; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "Aktyvus Į/I; "
-    PD32_PRINTER_STATUS_BUSY              "Spausdintuvas užimtas; "
-    PD32_PRINTER_STATUS_PRINTING          "Spausdina; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "Išvedimo dėklas pilnas; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "Nepasiekiama; "
-    PD32_PRINTER_STATUS_WAITING           "Laukia; "
-    PD32_PRINTER_STATUS_PROCESSING        "Apdorojimas; "
-    PD32_PRINTER_STATUS_INITIALIZING      "Inicijuojama; "
-    PD32_PRINTER_STATUS_WARMING_UP        "Kaista; "
-    PD32_PRINTER_STATUS_TONER_LOW         "Baigiasi dažai; "
-    PD32_PRINTER_STATUS_NO_TONER          "Nėra dažų; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Puslapis perkrautas; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "Pertraukta naudotojo; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "Trūksta atminties; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "Spausdintuvo durelės atidarytos; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "Spausdinimo serveris nežinomas; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "Energijos taupymo režimas; "
-}
-
-STRINGTABLE DISCARDABLE /* Font styles */
-{
-    IDS_FONT_REGULAR       "Normalus"
-    IDS_FONT_BOLD          "Pusjuodis"
-    IDS_FONT_ITALIC        "Kursyvas"
-    IDS_FONT_BOLD_ITALIC   "Pusjuodis kursyvas"
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "Juoda"
-    IDS_COLOR_MAROON    "Kaštoninė"
-    IDS_COLOR_GREEN     "Žalia"
-    IDS_COLOR_OLIVE     "Alyvinė"
-    IDS_COLOR_NAVY      "Ultramarinas"
-    IDS_COLOR_PURPLE    "Purpurinė"
-    IDS_COLOR_TEAL      "Neutrali ciano"
-    IDS_COLOR_GRAY      "Pilka"
-    IDS_COLOR_SILVER    "Sidabrinė"
-    IDS_COLOR_RED       "Raudona"
-    IDS_COLOR_LIME      "Gelsvai žalsva"
-    IDS_COLOR_YELLOW    "Geltona"
-    IDS_COLOR_BLUE      "Mėlyna"
-    IDS_COLOR_FUCHSIA   "Fuksija"
-    IDS_COLOR_AQUA      "Žydra"
-    IDS_COLOR_WHITE     "Balta"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_FONT_SIZE   "Pasirinkite šrifto dydį tarp %d ir %d taškų."
-    IDS_SAVE_BUTTON "&Išsaugoti"
-    IDS_SAVE_IN     "&Kur išsaugoti:"
-    IDS_SAVE        "Išsaugoti"
-    IDS_SAVE_AS     "Išsaugoti kaip"
-    IDS_OPEN_FILE   "Atverti failą"
 }

@@ -343,11 +343,8 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     else
         win = root;
 
-    if(pglXMakeCurrent(gdi_display, win, ctx) == 0)
-    {
-        ERR_(winediag)( "Unable to activate OpenGL context, most likely your OpenGL drivers haven't been installed correctly\n" );
-        goto done;
-    }
+    pglXMakeCurrent(gdi_display, win, ctx);
+
     WineGLInfo.glVersion = (const char *) pglGetString(GL_VERSION);
     str = (const char *) pglGetString(GL_EXTENSIONS);
     WineGLInfo.glExtensions = HeapAlloc(GetProcessHeap(), 0, strlen(str)+1);
@@ -509,9 +506,11 @@ static BOOL has_opengl(void)
 /* It doesn't matter if these fail. They'll only be used if the driver reports
    the associated extension is available (and if a driver reports the extension
    is available but fails to provide the functions, it's quite broken) */
-#define LOAD_FUNCPTR(f) p##f = (void*)pglXGetProcAddressARB((const unsigned char*)#f)
+#define LOAD_FUNCPTR(f) p##f = pglXGetProcAddressARB((const GLubyte *)#f)
     /* ARB GLX Extension */
     LOAD_FUNCPTR(glXCreateContextAttribsARB);
+    /* SGI GLX Extension */
+    LOAD_FUNCPTR(glXSwapIntervalSGI);
     /* NV GLX Extension */
     LOAD_FUNCPTR(glXAllocateMemoryNV);
     LOAD_FUNCPTR(glXFreeMemoryNV);
@@ -1797,6 +1796,7 @@ BOOL CDECL X11DRV_wglDeleteContext(HGLRC hglrc)
     if (ctx->tid != 0 && ctx->tid != GetCurrentThreadId())
     {
         TRACE("Cannot delete context=%p because it is current in another thread.\n", ctx);
+        SetLastError(ERROR_BUSY);
         return FALSE;
     }
 
@@ -1811,6 +1811,7 @@ BOOL CDECL X11DRV_wglDeleteContext(HGLRC hglrc)
         wine_tsx11_unlock();
     }
 
+    free_context(ctx);
     return TRUE;
 }
 
@@ -3402,7 +3403,9 @@ static const char * WINAPI X11DRV_wglGetExtensionsStringEXT(void) {
  * WGL_EXT_swap_control: wglGetSwapIntervalEXT
  */
 static int WINAPI X11DRV_wglGetSwapIntervalEXT(VOID) {
-    FIXME("(),stub!\n");
+    /* GLX_SGI_swap_control doesn't have any provisions for getting the swap
+     * interval, so the swap interval has to be tracked. */
+    TRACE("()\n");
     return swap_interval;
 }
 
@@ -3415,13 +3418,37 @@ static BOOL WINAPI X11DRV_wglSwapIntervalEXT(int interval) {
     BOOL ret = TRUE;
 
     TRACE("(%d)\n", interval);
-    swap_interval = interval;
-    if (NULL != pglXSwapIntervalSGI) {
-        wine_tsx11_lock();
-        ret = !pglXSwapIntervalSGI(interval);
-        wine_tsx11_unlock();
+
+    if (interval < 0)
+    {
+        SetLastError(ERROR_INVALID_DATA);
+        return FALSE;
     }
-    else WARN("(): GLX_SGI_swap_control extension seems not supported\n");
+    else if (interval == 0)
+    {
+        /* wglSwapIntervalEXT considers an interval value of zero to mean that
+         * vsync should be disabled, but glXSwapIntervalSGI considers such a
+         * value to be an error. Just silently ignore the request for now. */
+        WARN("Request to disable vertical sync is not handled\n");
+        swap_interval = 0;
+    }
+    else
+    {
+        if (pglXSwapIntervalSGI)
+        {
+            wine_tsx11_lock();
+            ret = !pglXSwapIntervalSGI(interval);
+            wine_tsx11_unlock();
+        }
+        else
+            WARN("GLX_SGI_swap_control extension is not available\n");
+
+        if (ret)
+            swap_interval = interval;
+        else
+            SetLastError(ERROR_DC_NOT_FOUND);
+    }
+
     return ret;
 }
 
@@ -4033,4 +4060,4 @@ XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
     return NULL;
 }
 
-#endif /* defined(HAVE_OPENGL) */
+#endif /* defined(SONAME_LIBGL) */

@@ -35,6 +35,8 @@ static UINT (WINAPI *pMsiGetPatchInfoExA)( LPCSTR, LPCSTR, LPCSTR, MSIINSTALLCON
                                            LPCSTR, LPSTR, DWORD * );
 static UINT (WINAPI *pMsiEnumPatchesExA)( LPCSTR, LPCSTR, DWORD, DWORD, DWORD, LPSTR,
                                           LPSTR, MSIINSTALLCONTEXT *, LPSTR, LPDWORD );
+static BOOL (WINAPI *pGetTokenInformation)( HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD );
+static BOOL (WINAPI *pOpenProcessToken)( HANDLE, DWORD, PHANDLE );
 
 static const char *msifile = "winetest-patch.msi";
 static const char *mspfile = "winetest-patch.msp";
@@ -55,7 +57,8 @@ static const char property_dat[] =
     "ProductLanguage\t1033\n"
     "ProductName\tmsitest\n"
     "ProductVersion\t1.1.1\n"
-    "PATCHNEWSUMMARYSUBJECT\tInstaller Database\n";
+    "PATCHNEWSUMMARYSUBJECT\tInstaller Database\n"
+    "MSIFASTINSTALL\t1\n";
 
 static const char media_dat[] =
     "DiskId\tLastSequence\tDiskPrompt\tCabinet\tVolumeLabel\tSource\n"
@@ -138,6 +141,7 @@ static const struct msi_table tables[] =
 static void init_function_pointers( void )
 {
     HMODULE hmsi = GetModuleHandleA( "msi.dll" );
+    HMODULE hadvapi32 = GetModuleHandleA( "advapi32.dll" );
 
 #define GET_PROC( mod, func ) \
     p ## func = (void *)GetProcAddress( mod, #func ); \
@@ -147,7 +151,29 @@ static void init_function_pointers( void )
     GET_PROC( hmsi, MsiApplyPatchA );
     GET_PROC( hmsi, MsiGetPatchInfoExA );
     GET_PROC( hmsi, MsiEnumPatchesExA );
+
+    GET_PROC( hadvapi32, GetTokenInformation );
+    GET_PROC( hadvapi32, OpenProcessToken );
 #undef GET_PROC
+}
+
+static BOOL is_process_limited(void)
+{
+    HANDLE token;
+
+    if (!pOpenProcessToken || !pGetTokenInformation) return FALSE;
+
+    if (pOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        BOOL ret;
+        TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
+        DWORD size;
+
+        ret = pGetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
+        CloseHandle(token);
+        return (ret && type == TokenElevationTypeLimited);
+    }
+    return FALSE;
 }
 
 static BOOL get_program_files_dir( char *buf, char *buf2 )
@@ -681,13 +707,18 @@ static void test_simple_patch( void )
 {
     UINT r;
     DWORD size;
-    char path[MAX_PATH], install_source[MAX_PATH];
+    char path[MAX_PATH], install_source[MAX_PATH], buffer[32];
     const char *query;
     MSIHANDLE hpackage, hdb, hview, hrec;
 
     if (!pMsiApplyPatchA)
     {
         win_skip("MsiApplyPatchA is not available\n");
+        return;
+    }
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
         return;
     }
 
@@ -753,6 +784,12 @@ static void test_simple_patch( void )
     MsiViewClose( hview );
     MsiCloseHandle( hview );
 
+    buffer[0] = 0;
+    size = sizeof(buffer);
+    r = MsiGetProperty( hpackage, "PATCHNEWSUMMARYSUBJECT", buffer, &size );
+    ok( r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r );
+    ok( !strcmp( buffer, "Installer Database" ), "expected \'Installer Database\', got \'%s\'\n", buffer );
+
     MsiCloseHandle( hdb );
     MsiCloseHandle( hpackage );
 
@@ -804,6 +841,12 @@ static void test_simple_patch( void )
     MsiCloseHandle( hrec );
     MsiViewClose( hview );
     MsiCloseHandle( hview );
+
+    buffer[0] = 0;
+    size = sizeof(buffer);
+    r = MsiGetProperty( hpackage, "PATCHNEWSUMMARYSUBJECT", buffer, &size );
+    ok( r == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", r );
+    ok( !strcmp( buffer, "Installation Database" ), "expected \'Installation Database\', got \'%s\'\n", buffer );
 
     MsiCloseHandle( hdb );
     MsiCloseHandle( hpackage );
@@ -923,6 +966,11 @@ static void test_system_tables( void )
     if (!pMsiApplyPatchA)
     {
         win_skip("MsiApplyPatchA is not available\n");
+        return;
+    }
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
         return;
     }
 
@@ -1083,6 +1131,11 @@ static void test_patch_registration( void )
     if (!pMsiApplyPatchA || !pMsiGetPatchInfoExA || !pMsiEnumPatchesExA)
     {
         win_skip("required functions not available\n");
+        return;
+    }
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
         return;
     }
 

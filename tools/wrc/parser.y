@@ -369,7 +369,7 @@ resource_file
 		else
 			$1 = rsc;
 
-		/* Final statements before were done */
+		/* Final statements before we're done */
                 if ((head = get_resource_head($1)) != NULL)
                 {
                     if (resource_top)  /* append to existing resources */
@@ -1278,13 +1278,14 @@ item_definitions
  * (who would want to specify a MF_x flag twice?).
  */
 item_options
-	: /* Empty */				{ $$ = 0; }
-	| opt_comma tCHECKED		item_options	{ $$ = $3 | MF_CHECKED; }
-	| opt_comma tGRAYED		item_options	{ $$ = $3 | MF_GRAYED; }
-	| opt_comma tHELP		item_options	{ $$ = $3 | MF_HELP; }
-	| opt_comma tINACTIVE		item_options	{ $$ = $3 | MF_DISABLED; }
-	| opt_comma tMENUBARBREAK	item_options	{ $$ = $3 | MF_MENUBARBREAK; }
-	| opt_comma tMENUBREAK	item_options	{ $$ = $3 | MF_MENUBREAK; }
+	:  /* Empty */			{ $$ = 0; }
+	| ','		item_options	{ $$ = $2; }
+	| tCHECKED	item_options	{ $$ = $2 | MF_CHECKED; }
+	| tGRAYED	item_options	{ $$ = $2 | MF_GRAYED; }
+	| tHELP		item_options	{ $$ = $2 | MF_HELP; }
+	| tINACTIVE	item_options	{ $$ = $2 | MF_DISABLED; }
+	| tMENUBARBREAK	item_options	{ $$ = $2 | MF_MENUBARBREAK; }
+	| tMENUBREAK	item_options	{ $$ = $2 | MF_MENUBREAK; }
 	;
 
 /* ------------------------------ MenuEx ------------------------------ */
@@ -1708,15 +1709,22 @@ loadmemopts
 		}
 	;
 
-lamo	: tPRELOAD	{ $$ = new_int(WRC_MO_PRELOAD); }
-	| tMOVEABLE	{ $$ = new_int(WRC_MO_MOVEABLE); }
-	| tDISCARDABLE	{ $$ = new_int(WRC_MO_DISCARDABLE); }
-	| tPURE		{ $$ = new_int(WRC_MO_PURE); }
+lamo	: tPRELOAD	{ $$ = new_int(WRC_MO_PRELOAD);
+			  if (win32 && pedantic) parser_warning("PRELOAD is ignored in 32-bit mode\n"); }
+	| tMOVEABLE	{ $$ = new_int(WRC_MO_MOVEABLE);
+			  if (win32 && pedantic) parser_warning("MOVEABLE is ignored in 32-bit mode\n"); }
+	| tDISCARDABLE	{ $$ = new_int(WRC_MO_DISCARDABLE);
+			  if (win32 && pedantic) parser_warning("DISCARDABLE is ignored in 32-bit mode\n"); }
+	| tPURE		{ $$ = new_int(WRC_MO_PURE);
+			  if (win32 && pedantic) parser_warning("PURE is ignored in 32-bit mode\n"); }
 	;
 
-lama	: tLOADONCALL	{ $$ = new_int(~WRC_MO_PRELOAD); }
-	| tFIXED	{ $$ = new_int(~WRC_MO_MOVEABLE); }
-	| tIMPURE	{ $$ = new_int(~WRC_MO_PURE); }
+lama	: tLOADONCALL	{ $$ = new_int(~WRC_MO_PRELOAD);
+			  if (win32 && pedantic) parser_warning("LOADONCALL is ignored in 32-bit mode\n"); }
+	| tFIXED	{ $$ = new_int(~WRC_MO_MOVEABLE);
+			  if (win32 && pedantic) parser_warning("FIXED is ignored in 32-bit mode\n"); }
+	| tIMPURE	{ $$ = new_int(~WRC_MO_PURE);
+			  if (win32 && pedantic) parser_warning("IMPURE is ignored in 32-bit mode\n"); }
 	;
 
 /* ------------------------------ Win32 options ------------------------------ */

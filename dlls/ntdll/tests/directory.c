@@ -50,7 +50,7 @@ static NTSTATUS (WINAPI *pRtlWow64EnableFsRedirection)( BOOLEAN enable );
 static NTSTATUS (WINAPI *pRtlWow64EnableFsRedirectionEx)( ULONG disable, ULONG *old_value );
 
 /* The attribute sets to test */
-struct testfile_s {
+static struct testfile_s {
     int todo;                 /* set if it doesn't work on wine yet */
     const DWORD attr;         /* desired attribute */
     const char *name;         /* filename to use */
@@ -71,9 +71,10 @@ static const int max_test_dir_size = 20;  /* size of above plus some for .. etc 
 static void set_up_attribute_test(const char *testdirA)
 {
     int i;
+    BOOL ret;
 
-    ok(CreateDirectoryA(testdirA, NULL),
-       "couldn't create dir '%s', error %d\n", testdirA, GetLastError());
+    ret = CreateDirectoryA(testdirA, NULL);
+    ok(ret, "couldn't create dir '%s', error %d\n", testdirA, GetLastError());
 
     for (i=0; testfiles[i].name; i++) {
         char buf[MAX_PATH];
@@ -82,8 +83,8 @@ static void set_up_attribute_test(const char *testdirA)
         sprintf(buf, "%s\\%s", testdirA, testfiles[i].name);
         testfiles[i].nfound = 0;
         if (testfiles[i].attr & FILE_ATTRIBUTE_DIRECTORY) {
-            ok(CreateDirectoryA(buf, NULL),
-               "couldn't create dir '%s', error %d\n", buf, GetLastError());
+            ret = CreateDirectoryA(buf, NULL);
+            ok(ret, "couldn't create dir '%s', error %d\n", buf, GetLastError());
         } else {
             HANDLE h = CreateFileA(buf,
                                    GENERIC_READ|GENERIC_WRITE,

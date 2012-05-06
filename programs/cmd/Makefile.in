@@ -1,11 +1,7 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = cmd.exe
 APPMODE   = -mconsole -municode
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
-IMPORTS   = shell32 user32 advapi32 kernel32
+IMPORTS   = shell32 user32 advapi32
 
 C_SRCS = \
 	batch.c \
@@ -13,28 +9,8 @@ C_SRCS = \
 	directory.c \
 	wcmdmain.c
 
-RC_SRCS = \
-	Cs.rc \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Es.rc \
-	Fr.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sv.rc \
-	Tr.rc \
-	Uk.rc \
-	wcmdrc.rc
+RC_SRCS = cmd.rc
+PO_SRCS = cmd.rc
 
 SVG_SRCS = wcmd.svg
 

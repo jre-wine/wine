@@ -27,6 +27,7 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "ole2.h"
+#include "shlobj.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -52,28 +53,130 @@ WINE_DECLARE_DEBUG_CHANNEL(gecko);
 #define NS_STRING_CONTAINER_INIT_DEPEND  0x0002
 #define NS_CSTRING_CONTAINER_INIT_DEPEND 0x0002
 
-static nsresult (*NS_InitXPCOM2)(nsIServiceManager**,void*,void*);
-static nsresult (*NS_ShutdownXPCOM)(nsIServiceManager*);
-static nsresult (*NS_GetComponentRegistrar)(nsIComponentRegistrar**);
-static nsresult (*NS_StringContainerInit2)(nsStringContainer*,const PRUnichar*,PRUint32,PRUint32);
-static nsresult (*NS_CStringContainerInit2)(nsCStringContainer*,const char*,PRUint32,PRUint32);
-static nsresult (*NS_StringContainerFinish)(nsStringContainer*);
-static nsresult (*NS_CStringContainerFinish)(nsCStringContainer*);
-static nsresult (*NS_StringSetData)(nsAString*,const PRUnichar*,PRUint32);
-static nsresult (*NS_CStringSetData)(nsACString*,const char*,PRUint32);
-static nsresult (*NS_NewLocalFile)(const nsAString*,PRBool,nsIFile**);
-static PRUint32 (*NS_StringGetData)(const nsAString*,const PRUnichar **,PRBool*);
-static PRUint32 (*NS_CStringGetData)(const nsACString*,const char**,PRBool*);
+static nsresult (CDECL *NS_InitXPCOM2)(nsIServiceManager**,void*,void*);
+static nsresult (CDECL *NS_ShutdownXPCOM)(nsIServiceManager*);
+static nsresult (CDECL *NS_GetComponentRegistrar)(nsIComponentRegistrar**);
+static nsresult (CDECL *NS_StringContainerInit2)(nsStringContainer*,const PRUnichar*,PRUint32,PRUint32);
+static nsresult (CDECL *NS_CStringContainerInit2)(nsCStringContainer*,const char*,PRUint32,PRUint32);
+static nsresult (CDECL *NS_StringContainerFinish)(nsStringContainer*);
+static nsresult (CDECL *NS_CStringContainerFinish)(nsCStringContainer*);
+static nsresult (CDECL *NS_StringSetData)(nsAString*,const PRUnichar*,PRUint32);
+static nsresult (CDECL *NS_CStringSetData)(nsACString*,const char*,PRUint32);
+static nsresult (CDECL *NS_NewLocalFile)(const nsAString*,PRBool,nsIFile**);
+static PRUint32 (CDECL *NS_StringGetData)(const nsAString*,const PRUnichar **,PRBool*);
+static PRUint32 (CDECL *NS_CStringGetData)(const nsACString*,const char**,PRBool*);
 
 static HINSTANCE hXPCOM = NULL;
 
 static nsIServiceManager *pServMgr = NULL;
 static nsIComponentManager *pCompMgr = NULL;
 static nsIMemory *nsmem = NULL;
+static nsIFile *profile_directory;
 
 static const WCHAR wszNsContainer[] = {'N','s','C','o','n','t','a','i','n','e','r',0};
 
 static ATOM nscontainer_class;
+static WCHAR gecko_path[MAX_PATH];
+static unsigned gecko_path_len;
+
+static nsresult NSAPI nsDirectoryServiceProvider_QueryInterface(nsIDirectoryServiceProvider *iface,
+        nsIIDRef riid, void **result)
+{
+    if(IsEqualGUID(&IID_nsISupports, riid)) {
+        TRACE("(IID_nsISupports %p)\n", result);
+        *result = iface;
+    }else if(IsEqualGUID(&IID_nsIDirectoryServiceProvider, riid)) {
+        TRACE("(IID_nsIDirectoryServiceProvider %p)\n", result);
+        *result = iface;
+    }else {
+        WARN("(%s %p)\n", debugstr_guid(riid), result);
+        *result = NULL;
+        return NS_NOINTERFACE;
+    }
+
+    nsISupports_AddRef((nsISupports*)*result);
+    return NS_OK;
+}
+
+static nsrefcnt NSAPI nsDirectoryServiceProvider_AddRef(nsIDirectoryServiceProvider *iface)
+{
+    return 2;
+}
+
+static nsrefcnt NSAPI nsDirectoryServiceProvider_Release(nsIDirectoryServiceProvider *iface)
+{
+    return 1;
+}
+
+static nsresult create_profile_directory(void)
+{
+    static const WCHAR wine_geckoW[] = {'\\','w','i','n','e','_','g','e','c','k','o',0};
+
+    WCHAR path[MAX_PATH + sizeof(wine_geckoW)/sizeof(WCHAR)];
+    nsAString str;
+    PRBool exists;
+    nsresult nsres;
+    HRESULT hres;
+
+    hres = SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, SHGFP_TYPE_DEFAULT, path);
+    if(FAILED(hres)) {
+        ERR("SHGetFolderPath failed: %08x\n", hres);
+        return NS_ERROR_FAILURE;
+    }
+
+    strcatW(path, wine_geckoW);
+    nsAString_InitDepend(&str, path);
+    nsres = NS_NewLocalFile(&str, FALSE, &profile_directory);
+    nsAString_Finish(&str);
+    if(NS_FAILED(nsres)) {
+        ERR("NS_NewLocalFile failed: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = nsIFile_Exists(profile_directory, &exists);
+    if(NS_FAILED(nsres)) {
+        ERR("Exists failed: %08x\n", nsres);
+        return nsres;
+    }
+
+    if(!exists) {
+        nsres = nsIFile_Create(profile_directory, 1, 0700);
+        if(NS_FAILED(nsres))
+            ERR("Create failed: %08x\n", nsres);
+    }
+
+    return nsres;
+}
+
+static nsresult NSAPI nsDirectoryServiceProvider_GetFile(nsIDirectoryServiceProvider *iface,
+        const char *prop, PRBool *persistent, nsIFile **_retval)
+{
+    TRACE("(%s %p %p)\n", debugstr_a(prop), persistent, _retval);
+
+    if(!strcmp(prop, "ProfD")) {
+        if(!profile_directory) {
+            nsresult nsres;
+
+            nsres = create_profile_directory();
+            if(NS_FAILED(nsres))
+                return nsres;
+        }
+
+        return nsIFile_Clone(profile_directory, _retval);
+    }
+
+    return NS_ERROR_FAILURE;
+}
+
+static const nsIDirectoryServiceProviderVtbl nsDirectoryServiceProviderVtbl = {
+    nsDirectoryServiceProvider_QueryInterface,
+    nsDirectoryServiceProvider_AddRef,
+    nsDirectoryServiceProvider_Release,
+    nsDirectoryServiceProvider_GetFile
+};
+
+static nsIDirectoryServiceProvider nsDirectoryServiceProvider =
+    { &nsDirectoryServiceProviderVtbl };
 
 static LRESULT WINAPI nsembed_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -127,6 +230,44 @@ static void register_nscontainer_class(void)
     nscontainer_class = RegisterClassExW(&wndclass);
 }
 
+static BOOL install_wine_gecko(BOOL silent)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si;
+    WCHAR app[MAX_PATH];
+    WCHAR *args;
+    LONG len;
+    BOOL ret;
+
+    static const WCHAR controlW[] = {'\\','c','o','n','t','r','o','l','.','e','x','e',0};
+    static const WCHAR argsW[] =
+        {' ','a','p','p','w','i','z','.','c','p','l',' ','i','n','s','t','a','l','l','_','g','e','c','k','o',0};
+
+    len = GetSystemDirectoryW(app, MAX_PATH-sizeof(controlW)/sizeof(WCHAR));
+    memcpy(app+len, controlW, sizeof(controlW));
+
+    args = heap_alloc(len*sizeof(WCHAR) + sizeof(controlW) + sizeof(argsW));
+    if(!args)
+        return FALSE;
+
+    memcpy(args, app, len*sizeof(WCHAR) + sizeof(controlW));
+    memcpy(args + len + sizeof(controlW)/sizeof(WCHAR)-1, argsW, sizeof(argsW));
+
+    TRACE("starting %s\n", debugstr_w(args));
+
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    ret = CreateProcessW(app, args, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    heap_free(args);
+    if (ret) {
+        CloseHandle(pi.hThread);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hProcess);
+    }
+
+    return ret;
+}
+
 static void set_environment(LPCWSTR gre_path)
 {
     WCHAR path_env[MAX_PATH], buf[20];
@@ -139,6 +280,8 @@ static void set_environment(LPCWSTR gre_path)
     static const WCHAR nspr_log_modulesW[] =
         {'N','S','P','R','_','L','O','G','_','M','O','D','U','L','E','S',0};
     static const WCHAR debug_formatW[] = {'a','l','l',':','%','d',0};
+    static const WCHAR moz_plugin_pathW[] = {'M','O','Z','_','P','L','U','G','I','N','_','P','A','T','H',0};
+    static const WCHAR gecko_pluginW[] = {'\\','g','e','c','k','o','\\','p','l','u','g','i','n',0};
 
     /* We have to modify PATH as XPCOM loads other DLLs from this directory. */
     GetEnvironmentVariableW(pathW, path_env, sizeof(path_env)/sizeof(WCHAR));
@@ -158,6 +301,12 @@ static void set_environment(LPCWSTR gre_path)
 
     sprintfW(buf, debug_formatW, debug_level);
     SetEnvironmentVariableW(nspr_log_modulesW, buf);
+
+    len = GetSystemDirectoryW(path_env, (sizeof(path_env)-sizeof(gecko_pluginW))/sizeof(WCHAR)+1);
+    if(len) {
+        strcpyW(path_env+len, gecko_pluginW);
+        SetEnvironmentVariableW(moz_plugin_pathW, path_env);
+    }
 }
 
 static BOOL load_xpcom(const PRUnichar *gre_path)
@@ -415,6 +564,7 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
     nsIComponentRegistrar *registrar = NULL;
     nsAString path;
     nsIFile *gre_dir;
+    WCHAR *ptr;
 
     nsAString_InitDepend(&path, gre_path);
     nsres = NS_NewLocalFile(&path, FALSE, &gre_dir);
@@ -425,27 +575,29 @@ static BOOL init_xpcom(const PRUnichar *gre_path)
         return FALSE;
     }
 
-    nsres = NS_InitXPCOM2(&pServMgr, gre_dir, NULL);
+    nsres = NS_InitXPCOM2(&pServMgr, gre_dir, &nsDirectoryServiceProvider);
     if(NS_FAILED(nsres)) {
         ERR("NS_InitXPCOM2 failed: %08x\n", nsres);
         FreeLibrary(hXPCOM);
         return FALSE;
     }
 
+    strcpyW(gecko_path, gre_path);
+    for(ptr = gecko_path; *ptr; ptr++) {
+        if(*ptr == '\\')
+            *ptr = '/';
+    }
+    gecko_path_len = ptr-gecko_path;
+
     nsres = nsIServiceManager_QueryInterface(pServMgr, &IID_nsIComponentManager, (void**)&pCompMgr);
     if(NS_FAILED(nsres))
         ERR("Could not get nsIComponentManager: %08x\n", nsres);
 
     nsres = NS_GetComponentRegistrar(&registrar);
-    if(NS_SUCCEEDED(nsres)) {
-        nsres = nsIComponentRegistrar_AutoRegister(registrar, NULL);
-        if(NS_FAILED(nsres))
-            ERR("AutoRegister(NULL) failed: %08x\n", nsres);
-
+    if(NS_SUCCEEDED(nsres))
         init_nsio(pCompMgr, registrar);
-    }else {
+    else
         ERR("NS_GetComponentRegistrar failed: %08x\n", nsres);
-    }
 
     nsres = nsIComponentManager_CreateInstanceByContractID(pCompMgr, NS_APPSTARTUPNOTIFIER_CONTRACTID,
             NULL, &IID_nsIObserver, (void**)&pStartNotif);
@@ -583,6 +735,30 @@ void nsAString_Finish(nsAString *str)
     NS_StringContainerFinish(str);
 }
 
+HRESULT return_nsstr(nsresult nsres, nsAString *nsstr, BSTR *p)
+{
+    const PRUnichar *str;
+
+    if(NS_FAILED(nsres)) {
+        ERR("failed: %08x\n", nsres);
+        nsAString_Finish(nsstr);
+        return E_FAIL;
+    }
+
+    nsAString_GetData(nsstr, &str);
+    TRACE("ret %s\n", debugstr_w(str));
+    if(*str) {
+        *p = SysAllocString(str);
+        if(!*p)
+            return E_OUTOFMEMORY;
+    }else {
+        *p = NULL;
+    }
+
+    nsAString_Finish(nsstr);
+    return S_OK;
+}
+
 nsICommandParams *create_nscommand_params(void)
 {
     nsICommandParams *ret = NULL;
@@ -619,6 +795,7 @@ static HRESULT nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNo
 {
     nsIDOMNodeList *node_list = NULL;
     PRBool has_children = FALSE;
+    nsIContent *nscontent;
     PRUint16 type;
     nsresult nsres;
 
@@ -630,32 +807,27 @@ static HRESULT nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNo
         return E_FAIL;
     }
 
+    nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIContent, (void**)&nscontent);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDontent interface: %08x\n", nsres);
+        return E_FAIL;
+    }
+
     switch(type) {
-    case ELEMENT_NODE: {
-        nsIDOMElement *nselem;
-        nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMElement, (void**)&nselem);
-        nsIContentSerializer_AppendElementStart(serializer, nselem, nselem, str);
-        nsIDOMElement_Release(nselem);
+    case ELEMENT_NODE:
+        nsIContentSerializer_AppendElementStart(serializer, nscontent, nscontent, str);
         break;
-    }
-    case TEXT_NODE: {
-        nsIDOMText *nstext;
-        nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMText, (void**)&nstext);
-        nsIContentSerializer_AppendText(serializer, nstext, 0, -1, str);
-        nsIDOMText_Release(nstext);
+    case TEXT_NODE:
+        nsIContentSerializer_AppendText(serializer, nscontent, 0, -1, str);
         break;
-    }
-    case COMMENT_NODE: {
-        nsIDOMComment *nscomment;
-        nsres = nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMComment, (void**)&nscomment);
-        nsres = nsIContentSerializer_AppendComment(serializer, nscomment, 0, -1, str);
+    case COMMENT_NODE:
+        nsres = nsIContentSerializer_AppendComment(serializer, nscontent, 0, -1, str);
         break;
-    }
     case DOCUMENT_NODE: {
-        nsIDOMDocument *nsdoc;
-        nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMDocument, (void**)&nsdoc);
+        nsIDocument *nsdoc;
+        nsIDOMNode_QueryInterface(nsnode, &IID_nsIDocument, (void**)&nsdoc);
         nsIContentSerializer_AppendDocumentStart(serializer, nsdoc, str);
-        nsIDOMDocument_Release(nsdoc);
+        nsIDocument_Release(nsdoc);
         break;
     }
     case DOCUMENT_TYPE_NODE:
@@ -687,13 +859,10 @@ static HRESULT nsnode_to_nsstring_rec(nsIContentSerializer *serializer, nsIDOMNo
         nsIDOMNodeList_Release(node_list);
     }
 
-    if(type == ELEMENT_NODE) {
-        nsIDOMElement *nselem;
-        nsIDOMNode_QueryInterface(nsnode, &IID_nsIDOMElement, (void**)&nselem);
-        nsIContentSerializer_AppendElementEnd(serializer, nselem, str);
-        nsIDOMElement_Release(nselem);
-    }
+    if(type == ELEMENT_NODE)
+        nsIContentSerializer_AppendElementEnd(serializer, nscontent, str);
 
+    nsIContent_Release(nscontent);
     return S_OK;
 }
 
@@ -779,6 +948,11 @@ void close_gecko(void)
 
     release_nsio();
 
+    if(profile_directory) {
+        nsIFile_Release(profile_directory);
+        profile_directory = NULL;
+    }
+
     if(pCompMgr)
         nsIComponentManager_Release(pCompMgr);
 
@@ -792,49 +966,72 @@ void close_gecko(void)
     /* if (hXPCOM) FreeLibrary(hXPCOM); */
 }
 
+BOOL is_gecko_path(const char *path)
+{
+    WCHAR *buf, *ptr;
+    BOOL ret;
+
+    buf = heap_strdupAtoW(path);
+    if(strlenW(buf) < gecko_path_len)
+        return FALSE;
+
+    buf[gecko_path_len] = 0;
+    for(ptr = buf; *ptr; ptr++) {
+        if(*ptr == '\\')
+            *ptr = '/';
+    }
+
+    ret = !strcmpiW(buf, gecko_path);
+    heap_free(buf);
+    return ret;
+}
+
 /**********************************************************
  *      nsIWebBrowserChrome interface
  */
 
-#define NSWBCHROME_THIS(iface) DEFINE_THIS(NSContainer, WebBrowserChrome, iface)
+static inline NSContainer *impl_from_nsIWebBrowserChrome(nsIWebBrowserChrome *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIWebBrowserChrome_iface);
+}
 
 static nsresult NSAPI nsWebBrowserChrome_QueryInterface(nsIWebBrowserChrome *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
 
     *result = NULL;
     if(IsEqualGUID(&IID_nsISupports, riid)) {
         TRACE("(%p)->(IID_nsISupports, %p)\n", This, result);
-        *result = NSWBCHROME(This);
+        *result = &This->nsIWebBrowserChrome_iface;
     }else if(IsEqualGUID(&IID_nsIWebBrowserChrome, riid)) {
         TRACE("(%p)->(IID_nsIWebBrowserChrome, %p)\n", This, result);
-        *result = NSWBCHROME(This);
+        *result = &This->nsIWebBrowserChrome_iface;
     }else if(IsEqualGUID(&IID_nsIContextMenuListener, riid)) {
         TRACE("(%p)->(IID_nsIContextMenuListener, %p)\n", This, result);
-        *result = NSCML(This);
+        *result = &This->nsIContextMenuListener_iface;
     }else if(IsEqualGUID(&IID_nsIURIContentListener, riid)) {
         TRACE("(%p)->(IID_nsIURIContentListener %p)\n", This, result);
-        *result = NSURICL(This);
+        *result = &This->nsIURIContentListener_iface;
     }else if(IsEqualGUID(&IID_nsIEmbeddingSiteWindow, riid)) {
         TRACE("(%p)->(IID_nsIEmbeddingSiteWindow %p)\n", This, result);
-        *result = NSEMBWNDS(This);
+        *result = &This->nsIEmbeddingSiteWindow_iface;
     }else if(IsEqualGUID(&IID_nsITooltipListener, riid)) {
         TRACE("(%p)->(IID_nsITooltipListener %p)\n", This, result);
-        *result = NSTOOLTIP(This);
+        *result = &This->nsITooltipListener_iface;
     }else if(IsEqualGUID(&IID_nsIInterfaceRequestor, riid)) {
         TRACE("(%p)->(IID_nsIInterfaceRequestor %p)\n", This, result);
-        *result = NSIFACEREQ(This);
+        *result = &This->nsIInterfaceRequestor_iface;
     }else if(IsEqualGUID(&IID_nsIWeakReference, riid)) {
         TRACE("(%p)->(IID_nsIWeakReference %p)\n", This, result);
-        *result = NSWEAKREF(This);
+        *result = &This->nsIWeakReference_iface;
     }else if(IsEqualGUID(&IID_nsISupportsWeakReference, riid)) {
         TRACE("(%p)->(IID_nsISupportsWeakReference %p)\n", This, result);
-        *result = NSSUPWEAKREF(This);
+        *result = &This->nsISupportsWeakReference_iface;
     }
 
     if(*result) {
-        nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+        nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
         return NS_OK;
     }
 
@@ -844,7 +1041,7 @@ static nsresult NSAPI nsWebBrowserChrome_QueryInterface(nsIWebBrowserChrome *ifa
 
 static nsrefcnt NSAPI nsWebBrowserChrome_AddRef(nsIWebBrowserChrome *iface)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%d\n", This, ref);
@@ -854,14 +1051,14 @@ static nsrefcnt NSAPI nsWebBrowserChrome_AddRef(nsIWebBrowserChrome *iface)
 
 static nsrefcnt NSAPI nsWebBrowserChrome_Release(nsIWebBrowserChrome *iface)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref) {
         if(This->parent)
-            nsIWebBrowserChrome_Release(NSWBCHROME(This->parent));
+            nsIWebBrowserChrome_Release(&This->parent->nsIWebBrowserChrome_iface);
         heap_free(This);
     }
 
@@ -871,7 +1068,7 @@ static nsrefcnt NSAPI nsWebBrowserChrome_Release(nsIWebBrowserChrome *iface)
 static nsresult NSAPI nsWebBrowserChrome_SetStatus(nsIWebBrowserChrome *iface,
         PRUint32 statusType, const PRUnichar *status)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     TRACE("(%p)->(%d %s)\n", This, statusType, debugstr_w(status));
     return NS_OK;
 }
@@ -879,7 +1076,7 @@ static nsresult NSAPI nsWebBrowserChrome_SetStatus(nsIWebBrowserChrome *iface,
 static nsresult NSAPI nsWebBrowserChrome_GetWebBrowser(nsIWebBrowserChrome *iface,
         nsIWebBrowser **aWebBrowser)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
 
     TRACE("(%p)->(%p)\n", This, aWebBrowser);
 
@@ -895,7 +1092,7 @@ static nsresult NSAPI nsWebBrowserChrome_GetWebBrowser(nsIWebBrowserChrome *ifac
 static nsresult NSAPI nsWebBrowserChrome_SetWebBrowser(nsIWebBrowserChrome *iface,
         nsIWebBrowser *aWebBrowser)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
 
     TRACE("(%p)->(%p)\n", This, aWebBrowser);
 
@@ -908,7 +1105,7 @@ static nsresult NSAPI nsWebBrowserChrome_SetWebBrowser(nsIWebBrowserChrome *ifac
 static nsresult NSAPI nsWebBrowserChrome_GetChromeFlags(nsIWebBrowserChrome *iface,
         PRUint32 *aChromeFlags)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)->(%p)\n", This, aChromeFlags);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -916,14 +1113,14 @@ static nsresult NSAPI nsWebBrowserChrome_GetChromeFlags(nsIWebBrowserChrome *ifa
 static nsresult NSAPI nsWebBrowserChrome_SetChromeFlags(nsIWebBrowserChrome *iface,
         PRUint32 aChromeFlags)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)->(%08x)\n", This, aChromeFlags);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 static nsresult NSAPI nsWebBrowserChrome_DestroyBrowserWindow(nsIWebBrowserChrome *iface)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     TRACE("(%p)\n", This);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -931,21 +1128,21 @@ static nsresult NSAPI nsWebBrowserChrome_DestroyBrowserWindow(nsIWebBrowserChrom
 static nsresult NSAPI nsWebBrowserChrome_SizeBrowserTo(nsIWebBrowserChrome *iface,
         PRInt32 aCX, PRInt32 aCY)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)->(%d %d)\n", This, aCX, aCY);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 static nsresult NSAPI nsWebBrowserChrome_ShowAsModal(nsIWebBrowserChrome *iface)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)\n", This);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 static nsresult NSAPI nsWebBrowserChrome_IsWindowModal(nsIWebBrowserChrome *iface, PRBool *_retval)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)->(%p)\n", This, _retval);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -953,12 +1150,10 @@ static nsresult NSAPI nsWebBrowserChrome_IsWindowModal(nsIWebBrowserChrome *ifac
 static nsresult NSAPI nsWebBrowserChrome_ExitModalEventLoop(nsIWebBrowserChrome *iface,
         nsresult aStatus)
 {
-    NSContainer *This = NSWBCHROME_THIS(iface);
+    NSContainer *This = impl_from_nsIWebBrowserChrome(iface);
     WARN("(%p)->(%08x)\n", This, aStatus);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
-
-#undef NSWBCHROME_THIS
 
 static const nsIWebBrowserChromeVtbl nsWebBrowserChromeVtbl = {
     nsWebBrowserChrome_QueryInterface,
@@ -980,35 +1175,40 @@ static const nsIWebBrowserChromeVtbl nsWebBrowserChromeVtbl = {
  *      nsIContextMenuListener interface
  */
 
-#define NSCML_THIS(iface) DEFINE_THIS(NSContainer, ContextMenuListener, iface)
+static inline NSContainer *impl_from_nsIContextMenuListener(nsIContextMenuListener *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIContextMenuListener_iface);
+}
 
 static nsresult NSAPI nsContextMenuListener_QueryInterface(nsIContextMenuListener *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSCML_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIContextMenuListener(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsContextMenuListener_AddRef(nsIContextMenuListener *iface)
 {
-    NSContainer *This = NSCML_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIContextMenuListener(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsContextMenuListener_Release(nsIContextMenuListener *iface)
 {
-    NSContainer *This = NSCML_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIContextMenuListener(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuListener *iface,
         PRUint32 aContextFlags, nsIDOMEvent *aEvent, nsIDOMNode *aNode)
 {
-    NSContainer *This = NSCML_THIS(iface);
+    NSContainer *This = impl_from_nsIContextMenuListener(iface);
     nsIDOMMouseEvent *event;
+    HTMLDOMNode *node;
     POINT pt;
     DWORD dwID = CONTEXT_MENU_DEFAULT;
     nsresult nsres;
+    HRESULT hres;
 
     TRACE("(%p)->(%08x %p %p)\n", This, aContextFlags, aEvent, aNode);
 
@@ -1044,12 +1244,13 @@ static nsresult NSAPI nsContextMenuListener_OnShowContextMenu(nsIContextMenuList
         FIXME("aContextFlags=%08x\n", aContextFlags);
     };
 
-    show_context_menu(This->doc, dwID, &pt, (IDispatch*)HTMLDOMNODE(get_node(This->doc->basedoc.doc_node, aNode, TRUE)));
+    hres = get_node(This->doc->basedoc.doc_node, aNode, TRUE, &node);
+    if(FAILED(hres))
+        return NS_ERROR_FAILURE;
 
+    show_context_menu(This->doc, dwID, &pt, (IDispatch*)&node->IHTMLDOMNode_iface);
     return NS_OK;
 }
-
-#undef NSCML_THIS
 
 static const nsIContextMenuListenerVtbl nsContextMenuListenerVtbl = {
     nsContextMenuListener_QueryInterface,
@@ -1062,31 +1263,34 @@ static const nsIContextMenuListenerVtbl nsContextMenuListenerVtbl = {
  *      nsIURIContentListener interface
  */
 
-#define NSURICL_THIS(iface) DEFINE_THIS(NSContainer, URIContentListener, iface)
+static inline NSContainer *impl_from_nsIURIContentListener(nsIURIContentListener *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIURIContentListener_iface);
+}
 
 static nsresult NSAPI nsURIContentListener_QueryInterface(nsIURIContentListener *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSURICL_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsURIContentListener_AddRef(nsIURIContentListener *iface)
 {
-    NSContainer *This = NSURICL_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsURIContentListener_Release(nsIURIContentListener *iface)
 {
-    NSContainer *This = NSURICL_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsURIContentListener_OnStartURIOpen(nsIURIContentListener *iface,
                                                           nsIURI *aURI, PRBool *_retval)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
     nsACString spec_str;
     const char *spec;
     nsresult nsres;
@@ -1112,7 +1316,7 @@ static nsresult NSAPI nsURIContentListener_DoContent(nsIURIContentListener *ifac
         const char *aContentType, PRBool aIsContentPreferred, nsIRequest *aRequest,
         nsIStreamListener **aContentHandler, PRBool *_retval)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     TRACE("(%p)->(%s %x %p %p %p)\n", This, debugstr_a(aContentType), aIsContentPreferred,
             aRequest, aContentHandler, _retval);
@@ -1126,7 +1330,7 @@ static nsresult NSAPI nsURIContentListener_DoContent(nsIURIContentListener *ifac
 static nsresult NSAPI nsURIContentListener_IsPreferred(nsIURIContentListener *iface,
         const char *aContentType, char **aDesiredContentType, PRBool *_retval)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     TRACE("(%p)->(%s %p %p)\n", This, debugstr_a(aContentType), aDesiredContentType, _retval);
 
@@ -1143,7 +1347,7 @@ static nsresult NSAPI nsURIContentListener_CanHandleContent(nsIURIContentListene
         const char *aContentType, PRBool aIsContentPreferred, char **aDesiredContentType,
         PRBool *_retval)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     TRACE("(%p)->(%s %x %p %p)\n", This, debugstr_a(aContentType), aIsContentPreferred,
             aDesiredContentType, _retval);
@@ -1157,7 +1361,7 @@ static nsresult NSAPI nsURIContentListener_CanHandleContent(nsIURIContentListene
 static nsresult NSAPI nsURIContentListener_GetLoadCookie(nsIURIContentListener *iface,
         nsISupports **aLoadCookie)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     WARN("(%p)->(%p)\n", This, aLoadCookie);
 
@@ -1169,7 +1373,7 @@ static nsresult NSAPI nsURIContentListener_GetLoadCookie(nsIURIContentListener *
 static nsresult NSAPI nsURIContentListener_SetLoadCookie(nsIURIContentListener *iface,
         nsISupports *aLoadCookie)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     WARN("(%p)->(%p)\n", This, aLoadCookie);
 
@@ -1181,7 +1385,7 @@ static nsresult NSAPI nsURIContentListener_SetLoadCookie(nsIURIContentListener *
 static nsresult NSAPI nsURIContentListener_GetParentContentListener(nsIURIContentListener *iface,
         nsIURIContentListener **aParentContentListener)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     TRACE("(%p)->(%p)\n", This, aParentContentListener);
 
@@ -1195,11 +1399,11 @@ static nsresult NSAPI nsURIContentListener_GetParentContentListener(nsIURIConten
 static nsresult NSAPI nsURIContentListener_SetParentContentListener(nsIURIContentListener *iface,
         nsIURIContentListener *aParentContentListener)
 {
-    NSContainer *This = NSURICL_THIS(iface);
+    NSContainer *This = impl_from_nsIURIContentListener(iface);
 
     TRACE("(%p)->(%p)\n", This, aParentContentListener);
 
-    if(aParentContentListener == NSURICL(This))
+    if(aParentContentListener == &This->nsIURIContentListener_iface)
         return NS_OK;
 
     if(This->content_listener)
@@ -1211,8 +1415,6 @@ static nsresult NSAPI nsURIContentListener_SetParentContentListener(nsIURIConten
 
     return NS_OK;
 }
-
-#undef NSURICL_THIS
 
 static const nsIURIContentListenerVtbl nsURIContentListenerVtbl = {
     nsURIContentListener_QueryInterface,
@@ -1232,31 +1434,34 @@ static const nsIURIContentListenerVtbl nsURIContentListenerVtbl = {
  *      nsIEmbeddinSiteWindow interface
  */
 
-#define NSEMBWNDS_THIS(iface) DEFINE_THIS(NSContainer, EmbeddingSiteWindow, iface)
+static inline NSContainer *impl_from_nsIEmbeddingSiteWindow(nsIEmbeddingSiteWindow *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIEmbeddingSiteWindow_iface);
+}
 
 static nsresult NSAPI nsEmbeddingSiteWindow_QueryInterface(nsIEmbeddingSiteWindow *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsEmbeddingSiteWindow_AddRef(nsIEmbeddingSiteWindow *iface)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsEmbeddingSiteWindow_Release(nsIEmbeddingSiteWindow *iface)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsEmbeddingSiteWindow_SetDimensions(nsIEmbeddingSiteWindow *iface,
         PRUint32 flags, PRInt32 x, PRInt32 y, PRInt32 cx, PRInt32 cy)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
     WARN("(%p)->(%08x %d %d %d %d)\n", This, flags, x, y, cx, cy);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1264,14 +1469,14 @@ static nsresult NSAPI nsEmbeddingSiteWindow_SetDimensions(nsIEmbeddingSiteWindow
 static nsresult NSAPI nsEmbeddingSiteWindow_GetDimensions(nsIEmbeddingSiteWindow *iface,
         PRUint32 flags, PRInt32 *x, PRInt32 *y, PRInt32 *cx, PRInt32 *cy)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
     WARN("(%p)->(%08x %p %p %p %p)\n", This, flags, x, y, cx, cy);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 static nsresult NSAPI nsEmbeddingSiteWindow_SetFocus(nsIEmbeddingSiteWindow *iface)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
 
     TRACE("(%p)\n", This);
 
@@ -1281,7 +1486,7 @@ static nsresult NSAPI nsEmbeddingSiteWindow_SetFocus(nsIEmbeddingSiteWindow *ifa
 static nsresult NSAPI nsEmbeddingSiteWindow_GetVisibility(nsIEmbeddingSiteWindow *iface,
         PRBool *aVisibility)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
 
     TRACE("(%p)->(%p)\n", This, aVisibility);
 
@@ -1292,7 +1497,7 @@ static nsresult NSAPI nsEmbeddingSiteWindow_GetVisibility(nsIEmbeddingSiteWindow
 static nsresult NSAPI nsEmbeddingSiteWindow_SetVisibility(nsIEmbeddingSiteWindow *iface,
         PRBool aVisibility)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
 
     TRACE("(%p)->(%x)\n", This, aVisibility);
 
@@ -1302,7 +1507,7 @@ static nsresult NSAPI nsEmbeddingSiteWindow_SetVisibility(nsIEmbeddingSiteWindow
 static nsresult NSAPI nsEmbeddingSiteWindow_GetTitle(nsIEmbeddingSiteWindow *iface,
         PRUnichar **aTitle)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
     WARN("(%p)->(%p)\n", This, aTitle);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1310,7 +1515,7 @@ static nsresult NSAPI nsEmbeddingSiteWindow_GetTitle(nsIEmbeddingSiteWindow *ifa
 static nsresult NSAPI nsEmbeddingSiteWindow_SetTitle(nsIEmbeddingSiteWindow *iface,
         const PRUnichar *aTitle)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
     WARN("(%p)->(%s)\n", This, debugstr_w(aTitle));
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1318,7 +1523,7 @@ static nsresult NSAPI nsEmbeddingSiteWindow_SetTitle(nsIEmbeddingSiteWindow *ifa
 static nsresult NSAPI nsEmbeddingSiteWindow_GetSiteWindow(nsIEmbeddingSiteWindow *iface,
         void **aSiteWindow)
 {
-    NSContainer *This = NSEMBWNDS_THIS(iface);
+    NSContainer *This = impl_from_nsIEmbeddingSiteWindow(iface);
 
     TRACE("(%p)->(%p)\n", This, aSiteWindow);
 
@@ -1340,31 +1545,34 @@ static const nsIEmbeddingSiteWindowVtbl nsEmbeddingSiteWindowVtbl = {
     nsEmbeddingSiteWindow_GetSiteWindow
 };
 
-#define NSTOOLTIP_THIS(iface) DEFINE_THIS(NSContainer, TooltipListener, iface)
+static inline NSContainer *impl_from_nsITooltipListener(nsITooltipListener *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsITooltipListener_iface);
+}
 
 static nsresult NSAPI nsTooltipListener_QueryInterface(nsITooltipListener *iface, nsIIDRef riid,
-                                                       nsQIResult result)
+        void **result)
 {
-    NSContainer *This = NSTOOLTIP_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsITooltipListener(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsTooltipListener_AddRef(nsITooltipListener *iface)
 {
-    NSContainer *This = NSTOOLTIP_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsITooltipListener(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsTooltipListener_Release(nsITooltipListener *iface)
 {
-    NSContainer *This = NSTOOLTIP_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsITooltipListener(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsTooltipListener_OnShowTooltip(nsITooltipListener *iface,
         PRInt32 aXCoord, PRInt32 aYCoord, const PRUnichar *aTipText)
 {
-    NSContainer *This = NSTOOLTIP_THIS(iface);
+    NSContainer *This = impl_from_nsITooltipListener(iface);
 
     if (This->doc)
         show_tooltip(This->doc, aXCoord, aYCoord, aTipText);
@@ -1374,15 +1582,13 @@ static nsresult NSAPI nsTooltipListener_OnShowTooltip(nsITooltipListener *iface,
 
 static nsresult NSAPI nsTooltipListener_OnHideTooltip(nsITooltipListener *iface)
 {
-    NSContainer *This = NSTOOLTIP_THIS(iface);
+    NSContainer *This = impl_from_nsITooltipListener(iface);
 
     if (This->doc)
         hide_tooltip(This->doc);
 
     return NS_OK;
 }
-
-#undef NSTOOLTIM_THIS
 
 static const nsITooltipListenerVtbl nsTooltipListenerVtbl = {
     nsTooltipListener_QueryInterface,
@@ -1392,41 +1598,42 @@ static const nsITooltipListenerVtbl nsTooltipListenerVtbl = {
     nsTooltipListener_OnHideTooltip
 };
 
-#define NSIFACEREQ_THIS(iface) DEFINE_THIS(NSContainer, InterfaceRequestor, iface)
+static inline NSContainer *impl_from_nsIInterfaceRequestor(nsIInterfaceRequestor *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIInterfaceRequestor_iface);
+}
 
 static nsresult NSAPI nsInterfaceRequestor_QueryInterface(nsIInterfaceRequestor *iface,
-                                                          nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSIFACEREQ_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIInterfaceRequestor(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsInterfaceRequestor_AddRef(nsIInterfaceRequestor *iface)
 {
-    NSContainer *This = NSIFACEREQ_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIInterfaceRequestor(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsInterfaceRequestor_Release(nsIInterfaceRequestor *iface)
 {
-    NSContainer *This = NSIFACEREQ_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIInterfaceRequestor(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsInterfaceRequestor_GetInterface(nsIInterfaceRequestor *iface,
-                                                        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSIFACEREQ_THIS(iface);
+    NSContainer *This = impl_from_nsIInterfaceRequestor(iface);
 
     if(IsEqualGUID(&IID_nsIDOMWindow, riid)) {
         TRACE("(%p)->(IID_nsIDOMWindow %p)\n", This, result);
         return nsIWebBrowser_GetContentDOMWindow(This->webbrowser, (nsIDOMWindow**)result);
     }
 
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
-
-#undef NSIFACEREQ_THIS
 
 static const nsIInterfaceRequestorVtbl nsInterfaceRequestorVtbl = {
     nsInterfaceRequestor_QueryInterface,
@@ -1435,35 +1642,36 @@ static const nsIInterfaceRequestorVtbl nsInterfaceRequestorVtbl = {
     nsInterfaceRequestor_GetInterface
 };
 
-#define NSWEAKREF_THIS(iface) DEFINE_THIS(NSContainer, WeakReference, iface)
+static inline NSContainer *impl_from_nsIWeakReference(nsIWeakReference *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsIWeakReference_iface);
+}
 
 static nsresult NSAPI nsWeakReference_QueryInterface(nsIWeakReference *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIWeakReference(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsWeakReference_AddRef(nsIWeakReference *iface)
 {
-    NSContainer *This = NSWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIWeakReference(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsWeakReference_Release(nsIWeakReference *iface)
 {
-    NSContainer *This = NSWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsIWeakReference(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsWeakReference_QueryReferent(nsIWeakReference *iface,
         const nsIID *riid, void **result)
 {
-    NSContainer *This = NSWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsIWeakReference(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
-
-#undef NSWEAKREF_THIS
 
 static const nsIWeakReferenceVtbl nsWeakReferenceVtbl = {
     nsWeakReference_QueryInterface,
@@ -1472,40 +1680,41 @@ static const nsIWeakReferenceVtbl nsWeakReferenceVtbl = {
     nsWeakReference_QueryReferent
 };
 
-#define NSSUPWEAKREF_THIS(iface) DEFINE_THIS(NSContainer, SupportsWeakReference, iface)
+static inline NSContainer *impl_from_nsISupportsWeakReference(nsISupportsWeakReference *iface)
+{
+    return CONTAINING_RECORD(iface, NSContainer, nsISupportsWeakReference_iface);
+}
 
 static nsresult NSAPI nsSupportsWeakReference_QueryInterface(nsISupportsWeakReference *iface,
-        nsIIDRef riid, nsQIResult result)
+        nsIIDRef riid, void **result)
 {
-    NSContainer *This = NSSUPWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_QueryInterface(NSWBCHROME(This), riid, result);
+    NSContainer *This = impl_from_nsISupportsWeakReference(iface);
+    return nsIWebBrowserChrome_QueryInterface(&This->nsIWebBrowserChrome_iface, riid, result);
 }
 
 static nsrefcnt NSAPI nsSupportsWeakReference_AddRef(nsISupportsWeakReference *iface)
 {
-    NSContainer *This = NSSUPWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_AddRef(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsISupportsWeakReference(iface);
+    return nsIWebBrowserChrome_AddRef(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsrefcnt NSAPI nsSupportsWeakReference_Release(nsISupportsWeakReference *iface)
 {
-    NSContainer *This = NSSUPWEAKREF_THIS(iface);
-    return nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    NSContainer *This = impl_from_nsISupportsWeakReference(iface);
+    return nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }
 
 static nsresult NSAPI nsSupportsWeakReference_GetWeakReference(nsISupportsWeakReference *iface,
         nsIWeakReference **_retval)
 {
-    NSContainer *This = NSSUPWEAKREF_THIS(iface);
+    NSContainer *This = impl_from_nsISupportsWeakReference(iface);
 
     TRACE("(%p)->(%p)\n", This, _retval);
 
-    nsIWeakReference_AddRef(NSWEAKREF(This));
-    *_retval = NSWEAKREF(This);
+    nsIWeakReference_AddRef(&This->nsIWeakReference_iface);
+    *_retval = &This->nsIWeakReference_iface;
     return NS_OK;
 }
-
-#undef NSWEAKREF_THIS
 
 static const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
     nsSupportsWeakReference_QueryInterface,
@@ -1514,6 +1723,17 @@ static const nsISupportsWeakReferenceVtbl nsSupportsWeakReferenceVtbl = {
     nsSupportsWeakReference_GetWeakReference
 };
 
+nsresult create_chrome_window(nsIWebBrowserChrome *parent, nsIWebBrowserChrome **ret)
+{
+    NSContainer *new_container;
+
+    if(parent->lpVtbl != &nsWebBrowserChromeVtbl)
+        return NS_ERROR_UNEXPECTED;
+
+    new_container = NSContainer_Create(NULL, impl_from_nsIWebBrowserChrome(parent));
+    *ret = &new_container->nsIWebBrowserChrome_iface;
+    return NS_OK;
+}
 
 NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
 {
@@ -1527,14 +1747,14 @@ NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
 
     ret = heap_alloc_zero(sizeof(NSContainer));
 
-    ret->lpWebBrowserChromeVtbl      = &nsWebBrowserChromeVtbl;
-    ret->lpContextMenuListenerVtbl   = &nsContextMenuListenerVtbl;
-    ret->lpURIContentListenerVtbl    = &nsURIContentListenerVtbl;
-    ret->lpEmbeddingSiteWindowVtbl   = &nsEmbeddingSiteWindowVtbl;
-    ret->lpTooltipListenerVtbl       = &nsTooltipListenerVtbl;
-    ret->lpInterfaceRequestorVtbl    = &nsInterfaceRequestorVtbl;
-    ret->lpWeakReferenceVtbl         = &nsWeakReferenceVtbl;
-    ret->lpSupportsWeakReferenceVtbl = &nsSupportsWeakReferenceVtbl;
+    ret->nsIWebBrowserChrome_iface.lpVtbl = &nsWebBrowserChromeVtbl;
+    ret->nsIContextMenuListener_iface.lpVtbl = &nsContextMenuListenerVtbl;
+    ret->nsIURIContentListener_iface.lpVtbl = &nsURIContentListenerVtbl;
+    ret->nsIEmbeddingSiteWindow_iface.lpVtbl = &nsEmbeddingSiteWindowVtbl;
+    ret->nsITooltipListener_iface.lpVtbl = &nsTooltipListenerVtbl;
+    ret->nsIInterfaceRequestor_iface.lpVtbl = &nsInterfaceRequestorVtbl;
+    ret->nsIWeakReference_iface.lpVtbl = &nsWeakReferenceVtbl;
+    ret->nsISupportsWeakReference_iface.lpVtbl = &nsSupportsWeakReferenceVtbl;
 
     ret->doc = doc;
     ret->ref = 1;
@@ -1548,10 +1768,10 @@ NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
     }
 
     if(parent)
-        nsIWebBrowserChrome_AddRef(NSWBCHROME(parent));
+        nsIWebBrowserChrome_AddRef(&parent->nsIWebBrowserChrome_iface);
     ret->parent = parent;
 
-    nsres = nsIWebBrowser_SetContainerWindow(ret->webbrowser, NSWBCHROME(ret));
+    nsres = nsIWebBrowser_SetContainerWindow(ret->webbrowser, &ret->nsIWebBrowserChrome_iface);
     if(NS_FAILED(nsres))
         ERR("SetContainerWindow failed: %08x\n", nsres);
 
@@ -1600,7 +1820,8 @@ NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
         ERR("InitWindow failed: %08x\n", nsres);
     }
 
-    nsres = nsIWebBrowser_SetParentURIContentListener(ret->webbrowser, NSURICL(ret));
+    nsres = nsIWebBrowser_SetParentURIContentListener(ret->webbrowser,
+            &ret->nsIURIContentListener_iface);
     if(NS_FAILED(nsres))
         ERR("SetParentURIContentListener failed: %08x\n", nsres);
 
@@ -1670,5 +1891,5 @@ void NSContainer_Release(NSContainer *This)
         This->hwnd = NULL;
     }
 
-    nsIWebBrowserChrome_Release(NSWBCHROME(This));
+    nsIWebBrowserChrome_Release(&This->nsIWebBrowserChrome_iface);
 }

@@ -25,7 +25,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 typedef struct {
-    DispatchEx dispex;
+    jsdisp_t dispex;
 
     DWORD length;
 } ArrayInstance;
@@ -56,7 +56,7 @@ static inline ArrayInstance *array_this(vdisp_t *jsthis)
     return is_vclass(jsthis, JSCLASS_ARRAY) ? array_from_vdisp(jsthis) : NULL;
 }
 
-static HRESULT get_length(script_ctx_t *ctx, vdisp_t *vdisp, jsexcept_t *ei, DispatchEx **jsthis, DWORD *ret)
+static HRESULT get_length(script_ctx_t *ctx, vdisp_t *vdisp, jsexcept_t *ei, jsdisp_t **jsthis, DWORD *ret)
 {
     ArrayInstance *array;
     VARIANT var;
@@ -70,7 +70,7 @@ static HRESULT get_length(script_ctx_t *ctx, vdisp_t *vdisp, jsexcept_t *ei, Dis
     }
 
     if(!is_jsdisp(vdisp))
-        return throw_type_error(ctx, ei, IDS_JSCRIPT_EXPECTED, NULL);
+        return throw_type_error(ctx, ei, JS_E_JSCRIPT_EXPECTED, NULL);
 
     hres = jsdisp_propget_name(vdisp->u.jsdisp, lengthW, &var, ei, NULL/*FIXME*/);
     if(FAILED(hres))
@@ -85,7 +85,7 @@ static HRESULT get_length(script_ctx_t *ctx, vdisp_t *vdisp, jsexcept_t *ei, Dis
     return S_OK;
 }
 
-static HRESULT set_length(DispatchEx *obj, jsexcept_t *ei, DWORD length)
+static HRESULT set_length(jsdisp_t *obj, jsexcept_t *ei, DWORD length)
 {
     VARIANT var;
 
@@ -133,13 +133,16 @@ static HRESULT Array_length(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
         HRESULT hres;
 
         hres = to_number(ctx, get_arg(dp, 0), ei, &num);
+        if(FAILED(hres))
+            return hres;
+
         if(V_VT(&num) == VT_I4)
             len = V_I4(&num);
         else
             len = floor(V_R8(&num));
 
         if(len!=(DWORD)len)
-            return throw_range_error(ctx, ei, IDS_INVALID_LENGTH, NULL);
+            return throw_range_error(ctx, ei, JS_E_INVALID_LENGTH, NULL);
 
         for(i=len; i<This->length; i++) {
             hres = jsdisp_delete_idx(&This->dispex, i);
@@ -158,7 +161,7 @@ static HRESULT Array_length(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     return S_OK;
 }
 
-static HRESULT concat_array(DispatchEx *array, ArrayInstance *obj, DWORD *len,
+static HRESULT concat_array(jsdisp_t *array, ArrayInstance *obj, DWORD *len,
         jsexcept_t *ei, IServiceProvider *caller)
 {
     VARIANT var;
@@ -182,9 +185,9 @@ static HRESULT concat_array(DispatchEx *array, ArrayInstance *obj, DWORD *len,
     return S_OK;
 }
 
-static HRESULT concat_obj(DispatchEx *array, IDispatch *obj, DWORD *len, jsexcept_t *ei, IServiceProvider *caller)
+static HRESULT concat_obj(jsdisp_t *array, IDispatch *obj, DWORD *len, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsobj;
+    jsdisp_t *jsobj;
     VARIANT var;
     HRESULT hres;
 
@@ -206,7 +209,7 @@ static HRESULT concat_obj(DispatchEx *array, IDispatch *obj, DWORD *len, jsexcep
 static HRESULT Array_concat(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *ret;
+    jsdisp_t *ret;
     DWORD len = 0;
     HRESULT hres;
 
@@ -235,16 +238,14 @@ static HRESULT Array_concat(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     if(FAILED(hres))
         return hres;
 
-    if(retv) {
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(ret);
-    }else {
+    if(retv)
+        var_set_jsdisp(retv, ret);
+    else
         jsdisp_release(ret);
-    }
     return S_OK;
 }
 
-static HRESULT array_join(script_ctx_t *ctx, DispatchEx *array, DWORD length, const WCHAR *sep, VARIANT *retv,
+static HRESULT array_join(script_ctx_t *ctx, jsdisp_t *array, DWORD length, const WCHAR *sep, VARIANT *retv,
         jsexcept_t *ei, IServiceProvider *caller)
 {
     BSTR *str_tab, ret = NULL;
@@ -348,7 +349,7 @@ static HRESULT array_join(script_ctx_t *ctx, DispatchEx *array, DWORD length, co
 static HRESULT Array_join(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     DWORD length;
     HRESULT hres;
 
@@ -378,7 +379,7 @@ static HRESULT Array_join(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPAR
 static HRESULT Array_pop(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     VARIANT val;
     DWORD length;
     HRESULT hres;
@@ -429,7 +430,7 @@ static HRESULT Array_pop(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARA
 static HRESULT Array_push(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     DWORD length = 0;
     int i, n;
     HRESULT hres;
@@ -461,7 +462,7 @@ static HRESULT Array_push(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPAR
 static HRESULT Array_reverse(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     DWORD length, k, l;
     VARIANT v1, v2;
     HRESULT hres1, hres2;
@@ -508,9 +509,8 @@ static HRESULT Array_reverse(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISP
     }
 
     if(retv) {
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(jsthis);
-        IDispatch_AddRef(V_DISPATCH(retv));
+        jsdisp_addref(jsthis);
+        var_set_jsdisp(retv, jsthis);
     }
 
     return S_OK;
@@ -520,7 +520,7 @@ static HRESULT Array_reverse(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISP
 static HRESULT Array_shift(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     DWORD length = 0, i;
     VARIANT v, ret;
     HRESULT hres;
@@ -574,7 +574,7 @@ static HRESULT Array_shift(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPA
 static HRESULT Array_slice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    DispatchEx *arr, *jsthis;
+    jsdisp_t *arr, *jsthis;
     VARIANT v;
     DOUBLE range;
     DWORD length, start, end, idx;
@@ -640,17 +640,15 @@ static HRESULT Array_slice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPA
         }
     }
 
-    if(retv) {
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(arr);
-    }
+    if(retv)
+        var_set_jsdisp(retv, arr);
     else
         jsdisp_release(arr);
 
     return S_OK;
 }
 
-static HRESULT sort_cmp(script_ctx_t *ctx, DispatchEx *cmp_func, VARIANT *v1, VARIANT *v2, jsexcept_t *ei,
+static HRESULT sort_cmp(script_ctx_t *ctx, jsdisp_t *cmp_func, VARIANT *v1, VARIANT *v2, jsexcept_t *ei,
         IServiceProvider *caller, INT *cmp)
 {
     HRESULT hres;
@@ -677,29 +675,31 @@ static HRESULT sort_cmp(script_ctx_t *ctx, DispatchEx *cmp_func, VARIANT *v1, VA
             *cmp = V_I4(&tmp);
         else
             *cmp = V_R8(&tmp) > 0.0 ? 1 : -1;
-    }else if(is_num_vt(V_VT(v1))) {
-        if(is_num_vt(V_VT(v2))) {
-            DOUBLE d = num_val(v1)-num_val(v2);
-            if(d > 0.0)
-                *cmp = 1;
-            else if(d < -0.0)
-                *cmp = -1;
-            else
-                *cmp = 0;
-        }else {
-            *cmp = -1;
-        }
-    }else if(is_num_vt(V_VT(v2))) {
-        *cmp = 1;
-    }else if(V_VT(v1) == VT_BSTR) {
-        if(V_VT(v2) == VT_BSTR)
-            *cmp = strcmpW(V_BSTR(v1), V_BSTR(v2));
+    }else if(V_VT(v1) == VT_EMPTY) {
+        *cmp = V_VT(v2) == VT_EMPTY ? 0 : 1;
+    }else if(V_VT(v2) == VT_EMPTY) {
+        *cmp = -1;
+    }else if(is_num_vt(V_VT(v1)) && is_num_vt(V_VT(v2))) {
+        DOUBLE d = num_val(v1)-num_val(v2);
+        if(d > 0.0)
+            *cmp = 1;
         else
-            *cmp = -1;
-    }else if(V_VT(v2) == VT_BSTR) {
-        *cmp = 1;
+            *cmp = d < -0.0 ? -1 : 0;
     }else {
-        *cmp = 0;
+        BSTR x, y;
+
+        hres = to_string(ctx, v1, ei, &x);
+        if(FAILED(hres))
+            return hres;
+
+        hres = to_string(ctx, v2, ei, &y);
+        if(SUCCEEDED(hres)) {
+            *cmp = strcmpW(x, y);
+            SysFreeString(y);
+        }
+        SysFreeString(x);
+        if(FAILED(hres))
+            return hres;
     }
 
     return S_OK;
@@ -709,7 +709,7 @@ static HRESULT sort_cmp(script_ctx_t *ctx, DispatchEx *cmp_func, VARIANT *v1, VA
 static HRESULT Array_sort(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsthis, *cmp_func = NULL;
+    jsdisp_t *jsthis, *cmp_func = NULL;
     VARIANT *vtab, **sorttab = NULL;
     DWORD length;
     DWORD i;
@@ -748,9 +748,8 @@ static HRESULT Array_sort(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPAR
         if(cmp_func)
             jsdisp_release(cmp_func);
         if(retv) {
-            V_VT(retv) = VT_DISPATCH;
-            V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(jsthis);
-	    IDispatch_AddRef(V_DISPATCH(retv));
+            jsdisp_addref(jsthis);
+            var_set_jsdisp(retv, jsthis);
         }
         return S_OK;
     }
@@ -854,9 +853,8 @@ static HRESULT Array_sort(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPAR
         return hres;
 
     if(retv) {
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(jsthis);
-        IDispatch_AddRef(V_DISPATCH(retv));
+        jsdisp_addref(jsthis);
+        var_set_jsdisp(retv, jsthis);
     }
 
     return S_OK;
@@ -867,7 +865,7 @@ static HRESULT Array_splice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPP
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
     DWORD length, start=0, delete_cnt=0, argc, i, add_args = 0;
-    DispatchEx *ret_array = NULL, *jsthis;
+    jsdisp_t *ret_array = NULL, *jsthis;
     VARIANT v;
     HRESULT hres = S_OK;
 
@@ -965,10 +963,8 @@ static HRESULT Array_splice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPP
         return hres;
     }
 
-    if(retv) {
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(ret_array);
-    }
+    if(retv)
+        var_set_jsdisp(retv, ret_array);
     return S_OK;
 }
 
@@ -982,7 +978,7 @@ static HRESULT Array_toString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
 
     array = array_this(jsthis);
     if(!array)
-        return throw_type_error(ctx, ei, IDS_ARRAY_EXPECTED, NULL);
+        return throw_type_error(ctx, ei, JS_E_ARRAY_EXPECTED, NULL);
 
     return array_join(ctx, &array->dispex, array->length, default_separatorW, retv, ei, sp);
 }
@@ -998,7 +994,7 @@ static HRESULT Array_toLocaleString(script_ctx_t *ctx, vdisp_t *vthis, WORD flag
 static HRESULT Array_unshift(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *jsthis;
+    jsdisp_t *jsthis;
     WCHAR buf[14], *buf_end, *str;
     DWORD argc, i, length;
     VARIANT var;
@@ -1068,7 +1064,7 @@ static HRESULT Array_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPP
 
     switch(flags) {
     case INVOKE_FUNC:
-        return throw_type_error(ctx, ei, IDS_NOT_FUNC, NULL);
+        return throw_type_error(ctx, ei, JS_E_FUNCTION_EXPECTED, NULL);
     case INVOKE_PROPERTYGET:
         return array_join(ctx, jsthis->u.jsdisp, array_from_vdisp(jsthis)->length, default_separatorW, retv, ei, sp);
     default:
@@ -1079,12 +1075,12 @@ static HRESULT Array_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPP
     return S_OK;
 }
 
-static void Array_destructor(DispatchEx *dispex)
+static void Array_destructor(jsdisp_t *dispex)
 {
     heap_free(dispex);
 }
 
-static void Array_on_put(DispatchEx *dispex, const WCHAR *name)
+static void Array_on_put(jsdisp_t *dispex, const WCHAR *name)
 {
     ArrayInstance *array = (ArrayInstance*)dispex;
     const WCHAR *ptr = name;
@@ -1133,7 +1129,7 @@ static const builtin_info_t Array_info = {
 static HRESULT ArrayConstr_value(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    DispatchEx *obj;
+    jsdisp_t *obj;
     VARIANT *arg_var;
     DWORD i;
     HRESULT hres;
@@ -1145,14 +1141,13 @@ static HRESULT ArrayConstr_value(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, 
     case DISPATCH_CONSTRUCT: {
         if(arg_cnt(dp) == 1 && V_VT((arg_var = get_arg(dp, 0))) == VT_I4) {
             if(V_I4(arg_var) < 0)
-                return throw_range_error(ctx, ei, IDS_INVALID_LENGTH, NULL);
+                return throw_range_error(ctx, ei, JS_E_INVALID_LENGTH, NULL);
 
             hres = create_array(ctx, V_I4(arg_var), &obj);
             if(FAILED(hres))
                 return hres;
 
-            V_VT(retv) = VT_DISPATCH;
-            V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(obj);
+            var_set_jsdisp(retv, obj);
             return S_OK;
         }
 
@@ -1170,8 +1165,7 @@ static HRESULT ArrayConstr_value(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, 
             return hres;
         }
 
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(obj);
+        var_set_jsdisp(retv, obj);
         break;
     }
     default:
@@ -1182,7 +1176,7 @@ static HRESULT ArrayConstr_value(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, 
     return S_OK;
 }
 
-static HRESULT alloc_array(script_ctx_t *ctx, DispatchEx *object_prototype, ArrayInstance **ret)
+static HRESULT alloc_array(script_ctx_t *ctx, jsdisp_t *object_prototype, ArrayInstance **ret)
 {
     ArrayInstance *array;
     HRESULT hres;
@@ -1205,7 +1199,7 @@ static HRESULT alloc_array(script_ctx_t *ctx, DispatchEx *object_prototype, Arra
     return S_OK;
 }
 
-HRESULT create_array_constr(script_ctx_t *ctx, DispatchEx *object_prototype, DispatchEx **ret)
+HRESULT create_array_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp_t **ret)
 {
     ArrayInstance *array;
     HRESULT hres;
@@ -1222,7 +1216,7 @@ HRESULT create_array_constr(script_ctx_t *ctx, DispatchEx *object_prototype, Dis
     return hres;
 }
 
-HRESULT create_array(script_ctx_t *ctx, DWORD length, DispatchEx **ret)
+HRESULT create_array(script_ctx_t *ctx, DWORD length, jsdisp_t **ret)
 {
     ArrayInstance *array;
     HRESULT hres;

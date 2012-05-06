@@ -1,24 +1,9 @@
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winepath.exe
 APPMODE   = -mconsole -municode
-IMPORTS   = kernel32
 
 C_SRCS = winepath.c
 
-MANPAGES = winepath.man
+MANPAGE = winepath.man
 
 @MAKE_PROG_RULES@
-
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) winepath.man $(DESTDIR)$(mandir)/man$(prog_manext)/winepath.$(prog_manext)
-
-@WOW64_DISABLE@ install install-lib:: install-man-pages
-
-uninstall::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/winepath.$(prog_manext)

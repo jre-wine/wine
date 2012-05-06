@@ -23,11 +23,16 @@
 #include "config.h"
 
 #include <stdarg.h>
+#ifdef HAVE_LIBXML2
+# include <libxml/parser.h>
+# include <libxml/xmlerror.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -39,13 +44,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 typedef struct _domimpl
 {
-    const struct IXMLDOMImplementationVtbl *lpVtbl;
+    IXMLDOMImplementation IXMLDOMImplementation_iface;
     LONG ref;
 } domimpl;
 
 static inline domimpl *impl_from_IXMLDOMImplementation( IXMLDOMImplementation *iface )
 {
-    return (domimpl *)((char*)iface - FIELD_OFFSET(domimpl, lpVtbl));
+    return CONTAINING_RECORD(iface, domimpl, IXMLDOMImplementation_iface);
 }
 
 static HRESULT WINAPI dimimpl_QueryInterface(
@@ -65,6 +70,7 @@ static HRESULT WINAPI dimimpl_QueryInterface(
     else
     {
         FIXME("Unsupported interface %s\n", debugstr_guid(riid));
+        *ppvObject = NULL;
         return E_NOINTERFACE;
     }
 
@@ -164,8 +170,8 @@ static HRESULT WINAPI dimimpl_Invoke(
     hr = get_typeinfo(IXMLDOMImplementation_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &(This->lpVtbl), dispIdMember, wFlags, pDispParams,
-                pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLDOMImplementation_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -220,10 +226,10 @@ IUnknown* create_doc_Implementation(void)
     if ( !This )
         return NULL;
 
-    This->lpVtbl = &dimimpl_vtbl;
+    This->IXMLDOMImplementation_iface.lpVtbl = &dimimpl_vtbl;
     This->ref = 1;
 
-    return (IUnknown*) &This->lpVtbl;
+    return (IUnknown*)&This->IXMLDOMImplementation_iface;
 }
 
 #endif

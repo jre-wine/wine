@@ -23,6 +23,7 @@
 #include "wine/port.h"
 
 #include <X11/Xlib.h>
+#include <X11/cursorfont.h>
 #include <stdarg.h>
 
 #ifdef SONAME_LIBXCURSOR
@@ -35,17 +36,21 @@ MAKE_FUNCPTR(XcursorImageLoadCursor);
 MAKE_FUNCPTR(XcursorImagesCreate);
 MAKE_FUNCPTR(XcursorImagesDestroy);
 MAKE_FUNCPTR(XcursorImagesLoadCursor);
+MAKE_FUNCPTR(XcursorLibraryLoadCursor);
 # undef MAKE_FUNCPTR
 #endif /* SONAME_LIBXCURSOR */
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
+#define OEMRESOURCE
 #include "windef.h"
 #include "winbase.h"
+#include "winreg.h"
 
 #include "x11drv.h"
 #include "wine/server.h"
 #include "wine/library.h"
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -87,10 +92,8 @@ static const UINT button_up_flags[NB_BUTTONS] =
     MOUSEEVENTF_XUP
 };
 
-POINT cursor_pos;
 static HWND cursor_window;
 static DWORD last_time_modified;
-static RECT cursor_clip; /* Cursor clipping rect */
 static XContext cursor_context;
 static Cursor create_cursor( HANDLE handle );
 
@@ -120,59 +123,11 @@ void X11DRV_Xcursor_Init(void)
     LOAD_FUNCPTR(XcursorImagesCreate);
     LOAD_FUNCPTR(XcursorImagesDestroy);
     LOAD_FUNCPTR(XcursorImagesLoadCursor);
+    LOAD_FUNCPTR(XcursorLibraryLoadCursor);
 #undef LOAD_FUNCPTR
 #endif /* SONAME_LIBXCURSOR */
 }
 
-
-/***********************************************************************
- *		get_coords
- *
- * get the coordinates of a mouse event
- */
-static inline void get_coords( HWND hwnd, Window window, int x, int y, POINT *pt )
-{
-    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
-
-    if (!data) return;
-
-    if (window == data->client_window)
-    {
-        pt->x = x + data->client_rect.left;
-        pt->y = y + data->client_rect.top;
-    }
-    else
-    {
-        pt->x = x + data->whole_rect.left;
-        pt->y = y + data->whole_rect.top;
-    }
-}
-
-/***********************************************************************
- *		clip_point_to_rect
- *
- * Clip point to the provided rectangle
- */
-static inline void clip_point_to_rect( LPCRECT rect, LPPOINT pt )
-{
-    if      (pt->x <  rect->left)   pt->x = rect->left;
-    else if (pt->x >= rect->right)  pt->x = rect->right - 1;
-    if      (pt->y <  rect->top)    pt->y = rect->top;
-    else if (pt->y >= rect->bottom) pt->y = rect->bottom - 1;
-}
-
-/***********************************************************************
- *		update_button_state
- *
- * Update the button state with what X provides us
- */
-static inline void update_button_state( unsigned int state )
-{
-    key_state_table[VK_LBUTTON] = (state & Button1Mask ? 0x80 : 0);
-    key_state_table[VK_MBUTTON] = (state & Button2Mask ? 0x80 : 0);
-    key_state_table[VK_RBUTTON] = (state & Button3Mask ? 0x80 : 0);
-    /* X-buttons are not reported from XQueryPointer */
-}
 
 /***********************************************************************
  *		get_empty_cursor
@@ -203,12 +158,9 @@ static Cursor get_empty_cursor(void)
 /***********************************************************************
  *		set_window_cursor
  */
-void set_window_cursor( HWND hwnd, HCURSOR handle )
+void set_window_cursor( struct x11drv_win_data *data, HCURSOR handle )
 {
-    struct x11drv_win_data *data;
     Cursor cursor, prev;
-
-    if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
     wine_tsx11_lock();
     if (!handle) cursor = get_empty_cursor();
@@ -241,234 +193,94 @@ void set_window_cursor( HWND hwnd, HCURSOR handle )
 }
 
 /***********************************************************************
- *		update_mouse_state
+ *              sync_window_cursor
+ */
+void sync_window_cursor( struct x11drv_win_data *data )
+{
+    HCURSOR cursor;
+
+    SERVER_START_REQ( set_cursor )
+    {
+        req->flags = 0;
+        wine_server_call( req );
+        cursor = reply->prev_count >= 0 ? wine_server_ptr_handle( reply->prev_handle ) : 0;
+    }
+    SERVER_END_REQ;
+
+    if (data->cursor != cursor) set_window_cursor( data, cursor );
+}
+
+/***********************************************************************
+ *		send_mouse_input
  *
  * Update the various window states on a mouse event.
  */
-static void update_mouse_state( HWND hwnd, Window window, int x, int y, unsigned int state, POINT *pt )
+static void send_mouse_input( HWND hwnd, UINT flags, Window window, int x, int y,
+                              unsigned int state, DWORD mouse_data, Time time )
 {
-    struct x11drv_thread_data *data = x11drv_thread_data();
+    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+    POINT pt;
+    INPUT input;
 
-    get_coords( hwnd, window, x, y, pt );
+    if (!data) return;
 
-    cursor_window = hwnd;
+    if (window == data->whole_window)
+    {
+        x += data->whole_rect.left - data->client_rect.left;
+        y += data->whole_rect.top - data->client_rect.top;
+    }
+    if (window == root_window)
+    {
+        x += virtual_screen_rect.left;
+        y += virtual_screen_rect.top;
+    }
+    pt.x = x;
+    pt.y = y;
+    if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL)
+        pt.x = data->client_rect.right - data->client_rect.left - 1 - pt.x;
+    MapWindowPoints( hwnd, 0, &pt, 1 );
+
+    if (InterlockedExchangePointer( (void **)&cursor_window, hwnd ) != hwnd ||
+        GetTickCount() - last_time_modified > 100)
+    {
+        cursor_window = hwnd;
+        sync_window_cursor( data );
+    }
+    last_time_modified = GetTickCount();
+
+    if (hwnd != GetDesktopWindow()) hwnd = GetAncestor( hwnd, GA_ROOT );
 
     /* update the wine server Z-order */
 
-    if (window != data->grab_window &&
+    if (window != x11drv_thread_data()->grab_window &&
         /* ignore event if a button is pressed, since the mouse is then grabbed too */
         !(state & (Button1Mask|Button2Mask|Button3Mask|Button4Mask|Button5Mask|Button6Mask|Button7Mask)))
     {
+        RECT rect;
+        SetRect( &rect, pt.x, pt.y, pt.x + 1, pt.y + 1 );
+        MapWindowPoints( 0, hwnd, (POINT *)&rect, 2 );
+
         SERVER_START_REQ( update_window_zorder )
         {
             req->window      = wine_server_user_handle( hwnd );
-            req->rect.left   = pt->x;
-            req->rect.top    = pt->y;
-            req->rect.right  = pt->x + 1;
-            req->rect.bottom = pt->y + 1;
+            req->rect.left   = rect.left;
+            req->rect.top    = rect.top;
+            req->rect.right  = rect.right;
+            req->rect.bottom = rect.bottom;
             wine_server_call( req );
         }
         SERVER_END_REQ;
     }
-}
 
+    input.type             = INPUT_MOUSE;
+    input.u.mi.dx          = pt.x;
+    input.u.mi.dy          = pt.y;
+    input.u.mi.mouseData   = mouse_data;
+    input.u.mi.dwFlags     = flags;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( time );
+    input.u.mi.dwExtraInfo = 0;
 
-/***********************************************************************
- *           get_key_state
- */
-static WORD get_key_state(void)
-{
-    WORD ret = 0;
-
-    if (GetSystemMetrics( SM_SWAPBUTTON ))
-    {
-        if (key_state_table[VK_RBUTTON] & 0x80) ret |= MK_LBUTTON;
-        if (key_state_table[VK_LBUTTON] & 0x80) ret |= MK_RBUTTON;
-    }
-    else
-    {
-        if (key_state_table[VK_LBUTTON] & 0x80) ret |= MK_LBUTTON;
-        if (key_state_table[VK_RBUTTON] & 0x80) ret |= MK_RBUTTON;
-    }
-    if (key_state_table[VK_MBUTTON] & 0x80)  ret |= MK_MBUTTON;
-    if (key_state_table[VK_SHIFT] & 0x80)    ret |= MK_SHIFT;
-    if (key_state_table[VK_CONTROL] & 0x80)  ret |= MK_CONTROL;
-    if (key_state_table[VK_XBUTTON1] & 0x80) ret |= MK_XBUTTON1;
-    if (key_state_table[VK_XBUTTON2] & 0x80) ret |= MK_XBUTTON2;
-    return ret;
-}
-
-
-/***********************************************************************
- *           queue_raw_mouse_message
- */
-static void queue_raw_mouse_message( UINT message, HWND hwnd, DWORD x, DWORD y,
-                                     DWORD data, DWORD time, DWORD extra_info, UINT injected_flags )
-{
-    MSLLHOOKSTRUCT hook;
-    HCURSOR cursor;
-
-    hook.pt.x        = x;
-    hook.pt.y        = y;
-    hook.mouseData   = MAKELONG( 0, data );
-    hook.flags       = injected_flags;
-    hook.time        = time;
-    hook.dwExtraInfo = extra_info;
-
-    last_time_modified = GetTickCount();
-    if (HOOK_CallHooks( WH_MOUSE_LL, HC_ACTION, message, (LPARAM)&hook, TRUE ))
-        message = 0;  /* ignore it */
-
-    SERVER_START_REQ( send_hardware_message )
-    {
-        req->id       = (injected_flags & LLMHF_INJECTED) ? 0 : GetCurrentThreadId();
-        req->win      = wine_server_user_handle( hwnd );
-        req->msg      = message;
-        req->wparam   = MAKEWPARAM( get_key_state(), data );
-        req->lparam   = 0;
-        req->x        = x;
-        req->y        = y;
-        req->time     = time;
-        req->info     = extra_info;
-        wine_server_call( req );
-        cursor = (reply->count >= 0) ? wine_server_ptr_handle(reply->cursor) : 0;
-    }
-    SERVER_END_REQ;
-
-    if (hwnd)
-    {
-        struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
-        if (data && cursor != data->cursor) set_window_cursor( hwnd, cursor );
-    }
-}
-
-
-/***********************************************************************
- *		X11DRV_send_mouse_input
- */
-void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
-                              DWORD data, DWORD time, DWORD extra_info, UINT injected_flags )
-{
-    POINT pt;
-
-    if (flags & MOUSEEVENTF_MOVE && flags & MOUSEEVENTF_ABSOLUTE)
-    {
-        if (injected_flags & LLMHF_INJECTED)
-        {
-            pt.x = (x * screen_width) >> 16;
-            pt.y = (y * screen_height) >> 16;
-        }
-        else
-        {
-            pt.x = x;
-            pt.y = y;
-            wine_tsx11_lock();
-            if (cursor_pos.x == x && cursor_pos.y == y &&
-                (flags & ~(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)))
-                flags &= ~MOUSEEVENTF_MOVE;
-            wine_tsx11_unlock();
-        }
-    }
-    else if (flags & MOUSEEVENTF_MOVE)
-    {
-        int accel[3], xMult = 1, yMult = 1;
-
-        /* dx and dy can be negative numbers for relative movements */
-        SystemParametersInfoW(SPI_GETMOUSE, 0, accel, 0);
-
-        if (abs(x) > accel[0] && accel[2] != 0)
-        {
-            xMult = 2;
-            if ((abs(x) > accel[1]) && (accel[2] == 2)) xMult = 4;
-        }
-        if (abs(y) > accel[0] && accel[2] != 0)
-        {
-            yMult = 2;
-            if ((abs(y) > accel[1]) && (accel[2] == 2)) yMult = 4;
-        }
-
-        wine_tsx11_lock();
-        pt.x = cursor_pos.x + (long)x * xMult;
-        pt.y = cursor_pos.y + (long)y * yMult;
-        wine_tsx11_unlock();
-    }
-    else
-    {
-        wine_tsx11_lock();
-        pt = cursor_pos;
-        wine_tsx11_unlock();
-    }
-
-    if (flags & MOUSEEVENTF_MOVE)
-    {
-        queue_raw_mouse_message( WM_MOUSEMOVE, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-        if ((injected_flags & LLMHF_INJECTED) &&
-            ((flags & MOUSEEVENTF_ABSOLUTE) || x || y))  /* we have to actually move the cursor */
-        {
-            X11DRV_SetCursorPos( pt.x, pt.y );
-        }
-        else
-        {
-            wine_tsx11_lock();
-            clip_point_to_rect( &cursor_clip, &pt);
-            cursor_pos = pt;
-            wine_tsx11_unlock();
-        }
-    }
-    if (flags & MOUSEEVENTF_LEFTDOWN)
-    {
-        key_state_table[VK_LBUTTON] |= 0xc0;
-        queue_raw_mouse_message( GetSystemMetrics(SM_SWAPBUTTON) ? WM_RBUTTONDOWN : WM_LBUTTONDOWN,
-                                 hwnd, pt.x, pt.y, data, time, extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_LEFTUP)
-    {
-        key_state_table[VK_LBUTTON] &= ~0x80;
-        queue_raw_mouse_message( GetSystemMetrics(SM_SWAPBUTTON) ? WM_RBUTTONUP : WM_LBUTTONUP,
-                                 hwnd, pt.x, pt.y, data, time, extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_RIGHTDOWN)
-    {
-        key_state_table[VK_RBUTTON] |= 0xc0;
-        queue_raw_mouse_message( GetSystemMetrics(SM_SWAPBUTTON) ? WM_LBUTTONDOWN : WM_RBUTTONDOWN,
-                                 hwnd, pt.x, pt.y, data, time, extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_RIGHTUP)
-    {
-        key_state_table[VK_RBUTTON] &= ~0x80;
-        queue_raw_mouse_message( GetSystemMetrics(SM_SWAPBUTTON) ? WM_LBUTTONUP : WM_RBUTTONUP,
-                                 hwnd, pt.x, pt.y, data, time, extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_MIDDLEDOWN)
-    {
-        key_state_table[VK_MBUTTON] |= 0xc0;
-        queue_raw_mouse_message( WM_MBUTTONDOWN, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_MIDDLEUP)
-    {
-        key_state_table[VK_MBUTTON] &= ~0x80;
-        queue_raw_mouse_message( WM_MBUTTONUP, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_WHEEL)
-    {
-        queue_raw_mouse_message( WM_MOUSEWHEEL, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_XDOWN)
-    {
-        key_state_table[VK_XBUTTON1 + data - 1] |= 0xc0;
-        queue_raw_mouse_message( WM_XBUTTONDOWN, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-    }
-    if (flags & MOUSEEVENTF_XUP)
-    {
-        key_state_table[VK_XBUTTON1 + data - 1] &= ~0x80;
-        queue_raw_mouse_message( WM_XBUTTONUP, hwnd, pt.x, pt.y, data, time,
-                                 extra_info, injected_flags );
-    }
+    __wine_send_input( hwnd, &input );
 }
 
 #ifdef SONAME_LIBXCURSOR
@@ -478,7 +290,7 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
  *
  * Use Xcursor to create a frame of an X cursor from a Windows one.
  */
-static XcursorImage *create_xcursor_frame( HDC hdc, ICONINFO *iinfo, HANDLE icon,
+static XcursorImage *create_xcursor_frame( HDC hdc, const ICONINFOEXW *iinfo, HANDLE icon,
                                            HBITMAP hbmColor, unsigned char *color_bits, int color_size,
                                            HBITMAP hbmMask, unsigned char *mask_bits, int mask_size,
                                            int width, int height, int istep )
@@ -545,7 +357,7 @@ cleanup:
  *
  * Use Xcursor to create an X cursor from a Windows one.
  */
-static Cursor create_xcursor_cursor( HDC hdc, ICONINFO *iinfo, HANDLE icon, int width, int height )
+static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE icon, int width, int height )
 {
     unsigned char *color_bits, *mask_bits;
     HBITMAP hbmColor = 0, hbmMask = 0;
@@ -630,6 +442,148 @@ cleanup:
     return cursor;
 }
 
+
+struct system_cursors
+{
+    WORD id;
+    const char *name;
+};
+
+static const struct system_cursors user32_cursors[] =
+{
+    { OCR_NORMAL,      "left_ptr" },
+    { OCR_IBEAM,       "xterm" },
+    { OCR_WAIT,        "watch" },
+    { OCR_CROSS,       "cross" },
+    { OCR_UP,          "center_ptr" },
+    { OCR_SIZE,        "fleur" },
+    { OCR_SIZEALL,     "fleur" },
+    { OCR_ICON,        "icon" },
+    { OCR_SIZENWSE,    "nwse-resize" },
+    { OCR_SIZENESW,    "nesw-resize" },
+    { OCR_SIZEWE,      "ew-resize" },
+    { OCR_SIZENS,      "ns-resize" },
+    { OCR_NO,          "not-allowed" },
+    { OCR_HAND,        "hand2" },
+    { OCR_APPSTARTING, "left_ptr_watch" },
+    { OCR_HELP,        "question_arrow" },
+    { 0 }
+};
+
+static const struct system_cursors comctl32_cursors[] =
+{
+    { 102, "move" },
+    { 104, "copy" },
+    { 105, "left_ptr" },
+    { 106, "row-resize" },
+    { 107, "row-resize" },
+    { 108, "hand2" },
+    { 135, "col-resize" },
+    { 0 }
+};
+
+static const struct system_cursors ole32_cursors[] =
+{
+    { 1, "no-drop" },
+    { 2, "move" },
+    { 3, "copy" },
+    { 4, "alias" },
+    { 0 }
+};
+
+static const struct system_cursors riched20_cursors[] =
+{
+    { 105, "hand2" },
+    { 107, "right_ptr" },
+    { 109, "copy" },
+    { 110, "move" },
+    { 111, "no-drop" },
+    { 0 }
+};
+
+static const struct
+{
+    const struct system_cursors *cursors;
+    WCHAR name[16];
+} module_cursors[] =
+{
+    { user32_cursors, {'u','s','e','r','3','2','.','d','l','l',0} },
+    { comctl32_cursors, {'c','o','m','c','t','l','3','2','.','d','l','l',0} },
+    { ole32_cursors, {'o','l','e','3','2','.','d','l','l',0} },
+    { riched20_cursors, {'r','i','c','h','e','d','2','0','.','d','l','l',0} }
+};
+
+/***********************************************************************
+ *		create_xcursor_system_cursor
+ *
+ * Create an X cursor for a system cursor.
+ */
+static Cursor create_xcursor_system_cursor( const ICONINFOEXW *info )
+{
+    static const WCHAR idW[] = {'%','h','u',0};
+    const struct system_cursors *cursors;
+    unsigned int i;
+    Cursor cursor = 0;
+    HMODULE module;
+    HKEY key;
+    WCHAR *p, name[MAX_PATH * 2], valueW[64];
+    char valueA[64];
+    DWORD size, ret;
+
+    if (!pXcursorLibraryLoadCursor) return 0;
+    if (!info->szModName[0]) return 0;
+
+    p = strrchrW( info->szModName, '\\' );
+    strcpyW( name, p ? p + 1 : info->szModName );
+    p = name + strlenW( name );
+    *p++ = ',';
+    if (info->szResName[0]) strcpyW( p, info->szResName );
+    else sprintfW( p, idW, info->wResID );
+    valueA[0] = 0;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver\Cursors */
+    if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\X11 Driver\\Cursors", &key ))
+    {
+        size = sizeof(valueW) / sizeof(WCHAR);
+        ret = RegQueryValueExW( key, name, NULL, NULL, (BYTE *)valueW, &size );
+        RegCloseKey( key );
+        if (!ret)
+        {
+            if (!valueW[0]) return 0; /* force standard cursor */
+            if (!WideCharToMultiByte( CP_UNIXCP, 0, valueW, -1, valueA, sizeof(valueA), NULL, NULL ))
+                valueA[0] = 0;
+            goto done;
+        }
+    }
+
+    if (info->szResName[0]) goto done;  /* only integer resources are supported here */
+    if (!(module = GetModuleHandleW( info->szModName ))) goto done;
+
+    for (i = 0; i < sizeof(module_cursors)/sizeof(module_cursors[0]); i++)
+        if (GetModuleHandleW( module_cursors[i].name ) == module) break;
+    if (i == sizeof(module_cursors)/sizeof(module_cursors[0])) goto done;
+
+    cursors = module_cursors[i].cursors;
+    for (i = 0; cursors[i].id; i++)
+        if (cursors[i].id == info->wResID)
+        {
+            strcpy( valueA, cursors[i].name );
+            break;
+        }
+
+done:
+    if (valueA[0])
+    {
+        wine_tsx11_lock();
+        cursor = pXcursorLibraryLoadCursor( gdi_display, valueA );
+        wine_tsx11_unlock();
+        if (!cursor) WARN( "no system cursor found for %s mapped to %s\n",
+                           debugstr_w(name), debugstr_a(valueA) );
+    }
+    else WARN( "no system cursor found for %s\n", debugstr_w(name) );
+    return cursor;
+}
+
 #endif /* SONAME_LIBXCURSOR */
 
 
@@ -709,7 +663,7 @@ done:
  *
  * Create an X cursor from a Windows one.
  */
-static Cursor create_xlib_cursor( HDC hdc, ICONINFO *icon, int width, int height )
+static Cursor create_xlib_cursor( HDC hdc, const ICONINFOEXW *icon, int width, int height )
 {
     XColor fg, bg;
     Cursor cursor = None;
@@ -838,18 +792,22 @@ done:
 static Cursor create_cursor( HANDLE handle )
 {
     Cursor cursor = 0;
-    HDC hdc;
-    ICONINFO info;
+    ICONINFOEXW info;
     BITMAP bm;
 
     if (!handle) return get_empty_cursor();
 
-    if (!(hdc = CreateCompatibleDC( 0 ))) return 0;
-    if (!GetIconInfo( handle, &info ))
+    info.cbSize = sizeof(info);
+    if (!GetIconInfoExW( handle, &info )) return 0;
+
+#ifdef SONAME_LIBXCURSOR
+    if (use_system_cursors && (cursor = create_xcursor_system_cursor( &info )))
     {
-        DeleteDC( hdc );
-        return 0;
+        DeleteObject( info.hbmColor );
+        DeleteObject( info.hbmMask );
+        return cursor;
     }
+#endif
 
     GetObjectW( info.hbmMask, sizeof(bm), &bm );
     if (!info.hbmColor) bm.bmHeight /= 2;
@@ -863,11 +821,17 @@ static Cursor create_cursor( HANDLE handle )
 
     if (info.hbmColor)
     {
+        HDC hdc = CreateCompatibleDC( 0 );
+        if (hdc)
+        {
 #ifdef SONAME_LIBXCURSOR
-        if (pXcursorImagesLoadCursor) cursor = create_xcursor_cursor( hdc, &info, handle, bm.bmWidth, bm.bmHeight );
+            if (pXcursorImagesLoadCursor)
+                cursor = create_xcursor_cursor( hdc, &info, handle, bm.bmWidth, bm.bmHeight );
 #endif
-        if (!cursor) cursor = create_xlib_cursor( hdc, &info, bm.bmWidth, bm.bmHeight );
+            if (!cursor) cursor = create_xlib_cursor( hdc, &info, bm.bmWidth, bm.bmHeight );
+        }
         DeleteObject( info.hbmColor );
+        DeleteDC( hdc );
     }
     else
     {
@@ -879,7 +843,6 @@ static Cursor create_cursor( HANDLE handle )
     }
 
     DeleteObject( info.hbmMask );
-    DeleteDC( hdc );
     return cursor;
 }
 
@@ -914,25 +877,13 @@ void CDECL X11DRV_SetCursor( HCURSOR handle )
 BOOL CDECL X11DRV_SetCursorPos( INT x, INT y )
 {
     Display *display = thread_init_display();
-    POINT pt;
 
     TRACE( "warping to (%d,%d)\n", x, y );
 
     wine_tsx11_lock();
-    if (cursor_pos.x == x && cursor_pos.y == y)
-    {
-        wine_tsx11_unlock();
-        /* We still need to generate WM_MOUSEMOVE */
-        queue_raw_mouse_message( WM_MOUSEMOVE, NULL, x, y, 0, GetCurrentTime(), 0, 0 );
-        return TRUE;
-    }
-
-    pt.x = x; pt.y = y;
-    clip_point_to_rect( &cursor_clip, &pt);
     XWarpPointer( display, root_window, root_window, 0, 0, 0, 0,
-                  pt.x - virtual_screen_rect.left, pt.y - virtual_screen_rect.top );
+                  x - virtual_screen_rect.left, y - virtual_screen_rect.top );
     XFlush( display ); /* avoids bad mouse lag in games that do their own mouse warping */
-    cursor_pos = pt;
     wine_tsx11_unlock();
     return TRUE;
 }
@@ -946,37 +897,20 @@ BOOL CDECL X11DRV_GetCursorPos(LPPOINT pos)
     Window root, child;
     int rootX, rootY, winX, winY;
     unsigned int xstate;
+    BOOL ret;
 
     wine_tsx11_lock();
-    if ((GetTickCount() - last_time_modified > 100) &&
-        XQueryPointer( display, root_window, &root, &child,
-                       &rootX, &rootY, &winX, &winY, &xstate ))
+    ret = XQueryPointer( display, root_window, &root, &child, &rootX, &rootY, &winX, &winY, &xstate );
+    if (ret)
     {
-        update_button_state( xstate );
-        winX += virtual_screen_rect.left;
-        winY += virtual_screen_rect.top;
-        TRACE("pointer at (%d,%d)\n", winX, winY );
-        cursor_pos.x = winX;
-        cursor_pos.y = winY;
+        pos->x = winX + virtual_screen_rect.left;
+        pos->y = winY + virtual_screen_rect.top;
+        TRACE("pointer at (%d,%d)\n", pos->x, pos->y );
     }
-    *pos = cursor_pos;
     wine_tsx11_unlock();
-    return TRUE;
+    return ret;
 }
 
-
-/***********************************************************************
- *		ClipCursor (X11DRV.@)
- *
- * Set the cursor clipping rectangle.
- */
-BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
-{
-    if (!IntersectRect( &cursor_clip, &virtual_screen_rect, clip ))
-        cursor_clip = virtual_screen_rect;
-
-    return TRUE;
-}
 
 /***********************************************************************
  *           X11DRV_ButtonPress
@@ -986,10 +920,8 @@ void X11DRV_ButtonPress( HWND hwnd, XEvent *xev )
     XButtonEvent *event = &xev->xbutton;
     int buttonNum = event->button - 1;
     WORD wData = 0;
-    POINT pt;
 
     if (buttonNum >= NB_BUTTONS) return;
-    if (!hwnd) return;
 
     switch (buttonNum)
     {
@@ -1014,10 +946,8 @@ void X11DRV_ButtonPress( HWND hwnd, XEvent *xev )
     }
 
     update_user_time( event->time );
-    update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
-
-    X11DRV_send_mouse_input( hwnd, button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
-                             pt.x, pt.y, wData, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
+    send_mouse_input( hwnd, button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                      event->window, event->x, event->y, event->state, wData, event->time );
 }
 
 
@@ -1029,10 +959,8 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
     XButtonEvent *event = &xev->xbutton;
     int buttonNum = event->button - 1;
     WORD wData = 0;
-    POINT pt;
 
     if (buttonNum >= NB_BUTTONS || !button_up_flags[buttonNum]) return;
-    if (!hwnd) return;
 
     switch (buttonNum)
     {
@@ -1050,10 +978,8 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
         break;
     }
 
-    update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
-
-    X11DRV_send_mouse_input( hwnd, button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
-                             pt.x, pt.y, wData, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
+    send_mouse_input( hwnd, button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
+                      event->window, event->x, event->y, event->state, wData, event->time );
 }
 
 
@@ -1063,16 +989,11 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
 void X11DRV_MotionNotify( HWND hwnd, XEvent *xev )
 {
     XMotionEvent *event = &xev->xmotion;
-    POINT pt;
 
     TRACE("hwnd %p, event->is_hint %d\n", hwnd, event->is_hint);
 
-    if (!hwnd) return;
-
-    update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
-
-    X11DRV_send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                             pt.x, pt.y, 0, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
+    send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                      event->window, event->x, event->y, event->state, 0, event->time );
 }
 
 
@@ -1082,17 +1003,13 @@ void X11DRV_MotionNotify( HWND hwnd, XEvent *xev )
 void X11DRV_EnterNotify( HWND hwnd, XEvent *xev )
 {
     XCrossingEvent *event = &xev->xcrossing;
-    POINT pt;
 
     TRACE("hwnd %p, event->detail %d\n", hwnd, event->detail);
 
-    if (!hwnd) return;
     if (event->detail == NotifyVirtual || event->detail == NotifyNonlinearVirtual) return;
     if (event->window == x11drv_thread_data()->grab_window) return;
 
     /* simulate a mouse motion event */
-    update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
-
-    X11DRV_send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                             pt.x, pt.y, 0, EVENT_x11_time_to_win32_time(event->time), 0, 0 );
+    send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                      event->window, event->x, event->y, event->state, 0, event->time );
 }

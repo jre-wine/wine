@@ -234,7 +234,8 @@ static void test_WM_LBUTTONDOWN(void)
     COMBOBOXINFO cbInfo;
     UINT x, y, item_height;
     LRESULT result;
-    int i, idx;
+    UINT i;
+    int idx;
     RECT rect;
     WCHAR buffer[3];
     static const UINT choices[] = {8,9,10,11,12,14,16,18,20,22,24,26,28,36,48,72};
@@ -379,6 +380,53 @@ static void test_CB_GETLBTEXT(void)
     DestroyWindow(hCombo);
 }
 
+static void test_WM_WINDOWPOSCHANGING(void)
+{
+    HWND hCombo;
+    WINDOWPOS wp;
+    RECT rect;
+    int combo_height;
+    int ret;
+
+    hCombo = createComboEx(WS_BORDER | WS_VISIBLE | WS_CHILD | CBS_DROPDOWN);
+    ok(hCombo != NULL, "createComboEx failed\n");
+    ret = GetWindowRect(hCombo, &rect);
+    ok(ret, "GetWindowRect failed\n");
+    combo_height = rect.bottom - rect.top;
+    ok(combo_height > 0, "wrong combo height\n");
+
+    /* Test height > combo_height */
+    wp.x = rect.left;
+    wp.y = rect.top;
+    wp.cx = (rect.right - rect.left);
+    wp.cy = combo_height * 2;
+    wp.flags = 0;
+    wp.hwnd = hCombo;
+    wp.hwndInsertAfter = NULL;
+
+    ret = SendMessageA(hCombo, WM_WINDOWPOSCHANGING, 0, (LPARAM)&wp);
+    ok(ret == 0, "expected 0, got %x", ret);
+    ok(wp.cy == combo_height,
+            "Expected height %d, got %d\n", combo_height, wp.cy);
+
+    /* Test height < combo_height */
+    wp.x = rect.left;
+    wp.y = rect.top;
+    wp.cx = (rect.right - rect.left);
+    wp.cy = combo_height / 2;
+    wp.flags = 0;
+    wp.hwnd = hCombo;
+    wp.hwndInsertAfter = NULL;
+
+    ret = SendMessageA(hCombo, WM_WINDOWPOSCHANGING, 0, (LPARAM)&wp);
+    ok(ret == 0, "expected 0, got %x", ret);
+    ok(wp.cy == combo_height,
+            "Expected height %d, got %d\n", combo_height, wp.cy);
+
+    ret = DestroyWindow(hCombo);
+    ok(ret, "DestroyWindow failed\n");
+}
+
 static LRESULT CALLBACK ComboExTestWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch(msg) {
@@ -503,16 +551,16 @@ static void test_get_set_item(void)
     item.lParam = 0xdeadbeef;
     ret = SendMessage(hComboEx, CBEM_GETITEMA, 0, (LPARAM)&item);
     expect(TRUE, ret);
-    ok(item.lParam == 0, "Expected zero, got %ld\n", item.lParam);
+    ok(item.lParam == 0, "Expected zero, got %lx\n", item.lParam);
 
-    item.lParam = 0xdeadbeef;
+    item.lParam = 0x1abe11ed;
     ret = SendMessage(hComboEx, CBEM_SETITEMA, 0, (LPARAM)&item);
     expect(TRUE, ret);
 
     item.lParam = 0;
     ret = SendMessage(hComboEx, CBEM_GETITEMA, 0, (LPARAM)&item);
     expect(TRUE, ret);
-    ok(item.lParam == 0xdeadbeef, "Expected 0xdeadbeef, got %ld\n", item.lParam);
+    ok(item.lParam == 0x1abe11ed, "Expected 0x1abe11ed, got %lx\n", item.lParam);
 
     DestroyWindow(hComboEx);
 }
@@ -527,6 +575,7 @@ START_TEST(comboex)
     test_comboboxex();
     test_WM_LBUTTONDOWN();
     test_CB_GETLBTEXT();
+    test_WM_WINDOWPOSCHANGING();
     test_comboboxex_subclass();
     test_get_set_item();
 

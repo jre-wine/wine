@@ -185,7 +185,6 @@ struct options
     enum target_cpu target_cpu;
     enum target_platform target_platform;
     const char *target;
-    const char *version;
     int shared;
     int use_msvcrt;
     int nostdinc;
@@ -195,6 +194,7 @@ struct options
     int noshortwchar;
     int gui_app;
     int unicode_app;
+    int win16_app;
     int compile_only;
     int force_pointer_size;
     int large_address_aware;
@@ -283,49 +283,30 @@ static char* get_temp_file(const char* prefix, const char* suffix)
     return tmp;
 }
 
-static char* build_tool_name(struct options *opts, const char* base, const char* deflt)
-{
-    char* str;
-
-    if (opts->target && opts->version)
-    {
-        str = strmake("%s-%s-%s", opts->target, base, opts->version);
-    }
-    else if (opts->target)
-    {
-        str = strmake("%s-%s", opts->target, base);
-    }
-    else if (opts->version)
-    {
-        str = strmake("%s-%s", base, opts->version);
-    }
-    else
-        str = xstrdup(deflt);
-    return str;
-}
-
 static const strarray* get_translator(struct options *opts)
 {
-    char *str = NULL;
+    const char *str = NULL;
     strarray *ret;
 
     switch(opts->processor)
     {
     case proc_cpp:
-        str = build_tool_name(opts, "cpp", CPP);
+        if (opts->target) str = strmake( "%s-cpp", opts->target );
+        else str = CPP;
         break;
     case proc_cc:
     case proc_as:
-        str = build_tool_name(opts, "gcc", CC);
+        if (opts->target) str = strmake( "%s-gcc", opts->target );
+        else str = CC;
         break;
     case proc_cxx:
-        str = build_tool_name(opts, "g++", CXX);
+        if (opts->target) str = strmake( "%s-g++", opts->target );
+        else str = CXX;
         break;
     default:
         assert(0);
     }
     ret = strarray_fromstring( str, " " );
-    free(str);
     if (opts->force_pointer_size)
         strarray_add( ret, strmake("-m%u", 8 * opts->force_pointer_size ));
     return ret;
@@ -398,8 +379,6 @@ static void compile(struct options* opts, const char* lang)
     strarray* comp_args = strarray_alloc();
     unsigned int j;
     int gcc_defs = 0;
-    char* gcc;
-    char* gpp;
 
     strarray_addall(comp_args, get_translator(opts));
     switch(opts->processor)
@@ -410,16 +389,12 @@ static void compile(struct options* opts, const char* lang)
 	/* mixing different C and C++ compilers isn't supported in configure anyway */
 	case proc_cc:
 	case proc_cxx:
-            gcc = build_tool_name(opts, "gcc", CC);
-            gpp = build_tool_name(opts, "g++", CXX);
             for ( j = 0; !gcc_defs && j < comp_args->size; j++ )
             {
                 const char *cc = comp_args->base[j];
 
-                gcc_defs = strendswith(cc, gcc) || strendswith(cc, gpp);
+                gcc_defs = strendswith(cc, "gcc") || strendswith(cc, "g++");
             }
-            free(gcc);
-            free(gpp);
             break;
     }
 
@@ -782,6 +757,9 @@ static void build(struct options* opts)
         strarray *resources = strarray_alloc();
         char *res_o_name = NULL;
 
+        if (opts->win16_app)
+            error( "Building 16-bit code is not supported for Windows\n" );
+
         if (opts->shared)
         {
             /* run winebuild to generate the .def file */
@@ -829,7 +807,12 @@ static void build(struct options* opts)
         for ( j = 0; j < lib_dirs->size; j++ )
             strarray_add(link_args, strmake("-L%s", lib_dirs->base[j]));
 
-        if (!opts->nostartfiles) add_library(opts, lib_dirs, files, "winecrt0");
+        if (!opts->nodefaultlibs)
+        {
+            add_library(opts, lib_dirs, files, "winecrt0");
+            add_library(opts, lib_dirs, files, "kernel32");
+            add_library(opts, lib_dirs, files, "ntdll");
+        }
         if (opts->shared && !opts->nostdlib) add_library(opts, lib_dirs, files, "wine");
         if (!opts->shared && opts->use_msvcrt && opts->target_platform == PLATFORM_CYGWIN)
             add_library(opts, lib_dirs, files, "msvcrt");
@@ -907,10 +890,15 @@ static void build(struct options* opts)
 	}
         add_library(opts, lib_dirs, files, "advapi32");
         add_library(opts, lib_dirs, files, "user32");
-        add_library(opts, lib_dirs, files, "kernel32");
     }
 
-    if (!opts->nostartfiles) add_library(opts, lib_dirs, files, "winecrt0");
+    if (!opts->nodefaultlibs)
+    {
+        add_library(opts, lib_dirs, files, "winecrt0");
+        if (opts->win16_app) add_library(opts, lib_dirs, files, "kernel");
+        add_library(opts, lib_dirs, files, "kernel32");
+        add_library(opts, lib_dirs, files, "ntdll");
+    }
     if (!opts->nostdlib) add_library(opts, lib_dirs, files, "wine");
 
     /* run winebuild to generate the .spec.o file */
@@ -936,6 +924,7 @@ static void build(struct options* opts)
         strarray_add(spec_args, "-E");
         strarray_add(spec_args, spec_file);
     }
+    if (opts->win16_app) strarray_add(spec_args, "-m16");
 
     if (!opts->shared)
     {
@@ -1089,7 +1078,7 @@ static int is_linker_arg(const char* arg)
 {
     static const char* link_switches[] = 
     {
-	"-nostartfiles", "-nodefaultlibs", "-nostdlib", "-s", 
+	"-nostartfiles", "-nostdlib", "-s",
 	"-static", "-static-libgcc", "-shared", "-shared-libgcc", "-symbolic",
 	"-framework", "--coverage", "-fprofile-generate", "-fprofile-use"
     };
@@ -1125,7 +1114,7 @@ static int is_linker_arg(const char* arg)
  */
 static int is_target_arg(const char* arg)
 {
-    return arg[1] == 'b' || arg[1] == 'V';
+    return arg[1] == 'b' || arg[2] == 'V';
 }
 
 
@@ -1282,11 +1271,7 @@ int main(int argc, char **argv)
 			next_is_arg = 1;
 		    break;
 	    }
-	    if (next_is_arg)
-            {
-                if (i + 1 >= argc) error("option -%c requires an argument\n", argv[i][1]);
-                option_arg = argv[i+1];
-            }
+	    if (next_is_arg) option_arg = argv[i+1];
 
 	    /* determine what options go 'as is' to the linker & the compiler */
 	    raw_compiler_arg = raw_linker_arg = 0;
@@ -1306,7 +1291,7 @@ int main(int argc, char **argv)
 		raw_linker_arg = 0;
 	    if (argv[i][1] == 'c' || argv[i][1] == 'L')
 		raw_compiler_arg = 0;
-	    if (argv[i][1] == 'o' || argv[i][1] == 'b' || argv[i][1] == 'V')
+	    if (argv[i][1] == 'o' || argv[i][1] == 'b')
 		raw_compiler_arg = raw_linker_arg = 0;
 
 	    /* do a bit of semantic analysis */
@@ -1328,9 +1313,6 @@ int main(int argc, char **argv)
 		    break;
                 case 'b':
                     parse_target_option( &opts, option_arg );
-                    break;
-                case 'V':
-                    opts.version = xstrdup( option_arg );
                     break;
                 case 'c':        /* compile or assemble */
 		    if (argv[i][2] == 0) opts.compile_only = 1;
@@ -1365,6 +1347,8 @@ int main(int argc, char **argv)
 			opts.gui_app = 0;
 		    else if (strcmp("-municode", argv[i]) == 0)
 			opts.unicode_app = 1;
+		    else if (strcmp("-m16", argv[i]) == 0)
+			opts.win16_app = 1;
 		    else if (strcmp("-m32", argv[i]) == 0)
                     {
                         if (opts.target_cpu == CPU_x86_64)

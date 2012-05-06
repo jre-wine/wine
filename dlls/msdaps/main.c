@@ -43,6 +43,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(oledb);
 extern BOOL WINAPI msdaps_DllMain(HINSTANCE, DWORD, LPVOID) DECLSPEC_HIDDEN;
 extern HRESULT WINAPI msdaps_DllGetClassObject(REFCLSID, REFIID, LPVOID *) DECLSPEC_HIDDEN;
 extern HRESULT WINAPI msdaps_DllCanUnloadNow(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI msdaps_DllRegisterServer(void) DECLSPEC_HIDDEN;
+extern HRESULT WINAPI msdaps_DllUnregisterServer(void) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  *              DllMain
@@ -58,13 +60,18 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
  */
 typedef struct
 {
-    const IClassFactoryVtbl *lpVtbl;
+    IClassFactory IClassFactory_iface;
     HRESULT (*create_object)( IUnknown*, LPVOID* );
 } cf;
 
+static inline cf *impl_from_IClassFactory(IClassFactory *iface)
+{
+    return CONTAINING_RECORD(iface, cf, IClassFactory_iface);
+}
+
 static HRESULT WINAPI CF_QueryInterface(IClassFactory *iface, REFIID riid, void **obj)
 {
-    cf *This = (cf *)iface;
+    cf *This = impl_from_IClassFactory(iface);
 
     TRACE("(%p, %s, %p)\n", This, debugstr_guid(riid), obj);
 
@@ -90,7 +97,7 @@ static ULONG WINAPI CF_Release(IClassFactory *iface)
 
 static HRESULT WINAPI CF_CreateInstance(IClassFactory *iface, IUnknown *pOuter, REFIID riid, void **obj)
 {
-    cf *This = (cf *)iface;
+    cf *This = impl_from_IClassFactory(iface);
     IUnknown *unk = NULL;
     HRESULT r;
 
@@ -120,10 +127,10 @@ static const IClassFactoryVtbl CF_Vtbl =
     CF_LockServer
 };
 
-static cf row_server_cf = { &CF_Vtbl, create_row_server };
-static cf row_proxy_cf  = { &CF_Vtbl, create_row_marshal };
-static cf rowset_server_cf = { &CF_Vtbl, create_rowset_server };
-static cf rowset_proxy_cf  = { &CF_Vtbl, create_rowset_marshal };
+static cf row_server_cf = { { &CF_Vtbl }, create_row_server };
+static cf row_proxy_cf  = { { &CF_Vtbl }, create_row_marshal };
+static cf rowset_server_cf = { { &CF_Vtbl }, create_rowset_server };
+static cf rowset_proxy_cf  = { { &CF_Vtbl }, create_rowset_marshal };
 
 /***********************************************************************
  *              DllGetClassObject
@@ -165,4 +172,20 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, LPVOID *obj)
 HRESULT WINAPI DllCanUnloadNow(void)
 {
     return msdaps_DllCanUnloadNow();
+}
+
+/***********************************************************************
+ *                DllRegisterServer
+ */
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return msdaps_DllRegisterServer();
+}
+
+/***********************************************************************
+ *                DllUnregisterServer
+ */
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return msdaps_DllUnregisterServer();
 }

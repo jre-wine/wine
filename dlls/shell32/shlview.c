@@ -312,6 +312,29 @@ static void SetStyle(IShellViewImpl * This, DWORD dwAdd, DWORD dwRemove)
 	SetWindowLongW(This->hWndList, GWL_STYLE, dwAdd | (tmpstyle & ~dwRemove));
 }
 
+static DWORD ViewModeToListStyle(UINT ViewMode)
+{
+	DWORD dwStyle;
+
+	TRACE("%d\n", ViewMode);
+
+	switch (ViewMode)
+	{
+	  case FVM_ICON:	dwStyle = LVS_ICON;		break;
+	  case FVM_DETAILS:	dwStyle = LVS_REPORT;		break;
+	  case FVM_SMALLICON:	dwStyle = LVS_SMALLICON;	break;
+	  case FVM_LIST:	dwStyle = LVS_LIST;		break;
+	  default:
+	  {
+		FIXME("ViewMode %d not implemented\n", ViewMode);
+		dwStyle = LVS_LIST;
+		break;
+	  }
+	}
+
+	return dwStyle;
+}
+
 /**********************************************************
 * ShellView_CreateList()
 *
@@ -326,19 +349,7 @@ static BOOL ShellView_CreateList (IShellViewImpl * This)
 		  LVS_SHAREIMAGELISTS | LVS_EDITLABELS | LVS_ALIGNLEFT | LVS_AUTOARRANGE;
         dwExStyle = WS_EX_CLIENTEDGE;
 
-	switch (This->FolderSettings.ViewMode)
-	{
-	  case FVM_ICON:	dwStyle |= LVS_ICON;		break;
-	  case FVM_DETAILS: 	dwStyle |= LVS_REPORT;		break;
-	  case FVM_SMALLICON: 	dwStyle |= LVS_SMALLICON;	break;
-	  case FVM_LIST: 	dwStyle |= LVS_LIST;		break;
-	  default:
-	  {
-		FIXME("ViewMode %d not implemented\n", This->FolderSettings.ViewMode);
-		dwStyle |= LVS_LIST;
-		break;
-	  }
-	}
+        dwStyle |= ViewModeToListStyle(This->FolderSettings.ViewMode);
 
 	if (This->FolderSettings.fFlags & FWF_AUTOARRANGE)	dwStyle |= LVS_AUTOARRANGE;
 	if (This->FolderSettings.fFlags & FWF_DESKTOP)
@@ -2247,7 +2258,7 @@ static HRESULT WINAPI ISVOleCmdTarget_QueryStatus(
               This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds, pCmdText);
 
     if (!prgCmds)
-        return E_POINTER;
+        return E_INVALIDARG;
     for (i = 0; i < cCmds; i++)
     {
         FIXME("\tprgCmds[%d].cmdID = %d\n", i, prgCmds[i].cmdID);
@@ -2274,6 +2285,8 @@ static HRESULT WINAPI ISVOleCmdTarget_Exec(
 	FIXME("(%p)->(\n\tTarget GUID:%s Command:0x%08x Opt:0x%08x %p %p)\n",
               This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, pvaIn, pvaOut);
 
+	if (!pguidCmdGroup)
+	    return OLECMDERR_E_UNKNOWNGROUP;
 	if (IsEqualIID(pguidCmdGroup, &CGID_Explorer) &&
 	   (nCmdID == 0x29) &&
 	   (nCmdexecopt == 4) && pvaOut)
@@ -2732,16 +2745,38 @@ static ULONG WINAPI IFView_Release( IFolderView *iface)
 
 static HRESULT WINAPI IFView_GetCurrentViewMode(IFolderView *iface, UINT *mode)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%p), stub\n", This, mode);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+    TRACE("(%p)->(%p), stub\n", This, mode);
+
+    if(!mode)
+        return E_INVALIDARG;
+
+    *mode = This->FolderSettings.ViewMode;
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_SetCurrentViewMode(IFolderView *iface, UINT mode)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%u), stub\n", This, mode);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+    DWORD dwStyle;
+    TRACE("(%p)->(%u), stub\n", This, mode);
+
+    if((mode < FVM_FIRST || mode > FVM_LAST) &&
+       (mode != FVM_AUTO))
+        return E_INVALIDARG;
+
+    /* Windows before Vista uses LVM_SETVIEW and possibly
+       LVM_SETEXTENDEDLISTVIEWSTYLE to set the style of the listview,
+       while later versions seem to accomplish this through other
+       means. */
+    dwStyle = ViewModeToListStyle(mode);
+    SetStyle(This, dwStyle, LVS_TYPEMASK);
+
+    /* This will not necessarily be the actual mode set above.
+       This mimics the behavior of Windows XP. */
+    This->FolderSettings.ViewMode = mode;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_GetFolder(IFolderView *iface, REFIID riid, void **ppv)

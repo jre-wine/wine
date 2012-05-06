@@ -1,8 +1,4 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = softpub.dll
-IMPORTS   = wintrust kernel32
+IMPORTS   = wintrust
 
 @MAKE_DLL_RULES@

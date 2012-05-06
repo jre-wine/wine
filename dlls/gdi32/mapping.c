@@ -23,7 +23,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wownt32.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -185,7 +184,8 @@ INT WINAPI SetMapMode( HDC hdc, INT mode )
     default:
         goto done;
     }
-    dc->MapMode = mode;
+    /* RTL layout is always MM_ANISOTROPIC */
+    if (!(dc->layout & LAYOUT_RTL)) dc->MapMode = mode;
     DC_UpdateXforms( dc );
  done:
     release_dc_ptr( dc );

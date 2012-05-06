@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = inetmib1.dll
-IMPORTS   = snmpapi kernel32
+IMPORTS   = snmpapi
 
 C_SRCS = \
 	main.c

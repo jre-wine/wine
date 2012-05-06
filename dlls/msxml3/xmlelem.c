@@ -23,11 +23,16 @@
 #include "config.h"
 
 #include <stdarg.h>
+#ifdef HAVE_LIBXML2
+# include <libxml/parser.h>
+# include <libxml/xmlerror.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 #include "ocidl.h"
 
 #include "wine/debug.h"
@@ -45,7 +50,7 @@ static HRESULT XMLElementCollection_create( IUnknown *pUnkOuter, xmlNodePtr node
  */
 typedef struct _xmlelem
 {
-    const IXMLElementVtbl *lpVtbl;
+    IXMLElement IXMLElement_iface;
     LONG ref;
     xmlNodePtr node;
     BOOL own;
@@ -53,14 +58,14 @@ typedef struct _xmlelem
 
 static inline xmlelem *impl_from_IXMLElement(IXMLElement *iface)
 {
-    return (xmlelem *)((char*)iface - FIELD_OFFSET(xmlelem, lpVtbl));
+    return CONTAINING_RECORD(iface, xmlelem, IXMLElement_iface);
 }
 
 static HRESULT WINAPI xmlelem_QueryInterface(IXMLElement *iface, REFIID riid, void** ppvObject)
 {
     xmlelem *This = impl_from_IXMLElement(iface);
 
-    TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IXMLElement))
@@ -70,6 +75,7 @@ static HRESULT WINAPI xmlelem_QueryInterface(IXMLElement *iface, REFIID riid, vo
     else
     {
         FIXME("interface %s not implemented\n", debugstr_guid(riid));
+        *ppvObject = NULL;
         return E_NOINTERFACE;
     }
 
@@ -165,7 +171,7 @@ static HRESULT WINAPI xmlelem_Invoke(IXMLElement *iface, DISPID dispIdMember,
     hr = get_typeinfo(IXMLElement_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &(This->lpVtbl), dispIdMember, wFlags, pDispParams,
+        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLElement_iface, dispIdMember, wFlags, pDispParams,
                 pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
@@ -177,7 +183,7 @@ static HRESULT WINAPI xmlelem_get_tagName(IXMLElement *iface, BSTR *p)
 {
     xmlelem *This = impl_from_IXMLElement(iface);
 
-    TRACE("(%p, %p)\n", iface, p);
+    TRACE("(%p)->(%p)\n", This, p);
 
     if (!p)
         return E_INVALIDARG;
@@ -192,7 +198,9 @@ static HRESULT WINAPI xmlelem_get_tagName(IXMLElement *iface, BSTR *p)
 
 static HRESULT WINAPI xmlelem_put_tagName(IXMLElement *iface, BSTR p)
 {
-    FIXME("(%p, %p): stub\n", iface, p);
+    xmlelem *This = impl_from_IXMLElement(iface);
+
+    FIXME("(%p)->(%s): stub\n", This, debugstr_w(p));
 
     if (!p)
         return E_INVALIDARG;
@@ -204,7 +212,7 @@ static HRESULT WINAPI xmlelem_get_parent(IXMLElement *iface, IXMLElement **paren
 {
     xmlelem *This = impl_from_IXMLElement(iface);
 
-    TRACE("(%p, %p)\n", iface, parent);
+    TRACE("(%p)->(%p)\n", This, parent);
 
     if (!parent)
         return E_INVALIDARG;
@@ -224,7 +232,7 @@ static HRESULT WINAPI xmlelem_setAttribute(IXMLElement *iface, BSTR strPropertyN
     xmlChar *name, *value;
     xmlAttrPtr attr;
 
-    TRACE("(%p, %s)\n", iface, debugstr_w(strPropertyName));
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(strPropertyName), debugstr_variant(&PropertyValue));
 
     if (!strPropertyName || V_VT(&PropertyValue) != VT_BSTR)
         return E_INVALIDARG;
@@ -245,7 +253,7 @@ static HRESULT WINAPI xmlelem_getAttribute(IXMLElement *iface, BSTR name,
     xmlelem *This = impl_from_IXMLElement(iface);
     xmlChar *val = NULL;
 
-    TRACE("(%p, %s, %p)\n", iface, debugstr_w(name), value);
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_w(name), value);
 
     if (!value)
         return E_INVALIDARG;
@@ -308,7 +316,7 @@ static HRESULT WINAPI xmlelem_removeAttribute(IXMLElement *iface, BSTR strProper
     int res;
     HRESULT hr = S_FALSE;
 
-    TRACE("(%p, %s)\n", iface, debugstr_w(strPropertyName));
+    TRACE("(%p)->(%s)\n", This, debugstr_w(strPropertyName));
 
     if (!strPropertyName)
         return E_INVALIDARG;
@@ -332,7 +340,7 @@ static HRESULT WINAPI xmlelem_get_children(IXMLElement *iface, IXMLElementCollec
 {
     xmlelem *This = impl_from_IXMLElement(iface);
 
-    TRACE("(%p, %p)\n", iface, p);
+    TRACE("(%p)->(%p)\n", This, p);
 
     if (!p)
         return E_INVALIDARG;
@@ -367,7 +375,7 @@ static HRESULT WINAPI xmlelem_get_type(IXMLElement *iface, LONG *p)
 {
     xmlelem *This = impl_from_IXMLElement(iface);
 
-    TRACE("(%p, %p)\n", This, p);
+    TRACE("(%p)->(%p)\n", This, p);
 
     if (!p)
         return E_INVALIDARG;
@@ -382,7 +390,7 @@ static HRESULT WINAPI xmlelem_get_text(IXMLElement *iface, BSTR *p)
     xmlelem *This = impl_from_IXMLElement(iface);
     xmlChar *content;
 
-    TRACE("(%p, %p)\n", iface, p);
+    TRACE("(%p)->(%p)\n", This, p);
 
     if (!p)
         return E_INVALIDARG;
@@ -400,7 +408,7 @@ static HRESULT WINAPI xmlelem_put_text(IXMLElement *iface, BSTR p)
     xmlelem *This = impl_from_IXMLElement(iface);
     xmlChar *content;
 
-    TRACE("(%p, %s)\n", iface, debugstr_w(p));
+    TRACE("(%p)->(%s)\n", This, debugstr_w(p));
 
     /* FIXME: test which types can be used */
     if (This->node->type == XML_ELEMENT_NODE)
@@ -421,7 +429,7 @@ static HRESULT WINAPI xmlelem_addChild(IXMLElement *iface, IXMLElement *pChildEl
     xmlelem *childElem = impl_from_IXMLElement(pChildElem);
     xmlNodePtr child;
 
-    TRACE("(%p, %p, %d, %d)\n", iface, pChildElem, lIndex, lreserved);
+    TRACE("(%p)->(%p %d %d)\n", This, pChildElem, lIndex, lreserved);
 
     if (lIndex == 0)
         child = xmlAddChild(This->node, childElem->node);
@@ -439,7 +447,7 @@ static HRESULT WINAPI xmlelem_removeChild(IXMLElement *iface, IXMLElement *pChil
     xmlelem *This = impl_from_IXMLElement(iface);
     xmlelem *childElem = impl_from_IXMLElement(pChildElem);
 
-    TRACE("(%p, %p)\n", This, childElem);
+    TRACE("(%p)->(%p)\n", This, childElem);
 
     if (!pChildElem)
         return E_INVALIDARG;
@@ -493,12 +501,12 @@ HRESULT XMLElement_create(IUnknown *pUnkOuter, xmlNodePtr node, LPVOID *ppObj, B
     if(!elem)
         return E_OUTOFMEMORY;
 
-    elem->lpVtbl = &xmlelem_vtbl;
+    elem->IXMLElement_iface.lpVtbl = &xmlelem_vtbl;
     elem->ref = 1;
     elem->node = node;
     elem->own  = own;
 
-    *ppObj = &elem->lpVtbl;
+    *ppObj = &elem->IXMLElement_iface;
 
     TRACE("returning iface %p\n", *ppObj);
     return S_OK;
@@ -509,8 +517,8 @@ HRESULT XMLElement_create(IUnknown *pUnkOuter, xmlNodePtr node, LPVOID *ppObj, B
  */
 typedef struct _xmlelem_collection
 {
-    const IXMLElementCollectionVtbl *lpVtbl;
-    const IEnumVARIANTVtbl          *lpvtblIEnumVARIANT;
+    IXMLElementCollection IXMLElementCollection_iface;
+    IEnumVARIANT IEnumVARIANT_iface;
     LONG ref;
     LONG length;
     xmlNodePtr node;
@@ -534,19 +542,19 @@ static inline LONG xmlelem_collection_updatelength(xmlelem_collection *collectio
 
 static inline xmlelem_collection *impl_from_IXMLElementCollection(IXMLElementCollection *iface)
 {
-    return (xmlelem_collection *)((char*)iface - FIELD_OFFSET(xmlelem_collection, lpVtbl));
+    return CONTAINING_RECORD(iface, xmlelem_collection, IXMLElementCollection_iface);
 }
 
 static inline xmlelem_collection *impl_from_IEnumVARIANT(IEnumVARIANT *iface)
 {
-    return (xmlelem_collection *)((char*)iface - FIELD_OFFSET(xmlelem_collection, lpvtblIEnumVARIANT));
+    return CONTAINING_RECORD(iface, xmlelem_collection, IEnumVARIANT_iface);
 }
 
 static HRESULT WINAPI xmlelem_collection_QueryInterface(IXMLElementCollection *iface, REFIID riid, void** ppvObject)
 {
     xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
 
-    TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IXMLElementCollection))
@@ -555,7 +563,7 @@ static HRESULT WINAPI xmlelem_collection_QueryInterface(IXMLElementCollection *i
     }
     else if (IsEqualGUID(riid, &IID_IEnumVARIANT))
     {
-        *ppvObject = &(This->lpvtblIEnumVARIANT);
+        *ppvObject = &This->IEnumVARIANT_iface;
     }
     else
     {
@@ -571,7 +579,7 @@ static HRESULT WINAPI xmlelem_collection_QueryInterface(IXMLElementCollection *i
 static ULONG WINAPI xmlelem_collection_AddRef(IXMLElementCollection *iface)
 {
     xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
-    TRACE("%p\n", This);
+    TRACE("(%p)\n", This);
     return InterlockedIncrement(&This->ref);
 }
 
@@ -580,7 +588,7 @@ static ULONG WINAPI xmlelem_collection_Release(IXMLElementCollection *iface)
     xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
     LONG ref;
 
-    TRACE("%p\n", This);
+    TRACE("(%p)\n", This);
 
     ref = InterlockedDecrement(&This->ref);
     if (ref == 0)
@@ -623,7 +631,8 @@ static HRESULT WINAPI xmlelem_collection_Invoke(IXMLElementCollection *iface, DI
 
 static HRESULT WINAPI xmlelem_collection_put_length(IXMLElementCollection *iface, LONG v)
 {
-    TRACE("(%p, %d)\n", iface, v);
+    xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
+    TRACE("(%p)->(%d)\n", This, v);
     return E_FAIL;
 }
 
@@ -631,7 +640,7 @@ static HRESULT WINAPI xmlelem_collection_get_length(IXMLElementCollection *iface
 {
     xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
 
-    TRACE("(%p, %p)\n", iface, p);
+    TRACE("(%p)->(%p)\n", This, p);
 
     if (!p)
         return E_INVALIDARG;
@@ -644,7 +653,7 @@ static HRESULT WINAPI xmlelem_collection_get__newEnum(IXMLElementCollection *ifa
 {
     xmlelem_collection *This = impl_from_IXMLElementCollection(iface);
 
-    TRACE("(%p, %p)\n", iface, ppUnk);
+    TRACE("(%p)->(%p)\n", This, ppUnk);
 
     if (!ppUnk)
         return E_INVALIDARG;
@@ -661,7 +670,7 @@ static HRESULT WINAPI xmlelem_collection_item(IXMLElementCollection *iface, VARI
     xmlNodePtr ptr = This->node->children;
     int index, i;
 
-    TRACE("(%p, %p)\n", iface, ppDisp);
+    TRACE("(%p)->(%s %s %p)\n", This, debugstr_variant(&var1), debugstr_variant(&var2), ppDisp);
 
     if (!ppDisp)
         return E_INVALIDARG;
@@ -727,7 +736,7 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Next(
     xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
     xmlNodePtr ptr = This->current;
 
-    TRACE("(%p, %d, %p, %p)\n", iface, celt, rgVar, fetched);
+    TRACE("(%p)->(%d %p %p)\n", This, celt, rgVar, fetched);
 
     if (!rgVar)
         return E_INVALIDARG;
@@ -752,7 +761,8 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Next(
 static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Skip(
     IEnumVARIANT *iface, ULONG celt)
 {
-    FIXME("(%p, %d): stub\n", iface, celt);
+    xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%d): stub\n", This, celt);
     return E_NOTIMPL;
 }
 
@@ -760,6 +770,7 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Reset(
     IEnumVARIANT *iface)
 {
     xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
+    TRACE("(%p)\n", This);
     This->current = This->node->children;
     return S_OK;
 }
@@ -767,7 +778,8 @@ static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Reset(
 static HRESULT WINAPI xmlelem_collection_IEnumVARIANT_Clone(
     IEnumVARIANT *iface, IEnumVARIANT **ppEnum)
 {
-    FIXME("(%p, %p): stub\n", iface, ppEnum);
+    xmlelem_collection *This = impl_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p): stub\n", This, ppEnum);
     return E_NOTIMPL;
 }
 
@@ -797,15 +809,15 @@ static HRESULT XMLElementCollection_create(IUnknown *pUnkOuter, xmlNodePtr node,
     if(!collection)
         return E_OUTOFMEMORY;
 
-    collection->lpVtbl = &xmlelem_collection_vtbl;
-    collection->lpvtblIEnumVARIANT = &xmlelem_collection_IEnumVARIANTvtbl;
+    collection->IXMLElementCollection_iface.lpVtbl = &xmlelem_collection_vtbl;
+    collection->IEnumVARIANT_iface.lpVtbl = &xmlelem_collection_IEnumVARIANTvtbl;
     collection->ref = 1;
     collection->length = 0;
     collection->node = node;
     collection->current = node->children;
     xmlelem_collection_updatelength(collection);
 
-    *ppObj = &collection->lpVtbl;
+    *ppObj = &collection->IXMLElementCollection_iface;
 
     TRACE("returning iface %p\n", *ppObj);
     return S_OK;

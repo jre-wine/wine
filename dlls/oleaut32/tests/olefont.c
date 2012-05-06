@@ -112,6 +112,7 @@ static void test_ifont_sizes(LONG lo_size, LONG hi_size,
 	ok(hres == S_OK, "%s: IFont_get_hFont returns 0x%08x instead of S_OK.\n",
 		test_name, hres);
 	hres = GetObject (hfont, sizeof(LOGFONT), &lf);
+        ok(hres == OBJ_FONT, "got obj type %d\n", hres);
 	ok(lf.lfHeight == hfont_height,
 		"%s: hFont has lf.lfHeight=%d, expected %d.\n",
 		test_name, lf.lfHeight, hfont_height);
@@ -126,6 +127,9 @@ static void test_QueryInterface(void)
         HRESULT hres;
         IFont*  font = NULL;
         LONG ret;
+
+        hres = pOleCreateFontIndirect(NULL, &IID_IFont, NULL);
+        ok(hres == E_POINTER, "got 0x%08x\n", hres);
 
         hres = pOleCreateFontIndirect(NULL, &IID_IFont, &pvObj);
         font = pvObj;
@@ -312,6 +316,7 @@ static void test_font_events_disp(void)
     dispparams.cArgs = 1;
     dispparams.rgvarg = &vararg;
     hr = IFontDisp_Invoke(pFontDisp, DISPID_FONT_BOLD, &IID_NULL, 0, DISPATCH_PROPERTYPUT, &dispparams, NULL, NULL, NULL);
+    ok(hr == S_OK, "IFontDisp_Invoke return 0x%08x instead of S_OK.\n", hr);
 
     IFontDisp_Release(pFontDisp);
 

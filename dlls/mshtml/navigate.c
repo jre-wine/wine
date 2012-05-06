@@ -1,5 +1,5 @@
 /*
- * Copyright 2006-2007 Jacek Caban for CodeWeavers
+ * Copyright 2006-2010 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,15 +45,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define UTF16_STR "utf-16"
 
 typedef struct {
-    const nsIInputStreamVtbl *lpInputStreamVtbl;
+    nsIInputStream nsIInputStream_iface;
 
     LONG ref;
 
     char buf[1024];
     DWORD buf_size;
 } nsProtocolStream;
-
-#define NSINSTREAM(x) ((nsIInputStream*) &(x)->lpInputStreamVtbl)
 
 typedef struct {
     void (*destroy)(BSCallback*);
@@ -63,13 +61,14 @@ typedef struct {
     HRESULT (*read_data)(BSCallback*,IStream*);
     HRESULT (*on_progress)(BSCallback*,ULONG,LPCWSTR);
     HRESULT (*on_response)(BSCallback*,DWORD,LPCWSTR);
+    HRESULT (*beginning_transaction)(BSCallback*,WCHAR**);
 } BSCallbackVtbl;
 
 struct BSCallback {
-    const IBindStatusCallbackVtbl *lpBindStatusCallbackVtbl;
-    const IServiceProviderVtbl    *lpServiceProviderVtbl;
-    const IHttpNegotiate2Vtbl     *lpHttpNegotiate2Vtbl;
-    const IInternetBindInfoVtbl   *lpInternetBindInfoVtbl;
+    IBindStatusCallback IBindStatusCallback_iface;
+    IServiceProvider    IServiceProvider_iface;
+    IHttpNegotiate2     IHttpNegotiate2_iface;
+    IInternetBindInfo   IInternetBindInfo_iface;
 
     const BSCallbackVtbl          *vtbl;
 
@@ -90,25 +89,28 @@ struct BSCallback {
     struct list entry;
 };
 
-#define NSINSTREAM_THIS(iface) DEFINE_THIS(nsProtocolStream, InputStream, iface)
+static inline nsProtocolStream *impl_from_nsIInputStream(nsIInputStream *iface)
+{
+    return CONTAINING_RECORD(iface, nsProtocolStream, nsIInputStream_iface);
+}
 
 static nsresult NSAPI nsInputStream_QueryInterface(nsIInputStream *iface, nsIIDRef riid,
-                                                   nsQIResult result)
+        void **result)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
 
     *result = NULL;
 
     if(IsEqualGUID(&IID_nsISupports, riid)) {
         TRACE("(%p)->(IID_nsISupports %p)\n", This, result);
-        *result  = NSINSTREAM(This);
+        *result  = &This->nsIInputStream_iface;
     }else if(IsEqualGUID(&IID_nsIInputStream, riid)) {
         TRACE("(%p)->(IID_nsIInputStream %p)\n", This, result);
-        *result  = NSINSTREAM(This);
+        *result  = &This->nsIInputStream_iface;
     }
 
     if(*result) {
-        nsIInputStream_AddRef(NSINSTREAM(This));
+        nsIInputStream_AddRef(&This->nsIInputStream_iface);
         return NS_OK;
     }
 
@@ -118,7 +120,7 @@ static nsresult NSAPI nsInputStream_QueryInterface(nsIInputStream *iface, nsIIDR
 
 static nsrefcnt NSAPI nsInputStream_AddRef(nsIInputStream *iface)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref=%d\n", This, ref);
@@ -129,7 +131,7 @@ static nsrefcnt NSAPI nsInputStream_AddRef(nsIInputStream *iface)
 
 static nsrefcnt NSAPI nsInputStream_Release(nsIInputStream *iface)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref=%d\n", This, ref);
@@ -142,14 +144,14 @@ static nsrefcnt NSAPI nsInputStream_Release(nsIInputStream *iface)
 
 static nsresult NSAPI nsInputStream_Close(nsIInputStream *iface)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     FIXME("(%p)\n", This);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 static nsresult NSAPI nsInputStream_Available(nsIInputStream *iface, PRUint32 *_retval)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     FIXME("(%p)->(%p)\n", This, _retval);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -157,7 +159,7 @@ static nsresult NSAPI nsInputStream_Available(nsIInputStream *iface, PRUint32 *_
 static nsresult NSAPI nsInputStream_Read(nsIInputStream *iface, char *aBuf, PRUint32 aCount,
                                          PRUint32 *_retval)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     DWORD read = aCount;
 
     TRACE("(%p)->(%p %d %p)\n", This, aBuf, aCount, _retval);
@@ -180,7 +182,7 @@ static nsresult NSAPI nsInputStream_ReadSegments(nsIInputStream *iface,
         nsresult (WINAPI *aWriter)(nsIInputStream*,void*,const char*,PRUint32,PRUint32,PRUint32*),
         void *aClousure, PRUint32 aCount, PRUint32 *_retval)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     PRUint32 written = 0;
     nsresult nsres;
 
@@ -192,7 +194,7 @@ static nsresult NSAPI nsInputStream_ReadSegments(nsIInputStream *iface,
     if(aCount > This->buf_size)
         aCount = This->buf_size;
 
-    nsres = aWriter(NSINSTREAM(This), aClousure, This->buf, 0, aCount, &written);
+    nsres = aWriter(&This->nsIInputStream_iface, aClousure, This->buf, 0, aCount, &written);
     if(NS_FAILED(nsres))
         TRACE("aWritter failed: %08x\n", nsres);
     else if(written != This->buf_size)
@@ -206,12 +208,10 @@ static nsresult NSAPI nsInputStream_ReadSegments(nsIInputStream *iface,
 
 static nsresult NSAPI nsInputStream_IsNonBlocking(nsIInputStream *iface, PRBool *_retval)
 {
-    nsProtocolStream *This = NSINSTREAM_THIS(iface);
+    nsProtocolStream *This = impl_from_nsIInputStream(iface);
     FIXME("(%p)->(%p)\n", This, _retval);
     return NS_ERROR_NOT_IMPLEMENTED;
 }
-
-#undef NSINSTREAM_THIS
 
 static const nsIInputStreamVtbl nsInputStreamVtbl = {
     nsInputStream_QueryInterface,
@@ -228,43 +228,46 @@ static nsProtocolStream *create_nsprotocol_stream(void)
 {
     nsProtocolStream *ret = heap_alloc(sizeof(nsProtocolStream));
 
-    ret->lpInputStreamVtbl = &nsInputStreamVtbl;
+    ret->nsIInputStream_iface.lpVtbl = &nsInputStreamVtbl;
     ret->ref = 1;
     ret->buf_size = 0;
 
     return ret;
 }
 
-#define STATUSCLB_THIS(iface) DEFINE_THIS(BSCallback, BindStatusCallback, iface)
+static inline BSCallback *impl_from_IBindStatusCallback(IBindStatusCallback *iface)
+{
+    return CONTAINING_RECORD(iface, BSCallback, IBindStatusCallback_iface);
+}
 
 static HRESULT WINAPI BindStatusCallback_QueryInterface(IBindStatusCallback *iface,
         REFIID riid, void **ppv)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
 
     *ppv = NULL;
     if(IsEqualGUID(&IID_IUnknown, riid)) {
         TRACE("(%p)->(IID_IUnknown, %p)\n", This, ppv);
-        *ppv = STATUSCLB(This);
+        *ppv = &This->IBindStatusCallback_iface;
     }else if(IsEqualGUID(&IID_IBindStatusCallback, riid)) {
         TRACE("(%p)->(IID_IBindStatusCallback, %p)\n", This, ppv);
-        *ppv = STATUSCLB(This);
+        *ppv = &This->IBindStatusCallback_iface;
     }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
         TRACE("(%p)->(IID_IServiceProvider %p)\n", This, ppv);
-        *ppv = SERVPROV(This);
+        *ppv = &This->IServiceProvider_iface;
     }else if(IsEqualGUID(&IID_IHttpNegotiate, riid)) {
         TRACE("(%p)->(IID_IHttpNegotiate %p)\n", This, ppv);
-        *ppv = HTTPNEG(This);
+        *ppv = &This->IHttpNegotiate2_iface;
     }else if(IsEqualGUID(&IID_IHttpNegotiate2, riid)) {
         TRACE("(%p)->(IID_IHttpNegotiate2 %p)\n", This, ppv);
-        *ppv = HTTPNEG(This);
+        *ppv = &This->IHttpNegotiate2_iface;
     }else if(IsEqualGUID(&IID_IInternetBindInfo, riid)) {
         TRACE("(%p)->(IID_IInternetBindInfo %p)\n", This, ppv);
-        *ppv = BINDINFO(This);
+        *ppv = &This->IInternetBindInfo_iface;
     }
 
     if(*ppv) {
-        IBindStatusCallback_AddRef(STATUSCLB(This));
+        IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
         return S_OK;
     }
 
@@ -274,7 +277,7 @@ static HRESULT WINAPI BindStatusCallback_QueryInterface(IBindStatusCallback *ifa
 
 static ULONG WINAPI BindStatusCallback_AddRef(IBindStatusCallback *iface)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     LONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) ref = %d\n", This, ref);
@@ -284,7 +287,7 @@ static ULONG WINAPI BindStatusCallback_AddRef(IBindStatusCallback *iface)
 
 static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     LONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) ref = %d\n", This, ref);
@@ -297,6 +300,7 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
         if(This->binding)
             IBinding_Release(This->binding);
         list_remove(&This->entry);
+        list_init(&This->entry);
         heap_free(This->headers);
 
         This->vtbl->destroy(This);
@@ -308,7 +312,7 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
 static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallback *iface,
         DWORD dwReserved, IBinding *pbind)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
 
     TRACE("(%p)->(%d %p)\n", This, dwReserved, pbind);
 
@@ -323,14 +327,14 @@ static HRESULT WINAPI BindStatusCallback_OnStartBinding(IBindStatusCallback *ifa
 
 static HRESULT WINAPI BindStatusCallback_GetPriority(IBindStatusCallback *iface, LONG *pnPriority)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     FIXME("(%p)->(%p)\n", This, pnPriority);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI BindStatusCallback_OnLowResource(IBindStatusCallback *iface, DWORD reserved)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     FIXME("(%p)->(%d)\n", This, reserved);
     return E_NOTIMPL;
 }
@@ -338,7 +342,7 @@ static HRESULT WINAPI BindStatusCallback_OnLowResource(IBindStatusCallback *ifac
 static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallback *iface, ULONG ulProgress,
         ULONG ulProgressMax, ULONG ulStatusCode, LPCWSTR szStatusText)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
 
     TRACE("%p)->(%u %u %u %s)\n", This, ulProgress, ulProgressMax, ulStatusCode,
             debugstr_w(szStatusText));
@@ -349,7 +353,7 @@ static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallback *iface, 
 static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *iface,
         HRESULT hresult, LPCWSTR szError)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     HRESULT hres;
 
     TRACE("(%p)->(%08x %s)\n", This, hresult, debugstr_w(szError));
@@ -364,6 +368,7 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
     }
 
     list_remove(&This->entry);
+    list_init(&This->entry);
     This->doc = NULL;
 
     return hres;
@@ -372,7 +377,7 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
 static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
         DWORD *grfBINDF, BINDINFO *pbindinfo)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     DWORD size;
 
     TRACE("(%p)->(%p %p)\n", This, grfBINDF, pbindinfo);
@@ -402,8 +407,8 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
 
         pbindinfo->stgmedData.tymed = TYMED_HGLOBAL;
         pbindinfo->stgmedData.u.hGlobal = This->post_data;
-        pbindinfo->stgmedData.pUnkForRelease = (IUnknown*)STATUSCLB(This);
-        IBindStatusCallback_AddRef(STATUSCLB(This));
+        pbindinfo->stgmedData.pUnkForRelease = (IUnknown*)&This->IBindStatusCallback_iface;
+        IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
     }
 
     return S_OK;
@@ -412,7 +417,7 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
 static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *iface,
         DWORD grfBSCF, DWORD dwSize, FORMATETC *pformatetc, STGMEDIUM *pstgmed)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
 
     TRACE("(%p)->(%08x %d %p %p)\n", This, grfBSCF, dwSize, pformatetc, pstgmed);
 
@@ -422,12 +427,10 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
 static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *iface,
         REFIID riid, IUnknown *punk)
 {
-    BSCallback *This = STATUSCLB_THIS(iface);
+    BSCallback *This = impl_from_IBindStatusCallback(iface);
     FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), punk);
     return E_NOTIMPL;
 }
-
-#undef STATUSCLB_THIS
 
 static const IBindStatusCallbackVtbl BindStatusCallbackVtbl = {
     BindStatusCallback_QueryInterface,
@@ -443,44 +446,54 @@ static const IBindStatusCallbackVtbl BindStatusCallbackVtbl = {
     BindStatusCallback_OnObjectAvailable
 };
 
-#define HTTPNEG_THIS(iface) DEFINE_THIS(BSCallback, HttpNegotiate2, iface)
+static inline BSCallback *impl_from_IHttpNegotiate2(IHttpNegotiate2 *iface)
+{
+    return CONTAINING_RECORD(iface, BSCallback, IHttpNegotiate2_iface);
+}
 
 static HRESULT WINAPI HttpNegotiate_QueryInterface(IHttpNegotiate2 *iface,
                                                    REFIID riid, void **ppv)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
-    return IBindStatusCallback_QueryInterface(STATUSCLB(This), riid, ppv);
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
+    return IBindStatusCallback_QueryInterface(&This->IBindStatusCallback_iface, riid, ppv);
 }
 
 static ULONG WINAPI HttpNegotiate_AddRef(IHttpNegotiate2 *iface)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
-    return IBindStatusCallback_AddRef(STATUSCLB(This));
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
+    return IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
 }
 
 static ULONG WINAPI HttpNegotiate_Release(IHttpNegotiate2 *iface)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
-    return IBindStatusCallback_Release(STATUSCLB(This));
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
+    return IBindStatusCallback_Release(&This->IBindStatusCallback_iface);
 }
 
 static HRESULT WINAPI HttpNegotiate_BeginningTransaction(IHttpNegotiate2 *iface,
         LPCWSTR szURL, LPCWSTR szHeaders, DWORD dwReserved, LPWSTR *pszAdditionalHeaders)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
-    DWORD size;
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
+    HRESULT hres;
 
     TRACE("(%p)->(%s %s %d %p)\n", This, debugstr_w(szURL), debugstr_w(szHeaders),
           dwReserved, pszAdditionalHeaders);
 
-    if(!This->headers) {
-        *pszAdditionalHeaders = NULL;
-        return S_OK;
-    }
+    *pszAdditionalHeaders = NULL;
 
-    size = (strlenW(This->headers)+1)*sizeof(WCHAR);
-    *pszAdditionalHeaders = CoTaskMemAlloc(size);
-    memcpy(*pszAdditionalHeaders, This->headers, size);
+    hres = This->vtbl->beginning_transaction(This, pszAdditionalHeaders);
+    if(hres != S_FALSE)
+        return hres;
+
+    if(This->headers) {
+        DWORD size;
+
+        size = (strlenW(This->headers)+1)*sizeof(WCHAR);
+        *pszAdditionalHeaders = CoTaskMemAlloc(size);
+        if(!*pszAdditionalHeaders)
+            return E_OUTOFMEMORY;
+        memcpy(*pszAdditionalHeaders, This->headers, size);
+    }
 
     return S_OK;
 }
@@ -488,7 +501,7 @@ static HRESULT WINAPI HttpNegotiate_BeginningTransaction(IHttpNegotiate2 *iface,
 static HRESULT WINAPI HttpNegotiate_OnResponse(IHttpNegotiate2 *iface, DWORD dwResponseCode,
         LPCWSTR szResponseHeaders, LPCWSTR szRequestHeaders, LPWSTR *pszAdditionalRequestHeaders)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
 
     TRACE("(%p)->(%d %s %s %p)\n", This, dwResponseCode, debugstr_w(szResponseHeaders),
           debugstr_w(szRequestHeaders), pszAdditionalRequestHeaders);
@@ -499,12 +512,10 @@ static HRESULT WINAPI HttpNegotiate_OnResponse(IHttpNegotiate2 *iface, DWORD dwR
 static HRESULT WINAPI HttpNegotiate_GetRootSecurityId(IHttpNegotiate2 *iface,
         BYTE *pbSecurityId, DWORD *pcbSecurityId, DWORD_PTR dwReserved)
 {
-    BSCallback *This = HTTPNEG_THIS(iface);
+    BSCallback *This = impl_from_IHttpNegotiate2(iface);
     FIXME("(%p)->(%p %p %ld)\n", This, pbSecurityId, pcbSecurityId, dwReserved);
     return E_NOTIMPL;
 }
-
-#undef HTTPNEG
 
 static const IHttpNegotiate2Vtbl HttpNegotiate2Vtbl = {
     HttpNegotiate_QueryInterface,
@@ -515,31 +526,34 @@ static const IHttpNegotiate2Vtbl HttpNegotiate2Vtbl = {
     HttpNegotiate_GetRootSecurityId
 };
 
-#define BINDINFO_THIS(iface) DEFINE_THIS(BSCallback, InternetBindInfo, iface)
+static inline BSCallback *impl_from_IInternetBindInfo(IInternetBindInfo *iface)
+{
+    return CONTAINING_RECORD(iface, BSCallback, IInternetBindInfo_iface);
+}
 
 static HRESULT WINAPI InternetBindInfo_QueryInterface(IInternetBindInfo *iface,
                                                       REFIID riid, void **ppv)
 {
-    BSCallback *This = BINDINFO_THIS(iface);
-    return IBindStatusCallback_QueryInterface(STATUSCLB(This), riid, ppv);
+    BSCallback *This = impl_from_IInternetBindInfo(iface);
+    return IBindStatusCallback_QueryInterface(&This->IBindStatusCallback_iface, riid, ppv);
 }
 
 static ULONG WINAPI InternetBindInfo_AddRef(IInternetBindInfo *iface)
 {
-    BSCallback *This = BINDINFO_THIS(iface);
-    return IBindStatusCallback_AddRef(STATUSCLB(This));
+    BSCallback *This = impl_from_IInternetBindInfo(iface);
+    return IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
 }
 
 static ULONG WINAPI InternetBindInfo_Release(IInternetBindInfo *iface)
 {
-    BSCallback *This = BINDINFO_THIS(iface);
-    return IBindStatusCallback_Release(STATUSCLB(This));
+    BSCallback *This = impl_from_IInternetBindInfo(iface);
+    return IBindStatusCallback_Release(&This->IBindStatusCallback_iface);
 }
 
 static HRESULT WINAPI InternetBindInfo_GetBindInfo(IInternetBindInfo *iface,
                                                    DWORD *grfBINDF, BINDINFO *pbindinfo)
 {
-    BSCallback *This = BINDINFO_THIS(iface);
+    BSCallback *This = impl_from_IInternetBindInfo(iface);
     FIXME("(%p)->(%p %p)\n", This, grfBINDF, pbindinfo);
     return E_NOTIMPL;
 }
@@ -547,12 +561,10 @@ static HRESULT WINAPI InternetBindInfo_GetBindInfo(IInternetBindInfo *iface,
 static HRESULT WINAPI InternetBindInfo_GetBindString(IInternetBindInfo *iface,
         ULONG ulStringType, LPOLESTR *ppwzStr, ULONG cEl, ULONG *pcElFetched)
 {
-    BSCallback *This = BINDINFO_THIS(iface);
+    BSCallback *This = impl_from_IInternetBindInfo(iface);
     FIXME("(%p)->(%u %p %u %p)\n", This, ulStringType, ppwzStr, cEl, pcElFetched);
     return E_NOTIMPL;
 }
-
-#undef BINDINFO_THIS
 
 static const IInternetBindInfoVtbl InternetBindInfoVtbl = {
     InternetBindInfo_QueryInterface,
@@ -562,36 +574,37 @@ static const IInternetBindInfoVtbl InternetBindInfoVtbl = {
     InternetBindInfo_GetBindString
 };
 
-#define SERVPROV_THIS(iface) DEFINE_THIS(BSCallback, ServiceProvider, iface)
+static inline BSCallback *impl_from_IServiceProvider(IServiceProvider *iface)
+{
+    return CONTAINING_RECORD(iface, BSCallback, IServiceProvider_iface);
+}
 
 static HRESULT WINAPI BSCServiceProvider_QueryInterface(IServiceProvider *iface,
                                                         REFIID riid, void **ppv)
 {
-    BSCallback *This = SERVPROV_THIS(iface);
-    return IBindStatusCallback_QueryInterface(STATUSCLB(This), riid, ppv);
+    BSCallback *This = impl_from_IServiceProvider(iface);
+    return IBindStatusCallback_QueryInterface(&This->IBindStatusCallback_iface, riid, ppv);
 }
 
 static ULONG WINAPI BSCServiceProvider_AddRef(IServiceProvider *iface)
 {
-    BSCallback *This = SERVPROV_THIS(iface);
-    return IBindStatusCallback_AddRef(STATUSCLB(This));
+    BSCallback *This = impl_from_IServiceProvider(iface);
+    return IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
 }
 
 static ULONG WINAPI BSCServiceProvider_Release(IServiceProvider *iface)
 {
-    BSCallback *This = SERVPROV_THIS(iface);
-    return IBindStatusCallback_Release(STATUSCLB(This));
+    BSCallback *This = impl_from_IServiceProvider(iface);
+    return IBindStatusCallback_Release(&This->IBindStatusCallback_iface);
 }
 
 static HRESULT WINAPI BSCServiceProvider_QueryService(IServiceProvider *iface,
         REFGUID guidService, REFIID riid, void **ppv)
 {
-    BSCallback *This = SERVPROV_THIS(iface);
+    BSCallback *This = impl_from_IServiceProvider(iface);
     TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
     return E_NOINTERFACE;
 }
-
-#undef SERVPROV_THIS
 
 static const IServiceProviderVtbl ServiceProviderVtbl = {
     BSCServiceProvider_QueryInterface,
@@ -602,10 +615,10 @@ static const IServiceProviderVtbl ServiceProviderVtbl = {
 
 static void init_bscallback(BSCallback *This, const BSCallbackVtbl *vtbl, IMoniker *mon, DWORD bindf)
 {
-    This->lpBindStatusCallbackVtbl = &BindStatusCallbackVtbl;
-    This->lpServiceProviderVtbl    = &ServiceProviderVtbl;
-    This->lpHttpNegotiate2Vtbl     = &HttpNegotiate2Vtbl;
-    This->lpInternetBindInfoVtbl   = &InternetBindInfoVtbl;
+    This->IBindStatusCallback_iface.lpVtbl = &BindStatusCallbackVtbl;
+    This->IServiceProvider_iface.lpVtbl = &ServiceProviderVtbl;
+    This->IHttpNegotiate2_iface.lpVtbl = &HttpNegotiate2Vtbl;
+    This->IInternetBindInfo_iface.lpVtbl = &InternetBindInfoVtbl;
     This->vtbl = vtbl;
     This->ref = 1;
     This->bindf = bindf;
@@ -638,74 +651,64 @@ static void call_docview_84(HTMLDocumentObj *doc)
         FIXME("handle result\n");
 }
 
-static void parse_post_data(nsIInputStream *post_data_stream, LPWSTR *headers_ret,
-                            HGLOBAL *post_data_ret, ULONG *post_data_len_ret)
+static HRESULT parse_headers(const WCHAR *headers, struct list *headers_list)
 {
-    PRUint32 post_data_len = 0, available = 0;
-    HGLOBAL post_data = NULL;
-    LPWSTR headers = NULL;
-    DWORD headers_len = 0, len;
-    const char *ptr, *ptr2, *post_data_end;
+    const WCHAR *header, *header_end, *colon, *value;
+    HRESULT hres;
 
-    nsIInputStream_Available(post_data_stream, &available);
-    post_data = GlobalAlloc(0, available+1);
-    nsIInputStream_Read(post_data_stream, post_data, available, &post_data_len);
-    
-    TRACE("post_data = %s\n", debugstr_an(post_data, post_data_len));
+    header = headers;
+    while(*header) {
+        if(header[0] == '\r' && header[1] == '\n' && !header[2])
+            break;
+        for(colon = header; *colon && *colon != ':' && *colon != '\r'; colon++);
+        if(*colon != ':')
+            return E_FAIL;
 
-    ptr = ptr2 = post_data;
-    post_data_end = (const char*)post_data+post_data_len;
+        value = colon+1;
+        while(*value == ' ')
+            value++;
+        if(!*value)
+            return E_FAIL;
 
-    while(ptr < post_data_end && (*ptr != '\r' || ptr[1] != '\n')) {
-        while(ptr < post_data_end && (*ptr != '\r' || ptr[1] != '\n'))
-            ptr++;
+        for(header_end = value+1; *header_end && *header_end != '\r'; header_end++);
 
-        if(!*ptr) {
-            FIXME("*ptr = 0\n");
-            return;
-        }
+        hres = set_http_header(headers_list, header, colon-header, value, header_end-value);
+        if(FAILED(hres))
+            return hres;
 
-        ptr += 2;
-
-        if(ptr-ptr2 >= sizeof(CONTENT_LENGTH)
-           && CompareStringA(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
-                             CONTENT_LENGTH, sizeof(CONTENT_LENGTH)-1,
-                             ptr2, sizeof(CONTENT_LENGTH)-1) == CSTR_EQUAL) {
-            ptr2 = ptr;
-            continue;
-        }
-
-        len = MultiByteToWideChar(CP_ACP, 0, ptr2, ptr-ptr2, NULL, 0);
-
-        if(headers)
-            headers = heap_realloc(headers,(headers_len+len+1)*sizeof(WCHAR));
-        else
-            headers = heap_alloc((len+1)*sizeof(WCHAR));
-
-        len = MultiByteToWideChar(CP_ACP, 0, ptr2, ptr-ptr2, headers+headers_len, len);
-        headers_len += len;
-
-        ptr2 = ptr;
+        header = header_end;
+        if(header[0] == '\r' && header[1] == '\n')
+            header += 2;
     }
 
-    headers[headers_len] = 0;
-    *headers_ret = headers;
+    return S_OK;
+}
 
-    if(ptr >= post_data_end-2) {
-        GlobalFree(post_data);
-        return;
+static HRESULT read_post_data_stream(nsIInputStream *stream, HGLOBAL *post_data,
+        ULONG *post_data_len)
+{
+    PRUint32 data_len = 0, available = 0;
+    char *data;
+    nsresult nsres;
+
+    nsres =  nsIInputStream_Available(stream, &available);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    data = GlobalAlloc(0, available+1);
+    if(!data)
+        return E_OUTOFMEMORY;
+
+    nsres = nsIInputStream_Read(stream, data, available, &data_len);
+    if(NS_FAILED(nsres)) {
+        GlobalFree(data);
+        return E_FAIL;
     }
 
-    ptr += 2;
-
-    if(headers_len) {
-        post_data_len -= ptr-(const char*)post_data;
-        memmove(post_data, ptr, post_data_len);
-        post_data = GlobalReAlloc(post_data, post_data_len+1, 0);
-    }
-
-    *post_data_ret = post_data;
-    *post_data_len_ret = post_data_len;
+    data[data_len] = 0;
+    *post_data = data;
+    *post_data_len = data_len;
+    return S_OK;
 }
 
 HRESULT start_binding(HTMLWindow *window, HTMLDocumentNode *doc, BSCallback *bscallback, IBindCtx *bctx)
@@ -724,10 +727,10 @@ HRESULT start_binding(HTMLWindow *window, HTMLDocumentNode *doc, BSCallback *bsc
     }
 
     if(bctx) {
-        RegisterBindStatusCallback(bctx, STATUSCLB(bscallback), NULL, 0);
+        RegisterBindStatusCallback(bctx, &bscallback->IBindStatusCallback_iface, NULL, 0);
         IBindCtx_AddRef(bctx);
     }else {
-        hres = CreateAsyncBindCtx(0, STATUSCLB(bscallback), NULL, &bctx);
+        hres = CreateAsyncBindCtx(0, &bscallback->IBindStatusCallback_iface, NULL, &bctx);
         if(FAILED(hres)) {
             WARN("CreateAsyncBindCtx failed: %08x\n", hres);
             bscallback->vtbl->stop_binding(bscallback, hres);
@@ -760,11 +763,14 @@ typedef struct {
     HRESULT hres;
 } BufferBSC;
 
-#define BUFFERBSC_THIS(bsc) ((BufferBSC*) bsc)
+static inline BufferBSC *BufferBSC_from_BSCallback(BSCallback *iface)
+{
+    return CONTAINING_RECORD(iface, BufferBSC, bsc);
+}
 
 static void BufferBSC_destroy(BSCallback *bsc)
 {
-    BufferBSC *This = BUFFERBSC_THIS(bsc);
+    BufferBSC *This = BufferBSC_from_BSCallback(bsc);
 
     heap_free(This->buf);
     heap_free(This);
@@ -782,7 +788,7 @@ static HRESULT BufferBSC_start_binding(BSCallback *bsc)
 
 static HRESULT BufferBSC_stop_binding(BSCallback *bsc, HRESULT result)
 {
-    BufferBSC *This = BUFFERBSC_THIS(bsc);
+    BufferBSC *This = BufferBSC_from_BSCallback(bsc);
 
     This->hres = result;
 
@@ -797,7 +803,7 @@ static HRESULT BufferBSC_stop_binding(BSCallback *bsc, HRESULT result)
 
 static HRESULT BufferBSC_read_data(BSCallback *bsc, IStream *stream)
 {
-    BufferBSC *This = BUFFERBSC_THIS(bsc);
+    BufferBSC *This = BufferBSC_from_BSCallback(bsc);
     DWORD readed;
     HRESULT hres;
 
@@ -831,7 +837,10 @@ static HRESULT BufferBSC_on_response(BSCallback *bsc, DWORD response_code,
     return S_OK;
 }
 
-#undef BUFFERBSC_THIS
+static HRESULT BufferBSC_beginning_transaction(BSCallback *bsc, WCHAR **additional_headers)
+{
+    return S_FALSE;
+}
 
 static const BSCallbackVtbl BufferBSCVtbl = {
     BufferBSC_destroy,
@@ -840,7 +849,8 @@ static const BSCallbackVtbl BufferBSCVtbl = {
     BufferBSC_stop_binding,
     BufferBSC_read_data,
     BufferBSC_on_progress,
-    BufferBSC_on_response
+    BufferBSC_on_response,
+    BufferBSC_beginning_transaction
 };
 
 
@@ -872,7 +882,7 @@ HRESULT bind_mon_to_buffer(HTMLDocumentNode *doc, IMoniker *mon, void **buf, DWO
         }
     }
 
-    IBindStatusCallback_Release(STATUSCLB(&bsc->bsc));
+    IBindStatusCallback_Release(&bsc->bsc.IBindStatusCallback_iface);
 
     return hres;
 }
@@ -889,7 +899,7 @@ struct nsChannelBSC {
     nsProtocolStream *nsstream;
 };
 
-static void on_start_nsrequest(nsChannelBSC *This)
+static HRESULT on_start_nsrequest(nsChannelBSC *This)
 {
     nsresult nsres;
 
@@ -898,27 +908,57 @@ static void on_start_nsrequest(nsChannelBSC *This)
         This->nschannel->response_status = 200;
 
     nsres = nsIStreamListener_OnStartRequest(This->nslistener,
-            (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext);
-    if(NS_FAILED(nsres))
+            (nsIRequest*)&This->nschannel->nsIHttpChannel_iface, This->nscontext);
+    if(NS_FAILED(nsres)) {
         FIXME("OnStartRequest failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(This->window) {
+        update_window_doc(This->window);
+        if(This->window->doc != This->bsc.doc)
+            This->bsc.doc = This->window->doc;
+        if(This->window->readystate != READYSTATE_LOADING)
+            set_ready_state(This->window, READYSTATE_LOADING);
+    }
+
+    return S_OK;
 }
 
 static void on_stop_nsrequest(nsChannelBSC *This, HRESULT result)
 {
-    nsresult nsres;
+    nsresult nsres, request_result;
 
-    if(!This->nslistener)
-        return;
+    switch(result) {
+    case S_OK:
+        request_result = NS_OK;
+        break;
+    case E_ABORT:
+        request_result = NS_BINDING_ABORTED;
+        break;
+    default:
+        request_result = NS_ERROR_FAILURE;
+    }
 
     if(!This->bsc.readed && SUCCEEDED(result)) {
         TRACE("No data read! Calling OnStartRequest\n");
         on_start_nsrequest(This);
     }
 
-    nsres = nsIStreamListener_OnStopRequest(This->nslistener, (nsIRequest*)NSCHANNEL(This->nschannel),
-             This->nscontext, SUCCEEDED(result) ? NS_OK : NS_ERROR_FAILURE);
-    if(NS_FAILED(nsres))
-        WARN("OnStopRequest failed: %08x\n", nsres);
+    if(This->nslistener) {
+        nsres = nsIStreamListener_OnStopRequest(This->nslistener,
+                 (nsIRequest*)&This->nschannel->nsIHttpChannel_iface, This->nscontext,
+                 request_result);
+        if(NS_FAILED(nsres))
+            WARN("OnStopRequet failed: %08x\n", nsres);
+    }
+
+    if(This->nschannel->load_group) {
+        nsres = nsILoadGroup_RemoveRequest(This->nschannel->load_group,
+                (nsIRequest*)&This->nschannel->nsIHttpChannel_iface, NULL, request_result);
+        if(NS_FAILED(nsres))
+            ERR("RemoveRequest failed: %08x\n", nsres);
+    }
 }
 
 static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
@@ -972,19 +1012,13 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
             }
 
             on_start_nsrequest(This);
-
-            if(This->window) {
-                update_window_doc(This->window);
-                if(This->window->readystate != READYSTATE_LOADING)
-                    set_ready_state(This->window, READYSTATE_LOADING);
-            }
         }
 
         This->bsc.readed += This->nsstream->buf_size;
 
         nsres = nsIStreamListener_OnDataAvailable(This->nslistener,
-                (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext,
-                NSINSTREAM(This->nsstream), This->bsc.readed-This->nsstream->buf_size,
+                (nsIRequest*)&This->nschannel->nsIHttpChannel_iface, This->nscontext,
+                &This->nsstream->nsIInputStream_iface, This->bsc.readed-This->nsstream->buf_size,
                 This->nsstream->buf_size);
         if(NS_FAILED(nsres))
             ERR("OnDataAvailable failed: %08x\n", nsres);
@@ -998,89 +1032,108 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
     return S_OK;
 }
 
-static void add_nsrequest(nsChannelBSC *This)
+static inline nsChannelBSC *nsChannelBSC_from_BSCallback(BSCallback *iface)
 {
-    nsresult nsres;
-
-    if(!This->nschannel || !This->nschannel->load_group)
-        return;
-
-    nsres = nsILoadGroup_AddRequest(This->nschannel->load_group,
-            (nsIRequest*)NSCHANNEL(This->nschannel), This->nscontext);
-
-    if(NS_FAILED(nsres))
-        ERR("AddRequest failed:%08x\n", nsres);
+    return CONTAINING_RECORD(iface, nsChannelBSC, bsc);
 }
-
-#define NSCHANNELBSC_THIS(bsc) ((nsChannelBSC*) bsc)
 
 static void nsChannelBSC_destroy(BSCallback *bsc)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
     if(This->nschannel)
-        nsIChannel_Release(NSCHANNEL(This->nschannel));
+        nsIChannel_Release(&This->nschannel->nsIHttpChannel_iface);
     if(This->nslistener)
         nsIStreamListener_Release(This->nslistener);
     if(This->nscontext)
         nsISupports_Release(This->nscontext);
     if(This->nsstream)
-        nsIInputStream_Release(NSINSTREAM(This->nsstream));
+        nsIInputStream_Release(&This->nsstream->nsIInputStream_iface);
     heap_free(This);
 }
 
 static HRESULT nsChannelBSC_start_binding(BSCallback *bsc)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
-    add_nsrequest(This);
+    if(This->window)
+        This->window->doc->skip_mutation_notif = FALSE;
 
     return S_OK;
 }
 
 static HRESULT nsChannelBSC_init_bindinfo(BSCallback *bsc)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
+    HRESULT hres;
 
     if(This->nschannel && This->nschannel->post_data_stream) {
-        parse_post_data(This->nschannel->post_data_stream, &This->bsc.headers, &This->bsc.post_data, &This->bsc.post_data_len);
-        TRACE("headers = %s post_data = %s\n", debugstr_w(This->bsc.headers),
-              debugstr_an(This->bsc.post_data, This->bsc.post_data_len));
+        hres = read_post_data_stream(This->nschannel->post_data_stream,
+                &This->bsc.post_data, &This->bsc.post_data_len);
+        if(FAILED(hres))
+            return hres;
+
+        TRACE("post_data = %s\n", debugstr_an(This->bsc.post_data, This->bsc.post_data_len));
     }
 
+    return S_OK;
+}
+
+typedef struct {
+    task_t header;
+    nsChannelBSC *bsc;
+} stop_request_task_t;
+
+static void stop_request_proc(task_t *_task)
+{
+    stop_request_task_t *task = (stop_request_task_t*)_task;
+
+    TRACE("(%p)\n", task->bsc);
+
+    list_remove(&task->bsc->bsc.entry);
+    list_init(&task->bsc->bsc.entry);
+    on_stop_nsrequest(task->bsc, S_OK);
+    IBindStatusCallback_Release(&task->bsc->bsc.IBindStatusCallback_iface);
+}
+
+static HRESULT async_stop_request(nsChannelBSC *This)
+{
+    stop_request_task_t *task;
+
+    task = heap_alloc(sizeof(*task));
+    if(!task)
+        return E_OUTOFMEMORY;
+
+    IBindStatusCallback_AddRef(&This->bsc.IBindStatusCallback_iface);
+    task->bsc = This;
+    push_task(&task->header, stop_request_proc, This->bsc.doc->basedoc.doc_obj->basedoc.task_magic);
     return S_OK;
 }
 
 static HRESULT nsChannelBSC_stop_binding(BSCallback *bsc, HRESULT result)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
-    on_stop_nsrequest(This, result);
-
-    if(This->nslistener) {
-        if(This->nschannel->load_group) {
-            nsresult nsres;
-
-            nsres = nsILoadGroup_RemoveRequest(This->nschannel->load_group,
-                    (nsIRequest*)NSCHANNEL(This->nschannel), NULL, NS_OK);
-            if(NS_FAILED(nsres))
-                ERR("RemoveRequest failed: %08x\n", nsres);
-        }
+    if(This->window && SUCCEEDED(result)) {
+        result = async_stop_request(This);
+        if(SUCCEEDED(result))
+           return S_OK;
     }
 
+    on_stop_nsrequest(This, result);
     return S_OK;
 }
 
 static HRESULT nsChannelBSC_read_data(BSCallback *bsc, IStream *stream)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
     return read_stream_data(This, stream);
 }
 
 static HRESULT nsChannelBSC_on_progress(BSCallback *bsc, ULONG status_code, LPCWSTR status_text)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
 
     switch(status_code) {
     case BINDSTATUS_MIMETYPEAVAILABLE:
@@ -1103,73 +1156,76 @@ static HRESULT nsChannelBSC_on_progress(BSCallback *bsc, ULONG status_code, LPCW
 static HRESULT nsChannelBSC_on_response(BSCallback *bsc, DWORD response_code,
         LPCWSTR response_headers)
 {
-    nsChannelBSC *This = NSCHANNELBSC_THIS(bsc);
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
+    HRESULT hres;
 
     This->nschannel->response_status = response_code;
 
     if(response_headers) {
-        const WCHAR *hdr_start, *hdr_end;
+        const WCHAR *headers;
 
-        hdr_start = strchrW(response_headers, '\r');
-        while(hdr_start) {
-            const WCHAR *colon;
-            struct ResponseHeader *new_header;
-            int len;
-
-            hdr_start += 2;
-            hdr_end = strchrW(hdr_start, '\r');
-            if(!hdr_end) {
-                WARN("Header doesn't end with CRLF: %s\n", wine_dbgstr_w(hdr_start));
-                break;
+        headers = strchrW(response_headers, '\r');
+        if(headers && headers[1] == '\n') {
+            headers += 2;
+            hres = parse_headers(headers, &This->nschannel->response_headers);
+            if(FAILED(hres)) {
+                WARN("parsing headers failed: %08x\n", hres);
+                return hres;
             }
-            if(hdr_end == hdr_start)
-                break;
-
-            for(colon = hdr_start; *colon != ':' && colon != hdr_end; ++colon);
-            if(*colon != ':') {
-                WARN("Header missing colon: %s\n", wine_dbgstr_w(hdr_start));
-                hdr_start = strchrW(hdr_start, '\r');
-                continue;
-            }
-
-            new_header = heap_alloc(sizeof(struct ResponseHeader));
-            if(!new_header)
-                return E_OUTOFMEMORY;
-
-            len = colon - hdr_start;
-            new_header->header = heap_alloc((len + 1) * sizeof(WCHAR));
-            if(!new_header->header) {
-                heap_free(new_header);
-                return E_OUTOFMEMORY;
-            }
-            memcpy(new_header->header, hdr_start, len * sizeof(WCHAR));
-            new_header->header[len] = 0;
-
-            colon++;
-            while(*colon == ' ')
-                colon++;
-
-            len = hdr_end - colon;
-            new_header->data = heap_alloc((len + 1) * sizeof(WCHAR));
-            if(!new_header->data) {
-                heap_free(new_header->header);
-                heap_free(new_header);
-                return E_OUTOFMEMORY;
-            }
-            memcpy(new_header->data, colon, len * sizeof(WCHAR));
-            new_header->data[len] = 0;
-
-            list_add_head(&This->nschannel->response_headers, &new_header->entry);
-            TRACE("Adding header to list: (%s):(%s)\n", wine_dbgstr_w(new_header->header), wine_dbgstr_w(new_header->data));
-
-            hdr_start = strchrW(hdr_start, '\r');
         }
     }
 
     return S_OK;
 }
 
-#undef NSCHANNELBSC_THIS
+static HRESULT nsChannelBSC_beginning_transaction(BSCallback *bsc, WCHAR **additional_headers)
+{
+    nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
+    http_header_t *iter;
+    DWORD len = 0;
+    WCHAR *ptr;
+
+    static const WCHAR content_lengthW[] =
+        {'C','o','n','t','e','n','t','-','L','e','n','g','t','h',0};
+
+    if(!This->nschannel)
+        return S_FALSE;
+
+    LIST_FOR_EACH_ENTRY(iter, &This->nschannel->request_headers, http_header_t, entry) {
+        if(strcmpW(iter->header, content_lengthW))
+            len += strlenW(iter->header) + 2 /* ": " */ + strlenW(iter->data) + 2 /* "\r\n" */;
+    }
+
+    if(!len)
+        return S_OK;
+
+    *additional_headers = ptr = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
+    if(!ptr)
+        return E_OUTOFMEMORY;
+
+    LIST_FOR_EACH_ENTRY(iter, &This->nschannel->request_headers, http_header_t, entry) {
+        if(!strcmpW(iter->header, content_lengthW))
+            continue;
+
+        len = strlenW(iter->header);
+        memcpy(ptr, iter->header, len*sizeof(WCHAR));
+        ptr += len;
+
+        *ptr++ = ':';
+        *ptr++ = ' ';
+
+        len = strlenW(iter->data);
+        memcpy(ptr, iter->data, len*sizeof(WCHAR));
+        ptr += len;
+
+        *ptr++ = '\r';
+        *ptr++ = '\n';
+    }
+
+    *ptr = 0;
+
+    return S_OK;
+}
 
 static const BSCallbackVtbl nsChannelBSCVtbl = {
     nsChannelBSC_destroy,
@@ -1178,7 +1234,8 @@ static const BSCallbackVtbl nsChannelBSCVtbl = {
     nsChannelBSC_stop_binding,
     nsChannelBSC_read_data,
     nsChannelBSC_on_progress,
-    nsChannelBSC_on_response
+    nsChannelBSC_on_response,
+    nsChannelBSC_beginning_transaction
 };
 
 HRESULT create_channelbsc(IMoniker *mon, WCHAR *headers, BYTE *post_data, DWORD post_data_size, nsChannelBSC **retval)
@@ -1194,7 +1251,7 @@ HRESULT create_channelbsc(IMoniker *mon, WCHAR *headers, BYTE *post_data, DWORD 
     if(headers) {
         ret->bsc.headers = heap_strdupW(headers);
         if(!ret->bsc.headers) {
-            IBindStatusCallback_Release(STATUSCLB(&ret->bsc));
+            IBindStatusCallback_Release(&ret->bsc.IBindStatusCallback_iface);
             return E_OUTOFMEMORY;
         }
     }
@@ -1203,7 +1260,7 @@ HRESULT create_channelbsc(IMoniker *mon, WCHAR *headers, BYTE *post_data, DWORD 
         ret->bsc.post_data = GlobalAlloc(0, post_data_size);
         if(!ret->bsc.post_data) {
             heap_free(ret->bsc.headers);
-            IBindStatusCallback_Release(STATUSCLB(&ret->bsc));
+            IBindStatusCallback_Release(&ret->bsc.IBindStatusCallback_iface);
             return E_OUTOFMEMORY;
         }
 
@@ -1229,14 +1286,14 @@ void set_window_bscallback(HTMLWindow *window, nsChannelBSC *callback)
             IBinding_Abort(window->bscallback->bsc.binding);
         window->bscallback->bsc.doc = NULL;
         window->bscallback->window = NULL;
-        IBindStatusCallback_Release(STATUSCLB(&window->bscallback->bsc));
+        IBindStatusCallback_Release(&window->bscallback->bsc.IBindStatusCallback_iface);
     }
 
     window->bscallback = callback;
 
     if(callback) {
         callback->window = window;
-        IBindStatusCallback_AddRef(STATUSCLB(&callback->bsc));
+        IBindStatusCallback_AddRef(&callback->bsc.IBindStatusCallback_iface);
         callback->bsc.doc = window->doc;
     }
 }
@@ -1252,7 +1309,7 @@ static void start_doc_binding_proc(task_t *_task)
     start_doc_binding_task_t *task = (start_doc_binding_task_t*)_task;
 
     start_binding(task->window, NULL, (BSCallback*)task->bscallback, NULL);
-    IBindStatusCallback_Release(STATUSCLB(&task->bscallback->bsc));
+    IBindStatusCallback_Release(&task->bscallback->bsc.IBindStatusCallback_iface);
 }
 
 HRESULT async_start_doc_binding(HTMLWindow *window, nsChannelBSC *bscallback)
@@ -1265,7 +1322,7 @@ HRESULT async_start_doc_binding(HTMLWindow *window, nsChannelBSC *bscallback)
 
     task->window = window;
     task->bscallback = bscallback;
-    IBindStatusCallback_AddRef(STATUSCLB(&bscallback->bsc));
+    IBindStatusCallback_AddRef(&bscallback->bsc.IBindStatusCallback_iface);
 
     push_task(&task->header, start_doc_binding_proc, window->task_magic);
     return S_OK;
@@ -1273,19 +1330,27 @@ HRESULT async_start_doc_binding(HTMLWindow *window, nsChannelBSC *bscallback)
 
 void abort_document_bindings(HTMLDocumentNode *doc)
 {
-    BSCallback *iter;
+    BSCallback *iter, *next;
 
-    LIST_FOR_EACH_ENTRY(iter, &doc->bindings, BSCallback, entry) {
+    LIST_FOR_EACH_ENTRY_SAFE(iter, next, &doc->bindings, BSCallback, entry) {
+        if(iter->doc)
+            remove_target_tasks(iter->doc->basedoc.task_magic);
+
         if(iter->binding)
             IBinding_Abort(iter->binding);
+        else {
+            list_remove(&iter->entry);
+            list_init(&iter->entry);
+            iter->vtbl->stop_binding(iter, S_OK);
+        }
+
         iter->doc = NULL;
-        list_remove(&iter->entry);
     }
 }
 
 HRESULT channelbsc_load_stream(nsChannelBSC *bscallback, IStream *stream)
 {
-    HRESULT hres;
+    HRESULT hres = S_OK;
 
     if(!bscallback->nschannel) {
         ERR("NULL nschannel\n");
@@ -1296,17 +1361,21 @@ HRESULT channelbsc_load_stream(nsChannelBSC *bscallback, IStream *stream)
     if(!bscallback->nschannel->content_type)
         return E_OUTOFMEMORY;
 
-    add_nsrequest(bscallback);
-
-    hres = read_stream_data(bscallback, stream);
-    IBindStatusCallback_OnStopBinding(STATUSCLB(&bscallback->bsc), hres, ERROR_SUCCESS);
+    list_add_head(&bscallback->bsc.doc->bindings, &bscallback->bsc.entry);
+    if(stream)
+        hres = read_stream_data(bscallback, stream);
+    if(SUCCEEDED(hres))
+        hres = async_stop_request(bscallback);
+    if(FAILED(hres))
+        IBindStatusCallback_OnStopBinding(&bscallback->bsc.IBindStatusCallback_iface, hres,
+                ERROR_SUCCESS);
 
     return hres;
 }
 
 void channelbsc_set_channel(nsChannelBSC *This, nsChannel *channel, nsIStreamListener *listener, nsISupports *context)
 {
-    nsIChannel_AddRef(NSCHANNEL(channel));
+    nsIChannel_AddRef(&channel->nsIHttpChannel_iface);
     This->nschannel = channel;
 
     nsIStreamListener_AddRef(listener);
@@ -1315,6 +1384,16 @@ void channelbsc_set_channel(nsChannelBSC *This, nsChannel *channel, nsIStreamLis
     if(context) {
         nsISupports_AddRef(context);
         This->nscontext = context;
+    }
+
+    if(This->bsc.headers) {
+        HRESULT hres;
+
+        hres = parse_headers(This->bsc.headers, &channel->request_headers);
+        heap_free(This->bsc.headers);
+        This->bsc.headers = NULL;
+        if(FAILED(hres))
+            WARN("parse_headers failed: %08x\n", hres);
     }
 }
 
@@ -1349,13 +1428,11 @@ HRESULT hlink_frame_navigate(HTMLDocument *doc, LPCWSTR url,
     }
 
     if(post_data_stream) {
-        parse_post_data(post_data_stream, &callback->bsc.headers, &callback->bsc.post_data,
-                        &callback->bsc.post_data_len);
-        TRACE("headers = %s post_data = %s\n", debugstr_w(callback->bsc.headers),
-              debugstr_an(callback->bsc.post_data, callback->bsc.post_data_len));
+        read_post_data_stream(post_data_stream, &callback->bsc.post_data, &callback->bsc.post_data_len);
+        TRACE("post_data = %s\n", debugstr_an(callback->bsc.post_data, callback->bsc.post_data_len));
     }
 
-    hres = CreateAsyncBindCtx(0, STATUSCLB(&callback->bsc), NULL, &bindctx);
+    hres = CreateAsyncBindCtx(0, &callback->bsc.IBindStatusCallback_iface, NULL, &bindctx);
     if(SUCCEEDED(hres))
         hres = CoCreateInstance(&CLSID_StdHlink, NULL, CLSCTX_INPROC_SERVER,
                 &IID_IHlink, (LPVOID*)&hlink);
@@ -1371,7 +1448,8 @@ HRESULT hlink_frame_navigate(HTMLDocument *doc, LPCWSTR url,
             IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
         }
 
-        hres = IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(&callback->bsc), hlink);
+        hres = IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx,
+                &callback->bsc.IBindStatusCallback_iface, hlink);
         IMoniker_Release(mon);
         *cancel = hres == S_OK;
         hres = S_OK;
@@ -1379,7 +1457,7 @@ HRESULT hlink_frame_navigate(HTMLDocument *doc, LPCWSTR url,
 
     IHlinkFrame_Release(hlink_frame);
     IBindCtx_Release(bindctx);
-    IBindStatusCallback_Release(STATUSCLB(&callback->bsc));
+    IBindStatusCallback_Release(&callback->bsc.IBindStatusCallback_iface);
     return hres;
 }
 

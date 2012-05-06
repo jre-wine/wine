@@ -216,6 +216,13 @@ test_pic_with_stream(LPSTREAM stream, unsigned int imgsize)
 	ok(hres == S_OK,"IPicture_get_Handle does not return S_OK, but 0x%08x\n", hres);
 	ok(handle != 0, "IPicture_get_Handle returns a NULL handle, but it should be non NULL\n");
 
+        if (handle)
+        {
+            BITMAP bmp;
+            GetObject(UlongToHandle(handle), sizeof(BITMAP), &bmp);
+            todo_wine ok(bmp.bmBits != 0, "not a dib\n");
+        }
+
 	width = 0;
 	hres = IPicture_get_Width (pic, &width);
 	ok(hres == S_OK,"IPicture_get_Width does not return S_OK, but 0x%08x\n", hres);
@@ -474,10 +481,10 @@ static void test_Invoke(void)
 
 static void test_OleCreatePictureIndirect(void)
 {
+    OLE_HANDLE handle;
     IPicture *pict;
     HRESULT hr;
     short type;
-    OLE_HANDLE handle;
 
     if(!pOleCreatePictureIndirect)
     {
@@ -485,13 +492,21 @@ static void test_OleCreatePictureIndirect(void)
         return;
     }
 
+if (0)
+{
+    /* crashes on native */
+    pOleCreatePictureIndirect(NULL, &IID_IPicture, TRUE, NULL);
+}
+
     hr = pOleCreatePictureIndirect(NULL, &IID_IPicture, TRUE, (void**)&pict);
     ok(hr == S_OK, "hr %08x\n", hr);
 
+    type = PICTYPE_NONE;
     hr = IPicture_get_Type(pict, &type);
     ok(hr == S_OK, "hr %08x\n", hr);
     ok(type == PICTYPE_UNINITIALIZED, "type %d\n", type);
 
+    handle = 0xdeadbeef;
     hr = IPicture_get_Handle(pict, &handle);
     ok(hr == S_OK, "hr %08x\n", hr);
     ok(handle == 0, "handle %08x\n", handle);
@@ -783,9 +798,8 @@ static void test_OleLoadPicturePath(void)
     hres = OleLoadPicturePath(emptyW, NULL, 0, 0, NULL, (void **)&pic);
     todo_wine
     ok(hres == INET_E_UNKNOWN_PROTOCOL || /* XP/Vista+ */
-       hres == E_UNEXPECTED || /* NT4/Win95 */
-       hres == E_FAIL || /* Win95 OSR2 */
-       hres == E_OUTOFMEMORY, /* Win98/Win2k/Win2k3 */
+       broken(hres == E_UNEXPECTED) || /* NT4 */
+       broken(hres == E_OUTOFMEMORY), /* Win2k/Win2k3 */
        "Expected OleLoadPicturePath to return INET_E_UNKNOWN_PROTOCOL, got 0x%08x\n", hres);
     ok(pic == NULL,
        "Expected the output interface pointer to be NULL, got %p\n", pic);
@@ -794,9 +808,8 @@ static void test_OleLoadPicturePath(void)
     hres = OleLoadPicturePath(emptyW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     todo_wine
     ok(hres == INET_E_UNKNOWN_PROTOCOL || /* XP/Vista+ */
-       hres == E_UNEXPECTED || /* NT4/Win95 */
-       hres == E_FAIL || /* Win95 OSR2 */
-       hres == E_OUTOFMEMORY, /* Win98/Win2k/Win2k3 */
+       broken(hres == E_UNEXPECTED) || /* NT4 */
+       broken(hres == E_OUTOFMEMORY), /* Win2k/Win2k3 */
        "Expected OleLoadPicturePath to return INET_E_UNKNOWN_PROTOCOL, got 0x%08x\n", hres);
     ok(pic == NULL,
        "Expected the output interface pointer to be NULL, got %p\n", pic);
@@ -814,7 +827,7 @@ static void test_OleLoadPicturePath(void)
     /* Try a normal DOS path. */
     hres = OleLoadPicturePath(temp_fileW + 8, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == S_OK ||
-       broken(hres == E_UNEXPECTED), /* NT4/Win95 */
+       broken(hres == E_UNEXPECTED), /* NT4 */
        "Expected OleLoadPicturePath to return S_OK, got 0x%08x\n", hres);
     if (pic)
         IPicture_Release(pic);
@@ -822,7 +835,7 @@ static void test_OleLoadPicturePath(void)
     /* Try a DOS path with tacked on "file:". */
     hres = OleLoadPicturePath(temp_fileW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == S_OK ||
-       broken(hres == E_UNEXPECTED), /* NT4/Win95 */
+       broken(hres == E_UNEXPECTED), /* NT4 */
        "Expected OleLoadPicturePath to return S_OK, got 0x%08x\n", hres);
     if (pic)
         IPicture_Release(pic);
@@ -832,14 +845,14 @@ static void test_OleLoadPicturePath(void)
     /* Try with a nonexistent file. */
     hres = OleLoadPicturePath(temp_fileW + 8, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == INET_E_RESOURCE_NOT_FOUND || /* XP+ */
-       hres == E_UNEXPECTED || /* NT4/Win95 */
-       hres == E_FAIL, /* Win9x/Win2k */
+       broken(hres == E_UNEXPECTED) || /* NT4 */
+       broken(hres == E_FAIL), /*Win2k */
        "Expected OleLoadPicturePath to return INET_E_RESOURCE_NOT_FOUND, got 0x%08x\n", hres);
 
     hres = OleLoadPicturePath(temp_fileW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == INET_E_RESOURCE_NOT_FOUND || /* XP+ */
-       hres == E_UNEXPECTED || /* NT4/Win95 */
-       hres == E_FAIL, /* Win9x/Win2k */
+       broken(hres == E_UNEXPECTED) || /* NT4 */
+       broken(hres == E_FAIL), /* Win2k */
        "Expected OleLoadPicturePath to return INET_E_RESOURCE_NOT_FOUND, got 0x%08x\n", hres);
 
     file = CreateFileA(temp_file, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
@@ -858,7 +871,7 @@ static void test_OleLoadPicturePath(void)
 
     hres = OleLoadPicturePath(temp_fileW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == S_OK ||
-       broken(hres == E_UNEXPECTED), /* NT4/Win95 */
+       broken(hres == E_UNEXPECTED), /* NT4 */
        "Expected OleLoadPicturePath to return S_OK, got 0x%08x\n", hres);
     if (pic)
         IPicture_Release(pic);
@@ -868,9 +881,87 @@ static void test_OleLoadPicturePath(void)
     /* Try with a nonexistent file. */
     hres = OleLoadPicturePath(temp_fileW, NULL, 0, 0, &IID_IPicture, (void **)&pic);
     ok(hres == INET_E_RESOURCE_NOT_FOUND || /* XP+ */
-       hres == E_UNEXPECTED || /* NT4/Win95 */
-       hres == E_FAIL, /* Win9x/Win2k */
+       broken(hres == E_UNEXPECTED) || /* NT4 */
+       broken(hres == E_FAIL), /* Win2k */
        "Expected OleLoadPicturePath to return INET_E_RESOURCE_NOT_FOUND, got 0x%08x\n", hres);
+}
+
+static void test_himetric(void)
+{
+    static const BYTE bmp_bits[1024];
+    OLE_XSIZE_HIMETRIC cx;
+    OLE_YSIZE_HIMETRIC cy;
+    IPicture *pic;
+    PICTDESC desc;
+    HBITMAP bmp;
+    HRESULT hr;
+    HICON icon;
+    HDC hdc;
+    INT d;
+
+    if (!pOleCreatePictureIndirect)
+    {
+        win_skip("OleCreatePictureIndirect not available\n");
+        return;
+    }
+
+    desc.cbSizeofstruct = sizeof(desc);
+    desc.picType = PICTYPE_BITMAP;
+    desc.u.bmp.hpal = NULL;
+
+    hdc = CreateCompatibleDC(0);
+
+    bmp = CreateBitmap(1.9 * GetDeviceCaps(hdc, LOGPIXELSX),
+                       1.9 * GetDeviceCaps(hdc, LOGPIXELSY), 1, 1, NULL);
+
+    desc.u.bmp.hbitmap = bmp;
+
+    /* size in himetric units reported rounded up to next integer value */
+    hr = pOleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    cx = 0;
+    d = MulDiv((INT)(1.9 * GetDeviceCaps(hdc, LOGPIXELSX)), 2540, GetDeviceCaps(hdc, LOGPIXELSX));
+    hr = IPicture_get_Width(pic, &cx);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cx == d, "got %d, expected %d\n", cx, d);
+
+    cy = 0;
+    d = MulDiv((INT)(1.9 * GetDeviceCaps(hdc, LOGPIXELSY)), 2540, GetDeviceCaps(hdc, LOGPIXELSY));
+    hr = IPicture_get_Height(pic, &cy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cy == d, "got %d, expected %d\n", cy, d);
+
+    DeleteObject(bmp);
+    IPicture_Release(pic);
+
+    /* same thing with icon */
+    icon = CreateIcon(NULL, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON),
+                      1, 1, bmp_bits, bmp_bits);
+    ok(icon != NULL, "failed to create icon\n");
+
+    desc.picType = PICTYPE_ICON;
+    desc.u.icon.hicon = icon;
+
+    hr = pOleCreatePictureIndirect(&desc, &IID_IPicture, FALSE, (void**)&pic);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    cx = 0;
+    d = MulDiv(GetSystemMetrics(SM_CXICON), 2540, GetDeviceCaps(hdc, LOGPIXELSX));
+    hr = IPicture_get_Width(pic, &cx);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cx == d, "got %d, expected %d\n", cx, d);
+
+    cy = 0;
+    d = MulDiv(GetSystemMetrics(SM_CYICON), 2540, GetDeviceCaps(hdc, LOGPIXELSY));
+    hr = IPicture_get_Height(pic, &cy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cy == d, "got %d, expected %d\n", cy, d);
+
+    IPicture_Release(pic);
+    DestroyIcon(icon);
+
+    DeleteDC(hdc);
 }
 
 START_TEST(olepicture)
@@ -904,6 +995,7 @@ START_TEST(olepicture)
     test_get_Handle();
     test_get_Type();
     test_OleLoadPicturePath();
+    test_himetric();
 }
 
 
@@ -932,11 +1024,11 @@ static HRESULT WINAPI NoStatStreamImpl_QueryInterface(
   NoStatStreamImpl* const This=(NoStatStreamImpl*)iface;
   if (ppvObject==0) return E_INVALIDARG;
   *ppvObject = 0;
-  if (memcmp(&IID_IUnknown, riid, sizeof(IID_IUnknown)) == 0)
+  if (IsEqualIID(&IID_IUnknown, riid))
   {
     *ppvObject = This;
   }
-  else if (memcmp(&IID_IStream, riid, sizeof(IID_IStream)) == 0)
+  else if (IsEqualIID(&IID_IStream, riid))
   {
     *ppvObject = This;
   }

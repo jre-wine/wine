@@ -263,11 +263,14 @@ static inline void choose_font(HWND hwnd)
         LOGFONTW lFont;
 
         HDC hdc = GetDC(hwnd);
+
+        GetObjectW(Globals.hfont, sizeof(LOGFONTW), &lFont);
+
         chFont.lStructSize = sizeof(CHOOSEFONTW);
         chFont.hwndOwner = hwnd;
         chFont.hDC = NULL;
         chFont.lpLogFont = &lFont;
-        chFont.Flags = CF_SCREENFONTS | CF_FORCEFONTEXIST | CF_LIMITSIZE | CF_NOSCRIPTSEL;
+        chFont.Flags = CF_SCREENFONTS | CF_FORCEFONTEXIST | CF_LIMITSIZE | CF_NOSCRIPTSEL | CF_INITTOLOGFONTSTRUCT;
         chFont.rgbColors = RGB(0,0,0);
         chFont.lCustData = 0;
         chFont.lpfnHook = NULL;
@@ -2019,8 +2022,7 @@ static BOOL toggle_fullscreen(HWND hwnd)
 		g_fullscreen.wasZoomed = IsZoomed(hwnd);
 
 		Frame_CalcFrameClient(hwnd, &rt);
-		ClientToScreen(hwnd, (LPPOINT)&rt.left);
-		ClientToScreen(hwnd, (LPPOINT)&rt.right);
+                MapWindowPoints( hwnd, 0, (POINT *)&rt, 2 );
 
 		rt.left = g_fullscreen.orgPos.left-rt.left;
 		rt.top = g_fullscreen.orgPos.top-rt.top;
@@ -2046,8 +2048,7 @@ static void fullscreen_move(HWND hwnd)
 	GetWindowRect(hwnd, &pos);
 
 	Frame_CalcFrameClient(hwnd, &rt);
-	ClientToScreen(hwnd, (LPPOINT)&rt.left);
-	ClientToScreen(hwnd, (LPPOINT)&rt.right);
+        MapWindowPoints( hwnd, 0, (POINT *)&rt, 2 );
 
 	rt.left = pos.left-rt.left;
 	rt.top = pos.top-rt.top;

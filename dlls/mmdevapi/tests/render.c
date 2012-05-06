@@ -23,7 +23,6 @@
 
 #include "wine/test.h"
 
-#define CINTERFACE
 #define COBJMACROS
 
 #ifdef STANDALONE
@@ -34,6 +33,8 @@
 #include "uuids.h"
 #include "mmdeviceapi.h"
 #include "audioclient.h"
+
+static IMMDevice *dev = NULL;
 
 static void test_uninitialized(IAudioClient *ac)
 {
@@ -71,15 +72,23 @@ static void test_uninitialized(IAudioClient *ac)
     CloseHandle(handle);
 }
 
-static void test_audioclient(IAudioClient *ac)
+static void test_audioclient(void)
 {
+    IAudioClient *ac;
     IUnknown *unk;
     HRESULT hr;
     ULONG ref;
     WAVEFORMATEX *pwfx, *pwfx2;
     REFERENCE_TIME t1, t2;
+    HANDLE handle;
 
-    HANDLE handle = CreateEventW(NULL, FALSE, FALSE, NULL);
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    handle = CreateEventW(NULL, FALSE, FALSE, NULL);
 
     hr = IAudioClient_QueryInterface(ac, &IID_IUnknown, NULL);
     ok(hr == E_POINTER, "QueryInterface(NULL) returned %08x\n", hr);
@@ -126,26 +135,27 @@ static void test_audioclient(IAudioClient *ac)
     hr = IAudioClient_GetMixFormat(ac, &pwfx);
     ok(hr == S_OK, "Valid GetMixFormat returns %08x\n", hr);
 
-    trace("Tag: %04x\n", pwfx->wFormatTag);
-    trace("bits: %u\n", pwfx->wBitsPerSample);
-    trace("chan: %u\n", pwfx->nChannels);
-    trace("rate: %u\n", pwfx->nSamplesPerSec);
-    trace("align: %u\n", pwfx->nBlockAlign);
-    trace("extra: %u\n", pwfx->cbSize);
-    ok(pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE, "wFormatTag is %x\n", pwfx->wFormatTag);
-    if (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
-    {
-        WAVEFORMATEXTENSIBLE *pwfxe = (void*)pwfx;
-        trace("Res: %u\n", pwfxe->Samples.wReserved);
-        trace("Mask: %x\n", pwfxe->dwChannelMask);
-        trace("Alg: %s\n",
-              IsEqualGUID(&pwfxe->SubFormat, &KSDATAFORMAT_SUBTYPE_PCM)?"PCM":
-              (IsEqualGUID(&pwfxe->SubFormat,
-                           &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)?"FLOAT":"Other"));
-    }
-
     if (hr == S_OK)
     {
+        trace("pwfx: %p\n", pwfx);
+        trace("Tag: %04x\n", pwfx->wFormatTag);
+        trace("bits: %u\n", pwfx->wBitsPerSample);
+        trace("chan: %u\n", pwfx->nChannels);
+        trace("rate: %u\n", pwfx->nSamplesPerSec);
+        trace("align: %u\n", pwfx->nBlockAlign);
+        trace("extra: %u\n", pwfx->cbSize);
+        ok(pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE, "wFormatTag is %x\n", pwfx->wFormatTag);
+        if (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE)
+        {
+            WAVEFORMATEXTENSIBLE *pwfxe = (void*)pwfx;
+            trace("Res: %u\n", pwfxe->Samples.wReserved);
+            trace("Mask: %x\n", pwfxe->dwChannelMask);
+            trace("Alg: %s\n",
+                  IsEqualGUID(&pwfxe->SubFormat, &KSDATAFORMAT_SUBTYPE_PCM)?"PCM":
+                  (IsEqualGUID(&pwfxe->SubFormat,
+                               &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)?"FLOAT":"Other"));
+        }
+
         hr = IAudioClient_IsFormatSupported(ac, AUDCLNT_SHAREMODE_SHARED, pwfx, &pwfx2);
         ok(hr == S_OK, "Valid IsFormatSupported(Shared) call returns %08x\n", hr);
         ok(pwfx2 == NULL, "pwfx2 is non-null\n");
@@ -165,7 +175,9 @@ static void test_audioclient(IAudioClient *ac)
         ok(pwfx2 == NULL, "pwfx2 non-null on exclusive IsFormatSupported\n");
 
         hr = IAudioClient_IsFormatSupported(ac, 0xffffffff, pwfx, NULL);
-        ok(hr == E_INVALIDARG, "IsFormatSupported(0xffffffff) call returns %08x\n", hr);
+        ok(hr == E_INVALIDARG ||
+           hr == AUDCLNT_E_UNSUPPORTED_FORMAT,
+           "IsFormatSupported(0xffffffff) call returns %08x\n", hr);
     }
 
     test_uninitialized(ac);
@@ -208,8 +220,9 @@ static void test_audioclient(IAudioClient *ac)
 
     hr = IAudioClient_SetEventHandle(ac, handle);
     ok(hr == AUDCLNT_E_EVENTHANDLE_NOT_EXPECTED ||
-       hr == HRESULT_FROM_WIN32(ERROR_INVALID_NAME) ||
-       hr == HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME) /* Some Vista */
+       broken(hr == HRESULT_FROM_WIN32(ERROR_INVALID_NAME)) ||
+       broken(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) /* Some 2k8 */ ||
+       broken(hr == HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME)) /* Some Vista */
        , "SetEventHandle returns %08x\n", hr);
 
     hr = IAudioClient_Reset(ac);
@@ -221,16 +234,156 @@ static void test_audioclient(IAudioClient *ac)
     hr = IAudioClient_Start(ac);
     ok(hr == S_OK, "Start on a stopped stream returns %08x\n", hr);
 
+    IAudioClient_Release(ac);
+
     CloseHandle(handle);
     CoTaskMemFree(pwfx);
+}
+
+static void test_references(void)
+{
+    IAudioClient *ac;
+    IAudioRenderClient *rc;
+    ISimpleAudioVolume *sav;
+    IAudioClock *acl;
+    WAVEFORMATEX *pwfx;
+    HRESULT hr;
+    ULONG ref;
+
+    /* IAudioRenderClient */
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_GetMixFormat(ac, &pwfx);
+    ok(hr == S_OK, "GetMixFormat failed: %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000,
+            0, pwfx, NULL);
+    ok(hr == S_OK, "Initialize failed: %08x\n", hr);
+
+    hr = IAudioClient_GetService(ac, &IID_IAudioRenderClient, (void**)&rc);
+    ok(hr == S_OK, "GetService failed: %08x\n", hr);
+
+    IAudioRenderClient_AddRef(rc);
+    ref = IAudioRenderClient_Release(rc);
+    ok(ref != 0, "RenderClient_Release gave wrong refcount: %u\n", ref);
+
+    ref = IAudioClient_Release(ac);
+    ok(ref != 0, "Client_Release gave wrong refcount: %u\n", ref);
+
+    ref = IAudioRenderClient_Release(rc);
+    ok(ref == 0, "RenderClient_Release gave wrong refcount: %u\n", ref);
+
+    /* ISimpleAudioVolume */
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_GetMixFormat(ac, &pwfx);
+    ok(hr == S_OK, "GetMixFormat failed: %08x\n", hr);
+
+    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000,
+            0, pwfx, NULL);
+    ok(hr == S_OK, "Initialize failed: %08x\n", hr);
+
+    hr = IAudioClient_GetService(ac, &IID_ISimpleAudioVolume, (void**)&sav);
+    ok(hr == S_OK, "GetService failed: %08x\n", hr);
+
+    ISimpleAudioVolume_AddRef(sav);
+    ref = ISimpleAudioVolume_Release(sav);
+    ok(ref != 0, "SimpleAudioVolume_Release gave wrong refcount: %u\n", ref);
+
+    ref = IAudioClient_Release(ac);
+    ok(ref != 0, "Client_Release gave wrong refcount: %u\n", ref);
+
+    ref = ISimpleAudioVolume_Release(sav);
+    ok(ref == 0, "SimpleAudioVolume_Release gave wrong refcount: %u\n", ref);
+
+    /* IAudioClock */
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_GetMixFormat(ac, &pwfx);
+    ok(hr == S_OK, "GetMixFormat failed: %08x\n", hr);
+
+    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED, 0, 5000000,
+            0, pwfx, NULL);
+    ok(hr == S_OK, "Initialize failed: %08x\n", hr);
+
+    hr = IAudioClient_GetService(ac, &IID_IAudioClock, (void**)&acl);
+    ok(hr == S_OK, "GetService failed: %08x\n", hr);
+
+    IAudioClock_AddRef(acl);
+    ref = IAudioClock_Release(acl);
+    ok(ref != 0, "AudioClock_Release gave wrong refcount: %u\n", ref);
+
+    ref = IAudioClient_Release(ac);
+    ok(ref != 0, "Client_Release gave wrong refcount: %u\n", ref);
+
+    ref = IAudioClock_Release(acl);
+    ok(ref == 0, "AudioClock_Release gave wrong refcount: %u\n", ref);
+}
+
+static void test_event(void)
+{
+    HANDLE event;
+    HRESULT hr;
+    IAudioClient *ac;
+    WAVEFORMATEX *pwfx;
+
+    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER,
+            NULL, (void**)&ac);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_GetMixFormat(ac, &pwfx);
+    ok(hr == S_OK, "GetMixFormat failed: %08x\n", hr);
+    if(hr != S_OK)
+        return;
+
+    hr = IAudioClient_Initialize(ac, AUDCLNT_SHAREMODE_SHARED,
+            AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 5000000,
+            0, pwfx, NULL);
+    ok(hr == S_OK, "Initialize failed: %08x\n", hr);
+
+    event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    ok(event != NULL, "CreateEvent failed\n");
+
+    hr = IAudioClient_Start(ac);
+    ok(hr == AUDCLNT_E_EVENTHANDLE_NOT_SET, "Start failed: %08x\n", hr);
+
+    hr = IAudioClient_SetEventHandle(ac, event);
+    ok(hr == S_OK, "SetEventHandle failed: %08x\n", hr);
+
+    hr = IAudioClient_Start(ac);
+    ok(hr == S_OK, "Start failed: %08x\n", hr);
+
+    hr = IAudioClient_Stop(ac);
+    ok(hr == S_OK, "Start failed: %08x\n", hr);
+
+    /* test releasing a playing stream */
+    hr = IAudioClient_Start(ac);
+    ok(hr == S_OK, "Start failed: %08x\n", hr);
+    IAudioClient_Release(ac);
+
+    CloseHandle(event);
 }
 
 START_TEST(render)
 {
     HRESULT hr;
     IMMDeviceEnumerator *mme = NULL;
-    IMMDevice *dev = NULL;
-    IAudioClient *ac = NULL;
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
     hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&mme);
@@ -251,13 +404,10 @@ START_TEST(render)
         goto cleanup;
     }
 
-    hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER, NULL, (void**)&ac);
-    ok(hr == S_OK, "Activation failed with %08x\n", hr);
-    if (ac)
-    {
-        test_audioclient(ac);
-        IAudioClient_Release(ac);
-    }
+    test_audioclient();
+    test_references();
+    test_event();
+
     IMMDevice_Release(dev);
 
 cleanup:

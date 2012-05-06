@@ -1,9 +1,4 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = comm.drv16
-IMPORTS   = kernel32
-EXTRADLLFLAGS = -Wb,--subsystem,win16
+EXTRADLLFLAGS = -m16
 
 @MAKE_DLL_RULES@

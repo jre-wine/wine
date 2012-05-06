@@ -90,6 +90,7 @@ HANDLE CDECL __wine_make_process_system(void)
     return ret;
 }
 
+static UINT process_error_mode;
 
 #define UNIMPLEMENTED_INFO_CLASS(c) \
     case c: \
@@ -126,7 +127,6 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     UNIMPLEMENTED_INFO_CLASS(ProcessAccessToken);
     UNIMPLEMENTED_INFO_CLASS(ProcessLdtInformation);
     UNIMPLEMENTED_INFO_CLASS(ProcessLdtSize);
-    UNIMPLEMENTED_INFO_CLASS(ProcessDefaultHardErrorMode);
     UNIMPLEMENTED_INFO_CLASS(ProcessIoPortHandlers);
     UNIMPLEMENTED_INFO_CLASS(ProcessPooledUsageAndLimits);
     UNIMPLEMENTED_INFO_CLASS(ProcessWorkingSetWatch);
@@ -314,6 +314,13 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         else
             ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
+    case ProcessDefaultHardErrorMode:
+        len = sizeof(process_error_mode);
+        if (ProcessInformationLength == len)
+            memcpy(ProcessInformation, &process_error_mode, len);
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
     case ProcessDebugObjectHandle:
         /* "These are not the debuggers you are looking for." *
          * set it to 0 aka "no debugger" to satisfy copy protections */
@@ -433,6 +440,10 @@ NTSTATUS WINAPI NtSetInformationProcess(
 
     switch (ProcessInformationClass)
     {
+    case ProcessDefaultHardErrorMode:
+        if (ProcessInformationLength != sizeof(UINT)) return STATUS_INVALID_PARAMETER;
+        process_error_mode = *(UINT *)ProcessInformation;
+        break;
     case ProcessAffinityMask:
         if (ProcessInformationLength != sizeof(DWORD_PTR)) return STATUS_INVALID_PARAMETER;
         if (*(PDWORD_PTR)ProcessInformation & ~(((DWORD_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1))

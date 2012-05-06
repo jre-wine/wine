@@ -559,6 +559,18 @@ static void str_to_buffer( WCHAR *buffer, const WCHAR *str, LPDWORD buflen )
     *buflen = len * sizeof(WCHAR);
 }
 
+static WCHAR *blob_to_str( DWORD encoding, CERT_NAME_BLOB *blob )
+{
+    WCHAR *ret;
+    DWORD size, format = CERT_SIMPLE_NAME_STR | CERT_NAME_STR_CRLF_FLAG;
+
+    size = CertNameToStrW( encoding, blob, format, NULL, 0 );
+    if ((ret = LocalAlloc( 0, size * sizeof(WCHAR) )))
+        CertNameToStrW( encoding, blob, format, ret, size );
+
+    return ret;
+}
+
 static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buffer, LPDWORD buflen )
 {
     request_t *request = (request_t *)hdr;
@@ -568,6 +580,7 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
     case WINHTTP_OPTION_SECURITY_FLAGS:
     {
         DWORD flags;
+        int bits;
 
         if (!buffer || *buflen < sizeof(flags))
         {
@@ -578,6 +591,14 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
 
         flags = 0;
         if (hdr->flags & WINHTTP_FLAG_SECURE) flags |= SECURITY_FLAG_SECURE;
+        flags |= request->netconn.security_flags;
+        bits = netconn_get_cipher_strength( &request->netconn );
+        if (bits >= 128)
+            flags |= SECURITY_FLAG_STRENGTH_STRONG;
+        else if (bits >= 56)
+            flags |= SECURITY_FLAG_STRENGTH_MEDIUM;
+        else
+            flags |= SECURITY_FLAG_STRENGTH_WEAK;
         *(DWORD *)buffer = flags;
         *buflen = sizeof(flags);
         return TRUE;
@@ -598,6 +619,41 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
         *buflen = sizeof(cert);
         return TRUE;
     }
+    case WINHTTP_OPTION_SECURITY_CERTIFICATE_STRUCT:
+    {
+        const CERT_CONTEXT *cert;
+        const CRYPT_OID_INFO *oidInfo;
+        WINHTTP_CERTIFICATE_INFO *ci = buffer;
+
+        FIXME("partial stub\n");
+
+        if (!buffer || *buflen < sizeof(*ci))
+        {
+            *buflen = sizeof(*ci);
+            set_last_error( ERROR_INSUFFICIENT_BUFFER );
+            return FALSE;
+        }
+        if (!(cert = netconn_get_certificate( &request->netconn ))) return FALSE;
+
+        ci->ftExpiry = cert->pCertInfo->NotAfter;
+        ci->ftStart  = cert->pCertInfo->NotBefore;
+        ci->lpszSubjectInfo = blob_to_str( cert->dwCertEncodingType, &cert->pCertInfo->Subject );
+        ci->lpszIssuerInfo  = blob_to_str( cert->dwCertEncodingType, &cert->pCertInfo->Issuer );
+        ci->lpszProtocolName      = NULL;
+        oidInfo = CryptFindOIDInfo( CRYPT_OID_INFO_OID_KEY,
+                                    cert->pCertInfo->SignatureAlgorithm.pszObjId,
+                                    0 );
+        if (oidInfo)
+            ci->lpszSignatureAlgName = (LPWSTR)oidInfo->pwszName;
+        else
+            ci->lpszSignatureAlgName  = NULL;
+        ci->lpszEncryptionAlgName = NULL;
+        ci->dwKeySize = netconn_get_cipher_strength( &request->netconn );
+
+        CertFreeCertificateContext( cert );
+        *buflen = sizeof(*ci);
+        return TRUE;
+    }
     case WINHTTP_OPTION_SECURITY_KEY_BITNESS:
     {
         if (!buffer || *buflen < sizeof(DWORD))
@@ -607,7 +663,7 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
             return FALSE;
         }
 
-        *(DWORD *)buffer = 128; /* FIXME */
+        *(DWORD *)buffer = netconn_get_cipher_strength( &request->netconn );
         *buflen = sizeof(DWORD);
         return TRUE;
     }

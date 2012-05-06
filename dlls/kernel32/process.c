@@ -56,6 +56,9 @@ WINE_DECLARE_DEBUG_CHANNEL(file);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 #ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#include <pthread.h>
+#include <unistd.h>
 extern char **__wine_get_main_environment(void);
 #else
 extern char **__wine_main_environ;
@@ -69,8 +72,6 @@ typedef struct
     LPSTR lpCmdShow;
     DWORD dwReserved;
 } LOADPARMS32;
-
-static UINT process_error_mode;
 
 static DWORD shutdown_flags = 0;
 static DWORD shutdown_priority = 0x280;
@@ -1630,7 +1631,7 @@ static startup_info_t *create_startup_info( LPCWSTR filename, LPCWSTR cmdline,
 
     info->console_flags = cur_params->ConsoleFlags;
     if (flags & CREATE_NEW_PROCESS_GROUP) info->console_flags = 1;
-    if (flags & CREATE_NEW_CONSOLE) info->console = (obj_handle_t)1;  /* FIXME: cf. kernel_main.c */
+    if (flags & CREATE_NEW_CONSOLE) info->console = wine_server_obj_handle(KERNEL32_CONSOLE_ALLOC);
 
     if (startup->dwFlags & STARTF_USESTDHANDLES)
     {
@@ -1735,6 +1736,54 @@ static const char *get_alternate_loader( char **ret_env )
     return loader;
 }
 
+#ifdef __APPLE__
+/***********************************************************************
+ *           terminate_main_thread
+ *
+ * On some versions of Mac OS X, the execve system call fails with
+ * ENOTSUP if the process has multiple threads.  Wine is always multi-
+ * threaded on Mac OS X because it specifically reserves the main thread
+ * for use by the system frameworks (see apple_main_thread() in
+ * libs/wine/loader.c).  So, when we need to exec without first forking,
+ * we need to terminate the main thread first.  We do this by installing
+ * a custom run loop source onto the main run loop and signaling it.
+ * The source's "perform" callback is pthread_exit and it will be
+ * executed on the main thread, terminating it.
+ *
+ * Returns TRUE if there's still hope the main thread has terminated or
+ * will soon.  Return FALSE if we've given up.
+ */
+static BOOL terminate_main_thread(void)
+{
+    static int delayms;
+
+    if (!delayms)
+    {
+        CFRunLoopSourceContext source_context = { 0 };
+        CFRunLoopSourceRef source;
+
+        source_context.perform = pthread_exit;
+        if (!(source = CFRunLoopSourceCreate( NULL, 0, &source_context )))
+            return FALSE;
+
+        CFRunLoopAddSource( CFRunLoopGetMain(), source, kCFRunLoopCommonModes );
+        CFRunLoopSourceSignal( source );
+        CFRunLoopWakeUp( CFRunLoopGetMain() );
+        CFRelease( source );
+
+        delayms = 20;
+    }
+
+    if (delayms > 1000)
+        return FALSE;
+
+    usleep(delayms * 1000);
+    delayms *= 2;
+
+    return TRUE;
+}
+#endif
+
 /***********************************************************************
  *           create_process
  *
@@ -1762,7 +1811,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
 
     if (!is_win64 && !is_wow64 && (binary_info->flags & BINARY_FLAG_64BIT))
     {
-        ERR( "starting 64-bit process %s not supported on this environment\n", debugstr_w(filename) );
+        ERR( "starting 64-bit process %s not supported in 32-bit wineprefix\n", debugstr_w(filename) );
         SetLastError( ERROR_BAD_EXE_FORMAT );
         return FALSE;
     }
@@ -1899,7 +1948,18 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
         if (wineloader) putenv( wineloader );
         if (unixdir) chdir(unixdir);
 
-        if (argv) wine_exec_wine_binary( loader, argv, getenv("WINELOADER") );
+        if (argv)
+        {
+            do
+            {
+                wine_exec_wine_binary( loader, argv, getenv("WINELOADER") );
+            }
+#ifdef __APPLE__
+            while (errno == ENOTSUP && exec_only && terminate_main_thread());
+#else
+            while (0);
+#endif
+        }
         _exit(1);
     }
 
@@ -2106,11 +2166,55 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
 }
 
 
-/* Steam hotpatches CreateProcessA and W, so to prevent it from crashing use an internal function */
-static BOOL create_process_impl( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
-                                 LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit, DWORD flags,
-                                 LPVOID env, LPCWSTR cur_dir, LPSTARTUPINFOW startup_info,
-                                 LPPROCESS_INFORMATION info )
+/**********************************************************************
+ *       CreateProcessA          (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessA( LPCSTR app_name, LPSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
+                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit,
+                                              DWORD flags, LPVOID env, LPCSTR cur_dir,
+                                              LPSTARTUPINFOA startup_info, LPPROCESS_INFORMATION info )
+{
+    BOOL ret = FALSE;
+    WCHAR *app_nameW = NULL, *cmd_lineW = NULL, *cur_dirW = NULL;
+    UNICODE_STRING desktopW, titleW;
+    STARTUPINFOW infoW;
+
+    desktopW.Buffer = NULL;
+    titleW.Buffer = NULL;
+    if (app_name && !(app_nameW = FILE_name_AtoW( app_name, TRUE ))) goto done;
+    if (cmd_line && !(cmd_lineW = FILE_name_AtoW( cmd_line, TRUE ))) goto done;
+    if (cur_dir && !(cur_dirW = FILE_name_AtoW( cur_dir, TRUE ))) goto done;
+
+    if (startup_info->lpDesktop) RtlCreateUnicodeStringFromAsciiz( &desktopW, startup_info->lpDesktop );
+    if (startup_info->lpTitle) RtlCreateUnicodeStringFromAsciiz( &titleW, startup_info->lpTitle );
+
+    memcpy( &infoW, startup_info, sizeof(infoW) );
+    infoW.lpDesktop = desktopW.Buffer;
+    infoW.lpTitle = titleW.Buffer;
+
+    if (startup_info->lpReserved)
+      FIXME("StartupInfo.lpReserved is used, please report (%s)\n",
+            debugstr_a(startup_info->lpReserved));
+
+    ret = CreateProcessW( app_nameW, cmd_lineW, process_attr, thread_attr,
+                          inherit, flags, env, cur_dirW, &infoW, info );
+done:
+    HeapFree( GetProcessHeap(), 0, app_nameW );
+    HeapFree( GetProcessHeap(), 0, cmd_lineW );
+    HeapFree( GetProcessHeap(), 0, cur_dirW );
+    RtlFreeUnicodeString( &desktopW );
+    RtlFreeUnicodeString( &titleW );
+    return ret;
+}
+
+
+/**********************************************************************
+ *       CreateProcessW          (KERNEL32.@)
+ */
+BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
+                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit, DWORD flags,
+                                              LPVOID env, LPCWSTR cur_dir, LPSTARTUPINFOW startup_info,
+                                              LPPROCESS_INFORMATION info )
 {
     BOOL retv = FALSE;
     HANDLE hFile = 0;
@@ -2242,61 +2346,6 @@ static BOOL create_process_impl( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_A
 
 
 /**********************************************************************
- *       CreateProcessA          (KERNEL32.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessA( LPCSTR app_name, LPSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
-                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit,
-                                              DWORD flags, LPVOID env, LPCSTR cur_dir,
-                                              LPSTARTUPINFOA startup_info, LPPROCESS_INFORMATION info )
-{
-    BOOL ret = FALSE;
-    WCHAR *app_nameW = NULL, *cmd_lineW = NULL, *cur_dirW = NULL;
-    UNICODE_STRING desktopW, titleW;
-    STARTUPINFOW infoW;
-
-    desktopW.Buffer = NULL;
-    titleW.Buffer = NULL;
-    if (app_name && !(app_nameW = FILE_name_AtoW( app_name, TRUE ))) goto done;
-    if (cmd_line && !(cmd_lineW = FILE_name_AtoW( cmd_line, TRUE ))) goto done;
-    if (cur_dir && !(cur_dirW = FILE_name_AtoW( cur_dir, TRUE ))) goto done;
-
-    if (startup_info->lpDesktop) RtlCreateUnicodeStringFromAsciiz( &desktopW, startup_info->lpDesktop );
-    if (startup_info->lpTitle) RtlCreateUnicodeStringFromAsciiz( &titleW, startup_info->lpTitle );
-
-    memcpy( &infoW, startup_info, sizeof(infoW) );
-    infoW.lpDesktop = desktopW.Buffer;
-    infoW.lpTitle = titleW.Buffer;
-
-    if (startup_info->lpReserved)
-      FIXME("StartupInfo.lpReserved is used, please report (%s)\n",
-            debugstr_a(startup_info->lpReserved));
-
-    ret = create_process_impl( app_nameW, cmd_lineW, process_attr, thread_attr,
-                               inherit, flags, env, cur_dirW, &infoW, info );
-done:
-    HeapFree( GetProcessHeap(), 0, app_nameW );
-    HeapFree( GetProcessHeap(), 0, cmd_lineW );
-    HeapFree( GetProcessHeap(), 0, cur_dirW );
-    RtlFreeUnicodeString( &desktopW );
-    RtlFreeUnicodeString( &titleW );
-    return ret;
-}
-
-
-/**********************************************************************
- *       CreateProcessW          (KERNEL32.@)
- */
-BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
-                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit, DWORD flags,
-                                              LPVOID env, LPCWSTR cur_dir, LPSTARTUPINFOW startup_info,
-                                              LPPROCESS_INFORMATION info )
-{
-    return create_process_impl( app_name, cmd_line, process_attr, thread_attr,
-                                inherit, flags, env, cur_dir, startup_info, info);
-}
-
-
-/**********************************************************************
  *       exec_process
  */
 static void exec_process( LPCWSTR name )
@@ -2411,25 +2460,25 @@ UINT WINAPI WinExec( LPCSTR lpCmdLine, UINT nCmdShow )
 /**********************************************************************
  *	    LoadModule    (KERNEL32.@)
  */
-HINSTANCE WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
+DWORD WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
 {
     LOADPARMS32 *params = paramBlock;
     PROCESS_INFORMATION info;
     STARTUPINFOA startup;
-    HINSTANCE hInstance;
+    DWORD ret;
     LPSTR cmdline, p;
     char filename[MAX_PATH];
     BYTE len;
 
-    if (!name) return (HINSTANCE)ERROR_FILE_NOT_FOUND;
+    if (!name) return ERROR_FILE_NOT_FOUND;
 
     if (!SearchPathA( NULL, name, ".exe", sizeof(filename), filename, NULL ) &&
         !SearchPathA( NULL, name, NULL, sizeof(filename), filename, NULL ))
-        return ULongToHandle(GetLastError());
+        return GetLastError();
 
     len = (BYTE)params->lpCmdLine[0];
     if (!(cmdline = HeapAlloc( GetProcessHeap(), 0, strlen(filename) + len + 2 )))
-        return (HINSTANCE)ERROR_NOT_ENOUGH_MEMORY;
+        return ERROR_NOT_ENOUGH_MEMORY;
 
     strcpy( cmdline, filename );
     p = cmdline + strlen(cmdline);
@@ -2451,19 +2500,19 @@ HINSTANCE WINAPI LoadModule( LPCSTR name, LPVOID paramBlock )
         /* Give 30 seconds to the app to come up */
         if (wait_input_idle( info.hProcess, 30000 ) == WAIT_FAILED)
             WARN("WaitForInputIdle failed: Error %d\n", GetLastError() );
-        hInstance = (HINSTANCE)33;
+        ret = 33;
         /* Close off the handles */
         CloseHandle( info.hThread );
         CloseHandle( info.hProcess );
     }
-    else if ((hInstance = ULongToHandle(GetLastError())) >= (HINSTANCE)32)
+    else if ((ret = GetLastError()) >= 32)
     {
-        FIXME("Strange error set by CreateProcess: %p\n", hInstance );
-        hInstance = (HINSTANCE)11;
+        FIXME("Strange error set by CreateProcess: %u\n", ret );
+        ret = 11;
     }
 
     HeapFree( GetProcessHeap(), 0, cmdline );
-    return hInstance;
+    return ret;
 }
 
 
@@ -2562,8 +2611,12 @@ BOOL WINAPI GetExitCodeProcess( HANDLE hProcess, LPDWORD lpExitCode )
  */
 UINT WINAPI SetErrorMode( UINT mode )
 {
-    UINT old = process_error_mode;
-    process_error_mode = mode;
+    UINT old;
+
+    NtQueryInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                               &old, sizeof(old), NULL );
+    NtSetInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                             &mode, sizeof(mode) );
     return old;
 }
 
@@ -2572,7 +2625,11 @@ UINT WINAPI SetErrorMode( UINT mode )
  */
 UINT WINAPI GetErrorMode( void )
 {
-    return process_error_mode;
+    UINT mode;
+
+    NtQueryInformationProcess( GetCurrentProcess(), ProcessDefaultHardErrorMode,
+                               &mode, sizeof(mode), NULL );
+    return mode;
 }
 
 /**********************************************************************
@@ -3435,6 +3492,26 @@ HANDLE WINAPI GetCurrentProcess(void)
 }
 
 /***********************************************************************
+ *           GetLogicalProcessorInformation     (KERNEL32.@)
+ */
+BOOL WINAPI GetLogicalProcessorInformation(PSYSTEM_LOGICAL_PROCESSOR_INFORMATION buffer, PDWORD pBufLen)
+{
+    FIXME("(%p,%p): stub\n", buffer, pBufLen);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
+ *           GetLogicalProcessorInformationEx   (KERNEL32.@)
+ */
+BOOL WINAPI GetLogicalProcessorInformationEx(LOGICAL_PROCESSOR_RELATIONSHIP relationship, PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX buffer, PDWORD pBufLen)
+{
+    FIXME("(%u,%p,%p): stub\n", relationship, buffer, pBufLen);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
  *           CmdBatNotification   (KERNEL32.@)
  *
  * Notifies the system that a batch file has started or finished.
@@ -3470,4 +3547,22 @@ DWORD WINAPI WTSGetActiveConsoleSessionId(void)
 {
     FIXME("stub\n");
     return 0;
+}
+
+/**********************************************************************
+ *           GetSystemDEPPolicy     (KERNEL32.@)
+ */
+DEP_SYSTEM_POLICY_TYPE WINAPI GetSystemDEPPolicy(void)
+{
+    FIXME("stub\n");
+    return OptIn;
+}
+/**********************************************************************
+ *           SetProcessDEPPolicy     (KERNEL32.@)
+ */
+BOOL WINAPI SetProcessDEPPolicy(DWORD newDEP)
+{
+    FIXME("(%d): stub\n", newDEP);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

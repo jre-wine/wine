@@ -18,26 +18,23 @@
 
 struct HTMLStyle {
     DispatchEx dispex;
-    const IHTMLStyleVtbl    *lpHTMLStyleVtbl;
-    const IHTMLStyle2Vtbl   *lpHTMLStyle2Vtbl;
-    const IHTMLStyle3Vtbl   *lpHTMLStyle3Vtbl;
-    const IHTMLStyle4Vtbl   *lpHTMLStyle4Vtbl;
+    IHTMLStyle  IHTMLStyle_iface;
+    IHTMLStyle2 IHTMLStyle2_iface;
+    IHTMLStyle3 IHTMLStyle3_iface;
+    IHTMLStyle4 IHTMLStyle4_iface;
 
     LONG ref;
 
     nsIDOMCSSStyleDeclaration *nsstyle;
+    WCHAR *filter;
 };
-
-#define HTMLSTYLE(x)     ((IHTMLStyle*)                   &(x)->lpHTMLStyleVtbl)
-#define HTMLSTYLE2(x)    ((IHTMLStyle2*)                  &(x)->lpHTMLStyle2Vtbl)
-#define HTMLSTYLE3(x)    ((IHTMLStyle3*)                  &(x)->lpHTMLStyle3Vtbl)
-#define HTMLSTYLE4(x)    ((IHTMLStyle4*)                  &(x)->lpHTMLStyle4Vtbl)
 
 /* NOTE: Make sure to keep in sync with style_tbl in htmlstyle.c */
 typedef enum {
     STYLEID_BACKGROUND,
     STYLEID_BACKGROUND_COLOR,
     STYLEID_BACKGROUND_IMAGE,
+    STYLEID_BACKGROUND_POSITION,
     STYLEID_BACKGROUND_POSITION_X,
     STYLEID_BACKGROUND_POSITION_Y,
     STYLEID_BACKGROUND_REPEAT,
@@ -82,6 +79,7 @@ typedef enum {
     STYLEID_MARGIN_TOP,
     STYLEID_MIN_HEIGHT,
     STYLEID_OVERFLOW,
+    STYLEID_PADDING,
     STYLEID_PADDING_BOTTOM,
     STYLEID_PADDING_LEFT,
     STYLEID_PADDING_RIGHT,
@@ -112,3 +110,4 @@ HRESULT get_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, 
 #define ATTR_FIX_PX      1
 #define ATTR_FIX_URL     2
 #define ATTR_STR_TO_INT  4
+#define ATTR_HEX_INT     8

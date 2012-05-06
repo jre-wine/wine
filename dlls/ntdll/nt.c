@@ -249,29 +249,47 @@ NTSTATUS WINAPI NtQueryInformationToken(
 	ULONG tokeninfolength,
 	PULONG retlen )
 {
-    ULONG len;
+    static const ULONG info_len [] =
+    {
+        0,
+        0,    /* TokenUser */
+        0,    /* TokenGroups */
+        0,    /* TokenPrivileges */
+        0,    /* TokenOwner */
+        0,    /* TokenPrimaryGroup */
+        0,    /* TokenDefaultDacl */
+        sizeof(TOKEN_SOURCE), /* TokenSource */
+        sizeof(TOKEN_TYPE),  /* TokenType */
+        sizeof(SECURITY_IMPERSONATION_LEVEL), /* TokenImpersonationLevel */
+        sizeof(TOKEN_STATISTICS), /* TokenStatistics */
+        0,    /* TokenRestrictedSids */
+        0,    /* TokenSessionId */
+        0,    /* TokenGroupsAndPrivileges */
+        0,    /* TokenSessionReference */
+        0,    /* TokenSandBoxInert */
+        0,    /* TokenAuditPolicy */
+        0,    /* TokenOrigin */
+        sizeof(TOKEN_ELEVATION_TYPE), /* TokenElevationType */
+        0,    /* TokenLinkedToken */
+        sizeof(TOKEN_ELEVATION), /* TokenElevation */
+        0,    /* TokenHasRestrictions */
+        0,    /* TokenAccessInformation */
+        0,    /* TokenVirtualizationAllowed */
+        0,    /* TokenVirtualizationEnabled */
+        0,    /* TokenIntegrityLevel */
+        0,    /* TokenUIAccess */
+        0,    /* TokenMandatoryPolicy */
+        0     /* TokenLogonSid */
+    };
+
+    ULONG len = 0;
     NTSTATUS status = STATUS_SUCCESS;
 
     TRACE("(%p,%d,%p,%d,%p)\n",
           token,tokeninfoclass,tokeninfo,tokeninfolength,retlen);
 
-    switch (tokeninfoclass)
-    {
-    case TokenSource:
-        len = sizeof(TOKEN_SOURCE);
-        break;
-    case TokenType:
-        len = sizeof (TOKEN_TYPE);
-        break;
-    case TokenImpersonationLevel:
-        len = sizeof(SECURITY_IMPERSONATION_LEVEL);
-        break;
-    case TokenStatistics:
-        len = sizeof(TOKEN_STATISTICS);
-        break;
-    default:
-        len = 0;
-    }
+    if (tokeninfoclass < MaxTokenInfoClass)
+        len = info_len[tokeninfoclass];
 
     if (retlen) *retlen = len;
 
@@ -488,6 +506,20 @@ NTSTATUS WINAPI NtQueryInformationToken(
             }
         }
         SERVER_END_REQ;
+        break;
+    case TokenElevationType:
+        {
+            TOKEN_ELEVATION_TYPE *elevation_type = tokeninfo;
+            FIXME("QueryInformationToken( ..., TokenElevationType, ...) semi-stub\n");
+            *elevation_type = TokenElevationTypeFull;
+        }
+        break;
+    case TokenElevation:
+        {
+            TOKEN_ELEVATION *elevation = tokeninfo;
+            FIXME("QueryInformationToken( ..., TokenElevation, ...) semi-stub\n");
+            elevation->TokenIsElevated = TRUE;
+        }
         break;
     default:
         {
@@ -895,8 +927,12 @@ void fill_cpu_info(void)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_AMD64;
 #elif defined(__powerpc__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_PPC;
+#elif defined(__arm__)
+    cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ARM;
 #elif defined(__ALPHA__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ALPHA;
+#elif defined(__sparc__)
+    cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_SPARC;
 #else
 #error Unknown CPU
 #endif
@@ -1020,6 +1056,8 @@ void fill_cpu_info(void)
             {
                 if (strstr(value, "cx8"))
                     user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
+                if (strstr(value, "cx16"))
+                    user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128] = TRUE;
                 if (strstr(value, "mmx"))
                     user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "tsc"))
@@ -1032,9 +1070,12 @@ void fill_cpu_info(void)
                     user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "sse2"))
                     user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
+                if (strstr(value, "pni"))
+                    user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] = TRUE;
                 if (strstr(value, "pae"))
                     user_shared_data->ProcessorFeatures[PF_PAE_ENABLED] = TRUE;
-
+                if (strstr(value, "ht"))
+                    cached_sci.FeatureSet |= CPU_FEATURE_HTT;
                 continue;
             }
 	}
@@ -1132,7 +1173,7 @@ void fill_cpu_info(void)
             fclose(f);
         }
     }
-#elif defined(__FreeBSD__)
+#elif defined(__FreeBSD__) || defined (__FreeBSD_kernel__)
     {
         int ret, num;
         size_t len;
@@ -1245,11 +1286,13 @@ void fill_cpu_info(void)
                 {
                     cached_sci.Revision |= value;
                     if (strstr(buffer, "CX8"))   user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
+                    if (strstr(buffer, "CX16"))  user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128] = TRUE;
                     if (strstr(buffer, "MMX"))   user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "TSC"))   user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
                     if (strstr(buffer, "3DNOW")) user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "SSE"))   user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "SSE2"))  user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
+                    if (strstr(buffer, "SSE3"))  user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "PAE"))   user_shared_data->ProcessorFeatures[PF_PAE_ENABLED] = TRUE;
                 }
                 break; /* CPU_TYPE_I386 */
@@ -1327,11 +1370,27 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         {
             SYSTEM_PERFORMANCE_INFORMATION spi;
             static BOOL fixme_written = FALSE;
+            FILE *fp;
 
             memset(&spi, 0 , sizeof(spi));
             len = sizeof(spi);
 
             spi.Reserved3 = 0x7fffffff; /* Available paged pool memory? */
+
+            if ((fp = fopen("/proc/uptime", "r")))
+            {
+                double uptime, idle_time;
+
+                fscanf(fp, "%lf %lf", &uptime, &idle_time);
+                fclose(fp);
+                spi.IdleTime.QuadPart = 10000000 * idle_time;
+            }
+            else
+            {
+                static ULONGLONG idle;
+                /* many programs expect IdleTime to change so fake change */
+                spi.IdleTime.QuadPart = ++idle;
+            }
 
             if (Length >= len)
             {
@@ -1527,26 +1586,35 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 FILE *cpuinfo = fopen("/proc/stat", "r");
                 if (cpuinfo)
                 {
-                    unsigned usr,nice,sys;
-                    unsigned long idle;
+                    unsigned long usr,nice,sys,idle,remainder[8];
                     int count;
                     char name[10];
                     char line[255];
 
                     /* first line is combined usage */
                     if (fgets(line,255,cpuinfo))
-                        count = sscanf(line, "%s %u %u %u %lu", name, &usr, &nice,
-                                       &sys, &idle);
+                        count = sscanf(line, "%s %lu %lu %lu %lu "
+                                       "%lu %lu %lu %lu %lu %lu %lu %lu",
+                                    name, &usr, &nice, &sys, &idle,
+                                    &remainder[0], &remainder[1], &remainder[2],
+                                    &remainder[3], &remainder[4], &remainder[5],
+                                    &remainder[6], &remainder[7]);
                     else
                         count = 0;
                     /* we set this up in the for older non-smp enabled kernels */
-                    if (count == 5 && strcmp(name, "cpu") == 0)
+                    if (count >= 5 && strcmp(name, "cpu") == 0)
                     {
+                        int i;
+                        for (i = 0; i + 5 < count; ++i)
+                            sys += remainder[i];
+                        usr += nice;
                         sppi = RtlAllocateHeap(GetProcessHeap(), 0,
                                                sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
                         sppi->IdleTime.QuadPart = idle;
                         sppi->KernelTime.QuadPart = sys;
-                        sppi->UserTime.QuadPart = usr;
+                        sppi->UserTime.QuadPart = usr+nice;
+                        sppi->Reserved1[0].QuadPart = 0;
+                        sppi->Reserved1[1].QuadPart = 0;
                         cpus = 1;
                         len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION);
                     }
@@ -1554,12 +1622,20 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                     do
                     {
                         if (fgets(line, 255, cpuinfo))
-                            count = sscanf(line, "%s %u %u %u %lu", name, &usr,
-                                           &nice, &sys, &idle);
+                            count = sscanf(line, "%s %lu %lu %lu %lu "
+                                        "%lu %lu %lu %lu %lu %lu %lu %lu",
+                                        name, &usr, &nice, &sys, &idle,
+                                        &remainder[0], &remainder[1], &remainder[2],
+                                        &remainder[3], &remainder[4], &remainder[5],
+                                        &remainder[6], &remainder[7]);
                         else
                             count = 0;
-                        if (count == 5 && strncmp(name, "cpu", 3)==0)
+                        if (count >= 5 && strncmp(name, "cpu", 3)==0)
                         {
+                            int i;
+                            for (i = 0; i + 5 < count; ++i)
+                                sys += remainder[i];
+                            usr += nice;
                             out_cpus --;
                             if (name[3]=='0') /* first cpu */
                             {
@@ -1574,6 +1650,8 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                                 sppi[cpus].IdleTime.QuadPart = idle;
                                 sppi[cpus].KernelTime.QuadPart = sys;
                                 sppi[cpus].UserTime.QuadPart = usr;
+                                sppi[cpus].Reserved1[0].QuadPart = 0;
+                                sppi[cpus].Reserved1[1].QuadPart = 0;
                                 cpus++;
                             }
                         }

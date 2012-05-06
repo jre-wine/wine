@@ -1,33 +1,11 @@
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = write.exe
 APPMODE   = -mwindows
-IMPORTS   = user32 gdi32 kernel32
+IMPORTS   = user32 gdi32
 
 C_SRCS = write.c
 
-RC_SRCS = \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Es.rc \
-	Fr.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sr.rc \
-	Sv.rc \
-	Uk.rc
+RC_SRCS = write.rc
+PO_SRCS = write.rc
 
 @MAKE_PROG_RULES@

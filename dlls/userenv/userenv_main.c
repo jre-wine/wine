@@ -26,9 +26,11 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "winternl.h"
+#include "winnls.h"
 #include "userenv.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL( userenv );
 
@@ -100,30 +102,219 @@ BOOL WINAPI ExpandEnvironmentStringsForUserW( HANDLE hToken, LPCWSTR lpSrc,
     return ret;
 }
 
+BOOL WINAPI GetDefaultUserProfileDirectoryA( LPSTR lpProfileDir, LPDWORD lpcchSize )
+{
+    FIXME("%p %p\n", lpProfileDir, lpcchSize );
+    return FALSE;
+}
+
+BOOL WINAPI GetDefaultUserProfileDirectoryW( LPWSTR lpProfileDir, LPDWORD lpcchSize )
+{
+    FIXME("%p %p\n", lpProfileDir, lpcchSize );
+    return FALSE;
+}
+
 BOOL WINAPI GetUserProfileDirectoryA( HANDLE hToken, LPSTR lpProfileDir,
                      LPDWORD lpcchSize )
 {
-    FIXME("%p %p %p\n", hToken, lpProfileDir, lpcchSize );
-    return FALSE;
+    BOOL ret;
+    WCHAR *dirW = NULL;
+
+    TRACE( "%p %p %p\n", hToken, lpProfileDir, lpcchSize );
+
+    if (!lpProfileDir || !lpcchSize)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (!(dirW = HeapAlloc( GetProcessHeap(), 0, *lpcchSize * sizeof(WCHAR) )))
+        return FALSE;
+
+    if ((ret = GetUserProfileDirectoryW( hToken, dirW, lpcchSize )))
+        WideCharToMultiByte( CP_ACP, 0, dirW, *lpcchSize, lpProfileDir, *lpcchSize, NULL, NULL );
+
+    HeapFree( GetProcessHeap(), 0, dirW );
+    return ret;
 }
 
 BOOL WINAPI GetUserProfileDirectoryW( HANDLE hToken, LPWSTR lpProfileDir,
                      LPDWORD lpcchSize )
 {
-    FIXME("%p %p %p\n", hToken, lpProfileDir, lpcchSize );
-    return FALSE;
+    static const WCHAR slashW[] = {'\\',0};
+    TOKEN_USER *t;
+    WCHAR *userW = NULL, *dirW = NULL;
+    DWORD len, dir_len, domain_len;
+    SID_NAME_USE use;
+    BOOL ret = FALSE;
+
+    TRACE( "%p %p %p\n", hToken, lpProfileDir, lpcchSize );
+
+    if (!lpcchSize)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    len = 0;
+    GetTokenInformation( hToken, TokenUser, NULL, 0, &len );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FALSE;
+    if (!(t = HeapAlloc( GetProcessHeap(), 0, len ))) return FALSE;
+    if (!GetTokenInformation( hToken, TokenUser, t, len, &len )) goto done;
+
+    len = 0;
+    LookupAccountSidW( NULL, t->User.Sid, NULL, &len, NULL, &domain_len, NULL );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) goto done;
+    if (!(userW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) goto done;
+    if (!LookupAccountSidW( NULL, t->User.Sid, userW, &len, NULL, &domain_len, &use )) goto done;
+
+    dir_len = 0;
+    GetProfilesDirectoryW( NULL, &dir_len );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) goto done;
+    if (!(dirW = HeapAlloc( GetProcessHeap(), 0, (dir_len + 1) * sizeof(WCHAR) ))) goto done;
+    if (!GetProfilesDirectoryW( dirW, &dir_len )) goto done;
+
+    len += dir_len + 2;
+    if (*lpcchSize < len)
+    {
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        *lpcchSize = len;
+        goto done;
+    }
+    strcpyW( lpProfileDir, dirW );
+    strcatW( lpProfileDir, slashW );
+    strcatW( lpProfileDir, userW );
+    *lpcchSize = len;
+    ret = TRUE;
+
+done:
+    HeapFree( GetProcessHeap(), 0, t );
+    HeapFree( GetProcessHeap(), 0, userW );
+    HeapFree( GetProcessHeap(), 0, dirW );
+    return ret;
 }
+
+static const char ProfileListA[] = "Software\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList";
 
 BOOL WINAPI GetProfilesDirectoryA( LPSTR lpProfilesDir, LPDWORD lpcchSize )
 {
-    FIXME("%p %p\n", lpProfilesDir, lpcchSize );
-    return FALSE;
+    static const char ProfilesDirectory[] = "ProfilesDirectory";
+    LONG l;
+    HKEY key;
+    BOOL ret = FALSE;
+    DWORD len = 0, expanded_len;
+    LPSTR unexpanded_profiles_dir = NULL;
+
+    TRACE("%p %p\n", lpProfilesDir, lpcchSize );
+
+    if (!lpProfilesDir || !lpcchSize)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    l = RegOpenKeyExA(HKEY_LOCAL_MACHINE, ProfileListA, 0, KEY_READ, &key);
+    if (l)
+    {
+        SetLastError(l);
+        return FALSE;
+    }
+    l = RegQueryValueExA(key, ProfilesDirectory, NULL, NULL, NULL, &len);
+    if (l)
+    {
+        SetLastError(l);
+        goto end;
+    }
+    unexpanded_profiles_dir = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!unexpanded_profiles_dir)
+    {
+        SetLastError(ERROR_OUTOFMEMORY);
+        goto end;
+    }
+    l = RegQueryValueExA(key, ProfilesDirectory, NULL, NULL,
+                             (BYTE *)unexpanded_profiles_dir, &len);
+    if (l)
+    {
+        SetLastError(l);
+        goto end;
+    }
+    expanded_len = ExpandEnvironmentStringsA(unexpanded_profiles_dir, NULL, 0);
+    /* The returned length doesn't include the NULL terminator. */
+    if (*lpcchSize < expanded_len - 1)
+    {
+        *lpcchSize = expanded_len - 1;
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        goto end;
+    }
+    *lpcchSize = expanded_len - 1;
+    /* The return value is also the expected length. */
+    ret = ExpandEnvironmentStringsA(unexpanded_profiles_dir, lpProfilesDir,
+                                    expanded_len) - 1;
+end:
+    HeapFree(GetProcessHeap(), 0, unexpanded_profiles_dir);
+    RegCloseKey(key);
+    return ret;
 }
+
+static const WCHAR ProfileListW[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s',' ','N','T','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','P','r','o','f','i','l','e','L','i','s','t',0};
 
 BOOL WINAPI GetProfilesDirectoryW( LPWSTR lpProfilesDir, LPDWORD lpcchSize )
 {
-    FIXME("%p %p\n", lpProfilesDir, lpcchSize );
-    return FALSE;
+    static const WCHAR ProfilesDirectory[] = {'P','r','o','f','i','l','e','s','D','i','r','e','c','t','o','r','y',0};
+    LONG l;
+    HKEY key;
+    BOOL ret = FALSE;
+    DWORD len = 0, expanded_len;
+    LPWSTR unexpanded_profiles_dir = NULL;
+
+    TRACE("%p %p\n", lpProfilesDir, lpcchSize );
+
+    if (!lpcchSize)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    l = RegOpenKeyExW(HKEY_LOCAL_MACHINE, ProfileListW, 0, KEY_READ, &key);
+    if (l)
+    {
+        SetLastError(l);
+        return FALSE;
+    }
+    l = RegQueryValueExW(key, ProfilesDirectory, NULL, NULL, NULL, &len);
+    if (l)
+    {
+        SetLastError(l);
+        goto end;
+    }
+    unexpanded_profiles_dir = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!unexpanded_profiles_dir)
+    {
+        SetLastError(ERROR_OUTOFMEMORY);
+        goto end;
+    }
+    l = RegQueryValueExW(key, ProfilesDirectory, NULL, NULL,
+                             (BYTE *)unexpanded_profiles_dir, &len);
+    if (l)
+    {
+        SetLastError(l);
+        goto end;
+    }
+    expanded_len = ExpandEnvironmentStringsW(unexpanded_profiles_dir, NULL, 0);
+    /* The returned length doesn't include the NULL terminator. */
+    if (*lpcchSize < expanded_len - 1 || !lpProfilesDir)
+    {
+        *lpcchSize = expanded_len - 1;
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        goto end;
+    }
+    *lpcchSize = expanded_len - 1;
+    /* The return value is also the expected length. */
+    ret = ExpandEnvironmentStringsW(unexpanded_profiles_dir, lpProfilesDir,
+                                    expanded_len) - 1;
+end:
+    HeapFree(GetProcessHeap(), 0, unexpanded_profiles_dir);
+    RegCloseKey(key);
+    return ret;
 }
 
 BOOL WINAPI GetAllUsersProfileDirectoryA( LPSTR lpProfileDir, LPDWORD lpcchSize )

@@ -745,6 +745,7 @@ static void test_CreateAssemblyNameObject(void)
         to_widechar(namestr, "wine, processorArchitecture=AMD64");
         name = NULL;
         hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
+        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
         size = MAX_PATH;
         hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_PROCESSORARCHITECTURE);
@@ -758,6 +759,7 @@ static void test_CreateAssemblyNameObject(void)
         to_widechar(namestr, "wine, processorArchitecture=IA64");
         name = NULL;
         hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
+        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
         size = MAX_PATH;
         hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_PROCESSORARCHITECTURE);
@@ -771,6 +773,7 @@ static void test_CreateAssemblyNameObject(void)
         to_widechar(namestr, "wine, processorArchitecture=MSIL");
         name = NULL;
         hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
+        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
 
         size = MAX_PATH;
         hr = IAssemblyName_GetDisplayName(name, str, &size, ASM_DISPLAYF_PROCESSORARCHITECTURE);
@@ -868,12 +871,9 @@ static void test_CreateAssemblyNameObject(void)
     to_widechar(namestr, "wine PublicKeyToken=1234567890abcdef");
     name = (IAssemblyName *)0xdeadbeef;
     hr = pCreateAssemblyNameObject(&name, namestr, CANOF_PARSE_DISPLAY_NAME, NULL);
-    todo_wine
-    {
-        ok(hr == FUSION_E_INVALID_NAME,
-           "Expected FUSION_E_INVALID_NAME, got %08x\n", hr);
-        ok(name == (IAssemblyName *)0xdeadbeef, "Expected 0xdeadbeef, got %p\n", name);
-    }
+    ok(hr == FUSION_E_INVALID_NAME,
+       "Expected FUSION_E_INVALID_NAME, got %08x\n", hr);
+    ok(name == (IAssemblyName *)0xdeadbeef, "Expected 0xdeadbeef, got %p\n", name);
     if(SUCCEEDED(hr)) IAssemblyName_Release(name);
 
     /* no '=' */

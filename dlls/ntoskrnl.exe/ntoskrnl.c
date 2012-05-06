@@ -622,6 +622,19 @@ NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
 
 
 /***********************************************************************
+ *           IoGetDeviceInterfaces   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoGetDeviceInterfaces( CONST GUID *InterfaceClassGuid,
+                                       PDEVICE_OBJECT PhysicalDeviceObject,
+                                       ULONG Flags, PWSTR *SymbolicLinkList )
+{
+    FIXME( "stub: %s %p %x %p\n", debugstr_guid(InterfaceClassGuid),
+           PhysicalDeviceObject, Flags, SymbolicLinkList );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
  *           IoGetDeviceObjectPointer   (NTOSKRNL.EXE.@)
  */
 NTSTATUS  WINAPI IoGetDeviceObjectPointer( UNICODE_STRING *name, ACCESS_MASK access, PFILE_OBJECT *file, PDEVICE_OBJECT *device )
@@ -1327,6 +1340,15 @@ BOOLEAN WINAPI MmIsAddressValid(PVOID VirtualAddress)
 }
 
 /***********************************************************************
+ *           MmMapIoSpace   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmMapIoSpace( PHYSICAL_ADDRESS PhysicalAddress, DWORD NumberOfBytes, DWORD CacheType )
+{
+    FIXME( "stub: 0x%08x%08x, %d, %d\n", PhysicalAddress.u.HighPart, PhysicalAddress.u.LowPart, NumberOfBytes, CacheType );
+    return NULL;
+}
+
+/***********************************************************************
  *           MmPageEntireDriver   (NTOSKRNL.EXE.@)
  */
 PVOID WINAPI MmPageEntireDriver(PVOID AddrInSection)
@@ -1341,6 +1363,14 @@ PVOID WINAPI MmPageEntireDriver(PVOID AddrInSection)
 void WINAPI MmResetDriverPaging(PVOID AddrInSection)
 {
     TRACE("%p\n", AddrInSection);
+}
+
+/***********************************************************************
+ *           MmUnmapIoSpace   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI MmUnmapIoSpace( PVOID BaseAddress, SIZE_T NumberOfBytes )
+{
+    FIXME( "stub: %p, %lu\n", BaseAddress, NumberOfBytes );
 }
 
 /***********************************************************************
@@ -1493,7 +1523,10 @@ PVOID WINAPI MmGetSystemRoutineAddress(PUNICODE_STRING SystemRoutineName)
         RtlFreeAnsiString( &routineNameA );
     }
 
-    TRACE( "%s -> %p\n", debugstr_us(SystemRoutineName), pFunc );
+    if (pFunc)
+        TRACE( "%s -> %p\n", debugstr_us(SystemRoutineName), pFunc );
+    else
+        FIXME( "%s not found\n", debugstr_us(SystemRoutineName) );
     return pFunc;
 }
 
@@ -1507,6 +1540,39 @@ MM_SYSTEMSIZE WINAPI MmQuerySystemSize(void)
     return MmLargeSystem;
 }
 
+/***********************************************************************
+ *           KeInitializeDpc   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI KeInitializeDpc(PRKDPC Dpc, PKDEFERRED_ROUTINE DeferredRoutine, PVOID DeferredContext)
+{
+    FIXME("stub\n");
+}
+
+/***********************************************************************
+ *           READ_REGISTER_BUFFER_UCHAR   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI READ_REGISTER_BUFFER_UCHAR(PUCHAR Register, PUCHAR Buffer, ULONG Count)
+{
+    FIXME("stub\n");
+}
+
+/*****************************************************
+ *           PoSetPowerState   (NTOSKRNL.EXE.@)
+ */
+POWER_STATE WINAPI PoSetPowerState(PDEVICE_OBJECT DeviceObject, POWER_STATE_TYPE Type, POWER_STATE State)
+{
+    FIXME("(%p %u %u) stub\n", DeviceObject, Type, State.DeviceState);
+    return State;
+}
+
+/*****************************************************
+ *           IoWMIRegistrationControl   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT DeviceObject, ULONG Action)
+{
+    FIXME("(%p %u ) stub\n", DeviceObject, Action);
+    return STATUS_SUCCESS;
+}
 
 /*****************************************************
  *           DllMain

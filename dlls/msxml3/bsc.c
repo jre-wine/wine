@@ -22,12 +22,16 @@
 #include "config.h"
 
 #include <stdarg.h>
-#include <assert.h>
+#ifdef HAVE_LIBXML2
+# include <libxml/parser.h>
+# include <libxml/xmlerror.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 #include "wininet.h"
 #include "urlmon.h"
 #include "winreg.h"
@@ -40,7 +44,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 struct bsc_t {
-    const struct IBindStatusCallbackVtbl *lpVtbl;
+    IBindStatusCallback IBindStatusCallback_iface;
 
     LONG ref;
 
@@ -53,7 +57,7 @@ struct bsc_t {
 
 static inline bsc_t *impl_from_IBindStatusCallback( IBindStatusCallback *iface )
 {
-    return (bsc_t *)((char*)iface - FIELD_OFFSET(bsc_t, lpVtbl));
+    return CONTAINING_RECORD(iface, bsc_t, IBindStatusCallback_iface);
 }
 
 static HRESULT WINAPI bsc_QueryInterface(
@@ -70,6 +74,7 @@ static HRESULT WINAPI bsc_QueryInterface(
     }
 
     TRACE("interface %s not implemented\n", debugstr_guid(riid));
+    *ppobj = NULL;
     return E_NOINTERFACE;
 }
 
@@ -270,14 +275,14 @@ HRESULT bind_url(LPCWSTR url, HRESULT (*onDataAvailable)(void*,char*,DWORD), voi
 
     bsc = heap_alloc(sizeof(bsc_t));
 
-    bsc->lpVtbl = &bsc_vtbl;
+    bsc->IBindStatusCallback_iface.lpVtbl = &bsc_vtbl;
     bsc->ref = 1;
     bsc->obj = obj;
     bsc->onDataAvailable = onDataAvailable;
     bsc->binding = NULL;
     bsc->memstream = NULL;
 
-    hr = RegisterBindStatusCallback(pbc, (IBindStatusCallback*)&bsc->lpVtbl, NULL, 0);
+    hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
     if(SUCCEEDED(hr))
     {
         IMoniker *moniker;
@@ -296,7 +301,7 @@ HRESULT bind_url(LPCWSTR url, HRESULT (*onDataAvailable)(void*,char*,DWORD), voi
 
     if(FAILED(hr))
     {
-        IBindStatusCallback_Release((IBindStatusCallback*)&bsc->lpVtbl);
+        IBindStatusCallback_Release(&bsc->IBindStatusCallback_iface);
         bsc = NULL;
     }
 
@@ -310,5 +315,5 @@ void detach_bsc(bsc_t *bsc)
         IBinding_Abort(bsc->binding);
 
     bsc->obj = NULL;
-    IBindStatusCallback_Release((IBindStatusCallback*)&bsc->lpVtbl);
+    IBindStatusCallback_Release(&bsc->IBindStatusCallback_iface);
 }

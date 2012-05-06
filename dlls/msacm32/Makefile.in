@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = msacm32.dll
 IMPORTLIB = msacm32
-IMPORTS   = winmm user32 advapi32 kernel32
+IMPORTS   = winmm user32 advapi32
 
 C_SRCS = \
 	driver.c \
@@ -22,6 +18,7 @@ RC_SRCS = \
 	msacm_En.rc \
 	msacm_Es.rc \
 	msacm_Fr.rc \
+	msacm_He.rc \
 	msacm_Hu.rc \
 	msacm_It.rc \
 	msacm_Ja.rc \

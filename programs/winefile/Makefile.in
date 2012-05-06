@@ -1,11 +1,7 @@
 EXTRADEFS = -D__WINE__ -DWINE_NO_UNICODE_MACROS
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winefile.exe
 APPMODE   = -mwindows
-IMPORTS   = uuid shell32 comdlg32 comctl32 ole32 mpr version user32 gdi32 advapi32 kernel32
+IMPORTS   = uuid shell32 comdlg32 comctl32 ole32 mpr version user32 gdi32 advapi32
 
 C_SRCS = \
 	splitpath.c \
@@ -18,7 +14,7 @@ RC_SRCS = \
 	En.rc \
 	Es.rc \
 	Fr.rc \
-	Hu.rc \
+	He.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
@@ -33,21 +29,12 @@ RC_SRCS = \
 	Sv.rc \
 	Tr.rc \
 	Uk.rc \
-	Zh.rc \
-	rsrc.rc
+	winefile.rc
 
-MANPAGES = winefile.man
+PO_SRCS = winefile.rc
+
+MANPAGE = winefile.man
 
 SVG_SRCS = winefile.svg
 
 @MAKE_PROG_RULES@
-
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) winefile.man $(DESTDIR)$(mandir)/man$(prog_manext)/winefile.$(prog_manext)
-
-@WOW64_DISABLE@ install install-lib:: install-man-pages
-
-uninstall::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/winefile.$(prog_manext)
