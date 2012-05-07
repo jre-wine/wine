@@ -99,10 +99,8 @@ If you need to set up Wine manually, without winecfg, you
 can force the creation of a ~/.wine directory by running
 "wineboot".
 
-If you're upgrading from a previous Wine version, Wine will usually
-attempt to upgrade the configuration in ~/.wine automatically. But
-if you need to, you can try to repair your configuration manually
-with "wineprefixcreate".
+If you're upgrading from a previous Wine version, Wine will attempt
+to upgrade the configuration in ~/.wine automatically.
 
 Or, if you're desperate, you can always completely wipe your Wine setup
 with "rm -rf ~/.wine". (This will destroy everything you've installed,
