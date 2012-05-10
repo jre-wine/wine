@@ -385,6 +385,7 @@ static void test_monthcal(void)
 
     /* set both limits, then set max < min */
     GetSystemTime(&st[0]);
+    st[0].wDay = 25;
     st[1] = st[0];
     st[1].wYear++;
     ok(SendMessage(hwnd, MCM_SETRANGE, GDTR_MIN|GDTR_MAX, (LPARAM)st), "Failed to set limits\n");
@@ -464,6 +465,29 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         msg.wParam = wParam;
         msg.lParam = lParam;
         add_message(sequences, PARENT_SEQ_INDEX, &msg);
+    }
+
+    if (message == WM_NOTIFY)
+    {
+        NMHDR *hdr = (NMHDR*)lParam;
+        switch (hdr->code)
+        {
+          case MCN_GETDAYSTATE:
+          {
+            NMDAYSTATE *nmstate = (NMDAYSTATE*)lParam;
+            static MONTHDAYSTATE months[14] = { 0 };
+
+            ok(nmstate->cDayState > 0, "got %d\n", nmstate->cDayState);
+            ok(nmstate->cDayState <= 14, "got %d\n", nmstate->cDayState);
+            ok(nmstate->prgDayState != NULL, "got %p\n", nmstate->prgDayState);
+
+            nmstate->prgDayState = months;
+
+            return TRUE;
+          }
+          default:
+            break;
+        }
     }
 
     defwndproc_counter++;
@@ -581,9 +605,9 @@ static void test_color(void)
 
     /* invalid color index */
     color = SendMessage(hwnd, MCM_GETCOLOR, MCSC_TRAILINGTEXT + 1, 0);
-    expect(-1, color);
+    expect(~0u, color);
     prev = SendMessage(hwnd, MCM_SETCOLOR, MCSC_TRAILINGTEXT + 1, RGB(255,255,255));
-    expect(-1, prev);
+    expect(~0u, prev);
 
     color = SendMessage(hwnd, MCM_GETCOLOR, MCSC_BACKGROUND, 0);
     prev = SendMessage(hwnd, MCM_SETCOLOR, MCSC_BACKGROUND, RGB(0,0,0));
@@ -775,6 +799,23 @@ static void test_currdate(void)
     res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st_new);
     expect(1, res);
 
+    /* set with invalid day of week */
+    memset(&st_test, 0, sizeof(st_test));
+    st_test.wYear = 2009;
+    st_test.wDay  = 7;
+    st_test.wMonth = 10;
+    st_test.wDayOfWeek = 100;
+    res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st_test);
+    expect(1, res);
+
+    memset(&st_test, 0, sizeof(st_test));
+    res = SendMessage(hwnd, MCM_GETCURSEL, 0, (LPARAM)&st_test);
+    expect(1, res);
+    expect(2009, st_test.wYear);
+    expect(7, st_test.wDay);
+    expect(10, st_test.wMonth);
+    expect(3, st_test.wDayOfWeek);
+
     DestroyWindow(hwnd);
 }
 
@@ -920,11 +961,11 @@ static void test_hittest(void)
     res = SendMessage(hwnd, MCM_HITTEST, 0, (LPARAM)&mchit);
     expect(0, mchit.pt.x);
     expect(0, mchit.pt.y);
-    expect(-1, res);
+    expect(~0u, res);
     expect(0, mchit.uHit);
     /* test with invalid pointer */
     res = SendMessage(hwnd, MCM_HITTEST, 0, 0);
-    expect(-1, res);
+    expect(~0u, res);
 
     /* resize control to display single Calendar */
     res = SendMessage(hwnd, MCM_GETMINREQRECT, 0, (LPARAM)&r);
@@ -1162,7 +1203,8 @@ static void test_todaylink(void)
     st_test.wMonth = 1;
     st_test.wYear = 2005;
 
-    SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    res = SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    expect(0, res);
 
     memset(&st_new, 0, sizeof(st_new));
     res = SendMessage(hwnd, MCM_GETTODAY, 0, (LPARAM)&st_new);
@@ -1206,7 +1248,8 @@ static void test_today(void)
     st_new.wDay = 27;
     st_new.wMonth = 27;
 
-    SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    res = SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    expect(0, res);
 
     res = SendMessage(hwnd, MCM_GETTODAY, 0, (LPARAM)&st_new);
     expect(1, res);
@@ -1223,7 +1266,8 @@ static void test_today(void)
     st_test.wDay = 0;
     st_test.wMonth = 0;
 
-    SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    res = SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
+    expect(0, res);
 
     res = SendMessage(hwnd, MCM_GETTODAY, 0, (LPARAM)&st_new);
     expect(1, res);
@@ -1316,33 +1360,31 @@ static void test_monthrange(void)
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     res = SendMessage(hwnd, MCM_GETMONTHRANGE, GMR_VISIBLE, (LPARAM)st_visible);
-    todo_wine {
-        expect(2, res);
-    }
+    expect(2, res);
     expect(2000, st_visible[0].wYear);
     expect(11, st_visible[0].wMonth);
     expect(1, st_visible[0].wDay);
     expect(2000, st_visible[1].wYear);
+    expect(12, st_visible[1].wMonth);
+    expect(31, st_visible[1].wDay);
 
-    todo_wine {
-        expect(12, st_visible[1].wMonth);
-        expect(31, st_visible[1].wDay);
-    }
     res = SendMessage(hwnd, MCM_GETMONTHRANGE, GMR_DAYSTATE, (LPARAM)st_daystate);
-    todo_wine {
-        expect(4, res);
-    }
+    expect(4, res);
     expect(2000, st_daystate[0].wYear);
     expect(10, st_daystate[0].wMonth);
     expect(29, st_daystate[0].wDay);
-
-    todo_wine {
-        expect(2001, st_daystate[1].wYear);
-        expect(1, st_daystate[1].wMonth);
-        expect(6, st_daystate[1].wDay);
-    }
+    expect(2001, st_daystate[1].wYear);
+    expect(1, st_daystate[1].wMonth);
+    expect(6, st_daystate[1].wDay);
 
     ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_monthrange_seq, "monthcal monthrange", FALSE);
+
+    /* with null date array parameter */
+    res = SendMessage(hwnd, MCM_GETMONTHRANGE, GMR_VISIBLE, 0);
+    expect(2, res);
+
+    res = SendMessage(hwnd, MCM_GETMONTHRANGE, GMR_DAYSTATE, 0);
+    expect(4, res);
 
     /* resize control to display single Calendar */
     MoveWindow(hwnd, 0, 0, r.right, r.bottom, FALSE);
@@ -1655,7 +1697,7 @@ static void test_hittest_v6(void)
     mchit.iRow = -1;
     mchit.iCol = -1;
     ret = SendMessage(hwnd, MCM_HITTEST, 0, (LPARAM)&mchit);
-    if (ret == -1)
+    if (ret == ~0u)
     {
         win_skip("Only MCHITTESTINFO_V1 supported\n");
         DestroyWindow(hwnd);
@@ -1756,6 +1798,127 @@ static void test_get_set_border(void)
     DestroyWindow(hwnd);
 }
 
+static void test_MCM_SIZERECTTOMIN(void)
+{
+    HWND hwnd;
+    DWORD ret;
+    RECT r, r2;
+
+    hwnd = create_monthcal_control(0);
+
+    ret = SendMessageA(hwnd, MCM_GETMINREQRECT, 0, (LPARAM)&r2);
+    if (ret == 0)
+    {
+        win_skip("Message MCM_GETMINREQRECT unsupported. Skipping.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    ret = SendMessageA(hwnd, MCM_SIZERECTTOMIN, 0, 0);
+    ok(ret == 0, "got %d\n", ret);
+
+    r.left = r.right = r.top = r.bottom = 0;
+    ret = SendMessageA(hwnd, MCM_SIZERECTTOMIN, 0, (LPARAM)&r);
+    if (ret == 0)
+    {
+        skip("Message MCM_SIZERECTTOMIN unsupported. Skipping.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+    ok(ret == 1, "got %d\n", ret);
+    ok(r.left == 0 && r.right > 0, "got %d, %d\n", r.left, r.right);
+
+    r = r2;
+    ret = SendMessageA(hwnd, MCM_SIZERECTTOMIN, 0, (LPARAM)&r);
+    ok(ret == 1, "got %d\n", ret);
+
+    r2.right = (r2.right - r2.left) * 3;
+    r2.bottom = (r2.bottom - r2.top) * 3;
+    r2.left = r2.top = 0;
+    ret = SendMessageA(hwnd, MCM_SIZERECTTOMIN, 0, (LPARAM)&r2);
+    ok(ret == 1, "got %d\n", ret);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_MCM_GETCALENDARCOUNT(void)
+{
+    HWND hwnd;
+    DWORD ret;
+
+    hwnd = create_monthcal_control(0);
+
+    ret = SendMessageA(hwnd, MCM_GETCALENDARCOUNT, 0, 0);
+    if (ret == 0)
+    {
+        win_skip("Message MCM_GETCALENDARCOUNT unsupported. Skipping.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    expect(2, ret);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_daystate(void)
+{
+    MONTHDAYSTATE state[4];
+    DWORD ret, style;
+    HWND hwnd;
+    RECT r;
+
+    /* without MCS_DAYSTATE */
+    hwnd = create_monthcal_control(0);
+
+    ret = SendMessage(hwnd, MCM_GETMINREQRECT, 0, (LPARAM)&r);
+    expect(TRUE, ret);
+
+    /* resize control to display two Calendars */
+    MoveWindow(hwnd, 0, 0, r.right, (5/2)*r.bottom, FALSE);
+
+    ret = SendMessageA(hwnd, MCM_GETMONTHRANGE, GMR_DAYSTATE, 0);
+    expect(4, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 4, (LPARAM)&state);
+    expect(0, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 2, (LPARAM)&state);
+    expect(0, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 0, 0);
+    expect(0, ret);
+
+    /* try to switch on */
+    SetWindowLongA(hwnd, GWL_STYLE, GetWindowLongA(hwnd, GWL_STYLE) | MCS_DAYSTATE);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok((style & MCS_DAYSTATE) == 0, "got 0x%08x\n", style);
+
+    DestroyWindow(hwnd);
+
+    /* with MCS_DAYSTATE */
+    hwnd = create_monthcal_control(MCS_DAYSTATE);
+
+    ret = SendMessageA(hwnd, MCM_GETMONTHRANGE, GMR_DAYSTATE, 0);
+    expect(4, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 4, (LPARAM)&state);
+    expect(1, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 2, (LPARAM)&state);
+    expect(0, ret);
+
+    ret = SendMessageA(hwnd, MCM_SETDAYSTATE, 0, 0);
+    expect(0, ret);
+
+    /* try to switch off */
+    SetWindowLongA(hwnd, GWL_STYLE, GetWindowLongA(hwnd, GWL_STYLE) & ~MCS_DAYSTATE);
+    style = GetWindowLongA(hwnd, GWL_STYLE);
+    ok((style & MCS_DAYSTATE) == MCS_DAYSTATE, "got 0x%08x\n", style);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(monthcal)
 {
     BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
@@ -1798,6 +1961,7 @@ START_TEST(monthcal)
     test_maxselday();
     test_selrange();
     test_killfocus();
+    test_daystate();
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {
@@ -1822,6 +1986,8 @@ START_TEST(monthcal)
 
     test_hittest_v6();
     test_get_set_border();
+    test_MCM_SIZERECTTOMIN();
+    test_MCM_GETCALENDARCOUNT();
 
     unload_v6_module(ctx_cookie, hCtx);
 

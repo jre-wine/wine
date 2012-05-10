@@ -269,12 +269,12 @@ DOS_PATHNAME_TYPE WINAPI RtlDetermineDosPathNameType_U( PCWSTR path )
 ULONG WINAPI RtlIsDosDeviceName_U( PCWSTR dos_name )
 {
     static const WCHAR consoleW[] = {'\\','\\','.','\\','C','O','N',0};
-    static const WCHAR auxW[3] = {'A','U','X'};
-    static const WCHAR comW[3] = {'C','O','M'};
-    static const WCHAR conW[3] = {'C','O','N'};
-    static const WCHAR lptW[3] = {'L','P','T'};
-    static const WCHAR nulW[3] = {'N','U','L'};
-    static const WCHAR prnW[3] = {'P','R','N'};
+    static const WCHAR auxW[] = {'A','U','X'};
+    static const WCHAR comW[] = {'C','O','M'};
+    static const WCHAR conW[] = {'C','O','N'};
+    static const WCHAR lptW[] = {'L','P','T'};
+    static const WCHAR nulW[] = {'N','U','L'};
+    static const WCHAR prnW[] = {'P','R','N'};
 
     const WCHAR *start, *end, *p;
 
@@ -343,7 +343,7 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
                                              PWSTR* file_part,
                                              CURDIR* cd)
 {
-    static const WCHAR LongFileNamePfxW[4] = {'\\','\\','?','\\'};
+    static const WCHAR LongFileNamePfxW[] = {'\\','\\','?','\\'};
     ULONG sz, offset;
     WCHAR local[MAX_PATH];
     LPWSTR ptr;
@@ -383,8 +383,14 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
         if (!(ptr = RtlAllocateHeap(GetProcessHeap(), 0, sz))) return FALSE;
         sz = RtlGetFullPathName_U(dos_path, sz, ptr, file_part);
     }
+    sz += (1 /* NUL */ + 4 /* unc\ */ + 4 /* \??\ */) * sizeof(WCHAR);
+    if (sz > MAXWORD)
+    {
+        if (ptr != local) RtlFreeHeap(GetProcessHeap(), 0, ptr);
+        return FALSE;
+    }
 
-    ntpath->MaximumLength = sz + (4 /* unc\ */ + 4 /* \??\ */) * sizeof(WCHAR);
+    ntpath->MaximumLength = sz;
     ntpath->Buffer = RtlAllocateHeap(GetProcessHeap(), 0, ntpath->MaximumLength);
     if (!ntpath->Buffer)
     {
@@ -745,7 +751,6 @@ static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
 
     memmove(buffer + reqsize / sizeof(WCHAR), name + dep, deplen + sizeof(WCHAR));
     if (reqsize) memcpy(buffer, ins_str, reqsize);
-    reqsize += deplen;
 
     if (ins_str != tmp && ins_str != cd->Buffer)
         RtlFreeHeap(GetProcessHeap(), 0, ins_str);

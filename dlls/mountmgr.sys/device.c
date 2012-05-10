@@ -195,11 +195,13 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
     static const WCHAR cdromW[] = {'\\','D','e','v','i','c','e','\\','C','d','R','o','m','%','u',0};
     static const WCHAR floppyW[] = {'\\','D','e','v','i','c','e','\\','F','l','o','p','p','y','%','u',0};
     static const WCHAR ramdiskW[] = {'\\','D','e','v','i','c','e','\\','R','a','m','d','i','s','k','%','u',0};
+    static const WCHAR cdromlinkW[] = {'\\','?','?','\\','C','d','R','o','m','%','u',0};
     static const WCHAR physdriveW[] = {'\\','?','?','\\','P','h','y','s','i','c','a','l','D','r','i','v','e','%','u',0};
 
     UINT i, first = 0;
     NTSTATUS status = 0;
     const WCHAR *format = NULL;
+    const WCHAR *link_format = NULL;
     UNICODE_STRING name;
     DEVICE_OBJECT *dev_obj;
     struct disk_device *device;
@@ -210,6 +212,7 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
     case DEVICE_HARDDISK:
     case DEVICE_NETWORK:  /* FIXME */
         format = harddiskW;
+        link_format = physdriveW;
         break;
     case DEVICE_HARDDISK_VOL:
         format = harddiskvolW;
@@ -221,6 +224,7 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
     case DEVICE_CDROM:
     case DEVICE_DVD:
         format = cdromW;
+        link_format = cdromlinkW;
         break;
     case DEVICE_RAMDISK:
         format = ramdiskW;
@@ -246,6 +250,19 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
         device->unix_mount     = NULL;
         device->symlink.Buffer = NULL;
 
+        if (link_format)
+        {
+            UNICODE_STRING symlink;
+
+            symlink.MaximumLength = (strlenW(link_format) + 10) * sizeof(WCHAR);
+            if ((symlink.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, symlink.MaximumLength)))
+            {
+                sprintfW( symlink.Buffer, link_format, i );
+                symlink.Length = strlenW(symlink.Buffer) * sizeof(WCHAR);
+                if (!IoCreateSymbolicLink( &symlink, &name )) device->symlink = symlink;
+            }
+        }
+
         switch (type)
         {
         case DEVICE_FLOPPY:
@@ -267,20 +284,9 @@ static NTSTATUS create_disk_device( enum device_type type, struct disk_device **
         case DEVICE_UNKNOWN:
         case DEVICE_HARDDISK:
         case DEVICE_NETWORK:  /* FIXME */
-            {
-                UNICODE_STRING symlink;
-
-                symlink.MaximumLength = sizeof(physdriveW) + 10 * sizeof(WCHAR);
-                if ((symlink.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, symlink.MaximumLength)))
-                {
-                    sprintfW( symlink.Buffer, physdriveW, i );
-                    symlink.Length = strlenW(symlink.Buffer) * sizeof(WCHAR);
-                    if (!IoCreateSymbolicLink( &symlink, &name )) device->symlink = symlink;
-                }
-                device->devnum.DeviceType = FILE_DEVICE_DISK;
-                device->devnum.DeviceNumber = i;
-                device->devnum.PartitionNumber = 0;
-            }
+            device->devnum.DeviceType = FILE_DEVICE_DISK;
+            device->devnum.DeviceNumber = i;
+            device->devnum.PartitionNumber = 0;
             break;
         case DEVICE_HARDDISK_VOL:
             device->devnum.DeviceType = FILE_DEVICE_DISK;
@@ -422,6 +428,8 @@ static struct volume *find_matching_volume( const char *udi, const char *device,
 
     LIST_FOR_EACH_ENTRY( volume, &volumes_list, struct volume, entry )
     {
+        int match = 0;
+
         /* when we have a udi we only match drives added manually */
         if (udi && volume->udi) continue;
         /* and when we don't have a udi we only match dynamic drives */
@@ -429,8 +437,17 @@ static struct volume *find_matching_volume( const char *udi, const char *device,
 
         disk_device = volume->device;
         if (disk_device->type != type) continue;
-        if (device && disk_device->unix_device && strcmp( device, disk_device->unix_device )) continue;
-        if (mount_point && disk_device->unix_mount && strcmp( mount_point, disk_device->unix_mount )) continue;
+        if (device && disk_device->unix_device)
+        {
+            if (strcmp( device, disk_device->unix_device )) continue;
+            match++;
+        }
+        if (mount_point && disk_device->unix_mount)
+        {
+            if (strcmp( mount_point, disk_device->unix_mount )) continue;
+            match++;
+        }
+        if (!match) continue;
         TRACE( "found matching volume %s for device %s mount %s type %u\n",
                debugstr_guid(&volume->guid), debugstr_a(device), debugstr_a(mount_point), type );
         return grab_volume( volume );
@@ -773,7 +790,7 @@ found:
     if (!RegCreateKeyW( HKEY_LOCAL_MACHINE, drives_keyW, &hkey ))
     {
         const WCHAR *type_name = drive_types[type];
-        WCHAR name[3] = {'a',':',0};
+        WCHAR name[] = {'a',':',0};
 
         name[0] += drive->drive;
         if (!type_name[0] && type == DEVICE_HARDDISK) type_name = drive_types[DEVICE_FLOPPY];
@@ -826,7 +843,7 @@ NTSTATUS remove_dos_device( int letter, const char *udi )
         /* clear the registry key too */
         if (!RegOpenKeyW( HKEY_LOCAL_MACHINE, drives_keyW, &hkey ))
         {
-            WCHAR name[3] = {'a',':',0};
+            WCHAR name[] = {'a',':',0};
             name[0] += drive->drive;
             RegDeleteValueW( hkey, name );
             RegCloseKey( hkey );
@@ -890,7 +907,27 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
         info.TracksPerCylinder = 255;
         info.SectorsPerTrack = 63;
         info.BytesPerSector = 512;
-        memcpy( irp->MdlAddress->StartVa, &info, len );
+        memcpy( irp->AssociatedIrp.SystemBuffer, &info, len );
+        irp->IoStatus.Information = len;
+        irp->IoStatus.u.Status = STATUS_SUCCESS;
+        break;
+    }
+    case IOCTL_DISK_GET_DRIVE_GEOMETRY_EX:
+    {
+        DISK_GEOMETRY_EX info;
+        DWORD len = min( sizeof(info), irpsp->Parameters.DeviceIoControl.OutputBufferLength );
+
+        FIXME("The DISK_PARTITION_INFO and DISK_DETECTION_INFO structures will not be filled\n");
+
+        info.Geometry.Cylinders.QuadPart = 10000;
+        info.Geometry.MediaType = (dev->devnum.DeviceType == FILE_DEVICE_DISK) ? FixedMedia : RemovableMedia;
+        info.Geometry.TracksPerCylinder = 255;
+        info.Geometry.SectorsPerTrack = 63;
+        info.Geometry.BytesPerSector = 512;
+        info.DiskSize.QuadPart = info.Geometry.Cylinders.QuadPart * info.Geometry.TracksPerCylinder *
+                                 info.Geometry.SectorsPerTrack * info.Geometry.BytesPerSector;
+        info.Data[0]  = 0;
+        memcpy( irp->AssociatedIrp.SystemBuffer, &info, len );
         irp->IoStatus.Information = len;
         irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
@@ -899,7 +936,7 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
     {
         DWORD len = min( sizeof(dev->devnum), irpsp->Parameters.DeviceIoControl.OutputBufferLength );
 
-        memcpy( irp->MdlAddress->StartVa, &dev->devnum, len );
+        memcpy( irp->AssociatedIrp.SystemBuffer, &dev->devnum, len );
         irp->IoStatus.Information = len;
         irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
@@ -912,15 +949,19 @@ static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
         DWORD len = min( 32, irpsp->Parameters.DeviceIoControl.OutputBufferLength );
 
         FIXME( "returning zero-filled buffer for IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS\n" );
-        memset( irp->MdlAddress->StartVa, 0, len );
+        memset( irp->AssociatedIrp.SystemBuffer, 0, len );
         irp->IoStatus.Information = len;
         irp->IoStatus.u.Status = STATUS_SUCCESS;
         break;
     }
     default:
-        FIXME( "unsupported ioctl %x\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
+    {
+        ULONG code = irpsp->Parameters.DeviceIoControl.IoControlCode;
+        FIXME("Unsupported ioctl %x (device=%x access=%x func=%x method=%x)\n",
+              code, code >> 16, (code >> 14) & 3, (code >> 2) & 0xfff, code & 3);
         irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
         break;
+    }
     }
 
     LeaveCriticalSection( &device_section );

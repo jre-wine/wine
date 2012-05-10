@@ -170,6 +170,7 @@ extern LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam ) DE
 extern LRESULT NC_HandleNCCalcSize( HWND hwnd, WPARAM wParam, RECT *winRect ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
+extern LRESULT NC_HandleNCRButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCLButtonDblClk( HWND hwnd, WPARAM wParam, LPARAM lParam) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleSysCommand( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleSetCursor( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
@@ -179,8 +180,6 @@ extern void NC_GetSysPopupPos( HWND hwnd, RECT* rect ) DECLSPEC_HIDDEN;
 /* scrollbar */
 extern void SCROLL_DrawScrollBar( HWND hwnd, HDC hdc, INT nBar, BOOL arrows, BOOL interior ) DECLSPEC_HIDDEN;
 extern void SCROLL_TrackScrollBar( HWND hwnd, INT scrollbar, POINT pt ) DECLSPEC_HIDDEN;
-extern INT SCROLL_SetNCSbState( HWND hwnd, int vMin, int vMax, int vPos,
-                                int hMin, int hMax, int hPos ) DECLSPEC_HIDDEN;
 
 /* combo box */
 

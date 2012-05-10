@@ -39,6 +39,9 @@ static int modes_size;
 static LPDDSURFACEDESC modes;
 static RECT rect_before_create;
 static RECT rect_after_delete;
+static int modes16bpp_cnt;
+static int refresh_rate;
+static int refresh_rate_cnt;
 
 static HRESULT (WINAPI *pDirectDrawEnumerateA)(LPDDENUMCALLBACKA,LPVOID);
 static HRESULT (WINAPI *pDirectDrawEnumerateW)(LPDDENUMCALLBACKW,LPVOID);
@@ -101,13 +104,6 @@ static void releasedirectdraw(void)
     }
 }
 
-static BOOL WINAPI crash_callbackA(GUID *lpGUID, LPSTR lpDriverDescription,
-                                  LPSTR lpDriverName, LPVOID lpContext)
-{
-    *(volatile char*)0 = 2;
-    return TRUE;
-}
-
 static BOOL WINAPI test_nullcontext_callbackA(GUID *lpGUID, LPSTR lpDriverDescription,
                                               LPSTR lpDriverName, LPVOID lpContext)
 {
@@ -143,19 +139,6 @@ static void test_DirectDrawEnumerateA(void)
     /* Test with NULL callback parameter. */
     ret = pDirectDrawEnumerateA(NULL, NULL);
     ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
-
-    /* Test with invalid callback parameter. */
-    ret = pDirectDrawEnumerateA((LPDDENUMCALLBACKA)0xdeadbeef, NULL);
-    ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
-
-    if (pDirectDrawEnumerateExA)
-    {
-        /* Test with callback that crashes. */
-        ret = pDirectDrawEnumerateA(crash_callbackA, NULL);
-        ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
-    }
-    else
-        win_skip("Test would crash on older ddraw\n");
 
     /* Test with valid callback parameter and NULL context parameter. */
     trace("Calling DirectDrawEnumerateA with test_nullcontext_callbackA callback and NULL context.\n");
@@ -204,14 +187,6 @@ static void test_DirectDrawEnumerateW(void)
     ok(ret == DDERR_UNSUPPORTED, "Expected DDERR_UNSUPPORTED, got %d\n", ret);
 }
 
-static BOOL WINAPI crash_callbackExA(GUID *lpGUID, LPSTR lpDriverDescription,
-                                     LPSTR lpDriverName, LPVOID lpContext,
-                                     HMONITOR hm)
-{
-    *(volatile char*)0 = 2;
-    return TRUE;
-}
-
 static BOOL WINAPI test_nullcontext_callbackExA(GUID *lpGUID, LPSTR lpDriverDescription,
                                                 LPSTR lpDriverName, LPVOID lpContext,
                                                 HMONITOR hm)
@@ -248,14 +223,6 @@ static void test_DirectDrawEnumerateExA(void)
 
     /* Test with NULL callback parameter. */
     ret = pDirectDrawEnumerateExA(NULL, NULL, 0);
-    ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
-
-    /* Test with invalid callback parameter. */
-    ret = pDirectDrawEnumerateExA((LPDDENUMCALLBACKEXA)0xdeadbeef, NULL, 0);
-    ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
-
-    /* Test with callback that crashes. */
-    ret = pDirectDrawEnumerateExA(crash_callbackExA, NULL, 0);
     ok(ret == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %d\n", ret);
 
     /* Test with valid callback parameter and invalid flags */
@@ -344,8 +311,8 @@ static void flushdisplaymodes(void)
 
 static HRESULT WINAPI enummodescallback(LPDDSURFACEDESC lpddsd, LPVOID lpContext)
 {
-    trace("Width = %i, Height = %i, Refresh Rate = %i, Pitch = %i, flags =%02X\n",
-        lpddsd->dwWidth, lpddsd->dwHeight,
+    trace("Width = %i, Height = %i, bpp = %i, Refresh Rate = %i, Pitch = %i, flags =%02X\n",
+        lpddsd->dwWidth, lpddsd->dwHeight, U1(lpddsd->ddpfPixelFormat).dwRGBBitCount,
           U2(*lpddsd).dwRefreshRate, U1(*lpddsd).lPitch, lpddsd->dwFlags);
 
     /* Check that the pitch is valid if applicable */
@@ -365,6 +332,56 @@ static HRESULT WINAPI enummodescallback(LPDDSURFACEDESC lpddsd, LPVOID lpContext
      */
 
     adddisplaymode(lpddsd);
+    if(U1(lpddsd->ddpfPixelFormat).dwRGBBitCount == 16)
+        modes16bpp_cnt++;
+
+    return DDENUMRET_OK;
+}
+
+static HRESULT WINAPI enummodescallback_16bit(LPDDSURFACEDESC lpddsd, LPVOID lpContext)
+{
+    trace("Width = %i, Height = %i, bpp = %i, Refresh Rate = %i, Pitch = %i, flags =%02X\n",
+        lpddsd->dwWidth, lpddsd->dwHeight, U1(lpddsd->ddpfPixelFormat).dwRGBBitCount,
+          U2(*lpddsd).dwRefreshRate, U1(*lpddsd).lPitch, lpddsd->dwFlags);
+
+    ok(lpddsd->dwFlags == (DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT|DDSD_PITCH|DDSD_REFRESHRATE),
+            "Wrong surface description flags %02X\n", lpddsd->dwFlags);
+    ok(lpddsd->ddpfPixelFormat.dwFlags == DDPF_RGB, "Wrong pixel format flag %02X\n",
+            lpddsd->ddpfPixelFormat.dwFlags);
+    ok(U1(lpddsd->ddpfPixelFormat).dwRGBBitCount == 16, "Expected 16 bpp got %i\n",
+            U1(lpddsd->ddpfPixelFormat).dwRGBBitCount);
+
+    /* Check that the pitch is valid if applicable */
+    if(lpddsd->dwFlags & DDSD_PITCH)
+    {
+        ok(U1(*lpddsd).lPitch != 0, "EnumDisplayModes callback with bad pitch\n");
+    }
+
+    if(!refresh_rate)
+    {
+        if(U2(*lpddsd).dwRefreshRate )
+        {
+            refresh_rate = U2(*lpddsd).dwRefreshRate;
+            refresh_rate_cnt++;
+        }
+    }
+    else
+    {
+        if(refresh_rate == U2(*lpddsd).dwRefreshRate)
+            refresh_rate_cnt++;
+    }
+
+    modes16bpp_cnt++;
+
+    return DDENUMRET_OK;
+}
+
+static HRESULT WINAPI enummodescallback_count(LPDDSURFACEDESC lpddsd, LPVOID lpContext)
+{
+    ok(lpddsd->dwFlags == (DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT|DDSD_PITCH|DDSD_REFRESHRATE),
+            "Wrong surface description flags %02X\n", lpddsd->dwFlags);
+
+    modes16bpp_cnt++;
 
     return DDENUMRET_OK;
 }
@@ -373,16 +390,122 @@ static void enumdisplaymodes(void)
 {
     DDSURFACEDESC ddsd;
     HRESULT rc;
+    int count, refresh_count;
 
     ZeroMemory(&ddsd, sizeof(DDSURFACEDESC));
     ddsd.dwSize = sizeof(DDSURFACEDESC);
     ddsd.dwFlags = DDSD_CAPS;
     ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
 
-    rc = IDirectDraw_EnumDisplayModes(lpDD,
-        DDEDM_STANDARDVGAMODES, &ddsd, 0, enummodescallback);
-    ok(rc==DD_OK || rc==E_INVALIDARG,"EnumDisplayModes returned: %x\n",rc);
+    /* Flags parameter is reserved in very old ddraw versions (3 and older?) and must be 0 */
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback);
+    ok(rc==DD_OK, "EnumDisplayModes returned: %x\n",rc);
+
+    count = modes16bpp_cnt;
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = DDSD_PIXELFORMAT;
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(ddsd.ddpfPixelFormat).dwRGBBitCount = 16;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0xf800;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x07e0;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x001F;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK, "EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0x0000;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x0000;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x0000;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK, "EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    U2(ddsd.ddpfPixelFormat).dwRBitMask = 0xF0F0;
+    U3(ddsd.ddpfPixelFormat).dwGBitMask = 0x0F00;
+    U4(ddsd.ddpfPixelFormat).dwBBitMask = 0x000F;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK, "EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+
+    modes16bpp_cnt = 0;
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_YUV;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.ddpfPixelFormat.dwFlags = DDPF_PALETTEINDEXED8;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = DDSD_PIXELFORMAT;
+    ddsd.ddpfPixelFormat.dwFlags = 0;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = 0;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_count);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == modes_cnt, "Expected %d modes got %d\n", modes_cnt, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = DDSD_PIXELFORMAT | DDSD_PITCH;
+    U1(ddsd).lPitch = 123;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == count, "Expected %d modes got %d\n", count, modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = DDSD_PIXELFORMAT | DDSD_REFRESHRATE;
+    U2(ddsd).dwRefreshRate = 1;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    ok(modes16bpp_cnt == 0, "Expected 0 modes got %d\n", modes16bpp_cnt);
+
+    modes16bpp_cnt = 0;
+    ddsd.dwFlags = DDSD_PIXELFORMAT;
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, DDEDM_REFRESHRATES, &ddsd, 0, enummodescallback_16bit);
+    if(rc == DDERR_INVALIDPARAMS)
+    {
+        skip("Ddraw version too old. Skipping.\n");
+        return;
+    }
+    ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+    refresh_count = refresh_rate_cnt;
+
+    if(refresh_rate)
+    {
+        modes16bpp_cnt = 0;
+        ddsd.dwFlags = DDSD_PIXELFORMAT | DDSD_REFRESHRATE;
+        U2(ddsd).dwRefreshRate = refresh_rate;
+
+        rc = IDirectDraw_EnumDisplayModes(lpDD, 0, &ddsd, 0, enummodescallback_16bit);
+        ok(rc==DD_OK,"EnumDisplayModes returned: %x\n",rc);
+        ok(modes16bpp_cnt == refresh_count, "Expected %d modes got %d\n", refresh_count, modes16bpp_cnt);
+    }
+
+    rc = IDirectDraw_EnumDisplayModes(lpDD, 0, NULL, 0, enummodescallback);
+    ok(rc==DD_OK, "EnumDisplayModes returned: %x\n",rc);
 }
+
 
 static void setdisplaymode(int i)
 {

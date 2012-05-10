@@ -30,7 +30,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(hlink);
 
 static HINSTANCE instance;
 
-typedef HRESULT (CALLBACK *LPFNCREATEINSTANCE)(IUnknown*, REFIID, LPVOID*);
+typedef HRESULT (*LPFNCREATEINSTANCE)(IUnknown*, REFIID, LPVOID*);
 
 typedef struct
 {
@@ -261,14 +261,16 @@ HRESULT WINAPI HlinkNavigateToStringReference( LPCWSTR pwzTarget,
     HRESULT r;
     IHlink *hlink = NULL;
 
-    FIXME("%s %s %p %08x %p %08x %p %p %p\n",
+    TRACE("%s %s %p %08x %p %08x %p %p %p\n",
           debugstr_w(pwzTarget), debugstr_w(pwzLocation), pihlsite,
           dwSiteData, pihlframe, grfHLNF, pibc, pibsc, pihlbc);
 
     r = HlinkCreateFromString( pwzTarget, pwzLocation, NULL, pihlsite,
                                dwSiteData, NULL, &IID_IHlink, (LPVOID*) &hlink );
-    if (SUCCEEDED(r))
+    if (SUCCEEDED(r)) {
         r = HlinkNavigate(hlink, pihlframe, grfHLNF, pibc, pibsc, pihlbc);
+        IHlink_Release(hlink);
+    }
 
     return r;
 }
@@ -590,7 +592,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( instance, NULL );
+    return __wine_register_resources( instance );
 }
 
 /***********************************************************************
@@ -598,5 +600,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( instance, NULL );
+    return __wine_unregister_resources( instance );
 }

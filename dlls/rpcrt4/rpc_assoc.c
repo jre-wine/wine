@@ -74,6 +74,7 @@ static RPC_STATUS RpcAssoc_Alloc(LPCSTR Protseq, LPCSTR NetworkAddr,
     list_init(&assoc->free_connection_pool);
     list_init(&assoc->context_handle_list);
     InitializeCriticalSection(&assoc->cs);
+    assoc->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": RpcAssoc.cs");
     assoc->Protseq = RPCRT4_strdupA(Protseq);
     assoc->NetworkAddr = RPCRT4_strdupA(NetworkAddr);
     assoc->Endpoint = RPCRT4_strdupA(Endpoint);
@@ -202,7 +203,7 @@ ULONG RpcAssoc_Release(RpcAssoc *assoc)
         LIST_FOR_EACH_ENTRY_SAFE(Connection, cursor2, &assoc->free_connection_pool, RpcConnection, conn_pool_entry)
         {
             list_remove(&Connection->conn_pool_entry);
-            RPCRT4_DestroyConnection(Connection);
+            RPCRT4_ReleaseConnection(Connection);
         }
 
         LIST_FOR_EACH_ENTRY_SAFE(context_handle, context_handle_cursor, &assoc->context_handle_list, RpcContextHandle, entry)
@@ -213,6 +214,7 @@ ULONG RpcAssoc_Release(RpcAssoc *assoc)
         HeapFree(GetProcessHeap(), 0, assoc->NetworkAddr);
         HeapFree(GetProcessHeap(), 0, assoc->Protseq);
 
+        assoc->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&assoc->cs);
 
         HeapFree(GetProcessHeap(), 0, assoc);
@@ -408,14 +410,14 @@ RPC_STATUS RpcAssoc_GetClientConnection(RpcAssoc *assoc,
     status = RPCRT4_OpenClientConnection(NewConnection);
     if (status != RPC_S_OK)
     {
-        RPCRT4_DestroyConnection(NewConnection);
+        RPCRT4_ReleaseConnection(NewConnection);
         return status;
     }
 
     status = RpcAssoc_BindConnection(assoc, NewConnection, InterfaceId, TransferSyntax);
     if (status != RPC_S_OK)
     {
-        RPCRT4_DestroyConnection(NewConnection);
+        RPCRT4_ReleaseConnection(NewConnection);
         return status;
     }
 

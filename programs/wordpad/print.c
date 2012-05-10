@@ -21,6 +21,7 @@
 #include <windows.h>
 #include <richedit.h>
 #include <commctrl.h>
+#include <commdlg.h>
 
 #include "wordpad.h"
 
@@ -138,7 +139,7 @@ static void AddTextButton(HWND hRebarWnd, UINT string, UINT command, UINT id)
     rb.cxIdeal = 100;
     rb.wID = id;
 
-    SendMessageW(hRebarWnd, RB_INSERTBAND, -1, (LPARAM)&rb);
+    SendMessageW(hRebarWnd, RB_INSERTBANDW, -1, (LPARAM)&rb);
 }
 
 static HDC make_dc(void)
@@ -620,7 +621,7 @@ static void preview_bar_show(HWND hMainWnd, BOOL show)
         rb.cxIdeal = 100;
         rb.wID = BANDID_PREVIEW_BUFFER;
 
-        SendMessageW(hReBar, RB_INSERTBAND, -1, (LPARAM)&rb);
+        SendMessageW(hReBar, RB_INSERTBANDW, -1, (LPARAM)&rb);
     } else
     {
         for(i = 0; i <= PREVIEW_BUTTONS; i++)

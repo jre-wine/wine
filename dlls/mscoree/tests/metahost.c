@@ -24,6 +24,7 @@
 #include "ole2.h"
 
 #include "corerror.h"
+#include "ocidl.h"
 #include "initguid.h"
 #include "metahost.h"
 #include "wine/test.h"
@@ -34,7 +35,7 @@ static HRESULT (WINAPI *pCLRCreateInstance)(REFCLSID clsid, REFIID riid, LPVOID 
 
 static ICLRMetaHost *metahost;
 
-BOOL init_pointers(void)
+static BOOL init_pointers(void)
 {
     HRESULT hr = E_FAIL;
 
@@ -56,14 +57,14 @@ BOOL init_pointers(void)
     return TRUE;
 }
 
-void cleanup(void)
+static void cleanup(void)
 {
     ICLRMetaHost_Release(metahost);
 
     FreeLibrary(hmscoree);
 }
 
-void test_enumruntimes(void)
+static void test_enumruntimes(void)
 {
     IEnumUnknown *runtime_enum;
     IUnknown *unk;
@@ -108,7 +109,7 @@ void test_enumruntimes(void)
     IEnumUnknown_Release(runtime_enum);
 }
 
-void test_getruntime(void)
+static void test_getruntime(void)
 {
     static const WCHAR twodotzero[] = {'v','2','.','0','.','5','0','7','2','7',0};
     static const WCHAR twodotzerodotzero[] = {'v','2','.','0','.','0',0};

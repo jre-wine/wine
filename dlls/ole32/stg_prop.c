@@ -720,8 +720,8 @@ static HRESULT WINAPI IPropertyStorage_fnReadPropertyNames(
 
             hr = S_OK;
             rglpwstrName[i] = CoTaskMemAlloc((len + 1) * sizeof(WCHAR));
-            if (rglpwstrName)
-                memcpy(rglpwstrName, name, (len + 1) * sizeof(WCHAR));
+            if (rglpwstrName[i])
+                memcpy(rglpwstrName[i], name, (len + 1) * sizeof(WCHAR));
             else
                 hr = STG_E_INSUFFICIENTMEMORY;
         }
@@ -1109,6 +1109,22 @@ static HRESULT PropertyStorage_ReadProperty(PropertyStorage_impl *This,
             else
                 hr = STG_E_INSUFFICIENTMEMORY;
         }
+        break;
+    }
+    case VT_BLOB:
+    {
+        DWORD count;
+
+        StorageUtl_ReadDWord(data, 0, &count);
+        prop->u.blob.cbSize = count;
+        prop->u.blob.pBlobData = CoTaskMemAlloc(count);
+        if (prop->u.blob.pBlobData)
+        {
+            memcpy(prop->u.blob.pBlobData, data + sizeof(DWORD), count);
+            TRACE("Read blob value of size %d\n", count);
+        }
+        else
+            hr = STG_E_INSUFFICIENTMEMORY;
         break;
     }
     case VT_LPWSTR:
@@ -1744,6 +1760,15 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
         if (FAILED(hr))
             goto end;
         bytesWritten = count + sizeof cf_hdr;
+        break;
+    }
+    case VT_CLSID:
+    {
+        CLSID temp;
+
+        StorageUtl_WriteGUID((BYTE *)&temp, 0, var->u.puuid);
+        hr = IStream_Write(This->stm, &temp, sizeof(temp), &count);
+        bytesWritten = count;
         break;
     }
     default:

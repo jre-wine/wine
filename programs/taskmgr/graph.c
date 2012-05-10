@@ -20,15 +20,14 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <stdio.h>
 #include <winnt.h>
-    
+
 #include "wine/unicode.h"
 #include "taskmgr.h"
 #include "perfdata.h"
@@ -439,7 +438,7 @@ Graph_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         
         hdc = BeginPaint(hWnd, &ps);
 
-        WindowId = GetWindowLongPtr(hWnd, GWLP_ID);
+        WindowId = GetWindowLongPtrW(hWnd, GWLP_ID);
 
         switch (WindowId)
         {
@@ -459,9 +458,9 @@ Graph_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
         
     }
-    
+
     /*
      * We pass on all non-handled messages
      */
-    return CallWindowProc((WNDPROC)OldGraphWndProc, hWnd, message, wParam, lParam);
+    return CallWindowProcW(OldGraphWndProc, hWnd, message, wParam, lParam);
 }

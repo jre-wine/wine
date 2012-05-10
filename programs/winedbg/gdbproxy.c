@@ -292,78 +292,6 @@ static size_t cpu_register_map[] = {
     /* FIXME: MQ is missing? FIELD_OFFSET(CONTEXT, Mq), */
     /* see gdb/nlm/ppc.c */
 };
-#elif defined(__ALPHA__)
-static size_t cpu_register_map[] = {
-    FIELD_OFFSET(CONTEXT, IntV0),
-    FIELD_OFFSET(CONTEXT, IntT0),
-    FIELD_OFFSET(CONTEXT, IntT1),
-    FIELD_OFFSET(CONTEXT, IntT2),
-    FIELD_OFFSET(CONTEXT, IntT3),
-    FIELD_OFFSET(CONTEXT, IntT4),
-    FIELD_OFFSET(CONTEXT, IntT5),
-    FIELD_OFFSET(CONTEXT, IntT6),
-    FIELD_OFFSET(CONTEXT, IntT7),
-    FIELD_OFFSET(CONTEXT, IntS0),
-    FIELD_OFFSET(CONTEXT, IntS1),
-    FIELD_OFFSET(CONTEXT, IntS2),
-    FIELD_OFFSET(CONTEXT, IntS3),
-    FIELD_OFFSET(CONTEXT, IntS4),
-    FIELD_OFFSET(CONTEXT, IntS5),
-    FIELD_OFFSET(CONTEXT, IntFp),
-    FIELD_OFFSET(CONTEXT, IntA0),
-    FIELD_OFFSET(CONTEXT, IntA1),
-    FIELD_OFFSET(CONTEXT, IntA2),
-    FIELD_OFFSET(CONTEXT, IntA3),
-    FIELD_OFFSET(CONTEXT, IntA4),
-    FIELD_OFFSET(CONTEXT, IntA5),
-    FIELD_OFFSET(CONTEXT, IntT8),
-    FIELD_OFFSET(CONTEXT, IntT9),
-    FIELD_OFFSET(CONTEXT, IntT10),
-    FIELD_OFFSET(CONTEXT, IntT11),
-    FIELD_OFFSET(CONTEXT, IntRa),
-    FIELD_OFFSET(CONTEXT, IntT12),
-    FIELD_OFFSET(CONTEXT, IntAt),
-    FIELD_OFFSET(CONTEXT, IntGp),
-    FIELD_OFFSET(CONTEXT, IntSp),
-    FIELD_OFFSET(CONTEXT, IntZero),
-    FIELD_OFFSET(CONTEXT, FltF0),
-    FIELD_OFFSET(CONTEXT, FltF1),
-    FIELD_OFFSET(CONTEXT, FltF2),
-    FIELD_OFFSET(CONTEXT, FltF3),
-    FIELD_OFFSET(CONTEXT, FltF4),
-    FIELD_OFFSET(CONTEXT, FltF5),
-    FIELD_OFFSET(CONTEXT, FltF6),
-    FIELD_OFFSET(CONTEXT, FltF7),
-    FIELD_OFFSET(CONTEXT, FltF8),
-    FIELD_OFFSET(CONTEXT, FltF9),
-    FIELD_OFFSET(CONTEXT, FltF10),
-    FIELD_OFFSET(CONTEXT, FltF11),
-    FIELD_OFFSET(CONTEXT, FltF12),
-    FIELD_OFFSET(CONTEXT, FltF13),
-    FIELD_OFFSET(CONTEXT, FltF14),
-    FIELD_OFFSET(CONTEXT, FltF15),
-    FIELD_OFFSET(CONTEXT, FltF16),
-    FIELD_OFFSET(CONTEXT, FltF17),
-    FIELD_OFFSET(CONTEXT, FltF18),
-    FIELD_OFFSET(CONTEXT, FltF19),
-    FIELD_OFFSET(CONTEXT, FltF20),
-    FIELD_OFFSET(CONTEXT, FltF21),
-    FIELD_OFFSET(CONTEXT, FltF22),
-    FIELD_OFFSET(CONTEXT, FltF23),
-    FIELD_OFFSET(CONTEXT, FltF24),
-    FIELD_OFFSET(CONTEXT, FltF25),
-    FIELD_OFFSET(CONTEXT, FltF26),
-    FIELD_OFFSET(CONTEXT, FltF27),
-    FIELD_OFFSET(CONTEXT, FltF28),
-    FIELD_OFFSET(CONTEXT, FltF29),
-    FIELD_OFFSET(CONTEXT, FltF30),
-    FIELD_OFFSET(CONTEXT, FltF31),
-
-    /* FIXME: Didn't look for the right order yet */
-    FIELD_OFFSET(CONTEXT, Fir),
-    FIELD_OFFSET(CONTEXT, Fpcr),
-    FIELD_OFFSET(CONTEXT, SoftFpcr),
-};
 #elif defined(__x86_64__)
 static size_t cpu_register_map[] = {
     FIELD_OFFSET(CONTEXT, Rax),
@@ -441,6 +369,9 @@ static size_t cpu_register_map[] = {
     FIELD_OFFSET(CONTEXT, R10),
     FIELD_OFFSET(CONTEXT, Fp),
     FIELD_OFFSET(CONTEXT, Ip),
+    FIELD_OFFSET(CONTEXT, Sp),
+    FIELD_OFFSET(CONTEXT, Lr),
+    FIELD_OFFSET(CONTEXT, Pc),
 };
 #else
 # error Define the registers map for your CPU
@@ -1068,7 +999,7 @@ static enum packet_return packet_continue(struct gdb_context* gdbctx)
     return packet_reply_status(gdbctx);
 }
 
-static enum packet_return packet_verbose(struct gdb_context* gdbctx)
+static enum packet_return packet_verbose_cont(struct gdb_context* gdbctx)
 {
     int i;
     int defaultAction = -1; /* magic non action */
@@ -1081,9 +1012,6 @@ static enum packet_return packet_verbose(struct gdb_context* gdbctx)
     unsigned int threadID = 0;
     struct dbg_thread*  thd;
 
-    /* basic check */
-    assert(gdbctx->in_packet_len >= 4);
-
     /* OK we have vCont followed by..
     * ? for query
     * c for packet_continue
@@ -1092,11 +1020,6 @@ static enum packet_return packet_verbose(struct gdb_context* gdbctx)
     * Ssig  for step signal
     * and then an optional thread ID at the end..
     * *******************************************/
-
-    if (gdbctx->trace & GDBPXY_TRC_COMMAND)
-        fprintf(stderr, "trying to process a verbose packet\n");
-    /* now check that we've got Cont */
-    assert(strncmp(gdbctx->in_packet, "Cont", 4) == 0);
 
     /* Query */
     if (gdbctx->in_packet[4] == '?')
@@ -1164,7 +1087,7 @@ static enum packet_return packet_verbose(struct gdb_context* gdbctx)
          * (they're running winedbg, so I'm sure they can fix the problem from the error message!) */
         if (threadCount == 100)
         {
-            fprintf(stderr, "Wow, that's a lot of threads, change threadIDs in wine/programms/winedgb/gdbproxy.c to be higher\n");
+            fprintf(stderr, "Wow, that's a lot of threads, change threadIDs in wine/programms/winedbg/gdbproxy.c to be higher\n");
             break;
         }
     }
@@ -1266,6 +1189,58 @@ static enum packet_return packet_verbose(struct gdb_context* gdbctx)
     be_cpu->single_step(&gdbctx->context, FALSE);
     return packet_reply_status(gdbctx);
 }
+
+struct verbose_defail
+{
+    const char*         name;
+    unsigned            len;
+    enum packet_return  (*handler)(struct gdb_context*);
+} verbose_details[] =
+{
+    /* {"Attach",           6}, */
+    {"Cont",             4, packet_verbose_cont},
+    /* {"File",             4},
+    {"FlashErase",      10},
+    {"FlashWrite",      10},
+    {"FlashDone",        9},
+    {"Kill",             4},
+    {"Run",              3},
+    {"Stopped",          7},*/
+};
+
+static enum packet_return packet_verbose(struct gdb_context* gdbctx)
+{
+    unsigned i;
+    unsigned klen;
+
+    for (klen = 0; ; klen++)
+    {
+        if (klen == gdbctx->in_packet_len ||
+            gdbctx->in_packet[klen] == ';' ||
+            gdbctx->in_packet[klen] == ':' ||
+            gdbctx->in_packet[klen] == '?')
+        {
+            if (gdbctx->trace & GDBPXY_TRC_COMMAND)
+                fprintf(stderr, "trying to process a verbose packet %*.*s\n",
+                        gdbctx->in_packet_len, gdbctx->in_packet_len, gdbctx->in_packet);
+            for (i = 0; i < sizeof(verbose_details)/sizeof(verbose_details[0]); i++)
+            {
+                if (klen == verbose_details[i].len &&
+                    !memcmp(gdbctx->in_packet, verbose_details[i].name, verbose_details[i].len))
+                {
+                    return verbose_details[i].handler(gdbctx);
+                }
+            }
+            /* no matching handler found, abort */
+            break;
+        }
+    }
+
+    if (gdbctx->trace & GDBPXY_TRC_COMMAND_FIXME)
+        fprintf(stderr, "No support for verbose packet %*.*s\n",
+                gdbctx->in_packet_len, gdbctx->in_packet_len, gdbctx->in_packet);
+    return packet_error;
+ }
 
 static enum packet_return packet_continue_signal(struct gdb_context* gdbctx)
 {
@@ -1808,6 +1783,16 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
         {
             packet_reply(gdbctx, "l", 1);
             return packet_done;
+        }
+        break;
+    case 'A':
+        if (strncmp(gdbctx->in_packet, "Attached", gdbctx->in_packet_len) == 0)
+        {
+            char    buf[2];
+
+            buf[0] = '1';
+            buf[1] = 0;
+            return packet_reply(gdbctx, buf, -1);
         }
         break;
     case 'C':

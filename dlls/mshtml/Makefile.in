@@ -27,6 +27,7 @@ C_SRCS = \
 	htmlframe.c \
 	htmlframebase.c \
 	htmlgeneric.c \
+	htmlhead.c \
 	htmliframe.c \
 	htmlimg.c \
 	htmlinput.c \
@@ -48,6 +49,7 @@ C_SRCS = \
 	htmltextcont.c \
 	htmltextnode.c \
 	htmlwindow.c \
+	ifacewrap.c \
 	ipwindow.c \
 	loadopts.c \
 	main.c \
@@ -74,37 +76,11 @@ C_SRCS = \
 	txtrange.c \
 	view.c
 
-RC_SRCS = \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Es.rc \
-	Fr.rc \
-	He.rc \
-	Hu.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sr.rc \
-	Sv.rc \
-	Uk.rc \
-	Zh.rc \
-	mshtml.rc
-
+RC_SRCS = mshtml.rc
 PO_SRCS = mshtml.rc
 
 IDL_H_SRCS = nsiface.idl
 
-IDL_R_SRCS = \
-	mshtml_classes.idl \
-	mshtml_tlb.idl
+IDL_R_SRCS = mshtml_classes.idl
 
 @MAKE_DLL_RULES@

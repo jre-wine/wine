@@ -1140,7 +1140,7 @@ HRESULT WINAPI SHGetDataFromIDListA(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
             lstrcpynA(pfd->cAlternateFileName, shortname, sizeof(pfd->cAlternateFileName));
         else
             pfd->cAlternateFileName[0] = '\0';
-        return NOERROR;
+        return S_OK;
 
     case SHGDFIL_NETRESOURCE:
     case SHGDFIL_DESCRIPTIONID:
@@ -1199,7 +1199,7 @@ HRESULT WINAPI SHGetDataFromIDListW(LPSHELLFOLDER psf, LPCITEMIDLIST pidl,
             pfd->cAlternateFileName[0] = '\0';
         else if (!MultiByteToWideChar(CP_ACP, 0, shortname, -1, pfd->cAlternateFileName, 14))
             pfd->cAlternateFileName[13] = 0;
-        return NOERROR;
+        return S_OK;
 
     case SHGDFIL_NETRESOURCE:
     case SHGDFIL_DESCRIPTIONID:
@@ -2243,7 +2243,7 @@ FileStructW* _ILGetFileStructW(LPCITEMIDLIST pidl) {
     /* Currently I don't see a fool prove way to figure out if a pidl is for sure of WinXP
      * style with a FileStructW member. If we switch all our shellfolder-implementations to
      * the new format, this won't be a problem. For now, we do as many sanity checks as possible. */
-    if (cbOffset & 0x1 || /* FileStructW member is word aligned in the pidl */
+    if ((cbOffset & 0x1) || /* FileStructW member is word aligned in the pidl */
         /* FileStructW is positioned after FileStruct */
         cbOffset < sizeof(pidl->mkid.cb) + sizeof(PIDLTYPE) + sizeof(FileStruct) ||
         /* There has to be enough space at cbOffset in the pidl to hold FileStructW and cbOffset */

@@ -205,7 +205,7 @@ static FCI_Int *get_fci_ptr( HFCI hfci )
 {
     FCI_Int *fci= (FCI_Int *)hfci;
 
-    if (!fci || !fci->magic == FCI_INT_MAGIC)
+    if (!fci || fci->magic != FCI_INT_MAGIC)
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return NULL;
@@ -466,10 +466,13 @@ static cab_ULONG fci_get_checksum( const void *pv, UINT cb, cab_ULONG seed )
   switch (cb % 4) {
     case 3:
       ul |= (((ULONG)(*pb++)) << 16);
+      /* fall through */
     case 2:
       ul |= (((ULONG)(*pb++)) <<  8);
+      /* fall through */
     case 1:
       ul |= *pb;
+      /* fall through */
     default:
       break;
   }
@@ -917,7 +920,7 @@ static void *zalloc( void *opaque, unsigned int items, unsigned int size )
 static void zfree( void *opaque, void *ptr )
 {
     FCI_Int *fci = opaque;
-    return fci->free( ptr );
+    fci->free( ptr );
 }
 
 static cab_UWORD compress_MSZIP( FCI_Int *fci )

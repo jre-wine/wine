@@ -117,24 +117,39 @@ static HRESULT WINAPI FlipRotator_GetSize(IWICBitmapFlipRotator *iface,
 static HRESULT WINAPI FlipRotator_GetPixelFormat(IWICBitmapFlipRotator *iface,
     WICPixelFormatGUID *pPixelFormat)
 {
-    FIXME("(%p,%p): stub\n", iface, pPixelFormat);
+    FlipRotator *This = impl_from_IWICBitmapFlipRotator(iface);
+    TRACE("(%p,%p)\n", iface, pPixelFormat);
 
-    return E_NOTIMPL;
+    if (!This->source)
+        return WINCODEC_ERR_WRONGSTATE;
+    else
+        return IWICBitmapSource_GetPixelFormat(This->source, pPixelFormat);
 }
 
 static HRESULT WINAPI FlipRotator_GetResolution(IWICBitmapFlipRotator *iface,
     double *pDpiX, double *pDpiY)
 {
-    FIXME("(%p,%p,%p): stub\n", iface, pDpiX, pDpiY);
+    FlipRotator *This = impl_from_IWICBitmapFlipRotator(iface);
+    TRACE("(%p,%p,%p)\n", iface, pDpiX, pDpiY);
 
-    return E_NOTIMPL;
+    if (!This->source)
+        return WINCODEC_ERR_WRONGSTATE;
+    else if (This->swap_xy)
+        return IWICBitmapSource_GetResolution(This->source, pDpiY, pDpiX);
+    else
+        return IWICBitmapSource_GetResolution(This->source, pDpiX, pDpiY);
 }
 
 static HRESULT WINAPI FlipRotator_CopyPalette(IWICBitmapFlipRotator *iface,
     IWICPalette *pIPalette)
 {
-    FIXME("(%p,%p): stub\n", iface, pIPalette);
-    return E_NOTIMPL;
+    FlipRotator *This = impl_from_IWICBitmapFlipRotator(iface);
+    TRACE("(%p,%p)\n", iface, pIPalette);
+
+    if (!This->source)
+        return WINCODEC_ERR_WRONGSTATE;
+    else
+        return IWICBitmapSource_CopyPalette(This->source, pIPalette);
 }
 
 static HRESULT WINAPI FlipRotator_CopyPixels(IWICBitmapFlipRotator *iface,

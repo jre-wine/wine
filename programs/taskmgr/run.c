@@ -19,15 +19,13 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <tchar.h>
-#include <stdio.h>
-    
+
 #include "taskmgr.h"
 
 typedef	void (WINAPI *RUNFILEDLG)(
@@ -52,7 +50,7 @@ void TaskManager_OnFileNew(void)
 {
     HMODULE            hShell32;
     RUNFILEDLG        RunFileDlg;
-    OSVERSIONINFO    versionInfo;
+    OSVERSIONINFOW    versionInfo;
     static const WCHAR wszShell32[] = {'S','H','E','L','L','3','2','.','D','L','L',0};
 
     hShell32 = LoadLibraryW(wszShell32);
@@ -62,8 +60,8 @@ void TaskManager_OnFileNew(void)
     if (RunFileDlg)
     {
         HICON hIcon = LoadIconW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDI_TASKMANAGER));
-        versionInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-        GetVersionEx(&versionInfo);
+        versionInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
+        GetVersionExW(&versionInfo);
 
         if (versionInfo.dwPlatformId == VER_PLATFORM_WIN32_NT)
         {

@@ -118,6 +118,9 @@ ok(testFunc1(true, "test") === true, "testFunc1 not returned true");
 
 ok(testFunc1.arguments === null, "testFunc1.arguments = " + testFunc1.arguments);
 
+(tmp) = 3;
+ok(tmp === 3, "tmp = " + tmp);
+
 function testRecFunc(x) {
     ok(testRecFunc.arguments === arguments, "testRecFunc.arguments = " + testRecFunc.arguments);
     if(x) {
@@ -136,6 +139,10 @@ tmp = (function() {1;})();
 ok(tmp === undefined, "tmp = " + tmp);
 tmp = eval("1;");
 ok(tmp === 1, "tmp = " + tmp);
+tmp = eval("1,2;");
+ok(tmp === 2, "tmp = " + tmp);
+tmp = eval("if(true) {3}");
+ok(tmp === 3, "tmp = " + tmp);
 
 var obj1 = new Object();
 ok(typeof(obj1) === "object", "typeof(obj1) is not object");
@@ -205,6 +212,25 @@ for(var iter in null)
 for(var iter in false)
     ok(false, "unexpected forin call, test = " + iter);
 
+for(var iter in pureDisp)
+    ok(false, "unexpected forin call in pureDisp object");
+
+tmp = new Object();
+ok(!tmp.nonexistent, "!tmp.nonexistent = " + !tmp.nonexistent);
+ok(!("nonexistent" in tmp), "nonexistent is in tmp after '!' expression")
+
+tmp = new Object();
+ok((~tmp.nonexistent) === -1, "!tmp.nonexistent = " + ~tmp.nonexistent);
+ok(!("nonexistent" in tmp), "nonexistent is in tmp after '~' expression")
+
+tmp = new Object();
+ok(isNaN(+tmp.nonexistent), "!tmp.nonexistent = " + (+tmp.nonexistent));
+ok(!("nonexistent" in tmp), "nonexistent is in tmp after '+' expression")
+
+tmp = new Object();
+tmp[tmp.nonexistent];
+ok(!("nonexistent" in tmp), "nonexistent is in tmp after array expression")
+
 tmp = 0;
 if(true)
     tmp = 1;
@@ -248,7 +274,7 @@ ok((0 === 2 ? 1 : 2) === 2, "conditional expression true is not 2");
 ok(getVT(undefined) === "VT_EMPTY", "getVT(undefined) is not VT_EMPTY");
 ok(getVT(null) === "VT_NULL", "getVT(null) is not VT_NULL");
 ok(getVT(0) === "VT_I4", "getVT(0) is not VT_I4");
-ok(getVT(0.5) === "VT_R8", "getVT(1.5) is not VT_R8");
+ok(getVT(0.5) === "VT_R8", "getVT(0.5) is not VT_R8");
 ok(getVT("test") === "VT_BSTR", "getVT(\"test\") is not VT_BSTR");
 ok(getVT(Math) === "VT_DISPATCH", "getVT(Math) is not VT_DISPATCH");
 ok(getVT(false) === "VT_BOOL", "getVT(false) is not VT_BOOL");
@@ -271,7 +297,7 @@ ok(getVT(tmp) === "VT_I4", "getVT(4-2) !== VT_I4");
 
 tmp = 4.5-2;
 ok(tmp === 2.5, "4.5-2 !== 2.5");
-ok(getVT(tmp) === "VT_R8", "getVT(4-2) !== VT_R8");
+ok(getVT(tmp) === "VT_R8", "getVT(4.5-2) !== VT_R8");
 
 tmp = -2;
 ok(tmp === 0-2, "-2 !== 0-2");
@@ -503,6 +529,10 @@ ok(tmp === 2, "incremented tmp(1) is not 2");
 ok(tmp-- === 2, "tmp-- (2) is not 2");
 ok(tmp === 1, "decremented tmp is not 1");
 
+tmp = new Object();
+tmp.iii++;
+ok(isNaN(tmp.iii), "tmp.iii = " + tmp.iii);
+
 String.prototype.test = true;
 ok("".test === true, "\"\".test is not true");
 
@@ -531,6 +561,29 @@ try {
     state = "finally";
 }
 ok(state === "finally", "state = " + state + " expected finally");
+
+state = "";
+try {
+    try {
+        throw 0;
+    }finally {
+        state = "finally";
+    }
+}catch(e) {
+    ok(state === "finally", "state = " + state + " expected finally");
+    state = "catch";
+}
+ok(state === "catch", "state = " + state + " expected catch");
+
+try {
+    try {
+        throw 0;
+    }finally {
+        throw 1;
+    }
+}catch(e) {
+    ok(e === 1, "e = " + e);
+}
 
 state = "";
 try {
@@ -776,6 +829,152 @@ for(var fi=0; fi < 4; fi++)
     ok(fi < 4, "fi = " + fi);
 ok(fi === 4, "fi !== 4");
 
+tmp = true;
+obj1 = new Object();
+for(obj1.nonexistent; tmp; tmp = false)
+    ok(!("nonexistent" in obj1), "nonexistent added to obj1");
+
+obj1 = new Object();
+for(tmp in obj1.nonexistent)
+    ok(false, "for(tmp in obj1.nonexistent) called with tmp = " + tmp);
+ok(!("nonexistent" in obj1), "nonexistent added to obj1 by for..in loop");
+
+
+var i, j;
+
+/* Previous versions have broken finally block implementation */
+if(ScriptEngineMinorVersion() >= 8) {
+    tmp = "";
+    i = 0;
+    while(true) {
+        tmp += "1";
+        for(i = 1; i < 3; i++) {
+            switch(i) {
+            case 1:
+                tmp += "2";
+                continue;
+            case 2:
+                tmp += "3";
+                try {
+                    throw null;
+                }finally {
+                    tmp += "4";
+                    break;
+                }
+            default:
+                ok(false, "unexpected state");
+            }
+            tmp += "5";
+        }
+        with({prop: "6"}) {
+            tmp += prop;
+            break;
+        }
+    }
+    ok(tmp === "123456", "tmp = " + tmp);
+}
+
+tmp = "";
+i = 0;
+for(j in [1,2,3]) {
+    tmp += "1";
+    for(;;) {
+        with({prop: "2"}) {
+            tmp += prop;
+            try {
+                throw "3";
+            }catch(e) {
+                tmp += e;
+                with([0])
+                    break;
+            }
+        }
+        ok(false, "unexpected state");
+    }
+    while(true) {
+        tmp += "4";
+        break;
+    }
+    break;
+}
+ok(tmp === "1234", "tmp = " + tmp);
+
+tmp = 0;
+for(var iter in [1,2,3]) {
+    tmp += +iter;
+    continue;
+}
+ok(tmp === 3, "tmp = " + tmp);
+
+tmp = false;
+for(var iter in [1,2,3]) {
+    switch(+iter) {
+    case 1:
+        tmp = true;
+        try {
+            continue;
+        }finally {}
+    default:
+        continue;
+    }
+}
+ok(tmp, "tmp = " + tmp);
+
+loop_label:
+while(true) {
+    while(true)
+        break loop_label;
+}
+
+loop_label: {
+    tmp = 0;
+    while(true) {
+        while(true)
+            break loop_label;
+    }
+    ok(false, "unexpected evaluation 1");
+}
+
+while(true) {
+    some_label: break;
+    ok(false, "unexpected evaluation 2");
+}
+
+just_label: tmp = 1;
+ok(tmp === 1, "tmp != 1");
+
+some_label: break some_label;
+
+other_label: {
+    break other_label;
+    ok(false, "unexpected evaluation 3");
+}
+
+loop_label:
+do {
+    while(true)
+        continue loop_label;
+}while(false);
+
+loop_label:
+for(i = 0; i < 3; i++) {
+    while(true)
+        continue loop_label;
+}
+
+loop_label:
+other_label:
+for(i = 0; i < 3; i++) {
+    while(true)
+        continue loop_label;
+}
+
+loop_label:
+for(tmp in {prop: false}) {
+    while(true)
+        continue loop_label;
+}
+
 ok((void 1) === undefined, "(void 1) !== undefined");
 
 var inobj = new Object();
@@ -815,8 +1014,15 @@ tmp = new Object();
 tmp.test = false;
 ok((delete tmp.test) === true, "delete returned false");
 ok(typeof(tmp.test) === "undefined", "tmp.test type = " + typeof(tmp.test));
+ok(!("test" in tmp), "test is still in tmp after delete?");
 for(iter in tmp)
     ok(false, "tmp has prop " + iter);
+
+tmp = new Object();
+tmp.test = false;
+ok((delete tmp["test"]) === true, "delete returned false");
+ok(typeof(tmp.test) === "undefined", "tmp.test type = " + typeof(tmp.test));
+ok(!("test" in tmp), "test is still in tmp after delete?");
 
 tmp.testWith = true;
 with(tmp)
@@ -1066,6 +1272,12 @@ ok(in_if_false(), "in_if_false failed");
 ok(newValue === 1, "newValue = " + newValue);
 
 obj = {undefined: 3};
+
+ok(typeof(name_override_func) === "function", "typeof(name_override_func) = " + typeof(name_override_func));
+name_override_func = 3;
+ok(name_override_func === 3, "name_override_func = " + name_override_func);
+function name_override_func() {};
+ok(name_override_func === 3, "name_override_func = " + name_override_func);
 
 /* Keep this test in the end of file */
 undefined = 6;

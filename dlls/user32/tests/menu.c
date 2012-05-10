@@ -169,6 +169,8 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
                 if( winetest_debug)
                     trace("WM_MEASUREITEM received data %lx size %dx%d\n",
                             pmis->itemData, pmis->itemWidth, pmis->itemHeight);
+                ok( !wparam, "wrong wparam %lx\n", wparam );
+                ok( pmis->CtlType == ODT_MENU, "wrong type %x\n", pmis->CtlType );
                 MOD_odheight = pmis->itemHeight;
                 pmis->itemWidth = MODsizes[pmis->itemData].cx;
                 pmis->itemHeight = MODsizes[pmis->itemData].cy;
@@ -197,6 +199,8 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
                             pdis->rcItem.right,pdis->rcItem.bottom );
                     SelectObject( pdis->hDC, oldpen);
                 }
+                ok( !wparam, "wrong wparam %lx\n", wparam );
+                ok( pdis->CtlType == ODT_MENU, "wrong type %x\n", pdis->CtlType );
                 /* calculate widths of some menu texts */
                 if( ! MOD_txtsizes[0].size.cx)
                     for(i = 0; MOD_txtsizes[i].text; i++) {
@@ -217,7 +221,7 @@ static LRESULT WINAPI menu_ownerdraw_wnd_proc(HWND hwnd, UINT msg,
                     }
 
                 if( pdis->itemData > MOD_maxid) return TRUE;
-                /* store the rectangl */
+                /* store the rectangle */
                 MOD_rc[pdis->itemData] = pdis->rcItem;
                 /* calculate average character width */
                 GetTextExtentPoint( pdis->hDC, chrs, 52, &sz );
@@ -404,6 +408,7 @@ static void test_menu_ownerdraw(void)
     int i,j,k;
     BOOL ret;
     HMENU hmenu;
+    MENUITEMINFO mii;
     LONG leftcol;
     HWND hwnd = CreateWindowEx(0, MAKEINTATOM(atomMenuCheckClass), NULL,
                                WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 200, 200,
@@ -462,6 +467,18 @@ static void test_menu_ownerdraw(void)
     ok( MOD_rc[0].bottom - MOD_rc[0].top == MOD_SIZE,
             "Height is incorrect. Got %d expected %d\n",
             MOD_rc[0].bottom - MOD_rc[0].top, MOD_SIZE);
+
+    /* test owner-drawn callback bitmap */
+    ModifyMenu( hmenu, 1, MF_BYPOSITION | MFT_BITMAP, 1, (LPCSTR)HBMMENU_CALLBACK );
+    mii.cbSize = sizeof(mii);
+    mii.fMask = MIIM_BITMAP | MIIM_FTYPE | MIIM_ID;
+    if (GetMenuItemInfoA( hmenu, 1, TRUE, &mii ))
+    {
+        ok( mii.fType == MFT_BITMAP, "wrong type %x\n", mii.fType );
+        ok( mii.wID == 1, "wrong id %x\n", mii.wID );
+        ok( mii.hbmpItem == HBMMENU_CALLBACK, "wrong data %p\n", mii.hbmpItem );
+    }
+    TrackPopupMenu( hmenu, TPM_RETURNCMD, 100,100, 0, hwnd, NULL);
 
     /* test width/height of an ownerdraw menu bar as well */
     ret = DestroyMenu(hmenu);
@@ -1065,7 +1082,7 @@ static void test_menu_iteminfo( void )
   void *txt, *init, *empty, *string;
   HBITMAP hbm = CreateBitmap(1,1,1,1,NULL);
   char stringA[0x80];
-  HMENU hmenu, submenu=CreateMenu();
+  HMENU hmenu, submenu;
   HBITMAP dummy_hbm = (HBITMAP)(ULONG_PTR)0xdeadbeef;
 
   do {
@@ -2932,6 +2949,20 @@ static void test_menu_trackpopupmenu(void)
                 gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
                 gflag_entermenuloop ? "WM_INITMENULOOP ": "",
                 gflag_initmenu ? "WM_INITMENU": "");
+
+        /* invalid window */
+        SetLastError(0xdeadbeef);
+        gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
+        ret = MyTrackPopupMenu( Ex, hmenu, TPM_RETURNCMD, 100,100, 0, NULL);
+        gle = GetLastError();
+        ok( !ret, "TrackPopupMenu%s should have failed\n", Ex ? "Ex" : "");
+        ok( gle == ERROR_INVALID_WINDOW_HANDLE, "TrackPopupMenu%s error got %u\n", Ex ? "Ex" : "", gle );
+        ok( !(gflag_initmenupopup || gflag_entermenuloop || gflag_initmenu),
+                "got unexpected message(s)%s%s%s\n",
+                gflag_initmenupopup ? " WM_INITMENUPOPUP ": " ",
+                gflag_entermenuloop ? "WM_INITMENULOOP ": "",
+                gflag_initmenu ? "WM_INITMENU": "");
+
         /* now a somewhat successful call */
         SetLastError(0xdeadbeef);
         gflag_initmenupopup = gflag_entermenuloop = gflag_initmenu = 0;
@@ -3072,7 +3103,7 @@ static void test_menu_cancelmode(void)
     {MSG msg;   while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessage(&msg);}
     /* test the effect of sending a WM_CANCELMODE message in the WM_INITMENULOOP
      * handler of the menu owner */
-    /* test results is exctracted from variable g_got_enteridle. Possible values:
+    /* test results is extracted from variable g_got_enteridle. Possible values:
      * 0 : complete conformance. Sending WM_CANCELMODE cancels a menu initializing tracking
      * 1 : Sending WM_CANCELMODE cancels a menu that is in tracking state
      * 2 : Sending WM_CANCELMODE does not work

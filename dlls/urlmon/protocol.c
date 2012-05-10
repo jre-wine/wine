@@ -89,13 +89,13 @@ static void request_complete(Protocol *protocol, INTERNET_ASYNC_RESULT *ar)
         }
 
         if(protocol->flags & FLAG_FIRST_CONTINUE_COMPLETE)
-            data.pData = (LPVOID)BINDSTATUS_ENDDOWNLOADCOMPONENTS;
+            data.pData = UlongToPtr(BINDSTATUS_ENDDOWNLOADCOMPONENTS);
         else
-            data.pData = (LPVOID)BINDSTATUS_DOWNLOADINGDATA;
+            data.pData = UlongToPtr(BINDSTATUS_DOWNLOADINGDATA);
 
     }else {
         protocol->flags |= FLAG_ERROR;
-        data.pData = (LPVOID)ar->dwError;
+        data.pData = UlongToPtr(ar->dwError);
     }
 
     if (protocol->bindf & BINDF_FROMURLMON)
@@ -286,12 +286,15 @@ HRESULT protocol_start(Protocol *protocol, IInternetProtocol *prot, IUri *uri,
 
 HRESULT protocol_continue(Protocol *protocol, PROTOCOLDATA *data)
 {
+    BOOL is_start;
     HRESULT hres;
 
     if (!data) {
         WARN("Expected pProtocolData to be non-NULL\n");
         return S_OK;
     }
+
+    is_start = data->pData == UlongToPtr(BINDSTATUS_DOWNLOADINGDATA);
 
     if(!protocol->request) {
         WARN("Expected request to be non-NULL\n");
@@ -305,14 +308,14 @@ HRESULT protocol_continue(Protocol *protocol, PROTOCOLDATA *data)
 
     if(protocol->flags & FLAG_ERROR) {
         protocol->flags &= ~FLAG_ERROR;
-        protocol->vtbl->on_error(protocol, (DWORD)data->pData);
+        protocol->vtbl->on_error(protocol, PtrToUlong(data->pData));
         return S_OK;
     }
 
     if(protocol->post_stream)
         return write_post_stream(protocol);
 
-    if(data->pData == (LPVOID)BINDSTATUS_DOWNLOADINGDATA) {
+    if(is_start) {
         hres = protocol->vtbl->start_downloading(protocol);
         if(FAILED(hres)) {
             protocol_close_connection(protocol);
@@ -335,7 +338,7 @@ HRESULT protocol_continue(Protocol *protocol, PROTOCOLDATA *data)
         protocol->flags |= FLAG_FIRST_CONTINUE_COMPLETE;
     }
 
-    if(data->pData >= (LPVOID)BINDSTATUS_DOWNLOADINGDATA) {
+    if(data->pData >= UlongToPtr(BINDSTATUS_DOWNLOADINGDATA) && !protocol->available_bytes) {
         BOOL res;
 
         /* InternetQueryDataAvailable may immediately fork and perform its asynchronous
@@ -344,6 +347,16 @@ HRESULT protocol_continue(Protocol *protocol, PROTOCOLDATA *data)
         protocol->flags &= ~FLAG_REQUEST_COMPLETE;
         res = InternetQueryDataAvailable(protocol->request, &protocol->available_bytes, 0, 0);
         if(res) {
+            if(!protocol->available_bytes) {
+                if(is_start) {
+                    TRACE("empty file\n");
+                    all_data_read(protocol);
+                }else {
+                    WARN("unexpected end of file?\n");
+                    report_result(protocol, INET_E_DOWNLOAD_FAILURE);
+                }
+                return S_OK;
+            }
             protocol->flags |= FLAG_REQUEST_COMPLETE;
             report_data(protocol);
         }else if(GetLastError() != ERROR_IO_PENDING) {
@@ -367,33 +380,33 @@ HRESULT protocol_read(Protocol *protocol, void *buf, ULONG size, ULONG *read_ret
         return S_FALSE;
     }
 
-    if(!(protocol->flags & FLAG_REQUEST_COMPLETE)) {
+    if(!(protocol->flags & FLAG_REQUEST_COMPLETE) || !protocol->available_bytes) {
         *read_ret = 0;
         return E_PENDING;
     }
 
-    while(read < size) {
-        if(protocol->available_bytes) {
-            ULONG len;
+    while(read < size && protocol->available_bytes) {
+        ULONG len;
 
-            res = InternetReadFile(protocol->request, ((BYTE *)buf)+read,
-                    protocol->available_bytes > size-read ? size-read : protocol->available_bytes, &len);
-            if(!res) {
-                WARN("InternetReadFile failed: %d\n", GetLastError());
-                hres = INET_E_DOWNLOAD_FAILURE;
-                report_result(protocol, hres);
-                break;
-            }
+        res = InternetReadFile(protocol->request, ((BYTE *)buf)+read,
+                protocol->available_bytes > size-read ? size-read : protocol->available_bytes, &len);
+        if(!res) {
+            WARN("InternetReadFile failed: %d\n", GetLastError());
+            hres = INET_E_DOWNLOAD_FAILURE;
+            report_result(protocol, hres);
+            break;
+        }
 
-            if(!len) {
-                all_data_read(protocol);
-                break;
-            }
+        if(!len) {
+            all_data_read(protocol);
+            break;
+        }
 
-            read += len;
-            protocol->current_position += len;
-            protocol->available_bytes -= len;
-        }else {
+        read += len;
+        protocol->current_position += len;
+        protocol->available_bytes -= len;
+
+        if(!protocol->available_bytes) {
             /* InternetQueryDataAvailable may immediately fork and perform its asynchronous
              * read, so clear the flag _before_ calling so it does not incorrectly get cleared
              * after the status callback is called */

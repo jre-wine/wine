@@ -3527,7 +3527,7 @@ static INT index_from_var(script_ctx_t *ctx, VARIANT *v)
 
     memset(&ei, 0, sizeof(ei));
     hres = to_number(ctx, v, &ei, &num);
-    if(FAILED(hres)) { /* FIXME: Move ignoring exceptions to to_promitive */
+    if(FAILED(hres)) { /* FIXME: Move ignoring exceptions to to_primitive */
         VariantClear(&ei.var);
         return 0;
     }
@@ -3846,7 +3846,7 @@ HRESULT create_regexp(script_ctx_t *ctx, const WCHAR *exp, int len, DWORD flags,
     RegExpInstance *regexp;
     HRESULT hres;
 
-    TRACE("%s %x\n", debugstr_w(exp), flags);
+    TRACE("%s %x\n", debugstr_wn(exp, len), flags);
 
     hres = alloc_regexp(ctx, NULL, &regexp);
     if(FAILED(hres))
@@ -4037,9 +4037,10 @@ static HRESULT RegExpConstr_leftContext(script_ctx_t *ctx, vdisp_t *jsthis, WORD
 
         V_VT(retv) = VT_BSTR;
         V_BSTR(retv) = ret;
+        break;
     }
     case DISPATCH_PROPERTYPUT:
-        return S_OK;
+        break;
     default:
         FIXME("unsupported flags\n");
         return E_NOTIMPL;
@@ -4063,9 +4064,10 @@ static HRESULT RegExpConstr_rightContext(script_ctx_t *ctx, vdisp_t *jsthis, WOR
 
         V_VT(retv) = VT_BSTR;
         V_BSTR(retv) = ret;
+        break;
     }
     case DISPATCH_PROPERTYPUT:
-        return S_OK;
+        break;
     default:
         FIXME("unsupported flags\n");
         return E_NOTIMPL;

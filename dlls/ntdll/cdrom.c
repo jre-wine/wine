@@ -144,6 +144,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(cdrom);
 # define CD_FRAMES            75 /* frames per second */
 #endif
 
+#ifdef WORDS_BIGENDIAN
+#define GET_BE_DWORD(x) (x)
+#else
+#define GET_BE_DWORD(x) RtlUlongByteSwap(x)
+#endif
+
 static const struct iocodexs
 {
   DWORD code;
@@ -182,6 +188,7 @@ X(IOCTL_SCSI_GET_INQUIRY_DATA)
 X(IOCTL_SCSI_PASS_THROUGH)
 X(IOCTL_SCSI_PASS_THROUGH_DIRECT)
 X(IOCTL_STORAGE_CHECK_VERIFY)
+X(IOCTL_STORAGE_CHECK_VERIFY2)
 X(IOCTL_STORAGE_EJECTION_CONTROL)
 X(IOCTL_STORAGE_EJECT_MEDIA)
 X(IOCTL_STORAGE_GET_DEVICE_NUMBER)
@@ -2567,9 +2574,9 @@ static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, 
             p->Reserved1 = 0;
             p->TrackDensity = l->track_density;
             p->LinearDensity = l->linear_density;
-            p->StartingDataSector = l->start_sector;
-            p->EndDataSector = l->end_sector;
-            p->EndLayerZeroSector = l->end_sector_l0;
+            p->StartingDataSector = GET_BE_DWORD(l->start_sector);
+            p->EndDataSector = GET_BE_DWORD(l->end_sector);
+            p->EndLayerZeroSector = GET_BE_DWORD(l->end_sector_l0);
             p->Reserved5 = 0;
             p->BCAFlag = l->bca;
             p->Reserved6 = 0;
@@ -2633,6 +2640,7 @@ static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, 
     } nt_desc;
 
     nt_desc.layer = layer;
+    RtlZeroMemory(&dvdrs, sizeof(dvdrs));
     dvdrs.address = (uint32_t)(structure->BlockByteOffset.QuadPart>>11);
     dvdrs.grantID = (uint8_t)structure->SessionId;
     dvdrs.layer = structure->LayerNumber;
@@ -2692,9 +2700,9 @@ static NTSTATUS DVD_ReadStructure(int dev, const DVD_READ_STRUCTURE *structure, 
             nt_desc.xlayer->TrackDensity = desc.phys.trackDensity;
             nt_desc.xlayer->LinearDensity = desc.phys.linearDensity;
             nt_desc.xlayer->BCAFlag = desc.phys.bcaFlag;
-            nt_desc.xlayer->StartingDataSector = OSReadBigInt32(&desc.phys.zero1, 0);
-            nt_desc.xlayer->EndDataSector = OSReadBigInt32(&desc.phys.zero2, 0);
-            nt_desc.xlayer->EndLayerZeroSector = OSReadBigInt32(&desc.phys.zero3, 0);
+            nt_desc.xlayer->StartingDataSector = *(DWORD *)&desc.phys.zero1;
+            nt_desc.xlayer->EndDataSector = *(DWORD *)&desc.phys.zero2;
+            nt_desc.xlayer->EndLayerZeroSector = *(DWORD *)&desc.phys.zero3;
             nt_desc.xlayer->Reserved5 = 0;
             nt_desc.xlayer->Reserved6 = 0;
             break;
@@ -2857,9 +2865,10 @@ NTSTATUS CDROM_DeviceIoControl(HANDLE hDevice,
 
     switch (dwIoControlCode)
     {
-    case IOCTL_STORAGE_CHECK_VERIFY:
     case IOCTL_CDROM_CHECK_VERIFY:
     case IOCTL_DISK_CHECK_VERIFY:
+    case IOCTL_STORAGE_CHECK_VERIFY:
+    case IOCTL_STORAGE_CHECK_VERIFY2:
         sz = 0;
 	CDROM_ClearCacheEntry(dev);
         if (lpInBuffer != NULL || nInBufferSize != 0 || lpOutBuffer != NULL || nOutBufferSize != 0)

@@ -23,12 +23,12 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#define COBJMACROS
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "mmsystem.h"
 #include "winternl.h"
 #include "mmddk.h"
 #include "wingdi.h"
@@ -37,7 +37,6 @@
 #include "ksmedia.h"
 #include "wine/debug.h"
 #include "dsound.h"
-#include "dsdriver.h"
 #include "dsound_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
@@ -1173,7 +1172,7 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->ref            = 1;
     device->priolevel      = DSSCL_NORMAL;
     device->state          = STATE_STOPPED;
-    device->speaker_config = DSSPEAKER_STEREO | (DSSPEAKER_GEOMETRY_NARROW << 16);
+    device->speaker_config = DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
 
     /* 3D listener initial parameters */
     device->ds3dl.dwSize   = sizeof(DS3DLISTENER);
@@ -1245,15 +1244,19 @@ ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
 
         /* The kill event should have allowed the timer process to expire
          * but try to grab the lock just in case. Can't hold lock because
-         * IDirectSoundBufferImpl_Destroy also grabs the lock */
+         * secondarybuffer_destroy also grabs the lock */
         RtlAcquireResourceShared(&(device->buffer_list_lock), TRUE);
         RtlReleaseResource(&(device->buffer_list_lock));
+
+        EnterCriticalSection(&DSOUND_renderers_lock);
+        list_remove(&device->entry);
+        LeaveCriticalSection(&DSOUND_renderers_lock);
 
         /* It is allowed to release this object even when buffers are playing */
         if (device->buffers) {
             WARN("%d secondary buffers not released\n", device->nrofbuffers);
             for( i=0;i<device->nrofbuffers;i++)
-                IDirectSoundBufferImpl_Destroy(device->buffers[i]);
+                secondarybuffer_destroy(device->buffers[i]);
         }
 
         if (device->primary) {
@@ -1265,21 +1268,18 @@ ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
         if (hr != DS_OK)
             WARN("DSOUND_PrimaryDestroy failed\n");
 
-        if (device->driver)
-            IDsDriver_Close(device->driver);
-
-        if (device->drvdesc.dwFlags & DSDDESC_DOMMSYSTEMOPEN)
-            waveOutClose(device->hwo);
-
-        if (device->driver)
-            IDsDriver_Release(device->driver);
-
-        DSOUND_renderer[device->drvdesc.dnDevNode] = NULL;
+        if(device->client)
+            IAudioClient_Release(device->client);
+        if(device->render)
+            IAudioRenderClient_Release(device->render);
+        if(device->clock)
+            IAudioClock_Release(device->clock);
+        if(device->volume)
+            IAudioStreamVolume_Release(device->volume);
 
         HeapFree(GetProcessHeap(), 0, device->tmp_buffer);
         HeapFree(GetProcessHeap(), 0, device->mix_buffer);
-        if (device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY)
-            HeapFree(GetProcessHeap(), 0, device->buffer);
+        HeapFree(GetProcessHeap(), 0, device->buffer);
         RtlDeleteResource(&device->buffer_list_lock);
         device->mixlock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&device->mixlock);
@@ -1335,21 +1335,64 @@ HRESULT DirectSoundDevice_GetCaps(
     lpDSCaps->dwTotalHwMemBytes                 = device->drvcaps.dwTotalHwMemBytes;
     lpDSCaps->dwFreeHwMemBytes                  = device->drvcaps.dwFreeHwMemBytes;
     lpDSCaps->dwMaxContigFreeHwMemBytes         = device->drvcaps.dwMaxContigFreeHwMemBytes;
-
-    /* driver doesn't have these */
-    lpDSCaps->dwUnlockTransferRateHwBuffers     = 4096; /* But we have none... */
-    lpDSCaps->dwPlayCpuOverheadSwBuffers        = 1;    /* 1% */
+    lpDSCaps->dwUnlockTransferRateHwBuffers     = device->drvcaps.dwUnlockTransferRateHwBuffers;
+    lpDSCaps->dwPlayCpuOverheadSwBuffers        = device->drvcaps.dwPlayCpuOverheadSwBuffers;
 
     return DS_OK;
+}
+
+BOOL DSOUND_check_supported(IAudioClient *client, DWORD rate,
+        DWORD depth, WORD channels)
+{
+    WAVEFORMATEX fmt, *junk;
+    HRESULT hr;
+
+    fmt.wFormatTag = WAVE_FORMAT_PCM;
+    fmt.nChannels = channels;
+    fmt.nSamplesPerSec = rate;
+    fmt.wBitsPerSample = depth;
+    fmt.nBlockAlign = (channels * depth) / 8;
+    fmt.nAvgBytesPerSec = rate * fmt.nBlockAlign;
+    fmt.cbSize = 0;
+
+    hr = IAudioClient_IsFormatSupported(client, AUDCLNT_SHAREMODE_SHARED, &fmt, &junk);
+    if(SUCCEEDED(hr))
+        CoTaskMemFree(junk);
+
+    return hr == S_OK;
+}
+
+UINT DSOUND_create_timer(LPTIMECALLBACK cb, DWORD_PTR user)
+{
+    UINT triggertime = DS_TIME_DEL, res = DS_TIME_RES, id;
+    TIMECAPS time;
+
+    timeGetDevCaps(&time, sizeof(TIMECAPS));
+    TRACE("Minimum timer resolution: %u, max timer: %u\n", time.wPeriodMin, time.wPeriodMax);
+    if (triggertime < time.wPeriodMin)
+        triggertime = time.wPeriodMin;
+    if (res < time.wPeriodMin)
+        res = time.wPeriodMin;
+    if (timeBeginPeriod(res) == TIMERR_NOCANDO)
+        WARN("Could not set minimum resolution, don't expect sound\n");
+    id = timeSetEvent(triggertime, res, cb, user, TIME_PERIODIC | TIME_KILL_SYNCHRONOUS);
+    if (!id)
+    {
+        WARN("Timer not created! Retrying without TIME_KILL_SYNCHRONOUS\n");
+        id = timeSetEvent(triggertime, res, cb, user, TIME_PERIODIC);
+        if (!id)
+            ERR("Could not create timer, sound playback will not occur\n");
+    }
+    return id;
 }
 
 HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGUID lpcGUID)
 {
     HRESULT hr = DS_OK;
-    unsigned wod, wodn;
-    BOOLEAN found = FALSE;
     GUID devGUID;
-    DirectSoundDevice * device = *ppDevice;
+    DirectSoundDevice *device;
+    IMMDevice *mmdevice;
+
     TRACE("(%p,%s)\n",ppDevice,debugstr_guid(lpcGUID));
 
     if (*ppDevice != NULL) {
@@ -1361,140 +1404,106 @@ HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGUID lpcG
     if (!lpcGUID || IsEqualGUID(lpcGUID, &GUID_NULL))
         lpcGUID = &DSDEVID_DefaultPlayback;
 
+    if(IsEqualGUID(lpcGUID, &DSDEVID_DefaultCapture) ||
+            IsEqualGUID(lpcGUID, &DSDEVID_DefaultVoiceCapture))
+        return DSERR_NODRIVER;
+
     if (GetDeviceID(lpcGUID, &devGUID) != DS_OK) {
         WARN("invalid parameter: lpcGUID\n");
         return DSERR_INVALIDPARAM;
     }
 
-    /* Enumerate WINMM audio devices and find the one we want */
-    wodn = waveOutGetNumDevs();
-    if (!wodn) {
-        WARN("no driver\n");
-        return DSERR_NODRIVER;
-    }
+    hr = get_mmdevice(eRender, &devGUID, &mmdevice);
+    if(FAILED(hr))
+        return hr;
 
-    for (wod=0; wod<wodn; wod++) {
-        if (IsEqualGUID( &devGUID, &DSOUND_renderer_guids[wod])) {
-            found = TRUE;
-            break;
-        }
-    }
+    EnterCriticalSection(&DSOUND_renderers_lock);
 
-    if (found == FALSE) {
-        WARN("No device found matching given ID!\n");
-        return DSERR_NODRIVER;
-    }
-
-    if (DSOUND_renderer[wod]) {
-        if (IsEqualGUID(&devGUID, &DSOUND_renderer[wod]->guid)) {
-            device = DSOUND_renderer[wod];
+    LIST_FOR_EACH_ENTRY(device, &DSOUND_renderers, DirectSoundDevice, entry){
+        if(IsEqualGUID(&device->guid, &devGUID)){
+            IMMDevice_Release(mmdevice);
             DirectSoundDevice_AddRef(device);
             *ppDevice = device;
+            LeaveCriticalSection(&DSOUND_renderers_lock);
             return DS_OK;
-        } else {
-            ERR("device GUID doesn't match\n");
-            hr = DSERR_GENERIC;
-            return hr;
-        }
-    } else {
-        hr = DirectSoundDevice_Create(&device);
-        if (hr != DS_OK) {
-            WARN("DirectSoundDevice_Create failed\n");
-            return hr;
         }
     }
 
-    *ppDevice = device;
-    device->guid = devGUID;
-    device->driver = NULL;
+    hr = DirectSoundDevice_Create(&device);
+    if(FAILED(hr)){
+        WARN("DirectSoundDevice_Create failed\n");
+        IMMDevice_Release(mmdevice);
+        LeaveCriticalSection(&DSOUND_renderers_lock);
+        return hr;
+    }
 
-    device->drvdesc.dnDevNode = wod;
+    device->mmdevice = mmdevice;
+    device->guid = devGUID;
+
     hr = DSOUND_ReopenDevice(device, FALSE);
     if (FAILED(hr))
     {
+        HeapFree(GetProcessHeap(), 0, device);
+        LeaveCriticalSection(&DSOUND_renderers_lock);
+        IMMDevice_Release(mmdevice);
         WARN("DSOUND_ReopenDevice failed: %08x\n", hr);
         return hr;
     }
 
-    if (device->driver) {
-        /* the driver is now open, so it's now allowed to call GetCaps */
-        hr = IDsDriver_GetCaps(device->driver,&(device->drvcaps));
-        if (hr != DS_OK) {
-            WARN("IDsDriver_GetCaps failed\n");
-            return hr;
-        }
-    } else {
-        WAVEOUTCAPSA woc;
-        hr = mmErr(waveOutGetDevCapsA(device->drvdesc.dnDevNode, &woc, sizeof(woc)));
-        if (hr != DS_OK) {
-            WARN("waveOutGetDevCaps failed\n");
-            return hr;
-        }
-        ZeroMemory(&device->drvcaps, sizeof(device->drvcaps));
-        if ((woc.dwFormats & WAVE_FORMAT_1M08) ||
-            (woc.dwFormats & WAVE_FORMAT_2M08) ||
-            (woc.dwFormats & WAVE_FORMAT_4M08) ||
-            (woc.dwFormats & WAVE_FORMAT_48M08) ||
-            (woc.dwFormats & WAVE_FORMAT_96M08)) {
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARY8BIT;
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARYMONO;
-        }
-        if ((woc.dwFormats & WAVE_FORMAT_1M16) ||
-            (woc.dwFormats & WAVE_FORMAT_2M16) ||
-            (woc.dwFormats & WAVE_FORMAT_4M16) ||
-            (woc.dwFormats & WAVE_FORMAT_48M16) ||
-            (woc.dwFormats & WAVE_FORMAT_96M16)) {
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARY16BIT;
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARYMONO;
-        }
-        if ((woc.dwFormats & WAVE_FORMAT_1S08) ||
-            (woc.dwFormats & WAVE_FORMAT_2S08) ||
-            (woc.dwFormats & WAVE_FORMAT_4S08) ||
-            (woc.dwFormats & WAVE_FORMAT_48S08) ||
-            (woc.dwFormats & WAVE_FORMAT_96S08)) {
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARY8BIT;
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARYSTEREO;
-        }
-        if ((woc.dwFormats & WAVE_FORMAT_1S16) ||
-            (woc.dwFormats & WAVE_FORMAT_2S16) ||
-            (woc.dwFormats & WAVE_FORMAT_4S16) ||
-            (woc.dwFormats & WAVE_FORMAT_48S16) ||
-            (woc.dwFormats & WAVE_FORMAT_96S16)) {
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARY16BIT;
-            device->drvcaps.dwFlags |= DSCAPS_PRIMARYSTEREO;
-        }
-        if (ds_emuldriver)
-            device->drvcaps.dwFlags |= DSCAPS_EMULDRIVER;
-        device->drvcaps.dwMinSecondarySampleRate = DSBFREQUENCY_MIN;
-        device->drvcaps.dwMaxSecondarySampleRate = DSBFREQUENCY_MAX;
-        ZeroMemory(&device->volpan, sizeof(device->volpan));
-    }
+    ZeroMemory(&device->drvcaps, sizeof(device->drvcaps));
+
+    if(DSOUND_check_supported(device->client, 11025, 8, 1) ||
+            DSOUND_check_supported(device->client, 22050, 8, 1) ||
+            DSOUND_check_supported(device->client, 44100, 8, 1) ||
+            DSOUND_check_supported(device->client, 48000, 8, 1) ||
+            DSOUND_check_supported(device->client, 96000, 8, 1))
+        device->drvcaps.dwFlags |= DSCAPS_PRIMARY8BIT | DSCAPS_PRIMARYMONO;
+
+    if(DSOUND_check_supported(device->client, 11025, 16, 1) ||
+            DSOUND_check_supported(device->client, 22050, 16, 1) ||
+            DSOUND_check_supported(device->client, 44100, 16, 1) ||
+            DSOUND_check_supported(device->client, 48000, 16, 1) ||
+            DSOUND_check_supported(device->client, 96000, 16, 1))
+        device->drvcaps.dwFlags |= DSCAPS_PRIMARY16BIT | DSCAPS_PRIMARYMONO;
+
+    if(DSOUND_check_supported(device->client, 11025, 8, 2) ||
+            DSOUND_check_supported(device->client, 22050, 8, 2) ||
+            DSOUND_check_supported(device->client, 44100, 8, 2) ||
+            DSOUND_check_supported(device->client, 48000, 8, 2) ||
+            DSOUND_check_supported(device->client, 96000, 8, 2))
+        device->drvcaps.dwFlags |= DSCAPS_PRIMARY8BIT | DSCAPS_PRIMARYSTEREO;
+
+    if(DSOUND_check_supported(device->client, 11025, 16, 2) ||
+            DSOUND_check_supported(device->client, 22050, 16, 2) ||
+            DSOUND_check_supported(device->client, 44100, 16, 2) ||
+            DSOUND_check_supported(device->client, 48000, 16, 2) ||
+            DSOUND_check_supported(device->client, 96000, 16, 2))
+        device->drvcaps.dwFlags |= DSCAPS_PRIMARY16BIT | DSCAPS_PRIMARYSTEREO;
+
+    /* the dsound mixer supports all of the following */
+    device->drvcaps.dwFlags |= DSCAPS_SECONDARY8BIT | DSCAPS_SECONDARY16BIT;
+    device->drvcaps.dwFlags |= DSCAPS_SECONDARYMONO | DSCAPS_SECONDARYSTEREO;
+    device->drvcaps.dwFlags |= DSCAPS_CONTINUOUSRATE;
+
+    device->drvcaps.dwPrimaryBuffers = 1;
+    device->drvcaps.dwMinSecondarySampleRate = DSBFREQUENCY_MIN;
+    device->drvcaps.dwMaxSecondarySampleRate = DSBFREQUENCY_MAX;
+    device->drvcaps.dwMaxHwMixingAllBuffers = 1;
+    device->drvcaps.dwMaxHwMixingStaticBuffers = 1;
+    device->drvcaps.dwMaxHwMixingStreamingBuffers = 1;
+
+    ZeroMemory(&device->volpan, sizeof(device->volpan));
 
     hr = DSOUND_PrimaryCreate(device);
-    if (hr == DS_OK) {
-        UINT triggertime = DS_TIME_DEL, res = DS_TIME_RES, id;
-        TIMECAPS time;
+    if (hr == DS_OK)
+        device->timerID = DSOUND_create_timer(DSOUND_timer, (DWORD_PTR)device);
+    else
+        WARN("DSOUND_PrimaryCreate failed: %08x\n", hr);
 
-        DSOUND_renderer[device->drvdesc.dnDevNode] = device;
-        timeGetDevCaps(&time, sizeof(TIMECAPS));
-        TRACE("Minimum timer resolution: %u, max timer: %u\n", time.wPeriodMin, time.wPeriodMax);
-        if (triggertime < time.wPeriodMin)
-            triggertime = time.wPeriodMin;
-        if (res < time.wPeriodMin)
-            res = time.wPeriodMin;
-        if (timeBeginPeriod(res) == TIMERR_NOCANDO)
-            WARN("Could not set minimum resolution, don't expect sound\n");
-        id = timeSetEvent(triggertime, res, DSOUND_timer, (DWORD_PTR)device, TIME_PERIODIC | TIME_KILL_SYNCHRONOUS);
-        if (!id)
-        {
-            WARN("Timer not created! Retrying without TIME_KILL_SYNCHRONOUS\n");
-            id = timeSetEvent(triggertime, res, DSOUND_timer, (DWORD_PTR)device, TIME_PERIODIC);
-            if (!id) ERR("Could not create timer, sound playback will not occur\n");
-        }
-        DSOUND_renderer[device->drvdesc.dnDevNode]->timerID = id;
-    } else {
-        WARN("DSOUND_PrimaryCreate failed\n");
-    }
+    *ppDevice = device;
+    list_add_tail(&DSOUND_renderers, &device->entry);
+
+    LeaveCriticalSection(&DSOUND_renderers_lock);
 
     return hr;
 }
@@ -1540,6 +1549,12 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
         TRACE("(lpwfxFormat=%p)\n",dsbd->lpwfxFormat);
     }
 
+    if (dsbd->dwFlags & DSBCAPS_LOCHARDWARE &&
+            !(dsbd->dwFlags & DSBCAPS_PRIMARYBUFFER)) {
+        TRACE("LOCHARDWARE is not supported, returning E_NOTIMPL\n");
+        return E_NOTIMPL;
+    }
+
     if (dsbd->dwFlags & DSBCAPS_PRIMARYBUFFER) {
         if (dsbd->lpwfxFormat != NULL) {
             WARN("invalid parameter: dsbd->lpwfxFormat must be NULL for "
@@ -1552,17 +1567,13 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
             IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER8)(device->primary));
             *ppdsb = (LPDIRECTSOUNDBUFFER)(device->primary);
         } else {
-           device->dsbd = *dsbd;
-           device->dsbd.dwFlags &= ~(DSBCAPS_LOCHARDWARE | DSBCAPS_LOCSOFTWARE);
-           if (device->hwbuf)
-               device->dsbd.dwFlags |= DSBCAPS_LOCHARDWARE;
-           else device->dsbd.dwFlags |= DSBCAPS_LOCSOFTWARE;
-           hres = PrimaryBufferImpl_Create(device, &(device->primary), &(device->dsbd));
-           if (device->primary) {
-               IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER8)(device->primary));
-               *ppdsb = (LPDIRECTSOUNDBUFFER)(device->primary);
-           } else
-               WARN("PrimaryBufferImpl_Create failed\n");
+            hres = primarybuffer_create(device, &device->primary, dsbd);
+            if (device->primary) {
+                *ppdsb = (IDirectSoundBuffer*)&device->primary->IDirectSoundBuffer8_iface;
+                device->primary->dsbd.dwFlags &= ~(DSBCAPS_LOCHARDWARE | DSBCAPS_LOCSOFTWARE);
+                device->primary->dsbd.dwFlags |= DSBCAPS_LOCSOFTWARE;
+            } else
+                WARN("primarybuffer_create() failed\n");
         }
     } else {
         IDirectSoundBufferImpl * dsb;
@@ -1630,15 +1641,10 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
         }
 
         hres = IDirectSoundBufferImpl_Create(device, &dsb, dsbd);
-        if (dsb) {
-            hres = SecondaryBufferImpl_Create(dsb, (SecondaryBufferImpl**)ppdsb);
-            if (*ppdsb) {
-                dsb->secondary = (SecondaryBufferImpl*)*ppdsb;
-                IDirectSoundBuffer_AddRef(*ppdsb);
-            } else
-                WARN("SecondaryBufferImpl_Create failed\n");
-        } else
-           WARN("IDirectSoundBufferImpl_Create failed\n");
+        if (dsb)
+            *ppdsb = (IDirectSoundBuffer*)&dsb->IDirectSoundBuffer8_iface;
+        else
+            WARN("IDirectSoundBufferImpl_Create failed\n");
    }
 
    return hres;
@@ -1669,28 +1675,18 @@ HRESULT DirectSoundDevice_DuplicateSoundBuffer(
     }
 
     /* make sure we have a secondary buffer */
-    if ((PrimaryBufferImpl *)psb == device->primary) {
+    if (psb == (IDirectSoundBuffer *)&device->primary->IDirectSoundBuffer8_iface) {
         WARN("trying to duplicate primary buffer\n");
         *ppdsb = NULL;
         return DSERR_INVALIDCALL;
     }
 
     /* duplicate the actual buffer implementation */
-    hres = IDirectSoundBufferImpl_Duplicate(device, &dsb,
-                                           ((SecondaryBufferImpl *)psb)->dsb);
-
-    if (hres == DS_OK) {
-        /* create a new secondary buffer using the new implementation */
-        hres = SecondaryBufferImpl_Create(dsb, (SecondaryBufferImpl**)ppdsb);
-        if (*ppdsb) {
-            dsb->secondary = (SecondaryBufferImpl*)*ppdsb;
-            IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER8)*ppdsb);
-        } else {
-            WARN("SecondaryBufferImpl_Create failed\n");
-            IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER8)dsb);
-            IDirectSoundBuffer_Release((LPDIRECTSOUNDBUFFER8)dsb);
-        }
-    }
+    hres = IDirectSoundBufferImpl_Duplicate(device, &dsb, (IDirectSoundBufferImpl*)psb);
+    if (hres == DS_OK)
+        *ppdsb = (IDirectSoundBuffer*)&dsb->IDirectSoundBuffer8_iface;
+    else
+        WARN("IDirectSoundBufferImpl_Duplicate failed\n");
 
     return hres;
 }

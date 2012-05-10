@@ -269,10 +269,10 @@ static HANDLE run_query( HWND hWnd, UINT uMsg, LPTHREAD_START_ROUTINE func,
 {
     static LONG next_handle = 0xdead;
     HANDLE thread;
-    ULONG handle = LOWORD( InterlockedIncrement( &next_handle ));
-
-    /* avoid handle 0 */
-    while (!handle) handle = LOWORD( InterlockedIncrement( &next_handle ));
+    ULONG handle;
+    do
+        handle = LOWORD( InterlockedIncrement( &next_handle ));
+    while (!handle); /* avoid handle 0 */
 
     query->hWnd    = hWnd;
     query->uMsg    = uMsg;
@@ -284,6 +284,7 @@ static HANDLE run_query( HWND hWnd, UINT uMsg, LPTHREAD_START_ROUTINE func,
     if (!thread)
     {
         SetLastError( WSAEWOULDBLOCK );
+        HeapFree( GetProcessHeap(), 0, query );
         return 0;
     }
     CloseHandle( thread );
@@ -406,7 +407,7 @@ HANDLE WINAPI WSAAsyncGetServByPort(HWND hWnd, UINT uMsg, INT port,
                                         LPCSTR proto, LPSTR sbuf, INT buflen)
 {
     struct async_query_getservbyport *aq;
-    unsigned int len = strlen(proto) + 1;
+    unsigned int len = proto ? strlen(proto) + 1 : 0;
 
     TRACE("hwnd %p, msg %04x, port %i, proto %s\n", hWnd, uMsg, port, debugstr_a(proto));
 
@@ -415,9 +416,17 @@ HANDLE WINAPI WSAAsyncGetServByPort(HWND hWnd, UINT uMsg, INT port,
         SetLastError( WSAEWOULDBLOCK );
         return 0;
     }
-    aq->serv_proto = (char *)(aq + 1);
-    aq->serv_port  = port;
-    strcpy( aq->serv_proto, proto );
+
+    if (proto)
+    {
+        aq->serv_proto = (char *)(aq + 1);
+        strcpy( aq->serv_proto, proto );
+    }
+    else
+        aq->serv_proto = NULL;
+
+    aq->serv_port = port;
+
     return run_query( hWnd, uMsg, async_getservbyport, &aq->query, sbuf, buflen );
 }
 

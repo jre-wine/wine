@@ -32,9 +32,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qedit);
 
-static WCHAR const vendor_name[] = { 'W', 'i', 'n', 'e', 0 };
-static WCHAR const pin_in_name[] = { 'I', 'n', 0 };
-static WCHAR const pin_out_name[] = { 'O', 'u', 't', 0 };
+static const WCHAR vendor_name[] = { 'W', 'i', 'n', 'e', 0 };
+static const WCHAR pin_in_name[] = { 'I', 'n', 0 };
+static const WCHAR pin_out_name[] = { 'O', 'u', 't', 0 };
 
 static IEnumPins *pinsenum_create(IBaseFilter *filter, IPin **pins, ULONG pinCount);
 static IEnumMediaTypes *mediaenum_create(const AM_MEDIA_TYPE *mtype);
@@ -88,7 +88,7 @@ Fixed_IEnumPins_QueryInterface(IEnumPins *iface, REFIID riid, void **ppvObject)
     if (IsEqualIID(riid, &IID_IUnknown) ||
         IsEqualIID(riid, &IID_IEnumPins)) {
 	Fixed_IEnumPins_AddRef(iface);
-        *ppvObject = &(This->pins);
+        *ppvObject = This->pins;
         return S_OK;
     }
     *ppvObject = NULL;

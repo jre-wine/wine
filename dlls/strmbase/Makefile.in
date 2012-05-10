@@ -1,10 +1,11 @@
-MODULE    = strmbase
+MODULE    = libstrmbase.a
 
 C_SRCS = \
 	dllfunc.c \
 	enumpins.c \
 	filter.c \
 	mediatype.c \
+	outputqueue.c \
 	pin.c \
 	qualitycontrol.c \
 	seeking.c \

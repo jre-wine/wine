@@ -49,64 +49,46 @@ typedef struct _basic_string_wchar
 } basic_string_wchar;
 
 static void* (__cdecl *p_set_invalid_parameter_handler)(void*);
+static basic_string_char* (__cdecl *p_basic_string_char_concatenate)(basic_string_char*, const basic_string_char*, const basic_string_char*);
+static basic_string_char* (__cdecl *p_basic_string_char_concatenate_cstr)(basic_string_char*, const basic_string_char*, const char*);
 
 #ifdef __i386__
-static basic_string_char* (WINAPI *p_basic_string_char_ctor)(void);
-static basic_string_char* (WINAPI *p_basic_string_char_copy_ctor)(basic_string_char*);
-static basic_string_char* (WINAPI *p_basic_string_char_ctor_cstr)(const char*);
-static void (WINAPI *p_basic_string_char_dtor)(void);
-static basic_string_char* (WINAPI *p_basic_string_char_erase)(size_t, size_t);
-static basic_string_char* (WINAPI *p_basic_string_char_assign_cstr_len)(const char*, size_t);
-static const char* (WINAPI *p_basic_string_char_cstr)(void);
-static const char* (WINAPI *p_basic_string_char_data)(void);
-static size_t (WINAPI *p_basic_string_char_size)(void);
-static size_t (WINAPI *p_basic_string_char_capacity)(void);
-static void (WINAPI *p_basic_string_char_swap)(basic_string_char*);
-static basic_string_char* (WINAPI *p_basic_string_char_append)(basic_string_char*);
-static basic_string_char* (WINAPI *p_basic_string_char_append_substr)(basic_string_char*, size_t, size_t);
-static int (WINAPI *p_basic_string_char_compare_substr_substr)(size_t, size_t, basic_string_char*, size_t, size_t);
-static int (WINAPI *p_basic_string_char_compare_substr_cstr_len)(size_t, size_t, const char*, size_t);
-
-static basic_string_wchar* (WINAPI *p_basic_string_wchar_ctor)(void);
-static basic_string_wchar* (WINAPI *p_basic_string_wchar_copy_ctor)(basic_string_wchar*);
-static basic_string_wchar* (WINAPI *p_basic_string_wchar_ctor_cstr)(const wchar_t*);
-static void (WINAPI *p_basic_string_wchar_dtor)(void);
-static basic_string_wchar* (WINAPI *p_basic_string_wchar_erase)(size_t, size_t);
-static basic_string_wchar* (WINAPI *p_basic_string_wchar_assign_cstr_len)(const wchar_t*, size_t);
-static const wchar_t* (WINAPI *p_basic_string_wchar_cstr)(void);
-static const wchar_t* (WINAPI *p_basic_string_wchar_data)(void);
-static size_t (WINAPI *p_basic_string_wchar_size)(void);
-static size_t (WINAPI *p_basic_string_wchar_capacity)(void);
-static void (WINAPI *p_basic_string_wchar_swap)(basic_string_wchar*);
+#define __thiscall __stdcall
 #else
-static basic_string_char* (__cdecl *p_basic_string_char_ctor)(basic_string_char*);
-static basic_string_char* (__cdecl *p_basic_string_char_copy_ctor)(basic_string_char*, basic_string_char*);
-static basic_string_char* (__cdecl *p_basic_string_char_ctor_cstr)(basic_string_char*, const char*);
-static void (__cdecl *p_basic_string_char_dtor)(basic_string_char*);
-static basic_string_char* (__cdecl *p_basic_string_char_erase)(basic_string_char*, size_t, size_t);
-static basic_string_char* (__cdecl *p_basic_string_char_assign_cstr_len)(basic_string_char*, const char*, size_t);
-static const char* (__cdecl *p_basic_string_char_cstr)(basic_string_char*);
-static const char* (__cdecl *p_basic_string_char_data)(basic_string_char*);
-static size_t (__cdecl *p_basic_string_char_size)(basic_string_char*);
-static size_t (__cdecl *p_basic_string_char_capacity)(basic_string_char*);
-static void (__cdecl *p_basic_string_char_swap)(basic_string_char*, basic_string_char*);
-static basic_string_char* (WINAPI *p_basic_string_char_append)(basic_string_char*, basic_string_char*);
-static basic_string_char* (WINAPI *p_basic_string_char_append_substr)(basic_string_char*, basic_string_char*, size_t, size_t);
-static int (WINAPI *p_basic_string_char_compare_substr_substr)(basic_string_char*, size_t, size_t, basic_string_char*, size_t, size_t);
-static int (WINAPI *p_basic_string_char_compare_substr_cstr_len)(basic_string_char*, size_t, size_t, const char*, size_t);
-
-static basic_string_wchar* (__cdecl *p_basic_string_wchar_ctor)(basic_string_wchar*);
-static basic_string_wchar* (__cdecl *p_basic_string_wchar_copy_ctor)(basic_string_wchar*, basic_string_wchar*);
-static basic_string_wchar* (__cdecl *p_basic_string_wchar_ctor_cstr)(basic_string_wchar*, const wchar_t*);
-static void (__cdecl *p_basic_string_wchar_dtor)(basic_string_wchar*);
-static basic_string_wchar* (__cdecl *p_basic_string_wchar_erase)(basic_string_wchar*, size_t, size_t);
-static basic_string_wchar* (__cdecl *p_basic_string_wchar_assign_cstr_len)(basic_string_wchar*, const wchar_t*, size_t);
-static const wchar_t* (__cdecl *p_basic_string_wchar_cstr)(basic_string_wchar*);
-static const wchar_t* (__cdecl *p_basic_string_wchar_data)(basic_string_wchar*);
-static size_t (__cdecl *p_basic_string_wchar_size)(basic_string_wchar*);
-static size_t (__cdecl *p_basic_string_wchar_capacity)(basic_string_wchar*);
-static void (__cdecl *p_basic_string_wchar_swap)(basic_string_wchar*, basic_string_wchar*);
+#define __thiscall __cdecl
 #endif
+
+static basic_string_char* (__thiscall *p_basic_string_char_ctor)(basic_string_char*);
+static basic_string_char* (__thiscall *p_basic_string_char_copy_ctor)(basic_string_char*, basic_string_char*);
+static basic_string_char* (__thiscall *p_basic_string_char_ctor_cstr)(basic_string_char*, const char*);
+static void (__thiscall *p_basic_string_char_dtor)(basic_string_char*);
+static basic_string_char* (__thiscall *p_basic_string_char_erase)(basic_string_char*, size_t, size_t);
+static basic_string_char* (__thiscall *p_basic_string_char_assign_cstr_len)(basic_string_char*, const char*, size_t);
+static const char* (__thiscall *p_basic_string_char_cstr)(basic_string_char*);
+static const char* (__thiscall *p_basic_string_char_data)(basic_string_char*);
+static size_t (__thiscall *p_basic_string_char_size)(basic_string_char*);
+static size_t (__thiscall *p_basic_string_char_capacity)(basic_string_char*);
+static void (__thiscall *p_basic_string_char_swap)(basic_string_char*, basic_string_char*);
+static basic_string_char* (__thiscall *p_basic_string_char_append)(basic_string_char*, basic_string_char*);
+static basic_string_char* (__thiscall *p_basic_string_char_append_substr)(basic_string_char*, basic_string_char*, size_t, size_t);
+static int (__thiscall *p_basic_string_char_compare_substr_substr)(basic_string_char*, size_t, size_t, basic_string_char*, size_t, size_t);
+static int (__thiscall *p_basic_string_char_compare_substr_cstr_len)(basic_string_char*, size_t, size_t, const char*, size_t);
+static size_t (__thiscall *p_basic_string_char_find_cstr_substr)(basic_string_char*, const char*, size_t, size_t);
+static size_t (__thiscall *p_basic_string_char_rfind_cstr_substr)(basic_string_char*, const char*, size_t, size_t);
+
+static size_t *p_basic_string_char_npos;
+
+static basic_string_wchar* (__thiscall *p_basic_string_wchar_ctor)(basic_string_wchar*);
+static basic_string_wchar* (__thiscall *p_basic_string_wchar_copy_ctor)(basic_string_wchar*, basic_string_wchar*);
+static basic_string_wchar* (__thiscall *p_basic_string_wchar_ctor_cstr)(basic_string_wchar*, const wchar_t*);
+static void (__thiscall *p_basic_string_wchar_dtor)(basic_string_wchar*);
+static basic_string_wchar* (__thiscall *p_basic_string_wchar_erase)(basic_string_wchar*, size_t, size_t);
+static basic_string_wchar* (__thiscall *p_basic_string_wchar_assign_cstr_len)(basic_string_wchar*, const wchar_t*, size_t);
+static const wchar_t* (__thiscall *p_basic_string_wchar_cstr)(basic_string_wchar*);
+static const wchar_t* (__thiscall *p_basic_string_wchar_data)(basic_string_wchar*);
+static size_t (__thiscall *p_basic_string_wchar_size)(basic_string_wchar*);
+static size_t (__thiscall *p_basic_string_wchar_capacity)(basic_string_wchar*);
+static void (__thiscall *p_basic_string_wchar_swap)(basic_string_wchar*, basic_string_wchar*);
 
 static int invalid_parameter = 0;
 static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
@@ -123,201 +105,58 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
 
 /* Emulate a __thiscall */
 #ifdef __i386__
-#ifdef _MSC_VER
-static inline void* do_call_func1(void *func, void *_this)
+
+#include "pshpack1.h"
+struct thiscall_thunk
 {
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
+    BYTE pop_eax;    /* popl  %eax (ret addr) */
+    BYTE pop_edx;    /* popl  %edx (func) */
+    BYTE pop_ecx;    /* popl  %ecx (this) */
+    BYTE push_eax;   /* pushl %eax */
+    WORD jmp_edx;    /* jmp  *%edx */
+};
+#include "poppack.h"
+
+static void * (WINAPI *call_thiscall_func1)( void *func, void *this );
+static void * (WINAPI *call_thiscall_func2)( void *func, void *this, const void *a );
+static void * (WINAPI *call_thiscall_func3)( void *func, void *this, const void *a, const void *b );
+static void * (WINAPI *call_thiscall_func4)( void *func, void *this, const void *a, const void *b,
+                                             const void *c );
+static void * (WINAPI *call_thiscall_func5)( void *func, void *this, const void *a, const void *b,
+                                             const void *c, const void *d );
+static void * (WINAPI *call_thiscall_func6)( void *func, void *this, const void *a, const void *b,
+                                             const void *c, const void *d, const void *e );
+
+static void init_thiscall_thunk(void)
+{
+    struct thiscall_thunk *thunk = VirtualAlloc( NULL, sizeof(*thunk),
+                                                 MEM_COMMIT, PAGE_EXECUTE_READWRITE );
+    thunk->pop_eax  = 0x58;   /* popl  %eax */
+    thunk->pop_edx  = 0x5a;   /* popl  %edx */
+    thunk->pop_ecx  = 0x59;   /* popl  %ecx */
+    thunk->push_eax = 0x50;   /* pushl %eax */
+    thunk->jmp_edx  = 0xe2ff; /* jmp  *%edx */
+    call_thiscall_func1 = (void *)thunk;
+    call_thiscall_func2 = (void *)thunk;
+    call_thiscall_func3 = (void *)thunk;
+    call_thiscall_func4 = (void *)thunk;
+    call_thiscall_func5 = (void *)thunk;
+    call_thiscall_func6 = (void *)thunk;
 }
 
-static inline void* do_call_func2(void *func, void *_this, const void *arg)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-
-static inline void* do_call_func3(void *func, void *_this,
-        const void *arg1, const void *arg2)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg1
-        push arg2
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-
-static inline void* do_call_func4(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg1
-        push arg2
-        push arg3
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-
-static inline void* do_call_func5(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3, const void *arg4)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg1
-        push arg2
-        push arg3
-        push arg4
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-
-static inline void* do_call_func6(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3,
-        const void *arg4, const void *arg5)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg1
-        push arg2
-        push arg3
-        push arg4
-        push arg5
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-#else
-static void* do_call_func1(void *func, void *_this)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "call *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "g" (func), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func2(void *func, void *_this, const void *arg)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func3(void *func, void *_this,
-        const void *arg1, const void *arg2)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %4\n\tpushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg1), "r" (arg2), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func4(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %5\n\tpushl %4\n\tpushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg1), "r" (arg2), "m" (arg3), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func5(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3, const void *arg4)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %6\n\tpushl %5\n\tpushl %4\n\tpushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg1), "r" (arg2), "m" (arg3), "m" (arg4), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func6(void *func, void *_this,
-        const void *arg1, const void *arg2, const void *arg3,
-        const void *arg4, const void *arg5)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %7\n\tpushl %6\n\tpushl %5\n\tpushl %4\n\tpushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg1), "r" (arg2), "m" (arg3), "m" (arg4), "m" (arg5), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-#endif
-
-#define call_func1(func,_this)   do_call_func1(func,_this)
-#define call_func2(func,_this,a) do_call_func2(func,_this,(const void*)a)
-#define call_func3(func,_this,a,b) do_call_func3(func,_this,(const void*)a,(const void*)b)
-#define call_func4(func,_this,a,b,c) do_call_func4(func,_this,(const void*)a,\
+#define call_func1(func,_this) call_thiscall_func1(func,_this)
+#define call_func2(func,_this,a) call_thiscall_func2(func,_this,(const void*)a)
+#define call_func3(func,_this,a,b) call_thiscall_func3(func,_this,(const void*)a,(const void*)b)
+#define call_func4(func,_this,a,b,c) call_thiscall_func4(func,_this,(const void*)a,\
         (const void*)b,(const void*)c)
-#define call_func5(func,_this,a,b,c,d) do_call_func5(func,_this,(const void*)a,\
+#define call_func5(func,_this,a,b,c,d) call_thiscall_func5(func,_this,(const void*)a,\
         (const void*)b,(const void*)c,(const void*)d)
-#define call_func6(func,_this,a,b,c,d,e) do_call_func6(func,_this,(const void*)a,\
+#define call_func6(func,_this,a,b,c,d,e) call_thiscall_func6(func,_this,(const void*)a,\
         (const void*)b,(const void*)c,(const void*)d,(const void*)e)
 
 #else
 
+#define init_thiscall_thunk()
 #define call_func1(func,_this) func(_this)
 #define call_func2(func,_this,a) func(_this,a)
 #define call_func3(func,_this,a,b) func(_this,a,b)
@@ -327,6 +166,8 @@ static void* do_call_func6(void *func, void *_this,
 
 #endif /* __i386__ */
 
+#define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
+#define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
 static BOOL init(void)
 {
     HMODULE msvcr = LoadLibraryA("msvcr90.dll");
@@ -345,115 +186,136 @@ static BOOL init(void)
     p_set_invalid_parameter_handler(test_invalid_parameter_handler);
 
     if(sizeof(void*) == 8) { /* 64-bit initialization */
-        p_basic_string_char_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_ctor,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@XZ");
-        p_basic_string_char_copy_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_copy_ctor,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV01@@Z");
-        p_basic_string_char_ctor_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_ctor_cstr,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@PEBD@Z");
-        p_basic_string_char_dtor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_dtor,
                 "??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@XZ");
-        p_basic_string_char_erase = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_erase,
                 "?erase@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV12@_K0@Z");
-        p_basic_string_char_assign_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_assign_cstr_len,
                 "?assign@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV12@PEBD_K@Z");
-        p_basic_string_char_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_cstr,
                 "?c_str@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEBDXZ");
-        p_basic_string_char_data = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_data,
                 "?data@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEBDXZ");
-        p_basic_string_char_size = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_size,
                 "?size@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KXZ");
-        p_basic_string_char_capacity = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_capacity,
                 "?capacity@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KXZ");
-        p_basic_string_char_swap = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_swap,
                 "?swap@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXAEAV12@@Z");
-        p_basic_string_char_append = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_append,
                 "?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV12@AEBV12@@Z");
-        p_basic_string_char_append_substr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_append_substr,
                 "?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAAEAV12@AEBV12@_K1@Z");
-        p_basic_string_char_compare_substr_substr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_compare_substr_substr,
                 "?compare@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAH_K0AEBV12@00@Z");
-        p_basic_string_char_compare_substr_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_compare_substr_cstr_len,
                 "?compare@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAH_K0PEBD0@Z");
+        SET(p_basic_string_char_concatenate,
+                "??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@AEBV10@0@Z");
+        SET(p_basic_string_char_concatenate_cstr,
+                "??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@AEBV10@PEBD@Z");
+        SET(p_basic_string_char_find_cstr_substr,
+                "?find@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KPEBD_K1@Z");
+        SET(p_basic_string_char_rfind_cstr_substr,
+                "?rfind@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA_KPEBD_K1@Z");
+        SET(p_basic_string_char_npos,
+                "?npos@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@2_KB");
 
-        p_basic_string_wchar_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_ctor,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@XZ");
-        p_basic_string_wchar_copy_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_copy_ctor,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@AEBV01@@Z");
-        p_basic_string_wchar_ctor_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_ctor_cstr,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@PEB_W@Z");
-        p_basic_string_wchar_dtor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_dtor,
                 "??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@XZ");
-        p_basic_string_wchar_erase = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_erase,
                 "?erase@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAAEAV12@_K0@Z");
-        p_basic_string_wchar_assign_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_assign_cstr_len,
                 "?assign@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAAEAV12@PEB_W_K@Z");
-        p_basic_string_wchar_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_cstr,
                 "?c_str@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEB_WXZ");
-        p_basic_string_wchar_data = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_data,
                 "?data@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEB_WXZ");
-        p_basic_string_wchar_size = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_size,
                 "?size@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA_KXZ");
-        p_basic_string_wchar_capacity = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_capacity,
                 "?capacity@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA_KXZ");
-        p_basic_string_wchar_swap = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_swap,
                 "?swap@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXAEAV12@@Z");
     } else {
-        p_basic_string_char_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_ctor,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
-        p_basic_string_char_copy_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_copy_ctor,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV01@@Z");
-        p_basic_string_char_ctor_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_ctor_cstr,
                 "??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@PBD@Z");
-        p_basic_string_char_dtor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_dtor,
                 "??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
-        p_basic_string_char_erase = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_erase,
                 "?erase@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@II@Z");
-        p_basic_string_char_assign_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_assign_cstr_len,
                 "?assign@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@PBDI@Z");
-        p_basic_string_char_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_cstr,
                 "?c_str@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPBDXZ");
-        p_basic_string_char_data = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_data,
                 "?data@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPBDXZ");
-        p_basic_string_char_size = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_size,
                 "?size@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIXZ");
-        p_basic_string_char_capacity = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_capacity,
                 "?capacity@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIXZ");
-        p_basic_string_char_swap = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_swap,
                 "?swap@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXAAV12@@Z");
-        p_basic_string_char_append = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_append,
                 "?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@ABV12@@Z");
-        p_basic_string_char_append_substr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_append_substr,
                 "?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@ABV12@II@Z");
-        p_basic_string_char_compare_substr_substr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_compare_substr_substr,
                 "?compare@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEHIIABV12@II@Z");
-        p_basic_string_char_compare_substr_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_char_compare_substr_cstr_len,
                 "?compare@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEHIIPBDI@Z");
+        SET(p_basic_string_char_concatenate,
+                "??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@0@Z");
+        SET(p_basic_string_char_concatenate_cstr,
+                "??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@PBD@Z");
+        SET(p_basic_string_char_find_cstr_substr,
+                "?find@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIPBDII@Z");
+        SET(p_basic_string_char_rfind_cstr_substr,
+                "?rfind@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIPBDII@Z");
+        SET(p_basic_string_char_npos,
+                "?npos@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@2IB");
 
-        p_basic_string_wchar_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_ctor,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@XZ");
-        p_basic_string_wchar_copy_ctor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_copy_ctor,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@ABV01@@Z");
-        p_basic_string_wchar_ctor_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_ctor_cstr,
                 "??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@PB_W@Z");
-        p_basic_string_wchar_dtor = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_dtor,
                 "??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@XZ");
-        p_basic_string_wchar_erase = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_erase,
                 "?erase@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEAAV12@II@Z");
-        p_basic_string_wchar_assign_cstr_len = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_assign_cstr_len,
                 "?assign@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEAAV12@PB_WI@Z");
-        p_basic_string_wchar_cstr = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_cstr,
                 "?c_str@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPB_WXZ");
-        p_basic_string_wchar_data = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_data,
                 "?data@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPB_WXZ");
-        p_basic_string_wchar_size = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_size,
                 "?size@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEIXZ");
-        p_basic_string_wchar_capacity = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_capacity,
                 "?capacity@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEIXZ");
-        p_basic_string_wchar_swap = (void*)GetProcAddress(msvcp,
+        SET(p_basic_string_wchar_swap,
                 "?swap@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXAAV12@@Z");
     }
 
+    init_thiscall_thunk();
     return TRUE;
 }
 
@@ -461,15 +323,6 @@ static void test_basic_string_char(void) {
     basic_string_char str1, str2, *pstr;
     const char *str;
     size_t size, capacity;
-
-    if(!p_basic_string_char_ctor || !p_basic_string_char_copy_ctor
-            || !p_basic_string_char_ctor_cstr || !p_basic_string_char_dtor
-            || !p_basic_string_char_erase || !p_basic_string_char_assign_cstr_len
-            || !p_basic_string_char_cstr || !p_basic_string_char_data
-            || !p_basic_string_char_size || !p_basic_string_char_capacity) {
-        win_skip("basic_string<char> unavailable\n");
-        return;
-    }
 
     call_func1(p_basic_string_char_ctor, &str1);
     str = NULL;
@@ -539,12 +392,6 @@ static void test_basic_string_char_swap(void) {
     basic_string_char str1, str2;
     char atmp1[32], atmp2[32];
 
-    if(!p_basic_string_char_ctor_cstr || !p_basic_string_char_dtor ||
-            !p_basic_string_char_swap || !p_basic_string_char_cstr) {
-        win_skip("basic_string<char> unavailable\n");
-        return;
-    }
-
     /* Swap self, local */
     strcpy(atmp1, "qwerty");
     call_func2(p_basic_string_char_ctor_cstr, &str1, atmp1);
@@ -573,13 +420,6 @@ static void test_basic_string_char_append(void) {
     basic_string_char str1, str2;
     const char *str;
 
-    if(!p_basic_string_char_ctor_cstr || !p_basic_string_char_dtor
-            || !p_basic_string_char_append || !p_basic_string_char_append_substr
-            || !p_basic_string_char_cstr) {
-        win_skip("basic_string<char> unavailable\n");
-        return;
-    }
-
     call_func2(p_basic_string_char_ctor_cstr, &str1, "");
     call_func2(p_basic_string_char_ctor_cstr, &str2, "append");
 
@@ -606,13 +446,6 @@ static void test_basic_string_char_append(void) {
 static void test_basic_string_char_compare(void) {
     basic_string_char str1, str2;
     int ret;
-
-    if(!p_basic_string_char_ctor_cstr || !p_basic_string_char_dtor
-            || !p_basic_string_char_compare_substr_substr
-            || !p_basic_string_char_compare_substr_cstr_len) {
-        win_skip("basic_string<char> unavailable\n");
-        return;
-    }
 
     call_func2(p_basic_string_char_ctor_cstr, &str1, "str1str");
     call_func2(p_basic_string_char_ctor_cstr, &str2, "str9str");
@@ -644,21 +477,83 @@ static void test_basic_string_char_compare(void) {
     call_func1(p_basic_string_char_dtor, &str2);
 }
 
+static void test_basic_string_char_concatenate(void) {
+    basic_string_char str, ret;
+    const char *cstr;
+
+    call_func2(p_basic_string_char_ctor_cstr, &str, "test ");
+    /* CDECL calling convention with return bigger than 8 bytes */
+    p_basic_string_char_concatenate(&ret, &str, &str);
+    cstr = call_func1(p_basic_string_char_cstr, &ret);
+    ok(cstr != NULL, "cstr = NULL\n");
+    ok(!strcmp(cstr, "test test "), "cstr = %s\n", cstr);
+    call_func1(p_basic_string_char_dtor, &ret);
+
+    p_basic_string_char_concatenate_cstr(&ret, &str, "passed");
+    cstr = call_func1(p_basic_string_char_cstr, &ret);
+    ok(cstr != NULL, "cstr = NULL\n");
+    ok(!strcmp(cstr, "test passed"), "cstr = %s\n", cstr);
+    call_func1(p_basic_string_char_dtor, &ret);
+
+    call_func1(p_basic_string_char_dtor, &str);
+}
+
+static void test_basic_string_char_find(void) {
+    static const char tmp[] = {'a','a','a','\0','b','b','b',0};
+    basic_string_char str;
+    size_t ret;
+
+    call_func1(p_basic_string_char_ctor, &str);
+    call_func3(p_basic_string_char_assign_cstr_len, &str, tmp, 7);
+    ret = (size_t)call_func4(p_basic_string_char_find_cstr_substr, &str, "aaa", 0, 3);
+    ok(ret == 0, "ret = %lu\n", (unsigned long)ret);
+    ret = (size_t)call_func4(p_basic_string_char_find_cstr_substr, &str, "aaa", 1, 3);
+    ok(ret == -1, "ret = %lu\n", (unsigned long)ret);
+    ret = (size_t)call_func4(p_basic_string_char_find_cstr_substr, &str, "bbb", 0, 3);
+    ok(ret == 4, "ret = %lu\n", (unsigned long)ret);
+    call_func1(p_basic_string_char_dtor, &str);
+}
+
+static void test_basic_string_char_rfind(void) {
+    struct rfind_char_test {
+        const char *str;
+        const char *find;
+        size_t pos;
+        size_t len;
+        size_t ret;
+    };
+
+    int i;
+    basic_string_char str;
+    size_t ret;
+    struct rfind_char_test tests[] = {
+        { "",    "a",   0, 1, *p_basic_string_char_npos }, /* empty string */
+        { "a",   "",    0, 0, 0 }, /* empty find */
+        { "aaa", "aaa", 0, 3, 0 }, /* simple case */
+        { "aaa", "a",   0, 1, 0 }, /* start of string */
+        { "aaa", "a",   2, 1, 2 }, /* end of string */
+        { "aaa", "a",   *p_basic_string_char_npos, 1, 2 }, /* off == npos */
+        { "aaa", "z",   0, 1, *p_basic_string_char_npos }  /* can't find */
+    };
+
+    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+        call_func2(p_basic_string_char_ctor_cstr, &str, tests[i].str);
+
+        ret = (size_t)call_func4(p_basic_string_char_rfind_cstr_substr, &str,
+            tests[i].find, tests[i].pos, tests[i].len);
+        ok(ret == tests[i].ret, "str = '%s' find = '%s' ret = %lu\n",
+            tests[i].str, tests[i].find, (unsigned long)ret);
+
+        call_func1(p_basic_string_char_dtor, &str);
+    }
+}
+
 static void test_basic_string_wchar(void) {
     static const wchar_t test[] = { 't','e','s','t',0 };
 
     basic_string_wchar str1, str2, *pstr;
     const wchar_t *str;
     size_t size, capacity;
-
-    if(!p_basic_string_wchar_ctor || !p_basic_string_wchar_copy_ctor
-            || !p_basic_string_wchar_ctor_cstr || !p_basic_string_wchar_dtor
-            || !p_basic_string_wchar_erase || !p_basic_string_wchar_assign_cstr_len
-            || !p_basic_string_wchar_cstr || !p_basic_string_wchar_data
-            || !p_basic_string_wchar_size || !p_basic_string_wchar_capacity) {
-        win_skip("basic_string<wchar_t> unavailable\n");
-        return;
-    }
 
     call_func1(p_basic_string_wchar_ctor, &str1);
     str = NULL;
@@ -729,12 +624,6 @@ static void test_basic_string_wchar_swap(void) {
     basic_string_wchar str1, str2;
     wchar_t wtmp1[32], wtmp2[32];
 
-    if(!p_basic_string_wchar_ctor_cstr || !p_basic_string_wchar_dtor ||
-            !p_basic_string_wchar_swap || !p_basic_string_wchar_cstr) {
-        win_skip("basic_string<wchar_t> unavailable\n");
-        return;
-    }
-
     /* Swap self, local */
     mbstowcs(wtmp1, "qwerty", 32);
     call_func2(p_basic_string_wchar_ctor_cstr, &str1, wtmp1);
@@ -768,6 +657,9 @@ START_TEST(string)
     test_basic_string_char_swap();
     test_basic_string_char_append();
     test_basic_string_char_compare();
+    test_basic_string_char_concatenate();
+    test_basic_string_char_find();
+    test_basic_string_char_rfind();
     test_basic_string_wchar();
     test_basic_string_wchar_swap();
 

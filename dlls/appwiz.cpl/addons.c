@@ -51,20 +51,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(appwizcpl);
 
-#define GECKO_VERSION "1.1.0"
+#define GECKO_VERSION "1.4"
 
 #ifdef __i386__
 #define ARCH_STRING "x86"
-#define GECKO_SHA "1b6c637207b6f032ae8a52841db9659433482714"
+#define GECKO_SHA "c30aa99621e98336eb4b7e2074118b8af8ea2ad5"
 #elif defined(__x86_64__)
 #define ARCH_STRING "x86_64"
-#define GECKO_SHA "55b4b60cd2a48631d6236fb411c3a94d806d9906"
+#define GECKO_SHA "bf0aaf56a8cf9abd75be02b56b05e5c4e9a4df93"
 #else
 #define ARCH_STRING ""
 #define GECKO_SHA "???"
 #endif
 
-#define GECKO_FILE_NAME "wine_gecko-" GECKO_VERSION "-" ARCH_STRING ".cab"
+#define GECKO_FILE_NAME "wine_gecko-" GECKO_VERSION "-" ARCH_STRING ".msi"
 
 static const WCHAR mshtml_keyW[] =
     {'S','o','f','t','w','a','r','e',
@@ -73,19 +73,6 @@ static const WCHAR mshtml_keyW[] =
 
 static HWND install_dialog = NULL;
 static LPWSTR url = NULL;
-
-static inline char *heap_strdupWtoA(LPCWSTR str)
-{
-    char *ret = NULL;
-
-    if(str) {
-        DWORD size = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
-        ret = heap_alloc(size);
-        WideCharToMultiByte(CP_ACP, 0, str, -1, ret, size, NULL, NULL);
-    }
-
-    return ret;
-}
 
 /* SHA definitions are copied from advapi32. They aren't available in headers. */
 
@@ -157,93 +144,7 @@ static void set_status(DWORD id)
     SendMessageW(status, WM_SETTEXT, 0, (LPARAM)buf);
 }
 
-static void set_registry(const WCHAR *install_dir)
-{
-    WCHAR mshtml_key[100];
-    LPWSTR gecko_path;
-    HKEY hkey;
-    DWORD res, len;
-
-    static const WCHAR wszGeckoPath[] = {'G','e','c','k','o','P','a','t','h',0};
-    static const WCHAR wszWineGecko[] = {'w','i','n','e','_','g','e','c','k','o',0};
-
-    memcpy(mshtml_key, mshtml_keyW, sizeof(mshtml_keyW));
-    mshtml_key[sizeof(mshtml_keyW)/sizeof(WCHAR)-1] = '\\';
-    MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, sizeof(GECKO_VERSION),
-            mshtml_key+sizeof(mshtml_keyW)/sizeof(WCHAR),
-            (sizeof(mshtml_key)-sizeof(mshtml_keyW))/sizeof(WCHAR));
-
-    /* @@ Wine registry key: HKCU\Software\Wine\MSHTML\<version> */
-    res = RegCreateKeyW(HKEY_CURRENT_USER, mshtml_key, &hkey);
-    if(res != ERROR_SUCCESS) {
-        ERR("Faild to create MSHTML key: %d\n", res);
-        return;
-    }
-
-    len = strlenW(install_dir);
-    gecko_path = heap_alloc((len+1)*sizeof(WCHAR)+sizeof(wszWineGecko));
-    memcpy(gecko_path, install_dir, len*sizeof(WCHAR));
-
-    if (len && gecko_path[len-1] != '\\')
-        gecko_path[len++] = '\\';
-
-    memcpy(gecko_path+len, wszWineGecko, sizeof(wszWineGecko));
-
-    res = RegSetValueExW(hkey, wszGeckoPath, 0, REG_SZ, (LPVOID)gecko_path,
-                       len*sizeof(WCHAR)+sizeof(wszWineGecko));
-    heap_free(gecko_path);
-    RegCloseKey(hkey);
-    if(res != ERROR_SUCCESS)
-        ERR("Failed to set GeckoPath value: %08x\n", res);
-}
-
-static BOOL install_cab(LPCWSTR file_name)
-{
-    char *install_dir_a, *file_name_a;
-    WCHAR install_dir[MAX_PATH];
-    DWORD res, len;
-    HRESULT hres;
-
-    static const WCHAR gecko_subdirW[] = {'\\','g','e','c','k','o','\\',0};
-
-    TRACE("(%s)\n", debugstr_w(file_name));
-
-    GetSystemDirectoryW(install_dir, sizeof(install_dir)/sizeof(WCHAR));
-    strcatW(install_dir, gecko_subdirW);
-    res = CreateDirectoryW(install_dir, NULL);
-    if(!res && GetLastError() != ERROR_ALREADY_EXISTS) {
-        ERR("Could not create directory: %08u\n", GetLastError());
-        return FALSE;
-    }
-
-    len = strlenW(install_dir);
-    MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, install_dir+len, sizeof(install_dir)/sizeof(WCHAR)-len);
-    res = CreateDirectoryW(install_dir, NULL);
-    if(!res && GetLastError() != ERROR_ALREADY_EXISTS) {
-        ERR("Could not create directory: %08u\n", GetLastError());
-        return FALSE;
-    }
-
-
-    /* FIXME: Use ExtractFilesW once it's implemented */
-    file_name_a = heap_strdupWtoA(file_name);
-    install_dir_a = heap_strdupWtoA(install_dir);
-    if(file_name_a && install_dir_a)
-        hres = ExtractFilesA(file_name_a, install_dir_a, 0, NULL, NULL, 0);
-    else
-        hres = E_OUTOFMEMORY;
-    heap_free(file_name_a);
-    heap_free(install_dir_a);
-    if(FAILED(hres)) {
-        ERR("Could not extract package: %08x\n", hres);
-        return FALSE;
-    }
-
-    set_registry(install_dir);
-    return TRUE;
-}
-
-static BOOL install_msi_file(const WCHAR *file_name)
+static BOOL install_file(const WCHAR *file_name)
 {
     ULONG res;
 
@@ -254,33 +155,6 @@ static BOOL install_msi_file(const WCHAR *file_name)
     }
 
     return TRUE;
-}
-
-static BOOL install_file(const WCHAR *file_name)
-{
-    BYTE magic[4];
-    HANDLE file;
-    DWORD size;
-    BOOL res;
-
-    static const BYTE msi_magic[] = {0xd0,0xcf,0x11,0xe0};
-
-    file = CreateFileW(file_name, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
-    if(file == INVALID_HANDLE_VALUE)
-        return FALSE;
-
-    res = ReadFile(file, magic, sizeof(magic), &size, NULL);
-    CloseHandle(file);
-    if(!res || size != sizeof(magic))
-        return INET_E_DOWNLOAD_FAILURE;
-
-    if(!memcmp(magic, "MSCF", sizeof(magic)))
-        return install_cab(file_name);
-    else if(!memcmp(magic, msi_magic, sizeof(magic)))
-        return install_msi_file(file_name);
-
-    ERR("Unknown file magic\n");
-    return FALSE;
 }
 
 static BOOL install_from_unix_file(const char *file_name)
@@ -560,6 +434,43 @@ static DWORD WINAPI download_proc(PVOID arg)
     return 0;
 }
 
+static void run_winebrowser(const WCHAR *url)
+{
+    PROCESS_INFORMATION pi;
+    STARTUPINFOW si;
+    WCHAR app[MAX_PATH];
+    LONG len, url_len;
+    WCHAR *args;
+    BOOL ret;
+
+    static const WCHAR winebrowserW[] = {'\\','w','i','n','e','b','r','o','w','s','e','r','.','e','x','e',0};
+
+    url_len = strlenW(url);
+
+    len = GetSystemDirectoryW(app, MAX_PATH-sizeof(winebrowserW)/sizeof(WCHAR));
+    memcpy(app+len, winebrowserW, sizeof(winebrowserW));
+    len += sizeof(winebrowserW)/sizeof(WCHAR) -1;
+
+    args = heap_alloc((len+1+url_len)*sizeof(WCHAR));
+    if(!args)
+        return;
+
+    memcpy(args, app, len*sizeof(WCHAR));
+    args[len++] = ' ';
+    memcpy(args+len, url, (url_len+1) * sizeof(WCHAR));
+
+    TRACE("starting %s\n", debugstr_w(args));
+
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    ret = CreateProcessW(app, args, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    heap_free(args);
+    if (ret) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+}
+
 static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch(msg) {
@@ -567,6 +478,17 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         ShowWindow(GetDlgItem(hwnd, ID_DWL_PROGRESS), SW_HIDE);
         install_dialog = hwnd;
         return TRUE;
+
+    case WM_NOTIFY:
+        switch (((NMHDR *)lParam)->code)
+        {
+        case NM_CLICK:
+        case NM_RETURN:
+            if (wParam == ID_DWL_STATUS)
+                run_winebrowser(((NMLINK*)lParam)->item.szUrl);
+            break;
+        }
+        break;
 
     case WM_COMMAND:
         switch(wParam) {
@@ -578,7 +500,7 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             ShowWindow(GetDlgItem(hwnd, ID_DWL_PROGRESS), SW_SHOW);
             EnableWindow(GetDlgItem(hwnd, ID_DWL_INSTALL), 0);
             EnableWindow(GetDlgItem(hwnd, IDCANCEL), 0); /* FIXME */
-            CreateThread(NULL, 0, download_proc, NULL, 0, NULL);
+            CloseHandle( CreateThread(NULL, 0, download_proc, NULL, 0, NULL));
             return FALSE;
         }
     }

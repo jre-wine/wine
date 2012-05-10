@@ -571,6 +571,8 @@ BOOL WINAPI ReadEventLogA( HANDLE hEventLog, DWORD dwReadFlags, DWORD dwRecordOf
 {
     FIXME("(%p,0x%08x,0x%08x,%p,0x%08x,%p,%p) stub\n", hEventLog, dwReadFlags,
           dwRecordOffset, lpBuffer, nNumberOfBytesToRead, pnBytesRead, pnMinNumberOfBytesNeeded);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
 
@@ -584,6 +586,8 @@ BOOL WINAPI ReadEventLogW( HANDLE hEventLog, DWORD dwReadFlags, DWORD dwRecordOf
 {
     FIXME("(%p,0x%08x,0x%08x,%p,0x%08x,%p,%p) stub\n", hEventLog, dwReadFlags,
           dwRecordOffset, lpBuffer, nNumberOfBytesToRead, pnBytesRead, pnMinNumberOfBytesNeeded);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
 }
 
@@ -750,10 +754,10 @@ ULONG WINAPI RegisterTraceGuidsW( WMIDPREQUEST RequestAddress,
                 PTRACE_GUID_REGISTRATION TraceGuidReg, LPCWSTR MofImagePath,
                 LPCWSTR MofResourceName, PTRACEHANDLE RegistrationHandle )
 {
-    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p,)\n", RequestAddress, RequestContext,
+    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p,): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_w(MofImagePath),
           debugstr_w(MofResourceName), RegistrationHandle);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -769,10 +773,10 @@ ULONG WINAPI RegisterTraceGuidsA( WMIDPREQUEST RequestAddress,
                 PTRACE_GUID_REGISTRATION TraceGuidReg, LPCSTR MofImagePath,
                 LPCSTR MofResourceName, PTRACEHANDLE RegistrationHandle )
 {
-    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p,)\n", RequestAddress, RequestContext,
+    FIXME("(%p, %p, %s, %u, %p, %s, %s, %p,): stub\n", RequestAddress, RequestContext,
           debugstr_guid(ControlGuid), GuidCount, TraceGuidReg, debugstr_a(MofImagePath),
           debugstr_a(MofResourceName), RegistrationHandle);
-    return ERROR_CALL_NOT_IMPLEMENTED;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -850,4 +854,76 @@ ULONG WINAPI QueryTraceW( TRACEHANDLE handle, LPCWSTR sessionname, PEVENT_TRACE_
 {
     FIXME("%s %s %p: stub\n", wine_dbgstr_longlong(handle), debugstr_w(sessionname), properties);
     return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * OpenTraceA [ADVAPI32.@]
+ */
+TRACEHANDLE WINAPI OpenTraceA( PEVENT_TRACE_LOGFILEA logfile )
+{
+    FIXME("%p: stub\n", logfile);
+    SetLastError(ERROR_ACCESS_DENIED);
+    return INVALID_PROCESSTRACE_HANDLE;
+}
+
+/******************************************************************************
+ * OpenTraceW [ADVAPI32.@]
+ */
+TRACEHANDLE WINAPI OpenTraceW( PEVENT_TRACE_LOGFILEW logfile )
+{
+    FIXME("%p: stub\n", logfile);
+    SetLastError(ERROR_ACCESS_DENIED);
+    return INVALID_PROCESSTRACE_HANDLE;
+}
+
+/******************************************************************************
+ * ProcessTrace [ADVAPI32.@]
+ */
+ULONG WINAPI ProcessTrace( PTRACEHANDLE HandleArray, ULONG HandleCount, LPFILETIME StartTime, LPFILETIME EndTime)
+{
+    FIXME("%p %u %p %p: stub\n", HandleArray, HandleCount, StartTime, EndTime);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * TraceMessage [ADVAPI32.@]
+ */
+ULONG WINAPIV TraceMessage( TRACEHANDLE handle, ULONG flags, LPGUID guid, USHORT number, ... )
+{
+    __ms_va_list valist;
+    ULONG ret;
+
+    __ms_va_start( valist, number );
+    ret = TraceMessageVa( handle, flags, guid, number, valist );
+    __ms_va_end( valist );
+    return ret;
+}
+
+/******************************************************************************
+ * TraceMessageVa [ADVAPI32.@]
+ */
+ULONG WINAPI TraceMessageVa( TRACEHANDLE handle, ULONG flags, LPGUID guid, USHORT number,
+                            __ms_va_list args )
+{
+    FIXME("(%s %x %s %d) : stub\n", wine_dbgstr_longlong(handle), flags, debugstr_guid(guid), number);
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * CloseTrace [ADVAPI32.@]
+ */
+ULONG WINAPI CloseTrace( TRACEHANDLE handle )
+{
+    FIXME("%s: stub\n", wine_dbgstr_longlong(handle));
+    return ERROR_INVALID_HANDLE;
+}
+
+/******************************************************************************
+ * EnumerateTraceGuids [ADVAPI32.@]
+ */
+ULONG WINAPI EnumerateTraceGuids(PTRACE_GUID_PROPERTIES *propertiesarray,
+                                 ULONG arraycount, PULONG guidcount)
+{
+    FIXME("%p %d %p: stub\n", propertiesarray, arraycount, guidcount);
+    return ERROR_INVALID_PARAMETER;
 }

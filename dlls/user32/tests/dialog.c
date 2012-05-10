@@ -33,6 +33,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+#define WINVER 0x0600 /* For NONCLIENTMETRICS with padding */
+
 #include "wine/test.h"
 #include "windef.h"
 #include "winbase.h"
@@ -50,7 +52,7 @@ static HWND g_hwndTestDlg, g_hwndTestDlgBut1, g_hwndTestDlgBut2, g_hwndTestDlgEd
 static HWND g_hwndInitialFocusT1, g_hwndInitialFocusT2, g_hwndInitialFocusGroupBox;
 
 static LONG g_styleInitialFocusT1, g_styleInitialFocusT2;
-static BOOL g_bInitialFocusInitDlgResult;
+static BOOL g_bInitialFocusInitDlgResult, g_bReceivedCommand;
 
 static int g_terminated;
 
@@ -209,7 +211,7 @@ static BOOL CreateWindows (HINSTANCE hinst)
 /* Form the lParam of a WM_KEYDOWN message */
 static DWORD KeyDownData (int repeat, int scancode, int extended, int wasdown)
 {
-    return ((repeat & 0x0000FFFF) | ((scancode & 0x00FF) >> 16) |
+    return ((repeat & 0x0000FFFF) | ((scancode & 0x00FF) << 16) |
             (extended ? 0x01000000 : 0) | (wasdown ? 0x40000000 : 0));
 }
 
@@ -539,6 +541,8 @@ static LRESULT CALLBACK testDlgWinProc (HWND hwnd, UINT uiMsg, WPARAM wParam,
         case WM_CREATE:
             return (OnTestDlgCreate (hwnd,
                     (LPCREATESTRUCTA) lParam) ? 0 : (LRESULT) -1);
+        case WM_COMMAND:
+            if(LOWORD(wParam) == 300) g_bReceivedCommand = TRUE;
     }
 
     return DefDlgProcA (hwnd, uiMsg, wParam, lParam);
@@ -576,6 +580,8 @@ static BOOL RegisterWindowClasses (void)
 
 static void test_WM_NEXTDLGCTL(void)
 {
+    HWND child1, child2, child3;
+    MSG msg;
     DWORD dwVal;
 
     g_hwndTestDlg = CreateWindowEx( WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR
@@ -638,7 +644,7 @@ static void test_WM_NEXTDLGCTL(void)
                         "Button1 style not set to BS_DEFPUSHBUTTON\n" );
 
                 ok ( !((GetWindowLong( g_hwndTestDlgBut2, GWL_STYLE)) & BS_DEFPUSHBUTTON),
-                        "Button2's style not chaged to BS_PUSHBUTTON\n" );
+                        "Button2's style not changed to BS_PUSHBUTTON\n" );
         }
 
         /*
@@ -663,7 +669,7 @@ static void test_WM_NEXTDLGCTL(void)
                         "Button2 style not set to BS_DEFPUSHBUTTON\n" );
 
                 ok ( !((GetWindowLong( g_hwndTestDlgBut1, GWL_STYLE)) & BS_DEFPUSHBUTTON),
-                        "Button1's style not chaged to BS_PUSHBUTTON\n" );
+                        "Button1's style not changed to BS_PUSHBUTTON\n" );
         }
 
         /*
@@ -678,6 +684,38 @@ static void test_WM_NEXTDLGCTL(void)
         dwVal = DefDlgProcA(g_hwndTestDlg, DM_GETDEFID, 0, 0);
         ok ( IDCANCEL == (LOWORD(dwVal)), "WM_NEXTDLGCTL changed default button\n");
     }
+
+    /* test nested default buttons */
+
+    child1 = CreateWindowA("button", "child1", WS_VISIBLE|WS_CHILD, 0, 0, 50, 50,
+                           g_hwndTestDlg, (HMENU)100, g_hinst, NULL);
+    ok(child1 != NULL, "failed to create first child\n");
+    child2 = CreateWindowA("button", "child2", WS_VISIBLE|WS_CHILD, 60, 60, 30, 30,
+                           g_hwndTestDlg, (HMENU)200, g_hinst, NULL);
+    ok(child2 != NULL, "failed to create second child\n");
+    /* create nested child */
+    child3 = CreateWindowA("button", "child3", WS_VISIBLE|WS_CHILD, 10, 10, 10, 10,
+                           child1, (HMENU)300, g_hinst, NULL);
+    ok(child3 != NULL, "failed to create subchild\n");
+
+    DefDlgProcA( g_hwndTestDlg, DM_SETDEFID, 200, 0);
+    dwVal = DefDlgProcA( g_hwndTestDlg, DM_GETDEFID, 0, 0);
+    ok(LOWORD(dwVal) == 200, "expected 200, got %x\n", dwVal);
+
+    DefDlgProcA( g_hwndTestDlg, DM_SETDEFID, 300, 0);
+    dwVal = DefDlgProcA( g_hwndTestDlg, DM_GETDEFID, 0, 0);
+    ok(LOWORD(dwVal) == 300, "expected 300, got %x\n", dwVal);
+    ok(SendMessageW( child3, WM_GETDLGCODE, 0, 0) != DLGC_DEFPUSHBUTTON,
+       "expected child3 not to be marked as DLGC_DEFPUSHBUTTON\n");
+
+    g_bReceivedCommand = FALSE;
+    FormEnterMsg (&msg, child3);
+    ok(IsDialogMessage (g_hwndTestDlg, &msg), "Did not handle the ENTER\n");
+    ok(g_bReceivedCommand, "Did not trigger the default Button action\n");
+
+    DestroyWindow(child3);
+    DestroyWindow(child2);
+    DestroyWindow(child1);
     DestroyWindow(g_hwndTestDlg);
 }
 
@@ -794,8 +832,7 @@ static void test_initial_focus(void)
 {
     /* Test 1:
      * This test intentionally returns FALSE in response to WM_INITDIALOG
-     * without setting focus to a control. This is not allowed according to
-     * MSDN, but it is exactly what MFC's CFormView does.
+     * without setting focus to a control. This is what MFC's CFormView does.
      *
      * Since the WM_INITDIALOG handler returns FALSE without setting the focus,
      * the focus should initially be NULL. Later, when we manually set focus to
@@ -874,6 +911,31 @@ static void test_initial_focus(void)
 
         ok ((g_hwndInitialFocusT1 == 0),
             "Focus should not be set for an invisible DS_CONTROL dialog %p.\n", g_hwndInitialFocusT1);
+
+        DestroyWindow(hDlg);
+    }
+
+    /* Test 4:
+     * If the dialog has no tab-accessible controls, set focus to first control */
+    {
+        HWND hDlg;
+        HRSRC hResource;
+        HANDLE hTemplate;
+        DLGTEMPLATE* pTemplate;
+        HWND hLabel;
+
+        hResource = FindResourceA(g_hinst,"FOCUS_TEST_DIALOG_2", RT_DIALOG);
+        hTemplate = LoadResource(g_hinst, hResource);
+        pTemplate = LockResource(hTemplate);
+
+        hDlg = CreateDialogIndirectParamA(g_hinst, pTemplate, NULL, focusDlgWinProc, 0);
+        g_hwndInitialFocusT1 = GetFocus();
+        hLabel = GetDlgItem(hDlg, 200);
+        ok (hDlg != 0, "Failed to create test dialog.\n");
+
+        ok ((g_hwndInitialFocusT1 == hLabel),
+            "Focus should have been set to the first control, expected (%p) got (%p).\n",
+            hLabel, g_hwndInitialFocusT1);
 
         DestroyWindow(hDlg);
     }
@@ -1022,10 +1084,49 @@ static INT_PTR CALLBACK TestReturnKeyDlgProc (HWND hDlg, UINT uiMsg,
     return FALSE;
 }
 
+static INT_PTR CALLBACK TestControlStyleDlgProc(HWND hdlg, UINT msg,
+                                                WPARAM wparam, LPARAM lparam)
+{
+    HWND control;
+    DWORD style, exstyle;
+    char buf[256];
+
+    switch (msg)
+    {
+    case WM_INITDIALOG:
+        control = GetDlgItem(hdlg, 7);
+        ok(control != 0, "dialog control with id 7 not found\n");
+        style = GetWindowLong(control, GWL_STYLE);
+        ok(style == (WS_CHILD|WS_VISIBLE), "expected WS_CHILD|WS_VISIBLE, got %#x\n", style);
+        exstyle = GetWindowLong(control, GWL_EXSTYLE);
+        ok(exstyle == (WS_EX_NOPARENTNOTIFY|WS_EX_TRANSPARENT|WS_EX_CLIENTEDGE), "expected WS_EX_NOPARENTNOTIFY|WS_EX_TRANSPARENT|WS_EX_CLIENTEDGE, got %#x\n", exstyle);
+        buf[0] = 0;
+        GetWindowText(control, buf, sizeof(buf));
+        ok(lstrcmp(buf, "bump7") == 0,  "expected bump7, got %s\n", buf);
+
+        control = GetDlgItem(hdlg, 8);
+        ok(control != 0, "dialog control with id 8 not found\n");
+        style = GetWindowLong(control, GWL_STYLE);
+        ok(style == (WS_CHILD|WS_VISIBLE), "expected WS_CHILD|WS_VISIBLE, got %#x\n", style);
+        exstyle = GetWindowLong(control, GWL_EXSTYLE);
+        ok(exstyle == (WS_EX_NOPARENTNOTIFY|WS_EX_TRANSPARENT), "expected WS_EX_NOPARENTNOTIFY|WS_EX_TRANSPARENT, got %#x\n", exstyle);
+        buf[0] = 0;
+        GetWindowText(control, buf, sizeof(buf));
+        ok(lstrcmp(buf, "bump8") == 0,  "expected bump8, got %s\n", buf);
+
+        EndDialog(hdlg, -7);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static void test_DialogBoxParamA(void)
 {
     INT_PTR ret;
     HWND hwnd_invalid = (HWND)0x4444;
+
+    ret = DialogBoxParamA(GetModuleHandle(0), "TEST_DLG_CHILD_POPUP", 0, TestControlStyleDlgProc, 0);
+    ok(ret == -7, "expected -7, got %ld\n", ret);
 
     SetLastError(0xdeadbeef);
     ret = DialogBoxParamA(GetModuleHandle(NULL), "IDD_DIALOG" , hwnd_invalid, 0 , 0);
@@ -1073,7 +1174,7 @@ static void test_DialogBoxParamA(void)
 static void test_DisabledDialogTest(void)
 {
     g_terminated = FALSE;
-    DialogBoxParam(g_hinst, "IDD_DIALOG", NULL, (DLGPROC)disabled_test_proc, 0);
+    DialogBoxParam(g_hinst, "IDD_DIALOG", NULL, disabled_test_proc, 0);
     ok(FALSE == g_terminated, "dialog with disabled ok button has been terminated\n");
 }
 
@@ -1162,7 +1263,7 @@ static void test_MessageBoxFontTest(void)
     }
     GetObjectW(hFont, sizeof(LOGFONTW), &lfStaticFont);
 
-    ncMetrics.cbSize = sizeof(NONCLIENTMETRICSW);
+    ncMetrics.cbSize = FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth);
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, 0, &ncMetrics, 0);
     ok( !memcmp(&lfStaticFont, &ncMetrics.lfMessageFont, FIELD_OFFSET(LOGFONTW, lfFaceName)) &&
         !lstrcmpW(lfStaticFont.lfFaceName, ncMetrics.lfMessageFont.lfFaceName),

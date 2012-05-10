@@ -22,9 +22,11 @@
  *
  */
 
-#include <windows.h>
-#include <shlwapi.h>
 #include <stdio.h>
+#include <windows.h>
+#include <commdlg.h>
+#include <shellapi.h>
+#include <shlwapi.h>
 
 #include "main.h"
 #include "dialog.h"
@@ -301,8 +303,6 @@ static int NOTEPAD_MenuCommand(WPARAM wParam)
     case CMD_FONT:             DIALOG_SelectFont(); break;
 
     case CMD_HELP_CONTENTS:    DIALOG_HelpContents(); break;
-    case CMD_HELP_SEARCH:      DIALOG_HelpSearch(); break;
-    case CMD_HELP_ON_HELP:     DIALOG_HelpHelp(); break;
     case CMD_HELP_ABOUT_NOTEPAD: DIALOG_HelpAboutNotepad(); break;
 
     default:

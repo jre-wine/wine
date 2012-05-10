@@ -287,21 +287,31 @@ static HRESULT WINAPI HTMLImgElement_get_src(IHTMLImgElement *iface, BSTR *p)
     const PRUnichar *src;
     nsAString src_str;
     nsresult nsres;
-    HRESULT hres;
+    HRESULT hres = S_OK;
+
+    static const WCHAR blockedW[] = {'B','L','O','C','K','E','D',':',':',0};
 
     TRACE("(%p)->(%p)\n", This, p);
 
     nsAString_Init(&src_str, NULL);
     nsres = nsIDOMHTMLImageElement_GetSrc(This->nsimg, &src_str);
-    if(NS_FAILED(nsres)) {
+    if(NS_SUCCEEDED(nsres)) {
+        nsAString_GetData(&src_str, &src);
+
+        if(!strncmpiW(src, blockedW, sizeof(blockedW)/sizeof(WCHAR)-1)) {
+            TRACE("returning BLOCKED::\n");
+            *p = SysAllocString(blockedW);
+            if(!*p)
+                hres = E_OUTOFMEMORY;
+        }else {
+            hres = nsuri_to_url(src, TRUE, p);
+        }
+    }else {
         ERR("GetSrc failed: %08x\n", nsres);
-        return E_FAIL;
+        hres = E_FAIL;
     }
 
-    nsAString_GetData(&src_str, &src);
-    hres = nsuri_to_url(src, TRUE, p);
     nsAString_Finish(&src_str);
-
     return hres;
 }
 
@@ -484,7 +494,7 @@ static HRESULT WINAPI HTMLImgElement_put_width(IHTMLImgElement *iface, LONG v)
 static HRESULT WINAPI HTMLImgElement_get_width(IHTMLImgElement *iface, LONG *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    PRInt32 width;
+    PRUint32 width;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
@@ -518,7 +528,7 @@ static HRESULT WINAPI HTMLImgElement_put_height(IHTMLImgElement *iface, LONG v)
 static HRESULT WINAPI HTMLImgElement_get_height(IHTMLImgElement *iface, LONG *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    PRInt32 height;
+    PRUint32 height;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
@@ -648,6 +658,8 @@ static const NodeImplVtbl HTMLImgElementImplVtbl = {
     HTMLImgElement_QI,
     HTMLImgElement_destructor,
     HTMLElement_clone,
+    HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -909,6 +921,7 @@ static const tid_t HTMLImageElementFactory_iface_tids[] = {
 
 static const dispex_static_data_vtbl_t HTMLImageElementFactory_dispex_vtbl = {
     HTMLImageElementFactory_value,
+    NULL,
     NULL,
     NULL
 };

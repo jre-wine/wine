@@ -49,31 +49,33 @@ static const struct
     const char *szProductType;
 } win_versions[] =
 {
-    { "win7",    "Windows 7",      6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "WinNT"},
-    { "win2008", "Windows 2008",   6,  0, 0x1771,VER_PLATFORM_WIN32_NT, "Service Pack 1", 0, 0, "ServerNT"},
-    { "vista",   "Windows Vista",  6,  0, 0x1772,VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "WinNT"},
-    { "win2003", "Windows 2003",   5,  2, 0xECE, VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "ServerNT"},
-    { "winxp",   "Windows XP",     5,  1, 0xA28, VER_PLATFORM_WIN32_NT, "Service Pack 3", 3, 0, "WinNT"},
-    { "win2k",   "Windows 2000",   5,  0, 0x893, VER_PLATFORM_WIN32_NT, "Service Pack 4", 4, 0, "WinNT"},
-    { "winme",   "Windows ME",     4, 90, 0xBB8, VER_PLATFORM_WIN32_WINDOWS, " ", 0, 0, ""},
-    { "win98",   "Windows 98",     4, 10, 0x8AE, VER_PLATFORM_WIN32_WINDOWS, " A ", 0, 0, ""},
-    { "win95",   "Windows 95",     4,  0, 0x3B6, VER_PLATFORM_WIN32_WINDOWS, "", 0, 0, ""},
-    { "nt40",    "Windows NT 4.0", 4,  0, 0x565, VER_PLATFORM_WIN32_NT, "Service Pack 6a", 6, 0, "WinNT"},
-    { "nt351",   "Windows NT 3.5", 3, 51, 0x421, VER_PLATFORM_WIN32_NT, "Service Pack 2", 0, 0, "WinNT"},
-    { "win31",   "Windows 3.1",    2, 10,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""},
-    { "win30",   "Windows 3.0",    3,  0,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""},
-    { "win20",   "Windows 2.0",    2,  0,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""}
+    { "win2008r2",   "Windows 2008 R2",   6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "ServerNT"},
+    { "win7",        "Windows 7",         6,  1, 0x1DB1,VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "WinNT"},
+    { "win2008",     "Windows 2008",      6,  0, 0x1772,VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "ServerNT"},
+    { "vista",       "Windows Vista",     6,  0, 0x1772,VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "WinNT"},
+    { "win2003",     "Windows 2003",      5,  2, 0xECE, VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "ServerNT"},
+    { "winxp",       "Windows XP",        5,  1, 0xA28, VER_PLATFORM_WIN32_NT, "Service Pack 3", 3, 0, "WinNT"},
+    { "win2k",       "Windows 2000",      5,  0, 0x893, VER_PLATFORM_WIN32_NT, "Service Pack 4", 4, 0, "WinNT"},
+    { "winme",       "Windows ME",        4, 90, 0xBB8, VER_PLATFORM_WIN32_WINDOWS, " ", 0, 0, ""},
+    { "win98",       "Windows 98",        4, 10, 0x8AE, VER_PLATFORM_WIN32_WINDOWS, " A ", 0, 0, ""},
+    { "win95",       "Windows 95",        4,  0, 0x3B6, VER_PLATFORM_WIN32_WINDOWS, "", 0, 0, ""},
+    { "nt40",        "Windows NT 4.0",    4,  0, 0x565, VER_PLATFORM_WIN32_NT, "Service Pack 6a", 6, 0, "WinNT"},
+    { "nt351",       "Windows NT 3.51",   3, 51, 0x421, VER_PLATFORM_WIN32_NT, "Service Pack 5", 5, 0, "WinNT"},
+    { "win31",       "Windows 3.1",       3, 10,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""},
+    { "win30",       "Windows 3.0",       3,  0,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""},
+    { "win20",       "Windows 2.0",       2,  0,     0, VER_PLATFORM_WIN32s, "Win32s 1.3", 0, 0, ""}
 };
 
 #define NB_VERSIONS (sizeof(win_versions)/sizeof(win_versions[0]))
 
 static const char szKey9x[] = "Software\\Microsoft\\Windows\\CurrentVersion";
 static const char szKeyNT[] = "Software\\Microsoft\\Windows NT\\CurrentVersion";
+static const char szKeyProdNT[] = "System\\CurrentControlSet\\Control\\ProductOptions";
 
 static int get_registry_version(void)
 {
     int i, best = -1, platform, major, minor = 0, build = 0;
-    char *p, *ver;
+    char *p, *ver, *type = NULL;
 
     if ((ver = get_reg_key( HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL )))
     {
@@ -81,8 +83,10 @@ static int get_registry_version(void)
 
         platform = VER_PLATFORM_WIN32_NT;
 
-	build_str = get_reg_key( HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL );
+        build_str = get_reg_key( HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL );
         build = atoi(build_str);
+
+        type = get_reg_key( HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL );
     }
     else if ((ver = get_reg_key( HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL )))
         platform = VER_PLATFORM_WIN32_WINDOWS;
@@ -107,6 +111,7 @@ static int get_registry_version(void)
     {
         if (win_versions[i].dwPlatformId != platform) continue;
         if (win_versions[i].dwMajorVersion != major) continue;
+        if (type && strcasecmp(win_versions[i].szProductType, type)) continue;
         best = i;
         if ((win_versions[i].dwMinorVersion == minor) &&
             (win_versions[i].dwBuildNumber == build))
@@ -131,7 +136,7 @@ static void update_comboboxes(HWND dialog)
         if (current_app) /* no explicit setting */
         {
             WINE_TRACE("setting winver combobox to default\n");
-            SendDlgItemMessage (dialog, IDC_WINVER, CB_SETCURSEL, 0, 0);
+            SendDlgItemMessageW(dialog, IDC_WINVER, CB_SETCURSEL, 0, 0);
             return;
         }
         if (ver != -1) winver = strdupA( win_versions[ver].szVersion );
@@ -144,7 +149,7 @@ static void update_comboboxes(HWND dialog)
     {
         if (!strcasecmp (win_versions[i].szVersion, winver))
         {
-            SendDlgItemMessage (dialog, IDC_WINVER, CB_SETCURSEL,
+            SendDlgItemMessageW(dialog, IDC_WINVER, CB_SETCURSEL,
                                 i + (current_app?1:0), 0);
             WINE_TRACE("match with %s\n", win_versions[i].szVersion);
             break;
@@ -159,20 +164,20 @@ init_comboboxes (HWND dialog)
 {
     int i;
 
-    SendDlgItemMessage(dialog, IDC_WINVER, CB_RESETCONTENT, 0, 0);
+    SendDlgItemMessageW(dialog, IDC_WINVER, CB_RESETCONTENT, 0, 0);
 
     /* add the default entries (automatic) which correspond to no setting  */
     if (current_app)
     {
         WCHAR str[256];
-        LoadStringW (GetModuleHandle (NULL), IDS_USE_GLOBAL_SETTINGS, str,
+        LoadStringW (GetModuleHandleW(NULL), IDS_USE_GLOBAL_SETTINGS, str,
             sizeof(str)/sizeof(str[0]));
         SendDlgItemMessageW (dialog, IDC_WINVER, CB_ADDSTRING, 0, (LPARAM)str);
     }
 
     for (i = 0; i < NB_VERSIONS; i++)
     {
-      SendDlgItemMessage (dialog, IDC_WINVER, CB_ADDSTRING,
+      SendDlgItemMessageA(dialog, IDC_WINVER, CB_ADDSTRING,
                           0, (LPARAM) win_versions[i].szDescription);
     }
 }
@@ -185,16 +190,17 @@ static void add_listview_item(HWND listview, WCHAR *text, void *association)
   item.pszText = text;
   item.cchTextMax = lstrlenW(text);
   item.lParam = (LPARAM) association;
-  item.iItem = ListView_GetItemCount(listview);
+  item.iItem = SendMessageW( listview, LVM_GETITEMCOUNT, 0, 0 );
   item.iSubItem = 0;
 
-  SendMessage(listview, LVM_INSERTITEMW, 0, (LPARAM) &item);
+  SendMessageW(listview, LVM_INSERTITEMW, 0, (LPARAM) &item);
 }
 
 /* Called when the application is initialized (cannot reinit!)  */
 static void init_appsheet(HWND dialog)
 {
   HWND listview;
+  LVITEMW item;
   HKEY key;
   int i;
   DWORD size;
@@ -206,12 +212,12 @@ static void init_appsheet(HWND dialog)
 
   /* we use the lparam field of the item so we can alter the presentation later and not change code
    * for instance, to use the tile view or to display the EXEs embedded 'display name' */
-  LoadStringW (GetModuleHandle (NULL), IDS_DEFAULT_SETTINGS, appname,
+  LoadStringW (GetModuleHandleW(NULL), IDS_DEFAULT_SETTINGS, appname,
       sizeof(appname)/sizeof(appname[0]));
   add_listview_item(listview, appname, NULL);
 
   /* because this list is only populated once, it's safe to bypass the settings list here  */
-  if (RegOpenKey(config_key, "AppDefaults", &key) == ERROR_SUCCESS)
+  if (RegOpenKeyA(config_key, "AppDefaults", &key) == ERROR_SUCCESS)
   {
       i = 0;
       size = sizeof(appname)/sizeof(appname[0]);
@@ -229,29 +235,24 @@ static void init_appsheet(HWND dialog)
   init_comboboxes(dialog);
   
   /* Select the default settings listview item  */
-  {
-      LVITEM item;
-      
-      item.iItem = 0;
-      item.iSubItem = 0;
-      item.mask = LVIF_STATE;
-      item.state = LVIS_SELECTED | LVIS_FOCUSED;
-      item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+  item.iItem = 0;
+  item.iSubItem = 0;
+  item.mask = LVIF_STATE;
+  item.state = LVIS_SELECTED | LVIS_FOCUSED;
+  item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
 
-      SendMessage(listview, LVM_SETITEM, 0, (LPARAM) &item);
-  }
-  
+  SendMessageW(listview, LVM_SETITEMW, 0, (LPARAM) &item);
 }
 
 /* there has to be an easier way than this  */
 static int get_listview_selection(HWND listview)
 {
-  int count = ListView_GetItemCount(listview);
+  int count = SendMessageW(listview, LVM_GETITEMCOUNT, 0, 0);
   int i;
-  
+
   for (i = 0; i < count; i++)
   {
-    if (ListView_GetItemState(listview, i, LVIS_SELECTED)) return i;
+      if (SendMessageW( listview, LVM_GETITEMSTATE, i, LVIS_SELECTED )) return i;
   }
 
   return -1;
@@ -261,7 +262,7 @@ static int get_listview_selection(HWND listview)
 /* called when the user selects a different application */
 static void on_selection_change(HWND dialog, HWND listview)
 {
-  LVITEM item;
+  LVITEMW item;
   WCHAR* oldapp = current_app;
 
   WINE_TRACE("()\n");
@@ -273,8 +274,8 @@ static void on_selection_change(HWND dialog, HWND listview)
   WINE_TRACE("item.iItem=%d\n", item.iItem);
   
   if (item.iItem == -1) return;
-  
-  SendMessage(listview, LVM_GETITEM, 0, (LPARAM) &item);
+
+  SendMessageW(listview, LVM_GETITEMW, 0, (LPARAM) &item);
 
   current_app = (WCHAR*) item.lParam;
 
@@ -325,9 +326,9 @@ static void on_add_app_click(HWND dialog)
 		       OFN_SHOWHELP | OFN_HIDEREADONLY | OFN_ENABLESIZING,
                        0, 0, NULL, 0, NULL };
 
-  LoadStringW (GetModuleHandle (NULL), IDS_SELECT_EXECUTABLE, selectExecutableStr,
+  LoadStringW (GetModuleHandleW(NULL), IDS_SELECT_EXECUTABLE, selectExecutableStr,
       sizeof(selectExecutableStr)/sizeof(selectExecutableStr[0]));
-  LoadStringW (GetModuleHandle (NULL), IDS_EXECUTABLE_FILTER, programsFilter,
+  LoadStringW (GetModuleHandleW(NULL), IDS_EXECUTABLE_FILTER, programsFilter,
       sizeof(programsFilter)/sizeof(programsFilter[0]));
   snprintfW( filter, MAX_PATH, filterW, programsFilter, 0, 0 );
 
@@ -343,19 +344,23 @@ static void on_add_app_click(HWND dialog)
   if (GetOpenFileNameW (&ofn))
   {
       HWND listview = GetDlgItem(dialog, IDC_APP_LISTVIEW);
-      int count = ListView_GetItemCount(listview);
+      int count = SendMessageW(listview, LVM_GETITEMCOUNT, 0, 0);
       WCHAR* new_app;
-      
+      LVITEMW item;
+
       if (list_contains_file(listview, filetitle))
           return;
-      
+
       new_app = strdupW(filetitle);
 
       WINE_TRACE("adding %s\n", wine_dbgstr_w (new_app));
-      
+
       add_listview_item(listview, new_app, new_app);
 
-      ListView_SetItemState(listview, count, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      item.mask = LVIF_STATE;
+      item.state = LVIS_SELECTED | LVIS_FOCUSED;
+      item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+      SendMessageW(listview, LVM_SETITEMSTATE, count, (LPARAM)&item );
 
       SetFocus(listview);
   }
@@ -379,19 +384,21 @@ static void on_remove_app_click(HWND dialog)
 
     section[strlen(section)] = '\0'; /* remove last backslash  */
     set_reg_key(config_key, section, NULL, NULL); /* delete the section  */
-    SendMessage(listview, LVM_GETITEMW, 0, (LPARAM) &item);
+    SendMessageW(listview, LVM_GETITEMW, 0, (LPARAM) &item);
     HeapFree (GetProcessHeap(), 0, (void*)item.lParam);
-    SendMessage(listview, LVM_DELETEITEM, selection, 0);
-    ListView_SetItemState(listview, selection - 1, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    SendMessageW(listview, LVM_DELETEITEM, selection, 0);
+    item.mask = LVIF_STATE;
+    item.state = LVIS_SELECTED | LVIS_FOCUSED;
+    item.stateMask = LVIS_SELECTED | LVIS_FOCUSED;
+    SendMessageW(listview, LVM_SETITEMSTATE, -1, (LPARAM)&item);
 
     SetFocus(listview);
-    
-    SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);        
+    SendMessageW(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
 }
 
 static void on_winver_change(HWND dialog)
 {
-    int selection = SendDlgItemMessage(dialog, IDC_WINVER, CB_GETCURSEL, 0, 0);
+    int selection = SendDlgItemMessageW(dialog, IDC_WINVER, CB_GETCURSEL, 0, 0);
 
     if (current_app)
     {
@@ -408,7 +415,6 @@ static void on_winver_change(HWND dialog)
     }
     else /* global version only */
     {
-        static const char szKeyProdNT[] = "System\\CurrentControlSet\\Control\\ProductOptions";
         static const char szKeyWindNT[] = "System\\CurrentControlSet\\Control\\Windows";
         static const char szKeyEnvNT[]  = "System\\CurrentControlSet\\Control\\Session Manager\\Environment";
         char Buffer[40];
@@ -420,10 +426,13 @@ static void on_winver_change(HWND dialog)
                      win_versions[selection].dwMinorVersion, win_versions[selection].dwBuildNumber);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", Buffer);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "SubVersionNumber", win_versions[selection].szCSDVersion);
+            snprintf(Buffer, sizeof(Buffer), "Microsoft %s", win_versions[selection].szDescription);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "ProductName", Buffer);
 
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyWindNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyEnvNT, "OS", NULL);
@@ -437,6 +446,8 @@ static void on_winver_change(HWND dialog)
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", win_versions[selection].szCSDVersion);
             snprintf(Buffer, sizeof(Buffer), "%d", win_versions[selection].dwBuildNumber);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", Buffer);
+            snprintf(Buffer, sizeof(Buffer), "Microsoft %s", win_versions[selection].szDescription);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", Buffer);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", win_versions[selection].szProductType);
             set_reg_key_dword(HKEY_LOCAL_MACHINE, szKeyWindNT, "CSDVersion",
                               MAKEWORD( win_versions[selection].wServicePackMinor,
@@ -445,6 +456,7 @@ static void on_winver_change(HWND dialog)
 
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "SubVersionNumber", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "ProductName", NULL);
             set_reg_key(config_key, keypath(""), "Version", NULL);
             break;
 
@@ -452,18 +464,20 @@ static void on_winver_change(HWND dialog)
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "CurrentBuildNumber", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKeyNT, "ProductName", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyProdNT, "ProductType", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyWindNT, "CSDVersion", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKeyEnvNT, "OS", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "VersionNumber", NULL);
             set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "SubVersionNumber", NULL);
+            set_reg_key(HKEY_LOCAL_MACHINE, szKey9x, "ProductName", NULL);
             set_reg_key(config_key, keypath(""), "Version", win_versions[selection].szVersion);
             break;
         }
     }
 
     /* enable the apply button  */
-    SendMessage(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
+    SendMessageW(GetParent(dialog), PSM_CHANGED, (WPARAM) dialog, 0);
 }
 
 INT_PTR CALLBACK
@@ -487,7 +501,7 @@ AppDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
             break;
         case PSN_APPLY:
             apply();
-            SetWindowLongPtr(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
+            SetWindowLongPtrW(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
             break;
       }
       

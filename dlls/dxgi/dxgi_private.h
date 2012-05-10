@@ -77,7 +77,7 @@ enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSP
 /* IDXGIFactory */
 struct dxgi_factory
 {
-    const struct IWineDXGIFactoryVtbl *vtbl;
+    IWineDXGIFactory IWineDXGIFactory_iface;
     LONG refcount;
     struct wined3d *wined3d;
     UINT adapter_count;
@@ -89,10 +89,10 @@ HRESULT dxgi_factory_init(struct dxgi_factory *factory) DECLSPEC_HIDDEN;
 /* IDXGIDevice */
 struct dxgi_device
 {
-    const struct IWineDXGIDeviceVtbl *vtbl;
+    IWineDXGIDevice IWineDXGIDevice_iface;
     IUnknown *child_layer;
     LONG refcount;
-    IWineD3DDevice *wined3d_device;
+    struct wined3d_device *wined3d_device;
     IWineDXGIFactory *factory;
 };
 
@@ -102,7 +102,7 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
 /* IDXGIOutput */
 struct dxgi_output
 {
-    const struct IDXGIOutputVtbl *vtbl;
+    IDXGIOutput IDXGIOutput_iface;
     LONG refcount;
     struct dxgi_adapter *adapter;
 };
@@ -112,7 +112,7 @@ void dxgi_output_init(struct dxgi_output *output, struct dxgi_adapter *adapter) 
 /* IDXGIAdapter */
 struct dxgi_adapter
 {
-    const struct IWineDXGIAdapterVtbl *vtbl;
+    IWineDXGIAdapter IWineDXGIAdapter_iface;
     IWineDXGIFactory *parent;
     LONG refcount;
     UINT ordinal;
@@ -124,18 +124,18 @@ HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IWineDXGIFactory *parent
 /* IDXGISwapChain */
 struct dxgi_swapchain
 {
-    const struct IDXGISwapChainVtbl *vtbl;
+    IDXGISwapChain IDXGISwapChain_iface;
     LONG refcount;
-    IWineD3DSwapChain *wined3d_swapchain;
+    struct wined3d_swapchain *wined3d_swapchain;
 };
 
 HRESULT dxgi_swapchain_init(struct dxgi_swapchain *swapchain, struct dxgi_device *device,
-        WINED3DPRESENT_PARAMETERS *present_parameters) DECLSPEC_HIDDEN;
+        struct wined3d_swapchain_desc *desc) DECLSPEC_HIDDEN;
 
 /* IDXGISurface */
 struct dxgi_surface
 {
-    const struct IDXGISurfaceVtbl *vtbl;
+    IDXGISurface IDXGISurface_iface;
     const struct IUnknownVtbl *inner_unknown_vtbl;
     IUnknown *outer_unknown;
     LONG refcount;

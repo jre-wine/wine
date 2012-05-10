@@ -1,5 +1,6 @@
 /*
  * Copyright 2006-2007 Henri Verbeet
+ * Copyright 2011 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -238,8 +239,6 @@ static void test_lockrect_offset(IDirect3DDevice9 *device)
 
         hr = IDirect3DSurface9_UnlockRect(surface);
         ok(SUCCEEDED(hr), "UnlockRect failed (%08x)\n", hr);
-        hr = IDirect3DSurface9_UnlockRect(surface);
-        ok(hr == D3DERR_INVALIDCALL, "Double UnlockRect returned %08x, expected D3DERR_INVALIDCALL\n", hr);
 
         hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
         ok(SUCCEEDED(hr), "LockRect failed (%08x)\n", hr);
@@ -590,6 +589,226 @@ static void test_surface_format_null(IDirect3DDevice9 *device)
     IDirect3DTexture9_Release(texture);
 }
 
+static void test_surface_double_unlock(IDirect3DDevice9 *device)
+{
+    static const struct
+    {
+        D3DPOOL pool;
+        const char *name;
+    }
+    pools[] =
+    {
+        { D3DPOOL_DEFAULT,      "D3DPOOL_DEFAULT"   },
+        { D3DPOOL_SCRATCH,      "D3DPOOL_SCRATCH"   },
+        { D3DPOOL_SYSTEMMEM,    "D3DPOOL_SYSTEMMEM" },
+        /* There are no standalone MANAGED pool surfaces */
+    };
+    IDirect3DSurface9 *surface;
+    unsigned int i;
+    HRESULT hr;
+    D3DLOCKED_RECT lr;
+
+    for (i = 0; i < (sizeof(pools) / sizeof(*pools)); i++)
+    {
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 64, 64, D3DFMT_X8R8G8B8,
+                pools[i].pool, &surface, NULL);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateOffscreenPlainSurface failed, hr = 0x%08x, pool %s\n",
+                hr, pools[i].name);
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(hr == D3DERR_INVALIDCALL, "Unlock without lock returned 0x%08x, expected 0x%08x, pool %s\n",
+                hr, D3DERR_INVALIDCALL, pools[i].name);
+
+        hr = IDirect3DSurface9_LockRect(surface, &lr, NULL, 0);
+        ok(SUCCEEDED(hr), "IDirect3DSurface9_LockRect failed, hr = 0x%08x, pool %s\n",
+                hr, pools[i].name);
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed, hr = 0x%08x, pool %s\n",
+                hr, pools[i].name);
+
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        ok(hr == D3DERR_INVALIDCALL, "Double unlock returned 0x%08x, expected 0x%08x, pool %s\n",
+                hr, D3DERR_INVALIDCALL, pools[i].name);
+
+        IDirect3DSurface9_Release(surface);
+    }
+}
+
+static void test_surface_lockrect_blocks(IDirect3DDevice9 *device)
+{
+    IDirect3DTexture9 *texture;
+    IDirect3DSurface9 *surface;
+    IDirect3D9 *d3d;
+    D3DLOCKED_RECT locked_rect;
+    unsigned int i, j;
+    HRESULT hr;
+    RECT rect;
+    BOOL surface_only;
+
+    const struct
+    {
+        D3DFORMAT fmt;
+        const char *name;
+        unsigned int block_width;
+        unsigned int block_height;
+        BOOL broken;
+    }
+    formats[] =
+    {
+        {D3DFMT_DXT1,                 "D3DFMT_DXT1", 4, 4, FALSE},
+        {D3DFMT_DXT2,                 "D3DFMT_DXT2", 4, 4, FALSE},
+        {D3DFMT_DXT3,                 "D3DFMT_DXT3", 4, 4, FALSE},
+        {D3DFMT_DXT4,                 "D3DFMT_DXT4", 4, 4, FALSE},
+        {D3DFMT_DXT5,                 "D3DFMT_DXT5", 4, 4, FALSE},
+        /* ATI2N has 2x2 blocks on all AMD cards and Geforce 7 cards,
+         * which doesn't match the format spec. On newer Nvidia cards
+         * it has the correct 4x4 block size */
+        {MAKEFOURCC('A','T','I','2'), "ATI2N",       4, 4, TRUE},
+        {D3DFMT_YUY2,                 "D3DFMT_YUY2", 2, 1, FALSE},
+        {D3DFMT_UYVY,                 "D3DFMT_UYVY", 2, 1, FALSE},
+    };
+    static const struct
+    {
+        D3DPOOL pool;
+        const char *name;
+        /* Don't check the return value, Nvidia returns D3DERR_INVALIDCALL for some formats
+         * and E_INVALIDARG/DDERR_INVALIDPARAMS for others. */
+        BOOL success;
+    }
+    pools[] =
+    {
+        {D3DPOOL_DEFAULT,       "D3DPOOL_DEFAULT",  FALSE},
+        {D3DPOOL_SCRATCH,       "D3DPOOL_SCRATCH",  TRUE},
+        {D3DPOOL_SYSTEMMEM,     "D3DPOOL_SYSTEMMEM",TRUE},
+        {D3DPOOL_MANAGED,       "D3DPOOL_MANAGED",  TRUE},
+    };
+
+    hr = IDirect3DDevice9_GetDirect3D(device, &d3d);
+    ok(SUCCEEDED(hr), "IDirect3DDevice9_GetDirect3D failed (%08x)\n", hr);
+
+    for (i = 0; i < (sizeof(formats) / sizeof(*formats)); ++i) {
+        surface_only = FALSE;
+        hr = IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, D3DUSAGE_DYNAMIC,
+                D3DRTYPE_TEXTURE, formats[i].fmt);
+        if (FAILED(hr))
+        {
+            hr = IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL, D3DFMT_X8R8G8B8, 0, D3DRTYPE_SURFACE, formats[i].fmt);
+            if (FAILED(hr))
+            {
+                skip("Format %s not supported, skipping lockrect offset test\n", formats[i].name);
+                continue;
+            }
+            surface_only = TRUE;
+        }
+
+        for (j = 0; j < (sizeof(pools) / sizeof(*pools)); j++)
+        {
+            switch (pools[j].pool)
+            {
+                case D3DPOOL_SYSTEMMEM:
+                case D3DPOOL_MANAGED:
+                    if (surface_only) continue;
+                    /* Fall through */
+                case D3DPOOL_DEFAULT:
+                    if (surface_only)
+                    {
+                        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 128, 128, formats[i].fmt,
+                                pools[j].pool, &surface, 0);
+                        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateOffscreenPlainSurface failed (%08x)\n", hr);
+                    }
+                    else
+                    {
+                        hr = IDirect3DDevice9_CreateTexture(device, 128, 128, 1,
+                                pools[j].pool == D3DPOOL_DEFAULT ? D3DUSAGE_DYNAMIC : 0,
+                                formats[i].fmt, pools[j].pool, &texture, NULL);
+                        ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateTexture failed (%08x)\n", hr);
+                        hr = IDirect3DTexture9_GetSurfaceLevel(texture, 0, &surface);
+                        ok(SUCCEEDED(hr), "IDirect3DTexture9_GetSurfaceLevel failed (%08x)\n", hr);
+                        IDirect3DTexture9_Release(texture);
+                    }
+                    if (FAILED(hr)) continue;
+                    break;
+
+                case D3DPOOL_SCRATCH:
+                    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 128, 128, formats[i].fmt,
+                            pools[j].pool, &surface, 0);
+                    ok(SUCCEEDED(hr), "CreateOffscreenPlainSurface failed (%08x)\n", hr);
+                    if (FAILED(hr)) continue;
+                    break;
+
+                default:
+                    break;
+            }
+
+            if (formats[i].block_width > 1)
+            {
+                SetRect(&rect, formats[i].block_width >> 1, 0, formats[i].block_width, formats[i].block_height);
+                hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+                ok(!SUCCEEDED(hr) == !pools[j].success || broken(formats[i].broken),
+                        "Partial block lock %s, expected %s, format %s, pool %s.\n",
+                        SUCCEEDED(hr) ? "succeeded" : "failed",
+                        pools[j].success ? "success" : "failure", formats[i].name, pools[j].name);
+                if (SUCCEEDED(hr))
+                {
+                    hr = IDirect3DSurface9_UnlockRect(surface);
+                    ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed (%08x)\n", hr);
+                }
+
+                SetRect(&rect, 0, 0, formats[i].block_width >> 1, formats[i].block_height);
+                hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+                ok(!SUCCEEDED(hr) == !pools[j].success || broken(formats[i].broken),
+                        "Partial block lock %s, expected %s, format %s, pool %s.\n",
+                        SUCCEEDED(hr) ? "succeeded" : "failed",
+                        pools[j].success ? "success" : "failure", formats[i].name, pools[j].name);
+                if (SUCCEEDED(hr))
+                {
+                    hr = IDirect3DSurface9_UnlockRect(surface);
+                    ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed (%08x)\n", hr);
+                }
+            }
+
+            if (formats[i].block_height > 1)
+            {
+                SetRect(&rect, 0, formats[i].block_height >> 1, formats[i].block_width, formats[i].block_height);
+                hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+                ok(!SUCCEEDED(hr) == !pools[j].success || broken(formats[i].broken),
+                        "Partial block lock %s, expected %s, format %s, pool %s.\n",
+                        SUCCEEDED(hr) ? "succeeded" : "failed",
+                        pools[j].success ? "success" : "failure", formats[i].name, pools[j].name);
+                if (SUCCEEDED(hr))
+                {
+                    hr = IDirect3DSurface9_UnlockRect(surface);
+                    ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed (%08x)\n", hr);
+                }
+
+                SetRect(&rect, 0, 0, formats[i].block_width, formats[i].block_height >> 1);
+                hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+                ok(!SUCCEEDED(hr) == !pools[j].success || broken(formats[i].broken),
+                        "Partial block lock %s, expected %s, format %s, pool %s.\n",
+                        SUCCEEDED(hr) ? "succeeded" : "failed",
+                        pools[j].success ? "success" : "failure", formats[i].name, pools[j].name);
+                if (SUCCEEDED(hr))
+                {
+                    hr = IDirect3DSurface9_UnlockRect(surface);
+                    ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed (%08x)\n", hr);
+                }
+            }
+
+            SetRect(&rect, 0, 0, formats[i].block_width, formats[i].block_height);
+            hr = IDirect3DSurface9_LockRect(surface, &locked_rect, &rect, 0);
+            ok(SUCCEEDED(hr), "Full block lock returned %08x, expected %08x, format %s, pool %s\n",
+                    hr, D3D_OK, formats[i].name, pools[j].name);
+            if (SUCCEEDED(hr))
+            {
+                hr = IDirect3DSurface9_UnlockRect(surface);
+                ok(SUCCEEDED(hr), "IDirect3DSurface9_UnlockRect failed (%08x)\n", hr);
+            }
+
+            IDirect3DSurface9_Release(surface);
+        }
+    }
+    IDirect3D9_Release(d3d);
+}
+
 START_TEST(surface)
 {
     HMODULE d3d9_handle;
@@ -614,6 +833,8 @@ START_TEST(surface)
     test_getdc(device_ptr);
     test_surface_dimensions(device_ptr);
     test_surface_format_null(device_ptr);
+    test_surface_double_unlock(device_ptr);
+    test_surface_lockrect_blocks(device_ptr);
 
     refcount = IDirect3DDevice9_Release(device_ptr);
     ok(!refcount, "Device has %u references left\n", refcount);

@@ -288,6 +288,7 @@ static VOID test_CreateRemoteThread(void)
         skip("child process wasn't mapped at same address, so can't do CreateRemoteThread tests.\n");
         return;
     }
+    ok(ret == WAIT_OBJECT_0 || broken(ret == WAIT_OBJECT_0+1 /* nt4,w2k */), "WaitForAllObjects 2 events %d\n", ret);
 
     hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
     ok(hEvent != NULL, "Can't create event, err=%u\n", GetLastError());
@@ -865,7 +866,7 @@ static VOID test_thread_processor(void)
      }
 
      error=pSetThreadIdealProcessor(curthread,MAXIMUM_PROCESSORS);
-     ok(error==0, "SetThreadIdealProcessor returned an incorrect value\n");
+     ok(error!=-1, "SetThreadIdealProcessor failed\n");
    }
 }
 
@@ -898,6 +899,7 @@ static HANDLE event;
 static void WINAPI set_test_val( int val )
 {
     test_value += val;
+    ExitThread(0);
 }
 
 static DWORD WINAPI threadFunc6(LPVOID p)
@@ -954,7 +956,23 @@ static void test_SetThreadContext(void)
                          prevcount, GetLastError() );
 
     WaitForSingleObject( thread, INFINITE );
-    ok( test_value == 20, "test_value %d instead of 20\n", test_value );
+    ok( test_value == 10, "test_value %d\n", test_value );
+
+    ctx.ContextFlags = CONTEXT_FULL;
+    SetLastError(0xdeadbeef);
+    ret = GetThreadContext( thread, &ctx );
+    ok( !ret, "GetThreadContext succeeded\n" );
+    ok( GetLastError() == ERROR_GEN_FAILURE || broken(GetLastError() == ERROR_INVALID_HANDLE), /* win2k */
+        "wrong error %u\n", GetLastError() );
+
+    SetLastError(0xdeadbeef);
+    ret = SetThreadContext( thread, &ctx );
+    ok( !ret, "SetThreadContext succeeded\n" );
+    ok( GetLastError() == ERROR_GEN_FAILURE || GetLastError() == ERROR_ACCESS_DENIED ||
+        broken(GetLastError() == ERROR_INVALID_HANDLE), /* win2k */
+        "wrong error %u\n", GetLastError() );
+
+    CloseHandle( thread );
 }
 
 #endif  /* __i386__ */
@@ -1231,7 +1249,7 @@ static void test_TLS(void)
   }
 
   ret = WaitForMultipleObjects(2, threads, TRUE, 60000);
-  ok(ret == WAIT_OBJECT_0 || ret == WAIT_OBJECT_0+1 /* nt4 */, "WaitForMultipleObjects failed %u\n",ret);
+  ok(ret == WAIT_OBJECT_0 || broken(ret == WAIT_OBJECT_0+1 /* nt4,w2k */), "WaitForAllObjects 2 threads %d\n",ret);
 
   for (i = 0; i < 2; ++i)
     CloseHandle(threads[i]);
@@ -1334,19 +1352,16 @@ static void test_ThreadErrorMode(void)
     pSetThreadErrorMode(oldmode, NULL);
 }
 
+#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
 static inline void set_fpu_cw(WORD cw)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
     __asm__ volatile ("fnclex; fldcw %0" : : "m" (cw));
-#endif
 }
 
 static inline WORD get_fpu_cw(void)
 {
     WORD cw = 0;
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
     __asm__ volatile ("fnstcw %0" : "=m" (cw));
-#endif
     return cw;
 }
 
@@ -1414,6 +1429,7 @@ static void test_thread_fpu_cw(void)
     cw = get_fpu_cw();
     ok(cw == initial_cw, "Expected FPU control word %#x, got %#x.\n", initial_cw, cw);
 }
+#endif
 
 START_TEST(thread)
 {

@@ -582,7 +582,7 @@ static HRESULT WINAPI Parser_OutputPin_DecideAllocator(BaseOutputPin *iface, IMe
     Parser_OutputPin *This = (Parser_OutputPin *)iface;
     HRESULT hr;
 
-    pAlloc = NULL;
+    *pAlloc = NULL;
 
     if (This->alloc)
         hr = IMemInputPin_NotifyAllocator(pPin, This->alloc, This->readonly);
@@ -624,10 +624,9 @@ static HRESULT WINAPI Parser_OutputPin_QueryInterface(IPin * iface, REFIID riid,
         *ppv = iface;
     else if (IsEqualIID(riid, &IID_IPin))
         *ppv = iface;
+    /* The Parser filter does not support querying IMediaSeeking, return it directly */
     else if (IsEqualIID(riid, &IID_IMediaSeeking))
-    {
-        return IBaseFilter_QueryInterface(This->pin.pin.pinInfo.pFilter, &IID_IMediaSeeking, ppv);
-    }
+        *ppv = &((ParserImpl*)This->pin.pin.pinInfo.pFilter)->sourceSeeking;
 
     if (*ppv)
     {
@@ -703,6 +702,31 @@ static const IPinVtbl Parser_OutputPin_Vtbl =
     BasePinImpl_NewSegment
 };
 
+static HRESULT WINAPI Parser_PullPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
+{
+    PullPin *This = (PullPin *)iface;
+
+    TRACE("(%p/%p)->(%s, %p)\n", This, iface, qzdebugstr_guid(riid), ppv);
+
+    *ppv = NULL;
+
+    /*
+     * It is important to capture the request for the IMediaSeeking interface before it is passed
+     * on to PullPin_QueryInterface, this is necessary since the Parser filter does not support
+     * querying IMediaSeeking
+     */
+    if (IsEqualIID(riid, &IID_IMediaSeeking))
+        *ppv = &((ParserImpl*)This->pin.pinInfo.pFilter)->sourceSeeking;
+
+    if (*ppv)
+    {
+        IUnknown_AddRef((IUnknown *)(*ppv));
+        return S_OK;
+    }
+
+    return PullPin_QueryInterface(iface, riid, ppv);
+}
+
 static HRESULT WINAPI Parser_PullPin_Disconnect(IPin * iface)
 {
     HRESULT hr;
@@ -771,7 +795,7 @@ static HRESULT WINAPI Parser_PullPin_EnumMediaTypes(IPin *iface, IEnumMediaTypes
 
 static const IPinVtbl Parser_InputPin_Vtbl =
 {
-    PullPin_QueryInterface,
+    Parser_PullPin_QueryInterface,
     BasePinImpl_AddRef,
     PullPin_Release,
     BaseInputPinImpl_Connect,

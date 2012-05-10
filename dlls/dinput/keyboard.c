@@ -373,7 +373,7 @@ static HRESULT WINAPI SysKeyboardWImpl_GetCapabilities(LPDIRECTINPUTDEVICE8W ifa
     }
 
     devcaps.dwSize = lpDIDevCaps->dwSize;
-    devcaps.dwFlags = DIDC_ATTACHED;
+    devcaps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
     if (This->base.dinput->dwVersion >= 0x0800)
 	devcaps.dwDevType = DI8DEVTYPE_KEYBOARD | (DI8DEVTYPEKEYBOARD_UNKNOWN << 8);
     else
@@ -410,12 +410,14 @@ SysKeyboardAImpl_GetObjectInfo(
 	DWORD dwHow)
 {
     HRESULT res;
+    LONG scan;
 
     res = IDirectInputDevice2AImpl_GetObjectInfo(iface, pdidoi, dwObj, dwHow);
     if (res != DI_OK) return res;
 
-    if (!GetKeyNameTextA((DIDFT_GETINSTANCE(pdidoi->dwType) & 0x80) << 17 |
-                         (DIDFT_GETINSTANCE(pdidoi->dwType) & 0x7f) << 16,
+    scan = DIDFT_GETINSTANCE(pdidoi->dwType);
+    if (scan == DIK_PAUSE || scan == DIK_NUMLOCK) scan ^= 0x80;
+    if (!GetKeyNameTextA((scan & 0x80) << 17 | (scan & 0x7f) << 16,
                          pdidoi->tszName, sizeof(pdidoi->tszName)))
         return DIERR_OBJECTNOTFOUND;
 
@@ -429,14 +431,15 @@ static HRESULT WINAPI SysKeyboardWImpl_GetObjectInfo(LPDIRECTINPUTDEVICE8W iface
 						     DWORD dwHow)
 {
     HRESULT res;
+    LONG scan;
 
     res = IDirectInputDevice2WImpl_GetObjectInfo(iface, pdidoi, dwObj, dwHow);
     if (res != DI_OK) return res;
 
-    if (!GetKeyNameTextW((DIDFT_GETINSTANCE(pdidoi->dwType) & 0x80) << 17 |
-                         (DIDFT_GETINSTANCE(pdidoi->dwType) & 0x7f) << 16,
-                         pdidoi->tszName,
-                         sizeof(pdidoi->tszName)/sizeof(pdidoi->tszName[0])))
+    scan = DIDFT_GETINSTANCE(pdidoi->dwType);
+    if (scan == DIK_PAUSE || scan == DIK_NUMLOCK) scan ^= 0x80;
+    if (!GetKeyNameTextW((scan & 0x80) << 17 | (scan & 0x7f) << 16,
+                         pdidoi->tszName, sizeof(pdidoi->tszName)))
         return DIERR_OBJECTNOTFOUND;
 
     _dump_OBJECTINSTANCEW(pdidoi);
@@ -509,6 +512,8 @@ static HRESULT WINAPI SysKeyboardWImpl_GetProperty(LPDIRECTINPUTDEVICE8W iface,
                 memcpy(ps->wsz, didoi.tszName, sizeof(ps->wsz));
             return hr;
         }
+        case (DWORD_PTR) DIPROP_RANGE:
+            return DIERR_UNSUPPORTED;
         default:
             return IDirectInputDevice2AImpl_GetProperty( IDirectInputDevice8A_from_impl(This), rguid, pdiph );
     }
@@ -520,6 +525,85 @@ static HRESULT WINAPI SysKeyboardAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
 {
     SysKeyboardImpl *This = impl_from_IDirectInputDevice8A(iface);
     return SysKeyboardWImpl_GetProperty(IDirectInputDevice8W_from_impl(This), rguid, pdiph);
+}
+
+static HRESULT WINAPI SysKeyboardWImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                      LPDIACTIONFORMATW lpdiaf,
+                                                      LPCWSTR lpszUserName,
+                                                      DWORD dwFlags)
+{
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    return  _build_action_map(iface, lpdiaf, lpszUserName, dwFlags, DIKEYBOARD_MASK, &c_dfDIKeyboard);
+}
+
+static HRESULT WINAPI SysKeyboardAImpl_BuildActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                      LPDIACTIONFORMATA lpdiaf,
+                                                      LPCSTR lpszUserName,
+                                                      DWORD dwFlags)
+{
+    SysKeyboardImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = SysKeyboardWImpl_BuildActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    _copy_diactionformatWtoA(lpdiaf, &diafW);
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
+}
+
+static HRESULT WINAPI SysKeyboardWImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                    LPDIACTIONFORMATW lpdiaf,
+                                                    LPCWSTR lpszUserName,
+                                                    DWORD dwFlags)
+{
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    return _set_action_map(iface, lpdiaf, lpszUserName, dwFlags, &c_dfDIKeyboard);
+}
+
+static HRESULT WINAPI SysKeyboardAImpl_SetActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                    LPDIACTIONFORMATA lpdiaf,
+                                                    LPCSTR lpszUserName,
+                                                    DWORD dwFlags)
+{
+    SysKeyboardImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = SysKeyboardWImpl_SetActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
 }
 
 static const IDirectInputDevice8AVtbl SysKeyboardAvt =
@@ -553,8 +637,8 @@ static const IDirectInputDevice8AVtbl SysKeyboardAvt =
     IDirectInputDevice2AImpl_SendDeviceData,
     IDirectInputDevice7AImpl_EnumEffectsInFile,
     IDirectInputDevice7AImpl_WriteEffectToFile,
-    IDirectInputDevice8AImpl_BuildActionMap,
-    IDirectInputDevice8AImpl_SetActionMap,
+    SysKeyboardAImpl_BuildActionMap,
+    SysKeyboardAImpl_SetActionMap,
     IDirectInputDevice8AImpl_GetImageInfo
 };
 
@@ -589,7 +673,7 @@ static const IDirectInputDevice8WVtbl SysKeyboardWvt =
     IDirectInputDevice2WImpl_SendDeviceData,
     IDirectInputDevice7WImpl_EnumEffectsInFile,
     IDirectInputDevice7WImpl_WriteEffectToFile,
-    IDirectInputDevice8WImpl_BuildActionMap,
-    IDirectInputDevice8WImpl_SetActionMap,
+    SysKeyboardWImpl_BuildActionMap,
+    SysKeyboardWImpl_SetActionMap,
     IDirectInputDevice8WImpl_GetImageInfo
 };

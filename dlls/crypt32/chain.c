@@ -1664,18 +1664,18 @@ static void dump_extension(const CERT_EXTENSION *ext)
 
 static LPCSTR filetime_to_str(const FILETIME *time)
 {
-    static char date[80];
+    char date[80];
     char dateFmt[80]; /* sufficient for all versions of LOCALE_SSHORTDATE */
     SYSTEMTIME sysTime;
 
-    if (!time) return NULL;
+    if (!time) return "(null)";
 
     GetLocaleInfoA(LOCALE_SYSTEM_DEFAULT, LOCALE_SSHORTDATE, dateFmt,
      sizeof(dateFmt) / sizeof(dateFmt[0]));
     FileTimeToSystemTime(time, &sysTime);
     GetDateFormatA(LOCALE_SYSTEM_DEFAULT, 0, &sysTime, dateFmt, date,
      sizeof(date) / sizeof(date[0]));
-    return date;
+    return wine_dbg_sprintf("%s", date);
 }
 
 static void dump_element(PCCERT_CONTEXT cert)
@@ -1760,28 +1760,12 @@ static BOOL CRYPT_KeyUsageValid(PCertificateChainEngine engine,
              * extensions as CA certs.  V1 and V2 certificates did not have
              * extensions, and many root certificates are V1 certificates, so
              * perhaps this is prudent.  On the other hand, MS also accepts V3
-             * certs without key usage extensions.  We are more restrictive:
-             * we accept locally installed V1 or V2 certs as CA certs.
-             * We also accept a lack of key usage extension on root certs,
-             * which is implied in RFC 5280, section 6.1:  the trust anchor's
-             * only requirement is that it was used to issue the next
-             * certificate in the chain.
+             * certs without key usage extensions.  Because some CAs, e.g.
+             * Certum, also do not include key usage extensions in their
+             * intermediate certificates, we are forced to accept V3
+             * certificates without key usage extensions as well.
              */
-            if (isRoot)
-                ret = TRUE;
-            else if (cert->pCertInfo->dwVersion == CERT_V1 ||
-             cert->pCertInfo->dwVersion == CERT_V2)
-            {
-                PCCERT_CONTEXT localCert = CRYPT_FindCertInStore(
-                 engine->hWorld, cert);
-
-                ret = localCert != NULL;
-                CertFreeCertificateContext(localCert);
-            }
-            else
-                ret = FALSE;
-            if (!ret)
-                WARN_(chain)("no key usage extension on a CA cert\n");
+            ret = TRUE;
         }
         else
         {
@@ -3178,6 +3162,7 @@ static BOOL match_domain_component(LPCWSTR allowed_component, DWORD allowed_len,
     BOOL matches = TRUE;
 
     *see_wildcard = FALSE;
+
     if (server_len < allowed_len)
     {
         WARN_(chain)("domain component %s too short for %s\n",
@@ -3236,6 +3221,13 @@ static BOOL match_common_name(LPCWSTR server_name, const CERT_RDN_ATTR *nameAttr
     BOOL matches = TRUE, allow_wildcards = TRUE;
 
     TRACE_(chain)("CN = %s\n", debugstr_wn(allowed_component, allowed_len));
+
+    /* Remove trailing NULLs from the allowed name; while they shouldn't appear
+     * in a certificate in the first place, they sometimes do, and they should
+     * be ignored.
+     */
+    while (allowed_len && allowed_component[allowed_len - 1] == 0)
+      allowed_len--;
 
     /* From RFC 2818 (HTTP over TLS), section 3.1:
      * "Names may contain the wildcard character * which is considered to match
@@ -3318,7 +3310,6 @@ static BOOL match_dns_to_subject_dn(PCCERT_CONTEXT cert, LPCWSTR server_name)
         {
             LPCWSTR ptr = server_name;
 
-            matches = TRUE;
             do {
                 LPCWSTR dot = strchrW(ptr, '.'), end;
                 /* 254 is the maximum DNS label length, see RFC 1035 */

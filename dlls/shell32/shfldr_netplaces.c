@@ -38,7 +38,6 @@
 #include "winreg.h"
 
 #include "pidl.h"
-#include "enumidlist.h"
 #include "undocshell.h"
 #include "shell32_main.h"
 #include "shresdef.h"
@@ -54,9 +53,9 @@ WINE_DEFAULT_DEBUG_CHANNEL (shell);
 */
 
 typedef struct {
-    const IShellFolder2Vtbl  *lpVtbl;
-    LONG                       ref;
-    const IPersistFolder2Vtbl *lpVtblPersistFolder2;
+    IShellFolder2   IShellFolder2_iface;
+    IPersistFolder2 IPersistFolder2_iface;
+    LONG            ref;
 
     /* both paths are parsible from the desktop */
     LPITEMIDLIST pidlRoot;	/* absolute pidl */
@@ -65,14 +64,16 @@ typedef struct {
 static const IShellFolder2Vtbl vt_ShellFolder2;
 static const IPersistFolder2Vtbl vt_NP_PersistFolder2;
 
-static inline IGenericSFImpl *impl_from_IPersistFolder2(IPersistFolder2 *iface)
+static inline IGenericSFImpl *impl_from_IShellFolder2(IShellFolder2 *iface)
 {
-    return (IGenericSFImpl *)((char*)iface - FIELD_OFFSET(IGenericSFImpl, lpVtblPersistFolder2));
+    return CONTAINING_RECORD(iface, IGenericSFImpl, IShellFolder2_iface);
 }
 
-#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
-#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpVtbl)
-#define _IPersistFolder2_(This) (&(This)->lpVtblPersistFolder2)
+static inline IGenericSFImpl *impl_from_IPersistFolder2(IPersistFolder2 *iface)
+{
+    return CONTAINING_RECORD(iface, IGenericSFImpl, IPersistFolder2_iface);
+}
+
 
 static const shvheader networkplaces_header[] = {
     {IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},
@@ -100,13 +101,13 @@ HRESULT WINAPI ISF_NetworkPlaces_Constructor (IUnknown * pUnkOuter, REFIID riid,
         return E_OUTOFMEMORY;
 
     sf->ref = 0;
-    sf->lpVtbl = &vt_ShellFolder2;
-    sf->lpVtblPersistFolder2 = &vt_NP_PersistFolder2;
+    sf->IShellFolder2_iface.lpVtbl = &vt_ShellFolder2;
+    sf->IPersistFolder2_iface.lpVtbl = &vt_NP_PersistFolder2;
     sf->pidlRoot = _ILCreateNetHood();	/* my qualified pidl */
 
-    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
+    if (FAILED (IShellFolder2_QueryInterface (&sf->IShellFolder2_iface, riid, ppv)))
     {
-        IUnknown_Release (_IUnknown_ (sf));
+        IShellFolder2_Release (&sf->IShellFolder2_iface);
         return E_NOINTERFACE;
     }
 
@@ -122,7 +123,7 @@ HRESULT WINAPI ISF_NetworkPlaces_Constructor (IUnknown * pUnkOuter, REFIID riid,
  */
 static HRESULT WINAPI ISF_NetworkPlaces_fnQueryInterface (IShellFolder2 *iface, REFIID riid, LPVOID *ppvObj)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     TRACE ("(%p)->(%s,%p)\n", This, shdebugstr_guid (riid), ppvObj);
 
@@ -138,7 +139,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnQueryInterface (IShellFolder2 *iface, 
              IsEqualIID (riid, &IID_IPersistFolder) ||
              IsEqualIID (riid, &IID_IPersistFolder2))
     {
-        *ppvObj = _IPersistFolder2_ (This);
+        *ppvObj = &This->IPersistFolder2_iface;
     }
 
     if (*ppvObj)
@@ -153,7 +154,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnQueryInterface (IShellFolder2 *iface, 
 
 static ULONG WINAPI ISF_NetworkPlaces_fnAddRef (IShellFolder2 * iface)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE ("(%p)->(count=%u)\n", This, refCount - 1);
@@ -163,7 +164,7 @@ static ULONG WINAPI ISF_NetworkPlaces_fnAddRef (IShellFolder2 * iface)
 
 static ULONG WINAPI ISF_NetworkPlaces_fnRelease (IShellFolder2 * iface)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE ("(%p)->(count=%u)\n", This, refCount + 1);
@@ -184,7 +185,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
                DWORD * pchEaten, LPITEMIDLIST * ppidl, DWORD * pdwAttributes)
 {
     static const WCHAR wszEntireNetwork[] = {'E','n','t','i','r','e','N','e','t','w','o','r','k'}; /* not nul-terminated */
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     HRESULT hr = E_INVALIDARG;
     LPCWSTR szNext = NULL;
     WCHAR szElement[MAX_PATH];
@@ -221,8 +222,8 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
         else
         {
             if (pdwAttributes && *pdwAttributes)
-                hr = SHELL32_GetItemAttributes(_IShellFolder_ (This),
-                                               pidlTemp, pdwAttributes);
+                hr = SHELL32_GetItemAttributes((IShellFolder *)&This->IShellFolder2_iface, pidlTemp,
+                        pdwAttributes);
         }
     }
 
@@ -242,16 +243,19 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
 static HRESULT WINAPI ISF_NetworkPlaces_fnEnumObjects (IShellFolder2 * iface,
                HWND hwndOwner, DWORD dwFlags, LPENUMIDLIST * ppEnumIDList)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+    IEnumIDListImpl *list;
 
     TRACE ("(%p)->(HWND=%p flags=0x%08x pplist=%p)\n", This,
             hwndOwner, dwFlags, ppEnumIDList);
 
-    *ppEnumIDList = IEnumIDList_Constructor();
+    if (!(list = IEnumIDList_Constructor()))
+        return E_OUTOFMEMORY;
+    *ppEnumIDList = &list->IEnumIDList_iface;
 
     TRACE ("-- (%p)->(new ID List: %p)\n", This, *ppEnumIDList);
 
-    return (*ppEnumIDList) ? S_OK : E_OUTOFMEMORY;
+    return S_OK;
 }
 
 /**************************************************************************
@@ -260,7 +264,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnEnumObjects (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnBindToObject (IShellFolder2 * iface,
                LPCITEMIDLIST pidl, LPBC pbcReserved, REFIID riid, LPVOID * ppvOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     TRACE ("(%p)->(pidl=%p,%p,%s,%p)\n", This,
             pidl, pbcReserved, shdebugstr_guid (riid), ppvOut);
@@ -274,7 +278,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnBindToObject (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnBindToStorage (IShellFolder2 * iface,
                LPCITEMIDLIST pidl, LPBC pbcReserved, REFIID riid, LPVOID * ppvOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     FIXME ("(%p)->(pidl=%p,%p,%s,%p) stub\n", This,
             pidl, pbcReserved, shdebugstr_guid (riid), ppvOut);
@@ -290,11 +294,11 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnBindToStorage (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnCompareIDs (IShellFolder2 * iface,
                LPARAM lParam, LPCITEMIDLIST pidl1, LPCITEMIDLIST pidl2)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     int nReturn;
 
     TRACE ("(%p)->(0x%08lx,pidl1=%p,pidl2=%p)\n", This, lParam, pidl1, pidl2);
-    nReturn = SHELL32_CompareIDs (_IShellFolder_ (This), lParam, pidl1, pidl2);
+    nReturn = SHELL32_CompareIDs ((IShellFolder *)&This->IShellFolder2_iface, lParam, pidl1, pidl2);
     TRACE ("-- %i\n", nReturn);
     return nReturn;
 }
@@ -305,7 +309,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnCompareIDs (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnCreateViewObject (IShellFolder2 * iface,
                HWND hwndOwner, REFIID riid, LPVOID * ppvOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     LPSHELLVIEW pShellView;
     HRESULT hr = E_INVALIDARG;
 
@@ -346,7 +350,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnCreateViewObject (IShellFolder2 * ifac
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetAttributesOf (IShellFolder2 * iface,
                UINT cidl, LPCITEMIDLIST * apidl, DWORD * rgfInOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
     HRESULT hr = S_OK;
 
     TRACE ("(%p)->(cidl=%d apidl=%p mask=%p (0x%08x))\n", This,
@@ -365,7 +369,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetAttributesOf (IShellFolder2 * iface
         IShellFolder *psfParent = NULL;
         LPCITEMIDLIST rpidl = NULL;
 
-        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, (LPCITEMIDLIST*)&rpidl);
+        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (void**)&psfParent, &rpidl);
         if(SUCCEEDED(hr))
         {
             SHELL32_GetItemAttributes (psfParent, rpidl, rgfInOut);
@@ -377,7 +381,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetAttributesOf (IShellFolder2 * iface
         while (cidl > 0 && *apidl)
         {
             pdump (*apidl);
-            SHELL32_GetItemAttributes (_IShellFolder_ (This), *apidl, rgfInOut);
+            SHELL32_GetItemAttributes ((IShellFolder *)&This->IShellFolder2_iface, *apidl, rgfInOut);
             apidl++;
             cidl--;
         }
@@ -406,7 +410,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetUIObjectOf (IShellFolder2 * iface,
                HWND hwndOwner, UINT cidl, LPCITEMIDLIST * apidl, REFIID riid,
                UINT * prgfInOut, LPVOID * ppvOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     LPITEMIDLIST pidl;
     IUnknown *pObj = NULL;
@@ -422,8 +426,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetUIObjectOf (IShellFolder2 * iface,
 
     if (IsEqualIID (riid, &IID_IContextMenu) && (cidl >= 1))
     {
-        pObj = (LPUNKNOWN) ISvItemCm_Constructor ((IShellFolder *) iface, This->pidlRoot, apidl, cidl);
-        hr = S_OK;
+        return ItemMenu_Constructor((IShellFolder*)iface, This->pidlRoot, apidl, cidl, riid, ppvOut);
     }
     else if (IsEqualIID (riid, &IID_IDataObject) && (cidl >= 1))
     {
@@ -466,7 +469,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetUIObjectOf (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDisplayNameOf (IShellFolder2 * iface,
                LPCITEMIDLIST pidl, DWORD dwFlags, LPSTRRET strRet)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     FIXME ("(%p)->(pidl=%p,0x%08x,%p)\n", This, pidl, dwFlags, strRet);
     pdump (pidl);
@@ -493,7 +496,8 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnSetNameOf (IShellFolder2 * iface,
                HWND hwndOwner, LPCITEMIDLIST pidl,	/*simple pidl */
                LPCOLESTR lpName, DWORD dwFlags, LPITEMIDLIST * pPidlOut)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+
     FIXME ("(%p)->(%p,pidl=%p,%s,%u,%p)\n", This,
             hwndOwner, pidl, debugstr_w (lpName), dwFlags, pPidlOut);
     return E_FAIL;
@@ -502,7 +506,8 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnSetNameOf (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultSearchGUID (
                IShellFolder2 * iface, GUID * pguid)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+
     FIXME ("(%p)\n", This);
     return E_NOTIMPL;
 }
@@ -510,7 +515,8 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultSearchGUID (
 static HRESULT WINAPI ISF_NetworkPlaces_fnEnumSearches (IShellFolder2 * iface,
                IEnumExtraSearch ** ppenum)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+
     FIXME ("(%p)\n", This);
     return E_NOTIMPL;
 }
@@ -518,7 +524,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnEnumSearches (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultColumn (IShellFolder2 * iface,
                DWORD dwRes, ULONG * pSort, ULONG * pDisplay)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     TRACE ("(%p)\n", This);
 
@@ -533,7 +539,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultColumn (IShellFolder2 * ifac
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultColumnState (
                IShellFolder2 * iface, UINT iColumn, DWORD * pcsFlags)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     TRACE ("(%p)->(%d %p)\n", This, iColumn, pcsFlags);
 
@@ -548,7 +554,8 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetDefaultColumnState (
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDetailsEx (IShellFolder2 * iface,
                LPCITEMIDLIST pidl, const SHCOLUMNID * pscid, VARIANT * pv)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+
     FIXME ("(%p)\n", This);
     return E_NOTIMPL;
 }
@@ -556,7 +563,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetDetailsEx (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnGetDetailsOf (IShellFolder2 * iface,
                LPCITEMIDLIST pidl, UINT iColumn, SHELLDETAILS * psd)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     FIXME ("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
 
@@ -566,7 +573,7 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetDetailsOf (IShellFolder2 * iface,
 static HRESULT WINAPI ISF_NetworkPlaces_fnMapColumnToSCID (IShellFolder2 * iface,
                UINT column, SHCOLUMNID * pscid)
 {
-    IGenericSFImpl *This = (IGenericSFImpl *)iface;
+    IGenericSFImpl *This = impl_from_IShellFolder2(iface);
 
     FIXME ("(%p)\n", This);
 
@@ -607,7 +614,7 @@ static HRESULT WINAPI INPFldr_PersistFolder2_QueryInterface (IPersistFolder2 * i
 
     TRACE ("(%p)\n", This);
 
-    return IUnknown_QueryInterface (_IUnknown_ (This), iid, ppvObj);
+    return IShellFolder2_QueryInterface (&This->IShellFolder2_iface, iid, ppvObj);
 }
 
 /************************************************************************
@@ -619,7 +626,7 @@ static ULONG WINAPI INPFldr_PersistFolder2_AddRef (IPersistFolder2 * iface)
 
     TRACE ("(%p)->(count=%u)\n", This, This->ref);
 
-    return IUnknown_AddRef (_IUnknown_ (This));
+    return IShellFolder2_AddRef (&This->IShellFolder2_iface);
 }
 
 /************************************************************************
@@ -631,7 +638,7 @@ static ULONG WINAPI INPFldr_PersistFolder2_Release (IPersistFolder2 * iface)
 
     TRACE ("(%p)->(count=%u)\n", This, This->ref);
 
-    return IUnknown_Release (_IUnknown_ (This));
+    return IShellFolder2_Release (&This->IShellFolder2_iface);
 }
 
 /************************************************************************

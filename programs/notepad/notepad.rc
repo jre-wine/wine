@@ -55,51 +55,94 @@ POPUP "&Search" {
   MENUITEM "&Replace...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Help" {
-  MENUITEM "&Contents",         CMD_HELP_CONTENTS
-  MENUITEM "&Search...",        CMD_HELP_SEARCH
-  MENUITEM "&Help on help",     CMD_HELP_ON_HELP
-  MENUITEM SEPARATOR
-  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&Contents\tF1",     CMD_HELP_CONTENTS
+  MENUITEM "&About Notepad",    CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
 STRINGTABLE
 {
-STRING_PAGESETUP_HEADERVALUE,   "&f"
+STRING_PAGESETUP_HEADERVALUE,   "#msgctxt#do not translate#&f"
 STRING_PAGESETUP_FOOTERVALUE,   "Page &p"
 
 STRING_NOTEPAD,                                 "Notepad"
 STRING_ERROR,                                   "ERROR"
-STRING_WARNING,                                 "WARNING"
-STRING_INFO,                                    "Information"
 
 STRING_UNTITLED,                                "Untitled"
 
 STRING_ALL_FILES,                               "All files (*.*)"
 STRING_TEXT_FILES_TXT,                  "Text files (*.txt)"
 
-STRING_TOOLARGE,                                "File '%s' is too large for notepad.\n\
-Please use a different editor."
-STRING_NOTEXT,                                  "You didn't enter any text.\
-\nPlease type something and try again"
 STRING_DOESNOTEXIST,                            "File '%s' does not exist.\n\n\
 Do you want to create a new file?"
 STRING_NOTSAVED,                                "File '%s' has been modified.\n\n\
 Would you like to save the changes?"
 STRING_NOTFOUND,                                        "'%s' could not be found."
-STRING_OUT_OF_MEMORY,                   "Not enough memory to complete this \
-task.\nClose one or more applications to increase the amount of free memory."
 
 STRING_UNICODE_LE,     "Unicode (UTF-16)"
 STRING_UNICODE_BE,     "Unicode (UTF-16 big-endian)"
 STRING_UTF8,           "Unicode (UTF-8)"
 
-STRING_LOSS_OF_UNICODE_CHARACTERS,         "%s\n\
+STRING_LOSS_OF_UNICODE_CHARACTERS,         "%1\n\
 This file contains Unicode characters which will be lost if\n\
-you save this file in the %s encoding.\n\
+you save this file in the %2 encoding.\n\
 To keep these characters, click Cancel, and then select\n\
 one of the Unicode options in the Encoding drop down list.\n\
 Continue?"
+}
+
+DIALOG_PAGESETUP DIALOG 0, 0, 240, 95
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
+FONT 8, "MS Shell Dlg"
+CAPTION "Page Setup"
+{
+LTEXT    "&Header:",  0x140,  10, 07, 68, 15
+EDITTEXT IDC_PAGESETUP_HEADERVALUE,   78,  5,110, 12, WS_BORDER | WS_TABSTOP
+LTEXT    "&Footer:",  0x142,   10, 24, 68, 15
+EDITTEXT IDC_PAGESETUP_FOOTERVALUE,   78, 22,110, 12, WS_BORDER | WS_TABSTOP
+
+GROUPBOX "Margins (millimeters)",      0x144,     10, 43,178, 45
+LTEXT    "&Left:",        0x145,   20, 55, 39, 10, WS_CHILD
+EDITTEXT IDC_PAGESETUP_LEFTVALUE,     59, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+LTEXT    "&Top:",         0x148,    20, 73, 39, 10, WS_CHILD
+EDITTEXT IDC_PAGESETUP_TOPVALUE,      59, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+LTEXT    "&Right:",       0x14B, 107, 55, 39, 10, WS_CHILD
+EDITTEXT IDC_PAGESETUP_RIGHTVALUE,   148, 55, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+LTEXT    "&Bottom:",      0x14E, 107, 73, 39, 10, WS_CHILD
+EDITTEXT IDC_PAGESETUP_BOTTOMVALUE,  148, 73, 35, 11, WS_CHILD | WS_BORDER | WS_TABSTOP
+
+DEFPUSHBUTTON "OK",         IDOK,                   195,  3, 40, 15, WS_TABSTOP
+PUSHBUTTON    "Cancel",     IDCANCEL,               195, 21, 40, 15, WS_TABSTOP
+PUSHBUTTON    "&Help",       IDHELP,                195, 39, 40, 15, WS_TABSTOP
+}
+
+IDD_OFN_TEMPLATE  DIALOG 50,50,300,15
+STYLE DS_3DLOOK | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_BORDER
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "Encoding:", -1, 5,0, 60,12
+  COMBOBOX IDC_OFN_ENCCOMBO, 63,0, 150,48, WS_CHILD | WS_VSCROLL | CBS_DROPDOWNLIST
+END
+
+ID_ACCEL ACCELERATORS
+{
+    "#msgctxt#accelerator Select All#A", CMD_SELECT_ALL, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Copy#C", CMD_COPY, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Find#F", CMD_SEARCH, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Replace#H", CMD_REPLACE, VIRTKEY, CONTROL
+    "#msgctxt#accelerator New#N", CMD_NEW, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Open#O", CMD_OPEN, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Print#P", CMD_PRINT, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Save#S", CMD_SAVE, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Paste#V", CMD_PASTE, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Cut#X", CMD_CUT, VIRTKEY, CONTROL
+    "#msgctxt#accelerator Undo#Z", CMD_UNDO, VIRTKEY, CONTROL
+    VK_BACK, CMD_UNDO, VIRTKEY, ALT
+    VK_F1, CMD_HELP_CONTENTS, VIRTKEY
+    VK_F3, CMD_SEARCH_NEXT, VIRTKEY
+    VK_F5, CMD_TIME_DATE, VIRTKEY
+    VK_INSERT, CMD_COPY, VIRTKEY, CONTROL
+    VK_INSERT, CMD_PASTE, VIRTKEY, SHIFT
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL

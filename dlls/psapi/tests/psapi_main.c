@@ -2,6 +2,7 @@
  * Unit test suite for PSAPI
  *
  * Copyright (C) 2005 Felix Nawothnig
+ * Copyright (C) 2012 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,11 +20,21 @@
  */
 
 #include <stdarg.h>
-#include <stdio.h>
 
-#include "windows.h"
-#include "wine/test.h"
+/* 0x0600 makes PROCESS_ALL_ACCESS not compatible with pre-Vista versions */
+#define _WIN32_WINNT 0x0500
+
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
+
+#include "windef.h"
+#include "winbase.h"
+#include "winreg.h"
+#include "winnt.h"
+#include "winternl.h"
+#include "winnls.h"
 #include "psapi.h"
+#include "wine/test.h"
 
 #define PSAPI_GET_PROC(func) \
     p ## func = (void*)GetProcAddress(hpsapi, #func); \
@@ -40,12 +51,14 @@ static DWORD (WINAPI *pGetModuleBaseNameA)(HANDLE, HMODULE, LPSTR, DWORD);
 static DWORD (WINAPI *pGetModuleFileNameExA)(HANDLE, HMODULE, LPSTR, DWORD);
 static BOOL  (WINAPI *pGetModuleInformation)(HANDLE, HMODULE, LPMODULEINFO, DWORD);
 static DWORD (WINAPI *pGetMappedFileNameA)(HANDLE, LPVOID, LPSTR, DWORD);
+static DWORD (WINAPI *pGetMappedFileNameW)(HANDLE, LPVOID, LPWSTR, DWORD);
 static DWORD (WINAPI *pGetProcessImageFileNameA)(HANDLE, LPSTR, DWORD);
 static DWORD (WINAPI *pGetProcessImageFileNameW)(HANDLE, LPWSTR, DWORD);
 static BOOL  (WINAPI *pGetProcessMemoryInfo)(HANDLE, PPROCESS_MEMORY_COUNTERS, DWORD);
 static BOOL  (WINAPI *pGetWsChanges)(HANDLE, PPSAPI_WS_WATCH_INFORMATION, DWORD);
 static BOOL  (WINAPI *pInitializeProcessForWsWatch)(HANDLE);
 static BOOL  (WINAPI *pQueryWorkingSet)(HANDLE, PVOID, DWORD);
+static NTSTATUS (WINAPI *pNtQueryVirtualMemory)(HANDLE, LPCVOID, ULONG, PVOID, SIZE_T, SIZE_T *);
       
 static BOOL InitFunctionPtrs(HMODULE hpsapi)
 {
@@ -56,6 +69,7 @@ static BOOL InitFunctionPtrs(HMODULE hpsapi)
     PSAPI_GET_PROC(GetModuleFileNameExA);
     PSAPI_GET_PROC(GetModuleInformation);
     PSAPI_GET_PROC(GetMappedFileNameA);
+    PSAPI_GET_PROC(GetMappedFileNameW);
     PSAPI_GET_PROC(GetProcessMemoryInfo);
     PSAPI_GET_PROC(GetWsChanges);
     PSAPI_GET_PROC(InitializeProcessForWsWatch);
@@ -65,6 +79,7 @@ static BOOL InitFunctionPtrs(HMODULE hpsapi)
       (void *)GetProcAddress(hpsapi, "GetProcessImageFileNameA");
     pGetProcessImageFileNameW =
       (void *)GetProcAddress(hpsapi, "GetProcessImageFileNameW");
+    pNtQueryVirtualMemory = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtQueryVirtualMemory");
     return TRUE;
 }
 
@@ -107,10 +122,26 @@ static void test_EnumProcessModules(void)
     ret = pEnumProcessModules(hpQV, &hMod, sizeof(HMODULE), &cbNeeded);
     if(ret != 1)
         return;
-    ok(cbNeeded / sizeof(HMODULE) >= 3 && cbNeeded / sizeof(HMODULE) <= 5 * sizeof(HMODULE),
-       "cbNeeded=%d\n", cbNeeded);
     ok(hMod == GetModuleHandle(NULL),
        "hMod=%p GetModuleHandle(NULL)=%p\n", hMod, GetModuleHandle(NULL));
+    ok(cbNeeded % sizeof(hMod) == 0, "not a multiple of sizeof(HMODULE) cbNeeded=%d\n", cbNeeded);
+    /* Windows sometimes has a bunch of extra dlls, presumably brought in by
+     * aclayers.dll.
+     */
+    if (cbNeeded < 4 * sizeof(HMODULE) || cbNeeded > 30 * sizeof(HMODULE))
+    {
+        HMODULE hmods[100];
+        int i;
+        ok(0, "cbNeeded=%d\n", cbNeeded);
+
+        pEnumProcessModules(hpQV, hmods, sizeof(hmods), &cbNeeded);
+        for (i = 0 ; i < cbNeeded/sizeof(*hmods); i++)
+        {
+            char path[1024];
+            GetModuleFileNameA(hmods[i], path, sizeof(path));
+            trace("i=%d hmod=%p path=[%s]\n", i, hmods[i], path);
+        }
+    }
 }
 
 static void test_GetModuleInformation(void)
@@ -163,14 +194,53 @@ static void test_GetProcessMemoryInfo(void)
     ok(ret == 1, "failed with %d\n", GetLastError());
 }
 
+static BOOL nt_get_mapped_file_name(HANDLE process, LPVOID addr, LPWSTR name, DWORD len)
+{
+    MEMORY_SECTION_NAME *section_name;
+    WCHAR *buf;
+    SIZE_T buf_len, ret_len;
+    NTSTATUS status;
+
+    if (!pNtQueryVirtualMemory) return FALSE;
+
+    buf_len = len * sizeof(WCHAR) + sizeof(MEMORY_SECTION_NAME);
+    buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buf_len);
+
+    ret_len = 0xdeadbeef;
+    status = pNtQueryVirtualMemory(process, addr, MemorySectionName, buf, buf_len, &ret_len);
+todo_wine
+    ok(!status, "NtQueryVirtualMemory error %x\n", status);
+    /* FIXME: remove once Wine is fixed */
+    if (status) return FALSE;
+
+    section_name = (MEMORY_SECTION_NAME *)buf;
+    ok(ret_len == section_name->SectionFileName.MaximumLength + sizeof(*section_name), "got %lu, %u\n",
+       ret_len, section_name->SectionFileName.MaximumLength);
+    ok((char *)section_name->SectionFileName.Buffer == (char *)section_name + sizeof(*section_name), "got %p, %p\n",
+       section_name, section_name->SectionFileName.Buffer);
+    ok(section_name->SectionFileName.MaximumLength == section_name->SectionFileName.Length + sizeof(WCHAR), "got %u, %u\n",
+       section_name->SectionFileName.MaximumLength, section_name->SectionFileName.Length);
+    ok(section_name->SectionFileName.Length == lstrlenW(section_name->SectionFileName.Buffer) * sizeof(WCHAR), "got %u, %u\n",
+       section_name->SectionFileName.Length, lstrlenW(section_name->SectionFileName.Buffer));
+
+    memcpy(name, section_name->SectionFileName.Buffer, section_name->SectionFileName.MaximumLength);
+    HeapFree(GetProcessHeap(), 0, buf);
+    return TRUE;
+}
+
 static void test_GetMappedFileName(void)
 {
     HMODULE hMod = GetModuleHandle(NULL);
     char szMapPath[MAX_PATH], szModPath[MAX_PATH], *szMapBaseName;
     DWORD ret;
-    
+    char *base;
+    char temp_path[MAX_PATH], file_name[MAX_PATH], map_name[MAX_PATH], device_name[MAX_PATH], drive[3];
+    WCHAR map_nameW[MAX_PATH], nt_map_name[MAX_PATH];
+    HANDLE hfile, hmap;
+
     SetLastError(0xdeadbeef);
     pGetMappedFileNameA(NULL, hMod, szMapPath, sizeof(szMapPath));
+todo_wine
     ok(GetLastError() == ERROR_INVALID_HANDLE, "expected error=ERROR_INVALID_HANDLE but got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -179,20 +249,136 @@ static void test_GetMappedFileName(void)
 
     SetLastError( 0xdeadbeef );
     ret = pGetMappedFileNameA(hpQI, hMod, szMapPath, sizeof(szMapPath));
+todo_wine
     ok( ret || broken(GetLastError() == ERROR_UNEXP_NET_ERR), /* win2k */
         "GetMappedFileNameA failed with error %u\n", GetLastError() );
-    if (!ret) return;
-    ok(ret == strlen(szMapPath), "szMapPath=\"%s\" ret=%d\n", szMapPath, ret);
-    ok(szMapPath[0] == '\\', "szMapPath=\"%s\"\n", szMapPath);
-    szMapBaseName = strrchr(szMapPath, '\\'); /* That's close enough for us */
-    if(!szMapBaseName || !*szMapBaseName)
+    if (ret)
     {
-        ok(0, "szMapPath=\"%s\"\n", szMapPath);
-        return;
+        ok(ret == strlen(szMapPath), "szMapPath=\"%s\" ret=%d\n", szMapPath, ret);
+        todo_wine
+        ok(szMapPath[0] == '\\', "szMapPath=\"%s\"\n", szMapPath);
+        szMapBaseName = strrchr(szMapPath, '\\'); /* That's close enough for us */
+        todo_wine
+        ok(szMapBaseName && *szMapBaseName, "szMapPath=\"%s\"\n", szMapPath);
+        if (szMapBaseName)
+        {
+            GetModuleFileNameA(NULL, szModPath, sizeof(szModPath));
+            ok(!strcmp(strrchr(szModPath, '\\'), szMapBaseName),
+               "szModPath=\"%s\" szMapBaseName=\"%s\"\n", szModPath, szMapBaseName);
+        }
     }
-    GetModuleFileNameA(NULL, szModPath, sizeof(szModPath));
-    ok(!strcmp(strrchr(szModPath, '\\'), szMapBaseName),
-       "szModPath=\"%s\" szMapBaseName=\"%s\"\n", szModPath, szMapBaseName);
+
+    GetTempPath(MAX_PATH, temp_path);
+    GetTempFileName(temp_path, "map", 0, file_name);
+
+    drive[0] = file_name[0];
+    drive[1] = ':';
+    drive[2] = 0;
+    SetLastError(0xdeadbeef);
+    ret = QueryDosDevice(drive, device_name, sizeof(device_name));
+    ok(ret, "QueryDosDevice error %d\n", GetLastError());
+    trace("%s -> %s\n", drive, device_name);
+
+    SetLastError(0xdeadbeef);
+    hfile = CreateFile(file_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(hfile != INVALID_HANDLE_VALUE, "CreateFile(%s) error %d\n", file_name, GetLastError());
+    SetFilePointer(hfile, 0x4000, NULL, FILE_BEGIN);
+    SetEndOfFile(hfile);
+
+    SetLastError(0xdeadbeef);
+    hmap = CreateFileMapping(hfile, NULL, PAGE_READONLY | SEC_COMMIT, 0, 0, NULL);
+    ok(hmap != 0, "CreateFileMapping error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    base = MapViewOfFile(hmap, FILE_MAP_READ, 0, 0, 0);
+    ok(base != NULL, "MapViewOfFile error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base, map_name, 0);
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base, 0, sizeof(map_name));
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base, map_name, 1);
+todo_wine
+    ok(ret == 1, "GetMappedFileName error %d\n", GetLastError());
+    ok(!map_name[0] || broken(map_name[0] == device_name[0]) /* before win2k */, "expected 0, got %c\n", map_name[0]);
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base, map_name, sizeof(map_name));
+todo_wine {
+    ok(ret, "GetMappedFileName error %d\n", GetLastError());
+    ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
+    ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
+}
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameW(GetCurrentProcess(), base, map_nameW, sizeof(map_nameW)/sizeof(map_nameW[0]));
+todo_wine {
+    ok(ret, "GetMappedFileNameW error %d\n", GetLastError());
+    ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
+}
+    if (nt_get_mapped_file_name(GetCurrentProcess(), base, nt_map_name, sizeof(nt_map_name)/sizeof(nt_map_name[0])))
+    {
+        ok(memcmp(map_nameW, nt_map_name, lstrlenW(map_nameW)) == 0, "map name does not start with a device name: %s\n", map_name);
+        WideCharToMultiByte(CP_ACP, 0, map_nameW, -1, map_name, MAX_PATH, NULL, NULL);
+        ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base + 0x2000, map_name, sizeof(map_name));
+todo_wine {
+    ok(ret, "GetMappedFileName error %d\n", GetLastError());
+    ok(ret > strlen(device_name), "map_name should be longer than device_name\n");
+    ok(memcmp(map_name, device_name, strlen(device_name)) == 0, "map name does not start with a device name: %s\n", map_name);
+}
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base + 0x4000, map_name, sizeof(map_name));
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_UNEXP_NET_ERR, "expected ERROR_UNEXP_NET_ERR, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), NULL, map_name, sizeof(map_name));
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_UNEXP_NET_ERR, "expected ERROR_UNEXP_NET_ERR, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(0, base, map_name, sizeof(map_name));
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
+
+    UnmapViewOfFile(base);
+    CloseHandle(hmap);
+    CloseHandle(hfile);
+    DeleteFile(file_name);
+
+    SetLastError(0xdeadbeef);
+    hmap = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READONLY | SEC_COMMIT, 0, 4096, NULL);
+    ok(hmap != 0, "CreateFileMapping error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    base = MapViewOfFile(hmap, FILE_MAP_READ, 0, 0, 0);
+    ok(base != NULL, "MapViewOfFile error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetMappedFileNameA(GetCurrentProcess(), base, map_name, sizeof(map_name));
+    ok(!ret, "GetMappedFileName should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_FILE_INVALID, "expected ERROR_FILE_INVALID, got %d\n", GetLastError());
+
+    UnmapViewOfFile(base);
+    CloseHandle(hmap);
 }
 
 static void test_GetProcessImageFileName(void)
@@ -222,15 +408,15 @@ static void test_GetProcessImageFileName(void)
 
     SetLastError(0xdeadbeef);
     pGetProcessImageFileNameA(NULL, szImgPath, sizeof(szImgPath));
-    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "expected error=ERROR_INVALID_HANDLE but got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "expected error=ERROR_INVALID_HANDLE but got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     pGetProcessImageFileNameA(hpSR, szImgPath, sizeof(szImgPath));
-    todo_wine ok(GetLastError() == ERROR_ACCESS_DENIED, "expected error=ERROR_ACCESS_DENIED but got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected error=ERROR_ACCESS_DENIED but got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     pGetProcessImageFileNameA(hpQI, szImgPath, 0);
-    todo_wine ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected error=ERROR_INSUFFICIENT_BUFFER but got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected error=ERROR_INSUFFICIENT_BUFFER but got %d\n", GetLastError());
 
     ret = pGetProcessImageFileNameA(hpQI, szImgPath, sizeof(szImgPath));
     ret1 = pGetMappedFileNameA(hpQV, hMod, szMapPath, sizeof(szMapPath));
@@ -415,7 +601,7 @@ START_TEST(psapi_main)
 
     if(!hpsapi)
     {
-        trace("Could not load psapi.dll\n");
+        win_skip("Could not load psapi.dll\n");
         return;
     }
 
@@ -435,7 +621,7 @@ START_TEST(psapi_main)
 	    test_EnumProcessModules();
 	    test_GetModuleInformation();
 	    test_GetProcessMemoryInfo();
-	    todo_wine test_GetMappedFileName();
+            test_GetMappedFileName();
             test_GetProcessImageFileName();
             test_GetModuleFileNameEx();
             test_GetModuleBaseName();

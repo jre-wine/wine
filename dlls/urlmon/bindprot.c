@@ -203,6 +203,7 @@ static HRESULT handle_mime_filter(BindProtocol *This, IInternetProtocol *mime_fi
         return hres;
     }
 
+    /* NOTE: IE9 calls it on the new protocol_sink. It doesn't make sense to is seems to be a bug there. */
     IInternetProtocolSink_ReportProgress(old_sink, BINDSTATUS_LOADINGMIMEHANDLER, NULL);
     IInternetProtocolSink_Release(old_sink);
 
@@ -329,6 +330,8 @@ static ULONG WINAPI BindProtocol_Release(IInternetProtocolEx *iface)
     if(!ref) {
         if(This->wininet_info)
             IWinInetInfo_Release(This->wininet_info);
+        if(This->wininet_http_info)
+            IWinInetHttpInfo_Release(This->wininet_http_info);
         if(This->protocol)
             IInternetProtocol_Release(This->protocol);
         if(This->bind_info)
@@ -339,11 +342,13 @@ static ULONG WINAPI BindProtocol_Release(IInternetProtocolEx *iface)
             IInternetProtocol_Release(&This->filter_proxy->IInternetProtocol_iface);
         if(This->uri)
             IUri_Release(This->uri);
+        SysFreeString(This->display_uri);
 
         set_binding_sink(This, NULL, NULL);
 
         if(This->notif_hwnd)
             release_notif_hwnd(This->notif_hwnd);
+        This->section.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->section);
 
         heap_free(This->mime);
@@ -523,8 +528,10 @@ static HRESULT WINAPI BindProtocol_StartEx(IInternetProtocolEx *iface, IUri *pUr
 
     This->protocol = protocol;
 
-    if(urlmon_protocol)
+    if(urlmon_protocol) {
         IInternetProtocol_QueryInterface(protocol, &IID_IWinInetInfo, (void**)&This->wininet_info);
+        IInternetProtocol_QueryInterface(protocol, &IID_IWinInetHttpInfo, (void**)&This->wininet_http_info);
+    }
 
     set_binding_sink(This, pOIProtSink, pOIBindInfo);
 
@@ -540,15 +547,12 @@ static HRESULT WINAPI BindProtocol_StartEx(IInternetProtocolEx *iface, IUri *pUr
                 &This->IInternetBindInfo_iface, 0, NULL);
         IInternetProtocolEx_Release(protocolex);
     }else {
-        BSTR display_uri;
-
-        hres = IUri_GetDisplayUri(pUri, &display_uri);
+        hres = IUri_GetDisplayUri(pUri, &This->display_uri);
         if(FAILED(hres))
             return hres;
 
-        hres = IInternetProtocol_Start(protocol, display_uri, &This->IInternetProtocolSink_iface,
+        hres = IInternetProtocol_Start(protocol, This->display_uri, &This->IInternetProtocolSink_iface,
                 &This->IInternetBindInfo_iface, 0, 0);
-        SysFreeString(display_uri);
     }
 
     return hres;
@@ -935,7 +939,8 @@ static HRESULT WINAPI BPInternetProtocolSink_Switch(IInternetProtocolSink *iface
         return E_OUTOFMEMORY;
     memcpy(data, pProtocolData, sizeof(PROTOCOLDATA));
 
-    if(!do_direct_notif(This)) {
+    if((This->pi&PI_APARTMENTTHREADED && pProtocolData->grfFlags&PI_FORCE_ASYNC)
+            || !do_direct_notif(This)) {
         switch_task_t *task;
 
         task = heap_alloc(sizeof(switch_task_t));
@@ -1310,6 +1315,7 @@ HRESULT create_binding_protocol(BOOL from_urlmon, BindProtocol **protocol)
     ret->notif_hwnd = get_notif_hwnd();
     ret->protocol_handler = &ret->default_protocol_handler.IInternetProtocol_iface;
     InitializeCriticalSection(&ret->section);
+    ret->section.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": BindProtocol.section");
 
     URLMON_LockModule();
 

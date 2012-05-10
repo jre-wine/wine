@@ -14,13 +14,17 @@ C_SRCS = \
 	clipping.c \
 	dc.c \
 	dib.c \
+	dibdrv/bitblt.c \
+	dibdrv/dc.c \
+	dibdrv/graphics.c \
+	dibdrv/objects.c \
+	dibdrv/primitives.c \
 	driver.c \
 	enhmetafile.c \
 	enhmfdrv/bitblt.c \
 	enhmfdrv/dc.c \
 	enhmfdrv/graphics.c \
 	enhmfdrv/init.c \
-	enhmfdrv/mapping.c \
 	enhmfdrv/objects.c \
 	font.c \
 	freetype.c \
@@ -32,7 +36,6 @@ C_SRCS = \
 	mfdrv/dc.c \
 	mfdrv/graphics.c \
 	mfdrv/init.c \
-	mfdrv/mapping.c \
 	mfdrv/objects.c \
 	mfdrv/text.c \
 	opengl.c \
@@ -43,9 +46,11 @@ C_SRCS = \
 	printdrv.c \
 	region.c
 
-RC_SRCS = version.rc
+RC_SRCS = gdi32.rc
+PO_SRCS = gdi32.rc
 
 EXTRASUBDIRS = \
+	dibdrv \
 	enhmfdrv \
 	mfdrv
 

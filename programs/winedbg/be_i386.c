@@ -25,7 +25,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
 #ifdef __i386__
 
-  /* debugger/db_disasm.c */
+  /* db_disasm.c */
 extern void             be_i386_disasm_one_insn(ADDRESS64* addr, int display);
 
 #define STEP_FLAG 0x00000100 /* single step flag */
@@ -145,7 +145,7 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
                (ctx->FloatSave.StatusWord & 0x00000200) >> 9,
                (ctx->FloatSave.StatusWord & 0x00000100) >> 8);
 
-    /* Now pull out hte 3 bit of the TOP stack pointer */
+    /* Now pull out the 3 bit of the TOP stack pointer */
     dbg_printf(" TOP:%01x", (unsigned int) (ctx->FloatSave.StatusWord & 0x00003800) >> 11);
 
     /* Lets analyse the error bits and indicate the status  
@@ -387,6 +387,7 @@ static BOOL fetch_value(const char* addr, unsigned sz, int* value)
         if (!dbg_read_memory(addr, &value16, sizeof(value16)))
             return FALSE;
         *value = value16;
+        break;
     case 32:
         if (!dbg_read_memory(addr, value, sizeof(*value)))
             return FALSE;

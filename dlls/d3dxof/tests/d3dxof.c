@@ -19,8 +19,8 @@
  */
 #define COBJMACROS
 
-#include <assert.h>
 #include <stdio.h>
+
 #include "wine/test.h"
 #include "initguid.h"
 #include "dxfile.h"
@@ -74,14 +74,50 @@ static char empty_bin_file[]  = "xof 0302bin 0064";
 /* MSZip data is generated with the command "MAKECAB.EXE /D Compress=ON /D CompressionType=MSZip file packed"
  * Data in cab is after the filename (null terminated) and the 32-bit checksum:
  * size (16-bit), packed_size (16-bit) and compressed data (with leading 16-bit CK signature)
- * Data in x files is preceding by 2 16-bit words: size with xof header (16 bytes) and a 0 value
- * It does not seem possible to generate a MSZip data with no byte, so put just 1 byte here */
-/* "\n" packed with MSZip => not text */
+ * for each MSZIP chunk whose decompressed size can not exceed 32768 bytes
+ * Data in x files is preceeding by the size (32-bit) of the decompressed file including the xof header (16 bytes)
+ * It does not seem possible to generate a MSZip data chunk with no byte, so put just 1 byte here */
+/* "\n" packed with MSZip => no text */
 static char empty_tzip_file[] = "xof 0302tzip0064\x11\x00\x00\x00\x01\x00\x05\x00\x43\x4b\xe3\x02\x00";
-/* "\n" packed with MSZip => not token (token are 16-bit and there is only 1 byte) */
+/* "\n" packed with MSZip => no token (token are 16-bit and there is only 1 byte) */
 static char empty_bzip_file[] = "xof 0302bzip0064\x11\x00\x00\x00\x01\x00\x05\x00\x43\x4b\xe3\x02\x00";
 static char empty_cmp_file[]  = "xof 0302cmp 0064";
 static char empty_xxxx_file[] = "xof 0302xxxx0064";
+
+static char object_noname[] =
+"xof 0302txt 0064\n"
+"Header\n"
+"{\n"
+"1; 2; 3;\n"
+"}\n";
+
+static char template_syntax_empty_array[] =
+"xof 0302txt 0064\n"
+"template Buffer\n"
+"{\n"
+"<3D82AB43-62DA-11CF-AB39-0020AF71E433>\n"
+"DWORD num_elem;\n"
+"array DWORD value[num_elem];\n"
+"DWORD dummy;\n"
+"}\n";
+
+static char object_syntax_empty_array_semicolon[] =
+"xof 0302txt 0064\n"
+"Buffer\n"
+"{\n"
+"0;\n"
+";\n"
+"1234;\n"
+"}\n";
+
+static char object_syntax_empty_array_nosemicolon[] =
+"xof 0302txt 0064\n"
+"Buffer\n"
+"{\n"
+"0;\n"
+"1234;\n"
+"}\n";
+
 
 static void init_function_pointers(void)
 {
@@ -114,7 +150,7 @@ static void test_refcount(void)
 
     hr = pDirectXFileCreate(&lpDirectXFile);
     ok(hr == DXFILE_OK, "DirectXFileCreate: %x\n", hr);
-    if(!lpDirectXFile)
+    if (!lpDirectXFile)
     {
         skip("Couldn't create DirectXFile interface\n");
         return;
@@ -123,7 +159,7 @@ static void test_refcount(void)
     ref = getRefcount( (IUnknown *) lpDirectXFile);
     ok(ref == 1, "Got refcount %d, expected 1\n", ref);
     ref = IDirectXFile_AddRef(lpDirectXFile);
-    ok(ref == 2, "Got refcount %d, expected 1\n", ref);
+    ok(ref == 2, "Got refcount %d, expected 2\n", ref);
     ref = IDirectXFile_Release(lpDirectXFile);
     ok(ref == 1, "Got refcount %d, expected 1\n", ref);
 
@@ -155,7 +191,7 @@ static void test_refcount(void)
     ref = getRefcount( (IUnknown *) lpdxfeo);
     ok(ref == 1, "Got refcount %d, expected 1\n", ref);
     ref = getRefcount( (IUnknown *) lpdxfd);
-    ok(ref == 2, "Got refcount %d, expected 1\n", ref);
+    ok(ref == 2, "Got refcount %d, expected 2\n", ref);
 
     ref = IDirectXFileEnumObject_Release(lpdxfeo);
     ok(ref == 0, "Got refcount %d, expected 0\n", ref);
@@ -186,7 +222,7 @@ static void test_CreateEnumObject(void)
 
     hr = pDirectXFileCreate(&lpDirectXFile);
     ok(hr == DXFILE_OK, "DirectXFileCreate: %x\n", hr);
-    if(!lpDirectXFile)
+    if (!lpDirectXFile)
     {
         skip("Couldn't create DirectXFile interface\n");
         return;
@@ -204,11 +240,37 @@ static void test_CreateEnumObject(void)
     hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
     ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
 
+    /* Get all data (szMember == NULL) */
     hr = IDirectXFileData_GetData(lpdxfd, NULL, &size, (void**)&pdata);
     ok(hr == DXFILE_OK, "IDirectXFileData_GetData: %x\n", hr);
 
-    ok(size == 8, "Retrieved data size is wrong\n");
+    ok(size == 8, "Retrieved data size is wrong (%u instead of 8)\n", size);
     ok((*((WORD*)pdata) == 1) && (*((WORD*)(pdata+2)) == 2) && (*((DWORD*)(pdata+4)) == 3), "Retrieved data is wrong\n");
+
+    /* Get only "major" member (szMember == "major") */
+    hr = IDirectXFileData_GetData(lpdxfd, "major", &size, (void**)&pdata);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetData: %x\n", hr);
+
+    ok(size == 2, "Retrieved data size is wrong (%u instead of 2)\n", size);
+    ok(*((WORD*)pdata) == 1, "Retrieved data is wrong (%u instead of 1)\n", *((WORD*)pdata));
+
+    /* Get only "minor" member (szMember == "minor") */
+    hr = IDirectXFileData_GetData(lpdxfd, "minor", &size, (void**)&pdata);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetData: %x\n", hr);
+
+    ok(size == 2, "Retrieved data size is wrong (%u instead of 2)\n", size);
+    ok(*((WORD*)pdata) == 2, "Retrieved data is wrong (%u instead of 2)\n", *((WORD*)pdata));
+
+    /* Get only "flags" member (szMember == "flags") */
+    hr = IDirectXFileData_GetData(lpdxfd, "flags", &size, (void**)&pdata);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetData: %x\n", hr);
+
+    ok(size == 4, "Retrieved data size is wrong (%u instead of 4)\n", size);
+    ok(*((WORD*)pdata) == 3, "Retrieved data is wrong (%u instead of 3)\n", *((WORD*)pdata));
+
+    /* Try to get not existing member (szMember == "unknown") */
+    hr = IDirectXFileData_GetData(lpdxfd, "unknow", &size, (void**)&pdata);
+    ok(hr == DXFILEERR_BADDATAREFERENCE, "IDirectXFileData_GetData: %x\n", hr);
 
     ref = IDirectXFileEnumObject_Release(lpdxfeo);
     ok(ref == 0, "Got refcount %d, expected 0\n", ref);
@@ -342,6 +404,147 @@ static void test_compressed_files(void)
     IDirectXFile_Release(dxfile);
 }
 
+static void test_getname(void)
+{
+    HRESULT hr;
+    ULONG ref;
+    LPDIRECTXFILE lpDirectXFile = NULL;
+    LPDIRECTXFILEENUMOBJECT lpdxfeo;
+    LPDIRECTXFILEDATA lpdxfd;
+    DXFILELOADMEMORY dxflm;
+    char name[100];
+    DWORD length;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        return;
+    }
+
+    hr = pDirectXFileCreate(&lpDirectXFile);
+    ok(hr == DXFILE_OK, "DirectXFileCreate: %x\n", hr);
+    if (!lpDirectXFile)
+    {
+        skip("Couldn't create DirectXFile interface\n");
+        return;
+    }
+
+    hr = IDirectXFile_RegisterTemplates(lpDirectXFile, template, sizeof(template) - 1);
+    ok(hr == DXFILE_OK, "IDirectXFileImpl_RegisterTemplates: %x\n", hr);
+
+    /* Check object with name */
+    dxflm.lpMemory = &object;
+    dxflm.dSize = sizeof(object) - 1;
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, &dxflm, DXFILELOAD_FROMMEMORY, &lpdxfeo);
+    ok(hr == DXFILE_OK, "IDirectXFile_CreateEnumObject: %x\n", hr);
+    hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
+    ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
+
+    hr = IDirectXFileData_GetName(lpdxfd, NULL, NULL);
+    ok(hr == DXFILEERR_BADVALUE, "IDirectXFileData_GetName: %x\n", hr);
+    hr = IDirectXFileData_GetName(lpdxfd, name, NULL);
+    ok(hr == DXFILEERR_BADVALUE, "IDirectXFileData_GetName: %x\n", hr);
+    hr = IDirectXFileData_GetName(lpdxfd, NULL, &length);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetName: %x\n", hr);
+    ok(length == 7, "Returned length should be 7 instead of %u\n", length);
+    length = sizeof(name);
+    hr = IDirectXFileData_GetName(lpdxfd, name, &length);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetName: %x\n", hr);
+    ok(length == 7, "Returned length should be 7 instead of %u\n", length);
+    ok(!strcmp(name, "Object"), "Returned string should be 'Object' intead of '%s'\n", name);
+    length = 3;
+    hr = IDirectXFileData_GetName(lpdxfd, name, &length);
+    ok(hr == DXFILEERR_BADVALUE, "IDirectXFileData_GetName: %x\n", hr);
+
+    ref = IDirectXFileEnumObject_Release(lpdxfeo);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    ref = IDirectXFileData_Release(lpdxfd);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+
+    /* Check object without name */
+    dxflm.lpMemory = &object_noname;
+    dxflm.dSize = sizeof(object_noname) - 1;
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, &dxflm, DXFILELOAD_FROMMEMORY, &lpdxfeo);
+    ok(hr == DXFILE_OK, "IDirectXFile_CreateEnumObject: %x\n", hr);
+    hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
+    ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
+
+    hr = IDirectXFileData_GetName(lpdxfd, NULL, &length);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetName: %x\n", hr);
+    ok(length == 0, "Returned length should be 0 instead of %u\n", length);
+    length = sizeof(name);
+    hr = IDirectXFileData_GetName(lpdxfd, name, &length);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetName: %x\n", hr);
+    ok(length == 0, "Returned length should be 0 instead of %u\n", length);
+
+    ref = IDirectXFileEnumObject_Release(lpdxfeo);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    ref = IDirectXFileData_Release(lpdxfd);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    ref = IDirectXFile_Release(lpDirectXFile);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+}
+
+static void test_syntax(void)
+{
+    HRESULT hr;
+    ULONG ref;
+    LPDIRECTXFILE lpDirectXFile = NULL;
+    LPDIRECTXFILEENUMOBJECT lpdxfeo;
+    LPDIRECTXFILEDATA lpdxfd;
+    DXFILELOADMEMORY dxflm;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        return;
+    }
+
+    hr = pDirectXFileCreate(&lpDirectXFile);
+    ok(hr == DXFILE_OK, "DirectXFileCreate: %x\n", hr);
+    if (!lpDirectXFile)
+    {
+        skip("Couldn't create DirectXFile interface\n");
+        return;
+    }
+
+    hr = IDirectXFile_RegisterTemplates(lpDirectXFile, template_syntax_empty_array, sizeof(template_syntax_empty_array) - 1);
+    ok(hr == DXFILE_OK, "IDirectXFileImpl_RegisterTemplates: %x\n", hr);
+
+    dxflm.lpMemory = &object_syntax_empty_array_semicolon;
+    dxflm.dSize = sizeof(object_syntax_empty_array_semicolon) - 1;
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, &dxflm, DXFILELOAD_FROMMEMORY, &lpdxfeo);
+    ok(hr == DXFILE_OK, "IDirectXFile_CreateEnumObject: %x\n", hr);
+    hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
+    ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
+
+    ref = IDirectXFileEnumObject_Release(lpdxfeo);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    if (hr == DXFILE_OK)
+    {
+        ref = IDirectXFileData_Release(lpdxfd);
+        ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    }
+
+    dxflm.lpMemory = &object_syntax_empty_array_nosemicolon;
+    dxflm.dSize = sizeof(object_syntax_empty_array_nosemicolon) - 1;
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, &dxflm, DXFILELOAD_FROMMEMORY, &lpdxfeo);
+    ok(hr == DXFILE_OK, "IDirectXFile_CreateEnumObject: %x\n", hr);
+    hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
+    ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
+
+    ref = IDirectXFileEnumObject_Release(lpdxfeo);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    if (hr == DXFILE_OK)
+    {
+        ref = IDirectXFileData_Release(lpdxfd);
+        ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+    }
+
+    ref = IDirectXFile_Release(lpDirectXFile);
+    ok(ref == 0, "Got refcount %d, expected 0\n", ref);
+}
+
 /* Set it to 1 to expand the string when dumping the object. This is useful when there is
  * only one string in a sub-object (very common). Use with care, this may lead to a crash. */
 #define EXPAND_STRING 0
@@ -354,7 +557,7 @@ static void process_data(LPDIRECTXFILEDATA lpDirectXFileData, int* plevel)
     CONST GUID* clsid_type = NULL;
     char str_clsid[40];
     char str_clsid_type[40];
-    DWORD len= 100;
+    DWORD len = 100;
     LPDIRECTXFILEOBJECT pChildObj;
     int i;
     int j = 0;
@@ -433,6 +636,7 @@ static void process_data(LPDIRECTXFILEDATA lpDirectXFileData, int* plevel)
             printf("Found Binary (%d)\n", j);
             IDirectXFileBinary_Release(p3);
         }
+        IDirectXFileObject_Release(pChildObj);
     }
     (*plevel)--;
     ok(hr == DXFILE_OK || hr == DXFILEERR_NOMOREOBJECTS, "IDirectXFileData_GetNextObject: %x\n", hr);
@@ -518,6 +722,8 @@ START_TEST(d3dxof)
     test_CreateEnumObject();
     test_file_types();
     test_compressed_files();
+    test_getname();
+    test_syntax();
     test_dump();
 
     FreeLibrary(hd3dxof);

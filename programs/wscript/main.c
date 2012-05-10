@@ -24,6 +24,7 @@
 #include <winbase.h>
 #include <winreg.h>
 #include <ole2.h>
+#include <shellapi.h>
 #include <activscp.h>
 #include <initguid.h>
 
@@ -36,8 +37,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(wscript);
 
 static const WCHAR wscriptW[] = {'W','S','c','r','i','p','t',0};
 static const WCHAR wshW[] = {'W','S','H',0};
+WCHAR scriptFullName[MAX_PATH];
 
 ITypeInfo *host_ti;
+ITypeInfo *arguments_ti;
 
 static HRESULT WINAPI ActiveScriptSite_QueryInterface(IActiveScriptSite *iface,
                                                       REFIID riid, void **ppv)
@@ -165,6 +168,8 @@ static BOOL load_typelib(void)
         return FALSE;
 
     hres = ITypeLib_GetTypeInfoOfGuid(typelib, &IID_IHost, &host_ti);
+    if(SUCCEEDED(hres))
+        hres = ITypeLib_GetTypeInfoOfGuid(typelib, &IID_IArguments2, &arguments_ti);
 
     ITypeLib_Release(typelib);
     return SUCCEEDED(hres);
@@ -318,6 +323,28 @@ static void run_script(const WCHAR *filename, IActiveScript *script, IActiveScri
         WINE_FIXME("SetScriptState failed: %08x\n", hres);
 }
 
+static BOOL set_host_properties(const WCHAR *prop)
+{
+    static const WCHAR iactive[] = {'i',0};
+    static const WCHAR batch[] = {'b',0};
+
+    if(*prop == '/') {
+        ++prop;
+        if(*prop == '/')
+            ++prop;
+    }
+    else
+        ++prop;
+
+    if(strcmpiW(prop, iactive) == 0)
+        wshInteractive = VARIANT_TRUE;
+    else if(strcmpiW(prop, batch) == 0)
+        wshInteractive = VARIANT_FALSE;
+    else
+        return FALSE;
+    return TRUE;
+}
+
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cmdshow)
 {
     const WCHAR *ext, *filename = NULL;
@@ -326,6 +353,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
     WCHAR **argv;
     CLSID clsid;
     int argc, i;
+    DWORD res;
 
     WINE_TRACE("(%p %p %s %x)\n", hInst, hPrevInst, wine_dbgstr_w(cmdline), cmdshow);
 
@@ -335,9 +363,12 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
 
     for(i=0; i<argc; i++) {
         if(*argv[i] == '/' || *argv[i] == '-') {
-            WINE_FIXME("Unsupported argument %s\n", wine_dbgstr_w(argv[i]));
+            if(!set_host_properties(argv[i]))
+                return 1;
         }else {
             filename = argv[i];
+            argums = argv+i+1;
+            numOfArgs = argc-i-1;
             break;
         }
     }
@@ -346,6 +377,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
         WINE_FIXME("No file name specified\n");
         return 1;
     }
+    res = GetFullPathNameW(filename, sizeof(scriptFullName)/sizeof(WCHAR), scriptFullName, NULL);
+    if(!res || res > sizeof(scriptFullName)/sizeof(WCHAR))
+        return 1;
 
     ext = strchrW(filename, '.');
     if(!ext)

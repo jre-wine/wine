@@ -29,28 +29,12 @@
 
 #include "wine/list.h"
 #include "dxdiag.h"
+#include "resource.h"
 
 /* DXDiag Interfaces: */
 typedef struct IDxDiagProviderImpl  IDxDiagProviderImpl;
 typedef struct IDxDiagContainerImpl IDxDiagContainerImpl;
 typedef struct IDxDiagContainerImpl_Container IDxDiagContainerImpl_Container;
-
-/* ---------------- */
-/* IDxDiagProvider  */
-/* ---------------- */
-
-/*****************************************************************************
- * IDxDiagProvider implementation structure
- */
-struct IDxDiagProviderImpl {
-  /* IUnknown fields */
-  const IDxDiagProviderVtbl *lpVtbl;
-  LONG        ref;
-  /* IDxDiagProvider fields */
-  BOOL        init;
-  DXDIAG_INIT_PARAMS params;
-  IDxDiagContainerImpl_Container *info_root;
-};
 
 /* ---------------- */
 /* IDxDiagContainer  */
@@ -77,30 +61,27 @@ typedef struct IDxDiagContainerImpl_Property {
  * IDxDiagContainer implementation structure
  */
 struct IDxDiagContainerImpl {
-  /* IUnknown fields */
-  const IDxDiagContainerVtbl *lpVtbl;
-  LONG        ref;
-  /* IDxDiagContainer fields */
+  IDxDiagContainer IDxDiagContainer_iface;
+  LONG ref;
   IDxDiagContainerImpl_Container *cont;
   IDxDiagProvider *pProv;
 };
 
-/* IUnknown: */
-extern HRESULT WINAPI IDxDiagContainerImpl_QueryInterface(PDXDIAGCONTAINER iface, REFIID riid, LPVOID *ppobj);
-
 /**
  * factories
  */
-extern HRESULT DXDiag_CreateDXDiagProvider(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
+extern HRESULT DXDiag_CreateDXDiagProvider(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
 
 /** internal factory */
-extern HRESULT DXDiag_CreateDXDiagContainer(REFIID riid, IDxDiagContainerImpl_Container *cont, IDxDiagProvider *pProv, LPVOID *ppobj);
+extern HRESULT DXDiag_CreateDXDiagContainer(REFIID riid, IDxDiagContainerImpl_Container *cont, IDxDiagProvider *pProv, LPVOID *ppobj) DECLSPEC_HIDDEN;
 
 /**********************************************************************
  * Dll lifetime tracking declaration for dxdiagn.dll
  */
-extern LONG DXDIAGN_refCount;
+extern LONG DXDIAGN_refCount DECLSPEC_HIDDEN;
 static inline void DXDIAGN_LockModule(void) { InterlockedIncrement( &DXDIAGN_refCount ); }
 static inline void DXDIAGN_UnlockModule(void) { InterlockedDecrement( &DXDIAGN_refCount ); }
+
+extern HINSTANCE dxdiagn_instance DECLSPEC_HIDDEN;
 
 #endif

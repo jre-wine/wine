@@ -353,7 +353,12 @@ static void test_set_value(void)
     test_hkey_main_Value_A(NULL, string1A, sizeof(string1A));
     test_hkey_main_Value_W(NULL, string1W, sizeof(string1W));
 
-    /* RegSetValueA ignores the size passed in */
+    ret = RegSetValueW(hkey_main, name1W, REG_SZ, string1W, sizeof(string1W));
+    ok(ret == ERROR_SUCCESS, "RegSetValueW failed: %d, GLE=%d\n", ret, GetLastError());
+    test_hkey_main_Value_A(name1A, string1A, sizeof(string1A));
+    test_hkey_main_Value_W(name1W, string1W, sizeof(string1W));
+
+    /* RegSetValueW ignores the size passed in */
     ret = RegSetValueW(hkey_main, NULL, REG_SZ, string1W, 4 * sizeof(string1W[0]));
     ok(ret == ERROR_SUCCESS, "RegSetValueW failed: %d, GLE=%d\n", ret, GetLastError());
     test_hkey_main_Value_A(NULL, string1A, sizeof(string1A));
@@ -845,7 +850,7 @@ static void test_reg_open_key(void)
     /* open same key twice */
     ret = RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Test", &hkResult);
     ok(ret == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %d\n", ret);
-    ok(hkResult != hkPreserve, "epxected hkResult != hkPreserve\n");
+    ok(hkResult != hkPreserve, "expected hkResult != hkPreserve\n");
     ok(hkResult != NULL, "hkResult != NULL\n");
     RegCloseKey(hkResult);
 
@@ -2064,8 +2069,13 @@ static void test_classesroot(void)
         delete_key( hkey );
         RegCloseKey( hkey );
     }
-    if (RegCreateKeyExA( HKEY_CURRENT_USER, "Software\\Classes\\WineTestCls", 0, NULL, 0,
-                         KEY_QUERY_VALUE|KEY_SET_VALUE, NULL, &hkey, NULL )) return;
+    res = RegCreateKeyExA( HKEY_CURRENT_USER, "Software\\Classes\\WineTestCls", 0, NULL, 0,
+                           KEY_QUERY_VALUE|KEY_SET_VALUE, NULL, &hkey, NULL );
+    if (res == ERROR_ACCESS_DENIED)
+    {
+        skip("not enough privileges to add a user class\n");
+        return;
+    }
 
     /* try to open that key in hkcr */
     res = RegOpenKeyExA( HKEY_CLASSES_ROOT, "WineTestCls", 0,
@@ -2075,7 +2085,7 @@ static void test_classesroot(void)
                  "test key not found in hkcr: %d\n", res);
     if (res)
     {
-        trace( "HKCR key merging not supported\n" );
+        skip("HKCR key merging not supported\n");
         delete_key( hkey );
         RegCloseKey( hkey );
         return;

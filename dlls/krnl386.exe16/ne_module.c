@@ -963,8 +963,8 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     NE_MODULE *pModule;
     const IMAGE_DOS_HEADER *descr = NULL;
     const char *file_name = NULL;
-    char dllname[32], *p;
-    const char *basename, *main_module;
+    char dllname[32];
+    const char *basename, *main_module, *p;
 
     /* strip path information */
 
@@ -975,12 +975,14 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
 
     if (strlen(basename) < sizeof(dllname)-6)
     {
-        strcpy( dllname, basename );
-        p = strrchr( dllname, '.' );
-        if (!p) strcat( dllname, ".dll" );
-        for (p = dllname; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
+        char *q;
 
-        strcpy( p, "16" );
+        strcpy( dllname, basename );
+        q = strrchr( dllname, '.' );
+        if (!q) strcat( dllname, ".dll" );
+        for (q = dllname; *q; q++) if (*q >= 'A' && *q <= 'Z') *q += 32;
+
+        strcpy( q, "16" );
         if ((mod32 = LoadLibraryA( dllname )))
         {
             if (!(descr = (void *)GetProcAddress( mod32, "__wine_spec_dos_header" )))
@@ -1400,7 +1402,7 @@ void WINAPI FreeLibrary16( HINSTANCE16 handle )
  */
 HMODULE16 WINAPI GetModuleHandle16( LPCSTR name )
 {
-    HMODULE16	hModule = hFirstModule;
+    HMODULE16	hModule;
     LPSTR	s;
     BYTE	len, *name_table;
     char	tmpstr[MAX_PATH];
@@ -1871,9 +1873,9 @@ static HMODULE16 create_dummy_module( HMODULE module32 )
     HMODULE16 hModule;
     NE_MODULE *pModule;
     SEGTABLEENTRY *pSegment;
-    char *pStr,*s;
+    char *pStr;
     unsigned int len;
-    const char* basename;
+    const char *basename, *s;
     OFSTRUCT *ofs;
     int of_size, size;
     char filename[MAX_PATH];

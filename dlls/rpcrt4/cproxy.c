@@ -37,6 +37,7 @@
 
 #include "cpsf.h"
 #include "ndr_misc.h"
+#include "ndr_stubless.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
@@ -68,47 +69,119 @@ static inline StdProxyImpl *impl_from_proxy_obj( void *iface )
     return CONTAINING_RECORD(iface, StdProxyImpl, PVtbl);
 }
 
-#if defined(__i386__)
-
-#include "pshpack1.h"
-
-struct thunk {
-  BYTE mov_eax;
-  DWORD index;
-  BYTE jmp;
-  LONG handler;
-};
-
-#include "poppack.h"
+#ifdef __i386__
 
 extern void call_stubless_func(void);
 __ASM_GLOBAL_FUNC(call_stubless_func,
-                  "pushl %eax\n\t"  /* method index */
+                  "movl 4(%esp),%ecx\n\t"         /* This pointer */
+                  "movl (%ecx),%ecx\n\t"          /* This->lpVtbl */
+                  "movl -8(%ecx),%ecx\n\t"        /* MIDL_STUBLESS_PROXY_INFO */
+                  "movl 8(%ecx),%edx\n\t"         /* info->FormatStringOffset */
+                  "movzwl (%edx,%eax,2),%edx\n\t" /* FormatStringOffset[index] */
+                  "addl 4(%ecx),%edx\n\t"         /* info->ProcFormatString + offset */
+                  "movzwl 8(%edx),%eax\n\t"       /* arguments size */
+                  "pushl %eax\n\t"
                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                  "pushl %esp\n\t"  /* pointer to index */
+                  "leal 8(%esp),%eax\n\t"         /* &This */
+                  "pushl %eax\n\t"
                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
-                  "call " __ASM_NAME("ObjectStubless") __ASM_STDCALL(4) "\n\t"
-                  __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
-                  "popl %edx\n\t"  /* args size */
+                  "pushl %edx\n\t"                /* format string */
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  "pushl (%ecx)\n\t"              /* info->pStubDesc */
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  "call " __ASM_NAME("ndr_client_call") "\n\t"
+                  "leal 12(%esp),%esp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset -12\n\t")
+                  "popl %edx\n\t"                 /* arguments size */
                   __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
                   "movl (%esp),%ecx\n\t"  /* return address */
                   "addl %edx,%esp\n\t"
                   "jmp *%ecx" );
 
-HRESULT WINAPI ObjectStubless(DWORD *args)
+#include "pshpack1.h"
+struct thunk
 {
-    DWORD index = args[0];
-    void **iface = (void **)args[2];
-    const void **vtbl = (const void **)*iface;
-    const MIDL_STUBLESS_PROXY_INFO *stubless = *(const MIDL_STUBLESS_PROXY_INFO **)(vtbl - 2);
-    const PFORMAT_STRING fs = stubless->ProcFormatString + stubless->FormatStringOffset[index];
+  BYTE mov_eax;
+  DWORD index;
+  BYTE jmp;
+  LONG handler;
+};
+#include "poppack.h"
 
-    /* store bytes to remove from stack */
-    args[0] = *(const WORD*)(fs + 8);
-    TRACE("(%p)->(%d)([%d bytes]) ret=%08x\n", iface, index, args[0], args[1]);
-
-    return NdrClientCall2(stubless->pStubDesc, fs, args + 2);
+static inline void init_thunk( struct thunk *thunk, unsigned int index )
+{
+    thunk->mov_eax = 0xb8; /* movl $n,%eax */
+    thunk->index   = index;
+    thunk->jmp     = 0xe9; /* jmp */
+    thunk->handler = (char *)call_stubless_func - (char *)(&thunk->handler + 1);
 }
+
+#elif defined(__x86_64__)
+
+extern void call_stubless_func(void);
+__ASM_GLOBAL_FUNC(call_stubless_func,
+                  "movq %rcx,0x8(%rsp)\n\t"
+                  "movq %rdx,0x10(%rsp)\n\t"
+                  "movq %r8,0x18(%rsp)\n\t"
+                  "movq %r9,0x20(%rsp)\n\t"
+                  "leaq 0x8(%rsp),%r8\n\t"        /* &This */
+                  "movq (%rcx),%rcx\n\t"          /* This->lpVtbl */
+                  "movq -0x10(%rcx),%rcx\n\t"     /* MIDL_STUBLESS_PROXY_INFO */
+                  "movq 0x10(%rcx),%rdx\n\t"      /* info->FormatStringOffset */
+                  "movzwq (%rdx,%r10,2),%rdx\n\t" /* FormatStringOffset[index] */
+                  "addq 8(%rcx),%rdx\n\t"         /* info->ProcFormatString + offset */
+                  "movq (%rcx),%rcx\n\t"          /* info->pStubDesc */
+                  "subq $0x38,%rsp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset 0x38\n\t")
+                  "movq %xmm1,0x20(%rsp)\n\t"
+                  "movq %xmm2,0x28(%rsp)\n\t"
+                  "movq %xmm3,0x30(%rsp)\n\t"
+                  "leaq 0x18(%rsp),%r9\n\t"       /* fpu_args */
+                  "call " __ASM_NAME("ndr_client_call") "\n\t"
+                  "addq $0x38,%rsp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset -0x38\n\t")
+                  "ret" );
+
+#include "pshpack1.h"
+struct thunk
+{
+    BYTE mov_r10[3];
+    DWORD index;
+    BYTE mov_rax[2];
+    void *call_stubless;
+    BYTE jmp_rax[2];
+};
+#include "poppack.h"
+
+static const struct thunk thunk_template =
+{
+    { 0x49, 0xc7, 0xc2 }, 0,  /* movq $index,%r10 */
+    { 0x48, 0xb8 }, 0,        /* movq $call_stubless_func,%rax */
+    { 0xff, 0xe0 }            /* jmp *%rax */
+};
+
+static inline void init_thunk( struct thunk *thunk, unsigned int index )
+{
+    *thunk = thunk_template;
+    thunk->index = index;
+    thunk->call_stubless = call_stubless_func;
+}
+
+#else  /* __i386__ */
+
+#warning You must implement stubless proxies for your CPU
+
+struct thunk
+{
+  DWORD index;
+};
+
+static inline void init_thunk( struct thunk *thunk, unsigned int index )
+{
+    thunk->index = index;
+}
+
+#endif  /* __i386__ */
 
 #define BLOCK_SIZE 1024
 #define MAX_BLOCKS 64  /* 64k methods should be enough for anybody */
@@ -124,13 +197,7 @@ static const struct thunk *allocate_block( unsigned int num )
                           MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE );
     if (!block) return NULL;
 
-    for (i = 0; i < BLOCK_SIZE; i++)
-    {
-        block[i].mov_eax = 0xb8; /* movl $n,%eax */
-        block[i].index   = BLOCK_SIZE * num + i + 3;
-        block[i].jmp     = 0xe9; /* jmp */
-        block[i].handler = (char *)call_stubless_func - (char *)(&block[i].handler + 1);
-    }
+    for (i = 0; i < BLOCK_SIZE; i++) init_thunk( &block[i], BLOCK_SIZE * num + i + 3 );
     VirtualProtect( block, BLOCK_SIZE * sizeof(*block), PAGE_EXECUTE_READ, NULL );
     prev = InterlockedCompareExchangePointer( (void **)&method_blocks[num], block, NULL );
     if (prev) /* someone beat us to it */
@@ -160,16 +227,6 @@ static BOOL fill_stubless_table( IUnknownVtbl *vtbl, DWORD num )
     }
     return TRUE;
 }
-
-#else  /* __i386__ */
-
-static BOOL fill_stubless_table( IUnknownVtbl *vtbl, DWORD num )
-{
-    ERR("stubless proxies are not supported on this architecture\n");
-    return FALSE;
-}
-
-#endif  /* __i386__ */
 
 HRESULT StdProxy_Construct(REFIID riid,
                            LPUNKNOWN pUnkOuter,

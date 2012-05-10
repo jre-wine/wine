@@ -34,8 +34,8 @@ UINT g_uiDefaultCharset;
 const COLORREF WCUSER_ColorMap[16] =
 {
     RGB(0x00, 0x00, 0x00), RGB(0x00, 0x00, 0x80), RGB(0x00, 0x80, 0x00), RGB(0x00, 0x80, 0x80),
-    RGB(0x80, 0x00, 0x00), RGB(0x80, 0x00, 0x80), RGB(0x80, 0x80, 0x00), RGB(0x80, 0x80, 0x80),
-    RGB(0xC0, 0xC0, 0xC0), RGB(0x00, 0x00, 0xFF), RGB(0x00, 0xFF, 0x00), RGB(0x00, 0xFF, 0xFF),
+    RGB(0x80, 0x00, 0x00), RGB(0x80, 0x00, 0x80), RGB(0x80, 0x80, 0x00), RGB(0xC0, 0xC0, 0xC0),
+    RGB(0x80, 0x80, 0x80), RGB(0x00, 0x00, 0xFF), RGB(0x00, 0xFF, 0x00), RGB(0x00, 0xFF, 0xFF),
     RGB(0xFF, 0x00, 0x00), RGB(0xFF, 0x00, 0xFF), RGB(0xFF, 0xFF, 0x00), RGB(0xFF, 0xFF, 0xFF),
 };
 
@@ -447,7 +447,7 @@ HFONT WCUSER_CopyFont(struct config_data* config, HWND hWnd, const LOGFONTW* lf,
      *  - the width of all characters in the font
      * This isn't true in Wine. As a temporary workaround, we get as the width of the
      * cell, the width of the first character in the font, after checking that all
-     * characters in the font have the same width (I hear paranoïa coming)
+     * characters in the font have the same width (I hear paranoia coming)
      * when this gets fixed, the code should be using tm.tmAveCharWidth
      * or tm.tmMaxCharWidth as the cell width.
      */
@@ -1368,13 +1368,12 @@ static int WCUSER_MainLoop(struct inner_data* data)
     MSG		msg;
 
     ShowWindow(data->hWnd, data->nCmdShow);
-    for (;;)
+    while (!data->dying || !data->curcfg.exit_on_die)
     {
 	switch (MsgWaitForMultipleObjects(1, &data->hSynchro, FALSE, INFINITE, QS_ALLINPUT))
 	{
 	case WAIT_OBJECT_0:
-	    if (!WINECON_GrabChanges(data) && data->curcfg.exit_on_die)
-                PostQuitMessage(0);
+	    WINECON_GrabChanges(data);
 	    break;
 	case WAIT_OBJECT_0+1:
             /* need to use PeekMessageW loop instead of simple GetMessage:
@@ -1393,6 +1392,8 @@ static int WCUSER_MainLoop(struct inner_data* data)
 	    break;
 	}
     }
+    PostQuitMessage(0);
+    return 0;
 }
 
 /******************************************************************

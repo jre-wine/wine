@@ -68,6 +68,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 
 #define SWP_AGG_NOPOSCHANGE (SWP_NOSIZE | SWP_NOMOVE | SWP_NOCLIENTSIZE | SWP_NOCLIENTMOVE | SWP_NOZORDER)
 
+/* is cursor clipping active? */
+int clipping_cursor = 0;
+
 /* X context to associate a hwnd to an X window */
 XContext winContext = 0;
 
@@ -82,6 +85,7 @@ static const char foreign_window_prop[] = "__wine_x11_foreign_window";
 static const char whole_window_prop[] = "__wine_x11_whole_window";
 static const char client_window_prop[]= "__wine_x11_client_window";
 static const char icon_window_prop[]  = "__wine_x11_icon_window";
+static const char clip_window_prop[]  = "__wine_x11_clip_window";
 static const char fbconfig_id_prop[]  = "__wine_x11_fbconfig_id";
 static const char gl_drawable_prop[]  = "__wine_x11_gl_drawable";
 static const char pixmap_prop[]       = "__wine_x11_pixmap";
@@ -155,12 +159,15 @@ struct has_popup_result
     BOOL found;
 };
 
-static BOOL CALLBACK has_popup( HWND hwnd, LPARAM lparam )
+static BOOL CALLBACK has_managed_popup( HWND hwnd, LPARAM lparam )
 {
     struct has_popup_result *result = (struct has_popup_result *)lparam;
+    struct x11drv_win_data *data;
 
     if (hwnd == result->hwnd) return FALSE;  /* popups are always above owner */
-    result->found = (GetWindow( hwnd, GW_OWNER ) == result->hwnd);
+    if (!(data = X11DRV_get_win_data( hwnd ))) return TRUE;
+    if (GetWindow( hwnd, GW_OWNER ) != result->hwnd) return TRUE;
+    result->found = data->managed;
     return !result->found;
 }
 
@@ -170,7 +177,7 @@ static BOOL has_owned_popups( HWND hwnd )
 
     result.hwnd = hwnd;
     result.found = FALSE;
-    EnumWindows( has_popup, (LPARAM)&result );
+    EnumWindows( has_managed_popup, (LPARAM)&result );
     return result.found;
 }
 
@@ -221,24 +228,6 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
 
 
 /***********************************************************************
- *		is_window_rect_mapped
- *
- * Check if the X whole window should be mapped based on its rectangle
- */
-static BOOL is_window_rect_mapped( const RECT *rect )
-{
-    /* don't map if rect is off-screen */
-    if (rect->left >= virtual_screen_rect.right ||
-        rect->top >= virtual_screen_rect.bottom ||
-        rect->right <= virtual_screen_rect.left ||
-        rect->bottom <= virtual_screen_rect.top)
-        return FALSE;
-
-    return TRUE;
-}
-
-
-/***********************************************************************
  *		is_window_resizable
  *
  * Check if window should be made resizable by the window manager
@@ -247,8 +236,7 @@ static inline BOOL is_window_resizable( struct x11drv_win_data *data, DWORD styl
 {
     if (style & WS_THICKFRAME) return TRUE;
     /* Metacity needs the window to be resizable to make it fullscreen */
-    return (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
-            data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height);
+    return is_window_rect_fullscreen( &data->whole_rect );
 }
 
 
@@ -603,7 +591,7 @@ static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
         XInstallColormap(gdi_display, attrib.colormap);
 
         if(data->gl_drawable) XDestroyWindow(gdi_display, data->gl_drawable);
-        data->gl_drawable = XCreateWindow(gdi_display, dummy_parent, -w, 0, w, h, 0,
+        data->gl_drawable = XCreateWindow(gdi_display, dummy_parent, 0, 0, w, h, 0,
                                           vis->depth, InputOutput, vis->visual,
                                           CWColormap | CWOverrideRedirect,
                                           &attrib);
@@ -681,7 +669,7 @@ static void sync_gl_drawable(struct x11drv_win_data *data)
     if(usexcomposite)
     {
         wine_tsx11_lock();
-        XMoveResizeWindow(gdi_display, data->gl_drawable, -w, 0, w, h);
+        XMoveResizeWindow(gdi_display, data->gl_drawable, 0, 0, w, h);
         wine_tsx11_unlock();
         return;
     }
@@ -997,6 +985,7 @@ static void set_size_hints( Display *display, struct x11drv_win_data *data, DWOR
             size_hints->y = data->whole_rect.top;
             size_hints->flags |= PPosition;
         }
+        else size_hints->win_gravity = NorthWestGravity;
 
         if (!is_window_resizable( data, style ))
         {
@@ -1011,6 +1000,41 @@ static void set_size_hints( Display *display, struct x11drv_win_data *data, DWOR
     }
     XSetWMNormalHints( display, data->whole_window, size_hints );
     XFree( size_hints );
+}
+
+
+/***********************************************************************
+ *              set_mwm_hints
+ */
+static void set_mwm_hints( Display *display, struct x11drv_win_data *data, DWORD style, DWORD ex_style )
+{
+    MwmHints mwm_hints;
+
+    if (data->hwnd == GetDesktopWindow())
+    {
+        mwm_hints.decorations = MWM_DECOR_TITLE | MWM_DECOR_BORDER | MWM_DECOR_MENU | MWM_DECOR_MINIMIZE;
+        mwm_hints.functions   = MWM_FUNC_MOVE | MWM_FUNC_MINIMIZE | MWM_FUNC_CLOSE;
+    }
+    else
+    {
+        mwm_hints.decorations = get_mwm_decorations( data, style, ex_style );
+        mwm_hints.functions = MWM_FUNC_MOVE;
+        if (is_window_resizable( data, style )) mwm_hints.functions |= MWM_FUNC_RESIZE;
+        if (!(style & WS_DISABLED))
+        {
+            if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
+            if (style & WS_MAXIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MAXIMIZE;
+            if (style & WS_SYSMENU)     mwm_hints.functions |= MWM_FUNC_CLOSE;
+        }
+    }
+
+    TRACE( "%p setting mwm hints to %lx,%lx (style %x exstyle %x)\n",
+           data->hwnd, mwm_hints.decorations, mwm_hints.functions, style, ex_style );
+
+    mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
+    XChangeProperty( display, data->whole_window, x11drv_atom(_MOTIF_WM_HINTS),
+                     x11drv_atom(_MOTIF_WM_HINTS), 32, PropModeReplace,
+                     (unsigned char*)&mwm_hints, sizeof(mwm_hints)/sizeof(long) );
 }
 
 
@@ -1143,7 +1167,6 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
     Window group_leader = data->whole_window;
     Window owner_win = 0;
     Atom window_type;
-    MwmHints mwm_hints;
     DWORD style, ex_style;
     HWND owner;
 
@@ -1168,35 +1191,17 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
 
     /* size hints */
     set_size_hints( display, data, style );
+    set_mwm_hints( display, data, style, ex_style );
 
-    /* set the WM_WINDOW_TYPE */
-    if (style & WS_THICKFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
-    else if (ex_style & WS_EX_APPWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
-    else if (style & WS_MINIMIZEBOX) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
-    else if (style & WS_DLGFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
-    else if (ex_style & WS_EX_DLGMODALFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
-    /* many window managers don't handle utility windows very well, so we don't use TYPE_UTILITY here */
-    else if (ex_style & WS_EX_TOOLWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
-    else if ((style & WS_POPUP) && owner) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
+    /* Only use dialog type for owned popups. Metacity allows making fullscreen
+     * only normal windows, and doesn't handle correctly TRANSIENT_FOR hint for
+     * dialogs owned by fullscreen windows.
+     */
+    if (((style & WS_POPUP) || (ex_style & WS_EX_DLGMODALFRAME)) && owner) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
     else window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
 
     XChangeProperty(display, data->whole_window, x11drv_atom(_NET_WM_WINDOW_TYPE),
 		    XA_ATOM, 32, PropModeReplace, (unsigned char*)&window_type, 1);
-
-    mwm_hints.flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS;
-    mwm_hints.decorations = get_mwm_decorations( data, style, ex_style );
-    mwm_hints.functions = MWM_FUNC_MOVE;
-    if (is_window_resizable( data, style )) mwm_hints.functions |= MWM_FUNC_RESIZE;
-    if (!(style & WS_DISABLED))
-    {
-        if (style & WS_MINIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MINIMIZE;
-        if (style & WS_MAXIMIZEBOX) mwm_hints.functions |= MWM_FUNC_MAXIMIZE;
-        if (style & WS_SYSMENU)     mwm_hints.functions |= MWM_FUNC_CLOSE;
-    }
-
-    XChangeProperty( display, data->whole_window, x11drv_atom(_MOTIF_WM_HINTS),
-                     x11drv_atom(_MOTIF_WM_HINTS), 32, PropModeReplace,
-                     (unsigned char*)&mwm_hints, sizeof(mwm_hints)/sizeof(long) );
 
     /* wm hints */
     if (data->wm_hints)
@@ -1209,6 +1214,24 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
     }
 
     wine_tsx11_unlock();
+}
+
+
+/***********************************************************************
+ *     init_clip_window
+ */
+Window init_clip_window(void)
+{
+    struct x11drv_thread_data *data = x11drv_init_thread_data();
+
+    if (!data->clip_window &&
+        (data->clip_window = (Window)GetPropA( GetDesktopWindow(), clip_window_prop )))
+    {
+        wine_tsx11_lock();
+        XSelectInput( data->display, data->clip_window, StructureNotifyMask );
+        wine_tsx11_unlock();
+    }
+    return data->clip_window;
 }
 
 
@@ -1253,8 +1276,7 @@ void update_net_wm_states( Display *display, struct x11drv_win_data *data )
     if (data->whole_window == root_window) return;
 
     style = GetWindowLongW( data->hwnd, GWL_STYLE );
-    if (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
-        data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height)
+    if (is_window_rect_fullscreen( &data->whole_rect ))
     {
         if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION)
             new_state |= (1 << NET_WM_STATE_MAXIMIZED);
@@ -1469,6 +1491,7 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
                                   const RECT *old_whole_rect, const RECT *old_client_rect )
 {
     DWORD style = GetWindowLongW( data->hwnd, GWL_STYLE );
+    DWORD ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
     XWindowChanges changes;
     unsigned int mask = 0;
 
@@ -1511,9 +1534,11 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
 
     wine_tsx11_lock();
     set_size_hints( display, data, style );
+    set_mwm_hints( display, data, style, ex_style );
     data->configure_serial = NextRequest( display );
     XReconfigureWMWindow( display, data->whole_window,
                           DefaultScreen(display), mask, &changes );
+    wine_tsx11_unlock();
 #ifdef HAVE_LIBXSHAPE
     if (IsRectEmpty( old_window_rect ) != IsRectEmpty( &data->window_rect ))
         sync_window_region( display, data, (HRGN)1 );
@@ -1524,11 +1549,14 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
         int new_x_offset = data->window_rect.left - data->whole_rect.left;
         int new_y_offset = data->window_rect.top - data->whole_rect.top;
         if (old_x_offset != new_x_offset || old_y_offset != new_y_offset)
+        {
+            wine_tsx11_lock();
             XShapeOffsetShape( display, data->whole_window, ShapeBounding,
                                new_x_offset - old_x_offset, new_y_offset - old_y_offset );
+            wine_tsx11_unlock();
+        }
     }
 #endif
-    wine_tsx11_unlock();
 
     TRACE( "win %p/%lx pos %d,%d,%dx%d after %lx changes=%x serial=%lu\n",
            data->hwnd, data->whole_window, data->whole_rect.left, data->whole_rect.top,
@@ -1716,14 +1744,13 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     if (!GetLayeredWindowAttributes( data->hwnd, &key, &alpha, &layered_flags )) layered_flags = 0;
     sync_window_opacity( display, data->whole_window, key, alpha, layered_flags );
 
+    init_clip_window();  /* make sure the clip window is initialized in this thread */
+
     wine_tsx11_lock();
     XFlush( display );  /* make sure the window exists before we start painting to it */
     wine_tsx11_unlock();
 
-    sync_window_cursor( data );
-    /* setting the cursor can fail if the window isn't created yet */
-    /* so make sure that we try again once we receive a mouse event */
-    data->cursor = (HANDLE)~0u;
+    sync_window_cursor( data->whole_window );
 
 done:
     if (win_rgn) DeleteObject( win_rgn );
@@ -1972,12 +1999,26 @@ BOOL CDECL X11DRV_CreateDesktopWindow( HWND hwnd )
  */
 BOOL CDECL X11DRV_CreateWindow( HWND hwnd )
 {
-    if (hwnd == GetDesktopWindow() && root_window != DefaultRootWindow( gdi_display ))
+    if (hwnd == GetDesktopWindow())
     {
-        Display *display = thread_init_display();
+        struct x11drv_thread_data *data = x11drv_init_thread_data();
+        XSetWindowAttributes attr;
 
-        /* the desktop win data can't be created lazily */
-        if (!create_desktop_win_data( display, hwnd )) return FALSE;
+        if (root_window != DefaultRootWindow( gdi_display ))
+        {
+            /* the desktop win data can't be created lazily */
+            if (!create_desktop_win_data( data->display, hwnd )) return FALSE;
+        }
+
+        /* create the cursor clipping window */
+        attr.override_redirect = TRUE;
+        attr.event_mask = StructureNotifyMask | FocusChangeMask;
+        wine_tsx11_lock();
+        data->clip_window = XCreateWindow( data->display, root_window, 0, 0, 1, 1, 0, 0,
+                                           InputOnly, visual, CWOverrideRedirect | CWEventMask, &attr );
+        XFlush( data->display );
+        wine_tsx11_unlock();
+        SetPropA( hwnd, clip_window_prop, (HANDLE)data->clip_window );
     }
     return TRUE;
 }
@@ -2232,10 +2273,7 @@ void CDECL X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
     escape.dc_rect.top          = win_rect->top - top_rect->top;
     escape.dc_rect.right        = win_rect->right - top_rect->left;
     escape.dc_rect.bottom       = win_rect->bottom - top_rect->top;
-    escape.drawable_rect.left   = top_rect->left;
-    escape.drawable_rect.top    = top_rect->top;
-    escape.drawable_rect.right  = top_rect->right;
-    escape.drawable_rect.bottom = top_rect->bottom;
+    escape.drawable_rect        = *top_rect;
 
     if (top == hwnd)
     {
@@ -2250,6 +2288,9 @@ void CDECL X11DRV_GetDC( HDC hdc, HWND hwnd, HWND top, const RECT *win_rect,
             escape.drawable = data ? data->whole_window : X11DRV_get_whole_window( hwnd );
         else
             escape.drawable = escape.gl_drawable;
+
+        /* special case: when repainting the root window, clip out top-level windows */
+        if (data && data->whole_window == root_window) escape.mode = ClipByChildren;
     }
     else
     {
@@ -2501,9 +2542,12 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
     if (data->mapped && event_type != ReparentNotify)
     {
         if (((swp_flags & SWP_HIDEWINDOW) && !(new_style & WS_VISIBLE)) ||
-            (event_type != ConfigureNotify &&
+            (!event_type &&
              !is_window_rect_mapped( rectWindow ) && is_window_rect_mapped( &old_window_rect )))
+        {
             unmap_window( display, data );
+            if (is_window_rect_fullscreen( &old_window_rect )) reset_clipping_window();
+        }
     }
 
     /* don't change position if we are about to minimize or maximize a managed window */
@@ -2683,8 +2727,13 @@ LRESULT CDECL X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
         X11DRV_resize_desktop( LOWORD(lp), HIWORD(lp) );
         return 0;
     case WM_X11DRV_SET_CURSOR:
-        if ((data = X11DRV_get_win_data( hwnd ))) set_window_cursor( data, (HCURSOR)lp );
+        if ((data = X11DRV_get_win_data( hwnd )) && data->whole_window)
+            set_window_cursor( data->whole_window, (HCURSOR)lp );
+        else if (hwnd == x11drv_thread_data()->clip_hwnd)
+            set_window_cursor( x11drv_thread_data()->clip_window, (HCURSOR)lp );
         return 0;
+    case WM_X11DRV_CLIP_CURSOR:
+        return clip_cursor_notify( hwnd, (HWND)lp );
     default:
         FIXME( "got window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp );
         return 0;
@@ -2731,9 +2780,7 @@ static BOOL is_netwm_supported( Display *display, Atom atom )
 LRESULT CDECL X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
 {
     WPARAM hittest = wparam & 0x0f;
-    DWORD dwPoint;
-    int x, y, dir;
-    XEvent xev;
+    int dir;
     Display *display = thread_display();
     struct x11drv_win_data *data;
 
@@ -2785,30 +2832,6 @@ LRESULT CDECL X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
         return -1;
     }
 
-    dwPoint = GetMessagePos();
-    x = (short)LOWORD(dwPoint);
-    y = (short)HIWORD(dwPoint);
-
-    TRACE("hwnd %p, x %d, y %d, dir %d\n", hwnd, x, y, dir);
-
-    xev.xclient.type = ClientMessage;
-    xev.xclient.window = X11DRV_get_whole_window(hwnd);
-    xev.xclient.message_type = x11drv_atom(_NET_WM_MOVERESIZE);
-    xev.xclient.serial = 0;
-    xev.xclient.display = display;
-    xev.xclient.send_event = True;
-    xev.xclient.format = 32;
-    xev.xclient.data.l[0] = x - virtual_screen_rect.left; /* x coord */
-    xev.xclient.data.l[1] = y - virtual_screen_rect.top;  /* y coord */
-    xev.xclient.data.l[2] = dir; /* direction */
-    xev.xclient.data.l[3] = 1; /* button */
-    xev.xclient.data.l[4] = 0; /* unused */
-
-    /* need to ungrab the pointer that may have been automatically grabbed
-     * with a ButtonPress event */
-    wine_tsx11_lock();
-    XUngrabPointer( display, CurrentTime );
-    XSendEvent(display, root_window, False, SubstructureNotifyMask | SubstructureRedirectMask, &xev);
-    wine_tsx11_unlock();
+    move_resize_window( display, data, dir );
     return 0;
 }

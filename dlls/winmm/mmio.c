@@ -380,8 +380,8 @@ static FOURCC MMIO_ParseExtA(LPCSTR szFileName)
     FOURCC ret = 0;
 
     /* Note that ext{Start,End} point to the . and + respectively */
-    LPSTR extEnd;
-    LPSTR extStart;
+    LPCSTR extEnd;
+    LPCSTR extStart;
 
     CHAR ext[5];
 
@@ -679,6 +679,8 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
     if (refmminfo->wErrorRet == 0)
 	return wm->info.hmmio;
  error1:
+    if (wm->info.dwFlags & MMIO_ALLOCBUF)
+        HeapFree(GetProcessHeap(), 0, wm->info.pchBuffer);
     if (wm->ioProc) wm->ioProc->count--;
  error2:
     MMIO_Destroy(wm);

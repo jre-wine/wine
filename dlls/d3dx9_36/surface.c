@@ -59,12 +59,8 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(LPCVOID data, UINT datasize, D3D
     IWICStream *stream;
     HRESULT hr;
     HRESULT initresult;
-    static int warn_once;
 
-    if (!warn_once++)
-        FIXME("(%p, %d, %p): partially implemented\n", data, datasize, info);
-
-    /* TODO: Add support for (or at least detect) TGA, DDS, PPM and DIB */
+    TRACE("(%p, %d, %p)\n", data, datasize, info);
 
     if (!data || !datasize)
         return D3DERR_INVALIDCALL;
@@ -82,6 +78,19 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(LPCVOID data, UINT datasize, D3D
         hr = IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL, 0, &decoder);
         IStream_Release(stream);
         IWICImagingFactory_Release(factory);
+    }
+
+    if (FAILED(hr)) {
+        if ((datasize >= 4) && !strncmp(data, "DDS ", 4))
+            FIXME("File type DDS is not supported yet\n");
+        else if ((datasize >= 2) && (!strncmp(data, "P3", 2) || !strncmp(data, "P6", 2)))
+            FIXME("File type PPM is not supported yet\n");
+        else if ((datasize >= 2) && !strncmp(data, "BM", 2))
+            FIXME("File type DIB is not supported yet\n");
+        else if ((datasize >= 10) && !strncmp(data, "#?RADIANCE", 10))
+            FIXME("File type HDR is not supported yet\n");
+        else if ((datasize >= 2) && (!strncmp(data, "PF", 2) || !strncmp(data, "Pf", 2)))
+            FIXME("File type PFM is not supported yet\n");
     }
 
     if (SUCCEEDED(hr)) {
@@ -163,8 +172,7 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(LPCVOID data, UINT datasize, D3D
         CoUninitialize();
 
     if (FAILED(hr)) {
-        /* Missing formats are not detected yet and will fail silently without the FIXME */
-        FIXME("Invalid or unsupported image file\n");
+        TRACE("Invalid or unsupported image file\n");
         return D3DXERR_INVALIDDATA;
     }
 
@@ -328,7 +336,7 @@ HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(LPDIRECT3DSURFACE9 pDestSurface,
     TRACE("(%p, %p, %p, %p, %d, %p, %d, %x, %p)\n", pDestSurface, pDestPalette, pDestRect, pSrcData,
         SrcDataSize, pSrcRect, dwFilter, Colorkey, pSrcInfo);
 
-    if (!pDestSurface || !pSrcData | !SrcDataSize)
+    if (!pDestSurface || !pSrcData || !SrcDataSize)
         return D3DERR_INVALIDCALL;
 
     hr = D3DXGetImageInfoFromFileInMemory(pSrcData, SrcDataSize, &imginfo);
@@ -702,13 +710,11 @@ static void copy_simple_data(CONST BYTE *src, UINT srcpitch, POINT srcsize,
 
         for(x = 0;x < minwidth;x++) {
             /* extract source color components */
-            if(srcformat->type == FORMAT_ARGB) {
-                pixel = dword_from_bytes(srcptr, srcformat->bytes_per_pixel);
-                get_relevant_argb_components(&conv_info, pixel, channels);
-            }
+            pixel = dword_from_bytes(srcptr, srcformat->bytes_per_pixel);
+            get_relevant_argb_components(&conv_info, pixel, channels);
 
             /* recombine the components */
-            if(destformat->type == FORMAT_ARGB) val = make_argb_color(&conv_info, channels);
+            val = make_argb_color(&conv_info, channels);
 
             if(colorkey) {
                 get_relevant_argb_components(&ck_conv_info, pixel, channels);
@@ -769,13 +775,11 @@ static void point_filter_simple_data(CONST BYTE *src, UINT srcpitch, POINT srcsi
             DWORD val = 0;
 
             /* extract source color components */
-            if(srcformat->type == FORMAT_ARGB) {
-                pixel = dword_from_bytes(srcptr, srcformat->bytes_per_pixel);
-                get_relevant_argb_components(&conv_info, pixel, channels);
-            }
+            pixel = dword_from_bytes(srcptr, srcformat->bytes_per_pixel);
+            get_relevant_argb_components(&conv_info, pixel, channels);
 
             /* recombine the components */
-            if(destformat->type == FORMAT_ARGB) val = make_argb_color(&conv_info, channels);
+            val = make_argb_color(&conv_info, channels);
 
             if(colorkey) {
                 get_relevant_argb_components(&ck_conv_info, pixel, channels);
@@ -942,4 +946,19 @@ HRESULT WINAPI D3DXLoadSurfaceFromSurface(LPDIRECT3DSURFACE9 pDestSurface,
 
     IDirect3DSurface9_UnlockRect(pSrcSurface);
     return hr;
+}
+
+
+HRESULT WINAPI D3DXSaveSurfaceToFileA(LPCSTR pDestFile, D3DXIMAGE_FILEFORMAT DestFormat,
+        LPDIRECT3DSURFACE9 pSrcSurface, const PALETTEENTRY* pSrcPalette, const RECT* pSrcRect)
+{
+    FIXME("(%p, %d, %p, %p, %p): stub\n", pDestFile, DestFormat, pSrcSurface, pSrcPalette, pSrcRect);
+    return D3DERR_INVALIDCALL;
+}
+
+HRESULT WINAPI D3DXSaveSurfaceToFileW(LPCWSTR pDestFile, D3DXIMAGE_FILEFORMAT DestFormat,
+        LPDIRECT3DSURFACE9 pSrcSurface, const PALETTEENTRY* pSrcPalette, const RECT* pSrcRect)
+{
+    FIXME("(%p, %d, %p, %p, %p): stub\n", pDestFile, DestFormat, pSrcSurface, pSrcPalette, pSrcRect);
+    return D3DERR_INVALIDCALL;
 }

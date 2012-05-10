@@ -22,6 +22,8 @@ struct HTMLStyle {
     IHTMLStyle2 IHTMLStyle2_iface;
     IHTMLStyle3 IHTMLStyle3_iface;
     IHTMLStyle4 IHTMLStyle4_iface;
+    IHTMLStyle5 IHTMLStyle5_iface;
+    IHTMLStyle6 IHTMLStyle6_iface;
 
     LONG ref;
 
@@ -59,8 +61,10 @@ typedef enum {
     STYLEID_BORDER_TOP_WIDTH,
     STYLEID_BORDER_WIDTH,
     STYLEID_BOTTOM,
+    STYLEID_CLIP,
     STYLEID_COLOR,
     STYLEID_CURSOR,
+    STYLEID_DIRECTION,
     STYLEID_DISPLAY,
     STYLEID_FILTER,
     STYLEID_FONT_FAMILY,
@@ -84,6 +88,8 @@ typedef enum {
     STYLEID_PADDING_LEFT,
     STYLEID_PADDING_RIGHT,
     STYLEID_PADDING_TOP,
+    STYLEID_PAGE_BREAK_AFTER,
+    STYLEID_PAGE_BREAK_BEFORE,
     STYLEID_POSITION,
     STYLEID_RIGHT,
     STYLEID_TEXT_ALIGN,
@@ -98,16 +104,17 @@ typedef enum {
     STYLEID_Z_INDEX
 } styleid_t;
 
-void HTMLStyle2_Init(HTMLStyle*);
-void HTMLStyle3_Init(HTMLStyle*);
+void HTMLStyle2_Init(HTMLStyle*) DECLSPEC_HIDDEN;
+void HTMLStyle3_Init(HTMLStyle*) DECLSPEC_HIDDEN;
 
-HRESULT get_nsstyle_attr(nsIDOMCSSStyleDeclaration*,styleid_t,BSTR*);
-HRESULT set_nsstyle_attr(nsIDOMCSSStyleDeclaration*,styleid_t,LPCWSTR,DWORD);
+HRESULT get_nsstyle_attr(nsIDOMCSSStyleDeclaration*,styleid_t,BSTR*,DWORD) DECLSPEC_HIDDEN;
+HRESULT set_nsstyle_attr(nsIDOMCSSStyleDeclaration*,styleid_t,LPCWSTR,DWORD) DECLSPEC_HIDDEN;
 
-HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *value, DWORD flags);
-HRESULT get_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *p, DWORD flags);
+HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *value, DWORD flags) DECLSPEC_HIDDEN;
+HRESULT get_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, VARIANT *p, DWORD flags) DECLSPEC_HIDDEN;
 
-#define ATTR_FIX_PX      1
-#define ATTR_FIX_URL     2
-#define ATTR_STR_TO_INT  4
-#define ATTR_HEX_INT     8
+#define ATTR_FIX_PX         0x0001
+#define ATTR_FIX_URL        0x0002
+#define ATTR_STR_TO_INT     0x0004
+#define ATTR_HEX_INT        0x0008
+#define ATTR_REMOVE_COMMA   0x0010

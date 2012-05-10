@@ -21,12 +21,13 @@
 
 #include "wine/test.h"
 #include "d3dx9.h"
+#include <math.h>
 
 #define ARRAY_SIZE 5
 
 #define admitted_error 0.0001f
 
-#define relative_error(exp, out) ((exp == 0.0f) ? fabs(exp - out) : (fabs(1.0f - out/ exp) ))
+#define relative_error(exp, out) ((exp == 0.0f) ? fabs(exp - out) : (fabs(1.0f - (out) / (exp))))
 
 #define expect_color(expectedcolor,gotcolor) ok((relative_error(expectedcolor.r, gotcolor.r)<admitted_error)&&(relative_error(expectedcolor.g, gotcolor.g)<admitted_error)&&(relative_error(expectedcolor.b, gotcolor.b)<admitted_error)&&(relative_error(expectedcolor.a, gotcolor.a)<admitted_error),"Expected Color= (%f, %f, %f, %f)\n , Got Color= (%f, %f, %f, %f)\n", expectedcolor.r, expectedcolor.g, expectedcolor.b, expectedcolor.a, gotcolor.r, gotcolor.g, gotcolor.b, gotcolor.a);
 
@@ -2215,6 +2216,130 @@ static void test_D3DXVec_Array(void)
     compare_planes(exp_plane, out_plane);
 }
 
+static void test_D3DXFloat_Array(void)
+{
+    static const float z = 0.0f;
+    /* Compilers set different sign bits on 0.0 / 0.0, pick the right ones for NaN and -NaN */
+    float tmpnan = 0.0f/z;
+    float nnan = copysignf(1, tmpnan) < 0.0f ? tmpnan : -tmpnan;
+    float nan = -nnan;
+    unsigned int i;
+    void *out = NULL;
+    D3DXFLOAT16 half;
+    FLOAT single;
+    struct
+    {
+        FLOAT single_in;
+
+        /* half_ver2 occurs on WXPPROSP3 (32 bit math), WVISTAADM (32 bit math), W7PRO (32 bit math) */
+        WORD half_ver1, half_ver2;
+
+        /* single_out_ver2 confirms that half -> single conversion is consistent across platforms */
+        FLOAT single_out_ver1, single_out_ver2;
+    } testdata[] = {
+        { 80000.0f, 0x7c00, 0x7ce2, 65536.0f, 80000.0f },
+        { 65503.0f, 0x7bff, 0x7bff, 65504.0f, 65504.0f },
+        { 65504.0f, 0x7bff, 0x7bff, 65504.0f, 65504.0f },
+        { 65520.0f, 0x7bff, 0x7c00, 65504.0f, 65536.0f },
+        { 65521.0f, 0x7c00, 0x7c00, 65536.0f, 65536.0f },
+        { 65534.0f, 0x7c00, 0x7c00, 65536.0f, 65536.0f },
+        { 65535.0f, 0x7c00, 0x7c00, 65535.0f, 65536.0f },
+        { 65536.0f, 0x7c00, 0x7c00, 65536.0f, 65536.0f },
+        { -80000.0f, 0xfc00, 0xfce2, -65536.0f, -80000.0f },
+        { -65503.0f, 0xfbff, 0xfbff, -65504.0f, -65504.0f },
+        { -65504.0f, 0xfbff, 0xfbff, -65504.0f, -65504.0f },
+        { -65520.0f, 0xfbff, 0xfc00, -65504.0f, -65536.0f },
+        { -65521.0f, 0xfc00, 0xfc00, -65536.0f, -65536.0f },
+        { -65534.0f, 0xfc00, 0xfc00, -65536.0f, -65536.0f },
+        { -65535.0f, 0xfc00, 0xfc00, -65535.0f, -65536.0f },
+        { -65536.0f, 0xfc00, 0xfc00, -65536.0f, -65536.0f },
+        { 1.0f/z, 0x7c00, 0x7fff, 65536.0f, 131008.0f },
+        { -1.0f/z, 0xffff, 0xffff, -131008.0f, -131008.0f },
+        { nan, 0x7fff, 0x7fff, 131008.0f, 131008.0f },
+        { nnan, 0xffff, 0xffff, -131008.0f, -131008.0f },
+        { 0.0f, 0x0, 0x0, 0.0f, 0.0f },
+        { -0.0f, 0x8000, 0x8000, 0.0f, 0.0f },
+        { 2.9809595e-08f, 0x0, 0x0, 0.0f, 0.0f },
+        { -2.9809595e-08f, 0x8000, 0x8000, -0.0f, -0.0f },
+        { 2.9809598e-08f, 0x1, 0x1, 5.96046e-08f, 5.96046e-08f },
+        { -2.9809598e-08f, 0x8001, 0x8001, -5.96046e-08f, -5.96046e-08f },
+        { 8.9406967e-08f, 0x2, 0x2, 1.19209e-07f, 1.19209e-07f }
+    };
+
+    /* exception on NULL out or in parameter */
+    out = D3DXFloat32To16Array(&half, &single, 0);
+    ok(out == &half, "Got %p, expected %p.\n", out, &half);
+
+    out = D3DXFloat16To32Array(&single, &half, 0);
+    ok(out == &single, "Got %p, expected %p.\n", out, &single);
+
+    for (i = 0; i < sizeof(testdata)/sizeof(testdata[0]); i++)
+    {
+        out = D3DXFloat32To16Array(&half, &testdata[i].single_in, 1);
+        ok(out == &half, "Got %p, expected %p.\n", out, &half);
+        ok(half.value == testdata[i].half_ver1 || half.value == testdata[i].half_ver2,
+           "Got %x, expected %x or %x for index %d.\n", half.value, testdata[i].half_ver1,
+           testdata[i].half_ver2, i);
+
+        out = D3DXFloat16To32Array(&single, (D3DXFLOAT16 *)&testdata[i].half_ver1, 1);
+        ok(out == &single, "Got %p, expected %p.\n", out, &single);
+        ok(relative_error(single, testdata[i].single_out_ver1) < admitted_error,
+           "Got %g, expected %g for index %d.\n", single, testdata[i].single_out_ver1, i);
+
+        out = D3DXFloat16To32Array(&single, (D3DXFLOAT16 *)&testdata[i].half_ver2, 1);
+        ok(out == &single, "Got %p, expected %p.\n", out, &single);
+        ok(relative_error(single, testdata[i].single_out_ver2) < admitted_error,
+           "Got %g, expected %g for index %d.\n", single, testdata[i].single_out_ver2, i);
+    }
+}
+
+static void test_D3DXSHAdd(void)
+{
+    UINT i, k;
+    FLOAT *ret = (FLOAT *)0xdeadbeef;
+    const FLOAT in1[50] =
+    {
+        1.11f, 1.12f, 1.13f, 1.14f, 1.15f, 1.16f, 1.17f, 1.18f,
+        1.19f, 1.20f, 1.21f, 1.22f, 1.23f, 1.24f, 1.25f, 1.26f,
+        1.27f, 1.28f, 1.29f, 1.30f, 1.31f, 1.32f, 1.33f, 1.34f,
+        1.35f, 1.36f, 1.37f, 1.38f, 1.39f, 1.40f, 1.41f, 1.42f,
+        1.43f, 1.44f, 1.45f, 1.46f, 1.47f, 1.48f, 1.49f, 1.50f,
+        1.51f, 1.52f, 1.53f, 1.54f, 1.55f, 1.56f, 1.57f, 1.58f,
+        1.59f, 1.60f,
+    };
+    const FLOAT in2[50] =
+    {
+        2.11f, 2.12f, 2.13f, 2.14f, 2.15f, 2.16f, 2.17f, 2.18f,
+        2.19f, 2.20f, 2.21f, 2.22f, 2.23f, 2.24f, 2.25f, 2.26f,
+        2.27f, 2.28f, 2.29f, 2.30f, 2.31f, 2.32f, 2.33f, 2.34f,
+        2.35f, 2.36f, 2.37f, 2.38f, 2.39f, 2.40f, 2.41f, 2.42f,
+        2.43f, 2.44f, 2.45f, 2.46f, 2.47f, 2.48f, 2.49f, 2.50f,
+        2.51f, 2.52f, 2.53f, 2.54f, 2.55f, 2.56f, 2.57f, 2.58f,
+        2.59f, 2.60f,
+    };
+    FLOAT out[50] = {0.0f};
+
+    /*
+     * Order is not limited by D3DXSH_MINORDER and D3DXSH_MAXORDER!
+     * All values will work, test from 0-7 [D3DXSH_MINORDER = 2, D3DXSH_MAXORDER = 6]
+     * Exceptions will show up when out, in1 or in2 are NULL
+     */
+    for (k = 0; k < 8; ++k)
+    {
+        UINT count = k * k;
+
+        ret = D3DXSHAdd(&out[0], k, &in1[0], &in2[0]);
+        ok(ret == out, "%u: D3DXSHAdd() failed, got %p, expected %p\n", k, out, ret);
+
+        for (i = 0; i < count; ++i)
+        {
+            ok(relative_error(in1[i] + in2[i], out[i]) < admitted_error,
+                    "%u-%u: D3DXSHAdd() failed, got %f, expected %f\n", k, i, out[i], in1[i] + in2[i]);
+        }
+        ok(out[count] == 0.0f, "%u-%u: D3DXSHAdd() failed, got %f, expected 0.0\n", k, k * k, out[count]);
+    }
+}
+
 START_TEST(math)
 {
     D3DXColorTest();
@@ -2230,4 +2355,6 @@ START_TEST(math)
     test_Matrix_Decompose();
     test_Matrix_Transformation2D();
     test_D3DXVec_Array();
+    test_D3DXFloat_Array();
+    test_D3DXSHAdd();
 }

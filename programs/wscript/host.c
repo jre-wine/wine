@@ -28,6 +28,13 @@
 #include "wscript.h"
 
 #include <wine/debug.h>
+#include <wine/unicode.h>
+
+#define BUILDVERSION 16535
+
+static const WCHAR wshNameW[] = {'W','i','n','d','o','w','s',' ','S','c','r','i','p','t',' ','H','o','s','t',0};
+static const WCHAR wshVersionW[] = {'5','.','8'};
+VARIANT_BOOL wshInteractive = VARIANT_TRUE;
 
 WINE_DEFAULT_DEBUG_CHANNEL(wscript);
 
@@ -94,38 +101,65 @@ static HRESULT WINAPI Host_Invoke(IHost *iface, DISPID dispIdMember, REFIID riid
 
 static HRESULT WINAPI Host_get_Name(IHost *iface, BSTR *out_Name)
 {
-    WINE_FIXME("(%p)\n", out_Name);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Name);
+
+    if(!(*out_Name = SysAllocString(wshNameW)))
+	return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Application(IHost *iface, IDispatch **out_Dispatch)
 {
-    WINE_FIXME("(%p)\n", out_Dispatch);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Dispatch);
+
+    *out_Dispatch = (IDispatch*)&host_obj;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_FullName(IHost *iface, BSTR *out_Path)
 {
-    WINE_FIXME("(%p)\n", out_Path);
-    return E_NOTIMPL;
+    WCHAR fullPath[MAX_PATH];
+
+    WINE_TRACE("(%p)\n", out_Path);
+
+    if(GetModuleFileNameW(NULL, fullPath, sizeof(fullPath)/sizeof(WCHAR)) == 0)
+        return E_FAIL;
+    if(!(*out_Path = SysAllocString(fullPath)))
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Path(IHost *iface, BSTR *out_Path)
 {
-    WINE_FIXME("(%p)\n", out_Path);
-    return E_NOTIMPL;
+    WCHAR path[MAX_PATH];
+    int howMany;
+    WCHAR *pos;
+
+    WINE_TRACE("(%p)\n", out_Path);
+
+    if(GetModuleFileNameW(NULL, path, sizeof(path)/sizeof(WCHAR)) == 0)
+        return E_FAIL;
+    pos = strrchrW(path, '\\');
+    howMany = pos - path;
+    if(!(*out_Path = SysAllocStringLen(path, howMany)))
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Interactive(IHost *iface, VARIANT_BOOL *out_Interactive)
 {
-    WINE_FIXME("(%p)\n", out_Interactive);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Interactive);
+
+    *out_Interactive = wshInteractive;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_put_Interactive(IHost *iface, VARIANT_BOOL v)
 {
-    WINE_FIXME("(%x)\n", v);
-    return E_NOTIMPL;
+    WINE_TRACE("(%x)\n", v);
+
+    wshInteractive = v;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_Quit(IHost *iface, int ExitCode)
@@ -136,32 +170,49 @@ static HRESULT WINAPI Host_Quit(IHost *iface, int ExitCode)
 
 static HRESULT WINAPI Host_get_ScriptName(IHost *iface, BSTR *out_ScriptName)
 {
-    WINE_FIXME("(%p)\n", out_ScriptName);
-    return E_NOTIMPL;
+    WCHAR *scriptName;
+
+    WINE_TRACE("(%p)\n", out_ScriptName);
+
+    scriptName = strrchrW(scriptFullName, '\\');
+    ++scriptName;
+    if(!(*out_ScriptName = SysAllocString(scriptName)))
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_ScriptFullName(IHost *iface, BSTR *out_ScriptFullName)
 {
-    WINE_FIXME("(%p)\n", out_ScriptFullName);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_ScriptFullName);
+
+    if(!(*out_ScriptFullName = SysAllocString(scriptFullName)))
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Arguments(IHost *iface, IArguments2 **out_Arguments)
 {
-    WINE_FIXME("(%p)\n", out_Arguments);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Arguments);
+
+    *out_Arguments = &arguments_obj;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Version(IHost *iface, BSTR *out_Version)
 {
-    WINE_FIXME("(%p)\n", out_Version);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Version);
+
+    if(!(*out_Version = SysAllocString(wshVersionW)))
+	return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_BuildVersion(IHost *iface, int *out_Build)
 {
-    WINE_FIXME("(%p)\n", out_Build);
-    return E_NOTIMPL;
+    WINE_TRACE("(%p)\n", out_Build);
+
+    *out_Build = BUILDVERSION;
+    return S_OK;
 }
 
 static HRESULT WINAPI Host_get_Timeout(IHost *iface, LONG *out_Timeout)

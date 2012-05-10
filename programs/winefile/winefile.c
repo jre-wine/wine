@@ -526,6 +526,7 @@ static BOOL time_to_filetime(const time_t* t, FILETIME* ftime)
 	stime.wHour = tm->tm_hour;
 	stime.wMinute = tm->tm_min;
 	stime.wSecond = tm->tm_sec;
+	stime.wMilliseconds = 0;
 
 	return SystemTimeToFileTime(&stime, ftime);
 }
@@ -1178,7 +1179,7 @@ static int (*sortFunctions[])(const void* arg1, const void* arg2) = {
 
 static void SortDirectory(Entry* dir, SORT_ORDER sortOrder)
 {
-	Entry* entry = dir->down;
+	Entry* entry;
 	Entry** array, **p;
 	int len;
 
@@ -1353,8 +1354,8 @@ static ChildWnd* alloc_child_window(LPCWSTR path, LPITEMIDLIST pidl, HWND hwnd)
 {
 	WCHAR drv[_MAX_DRIVE+1], dir[_MAX_DIR], name[_MAX_FNAME], ext[_MAX_EXT];
 	WCHAR dir_path[MAX_PATH];
-	WCHAR b1[BUFFER_LEN];
 	static const WCHAR sAsterics[] = {'*', '\0'};
+	static const WCHAR sTitleFmt[] = {'%','s',' ','-',' ','%','s','\0'};
 
 	ChildWnd* child = HeapAlloc(GetProcessHeap(), 0, sizeof(ChildWnd));
 	Root* root = &child->root;
@@ -1406,7 +1407,7 @@ static ChildWnd* alloc_child_window(LPCWSTR path, LPITEMIDLIST pidl, HWND hwnd)
 		load_string(root->entry.data.cFileName, sizeof(root->entry.data.cFileName)/sizeof(root->entry.data.cFileName[0]), IDS_DESKTOP);
 	else
 #endif
-		wsprintfW(root->entry.data.cFileName, RS(b1,IDS_TITLEFMT), drv, root->fs);
+		wsprintfW(root->entry.data.cFileName, sTitleFmt, drv, root->fs);
 
 	root->entry.data.dwFileAttributes = FILE_ATTRIBUTE_DIRECTORY;
 
@@ -2105,6 +2106,7 @@ static BOOL activate_drive_window(LPCWSTR path)
 	return FALSE;
 }
 
+#ifndef _NO_EXTENSIONS
 static BOOL activate_fs_window(LPCWSTR filesys)
 {
 	HWND child_wnd;
@@ -2127,6 +2129,7 @@ static BOOL activate_fs_window(LPCWSTR filesys)
 
 	return FALSE;
 }
+#endif /* _NO_EXTENSIONS */
 
 static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM lparam)
 {
@@ -2275,13 +2278,6 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 						else
 							display_error(hwnd, ret);
 					}
-					break;}
-
-				case ID_FORMAT_DISK: {
-					UINT sem_org = SetErrorMode(0); /* Get the current Error Mode settings. */
-					SetErrorMode(sem_org & ~SEM_FAILCRITICALERRORS); /* Force O/S to handle */
-					SHFormatDrive(hwnd, 0 /* A: */, SHFMT_ID_DEFAULT, 0);
-					SetErrorMode(sem_org); /* Put it back the way it was. */
 					break;}
 
 				case ID_HELP:
@@ -2569,6 +2565,7 @@ static BOOL calc_widths(Pane* pane, BOOL anyway)
 }
 
 
+#ifndef _NO_EXTENSIONS
 /* calculate one preferred column width */
 
 static void calc_single_width(Pane* pane, int col)
@@ -2627,6 +2624,7 @@ static void calc_single_width(Pane* pane, int col)
 
 	SendMessageW(pane->hwnd, LB_SETHORIZONTALEXTENT, x, 0);
 }
+#endif /* _NO_EXTENSIONS */
 
 
 static BOOL pattern_match(LPCWSTR str, LPCWSTR pattern)
@@ -2754,21 +2752,34 @@ static int insert_entries(Pane* pane, Entry* dir, LPCWSTR pattern, int filter_fl
 
 static void format_bytes(LPWSTR buffer, LONGLONG bytes)
 {
-	static const WCHAR sFmtGB[] = {'%', '.', '1', 'f', ' ', 'G', 'B', '\0'};
-	static const WCHAR sFmtMB[] = {'%', '.', '1', 'f', ' ', 'M', 'B', '\0'};
-	static const WCHAR sFmtkB[] = {'%', '.', '1', 'f', ' ', 'k', 'B', '\0'};
-	static const WCHAR sFmtB[]  = {'%', 'u', 0};
+	static const WCHAR sFmtSmall[]  = {'%', 'u', 0};
+	static const WCHAR sFmtBig[] = {'%', '.', '1', 'f', ' ', '%', 's', '\0'};
 
-	float fBytes = (float)bytes;
-
-	if (bytes >= 1073741824)	/* 1 GB */
-		sprintfW(buffer, sFmtGB, fBytes/1073741824.f+.5f);
-	else if (bytes >= 1048576)	/* 1 MB */
-		sprintfW(buffer, sFmtMB, fBytes/1048576.f+.5f);
-	else if (bytes >= 1024)		/* 1 kB */
-		sprintfW(buffer, sFmtkB, fBytes/1024.f+.5f);
+	if (bytes < 1024)
+		sprintfW(buffer, sFmtSmall, (DWORD)bytes);
 	else
-		sprintfW(buffer, sFmtB, (DWORD)bytes);
+	{
+		WCHAR unit[64];
+		UINT resid;
+		float fBytes;
+		if (bytes >= 1073741824)	/* 1 GB */
+		{
+			fBytes = ((float)bytes)/1073741824.f+.5f;
+			resid = IDS_UNIT_GB;
+		}
+		else if (bytes >= 1048576)	/* 1 MB */
+		{
+			fBytes = ((float)bytes)/1048576.f+.5f;
+			resid = IDS_UNIT_MB;
+		}
+		else if (bytes >= 1024)		/* 1 kB */
+		{
+			fBytes = ((float)bytes)/1024.f+.5f;
+			resid = IDS_UNIT_KB;
+		}
+		LoadStringW(Globals.hInstance, resid, unit, sizeof(unit)/sizeof(*unit));
+		sprintfW(buffer, sFmtBig, fBytes, unit);
+	}
 }
 
 static void set_space_status(void)
@@ -2777,9 +2788,14 @@ static void set_space_status(void)
 	WCHAR fmt[64], b1[64], b2[64], buffer[BUFFER_LEN];
 
 	if (GetDiskFreeSpaceExW(NULL, &ulFreeBytesToCaller, &ulTotalBytes, &ulFreeBytes)) {
+		DWORD_PTR args[2];
 		format_bytes(b1, ulFreeBytesToCaller.QuadPart);
 		format_bytes(b2, ulTotalBytes.QuadPart);
-		wsprintfW(buffer, RS(fmt,IDS_FREE_SPACE_FMT), b1, b2);
+		args[0] = (DWORD_PTR)b1;
+		args[1] = (DWORD_PTR)b2;
+		FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
+		               RS(fmt,IDS_FREE_SPACE_FMT), 0, 0, buffer,
+		               sizeof(buffer)/sizeof(*buffer), (__ms_va_list*)args);
 	} else
 		lstrcpyW(buffer, sQMarks);
 
@@ -2879,9 +2895,6 @@ static void calc_tabbed_width(Pane* pane, LPDRAWITEMSTRUCT dis, int col, LPCWSTR
 {
 	RECT rt = {0, 0, 0, 0};
 
-/*	DRAWTEXTPARAMS dtp = {sizeof(DRAWTEXTPARAMS), 2};
-	DrawTextExW(dis->hDC, (LPWSTR)str, -1, &rt, DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX|DT_EXPANDTABS|DT_TABSTOP, &dtp);*/
-
 	DrawTextW(dis->hDC, str, -1, &rt, DT_CALCRECT|DT_SINGLELINE|DT_EXPANDTABS|DT_TABSTOP|(2<<8));
 	/*FIXME rt (0,0) ??? */
 
@@ -2912,9 +2925,6 @@ static void output_tabbed_text(Pane* pane, LPDRAWITEMSTRUCT dis, int col, LPCWST
 	rt.top    = dis->rcItem.top;
 	rt.right  = x+pane->positions[col+1]-Globals.spaceSize.cx;
 	rt.bottom = dis->rcItem.bottom;
-
-/*	DRAWTEXTPARAMS dtp = {sizeof(DRAWTEXTPARAMS), 2};
-	DrawTextExW(dis->hDC, (LPWSTR)str, -1, &rt, DT_SINGLELINE|DT_NOPREFIX|DT_EXPANDTABS|DT_TABSTOP, &dtp);*/
 
 	DrawTextW(dis->hDC, str, -1, &rt, DT_SINGLELINE|DT_EXPANDTABS|DT_TABSTOP|(2<<8));
 }
@@ -3072,7 +3082,6 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 					hrgn_org = 0;
 				}
 
-				/* HGDIOBJ holdPen = SelectObject(dis->hDC, GetStockObject(BLACK_PEN)); */
 				ExtSelectClipRgn(dis->hDC, hrgn, RGN_AND);
 				DeleteObject(hrgn);
 
@@ -3110,7 +3119,6 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 
 				SelectClipRgn(dis->hDC, hrgn_org);
 				if (hrgn_org) DeleteObject(hrgn_org);
-				/* SelectObject(dis->hDC, holdPen); */
 			} else if (calcWidthCol==col || calcWidthCol==COLUMNS) {
 				int right = img_pos + IMAGE_WIDTH - TREE_LINE_DX;
 
@@ -3187,7 +3195,7 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 
 	col++;
 
-	/* ouput file name */
+	/* output file name */
 	if (calcWidthCol == -1)
 		output_text(pane, dis, col, entry->data.cFileName, 0);
 	else if (calcWidthCol==col || calcWidthCol==COLUMNS)
@@ -3312,43 +3320,6 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 		col++;
 	}
 
-/*TODO
-	if (flags.security) {
-		static const WCHAR sSecTabs[] = {
-			' ','\t',' ','\t',' ','\t',' ',
-			' ','\t',' ',
-			' ','\t',' ','\t',' ','\t',' ',
-			' ','\t',' ',
-			' ','\t',' ','\t',' ','\t',' ',
-			'\0'
-		};
-
-		DWORD rights = get_access_mask();
-
-		lstrcpyW(buffer, sSecTabs);
-
-		if (rights & FILE_READ_DATA)			buffer[ 0] = 'R';
-		if (rights & FILE_WRITE_DATA)			buffer[ 2] = 'W';
-		if (rights & FILE_APPEND_DATA)			buffer[ 4] = 'A';
-		if (rights & FILE_READ_EA)				{buffer[6] = 'entry'; buffer[ 7] = 'R';}
-		if (rights & FILE_WRITE_EA)				{buffer[9] = 'entry'; buffer[10] = 'W';}
-		if (rights & FILE_EXECUTE)				buffer[12] = 'X';
-		if (rights & FILE_DELETE_CHILD)			buffer[14] = 'D';
-		if (rights & FILE_READ_ATTRIBUTES)		{buffer[16] = 'a'; buffer[17] = 'R';}
-		if (rights & FILE_WRITE_ATTRIBUTES)		{buffer[19] = 'a'; buffer[20] = 'W';}
-		if (rights & WRITE_DAC)					buffer[22] = 'C';
-		if (rights & WRITE_OWNER)				buffer[24] = 'O';
-		if (rights & SYNCHRONIZE)				buffer[26] = 'S';
-
-		output_text(dis, col++, buffer, DT_LEFT, 3, psize);
-	}
-
-	if (flags.description) {
-		get_description(buffer);
-		output_text(dis, col++, buffer, 0, psize);
-	}
-*/
-
 #ifdef _NO_EXTENSIONS
   }
 
@@ -3366,7 +3337,7 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 		} else
 			hpen = CreatePen(PS_DOT, 0, RGB(255,255,255));
 
-		lastPen = SelectPen(dis->hDC, hpen);
+		lastPen = SelectObject(dis->hDC, hpen);
 		lastBrush = SelectObject(dis->hDC, GetStockObject(HOLLOW_BRUSH));
 		SetROP2(dis->hDC, R2_XORPEN);
 		Rectangle(dis->hDC, focusRect.left, focusRect.top, focusRect.right, focusRect.bottom);
@@ -3592,7 +3563,10 @@ static BOOL expand_entry(ChildWnd* child, Entry* dir)
 
 static void collapse_entry(Pane* pane, Entry* dir)
 {
-	int idx = SendMessageW(pane->hwnd, LB_FINDSTRING, 0, (LPARAM)dir);
+        int idx;
+
+        if (!dir) return;
+        idx = SendMessageW(pane->hwnd, LB_FINDSTRING, 0, (LPARAM)dir);
 
 	ShowWindow(pane->hwnd, SW_HIDE);
 
@@ -3896,7 +3870,6 @@ static BOOL pane_command(Pane* pane, UINT cmd)
 				InvalidateRect(pane->hwnd, 0, TRUE);
 				CheckMenuItem(Globals.hMenuView, ID_VIEW_NAME, MF_BYCOMMAND|MF_CHECKED);
 				CheckMenuItem(Globals.hMenuView, ID_VIEW_ALL_ATTRIBUTES, MF_BYCOMMAND);
-				CheckMenuItem(Globals.hMenuView, ID_VIEW_SELECTED_ATTRIBUTES, MF_BYCOMMAND);
 			}
 			break;
 
@@ -3910,7 +3883,6 @@ static BOOL pane_command(Pane* pane, UINT cmd)
 				InvalidateRect(pane->hwnd, 0, TRUE);
 				CheckMenuItem(Globals.hMenuView, ID_VIEW_NAME, MF_BYCOMMAND);
 				CheckMenuItem(Globals.hMenuView, ID_VIEW_ALL_ATTRIBUTES, MF_BYCOMMAND|MF_CHECKED);
-				CheckMenuItem(Globals.hMenuView, ID_VIEW_SELECTED_ATTRIBUTES, MF_BYCOMMAND);
 			}
 			break;
 
@@ -4040,13 +4012,13 @@ static BOOL CtxMenu_HandleMenuMsg(UINT nmsg, WPARAM wparam, LPARAM lparam)
 }
 
 
+#ifndef _NO_EXTENSIONS
 static HRESULT ShellFolderContextMenu(IShellFolder* shell_folder, HWND hwndParent, int cidl, LPCITEMIDLIST* apidl, int x, int y)
 {
 	IContextMenu* pcm;
 	BOOL executed = FALSE;
 
 	HRESULT hr = IShellFolder_GetUIObjectOf(shell_folder, hwndParent, cidl, apidl, &IID_IContextMenu, NULL, (LPVOID*)&pcm);
-/*	HRESULT hr = CDefFolderMenu_Create2(dir?dir->_pidl:DesktopFolder(), hwndParent, 1, &pidl, shell_folder, NULL, 0, NULL, &pcm); */
 
 	if (SUCCEEDED(hr)) {
 		HMENU hmenu = CreatePopupMenu();
@@ -4086,6 +4058,7 @@ static HRESULT ShellFolderContextMenu(IShellFolder* shell_folder, HWND hwndParen
 
 	return FAILED(hr)? hr: executed? S_OK: S_FALSE;
 }
+#endif /* _NO_EXTENSIONS */
 
 
 static LRESULT CALLBACK ChildWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM lparam)
@@ -4607,15 +4580,15 @@ static BOOL show_frame(HWND hwndParent, int cmdshow, LPCWSTR path)
 	hMenuWindow = GetSubMenu(hMenuFrame, GetMenuItemCount(hMenuFrame)-2);
 
 	Globals.hMenuFrame = hMenuFrame;
-	Globals.hMenuView = GetSubMenu(hMenuFrame, 3);
-	Globals.hMenuOptions = GetSubMenu(hMenuFrame, 4);
+	Globals.hMenuView = GetSubMenu(hMenuFrame, 2);
+	Globals.hMenuOptions = GetSubMenu(hMenuFrame, 3);
 
 	ccs.hWindowMenu  = hMenuWindow;
 	ccs.idFirstChild = IDW_FIRST_CHILD;
 
 
 	/* create main window */
-	Globals.hMainWnd = CreateWindowExW(0, MAKEINTRESOURCEW(Globals.hframeClass), RS(b1,IDS_WINE_FILE), WS_OVERLAPPEDWINDOW,
+	Globals.hMainWnd = CreateWindowExW(0, MAKEINTRESOURCEW(Globals.hframeClass), RS(b1,IDS_WINEFILE), WS_OVERLAPPEDWINDOW,
 					opts.start_x, opts.start_y, opts.width, opts.height,
 					hwndParent, Globals.hMenuFrame, Globals.hInstance, 0/*lpParam*/);
 
@@ -4637,10 +4610,7 @@ static BOOL show_frame(HWND hwndParent, int cmdshow, LPCWSTR path)
 			{1, ID_WINDOW_CASCADE, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
 			{2, ID_WINDOW_TILE_HORZ, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
 			{3, ID_WINDOW_TILE_VERT, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
-/*TODO
-			{4, ID_... , TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
-			{5, ID_... , TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
-*/		};
+		};
 
 		Globals.htoolbar = CreateToolbarEx(Globals.hMainWnd, WS_CHILD|WS_VISIBLE,
 			IDW_TOOLBAR, 2, Globals.hInstance, IDB_TOOLBAR, toolbarBtns,
@@ -4650,11 +4620,6 @@ static BOOL show_frame(HWND hwndParent, int cmdshow, LPCWSTR path)
 
 	Globals.hstatusbar = CreateStatusWindowW(WS_CHILD|WS_VISIBLE, 0, Globals.hMainWnd, IDW_STATUSBAR);
 	CheckMenuItem(Globals.hMenuOptions, ID_VIEW_STATUSBAR, MF_BYCOMMAND|MF_CHECKED);
-
-/* CreateStatusWindowW does not accept WS_BORDER
-	Globals.hstatusbar = CreateWindowExW(WS_EX_NOPARENTNOTIFY, STATUSCLASSNAME, 0,
-					WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS|WS_BORDER|CCS_NODIVIDER, 0,0,0,0,
-					Globals.hMainWnd, (HMENU)IDW_STATUSBAR, hinstance, 0);*/
 
 	/*TODO: read paths from registry */
 
@@ -4744,7 +4709,7 @@ static BOOL CALLBACK EnumWndProc(HWND hwnd, LPARAM lparam)
 {
 	WCHAR cls[128];
 
-	GetClassName(hwnd, cls, 128);
+	GetClassNameW(hwnd, cls, 128);
 
 	if (!lstrcmpW(cls, (LPCWSTR)lparam)) {
 		g_foundPrevInstance++;

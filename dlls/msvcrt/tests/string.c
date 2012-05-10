@@ -61,6 +61,7 @@ static int (__cdecl *pstrcat_s)(char *dst, size_t len, const char *src);
 static int (__cdecl *p_mbsnbcat_s)(unsigned char *dst, size_t size, const unsigned char *src, size_t count);
 static int (__cdecl *p_mbsnbcpy_s)(unsigned char * dst, size_t size, const unsigned char * src, size_t count);
 static int (__cdecl *p_wcscpy_s)(wchar_t *wcDest, size_t size, const wchar_t *wcSrc);
+static int (__cdecl *p_wcsncpy_s)(wchar_t *wcDest, size_t size, const wchar_t *wcSrc, size_t count);
 static int (__cdecl *p_wcsncat_s)(wchar_t *dst, size_t elem, const wchar_t *src, size_t count);
 static int (__cdecl *p_wcsupr_s)(wchar_t *str, size_t size);
 static size_t (__cdecl *p_strnlen)(const char *, size_t);
@@ -68,6 +69,7 @@ static __int64 (__cdecl *p_strtoi64)(const char *, char **, int);
 static unsigned __int64 (__cdecl *p_strtoui64)(const char *, char **, int);
 static int (__cdecl *pwcstombs_s)(size_t*,char*,size_t,const wchar_t*,size_t);
 static int (__cdecl *pmbstowcs_s)(size_t*,wchar_t*,size_t,const char*,size_t);
+static size_t (__cdecl *pwcsrtombs)(char*, const wchar_t**, size_t, int*);
 static errno_t (__cdecl *p_gcvt_s)(char*,size_t,double,int);
 static errno_t (__cdecl *p_itoa_s)(int,char*,size_t,int);
 static errno_t (__cdecl *p_strlwr_s)(char*,size_t);
@@ -75,6 +77,11 @@ static errno_t (__cdecl *p_ultoa_s)(__msvcrt_ulong,char*,size_t,int);
 static int *p__mb_cur_max;
 static unsigned char *p_mbctype;
 static _invalid_parameter_handler (__cdecl *p_set_invalid_parameter_handler)(_invalid_parameter_handler);
+static int (__cdecl *p_wcslwr_s)(wchar_t*,size_t);
+static errno_t (__cdecl *p_mbsupr_s)(unsigned char *str, size_t numberOfElements);
+static errno_t (__cdecl *p_mbslwr_s)(unsigned char *str, size_t numberOfElements);
+static int (__cdecl *p_wctob)(wint_t);
+static int (__cdecl *p_tolower)(int);
 
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(hMsvcrt,y)
 #define SET(x,y) SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y)
@@ -609,7 +616,7 @@ static void test_wcscpy_s(void)
 
     if(!p_wcscpy_s)
     {
-        skip("wcscpy_s not found\n");
+        win_skip("wcscpy_s not found\n");
         return;
     }
 
@@ -640,6 +647,39 @@ static void test_wcscpy_s(void)
     /* Copy smaller buffer size */
     szDest[0] = 'A';
     ret = p_wcscpy_s(szDestShort, 8, szLongText);
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(szDestShort[0] == 0, "szDestShort[0] not 0\n");
+
+    if(!p_wcsncpy_s)
+    {
+        win_skip("wcsncpy_s not found\n");
+        return;
+    }
+
+    ret = p_wcsncpy_s(NULL, 18, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ok(ret == EINVAL, "p_wcsncpy_s expect EINVAL got %d\n", ret);
+
+    szDest[0] = 'A';
+    ret = p_wcsncpy_s(szDest, 18, NULL, 1);
+    ok(ret == EINVAL, "expected EINVAL got %d\n", ret);
+    ok(szDest[0] == 0, "szDest[0] not 0\n");
+
+    szDest[0] = 'A';
+    ret = p_wcsncpy_s(szDest, 18, NULL, 0);
+    ok(ret == 0, "expected ERROR_SUCCESS got %d\n", ret);
+    ok(szDest[0] == 0, "szDest[0] not 0\n");
+
+    szDest[0] = 'A';
+    ret = p_wcsncpy_s(szDest, 0, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(szDest[0] == 0 || ret == EINVAL, "szDest[0] not 0\n");
+
+    ret = p_wcsncpy_s(szDest, 18, szLongText, sizeof(szLongText)/sizeof(WCHAR));
+    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(lstrcmpW(szDest, szLongText) == 0, "szDest != szLongText\n");
+
+    szDest[0] = 'A';
+    ret = p_wcsncpy_s(szDestShort, 8, szLongText, sizeof(szLongText)/sizeof(WCHAR));
     ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
     ok(szDestShort[0] == 0, "szDestShort[0] not 0\n");
 }
@@ -729,6 +769,93 @@ static void test__wcsupr_s(void)
     ret = p_wcsupr_s(testBuffer, sizeof(testBuffer)/sizeof(WCHAR));
     ok(ret == 0, "Expected _wcsupr_s to succeed, got %d\n", ret);
     ok(!wcscmp(testBuffer, expectedString), "Expected the string to be fully upper-case\n");
+}
+
+static void test__wcslwr_s(void)
+{
+    static const WCHAR mixedString[] = {'M', 'i', 'X', 'e', 'D', 'l', 'o', 'w',
+                                        'e', 'r', 'U', 'P', 'P', 'E', 'R', 0};
+    static const WCHAR expectedString[] = {'m', 'i', 'x', 'e', 'd', 'l', 'o',
+                                           'w', 'e', 'r', 'u', 'p', 'p', 'e',
+                                           'r', 0};
+    WCHAR buffer[2*sizeof(mixedString)/sizeof(WCHAR)];
+    int ret;
+
+    if (!p_wcslwr_s)
+    {
+        win_skip("_wcslwr_s not found\n");
+        return;
+    }
+
+    /* Test NULL input string and invalid size. */
+    errno = EBADF;
+    ret = p_wcslwr_s(NULL, 0);
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno EINVAL, got %d\n", errno);
+
+    /* Test NULL input string and valid size. */
+    errno = EBADF;
+    ret = p_wcslwr_s(NULL, sizeof(buffer)/sizeof(wchar_t));
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno EINVAL, got %d\n", errno);
+
+    /* Test empty string with zero size. */
+    errno = EBADF;
+    buffer[0] = 'a';
+    ret = p_wcslwr_s(buffer, 0);
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno EINVAL, got %d\n", errno);
+    ok(buffer[0] == 0, "expected empty string\n");
+
+    /* Test empty string with size of one. */
+    buffer[0] = 0;
+    ret = p_wcslwr_s(buffer, 1);
+    ok(ret == 0, "got %d\n", ret);
+    ok(buffer[0] == 0, "expected buffer to be unchanged\n");
+
+    /* Test one-byte buffer with zero size. */
+    errno = EBADF;
+    buffer[0] = 'x';
+    ret = p_wcslwr_s(buffer, 0);
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno to be EINVAL, got %d\n", errno);
+    ok(buffer[0] == '\0', "expected empty string\n");
+
+    /* Test one-byte buffer with size of one. */
+    errno = EBADF;
+    buffer[0] = 'x';
+    ret = p_wcslwr_s(buffer, 1);
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno to be EINVAL, got %d\n", errno);
+    ok(buffer[0] == '\0', "expected empty string\n");
+
+    /* Test invalid size. */
+    wcscpy(buffer, mixedString);
+    errno = EBADF;
+    ret = p_wcslwr_s(buffer, 0);
+    ok(ret == EINVAL, "Expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno to be EINVAL, got %d\n", errno);
+    ok(buffer[0] == '\0', "expected empty string\n");
+
+    /* Test normal string uppercasing. */
+    wcscpy(buffer, mixedString);
+    ret = p_wcslwr_s(buffer, sizeof(mixedString)/sizeof(WCHAR));
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    ok(!wcscmp(buffer, expectedString), "expected lowercase\n");
+
+    /* Test uppercasing with a shorter buffer size count. */
+    wcscpy(buffer, mixedString);
+    errno = EBADF;
+    ret = p_wcslwr_s(buffer, sizeof(mixedString)/sizeof(WCHAR) - 1);
+    ok(ret == EINVAL, "expected EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "expected errno to be EINVAL, got %d\n", errno);
+    ok(buffer[0] == '\0', "expected empty string\n");
+
+    /* Test uppercasing with a longer buffer size count. */
+    wcscpy(buffer, mixedString);
+    ret = p_wcslwr_s(buffer, sizeof(buffer)/sizeof(WCHAR));
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    ok(!wcscmp(buffer, expectedString), "expected lowercase\n");
 }
 
 static void test_mbcjisjms(void)
@@ -1192,6 +1319,7 @@ static void test_mbstowcs(void)
     static const char mSimple[] = "text";
     static const char mHiragana[] = { 0x82,0xa0,0x82,0xa1,0 };
 
+    const wchar_t *pwstr;
     wchar_t wOut[6];
     char mOut[6];
     size_t ret;
@@ -1233,29 +1361,60 @@ static void test_mbstowcs(void)
     ok(!memcmp(mOut, mHiragana, sizeof(mHiragana)), "mOut = %s\n", mOut);
 
     if(!pmbstowcs_s || !pwcstombs_s) {
+        setlocale(LC_ALL, "C");
         win_skip("mbstowcs_s or wcstombs_s not available\n");
         return;
     }
 
     err = pmbstowcs_s(&ret, wOut, 6, mSimple, _TRUNCATE);
     ok(err == 0, "err = %d\n", err);
-    ok(ret == 5, "ret = %d\n", (int)ret);
+    ok(ret == 5, "mbstowcs_s did not return 5\n");
     ok(!memcmp(wOut, wSimple, sizeof(wSimple)), "wOut = %s\n", wine_dbgstr_w(wOut));
 
     err = pmbstowcs_s(&ret, wOut, 6, mHiragana, _TRUNCATE);
     ok(err == 0, "err = %d\n", err);
-    ok(ret == 3, "ret = %d\n", (int)ret);
+    ok(ret == 3, "mbstowcs_s did not return 3\n");
     ok(!memcmp(wOut, wHiragana, sizeof(wHiragana)), "wOut = %s\n", wine_dbgstr_w(wOut));
+
+    err = pmbstowcs_s(&ret, NULL, 0, mHiragana, 1);
+    ok(err == 0, "err = %d\n", err);
+    ok(ret == 3, "mbstowcs_s did not return 3\n");
 
     err = pwcstombs_s(&ret, mOut, 6, wSimple, _TRUNCATE);
     ok(err == 0, "err = %d\n", err);
-    ok(ret == 5, "ret = %d\n", (int)ret);
+    ok(ret == 5, "wcstombs_s did not return 5\n");
     ok(!memcmp(mOut, mSimple, sizeof(mSimple)), "mOut = %s\n", mOut);
 
     err = pwcstombs_s(&ret, mOut, 6, wHiragana, _TRUNCATE);
     ok(err == 0, "err = %d\n", err);
-    ok(ret == 5, "ret = %d\n", (int)ret);
+    ok(ret == 5, "wcstombs_s did not return 5\n");
     ok(!memcmp(mOut, mHiragana, sizeof(mHiragana)), "mOut = %s\n", mOut);
+
+    err = pwcstombs_s(&ret, NULL, 0, wHiragana, 1);
+    ok(err == 0, "err = %d\n", err);
+    ok(ret == 5, "wcstombs_s did not return 5\n");
+
+    if(!pwcsrtombs) {
+        setlocale(LC_ALL, "C");
+        win_skip("wcsrtombs not available\n");
+        return;
+    }
+
+    pwstr = wSimple;
+    err = -3;
+    ret = pwcsrtombs(mOut, &pwstr, 4, &err);
+    ok(ret == 4, "wcsrtombs did not return 4\n");
+    ok(err == 0, "err = %d\n", err);
+    ok(pwstr == wSimple+4, "pwstr = %p (wszSimple = %p)\n", pwstr, wSimple);
+    ok(!memcmp(mOut, mSimple, ret), "mOut = %s\n", mOut);
+
+    pwstr = wSimple;
+    ret = pwcsrtombs(mOut, &pwstr, 5, NULL);
+    ok(ret == 4, "wcsrtombs did not return 4\n");
+    ok(pwstr == NULL, "pwstr != NULL\n");
+    ok(!memcmp(mOut, mSimple, sizeof(mSimple)), "mOut = %s\n", mOut);
+
+    setlocale(LC_ALL, "C");
 }
 
 static void test_gcvt(void)
@@ -1424,7 +1583,7 @@ static void test__strlwr_s(void)
     ok(ret == EINVAL, "Expected _strlwr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
     ok(!memcmp(buffer, "\0oRrIsTeR", sizeof("\0oRrIsTeR")),
-       "Expected the output buffer to be \"gorrIsTeR\"\n");
+       "Expected the output buffer to be \"\\0oRrIsTeR\"\n");
 
     strcpy(buffer, "GoRrIsTeR");
     errno = EBADF;
@@ -1432,7 +1591,7 @@ static void test__strlwr_s(void)
     ok(ret == EINVAL, "Expected _strlwr_s to return EINVAL, got %d\n", ret);
     ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
     ok(!memcmp(buffer, "\0oRrIsTeR", sizeof("\0oRrIsTeR")),
-       "Expected the output buffer to be \"gorrIsTeR\"\n");
+       "Expected the output buffer to be \"\\0oRrIsTeR\"\n");
 
     strcpy(buffer, "GoRrIsTeR");
     ret = p_strlwr_s(buffer, sizeof("GoRrIsTeR"));
@@ -1623,6 +1782,119 @@ static void test__mbsnbcat_s(void)
        "Expected the output buffer string to be \"\\0inosaurdu\" without ending null terminator\n");
 }
 
+static void test__mbsupr_s(void)
+{
+    errno_t ret;
+    unsigned char buffer[20];
+
+    if (!p_mbsupr_s)
+    {
+        win_skip("Skipping _mbsupr_s tests\n");
+        return;
+    }
+
+    errno = EBADF;
+    ret = p_mbsupr_s(NULL, 0);
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+
+    errno = EBADF;
+    ret = p_mbsupr_s(NULL, sizeof(buffer));
+    ok(ret == EINVAL, "Expected _mbsupr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    errno = EBADF;
+    ret = p_mbsupr_s(buffer, 0);
+    ok(ret == EINVAL, "Expected _mbsupr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    memcpy(buffer, "abcdefgh", sizeof("abcdefgh"));
+    errno = EBADF;
+    ret = p_mbsupr_s(buffer, sizeof("abcdefgh"));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "ABCDEFGH", sizeof("ABCDEFGH")),
+       "Expected the output buffer to be \"ABCDEFGH\", got \"%s\"\n",
+       buffer);
+
+    memcpy(buffer, "abcdefgh", sizeof("abcdefgh"));
+    errno = EBADF;
+    ret = p_mbsupr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "ABCDEFGH", sizeof("ABCDEFGH")),
+       "Expected the output buffer to be \"ABCDEFGH\", got \"%s\"\n",
+       buffer);
+
+    memcpy(buffer, "abcdefgh", sizeof("abcdefgh"));
+    errno = EBADF;
+    ret = p_mbsupr_s(buffer, 4);
+    ok(ret == EINVAL, "Expected _mbsupr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    memcpy(buffer, "abcdefgh\0ijklmnop", sizeof("abcdefgh\0ijklmnop"));
+    errno = EBADF;
+    ret = p_mbsupr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbsupr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "ABCDEFGH\0ijklmnop", sizeof("ABCDEFGH\0ijklmnop")),
+       "Expected the output buffer to be \"ABCDEFGH\\0ijklmnop\", got \"%s\"\n",
+       buffer);
+
+}
+
+static void test__mbslwr_s(void)
+{
+    errno_t ret;
+    unsigned char buffer[20];
+
+    if (!p_mbslwr_s)
+    {
+        win_skip("Skipping _mbslwr_s tests\n");
+        return;
+    }
+
+    errno = EBADF;
+    ret = p_mbslwr_s(NULL, 0);
+    ok(ret == 0, "Expected _mbslwr_s to return 0, got %d\n", ret);
+
+    errno = EBADF;
+    ret = p_mbslwr_s(NULL, sizeof(buffer));
+    ok(ret == EINVAL, "Expected _mbslwr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    errno = EBADF;
+    ret = p_mbslwr_s(buffer, 0);
+    ok(ret == EINVAL, "Expected _mbslwr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    memcpy(buffer, "ABCDEFGH", sizeof("ABCDEFGH"));
+    errno = EBADF;
+    ret = p_mbslwr_s(buffer, sizeof("ABCDEFGH"));
+    ok(ret == 0, "Expected _mbslwr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "abcdefgh", sizeof("abcdefgh")),
+       "Expected the output buffer to be \"abcdefgh\", got \"%s\"\n",
+       buffer);
+
+    memcpy(buffer, "ABCDEFGH", sizeof("ABCDEFGH"));
+    errno = EBADF;
+    ret = p_mbslwr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbslwr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "abcdefgh", sizeof("abcdefgh")),
+       "Expected the output buffer to be \"abcdefgh\", got \"%s\"\n",
+       buffer);
+
+    memcpy(buffer, "ABCDEFGH", sizeof("ABCDEFGH"));
+    errno = EBADF;
+    ret = p_mbslwr_s(buffer, 4);
+    ok(ret == EINVAL, "Expected _mbslwr_s to return EINVAL, got %d\n", ret);
+    ok(errno == EINVAL, "Expected errno to be EINVAL, got %d\n", errno);
+
+    memcpy(buffer, "ABCDEFGH\0IJKLMNOP", sizeof("ABCDEFGH\0IJKLMNOP"));
+    errno = EBADF;
+    ret = p_mbslwr_s(buffer, sizeof(buffer));
+    ok(ret == 0, "Expected _mbslwr_s to return 0, got %d\n", ret);
+    ok(!memcmp(buffer, "abcdefgh\0IJKLMNOP", sizeof("abcdefgh\0IJKLMNOP")),
+       "Expected the output buffer to be \"abcdefgh\\0IJKLMNOP\", got \"%s\"\n",
+       buffer);
+}
+
 static void test__ultoa_s(void)
 {
     errno_t ret;
@@ -1701,6 +1973,77 @@ static void test__ultoa_s(void)
        buffer);
 }
 
+static void test_wctob(void)
+{
+    int ret;
+
+    if(!p_wctob || !setlocale(LC_ALL, "chinese-traditional")) {
+        win_skip("Skipping wctob tests\n");
+        return;
+    }
+
+    ret = p_wctob(0x8141);
+    ok(ret == EOF, "ret = %x\n", ret);
+
+    ret = p_wctob(0x81);
+    ok(ret == EOF, "ret = %x\n", ret);
+
+    ret = p_wctob(0xe0);
+    ok(ret == 0x61, "ret = %x\n", ret);
+
+    _setmbcp(1250);
+    ret = p_wctob(0x81);
+    ok(ret == EOF, "ret = %x\n", ret);
+
+    setlocale(LC_ALL, "C");
+    ret = p_wctob(0x8141);
+    ok(ret == EOF, "ret = %x\n", ret);
+
+    ret = p_wctob(0x81);
+    ok(ret == (int)(char)0x81, "ret = %x\n", ret);
+
+    ret = p_wctob(0x9f);
+    ok(ret == (int)(char)0x9f, "ret = %x\n", ret);
+
+    ret = p_wctob(0xe0);
+    ok(ret == (int)(char)0xe0, "ret = %x\n", ret);
+}
+
+static void test_tolower(void)
+{
+    int ret;
+
+    ret = p_tolower(0x41);
+    ok(ret == 0x61, "ret = %x\n", ret);
+
+    ret = p_tolower(0xF4);
+    ok(ret == 0xF4, "ret = %x\n", ret);
+
+    ret = p_tolower((char)0xF4);
+    ok(ret==0xF4/*Vista+*/ || ret==(char)0xF4, "ret = %x\n", ret);
+
+    /* is it using different locale (CP_ACP) for negative values?? */
+    /* current implementation matches msvcr90 behaviour */
+    ret = p_tolower((char)0xD0);
+    todo_wine ok(ret==0xF0/*Vista+*/ || ret==(char)0xD0, "ret = %x\n", ret);
+
+    ret = p_tolower(0xD0);
+    ok(ret == 0xD0, "ret = %x\n", ret);
+
+    if(!setlocale(LC_ALL, "us")) {
+        win_skip("skipping tolower tests that depends on locale\n");
+        return;
+    }
+
+    ret = p_tolower((char)0xD0);
+    ok(ret == 0xF0, "ret = %x\n", ret);
+
+    ret = p_tolower(0xD0);
+    ok(ret == 0xF0, "ret = %x\n", ret);
+
+    setlocale(LC_ALL, "C");
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -1720,6 +2063,7 @@ START_TEST(string)
     p_mbsnbcat_s = (void *)GetProcAddress( hMsvcrt,"_mbsnbcat_s" );
     p_mbsnbcpy_s = (void *)GetProcAddress( hMsvcrt,"_mbsnbcpy_s" );
     p_wcscpy_s = (void *)GetProcAddress( hMsvcrt,"wcscpy_s" );
+    p_wcsncpy_s = (void *)GetProcAddress( hMsvcrt,"wcsncpy_s" );
     p_wcsncat_s = (void *)GetProcAddress( hMsvcrt,"wcsncat_s" );
     p_wcsupr_s = (void *)GetProcAddress( hMsvcrt,"_wcsupr_s" );
     p_strnlen = (void *)GetProcAddress( hMsvcrt,"strnlen" );
@@ -1727,11 +2071,17 @@ START_TEST(string)
     p_strtoui64 = (void *)GetProcAddress(hMsvcrt, "_strtoui64");
     pmbstowcs_s = (void *)GetProcAddress(hMsvcrt, "mbstowcs_s");
     pwcstombs_s = (void *)GetProcAddress(hMsvcrt, "wcstombs_s");
+    pwcsrtombs = (void *)GetProcAddress(hMsvcrt, "wcsrtombs");
     p_gcvt_s = (void *)GetProcAddress(hMsvcrt, "_gcvt_s");
     p_itoa_s = (void *)GetProcAddress(hMsvcrt, "_itoa_s");
     p_strlwr_s = (void *)GetProcAddress(hMsvcrt, "_strlwr_s");
     p_ultoa_s = (void *)GetProcAddress(hMsvcrt, "_ultoa_s");
     p_set_invalid_parameter_handler = (void *) GetProcAddress(hMsvcrt, "_set_invalid_parameter_handler");
+    p_wcslwr_s = (void*)GetProcAddress(hMsvcrt, "_wcslwr_s");
+    p_mbsupr_s = (void*)GetProcAddress(hMsvcrt, "_mbsupr_s");
+    p_mbslwr_s = (void*)GetProcAddress(hMsvcrt, "_mbslwr_s");
+    p_wctob = (void*)GetProcAddress(hMsvcrt, "wctob");
+    p_tolower = (void*)GetProcAddress(hMsvcrt, "tolower");
 
     /* MSVCRT memcpy behaves like memmove for overlapping moves,
        MFC42 CString::Insert seems to rely on that behaviour */
@@ -1771,4 +2121,9 @@ START_TEST(string)
     test_wcsncat_s();
     test__mbsnbcat_s();
     test__ultoa_s();
+    test__wcslwr_s();
+    test__mbsupr_s();
+    test__mbslwr_s();
+    test_wctob();
+    test_tolower();
 }

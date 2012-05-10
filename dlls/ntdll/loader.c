@@ -242,7 +242,7 @@ static ULONG_PTR allocate_stub( const char *dll, const char *name )
     {
         SIZE_T size = MAX_SIZE;
         if (NtAllocateVirtualMemory( NtCurrentProcess(), (void **)&stubs, 0, &size,
-                                     MEM_COMMIT, PAGE_EXECUTE_WRITECOPY ) != STATUS_SUCCESS)
+                                     MEM_COMMIT, PAGE_EXECUTE_READWRITE ) != STATUS_SUCCESS)
             return 0xdeadbeef;
     }
     stub = &stubs[nb_stubs++];
@@ -563,7 +563,7 @@ static WINE_MODREF *import_dll( HMODULE module, const IMAGE_IMPORT_DESCRIPTOR *d
     protect_base = thunk_list;
     protect_size *= sizeof(*thunk_list);
     NtProtectVirtualMemory( NtCurrentProcess(), &protect_base,
-                            &protect_size, PAGE_WRITECOPY, &protect_old );
+                            &protect_size, PAGE_READWRITE, &protect_old );
 
     imp_mod = wmImp->ldr.BaseAddress;
     exports = RtlImageDirectoryEntryToData( imp_mod, TRUE, IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size );
@@ -1452,7 +1452,7 @@ static void load_builtin_callback( void *module, const char *filename )
 
     SERVER_START_REQ( load_dll )
     {
-        req->handle     = 0;
+        req->mapping    = 0;
         req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
@@ -1486,18 +1486,21 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     size.QuadPart = 0;
     status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ,
-                              NULL, &size, PAGE_READONLY, SEC_IMAGE, file );
+                              NULL, &size, PAGE_EXECUTE_READ, SEC_IMAGE, file );
     if (status != STATUS_SUCCESS) return status;
 
     module = NULL;
     status = NtMapViewOfSection( mapping, NtCurrentProcess(),
-                                 &module, 0, 0, &size, &len, ViewShare, 0, PAGE_READONLY );
-    NtClose( mapping );
-    if (status < 0) return status;
+                                 &module, 0, 0, &size, &len, ViewShare, 0, PAGE_EXECUTE_READ );
+    if (status < 0) goto done;
 
     /* create the MODREF */
 
-    if (!(wm = alloc_module( module, name ))) return STATUS_NO_MEMORY;
+    if (!(wm = alloc_module( module, name )))
+    {
+        status = STATUS_NO_MEMORY;
+        goto done;
+    }
 
     /* fixup imports */
 
@@ -1516,7 +1519,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
              * around with no problems, so we don't care.
              * As these might reference our wm, we don't free it.
              */
-            return status;
+            goto done;
         }
     }
 
@@ -1526,7 +1529,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     SERVER_START_REQ( load_dll )
     {
-        req->handle     = wine_server_obj_handle( file );
+        req->mapping    = wine_server_obj_handle( mapping );
         req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
@@ -1543,7 +1546,10 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     wm->ldr.LoadCount = 1;
     *pwm = wm;
-    return STATUS_SUCCESS;
+    status = STATUS_SUCCESS;
+done:
+    NtClose( mapping );
+    return status;
 }
 
 
@@ -1747,16 +1753,16 @@ static NTSTATUS find_actctx_dll( LPCWSTR libname, LPWSTR *fullname )
         }
     }
 
-    needed = (windows_dir.Length + sizeof(winsxsW) + info->ulAssemblyDirectoryNameLength +
-              nameW.Length + 2*sizeof(WCHAR));
+    needed = (strlenW(user_shared_data->NtSystemRoot) * sizeof(WCHAR) +
+              sizeof(winsxsW) + info->ulAssemblyDirectoryNameLength + nameW.Length + 2*sizeof(WCHAR));
 
     if (!(*fullname = p = RtlAllocateHeap( GetProcessHeap(), 0, needed )))
     {
         status = STATUS_NO_MEMORY;
         goto done;
     }
-    memcpy( p, windows_dir.Buffer, windows_dir.Length );
-    p += windows_dir.Length / sizeof(WCHAR);
+    strcpyW( p, user_shared_data->NtSystemRoot );
+    p += strlenW(p);
     memcpy( p, winsxsW, sizeof(winsxsW) );
     p += sizeof(winsxsW) / sizeof(WCHAR);
     memcpy( p, info->lpAssemblyDirectoryName, info->ulAssemblyDirectoryNameLength );
@@ -2006,8 +2012,8 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
 /******************************************************************
  *		LdrLoadDll (NTDLL.@)
  */
-NTSTATUS WINAPI LdrLoadDll(LPCWSTR path_name, DWORD flags,
-                           const UNICODE_STRING *libname, HMODULE* hModule)
+NTSTATUS WINAPI DECLSPEC_HOTPATCH LdrLoadDll(LPCWSTR path_name, DWORD flags,
+                                             const UNICODE_STRING *libname, HMODULE* hModule)
 {
     WINE_MODREF *wm;
     NTSTATUS nts;
@@ -2806,8 +2812,8 @@ void CDECL __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
     PLIST_ENTRY mark, entry;
     LPWSTR buffer, p;
 
-    DIR_init_windows_dir( windir, sysdir );
     strcpyW( user_shared_data->NtSystemRoot, windir );
+    DIR_init_windows_dir( windir, sysdir );
 
     /* prepend the system dir to the name of the already created modules */
     mark = &NtCurrentTeb()->Peb->LdrData->InLoadOrderModuleList;
@@ -2841,7 +2847,6 @@ void __wine_process_init(void)
     NTSTATUS status;
     ANSI_STRING func_name;
     void (* DECLSPEC_NORETURN CDECL init_func)(void);
-    extern mode_t FILE_umask;
 
     main_exe_file = thread_init();
 

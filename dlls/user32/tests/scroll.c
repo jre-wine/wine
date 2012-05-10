@@ -259,7 +259,7 @@ todo_wine
                 "Scroll bar range is %d,%d. Expected 0,100. Style %08x\n", min, max, style);
     /* test GetScrollInfo, vist for vertical SB */
     ret = GetScrollInfo( hwnd, SB_VERT, &si);
-    /* should fail if no H orV scroll bar styles are present. Succeed otherwise */
+    /* should fail if no H or V scroll bar styles are present. Succeed otherwise */
     if( !( style & ( WS_VSCROLL | WS_HSCROLL)))
         ok( !ret, "GetScrollInfo succeeded unexpectedly. Style is %08x\n", style);
     else
@@ -269,7 +269,7 @@ todo_wine
                 "GetScrollInfo failed unexpectedly. Style is %08x\n", style);
     /* Same for Horizontal SB */
     ret = GetScrollInfo( hwnd, SB_HORZ, &si);
-    /* should fail if no H orV scroll bar styles are present. Succeed otherwise */
+    /* should fail if no H or V scroll bar styles are present. Succeed otherwise */
     if( !( style & ( WS_VSCROLL | WS_HSCROLL)))
         ok( !ret, "GetScrollInfo succeeded unexpectedly. Style is %08x\n", style);
     else
@@ -302,13 +302,10 @@ todo_wine
         if (bThemeActive || style != WS_HSCROLL)
 todo_wine
             ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == ( style | WS_VSCROLL),
-                    "unexpected style change %8lx expected %8lx\n",
-                    (winstyle & (WS_HSCROLL|WS_VSCROLL)), style | WS_VSCROLL);
+                "unexpected style change %08x/%08x\n", winstyle, style);
         else
-            ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == style ||
-                    broken((winstyle & (WS_HSCROLL|WS_VSCROLL)) == (WS_HSCROLL|WS_VSCROLL)), /* Win 9x/ME */
-                    "unexpected style change %8lx expected %8x\n",
-                    (winstyle & (WS_HSCROLL|WS_VSCROLL)), style);
+            ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == style,
+                "unexpected style change %08x/%08x\n", winstyle, style);
     }
     /* do the test again with H and V reversed.
      * Start with a clean window */
@@ -316,7 +313,7 @@ todo_wine
     hwnd = CreateWindowExA( 0, "static", "", WS_POPUP | style,
                 0, 0, 10, 10, 0, 0, 0, NULL);
     assert( hwnd != 0);
-    /* Set Horizonta Scroll range to something that could be the default value it
+    /* Set Horizontal Scroll range to something that could be the default value it
      * already has */;
     ret = SetScrollRange( hwnd, SB_HORZ, 0, 100, FALSE);
     ok( ret, "SetScrollRange failed.\n");
@@ -341,13 +338,10 @@ todo_wine
         if (bThemeActive || style != WS_VSCROLL)
 todo_wine
             ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == ( style | WS_HSCROLL),
-                    "unexpected style change %8lx expected %8lx\n",
-                    (winstyle & (WS_HSCROLL|WS_VSCROLL)), style | WS_HSCROLL);
+                "unexpected style change %08x/%08x\n", winstyle, style);
         else
-            ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == style ||
-                    broken((winstyle & (WS_HSCROLL|WS_VSCROLL)) == (WS_HSCROLL|WS_VSCROLL)), /* Win 9x/ME */
-                    "unexpected style change %8lx expected %8x\n",
-                    (winstyle & (WS_HSCROLL|WS_VSCROLL)), style);
+            ok( (winstyle & (WS_HSCROLL|WS_VSCROLL)) == style,
+                "unexpected style change %08x/%08x\n", winstyle, style);
     }
     /* Slightly change the test to use SetScrollInfo
      * Start with a clean window */

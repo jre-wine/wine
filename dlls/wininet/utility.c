@@ -172,7 +172,7 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
         len = strlenW(lpszServerName);
 
     sz = WideCharToMultiByte( CP_UNIXCP, 0, lpszServerName, len, NULL, 0, NULL, NULL );
-    if (!(name = HeapAlloc( GetProcessHeap(), 0, sz + 1 ))) return FALSE;
+    if (!(name = heap_alloc(sz + 1))) return FALSE;
     WideCharToMultiByte( CP_UNIXCP, 0, lpszServerName, len, name, sz, NULL, NULL );
     name[sz] = 0;
 
@@ -184,17 +184,17 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
     hints.ai_family = AF_INET;
 
     ret = getaddrinfo( name, NULL, &hints, &res );
-    HeapFree( GetProcessHeap(), 0, name );
     if (ret != 0)
     {
         TRACE("failed to get IPv4 address of %s (%s), retrying with IPv6\n", debugstr_w(lpszServerName), gai_strerror(ret));
         hints.ai_family = AF_INET6;
         ret = getaddrinfo( name, NULL, &hints, &res );
-        if (ret != 0)
-        {
-            TRACE("failed to get address of %s (%s)\n", debugstr_w(lpszServerName), gai_strerror(ret));
-            return FALSE;
-        }
+    }
+    heap_free( name );
+    if (ret != 0)
+    {
+        TRACE("failed to get address of %s (%s)\n", debugstr_w(lpszServerName), gai_strerror(ret));
+        return FALSE;
     }
     if (*sa_len < res->ai_addrlen)
     {
@@ -219,7 +219,7 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
 #else
     EnterCriticalSection( &cs_gethostbyname );
     phe = gethostbyname(name);
-    HeapFree( GetProcessHeap(), 0, name );
+    heap_free( name );
 
     if (NULL == phe)
     {
@@ -320,7 +320,7 @@ VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
         case INTERNET_STATUS_NAME_RESOLVED:
         case INTERNET_STATUS_CONNECTING_TO_SERVER:
         case INTERNET_STATUS_CONNECTED_TO_SERVER:
-            lpvNewInfo = HeapAlloc(GetProcessHeap(), 0, strlen(lpvStatusInfo) + 1);
+            lpvNewInfo = heap_alloc(strlen(lpvStatusInfo) + 1);
             if (lpvNewInfo) strcpy(lpvNewInfo, lpvStatusInfo);
             break;
         case INTERNET_STATUS_RESOLVING_NAME:
@@ -341,7 +341,7 @@ VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
     TRACE(" end callback().\n");
 
     if(lpvNewInfo != lpvStatusInfo)
-        HeapFree(GetProcessHeap(), 0, lpvNewInfo);
+        heap_free(lpvNewInfo);
 }
 
 static void SendAsyncCallbackProc(WORKREQUEST *workRequest)
@@ -355,7 +355,7 @@ static void SendAsyncCallbackProc(WORKREQUEST *workRequest)
                           req->dwStatusInfoLength);
 
     /* And frees the copy of the status info */
-    HeapFree(GetProcessHeap(), 0, req->lpvStatusInfo);
+    heap_free(req->lpvStatusInfo);
 }
 
 void SendAsyncCallback(object_header_t *hdr, DWORD_PTR dwContext,
@@ -379,7 +379,7 @@ void SendAsyncCallback(object_header_t *hdr, DWORD_PTR dwContext,
 
 	if (lpvStatusInfo)
 	{
-	    lpvStatusInfo_copy = HeapAlloc(GetProcessHeap(), 0, dwStatusInfoLength);
+	    lpvStatusInfo_copy = heap_alloc(dwStatusInfoLength);
 	    memcpy(lpvStatusInfo_copy, lpvStatusInfo, dwStatusInfoLength);
 	}
 

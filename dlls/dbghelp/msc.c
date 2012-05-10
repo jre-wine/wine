@@ -45,9 +45,7 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifndef PATH_MAX
-#define PATH_MAX MAX_PATH
-#endif
+
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -1156,8 +1154,9 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         if (details)
         {
             codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt, 
-                                                type->struct_v1.fieldlist);
+            if (!(type->struct_v1.property & 0x80)) /* 0x80 = forward declaration */
+                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+                                                    type->struct_v1.fieldlist);
         }
         break;
 
@@ -1171,8 +1170,9 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         if (details)
         {
             codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
-                                                type->struct_v2.fieldlist);
+            if (!(type->struct_v2.property & 0x80)) /* 0x80 = forward declaration */
+                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+                                                    type->struct_v2.fieldlist);
         }
         break;
 
@@ -1186,8 +1186,9 @@ static struct symt* codeview_parse_one_type(struct codeview_type_parse* ctp,
         if (details)
         {
             codeview_add_type(curr_type, symt);
-            codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
-                                                type->struct_v3.fieldlist);
+            if (!(type->struct_v3.property & 0x80)) /* 0x80 = forward declaration */
+                codeview_add_type_struct_field_list(ctp, (struct symt_udt*)symt,
+                                                    type->struct_v3.fieldlist);
         }
         break;
 
@@ -1395,7 +1396,7 @@ static void codeview_snarf_linetab(const struct msc_debug_info* msc_dbg, const B
             {
                 /* now locate function (if any) */
                 addr = func_addr0 + ltb->offsets[k] - start[j].start;
-                /* unfortunetaly, we can have several functions in the same block, if there's no
+                /* unfortunately, we can have several functions in the same block, if there's no
                  * gap between them... find the new function if needed
                  */
                 if (!func || addr >= func->address + func->size)
@@ -1453,6 +1454,8 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
         switch (lt2->header)
         {
         case LT2_LINES_BLOCK:
+            /* Skip blocks that are too small - Intel C Compiler generates these. */
+            if (lt2->size_of_block < sizeof (struct codeview_lt2blk_lines)) break;
             lines_blk = (const struct codeview_lt2blk_lines*)lt2;
             /* FIXME: should check that file_offset is within the LT2_FILES_BLOCK we've seen */
             addr = codeview_get_address(msc_dbg, lines_blk->seg, lines_blk->start);
@@ -1692,7 +1695,8 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
          */
 	case S_BPREL_V1:
             loc.kind = loc_regrel;
-            loc.reg = 0; /* FIXME */
+            /* Yes, it's i386 dependent, but that's the symbol purpose. S_REGREL is used on other CPUs */
+            loc.reg = CV_REG_EBP;
             loc.offset = sym->stack_v1.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v1.offset > 0 ? DataIsParam : DataIsLocal, 
@@ -1702,7 +1706,8 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             break;
 	case S_BPREL_V2:
             loc.kind = loc_regrel;
-            loc.reg = 0; /* FIXME */
+            /* Yes, it's i386 dependent, but that's the symbol purpose. S_REGREL is used on other CPUs */
+            loc.reg = CV_REG_EBP;
             loc.offset = sym->stack_v2.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v2.offset > 0 ? DataIsParam : DataIsLocal, 
@@ -1712,7 +1717,8 @@ static int codeview_snarf(const struct msc_debug_info* msc_dbg, const BYTE* root
             break;
 	case S_BPREL_V3:
             loc.kind = loc_regrel;
-            loc.reg = 0; /* FIXME */
+            /* Yes, it's i386 dependent, but that's the symbol purpose. S_REGREL is used on other CPUs */
+            loc.reg = CV_REG_EBP;
             loc.offset = sym->stack_v3.offset;
             symt_add_func_local(msc_dbg->module, curr_func, 
                                 sym->stack_v3.offset > 0 ? DataIsParam : DataIsLocal, 
@@ -2924,10 +2930,15 @@ static BOOL  pev_get_val(struct pevaluator* pev, const char* str, DWORD_PTR* val
     case '$':
     case '.':
         hash_table_iter_init(&pev->values, &hti, str);
-        if (!(ptr = hash_table_iter_up(&hti)))
-            return PEV_ERROR1(pev, "get_zvalue: no value found (%s)", str);
-        *val = GET_ENTRY(ptr, struct zvalue, elt)->value;
-        return TRUE;
+        while ((ptr = hash_table_iter_up(&hti)))
+        {
+            if (!strcmp(GET_ENTRY(ptr, struct zvalue, elt)->elt.name, str))
+            {
+                *val = GET_ENTRY(ptr, struct zvalue, elt)->value;
+                return TRUE;
+            }
+        }
+        return PEV_ERROR1(pev, "get_zvalue: no value found (%s)", str);
     default:
         *val = strtol(str, &n, 10);
         if (n == str || *n != '\0')
@@ -2974,7 +2985,15 @@ static BOOL  pev_set_value(struct pevaluator* pev, const char* name, DWORD_PTR v
     void*                       ptr;
 
     hash_table_iter_init(&pev->values, &hti, name);
-    if (!(ptr = hash_table_iter_up(&hti)))
+    while ((ptr = hash_table_iter_up(&hti)))
+    {
+        if (!strcmp(GET_ENTRY(ptr, struct zvalue, elt)->elt.name, name))
+        {
+            GET_ENTRY(ptr, struct zvalue, elt)->value = val;
+            break;
+        }
+    }
+    if (!ptr)
     {
         struct zvalue* zv = pool_alloc(&pev->pool, sizeof(*zv));
         if (!zv) return PEV_ERROR(pev, "set_value: out of memory");
@@ -2983,7 +3002,6 @@ static BOOL  pev_set_value(struct pevaluator* pev, const char* name, DWORD_PTR v
         zv->elt.name = pool_strdup(&pev->pool, name);
         hash_table_add(&pev->values, &zv->elt);
     }
-    else GET_ENTRY(ptr, struct zvalue, elt)->value = val;
     return TRUE;
 }
 
@@ -3158,7 +3176,7 @@ BOOL         pdb_virtual_unwind(struct cpu_stack_walk* csw, DWORD_PTR ip,
                       fpoext[i].str_offset < strsize ?
                           wine_dbgstr_a(strbase + 12 + fpoext[i].str_offset) : "<out of bounds>");
                 if (fpoext[i].str_offset < strsize)
-                    ret = pdb_parse_cmd_string(csw, fpoext, strbase + 12 + fpoext[i].str_offset, cpair);
+                    ret = pdb_parse_cmd_string(csw, &fpoext[i], strbase + 12 + fpoext[i].str_offset, cpair);
                 else
                     ret = FALSE;
                 break;

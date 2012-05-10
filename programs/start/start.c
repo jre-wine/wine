@@ -20,11 +20,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windows.h>
-#include <winuser.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 
 #include <wine/unicode.h>
 #include <wine/debug.h>
@@ -46,8 +46,9 @@ static void output(const WCHAR *message)
 
 	res = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), message, wlen, &count, NULL);
 
-	/* If writing to console fails, assume its file
-	i/o so convert to OEM codepage and output                  */
+	/* If writing to console fails, assume it's file
+         * i/o so convert to OEM codepage and output
+         */
 	if (!res)
 	{
 		DWORD len;
@@ -121,11 +122,6 @@ static void fatal_string(int which)
 static void usage(void)
 {
 	fatal_string(STRING_USAGE);
-}
-
-static void license(void)
-{
-	fatal_string(STRING_LICENSE);
 }
 
 static WCHAR *build_args( int argc, WCHAR **argvW )
@@ -223,10 +219,6 @@ int wmain (int argc, WCHAR *argv[])
 			case 'i':
 			case 'I':
 				break; /* FIXME: should ignore any changes to current environment */
-			case 'l':
-			case 'L':
-				license();
-				break;	/* notreached */
 			case 'm':
 			case 'M':
 				if (argv[i][ci+1] == 'a' || argv[i][ci+1] == 'A')
@@ -259,6 +251,9 @@ int wmain (int argc, WCHAR *argv[])
 			case 'w':
 			case 'W':
 				sei.fMask |= SEE_MASK_NOCLOSEPROCESS;
+				break;
+			case '?':
+				usage();
 				break;
 			default:
 				WINE_ERR("Option '%s' not recognized\n", wine_dbgstr_w( argv[i]+ci-1));

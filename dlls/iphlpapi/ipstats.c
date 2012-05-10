@@ -129,9 +129,7 @@
 #define ADVANCE(x, n) (x += ROUNDUP(((struct sockaddr *)n)->sa_len))
 #endif
 
-#include "windef.h"
-#include "winbase.h"
-#include "iprtrmib.h"
+#define NONAMELESSUNION
 #include "ifenum.h"
 #include "ipstats.h"
 
@@ -593,7 +591,7 @@ DWORD WINAPI GetIpStatistics(PMIB_IPSTATS stats)
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
-                            &stats->dwForwarding,
+                            &stats->u.dwForwarding,
                             &stats->dwDefaultTTL,
                             &stats->dwInReceives,
                             &stats->dwInHdrErrors,
@@ -631,7 +629,7 @@ DWORD WINAPI GetIpStatistics(PMIB_IPSTATS stats)
             kstat_read( kc, ksp, NULL ) != -1 &&
             ksp->ks_type == KSTAT_TYPE_NAMED)
         {
-            stats->dwForwarding      = kstat_get_ui32( ksp, "forwarding" );
+            stats->u.dwForwarding    = kstat_get_ui32( ksp, "forwarding" );
             stats->dwDefaultTTL      = kstat_get_ui32( ksp, "defaultTTL" );
             stats->dwInReceives      = kstat_get_ui32( ksp, "inReceives" );
             stats->dwInHdrErrors     = kstat_get_ui32( ksp, "inHdrErrors" );
@@ -684,7 +682,7 @@ DWORD WINAPI GetIpStatistics(PMIB_IPSTATS stats)
             return ERROR_NOT_SUPPORTED;
         }
 
-        stats->dwForwarding = ip_forwarding;
+        stats->u.dwForwarding = ip_forwarding;
         stats->dwDefaultTTL = ip_ttl;
         stats->dwInDelivers = ip_stat.ips_delivered;
         stats->dwInHdrErrors = ip_stat.ips_badhlen + ip_stat.ips_badsum + ip_stat.ips_tooshort + ip_stat.ips_badlen;
@@ -748,7 +746,7 @@ DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS stats)
                 {
                     ptr += sizeof(hdr);
                     sscanf( ptr, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u",
-                            &stats->dwRtoAlgorithm,
+                            &stats->u.dwRtoAlgorithm,
                             &stats->dwRtoMin,
                             &stats->dwRtoMax,
                             &stats->dwMaxConn,
@@ -785,7 +783,7 @@ DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS stats)
             kstat_read( kc, ksp, NULL ) != -1 &&
             ksp->ks_type == KSTAT_TYPE_NAMED)
         {
-            stats->dwRtoAlgorithm = kstat_get_ui32( ksp, "rtoAlgorithm" );
+            stats->u.dwRtoAlgorithm = kstat_get_ui32( ksp, "rtoAlgorithm" );
             stats->dwRtoMin       = kstat_get_ui32( ksp, "rtoMin" );
             stats->dwRtoMax       = kstat_get_ui32( ksp, "rtoMax" );
             stats->dwMaxConn      = kstat_get_ui32( ksp, "maxConn" );
@@ -818,7 +816,7 @@ DWORD WINAPI GetTcpStatistics(PMIB_TCPSTATS stats)
 
         if(sysctl(mib, MIB_LEN, &tcp_stat, &needed, NULL, 0) != -1)
         {
-            stats->dwRtoAlgorithm = MIB_TCP_RTO_VANJ;
+            stats->u.RtoAlgorithm = MIB_TCP_RTO_VANJ;
             stats->dwRtoMin = TCPTV_MIN;
             stats->dwRtoMax = TCPTV_REXMTMAX;
             stats->dwMaxConn = -1;
@@ -973,7 +971,7 @@ static int compare_ipforward_rows(const void *a, const void *b)
     int ret;
 
     if ((ret = rowA->dwForwardDest - rowB->dwForwardDest) != 0) return ret;
-    if ((ret = rowA->dwForwardProto - rowB->dwForwardProto) != 0) return ret;
+    if ((ret = rowA->u2.dwForwardProto - rowB->u2.dwForwardProto) != 0) return ret;
     if ((ret = rowA->dwForwardPolicy - rowB->dwForwardPolicy) != 0) return ret;
     return rowA->dwForwardNextHop - rowB->dwForwardNextHop;
 }
@@ -1035,9 +1033,9 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
                 row.dwForwardNextHop = strtoul(ptr + 1, &ptr, 16);
                 flags = strtoul(ptr + 1, &ptr, 16);
 
-                if (!(flags & RTF_UP)) row.dwForwardType = MIB_IPROUTE_TYPE_INVALID;
-                else if (flags & RTF_GATEWAY) row.dwForwardType = MIB_IPROUTE_TYPE_INDIRECT;
-                else row.dwForwardType = MIB_IPROUTE_TYPE_DIRECT;
+                if (!(flags & RTF_UP)) row.u1.ForwardType = MIB_IPROUTE_TYPE_INVALID;
+                else if (flags & RTF_GATEWAY) row.u1.ForwardType = MIB_IPROUTE_TYPE_INDIRECT;
+                else row.u1.ForwardType = MIB_IPROUTE_TYPE_DIRECT;
 
                 strtoul(ptr + 1, &ptr, 16); /* refcount, skip */
                 strtoul(ptr + 1, &ptr, 16); /* use, skip */
@@ -1045,7 +1043,7 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
                 row.dwForwardMask = strtoul(ptr + 1, &ptr, 16);
                 /* FIXME: other protos might be appropriate, e.g. the default
                  * route is typically set with MIB_IPPROTO_NETMGMT instead */
-                row.dwForwardProto = MIB_IPPROTO_LOCAL;
+                row.u2.ForwardProto = MIB_IPPROTO_LOCAL;
 
                 if (!(table = append_ipforward_row( heap, flags, table, &count, &row )))
                     break;
@@ -1071,8 +1069,8 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
                     row.dwForwardMask      = entry->ipRouteMask;
                     row.dwForwardPolicy    = 0;
                     row.dwForwardNextHop   = entry->ipRouteNextHop;
-                    row.dwForwardType      = entry->ipRouteType;
-                    row.dwForwardProto     = entry->ipRouteProto;
+                    row.u1.dwForwardType   = entry->ipRouteType;
+                    row.u2.dwForwardProto  = entry->ipRouteProto;
                     row.dwForwardAge       = entry->ipRouteAge;
                     row.dwForwardNextHopAS = 0;
                     row.dwForwardMetric1   = entry->ipRouteMetric1;
@@ -1141,9 +1139,9 @@ DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForw
 
           memset( &row, 0, sizeof(row) );
           row.dwForwardIfIndex = rtm->rtm_index;
-          row.dwForwardType = MIB_IPROUTE_TYPE_INDIRECT;
+          row.u1.ForwardType = MIB_IPROUTE_TYPE_INDIRECT;
           row.dwForwardMetric1 = rtm->rtm_rmx.rmx_hopcount;
-          row.dwForwardProto = MIB_IPPROTO_LOCAL;
+          row.u2.ForwardProto = MIB_IPPROTO_LOCAL;
 
           addrPtr = (char *)(rtm + 1);
 
@@ -1291,14 +1289,14 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
                 flags = strtoul(ptr + 1, &ptr, 16);
 
 #ifdef ATF_COM
-                if (flags & ATF_COM) row.dwType = MIB_IPNET_TYPE_DYNAMIC;
+                if (flags & ATF_COM) row.u.Type = MIB_IPNET_TYPE_DYNAMIC;
                 else
 #endif
 #ifdef ATF_PERM
-                if (flags & ATF_PERM) row.dwType = MIB_IPNET_TYPE_STATIC;
+                if (flags & ATF_PERM) row.u.Type = MIB_IPNET_TYPE_STATIC;
                 else
 #endif
-                    row.dwType = MIB_IPNET_TYPE_OTHER;
+                    row.u.Type = MIB_IPNET_TYPE_OTHER;
 
                 while (*ptr && isspace(*ptr)) ptr++;
                 while (*ptr && !isspace(*ptr))
@@ -1334,7 +1332,7 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
                     row.dwPhysAddrLen = min( entry->ipNetToMediaPhysAddress.o_length, MAXLEN_PHYSADDR );
                     memcpy( row.bPhysAddr, entry->ipNetToMediaPhysAddress.o_bytes, row.dwPhysAddrLen );
                     row.dwAddr = entry->ipNetToMediaNetAddress;
-                    row.dwType = entry->ipNetToMediaType;
+                    row.u.Type = entry->ipNetToMediaType;
                     namelen = min( sizeof(name) - 1, entry->ipNetToMediaIfIndex.o_length );
                     memcpy( name, entry->ipNetToMediaIfIndex.o_bytes, namelen );
                     name[namelen] = 0;
@@ -1391,10 +1389,10 @@ DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BO
               row.dwIndex = sdl->sdl_index;
               row.dwPhysAddrLen = min( 8, sdl->sdl_alen );
               memcpy( row.bPhysAddr, &sdl->sdl_data[sdl->sdl_nlen], row.dwPhysAddrLen );
-              if(rtm->rtm_rmx.rmx_expire == 0) row.dwType = MIB_IPNET_TYPE_STATIC;
-              else if(sinarp->sin_other & SIN_PROXY) row.dwType = MIB_IPNET_TYPE_OTHER;
-              else if(rtm->rtm_rmx.rmx_expire != 0) row.dwType = MIB_IPNET_TYPE_DYNAMIC;
-              else row.dwType = MIB_IPNET_TYPE_INVALID;
+              if(rtm->rtm_rmx.rmx_expire == 0) row.u.Type = MIB_IPNET_TYPE_STATIC;
+              else if(sinarp->sin_other & SIN_PROXY) row.u.Type = MIB_IPNET_TYPE_OTHER;
+              else if(rtm->rtm_rmx.rmx_expire != 0) row.u.Type = MIB_IPNET_TYPE_DYNAMIC;
+              else row.u.Type = MIB_IPNET_TYPE_INVALID;
 
               if (!(table = append_ipnet_row( heap, flags, table, &count, &row )))
                   break;
@@ -1531,6 +1529,76 @@ DWORD WINAPI AllocateAndGetUdpTableFromStack(PMIB_UDPTABLE *ppUdpTable, BOOL bOr
         }
         else ret = ERROR_NOT_SUPPORTED;
     }
+#elif defined(HAVE_SYS_SYSCTL_H) && defined(HAVE_STRUCT_XINPGEN)
+    {
+        size_t Len = 0;
+        char *Buf = NULL;
+        struct xinpgen *pXIG, *pOrigXIG;
+
+        if (sysctlbyname ("net.inet.udp.pcblist", NULL, &Len, NULL, 0) < 0)
+        {
+            ERR ("Failure to read net.inet.udp.pcblist via sysctlbyname!\n");
+            ret = ERROR_NOT_SUPPORTED;
+            goto done;
+        }
+
+        Buf = HeapAlloc (GetProcessHeap (), 0, Len);
+        if (!Buf)
+        {
+            ret = ERROR_OUTOFMEMORY;
+            goto done;
+        }
+
+        if (sysctlbyname ("net.inet.udp.pcblist", Buf, &Len, NULL, 0) < 0)
+        {
+            ERR ("Failure to read net.inet.udp.pcblist via sysctlbyname!\n");
+            ret = ERROR_NOT_SUPPORTED;
+            goto done;
+        }
+
+        /* Might be nothing here; first entry is just a header it seems */
+        if (Len <= sizeof (struct xinpgen)) goto done;
+
+        pOrigXIG = (struct xinpgen *)Buf;
+        pXIG = pOrigXIG;
+
+        for (pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len);
+             pXIG->xig_len > sizeof (struct xinpgen);
+             pXIG = (struct xinpgen *)((char *)pXIG + pXIG->xig_len))
+        {
+            struct inpcb *pINData;
+            struct xsocket *pSockData;
+
+            pINData = &((struct xinpcb *)pXIG)->xi_inp;
+            pSockData = &((struct xinpcb *)pXIG)->xi_socket;
+
+            /* Ignore sockets for other protocols */
+            if (pSockData->xso_protocol != IPPROTO_UDP)
+                continue;
+
+            /* Ignore PCBs that were freed while generating the data */
+            if (pINData->inp_gencnt > pOrigXIG->xig_gen)
+                continue;
+
+            /* we're only interested in IPv4 addresses */
+            if (!(pINData->inp_vflag & INP_IPV4) ||
+                (pINData->inp_vflag & INP_IPV6))
+                continue;
+
+            /* If all 0's, skip it */
+            if (!pINData->inp_laddr.s_addr &&
+                !pINData->inp_lport)
+                continue;
+
+            /* Fill in structure details */
+            row.dwLocalAddr = pINData->inp_laddr.s_addr;
+            row.dwLocalPort = pINData->inp_lport;
+            if (!(table = append_udp_row( heap, flags, table, &count, &row ))) break;
+        }
+
+    done:
+        HeapFree (GetProcessHeap (), 0, Buf);
+    }
 #else
     FIXME( "not implemented\n" );
     ret = ERROR_NOT_SUPPORTED;
@@ -1572,7 +1640,7 @@ static MIB_TCPTABLE *append_tcp_row( HANDLE heap, DWORD flags, MIB_TCPTABLE *tab
 
 /* Why not a lookup table? Because the TCPS_* constants are different
    on different platforms */
-static inline DWORD TCPStateToMIBState (int state)
+static inline MIB_TCP_STATE TCPStateToMIBState (int state)
 {
    switch (state)
    {
@@ -1653,11 +1721,11 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack( PMIB_TCPTABLE *ppTcpTable, BOOL bO
             while ((ptr = fgets(buf, sizeof(buf), fp)))
             {
                 if (sscanf( ptr, "%x: %x:%x %x:%x %x", &dummy, &row.dwLocalAddr, &row.dwLocalPort,
-                            &row.dwRemoteAddr, &row.dwRemotePort, &row.dwState ) != 6)
+                            &row.dwRemoteAddr, &row.dwRemotePort, &row.u.dwState ) != 6)
                     continue;
                 row.dwLocalPort = htons( row.dwLocalPort );
                 row.dwRemotePort = htons( row.dwRemotePort );
-                row.dwState = TCPStateToMIBState( row.dwState );
+                row.u.State = TCPStateToMIBState( row.u.dwState );
                 if (!(table = append_tcp_row( heap, flags, table, &count, &row )))
                     break;
             }
@@ -1681,7 +1749,7 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack( PMIB_TCPTABLE *ppTcpTable, BOOL bO
                     row.dwLocalPort = htons( entry->tcpConnLocalPort );
                     row.dwRemoteAddr = entry->tcpConnRemAddress;
                     row.dwRemotePort = htons( entry->tcpConnRemPort );
-                    row.dwState = entry->tcpConnState;
+                    row.u.dwState = entry->tcpConnState;
                     if (!(table = append_tcp_row( heap, flags, table, &count, &row ))) break;
                 }
                 HeapFree( GetProcessHeap(), 0, data );
@@ -1760,7 +1828,7 @@ DWORD WINAPI AllocateAndGetTcpTableFromStack( PMIB_TCPTABLE *ppTcpTable, BOOL bO
             row.dwLocalPort = pINData->inp_lport;
             row.dwRemoteAddr = pINData->inp_faddr.s_addr;
             row.dwRemotePort = pINData->inp_fport;
-            row.dwState = TCPStateToMIBState (pTCPData->t_state);
+            row.u.State = TCPStateToMIBState (pTCPData->t_state);
             if (!(table = append_tcp_row( heap, flags, table, &count, &row ))) break;
         }
 

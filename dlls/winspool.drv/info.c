@@ -33,6 +33,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <stddef.h>
+#include <errno.h>
+#ifdef HAVE_SYS_WAIT_H
+#include <sys/wait.h>
+#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -503,7 +507,7 @@ static BOOL CUPS_LoadPrinters(void)
             haddefault = TRUE;
         }
     }
-    if (hadprinter & !haddefault) {
+    if (hadprinter && !haddefault) {
         MultiByteToWideChar(CP_UNIXCP, 0, dests[0].name, -1, nameW, sizeof(nameW) / sizeof(WCHAR));
         SetDefaultPrinterW(nameW);
     }
@@ -516,6 +520,8 @@ static BOOL CUPS_LoadPrinters(void)
 static BOOL
 PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
     PRINTER_INFO_2A	pinfo2a;
+    const char	*r;
+    size_t		name_len;
     char		*e,*s,*name,*prettyname,*devname;
     BOOL		ret = FALSE, set_default = FALSE;
     char *port = NULL, *env_default;
@@ -523,14 +529,17 @@ PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
     WCHAR devnameW[MAX_PATH];
 
     while (isspace(*pent)) pent++;
-    s = strchr(pent,':');
-    if(s) *s='\0';
-    name = HeapAlloc(GetProcessHeap(), 0, strlen(pent) + 1);
-    strcpy(name,pent);
-    if(s) {
-        *s=':';
-        pent = s;
-    } else
+    r = strchr(pent,':');
+    if (r)
+        name_len = r - pent;
+    else
+        name_len = strlen(pent);
+    name = HeapAlloc(GetProcessHeap(), 0, name_len + 1);
+    memcpy(name, pent, name_len);
+    name[name_len] = '\0';
+    if (r)
+        pent = r;
+    else
         pent = "";
 
     TRACE("name=%s entry=%s\n",name, pent);
@@ -1773,6 +1782,38 @@ LONG WINAPI DocumentPropertiesW(HWND hWnd, HANDLE hPrinter,
     HeapFree(GetProcessHeap(),0,pDevModeInputA);
     HeapFree(GetProcessHeap(),0,pDeviceNameA);
     return ret;
+}
+
+/*****************************************************************************
+ *          IsValidDevmodeA            [WINSPOOL.@]
+ *
+ * Validate a DEVMODE structure and fix errors if possible.
+ *
+ */
+BOOL WINAPI IsValidDevmodeA(PDEVMODEA *pDevMode, SIZE_T size)
+{
+    FIXME("(%p,%ld): stub\n", pDevMode, size);
+
+    if(!pDevMode)
+        return FALSE;
+
+    return TRUE;
+}
+
+/*****************************************************************************
+ *          IsValidDevmodeW            [WINSPOOL.@]
+ *
+ * Validate a DEVMODE structure and fix errors if possible.
+ *
+ */
+BOOL WINAPI IsValidDevmodeW(PDEVMODEW *pDevMode, SIZE_T size)
+{
+    FIXME("(%p,%ld): stub\n", pDevMode, size);
+
+    if(!pDevMode)
+        return FALSE;
+
+    return TRUE;
 }
 
 /******************************************************************
@@ -7193,7 +7234,7 @@ static BOOL get_job_info_2(job_t *job, JOB_INFO_2W *ji2, LPBYTE buf, DWORD cbBuf
     DWORD shift;
     BOOL space = (cbBuf > 0);
     LPBYTE ptr = buf;
-    LPDEVMODEA  dmA;
+    LPDEVMODEA  dmA = NULL;
     LPDEVMODEW  devmode;
 
     *pcbNeeded = 0;
@@ -7371,6 +7412,8 @@ static BOOL schedule_pipe(LPCWSTR cmd, LPCWSTR filename)
     int fds[2] = {-1, -1}, file_fd = -1, no_read;
     BOOL ret = FALSE;
     char buf[1024];
+    pid_t pid, wret;
+    int status;
 
     if(!(unixname = wine_get_unix_file_name(filename)))
         return FALSE;
@@ -7390,7 +7433,7 @@ static BOOL schedule_pipe(LPCWSTR cmd, LPCWSTR filename)
         goto end;
     }
 
-    if (fork() == 0)
+    if ((pid = fork()) == 0)
     {
         close(0);
         dup2(fds[0], 0);
@@ -7398,14 +7441,36 @@ static BOOL schedule_pipe(LPCWSTR cmd, LPCWSTR filename)
 
         /* reset signals that we previously set to SIG_IGN */
         signal(SIGPIPE, SIG_DFL);
-        signal(SIGCHLD, SIG_DFL);
 
         execl("/bin/sh", "/bin/sh", "-c", cmdA, NULL);
         _exit(1);
     }
+    else if (pid == -1)
+    {
+        ERR("fork() failed!\n");
+        goto end;
+    }
 
     while((no_read = read(file_fd, buf, sizeof(buf))) > 0)
         write(fds[1], buf, no_read);
+
+    close(fds[1]);
+    fds[1] = -1;
+
+    /* reap child */
+    do {
+        wret = waitpid(pid, &status, 0);
+    } while (wret < 0 && errno == EINTR);
+    if (wret < 0)
+    {
+        ERR("waitpid() failed!\n");
+        goto end;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status))
+    {
+        ERR("child process failed! %d\n", status);
+        goto end;
+    }
 
     ret = TRUE;
 

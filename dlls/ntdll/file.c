@@ -27,9 +27,6 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifdef HAVE_SYS_ERRNO_H
-#include <sys/errno.h>
-#endif
 #ifdef HAVE_LINUX_MAJOR_H
 # include <linux/major.h>
 #endif
@@ -347,6 +344,9 @@ NTSTATUS FILE_GetNtStatus(void)
     case ECONNRESET:return STATUS_PIPE_DISCONNECTED;
     case EFAULT:    return STATUS_ACCESS_VIOLATION;
     case ESPIPE:    return STATUS_ILLEGAL_FUNCTION;
+#ifdef ETIME /* Missing on FreeBSD */
+    case ETIME:     return STATUS_IO_TIMEOUT;
+#endif
     case ENOEXEC:   /* ?? */
     case EEXIST:    /* ?? */
     default:
@@ -1960,7 +1960,18 @@ NTSTATUS WINAPI NtQueryInformationFile( HANDLE hFile, PIO_STATUS_BLOCK io,
                 {
                     pli->NamedPipeType = (reply->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE) ? 
                         FILE_PIPE_TYPE_MESSAGE : FILE_PIPE_TYPE_BYTE;
-                    pli->NamedPipeConfiguration = 0; /* FIXME */
+                    switch (reply->sharing)
+                    {
+                        case FILE_SHARE_READ:
+                            pli->NamedPipeConfiguration = FILE_PIPE_OUTBOUND;
+                            break;
+                        case FILE_SHARE_WRITE:
+                            pli->NamedPipeConfiguration = FILE_PIPE_INBOUND;
+                            break;
+                        case FILE_SHARE_READ | FILE_SHARE_WRITE:
+                            pli->NamedPipeConfiguration = FILE_PIPE_FULL_DUPLEX;
+                            break;
+                    }
                     pli->MaximumInstances = reply->maxinstances;
                     pli->CurrentInstances = reply->instances;
                     pli->InboundQuota = reply->insize;
@@ -2781,10 +2792,11 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
         req->attributes = attr->Attributes;
         req->rootdir = wine_server_obj_handle( attr->RootDirectory );
         req->options = options;
+        req->sharing = sharing;
         req->flags = 
-            (pipe_type) ? NAMED_PIPE_MESSAGE_STREAM_WRITE : 0 |
-            (read_mode) ? NAMED_PIPE_MESSAGE_STREAM_READ  : 0 |
-            (completion_mode) ? NAMED_PIPE_NONBLOCKING_MODE  : 0;
+            (pipe_type ? NAMED_PIPE_MESSAGE_STREAM_WRITE   : 0) |
+            (read_mode ? NAMED_PIPE_MESSAGE_STREAM_READ    : 0) |
+            (completion_mode ? NAMED_PIPE_NONBLOCKING_MODE : 0);
         req->maxinstances = max_inst;
         req->outsize = outbound_quota;
         req->insize  = inbound_quota;

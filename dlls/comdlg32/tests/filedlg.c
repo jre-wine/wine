@@ -22,7 +22,6 @@
 #include <windows.h>
 #include <wine/test.h>
 
-#include "initguid.h"
 #include "shlguid.h"
 #define COBJMACROS
 #include "shobjidl.h"
@@ -227,7 +226,8 @@ static UINT_PTR CALLBACK create_view_window2_hook(HWND dlg, UINT msg, WPARAM wPa
 
             hr = IShellView2_GetCurrentInfo(shell_view2, &folder_settings);
             ok(SUCCEEDED(hr), "GetCurrentInfo returned %#x\n", hr);
-            ok(folder_settings.ViewMode == FVM_DETAILS, "view mode is %d, expected FVM_DETAILS\n",
+            ok(folder_settings.ViewMode == FVM_DETAILS || broken(folder_settings.ViewMode == FVM_LIST), /* nt4 */
+               "view mode is %d, expected FVM_DETAILS\n",
                folder_settings.ViewMode);
 
 cleanup:
@@ -1033,7 +1033,7 @@ static UINT_PTR WINAPI test_extension_wndproc(HWND dlg, UINT msg, WPARAM wParam,
 {
     HWND parent = GetParent( dlg);
     if( msg == WM_NOTIFY) {
-        SetTimer( dlg, 0, 100, 0);
+        SetTimer( dlg, 0, 1000, 0);
         PostMessage( parent, WM_COMMAND, IDOK, 0);
     }
     if( msg == WM_TIMER) {
@@ -1044,51 +1044,91 @@ static UINT_PTR WINAPI test_extension_wndproc(HWND dlg, UINT msg, WPARAM wParam,
     return FALSE;
 }
 
-static const char *defext_filters[] = {
-    "TestFilter (*.pt*)\0*.pt*\0",
-    "TestFilter (*.ab?)\0*.ab?\0",
-    "TestFilter (*.*)\0*.*\0",
-    NULL    /* is a test, not an endmark! */
-};
-
 #define ARRAY_SIZE(a) (sizeof(a)/sizeof((a)[0]))
+
+static void test_extension_helper(OPENFILENAME* ofn, const char *filter,
+                                  const char *expected_filename)
+{
+    char *filename_ptr;
+    DWORD ret;
+    BOOL boolret;
+
+    strcpy(ofn->lpstrFile, "deadbeef");
+    ofn->lpstrFilter = filter;
+
+    boolret = GetSaveFileNameA(ofn);
+    ok(boolret, "%s: expected TRUE\n", filter);
+
+    ret = CommDlgExtendedError();
+    ok(!ret, "%s: CommDlgExtendedError returned %#x\n", filter, ret);
+
+    filename_ptr = ofn->lpstrFile + ofn->nFileOffset;
+    ok(strcmp(filename_ptr, expected_filename) == 0,
+        "%s: Filename is %s, expected %s\n", filter, filename_ptr, expected_filename);
+}
 
 static void test_extension(void)
 {
     OPENFILENAME ofn = { sizeof(OPENFILENAME)};
     char filename[1024] = {0};
     char curdir[MAX_PATH];
-    char *filename_ptr;
-    const char *test_file_name = "deadbeef";
-    const char **cur_filter;
-    DWORD ret;
+    unsigned int i;
     BOOL boolret;
+
+    const char *defext_concrete_filters[] = {
+        "TestFilter (*.abc)\0*.abc\0",
+        "TestFilter (*.abc;)\0*.abc;\0",
+        "TestFilter (*.abc;*.def)\0*.abc;*.def\0",
+    };
+
+    const char *defext_wildcard_filters[] = {
+        "TestFilter (*.pt*)\0*.pt*\0",
+        "TestFilter (*.pt*;*.abc)\0*.pt*;*.abc\0",
+        "TestFilter (*.ab?)\0*.ab?\0",
+        "TestFilter (*.*)\0*.*\0",
+        "TestFilter (*sav)\0*sav\0",
+        NULL    /* is a test, not an endmark! */
+    };
 
     boolret = GetCurrentDirectoryA(sizeof(curdir), curdir);
     ok(boolret, "Failed to get current dir err %d\n", GetLastError());
 
-    /* Ignore .* extension */
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = NULL;
     ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_EXPLORER | OFN_ENABLEHOOK;
-    ofn.lpstrDefExt = NULL;
     ofn.lpstrInitialDir = curdir;
     ofn.lpfnHook = test_extension_wndproc;
     ofn.nFileExtension = 0;
 
-    for (cur_filter = defext_filters; cur_filter < defext_filters + ARRAY_SIZE(defext_filters); cur_filter++) {
-        ofn.lpstrFilter = *cur_filter;
-        strcpy(filename, test_file_name);
-        boolret = GetSaveFileNameA(&ofn);
-        ok(boolret, "expected true\n");
-        ret = CommDlgExtendedError();
-        ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
-        filename_ptr = ofn.lpstrFile + strlen( ofn.lpstrFile ) - strlen( test_file_name );
-        ok( strlen(ofn.lpstrFile) >= strlen(test_file_name), "Filename %s is too short\n", ofn.lpstrFile );
-        ok( strcmp(filename_ptr, test_file_name) == 0,
-            "Filename is %s, expected %s\n", filename_ptr, test_file_name );
+    ofn.lpstrDefExt = NULL;
+
+    /* Without lpstrDefExt, append no extension */
+    test_extension_helper(&ofn, "TestFilter (*.abc) lpstrDefExt=NULL\0*.abc\0", "deadbeef");
+    test_extension_helper(&ofn, "TestFilter (*.ab?) lpstrDefExt=NULL\0*.ab?\0", "deadbeef");
+
+    ofn.lpstrDefExt = "";
+
+    /* If lpstrDefExt="" and the filter has a concrete extension, append it */
+    test_extension_helper(&ofn, "TestFilter (*.abc) lpstrDefExt=\"\"\0*.abc\0", "deadbeef.abc");
+
+    /* If lpstrDefExt="" and the filter has a wildcard extension, do nothing */
+    test_extension_helper(&ofn, "TestFilter (*.ab?) lpstrDefExt=\"\"\0*.ab?\0", "deadbeef");
+
+    ofn.lpstrDefExt = "xyz";
+
+    /* Append concrete extensions from filters */
+    for (i = 0; i < ARRAY_SIZE(defext_concrete_filters); i++) {
+        test_extension_helper(&ofn, defext_concrete_filters[i], "deadbeef.abc");
+    }
+
+    /* Append nothing from this filter */
+    test_extension_helper(&ofn, "TestFilter (*.)\0*.\0", "deadbeef");
+
+    /* Ignore wildcard extensions in filters */
+    for (i = 0; i < ARRAY_SIZE(defext_wildcard_filters); i++) {
+        test_extension_helper(&ofn, defext_wildcard_filters[i], "deadbeef.xyz");
     }
 }
 

@@ -109,28 +109,28 @@ static LONG delete_key( HKEY key, LPCSTR subkey, REGSAM access )
     return RegDeleteKeyA( key, subkey );
 }
 
-static LPSTR get_user_sid(LPSTR *usersid)
+static char *get_user_sid(void)
 {
     HANDLE token;
-    BYTE buf[1024];
-    DWORD size;
-    PTOKEN_USER user;
+    DWORD size = 0;
+    TOKEN_USER *user;
+    char *usersid = NULL;
 
     if (!pConvertSidToStringSidA)
     {
         win_skip("ConvertSidToStringSidA is not available\n");
         return NULL;
     }
-
-    *usersid = NULL;
     OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
-    size = sizeof(buf);
-    GetTokenInformation(token, TokenUser, buf, size, &size);
-    user = (PTOKEN_USER)buf;
-    pConvertSidToStringSidA(user->User.Sid, usersid);
-    ok(*usersid != NULL, "pConvertSidToStringSidA failed lre=%d\n", GetLastError());
+    GetTokenInformation(token, TokenUser, NULL, size, &size);
+
+    user = HeapAlloc(GetProcessHeap(), 0, size);
+    GetTokenInformation(token, TokenUser, user, size, &size);
+    pConvertSidToStringSidA(user->User.Sid, &usersid);
+    HeapFree(GetProcessHeap(), 0, user);
+
     CloseHandle(token);
-    return *usersid;
+    return usersid;
 }
 
 /* RegDeleteTreeW from dlls/advapi32/registry.c */
@@ -753,7 +753,7 @@ static MSIHANDLE create_package_db(void)
     ok( res == ERROR_SUCCESS , "Failed to commit database\n" );
 
     res = set_summary_info(hdb);
-    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     res = run_query( hdb,
             "CREATE TABLE `Directory` ( "
@@ -1134,6 +1134,7 @@ static void test_settargetpath(void)
     r = MsiSetTargetPath( hpkg, "TARGETDIR", tempdir );
     ok( r == ERROR_SUCCESS, "MsiSetTargetPath on subsubdir returned %d\n", r );
 
+    buffer[0] = 0;
     sz = sizeof buffer - 1;
     lstrcat( tempdir, "\\" );
     r = MsiGetTargetPath( hpkg, "TARGETDIR", buffer, &sz );
@@ -1144,13 +1145,29 @@ static void test_settargetpath(void)
     query_file_path( hpkg, "[#RootFile]", buffer );
     ok( !lstrcmp(buffer, file), "Expected %s, got %s\n", file, buffer);
 
+    buffer[0] = 0;
+    sz = sizeof(buffer);
+    r = MsiGetPropertyA( hpkg, "TestParent", buffer, &sz );
+    ok( r == ERROR_SUCCESS, "MsiGetProperty returned %u\n", r );
+    lstrcatA( tempdir, "TestParent\\" );
+    ok( !lstrcmpi(buffer, tempdir), "Expected \"%s\", got \"%s\"\n", tempdir, buffer );
+
     r = MsiSetTargetPath( hpkg, "TestParent", "C:\\one\\two" );
     ok( r == ERROR_SUCCESS, "MsiSetTargetPath returned %d\n", r );
 
+    buffer[0] = 0;
+    sz = sizeof(buffer);
+    r = MsiGetPropertyA( hpkg, "TestParent", buffer, &sz );
+    ok( r == ERROR_SUCCESS, "MsiGetProperty returned %u\n", r );
+    ok( lstrcmpi(buffer, "C:\\one\\two\\TestDir\\"),
+        "Expected \"C:\\one\\two\\TestDir\\\", got \"%s\"\n", buffer );
+
+    buffer[0] = 0;
     query_file_path( hpkg, "[#TestFile]", buffer );
     ok( !lstrcmpi(buffer, "C:\\one\\two\\TestDir\\testfile.txt"),
         "Expected C:\\one\\two\\TestDir\\testfile.txt, got %s\n", buffer );
 
+    buffer[0] = 0;
     sz = sizeof buffer - 1;
     r = MsiGetTargetPath( hpkg, "TestParent", buffer, &sz );
     ok( r == ERROR_SUCCESS, "failed to get target path: %d\n", r);
@@ -1159,10 +1176,29 @@ static void test_settargetpath(void)
     r = MsiSetTargetPath( hpkg, "TestParent", "C:\\one\\two\\three" );
     ok( r == ERROR_SUCCESS, "MsiSetTargetPath returned %d\n", r );
 
+    buffer[0] = 0;
     sz = sizeof buffer - 1;
     r = MsiGetTargetPath( hpkg, "TestParent", buffer, &sz );
     ok( r == ERROR_SUCCESS, "failed to get target path: %d\n", r);
     ok( !lstrcmpi(buffer, "C:\\one\\two\\three\\"), "Expected C:\\one\\two\\three\\, got %s\n", buffer);
+
+    r = MsiSetTargetPath( hpkg, "TestParent", "C:\\\\one\\\\two  " );
+    ok( r == ERROR_SUCCESS, "MsiSetTargetPath returned %d\n", r );
+
+    buffer[0] = 0;
+    sz = sizeof buffer - 1;
+    r = MsiGetTargetPath( hpkg, "TestParent", buffer, &sz );
+    ok( r == ERROR_SUCCESS, "failed to get target path: %d\n", r);
+    ok( !lstrcmpi(buffer, "C:\\one\\two\\"), "Expected \"C:\\one\\two\\\", got %s\n", buffer);
+
+    r = MsiSetTargetPath( hpkg, "TestParent", "C:\\\\ Program Files \\\\ " );
+    ok( r == ERROR_SUCCESS, "MsiSetTargetPath returned %d\n", r );
+
+    buffer[0] = 0;
+    sz = sizeof buffer - 1;
+    r = MsiGetTargetPath( hpkg, "TestParent", buffer, &sz );
+    ok( r == ERROR_SUCCESS, "failed to get target path: %d\n", r);
+    ok( !lstrcmpi(buffer, "C:\\Program Files\\"), "Expected \"C:\\Program Files\\\", got %s\n", buffer);
 
     MsiCloseHandle( hpkg );
 }
@@ -2447,12 +2483,12 @@ static void test_formatrecord2(void)
     buffer[0] = 0;
     sz = sizeof buffer;
     r = MsiFormatRecord( hpkg, hrec, buffer, &sz );
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
 
     r = MsiRecordSetString(hrec, 0, "[foo][1]");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "hoo");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2460,7 +2496,7 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "x[~]x");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2468,9 +2504,9 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[foo.$%}][1]");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "hoo");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2478,7 +2514,7 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[\\[]");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 1, "size wrong\n");
@@ -2487,7 +2523,7 @@ static void test_formatrecord2(void)
 
     SetEnvironmentVariable("FOO", "BAR");
     r = MsiRecordSetString(hrec, 0, "[%FOO]");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -2495,9 +2531,9 @@ static void test_formatrecord2(void)
     ok( r == ERROR_SUCCESS, "format failed\n");
 
     r = MsiRecordSetString(hrec, 0, "[[1]]");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     r = MsiRecordSetString(hrec, 1, "%FOO");
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     sz = sizeof buffer;
     r = MsiFormatRecord(hpkg, hrec, buffer, &sz);
     ok( sz == 3, "size wrong\n");
@@ -7975,10 +8011,7 @@ static void test_appsearch(void)
     size = sizeof(prop);
     r = MsiGetPropertyA( hpkg, "WEBBROWSERPROG", prop, &size );
     ok( r == ERROR_SUCCESS, "get property failed: %d\n", r);
-    todo_wine
-    {
-        ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
-    }
+    ok( lstrlenA(prop) != 0, "Expected non-zero length\n");
 
     size = sizeof(prop);
     r = MsiGetPropertyA( hpkg, "NOTEPAD", prop, &size );
@@ -7998,7 +8031,7 @@ static void test_appsearch_complocator(void)
     DWORD size;
     UINT r;
 
-    if (!get_user_sid(&usersid))
+    if (!(usersid = get_user_sid()))
         return;
 
     if (is_process_limited())
@@ -8425,13 +8458,13 @@ static void test_appsearch_reglocator(void)
     sprintf(path, "\"%s\\FileName1\" -option", CURR_DIR);
     res = RegSetValueExA(hklm, "value16", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     space = (strchr(CURR_DIR, ' ')) ? TRUE : FALSE;
     sprintf(path, "%s\\FileName1 -option", CURR_DIR);
     res = RegSetValueExA(hklm, "value17", 0, REG_SZ,
                          (const BYTE *)path, lstrlenA(path) + 1);
-    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", res);
+    ok( res == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", res);
 
     hdb = create_package_db();
     ok(hdb, "Expected a valid database handle\n");
@@ -8754,12 +8787,6 @@ static void test_appsearch_reglocator(void)
     if (S(U(si)).wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
         size = ExpandEnvironmentStringsA("%PATH%", NULL, 0);
-        if (size == 0 && GetLastError() == ERROR_INVALID_PARAMETER)
-        {
-            /* Workaround for Win95 */
-            CHAR tempbuf[1];
-            size = ExpandEnvironmentStringsA("%PATH%", tempbuf, 0);
-        }
         pathvar = HeapAlloc(GetProcessHeap(), 0, size);
         ExpandEnvironmentStringsA("%PATH%", pathvar, size);
 
@@ -9648,7 +9675,7 @@ static void test_featureparents(void)
 
     /* msidbFeatureAttributesFavorLocal:msidbComponentAttributesOptional */
     r = add_component_entry( hdb, "'lepus', '', 'TARGETDIR', 2, '', 'lepus_file'" );
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
 
     r = add_feature_components_entry( hdb, "'zodiac', 'leo'" );
     ok( r == ERROR_SUCCESS, "cannot add feature components: %d\n", r );
@@ -10044,14 +10071,10 @@ static void test_installprops(void)
         RegQueryValueEx(hkey2, "RegisteredOwner", NULL, &type, (LPBYTE)path, &size);
     }
 
-    /* win9x doesn't set this */
-    if (*path)
-    {
-        size = MAX_PATH;
-        r = MsiGetProperty(hpkg, "USERNAME", buf, &size);
-        ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
-        ok( !lstrcmp(buf, path), "Expected %s, got %s\n", path, buf);
-    }
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "USERNAME", buf, &size);
+    ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
+    ok( !lstrcmp(buf, path), "Expected %s, got %s\n", path, buf);
 
     size = MAX_PATH;
     type = REG_SZ;
@@ -10096,24 +10119,29 @@ static void test_installprops(void)
     ok( r == ERROR_SUCCESS, "failed to get property: %d\n", r);
     trace("PackageCode = %s\n", buf);
 
+    size = MAX_PATH;
+    r = MsiGetProperty(hpkg, "ComputerName", buf, &size);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
+    trace("ComputerName = %s\n", buf);
+
     langid = GetUserDefaultLangID();
     sprintf(path, "%d", langid);
 
     size = MAX_PATH;
     r = MsiGetProperty(hpkg, "UserLanguageID", buf, &size);
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     ok( !lstrcmpA(buf, path), "Expected \"%s\", got \"%s\"\n", path, buf);
 
     res = GetSystemMetrics(SM_CXSCREEN);
     size = MAX_PATH;
     r = MsiGetProperty(hpkg, "ScreenX", buf, &size);
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     ok(atol(buf) == res, "Expected %d, got %ld\n", res, atol(buf));
 
     res = GetSystemMetrics(SM_CYSCREEN);
     size = MAX_PATH;
     r = MsiGetProperty(hpkg, "ScreenY", buf, &size);
-    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS< got %d\n", r);
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS got %d\n", r);
     ok(atol(buf) == res, "Expected %d, got %ld\n", res, atol(buf));
 
     if (pGetSystemInfo && pSHGetFolderPathA)
@@ -10960,13 +10988,17 @@ static void test_MsiGetSourcePath(void)
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    todo_wine
-    {
-        ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
-    }
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostInitialize */
     size = MAX_PATH;
@@ -11013,6 +11045,13 @@ static void test_MsiGetSourcePath(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -11067,6 +11106,13 @@ static void test_MsiGetSourcePath(void)
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
@@ -11117,6 +11163,13 @@ static void test_MsiGetSourcePath(void)
     ok(size == MAX_PATH, "Expected size to be unchanged, got %d\n", size);
 
     /* source path does not exist, but the property exists */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -11256,6 +11309,13 @@ static void test_MsiGetSourcePath(void)
     /* source path nor the property exist */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
+    ok(size == 0, "Expected 0, got %d\n", size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, ""), "Expected \"\", got \"%s\"\n", path);
@@ -11312,13 +11372,17 @@ static void test_MsiGetSourcePath(void)
     /* source path does not exist, but the property exists */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
-    todo_wine
-    {
-        ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
-        ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
-    }
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
 
     /* try SubDir after CostInitialize */
     size = MAX_PATH;
@@ -11367,6 +11431,13 @@ static void test_MsiGetSourcePath(void)
     }
 
     /* source path and the property exist */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -11423,6 +11494,13 @@ static void test_MsiGetSourcePath(void)
     /* source path and the property exist */
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
@@ -11475,6 +11553,13 @@ static void test_MsiGetSourcePath(void)
     }
 
     /* source path and the property exist */
+    size = MAX_PATH;
+    lstrcpyA(path, "kiwi");
+    r = MsiGetProperty(hpkg, "SourceDir", path, &size);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
+    ok(!lstrcmpA(path, cwd), "Expected \"%s\", got \"%s\"\n", cwd, path);
+    ok(size == lstrlenA(cwd), "Expected %d, got %d\n", lstrlenA(cwd), size);
+
     size = MAX_PATH;
     lstrcpyA(path, "kiwi");
     r = MsiGetProperty(hpkg, "SOURCEDIR", path, &size);
@@ -12304,9 +12389,7 @@ static void _test_file_access(LPCSTR file, const struct access_res *ares, DWORD 
                line, idx, ares[idx].gothandle,
                (hfile != INVALID_HANDLE_VALUE));
 
-            ok(lasterr == ares[idx].lasterr ||
-               lasterr == 0xdeadbeef, /* win9x */
-               "(%d, lasterr, %d): Expected %d, got %d\n",
+            ok(lasterr == ares[idx].lasterr, "(%d, lasterr, %d): Expected %d, got %d\n",
                line, idx, ares[idx].lasterr, lasterr);
 
             CloseHandle(hfile);
@@ -12529,16 +12612,7 @@ static void test_MsiGetProductProperty(void)
     DWORD size;
     LONG res;
     UINT r;
-    SC_HANDLE scm;
     REGSAM access = KEY_ALL_ACCESS;
-
-    scm = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
-    if (!scm && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
-    {
-        win_skip("Different registry keys on Win9x and WinMe\n");
-        return;
-    }
-    CloseServiceHandle(scm);
 
     GetCurrentDirectoryA(MAX_PATH, path);
     lstrcatA(path, "\\");
@@ -12928,6 +13002,231 @@ static void test_MsiApplyPatch(void)
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r);
 }
 
+static void test_MsiEnumComponentCosts(void)
+{
+    MSIHANDLE hdb, hpkg;
+    char package[12], drive[3];
+    DWORD len;
+    UINT r;
+    int cost, temp;
+
+    hdb = create_package_db();
+    ok( hdb, "failed to create database\n" );
+
+    r = create_property_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create Property table %u\n", r );
+
+    r = add_property_entry( hdb, "'ProductCode', '{379B1C47-40C1-42FA-A9BB-BEBB6F1B0172}'" );
+    ok( r == ERROR_SUCCESS, "cannot add property entry %u\n", r );
+
+    r = add_property_entry( hdb, "'MSIFASTINSTALL', '1'" );
+    ok( r == ERROR_SUCCESS, "cannot add property entry %u\n", r );
+
+    r = add_directory_entry( hdb, "'TARGETDIR', '', 'SourceDir'" );
+    ok( r == ERROR_SUCCESS, "failed to add directory entry %u\n" , r );
+
+    r = create_media_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create Media table %u\n", r );
+
+    r = add_media_entry( hdb, "'1', '2', 'cabinet', '', '', ''");
+    ok( r == ERROR_SUCCESS, "cannot add media entry %u\n", r );
+
+    r = create_file_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create File table %u\n", r );
+
+    r = add_file_entry( hdb, "'one.txt', 'one', 'one.txt', 4096, '', '', 8192, 1" );
+    ok( r == ERROR_SUCCESS, "cannot add file %u\n", r );
+
+    r = create_component_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create Component table %u\n", r );
+
+    r = add_component_entry( hdb, "'one', '{B2F86B9D-8447-4BC5-8883-750C45AA31CA}', 'TARGETDIR', 0, '', 'one.txt'" );
+    ok( r == ERROR_SUCCESS, "cannot add component %u\n", r );
+
+    r = add_component_entry( hdb, "'two', '{62A09F6E-0B74-4829-BDB7-CAB66F42CCE8}', 'TARGETDIR', 0, '', ''" );
+    ok( r == ERROR_SUCCESS, "cannot add component %u\n", r );
+
+    r = create_feature_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create Feature table %u\n", r );
+
+    r = add_feature_entry( hdb, "'one', '', '', '', 0, 1, '', 0" );
+    ok( r == ERROR_SUCCESS, "cannot add feature %u\n", r );
+
+    r = add_feature_entry( hdb, "'two', '', '', '', 0, 1, '', 0" );
+    ok( r == ERROR_SUCCESS, "cannot add feature %u\n", r );
+
+    r = create_feature_components_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create FeatureComponents table %u\n", r );
+
+    r = add_feature_components_entry( hdb, "'one', 'one'" );
+    ok( r == ERROR_SUCCESS, "cannot add feature/component pair %u\n", r );
+
+    r = add_feature_components_entry( hdb, "'two', 'two'" );
+    ok( r == ERROR_SUCCESS, "cannot add feature/component pair %u\n", r );
+
+    r = create_install_execute_sequence_table( hdb );
+    ok( r == ERROR_SUCCESS, "cannot create InstallExecuteSequence table %u\n", r );
+
+    r = add_install_execute_sequence_entry( hdb, "'CostInitialize', '', '800'" );
+    ok( r == ERROR_SUCCESS, "cannot add install execute sequence entry %u\n", r );
+
+    r = add_install_execute_sequence_entry( hdb, "'FileCost', '', '900'" );
+    ok( r == ERROR_SUCCESS, "cannot add install execute sequence entry %u\n", r );
+
+    r = add_install_execute_sequence_entry( hdb, "'CostFinalize', '', '1000'" );
+    ok( r == ERROR_SUCCESS, "cannot add install execute sequence entry %u\n", r );
+
+    r = add_install_execute_sequence_entry( hdb, "'InstallValidate', '', '1100'" );
+    ok( r == ERROR_SUCCESS, "cannot add install execute sequence entry %u\n", r );
+
+    MsiDatabaseCommit( hdb );
+
+    sprintf( package, "#%u", hdb );
+    r = MsiOpenPackageA( package, &hpkg );
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( 0, NULL, 0, INSTALLSTATE_UNKNOWN, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, NULL, 0, INSTALLSTATE_UNKNOWN, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, NULL, 0, INSTALLSTATE_UNKNOWN, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, "", 0, INSTALLSTATE_UNKNOWN, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_UNKNOWN, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, NULL, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, NULL, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, NULL, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, NULL );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    todo_wine ok( r == ERROR_INVALID_HANDLE_STATE, "Expected ERROR_INVALID_HANDLE_STATE, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, NULL, &len, &cost, &temp );
+    ok( r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %u\n", r );
+
+    MsiSetInternalUI( INSTALLUILEVEL_NONE, NULL );
+
+    r = MsiDoAction( hpkg, "CostInitialize" );
+    ok( r == ERROR_SUCCESS, "CostInitialize failed %u\n", r );
+
+    r = MsiDoAction( hpkg, "FileCost" );
+    ok( r == ERROR_SUCCESS, "FileCost failed %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_FUNCTION_NOT_CALLED, "Expected ERROR_FUNCTION_NOT_CALLED, got %u\n", r );
+
+    r = MsiDoAction( hpkg, "CostFinalize" );
+    ok( r == ERROR_SUCCESS, "CostFinalize failed %u\n", r );
+
+    /* contrary to what msdn says InstallValidate must be called too */
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    todo_wine ok( r == ERROR_FUNCTION_NOT_CALLED, "Expected ERROR_FUNCTION_NOT_CALLED, got %u\n", r );
+
+    r = MsiDoAction( hpkg, "InstallValidate" );
+    ok( r == ERROR_SUCCESS, "InstallValidate failed %u\n", r );
+
+    len = 0;
+    r = MsiEnumComponentCostsA( hpkg, "three", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_UNKNOWN_COMPONENT, "Expected ERROR_UNKNOWN_COMPONENT, got %u\n", r );
+
+    len = 0;
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+
+    len = 2;
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+
+    len = 2;
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
+    ok( r == ERROR_MORE_DATA, "Expected ERROR_MORE_DATA, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+
+    /* install state doesn't seem to matter */
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_ABSENT, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_SOURCE, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+
+    len = sizeof(drive);
+    drive[0] = 0;
+    cost = temp = 0xdead;
+    r = MsiEnumComponentCostsA( hpkg, "one", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+    ok( drive[0], "expected a drive\n" );
+    ok( cost && cost != 0xdead, "expected cost > 0, got %d\n", cost );
+    ok( !temp, "expected temp == 0, got %d\n", temp );
+
+    len = sizeof(drive);
+    drive[0] = 0;
+    cost = temp = 0xdead;
+    r = MsiEnumComponentCostsA( hpkg, "two", 0, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+    ok( drive[0], "expected a drive\n" );
+    ok( !cost, "expected cost == 0, got %d\n", cost );
+    ok( !temp, "expected temp == 0, got %d\n", temp );
+
+    len = sizeof(drive);
+    drive[0] = 0;
+    cost = temp = 0xdead;
+    r = MsiEnumComponentCostsA( hpkg, "", 0, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
+    ok( r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r );
+    ok( len == 2, "expected len == 2, got %u\n", len );
+    ok( drive[0], "expected a drive\n" );
+    ok( !cost, "expected cost == 0, got %d\n", cost );
+    ok( temp && temp != 0xdead, "expected temp > 0, got %d\n", temp );
+
+    /* increased index */
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "one", 1, INSTALLSTATE_LOCAL, drive, &len, &cost, &temp );
+    ok( r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %u\n", r );
+
+    len = sizeof(drive);
+    r = MsiEnumComponentCostsA( hpkg, "", 1, INSTALLSTATE_UNKNOWN, drive, &len, &cost, &temp );
+    ok( r == ERROR_NO_MORE_ITEMS, "Expected ERROR_NO_MORE_ITEMS, got %u\n", r );
+
+    MsiCloseHandle( hpkg );
+error:
+    MsiCloseHandle( hdb );
+    DeleteFileA( msifile );
+}
+
 START_TEST(package)
 {
     STATEMGRSTATUS status;
@@ -12983,6 +13282,7 @@ START_TEST(package)
     test_MsiSetProperty();
     test_MsiApplyMultiplePatches();
     test_MsiApplyPatch();
+    test_MsiEnumComponentCosts();
 
     if (pSRSetRestorePointA && !pMsiGetComponentPathExA && ret)
     {

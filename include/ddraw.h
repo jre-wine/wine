@@ -252,12 +252,12 @@ typedef struct IDirectDrawGammaControl *LPDIRECTDRAWGAMMACONTROL;
 #define DDGBS_ISBLTDONE				0x00000002
 
 /* dwFlags for IDirectDrawSurface7::GetFlipStatus */
-#define DDGFS_CANFLIP		1L
-#define DDGFS_ISFLIPDONE	2L
+#define DDGFS_CANFLIP           __MSABI_LONG(1)
+#define DDGFS_ISFLIPDONE        __MSABI_LONG(2)
 
 /* dwFlags for IDirectDrawSurface7::SetPrivateData */
-#define DDSPD_IUNKNOWNPOINTER	1L
-#define DDSPD_VOLATILE		2L
+#define DDSPD_IUNKNOWNPOINTER   __MSABI_LONG(1)
+#define DDSPD_VOLATILE          __MSABI_LONG(2)
 
 /* DDSCAPS.dwCaps */
 /* reserved1, was 3d capable */
@@ -365,6 +365,7 @@ typedef struct _DDSCAPS {
 #define DDSCAPS2_DONOTPERSIST           0x00040000
 /* indicates surface is part of a stereo flipping chain */
 #define DDSCAPS2_STEREOSURFACELEFT      0x00080000
+#define DDSCAPS2_VOLUME                 0x00200000
 
 typedef struct _DDSCAPS2 {
 	DWORD	dwCaps;	/* capabilities of surface wanted */
@@ -1085,8 +1086,8 @@ DECL_WINELIB_TYPE_AW(LPDIRECTDRAWENUMERATEEX)
 #define DDENUM_NONDISPLAYDEVICES	0x00000004
 
 /* flags for DirectDrawCreate or IDirectDraw::Initialize */
-#define DDCREATE_HARDWAREONLY	1L
-#define DDCREATE_EMULATIONONLY	2L
+#define DDCREATE_HARDWAREONLY   __MSABI_LONG(1)
+#define DDCREATE_EMULATIONONLY  __MSABI_LONG(2)
 
 typedef struct _DDBLTFX
 {
@@ -1396,14 +1397,18 @@ DECLARE_INTERFACE_(IDirectDraw,IUnknown)
 
 
 /* flags for Lock() */
-#define DDLOCK_SURFACEMEMORYPTR	0x00000000
-#define DDLOCK_WAIT		0x00000001
-#define DDLOCK_EVENT		0x00000002
-#define DDLOCK_READONLY		0x00000010
-#define DDLOCK_WRITEONLY	0x00000020
-#define DDLOCK_NOSYSLOCK	0x00000800
-#define DDLOCK_NOOVERWRITE      0x00001000
-#define DDLOCK_DISCARDCONTENTS  0x00002000
+#define DDLOCK_SURFACEMEMORYPTR         __MSABI_LONG(0x00000000)
+#define DDLOCK_WAIT                     __MSABI_LONG(0x00000001)
+#define DDLOCK_EVENT                    __MSABI_LONG(0x00000002)
+#define DDLOCK_READONLY                 __MSABI_LONG(0x00000010)
+#define DDLOCK_WRITEONLY                __MSABI_LONG(0x00000020)
+#define DDLOCK_NOSYSLOCK                __MSABI_LONG(0x00000800)
+#define DDLOCK_NOOVERWRITE              __MSABI_LONG(0x00001000)
+#define DDLOCK_DISCARDCONTENTS          __MSABI_LONG(0x00002000)
+#define DDLOCK_OKTOSWAP                 __MSABI_LONG(0x00002000)
+#define DDLOCK_DONOTWAIT                __MSABI_LONG(0x00004000)
+#define DDLOCK_HASVOLUMETEXTUREBOXRECT  __MSABI_LONG(0x00008000)
+#define DDLOCK_NODIRTYUPDATE            __MSABI_LONG(0x00010000)
 
 
 /*****************************************************************************

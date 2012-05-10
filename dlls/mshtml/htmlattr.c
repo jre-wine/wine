@@ -121,8 +121,10 @@ static HRESULT WINAPI HTMLDOMAttribute_Invoke(IHTMLDOMAttribute *iface, DISPID d
 static HRESULT WINAPI HTMLDOMAttribute_get_nodeName(IHTMLDOMAttribute *iface, BSTR *p)
 {
     HTMLDOMAttribute *This = impl_from_IHTMLDOMAttribute(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return IDispatchEx_GetMemberName(&This->elem->node.dispex.IDispatchEx_iface, This->dispid, p);
 }
 
 static HRESULT WINAPI HTMLDOMAttribute_put_nodeName(IHTMLDOMAttribute *iface, VARIANT v)
@@ -184,18 +186,27 @@ static dispex_static_data_t HTMLDOMAttribute_dispex = {
 
 HRESULT HTMLDOMAttribute_Create(HTMLElement *elem, DISPID dispid, HTMLDOMAttribute **attr)
 {
+    HTMLAttributeCollection *col;
     HTMLDOMAttribute *ret;
+    HRESULT hres;
 
     ret = heap_alloc_zero(sizeof(*ret));
     if(!ret)
         return E_OUTOFMEMORY;
+
+    hres = HTMLElement_get_attr_col(&elem->node, &col);
+    if(FAILED(hres)) {
+        heap_free(ret);
+        return hres;
+    }
+    IHTMLAttributeCollection_Release(&col->IHTMLAttributeCollection_iface);
 
     ret->IHTMLDOMAttribute_iface.lpVtbl = &HTMLDOMAttributeVtbl;
     ret->ref = 1;
 
     ret->dispid = dispid;
     ret->elem = elem;
-    list_add_tail(&elem->attrs, &ret->entry);
+    list_add_tail(&elem->attrs->attrs, &ret->entry);
 
     init_dispex(&ret->dispex, (IUnknown*)&ret->IHTMLDOMAttribute_iface,
             &HTMLDOMAttribute_dispex);

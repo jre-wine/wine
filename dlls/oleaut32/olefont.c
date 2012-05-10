@@ -278,16 +278,14 @@ struct OLEFontImpl
   LONG cyLogical;
   LONG cyHimetric;
 
+  /*
+   * Stash realized height (pixels) from TEXTMETRIC - used in get_Size()
+   */
+  LONG nRealHeight;
+
   IConnectionPoint *pPropertyNotifyCP;
   IConnectionPoint *pFontEventsCP;
 };
-
-/*
- * Here, I define utility macros to help with the casting of the
- * "this" parameter.
- * There is a version to accommodate all of the VTables implemented
- * by this object.
- */
 
 static inline OLEFontImpl *impl_from_IFont(IFont *iface)
 {
@@ -336,16 +334,13 @@ HRESULT WINAPI OleCreateFontIndirect(
   REFIID     riid,
   LPVOID*     ppvObj)
 {
-  OLEFontImpl* newFont = 0;
-  HRESULT      hr      = S_OK;
+  OLEFontImpl* newFont;
+  HRESULT      hr;
   FONTDESC     fd;
 
   TRACE("(%p, %s, %p)\n", lpFontDesc, debugstr_guid(riid), ppvObj);
-  /*
-   * Sanity check
-   */
-  if (ppvObj==0)
-    return E_POINTER;
+
+  if (!ppvObj) return E_POINTER;
 
   *ppvObj = 0;
 
@@ -364,23 +359,10 @@ HRESULT WINAPI OleCreateFontIndirect(
     lpFontDesc = &fd;
   }
 
-  /*
-   * Try to construct a new instance of the class.
-   */
   newFont = OLEFontImpl_Construct(lpFontDesc);
+  if (!newFont) return E_OUTOFMEMORY;
 
-  if (newFont == 0)
-    return E_OUTOFMEMORY;
-
-  /*
-   * Make sure it supports the interface required by the caller.
-   */
   hr = IFont_QueryInterface(&newFont->IFont_iface, riid, ppvObj);
-
-  /*
-   * Release the reference obtained in the constructor. If
-   * the QueryInterface was unsuccessful, it will free the class.
-   */
   IFont_Release(&newFont->IFont_iface);
 
   return hr;
@@ -482,46 +464,52 @@ static HRESULT WINAPI OLEFontImpl_QueryInterface(
   void**  ppvObject)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
+
   TRACE("(%p)->(%s, %p)\n", this, debugstr_guid(riid), ppvObject);
 
   *ppvObject = 0;
 
-  /*
-   * Compare the riid with the interface IDs implemented by this object.
-   */
-  if (IsEqualGUID(&IID_IUnknown, riid))
-    *ppvObject = this;
-  if (IsEqualGUID(&IID_IFont, riid))
-    *ppvObject = this;
-  if (IsEqualGUID(&IID_IDispatch, riid))
-    *ppvObject = &this->IDispatch_iface;
-  if (IsEqualGUID(&IID_IFontDisp, riid))
-    *ppvObject = &this->IDispatch_iface;
-  if (IsEqualIID(&IID_IPersist, riid) || IsEqualGUID(&IID_IPersistStream, riid))
-    *ppvObject = &this->IPersistStream_iface;
-  if (IsEqualGUID(&IID_IConnectionPointContainer, riid))
-    *ppvObject = &this->IConnectionPointContainer_iface;
-  if (IsEqualGUID(&IID_IPersistPropertyBag, riid))
-    *ppvObject = &this->IPersistPropertyBag_iface;
-  if (IsEqualGUID(&IID_IPersistStreamInit, riid))
-    *ppvObject = &this->IPersistStreamInit_iface;
-
-  /*
-   * Check that we obtained an interface.
-   */
-  if ((*ppvObject)==0)
+  if (IsEqualGUID(&IID_IUnknown, riid) ||
+      IsEqualGUID(&IID_IFont, riid))
   {
-    FIXME("() : asking for unsupported interface %s\n",debugstr_guid(riid));
+    *ppvObject = this;
+  }
+  else if (IsEqualGUID(&IID_IDispatch, riid) ||
+           IsEqualGUID(&IID_IFontDisp, riid))
+  {
+    *ppvObject = &this->IDispatch_iface;
+  }
+  else if (IsEqualGUID(&IID_IPersist, riid) ||
+           IsEqualGUID(&IID_IPersistStream, riid))
+  {
+    *ppvObject = &this->IPersistStream_iface;
+  }
+  else if (IsEqualGUID(&IID_IConnectionPointContainer, riid))
+  {
+    *ppvObject = &this->IConnectionPointContainer_iface;
+  }
+  else if (IsEqualGUID(&IID_IPersistPropertyBag, riid))
+  {
+    *ppvObject = &this->IPersistPropertyBag_iface;
+  }
+  else if (IsEqualGUID(&IID_IPersistStreamInit, riid))
+  {
+    *ppvObject = &this->IPersistStreamInit_iface;
+  }
+
+  if (!*ppvObject)
+  {
+    FIXME("() : asking for unsupported interface %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;
   }
-  OLEFontImpl_AddRef(&this->IFont_iface);
+
+  IFont_AddRef(iface);
+
   return S_OK;
 }
 
 /************************************************************************
  * OLEFontImpl_AddRef (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_AddRef(
   IFont* iface)
@@ -533,21 +521,17 @@ static ULONG WINAPI OLEFontImpl_AddRef(
 
 /************************************************************************
  * OLEFontImpl_Release (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
-static ULONG WINAPI OLEFontImpl_Release(
-      IFont* iface)
+static ULONG WINAPI OLEFontImpl_Release(IFont* iface)
 {
   OLEFontImpl *this = impl_from_IFont(iface);
-  ULONG ret;
+  ULONG ref;
+
   TRACE("(%p)->(ref=%d)\n", this, this->ref);
 
-  /* Decrease the reference count for current interface */
-  ret = InterlockedDecrement(&this->ref);
+  ref = InterlockedDecrement(&this->ref);
 
-  /* If the reference count goes down to 0, destroy. */
-  if (ret == 0)
+  if (ref == 0)
   {
     ULONG fontlist_refs = InterlockedDecrement(&ifont_cnt);
 
@@ -569,7 +553,7 @@ static ULONG WINAPI OLEFontImpl_Release(
     OLEFontImpl_Destroy(this);
   }
 
-  return ret;
+  return ref;
 }
 
 typedef struct
@@ -593,86 +577,85 @@ static int CALLBACK font_enum_proc(const LOGFONTW *elf, const TEXTMETRICW *ntm, 
 
 static void realize_font(OLEFontImpl *This)
 {
-    if (This->dirty)
+    LOGFONTW logFont;
+    INT fontHeight;
+    WCHAR text_face[LF_FACESIZE];
+    HDC hdc = get_dc();
+    HFONT old_font;
+    TEXTMETRICW tm;
+
+    if (!This->dirty) return;
+
+    text_face[0] = 0;
+
+    if(This->gdiFont)
     {
-        LOGFONTW logFont;
-        INT fontHeight;
-        WCHAR text_face[LF_FACESIZE];
-        HDC hdc = get_dc();
-        HFONT old_font;
-        TEXTMETRICW tm;
-
-        text_face[0] = 0;
-
-        if(This->gdiFont)
-        {
-            old_font = SelectObject(hdc, This->gdiFont);
-            GetTextFaceW(hdc, sizeof(text_face) / sizeof(text_face[0]), text_face);
-            SelectObject(hdc, old_font);
-            dec_int_ref(This->gdiFont);
-            This->gdiFont = 0;
-        }
-
-        memset(&logFont, 0, sizeof(LOGFONTW));
-
-        lstrcpynW(logFont.lfFaceName, This->description.lpstrName, LF_FACESIZE);
-        logFont.lfCharSet         = This->description.sCharset;
-
-        /* If the font name has been changed then enumerate all charsets
-           and pick one that'll result in the font specified being selected */
-        if(text_face[0] && lstrcmpiW(text_face, This->description.lpstrName))
-        {
-            enum_data data;
-            data.orig_cs = This->description.sCharset;
-            data.avail_cs = -1;
-            logFont.lfCharSet = DEFAULT_CHARSET;
-            EnumFontFamiliesExW(get_dc(), &logFont, font_enum_proc, (LPARAM)&data, 0);
-            if(data.avail_cs != -1) logFont.lfCharSet = data.avail_cs;
-        }
-
-
-        /*
-         * The height of the font returned by the get_Size property is the
-         * height of the font in points multiplied by 10000... Using some
-         * simple conversions and the ratio given by the application, it can
-         * be converted to a height in pixels.
-         *
-         * Standard ratio is 72 / 2540, or 18 / 635 in lowest terms.
-         * Ratio is applied here relative to the standard.
-         */
-
-        fontHeight = MulDiv( This->description.cySize.s.Lo, This->cyLogical*635, This->cyHimetric*18 );
-
-
-        logFont.lfHeight          = ((fontHeight%10000L)>5000L) ? (-fontHeight/10000L) - 1 :
-                                                                  (-fontHeight/10000L);
-        logFont.lfItalic          = This->description.fItalic;
-        logFont.lfUnderline       = This->description.fUnderline;
-        logFont.lfStrikeOut       = This->description.fStrikethrough;
-        logFont.lfWeight          = This->description.sWeight;
-        logFont.lfOutPrecision    = OUT_CHARACTER_PRECIS;
-        logFont.lfClipPrecision   = CLIP_DEFAULT_PRECIS;
-        logFont.lfQuality         = DEFAULT_QUALITY;
-        logFont.lfPitchAndFamily  = DEFAULT_PITCH;
-
-        This->gdiFont = CreateFontIndirectW(&logFont);
-        This->dirty = FALSE;
-
-        add_hfontitem(This->gdiFont);
-
-        /* Fixup the name and charset properties so that they match the
-           selected font */
-        old_font = SelectObject(get_dc(), This->gdiFont);
+        old_font = SelectObject(hdc, This->gdiFont);
         GetTextFaceW(hdc, sizeof(text_face) / sizeof(text_face[0]), text_face);
-        if(lstrcmpiW(text_face, This->description.lpstrName))
-        {
-            HeapFree(GetProcessHeap(), 0, This->description.lpstrName);
-            This->description.lpstrName = strdupW(text_face);
-        }
-        GetTextMetricsW(hdc, &tm);
-        This->description.sCharset = tm.tmCharSet;
         SelectObject(hdc, old_font);
+        dec_int_ref(This->gdiFont);
+        This->gdiFont = 0;
     }
+
+    memset(&logFont, 0, sizeof(LOGFONTW));
+
+    lstrcpynW(logFont.lfFaceName, This->description.lpstrName, LF_FACESIZE);
+    logFont.lfCharSet = This->description.sCharset;
+
+    /* If the font name has been changed then enumerate all charsets
+       and pick one that'll result in the font specified being selected */
+    if(text_face[0] && lstrcmpiW(text_face, This->description.lpstrName))
+    {
+        enum_data data;
+        data.orig_cs = This->description.sCharset;
+        data.avail_cs = -1;
+        logFont.lfCharSet = DEFAULT_CHARSET;
+        EnumFontFamiliesExW(get_dc(), &logFont, font_enum_proc, (LPARAM)&data, 0);
+        if(data.avail_cs != -1) logFont.lfCharSet = data.avail_cs;
+    }
+
+    /*
+     * The height of the font returned by the get_Size property is the
+     * height of the font in points multiplied by 10000... Using some
+     * simple conversions and the ratio given by the application, it can
+     * be converted to a height in pixels.
+     *
+     * Standard ratio is 72 / 2540, or 18 / 635 in lowest terms.
+     * Ratio is applied here relative to the standard.
+     */
+
+    fontHeight = MulDiv( This->description.cySize.s.Lo, This->cyLogical*635, This->cyHimetric*18 );
+
+    logFont.lfHeight          = ((fontHeight%10000L)>5000L) ? (-fontHeight/10000L) - 1 :
+                                                                  (-fontHeight/10000L);
+    logFont.lfItalic          = This->description.fItalic;
+    logFont.lfUnderline       = This->description.fUnderline;
+    logFont.lfStrikeOut       = This->description.fStrikethrough;
+    logFont.lfWeight          = This->description.sWeight;
+    logFont.lfOutPrecision    = OUT_CHARACTER_PRECIS;
+    logFont.lfClipPrecision   = CLIP_DEFAULT_PRECIS;
+    logFont.lfQuality         = DEFAULT_QUALITY;
+    logFont.lfPitchAndFamily  = DEFAULT_PITCH;
+
+    This->gdiFont = CreateFontIndirectW(&logFont);
+    This->dirty = FALSE;
+
+    add_hfontitem(This->gdiFont);
+
+    /* Fixup the name and charset properties so that they match the
+       selected font */
+    old_font = SelectObject(get_dc(), This->gdiFont);
+    GetTextFaceW(hdc, sizeof(text_face) / sizeof(text_face[0]), text_face);
+    if(lstrcmpiW(text_face, This->description.lpstrName))
+    {
+        HeapFree(GetProcessHeap(), 0, This->description.lpstrName);
+        This->description.lpstrName = strdupW(text_face);
+    }
+    GetTextMetricsW(hdc, &tm);
+    This->description.sCharset = tm.tmCharSet;
+    /* While we have it handy, stash the realized font height for use by get_Size() */
+    This->nRealHeight = tm.tmHeight - tm.tmInternalLeading; /* corresponds to LOGFONT lfHeight */
+    SelectObject(hdc, old_font);
 }
 
 /************************************************************************
@@ -686,13 +669,11 @@ static HRESULT WINAPI OLEFontImpl_get_Name(
 {
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pname);
-  /*
-   * Sanity check.
-   */
+
   if (pname==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   if (this->description.lpstrName!=0)
     *pname = SysAllocString(this->description.lpstrName);
@@ -704,46 +685,28 @@ static HRESULT WINAPI OLEFontImpl_get_Name(
 
 /************************************************************************
  * OLEFontImpl_put_Name (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Name(
   IFont* iface,
   BSTR name)
 {
-  OLEFontImpl *this = impl_from_IFont(iface);
-  TRACE("(%p)->(%p)\n", this, name);
+  OLEFontImpl *This = impl_from_IFont(iface);
+  TRACE("(%p)->(%p)\n", This, name);
 
   if (!name)
     return CTL_E_INVALIDPROPERTYVALUE;
 
-  if (this->description.lpstrName==0)
-  {
-    this->description.lpstrName = HeapAlloc(GetProcessHeap(),
-					    0,
-					    (lstrlenW(name)+1) * sizeof(WCHAR));
-  }
-  else
-  {
-    this->description.lpstrName = HeapReAlloc(GetProcessHeap(),
-					      0,
-					      this->description.lpstrName,
-					      (lstrlenW(name)+1) * sizeof(WCHAR));
-  }
+  HeapFree(GetProcessHeap(), 0, This->description.lpstrName);
+  This->description.lpstrName = strdupW(name);
+  if (!This->description.lpstrName) return E_OUTOFMEMORY;
 
-  if (this->description.lpstrName==0)
-    return E_OUTOFMEMORY;
-
-  strcpyW(this->description.lpstrName, name);
-  TRACE("new name %s\n", debugstr_w(this->description.lpstrName));
-  OLEFont_SendNotify(this, DISPID_FONT_NAME);
+  TRACE("new name %s\n", debugstr_w(This->description.lpstrName));
+  OLEFont_SendNotify(This, DISPID_FONT_NAME);
   return S_OK;
 }
 
 /************************************************************************
  * OLEFontImpl_get_Size (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Size(
   IFont* iface,
@@ -752,24 +715,24 @@ static HRESULT WINAPI OLEFontImpl_get_Size(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, psize);
 
+  if (!psize) return E_POINTER;
+
+  realize_font(this);
+
   /*
-   * Sanity check
+   * Convert realized font height in pixels to points descaled by current
+   * scaling ratio then scaled up by 10000.
    */
-  if (psize==0)
-    return E_POINTER;
-
-  if(this->dirty) realize_font(this);
-
+  psize->s.Lo = MulDiv(this->nRealHeight,
+                       this->cyHimetric * 72 * 10000,
+                       this->cyLogical * 2540);
   psize->s.Hi = 0;
-  psize->s.Lo = this->description.cySize.s.Lo;
 
   return S_OK;
 }
 
 /************************************************************************
  * OLEFontImpl_put_Size (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Size(
   IFont* iface,
@@ -795,13 +758,10 @@ static HRESULT WINAPI OLEFontImpl_get_Bold(
 {
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pbold);
-  /*
-   * Sanity check
-   */
-  if (pbold==0)
-    return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  if (!pbold) return E_POINTER;
+
+  realize_font(this);
 
   *pbold = this->description.sWeight > 550;
 
@@ -810,8 +770,6 @@ static HRESULT WINAPI OLEFontImpl_get_Bold(
 
 /************************************************************************
  * OLEFontImpl_put_Bold (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Bold(
   IFont* iface,
@@ -827,8 +785,6 @@ static HRESULT WINAPI OLEFontImpl_put_Bold(
 
 /************************************************************************
  * OLEFontImpl_get_Italic (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Italic(
   IFont*  iface,
@@ -836,13 +792,11 @@ static HRESULT WINAPI OLEFontImpl_get_Italic(
 {
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pitalic);
-  /*
-   * Sanity check
-   */
+
   if (pitalic==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *pitalic = this->description.fItalic;
 
@@ -851,8 +805,6 @@ static HRESULT WINAPI OLEFontImpl_get_Italic(
 
 /************************************************************************
  * OLEFontImpl_put_Italic (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Italic(
   IFont* iface,
@@ -869,8 +821,6 @@ static HRESULT WINAPI OLEFontImpl_put_Italic(
 
 /************************************************************************
  * OLEFontImpl_get_Underline (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Underline(
   IFont*  iface,
@@ -879,13 +829,10 @@ static HRESULT WINAPI OLEFontImpl_get_Underline(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, punderline);
 
-  /*
-   * Sanity check
-   */
   if (punderline==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *punderline = this->description.fUnderline;
 
@@ -894,8 +841,6 @@ static HRESULT WINAPI OLEFontImpl_get_Underline(
 
 /************************************************************************
  * OLEFontImpl_put_Underline (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Underline(
   IFont* iface,
@@ -912,8 +857,6 @@ static HRESULT WINAPI OLEFontImpl_put_Underline(
 
 /************************************************************************
  * OLEFontImpl_get_Strikethrough (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Strikethrough(
   IFont*  iface,
@@ -922,13 +865,10 @@ static HRESULT WINAPI OLEFontImpl_get_Strikethrough(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pstrikethrough);
 
-  /*
-   * Sanity check
-   */
   if (pstrikethrough==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *pstrikethrough = this->description.fStrikethrough;
 
@@ -937,8 +877,6 @@ static HRESULT WINAPI OLEFontImpl_get_Strikethrough(
 
 /************************************************************************
  * OLEFontImpl_put_Strikethrough (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Strikethrough(
  IFont* iface,
@@ -955,8 +893,6 @@ static HRESULT WINAPI OLEFontImpl_put_Strikethrough(
 
 /************************************************************************
  * OLEFontImpl_get_Weight (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Weight(
   IFont* iface,
@@ -965,13 +901,10 @@ static HRESULT WINAPI OLEFontImpl_get_Weight(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pweight);
 
-  /*
-   * Sanity check
-   */
   if (pweight==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *pweight = this->description.sWeight;
 
@@ -980,8 +913,6 @@ static HRESULT WINAPI OLEFontImpl_get_Weight(
 
 /************************************************************************
  * OLEFontImpl_put_Weight (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Weight(
   IFont* iface,
@@ -998,8 +929,6 @@ static HRESULT WINAPI OLEFontImpl_put_Weight(
 
 /************************************************************************
  * OLEFontImpl_get_Charset (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_Charset(
   IFont* iface,
@@ -1008,13 +937,10 @@ static HRESULT WINAPI OLEFontImpl_get_Charset(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%p)\n", this, pcharset);
 
-  /*
-   * Sanity check
-   */
   if (pcharset==0)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *pcharset = this->description.sCharset;
 
@@ -1023,8 +949,6 @@ static HRESULT WINAPI OLEFontImpl_get_Charset(
 
 /************************************************************************
  * OLEFontImpl_put_Charset (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_put_Charset(
   IFont* iface,
@@ -1041,8 +965,6 @@ static HRESULT WINAPI OLEFontImpl_put_Charset(
 
 /************************************************************************
  * OLEFontImpl_get_hFont (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_get_hFont(
   IFont*   iface,
@@ -1053,7 +975,7 @@ static HRESULT WINAPI OLEFontImpl_get_hFont(
   if (phfont==NULL)
     return E_POINTER;
 
-  if(this->dirty) realize_font(this);
+  realize_font(this);
 
   *phfont = this->gdiFont;
   TRACE("Returning %p\n", *phfont);
@@ -1062,15 +984,13 @@ static HRESULT WINAPI OLEFontImpl_get_hFont(
 
 /************************************************************************
  * OLEFontImpl_Clone (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_Clone(
   IFont*  iface,
   IFont** ppfont)
 {
-  OLEFontImpl* newObject = 0;
   OLEFontImpl *this = impl_from_IFont(iface);
+  OLEFontImpl* newObject;
 
   TRACE("(%p)->(%p)\n", this, ppfont);
 
@@ -1079,32 +999,19 @@ static HRESULT WINAPI OLEFontImpl_Clone(
 
   *ppfont = NULL;
 
-  /*
-   * Allocate space for the object.
-   */
   newObject = HeapAlloc(GetProcessHeap(), 0, sizeof(OLEFontImpl));
-
   if (newObject==NULL)
     return E_OUTOFMEMORY;
 
   *newObject = *this;
-
-  /* We need to alloc new memory for the string, otherwise
-   * we free memory twice.
-   */
-  newObject->description.lpstrName = HeapAlloc(
-	GetProcessHeap(),0,
-	(1+strlenW(this->description.lpstrName))*2
-  );
-  strcpyW(newObject->description.lpstrName, this->description.lpstrName);
-
+  /* allocate separate buffer */
+  newObject->description.lpstrName = strdupW(this->description.lpstrName);
 
   /* Increment internal ref in hfont item list */
   if(newObject->gdiFont) inc_int_ref(newObject->gdiFont);
 
   InterlockedIncrement(&ifont_cnt);
 
-  /* create new connection points */
   newObject->pPropertyNotifyCP = NULL;
   newObject->pFontEventsCP = NULL;
   CreateConnectionPoint((IUnknown*)newObject, &IID_IPropertyNotifySink, &newObject->pPropertyNotifyCP);
@@ -1117,7 +1024,7 @@ static HRESULT WINAPI OLEFontImpl_Clone(
   }
 
   /* The cloned object starts with a reference count of 1 */
-  newObject->ref          = 1;
+  newObject->ref = 1;
 
   *ppfont = &newObject->IFont_iface;
 
@@ -1126,8 +1033,6 @@ static HRESULT WINAPI OLEFontImpl_Clone(
 
 /************************************************************************
  * OLEFontImpl_IsEqual (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_IsEqual(
   IFont* iface,
@@ -1168,8 +1073,6 @@ static HRESULT WINAPI OLEFontImpl_IsEqual(
 
 /************************************************************************
  * OLEFontImpl_SetRatio (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_SetRatio(
   IFont* iface,
@@ -1179,16 +1082,18 @@ static HRESULT WINAPI OLEFontImpl_SetRatio(
   OLEFontImpl *this = impl_from_IFont(iface);
   TRACE("(%p)->(%d, %d)\n", this, cyLogical, cyHimetric);
 
+  if(cyLogical == 0 || cyHimetric == 0)
+    return E_INVALIDARG;
+
   this->cyLogical  = cyLogical;
   this->cyHimetric = cyHimetric;
+  this->dirty = TRUE;
 
   return S_OK;
 }
 
 /************************************************************************
  * OLEFontImpl_QueryTextMetrics (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT      WINAPI OLEFontImpl_QueryTextMetrics(
   IFont*         iface,
@@ -1198,7 +1103,7 @@ static HRESULT      WINAPI OLEFontImpl_QueryTextMetrics(
   HFONT hOldFont, hNewFont;
 
   hdcRef = GetDC(0);
-  OLEFontImpl_get_hFont(iface, &hNewFont);
+  IFont_get_hFont(iface, &hNewFont);
   hOldFont = SelectObject(hdcRef, hNewFont);
   GetTextMetricsW(hdcRef, ptm);
   SelectObject(hdcRef, hOldFont);
@@ -1208,8 +1113,6 @@ static HRESULT      WINAPI OLEFontImpl_QueryTextMetrics(
 
 /************************************************************************
  * OLEFontImpl_AddRefHfont (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_AddRefHfont(
   IFont*  iface,
@@ -1226,8 +1129,6 @@ static HRESULT WINAPI OLEFontImpl_AddRefHfont(
 
 /************************************************************************
  * OLEFontImpl_ReleaseHfont (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_ReleaseHfont(
   IFont*  iface,
@@ -1244,8 +1145,6 @@ static HRESULT WINAPI OLEFontImpl_ReleaseHfont(
 
 /************************************************************************
  * OLEFontImpl_SetHdc (IFont)
- *
- * See Windows documentation for more details on IFont methods.
  */
 static HRESULT WINAPI OLEFontImpl_SetHdc(
   IFont* iface,
@@ -1256,9 +1155,6 @@ static HRESULT WINAPI OLEFontImpl_SetHdc(
   return E_NOTIMPL;
 }
 
-/*
- * Virtual function tables for the OLEFontImpl class.
- */
 static const IFontVtbl OLEFontImpl_VTable =
 {
   OLEFontImpl_QueryInterface,
@@ -1292,8 +1188,6 @@ static const IFontVtbl OLEFontImpl_VTable =
 
 /************************************************************************
  * OLEFontImpl_IDispatch_QueryInterface (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static HRESULT WINAPI OLEFontImpl_IDispatch_QueryInterface(
   IDispatch* iface,
@@ -1301,40 +1195,31 @@ static HRESULT WINAPI OLEFontImpl_IDispatch_QueryInterface(
   VOID**     ppvoid)
 {
   OLEFontImpl *this = impl_from_IDispatch(iface);
-
   return IFont_QueryInterface(&this->IFont_iface, riid, ppvoid);
 }
 
 /************************************************************************
  * OLEFontImpl_IDispatch_Release (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IDispatch_Release(
   IDispatch* iface)
 {
   OLEFontImpl *this = impl_from_IDispatch(iface);
-
   return IFont_Release(&this->IFont_iface);
 }
 
 /************************************************************************
  * OLEFontImpl_IDispatch_AddRef (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IDispatch_AddRef(
   IDispatch* iface)
 {
   OLEFontImpl *this = impl_from_IDispatch(iface);
-
   return IFont_AddRef(&this->IFont_iface);
 }
 
 /************************************************************************
  * OLEFontImpl_GetTypeInfoCount (IDispatch)
- *
- * See Windows documentation for more details on IDispatch methods.
  */
 static HRESULT WINAPI OLEFontImpl_GetTypeInfoCount(
   IDispatch*    iface,
@@ -1349,8 +1234,6 @@ static HRESULT WINAPI OLEFontImpl_GetTypeInfoCount(
 
 /************************************************************************
  * OLEFontImpl_GetTypeInfo (IDispatch)
- *
- * See Windows documentation for more details on IDispatch methods.
  */
 static HRESULT WINAPI OLEFontImpl_GetTypeInfo(
   IDispatch*  iface,
@@ -1381,8 +1264,6 @@ static HRESULT WINAPI OLEFontImpl_GetTypeInfo(
 
 /************************************************************************
  * OLEFontImpl_GetIDsOfNames (IDispatch)
- *
- * See Windows documentation for more details on IDispatch methods.
  */
 static HRESULT WINAPI OLEFontImpl_GetIDsOfNames(
   IDispatch*  iface,
@@ -1400,33 +1281,24 @@ static HRESULT WINAPI OLEFontImpl_GetIDsOfNames(
   TRACE("(%p,%s,%p,cNames=%d,lcid=%04x,%p)\n", this, debugstr_guid(riid),
         rgszNames, cNames, (int)lcid, rgDispId);
 
-  if (cNames == 0)
+  if (cNames == 0) return E_INVALIDARG;
+
+  hres = IDispatch_GetTypeInfo(iface, 0, lcid, &pTInfo);
+  if (FAILED(hres))
   {
-    return E_INVALIDARG;
-  }
-  else
-  {
-    /* retrieve type information */
-    hres = OLEFontImpl_GetTypeInfo(iface, 0, lcid, &pTInfo);
-
-    if (FAILED(hres))
-    {
-      ERR("GetTypeInfo failed.\n");
-      return hres;
-    }
-
-    /* convert names to DISPIDs */
-    hres = DispGetIDsOfNames (pTInfo, rgszNames, cNames, rgDispId);
-    ITypeInfo_Release(pTInfo);
-
+    ERR("GetTypeInfo failed.\n");
     return hres;
   }
+
+  /* convert names to DISPIDs */
+  hres = DispGetIDsOfNames (pTInfo, rgszNames, cNames, rgDispId);
+  ITypeInfo_Release(pTInfo);
+
+  return hres;
 }
 
 /************************************************************************
  * OLEFontImpl_Invoke (IDispatch)
- *
- * See Windows documentation for more details on IDispatch methods.
  * 
  * Note: Do not call _put_Xxx methods, since setting things here
  * should not call notify functions as I found out debugging the generic
@@ -1591,7 +1463,7 @@ static HRESULT WINAPI OLEFontImpl_Invoke(
   case DISPID_FONT_SIZE:
     if (wFlags & DISPATCH_PROPERTYGET) {
       V_VT(pVarResult) = VT_CY;
-      return OLEFontImpl_get_Size(&this->IFont_iface, &V_CY(pVarResult));
+      return IFont_get_Size(&this->IFont_iface, &V_CY(pVarResult));
     } else {
       VARIANTARG vararg;
 
@@ -1609,7 +1481,7 @@ static HRESULT WINAPI OLEFontImpl_Invoke(
   case DISPID_FONT_WEIGHT:
     if (wFlags & DISPATCH_PROPERTYGET) {
       V_VT(pVarResult) = VT_I2;
-      return OLEFontImpl_get_Weight(&this->IFont_iface, &V_I2(pVarResult));
+      return IFont_get_Weight(&this->IFont_iface, &V_I2(pVarResult));
     } else {
       VARIANTARG vararg;
 
@@ -1661,8 +1533,6 @@ static const IDispatchVtbl OLEFontImpl_IDispatch_VTable =
 
 /************************************************************************
  * OLEFontImpl_IPersistStream_QueryInterface (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static HRESULT WINAPI OLEFontImpl_IPersistStream_QueryInterface(
   IPersistStream* iface,
@@ -1676,8 +1546,6 @@ static HRESULT WINAPI OLEFontImpl_IPersistStream_QueryInterface(
 
 /************************************************************************
  * OLEFontImpl_IPersistStream_Release (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IPersistStream_Release(
   IPersistStream* iface)
@@ -1689,8 +1557,6 @@ static ULONG WINAPI OLEFontImpl_IPersistStream_Release(
 
 /************************************************************************
  * OLEFontImpl_IPersistStream_AddRef (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IPersistStream_AddRef(
   IPersistStream* iface)
@@ -1702,8 +1568,6 @@ static ULONG WINAPI OLEFontImpl_IPersistStream_AddRef(
 
 /************************************************************************
  * OLEFontImpl_GetClassID (IPersistStream)
- *
- * See Windows documentation for more details on IPersistStream methods.
  */
 static HRESULT WINAPI OLEFontImpl_GetClassID(
   IPersistStream* iface,
@@ -1755,80 +1619,50 @@ static HRESULT WINAPI OLEFontImpl_Load(
   IPersistStream*  iface,
   IStream*         pLoadStream)
 {
-  char  readBuffer[0x100];
+  OLEFontImpl *this = impl_from_IPersistStream(iface);
+  BYTE  version, attributes, string_size;
+  char readBuffer[0x100];
   ULONG cbRead;
-  BYTE  bVersion;
-  BYTE  bAttributes;
-  BYTE  bStringSize;
   INT len;
 
-  OLEFontImpl *this = impl_from_IPersistStream(iface);
+  /* Version */
+  IStream_Read(pLoadStream, &version, sizeof(BYTE), &cbRead);
+  if ((cbRead != sizeof(BYTE)) || (version != 0x01)) return E_FAIL;
 
-  /*
-   * Read the version byte
-   */
-  IStream_Read(pLoadStream, &bVersion, 1, &cbRead);
+  /* Charset */
+  IStream_Read(pLoadStream, &this->description.sCharset, sizeof(WORD), &cbRead);
+  if (cbRead != sizeof(WORD)) return E_FAIL;
 
-  if ( (cbRead!=1) ||
-       (bVersion!=0x01) )
-    return E_FAIL;
+  /* Attributes */
+  IStream_Read(pLoadStream, &attributes, sizeof(BYTE), &cbRead);
+  if (cbRead != sizeof(BYTE)) return E_FAIL;
 
-  /*
-   * Charset
-   */
-  IStream_Read(pLoadStream, &this->description.sCharset, 2, &cbRead);
+  this->description.fItalic        = (attributes & FONTPERSIST_ITALIC) != 0;
+  this->description.fStrikethrough = (attributes & FONTPERSIST_STRIKETHROUGH) != 0;
+  this->description.fUnderline     = (attributes & FONTPERSIST_UNDERLINE) != 0;
 
-  if (cbRead!=2)
-    return E_FAIL;
+  /* Weight */
+  IStream_Read(pLoadStream, &this->description.sWeight, sizeof(WORD), &cbRead);
+  if (cbRead != sizeof(WORD)) return E_FAIL;
 
-  /*
-   * Attributes
-   */
-  IStream_Read(pLoadStream, &bAttributes, 1, &cbRead);
-
-  if (cbRead!=1)
-    return E_FAIL;
-
-  this->description.fItalic        = (bAttributes & FONTPERSIST_ITALIC) != 0;
-  this->description.fStrikethrough = (bAttributes & FONTPERSIST_STRIKETHROUGH) != 0;
-  this->description.fUnderline     = (bAttributes & FONTPERSIST_UNDERLINE) != 0;
-
-  /*
-   * Weight
-   */
-  IStream_Read(pLoadStream, &this->description.sWeight, 2, &cbRead);
-
-  if (cbRead!=2)
-    return E_FAIL;
-
-  /*
-   * Size
-   */
-  IStream_Read(pLoadStream, &this->description.cySize.s.Lo, 4, &cbRead);
-
-  if (cbRead!=4)
-    return E_FAIL;
+  /* Size */
+  IStream_Read(pLoadStream, &this->description.cySize.s.Lo, sizeof(DWORD), &cbRead);
+  if (cbRead != sizeof(DWORD)) return E_FAIL;
 
   this->description.cySize.s.Hi = 0;
 
-  /*
-   * FontName
-   */
-  IStream_Read(pLoadStream, &bStringSize, 1, &cbRead);
+  /* Name */
+  IStream_Read(pLoadStream, &string_size, sizeof(BYTE), &cbRead);
+  if (cbRead != sizeof(BYTE)) return E_FAIL;
 
-  if (cbRead!=1)
-    return E_FAIL;
-
-  IStream_Read(pLoadStream, readBuffer, bStringSize, &cbRead);
-
-  if (cbRead!=bStringSize)
-    return E_FAIL;
+  IStream_Read(pLoadStream, readBuffer, string_size, &cbRead);
+  if (cbRead != string_size) return E_FAIL;
 
   HeapFree(GetProcessHeap(), 0, this->description.lpstrName);
 
-  len = MultiByteToWideChar( CP_ACP, 0, readBuffer, bStringSize, NULL, 0 );
+  len = MultiByteToWideChar( CP_ACP, 0, readBuffer, string_size, NULL, 0 );
   this->description.lpstrName = HeapAlloc( GetProcessHeap(), 0, (len+1) * sizeof(WCHAR) );
-  MultiByteToWideChar( CP_ACP, 0, readBuffer, bStringSize, this->description.lpstrName, len );
+  MultiByteToWideChar( CP_ACP, 0, readBuffer, string_size, this->description.lpstrName, len );
   this->description.lpstrName[len] = 0;
 
   /* Ensure use of this font causes a new one to be created */
@@ -1841,99 +1675,72 @@ static HRESULT WINAPI OLEFontImpl_Load(
 
 /************************************************************************
  * OLEFontImpl_Save (IPersistStream)
- *
- * See Windows documentation for more details on IPersistStream methods.
  */
 static HRESULT WINAPI OLEFontImpl_Save(
   IPersistStream*  iface,
   IStream*         pOutStream,
   BOOL             fClearDirty)
 {
-  char* writeBuffer = NULL;
-  ULONG cbWritten;
-  BYTE  bVersion = 0x01;
-  BYTE  bAttributes;
-  BYTE  bStringSize;
-
   OLEFontImpl *this = impl_from_IPersistStream(iface);
+  BYTE  attributes, string_size;
+  const BYTE version = 0x01;
+  char* writeBuffer = NULL;
+  ULONG written;
 
-  /*
-   * Read the version byte
-   */
-  IStream_Write(pOutStream, &bVersion, 1, &cbWritten);
+  TRACE("(%p)->(%p %d)\n", this, pOutStream, fClearDirty);
 
-  if (cbWritten!=1)
-    return E_FAIL;
+  /* Version */
+  IStream_Write(pOutStream, &version, sizeof(BYTE), &written);
+  if (written != sizeof(BYTE)) return E_FAIL;
 
-  /*
-   * Charset
-   */
-  IStream_Write(pOutStream, &this->description.sCharset, 2, &cbWritten);
+  /* Charset */
+  IStream_Write(pOutStream, &this->description.sCharset, sizeof(WORD), &written);
+  if (written != sizeof(WORD)) return E_FAIL;
 
-  if (cbWritten!=2)
-    return E_FAIL;
-
-  /*
-   * Attributes
-   */
-  bAttributes = 0;
+  /* Attributes */
+  attributes = 0;
 
   if (this->description.fItalic)
-    bAttributes |= FONTPERSIST_ITALIC;
+    attributes |= FONTPERSIST_ITALIC;
 
   if (this->description.fStrikethrough)
-    bAttributes |= FONTPERSIST_STRIKETHROUGH;
+    attributes |= FONTPERSIST_STRIKETHROUGH;
 
   if (this->description.fUnderline)
-    bAttributes |= FONTPERSIST_UNDERLINE;
+    attributes |= FONTPERSIST_UNDERLINE;
 
-  IStream_Write(pOutStream, &bAttributes, 1, &cbWritten);
+  IStream_Write(pOutStream, &attributes, sizeof(BYTE), &written);
+  if (written != sizeof(BYTE)) return E_FAIL;
 
-  if (cbWritten!=1)
-    return E_FAIL;
+  /* Weight */
+  IStream_Write(pOutStream, &this->description.sWeight, sizeof(WORD), &written);
+  if (written != sizeof(WORD)) return E_FAIL;
 
-  /*
-   * Weight
-   */
-  IStream_Write(pOutStream, &this->description.sWeight, 2, &cbWritten);
+  /* Size */
+  IStream_Write(pOutStream, &this->description.cySize.s.Lo, sizeof(DWORD), &written);
+  if (written != sizeof(DWORD)) return E_FAIL;
 
-  if (cbWritten!=2)
-    return E_FAIL;
-
-  /*
-   * Size
-   */
-  IStream_Write(pOutStream, &this->description.cySize.s.Lo, 4, &cbWritten);
-
-  if (cbWritten!=4)
-    return E_FAIL;
-
-  /*
-   * FontName
-   */
-  if (this->description.lpstrName!=0)
-    bStringSize = WideCharToMultiByte( CP_ACP, 0, this->description.lpstrName,
+  /* FontName */
+  if (this->description.lpstrName)
+    string_size = WideCharToMultiByte( CP_ACP, 0, this->description.lpstrName,
                                        strlenW(this->description.lpstrName), NULL, 0, NULL, NULL );
   else
-    bStringSize = 0;
+    string_size = 0;
 
-  IStream_Write(pOutStream, &bStringSize, 1, &cbWritten);
+  IStream_Write(pOutStream, &string_size, sizeof(BYTE), &written);
+  if (written != sizeof(BYTE)) return E_FAIL;
 
-  if (cbWritten!=1)
-    return E_FAIL;
-
-  if (bStringSize!=0)
+  if (string_size)
   {
-      if (!(writeBuffer = HeapAlloc( GetProcessHeap(), 0, bStringSize ))) return E_OUTOFMEMORY;
+      if (!(writeBuffer = HeapAlloc( GetProcessHeap(), 0, string_size ))) return E_OUTOFMEMORY;
       WideCharToMultiByte( CP_ACP, 0, this->description.lpstrName,
                            strlenW(this->description.lpstrName),
-                           writeBuffer, bStringSize, NULL, NULL );
+                           writeBuffer, string_size, NULL, NULL );
 
-    IStream_Write(pOutStream, writeBuffer, bStringSize, &cbWritten);
-    HeapFree(GetProcessHeap(), 0, writeBuffer);
+      IStream_Write(pOutStream, writeBuffer, string_size, &written);
+      HeapFree(GetProcessHeap(), 0, writeBuffer);
 
-    if (cbWritten!=bStringSize)
-      return E_FAIL;
+      if (written != string_size) return E_FAIL;
   }
 
   return S_OK;
@@ -1941,8 +1748,6 @@ static HRESULT WINAPI OLEFontImpl_Save(
 
 /************************************************************************
  * OLEFontImpl_GetSizeMax (IPersistStream)
- *
- * See Windows documentation for more details on IPersistStream methods.
  */
 static HRESULT WINAPI OLEFontImpl_GetSizeMax(
   IPersistStream*  iface,
@@ -1985,8 +1790,6 @@ static const IPersistStreamVtbl OLEFontImpl_IPersistStream_VTable =
 
 /************************************************************************
  * OLEFontImpl_IConnectionPointContainer_QueryInterface (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static HRESULT WINAPI OLEFontImpl_IConnectionPointContainer_QueryInterface(
   IConnectionPointContainer* iface,
@@ -2000,8 +1803,6 @@ static HRESULT WINAPI OLEFontImpl_IConnectionPointContainer_QueryInterface(
 
 /************************************************************************
  * OLEFontImpl_IConnectionPointContainer_Release (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IConnectionPointContainer_Release(
   IConnectionPointContainer* iface)
@@ -2013,8 +1814,6 @@ static ULONG WINAPI OLEFontImpl_IConnectionPointContainer_Release(
 
 /************************************************************************
  * OLEFontImpl_IConnectionPointContainer_AddRef (IUnknown)
- *
- * See Windows documentation for more details on IUnknown methods.
  */
 static ULONG WINAPI OLEFontImpl_IConnectionPointContainer_AddRef(
   IConnectionPointContainer* iface)
@@ -2026,9 +1825,6 @@ static ULONG WINAPI OLEFontImpl_IConnectionPointContainer_AddRef(
 
 /************************************************************************
  * OLEFontImpl_EnumConnectionPoints (IConnectionPointContainer)
- *
- * See Windows documentation for more details on IConnectionPointContainer
- * methods.
  */
 static HRESULT WINAPI OLEFontImpl_EnumConnectionPoints(
   IConnectionPointContainer* iface,
@@ -2042,9 +1838,6 @@ static HRESULT WINAPI OLEFontImpl_EnumConnectionPoints(
 
 /************************************************************************
  * OLEFontImpl_FindConnectionPoint (IConnectionPointContainer)
- *
- * See Windows documentation for more details on IConnectionPointContainer
- * methods.
  */
 static HRESULT WINAPI OLEFontImpl_FindConnectionPoint(
    IConnectionPointContainer* iface,
@@ -2353,19 +2146,13 @@ static const IPersistStreamInitVtbl OLEFontImpl_IPersistStreamInit_VTable =
  */
 static OLEFontImpl* OLEFontImpl_Construct(const FONTDESC *fontDesc)
 {
-  OLEFontImpl* newObject = 0;
+  OLEFontImpl* newObject;
 
-  /*
-   * Allocate space for the object.
-   */
   newObject = HeapAlloc(GetProcessHeap(), 0, sizeof(OLEFontImpl));
 
   if (newObject==0)
     return newObject;
 
-  /*
-   * Initialize the virtual function table.
-   */
   newObject->IFont_iface.lpVtbl = &OLEFontImpl_VTable;
   newObject->IDispatch_iface.lpVtbl = &OLEFontImpl_IDispatch_VTable;
   newObject->IPersistStream_iface.lpVtbl = &OLEFontImpl_IPersistStream_VTable;
@@ -2373,22 +2160,10 @@ static OLEFontImpl* OLEFontImpl_Construct(const FONTDESC *fontDesc)
   newObject->IPersistPropertyBag_iface.lpVtbl = &OLEFontImpl_IPersistPropertyBag_VTable;
   newObject->IPersistStreamInit_iface.lpVtbl = &OLEFontImpl_IPersistStreamInit_VTable;
 
-  /*
-   * Start with one reference count. The caller of this function
-   * must release the interface pointer when it is done.
-   */
   newObject->ref = 1;
 
-  /*
-   * Copy the description of the font in the object.
-   */
-  assert(fontDesc->cbSizeofstruct >= sizeof(FONTDESC));
-
   newObject->description.cbSizeofstruct = sizeof(FONTDESC);
-  newObject->description.lpstrName = HeapAlloc(GetProcessHeap(),
-					       0,
-					       (lstrlenW(fontDesc->lpstrName)+1) * sizeof(WCHAR));
-  strcpyW(newObject->description.lpstrName, fontDesc->lpstrName);
+  newObject->description.lpstrName      = strdupW(fontDesc->lpstrName);
   newObject->description.cySize         = fontDesc->cySize;
   newObject->description.sWeight        = fontDesc->sWeight;
   newObject->description.sCharset       = fontDesc->sCharset;
@@ -2396,18 +2171,15 @@ static OLEFontImpl* OLEFontImpl_Construct(const FONTDESC *fontDesc)
   newObject->description.fUnderline     = fontDesc->fUnderline;
   newObject->description.fStrikethrough = fontDesc->fStrikethrough;
 
-  /*
-   * Initializing all the other members.
-   */
   newObject->gdiFont  = 0;
   newObject->dirty = TRUE;
-  newObject->cyLogical  = 72L;
+  newObject->cyLogical  = GetDeviceCaps(get_dc(), LOGPIXELSY);
   newObject->cyHimetric = 2540L;
   newObject->pPropertyNotifyCP = NULL;
   newObject->pFontEventsCP = NULL;
 
-  CreateConnectionPoint((IUnknown*)newObject, &IID_IPropertyNotifySink, &newObject->pPropertyNotifyCP);
-  CreateConnectionPoint((IUnknown*)newObject, &IID_IFontEventsDisp, &newObject->pFontEventsCP);
+  CreateConnectionPoint((IUnknown*)&newObject->IFont_iface, &IID_IPropertyNotifySink, &newObject->pPropertyNotifyCP);
+  CreateConnectionPoint((IUnknown*)&newObject->IFont_iface, &IID_IFontEventsDisp, &newObject->pFontEventsCP);
 
   if (!newObject->pPropertyNotifyCP || !newObject->pFontEventsCP)
   {

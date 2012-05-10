@@ -29,7 +29,7 @@
 # error You cannot use both wine/port.h and msvcrt headers
 #endif
 
-#if defined(__x86_64__) && !defined(_WIN64)
+#if (defined(__x86_64__) || defined(__powerpc64__) || defined(__sparc64__)) && !defined(_WIN64)
 #define _WIN64
 #endif
 
@@ -96,6 +96,8 @@
 #  define DECLSPEC_ALIGN(x)
 # endif
 #endif
+
+#define _ARGMAX 100
 
 #ifndef _MSVCRT_LONG_DEFINED
 #define _MSVCRT_LONG_DEFINED
@@ -210,7 +212,7 @@ typedef struct threadlocaleinfostruct {
     int refcount;
     unsigned int lc_codepage;
     unsigned int lc_collate_cp;
-    unsigned long lc_handle[6];
+    __msvcrt_ulong lc_handle[6];
     LC_ID lc_id[6];
     struct {
         char *locale;

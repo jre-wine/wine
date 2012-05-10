@@ -36,7 +36,6 @@
 #include "rpcproxy.h"
 #include "shlguid.h"
 
-#include "wine/unicode.h"
 #include "wine/debug.h"
 
 #define INIT_GUID
@@ -124,6 +123,20 @@ void set_statustext(HTMLDocumentObj* doc, INT id, LPCWSTR arg)
 
     if(arg)
         heap_free(p);
+}
+
+HRESULT do_query_service(IUnknown *unk, REFGUID guid_service, REFIID riid, void **ppv)
+{
+    IServiceProvider *sp;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IServiceProvider, (void**)&sp);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IServiceProvider_QueryService(sp, guid_service, riid, ppv);
+    IServiceProvider_Release(sp);
+    return hres;
 }
 
 HINSTANCE get_shdoclc(void)
@@ -451,25 +464,8 @@ static HRESULT register_server(BOOL do_register)
     for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++)
         heap_free(pse[i].pszValue);
 
-    if(FAILED(hres)) {
-        ERR("RegInstall failed: %08x\n", hres);
-        return hres;
-    }
-
-    if(do_register) {
-        ITypeLib *typelib;
-
-        static const WCHAR wszMSHTML[] = {'m','s','h','t','m','l','.','t','l','b',0};
-
-        hres = LoadTypeLibEx(wszMSHTML, REGKIND_REGISTER, &typelib);
-        if(SUCCEEDED(hres))
-            ITypeLib_Release(typelib);
-    }else {
-        hres = UnRegisterTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
-    }
-
     if(FAILED(hres))
-        ERR("typelib registration failed: %08x\n", hres);
+        ERR("RegInstall failed: %08x\n", hres);
 
     return hres;
 }
@@ -484,7 +480,7 @@ HRESULT WINAPI DllRegisterServer(void)
 {
     HRESULT hres;
 
-    hres = __wine_register_resources( hInst, NULL );
+    hres = __wine_register_resources( hInst );
     if(SUCCEEDED(hres))
         hres = register_server(TRUE);
     if(SUCCEEDED(hres))
@@ -498,7 +494,7 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    HRESULT hres = __wine_unregister_resources( hInst, NULL );
+    HRESULT hres = __wine_unregister_resources( hInst );
     if(SUCCEEDED(hres)) hres = register_server(FALSE);
     return hres;
 }
@@ -513,6 +509,8 @@ const char *debugstr_variant(const VARIANT *v)
         return "{VT_EMPTY}";
     case VT_NULL:
         return "{VT_NULL}";
+    case VT_I2:
+        return wine_dbg_sprintf("{VT_I2: %d}", V_I2(v));
     case VT_I4:
         return wine_dbg_sprintf("{VT_I4: %d}", V_I4(v));
     case VT_R8:
@@ -521,6 +519,8 @@ const char *debugstr_variant(const VARIANT *v)
         return wine_dbg_sprintf("{VT_BSTR: %s}", debugstr_w(V_BSTR(v)));
     case VT_DISPATCH:
         return wine_dbg_sprintf("{VT_DISPATCH: %p}", V_DISPATCH(v));
+    case VT_ERROR:
+        return wine_dbg_sprintf("{VT_ERROR: %08x}", V_ERROR(v));
     case VT_BOOL:
         return wine_dbg_sprintf("{VT_BOOL: %x}", V_BOOL(v));
     case VT_UINT:

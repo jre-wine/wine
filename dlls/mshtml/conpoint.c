@@ -158,7 +158,8 @@ static HRESULT WINAPI ConnectionPoint_Advise(IConnectionPoint *iface, IUnknown *
     }
 
     This->sinks[i].unk = sink;
-    *pdwCookie = i+1;
+    if(pdwCookie)
+        *pdwCookie = i+1;
 
     if(!i && This->data && This->data->on_advise)
         This->data->on_advise(This->container->outer, This->data);
@@ -266,7 +267,7 @@ static HRESULT WINAPI ConnectionPointContainer_FindConnectionPoint(IConnectionPo
     TRACE("(%p)->(%s %p)\n", This, debugstr_cp_guid(riid), ppCP);
 
     if(This->forward_container)
-        return IConnectionPointContainer_FindConnectionPoint(&This->IConnectionPointContainer_iface,
+        return IConnectionPointContainer_FindConnectionPoint(&This->forward_container->IConnectionPointContainer_iface,
                 riid, ppCP);
 
     *ppCP = NULL;

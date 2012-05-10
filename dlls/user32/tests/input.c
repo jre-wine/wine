@@ -1540,7 +1540,7 @@ static void test_key_map(void)
 
 static void test_ToUnicode(void)
 {
-    WCHAR wStr[2];
+    WCHAR wStr[4];
     BYTE state[256];
     const BYTE SC_RETURN = 0x1c, SC_TAB = 0x0f;
     const BYTE HIGHEST_BIT = 0x80;
@@ -1548,8 +1548,9 @@ static void test_ToUnicode(void)
     for(i=0; i<256; i++)
         state[i]=0;
 
+    wStr[1] = 0xAA;
     SetLastError(0xdeadbeef);
-    ret = ToUnicode(VK_RETURN, SC_RETURN, state, wStr, 2, 0);
+    ret = ToUnicode(VK_RETURN, SC_RETURN, state, wStr, 4, 0);
     if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
         win_skip("ToUnicode is not implemented\n");
@@ -1558,7 +1559,11 @@ static void test_ToUnicode(void)
 
     ok(ret == 1, "ToUnicode for Return key didn't return 1 (was %i)\n", ret);
     if(ret == 1)
+    {
         ok(wStr[0]=='\r', "ToUnicode for CTRL + Return was %i (expected 13)\n", wStr[0]);
+        ok(wStr[1]==0 || broken(wStr[1]!=0) /* nt4 */,
+           "ToUnicode didn't null-terminate the buffer when there was room.\n");
+    }
     state[VK_CONTROL] |= HIGHEST_BIT;
     state[VK_LCONTROL] |= HIGHEST_BIT;
 
@@ -1598,6 +1603,46 @@ static void test_keyboard_layout_name(void)
     ok(!strcmp(klid, "00000409"), "expected 00000409, got %s\n", klid);
 }
 
+static void test_key_names(void)
+{
+    char buffer[40];
+    WCHAR bufferW[40];
+    int ret, prev;
+    LONG lparam = 0x1d << 16;
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = GetKeyNameTextA( lparam, buffer, sizeof(buffer) );
+    ok( ret > 0, "wrong len %u for '%s'\n", ret, buffer );
+    ok( ret == strlen(buffer), "wrong len %u for '%s'\n", ret, buffer );
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    prev = ret;
+    ret = GetKeyNameTextA( lparam, buffer, prev );
+    ok( ret == prev - 1, "wrong len %u for '%s'\n", ret, buffer );
+    ok( ret == strlen(buffer), "wrong len %u for '%s'\n", ret, buffer );
+
+    memset( buffer, 0xcc, sizeof(buffer) );
+    ret = GetKeyNameTextA( lparam, buffer, 0 );
+    ok( ret == 0, "wrong len %u for '%s'\n", ret, buffer );
+    ok( buffer[0] == 0, "wrong string '%s'\n", buffer );
+
+    memset( bufferW, 0xcc, sizeof(bufferW) );
+    ret = GetKeyNameTextW( lparam, bufferW, sizeof(bufferW)/sizeof(WCHAR) );
+    ok( ret > 0, "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
+    ok( ret == lstrlenW(bufferW), "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
+
+    memset( bufferW, 0xcc, sizeof(bufferW) );
+    prev = ret;
+    ret = GetKeyNameTextW( lparam, bufferW, prev );
+    ok( ret == prev - 1, "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
+    ok( ret == lstrlenW(bufferW), "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
+
+    memset( bufferW, 0xcc, sizeof(bufferW) );
+    ret = GetKeyNameTextW( lparam, bufferW, 0 );
+    ok( ret == 0, "wrong len %u for %s\n", ret, wine_dbgstr_w(bufferW) );
+    ok( bufferW[0] == 0xcccc, "wrong string %s\n", wine_dbgstr_w(bufferW) );
+}
+
 START_TEST(input)
 {
     init_function_pointers();
@@ -1616,6 +1661,7 @@ START_TEST(input)
     test_ToUnicode();
     test_get_async_key_state();
     test_keyboard_layout_name();
+    test_key_names();
 
     if(pGetMouseMovePointsEx)
         test_GetMouseMovePointsEx();

@@ -21,14 +21,40 @@
 #include "config.h"
 
 #include "x11drv.h"
-#include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
+
+static DWORD get_user_dashes( char *res, const DWORD *style, DWORD len )
+{
+    DWORD i, pos, dashes[MAX_DASHLEN];
+
+    len = min( len, MAX_DASHLEN );
+    memcpy( dashes, style, len * sizeof(DWORD) );
+    for (i = pos = 0; i < len; i++)
+    {
+        if (!dashes[i])  /* get rid of 0 entry */
+        {
+            if (i < len - 1)
+            {
+                i++;
+                if (pos) dashes[pos - 1] += dashes[i];
+                else dashes[len - 1] += dashes[i];
+            }
+            else if (pos)
+            {
+                dashes[0] += dashes[pos - 1];
+                pos--;
+            }
+        }
+        else dashes[pos++] = dashes[i];
+    }
+    for (i = 0; i < pos; i++) res[i] = min( dashes[i], 255 );
+    return pos;
+}
 
 /***********************************************************************
  *           SelectPen   (X11DRV.@)
  */
-HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
+HPEN X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern )
 {
     static const char PEN_dash[]          = { 16,8 };
     static const char PEN_dot[]           = { 4,4 };
@@ -39,13 +65,14 @@ HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
     static const char EXTPEN_dot[]        = { 1,1 };
     static const char EXTPEN_dashdot[]    = { 3,1,1,1 };
     static const char EXTPEN_dashdotdot[] = { 3,1,1,1,1,1 };
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     LOGPEN logpen;
     int i;
+    EXTLOGPEN *elp = NULL;
 
     if (!GetObjectW( hpen, sizeof(logpen), &logpen ))
     {
         /* must be an extended pen */
-        EXTLOGPEN *elp;
         INT size = GetObjectW( hpen, 0, NULL );
 
         if (!size) return 0;
@@ -54,13 +81,10 @@ HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
         elp = HeapAlloc( GetProcessHeap(), 0, size );
 
         GetObjectW( hpen, size, elp );
-        /* FIXME: add support for user style pens */
         logpen.lopnStyle = elp->elpPenStyle;
         logpen.lopnWidth.x = elp->elpWidth;
         logpen.lopnWidth.y = 0;
         logpen.lopnColor = elp->elpColor;
-
-        HeapFree( GetProcessHeap(), 0, elp );
     }
     else
         physDev->pen.ext = 0;
@@ -73,13 +97,13 @@ HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
     physDev->pen.width = logpen.lopnWidth.x;
     if ((logpen.lopnStyle & PS_GEOMETRIC) || (physDev->pen.width >= 1))
     {
-        physDev->pen.width = X11DRV_XWStoDS( physDev, physDev->pen.width );
+        physDev->pen.width = X11DRV_XWStoDS( dev->hdc, physDev->pen.width );
         if (physDev->pen.width < 0) physDev->pen.width = -physDev->pen.width;
     }
 
     if (physDev->pen.width == 1) physDev->pen.width = 0;  /* Faster */
     if (hpen == GetStockObject( DC_PEN ))
-        logpen.lopnColor = GetDCPenColor( physDev->hdc );
+        logpen.lopnColor = GetDCPenColor( dev->hdc );
     physDev->pen.pixel = X11DRV_PALETTE_ToPhysical( physDev, logpen.lopnColor );
     switch(logpen.lopnStyle & PS_STYLE_MASK)
     {
@@ -108,16 +132,20 @@ HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
             memcpy(physDev->pen.dashes, PEN_alternate, physDev->pen.dash_len);
             break;
       case PS_USERSTYLE:
-        FIXME("PS_USERSTYLE is not supported\n");
-        /* fall through */
+            physDev->pen.dash_len = get_user_dashes( physDev->pen.dashes,
+                                                     elp->elpStyleEntry, elp->elpNumEntries );
+            break;
       default:
         physDev->pen.dash_len = 0;
         break;
     }
-    if(physDev->pen.ext && physDev->pen.dash_len &&
-        (logpen.lopnStyle & PS_STYLE_MASK) != PS_ALTERNATE)
+    if(physDev->pen.ext && physDev->pen.dash_len && physDev->pen.width &&
+       (logpen.lopnStyle & PS_STYLE_MASK) != PS_USERSTYLE &&
+       (logpen.lopnStyle & PS_STYLE_MASK) != PS_ALTERNATE)
         for(i = 0; i < physDev->pen.dash_len; i++)
-            physDev->pen.dashes[i] *= (physDev->pen.width ? physDev->pen.width : 1);
+            physDev->pen.dashes[i] = min( physDev->pen.dashes[i] * physDev->pen.width, 255 );
+
+    HeapFree( GetProcessHeap(), 0, elp );
 
     return hpen;
 }
@@ -126,9 +154,11 @@ HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
 /***********************************************************************
  *           SetDCPenColor (X11DRV.@)
  */
-COLORREF CDECL X11DRV_SetDCPenColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
+COLORREF X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor )
 {
-    if (GetCurrentObject(physDev->hdc, OBJ_PEN) == GetStockObject( DC_PEN ))
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+
+    if (GetCurrentObject(dev->hdc, OBJ_PEN) == GetStockObject( DC_PEN ))
         physDev->pen.pixel = X11DRV_PALETTE_ToPhysical( physDev, crColor );
 
     return crColor;

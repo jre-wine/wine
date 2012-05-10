@@ -164,7 +164,7 @@ static void decrease_state(JScript *This, SCRIPTSTATE state)
             change_state(This, SCRIPTSTATE_DISCONNECTED);
             if(state == SCRIPTSTATE_DISCONNECTED)
                 return;
-
+            /* FALLTHROUGH */
         case SCRIPTSTATE_STARTED:
         case SCRIPTSTATE_DISCONNECTED:
             clear_script_queue(This);
@@ -173,7 +173,7 @@ static void decrease_state(JScript *This, SCRIPTSTATE state)
                 change_state(This, SCRIPTSTATE_INITIALIZED);
             if(state == SCRIPTSTATE_INITIALIZED)
                 return;
-
+            /* FALLTHROUGH */
         case SCRIPTSTATE_INITIALIZED:
             if(This->ctx->host_global) {
                 IDispatch_Release(This->ctx->host_global);
@@ -211,7 +211,7 @@ static void decrease_state(JScript *This, SCRIPTSTATE state)
                 jsdisp_release(This->ctx->global);
                 This->ctx->global = NULL;
             }
-
+            /* FALLTHROUGH */
         case SCRIPTSTATE_UNINITIALIZED:
             change_state(This, state);
             break;
@@ -287,7 +287,12 @@ static ULONG WINAPI AXSite_Release(IServiceProvider *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref)
+    {
+        if(This->sp)
+            IServiceProvider_Release(This->sp);
+
         heap_free(This);
+    }
 
     return ref;
 }
@@ -298,6 +303,9 @@ static HRESULT WINAPI AXSite_QueryService(IServiceProvider *iface,
     AXSite *This = impl_from_IServiceProvider(iface);
 
     TRACE("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
+
+    if(!This->sp)
+        return E_NOINTERFACE;
 
     return IServiceProvider_QueryService(This->sp, guidService, riid, ppv);
 }
@@ -311,14 +319,13 @@ static IServiceProviderVtbl AXSiteVtbl = {
 
 IUnknown *create_ax_site(script_ctx_t *ctx)
 {
-    IServiceProvider *sp;
+    IServiceProvider *sp = NULL;
     AXSite *ret;
     HRESULT hres;
 
     hres = IActiveScriptSite_QueryInterface(ctx->site, &IID_IServiceProvider, (void**)&sp);
     if(FAILED(hres)) {
-        ERR("Could not get IServiceProvider iface: %08x\n", hres);
-        return NULL;
+        TRACE("Could not get IServiceProvider iface: %08x\n", hres);
     }
 
     ret = heap_alloc(sizeof(AXSite));
@@ -943,7 +950,7 @@ static HRESULT WINAPI JScriptSafety_SetInterfaceSafetyOptions(IObjectSafety *ifa
     if(dwOptionSetMask & ~SUPPORTED_OPTIONS)
         return E_FAIL;
 
-    This->safeopt = dwEnabledOptions & dwEnabledOptions;
+    This->safeopt = (dwEnabledOptions & dwOptionSetMask) | (This->safeopt & ~dwOptionSetMask) | INTERFACE_USES_DISPEX;
     return S_OK;
 }
 
@@ -962,6 +969,11 @@ HRESULT WINAPI JScriptFactory_CreateInstance(IClassFactory *iface, IUnknown *pUn
     HRESULT hres;
 
     TRACE("(%p %s %p)\n", pUnkOuter, debugstr_guid(riid), ppv);
+
+    if(pUnkOuter) {
+        *ppv = NULL;
+        return CLASS_E_NOAGGREGATION;
+    }
 
     lock_module();
 

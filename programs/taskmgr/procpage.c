@@ -19,20 +19,18 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <tchar.h>
-#include <stdio.h>
 #include <winnt.h>
-    
+
 #include "taskmgr.h"
 #include "perfdata.h"
 #include "column.h"
-#include <ctype.h>
 
 HWND hProcessPage;                        /* Process List Property Page */
 
@@ -89,7 +87,7 @@ static void ProcessPageShowContextMenu(DWORD dwProcessId)
     GetCursorPos(&pt);
     GetSystemInfo(&si);
 
-    hMenu = LoadMenu(hInst, MAKEINTRESOURCE(IDR_PROCESS_PAGE_CONTEXT));
+    hMenu = LoadMenuW(hInst, MAKEINTRESOURCEW(IDR_PROCESS_PAGE_CONTEXT));
     hSubMenu = GetSubMenu(hMenu, 0);
     hPriorityMenu = GetSubMenu(hSubMenu, 4);
 
@@ -152,8 +150,8 @@ static void ProcessPageOnNotify(LPARAM lParam)
 {
     LPNMHDR            pnmh;
     NMLVDISPINFOW*     pnmdi;
-    LVITEM             lvitem;
-    ULONG              Index;
+    LVITEMW            lvitem;
+    ULONG              Index, Count;
     ULONG              ColumnIndex;
     IO_COUNTERS        iocounters;
     TIME               time;
@@ -321,21 +319,21 @@ static void ProcessPageOnNotify(LPARAM lParam)
             break;
 
         case NM_RCLICK:
-
-            for (Index=0; Index<(ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++)
+            Count = SendMessageW(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0);
+            for (Index=0; Index<Count; Index++)
             {
                 lvitem.mask = LVIF_STATE;
                 lvitem.stateMask = LVIS_SELECTED;
                 lvitem.iItem = Index;
                 lvitem.iSubItem = 0;
 
-                SendMessage(hProcessPageListCtrl, LVM_GETITEM, 0, (LPARAM) &lvitem);
+                SendMessageW(hProcessPageListCtrl, LVM_GETITEMW, 0, (LPARAM) &lvitem);
 
                 if (lvitem.state & LVIS_SELECTED)
                     break;
             }
 
-            if ((ListView_GetSelectedCount(hProcessPageListCtrl) == 1) &&
+            if ((SendMessageW(hProcessPageListCtrl, LVM_GETSELECTEDCOUNT, 0, 0) == 1) &&
                 (PerfDataGetProcessId(Index) != 0))
             {
                 ProcessPageShowContextMenu(PerfDataGetProcessId(Index));
@@ -396,7 +394,7 @@ static DWORD WINAPI ProcessPageRefreshThread(void *lpParameter)
     LoadStringW(hInst, IDS_STATUS_BAR_PROCESSES, wszProcesses, sizeof(wszProcesses)/sizeof(WCHAR));
 
     /* Create the event */
-    hProcessPageEvent = CreateEvent(NULL, TRUE, TRUE, NULL);
+    hProcessPageEvent = CreateEventW(NULL, TRUE, TRUE, NULL);
 
     /* If we couldn't create the event then exit the thread */
     if (!hProcessPageEvent)
@@ -419,8 +417,8 @@ static DWORD WINAPI ProcessPageRefreshThread(void *lpParameter)
             /* Reset our event */
             ResetEvent(hProcessPageEvent);
 
-            if ((ULONG)SendMessage(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0) != PerfDataGetProcessCount())
-                SendMessage(hProcessPageListCtrl, LVM_SETITEMCOUNT, PerfDataGetProcessCount(), /*LVSICF_NOINVALIDATEALL|*/LVSICF_NOSCROLL);
+            if (SendMessageW(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0) != PerfDataGetProcessCount())
+                SendMessageW(hProcessPageListCtrl, LVM_SETITEMCOUNT, PerfDataGetProcessCount(), /*LVSICF_NOINVALIDATEALL|*/LVSICF_NOSCROLL);
 
             if (IsWindowVisible(hProcessPage))
                 InvalidateRect(hProcessPageListCtrl, NULL, FALSE);
@@ -447,6 +445,7 @@ ProcessPageWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     int        nXDifference;
     int        nYDifference;
     int        cx, cy;
+    DWORD      extended_styles;
 
     switch (message) {
     case WM_INITDIALOG:
@@ -464,24 +463,25 @@ ProcessPageWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
          * Get handles to the controls
          */
         hProcessPageListCtrl = GetDlgItem(hDlg, IDC_PROCESSLIST);
-        hProcessPageHeaderCtrl = ListView_GetHeader(hProcessPageListCtrl);
+        hProcessPageHeaderCtrl = (HWND)SendMessageW(hProcessPageListCtrl, LVM_GETHEADER, 0, 0);
         hProcessPageEndProcessButton = GetDlgItem(hDlg, IDC_ENDPROCESS);
         hProcessPageShowAllProcessesButton = GetDlgItem(hDlg, IDC_SHOWALLPROCESSES);
 
         /*
          * Set the extended window styles for the list control
          */
-        SendMessage(hProcessPageListCtrl, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, ListView_GetExtendedListViewStyle(hProcessPageListCtrl) | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP);
+        extended_styles = SendMessageW(hProcessPageListCtrl, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+        SendMessageW(hProcessPageListCtrl, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, extended_styles | LVS_EX_FULLROWSELECT | LVS_EX_HEADERDRAGDROP);
 
         AddColumns();
 
         /*
          * Subclass the process list control so we can intercept WM_ERASEBKGND
          */
-        OldProcessListWndProc = (WNDPROC)SetWindowLongPtr(hProcessPageListCtrl, GWLP_WNDPROC, (LONG_PTR)ProcessListWndProc);
+        OldProcessListWndProc = (WNDPROC)SetWindowLongPtrW(hProcessPageListCtrl, GWLP_WNDPROC, (LONG_PTR)ProcessListWndProc);
 
         /* Start our refresh thread */
-         CreateThread(NULL, 0, ProcessPageRefreshThread, NULL, 0, NULL);
+        CloseHandle( CreateThread(NULL, 0, ProcessPageRefreshThread, NULL, 0, NULL));
 
         return TRUE;
 

@@ -687,7 +687,7 @@ INTERNETAPI INTERNET_STATUS_CALLBACK WINAPI InternetSetStatusCallbackW(HINTERNET
 #define INTERNET_STATE_IDLE                     0x00000100
 #define INTERNET_STATE_BUSY                     0x00000200
 
-#define INTERNET_INVALID_STATUS_CALLBACK        ((INTERNET_STATUS_CALLBACK)(-1L))
+#define INTERNET_INVALID_STATUS_CALLBACK        ((INTERNET_STATUS_CALLBACK)(-1))
 
 #define FTP_TRANSFER_TYPE_UNKNOWN   0x00000000
 #define FTP_TRANSFER_TYPE_ASCII     0x00000001
@@ -1659,6 +1659,16 @@ BOOLAPI FindCloseUrlCache(HANDLE);
 BOOLAPI DeleteUrlCacheEntryA(LPCSTR);
 BOOLAPI DeleteUrlCacheEntryW(LPCWSTR);
 #define DeleteUrlCacheEntry  WINELIB_NAME_AW(DeleteUrlCacheEntry)
+
+/* FCS_ flags and FreeUrlCacheSpace are no longer documented */
+#define FCS_PERCENT_CACHE_SPACE  0  /* guessed value */
+#define FCS_PERCENT_DISK_SPACE   1  /* guessed value */
+#define FCS_ABSOLUTE_SIZE        2  /* guessed value */
+
+BOOLAPI FreeUrlCacheSpaceA(LPCSTR ,DWORD ,DWORD);
+BOOLAPI FreeUrlCacheSpaceW(LPCWSTR ,DWORD ,DWORD);
+#define FreeUrlCacheSpace  WINELIB_NAME_AW(FreeUrlCacheSpace)
+
 
 INTERNETAPI DWORD WINAPI InternetDialA(HWND ,LPSTR ,DWORD ,DWORD_PTR* ,DWORD);
 INTERNETAPI DWORD WINAPI InternetDialW(HWND ,LPWSTR ,DWORD ,DWORD_PTR* ,DWORD);

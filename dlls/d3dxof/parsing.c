@@ -3,9 +3,6 @@
  *
  * Copyright 2008 Christian Costa
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -35,6 +32,18 @@
 #include <stdio.h>
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
+
+#define MAKEFOUR(a,b,c,d) ((DWORD)a + ((DWORD)b << 8) + ((DWORD)c << 16) + ((DWORD)d << 24))
+#define XOFFILE_FORMAT_MAGIC         MAKEFOUR('x','o','f',' ')
+#define XOFFILE_FORMAT_VERSION_302   MAKEFOUR('0','3','0','2')
+#define XOFFILE_FORMAT_VERSION_303   MAKEFOUR('0','3','0','3')
+#define XOFFILE_FORMAT_BINARY        MAKEFOUR('b','i','n',' ')
+#define XOFFILE_FORMAT_TEXT          MAKEFOUR('t','x','t',' ')
+#define XOFFILE_FORMAT_BINARY_MSZIP  MAKEFOUR('b','z','i','p')
+#define XOFFILE_FORMAT_TEXT_MSZIP    MAKEFOUR('t','z','i','p')
+#define XOFFILE_FORMAT_COMPRESSED    MAKEFOUR('c','m','p',' ')
+#define XOFFILE_FORMAT_FLOAT_BITS_32 MAKEFOUR('0','0','3','2')
+#define XOFFILE_FORMAT_FLOAT_BITS_64 MAKEFOUR('0','0','6','4')
 
 #define TOKEN_NAME         1
 #define TOKEN_STRING       2
@@ -70,6 +79,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
 
 #define CLSIDFMT "<%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X>"
 
+/* FOURCC to string conversion for debug messages */
+static const char *debugstr_fourcc(DWORD fourcc)
+{
+    if (!fourcc) return "'null'";
+    return wine_dbg_sprintf ("\'%c%c%c%c\'",
+        (char)(fourcc), (char)(fourcc >> 8),
+        (char)(fourcc >> 16), (char)(fourcc >> 24));
+}
+
 static const char* get_primitive_string(WORD token)
 {
   switch(token)
@@ -104,7 +122,7 @@ static const char* get_primitive_string(WORD token)
   return NULL;
 }
 
-void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
+static void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
 {
   int j, k;
   GUID* clsid;
@@ -135,17 +153,17 @@ void dump_template(xtemplate* templates_array, xtemplate* ptemplate)
   }
   if (ptemplate->open)
     DPRINTF("[...]\n");
-  else if (ptemplate->nb_childs)
+  else if (ptemplate->nb_children)
   {
-    DPRINTF("[%s", ptemplate->childs[0]);
-    for (j = 1; j < ptemplate->nb_childs; j++)
-      DPRINTF(",%s", ptemplate->childs[j]);
+    DPRINTF("[%s", ptemplate->children[0]);
+    for (j = 1; j < ptemplate->nb_children; j++)
+      DPRINTF(",%s", ptemplate->children[j]);
     DPRINTF("]\n");
   }
   DPRINTF("}\n");
 }
 
-BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size)
+static BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size)
 {
   if (buf->rem_bytes < size)
     return FALSE;
@@ -159,6 +177,112 @@ static void rewind_bytes(parse_buffer * buf, DWORD size)
 {
   buf->buffer -= size;
   buf->rem_bytes += size;
+}
+
+HRESULT parse_header(parse_buffer * buf, BYTE ** decomp_buffer_ptr)
+{
+  /* X File common header:
+   *  0-3  -> Magic Number (format identifier)
+   *  4-7  -> Format Version
+   *  8-11 -> Format Type (text or binary, decompressed or compressed)
+   * 12-15 -> Float Size (32 or 64 bits) */
+  DWORD header[4];
+
+  if (!read_bytes(buf, header, sizeof(header)))
+    return DXFILEERR_BADFILETYPE;
+
+  if (TRACE_ON(d3dxof_parsing))
+  {
+    char string[17];
+    memcpy(string, header, 16);
+    string[16] = 0;
+    TRACE("header = '%s'\n", string);
+  }
+
+  if (header[0] != XOFFILE_FORMAT_MAGIC)
+    return DXFILEERR_BADFILETYPE;
+
+  if (header[1] != XOFFILE_FORMAT_VERSION_302 && header[1] != XOFFILE_FORMAT_VERSION_303)
+    return DXFILEERR_BADFILEVERSION;
+
+  if (header[2] != XOFFILE_FORMAT_BINARY && header[2] != XOFFILE_FORMAT_TEXT &&
+      header[2] != XOFFILE_FORMAT_BINARY_MSZIP && header[2] != XOFFILE_FORMAT_TEXT_MSZIP)
+  {
+    WARN("File type %s unknown\n", debugstr_fourcc(header[2]));
+    return DXFILEERR_BADFILETYPE;
+  }
+
+  if (header[3] != XOFFILE_FORMAT_FLOAT_BITS_32 && header[3] != XOFFILE_FORMAT_FLOAT_BITS_64)
+    return DXFILEERR_BADFILEFLOATSIZE;
+
+  buf->txt = header[2] == XOFFILE_FORMAT_TEXT || header[2] == XOFFILE_FORMAT_TEXT_MSZIP;
+
+  if (header[2] == XOFFILE_FORMAT_BINARY_MSZIP || header[2] == XOFFILE_FORMAT_TEXT_MSZIP)
+  {
+    /* Extended header for compressed data:
+     * 16-19 -> size of decompressed file including xof header,
+     * 20-21 -> size of first decompressed MSZIP chunk, 22-23 -> size of first compressed MSZIP chunk
+     * 24-xx -> compressed MSZIP data chunk
+     * xx-xx -> size of next decompressed MSZIP chunk, xx-xx -> size of next compressed MSZIP chunk
+     * xx-xx -> compressed MSZIP data chunk
+     * .............................................................................................. */
+    int err;
+    DWORD decomp_file_size;
+    WORD decomp_chunk_size;
+    WORD comp_chunk_size;
+    LPBYTE decomp_buffer;
+
+    if (!read_bytes(buf, &decomp_file_size, sizeof(decomp_file_size)))
+      return DXFILEERR_BADFILETYPE;
+
+    TRACE("Compressed format %s detected: decompressed file size with xof header = %d\n",
+          debugstr_fourcc(header[2]), decomp_file_size);
+
+    /* Does not take xof header into account */
+    decomp_file_size -= 16;
+
+    decomp_buffer = HeapAlloc(GetProcessHeap(), 0, decomp_file_size);
+    if (!decomp_buffer)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
+    *decomp_buffer_ptr = decomp_buffer;
+
+    while (buf->rem_bytes)
+    {
+      if (!read_bytes(buf, &decomp_chunk_size, sizeof(decomp_chunk_size)))
+        return DXFILEERR_BADFILETYPE;
+      if (!read_bytes(buf, &comp_chunk_size, sizeof(comp_chunk_size)))
+        return DXFILEERR_BADFILETYPE;
+
+      TRACE("Process chunk: compressed_size = %d, decompressed_size = %d\n",
+            comp_chunk_size, decomp_chunk_size);
+
+      err = mszip_decompress(comp_chunk_size, decomp_chunk_size, (char*)buf->buffer, (char*)decomp_buffer);
+      if (err)
+      {
+        WARN("Error while decompressing MSZIP chunk %d\n", err);
+        HeapFree(GetProcessHeap(), 0, decomp_buffer);
+        return DXFILEERR_BADALLOC;
+      }
+      buf->rem_bytes -= comp_chunk_size;
+      buf->buffer += comp_chunk_size;
+      decomp_buffer += decomp_chunk_size;
+    }
+
+    if ((decomp_buffer - *decomp_buffer_ptr) != decomp_file_size)
+      ERR("Size of all decompressed chunks (%u) does not match decompressed file size (%u)\n",
+          (DWORD)(decomp_buffer - *decomp_buffer_ptr), decomp_file_size);
+
+    /* Use decompressed data */
+    buf->buffer = *decomp_buffer_ptr;
+    buf->rem_bytes = decomp_file_size;
+  }
+
+  TRACE("Header is correct\n");
+
+  return S_OK;
 }
 
 static void dump_TOKEN(WORD token)
@@ -337,10 +461,10 @@ static BOOL is_guid(parse_buffer* buf)
   DWORD tab[10];
   int ret;
 
-  if (*buf->buffer != '<')
+  if (buf->rem_bytes < 38 || *buf->buffer != '<')
     return FALSE;
   tmp[0] = '<';
-  while (*(buf->buffer+pos) != '>')
+  while (pos < sizeof(tmp) - 2 && *(buf->buffer+pos) != '>')
   {
     tmp[pos] = *(buf->buffer+pos);
     pos++;
@@ -381,17 +505,19 @@ static BOOL is_guid(parse_buffer* buf)
 
 static BOOL is_name(parse_buffer* buf)
 {
-  char tmp[50];
+  char tmp[512];
   DWORD pos = 0;
   char c;
   BOOL error = 0;
-  while (!is_separator(c = *(buf->buffer+pos)))
+  while (pos < buf->rem_bytes && !is_separator(c = *(buf->buffer+pos)))
   {
     if (!(((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-')))
       error = 1;
-    tmp[pos++] = c;
+    if (pos < sizeof(tmp))
+        tmp[pos] = c;
+    pos++;
   }
-  tmp[pos] = 0;
+  tmp[min(pos, sizeof(tmp) - 1)] = 0;
 
   if (error)
   {
@@ -410,21 +536,23 @@ static BOOL is_name(parse_buffer* buf)
 
 static BOOL is_float(parse_buffer* buf)
 {
-  char tmp[50];
+  char tmp[512];
   DWORD pos = 0;
   char c;
   float decimal;
   BOOL dot = 0;
 
-  while (!is_separator(c = *(buf->buffer+pos)))
+  while (pos < buf->rem_bytes && !is_separator(c = *(buf->buffer+pos)))
   {
     if (!((!pos && (c == '-')) || ((c >= '0') && (c <= '9')) || (!dot && (c == '.'))))
       return FALSE;
     if (c == '.')
       dot = TRUE;
-    tmp[pos++] = c;
+    if (pos < sizeof(tmp))
+        tmp[pos] = c;
+    pos++;
   }
-  tmp[pos] = 0;
+  tmp[min(pos, sizeof(tmp) - 1)] = 0;
 
   buf->buffer += pos;
   buf->rem_bytes -= pos;
@@ -440,18 +568,20 @@ static BOOL is_float(parse_buffer* buf)
 
 static BOOL is_integer(parse_buffer* buf)
 {
-  char tmp[50];
+  char tmp[512];
   DWORD pos = 0;
   char c;
   DWORD integer;
 
-  while (!is_separator(c = *(buf->buffer+pos)))
+  while (pos < buf->rem_bytes && !is_separator(c = *(buf->buffer+pos)))
   {
     if (!((c >= '0') && (c <= '9')))
       return FALSE;
-    tmp[pos++] = c;
+    if (pos < sizeof(tmp))
+        tmp[pos] = c;
+    pos++;
   }
-  tmp[pos] = 0;
+  tmp[min(pos, sizeof(tmp) - 1)] = 0;
 
   buf->buffer += pos;
   buf->rem_bytes -= pos;
@@ -467,7 +597,7 @@ static BOOL is_integer(parse_buffer* buf)
 
 static BOOL is_string(parse_buffer* buf)
 {
-  char tmp[100];
+  char tmp[512];
   DWORD pos = 0;
   char c;
   BOOL ok = 0;
@@ -475,16 +605,18 @@ static BOOL is_string(parse_buffer* buf)
   if (*buf->buffer != '"')
     return FALSE;
 
-  while (!is_separator(c = *(buf->buffer+pos+1)) && (pos < 99))
+  while (pos < buf->rem_bytes && !is_operator(c = *(buf->buffer+pos+1)))
   {
     if (c == '"')
     {
       ok = 1;
       break;
     }
-    tmp[pos++] = c;
+    if (pos < sizeof(tmp))
+        tmp[pos] = c;
+    pos++;
   }
-  tmp[pos] = 0;
+  tmp[min(pos, sizeof(tmp) - 1)] = 0;
 
   if (!ok)
   {
@@ -749,7 +881,7 @@ static WORD check_TOKEN(parse_buffer * buf)
   return buf->current_token;
 }
 
-BOOL is_template_available(parse_buffer * buf)
+static BOOL is_template_available(parse_buffer * buf)
 {
   return check_TOKEN(buf) == TOKEN_TEMPLATE;
 }
@@ -798,10 +930,10 @@ static BOOL parse_template_option_info(parse_buffer * buf)
     {
       if (get_TOKEN(buf) != TOKEN_NAME)
         return FALSE;
-      strcpy(cur_template->childs[cur_template->nb_childs], (char*)buf->value);
+      strcpy(cur_template->children[cur_template->nb_children], (char*)buf->value);
       if (check_TOKEN(buf) == TOKEN_GUID)
         get_TOKEN(buf);
-      cur_template->nb_childs++;
+      cur_template->nb_children++;
       if (check_TOKEN(buf) != TOKEN_COMMA)
         break;
       get_TOKEN(buf);
@@ -940,7 +1072,8 @@ static void go_to_next_definition(parse_buffer * buf)
   char c;
   while (buf->rem_bytes)
   {
-    read_bytes(buf, &c, 1);
+    if (!read_bytes(buf, &c, 1))
+      return;
     if ((c == '#') || (c == '/'))
     {
       /* Handle comment (# or //) */
@@ -967,7 +1100,7 @@ static void go_to_next_definition(parse_buffer * buf)
   }
 }
 
-BOOL parse_template(parse_buffer * buf)
+static BOOL parse_template(parse_buffer * buf)
 {
   if (get_TOKEN(buf) != TOKEN_TEMPLATE)
     return FALSE;
@@ -992,6 +1125,25 @@ BOOL parse_template(parse_buffer * buf)
   TRACE("%d - %s - %s\n", buf->pdxf->nb_xtemplates, buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].name, debugstr_guid(&buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].class_id));
   buf->pdxf->nb_xtemplates++;
 
+  return TRUE;
+}
+
+BOOL parse_templates(parse_buffer * buf)
+{
+  while (buf->rem_bytes && is_template_available(buf))
+  {
+    if (!parse_template(buf))
+    {
+      WARN("Template is not correct\n");
+      return FALSE;
+    }
+    else
+    {
+      TRACE("Template successfully parsed:\n");
+      if (TRACE_ON(d3dxof_parsing))
+        dump_template(buf->pdxf->xtemplates, &buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates - 1]);
+    }
+  }
   return TRUE;
 }
 
@@ -1020,6 +1172,8 @@ static BOOL parse_object_members_list(parse_buffer * buf)
   DWORD token;
   int i;
   xtemplate* pt = buf->pxt[buf->level];
+
+  buf->pxo->nb_members = pt->nb_members;
 
   for (i = 0; i < pt->nb_members; i++)
   {
@@ -1097,12 +1251,12 @@ static BOOL parse_object_members_list(parse_buffer * buf)
             return FALSE;
           if (pt->members[i].type == TOKEN_WORD)
           {
-            *(((WORD*)(buf->cur_pos_data + buf->pdata))) = (WORD)(*(DWORD*)buf->value);
+            *(((WORD*)(buf->pdata + buf->cur_pos_data))) = (WORD)(*(DWORD*)buf->value);
             buf->cur_pos_data += 2;
           }
           else if (pt->members[i].type == TOKEN_DWORD)
           {
-            *(((DWORD*)(buf->cur_pos_data + buf->pdata))) = (DWORD)(*(DWORD*)buf->value);
+            *(((DWORD*)(buf->pdata + buf->cur_pos_data))) = (DWORD)(*(DWORD*)buf->value);
             buf->cur_pos_data += 4;
           }
           else
@@ -1119,7 +1273,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
             return FALSE;
           if (pt->members[i].type == TOKEN_FLOAT)
           {
-            *(((float*)(buf->cur_pos_data + buf->pdata))) = (float)(*(float*)buf->value);
+            *(((float*)(buf->pdata + buf->cur_pos_data))) = (float)(*(float*)buf->value);
             buf->cur_pos_data += 4;
           }
           else
@@ -1132,7 +1286,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         {
           get_TOKEN(buf);
           TRACE("%s = %s\n", pt->members[i].name, (char*)buf->value);
-          if (!check_buffer(buf, 4))
+          if (!check_buffer(buf, sizeof(LPSTR)))
             return FALSE;
           if (pt->members[i].type == TOKEN_LPSTR)
           {
@@ -1143,9 +1297,9 @@ static BOOL parse_object_members_list(parse_buffer * buf)
               return FALSE;
             }
             strcpy((char*)buf->cur_pstrings, (char*)buf->value);
-            *(((LPCSTR*)(buf->cur_pos_data + buf->pdata))) = (char*)buf->cur_pstrings;
+            *(((LPCSTR*)(buf->pdata + buf->cur_pos_data))) = (char*)buf->cur_pstrings;
             buf->cur_pstrings += len;
-            buf->cur_pos_data += 4;
+            buf->cur_pos_data += sizeof(LPSTR);
           }
           else
           {
@@ -1161,12 +1315,17 @@ static BOOL parse_object_members_list(parse_buffer * buf)
       }
     }
 
-    if (nb_elems && buf->txt && (check_TOKEN(buf) != TOKEN_CBRACE))
+    /* Empty arrays can have the semicolon at the end or not so remove it if any and skip next check */
+    if (!nb_elems && (check_TOKEN(buf) == TOKEN_SEMICOLON))
+      get_TOKEN(buf);
+
+    if (nb_elems && buf->txt && (check_TOKEN(buf) != TOKEN_CBRACE) && (check_TOKEN(buf) != TOKEN_NAME))
     {
       token = get_TOKEN(buf);
       if ((token != TOKEN_SEMICOLON) && (token != TOKEN_COMMA))
         return FALSE;
     }
+    buf->pxo->members[i].size = buf->cur_pos_data - buf->pxo->members[i].start;
   }
 
   return TRUE;
@@ -1174,7 +1333,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
 
 static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
 {
-  buf->pxo->nb_childs = 0;
+  buf->pxo->nb_children = 0;
 
   if (!parse_object_members_list(buf))
     return FALSE;
@@ -1219,9 +1378,10 @@ _exit:
             return FALSE;
         }
 
-        buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
-        buf->pxo->childs[buf->pxo->nb_childs]->ptarget = &(buf->pxo_globals[i])[j];
-        buf->pxo->nb_childs++;
+        buf->pxo->children[buf->pxo->nb_children] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
+        buf->pxo->children[buf->pxo->nb_children]->ptarget = &(buf->pxo_globals[i])[j];
+        buf->pxo->children[buf->pxo->nb_children]->binary = FALSE;
+        buf->pxo->nb_children++;
       }
       else if (check_TOKEN(buf) == TOKEN_NAME)
       {
@@ -1233,7 +1393,7 @@ _exit:
             return FALSE;
         }
 
-        buf->pxo = buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
+        buf->pxo = buf->pxo->children[buf->pxo->nb_children] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
 
         TRACE("Enter optional %s\n", (char*)buf->value);
         buf->level++;
@@ -1244,16 +1404,16 @@ _exit:
         }
         buf->level--;
         buf->pxo = pxo;
-        buf->pxo->nb_childs++;
+        buf->pxo->nb_children++;
       }
       else
         break;
     }
   }
 
-  if (buf->pxo->nb_childs > MAX_CHILDS)
+  if (buf->pxo->nb_children > MAX_CHILDREN)
   {
-    FIXME("Too many childs %d\n", buf->pxo->nb_childs);
+    FIXME("Too many children %d\n", buf->pxo->nb_children);
     return FALSE;
   }
 
@@ -1266,6 +1426,7 @@ BOOL parse_object(parse_buffer * buf)
 
   buf->pxo->pos_data = buf->cur_pos_data;
   buf->pxo->ptarget = NULL;
+  buf->pxo->binary = FALSE;
   buf->pxo->root = buf->pxo_tab;
 
   if (get_TOKEN(buf) != TOKEN_NAME)

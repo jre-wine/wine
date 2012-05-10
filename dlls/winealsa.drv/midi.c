@@ -48,12 +48,13 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "mmddk.h"
-#include "alsa.h"
+#include "mmreg.h"
+#include "dsound.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(midi);
+#include <alsa/asoundlib.h>
 
-#ifdef HAVE_ALSA
+WINE_DEFAULT_DEBUG_CHANNEL(midi);
 
 #ifndef SND_SEQ_PORT_TYPE_PORT
 #define SND_SEQ_PORT_TYPE_PORT (1<<19)  /* Appears in version 1.0.12rc1 */
@@ -149,12 +150,12 @@ static	int 	MIDI_AlsaToWindowsDeviceType(unsigned int type)
      * MOD_SQSYNTH      square wave internal synth
      * MOD_FMSYNTH      FM internal synth
      * MOD_MAPPER       MIDI mapper
-     * MOD_WAVETABLE    hardware watetable internal synth
+     * MOD_WAVETABLE    hardware wavetable internal synth
      * MOD_SWSYNTH      software internal synth
      */
 
     /* FIXME Is this really the correct equivalence from ALSA to
-       Windows Sound type */
+       Windows Sound type? */
 
     if (type & SND_SEQ_PORT_TYPE_SYNTH)
         return MOD_FMSYNTH;
@@ -361,13 +362,16 @@ static DWORD WINAPI midRecThread(LPVOID arg)
                     toSend = 0xFC;
                     break;
                 case SND_SEQ_EVENT_SONGPOS:
-                    toSend = (((ev->data.control.value >> 7) & 0x7f) << 16) | ((ev->data.control.value & 0x7f) << 8) | 0xF2;
+                    toSend = (((ev->data.control.value >> 7) & 0x7f) << 16) | ((ev->data.control.value & 0x7f) << 8) | MIDI_CMD_COMMON_SONG_POS;
                     break;
                 case SND_SEQ_EVENT_SONGSEL:
-                  toSend = ((ev->data.control.value & 0x7f) << 8) | 0xF3;
+                  toSend = ((ev->data.control.value & 0x7f) << 8) | MIDI_CMD_COMMON_SONG_SELECT;
                     break;
                 case SND_SEQ_EVENT_RESET:
                     toSend = 0xFF;
+                    break;
+                case SND_SEQ_EVENT_QFRAME:
+                  toSend = ((ev->data.control.value & 0x7f) << 8) | MIDI_CMD_COMMON_MTC_QUARTER;
                     break;
 		case SND_SEQ_EVENT_SYSEX:
 		    {
@@ -863,7 +867,6 @@ static DWORD modData(WORD wDevID, DWORD dwParam)
 		switch (evt & 0x0F) {
 		case 0x00:	/* System Exclusive, don't do it on modData,
 				 * should require modLongData*/
-		case 0x01:	/* Undefined */
 		case 0x04:	/* Undefined. */
 		case 0x05:	/* Undefined. */
 		case 0x07:	/* End of Exclusive. */
@@ -889,6 +892,7 @@ static DWORD modData(WORD wDevID, DWORD dwParam)
 			snd_seq_ev_set_sysex(&event, sizeof(reset_sysex_seq), reset_sysex_seq);
 		    }
 		    break;
+		case 0x01:	/* MTC Quarter frame */
 		case 0x03:	/* Song Select. */
 		    {
 			BYTE buf[2];
@@ -1299,8 +1303,6 @@ static LONG ALSA_MidiInit(void)
     return TRUE;
 }
 
-#endif
-
 /**************************************************************************
  * 			midMessage (WINEALSA.@)
  */
@@ -1310,9 +1312,9 @@ DWORD WINAPI ALSA_midMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
     TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
     switch (wMsg) {
-#ifdef HAVE_ALSA
     case DRVM_INIT:
         ALSA_MidiInit();
+        return 0;
     case DRVM_EXIT:
     case DRVM_ENABLE:
     case DRVM_DISABLE:
@@ -1338,7 +1340,6 @@ DWORD WINAPI ALSA_midMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
 	return midStart(wDevID);
     case MIDM_STOP:
 	return midStop(wDevID);
-#endif
     default:
 	TRACE("Unsupported message\n");
     }
@@ -1355,9 +1356,9 @@ DWORD WINAPI ALSA_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {
-#ifdef HAVE_ALSA
     case DRVM_INIT:
         ALSA_MidiInit();
+        return 0;
     case DRVM_EXIT:
     case DRVM_ENABLE:
     case DRVM_DISABLE:
@@ -1385,11 +1386,35 @@ DWORD WINAPI ALSA_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
 	return 0;
     case MODM_RESET:
 	return modReset(wDevID);
-#endif
     default:
 	TRACE("Unsupported message\n");
     }
     return MMSYSERR_NOTSUPPORTED;
 }
 
-/*-----------------------------------------------------------------------*/
+/**************************************************************************
+ * 				DriverProc (WINEALSA.@)
+ */
+LRESULT CALLBACK ALSA_DriverProc(DWORD_PTR dwDevID, HDRVR hDriv, UINT wMsg,
+                                 LPARAM dwParam1, LPARAM dwParam2)
+{
+/* EPP     TRACE("(%08lX, %04X, %08lX, %08lX, %08lX)\n",  */
+/* EPP 	  dwDevID, hDriv, wMsg, dwParam1, dwParam2); */
+
+    switch(wMsg) {
+    case DRV_LOAD:
+    case DRV_FREE:
+    case DRV_OPEN:
+    case DRV_CLOSE:
+    case DRV_ENABLE:
+    case DRV_DISABLE:
+    case DRV_QUERYCONFIGURE:
+    case DRV_CONFIGURE:
+        return 1;
+    case DRV_INSTALL:
+    case DRV_REMOVE:
+        return DRV_SUCCESS;
+    default:
+	return 0;
+    }
+}

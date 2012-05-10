@@ -57,7 +57,6 @@ static const struct
     { "amd64",   CPU_x86_64 },
     { "x86_64",  CPU_x86_64 },
     { "sparc",   CPU_SPARC },
-    { "alpha",   CPU_ALPHA },
     { "powerpc", CPU_POWERPC },
     { "arm", CPU_ARM }
 };
@@ -359,10 +358,20 @@ struct strarray *get_as_command(void)
             strarray_add( args, "-arch", (force_pointer_size == 8) ? "x86_64" : "i386", NULL );
             break;
         default:
-            strarray_add_one( args, (force_pointer_size == 8) ? "--64" : "--32" );
+            switch(target_cpu)
+            {
+            case CPU_POWERPC:
+                strarray_add_one( args, (force_pointer_size == 8) ? "-a64" : "-a32" );
+                break;
+            default:
+                strarray_add_one( args, (force_pointer_size == 8) ? "--64" : "--32" );
+                break;
+            }
             break;
         }
     }
+
+    if (cpu_option) strarray_add_one( args, strmake("-mcpu=%s", cpu_option) );
     return args;
 }
 
@@ -388,7 +397,15 @@ struct strarray *get_ld_command(void)
             strarray_add( args, "-m", (force_pointer_size == 8) ? "elf_x86_64_fbsd" : "elf_i386_fbsd", NULL );
             break;
         default:
-            strarray_add( args, "-m", (force_pointer_size == 8) ? "elf_x86_64" : "elf_i386", NULL );
+            switch(target_cpu)
+            {
+            case CPU_POWERPC:
+                strarray_add( args, "-m", (force_pointer_size == 8) ? "elf64ppc" : "elf32ppc", NULL );
+                break;
+            default:
+                strarray_add( args, "-m", (force_pointer_size == 8) ? "elf_x86_64" : "elf_i386", NULL );
+                break;
+            }
             break;
         }
     }
@@ -409,25 +426,30 @@ const char *get_nm_command(void)
 char *get_temp_file_name( const char *prefix, const char *suffix )
 {
     char *name;
-    const char *ext;
+    const char *ext, *basename;
     int fd;
 
     if (!nb_tmp_files && !save_temps) atexit( cleanup_tmp_files );
 
     if (!prefix || !prefix[0]) prefix = "winebuild";
     if (!suffix) suffix = "";
-    if (!(ext = strchr( prefix, '.' ))) ext = prefix + strlen(prefix);
+    if ((basename = strrchr( prefix, '/' ))) basename++;
+    else basename = prefix;
+    if (!(ext = strchr( basename, '.' ))) ext = prefix + strlen(prefix);
     name = xmalloc( sizeof("/tmp/") + (ext - prefix) + sizeof(".XXXXXX") + strlen(suffix) );
-    strcpy( name, "/tmp/" );
-    memcpy( name + 5, prefix, ext - prefix );
-    strcpy( name + 5 + (ext - prefix), ".XXXXXX" );
+    memcpy( name, prefix, ext - prefix );
+    strcpy( name + (ext - prefix), ".XXXXXX" );
     strcat( name, suffix );
 
-    /* first try without the /tmp/ prefix */
-    if ((fd = mkstemps( name + 5, strlen(suffix) )) != -1)
-        name += 5;
-    else if ((fd = mkstemps( name, strlen(suffix) )) == -1)
-        fatal_error( "could not generate a temp file\n" );
+    if ((fd = mkstemps( name, strlen(suffix) )) == -1)
+    {
+        strcpy( name, "/tmp/" );
+        memcpy( name + 5, basename, ext - basename );
+        strcpy( name + 5 + (ext - basename), ".XXXXXX" );
+        strcat( name, suffix );
+        if ((fd = mkstemps( name, strlen(suffix) )) == -1)
+            fatal_error( "could not generate a temp file\n" );
+    }
 
     close( fd );
     if (nb_tmp_files >= max_tmp_files)
@@ -844,7 +866,6 @@ unsigned int get_alignment(unsigned int align)
         if (target_platform != PLATFORM_APPLE) return align;
         /* fall through */
     case CPU_POWERPC:
-    case CPU_ALPHA:
     case CPU_ARM:
         n = 0;
         while ((1u << n) != align) n++;
@@ -865,7 +886,6 @@ unsigned int get_page_size(void)
     case CPU_POWERPC: return 4096;
     case CPU_ARM:     return 4096;
     case CPU_SPARC:   return 8192;
-    case CPU_ALPHA:   return 8192;
     }
     /* unreached */
     assert(0);
@@ -880,7 +900,6 @@ unsigned int get_ptr_size(void)
     case CPU_x86:
     case CPU_POWERPC:
     case CPU_SPARC:
-    case CPU_ALPHA:
     case CPU_ARM:
         return 4;
     case CPU_x86_64:
@@ -894,7 +913,7 @@ unsigned int get_ptr_size(void)
 /* return the total size in bytes of the arguments on the stack */
 unsigned int get_args_size( const ORDDEF *odp )
 {
-    unsigned int i, size;
+    int i, size;
 
     for (i = size = 0; i < odp->u.func.nb_args; i++)
     {

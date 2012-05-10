@@ -41,36 +41,22 @@ BEGIN
     IDTB_STOP        "Stop"
     IDTB_REFRESH     "Refresh"
     IDTB_BACK        "Back"
-    IDTB_HOME        "Home"
+    IDTB_HOME        "#msgctxt#table of contents#Home"
     IDTB_SYNC        "Sync"
     IDTB_PRINT       "Print"
     IDTB_OPTIONS     "Options"
     IDTB_FORWARD     "Forward"
-    IDTB_NOTES       "IDTB_NOTES"
-    IDTB_BROWSE_FWD  "IDTB_BROWSE_FWD"
-    IDTB_BROWSE_BACK "IDT_BROWSE_BACK"
-    IDTB_CONTENTS    "IDTB_CONTENTS"
-    IDTB_INDEX       "IDTB_INDEX"
-    IDTB_SEARCH      "IDTB_SEARCH"
-    IDTB_HISTORY     "IDTB_HISTORY"
-    IDTB_FAVORITES   "IDTB_FAVORITES"
-    IDTB_JUMP1       "Jump1"
-    IDTB_JUMP2       "Jump2"
-    IDTB_CUSTOMIZE   "Customize"
-    IDTB_ZOOM        "Zoom"
-    IDTB_TOC_NEXT    "IDTB_TOC_NEXT"
-    IDTB_TOC_PREV    "IDTB_TOC_PREV"
 END
 
 MENU_POPUP MENU
 {
-    POPUP "Options"
+    POPUP "" /* Options */
     {
         MENUITEM "", IDTB_EXPAND,
         MENUITEM "S&ync", IDTB_SYNC
         MENUITEM "&Back", IDTB_BACK
         MENUITEM "&Forward", IDTB_FORWARD
-        MENUITEM "&Home", IDTB_HOME
+        MENUITEM "#msgctxt#table of contents#&Home", IDTB_HOME
         MENUITEM "&Stop", IDTB_STOP
         MENUITEM "&Refresh", IDTB_REFRESH
         MENUITEM "&Print...", IDTB_PRINT
@@ -78,9 +64,6 @@ MENU_POPUP MENU
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
-
-/* @makedep: hhctrl_tlb.tlb */
-1 TYPELIB hhctrl_tlb.tlb
 
 #define WINE_FILEDESCRIPTION_STR "Wine htmlhelp OCX"
 #define WINE_FILENAME_STR "hhctrl.ocx"

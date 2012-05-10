@@ -13,9 +13,12 @@ C_SRCS = \
 	image.c \
 	imageattributes.c \
 	matrix.c \
+	metafile.c \
 	pathiterator.c \
 	pen.c \
 	region.c \
 	stringformat.c
+
+RC_SRCS = gdiplus.rc
 
 @MAKE_DLL_RULES@

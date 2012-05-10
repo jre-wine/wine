@@ -133,9 +133,9 @@ HRESULT CDECL wined3d_palette_set_entries(struct wined3d_palette *palette,
     /* If the palette is attached to the render target, update all render targets */
     LIST_FOR_EACH_ENTRY(resource, &palette->device->resources, struct wined3d_resource, resource_list_entry)
     {
-        if (resource->resourceType == WINED3DRTYPE_SURFACE)
+        if (resource->type == WINED3D_RTYPE_SURFACE)
         {
-            IWineD3DSurfaceImpl *surface = surface_from_resource(resource);
+            struct wined3d_surface *surface = surface_from_resource(resource);
             if (surface->palette == palette)
                 surface->surface_ops->surface_realize_palette(surface);
         }
@@ -158,7 +158,7 @@ void * CDECL wined3d_palette_get_parent(const struct wined3d_palette *palette)
     return palette->parent;
 }
 
-HRESULT wined3d_palette_init(struct wined3d_palette *palette, IWineD3DDeviceImpl *device,
+static HRESULT wined3d_palette_init(struct wined3d_palette *palette, struct wined3d_device *device,
         DWORD flags, const PALETTEENTRY *entries, void *parent)
 {
     HRESULT hr;
@@ -183,6 +183,36 @@ HRESULT wined3d_palette_init(struct wined3d_palette *palette, IWineD3DDeviceImpl
         DeleteObject(palette->hpal);
         return hr;
     }
+
+    return WINED3D_OK;
+}
+
+HRESULT CDECL wined3d_palette_create(struct wined3d_device *device, DWORD flags,
+        const PALETTEENTRY *entries, void *parent, struct wined3d_palette **palette)
+{
+    struct wined3d_palette *object;
+    HRESULT hr;
+
+    TRACE("device %p, flags %#x, entries %p, palette %p, parent %p.\n",
+            device, flags, entries, palette, parent);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate palette memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = wined3d_palette_init(object, device, flags, entries, parent);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize palette, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created palette %p.\n", object);
+    *palette = object;
 
     return WINED3D_OK;
 }

@@ -62,12 +62,6 @@ static const union cptable *oem_cptable;
 static const union cptable *mac_cptable;
 static const union cptable *unix_cptable;  /* NULL if UTF8 */
 
-static const WCHAR szNlsKeyName[] = {
-    'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
-    'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-    'C','o','n','t','r','o','l','\\','N','l','s','\0'
-};
-
 static const WCHAR szLocaleKeyName[] = {
     'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
     'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
@@ -1650,7 +1644,7 @@ BOOL WINAPI IsDBCSLeadByteEx( UINT codepage, BYTE testchar )
  *  testchar [I] Character to test
  *
  * RETURNS
- *  TRUE, if testchar is a lead byte in the Ansii code page,
+ *  TRUE, if testchar is a lead byte in the ANSI code page,
  *  FALSE otherwise.
  */
 BOOL WINAPI IsDBCSLeadByte( BYTE testchar )
@@ -2843,7 +2837,7 @@ INT WINAPI CompareStringW(LCID lcid, DWORD style,
  *
  * RETURNS
  *  Success: CSTR_LESS_THAN, CSTR_EQUAL or CSTR_GREATER_THAN depending on whether
- *           str2 is less than, equal to or greater than str1 respectively.
+ *           str1 is less than, equal to or greater than str2 respectively.
  *  Failure: FALSE. Use GetLastError() to determine the cause.
  */
 INT WINAPI CompareStringA(LCID lcid, DWORD style,
@@ -2914,7 +2908,7 @@ INT WINAPI CompareStringA(LCID lcid, DWORD style,
  *
  * RETURNS
  *  Success: A number less than, equal to or greater than 0 depending on whether
- *           str2 is less than, equal to or greater than str1 respectively.
+ *           str1 is less than, equal to or greater than str2 respectively.
  *  Failure: FALSE. Use GetLastError() to determine the cause.
  */
 int WINAPI lstrcmpA(LPCSTR str1, LPCSTR str2)

@@ -92,6 +92,12 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
     LPWSTR cmdline;
     int in_quotes,bcount;
 
+    if(!numargs)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
     if (*lpCmdline==0)
     {
         /* Return the path to the executable */
@@ -113,8 +119,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
             LocalFree( argv );
         }
         argv[0]=(LPWSTR)(argv+1);
-        if (numargs)
-            *numargs=1;
+        *numargs=1;
 
         return argv;
     }
@@ -228,8 +233,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         *d='\0';
         argv[argc++]=arg;
     }
-    if (numargs)
-        *numargs=argc;
+    *numargs=argc;
 
     return argv;
 }
@@ -928,7 +932,7 @@ HRESULT WINAPI SHLoadInProc (REFCLSID rclsid)
     {
         IUnknown * pUnk = ptr;
         IUnknown_Release(pUnk);
-        return NOERROR;
+        return S_OK;
     }
     return DISP_E_MEMBERNOTFOUND;
 }
@@ -1179,7 +1183,7 @@ HIMAGELIST   ShellBigIconList = 0;
  * SHELL32 DllMain
  *
  * NOTES
- *  calling oleinitialize here breaks sone apps.
+ *  calling oleinitialize here breaks some apps.
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
 {
@@ -1238,7 +1242,7 @@ HRESULT WINAPI DllCanUnloadNow(void)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    HRESULT hr = __wine_register_resources( shell32_hInstance, NULL );
+    HRESULT hr = __wine_register_resources( shell32_hInstance );
     if (SUCCEEDED(hr)) hr = SHELL_RegisterShellFolders();
     return hr;
 }
@@ -1248,7 +1252,7 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( shell32_hInstance, NULL );
+    return __wine_unregister_resources( shell32_hInstance );
 }
 
 /***********************************************************************
@@ -1281,5 +1285,11 @@ LRESULT CALLBACK ShellHookProc(DWORD a, DWORD b, DWORD c)
 HRESULT WINAPI SHGetLocalizedName(LPCWSTR path, LPWSTR module, UINT size, INT *res)
 {
     FIXME("%s %p %u %p: stub\n", debugstr_w(path), module, size, res);
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI SetCurrentProcessExplicitAppUserModelID(PCWSTR appid)
+{
+    FIXME("%s: stub\n", debugstr_w(appid));
     return E_NOTIMPL;
 }

@@ -81,7 +81,7 @@ static void test_ClipboardOwner(void)
     SetLastError(0xdeadbeef);
     ret = OpenClipboard(hWnd2);
     ok(!ret && (GetLastError() == 0xdeadbeef || GetLastError() == ERROR_ACCESS_DENIED),
-       "OpenClipboard should fail without setting last error valuei, or with ERROR_ACCESS_DENIED, got error %d\n", GetLastError());
+       "OpenClipboard should fail without setting last error value, or with ERROR_ACCESS_DENIED, got error %d\n", GetLastError());
 
     ret = CloseClipboard();
     ok( ret, "CloseClipboard error %d\n", GetLastError());
@@ -183,6 +183,9 @@ todo_wine
     ok(!EmptyClipboard(), "EmptyClipboard should fail if clipboard wasn't open\n");
     ok(GetLastError() == ERROR_CLIPBOARD_NOT_OPEN || broken(GetLastError() == 0xdeadbeef), /* wow64 */
        "Wrong error %u\n", GetLastError());
+
+    format_id = RegisterClipboardFormatA("#1234");
+    ok(format_id == 1234, "invalid clipboard format id %04x\n", format_id);
 }
 
 static HGLOBAL create_text(void)

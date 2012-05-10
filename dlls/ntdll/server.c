@@ -90,8 +90,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 static const enum cpu_type client_cpu = CPU_x86;
 #elif defined(__x86_64__)
 static const enum cpu_type client_cpu = CPU_x86_64;
-#elif defined(__ALPHA__)
-static const enum cpu_type client_cpu = CPU_ALPHA;
 #elif defined(__powerpc__)
 static const enum cpu_type client_cpu = CPU_POWERPC;
 #elif defined(__sparc__)
@@ -1078,11 +1076,6 @@ size_t server_init_thread( void *entry_point )
 
     /* ignore SIGPIPE so that we get an EPIPE error instead  */
     sigaction( SIGPIPE, &sig_act, NULL );
-    /* automatic child reaping to avoid zombies */
-#ifdef SA_NOCLDWAIT
-    sig_act.sa_flags |= SA_NOCLDWAIT;
-#endif
-    sigaction( SIGCHLD, &sig_act, NULL );
 
     /* create the server->client communication pipes */
     if (server_pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );

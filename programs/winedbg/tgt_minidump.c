@@ -103,21 +103,42 @@ static BOOL tgt_process_minidump_read(HANDLE hProcess, const void* addr,
     {
         MINIDUMP_MEMORY_LIST*   mml = stream;
         MINIDUMP_MEMORY_DESCRIPTOR* mmd = &mml->MemoryRanges[0];
-        int                     i;
+        int                     i, found = -1;
+        SIZE_T                  ilen, prev_len = 0;
 
+        /* There's no reason that memory ranges inside a minidump do not overlap.
+         * So be smart when looking for a given memory range (either grab a
+         * range that covers the whole requested area, or if none, the range that
+         * has the largest overlap with requested area)
+         */
         for (i = 0; i < mml->NumberOfMemoryRanges; i++, mmd++)
         {
             if (get_addr64(mmd->StartOfMemoryRange) <= (DWORD_PTR)addr &&
                 (DWORD_PTR)addr < get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize)
             {
-                len = min(len,
-                          get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (DWORD_PTR)addr);
-                memcpy(buffer,
-                       (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (DWORD_PTR)addr - get_addr64(mmd->StartOfMemoryRange),
-                       len);
-                if (rlen) *rlen = len;
-                return TRUE;
+                ilen = min(len,
+                           get_addr64(mmd->StartOfMemoryRange) + mmd->Memory.DataSize - (DWORD_PTR)addr);
+                if (ilen == len) /* whole range is matched */
+                {
+                    found = i;
+                    prev_len = ilen;
+                    break;
+                }
+                if (found == -1 || ilen > prev_len) /* partial match, keep largest one */
+                {
+                    found = i;
+                    prev_len = ilen;
+                }
             }
+        }
+        if (found != -1)
+        {
+            mmd = &mml->MemoryRanges[found];
+            memcpy(buffer,
+                   (char*)private_data(dbg_curr_process)->mapping + mmd->Memory.Rva + (DWORD_PTR)addr - get_addr64(mmd->StartOfMemoryRange),
+                   prev_len);
+            if (rlen) *rlen = prev_len;
+            return TRUE;
         }
     }
     /* FIXME: this is a dirty hack to let the last frame in a bt to work
@@ -174,6 +195,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
     MINIDUMP_MODULE_LIST*       mml;
     MINIDUMP_MODULE*            mm;
     MINIDUMP_STRING*            mds;
+    MINIDUMP_DIRECTORY*         dir;
     WCHAR                       exec_name[1024];
     WCHAR                       nameW[1024];
     unsigned                    len;
@@ -212,7 +234,7 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         }
     }
 
-    if (MiniDumpReadDumpStream(data->mapping, SystemInfoStream, NULL, &stream, NULL))
+    if (MiniDumpReadDumpStream(data->mapping, SystemInfoStream, &dir, &stream, NULL))
     {
         MINIDUMP_SYSTEM_INFO*   msi = stream;
         const char *str;
@@ -238,18 +260,18 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             strcat(tmp, str);
             if (msi->ProcessorLevel == 3 || msi->ProcessorLevel == 4)
             {
-                if (HIWORD(msi->ProcessorRevision) == 0xFF)
+                if (HIBYTE(msi->ProcessorRevision) == 0xFF)
                     sprintf(tmp + strlen(tmp), " (%c%d)",
-                            'A' + HIBYTE(LOWORD(msi->ProcessorRevision)),
-                            LOBYTE(LOWORD(msi->ProcessorRevision)));
+                            'A' + ((msi->ProcessorRevision>>4)&0xf)-0x0a,
+                            ((msi->ProcessorRevision&0xf)));
                 else
                     sprintf(tmp + strlen(tmp), " (%c%d)",
-                            'A' + HIWORD(msi->ProcessorRevision),
-                            LOWORD(msi->ProcessorRevision));
+                            'A' + HIBYTE(msi->ProcessorRevision),
+                            LOBYTE(msi->ProcessorRevision));
             }
             else sprintf(tmp + strlen(tmp), " (%d.%d)",
-                         HIWORD(msi->ProcessorRevision),
-                         LOWORD(msi->ProcessorRevision));
+                         HIBYTE(msi->ProcessorRevision),
+                         LOBYTE(msi->ProcessorRevision));
             str = tmp;
             break;
         case PROCESSOR_ARCHITECTURE_MIPS:
@@ -263,6 +285,9 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
             break;
         case PROCESSOR_ARCHITECTURE_AMD64:
             str = "X86_64";
+            break;
+        case PROCESSOR_ARCHITECTURE_ARM:
+            str = "ARM";
             break;
         default:
             str = "???";
@@ -302,6 +327,21 @@ static enum dbg_start minidump_do_reload(struct tgt_process_minidump_data* data)
         }
         dbg_printf(" on Windows %s (%u)\n", str, msi->BuildNumber);
         /* FIXME CSD: msi->CSDVersionRva */
+
+        if (sizeof(MINIDUMP_SYSTEM_INFO) + 4 > dir->Location.DataSize &&
+            msi->CSDVersionRva >= dir->Location.Rva + sizeof(MINIDUMP_SYSTEM_INFO) + 4)
+        {
+            const char*     code = (const char*)stream + sizeof(MINIDUMP_SYSTEM_INFO);
+            const DWORD*    wes;
+
+            if (code[0] == 'W' && code[1] == 'I' && code[2] == 'N' && code[3] == 'E' &&
+                *(wes = (const DWORD*)(code += 4)) >= 3)
+            {
+                /* assume we have wine extensions */
+                dbg_printf("    [on %s, on top of %s (%s)]\n",
+                           code + wes[1], code + wes[2], code + wes[3]);
+            }
+        }
     }
 
     dbg_curr_process = dbg_add_process(&be_process_minidump_io, pid, hProc);

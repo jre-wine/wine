@@ -238,6 +238,12 @@ static void test_incorrect_api_usage(void)
     if (!result) return;
     pCryptDestroyHash(hHash);
 
+    result = pCryptCreateHash(0, CALG_SHA, 0, 0, &hHash);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
+    result = pCryptGenKey(0, CALG_RC4, 0, &hKey);
+    ok (!result && GetLastError() == ERROR_INVALID_PARAMETER, "%d\n", GetLastError());
+
     result = pCryptGenKey(hProv, CALG_RC4, 0, &hKey);
     ok (result, "%d\n", GetLastError());
     if (!result) return;
@@ -445,7 +451,9 @@ static void test_verify_sig(void)
 	 "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
 	SetLastError(0xdeadbeef);
 	ret = pCryptVerifySignatureW(hash, bogus, sizeof(bogus), key, NULL, 0);
-	ok(!ret && GetLastError() == NTE_BAD_SIGNATURE,
+	ok(!ret &&
+         (GetLastError() == NTE_BAD_SIGNATURE ||
+         broken(GetLastError() == NTE_BAD_HASH_STATE /* older NT4 */)),
 	 "Expected NTE_BAD_SIGNATURE, got %08x\n", GetLastError());
 	pCryptDestroyKey(key);
 	pCryptDestroyHash(hash);

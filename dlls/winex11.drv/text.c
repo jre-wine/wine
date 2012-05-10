@@ -37,43 +37,43 @@ WINE_DEFAULT_DEBUG_CHANNEL(text);
 /***********************************************************************
  *           X11DRV_ExtTextOut
  */
-BOOL CDECL
-X11DRV_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
-                   const RECT *lprect, LPCWSTR wstr, UINT count,
-                   const INT *lpDx )
+BOOL X11DRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
+                        const RECT *lprect, LPCWSTR wstr, UINT count, const INT *lpDx )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+    BOOL restore_region = FALSE;
     unsigned int i;
-    fontObject*		pfo;
+    int pixel;
+    fontObject*		pfo = XFONT_GetFontObject( physDev->font );
     XFontStruct*	font;
     BOOL		rotated = FALSE;
     XChar2b		*str2b = NULL;
-    BOOL		dibUpdateFlag = FALSE;
     BOOL                result = TRUE;
-    HRGN                saved_region = 0;
 
-    if(physDev->has_gdi_font)
-        return X11DRV_XRender_ExtTextOut(physDev, x, y, flags, lprect, wstr, count, lpDx);
+    if (!pfo)
+    {
+        dev = GET_NEXT_PHYSDEV( dev, pExtTextOut );
+        return dev->funcs->pExtTextOut( dev, x, y, flags, lprect, wstr, count, lpDx );
+    }
 
     if (!X11DRV_SetupGCForText( physDev )) return TRUE;
 
-    pfo = XFONT_GetFontObject( physDev->font );
     font = pfo->fs;
 
     if (pfo->lf.lfEscapement && pfo->lpX11Trans)
         rotated = TRUE;
 
     TRACE("hdc=%p df=%04x %d,%d rc %s %s, %d  flags=%d lpDx=%p\n",
-          physDev->hdc, (UINT16)physDev->font, x, y, wine_dbgstr_rect(lprect),
+          dev->hdc, (UINT16)physDev->font, x, y, wine_dbgstr_rect(lprect),
 	  debugstr_wn (wstr, count), count, flags, lpDx);
 
       /* Draw the rectangle */
 
     if (flags & ETO_OPAQUE)
     {
-        X11DRV_LockDIBSection( physDev, DIB_Status_GdiMod );
-        dibUpdateFlag = TRUE;
+	pixel = X11DRV_PALETTE_ToPhysical( physDev, GetBkColor(physDev->dev.hdc) );
         wine_tsx11_lock();
-        XSetForeground( gdi_display, physDev->gc, physDev->backgroundPixel );
+        XSetForeground( gdi_display, physDev->gc, pixel );
         XFillRectangle( gdi_display, physDev->drawable, physDev->gc,
                         physDev->dc_rect.left + lprect->left, physDev->dc_rect.top + lprect->top,
                         lprect->right - lprect->left, lprect->bottom - lprect->top );
@@ -86,31 +86,22 @@ X11DRV_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
 
     if (flags & ETO_CLIPPED)
     {
-        HRGN clip_region;
-
-        clip_region = CreateRectRgnIndirect( lprect );
-        /* make a copy of the current device region */
-        saved_region = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( saved_region, physDev->region, 0, RGN_COPY );
-        X11DRV_SetDeviceClipping( physDev, saved_region, clip_region );
+        HRGN clip_region = CreateRectRgnIndirect( lprect );
+        restore_region = add_extra_clipping_region( physDev, clip_region );
         DeleteObject( clip_region );
-    }
-
-      /* Draw the text background if necessary */
-
-    if (!dibUpdateFlag)
-    {
-        X11DRV_LockDIBSection( physDev, DIB_Status_GdiMod );
-        dibUpdateFlag = TRUE;
     }
 
 
     /* Draw the text (count > 0 verified) */
     if (!(str2b = X11DRV_cptable[pfo->fi->cptable].punicode_to_char2b( pfo, wstr, count )))
-        goto FAIL;
+    {
+        result = FALSE;
+        goto END;
+    }
 
+    pixel = X11DRV_PALETTE_ToPhysical( physDev, GetTextColor(physDev->dev.hdc) );
     wine_tsx11_lock();
-    XSetForeground( gdi_display, physDev->gc, physDev->textPixel );
+    XSetForeground( gdi_display, physDev->gc, pixel );
     wine_tsx11_unlock();
     if(!rotated)
     {
@@ -125,8 +116,11 @@ X11DRV_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
             XTextItem16 *items;
 
             items = HeapAlloc( GetProcessHeap(), 0, count * sizeof(XTextItem16) );
-            if(items == NULL) goto FAIL;
-
+            if(items == NULL)
+            {
+                result = FALSE;
+                goto END;
+            }
             items[0].chars = str2b;
             items[0].delta = 0;
             items[0].nchars = 1;
@@ -176,22 +170,10 @@ X11DRV_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
             }
         }
     }
-    HeapFree( GetProcessHeap(), 0, str2b );
-
-    if (flags & ETO_CLIPPED)
-    {
-        /* restore the device region */
-        X11DRV_SetDeviceClipping( physDev, saved_region, 0 );
-        DeleteObject( saved_region );
-    }
-    goto END;
-
-FAIL:
-    HeapFree( GetProcessHeap(), 0, str2b );
-    result = FALSE;
 
 END:
-    if (dibUpdateFlag) X11DRV_UnlockDIBSection( physDev, TRUE );
+    HeapFree( GetProcessHeap(), 0, str2b );
+    if (restore_region) restore_clipping_region( physDev );
     return result;
 }
 
@@ -199,9 +181,10 @@ END:
 /***********************************************************************
  *           X11DRV_GetTextExtentExPoint
  */
-BOOL CDECL X11DRV_GetTextExtentExPoint( X11DRV_PDEVICE *physDev, LPCWSTR str, INT count,
-                                        INT maxExt, LPINT lpnFit, LPINT alpDx, LPSIZE size )
+BOOL X11DRV_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR str, INT count,
+                                  INT maxExt, LPINT lpnFit, LPINT alpDx, LPSIZE size )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     fontObject* pfo = XFONT_GetFontObject( physDev->font );
 
     TRACE("%s %d\n", debugstr_wn(str,count), count);
@@ -245,5 +228,7 @@ BOOL CDECL X11DRV_GetTextExtentExPoint( X11DRV_PDEVICE *physDev, LPCWSTR str, IN
 	HeapFree( GetProcessHeap(), 0, p );
 	return TRUE;
     }
-    return FALSE;
+
+    dev = GET_NEXT_PHYSDEV( dev, pGetTextExtentExPoint );
+    return dev->funcs->pGetTextExtentExPoint( dev, str, count, maxExt, lpnFit, alpDx, size );
 }

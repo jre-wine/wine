@@ -27,6 +27,9 @@ static const struct ID3DXLineVtbl ID3DXLine_Vtbl;
 typedef struct ID3DXLineImpl {
     ID3DXLine ID3DXLine_iface;
     LONG ref;
+
+    IDirect3DDevice9 *device;
+    IDirect3DStateBlock9 *state;
 } ID3DXLineImpl;
 
 static inline ID3DXLineImpl *impl_from_ID3DXLine(ID3DXLine *iface)
@@ -71,7 +74,10 @@ static ULONG WINAPI ID3DXLineImpl_Release(ID3DXLine* iface)
     TRACE("(%p)->(): Release from %u\n", This, ref + 1);
 
     if (!ref)
+    {
+        IDirect3DDevice9_Release(This->device);
         HeapFree(GetProcessHeap(), 0, This);
+    }
 
     return ref;
 }
@@ -81,18 +87,76 @@ static HRESULT WINAPI ID3DXLineImpl_GetDevice(ID3DXLine* iface, LPDIRECT3DDEVICE
 {
     ID3DXLineImpl *This = impl_from_ID3DXLine(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, device);
+    TRACE ("(%p)->(%p): relay\n", This, device);
 
-    return E_NOTIMPL;
+    if (device == NULL) return D3DERR_INVALIDCALL;
+
+    *device = This->device;
+    IDirect3DDevice9_AddRef(This->device);
+
+    return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXLineImpl_Begin(ID3DXLine* iface)
 {
     ID3DXLineImpl *This = impl_from_ID3DXLine(iface);
 
-    FIXME("(%p)->(): stub\n", This);
+    HRESULT hr;
+    D3DXMATRIX identity, projection;
+    D3DVIEWPORT9 vp;
 
-    return E_NOTIMPL;
+    TRACE ("(%p)->()\n", This);
+
+    if (This->state != NULL) /* We already began. Return error. */
+        return D3DERR_INVALIDCALL;
+
+    hr = IDirect3DDevice9_CreateStateBlock(This->device, D3DSBT_ALL, &This->state);
+    if (FAILED(hr)) return D3DXERR_INVALIDDATA;
+
+    hr = IDirect3DDevice9_GetViewport(This->device, &vp);
+    if (FAILED(hr)) goto failed;
+
+    D3DXMatrixIdentity(&identity);
+    D3DXMatrixOrthoOffCenterLH(&projection,
+                               0.0, vp.Width, /* Min and max x */
+                               vp.Height, 0.0, /* Min and max y. Screen y is on top so this is inverted */
+                               0.0, 1.0); /* Min and max z */
+
+    hr = IDirect3DDevice9_SetTransform(This->device, D3DTS_WORLD, &identity);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetTransform(This->device, D3DTS_VIEW, &identity);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetTransform(This->device, D3DTS_PROJECTION, &projection);
+    if (FAILED(hr)) goto failed;
+
+    /* Windows sets similar states so we do the same */
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_LIGHTING, FALSE);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_FOGENABLE, FALSE);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_SHADEMODE, D3DSHADE_FLAT);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_ALPHABLENDENABLE, TRUE);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    if (FAILED(hr)) goto failed;
+
+    hr = IDirect3DDevice9_SetRenderState(This->device, D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    if (FAILED(hr)) goto failed;
+
+    return D3D_OK;
+failed:
+    IDirect3DStateBlock9_Apply(This->state);
+    IDirect3DStateBlock9_Release(This->state);
+    This->state = NULL;
+    return D3DXERR_INVALIDDATA;
 }
 
 static HRESULT WINAPI ID3DXLineImpl_Draw(ID3DXLine* iface, CONST D3DXVECTOR2* vertexlist, DWORD vertexlistcount, D3DCOLOR color)
@@ -208,9 +272,19 @@ static HRESULT WINAPI ID3DXLineImpl_End(ID3DXLine* iface)
 {
     ID3DXLineImpl *This = impl_from_ID3DXLine(iface);
 
-    FIXME("(%p)->(): stub\n", This);
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE ("(%p)->()\n", This);
+
+    if (This->state == NULL) /* We haven't begun yet. */
+        return D3DERR_INVALIDCALL;
+
+    hr = IDirect3DStateBlock9_Apply(This->state);
+    IDirect3DStateBlock9_Release(This->state);
+    This->state = NULL;
+
+    if (FAILED(hr)) return D3DXERR_INVALIDDATA;
+    else return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXLineImpl_OnLostDevice(ID3DXLine* iface)
@@ -274,6 +348,9 @@ HRESULT WINAPI D3DXCreateLine(LPDIRECT3DDEVICE9 device, LPD3DXLINE* line)
 
     object->ID3DXLine_iface.lpVtbl = &ID3DXLine_Vtbl;
     object->ref = 1;
+    object->device = device;
+    object->state = NULL; /* We only initialize it on Begin */
+    IDirect3DDevice9_AddRef(device);
 
     *line = &object->ID3DXLine_iface;
 

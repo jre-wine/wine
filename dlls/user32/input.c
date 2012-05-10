@@ -52,7 +52,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
-static DWORD last_mouse_event;
 
 /***********************************************************************
  *           get_key_state
@@ -126,7 +125,6 @@ BOOL CDECL __wine_send_input( HWND hwnd, const INPUT *input )
 {
     NTSTATUS status = send_hardware_message( hwnd, input, 0 );
     if (status) SetLastError( RtlNtStatusToDosError(status) );
-    else if (input->type == INPUT_MOUSE) last_mouse_event = GetTickCount();
     return !status;
 }
 
@@ -182,21 +180,7 @@ UINT WINAPI SendInput( UINT count, LPINPUT inputs, int size )
             /* we need to update the coordinates to what the server expects */
             INPUT input = inputs[i];
             update_mouse_coords( &input );
-            if (!(status = send_hardware_message( 0, &input, SEND_HWMSG_INJECTED )))
-            {
-                last_mouse_event = GetTickCount();
-
-                if ((input.u.mi.dwFlags & MOUSEEVENTF_MOVE) &&
-                    ((input.u.mi.dwFlags & MOUSEEVENTF_ABSOLUTE) || input.u.mi.dx || input.u.mi.dy))
-                {
-                    /* we have to actually move the cursor */
-                    POINT pt;
-                    GetCursorPos( &pt );
-                    if (!(input.u.mi.dwFlags & MOUSEEVENTF_ABSOLUTE) ||
-                        pt.x != input.u.mi.dx  || pt.y != input.u.mi.dy)
-                        USER_Driver->pSetCursorPos( pt.x, pt.y );
-                }
-            }
+            status = send_hardware_message( 0, &input, SEND_HWMSG_INJECTED );
         }
         else status = send_hardware_message( 0, &inputs[i], SEND_HWMSG_INJECTED );
 
@@ -253,28 +237,24 @@ void WINAPI mouse_event( DWORD dwFlags, DWORD dx, DWORD dy,
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetCursorPos( POINT *pt )
 {
-    BOOL ret = FALSE;
+    BOOL ret;
+    DWORD last_change;
 
     if (!pt) return FALSE;
 
-    /* query new position from graphics driver if we haven't updated recently */
-    if (GetTickCount() - last_mouse_event > 100) ret = USER_Driver->pGetCursorPos( pt );
-
     SERVER_START_REQ( set_cursor )
     {
-        if (ret)  /* update it */
-        {
-            req->flags = SET_CURSOR_POS;
-            req->x     = pt->x;
-            req->y     = pt->y;
-        }
         if ((ret = !wine_server_call( req )))
         {
             pt->x = reply->new_x;
             pt->y = reply->new_y;
+            last_change = reply->last_change;
         }
     }
     SERVER_END_REQ;
+
+    /* query new position from graphics driver if we haven't updated recently */
+    if (ret && GetTickCount() - last_change > 100) ret = USER_Driver->pGetCursorPos( pt );
     return ret;
 }
 
@@ -309,6 +289,7 @@ BOOL WINAPI GetCursorInfo( PCURSORINFO pci )
 BOOL WINAPI DECLSPEC_HOTPATCH SetCursorPos( INT x, INT y )
 {
     BOOL ret;
+    INT prev_x, prev_y, new_x, new_y;
 
     SERVER_START_REQ( set_cursor )
     {
@@ -317,12 +298,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetCursorPos( INT x, INT y )
         req->y     = y;
         if ((ret = !wine_server_call( req )))
         {
-            x = reply->new_x;
-            y = reply->new_y;
+            prev_x = reply->prev_x;
+            prev_y = reply->prev_y;
+            new_x  = reply->new_x;
+            new_y  = reply->new_y;
         }
     }
     SERVER_END_REQ;
-    if (ret) USER_Driver->pSetCursorPos( x, y );
+    if (ret && (prev_x != new_x || prev_y != new_y)) USER_Driver->pSetCursorPos( new_x, new_y );
     return ret;
 }
 
@@ -379,21 +362,31 @@ HWND WINAPI GetCapture(void)
  */
 SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
     SHORT ret;
 
     if (key < 0 || key >= 256) return 0;
 
     if ((ret = USER_Driver->pGetAsyncKeyState( key )) == -1)
     {
+        if (thread_info->key_state &&
+            !(thread_info->key_state[key] & 0xc0) &&
+            GetTickCount() - thread_info->key_state_time < 50)
+            return 0;
+
+        if (!thread_info->key_state) thread_info->key_state = HeapAlloc( GetProcessHeap(), 0, 256 );
+
         ret = 0;
         SERVER_START_REQ( get_key_state )
         {
             req->tid = 0;
             req->key = key;
+            if (thread_info->key_state) wine_server_set_reply( req, thread_info->key_state, 256 );
             if (!wine_server_call( req ))
             {
                 if (reply->state & 0x40) ret |= 0x0001;
                 if (reply->state & 0x80) ret |= 0x8000;
+                thread_info->key_state_time = GetTickCount();
             }
         }
         SERVER_END_REQ;
@@ -830,7 +823,7 @@ INT WINAPI GetKeyNameTextA(LONG lParam, LPSTR lpBuffer, INT nSize)
     WCHAR buf[256];
     INT ret;
 
-    if (!GetKeyNameTextW(lParam, buf, 256))
+    if (!nSize || !GetKeyNameTextW(lParam, buf, 256))
     {
         lpBuffer[0] = 0;
         return 0;
@@ -841,6 +834,8 @@ INT WINAPI GetKeyNameTextA(LONG lParam, LPSTR lpBuffer, INT nSize)
         ret = nSize - 1;
         lpBuffer[ret] = 0;
     }
+    else ret--;
+
     return ret;
 }
 
@@ -849,6 +844,7 @@ INT WINAPI GetKeyNameTextA(LONG lParam, LPSTR lpBuffer, INT nSize)
  */
 INT WINAPI GetKeyNameTextW(LONG lParam, LPWSTR lpBuffer, INT nSize)
 {
+    if (!lpBuffer || !nSize) return 0;
     return USER_Driver->pGetKeyNameText( lParam, lpBuffer, nSize );
 }
 
@@ -950,7 +946,7 @@ UINT WINAPI GetKeyboardLayoutList(INT nBuff, HKL *layouts)
             rc = RegEnumKeyW(hKeyKeyboard, count, szKeyName, 9);
             if (rc == ERROR_SUCCESS)
             {
-                layout = (HKL)strtoulW(szKeyName,NULL,16);
+                layout = (HKL)(ULONG_PTR)strtoulW(szKeyName,NULL,16);
                 if (baselayout != 0 && layout == (HKL)baselayout)
                     baselayout = 0; /* found in the registry do not add again */
                 if (nBuff && layouts)
@@ -988,9 +984,34 @@ UINT WINAPI GetKeyboardLayoutList(INT nBuff, HKL *layouts)
  */
 BOOL WINAPI RegisterHotKey(HWND hwnd,INT id,UINT modifiers,UINT vk)
 {
-    static int once;
-    if (!once++) FIXME_(keyboard)("(%p,%d,0x%08x,%X): stub\n",hwnd,id,modifiers,vk);
-    return TRUE;
+    BOOL ret;
+    int replaced=0;
+
+    TRACE_(keyboard)("(%p,%d,0x%08x,%X)\n",hwnd,id,modifiers,vk);
+
+    if ((hwnd == NULL || WIN_IsCurrentThread(hwnd)) &&
+        !USER_Driver->pRegisterHotKey(hwnd, modifiers, vk))
+        return FALSE;
+
+    SERVER_START_REQ( register_hotkey )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->id = id;
+        req->flags = modifiers;
+        req->vkey = vk;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            replaced = reply->replaced;
+            modifiers = reply->flags;
+            vk = reply->vkey;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret && replaced)
+        USER_Driver->pUnregisterHotKey(hwnd, modifiers, vk);
+
+    return ret;
 }
 
 /***********************************************************************
@@ -998,9 +1019,27 @@ BOOL WINAPI RegisterHotKey(HWND hwnd,INT id,UINT modifiers,UINT vk)
  */
 BOOL WINAPI UnregisterHotKey(HWND hwnd,INT id)
 {
-    static int once;
-    if (!once++) FIXME_(keyboard)("(%p,%d): stub\n",hwnd,id);
-    return TRUE;
+    BOOL ret;
+    UINT modifiers, vk;
+
+    TRACE_(keyboard)("(%p,%d)\n",hwnd,id);
+
+    SERVER_START_REQ( unregister_hotkey )
+    {
+        req->window = wine_server_user_handle( hwnd );
+        req->id = id;
+        if ((ret = !wine_server_call_err( req )))
+        {
+            modifiers = reply->flags;
+            vk = reply->vkey;
+        }
+    }
+    SERVER_END_REQ;
+
+    if (ret)
+        USER_Driver->pUnregisterHotKey(hwnd, modifiers, vk);
+
+    return ret;
 }
 
 /***********************************************************************

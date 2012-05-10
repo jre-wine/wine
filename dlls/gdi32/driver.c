@@ -22,6 +22,7 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
@@ -40,13 +41,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(driver);
 
 struct graphics_driver
 {
-    struct list             entry;
-    HMODULE                 module;  /* module handle */
-    DC_FUNCTIONS            funcs;
+    struct list                entry;
+    HMODULE                    module;  /* module handle */
+    const struct gdi_dc_funcs *funcs;
 };
 
 static struct list drivers = LIST_INIT( drivers );
 static struct graphics_driver *display_driver;
+
+const struct gdi_dc_funcs *font_driver = NULL;
 
 static CRITICAL_SECTION driver_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -64,168 +67,39 @@ static CRITICAL_SECTION driver_section = { &critsect_debug, -1, 0, 0, 0, 0 };
  */
 static struct graphics_driver *create_driver( HMODULE module )
 {
+    static const struct gdi_dc_funcs empty_funcs;
+    const struct gdi_dc_funcs *funcs = NULL;
     struct graphics_driver *driver;
 
     if (!(driver = HeapAlloc( GetProcessHeap(), 0, sizeof(*driver)))) return NULL;
     driver->module = module;
 
-    /* fill the function table */
     if (module)
     {
-#define GET_FUNC(name) driver->funcs.p##name = (void*)GetProcAddress( module, #name )
-        GET_FUNC(AbortDoc);
-        GET_FUNC(AbortPath);
-        GET_FUNC(AlphaBlend);
-        GET_FUNC(AngleArc);
-        GET_FUNC(Arc);
-        GET_FUNC(ArcTo);
-        GET_FUNC(BeginPath);
-        GET_FUNC(BitBlt);
-        GET_FUNC(ChoosePixelFormat);
-        GET_FUNC(Chord);
-        GET_FUNC(CloseFigure);
-        GET_FUNC(CreateBitmap);
-        GET_FUNC(CreateDC);
-        GET_FUNC(CreateDIBSection);
-        GET_FUNC(DeleteBitmap);
-        GET_FUNC(DeleteDC);
-        GET_FUNC(DescribePixelFormat);
-        GET_FUNC(DeviceCapabilities);
-        GET_FUNC(Ellipse);
-        GET_FUNC(EndDoc);
-        GET_FUNC(EndPage);
-        GET_FUNC(EndPath);
-        GET_FUNC(EnumDeviceFonts);
-        GET_FUNC(EnumICMProfiles);
-        GET_FUNC(ExcludeClipRect);
-        GET_FUNC(ExtDeviceMode);
-        GET_FUNC(ExtEscape);
-        GET_FUNC(ExtFloodFill);
-        GET_FUNC(ExtSelectClipRgn);
-        GET_FUNC(ExtTextOut);
-        GET_FUNC(FillPath);
-        GET_FUNC(FillRgn);
-        GET_FUNC(FlattenPath);
-        GET_FUNC(FrameRgn);
-        GET_FUNC(GdiComment);
-        GET_FUNC(GetBitmapBits);
-        GET_FUNC(GetCharWidth);
-        GET_FUNC(GetDIBColorTable);
-        GET_FUNC(GetDIBits);
-        GET_FUNC(GetDeviceCaps);
-        GET_FUNC(GetDeviceGammaRamp);
-        GET_FUNC(GetICMProfile);
-        GET_FUNC(GetNearestColor);
-        GET_FUNC(GetPixel);
-        GET_FUNC(GetPixelFormat);
-        GET_FUNC(GetSystemPaletteEntries);
-        GET_FUNC(GetTextExtentExPoint);
-        GET_FUNC(GetTextMetrics);
-        GET_FUNC(IntersectClipRect);
-        GET_FUNC(InvertRgn);
-        GET_FUNC(LineTo);
-        GET_FUNC(MoveTo);
-        GET_FUNC(ModifyWorldTransform);
-        GET_FUNC(OffsetClipRgn);
-        GET_FUNC(OffsetViewportOrg);
-        GET_FUNC(OffsetWindowOrg);
-        GET_FUNC(PaintRgn);
-        GET_FUNC(PatBlt);
-        GET_FUNC(Pie);
-        GET_FUNC(PolyBezier);
-        GET_FUNC(PolyBezierTo);
-        GET_FUNC(PolyDraw);
-        GET_FUNC(PolyPolygon);
-        GET_FUNC(PolyPolyline);
-        GET_FUNC(Polygon);
-        GET_FUNC(Polyline);
-        GET_FUNC(PolylineTo);
-        GET_FUNC(RealizeDefaultPalette);
-        GET_FUNC(RealizePalette);
-        GET_FUNC(Rectangle);
-        GET_FUNC(ResetDC);
-        GET_FUNC(RestoreDC);
-        GET_FUNC(RoundRect);
-        GET_FUNC(SaveDC);
-        GET_FUNC(ScaleViewportExt);
-        GET_FUNC(ScaleWindowExt);
-        GET_FUNC(SelectBitmap);
-        GET_FUNC(SelectBrush);
-        GET_FUNC(SelectClipPath);
-        GET_FUNC(SelectFont);
-        GET_FUNC(SelectPalette);
-        GET_FUNC(SelectPen);
-        GET_FUNC(SetArcDirection);
-        GET_FUNC(SetBitmapBits);
-        GET_FUNC(SetBkColor);
-        GET_FUNC(SetBkMode);
-        GET_FUNC(SetDCBrushColor);
-        GET_FUNC(SetDCPenColor);
-        GET_FUNC(SetDIBColorTable);
-        GET_FUNC(SetDIBits);
-        GET_FUNC(SetDIBitsToDevice);
-        GET_FUNC(SetDeviceClipping);
-        GET_FUNC(SetDeviceGammaRamp);
-        GET_FUNC(SetMapMode);
-        GET_FUNC(SetMapperFlags);
-        GET_FUNC(SetPixel);
-        GET_FUNC(SetPixelFormat);
-        GET_FUNC(SetPolyFillMode);
-        GET_FUNC(SetROP2);
-        GET_FUNC(SetRelAbs);
-        GET_FUNC(SetStretchBltMode);
-        GET_FUNC(SetTextAlign);
-        GET_FUNC(SetTextCharacterExtra);
-        GET_FUNC(SetTextColor);
-        GET_FUNC(SetTextJustification);
-        GET_FUNC(SetViewportExt);
-        GET_FUNC(SetViewportOrg);
-        GET_FUNC(SetWindowExt);
-        GET_FUNC(SetWindowOrg);
-        GET_FUNC(SetWorldTransform);
-        GET_FUNC(StartDoc);
-        GET_FUNC(StartPage);
-        GET_FUNC(StretchBlt);
-        GET_FUNC(StretchDIBits);
-        GET_FUNC(StrokeAndFillPath);
-        GET_FUNC(StrokePath);
-        GET_FUNC(SwapBuffers);
-        GET_FUNC(UnrealizePalette);
-        GET_FUNC(WidenPath);
+        const struct gdi_dc_funcs * (CDECL *wine_get_gdi_driver)( unsigned int version );
 
-        /* OpenGL32 */
-        GET_FUNC(wglCreateContext);
-        GET_FUNC(wglCreateContextAttribsARB);
-        GET_FUNC(wglDeleteContext);
-        GET_FUNC(wglGetProcAddress);
-        GET_FUNC(wglGetPbufferDCARB);
-        GET_FUNC(wglMakeContextCurrentARB);
-        GET_FUNC(wglMakeCurrent);
-        GET_FUNC(wglSetPixelFormatWINE);
-        GET_FUNC(wglShareLists);
-        GET_FUNC(wglUseFontBitmapsA);
-        GET_FUNC(wglUseFontBitmapsW);
-#undef GET_FUNC
+        if ((wine_get_gdi_driver = (void *)GetProcAddress( module, "wine_get_gdi_driver" )))
+            funcs = wine_get_gdi_driver( WINE_GDI_DRIVER_VERSION );
     }
-    else memset( &driver->funcs, 0, sizeof(driver->funcs) );
-
+    if (!funcs) funcs = &empty_funcs;
+    driver->funcs = funcs;
     return driver;
 }
 
 
 /**********************************************************************
- *	     DRIVER_get_display_driver
+ *	     get_display_driver
  *
  * Special case for loading the display driver: get the name from the config file
  */
-const DC_FUNCTIONS *DRIVER_get_display_driver(void)
+static const struct gdi_dc_funcs *get_display_driver(void)
 {
     struct graphics_driver *driver;
     char buffer[MAX_PATH], libname[32], *name, *next;
     HMODULE module = 0;
     HKEY hkey;
 
-    if (display_driver) return &display_driver->funcs;  /* already loaded */
+    if (display_driver) return display_driver->funcs;  /* already loaded */
 
     strcpy( buffer, "x11" );  /* default value */
     /* @@ Wine registry key: HKCU\Software\Wine\Drivers */
@@ -259,14 +133,14 @@ const DC_FUNCTIONS *DRIVER_get_display_driver(void)
         FreeLibrary( driver->module );
         HeapFree( GetProcessHeap(), 0, driver );
     }
-    return &display_driver->funcs;
+    return display_driver->funcs;
 }
 
 
 /**********************************************************************
  *	     DRIVER_load_driver
  */
-const DC_FUNCTIONS *DRIVER_load_driver( LPCWSTR name )
+const struct gdi_dc_funcs *DRIVER_load_driver( LPCWSTR name )
 {
     HMODULE module;
     struct graphics_driver *driver, *new_driver;
@@ -274,11 +148,11 @@ const DC_FUNCTIONS *DRIVER_load_driver( LPCWSTR name )
     static const WCHAR display1W[] = {'\\','\\','.','\\','D','I','S','P','L','A','Y','1',0};
 
     /* display driver is a special case */
-    if (!strcmpiW( name, displayW ) || !strcmpiW( name, display1W )) return DRIVER_get_display_driver();
+    if (!strcmpiW( name, displayW ) || !strcmpiW( name, display1W )) return get_display_driver();
 
     if ((module = GetModuleHandleW( name )))
     {
-        if (display_driver && display_driver->module == module) return &display_driver->funcs;
+        if (display_driver && display_driver->module == module) return display_driver->funcs;
         EnterCriticalSection( &driver_section );
         LIST_FOR_EACH_ENTRY( driver, &drivers, struct graphics_driver, entry )
         {
@@ -309,8 +183,687 @@ const DC_FUNCTIONS *DRIVER_load_driver( LPCWSTR name )
     TRACE( "loaded driver %p for %s\n", driver, debugstr_w(name) );
 done:
     LeaveCriticalSection( &driver_section );
-    return &driver->funcs;
+    return driver->funcs;
 }
+
+
+static INT nulldrv_AbortDoc( PHYSDEV dev )
+{
+    return 0;
+}
+
+static BOOL nulldrv_Arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                         INT xstart, INT ystart, INT xend, INT yend )
+{
+    return TRUE;
+}
+
+static INT nulldrv_ChoosePixelFormat( PHYSDEV dev, const PIXELFORMATDESCRIPTOR *descr )
+{
+    return 0;
+}
+
+static BOOL nulldrv_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                           INT xstart, INT ystart, INT xend, INT yend )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_CreateBitmap( PHYSDEV dev, HBITMAP bitmap )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
+{
+    if (!display_driver || !display_driver->funcs->pCreateCompatibleDC) return TRUE;
+    return display_driver->funcs->pCreateCompatibleDC( NULL, pdev );
+}
+
+static BOOL nulldrv_CreateDC( PHYSDEV *dev, LPCWSTR driver, LPCWSTR device,
+                              LPCWSTR output, const DEVMODEW *devmode )
+{
+    assert(0);  /* should never be called */
+    return FALSE;
+}
+
+static BOOL nulldrv_DeleteBitmap( HBITMAP bitmap )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_DeleteDC( PHYSDEV dev )
+{
+    assert(0);  /* should never be called */
+    return TRUE;
+}
+
+static BOOL nulldrv_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+{
+    return TRUE;
+}
+
+static INT nulldrv_DescribePixelFormat( PHYSDEV dev, INT format, UINT size, PIXELFORMATDESCRIPTOR * descr )
+{
+    return 0;
+}
+
+static DWORD nulldrv_DeviceCapabilities( LPSTR buffer, LPCSTR device, LPCSTR port,
+                                         WORD cap, LPSTR output, DEVMODEA *devmode )
+{
+    return -1;
+}
+
+static BOOL nulldrv_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
+{
+    return TRUE;
+}
+
+static INT nulldrv_EndDoc( PHYSDEV dev )
+{
+    return 0;
+}
+
+static INT nulldrv_EndPage( PHYSDEV dev )
+{
+    return 0;
+}
+
+static BOOL nulldrv_EnumFonts( PHYSDEV dev, LOGFONTW *logfont, FONTENUMPROCW proc, LPARAM lParam )
+{
+    return TRUE;
+}
+
+static INT nulldrv_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW func, LPARAM lparam )
+{
+    return -1;
+}
+
+static INT nulldrv_ExtDeviceMode( LPSTR buffer, HWND hwnd, DEVMODEA *output, LPSTR device,
+                                  LPSTR port, DEVMODEA *input, LPSTR profile, DWORD mode )
+{
+    return -1;
+}
+
+static INT nulldrv_ExtEscape( PHYSDEV dev, INT escape, INT in_size, const void *in_data,
+                                    INT out_size, void *out_data )
+{
+    return 0;
+}
+
+static BOOL nulldrv_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT type )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_FontIsLinked( PHYSDEV dev )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GdiComment( PHYSDEV dev, UINT size, const BYTE *data )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GdiRealizationInfo( PHYSDEV dev, void *info )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GetCharABCWidths( PHYSDEV dev, UINT first, UINT last, LPABC abc )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GetCharABCWidthsI( PHYSDEV dev, UINT first, UINT count, WORD *indices, LPABC abc )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GetCharWidth( PHYSDEV dev, UINT first, UINT last, INT *buffer )
+{
+    return FALSE;
+}
+
+static INT nulldrv_GetDeviceCaps( PHYSDEV dev, INT cap )
+{
+    switch (cap)  /* return meaningful values for some entries */
+    {
+    case HORZRES:     return 640;
+    case VERTRES:     return 480;
+    case BITSPIXEL:   return 1;
+    case PLANES:      return 1;
+    case NUMCOLORS:   return 2;
+    case ASPECTX:     return 36;
+    case ASPECTY:     return 36;
+    case ASPECTXY:    return 51;
+    case LOGPIXELSX:  return 72;
+    case LOGPIXELSY:  return 72;
+    case SIZEPALETTE: return 2;
+    case TEXTCAPS:    return (TC_OP_CHARACTER | TC_OP_STROKE | TC_CP_STROKE |
+                              TC_CR_ANY | TC_SF_X_YINDEP | TC_SA_DOUBLE | TC_SA_INTEGER |
+                              TC_SA_CONTIN | TC_UA_ABLE | TC_SO_ABLE | TC_RA_ABLE | TC_VA_ABLE);
+    default:          return 0;
+    }
+}
+
+static BOOL nulldrv_GetDeviceGammaRamp( PHYSDEV dev, void *ramp )
+{
+    SetLastError( ERROR_INVALID_PARAMETER );
+    return FALSE;
+}
+
+static DWORD nulldrv_GetFontData( PHYSDEV dev, DWORD table, DWORD offset, LPVOID buffer, DWORD length )
+{
+    return FALSE;
+}
+
+static DWORD nulldrv_GetFontUnicodeRanges( PHYSDEV dev, LPGLYPHSET glyphs )
+{
+    return 0;
+}
+
+static DWORD nulldrv_GetGlyphIndices( PHYSDEV dev, LPCWSTR str, INT count, LPWORD indices, DWORD flags )
+{
+    return GDI_ERROR;
+}
+
+static DWORD nulldrv_GetGlyphOutline( PHYSDEV dev, UINT ch, UINT format, LPGLYPHMETRICS metrics,
+                                      DWORD size, LPVOID buffer, const MAT2 *mat )
+{
+    return GDI_ERROR;
+}
+
+static BOOL nulldrv_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename )
+{
+    return FALSE;
+}
+
+static DWORD nulldrv_GetKerningPairs( PHYSDEV dev, DWORD count, LPKERNINGPAIR pairs )
+{
+    return 0;
+}
+
+static UINT nulldrv_GetOutlineTextMetrics( PHYSDEV dev, UINT size, LPOUTLINETEXTMETRICW otm )
+{
+    return 0;
+}
+
+static INT nulldrv_GetPixelFormat( PHYSDEV dev )
+{
+    return 0;
+}
+
+static UINT nulldrv_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, PALETTEENTRY *entries )
+{
+    return 0;
+}
+
+static UINT nulldrv_GetTextCharsetInfo( PHYSDEV dev, LPFONTSIGNATURE fs, DWORD flags )
+{
+    return DEFAULT_CHARSET;
+}
+
+static BOOL nulldrv_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR str, INT count, INT max_ext,
+                                          INT *fit, INT *dx, SIZE *size )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_GetTextExtentExPointI( PHYSDEV dev, const WORD *indices, INT count, INT max_ext,
+                                           INT *fit, INT *dx, SIZE *size )
+{
+    return FALSE;
+}
+
+static INT nulldrv_GetTextFace( PHYSDEV dev, INT size, LPWSTR name )
+{
+    INT ret = 0;
+    LOGFONTW font;
+    HFONT hfont = GetCurrentObject( dev->hdc, OBJ_FONT );
+
+    if (GetObjectW( hfont, sizeof(font), &font ))
+    {
+        ret = strlenW( font.lfFaceName ) + 1;
+        if (name)
+        {
+            lstrcpynW( name, font.lfFaceName, size );
+            ret = min( size, ret );
+        }
+    }
+    return ret;
+}
+
+static BOOL nulldrv_GetTextMetrics( PHYSDEV dev, TEXTMETRICW *metrics )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_LineTo( PHYSDEV dev, INT x, INT y )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_MoveTo( PHYSDEV dev, INT x, INT y )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_PaintRgn( PHYSDEV dev, HRGN rgn )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_Pie( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                         INT xstart, INT ystart, INT xend, INT yend )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_PolyPolygon( PHYSDEV dev, const POINT *points, const INT *counts, UINT polygons )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_PolyPolyline( PHYSDEV dev, const POINT *points, const DWORD *counts, DWORD lines )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_Polygon( PHYSDEV dev, const POINT *points, INT count )
+{
+    INT counts[1] = { count };
+
+    return PolyPolygon( dev->hdc, points, counts, 1 );
+}
+
+static BOOL nulldrv_Polyline( PHYSDEV dev, const POINT *points, INT count )
+{
+    DWORD counts[1] = { count };
+
+    if (count < 0) return FALSE;
+    return PolyPolyline( dev->hdc, points, counts, 1 );
+}
+
+static UINT nulldrv_RealizeDefaultPalette( PHYSDEV dev )
+{
+    return 0;
+}
+
+static UINT nulldrv_RealizePalette( PHYSDEV dev, HPALETTE palette, BOOL primary )
+{
+    return 0;
+}
+
+static BOOL nulldrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
+{
+    return TRUE;
+}
+
+static HDC nulldrv_ResetDC( PHYSDEV dev, const DEVMODEW *devmode )
+{
+    return 0;
+}
+
+static BOOL nulldrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                               INT ell_width, INT ell_height )
+{
+    return TRUE;
+}
+
+static HBITMAP nulldrv_SelectBitmap( PHYSDEV dev, HBITMAP bitmap )
+{
+    return bitmap;
+}
+
+static HBRUSH nulldrv_SelectBrush( PHYSDEV dev, HBRUSH brush, const struct brush_pattern *pattern )
+{
+    return brush;
+}
+
+static HFONT nulldrv_SelectFont( PHYSDEV dev, HFONT font )
+{
+    return 0;
+}
+
+static HPALETTE nulldrv_SelectPalette( PHYSDEV dev, HPALETTE palette, BOOL bkgnd )
+{
+    return palette;
+}
+
+static HPEN nulldrv_SelectPen( PHYSDEV dev, HPEN pen, const struct brush_pattern *pattern )
+{
+    return pen;
+}
+
+static INT nulldrv_SetArcDirection( PHYSDEV dev, INT dir )
+{
+    return dir;
+}
+
+static COLORREF nulldrv_SetBkColor( PHYSDEV dev, COLORREF color )
+{
+    return color;
+}
+
+static INT nulldrv_SetBkMode( PHYSDEV dev, INT mode )
+{
+    return mode;
+}
+
+static COLORREF nulldrv_SetDCBrushColor( PHYSDEV dev, COLORREF color )
+{
+    return color;
+}
+
+static COLORREF nulldrv_SetDCPenColor( PHYSDEV dev, COLORREF color )
+{
+    return color;
+}
+
+static void nulldrv_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
+{
+}
+
+static DWORD nulldrv_SetLayout( PHYSDEV dev, DWORD layout )
+{
+    return layout;
+}
+
+static BOOL nulldrv_SetDeviceGammaRamp( PHYSDEV dev, void *ramp )
+{
+    SetLastError( ERROR_INVALID_PARAMETER );
+    return FALSE;
+}
+
+static DWORD nulldrv_SetMapperFlags( PHYSDEV dev, DWORD flags )
+{
+    return flags;
+}
+
+static COLORREF nulldrv_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color )
+{
+    return color;
+}
+
+static BOOL nulldrv_SetPixelFormat( PHYSDEV dev, INT format, const PIXELFORMATDESCRIPTOR *descr )
+{
+    return FALSE;
+}
+
+static INT nulldrv_SetPolyFillMode( PHYSDEV dev, INT mode )
+{
+    return mode;
+}
+
+static INT nulldrv_SetROP2( PHYSDEV dev, INT rop )
+{
+    return rop;
+}
+
+static INT nulldrv_SetRelAbs( PHYSDEV dev, INT mode )
+{
+    return mode;
+}
+
+static INT nulldrv_SetStretchBltMode( PHYSDEV dev, INT mode )
+{
+    return mode;
+}
+
+static UINT nulldrv_SetTextAlign( PHYSDEV dev, UINT align )
+{
+    return align;
+}
+
+static INT nulldrv_SetTextCharacterExtra( PHYSDEV dev, INT extra )
+{
+    return extra;
+}
+
+static COLORREF nulldrv_SetTextColor( PHYSDEV dev, COLORREF color )
+{
+    return color;
+}
+
+static BOOL nulldrv_SetTextJustification( PHYSDEV dev, INT extra, INT breaks )
+{
+    return TRUE;
+}
+
+static INT nulldrv_StartDoc( PHYSDEV dev, const DOCINFOW *info )
+{
+    return 0;
+}
+
+static INT nulldrv_StartPage( PHYSDEV dev )
+{
+    return 1;
+}
+
+static BOOL nulldrv_SwapBuffers( PHYSDEV dev )
+{
+    return TRUE;
+}
+
+static BOOL nulldrv_UnrealizePalette( HPALETTE palette )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglCopyContext( HGLRC ctx_src, HGLRC ctx_dst, UINT mask )
+{
+    return FALSE;
+}
+
+static HGLRC nulldrv_wglCreateContext( PHYSDEV dev )
+{
+    return 0;
+}
+
+static HGLRC nulldrv_wglCreateContextAttribsARB( PHYSDEV dev, HGLRC share_ctx, const int *attribs )
+{
+    return 0;
+}
+
+static BOOL nulldrv_wglDeleteContext( HGLRC ctx )
+{
+    return FALSE;
+}
+
+static PROC nulldrv_wglGetProcAddress( LPCSTR name )
+{
+    return NULL;
+}
+
+static HDC nulldrv_wglGetPbufferDCARB( PHYSDEV dev, void *pbuffer )
+{
+    return 0;
+}
+
+static BOOL nulldrv_wglMakeCurrent( PHYSDEV dev, HGLRC ctx )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglMakeContextCurrentARB( PHYSDEV dev_draw, PHYSDEV dev_read, HGLRC ctx )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglSetPixelFormatWINE( PHYSDEV dev, INT format, const PIXELFORMATDESCRIPTOR *descr )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglShareLists( HGLRC ctx1, HGLRC ctx2 )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglUseFontBitmapsA( PHYSDEV dev, DWORD start, DWORD count, DWORD base )
+{
+    return FALSE;
+}
+
+static BOOL nulldrv_wglUseFontBitmapsW( PHYSDEV dev, DWORD start, DWORD count, DWORD base )
+{
+    return FALSE;
+}
+
+const struct gdi_dc_funcs null_driver =
+{
+    nulldrv_AbortDoc,                   /* pAbortDoc */
+    nulldrv_AbortPath,                  /* pAbortPath */
+    nulldrv_AlphaBlend,                 /* pAlphaBlend */
+    nulldrv_AngleArc,                   /* pAngleArc */
+    nulldrv_Arc,                        /* pArc */
+    nulldrv_ArcTo,                      /* pArcTo */
+    nulldrv_BeginPath,                  /* pBeginPath */
+    nulldrv_BlendImage,                 /* pBlendImage */
+    nulldrv_ChoosePixelFormat,          /* pChoosePixelFormat */
+    nulldrv_Chord,                      /* pChord */
+    nulldrv_CloseFigure,                /* pCloseFigure */
+    nulldrv_CopyBitmap,                 /* pCopyBitmap */
+    nulldrv_CreateBitmap,               /* pCreateBitmap */
+    nulldrv_CreateCompatibleDC,         /* pCreateCompatibleDC */
+    nulldrv_CreateDC,                   /* pCreateDC */
+    nulldrv_DeleteBitmap,               /* pDeleteBitmap */
+    nulldrv_DeleteDC,                   /* pDeleteDC */
+    nulldrv_DeleteObject,               /* pDeleteObject */
+    nulldrv_DescribePixelFormat,        /* pDescribePixelFormat */
+    nulldrv_DeviceCapabilities,         /* pDeviceCapabilities */
+    nulldrv_Ellipse,                    /* pEllipse */
+    nulldrv_EndDoc,                     /* pEndDoc */
+    nulldrv_EndPage,                    /* pEndPage */
+    nulldrv_EndPath,                    /* pEndPath */
+    nulldrv_EnumFonts,                  /* pEnumFonts */
+    nulldrv_EnumICMProfiles,            /* pEnumICMProfiles */
+    nulldrv_ExcludeClipRect,            /* pExcludeClipRect */
+    nulldrv_ExtDeviceMode,              /* pExtDeviceMode */
+    nulldrv_ExtEscape,                  /* pExtEscape */
+    nulldrv_ExtFloodFill,               /* pExtFloodFill */
+    nulldrv_ExtSelectClipRgn,           /* pExtSelectClipRgn */
+    nulldrv_ExtTextOut,                 /* pExtTextOut */
+    nulldrv_FillPath,                   /* pFillPath */
+    nulldrv_FillRgn,                    /* pFillRgn */
+    nulldrv_FlattenPath,                /* pFlattenPath */
+    nulldrv_FontIsLinked,               /* pFontIsLinked */
+    nulldrv_FrameRgn,                   /* pFrameRgn */
+    nulldrv_GdiComment,                 /* pGdiComment */
+    nulldrv_GdiRealizationInfo,         /* pGdiRealizationInfo */
+    nulldrv_GetCharABCWidths,           /* pGetCharABCWidths */
+    nulldrv_GetCharABCWidthsI,          /* pGetCharABCWidthsI */
+    nulldrv_GetCharWidth,               /* pGetCharWidth */
+    nulldrv_GetDeviceCaps,              /* pGetDeviceCaps */
+    nulldrv_GetDeviceGammaRamp,         /* pGetDeviceGammaRamp */
+    nulldrv_GetFontData,                /* pGetFontData */
+    nulldrv_GetFontUnicodeRanges,       /* pGetFontUnicodeRanges */
+    nulldrv_GetGlyphIndices,            /* pGetGlyphIndices */
+    nulldrv_GetGlyphOutline,            /* pGetGlyphOutline */
+    nulldrv_GetICMProfile,              /* pGetICMProfile */
+    nulldrv_GetImage,                   /* pGetImage */
+    nulldrv_GetKerningPairs,            /* pGetKerningPairs */
+    nulldrv_GetNearestColor,            /* pGetNearestColor */
+    nulldrv_GetOutlineTextMetrics,      /* pGetOutlineTextMetrics */
+    nulldrv_GetPixel,                   /* pGetPixel */
+    nulldrv_GetPixelFormat,             /* pGetPixelFormat */
+    nulldrv_GetSystemPaletteEntries,    /* pGetSystemPaletteEntries */
+    nulldrv_GetTextCharsetInfo,         /* pGetTextCharsetInfo */
+    nulldrv_GetTextExtentExPoint,       /* pGetTextExtentExPoint */
+    nulldrv_GetTextExtentExPointI,      /* pGetTextExtentExPointI */
+    nulldrv_GetTextFace,                /* pGetTextFace */
+    nulldrv_GetTextMetrics,             /* pGetTextMetrics */
+    nulldrv_GradientFill,               /* pGradientFill */
+    nulldrv_IntersectClipRect,          /* pIntersectClipRect */
+    nulldrv_InvertRgn,                  /* pInvertRgn */
+    nulldrv_LineTo,                     /* pLineTo */
+    nulldrv_ModifyWorldTransform,       /* pModifyWorldTransform */
+    nulldrv_MoveTo,                     /* pMoveTo */
+    nulldrv_OffsetClipRgn,              /* pOffsetClipRgn */
+    nulldrv_OffsetViewportOrgEx,        /* pOffsetViewportOrg */
+    nulldrv_OffsetWindowOrgEx,          /* pOffsetWindowOrg */
+    nulldrv_PaintRgn,                   /* pPaintRgn */
+    nulldrv_PatBlt,                     /* pPatBlt */
+    nulldrv_Pie,                        /* pPie */
+    nulldrv_PolyBezier,                 /* pPolyBezier */
+    nulldrv_PolyBezierTo,               /* pPolyBezierTo */
+    nulldrv_PolyDraw,                   /* pPolyDraw */
+    nulldrv_PolyPolygon,                /* pPolyPolygon */
+    nulldrv_PolyPolyline,               /* pPolyPolyline */
+    nulldrv_Polygon,                    /* pPolygon */
+    nulldrv_Polyline,                   /* pPolyline */
+    nulldrv_PolylineTo,                 /* pPolylineTo */
+    nulldrv_PutImage,                   /* pPutImage */
+    nulldrv_RealizeDefaultPalette,      /* pRealizeDefaultPalette */
+    nulldrv_RealizePalette,             /* pRealizePalette */
+    nulldrv_Rectangle,                  /* pRectangle */
+    nulldrv_ResetDC,                    /* pResetDC */
+    nulldrv_RestoreDC,                  /* pRestoreDC */
+    nulldrv_RoundRect,                  /* pRoundRect */
+    nulldrv_SaveDC,                     /* pSaveDC */
+    nulldrv_ScaleViewportExtEx,         /* pScaleViewportExt */
+    nulldrv_ScaleWindowExtEx,           /* pScaleWindowExt */
+    nulldrv_SelectBitmap,               /* pSelectBitmap */
+    nulldrv_SelectBrush,                /* pSelectBrush */
+    nulldrv_SelectClipPath,             /* pSelectClipPath */
+    nulldrv_SelectFont,                 /* pSelectFont */
+    nulldrv_SelectPalette,              /* pSelectPalette */
+    nulldrv_SelectPen,                  /* pSelectPen */
+    nulldrv_SetArcDirection,            /* pSetArcDirection */
+    nulldrv_SetBkColor,                 /* pSetBkColor */
+    nulldrv_SetBkMode,                  /* pSetBkMode */
+    nulldrv_SetDCBrushColor,            /* pSetDCBrushColor */
+    nulldrv_SetDCPenColor,              /* pSetDCPenColor */
+    nulldrv_SetDIBitsToDevice,          /* pSetDIBitsToDevice */
+    nulldrv_SetDeviceClipping,          /* pSetDeviceClipping */
+    nulldrv_SetDeviceGammaRamp,         /* pSetDeviceGammaRamp */
+    nulldrv_SetLayout,                  /* pSetLayout */
+    nulldrv_SetMapMode,                 /* pSetMapMode */
+    nulldrv_SetMapperFlags,             /* pSetMapperFlags */
+    nulldrv_SetPixel,                   /* pSetPixel */
+    nulldrv_SetPixelFormat,             /* pSetPixelFormat */
+    nulldrv_SetPolyFillMode,            /* pSetPolyFillMode */
+    nulldrv_SetROP2,                    /* pSetROP2 */
+    nulldrv_SetRelAbs,                  /* pSetRelAbs */
+    nulldrv_SetStretchBltMode,          /* pSetStretchBltMode */
+    nulldrv_SetTextAlign,               /* pSetTextAlign */
+    nulldrv_SetTextCharacterExtra,      /* pSetTextCharacterExtra */
+    nulldrv_SetTextColor,               /* pSetTextColor */
+    nulldrv_SetTextJustification,       /* pSetTextJustification */
+    nulldrv_SetViewportExtEx,           /* pSetViewportExt */
+    nulldrv_SetViewportOrgEx,           /* pSetViewportOrg */
+    nulldrv_SetWindowExtEx,             /* pSetWindowExt */
+    nulldrv_SetWindowOrgEx,             /* pSetWindowOrg */
+    nulldrv_SetWorldTransform,          /* pSetWorldTransform */
+    nulldrv_StartDoc,                   /* pStartDoc */
+    nulldrv_StartPage,                  /* pStartPage */
+    nulldrv_StretchBlt,                 /* pStretchBlt */
+    nulldrv_StretchDIBits,              /* pStretchDIBits */
+    nulldrv_StrokeAndFillPath,          /* pStrokeAndFillPath */
+    nulldrv_StrokePath,                 /* pStrokePath */
+    nulldrv_SwapBuffers,                /* pSwapBuffers */
+    nulldrv_UnrealizePalette,           /* pUnrealizePalette */
+    nulldrv_WidenPath,                  /* pWidenPath */
+    nulldrv_wglCopyContext,             /* pwglCopyContext */
+    nulldrv_wglCreateContext,           /* pwglCreateContext */
+    nulldrv_wglCreateContextAttribsARB, /* pwglCreateContextAttribsARB */
+    nulldrv_wglDeleteContext,           /* pwglDeleteContext */
+    nulldrv_wglGetPbufferDCARB,         /* pwglGetPbufferDCARB */
+    nulldrv_wglGetProcAddress,          /* pwglGetProcAddress */
+    nulldrv_wglMakeContextCurrentARB,   /* pwglMakeContextCurrentARB */
+    nulldrv_wglMakeCurrent,             /* pwglMakeCurrent */
+    nulldrv_wglSetPixelFormatWINE,      /* pwglSetPixelFormatWINE */
+    nulldrv_wglShareLists,              /* pwglShareLists */
+    nulldrv_wglUseFontBitmapsA,         /* pwglUseFontBitmapsA */
+    nulldrv_wglUseFontBitmapsW,         /* pwglUseFontBitmapsW */
+};
 
 
 /*****************************************************************************
@@ -470,9 +1023,9 @@ INT WINAPI GDI_CallExtDeviceMode16( HWND hwnd,
 
     if ((dc = get_dc_ptr( hdc )))
     {
-        if (dc->funcs->pExtDeviceMode)
-	    ret = dc->funcs->pExtDeviceMode( buf, hwnd, lpdmOutput, lpszDevice, lpszPort,
-                                             lpdmInput, lpszProfile, fwMode );
+        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pExtDeviceMode );
+        ret = physdev->funcs->pExtDeviceMode( buf, hwnd, lpdmOutput, lpszDevice, lpszPort,
+                                              lpdmInput, lpszProfile, fwMode );
 	release_dc_ptr( dc );
     }
     DeleteDC( hdc );
@@ -524,9 +1077,9 @@ DWORD WINAPI GDI_CallDeviceCapabilities16( LPCSTR lpszDevice, LPCSTR lpszPort,
 
     if ((dc = get_dc_ptr( hdc )))
     {
-        if (dc->funcs->pDeviceCapabilities)
-            ret = dc->funcs->pDeviceCapabilities( buf, lpszDevice, lpszPort,
-                                                  fwCapability, lpszOutput, lpdm );
+        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pDeviceCapabilities );
+        ret = physdev->funcs->pDeviceCapabilities( buf, lpszDevice, lpszPort,
+                                                   fwCapability, lpszOutput, lpdm );
         release_dc_ptr( dc );
     }
     DeleteDC( hdc );
@@ -652,10 +1205,12 @@ INT WINAPI ExtEscape( HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData,
 {
     INT ret = 0;
     DC * dc = get_dc_ptr( hdc );
+
     if (dc)
     {
-        if (dc->funcs->pExtEscape)
-            ret = dc->funcs->pExtEscape( dc->physDev, nEscape, cbInput, lpszInData, cbOutput, lpszOutData );
+        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pExtEscape );
+        update_dc( dc );
+        ret = physdev->funcs->pExtEscape( physdev, nEscape, cbInput, lpszInData, cbOutput, lpszOutData );
         release_dc_ptr( dc );
     }
     return ret;

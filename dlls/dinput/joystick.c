@@ -426,6 +426,129 @@ HRESULT WINAPI JoystickAGenericImpl_GetDeviceState(LPDIRECTINPUTDEVICE8A iface, 
     return JoystickWGenericImpl_GetDeviceState(IDirectInputDevice8W_from_impl(This), len, ptr);
 }
 
+
+HRESULT WINAPI JoystickWGenericImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                   LPDIACTIONFORMATW lpdiaf,
+                                                   LPCWSTR lpszUserName,
+                                                   DWORD dwFlags)
+{
+    JoystickGenericImpl *This = impl_from_IDirectInputDevice8W(iface);
+    int i, j, has_actions = 0;
+    DWORD object_types[] = { DIDFT_AXIS, DIDFT_BUTTON };
+    DWORD type_map[] = { DIDFT_RELAXIS, DIDFT_PSHBUTTON };
+
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    for (i=0; i < lpdiaf->dwNumActions; i++)
+    {
+        DWORD inst = (0x000000ff & (lpdiaf->rgoAction[i].dwSemantic)) - 1;
+        DWORD type = 0x000000ff & (lpdiaf->rgoAction[i].dwSemantic >> 8);
+        DWORD genre = 0xff000000 & lpdiaf->rgoAction[i].dwSemantic;
+
+        /* Don't touch an user configured action */
+        if (lpdiaf->rgoAction[i].dwHow == DIAH_USERCONFIG) continue;
+
+        /* Only consider actions of the right genre */
+        if (lpdiaf->dwGenre != genre && genre != DIGENRE_ANY) continue;
+
+        for (j=0; j < sizeof(object_types)/sizeof(object_types[0]); j++)
+        {
+            if (type & object_types[j])
+            {
+                /* Assure that the object exists */
+                LPDIOBJECTDATAFORMAT odf = dataformat_to_odf_by_type(This->base.data_format.wine_df, inst, object_types[j]);
+
+                if (odf != NULL)
+                {
+                    lpdiaf->rgoAction[i].dwObjID = type_map[j] | (0x0000ff00 & (inst << 8));
+                    lpdiaf->rgoAction[i].guidInstance = This->base.guid;
+                    lpdiaf->rgoAction[i].dwHow = DIAH_DEFAULT;
+
+                    has_actions = 1;
+
+                    /* No need to try other types if the action was already mapped */
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!has_actions) return DI_NOEFFECT;
+
+    return IDirectInputDevice8WImpl_BuildActionMap(iface, lpdiaf, lpszUserName, dwFlags);
+}
+
+HRESULT WINAPI JoystickAGenericImpl_BuildActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                   LPDIACTIONFORMATA lpdiaf,
+                                                   LPCSTR lpszUserName,
+                                                   DWORD dwFlags)
+{
+    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = JoystickWGenericImpl_BuildActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    _copy_diactionformatWtoA(lpdiaf, &diafW);
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
+}
+
+HRESULT WINAPI JoystickWGenericImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                 LPDIACTIONFORMATW lpdiaf,
+                                                 LPCWSTR lpszUserName,
+                                                 DWORD dwFlags)
+{
+    JoystickGenericImpl *This = impl_from_IDirectInputDevice8W(iface);
+
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    return _set_action_map(iface, lpdiaf, lpszUserName, dwFlags, This->base.data_format.wine_df);
+}
+
+HRESULT WINAPI JoystickAGenericImpl_SetActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                 LPDIACTIONFORMATA lpdiaf,
+                                                 LPCSTR lpszUserName,
+                                                 DWORD dwFlags)
+{
+    JoystickGenericImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = JoystickWGenericImpl_SetActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
+}
+
 /*
  * This maps the read value (from the input event) to a value in the
  * 'wanted' range.

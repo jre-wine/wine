@@ -41,6 +41,7 @@
 const char *debug_d3d10_driver_type(D3D10_DRIVER_TYPE driver_type) DECLSPEC_HIDDEN;
 const char *debug_d3d10_shader_variable_class(D3D10_SHADER_VARIABLE_CLASS c) DECLSPEC_HIDDEN;
 const char *debug_d3d10_shader_variable_type(D3D10_SHADER_VARIABLE_TYPE t) DECLSPEC_HIDDEN;
+const char *debug_d3d10_device_state_types(D3D10_DEVICE_STATE_TYPES t) DECLSPEC_HIDDEN;
 
 void *d3d10_rb_alloc(size_t size) DECLSPEC_HIDDEN;
 void *d3d10_rb_realloc(void *ptr, size_t size) DECLSPEC_HIDDEN;
@@ -93,7 +94,7 @@ struct d3d10_effect_shader_variable
 /* ID3D10EffectType */
 struct d3d10_effect_type
 {
-    const struct ID3D10EffectTypeVtbl *vtbl;
+    ID3D10EffectType ID3D10EffectType_iface;
 
     char *name;
     D3D10_SHADER_VARIABLE_TYPE basetype;
@@ -146,7 +147,7 @@ struct d3d10_effect_variable
 /* ID3D10EffectPass */
 struct d3d10_effect_pass
 {
-    const struct ID3D10EffectPassVtbl *vtbl;
+    ID3D10EffectPass ID3D10EffectPass_iface;
 
     struct d3d10_effect_technique *technique;
     char *name;
@@ -160,7 +161,7 @@ struct d3d10_effect_pass
 /* ID3D10EffectTechnique */
 struct d3d10_effect_technique
 {
-    const struct ID3D10EffectTechniqueVtbl *vtbl;
+    ID3D10EffectTechnique ID3D10EffectTechnique_iface;
 
     struct d3d10_effect *effect;
     char *name;
@@ -180,7 +181,7 @@ struct d3d10_effect_anonymous_shader
 extern const struct ID3D10EffectVtbl d3d10_effect_vtbl DECLSPEC_HIDDEN;
 struct d3d10_effect
 {
-    const struct ID3D10EffectVtbl *vtbl;
+    ID3D10Effect ID3D10Effect_iface;
     LONG refcount;
 
     ID3D10Device *device;
@@ -217,7 +218,7 @@ struct d3d10_effect
 extern const struct ID3D10ShaderReflectionVtbl d3d10_shader_reflection_vtbl DECLSPEC_HIDDEN;
 struct d3d10_shader_reflection
 {
-    const struct ID3D10ShaderReflectionVtbl *vtbl;
+    ID3D10ShaderReflection ID3D10ShaderReflection_iface;
     LONG refcount;
 };
 
@@ -251,7 +252,7 @@ static inline void write_dword(char **ptr, DWORD d)
     *ptr += sizeof(d);
 }
 
-void skip_dword_unknown(const char **ptr, unsigned int count) DECLSPEC_HIDDEN;
+void skip_dword_unknown(const char *location, const char **ptr, unsigned int count) DECLSPEC_HIDDEN;
 void write_dword_unknown(char **ptr, DWORD d) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_D3D10_PRIVATE_H */

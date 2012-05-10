@@ -133,6 +133,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
     WAVEHDR frag;
     MMRESULT rc;
     DWORD res;
+    MMTIME mmt;
     WORD nChannels = pwfx->nChannels;
     WORD wBitsPerSample = pwfx->wBitsPerSample;
     DWORD nSamplesPerSec = pwfx->nSamplesPerSec;
@@ -154,7 +155,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
        (!(flags & WAVE_FORMAT_DIRECT) || (flags & WAVE_MAPPED)) &&
        !(pcaps->dwFormats & format)) ||
        (rc==MMSYSERR_INVALFLAG && (flags & WAVE_FORMAT_DIRECT)),
-       "waveInOpen(%s): format=%dx%2dx%d flags=%lx(%s) rc=%s\n",
+       "waveInOpen(%s): format=%dx%2dx%d flags=%x(%s) rc=%s\n",
        dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
        pwfx->nChannels,CALLBACK_EVENT|flags,
        wave_open_flags(CALLBACK_EVENT|flags),wave_in_error(rc));
@@ -224,6 +225,12 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
            "frag.dwBytesRecorded=%d, should=%d\n",
            frag.dwBytesRecorded,pwfx->nAvgBytesPerSec);
 
+        mmt.wType = TIME_SAMPLES;
+        rc=waveInGetPosition(win, &mmt, sizeof(mmt));
+        ok(rc==MMSYSERR_NOERROR,"waveInGetPosition(%s): rc=%s\n",
+           dev_name(device),wave_in_error(rc));
+        ok(mmt.u.cb == frag.dwBytesRecorded, "Got wrong position: %u\n", mmt.u.cb);
+
         /* stop playing on error */
         if (res!=WAIT_OBJECT_0) {
             rc=waveInStop(win);
@@ -256,7 +263,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
            rc==MMSYSERR_ALLOCATED ||
            ((rc==WAVERR_BADFORMAT || rc==MMSYSERR_NOTSUPPORTED) &&
             !(pcaps->dwFormats & format)),
-           "waveOutOpen(%s) format=%dx%2dx%d flags=%lx(%s) rc=%s\n",
+           "waveOutOpen(%s) format=%dx%2dx%d flags=%x(%s) rc=%s\n",
            dev_name(device),pwfx->nSamplesPerSec,pwfx->wBitsPerSample,
            pwfx->nChannels,CALLBACK_EVENT|flags,
            wave_open_flags(CALLBACK_EVENT),wave_out_error(rc));
@@ -294,7 +301,7 @@ static void wave_in_test_device(UINT_PTR device)
 {
     WAVEINCAPSA capsA;
     WAVEINCAPSW capsW;
-    WAVEFORMATEX format,oformat;
+    WAVEFORMATEX format;
     WAVEFORMATEXTENSIBLE wfex;
     HWAVEIN win;
     MMRESULT rc;
@@ -437,29 +444,6 @@ static void wave_in_test_device(UINT_PTR device)
             }
         }
         VirtualFree(twoPages, 2 * dwPageSize, MEM_RELEASE);
-    }
-
-    /* Testing invalid format: 2 MHz sample rate */
-    format.wFormatTag=WAVE_FORMAT_PCM;
-    format.nChannels=2;
-    format.wBitsPerSample=16;
-    format.nSamplesPerSec=2000000;
-    format.nBlockAlign=format.nChannels*format.wBitsPerSample/8;
-    format.nAvgBytesPerSec=format.nSamplesPerSec*format.nBlockAlign;
-    format.cbSize=0;
-    oformat=format;
-    rc=waveInOpen(&win,device,&format,0,0,CALLBACK_NULL|WAVE_FORMAT_DIRECT);
-    ok(rc==WAVERR_BADFORMAT || rc==MMSYSERR_INVALFLAG ||
-       rc==MMSYSERR_INVALPARAM,
-       "waveInOpen(%s): opening the device with 2 MHz sample rate should fail: "
-       " rc=%s\n",dev_name(device),wave_in_error(rc));
-    if (rc==MMSYSERR_NOERROR) {
-        trace("     got %dx%2dx%d for %dx%2dx%d\n",
-              format.nSamplesPerSec, format.wBitsPerSample,
-              format.nChannels,
-              oformat.nSamplesPerSec, oformat.wBitsPerSample,
-              oformat.nChannels);
-        waveInClose(win);
     }
 
     /* test non PCM formats */

@@ -19,6 +19,8 @@
 #ifndef __WINE_FDI_H
 #define __WINE_FDI_H
 
+#include <basetsd.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
@@ -48,7 +50,7 @@ typedef struct {
 /**********************************************************************/
 
 #define CB_MAX_CHUNK         32768U
-#define CB_MAX_DISK          0x7fffffffL
+#define CB_MAX_DISK          __MSABI_LONG(0x7fffffff)
 #define CB_MAX_FILENAME      256
 #define CB_MAX_CABINET_NAME  256
 #define CB_MAX_CAB_PATH      256

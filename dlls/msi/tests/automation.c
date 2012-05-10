@@ -47,6 +47,7 @@ static const WCHAR szUpgradeCode[] = { '{','C','E','0','6','7','E','8','D','-','
 static const WCHAR szProductInfoException[] = { 'P','r','o','d','u','c','t','I','n','f','o',',','P','r','o','d','u','c','t',',','A','t','t','r','i','b','u','t','e',0 };
 static const WCHAR WINE_INSTALLPROPERTY_PACKAGENAMEW[] = {'P','a','c','k','a','g','e','N','a','m','e',0};
 static const WCHAR WINE_INSTALLPROPERTY_PRODUCTNAMEW[] = {'P','r','o','d','u','c','t','N','a','m','e',0};
+static const WCHAR WINE_INSTALLPROPERTY_LOCALPACKAGEW[] = {'L','o','c','a','l','P','a','c','k','a','g','e',0};
 static FILETIME systemtime;
 static CHAR CURR_DIR[MAX_PATH];
 static EXCEPINFO excepinfo;
@@ -302,6 +303,7 @@ static void create_database(const CHAR *name, const msi_table *tables, int num_t
 
 static BOOL create_package(LPWSTR path)
 {
+    static const WCHAR slashW[] = {'\\',0};
     DWORD len;
 
     /* Prepare package */
@@ -315,9 +317,8 @@ static BOOL create_package(LPWSTR path)
     if (!len)
         return FALSE;
 
-    /* lstrcatW does not work on win95 */
-    path[len - 1] = '\\';
-    memcpy(&path[len], szMsifile, sizeof(szMsifile));
+    lstrcatW(path, slashW);
+    lstrcatW(path, szMsifile);
     return TRUE;
 }
 
@@ -488,113 +489,79 @@ static DISPID get_dispid( IDispatch *disp, const char *name )
     return id;
 }
 
+typedef struct {
+    DISPID did;
+    const char *name;
+    BOOL todo;
+} get_did_t;
+
+static const get_did_t get_did_data[] = {
+    { 1,  "CreateRecord" },
+    { 2,  "OpenPackage" },
+    { 3,  "OpenProduct" },
+    { 4,  "OpenDatabase" },
+    { 5,  "SummaryInformation" },
+    { 6,  "UILevel" },
+    { 7,  "EnableLog" },
+    { 8,  "InstallProduct" },
+    { 9,  "Version" },
+    { 10, "LastErrorRecord" },
+    { 11, "RegistryValue" },
+    { 12, "Environment" },
+    { 13, "FileAttributes" },
+    { 15, "FileSize" },
+    { 16, "FileVersion" },
+    { 17, "ProductState" },
+    { 18, "ProductInfo" },
+    { 19, "ConfigureProduct", TRUE },
+    { 20, "ReinstallProduct", TRUE },
+    { 21, "CollectUserInfo", TRUE },
+    { 22, "ApplyPatch", TRUE },
+    { 23, "FeatureParent", TRUE },
+    { 24, "FeatureState", TRUE },
+    { 25, "UseFeature", TRUE },
+    { 26, "FeatureUsageCount", TRUE },
+    { 27, "FeatureUsageDate", TRUE },
+    { 28, "ConfigureFeature", TRUE },
+    { 29, "ReinstallFeature", TRUE },
+    { 30, "ProvideComponent", TRUE },
+    { 31, "ComponentPath", TRUE },
+    { 32, "ProvideQualifiedComponent", TRUE },
+    { 33, "QualifierDescription", TRUE },
+    { 34, "ComponentQualifiers", TRUE },
+    { 35, "Products" },
+    { 36, "Features", TRUE },
+    { 37, "Components", TRUE },
+    { 38, "ComponentClients", TRUE },
+    { 39, "Patches", TRUE },
+    { 40, "RelatedProducts" },
+    { 41, "PatchInfo", TRUE },
+    { 42, "PatchTransforms", TRUE },
+    { 43, "AddSource", TRUE },
+    { 44, "ClearSourceList", TRUE },
+    { 45, "ForceSourceListResolution", TRUE },
+    { 46, "ShortcutTarget", TRUE },
+    { 47, "FileHash", TRUE },
+    { 48, "FileSignatureInfo", TRUE },
+    { 0 }
+};
+
 static void test_dispid(void)
 {
+    const get_did_t *ptr = get_did_data;
     DISPID dispid;
 
-    dispid = get_dispid(pInstaller, "CreateRecord");
-    ok(dispid  == 1, "Expected 1, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "OpenPackage");
-    ok(dispid  == 2, "Expected 2, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "OpenProduct");
-    ok(dispid  == 3, "Expected 3, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "OpenDatabase");
-    ok(dispid == 4, "Expected 4, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "SummaryInformation");
-    ok(dispid == 5, "Expected 5, got %d\n", dispid);
-    dispid = get_dispid( pInstaller, "UILevel" );
-    ok(dispid == 6, "Expected 6, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "EnableLog");
-    ok(dispid == 7, "Expected 7, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "InstallProduct");
-    ok(dispid == 8, "Expected 8, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "Version");
-    ok(dispid == 9, "Expected 9, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "LastErrorRecord");
-    ok(dispid == 10, "Expected 10, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "RegistryValue");
-    ok(dispid == 11, "Expected 11, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "Environment");
-    ok(dispid == 12, "Expected 12, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "FileAttributes");
-    ok(dispid == 13, "Expected 13, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "FileSize");
-    ok(dispid == 15, "Expected 15, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "FileVersion");
-    ok(dispid == 16, "Expected 16, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "ProductState");
-    ok(dispid == 17, "Expected 17, got %d\n", dispid);
-    dispid = get_dispid(pInstaller, "ProductInfo");
-    ok(dispid == 18, "Expected 18, got %d\n", dispid);
-    todo_wine
+    while (ptr->name)
     {
-        dispid = get_dispid(pInstaller, "ConfigureProduct");
-        ok(dispid == 19, "Expected 19, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ReinstallProduct");
-        ok(dispid == 20 , "Expected 20, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "CollectUserInfo");
-        ok(dispid == 21, "Expected 21, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ApplyPatch");
-        ok(dispid == 22, "Expected 22, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FeatureParent");
-        ok(dispid == 23, "Expected 23, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FeatureState");
-        ok(dispid == 24, "Expected 24, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "UseFeature");
-        ok(dispid == 25, "Expected 25, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FeatureUsageCount");
-        ok(dispid == 26, "Expected 26, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FeatureUsageDate");
-        ok(dispid == 27, "Expected 27, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ConfigureFeature");
-        ok(dispid == 28, "Expected 28, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ReinstallFeature");
-        ok(dispid == 29, "Expected 29, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ProvideComponent");
-        ok(dispid == 30, "Expected 30, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ComponentPath");
-        ok(dispid == 31, "Expected 31, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ProvideQualifiedComponent");
-        ok(dispid == 32, "Expected 32, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "QualifierDescription");
-        ok(dispid == 33, "Expected 33, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ComponentQualifiers");
-        ok(dispid == 34, "Expected 34, got %d\n", dispid);
+        dispid = get_dispid(pInstaller, ptr->name);
+        if (ptr->todo)
+        todo_wine
+            ok(dispid == ptr->did, "%s: expected %d, got %d\n", ptr->name, ptr->did, dispid);
+        else
+            ok(dispid == ptr->did, "%s: expected %d, got %d\n", ptr->name, ptr->did, dispid);
+        ptr++;
     }
-    dispid = get_dispid(pInstaller, "Products");
-    ok(dispid == 35, "Expected 35, got %d\n", dispid);
-    todo_wine
-    {
-        dispid = get_dispid(pInstaller, "Features");
-        ok(dispid == 36, "Expected 36, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "Components");
-        ok(dispid == 37, "Expected 37, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ComponentClients");
-        ok(dispid == 38, "Expected 38, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "Patches");
-        ok(dispid == 39, "Expected 39, got %d\n", dispid);
-    }
-    dispid = get_dispid(pInstaller, "RelatedProducts");
-    ok(dispid == 40, "Expected 40, got %d\n", dispid);
-    todo_wine
-    {
-        dispid = get_dispid(pInstaller, "PatchInfo");
-        ok(dispid == 41, "Expected 41, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "PatchTransforms");
-        ok(dispid == 42, "Expected 42, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "AddSource");
-        ok(dispid == 43, "Expected 43, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ClearSourceList");
-        ok(dispid == 44, "Expected 44, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ForceSourceListResolution");
-        ok(dispid == 45, "Expected 45, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "ShortcutTarget");
-        ok(dispid == 46, "Expected 46, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FileHash");
-        ok(dispid == 47, "Expected 47, got %d\n", dispid);
-        dispid = get_dispid(pInstaller, "FileSignatureInfo");
-        ok(dispid == 48, "Expected 48, got %d\n", dispid);
-    }
+
     dispid = get_dispid(pInstaller, "RemovePatches");
     ok(dispid == 49 || dispid == -1, "Expected 49 or -1, got %d\n", dispid);
     dispid = get_dispid(pInstaller, "ApplyMultiplePatches");
@@ -949,9 +916,7 @@ static HRESULT Installer_RegistryValueW(HKEY hkey, LPCWSTR szKey, LPCWSTR szValu
     V_BSTR(&vararg) = SysAllocString(szValue);
 
     hr = Installer_RegistryValue(hkey, szKey, vararg, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        /* lstrcpyW is not implemented on Win95 (lstrlenW is though) */
-        memcpy(szString, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -967,8 +932,7 @@ static HRESULT Installer_RegistryValueI(HKEY hkey, LPCWSTR szKey, int iValue, LP
     V_I4(&vararg) = iValue;
 
     hr = Installer_RegistryValue(hkey, szKey, vararg, &varresult, vtResult);
-    if (SUCCEEDED(hr) && vtResult == VT_BSTR)
-        memcpy(szString, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (SUCCEEDED(hr) && vtResult == VT_BSTR) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -1059,8 +1023,7 @@ static HRESULT Installer_ProductInfo(LPCWSTR szProduct, LPCWSTR szAttribute, LPW
     V_BSTR(&vararg[0]) = SysAllocString(szAttribute);
 
     hr = invoke(pInstaller, "ProductInfo", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        memcpy(szString, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -1099,8 +1062,7 @@ static HRESULT Installer_VersionGet(LPWSTR szVersion)
     HRESULT hr;
 
     hr = invoke(pInstaller, "Version", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        memcpy(szVersion, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szVersion, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -1142,8 +1104,7 @@ static HRESULT Session_PropertyGet(IDispatch *pSession, LPCWSTR szName, LPWSTR s
     V_BSTR(&vararg[0]) = SysAllocString(szName);
 
     hr = invoke(pSession, "Property", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        memcpy(szReturn, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szReturn, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -1442,8 +1403,7 @@ static HRESULT Record_StringDataGet(IDispatch *pRecord, int iField, LPWSTR szStr
     V_I4(&vararg[0]) = iField;
 
     hr = invoke(pRecord, "StringData", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        memcpy(szString, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -1520,8 +1480,7 @@ static HRESULT StringList_Item(IDispatch *pStringList, int iIndex, LPWSTR szStri
     V_I4(&vararg[0]) = iIndex;
 
     hr = invoke(pStringList, "Item", DISPATCH_PROPERTYGET, &dispparams, &varresult, VT_BSTR);
-    if (V_BSTR(&varresult))
-        memcpy(szString, V_BSTR(&varresult), (lstrlenW(V_BSTR(&varresult)) + 1) * sizeof(WCHAR));
+    if (V_BSTR(&varresult)) lstrcpyW(szString, V_BSTR(&varresult));
     VariantClear(&varresult);
     return hr;
 }
@@ -2428,7 +2387,7 @@ static void test_Installer_InstallProduct(void)
 
     /* Avoid an interactive dialog in case of insufficient privileges. */
     hr = Installer_UILevelPut(INSTALLUILEVEL_NONE);
-    ok(hr == S_OK, "Expected UILevel propery put invoke to return S_OK, got 0x%08x\n", hr);
+    ok(hr == S_OK, "Expected UILevel property put invoke to return S_OK, got 0x%08x\n", hr);
 
     /* Installer::InstallProduct */
     hr = Installer_InstallProduct(szMsifile, NULL);
@@ -2493,18 +2452,22 @@ static void test_Installer_InstallProduct(void)
         IDispatch_Release(pStringList);
     }
 
+    hr = Installer_ProductInfo(szProductCode, WINE_INSTALLPROPERTY_LOCALPACKAGEW, szString);
+    ok(hr == S_OK, "Installer_ProductInfo failed, hresult 0x%08x\n", hr);
+    DeleteFileW( szString );
+
     /* Check & clean up installed files & registry keys */
     ok(delete_pf("msitest\\cabout\\new\\five.txt", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\cabout\\new", FALSE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout\\new", FALSE), "Directory not created\n");
     ok(delete_pf("msitest\\cabout\\four.txt", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\cabout", FALSE), "File not installed\n");
+    ok(delete_pf("msitest\\cabout", FALSE), "Directory not created\n");
     ok(delete_pf("msitest\\changed\\three.txt", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\changed", FALSE), "File not installed\n");
+    ok(delete_pf("msitest\\changed", FALSE), "Directory not created\n");
     ok(delete_pf("msitest\\first\\two.txt", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\first", FALSE), "File not installed\n");
+    ok(delete_pf("msitest\\first", FALSE), "Directory not created\n");
     ok(delete_pf("msitest\\one.txt", TRUE), "File not installed\n");
     ok(delete_pf("msitest\\filename", TRUE), "File not installed\n");
-    ok(delete_pf("msitest", FALSE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "Directory not created\n");
 
     res = RegOpenKeyA(HKEY_CURRENT_USER, "SOFTWARE\\Wine\\msitest", &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
@@ -2571,7 +2534,7 @@ static void test_Installer_InstallProduct(void)
 
     RegCloseKey(hkey);
 
-    /* Delete installation files we installed */
+    /* Delete installation files we created */
     delete_test_files();
 }
 

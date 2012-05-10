@@ -31,6 +31,7 @@ import "propidl.idl";
 import "msxml.idl";
 import "wtypes.idl";
 import "propsys.idl";
+import "objectarray.idl";
 /* FIXME: import "structuredquery.idl"; */
 
 cpp_quote("/* FIXME: #include <sherrors.h> */")
@@ -1308,6 +1309,27 @@ interface ICommDlgBrowser3 : ICommDlgBrowser2
         [in] IShellView *ppshv);
 }
 
+/*****************************************************************************
+ * IDockingWindow interface
+ */
+[
+    object,
+    uuid(012dd920-7b26-11d0-8ca9-00a0c92dbfe8)
+]
+interface IDockingWindow : IOleWindow
+{
+    HRESULT ShowDW(
+        [in] BOOL fShow);
+
+    HRESULT CloseDW(
+        [in] DWORD dwReserved);
+
+    HRESULT ResizeBorderDW(
+        [in] LPCRECT prcBorder,
+        [in] IUnknown *punkToolbarSite,
+        [in] BOOL fReserved);
+};
+
 
 /*****************************************************************************
  * IDockingWindowFrame interface
@@ -1563,6 +1585,23 @@ interface IContextMenu3 : IContextMenu2
         [out] LRESULT *plResult);
 }
 
+
+[
+    object,
+    uuid(3409e930-5a39-11d1-83fa-00a0c90dc849),
+    pointer_default(unique),
+    local
+]
+interface IContextMenuCB : IUnknown
+{
+    HRESULT CallBack(
+        [in] IShellFolder *psf,
+        [in] HWND hwndOwner,
+        [in] IDataObject *pdtobj,
+        [in] UINT uMsg,
+        [in] WPARAM wParam,
+        [in] LPARAM lParam);
+}
 
 /*****************************************************************************
  * IShellExecuteHookA interface
@@ -1833,7 +1872,144 @@ interface ITaskbarList : IUnknown
         [in] HWND hwnd);
 }
 
-cpp_quote("EXTERN_C const CLSID CLSID_TaskbarList;")
+/*****************************************************************************
+ *    ITaskbarList2 interface
+ */
+[
+    object,
+    uuid(602D4995-B13A-429B-A66E-1935E44F4317),
+    pointer_default(unique)
+]
+interface ITaskbarList2 : ITaskbarList
+{
+    HRESULT MarkFullscreenWindow(
+        [in] HWND hwnd,
+        [in] BOOL fullscreen);
+}
+
+cpp_quote("#ifdef MIDL_PASS")
+typedef IUnknown* HIMAGELIST;
+cpp_quote("#endif")
+
+typedef [v1_enum] enum THUMBBUTTONFLAGS {
+    THBF_ENABLED         = 0x0000,
+    THBF_DISABLED        = 0x0001,
+    THBF_DISMISSONCLICK  = 0x0002,
+    THBF_NOBACKGROUND    = 0x0004,
+    THBF_HIDDEN          = 0x0008,
+    THBF_NONINTERACTIVE  = 0x0010
+} THUMBBUTTONFLAGS;
+
+cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(THUMBBUTTONFLAGS)")
+
+typedef [v1_enum] enum THUMBBUTTONMASK {
+    THB_BITMAP   = 0x0001,
+    THB_ICON     = 0x0002,
+    THB_TOOLTIP  = 0x0004,
+    THB_FLAGS    = 0x0008
+} THUMBBUTTONMASK;
+
+cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(THUMBBUTTONMASK)")
+
+cpp_quote("#include <pshpack8.h>")
+typedef struct THUMBBUTTON {
+    THUMBBUTTONMASK dwMask;
+    UINT iId;
+    UINT iBitmap;
+    HICON hIcon;
+    WCHAR szTip[260];
+    THUMBBUTTONFLAGS dwFlags;
+} THUMBBUTTON, *LPTHUMBBUTTON;
+cpp_quote("#include <poppack.h>")
+
+[
+    uuid(ea1afb91-9e28-4b86-90e9-9e9f8a5eefaf),
+    object
+]
+interface ITaskbarList3 : ITaskbarList2
+{
+    typedef [v1_enum] enum TBPFLAG {
+        TBPF_NOPROGRESS     = 0x0000,
+        TBPF_INDETERMINATE  = 0x0001,
+        TBPF_NORMAL         = 0x0002,
+        TBPF_ERROR          = 0x0004,
+        TBPF_PAUSED         = 0x0008
+    } TBPFLAG;
+
+    cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(TBPFLAG)")
+
+    HRESULT SetProgressValue(
+            [in] HWND hwnd,
+            [in] ULONGLONG ullCompleted,
+            [in] ULONGLONG ullTotal);
+
+    HRESULT SetProgressState(
+            [in] HWND hwnd,
+            [in] TBPFLAG tbpFlags);
+
+    HRESULT RegisterTab(
+            [in] HWND hwndTab,
+            [in] HWND hwndMDI);
+
+    HRESULT UnregisterTab([in] HWND hwndTab);
+
+    HRESULT SetTabOrder(
+            [in] HWND hwndTab,
+            [in] HWND hwndInsertBefore);
+
+    HRESULT SetTabActive(
+            [in] HWND hwndTab,
+            [in] HWND hwndMDI,
+            [in] DWORD dwReserved);
+
+    HRESULT ThumbBarAddButtons(
+            [in] HWND hwnd,
+            [in] UINT cButtons,
+            [in, size_is(cButtons)] LPTHUMBBUTTON pButton);
+
+    HRESULT ThumbBarUpdateButtons(
+            [in] HWND hwnd,
+            [in] UINT cButtons,
+            [in, size_is(cButtons)] LPTHUMBBUTTON pButton);
+
+    HRESULT ThumbBarSetImageList(
+            [in] HWND hwnd,
+            [in] HIMAGELIST himl);
+
+    HRESULT SetOverlayIcon(
+            [in] HWND hwnd,
+            [in] HICON hIcon,
+            [in, unique, string] LPCWSTR pszDescription);
+
+    HRESULT SetThumbnailTooltip(
+            [in] HWND hwnd,
+            [in, unique, string] LPCWSTR pszTip);
+
+    HRESULT SetThumbnailClip(
+            [in] HWND hwnd,
+            [in] RECT *prcClip);
+}
+
+[
+    uuid(c43dc798-95d1-4bea-9030-bb99e2983a1a),
+    object
+]
+interface ITaskbarList4 : ITaskbarList3
+{
+    typedef [v1_enum] enum STPFLAG {
+        STPF_NONE                       = 0x0000,
+        STPF_USEAPPTHUMBNAILALWAYS      = 0x0001,
+        STPF_USEAPPTHUMBNAILWHENACTIVE  = 0x0002,
+        STPF_USEAPPPEEKALWAYS           = 0x0004,
+        STPF_USEAPPPEEKWHENACTIVE       = 0x0008
+    } STPFLAG;
+
+    cpp_quote("DEFINE_ENUM_FLAG_OPERATORS(STPFLAG)")
+
+    HRESULT SetTabProperties(
+            [in] HWND hwndTab,
+            [in] STPFLAG stpFlags);
+}
 
 /*****************************************************************************
  *    IAutoCompleteDropDown interface
@@ -2290,10 +2466,6 @@ interface INameSpaceTreeControlEvents : IUnknown
         [out] int *piDefaultIcon,
         [out] int *piOpenIcon);
 }
-
-cpp_quote("#ifdef MIDL_PASS")
-typedef IUnknown *HIMAGELIST;
-cpp_quote("#endif")
 
 /*****************************************************************************
  * INameSpaceTreeControlCustomDraw interface
@@ -2903,7 +3075,9 @@ typedef [v1_enum] enum tagKF_DEFINITION_FLAGS
 {
     KFDF_LOCAL_REDIRECT_ONLY    = 0x00000002,
     KFDF_ROAMABLE               = 0x00000004,
-    KFDF_PRECREATE              = 0x00000008
+    KFDF_PRECREATE              = 0x00000008,
+    KFDF_STREAM                 = 0x00000010,
+    KFDF_PUBLISHEXPANDEDPATH    = 0x00000020
 } KF_DEFINITION_FLAGS;
 
 typedef struct tagKNOWNFOLDER_DEFINITION
@@ -3037,6 +3211,103 @@ interface IKnownFolderManager : IUnknown
         [out, string] LPWSTR *ppszError);
 }
 
+/* function for releasing structure returned from IKnownFolder::GetFolderDefinition */
+cpp_quote("static inline void FreeKnownFolderDefinitionFields(KNOWNFOLDER_DEFINITION *pKFD)")
+cpp_quote("{")
+cpp_quote("    CoTaskMemFree(pKFD->pszName);")
+cpp_quote("    CoTaskMemFree(pKFD->pszDescription);")
+cpp_quote("    CoTaskMemFree(pKFD->pszRelativePath);")
+cpp_quote("    CoTaskMemFree(pKFD->pszParsingName);")
+cpp_quote("    CoTaskMemFree(pKFD->pszTooltip);")
+cpp_quote("    CoTaskMemFree(pKFD->pszLocalizedName);")
+cpp_quote("    CoTaskMemFree(pKFD->pszIcon);")
+cpp_quote("    CoTaskMemFree(pKFD->pszSecurity);")
+cpp_quote("}")
+
+typedef [v1_enum] enum ASSOCIATIONLEVEL {
+    AL_MACHINE,
+    AL_EFFECTIVE,
+    AL_USER
+} ASSOCIATIONLEVEL;
+
+typedef [v1_enum] enum ASSOCIATIONTYPE {
+    AT_FILEEXTENSION,
+    AT_URLPROTOCOL,
+    AT_STARTMENUCLIENT,
+    AT_MIMETYPE
+} ASSOCIATIONTYPE;
+
+[
+    object,
+    uuid(4e530b0a-e611-4c77-a3ac-9031d022281b),
+    pointer_default(unique)
+]
+interface IApplicationAssociationRegistration : IUnknown
+{
+    HRESULT QueryCurrentDefault(
+        [in, string] LPCWSTR pszQuery,
+        [in] ASSOCIATIONTYPE atQueryType,
+        [in] ASSOCIATIONLEVEL alQueryLevel,
+        [out, string] LPWSTR *ppszAssociation);
+
+    HRESULT QueryAppIsDefault(
+        [in, string] LPCWSTR pszQuery,
+        [in] ASSOCIATIONTYPE atQueryType,
+        [in] ASSOCIATIONLEVEL alQueryLevel,
+        [in, string] LPCWSTR pszAppRegistryName,
+        [out] BOOL *pfDefault);
+
+    HRESULT QueryAppIsDefaultAll(
+        [in] ASSOCIATIONLEVEL alQueryLevel,
+        [in, string] LPCWSTR pszAppRegistryName,
+        [out] BOOL* pfDefault);
+
+    HRESULT SetAppAsDefault(
+        [in, string] LPCWSTR pszAppRegistryName,
+        [in, string] LPCWSTR pszSet,
+        [in] ASSOCIATIONTYPE atSetType);
+
+    HRESULT SetAppAsDefaultAll(
+        [in, string] LPCWSTR pszAppRegistryName);
+
+    HRESULT ClearUserAssociations();
+}
+
+[
+    uuid(6332debf-87b5-4670-90c0-5e57b408a49e),
+    object,
+    pointer_default(unique)
+]
+interface ICustomDestinationList : IUnknown
+{
+    typedef [v1_enum] enum KNOWNDESTCATEGORY {
+        KDC_FREQUENT = 1,
+        KDC_RECENT
+    } KNOWNDESTCATEGORY;
+
+    HRESULT SetAppID([in, string] LPCWSTR pszAppID);
+
+    HRESULT BeginList(
+            [out] UINT *pcMinSlots,
+            [in] REFIID riid,
+            [out, iid_is(riid)] void **ppv);
+
+    HRESULT AppendCategory(
+            [in, string] LPCWSTR pszCategory,
+            [in] IObjectArray *poa);
+
+    HRESULT AppendKnownCategory([in] KNOWNDESTCATEGORY category);
+    HRESULT AddUserTasks([in] IObjectArray *poa);
+    HRESULT CommitList();
+
+    HRESULT GetRemovedDestinations(
+            [in] REFIID riid,
+            [out, iid_is(riid)] void **ppv);
+
+    HRESULT DeleteList([in, unique, string] LPCWSTR pszAppID);
+    HRESULT AbortList();
+}
+
 /*****************************************************************************
  * ShellObjects typelibrary
  */
@@ -3085,5 +3356,44 @@ library ShellObjects
     coclass KnownFolderManager
     {
         interface IKnownFolderManager;
+    }
+
+    [
+        uuid(591209c7-767b-42b2-9fba-44ee4615f2c7)
+    ]
+    coclass ApplicationAssociationRegistration
+    {
+        interface IApplicationAssociationRegistration;
+    }
+
+    [
+         uuid(00021401-0000-0000-c000-000000000046)
+    ]
+    coclass ShellLink
+    {
+        interface IShellLinkW;
+    }
+
+    [
+        uuid(56fdf344-fd6d-11d0-958a-006097c9a090)
+    ]
+    coclass TaskbarList
+    {
+        interface ITaskbarList4;
+    }
+
+    [
+        uuid(77f10cf0-3db5-4966-b520-b7c54fd35ed6)
+    ]
+    coclass DestinationList {
+        interface ICustomDestinationList;
+    }
+
+    [
+        uuid(2d3468c1-36a7-43b6-ac24-d3f02fd9607a)
+    ]
+    coclass EnumerableObjectCollection
+    {
+        interface IEnumObjects;
     }
 }

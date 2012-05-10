@@ -536,7 +536,7 @@ PFORMAT_STRING ComputeConformanceOrVariance(
   BYTE dtype = pFormat[0] & 0xf;
   short ofs = *(const short *)&pFormat[2];
   LPVOID ptr = NULL;
-  DWORD data = 0;
+  ULONG_PTR data = 0;
 
   if (!IsConformanceOrVariancePresent(pFormat)) {
     /* null descriptor */
@@ -565,7 +565,7 @@ PFORMAT_STRING ComputeConformanceOrVariance(
     break;
   case RPC_FC_CONSTANT_CONFORMANCE:
     data = ofs | ((DWORD)pFormat[1] << 16);
-    TRACE("constant conformance, val=%d\n", data);
+    TRACE("constant conformance, val=%ld\n", data);
     *pCount = data;
     goto finish_conf;
   case RPC_FC_TOP_LEVEL_MULTID_CONFORMANCE:
@@ -590,6 +590,8 @@ PFORMAT_STRING ComputeConformanceOrVariance(
   case RPC_FC_CALLBACK:
   {
     unsigned char *old_stack_top = pStubMsg->StackTop;
+    ULONG_PTR max_count, old_max_count = pStubMsg->MaxCount;
+
     pStubMsg->StackTop = ptr;
 
     /* ofs is index into StubDesc->apfnExprEval */
@@ -599,7 +601,9 @@ PFORMAT_STRING ComputeConformanceOrVariance(
     pStubMsg->StackTop = old_stack_top;
 
     /* the callback function always stores the computed value in MaxCount */
-    *pCount = pStubMsg->MaxCount;
+    max_count = pStubMsg->MaxCount;
+    pStubMsg->MaxCount = old_max_count;
+    *pCount = max_count;
     goto finish_conf;
   }
   default:
@@ -626,11 +630,14 @@ PFORMAT_STRING ComputeConformanceOrVariance(
   case RPC_FC_USMALL:
     data = *(UCHAR*)ptr;
     break;
+  case RPC_FC_HYPER:
+    data = *(ULONGLONG *)ptr;
+    break;
   default:
     FIXME("unknown conformance data type %x\n", dtype);
     goto done_conf_grab;
   }
-  TRACE("dereferenced data type %x at %p, got %d\n", dtype, ptr, data);
+  TRACE("dereferenced data type %x at %p, got %ld\n", dtype, ptr, data);
 
 done_conf_grab:
   switch (pFormat[1]) {
@@ -1172,7 +1179,8 @@ static unsigned char * EmbeddedPointerMarshall(PMIDL_STUB_MESSAGE pStubMsg,
   while (pFormat[0] != RPC_FC_END) {
     switch (pFormat[0]) {
     default:
-      FIXME("unknown repeat type %d\n", pFormat[0]);
+      FIXME("unknown repeat type %d; assuming no repeat\n", pFormat[0]);
+      /* fallthrough */
     case RPC_FC_NO_REPEAT:
       rep = 1;
       stride = 0;
@@ -1252,7 +1260,8 @@ static unsigned char * EmbeddedPointerUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
     TRACE("pFormat[0] = 0x%x\n", pFormat[0]);
     switch (pFormat[0]) {
     default:
-      FIXME("unknown repeat type %d\n", pFormat[0]);
+      FIXME("unknown repeat type %d; assuming no repeat\n", pFormat[0]);
+      /* fallthrough */
     case RPC_FC_NO_REPEAT:
       rep = 1;
       stride = 0;
@@ -1326,7 +1335,8 @@ static void EmbeddedPointerBufferSize(PMIDL_STUB_MESSAGE pStubMsg,
   while (pFormat[0] != RPC_FC_END) {
     switch (pFormat[0]) {
     default:
-      FIXME("unknown repeat type %d\n", pFormat[0]);
+      FIXME("unknown repeat type %d; assuming no repeat\n", pFormat[0]);
+      /* fallthrough */
     case RPC_FC_NO_REPEAT:
       rep = 1;
       stride = 0;
@@ -1398,7 +1408,8 @@ static ULONG EmbeddedPointerMemorySize(PMIDL_STUB_MESSAGE pStubMsg,
   while (pFormat[0] != RPC_FC_END) {
     switch (pFormat[0]) {
     default:
-      FIXME("unknown repeat type %d\n", pFormat[0]);
+      FIXME("unknown repeat type %d; assuming no repeat\n", pFormat[0]);
+      /* fallthrough */
     case RPC_FC_NO_REPEAT:
       rep = 1;
       stride = 0;
@@ -1456,7 +1467,8 @@ static void EmbeddedPointerFree(PMIDL_STUB_MESSAGE pStubMsg,
   while (pFormat[0] != RPC_FC_END) {
     switch (pFormat[0]) {
     default:
-      FIXME("unknown repeat type %d\n", pFormat[0]);
+      FIXME("unknown repeat type %d; assuming no repeat\n", pFormat[0]);
+      /* fallthrough */
     case RPC_FC_NO_REPEAT:
       rep = 1;
       stride = 0;
@@ -6152,6 +6164,7 @@ static LONG unmarshall_discriminant(PMIDL_STUB_MESSAGE pStubMsg,
     case RPC_FC_WCHAR:
     case RPC_FC_SHORT:
     case RPC_FC_USHORT:
+    case RPC_FC_ENUM16:
     {
         USHORT d;
         align_pointer(&pStubMsg->Buffer, sizeof(USHORT));

@@ -89,11 +89,11 @@ DWORD_PTR	        dbg_curr_tid = 0;
 DWORD_PTR	        dbg_curr_pid = 0;
 CONTEXT                 dbg_context;
 BOOL    	        dbg_interactiveP = FALSE;
+HANDLE                  dbg_houtput = 0;
 
 static struct list      dbg_process_list = LIST_INIT(dbg_process_list);
 
 struct dbg_internal_var         dbg_internal_vars[DBG_IV_LAST];
-static HANDLE                   dbg_houtput;
 
 static void dbg_outputA(const char* buffer, int len)
 {
@@ -614,8 +614,6 @@ struct backend_cpu* be_cpu;
 extern struct backend_cpu be_i386;
 #elif defined(__powerpc__)
 extern struct backend_cpu be_ppc;
-#elif defined(__ALPHA__)
-extern struct backend_cpu be_alpha;
 #elif defined(__x86_64__)
 extern struct backend_cpu be_x86_64;
 #elif defined(__sparc__)
@@ -636,8 +634,6 @@ int main(int argc, char** argv)
     be_cpu = &be_i386;
 #elif defined(__powerpc__)
     be_cpu = &be_ppc;
-#elif defined(__ALPHA__)
-    be_cpu = &be_alpha;
 #elif defined(__x86_64__)
     be_cpu = &be_x86_64;
 #elif defined(__sparc__)
@@ -672,12 +668,18 @@ int main(int argc, char** argv)
     SymSetOptions((SymGetOptions() & ~(SYMOPT_UNDNAME)) |
                   SYMOPT_LOAD_LINES | SYMOPT_DEFERRED_LOADS | SYMOPT_AUTO_PUBLICS);
 
-    if (argc && (!strcmp(argv[0], "--auto") || !strcmp(argv[0], "--minidump")))
+    if (argc && !strcmp(argv[0], "--auto"))
     {
-        /* force some internal variables */
-        DBG_IVAR(BreakOnDllLoad) = 0;
-        dbg_houtput = GetStdHandle(STD_ERROR_HANDLE);
         switch (dbg_active_auto(argc, argv))
+        {
+        case start_ok:          return 0;
+        case start_error_parse: return dbg_winedbg_usage(FALSE);
+        case start_error_init:  return -1;
+        }
+    }
+    if (argc && !strcmp(argv[0], "--minidump"))
+    {
+        switch (dbg_active_minidump(argc, argv))
         {
         case start_ok:          return 0;
         case start_error_parse: return dbg_winedbg_usage(FALSE);

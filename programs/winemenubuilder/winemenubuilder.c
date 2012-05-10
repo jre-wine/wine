@@ -147,6 +147,25 @@ typedef struct
     WORD idCount;
 } ICONDIR;
 
+typedef struct
+{
+    WORD offset;
+    WORD length;
+    WORD flags;
+    WORD id;
+    WORD handle;
+    WORD usage;
+} NE_NAMEINFO;
+
+typedef struct
+{
+    WORD  type_id;
+    WORD  count;
+    DWORD resloader;
+} NE_TYPEINFO;
+
+#define NE_RSCTYPE_ICON        0x8003
+#define NE_RSCTYPE_GROUP_ICON  0x800e
 
 #include "poppack.h"
 
@@ -160,6 +179,7 @@ struct xdg_mime_type
 {
     char *mimeType;
     char *glob;
+    char *lower_glob;
     struct list entry;
 };
 
@@ -179,6 +199,7 @@ static WCHAR* assoc_query(ASSOCSTR assocStr, LPCWSTR name, LPCWSTR extra);
 static HRESULT open_icon(LPCWSTR filename, int index, BOOL bWait, IStream **ppStream);
 
 /* Utility routines */
+#ifndef __APPLE__
 static unsigned short crc16(const char* string)
 {
     unsigned short crc = 0;
@@ -197,6 +218,7 @@ static unsigned short crc16(const char* string)
     }
     return crc;
 }
+#endif
 
 static char *strdupA( const char *str )
 {
@@ -214,13 +236,14 @@ static char* heap_printf(const char *format, ...)
     char *buffer, *ret;
     int n;
 
-    va_start(args, format);
     while (1)
     {
         buffer = HeapAlloc(GetProcessHeap(), 0, size);
         if (buffer == NULL)
             break;
+        va_start(args, format);
         n = vsnprintf(buffer, size, format, args);
+        va_end(args);
         if (n == -1)
             size *= 2;
         else if (n >= size)
@@ -229,7 +252,7 @@ static char* heap_printf(const char *format, ...)
             break;
         HeapFree(GetProcessHeap(), 0, buffer);
     }
-    va_end(args);
+
     if (!buffer) return NULL;
     ret = HeapReAlloc(GetProcessHeap(), 0, buffer, strlen(buffer) + 1 );
     if (!ret) ret = buffer;
@@ -349,7 +372,7 @@ static WCHAR* utf8_chars_to_wchars(LPCSTR string)
  * FIXME: should not use stdio
  */
 
-static HRESULT convert_to_native_icon(IStream *icoFile, int *indeces, int numIndeces,
+static HRESULT convert_to_native_icon(IStream *icoFile, int *indices, int numIndices,
                                       const CLSID *outputFormat, const char *outputFileName, LPCWSTR commentW)
 {
     WCHAR *dosOutputFileName = NULL;
@@ -390,7 +413,7 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indeces, int numInd
     hr = SHCreateStreamOnFileW(dosOutputFileName, STGM_CREATE | STGM_WRITE, &outputFile);
     if (FAILED(hr))
     {
-        WINE_ERR("error 0x%08X creating output file\n", hr);
+        WINE_ERR("error 0x%08X creating output file %s\n", hr, wine_dbgstr_w(dosOutputFileName));
         goto end;
     }
     hr = IWICBitmapEncoder_Initialize(encoder, outputFile, GENERIC_WRITE);
@@ -400,7 +423,7 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indeces, int numInd
         goto end;
     }
 
-    for (i = 0; i < numIndeces; i++)
+    for (i = 0; i < numIndices; i++)
     {
         IWICBitmapFrameDecode *sourceFrame = NULL;
         IWICBitmapSource *sourceBitmap = NULL;
@@ -408,10 +431,10 @@ static HRESULT convert_to_native_icon(IStream *icoFile, int *indeces, int numInd
         IPropertyBag2 *options = NULL;
         UINT width, height;
 
-        hr = IWICBitmapDecoder_GetFrame(decoder, indeces[i], &sourceFrame);
+        hr = IWICBitmapDecoder_GetFrame(decoder, indices[i], &sourceFrame);
         if (FAILED(hr))
         {
-            WINE_ERR("error 0x%08X getting frame %d\n", hr, indeces[i]);
+            WINE_ERR("error 0x%08X getting frame %d\n", hr, indices[i]);
             goto endloop;
         }
         hr = WICConvertBitmapSource(&GUID_WICPixelFormat32bppBGRA, (IWICBitmapSource*)sourceFrame, &sourceBitmap);
@@ -491,7 +514,99 @@ end:
     return hr;
 }
 
-static IStream *add_module_icons_to_stream(HMODULE hModule, GRPICONDIR *grpIconDir)
+struct IconData16 {
+    BYTE *fileBytes;
+    DWORD fileSize;
+    NE_TYPEINFO *iconResources;
+    WORD alignmentShiftCount;
+};
+
+static int populate_module16_icons(struct IconData16 *iconData16, GRPICONDIR *grpIconDir, ICONDIRENTRY *iconDirEntries, BYTE *icons, SIZE_T *iconOffset)
+{
+    int i, j;
+    int validEntries = 0;
+
+    for (i = 0; i < grpIconDir->idCount; i++)
+    {
+        BYTE *iconPtr = (BYTE*)iconData16->iconResources;
+        NE_NAMEINFO *matchingIcon = NULL;
+        iconPtr += sizeof(NE_TYPEINFO);
+        for (j = 0; j < iconData16->iconResources->count; j++)
+        {
+            NE_NAMEINFO *iconInfo = (NE_NAMEINFO*)iconPtr;
+            if ((((BYTE*)iconPtr) + sizeof(NE_NAMEINFO)) > (iconData16->fileBytes + iconData16->fileSize))
+            {
+                WINE_WARN("file too small for icon NE_NAMEINFO\n");
+                break;
+            }
+            if (iconInfo->id == (0x8000 | grpIconDir->idEntries[i].nID))
+            {
+                matchingIcon = iconInfo;
+                break;
+            }
+            iconPtr += sizeof(NE_NAMEINFO);
+        }
+
+        if (matchingIcon == NULL)
+            continue;
+        if (((matchingIcon->offset << iconData16->alignmentShiftCount) + grpIconDir->idEntries[i].dwBytesInRes) > iconData16->fileSize)
+        {
+            WINE_WARN("file too small for icon contents\n");
+            break;
+        }
+
+        iconDirEntries[validEntries].bWidth = grpIconDir->idEntries[i].bWidth;
+        iconDirEntries[validEntries].bHeight = grpIconDir->idEntries[i].bHeight;
+        iconDirEntries[validEntries].bColorCount = grpIconDir->idEntries[i].bColorCount;
+        iconDirEntries[validEntries].bReserved = grpIconDir->idEntries[i].bReserved;
+        iconDirEntries[validEntries].wPlanes = grpIconDir->idEntries[i].wPlanes;
+        iconDirEntries[validEntries].wBitCount = grpIconDir->idEntries[i].wBitCount;
+        iconDirEntries[validEntries].dwBytesInRes = grpIconDir->idEntries[i].dwBytesInRes;
+        iconDirEntries[validEntries].dwImageOffset = *iconOffset;
+        validEntries++;
+        memcpy(&icons[*iconOffset], &iconData16->fileBytes[matchingIcon->offset << iconData16->alignmentShiftCount], grpIconDir->idEntries[i].dwBytesInRes);
+        *iconOffset += grpIconDir->idEntries[i].dwBytesInRes;
+    }
+    return validEntries;
+}
+
+static int populate_module_icons(HMODULE hModule, GRPICONDIR *grpIconDir, ICONDIRENTRY *iconDirEntries, BYTE *icons, SIZE_T *iconOffset)
+{
+    int i;
+    int validEntries = 0;
+
+    for (i = 0; i < grpIconDir->idCount; i++)
+    {
+        HRSRC hResInfo;
+        LPCWSTR lpName = MAKEINTRESOURCEW(grpIconDir->idEntries[i].nID);
+        if ((hResInfo = FindResourceW(hModule, lpName, (LPCWSTR)RT_ICON)))
+        {
+            HGLOBAL hResData;
+            if ((hResData = LoadResource(hModule, hResInfo)))
+            {
+                BITMAPINFO *pIcon;
+                if ((pIcon = LockResource(hResData)))
+                {
+                    iconDirEntries[validEntries].bWidth = grpIconDir->idEntries[i].bWidth;
+                    iconDirEntries[validEntries].bHeight = grpIconDir->idEntries[i].bHeight;
+                    iconDirEntries[validEntries].bColorCount = grpIconDir->idEntries[i].bColorCount;
+                    iconDirEntries[validEntries].bReserved = grpIconDir->idEntries[i].bReserved;
+                    iconDirEntries[validEntries].wPlanes = grpIconDir->idEntries[i].wPlanes;
+                    iconDirEntries[validEntries].wBitCount = grpIconDir->idEntries[i].wBitCount;
+                    iconDirEntries[validEntries].dwBytesInRes = grpIconDir->idEntries[i].dwBytesInRes;
+                    iconDirEntries[validEntries].dwImageOffset = *iconOffset;
+                    validEntries++;
+                    memcpy(&icons[*iconOffset], pIcon, grpIconDir->idEntries[i].dwBytesInRes);
+                    *iconOffset += grpIconDir->idEntries[i].dwBytesInRes;
+                }
+                FreeResource(hResData);
+            }
+        }
+    }
+    return validEntries;
+}
+
+static IStream *add_module_icons_to_stream(struct IconData16 *iconData16, HMODULE hModule, GRPICONDIR *grpIconDir)
 {
     int i;
     SIZE_T iconsSize = 0;
@@ -529,34 +644,10 @@ static IStream *add_module_icons_to_stream(HMODULE hModule, GRPICONDIR *grpIconD
     }
 
     iconOffset = 0;
-    for (i = 0; i < grpIconDir->idCount; i++)
-    {
-        HRSRC hResInfo;
-        LPCWSTR lpName = MAKEINTRESOURCEW(grpIconDir->idEntries[i].nID);
-        if ((hResInfo = FindResourceW(hModule, lpName, (LPCWSTR)RT_ICON)))
-        {
-            HGLOBAL hResData;
-            if ((hResData = LoadResource(hModule, hResInfo)))
-            {
-                BITMAPINFO *pIcon;
-                if ((pIcon = LockResource(hResData)))
-                {
-                    iconDirEntries[validEntries].bWidth = grpIconDir->idEntries[i].bWidth;
-                    iconDirEntries[validEntries].bHeight = grpIconDir->idEntries[i].bHeight;
-                    iconDirEntries[validEntries].bColorCount = grpIconDir->idEntries[i].bColorCount;
-                    iconDirEntries[validEntries].bReserved = grpIconDir->idEntries[i].bReserved;
-                    iconDirEntries[validEntries].wPlanes = grpIconDir->idEntries[i].wPlanes;
-                    iconDirEntries[validEntries].wBitCount = grpIconDir->idEntries[i].wBitCount;
-                    iconDirEntries[validEntries].dwBytesInRes = grpIconDir->idEntries[i].dwBytesInRes;
-                    iconDirEntries[validEntries].dwImageOffset = iconOffset;
-                    validEntries++;
-                    memcpy(&icons[iconOffset], pIcon, grpIconDir->idEntries[i].dwBytesInRes);
-                    iconOffset += grpIconDir->idEntries[i].dwBytesInRes;
-                }
-                FreeResource(hResData);
-            }
-        }
-    }
+    if (iconData16)
+        validEntries = populate_module16_icons(iconData16, grpIconDir, iconDirEntries, icons, &iconOffset);
+    else if (hModule)
+        validEntries = populate_module_icons(hModule, grpIconDir, iconDirEntries, icons, &iconOffset);
 
     if (validEntries == 0)
     {
@@ -601,6 +692,137 @@ end:
     return stream;
 }
 
+static HRESULT open_module16_icon(LPCWSTR szFileName, int nIndex, IStream **ppStream)
+{
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    HANDLE hFileMapping = NULL;
+    DWORD fileSize;
+    BYTE *fileBytes = NULL;
+    IMAGE_DOS_HEADER *dosHeader;
+    IMAGE_OS2_HEADER *neHeader;
+    BYTE *rsrcTab;
+    NE_TYPEINFO *iconGroupResources;
+    NE_TYPEINFO *iconResources;
+    NE_NAMEINFO *iconDirPtr;
+    GRPICONDIR *iconDir;
+    WORD alignmentShiftCount;
+    struct IconData16 iconData16;
+    HRESULT hr = E_FAIL;
+
+    hFile = CreateFileW(szFileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+        OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        WINE_WARN("opening %s failed with error %d\n", wine_dbgstr_w(szFileName), GetLastError());
+        goto end;
+    }
+
+    hFileMapping = CreateFileMappingW(hFile, NULL, PAGE_READONLY | SEC_COMMIT, 0, 0, NULL);
+    if (hFileMapping == NULL)
+    {
+        WINE_WARN("CreateFileMapping failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    fileSize = GetFileSize(hFile, NULL);
+
+    fileBytes = MapViewOfFile(hFileMapping, FILE_MAP_READ, 0, 0, 0);
+    if (fileBytes == NULL)
+    {
+        WINE_WARN("MapViewOfFile failed, error %d\n", GetLastError());
+        goto end;
+    }
+
+    dosHeader = (IMAGE_DOS_HEADER*)fileBytes;
+    if (sizeof(IMAGE_DOS_HEADER) >= fileSize || dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        WINE_WARN("file too small for MZ header\n");
+        goto end;
+    }
+
+    neHeader = (IMAGE_OS2_HEADER*)(fileBytes + dosHeader->e_lfanew);
+    if ((((BYTE*)neHeader) + sizeof(IMAGE_OS2_HEADER)) > (fileBytes + fileSize) ||
+        neHeader->ne_magic != IMAGE_OS2_SIGNATURE)
+    {
+        WINE_WARN("file too small for NE header\n");
+        goto end;
+    }
+
+    rsrcTab = ((BYTE*)neHeader) + neHeader->ne_rsrctab;
+    if ((rsrcTab + 2) > (fileBytes + fileSize))
+    {
+        WINE_WARN("file too small for resource table\n");
+        goto end;
+    }
+
+    alignmentShiftCount = *(WORD*)rsrcTab;
+    rsrcTab += 2;
+    iconGroupResources = NULL;
+    iconResources = NULL;
+    for (;;)
+    {
+        NE_TYPEINFO *neTypeInfo = (NE_TYPEINFO*)rsrcTab;
+        if ((rsrcTab + sizeof(NE_TYPEINFO)) > (fileBytes + fileSize))
+        {
+            WINE_WARN("file too small for resource table\n");
+            goto end;
+        }
+        if (neTypeInfo->type_id == 0)
+            break;
+        else if (neTypeInfo->type_id == NE_RSCTYPE_GROUP_ICON)
+            iconGroupResources = neTypeInfo;
+        else if (neTypeInfo->type_id == NE_RSCTYPE_ICON)
+            iconResources = neTypeInfo;
+        rsrcTab += sizeof(NE_TYPEINFO) + neTypeInfo->count*sizeof(NE_NAMEINFO);
+    }
+    if (iconGroupResources == NULL)
+    {
+        WINE_WARN("no group icon resource type found\n");
+        goto end;
+    }
+    if (iconResources == NULL)
+    {
+        WINE_WARN("no icon resource type found\n");
+        goto end;
+    }
+
+    if (nIndex >= iconGroupResources->count)
+    {
+        WINE_WARN("icon index out of range\n");
+        goto end;
+    }
+
+    iconDirPtr = (NE_NAMEINFO*)(((BYTE*)iconGroupResources) + sizeof(NE_TYPEINFO) + nIndex*sizeof(NE_NAMEINFO));
+    if ((((BYTE*)iconDirPtr) + sizeof(NE_NAMEINFO)) > (fileBytes + fileSize))
+    {
+        WINE_WARN("file to small for icon group NE_NAMEINFO\n");
+        goto end;
+    }
+    iconDir = (GRPICONDIR*)(fileBytes + (iconDirPtr->offset << alignmentShiftCount));
+    if ((((BYTE*)iconDir) + sizeof(GRPICONDIR) + iconDir->idCount*sizeof(GRPICONDIRENTRY)) > (fileBytes + fileSize))
+    {
+        WINE_WARN("file too small for GRPICONDIR\n");
+        goto end;
+    }
+
+    iconData16.fileBytes = fileBytes;
+    iconData16.fileSize = fileSize;
+    iconData16.iconResources = iconResources;
+    iconData16.alignmentShiftCount = alignmentShiftCount;
+    *ppStream = add_module_icons_to_stream(&iconData16, NULL, iconDir);
+    if (*ppStream)
+        hr = S_OK;
+
+end:
+    if (hFile != INVALID_HANDLE_VALUE)
+        CloseHandle(hFile);
+    if (hFileMapping != NULL)
+        CloseHandle(hFileMapping);
+    if (fileBytes != NULL)
+        UnmapViewOfFile(fileBytes);
+    return hr;
+}
+
 static BOOL CALLBACK EnumResNameProc(HMODULE hModule, LPCWSTR lpszType, LPWSTR lpszName, LONG_PTR lParam)
 {
     ENUMRESSTRUCT *sEnumRes = (ENUMRESSTRUCT *) lParam;
@@ -626,9 +848,14 @@ static HRESULT open_module_icon(LPCWSTR szFileName, int nIndex, IStream **ppStre
     hModule = LoadLibraryExW(szFileName, 0, LOAD_LIBRARY_AS_DATAFILE);
     if (!hModule)
     {
-        WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
-                 wine_dbgstr_w(szFileName), GetLastError());
-        return HRESULT_FROM_WIN32(GetLastError());
+        if (GetLastError() == ERROR_BAD_EXE_FORMAT)
+            return open_module16_icon(szFileName, nIndex, ppStream);
+        else
+        {
+            WINE_WARN("LoadLibraryExW (%s) failed, error %d\n",
+                     wine_dbgstr_w(szFileName), GetLastError());
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
     }
 
     if (nIndex < 0)
@@ -656,7 +883,7 @@ static HRESULT open_module_icon(LPCWSTR szFileName, int nIndex, IStream **ppStre
         {
             if ((pIconDir = LockResource(hResData)))
             {
-                *ppStream = add_module_icons_to_stream(hModule, pIconDir);
+                *ppStream = add_module_icons_to_stream(0, hModule, pIconDir);
                 if (*ppStream)
                     hr = S_OK;
             }
@@ -751,6 +978,7 @@ end:
 
 static HRESULT open_file_type_icon(LPCWSTR szFileName, IStream **ppStream)
 {
+    static const WCHAR openW[] = {'o','p','e','n',0};
     WCHAR *extension;
     WCHAR *icon = NULL;
     WCHAR *comma;
@@ -776,7 +1004,7 @@ static HRESULT open_file_type_icon(LPCWSTR szFileName, IStream **ppStream)
     }
     else
     {
-        executable = assoc_query(ASSOCSTR_EXECUTABLE, extension, NULL);
+        executable = assoc_query(ASSOCSTR_EXECUTABLE, extension, openW);
         if (executable)
             hr = open_icon(executable, 0, FALSE, ppStream);
     }
@@ -1012,8 +1240,7 @@ static HRESULT platform_write_icon(IStream *icoStream, int exeIndex, LPCWSTR ico
 
     for (i = 0; i < numEntries; i++)
     {
-        int bestIndex;
-        int maxBits = -1;
+        int bestIndex = i;
         int j;
         BOOLEAN duplicate = FALSE;
         int w, h;
@@ -1034,14 +1261,13 @@ static HRESULT platform_write_icon(IStream *icoStream, int exeIndex, LPCWSTR ico
         }
         if (duplicate)
             continue;
-        for (j = i; j < numEntries; j++)
+        for (j = i + 1; j < numEntries; j++)
         {
             if (iconDirEntries[j].bWidth == iconDirEntries[i].bWidth &&
                 iconDirEntries[j].bHeight == iconDirEntries[i].bHeight &&
-                iconDirEntries[j].wBitCount >= maxBits)
+                iconDirEntries[j].wBitCount >= iconDirEntries[bestIndex].wBitCount)
             {
                 bestIndex = j;
-                maxBits = iconDirEntries[j].wBitCount;
             }
         }
         WINE_TRACE("Selected: %d\n", bestIndex);
@@ -1772,12 +1998,20 @@ static BOOL add_mimes(const char *xdg_data_dir, struct list *mime_types)
                         *pos = 0;
                         mime_type_entry->mimeType = strdupA(line);
                         mime_type_entry->glob = strdupA(pos + 1);
-                        if (mime_type_entry->mimeType && mime_type_entry->glob)
+                        mime_type_entry->lower_glob = strdupA(pos + 1);
+                        if (mime_type_entry->lower_glob)
+                        {
+                            char *l;
+                            for (l = mime_type_entry->lower_glob; *l; l++)
+                                *l = tolower(*l);
+                        }
+                        if (mime_type_entry->mimeType && mime_type_entry->glob && mime_type_entry->lower_glob)
                             list_add_tail(mime_types, &mime_type_entry->entry);
                         else
                         {
                             HeapFree(GetProcessHeap(), 0, mime_type_entry->mimeType);
                             HeapFree(GetProcessHeap(), 0, mime_type_entry->glob);
+                            HeapFree(GetProcessHeap(), 0, mime_type_entry->lower_glob);
                             HeapFree(GetProcessHeap(), 0, mime_type_entry);
                             ret = FALSE;
                         }
@@ -1804,6 +2038,7 @@ static void free_native_mime_types(struct list *native_mime_types)
     {
         list_remove(&mime_type_entry->entry);
         HeapFree(GetProcessHeap(), 0, mime_type_entry->glob);
+        HeapFree(GetProcessHeap(), 0, mime_type_entry->lower_glob);
         HeapFree(GetProcessHeap(), 0, mime_type_entry->mimeType);
         HeapFree(GetProcessHeap(), 0, mime_type_entry);
     }
@@ -1862,7 +2097,7 @@ static BOOL build_native_mime_types(const char *xdg_data_home, struct list **mim
 }
 
 static BOOL match_glob(struct list *native_mime_types, const char *extension,
-                       char **match)
+                       int ignoreGlobCase, char **match)
 {
 #ifdef HAVE_FNMATCH
     struct xdg_mime_type *mime_type_entry;
@@ -1872,12 +2107,13 @@ static BOOL match_glob(struct list *native_mime_types, const char *extension,
 
     LIST_FOR_EACH_ENTRY(mime_type_entry, native_mime_types, struct xdg_mime_type, entry)
     {
-        if (fnmatch(mime_type_entry->glob, extension, 0) == 0)
+        const char *glob = ignoreGlobCase ? mime_type_entry->lower_glob : mime_type_entry->glob;
+        if (fnmatch(glob, extension, 0) == 0)
         {
-            if (*match == NULL || matchLength < strlen(mime_type_entry->glob))
+            if (*match == NULL || matchLength < strlen(glob))
             {
                 *match = mime_type_entry->mimeType;
-                matchLength = strlen(mime_type_entry->glob);
+                matchLength = strlen(glob);
             }
         }
     }
@@ -1901,7 +2137,7 @@ static BOOL freedesktop_mime_type_for_extension(struct list *native_mime_types,
 {
     WCHAR *lower_extensionW;
     INT len;
-    BOOL ret = match_glob(native_mime_types, extensionA, mime_type);
+    BOOL ret = match_glob(native_mime_types, extensionA, 0, mime_type);
     if (ret == FALSE || *mime_type != NULL)
         return ret;
     len = strlenW(extensionW);
@@ -1914,7 +2150,7 @@ static BOOL freedesktop_mime_type_for_extension(struct list *native_mime_types,
         lower_extensionA = wchars_to_utf8_chars(lower_extensionW);
         if (lower_extensionA)
         {
-            ret = match_glob(native_mime_types, lower_extensionA, mime_type);
+            ret = match_glob(native_mime_types, lower_extensionA, 1, mime_type);
             HeapFree(GetProcessHeap(), 0, lower_extensionA);
         }
         else
@@ -2106,7 +2342,7 @@ static BOOL cleanup_associations(void)
     {
         int i;
         BOOL done = FALSE;
-        for (i = 0; !done; i++)
+        for (i = 0; !done;)
         {
             WCHAR *extensionW = NULL;
             DWORD size = 1024;
@@ -2142,6 +2378,8 @@ static BOOL cleanup_associations(void)
                     hasChanged = TRUE;
                     HeapFree(GetProcessHeap(), 0, desktopFile);
                 }
+                else
+                    i++;
                 HeapFree(GetProcessHeap(), 0, command);
             }
             else
@@ -2242,7 +2480,7 @@ static BOOL write_freedesktop_association_entry(const char *desktopPath, const c
         fprintf(desktop, "Type=Application\n");
         fprintf(desktop, "Name=%s\n", friendlyAppName);
         fprintf(desktop, "MimeType=%s;\n", mimeType);
-        fprintf(desktop, "Exec=wine start /ProgIDOpen %s %%f\n", progId);
+        fprintf(desktop, "Exec=env WINEPREFIX=\"%s\" wine start /ProgIDOpen %s %%f\n", wine_get_config_dir(), progId);
         fprintf(desktop, "NoDisplay=true\n");
         fprintf(desktop, "StartupNotify=true\n");
         if (openWithIcon)
@@ -2389,7 +2627,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             if (executableW)
                 openWithIconA = extract_icon(executableW, 0, NULL, FALSE);
 
-            friendlyAppNameW = assoc_query(ASSOCSTR_FRIENDLYAPPNAME, extensionW, NULL);
+            friendlyAppNameW = assoc_query(ASSOCSTR_FRIENDLYAPPNAME, extensionW, openW);
             if (friendlyAppNameW)
             {
                 friendlyAppNameA = wchars_to_utf8_chars(friendlyAppNameW);
@@ -2739,6 +2977,7 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
     IPropertyStorage *pPropStg;
     PROPSPEC ps[2];
     PROPVARIANT pv[2];
+    char *start_path = NULL;
 
     if ( !link )
     {
@@ -2778,6 +3017,13 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
     if (escaped_urlPath == NULL)
     {
         WINE_ERR("couldn't escape url, out of memory\n");
+        goto cleanup;
+    }
+
+    start_path = get_start_exe_path();
+    if (start_path == NULL)
+    {
+        WINE_ERR("out of memory\n");
         goto cleanup;
     }
 
@@ -2840,14 +3086,14 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
         location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
-            r = !write_desktop_entry(NULL, location, lastEntry, "winebrowser", escaped_urlPath, NULL, NULL, icon_name);
+            r = !write_desktop_entry(NULL, location, lastEntry, start_path, escaped_urlPath, NULL, NULL, icon_name);
             if (r == 0)
                 chmod(location, 0755);
             HeapFree(GetProcessHeap(), 0, location);
         }
     }
     else
-        r = !write_menu_entry(unix_link, link_name, "winebrowser", escaped_urlPath, NULL, NULL, icon_name);
+        r = !write_menu_entry(unix_link, link_name, start_path, escaped_urlPath, NULL, NULL, icon_name);
     ret = (r != 0);
     ReleaseSemaphore(hSem, 1, NULL);
 
@@ -3076,11 +3322,11 @@ static void RefreshFileTypeAssociations(void)
         argv[0] = "update-mime-database";
         argv[1] = mime_dir;
         argv[2] = NULL;
-        spawnvp( _P_NOWAIT, argv[0], argv );
+        spawnvp( _P_DETACH, argv[0], argv );
 
         argv[0] = "update-desktop-database";
         argv[1] = applications_dir;
-        spawnvp( _P_NOWAIT, argv[0], argv );
+        spawnvp( _P_DETACH, argv[0], argv );
     }
 
 end:

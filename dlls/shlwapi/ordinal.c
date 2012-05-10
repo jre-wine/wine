@@ -76,7 +76,7 @@ BOOL    WINAPI SHAboutInfoW(LPWSTR,DWORD);
 /*************************************************************************
  * SHLWAPI_DupSharedHandle
  *
- * Internal implemetation of SHLWAPI_11.
+ * Internal implementation of SHLWAPI_11.
  */
 static HANDLE SHLWAPI_DupSharedHandle(HANDLE hShared, DWORD dwDstProcId,
                                       DWORD dwSrcProcId, DWORD dwAccess,
@@ -1136,14 +1136,14 @@ HWND WINAPI SHSetParentHwnd(HWND hWnd, HWND hWndParent)
   TRACE("%p, %p\n", hWnd, hWndParent);
 
   if(GetParent(hWnd) == hWndParent)
-    return 0;
+    return NULL;
 
   if(hWndParent)
-    SHSetWindowBits(hWnd, GWL_STYLE, WS_CHILD, WS_CHILD);
+    SHSetWindowBits(hWnd, GWL_STYLE, WS_CHILD | WS_POPUP, WS_CHILD);
   else
-    SHSetWindowBits(hWnd, GWL_STYLE, WS_POPUP, WS_POPUP);
+    SHSetWindowBits(hWnd, GWL_STYLE, WS_CHILD | WS_POPUP, WS_POPUP);
 
-  return SetParent(hWnd, hWndParent);
+  return hWndParent ? SetParent(hWnd, hWndParent) : NULL;
 }
 
 /*************************************************************************
@@ -4063,8 +4063,11 @@ BOOL WINAPI IsOS(DWORD feature)
     case OS_ANYSERVER:
         ISOS_RETURN(platform == VER_PLATFORM_WIN32_NT)
     case OS_WOW6432:
-        FIXME("(OS_WOW6432) Should we check this?\n");
-        return FALSE;
+        {
+            BOOL is_wow64;
+            IsWow64Process(GetCurrentProcess(), &is_wow64);
+            return is_wow64;
+        }
     case OS_WEBSERVER:
         ISOS_RETURN(platform == VER_PLATFORM_WIN32_NT)
     case OS_SMALLBUSINESSSERVER:

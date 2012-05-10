@@ -176,8 +176,6 @@ static HRESULT GAMEUX_updateStatisticsFile(struct GAMEUX_STATS *stats)
     }
 
     if(SUCCEEDED(hr))
-
-    if(SUCCEEDED(hr))
         for(i=0; i<MAX_CATEGORIES; ++i)
         {
             if(lstrlenW(stats->categories[i].sName)==0)
@@ -306,13 +304,13 @@ static HRESULT GAMEUX_updateStatisticsFile(struct GAMEUX_STATS *stats)
 }
 /*******************************************************************************
  * GAMEUX_buildStatisticsFilePath
- * Creates path to file contaning statistics of game with given id.
+ * Creates path to file containing statistics of game with given id.
  *
  * Parameters:
  *  lpApplicationId                         [I]     application id of game,
  *                                                  as string
  *  lpStatisticsFile                        [O]     array where path will be
- *                                                  stored. It's size must be
+ *                                                  stored. Its size must be
  *                                                  at least MAX_PATH
  */
 static HRESULT GAMEUX_buildStatisticsFilePath(
@@ -390,17 +388,18 @@ static HRESULT GAMEUX_getAppIdFromGDFPath(
         /* game is registered, let's read it's application id from registry */
         hr = GAMEUX_buildGameRegistryPath(installScope, &instanceId, &lpRegistryPath);
 
-    if(SUCCEEDED(hr))
+    if(SUCCEEDED(hr)) {
         hr = HRESULT_FROM_WIN32(RegOpenKeyExW(HKEY_LOCAL_MACHINE,
                 lpRegistryPath, 0, KEY_READ | KEY_WOW64_64KEY, &hKey));
-
-    if(SUCCEEDED(hr))
-        hr = HRESULT_FROM_WIN32(RegGetValueW(hKey,
-                NULL, sApplicationId, RRF_RT_REG_SZ,
-                NULL, lpApplicationId, &dwLength));
+        if(SUCCEEDED(hr)) {
+            hr = HRESULT_FROM_WIN32(RegGetValueW(hKey,
+                    NULL, sApplicationId, RRF_RT_REG_SZ,
+                    NULL, lpApplicationId, &dwLength));
+            RegCloseKey(hKey);
+        }
+    }
 
     HeapFree(GetProcessHeap(), 0, lpRegistryPath);
-    RegCloseKey(hKey);
 
     TRACE("found app id: %s, return: %#x\n", debugstr_w(lpApplicationId), hr);
     return hr;
@@ -635,7 +634,7 @@ static HRESULT GAMEUX_loadGameStatistics(struct GAMEUX_STATS *pStats,
     }
     else if(hr == S_FALSE && openType == GAMESTATS_OPEN_OPENORCREATE) /* file does not exist */
     {
-        /* create new statitics, not yet connected with file */
+        /* create new statistics, not yet connected with file */
         ZeroMemory(pStats->categories, sizeof(pStats->categories));
         *pOpenResult = GAMESTATS_OPEN_CREATED;
         hr = S_OK;
@@ -651,20 +650,15 @@ static HRESULT GAMEUX_loadGameStatistics(struct GAMEUX_STATS *pStats,
  */
 typedef struct _GameStatisticsImpl
 {
-    const struct IGameStatisticsVtbl *lpVtbl;
+    IGameStatistics IGameStatistics_iface;
     LONG ref;
     struct GAMEUX_STATS stats;
 } GameStatisticsImpl;
 
 static inline GameStatisticsImpl *impl_from_IGameStatistics( IGameStatistics *iface )
 {
-    return (GameStatisticsImpl *)((char*)iface - FIELD_OFFSET(GameStatisticsImpl, lpVtbl));
+    return CONTAINING_RECORD(iface, GameStatisticsImpl, IGameStatistics_iface);
 }
-static inline IGameStatistics *IGameStatistics_from_impl( GameStatisticsImpl* This )
-{
-    return (struct IGameStatistics*)&This->lpVtbl;
-}
-
 
 static HRESULT WINAPI GameStatisticsImpl_QueryInterface(
         IGameStatistics *iface,
@@ -819,11 +813,12 @@ static HRESULT WINAPI GameStatisticsImpl_GetCategoryTitle(
 
     TRACE("%p, %d, %p\n", This, categoryIndex, pTitle);
 
+    if(!pTitle)
+        return E_INVALIDARG;
     *pTitle = NULL;
 
-    if(!pTitle || categoryIndex >= MAX_CATEGORIES)
+    if (categoryIndex >= MAX_CATEGORIES)
         hr = E_INVALIDARG;
-
 
     if(SUCCEEDED(hr))
     {
@@ -950,7 +945,7 @@ static HRESULT WINAPI GameStatisticsImpl_Save(
 
     TRACE("(%p, %d)\n", This, trackChanges);
 
-    if(trackChanges == TRUE)
+    if(trackChanges)
         FIXME("tracking changes not yet implemented\n");
 
     hr = GAMEUX_updateStatisticsFile(&This->stats);
@@ -994,15 +989,15 @@ static const struct IGameStatisticsVtbl GameStatisticsImplVtbl =
 };
 
 
-HRESULT create_IGameStatistics(GameStatisticsImpl** ppStats)
+static HRESULT create_IGameStatistics(GameStatisticsImpl** ppStats)
 {
     TRACE("(%p)\n", ppStats);
 
-    *ppStats = HeapAlloc( GetProcessHeap(), 0, sizeof(**ppStats));
+    *ppStats = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**ppStats));
     if(!(*ppStats))
         return E_OUTOFMEMORY;
 
-    (*ppStats)->lpVtbl = &GameStatisticsImplVtbl;
+    (*ppStats)->IGameStatistics_iface.lpVtbl = &GameStatisticsImplVtbl;
     (*ppStats)->ref = 1;
 
     TRACE("returning coclass: %p\n", *ppStats);
@@ -1014,13 +1009,13 @@ HRESULT create_IGameStatistics(GameStatisticsImpl** ppStats)
  */
 typedef struct _GameStatisticsMgrImpl
 {
-    const struct IGameStatisticsMgrVtbl *lpVtbl;
+    IGameStatisticsMgr IGameStatisticsMgr_iface;
     LONG ref;
 } GameStatisticsMgrImpl;
 
 static inline GameStatisticsMgrImpl *impl_from_IGameStatisticsMgr( IGameStatisticsMgr *iface )
 {
-    return (GameStatisticsMgrImpl *)((char*)iface - FIELD_OFFSET(GameStatisticsMgrImpl, lpVtbl));
+    return CONTAINING_RECORD(iface, GameStatisticsMgrImpl, IGameStatisticsMgr_iface);
 }
 
 
@@ -1099,7 +1094,7 @@ static HRESULT STDMETHODCALLTYPE GameStatisticsMgrImpl_GetGameStatistics(
 
     if(SUCCEEDED(hr))
     {
-        output_iface = IGameStatistics_from_impl(statisticsImpl);
+        output_iface = &statisticsImpl->IGameStatistics_iface;
         hr = GAMEUX_buildStatisticsFilePath(lpApplicationId, statisticsImpl->stats.sStatsFile);
     }
 
@@ -1160,10 +1155,10 @@ HRESULT GameStatistics_create(
     if( !pGameStatistics )
         return E_OUTOFMEMORY;
 
-    pGameStatistics->lpVtbl = &GameStatisticsMgrImplVtbl;
+    pGameStatistics->IGameStatisticsMgr_iface.lpVtbl = &GameStatisticsMgrImplVtbl;
     pGameStatistics->ref = 1;
 
-    *ppObj = (IUnknown*)(&pGameStatistics->lpVtbl);
+    *ppObj = (IUnknown*)&pGameStatistics->IGameStatisticsMgr_iface;
 
     TRACE("returning iface %p\n", *ppObj);
     return S_OK;

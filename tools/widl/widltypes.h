@@ -48,6 +48,7 @@ typedef struct _importinfo_t importinfo_t;
 typedef struct _typelib_t typelib_t;
 typedef struct _user_type_t user_type_t;
 typedef struct _user_type_t context_handle_t;
+typedef struct _user_type_t generic_handle_t;
 typedef struct _type_list_t type_list_t;
 typedef struct _statement_t statement_t;
 
@@ -60,6 +61,7 @@ typedef struct list ifref_list_t;
 typedef struct list array_dims_t;
 typedef struct list user_type_list_t;
 typedef struct list context_handle_list_t;
+typedef struct list generic_handle_list_t;
 typedef struct list statement_list_t;
 
 enum attr_type
@@ -327,7 +329,7 @@ struct enumeration_details
 struct func_details
 {
   var_list_t *args;
-  struct _type_t *rettype;
+  struct _var_t *retval;
   int idx;
 };
 
@@ -352,6 +354,7 @@ struct array_details
   unsigned int dim;
   unsigned char ptr_def_fc;
   unsigned char declptr; /* if declared as a pointer */
+  unsigned short ptr_tfsoff;  /* offset of pointer definition for declptr */
 };
 
 struct coclass_details
@@ -433,6 +436,7 @@ struct _var_t {
   expr_t *eval;
   enum storage_class stgclass;
   unsigned int procstring_offset;
+  unsigned int typestring_offset;
 
   struct _loc_info_t loc_info;
 
@@ -491,7 +495,6 @@ struct _importlib_t {
 
 struct _typelib_t {
     char *name;
-    char *filename;
     const attr_list_t *attrs;
     struct list importlibs;
     statement_list_t *stmts;
@@ -530,6 +533,8 @@ typedef enum {
 
 extern syskind_t typelib_kind;
 extern user_type_list_t user_type_list;
+extern context_handle_list_t context_handle_list;
+extern generic_handle_list_t generic_handle_list;
 void check_for_additional_prototype_types(const var_list_t *list);
 
 void init_types(void);
@@ -539,8 +544,6 @@ void clear_all_offsets(void);
 
 int is_ptr(const type_t *t);
 int is_array(const type_t *t);
-int is_var_ptr(const var_t *v);
-int cant_be_null(const var_t *v);
 
 #define tsENUM   1
 #define tsSTRUCT 2

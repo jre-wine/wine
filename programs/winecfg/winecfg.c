@@ -62,13 +62,13 @@ void set_window_title(HWND dialog)
     if (current_app)
     {
         WCHAR apptitle[256];
-        LoadStringW (GetModuleHandle(NULL), IDS_WINECFG_TITLE_APP, apptitle,
+        LoadStringW (GetModuleHandleW(NULL), IDS_WINECFG_TITLE_APP, apptitle,
             sizeof(apptitle)/sizeof(apptitle[0]));
         wsprintfW (newtitle, apptitle, current_app);
     }
     else
     {
-        LoadStringW (GetModuleHandle(NULL), IDS_WINECFG_TITLE, newtitle,
+        LoadStringW (GetModuleHandleW(NULL), IDS_WINECFG_TITLE, newtitle,
             sizeof(newtitle)/sizeof(newtitle[0]));
     }
 
@@ -83,7 +83,7 @@ WCHAR* load_string (UINT id)
     int len;
     WCHAR* newStr;
 
-    LoadStringW (GetModuleHandle (NULL), id, buf, sizeof(buf)/sizeof(buf[0]));
+    LoadStringW (GetModuleHandleW(NULL), id, buf, sizeof(buf)/sizeof(buf[0]));
 
     len = lstrlenW (buf);
     newStr = HeapAlloc (GetProcessHeap(), 0, (len + 1) * sizeof (WCHAR));
@@ -113,7 +113,7 @@ static WCHAR *get_config_key (HKEY root, const WCHAR *subkey, const WCHAR *name,
     WINE_TRACE("subkey=%s, name=%s, def=%s\n", wine_dbgstr_w(subkey),
                wine_dbgstr_w(name), wine_dbgstr_w(def));
 
-    res = RegOpenKeyW(root, subkey, &hSubKey);
+    res = RegOpenKeyExW(root, subkey, 0, MAXIMUM_ALLOWED, &hSubKey);
     if (res != ERROR_SUCCESS)
     {
         if (res == ERROR_FILE_NOT_FOUND)
@@ -146,7 +146,7 @@ static WCHAR *get_config_key (HKEY root, const WCHAR *subkey, const WCHAR *name,
 
     WINE_TRACE("buffer=%s\n", wine_dbgstr_w(buffer));
 end:
-    if (hSubKey && hSubKey != root) RegCloseKey(hSubKey);
+    RegCloseKey(hSubKey);
 
     return buffer;
 }
@@ -471,7 +471,7 @@ static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
     WCHAR **values = NULL;
     struct list *cursor;
 
-    res = RegOpenKeyW(root, path, &key);
+    res = RegOpenKeyExW(root, path, 0, MAXIMUM_ALLOWED, &key);
     if (res == ERROR_SUCCESS)
     {
         while (TRUE)
@@ -641,11 +641,15 @@ static void process_setting(struct setting *s)
     else
     {
 	WINE_TRACE("Removing %s:%s\n", wine_dbgstr_w(s->path), wine_dbgstr_w(s->name));
-        if (!RegOpenKeyW( s->root, s->path, &key ))
+        if (!RegOpenKeyExW( s->root, s->path, 0, MAXIMUM_ALLOWED, &key ))
         {
             /* NULL name means remove that path/section entirely */
             if (s->name) RegDeleteValueW( key, s->name );
-            else RegDeleteTreeW( key, NULL );
+            else
+            {
+                RegDeleteTreeW( key, NULL );
+                RegDeleteKeyW( s->root, s->path );
+            }
             RegCloseKey( key );
         }
         if (needs_wow64)
@@ -654,7 +658,11 @@ static void process_setting(struct setting *s)
             if (!RegOpenKeyExW( s->root, s->path, 0, MAXIMUM_ALLOWED | KEY_WOW64_32KEY, &key ))
             {
                 if (s->name) RegDeleteValueW( key, s->name );
-                else RegDeleteTreeW( key, NULL );
+                else
+                {
+                    RegDeleteTreeW( key, NULL );
+                    RegDeleteKeyExW( s->root, s->path, KEY_WOW64_32KEY, 0 );
+                }
                 RegCloseKey( key );
             }
         }
@@ -689,7 +697,7 @@ char *keypath(const char *section)
     if (current_app)
     {
         result = HeapAlloc(GetProcessHeap(), 0, strlen("AppDefaults\\") + lstrlenW(current_app)*2 + 2 /* \\ */ + strlen(section) + 1 /* terminator */);
-        wsprintf(result, "AppDefaults\\%ls", current_app);
+        wsprintfA(result, "AppDefaults\\%ls", current_app);
         if (section[0]) sprintf( result + strlen(result), "\\%s", section );
     }
     else
@@ -744,15 +752,12 @@ void PRINTERROR(void)
 
 int initialize(HINSTANCE hInstance)
 {
-    DWORD res = RegCreateKey(HKEY_CURRENT_USER, WINE_KEY_ROOT, &config_key);
+    DWORD res = RegCreateKeyA(HKEY_CURRENT_USER, WINE_KEY_ROOT, &config_key);
 
     if (res != ERROR_SUCCESS) {
 	WINE_ERR("RegOpenKey failed on wine config key (%d)\n", res);
 	return 1;
     }
-
-    /* load any menus */
-    hPopupMenus = LoadMenu(hInstance, MAKEINTRESOURCE(IDR_WINECFG));
 
     /* we could probably just have the list as static data  */
     settings = HeapAlloc(GetProcessHeap(), 0, sizeof(struct list));

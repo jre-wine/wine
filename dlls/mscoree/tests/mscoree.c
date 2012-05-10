@@ -1,5 +1,6 @@
 /*
  * Copyright 2010 Louis Lenders
+ * Copyright 2011 André Hentschel
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,6 +17,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include "corerror.h"
 #include "mscoree.h"
 #include "shlwapi.h"
@@ -27,6 +30,7 @@ static HRESULT (WINAPI *pGetCORVersion)(LPWSTR, DWORD, DWORD*);
 static HRESULT (WINAPI *pGetCORSystemDirectory)(LPWSTR, DWORD, DWORD*);
 static HRESULT (WINAPI *pGetRequestedRuntimeInfo)(LPCWSTR, LPCWSTR, LPCWSTR, DWORD, DWORD, LPWSTR, DWORD, DWORD*, LPWSTR, DWORD, DWORD*);
 static HRESULT (WINAPI *pLoadLibraryShim)(LPCWSTR, LPCWSTR, LPVOID, HMODULE*);
+static HRESULT (WINAPI *pCreateConfigStream)(LPCWSTR, IStream**);
 
 static BOOL init_functionpointers(void)
 {
@@ -42,6 +46,7 @@ static BOOL init_functionpointers(void)
     pGetCORSystemDirectory = (void *)GetProcAddress(hmscoree, "GetCORSystemDirectory");
     pGetRequestedRuntimeInfo = (void *)GetProcAddress(hmscoree, "GetRequestedRuntimeInfo");
     pLoadLibraryShim = (void *)GetProcAddress(hmscoree, "LoadLibraryShim");
+    pCreateConfigStream = (void *)GetProcAddress(hmscoree, "CreateConfigStream");
 
     if (!pGetCORVersion || !pGetCORSystemDirectory || !pGetRequestedRuntimeInfo || !pLoadLibraryShim)
     {
@@ -133,7 +138,7 @@ static void test_versioninfo(void)
     hr = pGetRequestedRuntimeInfo( NULL, v2_0, NULL, 0, 0, NULL, MAX_PATH, &path_len, version, MAX_PATH, &size);
     ok(hr == S_OK, "GetRequestedRuntimeInfo returned %08x\n", hr);
     ok(!winetest_strcmpW(version, v2_0), "version is %s , expected %s\n", wine_dbgstr_w(version), wine_dbgstr_w(v2_0));
-    /* With NULL-pointer for bufferlength, the buffer itsself still gets filled with correct string */
+    /* With NULL-pointer for bufferlength, the buffer itself still gets filled with correct string */
     memset(version, 0, sizeof(version));
     hr = pGetRequestedRuntimeInfo( NULL, v2_0, NULL, 0, 0, path, MAX_PATH, &path_len, version, MAX_PATH, NULL);
     ok(hr == S_OK, "GetRequestedRuntimeInfo returned %08x\n", hr);
@@ -244,6 +249,100 @@ static void test_loadlibraryshim(void)
         FreeLibrary(hdll);
 }
 
+static const char xmldata[] =
+    "<?xml version=\"1.0\" ?>\n"
+    "<!DOCTYPE Config>\n"
+    "<Configuration>\n"
+    "  <Name>Test</Name>\n"
+    "  <Value>1234</Value>\n"
+    "</Configuration>";
+
+static void create_xml_file(LPCWSTR filename)
+{
+    DWORD dwNumberOfBytesWritten;
+    HANDLE hfile = CreateFileW(filename, GENERIC_WRITE, 0, NULL,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(hfile != INVALID_HANDLE_VALUE, "File creation failed\n");
+    WriteFile(hfile, xmldata, sizeof(xmldata) - 1, &dwNumberOfBytesWritten, NULL);
+    CloseHandle(hfile);
+}
+
+static void test_createconfigstream(void)
+{
+    IStream *stream = NULL;
+    WCHAR file[] = {'c', 'o', 'n', 'f', '.', 'x', 'm', 'l', 0};
+    WCHAR nonexistent[] = {'n', 'o', 'n', 'e', 'x', 'i', 's', 't', '.', 'x', 'm', 'l', 0};
+    WCHAR path[MAX_PATH];
+    HRESULT hr;
+    char buffer[256] = {0};
+
+    if (!pCreateConfigStream)
+    {
+        win_skip("CreateConfigStream not available\n");
+        return;
+    }
+
+    create_xml_file(file);
+    GetFullPathNameW(file, MAX_PATH, path, NULL);
+
+    hr = pCreateConfigStream(NULL, &stream);
+    todo_wine ok(hr == E_FAIL ||
+                 broken(hr == HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND)) || /* some WinXP, Win2K3 and Win7 */
+                 broken(hr == S_OK && !stream), /* some Win2K3 */
+                 "CreateConfigStream returned %x\n", hr);
+
+    hr = pCreateConfigStream(path, NULL);
+    todo_wine ok(hr == COR_E_NULLREFERENCE, "CreateConfigStream returned %x\n", hr);
+
+    hr = pCreateConfigStream(NULL, NULL);
+    todo_wine ok(hr == COR_E_NULLREFERENCE, "CreateConfigStream returned %x\n", hr);
+
+    hr = pCreateConfigStream(nonexistent, &stream);
+    todo_wine ok(hr == COR_E_FILENOTFOUND, "CreateConfigStream returned %x\n", hr);
+    ok(stream == NULL, "Expected stream to be NULL\n");
+
+    hr = pCreateConfigStream(path, &stream);
+    todo_wine ok(hr == S_OK, "CreateConfigStream failed, hr=%x\n", hr);
+    todo_wine ok(stream != NULL, "Expected non-NULL stream\n");
+
+    if (stream)
+    {
+        DWORD count;
+        LARGE_INTEGER pos;
+        ULARGE_INTEGER size;
+        IStream *stream2 = NULL;
+
+        hr = IStream_Read(stream, buffer, strlen(xmldata), &count);
+        ok(hr == S_OK, "IStream_Read failed, hr=%x\n", hr);
+        ok(count == strlen(xmldata), "wrong count: %u\n", count);
+        ok(!strcmp(buffer, xmldata), "Strings do not match\n");
+
+        hr = IStream_Write(stream, xmldata, strlen(xmldata), &count);
+        ok(hr == E_FAIL, "IStream_Write returned hr=%x\n", hr);
+
+        pos.QuadPart = strlen(xmldata);
+        hr = IStream_Seek(stream, pos, STREAM_SEEK_SET, NULL);
+        ok(hr == E_NOTIMPL, "IStream_Seek returned hr=%x\n", hr);
+
+        size.QuadPart = strlen(xmldata);
+        hr = IStream_SetSize(stream, size);
+        ok(hr == E_NOTIMPL, "IStream_SetSize returned hr=%x\n", hr);
+
+        hr = IStream_Clone(stream, &stream2);
+        ok(hr == E_NOTIMPL, "IStream_Clone returned hr=%x\n", hr);
+
+        hr = IStream_Commit(stream, STGC_DEFAULT);
+        ok(hr == E_NOTIMPL, "IStream_Commit returned hr=%x\n", hr);
+
+        hr = IStream_Revert(stream);
+        ok(hr == E_NOTIMPL, "IStream_Revert returned hr=%x\n", hr);
+
+        hr = IStream_Release(stream);
+        ok(hr == S_OK, "IStream_Release returned hr=%x\n", hr);
+    }
+    DeleteFileW(file);
+}
+
 START_TEST(mscoree)
 {
     if (!init_functionpointers())
@@ -251,6 +350,7 @@ START_TEST(mscoree)
 
     test_versioninfo();
     test_loadlibraryshim();
+    test_createconfigstream();
 
     FreeLibrary(hmscoree);
 }

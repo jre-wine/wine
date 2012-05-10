@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +27,7 @@
 #include <stdarg.h>
 #include <assert.h>
 #include <ctype.h>
-#ifdef HAVE_GETTEXT_PO_H
+#ifdef HAVE_LIBGETTEXTPO
 #include <gettext-po.h>
 #endif
 
@@ -41,7 +42,148 @@
 #include "wine/list.h"
 #include "wine/unicode.h"
 
-#ifdef HAVE_LIBGETTEXTPO
+static resource_t *new_top, *new_tail;
+
+struct mo_file
+{
+    unsigned int magic;
+    unsigned int revision;
+    unsigned int count;
+    unsigned int msgid_off;
+    unsigned int msgstr_off;
+    /* ... rest of file data here */
+};
+
+static int is_english( const language_t *lan )
+{
+    return lan->id == LANG_ENGLISH && lan->sub == SUBLANG_DEFAULT;
+}
+
+static int is_rtl_language( const language_t *lan )
+{
+    return lan->id == LANG_ARABIC || lan->id == LANG_HEBREW || lan->id == LANG_PERSIAN;
+}
+
+static int uses_larger_font( const language_t *lan )
+{
+    return lan->id == LANG_CHINESE || lan->id == LANG_JAPANESE || lan->id == LANG_KOREAN;
+}
+
+static version_t *get_dup_version( language_t *lang )
+{
+    /* English "translations" take precedence over the original rc contents */
+    return new_version( is_english( lang ) ? 1 : -1 );
+}
+
+static name_id_t *dup_name_id( name_id_t *id )
+{
+    name_id_t *new;
+
+    if (!id || id->type != name_str) return id;
+    new = new_name_id();
+    *new = *id;
+    new->name.s_name = convert_string( id->name.s_name, str_unicode, 1252 );
+    return new;
+}
+
+static char *convert_msgid_ascii( const string_t *str, int error_on_invalid_char )
+{
+    int i;
+    string_t *newstr = convert_string( str, str_unicode, 1252 );
+    char *buffer = xmalloc( newstr->size + 1 );
+
+    for (i = 0; i < newstr->size; i++)
+    {
+        buffer[i] =  newstr->str.wstr[i];
+        if (newstr->str.wstr[i] >= 32 && newstr->str.wstr[i] <= 127) continue;
+        if (newstr->str.wstr[i] == '\t' || newstr->str.wstr[i] == '\n') continue;
+        if (error_on_invalid_char)
+        {
+            print_location( &newstr->loc );
+            error( "Invalid character %04x in source string\n", newstr->str.wstr[i] );
+        }
+        free( buffer);
+        free_string( newstr );
+        return NULL;
+    }
+    buffer[i] = 0;
+    free_string( newstr );
+    return buffer;
+}
+
+static char *get_message_context( char **msgid )
+{
+    static const char magic[] = "#msgctxt#";
+    char *id, *context;
+
+    if (strncmp( *msgid, magic, sizeof(magic) - 1 )) return NULL;
+    context = *msgid + sizeof(magic) - 1;
+    if (!(id = strchr( context, '#' ))) return NULL;
+    *id = 0;
+    *msgid = id + 1;
+    return context;
+}
+
+static int control_has_title( const control_t *ctrl )
+{
+    if (!ctrl->title) return 0;
+    if (ctrl->title->type != name_str) return 0;
+    /* check for text static control */
+    if (ctrl->ctlclass && ctrl->ctlclass->type == name_ord && ctrl->ctlclass->name.i_name == CT_STATIC)
+    {
+        switch (ctrl->style->or_mask & SS_TYPEMASK)
+        {
+        case SS_LEFT:
+        case SS_CENTER:
+        case SS_RIGHT:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static resource_t *dup_resource( resource_t *res, language_t *lang )
+{
+    resource_t *new = xmalloc( sizeof(*new) );
+
+    *new = *res;
+    new->lan = lang;
+    new->next = new->prev = NULL;
+    new->name = dup_name_id( res->name );
+
+    switch (res->type)
+    {
+    case res_acc:
+        new->res.acc = xmalloc( sizeof(*(new)->res.acc) );
+        *new->res.acc = *res->res.acc;
+        new->res.acc->lvc.language = lang;
+        new->res.acc->lvc.version = get_dup_version( lang );
+        break;
+    case res_dlg:
+        new->res.dlg = xmalloc( sizeof(*(new)->res.dlg) );
+        *new->res.dlg = *res->res.dlg;
+        new->res.dlg->lvc.language = lang;
+        new->res.dlg->lvc.version = get_dup_version( lang );
+        break;
+    case res_men:
+        new->res.men = xmalloc( sizeof(*(new)->res.men) );
+        *new->res.men = *res->res.men;
+        new->res.men->lvc.language = lang;
+        new->res.men->lvc.version = get_dup_version( lang );
+        break;
+    case res_stt:
+        new->res.stt = xmalloc( sizeof(*(new)->res.stt) );
+        *new->res.stt = *res->res.stt;
+        new->res.stt->lvc.language = lang;
+        new->res.stt->lvc.version = get_dup_version( lang );
+        break;
+    default:
+        assert(0);
+    }
+    return new;
+}
 
 static const struct
 {
@@ -276,6 +418,20 @@ static const struct
 #endif
 };
 
+#ifndef HAVE_LIBGETTEXTPO
+
+void write_pot_file( const char *outname )
+{
+    error( "PO files not supported in this wrc build\n" );
+}
+
+void write_po_files( const char *outname )
+{
+    error( "PO files not supported in this wrc build\n" );
+}
+
+#else  /* HAVE_LIBGETTEXTPO */
+
 static void po_xerror( int severity, po_message_t message,
                        const char *filename, size_t lineno, size_t column,
                        int multiline_p, const char *message_text )
@@ -301,11 +457,6 @@ static void po_xerror2( int severity, po_message_t message1,
 
 static const struct po_xerror_handler po_xerror_handler = { po_xerror, po_xerror2 };
 
-static int is_english( const language_t *lan )
-{
-    return lan->id == LANG_ENGLISH && lan->sub == SUBLANG_DEFAULT;
-}
-
 static char *convert_string_utf8( const string_t *str, int codepage )
 {
     string_t *newstr = convert_string( str, str_unicode, codepage );
@@ -314,43 +465,6 @@ static char *convert_string_utf8( const string_t *str, int codepage )
     buffer[len] = 0;
     free_string( newstr );
     return buffer;
-}
-
-static char *convert_msgid_ascii( const string_t *str, int error_on_invalid_char )
-{
-    int i;
-    string_t *newstr = convert_string( str, str_unicode, 1252 );
-    char *buffer = xmalloc( newstr->size + 1 );
-
-    for (i = 0; i < newstr->size; i++)
-    {
-        buffer[i] =  newstr->str.wstr[i];
-        if (newstr->str.wstr[i] >= 32 && newstr->str.wstr[i] <= 127) continue;
-        if (newstr->str.wstr[i] == '\t' || newstr->str.wstr[i] == '\n') continue;
-        if (error_on_invalid_char)
-        {
-            print_location( &newstr->loc );
-            error( "Invalid character %04x in source string\n", newstr->str.wstr[i] );
-        }
-        free_string( newstr );
-        return NULL;
-    }
-    buffer[i] = 0;
-    free_string( newstr );
-    return buffer;
-}
-
-static char *get_message_context( char **msgid )
-{
-    static const char magic[] = "#msgctxt#";
-    char *id, *context;
-
-    if (strncmp( *msgid, magic, sizeof(magic) - 1 )) return NULL;
-    context = *msgid + sizeof(magic) - 1;
-    if (!(id = strchr( context, '#' ))) return NULL;
-    *id = 0;
-    *msgid = id + 1;
-    return context;
 }
 
 static po_message_t find_message( po_file_t po, const char *msgid, const char *msgctxt,
@@ -373,6 +487,7 @@ static po_message_t find_message( po_file_t po, const char *msgid, const char *m
 static void add_po_string( po_file_t po, const string_t *msgid, const string_t *msgstr,
                            const language_t *lang )
 {
+    static const char dnt[] = "do not translate";
     po_message_t msg;
     po_message_iterator_t iterator;
     int codepage;
@@ -382,6 +497,12 @@ static void add_po_string( po_file_t po, const string_t *msgid, const string_t *
 
     id_buffer = id = convert_msgid_ascii( msgid, 1 );
     context = get_message_context( &id );
+    if (context && strcmp(context, dnt) == 0)
+    {
+        /* This string should not be translated */
+        free( id_buffer );
+        return;
+    }
 
     if (msgstr)
     {
@@ -454,22 +575,22 @@ static po_file_t get_po_file( const language_t *lang )
     return po_file->po;
 }
 
-static char *get_po_file_name( const language_t *lang )
+static const char *get_language_name( const language_t *lang )
 {
+    static char name[20];
     unsigned int i;
-    char name[40];
+
+    for (i = 0; i < sizeof(languages)/sizeof(languages[0]); i++)
+        if (languages[i].id == lang->id && languages[i].sub == lang->sub)
+            return languages[i].name;
 
     sprintf( name, "%02x-%02x", lang->id, lang->sub );
-    for (i = 0; i < sizeof(languages)/sizeof(languages[0]); i++)
-    {
-        if (languages[i].id == lang->id && languages[i].sub == lang->sub)
-        {
-            strcpy( name, languages[i].name );
-            break;
-        }
-    }
-    strcat( name, ".po" );
-    return xstrdup( name );
+    return name;
+}
+
+static char *get_po_file_name( const language_t *lang )
+{
+    return strmake( "%s.po", get_language_name( lang ) );
 }
 
 static unsigned int flush_po_files( const char *output_name )
@@ -503,26 +624,6 @@ static unsigned int flush_po_files( const char *output_name )
         free( name );
     }
     return count;
-}
-
-static int control_has_title( const control_t *ctrl )
-{
-    if (!ctrl->title) return 0;
-    if (ctrl->title->type != name_str) return 0;
-    /* check for text static control */
-    if (ctrl->ctlclass && ctrl->ctlclass->type == name_ord && ctrl->ctlclass->name.i_name == CT_STATIC)
-    {
-        switch (ctrl->style->or_mask & SS_TYPEMASK)
-        {
-        case SS_LEFT:
-        case SS_CENTER:
-        case SS_RIGHT:
-            return 1;
-        default:
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static void add_pot_stringtable( po_file_t po, const resource_t *res )
@@ -569,8 +670,79 @@ static void add_pot_dialog( po_file_t po, const resource_t *res )
     const dialog_t *dlg = res->res.dlg;
 
     if (dlg->title) add_po_string( po, dlg->title, NULL, NULL );
-    if (dlg->font) add_po_string( po, dlg->font->name, NULL, NULL );
     add_pot_dialog_controls( po, dlg->controls );
+}
+
+static void compare_dialogs( const dialog_t *english_dlg, const dialog_t *dlg )
+{
+    const control_t *english_ctrl, *ctrl;
+    unsigned int style = 0, exstyle = 0, english_style = 0, english_exstyle = 0;
+    char *name;
+    char *title = english_dlg->title ? convert_msgid_ascii( english_dlg->title, 0 ) : xstrdup("??");
+
+    if (english_dlg->width != dlg->width || english_dlg->height != dlg->height)
+        warning( "%s: dialog %s doesn't have the same size (%d,%d vs %d,%d)\n",
+                 get_language_name( dlg->lvc.language ), title, dlg->width, dlg->height,
+                 english_dlg->width, english_dlg->height );
+
+    if (dlg->gotstyle) style = dlg->style->or_mask;
+    if (dlg->gotexstyle) exstyle = dlg->exstyle->or_mask;
+    if (english_dlg->gotstyle) english_style = english_dlg->style->or_mask;
+    if (english_dlg->gotexstyle) english_exstyle = english_dlg->exstyle->or_mask;
+    if (is_rtl_language( dlg->lvc.language )) english_exstyle |= WS_EX_LAYOUTRTL;
+
+    if (english_style != style)
+        warning( "%s: dialog %s doesn't have the same style (%08x vs %08x)\n",
+                 get_language_name( dlg->lvc.language ), title, style, english_style );
+    if (english_exstyle != exstyle)
+        warning( "%s: dialog %s doesn't have the same exstyle (%08x vs %08x)\n",
+                 get_language_name( dlg->lvc.language ), title, exstyle, english_exstyle );
+
+    if (english_dlg->font || dlg->font)
+    {
+        int size = 0, english_size = 0;
+        char *font = NULL, *english_font = NULL;
+
+        if (english_dlg->font)
+        {
+            english_font = convert_msgid_ascii( english_dlg->font->name, 0 );
+            english_size = english_dlg->font->size;
+        }
+        if (dlg->font)
+        {
+            font = convert_msgid_ascii( dlg->font->name, 0 );
+            size = dlg->font->size;
+        }
+        if (uses_larger_font( dlg->lvc.language )) english_size++;
+
+        if (!english_font || !font || strcasecmp( english_font, font ) || english_size != size)
+            warning( "%s: dialog %s doesn't have the same font (%s %u vs %s %u)\n",
+                     get_language_name(dlg->lvc.language), title,
+                     english_font ? english_font : "default", english_size,
+                     font ? font : "default", size );
+        free( font );
+        free( english_font );
+    }
+    english_ctrl = english_dlg->controls;
+    ctrl = dlg->controls;
+    for ( ; english_ctrl && ctrl; ctrl = ctrl->next, english_ctrl = english_ctrl->next )
+    {
+        if (control_has_title( english_ctrl ))
+            name = convert_msgid_ascii( english_ctrl->title->name.s_name, 0 );
+        else
+            name = strmake( "%d", ctrl->id );
+
+        if (english_ctrl->width != ctrl->width || english_ctrl->height != ctrl->height)
+            warning( "%s: dialog %s control %s doesn't have the same size (%d,%d vs %d,%d)\n",
+                     get_language_name( dlg->lvc.language ), title, name,
+                     ctrl->width, ctrl->height, english_ctrl->width, english_ctrl->height );
+        if (english_ctrl->x != ctrl->x || english_ctrl->y != ctrl->y)
+            warning( "%s: dialog %s control %s doesn't have the same position (%d,%d vs %d,%d)\n",
+                     get_language_name( dlg->lvc.language ), title, name,
+                     ctrl->x, ctrl->y, english_ctrl->x, english_ctrl->y );
+        free( name );
+    }
+    free( title );
 }
 
 static void add_po_dialog_controls( po_file_t po, const control_t *english_ctrl,
@@ -592,10 +764,10 @@ static void add_po_dialog( const resource_t *english, const resource_t *res )
     const dialog_t *dlg = res->res.dlg;
     po_file_t po = get_po_file( dlg->lvc.language );
 
+    compare_dialogs( english_dlg, dlg );
+
     if (english_dlg->title && dlg->title)
         add_po_string( po, english_dlg->title, dlg->title, dlg->lvc.language );
-    if (english_dlg->font && dlg->font)
-        add_po_string( po, english_dlg->font->name, dlg->font->name, dlg->lvc.language );
     add_po_dialog_controls( po, english_dlg->controls, dlg->controls, dlg->lvc.language );
 }
 
@@ -637,6 +809,44 @@ static void add_po_menu( const resource_t *english, const resource_t *res )
     add_po_menu_items( po, english_items, items, res->res.men->lvc.language );
 }
 
+static int string_has_context( const string_t *str )
+{
+    char *id, *id_buffer, *context;
+
+    id_buffer = id = convert_msgid_ascii( str, 1 );
+    context = get_message_context( &id );
+    free( id_buffer );
+    return context != NULL;
+}
+
+static void add_pot_accel( po_file_t po, const resource_t *res )
+{
+    event_t *event = res->res.acc->events;
+
+    while (event)
+    {
+        /* accelerators without a context don't make sense in po files */
+        if (event->str && string_has_context( event->str ))
+            add_po_string( po, event->str, NULL, NULL );
+        event = event->next;
+    }
+}
+
+static void add_po_accel( const resource_t *english, const resource_t *res )
+{
+    event_t *english_event = english->res.acc->events;
+    event_t *event = res->res.acc->events;
+    po_file_t po = get_po_file( res->res.acc->lvc.language );
+
+    while (english_event && event)
+    {
+        if (english_event->str && event->str && string_has_context( english_event->str ))
+            add_po_string( po, english_event->str, event->str, res->res.acc->lvc.language );
+        event = event->next;
+        english_event = english_event->next;
+    }
+}
+
 static resource_t *find_english_resource( resource_t *res )
 {
     resource_t *ptr;
@@ -663,7 +873,7 @@ void write_pot_file( const char *outname )
 
         switch (res->type)
         {
-        case res_acc: break;  /* FIXME */
+        case res_acc: add_pot_accel( po, res ); break;
         case res_dlg: add_pot_dialog( po, res ); break;
         case res_men: add_pot_menu( po, res ); break;
         case res_stt: add_pot_stringtable( po, res ); break;
@@ -678,16 +888,13 @@ void write_pot_file( const char *outname )
 void write_po_files( const char *outname )
 {
     resource_t *res, *english;
-    po_file_t po;
 
     for (res = resource_top; res; res = res->next)
     {
         if (!(english = find_english_resource( res ))) continue;
-        po = get_po_file( res->lan );
-
         switch (res->type)
         {
-        case res_acc: break;  /* FIXME */
+        case res_acc: add_po_accel( english, res ); break;
         case res_dlg: add_po_dialog( english, res ); break;
         case res_men: add_po_menu( english, res ); break;
         case res_stt: add_po_stringtable( english, res ); break;
@@ -702,64 +909,112 @@ void write_po_files( const char *outname )
     }
 }
 
-static resource_t *new_top, *new_tail;
+#endif  /* HAVE_LIBGETTEXTPO */
 
-static version_t *get_dup_version( language_t *lang )
+static struct mo_file *mo_file;
+
+static void byteswap( unsigned int *data, unsigned int count )
 {
-    /* English "translations" take precedence over the original rc contents */
-    return new_version( is_english( lang ) ? 1 : -1 );
+    unsigned int i;
+
+    for (i = 0; i < count; i++)
+        data[i] = data[i] >> 24 | (data[i] >> 8 & 0xff00) | (data[i] << 8 & 0xff0000) | data[i] << 24;
 }
 
-static name_id_t *dup_name_id( name_id_t *id )
+static void load_mo_file( const char *name )
 {
-    name_id_t *new;
+    struct stat st;
+    int res, fd;
 
-    if (!id || id->type != name_str) return id;
-    new = new_name_id();
-    *new = *id;
-    new->name.s_name = convert_string( id->name.s_name, str_unicode, 1252 );
-    return new;
-}
+    fd = open( name, O_RDONLY | O_BINARY );
+    if (fd == -1) fatal_perror( "Failed to open %s", name );
+    fstat( fd, &st );
+    mo_file = xmalloc( st.st_size );
+    res = read( fd, mo_file, st.st_size );
+    if (res == -1) fatal_perror( "Failed to read %s", name );
+    else if (res != st.st_size) error( "Failed to read %s\n", name );
+    close( fd );
 
-static resource_t *dup_resource( resource_t *res, language_t *lang )
-{
-    resource_t *new = xmalloc( sizeof(*new) );
+    /* sanity checks */
 
-    *new = *res;
-    new->lan = lang;
-    new->next = new->prev = NULL;
-    new->name = dup_name_id( res->name );
+    if (st.st_size < sizeof(*mo_file))
+        error( "%s is not a valid .mo file\n", name );
+    if (mo_file->magic == 0xde120495)
+        byteswap( &mo_file->revision, 4 );
+    else if (mo_file->magic != 0x950412de)
+        error( "%s is not a valid .mo file\n", name );
+    if ((mo_file->revision >> 16) > 1)
+        error( "%s: unsupported file version %x\n", name, mo_file->revision );
+    if (mo_file->msgid_off >= st.st_size ||
+        mo_file->msgstr_off >= st.st_size ||
+        st.st_size < sizeof(*mo_file) + 2 * 8 * mo_file->count)
+        error( "%s: corrupted file\n", name );
 
-    switch (res->type)
+    if (mo_file->magic == 0xde120495)
     {
-    case res_dlg:
-        new->res.dlg = xmalloc( sizeof(*(new)->res.dlg) );
-        *new->res.dlg = *res->res.dlg;
-        new->res.dlg->lvc.language = lang;
-        new->res.dlg->lvc.version = get_dup_version( lang );
-        break;
-    case res_men:
-        new->res.men = xmalloc( sizeof(*(new)->res.men) );
-        *new->res.men = *res->res.men;
-        new->res.men->lvc.language = lang;
-        new->res.men->lvc.version = get_dup_version( lang );
-        break;
-    case res_stt:
-        new->res.stt = xmalloc( sizeof(*(new)->res.stt) );
-        *new->res.stt = *res->res.stt;
-        new->res.stt->lvc.language = lang;
-        new->res.stt->lvc.version = get_dup_version( lang );
-        break;
-    default:
-        assert(0);
+        byteswap( (unsigned int *)((char *)mo_file + mo_file->msgid_off), 2 * mo_file->count );
+        byteswap( (unsigned int *)((char *)mo_file + mo_file->msgstr_off), 2 * mo_file->count );
     }
-    return new;
 }
 
-static string_t *translate_string( po_file_t po, string_t *str, int *found )
+static void free_mo_file(void)
 {
-    po_message_t msg;
-    po_message_iterator_t iterator;
+    free( mo_file );
+    mo_file = NULL;
+}
+
+static inline const char *get_mo_msgid( int index )
+{
+    const char *base = (const char *)mo_file;
+    const unsigned int *offsets = (const unsigned int *)(base + mo_file->msgid_off);
+    return base + offsets[2 * index + 1];
+}
+
+static inline const char *get_mo_msgstr( int index )
+{
+    const char *base = (const char *)mo_file;
+    const unsigned int *offsets = (const unsigned int *)(base + mo_file->msgstr_off);
+    return base + offsets[2 * index + 1];
+}
+
+static const char *get_msgstr( const char *msgid, const char *context, int *found )
+{
+    int pos, res, min, max;
+    const char *ret = msgid;
+    char *id = NULL;
+
+    if (!mo_file)  /* strings containing a context still need to be transformed */
+    {
+        if (context) (*found)++;
+        return ret;
+    }
+
+    if (context) id = strmake( "%s%c%s", context, 4, msgid );
+    min = 0;
+    max = mo_file->count - 1;
+    while (min <= max)
+    {
+        pos = (min + max) / 2;
+        res = strcmp( get_mo_msgid(pos), id ? id : msgid );
+        if (!res)
+        {
+            const char *str = get_mo_msgstr( pos );
+            if (str[0])  /* ignore empty strings */
+            {
+                ret = str;
+                (*found)++;
+            }
+            break;
+        }
+        if (res > 0) max = pos - 1;
+        else min = pos + 1;
+    }
+    free( id );
+    return ret;
+}
+
+static string_t *translate_string( string_t *str, int *found )
+{
     string_t *new;
     const char *transl;
     int res;
@@ -770,16 +1025,7 @@ static string_t *translate_string( po_file_t po, string_t *str, int *found )
 
     msgid = buffer;
     context = get_message_context( &msgid );
-    msg = find_message( po, msgid, context, &iterator );
-    po_message_iterator_free( iterator );
-
-    if (msg && !po_message_is_fuzzy( msg ))
-    {
-        transl = po_message_msgstr( msg );
-        if (!transl[0]) transl = msgid;  /* ignore empty strings */
-        else (*found)++;
-    }
-    else transl = msgid;
+    transl = get_msgstr( msgid, context, found );
 
     new = xmalloc( sizeof(*new) );
     new->type = str_unicode;
@@ -793,7 +1039,7 @@ static string_t *translate_string( po_file_t po, string_t *str, int *found )
     return new;
 }
 
-static control_t *translate_controls( po_file_t po, control_t *ctrl, int *found )
+static control_t *translate_controls( control_t *ctrl, int *found )
 {
     control_t *new, *head = NULL, *tail = NULL;
 
@@ -805,7 +1051,7 @@ static control_t *translate_controls( po_file_t po, control_t *ctrl, int *found 
         {
             new->title = new_name_id();
             *new->title = *ctrl->title;
-            new->title->name.s_name = translate_string( po, ctrl->title->name.s_name, found );
+            new->title->name.s_name = translate_string( ctrl->title->name.s_name, found );
         }
         else new->title = dup_name_id( ctrl->title );
         new->ctlclass = dup_name_id( ctrl->ctlclass );
@@ -819,7 +1065,7 @@ static control_t *translate_controls( po_file_t po, control_t *ctrl, int *found 
     return head;
 }
 
-static menu_item_t *translate_items( po_file_t po, menu_item_t *item, int *found )
+static menu_item_t *translate_items( menu_item_t *item, int *found )
 {
     menu_item_t *new, *head = NULL, *tail = NULL;
 
@@ -827,8 +1073,8 @@ static menu_item_t *translate_items( po_file_t po, menu_item_t *item, int *found
     {
         new = xmalloc( sizeof(*new) );
         *new = *item;
-        if (item->name) new->name = translate_string( po, item->name, found );
-        if (item->popup) new->popup = translate_items( po, item->popup, found );
+        if (item->name) new->name = translate_string( item->name, found );
+        if (item->popup) new->popup = translate_items( item->popup, found );
         if (tail) tail->next = new;
         else head = new;
         new->next = NULL;
@@ -839,8 +1085,7 @@ static menu_item_t *translate_items( po_file_t po, menu_item_t *item, int *found
     return head;
 }
 
-static stringtable_t *translate_stringtable( po_file_t po, stringtable_t *stt,
-                                             language_t *lang, int *found )
+static stringtable_t *translate_stringtable( stringtable_t *stt, language_t *lang, int *found )
 {
     stringtable_t *new, *head = NULL, *tail = NULL;
     int i;
@@ -855,7 +1100,7 @@ static stringtable_t *translate_stringtable( po_file_t po, stringtable_t *stt,
         memcpy( new->entries, stt->entries, new->nentries * sizeof(*new->entries) );
         for (i = 0; i < stt->nentries; i++)
             if (stt->entries[i].str)
-                new->entries[i].str = translate_string( po, stt->entries[i].str, found );
+                new->entries[i].str = translate_string( stt->entries[i].str, found );
 
         if (tail) tail->next = new;
         else head = new;
@@ -867,19 +1112,48 @@ static stringtable_t *translate_stringtable( po_file_t po, stringtable_t *stt,
     return head;
 }
 
-static void translate_dialog( po_file_t po, dialog_t *dlg, dialog_t *new, int *found )
+static void translate_dialog( dialog_t *dlg, dialog_t *new, int *found )
 {
-    if (dlg->title) new->title = translate_string( po, dlg->title, found );
+    if (dlg->title) new->title = translate_string( dlg->title, found );
+    if (is_rtl_language( new->lvc.language ))
+    {
+        new->gotexstyle = TRUE;
+        if (dlg->gotexstyle)
+            new->exstyle = new_style( dlg->exstyle->or_mask | WS_EX_LAYOUTRTL, dlg->exstyle->and_mask );
+        else
+            new->exstyle = new_style( WS_EX_LAYOUTRTL, 0 );
+    }
     if (dlg->font)
     {
         new->font = xmalloc( sizeof(*dlg->font) );
-        new->font = dlg->font;
-        new->font->name = translate_string( po, dlg->font->name, found );
+        *new->font = *dlg->font;
+        if (uses_larger_font( new->lvc.language )) new->font->size++;
+        new->font->name = convert_string( dlg->font->name, str_unicode, 1252 );
     }
-    new->controls = translate_controls( po, dlg->controls, found );
+    new->controls = translate_controls( dlg->controls, found );
 }
 
-static void translate_resources( po_file_t po, language_t *lang )
+static event_t *translate_accel( accelerator_t *acc, accelerator_t *new, int *found )
+{
+    event_t *event, *new_ev, *head = NULL, *tail = NULL;
+
+    event = acc->events;
+    while (event)
+    {
+        new_ev = new_event();
+        *new_ev = *event;
+        if (event->str) new_ev->str = translate_string( event->str, found );
+        if (tail) tail->next = new_ev;
+        else head = new_ev;
+        new_ev->next = NULL;
+        new_ev->prev = tail;
+        tail = new_ev;
+        event = event->next;
+    }
+    return head;
+}
+
+static void translate_resources( language_t *lang )
 {
     resource_t *res;
 
@@ -893,19 +1167,20 @@ static void translate_resources( po_file_t po, language_t *lang )
         switch (res->type)
         {
         case res_acc:
-            /* FIXME */
+            new = dup_resource( res, lang );
+            new->res.acc->events = translate_accel( res->res.acc, new->res.acc, &found );
             break;
         case res_dlg:
             new = dup_resource( res, lang );
-            translate_dialog( po, res->res.dlg, new->res.dlg, &found );
+            translate_dialog( res->res.dlg, new->res.dlg, &found );
             break;
         case res_men:
             new = dup_resource( res, lang );
-            new->res.men->items = translate_items( po, res->res.men->items, &found );
+            new->res.men->items = translate_items( res->res.men->items, &found );
             break;
         case res_stt:
             new = dup_resource( res, lang );
-            new->res.stt = translate_stringtable( po, res->res.stt, lang, &found );
+            new->res.stt = translate_stringtable( res->res.stt, lang, &found );
             break;
         case res_msg:
             /* FIXME */
@@ -927,7 +1202,6 @@ static void translate_resources( po_file_t po, language_t *lang )
 void add_translations( const char *po_dir )
 {
     resource_t *res;
-    po_file_t po;
     char buffer[256];
     char *p, *tok, *name;
     unsigned int i;
@@ -937,10 +1211,20 @@ void add_translations( const char *po_dir )
     for (res = resource_top; res; res = res->next) if (is_english( res->lan )) break;
     if (!res) return;
 
+    if (!po_dir)  /* run through the translation process to remove msg contexts */
+    {
+        translate_resources( new_language( LANG_ENGLISH, SUBLANG_DEFAULT ));
+        goto done;
+    }
+
     new_top = new_tail = NULL;
 
     name = strmake( "%s/LINGUAS", po_dir );
-    if (!(f = fopen( name, "r" ))) return;
+    if (!(f = fopen( name, "r" )))
+    {
+        free( name );
+        return;
+    }
     free( name );
     while (fgets( buffer, sizeof(buffer), f ))
     {
@@ -953,16 +1237,16 @@ void add_translations( const char *po_dir )
             if (i == sizeof(languages)/sizeof(languages[0]))
                 error( "unknown language '%s'\n", tok );
 
-            name = strmake( "%s/%s.po", po_dir, tok );
-            if (!(po = po_file_read( name, &po_xerror_handler )))
-                error( "cannot load po file for language '%s'\n", tok );
-            translate_resources( po, new_language(languages[i].id, languages[i].sub) );
-            po_file_free( po );
+            name = strmake( "%s/%s.mo", po_dir, tok );
+            load_mo_file( name );
+            translate_resources( new_language(languages[i].id, languages[i].sub) );
+            free_mo_file();
             free( name );
         }
     }
     fclose( f );
 
+done:
     /* prepend the translated resources to the global list */
     if (new_tail)
     {
@@ -971,21 +1255,3 @@ void add_translations( const char *po_dir )
         resource_top = new_top;
     }
 }
-
-#else  /* HAVE_LIBGETTEXTPO */
-
-void write_pot_file( const char *outname )
-{
-    error( "PO files not supported in this wrc build\n" );
-}
-
-void write_po_files( const char *outname )
-{
-    error( "PO files not supported in this wrc build\n" );
-}
-
-void add_translations( const char *po_dir )
-{
-}
-
-#endif

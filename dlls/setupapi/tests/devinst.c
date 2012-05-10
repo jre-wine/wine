@@ -18,9 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -261,6 +261,7 @@ static void test_SetupDiCreateDeviceInfoListEx(void)
     DWORD error;
     static CHAR notnull[] = "NotNull";
     static const WCHAR machine[] = { 'd','u','m','m','y',0 };
+    static const WCHAR empty[] = { 0 };
 
     SetLastError(0xdeadbeef);
     /* create empty DeviceInfoList, but set Reserved to a value, which is not NULL */
@@ -285,6 +286,14 @@ static void test_SetupDiCreateDeviceInfoListEx(void)
 
     /* create empty DeviceInfoList */
     devlist = pSetupDiCreateDeviceInfoListExW(NULL, NULL, NULL, NULL);
+    ok(devlist && devlist != INVALID_HANDLE_VALUE, "SetupDiCreateDeviceInfoListExW failed : %p %d (expected != %p)\n", devlist, error, INVALID_HANDLE_VALUE);
+
+    /* destroy DeviceInfoList */
+    ret = pSetupDiDestroyDeviceInfoList(devlist);
+    ok(ret, "SetupDiDestroyDeviceInfoList failed : %d\n", error);
+
+    /* create empty DeviceInfoList with empty machine name */
+    devlist = pSetupDiCreateDeviceInfoListExW(NULL, NULL, empty, NULL);
     ok(devlist && devlist != INVALID_HANDLE_VALUE, "SetupDiCreateDeviceInfoListExW failed : %p %d (expected != %p)\n", devlist, error, INVALID_HANDLE_VALUE);
 
     /* destroy DeviceInfoList */
@@ -965,7 +974,6 @@ static void testDevRegKey(void)
         key = pSetupDiOpenDevRegKey(set, &devInfo, DICS_FLAG_GLOBAL, 0,
          DIREG_DRV, 0);
         /* The software key isn't created by default */
-        todo_wine
         ok(key == INVALID_HANDLE_VALUE &&
          GetLastError() == ERROR_KEY_DOES_NOT_EXIST,
          "Expected ERROR_KEY_DOES_NOT_EXIST, got %08x\n", GetLastError());

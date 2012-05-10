@@ -1,6 +1,7 @@
 /*
  * Copyright 2005-2006 Jacek Caban for CodeWeavers
- * Copyright 2009-2010 Detlef Riekenberg
+ * Copyright 2009-2011 Detlef Riekenberg
+ * Copyright 2011 Thomas Mullaly for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,6 +28,7 @@
 #include <wine/test.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -34,6 +36,9 @@
 #include "urlmon.h"
 
 #include "initguid.h"
+
+#define URLZONE_CUSTOM  URLZONE_USER_MIN+1
+#define URLZONE_CUSTOM2 URLZONE_CUSTOM+1
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -65,6 +70,7 @@ DEFINE_EXPECT(ParseUrl_SECURITY_URL_input2);
 DEFINE_EXPECT(ParseUrl_SECURITY_URL_expected);
 DEFINE_EXPECT(ParseUrl_SECURITY_URL_http);
 DEFINE_EXPECT(ParseUrl_SECURITY_DOMAIN_expected);
+DEFINE_EXPECT(ProcessUrlAction);
 
 static HRESULT (WINAPI *pCoInternetCreateSecurityManager)(IServiceProvider *, IInternetSecurityManager**, DWORD);
 static HRESULT (WINAPI *pCoInternetCreateZoneManager)(IServiceProvider *, IInternetZoneManager**, DWORD);
@@ -72,6 +78,9 @@ static HRESULT (WINAPI *pCoInternetGetSecurityUrl)(LPCWSTR, LPWSTR*, PSUACTION, 
 static HRESULT (WINAPI *pCoInternetGetSecurityUrlEx)(IUri*, IUri**, PSUACTION, DWORD_PTR);
 static HRESULT (WINAPI *pCreateUri)(LPCWSTR, DWORD, DWORD_PTR, IUri**);
 static HRESULT (WINAPI *pCoInternetGetSession)(DWORD, IInternetSession**, DWORD);
+static HRESULT (WINAPI *pCoInternetIsFeatureEnabled)(INTERNETFEATURELIST, DWORD);
+static HRESULT (WINAPI *pCoInternetIsFeatureEnabledForUrl)(INTERNETFEATURELIST, DWORD, LPCWSTR, IInternetSecurityManager*);
+static HRESULT (WINAPI *pCoInternetIsFeatureZoneElevationEnabled)(LPCWSTR, LPCWSTR, IInternetSecurityManager*, DWORD);
 
 static const WCHAR url1[] = {'r','e','s',':','/','/','m','s','h','t','m','l','.','d','l','l',
         '/','b','l','a','n','k','.','h','t','m',0};
@@ -89,6 +98,14 @@ static const WCHAR url9[] = {'h','t','t','p',':','/','/','w','w','w','.','z','o'
         '.','w','i','n','e','t','e','s','t', '/','s','i','t','e','/','a','b','o','u','t',0};
 static const WCHAR url10[] = {'f','i','l','e',':','/','/','s','o','m','e','%','2','0','f','i','l','e',
         '.','j','p','g',0};
+static const WCHAR url11[] = {'f','i','l','e',':','/','/','c',':','/','I','n','d','e','x','.','h','t','m',0};
+static const WCHAR url12[] = {'f','i','l','e',':','/','/','/','c',':','/','I','n','d','e','x','.','h','t','m',0};
+static const WCHAR url13[] = {'h','t','t','p',':','g','o','o','g','l','e','.','c','o','m',0};
+static const WCHAR url14[] = {'z','i','p',':','t','e','s','t','i','n','g','.','c','o','m','/','t','e','s','t','i','n','g',0};
+static const WCHAR url15[] = {'h','t','t','p',':','/','/','g','o','o','g','l','e','.','c','o','m','.','u','k',0};
+static const WCHAR url16[] = {'f','i','l','e',':','/','/','/','c',':',0};
+static const WCHAR url17[] = {'f','i','l','e',':','/','/','/','c',':','c','\\',0};
+static const WCHAR url18[] = {'c',':','\\','t','e','s','t','.','h','t','m',0};
 
 static const WCHAR url4e[] = {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e',
         '.','j','p','g',0};
@@ -99,7 +116,11 @@ static const WCHAR security_url2W[] = {'w','i','n','e','t','e','s','t',':','t','
 static const WCHAR security_expectedW[] = {'w','i','n','e','t','e','s','t',':','z','i','p',0};
 static const WCHAR winetest_to_httpW[] = {'w','i','n','e','t','e','s','t',':','h',0};
 
+static const char *szZoneMapDomainsKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap\\Domains";
+static const char *szInternetSettingsKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+
 static const BYTE secid1[] = {'f','i','l','e',':',0,0,0,0};
+static const BYTE secid2[] = {'*',':','i','n','d','e','x','.','h','t','m',3,0,0,0};
 static const BYTE secid5[] = {'h','t','t','p',':','w','w','w','.','z','o','n','e','3',
         '.','w','i','n','e','t','e','s','t',3,0,0,0};
 static const BYTE secid6[] = {'a','b','o','u','t',':','b','l','a','n','k',3,0,0,0};
@@ -107,8 +128,12 @@ static const BYTE secid7[] = {'f','t','p',':','z','o','n','e','3',
         '.','w','i','n','e','t','e','s','t',3,0,0,0};
 static const BYTE secid10[] =
     {'f','i','l','e',':','s','o','m','e','%','2','0','f','i','l','e','.','j','p','g',3,0,0,0};
+static const BYTE secid14[] =
+    {'z','i','p',':','t','e','s','t','i','n','g','.','c','o','m','/','t','e','s','t','i','n','g',3,0,0,0};
 static const BYTE secid10_2[] =
     {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e','.','j','p','g',3,0,0,0};
+static const BYTE secid13[] = {'h','t','t','p',':','c','o','m','.','u','k',3,0,0,0};
+static const BYTE secid13_2[] = {'h','t','t','p',':','g','o','o','g','l','e','.','c','o','m','.','u','k',3,0,0,0};
 
 static const GUID CLSID_TestActiveX =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x06,0x46}};
@@ -118,6 +143,7 @@ const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
     {0x10200490,0xfa38,0x11d0,{0xac,0x0e,0x00,0xa0,0xc9,0xf,0xff,0xc0}};
 
 static int called_securl_http;
+static DWORD ProcessUrlAction_policy;
 
 static struct secmgr_test {
     LPCWSTR url;
@@ -132,7 +158,12 @@ static struct secmgr_test {
     {url3, 0,   S_OK, sizeof(secid1), secid1, S_OK},
     {url5, 3,   S_OK, sizeof(secid5), secid5, S_OK},
     {url6, 3,   S_OK, sizeof(secid6), secid6, S_OK},
-    {url7, 3,   S_OK, sizeof(secid7), secid7, S_OK}
+    {url7, 3,   S_OK, sizeof(secid7), secid7, S_OK},
+    {url11,0,   S_OK, sizeof(secid1), secid1, S_OK},
+    {url12,0,   S_OK, sizeof(secid1), secid1, S_OK},
+    {url16,0,   S_OK, sizeof(secid1), secid1, S_OK},
+    {url17,0,   S_OK, sizeof(secid1), secid1, S_OK},
+    {url18,0,   S_OK, sizeof(secid1), secid1, S_OK}
 };
 
 static int strcmp_w(const WCHAR *str1, const WCHAR *str2)
@@ -168,6 +199,171 @@ static inline DWORD strcmp_aw(LPCSTR strA, LPCWSTR strB) {
     heap_free(strAW);
     return ret;
 }
+
+
+/* Based on RegDeleteTreeW from dlls/advapi32/registry.c */
+static LONG myRegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey)
+{
+    LONG ret;
+    DWORD dwMaxSubkeyLen, dwMaxValueLen;
+    DWORD dwMaxLen, dwSize;
+    CHAR szNameBuf[MAX_PATH], *lpszName = szNameBuf;
+    HKEY hSubKey = hKey;
+
+    if(lpszSubKey)
+    {
+        ret = RegOpenKeyExA(hKey, lpszSubKey, 0, KEY_READ, &hSubKey);
+        if (ret) return ret;
+    }
+
+    /* Get highest length for keys, values */
+    ret = RegQueryInfoKeyA(hSubKey, NULL, NULL, NULL, NULL,
+            &dwMaxSubkeyLen, NULL, NULL, &dwMaxValueLen, NULL, NULL, NULL);
+    if (ret) goto cleanup;
+
+    dwMaxSubkeyLen++;
+    dwMaxValueLen++;
+    dwMaxLen = max(dwMaxSubkeyLen, dwMaxValueLen);
+    if (dwMaxLen > sizeof(szNameBuf)/sizeof(CHAR))
+    {
+        /* Name too big: alloc a buffer for it */
+        if (!(lpszName = HeapAlloc( GetProcessHeap(), 0, dwMaxLen*sizeof(CHAR))))
+        {
+            ret = ERROR_NOT_ENOUGH_MEMORY;
+            goto cleanup;
+        }
+    }
+
+    /* Recursively delete all the subkeys */
+    while (TRUE)
+    {
+        dwSize = dwMaxLen;
+        if (RegEnumKeyExA(hSubKey, 0, lpszName, &dwSize, NULL,
+                          NULL, NULL, NULL)) break;
+
+        ret = myRegDeleteTreeA(hSubKey, lpszName);
+        if (ret) goto cleanup;
+    }
+
+    if (lpszSubKey)
+        ret = RegDeleteKeyA(hKey, lpszSubKey);
+    else
+        while (TRUE)
+        {
+            dwSize = dwMaxLen;
+            if (RegEnumValueA(hKey, 0, lpszName, &dwSize,
+                  NULL, NULL, NULL, NULL)) break;
+
+            ret = RegDeleteValueA(hKey, lpszName);
+            if (ret) goto cleanup;
+        }
+
+cleanup:
+    /* Free buffer if allocated */
+    if (lpszName != szNameBuf)
+        heap_free(lpszName);
+    if(lpszSubKey)
+        RegCloseKey(hSubKey);
+    return ret;
+}
+
+static HRESULT WINAPI SecurityManager_QueryInterface(IInternetSecurityManager* This,
+        REFIID riid, void **ppvObject)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static ULONG WINAPI SecurityManager_AddRef(IInternetSecurityManager* This)
+{
+    return 2;
+}
+
+static ULONG WINAPI SecurityManager_Release(IInternetSecurityManager* This)
+{
+    return 1;
+}
+
+static HRESULT WINAPI SecurityManager_SetSecuritySite(IInternetSecurityManager* This,
+        IInternetSecurityMgrSite *pSite)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_GetSecuritySite(IInternetSecurityManager* This,
+        IInternetSecurityMgrSite **ppSite)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_MapUrlToZone(IInternetSecurityManager* This,
+        LPCWSTR pwszUrl, DWORD *pdwZone, DWORD dwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_GetSecurityId(IInternetSecurityManager* This,
+        LPCWSTR pwszUrl, BYTE *pbSecurityId, DWORD *pcbSecurityId, DWORD_PTR dwReserved)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_ProcessUrlAction(IInternetSecurityManager* This,
+        LPCWSTR pwszUrl, DWORD dwAction, BYTE *pPolicy, DWORD cbPolicy,
+        BYTE *pContext, DWORD cbContext, DWORD dwFlags, DWORD dwReserved)
+{
+    CHECK_EXPECT(ProcessUrlAction);
+    ok(dwAction == URLACTION_FEATURE_ZONE_ELEVATION, "dwAction = %x\n", dwAction);
+    ok(cbPolicy == sizeof(DWORD), "cbPolicy = %d\n", cbPolicy);
+    ok(!pContext, "pContext != NULL\n");
+    ok(dwFlags == PUAF_NOUI, "dwFlags = %x\n", dwFlags);
+    ok(dwReserved == 0, "dwReserved = %x\n", dwReserved);
+
+    *pPolicy = ProcessUrlAction_policy;
+    return ProcessUrlAction_policy==URLPOLICY_ALLOW ? S_OK : S_FALSE;
+}
+
+static HRESULT WINAPI SecurityManager_QueryCustomPolicy(IInternetSecurityManager* This,
+        LPCWSTR pwszUrl, REFGUID guidKey, BYTE **ppPolicy, DWORD *pcbPolicy,
+        BYTE *pContext, DWORD cbContext, DWORD dwReserved)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_SetZoneMapping(IInternetSecurityManager* This,
+        DWORD dwZone, LPCWSTR lpszPattern, DWORD dwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SecurityManager_GetZoneMappings(IInternetSecurityManager* This,
+        DWORD dwZone, IEnumString **ppenumString, DWORD dwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IInternetSecurityManagerVtbl SecurityManagerVtbl = {
+    SecurityManager_QueryInterface,
+    SecurityManager_AddRef,
+    SecurityManager_Release,
+    SecurityManager_SetSecuritySite,
+    SecurityManager_GetSecuritySite,
+    SecurityManager_MapUrlToZone,
+    SecurityManager_GetSecurityId,
+    SecurityManager_ProcessUrlAction,
+    SecurityManager_QueryCustomPolicy,
+    SecurityManager_SetZoneMapping,
+    SecurityManager_GetZoneMappings
+};
+
+static IInternetSecurityManager security_manager = { &SecurityManagerVtbl };
 
 static void test_SecurityManager(void)
 {
@@ -229,9 +425,31 @@ static void test_SecurityManager(void)
     ok(size == sizeof(secid10) ||
        size == sizeof(secid10_2), /* win2k3 */
        "size=%d\n", size);
-    ok(!memcmp(buf, secid10, size) ||
-       !memcmp(buf, secid10_2, size), /* win2k3 */
+    ok(!memcmp(buf, secid10, sizeof(secid10)) ||
+       !memcmp(buf, secid10_2, sizeof(secid10_2)), /* win2k3 */
        "wrong secid\n");
+
+    zone = 100;
+    hres = IInternetSecurityManager_MapUrlToZone(secmgr, url13, &zone, 0);
+    ok(hres == S_OK, "MapUrlToZone failed: %08x\n", hres);
+    ok(zone == URLZONE_INVALID || broken(zone == URLZONE_INTERNET), "zone=%d\n", zone);
+
+    size = sizeof(buf);
+    memset(buf, 0xf0, sizeof(buf));
+    hres = IInternetSecurityManager_GetSecurityId(secmgr, url13, buf, &size, 0);
+    ok(hres == E_INVALIDARG || broken(hres == S_OK), "GetSecurityId failed: %08x\n", hres);
+
+    zone = 100;
+    hres = IInternetSecurityManager_MapUrlToZone(secmgr, url14, &zone, 0);
+    ok(hres == S_OK, "MapUrlToZone failed: %08x, expected S_OK\n", hres);
+    ok(zone == URLZONE_INTERNET, "zone=%d\n", zone);
+
+    size = sizeof(buf);
+    memset(buf, 0xf0, sizeof(buf));
+    hres = IInternetSecurityManager_GetSecurityId(secmgr, url14, buf, &size, 0);
+    ok(hres == S_OK, "GetSecurityId failed: %08x, expected S_OK\n", hres);
+    ok(size == sizeof(secid14), "size=%d\n", size);
+    ok(!memcmp(buf, secid14, size), "wrong secid\n");
 
     zone = 100;
     hres = IInternetSecurityManager_MapUrlToZone(secmgr, NULL, &zone, 0);
@@ -451,6 +669,296 @@ static void test_polices(void)
 
     IInternetSecurityManager_Release(secmgr);
     IInternetZoneManager_Release(zonemgr);
+}
+
+/* IE (or at least newer versions of it) seem to cache the keys in ZoneMap
+ * when urlmon.dll is loaded and it doesn't seem to update its cache, unless
+ * SetZoneMapping is used.
+ */
+static void test_zone_domain_cache(void)
+{
+    HRESULT hres;
+    DWORD res, zone;
+    IInternetSecurityManager *secmgr = NULL;
+    HKEY domains, domain;
+
+    static const WCHAR testing_domain_urlW[] = {'h','t','t','p',':','/','/','t','e','s','t','i','n','g','.',
+            'd','o','m','a','i','n','/',0};
+
+    res = RegOpenKeyA(HKEY_CURRENT_USER, szZoneMapDomainsKey, &domains);
+    ok(res == ERROR_SUCCESS, "RegOpenKey failed: %d\n", res);
+    if(res != ERROR_SUCCESS)
+        return;
+
+    res = RegCreateKeyA(domains, "testing.domain", &domain);
+    ok(res == ERROR_SUCCESS, "RegCreateKey failed: %d\n", res);
+    if(res != ERROR_SUCCESS) {
+        RegCloseKey(domains);
+        return;
+    }
+
+    zone = URLZONE_CUSTOM;
+    res = RegSetValueExA(domain, "http", 0, REG_DWORD, (BYTE*)&zone, sizeof(DWORD));
+    ok(res == ERROR_SUCCESS, "RegSetValueEx failed: %d\n", res);
+
+    RegCloseKey(domain);
+
+    hres = pCoInternetCreateSecurityManager(NULL, &secmgr, 0);
+    ok(hres == S_OK, "CoInternetCreateSecurityManager failed: %08x\n", hres);
+
+    zone = URLZONE_INVALID;
+    hres = IInternetSecurityManager_MapUrlToZone(secmgr, testing_domain_urlW, &zone, 0);
+    ok(hres == S_OK, "MapUrlToZone failed: %08x\n", hres);
+    todo_wine ok(zone == URLZONE_INTERNET, "Got %d, expected URLZONE_INTERNET\n", zone);
+
+    /* FIXME: Play nice with ZoneMaps that existed before the test is run. */
+    res = RegDeleteKeyA(domains, "testing.domain");
+    ok(res == ERROR_SUCCESS, "RegDeleteKey failed: %d\n", res);
+
+    RegCloseKey(domains);
+    IInternetSecurityManager_Release(secmgr);
+}
+
+typedef struct {
+    const char  *domain;
+    const char  *subdomain;
+    const char  *scheme;
+    DWORD       zone;
+} zone_domain_mapping;
+
+/* FIXME: Move these into SetZoneMapping tests when the day comes... */
+static const zone_domain_mapping zone_domain_mappings[] = {
+    /* Implicitly means "*.yabadaba.do". */
+    {"yabadaba.do",NULL,"http",URLZONE_CUSTOM},
+    /* The '*' doesn't count as a wildcard, since its not the first component of the subdomain. */
+    {"super.cool","testing.*","ftp",URLZONE_CUSTOM2},
+    /* The '*' counts since it's the first component of the subdomain. */
+    {"super.cool","*.testing","ftp",URLZONE_CUSTOM2},
+    /* All known scheme types apply to wildcard schemes. */
+    {"tests.test",NULL,"*",URLZONE_CUSTOM},
+    /* Due to a defect with how windows checks the mappings, unknown scheme types
+     * never seem to get mapped properly. */
+    {"tests.test",NULL,"zip",URLZONE_CUSTOM},
+    {"www.testing.com",NULL,"http",URLZONE_CUSTOM},
+    {"www.testing.com","testing","http",URLZONE_CUSTOM2},
+    {"org",NULL,"http",URLZONE_CUSTOM},
+    {"org","testing","http",URLZONE_CUSTOM2},
+    {"wine.testing",NULL,"*",URLZONE_CUSTOM2}
+};
+
+static void register_zone_domains(void)
+{
+    HKEY domains;
+    DWORD res, i;
+
+    /* Some Windows versions don't seem to have a "Domains" key in their HKLM. */
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, szZoneMapDomainsKey, &domains);
+    ok(res == ERROR_SUCCESS || broken(res == ERROR_FILE_NOT_FOUND), "RegOpenKey failed: %d\n", res);
+    if(res == ERROR_SUCCESS) {
+        HKEY domain;
+        DWORD zone = URLZONE_CUSTOM;
+
+        res = RegCreateKeyA(domains, "local.machine", &domain);
+        ok(res == ERROR_SUCCESS, "RegCreateKey failed: %d\n", res);
+
+        res = RegSetValueExA(domain, "http", 0, REG_DWORD, (BYTE*)&zone, sizeof(DWORD));
+        ok(res == ERROR_SUCCESS, "RegSetValueEx failed: %d\n", res);
+
+        RegCloseKey(domain);
+        RegCloseKey(domains);
+    }
+
+    res = RegOpenKeyA(HKEY_CURRENT_USER, szZoneMapDomainsKey, &domains);
+    ok(res == ERROR_SUCCESS, "RegOpenKey failed: %d\n", res);
+
+    for(i = 0; i < sizeof(zone_domain_mappings)/sizeof(zone_domain_mappings[0]); ++i) {
+        const zone_domain_mapping *test = zone_domain_mappings+i;
+        HKEY domain;
+
+        res = RegCreateKeyA(domains, test->domain, &domain);
+        ok(res == ERROR_SUCCESS, "RegCreateKey failed with %d on test %d\n", res, i);
+
+        /* Only set the value if there's no subdomain. */
+        if(!test->subdomain) {
+            res = RegSetValueExA(domain, test->scheme, 0, REG_DWORD, (BYTE*)&test->zone, sizeof(DWORD));
+            ok(res == ERROR_SUCCESS, "RegSetValueEx failed with %d on test %d\n", res, i);
+        } else {
+            HKEY subdomain;
+
+            res = RegCreateKeyA(domain, test->subdomain, &subdomain);
+            ok(res == ERROR_SUCCESS, "RegCreateKey failed with %d on test %d\n", res, i);
+
+            res = RegSetValueExA(subdomain, test->scheme, 0, REG_DWORD, (BYTE*)&test->zone, sizeof(DWORD));
+            ok(res == ERROR_SUCCESS, "RegSetValueEx failed with %d on test %d\n", res, i);
+
+            RegCloseKey(subdomain);
+        }
+
+        RegCloseKey(domain);
+    }
+
+    RegCloseKey(domains);
+}
+
+static void unregister_zone_domains(void)
+{
+    HKEY domains;
+    DWORD res, i;
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, szZoneMapDomainsKey, &domains);
+    ok(res == ERROR_SUCCESS || broken(res == ERROR_FILE_NOT_FOUND), "RegOpenKey failed: %d\n", res);
+    if(res == ERROR_SUCCESS) {
+        RegDeleteKeyA(domains, "local.machine");
+        RegCloseKey(domains);
+    }
+
+    res = RegOpenKeyA(HKEY_CURRENT_USER, szZoneMapDomainsKey, &domains);
+    ok(res == ERROR_SUCCESS, "RegOpenKey failed: %d\n", res);
+
+    for(i = 0; i < sizeof(zone_domain_mappings)/sizeof(zone_domain_mappings[0]); ++i) {
+        const zone_domain_mapping *test = zone_domain_mappings+i;
+
+        /* FIXME: Uses the "cludge" approach to remove the test data from the registry!
+         *        Although, if domain names are... unique, this shouldn't cause any harm
+         *        to keys (if any) that existed before the tests.
+         */
+        if(test->subdomain) {
+            HKEY domain;
+
+            res = RegOpenKeyA(domains, test->domain, &domain);
+            if(res == ERROR_SUCCESS) {
+                RegDeleteKeyA(domain, test->subdomain);
+                RegCloseKey(domain);
+            }
+        }
+        RegDeleteKeyA(domains, test->domain);
+    }
+
+    RegCloseKey(domains);
+}
+
+static void run_child_process(void)
+{
+    char cmdline[MAX_PATH];
+    char path[MAX_PATH];
+    char **argv;
+    PROCESS_INFORMATION pi;
+    STARTUPINFO si = { 0 };
+    BOOL ret;
+
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+
+    si.cb = sizeof(si);
+    winetest_get_mainargs(&argv);
+    sprintf(cmdline, "\"%s\" %s domain_tests", argv[0], argv[1]);
+    ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "Failed to spawn child process: %u\n", GetLastError());
+    winetest_wait_child_process(pi.hProcess);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+}
+
+typedef struct {
+    const char  *url;
+    DWORD       zone;
+    BOOL        todo;
+    DWORD       broken_zone;
+} zone_mapping_test;
+
+static const zone_mapping_test zone_mapping_tests[] = {
+    /* Tests for "yabadaba.do" zone mappings. */
+    {"http://yabadaba.do/",URLZONE_CUSTOM},
+    {"http://google.yabadaba.do/",URLZONE_CUSTOM},
+    {"zip://yabadaba.do/",URLZONE_INTERNET},
+    /* Tests for "super.cool" zone mappings. */
+    {"ftp://testing.google.super.cool/",URLZONE_INTERNET},
+    {"ftp://testing.*.super.cool/",URLZONE_CUSTOM2},
+    {"ftp://google.testing.super.cool/",URLZONE_CUSTOM2},
+    /* Tests for "tests.test" zone mappings. */
+    {"http://tests.test/",URLZONE_CUSTOM},
+    {"http://www.tests.test/",URLZONE_CUSTOM},
+    {"ftp://tests.test/",URLZONE_CUSTOM},
+    {"ftp://www.tests.test/",URLZONE_CUSTOM},
+    {"test://www.tests.test/",URLZONE_INTERNET},
+    {"test://tests.test/",URLZONE_INTERNET},
+    {"zip://www.tests.test/",URLZONE_INTERNET},
+    {"zip://tests.test/",URLZONE_INTERNET},
+    /* Tests for "www.testing.com" zone mappings. */
+    {"http://google.www.testing.com/",URLZONE_INTERNET},
+    {"http://www.testing.com/",URLZONE_CUSTOM,FALSE,URLZONE_INTERNET},
+    {"http://testing.www.testing.com/",URLZONE_CUSTOM2,FALSE,URLZONE_INTERNET},
+    /* Tests for "org" zone mappings. */
+    {"http://google.org/",URLZONE_INTERNET,FALSE,URLZONE_CUSTOM},
+    {"http://org/",URLZONE_CUSTOM},
+    {"http://testing.org/",URLZONE_CUSTOM2},
+    /* Tests for "wine.testing" mapping */
+    {"*:wine.testing/test",URLZONE_CUSTOM2},
+    {"http://wine.testing/testing",URLZONE_CUSTOM2}
+};
+
+static void test_zone_domain_mappings(void)
+{
+    HRESULT hres;
+    DWORD i, res;
+    IInternetSecurityManager *secmgr = NULL;
+    HKEY domains;
+    DWORD zone = URLZONE_INVALID;
+
+    trace("testing zone domain mappings...\n");
+
+    hres = pCoInternetCreateSecurityManager(NULL, &secmgr, 0);
+    ok(hres == S_OK, "CoInternetCreateSecurityManager failed: %08x\n", hres);
+
+    res = RegOpenKeyA(HKEY_LOCAL_MACHINE, szZoneMapDomainsKey, &domains);
+    if(res == ERROR_SUCCESS) {
+        static const WCHAR local_machineW[] = {'h','t','t','p',':','/','/','t','e','s','t','.','l','o','c','a','l',
+                '.','m','a','c','h','i','n','e','/',0};
+
+        hres = IInternetSecurityManager_MapUrlToZone(secmgr, local_machineW, &zone, 0);
+        ok(hres == S_OK, "MapUrlToZone failed: %08x\n", hres);
+        ok(zone == URLZONE_CUSTOM, "Expected URLZONE_CUSTOM, but got %d\n", zone);
+
+        RegCloseKey(domains);
+    }
+
+    for(i = 0; i < sizeof(zone_mapping_tests)/sizeof(zone_mapping_tests[0]); ++i) {
+        const zone_mapping_test *test = zone_mapping_tests+i;
+        LPWSTR urlW = a2w(test->url);
+        zone = URLZONE_INVALID;
+
+        hres = IInternetSecurityManager_MapUrlToZone(secmgr, urlW, &zone, 0);
+        ok(hres == S_OK, "MapUrlToZone failed: %08x\n", hres);
+        if(test->todo)
+            todo_wine
+                ok(zone == test->zone || broken(test->broken_zone == zone),
+                    "Expected %d, but got %d on test %d\n", test->zone, zone, i);
+        else
+            ok(zone == test->zone || broken(test->broken_zone == zone),
+                "Expected %d, but got %d on test %d\n", test->zone, zone, i);
+
+        heap_free(urlW);
+    }
+
+    IInternetSecurityManager_Release(secmgr);
+}
+
+static void test_zone_domains(void)
+{
+    if(is_ie_hardened()) {
+        skip("IE running in Enhanced Security Configuration\n");
+        return;
+    } else if(!pCreateUri) {
+        win_skip("Skipping zone domain tests, IE too old\n");
+        return;
+    }
+
+    trace("testing zone domains...\n");
+
+    test_zone_domain_cache();
+
+    register_zone_domains();
+    run_child_process();
+    unregister_zone_domains();
 }
 
 static void test_CoInternetCreateZoneManager(void)
@@ -717,6 +1225,83 @@ static void test_GetZoneAttributes(void)
     hr = IInternetZoneManager_Release(zonemgr);
     ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
 }
+
+static void test_SetZoneAttributes(void)
+{
+    IInternetZoneManager *zonemgr = NULL;
+    CHAR buffer [sizeof(ZONEATTRIBUTES) + 16];
+    ZONEATTRIBUTES* pZA = (ZONEATTRIBUTES*) buffer;
+    CHAR regpath[MAX_PATH];
+    HKEY hkey;
+    HRESULT hr;
+    DWORD res;
+
+    trace("testing SetZoneAttributes...\n");
+    hr = pCoInternetCreateZoneManager(NULL, &zonemgr, 0);
+    ok(hr == S_OK, "CoInternetCreateZoneManager result: 0x%x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    memset(buffer, -1, sizeof(buffer));
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, URLZONE_LOCAL_MACHINE, pZA);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+
+    sprintf(regpath, "%s\\Zones\\%d", szInternetSettingsKey, URLZONE_CUSTOM);
+    res = RegCreateKeyA(HKEY_CURRENT_USER, regpath, &hkey);
+    RegCloseKey(hkey);
+
+    ok(res == ERROR_SUCCESS, "got %d (expected ERROR_SUCCESS)\n", res);
+    if (res != ERROR_SUCCESS)
+        goto cleanup;
+
+    pZA->cbSize = sizeof(ZONEATTRIBUTES);
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%x (expected E_INVALIDARG)\n", hr);
+
+    /* normal use */
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, pZA);
+    if (hr == E_FAIL) {
+        win_skip("SetZoneAttributes not supported: IE too old\n");
+        goto cleanup;
+    }
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+
+    /* native urlmon ignores cbSize */
+    pZA->cbSize = sizeof(ZONEATTRIBUTES) + sizeof(DWORD);
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, pZA);
+    ok(hr == S_OK, "got 0x%x for sizeof(ZONEATTRIBUTES) + sizeof(DWORD) (expected S_OK)\n", hr);
+
+    pZA->cbSize = sizeof(ZONEATTRIBUTES) - sizeof(DWORD);
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, pZA);
+    ok(hr == S_OK, "got 0x%x for sizeof(ZONEATTRIBUTES) - sizeof(DWORD) (expected S_OK)\n", hr);
+
+    pZA->cbSize = 0;
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, pZA);
+    ok(hr == S_OK, "got 0x%x for size 0 (expected S_OK)\n", hr);
+
+    /* The key for the zone must be present, when calling SetZoneAttributes */
+    myRegDeleteTreeA(HKEY_CURRENT_USER, regpath);
+    /* E_FAIL is returned from IE6 here, which is reasonable.
+       All newer IE return S_OK without saving the zone attributes to the registry.
+       This is a Windows bug, but we have to accept that as standard */
+    hr = IInternetZoneManager_SetZoneAttributes(zonemgr, URLZONE_CUSTOM, pZA);
+    ok((hr == S_OK) || broken(hr == E_FAIL), "got 0x%x (expected S_OK)\n", hr);
+
+    /* SetZoneAttributes did not create the directory */
+    res = RegOpenKeyA(HKEY_CURRENT_USER, regpath, &hkey);
+    ok((res == ERROR_FILE_NOT_FOUND) && (hkey == NULL),
+        "got %u with %p (expected ERROR_FILE_NOT_FOUND with NULL)\n", res, hkey);
+
+    if (hkey) RegCloseKey(hkey);
+
+cleanup:
+    /* delete zone settings in the registry */
+    myRegDeleteTreeA(HKEY_CURRENT_USER, regpath);
+
+    hr = IInternetZoneManager_Release(zonemgr);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+}
+
 
 static void test_InternetSecurityMarshalling(void)
 {
@@ -1114,7 +1699,7 @@ static void test_InternetGetSecurityUrlEx_Pluggable(void)
     HRESULT hr;
     IUri *uri = NULL, *result;
 
-    trace("testing CoInternetGetSecurityUrlEx for plugable protocols...\n");
+    trace("testing CoInternetGetSecurityUrlEx for pluggable protocols...\n");
 
     hr = pCreateUri(security_urlW, 0, 0, &uri);
     ok(hr == S_OK, "CreateUri returned 0x%08x\n", hr);
@@ -1170,9 +1755,241 @@ static void test_InternetGetSecurityUrlEx_Pluggable(void)
     if(uri) IUri_Release(uri);
 }
 
+static const BYTE secidex2_1[] = {'z','i','p',':','/','/','t','e','s','t','i','n','g','.','c','o','m','/',3,0,0,0};
+static const BYTE secidex2_2[] = {'z','i','p',':','t','e','s','t','i','n','g','.','c','o','m',3,0,0,0};
+static const BYTE secidex2_3[] = {'*',':','t','e','s','t','i','n','g','.','c','o','m',3,0,0,0};
+
+static const struct {
+    const char  *uri;
+    DWORD       create_flags;
+    HRESULT     map_hres;
+    DWORD       zone;
+    BOOL        map_todo;
+    const BYTE  *secid;
+    DWORD       secid_size;
+    HRESULT     secid_hres;
+    BOOL        secid_todo;
+} sec_mgr_ex2_tests[] = {
+    {"res://mshtml.dll/blank.htm",0,S_OK,URLZONE_LOCAL_MACHINE,FALSE,secid1,sizeof(secid1),S_OK},
+    {"index.htm",Uri_CREATE_ALLOW_RELATIVE,0,URLZONE_INTERNET,FALSE,secid2,sizeof(secid2),S_OK},
+    {"file://c:\\Index.html",0,0,URLZONE_LOCAL_MACHINE,FALSE,secid1,sizeof(secid1),S_OK},
+    {"http://www.zone3.winetest/",0,0,URLZONE_INTERNET,FALSE,secid5,sizeof(secid5),S_OK},
+    {"about:blank",0,0,URLZONE_INTERNET,FALSE,secid6,sizeof(secid6),S_OK},
+    {"ftp://zone3.winetest/file.test",0,0,URLZONE_INTERNET,FALSE,secid7,sizeof(secid7),S_OK},
+    {"/file/testing/test.test",Uri_CREATE_ALLOW_RELATIVE,0,URLZONE_INTERNET,FALSE,NULL,0,E_INVALIDARG},
+    {"zip://testing.com/",0,0,URLZONE_INTERNET,FALSE,secidex2_1,sizeof(secidex2_1),S_OK},
+    {"zip:testing.com",0,0,URLZONE_INTERNET,FALSE,secidex2_2,sizeof(secidex2_2),S_OK},
+    {"http:google.com",0,S_OK,URLZONE_INVALID,FALSE,NULL,0,E_INVALIDARG},
+    {"http:/google.com",0,S_OK,URLZONE_INVALID,FALSE,NULL,0,E_INVALIDARG},
+    {"*:/testing",0,S_OK,URLZONE_INTERNET,FALSE,NULL,0,E_INVALIDARG},
+    {"*://testing.com",0,S_OK,URLZONE_INTERNET,FALSE,secidex2_3,sizeof(secidex2_3),S_OK}
+};
+
+static void test_SecurityManagerEx2(void)
+{
+    HRESULT hres;
+    DWORD i, zone;
+    BYTE buf[512];
+    DWORD buf_size = sizeof(buf);
+    IInternetSecurityManager *sec_mgr;
+    IInternetSecurityManagerEx2 *sec_mgr2;
+    IUri *uri = NULL;
+
+    static const WCHAR domainW[] = {'c','o','m','.','u','k',0};
+
+    if(!pCreateUri) {
+        win_skip("Skipping SecurityManagerEx2, IE is too old\n");
+        return;
+    }
+
+    trace("Testing SecurityManagerEx2...\n");
+
+    hres = pCoInternetCreateSecurityManager(NULL, &sec_mgr, 0);
+    ok(hres == S_OK, "CoInternetCreateSecurityManager failed: %08x\n", hres);
+
+    hres = IInternetSecurityManager_QueryInterface(sec_mgr, &IID_IInternetSecurityManagerEx2, (void**)&sec_mgr2);
+    ok(hres == S_OK, "QueryInterface(IID_IInternetSecurityManagerEx2) failed: %08x\n", hres);
+
+    zone = 0xdeadbeef;
+
+    hres = IInternetSecurityManagerEx2_MapUrlToZoneEx2(sec_mgr2, NULL, &zone, 0, NULL, NULL);
+    ok(hres == E_INVALIDARG, "MapUrlToZoneEx2 returned %08x, expected E_INVALIDARG\n", hres);
+    ok(zone == URLZONE_INVALID, "zone was %d\n", zone);
+
+    hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, NULL, buf, &buf_size, 0);
+    ok(hres == E_INVALIDARG, "GetSecurityIdEx2 returned %08x, expected E_INVALIDARG\n", hres);
+    ok(buf_size == sizeof(buf), "buf_size was %d\n", buf_size);
+
+    hres = pCreateUri(url5, 0, 0, &uri);
+    ok(hres == S_OK, "CreateUri failed: %08x\n", hres);
+
+    hres = IInternetSecurityManagerEx2_MapUrlToZoneEx2(sec_mgr2, uri, NULL, 0, NULL, NULL);
+    ok(hres == E_INVALIDARG, "MapToUrlZoneEx2 returned %08x, expected E_INVALIDARG\n", hres);
+
+    buf_size = sizeof(buf);
+    hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, uri, NULL, &buf_size, 0);
+    ok(hres == E_INVALIDARG || broken(hres == S_OK), "GetSecurityIdEx2 failed: %08x\n", hres);
+    ok(buf_size == sizeof(buf), "bug_size was %d\n", buf_size);
+
+    hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, uri, buf, NULL, 0);
+    ok(hres == E_INVALIDARG, "GetSecurityIdEx2 returned %08x, expected E_INVALIDARG\n", hres);
+
+    IUri_Release(uri);
+
+    for(i = 0; i < sizeof(sec_mgr_ex2_tests)/sizeof(sec_mgr_ex2_tests[0]); ++i) {
+        LPWSTR uriW = a2w(sec_mgr_ex2_tests[i].uri);
+
+        uri = NULL;
+        zone = URLZONE_INVALID;
+
+        hres = pCreateUri(uriW, sec_mgr_ex2_tests[i].create_flags, 0, &uri);
+        ok(hres == S_OK, "CreateUri returned %08x for '%s'\n", hres, sec_mgr_ex2_tests[i].uri);
+
+        hres = IInternetSecurityManagerEx2_MapUrlToZoneEx2(sec_mgr2, uri, &zone, 0, NULL, NULL);
+        if(sec_mgr_ex2_tests[i].map_todo) {
+            todo_wine
+                ok(hres == sec_mgr_ex2_tests[i].map_hres, "MapUrlZoneToEx2 returned %08x, expected %08x for '%s'\n",
+                    hres, sec_mgr_ex2_tests[i].map_hres, sec_mgr_ex2_tests[i].uri);
+            todo_wine
+                ok(zone == sec_mgr_ex2_tests[i].zone, "Expected zone %d, but got %d for '%s'\n", sec_mgr_ex2_tests[i].zone,
+                    zone, sec_mgr_ex2_tests[i].uri);
+        } else {
+            ok(hres == sec_mgr_ex2_tests[i].map_hres, "MapUrlToZoneEx2 returned %08x, expected %08x for '%s'\n",
+                hres, sec_mgr_ex2_tests[i].map_hres, sec_mgr_ex2_tests[i].uri);
+            ok(zone == sec_mgr_ex2_tests[i].zone, "Expected zone %d, but got %d for '%s'\n", sec_mgr_ex2_tests[i].zone,
+                zone, sec_mgr_ex2_tests[i].uri);
+        }
+
+        buf_size = sizeof(buf);
+        memset(buf, 0xf0, buf_size);
+
+        hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, uri, buf, &buf_size, 0);
+        if(sec_mgr_ex2_tests[i].secid_todo) {
+            todo_wine
+                ok(hres == sec_mgr_ex2_tests[i].secid_hres, "GetSecurityIdEx2 returned %08x, expected %08x on test '%s'\n",
+                    hres, sec_mgr_ex2_tests[i].secid_hres, sec_mgr_ex2_tests[i].uri);
+            if(sec_mgr_ex2_tests[i].secid) {
+                todo_wine {
+                    ok(buf_size == sec_mgr_ex2_tests[i].secid_size, "Got wrong security id size=%d, expected %d on test '%s'\n",
+                        buf_size, sec_mgr_ex2_tests[i].secid_size, sec_mgr_ex2_tests[i].uri);
+                    ok(!memcmp(buf, sec_mgr_ex2_tests[i].secid, sec_mgr_ex2_tests[i].secid_size), "Got wrong security id on test '%s'\n",
+                        sec_mgr_ex2_tests[i].uri);
+                }
+            }
+        } else {
+            ok(hres == sec_mgr_ex2_tests[i].secid_hres, "GetSecurityIdEx2 returned %08x, expected %08x on test '%s'\n",
+                hres, sec_mgr_ex2_tests[i].secid_hres, sec_mgr_ex2_tests[i].uri);
+            if(sec_mgr_ex2_tests[i].secid) {
+                ok(buf_size == sec_mgr_ex2_tests[i].secid_size, "Got wrong security id size=%d, expected %d on test '%s'\n",
+                    buf_size, sec_mgr_ex2_tests[i].secid_size, sec_mgr_ex2_tests[i].uri);
+                ok(!memcmp(buf, sec_mgr_ex2_tests[i].secid, sec_mgr_ex2_tests[i].secid_size), "Got wrong security id on test '%s'\n",
+                    sec_mgr_ex2_tests[i].uri);
+            }
+        }
+
+        heap_free(uriW);
+        IUri_Release(uri);
+    }
+
+    hres = pCreateUri(url15, 0, 0, &uri);
+    ok(hres == S_OK, "CreateUri failed: %08x\n", hres);
+
+    buf_size = sizeof(buf);
+    memset(buf, 0xf0, buf_size);
+
+    hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, uri, buf, &buf_size, (DWORD_PTR)domainW);
+    ok(hres == S_OK, "GetSecurityIdEx2 failed: %08x\n", hres);
+    todo_wine ok(buf_size == sizeof(secid13), "buf_size was %d\n", buf_size);
+    todo_wine ok(!memcmp(buf, secid13, sizeof(secid13)), "Got wrong secid\n");
+
+    buf_size = sizeof(buf);
+    memset(buf, 0xf0, buf_size);
+
+    hres = IInternetSecurityManagerEx2_GetSecurityIdEx2(sec_mgr2, uri, buf, &buf_size, 0);
+    ok(hres == S_OK, "GetSecurityIdEx2 failed: %08x\n", hres);
+    ok(buf_size == sizeof(secid13_2), "buf_size was %d\n", buf_size);
+    ok(!memcmp(buf, secid13_2, sizeof(secid13_2)), "Got wrong secid\n");
+
+    IUri_Release(uri);
+
+    IInternetSecurityManagerEx2_Release(sec_mgr2);
+    IInternetSecurityManager_Release(sec_mgr);
+}
+
+static void test_CoInternetIsFeatureZoneElevationEnabled(void)
+{
+    struct {
+        const char *url_from;
+        const char *url_to;
+        DWORD flags;
+        HRESULT hres;
+        DWORD policy_flags;
+    } testcases[] = {
+        /*  0 */ { "http://www.winehq.org", "http://www.winehq.org", 0, S_FALSE, URLPOLICY_ALLOW },
+        /*  1 */ { "http://www.winehq.org", "http://www.winehq.org", 0, S_OK, URLPOLICY_DISALLOW },
+        /*  2 */ { "http://www.winehq.org", "http://www.codeweavers.com", 0, S_FALSE, URLPOLICY_ALLOW },
+        /*  3 */ { "http://www.winehq.org", "http://www.codeweavers.com", 0, S_OK, URLPOLICY_DISALLOW },
+        /*  4 */ { "http://www.winehq.org", "http://www.winehq.org", GET_FEATURE_FROM_PROCESS, S_FALSE, -1 },
+        /*  5 */ { "http://www.winehq.org", "http://www.winehq.org/dir", GET_FEATURE_FROM_PROCESS, S_FALSE, -1 },
+        /*  6 */ { "http://www.winehq.org", "http://www.codeweavers.com", GET_FEATURE_FROM_PROCESS, S_FALSE, -1 },
+        /*  7 */ { "http://www.winehq.org", "ftp://winehq.org", GET_FEATURE_FROM_PROCESS, S_FALSE, -1 },
+        /*  8 */ { "http://www.winehq.org", "ftp://winehq.org", GET_FEATURE_FROM_PROCESS|0x100, S_FALSE, URLPOLICY_ALLOW },
+        /*  9 */ { "http://www.winehq.org", "ftp://winehq.org", GET_FEATURE_FROM_REGISTRY, S_FALSE, URLPOLICY_ALLOW },
+    };
+
+    WCHAR *url_from, *url_to;
+    int i;
+    HRESULT hres;
+
+    if(!pCoInternetIsFeatureZoneElevationEnabled || !pCoInternetIsFeatureEnabled
+            || !pCoInternetIsFeatureEnabledForUrl) {
+        win_skip("Skipping CoInternetIsFeatureZoneElevationEnabled tests\n");
+        return;
+    }
+
+
+    hres = pCoInternetIsFeatureEnabled(FEATURE_ZONE_ELEVATION, GET_FEATURE_FROM_PROCESS);
+    ok(SUCCEEDED(hres), "CoInternetIsFeatureEnabled returned %x\n", hres);
+
+    trace("Testing CoInternetIsFeatureZoneElevationEnabled... (%x)\n", hres);
+
+    for(i=0; i<sizeof(testcases)/sizeof(testcases[0]); i++) {
+        if(hres==S_OK && testcases[i].flags == GET_FEATURE_FROM_PROCESS)
+            testcases[i].policy_flags = URLPOLICY_ALLOW;
+    }
+
+    for(i=0; i<sizeof(testcases)/sizeof(testcases[0]); i++) {
+        url_from = a2w(testcases[i].url_from);
+        url_to = a2w(testcases[i].url_to);
+
+        if(testcases[i].policy_flags != -1) {
+            ProcessUrlAction_policy = testcases[i].policy_flags;
+            SET_EXPECT(ProcessUrlAction);
+        }
+        hres = pCoInternetIsFeatureZoneElevationEnabled(url_from, url_to,
+                &security_manager, testcases[i].flags);
+        ok(hres == testcases[i].hres, "%d) CoInternetIsFeatureZoneElevationEnabled returned %x\n", i, hres);
+        if(testcases[i].policy_flags != -1)
+            CHECK_CALLED(ProcessUrlAction);
+
+        if(testcases[i].policy_flags != -1)
+            SET_EXPECT(ProcessUrlAction);
+        hres = pCoInternetIsFeatureEnabledForUrl(FEATURE_ZONE_ELEVATION,
+                testcases[i].flags, url_to, &security_manager);
+        ok(hres == testcases[i].hres, "%d) CoInternetIsFeatureEnabledForUrl returned %x\n", i, hres);
+        if(testcases[i].policy_flags != -1)
+            CHECK_CALLED(ProcessUrlAction);
+
+        heap_free(url_from);
+        heap_free(url_to);
+    }
+}
+
 START_TEST(sec_mgr)
 {
     HMODULE hurlmon;
+    int argc;
+    char **argv;
 
     hurlmon = GetModuleHandle("urlmon.dll");
     pCoInternetCreateSecurityManager = (void*) GetProcAddress(hurlmon, "CoInternetCreateSecurityManager");
@@ -1181,10 +1998,19 @@ START_TEST(sec_mgr)
     pCoInternetGetSecurityUrlEx = (void*) GetProcAddress(hurlmon, "CoInternetGetSecurityUrlEx");
     pCreateUri = (void*) GetProcAddress(hurlmon, "CreateUri");
     pCoInternetGetSession = (void*) GetProcAddress(hurlmon, "CoInternetGetSession");
+    pCoInternetIsFeatureEnabled = (void*) GetProcAddress(hurlmon, "CoInternetIsFeatureEnabled");
+    pCoInternetIsFeatureEnabledForUrl = (void*) GetProcAddress(hurlmon, "CoInternetIsFeatureEnabledForUrl");
+    pCoInternetIsFeatureZoneElevationEnabled = (void*) GetProcAddress(hurlmon, "CoInternetIsFeatureZoneElevationEnabled");
 
     if (!pCoInternetCreateSecurityManager || !pCoInternetCreateZoneManager ||
         !pCoInternetGetSecurityUrl) {
         win_skip("Various CoInternet* functions not present in IE 4.0\n");
+        return;
+    }
+
+    argc = winetest_get_mainargs(&argv);
+    if(argc > 2 && !strcmp(argv[2], "domain_tests")) {
+        test_zone_domain_mappings();
         return;
     }
 
@@ -1201,13 +2027,17 @@ START_TEST(sec_mgr)
     }
 
     test_SecurityManager();
+    test_SecurityManagerEx2();
     test_polices();
+    test_zone_domains();
     test_CoInternetCreateZoneManager();
     test_CreateZoneEnumerator();
     test_GetZoneActionPolicy();
     test_GetZoneAt();
     test_GetZoneAttributes();
+    test_SetZoneAttributes();
     test_InternetSecurityMarshalling();
+    test_CoInternetIsFeatureZoneElevationEnabled();
 
     unregister_protocols();
     OleUninitialize();

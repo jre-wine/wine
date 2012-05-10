@@ -61,6 +61,12 @@ coclass KnownFolderManager { interface IKnownFolderManager; }
 ] coclass QueryAssociations { interface IQueryAssociations; }
 
 [
+    helpstring("Manage Application associations"),
+    threading(apartment),
+    uuid(591209c7-767b-42b2-9fba-44ee4615f2c7)
+] coclass ApplicationAssociationRegistration { interface IApplicationAssociationRegistration; }
+
+[
     helpstring("Shell Drag and Drop Helper"),
     threading(apartment),
     uuid(4657278a-411b-11d2-839a-00c04fd918d0)
@@ -135,3 +141,8 @@ coclass KnownFolderManager { interface IKnownFolderManager; }
     threading(apartment),
     uuid(21ec2020-3aea-1069-a2dd-08002b30309d)
 ] coclass ControlPanel { interface IShellFolder2; }
+
+[
+    threading(apartment),
+    uuid(53bd6b4e-3780-4693-afc3-7161c2f3ee9c)
+] coclass MruLongList { }

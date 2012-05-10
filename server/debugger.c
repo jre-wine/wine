@@ -33,6 +33,7 @@
 #include "winternl.h"
 
 #include "handle.h"
+#include "file.h"
 #include "process.h"
 #include "thread.h"
 #include "request.h"
@@ -154,18 +155,8 @@ static int fill_create_process_event( struct debug_event *event, const void *arg
         close_handle( debugger, event->data.create_process.process );
         return 0;
     }
-    event->data.create_process.thread = handle;
-
-    handle = 0;
-    if (exe_module->file &&
-        /* the doc says write access too, but this doesn't seem a good idea */
-        !(handle = alloc_handle( debugger, exe_module->file, GENERIC_READ, 0 )))
-    {
-        close_handle( debugger, event->data.create_process.process );
-        close_handle( debugger, event->data.create_process.thread );
-        return 0;
-    }
-    event->data.create_process.file       = handle;
+    event->data.create_process.thread     = handle;
+    event->data.create_process.file       = 0;
     event->data.create_process.teb        = thread->teb;
     event->data.create_process.base       = exe_module->base;
     event->data.create_process.start      = *entry;
@@ -173,6 +164,10 @@ static int fill_create_process_event( struct debug_event *event, const void *arg
     event->data.create_process.dbg_size   = exe_module->dbg_size;
     event->data.create_process.name       = exe_module->name;
     event->data.create_process.unicode    = 1;
+
+    if (exe_module->mapping)  /* the doc says write access too, but this doesn't seem a good idea */
+        event->data.create_process.file = open_mapping_file( debugger, exe_module->mapping, GENERIC_READ,
+                                                             FILE_SHARE_READ | FILE_SHARE_WRITE );
     return 1;
 }
 
@@ -194,16 +189,16 @@ static int fill_load_dll_event( struct debug_event *event, const void *arg )
 {
     struct process *debugger = event->debugger->process;
     const struct process_dll *dll = arg;
-    obj_handle_t handle = 0;
 
-    if (dll->file && !(handle = alloc_handle( debugger, dll->file, GENERIC_READ, 0 )))
-        return 0;
-    event->data.load_dll.handle     = handle;
+    event->data.load_dll.handle     = 0;
     event->data.load_dll.base       = dll->base;
     event->data.load_dll.dbg_offset = dll->dbg_offset;
     event->data.load_dll.dbg_size   = dll->dbg_size;
     event->data.load_dll.name       = dll->name;
     event->data.load_dll.unicode    = 1;
+    if (dll->mapping)
+        event->data.load_dll.handle = open_mapping_file( debugger, dll->mapping, GENERIC_READ,
+                                                         FILE_SHARE_READ | FILE_SHARE_WRITE );
     return 1;
 }
 
@@ -313,7 +308,11 @@ static void debug_event_destroy( struct object *obj )
             break;
         }
     }
-    if (event->sender->context == &event->context) event->sender->context = NULL;
+    if (event->sender->context == &event->context)
+    {
+        event->sender->context = NULL;
+        stop_thread_if_suspended( event->sender );
+    }
     release_object( event->sender );
     release_object( event->debugger );
 }
@@ -414,6 +413,7 @@ void generate_debug_event( struct thread *thread, int code, const void *arg )
             suspend_process( thread->process );
             release_object( event );
         }
+        clear_error();  /* ignore errors */
     }
 }
 
@@ -485,6 +485,7 @@ int debugger_detach( struct process *process, struct thread *debugger )
 
     /* remove relationships between process and its debugger */
     process->debugger = NULL;
+    process->debug_children = 0;
     if (!set_process_debug_flag( process, 0 )) clear_error();  /* ignore error */
 
     /* from this function */
@@ -632,6 +633,7 @@ DECL_HANDLER(queue_exception_event)
     {
         debug_event_t data;
         struct debug_event *event;
+        struct thread *thread = current;
 
         if ((req->len % sizeof(client_ptr_t)) != 0 ||
             req->len > get_req_data_size() ||
@@ -649,19 +651,19 @@ DECL_HANDLER(queue_exception_event)
         data.exception.nb_params = req->len / sizeof(client_ptr_t);
         memcpy( data.exception.params, get_req_data(), req->len );
 
-        if ((event = alloc_debug_event( current, EXCEPTION_DEBUG_EVENT, &data )))
+        if ((event = alloc_debug_event( thread, EXCEPTION_DEBUG_EVENT, &data )))
         {
             const context_t *context = (const context_t *)((const char *)get_req_data() + req->len);
             data_size_t size = get_req_data_size() - req->len;
 
             memset( &event->context, 0, sizeof(event->context) );
             memcpy( &event->context, context, min( sizeof(event->context), size ) );
-            current->context = &event->context;
+            thread->context = &event->context;
 
-            if ((reply->handle = alloc_handle( current->process, event, SYNCHRONIZE, 0 )))
+            if ((reply->handle = alloc_handle( thread->process, event, SYNCHRONIZE, 0 )))
             {
                 link_event( event );
-                suspend_process( current->process );
+                suspend_process( thread->process );
             }
             release_object( event );
         }
@@ -684,6 +686,7 @@ DECL_HANDLER(get_exception_status)
                 data_size_t size = min( sizeof(context_t), get_reply_max_size() );
                 set_reply_data( &event->context, size );
                 current->context = NULL;
+                stop_thread_if_suspended( current );
             }
             set_error( event->status );
         }

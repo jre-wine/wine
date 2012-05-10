@@ -135,7 +135,7 @@ static const StrFormatSizeResult StrFormatSize_results[] = {
   { 0, NULL, NULL }
 };
 
-/* StrFormatByteSize64/StrFormatKBSize results */
+/* StrFromTimeIntervalA/StrFromTimeIntervalW results */
 typedef struct tagStrFromTimeIntervalResult
 {
   DWORD ms;
@@ -196,6 +196,39 @@ static const StrFromTimeIntervalResult StrFromTimeInterval_results[] = {
 
   { 0, 0, NULL }
 };
+
+
+/* Returns true if the user interface is in English. Note that this does not
+ * presume of the formatting of dates, numbers, etc.
+ */
+static BOOL is_lang_english(void)
+{
+    static HMODULE hkernel32 = NULL;
+    static LANGID (WINAPI *pGetThreadUILanguage)(void) = NULL;
+    static LANGID (WINAPI *pGetUserDefaultUILanguage)(void) = NULL;
+
+    if (!hkernel32)
+    {
+        hkernel32 = GetModuleHandleA("kernel32.dll");
+        pGetThreadUILanguage = (void*)GetProcAddress(hkernel32, "GetThreadUILanguage");
+        pGetUserDefaultUILanguage = (void*)GetProcAddress(hkernel32, "GetUserDefaultUILanguage");
+    }
+    if (pGetThreadUILanguage)
+        return PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH;
+    if (pGetUserDefaultUILanguage)
+        return PRIMARYLANGID(pGetUserDefaultUILanguage()) == LANG_ENGLISH;
+
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
+
+/* Returns true if the dates, numbers, etc. are formatted using English
+ * conventions.
+ */
+static BOOL is_locale_english(void)
+{
+    /* Surprisingly GetThreadLocale() is irrelevant here */
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
 
 static void test_StrChrA(void)
 {
@@ -607,8 +640,8 @@ static void test_StrFromTimeIntervalA(void)
   {
     StrFromTimeIntervalA(szBuff, 256, result->ms, result->digits);
 
-    ok(!strcmp(result->time_interval, szBuff), "Formatted %d %d wrong\n",
-       result->ms, result->digits);
+    ok(!strcmp(result->time_interval, szBuff), "Formatted %d %d wrong: %s\n",
+       result->ms, result->digits, szBuff);
     result++;
   }
 }
@@ -953,7 +986,7 @@ if (0)
     {
         memset(buf, 0xbf, sizeof(buf));
         ret = pwnsprintfA(buf, 10, "%s", str1);
-        ok(broken(ret == 9) || ret == -1 /* Vista */, "Unexpected wsnprintfA return %d, expected 9 or -1\n", ret);
+        ok(broken(ret == 9) || ret == -1 /* Vista */, "Unexpected wnsprintfA return %d, expected 9 or -1\n", ret);
         expect_eq(buf[9], 0, CHAR, "%x");
         expect_eq(buf[10], (CHAR)0xbf, CHAR, "%x");
     }
@@ -964,7 +997,7 @@ if (0)
     {
         memset(wbuf, 0xbf, sizeof(wbuf));
         ret = pwnsprintfW(wbuf, 10, fmt, wstr1);
-        ok(broken(ret == 9) || ret == -1 /* Vista */, "Unexpected wsnprintfW return %d, expected 9 or -1\n", ret);
+        ok(broken(ret == 9) || ret == -1 /* Vista */, "Unexpected wnsprintfW return %d, expected 9 or -1\n", ret);
         expect_eq(wbuf[9], 0, WCHAR, "%x");
         expect_eq(wbuf[10], (WCHAR)0xbfbf, WCHAR, "%x");
     }
@@ -1405,15 +1438,18 @@ START_TEST(string)
   test_StrDupA();
 
   /* language-dependent test */
-  if (PRIMARYLANGID(GetUserDefaultLangID()) != LANG_ENGLISH)
-    skip("English is required for StrFromTimeInterval and StrFormat*Size tests\n");
-  else
+  if (is_lang_english() && is_locale_english())
   {
     test_StrFormatByteSize64A();
     test_StrFormatKBSizeA();
     test_StrFormatKBSizeW();
-    test_StrFromTimeIntervalA();
   }
+  else
+    skip("An English UI and locale is required for the StrFormat*Size tests\n");
+  if (is_lang_english())
+    test_StrFromTimeIntervalA();
+  else
+    skip("An English UI is required for the StrFromTimeInterval tests\n");
 
   test_StrCmpA();
   test_StrCmpW();

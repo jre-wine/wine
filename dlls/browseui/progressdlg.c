@@ -260,6 +260,8 @@ static void ProgressDialog_Destructor(ProgressDialog *This)
     heap_free(This->cancelMsg);
     heap_free(This->title);
     heap_free(This);
+    This->cs.DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(&This->cs);
     BROWSEUI_refCount--;
 }
 
@@ -302,6 +304,7 @@ static ULONG WINAPI ProgressDialog_Release(IProgressDialog *iface)
 
 static HRESULT WINAPI ProgressDialog_StartProgressDialog(IProgressDialog *iface, HWND hwndParent, IUnknown *punkEnableModeless, DWORD dwFlags, LPCVOID reserved)
 {
+    static const INITCOMMONCONTROLSEX init = { sizeof(init), ICC_ANIMATE_CLASS };
     ProgressDialog *This = impl_from_IProgressDialog(iface);
     struct create_params params;
     HANDLE hThread;
@@ -313,6 +316,8 @@ static HRESULT WINAPI ProgressDialog_StartProgressDialog(IProgressDialog *iface,
         FIXME("Flags PROGDLG_AUTOTIME not supported\n");
     if (dwFlags & PROGDLG_NOTIME)
         FIXME("Flags PROGDLG_NOTIME not supported\n");
+
+    InitCommonControlsEx( &init );
 
     EnterCriticalSection(&This->cs);
 
@@ -503,6 +508,7 @@ HRESULT ProgressDialog_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
     This->IProgressDialog_iface.lpVtbl = &ProgressDialogVtbl;
     This->refCount = 1;
     InitializeCriticalSection(&This->cs);
+    This->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ProgressDialog.cs");
 
     TRACE("returning %p\n", This);
     *ppOut = (IUnknown *)This;

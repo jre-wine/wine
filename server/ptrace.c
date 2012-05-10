@@ -463,6 +463,25 @@ int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t
             set_error( STATUS_ACCESS_DENIED );
             goto done;
         }
+
+        if (len > 3)
+        {
+            char procmem[24];
+            int fd;
+
+            sprintf( procmem, "/proc/%u/mem", process->unix_pid );
+            if ((fd = open( procmem, O_WRONLY )) != -1)
+            {
+                ssize_t r = pwrite( fd, src, size, ptr );
+                close( fd );
+                if (r == size)
+                {
+                    ret = 1;
+                    goto done;
+                }
+            }
+        }
+
         /* first word is special */
         if (len > 1)
         {
@@ -593,6 +612,8 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
     switch (context->cpu)
     {
     case CPU_x86:
+        /* Linux 2.6.33+ does DR0-DR3 alignment validation, so it has to know LEN bits first */
+        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 & 0xffff0000 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->debug.i386_regs.dr0 ) == -1) goto error;
         if (thread->context) thread->context->debug.i386_regs.dr0 = context->debug.i386_regs.dr0;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->debug.i386_regs.dr1 ) == -1) goto error;
@@ -603,10 +624,13 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
         if (thread->context) thread->context->debug.i386_regs.dr3 = context->debug.i386_regs.dr3;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(6), context->debug.i386_regs.dr6 ) == -1) goto error;
         if (thread->context) thread->context->debug.i386_regs.dr6 = context->debug.i386_regs.dr6;
+        /* Linux 2.6.33+ needs enable bits set briefly to update value returned by PEEKUSER later */
+        ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 | 0x55 );
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 ) == -1) goto error;
         if (thread->context) thread->context->debug.i386_regs.dr7 = context->debug.i386_regs.dr7;
         break;
     case CPU_x86_64:
+        if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.x86_64_regs.dr7 & 0xffff0000 ) == -1) goto error;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->debug.x86_64_regs.dr0 ) == -1) goto error;
         if (thread->context) thread->context->debug.x86_64_regs.dr0 = context->debug.x86_64_regs.dr0;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->debug.x86_64_regs.dr1 ) == -1) goto error;
@@ -617,6 +641,7 @@ void set_thread_context( struct thread *thread, const context_t *context, unsign
         if (thread->context) thread->context->debug.x86_64_regs.dr3 = context->debug.x86_64_regs.dr3;
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(6), context->debug.x86_64_regs.dr6 ) == -1) goto error;
         if (thread->context) thread->context->debug.x86_64_regs.dr6 = context->debug.x86_64_regs.dr6;
+        ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.x86_64_regs.dr7 | 0x55 );
         if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.x86_64_regs.dr7 ) == -1) goto error;
         if (thread->context) thread->context->debug.x86_64_regs.dr7 = context->debug.x86_64_regs.dr7;
         break;

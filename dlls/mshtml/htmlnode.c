@@ -241,7 +241,7 @@ static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, DISPID id, L
 
         hres = IHTMLDOMChildrenCollection_item(&This->IHTMLDOMChildrenCollection_iface,
                 id - DISPID_CHILDCOL_0, &disp);
-        if(0&&FAILED(hres))
+        if(FAILED(hres))
             return hres;
 
         V_VT(res) = VT_DISPATCH;
@@ -260,7 +260,8 @@ static HRESULT HTMLDOMChildrenCollection_invoke(DispatchEx *dispex, DISPID id, L
 static const dispex_static_data_vtbl_t HTMLDOMChildrenCollection_dispex_vtbl = {
     NULL,
     HTMLDOMChildrenCollection_get_dispid,
-    HTMLDOMChildrenCollection_invoke
+    HTMLDOMChildrenCollection_invoke,
+    NULL
 };
 
 static const tid_t HTMLDOMChildrenCollection_iface_tids[] = {
@@ -471,8 +472,22 @@ static HRESULT WINAPI HTMLDOMNode_get_childNodes(IHTMLDOMNode *iface, IDispatch 
 static HRESULT WINAPI HTMLDOMNode_get_attributes(IHTMLDOMNode *iface, IDispatch **p)
 {
     HTMLDOMNode *This = impl_from_IHTMLDOMNode(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    HTMLAttributeCollection *col;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->vtbl->get_attr_col) {
+        hres = This->vtbl->get_attr_col(This, &col);
+        if(FAILED(hres))
+            return hres;
+
+        *p = (IDispatch*)&col->IHTMLAttributeCollection_iface;
+        return S_OK;
+    }
+
+    *p = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDOMNode_insertBefore(IHTMLDOMNode *iface, IHTMLDOMNode *newChild,
@@ -565,8 +580,37 @@ static HRESULT WINAPI HTMLDOMNode_replaceChild(IHTMLDOMNode *iface, IHTMLDOMNode
                                                IHTMLDOMNode *oldChild, IHTMLDOMNode **node)
 {
     HTMLDOMNode *This = impl_from_IHTMLDOMNode(iface);
-    FIXME("(%p)->(%p %p %p)\n", This, newChild, oldChild, node);
-    return E_NOTIMPL;
+    HTMLDOMNode *node_new;
+    HTMLDOMNode *node_old;
+    nsIDOMNode *nsnode;
+    nsresult nsres;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p %p %p)\n", This, newChild, oldChild, node);
+
+    node_new = get_node_obj(This->doc, (IUnknown*)newChild);
+    if(!node_new)
+        return E_FAIL;
+
+    node_old = get_node_obj(This->doc, (IUnknown*)oldChild);
+    if(!node_old)
+        return E_FAIL;
+
+    nsres = nsIDOMNode_ReplaceChild(This->nsnode, node_new->nsnode, node_old->nsnode, &nsnode);
+    if(NS_FAILED(nsres)) {
+        return E_FAIL;
+    }
+
+    nsnode = node_new->nsnode;
+
+    hres = get_node(This->doc, nsnode, TRUE, &node_new);
+    nsIDOMNode_Release(nsnode);
+    if(FAILED(hres))
+        return hres;
+
+    *node = &node_new->IHTMLDOMNode_iface;
+    IHTMLDOMNode_AddRef(*node);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDOMNode_cloneNode(IHTMLDOMNode *iface, VARIANT_BOOL fDeep,
@@ -782,8 +826,26 @@ static HRESULT WINAPI HTMLDOMNode_get_lastChild(IHTMLDOMNode *iface, IHTMLDOMNod
 static HRESULT WINAPI HTMLDOMNode_get_previousSibling(IHTMLDOMNode *iface, IHTMLDOMNode **p)
 {
     HTMLDOMNode *This = impl_from_IHTMLDOMNode(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMNode *nschild = NULL;
+    HTMLDOMNode *node;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsIDOMNode_GetPreviousSibling(This->nsnode, &nschild);
+    if(!nschild) {
+        *p = NULL;
+        return S_OK;
+    }
+
+    hres = get_node(This->doc, nschild, TRUE, &node);
+    nsIDOMNode_Release(nschild);
+    if(FAILED(hres))
+        return hres;
+
+    *p = &node->IHTMLDOMNode_iface;
+    IHTMLDOMNode_AddRef(*p);
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDOMNode_get_nextSibling(IHTMLDOMNode *iface, IHTMLDOMNode **p)

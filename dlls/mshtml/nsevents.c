@@ -30,7 +30,6 @@
 #include "shlguid.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 #include "mshtml_private.h"
 #include "htmlevent.h"
@@ -184,6 +183,7 @@ static nsresult NSAPI handle_keypress(nsIDOMEventListener *iface,
 
 static void handle_docobj_load(HTMLDocumentObj *doc)
 {
+    IOleCommandTarget *olecmd = NULL;
     HRESULT hres;
 
     if(doc->nscontainer->editor_controller) {
@@ -195,33 +195,31 @@ static void handle_docobj_load(HTMLDocumentObj *doc)
         handle_edit_load(&doc->basedoc);
 
     if(doc->client) {
-        IOleCommandTarget *olecmd = NULL;
-
         hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
-        if(SUCCEEDED(hres)) {
-            if(doc->download_state) {
-                VARIANT state, progress;
-
-                V_VT(&progress) = VT_I4;
-                V_I4(&progress) = 0;
-                IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETPROGRESSPOS,
-                        OLECMDEXECOPT_DONTPROMPTUSER, &progress, NULL);
-
-                V_VT(&state) = VT_I4;
-                V_I4(&state) = 0;
-                IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETDOWNLOADSTATE,
-                        OLECMDEXECOPT_DONTPROMPTUSER, &state, NULL);
-            }
-
-            IOleCommandTarget_Exec(olecmd, &CGID_ShellDocView, 103, 0, NULL, NULL);
-            IOleCommandTarget_Exec(olecmd, &CGID_MSHTML, IDM_PARSECOMPLETE, 0, NULL, NULL);
-            IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_HTTPEQUIV_DONE, 0, NULL, NULL);
-
-            IOleCommandTarget_Release(olecmd);
-        }
+        if(FAILED(hres))
+            olecmd = NULL;
     }
 
-    doc->download_state = 0;
+    if(doc->download_state) {
+        if(olecmd) {
+            VARIANT progress;
+
+            V_VT(&progress) = VT_I4;
+            V_I4(&progress) = 0;
+            IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_SETPROGRESSPOS,
+                    OLECMDEXECOPT_DONTPROMPTUSER, &progress, NULL);
+        }
+
+        set_download_state(doc, 0);
+    }
+
+    if(olecmd) {
+        IOleCommandTarget_Exec(olecmd, &CGID_ShellDocView, 103, 0, NULL, NULL);
+        IOleCommandTarget_Exec(olecmd, &CGID_MSHTML, IDM_PARSECOMPLETE, 0, NULL, NULL);
+        IOleCommandTarget_Exec(olecmd, NULL, OLECMDID_HTTPEQUIV_DONE, 0, NULL, NULL);
+
+        IOleCommandTarget_Release(olecmd);
+    }
 }
 
 static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event)
@@ -254,6 +252,10 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
         update_title(doc_obj);
     }
 
+    if(doc_obj && doc_obj->usermode!=EDITMODE && doc_obj->doc_object_service)
+        IDocObjectService_FireDocumentComplete(doc_obj->doc_object_service,
+                &doc->basedoc.window->IHTMLWindow2_iface, 0);
+
     if(!doc->nsdoc) {
         ERR("NULL nsdoc\n");
         return NS_ERROR_FAILURE;
@@ -279,7 +281,7 @@ static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *
     eventid_t eid;
     nsresult nsres;
 
-    TRACE("\n");
+    TRACE("%p\n", This->This);
 
     nsAString_Init(&type_str, NULL);
     nsIDOMEvent_GetType(event, &type_str);
@@ -328,7 +330,7 @@ static void init_event(nsIDOMEventTarget *target, const PRUnichar *type,
     nsresult nsres;
 
     nsAString_InitDepend(&type_str, type);
-    nsres = nsIDOMEventTarget_AddEventListener(target, &type_str, listener, capture);
+    nsres = nsIDOMEventTarget_AddEventListener(target, &type_str, listener, capture, FALSE, 1);
     nsAString_Finish(&type_str);
     if(NS_FAILED(nsres))
         ERR("AddEventTarget failed: %08x\n", nsres);
@@ -361,8 +363,34 @@ void add_nsevent_listener(HTMLDocumentNode *doc, nsIDOMNode *nsnode, LPCWSTR typ
     nsIDOMEventTarget_Release(target);
 }
 
+void detach_nsevent(HTMLDocumentNode *doc, const WCHAR *type)
+{
+    nsIDOMEventTarget *target;
+    nsAString type_str;
+    nsresult nsres;
+
+    if(!doc->basedoc.window)
+        return;
+
+    nsres = nsIDOMWindow_QueryInterface(doc->basedoc.window->nswindow, &IID_nsIDOMEventTarget, (void**)&target);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMEventTarget interface: %08x\n", nsres);
+        return;
+    }
+
+    nsAString_InitDepend(&type_str, type);
+    nsres = nsIDOMEventTarget_RemoveEventListener(target, &type_str,
+            &doc->nsevent_listener->htmlevent_listener.nsIDOMEventListener_iface, TRUE);
+    nsAString_Finish(&type_str);
+    nsIDOMEventTarget_Release(target);
+    if(NS_FAILED(nsres))
+        ERR("RemoveEventTarget failed: %08x\n", nsres);
+}
+
 void release_nsevents(HTMLDocumentNode *doc)
 {
+    TRACE("%p %p\n", doc, doc->nsevent_listener);
+
     if(doc->nsevent_listener) {
         doc->nsevent_listener->doc = NULL;
         release_listener(doc->nsevent_listener);
@@ -384,6 +412,8 @@ void init_nsevents(HTMLDocumentNode *doc)
     listener = heap_alloc(sizeof(nsDocumentEventListener));
     if(!listener)
         return;
+
+    TRACE("%p %p\n", doc, listener);
 
     listener->ref = 1;
     listener->doc = doc;

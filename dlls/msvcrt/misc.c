@@ -33,7 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 /*********************************************************************
  *		_beep (MSVCRT.@)
  */
-void CDECL _beep( unsigned int freq, unsigned int duration)
+void CDECL MSVCRT__beep( unsigned int freq, unsigned int duration)
 {
     TRACE(":Freq %d, Duration %d\n",freq,duration);
     Beep(freq, duration);
@@ -252,4 +252,23 @@ void CDECL MSVCRT_qsort_s(void *base, MSVCRT_size_t nmemb, MSVCRT_size_t size,
         return;
     MSVCRT_mergesort(base, secondarr, size, compar, 0, nmemb-1, context);
     MSVCRT_free(secondarr);
+}
+
+/*********************************************************************
+ * _get_output_format (MSVCRT.@)
+ */
+unsigned int CDECL _get_output_format(void)
+{
+   return 0;
+}
+
+/*********************************************************************
+ * _resetstkoflw (MSVCRT.@)
+ */
+int CDECL MSVCRT__resetstkoflw(void)
+{
+    int stack_addr;
+
+    /* causes stack fault that updates NtCurrentTeb()->Tib.StackLimit */
+    return VirtualProtect( &stack_addr, 1, PAGE_GUARD|PAGE_READWRITE, NULL );
 }

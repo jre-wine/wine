@@ -24,8 +24,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(hlink);
 
-static const IHlinkBrowseContextVtbl hlvt;
-
 typedef struct
 {
     IHlinkBrowseContext IHlinkBrowseContext_iface;
@@ -37,29 +35,6 @@ typedef struct
 static inline HlinkBCImpl *impl_from_IHlinkBrowseContext(IHlinkBrowseContext *iface)
 {
     return CONTAINING_RECORD(iface, HlinkBCImpl, IHlinkBrowseContext_iface);
-}
-
-
-HRESULT WINAPI HLinkBrowseContext_Constructor(IUnknown *pUnkOuter, REFIID riid,
-        LPVOID *ppv)
-{
-    HlinkBCImpl * hl;
-
-    TRACE("unkOut=%p riid=%s\n", pUnkOuter, debugstr_guid(riid));
-    *ppv = NULL;
-
-    if (pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
-
-    hl = heap_alloc_zero(sizeof(HlinkBCImpl));
-    if (!hl)
-        return E_OUTOFMEMORY;
-
-    hl->ref = 1;
-    hl->IHlinkBrowseContext_iface.lpVtbl = &hlvt;
-
-    *ppv = hl;
-    return S_OK;
 }
 
 static HRESULT WINAPI IHlinkBC_fnQueryInterface( IHlinkBrowseContext *iface,
@@ -271,7 +246,7 @@ static HRESULT WINAPI IHlinkBC_Clone( IHlinkBrowseContext* iface,
 }
 
 static HRESULT WINAPI IHlinkBC_Close(IHlinkBrowseContext* iface,
-        DWORD reserverd)
+        DWORD reserved)
 {
     FIXME("\n");
     return E_NOTIMPL;
@@ -297,3 +272,24 @@ static const IHlinkBrowseContextVtbl hlvt =
     IHlinkBC_Clone,
     IHlinkBC_Close
 };
+
+HRESULT HLinkBrowseContext_Constructor(IUnknown *pUnkOuter, REFIID riid, void **ppv)
+{
+    HlinkBCImpl * hl;
+
+    TRACE("unkOut=%p riid=%s\n", pUnkOuter, debugstr_guid(riid));
+    *ppv = NULL;
+
+    if (pUnkOuter)
+        return CLASS_E_NOAGGREGATION;
+
+    hl = heap_alloc_zero(sizeof(HlinkBCImpl));
+    if (!hl)
+        return E_OUTOFMEMORY;
+
+    hl->ref = 1;
+    hl->IHlinkBrowseContext_iface.lpVtbl = &hlvt;
+
+    *ppv = hl;
+    return S_OK;
+}

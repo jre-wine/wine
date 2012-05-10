@@ -111,7 +111,7 @@ BOOL NavigateToUrl(HHInfo *info, LPCWSTR surl)
     return ret;
 }
 
-BOOL AppendFullPathURL(LPCWSTR file, LPWSTR buf, LPCWSTR index)
+static BOOL AppendFullPathURL(LPCWSTR file, LPWSTR buf, LPCWSTR index)
 {
     static const WCHAR url_format[] =
         {'m','k',':','@','M','S','I','T','S','t','o','r','e',':','%','s',':',':','%','s','%','s',0};
@@ -441,12 +441,14 @@ static LRESULT Child_OnSize(HWND hwnd)
 
     ResizeTabChild(info, TAB_CONTENTS);
     ResizeTabChild(info, TAB_INDEX);
+    ResizeTabChild(info, TAB_SEARCH);
     return 0;
 }
 
 static LRESULT OnTabChange(HWND hwnd)
 {
     HHInfo *info = (HHInfo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+    int tab_id, tab_index, i;
 
     TRACE("%p\n", hwnd);
 
@@ -456,7 +458,23 @@ static LRESULT OnTabChange(HWND hwnd)
     if(info->tabs[info->current_tab].hwnd)
         ShowWindow(info->tabs[info->current_tab].hwnd, SW_HIDE);
 
-    info->current_tab = SendMessageW(info->hwndTabCtrl, TCM_GETCURSEL, 0, 0);
+    tab_id = (int) SendMessageW(info->hwndTabCtrl, TCM_GETCURSEL, 0, 0);
+    /* convert the ID of the tab to an index in our tab list */
+    tab_index = -1;
+    for (i=0; i<TAB_NUMTABS; i++)
+    {
+        if (info->tabs[i].id == tab_id)
+        {
+            tab_index = i;
+            break;
+        }
+    }
+    if (tab_index == -1)
+    {
+        FIXME("Tab ID %d does not correspond to a valid index in the tab list.\n", tab_id);
+        return 0;
+    }
+    info->current_tab = tab_index;
 
     if(info->tabs[info->current_tab].hwnd)
         ShowWindow(info->tabs[info->current_tab].hwnd, SW_SHOW);
@@ -749,6 +767,14 @@ static void TB_OnClick(HWND hWnd, DWORD dwID)
         case IDTB_OPTIONS:
             DisplayPopupMenu(info);
             break;
+        case IDTB_NOTES:
+        case IDTB_CONTENTS:
+        case IDTB_INDEX:
+        case IDTB_SEARCH:
+        case IDTB_HISTORY:
+        case IDTB_FAVORITES:
+            /* These are officially unimplemented as of the Windows 7 SDK */
+            break;
         case IDTB_BROWSE_FWD:
         case IDTB_BROWSE_BACK:
         case IDTB_JUMP1:
@@ -776,6 +802,7 @@ static void TB_AddButtonsFromFlags(HHInfo *pHHInfo, TBBUTTON *pButtons, DWORD dw
     int nHistBitmaps = 0, nStdBitmaps = 0, nHHBitmaps = 0;
     HWND hToolbar = pHHInfo->WinType.hwndToolBar;
     TBADDBITMAP tbAB;
+    DWORD unsupported;
 
     /* Common bitmaps */
     tbAB.hInst = HINST_COMMCTRL;
@@ -786,14 +813,22 @@ static void TB_AddButtonsFromFlags(HHInfo *pHHInfo, TBBUTTON *pButtons, DWORD dw
     /* hhctrl.ocx bitmaps */
     tbAB.hInst = hhctrl_hinstance;
     tbAB.nID = IDB_HHTOOLBAR;
-    nHHBitmaps = SendMessageW(hToolbar, TB_ADDBITMAP, 0, (LPARAM)&tbAB);
+    nHHBitmaps = SendMessageW(hToolbar, TB_ADDBITMAP, HHTB_NUMBITMAPS, (LPARAM)&tbAB);
 
     *pdwNumButtons = 0;
 
+    unsupported = dwButtonFlags & (HHWIN_BUTTON_BROWSE_FWD |
+        HHWIN_BUTTON_BROWSE_BCK | HHWIN_BUTTON_NOTES | HHWIN_BUTTON_CONTENTS |
+        HHWIN_BUTTON_INDEX | HHWIN_BUTTON_SEARCH | HHWIN_BUTTON_HISTORY |
+        HHWIN_BUTTON_FAVORITES | HHWIN_BUTTON_JUMP1 | HHWIN_BUTTON_JUMP2 |
+        HHWIN_BUTTON_ZOOM | HHWIN_BUTTON_TOC_NEXT | HHWIN_BUTTON_TOC_PREV);
+    if (unsupported)
+        FIXME("got asked for unsupported buttons: %06x\n", unsupported);
+
     if (dwButtonFlags & HHWIN_BUTTON_EXPAND)
     {
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_EXPAND, nHistBitmaps + HIST_VIEWTREE);
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_CONTRACT, nHistBitmaps + HIST_VIEWTREE);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_EXPAND, nHHBitmaps + HHTB_EXPAND);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_CONTRACT, nHHBitmaps + HHTB_CONTRACT);
 
         if (pHHInfo->WinType.fNotExpanded)
             pButtons[1].fsState |= TBSTATE_HIDDEN;
@@ -808,38 +843,22 @@ static void TB_AddButtonsFromFlags(HHInfo *pHHInfo, TBBUTTON *pButtons, DWORD dw
         TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_FORWARD, nHistBitmaps + HIST_FORWARD);
 
     if (dwButtonFlags & HHWIN_BUTTON_STOP)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_STOP, nHHBitmaps + HH_STOP);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_STOP, nHHBitmaps + HHTB_STOP);
 
     if (dwButtonFlags & HHWIN_BUTTON_REFRESH)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_REFRESH, nHHBitmaps + HH_REFRESH);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_REFRESH, nHHBitmaps + HHTB_REFRESH);
 
     if (dwButtonFlags & HHWIN_BUTTON_HOME)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_HOME, nHHBitmaps + HH_HOME);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_HOME, nHHBitmaps + HHTB_HOME);
 
-    /* FIXME: Load the correct button bitmaps */
     if (dwButtonFlags & HHWIN_BUTTON_SYNC)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_SYNC, nStdBitmaps + STD_PRINT);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_SYNC, nHHBitmaps + HHTB_SYNC);
 
     if (dwButtonFlags & HHWIN_BUTTON_OPTIONS)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_OPTIONS, nStdBitmaps + STD_PRINT);
+        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_OPTIONS, nStdBitmaps + STD_PROPERTIES);
 
     if (dwButtonFlags & HHWIN_BUTTON_PRINT)
         TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_PRINT, nStdBitmaps + STD_PRINT);
-
-    if (dwButtonFlags & HHWIN_BUTTON_JUMP1)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_JUMP1, nStdBitmaps + STD_PRINT);
-
-    if (dwButtonFlags & HHWIN_BUTTON_JUMP2)
-        TB_AddButton(pButtons,(*pdwNumButtons)++, IDTB_JUMP2, nStdBitmaps + STD_PRINT);
-
-    if (dwButtonFlags & HHWIN_BUTTON_ZOOM)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_ZOOM, nStdBitmaps + STD_PRINT);
-
-    if (dwButtonFlags & HHWIN_BUTTON_TOC_NEXT)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_TOC_NEXT, nStdBitmaps + STD_PRINT);
-
-    if (dwButtonFlags & HHWIN_BUTTON_TOC_PREV)
-        TB_AddButton(pButtons, (*pdwNumButtons)++, IDTB_TOC_PREV, nStdBitmaps + STD_PRINT);
 }
 
 static BOOL HH_AddToolbar(HHInfo *pHHInfo)

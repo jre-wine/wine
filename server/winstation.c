@@ -232,14 +232,10 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             desktop->close_timeout = NULL;
             desktop->foreground_input = NULL;
             desktop->users = 0;
-            desktop->cursor_x = 0;
-            desktop->cursor_y = 0;
-            desktop->cursor_clip.left   = 0;
-            desktop->cursor_clip.top    = 0;
-            desktop->cursor_clip.right  = 0;
-            desktop->cursor_clip.bottom = 0;
+            memset( &desktop->cursor, 0, sizeof(desktop->cursor) );
             memset( desktop->keystate, 0, sizeof(desktop->keystate) );
             list_add_tail( &winstation->desktops, &desktop->entry );
+            list_init( &desktop->hotkeys );
         }
     }
     free( full_name );
@@ -278,6 +274,7 @@ static void desktop_destroy( struct object *obj )
 {
     struct desktop *desktop = (struct desktop *)obj;
 
+    free_hotkeys( desktop, 0 );
     if (desktop->top_window) destroy_window( desktop->top_window );
     if (desktop->msg_window) destroy_window( desktop->msg_window );
     if (desktop->global_hooks) release_object( desktop->global_hooks );
@@ -381,7 +378,7 @@ static void close_desktop_timeout( void *private )
 
     desktop->close_timeout = NULL;
     unlink_named_object( &desktop->obj );  /* make sure no other process can open it */
-    close_desktop_window( desktop );  /* and signal the owner to quit */
+    post_desktop_message( desktop, WM_CLOSE, 0, 0 );  /* and signal the owner to quit */
 }
 
 /* close the desktop of a given process */

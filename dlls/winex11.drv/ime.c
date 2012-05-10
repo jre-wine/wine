@@ -35,7 +35,7 @@
  *  This flow does not work well for the X11 driver and XIM.
  *   (It works fine for Mac)
  *  As such we will have to reroute step 1.  Instead the x11drv driver will
- *  generate an XIM events and call directly into this IME implimenetaion.
+ *  generate an XIM events and call directly into this IME implementation.
  *  As such we will have to use the alternative ImmGenerateMessage path to be
  *  generate the messages that we want the IMM layer to send to the application.
  */
@@ -719,32 +719,21 @@ BOOL WINAPI NotifyIME(HIMC hIMC, DWORD dwAction, DWORD dwIndex, DWORD dwValue)
                 case IMC_SETOPENSTATUS:
                     TRACE("IMC_SETOPENSTATUS\n");
 
-                    /* Indirectly called from XIM callbacks */
-                    if (ImmGetIMCCLockCount(lpIMC->hPrivate) > 0)
+                    bRet = TRUE;
+                    X11DRV_SetPreeditState(lpIMC->hWnd, lpIMC->fOpen);
+                    if (!lpIMC->fOpen)
                     {
-                        bRet = TRUE;
-                        break;
-                    }
+                        LPIMEPRIVATE myPrivate;
 
-                    bRet = X11DRV_SetPreeditState(lpIMC->hWnd, lpIMC->fOpen);
-                    if (bRet)
-                    {
-                        if (!lpIMC->fOpen)
+                        myPrivate = ImmLockIMCC(lpIMC->hPrivate);
+                        if (myPrivate->bInComposition)
                         {
-                            LPIMEPRIVATE myPrivate;
-
-                            myPrivate = ImmLockIMCC(lpIMC->hPrivate);
-                            if (myPrivate->bInComposition)
-                            {
-                                X11DRV_ForceXIMReset(lpIMC->hWnd);
-                                GenerateIMEMessage(hIMC, WM_IME_ENDCOMPOSITION, 0, 0);
-                                myPrivate->bInComposition = FALSE;
-                            }
-                            ImmUnlockIMCC(lpIMC->hPrivate);
+                            X11DRV_ForceXIMReset(lpIMC->hWnd);
+                            GenerateIMEMessage(hIMC, WM_IME_ENDCOMPOSITION, 0, 0);
+                            myPrivate->bInComposition = FALSE;
                         }
+                        ImmUnlockIMCC(lpIMC->hPrivate);
                     }
-                    else
-                        lpIMC->fOpen = !lpIMC->fOpen;
 
                     break;
                 default: FIXME("Unknown\n"); break;
@@ -957,7 +946,15 @@ DWORD WINAPI ImeGetImeMenuItems(HIMC hIMC,  DWORD dwFlags,  DWORD dwType,
 
 /* Interfaces to XIM and other parts of winex11drv */
 
-void IME_SetOpenStatus(BOOL fOpen, BOOL force)
+void IME_SetOpenStatus(BOOL fOpen)
+{
+    HIMC imc;
+
+    imc = RealIMC(FROM_X11);
+    ImmSetOpenStatus(imc, fOpen);
+}
+
+void IME_SetCompositionStatus(BOOL fOpen)
 {
     HIMC imc;
     LPINPUTCONTEXT lpIMC;
@@ -970,20 +967,18 @@ void IME_SetOpenStatus(BOOL fOpen, BOOL force)
 
     myPrivate = ImmLockIMCC(lpIMC->hPrivate);
 
-    if (!fOpen && myPrivate->bInComposition)
+    if (fOpen && !myPrivate->bInComposition)
+    {
+        GenerateIMEMessage(imc, WM_IME_STARTCOMPOSITION, 0, 0);
+    }
+    else if (!fOpen && myPrivate->bInComposition)
     {
         ShowWindow(myPrivate->hwndDefault, SW_HIDE);
         ImmDestroyIMCC(lpIMC->hCompStr);
         lpIMC->hCompStr = ImeCreateBlankCompStr();
-        myPrivate->bInComposition = FALSE;
         GenerateIMEMessage(imc, WM_IME_ENDCOMPOSITION, 0, 0);
     }
-
-    if (lpIMC->fOpen && fOpen)
-        ImmSetOpenStatus(imc, FALSE);
-
-    if (fOpen || force)
-        ImmSetOpenStatus(imc, fOpen);
+    myPrivate->bInComposition = fOpen;
 
     ImmUnlockIMCC(lpIMC->hPrivate);
     ImmUnlockIMC(imc);
@@ -1059,7 +1054,6 @@ void IME_SetResultString(LPWSTR lpResult, DWORD dwResultLen)
     LPINPUTCONTEXT lpIMC;
     HIMCC newCompStr;
     LPIMEPRIVATE myPrivate;
-    BOOL fOpen;
 
     imc = RealIMC(FROM_X11);
     lpIMC = ImmLockIMC(imc);
@@ -1071,15 +1065,11 @@ void IME_SetResultString(LPWSTR lpResult, DWORD dwResultLen)
     lpIMC->hCompStr = newCompStr;
 
     myPrivate = ImmLockIMCC(lpIMC->hPrivate);
-    fOpen = lpIMC->fOpen;
-    ImmSetOpenStatus(imc, TRUE);
     if (!myPrivate->bInComposition)
         GenerateIMEMessage(imc, WM_IME_STARTCOMPOSITION, 0, 0);
     GenerateIMEMessage(imc, WM_IME_COMPOSITION, 0, GCS_RESULTSTR);
     if (!myPrivate->bInComposition)
         GenerateIMEMessage(imc, WM_IME_ENDCOMPOSITION, 0, 0);
-    if (!fOpen)
-        ImmSetOpenStatus(imc, FALSE);
     ImmUnlockIMCC(lpIMC->hPrivate);
 
     ImmUnlockIMC(imc);
@@ -1143,7 +1133,7 @@ static void PaintDefaultIMEWnd(HIMC hIMC, HWND hwnd)
          *    needed and possible.   If our ptCurrentPos is outside of our rect
          *    then no window is displayed.
          * CFS_FORCE_POSITION: appears to behave just like CFS_POINT
-         *    maybe becase the default MSIME does not do any IME adjusting.
+         *    maybe because the default MSIME does not do any IME adjusting.
          */
         if (lpIMC->cfCompForm.dwStyle != CFS_DEFAULT)
         {

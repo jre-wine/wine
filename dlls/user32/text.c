@@ -301,7 +301,7 @@ static void TEXT_PathEllipsify (HDC hdc, WCHAR *str, unsigned int max_len,
  * 1. If the text is left-justified and there is room for some of the spaces
  *    that follow the last word on the line then those that fit are included on
  *    the line.
- * 2. If the text is centred or right-justified and there is room for some of
+ * 2. If the text is centered or right-justified and there is room for some of
  *    the spaces that follow the last word on the line then all but one of those
  *    that fit are included on the line.
  * 3. (Reasonable behaviour) If the word breaking causes a space to be the first
@@ -330,7 +330,7 @@ static void TEXT_PathEllipsify (HDC hdc, WCHAR *str, unsigned int max_len,
  * Work back from the last character that did fit to either a space or the last
  * character of a word, whichever is met first.
  * If there was one or the first character didn't fit then
- *     If the text is centred or right justified and that one character was a
+ *     If the text is centered or right justified and that one character was a
  *     space then break the line before that character
  *     Otherwise break the line after that character
  *     and if the next character is a space then discard it.
@@ -723,7 +723,6 @@ static const WCHAR *TEXT_NextLineW( HDC hdc, const WCHAR *str, int *count,
                  * pellip->under
                  */
             }
-            line_fits = (size.cx <= max_seg_width);
             ellipsified = 1;
         }
         /* As an optimisation if we have ellipsified and we are expanding
@@ -1280,6 +1279,8 @@ static LONG TEXT_TabbedTextOut( HDC hdc, INT x, INT y, LPCWSTR lpstr,
     SIZE extent;
     int i, j;
     int start = x;
+
+    if (!lpstr || count == 0) return 0;
 
     if (!lpTabPos)
         cTabStops=0;

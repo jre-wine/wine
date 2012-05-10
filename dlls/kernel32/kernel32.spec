@@ -133,11 +133,13 @@
 
 # functions exported by name, ordinal doesn't matter
 
+@ stdcall AcquireSRWLockExclusive(ptr)
+@ stdcall AcquireSRWLockShared(ptr)
 @ stdcall ActivateActCtx(ptr ptr)
 @ stdcall AddAtomA(str)
 @ stdcall AddAtomW(wstr)
-@ stub AddConsoleAliasA
-@ stub AddConsoleAliasW
+@ stdcall AddConsoleAliasA(str str str)
+@ stdcall AddConsoleAliasW(wstr wstr wstr)
 # @ stub AddLocalAlternateComputerNameA
 # @ stub AddLocalAlternateComputerNameW
 @ stdcall AddRefActCtx(ptr)
@@ -146,6 +148,8 @@
 @ stub -i386 AllocLSCallback
 @ stdcall -i386 -private AllocSLCallback(ptr ptr) krnl386.exe16.AllocSLCallback
 @ stub AllocateUserPhysicalPages
+@ stdcall ApplicationRecoveryFinished(long)
+@ stdcall ApplicationRecoveryInProgress(ptr)
 @ stdcall AreFileApisANSI()
 @ stdcall AssignProcessToJobObject(ptr ptr)
 @ stdcall AttachConsole(long)
@@ -234,8 +238,8 @@
 @ stdcall CreateJobObjectW(ptr wstr)
 # @ stub CreateJobSet
 @ stub CreateKernelThread
-@ stdcall CreateMailslotA(ptr long long ptr)
-@ stdcall CreateMailslotW(ptr long long ptr)
+@ stdcall CreateMailslotA(str long long ptr)
+@ stdcall CreateMailslotW(wstr long long ptr)
 @ stdcall CreateMemoryResourceNotification(long)
 @ stdcall CreateMutexA(ptr long str)
 @ stdcall CreateMutexExA(ptr str long long)
@@ -339,8 +343,8 @@
 @ stub ExitVDM
 @ stdcall ExpandEnvironmentStringsA(str ptr long)
 @ stdcall ExpandEnvironmentStringsW(wstr ptr long)
-@ stub ExpungeConsoleCommandHistoryA
-@ stub ExpungeConsoleCommandHistoryW
+@ stdcall ExpungeConsoleCommandHistoryA(str)
+@ stdcall ExpungeConsoleCommandHistoryW(wstr)
 @ stub ExtendVirtualBuffer
 @ stdcall -i386 -private -norelay FT_Exit0() krnl386.exe16.FT_Exit0
 @ stdcall -i386 -private -norelay FT_Exit12() krnl386.exe16.FT_Exit12
@@ -456,15 +460,15 @@
 @ stub GetConsoleAliasExesW
 @ stdcall GetConsoleAliasW(wstr ptr long wstr)
 @ stub GetConsoleAliasesA
-@ stub GetConsoleAliasesLengthA
-@ stub GetConsoleAliasesLengthW
+@ stdcall GetConsoleAliasesLengthA(str)
+@ stdcall GetConsoleAliasesLengthW(wstr)
 @ stub GetConsoleAliasesW
 @ stdcall GetConsoleCP()
 @ stub GetConsoleCharType
-@ stub GetConsoleCommandHistoryA
-@ stub GetConsoleCommandHistoryLengthA
-@ stub GetConsoleCommandHistoryLengthW
-@ stub GetConsoleCommandHistoryW
+@ stdcall GetConsoleCommandHistoryA(long long long)
+@ stdcall GetConsoleCommandHistoryLengthA(str)
+@ stdcall GetConsoleCommandHistoryLengthW(wstr)
+@ stdcall GetConsoleCommandHistoryW(long long long)
 @ stdcall GetConsoleCursorInfo(long ptr)
 @ stub GetConsoleCursorMode
 @ stdcall GetConsoleDisplayMode(ptr)
@@ -566,9 +570,9 @@
 @ stub GetNextVDMCommand
 @ stub GetNlsSectionName
 # @ stub GetNumaAvailableMemory
-# @ stub GetNumaAvailableMemoryNode
-# @ stub GetNumaHighestNodeNumber
-# @ stub GetNumaNodeProcessorMask
+@ stdcall GetNumaAvailableMemoryNode(long ptr)
+@ stdcall GetNumaHighestNodeNumber(ptr)
+@ stdcall GetNumaNodeProcessorMask(long ptr)
 # @ stub GetNumaProcessorMap
 # @ stub GetNumaProcessorNode
 @ stdcall GetNumberFormatA(long long str ptr ptr long)
@@ -591,6 +595,7 @@
 @ stdcall GetPrivateProfileStructW(wstr wstr ptr long wstr)
 @ stdcall GetProcAddress(long str)
 @ stdcall GetProcessAffinityMask(long ptr ptr)
+@ stdcall GetProcessDEPPolicy(long ptr ptr)
 @ stdcall GetProcessFlags(long)
 @ stdcall GetProcessHandleCount(long ptr)
 @ stdcall GetProcessHeap()
@@ -651,6 +656,7 @@
 @ stdcall GetThreadId(ptr)
 @ stdcall GetThreadIOPendingFlag(long ptr)
 @ stdcall GetThreadLocale()
+@ stdcall GetThreadPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetThreadPriority(long)
 @ stdcall GetThreadPriorityBoost(long ptr)
 @ stdcall GetThreadSelectorEntry(long long ptr)
@@ -676,7 +682,7 @@
 @ stdcall GetVolumeNameForVolumeMountPointW(wstr ptr long)
 @ stdcall GetVolumePathNameA(str ptr long)
 @ stdcall GetVolumePathNameW(wstr ptr long)
-# @ stub GetVolumePathNamesForVolumeNameA
+@ stdcall GetVolumePathNamesForVolumeNameA(str ptr long ptr)
 @ stdcall GetVolumePathNamesForVolumeNameW(wstr ptr long ptr)
 @ stdcall GetWindowsDirectoryA(ptr long)
 @ stdcall GetWindowsDirectoryW(ptr long)
@@ -730,6 +736,7 @@
 @ stdcall IdnToNameprepUnicode(long wstr long ptr long)
 @ stdcall IdnToUnicode(long wstr long ptr long)
 @ stdcall InitAtomTable(long)
+@ stdcall InitializeSRWLock(ptr)
 @ stdcall InitializeCriticalSection(ptr)
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
 @ stdcall InitializeCriticalSectionEx(ptr long long)
@@ -767,6 +774,31 @@
 @ stdcall IsValidLocale(long long)
 # @ stub IsValidUILanguage
 @ stdcall IsWow64Process(ptr ptr)
+@ stdcall K32EmptyWorkingSet(long)
+@ stdcall K32GetProcessImageFileNameA(long ptr long)
+@ stdcall K32GetProcessImageFileNameW(long ptr long)
+@ stdcall K32EnumDeviceDrivers(ptr long ptr)
+@ stdcall K32EnumPageFilesA(ptr ptr)
+@ stdcall K32EnumPageFilesW(ptr ptr)
+@ stdcall K32EnumProcessModules(long ptr long ptr)
+@ stdcall K32EnumProcesses(ptr long ptr)
+@ stdcall K32GetDeviceDriverBaseNameA(ptr ptr long)
+@ stdcall K32GetDeviceDriverBaseNameW(ptr ptr long)
+@ stdcall K32GetDeviceDriverFileNameA(ptr ptr long)
+@ stdcall K32GetDeviceDriverFileNameW(ptr ptr long)
+@ stdcall K32GetMappedFileNameA(long ptr ptr long)
+@ stdcall K32GetMappedFileNameW(long ptr ptr long)
+@ stdcall K32GetModuleBaseNameA(long long ptr long)
+@ stdcall K32GetModuleBaseNameW(long long ptr long)
+@ stdcall K32GetModuleFileNameExA(long long ptr long)
+@ stdcall K32GetModuleFileNameExW(long long ptr long)
+@ stdcall K32GetModuleInformation(long long ptr long)
+@ stdcall K32GetPerformanceInfo(ptr long)
+@ stdcall K32GetProcessMemoryInfo(long ptr long)
+@ stdcall K32GetWsChanges(long ptr long)
+@ stdcall K32InitializeProcessForWsWatch(long)
+@ stdcall K32QueryWorkingSet(long ptr long)
+@ stdcall K32QueryWorkingSetEx(long ptr long)
 @ stdcall -i386 -private -register K32Thk1632Epilog() krnl386.exe16.K32Thk1632Epilog
 @ stdcall -i386 -private -register K32Thk1632Prolog() krnl386.exe16.K32Thk1632Prolog
 @ stdcall LCIDToLocaleName(long ptr long long)
@@ -909,6 +941,49 @@
 @ stdcall ReadFileEx(long ptr long ptr ptr)
 @ stdcall ReadFileScatter(long ptr long ptr ptr)
 @ stdcall ReadProcessMemory(long ptr ptr long ptr)
+@ stdcall RegCloseKey(long) advapi32.RegCloseKey
+@ stdcall RegCreateKeyExA(long str long ptr long long ptr ptr ptr) advapi32.RegCreateKeyExA
+@ stdcall RegCreateKeyExW(long wstr long ptr long long ptr ptr ptr) advapi32.RegCreateKeyExW
+@ stdcall RegDeleteKeyExA(long str long long) advapi32.RegDeleteKeyExA
+@ stdcall RegDeleteKeyExW(long wstr long long) advapi32.RegDeleteKeyExW
+@ stdcall RegDeleteTreeA(long str) advapi32.RegDeleteTreeA
+@ stdcall RegDeleteTreeW(long wstr) advapi32.RegDeleteTreeW
+@ stdcall RegDeleteValueA(long str) advapi32.RegDeleteValueA
+@ stdcall RegDeleteValueW(long wstr) advapi32.RegDeleteValueW
+# stub RegDisablePredefinedCacheEx
+@ stdcall RegEnumKeyExA(long long ptr ptr ptr ptr ptr ptr) advapi32.RegEnumKeyExA
+@ stdcall RegEnumKeyExW(long long ptr ptr ptr ptr ptr ptr) advapi32.RegEnumKeyExW
+@ stdcall RegEnumValueA(long long ptr ptr ptr ptr ptr ptr) advapi32.RegEnumValueA
+@ stdcall RegEnumValueW(long long ptr ptr ptr ptr ptr ptr) advapi32.RegEnumValueW
+@ stdcall RegFlushKey(long) advapi32.RegFlushKey
+@ stdcall RegGetKeySecurity(long long ptr ptr) advapi32.RegGetKeySecurity
+@ stdcall RegGetValueA(long str str long ptr ptr ptr) advapi32.RegGetValueA
+@ stdcall RegGetValueW(long wstr wstr long ptr ptr ptr) advapi32.RegGetValueW
+# stub RegKrnGetGlobalState
+# stub RegKrnInitialize
+@ stdcall RegLoadKeyA(long str str) advapi32.RegLoadKeyA
+@ stdcall RegLoadKeyW(long wstr wstr) advapi32.RegLoadKeyW
+@ stdcall RegLoadMUIStringA(long str str long ptr long str) advapi32.RegLoadMUIStringA
+@ stdcall RegLoadMUIStringW(long wstr wstr long ptr long wstr) advapi32.RegLoadMUIStringW
+@ stdcall RegNotifyChangeKeyValue(long long long long long) advapi32.RegNotifyChangeKeyValue
+@ stdcall RegOpenCurrentUser(long ptr) advapi32.RegOpenCurrentUser
+@ stdcall RegOpenKeyExA(long str long long ptr) advapi32.RegOpenKeyExA
+@ stdcall RegOpenKeyExW(long wstr long long ptr) advapi32.RegOpenKeyExW
+@ stdcall RegOpenUserClassesRoot(ptr long long ptr) advapi32.RegOpenUserClassesRoot
+@ stdcall RegQueryInfoKeyA(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr) advapi32.RegQueryInfoKeyA
+@ stdcall RegQueryInfoKeyW(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr) advapi32.RegQueryInfoKeyW
+@ stdcall RegQueryValueExA(long str ptr ptr ptr ptr) advapi32.RegQueryValueExA
+@ stdcall RegQueryValueExW(long wstr ptr ptr ptr ptr) advapi32.RegQueryValueExW
+@ stdcall RegRestoreKeyA(long str long) advapi32.RegRestoreKeyA
+@ stdcall RegRestoreKeyW(long wstr long) advapi32.RegRestoreKeyW
+# stub RegSaveKeyExA
+# stub RegSaveKeyExW
+@ stdcall RegSetKeySecurity(long long ptr) advapi32.RegSetKeySecurity
+@ stdcall RegSetValueExA(long str long long ptr long) advapi32.RegSetValueExA
+@ stdcall RegSetValueExW(long wstr long long ptr long) advapi32.RegSetValueExW
+@ stdcall RegUnLoadKeyA(long str) advapi32.RegUnLoadKeyA
+@ stdcall RegUnLoadKeyW(long wstr) advapi32.RegUnLoadKeyW
+@ stdcall RegisterApplicationRecoveryCallback(ptr ptr long long)
 @ stdcall RegisterApplicationRestart(wstr long)
 @ stub RegisterConsoleIME
 @ stub RegisterConsoleOS2
@@ -924,6 +999,8 @@
 @ stdcall ReleaseActCtx(ptr)
 @ stdcall ReleaseMutex(long)
 @ stdcall ReleaseSemaphore(long long ptr)
+@ stdcall ReleaseSRWLockExclusive(ptr)
+@ stdcall ReleaseSRWLockShared(ptr)
 @ stdcall RemoveDirectoryA(str)
 @ stdcall RemoveDirectoryW(wstr)
 # @ stub RemoveLocalAlternateComputerNameA
@@ -942,6 +1019,7 @@
 @ stdcall -register RtlCaptureContext(ptr) ntdll.RtlCaptureContext
 @ stdcall RtlCaptureStackBackTrace(long long ptr ptr) ntdll.RtlCaptureStackBackTrace
 @ stdcall -arch=x86_64 RtlCompareMemory(ptr ptr long) ntdll.RtlCompareMemory
+@ cdecl -arch=x86_64 RtlDeleteFunctionTable(ptr) ntdll.RtlDeleteFunctionTable
 @ stdcall RtlFillMemory(ptr long long) ntdll.RtlFillMemory
 @ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
@@ -1076,6 +1154,7 @@
 @ stdcall SetThreadExecutionState(long)
 @ stdcall SetThreadIdealProcessor(long long)
 @ stdcall SetThreadLocale(long)
+@ stdcall SetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall SetThreadPriority(long long)
 @ stdcall SetThreadPriorityBoost(long long)
 @ stdcall SetThreadUILanguage(long)

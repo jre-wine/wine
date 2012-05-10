@@ -545,8 +545,8 @@ BOOL WINAPI CryptAcquireContextA (HCRYPTPROV *phProv, LPCSTR pszContainer,
 	PWSTR pProvider = NULL, pContainer = NULL;
 	BOOL ret = FALSE;
 
-	TRACE("(%p, %s, %s, %d, %08x)\n", phProv, pszContainer,
-		pszProvider, dwProvType, dwFlags);
+	TRACE("(%p, %s, %s, %d, %08x)\n", phProv, debugstr_a(pszContainer),
+              debugstr_a(pszProvider), dwProvType, dwFlags);
 
 	if ( !CRYPT_ANSIToUnicode(pszContainer, &pContainer, -1) )
 	{
@@ -720,12 +720,7 @@ BOOL WINAPI CryptCreateHash (HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey,
 
 	TRACE("(0x%lx, 0x%x, 0x%lx, %08x, %p)\n", hProv, Algid, hKey, dwFlags, phHash);
 
-	if (!prov)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
-	if (!phHash || prov->dwMagic != MAGIC_CRYPTPROV ||
+	if (!prov || !phHash || prov->dwMagic != MAGIC_CRYPTPROV ||
 		(key && key->dwMagic != MAGIC_CRYPTKEY))
 	{
 		SetLastError(ERROR_INVALID_PARAMETER);
@@ -1124,6 +1119,7 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
                 'P','r','o','v','i','d','e','r',0
         };
 	static const WCHAR typeW[] = {'T','y','p','e',0};
+	BOOL ret;
 
 	TRACE("(%d, %p, %d, %p, %p, %p)\n", dwIndex, pdwReserved, dwFlags,
 			pdwProvType, pszProvName, pcbProvName);
@@ -1145,6 +1141,7 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
 		return FALSE;
 	}
 
+	ret = TRUE;
 	if (!pszProvName)
 	{
 		DWORD numkeys;
@@ -1156,6 +1153,7 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
 		if (!(provNameW = CRYPT_Alloc(*pcbProvName * sizeof(WCHAR))))
 		{
 			SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+			RegCloseKey(hKey);
 			return FALSE;
 		}
 
@@ -1167,7 +1165,7 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
 		if (dwIndex >= numkeys)
 		{
 			SetLastError(ERROR_NO_MORE_ITEMS);
-			return FALSE;
+			ret = FALSE;
 		}
 	} else {
 		DWORD size = sizeof(DWORD);
@@ -1178,16 +1176,22 @@ BOOL WINAPI CryptEnumProvidersW (DWORD dwIndex, DWORD *pdwReserved,
 		if (result)
 		{
 			SetLastError(result);
+			RegCloseKey(hKey);
 			return FALSE;
 		}
 		if (RegOpenKeyW(hKey, pszProvName, &subkey))
+		{
+			RegCloseKey(hKey);
 			return FALSE;
+		}
+
 		if (RegQueryValueExW(subkey, typeW, NULL, NULL, (BYTE*)pdwProvType, &size))
-			return FALSE;
+			ret = FALSE;
+
 		RegCloseKey(subkey);
 	}
 	RegCloseKey(hKey);
-	return TRUE;
+	return ret;
 }
 
 /******************************************************************************
@@ -1200,7 +1204,7 @@ BOOL WINAPI CryptEnumProvidersA (DWORD dwIndex, DWORD *pdwReserved,
 {
 	PWSTR str = NULL;
 	DWORD bufsize;
-	BOOL ret; /* = FALSE; */
+	BOOL ret;
 
 	TRACE("(%d, %p, %08x, %p, %p, %p)\n", dwIndex, pdwReserved, dwFlags,
 			pdwProvType, pszProvName, pcbProvName);
@@ -1287,19 +1291,24 @@ BOOL WINAPI CryptEnumProviderTypesW (DWORD dwIndex, DWORD *pdwReserved,
 	if (dwIndex >= numkeys)
 	{
 		SetLastError(ERROR_NO_MORE_ITEMS);
+		RegCloseKey(hKey);
 		return FALSE;
 	}
 	keylen++;
 	if ( !(keyname = CRYPT_Alloc(keylen*sizeof(WCHAR))) )
 	{
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+		RegCloseKey(hKey);
 		return FALSE;
 	}
 	if ( RegEnumKeyW(hKey, dwIndex, keyname, keylen) ) {
                 CRYPT_Free(keyname);
+		RegCloseKey(hKey);
 		return FALSE;
         }
 	RegOpenKeyW(hKey, keyname, &hSubkey);
+	RegCloseKey(hKey);
+
 	ch = keyname + strlenW(keyname);
 	/* Convert "Type 000" to 0, etc/ */
 	*pdwProvType = *(--ch) - '0';
@@ -1311,11 +1320,11 @@ BOOL WINAPI CryptEnumProviderTypesW (DWORD dwIndex, DWORD *pdwReserved,
 	if (result)
 	{
 		SetLastError(result);
+		RegCloseKey(hSubkey);
 		return FALSE;
 	}
 
 	RegCloseKey(hSubkey);
-	RegCloseKey(hKey);
 	return TRUE;
 }
 
@@ -1420,11 +1429,6 @@ BOOL WINAPI CryptGenKey (HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYPTKE
 
 	TRACE("(0x%lx, %d, %08x, %p)\n", hProv, Algid, dwFlags, phKey);
 
-	if (!prov)
-	{
-		SetLastError(ERROR_INVALID_HANDLE);
-		return FALSE;
-	}
 	if (!phKey || !prov || prov->dwMagic != MAGIC_CRYPTPROV)
 	{
 		SetLastError(ERROR_INVALID_PARAMETER);
@@ -1507,6 +1511,8 @@ BOOL WINAPI CryptGetDefaultProviderW (DWORD dwProvType, DWORD *pdwReserved,
 	CRYPT_Free(keyname);
 	
 	result = RegQueryValueExW(hKey, nameW, NULL, NULL, (LPBYTE)pszProvName, pcbProvName); 
+	RegCloseKey(hKey);
+
 	if (result)
 	{
 		if (result != ERROR_MORE_DATA)
@@ -1517,7 +1523,6 @@ BOOL WINAPI CryptGetDefaultProviderW (DWORD dwProvType, DWORD *pdwReserved,
 		return FALSE;
 	}
 	
-	RegCloseKey(hKey);
 	return TRUE;
 }
 
@@ -1531,7 +1536,7 @@ BOOL WINAPI CryptGetDefaultProviderA (DWORD dwProvType, DWORD *pdwReserved,
 {
 	PWSTR str = NULL;
 	DWORD bufsize;
-	BOOL ret = FALSE;
+	BOOL ret;
 
 	TRACE("(%d, %p, %08x, %p, %p)\n", dwProvType, pdwReserved, dwFlags, pszProvName, pcbProvName);
 

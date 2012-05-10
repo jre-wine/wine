@@ -113,6 +113,26 @@ CONFIGRET WINAPI CM_Get_Device_ID_ListW(
 }
 
 /***********************************************************************
+ *             CM_Get_Device_ID_List_SizeA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_List_SizeA( PULONG  pulLen, PCSTR  pszFilter, ULONG  ulFlags )
+{
+    FIXME("%p %s 0x%08x\n", pulLen, debugstr_a(pszFilter), ulFlags);
+
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *             CM_Get_Device_ID_List_SizeW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Device_ID_List_SizeW( PULONG  pulLen, PCWSTR  pszFilter, ULONG  ulFlags )
+{
+    FIXME("%p %s 0x%08x\n", pulLen, debugstr_w(pszFilter), ulFlags);
+
+    return CR_SUCCESS;
+}
+
+/***********************************************************************
  *              CM_Get_Parent (SETUPAPI.@)
  */
 DWORD WINAPI CM_Get_Parent(PDEVINST pdnDevInst, DEVINST dnDevInst, ULONG ulFlags)
@@ -339,12 +359,72 @@ CONFIGRET WINAPI CM_Get_Device_Interface_List_Size_ExW(PULONG len, LPGUID class,
 }
 
 /***********************************************************************
+ *      CM_Get_DevNode_Registry_Property_ExA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_DevNode_Registry_Property_ExA(DEVINST dev, ULONG prop, PULONG regdatatype,
+    PVOID buf, PULONG len, ULONG flags, HMACHINE machine)
+{
+    FIXME("0x%08x %u %p %p %p 0x%08x %p: stub\n", dev, prop, regdatatype, buf, len, flags, machine);
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Get_DevNode_Registry_Property_ExW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_DevNode_Registry_Property_ExW(DEVINST dev, ULONG prop, PULONG regdatatype,
+    PVOID buf, PULONG len, ULONG flags, HMACHINE machine)
+{
+    FIXME("0x%08x %u %p %p %p 0x%08x %p: stub\n", dev, prop, regdatatype, buf, len, flags, machine);
+    return CR_FAILURE;
+}
+
+/***********************************************************************
  *      CM_Enumerate_Classes (SETUPAPI.@)
  */
 CONFIGRET WINAPI CM_Enumerate_Classes(ULONG index, LPGUID class, ULONG flags)
 {
     FIXME("%u %p 0x%08x: stub\n", index, class, flags);
     return CR_NO_SUCH_VALUE;
+}
+
+/***********************************************************************
+ *      CM_Get_Class_Registry_PropertyA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Class_Registry_PropertyA(LPGUID class, ULONG prop, PULONG regdatatype,
+                                                 PVOID buf, ULONG len, ULONG flags, HMACHINE machine)
+{
+    FIXME("%p %u %p %p %u 0x%08x %p: stub\n", class, prop, regdatatype, buf, len, flags, machine);
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Get_Class_Registry_PropertyW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Get_Class_Registry_PropertyW(LPGUID class, ULONG prop, PULONG regdatatype,
+                                                 PVOID buf, ULONG len, ULONG flags, HMACHINE machine)
+{
+    FIXME("%p %u %p %p %u 0x%08x %p: stub\n", class, prop, regdatatype, buf, len, flags, machine);
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Set_Class_Registry_PropertyA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Set_Class_Registry_PropertyA(LPGUID class, ULONG prop, PVOID buf, ULONG len,
+                                                 ULONG flags, HMACHINE machine)
+{
+    FIXME("%p %u %p %u 0x%08x %p: stub\n", class, prop, buf, len, flags, machine);
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Set_Class_Registry_PropertyW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Set_Class_Registry_PropertyW(LPGUID class, ULONG prop, PVOID buf, ULONG len,
+                                                 ULONG flags, HMACHINE machine)
+{
+    FIXME("%p %u %p %u 0x%08x %p: stub\n", class, prop, buf, len, flags, machine);
+    return CR_FAILURE;
 }
 
 /***********************************************************************
@@ -415,6 +495,28 @@ BOOL WINAPI SetupDiDeleteDeviceInfo(HDEVINFO DeviceInfoSet, PSP_DEVINFO_DATA Dev
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return FALSE;
  }
+
+/***********************************************************************
+ *              SetupDiDrawMiniIcon  (SETUPAPI.@)
+ */
+INT WINAPI SetupDiDrawMiniIcon(HDC hdc, RECT rc, INT MiniIconIndex, DWORD Flags)
+{
+    FIXME("(%p, %s, %d, %x) stub\n", hdc, wine_dbgstr_rect(&rc), MiniIconIndex, Flags);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/***********************************************************************
+ *              SetupDiGetClassBitmapIndex  (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetClassBitmapIndex(const GUID *ClassGuid, PINT MiniIconIndex)
+{
+    FIXME("(%s, %p) stub\n", debugstr_guid(ClassGuid), MiniIconIndex);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
 
 /***********************************************************************
  *              SetupDiLoadClassIcon  (SETUPAPI.@)

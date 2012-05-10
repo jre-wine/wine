@@ -315,6 +315,8 @@ static void test_res_protocol(void)
         {'r','e','s',':','/','/','x','x','.','d','l','l','/','b','l','a','n','k','.','h','t','m',0};
     static const WCHAR wrong_url5[] =
         {'r','e','s',':','/','/','s','h','t','m','l','.','d','l','l','/','b','l','a','n','k','.','h','t','m',0};
+    static const WCHAR wrong_url6[] =
+        {'r','e','s',':','/','/','c',':','\\','d','i','r','\\','f','i','l','e','.','d','l','l','/','b','l','a','n','k','.','h','t','m',0};
     static const WCHAR mshtml_dllW[] = {'m','s','h','t','m','l','.','d','l','l',0};
 
     hres = CoGetClassObject(&CLSID_ResProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void**)&unk);
@@ -363,6 +365,10 @@ static void test_res_protocol(void)
            "ParseUrl failed: %08x, expected MK_E_SYNTAX\n", hres);
 
         hres = IInternetProtocolInfo_ParseUrl(protocol_info, wrong_url5, PARSE_SECURITY_URL, 0, buf,
+                sizeof(buf)/sizeof(buf[0]), &size, 0);
+        ok(hres == MK_E_SYNTAX, "ParseUrl failed: %08x, expected MK_E_SYNTAX\n", hres);
+
+        hres = IInternetProtocolInfo_ParseUrl(protocol_info, wrong_url6, PARSE_SECURITY_URL, 0, buf,
                 sizeof(buf)/sizeof(buf[0]), &size, 0);
         ok(hres == MK_E_SYNTAX, "ParseUrl failed: %08x, expected MK_E_SYNTAX\n", hres);
 
@@ -749,6 +755,7 @@ static void test_about_protocol(void)
             case QUERY_IS_SECURE:
             case QUERY_IS_SAFE:
             case QUERY_USES_HISTORYFOLDER:
+            case QUERY_IS_CACHED_AND_USABLE_OFFLINE:
                 break;
             default:
                 hres = IInternetProtocolInfo_QueryInfo(protocol_info, about_blank_url, i, 0,

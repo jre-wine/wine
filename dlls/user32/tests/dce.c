@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -223,7 +222,7 @@ static void test_dc_visrgn(void)
     SetRectEmpty( &rect );
     GetClipBox( hdc, &rect );
     ok( !(rect.left >= 10 && rect.top >= 10 && rect.right <= 20 && rect.bottom <= 20),
-        "clip box sould have been reset %d,%d-%d,%d\n", rect.left, rect.top, rect.right, rect.bottom );
+        "clip box should have been reset %d,%d-%d,%d\n", rect.left, rect.top, rect.right, rect.bottom );
     ReleaseDC( hwnd_cache, hdc );
 
     /* window DC */

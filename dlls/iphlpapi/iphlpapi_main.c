@@ -23,12 +23,6 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
-#include <sys/socket.h>
-#endif
-#ifdef HAVE_NET_IF_H
-#include <net/if.h>
-#endif
 #ifdef HAVE_NETINET_IN_H
 # include <netinet/in.h>
 #endif
@@ -49,11 +43,13 @@
 #include "winreg.h"
 #define USE_WS_PREFIX
 #include "winsock2.h"
+#include "winternl.h"
 #include "ws2ipdef.h"
 #include "iphlpapi.h"
 #include "ifenum.h"
 #include "ipstats.h"
 #include "ipifcons.h"
+#include "fltdefs.h"
 
 #include "wine/debug.h"
 
@@ -587,7 +583,7 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
                * is the default gateway for this adapter */
               for (i = 0; i < routeTable->dwNumEntries; i++)
                 if (routeTable->table[i].dwForwardIfIndex == ptr->Index
-                 && routeTable->table[i].dwForwardType ==
+                 && routeTable->table[i].u1.ForwardType ==
                  MIB_IPROUTE_TYPE_INDIRECT)
                   toIPAddressString(routeTable->table[i].dwForwardNextHop,
                    ptr->GatewayList.IpAddress.String);
@@ -632,7 +628,7 @@ static DWORD typeFromMibType(DWORD mib_type)
     }
 }
 
-static DWORD connectionTypeFromMibType(DWORD mib_type)
+static NET_IF_CONNECTION_TYPE connectionTypeFromMibType(DWORD mib_type)
 {
     switch (mib_type)
     {
@@ -642,7 +638,7 @@ static DWORD connectionTypeFromMibType(DWORD mib_type)
     }
 }
 
-static ULONG v4addressesFromIndex(DWORD index, DWORD **addrs, ULONG *num_addrs)
+static ULONG v4addressesFromIndex(IF_INDEX index, DWORD **addrs, ULONG *num_addrs)
 {
     ULONG ret, i, j;
     MIB_IPADDRTABLE *at;
@@ -719,7 +715,7 @@ static ULONG count_v4_gateways(DWORD index, PMIB_IPFORWARDTABLE routeTable)
     for (i = 0; i < routeTable->dwNumEntries; i++)
     {
         if (routeTable->table[i].dwForwardIfIndex == index &&
-            routeTable->table[i].dwForwardType == MIB_IPROUTE_TYPE_INDIRECT)
+            routeTable->table[i].u1.ForwardType == MIB_IPROUTE_TYPE_INDIRECT)
             num_gateways++;
     }
     return num_gateways;
@@ -734,13 +730,13 @@ static PMIB_IPFORWARDROW findIPv4Gateway(DWORD index,
     for (i = 0; !row && i < routeTable->dwNumEntries; i++)
     {
         if (routeTable->table[i].dwForwardIfIndex == index &&
-            routeTable->table[i].dwForwardType == MIB_IPROUTE_TYPE_INDIRECT)
+            routeTable->table[i].u1.ForwardType == MIB_IPROUTE_TYPE_INDIRECT)
             row = &routeTable->table[i];
     }
     return row;
 }
 
-static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, DWORD index,
+static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, IF_INDEX index,
                                        IP_ADAPTER_ADDRESSES *aa, ULONG *size)
 {
     ULONG ret = ERROR_SUCCESS, i, num_v4addrs = 0, num_v4_gateways = 0, num_v6addrs = 0, total_size;
@@ -774,12 +770,10 @@ static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, DWORD index,
             ret = AllocateAndGetIpForwardTableFromStack(&routeTable, FALSE,
                                                         GetProcessHeap(), 0);
             if (!ret)
-            {
                 num_v4_gateways = count_v4_gateways(index, routeTable);
-                if (!(flags & GAA_FLAG_SKIP_UNICAST))
-                    ret = v6addressesFromIndex(index, &v6addrs, &num_v6addrs);
-            }
         }
+        if (!ret && !(flags & GAA_FLAG_SKIP_UNICAST))
+            ret = v6addressesFromIndex(index, &v6addrs, &num_v6addrs);
     }
     else
     {
@@ -809,7 +803,8 @@ static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, DWORD index,
     {
         char name[IF_NAMESIZE], *ptr = (char *)aa + sizeof(IP_ADAPTER_ADDRESSES), *src;
         WCHAR *dst;
-        DWORD buflen, type, status;
+        DWORD buflen, type;
+        INTERNAL_IF_OPER_STATUS status;
 
         memset(aa, 0, sizeof(IP_ADAPTER_ADDRESSES));
         aa->u.s.Length  = sizeof(IP_ADAPTER_ADDRESSES);
@@ -1217,7 +1212,7 @@ DWORD WINAPI GetBestRoute(DWORD dwDestAddr, DWORD dwSourceAddr, PMIB_IPFORWARDRO
     DWORD ndx, matchedBits, matchedNdx = table->dwNumEntries;
 
     for (ndx = 0, matchedBits = 0; ndx < table->dwNumEntries; ndx++) {
-      if (table->table[ndx].dwForwardType != MIB_IPROUTE_TYPE_INVALID &&
+      if (table->table[ndx].u1.ForwardType != MIB_IPROUTE_TYPE_INVALID &&
        (dwDestAddr & table->table[ndx].dwForwardMask) ==
        (table->table[ndx].dwForwardDest & table->table[ndx].dwForwardMask)) {
         DWORD numShifts, mask;
@@ -1882,6 +1877,22 @@ DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
     return ret;
 }
 
+/******************************************************************
+ *    GetExtendedTcpTable (IPHLPAPI.@)
+ */
+DWORD WINAPI GetExtendedTcpTable(PVOID pTcpTable, PDWORD pdwSize, BOOL bOrder,
+                                 ULONG ulAf, TCP_TABLE_CLASS TableClass, ULONG Reserved)
+{
+    TRACE("pTcpTable %p, pdwSize %p, bOrder %d, ulAf %u, TableClass %u, Reserved %u\n",
+           pTcpTable, pdwSize, bOrder, ulAf, TableClass, Reserved);
+
+    if (ulAf == AF_INET6 || TableClass != TCP_TABLE_BASIC_ALL)
+    {
+        FIXME("ulAf = %u, TableClass = %u not supportted\n", ulAf, TableClass);
+        return ERROR_NOT_SUPPORTED;
+    }
+    return GetTcpTable(pTcpTable, pdwSize, bOrder);
+}
 
 /******************************************************************
  *    GetUdpTable (IPHLPAPI.@)
@@ -2033,6 +2044,7 @@ DWORD WINAPI NotifyAddrChange(PHANDLE Handle, LPOVERLAPPED overlapped)
 {
   FIXME("(Handle %p, overlapped %p): stub\n", Handle, overlapped);
   if (Handle) *Handle = INVALID_HANDLE_VALUE;
+  if (overlapped) ((IO_STATUS_BLOCK *) overlapped)->u.Status = STATUS_PENDING;
   return ERROR_IO_PENDING;
 }
 
@@ -2253,4 +2265,41 @@ DWORD WINAPI UnenableRouter(OVERLAPPED * pOverlapped, LPDWORD lpdwEnableCount)
      could map EACCESS to ERROR_ACCESS_DENIED, I suppose
    */
   return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    PfCreateInterface (IPHLPAPI.@)
+ */
+DWORD WINAPI PfCreateInterface(DWORD dwName, PFFORWARD_ACTION inAction, PFFORWARD_ACTION outAction,
+        BOOL bUseLog, BOOL bMustBeUnique, INTERFACE_HANDLE *ppInterface)
+{
+    FIXME("(%d %d %d %x %x %p) stub\n", dwName, inAction, outAction, bUseLog, bMustBeUnique, ppInterface);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************
+ *    GetTcpTable2 (IPHLPAPI.@)
+ */
+ULONG WINAPI GetTcpTable2(PMIB_TCPTABLE2 table, PULONG size, BOOL order)
+{
+    FIXME("pTcpTable2 %p, pdwSize %p, bOrder %d: stub\n", table, size, order);
+    return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    GetTcp6Table (IPHLPAPI.@)
+ */
+ULONG WINAPI GetTcp6Table(PMIB_TCP6TABLE table, PULONG size, BOOL order)
+{
+    FIXME("pTcp6Table %p, size %p, order %d: stub\n", table, size, order);
+    return ERROR_NOT_SUPPORTED;
+}
+
+/******************************************************************
+ *    GetTcp6Table2 (IPHLPAPI.@)
+ */
+ULONG WINAPI GetTcp6Table2(PMIB_TCP6TABLE2 table, PULONG size, BOOL order)
+{
+    FIXME("pTcp6Table2 %p, size %p, order %d: stub\n", table, size, order);
+    return ERROR_NOT_SUPPORTED;
 }

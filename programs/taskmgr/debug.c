@@ -21,12 +21,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <stdio.h>
 #include <winnt.h>
 
 #include "wine/unicode.h"
@@ -36,7 +35,7 @@
 void ProcessPage_OnDebug(void)
 {
     LVITEMW              lvitem;
-    ULONG                Index;
+    ULONG                Index, Count;
     DWORD                dwProcessId;
     WCHAR                wstrErrorText[256];
     HKEY                 hKey;
@@ -62,7 +61,8 @@ void ProcessPage_OnDebug(void)
     LoadStringW(hInst, IDS_DEBUG_UNABLE2DEBUG, wszUnable2Debug, sizeof(wszUnable2Debug)/sizeof(WCHAR));
     LoadStringW(hInst, IDS_DEBUG_MESSAGE, wszWarnMsg, sizeof(wszWarnMsg)/sizeof(WCHAR));
 
-    for (Index=0; Index<(ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++)
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0);
+    for (Index=0; Index<Count; Index++)
     {
         lvitem.mask = LVIF_STATE;
         lvitem.stateMask = LVIS_SELECTED;
@@ -75,9 +75,9 @@ void ProcessPage_OnDebug(void)
             break;
     }
 
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETSELECTEDCOUNT, 0, 0);
     dwProcessId = PerfDataGetProcessId(Index);
-
-    if ((ListView_GetSelectedCount(hProcessPageListCtrl) != 1) || (dwProcessId == 0))
+    if ((Count != 1) || (dwProcessId == 0))
         return;
 
     if (MessageBoxW(hMainWnd, wszWarnMsg, wszWarnTitle, MB_YESNO|MB_ICONWARNING) != IDYES)
@@ -105,7 +105,7 @@ void ProcessPage_OnDebug(void)
 
     RegCloseKey(hKey);
 
-    hDebugEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+    hDebugEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     if (!hDebugEvent)
     {
         GetLastErrorText(wstrErrorText, sizeof(wstrErrorText)/sizeof(WCHAR));

@@ -42,11 +42,18 @@ static const HRESULT SetCoop_real_window[16] =  {
     E_INVALIDARG, E_NOTIMPL,    S_OK,         E_INVALIDARG,
     E_INVALIDARG, E_INVALIDARG, E_INVALIDARG, E_INVALIDARG};
 
+static const HRESULT SetCoop_child_window[16] =  {
+    E_INVALIDARG, E_INVALIDARG, E_INVALIDARG, E_INVALIDARG,
+    E_INVALIDARG, E_HANDLE,     E_HANDLE,     E_INVALIDARG,
+    E_INVALIDARG, E_HANDLE,     E_HANDLE,     E_INVALIDARG,
+    E_INVALIDARG, E_INVALIDARG, E_INVALIDARG, E_INVALIDARG};
+
 static void test_set_coop(LPDIRECTINPUT pDI, HWND hwnd)
 {
     HRESULT hr;
     LPDIRECTINPUTDEVICE pMouse = NULL;
     int i;
+    HWND child;
 
     hr = IDirectInput_CreateDevice(pDI, &GUID_SysMouse, &pMouse, NULL);
     ok(SUCCEEDED(hr), "IDirectInput_CreateDevice() failed: %08x\n", hr);
@@ -63,6 +70,17 @@ static void test_set_coop(LPDIRECTINPUT pDI, HWND hwnd)
         ok(hr == SetCoop_real_window[i], "SetCooperativeLevel(hwnd, %d): %08x\n", i, hr);
     }
 
+    child = CreateWindow("static", "Title", WS_CHILD | WS_VISIBLE,
+                         10, 10, 50, 50, hwnd, NULL, NULL, NULL);
+    ok(child != NULL, "err: %d\n", GetLastError());
+
+    for (i=0; i<16; i++)
+    {
+        hr = IDirectInputDevice_SetCooperativeLevel(pMouse, child, i);
+        ok(hr == SetCoop_child_window[i], "SetCooperativeLevel(child, %d): %08x\n", i, hr);
+    }
+
+    DestroyWindow(child);
     if (pMouse) IUnknown_Release(pMouse);
 }
 
@@ -72,6 +90,10 @@ static void test_acquire(LPDIRECTINPUT pDI, HWND hwnd)
     LPDIRECTINPUTDEVICE pMouse = NULL;
     DIMOUSESTATE m_state;
     HWND hwnd2;
+    DIPROPDWORD di_op;
+    DIDEVICEOBJECTDATA mouse_state;
+    DWORD cnt;
+    int i;
 
     if (! SetForegroundWindow(hwnd))
     {
@@ -85,6 +107,14 @@ static void test_acquire(LPDIRECTINPUT pDI, HWND hwnd)
 
     hr = IDirectInputDevice_SetCooperativeLevel(pMouse, hwnd, DISCL_NONEXCLUSIVE | DISCL_FOREGROUND);
     ok(hr == S_OK, "SetCooperativeLevel: %08x\n", hr);
+
+    memset(&di_op, 0, sizeof(di_op));
+    di_op.dwData = 5;
+    di_op.diph.dwHow = DIPH_DEVICE;
+    di_op.diph.dwSize = sizeof(DIPROPDWORD);
+    di_op.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+    hr = IDirectInputDevice_SetProperty(pMouse, DIPROP_BUFFERSIZE, (LPCDIPROPHEADER)&di_op);
+    ok(hr == S_OK, "SetProperty() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_SetDataFormat(pMouse, &c_dfDIMouse);
     ok(SUCCEEDED(hr), "IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
@@ -112,6 +142,36 @@ static void test_acquire(LPDIRECTINPUT pDI, HWND hwnd)
     SetActiveWindow( hwnd );
     hr = IDirectInputDevice_Acquire(pMouse);
     ok(hr == S_OK, "Acquire() failed: %08x\n", hr);
+
+    mouse_event(MOUSEEVENTF_MOVE, 10, 10, 0, 0);
+    cnt = 1;
+    hr = IDirectInputDevice_GetDeviceData(pMouse, sizeof(mouse_state), &mouse_state, &cnt, 0);
+    ok(hr == S_OK && cnt > 0, "GetDeviceData() failed: %08x cnt:%d\n", hr, cnt);
+
+    mouse_event(MOUSEEVENTF_MOVE, 10, 10, 0, 0);
+    IDirectInputDevice_Unacquire(pMouse);
+    cnt = 1;
+    hr = IDirectInputDevice_GetDeviceData(pMouse, sizeof(mouse_state), &mouse_state, &cnt, 0);
+    ok(hr == S_OK && cnt > 0, "GetDeviceData() failed: %08x cnt:%d\n", hr, cnt);
+
+    IDirectInputDevice_Acquire(pMouse);
+    mouse_event(MOUSEEVENTF_MOVE, 10, 10, 0, 0);
+    IDirectInputDevice_Unacquire(pMouse);
+    IDirectInputDevice_Acquire(pMouse);
+    cnt = 1;
+    hr = IDirectInputDevice_GetDeviceData(pMouse, sizeof(mouse_state), &mouse_state, &cnt, 0);
+    ok(hr == S_OK && cnt > 0, "GetDeviceData() failed: %08x cnt:%d\n", hr, cnt);
+
+    /* Check for buffer owerflow */
+    for (i = 0; i < 6; i++)
+        mouse_event(MOUSEEVENTF_MOVE, 10 + i, 10 + i, 0, 0);
+
+    cnt = 1;
+    hr = IDirectInputDevice_GetDeviceData(pMouse, sizeof(mouse_state), &mouse_state, &cnt, 0);
+    ok(hr == DI_OK, "GetDeviceData() failed: %08x cnt:%d\n", hr, cnt);
+    cnt = 1;
+    hr = IDirectInputDevice_GetDeviceData(pMouse, sizeof(mouse_state), &mouse_state, &cnt, 0);
+    ok(hr == DI_OK && cnt == 1, "GetDeviceData() failed: %08x cnt:%d\n", hr, cnt);
 
     if (pMouse) IUnknown_Release(pMouse);
 

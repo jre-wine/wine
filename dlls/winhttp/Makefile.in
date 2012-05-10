@@ -1,7 +1,7 @@
 MODULE    = winhttp.dll
 IMPORTLIB = winhttp
-IMPORTS   = shlwapi
-DELAYIMPORTS = crypt32 advapi32
+IMPORTS   = uuid user32 advapi32
+DELAYIMPORTS = oleaut32 ole32 crypt32
 EXTRALIBS = @SOCKETLIBS@
 
 C_SRCS = \
@@ -13,7 +13,8 @@ C_SRCS = \
 	session.c \
 	url.c
 
-RC_SRCS = \
-	version.rc
+IDL_TLB_SRCS = winhttp_tlb.idl
+
+RC_SRCS = rsrc.rc
 
 @MAKE_DLL_RULES@

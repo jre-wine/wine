@@ -42,7 +42,7 @@ typedef HRESULT (*SendPinFunc)( IPin *to, LPVOID arg );
  * Return the first received error code (E_NOTIMPL is ignored)
  * If no errors occur: return the first received non-error-code that isn't S_OK
  */
-HRESULT updatehres( HRESULT original, HRESULT new )
+static HRESULT updatehres( HRESULT original, HRESULT new )
 {
     if (FAILED( original ) || new == E_NOTIMPL)
         return original;
@@ -134,6 +134,8 @@ static HRESULT SendFurther( IPin *from, SendPinFunc fnMiddle, LPVOID arg, SendPi
     }
 
 out:
+    if (enumpins)
+        IEnumPins_Release( enumpins );
     if (pin_info.pFilter)
         IBaseFilter_Release( pin_info.pFilter );
     return hr;
@@ -199,6 +201,7 @@ static HRESULT PullPin_Init(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinI
     pPinImpl->fnDone = pDone;
     pPinImpl->fnPreConnect = NULL;
     pPinImpl->pAlloc = NULL;
+    pPinImpl->prefAlloc = NULL;
     pPinImpl->pReader = NULL;
     pPinImpl->hThread = NULL;
     pPinImpl->hEventStateChanged = CreateEventW(NULL, TRUE, TRUE, NULL);
@@ -283,6 +286,7 @@ HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const
 
         This->pReader = NULL;
         This->pAlloc = NULL;
+        This->prefAlloc = NULL;
         if (SUCCEEDED(hr))
         {
             hr = IPin_QueryInterface(pReceivePin, &IID_IAsyncReader, (LPVOID *)&This->pReader);
@@ -293,9 +297,19 @@ HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const
             hr = This->fnPreConnect(iface, pReceivePin, &props);
         }
 
+        /*
+         * Some custom filters (such as the one used by Fallout 3
+         * and Fallout: New Vegas) expect to be passed a non-NULL
+         * preferred allocator.
+         */
         if (SUCCEEDED(hr))
         {
-            hr = IAsyncReader_RequestAllocator(This->pReader, NULL, &props, &This->pAlloc);
+            hr = StdMemAllocator_create(NULL, (LPVOID *) &This->prefAlloc);
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            hr = IAsyncReader_RequestAllocator(This->pReader, This->prefAlloc, &props, &This->pAlloc);
         }
 
         if (SUCCEEDED(hr))
@@ -314,6 +328,9 @@ HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const
              if (This->pReader)
                  IAsyncReader_Release(This->pReader);
              This->pReader = NULL;
+             if (This->prefAlloc)
+                 IMemAllocator_Release(This->prefAlloc);
+             This->prefAlloc = NULL;
              if (This->pAlloc)
                  IMemAllocator_Release(This->pAlloc);
              This->pAlloc = NULL;
@@ -366,6 +383,8 @@ ULONG WINAPI PullPin_Release(IPin *iface)
         WaitForSingleObject(This->hEventStateChanged, INFINITE);
         assert(!This->hThread);
 
+        if(This->prefAlloc)
+            IMemAllocator_Release(This->prefAlloc);
         if(This->pAlloc)
             IMemAllocator_Release(This->pAlloc);
         if(This->pReader)
@@ -387,6 +406,9 @@ static void PullPin_Flush(PullPin *This)
 
     if (This->pReader)
     {
+        /* Do not allow state to change while flushing */
+        EnterCriticalSection(This->pin.pCritSec);
+
         /* Flush outstanding samples */
         IAsyncReader_BeginFlush(This->pReader);
 
@@ -405,6 +427,8 @@ static void PullPin_Flush(PullPin *This)
         }
 
         IAsyncReader_EndFlush(This->pReader);
+
+        LeaveCriticalSection(This->pin.pCritSec);
     }
 }
 
@@ -456,14 +480,15 @@ static void PullPin_Thread_Process(PullPin *This)
         }
         else
         {
-            /* FIXME: This is not well handled yet! */
-            ERR("Processing error: %x\n", hr);
             if (hr == VFW_E_TIMEOUT)
             {
-                assert(!pSample);
+                if (pSample != NULL)
+                    WARN("Non-NULL sample returned with VFW_E_TIMEOUT.\n");
                 hr = S_OK;
-                continue;
             }
+            /* FIXME: Errors are not well handled yet! */
+            else
+                ERR("Processing error: %x\n", hr);
         }
 
         if (pSample)
@@ -473,10 +498,22 @@ static void PullPin_Thread_Process(PullPin *This)
         }
     } while (This->rtCurrent < This->rtStop && hr == S_OK && !This->stop_playback);
 
-    /* Sample was rejected, and we are asked to terminate */
-    if (pSample)
+    /*
+     * Sample was rejected, and we are asked to terminate.  When there is more than one buffer
+     * it is possible for a filter to have several queued samples, making it necessary to
+     * release all of these pending samples.
+     */
+    if (This->stop_playback || FAILED(hr))
     {
-        IMediaSample_Release(pSample);
+        DWORD_PTR dwUser;
+
+        do
+        {
+            if (pSample)
+                IMediaSample_Release(pSample);
+            pSample = NULL;
+            IAsyncReader_WaitForNext(This->pReader, 0, &pSample, &dwUser);
+        } while(pSample);
     }
 
     /* Can't reset state to Sleepy here because that might race, instead PauseProcessing will do that for us
@@ -625,10 +662,26 @@ HRESULT PullPin_PauseProcessing(PullPin * This)
         assert(This->state == Req_Run|| This->state == Req_Sleepy);
 
         assert(WaitForSingleObject(This->thread_sleepy, 0) == WAIT_TIMEOUT);
+
         This->state = Req_Pause;
         This->stop_playback = 1;
         ResetEvent(This->hEventStateChanged);
         SetEvent(This->thread_sleepy);
+
+        /* Release any outstanding samples */
+        if (This->pReader)
+        {
+            IMediaSample *pSample;
+            DWORD_PTR dwUser;
+
+            do
+            {
+                pSample = NULL;
+                IAsyncReader_WaitForNext(This->pReader, 0, &pSample, &dwUser);
+                if (pSample)
+                    IMediaSample_Release(pSample);
+            } while(pSample);
+        }
 
         LeaveCriticalSection(This->pin.pCritSec);
     }
@@ -673,9 +726,17 @@ HRESULT WINAPI PullPin_QueryAccept(IPin * iface, const AM_MEDIA_TYPE * pmt)
 
 HRESULT WINAPI PullPin_EndOfStream(IPin * iface)
 {
-    FIXME("(%p)->() stub\n", iface);
+    PullPin *This = (PullPin *)iface;
+    HRESULT hr = S_FALSE;
 
-    return SendFurther( iface, deliver_endofstream, NULL, NULL );
+    TRACE("(%p)->()\n", iface);
+
+    EnterCriticalSection(This->pin.pCritSec);
+    hr = SendFurther( iface, deliver_endofstream, NULL, NULL );
+    SetEvent(This->hEventStateChanged);
+    LeaveCriticalSection(This->pin.pCritSec);
+
+    return hr;
 }
 
 HRESULT WINAPI PullPin_BeginFlush(IPin * iface)

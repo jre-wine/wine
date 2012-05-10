@@ -255,6 +255,7 @@ extern	struct dbg_thread*	dbg_curr_thread;
 extern	DWORD_PTR	        dbg_curr_tid;
 extern  CONTEXT 	        dbg_context;
 extern  BOOL                    dbg_interactiveP;
+extern  HANDLE                  dbg_houtput;
 
 struct dbg_internal_var
 {
@@ -308,7 +309,8 @@ extern void             break_restart_execution(int count);
 extern int              break_add_condition(int bpnum, struct expr* exp);
 
   /* crashdlg.c */
-extern BOOL             display_crash_dialog(void);
+extern int              display_crash_dialog(void);
+extern HANDLE           display_crash_details(HANDLE event);
 extern int              msgbox_res_id(HWND hwnd, UINT textId, UINT captionId, UINT uType);
 
   /* dbg.y */
@@ -367,7 +369,6 @@ extern void             memory_examine(const struct dbg_lvalue *lvalue, int coun
 extern void*            memory_to_linear_addr(const ADDRESS64* address);
 extern BOOL             memory_get_current_pc(ADDRESS64* address);
 extern BOOL             memory_get_current_stack(ADDRESS64* address);
-extern BOOL             memory_get_current_frame(ADDRESS64* address);
 extern BOOL             memory_get_string(struct dbg_process* pcs, void* addr, BOOL in_debuggee, BOOL unicode, char* buffer, int size);
 extern BOOL             memory_get_string_indirect(struct dbg_process* pcs, void* addr, BOOL unicode, WCHAR* buffer, int size);
 extern BOOL             memory_get_register(DWORD regno, DWORD_PTR** value, char* buffer, int len);
@@ -420,6 +421,7 @@ extern void             dbg_wait_next_exception(DWORD cont, int count, int mode)
 extern enum dbg_start   dbg_active_attach(int argc, char* argv[]);
 extern enum dbg_start   dbg_active_launch(int argc, char* argv[]);
 extern enum dbg_start   dbg_active_auto(int argc, char* argv[]);
+extern enum dbg_start   dbg_active_minidump(int argc, char* argv[]);
 extern void             dbg_active_wait_for_first_exception(void);
 extern BOOL             dbg_attach_debuggee(DWORD pid, BOOL cofe);
 

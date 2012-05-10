@@ -762,19 +762,11 @@ static HRESULT WINAPI Binding_QueryInterface(IBinding *iface, REFIID riid, void 
 
         *ppv = &This->IWinInetHttpInfo_iface;
     }else if(IsEqualGUID(&IID_IWinInetHttpInfo, riid)) {
-        IWinInetHttpInfo *http_info;
-        HRESULT hres;
-
         TRACE("(%p)->(IID_IWinInetHttpInfo %p)\n", This, ppv);
 
-        if(!This->protocol->wininet_info)
+        if(!This->protocol->wininet_http_info)
             return E_NOINTERFACE;
 
-        hres = IWinInetInfo_QueryInterface(This->protocol->wininet_info, &IID_IWinInetHttpInfo, (void**)&http_info);
-        if(FAILED(hres))
-            return E_NOINTERFACE;
-
-        IWinInetHttpInfo_Release(http_info);
         *ppv = &This->IWinInetHttpInfo_iface;
     }
 
@@ -915,7 +907,7 @@ static Binding *get_bctx_binding(IBindCtx *bctx)
     if(FAILED(hres))
         return NULL;
 
-    hres = IUnknown_QueryInterface(unk, &IID_IBinding, (void*)&binding);
+    hres = IUnknown_QueryInterface(unk, &IID_IBinding, (void**)&binding);
     IUnknown_Release(unk);
     if(FAILED(hres))
         return NULL;
@@ -1259,16 +1251,26 @@ static HRESULT WINAPI WinInetHttpInfo_QueryOption(IWinInetHttpInfo *iface, DWORD
         void *pBuffer, DWORD *pcbBuffer)
 {
     Binding *This = impl_from_IWinInetHttpInfo(iface);
-    FIXME("(%p)->(%x %p %p)\n", This, dwOption, pBuffer, pcbBuffer);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%x %p %p)\n", This, dwOption, pBuffer, pcbBuffer);
+
+    if(!This->protocol->wininet_info)
+        return E_FAIL;
+
+    return IWinInetInfo_QueryOption(This->protocol->wininet_info,
+            dwOption, pBuffer, pcbBuffer);
 }
 
 static HRESULT WINAPI WinInetHttpInfo_QueryInfo(IWinInetHttpInfo *iface, DWORD dwOption,
         void *pBuffer, DWORD *pcbBuffer, DWORD *pdwFlags, DWORD *pdwReserved)
 {
     Binding *This = impl_from_IWinInetHttpInfo(iface);
-    FIXME("(%p)->(%x %p %p %p %p)\n", This, dwOption, pBuffer, pcbBuffer, pdwFlags, pdwReserved);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%x %p %p %p %p)\n", This, dwOption, pBuffer, pcbBuffer, pdwFlags, pdwReserved);
+
+    if(!This->protocol->wininet_http_info)
+        return E_FAIL;
+
+    return IWinInetHttpInfo_QueryInfo(This->protocol->wininet_http_info,
+            dwOption, pBuffer, pcbBuffer, pdwFlags, pdwReserved);
 }
 
 static const IWinInetHttpInfoVtbl WinInetHttpInfoVtbl = {
@@ -1492,7 +1494,10 @@ static HRESULT start_binding(IMoniker *mon, Binding *binding_ctx, IUri *uri, IBi
     hres = IBindStatusCallback_OnStartBinding(binding->callback, 0, &binding->IBinding_iface);
     if(FAILED(hres)) {
         WARN("OnStartBinding failed: %08x\n", hres);
-        stop_binding(binding, INET_E_DOWNLOAD_FAILURE, NULL);
+        if(hres != E_ABORT && hres != E_NOTIMPL)
+            hres = INET_E_DOWNLOAD_FAILURE;
+
+        stop_binding(binding, hres, NULL);
         IBinding_Release(&binding->IBinding_iface);
         return hres;
     }
@@ -1536,8 +1541,6 @@ HRESULT bind_to_storage(IUri *uri, IBindCtx *pbc, REFIID riid, void **ppv)
 {
     Binding *binding = NULL, *binding_ctx;
     HRESULT hres;
-
-    *ppv = NULL;
 
     binding_ctx = get_bctx_binding(pbc);
 

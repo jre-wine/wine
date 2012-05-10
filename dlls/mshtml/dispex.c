@@ -31,6 +31,16 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+static CRITICAL_SECTION cs_dispex_static_data;
+static CRITICAL_SECTION_DEBUG cs_dispex_static_data_dbg =
+{
+    0, 0, &cs_dispex_static_data,
+    { &cs_dispex_static_data_dbg.ProcessLocksList, &cs_dispex_static_data_dbg.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": dispex_static_data") }
+};
+static CRITICAL_SECTION cs_dispex_static_data = { &cs_dispex_static_data_dbg, -1, 0, 0, 0, 0 };
+
+
 static const WCHAR objectW[] = {'[','o','b','j','e','c','t',']',0};
 
 typedef struct {
@@ -88,34 +98,42 @@ TID_LIST
 #undef XDIID
 };
 
+static HRESULT load_typelib(void)
+{
+    HRESULT hres;
+    ITypeLib *tl;
+
+    hres = LoadRegTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, &tl);
+    if(FAILED(hres)) {
+        ERR("LoadRegTypeLib failed: %08x\n", hres);
+        return hres;
+    }
+
+    if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
+        ITypeLib_Release(tl);
+    return hres;
+}
+
 static HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo)
 {
     HRESULT hres;
 
-    if(!typelib) {
-        ITypeLib *tl;
-
-        hres = LoadRegTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, &tl);
-        if(FAILED(hres)) {
-            ERR("LoadRegTypeLib failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
-            ITypeLib_Release(tl);
-    }
+    if (!typelib)
+        hres = load_typelib();
+    if (!typelib)
+        return hres;
 
     if(!typeinfos[tid]) {
-        ITypeInfo *typeinfo;
+        ITypeInfo *ti;
 
-        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &typeinfo);
+        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
         if(FAILED(hres)) {
             ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
             return hres;
         }
 
-        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), typeinfo, NULL))
-            ITypeInfo_Release(typeinfo);
+        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), ti, NULL))
+            ITypeInfo_Release(ti);
     }
 
     *typeinfo = typeinfos[tid];
@@ -147,6 +165,22 @@ void release_typelib(void)
             ITypeInfo_Release(typeinfos[i]);
 
     ITypeLib_Release(typelib);
+    DeleteCriticalSection(&cs_dispex_static_data);
+}
+
+HRESULT get_htmldoc_classinfo(ITypeInfo **typeinfo)
+{
+    HRESULT hres;
+
+    if (!typelib)
+        hres = load_typelib();
+    if (!typelib)
+        return hres;
+
+    hres = ITypeLib_GetTypeInfoOfGuid(typelib, &CLSID_HTMLDocument, typeinfo);
+    if(FAILED(hres))
+        ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
+    return hres;
 }
 
 static void add_func_info(dispex_data_t *data, DWORD *size, tid_t tid, const FUNCDESC *desc, ITypeInfo *dti)
@@ -225,21 +259,19 @@ static dispex_data_t *preprocess_dispex_data(DispatchEx *This)
 
     if(!data->func_cnt) {
         heap_free(data->funcs);
+        data->name_table = NULL;
         data->funcs = NULL;
-    }else if(data->func_cnt != size) {
-        data->funcs = heap_realloc(data->funcs, data->func_cnt * sizeof(func_info_t));
+        return data;
     }
 
+
+    data->funcs = heap_realloc(data->funcs, data->func_cnt * sizeof(func_info_t));
     qsort(data->funcs, data->func_cnt, sizeof(func_info_t), dispid_cmp);
 
-    if(data->funcs) {
-        data->name_table = heap_alloc(data->func_cnt * sizeof(func_info_t*));
-        for(i=0; i < data->func_cnt; i++)
-            data->name_table[i] = data->funcs+i;
-        qsort(data->name_table, data->func_cnt, sizeof(func_info_t*), func_name_cmp);
-    }else {
-        data->name_table = NULL;
-    }
+    data->name_table = heap_alloc(data->func_cnt * sizeof(func_info_t*));
+    for(i=0; i < data->func_cnt; i++)
+        data->name_table[i] = data->funcs+i;
+    qsort(data->name_table, data->func_cnt, sizeof(func_info_t*), func_name_cmp);
 
     return data;
 }
@@ -299,16 +331,6 @@ HRESULT get_dispids(tid_t tid, DWORD *ret_size, DISPID **ret)
     return S_OK;
 }
 
-static CRITICAL_SECTION cs_dispex_static_data;
-static CRITICAL_SECTION_DEBUG cs_dispex_static_data_dbg =
-{
-    0, 0, &cs_dispex_static_data,
-    { &cs_dispex_static_data_dbg.ProcessLocksList, &cs_dispex_static_data_dbg.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": dispex_static_data") }
-};
-static CRITICAL_SECTION cs_dispex_static_data = { &cs_dispex_static_data_dbg, -1, 0, 0, 0, 0 };
-
-
 static dispex_data_t *get_dispex_data(DispatchEx *This)
 {
     if(This->data->data)
@@ -345,11 +367,19 @@ static HRESULT variant_copy(VARIANT *dest, VARIANT *src)
     return VariantCopy(dest, src);
 }
 
-static inline dispex_dynamic_data_t *get_dynamic_data(DispatchEx *This, BOOL alloc)
+static inline dispex_dynamic_data_t *get_dynamic_data(DispatchEx *This)
 {
-    return !alloc || This->dynamic_data
-        ? This->dynamic_data
-        : (This->dynamic_data = heap_alloc_zero(sizeof(dispex_dynamic_data_t)));
+    if(This->dynamic_data)
+        return This->dynamic_data;
+
+    This->dynamic_data = heap_alloc_zero(sizeof(dispex_dynamic_data_t));
+    if(!This->dynamic_data)
+        return NULL;
+
+    if(This->data->vtbl && This->data->vtbl->populate_props)
+        This->data->vtbl->populate_props(This);
+
+    return This->dynamic_data;
 }
 
 static HRESULT get_dynamic_prop(DispatchEx *This, const WCHAR *name, DWORD flags, dynamic_prop_t **ret)
@@ -358,14 +388,9 @@ static HRESULT get_dynamic_prop(DispatchEx *This, const WCHAR *name, DWORD flags
     dispex_dynamic_data_t *data;
     dynamic_prop_t *prop;
 
-    data = get_dynamic_data(This, alloc);
-    if(!data) {
-        if(alloc)
-            return E_OUTOFMEMORY;
-
-        TRACE("not found %s\n", debugstr_w(name));
-        return DISP_E_UNKNOWNNAME;
-    }
+    data = get_dynamic_data(This);
+    if(!data)
+        return E_OUTOFMEMORY;
 
     for(prop = data->props; prop < data->props+data->prop_cnt; prop++) {
         if(flags & fdexNameCaseInsensitive ? !strcmpiW(prop->name, name) : !strcmpW(prop->name, name)) {
@@ -535,6 +560,7 @@ static HRESULT function_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
     case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
         if(!res)
             return E_INVALIDARG;
+        /* fall through */
     case DISPATCH_METHOD:
         hres = typeinfo_invoke(This->obj, This->info, flags, params, res, ei);
         break;
@@ -548,6 +574,7 @@ static HRESULT function_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
 
 static const dispex_static_data_vtbl_t function_dispex_vtbl = {
     function_value,
+    NULL,
     NULL,
     NULL
 };
@@ -586,6 +613,7 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
     case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
         if(!res)
             return E_INVALIDARG;
+        /* fall through */
     case DISPATCH_METHOD:
         hres = typeinfo_invoke(This, func, flags, dp, res, ei);
         break;
@@ -604,7 +632,7 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
             return S_OK;
         }
 
-        dynamic_data = get_dynamic_data(This, TRUE);
+        dynamic_data = get_dynamic_data(This);
         if(!dynamic_data)
             return E_OUTOFMEMORY;
 
@@ -628,6 +656,7 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
     }
     default:
         FIXME("Unimplemented flags %x\n", flags);
+        /* fall through */
     case DISPATCH_PROPERTYPUT:
         hres = E_NOTIMPL;
     }
@@ -898,7 +927,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         DWORD idx = id - DISPID_DYNPROP_0;
         dynamic_prop_t *prop;
 
-        if(!This->dynamic_data || This->dynamic_data->prop_cnt <= idx)
+        if(!get_dynamic_data(This) || This->dynamic_data->prop_cnt <= idx)
             return DISP_E_UNKNOWNNAME;
 
         prop = This->dynamic_data->props+idx;
@@ -907,6 +936,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
             if(!pvarRes)
                 return E_INVALIDARG;
+            /* fall through */
         case DISPATCH_METHOD: {
             DISPID named_arg = DISPID_THIS;
             DISPPARAMS dp = {NULL, &named_arg, 0, 1};
@@ -949,6 +979,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         case DISPATCH_PROPERTYGET:
             if(prop->flags & DYNPROP_DELETED)
                 return DISP_E_UNKNOWNNAME;
+            V_VT(pvarRes) = VT_EMPTY;
             return variant_copy(pvarRes, &prop->var);
         case DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF:
         case DISPATCH_PROPERTYPUT:
@@ -988,7 +1019,10 @@ static HRESULT WINAPI DispatchEx_DeleteMemberByName(IDispatchEx *iface, BSTR bst
 static HRESULT WINAPI DispatchEx_DeleteMemberByDispID(IDispatchEx *iface, DISPID id)
 {
     DispatchEx *This = impl_from_IDispatchEx(iface);
-    FIXME("(%p)->(%x)\n", This, id);
+
+    TRACE("(%p)->(%x)\n", This, id);
+
+    /* Not implemented by IE */
     return E_NOTIMPL;
 }
 
@@ -1011,7 +1045,7 @@ static HRESULT WINAPI DispatchEx_GetMemberName(IDispatchEx *iface, DISPID id, BS
     if(is_dynamic_dispid(id)) {
         DWORD idx = id - DISPID_DYNPROP_0;
 
-        if(!This->dynamic_data || This->dynamic_data->prop_cnt <= idx)
+        if(!get_dynamic_data(This) || This->dynamic_data->prop_cnt <= idx)
             return DISP_E_UNKNOWNNAME;
 
         *pbstrName = SysAllocString(This->dynamic_data->props[idx].name);
@@ -1047,7 +1081,7 @@ static HRESULT WINAPI DispatchEx_GetNextDispID(IDispatchEx *iface, DWORD grfdex,
     if(is_dynamic_dispid(id)) {
         DWORD idx = id - DISPID_DYNPROP_0;
 
-        if(!This->dynamic_data || This->dynamic_data->prop_cnt <= idx)
+        if(!get_dynamic_data(This) || This->dynamic_data->prop_cnt <= idx)
             return DISP_E_UNKNOWNNAME;
 
         while(++idx < This->dynamic_data->prop_cnt && This->dynamic_data->props[idx].flags & DYNPROP_DELETED);
@@ -1083,7 +1117,7 @@ static HRESULT WINAPI DispatchEx_GetNextDispID(IDispatchEx *iface, DWORD grfdex,
         func++;
     }
 
-    if(This->dynamic_data && This->dynamic_data->prop_cnt) {
+    if(get_dynamic_data(This) && This->dynamic_data->prop_cnt) {
         *pid = DISPID_DYNPROP_0;
         return S_OK;
     }

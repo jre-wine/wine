@@ -106,54 +106,59 @@ static void test_fileops( void )
     int fd;
     FILE *file;
     fpos_t pos;
-    int i, c;
+    int i, c, bufmode;
+    static const int bufmodes[] = {_IOFBF,_IONBF};
 
     fd = open ("fdopen.tst", O_WRONLY | O_CREAT | O_BINARY, _S_IREAD |_S_IWRITE);
     write (fd, outbuffer, sizeof (outbuffer));
     close (fd);
 
-    fd = open ("fdopen.tst", O_RDONLY | O_BINARY);
-    file = fdopen (fd, "rb");
-    ok(strlen(outbuffer) == (sizeof(outbuffer)-1),"strlen/sizeof error\n");
-    ok(fgets(buffer,sizeof(buffer),file) !=0,"fgets failed unexpected\n");
-    ok(fgets(buffer,sizeof(buffer),file) ==0,"fgets didn't signal EOF\n");
-    ok(feof(file) !=0,"feof doesn't signal EOF\n");
-    rewind(file);
-    ok(fgets(buffer,strlen(outbuffer),file) !=0,"fgets failed unexpected\n");
-    ok(lstrlenA(buffer) == lstrlenA(outbuffer) -1,"fgets didn't read right size\n");
-    ok(fgets(buffer,sizeof(outbuffer),file) !=0,"fgets failed unexpected\n");
-    ok(strlen(buffer) == 1,"fgets dropped chars\n");
-    ok(buffer[0] == outbuffer[strlen(outbuffer)-1],"fgets exchanged chars\n");
-
-    rewind(file);
-    for (i = 0, c = EOF; i < sizeof(outbuffer); i++)
+    for (bufmode=0; bufmode < sizeof(bufmodes)/sizeof(bufmodes[0]); bufmode++)
     {
-        ok((c = fgetc(file)) == outbuffer[i], "fgetc returned wrong data\n");
+        fd = open ("fdopen.tst", O_RDONLY | O_BINARY);
+        file = fdopen (fd, "rb");
+        setvbuf(file,NULL,bufmodes[bufmode],2048);
+        ok(strlen(outbuffer) == (sizeof(outbuffer)-1),"strlen/sizeof error for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgets(buffer,sizeof(buffer),file) !=0,"fgets failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgets(buffer,sizeof(buffer),file) ==0,"fgets didn't signal EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(feof(file) !=0,"feof doesn't signal EOF for bufmode=%x\n", bufmodes[bufmode]);
+        rewind(file);
+        ok(fgets(buffer,strlen(outbuffer),file) !=0,"fgets failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(lstrlenA(buffer) == lstrlenA(outbuffer) -1,"fgets didn't read right size for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgets(buffer,sizeof(outbuffer),file) !=0,"fgets failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(strlen(buffer) == 1,"fgets dropped chars for bufmode=%x\n", bufmodes[bufmode]);
+        ok(buffer[0] == outbuffer[strlen(outbuffer)-1],"fgets exchanged chars for bufmode=%x\n", bufmodes[bufmode]);
+
+        rewind(file);
+        for (i = 0; i < sizeof(outbuffer); i++)
+        {
+            ok(fgetc(file) == outbuffer[i], "fgetc returned wrong data for bufmode=%x\n", bufmodes[bufmode]);
+        }
+        ok((c = fgetc(file)) == EOF, "getc did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(feof(file), "feof did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(ungetc(c, file) == EOF, "ungetc(EOF) did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(feof(file), "feof after ungetc(EOF) did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgetc(file) == EOF, "getc did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        c = outbuffer[sizeof(outbuffer) - 1];
+        ok(ungetc(c, file) == c, "ungetc did not return its input for bufmode=%x\n", bufmodes[bufmode]);
+        ok(!feof(file), "feof after ungetc returned EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok((c = fgetc(file)) != EOF, "getc after ungetc returned EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(c == outbuffer[sizeof(outbuffer) - 1],
+           "getc did not return ungetc'd data for bufmode=%x\n", bufmodes[bufmode]);
+        ok(!feof(file), "feof after getc returned EOF prematurely for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgetc(file) == EOF, "getc did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+        ok(feof(file), "feof after getc did not return EOF for bufmode=%x\n", bufmodes[bufmode]);
+
+        rewind(file);
+        ok(fgetpos(file,&pos) == 0, "fgetpos failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(pos == 0, "Unexpected result of fgetpos %x%08x for bufmode=%x\n", (DWORD)(pos >> 32), (DWORD)pos, bufmodes[bufmode]);
+        pos = sizeof (outbuffer);
+        ok(fsetpos(file, &pos) == 0, "fsetpos failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(fgetpos(file,&pos) == 0, "fgetpos failed unexpected for bufmode=%x\n", bufmodes[bufmode]);
+        ok(pos == sizeof (outbuffer), "Unexpected result of fgetpos %x%08x for bufmode=%x\n", (DWORD)(pos >> 32), (DWORD)pos, bufmodes[bufmode]);
+
+        fclose (file);
     }
-    ok((c = fgetc(file)) == EOF, "getc did not return EOF\n");
-    ok(feof(file), "feof did not return EOF\n");
-    ok(ungetc(c, file) == EOF, "ungetc(EOF) did not return EOF\n");
-    ok(feof(file), "feof after ungetc(EOF) did not return EOF\n");
-    ok((c = fgetc(file)) == EOF, "getc did not return EOF\n");
-    c = outbuffer[sizeof(outbuffer) - 1];
-    ok(ungetc(c, file) == c, "ungetc did not return its input\n");
-    ok(!feof(file), "feof after ungetc returned EOF\n");
-    ok((c = fgetc(file)) != EOF, "getc after ungetc returned EOF\n");
-    ok(c == outbuffer[sizeof(outbuffer) - 1],
-       "getc did not return ungetc'd data\n");
-    ok(!feof(file), "feof after getc returned EOF prematurely\n");
-    ok((c = fgetc(file)) == EOF, "getc did not return EOF\n");
-    ok(feof(file), "feof after getc did not return EOF\n");
-
-    rewind(file);
-    ok(fgetpos(file,&pos) == 0, "fgetpos failed unexpected\n");
-    ok(pos == 0, "Unexpected result of fgetpos %x%08x\n", (DWORD)(pos >> 32), (DWORD)pos);
-    pos = sizeof (outbuffer);
-    ok(fsetpos(file, &pos) == 0, "fsetpos failed unexpected\n");
-    ok(fgetpos(file,&pos) == 0, "fgetpos failed unexpected\n");
-    ok(pos == sizeof (outbuffer), "Unexpected result of fgetpos %x%08x\n", (DWORD)(pos >> 32), (DWORD)pos);
-
-    fclose (file);
     fd = open ("fdopen.tst", O_RDONLY | O_TEXT);
     file = fdopen (fd, "rt"); /* open in TEXT mode */
     ok(fgetws(wbuffer,sizeof(wbuffer)/sizeof(wbuffer[0]),file) !=0,"fgetws failed unexpected\n");
@@ -353,17 +358,21 @@ static void test_asciimode(void)
 
     fp = fopen("ascii.tst", "r");
     c= fgetc(fp);
+    ok(c == '0', "fgetc failed, expected '0', got '%c'\n", c);
     c= fgetc(fp);
+    ok(c == '\n', "fgetc failed, expected '\\n', got '%c'\n", c);
     fseek(fp,0,SEEK_CUR);
     for(i=1; i<10; i++) {
 	ok((j = ftell(fp)) == i*3, "ftell fails in TEXT mode\n");
 	fseek(fp,0,SEEK_CUR);
 	ok((c = fgetc(fp)) == '0'+ i, "fgetc after fseek failed in line %d\n", i);
 	c= fgetc(fp);
+        ok(c == '\n', "fgetc failed, expected '\\n', got '%c'\n", c);
     }
     /* Show that fseek doesn't skip \\r !*/
     rewind(fp);
     c= fgetc(fp);
+    ok(c == '0', "fgetc failed, expected '0', got '%c'\n", c);
     fseek(fp, 2 ,SEEK_CUR);
     for(i=1; i<10; i++) {
 	ok((c = fgetc(fp)) == '0'+ i, "fgetc after fseek with pos Offset failed in line %d\n", i);
@@ -371,6 +380,7 @@ static void test_asciimode(void)
     }
     fseek(fp, 9*3 ,SEEK_SET);
     c = fgetc(fp);
+    ok(c == '9', "fgetc failed, expected '9', got '%c'\n", c);
     fseek(fp, -4 ,SEEK_CUR);
     for(i= 8; i>=0; i--) {
 	ok((c = fgetc(fp)) == '0'+ i, "fgetc after fseek with neg Offset failed in line %d\n", i);
@@ -534,10 +544,21 @@ static void test_flsbuf( void )
                          bufmodes[bufmode], 0, ret);
     ret = _flsbuf(0xff,tempfh);
     ok(0xff == ret, "_flsbuf(0xff,tempfh) with bufmode %x expected %x got %x\n",
-                         bufmodes[bufmode], 0, ret);
+                         bufmodes[bufmode], 0xff, ret);
     ret = _flsbuf(0xffffffff,tempfh);
     ok(0xff == ret, "_flsbuf(0xffffffff,tempfh) with bufmode %x expected %x got %x\n",
-                         bufmodes[bufmode], 0, ret);
+                         bufmodes[bufmode], 0xff, ret);
+    if(tempfh->_base) {
+        fputc('x', tempfh);
+        tempfh->_cnt = -1;
+        tempfh->_base[1] = 'a';
+        ret = _flsbuf(0xab,tempfh);
+        ok(ret == 0xab, "_flsbuf(0xab,tempfh) with bufmode %x expected 0xab got %x\n",
+                bufmodes[bufmode], ret);
+        ok(tempfh->_base[1] == 'a', "tempfh->_base[1] should not be changed (%d)\n",
+                tempfh->_base[1]);
+    }
+
     fclose(tempfh);
   }
 
@@ -1300,7 +1321,7 @@ static void test_get_osfhandle(void)
     WriteFile(handle, "bar", 3, &bytes_written, NULL);
     _close(fd);
     fd = _open(fname, _O_RDONLY, 0);
-    ok(fd != -1, "Coudn't open '%s' after _get_osfhanle()\n", fname);
+    ok(fd != -1, "Couldn't open '%s' after _get_osfhandle()\n", fname);
 
     _close(fd);
     _unlink(fname);

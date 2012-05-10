@@ -345,8 +345,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
         return 0;
     case MCI_INFO:
         {
-            MCI_INFO_PARMSA *mci_infoA = (MCI_INFO_PARMSA *)*dwParam2;
-            MCI_INFO_PARMSW *mci_infoW;
+            MCI_DGV_INFO_PARMSA *mci_infoA = (MCI_DGV_INFO_PARMSA *)*dwParam2;
+            MCI_DGV_INFO_PARMSW *mci_infoW;
             DWORD_PTR *ptr;
 
             ptr = HeapAlloc(GetProcessHeap(), 0, sizeof(*mci_infoW) + sizeof(DWORD_PTR));
@@ -354,7 +354,7 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
 
             *ptr++ = *dwParam2; /* save the previous pointer */
             *dwParam2 = (DWORD_PTR)ptr;
-            mci_infoW = (MCI_INFO_PARMSW *)ptr;
+            mci_infoW = (MCI_DGV_INFO_PARMSW *)ptr;
 
             if (dwParam1 & MCI_NOTIFY)
                 mci_infoW->dwCallback = mci_infoA->dwCallback;
@@ -362,6 +362,8 @@ static int MCI_MapMsgAtoW(UINT msg, DWORD_PTR dwParam1, DWORD_PTR *dwParam2)
             /* Size is measured in numbers of characters. */
             mci_infoW->dwRetSize = mci_infoA->dwRetSize;
             mci_infoW->lpstrReturn = HeapAlloc(GetProcessHeap(), 0, mci_infoW->dwRetSize * sizeof(WCHAR));
+            if (dwParam1 & MCI_DGV_INFO_ITEM)
+                mci_infoW->dwItem = mci_infoA->dwItem;
             return 1;
         }
     case MCI_SAVE:
@@ -972,23 +974,47 @@ static	WORD		MCI_GetMessage(LPCWSTR lpCmd)
 
 /**************************************************************************
  * 				MCI_GetDWord			[internal]
+ *
+ * Accept 0 -1 255 255:0 255:255:255:255 :::1 1::: 2::3 ::4: 12345678
+ * Refuse -1:0 0:-1 :: 256:0 1:256 0::::1
  */
 static	BOOL		MCI_GetDWord(DWORD* data, LPWSTR* ptr)
 {
-    DWORD	val;
-    LPWSTR	ret;
+    LPWSTR	ret = *ptr;
+    DWORD	total = 0, shift = 0;
+    BOOL	sign = FALSE, digits = FALSE;
 
-    val = strtoulW(*ptr, &ret, 0);
-
-    switch (*ret) {
-    case '\0':	break;
-    case ' ':	ret++; break;
-    default:	return FALSE;
+    while (*ret == ' ' || *ret == '\t') ret++;
+    if (*ret == '-') {
+	ret++;
+	sign = TRUE;
     }
+    for(;;) {
+	DWORD	val = 0;
+	while ('0' <= *ret && *ret <= '9') {
+	    val = *ret++ - '0' + 10 * val;
+	    digits = TRUE;
+	}
+	switch (*ret) {
+	case '\0':	break;
+	case '\t':
+	case ' ':	ret++; break;
+	default:	return FALSE;
+	case ':':
+	    if ((val >= 256) || (shift >= 24))	return FALSE;
+	    total |= val << shift;
+	    shift += 8;
+	    ret++;
+	    continue;
+	}
 
-    *data |= val;
-    *ptr = ret;
-    return TRUE;
+	if (!digits)				return FALSE;
+	if (shift && (val >= 256 || sign))	return FALSE;
+	total |= val << shift;
+	*data = sign ? -total : total;
+	*ptr = ret;
+	return TRUE;
+    }
 }
 
 /**************************************************************************
@@ -1114,7 +1140,6 @@ static	DWORD	MCI_ParseOptArgs(DWORD* data, int _offset, LPCWSTR lpCmd,
 			!MCI_GetDWord(&(data[offset+1]), &args) ||
 			!MCI_GetDWord(&(data[offset+2]), &args) ||
 			!MCI_GetDWord(&(data[offset+3]), &args)) {
-			ERR("Bad rect %s\n", debugstr_w(args));
 			return MCIERR_BAD_INTEGER;
 		    }
 		    TRACE("flag=%08x for rectangle\n", flg);
@@ -1693,9 +1718,8 @@ static	DWORD MCI_Open(DWORD dwParam, LPMCI_OPEN_PARMSW lpParms)
 #define WINE_MCIDRIVER_SUPP	(0xFFFF0000|MCI_OPEN_SHAREABLE|MCI_OPEN_ELEMENT| \
                          MCI_OPEN_ALIAS|MCI_OPEN_TYPE|MCI_OPEN_TYPE_ID| \
                          MCI_NOTIFY|MCI_WAIT)
-    if ((dwParam & ~WINE_MCIDRIVER_SUPP) != 0) {
-	FIXME("Unsupported yet dwFlags=%08lX\n", dwParam & ~WINE_MCIDRIVER_SUPP);
-    }
+    if ((dwParam & ~WINE_MCIDRIVER_SUPP) != 0)
+        FIXME("Unsupported yet dwFlags=%08X\n", dwParam & ~WINE_MCIDRIVER_SUPP);
 #undef WINE_MCIDRIVER_SUPP
 
     strDevTyp[0] = 0;
@@ -1868,7 +1892,7 @@ static DWORD MCI_WriteString(LPWSTR lpDstStr, DWORD dstSize, LPCWSTR lpSrcStr)
 static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParms)
 {
     DWORD		ret = MCIERR_INVALID_DEVICE_ID, cnt = 0;
-    WCHAR		buf[2048], *s = buf, *p;
+    WCHAR		buf[2048], *s, *p;
     LPWINE_MCIDRIVER	wmd;
     HKEY		hKey;
 

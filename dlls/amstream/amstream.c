@@ -4,9 +4,6 @@
  * Copyright 2004 Christian Costa
  * Copyright 2006 Ivan Leo Puoti
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -276,22 +273,15 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_AddMediaStream(IAMMultiMediaStream
 
     FIXME("(%p/%p)->(%p,%s,%x,%p) partial stub!\n", This, iface, pStreamObject, debugstr_guid(PurposeId), dwFlags, ppNewStream);
 
-    if (IsEqualGUID(PurposeId, &MSPID_PrimaryVideo))
-        hr = DirectDrawMediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
-    else
-        hr = MediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
-
+    hr = mediastream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
     if (SUCCEEDED(hr))
     {
-        pNewStreams = CoTaskMemAlloc((This->nbStreams+1)*sizeof(IMediaStream*));
+        pNewStreams = CoTaskMemRealloc(This->pStreams, (This->nbStreams+1) * sizeof(IMediaStream*));
         if (!pNewStreams)
         {
             IMediaStream_Release(pStream);
             return E_OUTOFMEMORY;
         }
-        if (This->nbStreams)
-            CopyMemory(pNewStreams, This->pStreams, This->nbStreams*sizeof(IMediaStream*));
-        CoTaskMemFree(This->pStreams);
         This->pStreams = pNewStreams;
         This->pStreams[This->nbStreams] = pStream;
         This->nbStreams++;

@@ -27,7 +27,6 @@
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "objsafe.h"
 #include "activscp.h"
 
 #include "wine/debug.h"
@@ -39,7 +38,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 static const WCHAR about_blankW[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 
 /* Defined as extern in urlmon.idl, but not exported by uuid.lib */
-const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
+DECLSPEC_HIDDEN const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
     {0x10200490,0xfa38,0x11d0,{0xac,0x0e,0x00,0xa0,0xc9,0xf,0xff,0xc0}};
 
 static inline HTMLDocumentNode *impl_from_IInternetHostSecurityManager(IInternetHostSecurityManager *iface)
@@ -81,9 +80,12 @@ static HRESULT WINAPI InternetHostSecurityManager_ProcessUrlAction(IInternetHost
 
     TRACE("(%p)->(%d %p %d %p %d %x %x)\n", This, dwAction, pPolicy, cbPolicy, pContext, cbContext, dwFlags, dwReserved);
 
+    if(!This->basedoc.window)
+        return E_UNEXPECTED;
+
     url = This->basedoc.window->url ? This->basedoc.window->url : about_blankW;
 
-    return IInternetSecurityManager_ProcessUrlAction(This->secmgr, url, dwAction, pPolicy, cbPolicy,
+    return IInternetSecurityManager_ProcessUrlAction(This->basedoc.window->secmgr, url, dwAction, pPolicy, cbPolicy,
             pContext, cbContext, dwFlags, dwReserved);
 }
 
@@ -121,7 +123,7 @@ static HRESULT confirm_safety(HTMLDocumentNode *This, const WCHAR *url, struct C
 
     /* FIXME: Check URLACTION_ACTIVEX_OVERRIDE_SCRIPT_SAFETY */
 
-    hres = IInternetSecurityManager_ProcessUrlAction(This->secmgr, url, URLACTION_SCRIPT_SAFE_ACTIVEX,
+    hres = IInternetSecurityManager_ProcessUrlAction(This->basedoc.window->secmgr, url, URLACTION_SCRIPT_SAFE_ACTIVEX,
             (BYTE*)&policy, sizeof(policy), NULL, 0, 0, 0);
     if(FAILED(hres) || policy != URLPOLICY_ALLOW) {
         *ret = URLPOLICY_DISALLOW;
@@ -185,9 +187,12 @@ static HRESULT WINAPI InternetHostSecurityManager_QueryCustomPolicy(IInternetHos
 
     TRACE("(%p)->(%s %p %p %p %d %x)\n", This, debugstr_guid(guidKey), ppPolicy, pcbPolicy, pContext, cbContext, dwReserved);
 
+    if(!This->basedoc.window)
+        return E_UNEXPECTED;
+
     url = This->basedoc.window->url ? This->basedoc.window->url : about_blankW;
 
-    hres = IInternetSecurityManager_QueryCustomPolicy(This->secmgr, url, guidKey, ppPolicy, pcbPolicy,
+    hres = IInternetSecurityManager_QueryCustomPolicy(This->basedoc.window->secmgr, url, guidKey, ppPolicy, pcbPolicy,
             pContext, cbContext, dwReserved);
     if(hres != HRESULT_FROM_WIN32(ERROR_NOT_FOUND))
         return hres;

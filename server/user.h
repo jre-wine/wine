@@ -51,6 +51,16 @@ struct winstation
     struct atom_table *atom_table;         /* global atom table */
 };
 
+struct global_cursor
+{
+    int                  x;                /* cursor position */
+    int                  y;
+    rectangle_t          clip;             /* cursor clip rectangle */
+    unsigned int         clip_msg;         /* message to post for cursor clip changes */
+    unsigned int         last_change;      /* time of last position change */
+    user_handle_t        win;              /* window that contains the cursor */
+};
+
 struct desktop
 {
     struct object        obj;              /* object header */
@@ -60,12 +70,11 @@ struct desktop
     struct window       *top_window;       /* desktop window for this desktop */
     struct window       *msg_window;       /* HWND_MESSAGE top window */
     struct hook_table   *global_hooks;     /* table of global hooks on this desktop */
+    struct list          hotkeys;          /* list of registered hotkeys */
     struct timeout_user *close_timeout;    /* timeout before closing the desktop */
     struct thread_input *foreground_input; /* thread input of foreground thread */
     unsigned int         users;            /* processes and threads using this desktop */
-    int                  cursor_x;         /* cursor position */
-    int                  cursor_y;
-    rectangle_t          cursor_clip;      /* cursor clip rectangle */
+    struct global_cursor cursor;           /* global cursor information */
     unsigned char        keystate[256];    /* asynchronous key state */
 };
 
@@ -106,6 +115,7 @@ extern void post_win_event( struct thread *thread, unsigned int event,
                             unsigned int child_id, client_ptr_t proc,
                             const WCHAR *module, data_size_t module_size,
                             user_handle_t handle );
+extern void free_hotkeys( struct desktop *desktop, user_handle_t window );
 
 /* region functions */
 
@@ -137,7 +147,8 @@ extern int rect_in_region( struct region *region, const rectangle_t *rect );
 
 extern struct process *get_top_window_owner( struct desktop *desktop );
 extern void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect );
-extern void close_desktop_window( struct desktop *desktop );
+extern void post_desktop_message( struct desktop *desktop, unsigned int message,
+                                  lparam_t wparam, lparam_t lparam );
 extern void destroy_window( struct window *win );
 extern void destroy_thread_windows( struct thread *thread );
 extern int is_child_window( user_handle_t parent, user_handle_t child );

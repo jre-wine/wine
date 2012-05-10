@@ -89,7 +89,7 @@ static void COOKIE_deleteDomain(cookie_domain *deadDomain);
 /* adds a cookie to the domain */
 static cookie *COOKIE_addCookie(cookie_domain *domain, LPCWSTR name, LPCWSTR data, FILETIME expiry)
 {
-    cookie *newCookie = HeapAlloc(GetProcessHeap(), 0, sizeof(cookie));
+    cookie *newCookie = heap_alloc(sizeof(cookie));
 
     list_init(&newCookie->entry);
     newCookie->lpCookieName = NULL;
@@ -132,20 +132,20 @@ static cookie *COOKIE_findCookie(cookie_domain *domain, LPCWSTR lpszCookieName)
 /* removes a cookie from the list, if its the last cookie we also remove the domain */
 static void COOKIE_deleteCookie(cookie *deadCookie, BOOL deleteDomain)
 {
-    HeapFree(GetProcessHeap(), 0, deadCookie->lpCookieName);
-    HeapFree(GetProcessHeap(), 0, deadCookie->lpCookieData);
+    heap_free(deadCookie->lpCookieName);
+    heap_free(deadCookie->lpCookieData);
     list_remove(&deadCookie->entry);
 
     /* special case: last cookie, lets remove the domain to save memory */
     if (list_empty(&deadCookie->parent->cookie_list) && deleteDomain)
         COOKIE_deleteDomain(deadCookie->parent);
-    HeapFree(GetProcessHeap(), 0, deadCookie);
+    heap_free(deadCookie);
 }
 
 /* allocates a domain and adds it to the end */
 static cookie_domain *COOKIE_addDomain(LPCWSTR domain, LPCWSTR path)
 {
-    cookie_domain *newDomain = HeapAlloc(GetProcessHeap(), 0, sizeof(cookie_domain));
+    cookie_domain *newDomain = heap_alloc(sizeof(cookie_domain));
 
     list_init(&newDomain->entry);
     list_init(&newDomain->cookie_list);
@@ -251,13 +251,84 @@ static void COOKIE_deleteDomain(cookie_domain *deadDomain)
         COOKIE_deleteCookie(LIST_ENTRY(cursor, cookie, entry), FALSE);
         list_remove(cursor);
     }
-
-    HeapFree(GetProcessHeap(), 0, deadDomain->lpCookieDomain);
-    HeapFree(GetProcessHeap(), 0, deadDomain->lpCookiePath);
+    heap_free(deadDomain->lpCookieDomain);
+    heap_free(deadDomain->lpCookiePath);
 
     list_remove(&deadDomain->entry);
 
-    HeapFree(GetProcessHeap(), 0, deadDomain);
+    heap_free(deadDomain);
+}
+
+BOOL get_cookie(const WCHAR *host, const WCHAR *path, WCHAR *cookie_data, DWORD *size)
+{
+    unsigned cnt = 0, len, domain_count = 0, cookie_count = 0;
+    cookie_domain *domain;
+    FILETIME tm;
+
+    GetSystemTimeAsFileTime(&tm);
+
+    LIST_FOR_EACH_ENTRY(domain, &domain_list, cookie_domain, entry) {
+        struct list *cursor, *cursor2;
+
+        if(!COOKIE_matchDomain(host, path, domain, TRUE))
+            continue;
+
+        domain_count++;
+        TRACE("found domain %p\n", domain);
+    
+        LIST_FOR_EACH_SAFE(cursor, cursor2, &domain->cookie_list) {
+            cookie *cookie_iter = LIST_ENTRY(cursor, cookie, entry);
+
+            /* check for expiry */
+            if((cookie_iter->expiry.dwLowDateTime != 0 || cookie_iter->expiry.dwHighDateTime != 0)
+                && CompareFileTime(&tm, &cookie_iter->expiry)  > 0)
+            {
+                TRACE("Found expired cookie. deleting\n");
+                COOKIE_deleteCookie(cookie_iter, FALSE);
+                continue;
+            }
+
+            if(!cookie_data) { /* return the size of the buffer required to lpdwSize */
+                if (cookie_count)
+                    cnt += 2; /* '; ' */
+                cnt += strlenW(cookie_iter->lpCookieName);
+                if ((len = strlenW(cookie_iter->lpCookieData))) {
+                    cnt += 1; /* = */
+                    cnt += len;
+                }
+            }else {
+                static const WCHAR szsc[] = { ';',' ',0 };
+                static const WCHAR szname[] = { '%','s',0 };
+                static const WCHAR szdata[] = { '=','%','s',0 };
+
+                if (cookie_count) cnt += snprintfW(cookie_data + cnt, *size - cnt, szsc);
+                cnt += snprintfW(cookie_data + cnt, *size - cnt, szname, cookie_iter->lpCookieName);
+
+                if (cookie_iter->lpCookieData[0])
+                    cnt += snprintfW(cookie_data + cnt, *size - cnt, szdata, cookie_iter->lpCookieData);
+
+                TRACE("Cookie: %s\n", debugstr_w(cookie_data));
+            }
+            cookie_count++;
+        }
+    }
+
+    if (!domain_count) {
+        TRACE("no cookies found for %s\n", debugstr_w(host));
+        SetLastError(ERROR_NO_MORE_ITEMS);
+        return FALSE;
+    }
+
+    if(!cookie_data) {
+        *size = (cnt + 1) * sizeof(WCHAR);
+        TRACE("returning %u\n", *size);
+        return TRUE;
+    }
+
+    *size = cnt + 1;
+
+    TRACE("Returning %u (from %u domains): %s\n", cnt, domain_count, debugstr_w(cookie_data));
+    return cnt != 0;
 }
 
 /***********************************************************************
@@ -276,14 +347,10 @@ static void COOKIE_deleteDomain(cookie_domain *deadDomain)
 BOOL WINAPI InternetGetCookieW(LPCWSTR lpszUrl, LPCWSTR lpszCookieName,
     LPWSTR lpCookieData, LPDWORD lpdwSize)
 {
+    WCHAR host[INTERNET_MAX_HOST_NAME_LENGTH], path[INTERNET_MAX_PATH_LENGTH];
     BOOL ret;
-    struct list * cursor;
-    unsigned int cnt = 0, domain_count = 0, cookie_count = 0;
-    WCHAR hostName[2048], path[2048];
-    FILETIME tm;
 
-    TRACE("(%s, %s, %p, %p)\n", debugstr_w(lpszUrl),debugstr_w(lpszCookieName),
-          lpCookieData, lpdwSize);
+    TRACE("(%s, %s, %p, %p)\n", debugstr_w(lpszUrl),debugstr_w(lpszCookieName), lpCookieData, lpdwSize);
 
     if (!lpszUrl)
     {
@@ -291,83 +358,11 @@ BOOL WINAPI InternetGetCookieW(LPCWSTR lpszUrl, LPCWSTR lpszCookieName,
         return FALSE;
     }
 
-    hostName[0] = 0;
-    ret = COOKIE_crackUrlSimple(lpszUrl, hostName, sizeof(hostName)/sizeof(hostName[0]), path, sizeof(path)/sizeof(path[0]));
-    if (!ret || !hostName[0]) return FALSE;
+    host[0] = 0;
+    ret = COOKIE_crackUrlSimple(lpszUrl, host, sizeof(host)/sizeof(host[0]), path, sizeof(path)/sizeof(path[0]));
+    if (!ret || !host[0]) return FALSE;
 
-    GetSystemTimeAsFileTime(&tm);
-
-    LIST_FOR_EACH(cursor, &domain_list)
-    {
-        cookie_domain *cookiesDomain = LIST_ENTRY(cursor, cookie_domain, entry);
-        if (COOKIE_matchDomain(hostName, path, cookiesDomain, TRUE))
-        {
-            struct list * cursor, * cursor2;
-            domain_count++;
-            TRACE("found domain %p\n", cookiesDomain);
-    
-            LIST_FOR_EACH_SAFE(cursor, cursor2, &cookiesDomain->cookie_list)
-            {
-                cookie *thisCookie = LIST_ENTRY(cursor, cookie, entry);
-                /* check for expiry */
-                if ((thisCookie->expiry.dwLowDateTime != 0 || thisCookie->expiry.dwHighDateTime != 0) && CompareFileTime(&tm,&thisCookie->expiry)  > 0)
-                {
-                    TRACE("Found expired cookie. deleting\n");
-                    COOKIE_deleteCookie(thisCookie, FALSE);
-                    continue;
-                }
-
-                if (lpCookieData == NULL) /* return the size of the buffer required to lpdwSize */
-                {
-                    unsigned int len;
-
-                    if (cookie_count) cnt += 2; /* '; ' */
-                    cnt += strlenW(thisCookie->lpCookieName);
-                    if ((len = strlenW(thisCookie->lpCookieData)))
-                    {
-                        cnt += 1; /* = */
-                        cnt += len;
-                    }
-                }
-                else
-                {
-                    static const WCHAR szsc[] = { ';',' ',0 };
-                    static const WCHAR szname[] = { '%','s',0 };
-                    static const WCHAR szdata[] = { '=','%','s',0 };
-
-                    if (cookie_count) cnt += snprintfW(lpCookieData + cnt, *lpdwSize - cnt, szsc);
-                    cnt += snprintfW(lpCookieData + cnt, *lpdwSize - cnt, szname, thisCookie->lpCookieName);
-
-                    if (thisCookie->lpCookieData[0])
-                        cnt += snprintfW(lpCookieData + cnt, *lpdwSize - cnt, szdata, thisCookie->lpCookieData);
-
-                    TRACE("Cookie: %s\n", debugstr_w(lpCookieData));
-                }
-                cookie_count++;
-            }
-        }
-    }
-
-    if (!domain_count)
-    {
-        TRACE("no cookies found for %s\n", debugstr_w(hostName));
-        SetLastError(ERROR_NO_MORE_ITEMS);
-        return FALSE;
-    }
-
-    if (lpCookieData == NULL)
-    {
-        *lpdwSize = (cnt + 1) * sizeof(WCHAR);
-        TRACE("returning %u\n", *lpdwSize);
-        return TRUE;
-    }
-
-    *lpdwSize = cnt + 1;
-
-    TRACE("Returning %u (from %u domains): %s\n", cnt, domain_count,
-           debugstr_w(lpCookieData));
-
-    return (cnt ? TRUE : FALSE);
+    return get_cookie(host, path, lpCookieData, lpdwSize);
 }
 
 
@@ -397,7 +392,7 @@ BOOL WINAPI InternetGetCookieA(LPCSTR lpszUrl, LPCSTR lpszCookieName,
     r = InternetGetCookieW( url, name, NULL, &len );
     if( r )
     {
-        szCookieData = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        szCookieData = heap_alloc(len * sizeof(WCHAR));
         if( !szCookieData )
         {
             r = FALSE;
@@ -410,15 +405,13 @@ BOOL WINAPI InternetGetCookieA(LPCSTR lpszUrl, LPCSTR lpszCookieName,
                                     lpCookieData, *lpdwSize, NULL, NULL );
         }
     }
-
-    HeapFree( GetProcessHeap(), 0, szCookieData );
-    HeapFree( GetProcessHeap(), 0, name );
-    HeapFree( GetProcessHeap(), 0, url );
-
+    heap_free( szCookieData );
+    heap_free( name );
+    heap_free( url );
     return r;
 }
 
-static BOOL set_cookie(LPCWSTR domain, LPCWSTR path, LPCWSTR cookie_name, LPCWSTR cookie_data)
+BOOL set_cookie(LPCWSTR domain, LPCWSTR path, LPCWSTR cookie_name, LPCWSTR cookie_data)
 {
     cookie_domain *thisCookieDomain = NULL;
     cookie *thisCookie;
@@ -451,12 +444,11 @@ static BOOL set_cookie(LPCWSTR domain, LPCWSTR path, LPCWSTR cookie_name, LPCWST
         if (!(ptr = strchrW(ptr,';'))) break;
         *ptr++ = 0;
 
-        if (value != data)
-            HeapFree(GetProcessHeap(), 0, value);
-        value = HeapAlloc(GetProcessHeap(), 0, (ptr - data) * sizeof(WCHAR));
+        if (value != data) heap_free(value);
+        value = heap_alloc((ptr - data) * sizeof(WCHAR));
         if (value == NULL)
         {
-            HeapFree(GetProcessHeap(), 0, data);
+            heap_free(data);
             ERR("could not allocate the cookie value buffer\n");
             return FALSE;
         }
@@ -525,8 +517,8 @@ static BOOL set_cookie(LPCWSTR domain, LPCWSTR path, LPCWSTR cookie_name, LPCWST
             thisCookieDomain = COOKIE_addDomain(domain, path);
         else
         {
-            HeapFree(GetProcessHeap(),0,data);
-            if (value != data) HeapFree(GetProcessHeap(), 0, value);
+            heap_free(data);
+            if (value != data) heap_free(value);
             return TRUE;
         }
     }
@@ -539,13 +531,12 @@ static BOOL set_cookie(LPCWSTR domain, LPCWSTR path, LPCWSTR cookie_name, LPCWST
 
     if (!expired && !COOKIE_addCookie(thisCookieDomain, cookie_name, value, expiry))
     {
-        HeapFree(GetProcessHeap(),0,data);
-        if (value != data) HeapFree(GetProcessHeap(), 0, value);
+        heap_free(data);
+        if (value != data) heap_free(value);
         return FALSE;
     }
-
-    HeapFree(GetProcessHeap(),0,data);
-    if (value != data) HeapFree(GetProcessHeap(), 0, value);
+    heap_free(data);
+    if (value != data) heap_free(value);
     return TRUE;
 }
 
@@ -563,7 +554,7 @@ BOOL WINAPI InternetSetCookieW(LPCWSTR lpszUrl, LPCWSTR lpszCookieName,
     LPCWSTR lpCookieData)
 {
     BOOL ret;
-    WCHAR hostName[2048], path[2048];
+    WCHAR hostName[INTERNET_MAX_HOST_NAME_LENGTH], path[INTERNET_MAX_PATH_LENGTH];
 
     TRACE("(%s,%s,%s)\n", debugstr_w(lpszUrl),
         debugstr_w(lpszCookieName), debugstr_w(lpCookieData));
@@ -597,7 +588,7 @@ BOOL WINAPI InternetSetCookieW(LPCWSTR lpszUrl, LPCWSTR lpszCookieName,
 
         ret = set_cookie(hostName, path, cookie, data);
 
-        HeapFree(GetProcessHeap(), 0, cookie);
+        heap_free(cookie);
         return ret;
     }
     return set_cookie(hostName, path, lpszCookieName, lpCookieData);
@@ -629,10 +620,9 @@ BOOL WINAPI InternetSetCookieA(LPCSTR lpszUrl, LPCSTR lpszCookieName,
 
     r = InternetSetCookieW( url, name, data );
 
-    HeapFree( GetProcessHeap(), 0, data );
-    HeapFree( GetProcessHeap(), 0, name );
-    HeapFree( GetProcessHeap(), 0, url );
-
+    heap_free( data );
+    heap_free( name );
+    heap_free( url );
     return r;
 }
 

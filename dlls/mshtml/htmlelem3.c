@@ -26,7 +26,6 @@
 #include "ole2.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 #include "mshtml_private.h"
 #include "htmlevent.h"
@@ -557,93 +556,21 @@ static HRESULT WINAPI HTMLElement4_normalize(IHTMLElement4 *iface)
     return E_NOTIMPL;
 }
 
-/* FIXME: This should be done in IDispatchEx implementation layer */
-static BOOL get_attr_from_nselem(HTMLElement *This, BSTR name, DISPID *dispid)
-{
-    const PRUnichar *v;
-    nsIDOMAttr *nsattr;
-    nsAString nsstr;
-    BSTR val = NULL;
-    nsresult nsres;
-    HRESULT hres;
-
-    nsAString_InitDepend(&nsstr, name);
-    nsres = nsIDOMHTMLElement_GetAttributeNode(This->nselem, &nsstr, &nsattr);
-    nsAString_Finish(&nsstr);
-    if(NS_FAILED(nsres) || !nsattr)
-        return FALSE;
-
-    FIXME("HACK\n");
-
-    nsAString_Init(&nsstr, NULL);
-    nsres = nsIDOMAttr_GetNodeValue(nsattr, &nsstr);
-    if(NS_FAILED(nsres)) {
-        nsAString_Finish(&nsstr);
-        return FALSE;
-    }
-
-    nsAString_GetData(&nsstr, &v);
-    if(*v) {
-        val = SysAllocString(v);
-        if(!val) {
-            nsAString_Finish(&nsstr);
-            return FALSE;
-        }
-    }
-    nsAString_Finish(&nsstr);
-
-    hres = IDispatchEx_GetDispID(&This->node.dispex.IDispatchEx_iface, name, fdexNameEnsure, dispid);
-    if(SUCCEEDED(hres)) {
-        VARIANT arg;
-        DISPPARAMS dp = {&arg, NULL, 1, 0};
-        EXCEPINFO ei;
-
-        V_VT(&arg) = VT_BSTR;
-        V_BSTR(&arg) = val;
-        memset(&ei, 0, sizeof(ei));
-        hres = IDispatchEx_InvokeEx(&This->node.dispex.IDispatchEx_iface, *dispid,
-                LOCALE_SYSTEM_DEFAULT, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, NULL);
-    }
-
-    SysFreeString(val);
-    return SUCCEEDED(hres);
-}
-
 static HRESULT WINAPI HTMLElement4_getAttributeNode(IHTMLElement4 *iface, BSTR bstrname, IHTMLDOMAttribute **ppAttribute)
 {
     HTMLElement *This = impl_from_IHTMLElement4(iface);
-    HTMLDOMAttribute *attr = NULL, *iter;
-    DISPID dispid;
+    HTMLAttributeCollection *attrs;
     HRESULT hres;
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_w(bstrname), ppAttribute);
 
-    hres = IDispatchEx_GetDispID(&This->node.dispex.IDispatchEx_iface, bstrname, fdexNameCaseInsensitive, &dispid);
-    if(hres == DISP_E_UNKNOWNNAME) {
-        if(!get_attr_from_nselem(This, bstrname, &dispid)) {
-            *ppAttribute = NULL;
-            return S_OK;
-        }
-    }else if(FAILED(hres)) {
+    hres = HTMLElement_get_attr_col(&This->node, &attrs);
+    if(FAILED(hres))
         return hres;
-    }
 
-    LIST_FOR_EACH_ENTRY(iter, &This->attrs, HTMLDOMAttribute, entry) {
-        if(iter->dispid == dispid) {
-            attr = iter;
-            break;
-        }
-    }
-
-    if(!attr) {
-        hres = HTMLDOMAttribute_Create(This, dispid, &attr);
-        if(FAILED(hres))
-            return hres;
-    }
-
-    IHTMLDOMAttribute_AddRef(&attr->IHTMLDOMAttribute_iface);
-    *ppAttribute = &attr->IHTMLDOMAttribute_iface;
-    return S_OK;
+    hres = IHTMLAttributeCollection2_getNamedItem(&attrs->IHTMLAttributeCollection2_iface, bstrname, ppAttribute);
+    IHTMLAttributeCollection_Release(&attrs->IHTMLAttributeCollection_iface);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLElement4_setAttributeNode(IHTMLElement4 *iface, IHTMLDOMAttribute *pattr,

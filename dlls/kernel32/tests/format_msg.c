@@ -125,6 +125,7 @@ static void test_message_from_string_wide(void)
     static const WCHAR s_sp002sp001[] = {' ',' ','0','0','0','2',',',' ',' ','0','0','1',0};
     static const WCHAR s_sp002sp003[] = {' ',' ','0','0','0','2',',',' ','0','0','0','0','3',0};
     static const WCHAR s_sp001004[]   = {' ',' ','0','0','1',',','0','0','0','0','0','4',0};
+    static const WCHAR s_null[]       = {'(','n','u','l','l',')',0};
 
     static const WCHAR init_buf[] = {'x', 'x', 'x', 'x', 'x', 'x'};
     static const WCHAR broken_buf[] = {'t','e','s','t','x','x'};
@@ -381,6 +382,12 @@ static void test_message_from_string_wide(void)
     ok(!lstrcmpW(s_crlfcrlf, out), "failed out=%s\n", wine_dbgstr_w(out));
     ok(r==4,"failed: r=%d\n", r);
 
+    /* null string as argument */
+    r = doitW(FORMAT_MESSAGE_FROM_STRING, fmt_1, 0,
+        0, out, sizeof(out)/sizeof(WCHAR), NULL);
+    ok(!lstrcmpW(s_null, out),"failed out=[%s]\n", wine_dbgstr_w(out));
+    ok(r==6,"failed: r=%d\n",r);
+
     /* precision and width */
 
     r = doitW(FORMAT_MESSAGE_FROM_STRING, fmt_13s,
@@ -476,9 +483,7 @@ static void test_message_from_string(void)
     memcpy(out, init_buf, sizeof(init_buf));
     r = FormatMessageA(FORMAT_MESSAGE_FROM_STRING, "", 0,
         0, out, sizeof(out)/sizeof(CHAR), NULL);
-    ok(!memcmp(out, init_buf, sizeof(init_buf)) ||
-       broken(!strcmp("", out)), /* Win9x */
-       "Expected the buffer to be untouched\n");
+    ok(!memcmp(out, init_buf, sizeof(init_buf)), "Expected the buffer to be untouched\n");
     ok(r==0, "succeeded: r=%d\n", r);
     ok(GetLastError()==0xdeadbeef,
        "last error %u\n", GetLastError());
@@ -510,29 +515,17 @@ static void test_message_from_string(void)
     memcpy(out, init_buf, sizeof(init_buf));
     r = FormatMessageA(FORMAT_MESSAGE_FROM_STRING, "%1", 0,
         0, out, sizeof(out)/sizeof(CHAR), NULL);
-    ok(!memcmp(out, init_buf, sizeof(init_buf)) ||
-       broken(!strcmp("%1", out)), /* Win9x */
-       "Expected the buffer to be untouched\n");
-    ok(r==0 ||
-       broken(r==2), /* Win9x */
-       "succeeded: r=%d\n", r);
-    ok(GetLastError()==ERROR_INVALID_PARAMETER ||
-       broken(GetLastError()==0xdeadbeef), /* Win9x */
-       "last error %u\n", GetLastError());
+    ok(!memcmp(out, init_buf, sizeof(init_buf)), "Expected the buffer to be untouched\n");
+    ok(r==0, "succeeded: r=%d\n", r);
+    ok(GetLastError()==ERROR_INVALID_PARAMETER, "last error %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     memcpy(out, init_buf, sizeof(init_buf));
     r = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_ARGUMENT_ARRAY, "%1", 0,
         0, out, sizeof(out)/sizeof(CHAR), NULL);
-    ok(!memcmp(out, init_buf, sizeof(init_buf)) ||
-       broken(!strcmp("%1", out)), /* Win9x */
-       "Expected the buffer to be untouched\n");
-    ok(r==0 ||
-       broken(r==2), /* Win9x */
-       "succeeded: r=%d\n", r);
-    ok(GetLastError()==ERROR_INVALID_PARAMETER ||
-       broken(GetLastError()==0xdeadbeef), /* Win9x */
-       "last error %u\n", GetLastError());
+    ok(!memcmp(out, init_buf, sizeof(init_buf)), "Expected the buffer to be untouched\n");
+    ok(r==0, "succeeded: r=%d\n", r);
+    ok(GetLastError()==ERROR_INVALID_PARAMETER, "last error %u\n", GetLastError());
 
     /* using the format feature */
     r = doit(FORMAT_MESSAGE_FROM_STRING, "%1!s!", 0,
@@ -714,6 +707,12 @@ static void test_message_from_string(void)
     ok(!strcmp("\r\n\r\n", out),"failed out=[%s]\n",out);
     ok(r==4,"failed: r=%d\n",r);
 
+    /* null string as argument */
+    r = doit(FORMAT_MESSAGE_FROM_STRING, "%1", 0,
+        0, out, sizeof(out)/sizeof(CHAR), NULL);
+    ok(!strcmp("(null)", out),"failed out=[%s]\n",out);
+    ok(r==6,"failed: r=%d\n",r);
+
     /* precision and width */
 
     r = doit(FORMAT_MESSAGE_FROM_STRING, "%1!3s!",
@@ -766,12 +765,8 @@ static void test_message_from_string(void)
     /* line feed */
     r = doit(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_MAX_WIDTH_MASK, "hi\n", 0,
         0, out, sizeof(out)/sizeof(CHAR));
-    ok(!strcmp("hi ", out) ||
-       broken(!strcmp("hi\r\n", out)), /* Win9x */
-       "failed out=[%s]\n",out);
-    ok(r==3 ||
-       broken(r==4), /* Win9x */
-       "failed: r=%d\n",r);
+    ok(!strcmp("hi ", out), "failed out=[%s]\n",out);
+    ok(r==3, "failed: r=%d\n",r);
 
     /* carriage return line feed */
     r = doit(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_MAX_WIDTH_MASK, "hi\r\n", 0,
@@ -821,9 +816,7 @@ static void test_message_ignore_inserts(void)
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_IGNORE_INSERTS, "%0test", 0, 0, out,
                          sizeof(out)/sizeof(CHAR), NULL);
     ok(ret == 0, "Expected FormatMessageA to return 0, got %d\n", ret);
-    ok(!memcmp(out, init_buf, sizeof(init_buf)) ||
-       broken(!strcmp("", out)), /* Win9x */
-       "Expected the output buffer to be untouched\n");
+    ok(!memcmp(out, init_buf, sizeof(init_buf)), "Expected the output buffer to be untouched\n");
     ok(GetLastError() == 0xdeadbeef, "Expected GetLastError() to return 0xdeadbeef, got %u\n", GetLastError());
 
     /* Insert sequences are ignored. */
@@ -835,12 +828,8 @@ static void test_message_ignore_inserts(void)
     /* Only the "%n", "%r", and "%t" escape sequences are processed. */
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_IGNORE_INSERTS, "%%% %.%!", 0, 0, out,
                          sizeof(out)/sizeof(CHAR), NULL);
-    ok(ret == 8 ||
-       broken(ret == 7) /* Win9x */,
-       "Expected FormatMessageA to return 8, got %d\n", ret);
-    ok(!strcmp("%%% %.%!", out) ||
-       broken(!strcmp("%%% %.!", out)) /* Win9x */,
-       "Expected output string \"%%%%%% %%.%%!\", got %s\n", out);
+    ok(ret == 8, "Expected FormatMessageA to return 8, got %d\n", ret);
+    ok(!strcmp("%%% %.%!", out), "Expected output string \"%%%%%% %%.%%!\", got %s\n", out);
 
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_IGNORE_INSERTS, "%n%r%t", 0, 0, out,
                          sizeof(out)/sizeof(CHAR), NULL);
@@ -872,12 +861,8 @@ static void test_message_ignore_inserts(void)
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_IGNORE_INSERTS |
                          FORMAT_MESSAGE_MAX_WIDTH_MASK, "hi\n", 0, 0, out,
                          sizeof(out)/sizeof(CHAR), NULL);
-    ok(!strcmp("hi ", out) ||
-       broken(!strcmp("hi\r\n", out)), /* Win9x */
-       "Expected output string \"hi \", got %s\n", out);
-    ok(ret == 3 ||
-       broken(ret == 4), /* Win9x */
-       "Expected FormatMessageA to return 3, got %d\n", ret);
+    ok(!strcmp("hi ", out), "Expected output string \"hi \", got %s\n", out);
+    ok(ret == 3, "Expected FormatMessageA to return 3, got %d\n", ret);
 
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_IGNORE_INSERTS |
                          FORMAT_MESSAGE_MAX_WIDTH_MASK, "hi\r\n", 0, 0, out,
@@ -1105,17 +1090,13 @@ static void test_message_null_buffer(void)
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, 0, 0, NULL, 0, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_INSUFFICIENT_BUFFER ||
-       error == ERROR_INVALID_PARAMETER, /* win9x */
-       "last error %u\n", error);
+    ok(error == ERROR_INSUFFICIENT_BUFFER, "last error %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, 0, 0, NULL, 1, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_INSUFFICIENT_BUFFER ||
-       error == ERROR_INVALID_PARAMETER, /* win9x */
-       "last error %u\n", error);
+    ok(error == ERROR_INSUFFICIENT_BUFFER, "last error %u\n", error);
 
     if (0) /* crashes on Windows */
     {
@@ -1127,25 +1108,19 @@ static void test_message_null_buffer(void)
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL, 0, 0, NULL, 0, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_NOT_ENOUGH_MEMORY ||
-       error == ERROR_INVALID_PARAMETER, /* win9x */
-       "last error %u\n", error);
+    ok(error == ERROR_NOT_ENOUGH_MEMORY, "last error %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL, 0, 0, NULL, 1, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_NOT_ENOUGH_MEMORY ||
-       error == ERROR_INVALID_PARAMETER, /* win9x */
-       "last error %u\n", error);
+    ok(error == ERROR_NOT_ENOUGH_MEMORY, "last error %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL, 0, 0, NULL, 256, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_NOT_ENOUGH_MEMORY ||
-       error == ERROR_INVALID_PARAMETER, /* win9x */
-       "last error %u\n", error);
+    ok(error == ERROR_NOT_ENOUGH_MEMORY, "last error %u\n", error);
 }
 
 static void test_message_null_buffer_wide(void)
@@ -1391,18 +1366,14 @@ static void test_message_from_hmodule(void)
     /* Test a message string with an insertion without passing any variadic arguments. */
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_FROM_HMODULE, h, 193 /* ERROR_BAD_EXE_FORMAT */,
                          MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), out, sizeof(out)/sizeof(CHAR), NULL);
-    ok(ret == 0 ||
-       broken(ret != 0), /* Win9x */
-       "FormatMessageA returned non-zero\n");
+    ok(ret == 0, "FormatMessageA returned non-zero\n");
 
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_FROM_HMODULE |
                          FORMAT_MESSAGE_ARGUMENT_ARRAY, h, 193 /* ERROR_BAD_EXE_FORMAT */,
                          MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), out, sizeof(out)/sizeof(CHAR), NULL);
-    ok(ret == 0 ||
-       broken(ret != 0), /* Win9x */
-       "FormatMessageA returned non-zero\n");
+    ok(ret == 0, "FormatMessageA returned non-zero\n");
 
-    /*Test nonexistent messageID with varying language ID's Note: FormatMessageW behaves the same*/
+    /*Test nonexistent messageID with varying language IDs Note: FormatMessageW behaves the same*/
     SetLastError(0xdeadbeef);
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_FROM_HMODULE, h, 3044,
                          MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL), out, sizeof(out)/sizeof(CHAR), NULL);
@@ -1469,9 +1440,7 @@ static void test_message_invalid_flags(void)
     ptr = (char *)0xdeadbeef;
     ret = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER, "test", 0, 0, (char *)&ptr, 0, NULL);
     ok(ret == 0, "Expected FormatMessageA to return 0, got %u\n", ret);
-    ok(ptr == NULL ||
-       broken(ptr == (char *)0xdeadbeef), /* Win9x */
-       "Expected output pointer to be initialized to NULL, got %p\n", ptr);
+    ok(ptr == NULL, "Expected output pointer to be initialized to NULL, got %p\n", ptr);
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
        "Expected GetLastError() to return ERROR_INVALID_PARAMETER, got %u\n",
        GetLastError());

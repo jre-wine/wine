@@ -19,20 +19,23 @@ C_SRCS = \
 	factory.c \
 	httprequest.c \
 	main.c \
+	mxnamespace.c \
+	mxwriter.c \
 	node.c \
 	nodelist.c \
 	nodemap.c \
 	parseerror.c \
 	pi.c \
-	queryresult.c \
 	saxreader.c \
 	schema.c \
+	selection.c \
 	stylesheet.c \
 	text.c \
 	uuid.c \
 	xdr.c \
 	xmldoc.c \
-	xmlelem.c
+	xmlelem.c \
+	xmlparser.c
 
 LEX_SRCS = xslpattern.l
 
@@ -42,7 +45,10 @@ RC_SRCS = \
 	schemas.rc \
 	version.rc
 
+IDL_R_SRCS = xmlparser.idl
+
+IDL_H_SRCS = xmlparser.idl
+
 IDL_TLB_SRCS = msxml3_v1.idl
-IDL_R_SRCS   = msxml3_v1.idl
 
 @MAKE_DLL_RULES@

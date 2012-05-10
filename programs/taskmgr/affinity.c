@@ -20,15 +20,14 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
 #include <winnt.h>
-#include <stdio.h>
-    
+
 #include "wine/unicode.h"
 #include "taskmgr.h"
 #include "perfdata.h"
@@ -321,11 +320,12 @@ AffinityDialogWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 void ProcessPage_OnSetAffinity(void)
 {
     LV_ITEMW         lvitem;
-    ULONG            Index;
+    ULONG            Index, Count;
     DWORD            dwProcessId;
     WCHAR            wstrErrorText[256];
 
-    for (Index=0; Index<(ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++) {
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0);
+    for (Index=0; Index<Count; Index++) {
         memset(&lvitem, 0, sizeof(LV_ITEMW));
         lvitem.mask = LVIF_STATE;
         lvitem.stateMask = LVIS_SELECTED;
@@ -334,8 +334,10 @@ void ProcessPage_OnSetAffinity(void)
         if (lvitem.state & LVIS_SELECTED)
             break;
     }
+
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETSELECTEDCOUNT, 0, 0);
     dwProcessId = PerfDataGetProcessId(Index);
-    if ((ListView_GetSelectedCount(hProcessPageListCtrl) != 1) || (dwProcessId == 0))
+    if ((Count != 1) || (dwProcessId == 0))
         return;
     hProcessAffinityHandle = OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_SET_INFORMATION, FALSE, dwProcessId);
     if (!hProcessAffinityHandle) {

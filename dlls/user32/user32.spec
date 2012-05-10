@@ -272,7 +272,7 @@
 @ stdcall GetClipboardViewer()
 @ stdcall GetComboBoxInfo(long ptr)
 @ stdcall GetCursor()
-# @ stub GetCursorFrameInfo
+@ stdcall GetCursorFrameInfo(long long long ptr ptr)
 @ stdcall GetCursorInfo(ptr)
 @ stdcall GetCursorPos(ptr)
 @ stdcall GetDC(long)
@@ -498,8 +498,8 @@
 @ stdcall MessageBoxExW(long wstr wstr long long)
 @ stdcall MessageBoxIndirectA(ptr)
 @ stdcall MessageBoxIndirectW(ptr)
-# @ stub MessageBoxTimeoutA
-# @ stub MessageBoxTimeoutW
+@ stdcall MessageBoxTimeoutA(long str str long long long)
+@ stdcall MessageBoxTimeoutW(long wstr wstr long long long)
 @ stdcall MessageBoxW(long wstr wstr long)
 # @ stub ModifyAccess
 @ stdcall ModifyMenuA(long long long long ptr)
@@ -676,7 +676,6 @@
 @ stdcall SetWindowPos(long long long long long long long)
 @ stdcall SetWindowRgn(long long long)
 @ stdcall SetWindowStationUser(long long)
-@ stdcall SetWindowText(long str) SetWindowTextA
 @ stdcall SetWindowTextA(long str)
 @ stdcall SetWindowTextW(long wstr)
 @ stdcall SetWindowWord(long long long)
@@ -780,8 +779,3 @@
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 #
 @ cdecl __wine_send_input(long ptr)
-
-################################################################
-# Wine dll separation hacks, these will go away, don't use them
-#
-@ cdecl HOOK_CallHooks(long long long long long)

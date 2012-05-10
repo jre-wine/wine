@@ -372,6 +372,8 @@ static void test_add_remove(void)
     /* destroy it */
     ok(ImageList_Destroy(himl),"destroy imagelist failed\n");
 
+    ok(-1==ImageList_AddIcon((HIMAGELIST)0xdeadbeef, hicon1),"don't crash on bad handle\n");
+
     ok(DestroyIcon(hicon1),"icon 1 wasn't deleted\n");
     ok(DestroyIcon(hicon2),"icon 2 wasn't deleted\n");
     ok(DestroyIcon(hicon3),"icon 3 wasn't deleted\n");
@@ -380,6 +382,8 @@ static void test_add_remove(void)
 static void test_imagecount(void)
 {
     HIMAGELIST himl;
+
+    ok(0==ImageList_GetImageCount((HIMAGELIST)0xdeadbeef),"don't crash on bad handle\n");
 
     if (!pImageList_SetImageCount)
     {
@@ -451,6 +455,8 @@ static void test_DrawIndirect(void)
     ok(!pImageList_DrawIndirect(&imldp), "zero hdc succeeded!\n");
     imldp.hdcDst = hdc;
     ok(!pImageList_DrawIndirect(&imldp),"zero himl succeeded!\n");
+    imldp.himl = (HIMAGELIST)0xdeadbeef;
+    ok(!pImageList_DrawIndirect(&imldp),"bad himl succeeded!\n");
     imldp.himl = himl;
 
     REDRAW(hwndfortest);
@@ -568,39 +574,37 @@ static void test_merge(void)
 
 struct my_IStream
 {
-    IStream is;
+    IStream IStream_iface;
     char *iml_data; /* written imagelist data */
     ULONG iml_data_size;
 };
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_QueryInterface(
-    IStream* This,
-    REFIID riid,
-    void** ppvObject)
+static struct my_IStream *impl_from_IStream(IStream *iface)
+{
+    return CONTAINING_RECORD(iface, struct my_IStream, IStream_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE Test_Stream_QueryInterface(IStream *iface, REFIID riid,
+                                                            void **ppvObject)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static ULONG STDMETHODCALLTYPE Test_Stream_AddRef(
-    IStream* This)
+static ULONG STDMETHODCALLTYPE Test_Stream_AddRef(IStream *iface)
 {
     assert(0);
     return 2;
 }
 
-static ULONG STDMETHODCALLTYPE Test_Stream_Release(
-    IStream* This)
+static ULONG STDMETHODCALLTYPE Test_Stream_Release(IStream *iface)
 {
     assert(0);
     return 1;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Read(
-    IStream* This,
-    void* pv,
-    ULONG cb,
-    ULONG* pcbRead)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Read(IStream *iface, void *pv, ULONG cb,
+                                                  ULONG *pcbRead)
 {
     assert(0);
     return E_NOTIMPL;
@@ -618,13 +622,10 @@ static BOOL allocate_storage(struct my_IStream *my_is, ULONG add)
     return my_is->iml_data ? TRUE : FALSE;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Write(
-    IStream* This,
-    const void* pv,
-    ULONG cb,
-    ULONG* pcbWritten)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Write(IStream *iface, const void *pv, ULONG cb,
+                                                   ULONG *pcbWritten)
 {
-    struct my_IStream *my_is = (struct my_IStream *)This;
+    struct my_IStream *my_is = impl_from_IStream(iface);
     ULONG current_iml_data_size = my_is->iml_data_size;
 
     if (!allocate_storage(my_is, cb)) return E_FAIL;
@@ -635,82 +636,61 @@ static HRESULT STDMETHODCALLTYPE Test_Stream_Write(
     return S_OK;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Seek(
-    IStream* This,
-    LARGE_INTEGER dlibMove,
-    DWORD dwOrigin,
-    ULARGE_INTEGER* plibNewPosition)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Seek(IStream *iface, LARGE_INTEGER dlibMove,
+                                                  DWORD dwOrigin, ULARGE_INTEGER *plibNewPosition)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_SetSize(
-    IStream* This,
-    ULARGE_INTEGER libNewSize)
+static HRESULT STDMETHODCALLTYPE Test_Stream_SetSize(IStream *iface, ULARGE_INTEGER libNewSize)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_CopyTo(
-    IStream* This,
-    IStream* pstm,
-    ULARGE_INTEGER cb,
-    ULARGE_INTEGER* pcbRead,
-    ULARGE_INTEGER* pcbWritten)
+static HRESULT STDMETHODCALLTYPE Test_Stream_CopyTo(IStream *iface, IStream *pstm,
+                                                    ULARGE_INTEGER cb, ULARGE_INTEGER *pcbRead,
+                                                    ULARGE_INTEGER *pcbWritten)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Commit(
-    IStream* This,
-    DWORD grfCommitFlags)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Commit(IStream *iface, DWORD grfCommitFlags)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Revert(
-    IStream* This)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Revert(IStream *iface)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_LockRegion(
-    IStream* This,
-    ULARGE_INTEGER libOffset,
-    ULARGE_INTEGER cb,
-    DWORD dwLockType)
+static HRESULT STDMETHODCALLTYPE Test_Stream_LockRegion(IStream *iface, ULARGE_INTEGER libOffset,
+                                                        ULARGE_INTEGER cb, DWORD dwLockType)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_UnlockRegion(
-    IStream* This,
-    ULARGE_INTEGER libOffset,
-    ULARGE_INTEGER cb,
-    DWORD dwLockType)
+static HRESULT STDMETHODCALLTYPE Test_Stream_UnlockRegion(IStream *iface, ULARGE_INTEGER libOffset,
+                                                          ULARGE_INTEGER cb, DWORD dwLockType)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Stat(
-    IStream* This,
-    STATSTG* pstatstg,
-    DWORD grfStatFlag)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Stat(IStream *iface, STATSTG *pstatstg,
+                                                  DWORD grfStatFlag)
 {
     assert(0);
     return E_NOTIMPL;
 }
 
-static HRESULT STDMETHODCALLTYPE Test_Stream_Clone(
-    IStream* This,
-    IStream** ppstm)
+static HRESULT STDMETHODCALLTYPE Test_Stream_Clone(IStream *iface, IStream **ppstm)
 {
     assert(0);
     return E_NOTIMPL;
@@ -738,29 +718,12 @@ static struct my_IStream Test_Stream = { { &Test_Stream_Vtbl }, 0, 0 };
 
 static INT DIB_GetWidthBytes( int width, int bpp )
 {
-    int words;
-
-    switch (bpp)
-    {
-	case 1:  words = (width + 31) / 32; break;
-	case 4:  words = (width + 7) / 8; break;
-	case 8:  words = (width + 3) / 4; break;
-	case 15:
-	case 16: words = (width + 1) / 2; break;
-	case 24: words = (width * 3 + 3)/4; break;
-	case 32: words = width; break;
-
-        default:
-            trace("Unknown depth %d, please report.\n", bpp );
-            assert(0);
-            return -1;
-    }
-    return 4 * words;
+    return ((width * bpp + 31) / 8) & ~3;
 }
 
-static void check_bitmap_data(const char *bm_data, ULONG bm_data_size,
-                              INT width, INT height, INT bpp,
-                              const char *comment)
+static ULONG check_bitmap_data(const char *bm_data, ULONG bm_data_size,
+                               INT width, INT height, INT bpp,
+                               const char *comment)
 {
     const BITMAPFILEHEADER *bmfh = (const BITMAPFILEHEADER *)bm_data;
     const BITMAPINFOHEADER *bmih = (const BITMAPINFOHEADER *)(bm_data + sizeof(*bmfh));
@@ -793,9 +756,10 @@ static void check_bitmap_data(const char *bm_data, ULONG bm_data_size,
     fclose(f);
 }
 #endif
+    return hdr_size + image_size;
 }
 
-static void check_ilhead_data(const char *ilh_data, INT cx, INT cy, INT cur, INT max, INT grow)
+static void check_ilhead_data(const char *ilh_data, INT cx, INT cy, INT cur, INT max, INT grow, INT flags)
 {
     const ILHEAD *ilh = (const ILHEAD *)ilh_data;
 
@@ -807,19 +771,12 @@ static void check_ilhead_data(const char *ilh_data, INT cx, INT cy, INT cur, INT
     ok(ilh->cx == cx, "wrong cx %d (expected %d)\n", ilh->cx, cx);
     ok(ilh->cy == cy, "wrong cy %d (expected %d)\n", ilh->cy, cy);
     ok(ilh->bkcolor == CLR_NONE, "wrong bkcolor %x\n", ilh->bkcolor);
-    ok(ilh->flags == ILC_COLOR24, "wrong flags %04x\n", ilh->flags);
-    ok(ilh->ovls[0] == -1 ||
-       ilh->ovls[0] == 0, /* win95 */
-       "wrong ovls[0] %04x\n", ilh->ovls[0]);
-    ok(ilh->ovls[1] == -1 ||
-       ilh->ovls[1] == 0, /* win95 */
-       "wrong ovls[1] %04x\n", ilh->ovls[1]);
-    ok(ilh->ovls[2] == -1 ||
-       ilh->ovls[2] == 0, /* win95 */
-       "wrong ovls[2] %04x\n", ilh->ovls[2]);
-    ok(ilh->ovls[3] == -1 ||
-       ilh->ovls[3] == 0, /* win95 */
-       "wrong ovls[3] %04x\n", ilh->ovls[3]);
+    ok(ilh->flags == flags || broken(!(ilh->flags & 0xfe) && (flags & 0xfe) == ILC_COLOR4),  /* <= w2k */
+       "wrong flags %04x\n", ilh->flags);
+    ok(ilh->ovls[0] == -1, "wrong ovls[0] %04x\n", ilh->ovls[0]);
+    ok(ilh->ovls[1] == -1, "wrong ovls[1] %04x\n", ilh->ovls[1]);
+    ok(ilh->ovls[2] == -1, "wrong ovls[2] %04x\n", ilh->ovls[2]);
+    ok(ilh->ovls[3] == -1, "wrong ovls[3] %04x\n", ilh->ovls[3]);
 }
 
 static HBITMAP create_bitmap(INT cx, INT cy, COLORREF color, const char *comment)
@@ -862,9 +819,9 @@ static HBITMAP create_bitmap(INT cx, INT cy, COLORREF color, const char *comment
     Test_Stream.iml_data_size = 0;
 
 static void check_iml_data(HIMAGELIST himl, INT cx, INT cy, INT cur, INT max, INT grow,
-                           INT width, INT height, INT bpp, const char *comment)
+                           INT width, INT height, INT flags, const char *comment)
 {
-    INT ret, cxx, cyy;
+    INT ret, cxx, cyy, size;
 
     trace("%s\n", comment);
 
@@ -877,23 +834,32 @@ static void check_iml_data(HIMAGELIST himl, INT cx, INT cy, INT cur, INT max, IN
     ok(cyy == cy, "wrong cy %d (expected %d)\n", cyy, cy);
 
     iml_clear_stream_data();
-    ret = ImageList_Write(himl, &Test_Stream.is);
+    ret = ImageList_Write(himl, &Test_Stream.IStream_iface);
     ok(ret, "ImageList_Write failed\n");
 
     ok(Test_Stream.iml_data != 0, "ImageList_Write didn't write any data\n");
     ok(Test_Stream.iml_data_size > sizeof(ILHEAD), "ImageList_Write wrote not enough data\n");
 
-    check_ilhead_data(Test_Stream.iml_data, cx, cy, cur, max, grow);
-    check_bitmap_data(Test_Stream.iml_data + sizeof(ILHEAD),
-                      Test_Stream.iml_data_size - sizeof(ILHEAD),
-                      width, height, bpp, comment);
+    check_ilhead_data(Test_Stream.iml_data, cx, cy, cur, max, grow, flags);
+    size = check_bitmap_data(Test_Stream.iml_data + sizeof(ILHEAD),
+                             Test_Stream.iml_data_size - sizeof(ILHEAD),
+                             width, height, flags & 0xfe, comment);
+    if (size < Test_Stream.iml_data_size - sizeof(ILHEAD))  /* mask is present */
+    {
+        ok( flags & ILC_MASK, "extra data %u/%u but mask not expected\n",
+            Test_Stream.iml_data_size, size );
+        check_bitmap_data(Test_Stream.iml_data + sizeof(ILHEAD) + size,
+                          Test_Stream.iml_data_size - sizeof(ILHEAD) - size,
+                          width, height, 1, comment);
+    }
 }
 
 static void image_list_init(HIMAGELIST himl)
 {
     HBITMAP hbm;
     char comment[16];
-    INT n = 1, i;
+    INT n = 1;
+    DWORD i;
     static const struct test_data
     {
         BYTE grey;
@@ -927,7 +893,7 @@ static void image_list_init(HIMAGELIST himl)
         { 255, BMP_CX, BMP_CX, 24, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "total 24" }
     };
 
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 2, 4, BMP_CX * 4, BMP_CX * 1, 24, "total 0");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 2, 4, BMP_CX * 4, BMP_CX * 1, ILC_COLOR24, "total 0");
 
 #define add_bitmap(grey) \
     sprintf(comment, "%d", n++); \
@@ -948,43 +914,44 @@ static void test_imagelist_storage(void)
 {
     HIMAGELIST himl;
     HBITMAP hbm;
+    HICON icon;
     INT ret;
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 1, 1);
     ok(himl != 0, "ImageList_Create failed\n");
 
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 2, 4, BMP_CX * 4, BMP_CX * 1, 24, "empty");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 2, 4, BMP_CX * 4, BMP_CX * 1, ILC_COLOR24, "empty");
 
     image_list_init(himl);
-    check_iml_data(himl, BMP_CX, BMP_CX, 24, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "orig");
+    check_iml_data(himl, BMP_CX, BMP_CX, 24, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "orig");
 
     ret = ImageList_Remove(himl, 4);
     ok(ret, "ImageList_Remove failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 23, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "1");
+    check_iml_data(himl, BMP_CX, BMP_CX, 23, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "1");
 
     ret = ImageList_Remove(himl, 5);
     ok(ret, "ImageList_Remove failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 22, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "2");
+    check_iml_data(himl, BMP_CX, BMP_CX, 22, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "2");
 
     ret = ImageList_Remove(himl, 6);
     ok(ret, "ImageList_Remove failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 21, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "3");
+    check_iml_data(himl, BMP_CX, BMP_CX, 21, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "3");
 
     ret = ImageList_Remove(himl, 7);
     ok(ret, "ImageList_Remove failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "4");
+    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "4");
 
     ret = ImageList_Remove(himl, -2);
     ok(!ret, "ImageList_Remove(-2) should fail\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "5");
+    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "5");
 
     ret = ImageList_Remove(himl, 20);
     ok(!ret, "ImageList_Remove(20) should fail\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, 24, "6");
+    check_iml_data(himl, BMP_CX, BMP_CX, 20, 27, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "6");
 
     ret = ImageList_Remove(himl, -1);
     ok(ret, "ImageList_Remove(-1) failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 4, 4, BMP_CX * 4, BMP_CX * 1, 24, "7");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 4, 4, BMP_CX * 4, BMP_CX * 1, ILC_COLOR24, "7");
 
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
@@ -995,11 +962,11 @@ static void test_imagelist_storage(void)
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 0, 32);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 1, 32, BMP_CX * 4, BMP_CX * 1, 24, "init 0 grow 32");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 1, 32, BMP_CX * 4, BMP_CX * 1, ILC_COLOR24, "init 0 grow 32");
     hbm = create_bitmap(BMP_CX * 9, BMP_CX, 0, "9");
     ret = ImageList_Add(himl, hbm, NULL);
     ok(ret == 0, "ImageList_Add returned %d, expected 0\n", ret);
-    check_iml_data(himl, BMP_CX, BMP_CX, 1, 34, 32, BMP_CX * 4, BMP_CX * 9, 24, "add 1 x 9");
+    check_iml_data(himl, BMP_CX, BMP_CX, 1, 34, 32, BMP_CX * 4, BMP_CX * 9, ILC_COLOR24, "add 1 x 9");
     DeleteObject(hbm);
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
@@ -1007,14 +974,14 @@ static void test_imagelist_storage(void)
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 4, 4);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, 24, "init 4 grow 4");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR24, "init 4 grow 4");
     hbm = create_bitmap(BMP_CX, BMP_CX * 9, 0, "9");
     ret = ImageList_Add(himl, hbm, NULL);
     ok(ret == 0, "ImageList_Add returned %d, expected 0\n", ret);
-    check_iml_data(himl, BMP_CX, BMP_CX, 9, 15, 4, BMP_CX * 4, BMP_CX * 4, 24, "add 9 x 1");
+    check_iml_data(himl, BMP_CX, BMP_CX, 9, 15, 4, BMP_CX * 4, BMP_CX * 4, ILC_COLOR24, "add 9 x 1");
     ret = ImageList_Add(himl, hbm, NULL);
     ok(ret == 9, "ImageList_Add returned %d, expected 9\n", ret);
-    check_iml_data(himl, BMP_CX, BMP_CX, 18, 25, 4, BMP_CX * 4, BMP_CX * 7, 24, "add 9 x 1");
+    check_iml_data(himl, BMP_CX, BMP_CX, 18, 25, 4, BMP_CX * 4, BMP_CX * 7, ILC_COLOR24, "add 9 x 1");
     DeleteObject(hbm);
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
@@ -1022,49 +989,156 @@ static void test_imagelist_storage(void)
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 207, 209);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 208, 212, BMP_CX * 4, BMP_CX * 52, 24, "init 207 grow 209");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 208, 212, BMP_CX * 4, BMP_CX * 52, ILC_COLOR24, "init 207 grow 209");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 209, 207);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 210, 208, BMP_CX * 4, BMP_CX * 53, 24, "init 209 grow 207");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 210, 208, BMP_CX * 4, BMP_CX * 53, ILC_COLOR24, "init 209 grow 207");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 14, 4);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 15, 4, BMP_CX * 4, BMP_CX * 4, 24, "init 14 grow 4");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 15, 4, BMP_CX * 4, BMP_CX * 4, ILC_COLOR24, "init 14 grow 4");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 5, 9);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 6, 12, BMP_CX * 4, BMP_CX * 2, 24, "init 5 grow 9");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 6, 12, BMP_CX * 4, BMP_CX * 2, ILC_COLOR24, "init 5 grow 9");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 9, 5);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 10, 8, BMP_CX * 4, BMP_CX * 3, 24, "init 9 grow 5");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 10, 8, BMP_CX * 4, BMP_CX * 3, ILC_COLOR24, "init 9 grow 5");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 2, 4);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 4, BMP_CX * 4, BMP_CX * 1, 24, "init 2 grow 4");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 4, BMP_CX * 4, BMP_CX * 1, ILC_COLOR24, "init 2 grow 4");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
 
     himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24, 4, 2);
     ok(himl != 0, "ImageList_Create failed\n");
-    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, 24, "init 4 grow 2");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR24, "init 4 grow 2");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR8, 4, 2);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR8, "bpp 8");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4, 4, 2);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR4, "bpp 4");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, 0, 4, 2);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR4, "bpp default");
+    icon = CreateIcon(hinst, 32, 32, 1, 1, icon_bits, icon_bits);
+    ok( ImageList_AddIcon(himl, icon) == 0,"failed to add icon\n");
+    ok( ImageList_AddIcon(himl, icon) == 1,"failed to add icon\n");
+    DestroyIcon( icon );
+    check_iml_data(himl, BMP_CX, BMP_CX, 2, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR4, "bpp default");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR24|ILC_MASK, 4, 2);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR24|ILC_MASK,
+                   "bpp 24 + mask");
+    icon = CreateIcon(hinst, 32, 32, 1, 1, icon_bits, icon_bits);
+    ok( ImageList_AddIcon(himl, icon) == 0,"failed to add icon\n");
+    ok( ImageList_AddIcon(himl, icon) == 1,"failed to add icon\n");
+    DestroyIcon( icon );
+    check_iml_data(himl, BMP_CX, BMP_CX, 2, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR24|ILC_MASK,
+                   "bpp 24 + mask");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4|ILC_MASK, 4, 2);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR4|ILC_MASK,
+                   "bpp 4 + mask");
+    icon = CreateIcon(hinst, 32, 32, 1, 1, icon_bits, icon_bits);
+    ok( ImageList_AddIcon(himl, icon) == 0,"failed to add icon\n");
+    ok( ImageList_AddIcon(himl, icon) == 1,"failed to add icon\n");
+    DestroyIcon( icon );
+    check_iml_data(himl, BMP_CX, BMP_CX, 2, 5, 4, BMP_CX * 4, BMP_CX * 2, ILC_COLOR4|ILC_MASK,
+                   "bpp 4 + mask");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4|ILC_MASK, 2, 99);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 100, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99");
+    icon = CreateIcon(hinst, 32, 32, 1, 1, icon_bits, icon_bits);
+    ok( ImageList_AddIcon(himl, icon) == 0,"failed to add icon\n");
+    ok( ImageList_AddIcon(himl, icon) == 1,"failed to add icon\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 2, 3, 100, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 2 icons");
+    ok( ImageList_AddIcon(himl, icon) == 2,"failed to add icon\n");
+    DestroyIcon( icon );
+    check_iml_data(himl, BMP_CX, BMP_CX, 3, 104, 100, BMP_CX * 4, BMP_CX * 104/4, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 3 icons");
+    ok( ImageList_Remove(himl, -1) == TRUE,"failed to remove icon\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 100, 100, BMP_CX * 4, BMP_CX * 100/4, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 empty");
+    ok( ImageList_SetImageCount(himl, 22) == TRUE,"failed to set image count\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 22, 23, 100, BMP_CX * 4, BMP_CX * 24/4, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 set count 22");
+    ok( ImageList_SetImageCount(himl, 0) == TRUE,"failed to set image count\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 1, 100, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 set count 0");
+    ok( ImageList_SetImageCount(himl, 42) == TRUE,"failed to set image count\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 42, 43, 100, BMP_CX * 4, BMP_CX * 44/4, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 99 set count 42");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4|ILC_MASK, 2, 65536+12);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 12, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 65536+12");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4|ILC_MASK, 2, 65535);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 0, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow 65535");
+    ret = ImageList_Destroy(himl);
+    ok(ret, "ImageList_Destroy failed\n");
+    iml_clear_stream_data();
+
+    himl = ImageList_Create(BMP_CX, BMP_CX, ILC_COLOR4|ILC_MASK, 2, -20);
+    ok(himl != 0, "ImageList_Create failed\n");
+    check_iml_data(himl, BMP_CX, BMP_CX, 0, 3, 4, BMP_CX * 4, BMP_CX, ILC_COLOR4|ILC_MASK,
+                   "init 2 grow -20");
     ret = ImageList_Destroy(himl);
     ok(ret, "ImageList_Destroy failed\n");
     iml_clear_stream_data();
@@ -1757,22 +1831,26 @@ static void test_iconsize(void)
     ok(!ret, "got %d\n", ret);
 
     /* doesn't touch return pointers */
-    cx = 0xdeadbeef;
+    cx = 0x1abe11ed;
     ret = ImageList_GetIconSize(himl, &cx, NULL);
     ok(!ret, "got %d\n", ret);
-    ok(cx == 0xdeadbeef, "got %d\n", cx);
+    ok(cx == 0x1abe11ed, "got %d\n", cx);
 
-    cy = 0xdeadbeef;
+    cy = 0x1abe11ed;
     ret = ImageList_GetIconSize(himl, NULL, &cy);
     ok(!ret, "got %d\n", ret);
-    ok(cy == 0xdeadbeef, "got %d\n", cy);
+    ok(cy == 0x1abe11ed, "got %d\n", cy);
 
     ImageList_Destroy(himl);
+
+    ret = ImageList_GetIconSize((HIMAGELIST)0xdeadbeef, &cx, &cy);
+    ok(!ret, "got %d\n", ret);
 }
 
-static void test_create(void)
+static void test_create_destroy(void)
 {
     HIMAGELIST himl;
+    BOOL rc;
 
     /* list with zero or negative image dimensions */
     himl = ImageList_Create(0, 0, ILC_COLOR16, 0, 3);
@@ -1789,6 +1867,9 @@ static void test_create(void)
 
     himl = ImageList_Create(-1, 16, ILC_COLOR16, 0, 3);
     ok(himl == NULL, "got %p\n", himl);
+
+    rc = ImageList_Destroy((HIMAGELIST)0xdeadbeef);
+    ok(rc == FALSE, "ImageList_Destroy(0xdeadbeef) should fail and not crash\n");
 }
 
 static void test_IImageList_Clone(void)
@@ -1928,7 +2009,7 @@ START_TEST(imagelist)
 
     InitCommonControls();
 
-    test_create();
+    test_create_destroy();
     test_hotspot();
     test_add_remove();
     test_imagecount();

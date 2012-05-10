@@ -80,8 +80,10 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(GetKeyboardLayoutName);
         GET_USER_FUNC(LoadKeyboardLayout);
         GET_USER_FUNC(MapVirtualKeyEx);
+        GET_USER_FUNC(RegisterHotKey);
         GET_USER_FUNC(ToUnicodeEx);
         GET_USER_FUNC(UnloadKeyboardLayout);
+        GET_USER_FUNC(UnregisterHotKey);
         GET_USER_FUNC(VkKeyScanEx);
         GET_USER_FUNC(CreateCursorIcon);
         GET_USER_FUNC(DestroyCursorIcon);
@@ -98,7 +100,6 @@ static const USER_DRIVER *load_driver(void)
         GET_USER_FUNC(CountClipboardFormats);
         GET_USER_FUNC(EnumClipboardFormats);
         GET_USER_FUNC(IsClipboardFormatAvailable);
-        GET_USER_FUNC(RegisterClipboardFormat);
         GET_USER_FUNC(EndClipboardUpdate);
         GET_USER_FUNC(ChangeDisplaySettingsEx);
         GET_USER_FUNC(EnumDisplayMonitors);
@@ -194,6 +195,11 @@ static UINT CDECL nulldrv_MapVirtualKeyEx( UINT code, UINT type, HKL layout )
     return 0;
 }
 
+static BOOL CDECL nulldrv_RegisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
+{
+    return TRUE;
+}
+
 static INT CDECL nulldrv_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state, LPWSTR str,
                                       int size, UINT flags, HKL layout )
 {
@@ -203,6 +209,10 @@ static INT CDECL nulldrv_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state, L
 static BOOL CDECL nulldrv_UnloadKeyboardLayout( HKL layout )
 {
     return 0;
+}
+
+static void CDECL nulldrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
+{
 }
 
 static SHORT CDECL nulldrv_VkKeyScanEx( WCHAR ch, HKL layout )
@@ -277,11 +287,6 @@ static HANDLE CDECL nulldrv_GetClipboardData( UINT format )
 static BOOL CDECL nulldrv_IsClipboardFormatAvailable( UINT format )
 {
     return FALSE;
-}
-
-static UINT CDECL nulldrv_RegisterClipboardFormat( LPCWSTR name )
-{
-    return 0;
 }
 
 static BOOL CDECL nulldrv_SetClipboardData( UINT format, HANDLE handle, BOOL owner )
@@ -436,8 +441,10 @@ static USER_DRIVER null_driver =
     nulldrv_GetKeyboardLayoutName,
     nulldrv_LoadKeyboardLayout,
     nulldrv_MapVirtualKeyEx,
+    nulldrv_RegisterHotKey,
     nulldrv_ToUnicodeEx,
     nulldrv_UnloadKeyboardLayout,
+    nulldrv_UnregisterHotKey,
     nulldrv_VkKeyScanEx,
     /* cursor/icon functions */
     nulldrv_CreateCursorIcon,
@@ -457,7 +464,6 @@ static USER_DRIVER null_driver =
     nulldrv_EnumClipboardFormats,
     nulldrv_GetClipboardData,
     nulldrv_IsClipboardFormatAvailable,
-    nulldrv_RegisterClipboardFormat,
     nulldrv_SetClipboardData,
     /* display modes */
     nulldrv_ChangeDisplaySettingsEx,
@@ -535,6 +541,11 @@ static UINT CDECL loaderdrv_MapVirtualKeyEx( UINT code, UINT type, HKL layout )
     return load_driver()->pMapVirtualKeyEx( code, type, layout );
 }
 
+static BOOL CDECL loaderdrv_RegisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
+{
+    return load_driver()->pRegisterHotKey( hwnd, modifiers, vk );
+}
+
 static INT CDECL loaderdrv_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state, LPWSTR str,
                                   int size, UINT flags, HKL layout )
 {
@@ -544,6 +555,11 @@ static INT CDECL loaderdrv_ToUnicodeEx( UINT virt, UINT scan, const BYTE *state,
 static BOOL CDECL loaderdrv_UnloadKeyboardLayout( HKL layout )
 {
     return load_driver()->pUnloadKeyboardLayout( layout );
+}
+
+static void CDECL loaderdrv_UnregisterHotKey( HWND hwnd, UINT modifiers, UINT vk )
+{
+    load_driver()->pUnregisterHotKey( hwnd, modifiers, vk );
 }
 
 static SHORT CDECL loaderdrv_VkKeyScanEx( WCHAR ch, HKL layout )
@@ -624,11 +640,6 @@ static HANDLE CDECL loaderdrv_GetClipboardData( UINT format )
 static BOOL CDECL loaderdrv_IsClipboardFormatAvailable( UINT format )
 {
     return load_driver()->pIsClipboardFormatAvailable( format );
-}
-
-static UINT CDECL loaderdrv_RegisterClipboardFormat( LPCWSTR name )
-{
-    return load_driver()->pRegisterClipboardFormat( name );
 }
 
 static BOOL CDECL loaderdrv_SetClipboardData( UINT format, HANDLE handle, BOOL owner )
@@ -777,8 +788,10 @@ static USER_DRIVER lazy_load_driver =
     loaderdrv_GetKeyboardLayoutName,
     loaderdrv_LoadKeyboardLayout,
     loaderdrv_MapVirtualKeyEx,
+    loaderdrv_RegisterHotKey,
     loaderdrv_ToUnicodeEx,
     loaderdrv_UnloadKeyboardLayout,
+    loaderdrv_UnregisterHotKey,
     loaderdrv_VkKeyScanEx,
     /* cursor/icon functions */
     loaderdrv_CreateCursorIcon,
@@ -798,7 +811,6 @@ static USER_DRIVER lazy_load_driver =
     loaderdrv_EnumClipboardFormats,
     loaderdrv_GetClipboardData,
     loaderdrv_IsClipboardFormatAvailable,
-    loaderdrv_RegisterClipboardFormat,
     loaderdrv_SetClipboardData,
     /* display modes */
     loaderdrv_ChangeDisplaySettingsEx,

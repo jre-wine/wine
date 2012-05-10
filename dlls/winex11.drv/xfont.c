@@ -3226,29 +3226,32 @@ XFontStruct* XFONT_GetFontStruct( X_PHYSFONT pFont )
 /***********************************************************************
  *           SelectFont   (X11DRV.@)
  */
-HFONT CDECL X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiFont )
+HFONT X11DRV_SelectFont( PHYSDEV dev, HFONT hfont )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+    PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectFont );
+    fontObject *pfo = XFONT_GetFontObject( physDev->font );
     LOGFONTW logfont;
     LOGFONT16 lf;
+    HFONT ret;
 
-    TRACE("hdc=%p, hfont=%p\n", physDev->hdc, hfont);
+    TRACE("hdc=%p, hfont=%p\n", dev->hdc, hfont);
 
-    if (!GetObjectW( hfont, sizeof(logfont), &logfont )) return HGDI_ERROR;
-
-    TRACE("gdiFont = %p\n", gdiFont);
-
-    if(gdiFont && using_client_side_fonts) {
-        X11DRV_XRender_SelectFont(physDev, hfont);
+    if (using_client_side_fonts && ((ret = next->funcs->pSelectFont( next, hfont ))))
+    {
+        if (pfo) XFONT_ReleaseCacheEntry( pfo );
+        physDev->font = 0;
         physDev->has_gdi_font = TRUE;
-	return FALSE;
+        return ret;
     }
+
+    GetObjectW( hfont, sizeof(logfont), &logfont );
 
     EnterCriticalSection( &crtsc_fonts_X11 );
 
     if(fontList == NULL) X11DRV_FONT_InitX11Metrics();
 
-    if( CHECK_PFONT(physDev->font) )
-        XFONT_ReleaseCacheEntry( __PFONT(physDev->font) );
+    if (pfo) XFONT_ReleaseCacheEntry( pfo );
 
     FONT_LogFontWTo16(&logfont, &lf);
 
@@ -3259,14 +3262,14 @@ HFONT CDECL X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiF
         /* FIXME - check that the other drivers do this correctly */
         if (lf.lfWidth)
         {
-            INT width = X11DRV_XWStoDS( physDev, lf.lfWidth );
+            INT width = X11DRV_XWStoDS( dev->hdc, lf.lfWidth );
             lf.lfWidth = (lf.lfWidth < 0) ? -abs(width) : abs(width);
             if (lf.lfWidth == 0)
                 lf.lfWidth = 1; /* Minimum width */
         }
         if (lf.lfHeight)
         {
-            INT height = X11DRV_YWStoDS( physDev, lf.lfHeight );
+            INT height = X11DRV_YWStoDS( dev->hdc, lf.lfHeight );
             lf.lfHeight = (lf.lfHeight < 0) ? -abs(height) : abs(height);
             if (lf.lfHeight == 0)
                 lf.lfHeight = MIN_FONT_SIZE;
@@ -3274,7 +3277,7 @@ HFONT CDECL X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiF
     }
 
     if (!lf.lfHeight)
-        lf.lfHeight = -(DEF_POINT_SIZE * GetDeviceCaps(physDev->hdc,LOGPIXELSY) + (72>>1)) / 72;
+        lf.lfHeight = -(DEF_POINT_SIZE * GetDeviceCaps(dev->hdc,LOGPIXELSY) + (72>>1)) / 72;
 
     {
 	/* Fixup aliases before passing to RealizeFont */
@@ -3311,25 +3314,30 @@ HFONT CDECL X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiF
     LeaveCriticalSection( &crtsc_fonts_X11 );
 
     physDev->has_gdi_font = FALSE;
-    return (HFONT)1; /* Use a device font */
+    next->funcs->pSelectFont( next, 0 );  /* tell next driver that we selected a device font */
+    return hfont;
 }
 
 
 /***********************************************************************
  *
- *           X11DRV_EnumDeviceFonts
+ *           X11DRV_EnumFonts
  */
-BOOL CDECL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
-                                   FONTENUMPROCW proc, LPARAM lp )
+BOOL X11DRV_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc, LPARAM lp )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+    PHYSDEV next = GET_NEXT_PHYSDEV( dev, pEnumFonts );
     ENUMLOGFONTEXW	lf;
     NEWTEXTMETRICEXW	tm;
     fontResource*	pfr = fontList;
-    BOOL	  	b, bRet = 0;
+    BOOL	  	ret;
     LOGFONTW lfW;
 
+    ret = next->funcs->pEnumFonts( next, plf, proc, lp );
+    if (!ret) return FALSE;
+
     /* don't enumerate x11 fonts if we're using client side fonts */
-    if (physDev->has_gdi_font) return FALSE;
+    if (physDev->has_gdi_font) return ret;
 
     if (!plf)
     {
@@ -3358,9 +3366,8 @@ BOOL CDECL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
 		   plf->lfCharSet == pfi->df.dfCharSet) {
 		    UINT xfm = XFONT_GetFontMetric( pfi, &lf, &tm );
 
-		    if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )) )
-		        bRet = b;
-		    else break;
+		    if (!(ret = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )))
+                        break;
 		}
 	    }
 	}
@@ -3372,36 +3379,39 @@ BOOL CDECL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
             {
 	        UINT xfm = XFONT_GetFontMetric( pfr->fi, &lf, &tm );
 
-	        if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )) )
-		    bRet = b;
-		else break;
+	        if (!(ret = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )))
+                    break;
             }
 	}
-    return bRet;
+    return ret;
 }
 
 
 /***********************************************************************
  *           X11DRV_GetTextMetrics
  */
-BOOL CDECL X11DRV_GetTextMetrics(X11DRV_PDEVICE *physDev, TEXTMETRICW *metrics)
+BOOL X11DRV_GetTextMetrics(PHYSDEV dev, TEXTMETRICW *metrics)
 {
-    if( CHECK_PFONT(physDev->font) )
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+    fontObject *pfo = XFONT_GetFontObject( physDev->font );
+
+    if (pfo)
     {
-	fontObject* pfo = __PFONT(physDev->font);
 	X11DRV_cptable[pfo->fi->cptable].pGetTextMetricsW( pfo, metrics );
 	return TRUE;
     }
-    return FALSE;
+
+    dev = GET_NEXT_PHYSDEV( dev, pGetTextMetrics );
+    return dev->funcs->pGetTextMetrics( dev, metrics );
 }
 
 
 /***********************************************************************
  *           X11DRV_GetCharWidth
  */
-BOOL CDECL X11DRV_GetCharWidth( X11DRV_PDEVICE *physDev, UINT firstChar, UINT lastChar,
-                                  LPINT buffer )
+BOOL X11DRV_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     fontObject* pfo = XFONT_GetFontObject( physDev->font );
 
     if( pfo )
@@ -3446,5 +3456,7 @@ BOOL CDECL X11DRV_GetCharWidth( X11DRV_PDEVICE *physDev, UINT firstChar, UINT la
 
 	return TRUE;
     }
-    return FALSE;
+
+    dev = GET_NEXT_PHYSDEV( dev, pGetCharWidth );
+    return dev->funcs->pGetCharWidth( dev, firstChar, lastChar, buffer );
 }

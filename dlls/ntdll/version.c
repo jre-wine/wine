@@ -53,6 +53,7 @@ typedef enum
     WIN2K3,  /* Windows 2003 */
     WINVISTA,/* Windows Vista */
     WIN2K8,  /* Windows 2008 */
+    WIN2K8R2,/* Windows 2008 R2 */
     WIN7,    /* Windows 7 */
     NB_WINDOWS_VERSIONS
 } WINDOWS_VERSION;
@@ -111,8 +112,8 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     /* NT351 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 3, 51, 0x421, VER_PLATFORM_WIN32_NT,
-        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','2',0},
-        0, 0, 0, 0, 0
+        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','5',0},
+        5, 0, 0, VER_NT_WORKSTATION, 0
     },
     /* NT40 */
     {
@@ -146,16 +147,23 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     },
     /* WIN2K8 */
     {
-        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1771, VER_PLATFORM_WIN32_NT,
-        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
-        0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1772, VER_PLATFORM_WIN32_NT,
+        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','2',0},
+        2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
     },
     /* WIN7 */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
         {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
         1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
-    }
+    },
+    /* WIN2K8R2 */
+    {
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB1, VER_PLATFORM_WIN32_NT,
+        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
+        1, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+    },
+
 };
 
 static const char * const WinVersionNames[NB_WINDOWS_VERSIONS] =
@@ -173,6 +181,7 @@ static const char * const WinVersionNames[NB_WINDOWS_VERSIONS] =
     "win2003,win2k3",             /* WIN2K3 */
     "vista,winvista",             /* WINVISTA*/
     "win2008,win2k8",             /* WIN2K8 */
+    "win2008r2,win2k8r2",         /* WIN2K8R2 */
     "win7",                       /* WIN7 */
 };
 
@@ -522,9 +531,8 @@ done:
 
     user_shared_data->NtProductType      = current_version->wProductType;
     user_shared_data->ProductTypeIsValid = TRUE;
-    user_shared_data->MajorNtVersion     = current_version->dwMajorVersion;
-    user_shared_data->MinorNtVersion     = current_version->dwMinorVersion;
-    user_shared_data->MinorNtVersion     = current_version->dwMinorVersion;
+    user_shared_data->NtMajorVersion     = current_version->dwMajorVersion;
+    user_shared_data->NtMinorVersion     = current_version->dwMinorVersion;
     user_shared_data->SuiteMask          = current_version->wSuiteMask;
 
     TRACE( "got %d.%d platform %d build %x name %s service pack %d.%d product %d\n",

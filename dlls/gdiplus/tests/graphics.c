@@ -546,8 +546,9 @@ static void test_BeginContainer2(void)
     status = GdipBeginContainer2(graphics, &cont1);
     expect(Ok, status);
 
-    GdipCreateMatrix2(defTrans[0], defTrans[1], defTrans[2], defTrans[3],
+    status = GdipCreateMatrix2(defTrans[0], defTrans[1], defTrans[2], defTrans[3],
             defTrans[4], defTrans[5], &transform);
+    expect(Ok, status);
     GdipSetWorldTransform(graphics, transform);
     GdipDeleteMatrix(transform);
     transform = NULL;
@@ -555,7 +556,8 @@ static void test_BeginContainer2(void)
     status = GdipBeginContainer2(graphics, &cont2);
     expect(Ok, status);
 
-    GdipCreateMatrix2(10, 20, 30, 40, 50, 60, &transform);
+    status = GdipCreateMatrix2(10, 20, 30, 40, 50, 60, &transform);
+    expect(Ok, status);
     GdipSetWorldTransform(graphics, transform);
     GdipDeleteMatrix(transform);
     transform = NULL;
@@ -563,7 +565,8 @@ static void test_BeginContainer2(void)
     status = GdipEndContainer(graphics, cont2);
     expect(Ok, status);
 
-    GdipCreateMatrix(&transform);
+    status = GdipCreateMatrix(&transform);
+    expect(Ok, status);
     GdipGetWorldTransform(graphics, transform);
     GdipGetMatrixElements(transform, elems);
     ok(fabs(defTrans[0] - elems[0]) < 0.0001 &&
@@ -1430,7 +1433,8 @@ static void test_Get_Release_DC(void)
         rectf[i].Width  = (REAL)rect[i].Width;
     }
 
-    GdipCreateMatrix(&m);
+    status = GdipCreateMatrix(&m);
+    expect(Ok, status);
     GdipCreateRegion(&region);
     GdipCreateSolidFill((ARGB)0xdeadbeef, &brush);
     GdipCreatePath(FillModeAlternate, &path);
@@ -1954,6 +1958,8 @@ static void test_GdipDrawString(void)
     LOGFONTA logfont;
     HDC hdc = GetDC( hwnd );
     static const WCHAR string[] = {'T','e','s','t',0};
+    static const PointF positions[4] = {{0,0}, {1,1}, {2,2}, {3,3}};
+    GpMatrix *matrix;
 
     memset(&logfont,0,sizeof(logfont));
     strcpy(logfont.lfFaceName,"Arial");
@@ -1985,6 +1991,34 @@ static void test_GdipDrawString(void)
     status = GdipDrawString(graphics, string, 4, fnt, &rect, format, brush);
     expect(Ok, status);
 
+    status = GdipCreateMatrix(&matrix);
+    expect(Ok, status);
+
+    status = GdipDrawDriverString(NULL, string, 4, fnt, brush, positions, DriverStringOptionsCmapLookup, matrix);
+    expect(InvalidParameter, status);
+
+    status = GdipDrawDriverString(graphics, NULL, 4, fnt, brush, positions, DriverStringOptionsCmapLookup, matrix);
+    expect(InvalidParameter, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, NULL, brush, positions, DriverStringOptionsCmapLookup, matrix);
+    expect(InvalidParameter, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, fnt, NULL, positions, DriverStringOptionsCmapLookup, matrix);
+    expect(InvalidParameter, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, fnt, brush, NULL, DriverStringOptionsCmapLookup, matrix);
+    expect(InvalidParameter, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, fnt, brush, positions, DriverStringOptionsCmapLookup|0x10, matrix);
+    expect(Ok, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, fnt, brush, positions, DriverStringOptionsCmapLookup, NULL);
+    expect(Ok, status);
+
+    status = GdipDrawDriverString(graphics, string, 4, fnt, brush, positions, DriverStringOptionsCmapLookup, matrix);
+    expect(Ok, status);
+
+    GdipDeleteMatrix(matrix);
     GdipDeleteGraphics(graphics);
     GdipDeleteBrush(brush);
     GdipDeleteFont(fnt);
@@ -2231,7 +2265,7 @@ static void test_fromMemoryBitmap(void)
     GdipDeleteGraphics(graphics);
 
     /* drawing writes to the memory provided */
-    todo_wine expect(0x68, bits[10]);
+    expect(0x68, bits[10]);
 
     status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
     expect(Ok, status);
@@ -2797,6 +2831,7 @@ static void test_string_functions(void)
     HDC hdc = GetDC( hwnd );
     const WCHAR fontname[] = {'T','a','h','o','m','a',0};
     const WCHAR teststring[] = {'M','M',' ','M','\n','M',0};
+    const WCHAR teststring2[] = {'j',0};
     REAL char_width, char_height;
     INT codepointsfitted, linesfilled;
     GpStringFormat *format;
@@ -2804,6 +2839,8 @@ static void test_string_functions(void)
     GpRegion *regions[4] = {0};
     BOOL region_isempty[4];
     int i;
+    PointF position;
+    GpMatrix *identity;
 
     ok(hdc != NULL, "Expected HDC to be initialized\n");
     status = GdipCreateFromHDC(hdc, &graphics);
@@ -3003,6 +3040,96 @@ static void test_string_functions(void)
     for (i=0; i<4; i++)
         GdipDeleteRegion(regions[i]);
 
+    status = GdipCreateMatrix(&identity);
+    expect(Ok, status);
+
+    position.X = 0;
+    position.Y = 0;
+
+    rc.X = 0;
+    rc.Y = 0;
+    rc.Width = 0;
+    rc.Height = 0;
+    status = GdipMeasureDriverString(NULL, teststring, 6, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(InvalidParameter, status);
+
+    status = GdipMeasureDriverString(graphics, NULL, 6, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(InvalidParameter, status);
+
+    status = GdipMeasureDriverString(graphics, teststring, 6, NULL, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(InvalidParameter, status);
+
+    status = GdipMeasureDriverString(graphics, teststring, 6, font, NULL,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(InvalidParameter, status);
+
+    status = GdipMeasureDriverString(graphics, teststring, 6, font, &position,
+        0x100, identity, &rc);
+    expect(Ok, status);
+
+    status = GdipMeasureDriverString(graphics, teststring, 6, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        NULL, &rc);
+    expect(Ok, status);
+
+    status = GdipMeasureDriverString(graphics, teststring, 6, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, NULL);
+    expect(InvalidParameter, status);
+
+    rc.X = 0;
+    rc.Y = 0;
+    rc.Width = 0;
+    rc.Height = 0;
+    status = GdipMeasureDriverString(graphics, teststring, 6, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(Ok, status);
+
+    expectf(0.0, rc.X);
+    ok(rc.Y < 0.0, "unexpected Y %0.2f\n", rc.Y);
+    ok(rc.Width > 0.0, "unexpected Width %0.2f\n", rc.Width);
+    ok(rc.Height > 0.0, "unexpected Y %0.2f\n", rc.Y);
+
+    char_width = rc.Width;
+    char_height = rc.Height;
+
+    rc.X = 0;
+    rc.Y = 0;
+    rc.Width = 0;
+    rc.Height = 0;
+    status = GdipMeasureDriverString(graphics, teststring, 4, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(Ok, status);
+
+    expectf(0.0, rc.X);
+    ok(rc.Y < 0.0, "unexpected Y %0.2f\n", rc.Y);
+    ok(rc.Width < char_width, "got Width %0.2f, expecting less than %0.2f\n", rc.Width, char_width);
+    expectf(char_height, rc.Height);
+
+    rc.X = 0;
+    rc.Y = 0;
+    rc.Width = 0;
+    rc.Height = 0;
+    status = GdipMeasureDriverString(graphics, teststring2, 1, font, &position,
+        DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance,
+        identity, &rc);
+    expect(Ok, status);
+
+    expectf(rc.X, 0.0);
+    ok(rc.Y < 0.0, "unexpected Y %0.2f\n", rc.Y);
+    ok(rc.Width > 0, "unexpected Width %0.2f\n", rc.Width);
+    expectf(rc.Height, char_height);
+
+    GdipDeleteMatrix(identity);
     GdipDeleteStringFormat(format);
     GdipDeleteBrush(brush);
     GdipDeleteFont(font);
@@ -3010,6 +3137,171 @@ static void test_string_functions(void)
     GdipDeleteGraphics(graphics);
 
     ReleaseDC(hwnd, hdc);
+}
+
+static void test_get_set_interpolation(void)
+{
+    GpGraphics *graphics;
+    HDC hdc = GetDC( hwnd );
+    GpStatus status;
+    InterpolationMode mode;
+
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    status = GdipGetInterpolationMode(NULL, &mode);
+    expect(InvalidParameter, status);
+
+    if (0)
+    {
+        /* Crashes on Windows XP */
+        status = GdipGetInterpolationMode(graphics, NULL);
+        expect(InvalidParameter, status);
+    }
+
+    status = GdipSetInterpolationMode(NULL, InterpolationModeNearestNeighbor);
+    expect(InvalidParameter, status);
+
+    /* out of range */
+    status = GdipSetInterpolationMode(graphics, InterpolationModeHighQualityBicubic+1);
+    expect(InvalidParameter, status);
+
+    status = GdipSetInterpolationMode(graphics, InterpolationModeInvalid);
+    expect(InvalidParameter, status);
+
+    status = GdipGetInterpolationMode(graphics, &mode);
+    expect(Ok, status);
+    expect(InterpolationModeBilinear, mode);
+
+    status = GdipSetInterpolationMode(graphics, InterpolationModeNearestNeighbor);
+    expect(Ok, status);
+
+    status = GdipGetInterpolationMode(graphics, &mode);
+    expect(Ok, status);
+    expect(InterpolationModeNearestNeighbor, mode);
+
+    status = GdipSetInterpolationMode(graphics, InterpolationModeDefault);
+    expect(Ok, status);
+
+    status = GdipGetInterpolationMode(graphics, &mode);
+    expect(Ok, status);
+    expect(InterpolationModeBilinear, mode);
+
+    status = GdipSetInterpolationMode(graphics, InterpolationModeLowQuality);
+    expect(Ok, status);
+
+    status = GdipGetInterpolationMode(graphics, &mode);
+    expect(Ok, status);
+    expect(InterpolationModeBilinear, mode);
+
+    status = GdipSetInterpolationMode(graphics, InterpolationModeHighQuality);
+    expect(Ok, status);
+
+    status = GdipGetInterpolationMode(graphics, &mode);
+    expect(Ok, status);
+    expect(InterpolationModeHighQualityBicubic, mode);
+
+    GdipDeleteGraphics(graphics);
+
+    ReleaseDC(hwnd, hdc);
+}
+
+static void test_get_set_textrenderinghint(void)
+{
+    GpGraphics *graphics;
+    HDC hdc = GetDC( hwnd );
+    GpStatus status;
+    TextRenderingHint hint;
+
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    status = GdipGetTextRenderingHint(NULL, &hint);
+    expect(InvalidParameter, status);
+
+    status = GdipGetTextRenderingHint(graphics, NULL);
+    expect(InvalidParameter, status);
+
+    status = GdipSetTextRenderingHint(NULL, TextRenderingHintAntiAlias);
+    expect(InvalidParameter, status);
+
+    /* out of range */
+    status = GdipSetTextRenderingHint(graphics, TextRenderingHintClearTypeGridFit+1);
+    expect(InvalidParameter, status);
+
+    status = GdipGetTextRenderingHint(graphics, &hint);
+    expect(Ok, status);
+    expect(TextRenderingHintSystemDefault, hint);
+
+    status = GdipSetTextRenderingHint(graphics, TextRenderingHintSystemDefault);
+    expect(Ok, status);
+
+    status = GdipGetTextRenderingHint(graphics, &hint);
+    expect(Ok, status);
+    expect(TextRenderingHintSystemDefault, hint);
+
+    status = GdipSetTextRenderingHint(graphics, TextRenderingHintAntiAliasGridFit);
+    expect(Ok, status);
+
+    status = GdipGetTextRenderingHint(graphics, &hint);
+    expect(Ok, status);
+    expect(TextRenderingHintAntiAliasGridFit, hint);
+
+    GdipDeleteGraphics(graphics);
+
+    ReleaseDC(hwnd, hdc);
+}
+
+static void test_getdc_scaled(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpBitmap *bitmap = NULL;
+    HDC hdc=NULL;
+    HBRUSH hbrush, holdbrush;
+    ARGB color;
+
+    status = GdipCreateBitmapFromScan0(10, 10, 12, PixelFormat24bppRGB, NULL, &bitmap);
+    expect(Ok, status);
+
+    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, status);
+
+    status = GdipScaleWorldTransform(graphics, 2.0, 2.0, MatrixOrderPrepend);
+    expect(Ok, status);
+
+    status = GdipGetDC(graphics, &hdc);
+    expect(Ok, status);
+    ok(hdc != NULL, "got NULL hdc\n");
+
+    hbrush = CreateSolidBrush(RGB(255, 0, 0));
+
+    holdbrush = SelectObject(hdc, hbrush);
+
+    Rectangle(hdc, 2, 2, 6, 6);
+
+    SelectObject(hdc, holdbrush);
+
+    DeleteObject(hbrush);
+
+    status = GdipReleaseDC(graphics, hdc);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+
+    status = GdipBitmapGetPixel(bitmap, 3, 3, &color);
+    expect(Ok, status);
+    expect(0xffff0000, color);
+
+    status = GdipBitmapGetPixel(bitmap, 8, 8, &color);
+    expect(Ok, status);
+    expect(0xff000000, color);
+
+    GdipDisposeImage((GpImage*)bitmap);
 }
 
 START_TEST(graphics)
@@ -3070,6 +3362,9 @@ START_TEST(graphics)
     test_textcontrast();
     test_fromMemoryBitmap();
     test_string_functions();
+    test_get_set_interpolation();
+    test_get_set_textrenderinghint();
+    test_getdc_scaled();
 
     GdiplusShutdown(gdiplusToken);
     DestroyWindow( hwnd );

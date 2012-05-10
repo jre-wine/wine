@@ -77,41 +77,72 @@ static const type_t *find_ps_factory( const statement_list_t *stmts )
     return NULL;
 }
 
-static int write_interface( const type_t *iface, const type_t *ps_factory )
+static void write_interface( const type_t *iface, const type_t *ps_factory )
 {
     const UUID *uuid = get_attrp( iface->attrs, ATTR_UUID );
-    const UUID *ps_uuid = ps_factory ? get_attrp( ps_factory->attrs, ATTR_UUID ) : NULL;
+    const UUID *ps_uuid = get_attrp( ps_factory->attrs, ATTR_UUID );
 
-    if (!uuid) return 0;
-    if (!is_object( iface )) return 0;
+    if (!uuid) return;
+    if (!is_object( iface )) return;
     if (!type_iface_get_inherit(iface)) /* special case for IUnknown */
     {
-        put_str( indent, "ForceRemove '%s' = s '%s'\n", format_uuid( uuid ), iface->name );
-        return 0;
+        put_str( indent, "'%s' = s '%s'\n", format_uuid( uuid ), iface->name );
+        return;
     }
-    if (is_local( iface->attrs )) return 0;
-    put_str( indent, "ForceRemove '%s' = s '%s'\n", format_uuid( uuid ), iface->name );
+    if (is_local( iface->attrs )) return;
+    put_str( indent, "'%s' = s '%s'\n", format_uuid( uuid ), iface->name );
     put_str( indent, "{\n" );
     indent++;
     put_str( indent, "NumMethods = s %u\n", count_methods( iface ));
-    put_str( indent, "ProxyStubClsid32 = s '%s'\n",
-             ps_uuid ? format_uuid( ps_uuid ) : "%CLSID_PSFactoryBuffer%" );
+    put_str( indent, "ProxyStubClsid32 = s '%s'\n", format_uuid( ps_uuid ));
     indent--;
     put_str( indent, "}\n" );
-    return 1;
 }
 
-static int write_interfaces( const statement_list_t *stmts, const type_t *ps_factory )
+static void write_interfaces( const statement_list_t *stmts, const type_t *ps_factory )
 {
     const statement_t *stmt;
-    int count = 0;
 
     if (stmts) LIST_FOR_EACH_ENTRY( stmt, stmts, const statement_t, entry )
     {
         if (stmt->type == STMT_TYPE && type_get_type( stmt->u.type ) == TYPE_INTERFACE)
-            count += write_interface( stmt->u.type, ps_factory );
+            write_interface( stmt->u.type, ps_factory );
     }
-    return count;
+}
+
+static void write_typelib_interface( const type_t *iface, const typelib_t *typelib )
+{
+    const UUID *typelib_uuid = get_attrp( typelib->attrs, ATTR_UUID );
+    const UUID *uuid = get_attrp( iface->attrs, ATTR_UUID );
+    unsigned int version = get_attrv( typelib->attrs, ATTR_VERSION );
+
+    if (!uuid) return;
+    if (!is_object( iface )) return;
+    if (!is_attr( iface->attrs, ATTR_OLEAUTOMATION ) && !is_attr( iface->attrs, ATTR_DISPINTERFACE ))
+        return;
+    put_str( indent, "'%s' = s '%s'\n", format_uuid( uuid ), iface->name );
+    put_str( indent, "{\n" );
+    indent++;
+    put_str( indent, "ProxyStubClsid = s '{00020424-0000-0000-C000-000000000046}'\n" );
+    put_str( indent, "ProxyStubClsid32 = s '{00020424-0000-0000-C000-000000000046}'\n" );
+    if (version)
+        put_str( indent, "TypeLib = s '%s' { val Version = s '%u.%u' }\n",
+                 format_uuid( typelib_uuid ), MAJORVERSION(version), MINORVERSION(version) );
+    else
+        put_str( indent, "TypeLib = s '%s'", format_uuid( typelib_uuid ));
+    indent--;
+    put_str( indent, "}\n" );
+}
+
+static void write_typelib_interfaces( const typelib_t *typelib )
+{
+    const statement_t *stmt;
+
+    if (typelib->stmts) LIST_FOR_EACH_ENTRY( stmt, typelib->stmts, const statement_t, entry )
+    {
+        if (stmt->type == STMT_TYPE && type_get_type( stmt->u.type ) == TYPE_INTERFACE)
+            write_typelib_interface( stmt->u.type, typelib );
+    }
 }
 
 static int write_coclass( const type_t *class, const typelib_t *typelib )
@@ -124,10 +155,10 @@ static int write_coclass( const type_t *class, const typelib_t *typelib )
     unsigned int version = get_attrv( class->attrs, ATTR_VERSION );
 
     if (!uuid) return 0;
-    if (typelib && !threading) return 0;
+    if (typelib && !threading && !progid) return 0;
     if (!descr) descr = class->name;
 
-    put_str( indent, "ForceRemove '%s' = s '%s'\n", format_uuid( uuid ), descr );
+    put_str( indent, "'%s' = s '%s'\n", format_uuid( uuid ), descr );
     put_str( indent++, "{\n" );
     if (threading) put_str( indent, "InprocServer32 = s '%%MODULE%%' { val ThreadingModel = s '%s' }\n",
                             threading );
@@ -154,11 +185,6 @@ static void write_coclasses( const statement_list_t *stmts, const typelib_t *typ
         {
             const type_t *type = stmt->u.type;
             if (type_get_type(type) == TYPE_COCLASS) write_coclass( type, typelib );
-        }
-        else if (stmt->type == STMT_LIBRARY)
-        {
-            const typelib_t *lib = stmt->u.lib;
-            write_coclasses( lib->stmts, lib );
         }
     }
 }
@@ -202,27 +228,11 @@ static void write_progids( const statement_list_t *stmts )
             const type_t *type = stmt->u.type;
             if (type_get_type(type) == TYPE_COCLASS) write_progid( type );
         }
-        else if (stmt->type == STMT_LIBRARY)
-        {
-            write_progids( stmt->u.lib->stmts );
-        }
     }
-}
-
-/* put a string into the resource file */
-static inline void put_string( const char *str )
-{
-    while (*str)
-    {
-        unsigned char ch = *str++;
-        put_word( toupper(ch) );
-    }
-    put_word( 0 );
 }
 
 void write_regscript( const statement_list_t *stmts )
 {
-    int count;
     const type_t *ps_factory;
 
     if (!do_regscript) return;
@@ -236,18 +246,11 @@ void write_regscript( const statement_list_t *stmts )
     put_str( indent, "NoRemove Interface\n" );
     put_str( indent++, "{\n" );
     ps_factory = find_ps_factory( stmts );
-    count = write_interfaces( stmts, ps_factory );
+    if (ps_factory) write_interfaces( stmts, ps_factory );
     put_str( --indent, "}\n" );
 
     put_str( indent, "NoRemove CLSID\n" );
     put_str( indent++, "{\n" );
-    if (count && !ps_factory)
-    {
-        put_str( indent, "ForceRemove '%%CLSID_PSFactoryBuffer%%' = s 'PSFactoryBuffer'\n" );
-        put_str( indent++, "{\n" );
-        put_str( indent, "InprocServer32 = s '%%MODULE%%' { val ThreadingModel = s 'Both' }\n" );
-        put_str( --indent, "}\n" );
-    }
     write_coclasses( stmts, NULL );
     put_str( --indent, "}\n" );
 
@@ -256,41 +259,8 @@ void write_regscript( const statement_list_t *stmts )
 
     if (strendswith( regscript_name, ".res" ))  /* create a binary resource file */
     {
-        unsigned char *data = output_buffer;
-        size_t data_size = output_buffer_pos;
-        size_t header_size = 5 * sizeof(unsigned int) + 2 * sizeof(unsigned short);
-
-        header_size += (strlen(regscript_token) + strlen("WINE_REGISTRY") + 2) * sizeof(unsigned short);
-
-        init_output_buffer();
-
-        put_dword( 0 );      /* ResSize */
-        put_dword( 32 );     /* HeaderSize */
-        put_word( 0xffff );  /* ResType */
-        put_word( 0x0000 );
-        put_word( 0xffff );  /* ResName */
-        put_word( 0x0000 );
-        put_dword( 0 );      /* DataVersion */
-        put_word( 0 );       /* Memory options */
-        put_word( 0 );       /* Language */
-        put_dword( 0 );      /* Version */
-        put_dword( 0 );      /* Characteristics */
-
-        put_dword( data_size );               /* ResSize */
-        put_dword( (header_size + 3) & ~3 );  /* HeaderSize */
-        put_string( "WINE_REGISTRY" );        /* ResType */
-        put_string( regscript_token );        /* ResName */
-        align_output( 4 );
-        put_dword( 0 );      /* DataVersion */
-        put_word( 0 );       /* Memory options */
-        put_word( 0 );       /* Language */
-        put_dword( 0 );      /* Version */
-        put_dword( 0 );      /* Characteristics */
-
-        put_data( data, data_size );
-        free( data );
-        align_output( 4 );
-        flush_output_buffer( regscript_name );
+        add_output_to_resources( "WINE_REGISTRY", regscript_token );
+        flush_output_resources( regscript_name );
     }
     else
     {
@@ -301,4 +271,49 @@ void write_regscript( const statement_list_t *stmts )
         if (fclose( f ))
             error( "Failed to write to %s\n", regscript_name );
     }
+}
+
+void output_typelib_regscript( const typelib_t *typelib )
+{
+    const UUID *typelib_uuid = get_attrp( typelib->attrs, ATTR_UUID );
+    const char *descr = get_attrp( typelib->attrs, ATTR_HELPSTRING );
+    const expr_t *lcid_expr = get_attrp( typelib->attrs, ATTR_LIBLCID );
+    unsigned int version = get_attrv( typelib->attrs, ATTR_VERSION );
+    unsigned int flags = 0;
+
+    if (is_attr( typelib->attrs, ATTR_RESTRICTED )) flags |= 1; /* LIBFLAG_FRESTRICTED */
+    if (is_attr( typelib->attrs, ATTR_CONTROL )) flags |= 2; /* LIBFLAG_FCONTROL */
+    if (is_attr( typelib->attrs, ATTR_HIDDEN )) flags |= 4; /* LIBFLAG_FHIDDEN */
+
+    put_str( indent, "HKCR\n" );
+    put_str( indent++, "{\n" );
+
+    put_str( indent, "NoRemove Typelib\n" );
+    put_str( indent++, "{\n" );
+    put_str( indent, "NoRemove '%s'\n", format_uuid( typelib_uuid ));
+    put_str( indent++, "{\n" );
+    put_str( indent, "'%u.%u' = s '%s'\n",
+             MAJORVERSION(version), MINORVERSION(version), descr ? descr : typelib->name );
+    put_str( indent++, "{\n" );
+    put_str( indent, "'%x' { %s = s '%%MODULE%%' }\n",
+             lcid_expr ? lcid_expr->cval : 0, typelib_kind == SYS_WIN64 ? "win64" : "win32" );
+    put_str( indent, "FLAGS = s '%u'\n", flags );
+    put_str( --indent, "}\n" );
+    put_str( --indent, "}\n" );
+    put_str( --indent, "}\n" );
+
+    put_str( indent, "NoRemove Interface\n" );
+    put_str( indent++, "{\n" );
+    write_typelib_interfaces( typelib );
+    put_str( --indent, "}\n" );
+
+    put_str( indent, "NoRemove CLSID\n" );
+    put_str( indent++, "{\n" );
+    write_coclasses( typelib->stmts, typelib );
+    put_str( --indent, "}\n" );
+
+    write_progids( typelib->stmts );
+    put_str( --indent, "}\n" );
+
+    add_output_to_resources( "WINE_REGISTRY", typelib_name );
 }

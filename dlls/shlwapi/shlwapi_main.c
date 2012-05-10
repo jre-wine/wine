@@ -30,8 +30,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
-HINSTANCE shlwapi_hInstance = 0;
-DWORD SHLWAPI_ThreadRef_index = TLS_OUT_OF_INDEXES;
+DECLSPEC_HIDDEN HINSTANCE shlwapi_hInstance = 0;
+DECLSPEC_HIDDEN DWORD SHLWAPI_ThreadRef_index = TLS_OUT_OF_INDEXES;
 
 /*************************************************************************
  * SHLWAPI {SHLWAPI}
@@ -51,7 +51,7 @@ DWORD SHLWAPI_ThreadRef_index = TLS_OUT_OF_INDEXES;
  * SHLWAPI DllMain
  *
  * NOTES
- *  calling oleinitialize here breaks sone apps.
+ *  calling oleinitialize here breaks some apps.
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
 {

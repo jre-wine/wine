@@ -42,7 +42,6 @@
 #include "ole2.h"
 #include "shlguid.h"
 
-#include "enumidlist.h"
 #include "pidl.h"
 #include "undocshell.h"
 #include "shell32_main.h"
@@ -287,7 +286,7 @@ static const WCHAR Desktop_NameSpaceW[] = { 'S','O','F','T','W','A','R','E',
  'o','r','e','r','\\','D','e','s','k','t','o','p','\\','N','a','m','e','s','p',
  'a','c','e','\0' };
 
-static BOOL CreateDesktopEnumList(IEnumIDList *list, DWORD dwFlags)
+static BOOL CreateDesktopEnumList(IEnumIDListImpl *list, DWORD dwFlags)
 {
     BOOL ret = TRUE;
     WCHAR szPath[MAX_PATH];
@@ -346,17 +345,19 @@ static HRESULT WINAPI ISF_Desktop_fnEnumObjects (IShellFolder2 * iface,
                 HWND hwndOwner, DWORD dwFlags, LPENUMIDLIST * ppEnumIDList)
 {
     IDesktopFolderImpl *This = impl_from_IShellFolder2(iface);
+    IEnumIDListImpl *list;
 
     TRACE ("(%p)->(HWND=%p flags=0x%08x pplist=%p)\n",
            This, hwndOwner, dwFlags, ppEnumIDList);
 
-    *ppEnumIDList = IEnumIDList_Constructor();
-    if (*ppEnumIDList)
-        CreateDesktopEnumList(*ppEnumIDList, dwFlags);
+    if (!(list = IEnumIDList_Constructor()))
+        return E_OUTOFMEMORY;
+    CreateDesktopEnumList(list, dwFlags);
+    *ppEnumIDList = &list->IEnumIDList_iface;
 
     TRACE ("-- (%p)->(new ID List: %p)\n", This, *ppEnumIDList);
 
-    return *ppEnumIDList ? S_OK : E_OUTOFMEMORY;
+    return S_OK;
 }
 
 /**************************************************************************
@@ -529,10 +530,9 @@ static HRESULT WINAPI ISF_Desktop_fnGetUIObjectOf (IShellFolder2 * iface,
     if (IsEqualIID (riid, &IID_IContextMenu))
     {
         if (cidl > 0)
-            pObj = (LPUNKNOWN) ISvItemCm_Constructor( (IShellFolder *) iface, This->pidlRoot, apidl, cidl);
+            return ItemMenu_Constructor((IShellFolder*)iface, This->pidlRoot, apidl, cidl, riid, ppvOut);
         else
-            pObj = (LPUNKNOWN) ISvBgCm_Constructor( (IShellFolder *) iface, TRUE);
-        hr = S_OK;
+            return BackgroundMenu_Constructor((IShellFolder*)iface, TRUE, riid, ppvOut);
     }
     else if (IsEqualIID (riid, &IID_IDataObject) && (cidl >= 1))
     {

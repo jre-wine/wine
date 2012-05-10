@@ -85,6 +85,20 @@ typedef struct
   ULONG Stats[1];
 } RPC_STATS_VECTOR;
 
+typedef struct _RPC_PROTSEQ_VECTORA
+{
+  unsigned int Count;
+  unsigned char *Protseq[1];
+} RPC_PROTSEQ_VECTORA;
+
+typedef struct _RPC_PROTSEQ_VECTORW
+{
+  unsigned int Count;
+  unsigned short *Protseq[1];
+} RPC_PROTSEQ_VECTORW;
+
+DECL_WINELIB_TYPE_AW(RPC_PROTSEQ_VECTOR)
+
 typedef I_RPC_HANDLE *RPC_EP_INQ_HANDLE;
 
 #define RPC_C_EP_ALL_ELTS 0
@@ -546,6 +560,18 @@ RPCRTAPI RPC_STATUS RPC_ENTRY
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcNetworkIsProtseqValidW( RPC_WSTR protseq );
 #define RpcNetworkIsProtseqValid WINELIB_NAME_AW(RpcNetworkIsProtseqValid)
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcNetworkInqProtseqsA( RPC_PROTSEQ_VECTORA** protseqs );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcNetworkInqProtseqsW( RPC_PROTSEQ_VECTORW** protseqs );
+#define RpcNetworkInqProtseqs WINELIB_NAME_AW(RpcNetworkInqProtseqs)
+
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcProtseqVectorFreeA( RPC_PROTSEQ_VECTORA** protseqs );
+RPCRTAPI RPC_STATUS RPC_ENTRY
+  RpcProtseqVectorFreeW( RPC_PROTSEQ_VECTORW** protseqs );
+#define RpcProtseqVectorFree WINELIB_NAME_AW(RpcProtseqVectorFree)
 
 RPCRTAPI RPC_STATUS RPC_ENTRY
   RpcRevertToSelf( void );

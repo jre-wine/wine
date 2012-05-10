@@ -24,6 +24,7 @@
 #define __WINE_RPCNDR_H
 
 #include <basetsd.h>
+#include <rpcsal.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,19 +40,19 @@ extern "C" {
 /* stupid #if can't handle casts... this __stupidity
    is just a workaround for that limitation */
 
-#define __NDR_CHAR_REP_MASK  0x000fL
-#define __NDR_INT_REP_MASK   0x00f0L
-#define __NDR_FLOAT_REP_MASK 0xff00L
+#define __NDR_CHAR_REP_MASK  0x000f
+#define __NDR_INT_REP_MASK   0x00f0
+#define __NDR_FLOAT_REP_MASK 0xff00
 
-#define __NDR_IEEE_FLOAT     0x0000L
-#define __NDR_VAX_FLOAT      0x0100L
-#define __NDR_IBM_FLOAT      0x0300L
+#define __NDR_IEEE_FLOAT     0x0000
+#define __NDR_VAX_FLOAT      0x0100
+#define __NDR_IBM_FLOAT      0x0300
 
-#define __NDR_ASCII_CHAR     0x0000L
-#define __NDR_EBCDIC_CHAR    0x0001L
+#define __NDR_ASCII_CHAR     0x0000
+#define __NDR_EBCDIC_CHAR    0x0001
 
-#define __NDR_LITTLE_ENDIAN  0x0010L
-#define __NDR_BIG_ENDIAN     0x0000L
+#define __NDR_LITTLE_ENDIAN  0x0010
+#define __NDR_BIG_ENDIAN     0x0000
 
 /* Mac's are special */
 #if defined(__RPC_MAC__)
@@ -413,11 +414,17 @@ typedef struct _MIDL_STUBLESS_PROXY_INFO
   PMIDL_SYNTAX_INFO pSyntaxInfo;
 } MIDL_STUBLESS_PROXY_INFO, *PMIDL_STUBLESS_PROXY_INFO;
 
+
+#if defined(__i386__) && !defined(__MSC_VER) && !defined(__MINGW32__) && !defined(__CYGWIN__)
+/* Calling convention for returning structures/unions is different between Windows and gcc on i386 */
+typedef LONG_PTR CLIENT_CALL_RETURN;
+#else
 typedef union _CLIENT_CALL_RETURN
 {
   void *Pointer;
   LONG_PTR Simple;
 } CLIENT_CALL_RETURN;
+#endif
 
 typedef enum {
   STUB_UNMARSHAL,
@@ -644,15 +651,13 @@ RPCRTAPI void RPC_ENTRY
 RPCRTAPI unsigned char* RPC_ENTRY
   NdrUserMarshalSimpleTypeConvert( ULONG *pFlags, unsigned char *pBuffer, unsigned char FormatChar );
 
-/* Note: this should return a CLIENT_CALL_RETURN, but calling convention for
- * returning structures/unions is different between Windows and gcc on i386. */
-LONG_PTR RPC_VAR_ENTRY
+CLIENT_CALL_RETURN RPC_VAR_ENTRY
   NdrClientCall2( PMIDL_STUB_DESC pStubDescriptor, PFORMAT_STRING pFormat, ... );
-LONG_PTR RPC_VAR_ENTRY
+CLIENT_CALL_RETURN RPC_VAR_ENTRY
   NdrClientCall( PMIDL_STUB_DESC pStubDescriptor, PFORMAT_STRING pFormat, ... );
-LONG_PTR RPC_VAR_ENTRY
+CLIENT_CALL_RETURN RPC_VAR_ENTRY
   NdrAsyncClientCall( PMIDL_STUB_DESC pStubDescriptor, PFORMAT_STRING pFormat, ... );
-LONG_PTR RPC_VAR_ENTRY
+CLIENT_CALL_RETURN RPC_VAR_ENTRY
   NdrDcomAsyncClientCall( PMIDL_STUB_DESC pStubDescriptor, PFORMAT_STRING pFormat, ... );
 
 RPCRTAPI void RPC_ENTRY

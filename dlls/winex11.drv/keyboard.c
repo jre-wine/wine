@@ -456,7 +456,7 @@ static const char main_key_BG_phonetic[MAIN_LEN][4] =
 };
 
 /*** Belarusian standard keyboard layout (contributed by Hleb Valoska) */
-/*** It matches belarusian layout for XKB from Alexander Mikhailian    */
+/*** It matches Belarusian layout for XKB from Alexander Mikhailian    */
 static const char main_key_BY[MAIN_LEN][4] =
 {
  "`~£³","1!","2@","3#","4$","5%","6^","7&","8*","9(","0)","-_","=+",
@@ -1006,8 +1006,8 @@ static const WORD nonchar_key_vkey[256] =
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFD8 */
     /* modifier keys */
     0, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL,                       /* FFE0 */
-    VK_RCONTROL, VK_CAPITAL, 0, VK_MENU,
-    VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, 0, 0, 0,     /* FFE8 */
+    VK_RCONTROL, VK_CAPITAL, 0, VK_LMENU,
+    VK_RMENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, 0, 0, 0,    /* FFE8 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFF0 */
     0, 0, 0, 0, 0, 0, 0, VK_DELETE                              /* FFF8 */
 };
@@ -1144,7 +1144,7 @@ static void X11DRV_send_keyboard_input( HWND hwnd, WORD vkey, WORD scan, DWORD f
 {
     INPUT input;
 
-    TRACE_(key)( "vkey=%04x scan=%04x flags=%04x\n", vkey, scan, flags );
+    TRACE_(key)( "hwnd %p vkey=%04x scan=%04x flags=%04x\n", hwnd, vkey, scan, flags );
 
     input.type             = INPUT_KEYBOARD;
     input.u.ki.wVk         = vkey;
@@ -1176,6 +1176,31 @@ static BOOL get_async_key_state( BYTE state[256] )
 }
 
 /***********************************************************************
+ *           set_async_key_state
+ */
+static void set_async_key_state( const BYTE state[256] )
+{
+    SERVER_START_REQ( set_key_state )
+    {
+        req->tid = GetCurrentThreadId();
+        req->async = 1;
+        wine_server_add_data( req, state, 256 );
+        wine_server_call( req );
+    }
+    SERVER_END_REQ;
+}
+
+static void update_key_state( BYTE *keystate, BYTE key, int down )
+{
+    if (down)
+    {
+        if (!(keystate[key] & 0x80)) keystate[key] ^= 0x01;
+        keystate[key] |= 0x80;
+    }
+    else keystate[key] &= ~0x80;
+}
+
+/***********************************************************************
  *           X11DRV_KeymapNotify
  *
  * Update modifiers state (Ctrl, Alt, Shift) when window is activated.
@@ -1187,10 +1212,17 @@ static BOOL get_async_key_state( BYTE state[256] )
 void X11DRV_KeymapNotify( HWND hwnd, XEvent *event )
 {
     int i, j;
-    DWORD time = GetCurrentTime();
     BYTE keystate[256];
+    WORD vkey;
+    BOOL changed = FALSE;
+    struct {
+        WORD vkey;
+        BOOL pressed;
+    } modifiers[6]; /* VK_LSHIFT through VK_RMENU are contiguous */
 
     if (!get_async_key_state( keystate )) return;
+
+    memset(modifiers, 0, sizeof(modifiers));
 
     /* the minimum keycode is always greater or equal to 8, so we can
      * skip the first 8 values, hence start at 1
@@ -1199,7 +1231,9 @@ void X11DRV_KeymapNotify( HWND hwnd, XEvent *event )
     {
         for (j = 0; j < 8; j++)
         {
-            WORD vkey = keyc2vkey[(i * 8) + j];
+            int m;
+
+            vkey = keyc2vkey[(i * 8) + j];
 
             switch(vkey & 0xff)
             {
@@ -1209,22 +1243,34 @@ void X11DRV_KeymapNotify( HWND hwnd, XEvent *event )
             case VK_RCONTROL:
             case VK_LSHIFT:
             case VK_RSHIFT:
-                if (!(keystate[vkey & 0xff] & 0x80) != !(event->xkeymap.key_vector[i] & (1<<j)))
-                {
-                    WORD scan = keyc2scan[(i * 8) + j];
-                    DWORD flags = vkey & 0x100 ? KEYEVENTF_EXTENDEDKEY : 0;
-                    if (!(event->xkeymap.key_vector[i] & (1<<j))) flags |= KEYEVENTF_KEYUP;
-
-                    TRACE( "Adjusting state for vkey %#.2x. State before %#.2x\n",
-                           vkey, keystate[vkey & 0xff]);
-
-                    /* Fake key being pressed inside wine */
-                    X11DRV_send_keyboard_input( hwnd, vkey & 0xff, scan & 0xff, flags, time );
-                }
+                m = (vkey & 0xff) - VK_LSHIFT;
+                /* Take the vkey from the first keycode we encounter for this modifier */
+                if (!modifiers[m].vkey) modifiers[m].vkey = vkey;
+                if (event->xkeymap.key_vector[i] & (1<<j)) modifiers[m].pressed = TRUE;
                 break;
             }
         }
     }
+
+    for (vkey = VK_LSHIFT; vkey <= VK_RMENU; vkey++)
+    {
+        int m = vkey - VK_LSHIFT;
+        if (modifiers[m].vkey && !(keystate[vkey] & 0x80) != !modifiers[m].pressed)
+        {
+            TRACE( "Adjusting state for vkey %#.2x. State before %#.2x\n",
+                   modifiers[m].vkey, keystate[vkey]);
+
+            update_key_state( keystate, vkey, modifiers[m].pressed );
+            changed = TRUE;
+        }
+    }
+
+    if (!changed) return;
+
+    update_key_state( keystate, VK_CONTROL, (keystate[VK_LCONTROL] | keystate[VK_RCONTROL]) & 0x80 );
+    update_key_state( keystate, VK_MENU, (keystate[VK_LMENU] | keystate[VK_RMENU]) & 0x80 );
+    update_key_state( keystate, VK_SHIFT, (keystate[VK_LSHIFT] | keystate[VK_RSHIFT]) & 0x80 );
+    set_async_key_state( keystate );
 }
 
 static void update_lock_state( HWND hwnd, WORD vkey, UINT state, DWORD time )
@@ -1295,13 +1341,13 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     if (xic && event->type == KeyPress)
     {
         ascii_chars = XmbLookupString(xic, event, buf, sizeof(buf), &keysym, &status);
-        TRACE("XmbLookupString needs %i byte(s)\n", ascii_chars);
+        TRACE_(key)("XmbLookupString needs %i byte(s)\n", ascii_chars);
         if (status == XBufferOverflow)
         {
             Str = HeapAlloc(GetProcessHeap(), 0, ascii_chars);
             if (Str == NULL)
             {
-                ERR("Failed to allocate memory!\n");
+                ERR_(key)("Failed to allocate memory!\n");
                 wine_tsx11_unlock();
                 return;
             }
@@ -2131,7 +2177,7 @@ UINT CDECL X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 		case MAPVK_VK_TO_CHAR: /* vkey-code to unshifted ANSI code */
 		{
                         /* we still don't know what "unshifted" means. in windows VK_W (0x57)
-                         * returns 0x57, which is upercase 'W'. So we have to return the uppercase
+                         * returns 0x57, which is uppercase 'W'. So we have to return the uppercase
                          * key.. Looks like something is wrong with the MS docs?
                          * This is only true for letters, for example VK_0 returns '0' not ')'.
                          * - hence we use the lock mask to ensure this happens.
@@ -2218,6 +2264,7 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
          case VK_RSHIFT:
                           /* R-Shift is "special" - it is an extended key with separate scan code */
                           scanCode |= 0x100;
+                          /* fall through */
          case VK_LSHIFT:
                           vkey = VK_SHIFT;
                           break;
@@ -2244,7 +2291,7 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
        (scanCode != 0x4a ) &&   /* numpad - */
        (scanCode != 0x4e ) )    /* numpad + */
       {
-        if ((nSize >= 2) && lpBuffer)
+        if (nSize >= 2)
 	{
           *lpBuffer = toupperW((WCHAR)ansi);
           *(lpBuffer+1) = 0;
@@ -2271,22 +2318,43 @@ INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
          break;
   if (keyi <= max_keycode)
   {
+      INT rc;
+
       wine_tsx11_lock();
       keyc = (KeyCode) keyi;
       keys = keycode_to_keysym(display, keyc, 0);
       name = XKeysymToString(keys);
       wine_tsx11_unlock();
-      TRACE("found scan=%04x keyc=%u keysym=%04x string=%s\n",
-            scanCode, keyc, (int)keys, name);
-      if (lpBuffer && nSize && name)
-          return MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpBuffer, nSize);
+
+      if (name && (vkey == VK_SHIFT || vkey == VK_CONTROL || vkey == VK_MENU))
+      {
+          char* idx = strrchr(name, '_');
+          if (idx && (strcasecmp(idx, "_r") == 0 || strcasecmp(idx, "_l") == 0))
+          {
+              TRACE("found scan=%04x keyc=%u keysym=%lx modified_string=%s\n",
+                    scanCode, keyc, keys, debugstr_an(name,idx-name));
+              rc = MultiByteToWideChar(CP_UNIXCP, 0, name, idx-name+1, lpBuffer, nSize);
+              if (!rc) rc = nSize;
+              lpBuffer[--rc] = 0;
+              return rc;
+          }
+      }
+
+      if (name)
+      {
+          TRACE("found scan=%04x keyc=%u keysym=%04x vkey=%04x string=%s\n",
+                scanCode, keyc, (int)keys, vkey, debugstr_a(name));
+          rc = MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpBuffer, nSize);
+          if (!rc) rc = nSize;
+          lpBuffer[--rc] = 0;
+          return rc;
+      }
   }
 
   /* Finally issue WARN for unknown keys   */
 
   WARN("(%08x,%p,%d): unsupported key, vkey=%04X, ansi=%04x\n",lParam,lpBuffer,nSize,vkey,ansi);
-  if (lpBuffer && nSize)
-    *lpBuffer = 0;
+  *lpBuffer = 0;
   return 0;
 }
 
@@ -2402,16 +2470,16 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 
     if (scanCode & 0x8000)
     {
-        TRACE("Key UP, doing nothing\n" );
+        TRACE_(key)("Key UP, doing nothing\n" );
         return 0;
     }
 
     if (!match_x11_keyboard_layout(hkl))
-        FIXME("keyboard layout %p is not supported\n", hkl);
+        FIXME_(key)("keyboard layout %p is not supported\n", hkl);
 
     if ((lpKeyState[VK_MENU] & 0x80) && (lpKeyState[VK_CONTROL] & 0x80))
     {
-        TRACE("Ctrl+Alt+[key] won't generate a character\n");
+        TRACE_(key)("Ctrl+Alt+[key] won't generate a character\n");
         return 0;
     }
 
@@ -2432,27 +2500,27 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 
     if (lpKeyState[VK_SHIFT] & 0x80)
     {
-	TRACE("ShiftMask = %04x\n", ShiftMask);
+	TRACE_(key)("ShiftMask = %04x\n", ShiftMask);
 	e.state |= ShiftMask;
     }
     if (lpKeyState[VK_CAPITAL] & 0x01)
     {
-	TRACE("LockMask = %04x\n", LockMask);
+	TRACE_(key)("LockMask = %04x\n", LockMask);
 	e.state |= LockMask;
     }
     if (lpKeyState[VK_CONTROL] & 0x80)
     {
-	TRACE("ControlMask = %04x\n", ControlMask);
+	TRACE_(key)("ControlMask = %04x\n", ControlMask);
 	e.state |= ControlMask;
     }
     if (lpKeyState[VK_NUMLOCK] & 0x01)
     {
-	TRACE("NumLockMask = %04x\n", NumLockMask);
+	TRACE_(key)("NumLockMask = %04x\n", NumLockMask);
 	e.state |= NumLockMask;
     }
 
     /* Restore saved AltGr state */
-    TRACE("AltGrMask = %04x\n", AltGrMask);
+    TRACE_(key)("AltGrMask = %04x\n", AltGrMask);
     e.state |= AltGrMask;
 
     TRACE_(key)("(%04X, %04X) : faked state = 0x%04x\n",
@@ -2485,11 +2553,11 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 
     if (!e.keycode && virtKey != VK_NONAME)
       {
-	WARN("Unknown virtual key %X !!!\n", virtKey);
+	WARN_(key)("Unknown virtual key %X !!!\n", virtKey);
         wine_tsx11_unlock();
 	return 0;
       }
-    else TRACE("Found keycode %u\n",e.keycode);
+    else TRACE_(key)("Found keycode %u\n",e.keycode);
 
     TRACE_(key)("type %d, window %lx, state 0x%04x, keycode %u\n",
 		e.type, e.window, e.state, e.keycode);
@@ -2500,13 +2568,13 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
     if (xic)
     {
         ret = XmbLookupString(xic, &e, buf, sizeof(buf), &keysym, &status);
-        TRACE("XmbLookupString needs %d byte(s)\n", ret);
+        TRACE_(key)("XmbLookupString needs %d byte(s)\n", ret);
         if (status == XBufferOverflow)
         {
             lpChar = HeapAlloc(GetProcessHeap(), 0, ret);
             if (lpChar == NULL)
             {
-                ERR("Failed to allocate memory!\n");
+                ERR_(key)("Failed to allocate memory!\n");
                 wine_tsx11_unlock();
                 return 0;
             }
@@ -2586,9 +2654,9 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 		ksname = "No Name";
 	    if ((keysym >> 8) != 0xff)
 		{
-		WARN("no char for keysym %04lx (%s) :\n",
+		WARN_(key)("no char for keysym %04lx (%s) :\n",
                     keysym, ksname);
-		WARN("virtKey=%X, scanCode=%X, keycode=%u, state=%X\n",
+		WARN_(key)("virtKey=%X, scanCode=%X, keycode=%u, state=%X\n",
                     virtKey, scanCode, e.keycode, e.state);
 		}
 	    }
@@ -2655,6 +2723,12 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 found:
     if (buf != lpChar)
         HeapFree(GetProcessHeap(), 0, lpChar);
+
+    /* Null-terminate the buffer, if there's room.  MSDN clearly states that the
+       caller must not assume this is done, but some programs (e.g. Audiosurf) do. */
+    if (1 <= ret && ret < bufW_size)
+        bufW[ret] = 0;
+
     TRACE_(key)("returning %d with %s\n", ret, debugstr_wn(bufW, ret));
     return ret;
 }

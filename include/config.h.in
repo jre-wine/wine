@@ -12,9 +12,6 @@
 /* Define to 1 if you have the <alias.h> header file. */
 #undef HAVE_ALIAS_H
 
-/* Define if you have ALSA 1.x including devel headers */
-#undef HAVE_ALSA
-
 /* Define to 1 if you have the <alsa/asoundlib.h> header file. */
 #undef HAVE_ALSA_ASOUNDLIB_H
 
@@ -46,12 +43,6 @@
 /* Define to 1 if you have the <AudioUnit/AudioUnit.h> header file. */
 #undef HAVE_AUDIOUNIT_AUDIOUNIT_H
 
-/* Define to 1 if you have the <audio/audiolib.h> header file. */
-#undef HAVE_AUDIO_AUDIOLIB_H
-
-/* Define to 1 if you have the <audio/soundlib.h> header file. */
-#undef HAVE_AUDIO_SOUNDLIB_H
-
 /* Define to 1 if you have the `AUGraphAddNode' function. */
 #undef HAVE_AUGRAPHADDNODE
 
@@ -79,9 +70,6 @@
 /* Define if you have the daylight variable */
 #undef HAVE_DAYLIGHT
 
-/* Define to 1 if you have the <dbus/dbus.h> header file. */
-#undef HAVE_DBUS_DBUS_H
-
 /* Define to 1 if you have the <direct.h> header file. */
 #undef HAVE_DIRECT_H
 
@@ -106,9 +94,6 @@
 
 /* Define to 1 if you have the `epoll_create' function. */
 #undef HAVE_EPOLL_CREATE
-
-/* Define if you have EsounD sound server */
-#undef HAVE_ESD
 
 /* Define to 1 if you have the `ffs' function. */
 #undef HAVE_FFS
@@ -164,9 +149,6 @@
 /* Define to 1 if you have the <freetype/ftwinfnt.h> header file. */
 #undef HAVE_FREETYPE_FTWINFNT_H
 
-/* Define to 1 if you have the <freetype/internal/sfnt.h> header file. */
-#undef HAVE_FREETYPE_INTERNAL_SFNT_H
-
 /* Define to 1 if you have the <freetype/ttnameid.h> header file. */
 #undef HAVE_FREETYPE_TTNAMEID_H
 
@@ -190,9 +172,6 @@
 
 /* Define to 1 if you have the `ftruncate' function. */
 #undef HAVE_FTRUNCATE
-
-/* Define to 1 if you have the `FT_Load_Sfnt_Table' function. */
-#undef HAVE_FT_LOAD_SFNT_TABLE
 
 /* Define to 1 if the system has the type `FT_TrueTypeEngineType'. */
 #undef HAVE_FT_TRUETYPEENGINETYPE
@@ -269,9 +248,6 @@
 /* Define to 1 if you have the <gsm.h> header file. */
 #undef HAVE_GSM_H
 
-/* Define to 1 if you have the <hal/libhal.h> header file. */
-#undef HAVE_HAL_LIBHAL_H
-
 /* Define to 1 if you have the <ieeefp.h> header file. */
 #undef HAVE_IEEEFP_H
 
@@ -310,9 +286,6 @@
 
 /* Define to 1 if you have the `isnan' function. */
 #undef HAVE_ISNAN
-
-/* Define to 1 if you have the <jack/jack.h> header file. */
-#undef HAVE_JACK_JACK_H
 
 /* Define to 1 if you have the <jpeglib.h> header file. */
 #undef HAVE_JPEGLIB_H
@@ -398,9 +371,6 @@
 /* Define to 1 if you have the <libxslt/transform.h> header file. */
 #undef HAVE_LIBXSLT_TRANSFORM_H
 
-/* Define if you have the X Shm extension */
-#undef HAVE_LIBXXSHM
-
 /* Define to 1 if you have the <link.h> header file. */
 #undef HAVE_LINK_H
 
@@ -452,6 +422,9 @@
 /* Define to 1 if you have the <linux/ucdrom.h> header file. */
 #undef HAVE_LINUX_UCDROM_H
 
+/* Define to 1 if you have the <linux/videodev2.h> header file. */
+#undef HAVE_LINUX_VIDEODEV2_H
+
 /* Define to 1 if you have the <linux/videodev.h> header file. */
 #undef HAVE_LINUX_VIDEODEV_H
 
@@ -466,9 +439,6 @@
 
 /* Define to 1 if you have the <machine/limits.h> header file. */
 #undef HAVE_MACHINE_LIMITS_H
-
-/* Define to 1 if you have the <machine/soundcard.h> header file. */
-#undef HAVE_MACHINE_SOUNDCARD_H
 
 /* Define to 1 if you have the <machine/sysarch.h> header file. */
 #undef HAVE_MACHINE_SYSARCH_H
@@ -508,9 +478,6 @@
 
 /* Define to 1 if you have the <mpg123.h> header file. */
 #undef HAVE_MPG123_H
-
-/* Define if you have NAS including devel headers */
-#undef HAVE_NAS
 
 /* Define to 1 if you have the <ncurses.h> header file. */
 #undef HAVE_NCURSES_H
@@ -608,6 +575,9 @@
 /* Define to 1 if you have the <openssl/ssl.h> header file. */
 #undef HAVE_OPENSSL_SSL_H
 
+/* Define to 1 if `numaudioengines' is a member of `oss_sysinfo'. */
+#undef HAVE_OSS_SYSINFO_NUMAUDIOENGINES
+
 /* Define to 1 if you have the `pclose' function. */
 #undef HAVE_PCLOSE
 
@@ -683,9 +653,6 @@
 /* Define to 1 if you have the `readlink' function. */
 #undef HAVE_READLINK
 
-/* Define to 1 if you have the <regex.h> header file. */
-#undef HAVE_REGEX_H
-
 /* Define to 1 if the system has the type `request_sense'. */
 #undef HAVE_REQUEST_SENSE
 
@@ -715,6 +682,9 @@
 
 /* Define to 1 if you have the <scsi/sg.h> header file. */
 #undef HAVE_SCSI_SG_H
+
+/* Define to 1 if you have the <Security/Security.h> header file. */
+#undef HAVE_SECURITY_SECURITY_H
 
 /* Define to 1 if you have the `select' function. */
 #undef HAVE_SELECT
@@ -758,14 +728,14 @@
 /* Define to 1 if you have the `socketpair' function. */
 #undef HAVE_SOCKETPAIR
 
-/* Define to 1 if you have the <soundcard.h> header file. */
-#undef HAVE_SOUNDCARD_H
-
 /* Define to 1 if you have the `spawnvp' function. */
 #undef HAVE_SPAWNVP
 
 /* Define to 1 if the system has the type `ssize_t'. */
 #undef HAVE_SSIZE_T
+
+/* Define to 1 if you have the `SSLCopyPeerCertificates' function. */
+#undef HAVE_SSLCOPYPEERCERTIFICATES
 
 /* Define to 1 if you have the `statfs' function. */
 #undef HAVE_STATFS
@@ -902,9 +872,6 @@
 /* Define to 1 if you have the <sys/epoll.h> header file. */
 #undef HAVE_SYS_EPOLL_H
 
-/* Define to 1 if you have the <sys/errno.h> header file. */
-#undef HAVE_SYS_ERRNO_H
-
 /* Define to 1 if you have the <sys/event.h> header file. */
 #undef HAVE_SYS_EVENT_H
 
@@ -979,9 +946,6 @@
 
 /* Define to 1 if you have the <sys/sockio.h> header file. */
 #undef HAVE_SYS_SOCKIO_H
-
-/* Define to 1 if you have the <sys/soundcard.h> header file. */
-#undef HAVE_SYS_SOUNDCARD_H
 
 /* Define to 1 if you have the <sys/statfs.h> header file. */
 #undef HAVE_SYS_STATFS_H
@@ -1100,6 +1064,9 @@
 /* Define to 1 if you have the <X11/extensions/Xinerama.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XINERAMA_H
 
+/* Define to 1 if you have the <X11/extensions/XInput2.h> header file. */
+#undef HAVE_X11_EXTENSIONS_XINPUT2_H
+
 /* Define to 1 if you have the <X11/extensions/XInput.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XINPUT_H
 
@@ -1108,9 +1075,6 @@
 
 /* Define to 1 if you have the <X11/extensions/Xrender.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XRENDER_H
-
-/* Define to 1 if you have the <X11/extensions/XShm.h> header file. */
-#undef HAVE_X11_EXTENSIONS_XSHM_H
 
 /* Define to 1 if you have the <X11/Xcursor/Xcursor.h> header file. */
 #undef HAVE_X11_XCURSOR_XCURSOR_H
@@ -1123,6 +1087,9 @@
 
 /* Define to 1 if you have the <X11/Xutil.h> header file. */
 #undef HAVE_X11_XUTIL_H
+
+/* Define to 1 if `xcookie' is a member of `XEvent'. */
+#undef HAVE_XEVENT_XCOOKIE
 
 /* Define to 1 if `callback' is a member of `XICCallback'. */
 #undef HAVE_XICCALLBACK_CALLBACK
@@ -1148,6 +1115,9 @@
 /* Define if libxml2 has the xmlSchemaSetValidStructuredErrors function */
 #undef HAVE_XMLSCHEMASSETVALIDSTRUCTUREDERRORS
 
+/* Define if Xrender has the XRenderCreateLinearGradient function */
+#undef HAVE_XRENDERCREATELINEARGRADIENT
+
 /* Define if Xrender has the XRenderSetPictureTransform function */
 #undef HAVE_XRENDERSETPICTURETRANSFORM
 
@@ -1156,6 +1126,12 @@
 
 /* Define to 1 if you have the <zlib.h> header file. */
 #undef HAVE_ZLIB_H
+
+/* Define to 1 if you have the `_finite' function. */
+#undef HAVE__FINITE
+
+/* Define to 1 if you have the `_isnan' function. */
+#undef HAVE__ISNAN
 
 /* Define to 1 if you have the `_pclose' function. */
 #undef HAVE__PCLOSE
@@ -1217,6 +1193,9 @@
 /* Define to the soname of the libcurses library. */
 #undef SONAME_LIBCURSES
 
+/* Define to the soname of the libdbus-1 library. */
+#undef SONAME_LIBDBUS_1
+
 /* Define to the soname of the libfontconfig library. */
 #undef SONAME_LIBFONTCONFIG
 
@@ -1237,9 +1216,6 @@
 
 /* Define to the soname of the libhal library. */
 #undef SONAME_LIBHAL
-
-/* Define to the soname of the libjack library. */
-#undef SONAME_LIBJACK
 
 /* Define to the soname of the libjpeg library. */
 #undef SONAME_LIBJPEG
@@ -1335,9 +1311,6 @@
 /* Define to a macro to generate an assembly function with stdcall calling
    convention */
 #undef __ASM_STDCALL_FUNC
-
-/* Define to empty if `const' does not conform to ANSI C. */
-#undef const
 
 /* Define to `__inline__' or `__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */

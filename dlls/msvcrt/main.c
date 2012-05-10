@@ -64,14 +64,22 @@ static inline BOOL msvcrt_free_tls(void)
 static inline void msvcrt_free_tls_mem(void)
 {
   thread_data_t *tls = TlsGetValue(msvcrt_tls_index);
+
   if (tls)
   {
+    CloseHandle(tls->handle);
     HeapFree(GetProcessHeap(),0,tls->efcvt_buffer);
     HeapFree(GetProcessHeap(),0,tls->asctime_buffer);
     HeapFree(GetProcessHeap(),0,tls->wasctime_buffer);
     HeapFree(GetProcessHeap(),0,tls->strerror_buffer);
     HeapFree(GetProcessHeap(),0,tls->wcserror_buffer);
-    MSVCRT__free_locale(tls->locale);
+    HeapFree(GetProcessHeap(),0,tls->time_buffer);
+    HeapFree(GetProcessHeap(),0,tls->tmpnam_buffer);
+    HeapFree(GetProcessHeap(),0,tls->wtmpnam_buffer);
+    if(tls->have_locale) {
+        free_locinfo(tls->locinfo);
+        free_mbcinfo(tls->mbcinfo);
+    }
   }
   HeapFree(GetProcessHeap(), 0, tls);
 }
@@ -92,7 +100,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     if (!msvcrt_init_tls())
       return FALSE;
     msvcrt_init_mt_locks();
-    if(!MSVCRT_setlocale(0, "C")) {
+    if(!msvcrt_init_locale()) {
         msvcrt_free_mt_locks();
         msvcrt_free_tls_mem();
         return FALSE;
@@ -102,7 +110,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     msvcrt_init_console();
     msvcrt_init_args();
     msvcrt_init_signals();
-    _setmbcp(_MB_CP_LOCALE);
     /* don't allow unloading msvcrt, we can't setup file handles twice */
     LdrAddRefDll( 0, hinstDLL );
     TRACE("finished process init\n");
@@ -110,8 +117,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
   case DLL_THREAD_ATTACH:
     break;
   case DLL_PROCESS_DETACH:
-    msvcrt_free_mt_locks();
     msvcrt_free_io();
+    msvcrt_free_mt_locks();
     msvcrt_free_console();
     msvcrt_free_args();
     msvcrt_free_signals();

@@ -19,7 +19,6 @@
 /* For IID_IDirectDraw3 - it is not in dxguid.dll */
 #define INITGUID
 
-#include <assert.h>
 #include "wine/test.h"
 #include "windef.h"
 #include "winbase.h"
@@ -422,8 +421,17 @@ START_TEST(surface)
 
     hr = pDllGetClassObject(&CLSID_DirectDrawFactory, &IID_IClassFactory, (void **) &classfactory);
     ok(hr == S_OK, "Failed to create a IClassFactory\n");
+    if (FAILED(hr)) {
+        skip("Failed to get DirectDrawFactory\n");
+        return;
+    }
     hr = IClassFactory_CreateInstance(classfactory, NULL, &IID_IDirectDrawFactory, (void **) &factory);
     ok(hr == S_OK, "Failed to create a IDirectDrawFactory\n");
+    if (FAILED(hr)) {
+        IClassFactory_Release(classfactory);
+        skip("Failed to get a DirectDrawFactory\n");
+        return;
+    }
 
     GetDCTest();
     CapsTest();
@@ -431,12 +439,8 @@ START_TEST(surface)
     test_surface_from_dc3();
     test_surface_from_dc4();
 
-    if(factory) {
-        ref = IDirectDrawFactory_Release(factory);
-        ok(ref == 0, "IDirectDrawFactory not cleanly released\n");
-    }
-    if(classfactory) {
-        ref = IClassFactory_Release(classfactory);
-        todo_wine ok(ref == 1, "IClassFactory refcount wrong, ref = %u\n", ref);
-    }
+    ref = IDirectDrawFactory_Release(factory);
+    ok(ref == 0, "IDirectDrawFactory not cleanly released\n");
+    ref = IClassFactory_Release(classfactory);
+    todo_wine ok(ref == 1, "IClassFactory refcount wrong, ref = %u\n", ref);
 }

@@ -39,7 +39,6 @@ struct dxgi_main
     HMODULE d3d10core;
     struct dxgi_device_layer *device_layers;
     UINT layer_count;
-    LONG refcount;
 };
 static struct dxgi_main dxgi_main;
 
@@ -55,6 +54,7 @@ static void dxgi_main_cleanup(void)
     dxgi_main.d3d10core = NULL;
 
     LeaveCriticalSection(&dxgi_cs);
+    DeleteCriticalSection(&dxgi_cs);
 }
 
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
@@ -65,11 +65,10 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
     {
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls(hInstDLL);
-            ++dxgi_main.refcount;
             break;
 
         case DLL_PROCESS_DETACH:
-            if (!--dxgi_main.refcount) dxgi_main_cleanup();
+            dxgi_main_cleanup();
             break;
     }
 
@@ -146,7 +145,7 @@ static HRESULT register_d3d10core_layers(HMODULE d3d10core)
             return E_FAIL;
         }
 
-        d3d10core_register_layers = (HRESULT (WINAPI *)(void))GetProcAddress(mod, "D3D10CoreRegisterLayers");
+        d3d10core_register_layers = (void *)GetProcAddress(mod, "D3D10CoreRegisterLayers");
         hr = d3d10core_register_layers();
         if (FAILED(hr))
         {

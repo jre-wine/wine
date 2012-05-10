@@ -2,7 +2,7 @@
  *    IXMLHTTPRequest implementation
  *
  * Copyright 2008 Alistair Leslie-Hughes
- * Copyright 2010 Nikolay Sivov for CodeWeavers
+ * Copyright 2010-2012 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,10 +33,16 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
+#include "wininet.h"
+#include "winreg.h"
 #include "winuser.h"
 #include "ole2.h"
+#include "mshtml.h"
 #include "msxml6.h"
 #include "objsafe.h"
+#include "docobj.h"
+#include "shlwapi.h"
 
 #include "msxml_private.h"
 
@@ -47,16 +53,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 #ifdef HAVE_LIBXML2
 
-static const WCHAR MethodGetW[] = {'G','E','T',0};
-static const WCHAR MethodPutW[] = {'P','U','T',0};
-static const WCHAR MethodPostW[] = {'P','O','S','T',0};
-
 static const WCHAR colspaceW[] = {':',' ',0};
 static const WCHAR crlfW[] = {'\r','\n',0};
 
 typedef struct BindStatusCallback BindStatusCallback;
 
-struct reqheader
+struct httpheader
 {
     struct list entry;
     BSTR header;
@@ -75,11 +77,19 @@ typedef struct
 
     /* request */
     BINDVERB verb;
+    BSTR custom;
+    BSTR siteurl;
     BSTR url;
     BOOL async;
     struct list reqheaders;
     /* cached resulting custom request headers string length in WCHARs */
     LONG reqheader_size;
+    /* use UTF-8 content type */
+    BOOL use_utf8_content;
+
+    /* response headers */
+    struct list respheaders;
+    BSTR raw_respheaders;
 
     /* credentials */
     BSTR user;
@@ -88,6 +98,7 @@ typedef struct
     /* bind callback */
     BindStatusCallback *bsc;
     LONG status;
+    BSTR status_text;
 
     /* IObjectWithSite*/
     IUnknown *site;
@@ -126,10 +137,27 @@ static void httprequest_setreadystate(httprequest *This, READYSTATE state)
     }
 }
 
+static void free_response_headers(httprequest *This)
+{
+    struct httpheader *header, *header2;
+
+    LIST_FOR_EACH_ENTRY_SAFE(header, header2, &This->respheaders, struct httpheader, entry)
+    {
+        list_remove(&header->entry);
+        SysFreeString(header->header);
+        SysFreeString(header->value);
+        heap_free(header);
+    }
+
+    SysFreeString(This->raw_respheaders);
+    This->raw_respheaders = NULL;
+}
+
 struct BindStatusCallback
 {
     IBindStatusCallback IBindStatusCallback_iface;
     IHttpNegotiate      IHttpNegotiate_iface;
+    IAuthenticate       IAuthenticate_iface;
     LONG ref;
 
     IBinding *binding;
@@ -152,7 +180,12 @@ static inline BindStatusCallback *impl_from_IHttpNegotiate( IHttpNegotiate *ifac
     return CONTAINING_RECORD(iface, BindStatusCallback, IHttpNegotiate_iface);
 }
 
-void BindStatusCallback_Detach(BindStatusCallback *bsc)
+static inline BindStatusCallback *impl_from_IAuthenticate( IAuthenticate *iface )
+{
+    return CONTAINING_RECORD(iface, BindStatusCallback, IAuthenticate_iface);
+}
+
+static void BindStatusCallback_Detach(BindStatusCallback *bsc)
 {
     if (bsc)
     {
@@ -179,6 +212,10 @@ static HRESULT WINAPI BindStatusCallback_QueryInterface(IBindStatusCallback *ifa
     else if (IsEqualGUID(&IID_IHttpNegotiate, riid))
     {
         *ppv = &This->IHttpNegotiate_iface;
+    }
+    else if (IsEqualGUID(&IID_IAuthenticate, riid))
+    {
+        *ppv = &This->IAuthenticate_iface;
     }
     else if (IsEqualGUID(&IID_IServiceProvider, riid) ||
              IsEqualGUID(&IID_IBindStatusCallbackEx, riid) ||
@@ -312,6 +349,11 @@ static HRESULT WINAPI BindStatusCallback_GetBindInfo(IBindStatusCallback *iface,
     }
 
     pbindinfo->dwBindVerb = This->request->verb;
+    if (This->request->verb == BINDVERB_CUSTOM)
+    {
+        pbindinfo->szCustomVerb = CoTaskMemAlloc(SysStringByteLen(This->request->custom));
+        strcpyW(pbindinfo->szCustomVerb, This->request->custom);
+    }
 
     return S_OK;
 }
@@ -385,21 +427,38 @@ static ULONG WINAPI BSCHttpNegotiate_Release(IHttpNegotiate *iface)
 static HRESULT WINAPI BSCHttpNegotiate_BeginningTransaction(IHttpNegotiate *iface,
         LPCWSTR url, LPCWSTR headers, DWORD reserved, LPWSTR *add_headers)
 {
+    static const WCHAR content_type_utf8W[] = {'C','o','n','t','e','n','t','-','T','y','p','e',':',' ',
+        't','e','x','t','/','p','l','a','i','n',';','c','h','a','r','s','e','t','=','u','t','f','-','8','\r','\n',0};
+
     BindStatusCallback *This = impl_from_IHttpNegotiate(iface);
-    const struct reqheader *entry;
+    const struct httpheader *entry;
     WCHAR *buff, *ptr;
+    int size = 0;
 
     TRACE("(%p)->(%s %s %d %p)\n", This, debugstr_w(url), debugstr_w(headers), reserved, add_headers);
 
     *add_headers = NULL;
 
-    if (list_empty(&This->request->reqheaders)) return S_OK;
+    if (This->request->use_utf8_content)
+        size = sizeof(content_type_utf8W);
 
-    buff = CoTaskMemAlloc(This->request->reqheader_size*sizeof(WCHAR));
+    if (!list_empty(&This->request->reqheaders))
+        size += This->request->reqheader_size*sizeof(WCHAR);
+
+    if (!size) return S_OK;
+
+    buff = CoTaskMemAlloc(size);
     if (!buff) return E_OUTOFMEMORY;
 
     ptr = buff;
-    LIST_FOR_EACH_ENTRY(entry, &This->request->reqheaders, struct reqheader, entry)
+    if (This->request->use_utf8_content)
+    {
+        lstrcpyW(ptr, content_type_utf8W);
+        ptr += sizeof(content_type_utf8W)/sizeof(WCHAR)-1;
+    }
+
+    /* user headers */
+    LIST_FOR_EACH_ENTRY(entry, &This->request->reqheaders, struct httpheader, entry)
     {
         lstrcpyW(ptr, entry->header);
         ptr += SysStringLen(entry->header);
@@ -419,6 +478,37 @@ static HRESULT WINAPI BSCHttpNegotiate_BeginningTransaction(IHttpNegotiate *ifac
     return S_OK;
 }
 
+static void add_response_header(httprequest *This, const WCHAR *data, int len)
+{
+    struct httpheader *entry;
+    const WCHAR *ptr = data;
+    BSTR header, value;
+
+    while (*ptr)
+    {
+        if (*ptr == ':')
+        {
+            header = SysAllocStringLen(data, ptr-data);
+            /* skip leading spaces for a value */
+            while (*++ptr == ' ')
+                ;
+            value = SysAllocStringLen(ptr, len-(ptr-data));
+            break;
+        }
+        ptr++;
+    }
+
+    if (!*ptr) return;
+
+    /* new header */
+    TRACE("got header %s:%s\n", debugstr_w(header), debugstr_w(value));
+
+    entry = heap_alloc(sizeof(*entry));
+    entry->header = header;
+    entry->value  = value;
+    list_add_head(&This->respheaders, &entry->entry);
+}
+
 static HRESULT WINAPI BSCHttpNegotiate_OnResponse(IHttpNegotiate *iface, DWORD code,
         LPCWSTR resp_headers, LPCWSTR req_headers, LPWSTR *add_reqheaders)
 {
@@ -428,6 +518,42 @@ static HRESULT WINAPI BSCHttpNegotiate_OnResponse(IHttpNegotiate *iface, DWORD c
           debugstr_w(req_headers), add_reqheaders);
 
     This->request->status = code;
+    /* store headers and status text */
+    free_response_headers(This->request);
+    SysFreeString(This->request->status_text);
+    This->request->status_text = NULL;
+    if (resp_headers)
+    {
+        const WCHAR *ptr, *line;
+
+        ptr = line = resp_headers;
+
+        /* skip status line */
+        while (*ptr)
+        {
+            if (*ptr == '\r' && *(ptr+1) == '\n')
+            {
+                const WCHAR *end = ptr-1;
+                line = ptr + 2;
+                /* scan back to get status phrase */
+                while (ptr > resp_headers)
+                {
+                     if (*ptr == ' ')
+                     {
+                         This->request->status_text = SysAllocStringLen(ptr+1, end-ptr);
+                         TRACE("status text %s\n", debugstr_w(This->request->status_text));
+                         break;
+                     }
+                     ptr--;
+                }
+                break;
+            }
+            ptr++;
+        }
+
+        /* store as unparsed string for now */
+        This->request->raw_respheaders = SysAllocString(line);
+    }
 
     return S_OK;
 }
@@ -440,11 +566,46 @@ static const IHttpNegotiateVtbl BSCHttpNegotiateVtbl = {
     BSCHttpNegotiate_OnResponse
 };
 
+static HRESULT WINAPI Authenticate_QueryInterface(IAuthenticate *iface,
+        REFIID riid, void **ppv)
+{
+    BindStatusCallback *This = impl_from_IAuthenticate(iface);
+    return IBindStatusCallback_QueryInterface(&This->IBindStatusCallback_iface, riid, ppv);
+}
+
+static ULONG WINAPI Authenticate_AddRef(IAuthenticate *iface)
+{
+    BindStatusCallback *This = impl_from_IAuthenticate(iface);
+    return IBindStatusCallback_AddRef(&This->IBindStatusCallback_iface);
+}
+
+static ULONG WINAPI Authenticate_Release(IAuthenticate *iface)
+{
+    BindStatusCallback *This = impl_from_IAuthenticate(iface);
+    return IBindStatusCallback_Release(&This->IBindStatusCallback_iface);
+}
+
+static HRESULT WINAPI Authenticate_Authenticate(IAuthenticate *iface,
+    HWND *hwnd, LPWSTR *username, LPWSTR *password)
+{
+    BindStatusCallback *This = impl_from_IAuthenticate(iface);
+    FIXME("(%p)->(%p %p %p)\n", This, hwnd, username, password);
+    return E_NOTIMPL;
+}
+
+static const IAuthenticateVtbl AuthenticateVtbl = {
+    Authenticate_QueryInterface,
+    Authenticate_AddRef,
+    Authenticate_Release,
+    Authenticate_Authenticate
+};
+
 static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback **obj, const VARIANT *body)
 {
     BindStatusCallback *bsc;
     IBindCtx *pbc;
     HRESULT hr;
+    int size;
 
     hr = CreateBindCtx(0, &pbc);
     if (hr != S_OK) return hr;
@@ -458,34 +619,93 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
 
     bsc->IBindStatusCallback_iface.lpVtbl = &BindStatusCallbackVtbl;
     bsc->IHttpNegotiate_iface.lpVtbl = &BSCHttpNegotiateVtbl;
+    bsc->IAuthenticate_iface.lpVtbl = &AuthenticateVtbl;
     bsc->ref = 1;
     bsc->request = This;
     bsc->binding = NULL;
     bsc->stream = NULL;
     bsc->body = NULL;
 
-    TRACE("created callback %p\n", bsc);
+    TRACE("(%p)->(%p)\n", This, bsc);
+
+    This->use_utf8_content = FALSE;
 
     if (This->verb != BINDVERB_GET)
     {
-        if (V_VT(body) == VT_BSTR)
-        {
-            LONG size = SysStringLen(V_BSTR(body)) * sizeof(WCHAR);
-            void *ptr;
+        void *send_data, *ptr;
+        SAFEARRAY *sa = NULL;
 
-            bsc->body = GlobalAlloc(GMEM_FIXED, size);
-            if (!bsc->body)
+        if (V_VT(body) == (VT_VARIANT|VT_BYREF))
+            body = V_VARIANTREF(body);
+
+        switch (V_VT(body))
+        {
+        case VT_BSTR:
+        {
+            int len = SysStringLen(V_BSTR(body));
+            const WCHAR *str = V_BSTR(body);
+            UINT i, cp = CP_ACP;
+
+            for (i = 0; i < len; i++)
+            {
+                if (str[i] > 127)
+                {
+                    cp = CP_UTF8;
+                    break;
+                }
+            }
+
+            size = WideCharToMultiByte(cp, 0, str, len, NULL, 0, NULL, NULL);
+            if (!(ptr = heap_alloc(size)))
             {
                 heap_free(bsc);
                 return E_OUTOFMEMORY;
             }
-
-            ptr = GlobalLock(bsc->body);
-            memcpy(ptr, V_BSTR(body), size);
-            GlobalUnlock(bsc->body);
+            WideCharToMultiByte(cp, 0, str, len, ptr, size, NULL, NULL);
+            if (cp == CP_UTF8) This->use_utf8_content = TRUE;
+            break;
         }
-        else
+        case VT_ARRAY|VT_UI1:
+        {
+            sa = V_ARRAY(body);
+            if ((hr = SafeArrayAccessData(sa, (void **)&ptr)) != S_OK) return hr;
+            if ((hr = SafeArrayGetUBound(sa, 1, &size) != S_OK))
+            {
+                SafeArrayUnaccessData(sa);
+                return hr;
+            }
+            size++;
+            break;
+        }
+        case VT_EMPTY:
+            ptr = NULL;
+            size = 0;
+            break;
+        default:
             FIXME("unsupported body data type %d\n", V_VT(body));
+            break;
+        }
+
+        bsc->body = GlobalAlloc(GMEM_FIXED, size);
+        if (!bsc->body)
+        {
+            if (V_VT(body) == VT_BSTR)
+                heap_free(ptr);
+            else if (V_VT(body) == (VT_ARRAY|VT_UI1))
+                SafeArrayUnaccessData(sa);
+
+            heap_free(bsc);
+            return E_OUTOFMEMORY;
+        }
+
+        send_data = GlobalLock(bsc->body);
+        memcpy(send_data, ptr, size);
+        GlobalUnlock(bsc->body);
+
+        if (V_VT(body) == VT_BSTR)
+            heap_free(ptr);
+        else if (V_VT(body) == (VT_ARRAY|VT_UI1))
+            SafeArrayUnaccessData(sa);
     }
 
     hr = RegisterBindStatusCallback(pbc, &bsc->IBindStatusCallback_iface, NULL, 0);
@@ -563,23 +783,28 @@ static ULONG WINAPI httprequest_Release(IXMLHTTPRequest *iface)
 
     if ( ref == 0 )
     {
-        struct reqheader *header, *header2;
+        struct httpheader *header, *header2;
 
         if (This->site)
             IUnknown_Release( This->site );
 
+        SysFreeString(This->custom);
+        SysFreeString(This->siteurl);
         SysFreeString(This->url);
         SysFreeString(This->user);
         SysFreeString(This->password);
 
         /* request headers */
-        LIST_FOR_EACH_ENTRY_SAFE(header, header2, &This->reqheaders, struct reqheader, entry)
+        LIST_FOR_EACH_ENTRY_SAFE(header, header2, &This->reqheaders, struct httpheader, entry)
         {
             list_remove(&header->entry);
             SysFreeString(header->header);
             SysFreeString(header->value);
             heap_free(header);
         }
+        /* response headers */
+        free_response_headers(This);
+        SysFreeString(This->status_text);
 
         /* detach callback object */
         BindStatusCallback_Detach(This->bsc);
@@ -607,13 +832,10 @@ static HRESULT WINAPI httprequest_GetTypeInfo(IXMLHTTPRequest *iface, UINT iTInf
         LCID lcid, ITypeInfo **ppTInfo)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    HRESULT hr;
 
     TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
 
-    hr = get_typeinfo(IXMLHTTPRequest_tid, ppTInfo);
-
-    return hr;
+    return get_typeinfo(IXMLHTTPRequest_tid, ppTInfo);
 }
 
 static HRESULT WINAPI httprequest_GetIDsOfNames(IXMLHTTPRequest *iface, REFIID riid,
@@ -664,9 +886,14 @@ static HRESULT WINAPI httprequest_Invoke(IXMLHTTPRequest *iface, DISPID dispIdMe
 static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR url,
         VARIANT async, VARIANT user, VARIANT password)
 {
+    static const WCHAR MethodGetW[] = {'G','E','T',0};
+    static const WCHAR MethodPutW[] = {'P','U','T',0};
+    static const WCHAR MethodPostW[] = {'P','O','S','T',0};
+    static const WCHAR MethodDeleteW[] = {'D','E','L','E','T','E',0};
+
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    VARIANT str, is_async;
     HRESULT hr;
-    VARIANT str;
 
     TRACE("(%p)->(%s %s %s)\n", This, debugstr_w(method), debugstr_w(url),
         debugstr_variant(&async));
@@ -679,17 +906,22 @@ static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR
     SysFreeString(This->password);
     This->url = This->user = This->password = NULL;
 
-    if (lstrcmpiW(method, MethodGetW) == 0)
+    if (!strcmpiW(method, MethodGetW))
     {
         This->verb = BINDVERB_GET;
     }
-    else if (lstrcmpiW(method, MethodPutW) == 0)
+    else if (!strcmpiW(method, MethodPutW))
     {
         This->verb = BINDVERB_PUT;
     }
-    else if (lstrcmpiW(method, MethodPostW) == 0)
+    else if (!strcmpiW(method, MethodPostW))
     {
         This->verb = BINDVERB_POST;
+    }
+    else if (!strcmpiW(method, MethodDeleteW))
+    {
+        This->verb = BINDVERB_CUSTOM;
+        SysReAllocString(&This->custom, method);
     }
     else
     {
@@ -698,16 +930,33 @@ static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR
         return E_FAIL;
     }
 
-    This->url = SysAllocString(url);
+    /* try to combine with site url */
+    if (This->siteurl && PathIsRelativeW(url))
+    {
+        DWORD len = INTERNET_MAX_URL_LENGTH;
+        WCHAR *fullW = heap_alloc(len*sizeof(WCHAR));
 
-    hr = VariantChangeType(&async, &async, 0, VT_BOOL);
-    This->async = hr == S_OK && V_BOOL(&async) == VARIANT_TRUE;
+        hr = UrlCombineW(This->siteurl, url, fullW, &len, 0);
+        if (hr == S_OK)
+        {
+            TRACE("combined url %s\n", debugstr_w(fullW));
+            This->url = SysAllocString(fullW);
+        }
+        heap_free(fullW);
+    }
+    else
+        This->url = SysAllocString(url);
+
+    VariantInit(&is_async);
+    hr = VariantChangeType(&is_async, &async, 0, VT_BOOL);
+    This->async = hr == S_OK && V_BOOL(&is_async) == VARIANT_TRUE;
 
     VariantInit(&str);
     hr = VariantChangeType(&str, &user, 0, VT_BSTR);
     if (hr == S_OK)
         This->user = V_BSTR(&str);
 
+    VariantInit(&str);
     hr = VariantChangeType(&str, &password, 0, VT_BSTR);
     if (hr == S_OK)
         This->password = V_BSTR(&str);
@@ -720,7 +969,7 @@ static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR
 static HRESULT WINAPI httprequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR header, BSTR value)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    struct reqheader *entry;
+    struct httpheader *entry;
 
     TRACE("(%p)->(%s %s)\n", This, debugstr_w(header), debugstr_w(value));
 
@@ -729,7 +978,7 @@ static HRESULT WINAPI httprequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR 
     if (!value) return E_INVALIDARG;
 
     /* replace existing header value if already added */
-    LIST_FOR_EACH_ENTRY(entry, &This->reqheaders, struct reqheader, entry)
+    LIST_FOR_EACH_ENTRY(entry, &This->reqheaders, struct httpheader, entry)
     {
         if (lstrcmpW(entry->header, header) == 0)
         {
@@ -761,22 +1010,56 @@ static HRESULT WINAPI httprequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR 
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_getResponseHeader(IXMLHTTPRequest *iface, BSTR bstrHeader, BSTR *pbstrValue)
+static HRESULT WINAPI httprequest_getResponseHeader(IXMLHTTPRequest *iface, BSTR header, BSTR *value)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    struct httpheader *entry;
 
-    FIXME("stub (%p) %s %p\n", This, debugstr_w(bstrHeader), pbstrValue);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(header), value);
 
-    return E_NOTIMPL;
+    if (!header || !value) return E_INVALIDARG;
+
+    if (This->raw_respheaders && list_empty(&This->respheaders))
+    {
+        WCHAR *ptr, *line;
+
+        ptr = line = This->raw_respheaders;
+        while (*ptr)
+        {
+            if (*ptr == '\r' && *(ptr+1) == '\n')
+            {
+                add_response_header(This, line, ptr-line);
+                ptr++; line = ++ptr;
+                continue;
+            }
+            ptr++;
+        }
+    }
+
+    LIST_FOR_EACH_ENTRY(entry, &This->respheaders, struct httpheader, entry)
+    {
+        if (!strcmpiW(entry->header, header))
+        {
+            *value = SysAllocString(entry->value);
+            TRACE("header value %s\n", debugstr_w(*value));
+            return S_OK;
+        }
+    }
+
+    return S_FALSE;
 }
 
-static HRESULT WINAPI httprequest_getAllResponseHeaders(IXMLHTTPRequest *iface, BSTR *pbstrHeaders)
+static HRESULT WINAPI httprequest_getAllResponseHeaders(IXMLHTTPRequest *iface, BSTR *respheaders)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
 
-    FIXME("stub (%p) %p\n", This, pbstrHeaders);
+    TRACE("(%p)->(%p)\n", This, respheaders);
 
-    return E_NOTIMPL;
+    if (!respheaders) return E_INVALIDARG;
+
+    *respheaders = SysAllocString(This->raw_respheaders);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI httprequest_send(IXMLHTTPRequest *iface, VARIANT body)
@@ -826,13 +1109,18 @@ static HRESULT WINAPI httprequest_get_status(IXMLHTTPRequest *iface, LONG *statu
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_get_statusText(IXMLHTTPRequest *iface, BSTR *pbstrStatus)
+static HRESULT WINAPI httprequest_get_statusText(IXMLHTTPRequest *iface, BSTR *status)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
 
-    FIXME("stub %p %p\n", This, pbstrStatus);
+    TRACE("(%p)->(%p)\n", This, status);
 
-    return E_NOTIMPL;
+    if (!status) return E_INVALIDARG;
+    if (This->state != READYSTATE_COMPLETE) return E_FAIL;
+
+    *status = SysAllocString(This->status_text);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI httprequest_get_responseXML(IXMLHTTPRequest *iface, IDispatch **body)
@@ -847,7 +1135,7 @@ static HRESULT WINAPI httprequest_get_responseXML(IXMLHTTPRequest *iface, IDispa
     if (!body) return E_INVALIDARG;
     if (This->state != READYSTATE_COMPLETE) return E_FAIL;
 
-    hr = DOMDocument_create(&CLSID_DOMDocument, NULL, (void**)&doc);
+    hr = DOMDocument_create(MSXML_DEFAULT, NULL, (void**)&doc);
     if (hr != S_OK) return hr;
 
     hr = IXMLHTTPRequest_get_responseText(iface, &str);
@@ -887,12 +1175,12 @@ static HRESULT WINAPI httprequest_get_responseText(IXMLHTTPRequest *iface, BSTR 
         if (size >= 4)
         {
             encoding = xmlDetectCharEncoding(ptr, 4);
-            TRACE("detected encoding: %s\n", xmlGetCharEncodingName(encoding));
+            TRACE("detected encoding: %s\n", debugstr_a(xmlGetCharEncodingName(encoding)));
             if ( encoding != XML_CHAR_ENCODING_UTF8 &&
                  encoding != XML_CHAR_ENCODING_UTF16LE &&
                  encoding != XML_CHAR_ENCODING_NONE )
             {
-                FIXME("unsupported encoding: %s\n", xmlGetCharEncodingName(encoding));
+                FIXME("unsupported encoding: %s\n", debugstr_a(xmlGetCharEncodingName(encoding)));
                 GlobalUnlock(hglobal);
                 return E_FAIL;
             }
@@ -927,7 +1215,9 @@ static HRESULT WINAPI httprequest_get_responseBody(IXMLHTTPRequest *iface, VARIA
     TRACE("(%p)->(%p)\n", This, body);
 
     if (!body) return E_INVALIDARG;
-    if (This->state != READYSTATE_COMPLETE) return E_FAIL;
+    V_VT(body) = VT_EMPTY;
+
+    if (This->state != READYSTATE_COMPLETE) return E_PENDING;
 
     hr = GetHGlobalFromStream(This->bsc->stream, &hglobal);
     if (hr == S_OK)
@@ -969,13 +1259,29 @@ static HRESULT WINAPI httprequest_get_responseBody(IXMLHTTPRequest *iface, VARIA
     return hr;
 }
 
-static HRESULT WINAPI httprequest_get_responseStream(IXMLHTTPRequest *iface, VARIANT *pvarBody)
+static HRESULT WINAPI httprequest_get_responseStream(IXMLHTTPRequest *iface, VARIANT *body)
 {
     httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    LARGE_INTEGER move;
+    IStream *stream;
+    HRESULT hr;
 
-    FIXME("stub %p %p\n", This, pvarBody);
+    TRACE("(%p)->(%p)\n", This, body);
 
-    return E_NOTIMPL;
+    if (!body) return E_INVALIDARG;
+    V_VT(body) = VT_EMPTY;
+
+    if (This->state != READYSTATE_COMPLETE) return E_PENDING;
+
+    hr = IStream_Clone(This->bsc->stream, &stream);
+
+    move.QuadPart = 0;
+    IStream_Seek(stream, move, STREAM_SEEK_SET, NULL);
+
+    V_VT(body) = VT_UNKNOWN;
+    V_UNKNOWN(body) = (IUnknown*)stream;
+
+    return hr;
 }
 
 static HRESULT WINAPI httprequest_get_readyState(IXMLHTTPRequest *iface, LONG *state)
@@ -1002,7 +1308,7 @@ static HRESULT WINAPI httprequest_put_onreadystatechange(IXMLHTTPRequest *iface,
     return S_OK;
 }
 
-static const struct IXMLHTTPRequestVtbl dimimpl_vtbl =
+static const struct IXMLHTTPRequestVtbl XMLHTTPRequestVtbl =
 {
     httprequest_QueryInterface,
     httprequest_AddRef,
@@ -1062,6 +1368,8 @@ static HRESULT WINAPI httprequest_ObjectWithSite_GetSite( IObjectWithSite *iface
 static HRESULT WINAPI httprequest_ObjectWithSite_SetSite( IObjectWithSite *iface, IUnknown *punk )
 {
     httprequest *This = impl_from_IObjectWithSite(iface);
+    IServiceProvider *provider;
+    HRESULT hr;
 
     TRACE("(%p)->(%p)\n", iface, punk);
 
@@ -1073,10 +1381,27 @@ static HRESULT WINAPI httprequest_ObjectWithSite_SetSite( IObjectWithSite *iface
 
     This->site = punk;
 
+    hr = IUnknown_QueryInterface(This->site, &IID_IServiceProvider, (void**)&provider);
+    if (hr == S_OK)
+    {
+        IHTMLDocument2 *doc;
+
+        hr = IServiceProvider_QueryService(provider, &SID_SContainerDispatch, &IID_IHTMLDocument2, (void**)&doc);
+        if (hr == S_OK)
+        {
+            SysFreeString(This->siteurl);
+
+            hr = IHTMLDocument2_get_URL(doc, &This->siteurl);
+            IHTMLDocument2_Release(doc);
+            TRACE("host url %s, 0x%08x\n", debugstr_w(This->siteurl), hr);
+        }
+        IServiceProvider_Release(provider);
+    }
+
     return S_OK;
 }
 
-static const IObjectWithSiteVtbl httprequestObjectSite =
+static const IObjectWithSiteVtbl ObjectWithSiteVtbl =
 {
     httprequest_ObjectWithSite_QueryInterface,
     httprequest_ObjectWithSite_AddRef,
@@ -1130,13 +1455,14 @@ static HRESULT WINAPI httprequest_Safety_SetInterfaceSafetyOptions(IObjectSafety
     if ((mask & ~SAFETY_SUPPORTED_OPTIONS) != 0)
         return E_FAIL;
 
-    This->safeopt = enabled & mask & SAFETY_SUPPORTED_OPTIONS;
+    This->safeopt = (This->safeopt & ~mask) | (mask & enabled);
+
     return S_OK;
 }
 
 #undef SAFETY_SUPPORTED_OPTIONS
 
-static const IObjectSafetyVtbl httprequestObjectSafety = {
+static const IObjectSafetyVtbl ObjectSafetyVtbl = {
     httprequest_Safety_QueryInterface,
     httprequest_Safety_AddRef,
     httprequest_Safety_Release,
@@ -1155,22 +1481,29 @@ HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **ppObj)
     if( !req )
         return E_OUTOFMEMORY;
 
-    req->IXMLHTTPRequest_iface.lpVtbl = &dimimpl_vtbl;
-    req->IObjectWithSite_iface.lpVtbl = &httprequestObjectSite;
-    req->IObjectSafety_iface.lpVtbl = &httprequestObjectSafety;
+    req->IXMLHTTPRequest_iface.lpVtbl = &XMLHTTPRequestVtbl;
+    req->IObjectWithSite_iface.lpVtbl = &ObjectWithSiteVtbl;
+    req->IObjectSafety_iface.lpVtbl = &ObjectSafetyVtbl;
     req->ref = 1;
 
     req->async = FALSE;
     req->verb = -1;
-    req->url = req->user = req->password = NULL;
+    req->custom = NULL;
+    req->url = req->siteurl = req->user = req->password = NULL;
 
     req->state = READYSTATE_UNINITIALIZED;
     req->sink = NULL;
 
     req->bsc = NULL;
     req->status = 0;
+    req->status_text = NULL;
     req->reqheader_size = 0;
+    req->raw_respheaders = NULL;
+    req->use_utf8_content = FALSE;
+
     list_init(&req->reqheaders);
+    list_init(&req->respheaders);
+
     req->site = NULL;
     req->safeopt = 0;
 

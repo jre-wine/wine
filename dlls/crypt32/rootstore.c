@@ -31,6 +31,9 @@
 #endif
 #include <errno.h>
 #include <limits.h>
+#ifdef HAVE_SECURITY_SECURITY_H
+#include <Security/Security.h>
+#endif
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -40,9 +43,6 @@
 #include "winternl.h"
 #include "wine/debug.h"
 #include "crypt32_private.h"
-#ifdef __APPLE__
-#include <Security/Security.h>
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
@@ -486,6 +486,7 @@ static const char * const CRYPT_knownLocations[] = {
  "/etc/ssl/certs",
  "/etc/pki/tls/certs/ca-bundle.crt",
  "/usr/local/share/certs/",
+ "/etc/sfw/openssl/certs",
 };
 
 static const BYTE authenticode[] = {
@@ -746,7 +747,7 @@ static void read_trusted_roots_from_known_locations(HCERTSTORE store)
         DWORD i;
         BOOL ret = FALSE;
 
-#ifdef __APPLE__
+#ifdef HAVE_SECURITY_SECURITY_H
         OSStatus status;
         CFArrayRef rootCerts;
 

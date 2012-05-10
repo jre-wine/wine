@@ -227,7 +227,7 @@ typedef struct tagWTI_DEVICES_INFO
 #define CSR_TYPE_ERASER     0x82a
 #define CSR_TYPE_MOUSE_2D   0x007
 #define CSR_TYPE_MOUSE_4D   0x094
-/* CSR_TYPE_OTHER is a special value! assumed no real world signifigance
+/* CSR_TYPE_OTHER is a special value! assumed no real world significance
  * if a stylus type or eraser type eventually have this value
  * it'll be a bug.  As of 2008 05 21 we can be sure because
  * linux wacom lists all the known values and this isn't one of them */
@@ -293,8 +293,8 @@ static DWORD         gSerial;
  * etc.....
  *
  * So with multimode tablets we could potentially need
- * 2 slots of the same type per tablet ie.
- * you are usuing 2 styluses at once so they would
+ * 2 slots of the same type per tablet i.e.
+ * you are using 2 styluses at once so they would
  * get placed in Cursors #1 and Cursor #4
  *
  * Now say someone has 2 multimode tablets with 2 erasers each
@@ -1024,13 +1024,20 @@ int CDECL X11DRV_AttachEventQueueToTablet(HWND hOwner)
             ProximityOut(the_device, proximity_out_type, event_list[event_number]);
             if (proximity_out_type) event_number++;
 
-            if (key_press_type) X11DRV_register_event_handler( key_press_type, key_event );
-            if (key_release_type) X11DRV_register_event_handler( key_release_type, key_event );
-            if (button_press_type) X11DRV_register_event_handler( button_press_type, button_event );
-            if (button_release_type) X11DRV_register_event_handler( button_release_type, button_event );
-            if (motion_type) X11DRV_register_event_handler( motion_type, motion_event );
-            if (proximity_in_type) X11DRV_register_event_handler( proximity_in_type, proximity_event );
-            if (proximity_out_type) X11DRV_register_event_handler( proximity_out_type, proximity_event );
+            if (key_press_type)
+                X11DRV_register_event_handler( key_press_type, key_event, "XInput KeyPress" );
+            if (key_release_type)
+                X11DRV_register_event_handler( key_release_type, key_event, "XInput KeyRelease" );
+            if (button_press_type)
+                X11DRV_register_event_handler( button_press_type, button_event, "XInput ButtonPress" );
+            if (button_release_type)
+                X11DRV_register_event_handler( button_release_type, button_event, "XInput ButtonRelease" );
+            if (motion_type)
+                X11DRV_register_event_handler( motion_type, motion_event, "XInput MotionNotify" );
+            if (proximity_in_type)
+                X11DRV_register_event_handler( proximity_in_type, proximity_event, "XInput ProximityIn" );
+            if (proximity_out_type)
+                X11DRV_register_event_handler( proximity_out_type, proximity_event, "XInput ProximityOut" );
 
             pXSelectExtensionEvent(data->display, win, event_list, event_number);
         }

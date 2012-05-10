@@ -39,12 +39,14 @@
 #include "winnls.h"
 #include "winternl.h"
 #include "winerror.h"
+#include "psapi.h"
 #include "wine/exception.h"
 #include "wine/debug.h"
 
 #include "kernel_private.h"
 
 WINE_DECLARE_DEBUG_CHANNEL(seh);
+WINE_DECLARE_DEBUG_CHANNEL(file);
 
 static unsigned int page_size;
 
@@ -346,20 +348,17 @@ HANDLE WINAPI CreateFileMappingW( HANDLE hFile, LPSECURITY_ATTRIBUTES sa,
     protect &= ~sec_flags;
     if (!sec_type) sec_type = SEC_COMMIT;
 
+    /* Win9x compatibility */
+    if (!protect && (GetVersion() & 0x80000000)) protect = PAGE_READONLY;
+
     switch(protect)
     {
-    case 0:
-        protect = PAGE_READONLY;  /* Win9x compatibility */
-        /* fall through */
     case PAGE_READONLY:
     case PAGE_WRITECOPY:
         access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE;
         break;
     case PAGE_READWRITE:
         access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_MAP_EXECUTE;
-        break;
-    case PAGE_EXECUTE:
-        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT;
         break;
     case PAGE_EXECUTE_READ:
     case PAGE_EXECUTE_WRITECOPY:
@@ -534,15 +533,21 @@ LPVOID WINAPI MapViewOfFileEx( HANDLE handle, DWORD access,
     NTSTATUS status;
     LARGE_INTEGER offset;
     ULONG protect;
+    BOOL exec;
 
     offset.u.LowPart  = offset_low;
     offset.u.HighPart = offset_high;
 
-    if (access & FILE_MAP_WRITE) protect = PAGE_READWRITE;
-    else if (access & FILE_MAP_COPY) protect = PAGE_WRITECOPY;
-    else protect = PAGE_READONLY;
+    exec = access & FILE_MAP_EXECUTE;
+    access &= ~FILE_MAP_EXECUTE;
 
-    if (access & FILE_MAP_EXECUTE) protect <<= 4;
+    if (access == FILE_MAP_COPY)
+        protect = exec ? PAGE_EXECUTE_WRITECOPY : PAGE_WRITECOPY;
+    else if (access & FILE_MAP_WRITE)
+        protect = exec ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+    else if (access & FILE_MAP_READ)
+        protect = exec ? PAGE_EXECUTE_READ : PAGE_READONLY;
+    else protect = PAGE_NOACCESS;
 
     if ((status = NtMapViewOfSection( handle, GetCurrentProcess(), &addr, 0, 0, &offset,
                                       &count, ViewShare, 0, protect )) < 0)
@@ -648,7 +653,7 @@ BOOL WINAPI IsBadReadPtr( LPCVOID ptr, UINT size )
     __TRY
     {
         volatile const char *p = ptr;
-        char dummy;
+        char dummy __attribute__((unused));
         UINT count = size;
 
         while (count > page_size)
@@ -822,4 +827,77 @@ BOOL WINAPI IsBadStringPtrW( LPCWSTR str, UINT max )
     }
     __ENDTRY
     return FALSE;
+}
+
+/***********************************************************************
+ *           K32GetMappedFileNameA (KERNEL32.@)
+ */
+DWORD WINAPI K32GetMappedFileNameA(HANDLE process, LPVOID lpv, LPSTR file_name, DWORD size)
+{
+    FIXME_(file)("(%p, %p, %p, %d): stub\n", process, lpv, file_name, size);
+
+    if (file_name && size)
+        file_name[0] = '\0';
+
+    return 0;
+}
+
+/***********************************************************************
+ *           K32GetMappedFileNameW (KERNEL32.@)
+ */
+DWORD WINAPI K32GetMappedFileNameW(HANDLE process, LPVOID lpv, LPWSTR file_name, DWORD size)
+{
+    FIXME_(file)("(%p, %p, %p, %d): stub\n", process, lpv, file_name, size);
+
+    if (file_name && size)
+        file_name[0] = '\0';
+
+    return 0;
+}
+
+/***********************************************************************
+ *           K32EnumPageFilesA (KERNEL32.@)
+ */
+BOOL WINAPI K32EnumPageFilesA( PENUM_PAGE_FILE_CALLBACKA callback, LPVOID context )
+{
+    FIXME_(file)("(%p, %p) stub\n", callback, context );
+    return FALSE;
+}
+
+/***********************************************************************
+ *           K32EnumPageFilesW (KERNEL32.@)
+ */
+BOOL WINAPI K32EnumPageFilesW( PENUM_PAGE_FILE_CALLBACKW callback, LPVOID context )
+{
+    FIXME_(file)("(%p, %p) stub\n", callback, context );
+    return FALSE;
+}
+
+/***********************************************************************
+ *           K32GetWsChanges (KERNEL32.@)
+ */
+BOOL WINAPI K32GetWsChanges(HANDLE process, PPSAPI_WS_WATCH_INFORMATION watchinfo, DWORD size)
+{
+    NTSTATUS status;
+
+    TRACE_(seh)("(%p, %p, %d)\n", process, watchinfo, size);
+
+    status = NtQueryInformationProcess( process, ProcessWorkingSetWatch, watchinfo, size, NULL );
+
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/***********************************************************************
+ *           K32InitializeProcessForWsWatch (KERNEL32.@)
+ */
+BOOL WINAPI K32InitializeProcessForWsWatch(HANDLE process)
+{
+    FIXME_(seh)("(process=%p): stub\n", process);
+
+    return TRUE;
 }

@@ -113,7 +113,6 @@ static void dump_cpu_type( const char *prefix, const cpu_type_t *code )
 #define CASE(c) case CPU_##c: fprintf( stderr, "%s%s", prefix, #c ); break
         CASE(x86);
         CASE(x86_64);
-        CASE(ALPHA);
         CASE(POWERPC);
         CASE(SPARC);
         default: fprintf( stderr, "%s%u", prefix, *code ); break;
@@ -528,54 +527,6 @@ static void dump_varargs_context( const char *prefix, data_size_t size )
                          (unsigned int)ctx.fp.x86_64_regs.fpregs[i].high,
                          (unsigned int)(ctx.fp.x86_64_regs.fpregs[i].low >> 32),
                          (unsigned int)ctx.fp.x86_64_regs.fpregs[i].low );
-        }
-        break;
-    case CPU_ALPHA:
-        if (ctx.flags & SERVER_CTX_CONTROL)
-        {
-            dump_uint64( ",fir=", &ctx.ctl.alpha_regs.fir );
-            fprintf( stderr, ",psr=%08x", ctx.ctl.alpha_regs.psr );
-        }
-        if (ctx.flags & SERVER_CTX_INTEGER)
-        {
-            dump_uint64( ",v0=",  &ctx.integer.alpha_regs.v0 );
-            dump_uint64( ",t0=",  &ctx.integer.alpha_regs.t0 );
-            dump_uint64( ",t1=",  &ctx.integer.alpha_regs.t1 );
-            dump_uint64( ",t2=",  &ctx.integer.alpha_regs.t2 );
-            dump_uint64( ",t3=",  &ctx.integer.alpha_regs.t3 );
-            dump_uint64( ",t4=",  &ctx.integer.alpha_regs.t4 );
-            dump_uint64( ",t5=",  &ctx.integer.alpha_regs.t5 );
-            dump_uint64( ",t6=",  &ctx.integer.alpha_regs.t6 );
-            dump_uint64( ",t7=",  &ctx.integer.alpha_regs.t7 );
-            dump_uint64( ",t8=",  &ctx.integer.alpha_regs.t8 );
-            dump_uint64( ",t9=",  &ctx.integer.alpha_regs.t9 );
-            dump_uint64( ",t10=", &ctx.integer.alpha_regs.t10 );
-            dump_uint64( ",t11=", &ctx.integer.alpha_regs.t11 );
-            dump_uint64( ",t12=", &ctx.integer.alpha_regs.t12 );
-            dump_uint64( ",s0=",  &ctx.integer.alpha_regs.s0 );
-            dump_uint64( ",s1=",  &ctx.integer.alpha_regs.s1 );
-            dump_uint64( ",s2=",  &ctx.integer.alpha_regs.s2 );
-            dump_uint64( ",s3=",  &ctx.integer.alpha_regs.s3 );
-            dump_uint64( ",s4=",  &ctx.integer.alpha_regs.s4 );
-            dump_uint64( ",s5=",  &ctx.integer.alpha_regs.s5 );
-            dump_uint64( ",s6=",  &ctx.integer.alpha_regs.s6 );
-            dump_uint64( ",a0=",  &ctx.integer.alpha_regs.a0 );
-            dump_uint64( ",a1=",  &ctx.integer.alpha_regs.a1 );
-            dump_uint64( ",a2=",  &ctx.integer.alpha_regs.a2 );
-            dump_uint64( ",a3=",  &ctx.integer.alpha_regs.a3 );
-            dump_uint64( ",a4=",  &ctx.integer.alpha_regs.a4 );
-            dump_uint64( ",a5=",  &ctx.integer.alpha_regs.a5 );
-            dump_uint64( ",at=",  &ctx.integer.alpha_regs.at );
-        }
-        if (ctx.flags & SERVER_CTX_FLOATING_POINT)
-        {
-            for (i = 0; i < 32; i++)
-            {
-                fprintf( stderr, ",f%u", i );
-                dump_uint64( "=", &ctx.fp.alpha_regs.f[i] );
-            }
-            dump_uint64( ",fpcr=", &ctx.fp.alpha_regs.fpcr );
-            dump_uint64( ",softfpcr=", &ctx.fp.alpha_regs.softfpcr );
         }
         break;
     case CPU_POWERPC:
@@ -1263,7 +1214,7 @@ static void dump_resume_thread_reply( const struct resume_thread_reply *req )
 
 static void dump_load_dll_request( const struct load_dll_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " mapping=%04x", req->mapping );
     dump_uint64( ", base=", &req->base );
     dump_uint64( ", name=", &req->name );
     fprintf( stderr, ", size=%u", req->size );
@@ -2501,6 +2452,11 @@ static void dump_send_hardware_message_request( const struct send_hardware_messa
 static void dump_send_hardware_message_reply( const struct send_hardware_message_reply *req )
 {
     fprintf( stderr, " wait=%d", req->wait );
+    fprintf( stderr, ", prev_x=%d", req->prev_x );
+    fprintf( stderr, ", prev_y=%d", req->prev_y );
+    fprintf( stderr, ", new_x=%d", req->new_x );
+    fprintf( stderr, ", new_y=%d", req->new_y );
+    dump_varargs_bytes( ", keystate=", cur_size );
 }
 
 static void dump_get_message_request( const struct get_message_request *req )
@@ -2656,6 +2612,7 @@ static void dump_create_named_pipe_request( const struct create_named_pipe_reque
     fprintf( stderr, ", attributes=%08x", req->attributes );
     fprintf( stderr, ", rootdir=%04x", req->rootdir );
     fprintf( stderr, ", options=%08x", req->options );
+    fprintf( stderr, ", sharing=%08x", req->sharing );
     fprintf( stderr, ", maxinstances=%08x", req->maxinstances );
     fprintf( stderr, ", outsize=%08x", req->outsize );
     fprintf( stderr, ", insize=%08x", req->insize );
@@ -2677,6 +2634,7 @@ static void dump_get_named_pipe_info_request( const struct get_named_pipe_info_r
 static void dump_get_named_pipe_info_reply( const struct get_named_pipe_info_reply *req )
 {
     fprintf( stderr, " flags=%08x", req->flags );
+    fprintf( stderr, ", sharing=%08x", req->sharing );
     fprintf( stderr, ", maxinstances=%08x", req->maxinstances );
     fprintf( stderr, ", instances=%08x", req->instances );
     fprintf( stderr, ", outsize=%08x", req->outsize );
@@ -3127,6 +3085,33 @@ static void dump_set_user_object_info_reply( const struct set_user_object_info_r
     dump_varargs_unicode_str( ", name=", cur_size );
 }
 
+static void dump_register_hotkey_request( const struct register_hotkey_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", id=%d", req->id );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", vkey=%08x", req->vkey );
+}
+
+static void dump_register_hotkey_reply( const struct register_hotkey_reply *req )
+{
+    fprintf( stderr, " replaced=%d", req->replaced );
+    fprintf( stderr, ", flags=%08x", req->flags );
+    fprintf( stderr, ", vkey=%08x", req->vkey );
+}
+
+static void dump_unregister_hotkey_request( const struct unregister_hotkey_request *req )
+{
+    fprintf( stderr, " window=%08x", req->window );
+    fprintf( stderr, ", id=%d", req->id );
+}
+
+static void dump_unregister_hotkey_reply( const struct unregister_hotkey_reply *req )
+{
+    fprintf( stderr, " flags=%08x", req->flags );
+    fprintf( stderr, ", vkey=%08x", req->vkey );
+}
+
 static void dump_attach_thread_input_request( const struct attach_thread_input_request *req )
 {
     fprintf( stderr, " tid_from=%04x", req->tid_from );
@@ -3177,6 +3162,7 @@ static void dump_get_key_state_reply( const struct get_key_state_reply *req )
 static void dump_set_key_state_request( const struct set_key_state_request *req )
 {
     fprintf( stderr, " tid=%04x", req->tid );
+    fprintf( stderr, ", async=%d", req->async );
     dump_varargs_bytes( ", keystate=", cur_size );
 }
 
@@ -3751,6 +3737,8 @@ static void dump_get_next_device_request_reply( const struct get_next_device_req
     fprintf( stderr, " next=%04x", req->next );
     dump_ioctl_code( ", code=", &req->code );
     dump_uint64( ", user_ptr=", &req->user_ptr );
+    fprintf( stderr, ", client_pid=%04x", req->client_pid );
+    fprintf( stderr, ", client_tid=%04x", req->client_tid );
     fprintf( stderr, ", in_size=%u", req->in_size );
     fprintf( stderr, ", out_size=%u", req->out_size );
     dump_varargs_bytes( ", next_data=", cur_size );
@@ -3896,15 +3884,33 @@ static void dump_set_cursor_request( const struct set_cursor_request *req )
     fprintf( stderr, ", x=%d", req->x );
     fprintf( stderr, ", y=%d", req->y );
     dump_rectangle( ", clip=", &req->clip );
+    fprintf( stderr, ", clip_msg=%08x", req->clip_msg );
 }
 
 static void dump_set_cursor_reply( const struct set_cursor_reply *req )
 {
     fprintf( stderr, " prev_handle=%08x", req->prev_handle );
     fprintf( stderr, ", prev_count=%d", req->prev_count );
+    fprintf( stderr, ", prev_x=%d", req->prev_x );
+    fprintf( stderr, ", prev_y=%d", req->prev_y );
     fprintf( stderr, ", new_x=%d", req->new_x );
     fprintf( stderr, ", new_y=%d", req->new_y );
     dump_rectangle( ", new_clip=", &req->new_clip );
+    fprintf( stderr, ", last_change=%08x", req->last_change );
+}
+
+static void dump_get_suspend_context_request( const struct get_suspend_context_request *req )
+{
+}
+
+static void dump_get_suspend_context_reply( const struct get_suspend_context_reply *req )
+{
+    dump_varargs_context( " context=", cur_size );
+}
+
+static void dump_set_suspend_context_request( const struct set_suspend_context_request *req )
+{
+    dump_varargs_context( " context=", cur_size );
 }
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
@@ -4088,6 +4094,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_thread_desktop_request,
     (dump_func)dump_enum_desktop_request,
     (dump_func)dump_set_user_object_info_request,
+    (dump_func)dump_register_hotkey_request,
+    (dump_func)dump_unregister_hotkey_request,
     (dump_func)dump_attach_thread_input_request,
     (dump_func)dump_get_thread_input_request,
     (dump_func)dump_get_last_input_time_request,
@@ -4151,6 +4159,8 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_alloc_user_handle_request,
     (dump_func)dump_free_user_handle_request,
     (dump_func)dump_set_cursor_request,
+    (dump_func)dump_get_suspend_context_request,
+    (dump_func)dump_set_suspend_context_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4334,6 +4344,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     (dump_func)dump_enum_desktop_reply,
     (dump_func)dump_set_user_object_info_reply,
+    (dump_func)dump_register_hotkey_reply,
+    (dump_func)dump_unregister_hotkey_reply,
     NULL,
     (dump_func)dump_get_thread_input_reply,
     (dump_func)dump_get_last_input_time_reply,
@@ -4397,6 +4409,8 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_alloc_user_handle_reply,
     NULL,
     (dump_func)dump_set_cursor_reply,
+    (dump_func)dump_get_suspend_context_reply,
+    NULL,
 };
 
 static const char * const req_names[REQ_NB_REQUESTS] = {
@@ -4580,6 +4594,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_thread_desktop",
     "enum_desktop",
     "set_user_object_info",
+    "register_hotkey",
+    "unregister_hotkey",
     "attach_thread_input",
     "get_thread_input",
     "get_last_input_time",
@@ -4643,6 +4659,8 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "alloc_user_handle",
     "free_user_handle",
     "set_cursor",
+    "get_suspend_context",
+    "set_suspend_context",
 };
 
 static const struct
@@ -4680,9 +4698,12 @@ static const struct
     { "ERROR_CLASS_DOES_NOT_EXIST",  0xc0010000 | ERROR_CLASS_DOES_NOT_EXIST },
     { "ERROR_CLASS_HAS_WINDOWS",     0xc0010000 | ERROR_CLASS_HAS_WINDOWS },
     { "ERROR_CLIPBOARD_NOT_OPEN",    0xc0010000 | ERROR_CLIPBOARD_NOT_OPEN },
+    { "ERROR_HOTKEY_ALREADY_REGISTERED", 0xc0010000 | ERROR_HOTKEY_ALREADY_REGISTERED },
+    { "ERROR_HOTKEY_NOT_REGISTERED", 0xc0010000 | ERROR_HOTKEY_NOT_REGISTERED },
     { "ERROR_INVALID_CURSOR_HANDLE", 0xc0010000 | ERROR_INVALID_CURSOR_HANDLE },
     { "ERROR_INVALID_INDEX",         0xc0010000 | ERROR_INVALID_INDEX },
     { "ERROR_INVALID_WINDOW_HANDLE", 0xc0010000 | ERROR_INVALID_WINDOW_HANDLE },
+    { "ERROR_WINDOW_OF_OTHER_THREAD", 0xc0010000 | ERROR_WINDOW_OF_OTHER_THREAD },
     { "FILE_DELETED",                STATUS_FILE_DELETED },
     { "FILE_IS_A_DIRECTORY",         STATUS_FILE_IS_A_DIRECTORY },
     { "FILE_LOCK_CONFLICT",          STATUS_FILE_LOCK_CONFLICT },

@@ -66,6 +66,7 @@ DEFINE_EXPECT(timeout);
 DEFINE_EXPECT(doccp_onclick);
 DEFINE_EXPECT(doccp_onclick_cancel);
 DEFINE_EXPECT(div_onclick_disp);
+DEFINE_EXPECT(invoke_onclick);
 DEFINE_EXPECT(iframe_onreadystatechange_loading);
 DEFINE_EXPECT(iframe_onreadystatechange_interactive);
 DEFINE_EXPECT(iframe_onreadystatechange_complete);
@@ -76,6 +77,7 @@ DEFINE_EXPECT(form_onsubmit);
 DEFINE_EXPECT(form_onclick);
 DEFINE_EXPECT(submit_onclick);
 DEFINE_EXPECT(submit_onclick_attached);
+DEFINE_EXPECT(submit_onclick_setret);
 
 static HWND container_hwnd = NULL;
 static IHTMLWindow2 *window;
@@ -108,6 +110,9 @@ static const char img_doc_str[] =
 
 static const char input_doc_str[] =
     "<html><body><input id=\"inputid\"></input></body></html>";    
+
+static const char iframe_doc_str[] =
+    "<html><body><iframe id=\"ifr\">Testing</iframe></body></html>";
 
 static const char form_doc_str[] =
     "<html><body><form id=\"formid\" method=\"post\" action=\"about:blank\">"
@@ -641,6 +646,7 @@ static void _test_event_obj(unsigned line, const char *type, const xy_test_t *xy
     _test_event_screenx(line, event, -10);
     _test_event_screeny(line, event, -10);
 
+    V_VT(&v) = VT_NULL;
     hres = IHTMLEventObj_get_returnValue(event, &v);
     ok_(__FILE__,line)(hres == S_OK, "get_returnValue failed: %08x\n", hres);
     ok_(__FILE__,line)(V_VT(&v) == VT_EMPTY, "V_VT(returnValue) = %d\n", V_VT(&v));
@@ -985,6 +991,33 @@ static HRESULT WINAPI submit_onclick_attached(IDispatchEx *iface, DISPID id, LCI
 
 EVENT_HANDLER_FUNC_OBJ(submit_onclick_attached);
 
+static VARIANT onclick_retval, onclick_event_retval;
+
+static HRESULT WINAPI submit_onclick_setret(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    IHTMLEventObj *event;
+    HRESULT hres;
+
+    CHECK_EXPECT(submit_onclick_setret);
+    test_event_args(NULL, id, wFlags, pdp, pvarRes, pei, pspCaller);
+    test_event_src("INPUT");
+
+    event = NULL;
+    hres = IHTMLWindow2_get_event(window, &event);
+    ok(hres == S_OK, "get_event failed: %08x\n", hres);
+    ok(event != NULL, "event == NULL\n");
+
+    hres = IHTMLEventObj_put_returnValue(event, onclick_event_retval);
+    ok(hres == S_OK, "put_returnValue failed: %08x\n", hres);
+    IHTMLEventObj_Release(event);
+
+    *pvarRes = onclick_retval;
+    return S_OK;
+}
+
+EVENT_HANDLER_FUNC_OBJ(submit_onclick_setret);
+
 static HRESULT WINAPI iframedoc_onreadystatechange(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
         VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
 {
@@ -1034,7 +1067,6 @@ static HRESULT WINAPI iframe_onreadystatechange(IDispatchEx *iface, DISPID id, L
 
     str = NULL;
     hres = IHTMLFrameBase2_get_readyState(iframe, &str);
-    IHTMLFrameBase2_Release(iframe);
     ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
     ok(str != NULL, "readyState == NULL\n");
     ok(!lstrcmpW(str, V_BSTR(&v)), "ready states differ\n");
@@ -1194,7 +1226,7 @@ static HRESULT WINAPI timeoutFunc_Invoke(IDispatchEx *iface, DISPID dispIdMember
     return S_OK;
 }
 
-static IDispatchExVtbl timeoutFuncVtbl = {
+static const IDispatchExVtbl timeoutFuncVtbl = {
     DispatchEx_QueryInterface,
     DispatchEx_AddRef,
     DispatchEx_Release,
@@ -1228,7 +1260,7 @@ static HRESULT WINAPI div_onclick_disp_Invoke(IDispatchEx *iface, DISPID id,
     return S_OK;
 }
 
-static IDispatchExVtbl div_onclick_dispVtbl = {
+static const IDispatchExVtbl div_onclick_dispVtbl = {
     Dispatch_QueryInterface,
     DispatchEx_AddRef,
     DispatchEx_Release,
@@ -1298,12 +1330,99 @@ static void unregister_cp(IUnknown *unk, REFIID riid, DWORD cookie)
     ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
 }
 
+static HRESULT WINAPI EventDispatch_QueryInterface(IDispatch *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IDispatch, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "Unexpected call\n");
+    return E_NOINTERFACE;
+}
+
+static DWORD WINAPI EventDispatch_AddRef(IDispatch *iface)
+{
+    return 2;
+}
+
+static DWORD WINAPI EventDispatch_Release(IDispatch *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI EventDispatch_GetTypeInfoCount(IDispatch *iface, UINT *pctinfo)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI EventDispatch_GetTypeInfo(IDispatch *iface, UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI EventDispatch_GetIDsOfNames(IDispatch *iface, REFIID riid, LPOLESTR *rgszNames,
+        UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    ok(0, "Unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI EventDispatch_Invoke(IDispatch *iface, DISPID dispIdMember, REFIID riid,
+        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    ok(IsEqualGUID(&IID_NULL, riid), "riid = %s\n", debugstr_guid(riid));
+    ok(pDispParams != NULL, "pDispParams == NULL\n");
+    ok(pExcepInfo != NULL, "pExcepInfo == NULL\n");
+    ok(puArgErr != NULL, "puArgErr == NULL\n");
+    ok(V_VT(pVarResult) == 0, "V_VT(pVarResult) = %d\n", V_VT(pVarResult));
+    ok(wFlags == DISPATCH_METHOD, "wFlags = %d\n", wFlags);
+
+    switch(dispIdMember) {
+    case DISPID_HTMLDOCUMENTEVENTS_ONCLICK:
+        CHECK_EXPECT2(invoke_onclick);
+        break;
+    case DISPID_HTMLDOCUMENTEVENTS2_ONPROPERTYCHANGE:
+    case DISPID_HTMLDOCUMENTEVENTS2_ONREADYSTATECHANGE:
+    case 1027:
+    case 1034:
+    case 1037:
+    case 1044:
+    case 1045:
+    case 1047:
+    case 1048:
+    case 1049:
+        break; /* TODO */
+    default:
+        ok(0, "Unexpected call: %d\n", dispIdMember);
+    }
+
+    return S_OK;
+}
+
+static const IDispatchVtbl EventDispatchVtbl = {
+    EventDispatch_QueryInterface,
+    EventDispatch_AddRef,
+    EventDispatch_Release,
+    EventDispatch_GetTypeInfoCount,
+    EventDispatch_GetTypeInfo,
+    EventDispatch_GetIDsOfNames,
+    EventDispatch_Invoke
+};
+
+static IDispatch EventDispatch = { &EventDispatchVtbl };
+
 static void test_onclick(IHTMLDocument2 *doc)
 {
     IHTMLElement *div, *body;
     DWORD cp_cookie;
     VARIANT v;
     HRESULT hres;
+
+    register_cp((IUnknown*)doc, &IID_IDispatch, (IUnknown*)&EventDispatch);
 
     div = get_elem_id(doc, "clickdiv");
 
@@ -1318,6 +1437,20 @@ static void test_onclick(IHTMLDocument2 *doc)
     V_VT(&v) = VT_EMPTY;
     hres = IHTMLElement_put_onclick(div, v);
     ok(hres == E_NOTIMPL, "put_onclick failed: %08x\n", hres);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("function();");
+    hres = IHTMLElement_put_onclick(div, v);
+    todo_wine ok(hres == S_OK, "put_onclick failed: %08x\n", hres);
+
+    if(hres == S_OK) {
+        V_VT(&v) = VT_EMPTY;
+        hres = IHTMLElement_get_onclick(div, &v);
+        ok(hres == S_OK, "get_onclick failed: %08x\n", hres);
+        ok(V_VT(&v) == VT_BSTR, "V_VT(onclick) = %d\n", V_VT(&v));
+        ok(!strcmp_wa(V_BSTR(&v), "function();"), "V_BSTR(onclick) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    }
+    VariantClear(&v);
 
     V_VT(&v) = VT_DISPATCH;
     V_DISPATCH(&v) = (IDispatch*)&div_onclick_obj;
@@ -1364,11 +1497,13 @@ static void test_onclick(IHTMLDocument2 *doc)
         SET_EXPECT(div_onclick_attached);
         SET_EXPECT(body_onclick);
         SET_EXPECT(document_onclick);
+        SET_EXPECT(invoke_onclick);
         pump_msgs(&called_document_onclick);
         CHECK_CALLED(div_onclick);
         CHECK_CALLED(div_onclick_attached);
         CHECK_CALLED(body_onclick);
         CHECK_CALLED(document_onclick);
+        CHECK_CALLED(invoke_onclick);
     }
 
     xy_todo = TRUE;
@@ -1377,6 +1512,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     SET_EXPECT(div_onclick_attached);
     SET_EXPECT(body_onclick);
     SET_EXPECT(document_onclick);
+    SET_EXPECT(invoke_onclick);
 
     hres = IHTMLElement_click(div);
     ok(hres == S_OK, "click failed: %08x\n", hres);
@@ -1385,11 +1521,13 @@ static void test_onclick(IHTMLDocument2 *doc)
     CHECK_CALLED(div_onclick_attached);
     CHECK_CALLED(body_onclick);
     CHECK_CALLED(document_onclick);
+    CHECK_CALLED(invoke_onclick);
 
     SET_EXPECT(div_onclick);
     SET_EXPECT(div_onclick_attached);
     SET_EXPECT(body_onclick);
     SET_EXPECT(document_onclick);
+    SET_EXPECT(invoke_onclick);
 
     V_VT(&v) = VT_EMPTY;
     elem_fire_event((IUnknown*)div, "onclick", &v);
@@ -1398,6 +1536,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     CHECK_CALLED(div_onclick_attached);
     CHECK_CALLED(body_onclick);
     CHECK_CALLED(document_onclick);
+    CHECK_CALLED(invoke_onclick);
 
     cp_cookie = register_cp((IUnknown*)doc, &DIID_HTMLDocumentEvents, (IUnknown*)&doccp_obj);
     elem_attach_event((IUnknown*)div, "onclick", (IDispatch*)&div_onclick_disp);
@@ -1410,6 +1549,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     SET_EXPECT(document_onclick);
     SET_EXPECT(doc_onclick_attached);
     SET_EXPECT(doccp_onclick);
+    SET_EXPECT(invoke_onclick);
 
     hres = IHTMLElement_click(div);
     ok(hres == S_OK, "click failed: %08x\n", hres);
@@ -1421,6 +1561,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     CHECK_CALLED(document_onclick);
     CHECK_CALLED(doc_onclick_attached);
     CHECK_CALLED(doccp_onclick);
+    CHECK_CALLED(invoke_onclick);
 
     unregister_cp((IUnknown*)doc, &DIID_HTMLDocumentEvents, cp_cookie);
 
@@ -1440,6 +1581,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     SET_EXPECT(div_onclick_attached);
     SET_EXPECT(body_onclick);
     SET_EXPECT(document_onclick);
+    SET_EXPECT(invoke_onclick);
 
     hres = IHTMLElement_click(div);
     ok(hres == S_OK, "click failed: %08x\n", hres);
@@ -1447,6 +1589,7 @@ static void test_onclick(IHTMLDocument2 *doc)
     CHECK_CALLED(div_onclick_attached);
     CHECK_CALLED(body_onclick);
     CHECK_CALLED(document_onclick);
+    CHECK_CALLED(invoke_onclick);
 
     IHTMLElement_Release(div);
     IHTMLElement_Release(body);
@@ -1678,6 +1821,57 @@ static void test_submit(IHTMLDocument2 *doc)
 
     unregister_cp((IUnknown*)doc, &DIID_HTMLDocumentEvents, cp_cookie);
 
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = (IDispatch*)&submit_onclick_setret_obj;
+    hres = IHTMLElement_put_onclick(submit, v);
+    ok(hres == S_OK, "put_onclick failed: %08x\n", hres);
+
+    V_VT(&onclick_retval) = VT_BOOL;
+    V_BOOL(&onclick_retval) = VARIANT_TRUE;
+    V_VT(&onclick_event_retval) = VT_BOOL;
+    V_BOOL(&onclick_event_retval) = VARIANT_TRUE;
+
+    SET_EXPECT(submit_onclick_setret);
+    SET_EXPECT(form_onclick);
+    SET_EXPECT(form_onsubmit);
+    hres = IHTMLElement_click(submit);
+    ok(hres == S_OK, "click failed: %08x\n", hres);
+    CHECK_CALLED(submit_onclick_setret);
+    CHECK_CALLED(form_onclick);
+    CHECK_CALLED(form_onsubmit);
+
+    V_VT(&onclick_event_retval) = VT_BOOL;
+    V_BOOL(&onclick_event_retval) = VARIANT_FALSE;
+
+    SET_EXPECT(submit_onclick_setret);
+    SET_EXPECT(form_onclick);
+    hres = IHTMLElement_click(submit);
+    ok(hres == S_OK, "click failed: %08x\n", hres);
+    CHECK_CALLED(submit_onclick_setret);
+    CHECK_CALLED(form_onclick);
+
+    V_VT(&onclick_retval) = VT_BOOL;
+    V_BOOL(&onclick_retval) = VARIANT_FALSE;
+    V_VT(&onclick_event_retval) = VT_BOOL;
+    V_BOOL(&onclick_event_retval) = VARIANT_TRUE;
+
+    SET_EXPECT(submit_onclick_setret);
+    SET_EXPECT(form_onclick);
+    hres = IHTMLElement_click(submit);
+    ok(hres == S_OK, "click failed: %08x\n", hres);
+    CHECK_CALLED(submit_onclick_setret);
+    CHECK_CALLED(form_onclick);
+
+    V_VT(&onclick_event_retval) = VT_BOOL;
+    V_BOOL(&onclick_event_retval) = VARIANT_FALSE;
+
+    SET_EXPECT(submit_onclick_setret);
+    SET_EXPECT(form_onclick);
+    hres = IHTMLElement_click(submit);
+    ok(hres == S_OK, "click failed: %08x\n", hres);
+    CHECK_CALLED(submit_onclick_setret);
+    CHECK_CALLED(form_onclick);
+
     IHTMLElement_Release(submit);
 }
 
@@ -1715,6 +1909,77 @@ static void test_timeout(IHTMLDocument2 *doc)
     ok(hres == S_OK, "clearTimeout failed: %08x\n", hres);
 
     IHTMLWindow3_Release(win3);
+}
+
+static IHTMLElement* find_element_by_id(IHTMLDocument2 *doc, const char *id)
+{
+    HRESULT hres;
+    IHTMLDocument3 *doc3;
+    IHTMLElement *result;
+    BSTR idW = a2bstr(id);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument3) failed: %08x\n", hres);
+
+    hres = IHTMLDocument3_getElementById(doc3, idW, &result);
+    ok(hres == S_OK, "getElementById failed: %08x\n", hres);
+    ok(result != NULL, "result == NULL\n");
+    SysFreeString(idW);
+
+    IHTMLDocument3_Release(doc3);
+    return result;
+}
+
+static IHTMLDocument2* get_iframe_doc(IHTMLIFrameElement *iframe)
+{
+    HRESULT hres;
+    IHTMLFrameBase2 *base;
+    IHTMLDocument2 *result = NULL;
+
+    hres = IHTMLIFrameElement_QueryInterface(iframe, &IID_IHTMLFrameBase2, (void**)&base);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLFrameBase2) failed: %08x\n", hres);
+    if(hres == S_OK) {
+        IHTMLWindow2 *window;
+
+        hres = IHTMLFrameBase2_get_contentWindow(base, &window);
+        ok(hres == S_OK, "get_contentWindow failed: %08x\n", hres);
+        ok(window != NULL, "window == NULL\n");
+        if(window) {
+            hres = IHTMLWindow2_get_document(window, &result);
+            ok(hres == S_OK, "get_document failed: %08x\n", hres);
+            ok(result != NULL, "result == NULL\n");
+            IHTMLWindow2_Release(window);
+        }
+    }
+    if(base) IHTMLFrameBase2_Release(base);
+
+    return result;
+}
+
+static void test_iframe_connections(IHTMLDocument2 *doc)
+{
+    HRESULT hres;
+    IHTMLIFrameElement *iframe;
+    IHTMLDocument2 *iframes_doc;
+    DWORD cookie;
+    IConnectionPoint *cp;
+    IHTMLElement *element = find_element_by_id(doc, "ifr");
+
+    hres = IHTMLElement_QueryInterface(element, &IID_IHTMLIFrameElement, (void**)&iframe);
+    IHTMLElement_Release(element);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLIFrameElement) failed: %08x\n", hres);
+
+    iframes_doc = get_iframe_doc(iframe);
+    IHTMLIFrameElement_Release(iframe);
+
+    cookie = register_cp((IUnknown*)iframes_doc, &IID_IDispatch, (IUnknown*)&div_onclick_disp);
+
+    cp = get_cp((IUnknown*)doc, &IID_IDispatch);
+    hres = IConnectionPoint_Unadvise(cp, cookie);
+    IConnectionPoint_Release(cp);
+    ok(hres == CONNECT_E_NOCONNECTION, "Unadvise returned %08x, expected CONNECT_E_NOCONNECTION\n", hres);
+
+    IHTMLDocument2_Release(iframes_doc);
 }
 
 static HRESULT QueryInterface(REFIID,void**);
@@ -1895,7 +2160,7 @@ static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSite *iface,
     *lprcPosRect = rect;
     *lprcClipRect = rect;
 
-    lpFrameInfo->cb = sizeof(*lpFrameInfo);
+    ok(lpFrameInfo->cb == sizeof(*lpFrameInfo), "lpFrameInfo->cb = %u, expected %u\n", lpFrameInfo->cb, (unsigned)sizeof(*lpFrameInfo));
     lpFrameInfo->fMDIApp = FALSE;
     lpFrameInfo->hwndFrame = container_hwnd;
     lpFrameInfo->haccel = NULL;
@@ -2134,7 +2399,7 @@ static HRESULT WINAPI PropertyNotifySink_OnRequestEdit(IPropertyNotifySink *ifac
     return E_NOTIMPL;
 }
 
-static IPropertyNotifySinkVtbl PropertyNotifySinkVtbl = {
+static const IPropertyNotifySinkVtbl PropertyNotifySinkVtbl = {
     PropertyNotifySink_QueryInterface,
     PropertyNotifySink_AddRef,
     PropertyNotifySink_Release,
@@ -2309,6 +2574,36 @@ static HWND create_container_window(void)
             300, 300, NULL, NULL, NULL, NULL);
 }
 
+static void test_empty_document(void)
+{
+    HRESULT hres;
+    IHTMLWindow2 *window;
+    IHTMLDocument2 *windows_doc, *doc;
+    IConnectionPoint *cp;
+    DWORD cookie;
+
+    doc = create_document();
+    if(!doc)
+        return;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
+
+    hres = IHTMLWindow2_get_document(window, &windows_doc);
+    IHTMLWindow2_Release(window);
+    ok(hres == S_OK, "get_document failed: %08x\n", hres);
+
+    cookie = register_cp((IUnknown*)windows_doc, &IID_IDispatch, (IUnknown*)&div_onclick_disp);
+
+    cp = get_cp((IUnknown*)doc, &IID_IDispatch);
+    hres = IConnectionPoint_Unadvise(cp, cookie);
+    IConnectionPoint_Release(cp);
+    ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
+
+    IHTMLDocument2_Release(windows_doc);
+    IHTMLDocument2_Release(doc);
+}
+
 START_TEST(events)
 {
     CoInitialize(NULL);
@@ -2323,6 +2618,9 @@ START_TEST(events)
     run_test(img_doc_str, test_imgload);
     run_test(input_doc_str, test_focus);
     run_test(form_doc_str, test_submit);
+    run_test(iframe_doc_str, test_iframe_connections);
+
+    test_empty_document();
 
     DestroyWindow(container_hwnd);
     CoUninitialize();

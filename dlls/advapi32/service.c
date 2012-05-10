@@ -45,10 +45,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(service);
 
-static const WCHAR szServiceManagerKey[] = { 'S','y','s','t','e','m','\\',
-      'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-      'S','e','r','v','i','c','e','s',0 };
-
 void  __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
 {
     return HeapAlloc(GetProcessHeap(), 0, len);
@@ -65,6 +61,7 @@ typedef struct service_data_t
     LPVOID context;
     HANDLE thread;
     SC_HANDLE handle;
+    SC_HANDLE full_access_handle;
     BOOL unicode : 1;
     union {
         LPSERVICE_MAIN_FUNCTIONA a;
@@ -143,7 +140,7 @@ static inline DWORD multisz_cb(LPCWSTR wmultisz)
  * RPC connection with services.exe
  */
 
-handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW MachineName)
+DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW MachineName)
 {
     WCHAR transport[] = SVCCTL_TRANSPORT;
     WCHAR endpoint[] = SVCCTL_ENDPOINT;
@@ -170,7 +167,7 @@ handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW MachineName)
     return rpc_handle;
 }
 
-void __RPC_USER MACHINE_HANDLEW_unbind(MACHINE_HANDLEW MachineName, handle_t h)
+DECLSPEC_HIDDEN void __RPC_USER MACHINE_HANDLEW_unbind(MACHINE_HANDLEW MachineName, handle_t h)
 {
     RpcBindingFree(&h);
 }
@@ -429,7 +426,8 @@ static DWORD WINAPI service_control_dispatcher(LPVOID arg)
         case WINESERV_STARTINFO:
             if (!service->handle)
             {
-                if (!(service->handle = OpenServiceW( manager, data, SERVICE_SET_STATUS )))
+                if (!(service->handle = OpenServiceW( manager, data, SERVICE_SET_STATUS )) ||
+                    !(service->full_access_handle = OpenServiceW( manager, data, GENERIC_READ|GENERIC_WRITE )))
                     FIXME( "failed to open service %s\n", debugstr_w(data) );
             }
             result = service_handle_start(service, data + info.name_size,
@@ -488,8 +486,41 @@ static BOOL service_run_main_thread(void)
         ret = WaitForMultipleObjects( n, wait_handles, FALSE, INFINITE );
         if (!ret)  /* system process event */
         {
-            TRACE( "last user process exited, shutting down\n" );
-            /* FIXME: we should maybe send a shutdown control to running services */
+            SERVICE_STATUS st;
+            SERVICE_PRESHUTDOWN_INFO spi;
+            DWORD timeout = 5000;
+            BOOL res;
+
+            EnterCriticalSection( &service_cs );
+            n = 0;
+            for (i = 0; i < nb_services && n < MAXIMUM_WAIT_OBJECTS; i++)
+            {
+                if (!services[i]->thread) continue;
+
+                res = QueryServiceStatus(services[i]->full_access_handle, &st);
+                ret = ERROR_SUCCESS;
+                if (res && (st.dwControlsAccepted & SERVICE_ACCEPT_PRESHUTDOWN))
+                {
+                    res = QueryServiceConfig2W( services[i]->full_access_handle, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+                            (LPBYTE)&spi, sizeof(spi), &i );
+                    if (res)
+                    {
+                        FIXME("service should be able to delay shutdown\n");
+                        timeout += spi.dwPreshutdownTimeout;
+                        ret = service_handle_control( services[i], SERVICE_CONTROL_PRESHUTDOWN );
+                        wait_handles[n++] = services[i]->thread;
+                    }
+                }
+                else if (res && (st.dwControlsAccepted & SERVICE_ACCEPT_SHUTDOWN))
+                {
+                    ret = service_handle_control( services[i], SERVICE_CONTROL_SHUTDOWN );
+                    wait_handles[n++] = services[i]->thread;
+                }
+            }
+            LeaveCriticalSection( &service_cs );
+
+            TRACE("last user process exited, shutting down (timeout: %d)\n", timeout);
+            WaitForMultipleObjects( n, wait_handles, TRUE, timeout );
             ExitProcess(0);
         }
         else if (ret == 1)
@@ -1172,21 +1203,32 @@ BOOL WINAPI QueryServiceStatusEx(SC_HANDLE hService, SC_STATUS_TYPE InfoLevel,
 
     TRACE("%p %d %p %d %p\n", hService, InfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
 
-    __TRY
+    if (InfoLevel != SC_STATUS_PROCESS_INFO)
     {
-        err = svcctl_QueryServiceStatusEx(hService, InfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
+        err = ERROR_INVALID_LEVEL;
     }
-    __EXCEPT(rpc_filter)
+    else if (cbBufSize < sizeof(SERVICE_STATUS_PROCESS))
     {
-        err = map_exception_code(GetExceptionCode());
+        *pcbBytesNeeded = sizeof(SERVICE_STATUS_PROCESS);
+        err = ERROR_INSUFFICIENT_BUFFER;
     }
-    __ENDTRY
+    else
+    {
+        __TRY
+        {
+            err = svcctl_QueryServiceStatusEx(hService, InfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
+        }
+        __EXCEPT(rpc_filter)
+        {
+            err = map_exception_code(GetExceptionCode());
+        }
+        __ENDTRY
+    }
     if (err != ERROR_SUCCESS)
     {
         SetLastError(err);
         return FALSE;
     }
-
     return TRUE;
 }
 
@@ -1393,6 +1435,10 @@ BOOL WINAPI QueryServiceConfig2A(SC_HANDLE hService, DWORD dwLevel, LPBYTE buffe
                 else configA->lpDescription = NULL;
             }
             break;
+        case SERVICE_CONFIG_PRESHUTDOWN_INFO:
+            if (buffer && bufferW && *needed<=size)
+                memcpy(buffer, bufferW, *needed);
+            break;
         default:
             FIXME("conversation W->A not implemented for level %d\n", dwLevel);
             ret = FALSE;
@@ -1414,7 +1460,7 @@ BOOL WINAPI QueryServiceConfig2W(SC_HANDLE hService, DWORD dwLevel, LPBYTE buffe
 {
     DWORD err;
 
-    if(dwLevel != SERVICE_CONFIG_DESCRIPTION) {
+    if(dwLevel!=SERVICE_CONFIG_DESCRIPTION && dwLevel!=SERVICE_CONFIG_PRESHUTDOWN_INFO) {
         FIXME("Level %d not implemented\n", dwLevel);
         SetLastError(ERROR_INVALID_LEVEL);
         return FALSE;
@@ -1475,13 +1521,14 @@ EnumServicesStatusA( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
     TRACE("%p 0x%x 0x%x %p %u %p %p %p\n", hmngr, type, state, services, size, needed,
           returned, resume_handle);
 
-    if (size && !(servicesW = HeapAlloc( GetProcessHeap(), 0, 2 * size )))
+    sz = max( 2 * size, sizeof(*servicesW) );
+    if (!(servicesW = HeapAlloc( GetProcessHeap(), 0, sz )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
     }
 
-    ret = EnumServicesStatusW( hmngr, type, state, servicesW, 2 * size, needed, returned, resume_handle );
+    ret = EnumServicesStatusW( hmngr, type, state, servicesW, sz, needed, returned, resume_handle );
     if (!ret) goto done;
 
     p = (char *)services + *returned * sizeof(ENUM_SERVICE_STATUSA);
@@ -1502,6 +1549,7 @@ EnumServicesStatusA( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
             p += sz;
             n -= sz;
         }
+        else services[i].lpDisplayName = NULL;
         services[i].ServiceStatus = servicesW[i].ServiceStatus;
     }
 
@@ -1521,6 +1569,7 @@ EnumServicesStatusW( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
                      LPDWORD resume_handle )
 {
     DWORD err, i;
+    ENUM_SERVICE_STATUSW dummy_status;
 
     TRACE("%p 0x%x 0x%x %p %u %p %p %p\n", hmngr, type, state, services, size, needed,
           returned, resume_handle);
@@ -1532,6 +1581,13 @@ EnumServicesStatusW( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
+    }
+
+    /* make sure we pass a valid pointer */
+    if (!services || size < sizeof(*services))
+    {
+        services = &dummy_status;
+        size = sizeof(dummy_status);
     }
 
     __TRY
@@ -1580,7 +1636,8 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
     TRACE("%p %u 0x%x 0x%x %p %u %p %p %p %s\n", hmngr, level, type, state, buffer,
           size, needed, returned, resume_handle, debugstr_a(group));
 
-    if (size && !(servicesW = HeapAlloc( GetProcessHeap(), 0, 2 * size )))
+    sz = max( 2 * size, sizeof(*servicesW) );
+    if (!(servicesW = HeapAlloc( GetProcessHeap(), 0, sz )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return FALSE;
@@ -1597,7 +1654,7 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
         MultiByteToWideChar( CP_ACP, 0, group, -1, groupW, len * sizeof(WCHAR) );
     }
 
-    ret = EnumServicesStatusExW( hmngr, level, type, state, (BYTE *)servicesW, 2 * size,
+    ret = EnumServicesStatusExW( hmngr, level, type, state, (BYTE *)servicesW, sz,
                                  needed, returned, resume_handle, groupW );
     if (!ret) goto done;
 
@@ -1619,6 +1676,7 @@ EnumServicesStatusExA( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
             p += sz;
             n -= sz;
         }
+        else services[i].lpDisplayName = NULL;
         services[i].ServiceStatusProcess = servicesW[i].ServiceStatusProcess;
     }
 
@@ -1639,6 +1697,7 @@ EnumServicesStatusExW( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
                        LPDWORD resume_handle, LPCWSTR group )
 {
     DWORD err, i;
+    ENUM_SERVICE_STATUS_PROCESSW dummy_status;
     ENUM_SERVICE_STATUS_PROCESSW *services = (ENUM_SERVICE_STATUS_PROCESSW *)buffer;
 
     TRACE("%p %u 0x%x 0x%x %p %u %p %p %p %s\n", hmngr, level, type, state, buffer,
@@ -1656,6 +1715,13 @@ EnumServicesStatusExW( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return FALSE;
+    }
+
+    /* make sure we pass a valid buffer pointer */
+    if (!services || size < sizeof(*services))
+    {
+        buffer = (BYTE *)&dummy_status;
+        size = sizeof(dummy_status);
     }
 
     __TRY
@@ -2023,6 +2089,10 @@ BOOL WINAPI ChangeServiceConfig2A( SC_HANDLE hService, DWORD dwInfoLevel,
 
         HeapFree( GetProcessHeap(), 0, faw.lpRebootMsg );
         HeapFree( GetProcessHeap(), 0, faw.lpCommand );
+    }
+    else if (dwInfoLevel == SERVICE_CONFIG_PRESHUTDOWN_INFO)
+    {
+        r = ChangeServiceConfig2W( hService, dwInfoLevel, lpInfo);
     }
     else
         SetLastError( ERROR_INVALID_PARAMETER );

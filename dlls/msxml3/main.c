@@ -62,9 +62,11 @@ HINSTANCE MSXML_hInstance = NULL;
 
 void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, va_list ap)
 {
-    char* buf = NULL;
-    int len = 32, needed;
-    enum __wine_debug_class dbcl = __WINE_DBCL_ERR;
+    static const int max_size = 200;
+    enum __wine_debug_class dbcl;
+    char buff[max_size];
+    int len;
+
     switch (lvl)
     {
         case XML_ERR_NONE:
@@ -74,25 +76,14 @@ void wineXmlCallbackLog(char const* caller, xmlErrorLevel lvl, char const* msg, 
             dbcl = __WINE_DBCL_WARN;
             break;
         default:
+            dbcl = __WINE_DBCL_ERR;
             break;
     }
 
-    do
-    {
-        heap_free(buf);
-        buf = heap_alloc(len);
-        needed = vsnprintf(buf, len, msg, ap);
-        if (needed == -1)
-            len *= 2;
-        else if (needed >= len)
-            len = needed + 1;
-        else
-            needed = 0;
-    }
-    while (needed);
+    len = vsnprintf(buff, max_size, msg, ap);
+    if (len == -1 || len >= max_size) buff[max_size-1] = 0;
 
-    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "%s", buf);
-    heap_free(buf);
+    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "%s", buff);
 }
 
 void wineXmlCallbackError(char const* caller, xmlErrorPtr err)
@@ -105,7 +96,12 @@ void wineXmlCallbackError(char const* caller, xmlErrorPtr err)
     case XML_ERR_WARNING: dbcl = __WINE_DBCL_WARN; break;
     default:              dbcl = __WINE_DBCL_ERR; break;
     }
-    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "%s", err->message);
+
+    wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "error code %d", err->code);
+    if (err->message)
+        wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, ": %s", err->message);
+    else
+        wine_dbg_log(dbcl, &__wine_dbch_msxml, caller, "\n");
 }
 
 /* Support for loading xml files from a Wine Windows drive */
@@ -193,7 +189,9 @@ static void init_libxslt(void)
     if (!libxslt_handle)
         return;
 
-#define LOAD_FUNCPTR(f, needed) if ((p##f = wine_dlsym(libxslt_handle, #f, NULL, 0)) == NULL && needed) { WARN("Can't find symbol %s\n", #f); goto sym_not_found; }
+#define LOAD_FUNCPTR(f, needed) \
+    if ((p##f = wine_dlsym(libxslt_handle, #f, NULL, 0)) == NULL) \
+        if (needed) { WARN("Can't find symbol %s\n", #f); goto sym_not_found; }
     LOAD_FUNCPTR(xsltInit, 0);
     LOAD_FUNCPTR(xsltApplyStylesheet, 1);
     LOAD_FUNCPTR(xsltCleanupGlobals, 1);
@@ -284,6 +282,11 @@ const char *debugstr_variant(const VARIANT *v)
         return wine_dbg_sprintf("{VT_UNKNOWN: %p}", V_UNKNOWN(v));
     case VT_UINT:
         return wine_dbg_sprintf("{VT_UINT: %u}", V_UINT(v));
+    case VT_BSTR|VT_BYREF:
+        return wine_dbg_sprintf("{VT_BSTR|VT_BYREF: ptr %p, data %s}",
+            V_BSTRREF(v), debugstr_w(V_BSTRREF(v) ? *V_BSTRREF(v) : NULL));
+    case VT_ERROR:
+        return wine_dbg_sprintf("{VT_ERROR: 0x%08x}", V_ERROR(v));
     default:
         return wine_dbg_sprintf("{vt %d}", V_VT(v));
     }
@@ -294,7 +297,7 @@ const char *debugstr_variant(const VARIANT *v)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( MSXML_hInstance, NULL );
+    return __wine_register_resources( MSXML_hInstance );
 }
 
 /***********************************************************************
@@ -302,5 +305,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( MSXML_hInstance, NULL );
+    return __wine_unregister_resources( MSXML_hInstance );
 }

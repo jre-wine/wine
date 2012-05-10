@@ -19,7 +19,6 @@
 
 /* See comment in dlls/d3d9/tests/visual.c for general guidelines */
 
-#include <assert.h>
 #include "wine/test.h"
 #include "ddraw.h"
 #include "d3d.h"
@@ -54,13 +53,24 @@ static BOOL color_match(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
     return TRUE;
 }
 
+static HRESULT WINAPI enum_z_fmt(DDPIXELFORMAT *fmt, void *ctx)
+{
+    DDPIXELFORMAT *zfmt = ctx;
+
+    if(U1(*fmt).dwZBufferBitDepth > U1(*zfmt).dwZBufferBitDepth)
+    {
+        *zfmt = *fmt;
+    }
+    return DDENUMRET_OK;
+}
+
 static BOOL createObjects(void)
 {
     HRESULT hr;
     HMODULE hmod = GetModuleHandleA("ddraw.dll");
     WNDCLASS wc = {0};
     DDSURFACEDESC2 ddsd;
-
+    DDPIXELFORMAT zfmt;
 
     if(!hmod) return FALSE;
     pDirectDrawCreateEx = (void*)GetProcAddress(hmod, "DirectDrawCreateEx");
@@ -106,14 +116,16 @@ static BOOL createObjects(void)
     hr = IDirectDraw7_CreateSurface(DirectDraw, &ddsd, &Surface, NULL);
     if(FAILED(hr)) goto err;
 
+    memset(&zfmt, 0, sizeof(zfmt));
+    hr = IDirect3D7_EnumZBufferFormats(Direct3D, &IID_IDirect3DTnLHalDevice, enum_z_fmt, &zfmt);
+    if (FAILED(hr)) goto err;
+    if (zfmt.dwSize == 0) goto err;
+
     memset(&ddsd, 0, sizeof(ddsd));
     ddsd.dwSize = sizeof(ddsd);
     ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
     ddsd.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
-    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
-    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_ZBUFFER;
-    U1(U4(ddsd).ddpfPixelFormat).dwZBufferBitDepth = 32;
-    U3(U4(ddsd).ddpfPixelFormat).dwZBitMask = 0x00ffffff;
+    U4(ddsd).ddpfPixelFormat = zfmt;
     ddsd.dwWidth = 640;
     ddsd.dwHeight = 480;
     hr = IDirectDraw7_CreateSurface(DirectDraw, &ddsd, &depth_buffer, NULL);
@@ -125,19 +137,7 @@ static BOOL createObjects(void)
     if (FAILED(hr)) goto err;
 
     hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DTnLHalDevice, Surface, &Direct3DDevice);
-    if(FAILED(hr))
-    {
-        trace("Creating a TnLHal Device failed, trying HAL\n");
-        hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DHALDevice, Surface, &Direct3DDevice);
-        if(FAILED(hr))
-        {
-            trace("Creating a HAL device failed, trying Ref\n");
-            hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DRefDevice, Surface, &Direct3DDevice);
-            if (SUCCEEDED(hr))
-                refdevice = TRUE;
-        }
-    }
-    if(!Direct3DDevice) goto err;
+    if (FAILED(hr) || !Direct3DDevice) goto err;
     return TRUE;
 
     err:
@@ -222,16 +222,24 @@ out:
     return ret;
 }
 
-/*
- * Helper function to get and set the viewport - needed on geforce 8800 on XP - driver bug?
- * This is needed after IDirect3DDevice7_SetRenderTarget in combination with offscreen to backbuffer rendering.
- */
-static void set_the_same_viewport_again(IDirect3DDevice7 *device)
+static void set_viewport_size(IDirect3DDevice7 *device)
 {
     D3DVIEWPORT7 vp = {0};
+    DDSURFACEDESC2 ddsd;
     HRESULT hr;
-    hr = IDirect3DDevice7_GetViewport(device,&vp);
-    ok(hr == D3D_OK && vp.dwWidth == 640 && vp.dwHeight == 480, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
+    IDirectDrawSurface7 *target;
+
+    hr = IDirect3DDevice7_GetRenderTarget(device, &target);
+    ok(hr == D3D_OK, "IDirect3DDevice7_GetRenderTarget returned %08x\n", hr);
+
+    memset(&ddsd, 0, sizeof(ddsd));
+    ddsd.dwSize = sizeof(ddsd);
+    IDirectDrawSurface7_GetSurfaceDesc(target, &ddsd);
+    ok(hr == D3D_OK, "IDirectDrawSurface7_GetSurfaceDesc returned %08x\n", hr);
+    IDirectDrawSurface7_Release(target);
+
+    vp.dwWidth = ddsd.dwWidth;
+    vp.dwHeight = ddsd.dwHeight;
     hr = IDirect3DDevice7_SetViewport(device, &vp);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
     return;
@@ -435,14 +443,14 @@ static void fog_test(IDirect3DDevice7 *device)
     D3DDEVICEDESC7 caps;
 
     /* Gets full z based fog with linear fog, no fog with specular color */
-    struct sVertex unstransformed_1[] = {
+    struct sVertex untransformed_1[] = {
         {-1,    -1,   0.1f,         0xFFFF0000,     0xFF000000  },
         {-1,     0,   0.1f,         0xFFFF0000,     0xFF000000  },
         { 0,     0,   0.1f,         0xFFFF0000,     0xFF000000  },
         { 0,    -1,   0.1f,         0xFFFF0000,     0xFF000000  },
     };
     /* Ok, I am too lazy to deal with transform matrices */
-    struct sVertex unstransformed_2[] = {
+    struct sVertex untransformed_2[] = {
         {-1,     0,   1.0f,         0xFFFF0000,     0xFF000000  },
         {-1,     1,   1.0f,         0xFFFF0000,     0xFF000000  },
         { 0,     1,   1.0f,         0xFFFF0000,     0xFF000000  },
@@ -465,6 +473,50 @@ static void fog_test(IDirect3DDevice7 *device)
     };
     WORD Indices[] = {0, 1, 2, 2, 3, 0};
 
+    float ident_mat[16] =
+    {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f
+    };
+    float world_mat1[16] =
+    {
+        1.0f, 0.0f,  0.0f, 0.0f,
+        0.0f, 1.0f,  0.0f, 0.0f,
+        0.0f, 0.0f,  1.0f, 0.0f,
+        0.0f, 0.0f, -0.5f, 1.0f
+    };
+    float world_mat2[16] =
+    {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 1.0f
+    };
+    float proj_mat[16] =
+    {
+        1.0f, 0.0f,  0.0f, 0.0f,
+        0.0f, 1.0f,  0.0f, 0.0f,
+        0.0f, 0.0f,  1.0f, 0.0f,
+        0.0f, 0.0f, -1.0f, 1.0f
+    };
+
+    struct sVertex far_quad1[] =
+    {
+        {-1.0f, -1.0f, 0.5f, 0xffff0000, 0xff000000},
+        {-1.0f,  0.0f, 0.5f, 0xffff0000, 0xff000000},
+        { 0.0f,  0.0f, 0.5f, 0xffff0000, 0xff000000},
+        { 0.0f, -1.0f, 0.5f, 0xffff0000, 0xff000000},
+    };
+    struct sVertex far_quad2[] =
+    {
+        {-1.0f, 0.0f, 1.5f, 0xffff0000, 0xff000000},
+        {-1.0f, 1.0f, 1.5f, 0xffff0000, 0xff000000},
+        { 0.0f, 1.0f, 1.5f, 0xffff0000, 0xff000000},
+        { 0.0f, 0.0f, 1.5f, 0xffff0000, 0xff000000},
+    };
+
     memset(&caps, 0, sizeof(caps));
     hr = IDirect3DDevice7_GetCaps(device, &caps);
     ok(hr == D3D_OK, "IDirect3DDevice7_GetCaps returned %08x\n", hr);
@@ -477,35 +529,35 @@ static void fog_test(IDirect3DDevice7 *device)
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGENABLE, TRUE);
     ok(hr == D3D_OK, "Turning on fog calculations returned %08x\n", hr);
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGCOLOR, 0xFF00FF00 /* A nice green */);
-    ok(hr == D3D_OK, "Turning on fog calculations returned %08x\n", hr);
+    ok(hr == D3D_OK, "Setting fog color returned %08x\n", hr);
 
     /* First test: Both table fog and vertex fog off */
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGTABLEMODE, D3DFOG_NONE);
     ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGVERTEXMODE, D3DFOG_NONE);
-    ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
+    ok(hr == D3D_OK, "Turning off vertex fog returned %08x\n", hr);
 
     /* Start = 0, end = 1. Should be default, but set them */
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGSTART, *((DWORD *) &start));
     ok(hr == D3D_OK, "Setting fog start returned %08x\n", hr);
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGEND, *((DWORD *) &end));
-    ok(hr == D3D_OK, "Setting fog start returned %08x\n", hr);
+    ok(hr == D3D_OK, "Setting fog end returned %08x\n", hr);
 
     if(IDirect3DDevice7_BeginScene(device) == D3D_OK)
     {
         /* Untransformed, vertex fog = NONE, table fog = NONE: Read the fog weighting from the specular color */
         hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
-                                                   unstransformed_1, 4, Indices, 6, 0);
+                                                   untransformed_1, 4, Indices, 6, 0);
         ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
 
         /* That makes it use the Z value */
         hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGVERTEXMODE, D3DFOG_LINEAR);
-        ok(hr == D3D_OK, "Turning off table fog returned %08x\n", hr);
+        ok(hr == D3D_OK, "Setting fog vertex mode to D3DFOG_LINEAR returned %08x\n", hr);
         /* Untransformed, vertex fog != none (or table fog != none):
          * Use the Z value as input into the equation
          */
         hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST, D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR,
-                                                   unstransformed_2, 4, Indices, 6, 0);
+                                                   untransformed_2, 4, Indices, 6, 0);
         ok(hr == D3D_OK, "DrawIndexedPrimitive returned %08x\n", hr);
 
         /* transformed verts */
@@ -533,15 +585,15 @@ static void fog_test(IDirect3DDevice7 *device)
     }
 
     color = getPixelColor(device, 160, 360);
-    ok(color == 0x00FF0000, "Untransformed vertex with no table or vertex fog has color %08x\n", color);
+    ok(color_match(color, 0x00FF0000, 1), "Untransformed vertex with no table or vertex fog has color %08x\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x0000FF00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
+    ok(color_match(color, 0x0000FF00, 1), "Untransformed vertex with linear vertex fog has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
-    ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
+    ok(color_match(color, 0x00FFFF00, 1), "Transformed vertex with linear vertex fog has color %08x\n", color);
     if(caps.dpcTriCaps.dwRasterCaps & D3DPRASTERCAPS_FOGTABLE)
     {
         color = getPixelColor(device, 480, 360);
-        ok(color == 0x0000FF00, "Transformed vertex with linear table fog has color %08x\n", color);
+        ok(color_match(color, 0x0000FF00, 1), "Transformed vertex with linear table fog has color %08x\n", color);
     }
     else
     {
@@ -551,6 +603,85 @@ static void fog_test(IDirect3DDevice7 *device)
         color = getPixelColor(device, 480, 120);
         ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
         trace("Info: Table fog not supported by this device\n");
+    }
+
+    if (caps.dpcTriCaps.dwRasterCaps & D3DPRASTERCAPS_FOGTABLE)
+    {
+        /* A simple fog + non-identity world matrix test */
+        hr = IDirect3DDevice7_SetTransform(device, D3DTRANSFORMSTATE_WORLD, (D3DMATRIX *)world_mat1);
+        ok(hr == D3D_OK, "IDirect3DDevice7_SetTransform returned %#08x\n", hr);
+
+        hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGTABLEMODE, D3DFOG_LINEAR);
+        ok(hr == D3D_OK, "Setting fog table mode to D3DFOG_LINEAR returned %#08x\n", hr);
+        hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_FOGVERTEXMODE, D3DFOG_NONE);
+        ok(hr == D3D_OK, "Turning off vertex fog returned %#08x\n", hr);
+
+        hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+        ok(hr == D3D_OK, "IDirect3DDevice7_Clear returned %#08x\n", hr);
+
+        if (IDirect3DDevice7_BeginScene(device) == D3D_OK)
+        {
+            hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST,
+                    D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR, far_quad1, 4, Indices, 6, 0);
+            ok(hr == D3D_OK, "DrawIndexedPrimitive returned %#08x\n", hr);
+
+            hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST,
+                    D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR, far_quad2, 4, Indices, 6, 0);
+            ok(hr == D3D_OK, "DrawIndexedPrimitive returned %#08x\n", hr);
+
+            hr = IDirect3DDevice7_EndScene(device);
+            ok(hr == D3D_OK, "EndScene returned %#08x\n", hr);
+        }
+        else
+        {
+            ok(FALSE, "BeginScene failed\n");
+        }
+
+        color = getPixelColor(device, 160, 360);
+        ok(color_match(color, 0x00ff0000, 4), "Unfogged quad has color %08x\n", color);
+        color = getPixelColor(device, 160, 120);
+        ok(color_match(color, 0x0000ff00, 1), "Fogged out quad has color %08x\n", color);
+
+        /* Test fog behavior with an orthogonal (but not identity) projection matrix */
+        hr = IDirect3DDevice7_SetTransform(device, D3DTRANSFORMSTATE_WORLD, (D3DMATRIX *)world_mat2);
+        ok(hr == D3D_OK, "SetTransform returned %#08x\n", hr);
+        hr = IDirect3DDevice7_SetTransform(device, D3DTRANSFORMSTATE_PROJECTION, (D3DMATRIX *)proj_mat);
+        ok(hr == D3D_OK, "SetTransform returned %#08x\n", hr);
+
+        hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
+        ok(hr == D3D_OK, "Clear returned %#08x\n", hr);
+
+        if (IDirect3DDevice7_BeginScene(device) == D3D_OK)
+        {
+            hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST,
+                    D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR, untransformed_1, 4, Indices, 6, 0);
+            ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %#08x\n", hr);
+
+            hr = IDirect3DDevice7_DrawIndexedPrimitive(device, D3DPT_TRIANGLELIST,
+                    D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_SPECULAR, untransformed_2, 4, Indices, 6, 0);
+            ok(hr == D3D_OK, "DrawIndexedPrimitiveUP returned %#08x\n", hr);
+
+            hr = IDirect3DDevice7_EndScene(device);
+            ok(hr == D3D_OK, "EndScene returned %#08x\n", hr);
+        }
+        else
+        {
+            ok(FALSE, "BeginScene failed\n");
+        }
+
+        color = getPixelColor(device, 160, 360);
+        todo_wine ok(color_match(color, 0x00e51900, 4), "Partially fogged quad has color %08x\n", color);
+        color = getPixelColor(device, 160, 120);
+        ok(color_match(color, 0x0000ff00, 1), "Fogged out quad has color %08x\n", color);
+
+        hr = IDirect3DDevice7_SetTransform(device, D3DTRANSFORMSTATE_WORLD, (D3DMATRIX *)ident_mat);
+        ok(hr == D3D_OK, "SetTransform returned %#08x\n", hr);
+        hr = IDirect3DDevice7_SetTransform(device, D3DTRANSFORMSTATE_PROJECTION, (D3DMATRIX *)ident_mat);
+        ok(hr == D3D_OK, "SetTransform returned %#08x\n", hr);
+    }
+    else
+    {
+        skip("D3DPRASTERCAPS_FOGTABLE not supported, skipping some fog tests\n");
     }
 
     /* Turn off the fog master switch to avoid confusing other tests */
@@ -720,6 +851,7 @@ static void offscreen_test(IDirect3DDevice7 *device)
     if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
         hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
+        set_viewport_size(device);
         hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffff00ff, 0.0, 0);
         ok(hr == D3D_OK, "Clear failed, hr = %08x\n", hr);
 
@@ -729,7 +861,7 @@ static void offscreen_test(IDirect3DDevice7 *device)
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
-        set_the_same_viewport_again(device);
+        set_viewport_size(device);
 
         hr = IDirect3DDevice7_SetTexture(device, 0, offscreen);
         ok(hr == D3D_OK, "SetTexture failed, %08x\n", hr);
@@ -876,7 +1008,8 @@ static void alpha_test(IDirect3DDevice7 *device)
          * vertices
          */
         hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
-        ok(hr == D3D_OK, "Can't get back buffer, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderTarget failed, hr = %08x\n", hr);
+        set_viewport_size(device);
         hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0x80ff0000, 0.0, 0);
         ok(hr == D3D_OK, "Clear failed, hr = %08x\n", hr);
 
@@ -895,8 +1028,8 @@ static void alpha_test(IDirect3DDevice7 *device)
         ok(hr == D3D_OK, "DrawPrimitive failed, hr = %08x\n", hr);
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
-        ok(hr == D3D_OK, "Can't get back buffer, hr = %08x\n", hr);
-        set_the_same_viewport_again(device);
+        ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderTarget failed, hr = %08x\n", hr);
+        set_viewport_size(device);
 
         /* Render the offscreen texture onto the frame buffer to be able to compare it regularly.
          * Disable alpha blending for the final composition
@@ -1319,7 +1452,7 @@ static void D3D1_TextureMapBlendTest(void)
 
     memcpy(exdesc.lpData, test1_quads, sizeof(test1_quads));
 
-    exe_buffer_ptr = 256 + (char*)exdesc.lpData;
+    exe_buffer_ptr = sizeof(test1_quads) + (char*)exdesc.lpData;
 
     EXEBUF_PUT_PROCESSVERTICES(8, exe_buffer_ptr);
 
@@ -1344,29 +1477,29 @@ static void D3D1_TextureMapBlendTest(void)
 
     EXEBUF_END(exe_buffer_ptr);
 
-    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - 256;
+    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - sizeof(test1_quads);
 
     hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     if (FAILED(hr)) {
         trace("IDirect3DExecuteBuffer_Unlock failed with %08x\n", hr);
     }
 
-    memset(&exdata, 0, sizeof(D3DEXECUTEDATA));
-    exdata.dwSize = sizeof(D3DEXECUTEDATA);
+    memset(&exdata, 0, sizeof(exdata));
+    exdata.dwSize = sizeof(exdata);
     exdata.dwVertexCount = 8;
-    exdata.dwInstructionOffset = 256;
+    exdata.dwInstructionOffset = sizeof(test1_quads);
     exdata.dwInstructionLength = exe_length;
     hr = IDirect3DExecuteBuffer_SetExecuteData(ExecuteBuffer, &exdata);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_SetExecuteData failed with %08x\n", hr);
 
     hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-    ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+    ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
     if (SUCCEEDED(hr)) {
         hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_UNCLIPPED);
         ok(hr == D3D_OK, "IDirect3DDevice_Execute failed, hr = %08x\n", hr);
         hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
     }
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -1451,7 +1584,7 @@ static void D3D1_TextureMapBlendTest(void)
 
     memcpy(exdesc.lpData, test1_quads, sizeof(test1_quads));
 
-    exe_buffer_ptr = 256 + (char*)exdesc.lpData;
+    exe_buffer_ptr = sizeof(test1_quads) + (char*)exdesc.lpData;
 
     EXEBUF_PUT_PROCESSVERTICES(8, exe_buffer_ptr);
 
@@ -1465,29 +1598,29 @@ static void D3D1_TextureMapBlendTest(void)
 
     EXEBUF_END(exe_buffer_ptr);
 
-    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - 256;
+    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - sizeof(test1_quads);
 
     hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     if (FAILED(hr)) {
         trace("IDirect3DExecuteBuffer_Unlock failed with %08x\n", hr);
     }
 
-    memset(&exdata, 0, sizeof(D3DEXECUTEDATA));
-    exdata.dwSize = sizeof(D3DEXECUTEDATA);
+    memset(&exdata, 0, sizeof(exdata));
+    exdata.dwSize = sizeof(exdata);
     exdata.dwVertexCount = 8;
-    exdata.dwInstructionOffset = 256;
+    exdata.dwInstructionOffset = sizeof(test1_quads);
     exdata.dwInstructionLength = exe_length;
     hr = IDirect3DExecuteBuffer_SetExecuteData(ExecuteBuffer, &exdata);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_SetExecuteData failed with %08x\n", hr);
 
     hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-    ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+    ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
     if (SUCCEEDED(hr)) {
         hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_UNCLIPPED);
         ok(hr == D3D_OK, "IDirect3DDevice_Execute failed, hr = %08x\n", hr);
         hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
     }
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -1572,7 +1705,7 @@ static void D3D1_TextureMapBlendTest(void)
 
     memcpy(exdesc.lpData, test2_quads, sizeof(test2_quads));
 
-    exe_buffer_ptr = 256 + (char*)exdesc.lpData;
+    exe_buffer_ptr = sizeof(test2_quads) + (char*)exdesc.lpData;
 
     EXEBUF_PUT_PROCESSVERTICES(8, exe_buffer_ptr);
 
@@ -1587,29 +1720,29 @@ static void D3D1_TextureMapBlendTest(void)
 
     EXEBUF_END(exe_buffer_ptr);
 
-    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - 256;
+    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - sizeof(test2_quads);
 
     hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     if (FAILED(hr)) {
         trace("IDirect3DExecuteBuffer_Unlock failed with %08x\n", hr);
     }
 
-    memset(&exdata, 0, sizeof(D3DEXECUTEDATA));
-    exdata.dwSize = sizeof(D3DEXECUTEDATA);
+    memset(&exdata, 0, sizeof(exdata));
+    exdata.dwSize = sizeof(exdata);
     exdata.dwVertexCount = 8;
-    exdata.dwInstructionOffset = 256;
+    exdata.dwInstructionOffset = sizeof(test2_quads);
     exdata.dwInstructionLength = exe_length;
     hr = IDirect3DExecuteBuffer_SetExecuteData(ExecuteBuffer, &exdata);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_SetExecuteData failed with %08x\n", hr);
 
     hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-    ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+    ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
     if (SUCCEEDED(hr)) {
         hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_UNCLIPPED);
         ok(hr == D3D_OK, "IDirect3DDevice_Execute failed, hr = %08x\n", hr);
         hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
     }
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -1698,7 +1831,7 @@ static void D3D1_TextureMapBlendTest(void)
 
     memcpy(exdesc.lpData, test1_quads, sizeof(test1_quads));
 
-    exe_buffer_ptr = 256 + (char*)exdesc.lpData;
+    exe_buffer_ptr = sizeof(test1_quads) + (char*)exdesc.lpData;
 
     EXEBUF_PUT_PROCESSVERTICES(8, exe_buffer_ptr);
 
@@ -1713,29 +1846,29 @@ static void D3D1_TextureMapBlendTest(void)
 
     EXEBUF_END(exe_buffer_ptr);
 
-    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - 256;
+    exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - sizeof(test1_quads);
 
     hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
     if (FAILED(hr)) {
         trace("IDirect3DExecuteBuffer_Unlock failed with %08x\n", hr);
     }
 
-    memset(&exdata, 0, sizeof(D3DEXECUTEDATA));
-    exdata.dwSize = sizeof(D3DEXECUTEDATA);
+    memset(&exdata, 0, sizeof(exdata));
+    exdata.dwSize = sizeof(exdata);
     exdata.dwVertexCount = 8;
-    exdata.dwInstructionOffset = 256;
+    exdata.dwInstructionOffset = sizeof(test1_quads);
     exdata.dwInstructionLength = exe_length;
     hr = IDirect3DExecuteBuffer_SetExecuteData(ExecuteBuffer, &exdata);
     ok(hr == D3D_OK, "IDirect3DExecuteBuffer_SetExecuteData failed with %08x\n", hr);
 
     hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-    ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+    ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
     if (SUCCEEDED(hr)) {
         hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_UNCLIPPED);
         ok(hr == D3D_OK, "IDirect3DDevice_Execute failed, hr = %08x\n", hr);
         hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
     }
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -1836,7 +1969,7 @@ static void D3D1_TextureMapBlendTest(void)
 
         memcpy(exdesc.lpData, test1_quads, sizeof(test1_quads));
 
-        exe_buffer_ptr = 256 + (char*)exdesc.lpData;
+        exe_buffer_ptr = sizeof(test1_quads) + (char*)exdesc.lpData;
 
         EXEBUF_PUT_PROCESSVERTICES(8, exe_buffer_ptr);
 
@@ -1851,29 +1984,29 @@ static void D3D1_TextureMapBlendTest(void)
 
         EXEBUF_END(exe_buffer_ptr);
 
-        exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - 256;
+        exe_length = ((char*)exe_buffer_ptr - (char*)exdesc.lpData) - sizeof(test1_quads);
 
         hr = IDirect3DExecuteBuffer_Unlock(ExecuteBuffer);
         if (FAILED(hr)) {
             trace("IDirect3DExecuteBuffer_Unlock failed with %08x\n", hr);
         }
 
-        memset(&exdata, 0, sizeof(D3DEXECUTEDATA));
-        exdata.dwSize = sizeof(D3DEXECUTEDATA);
+        memset(&exdata, 0, sizeof(exdata));
+        exdata.dwSize = sizeof(exdata);
         exdata.dwVertexCount = 8;
-        exdata.dwInstructionOffset = 256;
+        exdata.dwInstructionOffset = sizeof(test1_quads);
         exdata.dwInstructionLength = exe_length;
         hr = IDirect3DExecuteBuffer_SetExecuteData(ExecuteBuffer, &exdata);
         ok(hr == D3D_OK, "IDirect3DExecuteBuffer_SetExecuteData failed with %08x\n", hr);
 
         hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
         if (SUCCEEDED(hr)) {
             hr = IDirect3DDevice_Execute(Direct3DDevice1, ExecuteBuffer, Viewport, D3DEXECUTE_UNCLIPPED);
             ok(hr == D3D_OK, "IDirect3DDevice_Execute failed, hr = %08x\n", hr);
             hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-            ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+            ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
         }
 
         color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -1957,7 +2090,7 @@ static void D3D1_ViewportClearTest(void)
     ok(hr == D3D_OK, "IDirect3DViewport_SetBackground failed: %08x\n", hr);
 
     hr = IDirect3DDevice_BeginScene(Direct3DDevice1);
-    ok(hr == D3D_OK, "IDirect3DDevice3_BeginScene failed with %08x\n", hr);
+    ok(hr == D3D_OK, "IDirect3DDevice_BeginScene failed with %08x\n", hr);
 
     if (SUCCEEDED(hr)) {
         D3DRECT rect;
@@ -1979,7 +2112,7 @@ static void D3D1_ViewportClearTest(void)
         ok(hr == D3D_OK, "IDirect3DViewport_Clear failed: %08x\n", hr);
 
         hr = IDirect3DDevice_EndScene(Direct3DDevice1);
-        ok(hr == D3D_OK, "IDirect3DDevice3_EndScene failed, hr = %08x\n", hr);
+        ok(hr == D3D_OK, "IDirect3DDevice_EndScene failed, hr = %08x\n", hr);
         }
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 5, 5);
@@ -2801,55 +2934,58 @@ out:
 }
 
 /* This test tests depth clamping / clipping behaviour:
- *   - When D3DRS_CLIPPING is disabled depth values are *clamped* to the
- *   minimum/maximum z value.
+ *   - With software vertex processing, depth values are clamped to the
+ *     minimum / maximum z value when D3DRS_CLIPPING is disabled, and clipped
+ *     when D3DRS_CLIPPING is enabled. Pretransformed vertices behave the
+ *     same as regular vertices here.
+ *   - With hardware vertex processing, D3DRS_CLIPPING seems to be ignored.
+ *     Normal vertices are always clipped. Pretransformed vertices are
+ *     clipped when D3DPMISCCAPS_CLIPTLVERTS is set, clamped when it isn't.
  *   - The viewport's MinZ/MaxZ is irrelevant for this.
- *   - When D3DRS_CLIPPING is enabled depth values are clipped.
- *   - Pretransformed vertices behave the same as regular vertices.
  */
 static void depth_clamp_test(IDirect3DDevice7 *device)
 {
     struct tvertex quad1[] =
     {
-        {    0,    0,  5.0f, 1.0, 0xff002b7f},
-        {  640,    0,  5.0f, 1.0, 0xff002b7f},
-        {    0,  480,  5.0f, 1.0, 0xff002b7f},
-        {  640,  480,  5.0f, 1.0, 0xff002b7f},
+        {  0.0f,   0.0f,  5.0f, 1.0f, 0xff002b7f},
+        {640.0f,   0.0f,  5.0f, 1.0f, 0xff002b7f},
+        {  0.0f, 480.0f,  5.0f, 1.0f, 0xff002b7f},
+        {640.0f, 480.0f,  5.0f, 1.0f, 0xff002b7f},
     };
     struct tvertex quad2[] =
     {
-        {    0,  300, 10.0f, 1.0, 0xfff9e814},
-        {  640,  300, 10.0f, 1.0, 0xfff9e814},
-        {    0,  360, 10.0f, 1.0, 0xfff9e814},
-        {  640,  360, 10.0f, 1.0, 0xfff9e814},
+        {  0.0f, 300.0f, 10.0f, 1.0f, 0xfff9e814},
+        {640.0f, 300.0f, 10.0f, 1.0f, 0xfff9e814},
+        {  0.0f, 360.0f, 10.0f, 1.0f, 0xfff9e814},
+        {640.0f, 360.0f, 10.0f, 1.0f, 0xfff9e814},
     };
-    struct vertex quad3[] =
+    struct tvertex quad3[] =
     {
-        {-0.65, 0.55,  5.0f,      0xffffffff},
-        {-0.35, 0.55,  5.0f,      0xffffffff},
-        {-0.65, 0.15,  5.0f,      0xffffffff},
-        {-0.35, 0.15,  5.0f,      0xffffffff},
+        {112.0f, 108.0f,  5.0f, 1.0f, 0xffffffff},
+        {208.0f, 108.0f,  5.0f, 1.0f, 0xffffffff},
+        {112.0f, 204.0f,  5.0f, 1.0f, 0xffffffff},
+        {208.0f, 204.0f,  5.0f, 1.0f, 0xffffffff},
     };
-    struct vertex quad4[] =
+    struct tvertex quad4[] =
     {
-        {-0.87, 0.83, 10.0f,      0xffffffff},
-        {-0.65, 0.83, 10.0f,      0xffffffff},
-        {-0.87, 0.55, 10.0f,      0xffffffff},
-        {-0.65, 0.55, 10.0f,      0xffffffff},
+        { 42.0f,  41.0f, 10.0f, 1.0f, 0xffffffff},
+        {112.0f,  41.0f, 10.0f, 1.0f, 0xffffffff},
+        { 42.0f, 108.0f, 10.0f, 1.0f, 0xffffffff},
+        {112.0f, 108.0f, 10.0f, 1.0f, 0xffffffff},
     };
     struct vertex quad5[] =
     {
-        { -0.5,  0.5, 10.0f,      0xff14f914},
-        {  0.5,  0.5, 10.0f,      0xff14f914},
-        { -0.5, -0.5, 10.0f,      0xff14f914},
-        {  0.5, -0.5, 10.0f,      0xff14f914},
+        { -0.5f,   0.5f, 10.0f,       0xff14f914},
+        {  0.5f,   0.5f, 10.0f,       0xff14f914},
+        { -0.5f,  -0.5f, 10.0f,       0xff14f914},
+        {  0.5f,  -0.5f, 10.0f,       0xff14f914},
     };
-    struct tvertex quad6[] =
+    struct vertex quad6[] =
     {
-        {    0,  120, 10.0f, 1.0, 0xfff91414},
-        {  640,  120, 10.0f, 1.0, 0xfff91414},
-        {    0,  180, 10.0f, 1.0, 0xfff91414},
-        {  640,  180, 10.0f, 1.0, 0xfff91414},
+        { -1.0f,   0.5f, 10.0f,       0xfff91414},
+        {  1.0f,   0.5f, 10.0f,       0xfff91414},
+        { -1.0f,  0.25f, 10.0f,       0xfff91414},
+        {  1.0f,  0.25f, 10.0f,       0xfff91414},
     };
 
     D3DVIEWPORT7 vp;
@@ -2866,7 +3002,7 @@ static void depth_clamp_test(IDirect3DDevice7 *device)
     hr = IDirect3DDevice7_SetViewport(device, &vp);
     ok(SUCCEEDED(hr), "SetViewport failed, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xffffffff, 1.0, 0);
+    hr = IDirect3DDevice7_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xff00ff00, 1.0, 0);
     ok(SUCCEEDED(hr), "Clear failed, hr %#x.\n", hr);
 
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_CLIPPING, FALSE);
@@ -2885,34 +3021,40 @@ static void depth_clamp_test(IDirect3DDevice7 *device)
     ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
     hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_DIFFUSE, quad2, 4, 0);
     ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
-    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_DIFFUSE, quad3, 4, 0);
+
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_CLIPPING, TRUE);
+    ok(SUCCEEDED(hr), "SetRenderState failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_DIFFUSE, quad3, 4, 0);
     ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
-    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_DIFFUSE, quad4, 4, 0);
+    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_DIFFUSE, quad4, 4, 0);
+    ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_CLIPPING, FALSE);
+    ok(SUCCEEDED(hr), "SetRenderState failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_DIFFUSE, quad5, 4, 0);
     ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
 
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_CLIPPING, TRUE);
     ok(SUCCEEDED(hr), "SetRenderState failed, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_DIFFUSE, quad5, 4, 0);
-    ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
-    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_DIFFUSE, quad6, 4, 0);
+    hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_DIFFUSE, quad6, 4, 0);
     ok(SUCCEEDED(hr), "DrawPrimitive failed, hr %#x.\n", hr);
 
     hr = IDirect3DDevice7_EndScene(device);
     ok(SUCCEEDED(hr), "EndScene failed, hr %#x.\n", hr);
 
     color = getPixelColor(device, 75, 75);
-    ok(color_match(color, 0x00ffffff, 1), "color 0x%08x.\n", color);
+    ok(color_match(color, 0x00ffffff, 1) || color_match(color, 0x0000ff00, 1), "color 0x%08x.\n", color);
     color = getPixelColor(device, 150, 150);
-    ok(color_match(color, 0x00ffffff, 1) ||
-       broken(color == 0x00f91414), /* Reference rasterizer */
-       "color 0x%08x.\n", color);
+    ok(color_match(color, 0x00ffffff, 1) || color_match(color, 0x0000ff00, 1), "color 0x%08x.\n", color);
     color = getPixelColor(device, 320, 240);
-    ok(color_match(color, 0x00002b7f, 1), "color 0x%08x.\n", color);
+    ok(color_match(color, 0x00002b7f, 1) || color_match(color, 0x0000ff00, 1), "color 0x%08x.\n", color);
     color = getPixelColor(device, 320, 330);
-    ok(color_match(color, 0x00f9e814, 1), "color 0x%08x.\n", color);
+    ok(color_match(color, 0x00f9e814, 1) || color_match(color, 0x0000ff00, 1), "color 0x%08x.\n", color);
     color = getPixelColor(device, 320, 330);
-    ok(color_match(color, 0x00f9e814, 1), "color 0x%08x.\n", color);
+    ok(color_match(color, 0x00f9e814, 1) || color_match(color, 0x0000ff00, 1), "color 0x%08x.\n", color);
 
     vp.dvMinZ = 0.0;
     vp.dvMaxZ = 1.0;

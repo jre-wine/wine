@@ -159,7 +159,6 @@ static const struct
     { "amd64",   CPU_x86_64 },
     { "x86_64",  CPU_x86_64 },
     { "sparc",   CPU_SPARC },
-    { "alpha",   CPU_ALPHA },
     { "powerpc", CPU_POWERPC },
     { "arm",     CPU_ARM }
 };
@@ -185,6 +184,7 @@ struct options
     enum target_cpu target_cpu;
     enum target_platform target_platform;
     const char *target;
+    const char *version;
     int shared;
     int use_msvcrt;
     int nostdinc;
@@ -199,6 +199,7 @@ struct options
     int force_pointer_size;
     int large_address_aware;
     int unwind_tables;
+    int strip;
     const char* wine_objdir;
     const char* output_name;
     const char* image_base;
@@ -218,8 +219,6 @@ static const enum target_cpu build_cpu = CPU_x86;
 static const enum target_cpu build_cpu = CPU_x86_64;
 #elif defined(__sparc__)
 static const enum target_cpu build_cpu = CPU_SPARC;
-#elif defined(__ALPHA__)
-static const enum target_cpu build_cpu = CPU_ALPHA;
 #elif defined(__powerpc__)
 static const enum target_cpu build_cpu = CPU_POWERPC;
 #elif defined(__arm__)
@@ -283,30 +282,49 @@ static char* get_temp_file(const char* prefix, const char* suffix)
     return tmp;
 }
 
+static char* build_tool_name(struct options *opts, const char* base, const char* deflt)
+{
+    char* str;
+
+    if (opts->target && opts->version)
+    {
+        str = strmake("%s-%s-%s", opts->target, base, opts->version);
+    }
+    else if (opts->target)
+    {
+        str = strmake("%s-%s", opts->target, base);
+    }
+    else if (opts->version)
+    {
+        str = strmake("%s-%s", base, opts->version);
+    }
+    else
+        str = xstrdup(deflt);
+    return str;
+}
+
 static const strarray* get_translator(struct options *opts)
 {
-    const char *str = NULL;
+    char *str = NULL;
     strarray *ret;
 
     switch(opts->processor)
     {
     case proc_cpp:
-        if (opts->target) str = strmake( "%s-cpp", opts->target );
-        else str = CPP;
+        str = build_tool_name(opts, "cpp", CPP);
         break;
     case proc_cc:
     case proc_as:
-        if (opts->target) str = strmake( "%s-gcc", opts->target );
-        else str = CC;
+        str = build_tool_name(opts, "gcc", CC);
         break;
     case proc_cxx:
-        if (opts->target) str = strmake( "%s-g++", opts->target );
-        else str = CXX;
+        str = build_tool_name(opts, "g++", CXX);
         break;
     default:
         assert(0);
     }
     ret = strarray_fromstring( str, " " );
+    free(str);
     if (opts->force_pointer_size)
         strarray_add( ret, strmake("-m%u", 8 * opts->force_pointer_size ));
     return ret;
@@ -379,6 +397,8 @@ static void compile(struct options* opts, const char* lang)
     strarray* comp_args = strarray_alloc();
     unsigned int j;
     int gcc_defs = 0;
+    char* gcc;
+    char* gpp;
 
     strarray_addall(comp_args, get_translator(opts));
     switch(opts->processor)
@@ -389,12 +409,16 @@ static void compile(struct options* opts, const char* lang)
 	/* mixing different C and C++ compilers isn't supported in configure anyway */
 	case proc_cc:
 	case proc_cxx:
+            gcc = build_tool_name(opts, "gcc", CC);
+            gpp = build_tool_name(opts, "g++", CXX);
             for ( j = 0; !gcc_defs && j < comp_args->size; j++ )
             {
                 const char *cc = comp_args->base[j];
 
-                gcc_defs = strendswith(cc, "gcc") || strendswith(cc, "g++");
+                gcc_defs = strendswith(cc, gcc) || strendswith(cc, gpp);
             }
+            free(gcc);
+            free(gpp);
             break;
     }
 
@@ -624,16 +648,17 @@ static const char *mingw_unicode_hack( struct options *opts )
     char *main_stub = get_temp_file( opts->output_name, ".c" );
 
     create_file( main_stub, 0644,
-                 "#include <stdarg.h>\n"
-                 "#include <windef.h>\n"
-                 "#include <winbase.h>\n"
+                 "typedef unsigned short wchar_t;\n"
+                 "extern void * __stdcall LoadLibraryA(const char *);\n"
+                 "extern void * __stdcall GetProcAddress(void *,const char *);\n"
+                 "extern int wmain( int argc, wchar_t *argv[] );\n\n"
                  "int main( int argc, char *argv[] )\n{\n"
                  "    int wargc;\n"
                  "    wchar_t **wargv, **wenv;\n"
-                 "    HMODULE msvcrt = LoadLibraryA( \"msvcrt.dll\" );\n"
-                 "    void __cdecl (*__wgetmainargs)(int *argc, wchar_t** *wargv, wchar_t** *wenvp, int expand_wildcards,\n"
-                 "                                   int *new_mode) = (void *)GetProcAddress( msvcrt, \"__wgetmainargs\" );\n"
-                 "    __wgetmainargs( &wargc, &wargv, &wenv, 0, NULL );\n"
+                 "    void *msvcrt = LoadLibraryA( \"msvcrt.dll\" );\n"
+                 "    void (*__wgetmainargs)(int *argc, wchar_t** *wargv, wchar_t** *wenvp, int expand_wildcards,\n"
+                 "                           int *new_mode) = GetProcAddress( msvcrt, \"__wgetmainargs\" );\n"
+                 "    __wgetmainargs( &wargc, &wargv, &wenv, 0, 0 );\n"
                  "    return wmain( wargc, wargv );\n}\n" );
     return compile_to_object( opts, main_stub, NULL );
 }
@@ -986,6 +1011,8 @@ static void build(struct options* opts)
             strarray_add(link_args, "-image_base");
             strarray_add(link_args, opts->image_base);
         }
+        if (opts->strip)
+            strarray_add(link_args, "-Wl,-x");
         break;
     case PLATFORM_SOLARIS:
         {
@@ -1114,7 +1141,7 @@ static int is_linker_arg(const char* arg)
  */
 static int is_target_arg(const char* arg)
 {
-    return arg[1] == 'b' || arg[2] == 'V';
+    return arg[1] == 'b' || arg[1] == 'V';
 }
 
 
@@ -1229,7 +1256,7 @@ int main(int argc, char **argv)
     {
         if (argv[i][0] == '-')  /* option */
 	{
-	    /* determine if tihs switch is followed by a separate argument */
+	    /* determine if this switch is followed by a separate argument */
 	    next_is_arg = 0;
 	    option_arg = 0;
 	    switch(argv[i][1])
@@ -1271,7 +1298,11 @@ int main(int argc, char **argv)
 			next_is_arg = 1;
 		    break;
 	    }
-	    if (next_is_arg) option_arg = argv[i+1];
+	    if (next_is_arg)
+            {
+                if (i + 1 >= argc) error("option -%c requires an argument\n", argv[i][1]);
+                option_arg = argv[i+1];
+            }
 
 	    /* determine what options go 'as is' to the linker & the compiler */
 	    raw_compiler_arg = raw_linker_arg = 0;
@@ -1291,7 +1322,7 @@ int main(int argc, char **argv)
 		raw_linker_arg = 0;
 	    if (argv[i][1] == 'c' || argv[i][1] == 'L')
 		raw_compiler_arg = 0;
-	    if (argv[i][1] == 'o' || argv[i][1] == 'b')
+	    if (argv[i][1] == 'o' || argv[i][1] == 'b' || argv[i][1] == 'V')
 		raw_compiler_arg = raw_linker_arg = 0;
 
 	    /* do a bit of semantic analysis */
@@ -1299,6 +1330,7 @@ int main(int argc, char **argv)
 	    {
 		case 'B':
 		    str = strdup(option_arg);
+		    if (strendswith(str, "/")) str[strlen(str) - 1] = 0;
 		    if (strendswith(str, "/tools/winebuild"))
                     {
                         char *objdir = strdup(str);
@@ -1307,12 +1339,14 @@ int main(int argc, char **argv)
                         /* don't pass it to the compiler, this generates warnings */
                         raw_compiler_arg = raw_linker_arg = 0;
                     }
-		    if (strendswith(str, "/")) str[strlen(str) - 1] = 0;
                     if (!opts.prefix) opts.prefix = strarray_alloc();
                     strarray_add(opts.prefix, str);
 		    break;
                 case 'b':
                     parse_target_option( &opts, option_arg );
+                    break;
+                case 'V':
+                    opts.version = xstrdup( option_arg );
                     break;
                 case 'c':        /* compile or assemble */
 		    if (argv[i][2] == 0) opts.compile_only = 1;
@@ -1361,6 +1395,8 @@ int main(int argc, char **argv)
                         opts.force_pointer_size = 8;
 			raw_linker_arg = 1;
                     }
+                    else if (strncmp("-mcpu=", argv[i], 6) == 0)
+                        strarray_add(opts.winebuild_args, argv[i]);
 		    break;
                 case 'n':
                     if (strcmp("-nostdinc", argv[i]) == 0)
@@ -1385,6 +1421,15 @@ int main(int argc, char **argv)
 			opts.shared = 1;
                         raw_compiler_arg = raw_linker_arg = 0;
 		    }
+                    else if (strcmp("-s", argv[i]) == 0 && opts.target_platform == PLATFORM_APPLE)
+                    {
+                        /* On Mac, change -s into -Wl,-x. ld's -s switch
+                         * is deprecated, and it doesn't work on Tiger with
+                         * MH_BUNDLEs anyway
+                         */
+                        opts.strip = 1;
+                        raw_linker_arg = 0;
+                    }
                     break;
                 case 'v':
                     if (argv[i][2] == 0) verbose++;

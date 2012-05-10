@@ -65,30 +65,6 @@ MAKE_FUNCPTR(xsltParseStylesheetDoc);
 # undef MAKE_FUNCPTR
 #endif
 
-/* TODO: get rid of these and use the enum */
-static const WCHAR szBinBase64[]  = {'b','i','n','.','b','a','s','e','6','4',0};
-static const WCHAR szString[]     = {'s','t','r','i','n','g',0};
-static const WCHAR szNumber[]     = {'n','u','m','b','e','r',0};
-static const WCHAR szInt[]        = {'I','n','t',0};
-static const WCHAR szFixed[]      = {'F','i','x','e','d','.','1','4','.','4',0};
-static const WCHAR szBoolean[]    = {'B','o','o','l','e','a','n',0};
-static const WCHAR szDateTime[]   = {'d','a','t','e','T','i','m','e',0};
-static const WCHAR szDateTimeTZ[] = {'d','a','t','e','T','i','m','e','.','t','z',0};
-static const WCHAR szDate[]       = {'D','a','t','e',0};
-static const WCHAR szTime[]       = {'T','i','m','e',0};
-static const WCHAR szTimeTZ[]     = {'T','i','m','e','.','t','z',0};
-static const WCHAR szI1[]         = {'i','1',0};
-static const WCHAR szI2[]         = {'i','2',0};
-static const WCHAR szI4[]         = {'i','4',0};
-static const WCHAR szIU1[]        = {'u','i','1',0};
-static const WCHAR szIU2[]        = {'u','i','2',0};
-static const WCHAR szIU4[]        = {'u','i','4',0};
-static const WCHAR szR4[]         = {'r','4',0};
-static const WCHAR szR8[]         = {'r','8',0};
-static const WCHAR szFloat[]      = {'f','l','o','a','t',0};
-static const WCHAR szUUID[]       = {'u','u','i','d',0};
-static const WCHAR szBinHex[]     = {'b','i','n','.','h','e','x',0};
-
 static const IID IID_xmlnode = {0x4f2f4ba2,0xb822,0x11df,{0x8b,0x8a,0x68,0x50,0xdf,0xd7,0x20,0x85}};
 
 xmlNodePtr xmlNodePtr_from_domnode( IXMLDOMNode *iface, xmlElementType type )
@@ -113,10 +89,98 @@ BOOL node_query_interface(xmlnode *This, REFIID riid, void **ppv)
         return TRUE;
     }
 
-    if(This->dispex.outer)
-        return dispex_query_interface(&This->dispex, riid, ppv);
+    return dispex_query_interface(&This->dispex, riid, ppv);
+}
 
-    return FALSE;
+/* common ISupportErrorInfo implementation */
+typedef struct {
+   ISupportErrorInfo ISupportErrorInfo_iface;
+   LONG ref;
+
+   const tid_t* iids;
+} SupportErrorInfo;
+
+static inline SupportErrorInfo *impl_from_ISupportErrorInfo(ISupportErrorInfo *iface)
+{
+    return CONTAINING_RECORD(iface, SupportErrorInfo, ISupportErrorInfo_iface);
+}
+
+static HRESULT WINAPI SupportErrorInfo_QueryInterface(ISupportErrorInfo *iface, REFIID riid, void **obj)
+{
+    SupportErrorInfo *This = impl_from_ISupportErrorInfo(iface);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+
+    *obj = NULL;
+
+    if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_ISupportErrorInfo)) {
+        *obj = iface;
+        ISupportErrorInfo_AddRef(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI SupportErrorInfo_AddRef(ISupportErrorInfo *iface)
+{
+    SupportErrorInfo *This = impl_from_ISupportErrorInfo(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref );
+    return ref;
+}
+
+static ULONG WINAPI SupportErrorInfo_Release(ISupportErrorInfo *iface)
+{
+    SupportErrorInfo *This = impl_from_ISupportErrorInfo(iface);
+    LONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (ref == 0)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI SupportErrorInfo_InterfaceSupportsErrorInfo(ISupportErrorInfo *iface, REFIID riid)
+{
+    SupportErrorInfo *This = impl_from_ISupportErrorInfo(iface);
+    enum tid_t const *tid;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_guid(riid));
+
+    tid = This->iids;
+    while (*tid)
+    {
+        if (IsEqualGUID(riid, get_riid_from_tid(*tid)))
+            return S_OK;
+        tid++;
+    }
+
+    return S_FALSE;
+}
+
+static const struct ISupportErrorInfoVtbl SupportErrorInfoVtbl = {
+    SupportErrorInfo_QueryInterface,
+    SupportErrorInfo_AddRef,
+    SupportErrorInfo_Release,
+    SupportErrorInfo_InterfaceSupportsErrorInfo
+};
+
+HRESULT node_create_supporterrorinfo(enum tid_t const *iids, void **obj)
+{
+    SupportErrorInfo *This;
+
+    This = heap_alloc(sizeof(*This));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->ISupportErrorInfo_iface.lpVtbl = &SupportErrorInfoVtbl;
+    This->ref = 1;
+    This->iids = iids;
+
+    *obj = &This->ISupportErrorInfo_iface;
+
+    return S_OK;
 }
 
 xmlnode *get_node_obj(IXMLDOMNode *node)
@@ -131,12 +195,33 @@ xmlnode *get_node_obj(IXMLDOMNode *node)
 
 HRESULT node_get_nodeName(xmlnode *This, BSTR *name)
 {
+    BSTR prefix, base;
+    HRESULT hr;
+
     if (!name)
         return E_INVALIDARG;
 
-    *name = bstr_from_xmlChar(This->node->name);
-    if (!*name)
-        return S_FALSE;
+    hr = node_get_base_name(This, &base);
+    if (hr != S_OK) return hr;
+
+    hr = node_get_prefix(This, &prefix);
+    if (hr == S_OK)
+    {
+        static const WCHAR colW = ':';
+        WCHAR *ptr;
+
+        /* +1 for ':' */
+        ptr = *name = SysAllocStringLen(NULL, SysStringLen(base) + SysStringLen(prefix) + 1);
+        memcpy(ptr, prefix, SysStringByteLen(prefix));
+        ptr += SysStringLen(prefix);
+        memcpy(ptr++, &colW, sizeof(WCHAR));
+        memcpy(ptr, base, SysStringByteLen(base));
+
+        SysFreeString(base);
+        SysFreeString(prefix);
+    }
+    else
+        *name = base;
 
     return S_OK;
 }
@@ -162,7 +247,7 @@ HRESULT node_set_content(xmlnode *This, LPCWSTR value)
     xmlChar *str;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(value));
-    str = xmlChar_from_wchar(value);
+    str = xmlchar_from_wchar(value);
     if(!str)
         return E_OUTOFMEMORY;
 
@@ -176,7 +261,7 @@ static HRESULT node_set_content_escaped(xmlnode *This, LPCWSTR value)
     xmlChar *str, *escaped;
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(value));
-    str = xmlChar_from_wchar(value);
+    str = xmlchar_from_wchar(value);
     if(!str)
         return E_OUTOFMEMORY;
 
@@ -292,9 +377,9 @@ HRESULT node_get_next_sibling(xmlnode *This, IXMLDOMNode **ret)
 HRESULT node_insert_before(xmlnode *This, IXMLDOMNode *new_child, const VARIANT *ref_child,
         IXMLDOMNode **ret)
 {
-    xmlNodePtr new_child_node;
     IXMLDOMNode *before = NULL;
     xmlnode *node_obj;
+    xmlDocPtr doc;
     HRESULT hr;
 
     if(!new_child)
@@ -311,8 +396,11 @@ HRESULT node_insert_before(xmlnode *This, IXMLDOMNode *new_child, const VARIANT 
 
     case VT_UNKNOWN:
     case VT_DISPATCH:
-        hr = IUnknown_QueryInterface(V_UNKNOWN(ref_child), &IID_IXMLDOMNode, (void**)&before);
-        if(FAILED(hr)) return hr;
+        if (V_UNKNOWN(ref_child))
+        {
+            hr = IUnknown_QueryInterface(V_UNKNOWN(ref_child), &IID_IXMLDOMNode, (void**)&before);
+            if(FAILED(hr)) return hr;
+        }
         break;
 
     default:
@@ -320,12 +408,11 @@ HRESULT node_insert_before(xmlnode *This, IXMLDOMNode *new_child, const VARIANT 
         return E_FAIL;
     }
 
-    new_child_node = node_obj->node;
-    TRACE("new_child_node %p This->node %p\n", new_child_node, This->node);
+    TRACE("new child %p, This->node %p\n", node_obj->node, This->node);
 
-    if(!new_child_node->parent)
-        if(xmldoc_remove_orphan(new_child_node->doc, new_child_node) != S_OK)
-            WARN("%p is not an orphan of %p\n", new_child_node, new_child_node->doc);
+    if(!node_obj->node->parent)
+        if(xmldoc_remove_orphan(node_obj->node->doc, node_obj->node) != S_OK)
+            WARN("%p is not an orphan of %p\n", node_obj->node, node_obj->node->doc);
 
     if(before)
     {
@@ -335,16 +422,30 @@ HRESULT node_insert_before(xmlnode *This, IXMLDOMNode *new_child, const VARIANT 
 
         /* unlink from current parent first */
         if(node_obj->parent)
-            IXMLDOMNode_removeChild(node_obj->parent, node_obj->iface, NULL);
-        xmlAddPrevSibling(before_node_obj->node, new_child_node);
+        {
+            hr = IXMLDOMNode_removeChild(node_obj->parent, node_obj->iface, NULL);
+            if (hr == S_OK) xmldoc_remove_orphan(node_obj->node->doc, node_obj->node);
+        }
+        doc = node_obj->node->doc;
+        xmldoc_add_ref(before_node_obj->node->doc);
+        xmlAddPrevSibling(before_node_obj->node, node_obj->node);
+        xmldoc_release(doc);
         node_obj->parent = This->parent;
     }
     else
     {
         /* unlink from current parent first */
         if(node_obj->parent)
-            IXMLDOMNode_removeChild(node_obj->parent, node_obj->iface, NULL);
-        xmlAddChild(This->node, new_child_node);
+        {
+            hr = IXMLDOMNode_removeChild(node_obj->parent, node_obj->iface, NULL);
+            if (hr == S_OK) xmldoc_remove_orphan(node_obj->node->doc, node_obj->node);
+        }
+        doc = node_obj->node->doc;
+        xmldoc_add_ref(This->node->doc);
+        /* xmlAddChild doesn't unlink node from previous parent */
+        xmlUnlinkNode(node_obj->node);
+        xmlAddChild(This->node, node_obj->node);
+        xmldoc_release(doc);
         node_obj->parent = This->iface;
     }
 
@@ -438,6 +539,7 @@ HRESULT node_remove_child(xmlnode *This, IXMLDOMNode* child, IXMLDOMNode** oldCh
 
     xmlUnlinkNode(child_node->node);
     child_node->parent = NULL;
+    xmldoc_add_orphan(child_node->node->doc, child_node->node);
 
     if(oldChild)
     {
@@ -500,6 +602,8 @@ HRESULT node_clone(xmlnode *This, VARIANT_BOOL deep, IXMLDOMNode **cloneNode)
         if (!node)
         {
             ERR("Copy failed\n");
+            xmldoc_remove_orphan(clone->doc, clone);
+            xmlFreeNode(clone);
             return E_FAIL;
         }
 
@@ -627,7 +731,7 @@ HRESULT node_put_text(xmlnode *This, BSTR text)
 
     TRACE("(%p)->(%s)\n", This, debugstr_w(text));
 
-    str = xmlChar_from_wchar(text);
+    str = xmlchar_from_wchar(text);
 
     /* Escape the string. */
     str2 = xmlEncodeEntitiesReentrant(This->node->doc, str);
@@ -635,188 +739,6 @@ HRESULT node_put_text(xmlnode *This, BSTR text)
 
     xmlNodeSetContent(This->node, str2);
     xmlFree(str2);
-
-    return S_OK;
-}
-
-static inline BYTE hex_to_byte(xmlChar c)
-{
-    if(c <= '9') return c-'0';
-    if(c <= 'F') return c-'A'+10;
-    return c-'a'+10;
-}
-
-static inline BYTE base64_to_byte(xmlChar c)
-{
-    if(c == '+') return 62;
-    if(c == '/') return 63;
-    if(c <= '9') return c-'0'+52;
-    if(c <= 'Z') return c-'A';
-    return c-'a'+26;
-}
-
-/* TODO: phasing this version out */
-static inline HRESULT VARIANT_from_xmlChar(xmlChar *str, VARIANT *v, BSTR type)
-{
-    if(!type || !lstrcmpiW(type, szString) ||
-            !lstrcmpiW(type, szNumber) || !lstrcmpiW(type, szUUID))
-    {
-        V_VT(v) = VT_BSTR;
-        V_BSTR(v) = bstr_from_xmlChar(str);
-
-        if(!V_BSTR(v))
-            return E_OUTOFMEMORY;
-    }
-    else if(!lstrcmpiW(type, szDateTime) || !lstrcmpiW(type, szDateTimeTZ) ||
-            !lstrcmpiW(type, szDate) || !lstrcmpiW(type, szTime) ||
-            !lstrcmpiW(type, szTimeTZ))
-    {
-        VARIANT src;
-        WCHAR *p, *e;
-        SYSTEMTIME st;
-        DOUBLE date = 0.0;
-
-        st.wYear = 1899;
-        st.wMonth = 12;
-        st.wDay = 30;
-        st.wDayOfWeek = st.wHour = st.wMinute = st.wSecond = st.wMilliseconds = 0;
-
-        V_VT(&src) = VT_BSTR;
-        V_BSTR(&src) = bstr_from_xmlChar(str);
-
-        if(!V_BSTR(&src))
-            return E_OUTOFMEMORY;
-
-        p = V_BSTR(&src);
-        e = p + SysStringLen(V_BSTR(&src));
-
-        if(p+4<e && *(p+4)=='-') /* parse date (yyyy-mm-dd) */
-        {
-            st.wYear = atoiW(p);
-            st.wMonth = atoiW(p+5);
-            st.wDay = atoiW(p+8);
-            p += 10;
-
-            if(*p == 'T') p++;
-        }
-
-        if(p+2<e && *(p+2)==':') /* parse time (hh:mm:ss.?) */
-        {
-            st.wHour = atoiW(p);
-            st.wMinute = atoiW(p+3);
-            st.wSecond = atoiW(p+6);
-            p += 8;
-
-            if(*p == '.')
-            {
-                p++;
-                while(isdigitW(*p)) p++;
-            }
-        }
-
-        SystemTimeToVariantTime(&st, &date);
-        V_VT(v) = VT_DATE;
-        V_DATE(v) = date;
-
-        if(*p == '+') /* parse timezone offset (+hh:mm) */
-            V_DATE(v) += (DOUBLE)atoiW(p+1)/24 + (DOUBLE)atoiW(p+4)/1440;
-        else if(*p == '-') /* parse timezone offset (-hh:mm) */
-            V_DATE(v) -= (DOUBLE)atoiW(p+1)/24 + (DOUBLE)atoiW(p+4)/1440;
-
-        VariantClear(&src);
-    }
-    else if(!lstrcmpiW(type, szBinHex))
-    {
-        SAFEARRAYBOUND sab;
-        int i, len;
-
-        len = xmlStrlen(str)/2;
-        sab.lLbound = 0;
-        sab.cElements = len;
-
-        V_VT(v) = (VT_ARRAY|VT_UI1);
-        V_ARRAY(v) = SafeArrayCreate(VT_UI1, 1, &sab);
-
-        if(!V_ARRAY(v))
-            return E_OUTOFMEMORY;
-
-        for(i=0; i<len; i++)
-            ((BYTE*)V_ARRAY(v)->pvData)[i] = (hex_to_byte(str[2*i])<<4)
-                + hex_to_byte(str[2*i+1]);
-    }
-    else if(!lstrcmpiW(type, szBinBase64))
-    {
-        SAFEARRAYBOUND sab;
-        int i, len;
-
-        len  = xmlStrlen(str);
-        if(str[len-2] == '=') i = 2;
-        else if(str[len-1] == '=') i = 1;
-        else i = 0;
-
-        sab.lLbound = 0;
-        sab.cElements = len/4*3-i;
-
-        V_VT(v) = (VT_ARRAY|VT_UI1);
-        V_ARRAY(v) = SafeArrayCreate(VT_UI1, 1, &sab);
-
-        if(!V_ARRAY(v))
-            return E_OUTOFMEMORY;
-
-        for(i=0; i<len/4; i++)
-        {
-            ((BYTE*)V_ARRAY(v)->pvData)[3*i] = (base64_to_byte(str[4*i])<<2)
-                + (base64_to_byte(str[4*i+1])>>4);
-            if(3*i+1 < sab.cElements)
-                ((BYTE*)V_ARRAY(v)->pvData)[3*i+1] = (base64_to_byte(str[4*i+1])<<4)
-                    + (base64_to_byte(str[4*i+2])>>2);
-            if(3*i+2 < sab.cElements)
-                ((BYTE*)V_ARRAY(v)->pvData)[3*i+2] = (base64_to_byte(str[4*i+2])<<6)
-                    + base64_to_byte(str[4*i+3]);
-        }
-    }
-    else
-    {
-        VARIANT src;
-        HRESULT hres;
-
-        if(!lstrcmpiW(type, szInt) || !lstrcmpiW(type, szI4))
-            V_VT(v) = VT_I4;
-        else if(!lstrcmpiW(type, szFixed))
-            V_VT(v) = VT_CY;
-        else if(!lstrcmpiW(type, szBoolean))
-            V_VT(v) = VT_BOOL;
-        else if(!lstrcmpiW(type, szI1))
-            V_VT(v) = VT_I1;
-        else if(!lstrcmpiW(type, szI2))
-            V_VT(v) = VT_I2;
-        else if(!lstrcmpiW(type, szIU1))
-            V_VT(v) = VT_UI1;
-        else if(!lstrcmpiW(type, szIU2))
-            V_VT(v) = VT_UI2;
-        else if(!lstrcmpiW(type, szIU4))
-            V_VT(v) = VT_UI4;
-        else if(!lstrcmpiW(type, szR4))
-            V_VT(v) = VT_R4;
-        else if(!lstrcmpiW(type, szR8) || !lstrcmpiW(type, szFloat))
-            V_VT(v) = VT_R8;
-        else
-        {
-            FIXME("Type handling not yet implemented\n");
-            V_VT(v) = VT_BSTR;
-        }
-
-        V_VT(&src) = VT_BSTR;
-        V_BSTR(&src) = bstr_from_xmlChar(str);
-
-        if(!V_BSTR(&src))
-            return E_OUTOFMEMORY;
-
-        hres = VariantChangeTypeEx(v, &src, MAKELCID(MAKELANGID(
-                        LANG_ENGLISH,SUBLANG_ENGLISH_US),SORT_DEFAULT),0, V_VT(v));
-        VariantClear(&src);
-        return hres;
-    }
 
     return S_OK;
 }
@@ -842,7 +764,7 @@ BSTR EnsureCorrectEOL(BSTR sInput)
     if(nNum > 0)
     {
         int nPlace = 0;
-        sNew = SysAllocStringLen(NULL, nLen + nNum+1);
+        sNew = SysAllocStringLen(NULL, nLen + nNum);
         for(i=0; i < nLen; i++)
         {
             if(sInput[i] == '\n')
@@ -1015,8 +937,8 @@ HRESULT node_select_nodes(const xmlnode *This, BSTR query, IXMLDOMNodeList **nod
 
     if (!query || !nodes) return E_INVALIDARG;
 
-    str = xmlChar_from_wchar(query);
-    hr = queryresult_create(This->node, str, nodes);
+    str = xmlchar_from_wchar(query);
+    hr = create_selection(This->node, str, nodes);
     heap_free(str);
 
     return hr;
@@ -1038,18 +960,15 @@ HRESULT node_select_singlenode(const xmlnode *This, BSTR query, IXMLDOMNode **no
 
 HRESULT node_get_namespaceURI(xmlnode *This, BSTR *namespaceURI)
 {
-    xmlNsPtr *ns;
+    xmlNsPtr ns = This->node->ns;
 
     if(!namespaceURI)
         return E_INVALIDARG;
 
     *namespaceURI = NULL;
 
-    if ((ns = xmlGetNsList(This->node->doc, This->node)))
-    {
-        if (ns[0]->href) *namespaceURI = bstr_from_xmlChar( ns[0]->href );
-        xmlFree(ns);
-    }
+    if (ns && ns->href)
+        *namespaceURI = bstr_from_xmlChar(ns->href);
 
     TRACE("uri: %s\n", debugstr_w(*namespaceURI));
 
@@ -1058,17 +977,14 @@ HRESULT node_get_namespaceURI(xmlnode *This, BSTR *namespaceURI)
 
 HRESULT node_get_prefix(xmlnode *This, BSTR *prefix)
 {
-    xmlNsPtr *ns;
+    xmlNsPtr ns = This->node->ns;
 
     if (!prefix) return E_INVALIDARG;
 
     *prefix = NULL;
 
-    if ((ns = xmlGetNsList(This->node->doc, This->node)))
-    {
-        if (ns[0]->prefix) *prefix = bstr_from_xmlChar( ns[0]->prefix );
-        xmlFree(ns);
-    }
+    if (ns && ns->prefix)
+        *prefix = bstr_from_xmlChar(ns->prefix);
 
     TRACE("prefix: %s\n", debugstr_w(*prefix));
 
@@ -1091,6 +1007,7 @@ void destroy_xmlnode(xmlnode *This)
 {
     if(This->node)
         xmldoc_release(This->node->doc);
+    release_dispex(&This->dispex);
 }
 
 void init_xmlnode(xmlnode *This, xmlNodePtr node, IXMLDOMNode *node_iface, dispex_static_data_t *dispex_data)
@@ -1102,10 +1019,7 @@ void init_xmlnode(xmlnode *This, xmlNodePtr node, IXMLDOMNode *node_iface, dispe
     This->iface = node_iface;
     This->parent = NULL;
 
-    if(dispex_data)
-        init_dispex(&This->dispex, (IUnknown*)This->iface, dispex_data);
-    else
-        This->dispex.outer = NULL;
+    init_dispex(&This->dispex, (IUnknown*)This->iface, dispex_data);
 }
 
 typedef struct {

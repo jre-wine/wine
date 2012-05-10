@@ -32,6 +32,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "excpt.h"
+#include "winioctl.h"
 #include "ddk/ntddk.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
@@ -40,6 +41,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
+
+BOOLEAN KdDebuggerEnabled = FALSE;
 
 extern LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs );
 
@@ -65,6 +68,13 @@ struct IrpInstance
     struct list entry;
     IRP *irp;
 };
+
+/* tid of the thread running client request */
+static DWORD request_thread;
+
+/* pid/tid of the client thread */
+static DWORD client_tid;
+static DWORD client_pid;
 
 #ifdef __i386__
 #define DEFINE_FASTCALL1_ENTRYPOINT( name ) \
@@ -142,7 +152,15 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     memset( &mdl, 0x77, sizeof(mdl) );
 
     irp.RequestorMode = UserMode;
-    irp.AssociatedIrp.SystemBuffer = in_buff;
+    if ((code & 3) == METHOD_BUFFERED)
+    {
+        irp.AssociatedIrp.SystemBuffer = HeapAlloc( GetProcessHeap(), 0, max( in_size, *out_size ) );
+        if (!irp.AssociatedIrp.SystemBuffer)
+            return STATUS_NO_MEMORY;
+        memcpy( irp.AssociatedIrp.SystemBuffer, in_buff, in_size );
+    }
+    else
+        irp.AssociatedIrp.SystemBuffer = in_buff;
     irp.UserBuffer = out_buff;
     irp.MdlAddress = &mdl;
     irp.Tail.Overlay.s.u2.CurrentStackLocation = &irpsp;
@@ -177,6 +195,11 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
                  GetCurrentThreadId(), dispatch, device, &irp, status );
 
     *out_size = (irp.IoStatus.u.Status >= 0) ? irp.IoStatus.Information : 0;
+    if ((code & 3) == METHOD_BUFFERED)
+    {
+        memcpy( out_buff, irp.AssociatedIrp.SystemBuffer, *out_size );
+        HeapFree( GetProcessHeap(), 0, irp.AssociatedIrp.SystemBuffer );
+    }
     return irp.IoStatus.u.Status;
 }
 
@@ -194,6 +217,8 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
     DEVICE_OBJECT *device = NULL;
     ULONG in_size = 4096, out_size = 0;
     HANDLE handles[2];
+
+    request_thread = GetCurrentThreadId();
 
     if (!(in_buff = HeapAlloc( GetProcessHeap(), 0, in_size )))
     {
@@ -215,11 +240,13 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             wine_server_set_reply( req, in_buff, in_size );
             if (!(status = wine_server_call( req )))
             {
-                code     = reply->code;
-                ioctl    = reply->next;
-                device   = wine_server_get_ptr( reply->user_ptr );
-                in_size  = reply->in_size;
-                out_size = reply->out_size;
+                code       = reply->code;
+                ioctl      = reply->next;
+                device     = wine_server_get_ptr( reply->user_ptr );
+                client_tid = reply->client_pid;
+                client_pid = reply->client_tid;
+                in_size    = reply->in_size;
+                out_size   = reply->out_size;
             }
             else
             {
@@ -811,6 +838,15 @@ NTSTATUS WINAPI IoRegisterShutdownNotification( PDEVICE_OBJECT obj )
 
 
 /***********************************************************************
+ *           IoUnregisterShutdownNotification    (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI IoUnregisterShutdownNotification( PDEVICE_OBJECT obj )
+{
+    FIXME( "stub: %p\n", obj );
+}
+
+
+/***********************************************************************
  *           IoReportResourceUsage    (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI IoReportResourceUsage(PUNICODE_STRING name, PDRIVER_OBJECT drv_obj, PCM_RESOURCE_LIST drv_list,
@@ -1049,6 +1085,19 @@ void WINAPI ExInitializeNPagedLookasideList(PNPAGED_LOOKASIDE_LIST Lookaside,
     FIXME( "stub: %p, %p, %p, %u, %lu, %u, %u\n", Lookaside, Allocate, Free, Flags, Size, Tag, Depth );
 }
 
+/***********************************************************************
+ *           ExInitializePagedLookasideList   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExInitializePagedLookasideList(PPAGED_LOOKASIDE_LIST Lookaside,
+                                           PALLOCATE_FUNCTION Allocate,
+                                           PFREE_FUNCTION Free,
+                                           ULONG Flags,
+                                           SIZE_T Size,
+                                           ULONG Tag,
+                                           USHORT Depth)
+{
+    FIXME( "stub: %p, %p, %p, %u, %lu, %u, %u\n", Lookaside, Allocate, Free, Flags, Size, Tag, Depth );
+}
 
 /***********************************************************************
  *           ExInitializeZone   (NTOSKRNL.EXE.@)
@@ -1070,6 +1119,15 @@ NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING Redi
 {
     FIXME("(%p %p %d): stub\n", MupHandle, RedirDevName, MailslotsSupported);
     return STATUS_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *           IoGetCurrentProcess / PsGetCurrentProcess   (NTOSKRNL.EXE.@)
+ */
+PEPROCESS WINAPI IoGetCurrentProcess(void)
+{
+    FIXME("() stub\n");
+    return NULL;
 }
 
 /***********************************************************************
@@ -1096,6 +1154,27 @@ void WINAPI KeInitializeEvent( PRKEVENT Event, EVENT_TYPE Type, BOOLEAN State )
 void WINAPI KeInitializeMutex(PRKMUTEX Mutex, ULONG Level)
 {
     FIXME( "stub: %p, %u\n", Mutex, Level );
+}
+
+
+ /***********************************************************************
+ *           KeWaitForMutexObject   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI KeWaitForMutexObject(PRKMUTEX Mutex, KWAIT_REASON WaitReason, KPROCESSOR_MODE WaitMode,
+                                     BOOLEAN Alertable, PLARGE_INTEGER Timeout)
+{
+    FIXME( "stub: %p, %d, %d, %d, %p\n", Mutex, WaitReason, WaitMode, Alertable, Timeout );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+ /***********************************************************************
+ *           KeReleaseMutex   (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeReleaseMutex(PRKMUTEX Mutex, BOOLEAN Wait)
+{
+    FIXME( "stub: %p, %d\n", Mutex, Wait );
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 
@@ -1393,6 +1472,21 @@ NTSTATUS WINAPI ObReferenceObjectByHandle( HANDLE obj, ACCESS_MASK access,
     return STATUS_NOT_IMPLEMENTED;
 }
 
+ /***********************************************************************
+ *           ObReferenceObjectByName    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ObReferenceObjectByName( UNICODE_STRING *ObjectName,
+                                         ULONG Attributes,
+                                         ACCESS_STATE *AccessState,
+                                         ACCESS_MASK DesiredAccess,
+                                         POBJECT_TYPE ObjectType,
+                                         KPROCESSOR_MODE AccessMode,
+                                         void *ParseContext,
+                                         void **Object)
+{
+    FIXME("stub\n");
+    return STATUS_NOT_IMPLEMENTED;
+}
 
 /***********************************************************************
  *           ObfDereferenceObject   (NTOSKRNL.EXE.@)
@@ -1427,7 +1521,9 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
  */
 HANDLE WINAPI PsGetCurrentProcessId(void)
 {
-    return UlongToHandle(GetCurrentProcessId());  /* FIXME: not quite right... */
+    if (GetCurrentThreadId() == request_thread)
+        return UlongToHandle(client_pid);
+    return UlongToHandle(GetCurrentProcessId());
 }
 
 
@@ -1436,7 +1532,9 @@ HANDLE WINAPI PsGetCurrentProcessId(void)
  */
 HANDLE WINAPI PsGetCurrentThreadId(void)
 {
-    return UlongToHandle(GetCurrentThreadId());  /* FIXME: not quite right... */
+    if (GetCurrentThreadId() == request_thread)
+        return UlongToHandle(client_tid);
+    return UlongToHandle(GetCurrentThreadId());
 }
 
 
@@ -1575,6 +1673,44 @@ NTSTATUS WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT DeviceObject, ULONG Acti
 }
 
 /*****************************************************
+ *           PsSetLoadImageNotifyRoutine   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsSetLoadImageNotifyRoutine(PLOAD_IMAGE_NOTIFY_ROUTINE routine)
+{
+    FIXME("(%p) stub\n", routine);
+    return STATUS_SUCCESS;
+}
+
+/*****************************************************
+ *           PsLookupProcessByProcessId  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsLookupProcessByProcessId(HANDLE processid, PEPROCESS *process)
+{
+    FIXME("(%p %p) stub\n", processid, process);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/*****************************************************
+ *           IoSetThreadHardErrorMode  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI IoSetThreadHardErrorMode(BOOLEAN EnableHardErrors)
+{
+    FIXME("stub\n");
+    return FALSE;
+}
+
+
+/*****************************************************
+ *           IoInitializeRemoveLockEx  (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI IoInitializeRemoveLockEx(PIO_REMOVE_LOCK lock, ULONG tag,
+		                             ULONG maxmin, ULONG high, ULONG size)
+{
+    FIXME("(%p %u %u %u %u) stub\n", lock, tag, maxmin, high, size);
+}
+
+/*****************************************************
  *           DllMain
  */
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
@@ -1596,4 +1732,31 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         break;
     }
     return TRUE;
+}
+
+/*****************************************************
+ *           Ke386IoSetAccessProcess  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI Ke386IoSetAccessProcess(PEPROCESS *process, ULONG flag)
+{
+    FIXME("(%p %d) stub\n", process, flag);
+    return FALSE;
+}
+
+/*****************************************************
+ *           Ke386SetIoAccessMap  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI Ke386SetIoAccessMap(ULONG flag, PVOID buffer)
+{
+    FIXME("(%d %p) stub\n", flag, buffer);
+    return FALSE;
+}
+
+/*****************************************************
+ *           IoCreateSynchronizationEvent (NTOSKRNL.EXE.@)
+ */
+PKEVENT WINAPI IoCreateSynchronizationEvent(PUNICODE_STRING name, PHANDLE handle)
+{
+    FIXME("(%p %p) stub\n", name, handle);
+    return NULL;
 }

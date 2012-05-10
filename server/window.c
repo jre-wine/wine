@@ -402,11 +402,12 @@ void get_top_window_rectangle( struct desktop *desktop, rectangle_t *rect )
     else *rect = win->window_rect;
 }
 
-/* attempt to close the desktop window when the last process using it is gone */
-void close_desktop_window( struct desktop *desktop )
+/* post a message to the desktop window */
+void post_desktop_message( struct desktop *desktop, unsigned int message,
+                           lparam_t wparam, lparam_t lparam )
 {
     struct window *win = desktop->top_window;
-    if (win && win->thread) post_message( win->handle, WM_CLOSE, 0, 0 );
+    if (win && win->thread) post_message( win->handle, message, wparam, lparam );
 }
 
 /* create a new window structure (note: the window is not linked in the window tree) */
@@ -1553,7 +1554,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     }
 
     /* reset cursor clip rectangle when the desktop changes size */
-    if (win == win->desktop->top_window) win->desktop->cursor_clip = *window_rect;
+    if (win == win->desktop->top_window) win->desktop->cursor.clip = *window_rect;
 
     /* if the window is not visible, everything is easy */
     if (!visible) return;
@@ -1726,6 +1727,7 @@ void destroy_window( struct window *win )
     if (win == shell_listview) shell_listview = NULL;
     if (win == progman_window) progman_window = NULL;
     if (win == taskman_window) taskman_window = NULL;
+    free_hotkeys( win->desktop, win->handle );
     free_user_handle( win->handle );
     destroy_properties( win );
     list_remove( &win->entry );

@@ -139,6 +139,7 @@ typedef struct _EPROCESS *PEPROCESS;
 typedef struct _ERESOURCE *PERESOURCE;
 typedef struct _IO_WORKITEM *PIO_WORKITEM;
 typedef struct _NPAGED_LOOKASIDE_LIST *PNPAGED_LOOKASIDE_LIST;
+typedef struct _PAGED_LOOKASIDE_LIST *PPAGED_LOOKASIDE_LIST;
 typedef struct _OBJECT_TYPE *POBJECT_TYPE;
 typedef struct _OBJECT_HANDLE_INFORMATION *POBJECT_HANDLE_INFORMATION;
 typedef struct _ZONE_HEADER *PZONE_HEADER;
@@ -994,6 +995,13 @@ typedef enum _ALTERNATIVE_ARCHITECTURE_TYPE
    EndAlternatives
 } ALTERNATIVE_ARCHITECTURE_TYPE;
 
+#define NX_SUPPORT_POLICY_ALWAYSOFF     0
+#define NX_SUPPORT_POLICY_ALWAYSON      1
+#define NX_SUPPORT_POLICY_OPTIN         2
+#define NX_SUPPORT_POLICY_OPTOUT        3
+
+#define MAX_WOW64_SHARED_ENTRIES 16
+
 typedef struct _KUSER_SHARED_DATA {
     ULONG TickCountLowDeprecated;
     ULONG TickCountMultiplier;
@@ -1003,15 +1011,15 @@ typedef struct _KUSER_SHARED_DATA {
     USHORT ImageNumberLow;
     USHORT ImageNumberHigh;
     WCHAR NtSystemRoot[260];
-    ULONG MaxStckTraceDepth;
+    ULONG MaxStackTraceDepth;
     ULONG CryptoExponent;
     ULONG TimeZoneId;
     ULONG LargePageMinimum;
-    ULONG Reserverd2[7];
+    ULONG Reserved2[7];
     NT_PRODUCT_TYPE NtProductType;
     BOOLEAN ProductTypeIsValid;
-    ULONG MajorNtVersion;
-    ULONG MinorNtVersion;
+    ULONG NtMajorVersion;
+    ULONG NtMinorVersion;
     BOOLEAN ProcessorFeatures[PROCESSOR_FEATURE_MAX];
     ULONG Reserved1;
     ULONG Reserved3;
@@ -1020,6 +1028,7 @@ typedef struct _KUSER_SHARED_DATA {
     LARGE_INTEGER SystemExpirationDate;
     ULONG SuiteMask;
     BOOLEAN KdDebuggerEnabled;
+    UCHAR NXSupportPolicy;
     volatile ULONG ActiveConsoleId;
     volatile ULONG DismountCount;
     ULONG ComPlusPackage;
@@ -1027,12 +1036,16 @@ typedef struct _KUSER_SHARED_DATA {
     ULONG NumberOfPhysicalPages;
     BOOLEAN SafeBootMode;
     ULONG TraceLogging;
-    ULONGLONG Fill0;
-    ULONGLONG SystemCall[4];
+    ULONGLONG TestRetInstruction;
+    ULONG SystemCall;
+    ULONG SystemCallReturn;
+    ULONGLONG SystemCallPad[3];
     union {
         volatile KSYSTEM_TIME TickCount;
         volatile ULONG64 TickCountQuad;
     } DUMMYUNIONNAME;
+    ULONG Cookie;
+    ULONG Wow64SharedInformation[MAX_WOW64_SHARED_ENTRIES];
 } KSHARED_USER_DATA, *PKSHARED_USER_DATA;
 
 typedef enum _MEMORY_CACHING_TYPE {
@@ -1051,6 +1064,33 @@ typedef enum _MM_SYSTEM_SIZE
     MmMediumSystem,
     MmLargeSystem
 } MM_SYSTEMSIZE;
+
+typedef struct _IO_REMOVE_LOCK_COMMON_BLOCK {
+    BOOLEAN Removed;
+    BOOLEAN Reserved[3];
+    LONG IoCount;
+    KEVENT RemoveEvent;
+} IO_REMOVE_LOCK_COMMON_BLOCK;
+
+typedef struct _IO_REMOVE_LOCK_TRACKING_BLOCK *PIO_REMOVE_LOCK_TRACKING_BLOCK;
+
+typedef struct _IO_REMOVE_LOCK_DBG_BLOCK {
+    LONG Signature;
+    LONG HighWatermark;
+    LONGLONG MaxLockedTicks;
+    LONG AllocateTag;
+    LIST_ENTRY LockList;
+    KSPIN_LOCK Spin;
+    LONG LowMemoryCount;
+    ULONG Reserved1[4];
+    PVOID Reserved2;
+    PIO_REMOVE_LOCK_TRACKING_BLOCK Blocks;
+} IO_REMOVE_LOCK_DBG_BLOCK;
+
+typedef struct _IO_REMOVE_LOCK {
+	IO_REMOVE_LOCK_COMMON_BLOCK Common;
+	IO_REMOVE_LOCK_DBG_BLOCK Dbg;
+} IO_REMOVE_LOCK, *PIO_REMOVE_LOCK;
 
 NTSTATUS WINAPI ObCloseHandle(IN HANDLE handle);
 
@@ -1112,6 +1152,7 @@ NTSTATUS  WINAPI IoGetDeviceProperty(PDEVICE_OBJECT,DEVICE_REGISTRY_PROPERTY,ULO
 PVOID     WINAPI IoGetDriverObjectExtension(PDRIVER_OBJECT,PVOID);
 PDEVICE_OBJECT WINAPI IoGetRelatedDeviceObject(PFILE_OBJECT);
 void      WINAPI IoInitializeIrp(IRP*,USHORT,CCHAR);
+VOID      WINAPI IoInitializeRemoveLockEx(PIO_REMOVE_LOCK,ULONG,ULONG,ULONG,ULONG);
 NTSTATUS  WINAPI IoWMIRegistrationControl(PDEVICE_OBJECT,ULONG);
 
 PKTHREAD  WINAPI KeGetCurrentThread(void);

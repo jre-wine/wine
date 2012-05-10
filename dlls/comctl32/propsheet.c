@@ -543,7 +543,6 @@ static BOOL PROPSHEET_CollectPageInfo(LPCPROPSHEETPAGEW lppsp,
   /* Extract the caption */
   psInfo->proppage[index].pszText = p;
   TRACE("Tab %d %s\n",index,debugstr_w( p ));
-  p += lstrlenW( p ) + 1;
 
   if (dwFlags & PSP_USETITLE)
   {
@@ -3064,6 +3063,12 @@ BOOL WINAPI DestroyPropertySheetPage(HPROPSHEETPAGE hPropPage)
   if ((psp->dwFlags & PSP_USETITLE) && !IS_INTRESOURCE( psp->pszTitle ))
      Free ((LPVOID)psp->pszTitle);
 
+  if ((psp->dwFlags & PSP_USEHEADERTITLE) && !IS_INTRESOURCE( psp->pszHeaderTitle ))
+     Free ((LPVOID)psp->pszHeaderTitle);
+
+  if ((psp->dwFlags & PSP_USEHEADERSUBTITLE) && !IS_INTRESOURCE( psp->pszHeaderSubTitle ))
+     Free ((LPVOID)psp->pszHeaderSubTitle);
+
   Free(hPropPage);
 
   return TRUE;
@@ -3202,17 +3207,20 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
     WCHAR szBuffer[256];
     int nLength;
 
-    if (psInfo->active_page < 0) return 1;
     hdc = hdcParam ? hdcParam : BeginPaint(hwnd, &ps);
     if (!hdc) return 1;
 
     hdcSrc = CreateCompatibleDC(0);
-    ppshpage = (LPCPROPSHEETPAGEW)psInfo->proppage[psInfo->active_page].hpage;
 
     if (psInfo->ppshheader.dwFlags & PSH_USEHPLWATERMARK) 
 	hOldPal = SelectPalette(hdc, psInfo->ppshheader.hplWatermark, FALSE);
 
-    if ( (!(ppshpage->dwFlags & PSP_HIDEHEADER)) &&
+    if (psInfo->active_page < 0)
+        ppshpage = NULL;
+    else
+        ppshpage = (LPCPROPSHEETPAGEW)psInfo->proppage[psInfo->active_page].hpage;
+
+    if ( (ppshpage && !(ppshpage->dwFlags & PSP_HIDEHEADER)) &&
 	 (psInfo->ppshheader.dwFlags & (PSH_WIZARD97_OLD | PSH_WIZARD97_NEW)) &&
 	 (psInfo->ppshheader.dwFlags & PSH_HEADER) ) 
     {
@@ -3319,7 +3327,7 @@ static LRESULT PROPSHEET_Paint(HWND hwnd, HDC hdcParam)
 	SelectObject(hdcSrc, hbmp);
     }
 
-    if ( (ppshpage->dwFlags & PSP_HIDEHEADER) &&
+    if ( (ppshpage && (ppshpage->dwFlags & PSP_HIDEHEADER)) &&
 	 (psInfo->ppshheader.dwFlags & (PSH_WIZARD97_OLD | PSH_WIZARD97_NEW)) &&
 	 (psInfo->ppshheader.dwFlags & PSH_WATERMARK) ) 
     {

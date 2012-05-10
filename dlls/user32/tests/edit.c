@@ -736,9 +736,10 @@ static void test_edit_control_1(void)
  */
 static void test_edit_control_2(void)
 {
-    HWND hwndMain;
+    HWND hwndMain, phwnd;
     char szLocalString[MAXLEN];
-    LONG r;
+    LONG r, w = 150, h = 50;
+    POINT cpos;
 
     /* Create main and edit windows. */
     hwndMain = CreateWindow(szEditTest2Class, "ET2", WS_OVERLAPPEDWINDOW,
@@ -749,7 +750,7 @@ static void test_edit_control_2(void)
 
     hwndET2 = CreateWindow("EDIT", NULL,
                            WS_CHILD|WS_BORDER|ES_LEFT|ES_AUTOHSCROLL,
-                           0, 0, 150, 50, /* important this not be 0 size. */
+                           0, 0, w, h, /* important this not be 0 size. */
                            hwndMain, (HMENU) ID_EDITTEST2, hinst, NULL);
     assert(hwndET2);
     if (winetest_interactive)
@@ -767,6 +768,37 @@ static void test_edit_control_2(void)
     GetWindowText(hwndET2, szLocalString, MAXLEN);
     ok(lstrcmp(szLocalString, "bar")==0,
        "Wrong contents of edit: %s\n", szLocalString);
+
+    /* try setting the caret before it's visible */
+    r = SetCaretPos(0, 0);
+    todo_wine ok(0 == r, "SetCaretPos succeeded unexpectedly, expected: 0, got: %d\n", r);
+    phwnd = SetFocus(hwndET2);
+    ok(phwnd != NULL, "SetFocus failed unexpectedly, expected non-zero, got NULL\n");
+    r = SetCaretPos(0, 0);
+    ok(1 == r, "SetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    r = GetCaretPos(&cpos);
+    ok(1 == r, "GetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    ok(cpos.x == 0 && cpos.y == 0, "Wrong caret position, expected: (0,0), got: (%d,%d)\n", cpos.x, cpos.y);
+    r = SetCaretPos(-1, -1);
+    ok(1 == r, "SetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    r = GetCaretPos(&cpos);
+    ok(1 == r, "GetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    ok(cpos.x == -1 && cpos.y == -1, "Wrong caret position, expected: (-1,-1), got: (%d,%d)\n", cpos.x, cpos.y);
+    r = SetCaretPos(w << 1, h << 1);
+    ok(1 == r, "SetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    r = GetCaretPos(&cpos);
+    ok(1 == r, "GetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    ok(cpos.x == (w << 1) && cpos.y == (h << 1), "Wrong caret position, expected: (%d,%d), got: (%d,%d)\n", w << 1, h << 1, cpos.x, cpos.y);
+    r = SetCaretPos(w, h);
+    ok(1 == r, "SetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    r = GetCaretPos(&cpos);
+    ok(1 == r, "GetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    ok(cpos.x == w && cpos.y == h, "Wrong caret position, expected: (%d,%d), got: (%d,%d)\n", w, h, cpos.x, cpos.y);
+    r = SetCaretPos(w - 1, h - 1);
+    ok(1 == r, "SetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    r = GetCaretPos(&cpos);
+    ok(1 == r, "GetCaretPos failed unexpectedly, expected: 1, got: %d\n", r);
+    ok(cpos.x == (w - 1) && cpos.y == (h - 1), "Wrong caret position, expected: (%d,%d), got: (%d,%d)\n", w - 1, h - 1, cpos.x, cpos.y);
 
     /* OK, done! */
     DestroyWindow (hwndET2);
@@ -1318,9 +1350,7 @@ static void test_edit_control_limittext(void)
     ok(r == 30000, "Incorrect default text limit, expected 30000 got %u\n", r);
     SendMessage(hwEdit, EM_SETLIMITTEXT, 0, 0);
     r = SendMessage(hwEdit, EM_GETLIMITTEXT, 0, 0);
-    /* Win9x+ME: 32766; WinNT: 2147483646UL */
-    ok( (r == 32766) || (r == 2147483646UL),
-        "got limit %u (expected 32766 or 2147483646)\n", r);
+    ok( r == 2147483646, "got limit %u (expected 2147483646)\n", r);
     DestroyWindow(hwEdit);
 
     /* Test default limit for multi-line control */
@@ -1330,9 +1360,7 @@ static void test_edit_control_limittext(void)
     ok(r == 30000, "Incorrect default text limit, expected 30000 got %u\n", r);
     SendMessage(hwEdit, EM_SETLIMITTEXT, 0, 0);
     r = SendMessage(hwEdit, EM_GETLIMITTEXT, 0, 0);
-    /* Win9x+ME: 65535; WinNT: 4294967295UL */
-    ok( (r == 65535) || (r == 4294967295UL),
-        "got limit %u (expected 65535 or 4294967295)\n", r);
+    ok( r == 4294967295U, "got limit %u (expected 4294967295)\n", r);
     DestroyWindow(hwEdit);
 }
 
@@ -1708,7 +1736,7 @@ static void test_espassword(void)
 
     hwEdit = create_editcontrol(ES_PASSWORD, 0);
     r = get_edit_style(hwEdit);
-    ok(r == ES_PASSWORD, "Wrong style expected 0x%x got: 0x%x\n", ES_PASSWORD, r);
+    ok(r == ES_PASSWORD, "Wrong style expected ES_PASSWORD got: 0x%x\n", r);
     /* set text */
     r = SendMessage(hwEdit , WM_SETTEXT, 0, (LPARAM) password);
     ok(r == TRUE, "Expected: %d, got: %d\n", TRUE, r);
@@ -1812,7 +1840,7 @@ static void test_enter(void)
     /* multiline */
     hwEdit = create_editcontrol(ES_MULTILINE, 0);
     r = get_edit_style(hwEdit);
-    ok(ES_MULTILINE == r, "Wrong style expected 0x%x got: 0x%x\n", ES_MULTILINE, r);
+    ok(ES_MULTILINE == r, "Wrong style expected ES_MULTILINE got: 0x%x\n", r);
 
     /* set text */
     r = SendMessage(hwEdit , WM_SETTEXT, 0, (LPARAM) "");
@@ -1852,7 +1880,7 @@ static void test_enter(void)
     /* single line with ES_WANTRETURN */
     hwEdit = create_editcontrol(ES_WANTRETURN, 0);
     r = get_edit_style(hwEdit);
-    ok(ES_WANTRETURN == r, "Wrong style expected 0x%x got: 0x%x\n", ES_WANTRETURN, r);
+    ok(ES_WANTRETURN == r, "Wrong style expected ES_WANTRETURN got: 0x%x\n", r);
 
     /* set text */
     r = SendMessage(hwEdit , WM_SETTEXT, 0, (LPARAM) "");
@@ -1879,7 +1907,7 @@ static void test_tab(void)
     /* multiline */
     hwEdit = create_editcontrol(ES_MULTILINE, 0);
     r = get_edit_style(hwEdit);
-    ok(ES_MULTILINE == r, "Wrong style expected 0x%x got: 0x%x\n", ES_MULTILINE, r);
+    ok(ES_MULTILINE == r, "Wrong style expected ES_MULTILINE got: 0x%x\n", r);
 
     /* set text */
     r = SendMessage(hwEdit , WM_SETTEXT, 0, (LPARAM) "");
@@ -1922,57 +1950,57 @@ static void test_edit_dialog(void)
     int r;
 
     /* from bug 11841 */
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 0);
     ok(333 == r, "Expected %d, got %d\n", 333, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 1);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 2);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* more tests for WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 3);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 4);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 4);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 5);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 5);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* more tests for WM_KEYDOWN + WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 6);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 6);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 7);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 7);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 8);
+    r = DialogBoxParam(hinst, "EDIT_READONLY_DIALOG", NULL, edit_dialog_proc, 8);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests with an editable edit control */
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 0);
     ok(333 == r, "Expected %d, got %d\n", 333, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 1);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 2);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 3);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 4);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 4);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 5);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 5);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_KEYDOWN + WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 6);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 6);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 7);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 7);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 8);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 8);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* multiple tab tests */
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 9);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 9);
     ok(22 == r, "Expected %d, got %d\n", 22, r);
-    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, (DLGPROC)edit_dialog_proc, 10);
+    r = DialogBoxParam(hinst, "EDIT_DIALOG", NULL, edit_dialog_proc, 10);
     ok(33 == r, "Expected %d, got %d\n", 33, r);
 }
 
@@ -1981,13 +2009,13 @@ static void test_multi_edit_dialog(void)
     int r;
 
     /* test for multiple edit dialogs (bug 12319) */
-    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, (DLGPROC)multi_edit_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, multi_edit_dialog_proc, 0);
     ok(2222 == r, "Expected %d, got %d\n", 2222, r);
-    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, (DLGPROC)multi_edit_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, multi_edit_dialog_proc, 1);
     ok(1111 == r, "Expected %d, got %d\n", 1111, r);
-    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, (DLGPROC)multi_edit_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, multi_edit_dialog_proc, 2);
     ok(2222 == r, "Expected %d, got %d\n", 2222, r);
-    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, (DLGPROC)multi_edit_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "MULTI_EDIT_DIALOG", NULL, multi_edit_dialog_proc, 3);
     ok(11 == r, "Expected %d, got %d\n", 11, r);
 }
 
@@ -1996,27 +2024,27 @@ static void test_wantreturn_edit_dialog(void)
     int r;
 
     /* tests for WM_KEYDOWN */
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 0);
     ok(333 == r, "Expected %d, got %d\n", 333, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 1);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 2);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 3);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 4);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 4);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 5);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 5);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_KEYDOWN + WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 6);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 6);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 7);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 7);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_wantreturn_dialog_proc, 8);
+    r = DialogBoxParam(hinst, "EDIT_WANTRETURN_DIALOG", NULL, edit_wantreturn_dialog_proc, 8);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 }
 
@@ -2025,51 +2053,51 @@ static void test_singleline_wantreturn_edit_dialog(void)
     int r;
 
     /* tests for WM_KEYDOWN */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 0);
     ok(222 == r, "Expected %d, got %d\n", 222, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 1);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 2);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 3);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 4);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 4);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 5);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 5);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_KEYDOWN + WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 6);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 6);
     ok(222 == r, "Expected %d, got %d\n", 222, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 7);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 7);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 8);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_DIALOG", NULL, edit_singleline_dialog_proc, 8);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_KEYDOWN */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 0);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 0);
     ok(222 == r, "Expected %d, got %d\n", 222, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 1);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 1);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 2);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 2);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 3);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 3);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 4);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 4);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 5);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 5);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 
     /* tests for WM_KEYDOWN + WM_CHAR */
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 6);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 6);
     ok(222 == r, "Expected %d, got %d\n", 222, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 7);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 7);
     ok(111 == r, "Expected %d, got %d\n", 111, r);
-    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, (DLGPROC)edit_singleline_dialog_proc, 8);
+    r = DialogBoxParam(hinst, "EDIT_SINGLELINE_WANTRETURN_DIALOG", NULL, edit_singleline_dialog_proc, 8);
     ok(444 == r, "Expected %d, got %d\n", 444, r);
 }
 

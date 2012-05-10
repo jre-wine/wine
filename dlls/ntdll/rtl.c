@@ -140,7 +140,7 @@ void WINAPI RtlDeleteResource(LPRTL_RWLOCK rwl)
     {
 	RtlEnterCriticalSection( &rwl->rtlCS );
 	if( rwl->iNumberActive || rwl->uExclusiveWaiters || rwl->uSharedWaiters )
-	    MESSAGE("Deleting active MRSW lock (%p), expect failure\n", rwl );
+	    ERR("Deleting active MRSW lock (%p), expect failure\n", rwl );
 	rwl->hOwningThreadId = 0;
 	rwl->uExclusiveWaiters = rwl->uSharedWaiters = 0;
 	rwl->iNumberActive = 0;
@@ -860,14 +860,14 @@ void WINAPI RtlCopyLuid (PLUID LuidDest, const LUID *LuidSrc)
 /*************************************************************************
  * RtlEqualLuid   [NTDLL.@]
  *
- * Compare two local unique ID's.
+ * Compare two local unique IDs.
  *
  * PARAMS
  *  Luid1 [I] First Luid to compare to Luid2
  *  Luid2 [I] Second Luid to compare to Luid1
  *
  * RETURNS
- *  TRUE: The two LUID's are equal.
+ *  TRUE: The two LUIDs are equal.
  *  FALSE: Otherwise
  */
 BOOLEAN WINAPI RtlEqualLuid (const LUID *Luid1, const LUID *Luid2)
@@ -879,7 +879,7 @@ BOOLEAN WINAPI RtlEqualLuid (const LUID *Luid1, const LUID *Luid2)
 /*************************************************************************
  * RtlCopyLuidAndAttributesArray   [NTDLL.@]
  *
- * Copy an array of local unique ID's and attributes.
+ * Copy an array of local unique IDs and attributes.
  *
  * PARAMS
  *  Count [I] Number of Luid/attributes in Src

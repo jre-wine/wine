@@ -46,7 +46,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(volume);
 
-#define SUPERBLOCK_SIZE 2048
+#define BLOCK_SIZE 2048
+#define SUPERBLOCK_SIZE BLOCK_SIZE
 #define SYMBOLIC_LINK_QUERY 0x0001
 
 #define CDFRAMES_PERSEC         75
@@ -63,7 +64,8 @@ enum fs_type
     FS_UNKNOWN,  /* unknown file system */
     FS_FAT1216,
     FS_FAT32,
-    FS_ISO9660
+    FS_ISO9660,
+    FS_UDF       /* For reference [E] = Ecma-167.pdf, [U] = udf260.pdf */
 };
 
 /* read a Unix symlink; returned buffer must be freed by caller */
@@ -387,30 +389,106 @@ static enum fs_type VOLUME_ReadFATSuperblock( HANDLE handle, BYTE *buff )
 
 
 /***********************************************************************
+ *           VOLUME_ReadCDBlock
+ */
+static BOOL VOLUME_ReadCDBlock( HANDLE handle, BYTE *buff, INT offs )
+{
+    DWORD size, whence = offs >= 0 ? FILE_BEGIN : FILE_END;
+
+    if (SetFilePointer( handle, offs, NULL, whence ) != offs ||
+        !ReadFile( handle, buff, SUPERBLOCK_SIZE, &size, NULL ) ||
+        size != SUPERBLOCK_SIZE)
+        return FALSE;
+
+    return TRUE;
+}
+
+
+/***********************************************************************
  *           VOLUME_ReadCDSuperblock
  */
 static enum fs_type VOLUME_ReadCDSuperblock( HANDLE handle, BYTE *buff )
 {
-    DWORD size, offs = VOLUME_FindCdRomDataBestVoldesc( handle );
+    int i;
+    DWORD offs;
 
+    /* Check UDF first as UDF and ISO9660 structures can coexist on the same medium
+     *  Starting from sector 16, we may find :
+     *  - a CD-ROM Volume Descriptor Set (ISO9660) containing one or more Volume Descriptors
+     *  - an Extented Area (UDF) -- [E] 2/8.3.1 and [U] 2.1.7
+     *  There is no explicit end so read 16 sectors and then give up */
+    for( i=16; i<16+16; i++)
+    {
+        if (!VOLUME_ReadCDBlock(handle, buff, i*BLOCK_SIZE))
+            continue;
+
+        /* We are supposed to check "BEA01", "NSR0x" and "TEA01" IDs + verify tag checksum
+         *  but we assume the volume is well-formatted */
+        if (!memcmp(&buff[1], "BEA01", 5)) return FS_UDF;
+    }
+
+    offs = VOLUME_FindCdRomDataBestVoldesc( handle );
     if (!offs) return FS_UNKNOWN;
 
-    if (SetFilePointer( handle, offs, NULL, FILE_BEGIN ) != offs ||
-        !ReadFile( handle, buff, SUPERBLOCK_SIZE, &size, NULL ) ||
-        size != SUPERBLOCK_SIZE)
+    if (!VOLUME_ReadCDBlock(handle, buff, offs))
         return FS_ERROR;
 
-    /* check for iso9660 present */
+    /* check for the iso9660 identifier */
     if (!memcmp(&buff[1], "CD001", 5)) return FS_ISO9660;
     return FS_UNKNOWN;
 }
 
 
 /**************************************************************************
+ *                        UDF_Find_PVD
+ * Find the Primary Volume Descriptor
+ */
+static BOOL UDF_Find_PVD( HANDLE handle, BYTE pvd[] )
+{
+    int i;
+    DWORD offset;
+    INT locations[] = { 256, -1, -257, 512 };
+
+    for(i=0; i<sizeof(locations)/sizeof(locations[0]); i++)
+    {
+        if (!VOLUME_ReadCDBlock(handle, pvd, locations[i]*BLOCK_SIZE))
+            return FALSE;
+
+        /* Tag Identifier of Anchor Volume Descriptor Pointer is 2 -- [E] 3/10.2.1 */
+        if (pvd[0]==2 && pvd[1]==0)
+        {
+            /* Tag location (Uint32) at offset 12, little-endian */
+            offset  = pvd[20 + 0];
+            offset |= pvd[20 + 1] << 8;
+            offset |= pvd[20 + 2] << 16;
+            offset |= pvd[20 + 3] << 24;
+            offset *= BLOCK_SIZE;
+
+            if (!VOLUME_ReadCDBlock(handle, pvd, offset))
+                return FALSE;
+
+            /* Check for the Primary Volume Descriptor Tag Id -- [E] 3/10.1.1 */
+            if (pvd[0]!=1 || pvd[1]!=0)
+                return FALSE;
+
+            /* 8 or 16 bits per character -- [U] 2.1.1 */
+            if (!(pvd[24]==8 || pvd[24]==16))
+                return FALSE;
+
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+
+/**************************************************************************
  *                              VOLUME_GetSuperblockLabel
  */
-static void VOLUME_GetSuperblockLabel( const UNICODE_STRING *device, enum fs_type type,
-                                       const BYTE *superblock, WCHAR *label, DWORD len )
+static void VOLUME_GetSuperblockLabel( const UNICODE_STRING *device, HANDLE handle,
+                                       enum fs_type type, const BYTE *superblock,
+                                       WCHAR *label, DWORD len )
 {
     const BYTE *label_ptr = NULL;
     DWORD label_len;
@@ -451,6 +529,34 @@ static void VOLUME_GetSuperblockLabel( const UNICODE_STRING *device, enum fs_typ
             label_len = 32;
             break;
         }
+    case FS_UDF:
+        {
+            BYTE pvd[BLOCK_SIZE];
+
+            if(!UDF_Find_PVD(handle, pvd))
+            {
+                label_len = 0;
+                break;
+            }
+
+            /* [E] 3/10.1.4 and [U] 2.1.1 */
+            if(pvd[24]==8)
+            {
+                label_ptr = pvd + 24 + 1;
+                label_len = pvd[24+32-1];
+                break;
+            }
+            else
+            {
+                int i;
+
+                label_len = 1 + pvd[24+32-1];
+                for(i=0; i<label_len && i<len; i+=2)
+                    label[i/2]  = (pvd[24+1 +i] << 8) | pvd[24+1 +i+1];
+                label[label_len] = 0;
+                return;
+            }
+        }
     }
     if (label_len) RtlMultiByteToUnicodeN( label, (len-1) * sizeof(WCHAR),
                                            &label_len, (LPCSTR)label_ptr, label_len );
@@ -463,9 +569,11 @@ static void VOLUME_GetSuperblockLabel( const UNICODE_STRING *device, enum fs_typ
 /**************************************************************************
  *                              VOLUME_GetSuperblockSerial
  */
-static DWORD VOLUME_GetSuperblockSerial( const UNICODE_STRING *device, enum fs_type type,
-                                         const BYTE *superblock )
+static DWORD VOLUME_GetSuperblockSerial( const UNICODE_STRING *device, HANDLE handle,
+                                         enum fs_type type, const BYTE *superblock )
 {
+    BYTE block[BLOCK_SIZE];
+
     switch(type)
     {
     case FS_ERROR:
@@ -476,6 +584,11 @@ static DWORD VOLUME_GetSuperblockSerial( const UNICODE_STRING *device, enum fs_t
         return GETLONG( superblock, 0x27 );
     case FS_FAT32:
         return GETLONG( superblock, 0x33 );
+    case FS_UDF:
+        if (!VOLUME_ReadCDBlock(handle, block, 257*BLOCK_SIZE))
+            break;
+        superblock = block;
+        /* fallthrough */
     case FS_ISO9660:
         {
             BYTE sum[4];
@@ -495,7 +608,7 @@ static DWORD VOLUME_GetSuperblockSerial( const UNICODE_STRING *device, enum fs_t
              * Me$$ysoft chose to reverse the serial number in NT4/W2K.
              * It's true and nobody will ever be able to change it.
              */
-            if (GetVersion() & 0x80000000)
+            if ((GetVersion() & 0x80000000) || type == FS_UDF)
                 return (sum[3] << 24) | (sum[2] << 16) | (sum[1] << 8) | sum[0];
             else
                 return (sum[0] << 24) | (sum[1] << 16) | (sum[2] << 8) | sum[3];
@@ -546,6 +659,7 @@ BOOL WINAPI GetVolumeInformationW( LPCWSTR root, LPWSTR label, DWORD label_len,
     static const WCHAR fat32W[] = {'F','A','T','3','2',0};
     static const WCHAR ntfsW[] = {'N','T','F','S',0};
     static const WCHAR cdfsW[] = {'C','D','F','S',0};
+    static const WCHAR udfW[] = {'U','D','F',0};
     static const WCHAR default_rootW[] = {'\\',0};
 
     HANDLE handle;
@@ -618,12 +732,16 @@ BOOL WINAPI GetVolumeInformationW( LPCWSTR root, LPWSTR label, DWORD label_len,
             type = VOLUME_ReadFATSuperblock( handle, superblock );
             if (type == FS_UNKNOWN) type = VOLUME_ReadCDSuperblock( handle, superblock );
         }
-        CloseHandle( handle );
         TRACE( "%s: found fs type %d\n", debugstr_w(nt_name.Buffer), type );
-        if (type == FS_ERROR) goto done;
+        if (type == FS_ERROR)
+        {
+            CloseHandle( handle );
+            goto done;
+        }
 
-        if (label && label_len) VOLUME_GetSuperblockLabel( &nt_name, type, superblock, label, label_len );
-        if (serial) *serial = VOLUME_GetSuperblockSerial( &nt_name, type, superblock );
+        if (label && label_len) VOLUME_GetSuperblockLabel( &nt_name, handle, type, superblock, label, label_len );
+        if (serial) *serial = VOLUME_GetSuperblockSerial( &nt_name, handle, type, superblock );
+        CloseHandle( handle );
         goto fill_fs_info;
     }
     else TRACE( "cannot open device %s: %x\n", debugstr_w(nt_name.Buffer), status );
@@ -656,6 +774,12 @@ fill_fs_info:  /* now fill in the information that depends on the file system ty
         if (fsname) lstrcpynW( fsname, cdfsW, fsname_len );
         if (filename_len) *filename_len = 221;
         if (flags) *flags = FILE_READ_ONLY_VOLUME;
+        break;
+    case FS_UDF:
+        if (fsname) lstrcpynW( fsname, udfW, fsname_len );
+        if (filename_len) *filename_len = 255;
+        if (flags)
+            *flags = FILE_READ_ONLY_VOLUME | FILE_UNICODE_ON_DISK | FILE_CASE_SENSITIVE_SEARCH;
         break;
     case FS_FAT1216:
         if (fsname) lstrcpynW( fsname, fatW, fsname_len );
@@ -1621,13 +1745,170 @@ BOOL WINAPI GetVolumePathNameW(LPCWSTR filename, LPWSTR volumepathname, DWORD bu
 }
 
 /***********************************************************************
+ *           GetVolumePathNamesForVolumeNameA   (KERNEL32.@)
+ */
+BOOL WINAPI GetVolumePathNamesForVolumeNameA(LPCSTR volumename, LPSTR volumepathname, DWORD buflen, PDWORD returnlen)
+{
+    BOOL ret;
+    WCHAR *volumenameW = NULL, *volumepathnameW;
+
+    if (volumename && !(volumenameW = FILE_name_AtoW( volumename, TRUE ))) return FALSE;
+    if (!(volumepathnameW = HeapAlloc( GetProcessHeap(), 0, buflen * sizeof(WCHAR) )))
+    {
+        HeapFree( GetProcessHeap(), 0, volumenameW );
+        return FALSE;
+    }
+    if ((ret = GetVolumePathNamesForVolumeNameW( volumenameW, volumepathnameW, buflen, returnlen )))
+    {
+        char *path = volumepathname;
+        const WCHAR *pathW = volumepathnameW;
+
+        while (*pathW)
+        {
+            int len = strlenW( pathW ) + 1;
+            FILE_name_WtoA( pathW, len, path, buflen );
+            buflen -= len;
+            pathW += len;
+            path += len;
+        }
+        path[0] = 0;
+    }
+    HeapFree( GetProcessHeap(), 0, volumenameW );
+    HeapFree( GetProcessHeap(), 0, volumepathnameW );
+    return ret;
+}
+
+static MOUNTMGR_MOUNT_POINTS *query_mount_points( HANDLE mgr, MOUNTMGR_MOUNT_POINT *input, DWORD insize )
+{
+    MOUNTMGR_MOUNT_POINTS *output;
+    DWORD outsize = 1024;
+
+    for (;;)
+    {
+        if (!(output = HeapAlloc( GetProcessHeap(), 0, outsize )))
+        {
+            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+            return NULL;
+        }
+        if (DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_POINTS, input, insize, output, outsize, NULL, NULL )) break;
+        outsize = output->Size;
+        HeapFree( GetProcessHeap(), 0, output );
+        if (GetLastError() != ERROR_MORE_DATA) return NULL;
+    }
+    return output;
+}
+/***********************************************************************
  *           GetVolumePathNamesForVolumeNameW   (KERNEL32.@)
  */
 BOOL WINAPI GetVolumePathNamesForVolumeNameW(LPCWSTR volumename, LPWSTR volumepathname, DWORD buflen, PDWORD returnlen)
 {
-    FIXME("(%s, %p, %d, %p), stub!\n", debugstr_w(volumename), volumepathname, buflen, returnlen);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return FALSE;
+    static const WCHAR dosdevicesW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\'};
+    HANDLE mgr;
+    DWORD len, size;
+    MOUNTMGR_MOUNT_POINT *spec;
+    MOUNTMGR_MOUNT_POINTS *link, *target = NULL;
+    WCHAR *name, *path;
+    BOOL ret = FALSE;
+    UINT i, j;
+
+    TRACE("%s, %p, %u, %p\n", debugstr_w(volumename), volumepathname, buflen, returnlen);
+
+    if (!volumename || (len = strlenW( volumename )) != 49)
+    {
+        SetLastError( ERROR_INVALID_NAME );
+        return FALSE;
+    }
+    mgr = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, 0, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, 0 );
+    if (mgr == INVALID_HANDLE_VALUE) return FALSE;
+
+    size = sizeof(*spec) + sizeof(WCHAR) * (len - 1); /* remove trailing backslash */
+    if (!(spec = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size ))) goto done;
+    spec->SymbolicLinkNameOffset = sizeof(*spec);
+    spec->SymbolicLinkNameLength = size - sizeof(*spec);
+    name = (WCHAR *)((char *)spec + spec->SymbolicLinkNameOffset);
+    memcpy( name, volumename, size - sizeof(*spec) );
+    name[1] = '?'; /* map \\?\ to \??\ */
+
+    target = query_mount_points( mgr, spec, size );
+    HeapFree( GetProcessHeap(), 0, spec );
+    if (!target)
+    {
+        goto done;
+    }
+    if (!target->NumberOfMountPoints)
+    {
+        SetLastError( ERROR_FILE_NOT_FOUND );
+        goto done;
+    }
+    len = 0;
+    path = volumepathname;
+    for (i = 0; i < target->NumberOfMountPoints; i++)
+    {
+        link = NULL;
+        if (target->MountPoints[i].DeviceNameOffset)
+        {
+            const WCHAR *device = (const WCHAR *)((const char *)target + target->MountPoints[i].DeviceNameOffset);
+            USHORT device_len = target->MountPoints[i].DeviceNameLength;
+
+            size = sizeof(*spec) + device_len;
+            if (!(spec = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size ))) goto done;
+            spec->DeviceNameOffset = sizeof(*spec);
+            spec->DeviceNameLength = device_len;
+            memcpy( (char *)spec + spec->DeviceNameOffset, device, device_len );
+
+            link = query_mount_points( mgr, spec, size );
+            HeapFree( GetProcessHeap(), 0, spec );
+        }
+        else if (target->MountPoints[i].UniqueIdOffset)
+        {
+            const WCHAR *id = (const WCHAR *)((const char *)target + target->MountPoints[i].UniqueIdOffset);
+            USHORT id_len = target->MountPoints[i].UniqueIdLength;
+
+            size = sizeof(*spec) + id_len;
+            if (!(spec = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size ))) goto done;
+            spec->UniqueIdOffset = sizeof(*spec);
+            spec->UniqueIdLength = id_len;
+            memcpy( (char *)spec + spec->UniqueIdOffset, id, id_len );
+
+            link = query_mount_points( mgr, spec, size );
+            HeapFree( GetProcessHeap(), 0, spec );
+        }
+        if (!link) continue;
+        for (j = 0; j < link->NumberOfMountPoints; j++)
+        {
+            const WCHAR *linkname;
+
+            if (!link->MountPoints[j].SymbolicLinkNameOffset) continue;
+            linkname = (const WCHAR *)((const char *)link + link->MountPoints[j].SymbolicLinkNameOffset);
+
+            if (link->MountPoints[j].SymbolicLinkNameLength == sizeof(dosdevicesW) + 2 * sizeof(WCHAR) &&
+                !memicmpW( linkname, dosdevicesW, sizeof(dosdevicesW) / sizeof(WCHAR) ))
+            {
+                len += 4;
+                if (volumepathname && len < buflen)
+                {
+                    path[0] = linkname[sizeof(dosdevicesW) / sizeof(WCHAR)];
+                    path[1] = ':';
+                    path[2] = '\\';
+                    path[3] = 0;
+                    path += 4;
+                }
+            }
+        }
+        HeapFree( GetProcessHeap(), 0, link );
+    }
+    if (buflen <= len) SetLastError( ERROR_MORE_DATA );
+    else if (volumepathname)
+    {
+        volumepathname[len] = 0;
+        ret = TRUE;
+    }
+    if (returnlen) *returnlen = len + 1;
+
+done:
+    HeapFree( GetProcessHeap(), 0, target );
+    CloseHandle( mgr );
+    return ret;
 }
 
 /***********************************************************************

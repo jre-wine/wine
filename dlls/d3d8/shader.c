@@ -22,79 +22,28 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d8);
 
-static HRESULT WINAPI d3d8_vertexshader_QueryInterface(IDirect3DVertexShader8 *iface, REFIID riid, void **object)
-{
-    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
-
-    if (IsEqualGUID(riid, &IID_IDirect3DVertexShader8)
-            || IsEqualGUID(riid, &IID_IUnknown))
-    {
-        IUnknown_AddRef(iface);
-        *object = iface;
-        return S_OK;
-    }
-
-    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
-
-    *object = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI d3d8_vertexshader_AddRef(IDirect3DVertexShader8 *iface)
-{
-    IDirect3DVertexShader8Impl *shader = (IDirect3DVertexShader8Impl *)iface;
-    ULONG refcount = InterlockedIncrement(&shader->ref);
-
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
-
-    if (refcount == 1 && shader->wineD3DVertexShader)
-    {
-        wined3d_mutex_lock();
-        IWineD3DVertexShader_AddRef(shader->wineD3DVertexShader);
-        wined3d_mutex_unlock();
-    }
-
-    return refcount;
-}
-
 static void STDMETHODCALLTYPE d3d8_vertexshader_wined3d_object_destroyed(void *parent)
 {
-    IDirect3DVertexShader8Impl *shader = parent;
-    IDirect3DVertexDeclaration8_Release(shader->vertex_declaration);
+    struct d3d8_vertex_shader *shader = parent;
+    d3d8_vertex_declaration_destroy(shader->vertex_declaration);
     HeapFree(GetProcessHeap(), 0, shader);
 }
 
-static ULONG WINAPI d3d8_vertexshader_Release(IDirect3DVertexShader8 *iface)
+void d3d8_vertex_shader_destroy(struct d3d8_vertex_shader *shader)
 {
-    IDirect3DVertexShader8Impl *shader = (IDirect3DVertexShader8Impl *)iface;
-    ULONG refcount = InterlockedDecrement(&shader->ref);
+    TRACE("shader %p.\n", shader);
 
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
-
-    if (!refcount)
+    if (shader->wined3d_shader)
     {
-        if (shader->wineD3DVertexShader)
-        {
-            wined3d_mutex_lock();
-            IWineD3DVertexShader_Release(shader->wineD3DVertexShader);
-            wined3d_mutex_unlock();
-        }
-        else
-        {
-            d3d8_vertexshader_wined3d_object_destroyed(shader);
-        }
+        wined3d_mutex_lock();
+        wined3d_shader_decref(shader->wined3d_shader);
+        wined3d_mutex_unlock();
     }
-
-    return refcount;
+    else
+    {
+        d3d8_vertexshader_wined3d_object_destroyed(shader);
+    }
 }
-
-static const IDirect3DVertexShader8Vtbl d3d8_vertexshader_vtbl =
-{
-    /* IUnknown */
-    d3d8_vertexshader_QueryInterface,
-    d3d8_vertexshader_AddRef,
-    d3d8_vertexshader_Release,
-};
 
 static const struct wined3d_parent_ops d3d8_vertexshader_wined3d_parent_ops =
 {
@@ -102,9 +51,9 @@ static const struct wined3d_parent_ops d3d8_vertexshader_wined3d_parent_ops =
 };
 
 static HRESULT d3d8_vertexshader_create_vertexdeclaration(IDirect3DDevice8Impl *device,
-        const DWORD *declaration, DWORD shader_handle, IDirect3DVertexDeclaration8 **decl_ptr)
+        const DWORD *declaration, DWORD shader_handle, struct d3d8_vertex_declaration **decl_ptr)
 {
-    IDirect3DVertexDeclaration8Impl *object;
+    struct d3d8_vertex_declaration *object;
     HRESULT hr;
 
     TRACE("device %p, declaration %p, shader_handle %#x, decl_ptr %p.\n",
@@ -117,7 +66,7 @@ static HRESULT d3d8_vertexshader_create_vertexdeclaration(IDirect3DDevice8Impl *
         return E_OUTOFMEMORY;
     }
 
-    hr = vertexdeclaration_init(object, device, declaration, shader_handle);
+    hr = d3d8_vertex_declaration_init(object, device, declaration, shader_handle);
     if (FAILED(hr))
     {
         WARN("Failed to initialize vertex declaration, hr %#x.\n", hr);
@@ -126,12 +75,12 @@ static HRESULT d3d8_vertexshader_create_vertexdeclaration(IDirect3DDevice8Impl *
     }
 
     TRACE("Created vertex declaration %p.\n", object);
-    *decl_ptr = (IDirect3DVertexDeclaration8 *)object;
+    *decl_ptr = object;
 
     return D3D_OK;
 }
 
-HRESULT vertexshader_init(IDirect3DVertexShader8Impl *shader, IDirect3DDevice8Impl *device,
+HRESULT d3d8_vertex_shader_init(struct d3d8_vertex_shader *shader, IDirect3DDevice8Impl *device,
         const DWORD *declaration, const DWORD *byte_code, DWORD shader_handle, DWORD usage)
 {
     const DWORD *token = declaration;
@@ -156,9 +105,6 @@ HRESULT vertexshader_init(IDirect3DVertexShader8Impl *shader, IDirect3DDevice8Im
         token += parse_token(token);
     }
 
-    shader->ref = 1;
-    shader->lpVtbl = &d3d8_vertexshader_vtbl;
-
     hr = d3d8_vertexshader_create_vertexdeclaration(device, declaration, shader_handle, &shader->vertex_declaration);
     if (FAILED(hr))
     {
@@ -171,85 +117,34 @@ HRESULT vertexshader_init(IDirect3DVertexShader8Impl *shader, IDirect3DDevice8Im
         if (usage) FIXME("Usage %#x not implemented.\n", usage);
 
         wined3d_mutex_lock();
-        hr = IWineD3DDevice_CreateVertexShader(device->WineD3DDevice, byte_code, NULL /* output signature */,
-                shader, &d3d8_vertexshader_wined3d_parent_ops, &shader->wineD3DVertexShader);
+        hr = wined3d_shader_create_vs(device->wined3d_device, byte_code, NULL /* output signature */,
+                shader, &d3d8_vertexshader_wined3d_parent_ops, &shader->wined3d_shader, 1);
         wined3d_mutex_unlock();
         if (FAILED(hr))
         {
             WARN("Failed to create wined3d vertex shader, hr %#x.\n", hr);
-            IDirect3DVertexDeclaration8_Release(shader->vertex_declaration);
+            d3d8_vertex_declaration_destroy(shader->vertex_declaration);
             return hr;
         }
 
-        load_local_constants(declaration, shader->wineD3DVertexShader);
+        load_local_constants(declaration, shader->wined3d_shader);
     }
 
     return D3D_OK;
 }
 
-static HRESULT WINAPI d3d8_pixelshader_QueryInterface(IDirect3DPixelShader8 *iface, REFIID riid, void **object)
-{
-    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
-
-    if (IsEqualGUID(riid, &IID_IDirect3DPixelShader8)
-            || IsEqualGUID(riid, &IID_IUnknown))
-    {
-        IUnknown_AddRef(iface);
-        *object = iface;
-        return S_OK;
-    }
-
-    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
-
-    *object = NULL;
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI d3d8_pixelshader_AddRef(IDirect3DPixelShader8 *iface)
-{
-    IDirect3DPixelShader8Impl *shader = (IDirect3DPixelShader8Impl *)iface;
-    ULONG refcount = InterlockedIncrement(&shader->ref);
-
-    TRACE("%p increasing refcount to %u.\n", iface, refcount);
-
-    if (refcount == 1)
-    {
-        wined3d_mutex_lock();
-        IWineD3DPixelShader_AddRef(shader->wineD3DPixelShader);
-        wined3d_mutex_unlock();
-    }
-
-    return refcount;
-}
-
-static ULONG WINAPI d3d8_pixelshader_Release(IDirect3DPixelShader8 *iface)
-{
-    IDirect3DPixelShader8Impl *shader = (IDirect3DPixelShader8Impl *)iface;
-    ULONG refcount = InterlockedDecrement(&shader->ref);
-
-    TRACE("%p decreasing refcount to %u.\n", iface, refcount);
-
-    if (!refcount)
-    {
-        wined3d_mutex_lock();
-        IWineD3DPixelShader_Release(shader->wineD3DPixelShader);
-        wined3d_mutex_unlock();
-    }
-
-    return refcount;
-}
-
-static const IDirect3DPixelShader8Vtbl d3d8_pixelshader_vtbl =
-{
-    /* IUnknown */
-    d3d8_pixelshader_QueryInterface,
-    d3d8_pixelshader_AddRef,
-    d3d8_pixelshader_Release,
-};
-
 static void STDMETHODCALLTYPE d3d8_pixelshader_wined3d_object_destroyed(void *parent)
 {
     HeapFree(GetProcessHeap(), 0, parent);
+}
+
+void d3d8_pixel_shader_destroy(struct d3d8_pixel_shader *shader)
+{
+    TRACE("shader %p.\n", shader);
+
+    wined3d_mutex_lock();
+    wined3d_shader_decref(shader->wined3d_shader);
+    wined3d_mutex_unlock();
 }
 
 static const struct wined3d_parent_ops d3d8_pixelshader_wined3d_parent_ops =
@@ -257,18 +152,16 @@ static const struct wined3d_parent_ops d3d8_pixelshader_wined3d_parent_ops =
     d3d8_pixelshader_wined3d_object_destroyed,
 };
 
-HRESULT pixelshader_init(IDirect3DPixelShader8Impl *shader, IDirect3DDevice8Impl *device,
+HRESULT d3d8_pixel_shader_init(struct d3d8_pixel_shader *shader, IDirect3DDevice8Impl *device,
         const DWORD *byte_code, DWORD shader_handle)
 {
     HRESULT hr;
 
-    shader->ref = 1;
-    shader->lpVtbl = &d3d8_pixelshader_vtbl;
     shader->handle = shader_handle;
 
     wined3d_mutex_lock();
-    hr = IWineD3DDevice_CreatePixelShader(device->WineD3DDevice, byte_code, NULL, shader,
-            &d3d8_pixelshader_wined3d_parent_ops, &shader->wineD3DPixelShader);
+    hr = wined3d_shader_create_ps(device->wined3d_device, byte_code, NULL, shader,
+            &d3d8_pixelshader_wined3d_parent_ops, &shader->wined3d_shader, 1);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {

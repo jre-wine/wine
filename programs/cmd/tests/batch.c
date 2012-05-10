@@ -24,34 +24,53 @@
 
 static char workdir[MAX_PATH];
 static DWORD workdir_len;
+static char drive[2];
+static const DWORD drive_len = sizeof(drive)/sizeof(drive[0]);
+static char path[MAX_PATH];
+static DWORD path_len;
+static char shortpath[MAX_PATH];
+static DWORD shortpath_len;
 
-/* Substitute escaped spaces with real ones */
-static const char* replace_escaped_spaces(const char *data, DWORD size, DWORD *new_size)
+/* Convert to DOS line endings, and substitute escaped whitespace chars with real ones */
+static const char* convert_input_data(const char *data, DWORD size, DWORD *new_size)
 {
-    static const char escaped_space[] = {'@','s','p','a','c','e','@','\0'};
-    const char *a, *b;
-    char *new_data;
-    DWORD len_space = sizeof(escaped_space) -1;
+    static const char escaped_space[] = {'@','s','p','a','c','e','@'};
+    static const char escaped_tab[]   = {'@','t','a','b','@'};
+    DWORD i, eol_count = 0;
+    char *ptr, *new_data;
 
-    a = b = data;
-    *new_size = 0;
+    for (i = 0; i < size; i++)
+        if (data[i] == '\n') eol_count++;
 
-    new_data = HeapAlloc(GetProcessHeap(), 0, size*sizeof(char));
-    ok(new_data != NULL, "HeapAlloc failed\n");
-    if(!new_data)
-        return NULL;
+    ptr = new_data = HeapAlloc(GetProcessHeap(), 0, size + eol_count + 1);
 
-    while( (b = strstr(a, escaped_space)) )
-    {
-        strncpy(new_data + *new_size, a, b-a + 1);
-        *new_size += b-a + 1;
-        new_data[*new_size - 1] = ' ';
-        a = b + len_space;
+    for (i = 0; i < size; i++) {
+        switch (data[i]) {
+            case '\n':
+                if (data[i-1] != '\r')
+                    *ptr++ = '\r';
+                *ptr++ = '\n';
+                break;
+            case '@':
+                if (data + i + sizeof(escaped_space) - 1 < data + size
+                        && !memcmp(data + i, escaped_space, sizeof(escaped_space))) {
+                    *ptr++ = ' ';
+                    i += sizeof(escaped_space) - 1;
+                } else if (data + i + sizeof(escaped_tab) - 1 < data + size
+                        && !memcmp(data + i, escaped_tab, sizeof(escaped_tab))) {
+                    *ptr++ = '\t';
+                    i += sizeof(escaped_tab) - 1;
+                } else {
+                    *ptr++ = data[i];
+                }
+                break;
+            default:
+                *ptr++ = data[i];
+        }
     }
+    *ptr = '\0';
 
-    strncpy(new_data + *new_size, a, strlen(a) + 1);
-    *new_size += strlen(a);
-
+    *new_size = strlen(new_data);
     return new_data;
 }
 
@@ -142,8 +161,11 @@ static const char *compare_line(const char *out_line, const char *out_end, const
     const char *err = NULL;
 
     static const char pwd_cmd[] = {'@','p','w','d','@'};
-    static const char todo_space_cmd[] = {'@','t','o','d','o','_','s','p','a','c','e','@'};
+    static const char drive_cmd[] = {'@','d','r','i','v','e','@'};
+    static const char path_cmd[]  = {'@','p','a','t','h','@'};
+    static const char shortpath_cmd[]  = {'@','s','h','o','r','t','p','a','t','h','@'};
     static const char space_cmd[] = {'@','s','p','a','c','e','@'};
+    static const char tab_cmd[]   = {'@','t','a','b','@'};
     static const char or_broken_cmd[] = {'@','o','r','_','b','r','o','k','e','n','@'};
 
     while(exp_ptr < exp_end) {
@@ -159,25 +181,65 @@ static const char *compare_line(const char *out_line, const char *out_end, const
                     out_ptr += workdir_len;
                     continue;
                 }
-            }else if(exp_ptr+sizeof(todo_space_cmd) <= exp_end
-                    && !memcmp(exp_ptr, todo_space_cmd, sizeof(todo_space_cmd))) {
-                exp_ptr += sizeof(todo_space_cmd);
-                todo_wine ok(*out_ptr == ' ', "expected space\n");
-                if(out_ptr < out_end && *out_ptr == ' ')
-                    out_ptr++;
-                continue;
+            } else if(exp_ptr+sizeof(drive_cmd) <= exp_end
+                    && !memcmp(exp_ptr, drive_cmd, sizeof(drive_cmd))) {
+                exp_ptr += sizeof(drive_cmd);
+                if(out_end-out_ptr < drive_len
+                   || (CompareStringA(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
+                                      out_ptr, drive_len, drive, drive_len) != CSTR_EQUAL)) {
+                    err = out_ptr;
+                }else {
+                    out_ptr += drive_len;
+                    continue;
+                }
+            } else if(exp_ptr+sizeof(path_cmd) <= exp_end
+                    && !memcmp(exp_ptr, path_cmd, sizeof(path_cmd))) {
+                exp_ptr += sizeof(path_cmd);
+                if(out_end-out_ptr < path_len
+                   || (CompareStringA(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
+                                      out_ptr, path_len, path, path_len) != CSTR_EQUAL)) {
+                    err = out_ptr;
+                }else {
+                    out_ptr += path_len;
+                    continue;
+                }
+            } else if(exp_ptr+sizeof(shortpath_cmd) <= exp_end
+                    && !memcmp(exp_ptr, shortpath_cmd, sizeof(shortpath_cmd))) {
+                exp_ptr += sizeof(shortpath_cmd);
+                if(out_end-out_ptr < shortpath_len
+                   || (CompareStringA(LOCALE_SYSTEM_DEFAULT, NORM_IGNORECASE,
+                                      out_ptr, shortpath_len, shortpath, shortpath_len) != CSTR_EQUAL)) {
+                    err = out_ptr;
+                }else {
+                    out_ptr += shortpath_len;
+                    continue;
+                }
             }else if(exp_ptr+sizeof(space_cmd) <= exp_end
                     && !memcmp(exp_ptr, space_cmd, sizeof(space_cmd))) {
                 exp_ptr += sizeof(space_cmd);
-                ok(*out_ptr == ' ', "expected space\n");
-                if(out_ptr < out_end && *out_ptr == ' ')
+                if(out_ptr < out_end && *out_ptr == ' ') {
                     out_ptr++;
-                continue;
+                    continue;
+                } else {
+                    err = out_end;
+                }
+            }else if(exp_ptr+sizeof(tab_cmd) <= exp_end
+                    && !memcmp(exp_ptr, tab_cmd, sizeof(tab_cmd))) {
+                exp_ptr += sizeof(tab_cmd);
+                if(out_ptr < out_end && *out_ptr == '\t') {
+                    out_ptr++;
+                    continue;
+                } else {
+                    err = out_end;
+                }
             }else if(exp_ptr+sizeof(or_broken_cmd) <= exp_end
                      && !memcmp(exp_ptr, or_broken_cmd, sizeof(or_broken_cmd))) {
-                exp_ptr = exp_end;
-                continue;
-            }
+                if(out_ptr == out_end)
+                    return NULL;
+                else
+                    err = out_ptr;
+            }else if(out_ptr == out_end || *out_ptr != *exp_ptr)
+                err = out_ptr;
         }else if(out_ptr == out_end || *out_ptr != *exp_ptr) {
             err = out_ptr;
         }
@@ -201,13 +263,21 @@ static const char *compare_line(const char *out_line, const char *out_end, const
         out_ptr++;
     }
 
-    return exp_ptr == exp_end ? NULL : out_ptr;
+    if(exp_ptr != exp_end)
+        return out_ptr;
+    else if(out_ptr != out_end)
+        return exp_end;
+
+    return NULL;
 }
 
 static void test_output(const char *out_data, DWORD out_size, const char *exp_data, DWORD exp_size)
 {
     const char *out_ptr = out_data, *exp_ptr = exp_data, *out_nl, *exp_nl, *err;
     DWORD line = 0;
+    static const char todo_wine_cmd[] = {'@','t','o','d','o','_','w','i','n','e','@'};
+    static const char resync_cmd[] = {'-','-','-'};
+    BOOL is_todo_wine, is_out_resync, is_exp_resync;
 
     while(out_ptr < out_data+out_size && exp_ptr < exp_data+exp_size) {
         line++;
@@ -215,20 +285,49 @@ static void test_output(const char *out_data, DWORD out_size, const char *exp_da
         for(exp_nl = exp_ptr; exp_nl < exp_data+exp_size && *exp_nl != '\r' && *exp_nl != '\n'; exp_nl++);
         for(out_nl = out_ptr; out_nl < out_data+out_size && *out_nl != '\r' && *out_nl != '\n'; out_nl++);
 
+        is_todo_wine = (exp_ptr+sizeof(todo_wine_cmd) <= exp_nl &&
+                        !memcmp(exp_ptr, todo_wine_cmd, sizeof(todo_wine_cmd)));
+        if (is_todo_wine) {
+            exp_ptr += sizeof(todo_wine_cmd);
+            winetest_start_todo("wine");
+        }
+        is_exp_resync=(exp_ptr+sizeof(resync_cmd) <= exp_nl &&
+                       !memcmp(exp_ptr, resync_cmd, sizeof(resync_cmd)));
+        is_out_resync=(out_ptr+sizeof(resync_cmd) <= out_nl &&
+                       !memcmp(out_ptr, resync_cmd, sizeof(resync_cmd)));
+
         err = compare_line(out_ptr, out_nl, exp_ptr, exp_nl);
         if(err == out_nl)
             ok(0, "unexpected end of line %d (got '%.*s', wanted '%.*s')\n",
                line, (int)(out_nl-out_ptr), out_ptr, (int)(exp_nl-exp_ptr), exp_ptr);
-        else if(err)
-            ok(0, "unexpected char 0x%x position %d in line %d (got '%.*s', wanted '%.*s')\n",
-               *err, (int)(err-out_ptr), line, (int)(out_nl-out_ptr), out_ptr, (int)(exp_nl-exp_ptr), exp_ptr);
+        else if(err == exp_nl)
+            ok(0, "excess characters on line %d (got '%.*s', wanted '%.*s')\n",
+               line, (int)(out_nl-out_ptr), out_ptr, (int)(exp_nl-exp_ptr), exp_ptr);
+        else if (!err && is_todo_wine && is_out_resync && is_exp_resync)
+            /* Consider that the todo_wine was to deal with extra lines,
+             * not for the resync line itself
+             */
+            err = NULL;
+        else
+            ok(!err, "unexpected char 0x%x position %d in line %d (got '%.*s', wanted '%.*s')\n",
+               (err ? *err : 0), (err ? (int)(err-out_ptr) : -1), line, (int)(out_nl-out_ptr), out_ptr, (int)(exp_nl-exp_ptr), exp_ptr);
 
-        exp_ptr = exp_nl+1;
-        out_ptr = out_nl+1;
-        if(out_nl+1 < out_data+out_size && out_nl[0] == '\r' && out_nl[1] == '\n')
-            out_ptr++;
-        if(exp_nl+1 < exp_data+exp_size && exp_nl[0] == '\r' && exp_nl[1] == '\n')
-            exp_ptr++;
+        if(is_todo_wine) winetest_end_todo("wine");
+
+        if (is_exp_resync && err && is_todo_wine)
+            exp_ptr -= sizeof(todo_wine_cmd);
+        else if (!is_exp_resync || (is_exp_resync && !err))
+        {
+            exp_ptr = exp_nl+1;
+            if(exp_nl+1 < exp_data+exp_size && exp_nl[0] == '\r' && exp_nl[1] == '\n')
+                exp_ptr++;
+        }
+        if (!is_out_resync || (is_out_resync && !err))
+        {
+            out_ptr = out_nl+1;
+            if(out_nl+1 < out_data+out_size && out_nl[0] == '\r' && out_nl[1] == '\n')
+                out_ptr++;
+        }
     }
 
     ok(exp_ptr >= exp_data+exp_size, "unexpected end of output in line %d, missing %s\n", line, exp_ptr);
@@ -240,7 +339,7 @@ static void run_test(const char *cmd_data, DWORD cmd_size, const char *exp_data,
     const char *out_data, *actual_cmd_data;
     DWORD out_size, actual_cmd_size;
 
-    actual_cmd_data = replace_escaped_spaces(cmd_data, cmd_size, &actual_cmd_size);
+    actual_cmd_data = convert_input_data(cmd_data, cmd_size, &actual_cmd_size);
     if(!actual_cmd_size || !actual_cmd_data)
         goto cleanup;
 
@@ -259,7 +358,7 @@ cleanup:
     HeapFree(GetProcessHeap(), 0, (LPVOID)actual_cmd_data);
 }
 
-static void run_from_file(char *file_name)
+static void run_from_file(const char *file_name)
 {
     char out_name[MAX_PATH];
     const char *test_data, *out_data;
@@ -353,6 +452,13 @@ START_TEST(batch)
     }
 
     workdir_len = GetCurrentDirectoryA(sizeof(workdir), workdir);
+    drive[0] = workdir[0];
+    drive[1] = workdir[1]; /* Should be ':' */
+    memcpy(path, workdir + drive_len, (workdir_len - drive_len) * sizeof(drive[0]));
+    path[workdir_len - drive_len] = '\\';
+    path_len = workdir_len - drive_len + 1;
+    shortpath_len = GetShortPathNameA(path, shortpath,
+                                      sizeof(shortpath)/sizeof(shortpath[0]));
 
     argc = winetest_get_mainargs(&argv);
     if(argc > 2)

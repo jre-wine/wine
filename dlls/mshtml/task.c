@@ -47,12 +47,18 @@ typedef struct {
     struct list entry;
 } task_timer_t;
 
-void push_task(task_t *task, task_proc_t proc, LONG magic)
+static void default_task_destr(task_t *task)
+{
+    heap_free(task);
+}
+
+void push_task(task_t *task, task_proc_t proc, task_proc_t destr, LONG magic)
 {
     thread_data_t *thread_data = get_thread_data(TRUE);
 
     task->target_magic = magic;
     task->proc = proc;
+    task->destr = destr ? destr : default_task_destr;
     task->next = NULL;
 
     if(thread_data->task_queue_tail)
@@ -110,15 +116,16 @@ void remove_target_tasks(LONG target)
         SetTimer(thread_data->thread_hwnd, TIMER_ID, timer->time - GetTickCount(), NULL);
     }
 
-    while(thread_data->task_queue_head
-          && thread_data->task_queue_head->target_magic == target)
-        pop_task();
+    while(thread_data->task_queue_head && thread_data->task_queue_head->target_magic == target) {
+        iter = pop_task();
+        iter->destr(iter);
+    }
 
     for(iter = thread_data->task_queue_head; iter; iter = iter->next) {
         while(iter->next && iter->next->target_magic == target) {
             tmp = iter->next;
             iter->next = tmp->next;
-            heap_free(tmp);
+            tmp->destr(tmp);
         }
 
         if(!iter->next)
@@ -266,7 +273,7 @@ static LRESULT WINAPI hidden_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
                 break;
 
             task->proc(task);
-            heap_free(task);
+            task->destr(task);
         }
 
         return 0;

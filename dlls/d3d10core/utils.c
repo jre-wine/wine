@@ -242,7 +242,7 @@ DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format)
         case WINED3DFMT_B8G8R8X8_UNORM: return DXGI_FORMAT_B8G8R8X8_UNORM;
         default:
             FIXME("Unhandled wined3d format %#x.\n", format);
-            return WINED3DFMT_UNKNOWN;
+            return DXGI_FORMAT_UNKNOWN;
     }
 }
 
@@ -374,7 +374,7 @@ HRESULT parse_dxbc(const char *data, SIZE_T data_size,
     if (tag != TAG_DXBC)
     {
         WARN("Wrong tag.\n");
-        return E_FAIL;
+        return E_INVALIDARG;
     }
 
     /* checksum? */

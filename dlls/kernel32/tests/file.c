@@ -38,6 +38,7 @@ static BOOL (WINAPI *pReplaceFileA)(LPCSTR, LPCSTR, LPCSTR, DWORD, LPVOID, LPVOI
 static BOOL (WINAPI *pReplaceFileW)(LPCWSTR, LPCWSTR, LPCWSTR, DWORD, LPVOID, LPVOID);
 static UINT (WINAPI *pGetSystemWindowsDirectoryA)(LPSTR, UINT);
 static BOOL (WINAPI *pGetVolumeNameForVolumeMountPointA)(LPCSTR, LPSTR, DWORD);
+static DWORD (WINAPI *pQueueUserAPC)(PAPCFUNC pfnAPC, HANDLE hThread, ULONG_PTR dwData);
 
 /* keep filename and filenameW the same */
 static const char filename[] = "testfile.xxx";
@@ -71,6 +72,7 @@ static void InitFunctionPointers(void)
     pReplaceFileW=(void*)GetProcAddress(hkernel32, "ReplaceFileW");
     pGetSystemWindowsDirectoryA=(void*)GetProcAddress(hkernel32, "GetSystemWindowsDirectoryA");
     pGetVolumeNameForVolumeMountPointA = (void *) GetProcAddress(hkernel32, "GetVolumeNameForVolumeMountPointA");
+    pQueueUserAPC = (void *) GetProcAddress(hkernel32, "QueueUserAPC");
 }
 
 static void test__hread( void )
@@ -1589,7 +1591,7 @@ static void test_offset_in_overlapped_structure(void)
 
 static void test_LockFile(void)
 {
-    HANDLE handle;
+    HANDLE handle, handle2;
     DWORD written;
     OVERLAPPED overlapped;
     int limited_LockFile;
@@ -1603,6 +1605,14 @@ static void test_LockFile(void)
     {
         ok(0,"couldn't create file \"%s\" (err=%d)\n",filename,GetLastError());
         return;
+    }
+    handle2 = CreateFileA( filename, GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           OPEN_EXISTING, 0, 0 );
+    if (handle2 == INVALID_HANDLE_VALUE)
+    {
+        ok( 0, "couldn't open file \"%s\" (err=%d)\n", filename, GetLastError() );
+        goto cleanup;
     }
     ok( WriteFile( handle, sillytext, strlen(sillytext), &written, NULL ), "write failed\n" );
 
@@ -1654,6 +1664,22 @@ static void test_LockFile(void)
             "UnlockFileEx 150,100 again succeeded\n" );
     }
 
+    /* shared lock can overlap exclusive if handles are equal */
+    S(U(overlapped)).Offset = 300;
+    ok( LockFileEx( handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 100, 0, &overlapped ),
+        "LockFileEx exclusive 300,100 failed\n" );
+    ok( !LockFileEx( handle2, LOCKFILE_FAIL_IMMEDIATELY, 0, 100, 0, &overlapped ),
+        "LockFileEx handle2 300,100 succeeded\n" );
+    ret = LockFileEx( handle, LOCKFILE_FAIL_IMMEDIATELY, 0, 100, 0, &overlapped );
+    ok( ret, "LockFileEx 300,100 failed\n" );
+    ok( UnlockFileEx( handle, 0, 100, 0, &overlapped ), "UnlockFileEx 300,100 failed\n" );
+    /* exclusive lock is removed first */
+    ok( LockFileEx( handle2, LOCKFILE_FAIL_IMMEDIATELY, 0, 100, 0, &overlapped ),
+        "LockFileEx handle2 300,100 failed\n" );
+    ok( UnlockFileEx( handle2, 0, 100, 0, &overlapped ), "UnlockFileEx 300,100 failed\n" );
+    if (ret)
+        ok( UnlockFileEx( handle, 0, 100, 0, &overlapped ), "UnlockFileEx 300,100 failed\n" );
+
     ret = LockFile( handle, 0, 0x10000000, 0, 0xf0000000 );
     if (ret)
     {
@@ -1687,6 +1713,8 @@ static void test_LockFile(void)
 
     ok( UnlockFile( handle, 100, 0, 0, 0 ), "UnlockFile 100,0 failed\n" );
 
+    CloseHandle( handle2 );
+cleanup:
     CloseHandle( handle );
     DeleteFileA( filename );
 }
@@ -1730,7 +1758,7 @@ static BOOL create_fake_dll( LPCSTR filename )
 #elif defined __sparc__
     nt->FileHeader.Machine = IMAGE_FILE_MACHINE_SPARC;
 #elif defined __arm__
-    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_ARM;
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_ARMV7;
 #else
 # error You must specify the machine type
 #endif
@@ -1768,27 +1796,30 @@ static BOOL create_fake_dll( LPCSTR filename )
     return ret;
 }
 
-static int is_sharing_compatible( DWORD access1, DWORD sharing1, DWORD access2, DWORD sharing2, BOOL is_win9x )
+static unsigned int map_file_access( unsigned int access )
 {
-    if (!is_win9x)
-    {
-        if (!access1) sharing1 = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
-        if (!access2) sharing2 = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
-    }
-    else
-    {
-        access1 &= ~DELETE;
-        if (!access1) access1 = GENERIC_READ;
+    if (access & GENERIC_READ)    access |= FILE_GENERIC_READ;
+    if (access & GENERIC_WRITE)   access |= FILE_GENERIC_WRITE;
+    if (access & GENERIC_EXECUTE) access |= FILE_GENERIC_EXECUTE;
+    if (access & GENERIC_ALL)     access |= FILE_ALL_ACCESS;
+    return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
+}
 
-        access2 &= ~DELETE;
-        if (!access2) access2 = GENERIC_READ;
-    }
+static int is_sharing_compatible( DWORD access1, DWORD sharing1, DWORD access2, DWORD sharing2 )
+{
+    access1 = map_file_access( access1 );
+    access2 = map_file_access( access2 );
+    access1 &= FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_EXECUTE | DELETE;
+    access2 &= FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_EXECUTE | DELETE;
 
-    if ((access1 & GENERIC_READ) && !(sharing2 & FILE_SHARE_READ)) return 0;
-    if ((access1 & GENERIC_WRITE) && !(sharing2 & FILE_SHARE_WRITE)) return 0;
+    if (!access1) sharing1 = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
+    if (!access2) sharing2 = FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;
+
+    if ((access1 & (FILE_READ_DATA|FILE_EXECUTE)) && !(sharing2 & FILE_SHARE_READ)) return 0;
+    if ((access1 & (FILE_WRITE_DATA|FILE_APPEND_DATA)) && !(sharing2 & FILE_SHARE_WRITE)) return 0;
     if ((access1 & DELETE) && !(sharing2 & FILE_SHARE_DELETE)) return 0;
-    if ((access2 & GENERIC_READ) && !(sharing1 & FILE_SHARE_READ)) return 0;
-    if ((access2 & GENERIC_WRITE) && !(sharing1 & FILE_SHARE_WRITE)) return 0;
+    if ((access2 & (FILE_READ_DATA|FILE_EXECUTE)) && !(sharing1 & FILE_SHARE_READ)) return 0;
+    if ((access2 & (FILE_WRITE_DATA|FILE_APPEND_DATA)) && !(sharing1 & FILE_SHARE_WRITE)) return 0;
     if ((access2 & DELETE) && !(sharing1 & FILE_SHARE_DELETE)) return 0;
     return 1;
 }
@@ -1797,7 +1828,8 @@ static int is_sharing_map_compatible( DWORD map_access, DWORD access2, DWORD sha
 {
     if ((map_access == PAGE_READWRITE || map_access == PAGE_EXECUTE_READWRITE) &&
         !(sharing2 & FILE_SHARE_WRITE)) return 0;
-    if ((map_access & SEC_IMAGE) && (access2 & GENERIC_WRITE)) return 0;
+    access2 = map_file_access( access2 );
+    if ((map_access & SEC_IMAGE) && (access2 & FILE_WRITE_DATA)) return 0;
     return 1;
 }
 
@@ -1805,7 +1837,12 @@ static void test_file_sharing(void)
 {
     static const DWORD access_modes[] =
         { 0, GENERIC_READ, GENERIC_WRITE, GENERIC_READ|GENERIC_WRITE,
-          DELETE, GENERIC_READ|DELETE, GENERIC_WRITE|DELETE, GENERIC_READ|GENERIC_WRITE|DELETE };
+          DELETE, GENERIC_READ|DELETE, GENERIC_WRITE|DELETE, GENERIC_READ|GENERIC_WRITE|DELETE,
+          GENERIC_EXECUTE, GENERIC_EXECUTE | DELETE,
+          FILE_READ_DATA, FILE_WRITE_DATA, FILE_APPEND_DATA, FILE_READ_EA, FILE_WRITE_EA,
+          FILE_READ_DATA | FILE_EXECUTE, FILE_WRITE_DATA | FILE_EXECUTE, FILE_APPEND_DATA | FILE_EXECUTE,
+          FILE_READ_EA | FILE_EXECUTE, FILE_WRITE_EA | FILE_EXECUTE, FILE_EXECUTE,
+          FILE_DELETE_CHILD, FILE_READ_ATTRIBUTES, FILE_WRITE_ATTRIBUTES };
     static const DWORD sharing_modes[] =
         { 0, FILE_SHARE_READ,
           FILE_SHARE_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE,
@@ -1816,7 +1853,6 @@ static void test_file_sharing(void)
     int a1, s1, a2, s2;
     int ret;
     HANDLE h, h2;
-    BOOL is_win9x = FALSE;
 
     /* make sure the file exists */
     if (!create_fake_dll( filename ))
@@ -1824,16 +1860,11 @@ static void test_file_sharing(void)
         ok(0, "couldn't create file \"%s\" (err=%d)\n", filename, GetLastError());
         return;
     }
-    is_win9x = GetFileAttributesW(filenameW) == INVALID_FILE_ATTRIBUTES;
 
     for (a1 = 0; a1 < sizeof(access_modes)/sizeof(access_modes[0]); a1++)
     {
         for (s1 = 0; s1 < sizeof(sharing_modes)/sizeof(sharing_modes[0]); s1++)
         {
-            /* Win9x doesn't support FILE_SHARE_DELETE */
-            if (is_win9x && (sharing_modes[s1] & FILE_SHARE_DELETE))
-                continue;
-
             SetLastError(0xdeadbeef);
             h = CreateFileA( filename, access_modes[a1], sharing_modes[s1],
                              NULL, OPEN_EXISTING, 0, 0 );
@@ -1846,24 +1877,18 @@ static void test_file_sharing(void)
             {
                 for (s2 = 0; s2 < sizeof(sharing_modes)/sizeof(sharing_modes[0]); s2++)
                 {
-                    /* Win9x doesn't support FILE_SHARE_DELETE */
-                    if (is_win9x && (sharing_modes[s2] & FILE_SHARE_DELETE))
-                        continue;
-
                     SetLastError(0xdeadbeef);
                     h2 = CreateFileA( filename, access_modes[a2], sharing_modes[s2],
                                       NULL, OPEN_EXISTING, 0, 0 );
                     ret = GetLastError();
                     if (is_sharing_compatible( access_modes[a1], sharing_modes[s1],
-                                               access_modes[a2], sharing_modes[s2], is_win9x ))
+                                               access_modes[a2], sharing_modes[s2] ))
                     {
                         ok( h2 != INVALID_HANDLE_VALUE,
                             "open failed for modes %x/%x/%x/%x\n",
                             access_modes[a1], sharing_modes[s1],
                             access_modes[a2], sharing_modes[s2] );
-                        ok( ret == 0xdeadbeef /* Win9x */ ||
-                            ret == 0, /* XP */
-                             "wrong error code %d\n", ret );
+                        ok( ret == 0, "wrong error code %d\n", ret );
                     }
                     else
                     {
@@ -1902,10 +1927,6 @@ static void test_file_sharing(void)
         {
             for (s2 = 0; s2 < sizeof(sharing_modes)/sizeof(sharing_modes[0]); s2++)
             {
-                /* Win9x doesn't support FILE_SHARE_DELETE */
-                if (is_win9x && (sharing_modes[s2] & FILE_SHARE_DELETE))
-                    continue;
-
                 SetLastError(0xdeadbeef);
                 h2 = CreateFileA( filename, access_modes[a2], sharing_modes[s2],
                                   NULL, OPEN_EXISTING, 0, 0 );
@@ -1913,10 +1934,9 @@ static void test_file_sharing(void)
                 ret = GetLastError();
                 if (h2 == INVALID_HANDLE_VALUE)
                 {
-                    if (is_sharing_map_compatible(mapping_modes[a1], access_modes[a2], sharing_modes[s2]))
-                        ok( is_win9x, /* there's no sharing at all with a mapping on win9x */
-                            "open failed for modes map %x/%x/%x\n",
-                            mapping_modes[a1], access_modes[a2], sharing_modes[s2] );
+                    ok( !is_sharing_map_compatible(mapping_modes[a1], access_modes[a2], sharing_modes[s2]),
+                        "open failed for modes map %x/%x/%x\n",
+                        mapping_modes[a1], access_modes[a2], sharing_modes[s2] );
                     ok( ret == ERROR_SHARING_VIOLATION,
                         "wrong error code %d\n", ret );
                 }
@@ -1939,7 +1959,7 @@ static void test_file_sharing(void)
         h2 = CreateFileA( filename, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
                           NULL, CREATE_ALWAYS, 0, 0 );
         ret = GetLastError();
-        if ((mapping_modes[a1] & SEC_IMAGE) || is_win9x)
+        if (mapping_modes[a1] & SEC_IMAGE)
         {
             ok( h2 == INVALID_HANDLE_VALUE, "create succeeded for map %x\n", mapping_modes[a1] );
             ok( ret == ERROR_SHARING_VIOLATION, "wrong error code %d for %x\n", ret, mapping_modes[a1] );
@@ -1956,12 +1976,7 @@ static void test_file_sharing(void)
         h2 = CreateFileA( filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
                           NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, 0 );
         ret = GetLastError();
-        if (is_win9x)
-        {
-            ok( h2 == INVALID_HANDLE_VALUE, "create succeeded for map %x\n", mapping_modes[a1] );
-            ok( ret == ERROR_SHARING_VIOLATION, "wrong error code %d for %x\n", ret, mapping_modes[a1] );
-        }
-        else if (mapping_modes[a1] & SEC_IMAGE)
+        if (mapping_modes[a1] & SEC_IMAGE)
         {
             ok( h2 == INVALID_HANDLE_VALUE, "create succeeded for map %x\n", mapping_modes[a1] );
             ok( ret == ERROR_ACCESS_DENIED, "wrong error code %d for %x\n", ret, mapping_modes[a1] );
@@ -2375,6 +2390,12 @@ static void test_async_file_errors(void)
     HeapFree(GetProcessHeap(), 0, lpBuffer);
 }
 
+static BOOL user_apc_ran;
+static void CALLBACK user_apc(ULONG_PTR param)
+{
+    user_apc_ran = TRUE;
+}
+
 static void test_read_write(void)
 {
     DWORD bytes, ret, old_prot;
@@ -2394,6 +2415,13 @@ static void test_read_write(void)
     hFile = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                         CREATE_ALWAYS, FILE_FLAG_RANDOM_ACCESS, 0);
     ok(hFile != INVALID_HANDLE_VALUE, "CreateFileA: error %d\n", GetLastError());
+
+    user_apc_ran = FALSE;
+    if (pQueueUserAPC) {
+        trace("Queueing an user APC\n"); /* verify the file is non alerable */
+        ret = pQueueUserAPC(&user_apc, GetCurrentThread(), 0);
+        ok(ret, "QueueUserAPC failed: %d\n", GetLastError());
+    }
 
     SetLastError(12345678);
     bytes = 12345678;
@@ -2430,6 +2458,10 @@ static void test_read_write(void)
 		GetLastError() == ERROR_INVALID_PARAMETER), /* Win9x */
 	"ret = %d, error %d\n", ret, GetLastError());
     ok(!bytes, "bytes = %d\n", bytes);
+
+    ok(user_apc_ran == FALSE, "UserAPC ran, file using alertable io mode\n");
+    if (pQueueUserAPC)
+        SleepEx(0, TRUE); /* get rid of apc */
 
     /* test passing protected memory as buffer */
 
@@ -3013,6 +3045,7 @@ static void test_ReplaceFileA(void)
     ok(!ret && (GetLastError() == ERROR_FILE_NOT_FOUND ||
         GetLastError() == ERROR_ACCESS_DENIED),
         "ReplaceFileA: unexpected error %d\n", GetLastError());
+    DeleteFileA( replacement );
 
     /*
      * if the first round (w/ backup) worked then as long as there is no
@@ -3107,6 +3140,7 @@ static void test_ReplaceFileW(void)
     ok(!ret && (GetLastError() == ERROR_FILE_NOT_FOUND ||
        GetLastError() == ERROR_ACCESS_DENIED),
         "ReplaceFileW: unexpected error %d\n", GetLastError());
+    DeleteFileW( replacement );
 
     if (removeBackup)
     {

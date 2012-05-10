@@ -107,14 +107,12 @@
 
 #endif /* __WINE_WINSOCKAPI_STDLIB_H */
 
-#ifndef __WINESRC__
-# include <windows.h>
-#else
-# include <windef.h>
-#endif
+#include <windows.h>
 
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
+
+#include <inaddr.h>
 
 #ifdef USE_WS_PREFIX
 typedef unsigned char  WS_u_char;
@@ -591,34 +589,6 @@ static inline ULONG __wine_ulong_swap(ULONG l)
 #define WS_INADDR_NONE             0xffffffff
 #endif /* USE_WS_PREFIX */
 
-typedef struct WS(in_addr)
-{
-    union {
-        struct {
-            WS(u_char) s_b1,s_b2,s_b3,s_b4;
-        } S_un_b;
-        struct {
-            WS(u_short) s_w1,s_w2;
-        } S_un_w;
-        ULONG S_addr;
-    } S_un;
-#ifndef USE_WS_PREFIX
-#define s_addr  S_un.S_addr
-#define s_host  S_un.S_un_b.s_b2
-#define s_net   S_un.S_un_b.s_b1
-#define s_imp   S_un.S_un_w.s_w2
-#define s_impno S_un.S_un_b.s_b4
-#define s_lh    S_un.S_un_b.s_b3
-#else
-#define WS_s_addr  S_un.S_addr
-#define WS_s_host  S_un.S_un_b.s_b2
-#define WS_s_net   S_un.S_un_b.s_b1
-#define WS_s_imp   S_un.S_un_w.s_w2
-#define WS_s_impno S_un.S_un_b.s_b4
-#define WS_s_lh    S_un.S_un_b.s_b3
-#endif /* USE_WS_PREFIX */
-} IN_ADDR, *PIN_ADDR, *LPIN_ADDR;
-
 typedef struct WS(sockaddr_in)
 {
     short              sin_family;
@@ -1036,7 +1006,6 @@ int WINAPI WS(closesocket)(SOCKET);
 int WINAPI WS(connect)(SOCKET,const struct WS(sockaddr)*,int);
 struct WS(hostent)* WINAPI WS(gethostbyaddr)(const char*,int,int);
 struct WS(hostent)* WINAPI WS(gethostbyname)(const char*);
-/* gethostname not defined because of conflicts with unistd.h */
 int WINAPI WS(getpeername)(SOCKET,struct WS(sockaddr)*,int*);
 struct WS(protoent)* WINAPI WS(getprotobyname)(const char*);
 struct WS(protoent)* WINAPI WS(getprotobynumber)(int);
@@ -1058,6 +1027,11 @@ int WINAPI WS(sendto)(SOCKET,const char*,int,int,const struct WS(sockaddr)*,int)
 int WINAPI WS(setsockopt)(SOCKET,int,int,const char*,int);
 int WINAPI WS(shutdown)(SOCKET,int);
 SOCKET WINAPI WS(socket)(int,int,int);
+
+#if defined(__MINGW32__) || defined (_MSC_VER)
+/* gethostname is not defined on Unix because of conflicts with unistd.h */
+int WINAPI WS(gethostname)(char*,int);
+#endif
 
 #endif /* !defined(__WINE_WINSOCK2__) || WS_API_PROTOTYPES */
 

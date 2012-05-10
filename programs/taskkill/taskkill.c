@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <stdlib.h>
 #include <windows.h>
 #include <psapi.h>
 #include <wine/unicode.h>
@@ -36,13 +37,14 @@ struct pid_close_info
     BOOL found;
 };
 
-static int taskkill_vprintfW(const WCHAR *msg, va_list va_args)
+static int taskkill_vprintfW(const WCHAR *msg, __ms_va_list va_args)
 {
     int wlen;
     DWORD count, ret;
     WCHAR msg_buffer[8192];
 
-    wlen = vsprintfW(msg_buffer, msg, va_args);
+    wlen = FormatMessageW(FORMAT_MESSAGE_FROM_STRING, msg, 0, 0, msg_buffer,
+                          sizeof(msg_buffer)/sizeof(*msg_buffer), &va_args);
 
     ret = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), msg_buffer, wlen, &count, NULL);
     if (!ret)
@@ -50,6 +52,10 @@ static int taskkill_vprintfW(const WCHAR *msg, va_list va_args)
         DWORD len;
         char *msgA;
 
+        /* On Windows WriteConsoleW() fails if the output is redirected. So fall
+         * back to WriteFile(), assuming the console encoding is still the right
+         * one in that case.
+         */
         len = WideCharToMultiByte(GetConsoleOutputCP(), 0, msg_buffer, wlen,
             NULL, 0, NULL, NULL);
         msgA = HeapAlloc(GetProcessHeap(), 0, len);
@@ -65,37 +71,37 @@ static int taskkill_vprintfW(const WCHAR *msg, va_list va_args)
     return count;
 }
 
-static int taskkill_printfW(const WCHAR *msg, ...)
+static int CDECL taskkill_printfW(const WCHAR *msg, ...)
 {
-    va_list va_args;
+    __ms_va_list va_args;
     int len;
 
-    va_start(va_args, msg);
+    __ms_va_start(va_args, msg);
     len = taskkill_vprintfW(msg, va_args);
-    va_end(va_args);
+    __ms_va_end(va_args);
 
     return len;
 }
 
-static int taskkill_message_printfW(int msg, ...)
+static int CDECL taskkill_message_printfW(int msg, ...)
 {
-    va_list va_args;
+    __ms_va_list va_args;
     WCHAR msg_buffer[8192];
     int len;
 
     LoadStringW(GetModuleHandleW(NULL), msg, msg_buffer,
         sizeof(msg_buffer)/sizeof(WCHAR));
 
-    va_start(va_args, msg);
+    __ms_va_start(va_args, msg);
     len = taskkill_vprintfW(msg_buffer, va_args);
-    va_end(va_args);
+    __ms_va_end(va_args);
 
     return len;
 }
 
 static int taskkill_message(int msg)
 {
-    static const WCHAR formatW[] = {'%','s',0};
+    static const WCHAR formatW[] = {'%','1',0};
     WCHAR msg_buffer[8192];
 
     LoadStringW(GetModuleHandleW(NULL), msg, msg_buffer,

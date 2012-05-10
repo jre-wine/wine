@@ -38,6 +38,8 @@ static BOOL   (WINAPI *pVirtualFreeEx)(HANDLE, LPVOID, SIZE_T, DWORD);
 static UINT   (WINAPI *pGetWriteWatch)(DWORD,LPVOID,SIZE_T,LPVOID*,ULONG_PTR*,ULONG*);
 static UINT   (WINAPI *pResetWriteWatch)(LPVOID,SIZE_T);
 static NTSTATUS (WINAPI *pNtAreMappedFilesTheSame)(PVOID,PVOID);
+static NTSTATUS (WINAPI *pNtMapViewOfSection)(HANDLE, HANDLE, PVOID *, ULONG, SIZE_T, const LARGE_INTEGER *, SIZE_T *, ULONG, ULONG, ULONG);
+static DWORD (WINAPI *pNtUnmapViewOfSection)(HANDLE, PVOID);
 
 /* ############################### */
 
@@ -417,6 +419,7 @@ static void test_MapViewOfFile(void)
     ret = DuplicateHandle( GetCurrentProcess(), mapping, GetCurrentProcess(), &map2,
                            FILE_MAP_READ, FALSE, 0 );
     ok( ret, "DuplicateHandle failed error %u\n", GetLastError());
+    SetLastError(0xdeadbeef);
     ptr = MapViewOfFile( map2, FILE_MAP_WRITE, 0, 0, 4096 );
     if (!ptr)
     {
@@ -424,6 +427,7 @@ static void test_MapViewOfFile(void)
         CloseHandle( map2 );
         ret = DuplicateHandle( GetCurrentProcess(), mapping, GetCurrentProcess(), &map2, 0, FALSE, 0 );
         ok( ret, "DuplicateHandle failed error %u\n", GetLastError());
+        SetLastError(0xdeadbeef);
         ptr = MapViewOfFile( map2, 0, 0, 0, 4096 );
         ok( !ptr, "MapViewOfFile succeeded\n" );
         ok( GetLastError() == ERROR_ACCESS_DENIED, "Wrong error %d\n", GetLastError() );
@@ -598,12 +602,14 @@ static void test_MapViewOfFile(void)
     ptr = MapViewOfFile( mapping, FILE_MAP_WRITE, 0, 0, 0 );
     if (!ptr)
     {
+        SIZE_T size;
         ok( GetLastError() == ERROR_ACCESS_DENIED, "Wrong error %d\n", GetLastError() );
         SetLastError(0xdeadbeef);
         ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
         ok( ptr != NULL, "MapViewOfFile FILE_MAP_READ error %u\n", GetLastError() );
         SetLastError(0xdeadbeef);
-        ok( VirtualQuery( ptr, &info, sizeof(info) ) == sizeof(info),
+        size = VirtualQuery( ptr, &info, sizeof(info) );
+        ok( size == sizeof(info),
             "VirtualQuery error %u\n", GetLastError() );
         ok( info.BaseAddress == ptr, "%p != %p\n", info.BaseAddress, ptr );
         ok( info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr );
@@ -623,12 +629,14 @@ static void test_MapViewOfFile(void)
     ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
     if (!ptr)
     {
+        SIZE_T size;
         ok( GetLastError() == ERROR_ACCESS_DENIED, "Wrong error %d\n", GetLastError() );
         SetLastError(0xdeadbeef);
         ptr = MapViewOfFile( mapping, FILE_MAP_WRITE, 0, 0, 0 );
         ok( ptr != NULL, "MapViewOfFile FILE_MAP_WRITE error %u\n", GetLastError() );
         SetLastError(0xdeadbeef);
-        ok( VirtualQuery( ptr, &info, sizeof(info) ) == sizeof(info),
+        size = VirtualQuery( ptr, &info, sizeof(info) );
+        ok( size == sizeof(info),
             "VirtualQuery error %u\n", GetLastError() );
         ok( info.BaseAddress == ptr, "%p != %p\n", info.BaseAddress, ptr );
         ok( info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr );
@@ -774,12 +782,6 @@ static void test_MapViewOfFile(void)
     ok( VirtualFree(addr, 0, MEM_RELEASE), "VirtualFree failed\n" );
 }
 
-static DWORD (WINAPI *pNtMapViewOfSection)( HANDLE handle, HANDLE process, PVOID *addr_ptr,
-                                            ULONG zero_bits, SIZE_T commit_size,
-                                            const LARGE_INTEGER *offset_ptr, SIZE_T *size_ptr,
-                                            ULONG inherit, ULONG alloc_type, ULONG protect );
-static DWORD (WINAPI *pNtUnmapViewOfSection)( HANDLE process, PVOID addr );
-
 static void test_NtMapViewOfSection(void)
 {
     HANDLE hProcess;
@@ -794,8 +796,6 @@ static void test_NtMapViewOfSection(void)
     SIZE_T size, result;
     LARGE_INTEGER offset;
 
-    pNtMapViewOfSection = (void *)GetProcAddress( GetModuleHandle("ntdll.dll"), "NtMapViewOfSection" );
-    pNtUnmapViewOfSection = (void *)GetProcAddress( GetModuleHandle("ntdll.dll"), "NtUnmapViewOfSection" );
     if (!pNtMapViewOfSection || !pNtUnmapViewOfSection)
     {
         win_skip( "NtMapViewOfSection not available\n" );
@@ -1382,6 +1382,851 @@ static void test_write_watch(void)
     VirtualFree( base, 0, MEM_FREE );
 }
 
+static void test_VirtualProtect(void)
+{
+    static const struct test_data
+    {
+        DWORD prot_set, prot_get;
+    } td[] =
+    {
+        { 0, 0 }, /* 0x00 */
+        { PAGE_NOACCESS, PAGE_NOACCESS }, /* 0x01 */
+        { PAGE_READONLY, PAGE_READONLY }, /* 0x02 */
+        { PAGE_READONLY | PAGE_NOACCESS, 0 }, /* 0x03 */
+        { PAGE_READWRITE, PAGE_READWRITE }, /* 0x04 */
+        { PAGE_READWRITE | PAGE_NOACCESS, 0 }, /* 0x05 */
+        { PAGE_READWRITE | PAGE_READONLY, 0 }, /* 0x06 */
+        { PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, 0 }, /* 0x07 */
+        { PAGE_WRITECOPY, 0 }, /* 0x08 */
+        { PAGE_WRITECOPY | PAGE_NOACCESS, 0 }, /* 0x09 */
+        { PAGE_WRITECOPY | PAGE_READONLY, 0 }, /* 0x0a */
+        { PAGE_WRITECOPY | PAGE_NOACCESS | PAGE_READONLY, 0 }, /* 0x0b */
+        { PAGE_WRITECOPY | PAGE_READWRITE, 0 }, /* 0x0c */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_NOACCESS, 0 }, /* 0x0d */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY, 0 }, /* 0x0e */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, 0 }, /* 0x0f */
+
+        { PAGE_EXECUTE, PAGE_EXECUTE }, /* 0x10 */
+        { PAGE_EXECUTE_READ, PAGE_EXECUTE_READ }, /* 0x20 */
+        { PAGE_EXECUTE_READ | PAGE_EXECUTE, 0 }, /* 0x30 */
+        { PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_READWRITE }, /* 0x40 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, 0 }, /* 0x50 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, 0 }, /* 0x60 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, 0 }, /* 0x70 */
+        { PAGE_EXECUTE_WRITECOPY, 0 }, /* 0x80 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE, 0 }, /* 0x90 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ, 0 }, /* 0xa0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE, 0 }, /* 0xb0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE, 0 }, /* 0xc0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, 0 }, /* 0xd0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, 0 }, /* 0xe0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, 0 } /* 0xf0 */
+    };
+    char *base;
+    DWORD ret, old_prot, rw_prot, exec_prot, i, j;
+    MEMORY_BASIC_INFORMATION info;
+    SYSTEM_INFO si;
+
+    GetSystemInfo(&si);
+    trace("system page size %#x\n", si.dwPageSize);
+
+    SetLastError(0xdeadbeef);
+    base = VirtualAlloc(0, si.dwPageSize, MEM_RESERVE | MEM_COMMIT, PAGE_NOACCESS);
+    ok(base != NULL, "VirtualAlloc failed %d\n", GetLastError());
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        ret = VirtualQuery(base, &info, sizeof(info));
+        ok(ret, "VirtualQuery failed %d\n", GetLastError());
+        ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+        ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+        ok(info.Protect == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, info.Protect);
+        ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+        ok(info.AllocationProtect == PAGE_NOACCESS, "%d: %#x != PAGE_NOACCESS\n", i, info.AllocationProtect);
+        ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+        ok(info.Type == MEM_PRIVATE, "%d: %#x != MEM_PRIVATE\n", i, info.Type);
+
+        old_prot = 0xdeadbeef;
+        SetLastError(0xdeadbeef);
+        ret = VirtualProtect(base, si.dwPageSize, td[i].prot_set, &old_prot);
+        if (td[i].prot_get)
+        {
+            ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
+            ok(old_prot == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, old_prot);
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualQuery(base, &info, sizeof(info));
+            ok(ret, "VirtualQuery failed %d\n", GetLastError());
+            ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+            ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+            ok(info.Protect == td[i].prot_get, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_get);
+            ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+            ok(info.AllocationProtect == PAGE_NOACCESS, "%d: %#x != PAGE_NOACCESS\n", i, info.AllocationProtect);
+            ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+            ok(info.Type == MEM_PRIVATE, "%d: %#x != MEM_PRIVATE\n", i, info.Type);
+        }
+        else
+        {
+            ok(!ret, "%d: VirtualProtect should fail\n", i);
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%d: expected ERROR_INVALID_PARAMETER, got %d\n", i, GetLastError());
+        }
+
+        old_prot = 0xdeadbeef;
+        SetLastError(0xdeadbeef);
+        ret = VirtualProtect(base, si.dwPageSize, PAGE_NOACCESS, &old_prot);
+        ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
+        if (td[i].prot_get)
+            ok(old_prot == td[i].prot_get, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_get);
+        else
+            ok(old_prot == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, old_prot);
+    }
+
+    exec_prot = 0;
+
+    for (i = 0; i <= 4; i++)
+    {
+        rw_prot = 0;
+
+        for (j = 0; j <= 4; j++)
+        {
+            DWORD prot = exec_prot | rw_prot;
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualProtect(base, si.dwPageSize, prot, &old_prot);
+            if ((rw_prot && exec_prot) || (!rw_prot && !exec_prot))
+            {
+                ok(!ret, "VirtualProtect(%02x) should fail\n", prot);
+                ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+            }
+            else
+            {
+                if (prot & (PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY))
+                {
+                    ok(!ret, "VirtualProtect(%02x) should fail\n", prot);
+                    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+                }
+                else
+                    ok(ret, "VirtualProtect(%02x) error %d\n", prot, GetLastError());
+            }
+
+            rw_prot = 1 << j;
+        }
+
+        exec_prot = 1 << (i + 4);
+    }
+
+    VirtualFree(base, 0, MEM_FREE);
+}
+
+static BOOL is_mem_writable(DWORD prot)
+{
+    switch (prot & 0xff)
+    {
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return TRUE;
+
+        default:
+            return FALSE;
+    }
+}
+
+static void test_VirtualAlloc_protection(void)
+{
+    static const struct test_data
+    {
+        DWORD prot;
+        BOOL success;
+    } td[] =
+    {
+        { 0, FALSE }, /* 0x00 */
+        { PAGE_NOACCESS, TRUE }, /* 0x01 */
+        { PAGE_READONLY, TRUE }, /* 0x02 */
+        { PAGE_READONLY | PAGE_NOACCESS, FALSE }, /* 0x03 */
+        { PAGE_READWRITE, TRUE }, /* 0x04 */
+        { PAGE_READWRITE | PAGE_NOACCESS, FALSE }, /* 0x05 */
+        { PAGE_READWRITE | PAGE_READONLY, FALSE }, /* 0x06 */
+        { PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, FALSE }, /* 0x07 */
+        { PAGE_WRITECOPY, FALSE }, /* 0x08 */
+        { PAGE_WRITECOPY | PAGE_NOACCESS, FALSE }, /* 0x09 */
+        { PAGE_WRITECOPY | PAGE_READONLY, FALSE }, /* 0x0a */
+        { PAGE_WRITECOPY | PAGE_NOACCESS | PAGE_READONLY, FALSE }, /* 0x0b */
+        { PAGE_WRITECOPY | PAGE_READWRITE, FALSE }, /* 0x0c */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_NOACCESS, FALSE }, /* 0x0d */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY, FALSE }, /* 0x0e */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, FALSE }, /* 0x0f */
+
+        { PAGE_EXECUTE, TRUE }, /* 0x10 */
+        { PAGE_EXECUTE_READ, TRUE }, /* 0x20 */
+        { PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE }, /* 0x30 */
+        { PAGE_EXECUTE_READWRITE, TRUE }, /* 0x40 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, FALSE }, /* 0x50 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, FALSE }, /* 0x60 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE }, /* 0x70 */
+        { PAGE_EXECUTE_WRITECOPY, FALSE }, /* 0x80 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE, FALSE }, /* 0x90 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ, FALSE }, /* 0xa0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE }, /* 0xb0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE, FALSE }, /* 0xc0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, FALSE }, /* 0xd0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, FALSE }, /* 0xe0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE } /* 0xf0 */
+    };
+    char *base;
+    DWORD ret, i;
+    MEMORY_BASIC_INFORMATION info;
+    SYSTEM_INFO si;
+
+    GetSystemInfo(&si);
+    trace("system page size %#x\n", si.dwPageSize);
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        base = VirtualAlloc(0, si.dwPageSize, MEM_COMMIT, td[i].prot);
+
+        if (td[i].success)
+        {
+            ok(base != NULL, "%d: VirtualAlloc failed %d\n", i, GetLastError());
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualQuery(base, &info, sizeof(info));
+            ok(ret, "VirtualQuery failed %d\n", GetLastError());
+            ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+            ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+            ok(info.Protect == td[i].prot, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot);
+            ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+            ok(info.AllocationProtect == td[i].prot, "%d: %#x != %#x\n", i, info.AllocationProtect, td[i].prot);
+            ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+            ok(info.Type == MEM_PRIVATE, "%d: %#x != MEM_PRIVATE\n", i, info.Type);
+
+            if (is_mem_writable(info.Protect))
+            {
+                base[0] = 0xfe;
+
+                SetLastError(0xdeadbeef);
+                ret = VirtualQuery(base, &info, sizeof(info));
+                ok(ret, "VirtualQuery failed %d\n", GetLastError());
+                ok(info.Protect == td[i].prot, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot);
+            }
+
+            VirtualFree(base, 0, MEM_FREE);
+        }
+        else
+        {
+            ok(!base, "%d: VirtualAlloc should fail\n", i);
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%d: expected ERROR_INVALID_PARAMETER, got %d\n", i, GetLastError());
+        }
+    }
+}
+
+static void test_CreateFileMapping_protection(void)
+{
+    static const struct test_data
+    {
+        DWORD prot;
+        BOOL success;
+        DWORD prot_after_write;
+    } td[] =
+    {
+        { 0, FALSE, 0 }, /* 0x00 */
+        { PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x01 */
+        { PAGE_READONLY, TRUE, PAGE_READONLY }, /* 0x02 */
+        { PAGE_READONLY | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x03 */
+        { PAGE_READWRITE, TRUE, PAGE_READWRITE }, /* 0x04 */
+        { PAGE_READWRITE | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x05 */
+        { PAGE_READWRITE | PAGE_READONLY, FALSE, PAGE_NOACCESS }, /* 0x06 */
+        { PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x07 */
+        { PAGE_WRITECOPY, TRUE, PAGE_READWRITE }, /* 0x08 */
+        { PAGE_WRITECOPY | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x09 */
+        { PAGE_WRITECOPY | PAGE_READONLY, FALSE, PAGE_NOACCESS }, /* 0x0a */
+        { PAGE_WRITECOPY | PAGE_NOACCESS | PAGE_READONLY, FALSE, PAGE_NOACCESS }, /* 0x0b */
+        { PAGE_WRITECOPY | PAGE_READWRITE, FALSE, PAGE_NOACCESS }, /* 0x0c */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x0d */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY, FALSE, PAGE_NOACCESS }, /* 0x0e */
+        { PAGE_WRITECOPY | PAGE_READWRITE | PAGE_READONLY | PAGE_NOACCESS, FALSE, PAGE_NOACCESS }, /* 0x0f */
+
+        { PAGE_EXECUTE, FALSE, PAGE_EXECUTE }, /* 0x10 */
+        { PAGE_EXECUTE_READ, TRUE, PAGE_EXECUTE_READ }, /* 0x20 */
+        { PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE, PAGE_EXECUTE_READ }, /* 0x30 */
+        { PAGE_EXECUTE_READWRITE, TRUE, PAGE_EXECUTE_READWRITE }, /* 0x40 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, FALSE, PAGE_NOACCESS }, /* 0x50 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, FALSE, PAGE_NOACCESS }, /* 0x60 */
+        { PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE, PAGE_NOACCESS }, /* 0x70 */
+        { PAGE_EXECUTE_WRITECOPY, TRUE, PAGE_EXECUTE_READWRITE }, /* 0x80 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE, FALSE, PAGE_NOACCESS }, /* 0x90 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ, FALSE, PAGE_NOACCESS }, /* 0xa0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE, PAGE_NOACCESS }, /* 0xb0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE, FALSE, PAGE_NOACCESS }, /* 0xc0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE, FALSE, PAGE_NOACCESS }, /* 0xd0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ, FALSE, PAGE_NOACCESS }, /* 0xe0 */
+        { PAGE_EXECUTE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE, FALSE, PAGE_NOACCESS } /* 0xf0 */
+    };
+    char *base;
+    DWORD ret, i, alloc_prot, prot, old_prot;
+    MEMORY_BASIC_INFORMATION info;
+    SYSTEM_INFO si;
+    char temp_path[MAX_PATH];
+    char file_name[MAX_PATH];
+    HANDLE hfile, hmap;
+    BOOL page_exec_supported = TRUE;
+
+    GetSystemInfo(&si);
+    trace("system page size %#x\n", si.dwPageSize);
+
+    GetTempPath(MAX_PATH, temp_path);
+    GetTempFileName(temp_path, "map", 0, file_name);
+
+    SetLastError(0xdeadbeef);
+    hfile = CreateFile(file_name, GENERIC_READ|GENERIC_WRITE|GENERIC_EXECUTE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(hfile != INVALID_HANDLE_VALUE, "CreateFile(%s) error %d\n", file_name, GetLastError());
+    SetFilePointer(hfile, si.dwPageSize, NULL, FILE_BEGIN);
+    SetEndOfFile(hfile);
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        hmap = CreateFileMapping(hfile, NULL, td[i].prot | SEC_COMMIT, 0, si.dwPageSize, NULL);
+
+        if (td[i].success)
+        {
+            if (!hmap)
+            {
+                trace("%d: CreateFileMapping(%04x) failed: %d\n", i, td[i].prot, GetLastError());
+                /* NT4 and win2k don't support EXEC on file mappings */
+                if (td[i].prot == PAGE_EXECUTE_READ || td[i].prot == PAGE_EXECUTE_READWRITE)
+                {
+                    page_exec_supported = FALSE;
+                    ok(broken(!hmap), "%d: CreateFileMapping doesn't support PAGE_EXECUTE\n", i);
+                    continue;
+                }
+                /* Vista+ supports PAGE_EXECUTE_WRITECOPY, earlier versions don't */
+                if (td[i].prot == PAGE_EXECUTE_WRITECOPY)
+                {
+                    page_exec_supported = FALSE;
+                    ok(broken(!hmap), "%d: CreateFileMapping doesn't support PAGE_EXECUTE_WRITECOPY\n", i);
+                    continue;
+                }
+            }
+            ok(hmap != 0, "%d: CreateFileMapping(%04x) error %d\n", i, td[i].prot, GetLastError());
+
+            base = MapViewOfFile(hmap, FILE_MAP_READ, 0, 0, 0);
+            ok(base != NULL, "%d: MapViewOfFile failed %d\n", i, GetLastError());
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualQuery(base, &info, sizeof(info));
+            ok(ret, "VirtualQuery failed %d\n", GetLastError());
+            ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+            ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+            ok(info.Protect == PAGE_READONLY, "%d: got %#x != expected PAGE_READONLY\n", i, info.Protect);
+            ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+            ok(info.AllocationProtect == PAGE_READONLY, "%d: %#x != PAGE_READONLY\n", i, info.AllocationProtect);
+            ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+            ok(info.Type == MEM_MAPPED, "%d: %#x != MEM_MAPPED\n", i, info.Type);
+
+            if (is_mem_writable(info.Protect))
+            {
+                base[0] = 0xfe;
+
+                SetLastError(0xdeadbeef);
+                ret = VirtualQuery(base, &info, sizeof(info));
+                ok(ret, "VirtualQuery failed %d\n", GetLastError());
+                ok(info.Protect == td[i].prot, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot);
+            }
+
+            UnmapViewOfFile(base);
+            CloseHandle(hmap);
+        }
+        else
+        {
+            ok(!hmap, "%d: CreateFileMapping should fail\n", i);
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%d: expected ERROR_INVALID_PARAMETER, got %d\n", i, GetLastError());
+        }
+    }
+
+    if (page_exec_supported) alloc_prot = PAGE_EXECUTE_READWRITE;
+    else alloc_prot = PAGE_READWRITE;
+    SetLastError(0xdeadbeef);
+    hmap = CreateFileMapping(hfile, NULL, alloc_prot, 0, si.dwPageSize, NULL);
+    ok(hmap != 0, "%d: CreateFileMapping error %d\n", i, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    base = MapViewOfFile(hmap, FILE_MAP_READ | FILE_MAP_WRITE | (page_exec_supported ? FILE_MAP_EXECUTE : 0), 0, 0, 0);
+    ok(base != NULL, "MapViewOfFile failed %d\n", GetLastError());
+
+    old_prot = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = VirtualProtect(base, si.dwPageSize, PAGE_NOACCESS, &old_prot);
+    ok(ret, "VirtualProtect error %d\n", GetLastError());
+    ok(old_prot == alloc_prot, "got %#x != expected %#x\n", old_prot, alloc_prot);
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        ret = VirtualQuery(base, &info, sizeof(info));
+        ok(ret, "VirtualQuery failed %d\n", GetLastError());
+        ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+        ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+        ok(info.Protect == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, info.Protect);
+        ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+        ok(info.AllocationProtect == alloc_prot, "%d: %#x != %#x\n", i, info.AllocationProtect, alloc_prot);
+        ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+        ok(info.Type == MEM_MAPPED, "%d: %#x != MEM_MAPPED\n", i, info.Type);
+
+        old_prot = 0xdeadbeef;
+        SetLastError(0xdeadbeef);
+        ret = VirtualProtect(base, si.dwPageSize, td[i].prot, &old_prot);
+        if (td[i].success || td[i].prot == PAGE_NOACCESS || td[i].prot == PAGE_EXECUTE)
+        {
+            if (!ret)
+            {
+                /* win2k and XP don't support EXEC on file mappings */
+                if (td[i].prot == PAGE_EXECUTE)
+                {
+                    ok(broken(!ret), "%d: VirtualProtect doesn't support PAGE_EXECUTE\n", i);
+                    continue;
+                }
+                /* NT4 and win2k don't support EXEC on file mappings */
+                if (td[i].prot == PAGE_EXECUTE_READ || td[i].prot == PAGE_EXECUTE_READWRITE)
+                {
+                    ok(broken(!ret), "%d: VirtualProtect doesn't support PAGE_EXECUTE\n", i);
+                    continue;
+                }
+                /* Vista+ supports PAGE_EXECUTE_WRITECOPY, earlier versions don't */
+                if (td[i].prot == PAGE_EXECUTE_WRITECOPY)
+                {
+                    ok(broken(!ret), "%d: VirtualProtect doesn't support PAGE_EXECUTE_WRITECOPY\n", i);
+                    continue;
+                }
+            }
+
+            ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
+            ok(old_prot == PAGE_NOACCESS, "%d: got %#x != expected PAGE_NOACCESS\n", i, old_prot);
+
+            prot = td[i].prot;
+            /* looks strange but Windows doesn't do this for PAGE_WRITECOPY */
+            if (prot == PAGE_EXECUTE_WRITECOPY) prot = PAGE_EXECUTE_READWRITE;
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualQuery(base, &info, sizeof(info));
+            ok(ret, "VirtualQuery failed %d\n", GetLastError());
+            ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
+            ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
+            /* FIXME: remove the condition below once Wine is fixed */
+            if (td[i].prot == PAGE_EXECUTE_WRITECOPY)
+                todo_wine ok(info.Protect == prot, "%d: got %#x != expected %#x\n", i, info.Protect, prot);
+            else
+                ok(info.Protect == prot, "%d: got %#x != expected %#x\n", i, info.Protect, prot);
+            ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
+            ok(info.AllocationProtect == alloc_prot, "%d: %#x != %#x\n", i, info.AllocationProtect, alloc_prot);
+            ok(info.State == MEM_COMMIT, "%d: %#x != MEM_COMMIT\n", i, info.State);
+            ok(info.Type == MEM_MAPPED, "%d: %#x != MEM_MAPPED\n", i, info.Type);
+
+            if (is_mem_writable(info.Protect))
+            {
+                base[0] = 0xfe;
+
+                SetLastError(0xdeadbeef);
+                ret = VirtualQuery(base, &info, sizeof(info));
+                ok(ret, "VirtualQuery failed %d\n", GetLastError());
+                /* FIXME: remove the condition below once Wine is fixed */
+                if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
+                    todo_wine ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
+                else
+                    ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
+            }
+        }
+        else
+        {
+            ok(!ret, "%d: VirtualProtect should fail\n", i);
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "%d: expected ERROR_INVALID_PARAMETER, got %d\n", i, GetLastError());
+            continue;
+        }
+
+        old_prot = 0xdeadbeef;
+        SetLastError(0xdeadbeef);
+        ret = VirtualProtect(base, si.dwPageSize, PAGE_NOACCESS, &old_prot);
+        ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
+        /* FIXME: remove the condition below once Wine is fixed */
+        if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
+            todo_wine ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
+        else
+            ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
+    }
+
+    UnmapViewOfFile(base);
+    CloseHandle(hmap);
+
+    CloseHandle(hfile);
+    DeleteFile(file_name);
+}
+
+#define ACCESS_READ      0x01
+#define ACCESS_WRITE     0x02
+#define ACCESS_EXECUTE   0x04
+#define ACCESS_WRITECOPY 0x08
+
+static DWORD page_prot_to_access(DWORD prot)
+{
+    switch (prot)
+    {
+    case PAGE_READWRITE:
+        return ACCESS_READ | ACCESS_WRITE;
+
+    case PAGE_EXECUTE:
+    case PAGE_EXECUTE_READ:
+        return ACCESS_READ | ACCESS_EXECUTE;
+
+    case PAGE_EXECUTE_READWRITE:
+        return ACCESS_READ | ACCESS_WRITE | ACCESS_WRITECOPY | ACCESS_EXECUTE;
+
+    case PAGE_EXECUTE_WRITECOPY:
+        return ACCESS_READ | ACCESS_WRITECOPY | ACCESS_EXECUTE;
+
+    case PAGE_READONLY:
+        return ACCESS_READ;
+
+    case PAGE_WRITECOPY:
+        return ACCESS_READ;
+
+    default:
+        return 0;
+    }
+}
+
+static BOOL is_compatible_protection(DWORD map_prot, DWORD view_prot, DWORD prot)
+{
+    DWORD map_access, view_access, prot_access;
+
+    map_access = page_prot_to_access(map_prot);
+    view_access = page_prot_to_access(view_prot);
+    prot_access = page_prot_to_access(prot);
+
+    if (view_access == prot_access) return TRUE;
+    if (!view_access) return FALSE;
+
+    if ((view_access & prot_access) != prot_access) return FALSE;
+    if ((map_access & prot_access) == prot_access) return TRUE;
+
+    return FALSE;
+}
+
+static DWORD map_prot_to_access(DWORD prot)
+{
+    switch (prot)
+    {
+    case PAGE_READWRITE:
+    case PAGE_EXECUTE_READWRITE:
+        return SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT | SECTION_QUERY;
+    case PAGE_READONLY:
+    case PAGE_WRITECOPY:
+    case PAGE_EXECUTE:
+    case PAGE_EXECUTE_READ:
+    case PAGE_EXECUTE_WRITECOPY:
+        return SECTION_MAP_READ | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT | SECTION_QUERY;
+    default:
+        return 0;
+    }
+}
+
+static BOOL is_compatible_access(DWORD map_prot, DWORD view_prot)
+{
+    DWORD access = map_prot_to_access(map_prot);
+    if (!view_prot) view_prot = SECTION_MAP_READ;
+    return (view_prot & access) == view_prot;
+}
+
+static void *map_view_of_file(HANDLE handle, DWORD access)
+{
+    NTSTATUS status;
+    LARGE_INTEGER offset;
+    SIZE_T count;
+    ULONG protect;
+    BOOL exec;
+    void *addr;
+
+    if (!pNtMapViewOfSection) return NULL;
+
+    count = 0;
+    offset.u.LowPart  = 0;
+    offset.u.HighPart = 0;
+
+    exec = access & FILE_MAP_EXECUTE;
+    access &= ~FILE_MAP_EXECUTE;
+
+    if (access == FILE_MAP_COPY)
+    {
+        if (exec)
+            protect = PAGE_EXECUTE_WRITECOPY;
+        else
+            protect = PAGE_WRITECOPY;
+    }
+    else if (access & FILE_MAP_WRITE)
+    {
+        if (exec)
+            protect = PAGE_EXECUTE_READWRITE;
+        else
+            protect = PAGE_READWRITE;
+    }
+    else if (access & FILE_MAP_READ)
+    {
+        if (exec)
+            protect = PAGE_EXECUTE_READ;
+        else
+            protect = PAGE_READONLY;
+    }
+    else protect = PAGE_NOACCESS;
+
+    addr = NULL;
+    status = pNtMapViewOfSection(handle, GetCurrentProcess(), &addr, 0, 0, &offset,
+                                 &count, 1 /* ViewShare */, 0, protect);
+    if (status)
+    {
+        /* for simplicity */
+        SetLastError(ERROR_ACCESS_DENIED);
+        addr = NULL;
+    }
+    return addr;
+}
+
+static void test_mapping(void)
+{
+    static const DWORD page_prot[] =
+    {
+        PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+        PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY
+    };
+    static const struct
+    {
+        DWORD access, prot;
+    } view[] =
+    {
+        { 0, PAGE_NOACCESS }, /* 0x00 */
+        { FILE_MAP_COPY, PAGE_WRITECOPY }, /* 0x01 */
+        { FILE_MAP_WRITE, PAGE_READWRITE }, /* 0x02 */
+        { FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_READWRITE }, /* 0x03 */
+        { FILE_MAP_READ, PAGE_READONLY }, /* 0x04 */
+        { FILE_MAP_READ | FILE_MAP_COPY, PAGE_READONLY }, /* 0x05 */
+        { FILE_MAP_READ | FILE_MAP_WRITE, PAGE_READWRITE }, /* 0x06 */
+        { FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_READWRITE }, /* 0x07 */
+        { SECTION_MAP_EXECUTE, PAGE_NOACCESS }, /* 0x08 */
+        { SECTION_MAP_EXECUTE | FILE_MAP_COPY, PAGE_NOACCESS }, /* 0x09 */
+        { SECTION_MAP_EXECUTE | FILE_MAP_WRITE, PAGE_READWRITE }, /* 0x0a */
+        { SECTION_MAP_EXECUTE | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_READWRITE }, /* 0x0b */
+        { SECTION_MAP_EXECUTE | FILE_MAP_READ, PAGE_READONLY }, /* 0x0c */
+        { SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_COPY, PAGE_READONLY }, /* 0x0d */
+        { SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE, PAGE_READWRITE }, /* 0x0e */
+        { SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_READWRITE }, /* 0x0f */
+        { FILE_MAP_EXECUTE, PAGE_NOACCESS }, /* 0x20 */
+        { FILE_MAP_EXECUTE | FILE_MAP_COPY, PAGE_EXECUTE_WRITECOPY }, /* 0x21 */
+        { FILE_MAP_EXECUTE | FILE_MAP_WRITE, PAGE_EXECUTE_READWRITE }, /* 0x22 */
+        { FILE_MAP_EXECUTE | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_EXECUTE_READWRITE }, /* 0x23 */
+        { FILE_MAP_EXECUTE | FILE_MAP_READ, PAGE_EXECUTE_READ }, /* 0x24 */
+        { FILE_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_COPY, PAGE_EXECUTE_READ }, /* 0x25 */
+        { FILE_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE, PAGE_EXECUTE_READWRITE }, /* 0x26 */
+        { FILE_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_EXECUTE_READWRITE }, /* 0x27 */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE, PAGE_NOACCESS }, /* 0x28 */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_COPY, PAGE_NOACCESS }, /* 0x29 */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_WRITE, PAGE_EXECUTE_READWRITE }, /* 0x2a */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_EXECUTE_READWRITE }, /* 0x2b */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_READ, PAGE_EXECUTE_READ }, /* 0x2c */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_COPY, PAGE_EXECUTE_READ }, /* 0x2d */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE, PAGE_EXECUTE_READWRITE }, /* 0x2e */
+        { FILE_MAP_EXECUTE | SECTION_MAP_EXECUTE | FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_COPY, PAGE_EXECUTE_READWRITE } /* 0x2f */
+    };
+    void *base, *nt_base;
+    DWORD i, j, k, ret, old_prot, prev_prot;
+    SYSTEM_INFO si;
+    char temp_path[MAX_PATH];
+    char file_name[MAX_PATH];
+    HANDLE hfile, hmap;
+    MEMORY_BASIC_INFORMATION info, nt_info;
+
+    GetSystemInfo(&si);
+    trace("system page size %#x\n", si.dwPageSize);
+
+    GetTempPath(MAX_PATH, temp_path);
+    GetTempFileName(temp_path, "map", 0, file_name);
+
+    SetLastError(0xdeadbeef);
+    hfile = CreateFile(file_name, GENERIC_READ|GENERIC_WRITE|GENERIC_EXECUTE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok(hfile != INVALID_HANDLE_VALUE, "CreateFile(%s) error %d\n", file_name, GetLastError());
+    SetFilePointer(hfile, si.dwPageSize, NULL, FILE_BEGIN);
+    SetEndOfFile(hfile);
+
+    for (i = 0; i < sizeof(page_prot)/sizeof(page_prot[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        hmap = CreateFileMapping(hfile, NULL, page_prot[i] | SEC_COMMIT, 0, si.dwPageSize, NULL);
+
+        if (page_prot[i] == PAGE_NOACCESS)
+        {
+            HANDLE hmap2;
+
+            ok(!hmap, "CreateFileMapping(PAGE_NOACCESS) should fail\n");
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+            /* A trick to create a not accessible mapping */
+            SetLastError(0xdeadbeef);
+            hmap = CreateFileMapping(hfile, NULL, PAGE_READWRITE | SEC_COMMIT, 0, si.dwPageSize, NULL);
+            ok(hmap != 0, "CreateFileMapping(PAGE_READWRITE) error %d\n", GetLastError());
+            SetLastError(0xdeadbeef);
+            ret = DuplicateHandle(GetCurrentProcess(), hmap, GetCurrentProcess(), &hmap2, 0, FALSE, 0);
+            ok(ret, "DuplicateHandle error %d\n", GetLastError());
+            CloseHandle(hmap);
+            hmap = hmap2;
+        }
+
+        if (!hmap)
+        {
+            trace("%d: CreateFileMapping(%04x) failed: %d\n", i, page_prot[i], GetLastError());
+
+            /* NT4 and win2k don't support EXEC on file mappings */
+            if (page_prot[i] == PAGE_EXECUTE_READ || page_prot[i] == PAGE_EXECUTE_READWRITE)
+            {
+                ok(broken(!hmap), "%d: CreateFileMapping doesn't support PAGE_EXECUTE\n", i);
+                continue;
+            }
+            /* Vista+ supports PAGE_EXECUTE_WRITECOPY, earlier versions don't */
+            if (page_prot[i] == PAGE_EXECUTE_WRITECOPY)
+            {
+                ok(broken(!hmap), "%d: CreateFileMapping doesn't support PAGE_EXECUTE_WRITECOPY\n", i);
+                continue;
+            }
+        }
+
+        ok(hmap != 0, "%d: CreateFileMapping(%04x) error %d\n", i, page_prot[i], GetLastError());
+
+        for (j = 0; j < sizeof(view)/sizeof(view[0]); j++)
+        {
+            nt_base = map_view_of_file(hmap, view[j].access);
+            if (nt_base)
+            {
+                SetLastError(0xdeadbeef);
+                ret = VirtualQuery(nt_base, &nt_info, sizeof(nt_info));
+                ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
+                UnmapViewOfFile(nt_base);
+            }
+
+            SetLastError(0xdeadbeef);
+            base = MapViewOfFile(hmap, view[j].access, 0, 0, 0);
+
+            /* Vista+ supports FILE_MAP_EXECUTE properly, earlier versions don't */
+            ok(!nt_base == !base ||
+               broken((view[j].access & FILE_MAP_EXECUTE) && !nt_base != !base),
+               "%d: (%04x/%04x) NT %p kernel %p\n", j, page_prot[i], view[j].access, nt_base, base);
+
+            if (!is_compatible_access(page_prot[i], view[j].access))
+            {
+                ok(!base, "%d: MapViewOfFile(%04x/%04x) should fail\n", j, page_prot[i], view[j].access);
+                ok(GetLastError() == ERROR_ACCESS_DENIED, "wrong error %d\n", GetLastError());
+                continue;
+            }
+
+            /* Vista+ properly supports FILE_MAP_EXECUTE, earlier versions don't */
+            if (!base && (view[j].access & FILE_MAP_EXECUTE))
+            {
+                ok(broken(!base), "%d: MapViewOfFile(%04x/%04x) failed %d\n", j, page_prot[i], view[j].access, GetLastError());
+                continue;
+            }
+
+            ok(base != NULL, "%d: MapViewOfFile(%04x/%04x) failed %d\n", j, page_prot[i], view[j].access, GetLastError());
+
+            SetLastError(0xdeadbeef);
+            ret = VirtualQuery(base, &info, sizeof(info));
+            ok(ret, "%d: VirtualQuery failed %d\n", j, GetLastError());
+            ok(info.BaseAddress == base, "%d: (%04x) got %p, expected %p\n", j, view[j].access, info.BaseAddress, base);
+            ok(info.RegionSize == si.dwPageSize, "%d: (%04x) got %#lx != expected %#x\n", j, view[j].access, info.RegionSize, si.dwPageSize);
+            ok(info.Protect == view[j].prot ||
+               broken(view[j].prot == PAGE_EXECUTE_READ && info.Protect == PAGE_READONLY) || /* win2k */
+               broken(view[j].prot == PAGE_EXECUTE_READWRITE && info.Protect == PAGE_READWRITE) || /* win2k */
+               broken(view[j].prot == PAGE_EXECUTE_WRITECOPY && info.Protect == PAGE_NOACCESS), /* XP */
+               "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, info.Protect, view[j].prot);
+            ok(info.AllocationBase == base, "%d: (%04x) got %p, expected %p\n", j, view[j].access, info.AllocationBase, base);
+            ok(info.AllocationProtect == info.Protect, "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, info.AllocationProtect, info.Protect);
+            ok(info.State == MEM_COMMIT, "%d: (%04x) got %#x, expected MEM_COMMIT\n", j, view[j].access, info.State);
+            ok(info.Type == MEM_MAPPED, "%d: (%04x) got %#x, expected MEM_MAPPED\n", j, view[j].access, info.Type);
+
+            if (nt_base && base)
+            {
+                ok(nt_info.RegionSize == info.RegionSize, "%d: (%04x) got %#lx != expected %#lx\n", j, view[j].access, nt_info.RegionSize, info.RegionSize);
+                ok(nt_info.Protect == info.Protect /* Vista+ */ ||
+                   broken(nt_info.AllocationProtect == PAGE_EXECUTE_WRITECOPY && info.Protect == PAGE_NOACCESS), /* XP */
+                   "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, nt_info.Protect, info.Protect);
+                ok(nt_info.AllocationProtect == info.AllocationProtect /* Vista+ */ ||
+                   broken(nt_info.AllocationProtect == PAGE_EXECUTE_WRITECOPY && info.Protect == PAGE_NOACCESS), /* XP */
+                   "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, nt_info.AllocationProtect, info.AllocationProtect);
+                ok(nt_info.State == info.State, "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, nt_info.State, info.State);
+                ok(nt_info.Type == info.Type, "%d: (%04x) got %#x, expected %#x\n", j, view[j].access, nt_info.Type, info.Type);
+            }
+
+            prev_prot = info.Protect;
+
+            for (k = 0; k < sizeof(page_prot)/sizeof(page_prot[0]); k++)
+            {
+                /*trace("map %#x, view %#x, requested prot %#x\n", page_prot[i], view[j].prot, page_prot[k]);*/
+                SetLastError(0xdeadbeef);
+                old_prot = 0xdeadbeef;
+                ret = VirtualProtect(base, si.dwPageSize, page_prot[k], &old_prot);
+                if (is_compatible_protection(page_prot[i], view[j].prot, page_prot[k]))
+                {
+                    /* win2k and XP don't support EXEC on file mappings */
+                    if (!ret && page_prot[k] == PAGE_EXECUTE)
+                    {
+                        ok(broken(!ret), "VirtualProtect doesn't support PAGE_EXECUTE\n");
+                        continue;
+                    }
+                    /* NT4 and win2k don't support EXEC on file mappings */
+                    if (!ret && (page_prot[k] == PAGE_EXECUTE_READ || page_prot[k] == PAGE_EXECUTE_READWRITE))
+                    {
+                        ok(broken(!ret), "VirtualProtect doesn't support PAGE_EXECUTE\n");
+                        continue;
+                    }
+                    /* Vista+ supports PAGE_EXECUTE_WRITECOPY, earlier versions don't */
+                    if (!ret && page_prot[k] == PAGE_EXECUTE_WRITECOPY)
+                    {
+                        ok(broken(!ret), "VirtualProtect doesn't support PAGE_EXECUTE_WRITECOPY\n");
+                        continue;
+                    }
+                    /* win2k and XP don't support PAGE_EXECUTE_WRITECOPY views properly  */
+                    if (!ret && view[j].prot == PAGE_EXECUTE_WRITECOPY)
+                    {
+                        ok(broken(!ret), "VirtualProtect doesn't support PAGE_EXECUTE_WRITECOPY view properly\n");
+                        continue;
+                    }
+
+                    ok(ret, "VirtualProtect error %d, map %#x, view %#x, requested prot %#x\n", GetLastError(), page_prot[i], view[j].prot, page_prot[k]);
+                    ok(old_prot == prev_prot, "got %#x, expected %#x\n", old_prot, prev_prot);
+                    prev_prot = page_prot[k];
+                }
+                else
+                {
+                    /* NT4 doesn't fail on incompatible map and view */
+                    if (ret)
+                    {
+                        ok(broken(ret), "VirtualProtect should fail, map %#x, view %#x, requested prot %#x\n", page_prot[i], view[j].prot, page_prot[k]);
+                        skip("Incompatible map and view are not properly handled on this platform\n");
+                        break; /* NT4 won't pass remaining tests */
+                    }
+
+                    ok(!ret, "VirtualProtect should fail, map %#x, view %#x, requested prot %#x\n", page_prot[i], view[j].prot, page_prot[k]);
+                    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+                }
+            }
+
+            UnmapViewOfFile(base);
+        }
+
+        CloseHandle(hmap);
+    }
+
+    CloseHandle(hfile);
+    DeleteFile(file_name);
+}
+
 START_TEST(virtual)
 {
     int argc;
@@ -1417,7 +2262,13 @@ START_TEST(virtual)
     pResetWriteWatch = (void *) GetProcAddress(hkernel32, "ResetWriteWatch");
     pNtAreMappedFilesTheSame = (void *)GetProcAddress( GetModuleHandle("ntdll.dll"),
                                                        "NtAreMappedFilesTheSame" );
+    pNtMapViewOfSection = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtMapViewOfSection");
+    pNtUnmapViewOfSection = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtUnmapViewOfSection");
 
+    test_mapping();
+    test_CreateFileMapping_protection();
+    test_VirtualAlloc_protection();
+    test_VirtualProtect();
     test_VirtualAllocEx();
     test_VirtualAlloc();
     test_MapViewOfFile();

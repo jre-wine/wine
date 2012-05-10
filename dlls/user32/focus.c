@@ -232,12 +232,18 @@ HWND WINAPI SetActiveWindow( HWND hwnd )
 
     if (hwnd)
     {
-        LONG style = GetWindowLongW( hwnd, GWL_STYLE );
-
-        if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD)
-            return GetActiveWindow();  /* Windows doesn't seem to return an error here */
+        LONG style;
 
         hwnd = WIN_GetFullHandle( hwnd );
+        if (!IsWindow( hwnd ))
+        {
+            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+            return 0;
+        }
+
+        style = GetWindowLongW( hwnd, GWL_STYLE );
+        if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD)
+            return GetActiveWindow();  /* Windows doesn't seem to return an error here */
     }
 
     if (!set_active_window( hwnd, &prev, FALSE, TRUE )) return 0;
@@ -259,6 +265,11 @@ HWND WINAPI SetFocus( HWND hwnd )
     {
         /* Check if we can set the focus to this window */
         hwnd = WIN_GetFullHandle( hwnd );
+        if (!IsWindow( hwnd ))
+        {
+            SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+            return 0;
+        }
         if (hwnd == previous) return previous;  /* nothing to do */
         for (;;)
         {
@@ -266,7 +277,11 @@ HWND WINAPI SetFocus( HWND hwnd )
             LONG style = GetWindowLongW( hwndTop, GWL_STYLE );
             if (style & (WS_MINIMIZE | WS_DISABLED)) return 0;
             parent = GetAncestor( hwndTop, GA_PARENT );
-            if (!parent || parent == GetDesktopWindow()) break;
+            if (!parent || parent == GetDesktopWindow())
+            {
+                if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return 0;
+                break;
+            }
             if (parent == get_hwnd_message_parent()) return 0;
             hwndTop = parent;
         }

@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -37,7 +36,13 @@
 static HANDLE alarm_event;
 static BOOL (WINAPI *pDuplicateTokenEx)(HANDLE,DWORD,LPSECURITY_ATTRIBUTES,
                                         SECURITY_IMPERSONATION_LEVEL,TOKEN_TYPE,PHANDLE);
+static DWORD (WINAPI *pQueueUserAPC)(PAPCFUNC pfnAPC, HANDLE hThread, ULONG_PTR dwData);
 
+static BOOL user_apc_ran;
+static void CALLBACK user_apc(ULONG_PTR param)
+{
+    user_apc_ran = TRUE;
+}
 
 static void test_CreateNamedPipe(int pipemode)
 {
@@ -65,6 +70,19 @@ static void test_CreateNamedPipe(int pipemode)
         /* lpSecurityAttrib */ NULL);
     ok(hnp == INVALID_HANDLE_VALUE && GetLastError() == ERROR_INVALID_NAME,
         "CreateNamedPipe should fail if name doesn't start with \\\\.\\pipe\n");
+
+    if (pipemode == PIPE_TYPE_BYTE)
+    {
+        /* Bad parameter checks */
+        hnp = CreateNamedPipe(PIPENAME, PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_MESSAGE,
+            /* nMaxInstances */ 1,
+            /* nOutBufSize */ 1024,
+            /* nInBufSize */ 1024,
+            /* nDefaultWait */ NMPWAIT_USE_DEFAULT_WAIT,
+            /* lpSecurityAttrib */ NULL);
+        ok(hnp == INVALID_HANDLE_VALUE && GetLastError() == ERROR_INVALID_PARAMETER,
+            "CreateNamedPipe should fail with PIPE_TYPE_BYTE | PIPE_READMODE_MESSAGE\n");
+    }
 
     hnp = CreateNamedPipe(NULL,
         PIPE_ACCESS_DUPLEX, pipemode | PIPE_WAIT,
@@ -369,7 +387,7 @@ static void test_CreateNamedPipe_instances_must_match(void)
     ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
 
     hnp2 = CreateNamedPipe(PIPENAME, PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_WAIT,
-        /* nMaxInstances */ 1,
+        /* nMaxInstances */ 2,
         /* nOutBufSize */ 1024,
         /* nInBufSize */ 1024,
         /* nDefaultWait */ NMPWAIT_USE_DEFAULT_WAIT,
@@ -379,7 +397,25 @@ static void test_CreateNamedPipe_instances_must_match(void)
 
     ok(CloseHandle(hnp), "CloseHandle\n");
 
-    /* etc, etc */
+    /* check everything else */
+    hnp = CreateNamedPipe(PIPENAME, PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_WAIT,
+        /* nMaxInstances */ 4,
+        /* nOutBufSize */ 1024,
+        /* nInBufSize */ 1024,
+        /* nDefaultWait */ NMPWAIT_USE_DEFAULT_WAIT,
+        /* lpSecurityAttrib */ NULL);
+    ok(hnp != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+
+    hnp2 = CreateNamedPipe(PIPENAME, PIPE_ACCESS_DUPLEX, PIPE_TYPE_MESSAGE,
+        /* nMaxInstances */ 3,
+        /* nOutBufSize */ 102,
+        /* nInBufSize */ 24,
+        /* nDefaultWait */ 1234,
+        /* lpSecurityAttrib */ NULL);
+    ok(hnp2 != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+
+    ok(CloseHandle(hnp), "CloseHandle\n");
+    ok(CloseHandle(hnp2), "CloseHandle\n");
 }
 
 /** implementation of alarm() */
@@ -471,6 +507,13 @@ static DWORD CALLBACK serverThreadMain2(LPVOID arg)
         DWORD readden;
         DWORD success;
 
+        user_apc_ran = FALSE;
+        if (i == 0 && pQueueUserAPC) {
+            trace("Queueing an user APC\n"); /* verify the pipe is non alerable */
+            success = pQueueUserAPC(&user_apc, GetCurrentThread(), 0);
+            ok(success, "QueueUserAPC failed: %d\n", GetLastError());
+        }
+
         /* Wait for client to connect */
         trace("Server calling ConnectNamedPipe...\n");
         ok(ConnectNamedPipe(hnp, NULL)
@@ -493,6 +536,11 @@ static DWORD CALLBACK serverThreadMain2(LPVOID arg)
         /* finish this connection, wait for next one */
         ok(FlushFileBuffers(hnp), "FlushFileBuffers\n");
         ok(DisconnectNamedPipe(hnp), "DisconnectNamedPipe\n");
+
+        ok(user_apc_ran == FALSE, "UserAPC ran, pipe using alertable io mode\n");
+
+        if (i == 0 && pQueueUserAPC)
+            SleepEx(0, TRUE); /* get rid of apc */
 
         /* Set up next echo server */
         hnpNext =
@@ -916,9 +964,13 @@ static void test_CreatePipe(void)
     BYTE *buffer;
     char readbuf[32];
 
+    user_apc_ran = FALSE;
+    if (pQueueUserAPC)
+        ok(pQueueUserAPC(user_apc, GetCurrentThread(), 0), "couldn't create user apc\n");
+
     pipe_attr.nLength = sizeof(SECURITY_ATTRIBUTES); 
     pipe_attr.bInheritHandle = TRUE; 
-    pipe_attr.lpSecurityDescriptor = NULL; 
+    pipe_attr.lpSecurityDescriptor = NULL;
     ok(CreatePipe(&piperead, &pipewrite, &pipe_attr, 0) != 0, "CreatePipe failed\n");
     ok(WriteFile(pipewrite,PIPENAME,sizeof(PIPENAME), &written, NULL), "Write to anonymous pipe failed\n");
     ok(written == sizeof(PIPENAME), "Write to anonymous pipe wrote %d bytes\n", written);
@@ -956,6 +1008,9 @@ static void test_CreatePipe(void)
     ok(ReadFile(piperead,readbuf,sizeof(readbuf),&read, NULL) == 0, "Broken pipe not detected\n");
     ok(CloseHandle(piperead), "CloseHandle for the read pipe failed\n");
     HeapFree(GetProcessHeap(), 0, buffer);
+
+    ok(user_apc_ran == FALSE, "user apc ran, pipe using alertable io mode\n");
+    SleepEx(0, TRUE); /* get rid of apc */
 }
 
 struct named_pipe_client_params
@@ -1588,6 +1643,8 @@ START_TEST(pipe)
 
     hmod = GetModuleHandle("advapi32.dll");
     pDuplicateTokenEx = (void *) GetProcAddress(hmod, "DuplicateTokenEx");
+    hmod = GetModuleHandle("kernel32.dll");
+    pQueueUserAPC = (void *) GetProcAddress(hmod, "QueueUserAPC");
 
     if (test_DisconnectNamedPipe())
         return;

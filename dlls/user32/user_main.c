@@ -312,6 +312,7 @@ static void thread_detach(void)
     if (thread_info->msg_window) WIN_DestroyThreadWindows( thread_info->msg_window );
     CloseHandle( thread_info->server_queue );
     HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
+    HeapFree( GetProcessHeap(), 0, thread_info->key_state );
 
     exiting_thread_id = 0;
 }
@@ -336,6 +337,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         break;
     case DLL_PROCESS_DETACH:
         USER_unload_driver();
+        DeleteCriticalSection(&user_section);
         break;
     }
     return ret;

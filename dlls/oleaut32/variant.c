@@ -872,7 +872,7 @@ HRESULT WINAPI VariantCopyInd(VARIANT* pvargDest, VARIANTARG* pvargSrc)
 
   /* Argument checking is more lax than VariantCopy()... */
   vt = V_TYPE(pvargSrc);
-  if (V_ISARRAY(pvargSrc) ||
+  if (V_ISARRAY(pvargSrc) || (V_VT(pvargSrc) == (VT_RECORD|VT_BYREF)) ||
      (vt > VT_NULL && vt != (VARTYPE)15 && vt < VT_VOID &&
      !(V_VT(pvargSrc) & (VT_VECTOR|VT_RESERVED))))
   {
@@ -1607,7 +1607,7 @@ static void VARIANT_GetLocalisedNumberChars(VARIANT_NUMBER_CHARS *lpChars, LCID 
  *            from "oleauto.h".
  *
  * FIXME
- *  - I am unsure if this function should parse non-arabic (e.g. Thai)
+ *  - I am unsure if this function should parse non-Arabic (e.g. Thai)
  *   numerals, so this has not been implemented.
  */
 HRESULT WINAPI VarParseNumFromStr(OLECHAR *lpszStr, LCID lcid, ULONG dwFlags,
@@ -2624,7 +2624,7 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
             {
                 /* Bools are handled as localized True/False strings instead of 0/-1 as in MSDN */
                 V_VT(&bstrvar_left) = VT_BSTR;
-                if (V_BOOL(left) == TRUE)
+                if (V_BOOL(left))
                     V_BSTR(&bstrvar_left) = SysAllocString(str_true);
                 else
                     V_BSTR(&bstrvar_left) = SysAllocString(str_false);
@@ -2664,7 +2664,7 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
             {
                 /* Bools are handled as localized True/False strings instead of 0/-1 as in MSDN */
                 V_VT(&bstrvar_right) = VT_BSTR;
-                if (V_BOOL(right) == TRUE)
+                if (V_BOOL(right))
                     V_BSTR(&bstrvar_right) = SysAllocString(str_true);
                 else
                     V_BSTR(&bstrvar_right) = SysAllocString(str_false);
@@ -2719,15 +2719,10 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
 static HRESULT _VarChangeTypeExWrap (VARIANTARG* pvargDest,
                     VARIANTARG* pvargSrc, LCID lcid, USHORT wFlags, VARTYPE vt)
 {
-    HRESULT res;
-    VARTYPE flags;
+    VARIANTARG vtmpsrc = *pvargSrc;
 
-    flags = V_VT(pvargSrc) & ~VT_TYPEMASK;
-    V_VT(pvargSrc) &= ~VT_RESERVED;
-    res = VariantChangeTypeEx(pvargDest,pvargSrc,lcid,wFlags,vt);
-    V_VT(pvargSrc) |= flags;
-
-    return res;
+    V_VT(&vtmpsrc) &= ~VT_RESERVED;
+    return VariantChangeTypeEx(pvargDest,&vtmpsrc,lcid,wFlags,vt);
 }
 
 /**********************************************************************

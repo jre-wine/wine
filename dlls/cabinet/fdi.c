@@ -48,7 +48,7 @@
  * Test unit(s).
  *
  * The fdintNEXT_CABINET callbacks are probably not working quite as they should.
- * There are several FIXME's in the source describing some of the deficiencies in
+ * There are several FIXMEs in the source describing some of the deficiencies in
  * some detail.  Additionally, we do not do a very good job of returning the right
  * error codes to this callback.
  *
@@ -196,7 +196,7 @@ static FDI_Int *get_fdi_ptr( HFDI hfdi )
 {
     FDI_Int *fdi= (FDI_Int *)hfdi;
 
-    if (!fdi || !fdi->magic == FDI_INT_MAGIC)
+    if (!fdi || fdi->magic != FDI_INT_MAGIC)
     {
         SetLastError( ERROR_INVALID_HANDLE );
         return NULL;
@@ -360,7 +360,9 @@ static cab_ULONG checksum(const cab_UBYTE *data, cab_UWORD bytes, cab_ULONG csum
 
   switch (bytes & 3) {
   case 3: ul |= *data++ << 16;
+  /* fall through */
   case 2: ul |= *data++ <<  8;
+  /* fall through */
   case 1: ul |= *data;
   }
   csum ^= ul;
@@ -2533,7 +2535,7 @@ BOOL __cdecl FDICopy(
 
   /* check if it's really a cabfile. Note that this doesn't implement the bug */
   if (!FDI_read_entries(fdi, cabhf, &fdici, &(CAB(mii)))) {
-    ERR("FDIIsCabinet failed.\n");
+    ERR("FDIIsCabinet failed: %u.\n", fdi->perf->erfOper);
     fdi->free(decomp_state);
     fdi->close(cabhf);
     return FALSE;
@@ -2731,7 +2733,7 @@ BOOL __cdecl FDICopy(
 
         TRACE("Resetting folder for file %s.\n", debugstr_a(file->filename));
 
-        /* free stuff for the old decompresser */
+        /* free stuff for the old decompressor */
         switch (ct2) {
         case cffoldCOMPTYPE_LZX:
           if (LZX(window)) {
@@ -2752,7 +2754,7 @@ BOOL __cdecl FDICopy(
         CAB(offset) = 0;
         CAB(outlen) = 0;
 
-        /* initialize the new decompresser */
+        /* initialize the new decompressor */
         switch (ct1) {
         case cffoldCOMPTYPE_NONE:
           CAB(decompress) = NONEfdi_decomp;

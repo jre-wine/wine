@@ -417,10 +417,11 @@ static HBITMAP get_up_arrow_inactive_bitmap(void)
  *
  * Return the default system menu.
  */
-static HMENU MENU_CopySysPopup(void)
+static HMENU MENU_CopySysPopup(BOOL mdi)
 {
     static const WCHAR sysmenuW[] = {'S','Y','S','M','E','N','U',0};
-    HMENU hMenu = LoadMenuW(user32_module, sysmenuW);
+    static const WCHAR sysmenumdiW[] = {'S','Y','S','M','E','N','U','M','D','I',0};
+    HMENU hMenu = LoadMenuW(user32_module, (mdi ? sysmenumdiW : sysmenuW));
 
     if( hMenu ) {
         MENUINFO minfo;
@@ -447,7 +448,7 @@ static HMENU MENU_CopySysPopup(void)
     else
 	ERR("Unable to load default system menu\n" );
 
-    TRACE("returning %p.\n", hMenu );
+    TRACE("returning %p (mdi=%d).\n", hMenu, mdi );
 
     return hMenu;
 }
@@ -475,7 +476,12 @@ static HMENU MENU_GetSysMenu( HWND hWnd, HMENU hPopupMenu )
 	TRACE("hWnd %p (hMenu %p)\n", menu->hWnd, hMenu);
 
 	if (!hPopupMenu)
-	    hPopupMenu = MENU_CopySysPopup();
+        {
+            if (GetWindowLongW(hWnd, GWL_EXSTYLE) & WS_EX_MDICHILD)
+	        hPopupMenu = MENU_CopySysPopup(TRUE);
+            else
+	        hPopupMenu = MENU_CopySysPopup(FALSE);
+        }
 
 	if (hPopupMenu)
 	{
@@ -784,8 +790,8 @@ static UINT MENU_FindItemByKey( HWND hwndOwner, HMENU hmenu,
 	}
 	menuchar = SendMessageW( hwndOwner, WM_MENUCHAR,
                                  MAKEWPARAM( key, menu->wFlags ), (LPARAM)hmenu );
-	if (HIWORD(menuchar) == 2) return LOWORD(menuchar);
-	if (HIWORD(menuchar) == 1) return (UINT)(-2);
+	if (HIWORD(menuchar) == MNC_EXECUTE) return LOWORD(menuchar);
+	if (HIWORD(menuchar) == MNC_CLOSE) return (UINT)(-2);
     }
     return (UINT)(-1);
 }
@@ -816,7 +822,7 @@ static void MENU_GetBitmapItemSize( MENUITEM *lpitem, SIZE *size,
             measItem.itemWidth = lpitem->rect.right - lpitem->rect.left;
             measItem.itemHeight = lpitem->rect.bottom - lpitem->rect.top;
             measItem.itemData = lpitem->dwItemData;
-            SendMessageW( hwndOwner, WM_MEASUREITEM, lpitem->wID, (LPARAM)&measItem);
+            SendMessageW( hwndOwner, WM_MEASUREITEM, 0, (LPARAM)&measItem);
             size->cx = measItem.itemWidth;
             size->cy = measItem.itemHeight;
             return;
@@ -1848,6 +1854,11 @@ static BOOL MENU_ShowPopup( HWND hwndOwner, HMENU hmenu, UINT id, UINT flags,
     }
 
     /* store the owner for DrawItem */
+    if (!IsWindow( hwndOwner ))
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return FALSE;
+    }
     menu->hwndOwner = hwndOwner;
 
     menu->nScrollPos = 0;
@@ -2100,7 +2111,7 @@ static MENUITEM *MENU_InsertItem( HMENU hMenu, UINT pos, UINT flags )
            (INT_PTR)menu->items[pos - 1].hbmpItem <= (INT_PTR)HBMMENU_MBAR_CLOSE_D)
         pos--;
 
-    TRACE("inserting at %u by pos %u\n", pos, flags & MF_BYPOSITION);
+    TRACE("inserting at %u flags %x\n", pos, flags);
 
     /* Create new items array */
 
@@ -2383,6 +2394,9 @@ static HMENU MENU_ShowSubPopup( HWND hwndOwner, HMENU hmenu,
 	    rect.bottom = item->rect.bottom - item->rect.top;
 	}
     }
+
+    /* use default alignment for submenus */
+    wFlags &= ~(TPM_CENTERALIGN | TPM_RIGHTALIGN | TPM_VCENTERALIGN | TPM_BOTTOMALIGN);
 
     MENU_ShowPopup( hwndOwner, item->hSubMenu, menu->FocusedItem, wFlags,
 		    rect.left, rect.top, rect.right, rect.bottom );
@@ -3397,7 +3411,7 @@ void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar)
         if( uItem == NO_SELECTED_ITEM )
             MENU_MoveSelection( hwnd, hTrackMenu, ITEM_NEXT );
         else
-            PostMessageW( hwnd, WM_KEYDOWN, VK_DOWN, 0L );
+            PostMessageW( hwnd, WM_KEYDOWN, VK_RETURN, 0 );
     }
 
 track_menu:
@@ -3805,7 +3819,7 @@ static void MENU_mnu2mnuii( UINT flags, UINT_PTR id, LPCWSTR str,
         pmii->dwTypeData = (LPWSTR)str;
     } else if( flags & MFT_BITMAP){
         pmii->fMask |= MIIM_BITMAP | MIIM_STRING;
-        pmii->hbmpItem = ULongToHandle(LOWORD(str));
+        pmii->hbmpItem = (HBITMAP)str;
     }
     if( flags & MF_OWNERDRAW){
         pmii->fMask |= MIIM_DATA;

@@ -29,7 +29,6 @@
 #include "ole2.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 #include "mshtml_private.h"
 
@@ -479,6 +478,9 @@ static HRESULT WINAPI AboutProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, 
     case QUERY_USES_HISTORYFOLDER:
         FIXME("Unsupported option QUERY_USES_HISTORYFOLDER\n");
         return E_FAIL;
+    case QUERY_IS_CACHED_AND_USABLE_OFFLINE:
+        FIXME("Unsupported option QUERY_IS_CACHED_AND_USABLE_OFFLINE\n");
+        return E_NOTIMPL;
     default:
         return E_FAIL;
     }
@@ -865,8 +867,20 @@ static HRESULT WINAPI ResProtocolInfo_ParseUrl(IInternetProtocolInfo *iface, LPC
 
         len = SearchPathW(NULL, file_part, NULL, sizeof(full_path)/sizeof(WCHAR), full_path, NULL);
         if(!len) {
-            WARN("Could not find file %s\n", debugstr_w(file_part));
-            return MK_E_SYNTAX;
+            HMODULE module;
+
+            /* SearchPath does not work well with winelib files (like our test executable),
+             * so we also try to load the library here */
+            module = LoadLibraryExW(file_part, NULL, LOAD_LIBRARY_AS_DATAFILE);
+            if(!module) {
+                WARN("Could not find file %s\n", debugstr_w(file_part));
+                return MK_E_SYNTAX;
+            }
+
+            len = GetModuleFileNameW(module, full_path, sizeof(full_path)/sizeof(WCHAR));
+            FreeLibrary(module);
+            if(!len)
+                return E_FAIL;
         }
 
         size = sizeof(wszFile)/sizeof(WCHAR) + len + 1;
@@ -912,10 +926,10 @@ static HRESULT WINAPI ResProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LP
         break;
 
     case QUERY_IS_SECURE:
-        FIXME("not supporte QUERY_IS_SECURE\n");
+        FIXME("QUERY_IS_SECURE not supported\n");
         return E_NOTIMPL;
     case QUERY_IS_SAFE:
-        FIXME("not supporte QUERY_IS_SAFE\n");
+        FIXME("QUERY_IS_SAFE not supported\n");
         return E_NOTIMPL;
     default:
         return INET_E_USE_DEFAULT_PROTOCOLHANDLER;
@@ -997,7 +1011,7 @@ static HRESULT WINAPI JSProtocolInfo_QueryInfo(IInternetProtocolInfo *iface, LPC
         break;
 
     case QUERY_IS_SECURE:
-        FIXME("not supporte QUERY_IS_SECURE\n");
+        FIXME("QUERY_IS_SECURE not supported\n");
         return E_NOTIMPL;
 
     default:

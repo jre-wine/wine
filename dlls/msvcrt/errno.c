@@ -130,7 +130,7 @@ static MSVCRT_invalid_parameter_handler invalid_parameter_handler = NULL;
 /* INTERNAL: Set the crt and dos errno's from the OS error given. */
 void msvcrt_set_errno(int err)
 {
-  int *errno = MSVCRT__errno();
+  int *errno_ptr = MSVCRT__errno();
   MSVCRT_ulong *doserrno = MSVCRT___doserrno();
 
   *doserrno = err;
@@ -138,7 +138,7 @@ void msvcrt_set_errno(int err)
   switch(err)
   {
 #define ERR_CASE(oserr) case oserr:
-#define ERR_MAPS(oserr, crterr) case oserr: *errno = crterr; break
+#define ERR_MAPS(oserr, crterr) case oserr: *errno_ptr = crterr; break
     ERR_CASE(ERROR_ACCESS_DENIED)
     ERR_CASE(ERROR_NETWORK_ACCESS_DENIED)
     ERR_CASE(ERROR_CANNOT_MAKE)
@@ -164,7 +164,7 @@ void msvcrt_set_errno(int err)
     ERR_MAPS(ERROR_INVALID_HANDLE,       MSVCRT_EBADF);
     ERR_CASE(ERROR_OUTOFMEMORY)
     ERR_CASE(ERROR_INVALID_BLOCK)
-    ERR_CASE(ERROR_NOT_ENOUGH_QUOTA);
+    ERR_CASE(ERROR_NOT_ENOUGH_QUOTA)
     ERR_MAPS(ERROR_ARENA_TRASHED,        MSVCRT_ENOMEM);
     ERR_MAPS(ERROR_BUSY,                 MSVCRT_EBUSY);
     ERR_CASE(ERROR_ALREADY_EXISTS)
@@ -184,7 +184,7 @@ void msvcrt_set_errno(int err)
   default:
     /*  Remaining cases map to EINVAL */
     /* FIXME: may be missing some errors above */
-    *errno = MSVCRT_EINVAL;
+    *errno_ptr = MSVCRT_EINVAL;
   }
 }
 
@@ -291,7 +291,7 @@ int CDECL strerror_s(char *buffer, MSVCRT_size_t numberOfElements, int errnum)
 /**********************************************************************
  *		_strerror	(MSVCRT.@)
  */
-char* CDECL _strerror(const char* str)
+char* CDECL MSVCRT__strerror(const char* str)
 {
     thread_data_t *data = msvcrt_get_thread_data();
     int err;
@@ -345,7 +345,7 @@ int CDECL _wcserror_s(MSVCRT_wchar_t* buffer, MSVCRT_size_t nc, int err)
 /*********************************************************************
  *		_wcserror (MSVCRT.@)
  */
-MSVCRT_wchar_t* CDECL _wcserror(int err)
+MSVCRT_wchar_t* CDECL MSVCRT__wcserror(int err)
 {
     thread_data_t *data = msvcrt_get_thread_data();
 
@@ -392,7 +392,7 @@ int CDECL __wcserror_s(MSVCRT_wchar_t* buffer, MSVCRT_size_t nc, const MSVCRT_wc
 /**********************************************************************
  *		__wcserror	(MSVCRT.@)
  */
-MSVCRT_wchar_t* CDECL __wcserror(const MSVCRT_wchar_t* str)
+MSVCRT_wchar_t* CDECL MSVCRT___wcserror(const MSVCRT_wchar_t* str)
 {
     thread_data_t *data = msvcrt_get_thread_data();
     int err;

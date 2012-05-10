@@ -45,6 +45,7 @@
 # include <sys/poll.h>
 #endif
 
+#define NONAMELESSUNION
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -159,7 +160,8 @@ static int  get_console_bare_fd(HANDLE hin)
 {
     int         fd;
 
-    if (wine_server_handle_to_fd(wine_server_ptr_handle(console_handle_unmap(hin)),
+    if (is_console_handle(hin) &&
+        wine_server_handle_to_fd(wine_server_ptr_handle(console_handle_unmap(hin)),
                                  0, &fd, NULL) == STATUS_SUCCESS)
         return fd;
     return -1;
@@ -202,8 +204,8 @@ static BOOL put_console_into_raw_mode(int fd)
 }
 
 /* put back the console in cooked mode iff we're the process which created the bare console
- * we don't test if thie process has set the console in raw mode as it could be one of its
- * child who did it
+ * we don't test if this process has set the console in raw mode as it could be one of its
+ * children who did it
  */
 static BOOL restore_console_mode(HANDLE hin)
 {
@@ -1447,16 +1449,16 @@ static  BOOL    start_console_renderer_helper(const char* appname, STARTUPINFOA*
                        NULL, NULL, si, &pi))
     {
         HANDLE  wh[2];
-        DWORD   ret;
+        DWORD   res;
 
         wh[0] = hEvent;
         wh[1] = pi.hProcess;
-        ret = WaitForMultipleObjects(2, wh, FALSE, INFINITE);
+        res = WaitForMultipleObjects(2, wh, FALSE, INFINITE);
 
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
 
-        if (ret != WAIT_OBJECT_0) return FALSE;
+        if (res != WAIT_OBJECT_0) return FALSE;
 
         TRACE("Started wineconsole pid=%08x tid=%08x\n",
               pi.dwProcessId, pi.dwThreadId);
@@ -1997,6 +1999,8 @@ static DWORD WINAPI CONSOLE_SendEventThread(void* pmt)
  */
 int     CONSOLE_HandleCtrlC(unsigned sig)
 {
+    HANDLE thread;
+
     /* FIXME: better test whether a console is attached to this process ??? */
     extern    unsigned CONSOLE_GetNumHistoryEntries(void);
     if (CONSOLE_GetNumHistoryEntries() == (unsigned)-1) return 0;
@@ -2013,7 +2017,11 @@ int     CONSOLE_HandleCtrlC(unsigned sig)
          *    console critical section, we need another execution environment where
          *    we can wait on this critical section 
          */
-        CreateThread(NULL, 0, CONSOLE_SendEventThread, (void*)CTRL_C_EVENT, 0, NULL);
+        thread = CreateThread(NULL, 0, CONSOLE_SendEventThread, (void*)CTRL_C_EVENT, 0, NULL);
+        if (thread == NULL)
+            return 0;
+
+        CloseHandle(thread);
     }
     return 1;
 }
@@ -2361,7 +2369,9 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
     {
         char*           ptr;
         unsigned        len;
-        BOOL            ret;
+        HANDLE          hFile;
+        NTSTATUS        status;
+        IO_STATUS_BLOCK iosb;
 
         close(fd);
         /* FIXME: mode ENABLED_OUTPUT is not processed (or actually we rely on underlying Unix/TTY fd
@@ -2372,17 +2382,28 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
             return FALSE;
 
         WideCharToMultiByte(CP_UNIXCP, 0, lpBuffer, nNumberOfCharsToWrite, ptr, len, NULL, NULL);
-        ret = WriteFile(wine_server_ptr_handle(console_handle_unmap(hConsoleOutput)),
-                        ptr, len, lpNumberOfCharsWritten, NULL);
-        if (ret && lpNumberOfCharsWritten)
+        hFile = wine_server_ptr_handle(console_handle_unmap(hConsoleOutput));
+        status = NtWriteFile(hFile, NULL, NULL, NULL, &iosb, ptr, len, 0, NULL);
+        if (status == STATUS_PENDING)
         {
-            if (*lpNumberOfCharsWritten == len)
+            WaitForSingleObject(hFile, INFINITE);
+            status = iosb.u.Status;
+        }
+
+        if (status != STATUS_PENDING && lpNumberOfCharsWritten)
+        {
+            if (iosb.Information == len)
                 *lpNumberOfCharsWritten = nNumberOfCharsToWrite;
             else
                 FIXME("Conversion not supported yet\n");
         }
         HeapFree(GetProcessHeap(), 0, ptr);
-        return ret;
+        if (status != STATUS_SUCCESS)
+        {
+            SetLastError(RtlNtStatusToDosError(status));
+            return FALSE;
+        }
+        return TRUE;
     }
 
     if (!GetConsoleMode(hConsoleOutput, &mode) || !GetConsoleScreenBufferInfo(hConsoleOutput, &csbi))
@@ -2416,8 +2437,7 @@ BOOL WINAPI WriteConsoleW(HANDLE hConsoleOutput, LPCVOID lpBuffer, DWORD nNumber
 		break;
 	    case '\t':
 	        {
-		    WCHAR tmp[8] = {' ',' ',' ',' ',' ',' ',' ',' '};
-
+		    static const WCHAR tmp[] = {' ',' ',' ',' ',' ',' ',' ',' '};
 		    if (!write_block(hConsoleOutput, &csbi, mode, tmp,
 				     ((csbi.dwCursorPosition.X + 8) & ~7) - csbi.dwCursorPosition.X))
 			goto the_end;
@@ -2915,8 +2935,6 @@ BOOL WINAPI SetConsoleDisplayMode(HANDLE hConsoleOutput, DWORD dwFlags,
 /* some missing functions...
  * FIXME: those are likely to be defined as undocumented function in kernel32 (or part of them)
  * should get the right API and implement them
- *	GetConsoleCommandHistory[AW] (dword dword dword)
- *	GetConsoleCommandHistoryLength[AW]
  *	SetConsoleCommandHistoryMode
  *	SetConsoleNumberOfCommands[AW]
  */
@@ -3121,4 +3139,80 @@ BOOL CONSOLE_Exit(void)
 {
     /* the console is in raw mode, put it back in cooked mode */
     return restore_console_mode(GetStdHandle(STD_INPUT_HANDLE));
+}
+
+/* Undocumented, called by native doskey.exe */
+/* FIXME: Should use CONSOLE_GetHistory() above for full implementation */
+DWORD WINAPI GetConsoleCommandHistoryA(DWORD unknown1, DWORD unknown2, DWORD unknown3)
+{
+    FIXME(": (0x%x, 0x%x, 0x%x) stub!\n", unknown1, unknown2, unknown3);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/* Undocumented, called by native doskey.exe */
+/* FIXME: Should use CONSOLE_GetHistory() above for full implementation */
+DWORD WINAPI GetConsoleCommandHistoryW(DWORD unknown1, DWORD unknown2, DWORD unknown3)
+{
+    FIXME(": (0x%x, 0x%x, 0x%x) stub!\n", unknown1, unknown2, unknown3);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/* Undocumented, called by native doskey.exe */
+/* FIXME: Should use CONSOLE_GetHistory() above for full implementation */
+DWORD WINAPI GetConsoleCommandHistoryLengthA(LPCSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_a(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/* Undocumented, called by native doskey.exe */
+/* FIXME: Should use CONSOLE_GetHistory() above for full implementation */
+DWORD WINAPI GetConsoleCommandHistoryLengthW(LPCWSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_w(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+DWORD WINAPI GetConsoleAliasesLengthA(LPSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_a(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+DWORD WINAPI GetConsoleAliasesLengthW(LPWSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_w(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+VOID WINAPI ExpungeConsoleCommandHistoryA(LPCSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_a(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+}
+
+VOID WINAPI ExpungeConsoleCommandHistoryW(LPCWSTR unknown)
+{
+    FIXME(": (%s) stub!\n", debugstr_w(unknown));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+}
+
+BOOL WINAPI AddConsoleAliasA(LPSTR source, LPSTR target, LPSTR exename)
+{
+    FIXME(": (%s, %s, %s) stub!\n", debugstr_a(source), debugstr_a(target), debugstr_a(exename));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+BOOL WINAPI AddConsoleAliasW(LPWSTR source, LPWSTR target, LPWSTR exename)
+{
+    FIXME(": (%s, %s, %s) stub!\n", debugstr_w(source), debugstr_w(target), debugstr_w(exename));
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }

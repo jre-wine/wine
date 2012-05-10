@@ -1,4 +1,4 @@
-EXTRADEFS = -D__WINE__ -DWINE_NO_UNICODE_MACROS
+EXTRADEFS = -D__WINE__
 MODULE    = winefile.exe
 APPMODE   = -mwindows
 IMPORTS   = uuid shell32 comdlg32 comctl32 ole32 mpr version user32 gdi32 advapi32
@@ -7,30 +7,7 @@ C_SRCS = \
 	splitpath.c \
 	winefile.c
 
-RC_SRCS = \
-	Cs.rc \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Es.rc \
-	Fr.rc \
-	He.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sv.rc \
-	Tr.rc \
-	Uk.rc \
-	winefile.rc
-
+RC_SRCS = winefile.rc
 PO_SRCS = winefile.rc
 
 MANPAGE = winefile.man

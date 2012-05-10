@@ -526,7 +526,7 @@ typedef struct _CRL_DIST_POINTS_INFO {
 #define GET_CRL_DIST_POINT_ERR_INDEX(x) \
  (((x) >> CRL_DIST_POINT_ERR_INDEX_SHIFT) & CRL_DIST_POINT_ERR_INDEX_MASK)
 
-#define CRL_DIST_POINT_ERR_CRL_ISSUER_BIT 0x80000000L
+#define CRL_DIST_POINT_ERR_CRL_ISSUER_BIT __MSABI_LONG(0x80000000)
 #define IS_CRL_DIST_POINT_ERR_CRL_ISSUER(x) \
  ((x) & CRL_DIST_POINT_ERR_CRL_ISSUER_BIT)
 
@@ -569,7 +569,7 @@ typedef struct _CERT_NAME_CONSTRAINTS_INFO {
     PCERT_GENERAL_SUBTREE rgExcludedSubtree;
 } CERT_NAME_CONSTRAINTS_INFO, *PCERT_NAME_CONSTRAINTS_INFO;
 
-#define CERT_EXCLUDED_SUBTREE_BIT 0x80000000L
+#define CERT_EXCLUDED_SUBTREE_BIT __MSABI_LONG(0x80000000)
 #define IS_CERT_EXCLUDED_SUBTREE(x) ((x) & CERT_EXCLUDED_SUBTREE_BIT)
 
 typedef struct _CRYPT_ATTRIBUTE {
@@ -593,7 +593,7 @@ typedef struct _CERT_REQUEST_INFO {
 
 typedef struct _CERT_KEYGEN_REQUEST_INFO {
     DWORD                dwVersion;
-    CERT_PUBLIC_KEY_INFO SubjectPubliceKeyInfo;
+    CERT_PUBLIC_KEY_INFO SubjectPublicKeyInfo;
     LPWSTR               pwszChallengeString;
 } CERT_KEYGEN_REQUEST_INFO, *PCERT_KEYGEN_REQUEST_INFO;
 
@@ -832,6 +832,12 @@ typedef struct _CTL_VERIFY_USAGE_STATUS {
 #define CERT_VERIFY_NO_TIME_CHECK_FLAG      0x4
 #define CERT_VERIFY_ALLOW_MORE_USAGE_FLAG   0x8
 #define CERT_VERIFY_UPDATED_CTL_FLAG        0x1
+
+typedef struct _CERT_CHAIN {
+    DWORD               cCerts;
+    PCERT_BLOB          certs;
+    CRYPT_KEY_PROV_INFO keyLocatorInfo;
+} CERT_CHAIN, *PCERT_CHAIN;
 
 typedef struct _CERT_REVOCATION_STATUS {
     DWORD cbSize;
@@ -3426,6 +3432,7 @@ typedef struct _CERT_ID
 #define CERT_ID_KEY_IDENTIFIER       2
 #define CERT_ID_SHA1_HASH            3
 
+#ifndef USE_WC_PREFIX
 #undef CMSG_DATA /* may be defined by sys/socket.h */
 #define CMSG_DATA                 1
 #define CMSG_SIGNED               2
@@ -3440,6 +3447,21 @@ typedef struct _CERT_ID
 #define CMSG_ENVELOPED_FLAG            (1 << CMSG_ENVELOPED)
 #define CMSG_SIGNED_AND_ENVELOPED_FLAG (1 << CMSG_SIGNED_AND_ENVELOPED)
 #define CMSG_ENCRYPTED_FLAG            (1 << CMSG_ENCRYPTED)
+#else
+#define WC_CMSG_DATA                 1
+#define WC_CMSG_SIGNED               2
+#define WC_CMSG_ENVELOPED            3
+#define WC_CMSG_SIGNED_AND_ENVELOPED 4
+#define WC_CMSG_HASHED               5
+#define WC_CMSG_ENCRYPTED            6
+
+#define WC_CMSG_ALL_FLAGS                 ~0U
+#define WC_CMSG_DATA_FLAG                 (1 << WC_CMSG_DATA)
+#define WC_CMSG_SIGNED_FLAG               (1 << WC_CMSG_SIGNED)
+#define WC_CMSG_ENVELOPED_FLAG            (1 << WC_CMSG_ENVELOPED)
+#define WC_CMSG_SIGNED_AND_ENVELOPED_FLAG (1 << WC_CMSG_SIGNED_AND_ENVELOPED)
+#define WC_CMSG_ENCRYPTED_FLAG            (1 << WC_CMSG_ENCRYPTED)
+#endif
 
 typedef struct _CMSG_SIGNER_ENCODE_INFO
 {
@@ -4215,9 +4237,9 @@ BOOL WINAPI CertGetEnhancedKeyUsage(PCCERT_CONTEXT pCertContext, DWORD dwFlags,
 BOOL WINAPI CertSetEnhancedKeyUsage(PCCERT_CONTEXT pCertContext,
  PCERT_ENHKEY_USAGE pUsage);
 BOOL WINAPI CertAddEnhancedKeyUsageIdentifier(PCCERT_CONTEXT pCertContext,
- LPCSTR pszUsageIdentifer);
+ LPCSTR pszUsageIdentifier);
 BOOL WINAPI CertRemoveEnhancedKeyUsageIdentifier(PCCERT_CONTEXT pCertContext,
- LPCSTR pszUsageIdentifer);
+ LPCSTR pszUsageIdentifier);
 BOOL WINAPI CertGetValidUsages(DWORD cCerts, PCCERT_CONTEXT *rghCerts,
  int *cNumOIDs, LPSTR *rghOIDs, DWORD *pcbOIDs);
 
@@ -4496,6 +4518,8 @@ BOOL WINAPI PFXExportCertStoreEx(HCERTSTORE hStore, CRYPT_DATA_BLOB *pPFX,
  LPCWSTR szPassword, void *pvReserved, DWORD dwFlags);
 BOOL WINAPI PFXExportCertStore(HCERTSTORE hStore, CRYPT_DATA_BLOB *pPFX,
  LPCWSTR szPassword, DWORD dwFlags);
+BOOL WINAPI PFXVerifyPassword(CRYPT_DATA_BLOB *pPFX, LPCWSTR szPassword,
+ DWORD dwFlags);
 
 /* cryptnet.dll functions */
 BOOL WINAPI CryptCancelAsyncRetrieval(HCRYPTASYNC hAsyncRetrieval);
@@ -4525,6 +4549,11 @@ BOOL WINAPI CryptRetrieveObjectByUrlW(LPCWSTR pszURL, LPCSTR pszObjectOid,
  HCRYPTASYNC hAsyncRetrieve, PCRYPT_CREDENTIALS pCredentials, LPVOID pvVerify,
  PCRYPT_RETRIEVE_AUX_INFO pAuxInfo);
 #define CryptRetrieveObjectByUrl WINELIB_NAME_AW(CryptRetrieveObjectByUrl)
+
+/* Not found in crypt32.dll but in softpub.dll */
+HRESULT WINAPI FindCertsByIssuer(PCERT_CHAIN pCertChains, DWORD *pcbCertChains,
+ DWORD *pcCertChains, BYTE* pbEncodedIssuerName, DWORD cbEncodedIssuerName,
+ LPCWSTR pwszPurpose, DWORD dwKeySpec);
 
 #ifdef __cplusplus
 }

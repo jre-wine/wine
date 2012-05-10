@@ -112,17 +112,21 @@ static Pixmap BRUSH_DitherColor( COLORREF color, int depth)
     Pixmap pixmap;
     GC gc = get_bitmap_gc(depth);
 
+    wine_tsx11_lock();
     if (!ditherImage)
     {
-        ditherImage = X11DRV_DIB_CreateXImage( MATRIX_SIZE, MATRIX_SIZE, depth );
-        if (!ditherImage) 
+        ditherImage = XCreateImage( gdi_display, visual, depth, ZPixmap, 0,
+                                    NULL, MATRIX_SIZE, MATRIX_SIZE, 32, 0 );
+        if (!ditherImage)
         {
+            wine_tsx11_unlock();
             ERR("Could not create dither image\n");
             return 0;
         }
+        ditherImage->data = HeapAlloc( GetProcessHeap(), 0,
+                                       ditherImage->height * ditherImage->bytes_per_line );
     }
 
-    wine_tsx11_lock();
     if (color != prevColor)
     {
 	int r = GetRValue( color ) * DITHER_LEVELS;
@@ -209,31 +213,35 @@ static void BRUSH_SelectSolidBrush( X11DRV_PDEVICE *physDev, COLORREF color )
 /***********************************************************************
  *           BRUSH_SelectPatternBrush
  */
-static BOOL BRUSH_SelectPatternBrush( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
+static void BRUSH_SelectPatternBrush( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, X_PHYSBITMAP *physBitmap )
 {
     BITMAP bitmap;
-    X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
 
-    if (!physBitmap || !GetObjectW( hbitmap, sizeof(bitmap), &bitmap )) return FALSE;
+    GetObjectW( hbitmap, sizeof(bitmap), &bitmap );
 
-    if ((physDev->depth == 1) && (physBitmap->pixmap_depth != 1))
+    wine_tsx11_lock();
+
+    if (physDev->brush.pixmap) XFreePixmap( gdi_display, physDev->brush.pixmap );
+
+    if ((physDev->depth == 1) && (physBitmap->depth != 1))
     {
-        wine_tsx11_lock();
         /* Special case: a color pattern on a monochrome DC */
         physDev->brush.pixmap = XCreatePixmap( gdi_display, root_window,
                                                bitmap.bmWidth, bitmap.bmHeight, 1);
         /* FIXME: should probably convert to monochrome instead */
         XCopyPlane( gdi_display, physBitmap->pixmap, physDev->brush.pixmap,
                     get_bitmap_gc(1), 0, 0, bitmap.bmWidth, bitmap.bmHeight, 0, 0, 1 );
-        wine_tsx11_unlock();
     }
     else
     {
-        /* XRender is needed because of possible depth conversion */
-        X11DRV_XRender_CopyBrush(physDev, physBitmap, bitmap.bmWidth, bitmap.bmHeight);
+        physDev->brush.pixmap = XCreatePixmap( gdi_display, root_window,
+                                               bitmap.bmWidth, bitmap.bmHeight, physBitmap->depth );
+        XCopyArea( gdi_display, physBitmap->pixmap, physDev->brush.pixmap,
+                   get_bitmap_gc(physBitmap->depth), 0, 0, bitmap.bmWidth, bitmap.bmHeight, 0, 0 );
     }
+    wine_tsx11_unlock();
 
-    if (physBitmap->pixmap_depth > 1)
+    if (physBitmap->depth > 1)
     {
 	physDev->brush.fillStyle = FillTiled;
 	physDev->brush.pixel = 0;  /* Ignored */
@@ -243,22 +251,66 @@ static BOOL BRUSH_SelectPatternBrush( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
 	physDev->brush.fillStyle = FillOpaqueStippled;
 	physDev->brush.pixel = -1;  /* Special case (see DC_SetupGCForBrush) */
     }
-    return TRUE;
+}
+
+/* create a bitmap appropriate for the given DIB pattern brush */
+HBITMAP create_brush_bitmap( X11DRV_PDEVICE *physDev, const struct brush_pattern *pattern )
+{
+    HDC memdc;
+    int bpp = screen_bpp;
+    HBITMAP bitmap;
+    const BITMAPINFO *info = pattern->info;
+
+    if (physDev->depth == 1 || info->bmiHeader.biBitCount == 1) bpp = 1;
+    bitmap = CreateBitmap( info->bmiHeader.biWidth, abs(info->bmiHeader.biHeight), 1, bpp, NULL );
+    if (!bitmap) return 0;
+
+    /* make sure it's owned by x11drv */
+    memdc = CreateCompatibleDC( physDev->dev.hdc );
+    SelectObject( memdc, bitmap );
+    DeleteDC( memdc );
+    if (!X11DRV_get_phys_bitmap( bitmap ))
+    {
+        DeleteObject( bitmap );
+        return 0;
+    }
+
+    SetDIBits( physDev->dev.hdc, bitmap, 0, abs(info->bmiHeader.biHeight),
+               pattern->bits.ptr, info, pattern->usage );
+    return bitmap;
 }
 
 
 /***********************************************************************
  *           SelectBrush   (X11DRV.@)
  */
-HBRUSH CDECL X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
+HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern )
 {
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
     LOGBRUSH logbrush;
-    HBITMAP hBitmap;
-    BITMAPINFO * bmpInfo;
+
+    if (pattern)  /* pattern brush */
+    {
+        X_PHYSBITMAP *physbitmap;
+        HBITMAP bitmap = pattern->bitmap;
+        BOOL delete_bitmap = FALSE;
+
+        if (!bitmap || !(physbitmap = X11DRV_get_phys_bitmap( bitmap )))
+        {
+            if (!(bitmap = create_brush_bitmap( physDev, pattern ))) return 0;
+            physbitmap = X11DRV_get_phys_bitmap( bitmap );
+            delete_bitmap = TRUE;
+        }
+        BRUSH_SelectPatternBrush( physDev, bitmap, physbitmap );
+        TRACE("BS_PATTERN\n");
+        physDev->brush.style = BS_PATTERN;
+        if (delete_bitmap) DeleteObject( bitmap );
+        return hbrush;
+    }
 
     if (!GetObjectA( hbrush, sizeof(logbrush), &logbrush )) return 0;
 
-    TRACE("hdc=%p hbrush=%p\n", physDev->hdc,hbrush);
+    TRACE("hdc=%p hbrush=%p\n", dev->hdc, hbrush);
 
     if (physDev->brush.pixmap)
     {
@@ -269,7 +321,7 @@ HBRUSH CDECL X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
     }
     physDev->brush.style = logbrush.lbStyle;
     if (hbrush == GetStockObject( DC_BRUSH ))
-        logbrush.lbColor = GetDCBrushColor( physDev->hdc );
+        logbrush.lbColor = GetDCBrushColor( dev->hdc );
 
     switch(logbrush.lbStyle)
     {
@@ -291,27 +343,6 @@ HBRUSH CDECL X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
         wine_tsx11_unlock();
 	physDev->brush.fillStyle = FillStippled;
 	break;
-
-      case BS_PATTERN:
-	TRACE("BS_PATTERN\n");
-	if (!BRUSH_SelectPatternBrush( physDev, (HBITMAP)logbrush.lbHatch )) return 0;
-	break;
-
-      case BS_DIBPATTERN:
-	TRACE("BS_DIBPATTERN\n");
-        if ((bmpInfo = GlobalLock( (HGLOBAL)logbrush.lbHatch )))
-	{
-	    int size = bitmap_info_size( bmpInfo, logbrush.lbColor );
-	    hBitmap = CreateDIBitmap( physDev->hdc, &bmpInfo->bmiHeader,
-                                        CBM_INIT, ((char *)bmpInfo) + size,
-                                        bmpInfo,
-                                        (WORD)logbrush.lbColor );
-	    BRUSH_SelectPatternBrush( physDev, hBitmap );
-	    DeleteObject( hBitmap );
-            GlobalUnlock( (HGLOBAL)logbrush.lbHatch );
-	}
-
-	break;
     }
     return hbrush;
 }
@@ -320,9 +351,11 @@ HBRUSH CDECL X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
 /***********************************************************************
  *           SetDCBrushColor (X11DRV.@)
  */
-COLORREF CDECL X11DRV_SetDCBrushColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
+COLORREF X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor )
 {
-    if (GetCurrentObject(physDev->hdc, OBJ_BRUSH) == GetStockObject( DC_BRUSH ))
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+
+    if (GetCurrentObject(dev->hdc, OBJ_BRUSH) == GetStockObject( DC_BRUSH ))
         BRUSH_SelectSolidBrush( physDev, crColor );
 
     return crColor;

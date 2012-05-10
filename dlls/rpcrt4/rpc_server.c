@@ -539,6 +539,7 @@ static DWORD CALLBACK RPCRT4_worker_thread(LPVOID the_arg)
   RpcPacket *pkt = the_arg;
   RPCRT4_process_packet(pkt->conn, pkt->hdr, pkt->msg, pkt->auth_data,
                         pkt->auth_length);
+  RPCRT4_ReleaseConnection(pkt->conn);
   HeapFree(GetProcessHeap(), 0, pkt);
   return 0;
 }
@@ -585,7 +586,7 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
         HeapFree(GetProcessHeap(), 0, auth_data);
         goto exit;
       }
-      packet->conn = conn;
+      packet->conn = RPCRT4_GrabConnection( conn );
       packet->hdr = hdr;
       packet->msg = msg;
       packet->auth_data = auth_data;
@@ -621,7 +622,7 @@ static DWORD CALLBACK RPCRT4_io_thread(LPVOID the_arg)
     }
   }
 exit:
-  RPCRT4_DestroyConnection(conn);
+  RPCRT4_ReleaseConnection(conn);
   return 0;
 }
 
@@ -631,7 +632,7 @@ void RPCRT4_new_client(RpcConnection* conn)
   if (!thread) {
     DWORD err = GetLastError();
     ERR("failed to create thread, error=%08x\n", err);
-    RPCRT4_DestroyConnection(conn);
+    RPCRT4_ReleaseConnection(conn);
   }
   /* we could set conn->thread, but then we'd have to make the io_thread wait
    * for that, otherwise the thread might finish, destroy the connection, and
@@ -931,6 +932,7 @@ static RPC_STATUS alloc_serverprotoseq(UINT MaxCalls, const char *Protseq, RpcSe
   (*ps)->MaxCalls = 0;
   (*ps)->conn = NULL;
   InitializeCriticalSection(&(*ps)->cs);
+  (*ps)->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": RpcServerProtseq.cs");
   (*ps)->is_listening = FALSE;
   (*ps)->mgr_mutex = NULL;
   (*ps)->server_ready_event = NULL;
@@ -946,6 +948,7 @@ static RPC_STATUS alloc_serverprotoseq(UINT MaxCalls, const char *Protseq, RpcSe
 static void destroy_serverprotoseq(RpcServerProtseq *ps)
 {
     RPCRT4_strfree(ps->Protseq);
+    ps->cs.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&ps->cs);
     CloseHandle(ps->mgr_mutex);
     CloseHandle(ps->server_ready_event);
@@ -1076,6 +1079,8 @@ void RPCRT4_destroy_all_protseqs(void)
         destroy_serverprotoseq(cps);
     }
     LeaveCriticalSection(&server_cs);
+    DeleteCriticalSection(&server_cs);
+    DeleteCriticalSection(&listen_cs);
 }
 
 /***********************************************************************
@@ -1224,7 +1229,7 @@ RPC_STATUS WINAPI RpcServerUnregisterIfEx( RPC_IF_HANDLE IfSpec, UUID* MgrTypeUu
  *   RPC_S_INVALID_OBJECT     The provided object (nil) is not valid
  *   RPC_S_ALREADY_REGISTERED The provided object is already registered
  *
- * Maps "Object" UUIDs to "Type" UUID's.  Passing the nil UUID as the type
+ * Maps "Object" UUIDs to "Type" UUIDs.  Passing the nil UUID as the type
  * resets the mapping for the specified object UUID to nil (the default).
  * The nil object is always associated with the nil type and cannot be
  * reassigned.  Servers can support multiple implementations on the same
@@ -1319,6 +1324,7 @@ void RPCRT4_ServerFreeAllRegisteredAuthInfo(void)
         HeapFree(GetProcessHeap(), 0, auth_info);
     }
     LeaveCriticalSection(&server_auth_info_cs);
+    DeleteCriticalSection(&server_auth_info_cs);
 }
 
 /***********************************************************************

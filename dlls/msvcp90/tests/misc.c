@@ -17,12 +17,35 @@
  */
 
 #include <stdio.h>
+#include <locale.h>
 
 #include <windef.h>
 #include <winbase.h>
 #include "wine/test.h"
 
+typedef struct {
+    LCID handle;
+    unsigned page;
+    short *table;
+    int delfl;
+} MSVCP__Ctypevec;
+
+/* basic_string<char, char_traits<char>, allocator<char>> */
+#define BUF_SIZE_CHAR 16
+typedef struct
+{
+    void *allocator;
+    union {
+        char buf[BUF_SIZE_CHAR];
+        char *ptr;
+    } data;
+    size_t size;
+    size_t res;
+} basic_string_char;
+
 static void* (__cdecl *p_set_invalid_parameter_handler)(void*);
+static _locale_t (__cdecl *p__get_current_locale)(void);
+static void  (__cdecl *p_free)(void*);
 
 static void (__cdecl *p_char_assign)(void*, const void*);
 static void (__cdecl *p_wchar_assign)(void*, const void*);
@@ -34,21 +57,31 @@ static BYTE (__cdecl *p_short_eq)(const void*, const void*);
 
 static char* (__cdecl *p_Copy_s)(char*, size_t, const char*, size_t);
 
+static unsigned short (__cdecl *p_wctype)(const char*);
+static MSVCP__Ctypevec (__cdecl *p__Getctype)(void);
+
 #ifdef __i386__
-static char* (WINAPI *p_char_address)(char*);
-static void* (WINAPI *p_char_ctor)(void);
-static void (WINAPI *p_char_deallocate)(char*, size_t);
-static char* (WINAPI *p_char_allocate)(size_t);
-static void (WINAPI *p_char_construct)(char*, const char*);
-static size_t (WINAPI *p_char_max_size)(void);
+#define __thiscall __stdcall
 #else
-static char* (__cdecl *p_char_address)(void*, char*);
-static void* (__cdecl *p_char_ctor)(void*);
-static void (__cdecl *p_char_deallocate)(void*, char*, size_t);
-static char* (__cdecl *p_char_allocate)(void*, size_t);
-static void (__cdecl *p_char_construct)(void*, char*, const char*);
-static size_t (__cdecl *p_char_max_size)(void*);
+#define __thiscall __cdecl
 #endif
+
+static char* (__thiscall *p_char_address)(void*, char*);
+static void* (__thiscall *p_char_ctor)(void*);
+static void (__thiscall *p_char_deallocate)(void*, char*, size_t);
+static char* (__thiscall *p_char_allocate)(void*, size_t);
+static void (__thiscall *p_char_construct)(void*, char*, const char*);
+static size_t (__thiscall *p_char_max_size)(void*);
+
+void* (__thiscall *p_collate_char_ctor_refs)(void*, size_t);
+int (__thiscall *p_collate_char_compare)(const void*, const char*,
+        const char*, const char*, const char*);
+void (__thiscall *p_collate_char_dtor)(void*);
+void* (__thiscall *p_numpunct_char_ctor)(void*);
+basic_string_char* (__thiscall *p_numpunct_char_falsename)(void*,basic_string_char*);
+void (__thiscall *p_numpunct_char_dtor)(void*);
+static void (__thiscall *p_basic_string_char_dtor)(basic_string_char*);
+static const char* (__thiscall *p_basic_string_char_cstr)(basic_string_char*);
 
 static int invalid_parameter = 0;
 static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
@@ -65,103 +98,58 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
 
 /* Emulate a __thiscall */
 #ifdef __i386__
-#ifdef _MSC_VER
-static inline void* do_call_func1(void *func, void *_this)
+
+#include "pshpack1.h"
+struct thiscall_thunk
 {
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-            mov ecx, _this
-            call func
-            mov retval, eax
-            pop ecx
-    }
-    return (void*)retval;
+    BYTE pop_eax;    /* popl  %eax (ret addr) */
+    BYTE pop_edx;    /* popl  %edx (func) */
+    BYTE pop_ecx;    /* popl  %ecx (this) */
+    BYTE push_eax;   /* pushl %eax */
+    WORD jmp_edx;    /* jmp  *%edx */
+};
+#include "poppack.h"
+
+static void * (WINAPI *call_thiscall_func1)( void *func, void *this );
+static void * (WINAPI *call_thiscall_func2)( void *func, void *this, const void *a );
+static void * (WINAPI *call_thiscall_func3)( void *func, void *this, const void *a, const void *b );
+static void * (WINAPI *call_thiscall_func5)( void *func, void *this, const void *a, const void *b,
+        const void *c, const void *d );
+struct thiscall_thunk_retptr *thunk_retptr;
+
+static void init_thiscall_thunk(void)
+{
+    struct thiscall_thunk *thunk = VirtualAlloc( NULL, sizeof(*thunk),
+                                                 MEM_COMMIT, PAGE_EXECUTE_READWRITE );
+    thunk->pop_eax  = 0x58;   /* popl  %eax */
+    thunk->pop_edx  = 0x5a;   /* popl  %edx */
+    thunk->pop_ecx  = 0x59;   /* popl  %ecx */
+    thunk->push_eax = 0x50;   /* pushl %eax */
+    thunk->jmp_edx  = 0xe2ff; /* jmp  *%edx */
+    call_thiscall_func1 = (void *)thunk;
+    call_thiscall_func2 = (void *)thunk;
+    call_thiscall_func3 = (void *)thunk;
+    call_thiscall_func5 = (void *)thunk;
 }
 
-static inline void* do_call_func2(void *func, void *_this, const void *arg)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-
-static inline void* do_call_func3(void *func, void *_this,
-        const void *arg1, const void *arg2)
-{
-    volatile void* retval = 0;
-    __asm
-    {
-        push ecx
-        push arg1
-        push arg2
-        mov ecx, _this
-        call func
-        mov retval, eax
-        pop ecx
-    }
-    return (void*)retval;
-}
-#else
-static void* do_call_func1(void *func, void *_this)
-{
-        void *ret, *dummy;
-        __asm__ __volatile__ (
-                "call *%2"
-                : "=a" (ret), "=c" (dummy)
-                : "g" (func), "1" (_this)
-                : "edx", "memory"
-                );
-        return ret;
-}
-
-static void* do_call_func2(void *func, void *_this, const void *arg)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-
-static void* do_call_func3(void *func, void *_this,
-        const void *arg1, const void *arg2)
-{
-    void *ret, *dummy;
-    __asm__ __volatile__ (
-            "pushl %4\n\tpushl %3\n\tcall *%2"
-            : "=a" (ret), "=c" (dummy)
-            : "r" (func), "r" (arg1), "r" (arg2), "1" (_this)
-            : "edx", "memory"
-            );
-    return ret;
-}
-#endif
-
-#define call_func1(func,_this)   do_call_func1(func,_this)
-#define call_func2(func,_this,a) do_call_func2(func,_this,(const void*)a)
-#define call_func3(func,_this,a,b) do_call_func3(func,_this,(const void*)a,(const void*)b)
+#define call_func1(func,_this) call_thiscall_func1(func,_this)
+#define call_func2(func,_this,a) call_thiscall_func2(func,_this,(const void*)(a))
+#define call_func3(func,_this,a,b) call_thiscall_func3(func,_this,(const void*)(a),(const void*)(b))
+#define call_func5(func,_this,a,b,c,d) call_thiscall_func5(func,_this,(const void*)(a),(const void*)(b), \
+        (const void*)(c), (const void *)(d))
 
 #else
 
+#define init_thiscall_thunk()
 #define call_func1(func,_this) func(_this)
 #define call_func2(func,_this,a) func(_this,a)
 #define call_func3(func,_this,a,b) func(_this,a,b)
+#define call_func5(func,_this,a,b,c,d) func(_this,a,b,c,d)
 
 #endif /* __i386__ */
 
+#define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
+#define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
 static BOOL init(void)
 {
     HMODULE msvcr = LoadLibraryA("msvcr90.dll");
@@ -172,49 +160,76 @@ static BOOL init(void)
     }
 
     p_set_invalid_parameter_handler = (void*)GetProcAddress(msvcr, "_set_invalid_parameter_handler");
-    if(!p_set_invalid_parameter_handler) {
+    p__get_current_locale = (void*)GetProcAddress(msvcr, "_get_current_locale");
+    p_free = (void*)GetProcAddress(msvcr, "free");
+    if(!p_set_invalid_parameter_handler || !p__get_current_locale || !p_free) {
         win_skip("Error setting tests environment\n");
         return FALSE;
     }
 
     p_set_invalid_parameter_handler(test_invalid_parameter_handler);
 
+    SET(p_wctype, "wctype");
+    SET(p__Getctype, "_Getctype");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
-        p_char_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@D@std@@SAXAEADAEBD@Z");
-        p_wchar_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@_W@std@@SAXAEA_WAEB_W@Z");
-        p_short_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@G@std@@SAXAEAGAEBG@Z");
+        SET(p_char_assign, "?assign@?$char_traits@D@std@@SAXAEADAEBD@Z");
+        SET(p_wchar_assign, "?assign@?$char_traits@_W@std@@SAXAEA_WAEB_W@Z");
+        SET(p_short_assign, "?assign@?$char_traits@G@std@@SAXAEAGAEBG@Z");
 
-        p_char_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@D@std@@SA_NAEBD0@Z");
-        p_wchar_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@_W@std@@SA_NAEB_W0@Z");
-        p_short_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@G@std@@SA_NAEBG0@Z");
+        SET(p_char_eq, "?eq@?$char_traits@D@std@@SA_NAEBD0@Z");
+        SET(p_wchar_eq, "?eq@?$char_traits@_W@std@@SA_NAEB_W0@Z");
+        SET(p_short_eq, "?eq@?$char_traits@G@std@@SA_NAEBG0@Z");
 
-        p_Copy_s = (void*)GetProcAddress(msvcp, "?_Copy_s@?$char_traits@D@std@@SAPEADPEAD_KPEBD1@Z");
+        SET(p_Copy_s, "?_Copy_s@?$char_traits@D@std@@SAPEADPEAD_KPEBD1@Z");
 
-        p_char_address = (void*)GetProcAddress(msvcp, "?address@?$allocator@D@std@@QEBAPEADAEAD@Z");
-        p_char_ctor = (void*)GetProcAddress(msvcp, "??0?$allocator@D@std@@QEAA@XZ");
-        p_char_deallocate = (void*)GetProcAddress(msvcp, "?deallocate@?$allocator@D@std@@QEAAXPEAD_K@Z");
-        p_char_allocate = (void*)GetProcAddress(msvcp, "?allocate@?$allocator@D@std@@QEAAPEAD_K@Z");
-        p_char_construct = (void*)GetProcAddress(msvcp, "?construct@?$allocator@D@std@@QEAAXPEADAEBD@Z");
-        p_char_max_size = (void*)GetProcAddress(msvcp, "?max_size@?$allocator@D@std@@QEBA_KXZ");
+        SET(p_char_address, "?address@?$allocator@D@std@@QEBAPEADAEAD@Z");
+        SET(p_char_ctor, "??0?$allocator@D@std@@QEAA@XZ");
+        SET(p_char_deallocate, "?deallocate@?$allocator@D@std@@QEAAXPEAD_K@Z");
+        SET(p_char_allocate, "?allocate@?$allocator@D@std@@QEAAPEAD_K@Z");
+        SET(p_char_construct, "?construct@?$allocator@D@std@@QEAAXPEADAEBD@Z");
+        SET(p_char_max_size, "?max_size@?$allocator@D@std@@QEBA_KXZ");
+
+        SET(p_collate_char_ctor_refs, "??0?$collate@D@std@@QEAA@_K@Z");
+        SET(p_collate_char_compare, "?compare@?$collate@D@std@@QEBAHPEBD000@Z");
+        SET(p_collate_char_dtor, "??1?$collate@D@std@@MEAA@XZ");
+        SET(p_numpunct_char_ctor, "??_F?$numpunct@D@std@@QEAAXXZ");
+        SET(p_numpunct_char_falsename, "?falsename@?$numpunct@D@std@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ");
+        SET(p_numpunct_char_dtor, "??1?$numpunct@D@std@@MEAA@XZ");
+        SET(p_basic_string_char_dtor,
+                "??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@XZ");
+        SET(p_basic_string_char_cstr,
+                "?c_str@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEBDXZ");
     } else {
-        p_char_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@D@std@@SAXAADABD@Z");
-        p_wchar_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@_W@std@@SAXAA_WAB_W@Z");
-        p_short_assign = (void*)GetProcAddress(msvcp, "?assign@?$char_traits@G@std@@SAXAAGABG@Z");
+        SET(p_char_assign, "?assign@?$char_traits@D@std@@SAXAADABD@Z");
+        SET(p_wchar_assign, "?assign@?$char_traits@_W@std@@SAXAA_WAB_W@Z");
+        SET(p_short_assign, "?assign@?$char_traits@G@std@@SAXAAGABG@Z");
 
-        p_char_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@D@std@@SA_NABD0@Z");
-        p_wchar_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@_W@std@@SA_NAB_W0@Z");
-        p_short_eq = (void*)GetProcAddress(msvcp, "?eq@?$char_traits@G@std@@SA_NABG0@Z");
+        SET(p_char_eq, "?eq@?$char_traits@D@std@@SA_NABD0@Z");
+        SET(p_wchar_eq, "?eq@?$char_traits@_W@std@@SA_NAB_W0@Z");
+        SET(p_short_eq, "?eq@?$char_traits@G@std@@SA_NABG0@Z");
 
-        p_Copy_s = (void*)GetProcAddress(msvcp, "?_Copy_s@?$char_traits@D@std@@SAPADPADIPBDI@Z");
+        SET(p_Copy_s, "?_Copy_s@?$char_traits@D@std@@SAPADPADIPBDI@Z");
 
-        p_char_address = (void*)GetProcAddress(msvcp, "?address@?$allocator@D@std@@QBEPADAAD@Z");
-        p_char_ctor = (void*)GetProcAddress(msvcp, "??0?$allocator@D@std@@QAE@XZ");
-        p_char_deallocate = (void*)GetProcAddress(msvcp, "?deallocate@?$allocator@D@std@@QAEXPADI@Z");
-        p_char_allocate = (void*)GetProcAddress(msvcp, "?allocate@?$allocator@D@std@@QAEPADI@Z");
-        p_char_construct = (void*)GetProcAddress(msvcp, "?construct@?$allocator@D@std@@QAEXPADABD@Z");
-        p_char_max_size = (void*)GetProcAddress(msvcp, "?max_size@?$allocator@D@std@@QBEIXZ");
+        SET(p_char_address, "?address@?$allocator@D@std@@QBEPADAAD@Z");
+        SET(p_char_ctor, "??0?$allocator@D@std@@QAE@XZ");
+        SET(p_char_deallocate, "?deallocate@?$allocator@D@std@@QAEXPADI@Z");
+        SET(p_char_allocate, "?allocate@?$allocator@D@std@@QAEPADI@Z");
+        SET(p_char_construct, "?construct@?$allocator@D@std@@QAEXPADABD@Z");
+        SET(p_char_max_size, "?max_size@?$allocator@D@std@@QBEIXZ");
+
+        SET(p_collate_char_ctor_refs, "??0?$collate@D@std@@QAE@I@Z");
+        SET(p_collate_char_compare, "?compare@?$collate@D@std@@QBEHPBD000@Z");
+        SET(p_collate_char_dtor, "??1?$collate@D@std@@MAE@XZ");
+        SET(p_numpunct_char_ctor, "??_F?$numpunct@D@std@@QAEXXZ");
+        SET(p_numpunct_char_falsename, "?falsename@?$numpunct@D@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ");
+        SET(p_numpunct_char_dtor, "??1?$numpunct@D@std@@MAE@XZ");
+        SET(p_basic_string_char_dtor,
+                "??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
+        SET(p_basic_string_char_cstr,
+                "?c_str@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPBDXZ");
     }
 
+    init_thiscall_thunk();
     return TRUE;
 }
 
@@ -222,11 +237,6 @@ static void test_assign(void)
 {
     const char in[] = "abc";
     char out[4];
-
-    if(!p_char_assign || !p_wchar_assign || !p_short_assign) {
-        win_skip("assign tests skipped\n");
-        return;
-    }
 
     out[1] = '#';
     p_char_assign(out, in);
@@ -254,11 +264,6 @@ static void test_equal(void)
     static const char in4[] = "b";
     BYTE ret;
 
-    if(!p_char_eq || !p_wchar_eq || !p_short_eq) {
-        win_skip("equal tests skipped\n");
-        return;
-    }
-
     ret = p_char_eq(in1, in2);
     ok(ret == TRUE, "ret = %d\n", (int)ret);
     ret = p_char_eq(in1, in3);
@@ -285,11 +290,6 @@ static void test_Copy_s(void)
 {
     static const char src[] = "abcd";
     char dest[32], *ret;
-
-    if(!p_Copy_s) {
-        win_skip("Copy_s tests skipped\n");
-        return;
-    }
 
     dest[4] = '#';
     dest[5] = '\0';
@@ -328,18 +328,61 @@ static void test_Copy_s(void)
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
 }
 
+static void test_wctype(void)
+{
+    static const struct {
+        const char *name;
+        unsigned short mask;
+    } properties[] = {
+        { "alnum",  0x107 },
+        { "alpha",  0x103 },
+        { "cntrl",  0x020 },
+        { "digit",  0x004 },
+        { "graph",  0x117 },
+        { "lower",  0x002 },
+        { "print",  0x157 },
+        { "punct",  0x010 },
+        { "space",  0x008 },
+        { "upper",  0x001 },
+        { "xdigit", 0x080 },
+        { "ALNUM",  0x000 },
+        { "Alnum",  0x000 },
+        { "",  0x000 }
+    };
+    int i, ret;
+
+    for(i=0; i<sizeof(properties)/sizeof(properties[0]); i++) {
+        ret = p_wctype(properties[i].name);
+        ok(properties[i].mask == ret, "%d - Expected %x, got %x\n", i, properties[i].mask, ret);
+    }
+}
+
+static void test__Getctype(void)
+{
+    MSVCP__Ctypevec ret;
+
+    ret = p__Getctype();
+    ok(ret.handle == 0, "ret.handle = %d\n", ret.handle);
+    ok(ret.page == 0, "ret.page = %d\n", ret.page);
+    ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
+    ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
+    p_free(ret.table);
+
+    p__get_current_locale()->locinfo->lc_handle[LC_COLLATE] = 1;
+    ret = p__Getctype();
+    ok(ret.handle == 1, "ret.handle = %d\n", ret.handle);
+    ok(ret.page == 0, "ret.page = %d\n", ret.page);
+    ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
+    ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
+    p_free(ret.table);
+}
+
 static void test_allocator_char(void)
 {
     void *allocator = (void*)0xdeadbeef;
     char *ptr;
     char val;
     unsigned int size;
-
-    if(!p_char_address || !p_char_ctor || !p_char_deallocate || !p_char_allocate
-            || !p_char_construct || !p_char_max_size) {
-        win_skip("allocator<char> class not available\n");
-        return;
-    }
 
     allocator = call_func1(p_char_ctor, allocator);
     ok(allocator == (void*)0xdeadbeef, "allocator = %p\n", allocator);
@@ -365,6 +408,32 @@ static void test_allocator_char(void)
     ok(size == (unsigned int)0xffffffff, "size = %x\n", size);
 }
 
+static void test_virtual_call(void)
+{
+    BYTE this[256];
+    basic_string_char bstr;
+    const char *p;
+    char str1[] = "test";
+    char str2[] = "TEST";
+    int ret;
+
+    call_func2(p_collate_char_ctor_refs, this, 0);
+    ret = (int)call_func5(p_collate_char_compare, this, str1, str1+4, str1, str1+4);
+    ok(ret == 0, "collate<char>::compare returned %d\n", ret);
+    ret = (int)call_func5(p_collate_char_compare, this, str2, str2+4, str1, str1+4);
+    ok(ret == 1, "collate<char>::compare returned %d\n", ret);
+    ret = (int)call_func5(p_collate_char_compare, this, str1, str1+3, str1, str1+4);
+    ok(ret == -1, "collate<char>::compare returned %d\n", ret);
+    call_func1(p_collate_char_dtor, this);
+
+    call_func1(p_numpunct_char_ctor, this);
+    call_func2(p_numpunct_char_falsename, this, &bstr);
+    p = call_func1(p_basic_string_char_cstr, &bstr);
+    ok(!strcmp(p, "false"), "numpunct<char>::falsename returned %s\n", p);
+    call_func1(p_basic_string_char_dtor, &bstr);
+    call_func1(p_numpunct_char_dtor, this);
+}
+
 START_TEST(misc)
 {
     if(!init())
@@ -373,6 +442,9 @@ START_TEST(misc)
     test_assign();
     test_equal();
     test_Copy_s();
+    test_wctype();
+    test__Getctype();
+    test_virtual_call();
 
     test_allocator_char();
 

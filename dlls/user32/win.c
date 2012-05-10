@@ -1066,7 +1066,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
 
     /* FIXME: Add dumping of BS_/ES_/SBS_/LBS_/CBS_/DS_/etc. styles */
 #define DUMPED_STYLES \
-    (WS_POPUP | \
+    ((DWORD)(WS_POPUP | \
      WS_CHILD | \
      WS_MINIMIZE | \
      WS_VISIBLE | \
@@ -1083,9 +1083,9 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_GROUP | \
      WS_TABSTOP | \
      WS_MINIMIZEBOX | \
-     WS_MAXIMIZEBOX)
+     WS_MAXIMIZEBOX))
 
-    if(style & ~DUMPED_STYLES) TRACE(" %08lx", style & ~DUMPED_STYLES);
+    if(style & ~DUMPED_STYLES) TRACE(" %08x", style & ~DUMPED_STYLES);
     TRACE("\n");
 #undef DUMPED_STYLES
 
@@ -1111,7 +1111,7 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
     if(exstyle & WS_EX_LAYOUTRTL) TRACE(" WS_EX_LAYOUTRTL");
 
 #define DUMPED_EX_STYLES \
-    (WS_EX_DLGMODALFRAME | \
+    ((DWORD)(WS_EX_DLGMODALFRAME | \
      WS_EX_DRAGDETECT | \
      WS_EX_NOPARENTNOTIFY | \
      WS_EX_TOPMOST | \
@@ -1129,9 +1129,9 @@ static void dump_window_styles( DWORD style, DWORD exstyle )
      WS_EX_STATICEDGE | \
      WS_EX_APPWINDOW | \
      WS_EX_LAYERED | \
-     WS_EX_LAYOUTRTL)
+     WS_EX_LAYOUTRTL))
 
-    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08lx", exstyle & ~DUMPED_EX_STYLES);
+    if(exstyle & ~DUMPED_EX_STYLES) TRACE(" %08x", exstyle & ~DUMPED_EX_STYLES);
     TRACE("\n");
 #undef DUMPED_EX_STYLES
 }
@@ -1324,14 +1324,15 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
             wndPtr->dwStyle |= WS_CAPTION;
     }
 
-    /*
-     * WS_EX_WINDOWEDGE appears to be enforced based on the other styles, so
-     * why does the user get to set it?
-     */
-
-    if ((wndPtr->dwExStyle & WS_EX_DLGMODALFRAME) ||
-          (wndPtr->dwStyle & (WS_DLGFRAME | WS_THICKFRAME)))
+    /* WS_EX_WINDOWEDGE depends on some other styles */
+    if (wndPtr->dwExStyle & WS_EX_DLGMODALFRAME)
         wndPtr->dwExStyle |= WS_EX_WINDOWEDGE;
+    else if (wndPtr->dwStyle & (WS_DLGFRAME | WS_THICKFRAME))
+    {
+        if (!((wndPtr->dwExStyle & WS_EX_STATICEDGE) &&
+            (wndPtr->dwStyle & (WS_CHILD | WS_POPUP))))
+            wndPtr->dwExStyle |= WS_EX_WINDOWEDGE;
+    }
     else
         wndPtr->dwExStyle &= ~WS_EX_WINDOWEDGE;
 
@@ -2176,6 +2177,8 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
         newval = style.styleNew;
         /* WS_CLIPSIBLINGS can't be reset on top-level windows */
         if (wndPtr->parent == GetDesktopWindow()) newval |= WS_CLIPSIBLINGS;
+        /* FIXME: changing WS_DLGFRAME | WS_THICKFRAME is supposed to change
+           WS_EX_WINDOWEDGE too */
         break;
     case GWL_EXSTYLE:
         style.styleOld = wndPtr->dwExStyle;
@@ -2186,9 +2189,11 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
         /* WS_EX_TOPMOST can only be changed through SetWindowPos */
         newval = (style.styleNew & ~WS_EX_TOPMOST) | (wndPtr->dwExStyle & WS_EX_TOPMOST);
         /* WS_EX_WINDOWEDGE depends on some other styles */
-        if ((newval & WS_EX_DLGMODALFRAME) || (wndPtr->dwStyle & WS_THICKFRAME))
+        if (newval & WS_EX_DLGMODALFRAME)
             newval |= WS_EX_WINDOWEDGE;
-        else if (wndPtr->dwStyle & (WS_CHILD|WS_POPUP))
+        else if (!(newval & WS_EX_STATICEDGE) && (wndPtr->dwStyle & (WS_DLGFRAME | WS_THICKFRAME)))
+            newval |= WS_EX_WINDOWEDGE;
+        else
             newval &= ~WS_EX_WINDOWEDGE;
         break;
     case GWLP_HWNDPARENT:
@@ -3395,7 +3400,7 @@ UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
  *
  * Note: tests show that Windows doesn't check cbSize of the structure.
  */
-BOOL WINAPI GetWindowInfo( HWND hwnd, PWINDOWINFO pwi)
+BOOL WINAPI DECLSPEC_HOTPATCH GetWindowInfo( HWND hwnd, PWINDOWINFO pwi)
 {
     if (!pwi) return FALSE;
     if (!WIN_GetRectangles( hwnd, COORDS_SCREEN, &pwi->rcWindow, &pwi->rcClient )) return FALSE;

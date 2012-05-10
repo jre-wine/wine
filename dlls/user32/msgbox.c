@@ -33,7 +33,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dialog);
 WINE_DECLARE_DEBUG_CHANNEL(msgbox);
 
-#define MSGBOX_IDICON 1088
+#define MSGBOX_IDICON stc1
 #define MSGBOX_IDTEXT 100
 #define IDS_ERROR     2
 
@@ -78,7 +78,9 @@ static HFONT MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
     const WCHAR *ptr;
 
     /* Index the order the buttons need to appear to an ID* constant */
-    static const int buttonOrder[10] = { 6, 7, 1, 3, 4, 2, 5, 10, 11, 9 };
+    static const int buttonOrder[10] = { IDYES, IDNO, IDOK, IDABORT, IDRETRY,
+                                         IDCANCEL, IDIGNORE, IDTRYAGAIN,
+                                         IDCONTINUE, IDHELP };
 
     nclm.cbSize = sizeof(nclm);
     SystemParametersInfoW (SPI_GETNONCLIENTMETRICS, 0, &nclm, 0);
@@ -175,23 +177,23 @@ static HFONT MSGBOX_OnInit(HWND hwnd, LPMSGBOXPARAMSW lpmb)
     /* Set the icon */
     switch(lpmb->dwStyle & MB_ICONMASK) {
     case MB_ICONEXCLAMATION:
-	SendDlgItemMessageW(hwnd, stc1, STM_SETICON,
+	SendDlgItemMessageW(hwnd, MSGBOX_IDICON, STM_SETICON,
 			    (WPARAM)LoadIconW(0, (LPWSTR)IDI_EXCLAMATION), 0);
 	break;
     case MB_ICONQUESTION:
-	SendDlgItemMessageW(hwnd, stc1, STM_SETICON,
+	SendDlgItemMessageW(hwnd, MSGBOX_IDICON, STM_SETICON,
 			    (WPARAM)LoadIconW(0, (LPWSTR)IDI_QUESTION), 0);
 	break;
     case MB_ICONASTERISK:
-	SendDlgItemMessageW(hwnd, stc1, STM_SETICON,
+	SendDlgItemMessageW(hwnd, MSGBOX_IDICON, STM_SETICON,
 			    (WPARAM)LoadIconW(0, (LPWSTR)IDI_ASTERISK), 0);
 	break;
     case MB_ICONHAND:
-      SendDlgItemMessageW(hwnd, stc1, STM_SETICON,
+      SendDlgItemMessageW(hwnd, MSGBOX_IDICON, STM_SETICON,
 			    (WPARAM)LoadIconW(0, (LPWSTR)IDI_HAND), 0);
       break;
     case MB_USERICON:
-      SendDlgItemMessageW(hwnd, stc1, STM_SETICON,
+      SendDlgItemMessageW(hwnd, MSGBOX_IDICON, STM_SETICON,
 			  (WPARAM)LoadIconW(lpmb->hInstance, lpmb->lpszIcon), 0);
       break;
     default:
@@ -449,6 +451,26 @@ INT WINAPI MessageBoxExW( HWND hWnd, LPCWSTR text, LPCWSTR title,
     msgbox.dwLanguageId = langid;
 
     return MessageBoxIndirectW(&msgbox);
+}
+
+/**************************************************************************
+ *      MessageBoxTimeoutA (USER32.@)
+ */
+INT WINAPI MessageBoxTimeoutA( HWND hWnd, LPCSTR text, LPCSTR title,
+                               UINT type, WORD langid, DWORD timeout )
+{
+    FIXME("timeout not supported (%u)\n", timeout);
+    return MessageBoxExA( hWnd, text, title, type, langid );
+}
+
+/**************************************************************************
+ *      MessageBoxTimeoutW (USER32.@)
+ */
+INT WINAPI MessageBoxTimeoutW( HWND hWnd, LPCWSTR text, LPCWSTR title,
+                               UINT type, WORD langid, DWORD timeout )
+{
+    FIXME("timeout not supported (%u)\n", timeout);
+    return MessageBoxExW( hWnd, text, title, type, langid );
 }
 
 /**************************************************************************

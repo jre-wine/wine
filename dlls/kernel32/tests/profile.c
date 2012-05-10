@@ -146,12 +146,16 @@ static void test_profile_string(void)
     ret=GetPrivateProfileStringW(emptyW, keyW, emptyW, bufW,
                                  sizeof(bufW)/sizeof(bufW[0]), TESTFILE2W);
     todo_wine
+    ok(ret == 13, "expected 13, got %u\n", ret);
+    todo_wine
     ok(!lstrcmpW(valsectionW,bufW), "expected %s, got %s\n",
         wine_dbgstr_w(valsectionW), wine_dbgstr_w(bufW) );
 
     /* works only in unicode, ascii crashes */
     ret=GetPrivateProfileStringW(sW, emptyW, emptyW, bufW,
                                  sizeof(bufW)/sizeof(bufW[0]), TESTFILE2W);
+    todo_wine
+    ok(ret == 10, "expected 10, got %u\n", ret);
     todo_wine
     ok(!lstrcmpW(valnokeyW,bufW), "expected %s, got %s\n",
         wine_dbgstr_w(valnokeyW), wine_dbgstr_w(bufW) );
@@ -444,8 +448,8 @@ static void test_profile_delete_on_close(void)
 
     h = CreateFile(testfile, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                     CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-    ok( WriteFile( h, contents, sizeof contents - 1, &size, NULL ),
-                    "Cannot write test file: %x\n", GetLastError() );
+    res = WriteFile( h, contents, sizeof contents - 1, &size, NULL );
+    ok( res, "Cannot write test file: %x\n", GetLastError() );
     ok( size == sizeof contents - 1, "Test file: partial write\n");
 
     SetLastError(0xdeadbeef);
@@ -468,8 +472,8 @@ static void test_profile_refresh(void)
 
     h = CreateFile(testfile, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                     CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-    ok( WriteFile( h, contents1, sizeof contents1 - 1, &size, NULL ),
-                    "Cannot write test file: %x\n", GetLastError() );
+    res = WriteFile( h, contents1, sizeof contents1 - 1, &size, NULL );
+    ok( res, "Cannot write test file: %x\n", GetLastError() );
     ok( size == sizeof contents1 - 1, "Test file: partial write\n");
 
     SetLastError(0xdeadbeef);
@@ -484,8 +488,8 @@ static void test_profile_refresh(void)
 
     h = CreateFile(testfile, GENERIC_WRITE, FILE_SHARE_READ, NULL,
                     CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NULL);
-    ok( WriteFile( h, contents2, sizeof contents2 - 1, &size, NULL ),
-                    "Cannot write test file: %x\n", GetLastError() );
+    res = WriteFile( h, contents2, sizeof contents2 - 1, &size, NULL );
+    ok( res, "Cannot write test file: %x\n", GetLastError() );
     ok( size == sizeof contents2 - 1, "Test file: partial write\n");
 
     SetLastError(0xdeadbeef);

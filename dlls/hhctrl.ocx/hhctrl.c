@@ -98,9 +98,41 @@ static const char *command_to_string(UINT command)
 #undef X
 }
 
-static BOOL resolve_filename(const WCHAR *filename, WCHAR *fullname, DWORD buflen)
+static BOOL resolve_filename(const WCHAR *filename, WCHAR *fullname, DWORD buflen, const WCHAR **index, const WCHAR **window)
 {
+    const WCHAR *extra;
+    WCHAR chm_file[MAX_PATH];
+
     static const WCHAR helpW[] = {'\\','h','e','l','p','\\',0};
+    static const WCHAR delimW[] = {':',':',0};
+    static const WCHAR delim2W[] = {'>',0};
+
+    filename = skip_schema(filename);
+
+    /* the format is "helpFile[::/index][>window]" */
+    if (index) *index = NULL;
+    if (window) *window = NULL;
+
+    extra = strstrW(filename, delim2W);
+    if (extra)
+    {
+        memcpy(chm_file, filename, (extra-filename)*sizeof(WCHAR));
+        chm_file[extra-filename] = 0;
+        filename = chm_file;
+        if (window)
+            *window = strdupW(extra+1);
+    }
+
+    extra = strstrW(filename, delimW);
+    if (extra)
+    {
+        if (filename != chm_file)
+            memcpy(chm_file, filename, (extra-filename)*sizeof(WCHAR));
+        chm_file[extra-filename] = 0;
+        filename = chm_file;
+        if (index)
+            *index = strdupW(extra+2);
+    }
 
     GetFullPathNameW(filename, buflen, fullname, NULL);
     if (GetFileAttributesW(fullname) == INVALID_FILE_ATTRIBUTES)
@@ -127,32 +159,24 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
     {
     case HH_DISPLAY_TOPIC:
     case HH_DISPLAY_TOC:
+    case HH_DISPLAY_INDEX:
     case HH_DISPLAY_SEARCH:{
-        static const WCHAR delimW[] = {':',':',0};
         HHInfo *info;
         BOOL res;
-        WCHAR chm_file[MAX_PATH];
-        const WCHAR *index;
-
-        FIXME("Not all HH cases handled correctly\n");
+        NMHDR nmhdr;
+        const WCHAR *index = NULL;
+        int tab_index = TAB_CONTENTS;
+        const WCHAR *default_index = NULL;
 
         if (!filename)
             return NULL;
 
-        index = strstrW(filename, delimW);
-        if (index)
-        {
-            memcpy(chm_file, filename, (index-filename)*sizeof(WCHAR));
-            chm_file[index-filename] = 0;
-            filename = chm_file;
-            index += 2; /* advance beyond "::" for calling NavigateToChm() later */
-        }
-
-        if (!resolve_filename(filename, fullname, MAX_PATH))
+        if (!resolve_filename(filename, fullname, MAX_PATH, &default_index, NULL))
         {
             WARN("can't find %s\n", debugstr_w(filename));
             return 0;
         }
+        index = default_index;
 
         info = CreateHelpViewer(fullname);
         if(!info)
@@ -161,12 +185,50 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
         if(!index)
             index = info->WinType.pszFile;
 
+        /* called to load a specified topic */
+        switch(command)
+        {
+        case HH_DISPLAY_TOPIC:
+        case HH_DISPLAY_TOC:
+            if (data)
+                index = (const WCHAR *)data;
+            break;
+        }
+
         res = NavigateToChm(info, info->pCHMInfo->szFile, index);
+
+        if (default_index)
+            heap_free((WCHAR*)default_index);
+
         if(!res)
         {
             ReleaseHelpViewer(info);
             return NULL;
         }
+
+        switch(command)
+        {
+        case HH_DISPLAY_TOPIC:
+        case HH_DISPLAY_TOC:
+            tab_index = TAB_CONTENTS;
+            break;
+        case HH_DISPLAY_INDEX:
+            tab_index = TAB_INDEX;
+            if (data)
+                FIXME("Should select keyword '%s'.\n", debugstr_w((WCHAR *)data));
+            break;
+        case HH_DISPLAY_SEARCH:
+            tab_index = TAB_SEARCH;
+            if (data)
+                FIXME("Should display search specified by HH_FTS_QUERY structure.\n");
+            break;
+        }
+        /* open the requested tab */
+        memset(&nmhdr, 0, sizeof(nmhdr));
+        nmhdr.code = TCN_SELCHANGE;
+        SendMessageW(info->hwndTabCtrl, TCM_SETCURSEL, (WPARAM)info->tabs[tab_index].id, 0);
+        SendMessageW(info->WinType.hwndNavigation, WM_NOTIFY, 0, (LPARAM)&nmhdr);
+
         return info->WinType.hwndHelp;
     }
     case HH_HELP_CONTEXT: {
@@ -176,7 +238,7 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
         if (!filename)
             return NULL;
 
-        if (!resolve_filename(filename, fullname, MAX_PATH))
+        if (!resolve_filename(filename, fullname, MAX_PATH, NULL, NULL))
         {
             WARN("can't find %s\n", debugstr_w(filename));
             return 0;
@@ -287,6 +349,7 @@ int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
     int len, buflen, mapid = -1;
     WCHAR *filename;
     char *endq = NULL;
+    HWND hwnd;
 
     hh_process = TRUE;
 
@@ -342,11 +405,17 @@ int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
 
     /* Open a specific help topic */
     if(mapid != -1)
-        HtmlHelpW(GetDesktopWindow(), filename, HH_HELP_CONTEXT, mapid);
+        hwnd = HtmlHelpW(GetDesktopWindow(), filename, HH_HELP_CONTEXT, mapid);
     else
-        HtmlHelpW(GetDesktopWindow(), filename, HH_DISPLAY_TOPIC, 0);
+        hwnd = HtmlHelpW(GetDesktopWindow(), filename, HH_DISPLAY_TOPIC, 0);
 
     heap_free(filename);
+
+    if (!hwnd)
+    {
+        ERR("Failed to open HTML Help file '%s'.\n", szCmdLine);
+        return 0;
+    }
 
     while (GetMessageW(&msg, 0, 0, 0))
     {
@@ -371,7 +440,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( hhctrl_hinstance, NULL );
+    return __wine_register_resources( hhctrl_hinstance );
 }
 
 /***********************************************************************
@@ -379,5 +448,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( hhctrl_hinstance, NULL );
+    return __wine_unregister_resources( hhctrl_hinstance );
 }

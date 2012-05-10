@@ -114,11 +114,15 @@ static char *find_dosbox(void)
     const char *envpath = getenv( "PATH" );
     struct stat st;
     char *path, *p, *buffer, *dir;
+    size_t envpath_len;
 
     if (!envpath) return NULL;
-    path = HeapAlloc( GetProcessHeap(), 0, strlen(envpath) );
-    buffer = HeapAlloc( GetProcessHeap(), 0, strlen(path) + sizeof("/dosbox") );
+
+    envpath_len = strlen( envpath );
+    path = HeapAlloc( GetProcessHeap(), 0, envpath_len + 1 );
+    buffer = HeapAlloc( GetProcessHeap(), 0, envpath_len + sizeof("/dosbox") );
     strcpy( path, envpath );
+
     p = path;
     while (*p)
     {
@@ -126,7 +130,7 @@ static char *find_dosbox(void)
         if (!*p) break;
         dir = p;
         while (*p && *p != ':') p++;
-        *p++ = 0;
+        if (*p == ':') *p++ = 0;
         strcpy( buffer, dir );
         strcat( buffer, "/dosbox" );
         if (!stat( buffer, &st ))
@@ -150,7 +154,7 @@ static void start_dosbox( const char *appname, const char *args )
     const char *config_dir = wine_get_config_dir();
     WCHAR path[MAX_PATH], config[MAX_PATH];
     HANDLE file;
-    char *p, *buffer;
+    char *p, *buffer, app[MAX_PATH];
     int i;
     int ret = 1;
     DWORD written, drives = GetLogicalDrives();
@@ -160,21 +164,31 @@ static void start_dosbox( const char *appname, const char *args )
     if (!GetTempPathW( MAX_PATH, path )) return;
     if (!GetTempFileNameW( path, cfgW, 0, config )) return;
     if (!GetCurrentDirectoryW( MAX_PATH, path )) return;
+    if (!GetShortPathNameA( appname, app, MAX_PATH )) return;
+    GetShortPathNameW( path, path, MAX_PATH );
     file = CreateFileW( config, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
     if (file == INVALID_HANDLE_VALUE) return;
 
     buffer = HeapAlloc( GetProcessHeap(), 0, sizeof("[autoexec]") +
+                        sizeof("mount -z c") + sizeof("config -securemode") +
                         25 * (strlen(config_dir) + sizeof("mount c /dosdevices/c:")) +
                         4 * strlenW( path ) +
-                        6 + strlen( appname ) + strlen( args ) + 20 );
+                        6 + strlen( app ) + strlen( args ) + 20 );
     p = buffer;
     p += sprintf( p, "[autoexec]\n" );
-    for (i = 0; i < 25; i++)
+    for (i = 25; i >= 0; i--)
+        if (!(drives & (1 << i)))
+        {
+            p += sprintf( p, "mount -z %c\n", 'a' + i );
+            break;
+        }
+    for (i = 0; i <= 25; i++)
         if (drives & (1 << i))
             p += sprintf( p, "mount %c %s/dosdevices/%c:\n", 'a' + i, config_dir, 'a' + i );
     p += sprintf( p, "%c:\ncd ", path[0] );
     p += WideCharToMultiByte( CP_UNIXCP, 0, path + 2, -1, p, 4 * strlenW(path), NULL, NULL ) - 1;
-    p += sprintf( p, "\n%s %s\n", appname, args );
+    p += sprintf( p, "\nconfig -securemode\n" );
+    p += sprintf( p, "%s %s\n", app, args );
     p += sprintf( p, "exit\n" );
     if (WriteFile( file, buffer, strlen(buffer), &written, NULL ) && written == strlen(buffer))
     {
@@ -285,14 +299,13 @@ static BOOL read_pif_file( HANDLE hFile, char *progname, char *title,
         }
     }
     /* prepare the return data */
-    strncpy( progname, pifheader.program, sizeof(pifheader.program));
-    memcpy( title, pifheader.windowtitle, sizeof(pifheader.windowtitle));
-    title[ sizeof(pifheader.windowtitle) ] = '\0';
+    lstrcpynA( progname, pifheader.program, sizeof(pifheader.program)+1);
+    lstrcpynA( title, pifheader.windowtitle, sizeof(pifheader.windowtitle)+1);
     if( found386rec)
-        strncpy( optparams, pif386rec.optparams, sizeof( pif386rec.optparams));
+        lstrcpynA( optparams, pif386rec.optparams, sizeof( pif386rec.optparams)+1);
     else
-        strncpy( optparams, pifheader.optparams, sizeof(pifheader.optparams));
-    strncpy( startdir, pifheader.startdir, sizeof(pifheader.startdir));
+        lstrcpynA( optparams, pifheader.optparams, sizeof(pifheader.optparams)+1);
+    lstrcpynA( startdir, pifheader.startdir, sizeof(pifheader.startdir)+1);
     *closeonexit = pifheader.hdrflags1 & 0x10;
     *textmode = found386rec ? pif386rec.videoflags & 0x0010
                             : pifheader.hdrflags1 & 0x0002;
@@ -311,8 +324,8 @@ static VOID pif_cmd( char *filename, char *cmdline)
     char buf[128];
     char progname[64];
     char title[31];
-    char optparams[64];
-    char startdir[64];
+    char optparams[65];
+    char startdir[65];
     char *p;
     int closeonexit;
     int textmode;

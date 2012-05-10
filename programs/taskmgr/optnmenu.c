@@ -19,21 +19,13 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-/*
- * options.c
- *
- * Menu item handlers for the options menu.
- */
 
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <tchar.h>
-#include <stdio.h>
-    
+
 #include "taskmgr.h"
 
 void TaskManager_OnOptionsAlwaysOnTop(void)
@@ -48,7 +40,7 @@ void TaskManager_OnOptionsAlwaysOnTop(void)
      * Check or uncheck the always on top menu item
      * and update main window.
      */
-    if ((GetWindowLong(hMainWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0)
+    if ((GetWindowLongW(hMainWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0)
     {
         CheckMenuItem(hOptionsMenu, ID_OPTIONS_ALWAYSONTOP, MF_BYCOMMAND|MF_UNCHECKED);
         TaskManagerSettings.AlwaysOnTop = FALSE;

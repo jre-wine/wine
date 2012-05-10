@@ -20,6 +20,7 @@
 
 #define COBJMACROS
 #define CONST_VTABLE
+#define WIN32_LEAN_AND_MEAN
 
 #include <stdarg.h>
 
@@ -1784,20 +1785,28 @@ static void test_runnable(void)
         { NULL, 0 }
     };
 
+    BOOL ret;
     IOleObject *object = &OleObject;
 
+    /* null argument */
+    ret = OleIsRunning(NULL);
+    ok(ret == FALSE, "got %d\n", ret);
+
     expected_method_list = methods_query_runnable;
-    ok(OleIsRunning(object), "Object should be running\n");
+    ret = OleIsRunning(object);
+    ok(ret == TRUE, "Object should be running\n");
     CHECK_NO_EXTRA_METHODS();
 
     g_isRunning = FALSE;
     expected_method_list = methods_query_runnable;
-    ok(OleIsRunning(object) == FALSE, "Object should not be running\n");
+    ret = OleIsRunning(object);
+    ok(ret == FALSE, "Object should not be running\n");
     CHECK_NO_EXTRA_METHODS();
 
     g_showRunnable = FALSE;  /* QueryInterface(IID_IRunnableObject, ...) will fail */
     expected_method_list = methods_no_runnable;
-    ok(OleIsRunning(object), "Object without IRunnableObject should be running\n");
+    ret = OleIsRunning(object);
+    ok(ret == TRUE, "Object without IRunnableObject should be running\n");
     CHECK_NO_EXTRA_METHODS();
 
     g_isRunning = TRUE;
@@ -1833,13 +1842,13 @@ static const IUnknownVtbl UnknownVtbl =
     Unknown_Release
 };
 
-static IUnknown Unknown = { &UnknownVtbl };
+static IUnknown unknown = { &UnknownVtbl };
 
 static void test_OleLockRunning(void)
 {
     HRESULT hr;
 
-    hr = OleLockRunning((LPUNKNOWN)&Unknown, TRUE, FALSE);
+    hr = OleLockRunning((LPUNKNOWN)&unknown, TRUE, FALSE);
     ok(hr == S_OK, "OleLockRunning failed 0x%08x\n", hr);
 }
 

@@ -70,6 +70,8 @@ static HRESULT (WINAPI *pSHGetItemFromDataObject)(IDataObject*,DATAOBJ_GET_ITEM_
 static HRESULT (WINAPI *pSHGetIDListFromObject)(IUnknown*, PIDLIST_ABSOLUTE*);
 static HRESULT (WINAPI *pSHGetItemFromObject)(IUnknown*,REFIID,void**);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
+static UINT (WINAPI *pGetSystemWow64DirectoryW)(LPWSTR, UINT);
+static HRESULT (WINAPI *pSHCreateDefaultContextMenu)(const DEFCONTEXTMENU*,REFIID,void**);
 
 static WCHAR *make_wstr(const char *str)
 {
@@ -125,6 +127,7 @@ static void init_function_pointers(void)
     MAKEFUNC(SHGetItemFromDataObject);
     MAKEFUNC(SHGetIDListFromObject);
     MAKEFUNC(SHGetItemFromObject);
+    MAKEFUNC(SHCreateDefaultContextMenu);
 #undef MAKEFUNC
 
 #define MAKEFUNC_ORD(f, ord) (p##f = (void*)GetProcAddress(hmod, (LPSTR)(ord)))
@@ -165,7 +168,9 @@ static void init_function_pointers(void)
     hmod = GetModuleHandleA("shlwapi.dll");
     pStrRetToBufW = (void*)GetProcAddress(hmod, "StrRetToBufW");
 
-    pIsWow64Process = (void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsWow64Process");
+    hmod = GetModuleHandleA("kernel32.dll");
+    pIsWow64Process = (void*)GetProcAddress(hmod, "IsWow64Process");
+    pGetSystemWow64DirectoryW = (void*)GetProcAddress(hmod, "GetSystemWow64DirectoryW");
 
     hr = SHGetMalloc(&ppM);
     ok(hr == S_OK, "SHGetMalloc failed %08x\n", hr);
@@ -1773,7 +1778,7 @@ static void test_ITEMIDLIST_format(void) {
             /* WinXP stores a derived 8.3 dos name (LONGER~1.8_3) here. We probably
              * can't implement this correctly, since unix filesystems don't support
              * this nasty short/long filename stuff. So we'll probably stay with our
-             * current habbit of storing the long filename here, which seems to work
+             * current habit of storing the long filename here, which seems to work
              * just fine. */
             todo_wine
             ok(pidlFile->mkid.abID[18] == '~' ||
@@ -1801,6 +1806,7 @@ static void test_ITEMIDLIST_format(void) {
             cbOffset <= pidlFile->mkid.cb - sizeof(struct FileStructW))
         {
             struct FileStructW *pFileStructW = (struct FileStructW *)(((LPBYTE)pidlFile)+cbOffset);
+            WCHAR *name = pFileStructW->wszName;
 
             ok(pidlFile->mkid.cb == cbOffset + pFileStructW->cbLen,
                 "FileStructW's offset and length should add up to the PIDL's length!\n");
@@ -1837,9 +1843,9 @@ static void test_ITEMIDLIST_format(void) {
                     /* TODO: Perform check for date being within one day.*/
                 }
 
-                ok (!lstrcmpW(wszFile[i], pFileStructW->wszName) ||
-                    !lstrcmpW(wszFile[i], (WCHAR *)(pFileStructW->abFooBar2 + 22)) || /* Vista */
-                    !lstrcmpW(wszFile[i], (WCHAR *)(pFileStructW->abFooBar2 + 26)), /* Win7 */
+                ok (!lstrcmpW(wszFile[i], name) ||
+                    !lstrcmpW(wszFile[i], name + 9) || /* Vista */
+                    !lstrcmpW(wszFile[i], name + 11), /* Win7 */
                     "The filename should be stored in unicode at this position!\n");
             }
         }
@@ -2965,7 +2971,7 @@ cleanup:
 /**************************************************************/
 /* IUnknown implementation for counting QueryInterface calls. */
 typedef struct {
-    const IUnknownVtbl *lpVtbl;
+    IUnknown IUnknown_iface;
     struct if_count {
         REFIID id;
         LONG count;
@@ -2973,9 +2979,14 @@ typedef struct {
     LONG unknown;
 } IUnknownImpl;
 
+static inline IUnknownImpl *impl_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, IUnknownImpl, IUnknown_iface);
+}
+
 static HRESULT WINAPI unk_fnQueryInterface(IUnknown *iunk, REFIID riid, void** punk)
 {
-    IUnknownImpl *This = (IUnknownImpl*)iunk;
+    IUnknownImpl *This = impl_from_IUnknown(iunk);
     UINT i, found;
     for(i = found = 0; This->ifaces[i].id != NULL; i++)
     {
@@ -3042,7 +3053,7 @@ static void test_SHGetIDListFromObject(void)
     ok(hres == E_NOINTERFACE, "Got %x\n", hres);
 
     punkimpl = HeapAlloc(GetProcessHeap(), 0, sizeof(IUnknownImpl));
-    punkimpl->lpVtbl = &vt_IUnknown;
+    punkimpl->IUnknown_iface.lpVtbl = &vt_IUnknown;
     punkimpl->ifaces = ifaces;
     punkimpl->unknown = 0;
 
@@ -3213,7 +3224,7 @@ static void test_SHGetItemFromObject(void)
     ok(hres == E_NOINTERFACE, "Got 0x%08x\n", hres);
 
     punkimpl = HeapAlloc(GetProcessHeap(), 0, sizeof(IUnknownImpl));
-    punkimpl->lpVtbl = &vt_IUnknown;
+    punkimpl->IUnknown_iface.lpVtbl = &vt_IUnknown;
     punkimpl->ifaces = ifaces;
     punkimpl->unknown = 0;
 
@@ -3673,7 +3684,7 @@ static void test_ShellItemBindToHandler(void)
     pILFree(pidl_desktop);
 }
 
-void test_ShellItemGetAttributes(void)
+static void test_ShellItemGetAttributes(void)
 {
     IShellItem *psi;
     LPITEMIDLIST pidl_desktop;
@@ -3696,7 +3707,7 @@ void test_ShellItemGetAttributes(void)
     }
     if(FAILED(hr))
     {
-        skip("Skipping tests.");
+        skip("Skipping tests.\n");
         return;
     }
 
@@ -3722,7 +3733,7 @@ static void test_SHParseDisplayName(void)
     WCHAR dirW[MAX_PATH];
     WCHAR nameW[10];
     HRESULT hr;
-    BOOL ret;
+    BOOL ret, is_wow64;
 
     if (!pSHParseDisplayName)
     {
@@ -3769,6 +3780,27 @@ if (0)
     ok(ret == TRUE, "expected equal idls\n");
     pILFree(pidl1);
     pILFree(pidl2);
+
+    /* system32 is not redirected to syswow64 on WOW64 */
+    if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
+    if (is_wow64 && pGetSystemWow64DirectoryW)
+    {
+        UINT len;
+        *dirW = 0;
+        len = GetSystemDirectoryW(dirW, MAX_PATH);
+        ok(len > 0, "GetSystemDirectoryW failed: %u\n", GetLastError());
+        hr = pSHParseDisplayName(dirW, NULL, &pidl1, 0, NULL);
+        ok(hr == S_OK, "failed %08x\n", hr);
+        *dirW = 0;
+        len = pGetSystemWow64DirectoryW(dirW, MAX_PATH);
+        ok(len > 0, "GetSystemWow64DirectoryW failed: %u\n", GetLastError());
+        hr = pSHParseDisplayName(dirW, NULL, &pidl2, 0, NULL);
+        ok(hr == S_OK, "failed %08x\n", hr);
+        ret = pILIsEqual(pidl1, pidl2);
+        ok(ret == FALSE, "expected different idls\n");
+        pILFree(pidl1);
+        pILFree(pidl2);
+    }
 
     IShellFolder_Release(desktop);
 }
@@ -3866,8 +3898,8 @@ static void test_GetUIObject(void)
         ok(hr == S_OK, "Got 0x%08x\n", hr);
         if(SUCCEEDED(hr))
         {
-            hr = IShellFolder_GetUIObjectOf(psf, NULL, 1, (LPCITEMIDLIST*)&pidl_child,
-                                            &IID_IContextMenu, NULL, (void**)&pcm);
+            hr = IShellFolder_GetUIObjectOf(psf, NULL, 1, &pidl_child, &IID_IContextMenu, NULL,
+                                            (void**)&pcm);
             ok(hr == S_OK, "Got 0x%08x\n", hr);
             if(SUCCEEDED(hr))
             {
@@ -4063,7 +4095,7 @@ static HRESULT WINAPI fsbd_GetFindData_nul(IFileSystemBindData *fsbd,
 static HRESULT WINAPI fsbd_GetFindData_junk(IFileSystemBindData *fsbd,
         WIN32_FIND_DATAW *pfd)
 {
-    memset(pfd, 0xdeadbeef, sizeof(WIN32_FIND_DATAW));
+    memset(pfd, 0xef, sizeof(WIN32_FIND_DATAW));
     return S_OK;
 }
 
@@ -4315,16 +4347,23 @@ struct ChNotifyTest {
 };
 
 struct ChNotifyTest *exp_data;
+BOOL test_new_delivery_flag;
 
 static LRESULT CALLBACK testwindow_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
-    UINT signal = (UINT)lparam;
+    LONG signal = (LONG)lparam;
 
     switch(msg){
     case WM_USER_NOTIFY:
-        if(exp_data->missing_events > 0){
+        if(exp_data->missing_events > 0) {
             WCHAR *path1, *path2;
-            LPCITEMIDLIST *pidls = (LPCITEMIDLIST*)wparam;
+            LPITEMIDLIST *pidls = (LPITEMIDLIST*)wparam;
+            HANDLE hLock = NULL;
+
+            if(test_new_delivery_flag) {
+                hLock = SHChangeNotification_Lock((HANDLE)wparam, lparam, &pidls, &signal);
+                ok(hLock != NULL, "SHChangeNotification_Lock returned NULL\n");
+            }
 
             ok(exp_data->signal == signal,
                     "%s: expected notification type %x, got: %x\n",
@@ -4339,6 +4378,9 @@ static LRESULT CALLBACK testwindow_wndproc(HWND hwnd, UINT msg, WPARAM wparam, L
             HeapFree(GetProcessHeap(), 0, path2);
 
             exp_data->missing_events--;
+
+            if(test_new_delivery_flag)
+                SHChangeNotification_Unlock(hLock);
         }else
             ok(0, "Didn't expect a WM_USER_NOTIFY message (event: %x)\n", signal);
         return 0;
@@ -4380,7 +4422,7 @@ static void do_events(void)
     trace("%s: took %d tries\n", exp_data->id, c);
 }
 
-static void test_SHChangeNotify(void)
+static void test_SHChangeNotify(BOOL test_new_delivery)
 {
     HWND wnd;
     ULONG notifyID, i;
@@ -4390,10 +4432,14 @@ static void test_SHChangeNotify(void)
     const CHAR root_dirA[] = "C:\\shell32_cn_test";
     const WCHAR root_dirW[] = {'C',':','\\','s','h','e','l','l','3','2','_','c','n','_','t','e','s','t',0};
 
+    trace("SHChangeNotify tests (%x)\n", test_new_delivery);
+
     CreateDirectoryW(NULL, NULL);
     has_unicode = !(GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
 
-    register_testwindow_class();
+    test_new_delivery_flag = test_new_delivery;
+    if(!test_new_delivery)
+        register_testwindow_class();
 
     wnd = CreateWindowExA(0, testwindow_class, testwindow_class, 0,
             CW_USEDEFAULT, CW_USEDEFAULT, 130, 105,
@@ -4411,7 +4457,7 @@ static void test_SHChangeNotify(void)
     ok(hr == S_OK, "SHILCreateFromPath failed: 0x%08x\n", hr);
     entries[0].fRecursive = TRUE;
 
-    notifyID = SHChangeNotifyRegister(wnd, SHCNRF_ShellLevel,
+    notifyID = SHChangeNotifyRegister(wnd, !test_new_delivery ? SHCNRF_ShellLevel : SHCNRF_ShellLevel|SHCNRF_NewDelivery,
             SHCNE_ALLEVENTS, WM_USER_NOTIFY, 1, entries);
     ok(notifyID != 0, "Failed to register a window for change notifications\n");
 
@@ -4449,6 +4495,93 @@ static void test_SHChangeNotify(void)
     ok(br == TRUE, "RemoveDirectory failed: %d\n", GetLastError());
 }
 
+static void test_SHCreateDefaultContextMenu(void)
+{
+    HKEY keys[16];
+    WCHAR path[MAX_PATH];
+    IShellFolder *desktop,*folder;
+    IPersistFolder2 *persist;
+    IContextMenu *cmenu;
+    LONG status;
+    LPITEMIDLIST pidlFolder, pidl_child, pidl;
+    DEFCONTEXTMENU cminfo;
+    HRESULT hr;
+    UINT i;
+    const WCHAR filename[] =
+        {'\\','t','e','s','t','d','i','r','\\','t','e','s','t','1','.','t','x','t',0};
+    if(!pSHCreateDefaultContextMenu)
+    {
+        win_skip("SHCreateDefaultContextMenu missing.\n");
+        return;
+    }
+
+    if(!pSHBindToParent)
+    {
+        skip("SHBindToParent missing.\n");
+        return;
+    }
+
+    GetCurrentDirectoryW(MAX_PATH, path);
+    if(!lstrlenW(path))
+    {
+        skip("GetCurrentDirectoryW returned an empty string.\n");
+        return;
+    }
+    lstrcatW(path, filename);
+    SHGetDesktopFolder(&desktop);
+
+    CreateFilesFolders();
+
+    hr = IShellFolder_ParseDisplayName(desktop, NULL, NULL, path, NULL, &pidl, 0);
+    ok(hr == S_OK || broken(hr == E_FAIL) /* WinME */, "Got 0x%08x\n", hr);
+    if(SUCCEEDED(hr))
+    {
+
+        hr = pSHBindToParent(pidl, &IID_IShellFolder, (void**)&folder, (LPCITEMIDLIST*)&pidl_child);
+        ok(hr == S_OK, "Got 0x%08x\n", hr);
+
+        IShellFolder_QueryInterface(folder,&IID_IPersistFolder2,(void**)&persist);
+        IPersistFolder2_GetCurFolder(persist,&pidlFolder);
+        IPersistFolder2_Release(persist);
+        if(SUCCEEDED(hr))
+        {
+
+            cminfo.hwnd=NULL;
+            cminfo.pcmcb=NULL;
+            cminfo.psf=folder;
+            cminfo.pidlFolder=NULL;
+            cminfo.apidl=(LPCITEMIDLIST*)&pidl_child;
+            cminfo.cidl=1;
+            cminfo.aKeys=NULL;
+            cminfo.cKeys=0;
+            cminfo.punkAssociationInfo=NULL;
+            hr = pSHCreateDefaultContextMenu(&cminfo,&IID_IContextMenu,(void**)&cmenu);
+            ok(hr==S_OK,"Got 0x%08x\n", hr);
+            IContextMenu_Release(cmenu);
+            cminfo.pidlFolder=pidlFolder;
+            hr = pSHCreateDefaultContextMenu(&cminfo,&IID_IContextMenu,(void**)&cmenu);
+            ok(hr==S_OK,"Got 0x%08x\n", hr);
+            IContextMenu_Release(cmenu);
+            status = RegOpenKeyExA(HKEY_CLASSES_ROOT,"*",0,KEY_READ,keys);
+            if(status==ERROR_SUCCESS){
+                for(i=1;i<16;i++)
+                    keys[i]=keys[0];
+                cminfo.aKeys=keys;
+                cminfo.cKeys=16;
+                hr = pSHCreateDefaultContextMenu(&cminfo,&IID_IContextMenu,(void**)&cmenu);
+                RegCloseKey(keys[0]);
+                ok(hr==S_OK,"Got 0x%08x\n", hr);
+                IContextMenu_Release(cmenu);
+            }
+        }
+        ILFree(pidlFolder);
+        IShellFolder_Release(folder);
+    }
+    IShellFolder_Release(desktop);
+    ILFree(pidl);
+    Cleanup();
+}
+
 START_TEST(shlfolder)
 {
     init_function_pointers();
@@ -4480,9 +4613,11 @@ START_TEST(shlfolder)
     test_SHGetIDListFromObject();
     test_SHGetItemFromObject();
     test_ShellItemCompare();
-    test_SHChangeNotify();
+    test_SHChangeNotify(FALSE);
+    test_SHChangeNotify(TRUE);
     test_ShellItemBindToHandler();
     test_ShellItemGetAttributes();
+    test_SHCreateDefaultContextMenu();
 
     OleUninitialize();
 }

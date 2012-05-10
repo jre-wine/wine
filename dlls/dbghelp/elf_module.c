@@ -42,9 +42,6 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#ifndef PATH_MAX
-#define PATH_MAX MAX_PATH
-#endif
 
 #include "dbghelp_private.h"
 
@@ -294,6 +291,7 @@ static BOOL elf_map_file(struct elf_map_file_data* emfd, struct image_file_map* 
         filename = NULL;
         break;
     default: assert(0);
+        return FALSE;
     }
 
     elf_reset_file_map(fmap);
@@ -326,6 +324,7 @@ static BOOL elf_map_file(struct elf_map_file_data* emfd, struct image_file_map* 
 #else
     if (fmap->u.elf.elfhdr.e_ident[EI_CLASS] != ELFCLASS32) goto done;
 #endif
+    fmap->addr_size = fmap->u.elf.elfhdr.e_ident[EI_CLASS] == ELFCLASS64 ? 64 : 32;
     fmap->u.elf.sect = HeapAlloc(GetProcessHeap(), 0,
                                  fmap->u.elf.elfhdr.e_shnum * sizeof(fmap->u.elf.sect[0]));
     if (!fmap->u.elf.sect) goto done;
@@ -732,7 +731,7 @@ static int elf_new_wine_thunks(struct module* module, const struct hash_table* h
             struct location loc;
 
             symt = symt_find_nearest(module, addr);
-            if (symt && !symt_get_info(module, &symt->symt, TI_GET_ADDRESS, &ref_addr))
+            if (symt && !symt_get_address(&symt->symt, &ref_addr))
                 ref_addr = addr;
             if (!symt || addr != ref_addr)
             {
@@ -762,32 +761,10 @@ static int elf_new_wine_thunks(struct module* module, const struct hash_table* h
                  * we are adding new symbols, but as we're parsing a symbol table
                  * (hopefully without duplicate symbols) we delay rebuilding the sorted
                  * module table until we're done with the symbol table
-                 * Otherwise, as we intertwine symbols's add and lookup, performance
+                 * Otherwise, as we intertwine symbols' add and lookup, performance
                  * is rather bad
                  */
                 module->sortlist_valid = TRUE;
-            }
-            else if (strcmp(ste->ht_elt.name, symt->hash_elt.name))
-            {
-                ULONG64 xaddr = 0, xsize = 0;
-                DWORD   kind = -1;
-
-                symt_get_info(module, &symt->symt, TI_GET_ADDRESS,  &xaddr);
-                symt_get_info(module, &symt->symt, TI_GET_LENGTH,   &xsize);
-                symt_get_info(module, &symt->symt, TI_GET_DATAKIND, &kind);
-
-                /* If none of symbols has a correct size, we consider they are both markers
-                 * Hence, we can silence this warning
-                 * Also, we check that we don't have two symbols, one local, the other 
-                 * global which is legal
-                 */
-                if ((xsize || ste->symp->st_size) &&
-                    (kind == (ELF32_ST_BIND(ste->symp->st_info) == STB_LOCAL) ? DataIsFileStatic : DataIsGlobal))
-                    FIXME("Duplicate in %s: %s<%08lx-%08x> %s<%s-%s>\n",
-                          debugstr_w(module->module.ModuleName),
-                          ste->ht_elt.name, addr, (unsigned int)ste->symp->st_size,
-                          symt->hash_elt.name,
-                          wine_dbgstr_longlong(xaddr), wine_dbgstr_longlong(xsize));
             }
         }
     }
@@ -1012,7 +989,6 @@ static BOOL elf_load_debug_info_from_map(struct module* module,
                     WARN("Couldn't correctly read stabs\n");
                 ret = ret || lret;
             }
-            else lret = FALSE;
             image_unmap_section(&stab_sect);
             image_unmap_section(&stabstr_sect);
         }
@@ -1262,7 +1238,6 @@ static BOOL elf_load_file_from_path(HANDLE hProcess,
 	ret = elf_load_file(hProcess, fn, load_offset, dyn_addr, elf_info);
 	HeapFree(GetProcessHeap(), 0, fn);
 	if (ret) break;
-	s = (t) ? (t+1) : NULL;
     }
 
     HeapFree(GetProcessHeap(), 0, pathW);
@@ -1308,7 +1283,7 @@ static BOOL elf_load_file_from_dll_path(HANDLE hProcess,
 /******************************************************************
  *		elf_search_auxv
  *
- * locate some a value from the debuggee auxillary vector
+ * locate some a value from the debuggee auxiliary vector
  */
 static BOOL elf_search_auxv(const struct process* pcs, unsigned type, unsigned long* val)
 {
@@ -1330,7 +1305,7 @@ static BOOL elf_search_auxv(const struct process* pcs, unsigned type, unsigned l
         return FALSE;
     }
     /* walk through envp[] */
-    /* envp[] strings are located after the auxillary vector, so protect the walk */
+    /* envp[] strings are located after the auxiliary vector, so protect the walk */
     str_max = (void*)(DWORD_PTR)~0L;
     while (ReadProcessMemory(pcs->handle, addr, &str, sizeof(str), NULL) &&
            (addr = (void*)((DWORD_PTR)addr + sizeof(str))) != NULL && str != NULL)

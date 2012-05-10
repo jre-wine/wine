@@ -111,16 +111,6 @@ static void test_null_source(void)
         len, GLE);
 }
 
-/* lstrcmpW is not supported on Win9x! */
-static int mylstrcmpW(const WCHAR* str1, const WCHAR* str2)
-{
-    while (*str1 && *str1==*str2) {
-        str1++;
-        str2++;
-    }
-    return *str1-*str2;
-}
-
 static void test_negative_source_length(void)
 {
     int len;
@@ -139,7 +129,7 @@ static void test_negative_source_length(void)
     SetLastError( 0xdeadbeef );
     memset(bufW,'x',sizeof(bufW));
     len = MultiByteToWideChar(CP_ACP, 0, "foobar", -2002, bufW, 10);
-    ok(len == 7 && !mylstrcmpW(bufW, foobarW) && GetLastError() == 0xdeadbeef,
+    ok(len == 7 && !lstrcmpW(bufW, foobarW) && GetLastError() == 0xdeadbeef,
        "MultiByteToWideChar(-2002): len=%d error=%u\n", len, GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -221,8 +211,8 @@ static void test_string_conversion(LPBOOL bUsedDefaultChar)
     int ret;
     WCHAR wc1 = 228;                           /* Western Windows-1252 character */
     WCHAR wc2 = 1088;                          /* Russian Windows-1251 character not displayable for Windows-1252 */
-    WCHAR wcs[5] = {'T', 'h', 1088, 'i', 0};   /* String with ASCII characters and a Russian character */
-    WCHAR dbwcs[3] = {28953, 25152, 0};        /* String with Chinese (codepage 950) characters */
+    static const WCHAR wcs[] = {'T', 'h', 1088, 'i', 0}; /* String with ASCII characters and a Russian character */
+    static const WCHAR dbwcs[] = {28953, 25152, 0}; /* String with Chinese (codepage 950) characters */
 
     SetLastError(0xdeadbeef);
     ret = WideCharToMultiByte(1252, 0, &wc1, 1, &mbc, 1, NULL, bUsedDefaultChar);
@@ -354,6 +344,56 @@ static void test_string_conversion(LPBOOL bUsedDefaultChar)
     ok(GetLastError() == 0xdeadbeef, "GetLastError() is %u\n", GetLastError());
 }
 
+static void test_undefined_byte_char(void)
+{
+    static const struct tag_testset {
+        INT codepage;
+        LPCSTR str;
+        BOOL is_error;
+    } testset[] = {
+        {  874, "\xdd", TRUE },
+        {  932, "\xfe", TRUE },
+        {  932, "\x80", FALSE },
+        {  936, "\xff", TRUE },
+        {  949, "\xff", TRUE },
+        {  950, "\xff", TRUE },
+        { 1252, "\x90", FALSE },
+        { 1253, "\xaa", TRUE },
+        { 1255, "\xff", TRUE },
+        { 1257, "\xa5", TRUE },
+    };
+    INT i, ret;
+
+    for (i = 0; i < (sizeof(testset) / sizeof(testset[0])); i++) {
+        if (! IsValidCodePage(testset[i].codepage))
+        {
+            skip("Codepage %d not available\n", testset[i].codepage);
+            continue;
+        }
+
+        SetLastError(0xdeadbeef);
+        ret = MultiByteToWideChar(testset[i].codepage, MB_ERR_INVALID_CHARS,
+                                  testset[i].str, -1, NULL, 0);
+        if (testset[i].is_error) {
+            ok(ret == 0 && GetLastError() == ERROR_NO_UNICODE_TRANSLATION,
+               "ret is %d, GetLastError is %u (cp %d)\n",
+               ret, GetLastError(), testset[i].codepage);
+        }
+        else {
+            ok(ret == strlen(testset[i].str)+1 && GetLastError() == 0xdeadbeef,
+               "ret is %d, GetLastError is %u (cp %d)\n",
+               ret, GetLastError(), testset[i].codepage);
+        }
+
+        SetLastError(0xdeadbeef);
+        ret = MultiByteToWideChar(testset[i].codepage, 0,
+                                  testset[i].str, -1, NULL, 0);
+        ok(ret == strlen(testset[i].str)+1 && GetLastError() == 0xdeadbeef,
+           "ret is %d, GetLastError is %u (cp %d)\n",
+           ret, GetLastError(), testset[i].codepage);
+    }
+}
+
 START_TEST(codepage)
 {
     BOOL bUsedDefaultChar;
@@ -367,4 +407,6 @@ START_TEST(codepage)
     /* WideCharToMultiByte has two code paths, test both here */
     test_string_conversion(NULL);
     test_string_conversion(&bUsedDefaultChar);
+
+    test_undefined_byte_char();
 }

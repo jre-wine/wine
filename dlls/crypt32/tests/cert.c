@@ -18,9 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdarg.h>
+
 #include <windef.h>
 #include <winbase.h>
 #include <winreg.h>
@@ -632,6 +632,51 @@ static void testCertProperties(void)
         ok(!memcmp(hashProperty, selfSignedSignatureHash, size),
          "unexpected value\n");
     CertFreeCertificateContext(context);
+}
+
+static void testCreateCert(void)
+{
+    PCCERT_CONTEXT cert, enumCert;
+    DWORD count, size;
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    cert = CertCreateCertificateContext(0, NULL, 0);
+    ok(!cert && GetLastError() == E_INVALIDARG,
+     "expected E_INVALIDARG, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    cert = CertCreateCertificateContext(0, selfSignedCert,
+     sizeof(selfSignedCert));
+    ok(!cert && GetLastError() == E_INVALIDARG,
+     "expected E_INVALIDARG, got %08x\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    cert = CertCreateCertificateContext(X509_ASN_ENCODING, NULL, 0);
+    ok(!cert &&
+     (GetLastError() == CRYPT_E_ASN1_EOD ||
+     broken(GetLastError() == OSS_MORE_INPUT /* NT4 */)),
+     "expected CRYPT_E_ASN1_EOD, got %08x\n", GetLastError());
+
+    cert = CertCreateCertificateContext(X509_ASN_ENCODING,
+     selfSignedCert, sizeof(selfSignedCert));
+    ok(cert != NULL, "creating cert failed: %08x\n", GetLastError());
+    /* Even in-memory certs are expected to have a store associated with them */
+    todo_wine
+    ok(cert->hCertStore != NULL, "expected created cert to have a store\n");
+    /* The cert doesn't have the archived property set (which would imply it
+     * doesn't show up in enumerations.)
+     */
+    size = 0;
+    ret = CertGetCertificateContextProperty(cert, CERT_ARCHIVED_PROP_ID,
+     NULL, &size);
+    ok(!ret && GetLastError() == CRYPT_E_NOT_FOUND,
+       "expected CRYPT_E_NOT_FOUND, got %08x\n", GetLastError());
+    /* Strangely, enumerating the certs in the store finds none. */
+    enumCert = NULL;
+    count = 0;
+    while ((enumCert = CertEnumCertificatesInStore(cert->hCertStore, enumCert)))
+        count++;
+    ok(!count, "expected 0, got %d\n", count);
+    CertFreeCertificateContext(cert);
 }
 
 static void testDupCert(void)
@@ -1720,6 +1765,73 @@ static void testVerifyCertSig(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
     DWORD size = 0;
     BOOL ret;
 
+    if (!pCryptEncodeObjectEx)
+    {
+        win_skip("no CryptEncodeObjectEx support\n");
+        return;
+    }
+    ret = CryptVerifyCertificateSignature(0, 0, NULL, 0, NULL);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+    ret = CryptVerifyCertificateSignature(csp, 0, NULL, 0, NULL);
+    ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+     "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
+    ret = CryptVerifyCertificateSignature(csp, X509_ASN_ENCODING, NULL, 0,
+     NULL);
+    ok(!ret && (GetLastError() == CRYPT_E_ASN1_EOD ||
+     GetLastError() == OSS_BAD_ARG),
+     "Expected CRYPT_E_ASN1_EOD or OSS_BAD_ARG, got %08x\n", GetLastError());
+    info.ToBeSigned.cbData = toBeSigned->cbData;
+    info.ToBeSigned.pbData = toBeSigned->pbData;
+    info.SignatureAlgorithm.pszObjId = (LPSTR)sigOID;
+    info.SignatureAlgorithm.Parameters.cbData = 0;
+    info.Signature.cbData = sigLen;
+    info.Signature.pbData = (BYTE *)sig;
+    info.Signature.cUnusedBits = 0;
+    ret = pCryptEncodeObjectEx(X509_ASN_ENCODING, X509_CERT, &info,
+     CRYPT_ENCODE_ALLOC_FLAG, NULL, &cert, &size);
+    ok(ret, "CryptEncodeObjectEx failed: %08x\n", GetLastError());
+    if (cert)
+    {
+        PCERT_PUBLIC_KEY_INFO pubKeyInfo = NULL;
+        DWORD pubKeySize;
+
+        if (0)
+        {
+            /* Crashes prior to Vista */
+            ret = CryptVerifyCertificateSignature(csp, X509_ASN_ENCODING,
+             cert, size, NULL);
+        }
+        CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE, X509_ASN_ENCODING,
+         (LPSTR)sigOID, 0, NULL, NULL, &pubKeySize);
+        pubKeyInfo = HeapAlloc(GetProcessHeap(), 0, pubKeySize);
+        if (pubKeyInfo)
+        {
+            ret = CryptExportPublicKeyInfoEx(csp, AT_SIGNATURE,
+             X509_ASN_ENCODING, (LPSTR)sigOID, 0, NULL, pubKeyInfo,
+             &pubKeySize);
+            ok(ret, "CryptExportKey failed: %08x\n", GetLastError());
+            if (ret)
+            {
+                ret = CryptVerifyCertificateSignature(csp, X509_ASN_ENCODING,
+                 cert, size, pubKeyInfo);
+                ok(ret, "CryptVerifyCertificateSignature failed: %08x\n",
+                 GetLastError());
+            }
+            HeapFree(GetProcessHeap(), 0, pubKeyInfo);
+        }
+        LocalFree(cert);
+    }
+}
+
+static void testVerifyCertSigEx(HCRYPTPROV csp, const CRYPT_DATA_BLOB *toBeSigned,
+ LPCSTR sigOID, const BYTE *sig, DWORD sigLen)
+{
+    CERT_SIGNED_CONTENT_INFO info;
+    LPBYTE cert = NULL;
+    DWORD size = 0;
+    BOOL ret;
+
     if (!pCryptVerifyCertificateSignatureEx)
     {
         win_skip("no CryptVerifyCertificateSignatureEx support\n");
@@ -1830,6 +1942,7 @@ static void testCertSigs(void)
 
     testSignCert(csp, &toBeSigned, szOID_RSA_SHA1RSA, sig, &sigSize);
     testVerifyCertSig(csp, &toBeSigned, szOID_RSA_SHA1RSA, sig, sigSize);
+    testVerifyCertSigEx(csp, &toBeSigned, szOID_RSA_SHA1RSA, sig, sigSize);
 
     CryptReleaseContext(csp, 0);
     ret = pCryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
@@ -3208,6 +3321,11 @@ static void testVerifyRevocation(void)
     SetLastError(0xdeadbeef);
     ret = CertVerifyRevocation(X509_ASN_ENCODING, CERT_CONTEXT_REVOCATION_TYPE,
      1, (void **)certs, 0, NULL, &status);
+    if (!ret && GetLastError() == ERROR_FILE_NOT_FOUND)
+    {
+        win_skip("CERT_CONTEXT_REVOCATION_TYPE unsupported, skipping\n");
+        return;
+    }
     ok(!ret && GetLastError() == CRYPT_E_NO_REVOCATION_CHECK,
      "expected CRYPT_E_NO_REVOCATION_CHECK, got %08x\n", GetLastError());
     ok(status.dwError == CRYPT_E_NO_REVOCATION_CHECK,
@@ -3634,6 +3752,7 @@ START_TEST(cert)
 
     testAddCert();
     testCertProperties();
+    testCreateCert();
     testDupCert();
     testFindCert();
     testGetSubjectCert();

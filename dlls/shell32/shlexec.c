@@ -269,7 +269,12 @@ static BOOL SHELL_ArgifyW(WCHAR* out, int len, const WCHAR* fmt, const WCHAR* lp
         }
     }
 
-    *res = '\0';
+    used ++;
+    if (res - out < len)
+        *res = '\0';
+    else
+        out[len-1] = '\0';
+
     TRACE("used %i of %i space\n",used,len);
     if (out_len)
         *out_len = used;
@@ -776,19 +781,32 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
     static const WCHAR wTopic[] = {'\\','t','o','p','i','c',0};
     WCHAR       regkey[256];
     WCHAR *     endkey = regkey + strlenW(key);
-    WCHAR       app[256], topic[256], ifexec[256], res[256];
+    WCHAR       app[256], topic[256], ifexec[256], static_res[256];
+    WCHAR *     dynamic_res=NULL;
+    WCHAR *     res;
     LONG        applen, topiclen, ifexeclen;
     WCHAR *     exec;
     DWORD       ddeInst = 0;
     DWORD       tid;
-    DWORD       resultLen;
+    DWORD       resultLen, endkeyLen;
     HSZ         hszApp, hszTopic;
     HCONV       hConv;
     HDDEDATA    hDdeData;
     unsigned    ret = SE_ERR_NOASSOC;
     BOOL unicode = !(GetVersion() & 0x80000000);
 
+    if (strlenW(key) + 1 > sizeof(regkey) / sizeof(regkey[0]))
+    {
+        FIXME("input parameter %s larger than buffer\n", debugstr_w(key));
+        return 2;
+    }
     strcpyW(regkey, key);
+    endkeyLen = sizeof(regkey) / sizeof(regkey[0]) - (endkey - regkey);
+    if (strlenW(wApplication) + 1 > endkeyLen)
+    {
+        FIXME("endkey %s overruns buffer\n", debugstr_w(wApplication));
+        return 2;
+    }
     strcpyW(endkey, wApplication);
     applen = sizeof(app);
     if (RegQueryValueW(HKEY_CLASSES_ROOT, regkey, app, &applen) != ERROR_SUCCESS)
@@ -802,6 +820,12 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
         /* Get application command from start string and find filename of application */
         if (*start == '"')
         {
+            if (strlenW(start + 1) + 1 > sizeof(command) / sizeof(command[0]))
+            {
+                FIXME("size of input parameter %s larger than buffer\n",
+                      debugstr_w(start + 1));
+                return 2;
+            }
             strcpyW(command, start+1);
             if ((ptr = strchrW(command, '"')))
                 *ptr = 0;
@@ -828,6 +852,11 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
             ERR("Unable to find application path for command %s\n", debugstr_w(start));
             return ERROR_ACCESS_DENIED;
         }
+        if (strlenW(ptr) + 1 > sizeof(app) / sizeof(app[0]))
+        {
+            FIXME("size of found path %s larger than buffer\n", debugstr_w(ptr));
+            return 2;
+        }
         strcpyW(app, ptr);
 
         /* Remove extensions (including .so) */
@@ -841,6 +870,11 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
         *ptr = 0;
     }
 
+    if (strlenW(wTopic) + 1 > endkeyLen)
+    {
+        FIXME("endkey %s overruns buffer\n", debugstr_w(wTopic));
+        return 2;
+    }
     strcpyW(endkey, wTopic);
     topiclen = sizeof(topic);
     if (RegQueryValueW(HKEY_CLASSES_ROOT, regkey, topic, &topiclen) != ERROR_SUCCESS)
@@ -883,6 +917,11 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
             SetLastError(ERROR_DDE_FAIL);
             return 30; /* whatever */
         }
+        if (strlenW(wIfexec) + 1 > endkeyLen)
+        {
+            FIXME("endkey %s overruns buffer\n", debugstr_w(wIfexec));
+            return 2;
+        }
         strcpyW(endkey, wIfexec);
         ifexeclen = sizeof(ifexec);
         if (RegQueryValueW(HKEY_CLASSES_ROOT, regkey, ifexec, &ifexeclen) == ERROR_SUCCESS)
@@ -891,9 +930,14 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
         }
     }
 
-    SHELL_ArgifyW(res, sizeof(res)/sizeof(WCHAR), exec, lpFile, pidl, szCommandline, &resultLen);
-    if (resultLen > sizeof(res)/sizeof(WCHAR))
-        ERR("Argify buffer not large enough, truncated\n");
+    SHELL_ArgifyW(static_res, sizeof(static_res)/sizeof(WCHAR), exec, lpFile, pidl, szCommandline, &resultLen);
+    if (resultLen > sizeof(static_res)/sizeof(WCHAR))
+    {
+        res = dynamic_res = HeapAlloc(GetProcessHeap(), 0, resultLen * sizeof(WCHAR));
+        SHELL_ArgifyW(dynamic_res, resultLen, exec, lpFile, pidl, szCommandline, NULL);
+    }
+    else
+        res = static_res;
     TRACE("%s %s => %s\n", debugstr_w(exec), debugstr_w(lpFile), debugstr_w(res));
 
     /* It's documented in the KB 330337 that IE has a bug and returns
@@ -916,6 +960,8 @@ static unsigned dde_connect(const WCHAR* key, const WCHAR* start, WCHAR* ddeexec
     else
         WARN("DdeClientTransaction failed with error %04x\n", DdeGetLastError(ddeInst));
     ret = 33;
+
+    HeapFree(GetProcessHeap(), 0, dynamic_res);
 
     DdeDisconnect(hConv);
 
@@ -1471,7 +1517,7 @@ static UINT_PTR SHELL_execute_url( LPCWSTR lpFile, LPCWSTR wFile, LPCWSTR wcmd, 
     TRACE("Got URL: %s\n", debugstr_w(lpFile));
     /* Looking for ...protocol\shell\lpOperation\command */
     len = iSize + lstrlenW(wShell) + lstrlenW(wCommand) + 1;
-    if (psei->lpVerb)
+    if (psei->lpVerb && *psei->lpVerb)
         len += lstrlenW(psei->lpVerb);
     else
         len += lstrlenW(wszOpen);
@@ -1479,7 +1525,7 @@ static UINT_PTR SHELL_execute_url( LPCWSTR lpFile, LPCWSTR wFile, LPCWSTR wcmd, 
     memcpy(lpstrProtocol, lpFile, iSize*sizeof(WCHAR));
     lpstrProtocol[iSize] = '\0';
     strcatW(lpstrProtocol, wShell);
-    strcatW(lpstrProtocol, psei->lpVerb? psei->lpVerb: wszOpen);
+    strcatW(lpstrProtocol, psei->lpVerb && *psei->lpVerb ? psei->lpVerb: wszOpen);
     strcatW(lpstrProtocol, wCommand);
 
     /* Remove File Protocol from lpFile */
@@ -1751,6 +1797,7 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
 
 	    /* terminate previous command string after the quote character */
 	    *end = '\0';
+            lpFile = wfileName;
 	}
 	else
 	{
@@ -1781,12 +1828,10 @@ static BOOL SHELL_execute( LPSHELLEXECUTEINFOW sei, SHELL_ExecuteW32 execfunc )
 		}
 	    }
 
-           lstrcpynW(wfileName, sei_tmp.lpFile,sizeof(wfileName)/sizeof(WCHAR));
+            lpFile = sei_tmp.lpFile;
 	}
     } else
-       lstrcpynW(wfileName, sei_tmp.lpFile,sizeof(wfileName)/sizeof(WCHAR));
-
-    lpFile = wfileName;
+        lpFile = sei_tmp.lpFile;
 
     wcmd = wcmdBuffer;
     len = lstrlenW(wszApplicationName) + 1;

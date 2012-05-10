@@ -291,6 +291,8 @@ DECL_HANDLER(get_thread_desktop);
 DECL_HANDLER(set_thread_desktop);
 DECL_HANDLER(enum_desktop);
 DECL_HANDLER(set_user_object_info);
+DECL_HANDLER(register_hotkey);
+DECL_HANDLER(unregister_hotkey);
 DECL_HANDLER(attach_thread_input);
 DECL_HANDLER(get_thread_input);
 DECL_HANDLER(get_last_input_time);
@@ -354,6 +356,8 @@ DECL_HANDLER(set_window_layered_info);
 DECL_HANDLER(alloc_user_handle);
 DECL_HANDLER(free_user_handle);
 DECL_HANDLER(set_cursor);
+DECL_HANDLER(get_suspend_context);
+DECL_HANDLER(set_suspend_context);
 
 #ifdef WANT_REQUEST_HANDLERS
 
@@ -540,6 +544,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_set_thread_desktop,
     (req_handler)req_enum_desktop,
     (req_handler)req_set_user_object_info,
+    (req_handler)req_register_hotkey,
+    (req_handler)req_unregister_hotkey,
     (req_handler)req_attach_thread_input,
     (req_handler)req_get_thread_input,
     (req_handler)req_get_last_input_time,
@@ -603,6 +609,8 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_alloc_user_handle,
     (req_handler)req_free_user_handle,
     (req_handler)req_set_cursor,
+    (req_handler)req_get_suspend_context,
+    (req_handler)req_set_suspend_context,
 };
 
 C_ASSERT( sizeof(affinity_t) == 8 );
@@ -751,7 +759,7 @@ C_ASSERT( FIELD_OFFSET(struct resume_thread_request, handle) == 12 );
 C_ASSERT( sizeof(struct resume_thread_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct resume_thread_reply, count) == 8 );
 C_ASSERT( sizeof(struct resume_thread_reply) == 16 );
-C_ASSERT( FIELD_OFFSET(struct load_dll_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct load_dll_request, mapping) == 12 );
 C_ASSERT( FIELD_OFFSET(struct load_dll_request, base) == 16 );
 C_ASSERT( FIELD_OFFSET(struct load_dll_request, name) == 24 );
 C_ASSERT( FIELD_OFFSET(struct load_dll_request, size) == 32 );
@@ -1383,7 +1391,11 @@ C_ASSERT( FIELD_OFFSET(struct send_hardware_message_request, input) == 16 );
 C_ASSERT( FIELD_OFFSET(struct send_hardware_message_request, flags) == 48 );
 C_ASSERT( sizeof(struct send_hardware_message_request) == 56 );
 C_ASSERT( FIELD_OFFSET(struct send_hardware_message_reply, wait) == 8 );
-C_ASSERT( sizeof(struct send_hardware_message_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct send_hardware_message_reply, prev_x) == 12 );
+C_ASSERT( FIELD_OFFSET(struct send_hardware_message_reply, prev_y) == 16 );
+C_ASSERT( FIELD_OFFSET(struct send_hardware_message_reply, new_x) == 20 );
+C_ASSERT( FIELD_OFFSET(struct send_hardware_message_reply, new_y) == 24 );
+C_ASSERT( sizeof(struct send_hardware_message_reply) == 32 );
 C_ASSERT( FIELD_OFFSET(struct get_message_request, flags) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_message_request, get_win) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_message_request, get_first) == 20 );
@@ -1469,21 +1481,23 @@ C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, access) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, attributes) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, rootdir) == 20 );
 C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, options) == 24 );
-C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, maxinstances) == 28 );
-C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, outsize) == 32 );
-C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, insize) == 36 );
-C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, timeout) == 40 );
-C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, flags) == 48 );
-C_ASSERT( sizeof(struct create_named_pipe_request) == 56 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, sharing) == 28 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, maxinstances) == 32 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, outsize) == 36 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, insize) == 40 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, timeout) == 48 );
+C_ASSERT( FIELD_OFFSET(struct create_named_pipe_request, flags) == 56 );
+C_ASSERT( sizeof(struct create_named_pipe_request) == 64 );
 C_ASSERT( FIELD_OFFSET(struct create_named_pipe_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_named_pipe_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_named_pipe_info_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, flags) == 8 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, maxinstances) == 12 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, instances) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, outsize) == 20 );
-C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, insize) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, sharing) == 12 );
+C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, maxinstances) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, instances) == 20 );
+C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, outsize) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_named_pipe_info_reply, insize) == 28 );
 C_ASSERT( sizeof(struct get_named_pipe_info_reply) == 32 );
 C_ASSERT( FIELD_OFFSET(struct create_window_request, parent) == 12 );
 C_ASSERT( FIELD_OFFSET(struct create_window_request, owner) == 16 );
@@ -1701,6 +1715,21 @@ C_ASSERT( sizeof(struct set_user_object_info_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_user_object_info_reply, is_desktop) == 8 );
 C_ASSERT( FIELD_OFFSET(struct set_user_object_info_reply, old_obj_flags) == 12 );
 C_ASSERT( sizeof(struct set_user_object_info_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_request, window) == 12 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_request, id) == 16 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_request, flags) == 20 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_request, vkey) == 24 );
+C_ASSERT( sizeof(struct register_hotkey_request) == 32 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_reply, replaced) == 8 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_reply, flags) == 12 );
+C_ASSERT( FIELD_OFFSET(struct register_hotkey_reply, vkey) == 16 );
+C_ASSERT( sizeof(struct register_hotkey_reply) == 24 );
+C_ASSERT( FIELD_OFFSET(struct unregister_hotkey_request, window) == 12 );
+C_ASSERT( FIELD_OFFSET(struct unregister_hotkey_request, id) == 16 );
+C_ASSERT( sizeof(struct unregister_hotkey_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct unregister_hotkey_reply, flags) == 8 );
+C_ASSERT( FIELD_OFFSET(struct unregister_hotkey_reply, vkey) == 12 );
+C_ASSERT( sizeof(struct unregister_hotkey_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct attach_thread_input_request, tid_from) == 12 );
 C_ASSERT( FIELD_OFFSET(struct attach_thread_input_request, tid_to) == 16 );
 C_ASSERT( FIELD_OFFSET(struct attach_thread_input_request, attach) == 20 );
@@ -1727,7 +1756,8 @@ C_ASSERT( sizeof(struct get_key_state_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_key_state_reply, state) == 8 );
 C_ASSERT( sizeof(struct get_key_state_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_key_state_request, tid) == 12 );
-C_ASSERT( sizeof(struct set_key_state_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_key_state_request, async) == 16 );
+C_ASSERT( sizeof(struct set_key_state_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_foreground_window_request, handle) == 12 );
 C_ASSERT( sizeof(struct set_foreground_window_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_foreground_window_reply, previous) == 8 );
@@ -2021,9 +2051,11 @@ C_ASSERT( sizeof(struct get_next_device_request_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, next) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, code) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, user_ptr) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, in_size) == 24 );
-C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, out_size) == 28 );
-C_ASSERT( sizeof(struct get_next_device_request_reply) == 32 );
+C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, client_pid) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, client_tid) == 28 );
+C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, in_size) == 32 );
+C_ASSERT( FIELD_OFFSET(struct get_next_device_request_reply, out_size) == 36 );
+C_ASSERT( sizeof(struct get_next_device_request_reply) == 40 );
 C_ASSERT( sizeof(struct make_process_system_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct make_process_system_reply, event) == 8 );
 C_ASSERT( sizeof(struct make_process_system_reply) == 16 );
@@ -2097,13 +2129,20 @@ C_ASSERT( FIELD_OFFSET(struct set_cursor_request, show_count) == 20 );
 C_ASSERT( FIELD_OFFSET(struct set_cursor_request, x) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_cursor_request, y) == 28 );
 C_ASSERT( FIELD_OFFSET(struct set_cursor_request, clip) == 32 );
-C_ASSERT( sizeof(struct set_cursor_request) == 48 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_request, clip_msg) == 48 );
+C_ASSERT( sizeof(struct set_cursor_request) == 56 );
 C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, prev_handle) == 8 );
 C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, prev_count) == 12 );
-C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_x) == 16 );
-C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_y) == 20 );
-C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_clip) == 24 );
-C_ASSERT( sizeof(struct set_cursor_reply) == 40 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, prev_x) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, prev_y) == 20 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_x) == 24 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_y) == 28 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, new_clip) == 32 );
+C_ASSERT( FIELD_OFFSET(struct set_cursor_reply, last_change) == 48 );
+C_ASSERT( sizeof(struct set_cursor_reply) == 56 );
+C_ASSERT( sizeof(struct get_suspend_context_request) == 16 );
+C_ASSERT( sizeof(struct get_suspend_context_reply) == 8 );
+C_ASSERT( sizeof(struct set_suspend_context_request) == 16 );
 
 #endif  /* WANT_REQUEST_HANDLERS */
 

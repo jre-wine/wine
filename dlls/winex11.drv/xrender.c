@@ -3,6 +3,7 @@
  *
  * Copyright 2001, 2002 Huw D M Davies for CodeWeavers
  * Copyright 2009 Roderick Colenbrander
+ * Copyright 2011 Alexandre Julliard
  *
  * Some parts also:
  * Copyright 2000 Keith Packard, member of The XFree86 Project, Inc.
@@ -43,7 +44,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(xrender);
 
 #ifdef SONAME_LIBXRENDER
 
-static BOOL X11DRV_XRender_Installed = FALSE;
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrender.h>
@@ -55,7 +56,7 @@ static BOOL X11DRV_XRender_Installed = FALSE;
 #define RepeatReflect 3
 #endif
 
-typedef enum wine_xrformat
+enum wxr_format
 {
   WXR_FORMAT_MONO,
   WXR_FORMAT_GRAY,
@@ -69,12 +70,12 @@ typedef enum wine_xrformat
   WXR_FORMAT_B8G8R8A8,
   WXR_FORMAT_X8R8G8B8,
   WXR_FORMAT_B8G8R8X8,
-  WXR_NB_FORMATS
-} WXRFormat;
+  WXR_NB_FORMATS,
+  WXR_INVALID_FORMAT = WXR_NB_FORMATS
+};
 
 typedef struct wine_xrender_format_template
 {
-    WXRFormat wxr_format;
     unsigned int depth;
     unsigned int alpha;
     unsigned int alphaMask;
@@ -89,29 +90,39 @@ typedef struct wine_xrender_format_template
 static const WineXRenderFormatTemplate wxr_formats_template[WXR_NB_FORMATS] =
 {
     /* Format               depth   alpha   mask    red     mask    green   mask    blue    mask*/
-    {WXR_FORMAT_MONO,       1,      0,      0x01,   0,      0,      0,      0,      0,      0       },
-    {WXR_FORMAT_GRAY,       8,      0,      0xff,   0,      0,      0,      0,      0,      0       },
-    {WXR_FORMAT_X1R5G5B5,   16,     0,      0,      10,     0x1f,   5,      0x1f,   0,      0x1f    },
-    {WXR_FORMAT_X1B5G5R5,   16,     0,      0,      0,      0x1f,   5,      0x1f,   10,     0x1f    },
-    {WXR_FORMAT_R5G6B5,     16,     0,      0,      11,     0x1f,   5,      0x3f,   0,      0x1f    },
-    {WXR_FORMAT_B5G6R5,     16,     0,      0,      0,      0x1f,   5,      0x3f,   11,     0x1f    },
-    {WXR_FORMAT_R8G8B8,     24,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    },
-    {WXR_FORMAT_B8G8R8,     24,     0,      0,      0,      0xff,   8,      0xff,   16,     0xff    },
-    {WXR_FORMAT_A8R8G8B8,   32,     24,     0xff,   16,     0xff,   8,      0xff,   0,      0xff    },
-    {WXR_FORMAT_B8G8R8A8,   32,     0,      0xff,   8,      0xff,   16,     0xff,   24,     0xff    },
-    {WXR_FORMAT_X8R8G8B8,   32,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    },
-    {WXR_FORMAT_B8G8R8X8,   32,     0,      0,      8,      0xff,   16,     0xff,   24,     0xff    },
+/* WXR_FORMAT_MONO     */ { 1,      0,      0x01,   0,      0,      0,      0,      0,      0       },
+/* WXR_FORMAT_GRAY     */ { 8,      0,      0xff,   0,      0,      0,      0,      0,      0       },
+/* WXR_FORMAT_X1R5G5B5 */ { 16,     0,      0,      10,     0x1f,   5,      0x1f,   0,      0x1f    },
+/* WXR_FORMAT_X1B5G5R5 */ { 16,     0,      0,      0,      0x1f,   5,      0x1f,   10,     0x1f    },
+/* WXR_FORMAT_R5G6B5   */ { 16,     0,      0,      11,     0x1f,   5,      0x3f,   0,      0x1f    },
+/* WXR_FORMAT_B5G6R5   */ { 16,     0,      0,      0,      0x1f,   5,      0x3f,   11,     0x1f    },
+/* WXR_FORMAT_R8G8B8   */ { 24,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    },
+/* WXR_FORMAT_B8G8R8   */ { 24,     0,      0,      0,      0xff,   8,      0xff,   16,     0xff    },
+/* WXR_FORMAT_A8R8G8B8 */ { 32,     24,     0xff,   16,     0xff,   8,      0xff,   0,      0xff    },
+/* WXR_FORMAT_B8G8R8A8 */ { 32,     0,      0xff,   8,      0xff,   16,     0xff,   24,     0xff    },
+/* WXR_FORMAT_X8R8G8B8 */ { 32,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    },
+/* WXR_FORMAT_B8G8R8X8 */ { 32,     0,      0,      8,      0xff,   16,     0xff,   24,     0xff    },
 };
 
-typedef struct wine_xrender_format
+static const ColorShifts wxr_color_shifts[WXR_NB_FORMATS] =
 {
-    WXRFormat               format;
-    XRenderPictFormat       *pict_format;
-} WineXRenderFormat;
+    /* format                phys red    phys green  phys blue   log red     log green   log blue */
+/* WXR_FORMAT_MONO     */ { { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 }  },
+/* WXR_FORMAT_GRAY     */ { { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 },  { 0,0,0 }  },
+/* WXR_FORMAT_X1R5G5B5 */ { {10,5,31},  { 5,5,31},  { 0,5,31},  {10,5,31},  { 5,5,31},  { 0,5,31}  },
+/* WXR_FORMAT_X1B5G5R5 */ { { 0,5,31},  { 5,5,31},  {10,5,31},  { 0,5,31},  { 5,5,31},  {10,5,31}  },
+/* WXR_FORMAT_R5G6B5   */ { {11,5,31},  { 5,6,63},  { 0,5,31},  {11,5,31},  { 5,6,63},  { 0,5,31}  },
+/* WXR_FORMAT_B5G6R5   */ { { 0,5,31},  { 5,6,63},  {11,5,31},  { 0,5,31},  { 5,6,63},  {11,5,31}  },
+/* WXR_FORMAT_R8G8B8   */ { {16,8,255}, { 8,8,255}, { 0,8,255}, {16,8,255}, { 8,8,255}, { 0,8,255} },
+/* WXR_FORMAT_B8G8R8   */ { { 0,8,255}, { 8,8,255}, {16,8,255}, { 0,8,255}, { 8,8,255}, {16,8,255} },
+/* WXR_FORMAT_A8R8G8B8 */ { {16,8,255}, { 8,8,255}, { 0,8,255}, {16,8,255}, { 8,8,255}, { 0,8,255} },
+/* WXR_FORMAT_B8G8R8A8 */ { { 8,8,255}, {16,8,255}, {24,8,255}, { 8,8,255}, {16,8,255}, {24,8,255} },
+/* WXR_FORMAT_X8R8G8B8 */ { {16,8,255}, { 8,8,255}, { 0,8,255}, {16,8,255}, { 8,8,255}, { 0,8,255} },
+/* WXR_FORMAT_B8G8R8X8 */ { { 8,8,255}, {16,8,255}, {24,8,255}, { 8,8,255}, {16,8,255}, {24,8,255} },
+};
 
-static WineXRenderFormat wxr_formats[WXR_NB_FORMATS];
-static int WineXRenderFormatsListSize = 0;
-static WineXRenderFormat *default_format = NULL;
+static enum wxr_format default_format = WXR_INVALID_FORMAT;
+static XRenderPictFormat *pict_formats[WXR_NB_FORMATS + 1 /* invalid format */];
 
 typedef struct
 {
@@ -128,10 +139,9 @@ typedef enum { AA_None = 0, AA_Grey, AA_RGB, AA_BGR, AA_VRGB, AA_VBGR, AA_MAXVAL
 typedef struct
 {
     GlyphSet glyphset;
-    const WineXRenderFormat *font_format;
+    XRenderPictFormat *font_format;
     int nrealized;
     BOOL *realized;
-    void **bitmaps;
     XGlyphInfo *gis;
 } gsCacheEntryFormat;
 
@@ -144,13 +154,25 @@ typedef struct
     INT next;
 } gsCacheEntry;
 
-struct xrender_info
+struct xrender_physdev
 {
+    struct gdi_physdev dev;
+    X11DRV_PDEVICE    *x11dev;
+    HRGN               region;
+    enum wxr_format    format;
     int                cache_index;
+    BOOL               update_clip;
     Picture            pict;
     Picture            pict_src;
-    const WineXRenderFormat *format;
+    XRenderPictFormat *pict_format;
 };
+
+static inline struct xrender_physdev *get_xrender_dev( PHYSDEV dev )
+{
+    return (struct xrender_physdev *)dev;
+}
+
+static const struct gdi_dc_funcs xrender_funcs;
 
 static gsCacheEntry *glyphsetCache = NULL;
 static DWORD glyphsetCacheSize = 0;
@@ -165,10 +187,8 @@ static void *xrender_handle;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f;
 MAKE_FUNCPTR(XRenderAddGlyphs)
+MAKE_FUNCPTR(XRenderChangePicture)
 MAKE_FUNCPTR(XRenderComposite)
-MAKE_FUNCPTR(XRenderCompositeString8)
-MAKE_FUNCPTR(XRenderCompositeString16)
-MAKE_FUNCPTR(XRenderCompositeString32)
 MAKE_FUNCPTR(XRenderCompositeText16)
 MAKE_FUNCPTR(XRenderCreateGlyphSet)
 MAKE_FUNCPTR(XRenderCreatePicture)
@@ -178,6 +198,9 @@ MAKE_FUNCPTR(XRenderFindVisualFormat)
 MAKE_FUNCPTR(XRenderFreeGlyphSet)
 MAKE_FUNCPTR(XRenderFreePicture)
 MAKE_FUNCPTR(XRenderSetPictureClipRectangles)
+#ifdef HAVE_XRENDERCREATELINEARGRADIENT
+MAKE_FUNCPTR(XRenderCreateLinearGradient)
+#endif
 #ifdef HAVE_XRENDERSETPICTURETRANSFORM
 MAKE_FUNCPTR(XRenderSetPictureTransform)
 #endif
@@ -230,7 +253,12 @@ static CRITICAL_SECTION xrender_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 #define NATIVE_BYTE_ORDER LSBFirst
 #endif
 
-static WXRFormat get_format_without_alpha( WXRFormat format )
+static BOOL has_alpha( enum wxr_format format )
+{
+    return (format == WXR_FORMAT_A8R8G8B8 || format == WXR_FORMAT_B8G8R8A8);
+}
+
+static enum wxr_format get_format_without_alpha( enum wxr_format format )
 {
     switch (format)
     {
@@ -280,16 +308,18 @@ static BOOL is_wxrformat_compatible_with_default_visual(const WineXRenderFormatT
 
 static int load_xrender_formats(void)
 {
+    int count = 0;
     unsigned int i;
-    for(i = 0; i < (sizeof(wxr_formats_template) / sizeof(wxr_formats_template[0])); i++)
+
+    for (i = 0; i < WXR_NB_FORMATS; i++)
     {
-        XRenderPictFormat templ, *pict_format;
+        XRenderPictFormat templ;
 
         if(is_wxrformat_compatible_with_default_visual(&wxr_formats_template[i]))
         {
             wine_tsx11_lock();
-            pict_format = pXRenderFindVisualFormat(gdi_display, visual);
-            if(!pict_format)
+            pict_formats[i] = pXRenderFindVisualFormat(gdi_display, visual);
+            if (!pict_formats[i])
             {
                 /* Xrender doesn't like DirectColor visuals, try to find a TrueColor one instead */
                 if (visual->class == DirectColor)
@@ -298,21 +328,13 @@ static int load_xrender_formats(void)
                     if (XMatchVisualInfo( gdi_display, DefaultScreen(gdi_display),
                                           screen_depth, TrueColor, &info ))
                     {
-                        pict_format = pXRenderFindVisualFormat(gdi_display, info.visual);
-                        if (pict_format) visual = info.visual;
+                        pict_formats[i] = pXRenderFindVisualFormat(gdi_display, info.visual);
+                        if (pict_formats[i]) visual = info.visual;
                     }
                 }
             }
             wine_tsx11_unlock();
-
-            if(pict_format)
-            {
-                wxr_formats[WineXRenderFormatsListSize].format = wxr_formats_template[i].wxr_format;
-                wxr_formats[WineXRenderFormatsListSize].pict_format = pict_format;
-                default_format = &wxr_formats[WineXRenderFormatsListSize];
-                WineXRenderFormatsListSize++;
-                TRACE("Loaded pict_format with id=%#lx for wxr_format=%#x\n", pict_format->id, wxr_formats_template[i].wxr_format);
-            }
+            if (pict_formats[i]) default_format = i;
         }
         else
         {
@@ -320,19 +342,16 @@ static int load_xrender_formats(void)
             get_xrender_template(&wxr_formats_template[i], &templ, &mask);
 
             wine_tsx11_lock();
-            pict_format = pXRenderFindFormat(gdi_display, mask, &templ, 0);
+            pict_formats[i] = pXRenderFindFormat(gdi_display, mask, &templ, 0);
             wine_tsx11_unlock();
-
-            if(pict_format)
-            {
-                wxr_formats[WineXRenderFormatsListSize].format = wxr_formats_template[i].wxr_format;
-                wxr_formats[WineXRenderFormatsListSize].pict_format = pict_format;
-                WineXRenderFormatsListSize++;
-                TRACE("Loaded pict_format with id=%#lx for wxr_format=%#x\n", pict_format->id, wxr_formats_template[i].wxr_format);
-            }
+        }
+        if (pict_formats[i])
+        {
+            count++;
+            TRACE("Loaded pict_format with id=%#lx for wxr_format=%#x\n", pict_formats[i]->id, i);
         }
     }
-    return WineXRenderFormatsListSize;
+    return count;
 }
 
 /***********************************************************************
@@ -341,60 +360,58 @@ static int load_xrender_formats(void)
  * Let's see if our XServer has the extension available
  *
  */
-void X11DRV_XRender_Init(void)
+const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
 {
     int event_base, i;
+    BOOL ok;
 
-    if (client_side_with_render &&
-	wine_dlopen(SONAME_LIBX11, RTLD_NOW|RTLD_GLOBAL, NULL, 0) &&
-	wine_dlopen(SONAME_LIBXEXT, RTLD_NOW|RTLD_GLOBAL, NULL, 0) && 
-	(xrender_handle = wine_dlopen(SONAME_LIBXRENDER, RTLD_NOW, NULL, 0)))
-    {
+    using_client_side_fonts = client_side_with_render || client_side_with_core;
 
-#define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(xrender_handle, #f, NULL, 0)) == NULL) goto sym_not_found;
-LOAD_FUNCPTR(XRenderAddGlyphs)
-LOAD_FUNCPTR(XRenderComposite)
-LOAD_FUNCPTR(XRenderCompositeString8)
-LOAD_FUNCPTR(XRenderCompositeString16)
-LOAD_FUNCPTR(XRenderCompositeString32)
-LOAD_FUNCPTR(XRenderCompositeText16)
-LOAD_FUNCPTR(XRenderCreateGlyphSet)
-LOAD_FUNCPTR(XRenderCreatePicture)
-LOAD_FUNCPTR(XRenderFillRectangle)
-LOAD_FUNCPTR(XRenderFindFormat)
-LOAD_FUNCPTR(XRenderFindVisualFormat)
-LOAD_FUNCPTR(XRenderFreeGlyphSet)
-LOAD_FUNCPTR(XRenderFreePicture)
-LOAD_FUNCPTR(XRenderSetPictureClipRectangles)
-LOAD_FUNCPTR(XRenderQueryExtension)
-#undef LOAD_FUNCPTR
-#ifdef HAVE_XRENDERSETPICTURETRANSFORM
-#define LOAD_OPTIONAL_FUNCPTR(f) p##f = wine_dlsym(xrender_handle, #f, NULL, 0);
-LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
-#undef LOAD_OPTIONAL_FUNCPTR
+    if (!client_side_with_render) return NULL;
+    if (!(xrender_handle = wine_dlopen(SONAME_LIBXRENDER, RTLD_NOW, NULL, 0))) return NULL;
+
+#define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(xrender_handle, #f, NULL, 0)) == NULL) return NULL
+#define LOAD_OPTIONAL_FUNCPTR(f) p##f = wine_dlsym(xrender_handle, #f, NULL, 0)
+    LOAD_FUNCPTR(XRenderAddGlyphs);
+    LOAD_FUNCPTR(XRenderChangePicture);
+    LOAD_FUNCPTR(XRenderComposite);
+    LOAD_FUNCPTR(XRenderCompositeText16);
+    LOAD_FUNCPTR(XRenderCreateGlyphSet);
+    LOAD_FUNCPTR(XRenderCreatePicture);
+    LOAD_FUNCPTR(XRenderFillRectangle);
+    LOAD_FUNCPTR(XRenderFindFormat);
+    LOAD_FUNCPTR(XRenderFindVisualFormat);
+    LOAD_FUNCPTR(XRenderFreeGlyphSet);
+    LOAD_FUNCPTR(XRenderFreePicture);
+    LOAD_FUNCPTR(XRenderSetPictureClipRectangles);
+    LOAD_FUNCPTR(XRenderQueryExtension);
+#ifdef HAVE_XRENDERCREATELINEARGRADIENT
+    LOAD_OPTIONAL_FUNCPTR(XRenderCreateLinearGradient);
 #endif
+#ifdef HAVE_XRENDERSETPICTURETRANSFORM
+    LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform);
+#endif
+#undef LOAD_OPTIONAL_FUNCPTR
+#undef LOAD_FUNCPTR
 
-        wine_tsx11_lock();
-        X11DRV_XRender_Installed = pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base);
-        wine_tsx11_unlock();
-        if(X11DRV_XRender_Installed) {
-            TRACE("Xrender is up and running error_base = %d\n", xrender_error_base);
-            if(!load_xrender_formats()) /* This fails in buggy versions of libXrender.so */
-            {
-                wine_tsx11_unlock();
-                WINE_MESSAGE(
-                    "Wine has detected that you probably have a buggy version\n"
-                    "of libXrender.so .  Because of this client side font rendering\n"
-                    "will be disabled.  Please upgrade this library.\n");
-                X11DRV_XRender_Installed = FALSE;
-                return;
-            }
+    wine_tsx11_lock();
+    ok = pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base);
+    wine_tsx11_unlock();
+    if (!ok) return NULL;
 
-            if (!visual->red_mask || !visual->green_mask || !visual->blue_mask) {
-                WARN("one or more of the colour masks are 0, disabling XRENDER. Try running in 16-bit mode or higher.\n");
-                X11DRV_XRender_Installed = FALSE;
-            }
-        }
+    TRACE("Xrender is up and running error_base = %d\n", xrender_error_base);
+    if(!load_xrender_formats()) /* This fails in buggy versions of libXrender.so */
+    {
+        ERR_(winediag)("Wine has detected that you probably have a buggy version "
+                       "of libXrender.  Because of this client side font rendering "
+                       "will be disabled.  Please upgrade this library.\n");
+        return NULL;
+    }
+
+    if (!visual->red_mask || !visual->green_mask || !visual->blue_mask)
+    {
+        WARN("one or more of the colour masks are 0, disabling XRENDER. Try running in 16-bit mode or higher.\n");
+        return NULL;
     }
 
 #ifdef SONAME_LIBFONTCONFIG
@@ -416,107 +433,106 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
         fontconfig_installed = pFcInit();
     }
     else TRACE( "cannot find the fontconfig library " SONAME_LIBFONTCONFIG "\n" );
-#endif
 
 sym_not_found:
-    if(X11DRV_XRender_Installed || client_side_with_core)
-    {
-	glyphsetCache = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-				  sizeof(*glyphsetCache) * INIT_CACHE_SIZE);
+#endif
 
-	glyphsetCacheSize = INIT_CACHE_SIZE;
-	lastfree = 0;
-	for(i = 0; i < INIT_CACHE_SIZE; i++) {
-	  glyphsetCache[i].next = i + 1;
-	  glyphsetCache[i].count = -1;
-	}
-	glyphsetCache[i-1].next = -1;
-	using_client_side_fonts = 1;
+    glyphsetCache = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+                              sizeof(*glyphsetCache) * INIT_CACHE_SIZE);
 
-	if(!X11DRV_XRender_Installed) {
-	    TRACE("Xrender is not available on your XServer, client side rendering with the core protocol instead.\n");
-	    if(screen_depth <= 8 || !client_side_antialias_with_core)
-	        antialias = 0;
-	} else {
-	    if(screen_depth <= 8 || !client_side_antialias_with_render)
-	        antialias = 0;
-	}
+    glyphsetCacheSize = INIT_CACHE_SIZE;
+    lastfree = 0;
+    for(i = 0; i < INIT_CACHE_SIZE; i++) {
+        glyphsetCache[i].next = i + 1;
+        glyphsetCache[i].count = -1;
     }
-    else TRACE("Using X11 core fonts\n");
+    glyphsetCache[i-1].next = -1;
+
+    if(screen_depth <= 8 || !client_side_antialias_with_render) antialias = 0;
+
+    return &xrender_funcs;
 }
 
 /* Helper function to convert from a color packed in a 32-bit integer to a XRenderColor */
-static void get_xrender_color(const WineXRenderFormat *wxr_format, int src_color, XRenderColor *dst_color)
+static void get_xrender_color( struct xrender_physdev *physdev, COLORREF src_color, XRenderColor *dst_color )
 {
-    XRenderPictFormat *pf = wxr_format->pict_format;
-
-    if(pf->direct.redMask)
-        dst_color->red = ((src_color >> pf->direct.red) & pf->direct.redMask) * 65535/pf->direct.redMask;
-    else
-       dst_color->red = 0;
-
-    if(pf->direct.greenMask)
-        dst_color->green = ((src_color >> pf->direct.green) & pf->direct.greenMask) * 65535/pf->direct.greenMask;
-    else
-        dst_color->green = 0;
-
-    if(pf->direct.blueMask)
-        dst_color->blue = ((src_color >> pf->direct.blue) & pf->direct.blueMask) * 65535/pf->direct.blueMask;
-    else
-        dst_color->blue = 0;
-
-    dst_color->alpha = 0xffff;
-}
-
-static const WineXRenderFormat *get_xrender_format(WXRFormat format)
-{
-    int i;
-    for(i=0; i<WineXRenderFormatsListSize; i++)
+    if (src_color & (1 << 24))  /* PALETTEINDEX */
     {
-        if(wxr_formats[i].format == format)
-        {
-            TRACE("Returning wxr_format=%#x\n", format);
-            return &wxr_formats[i];
-        }
+        HPALETTE pal = GetCurrentObject( physdev->dev.hdc, OBJ_PAL );
+        PALETTEENTRY pal_ent;
+
+        if (!GetPaletteEntries( pal, LOWORD(src_color), 1, &pal_ent ))
+            GetPaletteEntries( pal, 0, 1, &pal_ent );
+        dst_color->red   = pal_ent.peRed   * 257;
+        dst_color->green = pal_ent.peGreen * 257;
+        dst_color->blue  = pal_ent.peBlue  * 257;
     }
-    return NULL;
-}
-
-static const WineXRenderFormat *get_xrender_format_from_color_shifts(int depth, ColorShifts *shifts)
-{
-    int redMask, greenMask, blueMask;
-    unsigned int i;
-
-    if(depth == 1)
-        return get_xrender_format(WXR_FORMAT_MONO);
-
-    /* physDevs of a depth <=8, don't have color_shifts set and XRender can't handle those except for 1-bit */
-    if(!shifts)
-        return default_format;
-
-    redMask   = shifts->physicalRed.max << shifts->physicalRed.shift;
-    greenMask = shifts->physicalGreen.max << shifts->physicalGreen.shift;
-    blueMask  = shifts->physicalBlue.max << shifts->physicalBlue.shift;
-
-    /* Try to locate a format which matches the specification of the dibsection. */
-    for(i = 0; i < (sizeof(wxr_formats_template) / sizeof(wxr_formats_template[0])); i++)
+    else
     {
-        if( depth     == wxr_formats_template[i].depth &&
-            redMask   == (wxr_formats_template[i].redMask << wxr_formats_template[i].red) &&
-            greenMask == (wxr_formats_template[i].greenMask << wxr_formats_template[i].green) &&
-            blueMask  == (wxr_formats_template[i].blueMask << wxr_formats_template[i].blue) )
+        if (src_color >> 16 == 0x10ff) src_color = 0; /* DIBINDEX */
 
-        {
-            /* When we reach this stage the format was found in our template table but this doesn't mean that
-            * the Xserver also supports this format (e.g. its depth might be too low). The call below verifies that.
-            */
-            return get_xrender_format(wxr_formats_template[i].wxr_format);
-        }
+        dst_color->red   = GetRValue( src_color ) * 257;
+        dst_color->green = GetGValue( src_color ) * 257;
+        dst_color->blue  = GetBValue( src_color ) * 257;
     }
 
-    /* This should not happen because when we reach 'shifts' must have been set and we only allows shifts which are backed by X */
-    ERR("No XRender format found!\n");
-    return NULL;
+    if (physdev->format == WXR_FORMAT_MONO && !dst_color->red && !dst_color->green && !dst_color->blue)
+        dst_color->alpha = 0;
+    else
+        dst_color->alpha = 0xffff;
+}
+
+static enum wxr_format get_xrender_format_from_bitmapinfo( const BITMAPINFO *info )
+{
+    if (info->bmiHeader.biPlanes != 1) return WXR_INVALID_FORMAT;
+
+    switch (info->bmiHeader.biBitCount)
+    {
+    case 1:
+        return WXR_FORMAT_MONO;
+    case 4:
+    case 8:
+        break;
+    case 24:
+        if (info->bmiHeader.biCompression != BI_RGB) break;
+        return WXR_FORMAT_R8G8B8;
+    case 16:
+    case 32:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        {
+            DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
+            unsigned int i;
+
+            for (i = 0; i < WXR_NB_FORMATS; i++)
+            {
+                if (info->bmiHeader.biBitCount == wxr_formats_template[i].depth &&
+                    colors[0] == (wxr_formats_template[i].redMask << wxr_formats_template[i].red) &&
+                    colors[1] == (wxr_formats_template[i].greenMask << wxr_formats_template[i].green) &&
+                    colors[2] == (wxr_formats_template[i].blueMask << wxr_formats_template[i].blue))
+                    return i;
+            }
+            break;
+        }
+        if (info->bmiHeader.biCompression != BI_RGB) break;
+        return (info->bmiHeader.biBitCount == 16) ? WXR_FORMAT_X1R5G5B5 : WXR_FORMAT_A8R8G8B8;
+    }
+    return WXR_INVALID_FORMAT;
+}
+
+static enum wxr_format get_bitmap_format( int bpp )
+{
+    enum wxr_format format = WXR_INVALID_FORMAT;
+
+    if (bpp == screen_bpp)
+    {
+        switch (bpp)
+        {
+        case 16: format = WXR_FORMAT_R5G6B5; break;
+        case 24: format = WXR_FORMAT_R8G8B8; break;
+        case 32: format = WXR_FORMAT_A8R8G8B8; break;
+        }
+    }
+    return format;
 }
 
 /* Set the x/y scaling and x/y offsets in the transformation matrix of the source picture */
@@ -534,79 +550,118 @@ static void set_xrender_transformation(Picture src_pict, double xscale, double y
 }
 
 /* check if we can use repeating instead of scaling for the specified source DC */
-static BOOL use_source_repeat( X11DRV_PDEVICE *physDev )
+static BOOL use_source_repeat( struct xrender_physdev *dev )
 {
-    return (physDev->bitmap &&
-            physDev->drawable_rect.right - physDev->drawable_rect.left == 1 &&
-            physDev->drawable_rect.bottom - physDev->drawable_rect.top == 1);
+    return (dev->x11dev->bitmap &&
+            dev->x11dev->drawable_rect.right - dev->x11dev->drawable_rect.left == 1 &&
+            dev->x11dev->drawable_rect.bottom - dev->x11dev->drawable_rect.top == 1);
 }
 
-static struct xrender_info *get_xrender_info(X11DRV_PDEVICE *physDev)
+static void update_xrender_clipping( struct xrender_physdev *dev, HRGN rgn )
 {
-    if(!physDev->xrender)
+    XRenderPictureAttributes pa;
+    RGNDATA *data;
+
+    if (!rgn)
     {
-        physDev->xrender = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physDev->xrender));
-
-        if(!physDev->xrender)
-        {
-            ERR("Unable to allocate XRENDERINFO!\n");
-            return NULL;
-        }
-        physDev->xrender->cache_index = -1;
+        wine_tsx11_lock();
+        pa.clip_mask = None;
+        pXRenderChangePicture( gdi_display, dev->pict, CPClipMask, &pa );
+        wine_tsx11_unlock();
     }
-    if (!physDev->xrender->format)
-        physDev->xrender->format = get_xrender_format_from_color_shifts(physDev->depth, physDev->color_shifts);
-
-    return physDev->xrender;
+    else if ((data = X11DRV_GetRegionData( rgn, 0 )))
+    {
+        wine_tsx11_lock();
+        pXRenderSetPictureClipRectangles( gdi_display, dev->pict,
+                                          dev->x11dev->dc_rect.left, dev->x11dev->dc_rect.top,
+                                          (XRectangle *)data->Buffer, data->rdh.nCount );
+        wine_tsx11_unlock();
+        HeapFree( GetProcessHeap(), 0, data );
+    }
 }
 
-static Picture get_xrender_picture(X11DRV_PDEVICE *physDev)
-{
-    struct xrender_info *info = get_xrender_info(physDev);
-    if (!info) return 0;
 
-    if (!info->pict && info->format)
+static Picture get_xrender_picture( struct xrender_physdev *dev, HRGN clip_rgn, const RECT *clip_rect )
+{
+    if (!dev->pict && dev->pict_format)
     {
         XRenderPictureAttributes pa;
-        RGNDATA *clip = X11DRV_GetRegionData( physDev->region, 0 );
 
         wine_tsx11_lock();
         pa.subwindow_mode = IncludeInferiors;
-        info->pict = pXRenderCreatePicture(gdi_display, physDev->drawable, info->format->pict_format,
-                                           CPSubwindowMode, &pa);
-        if (info->pict && clip)
-            pXRenderSetPictureClipRectangles( gdi_display, info->pict,
-                                              physDev->dc_rect.left, physDev->dc_rect.top,
-                                              (XRectangle *)clip->Buffer, clip->rdh.nCount );
+        dev->pict = pXRenderCreatePicture( gdi_display, dev->x11dev->drawable,
+                                           dev->pict_format, CPSubwindowMode, &pa );
         wine_tsx11_unlock();
-        TRACE("Allocing pict=%lx dc=%p drawable=%08lx\n", info->pict, physDev->hdc, physDev->drawable);
-        HeapFree( GetProcessHeap(), 0, clip );
+        TRACE( "Allocing pict=%lx dc=%p drawable=%08lx\n",
+               dev->pict, dev->dev.hdc, dev->x11dev->drawable );
+        dev->update_clip = (dev->region != 0);
     }
 
-    return info->pict;
+    if (clip_rect)
+    {
+        HRGN rgn = CreateRectRgnIndirect( clip_rect );
+        if (clip_rgn) CombineRgn( rgn, rgn, clip_rgn, RGN_AND );
+        if (dev->region) CombineRgn( rgn, rgn, dev->region, RGN_AND );
+        update_xrender_clipping( dev, rgn );
+        DeleteObject( rgn );
+    }
+    else if (clip_rgn)
+    {
+        if (dev->region)
+        {
+            HRGN rgn = CreateRectRgn( 0, 0, 0, 0 );
+            CombineRgn( rgn, clip_rgn, dev->region, RGN_AND );
+            update_xrender_clipping( dev, rgn );
+            DeleteObject( rgn );
+        }
+        else update_xrender_clipping( dev, clip_rgn );
+    }
+    else if (dev->update_clip) update_xrender_clipping( dev, dev->region );
+
+    dev->update_clip = (clip_rect || clip_rgn);  /* have to update again if we are using a custom region */
+    return dev->pict;
 }
 
-static Picture get_xrender_picture_source(X11DRV_PDEVICE *physDev, BOOL repeat)
+static Picture get_xrender_picture_source( struct xrender_physdev *dev, BOOL repeat )
 {
-    struct xrender_info *info = get_xrender_info(physDev);
-    if (!info) return 0;
-
-    if (!info->pict_src && info->format)
+    if (!dev->pict_src && dev->pict_format)
     {
         XRenderPictureAttributes pa;
 
         wine_tsx11_lock();
         pa.subwindow_mode = IncludeInferiors;
         pa.repeat = repeat ? RepeatNormal : RepeatNone;
-        info->pict_src = pXRenderCreatePicture(gdi_display, physDev->drawable, info->format->pict_format,
-                                               CPSubwindowMode|CPRepeat, &pa);
+        dev->pict_src = pXRenderCreatePicture( gdi_display, dev->x11dev->drawable,
+                                               dev->pict_format, CPSubwindowMode|CPRepeat, &pa );
         wine_tsx11_unlock();
 
         TRACE("Allocing pict_src=%lx dc=%p drawable=%08lx repeat=%u\n",
-              info->pict_src, physDev->hdc, physDev->drawable, pa.repeat);
+              dev->pict_src, dev->dev.hdc, dev->x11dev->drawable, pa.repeat);
     }
 
-    return info->pict_src;
+    return dev->pict_src;
+}
+
+static void free_xrender_picture( struct xrender_physdev *dev )
+{
+    if (dev->pict || dev->pict_src)
+    {
+        wine_tsx11_lock();
+        XFlush( gdi_display );
+        if (dev->pict)
+        {
+            TRACE("freeing pict = %lx dc = %p\n", dev->pict, dev->dev.hdc);
+            pXRenderFreePicture(gdi_display, dev->pict);
+            dev->pict = 0;
+        }
+        if(dev->pict_src)
+        {
+            TRACE("freeing pict = %lx dc = %p\n", dev->pict_src, dev->dev.hdc);
+            pXRenderFreePicture(gdi_display, dev->pict_src);
+            dev->pict_src = 0;
+        }
+        wine_tsx11_unlock();
+    }
 }
 
 /* return a mask picture used to force alpha to 0 */
@@ -618,14 +673,13 @@ static Picture get_no_alpha_mask(void)
     wine_tsx11_lock();
     if (!pict)
     {
-        const WineXRenderFormat *fmt = get_xrender_format( WXR_FORMAT_A8R8G8B8 );
         XRenderPictureAttributes pa;
         XRenderColor col;
 
         pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, 32 );
         pa.repeat = RepeatNormal;
         pa.component_alpha = True;
-        pict = pXRenderCreatePicture( gdi_display, pixmap, fmt->pict_format,
+        pict = pXRenderCreatePicture( gdi_display, pixmap, pict_formats[WXR_FORMAT_A8R8G8B8],
                                       CPRepeat|CPComponentAlpha, &pa );
         col.red = col.green = col.blue = 0xffff;
         col.alpha = 0;
@@ -662,10 +716,7 @@ static int LookupEntry(LFANDSIZE *plfsz)
 
   for(i = mru; i >= 0; i = glyphsetCache[i].next) {
     TRACE("%d\n", i);
-    if(glyphsetCache[i].count == -1) { /* reached free list so stop */
-      i = -1;
-      break;
-    }
+    if(glyphsetCache[i].count == -1) break; /* reached free list so stop */
 
     if(!fontcmp(&glyphsetCache[i].lfsz, plfsz)) {
       glyphsetCache[i].count++;
@@ -685,8 +736,8 @@ static int LookupEntry(LFANDSIZE *plfsz)
 
 static void FreeEntry(int entry)
 {
-    int i, format;
-  
+    int format;
+
     for(format = 0; format < AA_MAXVALUE; format++) {
         gsCacheEntryFormat * formatEntry;
 
@@ -704,12 +755,6 @@ static void FreeEntry(int entry)
         if(formatEntry->nrealized) {
             HeapFree(GetProcessHeap(), 0, formatEntry->realized);
             formatEntry->realized = NULL;
-            if(formatEntry->bitmaps) {
-                for(i = 0; i < formatEntry->nrealized; i++)
-                    HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps[i]);
-                HeapFree(GetProcessHeap(), 0, formatEntry->bitmaps);
-                formatEntry->bitmaps = NULL;
-            }
             HeapFree(GetProcessHeap(), 0, formatEntry->gis);
             formatEntry->gis = NULL;
             formatEntry->nrealized = 0;
@@ -787,7 +832,7 @@ static int AllocEntry(void)
   return mru;
 }
 
-static BOOL get_gasp_flags(X11DRV_PDEVICE *physDev, WORD *flags)
+static BOOL get_gasp_flags(HDC hdc, WORD *flags)
 {
     DWORD size;
     WORD *gasp, *buffer;
@@ -797,15 +842,15 @@ static BOOL get_gasp_flags(X11DRV_PDEVICE *physDev, WORD *flags)
 
     *flags = 0;
 
-    size = GetFontData(physDev->hdc, MS_GASP_TAG,  0, NULL, 0);
+    size = GetFontData(hdc, MS_GASP_TAG,  0, NULL, 0);
     if(size == GDI_ERROR)
         return FALSE;
 
     gasp = buffer = HeapAlloc(GetProcessHeap(), 0, size);
-    GetFontData(physDev->hdc, MS_GASP_TAG,  0, gasp, size);
+    GetFontData(hdc, MS_GASP_TAG,  0, gasp, size);
 
-    GetTextMetricsW(physDev->hdc, &tm);
-    ppem = abs(X11DRV_YWStoDS(physDev, tm.tmAscent + tm.tmDescent - tm.tmInternalLeading));
+    GetTextMetricsW(hdc, &tm);
+    ppem = abs(X11DRV_YWStoDS(hdc, tm.tmAscent + tm.tmDescent - tm.tmInternalLeading));
 
     gasp++;
     num_recs = get_be_word(*gasp);
@@ -823,13 +868,13 @@ static BOOL get_gasp_flags(X11DRV_PDEVICE *physDev, WORD *flags)
     return TRUE;
 }
 
-static AA_Type get_antialias_type( X11DRV_PDEVICE *physDev, BOOL subpixel, BOOL hinter)
+static AA_Type get_antialias_type( HDC hdc, BOOL subpixel, BOOL hinter )
 {
     AA_Type ret;
     WORD flags;
     UINT font_smoothing_type, font_smoothing_orientation;
 
-    if (X11DRV_XRender_Installed && subpixel &&
+    if (subpixel &&
         SystemParametersInfoW( SPI_GETFONTSMOOTHINGTYPE, 0, &font_smoothing_type, 0) &&
         font_smoothing_type == FE_FONTSMOOTHINGCLEARTYPE)
     {
@@ -846,7 +891,7 @@ static AA_Type get_antialias_type( X11DRV_PDEVICE *physDev, BOOL subpixel, BOOL 
           But, Wine's subpixel rendering can support the portrait mode.
          */
     }
-    else if (!hinter || !get_gasp_flags(physDev, &flags) || flags & GASP_DOGRAY)
+    else if (!hinter || !get_gasp_flags(hdc, &flags) || flags & GASP_DOGRAY)
         ret = AA_Grey;
     else
         ret = AA_None;
@@ -854,7 +899,7 @@ static AA_Type get_antialias_type( X11DRV_PDEVICE *physDev, BOOL subpixel, BOOL 
     return ret;
 }
 
-static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
+static int GetCacheEntry( HDC hdc, LFANDSIZE *plfsz )
 {
     int ret;
     int format;
@@ -885,11 +930,11 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
         switch (plfsz->lf.lfQuality)
         {
             case ANTIALIASED_QUALITY:
-                entry->aa_default = get_antialias_type( physDev, FALSE, hinter );
+                entry->aa_default = get_antialias_type( hdc, FALSE, hinter );
                 return ret;  /* ignore further configuration */
             case CLEARTYPE_QUALITY:
             case CLEARTYPE_NATURAL_QUALITY:
-                entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                entry->aa_default = get_antialias_type( hdc, subpixel, hinter );
                 break;
             case DEFAULT_QUALITY:
             case DRAFT_QUALITY:
@@ -898,7 +943,7 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
                 if ( SystemParametersInfoW( SPI_GETFONTSMOOTHING, 0, &font_smoothing, 0) &&
                      font_smoothing)
                 {
-                    entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                    entry->aa_default = get_antialias_type( hdc, subpixel, hinter );
                 }
                 else
                     entry->aa_default = AA_None;
@@ -909,11 +954,18 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
 #ifdef SONAME_LIBFONTCONFIG
         if (fontconfig_installed)
         {
-            FcPattern *match, *pattern = pFcPatternCreate();
+            FcPattern *match, *pattern;
             FcResult result;
             char family[LF_FACESIZE * 4];
 
+#if defined(__i386__) && defined(__GNUC__)
+            /* fontconfig generates floating point exceptions, mask them */
+            WORD cw, default_cw = 0x37f;
+            __asm__ __volatile__("fnstcw %0; fldcw %1" : "=m" (cw) : "m" (default_cw));
+#endif
+
             WideCharToMultiByte( CP_UTF8, 0, plfsz->lf.lfFaceName, -1, family, sizeof(family), NULL, NULL );
+            pattern = pFcPatternCreate();
             pFcPatternAddString( pattern, FC_FAMILY, (FcChar8 *)family );
             if (plfsz->lf.lfWeight != FW_DONTCARE)
             {
@@ -964,6 +1016,10 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
                 pFcPatternDestroy( match );
             }
             pFcPatternDestroy( pattern );
+
+#if defined(__i386__) && defined(__GNUC__)
+            __asm__ __volatile__("fnclex; fldcw %0" : : "m" (cw));
+#endif
         }
 #endif  /* SONAME_LIBFONTCONFIG */
 
@@ -993,9 +1049,6 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
         }
 
         if (!font_smoothing) entry->aa_default = AA_None;
-
-        /* we can't support subpixel without xrender */
-        if (!X11DRV_XRender_Installed && entry->aa_default > AA_Grey) entry->aa_default = AA_Grey;
     }
     else
         entry->aa_default = AA_None;
@@ -1048,186 +1101,286 @@ void X11DRV_XRender_Finalize(void)
     for(i = mru; i >= 0; i = glyphsetCache[i].next)
 	FreeEntry(i);
     LeaveCriticalSection(&xrender_cs);
+    DeleteCriticalSection(&xrender_cs);
 }
 
-
-/***********************************************************************
- *   X11DRV_XRender_SelectFont
+/**********************************************************************
+ *	     xrenderdrv_SelectFont
  */
-BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
+static HFONT xrenderdrv_SelectFont( PHYSDEV dev, HFONT hfont )
 {
-    LFANDSIZE lfsz;
-    struct xrender_info *info;
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+    PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectFont );
+    HFONT ret = next->funcs->pSelectFont( next, hfont );
 
-    GetObjectW(hfont, sizeof(lfsz.lf), &lfsz.lf);
-    TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
-	  lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
-	  lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
-    lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
-    lfsz.devsize.cx = X11DRV_XWStoDS( physDev, lfsz.lf.lfWidth );
-    lfsz.devsize.cy = X11DRV_YWStoDS( physDev, lfsz.lf.lfHeight );
+    if (!ret) return 0;
 
-    GetTransform( physDev->hdc, 0x204, &lfsz.xform );
-    TRACE("font transform %f %f %f %f\n", lfsz.xform.eM11, lfsz.xform.eM12,
-          lfsz.xform.eM21, lfsz.xform.eM22);
-
-    /* Not used fields, would break hashing */
-    lfsz.xform.eDx = lfsz.xform.eDy = 0;
-
-    lfsz_calc_hash(&lfsz);
-
-    info = get_xrender_info(physDev);
-    if (!info) return 0;
-
-    EnterCriticalSection(&xrender_cs);
-    if(info->cache_index != -1)
-        dec_ref_cache(info->cache_index);
-    info->cache_index = GetCacheEntry(physDev, &lfsz);
-    LeaveCriticalSection(&xrender_cs);
-    return 0;
-}
-
-/***********************************************************************
-*   X11DRV_XRender_SetDeviceClipping
-*/
-void X11DRV_XRender_SetDeviceClipping(X11DRV_PDEVICE *physDev, const RGNDATA *data)
-{
-    if (physDev->xrender->pict)
+    if (physdev->x11dev->has_gdi_font)
     {
-        wine_tsx11_lock();
-        pXRenderSetPictureClipRectangles( gdi_display, physDev->xrender->pict,
-                                          physDev->dc_rect.left, physDev->dc_rect.top,
-                                          (XRectangle *)data->Buffer, data->rdh.nCount );
-        wine_tsx11_unlock();
-    }
-}
+        LFANDSIZE lfsz;
 
-/***********************************************************************
- *   X11DRV_XRender_DeleteDC
- */
-void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
-{
-    X11DRV_XRender_UpdateDrawable(physDev);
+        GetObjectW( hfont, sizeof(lfsz.lf), &lfsz.lf );
 
-    EnterCriticalSection(&xrender_cs);
-    if(physDev->xrender->cache_index != -1)
-        dec_ref_cache(physDev->xrender->cache_index);
-    LeaveCriticalSection(&xrender_cs);
+        TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
+              lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
+              lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
+        lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
+        lfsz.devsize.cx = X11DRV_XWStoDS( dev->hdc, lfsz.lf.lfWidth );
+        lfsz.devsize.cy = X11DRV_YWStoDS( dev->hdc, lfsz.lf.lfHeight );
 
-    HeapFree(GetProcessHeap(), 0, physDev->xrender);
-    physDev->xrender = NULL;
-    return;
-}
+        GetTransform( dev->hdc, 0x204, &lfsz.xform );
+        TRACE("font transform %f %f %f %f\n", lfsz.xform.eM11, lfsz.xform.eM12,
+              lfsz.xform.eM21, lfsz.xform.eM22);
 
-BOOL X11DRV_XRender_SetPhysBitmapDepth(X_PHYSBITMAP *physBitmap, int bits_pixel, const DIBSECTION *dib)
-{
-    const WineXRenderFormat *fmt;
-    ColorShifts shifts;
+        if (GetGraphicsMode( dev->hdc ) == GM_COMPATIBLE && lfsz.xform.eM11 * lfsz.xform.eM22 < 0)
+            lfsz.lf.lfOrientation = -lfsz.lf.lfOrientation;
 
-    /* When XRender is not around we can only use the screen_depth and when needed we perform depth conversion
-     * in software. Further we also return the screen depth for paletted formats or TrueColor formats with a low
-     * number of bits because XRender can't handle paletted formats and 8-bit TrueColor does not exist for XRender. */
-    if (!X11DRV_XRender_Installed || bits_pixel <= 8)
-        return FALSE;
+        /* Not used fields, would break hashing */
+        lfsz.xform.eDx = lfsz.xform.eDy = 0;
 
-    if (dib)
-    {
-        X11DRV_PALETTE_ComputeColorShifts(&shifts, dib->dsBitfields[0], dib->dsBitfields[1], dib->dsBitfields[2]);
-        fmt = get_xrender_format_from_color_shifts(dib->dsBm.bmBitsPixel, &shifts);
+        lfsz_calc_hash(&lfsz);
 
-        /* Common formats should be in our picture format table. */
-        if (!fmt)
-        {
-            TRACE("Unhandled dibsection format bpp=%d, redMask=%x, greenMask=%x, blueMask=%x\n",
-                dib->dsBm.bmBitsPixel, dib->dsBitfields[0], dib->dsBitfields[1], dib->dsBitfields[2]);
-            return FALSE;
-        }
+        EnterCriticalSection(&xrender_cs);
+        if (physdev->cache_index != -1)
+            dec_ref_cache( physdev->cache_index );
+        physdev->cache_index = GetCacheEntry( dev->hdc, &lfsz );
+        LeaveCriticalSection(&xrender_cs);
     }
     else
     {
-        int red_mask, green_mask, blue_mask;
-
-        /* We are dealing with a DDB */
-        switch (bits_pixel)
-        {
-            case 16:
-                fmt = get_xrender_format(WXR_FORMAT_R5G6B5);
-                break;
-            case 24:
-                fmt = get_xrender_format(WXR_FORMAT_R8G8B8);
-                break;
-            case 32:
-                fmt = get_xrender_format(WXR_FORMAT_A8R8G8B8);
-                break;
-            default:
-                fmt = NULL;
-        }
-
-        if (!fmt)
-        {
-            TRACE("Unhandled DDB bits_pixel=%d\n", bits_pixel);
-            return FALSE;
-        }
-
-        red_mask = fmt->pict_format->direct.redMask << fmt->pict_format->direct.red;
-        green_mask = fmt->pict_format->direct.greenMask << fmt->pict_format->direct.green;
-        blue_mask = fmt->pict_format->direct.blueMask << fmt->pict_format->direct.blue;
-        X11DRV_PALETTE_ComputeColorShifts(&shifts, red_mask, green_mask, blue_mask);
+        EnterCriticalSection( &xrender_cs );
+        if (physdev->cache_index != -1) dec_ref_cache( physdev->cache_index );
+        physdev->cache_index = -1;
+        LeaveCriticalSection( &xrender_cs );
     }
+    return ret;
+}
 
-    physBitmap->pixmap_depth = fmt->pict_format->depth;
-    physBitmap->trueColor = TRUE;
-    physBitmap->pixmap_color_shifts = shifts;
+static BOOL create_xrender_dc( PHYSDEV *pdev, enum wxr_format format )
+{
+    X11DRV_PDEVICE *x11dev = get_x11drv_dev( *pdev );
+    struct xrender_physdev *physdev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physdev) );
+
+    if (!physdev) return FALSE;
+    physdev->x11dev = x11dev;
+    physdev->cache_index = -1;
+    physdev->format = format;
+    physdev->pict_format = pict_formats[format];
+    push_dc_driver( pdev, &physdev->dev, &xrender_funcs );
     return TRUE;
 }
 
-/***********************************************************************
- *   X11DRV_XRender_UpdateDrawable
- *
- * Deletes the pict and tile when the drawable changes.
- */
-void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
+/* store the color mask data in the bitmap info structure */
+static void set_color_info( XRenderPictFormat *format, BITMAPINFO *info )
 {
-    struct xrender_info *info = physDev->xrender;
+    DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
 
-    if (info->pict || info->pict_src)
+    info->bmiHeader.biPlanes      = 1;
+    info->bmiHeader.biBitCount    = pixmap_formats[format->depth]->bits_per_pixel;
+    info->bmiHeader.biCompression = BI_RGB;
+    info->bmiHeader.biClrUsed     = 0;
+
+    switch (info->bmiHeader.biBitCount)
     {
-        wine_tsx11_lock();
-        XFlush( gdi_display );
-        if (info->pict)
-        {
-            TRACE("freeing pict = %lx dc = %p\n", info->pict, physDev->hdc);
-            pXRenderFreePicture(gdi_display, info->pict);
-            info->pict = 0;
-        }
-        if(info->pict_src)
-        {
-            TRACE("freeing pict = %lx dc = %p\n", info->pict_src, physDev->hdc);
-            pXRenderFreePicture(gdi_display, info->pict_src);
-            info->pict_src = 0;
-        }
-        wine_tsx11_unlock();
+    case 16:
+        colors[0] = format->direct.redMask   << format->direct.red;
+        colors[1] = format->direct.greenMask << format->direct.green;
+        colors[2] = format->direct.blueMask  << format->direct.blue;
+        info->bmiHeader.biCompression = BI_BITFIELDS;
+        break;
+    case 32:
+        colors[0] = format->direct.redMask   << format->direct.red;
+        colors[1] = format->direct.greenMask << format->direct.green;
+        colors[2] = format->direct.blueMask  << format->direct.blue;
+        if (colors[0] != 0xff0000 || colors[1] != 0x00ff00 || colors[2] != 0x0000ff)
+            info->bmiHeader.biCompression = BI_BITFIELDS;
+        break;
     }
-
-    info->format = NULL;
 }
+
+
+/**********************************************************************
+ *	     xrenderdrv_CreateDC
+ */
+static BOOL xrenderdrv_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
+                                 LPCWSTR output, const DEVMODEW* initData )
+{
+    return create_xrender_dc( pdev, default_format );
+}
+
+/**********************************************************************
+ *	     xrenderdrv_CreateCompatibleDC
+ */
+static BOOL xrenderdrv_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
+{
+    if (orig)  /* chain to x11drv first */
+    {
+        orig = GET_NEXT_PHYSDEV( orig, pCreateCompatibleDC );
+        if (!orig->funcs->pCreateCompatibleDC( orig, pdev )) return FALSE;
+    }
+    /* otherwise we have been called by x11drv */
+
+    return create_xrender_dc( pdev, WXR_FORMAT_MONO );
+}
+
+/**********************************************************************
+ *	     xrenderdrv_DeleteDC
+ */
+static BOOL xrenderdrv_DeleteDC( PHYSDEV dev )
+{
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+
+    free_xrender_picture( physdev );
+
+    EnterCriticalSection( &xrender_cs );
+    if (physdev->cache_index != -1) dec_ref_cache( physdev->cache_index );
+    LeaveCriticalSection( &xrender_cs );
+
+    HeapFree( GetProcessHeap(), 0, physdev );
+    return TRUE;
+}
+
+/**********************************************************************
+ *           xrenderdrv_ExtEscape
+ */
+static INT xrenderdrv_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_data,
+                                 INT out_count, LPVOID out_data )
+{
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+
+    dev = GET_NEXT_PHYSDEV( dev, pExtEscape );
+
+    if (escape == X11DRV_ESCAPE && in_data && in_count >= sizeof(enum x11drv_escape_codes))
+    {
+        if (*(const enum x11drv_escape_codes *)in_data == X11DRV_SET_DRAWABLE)
+        {
+            BOOL ret = dev->funcs->pExtEscape( dev, escape, in_count, in_data, out_count, out_data );
+            if (ret) free_xrender_picture( physdev );  /* pict format doesn't change, only drawable */
+            return ret;
+        }
+    }
+    return dev->funcs->pExtEscape( dev, escape, in_count, in_data, out_count, out_data );
+}
+
+/****************************************************************************
+ *	  xrenderdrv_CopyBitmap
+ */
+static BOOL xrenderdrv_CopyBitmap( HBITMAP src, HBITMAP dst )
+{
+    return X11DRV_CopyBitmap( src, dst );
+}
+
+/****************************************************************************
+ *	  xrenderdrv_CreateBitmap
+ */
+static BOOL xrenderdrv_CreateBitmap( PHYSDEV dev, HBITMAP hbitmap )
+{
+    enum wxr_format format = WXR_INVALID_FORMAT;
+    X_PHYSBITMAP *phys_bitmap;
+    BITMAP bitmap;
+
+    if (!GetObjectW( hbitmap, sizeof(bitmap), &bitmap )) return FALSE;
+
+    if (bitmap.bmBitsPixel == 1)
+    {
+        if (!(phys_bitmap = X11DRV_create_phys_bitmap( hbitmap, &bitmap, 1 ))) return FALSE;
+        phys_bitmap->format = WXR_FORMAT_MONO;
+        phys_bitmap->trueColor = FALSE;
+    }
+    else
+    {
+        format = get_bitmap_format( bitmap.bmBitsPixel );
+
+        if (pict_formats[format])
+        {
+            if (!(phys_bitmap = X11DRV_create_phys_bitmap( hbitmap, &bitmap, pict_formats[format]->depth )))
+                return FALSE;
+            phys_bitmap->format = format;
+            phys_bitmap->trueColor = TRUE;
+            phys_bitmap->color_shifts = wxr_color_shifts[format];
+        }
+        else
+        {
+            if (!(phys_bitmap = X11DRV_create_phys_bitmap( hbitmap, &bitmap, screen_depth )))
+                return FALSE;
+            phys_bitmap->format = WXR_INVALID_FORMAT;
+            phys_bitmap->trueColor = (visual->class == TrueColor || visual->class == DirectColor);
+            phys_bitmap->color_shifts = X11DRV_PALETTE_default_shifts;
+        }
+    }
+    return TRUE;
+}
+
+/****************************************************************************
+ *	  xrenderdrv_DeleteBitmap
+ */
+static BOOL xrenderdrv_DeleteBitmap( HBITMAP hbitmap )
+{
+    return X11DRV_DeleteBitmap( hbitmap );
+}
+
+/***********************************************************************
+ *           xrenderdrv_SelectBitmap
+ */
+static HBITMAP xrenderdrv_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
+{
+    HBITMAP ret;
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+
+    dev = GET_NEXT_PHYSDEV( dev, pSelectBitmap );
+    ret = dev->funcs->pSelectBitmap( dev, hbitmap );
+    if (ret)
+    {
+        free_xrender_picture( physdev );
+        if (hbitmap == BITMAP_stock_phys_bitmap.hbitmap) physdev->format = WXR_FORMAT_MONO;
+        else physdev->format = X11DRV_get_phys_bitmap(hbitmap)->format;
+        physdev->pict_format = pict_formats[physdev->format];
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *           xrenderdrv_GetImage
+ */
+static DWORD xrenderdrv_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
+                                  struct gdi_image_bits *bits, struct bitblt_coords *src )
+{
+    if (hbitmap) return X11DRV_GetImage( dev, hbitmap, info, bits, src );
+    dev = GET_NEXT_PHYSDEV( dev, pGetImage );
+    return dev->funcs->pGetImage( dev, hbitmap, info, bits, src );
+}
+
+/***********************************************************************
+ *           xrenderdrv_SetDeviceClipping
+ */
+static void xrenderdrv_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
+{
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+
+    physdev->region = rgn;
+    physdev->update_clip = TRUE;
+
+    dev = GET_NEXT_PHYSDEV( dev, pSetDeviceClipping );
+    dev->funcs->pSetDeviceClipping( dev, rgn );
+}
+
 
 /************************************************************************
  *   UploadGlyph
  *
  * Helper to ExtTextOut.  Must be called inside xrender_cs
  */
-static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
+static void UploadGlyph(struct xrender_physdev *physDev, int glyph, AA_Type format)
 {
     unsigned int buflen;
     char *buf;
     Glyph gid;
     GLYPHMETRICS gm;
     XGlyphInfo gi;
-    gsCacheEntry *entry = glyphsetCache + physDev->xrender->cache_index;
+    gsCacheEntry *entry = glyphsetCache + physDev->cache_index;
     gsCacheEntryFormat *formatEntry;
     UINT ggo_format = GGO_GLYPH_INDEX;
-    WXRFormat wxr_format;
+    enum wxr_format wxr_format;
     static const char zero[4];
     static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
 
@@ -1255,20 +1408,20 @@ static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	break;
     }
 
-    buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
+    buflen = GetGlyphOutlineW(physDev->dev.hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
     if(buflen == GDI_ERROR) {
         if(format != AA_None) {
             format = AA_None;
             entry->aa_default = AA_None;
             ggo_format = GGO_GLYPH_INDEX | GGO_BITMAP;
-            buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
+            buflen = GetGlyphOutlineW(physDev->dev.hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
         }
         if(buflen == GDI_ERROR) {
             WARN("GetGlyphOutlineW failed using default glyph\n");
-            buflen = GetGlyphOutlineW(physDev->hdc, 0, ggo_format, &gm, 0, NULL, &identity);
+            buflen = GetGlyphOutlineW(physDev->dev.hdc, 0, ggo_format, &gm, 0, NULL, &identity);
             if(buflen == GDI_ERROR) {
                 WARN("GetGlyphOutlineW failed for default glyph trying for space\n");
-                buflen = GetGlyphOutlineW(physDev->hdc, 0x20, ggo_format, &gm, 0, NULL, &identity);
+                buflen = GetGlyphOutlineW(physDev->dev.hdc, 0x20, ggo_format, &gm, 0, NULL, &identity);
                 if(buflen == GDI_ERROR) {
                     ERR("GetGlyphOutlineW for all attempts unable to upload a glyph\n");
                     return;
@@ -1299,17 +1452,6 @@ static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 				      HEAP_ZERO_MEMORY,
 				      formatEntry->nrealized * sizeof(BOOL));
 
-	if(!X11DRV_XRender_Installed) {
-	  if (formatEntry->bitmaps)
-	    formatEntry->bitmaps = HeapReAlloc(GetProcessHeap(),
-				      HEAP_ZERO_MEMORY,
-				      formatEntry->bitmaps,
-				      formatEntry->nrealized * sizeof(formatEntry->bitmaps[0]));
-	  else
-	    formatEntry->bitmaps = HeapAlloc(GetProcessHeap(),
-				      HEAP_ZERO_MEMORY,
-				      formatEntry->nrealized * sizeof(formatEntry->bitmaps[0]));
-        }
         if (formatEntry->gis)
 	    formatEntry->gis = HeapReAlloc(GetProcessHeap(),
 				   HEAP_ZERO_MEMORY,
@@ -1322,7 +1464,7 @@ static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     }
 
 
-    if(formatEntry->glyphset == 0 && X11DRV_XRender_Installed) {
+    if(formatEntry->glyphset == 0) {
         switch(format) {
             case AA_Grey:
                 wxr_format = WXR_FORMAT_GRAY;
@@ -1343,14 +1485,14 @@ static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
         }
 
         wine_tsx11_lock();
-        formatEntry->font_format = get_xrender_format(wxr_format);
-        formatEntry->glyphset = pXRenderCreateGlyphSet(gdi_display, formatEntry->font_format->pict_format);
+        formatEntry->font_format = pict_formats[wxr_format];
+        formatEntry->glyphset = pXRenderCreateGlyphSet(gdi_display, formatEntry->font_format);
         wine_tsx11_unlock();
     }
 
 
     buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buflen);
-    GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, buflen, buf, &identity);
+    GetGlyphOutlineW(physDev->dev.hdc, glyph, ggo_format, &gm, buflen, buf, &identity);
     formatEntry->realized[glyph] = TRUE;
 
     TRACE("buflen = %d. Got metrics: %dx%d adv=%d,%d origin=%d,%d\n",
@@ -1438,247 +1580,9 @@ static void UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
                           buflen ? buf : zero, buflen ? buflen : sizeof(zero));
 	wine_tsx11_unlock();
 	HeapFree(GetProcessHeap(), 0, buf);
-    } else {
-        formatEntry->bitmaps[glyph] = buf;
     }
 
     formatEntry->gis[glyph] = gi;
-}
-
-static void SharpGlyphMono(X11DRV_PDEVICE *physDev, INT x, INT y,
-			    void *bitmap, XGlyphInfo *gi)
-{
-    unsigned char   *srcLine = bitmap, *src;
-    unsigned char   bits, bitsMask;
-    int             width = gi->width;
-    int             stride = ((width + 31) & ~31) >> 3;
-    int             height = gi->height;
-    int             w;
-    int             xspan, lenspan;
-
-    TRACE("%d, %d\n", x, y);
-    x -= gi->x;
-    y -= gi->y;
-    while (height--)
-    {
-        src = srcLine;
-        srcLine += stride;
-        w = width;
-        
-        bitsMask = 0x80;    /* FreeType is always MSB first */
-        bits = *src++;
-        
-        xspan = x;
-        while (w)
-        {
-            if (bits & bitsMask)
-            {
-                lenspan = 0;
-                do
-                {
-                    lenspan++;
-                    if (lenspan == w)
-                        break;
-                    bitsMask = bitsMask >> 1;
-                    if (!bitsMask)
-                    {
-                        bits = *src++;
-                        bitsMask = 0x80;
-                    }
-                } while (bits & bitsMask);
-                XFillRectangle (gdi_display, physDev->drawable, 
-                                physDev->gc, xspan, y, lenspan, 1);
-                xspan += lenspan;
-                w -= lenspan;
-            }
-            else
-            {
-                do
-                {
-                    w--;
-                    xspan++;
-                    if (!w)
-                        break;
-                    bitsMask = bitsMask >> 1;
-                    if (!bitsMask)
-                    {
-                        bits = *src++;
-                        bitsMask = 0x80;
-                    }
-                } while (!(bits & bitsMask));
-            }
-        }
-        y++;
-    }
-}
-
-static void SharpGlyphGray(X11DRV_PDEVICE *physDev, INT x, INT y,
-			    void *bitmap, XGlyphInfo *gi)
-{
-    unsigned char   *srcLine = bitmap, *src, bits;
-    int             width = gi->width;
-    int             stride = ((width + 3) & ~3);
-    int             height = gi->height;
-    int             w;
-    int             xspan, lenspan;
-
-    x -= gi->x;
-    y -= gi->y;
-    while (height--)
-    {
-        src = srcLine;
-        srcLine += stride;
-        w = width;
-        
-        bits = *src++;
-        xspan = x;
-        while (w)
-        {
-            if (bits >= 0x80)
-            {
-                lenspan = 0;
-                do
-                {
-                    lenspan++;
-                    if (lenspan == w)
-                        break;
-                    bits = *src++;
-                } while (bits >= 0x80);
-                XFillRectangle (gdi_display, physDev->drawable, 
-                                physDev->gc, xspan, y, lenspan, 1);
-                xspan += lenspan;
-                w -= lenspan;
-            }
-            else
-            {
-                do
-                {
-                    w--;
-                    xspan++;
-                    if (!w)
-                        break;
-                    bits = *src++;
-                } while (bits < 0x80);
-            }
-        }
-        y++;
-    }
-}
-
-
-static void ExamineBitfield (DWORD mask, int *shift, int *len)
-{
-    int s, l;
-
-    s = 0;
-    while ((mask & 1) == 0)
-    {
-        mask >>= 1;
-        s++;
-    }
-    l = 0;
-    while ((mask & 1) == 1)
-    {
-        mask >>= 1;
-        l++;
-    }
-    *shift = s;
-    *len = l;
-}
-
-static DWORD GetField (DWORD pixel, int shift, int len)
-{
-    pixel = pixel & (((1 << (len)) - 1) << shift);
-    pixel = pixel << (32 - (shift + len)) >> 24;
-    while (len < 8)
-    {
-        pixel |= (pixel >> len);
-        len <<= 1;
-    }
-    return pixel;
-}
-
-
-static DWORD PutField (DWORD pixel, int shift, int len)
-{
-    shift = shift - (8 - len);
-    if (len <= 8)
-        pixel &= (((1 << len) - 1) << (8 - len));
-    if (shift < 0)
-        pixel >>= -shift;
-    else
-        pixel <<= shift;
-    return pixel;
-}
-
-static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInfo *gi,
-			    int color)
-{
-    int             r_shift, r_len;
-    int             g_shift, g_len;
-    int             b_shift, b_len;
-    BYTE            *maskLine, *mask, m;
-    int             maskStride;
-    DWORD           pixel;
-    int             width, height;
-    int             w, tx;
-    BYTE            src_r, src_g, src_b;
-
-    x -= gi->x;
-    y -= gi->y;
-    width = gi->width;
-    height = gi->height;
-
-    maskLine = bitmap;
-    maskStride = (width + 3) & ~3;
-
-    ExamineBitfield (image->red_mask, &r_shift, &r_len);
-    ExamineBitfield (image->green_mask, &g_shift, &g_len);
-    ExamineBitfield (image->blue_mask, &b_shift, &b_len);
-
-    src_r = GetField(color, r_shift, r_len);
-    src_g = GetField(color, g_shift, g_len);
-    src_b = GetField(color, b_shift, b_len);
-    
-    for(; height--; y++)
-    {
-        mask = maskLine;
-        maskLine += maskStride;
-        w = width;
-        tx = x;
-
-	if(y < 0) continue;
-	if(y >= image->height) break;
-
-        for(; w--; tx++)
-        {
-	    if(tx >= image->width) break;
-
-            m = *mask++;
-	    if(tx < 0) continue;
-
-	    if (m == 0xff)
-		XPutPixel (image, tx, y, color);
-	    else if (m)
-	    {
-	        BYTE r, g, b;
-
-		pixel = XGetPixel (image, tx, y);
-
-		r = GetField(pixel, r_shift, r_len);
-		r = ((BYTE)~m * (WORD)r + (BYTE)m * (WORD)src_r) >> 8;
-		g = GetField(pixel, g_shift, g_len);
-		g = ((BYTE)~m * (WORD)g + (BYTE)m * (WORD)src_g) >> 8;
-		b = GetField(pixel, b_shift, b_len);
-		b = ((BYTE)~m * (WORD)b + (BYTE)m * (WORD)src_b) >> 8;
-
-		pixel = (PutField (r, r_shift, r_len) |
-			 PutField (g, g_shift, g_len) |
-			 PutField (b, b_shift, b_len));
-		XPutPixel (image, tx, y, pixel);
-	    }
-        }
-    }
 }
 
 /*************************************************************
@@ -1687,35 +1591,37 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
  * Returns an appropriate Picture for tiling the text colour.
  * Call and use result within the xrender_cs
  */
-static Picture get_tile_pict(const WineXRenderFormat *wxr_format, int text_pixel)
+static Picture get_tile_pict( enum wxr_format wxr_format, const XRenderColor *color)
 {
     static struct
     {
         Pixmap xpm;
         Picture pict;
-        int current_color;
+        XRenderColor current_color;
     } tiles[WXR_NB_FORMATS], *tile;
-    XRenderColor col;
 
-    tile = &tiles[wxr_format->format];
+    tile = &tiles[wxr_format];
 
     if(!tile->xpm)
     {
         XRenderPictureAttributes pa;
+        XRenderPictFormat *pict_format = pict_formats[wxr_format];
 
         wine_tsx11_lock();
-        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, wxr_format->pict_format->depth);
+        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, pict_format->depth);
 
         pa.repeat = RepeatNormal;
-        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, wxr_format->pict_format, CPRepeat, &pa);
+        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, pict_format, CPRepeat, &pa);
         wine_tsx11_unlock();
 
         /* init current_color to something different from text_pixel */
-        tile->current_color = ~text_pixel;
+        tile->current_color = *color;
+        tile->current_color.red ^= 0xffff;
 
-        if(wxr_format->format == WXR_FORMAT_MONO)
+        if (wxr_format == WXR_FORMAT_MONO)
         {
             /* for a 1bpp bitmap we always need a 1 in the tile */
+            XRenderColor col;
             col.red = col.green = col.blue = 0;
             col.alpha = 0xffff;
             wine_tsx11_lock();
@@ -1724,13 +1630,12 @@ static Picture get_tile_pict(const WineXRenderFormat *wxr_format, int text_pixel
         }
     }
 
-    if(text_pixel != tile->current_color && wxr_format->format != WXR_FORMAT_MONO)
+    if (memcmp( color, &tile->current_color, sizeof(*color) ) && wxr_format != WXR_FORMAT_MONO)
     {
-        get_xrender_color(wxr_format, text_pixel, &col);
         wine_tsx11_lock();
-        pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
+        pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, color, 0, 0, 1, 1);
         wine_tsx11_unlock();
-        tile->current_color = text_pixel;
+        tile->current_color = *color;
     }
     return tile->pict;
 }
@@ -1751,13 +1656,13 @@ static Picture get_mask_pict( int alpha )
 
     if (!pixmap)
     {
-        const WineXRenderFormat *fmt = get_xrender_format( WXR_FORMAT_A8R8G8B8 );
         XRenderPictureAttributes pa;
 
         wine_tsx11_lock();
         pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, 32 );
         pa.repeat = RepeatNormal;
-        pict = pXRenderCreatePicture( gdi_display, pixmap, fmt->pict_format, CPRepeat, &pa );
+        pict = pXRenderCreatePicture( gdi_display, pixmap,
+                                      pict_formats[WXR_FORMAT_A8R8G8B8], CPRepeat, &pa );
         wine_tsx11_unlock();
         current_alpha = -1;
     }
@@ -1774,376 +1679,212 @@ static Picture get_mask_pict( int alpha )
     return pict;
 }
 
-static int XRenderErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
-{
-    return 1;
-}
-
 /***********************************************************************
- *   X11DRV_XRender_ExtTextOut
+ *           xrenderdrv_ExtTextOut
  */
-BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
-				const RECT *lprect, LPCWSTR wstr, UINT count,
-				const INT *lpDx )
+static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
+                                   const RECT *lprect, LPCWSTR wstr, UINT count, const INT *lpDx )
 {
-    XGCValues xgcval;
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
     gsCacheEntry *entry;
     gsCacheEntryFormat *formatEntry;
-    BOOL retv = FALSE;
-    int textPixel, backgroundPixel;
-    HRGN saved_region = 0;
-    BOOL disable_antialias = FALSE;
     AA_Type aa_type = AA_None;
-    DIBSECTION bmp;
     unsigned int idx;
-    const WineXRenderFormat *dst_format = get_xrender_format_from_color_shifts(physDev->depth, physDev->color_shifts);
-    Picture tile_pict = 0;
+    Picture pict, tile_pict = 0;
+    XGlyphElt16 *elts;
+    POINT offset, desired, current;
+    int render_op = PictOpOver;
+    XRenderColor col;
 
-    /* Do we need to disable antialiasing because of palette mode? */
-    if( !physDev->bitmap || GetObjectW( physDev->bitmap->hbitmap, sizeof(bmp), &bmp ) != sizeof(bmp) ) {
-        TRACE("bitmap is not a DIB\n");
+    if (!physdev->x11dev->has_gdi_font)
+    {
+        dev = GET_NEXT_PHYSDEV( dev, pExtTextOut );
+        return dev->funcs->pExtTextOut( dev, x, y, flags, lprect, wstr, count, lpDx );
     }
-    else if (bmp.dsBmih.biBitCount <= 8) {
-        TRACE("Disabling antialiasing\n");
-        disable_antialias = TRUE;
-    }
 
-    xgcval.function = GXcopy;
-    xgcval.background = physDev->backgroundPixel;
-    xgcval.fill_style = FillSolid;
-    wine_tsx11_lock();
-    XChangeGC( gdi_display, physDev->gc, GCFunction | GCBackground | GCFillStyle, &xgcval );
-    wine_tsx11_unlock();
-
-    X11DRV_LockDIBSection( physDev, DIB_Status_GdiMod );
-
-    if(physDev->depth == 1) {
-        if((physDev->textPixel & 0xffffff) == 0) {
-	    textPixel = 0;
-	    backgroundPixel = 1;
-	} else {
-	    textPixel = 1;
-	    backgroundPixel = 0;
-	}
-    } else {
-        textPixel = physDev->textPixel;
-	backgroundPixel = physDev->backgroundPixel;
-    }
+    get_xrender_color( physdev, GetTextColor( physdev->dev.hdc ), &col );
+    pict = get_xrender_picture( physdev, 0, (flags & ETO_CLIPPED) ? lprect : NULL );
 
     if(flags & ETO_OPAQUE)
     {
+        XRenderColor bg;
+
+        if (physdev->format == WXR_FORMAT_MONO)
+            /* use the inverse of the text color */
+            bg.red = bg.green = bg.blue = bg.alpha = ~col.alpha;
+        else
+            get_xrender_color( physdev, GetBkColor( physdev->dev.hdc ), &bg );
+
         wine_tsx11_lock();
-        XSetForeground( gdi_display, physDev->gc, backgroundPixel );
-        XFillRectangle( gdi_display, physDev->drawable, physDev->gc,
-                        physDev->dc_rect.left + lprect->left, physDev->dc_rect.top + lprect->top,
-                        lprect->right - lprect->left, lprect->bottom - lprect->top );
+        set_xrender_transformation( pict, 1, 1, 0, 0 );
+        pXRenderFillRectangle( gdi_display, PictOpSrc, pict, &bg,
+                               physdev->x11dev->dc_rect.left + lprect->left,
+                               physdev->x11dev->dc_rect.top + lprect->top,
+                               lprect->right - lprect->left,
+                               lprect->bottom - lprect->top );
         wine_tsx11_unlock();
     }
 
-    if(count == 0)
-    {
-	retv = TRUE;
-        goto done_unlock;
-    }
-
-    if (flags & ETO_CLIPPED)
-    {
-        HRGN clip_region;
-
-        clip_region = CreateRectRgnIndirect( lprect );
-        /* make a copy of the current device region */
-        saved_region = CreateRectRgn( 0, 0, 0, 0 );
-        CombineRgn( saved_region, physDev->region, 0, RGN_COPY );
-        X11DRV_SetDeviceClipping( physDev, saved_region, clip_region );
-        DeleteObject( clip_region );
-    }
+    if(count == 0) return TRUE;
 
     EnterCriticalSection(&xrender_cs);
 
-    entry = glyphsetCache + physDev->xrender->cache_index;
-    if( disable_antialias == FALSE )
-        aa_type = entry->aa_default;
+    entry = glyphsetCache + physdev->cache_index;
+    aa_type = entry->aa_default;
     formatEntry = entry->format[aa_type];
 
     for(idx = 0; idx < count; idx++) {
         if( !formatEntry ) {
-	    UploadGlyph(physDev, wstr[idx], aa_type);
+	    UploadGlyph(physdev, wstr[idx], aa_type);
             /* re-evaluate antialias since aa_default may have changed */
-            if( disable_antialias == FALSE )
-                aa_type = entry->aa_default;
+            aa_type = entry->aa_default;
             formatEntry = entry->format[aa_type];
         } else if( wstr[idx] >= formatEntry->nrealized || formatEntry->realized[wstr[idx]] == FALSE) {
-	    UploadGlyph(physDev, wstr[idx], aa_type);
+	    UploadGlyph(physdev, wstr[idx], aa_type);
 	}
     }
     if (!formatEntry)
     {
         WARN("could not upload requested glyphs\n");
         LeaveCriticalSection(&xrender_cs);
-        goto done_unlock;
+        return FALSE;
     }
 
     TRACE("Writing %s at %d,%d\n", debugstr_wn(wstr,count),
-          physDev->dc_rect.left + x, physDev->dc_rect.top + y);
+          physdev->x11dev->dc_rect.left + x, physdev->x11dev->dc_rect.top + y);
 
-    if(X11DRV_XRender_Installed)
+    elts = HeapAlloc(GetProcessHeap(), 0, sizeof(XGlyphElt16) * count);
+
+    /* There's a bug in XRenderCompositeText that ignores the xDst and yDst parameters.
+       So we pass zeros to the function and move to our starting position using the first
+       element of the elts array. */
+
+    desired.x = physdev->x11dev->dc_rect.left + x;
+    desired.y = physdev->x11dev->dc_rect.top + y;
+    offset.x = offset.y = 0;
+    current.x = current.y = 0;
+
+    tile_pict = get_tile_pict(physdev->format, &col);
+
+    /* FIXME the mapping of Text/BkColor onto 1 or 0 needs investigation.
+     */
+    if (physdev->format == WXR_FORMAT_MONO && col.red == 0 && col.green == 0 && col.blue == 0)
+        render_op = PictOpOutReverse; /* This gives us 'black' text */
+
+    for(idx = 0; idx < count; idx++)
     {
-        XGlyphElt16 *elts = HeapAlloc(GetProcessHeap(), 0, sizeof(XGlyphElt16) * count);
-        POINT offset = {0, 0};
-        POINT desired, current;
-        int render_op = PictOpOver;
-        Picture pict = get_xrender_picture(physDev);
+        elts[idx].glyphset = formatEntry->glyphset;
+        elts[idx].chars = wstr + idx;
+        elts[idx].nchars = 1;
+        elts[idx].xOff = desired.x - current.x;
+        elts[idx].yOff = desired.y - current.y;
 
-        /* There's a bug in XRenderCompositeText that ignores the xDst and yDst parameters.
-           So we pass zeros to the function and move to our starting position using the first
-           element of the elts array. */
+        current.x += (elts[idx].xOff + formatEntry->gis[wstr[idx]].xOff);
+        current.y += (elts[idx].yOff + formatEntry->gis[wstr[idx]].yOff);
 
-        desired.x = physDev->dc_rect.left + x;
-        desired.y = physDev->dc_rect.top + y;
-        current.x = current.y = 0;
-
-        tile_pict = get_tile_pict(dst_format, physDev->textPixel);
-
-	/* FIXME the mapping of Text/BkColor onto 1 or 0 needs investigation.
-	 */
-	if((dst_format->format == WXR_FORMAT_MONO) && (textPixel == 0))
-	    render_op = PictOpOutReverse; /* This gives us 'black' text */
-
-        for(idx = 0; idx < count; idx++)
+        if(!lpDx)
         {
-            elts[idx].glyphset = formatEntry->glyphset;
-            elts[idx].chars = wstr + idx;
-            elts[idx].nchars = 1;
-            elts[idx].xOff = desired.x - current.x;
-            elts[idx].yOff = desired.y - current.y;
-
-            current.x += (elts[idx].xOff + formatEntry->gis[wstr[idx]].xOff);
-            current.y += (elts[idx].yOff + formatEntry->gis[wstr[idx]].yOff);
-
-            if(!lpDx)
-            {
-                desired.x += formatEntry->gis[wstr[idx]].xOff;
-                desired.y += formatEntry->gis[wstr[idx]].yOff;
-            }
-            else
-            {
-                if(flags & ETO_PDY)
-                {
-                    offset.x += lpDx[idx * 2];
-                    offset.y += lpDx[idx * 2 + 1];
-                }
-                else
-                    offset.x += lpDx[idx];
-                desired.x = physDev->dc_rect.left + x + offset.x;
-                desired.y = physDev->dc_rect.top  + y + offset.y;
-            }
+            desired.x += formatEntry->gis[wstr[idx]].xOff;
+            desired.y += formatEntry->gis[wstr[idx]].yOff;
         }
-        wine_tsx11_lock();
-        /* Make sure we don't have any transforms set from a previous call */
-        set_xrender_transformation(pict, 1, 1, 0, 0);
-        pXRenderCompositeText16(gdi_display, render_op,
-                                tile_pict,
-                                pict,
-                                formatEntry->font_format->pict_format,
-                                0, 0, 0, 0, elts, count);
-        wine_tsx11_unlock();
-        HeapFree(GetProcessHeap(), 0, elts);
-    } else {
-        POINT offset = {0, 0};
-        wine_tsx11_lock();
-	XSetForeground( gdi_display, physDev->gc, textPixel );
-
-        if(aa_type == AA_None || physDev->depth == 1)
+        else
         {
-            void (* sharp_glyph_fn)(X11DRV_PDEVICE *, INT, INT, void *, XGlyphInfo *);
-
-            if(aa_type == AA_None)
-                sharp_glyph_fn = SharpGlyphMono;
+            if(flags & ETO_PDY)
+            {
+                offset.x += lpDx[idx * 2];
+                offset.y += lpDx[idx * 2 + 1];
+            }
             else
-                sharp_glyph_fn = SharpGlyphGray;
-
-	    for(idx = 0; idx < count; idx++) {
-                sharp_glyph_fn(physDev,
-                               physDev->dc_rect.left + x + offset.x,
-                               physDev->dc_rect.top  + y + offset.y,
-			       formatEntry->bitmaps[wstr[idx]],
-			       &formatEntry->gis[wstr[idx]]);
-                if(lpDx)
-                {
-                    if(flags & ETO_PDY)
-                    {
-                        offset.x += lpDx[idx * 2];
-                        offset.y += lpDx[idx * 2 + 1];
-                    }
-                    else
-                        offset.x += lpDx[idx];
-                }
-                else
-                {
-                    offset.x += formatEntry->gis[wstr[idx]].xOff;
-                    offset.y += formatEntry->gis[wstr[idx]].yOff;
-		}
-	    }
-	} else {
-	    XImage *image;
-	    int image_x, image_y, image_off_x, image_off_y, image_w, image_h;
-	    RECT extents = {0, 0, 0, 0};
-	    POINT cur = {0, 0};
-            int w = physDev->drawable_rect.right - physDev->drawable_rect.left;
-            int h = physDev->drawable_rect.bottom - physDev->drawable_rect.top;
-
-	    TRACE("drawable %dx%d\n", w, h);
-
-	    for(idx = 0; idx < count; idx++) {
-	        if(extents.left > cur.x - formatEntry->gis[wstr[idx]].x)
-		    extents.left = cur.x - formatEntry->gis[wstr[idx]].x;
-		if(extents.top > cur.y - formatEntry->gis[wstr[idx]].y)
-		    extents.top = cur.y - formatEntry->gis[wstr[idx]].y;
-		if(extents.right < cur.x - formatEntry->gis[wstr[idx]].x + formatEntry->gis[wstr[idx]].width)
-		    extents.right = cur.x - formatEntry->gis[wstr[idx]].x + formatEntry->gis[wstr[idx]].width;
-		if(extents.bottom < cur.y - formatEntry->gis[wstr[idx]].y + formatEntry->gis[wstr[idx]].height)
-		    extents.bottom = cur.y - formatEntry->gis[wstr[idx]].y + formatEntry->gis[wstr[idx]].height;
-
-                if(lpDx)
-                {
-                    if(flags & ETO_PDY)
-                    {
-                        cur.x += lpDx[idx * 2];
-                        cur.y += lpDx[idx * 2 + 1];
-                    }
-                    else
-                        cur.x += lpDx[idx];
-                }
-                else
-                {
-                    cur.x += formatEntry->gis[wstr[idx]].xOff;
-                    cur.y += formatEntry->gis[wstr[idx]].yOff;
-		}
-	    }
-	    TRACE("glyph extents %d,%d - %d,%d drawable x,y %d,%d\n", extents.left, extents.top,
-		  extents.right, extents.bottom, physDev->dc_rect.left + x, physDev->dc_rect.top + y);
-
-	    if(physDev->dc_rect.left + x + extents.left >= 0) {
-	        image_x = physDev->dc_rect.left + x + extents.left;
-		image_off_x = 0;
-	    } else {
-	        image_x = 0;
-		image_off_x = physDev->dc_rect.left + x + extents.left;
-	    }
-	    if(physDev->dc_rect.top + y + extents.top >= 0) {
-	        image_y = physDev->dc_rect.top + y + extents.top;
-		image_off_y = 0;
-	    } else {
-	        image_y = 0;
-		image_off_y = physDev->dc_rect.top + y + extents.top;
-	    }
-	    if(physDev->dc_rect.left + x + extents.right < w)
-	        image_w = physDev->dc_rect.left + x + extents.right - image_x;
-	    else
-	        image_w = w - image_x;
-	    if(physDev->dc_rect.top + y + extents.bottom < h)
-	        image_h = physDev->dc_rect.top + y + extents.bottom - image_y;
-	    else
-	        image_h = h - image_y;
-
-	    if(image_w <= 0 || image_h <= 0) goto no_image;
-
-	    X11DRV_expect_error(gdi_display, XRenderErrorHandler, NULL);
-	    image = XGetImage(gdi_display, physDev->drawable,
-			      image_x, image_y, image_w, image_h,
-			      AllPlanes, ZPixmap);
-	    X11DRV_check_error();
-
-	    TRACE("XGetImage(%p, %x, %d, %d, %d, %d, %lx, %x) depth = %d rets %p\n",
-		  gdi_display, (int)physDev->drawable, image_x, image_y,
-		  image_w, image_h, AllPlanes, ZPixmap,
-		  physDev->depth, image);
-	    if(!image) {
-	        Pixmap xpm = XCreatePixmap(gdi_display, root_window, image_w, image_h,
-					   physDev->depth);
-		GC gc;
-		XGCValues gcv;
-
-		gcv.graphics_exposures = False;
-		gc = XCreateGC(gdi_display, xpm, GCGraphicsExposures, &gcv);
-		XCopyArea(gdi_display, physDev->drawable, xpm, gc, image_x, image_y,
-			  image_w, image_h, 0, 0);
-		XFreeGC(gdi_display, gc);
-		X11DRV_expect_error(gdi_display, XRenderErrorHandler, NULL);
-		image = XGetImage(gdi_display, xpm, 0, 0, image_w, image_h, AllPlanes,
-				  ZPixmap);
-		X11DRV_check_error();
-		XFreePixmap(gdi_display, xpm);
-	    }
-	    if(!image) goto no_image;
-
-	    image->red_mask = visual->red_mask;
-	    image->green_mask = visual->green_mask;
-	    image->blue_mask = visual->blue_mask;
-
-	    for(idx = 0; idx < count; idx++) {
-	        SmoothGlyphGray(image,
-                                offset.x + image_off_x - extents.left,
-                                offset.y + image_off_y - extents.top,
-				formatEntry->bitmaps[wstr[idx]],
-				&formatEntry->gis[wstr[idx]],
-				physDev->textPixel);
-                if(lpDx)
-                {
-                    if(flags & ETO_PDY)
-                    {
-                        offset.x += lpDx[idx * 2];
-                        offset.y += lpDx[idx * 2 + 1];
-                    }
-                    else
-                        offset.x += lpDx[idx];
-                }
-                else
-                {
-                    offset.x += formatEntry->gis[wstr[idx]].xOff;
-                    offset.y += formatEntry->gis[wstr[idx]].yOff;
-                }
-	    }
-	    XPutImage(gdi_display, physDev->drawable, physDev->gc, image, 0, 0,
-		      image_x, image_y, image_w, image_h);
-	    XDestroyImage(image);
-	}
-    no_image:
-	wine_tsx11_unlock();
+                offset.x += lpDx[idx];
+            desired.x = physdev->x11dev->dc_rect.left + x + offset.x;
+            desired.y = physdev->x11dev->dc_rect.top  + y + offset.y;
+        }
     }
+
+    wine_tsx11_lock();
+    /* Make sure we don't have any transforms set from a previous call */
+    set_xrender_transformation(pict, 1, 1, 0, 0);
+    pXRenderCompositeText16(gdi_display, render_op,
+                            tile_pict,
+                            pict,
+                            formatEntry->font_format,
+                            0, 0, 0, 0, elts, count);
+    wine_tsx11_unlock();
+    HeapFree(GetProcessHeap(), 0, elts);
+
     LeaveCriticalSection(&xrender_cs);
+    return TRUE;
+}
 
-    if (flags & ETO_CLIPPED)
-    {
-        /* restore the device region */
-        X11DRV_SetDeviceClipping( physDev, saved_region, 0 );
-        DeleteObject( saved_region );
-    }
+/* multiply the alpha channel of a picture */
+static void multiply_alpha( Picture pict, XRenderPictFormat *format, int alpha,
+                            int x, int y, int width, int height )
+{
+    XRenderPictureAttributes pa;
+    Pixmap src_pixmap, mask_pixmap;
+    Picture src_pict, mask_pict;
+    XRenderColor color;
 
-    retv = TRUE;
-
-done_unlock:
-    X11DRV_UnlockDIBSection( physDev, TRUE );
-    return retv;
+    wine_tsx11_lock();
+    src_pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, format->depth );
+    mask_pixmap = XCreatePixmap( gdi_display, root_window, 1, 1, format->depth );
+    pa.repeat = RepeatNormal;
+    src_pict = pXRenderCreatePicture( gdi_display, src_pixmap, format, CPRepeat, &pa );
+    pa.component_alpha = True;
+    mask_pict = pXRenderCreatePicture( gdi_display, mask_pixmap, format, CPRepeat|CPComponentAlpha, &pa );
+    color.red = color.green = color.blue = color.alpha = 0xffff;
+    pXRenderFillRectangle( gdi_display, PictOpSrc, src_pict, &color, 0, 0, 1, 1 );
+    color.alpha = alpha;
+    pXRenderFillRectangle( gdi_display, PictOpSrc, mask_pict, &color, 0, 0, 1, 1 );
+    pXRenderComposite( gdi_display, PictOpInReverse, src_pict, mask_pict, pict,
+                       0, 0, 0, 0, x, y, width, height );
+    pXRenderFreePicture( gdi_display, src_pict );
+    pXRenderFreePicture( gdi_display, mask_pict );
+    XFreePixmap( gdi_display, src_pixmap );
+    XFreePixmap( gdi_display, mask_pixmap );
+    wine_tsx11_unlock();
 }
 
 /* Helper function for (stretched) blitting using xrender */
 static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture dst_pict,
-                          int x_src, int y_src, int x_dst, int y_dst,
-                          double xscale, double yscale, int width, int height )
+                          int x_src, int y_src, int width_src, int height_src,
+                          int x_dst, int y_dst, int width_dst, int height_dst,
+                          double xscale, double yscale )
 {
     int x_offset, y_offset;
+
+    if (width_src < 0)
+    {
+        x_src += width_src + 1;
+        width_src = -width_src;
+    }
+    if (height_src < 0)
+    {
+        y_src += height_src + 1;
+        height_src = -height_src;
+    }
+    if (width_dst < 0)
+    {
+        x_dst += width_dst + 1;
+        width_dst = -width_dst;
+    }
+    if (height_dst < 0)
+    {
+        y_dst += height_dst + 1;
+        height_dst = -height_dst;
+    }
 
     /* When we need to scale we perform scaling and source_x / source_y translation using a transformation matrix.
      * This is needed because XRender is inaccurate in combination with scaled source coordinates passed to XRenderComposite.
      * In all other cases we do use XRenderComposite for translation as it is faster than using a transformation matrix. */
+    wine_tsx11_lock();
     if(xscale != 1.0 || yscale != 1.0)
     {
         /* In case of mirroring we need a source x- and y-offset because without the pixels will be
          * in the wrong quadrant of the x-y plane.
          */
-        x_offset = (xscale < 0) ? -width : 0;
-        y_offset = (yscale < 0) ? -height : 0;
+        x_offset = (xscale < 0) ? -width_dst : 0;
+        y_offset = (yscale < 0) ? -height_dst : 0;
         set_xrender_transformation(src_pict, xscale, yscale, x_src, y_src);
     }
     else
@@ -2153,62 +1894,137 @@ static void xrender_blit( int op, Picture src_pict, Picture mask_pict, Picture d
         set_xrender_transformation(src_pict, 1, 1, 0, 0);
     }
     pXRenderComposite( gdi_display, op, src_pict, mask_pict, dst_pict,
-                       x_offset, y_offset, 0, 0, x_dst, y_dst, width, height );
+                       x_offset, y_offset, 0, 0, x_dst, y_dst, width_dst, height_dst );
+    wine_tsx11_unlock();
 }
 
 /* Helper function for (stretched) mono->color blitting using xrender */
-static void xrender_mono_blit( Picture src_pict, Picture mask_pict, Picture dst_pict,
-                               int x_src, int y_src, double xscale, double yscale, int width, int height )
+static void xrender_mono_blit( Picture src_pict, Picture dst_pict,
+                               enum wxr_format dst_format, XRenderColor *fg, XRenderColor *bg,
+                               int x_src, int y_src, int width_src, int height_src,
+                               int x_dst, int y_dst, int width_dst, int height_dst,
+                               double xscale, double yscale )
 {
+    Picture tile_pict;
     int x_offset, y_offset;
+    XRenderColor color;
 
-    /* When doing a mono->color blit, 'src_pict' contains a 1x1 picture for tiling, the actual
-     * source data is in mask_pict.  The 'src_pict' data effectively acts as an alpha channel to the
-     * tile data. We need PictOpOver for correct rendering.
-     * Note since the 'source data' is in the mask picture, we have to pass x_src / y_src using
-     * mask_x / mask_y
+    if (width_src < 0)
+    {
+        x_src += width_src + 1;
+        width_src = -width_src;
+    }
+    if (height_src < 0)
+    {
+        y_src += height_src + 1;
+        height_src = -height_src;
+    }
+    if (width_dst < 0)
+    {
+        x_dst += width_dst + 1;
+        width_dst = -width_dst;
+    }
+    if (height_dst < 0)
+    {
+        y_dst += height_dst + 1;
+        height_dst = -height_dst;
+    }
+
+    /* When doing a mono->color blit, the source data is used as mask, and the source picture
+     * contains a 1x1 picture for tiling. The source data effectively acts as an alpha channel to
+     * the tile data.
      */
+    EnterCriticalSection( &xrender_cs );
+    color = *bg;
+    color.alpha = 0xffff;  /* tile pict needs 100% alpha */
+    tile_pict = get_tile_pict( dst_format, &color );
+
+    wine_tsx11_lock();
+    pXRenderFillRectangle( gdi_display, PictOpSrc, dst_pict, fg, x_dst, y_dst, width_dst, height_dst );
+
     if (xscale != 1.0 || yscale != 1.0)
     {
         /* In case of mirroring we need a source x- and y-offset because without the pixels will be
          * in the wrong quadrant of the x-y plane.
          */
-        x_offset = (xscale < 0) ? -width : 0;
-        y_offset = (yscale < 0) ? -height : 0;
-        set_xrender_transformation(mask_pict, xscale, yscale, x_src, y_src);
+        x_offset = (xscale < 0) ? -width_dst : 0;
+        y_offset = (yscale < 0) ? -height_dst : 0;
+        set_xrender_transformation(src_pict, xscale, yscale, x_src, y_src);
     }
     else
     {
         x_offset = x_src;
         y_offset = y_src;
-        set_xrender_transformation(mask_pict, 1, 1, 0, 0);
+        set_xrender_transformation(src_pict, 1, 1, 0, 0);
     }
-    pXRenderComposite(gdi_display, PictOpOver, src_pict, mask_pict, dst_pict,
-                      0, 0, x_offset, y_offset, 0, 0, width, height);
+    pXRenderComposite(gdi_display, PictOpOver, tile_pict, src_pict, dst_pict,
+                      0, 0, x_offset, y_offset, x_dst, y_dst, width_dst, height_dst );
+    wine_tsx11_unlock();
+    LeaveCriticalSection( &xrender_cs );
+
+    /* force the alpha channel for background pixels, it has been set to 100% by the tile */
+    if (bg->alpha != 0xffff && (dst_format == WXR_FORMAT_A8R8G8B8 || dst_format == WXR_FORMAT_B8G8R8A8))
+        multiply_alpha( dst_pict, pict_formats[dst_format], bg->alpha,
+                        x_dst, y_dst, width_dst, height_dst );
 }
 
-/******************************************************************************
- * AlphaBlend
- */
-BOOL XRender_AlphaBlend( X11DRV_PDEVICE *devDst, X11DRV_PDEVICE *devSrc,
-                         struct bitblt_coords *dst, struct bitblt_coords *src, BLENDFUNCTION blendfn )
+/* create a pixmap and render picture for an image */
+static DWORD create_image_pixmap( BITMAPINFO *info, const struct gdi_image_bits *bits,
+                                  struct bitblt_coords *src, enum wxr_format format,
+                                  Pixmap *pixmap, Picture *pict, BOOL *use_repeat )
 {
-    Picture dst_pict, src_pict = 0, mask_pict = 0, tmp_pict = 0;
-    struct xrender_info *src_info = get_xrender_info( devSrc );
-    double xscale, yscale;
+    DWORD ret;
+    int width = src->visrect.right - src->visrect.left;
+    int height = src->visrect.bottom - src->visrect.top;
+    int depth = pict_formats[format]->depth;
+    struct gdi_image_bits dst_bits;
+    XRenderPictureAttributes pa;
+    XImage *image;
+
+    wine_tsx11_lock();
+    image = XCreateImage( gdi_display, visual, depth, ZPixmap, 0, NULL,
+                          info->bmiHeader.biWidth, height, 32, 0 );
+    wine_tsx11_unlock();
+    if (!image) return ERROR_OUTOFMEMORY;
+
+    ret = copy_image_bits( info, (format == WXR_FORMAT_R8G8B8), image, bits, &dst_bits, src, NULL, ~0u );
+    if (ret) return ret;
+
+    image->data = dst_bits.ptr;
+
+    *use_repeat = (width == 1 && height == 1);
+    pa.repeat = *use_repeat ? RepeatNormal : RepeatNone;
+
+    wine_tsx11_lock();
+    *pixmap = XCreatePixmap( gdi_display, root_window, width, height, depth );
+    XPutImage( gdi_display, *pixmap, get_bitmap_gc( depth ), image,
+               src->visrect.left, 0, 0, 0, width, height );
+    *pict = pXRenderCreatePicture( gdi_display, *pixmap, pict_formats[format], CPRepeat, &pa );
+    wine_tsx11_unlock();
+
+    /* make coordinates relative to the pixmap */
+    src->x -= src->visrect.left;
+    src->y -= src->visrect.top;
+    OffsetRect( &src->visrect, -src->visrect.left, -src->visrect.top );
+
+    image->data = NULL;
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
+    if (dst_bits.free) dst_bits.free( &dst_bits );
+    return ret;
+}
+
+static void xrender_stretch_blit( struct xrender_physdev *physdev_src, struct xrender_physdev *physdev_dst,
+                                  Drawable drawable, const struct bitblt_coords *src,
+                                  const struct bitblt_coords *dst )
+{
+    int x_dst, y_dst;
+    Picture src_pict = 0, dst_pict, mask_pict = 0;
     BOOL use_repeat;
+    double xscale, yscale;
 
-    if(!X11DRV_XRender_Installed) {
-        FIXME("Unable to AlphaBlend without Xrender\n");
-        return FALSE;
-    }
-
-    if (devSrc != devDst) X11DRV_LockDIBSection( devSrc, DIB_Status_GdiMod );
-    X11DRV_LockDIBSection( devDst, DIB_Status_GdiMod );
-
-    dst_pict = get_xrender_picture( devDst );
-
-    use_repeat = use_source_repeat( devSrc );
+    use_repeat = use_source_repeat( physdev_src );
     if (!use_repeat)
     {
         xscale = src->width / (double)dst->width;
@@ -2216,248 +2032,764 @@ BOOL XRender_AlphaBlend( X11DRV_PDEVICE *devDst, X11DRV_PDEVICE *devSrc,
     }
     else xscale = yscale = 1;  /* no scaling needed with a repeating source */
 
-    if (!(blendfn.AlphaFormat & AC_SRC_ALPHA) && src_info->format)
+    if (drawable)  /* using an intermediate pixmap */
+    {
+        XRenderPictureAttributes pa;
+
+        x_dst = dst->x;
+        y_dst = dst->y;
+        pa.repeat = RepeatNone;
+        wine_tsx11_lock();
+        dst_pict = pXRenderCreatePicture( gdi_display, drawable, physdev_dst->pict_format, CPRepeat, &pa );
+        wine_tsx11_unlock();
+    }
+    else
+    {
+        x_dst = physdev_dst->x11dev->dc_rect.left + dst->x;
+        y_dst = physdev_dst->x11dev->dc_rect.top + dst->y;
+        dst_pict = get_xrender_picture( physdev_dst, 0, &dst->visrect );
+    }
+
+    src_pict = get_xrender_picture_source( physdev_src, use_repeat );
+
+    /* mono -> color */
+    if (physdev_src->format == WXR_FORMAT_MONO && physdev_dst->format != WXR_FORMAT_MONO)
+    {
+        XRenderColor fg, bg;
+
+        get_xrender_color( physdev_dst, GetTextColor( physdev_dst->dev.hdc ), &fg );
+        get_xrender_color( physdev_dst, GetBkColor( physdev_dst->dev.hdc ), &bg );
+        fg.alpha = bg.alpha = 0;
+
+        xrender_mono_blit( src_pict, dst_pict, physdev_dst->format, &fg, &bg,
+                           physdev_src->x11dev->dc_rect.left + src->x,
+                           physdev_src->x11dev->dc_rect.top + src->y,
+                           src->width, src->height, x_dst, y_dst, dst->width, dst->height, xscale, yscale );
+    }
+    else /* color -> color (can be at different depths) or mono -> mono */
+    {
+        if (physdev_dst->pict_format->depth == 32 && physdev_src->pict_format->depth < 32)
+            mask_pict = get_no_alpha_mask();
+
+        xrender_blit( PictOpSrc, src_pict, mask_pict, dst_pict,
+                      physdev_src->x11dev->dc_rect.left + src->x,
+                      physdev_src->x11dev->dc_rect.top + src->y,
+                      src->width, src->height, x_dst, y_dst, dst->width, dst->height, xscale, yscale );
+    }
+
+    if (drawable)
+    {
+        wine_tsx11_lock();
+        pXRenderFreePicture( gdi_display, dst_pict );
+        wine_tsx11_unlock();
+    }
+}
+
+
+static void xrender_put_image( Pixmap src_pixmap, Picture src_pict, Picture mask_pict, HRGN clip,
+                               XRenderPictFormat *dst_format, struct xrender_physdev *physdev,
+                               Drawable drawable, struct bitblt_coords *src,
+                               struct bitblt_coords *dst, BOOL use_repeat )
+{
+    int x_dst, y_dst;
+    Picture dst_pict;
+    XRenderPictureAttributes pa;
+    double xscale, yscale;
+
+    if (drawable)  /* using an intermediate pixmap */
+    {
+        RGNDATA *clip_data = NULL;
+
+        if (clip) clip_data = X11DRV_GetRegionData( clip, 0 );
+        x_dst = dst->x;
+        y_dst = dst->y;
+        pa.repeat = RepeatNone;
+        wine_tsx11_lock();
+        dst_pict = pXRenderCreatePicture( gdi_display, drawable, dst_format, CPRepeat, &pa );
+        if (clip_data)
+            pXRenderSetPictureClipRectangles( gdi_display, dst_pict, 0, 0,
+                                              (XRectangle *)clip_data->Buffer, clip_data->rdh.nCount );
+        wine_tsx11_unlock();
+        HeapFree( GetProcessHeap(), 0, clip_data );
+    }
+    else
+    {
+        x_dst = physdev->x11dev->dc_rect.left + dst->x;
+        y_dst = physdev->x11dev->dc_rect.top + dst->y;
+        dst_pict = get_xrender_picture( physdev, clip, &dst->visrect );
+    }
+
+    if (!use_repeat)
+    {
+        xscale = src->width / (double)dst->width;
+        yscale = src->height / (double)dst->height;
+    }
+    else xscale = yscale = 1;  /* no scaling needed with a repeating source */
+
+    xrender_blit( PictOpSrc, src_pict, mask_pict, dst_pict, src->x, src->y, src->width, src->height,
+                  x_dst, y_dst, dst->width, dst->height, xscale, yscale );
+
+    if (drawable)
+    {
+        wine_tsx11_lock();
+        pXRenderFreePicture( gdi_display, dst_pict );
+        wine_tsx11_unlock();
+    }
+}
+
+
+/***********************************************************************
+ *           xrenderdrv_StretchBlt
+ */
+static BOOL xrenderdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                                   PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
+{
+    struct xrender_physdev *physdev_dst = get_xrender_dev( dst_dev );
+    struct xrender_physdev *physdev_src = get_xrender_dev( src_dev );
+    BOOL stretch = (src->width != dst->width) || (src->height != dst->height);
+
+    if (src_dev->funcs != dst_dev->funcs)
+    {
+        dst_dev = GET_NEXT_PHYSDEV( dst_dev, pStretchBlt );
+        return dst_dev->funcs->pStretchBlt( dst_dev, dst, src_dev, src, rop );
+    }
+
+    /* XRender is of no use for color -> mono */
+    if (physdev_dst->format == WXR_FORMAT_MONO && physdev_src->format != WXR_FORMAT_MONO)
+        goto x11drv_fallback;
+
+    /* if not stretching, we only need to handle format conversion */
+    if (!stretch && physdev_dst->format == physdev_src->format) goto x11drv_fallback;
+
+    if (rop != SRCCOPY)
+    {
+        GC tmpGC;
+        Pixmap tmp_pixmap;
+        struct bitblt_coords tmp;
+
+        /* make coordinates relative to tmp pixmap */
+        tmp = *dst;
+        tmp.x -= tmp.visrect.left;
+        tmp.y -= tmp.visrect.top;
+        OffsetRect( &tmp.visrect, -tmp.visrect.left, -tmp.visrect.top );
+
+        wine_tsx11_lock();
+        tmpGC = XCreateGC( gdi_display, physdev_dst->x11dev->drawable, 0, NULL );
+        XSetSubwindowMode( gdi_display, tmpGC, IncludeInferiors );
+        XSetGraphicsExposures( gdi_display, tmpGC, False );
+        tmp_pixmap = XCreatePixmap( gdi_display, root_window, tmp.visrect.right - tmp.visrect.left,
+                                    tmp.visrect.bottom - tmp.visrect.top, physdev_dst->pict_format->depth );
+        wine_tsx11_unlock();
+
+        xrender_stretch_blit( physdev_src, physdev_dst, tmp_pixmap, src, &tmp );
+        execute_rop( physdev_dst->x11dev, tmp_pixmap, tmpGC, &dst->visrect, rop );
+
+        wine_tsx11_lock();
+        XFreePixmap( gdi_display, tmp_pixmap );
+        XFreeGC( gdi_display, tmpGC );
+        wine_tsx11_unlock();
+    }
+    else xrender_stretch_blit( physdev_src, physdev_dst, 0, src, dst );
+
+    return TRUE;
+
+x11drv_fallback:
+    return X11DRV_StretchBlt( &physdev_dst->x11dev->dev, dst, &physdev_src->x11dev->dev, src, rop );
+}
+
+
+/***********************************************************************
+ *           xrenderdrv_PutImage
+ */
+static DWORD xrenderdrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+                                  const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                                  struct bitblt_coords *dst, DWORD rop )
+{
+    struct xrender_physdev *physdev;
+    X_PHYSBITMAP *bitmap;
+    DWORD ret;
+    Pixmap tmp_pixmap;
+    GC gc;
+    enum wxr_format src_format, dst_format;
+    XRenderPictFormat *pict_format;
+    Pixmap src_pixmap;
+    Picture src_pict, mask_pict = 0;
+    BOOL use_repeat;
+
+    if (hbitmap)
+    {
+        if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
+        physdev = NULL;
+        dst_format = bitmap->format;
+    }
+    else
+    {
+        physdev = get_xrender_dev( dev );
+        bitmap = NULL;
+        dst_format = physdev->format;
+    }
+
+    src_format = get_xrender_format_from_bitmapinfo( info );
+    if (!(pict_format = pict_formats[src_format])) goto update_format;
+
+    /* make sure we can create an image with the same bpp */
+    if (info->bmiHeader.biBitCount != pixmap_formats[pict_format->depth]->bits_per_pixel)
+        goto update_format;
+
+    /* mono <-> color conversions not supported */
+    if ((src_format != dst_format) && (src_format == WXR_FORMAT_MONO || dst_format == WXR_FORMAT_MONO))
+        goto x11drv_fallback;
+
+    if (!bits) return ERROR_SUCCESS;  /* just querying the format */
+
+    if (!has_alpha( src_format ) && has_alpha( dst_format )) mask_pict = get_no_alpha_mask();
+
+    ret = create_image_pixmap( info, bits, src, src_format, &src_pixmap, &src_pict, &use_repeat );
+    if (!ret)
+    {
+        struct bitblt_coords tmp;
+
+        if (bitmap)
+        {
+            HRGN rgn = CreateRectRgnIndirect( &dst->visrect );
+            if (clip) CombineRgn( rgn, rgn, clip, RGN_AND );
+
+            xrender_put_image( src_pixmap, src_pict, mask_pict, rgn,
+                               pict_formats[dst_format], NULL, bitmap->pixmap, src, dst, use_repeat );
+            DeleteObject( rgn );
+        }
+        else
+        {
+            if (rop != SRCCOPY)
+            {
+                BOOL restore_region = add_extra_clipping_region( physdev->x11dev, clip );
+
+                /* make coordinates relative to tmp pixmap */
+                tmp = *dst;
+                tmp.x -= tmp.visrect.left;
+                tmp.y -= tmp.visrect.top;
+                OffsetRect( &tmp.visrect, -tmp.visrect.left, -tmp.visrect.top );
+
+                wine_tsx11_lock();
+                gc = XCreateGC( gdi_display, physdev->x11dev->drawable, 0, NULL );
+                XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
+                XSetGraphicsExposures( gdi_display, gc, False );
+                tmp_pixmap = XCreatePixmap( gdi_display, root_window,
+                                            tmp.visrect.right - tmp.visrect.left,
+                                            tmp.visrect.bottom - tmp.visrect.top,
+                                            physdev->pict_format->depth );
+                wine_tsx11_unlock();
+
+                xrender_put_image( src_pixmap, src_pict, mask_pict, NULL, physdev->pict_format,
+                                   NULL, tmp_pixmap, src, &tmp, use_repeat );
+                execute_rop( physdev->x11dev, tmp_pixmap, gc, &dst->visrect, rop );
+
+                wine_tsx11_lock();
+                XFreePixmap( gdi_display, tmp_pixmap );
+                XFreeGC( gdi_display, gc );
+                wine_tsx11_unlock();
+
+                if (restore_region) restore_clipping_region( physdev->x11dev );
+            }
+            else xrender_put_image( src_pixmap, src_pict, mask_pict, clip,
+                                    physdev->pict_format, physdev, 0, src, dst, use_repeat );
+        }
+
+        wine_tsx11_lock();
+        pXRenderFreePicture( gdi_display, src_pict );
+        XFreePixmap( gdi_display, src_pixmap );
+        wine_tsx11_unlock();
+    }
+    return ret;
+
+update_format:
+    if (info->bmiHeader.biHeight > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
+    set_color_info( pict_formats[dst_format], info );
+    return ERROR_BAD_FORMAT;
+
+x11drv_fallback:
+    if (hbitmap) return X11DRV_PutImage( dev, hbitmap, clip, info, bits, src, dst, rop );
+    dev = GET_NEXT_PHYSDEV( dev, pPutImage );
+    return dev->funcs->pPutImage( dev, hbitmap, clip, info, bits, src, dst, rop );
+}
+
+
+/***********************************************************************
+ *           xrenderdrv_BlendImage
+ */
+static DWORD xrenderdrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct gdi_image_bits *bits,
+                                    struct bitblt_coords *src, struct bitblt_coords *dst,
+                                    BLENDFUNCTION func )
+{
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+    DWORD ret;
+    enum wxr_format format;
+    XRenderPictFormat *pict_format;
+    Picture dst_pict, src_pict, mask_pict;
+    Pixmap src_pixmap;
+    BOOL use_repeat;
+
+    format = get_xrender_format_from_bitmapinfo( info );
+    if (!(func.AlphaFormat & AC_SRC_ALPHA))
+        format = get_format_without_alpha( format );
+    else if (format != WXR_FORMAT_A8R8G8B8)
+        return ERROR_INVALID_PARAMETER;
+
+    if (!(pict_format = pict_formats[format])) goto update_format;
+
+    /* make sure we can create an image with the same bpp */
+    if (info->bmiHeader.biBitCount != pixmap_formats[pict_format->depth]->bits_per_pixel)
+        goto update_format;
+
+    if (format == WXR_FORMAT_MONO && physdev->format != WXR_FORMAT_MONO)
+        goto update_format;
+
+    if (!bits) return ERROR_SUCCESS;  /* just querying the format */
+
+    ret = create_image_pixmap( info, bits, src, format, &src_pixmap, &src_pict, &use_repeat );
+    if (!ret)
+    {
+        double xscale, yscale;
+
+        if (!use_repeat)
+        {
+            xscale = src->width / (double)dst->width;
+            yscale = src->height / (double)dst->height;
+        }
+        else xscale = yscale = 1;  /* no scaling needed with a repeating source */
+
+        dst_pict = get_xrender_picture( physdev, 0, &dst->visrect );
+
+        EnterCriticalSection( &xrender_cs );
+        mask_pict = get_mask_pict( func.SourceConstantAlpha * 257 );
+
+        xrender_blit( PictOpOver, src_pict, mask_pict, dst_pict,
+                      src->x, src->y, src->width, src->height,
+                      physdev->x11dev->dc_rect.left + dst->x,
+                      physdev->x11dev->dc_rect.top + dst->y,
+                      dst->width, dst->height, xscale, yscale );
+
+        wine_tsx11_lock();
+        pXRenderFreePicture( gdi_display, src_pict );
+        XFreePixmap( gdi_display, src_pixmap );
+        wine_tsx11_unlock();
+
+        LeaveCriticalSection( &xrender_cs );
+    }
+    return ret;
+
+update_format:
+    if (info->bmiHeader.biHeight > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
+    set_color_info( physdev->pict_format, info );
+    return ERROR_BAD_FORMAT;
+}
+
+
+/***********************************************************************
+ *           xrenderdrv_AlphaBlend
+ */
+static BOOL xrenderdrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                                   PHYSDEV src_dev, struct bitblt_coords *src, BLENDFUNCTION blendfn )
+{
+    struct xrender_physdev *physdev_dst = get_xrender_dev( dst_dev );
+    struct xrender_physdev *physdev_src = get_xrender_dev( src_dev );
+    Picture dst_pict, src_pict = 0, mask_pict = 0, tmp_pict = 0;
+    XRenderPictureAttributes pa;
+    Pixmap tmp_pixmap = 0;
+    double xscale, yscale;
+    BOOL use_repeat;
+
+    if (src_dev->funcs != dst_dev->funcs)
+    {
+        dst_dev = GET_NEXT_PHYSDEV( dst_dev, pAlphaBlend );
+        return dst_dev->funcs->pAlphaBlend( dst_dev, dst, src_dev, src, blendfn );
+    }
+
+    if ((blendfn.AlphaFormat & AC_SRC_ALPHA) && physdev_src->format != WXR_FORMAT_A8R8G8B8)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    dst_pict = get_xrender_picture( physdev_dst, 0, &dst->visrect );
+
+    use_repeat = use_source_repeat( physdev_src );
+    if (!use_repeat)
+    {
+        xscale = src->width / (double)dst->width;
+        yscale = src->height / (double)dst->height;
+    }
+    else xscale = yscale = 1;  /* no scaling needed with a repeating source */
+
+    src_pict = get_xrender_picture_source( physdev_src, use_repeat );
+
+    if (physdev_src->format == WXR_FORMAT_MONO && physdev_dst->format != WXR_FORMAT_MONO)
+    {
+        /* mono -> color blending needs an intermediate color pixmap */
+        XRenderColor fg, bg;
+        int width = src->visrect.right - src->visrect.left;
+        int height = src->visrect.bottom - src->visrect.top;
+
+        /* blending doesn't use the destination DC colors */
+        fg.red = fg.green = fg.blue = 0;
+        bg.red = bg.green = bg.blue = 0xffff;
+        fg.alpha = bg.alpha = 0xffff;
+
+        wine_tsx11_lock();
+        tmp_pixmap = XCreatePixmap( gdi_display, root_window, width, height,
+                                    physdev_dst->pict_format->depth );
+        pa.repeat = use_repeat ? RepeatNormal : RepeatNone;
+        tmp_pict = pXRenderCreatePicture( gdi_display, tmp_pixmap, physdev_dst->pict_format,
+                                          CPRepeat, &pa );
+        wine_tsx11_unlock();
+
+        xrender_mono_blit( src_pict, tmp_pict, physdev_dst->format, &fg, &bg,
+                           src->visrect.left, src->visrect.top, width, height, 0, 0, width, height, 1, 1 );
+    }
+    else if (!(blendfn.AlphaFormat & AC_SRC_ALPHA) && physdev_src->pict_format)
     {
         /* we need a source picture with no alpha */
-        WXRFormat format = get_format_without_alpha( src_info->format->format );
-        if (format != src_info->format->format)
+        enum wxr_format format = get_format_without_alpha( physdev_src->format );
+        if (format != physdev_src->format)
         {
-            XRenderPictureAttributes pa;
-            const WineXRenderFormat *fmt = get_xrender_format( format );
-
             wine_tsx11_lock();
             pa.subwindow_mode = IncludeInferiors;
             pa.repeat = use_repeat ? RepeatNormal : RepeatNone;
-            tmp_pict = pXRenderCreatePicture( gdi_display, devSrc->drawable, fmt->pict_format,
-                                              CPSubwindowMode|CPRepeat, &pa );
+            tmp_pict = pXRenderCreatePicture( gdi_display, physdev_src->x11dev->drawable,
+                                              pict_formats[format], CPSubwindowMode|CPRepeat, &pa );
             wine_tsx11_unlock();
-            src_pict = tmp_pict;
         }
     }
 
-    if (!src_pict) src_pict = get_xrender_picture_source( devSrc, use_repeat );
+    if (tmp_pict) src_pict = tmp_pict;
 
     EnterCriticalSection( &xrender_cs );
     mask_pict = get_mask_pict( blendfn.SourceConstantAlpha * 257 );
 
-    wine_tsx11_lock();
     xrender_blit( PictOpOver, src_pict, mask_pict, dst_pict,
-                  devSrc->dc_rect.left + src->visrect.left, devSrc->dc_rect.top + src->visrect.top,
-                  devDst->dc_rect.left + dst->visrect.left, devDst->dc_rect.top + dst->visrect.top,
-                  xscale, yscale,
-                  dst->visrect.right - dst->visrect.left, dst->visrect.bottom - dst->visrect.top );
+                  physdev_src->x11dev->dc_rect.left + src->x,
+                  physdev_src->x11dev->dc_rect.top + src->y,
+                  src->width, src->height,
+                  physdev_dst->x11dev->dc_rect.left + dst->x,
+                  physdev_dst->x11dev->dc_rect.top + dst->y,
+                  dst->width, dst->height, xscale, yscale );
+
+    wine_tsx11_lock();
     if (tmp_pict) pXRenderFreePicture( gdi_display, tmp_pict );
+    if (tmp_pixmap) XFreePixmap( gdi_display, tmp_pixmap );
     wine_tsx11_unlock();
 
     LeaveCriticalSection( &xrender_cs );
-    if (devSrc != devDst) X11DRV_UnlockDIBSection( devSrc, FALSE );
-    X11DRV_UnlockDIBSection( devDst, TRUE );
     return TRUE;
 }
 
-
-void X11DRV_XRender_CopyBrush(X11DRV_PDEVICE *physDev, X_PHYSBITMAP *physBitmap, int width, int height)
+/***********************************************************************
+ *           xrenderdrv_GradientFill
+ */
+static BOOL xrenderdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
+                                     void * grad_array, ULONG ngrad, ULONG mode )
 {
-    /* At depths >1, the depth of physBitmap and physDev might not be the same e.g. the physbitmap might be a 16-bit DIB while the physdev uses 24-bit */
-    int depth = physBitmap->pixmap_depth == 1 ? 1 : physDev->depth;
-    const WineXRenderFormat *src_format = get_xrender_format_from_color_shifts(physBitmap->pixmap_depth, &physBitmap->pixmap_color_shifts);
-    const WineXRenderFormat *dst_format = get_xrender_format_from_color_shifts(physDev->depth, physDev->color_shifts);
+#ifdef HAVE_XRENDERCREATELINEARGRADIENT
+    static const XFixed stops[2] = { 0, 1 << 16 };
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+    XLinearGradient gradient;
+    XRenderColor colors[2];
+    Picture src_pict, dst_pict;
+    unsigned int i;
+    const GRADIENT_RECT *rect = grad_array;
+    POINT pt[2];
 
-    wine_tsx11_lock();
-    physDev->brush.pixmap = XCreatePixmap(gdi_display, root_window, width, height, depth);
+    if (!pXRenderCreateLinearGradient) goto fallback;
 
-    /* Use XCopyArea when the physBitmap and brush.pixmap have the same format. */
-    if( (physBitmap->pixmap_depth == 1) || (!X11DRV_XRender_Installed && physDev->depth == physBitmap->pixmap_depth) ||
-        (src_format->format == dst_format->format) )
+    /* <= 16-bpp uses dithering */
+    if (!physdev->pict_format || physdev->pict_format->depth <= 16) goto fallback;
+
+    switch (mode)
     {
-        XCopyArea( gdi_display, physBitmap->pixmap, physDev->brush.pixmap,
-                   get_bitmap_gc(physBitmap->pixmap_depth), 0, 0, width, height, 0, 0 );
-    }
-    else /* We need depth conversion */
-    {
-        Picture src_pict, dst_pict;
-        XRenderPictureAttributes pa;
-        pa.subwindow_mode = IncludeInferiors;
-        pa.repeat = RepeatNone;
+    case GRADIENT_FILL_RECT_H:
+    case GRADIENT_FILL_RECT_V:
+        for (i = 0; i < ngrad; i++, rect++)
+        {
+            const TRIVERTEX *v1 = vert_array + rect->UpperLeft;
+            const TRIVERTEX *v2 = vert_array + rect->LowerRight;
 
-        src_pict = pXRenderCreatePicture(gdi_display, physBitmap->pixmap, src_format->pict_format, CPSubwindowMode|CPRepeat, &pa);
-        dst_pict = pXRenderCreatePicture(gdi_display, physDev->brush.pixmap, dst_format->pict_format, CPSubwindowMode|CPRepeat, &pa);
+            colors[0].red   = v1->Red * 257 / 256;
+            colors[0].green = v1->Green * 257 / 256;
+            colors[0].blue  = v1->Blue * 257 / 256;
+            colors[1].red   = v2->Red * 257 / 256;
+            colors[1].green = v2->Green * 257 / 256;
+            colors[1].blue  = v2->Blue * 257 / 256;
+            /* always ignore alpha since otherwise xrender will want to pre-multiply the colors */
+            colors[0].alpha = colors[1].alpha = 65535;
 
-        xrender_blit(PictOpSrc, src_pict, 0, dst_pict, 0, 0, 0, 0, 1.0, 1.0, width, height);
-        pXRenderFreePicture(gdi_display, src_pict);
-        pXRenderFreePicture(gdi_display, dst_pict);
-    }
-    wine_tsx11_unlock();
-}
+            pt[0].x = v1->x;
+            pt[0].y = v1->y;
+            pt[1].x = v2->x;
+            pt[1].y = v2->y;
+            LPtoDP( dev->hdc, pt, 2 );
+            if (mode == GRADIENT_FILL_RECT_H)
+            {
+                gradient.p1.y = gradient.p2.y = 0;
+                if (pt[1].x > pt[0].x)
+                {
+                    gradient.p1.x = 0;
+                    gradient.p2.x = (pt[1].x - pt[0].x) << 16;
+                }
+                else
+                {
+                    gradient.p1.x = (pt[0].x - pt[1].x) << 16;
+                    gradient.p2.x = 0;
+                }
+            }
+            else
+            {
+                gradient.p1.x = gradient.p2.x = 0;
+                if (pt[1].y > pt[0].y)
+                {
+                    gradient.p1.y = 0;
+                    gradient.p2.y = (pt[1].y - pt[0].y) << 16;
+                }
+                else
+                {
+                    gradient.p1.y = (pt[0].y - pt[1].y) << 16;
+                    gradient.p2.y = 0;
+                }
+            }
 
-BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                                      Pixmap pixmap, GC gc,
-                                      const struct bitblt_coords *src, const struct bitblt_coords *dst )
-{
-    BOOL stretch = (src->width != dst->width) || (src->height != dst->height);
-    int width = dst->visrect.right - dst->visrect.left;
-    int height = dst->visrect.bottom - dst->visrect.top;
-    int x_src = physDevSrc->dc_rect.left + src->visrect.left;
-    int y_src = physDevSrc->dc_rect.top + src->visrect.top;
-    struct xrender_info *src_info = get_xrender_info(physDevSrc);
-    const WineXRenderFormat *dst_format = get_xrender_format_from_color_shifts(physDevDst->depth, physDevDst->color_shifts);
-    Picture src_pict=0, dst_pict=0, mask_pict=0;
-    BOOL use_repeat;
-    double xscale, yscale;
+            TRACE( "%u gradient %d,%d - %d,%d colors %04x,%04x,%04x,%04x -> %04x,%04x,%04x,%04x\n",
+                   mode, pt[0].x, pt[0].y, pt[1].x, pt[1].y,
+                   colors[0].red, colors[0].green, colors[0].blue, colors[0].alpha,
+                   colors[1].red, colors[1].green, colors[1].blue, colors[1].alpha );
 
-    XRenderPictureAttributes pa;
-    pa.subwindow_mode = IncludeInferiors;
-    pa.repeat = RepeatNone;
+            dst_pict = get_xrender_picture( physdev, 0, NULL );
 
-    TRACE("src depth=%d widthSrc=%d heightSrc=%d xSrc=%d ySrc=%d\n",
-          physDevSrc->depth, src->width, src->height, x_src, y_src);
-    TRACE("dst depth=%d widthDst=%d heightDst=%d\n", physDevDst->depth, dst->width, dst->height);
-
-    if(!X11DRV_XRender_Installed)
-    {
-        TRACE("Not using XRender since it is not available or disabled\n");
-        return FALSE;
-    }
-
-    /* XRender can't handle palettes, so abort */
-    if(X11DRV_PALETTE_XPixelToPalette)
-        return FALSE;
-
-    /* XRender is of no use in this case */
-    if((physDevDst->depth == 1) && (physDevSrc->depth > 1))
-        return FALSE;
-
-    /* Just use traditional X copy when the formats match and we don't need stretching */
-    if((src_info->format->format == dst_format->format) && !stretch)
-    {
-        TRACE("Source and destination depth match and no stretching needed falling back to XCopyArea\n");
-        wine_tsx11_lock();
-        XCopyArea( gdi_display, physDevSrc->drawable, pixmap, gc, x_src, y_src, width, height, 0, 0);
-        wine_tsx11_unlock();
+            wine_tsx11_lock();
+            src_pict = pXRenderCreateLinearGradient( gdi_display, &gradient, stops, colors, 2 );
+            xrender_blit( PictOpSrc, src_pict, 0, dst_pict,
+                          0, 0, abs(pt[1].x - pt[0].x), abs(pt[1].y - pt[0].y),
+                          physdev->x11dev->dc_rect.left + min( pt[0].x, pt[1].x ),
+                          physdev->x11dev->dc_rect.top + min( pt[0].y, pt[1].y ),
+                          abs(pt[1].x - pt[0].x), abs(pt[1].y - pt[0].y), 1, 1 );
+            pXRenderFreePicture( gdi_display, src_pict );
+            wine_tsx11_unlock();
+        }
         return TRUE;
     }
 
-    use_repeat = use_source_repeat( physDevSrc );
-    if (!use_repeat)
-    {
-        xscale = src->width / (double)dst->width;
-        yscale = src->height / (double)dst->height;
-    }
-    else xscale = yscale = 1;  /* no scaling needed with a repeating source */
-
-    /* mono -> color */
-    if(physDevSrc->depth == 1 && physDevDst->depth > 1)
-    {
-        XRenderColor col;
-        get_xrender_color(dst_format, physDevDst->textPixel, &col);
-
-        /* We use the source drawable as a mask */
-        mask_pict = get_xrender_picture_source( physDevSrc, use_repeat );
-
-        /* Use backgroundPixel as the foreground color */
-        EnterCriticalSection( &xrender_cs );
-        src_pict = get_tile_pict(dst_format, physDevDst->backgroundPixel);
-
-        /* Create a destination picture and fill it with textPixel color as the background color */
-        wine_tsx11_lock();
-        dst_pict = pXRenderCreatePicture(gdi_display, pixmap, dst_format->pict_format, CPSubwindowMode|CPRepeat, &pa);
-        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &col, 0, 0, width, height);
-
-        xrender_mono_blit(src_pict, mask_pict, dst_pict, x_src, y_src, xscale, yscale, width, height);
-
-        if(dst_pict) pXRenderFreePicture(gdi_display, dst_pict);
-        wine_tsx11_unlock();
-        LeaveCriticalSection( &xrender_cs );
-    }
-    else /* color -> color (can be at different depths) or mono -> mono */
-    {
-        if (physDevDst->depth == 32 && physDevSrc->depth < 32) mask_pict = get_no_alpha_mask();
-        src_pict = get_xrender_picture_source( physDevSrc, use_repeat );
-
-        wine_tsx11_lock();
-        dst_pict = pXRenderCreatePicture(gdi_display,
-                                          pixmap, dst_format->pict_format,
-                                          CPSubwindowMode|CPRepeat, &pa);
-
-        xrender_blit(PictOpSrc, src_pict, mask_pict, dst_pict,
-                     x_src, y_src, 0, 0, xscale, yscale, width, height);
-
-        if(dst_pict) pXRenderFreePicture(gdi_display, dst_pict);
-        wine_tsx11_unlock();
-    }
-    return TRUE;
+fallback:
+#endif
+    dev = GET_NEXT_PHYSDEV( dev, pGradientFill );
+    return dev->funcs->pGradientFill( dev, vert_array, nvert, grad_array, ngrad, mode );
 }
+
+/***********************************************************************
+ *           xrenderdrv_SelectBrush
+ */
+static HBRUSH xrenderdrv_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern )
+{
+    struct xrender_physdev *physdev = get_xrender_dev( dev );
+    X_PHYSBITMAP *physbitmap;
+    BOOL delete_bitmap = FALSE;
+    BITMAP bm;
+    HBITMAP bitmap;
+    Pixmap pixmap;
+    XRenderPictFormat *pict_format;
+    Picture src_pict, dst_pict;
+    XRenderPictureAttributes pa;
+
+    if (!pattern) goto x11drv_fallback;
+    if (physdev->format == WXR_FORMAT_MONO) goto x11drv_fallback;
+
+    bitmap = pattern->bitmap;
+    if (!bitmap || !(physbitmap = X11DRV_get_phys_bitmap( bitmap )))
+    {
+        if (!(bitmap = create_brush_bitmap( physdev->x11dev, pattern ))) return 0;
+        physbitmap = X11DRV_get_phys_bitmap( bitmap );
+        delete_bitmap = TRUE;
+    }
+
+    if (physbitmap->format == WXR_FORMAT_MONO) goto x11drv_fallback;
+    if (!(pict_format = pict_formats[physbitmap->format])) goto x11drv_fallback;
+
+    GetObjectW( bitmap, sizeof(bm), &bm );
+
+    wine_tsx11_lock();
+    pixmap = XCreatePixmap( gdi_display, root_window, bm.bmWidth, bm.bmHeight,
+                            physdev->pict_format->depth );
+
+    pa.repeat = RepeatNone;
+    src_pict = pXRenderCreatePicture(gdi_display, physbitmap->pixmap, pict_format, CPRepeat, &pa);
+    dst_pict = pXRenderCreatePicture(gdi_display, pixmap, physdev->pict_format, CPRepeat, &pa);
+
+    xrender_blit( PictOpSrc, src_pict, 0, dst_pict, 0, 0, bm.bmWidth, bm.bmHeight,
+                  0, 0, bm.bmWidth, bm.bmHeight, 1.0, 1.0 );
+    pXRenderFreePicture( gdi_display, src_pict );
+    pXRenderFreePicture( gdi_display, dst_pict );
+
+    if (physdev->x11dev->brush.pixmap) XFreePixmap( gdi_display, physdev->x11dev->brush.pixmap );
+    physdev->x11dev->brush.pixmap = pixmap;
+    physdev->x11dev->brush.fillStyle = FillTiled;
+    physdev->x11dev->brush.pixel = 0;  /* ignored */
+    physdev->x11dev->brush.style = BS_PATTERN;
+    wine_tsx11_unlock();
+
+    if (delete_bitmap) DeleteObject( bitmap );
+    return hbrush;
+
+x11drv_fallback:
+    if (delete_bitmap) DeleteObject( bitmap );
+    dev = GET_NEXT_PHYSDEV( dev, pSelectBrush );
+    return dev->funcs->pSelectBrush( dev, hbrush, pattern );
+}
+
+
+static const struct gdi_dc_funcs xrender_funcs =
+{
+    NULL,                               /* pAbortDoc */
+    NULL,                               /* pAbortPath */
+    xrenderdrv_AlphaBlend,              /* pAlphaBlend */
+    NULL,                               /* pAngleArc */
+    NULL,                               /* pArc */
+    NULL,                               /* pArcTo */
+    NULL,                               /* pBeginPath */
+    xrenderdrv_BlendImage,              /* pBlendImage */
+    NULL,                               /* pChoosePixelFormat */
+    NULL,                               /* pChord */
+    NULL,                               /* pCloseFigure */
+    xrenderdrv_CopyBitmap,              /* pCopyBitmap */
+    xrenderdrv_CreateBitmap,            /* pCreateBitmap */
+    xrenderdrv_CreateCompatibleDC,      /* pCreateCompatibleDC */
+    xrenderdrv_CreateDC,                /* pCreateDC */
+    xrenderdrv_DeleteBitmap,            /* pDeleteBitmap */
+    xrenderdrv_DeleteDC,                /* pDeleteDC */
+    NULL,                               /* pDeleteObject */
+    NULL,                               /* pDescribePixelFormat */
+    NULL,                               /* pDeviceCapabilities */
+    NULL,                               /* pEllipse */
+    NULL,                               /* pEndDoc */
+    NULL,                               /* pEndPage */
+    NULL,                               /* pEndPath */
+    NULL,                               /* pEnumFonts */
+    NULL,                               /* pEnumICMProfiles */
+    NULL,                               /* pExcludeClipRect */
+    NULL,                               /* pExtDeviceMode */
+    xrenderdrv_ExtEscape,               /* pExtEscape */
+    NULL,                               /* pExtFloodFill */
+    NULL,                               /* pExtSelectClipRgn */
+    xrenderdrv_ExtTextOut,              /* pExtTextOut */
+    NULL,                               /* pFillPath */
+    NULL,                               /* pFillRgn */
+    NULL,                               /* pFlattenPath */
+    NULL,                               /* pFontIsLinked */
+    NULL,                               /* pFrameRgn */
+    NULL,                               /* pGdiComment */
+    NULL,                               /* pGdiRealizationInfo */
+    NULL,                               /* pGetCharABCWidths */
+    NULL,                               /* pGetCharABCWidthsI */
+    NULL,                               /* pGetCharWidth */
+    NULL,                               /* pGetDeviceCaps */
+    NULL,                               /* pGetDeviceGammaRamp */
+    NULL,                               /* pGetFontData */
+    NULL,                               /* pGetFontUnicodeRanges */
+    NULL,                               /* pGetGlyphIndices */
+    NULL,                               /* pGetGlyphOutline */
+    NULL,                               /* pGetICMProfile */
+    xrenderdrv_GetImage,                /* pGetImage */
+    NULL,                               /* pGetKerningPairs */
+    NULL,                               /* pGetNearestColor */
+    NULL,                               /* pGetOutlineTextMetrics */
+    NULL,                               /* pGetPixel */
+    NULL,                               /* pGetPixelFormat */
+    NULL,                               /* pGetSystemPaletteEntries */
+    NULL,                               /* pGetTextCharsetInfo */
+    NULL,                               /* pGetTextExtentExPoint */
+    NULL,                               /* pGetTextExtentExPointI */
+    NULL,                               /* pGetTextFace */
+    NULL,                               /* pGetTextMetrics */
+    xrenderdrv_GradientFill,            /* pGradientFill */
+    NULL,                               /* pIntersectClipRect */
+    NULL,                               /* pInvertRgn */
+    NULL,                               /* pLineTo */
+    NULL,                               /* pModifyWorldTransform */
+    NULL,                               /* pMoveTo */
+    NULL,                               /* pOffsetClipRgn */
+    NULL,                               /* pOffsetViewportOrg */
+    NULL,                               /* pOffsetWindowOrg */
+    NULL,                               /* pPaintRgn */
+    NULL,                               /* pPatBlt */
+    NULL,                               /* pPie */
+    NULL,                               /* pPolyBezier */
+    NULL,                               /* pPolyBezierTo */
+    NULL,                               /* pPolyDraw */
+    NULL,                               /* pPolyPolygon */
+    NULL,                               /* pPolyPolyline */
+    NULL,                               /* pPolygon */
+    NULL,                               /* pPolyline */
+    NULL,                               /* pPolylineTo */
+    xrenderdrv_PutImage,                /* pPutImage */
+    NULL,                               /* pRealizeDefaultPalette */
+    NULL,                               /* pRealizePalette */
+    NULL,                               /* pRectangle */
+    NULL,                               /* pResetDC */
+    NULL,                               /* pRestoreDC */
+    NULL,                               /* pRoundRect */
+    NULL,                               /* pSaveDC */
+    NULL,                               /* pScaleViewportExt */
+    NULL,                               /* pScaleWindowExt */
+    xrenderdrv_SelectBitmap,            /* pSelectBitmap */
+    xrenderdrv_SelectBrush,             /* pSelectBrush */
+    NULL,                               /* pSelectClipPath */
+    xrenderdrv_SelectFont,              /* pSelectFont */
+    NULL,                               /* pSelectPalette */
+    NULL,                               /* pSelectPen */
+    NULL,                               /* pSetArcDirection */
+    NULL,                               /* pSetBkColor */
+    NULL,                               /* pSetBkMode */
+    NULL,                               /* pSetDCBrushColor */
+    NULL,                               /* pSetDCPenColor */
+    NULL,                               /* pSetDIBitsToDevice */
+    xrenderdrv_SetDeviceClipping,       /* pSetDeviceClipping */
+    NULL,                               /* pSetDeviceGammaRamp */
+    NULL,                               /* pSetLayout */
+    NULL,                               /* pSetMapMode */
+    NULL,                               /* pSetMapperFlags */
+    NULL,                               /* pSetPixel */
+    NULL,                               /* pSetPixelFormat */
+    NULL,                               /* pSetPolyFillMode */
+    NULL,                               /* pSetROP2 */
+    NULL,                               /* pSetRelAbs */
+    NULL,                               /* pSetStretchBltMode */
+    NULL,                               /* pSetTextAlign */
+    NULL,                               /* pSetTextCharacterExtra */
+    NULL,                               /* pSetTextColor */
+    NULL,                               /* pSetTextJustification */
+    NULL,                               /* pSetViewportExt */
+    NULL,                               /* pSetViewportOrg */
+    NULL,                               /* pSetWindowExt */
+    NULL,                               /* pSetWindowOrg */
+    NULL,                               /* pSetWorldTransform */
+    NULL,                               /* pStartDoc */
+    NULL,                               /* pStartPage */
+    xrenderdrv_StretchBlt,              /* pStretchBlt */
+    NULL,                               /* pStretchDIBits */
+    NULL,                               /* pStrokeAndFillPath */
+    NULL,                               /* pStrokePath */
+    NULL,                               /* pSwapBuffers */
+    NULL,                               /* pUnrealizePalette */
+    NULL,                               /* pWidenPath */
+    /* OpenGL not supported */
+};
 
 #else /* SONAME_LIBXRENDER */
 
-void X11DRV_XRender_Init(void)
+const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
 {
     TRACE("XRender support not compiled in.\n");
-    return;
+    return NULL;
 }
 
 void X11DRV_XRender_Finalize(void)
 {
 }
 
-BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
-{
-  assert(0);
-  return FALSE;
-}
-
-void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
-{
-  assert(0);
-  return;
-}
-
-void X11DRV_XRender_SetDeviceClipping(X11DRV_PDEVICE *physDev, const RGNDATA *data)
-{
-    assert(0);
-    return;
-}
-
-BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
-				const RECT *lprect, LPCWSTR wstr, UINT count,
-				const INT *lpDx )
-{
-  assert(0);
-  return FALSE;
-}
-
-void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
-{
-  assert(0);
-  return;
-}
-
-BOOL XRender_AlphaBlend( X11DRV_PDEVICE *devDst, X11DRV_PDEVICE *devSrc,
-                         struct bitblt_coords *dst, struct bitblt_coords *src, BLENDFUNCTION blendfn )
-{
-  FIXME("not supported - XRENDER headers were missing at compile time\n");
-  return FALSE;
-}
-
-void X11DRV_XRender_CopyBrush(X11DRV_PDEVICE *physDev, X_PHYSBITMAP *physBitmap, int width, int height)
-{
-    wine_tsx11_lock();
-    physDev->brush.pixmap = XCreatePixmap(gdi_display, root_window, width, height, physBitmap->pixmap_depth);
-
-    XCopyArea( gdi_display, physBitmap->pixmap, physDev->brush.pixmap,
-               get_bitmap_gc(physBitmap->pixmap_depth), 0, 0, width, height, 0, 0 );
-    wine_tsx11_unlock();
-}
-
-BOOL X11DRV_XRender_SetPhysBitmapDepth(X_PHYSBITMAP *physBitmap, int bits_pixel, const DIBSECTION *dib)
-{
-    return FALSE;
-}
-
-BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                                      Pixmap pixmap, GC gc,
-                                      const struct bitblt_coords *src, const struct bitblt_coords *dst )
-{
-    return FALSE;
-}
 #endif /* SONAME_LIBXRENDER */
