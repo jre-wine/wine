@@ -34,6 +34,7 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
+WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
 #define NTLM_MAX_BUF 1904
 #define MIN_NTLM_AUTH_MAJOR_VERSION 3
@@ -693,7 +694,10 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
             lstrcpynA(buffer, want_flags, max_len-1);
             if((ret = run_helper(helper, buffer, max_len, &buffer_len)) 
                     != SEC_E_OK)
+            {
+                cleanup_helper(helper);
                 goto isc_end;
+            }
             if(!strncmp(buffer, "BH", 2))
                 ERR("Helper doesn't understand new command set. Expect more things to fail.\n");
         }
@@ -1255,7 +1259,6 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcceptSecurityContext(
             }
         }
         pOutput->pBuffers[0].cbBuffer = 0;
-        ret = SEC_E_OK;
 
         TRACE("Getting negotiated flags\n");
         lstrcpynA(buffer, "GF", max_len - 1);
@@ -1973,7 +1976,7 @@ static const SecPkgInfoA infoA = {
 
 #define NEGO_COMMENT { 'M', 'i', 'c', 'r', 'o', 's', 'o', 'f', 't', ' ', \
     'P', 'a', 'c', 'k', 'a', 'g', 'e', ' ', \
-    'N', 'e', 'g', 'o', 't', 'i', 'a', 't', 'o', 'r', 0};
+    'N', 'e', 'g', 'o', 't', 'i', 'a', 't', 'o', 'r', 0}
 
 static CHAR nego_comment_A[] = NEGO_COMMENT;
 static WCHAR nego_comment_W[] = NEGO_COMMENT;
@@ -2027,21 +2030,17 @@ void SECUR32_initNTLMSP(void)
         NULL };
 
     if(fork_helper(&helper, ntlm_auth, args) != SEC_E_OK)
-    {
-        /* Cheat and allocate a helper anyway, so cleanup later will work. */
-        helper = HeapAlloc(GetProcessHeap(),0, sizeof(NegoHelper));
-        helper->major = helper->minor = helper->micro = -1;
-        helper->pipe_in = helper->pipe_out = -1;
-    }
+        helper = NULL;
     else
         check_version(helper);
 
-    if( (helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||
-        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
-         helper->minor >  MIN_NTLM_AUTH_MINOR_VERSION) ||
-        (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
-         helper->minor == MIN_NTLM_AUTH_MINOR_VERSION  &&
-         helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION) )
+    if( helper &&
+        ((helper->major >  MIN_NTLM_AUTH_MAJOR_VERSION) ||
+         (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+          helper->minor >  MIN_NTLM_AUTH_MINOR_VERSION) ||
+         (helper->major == MIN_NTLM_AUTH_MAJOR_VERSION  &&
+          helper->minor == MIN_NTLM_AUTH_MINOR_VERSION  &&
+          helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION)) )
     {
         SecureProvider *provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);
         SecureProvider *nego_provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);
@@ -2052,14 +2051,13 @@ void SECUR32_initNTLMSP(void)
     }
     else
     {
-        ERR("%s was not found or is outdated. "
-            "Make sure that ntlm_auth >= %d.%d.%d is in your path.\n",
-            ntlm_auth,
-	    MIN_NTLM_AUTH_MAJOR_VERSION,
-	    MIN_NTLM_AUTH_MINOR_VERSION,
-	    MIN_NTLM_AUTH_MICRO_VERSION);
-        ERR("Usually, you can find it in the winbind package of your "
-            "distribution.\n");
+        ERR_(winediag)("%s was not found or is outdated. "
+                       "Make sure that ntlm_auth >= %d.%d.%d is in your path. "
+                       "Usually, you can find it in the winbind package of your distribution.\n",
+                       ntlm_auth,
+                       MIN_NTLM_AUTH_MAJOR_VERSION,
+                       MIN_NTLM_AUTH_MINOR_VERSION,
+                       MIN_NTLM_AUTH_MICRO_VERSION);
 
     }
     cleanup_helper(helper);

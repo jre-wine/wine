@@ -37,36 +37,12 @@
 #include "wine/list.h"
 #include "wine/wined3d.h"
 
+extern const struct wined3d_parent_ops ddraw_surface_wined3d_parent_ops DECLSPEC_HIDDEN;
 extern const struct wined3d_parent_ops ddraw_null_wined3d_parent_ops DECLSPEC_HIDDEN;
-
-/*****************************************************************************
- * IParent - a helper interface
- *****************************************************************************/
-DEFINE_GUID(IID_IParent, 0xc20e4c88, 0x74e7, 0x4940, 0xba, 0x9f, 0x2e, 0x32, 0x3f, 0x9d, 0xc9, 0x81);
-typedef struct IParent *LPPARENT, *PPARENT;
-
-#define INTERFACE IParent
-DECLARE_INTERFACE_(IParent,IUnknown)
-{
-    /*** IUnknown methods ***/
-    STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
-    STDMETHOD_(ULONG,AddRef)(THIS) PURE;
-    STDMETHOD_(ULONG,Release)(THIS) PURE;
-};
-#undef INTERFACE
-
-#if !defined(__cplusplus) || defined(CINTERFACE)
-/*** IUnknown methods ***/
-#define IParent_QueryInterface(p,a,b) (p)->lpVtbl->QueryInterface(p,a,b)
-#define IParent_AddRef(p)             (p)->lpVtbl->AddRef(p)
-#define IParent_Release(p)            (p)->lpVtbl->Release(p)
-#endif
-
 
 /* Typdef the interfaces */
 typedef struct IDirectDrawImpl            IDirectDrawImpl;
 typedef struct IDirectDrawSurfaceImpl     IDirectDrawSurfaceImpl;
-typedef struct IDirectDrawClipperImpl     IDirectDrawClipperImpl;
 typedef struct IDirectDrawPaletteImpl     IDirectDrawPaletteImpl;
 typedef struct IDirect3DDeviceImpl        IDirect3DDeviceImpl;
 typedef struct IDirect3DLightImpl         IDirect3DLightImpl;
@@ -74,13 +50,6 @@ typedef struct IDirect3DViewportImpl      IDirect3DViewportImpl;
 typedef struct IDirect3DMaterialImpl      IDirect3DMaterialImpl;
 typedef struct IDirect3DExecuteBufferImpl IDirect3DExecuteBufferImpl;
 typedef struct IDirect3DVertexBufferImpl  IDirect3DVertexBufferImpl;
-typedef struct IParentImpl                IParentImpl;
-
-/* Callbacks for implicit object destruction */
-extern ULONG WINAPI D3D7CB_DestroySwapChain(IWineD3DSwapChain *pSwapChain) DECLSPEC_HIDDEN;
-
-/* Global critical section */
-extern CRITICAL_SECTION ddraw_cs DECLSPEC_HIDDEN;
 
 extern DWORD force_refresh_rate DECLSPEC_HIDDEN;
 
@@ -98,28 +67,27 @@ struct IDirectDrawImpl
     /* Interfaces */
     IDirectDraw7 IDirectDraw7_iface;
     IDirectDraw4 IDirectDraw4_iface;
-    IDirectDraw3 IDirectDraw3_iface;
     IDirectDraw2 IDirectDraw2_iface;
     IDirectDraw IDirectDraw_iface;
     IDirect3D7 IDirect3D7_iface;
     IDirect3D3 IDirect3D3_iface;
     IDirect3D2 IDirect3D2_iface;
     IDirect3D IDirect3D_iface;
-    const IWineD3DDeviceParentVtbl *device_parent_vtbl;
+    struct wined3d_device_parent device_parent;
 
     /* See comment in IDirectDraw::AddRef */
     LONG                    ref7, ref4, ref2, ref3, ref1, numIfaces;
+    BOOL initialized;
 
-    /* WineD3D linkage */
-    struct wined3d *wineD3D;
-    IWineD3DDevice          *wineD3DDevice;
+    struct wined3d *wined3d;
+    struct wined3d_device *wined3d_device;
     BOOL                    d3d_initialized;
 
-    /* Misc ddraw fields */
-    UINT                    total_vidmem;
-    DWORD                   cur_scanline;
-    BOOL                    fake_vblank;
-    BOOL                    initialized;
+    IDirectDrawSurfaceImpl *primary;
+    RECT primary_lock;
+    struct wined3d_surface *wined3d_frontbuffer;
+    struct wined3d_swapchain *wined3d_swapchain;
+    HWND swapchain_window;
 
     /* DirectDraw things, which are not handled by WineD3D */
     DWORD                   cooperative_level;
@@ -128,7 +96,6 @@ struct IDirectDrawImpl
     DWORD                   orig_bpp;
 
     /* D3D things */
-    IDirectDrawSurfaceImpl  *d3d_target;
     HWND                    d3d_window;
     IDirect3DDeviceImpl     *d3ddevice;
     int                     d3dversion;
@@ -138,12 +105,8 @@ struct IDirectDrawImpl
     HWND                    devicewindow;
     HWND                    dest_window;
 
-    /* The surface type to request */
-    WINED3DSURFTYPE         ImplType;
-
     /* Helpers for surface creation */
     IDirectDrawSurfaceImpl *tex_root;
-    BOOL                    depthstencil;
 
     /* For the dll unload cleanup code */
     struct list ddraw_list_entry;
@@ -151,41 +114,31 @@ struct IDirectDrawImpl
      * because of IParent
      */
     struct list surface_list;
-    LONG surfaces;
 
     /* FVF management */
     struct FvfToDecl       *decls;
     UINT                    numConvertedDecls, declArraySize;
 };
 
-#define DDRAW_WINDOW_CLASS_NAME "ddraw_wc"
+#define DDRAW_WINDOW_CLASS_NAME "DirectDrawDeviceWnd"
 
-HRESULT ddraw_init(IDirectDrawImpl *ddraw, WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
+HRESULT ddraw_init(IDirectDrawImpl *ddraw, enum wined3d_device_type device_type) DECLSPEC_HIDDEN;
+void ddraw_destroy_swapchain(IDirectDrawImpl *ddraw) DECLSPEC_HIDDEN;
 
-/* Helper structures */
-typedef struct EnumDisplayModesCBS
+static inline void ddraw_set_swapchain_window(struct IDirectDrawImpl *ddraw, HWND window)
 {
-    void *context;
-    LPDDENUMMODESCALLBACK2 callback;
-} EnumDisplayModesCBS;
-
-typedef struct EnumSurfacesCBS
-{
-    void *context;
-    LPDDENUMSURFACESCALLBACK7 callback;
-    LPDDSURFACEDESC2 pDDSD;
-    DWORD Flags;
-} EnumSurfacesCBS;
+    if (window == GetDesktopWindow())
+        window = NULL;
+    ddraw->swapchain_window = window;
+}
 
 /* Utility functions */
 void DDRAW_Convert_DDSCAPS_1_To_2(const DDSCAPS *pIn, DDSCAPS2 *pOut) DECLSPEC_HIDDEN;
 void DDRAW_Convert_DDDEVICEIDENTIFIER_2_To_1(const DDDEVICEIDENTIFIER2 *pIn, DDDEVICEIDENTIFIER *pOut) DECLSPEC_HIDDEN;
-HRESULT WINAPI ddraw_recreate_surfaces_cb(IDirectDrawSurface7 *surf,
-        DDSURFACEDESC2 *desc, void *Context) DECLSPEC_HIDDEN;
 struct wined3d_vertex_declaration *ddraw_find_decl(IDirectDrawImpl *This, DWORD fvf) DECLSPEC_HIDDEN;
 
 /* The default surface type */
-extern WINED3DSURFTYPE DefaultSurfaceType DECLSPEC_HIDDEN;
+extern enum wined3d_surface_type DefaultSurfaceType DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirectDrawSurface implementation structure
@@ -194,26 +147,29 @@ extern WINED3DSURFTYPE DefaultSurfaceType DECLSPEC_HIDDEN;
 struct IDirectDrawSurfaceImpl
 {
     /* IUnknown fields */
-    const IDirectDrawSurface7Vtbl *lpVtbl;
-    const IDirectDrawSurface3Vtbl *IDirectDrawSurface3_vtbl;
-    const IDirectDrawGammaControlVtbl *IDirectDrawGammaControl_vtbl;
-    const IDirect3DTexture2Vtbl *IDirect3DTexture2_vtbl;
-    const IDirect3DTextureVtbl *IDirect3DTexture_vtbl;
+    IDirectDrawSurface7 IDirectDrawSurface7_iface;
+    IDirectDrawSurface4 IDirectDrawSurface4_iface;
+    IDirectDrawSurface3 IDirectDrawSurface3_iface;
+    IDirectDrawSurface2 IDirectDrawSurface2_iface;
+    IDirectDrawSurface IDirectDrawSurface_iface;
+    IDirectDrawGammaControl IDirectDrawGammaControl_iface;
+    IDirect3DTexture2 IDirect3DTexture2_iface;
+    IDirect3DTexture IDirect3DTexture_iface;
 
-    LONG                     ref;
+    LONG                     ref7, ref4, ref3, ref2, ref1, iface_count, gamma_count;
     IUnknown                *ifaceToRelease;
 
     int                     version;
 
     /* Connections to other Objects */
     IDirectDrawImpl         *ddraw;
-    IWineD3DSurface         *WineD3DSurface;
-    IWineD3DBaseTexture     *wineD3DTexture;
-    IWineD3DSwapChain       *wineD3DSwapChain;
+    struct wined3d_surface *wined3d_surface;
+    struct wined3d_texture *wined3d_texture;
 
     /* This implementation handles attaching surfaces to other surfaces */
     IDirectDrawSurfaceImpl  *next_attached;
     IDirectDrawSurfaceImpl  *first_attached;
+    IUnknown                *attached_iface;
 
     /* Complex surfaces are organized in a tree, although the tree is degenerated to a list in most cases.
      * In mipmap and primary surfaces each level has only one attachment, which is the next surface level.
@@ -233,13 +189,9 @@ struct IDirectDrawSurfaceImpl
     /* Misc things */
     DWORD                   uniqueness_value;
     UINT                    mipmap_level;
-    WINED3DSURFTYPE         ImplType;
-
-    /* For D3DDevice creation */
-    BOOL                    isRenderTarget;
 
     /* Clipper objects */
-    IDirectDrawClipperImpl  *clipper;
+    struct ddraw_clipper *clipper;
 
     /* For the ddraw surface list */
     struct list             surface_list_entry;
@@ -247,48 +199,52 @@ struct IDirectDrawSurfaceImpl
     DWORD                   Handle;
 };
 
-void ddraw_surface_destroy(IDirectDrawSurfaceImpl *surface) DECLSPEC_HIDDEN;
+HRESULT ddraw_surface_create_texture(IDirectDrawSurfaceImpl *surface) DECLSPEC_HIDDEN;
 HRESULT ddraw_surface_init(IDirectDrawSurfaceImpl *surface, IDirectDrawImpl *ddraw,
-        DDSURFACEDESC2 *desc, UINT mip_level, WINED3DSURFTYPE surface_type) DECLSPEC_HIDDEN;
+        DDSURFACEDESC2 *desc, UINT mip_level, UINT version) DECLSPEC_HIDDEN;
+ULONG ddraw_surface_release_iface(IDirectDrawSurfaceImpl *This) DECLSPEC_HIDDEN;
 
-static inline IDirectDrawSurfaceImpl *surface_from_texture1(IDirect3DTexture *iface)
+static inline IDirectDrawSurfaceImpl *impl_from_IDirect3DTexture(IDirect3DTexture *iface)
 {
-    return (IDirectDrawSurfaceImpl *)((char*)iface - FIELD_OFFSET(IDirectDrawSurfaceImpl, IDirect3DTexture_vtbl));
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirect3DTexture_iface);
 }
 
-static inline IDirectDrawSurfaceImpl *surface_from_texture2(IDirect3DTexture2 *iface)
+static inline IDirectDrawSurfaceImpl *impl_from_IDirect3DTexture2(IDirect3DTexture2 *iface)
 {
-    return (IDirectDrawSurfaceImpl *)((char*)iface - FIELD_OFFSET(IDirectDrawSurfaceImpl, IDirect3DTexture2_vtbl));
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirect3DTexture2_iface);
 }
 
-static inline IDirectDrawSurfaceImpl *surface_from_surface3(IDirectDrawSurface3 *iface)
+static inline IDirectDrawSurfaceImpl *impl_from_IDirectDrawSurface(IDirectDrawSurface *iface)
 {
-    return (IDirectDrawSurfaceImpl *)((char*)iface - FIELD_OFFSET(IDirectDrawSurfaceImpl, IDirectDrawSurface3_vtbl));
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirectDrawSurface_iface);
 }
 
-/* Get the number of bytes per pixel for a given surface */
-#define PFGET_BPP(pf) (pf.dwFlags&DDPF_PALETTEINDEXED8?1:((pf.dwRGBBitCount+7)/8))
-#define GET_BPP(desc) PFGET_BPP(desc.ddpfPixelFormat)
-
-/*****************************************************************************
- * IParent Implementation
- *****************************************************************************/
-struct IParentImpl
+static inline IDirectDrawSurfaceImpl *impl_from_IDirectDrawSurface2(IDirectDrawSurface2 *iface)
 {
-    /* IUnknown fields */
-    const IParentVtbl *lpVtbl;
-    LONG                    ref;
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirectDrawSurface2_iface);
+}
 
-    /* IParentImpl fields */
-    IUnknown      *child;
+static inline IDirectDrawSurfaceImpl *impl_from_IDirectDrawSurface3(IDirectDrawSurface3 *iface)
+{
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirectDrawSurface3_iface);
+}
 
-};
+static inline IDirectDrawSurfaceImpl *impl_from_IDirectDrawSurface4(IDirectDrawSurface4 *iface)
+{
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirectDrawSurface4_iface);
+}
 
-void ddraw_parent_init(IParentImpl *parent) DECLSPEC_HIDDEN;
+static inline IDirectDrawSurfaceImpl *impl_from_IDirectDrawSurface7(IDirectDrawSurface7 *iface)
+{
+    return CONTAINING_RECORD(iface, IDirectDrawSurfaceImpl, IDirectDrawSurface7_iface);
+}
 
-/*****************************************************************************
- * IDirect3DDevice implementation
- *****************************************************************************/
+IDirectDrawSurfaceImpl *unsafe_impl_from_IDirectDrawSurface(IDirectDrawSurface *iface) DECLSPEC_HIDDEN;
+IDirectDrawSurfaceImpl *unsafe_impl_from_IDirectDrawSurface4(IDirectDrawSurface4 *iface) DECLSPEC_HIDDEN;
+IDirectDrawSurfaceImpl *unsafe_impl_from_IDirectDrawSurface7(IDirectDrawSurface7 *iface) DECLSPEC_HIDDEN;
+
+IDirectDrawSurfaceImpl *unsafe_impl_from_IDirect3DTexture(IDirect3DTexture *iface) DECLSPEC_HIDDEN;
+IDirectDrawSurfaceImpl *unsafe_impl_from_IDirect3DTexture2(IDirect3DTexture2 *iface) DECLSPEC_HIDDEN;
 
 #define DDRAW_INVALID_HANDLE ~0U
 
@@ -324,25 +280,29 @@ void *ddraw_get_object(struct ddraw_handle_table *t, DWORD handle, enum ddraw_ha
 struct IDirect3DDeviceImpl
 {
     /* IUnknown */
-    const IDirect3DDevice7Vtbl *lpVtbl;
-    const IDirect3DDevice3Vtbl *IDirect3DDevice3_vtbl;
-    const IDirect3DDevice2Vtbl *IDirect3DDevice2_vtbl;
-    const IDirect3DDeviceVtbl *IDirect3DDevice_vtbl;
+    IDirect3DDevice7 IDirect3DDevice7_iface;
+    IDirect3DDevice3 IDirect3DDevice3_iface;
+    IDirect3DDevice2 IDirect3DDevice2_iface;
+    IDirect3DDevice IDirect3DDevice_iface;
     LONG                    ref;
 
     /* Other object connections */
-    IWineD3DDevice          *wineD3DDevice;
+    struct wined3d_device *wined3d_device;
     IDirectDrawImpl         *ddraw;
     struct wined3d_buffer *indexbuffer;
     IDirectDrawSurfaceImpl  *target;
 
     /* Viewport management */
-    IDirect3DViewportImpl *viewport_list;
+    struct list viewport_list;
     IDirect3DViewportImpl *current_viewport;
     D3DVIEWPORT7 active_viewport;
 
     /* Required to keep track which of two available texture blending modes in d3ddevice3 is used */
     BOOL legacyTextureBlending;
+    BOOL from_surface;
+
+    D3DMATRIX legacy_projection;
+    D3DMATRIX legacy_clipspace;
 
     /* Light state */
     DWORD material;
@@ -370,52 +330,44 @@ extern const GUID IID_D3DDEVICE_WineD3D DECLSPEC_HIDDEN;
 /* Helper functions */
 HRESULT IDirect3DImpl_GetCaps(const struct wined3d *wined3d,
         D3DDEVICEDESC *Desc123, D3DDEVICEDESC7 *Desc7) DECLSPEC_HIDDEN;
-WINED3DZBUFFERTYPE IDirect3DDeviceImpl_UpdateDepthStencil(IDirect3DDeviceImpl *This) DECLSPEC_HIDDEN;
+enum wined3d_depth_buffer_type IDirect3DDeviceImpl_UpdateDepthStencil(IDirect3DDeviceImpl *device) DECLSPEC_HIDDEN;
 
-static inline IDirect3DDeviceImpl *device_from_device1(IDirect3DDevice *iface)
+static inline IDirect3DDeviceImpl *impl_from_IDirect3DDevice(IDirect3DDevice *iface)
 {
-    return (IDirect3DDeviceImpl *)((char*)iface - FIELD_OFFSET(IDirect3DDeviceImpl, IDirect3DDevice_vtbl));
+    return CONTAINING_RECORD(iface, IDirect3DDeviceImpl, IDirect3DDevice_iface);
 }
 
-static inline IDirect3DDeviceImpl *device_from_device2(IDirect3DDevice2 *iface)
+static inline IDirect3DDeviceImpl *impl_from_IDirect3DDevice2(IDirect3DDevice2 *iface)
 {
-    return (IDirect3DDeviceImpl *)((char*)iface - FIELD_OFFSET(IDirect3DDeviceImpl, IDirect3DDevice2_vtbl));
+    return CONTAINING_RECORD(iface, IDirect3DDeviceImpl, IDirect3DDevice2_iface);
 }
 
-static inline IDirect3DDeviceImpl *device_from_device3(IDirect3DDevice3 *iface)
+static inline IDirect3DDeviceImpl *impl_from_IDirect3DDevice3(IDirect3DDevice3 *iface)
 {
-    return (IDirect3DDeviceImpl *)((char*)iface - FIELD_OFFSET(IDirect3DDeviceImpl, IDirect3DDevice3_vtbl));
+    return CONTAINING_RECORD(iface, IDirect3DDeviceImpl, IDirect3DDevice3_iface);
 }
 
-/* Structures */
-struct EnumTextureFormatsCBS
+static inline IDirect3DDeviceImpl *impl_from_IDirect3DDevice7(IDirect3DDevice7 *iface)
 {
-    LPD3DENUMTEXTUREFORMATSCALLBACK cbv2;
-    LPD3DENUMPIXELFORMATSCALLBACK cbv7;
-    void *Context;
-};
+    return CONTAINING_RECORD(iface, IDirect3DDeviceImpl, IDirect3DDevice7_iface);
+}
 
-/* Structure for EnumZBufferFormats */
-struct EnumZBufferFormatsData
-{
-    LPD3DENUMPIXELFORMATSCALLBACK Callback;
-    void *Context;
-};
+IDirect3DDeviceImpl *unsafe_impl_from_IDirect3DDevice(IDirect3DDevice *iface) DECLSPEC_HIDDEN;
+IDirect3DDeviceImpl *unsafe_impl_from_IDirect3DDevice2(IDirect3DDevice2 *iface) DECLSPEC_HIDDEN;
+IDirect3DDeviceImpl *unsafe_impl_from_IDirect3DDevice3(IDirect3DDevice3 *iface) DECLSPEC_HIDDEN;
+IDirect3DDeviceImpl *unsafe_impl_from_IDirect3DDevice7(IDirect3DDevice7 *iface) DECLSPEC_HIDDEN;
 
-/*****************************************************************************
- * IDirectDrawClipper implementation structure
- *****************************************************************************/
-struct IDirectDrawClipperImpl
+struct ddraw_clipper
 {
-    /* IUnknown fields */
-    const IDirectDrawClipperVtbl *lpVtbl;
+    IDirectDrawClipper IDirectDrawClipper_iface;
     LONG ref;
-
-    struct wined3d_clipper *wineD3DClipper;
+    HWND window;
+    HRGN region;
     BOOL initialized;
 };
 
-HRESULT ddraw_clipper_init(IDirectDrawClipperImpl *clipper) DECLSPEC_HIDDEN;
+HRESULT ddraw_clipper_init(struct ddraw_clipper *clipper) DECLSPEC_HIDDEN;
+struct ddraw_clipper *unsafe_impl_from_IDirectDrawClipper(IDirectDrawClipper *iface) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirectDrawPalette implementation structure
@@ -423,7 +375,7 @@ HRESULT ddraw_clipper_init(IDirectDrawClipperImpl *clipper) DECLSPEC_HIDDEN;
 struct IDirectDrawPaletteImpl
 {
     /* IUnknown fields */
-    const IDirectDrawPaletteVtbl *lpVtbl;
+    IDirectDrawPalette IDirectDrawPalette_iface;
     LONG ref;
 
     struct wined3d_palette *wineD3DPalette;
@@ -431,6 +383,13 @@ struct IDirectDrawPaletteImpl
     /* IDirectDrawPalette fields */
     IUnknown                  *ifaceToRelease;
 };
+
+static inline IDirectDrawPaletteImpl *impl_from_IDirectDrawPalette(IDirectDrawPalette *iface)
+{
+    return CONTAINING_RECORD(iface, IDirectDrawPaletteImpl, IDirectDrawPalette_iface);
+}
+
+IDirectDrawPaletteImpl *unsafe_impl_from_IDirectDrawPalette(IDirectDrawPalette *iface) DECLSPEC_HIDDEN;
 
 HRESULT ddraw_palette_init(IDirectDrawPaletteImpl *palette,
         IDirectDrawImpl *ddraw, DWORD flags, PALETTEENTRY *entries) DECLSPEC_HIDDEN;
@@ -448,7 +407,7 @@ struct object_creation_info
  ******************************************************************************/
 struct IDirect3DLightImpl
 {
-    const IDirect3DLightVtbl *lpVtbl;
+    IDirect3DLight IDirect3DLight_iface;
     LONG ref;
 
     /* IDirect3DLight fields */
@@ -462,23 +421,23 @@ struct IDirect3DLightImpl
 
     DWORD dwLightIndex;
 
-    /* Chained list used for adding / removing from viewports */
-    IDirect3DLightImpl        *next;
+    struct list entry;
 };
 
 /* Helper functions */
 void light_activate(IDirect3DLightImpl *light) DECLSPEC_HIDDEN;
 void light_deactivate(IDirect3DLightImpl *light) DECLSPEC_HIDDEN;
 void d3d_light_init(IDirect3DLightImpl *light, IDirectDrawImpl *ddraw) DECLSPEC_HIDDEN;
+IDirect3DLightImpl *unsafe_impl_from_IDirect3DLight(IDirect3DLight *iface) DECLSPEC_HIDDEN;
 
 /******************************************************************************
  * IDirect3DMaterial implementation structure - Wraps to D3D7
  ******************************************************************************/
 struct IDirect3DMaterialImpl
 {
-    const IDirect3DMaterial3Vtbl *lpVtbl;
-    const IDirect3DMaterial2Vtbl *IDirect3DMaterial2_vtbl;
-    const IDirect3DMaterialVtbl *IDirect3DMaterial_vtbl;
+    IDirect3DMaterial3 IDirect3DMaterial3_iface;
+    IDirect3DMaterial2 IDirect3DMaterial2_iface;
+    IDirect3DMaterial IDirect3DMaterial_iface;
     LONG  ref;
 
     /* IDirect3DMaterial2 fields */
@@ -491,14 +450,14 @@ struct IDirect3DMaterialImpl
 
 /* Helper functions */
 void material_activate(IDirect3DMaterialImpl* This) DECLSPEC_HIDDEN;
-void d3d_material_init(IDirect3DMaterialImpl *material, IDirectDrawImpl *ddraw) DECLSPEC_HIDDEN;
+IDirect3DMaterialImpl *d3d_material_create(IDirectDrawImpl *ddraw) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DViewport - Wraps to D3D7
  *****************************************************************************/
 struct IDirect3DViewportImpl
 {
-    const IDirect3DViewport3Vtbl *lpVtbl;
+    IDirect3DViewport3 IDirect3DViewport3_iface;
     LONG ref;
 
     /* IDirect3DViewport fields */
@@ -518,15 +477,16 @@ struct IDirect3DViewportImpl
         D3DVIEWPORT2 vp2;
     } viewports;
 
-    /* Field used to chain viewports together */
-    IDirect3DViewportImpl     *next;
-
-    /* Lights list */
-    IDirect3DLightImpl        *lights;
+    struct list entry;
+    struct list light_list;
 
     /* Background material */
     IDirect3DMaterialImpl     *background;
 };
+
+IDirect3DViewportImpl *unsafe_impl_from_IDirect3DViewport3(IDirect3DViewport3 *iface) DECLSPEC_HIDDEN;
+IDirect3DViewportImpl *unsafe_impl_from_IDirect3DViewport2(IDirect3DViewport2 *iface) DECLSPEC_HIDDEN;
+IDirect3DViewportImpl *unsafe_impl_from_IDirect3DViewport(IDirect3DViewport *iface) DECLSPEC_HIDDEN;
 
 /* Helper functions */
 void viewport_activate(IDirect3DViewportImpl* This, BOOL ignore_lights) DECLSPEC_HIDDEN;
@@ -537,10 +497,8 @@ void d3d_viewport_init(IDirect3DViewportImpl *viewport, IDirectDrawImpl *ddraw) 
  *****************************************************************************/
 struct IDirect3DExecuteBufferImpl
 {
-    /* IUnknown */
-    const IDirect3DExecuteBufferVtbl *lpVtbl;
-    LONG                 ref;
-
+    IDirect3DExecuteBuffer IDirect3DExecuteBuffer_iface;
+    LONG ref;
     /* IDirect3DExecuteBuffer fields */
     IDirectDrawImpl      *ddraw;
     IDirect3DDeviceImpl  *d3ddev;
@@ -561,20 +519,20 @@ struct IDirect3DExecuteBufferImpl
 
 HRESULT d3d_execute_buffer_init(IDirect3DExecuteBufferImpl *execute_buffer,
         IDirect3DDeviceImpl *device, D3DEXECUTEBUFFERDESC *desc) DECLSPEC_HIDDEN;
+IDirect3DExecuteBufferImpl *unsafe_impl_from_IDirect3DExecuteBuffer(IDirect3DExecuteBuffer *iface) DECLSPEC_HIDDEN;
 
 /* The execute function */
-void IDirect3DExecuteBufferImpl_Execute(IDirect3DExecuteBufferImpl *This,
-        IDirect3DDeviceImpl *Device, IDirect3DViewportImpl *ViewportImpl) DECLSPEC_HIDDEN;
+HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *execute_buffer,
+        IDirect3DDeviceImpl *device, IDirect3DViewportImpl *viewport) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DVertexBuffer
  *****************************************************************************/
 struct IDirect3DVertexBufferImpl
 {
-    /*** IUnknown Methods ***/
-    const IDirect3DVertexBuffer7Vtbl *lpVtbl;
-    const IDirect3DVertexBufferVtbl *IDirect3DVertexBuffer_vtbl;
-    LONG                 ref;
+    IDirect3DVertexBuffer7 IDirect3DVertexBuffer7_iface;
+    IDirect3DVertexBuffer IDirect3DVertexBuffer_iface;
+    LONG ref;
 
     /*** WineD3D and ddraw links ***/
     struct wined3d_buffer *wineD3DVertexBuffer;
@@ -586,14 +544,10 @@ struct IDirect3DVertexBufferImpl
     DWORD                fvf;
 };
 
-HRESULT d3d_vertex_buffer_init(IDirect3DVertexBufferImpl *buffer,
-        IDirectDrawImpl *ddraw, D3DVERTEXBUFFERDESC *desc) DECLSPEC_HIDDEN;
-
-static inline IDirect3DVertexBufferImpl *vb_from_vb1(IDirect3DVertexBuffer *iface)
-{
-    return (IDirect3DVertexBufferImpl *)((char*)iface
-            - FIELD_OFFSET(IDirect3DVertexBufferImpl, IDirect3DVertexBuffer_vtbl));
-}
+HRESULT d3d_vertex_buffer_create(IDirect3DVertexBufferImpl **vertex_buf, IDirectDrawImpl *ddraw,
+        D3DVERTEXBUFFERDESC *desc) DECLSPEC_HIDDEN;
+IDirect3DVertexBufferImpl *unsafe_impl_from_IDirect3DVertexBuffer(IDirect3DVertexBuffer *iface) DECLSPEC_HIDDEN;
+IDirect3DVertexBufferImpl *unsafe_impl_from_IDirect3DVertexBuffer7(IDirect3DVertexBuffer7 *iface) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * Helper functions from utils.c
@@ -613,13 +567,12 @@ void DDRAW_dump_DDCAPS(const DDCAPS *lpcaps) DECLSPEC_HIDDEN;
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) DECLSPEC_HIDDEN;
 void DDRAW_dump_DDSCAPS2(const DDSCAPS2 *in) DECLSPEC_HIDDEN;
 void DDRAW_dump_cooperativelevel(DWORD cooplevel) DECLSPEC_HIDDEN;
+void DDSD_to_DDSD2(const DDSURFACEDESC *in, DDSURFACEDESC2 *out) DECLSPEC_HIDDEN;
+void DDSD2_to_DDSD(const DDSURFACEDESC2 *in, DDSURFACEDESC *out) DECLSPEC_HIDDEN;
 
 /* This only needs to be here as long the processvertices functionality of
  * IDirect3DExecuteBuffer isn't in WineD3D */
 void multiply_matrix(LPD3DMATRIX dest, const D3DMATRIX *src1, const D3DMATRIX *src2) DECLSPEC_HIDDEN;
-
-/* Helper function in main.c */
-BOOL LoadWineD3D(void) DECLSPEC_HIDDEN;
 
 /* Used for generic dumping */
 typedef struct
@@ -641,22 +594,31 @@ typedef struct
 /* Structure copy */
 #define ME(x,f,e) { x, #x, (void (*)(const void *))(f), offsetof(STRUCT, e) }
 
-#define DD_STRUCT_COPY_BYSIZE(to,from)                  \
-        do {                                            \
-                DWORD __size = (to)->dwSize;            \
-                DWORD __copysize = __size;              \
-                DWORD __resetsize = __size;             \
-                assert(to != from);                     \
-                if (__resetsize > sizeof(*to))          \
-                    __resetsize = sizeof(*to);          \
-                memset(to,0,__resetsize);               \
-                if ((from)->dwSize < __size)            \
-                    __copysize = (from)->dwSize;        \
-                memcpy(to,from,__copysize);             \
-                (to)->dwSize = __size;/*restore size*/  \
-        } while (0)
+#define DD_STRUCT_COPY_BYSIZE_(to,from,from_size)                 \
+    do {                                                          \
+        DWORD __size = (to)->dwSize;                              \
+        DWORD __resetsize = min(__size, sizeof(*to));             \
+        DWORD __copysize = min(__resetsize, from_size);           \
+        assert(to != from);                                       \
+        memcpy(to, from, __copysize);                             \
+        memset((char*)(to) + __copysize, 0, __resetsize - __copysize); \
+        (to)->dwSize = __size; /* restore size */                 \
+    } while (0)
 
+#define DD_STRUCT_COPY_BYSIZE(to,from) DD_STRUCT_COPY_BYSIZE_(to,from,(from)->dwSize)
 
-#endif
+#define SIZEOF_END_PADDING(type, last_field) \
+    (sizeof(type) - offsetof(type, last_field) - sizeof(((type *)0)->last_field))
+
+static inline void copy_to_surfacedesc2(DDSURFACEDESC2 *to, DDSURFACEDESC2 *from)
+{
+    DWORD from_size = from->dwSize;
+    if (from_size == sizeof(DDSURFACEDESC))
+        from_size -= SIZEOF_END_PADDING(DDSURFACEDESC, ddsCaps);
+    to->dwSize = sizeof(DDSURFACEDESC2); /* for struct copy */
+    DD_STRUCT_COPY_BYSIZE_(to, from, from_size);
+}
 
 HRESULT hr_ddraw_from_wined3d(HRESULT hr) DECLSPEC_HIDDEN;
+
+#endif

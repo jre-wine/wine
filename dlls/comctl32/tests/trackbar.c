@@ -17,7 +17,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <windows.h>
 #include <commctrl.h>
 #include <stdio.h>
@@ -299,10 +298,20 @@ static const struct message thumb_length_test_seq[] = {
     { WM_PAINT, sent|defwinproc},
     { TBM_GETTHUMBLENGTH, sent},
     { TBM_GETTHUMBLENGTH, sent},
+    { WM_SIZE, sent},
+    { WM_PAINT, sent|defwinproc},
+    { TBM_GETTHUMBLENGTH, sent},
+    { WM_SIZE, sent},
+    { WM_PAINT, sent|defwinproc},
+    { TBM_GETTHUMBLENGTH, sent},
     {0}
 };
 
 static const struct message parent_thumb_length_test_seq[] = {
+    { WM_CTLCOLORSTATIC, sent},
+    { WM_NOTIFY, sent},
+    { WM_CTLCOLORSTATIC, sent},
+    { WM_NOTIFY, sent},
     { WM_CTLCOLORSTATIC, sent},
     { WM_NOTIFY, sent},
     { WM_CTLCOLORSTATIC, sent},
@@ -743,8 +752,17 @@ static void test_thumb_length(HWND hWndTrackbar){
     r = SendMessage(hWndTrackbar, TBM_GETTHUMBLENGTH, 0,0);
     expect(20, r);
 
+    r = SendMessage(hWndTrackbar, WM_SIZE, 0,0);
+    expect(0, r);
+    r = SendMessage(hWndTrackbar, TBM_GETTHUMBLENGTH, 0,0);
+    expect(20, r);
+    r = SendMessage(hWndTrackbar, WM_SIZE, 0, MAKELPARAM(50, 50) );
+    expect(0, r);
+    r = SendMessage(hWndTrackbar, TBM_GETTHUMBLENGTH, 0,0);
+    expect(20, r);
+
     ok_sequence(sequences, TRACKBAR_SEQ_INDEX, thumb_length_test_seq, "thumb length test sequence", TRUE);
-    ok_sequence(sequences, PARENT_SEQ_INDEX, parent_thumb_length_test_seq, "parent thumb lenth test sequence", TRUE);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, parent_thumb_length_test_seq, "parent thumb length test sequence", TRUE);
 }
 
 static void test_tic_settings(HWND hWndTrackbar){
@@ -954,7 +972,7 @@ static void test_ignore_selection(HWND hWndTrackbar){
 static void test_initial_state(void)
 {
     HWND hWnd;
-    DWORD ret;
+    int ret;
 
     hWnd = create_trackbar(0, hWndParent);
 
@@ -964,6 +982,66 @@ static void test_initial_state(void)
     expect(-1, ret);
     ret = SendMessage(hWnd, TBM_GETTICPOS, 0, 0);
     expect(-1, ret);
+    ret = SendMessage(hWnd, TBM_GETRANGEMIN, 0, 0);
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_GETRANGEMAX, 0, 0);
+    expect(100, ret);
+
+    ret = SendMessage(hWnd, TBM_SETRANGEMAX, TRUE, 200);
+    expect(0, ret);
+
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(2, ret);
+
+    ret = SendMessage(hWnd, TBM_SETRANGEMIN, TRUE, 10);
+    expect(0, ret);
+
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(2, ret);
+
+    DestroyWindow(hWnd);
+}
+
+static void test_TBS_AUTOTICKS(void)
+{
+    HWND hWnd;
+    int ret;
+
+    hWnd = create_trackbar(TBS_AUTOTICKS, hWndParent);
+
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(2, ret);
+    ret = SendMessage(hWnd, TBM_GETTIC, 0, 0);
+    expect(-1, ret);
+    ret = SendMessage(hWnd, TBM_GETTICPOS, 0, 0);
+    expect(-1, ret);
+    ret = SendMessage(hWnd, TBM_GETRANGEMIN, 0, 0);
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_GETRANGEMAX, 0, 0);
+    expect(100, ret);
+
+    /* TBM_SETRANGEMAX rebuilds tics */
+    ret = SendMessage(hWnd, TBM_SETRANGEMAX, TRUE, 200);
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(201, ret);
+
+    /* TBM_SETRANGEMIN rebuilds tics */
+    ret = SendMessage(hWnd, TBM_SETRANGEMAX, TRUE, 100);
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_SETRANGEMIN, TRUE, 10);
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(91, ret);
+
+    ret = SendMessage(hWnd, TBM_SETRANGEMIN, TRUE, 0);
+    expect(0, ret);
+
+    /* TBM_SETRANGE rebuilds tics */
+    ret = SendMessage(hWnd, TBM_SETRANGE, TRUE, MAKELONG(10, 200));
+    expect(0, ret);
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(191, ret);
 
     DestroyWindow(hWnd);
 }
@@ -1013,6 +1091,7 @@ START_TEST(trackbar)
     test_tic_placement(hWndTrackbar);
     test_tool_tips(hWndTrackbar);
     test_unicode(hWndTrackbar);
+    test_TBS_AUTOTICKS();
 
     flush_sequences(sequences, NUM_MSG_SEQUENCE);
     DestroyWindow(hWndTrackbar);

@@ -45,9 +45,9 @@
 @ stub SymEnumProcesses
 @ stub SymEnumSourceFileTokens
 @ stdcall SymEnumSourceFiles(ptr int64 str ptr ptr)
-@ stub SymEnumSourceFilesW
-@ stub SymEnumSourceLines
-@ stub SymEnumSourceLinesW
+@ stdcall SymEnumSourceFilesW(ptr int64 wstr ptr ptr)
+@ stdcall SymEnumSourceLines(ptr int64 str str long long ptr ptr)
+@ stdcall SymEnumSourceLinesW(ptr int64 wstr wstr long long ptr ptr)
 @ stub SymEnumSym
 @ stdcall SymEnumSymbols(ptr int64 str ptr ptr)
 @ stub SymEnumSymbolsForAddr
@@ -72,8 +72,8 @@
 @ stdcall SymFindFileInPathW(long wstr wstr ptr long long long ptr ptr ptr)
 @ stdcall SymFromAddr(ptr int64 ptr ptr)
 @ stdcall SymFromAddrW(ptr int64 ptr ptr)
-@ stub SymFromIndex
-@ stub SymFromIndexW
+@ stdcall SymFromIndex(long int64 long ptr)
+@ stdcall SymFromIndexW(long int64 long ptr)
 @ stdcall SymFromName(long str ptr)
 @ stub SymFromNameW
 @ stub SymFromToken
@@ -137,9 +137,9 @@
 @ stdcall SymLoadModuleExW(long long wstr wstr int64 long ptr long)
 @ stdcall SymMatchFileName(str str ptr ptr)
 @ stdcall SymMatchFileNameW(wstr wstr ptr ptr)
-@ stdcall SymMatchString(str str long)
-@ stub SymMatchStringA
-@ stub SymMatchStringW
+@ stdcall SymMatchString(str str long) SymMatchStringA
+@ stdcall SymMatchStringA(str str long)
+@ stdcall SymMatchStringW(wstr wstr long)
 @ stub SymNext
 @ stub SymNextW
 @ stub SymPrev

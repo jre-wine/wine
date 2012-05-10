@@ -23,11 +23,15 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
+#ifdef HAVE_SYS_WAIT_H
+#include <sys/wait.h>
+#endif
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
@@ -101,7 +105,7 @@ static int try_mmap_fixed (void *addr, size_t len, int prot, int flags,
 {
     char * volatile result = NULL;
     int pagesize = getpagesize();
-    pid_t pid;
+    pid_t pid, wret;
 
     /* We only try to map to a fixed address if
        addr is non-NULL and properly aligned,
@@ -150,9 +154,10 @@ static int try_mmap_fixed (void *addr, size_t len, int prot, int flags,
        _exit(1);
     }
 
-    /* vfork() lets the parent continue only after the child
-       has exited.  Furthermore, Wine sets SIGCHLD to SIG_IGN,
-       so we don't need to wait for the child. */
+    /* reap child */
+    do {
+        wret = waitpid(pid, NULL, 0);
+    } while (wret < 0 && errno == EINTR);
 
     return result == addr;
 }
@@ -277,11 +282,11 @@ static inline void reserve_area( void *addr, void *end )
         wine_mmap_add_reserved_area( addr, size );
         return;
     }
-    if (size > granularity_mask + 1)
+    size = (size / 2) & ~granularity_mask;
+    if (size)
     {
-        size_t new_size = (size / 2) & ~granularity_mask;
-        reserve_area( addr, (char *)addr + new_size );
-        reserve_area( (char *)addr + new_size, end );
+        reserve_area( addr, (char *)addr + size );
+        reserve_area( (char *)addr + size, end );
     }
 #endif
 }

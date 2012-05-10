@@ -597,7 +597,7 @@ _xsize(const TYPEDESC *td, ITypeInfo *tinfo) {
     case VT_CY:
         return sizeof(CY);
     case VT_VARIANT:
-	return sizeof(VARIANT)+3; /* FIXME: why the +3? */
+	return sizeof(VARIANT);
     case VT_CARRAY: {
 	int i, arrsize = 1;
 	const ARRAYDESC *adesc = td->u.lpadesc;
@@ -636,6 +636,17 @@ _xsize(const TYPEDESC *td, ITypeInfo *tinfo) {
     default:
 	return 4;
     }
+}
+
+/* Whether we pass this type by reference or by value */
+static int
+_passbyref(const TYPEDESC *td, ITypeInfo *tinfo) {
+    if (td->vt == VT_USERDEFINED ||
+        td->vt == VT_VARIANT     ||
+        td->vt == VT_PTR)
+        return 1;
+
+    return 0;
 }
 
 static HRESULT
@@ -712,7 +723,7 @@ serialize_param(
         return S_OK;
     }
     case VT_BSTR: {
-	if (debugout) {
+	if (writeit && debugout) {
 	    if (*arg)
                    TRACE_(olerelay)("%s",relaystr((WCHAR*)*arg));
 	    else
@@ -892,7 +903,8 @@ serialize_param(
 	if (debugout) TRACE_(olerelay)("(vt %s)",debugstr_vt(adesc->tdescElem.vt));
 	if (debugout) TRACE_(olerelay)("[");
 	for (i=0;i<arrsize;i++) {
-	    hres = serialize_param(tinfo, writeit, debugout, dealloc, &adesc->tdescElem, (DWORD*)((LPBYTE)(*arg)+i*_xsize(&adesc->tdescElem, tinfo)), buf);
+            LPBYTE base = _passbyref(&adesc->tdescElem, tinfo) ? (LPBYTE) *arg : (LPBYTE) arg;
+	    hres = serialize_param(tinfo, writeit, debugout, dealloc, &adesc->tdescElem, (DWORD*)((LPBYTE)base+i*_xsize(&adesc->tdescElem, tinfo)), buf);
 	    if (hres)
 		return hres;
 	    if (debugout && (i<arrsize-1)) TRACE_(olerelay)(",");
@@ -1172,13 +1184,18 @@ deserialize_param(
 	}
 	case VT_CARRAY: {
 	    /* arg is pointing to the start of the array. */
+            LPBYTE base = (LPBYTE) arg;
 	    ARRAYDESC *adesc = tdesc->u.lpadesc;
 	    int		arrsize,i;
 	    arrsize = 1;
 	    if (adesc->cDims > 1) FIXME("cDims > 1 in VT_CARRAY. Does it work?\n");
 	    for (i=0;i<adesc->cDims;i++)
 		arrsize *= adesc->rgbounds[i].cElements;
-	    *arg=(DWORD)HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,_xsize(tdesc->u.lptdesc, tinfo) * arrsize);
+            if (_passbyref(&adesc->tdescElem, tinfo))
+            {
+	        base = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,_xsize(tdesc->u.lptdesc, tinfo) * arrsize);
+                *arg = (DWORD) base;
+            }
 	    for (i=0;i<arrsize;i++)
 		deserialize_param(
 		    tinfo,
@@ -1186,7 +1203,7 @@ deserialize_param(
 		    debugout,
 		    alloc,
 		    &adesc->tdescElem,
-		    (DWORD*)((LPBYTE)(*arg)+i*_xsize(&adesc->tdescElem, tinfo)),
+		    (DWORD*)(base + i*_xsize(&adesc->tdescElem, tinfo)),
 		    buf
 		);
 	    return S_OK;
@@ -1385,11 +1402,20 @@ xCall(LPVOID retptr, int method, TMProxyImpl *tpinfo /*, args */)
 		TRACE_(olerelay)("%s=",relaystr(names[i+1]));
 	}
 	/* No need to marshal other data than FIN and any VT_PTR. */
-	if (!is_in_elem(elem) && (elem->tdesc.vt != VT_PTR)) {
-	    xargs+=_argsize(&elem->tdesc, tinfo);
-	    if (relaydeb) TRACE_(olerelay)("[out]");
-	    continue;
-	}
+        if (!is_in_elem(elem))
+        {
+            if (elem->tdesc.vt != VT_PTR)
+            {
+                xargs+=_argsize(&elem->tdesc, tinfo);
+                if (relaydeb) TRACE_(olerelay)("[out]");
+                continue;
+            }
+            else
+            {
+                memset( *(void **)xargs, 0, _xsize( elem->tdesc.u.lptdesc, tinfo ) );
+            }
+        }
+
 	hres = serialize_param(
 	    tinfo,
 	    is_in_elem(elem),
@@ -2002,16 +2028,19 @@ TMStubImpl_Invoke(
 
     if (This->dispatch_derivative && xmsg->iMethod < sizeof(IDispatchVtbl)/sizeof(void *))
     {
-        IPSFactoryBuffer *factory_buffer;
-        hres = get_facbuf_for_iid(&IID_IDispatch, &factory_buffer);
-        if (hres == S_OK)
+        if (!This->dispatch_stub)
         {
-            hres = IPSFactoryBuffer_CreateStub(factory_buffer, &IID_IDispatch,
-                This->pUnk, &This->dispatch_stub);
-            IPSFactoryBuffer_Release(factory_buffer);
+            IPSFactoryBuffer *factory_buffer;
+            hres = get_facbuf_for_iid(&IID_IDispatch, &factory_buffer);
+            if (hres == S_OK)
+            {
+                hres = IPSFactoryBuffer_CreateStub(factory_buffer, &IID_IDispatch,
+                    This->pUnk, &This->dispatch_stub);
+                IPSFactoryBuffer_Release(factory_buffer);
+            }
+            if (hres != S_OK)
+                return hres;
         }
-        if (hres != S_OK)
-            return hres;
         return IRpcStubBuffer_Invoke(This->dispatch_stub, xmsg, rpcchanbuf);
     }
 

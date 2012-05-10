@@ -2,6 +2,7 @@
  * Unit test of the SHBrowseForFolder function.
  *
  * Copyright 2009-2010 Michael Mc Donnell
+ * Copyright 2011 André Hentschel
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,6 +28,7 @@
 #define TIMER_WAIT_MS 50 /* Should be long enough for slow systems */
 
 static const char new_folder_name[] = "foo";
+static LPITEMIDLIST selected_folder_pidl;
 
 /*
  * Returns the number of folders in a folder.
@@ -147,7 +149,7 @@ static int CALLBACK create_new_folder_callback(HWND hwnd, UINT uMsg,
  */
 static void test_click_make_new_folder_button(void)
 {
-    HRESULT resCoInit;
+    HRESULT resCoInit, hr;
     BROWSEINFO bi;
     LPITEMIDLIST pidl = NULL;
     LPITEMIDLIST test_folder_pidl;
@@ -198,9 +200,14 @@ static void test_click_make_new_folder_button(void)
     bi.ulFlags = BIF_NEWDIALOGSTYLE;
     bi.lpfn = create_new_folder_callback;
     /* Use test folder as the root folder for dialog box */
-    MultiByteToWideChar(CP_UTF8, 0, test_folder_path, MAX_PATH,
+    MultiByteToWideChar(CP_UTF8, 0, test_folder_path, -1,
         test_folder_pathW, MAX_PATH);
-    SHGetDesktopFolder(&test_folder_object);
+    hr = SHGetDesktopFolder(&test_folder_object);
+    ok (SUCCEEDED(hr), "SHGetDesktopFolder failed with hr 0x%08x\n", hr);
+    if (FAILED(hr)) {
+        skip("SHGetDesktopFolder failed - skipping\n");
+        return;
+    }
     test_folder_object->lpVtbl->ParseDisplayName(test_folder_object, NULL, NULL,
         test_folder_pathW, 0UL, &test_folder_pidl, 0UL);
     bi.pidlRoot = test_folder_pidl;
@@ -209,20 +216,20 @@ static void test_click_make_new_folder_button(void)
     pidl = SHBrowseForFolder(&bi);
 
     number_of_folders = get_number_of_folders(test_folder_path);
-    todo_wine ok(number_of_folders == 1 || broken(number_of_folders == 0) /* W95, W98 */,
+    ok(number_of_folders == 1 || broken(number_of_folders == 0) /* W95, W98 */,
         "Clicking \"Make New Folder\" button did not result in a new folder.\n");
 
     /* There should be a new folder foo inside the test folder */
     strcpy(new_folder_path, test_folder_path);
     strcat(new_folder_path, new_folder_name);
-    todo_wine ok(does_folder_or_file_exist(new_folder_path)
+    ok(does_folder_or_file_exist(new_folder_path)
         || broken(!does_folder_or_file_exist(new_folder_path)) /* W95, W98, XP, W2K3 */,
         "The new folder did not get the name %s\n", new_folder_name);
 
     /* Dialog should return a pidl pointing to the new folder */
     ok(SHGetPathFromIDListA(pidl, new_folder_pidl_path),
         "SHGetPathFromIDList failed for new folder.\n");
-    todo_wine ok(strcmp(new_folder_path, new_folder_pidl_path) == 0
+    ok(strcmp(new_folder_path, new_folder_pidl_path) == 0
         || broken(strcmp(new_folder_path, new_folder_pidl_path) != 0) /* earlier than Vista */,
         "SHBrowseForFolder did not return the pidl for the new folder. "
         "Expected '%s' got '%s'\n", new_folder_path, new_folder_pidl_path);
@@ -241,8 +248,112 @@ static void test_click_make_new_folder_button(void)
         CoTaskMemFree(pidl);
     if (test_folder_pidl)
         CoTaskMemFree(test_folder_pidl);
-    if (test_folder_object)
-        test_folder_object->lpVtbl->Release(test_folder_object);
+    test_folder_object->lpVtbl->Release(test_folder_object);
+
+    CoUninitialize();
+}
+
+
+/*
+ * Callback used by test_selection.
+ */
+static int CALLBACK selection_callback(HWND hwnd, UINT uMsg, LPARAM lParam, LPARAM lpData)
+{
+    DWORD ret;
+
+    switch (uMsg)
+    {
+    case BFFM_INITIALIZED:
+        /* test with zero values */
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONA, 0, 0);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONW, 0, 0);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONA, 1, 0);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+
+        if(0)
+        {
+            /* Crashes on NT4 */
+            ret = SendMessage(hwnd, BFFM_SETSELECTIONW, 1, 0);
+            ok(!ret, "SendMessage returned: %u\n", ret);
+        }
+
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONA, 0, (LPARAM)selected_folder_pidl);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONW, 0, (LPARAM)selected_folder_pidl);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONA, 1, (LPARAM)selected_folder_pidl);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONW, 1, (LPARAM)selected_folder_pidl);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONA, 1, (LPARAM)new_folder_name);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+        ret = SendMessage(hwnd, BFFM_SETSELECTIONW, 1, (LPARAM)new_folder_name);
+        ok(!ret, "SendMessage returned: %u\n", ret);
+
+        SendMessage(hwnd, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void test_selection(void)
+{
+    HRESULT resCoInit, hr;
+    BROWSEINFO bi;
+    LPITEMIDLIST pidl = NULL;
+    IShellFolder *desktop_object;
+    WCHAR selected_folderW[MAX_PATH];
+    const CHAR title[] = "test_selection";
+
+    resCoInit = CoInitialize(NULL);
+    if(!(resCoInit == S_OK || resCoInit == S_FALSE))
+    {
+        skip("COM could not be initialized %u\n", GetLastError());
+        return;
+    }
+
+    if (!GetCurrentDirectoryW(MAX_PATH, selected_folderW))
+    {
+        skip("GetCurrentDirectoryW failed %u\n", GetLastError());
+    }
+
+    /* Initialize browse info struct for SHBrowseForFolder */
+    bi.hwndOwner = NULL;
+    bi.pszDisplayName = NULL;
+    bi.lpszTitle = (LPTSTR) title;
+    bi.lpfn = selection_callback;
+
+    hr = SHGetDesktopFolder(&desktop_object);
+    ok (SUCCEEDED(hr), "SHGetDesktopFolder failed with hr 0x%08x\n", hr);
+    if (FAILED(hr)) {
+        skip("SHGetDesktopFolder failed - skipping\n");
+        return;
+    }
+    desktop_object->lpVtbl->ParseDisplayName(desktop_object, NULL, NULL,
+        selected_folderW, 0UL, &selected_folder_pidl, 0UL);
+    bi.pidlRoot = selected_folder_pidl;
+
+    /* test without flags */
+    bi.ulFlags = 0;
+    pidl = SHBrowseForFolder(&bi);
+
+    if (pidl)
+        CoTaskMemFree(pidl);
+
+    /* test with flag */
+    bi.ulFlags = BIF_NEWDIALOGSTYLE;
+    pidl = SHBrowseForFolder(&bi);
+
+    if (pidl)
+        CoTaskMemFree(pidl);
+
+    desktop_object->lpVtbl->Release(desktop_object);
 
     CoUninitialize();
 }
@@ -250,4 +361,5 @@ static void test_click_make_new_folder_button(void)
 START_TEST(brsfolder)
 {
     test_click_make_new_folder_button();
+    test_selection();
 }

@@ -36,6 +36,8 @@
 #include "strmif.h"
 #include "wine/unicode.h"
 #include "uuids.h"
+#include "initguid.h"
+#include "fil_data.h"
 
 #include "wine/debug.h"
 
@@ -43,54 +45,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
 #define ARRAYSIZE(array) (sizeof(array)/sizeof((array)[0]))
 
-/* Unexposed IAMFilterData interface */
-typedef struct IAMFilterData IAMFilterData;
-
-typedef struct IAMFilterDataVtbl
-{
-    BEGIN_INTERFACE
-
-    /*** IUnknown methods ***/
-    HRESULT (STDMETHODCALLTYPE *QueryInterface)(
-        IAMFilterData *This,
-        REFIID riid,
-        void **ppvObject);
-
-    ULONG (STDMETHODCALLTYPE *AddRef)(
-        IAMFilterData *This);
-
-    ULONG (STDMETHODCALLTYPE *Release)(
-        IAMFilterData *This);
-
-    /*** IAMFilterData methods ***/
-    HRESULT (STDMETHODCALLTYPE *ParseFilterData)(
-        IAMFilterData *This,
-        BYTE *pData,
-        ULONG cb,
-        BYTE **ppRegFilter2);
-
-    HRESULT (STDMETHODCALLTYPE *CreateFilterData)(
-        IAMFilterData* This,
-        REGFILTER2 *prf2,
-        BYTE **pRegFilterData,
-        ULONG *pcb);
-
-    END_INTERFACE
-} IAMFilterDataVtbl;
-struct IAMFilterData
-{
-    const IAMFilterDataVtbl *lpVtbl;
-};
-static const GUID IID_IAMFilterData = {
- 0x97f7c4d4, 0x547b, 0x4a5f, { 0x83,0x32, 0x53,0x64,0x30,0xad,0x2e,0x4d }
-};
-
-
 typedef struct FilterMapper3Impl
 {
-    const IFilterMapper3Vtbl *lpVtbl;
-    const IFilterMapperVtbl  *lpVtblFilterMapper;
-    const IAMFilterDataVtbl  *lpVtblAMFilterData;
+    IFilterMapper3 IFilterMapper3_iface;
+    IFilterMapper IFilterMapper_iface;
+    IAMFilterData IAMFilterData_iface;
     const IUnknownVtbl *IInner_vtbl;
     LONG refCount;
     IUnknown * pUnkOuter;
@@ -103,14 +62,19 @@ static const IFilterMapper3Vtbl fm3vtbl;
 static const IFilterMapperVtbl fmvtbl;
 static const IAMFilterDataVtbl AMFilterDataVtbl;
 
+static inline FilterMapper3Impl *impl_from_IFilterMapper3( IFilterMapper3 *iface )
+{
+    return CONTAINING_RECORD(iface, FilterMapper3Impl, IFilterMapper3_iface);
+}
+
 static inline FilterMapper3Impl *impl_from_IFilterMapper( IFilterMapper *iface )
 {
-    return (FilterMapper3Impl *)((char*)iface - FIELD_OFFSET(FilterMapper3Impl, lpVtblFilterMapper));
+    return CONTAINING_RECORD(iface, FilterMapper3Impl, IFilterMapper_iface);
 }
 
 static inline FilterMapper3Impl *impl_from_IAMFilterData( IAMFilterData *iface )
 {
-    return (FilterMapper3Impl *)((char*)iface - FIELD_OFFSET(FilterMapper3Impl, lpVtblAMFilterData));
+    return CONTAINING_RECORD(iface, FilterMapper3Impl, IAMFilterData_iface);
 }
 
 static inline FilterMapper3Impl *impl_from_inner_IUnknown( IUnknown *iface )
@@ -232,9 +196,9 @@ HRESULT FilterMapper2_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     pFM2impl->bUnkOuterValid = FALSE;
     pFM2impl->bAggregatable = FALSE;
     pFM2impl->IInner_vtbl = &IInner_VTable;
-    pFM2impl->lpVtbl = &fm3vtbl;
-    pFM2impl->lpVtblFilterMapper = &fmvtbl;
-    pFM2impl->lpVtblAMFilterData = &AMFilterDataVtbl;
+    pFM2impl->IFilterMapper3_iface.lpVtbl = &fm3vtbl;
+    pFM2impl->IFilterMapper_iface.lpVtbl = &fmvtbl;
+    pFM2impl->IAMFilterData_iface.lpVtbl = &AMFilterDataVtbl;
     pFM2impl->refCount = 1;
 
     *ppObj = pFM2impl;
@@ -255,7 +219,7 @@ HRESULT FilterMapper_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     if (FAILED(hr))
         return hr;
 
-    *ppObj = &pFM2impl->lpVtblFilterMapper;
+    *ppObj = &pFM2impl->IFilterMapper_iface;
 
     return hr;
 }
@@ -278,9 +242,9 @@ static HRESULT WINAPI Inner_QueryInterface(IUnknown * iface, REFIID riid, LPVOID
         IsEqualIID(riid, &IID_IFilterMapper3))
         *ppv = This;
     else if (IsEqualIID(riid, &IID_IFilterMapper))
-        *ppv = &This->lpVtblFilterMapper;
+        *ppv = &This->IFilterMapper_iface;
     else if (IsEqualIID(riid, &IID_IAMFilterData))
-        *ppv = &This->lpVtblAMFilterData;
+        *ppv = &This->IAMFilterData_iface;
 
     if (*ppv != NULL)
     {
@@ -326,7 +290,7 @@ static const IUnknownVtbl IInner_VTable =
 
 static HRESULT WINAPI FilterMapper3_QueryInterface(IFilterMapper3 * iface, REFIID riid, LPVOID *ppv)
 {
-    FilterMapper3Impl *This = (FilterMapper3Impl *)iface;
+    FilterMapper3Impl *This = impl_from_IFilterMapper3(iface);
 
     if (This->bAggregatable)
         This->bUnkOuterValid = TRUE;
@@ -356,7 +320,7 @@ static HRESULT WINAPI FilterMapper3_QueryInterface(IFilterMapper3 * iface, REFII
 
 static ULONG WINAPI FilterMapper3_AddRef(IFilterMapper3 * iface)
 {
-    FilterMapper3Impl *This = (FilterMapper3Impl *)iface;
+    FilterMapper3Impl *This = impl_from_IFilterMapper3(iface);
 
     if (This->pUnkOuter && This->bUnkOuterValid)
         return IUnknown_AddRef(This->pUnkOuter);
@@ -365,7 +329,7 @@ static ULONG WINAPI FilterMapper3_AddRef(IFilterMapper3 * iface)
 
 static ULONG WINAPI FilterMapper3_Release(IFilterMapper3 * iface)
 {
-    FilterMapper3Impl *This = (FilterMapper3Impl *)iface;
+    FilterMapper3Impl *This = impl_from_IFilterMapper3(iface);
 
     if (This->pUnkOuter && This->bUnkOuterValid)
         return IUnknown_Release(This->pUnkOuter);
@@ -1235,21 +1199,21 @@ static HRESULT WINAPI FilterMapper_QueryInterface(IFilterMapper * iface, REFIID 
 
     TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppv);
 
-    return FilterMapper3_QueryInterface((IFilterMapper3*)&This->lpVtbl, riid, ppv);
+    return FilterMapper3_QueryInterface(&This->IFilterMapper3_iface, riid, ppv);
 }
 
 static ULONG WINAPI FilterMapper_AddRef(IFilterMapper * iface)
 {
     FilterMapper3Impl *This = impl_from_IFilterMapper(iface);
 
-    return FilterMapper3_AddRef((IFilterMapper3*)This);
+    return FilterMapper3_AddRef(&This->IFilterMapper3_iface);
 }
 
 static ULONG WINAPI FilterMapper_Release(IFilterMapper * iface)
 {
     FilterMapper3Impl *This = impl_from_IFilterMapper(iface);
 
-    return FilterMapper3_Release((IFilterMapper3*)This);
+    return FilterMapper3_Release(&This->IFilterMapper3_iface);
 }
 
 /*** IFilterMapper methods ***/
@@ -1295,22 +1259,9 @@ static HRESULT WINAPI FilterMapper_EnumMatchingFilters(
 
     *ppEnum = NULL;
 
-    hr = IFilterMapper3_EnumMatchingFilters((IFilterMapper3*)This,
-                                       &ppEnumMoniker,
-                                       0,
-                                       TRUE,
-                                       dwMerit,
-                                       bInputNeeded,
-                                       1,
-                                       InputType,
-                                       NULL,
-                                       &GUID_NULL,
-                                       bRender,
-                                       bOutputNeeded,
-                                       1,
-                                       OutputType,
-                                       NULL,
-                                       &GUID_NULL);
+    hr = IFilterMapper3_EnumMatchingFilters(&This->IFilterMapper3_iface, &ppEnumMoniker, 0, TRUE,
+            dwMerit, bInputNeeded, 1, InputType, NULL, &GUID_NULL, bRender, bOutputNeeded, 1,
+            OutputType, NULL, &GUID_NULL);
 
     if (FAILED(hr))
         return hr;
@@ -1757,21 +1708,21 @@ static HRESULT WINAPI AMFilterData_QueryInterface(IAMFilterData * iface, REFIID 
 {
     FilterMapper3Impl *This = impl_from_IAMFilterData(iface);
 
-    return FilterMapper3_QueryInterface((IFilterMapper3*)This, riid, ppv);
+    return FilterMapper3_QueryInterface(&This->IFilterMapper3_iface, riid, ppv);
 }
 
 static ULONG WINAPI AMFilterData_AddRef(IAMFilterData * iface)
 {
     FilterMapper3Impl *This = impl_from_IAMFilterData(iface);
 
-    return FilterMapper3_AddRef((IFilterMapper3*)This);
+    return FilterMapper3_AddRef(&This->IFilterMapper3_iface);
 }
 
 static ULONG WINAPI AMFilterData_Release(IAMFilterData * iface)
 {
     FilterMapper3Impl *This = impl_from_IAMFilterData(iface);
 
-    return FilterMapper3_Release((IFilterMapper3*)This);
+    return FilterMapper3_Release(&This->IFilterMapper3_iface);
 }
 
 /*** IAMFilterData methods ***/
@@ -1781,14 +1732,14 @@ static HRESULT WINAPI AMFilterData_ParseFilterData(IAMFilterData* iface,
 {
     FilterMapper3Impl *This = impl_from_IAMFilterData(iface);
     HRESULT hr = S_OK;
-    REGFILTER2 *prf2;
+    static REGFILTER2 *prf2;
 
     TRACE("(%p/%p)->(%p, %d, %p)\n", This, iface, pData, cb, ppRegFilter2);
 
     prf2 = CoTaskMemAlloc(sizeof(*prf2));
     if (!prf2)
         return E_OUTOFMEMORY;
-    *ppRegFilter2 = (BYTE *)prf2;
+    *ppRegFilter2 = (BYTE *)&prf2;
 
     hr = FM2_ReadFilterData(pData, prf2);
     if (FAILED(hr))

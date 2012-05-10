@@ -395,7 +395,7 @@ static int build_shared_mapping( struct mapping *mapping, int fd,
 }
 
 /* retrieve the mapping parameters for an executable (PE) image */
-static int get_image_params( struct mapping *mapping, int unix_fd )
+static int get_image_params( struct mapping *mapping, int unix_fd, int protect )
 {
     IMAGE_DOS_HEADER dos;
     IMAGE_SECTION_HEADER *sec = NULL;
@@ -453,7 +453,7 @@ static int get_image_params( struct mapping *mapping, int unix_fd )
 
     if (mapping->shared_file) list_add_head( &shared_list, &mapping->shared_entry );
 
-    mapping->protect = VPROT_IMAGE;
+    mapping->protect = protect;
     free( sec );
     return 1;
 
@@ -496,6 +496,7 @@ static struct object *create_mapping( struct directory *root, const struct unico
 
     if (handle)
     {
+        const unsigned int sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
         unsigned int mapping_access = FILE_MAPPING_ACCESS;
 
         if (!(protect & VPROT_COMMITTED))
@@ -509,18 +510,20 @@ static struct object *create_mapping( struct directory *root, const struct unico
         /* file sharing rules for mappings are different so we use magic the access rights */
         if (protect & VPROT_IMAGE) mapping_access |= FILE_MAPPING_IMAGE;
         else if (protect & VPROT_WRITE) mapping_access |= FILE_MAPPING_WRITE;
-        mapping->fd = dup_fd_object( fd, mapping_access,
-                                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                     FILE_SYNCHRONOUS_IO_NONALERT );
+
+        if (!(mapping->fd = get_fd_object_for_mapping( fd, mapping_access, sharing )))
+        {
+            mapping->fd = dup_fd_object( fd, mapping_access, sharing, FILE_SYNCHRONOUS_IO_NONALERT );
+            if (mapping->fd) set_fd_user( mapping->fd, &mapping_fd_ops, NULL );
+        }
         release_object( file );
         release_object( fd );
         if (!mapping->fd) goto error;
 
-        set_fd_user( mapping->fd, &mapping_fd_ops, &mapping->obj );
         if ((unix_fd = get_unix_fd( mapping->fd )) == -1) goto error;
         if (protect & VPROT_IMAGE)
         {
-            if (!get_image_params( mapping, unix_fd )) goto error;
+            if (!get_image_params( mapping, unix_fd, protect )) goto error;
             return &mapping->obj;
         }
         if (fstat( unix_fd, &st ) == -1)
@@ -563,6 +566,30 @@ static struct object *create_mapping( struct directory *root, const struct unico
  error:
     release_object( mapping );
     return NULL;
+}
+
+struct mapping *get_mapping_obj( struct process *process, obj_handle_t handle, unsigned int access )
+{
+    return (struct mapping *)get_handle_obj( process, handle, access, &mapping_ops );
+}
+
+/* open a new file handle to the file backing the mapping */
+obj_handle_t open_mapping_file( struct process *process, struct mapping *mapping,
+                                unsigned int access, unsigned int sharing )
+{
+    obj_handle_t handle;
+    struct file *file = create_file_for_fd_obj( mapping->fd, access, sharing );
+
+    if (!file) return 0;
+    handle = alloc_handle( process, file, access, 0 );
+    release_object( file );
+    return handle;
+}
+
+struct mapping *grab_mapping_unless_removable( struct mapping *mapping )
+{
+    if (is_fd_removable( mapping->fd )) return NULL;
+    return (struct mapping *)grab_object( mapping );
 }
 
 static void mapping_dump( struct object *obj, int verbose )
@@ -682,8 +709,7 @@ DECL_HANDLER(get_mapping_info)
     struct mapping *mapping;
     struct fd *fd;
 
-    if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle,
-                                                     req->access, &mapping_ops )))
+    if ((mapping = get_mapping_obj( current->process, req->handle, req->access )))
     {
         reply->size        = mapping->size;
         reply->protect     = mapping->protect;
@@ -713,7 +739,7 @@ DECL_HANDLER(get_mapping_committed_range)
 {
     struct mapping *mapping;
 
-    if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle, 0, &mapping_ops )))
+    if ((mapping = get_mapping_obj( current->process, req->handle, 0 )))
     {
         if (!(req->offset & page_mask) && req->offset < mapping->size)
             reply->committed = find_committed_range( mapping, req->offset, &reply->size );
@@ -729,7 +755,7 @@ DECL_HANDLER(add_mapping_committed_range)
 {
     struct mapping *mapping;
 
-    if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle, 0, &mapping_ops )))
+    if ((mapping = get_mapping_obj( current->process, req->handle, 0 )))
     {
         if (!(req->size & page_mask) &&
             !(req->offset & page_mask) &&

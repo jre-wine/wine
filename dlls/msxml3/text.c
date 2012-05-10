@@ -77,7 +77,7 @@ static HRESULT WINAPI domtext_QueryInterface(
     }
     else
     {
-        FIXME("Unsupported interface %s\n", debugstr_guid(riid));
+        TRACE("Unsupported interface %s\n", debugstr_guid(riid));
         *ppvObject = NULL;
         return E_NOINTERFACE;
     }
@@ -90,16 +90,18 @@ static ULONG WINAPI domtext_AddRef(
     IXMLDOMText *iface )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    return InterlockedIncrement( &This->ref );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref);
+    return ref;
 }
 
 static ULONG WINAPI domtext_Release(
     IXMLDOMText *iface )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    ULONG ref;
+    ULONG ref = InterlockedDecrement( &This->ref );
 
-    ref = InterlockedDecrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref);
     if ( ref == 0 )
     {
         destroy_xmlnode(&This->node);
@@ -114,12 +116,7 @@ static HRESULT WINAPI domtext_GetTypeInfoCount(
     UINT* pctinfo )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-
-    TRACE("(%p)->(%p)\n", This, pctinfo);
-
-    *pctinfo = 1;
-
-    return S_OK;
+    return IDispatchEx_GetTypeInfoCount(&This->node.dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI domtext_GetTypeInfo(
@@ -128,13 +125,8 @@ static HRESULT WINAPI domtext_GetTypeInfo(
     ITypeInfo** ppTInfo )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    HRESULT hr;
-
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
-
-    hr = get_typeinfo(IXMLDOMText_tid, ppTInfo);
-
-    return hr;
+    return IDispatchEx_GetTypeInfo(&This->node.dispex.IDispatchEx_iface,
+        iTInfo, lcid, ppTInfo);
 }
 
 static HRESULT WINAPI domtext_GetIDsOfNames(
@@ -143,23 +135,8 @@ static HRESULT WINAPI domtext_GetIDsOfNames(
     UINT cNames, LCID lcid, DISPID* rgDispId )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
-          lcid, rgDispId);
-
-    if(!rgszNames || cNames == 0 || !rgDispId)
-        return E_INVALIDARG;
-
-    hr = get_typeinfo(IXMLDOMText_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
+    return IDispatchEx_GetIDsOfNames(&This->node.dispex.IDispatchEx_iface,
+        riid, rgszNames, cNames, lcid, rgDispId);
 }
 
 static HRESULT WINAPI domtext_Invoke(
@@ -169,21 +146,8 @@ static HRESULT WINAPI domtext_Invoke(
     EXCEPINFO* pExcepInfo, UINT* puArgErr )
 {
     domtext *This = impl_from_IXMLDOMText( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
-          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-
-    hr = get_typeinfo(IXMLDOMText_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLDOMText_iface, dispIdMember, wFlags, pDispParams,
-                pVarResult, pExcepInfo, puArgErr);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
+    return IDispatchEx_Invoke(&This->node.dispex.IDispatchEx_iface,
+        dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
 
 static HRESULT WINAPI domtext_get_nodeName(
@@ -207,12 +171,7 @@ static HRESULT WINAPI domtext_get_nodeValue(
 
     TRACE("(%p)->(%p)\n", This, value);
 
-    if(!value)
-        return E_INVALIDARG;
-
-    V_VT(value) = VT_BSTR;
-    V_BSTR(value) = bstr_from_xmlChar(This->node.node->content);
-    return S_OK;
+    return node_get_content(&This->node, value);
 }
 
 static HRESULT WINAPI domtext_put_nodeValue(
@@ -447,7 +406,7 @@ static HRESULT WINAPI domtext_get_nodeTypedValue(
     if (!var1)
         return E_INVALIDARG;
 
-    hr = domtext_get_parentNode(iface, &parent);
+    hr = IXMLDOMText_get_parentNode(iface, &parent);
 
     if (hr == S_OK)
     {
@@ -474,7 +433,7 @@ static HRESULT WINAPI domtext_put_nodeTypedValue(
 
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&value));
 
-    hr = domtext_get_parentNode(iface, &parent);
+    hr = IXMLDOMText_get_parentNode(iface, &parent);
 
     if (hr == S_OK)
     {
@@ -502,7 +461,7 @@ static HRESULT WINAPI domtext_get_dataType(
     if (!dtName)
         return E_INVALIDARG;
 
-    hr = domtext_get_parentNode(iface, &parent);
+    hr = IXMLDOMText_get_parentNode(iface, &parent);
 
     if (hr == S_OK)
     {
@@ -532,7 +491,7 @@ static HRESULT WINAPI domtext_put_dataType(
     if (!dtName)
         return E_INVALIDARG;
 
-    hr = domtext_get_parentNode(iface, &parent);
+    hr = IXMLDOMText_get_parentNode(iface, &parent);
 
     if (hr == S_OK)
     {
@@ -946,6 +905,18 @@ static const struct IXMLDOMTextVtbl domtext_vtbl =
     domtext_splitText
 };
 
+static const tid_t domtext_iface_tids[] = {
+    IXMLDOMText_tid,
+    0
+};
+
+static dispex_static_data_t domtext_dispex = {
+    NULL,
+    IXMLDOMText_tid,
+    NULL,
+    domtext_iface_tids
+};
+
 IUnknown* create_text( xmlNodePtr text )
 {
     domtext *This;
@@ -957,7 +928,7 @@ IUnknown* create_text( xmlNodePtr text )
     This->IXMLDOMText_iface.lpVtbl = &domtext_vtbl;
     This->ref = 1;
 
-    init_xmlnode(&This->node, text, (IXMLDOMNode*)&This->IXMLDOMText_iface, NULL);
+    init_xmlnode(&This->node, text, (IXMLDOMNode*)&This->IXMLDOMText_iface, &domtext_dispex);
 
     return (IUnknown*)&This->IXMLDOMText_iface;
 }

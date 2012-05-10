@@ -19,16 +19,14 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <windows.h>
 #include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
-#include <tchar.h>
-#include <stdio.h>
 #include <winnt.h>
-    
+
 #include "taskmgr.h"
 #include "perfdata.h"
 
@@ -39,6 +37,7 @@ WNDPROC                OldProcessListWndProc;
 LRESULT CALLBACK ProcessListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     HBRUSH    hbrBackground;
+    int     count;
     RECT    rcItem;
     RECT    rcClip;
     HDC        hDC;
@@ -69,7 +68,7 @@ LRESULT CALLBACK ProcessListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
         /*
          * Get the background brush
          */
-        hbrBackground = (HBRUSH) GetClassLongPtr(hWnd, GCLP_HBRBACKGROUND);
+        hbrBackground = (HBRUSH) GetClassLongPtrW(hWnd, GCLP_HBRBACKGROUND);
 
         /*
          * Calculate the clip rect by getting the RECT
@@ -80,13 +79,14 @@ LRESULT CALLBACK ProcessListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
          * use icons in this list control.
          */
         rcClip.left = LVIR_BOUNDS;
-        SendMessage(hWnd, LVM_GETITEMRECT, 0, (LPARAM) &rcClip);
+        SendMessageW(hWnd, LVM_GETITEMRECT, 0, (LPARAM) &rcClip);
         rcItem.left = LVIR_BOUNDS;
-        SendMessage(hWnd, LVM_GETITEMRECT, ListView_GetItemCount(hWnd) - 1, (LPARAM) &rcItem);
+        count = SendMessageW(hWnd, LVM_GETITEMCOUNT, 0, 0);
+        SendMessageW(hWnd, LVM_GETITEMRECT, count - 1, (LPARAM) &rcItem);
 
         rcClip.bottom = rcItem.bottom;
         rcItem.left = LVIR_ICON;
-        SendMessage(hWnd, LVM_GETITEMRECT, 0, (LPARAM) &rcItem);
+        SendMessageW(hWnd, LVM_GETITEMRECT, 0, (LPARAM) &rcItem);
         rcClip.left = rcItem.right;
 
         /*
@@ -117,5 +117,5 @@ LRESULT CALLBACK ProcessListWndProc(HWND hWnd, UINT message, WPARAM wParam, LPAR
     /*
      * We pass on all messages except WM_ERASEBKGND
      */
-    return CallWindowProc(OldProcessListWndProc, hWnd, message, wParam, lParam);
+    return CallWindowProcW(OldProcessListWndProc, hWnd, message, wParam, lParam);
 }

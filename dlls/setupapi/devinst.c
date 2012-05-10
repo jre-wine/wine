@@ -527,7 +527,7 @@ static void SETUPDI_FreeDeviceInfo(struct DeviceInfo *devInfo)
     GlobalFree((HANDLE)devInfo->devId);
 }
 
-/* Adds a device with GUID guid and identifer devInst to set.  Allocates a
+/* Adds a device with GUID guid and identifier devInst to set.  Allocates a
  * struct DeviceInfo, and points the returned device info's Reserved member
  * to it.  "Phantom" devices are deleted from the registry when closed.
  * Returns a pointer to the newly allocated device info.
@@ -609,7 +609,7 @@ BOOL WINAPI SetupDiBuildClassInfoList(
  *              SetupDiBuildClassInfoListExA  (SETUPAPI.@)
  *
  * Returns a list of setup class GUIDs that identify the classes
- * that are installed on a local or remote macine.
+ * that are installed on a local or remote machine.
  *
  * PARAMS
  *   Flags [I] control exclusion of classes from the list.
@@ -655,7 +655,7 @@ BOOL WINAPI SetupDiBuildClassInfoListExA(
  *              SetupDiBuildClassInfoListExW  (SETUPAPI.@)
  *
  * Returns a list of setup class GUIDs that identify the classes
- * that are installed on a local or remote macine.
+ * that are installed on a local or remote machine.
  *
  * PARAMS
  *   Flags [I] control exclusion of classes from the list.
@@ -1163,7 +1163,7 @@ SetupDiCreateDeviceInfoListExW(const GUID *ClassGuid,
     TRACE("%s %p %s %p\n", debugstr_guid(ClassGuid), hwndParent,
       debugstr_w(MachineName), Reserved);
 
-    if (MachineName != NULL)
+    if (MachineName && *MachineName)
     {
         FIXME("remote support is not implemented\n");
         SetLastError(ERROR_INVALID_MACHINENAME);
@@ -2371,7 +2371,7 @@ HDEVINFO WINAPI SetupDiGetClassDevsExW(
         set = SetupDiCreateDeviceInfoListExW(class, parent, machine, reserved);
     if (set)
     {
-        if (machine)
+        if (machine && *machine)
             FIXME("%s: unimplemented for remote machines\n",
                     debugstr_w(machine));
         else if (flags & DIGCF_DEVICEINTERFACE)
@@ -2821,6 +2821,8 @@ BOOL WINAPI SetupDiEnumDeviceInterfaces(
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
+    /* In case application fails to check return value, clear output */
+    memset(DeviceInterfaceData, 0, sizeof(*DeviceInterfaceData));
     if (DeviceInfoData)
     {
         struct DeviceInfo *devInfo =
@@ -3560,7 +3562,7 @@ HKEY WINAPI SetupDiOpenClassRegKeyExW(
     LPCWSTR lpKeyName;
     LONG l;
 
-    if (MachineName != NULL)
+    if (MachineName && *MachineName)
     {
         FIXME("Remote access not supported yet!\n");
         return INVALID_HANDLE_VALUE;
@@ -3726,8 +3728,13 @@ static HKEY SETUPDI_OpenDrvKey(struct DeviceInfo *devInfo, REGSAM samDesired)
         WCHAR devId[10];
 
         sprintfW(devId, fmt, devInfo->devId);
-        RegOpenKeyExW(classKey, devId, 0, samDesired, &key);
+        l = RegOpenKeyExW(classKey, devId, 0, samDesired, &key);
         RegCloseKey(classKey);
+        if (l)
+        {
+            SetLastError(ERROR_KEY_DOES_NOT_EXIST);
+            return INVALID_HANDLE_VALUE;
+        }
     }
     return key;
 }

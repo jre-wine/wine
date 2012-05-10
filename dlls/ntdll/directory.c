@@ -77,6 +77,7 @@
 #include "windef.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "ddk/wdm.h"
 #include "ntdll_misc.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
@@ -161,7 +162,6 @@ static int show_dot_files = -1;
 /* at some point we may want to allow Winelib apps to set this */
 static const int is_case_sensitive = FALSE;
 
-UNICODE_STRING windows_dir = { 0, 0, NULL };  /* windows directory */
 UNICODE_STRING system_dir = { 0, 0, NULL };  /* system directory */
 
 static struct file_identity curdir;
@@ -923,7 +923,7 @@ static BOOLEAN get_dir_case_sensitivity_stat( const char *dir )
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
     struct statfs stfs;
 
-    statfs( dir, &stfs );
+    if (statfs( dir, &stfs ) == -1) return FALSE;
     /* Assume these file systems are always case insensitive on Mac OS.
      * For FreeBSD, only assume CIOPFS is case insensitive (AFAIK, Mac OS
      * is the only UNIX that supports case-insensitive lookup).
@@ -960,7 +960,7 @@ static BOOLEAN get_dir_case_sensitivity_stat( const char *dir )
 #elif defined(__NetBSD__)
     struct statvfs stfs;
 
-    statvfs( dir, &stfs );
+    if (statvfs( dir, &stfs ) == -1) return FALSE;
     /* Only assume CIOPFS is case insensitive. */
     if (strcmp( stfs.f_fstypename, "fusefs" ) ||
         strncmp( stfs.f_mntfromname, "ciopfs", 5 ))
@@ -973,7 +973,7 @@ static BOOLEAN get_dir_case_sensitivity_stat( const char *dir )
     char *cifile;
 
     /* Only assume CIOPFS is case insensitive. */
-    statfs( dir, &stfs );
+    if (statfs( dir, &stfs ) == -1) return FALSE;
     if (stfs.f_type != 0x65735546 /* FUSE_SUPER_MAGIC */)
         return TRUE;
     /* Normally, we'd have to parse the mtab to find out exactly what
@@ -1486,22 +1486,56 @@ static int read_directory_vfat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
 #endif /* VFAT_IOCTL_READDIR_BOTH */
 
 
+#ifdef USE_GETDENTS
+/***********************************************************************
+ *           read_first_dent_name
+ *
+ * reads name of first or second dentry (if they have inodes).
+ */
+static char *read_first_dent_name( int which, int fd, off_t second_offs, KERNEL_DIRENT64 *de_first_two,
+                                   char *buffer, size_t size, BOOL *buffer_changed )
+{
+    KERNEL_DIRENT64 *de;
+    int res;
+
+    de = de_first_two;
+    if (de != NULL)
+    {
+        if (which == 1)
+            de = (KERNEL_DIRENT64 *)((char *)de + de->d_reclen);
+
+        return de->d_ino ? de->d_name : NULL;
+    }
+
+    *buffer_changed = TRUE;
+    lseek( fd, which == 1 ? second_offs : 0, SEEK_SET );
+    res = getdents64( fd, buffer, size );
+    if (res <= 0)
+        return NULL;
+
+    de = (KERNEL_DIRENT64 *)buffer;
+    return de->d_ino ? de->d_name : NULL;
+}
+
 /***********************************************************************
  *           read_directory_getdents
  *
  * Read a directory using the Linux getdents64 system call; helper for NtQueryDirectoryFile.
  */
-#ifdef USE_GETDENTS
 static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
                                     BOOLEAN single_entry, const UNICODE_STRING *mask,
                                     BOOLEAN restart_scan, FILE_INFORMATION_CLASS class )
 {
-    off_t old_pos = 0;
+    static off_t second_entry_pos;
+    static struct file_identity last_dir_id;
+    off_t old_pos = 0, next_pos;
     size_t size = length;
-    int res, fake_dot_dot = 1;
     char *data, local_buffer[8192];
-    KERNEL_DIRENT64 *de;
+    KERNEL_DIRENT64 *de, *de_first_two = NULL;
     union file_directory_info *info, *last_info = NULL;
+    const char *filename;
+    BOOL data_buffer_changed;
+    int res, swap_to;
 
     if (size <= sizeof(local_buffer) || !(data = RtlAllocateHeap( GetProcessHeap(), 0, size )))
     {
@@ -1510,18 +1544,33 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     }
 
     if (restart_scan) lseek( fd, 0, SEEK_SET );
-    else if (length < max_dir_info_size(class))  /* we may have to return a partial entry here */
+    else
     {
         old_pos = lseek( fd, 0, SEEK_CUR );
-        if (old_pos == -1 && errno == ENOENT)
+        if (old_pos == -1)
         {
-            io->u.Status = STATUS_NO_MORE_FILES;
+            io->u.Status = (errno == ENOENT) ? STATUS_NO_MORE_FILES : FILE_GetNtStatus();
             res = 0;
             goto done;
         }
     }
 
     io->u.Status = STATUS_SUCCESS;
+    de = (KERNEL_DIRENT64 *)data;
+
+    /* if old_pos is not 0 we don't know how many entries have been returned already,
+     * so maintain second_entry_pos to know when to return '..' */
+    if (old_pos != 0 && (last_dir_id.dev != curdir.dev || last_dir_id.ino != curdir.ino))
+    {
+        lseek( fd, 0, SEEK_SET );
+        res = getdents64( fd, data, size );
+        if (res > 0)
+        {
+            second_entry_pos = de->d_off;
+            last_dir_id = curdir;
+        }
+        lseek( fd, old_pos, SEEK_SET );
+    }
 
     res = getdents64( fd, data, size );
     if (res == -1)
@@ -1534,52 +1583,46 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
         goto done;
     }
 
-    de = (KERNEL_DIRENT64 *)data;
-
-    if (restart_scan)
+    if (old_pos == 0 && res > 0)
     {
-        /* check if we got . and .. from getdents */
-        if (res > 0)
-        {
-            if (!strcmp( de->d_name, "." ) && res > de->d_reclen)
-            {
-                KERNEL_DIRENT64 *next_de = (KERNEL_DIRENT64 *)(data + de->d_reclen);
-                if (!strcmp( next_de->d_name, ".." )) fake_dot_dot = 0;
-            }
-        }
-        /* make sure we have enough room for both entries */
-        if (fake_dot_dot)
-        {
-            const ULONG min_info_size = dir_info_size( class, 1 ) + dir_info_size( class, 2 );
-            if (length < min_info_size || single_entry)
-            {
-                FIXME( "not enough room %u/%u for fake . and .. entries\n", length, single_entry );
-                fake_dot_dot = 0;
-            }
-        }
-
-        if (fake_dot_dot)
-        {
-            if ((info = append_entry( buffer, io, length, ".", NULL, mask, class )))
-                last_info = info;
-            if ((info = append_entry( buffer, io, length, "..", NULL, mask, class )))
-                last_info = info;
-
-            /* check if we still have enough space for the largest possible entry */
-            if (last_info && io->Information + max_dir_info_size(class) > length)
-            {
-                lseek( fd, 0, SEEK_SET );  /* reset pos to first entry */
-                res = 0;
-            }
-        }
+        second_entry_pos = de->d_off;
+        last_dir_id = curdir;
+        if (res > de->d_reclen)
+            de_first_two = de;
     }
 
     while (res > 0)
     {
         res -= de->d_reclen;
-        if (de->d_ino &&
-            !(fake_dot_dot && (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))) &&
-            (info = append_entry( buffer, io, length, de->d_name, NULL, mask, class )))
+        next_pos = de->d_off;
+        filename = NULL;
+
+        /* we must return first 2 entries as "." and "..", but getdents64()
+         * can return them anywhere, so swap first entries with "." and ".." */
+        if (old_pos == 0)
+            filename = ".";
+        else if (old_pos == second_entry_pos)
+            filename = "..";
+        else if (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))
+        {
+            swap_to = !strcmp( de->d_name, "." ) ? 0 : 1;
+            data_buffer_changed = FALSE;
+
+            filename = read_first_dent_name( swap_to, fd, second_entry_pos, de_first_two,
+                                             data, size, &data_buffer_changed );
+            if (filename != NULL && (!strcmp( filename, "." ) || !strcmp( filename, ".." )))
+                filename = read_first_dent_name( swap_to ^ 1, fd, second_entry_pos, NULL,
+                                                 data, size, &data_buffer_changed );
+            if (data_buffer_changed)
+            {
+                lseek( fd, next_pos, SEEK_SET );
+                res = 0;
+            }
+        }
+        else if (de->d_ino)
+            filename = de->d_name;
+
+        if (filename && (info = append_entry( buffer, io, length, filename, NULL, mask, class )))
         {
             last_info = info;
             if (io->u.Status == STATUS_BUFFER_OVERFLOW)
@@ -1590,17 +1633,18 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
             /* check if we still have enough space for the largest possible entry */
             if (single_entry || io->Information + max_dir_info_size(class) > length)
             {
-                if (res > 0) lseek( fd, de->d_off, SEEK_SET );  /* set pos to next entry */
+                if (res > 0) lseek( fd, next_pos, SEEK_SET );  /* set pos to next entry */
                 break;
             }
         }
-        old_pos = de->d_off;
+        old_pos = next_pos;
         /* move on to the next entry */
         if (res > 0) de = (KERNEL_DIRENT64 *)((char *)de + de->d_reclen);
         else
         {
             res = getdents64( fd, data, size );
             de = (KERNEL_DIRENT64 *)data;
+            de_first_two = NULL;
         }
     }
 
@@ -1768,7 +1812,7 @@ static int read_directory_getdirentries( int fd, IO_STATUS_BLOCK *io, void *buff
             if (res > 0 && (single_entry || io->Information + max_dir_info_size(class) > length))
             {
                 lseek( fd, (unsigned long)restart_pos, SEEK_SET );
-                size = (char *)de - data;
+                size = (char *)de + de->d_reclen - data;
                 io->Information = restart_info_pos;
                 last_info = restart_last_info;
                 goto restart;
@@ -2090,43 +2134,43 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
         int fd = open( unix_name, O_RDONLY | O_DIRECTORY );
         if (fd != -1)
         {
-            KERNEL_DIRENT *de;
+            KERNEL_DIRENT *kde;
 
             RtlEnterCriticalSection( &dir_section );
-            if ((de = start_vfat_ioctl( fd )))
+            if ((kde = start_vfat_ioctl( fd )))
             {
                 unix_name[pos - 1] = '/';
-                while (de[0].d_reclen)
+                while (kde[0].d_reclen)
                 {
                     /* make sure names are null-terminated to work around an x86-64 kernel bug */
-                    size_t len = min(de[0].d_reclen, sizeof(de[0].d_name) - 1 );
-                    de[0].d_name[len] = 0;
-                    len = min(de[1].d_reclen, sizeof(de[1].d_name) - 1 );
-                    de[1].d_name[len] = 0;
+                    size_t len = min(kde[0].d_reclen, sizeof(kde[0].d_name) - 1 );
+                    kde[0].d_name[len] = 0;
+                    len = min(kde[1].d_reclen, sizeof(kde[1].d_name) - 1 );
+                    kde[1].d_name[len] = 0;
 
-                    if (de[1].d_name[0])
+                    if (kde[1].d_name[0])
                     {
-                        ret = ntdll_umbstowcs( 0, de[1].d_name, strlen(de[1].d_name),
+                        ret = ntdll_umbstowcs( 0, kde[1].d_name, strlen(kde[1].d_name),
                                                buffer, MAX_DIR_ENTRY_LEN );
                         if (ret == length && !memicmpW( buffer, name, length))
                         {
-                            strcpy( unix_name + pos, de[1].d_name );
+                            strcpy( unix_name + pos, kde[1].d_name );
                             RtlLeaveCriticalSection( &dir_section );
                             close( fd );
                             goto success;
                         }
                     }
-                    ret = ntdll_umbstowcs( 0, de[0].d_name, strlen(de[0].d_name),
+                    ret = ntdll_umbstowcs( 0, kde[0].d_name, strlen(kde[0].d_name),
                                            buffer, MAX_DIR_ENTRY_LEN );
                     if (ret == length && !memicmpW( buffer, name, length))
                     {
                         strcpy( unix_name + pos,
-                                de[1].d_name[0] ? de[1].d_name : de[0].d_name );
+                                kde[1].d_name[0] ? kde[1].d_name : kde[0].d_name );
                         RtlLeaveCriticalSection( &dir_section );
                         close( fd );
                         goto success;
                     }
-                    if (ioctl( fd, VFAT_IOCTL_READDIR_BOTH, (long)de ) == -1)
+                    if (ioctl( fd, VFAT_IOCTL_READDIR_BOTH, (long)kde ) == -1)
                     {
                         RtlLeaveCriticalSection( &dir_section );
                         close( fd );
@@ -2175,7 +2219,6 @@ static NTSTATUS find_file_in_dir( char *unix_name, int pos, const WCHAR *name, i
         }
     }
     closedir( dir );
-    goto not_found;  /* avoid warning */
 
 not_found:
     unix_name[pos - 1] = 0;
@@ -2283,16 +2326,16 @@ static void init_redirects(void)
     struct stat st;
     unsigned int i;
 
-    if (!RtlDosPathNameToNtPathName_U( windows_dir.Buffer, &nt_name, NULL, NULL ))
+    if (!RtlDosPathNameToNtPathName_U( user_shared_data->NtSystemRoot, &nt_name, NULL, NULL ))
     {
-        ERR( "can't convert %s\n", debugstr_us(&windows_dir) );
+        ERR( "can't convert %s\n", debugstr_w(user_shared_data->NtSystemRoot) );
         return;
     }
     status = wine_nt_to_unix_file_name( &nt_name, &unix_name, FILE_OPEN_IF, FALSE );
     RtlFreeUnicodeString( &nt_name );
     if (status)
     {
-        ERR( "cannot open %s (%x)\n", debugstr_us(&windows_dir), status );
+        ERR( "cannot open %s (%x)\n", debugstr_w(user_shared_data->NtSystemRoot), status );
         return;
     }
     if (!stat( unix_name.Buffer, &st ))
@@ -2390,7 +2433,6 @@ void DIR_init_windows_dir( const WCHAR *win, const WCHAR *sys )
 {
     /* FIXME: should probably store paths as NT file names */
 
-    RtlCreateUnicodeString( &windows_dir, win );
     RtlCreateUnicodeString( &system_dir, sys );
 
 #ifndef _WIN64

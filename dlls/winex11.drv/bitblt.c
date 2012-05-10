@@ -1,7 +1,7 @@
 /*
  * GDI bit-blit operations
  *
- * Copyright 1993, 1994  Alexandre Julliard
+ * Copyright 1993, 1994, 2011 Alexandre Julliard
  * Copyright 2006 Damjan Jovanovic
  *
  * This library is free software; you can redistribute it and/or
@@ -30,6 +30,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "winternl.h"
 #include "x11drv.h"
 #include "wine/debug.h"
 
@@ -50,9 +51,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(bitblt);
 #define OP_ROP(opcode)    ((opcode) & 0x0f)
 
 #define MAX_OP_LEN  6  /* Longest opcode + 1 for the terminating 0 */
-
-#define SWAP_INT32(i1,i2) \
-    do { INT __t = *(i1); *(i1) = *(i2); *(i2) = __t; } while(0)
 
 static const unsigned char BITBLT_Opcodes[256][MAX_OP_LEN] =
 {
@@ -78,20 +76,20 @@ static const unsigned char BITBLT_Opcodes[256][MAX_OP_LEN] =
     { OP(PAT,DST,GXand), OP(SRC,DST,GXnor) },        /* 0x13  ~(S|(D&P))     */
     { OP(PAT,SRC,GXequiv), OP(SRC,DST,GXnor) },      /* 0x14  ~(D|~(P^S))    */
     { OP(PAT,SRC,GXand), OP(SRC,DST,GXnor) },        /* 0x15  ~(D|(P&S))     */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXnand),
-      OP(TMP,DST,GXand), OP(SRC,DST,GXxor),
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXnand),
+      OP(SRC,DST,GXand), OP(TMP,DST,GXxor),
       OP(PAT,DST,GXxor) },                           /* 0x16  P^S^(D&~(P&S)  */
     { OP(SRC,TMP,GXcopy), OP(SRC,DST,GXxor),
       OP(PAT,SRC,GXxor), OP(SRC,DST,GXand),
       OP(TMP,DST,GXequiv) },                         /* 0x17 ~S^((S^P)&(S^D))*/
     { OP(PAT,SRC,GXxor), OP(PAT,DST,GXxor),
         OP(SRC,DST,GXand) },                         /* 0x18  (S^P)&(D^P)    */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXnand),
-      OP(TMP,DST,GXand), OP(SRC,DST,GXequiv) },      /* 0x19  ~S^(D&~(P&S))  */
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXnand),
+      OP(SRC,DST,GXand), OP(TMP,DST,GXequiv) },      /* 0x19  ~S^(D&~(P&S))  */
     { OP(PAT,SRC,GXand), OP(SRC,DST,GXor),
       OP(PAT,DST,GXxor) },                           /* 0x1a  P^(D|(S&P))    */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXxor),
-      OP(TMP,DST,GXand), OP(SRC,DST,GXequiv) },      /* 0x1b  ~S^(D&(P^S))   */
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXxor),
+      OP(SRC,DST,GXand), OP(TMP,DST,GXequiv) },      /* 0x1b  ~S^(D&(P^S))   */
     { OP(PAT,DST,GXand), OP(SRC,DST,GXor),
       OP(PAT,DST,GXxor) },                           /* 0x1c  P^(S|(D&P))    */
     { OP(DST,TMP,GXcopy), OP(PAT,DST,GXxor),
@@ -106,13 +104,13 @@ static const unsigned char BITBLT_Opcodes[256][MAX_OP_LEN] =
       OP(SRC,DST,GXand) },                           /* 0x24   (S^P)&(S^D)   */
     { OP(PAT,SRC,GXnand), OP(SRC,DST,GXand),
       OP(PAT,DST,GXequiv) },                         /* 0x25  ~P^(D&~(S&P))  */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXand),
-      OP(TMP,DST,GXor), OP(SRC,DST,GXxor) },         /* 0x26  S^(D|(S&P))    */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXequiv),
-      OP(TMP,DST,GXor), OP(SRC,DST,GXxor) },         /* 0x27  S^(D|~(P^S))   */
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXand),
+      OP(SRC,DST,GXor), OP(TMP,DST,GXxor) },         /* 0x26  S^(D|(S&P))    */
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXequiv),
+      OP(SRC,DST,GXor), OP(TMP,DST,GXxor) },         /* 0x27  S^(D|~(P^S))   */
     { OP(PAT,SRC,GXxor), OP(SRC,DST,GXand) },        /* 0x28  D&(P^S)        */
-    { OP(SRC,TMP,GXcopy), OP(PAT,TMP,GXand),
-      OP(TMP,DST,GXor), OP(SRC,DST,GXxor),
+    { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXand),
+      OP(SRC,DST,GXor), OP(TMP,DST,GXxor),
       OP(PAT,DST,GXequiv) },                         /* 0x29  ~P^S^(D|(P&S)) */
     { OP(PAT,SRC,GXnand), OP(SRC,DST,GXand) },       /* 0x2a  D&~(P&S)       */
     { OP(SRC,TMP,GXcopy), OP(PAT,SRC,GXxor),
@@ -443,6 +441,59 @@ static const unsigned char BITBLT_Opcodes[256][MAX_OP_LEN] =
     { OP(PAT,DST,GXset) }                            /* 0xff  1              */
 };
 
+static const unsigned char bit_swap[256] =
+{
+    0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
+    0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
+    0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
+    0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
+    0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4,
+    0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
+    0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec,
+    0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
+    0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
+    0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
+    0x0a, 0x8a, 0x4a, 0xca, 0x2a, 0xaa, 0x6a, 0xea,
+    0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
+    0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6,
+    0x16, 0x96, 0x56, 0xd6, 0x36, 0xb6, 0x76, 0xf6,
+    0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee,
+    0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe,
+    0x01, 0x81, 0x41, 0xc1, 0x21, 0xa1, 0x61, 0xe1,
+    0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
+    0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9,
+    0x19, 0x99, 0x59, 0xd9, 0x39, 0xb9, 0x79, 0xf9,
+    0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5,
+    0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5,
+    0x0d, 0x8d, 0x4d, 0xcd, 0x2d, 0xad, 0x6d, 0xed,
+    0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
+    0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3,
+    0x13, 0x93, 0x53, 0xd3, 0x33, 0xb3, 0x73, 0xf3,
+    0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb,
+    0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb,
+    0x07, 0x87, 0x47, 0xc7, 0x27, 0xa7, 0x67, 0xe7,
+    0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
+    0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef,
+    0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff
+};
+
+#ifdef WORDS_BIGENDIAN
+static const unsigned int zeropad_masks[32] =
+{
+    0xffffffff, 0x80000000, 0xc0000000, 0xe0000000, 0xf0000000, 0xf8000000, 0xfc000000, 0xfe000000,
+    0xff000000, 0xff800000, 0xffc00000, 0xffe00000, 0xfff00000, 0xfff80000, 0xfffc0000, 0xfffe0000,
+    0xffff0000, 0xffff8000, 0xffffc000, 0xffffe000, 0xfffff000, 0xfffff800, 0xfffffc00, 0xfffffe00,
+    0xffffff00, 0xffffff80, 0xffffffc0, 0xffffffe0, 0xfffffff0, 0xfffffff8, 0xfffffffc, 0xfffffffe
+};
+#else
+static const unsigned int zeropad_masks[32] =
+{
+    0xffffffff, 0x00000080, 0x000000c0, 0x000000e0, 0x000000f0, 0x000000f8, 0x000000fc, 0x000000fe,
+    0x000000ff, 0x000080ff, 0x0000c0ff, 0x0000e0ff, 0x0000f0ff, 0x0000f8ff, 0x0000fcff, 0x0000feff,
+    0x0000ffff, 0x0080ffff, 0x00c0ffff, 0x00e0ffff, 0x00f0ffff, 0x00f8ffff, 0x00fcffff, 0x00feffff,
+    0x00ffffff, 0x80ffffff, 0xc0ffffff, 0xe0ffffff, 0xf0ffffff, 0xf8ffffff, 0xfcffffff, 0xfeffffff
+};
+#endif
 
 #ifdef BITBLT_TEST  /* Opcodes test */
 
@@ -474,7 +525,7 @@ static int do_bitop( int s, int d, int rop )
 int main()
 {
     int rop, i, res, src, dst, pat, tmp, dstUsed;
-    const BYTE *opcode;
+    const unsigned char *opcode;
 
     for (rop = 0; rop < 256; rop++)
     {
@@ -500,9 +551,6 @@ int main()
                 case OP_ARGS(SRC,DST):
                     dst = do_bitop( src, dst, *opcode & 0xf );
                     dstUsed = 1;
-                    break;
-                case OP_ARGS(PAT,TMP):
-                    tmp = do_bitop( pat, tmp, *opcode & 0xf );
                     break;
                 case OP_ARGS(PAT,DST):
                     dst = do_bitop( pat, dst, *opcode & 0xf );
@@ -534,534 +582,11 @@ int main()
 #endif  /* BITBLT_TEST */
 
 
-static void get_colors(X11DRV_PDEVICE *physDevDst, X11DRV_PDEVICE *physDevSrc,
-		       int *fg, int *bg)
+/* handler for XGetImage BadMatch errors */
+static int XGetImage_handler( Display *dpy, XErrorEvent *event, void *arg )
 {
-    RGBQUAD rgb[2];
-
-    *fg = physDevDst->textPixel;
-    *bg = physDevDst->backgroundPixel;
-    if(physDevSrc->depth == 1) {
-        if(GetDIBColorTable(physDevSrc->hdc, 0, 2, rgb) == 2) {
-            DWORD logcolor;
-            logcolor = RGB(rgb[0].rgbRed, rgb[0].rgbGreen, rgb[0].rgbBlue);
-            *fg = X11DRV_PALETTE_ToPhysical( physDevDst, logcolor );
-            logcolor = RGB(rgb[1].rgbRed, rgb[1].rgbGreen,rgb[1].rgbBlue);
-            *bg = X11DRV_PALETTE_ToPhysical( physDevDst, logcolor );
-        }
-    }
+    return (event->request_code == X_GetImage && event->error_code == BadMatch);
 }
-
-/* return a mask for meaningful bits when doing an XGetPixel on an image */
-static unsigned long image_pixel_mask( X11DRV_PDEVICE *physDev )
-{
-    unsigned long ret;
-    ColorShifts *shifts = physDev->color_shifts;
-
-    if (!shifts) shifts = &X11DRV_PALETTE_default_shifts;
-    ret = (shifts->physicalRed.max << shifts->physicalRed.shift) |
-        (shifts->physicalGreen.max << shifts->physicalGreen.shift) |
-        (shifts->physicalBlue.max << shifts->physicalBlue.shift);
-    if (!ret) ret = (1 << physDev->depth) - 1;
-    return ret;
-}
-
-
-/***********************************************************************
- *           BITBLT_StretchRow
- *
- * Stretch a row of pixels. Helper function for BITBLT_StretchImage.
- */
-static void BITBLT_StretchRow( int *rowSrc, int *rowDst,
-                               INT startDst, INT widthDst,
-                               INT xinc, INT xoff, WORD mode )
-{
-    register INT xsrc = xinc * startDst + xoff;
-    rowDst += startDst;
-    switch(mode)
-    {
-    case STRETCH_ANDSCANS:
-        for(; widthDst > 0; widthDst--, xsrc += xinc)
-            *rowDst++ &= rowSrc[xsrc >> 16];
-        break;
-    case STRETCH_ORSCANS:
-        for(; widthDst > 0; widthDst--, xsrc += xinc)
-            *rowDst++ |= rowSrc[xsrc >> 16];
-        break;
-    case STRETCH_DELETESCANS:
-        for(; widthDst > 0; widthDst--, xsrc += xinc)
-            *rowDst++ = rowSrc[xsrc >> 16];
-        break;
-    }
-}
-
-
-/***********************************************************************
- *           BITBLT_ShrinkRow
- *
- * Shrink a row of pixels. Helper function for BITBLT_StretchImage.
- */
-static void BITBLT_ShrinkRow( int *rowSrc, int *rowDst,
-                              INT startSrc, INT widthSrc,
-                              INT xinc, INT xoff, WORD mode )
-{
-    register INT xdst = xinc * startSrc + xoff;
-    rowSrc += startSrc;
-    switch(mode)
-    {
-    case STRETCH_ORSCANS:
-        for(; widthSrc > 0; widthSrc--, xdst += xinc)
-            rowDst[xdst >> 16] |= *rowSrc++;
-        break;
-    case STRETCH_ANDSCANS:
-        for(; widthSrc > 0; widthSrc--, xdst += xinc)
-            rowDst[xdst >> 16] &= *rowSrc++;
-        break;
-    case STRETCH_DELETESCANS:
-        for(; widthSrc > 0; widthSrc--, xdst += xinc)
-            rowDst[xdst >> 16] = *rowSrc++;
-        break;
-    }
-}
-
-
-/***********************************************************************
- *           BITBLT_GetRow
- *
- * Retrieve a row from an image. Helper function for BITBLT_StretchImage.
- */
-static void BITBLT_GetRow( XImage *image, int *pdata, INT row,
-                           INT start, INT width, INT depthDst,
-                           int fg, int bg, unsigned long pixel_mask, BOOL swap)
-{
-    register INT i;
-
-    assert( (row >= 0) && (row < image->height) );
-    assert( (start >= 0) && (width <= image->width) );
-
-    pdata += swap ? start+width-1 : start;
-    if (image->depth == depthDst)  /* color -> color */
-    {
-        if (X11DRV_PALETTE_XPixelToPalette && (depthDst != 1))
-            if (swap) for (i = 0; i < width; i++)
-                *pdata-- = X11DRV_PALETTE_XPixelToPalette[XGetPixel( image, i, row )];
-            else for (i = 0; i < width; i++)
-                *pdata++ = X11DRV_PALETTE_XPixelToPalette[XGetPixel( image, i, row )];
-        else
-            if (swap) for (i = 0; i < width; i++)
-                *pdata-- = XGetPixel( image, i, row );
-            else for (i = 0; i < width; i++)
-                *pdata++ = XGetPixel( image, i, row );
-    }
-    else
-    {
-        if (image->depth == 1)  /* monochrome -> color */
-        {
-            if (X11DRV_PALETTE_XPixelToPalette)
-            {
-                fg = X11DRV_PALETTE_XPixelToPalette[fg];
-                bg = X11DRV_PALETTE_XPixelToPalette[bg];
-            }
-            if (swap) for (i = 0; i < width; i++)
-                *pdata-- = XGetPixel( image, i, row ) ? bg : fg;
-            else for (i = 0; i < width; i++)
-                *pdata++ = XGetPixel( image, i, row ) ? bg : fg;
-        }
-        else  /* color -> monochrome */
-        {
-            if (swap) for (i = 0; i < width; i++)
-                *pdata-- = ((XGetPixel( image, i, row ) & pixel_mask) == bg) ? 1 : 0;
-            else for (i = 0; i < width; i++)
-                *pdata++ = ((XGetPixel( image, i, row ) & pixel_mask) == bg) ? 1 : 0;
-        }
-    }
-}
-
-
-/***********************************************************************
- *           BITBLT_StretchImage
- *
- * Stretch an X image.
- * FIXME: does not work for full 32-bit coordinates.
- */
-static void BITBLT_StretchImage( XImage *srcImage, XImage *dstImage,
-                                 INT widthSrc, INT heightSrc,
-                                 INT widthDst, INT heightDst,
-                                 RECT *visRectSrc, RECT *visRectDst,
-                                 int foreground, int background,
-                                 unsigned long pixel_mask, WORD mode )
-{
-    int *rowSrc, *rowDst, *pixel;
-    char *pdata;
-    INT xinc, xoff, yinc, ysrc, ydst;
-    register INT x, y;
-    BOOL hstretch, vstretch, hswap, vswap;
-
-    hswap = widthSrc * widthDst < 0;
-    vswap = heightSrc * heightDst < 0;
-    widthSrc  = abs(widthSrc);
-    heightSrc = abs(heightSrc);
-    widthDst  = abs(widthDst);
-    heightDst = abs(heightDst);
-
-    if (!(rowSrc = HeapAlloc( GetProcessHeap(), 0,
-                              (widthSrc+widthDst)*sizeof(int) ))) return;
-    rowDst = rowSrc + widthSrc;
-
-      /* When stretching, all modes are the same, and DELETESCANS is faster */
-    if ((widthSrc < widthDst) && (heightSrc < heightDst))
-        mode = STRETCH_DELETESCANS;
-
-    if (mode == STRETCH_HALFTONE) /* FIXME */
-        mode = STRETCH_DELETESCANS;
-
-    if (mode != STRETCH_DELETESCANS)
-        memset( rowDst, (mode == STRETCH_ANDSCANS) ? 0xff : 0x00,
-                widthDst*sizeof(int) );
-
-    hstretch = (widthSrc < widthDst);
-    vstretch = (heightSrc < heightDst);
-
-    if (hstretch)
-    {
-        xinc = (widthSrc << 16) / widthDst;
-        xoff = ((widthSrc << 16) - (xinc * widthDst)) / 2;
-    }
-    else
-    {
-        xinc = ((int)widthDst << 16) / widthSrc;
-        xoff = ((widthDst << 16) - (xinc * widthSrc)) / 2;
-    }
-
-    wine_tsx11_lock();
-    if (vstretch)
-    {
-        yinc = (heightSrc << 16) / heightDst;
-        ydst = visRectDst->top;
-        if (vswap)
-        {
-            ysrc = yinc * (heightDst - ydst - 1);
-            yinc = -yinc;
-        }
-        else
-            ysrc = yinc * ydst;
-
-        for ( ; (ydst < visRectDst->bottom); ysrc += yinc, ydst++)
-        {
-            if (((ysrc >> 16) < visRectSrc->top) ||
-                ((ysrc >> 16) >= visRectSrc->bottom)) continue;
-
-            /* Retrieve a source row */
-            BITBLT_GetRow( srcImage, rowSrc, (ysrc >> 16) - visRectSrc->top,
-                           hswap ? widthSrc - visRectSrc->right
-                                 : visRectSrc->left,
-                           visRectSrc->right - visRectSrc->left,
-                           dstImage->depth, foreground, background, pixel_mask, hswap );
-
-            /* Stretch or shrink it */
-            if (hstretch)
-                BITBLT_StretchRow( rowSrc, rowDst, visRectDst->left,
-                                   visRectDst->right - visRectDst->left,
-                                   xinc, xoff, mode );
-            else BITBLT_ShrinkRow( rowSrc, rowDst,
-                                   hswap ? widthSrc - visRectSrc->right
-                                         : visRectSrc->left,
-                                   visRectSrc->right - visRectSrc->left,
-                                   xinc, xoff, mode );
-
-            /* Store the destination row */
-            pixel = rowDst + visRectDst->right - 1;
-            y = ydst - visRectDst->top;
-            for (x = visRectDst->right-visRectDst->left-1; x >= 0; x--)
-                XPutPixel( dstImage, x, y, *pixel-- );
-            if (mode != STRETCH_DELETESCANS)
-                memset( rowDst, (mode == STRETCH_ANDSCANS) ? 0xff : 0x00,
-                        widthDst*sizeof(int) );
-
-            /* Make copies of the destination row */
-
-            pdata = dstImage->data + dstImage->bytes_per_line * y;
-            while (((ysrc + yinc) >> 16 == ysrc >> 16) &&
-                   (ydst < visRectDst->bottom-1))
-            {
-                memcpy( pdata + dstImage->bytes_per_line, pdata,
-                        dstImage->bytes_per_line );
-                pdata += dstImage->bytes_per_line;
-                ysrc += yinc;
-                ydst++;
-            }
-        }
-    }
-    else  /* Shrinking */
-    {
-        yinc = (heightDst << 16) / heightSrc;
-        ysrc = visRectSrc->top;
-        ydst = ((heightDst << 16) - (yinc * heightSrc)) / 2;
-        if (vswap)
-        {
-            ydst += yinc * (heightSrc - ysrc - 1);
-            yinc = -yinc;
-        }
-        else
-            ydst += yinc * ysrc;
-
-        for( ; (ysrc < visRectSrc->bottom); ydst += yinc, ysrc++)
-        {
-            if (((ydst >> 16) < visRectDst->top) ||
-                ((ydst >> 16) >= visRectDst->bottom)) continue;
-
-            /* Retrieve a source row */
-            BITBLT_GetRow( srcImage, rowSrc, ysrc - visRectSrc->top,
-                           hswap ? widthSrc - visRectSrc->right
-                                 : visRectSrc->left,
-                           visRectSrc->right - visRectSrc->left,
-                           dstImage->depth, foreground, background, pixel_mask, hswap );
-
-            /* Stretch or shrink it */
-            if (hstretch)
-                BITBLT_StretchRow( rowSrc, rowDst, visRectDst->left,
-                                   visRectDst->right - visRectDst->left,
-                                   xinc, xoff, mode );
-            else BITBLT_ShrinkRow( rowSrc, rowDst,
-                                   hswap ? widthSrc - visRectSrc->right
-                                         : visRectSrc->left,
-                                   visRectSrc->right - visRectSrc->left,
-                                   xinc, xoff, mode );
-
-            /* Merge several source rows into the destination */
-            if (mode == STRETCH_DELETESCANS)
-            {
-                /* Simply skip the overlapping rows */
-                while (((ydst + yinc) >> 16 == ydst >> 16) &&
-                       (ysrc < visRectSrc->bottom-1))
-                {
-                    ydst += yinc;
-                    ysrc++;
-                }
-            }
-            else if (((ydst + yinc) >> 16 == ydst >> 16) &&
-                     (ysrc < visRectSrc->bottom-1))
-                continue;  /* Restart loop for next overlapping row */
-
-            /* Store the destination row */
-            pixel = rowDst + visRectDst->right - 1;
-            y = (ydst >> 16) - visRectDst->top;
-            for (x = visRectDst->right-visRectDst->left-1; x >= 0; x--)
-                XPutPixel( dstImage, x, y, *pixel-- );
-            if (mode != STRETCH_DELETESCANS)
-                memset( rowDst, (mode == STRETCH_ANDSCANS) ? 0xff : 0x00,
-                        widthDst*sizeof(int) );
-        }
-    }
-    wine_tsx11_unlock();
-    HeapFree( GetProcessHeap(), 0, rowSrc );
-}
-
-
-/***********************************************************************
- *           BITBLT_GetSrcAreaStretch
- *
- * Retrieve an area from the source DC, stretching and mapping all the
- * pixels to Windows colors.
- */
-static int BITBLT_GetSrcAreaStretch( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                                     Pixmap pixmap, GC gc,
-                                     const struct bitblt_coords *src, const struct bitblt_coords *dst )
-{
-    XImage *imageSrc, *imageDst;
-    RECT rectSrc = src->visrect;
-    RECT rectDst = dst->visrect;
-    int fg, bg;
-
-    rectSrc.left   -= src->x;
-    rectSrc.right  -= src->x;
-    rectSrc.top    -= src->y;
-    rectSrc.bottom -= src->y;
-    rectDst.left   -= dst->x;
-    rectDst.right  -= dst->x;
-    rectDst.top    -= dst->y;
-    rectDst.bottom -= dst->y;
-    if (src->width < 0)
-    {
-        rectSrc.left  -= src->width;
-        rectSrc.right -= src->width;
-    }
-    if (dst->width < 0)
-    {
-        rectDst.left  -= dst->width;
-        rectDst.right -= dst->width;
-    }
-    if (src->height < 0)
-    {
-        rectSrc.top    -= src->height;
-        rectSrc.bottom -= src->height;
-    }
-    if (dst->height < 0)
-    {
-        rectDst.top    -= dst->height;
-        rectDst.bottom -= dst->height;
-    }
-
-    get_colors(physDevDst, physDevSrc, &fg, &bg);
-    wine_tsx11_lock();
-    /* FIXME: avoid BadMatch errors */
-    imageSrc = XGetImage( gdi_display, physDevSrc->drawable,
-                          physDevSrc->dc_rect.left + src->visrect.left,
-                          physDevSrc->dc_rect.top + src->visrect.top,
-                          src->visrect.right - src->visrect.left,
-                          src->visrect.bottom - src->visrect.top,
-                          AllPlanes, ZPixmap );
-    wine_tsx11_unlock();
-
-    imageDst = X11DRV_DIB_CreateXImage( rectDst.right - rectDst.left,
-                                        rectDst.bottom - rectDst.top, physDevDst->depth );
-    BITBLT_StretchImage( imageSrc, imageDst, src->width, src->height,
-                         dst->width, dst->height, &rectSrc, &rectDst,
-                         fg, physDevDst->depth != 1 ? bg : physDevSrc->backgroundPixel,
-                         image_pixel_mask( physDevSrc ), GetStretchBltMode(physDevDst->hdc) );
-    wine_tsx11_lock();
-    XPutImage( gdi_display, pixmap, gc, imageDst, 0, 0, 0, 0,
-               rectDst.right - rectDst.left, rectDst.bottom - rectDst.top );
-    XDestroyImage( imageSrc );
-    X11DRV_DIB_DestroyXImage( imageDst );
-    wine_tsx11_unlock();
-    return 0;  /* no exposure events generated */
-}
-
-
-/***********************************************************************
- *           BITBLT_GetSrcArea
- *
- * Retrieve an area from the source DC, mapping all the
- * pixels to Windows colors.
- */
-static int BITBLT_GetSrcArea( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                              Pixmap pixmap, GC gc, RECT *visRectSrc )
-{
-    XImage *imageSrc, *imageDst;
-    register INT x, y;
-    int exposures = 0;
-    INT width  = visRectSrc->right - visRectSrc->left;
-    INT height = visRectSrc->bottom - visRectSrc->top;
-    int fg, bg;
-    BOOL memdc = (GetObjectType(physDevSrc->hdc) == OBJ_MEMDC);
-
-    if (physDevSrc->depth == physDevDst->depth)
-    {
-        wine_tsx11_lock();
-        if (!X11DRV_PALETTE_XPixelToPalette ||
-            (physDevDst->depth == 1))  /* monochrome -> monochrome */
-        {
-            if (physDevDst->depth == 1)
-            {
-                /* MSDN says if StretchBlt must convert a bitmap from monochrome
-                   to color or vice versa, the foreground and background color of
-                   the device context are used.  In fact, it also applies to the
-                   case when it is converted from mono to mono. */
-                XSetBackground( gdi_display, gc, physDevDst->textPixel );
-                XSetForeground( gdi_display, gc, physDevDst->backgroundPixel );
-                XCopyPlane( gdi_display, physDevSrc->drawable, pixmap, gc,
-                            physDevSrc->dc_rect.left + visRectSrc->left,
-                            physDevSrc->dc_rect.top + visRectSrc->top,
-                            width, height, 0, 0, 1);
-            }
-            else
-                XCopyArea( gdi_display, physDevSrc->drawable, pixmap, gc,
-                           physDevSrc->dc_rect.left + visRectSrc->left,
-                           physDevSrc->dc_rect.top + visRectSrc->top,
-                           width, height, 0, 0);
-            exposures++;
-        }
-        else  /* color -> color */
-        {
-            if (memdc)
-                imageSrc = XGetImage( gdi_display, physDevSrc->drawable,
-                                      physDevSrc->dc_rect.left + visRectSrc->left,
-                                      physDevSrc->dc_rect.top + visRectSrc->top,
-                                      width, height, AllPlanes, ZPixmap );
-            else
-            {
-                /* Make sure we don't get a BadMatch error */
-                XCopyArea( gdi_display, physDevSrc->drawable, pixmap, gc,
-                           physDevSrc->dc_rect.left + visRectSrc->left,
-                           physDevSrc->dc_rect.top + visRectSrc->top,
-                           width, height, 0, 0);
-                exposures++;
-                imageSrc = XGetImage( gdi_display, pixmap, 0, 0, width, height,
-                                      AllPlanes, ZPixmap );
-            }
-            for (y = 0; y < height; y++)
-                for (x = 0; x < width; x++)
-                    XPutPixel(imageSrc, x, y,
-                              X11DRV_PALETTE_XPixelToPalette[XGetPixel(imageSrc, x, y)]);
-            XPutImage( gdi_display, pixmap, gc, imageSrc,
-                       0, 0, 0, 0, width, height );
-            XDestroyImage( imageSrc );
-        }
-        wine_tsx11_unlock();
-    }
-    else
-    {
-        if (physDevSrc->depth == 1)  /* monochrome -> color */
-        {
-	    get_colors(physDevDst, physDevSrc, &fg, &bg);
-
-            wine_tsx11_lock();
-            if (X11DRV_PALETTE_XPixelToPalette)
-            {
-                XSetBackground( gdi_display, gc,
-                             X11DRV_PALETTE_XPixelToPalette[fg] );
-                XSetForeground( gdi_display, gc,
-                             X11DRV_PALETTE_XPixelToPalette[bg]);
-            }
-            else
-            {
-                XSetBackground( gdi_display, gc, fg );
-                XSetForeground( gdi_display, gc, bg );
-            }
-            XCopyPlane( gdi_display, physDevSrc->drawable, pixmap, gc,
-                        physDevSrc->dc_rect.left + visRectSrc->left,
-                        physDevSrc->dc_rect.top + visRectSrc->top,
-                        width, height, 0, 0, 1 );
-            exposures++;
-            wine_tsx11_unlock();
-        }
-        else  /* color -> monochrome */
-        {
-            unsigned long pixel_mask;
-            wine_tsx11_lock();
-            /* FIXME: avoid BadMatch error */
-            imageSrc = XGetImage( gdi_display, physDevSrc->drawable,
-                                  physDevSrc->dc_rect.left + visRectSrc->left,
-                                  physDevSrc->dc_rect.top + visRectSrc->top,
-                                  width, height, AllPlanes, ZPixmap );
-            if (!imageSrc)
-            {
-                wine_tsx11_unlock();
-                return exposures;
-            }
-            imageDst = X11DRV_DIB_CreateXImage( width, height, physDevDst->depth );
-            if (!imageDst)
-            {
-                XDestroyImage(imageSrc);
-                wine_tsx11_unlock();
-                return exposures;
-            }
-            pixel_mask = image_pixel_mask( physDevSrc );
-            for (y = 0; y < height; y++)
-                for (x = 0; x < width; x++)
-                    XPutPixel(imageDst, x, y,
-                              !((XGetPixel(imageSrc,x,y) ^ physDevSrc->backgroundPixel) & pixel_mask));
-            XPutImage( gdi_display, pixmap, gc, imageDst,
-                       0, 0, 0, 0, width, height );
-            XDestroyImage( imageSrc );
-            X11DRV_DIB_DestroyXImage( imageDst );
-            wine_tsx11_unlock();
-        }
-    }
-    return exposures;
-}
-
 
 /***********************************************************************
  *           BITBLT_GetDstArea
@@ -1069,12 +594,12 @@ static int BITBLT_GetSrcArea( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDe
  * Retrieve an area from the destination DC, mapping all the
  * pixels to Windows colors.
  */
-static int BITBLT_GetDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, GC gc, RECT *visRectDst)
+static int BITBLT_GetDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, GC gc, const RECT *visRectDst)
 {
     int exposures = 0;
     INT width  = visRectDst->right - visRectDst->left;
     INT height = visRectDst->bottom - visRectDst->top;
-    BOOL memdc = (GetObjectType( physDev->hdc ) == OBJ_MEMDC);
+    BOOL memdc = (GetObjectType( physDev->dev.hdc ) == OBJ_MEMDC);
 
     wine_tsx11_lock();
 
@@ -1129,7 +654,7 @@ static int BITBLT_GetDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, GC gc, RECT
  * Put an area back into the destination DC, mapping the pixel
  * colors to X pixels.
  */
-static int BITBLT_PutDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, RECT *visRectDst)
+static int BITBLT_PutDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, const RECT *visRectDst)
 {
     int exposures = 0;
     INT width  = visRectDst->right - visRectDst->left;
@@ -1164,238 +689,6 @@ static int BITBLT_PutDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, RECT *visRe
     return exposures;
 }
 
-
-/***********************************************************************
- *           BITBLT_GetVisRectangles
- *
- * Get the source and destination visible rectangles for StretchBlt().
- * Return FALSE if one of the rectangles is empty.
- */
-static BOOL BITBLT_GetVisRectangles( X11DRV_PDEVICE *physDevDst, X11DRV_PDEVICE *physDevSrc,
-                                     struct bitblt_coords *dst, struct bitblt_coords *src )
-{
-    RECT rect, clipRect;
-
-      /* Get the destination visible rectangle */
-
-    rect.left   = dst->x;
-    rect.top    = dst->y;
-    rect.right  = dst->x + dst->width;
-    rect.bottom = dst->y + dst->height;
-    LPtoDP( physDevDst->hdc, (POINT *)&rect, 2 );
-    dst->x      = rect.left;
-    dst->y      = rect.top;
-    dst->width  = rect.right - rect.left;
-    dst->height = rect.bottom - rect.top;
-    if (dst->layout & LAYOUT_RTL && dst->layout & LAYOUT_BITMAPORIENTATIONPRESERVED)
-    {
-        SWAP_INT32( &rect.left, &rect.right );
-        dst->x = rect.left;
-        dst->width = rect.right - rect.left;
-    }
-    if (rect.left > rect.right) { SWAP_INT32( &rect.left, &rect.right ); rect.left++; rect.right++; }
-    if (rect.top > rect.bottom) { SWAP_INT32( &rect.top, &rect.bottom ); rect.top++; rect.bottom++; }
-
-    GetRgnBox( physDevDst->region, &clipRect );
-    if (!IntersectRect( &dst->visrect, &rect, &clipRect )) return FALSE;
-
-      /* Get the source visible rectangle */
-
-    if (!physDevSrc) return TRUE;
-
-    rect.left   = src->x;
-    rect.top    = src->y;
-    rect.right  = src->x + src->width;
-    rect.bottom = src->y + src->height;
-    LPtoDP( physDevSrc->hdc, (POINT *)&rect, 2 );
-    src->x      = rect.left;
-    src->y      = rect.top;
-    src->width  = rect.right - rect.left;
-    src->height = rect.bottom - rect.top;
-    if (src->layout & LAYOUT_RTL && src->layout & LAYOUT_BITMAPORIENTATIONPRESERVED)
-    {
-        SWAP_INT32( &rect.left, &rect.right );
-        src->x = rect.left;
-        src->width = rect.right - rect.left;
-    }
-    if (rect.left > rect.right) { SWAP_INT32( &rect.left, &rect.right ); rect.left++; rect.right++; }
-    if (rect.top > rect.bottom) { SWAP_INT32( &rect.top, &rect.bottom ); rect.top++; rect.bottom++; }
-
-    /* Apparently the clipping and visible regions are only for output,
-       so just check against dc extent here to avoid BadMatch errors */
-    clipRect = physDevSrc->drawable_rect;
-    OffsetRect( &clipRect, -(physDevSrc->drawable_rect.left + physDevSrc->dc_rect.left),
-                -(physDevSrc->drawable_rect.top + physDevSrc->dc_rect.top) );
-    if (!IntersectRect( &src->visrect, &rect, &clipRect ))
-        return FALSE;
-
-      /* Intersect the rectangles */
-
-    if ((src->width == dst->width) && (src->height == dst->height)) /* no stretching */
-    {
-        OffsetRect( &src->visrect, dst->x - src->x, dst->y - src->y );
-        if (!IntersectRect( &rect, &src->visrect, &dst->visrect )) return FALSE;
-        src->visrect = dst->visrect = rect;
-        OffsetRect( &src->visrect, src->x - dst->x, src->y - dst->y );
-    }
-    else  /* stretching */
-    {
-        /* Map source rectangle into destination coordinates */
-        rect.left   = dst->x + (src->visrect.left - src->x)*dst->width/src->width;
-        rect.top    = dst->y + (src->visrect.top - src->y)*dst->height/src->height;
-        rect.right  = dst->x + (src->visrect.right - src->x)*dst->width/src->width;
-        rect.bottom = dst->y + (src->visrect.bottom - src->y)*dst->height/src->height;
-        if (rect.left > rect.right) SWAP_INT32( &rect.left, &rect.right );
-        if (rect.top > rect.bottom) SWAP_INT32( &rect.top, &rect.bottom );
-
-        /* Avoid rounding errors */
-        rect.left--;
-        rect.top--;
-        rect.right++;
-        rect.bottom++;
-        if (!IntersectRect( &dst->visrect, &rect, &dst->visrect )) return FALSE;
-
-        /* Map destination rectangle back to source coordinates */
-        rect = dst->visrect;
-        rect.left   = src->x + (dst->visrect.left - dst->x)*src->width/dst->width;
-        rect.top    = src->y + (dst->visrect.top - dst->y)*src->height/dst->height;
-        rect.right  = src->x + (dst->visrect.right - dst->x)*src->width/dst->width;
-        rect.bottom = src->y + (dst->visrect.bottom - dst->y)*src->height/dst->height;
-        if (rect.left > rect.right) SWAP_INT32( &rect.left, &rect.right );
-        if (rect.top > rect.bottom) SWAP_INT32( &rect.top, &rect.bottom );
-
-        /* Avoid rounding errors */
-        rect.left--;
-        rect.top--;
-        rect.right++;
-        rect.bottom++;
-        if (!IntersectRect( &src->visrect, &rect, &src->visrect )) return FALSE;
-    }
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           client_side_dib_copy
- */
-static BOOL client_side_dib_copy( X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc,
-                                  X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
-                                  INT width, INT height )
-{
-    DIBSECTION srcDib, dstDib;
-    BYTE *srcPtr, *dstPtr;
-    INT srcRowOffset, dstRowOffset;
-    INT bytesPerPixel;
-    INT bytesToCopy;
-    INT y;
-    static RECT unusedRect;
-
-    if (GetObjectW(physDevSrc->bitmap->hbitmap, sizeof(srcDib), &srcDib) != sizeof(srcDib))
-      return FALSE;
-    if (GetObjectW(physDevDst->bitmap->hbitmap, sizeof(dstDib), &dstDib) != sizeof(dstDib))
-      return FALSE;
-
-    /* check for oversized values, just like X11DRV_DIB_CopyDIBSection() */
-    if (xSrc > srcDib.dsBm.bmWidth || ySrc > srcDib.dsBm.bmHeight)
-      return FALSE;
-    if (xSrc + width > srcDib.dsBm.bmWidth)
-      width = srcDib.dsBm.bmWidth - xSrc;
-    if (ySrc + height > srcDib.dsBm.bmHeight)
-      height = srcDib.dsBm.bmHeight - ySrc;
-
-    if (GetRgnBox(physDevDst->region, &unusedRect) == COMPLEXREGION)
-    {
-      /* for simple regions, the clipping was already done by BITBLT_GetVisRectangles */
-      FIXME("potential optimization: client-side complex region clipping\n");
-      return FALSE;
-    }
-    if (dstDib.dsBm.bmBitsPixel <= 8)
-    {
-      static BOOL fixme_once;
-      if(!fixme_once++) FIXME("potential optimization: client-side color-index mode DIB copy\n");
-      return FALSE;
-    }
-    if (!(srcDib.dsBmih.biCompression == BI_BITFIELDS &&
-          dstDib.dsBmih.biCompression == BI_BITFIELDS &&
-          !memcmp(srcDib.dsBitfields, dstDib.dsBitfields, 3*sizeof(DWORD)))
-        && !(srcDib.dsBmih.biCompression == BI_RGB &&
-             dstDib.dsBmih.biCompression == BI_RGB))
-    {
-      FIXME("potential optimization: client-side compressed DIB copy\n");
-      return FALSE;
-    }
-    if (srcDib.dsBm.bmBitsPixel != dstDib.dsBm.bmBitsPixel)
-    {
-      FIXME("potential optimization: pixel format conversion\n");
-      return FALSE;
-    }
-    if (srcDib.dsBmih.biWidth < 0 || dstDib.dsBmih.biWidth < 0)
-    {
-      FIXME("negative widths not yet implemented\n");
-      return FALSE;
-    }
-
-    switch (dstDib.dsBm.bmBitsPixel)
-    {
-      case 15:
-      case 16:
-        bytesPerPixel = 2;
-        break;
-      case 24:
-        bytesPerPixel = 3;
-        break;
-      case 32:
-        bytesPerPixel = 4;
-        break;
-      default:
-        FIXME("don't know how to work with a depth of %d\n", physDevSrc->depth);
-        return FALSE;
-    }
-
-    bytesToCopy = width * bytesPerPixel;
-
-    if (physDevSrc->bitmap->topdown)
-    {
-      srcPtr = &physDevSrc->bitmap->base[ySrc*srcDib.dsBm.bmWidthBytes + xSrc*bytesPerPixel];
-      srcRowOffset = srcDib.dsBm.bmWidthBytes;
-    }
-    else
-    {
-      srcPtr = &physDevSrc->bitmap->base[(srcDib.dsBm.bmHeight-ySrc-1)*srcDib.dsBm.bmWidthBytes
-        + xSrc*bytesPerPixel];
-      srcRowOffset = -srcDib.dsBm.bmWidthBytes;
-    }
-    if (physDevDst->bitmap->topdown)
-    {
-      dstPtr = &physDevDst->bitmap->base[yDst*dstDib.dsBm.bmWidthBytes + xDst*bytesPerPixel];
-      dstRowOffset = dstDib.dsBm.bmWidthBytes;
-    }
-    else
-    {
-      dstPtr = &physDevDst->bitmap->base[(dstDib.dsBm.bmHeight-yDst-1)*dstDib.dsBm.bmWidthBytes
-        + xDst*bytesPerPixel];
-      dstRowOffset = -dstDib.dsBm.bmWidthBytes;
-    }
-
-    /* Handle overlapping regions on the same DIB */
-    if (physDevSrc == physDevDst && ySrc < yDst)
-    {
-      srcPtr += srcRowOffset * (height - 1);
-      srcRowOffset = -srcRowOffset;
-      dstPtr += dstRowOffset * (height - 1);
-      dstRowOffset = -dstRowOffset;
-    }
-
-    for (y = yDst; y < yDst + height; ++y)
-    {
-      memmove(dstPtr, srcPtr, bytesToCopy);
-      srcPtr += srcRowOffset;
-      dstPtr += dstRowOffset;
-    }
-
-    return TRUE;
-}
-
 static BOOL same_format(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst)
 {
     if (physDevSrc->depth != physDevDst->depth) return FALSE;
@@ -1405,320 +698,753 @@ static BOOL same_format(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst)
     return FALSE;
 }
 
-/***********************************************************************
- *           X11DRV_StretchBlt
- */
-BOOL CDECL X11DRV_StretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                              X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
-                              DWORD rop )
+void execute_rop( X11DRV_PDEVICE *physdev, Pixmap src_pixmap, GC gc, const RECT *visrect, DWORD rop )
 {
-    BOOL usePat, useSrc, useDst, destUsed, fStretch, fNullBrush;
-    struct bitblt_coords src, dst;
-    INT width, height;
-    INT sDst, sSrc = DIB_Status_None;
-    const BYTE *opcode;
-    Pixmap pixmaps[3] = { 0, 0, 0 };  /* pixmaps for DST, SRC, TMP */
-    GC tmpGC = 0;
+    Pixmap pixmaps[3];
+    Pixmap result = src_pixmap;
+    BOOL null_brush;
+    const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
+    BOOL use_pat = (((rop >> 4) & 0x0f0000) != (rop & 0x0f0000));
+    BOOL use_dst = (((rop >> 1) & 0x550000) != (rop & 0x550000));
+    int width  = visrect->right - visrect->left;
+    int height = visrect->bottom - visrect->top;
 
-    usePat = (((rop >> 4) & 0x0f0000) != (rop & 0x0f0000));
-    useSrc = (((rop >> 2) & 0x330000) != (rop & 0x330000));
-    useDst = (((rop >> 1) & 0x550000) != (rop & 0x550000));
-    if (!physDevSrc && useSrc) return FALSE;
-
-    src.x      = xSrc;
-    src.y      = ySrc;
-    src.width  = widthSrc;
-    src.height = heightSrc;
-    src.layout = physDevSrc ? GetLayout( physDevSrc->hdc ) : 0;
-    dst.x      = xDst;
-    dst.y      = yDst;
-    dst.width  = widthDst;
-    dst.height = heightDst;
-    dst.layout = GetLayout( physDevDst->hdc );
-
-    if (rop & NOMIRRORBITMAP)
-    {
-        src.layout |= LAYOUT_BITMAPORIENTATIONPRESERVED;
-        dst.layout |= LAYOUT_BITMAPORIENTATIONPRESERVED;
-        rop &= ~NOMIRRORBITMAP;
-    }
-
-    if (useSrc)
-    {
-        if (!BITBLT_GetVisRectangles( physDevDst, physDevSrc, &dst, &src ))
-            return TRUE;
-        fStretch = (src.width != dst.width) || (src.height != dst.height);
-
-        if (physDevDst != physDevSrc)
-            sSrc = X11DRV_LockDIBSection( physDevSrc, DIB_Status_None );
-    }
-    else
-    {
-        fStretch = FALSE;
-        if (!BITBLT_GetVisRectangles( physDevDst, NULL, &dst, NULL ))
-            return TRUE;
-    }
-
-    TRACE("    rectdst=%d,%d %dx%d orgdst=%d,%d visdst=%s\n",
-          dst.x, dst.y, dst.width, dst.height,
-          physDevDst->dc_rect.left, physDevDst->dc_rect.top, wine_dbgstr_rect( &dst.visrect ) );
-    if (useSrc)
-        TRACE("    rectsrc=%d,%d %dx%d orgsrc=%d,%d vissrc=%s\n",
-              src.x, src.y, src.width, src.height,
-              physDevSrc->dc_rect.left, physDevSrc->dc_rect.top, wine_dbgstr_rect( &src.visrect ) );
-
-    width  = dst.visrect.right - dst.visrect.left;
-    height = dst.visrect.bottom - dst.visrect.top;
-
-    sDst = X11DRV_LockDIBSection( physDevDst, DIB_Status_None );
-    if (physDevDst == physDevSrc) sSrc = sDst;
-
-    /* try client-side DIB copy */
-    if (!fStretch && rop == SRCCOPY &&
-        sSrc == DIB_Status_AppMod && sDst == DIB_Status_AppMod &&
-        same_format(physDevSrc, physDevDst))
-    {
-        if (client_side_dib_copy( physDevSrc, src.visrect.left, src.visrect.top,
-                                  physDevDst, dst.visrect.left, dst.visrect.top, width, height ))
-            goto done;
-    }
-
-    X11DRV_CoerceDIBSection( physDevDst, DIB_Status_GdiMod );
-
-    opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
-
-    /* a few optimizations for single-op ROPs */
-    if (!fStretch && !opcode[1])
-    {
-        if (OP_SRCDST(*opcode) == OP_ARGS(PAT,DST))
-        {
-            switch(rop)  /* a few special cases */
-            {
-            case BLACKNESS:  /* 0x00 */
-            case WHITENESS:  /* 0xff */
-                if ((physDevDst->depth != 1) && X11DRV_PALETTE_PaletteToXPixel)
-                {
-                    wine_tsx11_lock();
-                    XSetFunction( gdi_display, physDevDst->gc, GXcopy );
-                    if (rop == BLACKNESS)
-                        XSetForeground( gdi_display, physDevDst->gc, X11DRV_PALETTE_PaletteToXPixel[0] );
-                    else
-                        XSetForeground( gdi_display, physDevDst->gc,
-                                        WhitePixel( gdi_display, DefaultScreen(gdi_display) ));
-                    XSetFillStyle( gdi_display, physDevDst->gc, FillSolid );
-                    XFillRectangle( gdi_display, physDevDst->drawable, physDevDst->gc,
-                                    physDevDst->dc_rect.left + dst.visrect.left,
-                                    physDevDst->dc_rect.top + dst.visrect.top,
-                                    width, height );
-                    wine_tsx11_unlock();
-                    goto done;
-                }
-                break;
-            case DSTINVERT:  /* 0x55 */
-                if (!(X11DRV_PALETTE_PaletteFlags & (X11DRV_PALETTE_PRIVATE | X11DRV_PALETTE_VIRTUAL)))
-                {
-                    /* Xor is much better when we do not have full colormap.   */
-                    /* Using white^black ensures that we invert at least black */
-                    /* and white. */
-                    unsigned long xor_pix = (WhitePixel( gdi_display, DefaultScreen(gdi_display) ) ^
-                                             BlackPixel( gdi_display, DefaultScreen(gdi_display) ));
-                    wine_tsx11_lock();
-                    XSetFunction( gdi_display, physDevDst->gc, GXxor );
-                    XSetForeground( gdi_display, physDevDst->gc, xor_pix);
-                    XSetFillStyle( gdi_display, physDevDst->gc, FillSolid );
-                    XFillRectangle( gdi_display, physDevDst->drawable, physDevDst->gc,
-                                    physDevDst->dc_rect.left + dst.visrect.left,
-                                    physDevDst->dc_rect.top + dst.visrect.top,
-                                    width, height );
-                    wine_tsx11_unlock();
-                    goto done;
-                }
-                break;
-            }
-            if (!usePat || X11DRV_SetupGCForBrush( physDevDst ))
-            {
-                wine_tsx11_lock();
-                XSetFunction( gdi_display, physDevDst->gc, OP_ROP(*opcode) );
-                XFillRectangle( gdi_display, physDevDst->drawable, physDevDst->gc,
-                                physDevDst->dc_rect.left + dst.visrect.left,
-                                physDevDst->dc_rect.top + dst.visrect.top,
-                                width, height );
-                wine_tsx11_unlock();
-            }
-            goto done;
-        }
-        else if (OP_SRCDST(*opcode) == OP_ARGS(SRC,DST))
-        {
-            if (same_format(physDevSrc, physDevDst))
-            {
-                wine_tsx11_lock();
-                XSetFunction( gdi_display, physDevDst->gc, OP_ROP(*opcode) );
-                wine_tsx11_unlock();
-
-                if (physDevSrc != physDevDst)
-                {
-                    if (sSrc == DIB_Status_AppMod)
-                    {
-                        X11DRV_DIB_CopyDIBSection( physDevSrc, physDevDst, src.visrect.left, src.visrect.top,
-                                                   dst.visrect.left, dst.visrect.top, width, height );
-                        goto done;
-                    }
-                    X11DRV_CoerceDIBSection( physDevSrc, DIB_Status_GdiMod );
-                }
-                wine_tsx11_lock();
-                XCopyArea( gdi_display, physDevSrc->drawable,
-                           physDevDst->drawable, physDevDst->gc,
-                           physDevSrc->dc_rect.left + src.visrect.left,
-                           physDevSrc->dc_rect.top + src.visrect.top,
-                           width, height,
-                           physDevDst->dc_rect.left + dst.visrect.left,
-                           physDevDst->dc_rect.top + dst.visrect.top );
-                physDevDst->exposures++;
-                wine_tsx11_unlock();
-                goto done;
-            }
-            if (physDevSrc->depth == 1)
-            {
-                int fg, bg;
-
-                X11DRV_CoerceDIBSection( physDevSrc, DIB_Status_GdiMod );
-                get_colors(physDevDst, physDevSrc, &fg, &bg);
-                wine_tsx11_lock();
-                XSetBackground( gdi_display, physDevDst->gc, fg );
-                XSetForeground( gdi_display, physDevDst->gc, bg );
-                XSetFunction( gdi_display, physDevDst->gc, OP_ROP(*opcode) );
-                XCopyPlane( gdi_display, physDevSrc->drawable,
-                            physDevDst->drawable, physDevDst->gc,
-                            physDevSrc->dc_rect.left + src.visrect.left,
-                            physDevSrc->dc_rect.top + src.visrect.top,
-                            width, height,
-                            physDevDst->dc_rect.left + dst.visrect.left,
-                            physDevDst->dc_rect.top + dst.visrect.top, 1 );
-                physDevDst->exposures++;
-                wine_tsx11_unlock();
-                goto done;
-            }
-        }
-    }
-
+    pixmaps[SRC] = src_pixmap;
+    pixmaps[TMP] = 0;
     wine_tsx11_lock();
-    tmpGC = XCreateGC( gdi_display, physDevDst->drawable, 0, NULL );
-    XSetSubwindowMode( gdi_display, tmpGC, IncludeInferiors );
-    XSetGraphicsExposures( gdi_display, tmpGC, False );
-    pixmaps[DST] = XCreatePixmap( gdi_display, root_window, width, height,
-                                  physDevDst->depth );
+    pixmaps[DST] = XCreatePixmap( gdi_display, root_window, width, height, physdev->depth );
     wine_tsx11_unlock();
 
-    if (useSrc)
-    {
-        wine_tsx11_lock();
-        pixmaps[SRC] = XCreatePixmap( gdi_display, root_window, width, height,
-                                      physDevDst->depth );
-        wine_tsx11_unlock();
-
-        if (physDevDst != physDevSrc) X11DRV_CoerceDIBSection( physDevSrc, DIB_Status_GdiMod );
-
-        if(!X11DRV_XRender_GetSrcAreaStretch( physDevSrc, physDevDst, pixmaps[SRC], tmpGC, &src, &dst ))
-        {
-            if (fStretch)
-                BITBLT_GetSrcAreaStretch( physDevSrc, physDevDst, pixmaps[SRC], tmpGC, &src, &dst );
-            else
-                BITBLT_GetSrcArea( physDevSrc, physDevDst, pixmaps[SRC], tmpGC, &src.visrect );
-        }
-    }
-
-    if (useDst) BITBLT_GetDstArea( physDevDst, pixmaps[DST], tmpGC, &dst.visrect );
-    if (usePat) fNullBrush = !X11DRV_SetupGCForPatBlt( physDevDst, tmpGC, TRUE );
-    else fNullBrush = FALSE;
-    destUsed = FALSE;
+    if (use_dst) BITBLT_GetDstArea( physdev, pixmaps[DST], gc, visrect );
+    null_brush = use_pat && !X11DRV_SetupGCForPatBlt( physdev, gc, TRUE );
 
     wine_tsx11_lock();
     for ( ; *opcode; opcode++)
     {
-        if (OP_DST(*opcode) == DST) destUsed = TRUE;
-        XSetFunction( gdi_display, tmpGC, OP_ROP(*opcode) );
+        if (OP_DST(*opcode) == DST) result = pixmaps[DST];
+        XSetFunction( gdi_display, gc, OP_ROP(*opcode) );
         switch(OP_SRCDST(*opcode))
         {
         case OP_ARGS(DST,TMP):
         case OP_ARGS(SRC,TMP):
             if (!pixmaps[TMP])
-                pixmaps[TMP] = XCreatePixmap( gdi_display, root_window,
-                                              width, height, physDevDst->depth );
+                pixmaps[TMP] = XCreatePixmap( gdi_display, root_window, width, height, physdev->depth );
             /* fall through */
         case OP_ARGS(DST,SRC):
         case OP_ARGS(SRC,DST):
         case OP_ARGS(TMP,SRC):
         case OP_ARGS(TMP,DST):
-	    if (useSrc)
-		XCopyArea( gdi_display, pixmaps[OP_SRC(*opcode)],
-			   pixmaps[OP_DST(*opcode)], tmpGC,
-			   0, 0, width, height, 0, 0 );
+            XCopyArea( gdi_display, pixmaps[OP_SRC(*opcode)], pixmaps[OP_DST(*opcode)], gc,
+                       0, 0, width, height, 0, 0 );
             break;
-
-        case OP_ARGS(PAT,TMP):
-            if (!pixmaps[TMP] && !fNullBrush)
-                pixmaps[TMP] = XCreatePixmap( gdi_display, root_window,
-                                              width, height, physDevDst->depth );
-            /* fall through */
         case OP_ARGS(PAT,DST):
         case OP_ARGS(PAT,SRC):
-            if (!fNullBrush)
-                XFillRectangle( gdi_display, pixmaps[OP_DST(*opcode)],
-                                tmpGC, 0, 0, width, height );
+            if (!null_brush)
+                XFillRectangle( gdi_display, pixmaps[OP_DST(*opcode)], gc, 0, 0, width, height );
             break;
         }
     }
-    XSetFunction( gdi_display, physDevDst->gc, GXcopy );
-    physDevDst->exposures += BITBLT_PutDstArea( physDevDst, pixmaps[destUsed ? DST : SRC], &dst.visrect );
+    XSetFunction( gdi_display, physdev->gc, GXcopy );
+    physdev->exposures += BITBLT_PutDstArea( physdev, result, visrect );
     XFreePixmap( gdi_display, pixmaps[DST] );
-    if (pixmaps[SRC]) XFreePixmap( gdi_display, pixmaps[SRC] );
     if (pixmaps[TMP]) XFreePixmap( gdi_display, pixmaps[TMP] );
-    XFreeGC( gdi_display, tmpGC );
     wine_tsx11_unlock();
+}
 
-done:
-    if (useSrc && physDevDst != physDevSrc) X11DRV_UnlockDIBSection( physDevSrc, FALSE );
-    X11DRV_UnlockDIBSection( physDevDst, TRUE );
+/***********************************************************************
+ *           X11DRV_PatBlt
+ */
+BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
+{
+    X11DRV_PDEVICE *physDev = get_x11drv_dev( dev );
+    BOOL usePat = (((rop >> 4) & 0x0f0000) != (rop & 0x0f0000));
+    const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
+
+    if (usePat && !X11DRV_SetupGCForBrush( physDev )) return TRUE;
+
+    wine_tsx11_lock();
+    XSetFunction( gdi_display, physDev->gc, OP_ROP(*opcode) );
+
+    switch(rop)  /* a few special cases */
+    {
+    case BLACKNESS:  /* 0x00 */
+    case WHITENESS:  /* 0xff */
+        if ((physDev->depth != 1) && X11DRV_PALETTE_PaletteToXPixel)
+        {
+            XSetFunction( gdi_display, physDev->gc, GXcopy );
+            if (rop == BLACKNESS)
+                XSetForeground( gdi_display, physDev->gc, X11DRV_PALETTE_PaletteToXPixel[0] );
+            else
+                XSetForeground( gdi_display, physDev->gc,
+                                WhitePixel( gdi_display, DefaultScreen(gdi_display) ));
+            XSetFillStyle( gdi_display, physDev->gc, FillSolid );
+        }
+        break;
+    case DSTINVERT:  /* 0x55 */
+        if (!(X11DRV_PALETTE_PaletteFlags & (X11DRV_PALETTE_PRIVATE | X11DRV_PALETTE_VIRTUAL)))
+        {
+            /* Xor is much better when we do not have full colormap.   */
+            /* Using white^black ensures that we invert at least black */
+            /* and white. */
+            unsigned long xor_pix = (WhitePixel( gdi_display, DefaultScreen(gdi_display) ) ^
+                                     BlackPixel( gdi_display, DefaultScreen(gdi_display) ));
+            XSetFunction( gdi_display, physDev->gc, GXxor );
+            XSetForeground( gdi_display, physDev->gc, xor_pix);
+            XSetFillStyle( gdi_display, physDev->gc, FillSolid );
+        }
+        break;
+    }
+    XFillRectangle( gdi_display, physDev->drawable, physDev->gc,
+                    physDev->dc_rect.left + dst->visrect.left,
+                    physDev->dc_rect.top + dst->visrect.top,
+                    dst->visrect.right - dst->visrect.left,
+                    dst->visrect.bottom - dst->visrect.top );
+    wine_tsx11_unlock();
     return TRUE;
 }
 
 
 /***********************************************************************
- *           X11DRV_AlphaBlend
+ *           X11DRV_StretchBlt
  */
-BOOL CDECL X11DRV_AlphaBlend( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                              X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
-                              BLENDFUNCTION blendfn )
+BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                        PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop )
 {
-    struct bitblt_coords src, dst;
+    X11DRV_PDEVICE *physDevDst = get_x11drv_dev( dst_dev );
+    X11DRV_PDEVICE *physDevSrc = get_x11drv_dev( src_dev );
+    INT width, height;
+    const BYTE *opcode;
+    Pixmap src_pixmap;
+    GC gc;
 
-    src.x      = xSrc;
-    src.y      = ySrc;
-    src.width  = widthSrc;
-    src.height = heightSrc;
-    src.layout = GetLayout( physDevSrc->hdc );
-    dst.x      = xDst;
-    dst.y      = yDst;
-    dst.width  = widthDst;
-    dst.height = heightDst;
-    dst.layout = GetLayout( physDevDst->hdc );
-
-    if (!BITBLT_GetVisRectangles( physDevDst, physDevSrc, &dst, &src )) return TRUE;
-
-    TRACE( "format %x alpha %u rectdst=%d,%d %dx%d orgdst=%d,%d visdst=%s rectsrc=%d,%d %dx%d orgsrc=%d,%d vissrc=%s\n",
-           blendfn.AlphaFormat, blendfn.SourceConstantAlpha, dst.x, dst.y, dst.width, dst.height,
-           physDevDst->dc_rect.left, physDevDst->dc_rect.top, wine_dbgstr_rect( &dst.visrect ),
-           src.x, src.y, src.width, src.height,
-           physDevSrc->dc_rect.left, physDevSrc->dc_rect.top, wine_dbgstr_rect( &src.visrect ) );
-
-    if (src.x < 0 || src.y < 0 || src.width < 0 || src.height < 0 ||
-        src.width > physDevSrc->drawable_rect.right - physDevSrc->drawable_rect.left - src.x ||
-        src.height > physDevSrc->drawable_rect.bottom - physDevSrc->drawable_rect.top - src.y)
+    if (src_dev->funcs != dst_dev->funcs ||
+        src->width != dst->width || src->height != dst->height ||  /* no stretching with core X11 */
+        (physDevDst->depth == 1 && physDevSrc->depth != 1) ||  /* color -> mono done by hand */
+        (X11DRV_PALETTE_XPixelToPalette && physDevSrc->depth != 1))  /* needs palette mapping */
     {
-        WARN( "Invalid src coords: (%d,%d), size %dx%d\n", src.x, src.y, src.width, src.height );
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
+        dst_dev = GET_NEXT_PHYSDEV( dst_dev, pStretchBlt );
+        return dst_dev->funcs->pStretchBlt( dst_dev, dst, src_dev, src, rop );
     }
 
-    return XRender_AlphaBlend( physDevDst, physDevSrc, &dst, &src, blendfn );
+    width  = dst->visrect.right - dst->visrect.left;
+    height = dst->visrect.bottom - dst->visrect.top;
+    opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
+
+    /* a few optimizations for single-op ROPs */
+    if (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST))
+    {
+        if (same_format(physDevSrc, physDevDst))
+        {
+            wine_tsx11_lock();
+            XSetFunction( gdi_display, physDevDst->gc, OP_ROP(*opcode) );
+            XCopyArea( gdi_display, physDevSrc->drawable,
+                       physDevDst->drawable, physDevDst->gc,
+                       physDevSrc->dc_rect.left + src->visrect.left,
+                       physDevSrc->dc_rect.top + src->visrect.top,
+                       width, height,
+                       physDevDst->dc_rect.left + dst->visrect.left,
+                       physDevDst->dc_rect.top + dst->visrect.top );
+            physDevDst->exposures++;
+            wine_tsx11_unlock();
+            return TRUE;
+        }
+        if (physDevSrc->depth == 1)
+        {
+            int text_pixel = X11DRV_PALETTE_ToPhysical( physDevDst, GetTextColor(physDevDst->dev.hdc) );
+            int bkgnd_pixel = X11DRV_PALETTE_ToPhysical( physDevDst, GetBkColor(physDevDst->dev.hdc) );
+
+            wine_tsx11_lock();
+            XSetBackground( gdi_display, physDevDst->gc, text_pixel );
+            XSetForeground( gdi_display, physDevDst->gc, bkgnd_pixel );
+            XSetFunction( gdi_display, physDevDst->gc, OP_ROP(*opcode) );
+            XCopyPlane( gdi_display, physDevSrc->drawable,
+                        physDevDst->drawable, physDevDst->gc,
+                        physDevSrc->dc_rect.left + src->visrect.left,
+                        physDevSrc->dc_rect.top + src->visrect.top,
+                        width, height,
+                        physDevDst->dc_rect.left + dst->visrect.left,
+                        physDevDst->dc_rect.top + dst->visrect.top, 1 );
+            physDevDst->exposures++;
+            wine_tsx11_unlock();
+            return TRUE;
+        }
+    }
+
+    wine_tsx11_lock();
+    gc = XCreateGC( gdi_display, physDevDst->drawable, 0, NULL );
+    XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
+    XSetGraphicsExposures( gdi_display, gc, False );
+
+    /* retrieve the source */
+
+    src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, physDevDst->depth );
+    if (physDevSrc->depth == 1)
+    {
+        /* MSDN says if StretchBlt must convert a bitmap from monochrome
+           to color or vice versa, the foreground and background color of
+           the device context are used.  In fact, it also applies to the
+           case when it is converted from mono to mono. */
+        int text_pixel = X11DRV_PALETTE_ToPhysical( physDevDst, GetTextColor(physDevDst->dev.hdc) );
+        int bkgnd_pixel = X11DRV_PALETTE_ToPhysical( physDevDst, GetBkColor(physDevDst->dev.hdc) );
+
+        if (X11DRV_PALETTE_XPixelToPalette && physDevDst->depth != 1)
+        {
+            XSetBackground( gdi_display, gc, X11DRV_PALETTE_XPixelToPalette[text_pixel] );
+            XSetForeground( gdi_display, gc, X11DRV_PALETTE_XPixelToPalette[bkgnd_pixel]);
+        }
+        else
+        {
+            XSetBackground( gdi_display, gc, text_pixel );
+            XSetForeground( gdi_display, gc, bkgnd_pixel );
+        }
+        XCopyPlane( gdi_display, physDevSrc->drawable, src_pixmap, gc,
+                    physDevSrc->dc_rect.left + src->visrect.left,
+                    physDevSrc->dc_rect.top + src->visrect.top,
+                    width, height, 0, 0, 1 );
+    }
+    else  /* color -> color */
+    {
+        XCopyArea( gdi_display, physDevSrc->drawable, src_pixmap, gc,
+                   physDevSrc->dc_rect.left + src->visrect.left,
+                   physDevSrc->dc_rect.top + src->visrect.top,
+                   width, height, 0, 0 );
+    }
+    wine_tsx11_unlock();
+
+    execute_rop( physDevDst, src_pixmap, gc, &dst->visrect, rop );
+
+    wine_tsx11_lock();
+    XFreePixmap( gdi_display, src_pixmap );
+    XFreeGC( gdi_display, gc );
+    wine_tsx11_unlock();
+    return TRUE;
+}
+
+
+static void free_heap_bits( struct gdi_image_bits *bits )
+{
+    HeapFree( GetProcessHeap(), 0, bits->ptr );
+}
+
+static void free_ximage_bits( struct gdi_image_bits *bits )
+{
+    wine_tsx11_lock();
+    XFree( bits->ptr );
+    wine_tsx11_unlock();
+}
+
+/* store the palette or color mask data in the bitmap info structure */
+static void set_color_info( PHYSDEV dev, const ColorShifts *color_shifts, BITMAPINFO *info )
+{
+    DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
+
+    info->bmiHeader.biCompression = BI_RGB;
+    info->bmiHeader.biClrUsed = 0;
+
+    switch (info->bmiHeader.biBitCount)
+    {
+    case 4:
+    case 8:
+    {
+        RGBQUAD *rgb = (RGBQUAD *)colors;
+        PALETTEENTRY palette[256];
+        UINT i, count;
+
+        info->bmiHeader.biClrUsed = 1 << info->bmiHeader.biBitCount;
+        count = X11DRV_GetSystemPaletteEntries( dev, 0, info->bmiHeader.biClrUsed, palette );
+        for (i = 0; i < count; i++)
+        {
+            rgb[i].rgbRed   = palette[i].peRed;
+            rgb[i].rgbGreen = palette[i].peGreen;
+            rgb[i].rgbBlue  = palette[i].peBlue;
+            rgb[i].rgbReserved = 0;
+        }
+        memset( &rgb[count], 0, (info->bmiHeader.biClrUsed - count) * sizeof(*rgb) );
+        break;
+    }
+    case 16:
+        colors[0] = color_shifts->logicalRed.max << color_shifts->logicalRed.shift;
+        colors[1] = color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift;
+        colors[2] = color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift;
+        info->bmiHeader.biCompression = BI_BITFIELDS;
+        break;
+    case 32:
+        colors[0] = color_shifts->logicalRed.max << color_shifts->logicalRed.shift;
+        colors[1] = color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift;
+        colors[2] = color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift;
+        if (colors[0] != 0xff0000 || colors[1] != 0x00ff00 || colors[2] != 0x0000ff)
+            info->bmiHeader.biCompression = BI_BITFIELDS;
+        break;
+    }
+}
+
+/* check if the specified color info is suitable for PutImage */
+static BOOL matching_color_info( PHYSDEV dev, const ColorShifts *color_shifts, const BITMAPINFO *info )
+{
+    DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
+
+    switch (info->bmiHeader.biBitCount)
+    {
+    case 1:
+        if (info->bmiHeader.biCompression != BI_RGB) return FALSE;
+        return !info->bmiHeader.biClrUsed;  /* color map not allowed */
+    case 4:
+    case 8:
+    {
+        RGBQUAD *rgb = (RGBQUAD *)colors;
+        PALETTEENTRY palette[256];
+        UINT i, count;
+
+        if (info->bmiHeader.biCompression != BI_RGB) return FALSE;
+        count = X11DRV_GetSystemPaletteEntries( dev, 0, 1 << info->bmiHeader.biBitCount, palette );
+        if (count != info->bmiHeader.biClrUsed) return FALSE;
+        for (i = 0; i < count; i++)
+        {
+            if (rgb[i].rgbRed   != palette[i].peRed ||
+                rgb[i].rgbGreen != palette[i].peGreen ||
+                rgb[i].rgbBlue  != palette[i].peBlue) return FALSE;
+        }
+        return TRUE;
+    }
+    case 16:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift == colors[0] &&
+                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == colors[1] &&
+                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift == colors[2]);
+        if (info->bmiHeader.biCompression == BI_RGB)
+            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift     == 0x7c00 &&
+                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == 0x03e0 &&
+                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift   == 0x001f);
+        break;
+    case 32:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift == colors[0] &&
+                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == colors[1] &&
+                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift == colors[2]);
+        /* fall through */
+    case 24:
+        if (info->bmiHeader.biCompression == BI_RGB)
+            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift     == 0xff0000 &&
+                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == 0x00ff00 &&
+                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift   == 0x0000ff);
+        break;
+    }
+    return FALSE;
+}
+
+static inline BOOL is_r8g8b8( int depth, const ColorShifts *color_shifts )
+{
+    return depth == 24 && color_shifts->logicalBlue.shift == 0 && color_shifts->logicalRed.shift == 16;
+}
+
+/* copy the image bits, fixing up alignment and byte swapping as necessary */
+DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
+                       const struct gdi_image_bits *src_bits, struct gdi_image_bits *dst_bits,
+                       struct bitblt_coords *coords, const int *mapping, unsigned int zeropad_mask )
+{
+#ifdef WORDS_BIGENDIAN
+    static const int client_byte_order = MSBFirst;
+#else
+    static const int client_byte_order = LSBFirst;
+#endif
+    BOOL need_byteswap;
+    int x, y, height = coords->visrect.bottom - coords->visrect.top;
+    int width_bytes = image->bytes_per_line;
+    int padding_pos;
+    unsigned char *src, *dst;
+
+    switch (info->bmiHeader.biBitCount)
+    {
+    case 1:
+        need_byteswap = (image->bitmap_bit_order != MSBFirst);
+        break;
+    case 4:
+        need_byteswap = (image->byte_order != MSBFirst);
+        break;
+    case 16:
+    case 32:
+        need_byteswap = (image->byte_order != client_byte_order);
+        break;
+    case 24:
+        need_byteswap = (image->byte_order == MSBFirst) ^ !is_r8g8b8;
+        break;
+    default:
+        need_byteswap = FALSE;
+        break;
+    }
+
+    src = src_bits->ptr;
+    if (info->bmiHeader.biHeight > 0)
+        src += (info->bmiHeader.biHeight - coords->visrect.bottom) * width_bytes;
+    else
+        src += coords->visrect.top * width_bytes;
+
+    if ((need_byteswap && !src_bits->is_copy) ||  /* need to swap bytes */
+        (zeropad_mask != ~0u && !src_bits->is_copy) ||  /* need to clear padding bytes */
+        (mapping && !src_bits->is_copy) ||  /* need to remap pixels */
+        (width_bytes & 3) ||  /* need to fixup line alignment */
+        (info->bmiHeader.biHeight > 0))  /* need to flip vertically */
+    {
+        width_bytes = (width_bytes + 3) & ~3;
+        info->bmiHeader.biSizeImage = height * width_bytes;
+        if (!(dst_bits->ptr = HeapAlloc( GetProcessHeap(), 0, info->bmiHeader.biSizeImage )))
+            return ERROR_OUTOFMEMORY;
+        dst_bits->is_copy = TRUE;
+        dst_bits->free = free_heap_bits;
+    }
+    else
+    {
+        /* swap bits in place */
+        dst_bits->ptr = src;
+        dst_bits->is_copy = src_bits->is_copy;
+        dst_bits->free = NULL;
+        if (!need_byteswap && zeropad_mask == ~0u && !mapping) return ERROR_SUCCESS;  /* nothing to do */
+    }
+
+    dst = dst_bits->ptr;
+    padding_pos = width_bytes/sizeof(unsigned int) - 1;
+
+    if (info->bmiHeader.biHeight > 0)
+    {
+        dst += (height - 1) * width_bytes;
+        width_bytes = -width_bytes;
+    }
+
+    if (need_byteswap || mapping)
+    {
+        switch (info->bmiHeader.biBitCount)
+        {
+        case 1:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+            {
+                for (x = 0; x < image->bytes_per_line; x++)
+                    dst[x] = bit_swap[src[x]];
+                ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+            }
+            break;
+        case 4:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+            {
+                if (mapping)
+                    for (x = 0; x < image->bytes_per_line; x++)
+                        dst[x] = (mapping[src[x] & 0x0f] << 4) | mapping[src[x] >> 4];
+                else
+                    for (x = 0; x < image->bytes_per_line; x++)
+                        dst[x] = (src[x] << 4) | (src[x] >> 4);
+                ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+            }
+            break;
+        case 8:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+            {
+                for (x = 0; x < image->bytes_per_line; x++)
+                    dst[x] = mapping[src[x]];
+                ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+            }
+            break;
+        case 16:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+            {
+                for (x = 0; x < info->bmiHeader.biWidth; x++)
+                    ((USHORT *)dst)[x] = RtlUshortByteSwap( ((const USHORT *)src)[x] );
+                ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+            }
+            break;
+        case 24:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+            {
+                for (x = 0; x < info->bmiHeader.biWidth; x++)
+                {
+                    unsigned char tmp = src[3 * x];
+                    dst[3 * x]     = src[3 * x + 2];
+                    dst[3 * x + 1] = src[3 * x + 1];
+                    dst[3 * x + 2] = tmp;
+                }
+                ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+            }
+            break;
+        case 32:
+            for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+                for (x = 0; x < info->bmiHeader.biWidth; x++)
+                    ((ULONG *)dst)[x] = RtlUlongByteSwap( ((const ULONG *)src)[x] );
+            break;
+        }
+    }
+    else if (src != dst)
+    {
+        for (y = 0; y < height; y++, src += image->bytes_per_line, dst += width_bytes)
+        {
+            memcpy( dst, src, image->bytes_per_line );
+            ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+        }
+    }
+    else  /* only need to clear the padding */
+    {
+        for (y = 0; y < height; y++, dst += width_bytes)
+            ((unsigned int *)dst)[padding_pos] &= zeropad_mask;
+    }
+    return ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           X11DRV_PutImage
+ */
+DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+                       const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                       struct bitblt_coords *dst, DWORD rop )
+{
+    X11DRV_PDEVICE *physdev;
+    X_PHYSBITMAP *bitmap;
+    DWORD ret;
+    XImage *image;
+    int depth;
+    struct gdi_image_bits dst_bits;
+    const XPixmapFormatValues *format;
+    const ColorShifts *color_shifts;
+    const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
+    const int *mapping = NULL;
+
+    if (hbitmap)
+    {
+        if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
+        physdev = NULL;
+        depth = bitmap->depth;
+        color_shifts = &bitmap->color_shifts;
+    }
+    else
+    {
+        physdev = get_x11drv_dev( dev );
+        bitmap = NULL;
+        depth = physdev->depth;
+        color_shifts = physdev->color_shifts;
+    }
+    format = pixmap_formats[depth];
+
+    if (info->bmiHeader.biPlanes != 1) goto update_format;
+    if (info->bmiHeader.biBitCount != format->bits_per_pixel) goto update_format;
+    /* FIXME: could try to handle 1-bpp using XCopyPlane */
+    if (!matching_color_info( dev, color_shifts, info )) goto update_format;
+    if (!bits) return ERROR_SUCCESS;  /* just querying the format */
+    if ((src->width != dst->width) || (src->height != dst->height)) return ERROR_TRANSFORM_NOT_SUPPORTED;
+
+    wine_tsx11_lock();
+    image = XCreateImage( gdi_display, visual, depth, ZPixmap, 0, NULL,
+                          info->bmiHeader.biWidth, src->visrect.bottom - src->visrect.top, 32, 0 );
+    wine_tsx11_unlock();
+    if (!image) return ERROR_OUTOFMEMORY;
+
+    if (image->bits_per_pixel == 4 || image->bits_per_pixel == 8)
+    {
+        if (bitmap || (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST)))
+            mapping = X11DRV_PALETTE_PaletteToXPixel;
+    }
+
+    ret = copy_image_bits( info, is_r8g8b8(depth,color_shifts), image, bits, &dst_bits, src, mapping, ~0u );
+
+    if (!ret)
+    {
+        int width = dst->visrect.right - dst->visrect.left;
+        int height = dst->visrect.bottom - dst->visrect.top;
+
+        image->data = dst_bits.ptr;
+
+        if (bitmap)
+        {
+            RGNDATA *clip_data = NULL;
+            GC gc;
+
+            if (clip) clip_data = X11DRV_GetRegionData( clip, 0 );
+
+            wine_tsx11_lock();
+            gc = XCreateGC( gdi_display, bitmap->pixmap, 0, NULL );
+            XSetGraphicsExposures( gdi_display, gc, False );
+            if (clip_data) XSetClipRectangles( gdi_display, gc, 0, 0, (XRectangle *)clip_data->Buffer,
+                                               clip_data->rdh.nCount, YXBanded );
+            XPutImage( gdi_display, bitmap->pixmap, gc, image, src->visrect.left, 0,
+                       dst->visrect.left, dst->visrect.top, width, height );
+            XFreeGC( gdi_display, gc );
+            wine_tsx11_unlock();
+            HeapFree( GetProcessHeap(), 0, clip_data );
+        }
+        else
+        {
+            BOOL restore_region = add_extra_clipping_region( physdev, clip );
+
+            /* optimization for single-op ROPs */
+            if (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST))
+            {
+                wine_tsx11_lock();
+                XSetFunction( gdi_display, physdev->gc, OP_ROP(*opcode) );
+                XPutImage( gdi_display, physdev->drawable, physdev->gc, image, src->visrect.left, 0,
+                           physdev->dc_rect.left + dst->visrect.left,
+                           physdev->dc_rect.top + dst->visrect.top, width, height );
+                wine_tsx11_unlock();
+            }
+            else
+            {
+                Pixmap src_pixmap;
+                GC gc;
+
+                wine_tsx11_lock();
+                gc = XCreateGC( gdi_display, physdev->drawable, 0, NULL );
+                XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
+                XSetGraphicsExposures( gdi_display, gc, False );
+                src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, depth );
+                XPutImage( gdi_display, src_pixmap, gc, image, src->visrect.left, 0, 0, 0, width, height );
+                wine_tsx11_unlock();
+
+                execute_rop( physdev, src_pixmap, gc, &dst->visrect, rop );
+
+                wine_tsx11_lock();
+                XFreePixmap( gdi_display, src_pixmap );
+                XFreeGC( gdi_display, gc );
+                wine_tsx11_unlock();
+            }
+
+            if (restore_region) restore_clipping_region( physdev );
+        }
+        image->data = NULL;
+    }
+
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
+    if (dst_bits.free) dst_bits.free( &dst_bits );
+    return ret;
+
+update_format:
+    info->bmiHeader.biPlanes   = 1;
+    info->bmiHeader.biBitCount = format->bits_per_pixel;
+    if (info->bmiHeader.biHeight > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
+    set_color_info( dev, color_shifts, info );
+    return ERROR_BAD_FORMAT;
+}
+
+/***********************************************************************
+ *           X11DRV_GetImage
+ */
+DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
+                       struct gdi_image_bits *bits, struct bitblt_coords *src )
+{
+    X11DRV_PDEVICE *physdev;
+    X_PHYSBITMAP *bitmap;
+    DWORD ret = ERROR_SUCCESS;
+    XImage *image;
+    UINT align, x, y, width, height;
+    int depth;
+    struct gdi_image_bits src_bits;
+    const XPixmapFormatValues *format;
+    const ColorShifts *color_shifts;
+    const int *mapping = NULL;
+
+    if (hbitmap)
+    {
+        if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
+        physdev = NULL;
+        depth = bitmap->depth;
+        color_shifts = &bitmap->color_shifts;
+    }
+    else
+    {
+        physdev = get_x11drv_dev( dev );
+        bitmap = NULL;
+        depth = physdev->depth;
+        color_shifts = physdev->color_shifts;
+    }
+    format = pixmap_formats[depth];
+
+    /* align start and width to 32-bit boundary */
+    switch (format->bits_per_pixel)
+    {
+    case 1:  align = 32; break;
+    case 4:  align = 8;  mapping = X11DRV_PALETTE_XPixelToPalette; break;
+    case 8:  align = 4;  mapping = X11DRV_PALETTE_XPixelToPalette; break;
+    case 16: align = 2;  break;
+    case 24: align = 4;  break;
+    case 32: align = 1;  break;
+    default:
+        FIXME( "depth %u bpp %u not supported yet\n", depth, format->bits_per_pixel );
+        return ERROR_BAD_FORMAT;
+    }
+
+    info->bmiHeader.biSize          = sizeof(info->bmiHeader);
+    info->bmiHeader.biPlanes        = 1;
+    info->bmiHeader.biBitCount      = format->bits_per_pixel;
+    info->bmiHeader.biXPelsPerMeter = 0;
+    info->bmiHeader.biYPelsPerMeter = 0;
+    info->bmiHeader.biClrImportant  = 0;
+    set_color_info( dev, color_shifts, info );
+
+    if (!bits) return ERROR_SUCCESS;  /* just querying the color information */
+
+    x = src->visrect.left & ~(align - 1);
+    y = src->visrect.top;
+    width = src->visrect.right - x;
+    height = src->visrect.bottom - src->visrect.top;
+    if (format->scanline_pad != 32) width = (width + (align - 1)) & ~(align - 1);
+    /* make the source rectangle relative to the returned bits */
+    src->x -= x;
+    src->y -= y;
+    OffsetRect( &src->visrect, -x, -y );
+
+    if (bitmap)
+    {
+        BITMAP bm;
+        GetObjectW( hbitmap, sizeof(bm), &bm );
+        width = min( width, bm.bmWidth - x );
+        height = min( height, bm.bmHeight - y );
+        wine_tsx11_lock();
+        image = XGetImage( gdi_display, bitmap->pixmap, x, y, width, height, AllPlanes, ZPixmap );
+        wine_tsx11_unlock();
+    }
+    else if (GetObjectType( dev->hdc ) == OBJ_MEMDC)
+    {
+        width = min( width, physdev->dc_rect.right - physdev->dc_rect.left - x );
+        height = min( height, physdev->dc_rect.bottom - physdev->dc_rect.top - y );
+        wine_tsx11_lock();
+        image = XGetImage( gdi_display, physdev->drawable,
+                           physdev->dc_rect.left + x, physdev->dc_rect.top + y,
+                           width, height, AllPlanes, ZPixmap );
+        wine_tsx11_unlock();
+    }
+    else
+    {
+        X11DRV_expect_error( gdi_display, XGetImage_handler, NULL );
+        image = XGetImage( gdi_display, physdev->drawable,
+                           physdev->dc_rect.left + x, physdev->dc_rect.top + y,
+                           width, height, AllPlanes, ZPixmap );
+        if (X11DRV_check_error())
+        {
+            /* use a temporary pixmap to avoid the BadMatch error */
+            Pixmap pixmap;
+
+            wine_tsx11_lock();
+            pixmap = XCreatePixmap( gdi_display, root_window, width, height, depth );
+            XCopyArea( gdi_display, physdev->drawable, pixmap, get_bitmap_gc(depth),
+                       physdev->dc_rect.left + x, physdev->dc_rect.top + y, width, height, 0, 0 );
+            image = XGetImage( gdi_display, pixmap, 0, 0, width, height, AllPlanes, ZPixmap );
+            XFreePixmap( gdi_display, pixmap );
+            wine_tsx11_unlock();
+        }
+    }
+    if (!image) return ERROR_OUTOFMEMORY;
+
+    info->bmiHeader.biWidth     = width;
+    info->bmiHeader.biHeight    = -height;
+    info->bmiHeader.biSizeImage = height * image->bytes_per_line;
+
+    src_bits.ptr     = image->data;
+    src_bits.is_copy = TRUE;
+    ret = copy_image_bits( info, is_r8g8b8(depth,color_shifts), image, &src_bits, bits, src, mapping,
+                           zeropad_masks[(width * image->bits_per_pixel) & 31] );
+
+    if (!ret && bits->ptr == image->data)
+    {
+        bits->free = free_ximage_bits;
+        image->data = NULL;
+    }
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
+    return ret;
 }

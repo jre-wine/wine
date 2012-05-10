@@ -1,12 +1,10 @@
 MODULE    = winedbg.exe
 APPMODE   = -mconsole
 IMPORTS   = psapi dbghelp advapi32
-DELAYIMPORTS = user32 gdi32
+DELAYIMPORTS = comdlg32 shell32 comctl32 user32 gdi32
 EXTRALIBS = @LIBPOLL@
-EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 
 C_SRCS = \
-	be_alpha.c \
 	be_arm.c \
 	be_i386.c \
 	be_ppc.c \
@@ -30,28 +28,7 @@ C_SRCS = \
 	types.c \
 	winedbg.c
 
-RC_SRCS = \
-	rsrc_Da.rc \
-	rsrc_De.rc \
-	rsrc_En.rc \
-	rsrc_Es.rc \
-	rsrc_Fr.rc \
-	rsrc_He.rc \
-	rsrc_It.rc \
-	rsrc_Ko.rc \
-	rsrc_Lt.rc \
-	rsrc_Nl.rc \
-	rsrc_No.rc \
-	rsrc_Pl.rc \
-	rsrc_Pt.rc \
-	rsrc_Ro.rc \
-	rsrc_Ru.rc \
-	rsrc_Si.rc \
-	rsrc_Sr.rc \
-	rsrc_Sv.rc \
-	rsrc_Uk.rc \
-	winedbg.rc
-
+RC_SRCS = winedbg.rc
 PO_SRCS = winedbg.rc
 
 LEX_SRCS   = debug.l

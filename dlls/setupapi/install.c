@@ -63,6 +63,9 @@ struct register_dll_info
     PSP_FILE_CALLBACK_W callback;
     PVOID               callback_context;
     BOOL                unregister;
+    int                 modules_size;
+    int                 modules_count;
+    HMODULE            *modules;
 };
 
 typedef BOOL (*iterate_fields_func)( HINF hinf, PCWSTR field, void *arg );
@@ -492,7 +495,7 @@ static BOOL registry_callback( HINF hinf, PCWSTR field, void *arg )
  *
  * Register or unregister a dll.
  */
-static BOOL do_register_dll( const struct register_dll_info *info, const WCHAR *path,
+static BOOL do_register_dll( struct register_dll_info *info, const WCHAR *path,
                              INT flags, INT timeout, const WCHAR *args )
 {
     HMODULE module;
@@ -532,7 +535,7 @@ static BOOL do_register_dll( const struct register_dll_info *info, const WCHAR *
     {
         /* file is an executable, not a dll */
         STARTUPINFOW startup;
-        PROCESS_INFORMATION info;
+        PROCESS_INFORMATION process_info;
         WCHAR *cmd_line;
         BOOL res;
         static const WCHAR format[] = {'"','%','s','"',' ','%','s',0};
@@ -546,7 +549,7 @@ static BOOL do_register_dll( const struct register_dll_info *info, const WCHAR *
         memset( &startup, 0, sizeof(startup) );
         startup.cb = sizeof(startup);
         TRACE( "executing %s\n", debugstr_w(cmd_line) );
-        res = CreateProcessW( NULL, cmd_line, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &info );
+        res = CreateProcessW( path, cmd_line, NULL, NULL, FALSE, 0, NULL, NULL, &startup, &process_info );
         HeapFree( GetProcessHeap(), 0, cmd_line );
         if (!res)
         {
@@ -554,16 +557,16 @@ static BOOL do_register_dll( const struct register_dll_info *info, const WCHAR *
             status.Win32Error = GetLastError();
             goto done;
         }
-        CloseHandle( info.hThread );
+        CloseHandle( process_info.hThread );
 
-        if (WaitForSingleObject( info.hProcess, timeout*1000 ) == WAIT_TIMEOUT)
+        if (WaitForSingleObject( process_info.hProcess, timeout*1000 ) == WAIT_TIMEOUT)
         {
             /* timed out, kill the process */
-            TerminateProcess( info.hProcess, 1 );
+            TerminateProcess( process_info.hProcess, 1 );
             status.FailureCode = SPREG_TIMEOUT;
             status.Win32Error = ERROR_TIMEOUT;
         }
-        CloseHandle( info.hProcess );
+        CloseHandle( process_info.hProcess );
         goto done;
     }
 
@@ -616,7 +619,23 @@ static BOOL do_register_dll( const struct register_dll_info *info, const WCHAR *
     }
 
 done:
-    if (module) FreeLibrary( module );
+    if (module)
+    {
+        if (info->modules_count >= info->modules_size)
+        {
+            int new_size = max( 32, info->modules_size * 2 );
+            HMODULE *new = info->modules ?
+                HeapReAlloc( GetProcessHeap(), 0, info->modules, new_size * sizeof(*new) ) :
+                HeapAlloc( GetProcessHeap(), 0, new_size * sizeof(*new) );
+            if (new)
+            {
+                info->modules_size = new_size;
+                info->modules = new;
+            }
+        }
+        if (info->modules_count < info->modules_size) info->modules[info->modules_count++] = module;
+        else FreeLibrary( module );
+    }
     if (info->callback) info->callback( info->callback_context, SPFILENOTIFY_ENDREGISTRATION,
                                         (UINT_PTR)&status, !info->unregister );
     return TRUE;
@@ -682,7 +701,6 @@ static BOOL register_dlls_callback( HINF hinf, PCWSTR field, void *arg )
 static BOOL fake_dlls_callback( HINF hinf, PCWSTR field, void *arg )
 {
     INFCONTEXT context;
-    BOOL ret = TRUE;
     BOOL ok = SetupFindFirstLineW( hinf, field, NULL, &context );
 
     for (; ok; ok = SetupFindNextLine( &context, &context ))
@@ -711,9 +729,8 @@ static BOOL fake_dlls_callback( HINF hinf, PCWSTR field, void *arg )
 
     done:
         HeapFree( GetProcessHeap(), 0, path );
-        if (!ret) break;
     }
-    return ret;
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1047,11 +1064,13 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
                                          PSP_FILE_CALLBACK_W callback, PVOID context,
                                          HDEVINFO devinfo, PSP_DEVINFO_DATA devinfo_data )
 {
+    BOOL ret;
+    int i;
+
     if (flags & SPINST_FILES)
     {
         struct files_callback_info info;
         HSPFILEQ queue;
-        BOOL ret;
 
         if (!(queue = SetupOpenFileQueue())) return FALSE;
         info.queue      = queue;
@@ -1086,7 +1105,10 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
     {
         struct register_dll_info info;
 
-        info.unregister = FALSE;
+        info.unregister    = FALSE;
+        info.modules_size  = 0;
+        info.modules_count = 0;
+        info.modules       = NULL;
         if (flags & SPINST_REGISTERCALLBACKAWARE)
         {
             info.callback         = callback;
@@ -1099,14 +1121,19 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
         else
             return FALSE;
 
-        if (!iterate_section_fields( hinf, section, RegisterDlls, register_dlls_callback, &info ))
-            return FALSE;
+        ret = iterate_section_fields( hinf, section, RegisterDlls, register_dlls_callback, &info );
+        for (i = 0; i < info.modules_count; i++) FreeLibrary( info.modules[i] );
+        HeapFree( GetProcessHeap(), 0, info.modules );
+        if (!ret) return FALSE;
     }
     if (flags & SPINST_UNREGSVR)
     {
         struct register_dll_info info;
 
-        info.unregister = TRUE;
+        info.unregister    = TRUE;
+        info.modules_size  = 0;
+        info.modules_count = 0;
+        info.modules       = NULL;
         if (flags & SPINST_REGISTERCALLBACKAWARE)
         {
             info.callback         = callback;
@@ -1114,8 +1141,10 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
         }
         else info.callback = NULL;
 
-        if (!iterate_section_fields( hinf, section, UnregisterDlls, register_dlls_callback, &info ))
-            return FALSE;
+        ret = iterate_section_fields( hinf, section, UnregisterDlls, register_dlls_callback, &info );
+        for (i = 0; i < info.modules_count; i++) FreeLibrary( info.modules[i] );
+        HeapFree( GetProcessHeap(), 0, info.modules );
+        if (!ret) return FALSE;
     }
     if (flags & SPINST_REGISTRY)
     {
@@ -1217,6 +1246,7 @@ void WINAPI InstallHinfSectionW( HWND hwnd, HINSTANCE handle, LPCWSTR cmdline, I
     /* FIXME: should check the mode and maybe reboot */
     /* there isn't much point in doing that since we */
     /* don't yet handle deferred file copies anyway. */
+    if (mode & 7) TRACE( "should consider reboot, mode %u\n", mode );
 }
 
 

@@ -33,6 +33,7 @@
 #include "wine/test.h"
 
 static const CHAR spooler[] = "Spooler"; /* Should be available on all platforms */
+static CHAR selfname[MAX_PATH];
 
 static BOOL (WINAPI *pChangeServiceConfig2A)(SC_HANDLE,DWORD,LPVOID);
 static BOOL (WINAPI *pEnumServicesStatusExA)(SC_HANDLE, SC_ENUM_TYPE, DWORD,
@@ -143,7 +144,7 @@ static void test_open_svc(void)
     /* Proper SCM handle but different access rights */
     scm_handle = OpenSCManagerA(NULL, NULL, SC_MANAGER_CONNECT);
     SetLastError(0xdeadbeef);
-    svc_handle = OpenServiceA(scm_handle, "Spooler", GENERIC_WRITE);
+    svc_handle = OpenServiceA(scm_handle, spooler, GENERIC_WRITE);
     if (!svc_handle && (GetLastError() == ERROR_ACCESS_DENIED))
         skip("Not enough rights to get a handle to the service\n");
     else
@@ -948,6 +949,12 @@ static void test_query_svc(void)
     CloseServiceHandle(svc_handle);
 
     /* More or less the same tests for QueryServiceStatusEx */
+    if (!pQueryServiceStatusEx)
+    {
+        win_skip( "QueryServiceStatusEx not available\n" );
+        CloseServiceHandle(scm_handle);
+        return;
+    }
 
     /* Open service with not enough rights to query the status */
     svc_handle = OpenServiceA(scm_handle, spooler, STANDARD_RIGHTS_READ);
@@ -956,7 +963,6 @@ static void test_query_svc(void)
     SetLastError(0xdeadbeef);
     ret = pQueryServiceStatusEx(NULL, 1, NULL, 0, NULL);
     ok(!ret, "Expected failure\n");
-    todo_wine
     ok(GetLastError() == ERROR_INVALID_LEVEL,
        "Expected ERROR_INVALID_LEVEL, got %d\n", GetLastError());
 
@@ -966,8 +972,8 @@ static void test_query_svc(void)
 
     /* Only info level is correct. It looks like the buffer/size is checked second */
     SetLastError(0xdeadbeef);
-    ret = pQueryServiceStatusEx(NULL, 0, NULL, 0, &needed);
-    /* NT4 and Wine check the handle first */
+    ret = pQueryServiceStatusEx(NULL, SC_STATUS_PROCESS_INFO, NULL, 0, &needed);
+    /* NT4 checks the handle first */
     if (GetLastError() != ERROR_INVALID_HANDLE)
     {
         ok(!ret, "Expected failure\n");
@@ -981,7 +987,7 @@ static void test_query_svc(void)
     statusproc = HeapAlloc(GetProcessHeap(), 0, sizeof(SERVICE_STATUS_PROCESS));
     bufsize = needed;
     SetLastError(0xdeadbeef);
-    ret = pQueryServiceStatusEx(NULL, 0, (BYTE*)statusproc, bufsize, &needed);
+    ret = pQueryServiceStatusEx(NULL, SC_STATUS_PROCESS_INFO, (BYTE*)statusproc, bufsize, &needed);
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_INVALID_HANDLE,
        "Expected ERROR_INVALID_HANDLE, got %d\n", GetLastError());
@@ -989,25 +995,22 @@ static void test_query_svc(void)
 
     /* Correct handle and info level */
     SetLastError(0xdeadbeef);
-    ret = pQueryServiceStatusEx(svc_handle, 0, NULL, 0, &needed);
+    ret = pQueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, NULL, 0, &needed);
     /* NT4 doesn't return the needed size */
     if (GetLastError() != ERROR_INVALID_PARAMETER)
     {
         ok(!ret, "Expected failure\n");
-        todo_wine
-        {
         ok(needed == sizeof(SERVICE_STATUS_PROCESS),
            "Needed buffersize is wrong : %d\n", needed);
         ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
            "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
-        }
     }
 
     /* All parameters are OK but we don't have enough rights */
     statusproc = HeapAlloc(GetProcessHeap(), 0, sizeof(SERVICE_STATUS_PROCESS));
     bufsize = sizeof(SERVICE_STATUS_PROCESS);
     SetLastError(0xdeadbeef);
-    ret = pQueryServiceStatusEx(svc_handle, 0, (BYTE*)statusproc, bufsize, &needed);
+    ret = pQueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, (BYTE*)statusproc, bufsize, &needed);
     ok(!ret, "Expected failure\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED,
        "Expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
@@ -1021,7 +1024,7 @@ static void test_query_svc(void)
     statusproc = HeapAlloc(GetProcessHeap(), 0, sizeof(SERVICE_STATUS_PROCESS));
     bufsize = sizeof(SERVICE_STATUS_PROCESS);
     SetLastError(0xdeadbeef);
-    ret = pQueryServiceStatusEx(svc_handle, 0, (BYTE*)statusproc, bufsize, &needed);
+    ret = pQueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, (BYTE*)statusproc, bufsize, &needed);
     ok(ret, "Expected success, got error %u\n", GetLastError());
     if (statusproc->dwCurrentState == SERVICE_RUNNING)
         ok(statusproc->dwProcessId != 0,
@@ -1029,6 +1032,14 @@ static void test_query_svc(void)
     else
         ok(statusproc->dwProcessId == 0,
            "Expect no process id for this stopped service\n");
+
+    /* same call with null needed pointer */
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, (BYTE*)statusproc, bufsize, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(broken(GetLastError() == ERROR_INVALID_PARAMETER) /* NT4 */ ||
+       GetLastError() == ERROR_INVALID_ADDRESS, "got %d\n", GetLastError());
+
     HeapFree(GetProcessHeap(), 0, statusproc);
 
     CloseServiceHandle(svc_handle);
@@ -1399,6 +1410,11 @@ static void test_enum_svc(void)
     CloseServiceHandle(scm_handle);
 
     /* More or less the same for EnumServicesStatusExA */
+    if (!pEnumServicesStatusExA)
+    {
+        win_skip( "EnumServicesStatusExA not available\n" );
+        return;
+    }
 
     /* All NULL or wrong */
     SetLastError(0xdeadbeef);
@@ -1880,6 +1896,7 @@ static void test_queryconfig2(void)
     DWORD expected, needed;
     BYTE buffer[MAX_PATH];
     LPSERVICE_DESCRIPTIONA pConfig = (LPSERVICE_DESCRIPTIONA)buffer;
+    SERVICE_PRESHUTDOWN_INFO preshutdown_info;
     static const CHAR servicename [] = "Winetest";
     static const CHAR displayname [] = "Winetest dummy service";
     static const CHAR pathname    [] = "we_dont_care.exe";
@@ -2046,10 +2063,172 @@ static void test_queryconfig2(void)
     ret = pQueryServiceConfig2W(svc_handle, SERVICE_CONFIG_DESCRIPTION,buffer, needed,&needed);
     ok(ret, "expected QueryServiceConfig2W to succeed\n");
 
+    SetLastError(0xdeadbeef);
+    ret = pQueryServiceConfig2W(svc_handle, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            (LPBYTE)&preshutdown_info, sizeof(preshutdown_info), &needed);
+    if(!ret && GetLastError()==ERROR_INVALID_LEVEL)
+    {
+        /* Win2k3 and older */
+        win_skip("SERVICE_CONFIG_PRESHUTDOWN_INFO not supported\n");
+        goto cleanup;
+    }
+    ok(ret, "expected QueryServiceConfig2W to succeed (%d)\n", GetLastError());
+    ok(needed == sizeof(preshutdown_info), "needed = %d\n", needed);
+    ok(preshutdown_info.dwPreshutdownTimeout == 180000, "Default PreshutdownTimeout = %d\n",
+            preshutdown_info.dwPreshutdownTimeout);
+
+    SetLastError(0xdeadbeef);
+    preshutdown_info.dwPreshutdownTimeout = -1;
+    ret = pChangeServiceConfig2A(svc_handle, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            (LPVOID)&preshutdown_info);
+    ok(ret, "expected ChangeServiceConfig2A to succeed (%d)\n", GetLastError());
+
+    ret = pQueryServiceConfig2W(svc_handle, SERVICE_CONFIG_PRESHUTDOWN_INFO,
+            (LPBYTE)&preshutdown_info, sizeof(preshutdown_info), &needed);
+    ok(ret, "expected QueryServiceConfig2W to succeed (%d)\n", GetLastError());
+    ok(needed == sizeof(preshutdown_info), "needed = %d\n", needed);
+    ok(preshutdown_info.dwPreshutdownTimeout == -1, "New PreshutdownTimeout = %d\n",
+            preshutdown_info.dwPreshutdownTimeout);
+
 cleanup:
     DeleteService(svc_handle);
 
     CloseServiceHandle(svc_handle);
+
+    /* Wait a while. The following test does a CreateService again */
+    Sleep(1000);
+
+    CloseServiceHandle(scm_handle);
+}
+
+static DWORD try_start_stop(SC_HANDLE svc_handle, const char* name, DWORD is_nt4)
+{
+    BOOL ret;
+    DWORD le1, le2;
+    SERVICE_STATUS status;
+
+    ret = StartServiceA(svc_handle, 0, NULL);
+    le1 = GetLastError();
+    ok(!ret, "%s: StartServiceA() should have failed\n", name);
+
+    if (pQueryServiceStatusEx)
+    {
+        DWORD needed;
+        SERVICE_STATUS_PROCESS statusproc;
+
+        ret = pQueryServiceStatusEx(svc_handle, SC_STATUS_PROCESS_INFO, (BYTE*)&statusproc, sizeof(statusproc), &needed);
+        ok(ret, "%s: QueryServiceStatusEx() failed le=%u\n", name, GetLastError());
+        ok(statusproc.dwCurrentState == SERVICE_STOPPED, "%s: should be stopped state=%x\n", name, statusproc.dwCurrentState);
+        ok(statusproc.dwProcessId == 0, "%s: ProcessId should be 0 instead of %x\n", name, statusproc.dwProcessId);
+    }
+
+    ret = StartServiceA(svc_handle, 0, NULL);
+    le2 = GetLastError();
+    ok(!ret, "%s: StartServiceA() should have failed\n", name);
+    ok(le2 == le1, "%s: the second try should yield the same error: %u != %u\n", name, le1, le2);
+
+    status.dwCurrentState = 0xdeadbeef;
+    ret = ControlService(svc_handle, SERVICE_CONTROL_STOP, &status);
+    le2 = GetLastError();
+    ok(!ret, "%s: ControlService() should have failed\n", name);
+    ok(le2 == ERROR_SERVICE_NOT_ACTIVE, "%s: %d != ERROR_SERVICE_NOT_ACTIVE\n", name, le2);
+    ok(status.dwCurrentState == SERVICE_STOPPED ||
+       broken(is_nt4), /* NT4 returns a random value */
+       "%s: should be stopped state=%x\n", name, status.dwCurrentState);
+
+    return le1;
+}
+
+static void test_start_stop(void)
+{
+    BOOL ret;
+    SC_HANDLE scm_handle, svc_handle;
+    DWORD le, is_nt4;
+    static const char servicename[] = "Winetest";
+    char cmd[MAX_PATH+20];
+    const char* displayname;
+
+    SetLastError(0xdeadbeef);
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+    if (!scm_handle)
+    {
+	if(GetLastError() == ERROR_ACCESS_DENIED)
+            skip("Not enough rights to get a handle to the manager\n");
+        else
+            ok(FALSE, "Could not get a handle to the manager: %d\n", GetLastError());
+        return;
+    }
+
+    /* Detect NT4 */
+    svc_handle = OpenServiceA(scm_handle, NULL, GENERIC_READ);
+    is_nt4=(svc_handle == NULL && GetLastError() == ERROR_INVALID_PARAMETER);
+
+    /* Do some cleanup in case a previous run crashed */
+    svc_handle = OpenServiceA(scm_handle, servicename, GENERIC_ALL);
+    if (svc_handle)
+    {
+        DeleteService(svc_handle);
+        CloseServiceHandle(svc_handle);
+    }
+
+    /* Create a dummy disabled service */
+    sprintf(cmd, "\"%s\" service exit", selfname);
+    displayname = "Winetest Disabled Service";
+    svc_handle = CreateServiceA(scm_handle, servicename, displayname,
+        GENERIC_ALL, SERVICE_INTERACTIVE_PROCESS | SERVICE_WIN32_OWN_PROCESS,
+        SERVICE_DISABLED, SERVICE_ERROR_IGNORE, cmd, NULL,
+        NULL, NULL, NULL, NULL);
+    if (!svc_handle)
+    {
+        if(GetLastError() == ERROR_ACCESS_DENIED)
+            skip("Not enough rights to create the service\n");
+        else
+            ok(FALSE, "Could not create the service: %d\n", GetLastError());
+        goto cleanup;
+    }
+    le = try_start_stop(svc_handle, displayname, is_nt4);
+    ok(le == ERROR_SERVICE_DISABLED, "%d != ERROR_SERVICE_DISABLED\n", le);
+
+    /* Then one with a bad path */
+    displayname = "Winetest Bad Path";
+    ret = ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_DEMAND_START, SERVICE_NO_CHANGE, "c:\\no_such_file.exe", NULL, NULL, NULL, NULL, NULL, displayname);
+    ok(ret, "ChangeServiceConfig() failed le=%u\n", GetLastError());
+    try_start_stop(svc_handle, displayname, is_nt4);
+
+    if (is_nt4)
+    {
+        /* NT4 does not detect when a service fails to start and uses an
+         * insanely long timeout: 120s. So skip the rest of the tests.
+         */
+        win_skip("Skip some service start/stop tests on NT4\n");
+        goto cleanup;
+    }
+
+    /* Again with a process that exits right away */
+    displayname = "Winetest Exit Service";
+    ret = ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, cmd, NULL, NULL, NULL, NULL, NULL, displayname);
+    ok(ret, "ChangeServiceConfig() failed le=%u\n", GetLastError());
+    le = try_start_stop(svc_handle, displayname, is_nt4);
+    ok(le == ERROR_SERVICE_REQUEST_TIMEOUT, "%d != ERROR_SERVICE_REQUEST_TIMEOUT\n", le);
+
+    /* And finally with a service that plays dead, forcing a timeout.
+     * This time we will put no quotes. That should work too, even if there are
+     * spaces in the path.
+     */
+    sprintf(cmd, "%s service sleep", selfname);
+    displayname = "Winetest Sleep Service";
+    ret = ChangeServiceConfigA(svc_handle, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, cmd, NULL, NULL, NULL, NULL, NULL, displayname);
+    ok(ret, "ChangeServiceConfig() failed le=%u\n", GetLastError());
+
+    le = try_start_stop(svc_handle, displayname, is_nt4);
+    ok(le == ERROR_SERVICE_REQUEST_TIMEOUT, "%d != ERROR_SERVICE_REQUEST_TIMEOUT\n", le);
+
+cleanup:
+    if (svc_handle)
+    {
+        DeleteService(svc_handle);
+        CloseServiceHandle(svc_handle);
+    }
 
     /* Wait a while. The following test does a CreateService again */
     Sleep(1000);
@@ -2160,6 +2339,19 @@ static void test_refcount(void)
 START_TEST(service)
 {
     SC_HANDLE scm_handle;
+    int myARGC;
+    char** myARGV;
+
+    myARGC = winetest_get_mainargs(&myARGV);
+    GetFullPathNameA(myARGV[0], sizeof(selfname), selfname, NULL);
+    if (myARGC >= 3)
+    {
+        if (strcmp(myARGV[2], "sleep") == 0)
+            /* Cause a service startup timeout */
+            Sleep(90000);
+        /* then, or if myARGV[2] == "exit", just exit */
+        return;
+    }
 
     /* Bail out if we are on win98 */
     SetLastError(0xdeadbeef);
@@ -2186,6 +2378,7 @@ START_TEST(service)
     /* Test the creation, querying and deletion of a service */
     test_sequence();
     test_queryconfig2();
+    test_start_stop();
     /* The main reason for this test is to check if any refcounting is used
      * and what the rules are
      */

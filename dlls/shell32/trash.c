@@ -3,6 +3,7 @@
  * (see http://www.ramendik.ru/docs/trashspec.html)
  *
  * Copyright (C) 2006 Mikolaj Zalewski
+ * Copyright 2011 Jay Yang
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -208,7 +209,7 @@ error:
 
 /*
  * Try to create a .trashinfo file. This function will make several attempts with
- * different filenames. It will return the filename that succeded or NULL if a file
+ * different filenames. It will return the filename that succeeded or NULL if a file
  * couldn't be created.
  */
 static char *create_trashinfo(const char *info_dir, const char *file_path)
@@ -284,7 +285,7 @@ static BOOL TRASH_MoveFileToBucket(TRASH_BUCKET *pBucket, const char *unix_path)
     
     if (rename(unix_path, trash_path)==0)
     {
-        TRACE("rename succeded\n");
+        TRACE("rename succeeded\n");
         goto cleanup;
     }
     
@@ -423,10 +424,10 @@ static HRESULT TRASH_GetDetails(const TRASH_BUCKET *bucket, LPCSTR filename, WIN
     else
     {
         /* show only the file name */
-        char *filename = strrchr(original_file_name, '/');
-        if (filename == NULL)
-            filename = original_file_name;
-        MultiByteToWideChar(CP_UNIXCP, 0, filename, -1, data->cFileName, MAX_PATH);
+        char *file = strrchr(original_file_name, '/');
+        if (file == NULL)
+            file = original_file_name;
+        MultiByteToWideChar(CP_UNIXCP, 0, file, -1, data->cFileName, MAX_PATH);
     }
     
     deletion_date = XDG_GetStringValue(parsed, trashinfo_group, "DeletionDate", 0);
@@ -541,4 +542,64 @@ failed:
     DPA_DestroyCallback(tinfs, free_item_callback, NULL);
     
     return err;
+}
+
+HRESULT TRASH_RestoreItem(LPCITEMIDLIST pidl){
+    int suffix_length = strlen(trashinfo_suffix);
+    LPCSHITEMID id = &(pidl->mkid);
+    const char *bucket_name = (const char*)(id->abID+1+sizeof(WIN32_FIND_DATAW));
+    const char *filename = (const char*)(id->abID+1+sizeof(WIN32_FIND_DATAW)+strlen(bucket_name)+1);
+    char *restore_path;
+    WIN32_FIND_DATAW data;
+    char *file_path;
+
+    TRACE("(%p)\n",pidl);
+    if(strcmp(filename+strlen(filename)-suffix_length,trashinfo_suffix))
+    {
+        ERR("pidl at %p is not a valid recycle bin entry\n",pidl);
+        return E_INVALIDARG;
+    }
+    TRASH_UnpackItemID(id,&data);
+    restore_path = wine_get_unix_file_name(data.cFileName);
+    file_path = SHAlloc(max(strlen(home_trash->files_dir),strlen(home_trash->info_dir))+strlen(filename)+1);
+    sprintf(file_path,"%s%s",home_trash->files_dir,filename);
+    file_path[strlen(home_trash->files_dir)+strlen(filename)-suffix_length] = '\0';
+    if(!rename(file_path,restore_path))
+    {
+            sprintf(file_path,"%s%s",home_trash->info_dir,filename);
+            if(unlink(file_path))
+                WARN("failed to delete the trashinfo file %s\n",filename);
+    }
+    else
+        WARN("could not erase %s from the trash (errno=%i)\n",filename,errno);
+    SHFree(file_path);
+    HeapFree(GetProcessHeap(), 0, restore_path);
+    return S_OK;
+}
+
+HRESULT TRASH_EraseItem(LPCITEMIDLIST pidl)
+{
+    int suffix_length = strlen(trashinfo_suffix);
+
+    LPCSHITEMID id = &(pidl->mkid);
+    const char *bucket_name = (const char*)(id->abID+1+sizeof(WIN32_FIND_DATAW));
+    const char *filename = (const char*)(id->abID+1+sizeof(WIN32_FIND_DATAW)+strlen(bucket_name)+1);
+    char *file_path;
+
+    TRACE("(%p)\n",pidl);
+    if(strcmp(filename+strlen(filename)-suffix_length,trashinfo_suffix))
+    {
+        ERR("pidl at %p is not a valid recycle bin entry\n",pidl);
+        return E_INVALIDARG;
+    }
+    file_path = SHAlloc(max(strlen(home_trash->files_dir),strlen(home_trash->info_dir))+strlen(filename)+1);
+    sprintf(file_path,"%s%s",home_trash->info_dir,filename);
+    if(unlink(file_path))
+        WARN("failed to delete the trashinfo file %s\n",filename);
+    sprintf(file_path,"%s%s",home_trash->files_dir,filename);
+    file_path[strlen(home_trash->files_dir)+strlen(filename)-suffix_length] = '\0';
+    if(unlink(file_path))
+        WARN("could not erase %s from the trash (errno=%i)\n",filename,errno);
+    SHFree(file_path);
+    return S_OK;
 }

@@ -1,14 +1,12 @@
 MODULE    = wineoss.drv
-IMPORTS   = dxguid uuid winmm user32
+IMPORTS   = uuid ole32 user32
+DELAYIMPORTS = winmm
+EXTRAINCL = @OSS4INCL@
 
 C_SRCS = \
-	audio.c \
-	dscapture.c \
-	dsrender.c \
 	midi.c \
 	midipatch.c \
-	mixer.c \
 	mmaux.c \
-	oss.c
+	mmdevdrv.c
 
 @MAKE_DLL_RULES@

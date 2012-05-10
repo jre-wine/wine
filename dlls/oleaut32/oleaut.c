@@ -35,6 +35,7 @@
 #include "oleauto.h"
 #include "initguid.h"
 #include "typelib.h"
+#include "oleaut32_oaidl.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -446,7 +447,7 @@ void WINAPI SetOaNoCache(void)
   BSTR_bCache = FALSE;
 }
 
-static const WCHAR	_delimiter[2] = {'!',0}; /* default delimiter apparently */
+static const WCHAR	_delimiter[] = {'!',0}; /* default delimiter apparently */
 static const WCHAR	*pdelimiter = &_delimiter[0];
 
 /***********************************************************************
@@ -471,6 +472,7 @@ HRESULT WINAPI RegisterActiveObject(
 	HRESULT			ret;
 	LPRUNNINGOBJECTTABLE	runobtable;
 	LPMONIKER		moniker;
+        DWORD                   rot_flags = ROTFLAGS_REGISTRATIONKEEPSALIVE; /* default registration is strong */
 
 	StringFromGUID2(rcid,guidbuf,39);
 	ret = CreateItemMoniker(pdelimiter,guidbuf,&moniker);
@@ -481,7 +483,9 @@ HRESULT WINAPI RegisterActiveObject(
 		IMoniker_Release(moniker);
 		return ret;
 	}
-	ret = IRunningObjectTable_Register(runobtable,dwFlags,punk,moniker,pdwRegister);
+        if(dwFlags == ACTIVEOBJECT_WEAK)
+          rot_flags = 0;
+	ret = IRunningObjectTable_Register(runobtable,rot_flags,punk,moniker,pdwRegister);
 	IRunningObjectTable_Release(runobtable);
 	IMoniker_Release(moniker);
 	return ret;
@@ -596,8 +600,11 @@ ULONG WINAPI OaBuildVersion(void)
     case 0x80000a04:  /* WIN98 */
     case 0x00000004:  /* NT40 */
     case 0x00000005:  /* W2K */
-    case 0x00000105:  /* WinXP */
 		return MAKELONG(0xffff, 40);
+    case 0x00000105:  /* WinXP */
+    case 0x00000006:  /* Vista */
+    case 0x00000106:  /* Win7 */
+		return MAKELONG(0xffff, 50);
     default:
 		FIXME("Version value not known yet. Please investigate it !\n");
 		return MAKELONG(0xffff, 40);  /* for now return the same value as for w2k */
@@ -836,48 +843,12 @@ BOOL WINAPI DllMain(HINSTANCE hInstDll, DWORD fdwReason, LPVOID lpvReserved)
     return OLEAUTPS_DllMain( hInstDll, fdwReason, lpvReserved );
 }
 
-
-static HRESULT register_typelib( const WCHAR *name )
-{
-    static const WCHAR backslash[] = {'\\',0};
-    HRESULT hr;
-    ITypeLib *typelib;
-    WCHAR *path;
-    DWORD len;
-
-    len = GetSystemDirectoryW( NULL, 0 ) + strlenW( name ) + 1;
-    if (!(path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return E_OUTOFMEMORY;
-    GetSystemDirectoryW( path, len );
-    strcatW( path, backslash );
-    strcatW( path, name );
-    hr = LoadTypeLib( path, &typelib );
-    if (SUCCEEDED(hr))
-    {
-        hr = RegisterTypeLib( typelib, path, NULL );
-        ITypeLib_Release( typelib );
-    }
-    HeapFree( GetProcessHeap(), 0, path );
-    return hr;
-}
-
 /***********************************************************************
  *		DllRegisterServer (OLEAUT32.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    HRESULT hr;
-
-    TRACE("\n");
-
-    hr = OLEAUTPS_DllRegisterServer();
-    if (SUCCEEDED(hr))
-    {
-        const WCHAR stdole32W[] = {'s','t','d','o','l','e','3','2','.','t','l','b',0};
-        const WCHAR stdole2W[] = {'s','t','d','o','l','e','2','.','t','l','b',0};
-        hr = register_typelib( stdole2W );
-        if (SUCCEEDED(hr)) hr = register_typelib( stdole32W );
-    }
-    return hr;
+    return OLEAUTPS_DllRegisterServer();
 }
 
 /***********************************************************************

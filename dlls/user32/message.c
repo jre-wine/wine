@@ -1869,6 +1869,14 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
 
         return call_current_hook( h_extra->handle, HC_ACTION, wparam, h_extra->lparam );
     }
+    case WM_WINE_CLIPCURSOR:
+        if (wparam)
+        {
+            RECT rect;
+            GetClipCursor( &rect );
+            return USER_Driver->pClipCursor( &rect );
+        }
+        return USER_Driver->pClipCursor( NULL );
     default:
         if (msg >= WM_WINE_FIRST_DRIVER_MSG && msg <= WM_WINE_LAST_DRIVER_MSG)
             return USER_Driver->pWindowMessage( hwnd, msg, wparam, lparam );
@@ -3104,7 +3112,9 @@ static BOOL send_message( struct send_message_info *info, DWORD_PTR *res_ptr, BO
  */
 NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
     struct send_message_info info;
+    int prev_x, prev_y, new_x, new_y;
     NTSTATUS ret;
     BOOL wait;
 
@@ -3141,10 +3151,22 @@ NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags )
             req->input.hw.lparam = MAKELONG( input->u.hi.wParamL, input->u.hi.wParamH );
             break;
         }
+        if (thread_info->key_state) wine_server_set_reply( req, thread_info->key_state, 256 );
         ret = wine_server_call( req );
         wait = reply->wait;
+        prev_x = reply->prev_x;
+        prev_y = reply->prev_y;
+        new_x  = reply->new_x;
+        new_y  = reply->new_y;
     }
     SERVER_END_REQ;
+
+    if (!ret)
+    {
+        if (thread_info->key_state) thread_info->key_state_time = GetTickCount();
+        if ((flags & SEND_HWMSG_INJECTED) && (prev_x != new_x || prev_y != new_y))
+            USER_Driver->pSetCursorPos( new_x, new_y );
+    }
 
     if (wait)
     {

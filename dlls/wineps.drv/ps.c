@@ -125,9 +125,6 @@ static const char pssetfont[] = /* fontname, xx_scale, xy_scale, yx_scale, yy_sc
 static const char pssetline[] = /* width, join, endcap */
 "%d setlinewidth %u setlinejoin %u setlinecap\n";
 
-static const char pssetdash[] = /* dash, offset */
-"[%s] %d setdash\n";
-
 static const char pssetgray[] = /* gray */
 "%.2f setgray\n";
 
@@ -140,6 +137,9 @@ static const char psarc[] = /* x, y, w, h, ang1, ang2 */
 "%d %d scale\n"
 "0 0 0.5 %.1f %.1f arc\n"
 "tmpmtrx setmatrix\n";
+
+static const char pscurveto[] = /* x1, y1, x2, y2, x3, y3 */
+"%d %d %d %d %d %d curveto\n";
 
 static const char psgsave[] =
 "gsave\n";
@@ -186,8 +186,9 @@ static const char psarraydef[] =
 static const char psenddocument[] =
 "\n%%EndDocument\n";
 
-DWORD PSDRV_WriteSpool(PSDRV_PDEVICE *physDev, LPCSTR lpData, DWORD cch)
+DWORD PSDRV_WriteSpool(PHYSDEV dev, LPCSTR lpData, DWORD cch)
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     int num, num_left = cch;
 
     if(physDev->job.quiet) {
@@ -196,18 +197,18 @@ DWORD PSDRV_WriteSpool(PSDRV_PDEVICE *physDev, LPCSTR lpData, DWORD cch)
     }
 
     if(physDev->job.in_passthrough) { /* Was in PASSTHROUGH mode */
-        write_spool( physDev, psenddocument, sizeof(psenddocument)-1 );
+        write_spool( dev, psenddocument, sizeof(psenddocument)-1 );
         physDev->job.in_passthrough = physDev->job.had_passthrough_rect = FALSE;
     }
 
     if(physDev->job.OutOfPage) { /* Will get here after NEWFRAME Escape */
-        if( !PSDRV_StartPage(physDev) )
+        if( !PSDRV_StartPage(dev) )
 	    return 0;
     }
 
     do {
         num = min(num_left, 0x8000);
-        if(write_spool( physDev, lpData, num ) != num)
+        if(write_spool( dev, lpData, num ) != num)
             return 0;
         lpData += num;
         num_left -= num;
@@ -217,16 +218,16 @@ DWORD PSDRV_WriteSpool(PSDRV_PDEVICE *physDev, LPCSTR lpData, DWORD cch)
 }
 
 
-static INT PSDRV_WriteFeature(PSDRV_PDEVICE *physDev, LPCSTR feature, LPCSTR value, LPCSTR invocation)
+static INT PSDRV_WriteFeature(PHYSDEV dev, LPCSTR feature, LPCSTR value, LPCSTR invocation)
 {
 
     char *buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psbeginfeature) +
                            strlen(feature) + strlen(value));
 
     sprintf(buf, psbeginfeature, feature, value);
-    write_spool( physDev, buf, strlen(buf) );
-    write_spool( physDev, invocation, strlen(invocation) );
-    write_spool( physDev, psendfeature, strlen(psendfeature) );
+    write_spool( dev, buf, strlen(buf) );
+    write_spool( dev, invocation, strlen(invocation) );
+    write_spool( dev, psendfeature, strlen(psendfeature) );
 
     HeapFree( PSDRV_Heap, 0, buf );
     return 1;
@@ -286,10 +287,11 @@ static char *escape_title(LPCSTR str)
     *cp = '\0';
     return ret;
 }
-       
 
-INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
+
+INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf, *escaped_title;
     INPUTSLOT *slot;
     PAGESIZE *page;
@@ -318,28 +320,28 @@ INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
     sprintf(buf, psheader, escaped_title, llx, lly, urx, ury);
 
     HeapFree(GetProcessHeap(), 0, escaped_title);
-    if( write_spool( physDev, buf, strlen(buf) ) != strlen(buf) ) {
+    if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
 	HeapFree( PSDRV_Heap, 0, buf );
 	return 0;
     }
     HeapFree( PSDRV_Heap, 0, buf );
 
-    write_spool( physDev, psbeginprolog, strlen(psbeginprolog) );
-    write_spool( physDev, psprolog, strlen(psprolog) );
-    write_spool( physDev, psendprolog, strlen(psendprolog) );
-    write_spool( physDev, psbeginsetup, strlen(psbeginsetup) );
+    write_spool( dev, psbeginprolog, strlen(psbeginprolog) );
+    write_spool( dev, psprolog, strlen(psprolog) );
+    write_spool( dev, psendprolog, strlen(psendprolog) );
+    write_spool( dev, psbeginsetup, strlen(psbeginsetup) );
 
     if(physDev->Devmode->dmPublic.u1.s1.dmCopies > 1) {
         char copies_buf[100];
         sprintf(copies_buf, "mark {\n << /NumCopies %d >> setpagedevice\n} stopped cleartomark\n", physDev->Devmode->dmPublic.u1.s1.dmCopies);
-        write_spool(physDev, copies_buf, strlen(copies_buf));
+        write_spool(dev, copies_buf, strlen(copies_buf));
     }
 
     for(slot = physDev->pi->ppd->InputSlots; slot; slot = slot->next) {
         if(slot->WinBin == physDev->Devmode->dmPublic.u1.s1.dmDefaultSource) {
 	    if(slot->InvocationString) {
-	        PSDRV_WriteFeature(physDev, "*InputSlot", slot->Name,
+	        PSDRV_WriteFeature(dev, "*InputSlot", slot->Name,
 			     slot->InvocationString);
 		break;
 	    }
@@ -349,7 +351,7 @@ INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
     LIST_FOR_EACH_ENTRY(page, &physDev->pi->ppd->PageSizes, PAGESIZE, entry) {
         if(page->WinPage == physDev->Devmode->dmPublic.u1.s1.dmPaperSize) {
 	    if(page->InvocationString) {
-	        PSDRV_WriteFeature(physDev, "*PageSize", page->Name,
+	        PSDRV_WriteFeature(dev, "*PageSize", page->Name,
 			     page->InvocationString);
 		break;
 	    }
@@ -361,22 +363,23 @@ INT PSDRV_WriteHeader( PSDRV_PDEVICE *physDev, LPCSTR title )
     for(duplex = physDev->pi->ppd->Duplexes; duplex; duplex = duplex->next) {
         if(duplex->WinDuplex == win_duplex) {
 	    if(duplex->InvocationString) {
-	        PSDRV_WriteFeature(physDev, "*Duplex", duplex->Name,
+	        PSDRV_WriteFeature(dev, "*Duplex", duplex->Name,
 			     duplex->InvocationString);
 		break;
 	    }
 	}
     }
 
-    write_spool( physDev, psendsetup, strlen(psendsetup) );
+    write_spool( dev, psendsetup, strlen(psendsetup) );
 
 
     return 1;
 }
 
 
-INT PSDRV_WriteFooter( PSDRV_PDEVICE *physDev )
+INT PSDRV_WriteFooter( PHYSDEV dev )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf;
 
     buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psfooter) + 100 );
@@ -387,7 +390,7 @@ INT PSDRV_WriteFooter( PSDRV_PDEVICE *physDev )
 
     sprintf(buf, psfooter, physDev->job.PageNo);
 
-    if( write_spool( physDev, buf, strlen(buf) ) != strlen(buf) ) {
+    if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
 	HeapFree( PSDRV_Heap, 0, buf );
 	return 0;
@@ -398,9 +401,9 @@ INT PSDRV_WriteFooter( PSDRV_PDEVICE *physDev )
 
 
 
-INT PSDRV_WriteEndPage( PSDRV_PDEVICE *physDev )
+INT PSDRV_WriteEndPage( PHYSDEV dev )
 {
-    if( write_spool( physDev, psendpage, sizeof(psendpage)-1 ) != sizeof(psendpage)-1 ) {
+    if( write_spool( dev, psendpage, sizeof(psendpage)-1 ) != sizeof(psendpage)-1 ) {
         WARN("WriteSpool error\n");
 	return 0;
     }
@@ -410,8 +413,9 @@ INT PSDRV_WriteEndPage( PSDRV_PDEVICE *physDev )
 
 
 
-INT PSDRV_WriteNewPage( PSDRV_PDEVICE *physDev )
+INT PSDRV_WriteNewPage( PHYSDEV dev )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf;
     char name[100];
     signed int xtrans, ytrans, rotation;
@@ -444,7 +448,7 @@ INT PSDRV_WriteNewPage( PSDRV_PDEVICE *physDev )
 	    physDev->logPixelsX, physDev->logPixelsY,
 	    xtrans, ytrans, rotation);
 
-    if( write_spool( physDev, buf, strlen(buf) ) != strlen(buf) ) {
+    if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
 	HeapFree( PSDRV_Heap, 0, buf );
 	return 0;
@@ -454,40 +458,40 @@ INT PSDRV_WriteNewPage( PSDRV_PDEVICE *physDev )
 }
 
 
-BOOL PSDRV_WriteMoveTo(PSDRV_PDEVICE *physDev, INT x, INT y)
+BOOL PSDRV_WriteMoveTo(PHYSDEV dev, INT x, INT y)
 {
     char buf[100];
 
     sprintf(buf, psmoveto, x, y);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteLineTo(PSDRV_PDEVICE *physDev, INT x, INT y)
+BOOL PSDRV_WriteLineTo(PHYSDEV dev, INT x, INT y)
 {
     char buf[100];
 
     sprintf(buf, pslineto, x, y);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
 
-BOOL PSDRV_WriteStroke(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteStroke(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psstroke, sizeof(psstroke)-1);
+    return PSDRV_WriteSpool(dev, psstroke, sizeof(psstroke)-1);
 }
 
 
 
-BOOL PSDRV_WriteRectangle(PSDRV_PDEVICE *physDev, INT x, INT y, INT width,
+BOOL PSDRV_WriteRectangle(PHYSDEV dev, INT x, INT y, INT width,
 			INT height)
 {
     char buf[100];
 
     sprintf(buf, psrectangle, x, y, width, height, -width);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteArc(PSDRV_PDEVICE *physDev, INT x, INT y, INT w, INT h, double ang1,
+BOOL PSDRV_WriteArc(PHYSDEV dev, INT x, INT y, INT w, INT h, double ang1,
 		      double ang2)
 {
     char buf[256];
@@ -497,11 +501,19 @@ BOOL PSDRV_WriteArc(PSDRV_PDEVICE *physDev, INT x, INT y, INT w, INT h, double a
     push_lc_numeric("C");
     sprintf(buf, psarc, x, y, w, h, -ang2, -ang1);
     pop_lc_numeric();
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
+}
+
+BOOL PSDRV_WriteCurveTo(PHYSDEV dev, POINT pts[3])
+{
+    char buf[256];
+
+    sprintf(buf, pscurveto, pts[0].x, pts[0].y, pts[1].x, pts[1].y, pts[2].x, pts[2].y );
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
 
-BOOL PSDRV_WriteSetFont(PSDRV_PDEVICE *physDev, const char *name, matrix size, INT escapement)
+BOOL PSDRV_WriteSetFont(PHYSDEV dev, const char *name, matrix size, INT escapement)
 {
     char *buf;
 
@@ -515,13 +527,14 @@ BOOL PSDRV_WriteSetFont(PSDRV_PDEVICE *physDev, const char *name, matrix size, I
 
     sprintf(buf, pssetfont, name, size.xx, size.xy, size.yx, size.yy, -escapement);
 
-    PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    PSDRV_WriteSpool(dev, buf, strlen(buf));
     HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }
 
-BOOL PSDRV_WriteSetColor(PSDRV_PDEVICE *physDev, PSCOLOR *color)
+BOOL PSDRV_WriteSetColor(PHYSDEV dev, PSCOLOR *color)
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char buf[256];
 
     PSDRV_CopyColor(&physDev->inkColor, color);
@@ -531,13 +544,13 @@ BOOL PSDRV_WriteSetColor(PSDRV_PDEVICE *physDev, PSCOLOR *color)
         sprintf(buf, pssetrgbcolor, color->value.rgb.r, color->value.rgb.g,
 		color->value.rgb.b);
         pop_lc_numeric();
-	return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+	return PSDRV_WriteSpool(dev, buf, strlen(buf));
 
     case PSCOLOR_GRAY:
         push_lc_numeric("C");
         sprintf(buf, pssetgray, color->value.gray.i);
         pop_lc_numeric();
-	return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+	return PSDRV_WriteSpool(dev, buf, strlen(buf));
 
     default:
         ERR("Unkonwn colour type %d\n", color->type);
@@ -547,25 +560,31 @@ BOOL PSDRV_WriteSetColor(PSDRV_PDEVICE *physDev, PSCOLOR *color)
     return FALSE;
 }
 
-BOOL PSDRV_WriteSetPen(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteSetPen(PHYSDEV dev)
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char buf[256];
+    DWORD i, pos;
 
     sprintf(buf, pssetline, physDev->pen.width, physDev->pen.join, physDev->pen.endcap);
-    PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    PSDRV_WriteSpool(dev, buf, strlen(buf));
 
-    if(physDev->pen.dash) {
-        sprintf(buf, pssetdash, physDev->pen.dash, 0);
+    if (physDev->pen.dash_len)
+    {
+        for (i = pos = 0; i < physDev->pen.dash_len; i++)
+            pos += sprintf( buf + pos, " %u", physDev->pen.dash[i] );
+        buf[0] = '[';
+        sprintf(buf + pos, "] %u setdash\n", 0);
     }
     else
-        sprintf(buf, pssetdash, "", 0);
-   
-   PSDRV_WriteSpool(physDev, buf, strlen(buf));
+        sprintf(buf, "[] %u setdash\n", 0);
+
+   PSDRV_WriteSpool(dev, buf, strlen(buf));
 	
    return TRUE;
 }
 
-BOOL PSDRV_WriteGlyphShow(PSDRV_PDEVICE *physDev, LPCSTR g_name)
+BOOL PSDRV_WriteGlyphShow(PHYSDEV dev, LPCSTR g_name)
 {
     char    buf[128];
     int     l;
@@ -577,79 +596,79 @@ BOOL PSDRV_WriteGlyphShow(PSDRV_PDEVICE *physDev, LPCSTR g_name)
 	return FALSE;
     }
 
-    PSDRV_WriteSpool(physDev, buf, l);
+    PSDRV_WriteSpool(dev, buf, l);
     return TRUE;
 }
 
-BOOL PSDRV_WriteFill(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteFill(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psfill, sizeof(psfill)-1);
+    return PSDRV_WriteSpool(dev, psfill, sizeof(psfill)-1);
 }
 
-BOOL PSDRV_WriteEOFill(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteEOFill(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, pseofill, sizeof(pseofill)-1);
+    return PSDRV_WriteSpool(dev, pseofill, sizeof(pseofill)-1);
 }
 
-BOOL PSDRV_WriteGSave(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteGSave(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psgsave, sizeof(psgsave)-1);
+    return PSDRV_WriteSpool(dev, psgsave, sizeof(psgsave)-1);
 }
 
-BOOL PSDRV_WriteGRestore(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteGRestore(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psgrestore, sizeof(psgrestore)-1);
+    return PSDRV_WriteSpool(dev, psgrestore, sizeof(psgrestore)-1);
 }
 
-BOOL PSDRV_WriteNewPath(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteNewPath(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psnewpath, sizeof(psnewpath)-1);
+    return PSDRV_WriteSpool(dev, psnewpath, sizeof(psnewpath)-1);
 }
 
-BOOL PSDRV_WriteClosePath(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteClosePath(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psclosepath, sizeof(psclosepath)-1);
+    return PSDRV_WriteSpool(dev, psclosepath, sizeof(psclosepath)-1);
 }
 
-BOOL PSDRV_WriteClip(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteClip(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, psclip, sizeof(psclip)-1);
+    return PSDRV_WriteSpool(dev, psclip, sizeof(psclip)-1);
 }
 
-BOOL PSDRV_WriteEOClip(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteEOClip(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, pseoclip, sizeof(pseoclip)-1);
+    return PSDRV_WriteSpool(dev, pseoclip, sizeof(pseoclip)-1);
 }
 
-BOOL PSDRV_WriteHatch(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteHatch(PHYSDEV dev)
 {
-    return PSDRV_WriteSpool(physDev, pshatch, sizeof(pshatch)-1);
+    return PSDRV_WriteSpool(dev, pshatch, sizeof(pshatch)-1);
 }
 
-BOOL PSDRV_WriteRotate(PSDRV_PDEVICE *physDev, float ang)
+BOOL PSDRV_WriteRotate(PHYSDEV dev, float ang)
 {
     char buf[256];
 
     push_lc_numeric("C");
     sprintf(buf, psrotate, ang);
     pop_lc_numeric();
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteIndexColorSpaceBegin(PSDRV_PDEVICE *physDev, int size)
+BOOL PSDRV_WriteIndexColorSpaceBegin(PHYSDEV dev, int size)
 {
     char buf[256];
     sprintf(buf, "[/Indexed /DeviceRGB %d\n<\n", size);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteIndexColorSpaceEnd(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_WriteIndexColorSpaceEnd(PHYSDEV dev)
 {
     static const char buf[] = ">\n] setcolorspace\n";
-    return PSDRV_WriteSpool(physDev, buf, sizeof(buf) - 1);
+    return PSDRV_WriteSpool(dev, buf, sizeof(buf) - 1);
 }
 
-BOOL PSDRV_WriteRGB(PSDRV_PDEVICE *physDev, COLORREF *map, int number)
+static BOOL PSDRV_WriteRGB(PHYSDEV dev, COLORREF *map, int number)
 {
     char *buf = HeapAlloc(PSDRV_Heap, 0, number * 7 + 1), *ptr;
     int i;
@@ -661,13 +680,28 @@ BOOL PSDRV_WriteRGB(PSDRV_PDEVICE *physDev, COLORREF *map, int number)
 		((i & 0x7) == 0x7) || (i == number - 1) ? '\n' : ' ');
 	ptr += 7;
     }
-    PSDRV_WriteSpool(physDev, buf, number * 7);
+    PSDRV_WriteSpool(dev, buf, number * 7);
     HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }
 
-static BOOL PSDRV_WriteImageDict(PSDRV_PDEVICE *physDev, WORD depth,
-				 INT widthSrc, INT heightSrc, char *bits)
+BOOL PSDRV_WriteRGBQUAD(PHYSDEV dev, const RGBQUAD *rgb, int number)
+{
+    char *buf = HeapAlloc(PSDRV_Heap, 0, number * 7 + 1), *ptr;
+    int i;
+
+    ptr = buf;
+    for(i = 0; i < number; i++, rgb++)
+        ptr += sprintf(ptr, "%02x%02x%02x%c", rgb->rgbRed, rgb->rgbGreen, rgb->rgbBlue,
+                       ((i & 0x7) == 0x7) || (i == number - 1) ? '\n' : ' ');
+
+    PSDRV_WriteSpool(dev, buf, ptr - buf);
+    HeapFree(PSDRV_Heap, 0, buf);
+    return TRUE;
+}
+
+static BOOL PSDRV_WriteImageDict(PHYSDEV dev, WORD depth,
+				 INT widthSrc, INT heightSrc, char *bits, BOOL top_down)
 {
     static const char start[] = "<<\n"
       " /ImageType 1\n /Width %d\n /Height %d\n /BitsPerComponent %d\n"
@@ -681,10 +715,14 @@ static BOOL PSDRV_WriteImageDict(PSDRV_PDEVICE *physDev, WORD depth,
 
     char *buf = HeapAlloc(PSDRV_Heap, 0, 1000);
 
-    sprintf(buf, start, widthSrc, heightSrc,
-	    (depth < 8) ? depth : 8, widthSrc, -heightSrc, heightSrc);
+    if (top_down)
+        sprintf(buf, start, widthSrc, heightSrc,
+                (depth < 8) ? depth : 8, widthSrc, heightSrc, 0);
+    else
+        sprintf(buf, start, widthSrc, heightSrc,
+                (depth < 8) ? depth : 8, widthSrc, -heightSrc, heightSrc);
 
-    PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    PSDRV_WriteSpool(dev, buf, strlen(buf));
 
     switch(depth) {
     case 8:
@@ -704,22 +742,22 @@ static BOOL PSDRV_WriteImageDict(PSDRV_PDEVICE *physDev, WORD depth,
 	break;
     }
 
-    PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    PSDRV_WriteSpool(dev, buf, strlen(buf));
 
     if(!bits) {
-        PSDRV_WriteSpool(physDev, end, sizeof(end) - 1);
+        PSDRV_WriteSpool(dev, end, sizeof(end) - 1);
     } else {
         sprintf(buf, endbits, bits);
-        PSDRV_WriteSpool(physDev, buf, strlen(buf));
+        PSDRV_WriteSpool(dev, buf, strlen(buf));
     }
 
     HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }
 
-BOOL PSDRV_WriteImage(PSDRV_PDEVICE *physDev, WORD depth, INT xDst, INT yDst,
+BOOL PSDRV_WriteImage(PHYSDEV dev, WORD depth, INT xDst, INT yDst,
 		      INT widthDst, INT heightDst, INT widthSrc,
-		      INT heightSrc, BOOL mask)
+		      INT heightSrc, BOOL mask, BOOL top_down)
 {
     static const char start[] = "%d %d translate\n%d %d scale\n";
     static const char image[] = "image\n";
@@ -727,17 +765,17 @@ BOOL PSDRV_WriteImage(PSDRV_PDEVICE *physDev, WORD depth, INT xDst, INT yDst,
     char buf[100];
 
     sprintf(buf, start, xDst, yDst, widthDst, heightDst);
-    PSDRV_WriteSpool(physDev, buf, strlen(buf));
-    PSDRV_WriteImageDict(physDev, depth, widthSrc, heightSrc, NULL);
+    PSDRV_WriteSpool(dev, buf, strlen(buf));
+    PSDRV_WriteImageDict(dev, depth, widthSrc, heightSrc, NULL, top_down);
     if(mask)
-        PSDRV_WriteSpool(physDev, imagemask, sizeof(imagemask) - 1);
+        PSDRV_WriteSpool(dev, imagemask, sizeof(imagemask) - 1);
     else
-        PSDRV_WriteSpool(physDev, image, sizeof(image) - 1);
+        PSDRV_WriteSpool(dev, image, sizeof(image) - 1);
     return TRUE;
 }
 
 
-BOOL PSDRV_WriteBytes(PSDRV_PDEVICE *physDev, const BYTE *bytes, DWORD number)
+BOOL PSDRV_WriteBytes(PHYSDEV dev, const BYTE *bytes, DWORD number)
 {
     char *buf = HeapAlloc(PSDRV_Heap, 0, number * 3 + 1);
     char *ptr;
@@ -753,19 +791,19 @@ BOOL PSDRV_WriteBytes(PSDRV_PDEVICE *physDev, const BYTE *bytes, DWORD number)
             ptr++;
         }
     }
-    PSDRV_WriteSpool(physDev, buf, ptr - buf);
+    PSDRV_WriteSpool(dev, buf, ptr - buf);
     HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }
 
-BOOL PSDRV_WriteData(PSDRV_PDEVICE *physDev, const BYTE *data, DWORD number)
+BOOL PSDRV_WriteData(PHYSDEV dev, const BYTE *data, DWORD number)
 {
     int num, num_left = number;
 
     do {
         num = min(num_left, 60);
-        PSDRV_WriteSpool(physDev, (LPCSTR)data, num);
-        PSDRV_WriteSpool(physDev, "\n", 1);
+        PSDRV_WriteSpool(dev, (LPCSTR)data, num);
+        PSDRV_WriteSpool(dev, "\n", 1);
         data += num;
         num_left -= num;
     } while(num_left);
@@ -773,103 +811,56 @@ BOOL PSDRV_WriteData(PSDRV_PDEVICE *physDev, const BYTE *data, DWORD number)
     return TRUE;
 }
 
-BOOL PSDRV_WriteArrayPut(PSDRV_PDEVICE *physDev, CHAR *pszArrayName, INT nIndex, LONG lObject)
+BOOL PSDRV_WriteArrayPut(PHYSDEV dev, CHAR *pszArrayName, INT nIndex, LONG lObject)
 {
     char buf[100];
 
     sprintf(buf, psarrayput, pszArrayName, nIndex, lObject);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteArrayDef(PSDRV_PDEVICE *physDev, CHAR *pszArrayName, INT nSize)
+BOOL PSDRV_WriteArrayDef(PHYSDEV dev, CHAR *pszArrayName, INT nSize)
 {
     char buf[100];
 
     sprintf(buf, psarraydef, pszArrayName, nSize);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteRectClip(PSDRV_PDEVICE *physDev, INT x, INT y, INT w, INT h)
+BOOL PSDRV_WriteRectClip(PHYSDEV dev, INT x, INT y, INT w, INT h)
 {
     char buf[100];
 
     sprintf(buf, psrectclip, x, y, w, h);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WriteRectClip2(PSDRV_PDEVICE *physDev, CHAR *pszArrayName)
+BOOL PSDRV_WriteRectClip2(PHYSDEV dev, CHAR *pszArrayName)
 {
     char buf[100];
 
     sprintf(buf, psrectclip2, pszArrayName);
-    return PSDRV_WriteSpool(physDev, buf, strlen(buf));
+    return PSDRV_WriteSpool(dev, buf, strlen(buf));
 }
 
-BOOL PSDRV_WritePatternDict(PSDRV_PDEVICE *physDev, BITMAP *bm, BYTE *bits)
+BOOL PSDRV_WriteDIBPatternDict(PHYSDEV dev, const BITMAPINFO *bmi, BYTE *bits, UINT usage)
 {
     static const char mypat[] = "/mypat\n";
     static const char do_pattern[] = "<<\n /PaintType 1\n /PatternType 1\n /TilingType 1\n "
       "/BBox [0 0 %d %d]\n /XStep %d\n /YStep %d\n /PaintProc {\n  begin\n  0 0 translate\n"
       "  %d %d scale\n  mypat image\n  end\n }\n>>\n matrix makepattern setpattern\n";
-
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf, *ptr;
     INT w, h, x, y, w_mult, h_mult;
     COLORREF map[2];
 
-    w = bm->bmWidth & ~0x7;
-    h = bm->bmHeight & ~0x7;
-
-    buf = HeapAlloc(PSDRV_Heap, 0, sizeof(do_pattern) + 100);
-    ptr = buf;
-    for(y = h-1; y >= 0; y--) {
-        for(x = 0; x < w/8; x++) {
-	    sprintf(ptr, "%02x", *(bits + x/8 + y * bm->bmWidthBytes));
-	    ptr += 2;
-	}
-    }
-    PSDRV_WriteSpool(physDev, mypat, sizeof(mypat) - 1);
-    PSDRV_WriteImageDict(physDev, 1, 8, 8, buf);
-    PSDRV_WriteSpool(physDev, "def\n", 4);
-
-    PSDRV_WriteIndexColorSpaceBegin(physDev, 1);
-    map[0] = GetTextColor( physDev->hdc );
-    map[1] = GetBkColor( physDev->hdc );
-    PSDRV_WriteRGB(physDev, map, 2);
-    PSDRV_WriteIndexColorSpaceEnd(physDev);
-
-    /* Windows seems to scale patterns so that a one pixel corresponds to 1/300" */
-    w_mult = (physDev->logPixelsX + 150) / 300;
-    h_mult = (physDev->logPixelsY + 150) / 300;
-    sprintf(buf, do_pattern, w * w_mult, h * h_mult, w * w_mult, h * h_mult, w * w_mult, h * h_mult);
-    PSDRV_WriteSpool(physDev,  buf, strlen(buf));
-
-    HeapFree(PSDRV_Heap, 0, buf);
-    return TRUE;
-}
-
-BOOL PSDRV_WriteDIBPatternDict(PSDRV_PDEVICE *physDev, BITMAPINFO *bmi, UINT usage)
-{
-    static const char mypat[] = "/mypat\n";
-    static const char do_pattern[] = "<<\n /PaintType 1\n /PatternType 1\n /TilingType 1\n "
-      "/BBox [0 0 %d %d]\n /XStep %d\n /YStep %d\n /PaintProc {\n  begin\n  0 0 translate\n"
-      "  %d %d scale\n  mypat image\n  end\n }\n>>\n matrix makepattern setpattern\n";
-    char *buf, *ptr;
-    BYTE *bits;
-    INT w, h, x, y, colours, w_mult, h_mult;
-    COLORREF map[2];
+    TRACE( "size %dx%dx%d\n",
+           bmi->bmiHeader.biWidth, bmi->bmiHeader.biHeight, bmi->bmiHeader.biBitCount);
 
     if(bmi->bmiHeader.biBitCount != 1) {
         FIXME("dib depth %d not supported\n", bmi->bmiHeader.biBitCount);
 	return FALSE;
     }
-
-    bits = (LPBYTE)bmi + bmi->bmiHeader.biSize;
-    colours = bmi->bmiHeader.biClrUsed;
-    if (colours > 256) colours = 256;
-    if(!colours && bmi->bmiHeader.biBitCount <= 8)
-        colours = 1 << bmi->bmiHeader.biBitCount;
-    bits += colours * ((usage == DIB_RGB_COLORS) ?
-		       sizeof(RGBQUAD) : sizeof(WORD));
 
     w = bmi->bmiHeader.biWidth & ~0x7;
     h = bmi->bmiHeader.biHeight & ~0x7;
@@ -883,21 +874,21 @@ BOOL PSDRV_WriteDIBPatternDict(PSDRV_PDEVICE *physDev, BITMAPINFO *bmi, UINT usa
 	    ptr += 2;
 	}
     }
-    PSDRV_WriteSpool(physDev, mypat, sizeof(mypat) - 1);
-    PSDRV_WriteImageDict(physDev, 1, 8, 8, buf);
-    PSDRV_WriteSpool(physDev, "def\n", 4);
+    PSDRV_WriteSpool(dev, mypat, sizeof(mypat) - 1);
+    PSDRV_WriteImageDict(dev, 1, 8, 8, buf, FALSE);
+    PSDRV_WriteSpool(dev, "def\n", 4);
 
-    PSDRV_WriteIndexColorSpaceBegin(physDev, 1);
-    map[0] = GetTextColor( physDev->hdc );
-    map[1] = GetBkColor( physDev->hdc );
-    PSDRV_WriteRGB(physDev, map, 2);
-    PSDRV_WriteIndexColorSpaceEnd(physDev);
+    PSDRV_WriteIndexColorSpaceBegin(dev, 1);
+    map[0] = GetTextColor( dev->hdc );
+    map[1] = GetBkColor( dev->hdc );
+    PSDRV_WriteRGB(dev, map, 2);
+    PSDRV_WriteIndexColorSpaceEnd(dev);
 
     /* Windows seems to scale patterns so that a one pixel corresponds to 1/300" */
     w_mult = (physDev->logPixelsX + 150) / 300;
     h_mult = (physDev->logPixelsY + 150) / 300;
     sprintf(buf, do_pattern, w * w_mult, h * h_mult, w * w_mult, h * h_mult, w * w_mult, h * h_mult);
-    PSDRV_WriteSpool(physDev,  buf, strlen(buf));
+    PSDRV_WriteSpool(dev,  buf, strlen(buf));
     HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }

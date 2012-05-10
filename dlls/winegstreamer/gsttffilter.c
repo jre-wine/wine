@@ -225,11 +225,11 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
     int ret;
     TRACE("Reading %p\n", sample);
 
-    EnterCriticalSection(&This->tf.filter.csFilter);
+    EnterCriticalSection(&This->tf.csReceive);
     IMediaSample_GetPointer(sample, &data);
     buf = gst_app_buffer_new(data, IMediaSample_GetActualDataLength(sample), release_sample, sample);
     if (!buf) {
-        LeaveCriticalSection(&This->tf.filter.csFilter);
+        LeaveCriticalSection(&This->tf.csReceive);
         return S_OK;
     }
     gst_buffer_set_caps(buf, gst_pad_get_caps_reffed(This->my_src));
@@ -251,7 +251,7 @@ static HRESULT WINAPI Gstreamer_transform_ProcessData(TransformFilter *iface, IM
         GST_BUFFER_FLAG_SET(buf, GST_BUFFER_FLAG_PREROLL);
     if (IMediaSample_IsSyncPoint(sample) != S_OK)
         GST_BUFFER_FLAG_SET(buf, GST_BUFFER_FLAG_DELTA_UNIT);
-    LeaveCriticalSection(&This->tf.filter.csFilter);
+    LeaveCriticalSection(&This->tf.csReceive);
     ret = gst_pad_push(This->my_src, buf);
     if (ret)
         WARN("Sending returned: %i\n", ret);
@@ -268,9 +268,9 @@ static HRESULT WINAPI Gstreamer_transform_ProcessEnd(TransformFilter *iface) {
     GstTfImpl *This = (GstTfImpl*)iface;
     int ret;
 
-    LeaveCriticalSection(&This->tf.filter.csFilter);
+    LeaveCriticalSection(&This->tf.csReceive);
     ret = gst_element_set_state(This->filter, GST_STATE_READY);
-    EnterCriticalSection(&This->tf.filter.csFilter);
+    EnterCriticalSection(&This->tf.csReceive);
     TRACE("Returned: %i\n", ret);
     return S_OK;
 }
@@ -627,7 +627,7 @@ static HRESULT WINAPI Gstreamer_YUV_SetMediaType(TransformFilter *tf, PIN_DIRECT
     AM_MEDIA_TYPE *outpmt = &This->tf.pmt;
     HRESULT hr;
     int avgtime;
-    DWORD width, height;
+    LONG width, height;
 
     if (dir != PINDIR_INPUT)
         return S_OK;
@@ -643,19 +643,21 @@ static HRESULT WINAPI Gstreamer_YUV_SetMediaType(TransformFilter *tf, PIN_DIRECT
         avgtime = vih->AvgTimePerFrame;
         width = vih->bmiHeader.biWidth;
         height = vih->bmiHeader.biHeight;
-        if ((LONG)vih->bmiHeader.biHeight > 0)
+        if (vih->bmiHeader.biHeight > 0)
             vih->bmiHeader.biHeight = -vih->bmiHeader.biHeight;
         vih->bmiHeader.biBitCount = 24;
         vih->bmiHeader.biCompression = BI_RGB;
+        vih->bmiHeader.biSizeImage = width * abs(height) * 3;
     } else {
         VIDEOINFOHEADER2 *vih = (VIDEOINFOHEADER2*)outpmt->pbFormat;
         avgtime = vih->AvgTimePerFrame;
         width = vih->bmiHeader.biWidth;
         height = vih->bmiHeader.biHeight;
-        if ((LONG)vih->bmiHeader.biHeight > 0)
+        if (vih->bmiHeader.biHeight > 0)
             vih->bmiHeader.biHeight = -vih->bmiHeader.biHeight;
         vih->bmiHeader.biBitCount = 24;
         vih->bmiHeader.biCompression = BI_RGB;
+        vih->bmiHeader.biSizeImage = width * abs(height) * 3;
     }
     if (!avgtime)
         avgtime = 10000000 / 30;
@@ -830,7 +832,7 @@ IUnknown * CALLBACK Gstreamer_AudioConvert_create(IUnknown *punkout, HRESULT *ph
     return obj;
 }
 
-HRESULT WINAPI GSTTf_QueryInterface(IBaseFilter * iface, REFIID riid, LPVOID * ppv)
+static HRESULT WINAPI GSTTf_QueryInterface(IBaseFilter * iface, REFIID riid, LPVOID * ppv)
 {
     HRESULT hr;
     GstTfImpl *This = (GstTfImpl*)iface;

@@ -88,7 +88,7 @@ const char* pe_map_section(struct image_section_map* ism)
             return IMAGE_NO_MAP;
         }
         /* FIXME: that's rather drastic, but that will do for now
-         * that's ok if the full file map exists, but we could be less agressive otherwise and
+         * that's ok if the full file map exists, but we could be less aggressive otherwise and
          * only map the relevant section
          */
         if ((mapping = pe_map_full(ism->fmap, &nth)))
@@ -224,6 +224,12 @@ static BOOL pe_map_file(HANDLE file, struct image_file_map* fmap, enum module_ty
 
             if (!(nthdr = RtlImageNtHeader(mapping))) goto error;
             memcpy(&fmap->u.pe.ntheader, nthdr, sizeof(fmap->u.pe.ntheader));
+            switch (nthdr->OptionalHeader.Magic)
+            {
+            case 0x10b: fmap->addr_size = 32; break;
+            case 0x20b: fmap->addr_size = 64; break;
+            default: return FALSE;
+            }
             section = (IMAGE_SECTION_HEADER*)
                 ((char*)&nthdr->OptionalHeader + nthdr->FileHeader.SizeOfOptionalHeader);
             fmap->u.pe.sect = HeapAlloc(GetProcessHeap(), 0,
@@ -600,8 +606,8 @@ static BOOL pe_load_msc_debug_info(const struct process* pcs, struct module* mod
         if (nDbg != 1 || dbg->Type != IMAGE_DEBUG_TYPE_MISC ||
             misc->DataType != IMAGE_DEBUG_MISC_EXENAME)
         {
-            WINE_ERR("-Debug info stripped, but no .DBG file in module %s\n",
-                     debugstr_w(module->module.ModuleName));
+            ERR("-Debug info stripped, but no .DBG file in module %s\n",
+                debugstr_w(module->module.ModuleName));
         }
         else
         {
@@ -775,6 +781,7 @@ struct module* pe_load_native_module(struct process* pcs, const WCHAR* name,
                 module->module.SymType = SymDeferred;
             else
                 pe_load_debug_info(pcs, module);
+            module->reloc_delta = base - modfmt->u.pe_info->fmap.u.pe.ntheader.OptionalHeader.ImageBase;
         }
         else
         {

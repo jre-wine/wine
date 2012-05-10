@@ -42,7 +42,6 @@
 #include "ole2.h"
 #include "shlguid.h"
 
-#include "enumidlist.h"
 #include "pidl.h"
 #include "undocshell.h"
 #include "shell32_main.h"
@@ -449,17 +448,19 @@ IShellFolder_fnEnumObjects (IShellFolder2 * iface, HWND hwndOwner,
                             DWORD dwFlags, LPENUMIDLIST * ppEnumIDList)
 {
     IGenericSFImpl *This = impl_from_IShellFolder2(iface);
+    IEnumIDListImpl *list;
 
     TRACE ("(%p)->(HWND=%p flags=0x%08x pplist=%p)\n", This, hwndOwner,
      dwFlags, ppEnumIDList);
 
-    *ppEnumIDList = IEnumIDList_Constructor();
-    if (*ppEnumIDList)
-        CreateFolderEnumList(*ppEnumIDList, This->sPathTarget, dwFlags);
+    if (!(list = IEnumIDList_Constructor()))
+        return E_OUTOFMEMORY;
+    CreateFolderEnumList(list, This->sPathTarget, dwFlags);
+    *ppEnumIDList = &list->IEnumIDList_iface;
 
     TRACE ("-- (%p)->(new ID List: %p)\n", This, *ppEnumIDList);
 
-    return *ppEnumIDList ? S_OK : E_OUTOFMEMORY;
+    return S_OK;
 }
 
 /**************************************************************************
@@ -743,9 +744,7 @@ IShellFolder_fnGetUIObjectOf (IShellFolder2 * iface,
         }
 
         if (IsEqualIID (riid, &IID_IContextMenu) && (cidl >= 1)) {
-            pObj = (LPUNKNOWN) ISvItemCm_Constructor ((IShellFolder *) iface,
-             This->pidlRoot, apidl, cidl);
-            hr = S_OK;
+            return ItemMenu_Constructor((IShellFolder*)iface, This->pidlRoot, apidl, cidl, riid, ppvOut);
         } else if (IsEqualIID (riid, &IID_IDataObject) && (cidl >= 1)) {
             pObj = (LPUNKNOWN) IDataObject_Constructor (hwndOwner,
              This->pidlRoot, apidl, cidl);
@@ -1383,12 +1382,14 @@ static HRESULT WINAPI
 ISFHelper_fnCopyItems (ISFHelper * iface, IShellFolder * pSFFrom, UINT cidl,
                        LPCITEMIDLIST * apidl)
 {
-    UINT i;
+    HRESULT ret=E_FAIL;
     IPersistFolder2 *ppf2 = NULL;
-    char szSrcPath[MAX_PATH],
-      szDstPath[MAX_PATH];
-
+    WCHAR wszSrcPathRoot[MAX_PATH],
+      wszDstPath[MAX_PATH+1];
+    WCHAR *wszSrcPathsList;
     IGenericSFImpl *This = impl_from_ISFHelper(iface);
+
+    SHFILEOPSTRUCTW fop;
 
     TRACE ("(%p)->(%p,%u,%p)\n", This, pSFFrom, cidl, apidl);
 
@@ -1398,24 +1399,32 @@ ISFHelper_fnCopyItems (ISFHelper * iface, IShellFolder * pSFFrom, UINT cidl,
         LPITEMIDLIST pidl;
 
         if (SUCCEEDED (IPersistFolder2_GetCurFolder (ppf2, &pidl))) {
-            for (i = 0; i < cidl; i++) {
-                SHGetPathFromIDListA (pidl, szSrcPath);
-                PathAddBackslashA (szSrcPath);
-                _ILSimpleGetText (apidl[i], szSrcPath + strlen (szSrcPath),
-                 MAX_PATH);
-
-                if (!WideCharToMultiByte(CP_ACP, 0, This->sPathTarget, -1, szDstPath, MAX_PATH, NULL, NULL))
-                    szDstPath[0] = '\0';
-                PathAddBackslashA (szDstPath);
-                _ILSimpleGetText (apidl[i], szDstPath + strlen (szDstPath),
-                 MAX_PATH);
-                MESSAGE ("would copy %s to %s\n", szSrcPath, szDstPath);
+            SHGetPathFromIDListW (pidl, wszSrcPathRoot);
+            ZeroMemory(wszDstPath, MAX_PATH+1);
+            if (This->sPathTarget)
+                lstrcpynW(wszDstPath, This->sPathTarget, MAX_PATH);
+            PathAddBackslashW(wszSrcPathRoot);
+            PathAddBackslashW(wszDstPath);
+            wszSrcPathsList = build_paths_list(wszSrcPathRoot, cidl, apidl);
+            ZeroMemory(&fop, sizeof(fop));
+            fop.hwnd = GetActiveWindow();
+            fop.wFunc = FO_COPY;
+            fop.pFrom = wszSrcPathsList;
+            fop.pTo = wszDstPath;
+            fop.fFlags = FOF_ALLOWUNDO;
+            ret = S_OK;
+            if(SHFileOperationW(&fop))
+            {
+                WARN("Copy failed\n");
+                ret = E_FAIL;
             }
-            SHFree (pidl);
+            HeapFree(GetProcessHeap(), 0, wszSrcPathsList);
+
         }
-        IPersistFolder2_Release (ppf2);
+        SHFree(pidl);
+        IPersistFolder2_Release(ppf2);
     }
-    return S_OK;
+    return ret;
 }
 
 static const ISFHelperVtbl shvt =

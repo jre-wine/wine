@@ -1164,20 +1164,19 @@ static LRESULT CALLBACK cert_mgr_dlg_proc(HWND hwnd, UINT msg, WPARAM wp,
             break;
         case LVN_ITEMCHANGED:
         {
-            NMITEMACTIVATE *nm;
+            WCHAR empty[] = { 0 };
+            NMITEMACTIVATE *nm = (NMITEMACTIVATE*)lp;
             HWND lv = GetDlgItem(hwnd, IDC_MGR_CERTS);
+            int numSelected = SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0);
 
-            nm = (NMITEMACTIVATE*)lp;
-            if (nm->uNewState & LVN_ITEMACTIVATE)
-            {
-                int numSelected = SendMessageW(lv, LVM_GETSELECTEDCOUNT, 0, 0);
-
-                EnableWindow(GetDlgItem(hwnd, IDC_MGR_EXPORT), numSelected > 0);
-                EnableWindow(GetDlgItem(hwnd, IDC_MGR_REMOVE), numSelected > 0);
-                EnableWindow(GetDlgItem(hwnd, IDC_MGR_VIEW), numSelected == 1);
-                if (numSelected == 1)
-                    cert_mgr_show_cert_usages(hwnd, nm->iItem);
-            }
+            EnableWindow(GetDlgItem(hwnd, IDC_MGR_EXPORT), numSelected > 0);
+            EnableWindow(GetDlgItem(hwnd, IDC_MGR_REMOVE), numSelected > 0);
+            EnableWindow(GetDlgItem(hwnd, IDC_MGR_VIEW), numSelected == 1);
+            if (numSelected == 1)
+                cert_mgr_show_cert_usages(hwnd, nm->iItem);
+            else
+                SendMessageW(GetDlgItem(hwnd, IDC_MGR_PURPOSES), WM_SETTEXT, 0,
+                 (LPARAM)empty);
             break;
         }
         case NM_DBLCLK:
@@ -1967,23 +1966,19 @@ static struct OIDToString oidMap[] = {
 
 static struct OIDToString *findSupportedOID(LPCSTR oid)
 {
-    int indexHigh = sizeof(oidMap) / sizeof(oidMap[0]) - 1, indexLow = 0, i;
-    struct OIDToString *ret = NULL;
+    int indexHigh = sizeof(oidMap) / sizeof(oidMap[0]) - 1, indexLow = 0;
 
-    for (i = (indexLow + indexHigh) / 2; !ret && indexLow <= indexHigh;
-     i = (indexLow + indexHigh) / 2)
+    while (indexLow <= indexHigh)
     {
-        int cmp;
-
-        cmp = strcmp(oid, oidMap[i].oid);
-        if (!cmp)
-            ret = &oidMap[i];
-        else if (cmp > 0)
+        int cmp, i = (indexLow + indexHigh) / 2;
+        if (!(cmp = strcmp(oid, oidMap[i].oid)))
+            return &oidMap[i];
+        if (cmp > 0)
             indexLow = i + 1;
         else
             indexHigh = i - 1;
     }
-    return ret;
+    return NULL;
 }
 
 static void add_local_oid_text_to_control(HWND text, LPCSTR oid)
@@ -2709,6 +2704,8 @@ static WCHAR *field_format_public_key(PCCERT_CONTEXT cert)
         if (LoadStringW(hInstance, IDS_FIELD_PUBLIC_KEY_FORMAT, fmt,
          sizeof(fmt) / sizeof(fmt[0])))
         {
+            DWORD len;
+
             /* Allocate the output buffer.  Use the number of bytes in the
              * public key as a conservative (high) estimate for the number of
              * digits in its output.
@@ -2718,14 +2715,18 @@ static WCHAR *field_format_public_key(PCCERT_CONTEXT cert)
              * good idea, but as this isn't a sentence fragment, it shouldn't
              * be word-order dependent.
              */
-            buf = HeapAlloc(GetProcessHeap(), 0,
-             (strlenW(fmt) + strlenW(oidInfo->pwszName) +
-             cert->pCertInfo->SubjectPublicKeyInfo.PublicKey.cbData * 8)
-             * sizeof(WCHAR));
+            len = strlenW(fmt) + strlenW(oidInfo->pwszName) +
+                cert->pCertInfo->SubjectPublicKeyInfo.PublicKey.cbData * 8;
+            buf = HeapAlloc(GetProcessHeap(), 0, len * sizeof(*buf));
             if (buf)
-                sprintfW(buf, fmt, oidInfo->pwszName,
-                 CertGetPublicKeyLength(X509_ASN_ENCODING,
-                  &cert->pCertInfo->SubjectPublicKeyInfo));
+            {
+                DWORD_PTR args[2];
+                args[0] = (DWORD_PTR)oidInfo->pwszName;
+                args[1] = CertGetPublicKeyLength(X509_ASN_ENCODING,
+                              &cert->pCertInfo->SubjectPublicKeyInfo);
+                FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                               fmt, 0, 0, buf, len, (__ms_va_list*)args);
+            }
         }
     }
     return buf;
@@ -3082,7 +3083,7 @@ struct selection_list_item
     add_fields_func add;
 };
 
-const struct selection_list_item listItems[] = {
+static const struct selection_list_item listItems[] = {
  { IDS_FIELDS_ALL, add_all_fields },
  { IDS_FIELDS_V1, add_v1_fields },
  { IDS_FIELDS_EXTENSIONS, add_all_extensions },
@@ -4921,7 +4922,7 @@ static const WCHAR filter_cms[] = { '*','.','s','p','c',';','*','.',
  'p','7','b',0 };
 static const WCHAR filter_all[] = { '*','.','*',0 };
 
-struct StringToFilter
+static struct StringToFilter
 {
     int     id;
     DWORD   allowFlags;
@@ -5476,7 +5477,7 @@ static BOOL show_import_ui(DWORD dwFlags, HWND hwndParent,
     data.autoDest = TRUE;
     data.success = TRUE;
 
-    memset(&pages, 0, sizeof(pages));
+    memset(pages, 0, sizeof(pages));
 
     pages[nPages].dwSize = sizeof(pages[0]);
     pages[nPages].hInstance = hInstance;
@@ -6889,7 +6890,7 @@ static BOOL show_export_ui(DWORD dwFlags, HWND hwndParent,
     data.file = INVALID_HANDLE_VALUE;
     data.success = FALSE;
 
-    memset(&pages, 0, sizeof(pages));
+    memset(pages, 0, sizeof(pages));
 
     pages[nPages].dwSize = sizeof(pages[0]);
     pages[nPages].hInstance = hInstance;
@@ -7043,4 +7044,16 @@ BOOL WINAPI CryptUIDlgViewSignerInfoA(CRYPTUI_VIEWSIGNERINFO_STRUCTA *pcvsi)
 {
     FIXME("%p: stub\n", pcvsi);
     return FALSE;
+}
+
+PCCERT_CONTEXT WINAPI CryptUIDlgSelectCertificateW(PCCRYPTUI_SELECTCERTIFICATE_STRUCTW pcsc)
+{
+    FIXME("%p: stub\n", pcsc);
+    return NULL;
+}
+
+PCCERT_CONTEXT WINAPI CryptUIDlgSelectCertificateA(PCCRYPTUI_SELECTCERTIFICATE_STRUCTA pcsc)
+{
+    FIXME("%p: stub\n", pcsc);
+    return NULL;
 }

@@ -97,7 +97,7 @@ typedef struct
  * Special flag set in DRAWITEMSTRUCT itemState field. It is set by
  * the ComboEx version of the Combo Window Proc so that when the
  * WM_DRAWITEM message is then passed to ComboEx, we know that this
- * particular WM_DRAWITEM message is for listbox only items. Any messasges
+ * particular WM_DRAWITEM message is for listbox only items. Any message
  * without this flag is then for the Edit control field.
  *
  * We really cannot use the ODS_COMBOBOXEDIT flag because MSDN states that
@@ -672,6 +672,7 @@ static INT COMBOEX_InsertItemW (COMBOEX_INFO *infoPtr, COMBOBOXEXITEMW const *ci
     SendMessageW (infoPtr->hwndCombo, CB_INSERTSTRING, cit->iItem, (LPARAM)item);
 
     memset (&nmcit.ceItem, 0, sizeof(nmcit.ceItem));
+    nmcit.ceItem.mask=~0;
     COMBOEX_CopyItem (item, &nmcit.ceItem);
     COMBOEX_NotifyItem (infoPtr, CBEN_INSERTITEM, &nmcit);
 
@@ -1120,10 +1121,10 @@ static LRESULT COMBOEX_Command (COMBOEX_INFO *infoPtr, WPARAM wParam)
     switch (command)
     {
     case CBN_DROPDOWN:
-	SetFocus (infoPtr->hwndCombo);
-	ShowWindow (infoPtr->hwndEdit, SW_HIDE);
-	return SendMessageW (parent, WM_COMMAND, wParam, (LPARAM)infoPtr->hwndSelf);
-
+        SetFocus (infoPtr->hwndCombo);
+        ShowWindow (infoPtr->hwndEdit, SW_HIDE);
+        infoPtr->flags |= WCBE_ACTEDIT;
+        return SendMessageW (parent, WM_COMMAND, wParam, (LPARAM)infoPtr->hwndSelf);
     case CBN_CLOSEUP:
 	SendMessageW (parent, WM_COMMAND, wParam, (LPARAM)infoPtr->hwndSelf);
 	/*
@@ -1304,6 +1305,7 @@ static BOOL COMBOEX_WM_DeleteItem (COMBOEX_INFO *infoPtr, DELETEITEMSTRUCT const
     infoPtr->nb_items--;
 
     memset (&nmcit.ceItem, 0, sizeof(nmcit.ceItem));
+    nmcit.ceItem.mask=~0;
     COMBOEX_CopyItem (olditem, &nmcit.ceItem);
     COMBOEX_NotifyItem (infoPtr, CBEN_DELETEITEM, &nmcit);
 
@@ -1325,8 +1327,6 @@ static LRESULT COMBOEX_DrawItem (const COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT con
     INT len;
     COLORREF nbkc, ntxc, bkc, txc;
     int drawimage, drawstate, xioff;
-
-    if (!IsWindowEnabled(infoPtr->hwndCombo)) return 0;
 
     TRACE("DRAWITEMSTRUCT: CtlType=0x%08x CtlID=0x%08x\n",
 	  dis->CtlType, dis->CtlID);
@@ -1593,6 +1593,22 @@ static LRESULT COMBOEX_Destroy (COMBOEX_INFO *infoPtr)
     Free (infoPtr);
 
     return 0;
+}
+
+
+static LRESULT COMBOEX_Enable (COMBOEX_INFO *infoPtr, BOOL enable)
+{
+    TRACE("hwnd=%p, enable=%s\n", infoPtr->hwndSelf, enable ? "TRUE":"FALSE");
+
+    if (infoPtr->hwndEdit)
+       EnableWindow(infoPtr->hwndEdit, enable);
+
+    EnableWindow(infoPtr->hwndCombo, enable);
+
+    /* Force the control to repaint when the enabled state changes. */
+    InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
+
+    return 1;
 }
 
 
@@ -2275,6 +2291,9 @@ COMBOEX_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 	case WM_DESTROY:
 	    return COMBOEX_Destroy (infoPtr);
+
+	case WM_ENABLE:
+	    return COMBOEX_Enable (infoPtr, (BOOL)wParam);
 
         case WM_MEASUREITEM:
             return COMBOEX_MeasureItem (infoPtr, (MEASUREITEMSTRUCT *)lParam);

@@ -101,10 +101,33 @@ tmp = encodeURI("\xffff");
 ok(tmp.length === 8, "encodeURI('\\xffff').length = " + tmp.length);
 tmp = encodeURI("abcABC123;/?:@&=+$,-_.!~*'()");
 ok(tmp === "abcABC123;/?:@&=+$,-_.!~*'()", "encodeURI('abcABC123;/?:@&=+$,-_.!~*'()') = " + tmp);
+tmp = encodeURI("%");
+ok(tmp === "%25", "encodeURI('%') = " + tmp);
 tmp = encodeURI();
 ok(tmp === "undefined", "encodeURI() = " + tmp);
 tmp = encodeURI("abc", "test");
 ok(tmp === "abc", "encodeURI('abc') = " + tmp);
+
+tmp = decodeURI("abc");
+ok(tmp === "abc", "decodeURI('abc') = " + tmp);
+tmp = decodeURI("{abc}");
+ok(tmp === "{abc}", "decodeURI('{abc}') = " + tmp);
+tmp = decodeURI("");
+ok(tmp === "", "decodeURI('') = " + tmp);
+tmp = decodeURI("\01\02\03\04");
+ok(tmp === "\01\02\03\04", "decodeURI('\\01\\02\\03\\04') = " + tmp);
+tmp = decodeURI();
+ok(tmp === "undefined", "decodeURI() = " + tmp);
+tmp = decodeURI("abc", "test");
+ok(tmp === "abc", "decodeURI('abc') = " + tmp);
+tmp = decodeURI("%7babc%7d");
+ok(tmp === "{abc}", "decodeURI('%7Babc%7D') = " + tmp);
+tmp = decodeURI("%01%02%03%04");
+ok(tmp === "\01\02\03\04", "decodeURI('%01%02%03%04') = " + tmp);
+tmp = decodeURI("%C2%A1%20");
+ok(tmp === "\xa1 ", "decodeURI('%C2%A1%20') = " + tmp);
+tmp = decodeURI("%C3%BFff");
+ok(tmp.length === 3, "decodeURI('%C3%BFff').length = " + tmp.length);
 
 tmp = encodeURIComponent("abc");
 ok(tmp === "abc", "encodeURIComponent('abc') = " + tmp);
@@ -752,7 +775,7 @@ arr[2] = "aa";
 arr.sort = Array.prototype.sort;
 tmp = arr.sort();
 ok(arr === tmp, "tmp !== arr");
-ok(arr[0]===1 && arr[1]==="aa" && arr[2]===undefined, "arr is sorted incorectly");
+ok(arr[0]===1 && arr[1]==="aa" && arr[2]===undefined, "arr is sorted incorrectly");
 
 tmp = [["bb","aa"],["ab","aa"]].sort().toString();
 ok(tmp === "ab,aa,bb,aa", "sort() = " + tmp);
@@ -1864,10 +1887,21 @@ ok(err.message === 4, "err.message = " + err.message);
 ok(!("number" in Error), "number is in Error");
 
 tmp = new Object();
+ok(tmp.hasOwnProperty("toString") === false, "toString property should be inherited");
 tmp.toString = function() { return "test"; };
+ok(tmp.hasOwnProperty("toString") === true, "toString own property should exist");
+ok(tmp.hasOwnProperty("nonExisting") === false, "nonExisting property should not exist");
 
 tmp = Error.prototype.toString.call(tmp);
 ok(tmp === "[object Error]", "Error.prototype.toString.call(tmp) = " + tmp);
+
+tmp = function() { return 0; };
+tmp[0] = true;
+ok(tmp.hasOwnProperty("toString") === false, "toString property should be inherited");
+ok(tmp.hasOwnProperty("0") === true, "hasOwnProperty(0) returned false");
+ok(tmp.hasOwnProperty() === false, "hasOwnProperty() returned true");
+
+ok(Object.prototype.hasOwnProperty.call(testObj) === false, "hasOwnProperty without name returned true");
 
 if(invokeVersion >= 2) {
     obj = new Object();
@@ -1930,8 +1964,10 @@ var exception_array = {
     E_INVALID_CALL_ARG:    { type: "TypeError",   number: -2146828283 },
     E_NOT_FUNC:            { type: "TypeError",   number: -2146823286 },
     E_OBJECT_EXPECTED:     { type: "TypeError", number: -2146823281 },
+    E_OBJECT_REQUIRED:     { type: "TypeError", number: -2146827864 },
     E_UNSUPPORTED_ACTION:  { type: "TypeError", number: -2146827843 },
     E_NOT_VBARRAY:         { type: "TypeError", number: -2146823275 },
+    E_INVALID_DELETE:      { type: "TypeError", number: -2146823276 },
     E_UNDEFINED:           { type: "TypeError", number: -2146823279 },
     E_JSCRIPT_EXPECTED:    { type: "TypeError", number: -2146823274 },
     E_NOT_ARRAY:           { type: "TypeError", number: -2146823257 },
@@ -1942,6 +1978,10 @@ var exception_array = {
     E_SEMICOLON:         { type: "SyntaxError",  number: -2146827284 },
     E_UNTERMINATED_STR:  { type: "SyntaxError",  number: -2146827273 },
     E_DISABLED_CC:       { type: "SyntaxError",  number: -2146827258 },
+    E_INVALID_BREAK:     { type: "SyntaxError",  number: -2146827269 },
+    E_INVALID_CONTINUE:  { type: "SyntaxError",  number: -2146827268 },
+    E_LABEL_NOT_FOUND:   { type: "SyntaxError",  number: -2146827262 },
+    E_LABEL_REDEFINED:   { type: "SyntaxError",  number: -2146827263 },
 
     E_ILLEGAL_ASSIGN:  { type: "ReferenceError", number: -2146823280 },
 
@@ -1949,7 +1989,8 @@ var exception_array = {
 
     E_REGEXP_SYNTAX_ERROR:  { type: "RegExpError", number: -2146823271 },
 
-    E_URI_INVALID_CHAR:  { type: "URIError", number: -2146823264 }
+    E_URI_INVALID_CHAR:     { type: "URIError", number: -2146823264 },
+    E_URI_INVALID_CODING:   { type: "URIError", number: -2146823263 }
 };
 
 function testException(func, id) {
@@ -1982,6 +2023,7 @@ testException(function() {(new Number(3)).toString(1);}, "E_INVALID_CALL_ARG");
 testException(function() {not_existing_variable.something();}, "E_UNDEFINED");
 testException(function() {date();}, "E_NOT_FUNC");
 testException(function() {arr();}, "E_NOT_FUNC");
+testException(function() {(new Object) instanceof (new Object);}, "E_NOT_FUNC");
 testException(function() {eval("nonexistingfunc()")}, "E_OBJECT_EXPECTED");
 testException(function() {(new Object()) instanceof 3;}, "E_NOT_FUNC");
 testException(function() {(new Object()) instanceof null;}, "E_NOT_FUNC");
@@ -1995,6 +2037,20 @@ testException(function() {new nullDisp;}, "E_NO_PROPERTY");
 testException(function() {new VBArray();}, "E_NOT_VBARRAY");
 testException(function() {new VBArray(new VBArray(createArray()));}, "E_NOT_VBARRAY");
 testException(function() {VBArray.prototype.lbound.call(new Object());}, "E_NOT_VBARRAY");
+testException(function() {+nullDisp.prop;}, "E_OBJECT_REQUIRED");
+testException(function() {+nullDisp["prop"];}, "E_OBJECT_REQUIRED");
+testException(function() {delete (new Object());}, "E_INVALID_DELETE");
+testException(function() {delete false;}, "E_INVALID_DELETE");
+
+obj = new Object();
+obj.prop = 1;
+tmp = false;
+testException(function() {delete ((tmp = true) ? obj.prop : obj.prop);}, "E_INVALID_DELETE");
+ok(tmp, "delete (..) expression not evaluated");
+
+//FIXME: testException(function() {nonexistent++;}, "E_OBJECT_EXPECTED");
+//FIXME: testException(function() {undefined.nonexistent++;}, "E_OBJECT_EXPECTED");
+
 
 // SyntaxError tests
 function testSyntaxError(code, id) {
@@ -2032,15 +2088,45 @@ testSyntaxError("*", "E_SYNTAX_ERROR");
 testSyntaxError("@_jscript_version", "E_DISABLED_CC");
 testSyntaxError("@a", "E_DISABLED_CC");
 testSyntaxError("/* @cc_on @*/ @_jscript_version", "E_DISABLED_CC");
+testSyntaxError("ok(false, 'unexpected execution'); break;", "E_INVALID_BREAK");
+testSyntaxError("ok(false, 'unexpected execution'); continue;", "E_INVALID_CONTINUE");
+testSyntaxError("ok(false, 'unexpected execution'); while(true) break unknown_label;", "E_LABEL_NOT_FOUND");
+testSyntaxError("ok(false, 'unexpected execution'); some_label: continue some_label;", "E_INVALID_CONTINUE");
+testSyntaxError("ok(false, 'unexpected execution'); while(true) continue some_label;", "E_LABEL_NOT_FOUND");
+testSyntaxError("ok(false, 'unexpected execution'); some_label: { while(true) continue some_label; }", "E_INVALID_CONTINUE");
+testSyntaxError("ok(false, 'unexpected execution'); some_label: { some_label: while(true); }", "E_LABEL_REDEFINED");
 
 // ReferenceError tests
 testException(function() {test = function() {}}, "E_ILLEGAL_ASSIGN");
+
+tmp = false;
+testException(function() {test = (tmp = true);}, "E_ILLEGAL_ASSIGN");
+ok(tmp, "expr value on invalid assign not evaluated");
+
+tmp = false;
+testException(function() {(tmp = true) = false;}, "E_ILLEGAL_ASSIGN");
+ok(tmp, "expr assign not evaluated");
+
+tmp = false;
+testException(function() {true = (tmp = true);}, "E_ILLEGAL_ASSIGN");
+ok(tmp, "expr value assign not evaluated");
+
+tmp = "";
+testException(function() {(tmp = tmp+"1") = (tmp = tmp+"2");}, "E_ILLEGAL_ASSIGN");
+ok(tmp === "12", "assign evaluated in unexpected order");
+
+tmp = false;
+testException(function() { ((tmp = true) && false)++; }, "E_ILLEGAL_ASSIGN")
+ok(tmp, "incremented expression not evaluated");
 
 // RegExpError tests
 testException(function() {RegExp(/a/, "g");}, "E_REGEXP_SYNTAX_ERROR");
 
 // URIError tests
 testException(function() {encodeURI('\udcaa');}, "E_URI_INVALID_CHAR");
+testException(function() {encodeURIComponent('\udcaa');}, "E_URI_INVALID_CHAR");
+testException(function() {decodeURI('%');}, "E_URI_INVALID_CODING");
+testException(function() {decodeURI('%aaaa');}, "E_URI_INVALID_CODING");
 
 function testThisExcept(func, e) {
     testException(function() {func.call(new Object())}, e);

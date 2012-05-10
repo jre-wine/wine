@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "wine/port.h"
+#include <assert.h>
 
 #include "d3d10core_private.h"
 
@@ -41,7 +42,7 @@ static HRESULT isgn_handler(const char *data, DWORD data_size, DWORD tag, void *
 
 static HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEMENT_DESC *element_descs,
         UINT element_count, const void *shader_byte_code, SIZE_T shader_byte_code_length,
-        WINED3DVERTEXELEMENT **wined3d_elements, UINT *wined3d_element_count)
+        struct wined3d_vertex_element **wined3d_elements, UINT *wined3d_element_count)
 {
     struct wined3d_shader_signature is;
     HRESULT hr;
@@ -72,14 +73,14 @@ static HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEME
             if (!strcmp(element_descs[i].SemanticName, is.elements[j].semantic_name)
                     && element_descs[i].SemanticIndex == is.elements[j].semantic_idx)
             {
-                WINED3DVERTEXELEMENT *e = &(*wined3d_elements)[(*wined3d_element_count)++];
+                struct wined3d_vertex_element *e = &(*wined3d_elements)[(*wined3d_element_count)++];
                 const D3D10_INPUT_ELEMENT_DESC *f = &element_descs[i];
 
                 e->format = wined3dformat_from_dxgi_format(f->Format);
                 e->input_slot = f->InputSlot;
                 e->offset = f->AlignedByteOffset;
                 e->output_slot = is.elements[j].register_idx;
-                e->method = WINED3DDECLMETHOD_DEFAULT;
+                e->method = WINED3D_DECL_METHOD_DEFAULT;
                 e->usage = 0;
                 e->usage_idx = 0;
 
@@ -98,6 +99,11 @@ static HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEME
     shader_free_signature(&is);
 
     return S_OK;
+}
+
+static inline struct d3d10_input_layout *impl_from_ID3D10InputLayout(ID3D10InputLayout *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_input_layout, ID3D10InputLayout_iface);
 }
 
 /* IUnknown methods */
@@ -124,7 +130,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_input_layout_QueryInterface(ID3D10InputLa
 
 static ULONG STDMETHODCALLTYPE d3d10_input_layout_AddRef(ID3D10InputLayout *iface)
 {
-    struct d3d10_input_layout *This = (struct d3d10_input_layout *)iface;
+    struct d3d10_input_layout *This = impl_from_ID3D10InputLayout(iface);
     ULONG refcount = InterlockedIncrement(&This->refcount);
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
@@ -139,7 +145,7 @@ static ULONG STDMETHODCALLTYPE d3d10_input_layout_AddRef(ID3D10InputLayout *ifac
 
 static ULONG STDMETHODCALLTYPE d3d10_input_layout_Release(ID3D10InputLayout *iface)
 {
-    struct d3d10_input_layout *This = (struct d3d10_input_layout *)iface;
+    struct d3d10_input_layout *This = impl_from_ID3D10InputLayout(iface);
     ULONG refcount = InterlockedDecrement(&This->refcount);
 
     TRACE("%p decreasing refcount to %u\n", This, refcount);
@@ -212,11 +218,11 @@ HRESULT d3d10_input_layout_init(struct d3d10_input_layout *layout, struct d3d10_
         const D3D10_INPUT_ELEMENT_DESC *element_descs, UINT element_count,
         const void *shader_byte_code, SIZE_T shader_byte_code_length)
 {
-    WINED3DVERTEXELEMENT *wined3d_elements;
+    struct wined3d_vertex_element *wined3d_elements;
     UINT wined3d_element_count;
     HRESULT hr;
 
-    layout->vtbl = &d3d10_input_layout_vtbl;
+    layout->ID3D10InputLayout_iface.lpVtbl = &d3d10_input_layout_vtbl;
     layout->refcount = 1;
 
     hr = d3d10_input_layout_to_wined3d_declaration(element_descs, element_count,
@@ -227,7 +233,7 @@ HRESULT d3d10_input_layout_init(struct d3d10_input_layout *layout, struct d3d10_
         return hr;
     }
 
-    hr = IWineD3DDevice_CreateVertexDeclaration(device->wined3d_device, wined3d_elements, wined3d_element_count,
+    hr = wined3d_vertex_declaration_create(device->wined3d_device, wined3d_elements, wined3d_element_count,
             layout, &d3d10_input_layout_wined3d_parent_ops, &layout->wined3d_decl);
     HeapFree(GetProcessHeap(), 0, wined3d_elements);
     if (FAILED(hr))
@@ -237,4 +243,13 @@ HRESULT d3d10_input_layout_init(struct d3d10_input_layout *layout, struct d3d10_
     }
 
     return S_OK;
+}
+
+struct d3d10_input_layout *unsafe_impl_from_ID3D10InputLayout(ID3D10InputLayout *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d10_input_layout_vtbl);
+
+    return impl_from_ID3D10InputLayout(iface);
 }

@@ -40,6 +40,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(relay);
 
 #if defined(__i386__) || defined(__x86_64__)
 
+WINE_DECLARE_DEBUG_CHANNEL(timestamp);
+
 struct relay_descr  /* descriptor for a module */
 {
     void               *magic;               /* signature */
@@ -118,15 +120,15 @@ static const WCHAR **build_list( const WCHAR *buffer )
                                 (count+1) * sizeof(WCHAR*) + (strlenW(buffer)+1) * sizeof(WCHAR) )))
     {
         WCHAR *str = (WCHAR *)(ret + count + 1);
-        WCHAR *p = str;
+        WCHAR *q = str;
 
         strcpyW( str, buffer );
         count = 0;
         for (;;)
         {
-            ret[count++] = p;
-            if (!(p = strchrW( p, ';' ))) break;
-            *p++ = 0;
+            ret[count++] = q;
+            if (!(q = strchrW( q, ';' ))) break;
+            *q++ = 0;
         }
         ret[count++] = NULL;
     }
@@ -396,6 +398,13 @@ __ASM_GLOBAL_FUNC( call_entry_point,
 #endif
 
 
+static void print_timestamp(void)
+{
+    ULONG ticks = NtGetTickCount();
+    DPRINTF( "%3u.%03u:", ticks / 1000, ticks % 1000 );
+}
+
+
 /***********************************************************************
  *           relay_call
  *
@@ -414,6 +423,8 @@ static LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx, 
         ret = call_entry_point( entry_point->orig_func, nb_args, stack + 1, flags );
     else
     {
+        if (TRACE_ON(timestamp))
+            print_timestamp();
         if (entry_point->name)
             DPRINTF( "%04x:Call %s.%s(", GetCurrentThreadId(), data->dllname, entry_point->name );
         else
@@ -423,6 +434,8 @@ static LONGLONG WINAPI relay_call( struct relay_descr *descr, unsigned int idx, 
 
         ret = call_entry_point( entry_point->orig_func, nb_args, stack + 1, flags );
 
+        if (TRACE_ON(timestamp))
+            print_timestamp();
         if (entry_point->name)
             DPRINTF( "%04x:Ret  %s.%s()", GetCurrentThreadId(), data->dllname, entry_point->name );
         else
@@ -933,6 +946,8 @@ void WINAPI __regs_SNOOP_Entry( CONTEXT *context )
 
 	context->Eip = (DWORD)fun->origfun;
 
+	if (TRACE_ON(timestamp))
+		print_timestamp();
 	if (fun->name) DPRINTF("%04x:CALL %s.%s(",GetCurrentThreadId(),dll->name,fun->name);
 	else DPRINTF("%04x:CALL %s.%d(",GetCurrentThreadId(),dll->name,dll->ordbase+ordinal);
 	if (fun->nrofargs>0) {
@@ -967,6 +982,8 @@ void WINAPI __regs_SNOOP_Return( CONTEXT *context )
 	if (ret->dll->funs[ret->ordinal].nrofargs<0)
 		ret->dll->funs[ret->ordinal].nrofargs=(context->Esp - ret->origESP-4)/4;
 	context->Eip = (DWORD)ret->origreturn;
+	if (TRACE_ON(timestamp))
+		print_timestamp();
 	if (ret->args) {
 		int	i,max;
 

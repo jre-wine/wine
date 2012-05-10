@@ -21,6 +21,9 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <limits.h>
+
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "snmp.h"
@@ -59,7 +62,7 @@ struct structToAsnValue
 };
 
 static AsnInteger32 mapStructEntryToValue(struct structToAsnValue *map,
-    UINT mapLen, void *record, UINT id, BYTE bPduType, SnmpVarBind *pVarBind)
+    UINT mapLen, void *record, UINT id, SnmpVarBind *pVarBind)
 {
     /* OIDs are 1-based */
     if (!id)
@@ -640,7 +643,7 @@ static BOOL mib2IfEntryQuery(BYTE bPduType, SnmpVarBind *pVarBind,
                 {
                     *pErrorStatus = mapStructEntryToValue(mib2IfEntryMap,
                         DEFINE_SIZEOF(mib2IfEntryMap),
-                        &ifTable->table[tableIndex - 1], item, bPduType,
+                        &ifTable->table[tableIndex - 1], item,
                         pVarBind);
                     if (bPduType == SNMP_PDU_GETNEXT)
                         ret = setOidWithItemAndInteger(&pVarBind->name,
@@ -669,7 +672,7 @@ static void mib2IpStatsInit(void)
 }
 
 static struct structToAsnValue mib2IpMap[] = {
-    { FIELD_OFFSET(MIB_IPSTATS, dwForwarding), copyInt }, /* 1 */
+    { FIELD_OFFSET(MIB_IPSTATS, u.dwForwarding), copyInt }, /* 1 */
     { FIELD_OFFSET(MIB_IPSTATS, dwDefaultTTL), copyInt }, /* 2 */
     { FIELD_OFFSET(MIB_IPSTATS, dwInReceives), copyInt }, /* 3 */
     { FIELD_OFFSET(MIB_IPSTATS, dwInHdrErrors), copyInt }, /* 4 */
@@ -713,7 +716,7 @@ static BOOL mib2IpStatsQuery(BYTE bPduType, SnmpVarBind *pVarBind,
         if (!*pErrorStatus)
         {
             *pErrorStatus = mapStructEntryToValue(mib2IpMap,
-                DEFINE_SIZEOF(mib2IpMap), &ipStats, item, bPduType, pVarBind);
+                DEFINE_SIZEOF(mib2IpMap), &ipStats, item, pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItem(&pVarBind->name, &myOid, item);
         }
@@ -798,7 +801,7 @@ static BOOL mib2IpAddrQuery(BYTE bPduType, SnmpVarBind *pVarBind,
             assert(item);
             *pErrorStatus = mapStructEntryToValue(mib2IpAddrMap,
                 DEFINE_SIZEOF(mib2IpAddrMap),
-                &ipAddrTable->table[tableIndex - 1], item, bPduType, pVarBind);
+                &ipAddrTable->table[tableIndex - 1], item, pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItemAndIpAddr(&pVarBind->name, &myOid, item,
                     ipAddrTable->table[tableIndex - 1].dwAddr);
@@ -826,8 +829,8 @@ static struct structToAsnValue mib2IpRouteMap[] = {
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardMetric3), copyInt },
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardMetric4), copyInt },
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardNextHop), copyIpAddr },
-    { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardType), copyInt },
-    { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardProto), copyInt },
+    { FIELD_OFFSET(MIB_IPFORWARDROW, u1.dwForwardType), copyInt },
+    { FIELD_OFFSET(MIB_IPFORWARDROW, u2.dwForwardProto), copyInt },
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardAge), copyInt },
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardMask), copyIpAddr },
     { FIELD_OFFSET(MIB_IPFORWARDROW, dwForwardMetric5), copyInt },
@@ -891,7 +894,7 @@ static BOOL mib2IpRouteQuery(BYTE bPduType, SnmpVarBind *pVarBind,
             assert(item);
             *pErrorStatus = mapStructEntryToValue(mib2IpRouteMap,
                 DEFINE_SIZEOF(mib2IpRouteMap),
-                &ipRouteTable->table[tableIndex - 1], item, bPduType, pVarBind);
+                &ipRouteTable->table[tableIndex - 1], item, pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItemAndIpAddr(&pVarBind->name, &myOid, item,
                     ipRouteTable->table[tableIndex - 1].dwForwardDest);
@@ -924,7 +927,7 @@ static struct structToAsnValue mib2IpNetMap[] = {
     { FIELD_OFFSET(MIB_IPNETROW, dwIndex), copyInt },
     { FIELD_OFFSET(MIB_IPNETROW, dwPhysAddrLen), copyIpNetPhysAddr },
     { FIELD_OFFSET(MIB_IPNETROW, dwAddr), copyIpAddr },
-    { FIELD_OFFSET(MIB_IPNETROW, dwType), copyInt },
+    { FIELD_OFFSET(MIB_IPNETROW, u.dwType), copyInt },
 };
 
 static void mib2IpNetInit(void)
@@ -978,7 +981,7 @@ static BOOL mib2IpNetQuery(BYTE bPduType, SnmpVarBind *pVarBind,
                 {
                     *pErrorStatus = mapStructEntryToValue(mib2IpNetMap,
                         DEFINE_SIZEOF(mib2IpNetMap),
-                        &ipNetTable[tableIndex - 1], item, bPduType, pVarBind);
+                        &ipNetTable[tableIndex - 1], item, pVarBind);
                     if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                         ret = setOidWithItemAndInteger(&pVarBind->name, &myOid,
                             item, tableIndex);
@@ -1053,7 +1056,7 @@ static BOOL mib2IcmpQuery(BYTE bPduType, SnmpVarBind *pVarBind,
         if (!*pErrorStatus)
         {
             *pErrorStatus = mapStructEntryToValue(mib2IcmpMap,
-                DEFINE_SIZEOF(mib2IcmpMap), &icmpStats, item, bPduType,
+                DEFINE_SIZEOF(mib2IcmpMap), &icmpStats, item,
                 pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItem(&pVarBind->name, &myOid, item);
@@ -1079,7 +1082,7 @@ static void mib2TcpInit(void)
 }
 
 static struct structToAsnValue mib2TcpMap[] = {
-    { FIELD_OFFSET(MIB_TCPSTATS, dwRtoAlgorithm), copyInt },
+    { FIELD_OFFSET(MIB_TCPSTATS, u.dwRtoAlgorithm), copyInt },
     { FIELD_OFFSET(MIB_TCPSTATS, dwRtoMin), copyInt },
     { FIELD_OFFSET(MIB_TCPSTATS, dwRtoMax), copyInt },
     { FIELD_OFFSET(MIB_TCPSTATS, dwMaxConn), copyInt },
@@ -1115,7 +1118,7 @@ static BOOL mib2TcpQuery(BYTE bPduType, SnmpVarBind *pVarBind,
         if (!*pErrorStatus)
         {
             *pErrorStatus = mapStructEntryToValue(mib2TcpMap,
-                DEFINE_SIZEOF(mib2TcpMap), &tcpStats, item, bPduType, pVarBind);
+                DEFINE_SIZEOF(mib2TcpMap), &tcpStats, item, pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItem(&pVarBind->name, &myOid, item);
         }
@@ -1165,7 +1168,7 @@ static BOOL mib2UdpQuery(BYTE bPduType, SnmpVarBind *pVarBind,
         if (!*pErrorStatus)
         {
             *pErrorStatus = mapStructEntryToValue(mib2UdpMap,
-                DEFINE_SIZEOF(mib2UdpMap), &udpStats, item, bPduType, pVarBind);
+                DEFINE_SIZEOF(mib2UdpMap), &udpStats, item, pVarBind);
             if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 ret = setOidWithItem(&pVarBind->name, &myOid, item);
         }
@@ -1258,7 +1261,7 @@ static BOOL mib2UdpEntryQuery(BYTE bPduType, SnmpVarBind *pVarBind,
                 assert(item);
                 *pErrorStatus = mapStructEntryToValue(mib2UdpEntryMap,
                     DEFINE_SIZEOF(mib2UdpEntryMap),
-                    &udpTable->table[tableIndex - 1], item, bPduType, pVarBind);
+                    &udpTable->table[tableIndex - 1], item, pVarBind);
                 if (!*pErrorStatus && bPduType == SNMP_PDU_GETNEXT)
                 {
                     AsnObjectIdentifier oid;
@@ -1342,29 +1345,26 @@ static void cleanup(void)
 static struct mibImplementation *findSupportedQuery(UINT *ids, UINT idLength,
     UINT *matchingIndex)
 {
-    int indexHigh = DEFINE_SIZEOF(supportedIDs) - 1, indexLow = 0, i;
-    struct mibImplementation *impl = NULL;
+    int indexHigh = DEFINE_SIZEOF(supportedIDs) - 1, indexLow = 0;
     AsnObjectIdentifier oid1 = { idLength, ids};
 
     if (!idLength)
         return NULL;
-    for (i = (indexLow + indexHigh) / 2; !impl && indexLow <= indexHigh;
-         i = (indexLow + indexHigh) / 2)
-    {
-        INT cmp;
 
-        cmp = SnmpUtilOidNCmp(&oid1, &supportedIDs[i].name, idLength);
-        if (!cmp)
+    while (indexLow <= indexHigh)
+    {
+        INT cmp, i = (indexLow + indexHigh) / 2;
+        if (!(cmp = SnmpUtilOidNCmp(&oid1, &supportedIDs[i].name, idLength)))
         {
-            impl = &supportedIDs[i];
             *matchingIndex = i;
+            return &supportedIDs[i];
         }
-        else if (cmp > 0)
+        if (cmp > 0)
             indexLow = i + 1;
         else
             indexHigh = i - 1;
     }
-    return impl;
+    return NULL;
 }
 
 /*****************************************************************************

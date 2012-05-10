@@ -51,8 +51,8 @@
 #include "shlwapi.h"
 #include "xdg.h"
 #include "sddl.h"
-#define INITGUID
 #include "knownfolders.h"
+#include "initguid.h"
 #include "shobjidl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
@@ -669,37 +669,27 @@ BOOL WINAPI PathQualifyAW(LPCVOID pszPath)
 	return PathQualifyA(pszPath);
 }
 
-static BOOL PathResolveA(
-	LPSTR lpszPath,
-	LPCSTR *alpszPaths,
-	DWORD dwFlags)
+static BOOL PathResolveA(LPSTR path, LPCSTR *paths, DWORD flags)
 {
-	FIXME("(%s,%p,0x%08x),stub!\n",
-	  lpszPath, *alpszPaths, dwFlags);
-	return 0;
+    FIXME("(%s,%p,0x%08x),stub!\n", debugstr_a(path), paths, flags);
+    return FALSE;
 }
 
-static BOOL PathResolveW(
-	LPWSTR lpszPath,
-	LPCWSTR *alpszPaths,
-	DWORD dwFlags)
+static BOOL PathResolveW(LPWSTR path, LPCWSTR *paths, DWORD flags)
 {
-	FIXME("(%s,%p,0x%08x),stub!\n",
-	  debugstr_w(lpszPath), debugstr_w(*alpszPaths), dwFlags);
-	return 0;
+    FIXME("(%s,%p,0x%08x),stub!\n", debugstr_w(path), paths, flags);
+    return FALSE;
 }
 
 /*************************************************************************
  * PathResolve [SHELL32.51]
  */
-BOOL WINAPI PathResolveAW(
-	LPVOID lpszPath,
-	LPCVOID *alpszPaths,
-	DWORD dwFlags)
+BOOL WINAPI PathResolveAW(LPVOID path, LPCVOID *paths, DWORD flags)
 {
-	if (SHELL_OsIsUnicode())
-	  return PathResolveW(lpszPath, (LPCWSTR*)alpszPaths, dwFlags);
-	return PathResolveA(lpszPath, (LPCSTR*)alpszPaths, dwFlags);
+    if (SHELL_OsIsUnicode())
+        return PathResolveW(path, (LPCWSTR*)paths, flags);
+    else
+        return PathResolveA(path, (LPCSTR*)paths, flags);
 }
 
 /*************************************************************************
@@ -766,6 +756,8 @@ VOID WINAPI PathSetDlgItemPathAW(HWND hDlg, int id, LPCVOID pszPath)
 static const WCHAR szCurrentVersion[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\0'};
 static const WCHAR Administrative_ToolsW[] = {'A','d','m','i','n','i','s','t','r','a','t','i','v','e',' ','T','o','o','l','s','\0'};
 static const WCHAR AppDataW[] = {'A','p','p','D','a','t','a','\0'};
+static const WCHAR AppData_LocalLowW[] = {'A','p','p','D','a','t','a','\\','L','o','c','a','l','L','o','w','\0'};
+static const WCHAR Application_DataW[] = {'A','p','p','l','i','c','a','t','i','o','n',' ','D','a','t','a','\0'};
 static const WCHAR CacheW[] = {'C','a','c','h','e','\0'};
 static const WCHAR CD_BurningW[] = {'C','D',' ','B','u','r','n','i','n','g','\0'};
 static const WCHAR Common_Administrative_ToolsW[] = {'C','o','m','m','o','n',' ','A','d','m','i','n','i','s','t','r','a','t','i','v','e',' ','T','o','o','l','s','\0'};
@@ -785,27 +777,57 @@ static const WCHAR CommonVideoW[] = {'C','o','m','m','o','n','V','i','d','e','o'
 static const WCHAR ContactsW[] = {'C','o','n','t','a','c','t','s','\0'};
 static const WCHAR CookiesW[] = {'C','o','o','k','i','e','s','\0'};
 static const WCHAR DesktopW[] = {'D','e','s','k','t','o','p','\0'};
+static const WCHAR DocumentsW[] = {'D','o','c','u','m','e','n','t','s','\0'};
+static const WCHAR DownloadsW[] = {'D','o','w','n','l','o','a','d','s','\0'};
 static const WCHAR FavoritesW[] = {'F','a','v','o','r','i','t','e','s','\0'};
 static const WCHAR FontsW[] = {'F','o','n','t','s','\0'};
 static const WCHAR HistoryW[] = {'H','i','s','t','o','r','y','\0'};
+static const WCHAR LinksW[] = {'L','i','n','k','s','\0'};
 static const WCHAR Local_AppDataW[] = {'L','o','c','a','l',' ','A','p','p','D','a','t','a','\0'};
+static const WCHAR Local_Settings_Application_DataW[] = {'L','o','c','a','l',' ','S','e','t','t','i','n','g','s','\\','A','p','p','l','i','c','a','t','i','o','n',' ','D','a','t','a','\0'};
+static const WCHAR Local_Settings_CD_BurningW[] = {'L','o','c','a','l',' ','S','e','t','t','i','n','g','s','\\','A','p','p','l','i','c','a','t','i','o','n',' ','D','a','t','a','\\','M','i','c','r','o','s','o','f','t','\\','C','D',' ','B','u','r','n','i','n','g','\0'};
+static const WCHAR Local_Settings_HistoryW[] = {'L','o','c','a','l',' ','S','e','t','t','i','n','g','s','\\','H','i','s','t','o','r','y','\0'};
+static const WCHAR Local_Settings_Temporary_Internet_FilesW[] = {'L','o','c','a','l',' ','S','e','t','t','i','n','g','s','\\','T','e','m','p','o','r','a','r','y',' ','I','n','t','e','r','n','e','t',' ','F','i','l','e','s','\0'};
+static const WCHAR Microsoft_Windows_GameExplorerW[] = {'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','G','a','m','e','E','x','p','l','o','r','e','r','\0'};
+static const WCHAR Microsoft_Windows_LibrariesW[] = {'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','L','i','b','r','a','r','i','e','s','\0'};
+static const WCHAR Microsoft_Windows_RingtonesW[] = {'M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','R','i','n','g','t','o','n','e','s','\0'};
+static const WCHAR MusicW[] = {'M','u','s','i','c','\0'};
+static const WCHAR Music_PlaylistsW[] = {'M','u','s','i','c','\\','P','l','a','y','l','i','s','t','s','\0'};
+static const WCHAR Music_Sample_MusicW[] = {'M','u','s','i','c','\\','S','a','m','p','l','e',' ','M','u','s','i','c','\0'};
+static const WCHAR Music_Sample_PlaylistsW[] = {'M','u','s','i','c','\\','S','a','m','p','l','e',' ','P','l','a','y','l','i','s','t','s','\0'};
+static const WCHAR My_DocumentsW[] = {'M','y',' ','D','o','c','u','m','e','n','t','s','\0'};
 static const WCHAR My_MusicW[] = {'M','y',' ','M','u','s','i','c','\0'};
 static const WCHAR My_PicturesW[] = {'M','y',' ','P','i','c','t','u','r','e','s','\0'};
-static const WCHAR My_VideoW[] = {'M','y',' ','V','i','d','e','o','s','\0'};
+static const WCHAR My_VideosW[] = {'M','y',' ','V','i','d','e','o','s','\0'};
 static const WCHAR NetHoodW[] = {'N','e','t','H','o','o','d','\0'};
+static const WCHAR OEM_LinksW[] = {'O','E','M',' ','L','i','n','k','s','\0'};
 static const WCHAR PersonalW[] = {'P','e','r','s','o','n','a','l','\0'};
+static const WCHAR PicturesW[] = {'P','i','c','t','u','r','e','s','\0'};
+static const WCHAR Pictures_Sample_PicturesW[] = {'P','i','c','t','u','r','e','s','\\','S','a','m','p','l','e',' ','P','i','c','t','u','r','e','s','\0'};
+static const WCHAR Pictures_Slide_ShowsW[] = {'P','i','c','t','u','r','e','s','\\','S','l','i','d','e',' ','S','h','o','w','s','\0'};
 static const WCHAR PrintHoodW[] = {'P','r','i','n','t','H','o','o','d','\0'};
+static const WCHAR Program_FilesW[] = {'P','r','o','g','r','a','m',' ','F','i','l','e','s','\0'};
+static const WCHAR Program_Files_Common_FilesW[] = {'P','r','o','g','r','a','m',' ','F','i','l','e','s','\\','C','o','m','m','o','n',' ','F','i','l','e','s','\0'};
+static const WCHAR Program_Files_x86W[] = {'P','r','o','g','r','a','m',' ','F','i','l','e','s',' ','(','x','8','6',')','\0'};
+static const WCHAR Program_Files_x86_Common_FilesW[] = {'P','r','o','g','r','a','m',' ','F','i','l','e','s',' ','(','x','8','6',')','\\','C','o','m','m','o','n',' ','F','i','l','e','s','\0'};
 static const WCHAR ProgramFilesDirW[] = {'P','r','o','g','r','a','m','F','i','l','e','s','D','i','r','\0'};
 static const WCHAR ProgramFilesDirX86W[] = {'P','r','o','g','r','a','m','F','i','l','e','s','D','i','r',' ','(','x','8','6',')','\0'};
 static const WCHAR ProgramsW[] = {'P','r','o','g','r','a','m','s','\0'};
 static const WCHAR RecentW[] = {'R','e','c','e','n','t','\0'};
 static const WCHAR ResourcesW[] = {'R','e','s','o','u','r','c','e','s','\0'};
+static const WCHAR Saved_GamesW[] = {'S','a','v','e','d',' ','G','a','m','e','s','\0'};
+static const WCHAR SearchesW[] = {'S','e','a','r','c','h','e','s','\0'};
 static const WCHAR SendToW[] = {'S','e','n','d','T','o','\0'};
 static const WCHAR StartUpW[] = {'S','t','a','r','t','U','p','\0'};
 static const WCHAR Start_MenuW[] = {'S','t','a','r','t',' ','M','e','n','u','\0'};
+static const WCHAR Start_Menu_ProgramsW[] = {'S','t','a','r','t',' ','M','e','n','u','\\','P','r','o','g','r','a','m','s','\0'};
+static const WCHAR Start_Menu_Admin_ToolsW[] = {'S','t','a','r','t',' ','M','e','n','u','\\','P','r','o','g','r','a','m','s','\\','A','d','m','i','n','i','s','t','r','a','t','i','v','e',' ','T','o','o','l','s','\0'};
+static const WCHAR Start_Menu_StartupW[] = {'S','t','a','r','t',' ','M','e','n','u','\\','P','r','o','g','r','a','m','s','\\','S','t','a','r','t','U','p','\0'};
 static const WCHAR TemplatesW[] = {'T','e','m','p','l','a','t','e','s','\0'};
 static const WCHAR UsersW[] = {'U','s','e','r','s','\0'};
 static const WCHAR UsersPublicW[] = {'U','s','e','r','s','\\','P','u','b','l','i','c','\0'};
+static const WCHAR VideosW[] = {'V','i','d','e','o','s','\0'};
+static const WCHAR Videos_Sample_VideosW[] = {'V','i','d','e','o','s','\\','S','a','m','p','l','e',' ','V','i','d','e','o','s','\0'};
 static const WCHAR DefaultW[] = {'.','D','e','f','a','u','l','t','\0'};
 static const WCHAR AllUsersProfileW[] = {'%','A','L','L','U','S','E','R','S','P','R','O','F','I','L','E','%','\0'};
 static const WCHAR UserProfileW[] = {'%','U','S','E','R','P','R','O','F','I','L','E','%','\0'};
@@ -816,6 +838,8 @@ static const WCHAR AllUsersProfileValueW[] = {'A','l','l','U','s','e','r','s','P
 static const WCHAR szSHFolders[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','S','h','e','l','l',' ','F','o','l','d','e','r','s','\0'};
 static const WCHAR szSHUserFolders[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','U','s','e','r',' ','S','h','e','l','l',' ','F','o','l','d','e','r','s','\0'};
 static const WCHAR szDefaultProfileDirW[] = {'u','s','e','r','s',0};
+static const WCHAR szKnownFolderDescriptions[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','F','o','l','d','e','r','D','e','s','c','r','i','p','t','i','o','n','s','\0'};
+static const WCHAR szKnownFolderRedirections[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','U','s','e','r',' ','S','h','e','l','l',' ','F','o','l','d','e','r','s',0};
 static const WCHAR AllUsersW[] = {'P','u','b','l','i','c',0};
 
 typedef enum _CSIDL_Type {
@@ -855,7 +879,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Programs,
         CSIDL_Type_User,
         ProgramsW,
-        MAKEINTRESOURCEW(IDS_PROGRAMS)
+        Start_Menu_ProgramsW
     },
     { /* 0x03 - CSIDL_CONTROLS (.CPL files) */
         &FOLDERID_ControlPanelFolder,
@@ -870,7 +894,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         NULL
     },
     { /* 0x05 - CSIDL_PERSONAL */
-        &GUID_NULL,
+        &FOLDERID_Documents,
         CSIDL_Type_User,
         PersonalW,
         MAKEINTRESOURCEW(IDS_PERSONAL)
@@ -879,25 +903,25 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Favorites,
         CSIDL_Type_User,
         FavoritesW,
-        MAKEINTRESOURCEW(IDS_FAVORITES)
+        FavoritesW
     },
     { /* 0x07 - CSIDL_STARTUP */
         &FOLDERID_Startup,
         CSIDL_Type_User,
         StartUpW,
-        MAKEINTRESOURCEW(IDS_STARTUP)
+        Start_Menu_StartupW
     },
     { /* 0x08 - CSIDL_RECENT */
         &FOLDERID_Recent,
         CSIDL_Type_User,
         RecentW,
-        MAKEINTRESOURCEW(IDS_RECENT)
+        RecentW
     },
     { /* 0x09 - CSIDL_SENDTO */
         &FOLDERID_SendTo,
         CSIDL_Type_User,
         SendToW,
-        MAKEINTRESOURCEW(IDS_SENDTO)
+        SendToW
     },
     { /* 0x0a - CSIDL_BITBUCKET - Recycle Bin */
         &FOLDERID_RecycleBinFolder,
@@ -909,7 +933,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_StartMenu,
         CSIDL_Type_User,
         Start_MenuW,
-        MAKEINTRESOURCEW(IDS_STARTMENU)
+        Start_MenuW
     },
     { /* 0x0c - CSIDL_MYDOCUMENTS */
         &GUID_NULL,
@@ -926,8 +950,8 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x0e - CSIDL_MYVIDEO */
         &FOLDERID_Videos,
         CSIDL_Type_User,
-        My_VideoW,
-        MAKEINTRESOURCEW(IDS_MYVIDEO)
+        My_VideosW,
+        MAKEINTRESOURCEW(IDS_MYVIDEOS)
     },
     { /* 0x0f - unassigned */
         &GUID_NULL,
@@ -957,7 +981,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_NetHood,
         CSIDL_Type_User,
         NetHoodW,
-        MAKEINTRESOURCEW(IDS_NETHOOD)
+        NetHoodW
     },
     { /* 0x14 - CSIDL_FONTS */
         &FOLDERID_Fonts,
@@ -969,25 +993,25 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Templates,
         CSIDL_Type_User,
         TemplatesW,
-        MAKEINTRESOURCEW(IDS_TEMPLATES)
+        TemplatesW
     },
     { /* 0x16 - CSIDL_COMMON_STARTMENU */
         &FOLDERID_CommonStartMenu,
         CSIDL_Type_AllUsers,
         Common_Start_MenuW,
-        MAKEINTRESOURCEW(IDS_STARTMENU)
+        Start_MenuW
     },
     { /* 0x17 - CSIDL_COMMON_PROGRAMS */
         &FOLDERID_CommonPrograms,
         CSIDL_Type_AllUsers,
         Common_ProgramsW,
-        MAKEINTRESOURCEW(IDS_PROGRAMS)
+        Start_Menu_ProgramsW
     },
     { /* 0x18 - CSIDL_COMMON_STARTUP */
         &FOLDERID_CommonStartup,
         CSIDL_Type_AllUsers,
         Common_StartUpW,
-        MAKEINTRESOURCEW(IDS_STARTUP)
+        Start_Menu_StartupW
     },
     { /* 0x19 - CSIDL_COMMON_DESKTOPDIRECTORY */
         &FOLDERID_PublicDesktop,
@@ -999,19 +1023,19 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_RoamingAppData,
         CSIDL_Type_User,
         AppDataW,
-        MAKEINTRESOURCEW(IDS_APPDATA)
+        Application_DataW
     },
     { /* 0x1b - CSIDL_PRINTHOOD */
         &FOLDERID_PrintHood,
         CSIDL_Type_User,
         PrintHoodW,
-        MAKEINTRESOURCEW(IDS_PRINTHOOD)
+        PrintHoodW
     },
     { /* 0x1c - CSIDL_LOCAL_APPDATA */
         &FOLDERID_LocalAppData,
         CSIDL_Type_User,
         Local_AppDataW,
-        MAKEINTRESOURCEW(IDS_LOCAL_APPDATA)
+        Local_Settings_Application_DataW
     },
     { /* 0x1d - CSIDL_ALTSTARTUP */
         &GUID_NULL,
@@ -1029,31 +1053,31 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Favorites,
         CSIDL_Type_AllUsers,
         Common_FavoritesW,
-        MAKEINTRESOURCEW(IDS_FAVORITES)
+        FavoritesW
     },
     { /* 0x20 - CSIDL_INTERNET_CACHE */
         &FOLDERID_InternetCache,
         CSIDL_Type_User,
         CacheW,
-        MAKEINTRESOURCEW(IDS_INTERNET_CACHE)
+        Local_Settings_Temporary_Internet_FilesW
     },
     { /* 0x21 - CSIDL_COOKIES */
         &FOLDERID_Cookies,
         CSIDL_Type_User,
         CookiesW,
-        MAKEINTRESOURCEW(IDS_COOKIES)
+        CookiesW
     },
     { /* 0x22 - CSIDL_HISTORY */
         &FOLDERID_History,
         CSIDL_Type_User,
         HistoryW,
-        MAKEINTRESOURCEW(IDS_HISTORY)
+        Local_Settings_HistoryW
     },
     { /* 0x23 - CSIDL_COMMON_APPDATA */
         &FOLDERID_ProgramData,
         CSIDL_Type_AllUsers,
         Common_AppDataW,
-        MAKEINTRESOURCEW(IDS_APPDATA)
+        Application_DataW
     },
     { /* 0x24 - CSIDL_WINDOWS */
         &FOLDERID_Windows,
@@ -1071,7 +1095,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_ProgramFiles,
         CSIDL_Type_CurrVer,
         ProgramFilesDirW,
-        MAKEINTRESOURCEW(IDS_PROGRAM_FILES)
+        Program_FilesW
     },
     { /* 0x27 - CSIDL_MYPICTURES */
         &FOLDERID_Pictures,
@@ -1095,43 +1119,43 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_ProgramFilesX86,
         CSIDL_Type_CurrVer,
         ProgramFilesDirX86W,
-        MAKEINTRESOURCEW(IDS_PROGRAM_FILESX86)
+        Program_Files_x86W
     },
     { /* 0x2b - CSIDL_PROGRAM_FILES_COMMON */
         &FOLDERID_ProgramFilesCommon,
         CSIDL_Type_CurrVer,
         CommonFilesDirW,
-        MAKEINTRESOURCEW(IDS_PROGRAM_FILES_COMMON)
+        Program_Files_Common_FilesW
     },
     { /* 0x2c - CSIDL_PROGRAM_FILES_COMMONX86 */
         &FOLDERID_ProgramFilesCommonX86,
         CSIDL_Type_CurrVer,
         CommonFilesDirX86W,
-        MAKEINTRESOURCEW(IDS_PROGRAM_FILES_COMMONX86)
+        Program_Files_x86_Common_FilesW
     },
     { /* 0x2d - CSIDL_COMMON_TEMPLATES */
         &FOLDERID_CommonTemplates,
         CSIDL_Type_AllUsers,
         Common_TemplatesW,
-        MAKEINTRESOURCEW(IDS_TEMPLATES)
+        TemplatesW
     },
     { /* 0x2e - CSIDL_COMMON_DOCUMENTS */
         &FOLDERID_PublicDocuments,
         CSIDL_Type_AllUsers,
         Common_DocumentsW,
-        MAKEINTRESOURCEW(IDS_COMMON_DOCUMENTS)
+        DocumentsW
     },
     { /* 0x2f - CSIDL_COMMON_ADMINTOOLS */
         &FOLDERID_CommonAdminTools,
         CSIDL_Type_AllUsers,
         Common_Administrative_ToolsW,
-        MAKEINTRESOURCEW(IDS_ADMINTOOLS)
+        Start_Menu_Admin_ToolsW
     },
     { /* 0x30 - CSIDL_ADMINTOOLS */
         &FOLDERID_AdminTools,
         CSIDL_Type_User,
         Administrative_ToolsW,
-        MAKEINTRESOURCEW(IDS_ADMINTOOLS)
+        Start_Menu_Admin_ToolsW
     },
     { /* 0x31 - CSIDL_CONNECTIONS */
         &FOLDERID_ConnectionsFolder,
@@ -1161,19 +1185,19 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_PublicMusic,
         CSIDL_Type_AllUsers,
         CommonMusicW,
-        MAKEINTRESOURCEW(IDS_COMMON_MUSIC)
+        MusicW
     },
     { /* 0x36 - CSIDL_COMMON_PICTURES */
         &FOLDERID_PublicPictures,
         CSIDL_Type_AllUsers,
         CommonPicturesW,
-        MAKEINTRESOURCEW(IDS_COMMON_PICTURES)
+        PicturesW
     },
     { /* 0x37 - CSIDL_COMMON_VIDEO */
         &FOLDERID_PublicVideos,
         CSIDL_Type_AllUsers,
         CommonVideoW,
-        MAKEINTRESOURCEW(IDS_COMMON_VIDEO)
+        VideosW
     },
     { /* 0x38 - CSIDL_RESOURCES */
         &FOLDERID_ResourceDir,
@@ -1191,13 +1215,13 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_CommonOEMLinks,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_COMMON_OEM_LINKS)
+        OEM_LinksW
     },
     { /* 0x3b - CSIDL_CDBURN_AREA */
         &FOLDERID_CDBurning,
         CSIDL_Type_User,
         CD_BurningW,
-        MAKEINTRESOURCEW(IDS_CDBURN_AREA)
+        Local_Settings_CD_BurningW
     },
     { /* 0x3c unassigned */
         &GUID_NULL,
@@ -1245,7 +1269,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Contacts,
         CSIDL_Type_User,
         ContactsW,
-        MAKEINTRESOURCEW(IDS_CONTACTS)
+        ContactsW
     },
     { /* 0x44 */
         &FOLDERID_DeviceMetadataStore,
@@ -1254,10 +1278,10 @@ static const CSIDL_DATA CSIDL_Data[] =
         NULL
     },
     { /* 0x45 */
-        &FOLDERID_Documents,
+        &GUID_NULL,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_DOCUMENTS)
+        DocumentsW
     },
     { /* 0x46 */
         &FOLDERID_DocumentsLibrary,
@@ -1269,7 +1293,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Downloads,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_DOWNLOADS)
+        DownloadsW
     },
     { /* 0x48 */
         &FOLDERID_Games,
@@ -1305,13 +1329,13 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Links,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_LINKS)
+        LinksW
     },
     { /* 0x4e */
         &FOLDERID_LocalAppDataLow,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_LOCAL_APPDATA_LOW)
+        AppData_LocalLowW
     },
     { /* 0x4f */
         &FOLDERID_MusicLibrary,
@@ -1329,7 +1353,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_PhotoAlbums,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_PHOTO_ALBUMS)
+        Pictures_Slide_ShowsW
     },
     { /* 0x52 */
         &FOLDERID_PicturesLibrary,
@@ -1341,7 +1365,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_Playlists,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_PLAYLISTS)
+        Music_PlaylistsW
     },
     { /* 0x54 */
         &FOLDERID_ProgramFilesX64,
@@ -1365,25 +1389,25 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_PublicDownloads,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_PUBLIC_DOWNLOADS)
+        DownloadsW
     },
     { /* 0x58 */
         &FOLDERID_PublicGameTasks,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_PUBLIC_GAME_TASKS)
+        Microsoft_Windows_GameExplorerW
     },
     { /* 0x59 */
         &FOLDERID_PublicLibraries,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_PUBLIC_LIBRARIES)
+        Microsoft_Windows_LibrariesW
     },
     { /* 0x5a */
         &FOLDERID_PublicRingtones,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_PUBLIC_RINGTONES)
+        Microsoft_Windows_RingtonesW
     },
     { /* 0x5b */
         &FOLDERID_QuickLaunch,
@@ -1407,37 +1431,37 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_SampleMusic,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAMPLE_MUSIC)
+        Music_Sample_MusicW
     },
     { /* 0x5f */
         &FOLDERID_SamplePictures,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAMPLE_PICTURES)
+        Pictures_Sample_PicturesW
     },
     { /* 0x60 */
         &FOLDERID_SamplePlaylists,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAMPLE_PLAYLISTS)
+        Music_Sample_PlaylistsW
     },
     { /* 0x61 */
         &FOLDERID_SampleVideos,
         CSIDL_Type_AllUsers,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAMPLE_VIDEOS)
+        Videos_Sample_VideosW
     },
     { /* 0x62 */
         &FOLDERID_SavedGames,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAVED_GAMES)
+        Saved_GamesW
     },
     { /* 0x63 */
         &FOLDERID_SavedSearches,
         CSIDL_Type_User,
         NULL,
-        MAKEINTRESOURCEW(IDS_SAVED_SEARCHES)
+        SearchesW
     },
     { /* 0x64 */
         &FOLDERID_SEARCH_CSC,
@@ -1497,7 +1521,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         &FOLDERID_UserProfiles,
         CSIDL_Type_CurrVer,
         UsersW,
-        MAKEINTRESOURCEW(IDS_USER_PROFILES)
+        UsersW
     },
     { /* 0x6e */
         &FOLDERID_UserProgramFiles,
@@ -2511,8 +2535,8 @@ static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
                 case IDS_MYPICTURES:
                     lstrcpyW(wszSubPath, My_PicturesW);
                     break;
-                case IDS_MYVIDEO:
-                    lstrcpyW(wszSubPath, My_VideoW);
+                case IDS_MYVIDEOS:
+                    lstrcpyW(wszSubPath, My_VideosW);
                     break;
                 default:
                     ERR("LoadString(%d) failed!\n", LOWORD(pwszSubPath));
@@ -2545,7 +2569,7 @@ static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
  * - If there is a 'My Documents' directory in $HOME, the user probably wants
  *   wine's 'My Documents' to point there. Furthermore, we imply that the user
  *   is a Windows lover and has no problem with wine creating 'My Pictures',
- *   'My Music' and 'My Video' subfolders under '$HOME/My Documents', if those
+ *   'My Music' and 'My Videos' subfolders under '$HOME/My Documents', if those
  *   do not already exits. We put appropriate symbolic links in place for those,
  *   too.
  * - If there is no 'My Documents' directory in $HOME, we let 'My Documents'
@@ -2554,7 +2578,7 @@ static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
  *   there already is a 'My Music' directory in $HOME, we symlink the 'My Music'
  *   shell folder to it. But if not, then we check XDG_MUSIC_DIR - "well known"
  *   directory, and try to link to that. If that fails, then we symlink to
- *   $HOME directly. The same holds fo 'My Pictures' and 'My Video'.
+ *   $HOME directly. The same holds fo 'My Pictures' and 'My Videos'.
  * - The Desktop shell folder is symlinked to XDG_DESKTOP_DIR. If that does not
  *   exist, then we try '$HOME/Desktop'. If that does not exist, then we leave
  *   it alone.
@@ -2562,7 +2586,7 @@ static inline BOOL _SHAppendToUnixPath(char *szBasePath, LPCWSTR pwszSubPath) {
  */
 static void _SHCreateSymbolicLinks(void)
 {
-    UINT aidsMyStuff[] = { IDS_MYPICTURES, IDS_MYVIDEO, IDS_MYMUSIC }, i;
+    UINT aidsMyStuff[] = { IDS_MYPICTURES, IDS_MYVIDEOS, IDS_MYMUSIC }, i;
     int acsidlMyStuff[] = { CSIDL_MYPICTURES, CSIDL_MYVIDEO, CSIDL_MYMUSIC };
     static const char * const xdg_dirs[] = { "PICTURES", "VIDEOS", "MUSIC", "DESKTOP" };
     static const unsigned int num = sizeof(xdg_dirs) / sizeof(xdg_dirs[0]);
@@ -2622,7 +2646,7 @@ static void _SHCreateSymbolicLinks(void)
         }
     }
 
-    /* Create symbolic links for 'My Pictures', 'My Video' and 'My Music'. */
+    /* Create symbolic links for 'My Pictures', 'My Videos' and 'My Music'. */
     for (i=0; i < sizeof(aidsMyStuff)/sizeof(aidsMyStuff[0]); i++) {
         /* Create the current 'My Whatever' folder and get it's unix path. */
         hr = SHGetFolderPathW(NULL, acsidlMyStuff[i]|CSIDL_FLAG_CREATE, NULL,
@@ -2805,7 +2829,7 @@ HRESULT SHELL_RegisterShellFolders(void)
     HRESULT hr;
 
     /* Set up '$HOME' targeted symlinks for 'My Documents', 'My Pictures',
-     * 'My Video', 'My Music' and 'Desktop' in advance, so that the
+     * 'My Videos', 'My Music' and 'Desktop' in advance, so that the
      * _SHRegister*ShellFolders() functions will find everything nice and clean
      * and thus will not attempt to create them in the profile directory. */
     _SHCreateSymbolicLinks();
@@ -2969,7 +2993,7 @@ HRESULT WINAPI SHGetFolderLocation(
         }
     }
     if(*ppidl)
-        hr = NOERROR;
+        hr = S_OK;
 
     TRACE("-- (new pidl %p)\n",*ppidl);
     return hr;
@@ -3017,8 +3041,10 @@ HRESULT WINAPI SHGetKnownFolderPath(REFKNOWNFOLDERID rfid, DWORD flags, HANDLE t
 
     TRACE("%s, 0x%08x, %p, %p\n", debugstr_guid(rfid), flags, token, path);
 
+    *path = NULL;
+
     if (index < 0)
-        return E_INVALIDARG;
+        return HRESULT_FROM_WIN32( ERROR_FILE_NOT_FOUND );
 
     if (flags & KF_FLAG_CREATE)
         index |= CSIDL_FLAG_CREATE;
@@ -3075,16 +3101,215 @@ HRESULT WINAPI SHGetFolderPathEx(REFKNOWNFOLDERID rfid, DWORD flags, HANDLE toke
     return hr;
 }
 
+/* constant values used by known folder functions */
+static const WCHAR szCategory[] = {'C','a','t','e','g','o','r','y',0};
+static const WCHAR szName[] = {'N','a','m','e',0};
+static const WCHAR szRelativePath[] = {'R','e','l','a','t','i','v','e','P','a','t','h',0};
+static const WCHAR szParentFolder[] = {'P','a','r','e','n','t','F','o','l','d','e','r',0};
+
+/*
+ * Internal function to convert known folder identifier to path of registry key
+ * associated with known folder.
+ *
+ * Parameters:
+ *  rfid            [I] pointer to known folder identifier (may be NULL)
+ *  lpStringGuid    [I] string with known folder identifier (used when rfid is NULL)
+ *  lpPath          [O] place to store string address. String should be
+ *                      later freed using HeapFree(GetProcessHeap(),0, ... )
+ */
+static HRESULT get_known_folder_registry_path(
+    REFKNOWNFOLDERID rfid,
+    LPWSTR lpStringGuid,
+    LPWSTR *lpPath)
+{
+    static const WCHAR sBackslash[] = {'\\',0};
+    HRESULT hr = S_OK;
+    int length;
+    WCHAR sGuid[50];
+
+    TRACE("(%s, %s, %p)\n", debugstr_guid(rfid), debugstr_w(lpStringGuid), lpPath);
+
+    if(rfid)
+        StringFromGUID2(rfid, sGuid, sizeof(sGuid)/sizeof(sGuid[0]));
+    else
+        lstrcpyW(sGuid, lpStringGuid);
+
+    length = lstrlenW(szKnownFolderDescriptions)+51;
+    *lpPath = HeapAlloc(GetProcessHeap(), 0, length*sizeof(WCHAR));
+    if(!(*lpPath))
+        hr = E_OUTOFMEMORY;
+
+    if(SUCCEEDED(hr))
+    {
+        lstrcpyW(*lpPath, szKnownFolderDescriptions);
+        lstrcatW(*lpPath, sBackslash);
+        lstrcatW(*lpPath, sGuid);
+    }
+
+    return hr;
+}
+
+/*
+ * Internal function to get place where folder redirection information are stored.
+ *
+ * Parameters:
+ *  rfid            [I] pointer to known folder identifier (may be NULL)
+ *  rootKey         [O] root key where the redirection information are stored
+ *                      It can be HKLM for COMMON folders, and HKCU for PERUSER folders.
+ *                      However, besides root key, path is always that same, and is stored
+ *                      as "szKnownFolderRedirections" constant
+ */
+static HRESULT get_known_folder_redirection_place(
+    REFKNOWNFOLDERID rfid,
+    HKEY *rootKey)
+{
+    HRESULT hr;
+    LPWSTR lpRegistryPath = NULL;
+    KF_CATEGORY category;
+    DWORD dwSize;
+
+    /* first, get known folder's category */
+    hr = get_known_folder_registry_path(rfid, NULL, &lpRegistryPath);
+
+    if(SUCCEEDED(hr))
+    {
+        dwSize = sizeof(category);
+        hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, lpRegistryPath, szCategory, RRF_RT_DWORD, NULL, &category, &dwSize));
+    }
+
+    if(SUCCEEDED(hr))
+    {
+        if(category == KF_CATEGORY_COMMON)
+        {
+            *rootKey = HKEY_LOCAL_MACHINE;
+            hr = S_OK;
+        }
+        else if(category == KF_CATEGORY_PERUSER)
+        {
+            *rootKey = HKEY_CURRENT_USER;
+            hr = S_OK;
+        }
+        else
+            hr = E_FAIL;
+    }
+
+    HeapFree(GetProcessHeap(), 0, lpRegistryPath);
+    return hr;
+}
+
+static HRESULT get_known_folder_path_by_id(REFKNOWNFOLDERID folderId, LPWSTR lpRegistryPath, DWORD dwFlags, LPWSTR *ppszPath);
+
+static HRESULT get_known_folder_category(
+    LPWSTR registryPath,
+    KF_CATEGORY* pCategory)
+{
+    DWORD dwSize = sizeof(DWORD);
+    DWORD dwType;
+    return HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, registryPath, szCategory, RRF_RT_DWORD, &dwType, pCategory, &dwSize));
+}
+
+static HRESULT redirect_known_folder(
+    REFKNOWNFOLDERID rfid,
+    HWND hwnd,
+    KF_REDIRECT_FLAGS flags,
+    LPCWSTR pszTargetPath,
+    UINT cFolders,
+    KNOWNFOLDERID const *pExclusion,
+    LPWSTR *ppszError)
+{
+    HRESULT hr;
+    HKEY rootKey = HKEY_LOCAL_MACHINE, hKey;
+    WCHAR sGuid[39];
+    LPWSTR lpRegistryPath = NULL, lpSrcPath = NULL;
+    TRACE("(%s, %p, 0x%08x, %s, %d, %p, %p)\n", debugstr_guid(rfid), hwnd, flags, debugstr_w(pszTargetPath), cFolders, pExclusion, ppszError);
+
+    if (ppszError) *ppszError = NULL;
+
+    hr = get_known_folder_registry_path(rfid, NULL, &lpRegistryPath);
+
+    if(SUCCEEDED(hr))
+        hr = get_known_folder_path_by_id(rfid, lpRegistryPath, 0, &lpSrcPath);
+
+    HeapFree(GetProcessHeap(), 0, lpRegistryPath);
+
+    /* get path to redirection storage */
+    if(SUCCEEDED(hr))
+        hr = get_known_folder_redirection_place(rfid, &rootKey);
+
+    /* write redirection information */
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegCreateKeyExW(rootKey, szKnownFolderRedirections, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL));
+
+    if(SUCCEEDED(hr))
+    {
+        StringFromGUID2(rfid, sGuid, sizeof(sGuid)/sizeof(sGuid[0]));
+
+        hr = HRESULT_FROM_WIN32(RegSetValueExW(hKey, sGuid, 0, REG_SZ, (LPBYTE)pszTargetPath, (lstrlenW(pszTargetPath)+1)*sizeof(WCHAR)));
+
+        RegCloseKey(hKey);
+    }
+
+    /* make sure destination path exists */
+    SHCreateDirectory(NULL, pszTargetPath);
+
+    /* copy content if required */
+    if(SUCCEEDED(hr) && (flags & KF_REDIRECT_COPY_CONTENTS) )
+    {
+        static const WCHAR sWildcard[] = {'\\','*',0};
+        WCHAR srcPath[MAX_PATH+1], dstPath[MAX_PATH+1];
+        SHFILEOPSTRUCTW fileOp;
+
+        ZeroMemory(srcPath, sizeof(srcPath));
+        lstrcpyW(srcPath, lpSrcPath);
+        lstrcatW(srcPath, sWildcard);
+
+        ZeroMemory(dstPath, sizeof(dstPath));
+        lstrcpyW(dstPath, pszTargetPath);
+
+        ZeroMemory(&fileOp, sizeof(fileOp));
+
+        if(flags & KF_REDIRECT_DEL_SOURCE_CONTENTS)
+            fileOp.wFunc = FO_MOVE;
+        else
+            fileOp.wFunc = FO_COPY;
+
+        fileOp.pFrom = srcPath;
+        fileOp.pTo = dstPath;
+        fileOp.fFlags = FOF_NO_UI;
+
+        hr = (SHFileOperationW(&fileOp)==0 ? S_OK : E_FAIL);
+
+        if(flags & KF_REDIRECT_DEL_SOURCE_CONTENTS)
+        {
+            ZeroMemory(srcPath, sizeof(srcPath));
+            lstrcpyW(srcPath, lpSrcPath);
+
+            ZeroMemory(&fileOp, sizeof(fileOp));
+            fileOp.wFunc = FO_DELETE;
+            fileOp.pFrom = srcPath;
+            fileOp.fFlags = FOF_NO_UI;
+
+            hr = (SHFileOperationW(&fileOp)==0 ? S_OK : E_FAIL);
+        }
+    }
+
+    CoTaskMemFree(lpSrcPath);
+
+    return hr;
+}
+
+
 struct knownfolder
 {
-    const struct IKnownFolderVtbl *vtbl;
+    IKnownFolder IKnownFolder_iface;
     LONG refs;
     KNOWNFOLDERID id;
+    LPWSTR registryPath;
 };
 
 static inline struct knownfolder *impl_from_IKnownFolder( IKnownFolder *iface )
 {
-    return (struct knownfolder *)((char *)iface - FIELD_OFFSET( struct knownfolder, vtbl ));
+    return CONTAINING_RECORD( iface, struct knownfolder, IKnownFolder_iface );
 }
 
 static ULONG WINAPI knownfolder_AddRef(
@@ -3102,6 +3327,7 @@ static ULONG WINAPI knownfolder_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", knownfolder);
+        HeapFree( GetProcessHeap(), 0, knownfolder->registryPath);
         HeapFree( GetProcessHeap(), 0, knownfolder );
     }
     return refs;
@@ -3130,16 +3356,36 @@ static HRESULT WINAPI knownfolder_QueryInterface(
     return S_OK;
 }
 
-static HRESULT knowfolder_set_id(
-    IKnownFolder *iface,
+static HRESULT knownfolder_set_id(
+    struct knownfolder *knownfolder,
     const KNOWNFOLDERID *kfid)
 {
-    struct knownfolder *knownfolder = impl_from_IKnownFolder( iface );
+    HKEY hKey;
+    HRESULT hr;
 
     TRACE("%s\n", debugstr_guid(kfid));
 
     knownfolder->id = *kfid;
-    return S_OK;
+
+    /* check is it registry-registered folder */
+    hr = get_known_folder_registry_path(kfid, NULL, &knownfolder->registryPath);
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegOpenKeyExW(HKEY_LOCAL_MACHINE, knownfolder->registryPath, 0, 0, &hKey));
+
+    if(SUCCEEDED(hr))
+    {
+        hr = S_OK;
+        RegCloseKey(hKey);
+    }
+    else
+    {
+        /* This known folder is not registered. To mark it, we set registryPath to NULL */
+        HeapFree(GetProcessHeap(), 0, knownfolder->registryPath);
+        knownfolder->registryPath = NULL;
+        hr = S_OK;
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI knownfolder_GetId(
@@ -3158,8 +3404,19 @@ static HRESULT WINAPI knownfolder_GetCategory(
     IKnownFolder *iface,
     KF_CATEGORY *pCategory)
 {
-    FIXME("%p\n", pCategory);
-    return E_NOTIMPL;
+    struct knownfolder *knownfolder = impl_from_IKnownFolder(iface);
+    HRESULT hr = S_OK;
+
+    TRACE("%p, %p\n", knownfolder, pCategory);
+
+    /* we cannot get a category for a folder which is not registered */
+    if(!knownfolder->registryPath)
+        hr = E_FAIL;
+
+    if(SUCCEEDED(hr))
+        hr = get_known_folder_category(knownfolder->registryPath, pCategory);
+
+    return hr;
 }
 
 static HRESULT WINAPI knownfolder_GetShellItem(
@@ -3172,15 +3429,145 @@ static HRESULT WINAPI knownfolder_GetShellItem(
     return E_NOTIMPL;
 }
 
+static HRESULT get_known_folder_path(
+    LPWSTR sFolderId,
+    LPWSTR registryPath,
+    LPWSTR *ppszPath)
+{
+    static const WCHAR sBackslash[] = {'\\',0};
+    HRESULT hr;
+    DWORD dwSize, dwType;
+    WCHAR path[MAX_PATH] = {0};
+    WCHAR parentGuid[39];
+    KF_CATEGORY category;
+    LPWSTR parentRegistryPath, parentPath;
+    HKEY hRedirectionRootKey = NULL;
+
+    TRACE("(%s, %p)\n", debugstr_w(registryPath), ppszPath);
+    *ppszPath = NULL;
+
+    /* check if folder has parent */
+    dwSize = sizeof(parentGuid);
+    hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, registryPath, szParentFolder, RRF_RT_REG_SZ, &dwType, parentGuid, &dwSize));
+    if(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) hr = S_FALSE;
+
+    if(hr == S_OK)
+    {
+        /* get parent's known folder path (recursive) */
+        hr = get_known_folder_registry_path(NULL, parentGuid, &parentRegistryPath);
+        if(FAILED(hr)) return hr;
+
+        hr = get_known_folder_path(parentGuid, parentRegistryPath, &parentPath);
+        if(FAILED(hr)) {
+            HeapFree(GetProcessHeap(), 0, parentRegistryPath);
+            return hr;
+        }
+
+        lstrcatW(path, parentPath);
+        lstrcatW(path, sBackslash);
+
+        HeapFree(GetProcessHeap(), 0, parentRegistryPath);
+        HeapFree(GetProcessHeap(), 0, parentPath);
+    }
+
+    /* check, if folder was redirected */
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, registryPath, szCategory, RRF_RT_REG_DWORD, NULL, &category, &dwSize));
+
+    if(SUCCEEDED(hr))
+    {
+        if(category == KF_CATEGORY_COMMON)
+            hRedirectionRootKey = HKEY_LOCAL_MACHINE;
+        else if(category == KF_CATEGORY_PERUSER)
+            hRedirectionRootKey = HKEY_CURRENT_USER;
+
+        if(hRedirectionRootKey)
+        {
+            hr = HRESULT_FROM_WIN32(RegGetValueW(hRedirectionRootKey, szKnownFolderRedirections, sFolderId, RRF_RT_REG_SZ, NULL, NULL, &dwSize));
+
+            if(SUCCEEDED(hr))
+            {
+                *ppszPath = CoTaskMemAlloc(dwSize+(lstrlenW(path)+1)*sizeof(WCHAR));
+                if(!*ppszPath) hr = E_OUTOFMEMORY;
+            }
+
+            if(SUCCEEDED(hr))
+            {
+                lstrcpyW(*ppszPath, path);
+                hr = HRESULT_FROM_WIN32(RegGetValueW(hRedirectionRootKey, szKnownFolderRedirections, sFolderId, RRF_RT_REG_SZ, NULL, *ppszPath + lstrlenW(path), &dwSize));
+            }
+        }
+
+        if(!*ppszPath)
+        {
+            /* no redirection, use previous way - read the relative path from folder definition */
+            hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, registryPath, szRelativePath, RRF_RT_REG_SZ, &dwType, NULL, &dwSize));
+
+            if(SUCCEEDED(hr))
+            {
+                *ppszPath = CoTaskMemAlloc(dwSize+(lstrlenW(path)+1)*sizeof(WCHAR));
+                if(!*ppszPath) hr = E_OUTOFMEMORY;
+            }
+
+            if(SUCCEEDED(hr))
+            {
+                lstrcpyW(*ppszPath, path);
+                hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, registryPath, szRelativePath, RRF_RT_REG_SZ, &dwType, *ppszPath + lstrlenW(path), &dwSize));
+            }
+        }
+    }
+
+    TRACE("returning path: %s\n", debugstr_w(*ppszPath));
+    return hr;
+}
+
+static HRESULT get_known_folder_path_by_id(
+    REFKNOWNFOLDERID folderId,
+    LPWSTR lpRegistryPath,
+    DWORD dwFlags,
+    LPWSTR *ppszPath)
+{
+    HRESULT hr;
+    WCHAR sGuid[39];
+    DWORD dwAttributes;
+
+    TRACE("(%s, %s, 0x%08x, %p)\n", debugstr_guid(folderId), debugstr_w(lpRegistryPath), dwFlags, ppszPath);
+
+    /* if this is registry-registered known folder, get path from registry */
+    if(lpRegistryPath)
+    {
+        StringFromGUID2(folderId, sGuid, sizeof(sGuid)/sizeof(sGuid[0]));
+
+        hr = get_known_folder_path(sGuid, lpRegistryPath, ppszPath);
+    }
+    /* in other case, use older way */
+    else
+        hr = SHGetKnownFolderPath( folderId, dwFlags, NULL, ppszPath );
+
+    if (FAILED(hr)) return hr;
+
+    /* check if known folder really exists */
+    dwAttributes = GetFileAttributesW(*ppszPath);
+    if(dwAttributes == INVALID_FILE_ATTRIBUTES || !(dwAttributes & FILE_ATTRIBUTE_DIRECTORY) )
+    {
+        TRACE("directory %s not found\n", debugstr_w(*ppszPath));
+        CoTaskMemFree(*ppszPath);
+        *ppszPath = NULL;
+        hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    }
+
+    return hr;
+}
+
 static HRESULT WINAPI knownfolder_GetPath(
     IKnownFolder *iface,
     DWORD dwFlags,
     LPWSTR *ppszPath)
 {
     struct knownfolder *knownfolder = impl_from_IKnownFolder( iface );
+    TRACE("(%p, 0x%08x, %p)\n", knownfolder, dwFlags, ppszPath);
 
-    TRACE("0x%08x, %p\n", dwFlags, ppszPath);
-    return SHGetKnownFolderPath( &knownfolder->id, dwFlags, NULL, ppszPath );
+    return get_known_folder_path_by_id(&knownfolder->id, knownfolder->registryPath, dwFlags, ppszPath);
 }
 
 static HRESULT WINAPI knownfolder_SetPath(
@@ -3188,8 +3575,19 @@ static HRESULT WINAPI knownfolder_SetPath(
     DWORD dwFlags,
     LPCWSTR pszPath)
 {
-    FIXME("0x%08x, %p\n", dwFlags, debugstr_w(pszPath));
-    return E_NOTIMPL;
+    struct knownfolder *knownfolder = impl_from_IKnownFolder( iface );
+    HRESULT hr = S_OK;
+
+    TRACE("(%p, 0x%08x, %p)\n", knownfolder, dwFlags, debugstr_w(pszPath));
+
+    /* check if the known folder is registered */
+    if(!knownfolder->registryPath)
+        hr = E_FAIL;
+
+    if(SUCCEEDED(hr))
+        hr = redirect_known_folder(&knownfolder->id, NULL, 0, pszPath, 0, NULL, NULL);
+
+    return hr;
 }
 
 static HRESULT WINAPI knownfolder_GetIDList(
@@ -3221,8 +3619,30 @@ static HRESULT WINAPI knownfolder_GetFolderDefinition(
     IKnownFolder *iface,
     KNOWNFOLDER_DEFINITION *pKFD)
 {
-    FIXME("%p\n", pKFD);
-    return E_NOTIMPL;
+    struct knownfolder *knownfolder = impl_from_IKnownFolder( iface );
+    HRESULT hr;
+    DWORD dwSize;
+    TRACE("(%p, %p)\n", knownfolder, pKFD);
+
+    if(!pKFD) return E_INVALIDARG;
+
+    ZeroMemory(pKFD, sizeof(*pKFD));
+
+    hr = get_known_folder_category(knownfolder->registryPath, &pKFD->category);
+
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, knownfolder->registryPath, szName, RRF_RT_REG_SZ, NULL, NULL, &dwSize));
+
+    if(SUCCEEDED(hr))
+    {
+        pKFD->pszName = CoTaskMemAlloc(dwSize);
+        if(!pKFD->pszName) hr = E_OUTOFMEMORY;
+    }
+
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegGetValueW(HKEY_LOCAL_MACHINE, knownfolder->registryPath, szName, RRF_RT_REG_SZ, NULL, pKFD->pszName, &dwSize));
+
+    return hr;
 }
 
 static const struct IKnownFolderVtbl knownfolder_vtbl =
@@ -3241,26 +3661,27 @@ static const struct IKnownFolderVtbl knownfolder_vtbl =
     knownfolder_GetFolderDefinition
 };
 
-static HRESULT knownfolder_create( void **ppv )
+static HRESULT knownfolder_create( struct knownfolder **knownfolder )
 {
     struct knownfolder *kf;
 
     kf = HeapAlloc( GetProcessHeap(), 0, sizeof(*kf) );
     if (!kf) return E_OUTOFMEMORY;
 
-    kf->vtbl = &knownfolder_vtbl;
+    kf->IKnownFolder_iface.lpVtbl = &knownfolder_vtbl;
     kf->refs = 1;
     memset( &kf->id, 0, sizeof(kf->id) );
+    kf->registryPath = NULL;
 
-    *ppv = &kf->vtbl;
+    *knownfolder = kf;
 
-    TRACE("returning iface %p\n", *ppv);
+    TRACE("returning iface %p\n", &kf->IKnownFolder_iface);
     return S_OK;
 }
 
 struct foldermanager
 {
-    const struct IKnownFolderManagerVtbl *vtbl;
+    IKnownFolderManager IKnownFolderManager_iface;
     LONG refs;
     UINT num_ids;
     KNOWNFOLDERID *ids;
@@ -3268,7 +3689,7 @@ struct foldermanager
 
 static inline struct foldermanager *impl_from_IKnownFolderManager( IKnownFolderManager *iface )
 {
-    return (struct foldermanager *)((char *)iface - FIELD_OFFSET( struct foldermanager, vtbl ));
+    return CONTAINING_RECORD( iface, struct foldermanager, IKnownFolderManager_iface );
 }
 
 static ULONG WINAPI foldermanager_AddRef(
@@ -3360,11 +3781,25 @@ static HRESULT WINAPI foldermanager_GetFolderIds(
 static BOOL is_knownfolder( struct foldermanager *fm, const KNOWNFOLDERID *id )
 {
     UINT i;
+    HRESULT hr;
+    LPWSTR registryPath = NULL;
+    HKEY hKey;
 
+    /* TODO: move all entries from "CSIDL_Data" static array to registry known folder descriptions */
     for (i = 0; i < fm->num_ids; i++)
         if (IsEqualGUID( &fm->ids[i], id )) return TRUE;
 
-    return FALSE;
+    hr = get_known_folder_registry_path(id, NULL, &registryPath);
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegOpenKeyExW(HKEY_LOCAL_MACHINE, registryPath, 0, 0, &hKey));
+
+    if(SUCCEEDED(hr))
+    {
+        hr = S_OK;
+        RegCloseKey(hKey);
+    }
+
+    return hr == S_OK;
 }
 
 static HRESULT WINAPI foldermanager_GetFolder(
@@ -3373,6 +3808,7 @@ static HRESULT WINAPI foldermanager_GetFolder(
     IKnownFolder **ppkf)
 {
     struct foldermanager *fm = impl_from_IKnownFolderManager( iface );
+    struct knownfolder *kf;
     HRESULT hr;
 
     TRACE("%s, %p\n", debugstr_guid(rfid), ppkf);
@@ -3382,9 +3818,14 @@ static HRESULT WINAPI foldermanager_GetFolder(
         WARN("unknown folder\n");
         return E_INVALIDARG;
     }
-    hr = knownfolder_create( (void **)ppkf );
+    hr = knownfolder_create( &kf );
     if (SUCCEEDED( hr ))
-        hr = knowfolder_set_id( *ppkf, rfid );
+    {
+        hr = knownfolder_set_id( kf, rfid );
+        *ppkf = &kf->IKnownFolder_iface;
+    }
+    else
+        *ppkf = NULL;
 
     return hr;
 }
@@ -3403,16 +3844,72 @@ static HRESULT WINAPI foldermanager_RegisterFolder(
     REFKNOWNFOLDERID rfid,
     KNOWNFOLDER_DEFINITION const *pKFD)
 {
-    FIXME("%p, %p\n", rfid, pKFD);
-    return E_NOTIMPL;
+    HRESULT hr;
+    HKEY hKey = NULL;
+    DWORD dwDisp;
+    LPWSTR registryPath = NULL;
+    TRACE("(%p, %s, %p)\n", iface, debugstr_guid(rfid), pKFD);
+
+    hr = get_known_folder_registry_path(rfid, NULL, &registryPath);
+    TRACE("registry path: %s\n", debugstr_w(registryPath));
+
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(RegCreateKeyExW(HKEY_LOCAL_MACHINE, registryPath, 0, NULL, 0, KEY_WRITE, 0, &hKey, &dwDisp));
+
+    if(SUCCEEDED(hr))
+    {
+        if(dwDisp == REG_OPENED_EXISTING_KEY)
+            hr = E_FAIL;
+
+        if(SUCCEEDED(hr))
+            hr = HRESULT_FROM_WIN32(RegSetValueExW(hKey, szCategory, 0, REG_DWORD, (LPBYTE)&pKFD->category, sizeof(pKFD->category)));
+
+        if(SUCCEEDED(hr))
+            hr = HRESULT_FROM_WIN32(RegSetValueExW(hKey, szName, 0, REG_SZ, (LPBYTE)pKFD->pszName, (lstrlenW(pKFD->pszName)+1)*sizeof(WCHAR) ));
+
+        if(SUCCEEDED(hr) && !IsEqualGUID(&pKFD->fidParent, &GUID_NULL))
+        {
+            WCHAR sParentGuid[39];
+            StringFromGUID2(&pKFD->fidParent, sParentGuid, sizeof(sParentGuid)/sizeof(sParentGuid[0]));
+
+            /* this known folder has parent folder */
+            hr = HRESULT_FROM_WIN32(RegSetValueExW(hKey, szParentFolder, 0, REG_SZ, (LPBYTE)sParentGuid, sizeof(sParentGuid)));
+        }
+
+        if(SUCCEEDED(hr) && pKFD->category != KF_CATEGORY_VIRTUAL)
+        {
+            if(!pKFD->pszRelativePath)
+                hr = E_INVALIDARG;
+
+            if(SUCCEEDED(hr))
+                hr = HRESULT_FROM_WIN32(RegSetValueExW(hKey, szRelativePath, 0, REG_SZ, (LPBYTE)pKFD->pszRelativePath, (lstrlenW(pKFD->pszRelativePath)+1)*sizeof(WCHAR) ));
+        }
+
+        RegCloseKey(hKey);
+
+        if(FAILED(hr))
+            SHDeleteKeyW(HKEY_LOCAL_MACHINE, registryPath);
+    }
+
+    HeapFree(GetProcessHeap(), 0, registryPath);
+    return hr;
 }
 
 static HRESULT WINAPI foldermanager_UnregisterFolder(
     IKnownFolderManager *iface,
     REFKNOWNFOLDERID rfid)
 {
-    FIXME("%p\n", rfid);
-    return E_NOTIMPL;
+    HRESULT hr;
+    LPWSTR registryPath = NULL;
+    TRACE("(%p, %s)\n", iface, debugstr_guid(rfid));
+
+    hr = get_known_folder_registry_path(rfid, NULL, &registryPath);
+
+    if(SUCCEEDED(hr))
+        hr = HRESULT_FROM_WIN32(SHDeleteKeyW(HKEY_LOCAL_MACHINE, registryPath));
+
+    HeapFree(GetProcessHeap(), 0, registryPath);
+    return hr;
 }
 
 static HRESULT WINAPI foldermanager_FindFolderFromPath(
@@ -3444,9 +3941,7 @@ static HRESULT WINAPI foldermanager_Redirect(
     KNOWNFOLDERID const *pExclusion,
     LPWSTR *ppszError)
 {
-    FIXME("%p, %p, 0x%08x, %s, %u, %p, %p\n", rfid, hwnd, flags,
-          debugstr_w(pszTargetPath), cFolders, pExclusion, ppszError);
-    return E_NOTIMPL;
+    return redirect_known_folder(rfid, hwnd, flags, pszTargetPath, cFolders, pExclusion, ppszError);
 }
 
 static const struct IKnownFolderManagerVtbl foldermanager_vtbl =
@@ -3474,7 +3969,7 @@ static HRESULT foldermanager_create( void **ppv )
     fm = HeapAlloc( GetProcessHeap(), 0, sizeof(*fm) );
     if (!fm) return E_OUTOFMEMORY;
 
-    fm->vtbl = &foldermanager_vtbl;
+    fm->IKnownFolderManager_iface.lpVtbl = &foldermanager_vtbl;
     fm->refs = 1;
     fm->num_ids = 0;
 
@@ -3497,7 +3992,7 @@ static HRESULT foldermanager_create( void **ppv )
         }
     }
     TRACE("found %u known folders\n", fm->num_ids);
-    *ppv = &fm->vtbl;
+    *ppv = &fm->IKnownFolderManager_iface;
 
     TRACE("returning iface %p\n", *ppv);
     return S_OK;

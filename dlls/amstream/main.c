@@ -3,9 +3,6 @@
  *
  * Copyright 2004 Christian Costa
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -216,7 +213,7 @@ HRESULT WINAPI DllCanUnloadNow(void)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( instance, NULL );
+    return __wine_register_resources( instance );
 }
 
 /***********************************************************************
@@ -224,5 +221,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( instance, NULL );
+    return __wine_unregister_resources( instance );
 }

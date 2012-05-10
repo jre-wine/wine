@@ -270,6 +270,8 @@ static const NodeImplVtbl HTMLFrameElementImplVtbl = {
     HTMLFrameElement_QI,
     HTMLFrameElement_destructor,
     HTMLElement_clone,
+    HTMLElement_get_attr_col,
+    NULL,
     NULL,
     NULL,
     NULL,

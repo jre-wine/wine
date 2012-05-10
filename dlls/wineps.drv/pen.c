@@ -28,23 +28,24 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
-static const char PEN_dash[]       = "50 30";     /* -----   -----   -----  */
-static const char PEN_dot[]        = "20";      /* --  --  --  --  --  -- */
-static const char PEN_dashdot[]    = "40 30 20 30";  /* ----   --   ----   --  */
-static const char PEN_dashdotdot[] = "40 20 20 20 20 20"; /* ----  --  --  ----  */
-static const char PEN_alternate[]  = "1";
+static const DWORD PEN_dash[]       = { 50, 30 };                 /* -----   -----   -----  */
+static const DWORD PEN_dot[]        = { 20 };                     /* --  --  --  --  --  -- */
+static const DWORD PEN_dashdot[]    = { 40, 30, 20, 30 };         /* ----   --   ----   --  */
+static const DWORD PEN_dashdotdot[] = { 40, 20, 20, 20, 20, 20 }; /* ----  --  --  ----  */
+static const DWORD PEN_alternate[]  = { 1 };
 
 /***********************************************************************
  *           SelectPen   (WINEPS.@)
  */
-HPEN CDECL PSDRV_SelectPen( PSDRV_PDEVICE *physDev, HPEN hpen )
+HPEN PSDRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     LOGPEN logpen;
+    EXTLOGPEN *elp = NULL;
 
     if (!GetObjectW( hpen, sizeof(logpen), &logpen ))
     {
         /* must be an extended pen */
-        EXTLOGPEN *elp;
         INT size = GetObjectW( hpen, 0, NULL );
 
         if (!size) return 0;
@@ -57,8 +58,6 @@ HPEN CDECL PSDRV_SelectPen( PSDRV_PDEVICE *physDev, HPEN hpen )
         logpen.lopnWidth.x = elp->elpWidth;
         logpen.lopnWidth.y = 0;
         logpen.lopnColor = elp->elpColor;
-
-        HeapFree( GetProcessHeap(), 0, elp );
     }
 
     TRACE("hpen = %p colour = %08x\n", hpen, logpen.lopnColor);
@@ -66,9 +65,11 @@ HPEN CDECL PSDRV_SelectPen( PSDRV_PDEVICE *physDev, HPEN hpen )
     physDev->pen.width = logpen.lopnWidth.x;
     if ((logpen.lopnStyle & PS_GEOMETRIC) || (physDev->pen.width > 1))
     {
-        physDev->pen.width = PSDRV_XWStoDS( physDev, physDev->pen.width );
+        physDev->pen.width = PSDRV_XWStoDS( dev, physDev->pen.width );
         if(physDev->pen.width < 0) physDev->pen.width = -physDev->pen.width;
     }
+    if (hpen == GetStockObject( DC_PEN ))
+        logpen.lopnColor = GetDCPenColor( dev->hdc );
 
     switch (logpen.lopnStyle & PS_JOIN_MASK)
     {
@@ -86,41 +87,67 @@ HPEN CDECL PSDRV_SelectPen( PSDRV_PDEVICE *physDev, HPEN hpen )
     case PS_ENDCAP_FLAT:   physDev->pen.endcap = 0; break;
     }
 
-    PSDRV_CreateColor(physDev, &physDev->pen.color, logpen.lopnColor);
+    PSDRV_CreateColor(dev, &physDev->pen.color, logpen.lopnColor);
     physDev->pen.style = logpen.lopnStyle & PS_STYLE_MASK;
 
     switch(physDev->pen.style) {
     case PS_DASH:
-	physDev->pen.dash = PEN_dash;
+        memcpy( physDev->pen.dash, PEN_dash, sizeof(PEN_dash) );
+        physDev->pen.dash_len = sizeof(PEN_dash) / sizeof(DWORD);
 	break;
 
     case PS_DOT:
-	physDev->pen.dash = PEN_dot;
+        memcpy( physDev->pen.dash, PEN_dot, sizeof(PEN_dot) );
+        physDev->pen.dash_len = sizeof(PEN_dot) / sizeof(DWORD);
 	break;
 
     case PS_DASHDOT:
-	physDev->pen.dash = PEN_dashdot;
+        memcpy( physDev->pen.dash, PEN_dashdot, sizeof(PEN_dashdot) );
+        physDev->pen.dash_len = sizeof(PEN_dashdot) / sizeof(DWORD);
 	break;
 
     case PS_DASHDOTDOT:
-	physDev->pen.dash = PEN_dashdotdot;
+        memcpy( physDev->pen.dash, PEN_dashdotdot, sizeof(PEN_dashdotdot) );
+        physDev->pen.dash_len = sizeof(PEN_dashdotdot) / sizeof(DWORD);
 	break;
 
     case PS_ALTERNATE:
-	physDev->pen.dash = PEN_alternate;
+        memcpy( physDev->pen.dash, PEN_alternate, sizeof(PEN_alternate) );
+        physDev->pen.dash_len = sizeof(PEN_alternate) / sizeof(DWORD);
+	break;
+
+    case PS_USERSTYLE:
+        physDev->pen.dash_len = min( elp->elpNumEntries, MAX_DASHLEN );
+        memcpy( physDev->pen.dash, elp->elpStyleEntry, physDev->pen.dash_len * sizeof(DWORD) );
 	break;
 
     default:
-	physDev->pen.dash = NULL;
+	physDev->pen.dash_len = 0;
     }
 
-    if ((physDev->pen.width > 1) && (physDev->pen.dash != NULL)) {
-	physDev->pen.style = PS_SOLID;
-         physDev->pen.dash = NULL;
+    if ((physDev->pen.width > 1) && physDev->pen.dash_len &&
+        physDev->pen.style != PS_USERSTYLE && physDev->pen.style != PS_ALTERNATE)
+    {
+        physDev->pen.style = PS_SOLID;
+        physDev->pen.dash_len = 0;
     }
 
+    HeapFree( GetProcessHeap(), 0, elp );
     physDev->pen.set = FALSE;
     return hpen;
+}
+
+
+/***********************************************************************
+ *           SetDCPenColor (WINEPS.@)
+ */
+COLORREF PSDRV_SetDCPenColor( PHYSDEV dev, COLORREF color )
+{
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+
+    if (GetCurrentObject( dev->hdc, OBJ_PEN ) == GetStockObject( DC_PEN ))
+        PSDRV_CreateColor( dev, &physDev->pen.color, color );
+    return color;
 }
 
 
@@ -129,13 +156,15 @@ HPEN CDECL PSDRV_SelectPen( PSDRV_PDEVICE *physDev, HPEN hpen )
  *	PSDRV_SetPen
  *
  */
-BOOL PSDRV_SetPen(PSDRV_PDEVICE *physDev)
+BOOL PSDRV_SetPen( PHYSDEV dev )
 {
+    PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
+
     if (physDev->pen.style != PS_NULL) {
-	PSDRV_WriteSetColor(physDev, &physDev->pen.color);
+	PSDRV_WriteSetColor(dev, &physDev->pen.color);
 
 	if(!physDev->pen.set) {
-	    PSDRV_WriteSetPen(physDev);
+	    PSDRV_WriteSetPen(dev);
 	    physDev->pen.set = TRUE;
 	}
     }

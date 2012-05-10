@@ -40,8 +40,8 @@ static WNDPROC g_status_wndproc;
 static RECT g_rcCreated;
 static HWND g_hMainWnd;
 static int g_wmsize_count = 0;
-static DWORD g_ysize;
-static DWORD g_dpisize;
+static INT g_ysize;
+static INT g_dpisize;
 static int g_wmdrawitm_ctr;
 static WNDPROC g_wndproc_saved;
 
@@ -120,7 +120,7 @@ static int CALLBACK check_height_font_enumproc(ENUMLOGFONTEX *enumlf, NEWTEXTMET
     static const int sizes[] = { 6,  7,  8,  9, 10, 11, 12, 13, 15, 16,
                                 20, 22, 28, 36, 48, 72};
     DWORD i;
-    DWORD y;
+    INT y;
     LPSTR facename = (CHAR *)enumlf->elfFullName;
 
     /* on win9x, enumlf->elfFullName is only valid for truetype fonts */
@@ -260,17 +260,18 @@ static void test_status_control(void)
     HICON hIcon;
     char ch;
     char chstr[10] = "Inval id";
+    COLORREF crColor = RGB(0,0,0);
 
     hWndStatus = create_status_control(WS_VISIBLE | SBT_TOOLTIPS, 0);
 
     /* Divide into parts and set text */
     r = SendMessage(hWndStatus, SB_SETPARTS, 3, (LPARAM)nParts);
     expect(TRUE,r);
-    r = SendMessage(hWndStatus, SB_SETTEXT, 0, (LPARAM)"First");
+    r = SendMessage(hWndStatus, SB_SETTEXT, SBT_POPOUT|0,    (LPARAM)"First");
     expect(TRUE,r);
-    r = SendMessage(hWndStatus, SB_SETTEXT, 1, (LPARAM)"Second");
+    r = SendMessage(hWndStatus, SB_SETTEXT, SBT_OWNERDRAW|1, (LPARAM)"Second");
     expect(TRUE,r);
-    r = SendMessage(hWndStatus, SB_SETTEXT, 2, (LPARAM)"Third");
+    r = SendMessage(hWndStatus, SB_SETTEXT, SBT_NOBORDERS|2, (LPARAM)"Third");
     expect(TRUE,r);
 
     /* Get RECT Information */
@@ -286,13 +287,21 @@ static void test_status_control(void)
     r = SendMessage(hWndStatus, SB_GETRECT, 3, (LPARAM)&rc);
     expect(FALSE,r);
     /* Get text length and text */
+    r = SendMessage(hWndStatus, SB_GETTEXTLENGTH, 0, 0);
+    expect(5,LOWORD(r));
+    expect(SBT_POPOUT,HIWORD(r));
+    r = SendMessageW(hWndStatus, WM_GETTEXTLENGTH, 0, 0);
+    ok(r == 5 || broken(0x02000005 /* NT4 */), "Expected 5, got %d\n", r);
+    r = SendMessage(hWndStatus, SB_GETTEXTLENGTH, 1, 0);
+    expect(0,LOWORD(r));
+    expect(SBT_OWNERDRAW,HIWORD(r));
     r = SendMessage(hWndStatus, SB_GETTEXTLENGTH, 2, 0);
     expect(5,LOWORD(r));
-    expect(0,HIWORD(r));
+    expect(SBT_NOBORDERS,HIWORD(r));
     r = SendMessage(hWndStatus, SB_GETTEXT, 2, (LPARAM) charArray);
     ok(strcmp(charArray,"Third") == 0, "Expected Third, got %s\n", charArray);
     expect(5,LOWORD(r));
-    expect(0,HIWORD(r));
+    expect(SBT_NOBORDERS,HIWORD(r));
 
     /* Get parts and borders */
     r = SendMessage(hWndStatus, SB_GETPARTS, 3, (LPARAM)checkParts);
@@ -343,14 +352,14 @@ static void test_status_control(void)
     }
 
     /* Set background color */
-    r = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, RGB(255,0,0));
-    ok(r == CLR_DEFAULT ||
-       broken(r == 0), /* win95 */
-       "Expected %d, got %d\n", CLR_DEFAULT, r);
-    r = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, CLR_DEFAULT);
-    ok(r == RGB(255,0,0) ||
-       broken(r == 0), /* win95 */
-       "Expected %d, got %d\n", RGB(255,0,0), r);
+    crColor = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, RGB(255,0,0));
+    ok(crColor == CLR_DEFAULT ||
+       broken(crColor == RGB(0,0,0)), /* win95 */
+       "Expected 0x%.8x, got 0x%.8x\n", CLR_DEFAULT, crColor);
+    crColor = SendMessage(hWndStatus, SB_SETBKCOLOR , 0, CLR_DEFAULT);
+    ok(crColor == RGB(255,0,0) ||
+       broken(crColor == RGB(0,0,0)), /* win95 */
+       "Expected 0x%.8x, got 0x%.8x\n", RGB(255,0,0), crColor);
 
     /* Add an icon to the status bar */
     hIcon = LoadIcon(NULL, IDI_QUESTION);
@@ -459,7 +468,7 @@ static void test_status_ownerdraw(void)
     r = SendMessage(hWndStatus, SB_SETTEXT, SBT_OWNERDRAW, (LPARAM)statustext);
     ok( r == TRUE, "Sendmessage returned %d, expected 1\n", r);
     ok( 1 == g_wmdrawitm_ctr, "got %d drawitem messages expected 1\n", g_wmdrawitm_ctr);
-    /* ;and again */
+    /* and again */
     g_wmdrawitm_ctr = 0;
     r = SendMessage(hWndStatus, SB_SETTEXT, SBT_OWNERDRAW, (LPARAM)statustext);
     ok( r == TRUE, "Sendmessage returned %d, expected 1\n", r);

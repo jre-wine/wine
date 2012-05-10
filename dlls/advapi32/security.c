@@ -607,6 +607,19 @@ CheckTokenMembership( HANDLE token, PSID sid_to_check,
         }
         token = thread_token;
     }
+    else
+    {
+        TOKEN_TYPE type;
+
+        ret = GetTokenInformation(token, TokenType, &type, sizeof(TOKEN_TYPE), &size);
+        if (!ret) goto exit;
+
+        if (type == TokenPrimary)
+        {
+            SetLastError(ERROR_NO_IMPERSONATION_TOKEN);
+            return FALSE;
+        }
+    }
 
     ret = GetTokenInformation(token, TokenGroups, NULL, 0, &size);
     if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER)
@@ -3471,7 +3484,7 @@ BOOL WINAPI SetAclInformation( PACL pAcl, LPVOID pAclInformation,
     return TRUE;
 }
 
-DWORD trustee_name_A_to_W(TRUSTEE_FORM form, char *trustee_nameA, WCHAR **ptrustee_nameW)
+static DWORD trustee_name_A_to_W(TRUSTEE_FORM form, char *trustee_nameA, WCHAR **ptrustee_nameW)
 {
     DWORD len;
 
@@ -3552,7 +3565,7 @@ error:
     }
 }
 
-void free_trustee_name(TRUSTEE_FORM form, WCHAR *trustee_nameW)
+static void free_trustee_name(TRUSTEE_FORM form, WCHAR *trustee_nameW)
 {
     switch (form)
     {
@@ -3587,7 +3600,7 @@ DWORD WINAPI SetEntriesInAclA( ULONG count, PEXPLICIT_ACCESSA pEntries,
 {
     DWORD err = ERROR_SUCCESS;
     EXPLICIT_ACCESSW *pEntriesW;
-    int alloc_index, free_index;
+    UINT alloc_index, free_index;
 
     TRACE("%d %p %p %p\n", count, pEntries, OldAcl, NewAcl);
 
@@ -5495,6 +5508,30 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
 }
 
 /******************************************************************************
+ * GetNamedSecurityInfoExW [ADVAPI32.@]
+ */
+DWORD WINAPI GetNamedSecurityInfoExW( LPCWSTR object, SE_OBJECT_TYPE type,
+    SECURITY_INFORMATION info, LPCWSTR provider, LPCWSTR property,
+    PACTRL_ACCESSW* access_list, PACTRL_AUDITW* audit_list, LPWSTR* owner, LPWSTR* group )
+{
+    FIXME("(%s, %d, %d, %s, %s, %p, %p, %p, %p) stub\n", debugstr_w(object), type, info,
+        debugstr_w(provider), debugstr_w(property), access_list, audit_list, owner, group);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * GetNamedSecurityInfoExA [ADVAPI32.@]
+ */
+DWORD WINAPI GetNamedSecurityInfoExA( LPCSTR object, SE_OBJECT_TYPE type,
+    SECURITY_INFORMATION info, LPCSTR provider, LPCSTR property,
+    PACTRL_ACCESSA* access_list, PACTRL_AUDITA* audit_list, LPSTR* owner, LPSTR* group )
+{
+    FIXME("(%s, %d, %d, %s, %s, %p, %p, %p, %p) stub\n", debugstr_a(object), type, info,
+        debugstr_a(provider), debugstr_a(property), access_list, audit_list, owner, group);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
  * DecryptFileW [ADVAPI32.@]
  */
 BOOL WINAPI DecryptFileW(LPCWSTR lpFileName, DWORD dwReserved)
@@ -5617,5 +5654,15 @@ BOOL WINAPI SaferGetPolicyInformation(DWORD scope, SAFER_POLICY_INFO_CLASS class
                                       PVOID buffer, PDWORD required, LPVOID lpReserved)
 {
     FIXME("(%u %u %u %p %p %p) stub\n", scope, class, size, buffer, required, lpReserved);
+    return FALSE;
+}
+
+/******************************************************************************
+ * SaferSetLevelInformation   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferSetLevelInformation(SAFER_LEVEL_HANDLE handle, SAFER_OBJECT_INFO_CLASS infotype,
+                                     LPVOID buffer, DWORD size)
+{
+    FIXME("(%p %u %p %u) stub\n", handle, infotype, buffer, size);
     return FALSE;
 }

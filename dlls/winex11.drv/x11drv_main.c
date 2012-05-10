@@ -67,15 +67,15 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION X11DRV_CritSection = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-Screen *screen;
+static Screen *screen;
 Visual *visual;
+XPixmapFormatValues **pixmap_formats;
 unsigned int screen_width;
 unsigned int screen_height;
 unsigned int screen_bpp;
 unsigned int screen_depth;
 RECT virtual_screen_rect;
 Window root_window;
-int dxgrab = 0;
 int usexvidmode = 1;
 int usexrandr = 1;
 int usexcomposite = 1;
@@ -84,6 +84,8 @@ int use_take_focus = 1;
 int use_primary_selection = 0;
 int use_system_cursors = 1;
 int show_systray = 1;
+int grab_pointer = 1;
+int grab_fullscreen = 0;
 int managed_mode = 1;
 int decorated_mode = 1;
 int private_color_map = 0;
@@ -323,33 +325,21 @@ void CDECL wine_tsx11_unlock(void)
 
 
 /***********************************************************************
- *		depth_to_bpp
- *
- * Convert X11-reported depth to the BPP value that Windows apps expect to see.
+ *		init_pixmap_formats
  */
-unsigned int depth_to_bpp( unsigned int depth )
+static void init_pixmap_formats( Display *display )
 {
-    switch (depth)
+    int i, count, max = 32;
+    XPixmapFormatValues *formats = XListPixmapFormats( display, &count );
+
+    for (i = 0; i < count; i++)
     {
-    case 1:
-    case 8:
-        return depth;
-    case 15:
-    case 16:
-        return 16;
-    case 24:
-        /* This is not necessarily right. X11 always has 24 bits per pixel, but it can run
-         * with 24 bit framebuffers and 32 bit framebuffers. It doesn't make any difference
-         * for windowing, but gl applications can get visuals with alpha channels. So we
-         * should check the framebuffer and/or opengl formats available to find out what the
-         * framebuffer actually does
-         */
-    case 32:
-        return 32;
-    default:
-        FIXME( "Unexpected X11 depth %d bpp, what to report to app?\n", depth );
-        return depth;
+        TRACE( "depth %u, bpp %u, pad %u\n",
+               formats[i].depth, formats[i].bits_per_pixel, formats[i].scanline_pad );
+        if (formats[i].depth > max) max = formats[i].depth;
     }
+    pixmap_formats = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*pixmap_formats) * (max + 1) );
+    for (i = 0; i < count; i++) pixmap_formats[formats[i].depth] = &formats[i];
 }
 
 
@@ -405,9 +395,6 @@ static void setup_options(void)
     if (!get_config_key( hkey, appkey, "Decorated", buffer, sizeof(buffer) ))
         decorated_mode = IS_OPTION_TRUE( buffer[0] );
 
-    if (!get_config_key( hkey, appkey, "DXGrab", buffer, sizeof(buffer) ))
-        dxgrab = IS_OPTION_TRUE( buffer[0] );
-
     if (!get_config_key( hkey, appkey, "UseXVidMode", buffer, sizeof(buffer) ))
         usexvidmode = IS_OPTION_TRUE( buffer[0] );
 
@@ -425,6 +412,12 @@ static void setup_options(void)
 
     if (!get_config_key( hkey, appkey, "ShowSystray", buffer, sizeof(buffer) ))
         show_systray = IS_OPTION_TRUE( buffer[0] );
+
+    if (!get_config_key( hkey, appkey, "GrabPointer", buffer, sizeof(buffer) ))
+        grab_pointer = IS_OPTION_TRUE( buffer[0] );
+
+    if (!get_config_key( hkey, appkey, "GrabFullscreen", buffer, sizeof(buffer) ))
+        grab_fullscreen = IS_OPTION_TRUE( buffer[0] );
 
     screen_depth = 0;
     if (!get_config_key( hkey, appkey, "ScreenDepth", buffer, sizeof(buffer) ))
@@ -529,7 +522,20 @@ sym_not_found:
  */
 static BOOL process_attach(void)
 {
+    char error[1024];
     Display *display;
+    void *libx11 = wine_dlopen( SONAME_LIBX11, RTLD_NOW|RTLD_GLOBAL, error, sizeof(error) );
+
+    if (!libx11)
+    {
+        ERR( "failed to load %s: %s\n", SONAME_LIBX11, error );
+        return FALSE;
+    }
+    pXGetEventData = wine_dlsym( libx11, "XGetEventData", NULL, 0 );
+    pXFreeEventData = wine_dlsym( libx11, "XFreeEventData", NULL, 0 );
+#ifdef SONAME_LIBXEXT
+    wine_dlopen( SONAME_LIBXEXT, RTLD_NOW|RTLD_GLOBAL, NULL, 0 );
+#endif
 
     setup_options();
 
@@ -562,7 +568,8 @@ static BOOL process_attach(void)
         }
     }
     if (!screen_depth) screen_depth = DefaultDepthOfScreen( screen );
-    screen_bpp = depth_to_bpp( screen_depth );
+    init_pixmap_formats( display );
+    screen_bpp = pixmap_formats[screen_depth]->bits_per_pixel;
 
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
 
@@ -582,6 +589,7 @@ static BOOL process_attach(void)
 #ifdef SONAME_LIBXCOMPOSITE
     X11DRV_XComposite_Init();
 #endif
+    X11DRV_XInput2_Init();
 
 #ifdef HAVE_XKB
     if (use_xkb) use_xkb = XkbUseExtension( gdi_display, NULL, NULL );
@@ -624,8 +632,7 @@ static void process_detach(void)
     /* cleanup XVidMode */
     X11DRV_XF86VM_Cleanup();
 #endif
-    if(using_client_side_fonts)
-        X11DRV_XRender_Finalize();
+    X11DRV_XRender_Finalize();
 
     /* cleanup GDI */
     X11DRV_GDI_Finalize();

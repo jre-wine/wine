@@ -1310,22 +1310,17 @@ static BOOL CRYPT_AsnDecodeOidIgnoreTag(const BYTE *pbEncoded, DWORD cbEncoded,
 
         if (dataLen)
         {
-            /* The largest possible string for the first two components
-             * is 2.175 (= 2 * 40 + 175 = 255), so this is big enough.
-             */
-            char firstTwo[6];
             const BYTE *ptr;
+            char str[32];
 
-            snprintf(firstTwo, sizeof(firstTwo), "%d.%d",
+            snprintf(str, sizeof(str), "%d.%d",
              pbEncoded[1 + lenBytes] / 40,
              pbEncoded[1 + lenBytes] - (pbEncoded[1 + lenBytes] / 40)
              * 40);
-            bytesNeeded += strlen(firstTwo) + 1;
+            bytesNeeded += strlen(str) + 1;
             for (ptr = pbEncoded + 2 + lenBytes; ret &&
              ptr - pbEncoded - 1 - lenBytes < dataLen; )
             {
-                /* large enough for ".4000000" */
-                char str[9];
                 int val = 0;
 
                 while (ptr - pbEncoded - 1 - lenBytes < dataLen &&
@@ -1465,7 +1460,10 @@ static BOOL WINAPI CRYPT_AsnDecodeExtensions(DWORD dwCertEncodingType,
          sizeof(CERT_EXTENSIONS),
          CRYPT_AsnDecodeExtension, sizeof(CERT_EXTENSION), TRUE,
          offsetof(CERT_EXTENSION, pszObjId) };
+        CERT_EXTENSIONS *exts = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            exts->rgExtension = (CERT_EXTENSION *)(exts + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -2356,7 +2354,10 @@ static BOOL WINAPI CRYPT_AsnDecodeSMIMECapabilities(DWORD dwCertEncodingType,
          sizeof(CRYPT_SMIME_CAPABILITIES),
          CRYPT_AsnDecodeSMIMECapability, sizeof(CRYPT_SMIME_CAPABILITY), TRUE,
          offsetof(CRYPT_SMIME_CAPABILITY, pszObjId) };
+        CRYPT_SMIME_CAPABILITIES *capabilities = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            capabilities->rgCapability = (CRYPT_SMIME_CAPABILITY *)(capabilities + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -2832,7 +2833,10 @@ static BOOL WINAPI CRYPT_AsnDecodePKCSAttributes(DWORD dwCertEncodingType,
          sizeof(CRYPT_ATTRIBUTES),
          CRYPT_AsnDecodePKCSAttributeInternal, sizeof(CRYPT_ATTRIBUTE),
          TRUE, offsetof(CRYPT_ATTRIBUTE, pszObjId) };
+        CRYPT_ATTRIBUTES *attrs = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            attrs->rgAttr = (CRYPT_ATTRIBUTE *)(attrs + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -3232,7 +3236,10 @@ static BOOL WINAPI CRYPT_AsnDecodeAuthorityInfoAccess(DWORD dwCertEncodingType,
          sizeof(CERT_AUTHORITY_INFO_ACCESS),
          CRYPT_AsnDecodeAccessDescription, sizeof(CERT_ACCESS_DESCRIPTION),
          TRUE, offsetof(CERT_ACCESS_DESCRIPTION, pszAccessMethod) };
+        CERT_AUTHORITY_INFO_ACCESS *info = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            info->rgAccDescr = (CERT_ACCESS_DESCRIPTION *)(info + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -3653,6 +3660,10 @@ static BOOL WINAPI CRYPT_AsnDecodeCertPolicies(DWORD dwCertEncodingType,
          sizeof(CERT_POLICIES_INFO),
          CRYPT_AsnDecodeCertPolicy, sizeof(CERT_POLICY_INFO), TRUE,
          offsetof(CERT_POLICY_INFO, pszPolicyIdentifier) };
+        CERT_POLICIES_INFO *info = pvStructInfo;
+
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            info->rgPolicyInfo = (CERT_POLICY_INFO *)(info + 1);
 
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
@@ -3706,7 +3717,10 @@ static BOOL WINAPI CRYPT_AsnDecodeCertPolicyMappings(DWORD dwCertEncodingType,
          sizeof(CERT_POLICY_MAPPING),
          CRYPT_AsnDecodeCertPolicyMapping, sizeof(CERT_POLICY_MAPPING), TRUE,
          offsetof(CERT_POLICY_MAPPING, pszIssuerDomainPolicy) };
+        CERT_POLICY_MAPPINGS_INFO *info = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            info->rgPolicyMapping = (CERT_POLICY_MAPPING *)(info + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -5020,7 +5034,10 @@ static BOOL WINAPI CRYPT_AsnDecodeCRLDistPoints(DWORD dwCertEncodingType,
          sizeof(CRL_DIST_POINTS_INFO),
          CRYPT_AsnDecodeDistPoint, sizeof(CRL_DIST_POINT), TRUE,
          offsetof(CRL_DIST_POINT, DistPointName.u.FullName.rgAltEntry) };
+        CRL_DIST_POINTS_INFO *info = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            info->rgDistPoint = (CRL_DIST_POINT *)(info + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -5049,7 +5066,10 @@ static BOOL WINAPI CRYPT_AsnDecodeEnhancedKeyUsage(DWORD dwCertEncodingType,
          offsetof(CERT_ENHKEY_USAGE, rgpszUsageIdentifier),
          sizeof(CERT_ENHKEY_USAGE),
          CRYPT_AsnDecodeOidInternal, sizeof(LPSTR), TRUE, 0 };
+        CERT_ENHKEY_USAGE *usage = pvStructInfo;
 
+        if (pvStructInfo && !(dwFlags & CRYPT_DECODE_ALLOC_FLAG))
+            usage->rgpszUsageIdentifier = (LPSTR *)(usage + 1);
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
     }
@@ -6111,4 +6131,11 @@ HCERTSTORE WINAPI PFXImportCertStore(CRYPT_DATA_BLOB *pPFX, LPCWSTR szPassword,
 {
     FIXME_(crypt)("(%p, %p, %08x): stub\n", pPFX, szPassword, dwFlags);
     return NULL;
+}
+
+BOOL WINAPI PFXVerifyPassword(CRYPT_DATA_BLOB *pPFX, LPCWSTR szPassword,
+ DWORD dwFlags)
+{
+    FIXME_(crypt)("(%p, %p, %08x): stub\n", pPFX, szPassword, dwFlags);
+    return FALSE;
 }

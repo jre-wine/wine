@@ -940,14 +940,22 @@ GpStatus WINGDIPAPI GdipCreateTextureIAI(GpImage *image, GDIPCONST GpImageAttrib
 GpStatus WINGDIPAPI GdipCreateTexture2I(GpImage *image, GpWrapMode wrapmode,
         INT x, INT y, INT width, INT height, GpTexture **texture)
 {
-    GpImageAttributes imageattr;
+    GpImageAttributes *imageattr;
+    GpStatus stat;
 
     TRACE("%p %d %d %d %d %d %p\n", image, wrapmode, x, y, width, height,
             texture);
 
-    imageattr.wrap = wrapmode;
+    stat = GdipCreateImageAttributes(&imageattr);
 
-    return GdipCreateTextureIA(image, &imageattr, x, y, width, height, texture);
+    if (stat == Ok)
+    {
+        imageattr->wrap = wrapmode;
+
+        stat = GdipCreateTextureIA(image, imageattr, x, y, width, height, texture);
+    }
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipGetBrushType(GpBrush *brush, GpBrushType *type)
@@ -1022,6 +1030,7 @@ GpStatus WINGDIPAPI GdipDeleteBrush(GpBrush *brush)
             GdipDeleteMatrix(((GpTexture*)brush)->transform);
             GdipDisposeImage(((GpTexture*)brush)->image);
             GdipDisposeImageAttributes(((GpTexture*)brush)->imageattributes);
+            GdipFree(((GpTexture*)brush)->bitmap_bits);
             break;
         default:
             break;
@@ -1244,10 +1253,15 @@ GpStatus WINGDIPAPI GdipGetPathGradientSurroundColorsWithCount(GpPathGradient
 
 GpStatus WINGDIPAPI GdipGetPathGradientSurroundColorCount(GpPathGradient *brush, INT *count)
 {
+    static int calls;
+
     TRACE("(%p, %p)\n", brush, count);
 
     if (!brush || !count)
        return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
 
     return NotImplemented;
 }
@@ -2003,9 +2017,14 @@ GpStatus WINGDIPAPI GdipMultiplyLineTransform(GpLineGradient *brush,
 GpStatus WINGDIPAPI GdipTranslateLineTransform(GpLineGradient* brush,
         REAL dx, REAL dy, GpMatrixOrder order)
 {
-    FIXME("stub: %p %f %f %d\n", brush, dx, dy, order);
+    static int calls;
 
-    return NotImplemented;
+    TRACE("(%p,%f,%f,%d)\n", brush, dx, dy, order);
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return Ok;
 }
 
 /******************************************************************************

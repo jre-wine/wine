@@ -22,6 +22,7 @@
 #include <stdarg.h>
 
 #include "stdlib.h"
+#include "stdio.h"
 #include "errno.h"
 #include "malloc.h"
 #include "windef.h"
@@ -66,8 +67,8 @@ typedef struct __type_info
   char        mangled[32]; /* Variable length, but we declare it large enough for static RTTI */
 } type_info;
 
-typedef void* (*__cdecl malloc_func_t)(size_t);
-typedef void  (*__cdecl free_func_t)(void*);
+typedef void* (__cdecl *malloc_func_t)(size_t);
+typedef void  (__cdecl *free_func_t)(void*);
 
 extern char* __cdecl __unDName(char *,const char*,int,malloc_func_t,free_func_t,unsigned short int);
 
@@ -101,6 +102,7 @@ BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
 
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hdll);
+        _set_printf_count_output(0);
     }
     return TRUE;
 }
@@ -190,7 +192,7 @@ void* CDECL _recalloc(void* mem, size_t num, size_t size)
     }
 
     if(size>old_size)
-        memset((BYTE*)mem+old_size, 0, size-old_size);
+        memset((BYTE*)ret+old_size, 0, size-old_size);
     return ret;
 }
 
@@ -337,4 +339,30 @@ const char * __thiscall MSVCRT_type_info_name_internal_method(type_info * _this,
     }
     TRACE("(%p) returning %s\n", _this, _this->name);
     return _this->name;
+}
+
+/*********************************************************************
+ *              _CRT_RTC_INIT (MSVCR90.@)
+ */
+void* CDECL _CRT_RTC_INIT(void *unk1, void *unk2, int unk3, int unk4, int unk5)
+{
+    TRACE("%p %p %x %x %x\n", unk1, unk2, unk3, unk4, unk5);
+    return NULL;
+}
+
+/*********************************************************************
+ *              _CRT_RTC_INITW (MSVCR90.@)
+ */
+void* CDECL _CRT_RTC_INITW(void *unk1, void *unk2, int unk3, int unk4, int unk5)
+{
+    TRACE("%p %p %x %x %x\n", unk1, unk2, unk3, unk4, unk5);
+    return NULL;
+}
+
+/*********************************************************************
+ *              _vswprintf_p (MSVCR90.@)
+ */
+int CDECL MSVCR90__vswprintf_p(wchar_t *buffer, size_t length, const wchar_t *format, __ms_va_list args)
+{
+    return _vswprintf_p_l(buffer, length, format, NULL, args);
 }

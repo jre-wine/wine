@@ -27,12 +27,15 @@
 #define NO_SHLWAPI_REG
 #include "shlwapi.h"
 #include "advpub.h"
+#include "initguid.h"
 
 #include "wine/debug.h"
 
 #include "urlmon.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
+
+DEFINE_GUID(CLSID_CUri, 0xDF2FCE13, 0x25EC, 0x45BB, 0x9D,0x4C, 0xCE,0xCD,0x47,0xC2,0x43,0x0C);
 
 LONG URLMON_refCount = 0;
 
@@ -154,6 +157,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
 
     case DLL_PROCESS_DETACH:
         process_detach();
+        DeleteCriticalSection(&tls_cs);
         break;
 
     case DLL_THREAD_DETACH:
@@ -291,6 +295,8 @@ static ClassFactory StdURLMonikerCF =
     { { &ClassFactoryVtbl }, StdURLMoniker_Construct};
 static ClassFactory MimeFilterCF =
     { { &ClassFactoryVtbl }, MimeFilter_Construct};
+static ClassFactory CUriCF =
+    { { &ClassFactoryVtbl }, Uri_Construct};
 
 struct object_creation_info
 {
@@ -317,7 +323,8 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_InternetSecurityManager, &SecurityManagerCF.IClassFactory_iface, NULL    },
     { &CLSID_InternetZoneManager,     &ZoneManagerCF.IClassFactory_iface,     NULL    },
     { &CLSID_StdURLMoniker,           &StdURLMonikerCF.IClassFactory_iface,   NULL    },
-    { &CLSID_DeCompMimeFilter,        &MimeFilterCF.IClassFactory_iface,      NULL    }
+    { &CLSID_DeCompMimeFilter,        &MimeFilterCF.IClassFactory_iface,      NULL    },
+    { &CLSID_CUri,                    &CUriCF.IClassFactory_iface,            NULL    }
 };
 
 static void init_session(BOOL init)
@@ -426,7 +433,7 @@ HRESULT WINAPI DllRegisterServerEx(void)
  * Determines if a specified string is a valid URL.
  *
  * PARAMS
- *  pBC        [I] ignored, must be NULL.
+ *  pBC        [I] ignored, should be NULL.
  *  szURL      [I] string that represents the URL in question.
  *  dwReserved [I] reserved and must be zero.
  *
@@ -442,7 +449,7 @@ HRESULT WINAPI IsValidURL(LPBC pBC, LPCWSTR szURL, DWORD dwReserved)
 {
     FIXME("(%p, %s, %d): stub\n", pBC, debugstr_w(szURL), dwReserved);
 
-    if (pBC || dwReserved || !szURL)
+    if (dwReserved || !szURL)
         return E_INVALIDARG;
 
     return S_OK;
@@ -559,13 +566,19 @@ static BOOL text_html_filter(const BYTE *b, DWORD size)
     if(size < 5)
         return FALSE;
 
-    for(i=0; i < size-5; i++) {
-        if(b[i] == '<'
-           && (b[i+1] == 'h' || b[i+1] == 'H')
-           && (b[i+2] == 't' || b[i+2] == 'T')
-           && (b[i+3] == 'm' || b[i+3] == 'M')
-           && (b[i+4] == 'l' || b[i+4] == 'L'))
-            return TRUE;
+    for(i = 0; i < size-5; i++) {
+        if((b[i] == '<'
+            && (b[i+1] == 'h' || b[i+1] == 'H')
+            && (b[i+2] == 't' || b[i+2] == 'T')
+            && (b[i+3] == 'm' || b[i+3] == 'M')
+            && (b[i+4] == 'l' || b[i+4] == 'L')) ||
+           ((size - i >= 6)
+            &&  b[i]   == '<'
+            && (b[i+1] == 'h' || b[i+1] == 'H')
+            && (b[i+2] == 'e' || b[i+2] == 'E')
+            && (b[i+3] == 'a' || b[i+3] == 'A')
+            && (b[i+4] == 'd' || b[i+4] == 'D')
+            &&  b[i+5] == '>')) return TRUE;
     }
 
     return FALSE;
@@ -602,7 +615,10 @@ static BOOL image_pjpeg_filter(const BYTE *b, DWORD size)
 
 static BOOL image_tiff_filter(const BYTE *b, DWORD size)
 {
-    return size > 2 && b[0] == 0x4d && b[1] == 0x4d;
+    static const BYTE magic1[] = {0x4d,0x4d,0x00,0x2a};
+    static const BYTE magic2[] = {0x49,0x49,0x2a,0xff};
+
+    return size >= 4 && (!memcmp(b, magic1, 4) || !memcmp(b, magic2, 4));
 }
 
 static BOOL image_xpng_filter(const BYTE *b, DWORD size)
@@ -907,21 +923,60 @@ BOOL WINAPI IsLoggingEnabledW(LPCWSTR url)
 }
 
 /***********************************************************************
- *           URLMON_410 (URLMON.410)
- *    Undocumented, added in IE8
+ *           IsProtectedModeURL (URLMON.111)
+ *    Undocumented, added in IE7
  */
-BOOL WINAPI URLMON_410(DWORD unknown1, DWORD unknown2)
+BOOL WINAPI IsProtectedModeURL(const WCHAR *url)
 {
-    FIXME("stub: %d %d\n", unknown1, unknown2);
-    return FALSE;
+    FIXME("stub: %s\n", debugstr_w(url));
+    return TRUE;
 }
 
 /***********************************************************************
- *           URLMON_423 (URLMON.423)
+ *           LogSqmBits (URLMON.410)
  *    Undocumented, added in IE8
  */
-BOOL WINAPI URLMON_423(DWORD unknown1, DWORD unknown2, DWORD unknown3, DWORD unknown4)
+int WINAPI LogSqmBits(DWORD unk1, DWORD unk2)
 {
-    FIXME("stub: %d %d %d %d\n", unknown1, unknown2, unknown3, unknown4);
-    return FALSE;
+    FIXME("stub: %d %d\n", unk1, unk2);
+    return 0;
+}
+
+/***********************************************************************
+ *           LogSqmUXCommandOffsetInternal (URLMON.423)
+ *    Undocumented, added in IE8
+ */
+void WINAPI LogSqmUXCommandOffsetInternal(DWORD unk1, DWORD unk2, DWORD unk3, DWORD unk4)
+{
+    FIXME("stub: %d %d %d %d\n", unk1, unk2, unk3, unk4);
+}
+
+/***********************************************************************
+ *           MapUriToBrowserEmulationState (URLMON.444)
+ *    Undocumented, added in IE8
+ */
+int WINAPI MapUriToBrowserEmulationState(DWORD unk1, DWORD unk2, DWORD unk3)
+{
+    FIXME("stub: %d %d %d\n", unk1, unk2, unk3);
+    return 0;
+}
+
+/***********************************************************************
+ *           MapBrowserEmulationModeToUserAgent (URLMON.445)
+ *    Undocumented, added in IE8
+ */
+int WINAPI MapBrowserEmulationModeToUserAgent(DWORD unk1, DWORD unk2)
+{
+    FIXME("stub: %d %d\n", unk1, unk2);
+    return 0;
+}
+
+/***********************************************************************
+ *            RegisterMediaTypes
+ *    Added in IE3, registers known MIME-type strings.
+ */
+HRESULT WINAPI RegisterMediaTypes(UINT types, LPCSTR *szTypes, CLIPFORMAT *cfTypes)
+{
+   FIXME("stub: %u %p %p\n", types, szTypes, cfTypes);
+   return E_INVALIDARG;
 }

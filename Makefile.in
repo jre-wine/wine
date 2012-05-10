@@ -26,7 +26,11 @@ EXTRASUBDIRS = \
 	programs
 
 # Destination directories for make install
-INSTALLDIRS = $(DESTDIR)$(bindir)
+INSTALLDIRS = \
+	$(DESTDIR)$(bindir) \
+	$(DESTDIR)$(dlldir) \
+	$(DESTDIR)$(fakedlldir) \
+	$(DESTDIR)$(mandir)/man$(prog_manext)
 
 all: wine
 	@echo "Wine build complete."
@@ -48,11 +52,15 @@ include/stamp-h: include/config.h.in config.status
 
 .PHONY: __clean__
 clean:: __clean__
-	$(RM) tools/makedep$(EXEEXT)
-
 distclean:: clean
 	$(RM) config.* configure.lineno TAGS tags include/config.h include/stamp-h Makefile Make.tmp
 	$(RM) -r autom4te.cache
+
+# Rules for uninstalling
+
+.PHONY: __uninstall__
+uninstall:: __uninstall__
+	-rmdir $(DESTDIR)$(datadir)/wine $(DESTDIR)$(fakedlldir) $(DESTDIR)$(dlldir)
 
 # Dependencies between directories
 
@@ -63,7 +71,7 @@ __builddeps__: __tooldeps__ include
 
 loader server: libs/port libs/wine tools
 fonts: tools
-include: tools/widl
+include: tools tools/widl
 libs/wine: libs/port
 tools/wmc tools/wrc: tools
 tools tools/wmc tools/wrc: libs/wine
@@ -71,15 +79,17 @@ tools/widl tools/wmc tools/wrc: libs/wpp
 
 dlls/shell32/Makefile dlls/shell32/__depend__: dlls/shell32/AUTHORS
 
-$(MAKEDEP): include/config.h tools/Makefile
+$(MAKEDEP): include/config.h
 	@cd $(TOOLSDIR)/tools && $(MAKE) makedep$(TOOLSEXT)
 
 # Misc rules
 
+TAGSFLAGS = --langmap='c:+.idl.l.rh,make:(Make*.in)'
+
 TAGS etags:
 	$(RM) TAGS
-	(test -d .git && git ls-files '*.[chly]' '*.idl' || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs etags -a
+	(test -d .git && git ls-files || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs etags -a $(TAGSFLAGS)
 
 tags ctags:
 	$(RM) tags
-	(test -d .git && git ls-files '*.[chly]' '*.idl' || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs ctags -a
+	(test -d .git && git ls-files || find -L $(top_srcdir) -name '*.[ch]' -print) | xargs ctags -a $(TAGSFLAGS)

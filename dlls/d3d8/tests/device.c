@@ -18,6 +18,7 @@
  */
 
 #define COBJMACROS
+#include <windowsx.h>
 #include <initguid.h>
 #include <d3d8.h>
 #include "wine/test.h"
@@ -183,7 +184,7 @@ static void test_mipmap_levels(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -231,7 +232,7 @@ static void test_swapchain(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -343,6 +344,7 @@ static void test_refcount(void)
     HRESULT                      hr;
     HWND                         hwnd               = NULL;
     IDirect3D8                  *pD3d               = NULL;
+    IDirect3D8                  *pD3d2              = NULL;
     IDirect3DDevice8            *pDevice            = NULL;
     IDirect3DVertexBuffer8      *pVertexBuffer      = NULL;
     IDirect3DIndexBuffer8       *pIndexBuffer       = NULL;
@@ -377,9 +379,11 @@ static void test_refcount(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
+
+    CHECK_REFCOUNT( pD3d, 1 );
 
     IDirect3D8_GetAdapterDisplayMode( pD3d, D3DADAPTER_DEFAULT, &d3ddm );
     ZeroMemory( &d3dpp, sizeof(d3dpp) );
@@ -400,6 +404,15 @@ static void test_refcount(void)
 
     refcount = get_refcount( (IUnknown *)pDevice );
     ok(refcount == 1, "Invalid device RefCount %d\n", refcount);
+
+    CHECK_REFCOUNT( pD3d, 2 );
+
+    hr = IDirect3DDevice8_GetDirect3D(pDevice, &pD3d2);
+    CHECK_CALL( hr, "GetDirect3D", pDevice, refcount );
+
+    ok(pD3d2 == pD3d, "Expected IDirect3D8 pointers to be equal\n");
+    CHECK_REFCOUNT( pD3d, 3 );
+    CHECK_RELEASE_REFCOUNT( pD3d, 2 );
 
     /**
      * Check refcount of implicit surfaces. Findings:
@@ -701,7 +714,7 @@ static void test_cursor(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -767,6 +780,128 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (pD3d) IDirect3D8_Release(pD3d);
+    DestroyWindow(hwnd);
+}
+
+static const POINT *expect_pos;
+
+static LRESULT CALLBACK test_cursor_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (message == WM_MOUSEMOVE)
+    {
+        if (expect_pos && expect_pos->x && expect_pos->y)
+        {
+            POINT p = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+
+            ClientToScreen(window, &p);
+            if (expect_pos->x == p.x && expect_pos->y == p.y)
+                ++expect_pos;
+        }
+    }
+
+    return DefWindowProcA(window, message, wparam, lparam);
+}
+
+static void test_cursor_pos(void)
+{
+    IDirect3DSurface8 *cursor;
+    IDirect3DDevice8 *device;
+    WNDCLASSA wc = {0};
+    IDirect3D8 *d3d8;
+    UINT refcount;
+    HWND window;
+    HRESULT hr;
+    BOOL ret;
+
+    /* Note that we don't check for movement we're not supposed to receive.
+     * That's because it's hard to distinguish from the user accidentally
+     * moving the mouse. */
+    static const POINT points[] =
+    {
+        {50, 50},
+        {75, 75},
+        {100, 100},
+        {125, 125},
+        {150, 150},
+        {125, 125},
+        {150, 150},
+        {150, 150},
+        {0, 0},
+    };
+
+    if (!(d3d8 = pDirect3DCreate8(D3D_SDK_VERSION)))
+    {
+        skip("Failed to create IDirect3D8 object, skipping cursor tests.\n");
+        return;
+    }
+
+    wc.lpfnWndProc = test_cursor_proc;
+    wc.lpszClassName = "d3d8_test_cursor_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+    window = CreateWindow("d3d8_test_cursor_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 320, 240, NULL, NULL, NULL, NULL);
+    ShowWindow(window, SW_SHOW);
+
+    device = create_device(d3d8, window, window, TRUE);
+    if (!device)
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    hr = IDirect3DDevice8_CreateImageSurface(device, 32, 32, D3DFMT_A8R8G8B8, &cursor);
+    ok(SUCCEEDED(hr), "Failed to create cursor surface, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_SetCursorProperties(device, 0, 0, cursor);
+    ok(SUCCEEDED(hr), "Failed to set cursor properties, hr %#x.\n", hr);
+    IDirect3DSurface8_Release(cursor);
+    ret = IDirect3DDevice8_ShowCursor(device, TRUE);
+    ok(!ret, "Failed to show cursor, hr %#x.\n", ret);
+
+    flush_events();
+    expect_pos = points;
+
+    ret = SetCursorPos(50, 50);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+
+    IDirect3DDevice8_SetCursorPosition(device, 75, 75, 0);
+    flush_events();
+    /* SetCursorPosition() eats duplicates. */
+    IDirect3DDevice8_SetCursorPosition(device, 75, 75, 0);
+    flush_events();
+
+    ret = SetCursorPos(100, 100);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+    /* Even if the position was set with SetCursorPos(). */
+    IDirect3DDevice8_SetCursorPosition(device, 100, 100, 0);
+    flush_events();
+
+    IDirect3DDevice8_SetCursorPosition(device, 125, 125, 0);
+    flush_events();
+    ret = SetCursorPos(150, 150);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+    IDirect3DDevice8_SetCursorPosition(device, 125, 125, 0);
+    flush_events();
+
+    IDirect3DDevice8_SetCursorPosition(device, 150, 150, 0);
+    flush_events();
+    /* SetCursorPos() doesn't. */
+    ret = SetCursorPos(150, 150);
+    ok(ret, "Failed to set cursor position.\n");
+    flush_events();
+
+    ok(!expect_pos->x && !expect_pos->y, "Didn't receive MOUSEMOVE %u (%d, %d).\n",
+       (unsigned)(expect_pos - points), expect_pos->x, expect_pos->y);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+done:
+    DestroyWindow(window);
+    UnregisterClassA("d3d8_test_cursor_wc", GetModuleHandleA(NULL));
+    if (d3d8)
+        IDirect3D8_Release(d3d8);
 }
 
 static void test_states(void)
@@ -780,7 +915,7 @@ static void test_states(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -812,6 +947,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (pD3d) IDirect3D8_Release(pD3d);
+    DestroyWindow(hwnd);
 }
 
 static void test_shader_versions(void)
@@ -866,6 +1002,436 @@ static void test_display_modes(void)
     IDirect3D8_Release(pD3d);
 }
 
+static void test_reset(void)
+{
+    UINT width, orig_width = GetSystemMetrics(SM_CXSCREEN);
+    UINT height, orig_height = GetSystemMetrics(SM_CYSCREEN);
+    IDirect3DDevice8 *device1 = NULL;
+    IDirect3DDevice8 *device2 = NULL;
+    D3DDISPLAYMODE d3ddm, d3ddm2;
+    D3DSURFACE_DESC surface_desc;
+    D3DPRESENT_PARAMETERS d3dpp;
+    IDirect3DSurface8 *surface;
+    IDirect3DTexture8 *texture;
+    UINT adapter_mode_count;
+    D3DLOCKED_RECT lockrect;
+    IDirect3D8 *d3d8 = NULL;
+    UINT mode_count = 0;
+    HWND window = NULL;
+    D3DVIEWPORT8 vp;
+    D3DCAPS8 caps;
+    DWORD shader;
+    HRESULT hr;
+    UINT i;
+
+    static const DWORD decl[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION,  D3DVSDT_FLOAT4),
+        D3DVSD_END(),
+    };
+
+    struct
+    {
+        UINT w;
+        UINT h;
+    } *modes = NULL;
+
+    d3d8 = pDirect3DCreate8(D3D_SDK_VERSION);
+    ok(!!d3d8, "Failed to create IDirect3D8 object.\n");
+    window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create window.\n");
+    if (!d3d8 || !window)
+        goto cleanup;
+
+    hr = IDirect3D8_GetAdapterDisplayMode(d3d8, D3DADAPTER_DEFAULT, &d3ddm);
+    ok(SUCCEEDED(hr), "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+    adapter_mode_count = IDirect3D8_GetAdapterModeCount(d3d8, D3DADAPTER_DEFAULT);
+    modes = HeapAlloc(GetProcessHeap(), 0, sizeof(*modes) * adapter_mode_count);
+    for (i = 0; i < adapter_mode_count; ++i)
+    {
+        UINT j;
+
+        memset(&d3ddm2, 0, sizeof(d3ddm2));
+        hr = IDirect3D8_EnumAdapterModes(d3d8, D3DADAPTER_DEFAULT, i, &d3ddm2);
+        ok(SUCCEEDED(hr), "EnumAdapterModes failed, hr %#x.\n", hr);
+
+        if (d3ddm2.Format != d3ddm.Format)
+            continue;
+
+        for (j = 0; j < mode_count; ++j)
+        {
+            if (modes[j].w == d3ddm2.Width && modes[j].h == d3ddm2.Height)
+                break;
+        }
+        if (j == mode_count)
+        {
+            modes[j].w = d3ddm2.Width;
+            modes[j].h = d3ddm2.Height;
+            ++mode_count;
+        }
+
+        /* We use them as invalid modes. */
+        if ((d3ddm2.Width == 801 && d3ddm2.Height == 600)
+                || (d3ddm2.Width == 32 && d3ddm2.Height == 32))
+        {
+            skip("This system supports a screen resolution of %dx%d, not running mode tests.\n",
+                    d3ddm2.Width, d3ddm2.Height);
+            goto cleanup;
+        }
+    }
+
+    if (mode_count < 2)
+    {
+        skip("Less than 2 modes supported, skipping mode tests.\n");
+        goto cleanup;
+    }
+
+    i = 0;
+    if (modes[i].w == orig_width && modes[i].h == orig_height) ++i;
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.Windowed = FALSE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth = modes[i].w;
+    d3dpp.BackBufferHeight = modes[i].h;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    d3dpp.EnableAutoDepthStencil = TRUE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device1);
+    if (FAILED(hr))
+    {
+        skip("Failed to create device, hr %#x.\n", hr);
+        goto cleanup;
+    }
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetDeviceCaps(device1, &caps);
+    ok(SUCCEEDED(hr), "GetDeviceCaps failed, hr %#x.\n", hr);
+
+    width = GetSystemMetrics(SM_CXSCREEN);
+    height = GetSystemMetrics(SM_CYSCREEN);
+    ok(width == modes[i].w, "Screen width is %u, expected %u.\n", width, modes[i].w);
+    ok(height == modes[i].h, "Screen height is %u, expected %u.\n", height, modes[i].h);
+
+    hr = IDirect3DDevice8_GetViewport(device1, &vp);
+    ok(SUCCEEDED(hr), "GetViewport failed, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(vp.X == 0, "D3DVIEWPORT->X = %u, expected 0.\n", vp.X);
+        ok(vp.Y == 0, "D3DVIEWPORT->Y = %u, expected 0.\n", vp.Y);
+        ok(vp.Width == modes[i].w, "D3DVIEWPORT->Width = %u, expected %u.\n", vp.Width, modes[i].w);
+        ok(vp.Height == modes[i].h, "D3DVIEWPORT->Height = %u, expected %u.\n", vp.Height, modes[i].h);
+        ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %.8e, expected 0.\n", vp.MinZ);
+        ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %.8e, expected 1.\n", vp.MaxZ);
+    }
+
+    i = 1;
+    vp.X = 10;
+    vp.Y = 20;
+    vp.Width = modes[i].w  / 2;
+    vp.Height = modes[i].h / 2;
+    vp.MinZ = 0.2f;
+    vp.MaxZ = 0.3f;
+    hr = IDirect3DDevice8_SetViewport(device1, &vp);
+    ok(SUCCEEDED(hr), "SetViewport failed, hr %#x.\n", hr);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = FALSE;
+    d3dpp.BackBufferWidth = modes[i].w;
+    d3dpp.BackBufferHeight = modes[i].h;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    memset(&vp, 0, sizeof(vp));
+    hr = IDirect3DDevice8_GetViewport(device1, &vp);
+    ok(SUCCEEDED(hr), "GetViewport failed, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(vp.X == 0, "D3DVIEWPORT->X = %u, expected 0.\n", vp.X);
+        ok(vp.Y == 0, "D3DVIEWPORT->Y = %u, expected 0.\n", vp.Y);
+        ok(vp.Width == modes[i].w, "D3DVIEWPORT->Width = %u, expected %u.\n", vp.Width, modes[i].w);
+        ok(vp.Height == modes[i].h, "D3DVIEWPORT->Height = %u, expected %u.\n", vp.Height, modes[i].h);
+        ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %.8e, expected 0.\n", vp.MinZ);
+        ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %.8e, expected 1.\n", vp.MaxZ);
+    }
+
+    width = GetSystemMetrics(SM_CXSCREEN);
+    height = GetSystemMetrics(SM_CYSCREEN);
+    ok(width == modes[i].w, "Screen width is %u, expected %u.\n", width, modes[i].w);
+    ok(height == modes[i].h, "Screen height is %u, expected %u.\n", height, modes[i].h);
+
+    hr = IDirect3DDevice8_GetRenderTarget(device1, &surface);
+    ok(SUCCEEDED(hr), "GetRenderTarget failed, hr %#x.\n", hr);
+    hr = IDirect3DSurface8_GetDesc(surface, &surface_desc);
+    ok(hr == D3D_OK, "GetDesc failed, hr %#x.\n", hr);
+    ok(surface_desc.Width == modes[i].w, "Back buffer width is %u, expected %u.\n",
+            surface_desc.Width, modes[i].w);
+    ok(surface_desc.Height == modes[i].h, "Back buffer height is %u, expected %u.\n",
+            surface_desc.Height, modes[i].h);
+    IDirect3DSurface8_Release(surface);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = TRUE;
+    d3dpp.BackBufferWidth = 400;
+    d3dpp.BackBufferHeight = 300;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    memset(&vp, 0, sizeof(vp));
+    hr = IDirect3DDevice8_GetViewport(device1, &vp);
+    ok(SUCCEEDED(hr), "GetViewport failed, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        ok(vp.X == 0, "D3DVIEWPORT->X = %u, expected 0.\n", vp.X);
+        ok(vp.Y == 0, "D3DVIEWPORT->Y = %u, expected 0.\n", vp.Y);
+        ok(vp.Width == 400, "D3DVIEWPORT->Width = %u, expected 400.\n", vp.Width);
+        ok(vp.Height == 300, "D3DVIEWPORT->Height = %u, expected 300.\n", vp.Height);
+        ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %.8e, expected 0.\n", vp.MinZ);
+        ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %.8e, expected 1.\n", vp.MaxZ);
+    }
+
+    width = GetSystemMetrics(SM_CXSCREEN);
+    height = GetSystemMetrics(SM_CYSCREEN);
+    ok(width == orig_width, "Screen width is %u, expected %u.\n", width, orig_width);
+    ok(height == orig_height, "Screen height is %u, expected %u.\n", height, orig_height);
+
+    hr = IDirect3DDevice8_GetRenderTarget(device1, &surface);
+    ok(SUCCEEDED(hr), "GetRenderTarget failed, hr %#x.\n", hr);
+    hr = IDirect3DSurface8_GetDesc(surface, &surface_desc);
+    ok(hr == D3D_OK, "GetDesc failed, hr %#x.\n", hr);
+    ok(surface_desc.Width == 400, "Back buffer width is %u, expected 400.\n",
+            surface_desc.Width);
+    ok(surface_desc.Height == 300, "Back buffer height is %u, expected 300.\n",
+            surface_desc.Height);
+    IDirect3DSurface8_Release(surface);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = TRUE;
+    d3dpp.BackBufferWidth = 400;
+    d3dpp.BackBufferHeight = 300;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+    /* Reset fails if there is a resource in the default pool. */
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_DEVICELOST, "Reset returned %#x, expected %#x.\n", hr, D3DERR_DEVICELOST);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n", hr, D3DERR_DEVICENOTRESET);
+    IDirect3DTexture8_Release(texture);
+    /* Reset again to get the device out of the lost state. */
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    if (caps.TextureCaps & D3DPTEXTURECAPS_VOLUMEMAP)
+    {
+        IDirect3DVolumeTexture8 *volume_texture;
+
+        hr = IDirect3DDevice8_CreateVolumeTexture(device1, 16, 16, 4, 1, 0,
+                D3DFMT_R5G6B5, D3DPOOL_DEFAULT, &volume_texture);
+        ok(SUCCEEDED(hr), "CreateVolumeTexture failed, hr %#x.\n", hr);
+        hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+        ok(hr == D3DERR_DEVICELOST, "Reset returned %#x, expected %#x.\n", hr, D3DERR_INVALIDCALL);
+        hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+        ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n",
+                hr, D3DERR_DEVICENOTRESET);
+        IDirect3DVolumeTexture8_Release(volume_texture);
+        hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+        ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+        hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+        ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    }
+    else
+    {
+        skip("Volume textures not supported.\n");
+    }
+
+    /* Scratch, sysmem and managed pool resources are fine. */
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_SCRATCH, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    IDirect3DTexture8_Release(texture);
+
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    IDirect3DTexture8_Release(texture);
+
+    /* The depth stencil should get reset to the auto depth stencil when present. */
+    hr = IDirect3DDevice8_SetRenderTarget(device1, NULL, NULL);
+    ok(SUCCEEDED(hr), "SetRenderTarget failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device1, &surface);
+    ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned %#x, expected %#x.\n", hr, D3DERR_NOTFOUND);
+    ok(!surface, "Depth / stencil buffer should be NULL.\n");
+
+    d3dpp.EnableAutoDepthStencil = TRUE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device1, &surface);
+    ok(SUCCEEDED(hr), "GetDepthStencilSurface failed, hr %#x.\n", hr);
+    ok(!!surface, "Depth / stencil buffer should not be NULL.\n");
+    if (surface) IDirect3DSurface8_Release(surface);
+
+    d3dpp.EnableAutoDepthStencil = FALSE;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device1, &surface);
+    ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned %#x, expected %#x.\n", hr, D3DERR_NOTFOUND);
+    ok(!surface, "Depth / stencil buffer should be NULL.\n");
+
+    /* Will a sysmem or scratch resource survive while locked? */
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_SYSTEMMEM, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DTexture8_LockRect(texture, 0, &lockrect, NULL, D3DLOCK_DISCARD);
+    ok(SUCCEEDED(hr), "LockRect failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    IDirect3DTexture8_UnlockRect(texture, 0);
+    IDirect3DTexture8_Release(texture);
+
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_SCRATCH, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DTexture8_LockRect(texture, 0, &lockrect, NULL, D3DLOCK_DISCARD);
+    ok(SUCCEEDED(hr), "LockRect failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    IDirect3DTexture8_UnlockRect(texture, 0);
+    IDirect3DTexture8_Release(texture);
+
+    hr = IDirect3DDevice8_CreateTexture(device1, 16, 16, 1, 0, D3DFMT_R5G6B5, D3DPOOL_MANAGED, &texture);
+    ok(SUCCEEDED(hr), "CreateTexture failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+    IDirect3DTexture8_Release(texture);
+
+    /* A reference held to an implicit surface causes failures as well. */
+    hr = IDirect3DDevice8_GetBackBuffer(device1, 0, D3DBACKBUFFER_TYPE_MONO, &surface);
+    ok(SUCCEEDED(hr), "GetBackBuffer failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_DEVICELOST, "Reset returned %#x, expected %#x.\n", hr, D3DERR_DEVICELOST);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n", hr, D3DERR_DEVICENOTRESET);
+    IDirect3DSurface8_Release(surface);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    /* Shaders are fine as well. */
+    hr = IDirect3DDevice8_CreateVertexShader(device1, decl, simple_vs, &shader, 0);
+    ok(SUCCEEDED(hr), "CreateVertexShader failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_DeleteVertexShader(device1, shader);
+    ok(SUCCEEDED(hr), "DeleteVertexShader failed, hr %#x.\n", hr);
+
+    /* Try setting invalid modes. */
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = FALSE;
+    d3dpp.BackBufferWidth = 32;
+    d3dpp.BackBufferHeight = 32;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "Reset returned %#x, expected %#x.\n", hr, D3DERR_INVALIDCALL);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n", hr, D3DERR_DEVICENOTRESET);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = FALSE;
+    d3dpp.BackBufferWidth = 801;
+    d3dpp.BackBufferHeight = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "Reset returned %#x, expected %#x.\n", hr, D3DERR_INVALIDCALL);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n", hr, D3DERR_DEVICENOTRESET);
+
+    hr = IDirect3D8_GetAdapterDisplayMode(d3d8, D3DADAPTER_DEFAULT, &d3ddm);
+    ok(SUCCEEDED(hr), "GetAdapterDisplayMode failed, hr %#x.\n", hr);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.Windowed = TRUE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    d3dpp.EnableAutoDepthStencil = FALSE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device2);
+    if (FAILED(hr))
+    {
+        skip("Failed to create device, hr %#x.\n", hr);
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_TestCooperativeLevel(device2);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed, hr %#x.\n", hr);
+
+    d3dpp.Windowed = TRUE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth = 400;
+    d3dpp.BackBufferHeight = 300;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    d3dpp.EnableAutoDepthStencil = TRUE;
+    d3dpp.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3DDevice8_Reset(device2, &d3dpp);
+    ok(SUCCEEDED(hr), "Reset failed, hr %#x.\n", hr);
+    if (FAILED(hr))
+        goto cleanup;
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device2, &surface);
+    ok(SUCCEEDED(hr), "GetDepthStencilSurface failed, hr %#x.\n", hr);
+    ok(!!surface, "Depth / stencil buffer should not be NULL.\n");
+    if (surface)
+        IDirect3DSurface8_Release(surface);
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, modes);
+    if (device2)
+        IDirect3DDevice8_Release(device2);
+    if (device1)
+        IDirect3DDevice8_Release(device1);
+    if (d3d8)
+        IDirect3D8_Release(d3d8);
+    if (window)
+        DestroyWindow(window);
+}
+
 static void test_scene(void)
 {
     HRESULT                      hr;
@@ -877,7 +1443,7 @@ static void test_scene(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -899,7 +1465,7 @@ static void test_scene(void)
         goto cleanup;
     }
 
-    /* Test an EndScene without beginscene. Should return an error */
+    /* Test an EndScene without BeginScene. Should return an error */
     hr = IDirect3DDevice8_EndScene(pDevice);
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_EndScene returned %#08x\n", hr);
 
@@ -935,7 +1501,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (pD3d) IDirect3D8_Release(pD3d);
-    if(hwnd) DestroyWindow(hwnd);
+    DestroyWindow(hwnd);
 }
 
 static void test_shader(void)
@@ -987,7 +1553,7 @@ static void test_shader(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -1184,7 +1750,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (pD3d) IDirect3D8_Release(pD3d);
-    if(hwnd) DestroyWindow(hwnd);
+    DestroyWindow(hwnd);
 }
 
 static void test_limits(void)
@@ -1200,7 +1766,7 @@ static void test_limits(void)
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!pD3d || !hwnd) goto cleanup;
 
@@ -1250,7 +1816,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (pD3d) IDirect3D8_Release(pD3d);
-    if(hwnd) DestroyWindow(hwnd);
+    DestroyWindow(hwnd);
 }
 
 static void test_lights(void)
@@ -1267,7 +1833,7 @@ static void test_lights(void)
 
     d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!d3d8 || !hwnd) goto cleanup;
 
@@ -1282,7 +1848,7 @@ static void test_lights(void)
     d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
-                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
+                                  D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3dpp, &device );
     ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
        "IDirect3D8_CreateDevice failed with %08x\n", hr);
     if(!device)
@@ -1325,6 +1891,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (d3d8) IDirect3D8_Release(d3d8);
+    DestroyWindow(hwnd);
 }
 
 static void test_render_zero_triangles(void)
@@ -1351,7 +1918,7 @@ static void test_render_zero_triangles(void)
 
     d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!d3d8 || !hwnd) goto cleanup;
 
@@ -1399,13 +1966,14 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (d3d8) IDirect3D8_Release(d3d8);
+    DestroyWindow(hwnd);
 }
 
 static void test_depth_stencil_reset(void)
 {
     D3DPRESENT_PARAMETERS present_parameters;
     D3DDISPLAYMODE display_mode;
-    IDirect3DSurface8 *surface;
+    IDirect3DSurface8 *surface, *orig_rt;
     IDirect3DDevice8 *device = NULL;
     IDirect3D8 *d3d8;
     UINT refcount;
@@ -1414,7 +1982,7 @@ static void test_depth_stencil_reset(void)
 
     d3d8 = pDirect3DCreate8(D3D_SDK_VERSION);
     ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow("static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    hwnd = CreateWindow("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
     ok(hwnd != NULL, "Failed to create window\n");
     if (!d3d8 || !hwnd) goto cleanup;
 
@@ -1434,6 +2002,9 @@ static void test_depth_stencil_reset(void)
         goto cleanup;
     }
 
+    hr = IDirect3DDevice8_GetRenderTarget(device, &orig_rt);
+    ok(hr == D3D_OK, "GetRenderTarget failed with 0x%08x\n", hr);
+
     hr = IDirect3DDevice8_TestCooperativeLevel(device);
     ok(SUCCEEDED(hr), "TestCooperativeLevel failed with %#x\n", hr);
 
@@ -1442,8 +2013,9 @@ static void test_depth_stencil_reset(void)
 
     hr = IDirect3DDevice8_GetRenderTarget(device, &surface);
     ok(hr == D3D_OK, "GetRenderTarget failed with 0x%08x\n", hr);
-    ok(surface != NULL, "Render target should not be NULL\n");
+    ok(surface == orig_rt, "Render target is %p, should be %p\n", surface, orig_rt);
     if (surface) IDirect3DSurface8_Release(surface);
+    IDirect3DSurface8_Release(orig_rt);
 
     hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surface);
     ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned 0x%08x, expected D3DERR_NOTFOUND\n", hr);
@@ -1516,6 +2088,7 @@ cleanup:
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (d3d8) IDirect3D8_Release(d3d8);
+    DestroyWindow(hwnd);
 }
 
 static HWND filter_messages;
@@ -1965,8 +2538,13 @@ done:
 static inline void set_fpu_cw(WORD cw)
 {
 #if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#define D3D8_TEST_SET_FPU_CW 1
     __asm__ volatile ("fnclex");
     __asm__ volatile ("fldcw %0" : : "m" (cw));
+#elif defined(__i386__) && defined(_MSC_VER)
+#define D3D8_TEST_SET_FPU_CW 1
+    __asm fnclex;
+    __asm fldcw cw;
 #endif
 }
 
@@ -1974,14 +2552,18 @@ static inline WORD get_fpu_cw(void)
 {
     WORD cw = 0;
 #if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#define D3D8_TEST_GET_FPU_CW 1
     __asm__ volatile ("fnstcw %0" : "=m" (cw));
+#elif defined(__i386__) && defined(_MSC_VER)
+#define D3D8_TEST_GET_FPU_CW 1
+    __asm fnstcw cw;
 #endif
     return cw;
 }
 
 static void test_fpu_setup(void)
 {
-#if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
+#if defined(D3D8_TEST_SET_FPU_CW) && defined(D3D8_TEST_GET_FPU_CW)
     D3DPRESENT_PARAMETERS present_parameters;
     IDirect3DDevice8 *device;
     D3DDISPLAYMODE d3ddm;
@@ -1994,7 +2576,7 @@ static void test_fpu_setup(void)
     ok(!!d3d8, "Failed to create a d3d8 object.\n");
     if (!d3d8) return;
 
-    window = CreateWindowA("static", "d3d8_test", WS_CAPTION, 0, 0, screen_width, screen_height, 0, 0, 0, 0);
+    window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_CAPTION, 0, 0, screen_width, screen_height, 0, 0, 0, 0);
     ok(!!window, "Failed to create a window.\n");
     if (!window) goto done;
 
@@ -2059,7 +2641,7 @@ static void test_ApplyStateBlock(void)
 
     d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
-    hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
     ok(hwnd != NULL, "Failed to create window\n");
     if (!d3d8 || !hwnd) goto cleanup;
 
@@ -2074,7 +2656,7 @@ static void test_ApplyStateBlock(void)
     d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
-                                  D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
+                                  D3DCREATE_HARDWARE_VERTEXPROCESSING, &d3dpp, &device );
     ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
        "IDirect3D8_CreateDevice failed with %#x\n", hr);
     if(!device)
@@ -2109,16 +2691,419 @@ static void test_ApplyStateBlock(void)
     IDirect3DDevice8_Release(device);
 cleanup:
     if (d3d8) IDirect3D8_Release(d3d8);
+    DestroyWindow(hwnd);
+}
+
+static void test_depth_stencil_size(void)
+{
+    IDirect3DDevice8 *device;
+    IDirect3DSurface8 *ds, *rt, *ds_bigger, *ds_bigger2;
+    IDirect3DSurface8 *surf;
+    IDirect3D8 *d3d8;
+    HRESULT hr;
+    HWND hwnd;
+
+    d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
+    ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow( "d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d8 || !hwnd) goto cleanup;
+
+    device = create_device(d3d8, hwnd, hwnd, TRUE);
+    if (!device) goto cleanup;
+
+    hr = IDirect3DDevice8_CreateRenderTarget(device, 64, 64, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, FALSE, &rt);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_CreateRenderTarget failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_CreateDepthStencilSurface(device, 32, 32, D3DFMT_D24X8, D3DMULTISAMPLE_NONE, &ds);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_CreateDepthStencilSurface failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_CreateDepthStencilSurface(device, 128, 128, D3DFMT_D24X8, D3DMULTISAMPLE_NONE, &ds_bigger);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_CreateDepthStencilSurface failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_CreateDepthStencilSurface(device, 128, 128, D3DFMT_D24X8, D3DMULTISAMPLE_NONE, &ds_bigger2);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_CreateDepthStencilSurface failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_SetRenderTarget(device, rt, ds);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_SetRenderTarget returned %#x, expected D3DERR_INVALIDCALL.\n", hr);
+    hr = IDirect3DDevice8_SetRenderTarget(device, rt, ds_bigger);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_SetRenderTarget failed, hr %#x.\n", hr);
+
+    /* try to set the small ds without changing the render target at the same time */
+    hr = IDirect3DDevice8_SetRenderTarget(device, NULL, ds);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_SetRenderTarget returned %#x, expected D3DERR_INVALIDCALL.\n", hr);
+    hr = IDirect3DDevice8_SetRenderTarget(device, NULL, ds_bigger2);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_SetRenderTarget failed, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice8_GetRenderTarget(device, &surf);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetRenderTarget failed, hr %#x.\n", hr);
+    ok(surf == rt, "The render target is %p, expected %p\n", surf, rt);
+    IDirect3DSurface8_Release(surf);
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surf);
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetDepthStencilSurface failed, hr %#x.\n", hr);
+    ok(surf == ds_bigger2, "The depth stencil is %p, expected %p\n", surf, ds_bigger2);
+    IDirect3DSurface8_Release(surf);
+
+    hr = IDirect3DDevice8_SetRenderTarget(device, NULL, NULL);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_SetRenderTarget failed, hr %#x.\n", hr);
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surf);
+    ok(FAILED(hr), "IDirect3DDevice8_GetDepthStencilSurface should have failed, hr %#x.\n", hr);
+    ok(surf == NULL, "The depth stencil is %p, expected NULL\n", surf);
+    if (surf) IDirect3DSurface8_Release(surf);
+
+    IDirect3DSurface8_Release(rt);
+    IDirect3DSurface8_Release(ds);
+    IDirect3DSurface8_Release(ds_bigger);
+    IDirect3DSurface8_Release(ds_bigger2);
+
+cleanup:
+    if (d3d8) IDirect3D8_Release(d3d8);
+    DestroyWindow(hwnd);
+}
+
+static void test_window_style(void)
+{
+    RECT focus_rect, fullscreen_rect, r;
+    LONG device_style, device_exstyle;
+    LONG focus_style, focus_exstyle;
+    LONG style, expected_style;
+    IDirect3DDevice8 *device;
+    IDirect3D8 *d3d8;
+    ULONG ref;
+
+
+    if (!(d3d8 = pDirect3DCreate8(D3D_SDK_VERSION)))
+    {
+        skip("Failed to create IDirect3D8 object, skipping tests.\n");
+        return;
+    }
+
+    focus_window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+    device_window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+
+    device_style = GetWindowLongA(device_window, GWL_STYLE);
+    device_exstyle = GetWindowLongA(device_window, GWL_EXSTYLE);
+    focus_style = GetWindowLongA(focus_window, GWL_STYLE);
+    focus_exstyle = GetWindowLongA(focus_window, GWL_EXSTYLE);
+
+    SetRect(&fullscreen_rect, 0, 0, screen_width, screen_height);
+    GetWindowRect(focus_window, &focus_rect);
+
+    device = create_device(d3d8, device_window, focus_window, FALSE);
+    if (!device)
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    style = GetWindowLongA(device_window, GWL_STYLE);
+    expected_style = device_style | WS_VISIBLE;
+    todo_wine ok(style == expected_style, "Expected device window style %#x, got %#x.\n",
+            expected_style, style);
+    style = GetWindowLongA(device_window, GWL_EXSTYLE);
+    expected_style = device_exstyle | WS_EX_TOPMOST;
+    todo_wine ok(style == expected_style, "Expected device window extended style %#x, got %#x.\n",
+            expected_style, style);
+
+    style = GetWindowLongA(focus_window, GWL_STYLE);
+    ok(style == focus_style, "Expected focus window style %#x, got %#x.\n",
+            focus_style, style);
+    style = GetWindowLongA(focus_window, GWL_EXSTYLE);
+    ok(style == focus_exstyle, "Expected focus window extended style %#x, got %#x.\n",
+            focus_exstyle, style);
+
+    GetWindowRect(device_window, &r);
+    ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+    GetClientRect(device_window, &r);
+    todo_wine ok(!EqualRect(&r, &fullscreen_rect), "Client rect and window rect are equal.\n");
+    GetWindowRect(focus_window, &r);
+    ok(EqualRect(&r, &focus_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+
+    ref = IDirect3DDevice8_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+done:
+    IDirect3D8_Release(d3d8);
+
+    DestroyWindow(device_window);
+    DestroyWindow(focus_window);
+}
+
+static void test_wrong_shader(void)
+{
+    HRESULT hr;
+    HWND hwnd = NULL;
+    IDirect3D8 *d3d = NULL;
+    IDirect3DDevice8 *device = NULL;
+    D3DPRESENT_PARAMETERS d3dpp;
+    D3DDISPLAYMODE d3ddm;
+    DWORD vs, ps;
+
+    static const DWORD vs_2_0[] =
+    {
+        0xfffe0200,                                         /* vs_2_0           */
+        0x0200001f, 0x80000000, 0x900f0000,                 /* dcl_position v0  */
+        0x02000001, 0x800f0001, 0xa0e40001,                 /* mov r1, c1       */
+        0x03000002, 0xd00f0000, 0x80e40001, 0xa0e40002,     /* add oD0, r1, c2  */
+        0x02000001, 0xc00f0000, 0x90e40000,                 /* mov oPos, v0     */
+        0x0000ffff                                          /* end              */
+    };
+    static const DWORD ps_2_0[] =
+    {
+        0xffff0200,                                         /* ps_2_0           */
+        0x02000001, 0x800f0001, 0xa0e40001,                 /* mov r1, c1       */
+        0x03000002, 0x800f0000, 0x80e40001, 0xa0e40002,     /* add r0, r1, c2   */
+        0x02000001, 0x800f0800, 0x80e40000,                 /* mov oC0, r0      */
+        0x0000ffff                                          /* end              */
+    };
+
+    static const DWORD decl[] =
+    {
+        D3DVSD_STREAM(0),
+        D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3),
+        D3DVSD_END()
+    };
+
+    d3d = pDirect3DCreate8(D3D_SDK_VERSION);
+    ok(d3d != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d || !hwnd)
+        goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode(d3d, D3DADAPTER_DEFAULT, &d3ddm);
+    ZeroMemory(&d3dpp, sizeof(d3dpp));
+    d3dpp.Windowed = TRUE;
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.BackBufferWidth = 800;
+    d3dpp.BackBufferHeight = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+
+    hr = IDirect3D8_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL || broken(hr == D3DERR_NOTAVAILABLE), "IDirect3D8_CreateDevice failed with %#08x\n", hr);
+    if (!device)
+    {
+        skip("could not create device, IDirect3D8_CreateDevice returned %#08x\n", hr);
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_CreateVertexShader(device, decl, simple_ps, &vs, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+
+    hr = IDirect3DDevice8_CreatePixelShader(device, simple_vs, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreatePixelShader returned %#08x\n", hr);
+
+    hr = IDirect3DDevice8_CreateVertexShader(device, decl, vs_2_0, &vs, 0);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
+
+    hr = IDirect3DDevice8_CreatePixelShader(device, ps_2_0, &ps);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_CreatePixelShader returned %#08x\n", hr);
+
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (d3d)
+        IDirect3D8_Release(d3d);
+    DestroyWindow(hwnd);
+}
+
+static void test_mode_change(void)
+{
+    RECT fullscreen_rect, focus_rect, r;
+    IDirect3DSurface8 *backbuffer;
+    IDirect3DDevice8 *device;
+    D3DSURFACE_DESC desc;
+    IDirect3D8 *d3d8;
+    DEVMODEW devmode;
+    UINT refcount;
+    HRESULT hr;
+    DWORD ret;
+
+    if (!(d3d8 = pDirect3DCreate8(D3D_SDK_VERSION)))
+    {
+        skip("Failed to create IDirect3D8 object, skipping mode change tests.\n");
+        return;
+    }
+
+    focus_window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+    device_window = CreateWindowA("d3d8_test_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+
+    SetRect(&fullscreen_rect, 0, 0, screen_width, screen_height);
+    GetWindowRect(focus_window, &focus_rect);
+
+    device = create_device(d3d8, device_window, focus_window, FALSE);
+    if (!device)
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    devmode.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+    devmode.dmPelsWidth = 640;
+    devmode.dmPelsHeight = 480;
+
+    ret = ChangeDisplaySettingsW(&devmode, CDS_FULLSCREEN);
+    ok(ret == DISP_CHANGE_SUCCESSFUL, "Failed to change display mode, ret %#x.\n", ret);
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "Failed to get display mode.\n");
+    ok(devmode.dmPelsWidth == 640, "Got unexpect width %u.\n", devmode.dmPelsWidth);
+    ok(devmode.dmPelsHeight == 480, "Got unexpect height %u.\n", devmode.dmPelsHeight);
+
+    GetWindowRect(device_window, &r);
+    ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+    GetWindowRect(focus_window, &r);
+    ok(EqualRect(&r, &focus_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+
+    hr = IDirect3DDevice8_GetBackBuffer(device, 0, D3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    ok(SUCCEEDED(hr), "Failed to get backbuffer, hr %#x.\n", hr);
+    hr = IDirect3DSurface8_GetDesc(backbuffer, &desc);
+    ok(SUCCEEDED(hr), "Failed to get backbuffer desc, hr %#x.\n", hr);
+    ok(desc.Width == screen_width, "Got unexpected backbuffer width %u.\n", desc.Width);
+    ok(desc.Height == screen_height, "Got unexpected backbuffer height %u.\n", desc.Height);
+    IDirect3DSurface8_Release(backbuffer);
+
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "Failed to get display mode.\n");
+    ok(devmode.dmPelsWidth == screen_width, "Got unexpect width %u.\n", devmode.dmPelsWidth);
+    ok(devmode.dmPelsHeight == screen_height, "Got unexpect height %u.\n", devmode.dmPelsHeight);
+
+done:
+    DestroyWindow(device_window);
+    DestroyWindow(focus_window);
+    if (d3d8)
+        IDirect3D8_Release(d3d8);
+
+    memset(&devmode, 0, sizeof(devmode));
+    devmode.dmSize = sizeof(devmode);
+    ret = EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &devmode);
+    ok(ret, "Failed to get display mode.\n");
+    ok(devmode.dmPelsWidth == screen_width, "Got unexpect width %u.\n", devmode.dmPelsWidth);
+    ok(devmode.dmPelsHeight == screen_height, "Got unexpect height %u.\n", devmode.dmPelsHeight);
+}
+
+static void test_device_window_reset(void)
+{
+    RECT fullscreen_rect, device_rect, r;
+    IDirect3DDevice8 *device;
+    WNDCLASSA wc = {0};
+    IDirect3D8 *d3d8;
+    LONG_PTR proc;
+    HRESULT hr;
+    ULONG ref;
+
+    if (!(d3d8 = pDirect3DCreate8(D3D_SDK_VERSION)))
+    {
+        skip("Failed to create IDirect3D8 object, skipping tests.\n");
+        return;
+    }
+
+    wc.lpfnWndProc = test_proc;
+    wc.lpszClassName = "d3d8_test_wndproc_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+
+    focus_window = CreateWindowA("d3d8_test_wndproc_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+    device_window = CreateWindowA("d3d8_test_wndproc_wc", "d3d8_test", WS_OVERLAPPEDWINDOW,
+            0, 0, screen_width / 2, screen_height / 2, 0, 0, 0, 0);
+
+    SetRect(&fullscreen_rect, 0, 0, screen_width, screen_height);
+    GetWindowRect(device_window, &device_rect);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    device = create_device(d3d8, NULL, focus_window, FALSE);
+    if (!device)
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    GetWindowRect(focus_window, &r);
+    ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+    GetWindowRect(device_window, &r);
+    ok(EqualRect(&r, &device_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            device_rect.left, device_rect.top, device_rect.right, device_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    hr = reset_device(device, device_window, FALSE);
+    ok(SUCCEEDED(hr), "Failed to reset device.\n");
+
+    GetWindowRect(focus_window, &r);
+    ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+    GetWindowRect(device_window, &r);
+    ok(EqualRect(&r, &fullscreen_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
+            fullscreen_rect.left, fullscreen_rect.top, fullscreen_rect.right, fullscreen_rect.bottom,
+            r.left, r.top, r.right, r.bottom);
+
+    proc = GetWindowLongPtrA(device_window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    proc = GetWindowLongPtrA(focus_window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    ref = IDirect3DDevice8_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+done:
+    IDirect3D8_Release(d3d8);
+    DestroyWindow(device_window);
+    DestroyWindow(focus_window);
+    UnregisterClassA("d3d8_test_wndproc_wc", GetModuleHandleA(NULL));
 }
 
 START_TEST(device)
 {
     HMODULE d3d8_handle = LoadLibraryA( "d3d8.dll" );
+    WNDCLASS wc = {0};
     if (!d3d8_handle)
     {
         skip("Could not load d3d8.dll\n");
         return;
     }
+
+    wc.lpfnWndProc = DefWindowProc;
+    wc.lpszClassName = "d3d8_test_wc";
+    RegisterClass(&wc);
 
     pDirect3DCreate8 = (void *)GetProcAddress( d3d8_handle, "Direct3DCreate8" );
     ok(pDirect3DCreate8 != NULL, "Failed to get address of Direct3DCreate8\n");
@@ -2143,7 +3128,9 @@ START_TEST(device)
         test_refcount();
         test_mipmap_levels();
         test_cursor();
+        test_cursor_pos();
         test_states();
+        test_reset();
         test_scene();
         test_shader();
         test_limits();
@@ -2153,5 +3140,11 @@ START_TEST(device)
         test_depth_stencil_reset();
         test_wndproc();
         test_wndproc_windowed();
+        test_depth_stencil_size();
+        test_window_style();
+        test_wrong_shader();
+        test_mode_change();
+        test_device_window_reset();
     }
+    UnregisterClassA("d3d8_test_wc", GetModuleHandleA(NULL));
 }

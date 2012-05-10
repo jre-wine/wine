@@ -2,6 +2,7 @@
  * Unit tests for security functions
  *
  * Copyright (c) 2004 Mike McCormack
+ * Copyright (c) 2011 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -114,6 +115,8 @@ static DWORD (WINAPI *pGetSecurityInfo)(HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMA
                                         PSID*, PSID*, PACL*, PACL*, PSECURITY_DESCRIPTOR*);
 static NTSTATUS (WINAPI *pNtAccessCheck)(PSECURITY_DESCRIPTOR, HANDLE, ACCESS_MASK, PGENERIC_MAPPING,
                                          PPRIVILEGE_SET, PULONG, PULONG, NTSTATUS*);
+static BOOL (WINAPI *pCreateRestrictedToken)(HANDLE, DWORD, DWORD, PSID_AND_ATTRIBUTES, DWORD,
+                                             PLUID_AND_ATTRIBUTES, DWORD, PSID_AND_ATTRIBUTES, PHANDLE);
 
 static HMODULE hmod;
 static int     myARGC;
@@ -156,6 +159,7 @@ static void init(void)
     pSetEntriesInAclA = (void *)GetProcAddress(hmod, "SetEntriesInAclA");
     pSetSecurityDescriptorControl = (void *)GetProcAddress(hmod, "SetSecurityDescriptorControl");
     pGetSecurityInfo = (void *)GetProcAddress(hmod, "GetSecurityInfo");
+    pCreateRestrictedToken = (void *)GetProcAddress(hmod, "CreateRestrictedToken");
 
     myARGC = winetest_get_mainargs( &myARGV );
 }
@@ -235,8 +239,8 @@ static void test_sid(void)
     ok(pConvertStringSidToSidA("S-1-5-21-93476-23408-4576", &psid), "ConvertStringSidToSidA failed\n");
     pisid = psid;
     ok(pisid->SubAuthorityCount == 4, "Invalid sub authority count - expected 4, got %d\n", pisid->SubAuthorityCount);
-    ok(pisid->SubAuthority[0] == 21, "Invalid subauthority 0 - expceted 21, got %d\n", pisid->SubAuthority[0]);
-    ok(pisid->SubAuthority[3] == 4576, "Invalid subauthority 0 - expceted 4576, got %d\n", pisid->SubAuthority[3]);
+    ok(pisid->SubAuthority[0] == 21, "Invalid subauthority 0 - expected 21, got %d\n", pisid->SubAuthority[0]);
+    ok(pisid->SubAuthority[3] == 4576, "Invalid subauthority 0 - expected 4576, got %d\n", pisid->SubAuthority[3]);
     LocalFree(str);
     LocalFree(psid);
 
@@ -691,12 +695,13 @@ static void test_FileSecurity(void)
     char wintmpdir [MAX_PATH];
     char path [MAX_PATH];
     char file [MAX_PATH];
-    BOOL rc;
-    HANDLE fh;
-    DWORD sdSize;
-    DWORD retSize;
+    HANDLE fh, token;
+    DWORD sdSize, retSize, rc, granted, priv_set_len;
+    PRIVILEGE_SET priv_set;
+    BOOL status;
     BYTE *sd;
-    SECURITY_INFORMATION const request = OWNER_SECURITY_INFORMATION
+    GENERIC_MAPPING mapping = { FILE_READ_DATA, FILE_WRITE_DATA, FILE_EXECUTE, FILE_ALL_ACCESS };
+    const SECURITY_INFORMATION request = OWNER_SECURITY_INFORMATION
                                        | GROUP_SECURITY_INFORMATION
                                        | DACL_SECURITY_INFORMATION;
 
@@ -810,6 +815,238 @@ cleanup:
     /* Remove temporary file and directory */
     DeleteFileA(file);
     RemoveDirectoryA(path);
+
+    /* Test file access permissions for a file with FILE_ATTRIBUTE_ARCHIVE */
+    SetLastError(0xdeadbeef);
+    rc = GetTempPath(sizeof(wintmpdir), wintmpdir);
+    ok(rc, "GetTempPath error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    rc = GetTempFileName(wintmpdir, "tmp", 0, file);
+    ok(rc, "GetTempFileName error %d\n", GetLastError());
+
+    rc = GetFileAttributes(file);
+    rc &= ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    ok(rc == FILE_ATTRIBUTE_ARCHIVE, "expected FILE_ATTRIBUTE_ARCHIVE got %#x\n", rc);
+
+    retSize = 0xdeadbeef;
+    rc = GetFileSecurity(file, OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,
+                         NULL, 0, &sdSize);
+    ok(!rc, "GetFileSecurity should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "expected ERROR_INSUFFICIENT_BUFFER got %d\n", GetLastError());
+    ok(sdSize > sizeof(SECURITY_DESCRIPTOR), "got sd size %d\n", sdSize);
+
+    sd = HeapAlloc(GetProcessHeap (), 0, sdSize);
+    retSize = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = GetFileSecurity(file, OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,
+                         sd, sdSize, &retSize);
+    ok(rc, "GetFileSecurity error %d\n", GetLastError());
+    ok(retSize == sdSize || broken(retSize == 0) /* NT4 */, "expected %d, got %d\n", sdSize, retSize);
+
+    SetLastError(0xdeadbeef);
+    rc = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token);
+    ok(!rc, "OpenThreadToken should fail\n");
+    ok(GetLastError() == ERROR_NO_TOKEN, "expected ERROR_NO_TOKEN, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    rc = ImpersonateSelf(SecurityIdentification);
+    ok(rc, "ImpersonateSelf error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    rc = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &token);
+    ok(rc, "OpenThreadToken error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    rc = RevertToSelf();
+    ok(rc, "RevertToSelf error %d\n", GetLastError());
+
+    priv_set_len = sizeof(priv_set);
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_READ_DATA, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_READ_DATA, "expected FILE_READ_DATA, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_WRITE_DATA, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_WRITE_DATA, "expected FILE_WRITE_DATA, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_EXECUTE, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_EXECUTE, "expected FILE_EXECUTE, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, DELETE, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == DELETE, "expected DELETE, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_DELETE_CHILD, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_DELETE_CHILD, "expected FILE_DELETE_CHILD, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, 0x1ff, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == 0x1ff, "expected 0x1ff, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_ALL_ACCESS, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_ALL_ACCESS, "expected FILE_ALL_ACCESS, got %#x\n", granted);
+
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, 0xffffffff, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(!rc, "AccessCheck should fail\n");
+    ok(GetLastError() == ERROR_GENERIC_NOT_MAPPED, "expected ERROR_GENERIC_NOT_MAPPED, got %d\n", GetLastError());
+
+    /* Test file access permissions for a file with FILE_ATTRIBUTE_READONLY */
+    SetLastError(0xdeadbeef);
+    fh = CreateFile(file, FILE_READ_DATA, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_READONLY, 0);
+    ok(fh != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
+    retSize = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = WriteFile(fh, "1", 1, &retSize, NULL);
+    ok(!rc, "WriteFile should fail\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(retSize == 0, "expected 0, got %d\n", retSize);
+    CloseHandle(fh);
+
+    rc = GetFileAttributes(file);
+    rc &= ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+todo_wine
+    ok(rc == (FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY),
+       "expected FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY got %#x\n", rc);
+
+    SetLastError(0xdeadbeef);
+    rc = SetFileAttributes(file, FILE_ATTRIBUTE_ARCHIVE);
+    ok(rc, "SetFileAttributes error %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    rc = DeleteFile(file);
+    ok(rc, "DeleteFile error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    fh = CreateFile(file, FILE_READ_DATA, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_READONLY, 0);
+    ok(fh != INVALID_HANDLE_VALUE, "CreateFile error %d\n", GetLastError());
+    retSize = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = WriteFile(fh, "1", 1, &retSize, NULL);
+    ok(!rc, "WriteFile should fail\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    ok(retSize == 0, "expected 0, got %d\n", retSize);
+    CloseHandle(fh);
+
+    rc = GetFileAttributes(file);
+    rc &= ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+    ok(rc == (FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY),
+       "expected FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY got %#x\n", rc);
+
+    retSize = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = GetFileSecurity(file, OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,
+                         sd, sdSize, &retSize);
+    ok(rc, "GetFileSecurity error %d\n", GetLastError());
+    ok(retSize == sdSize || broken(retSize == 0) /* NT4 */, "expected %d, got %d\n", sdSize, retSize);
+
+    priv_set_len = sizeof(priv_set);
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_READ_DATA, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_READ_DATA, "expected FILE_READ_DATA, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_WRITE_DATA, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+todo_wine {
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_WRITE_DATA, "expected FILE_WRITE_DATA, got %#x\n", granted);
+}
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_EXECUTE, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_EXECUTE, "expected FILE_EXECUTE, got %#x\n", granted);
+
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, DELETE, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+todo_wine {
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == DELETE, "expected DELETE, got %#x\n", granted);
+}
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_DELETE_CHILD, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+todo_wine {
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_DELETE_CHILD, "expected FILE_DELETE_CHILD, got %#x\n", granted);
+}
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, 0x1ff, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+todo_wine {
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == 0x1ff, "expected 0x1ff, got %#x\n", granted);
+}
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    rc = AccessCheck(sd, token, FILE_ALL_ACCESS, &mapping, &priv_set, &priv_set_len, &granted, &status);
+    ok(rc, "AccessCheck error %d\n", GetLastError());
+todo_wine {
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == FILE_ALL_ACCESS, "expected FILE_ALL_ACCESS, got %#x\n", granted);
+}
+    SetLastError(0xdeadbeef);
+    rc = DeleteFile(file);
+    ok(!rc, "DeleteFile should fail\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    rc = SetFileAttributes(file, FILE_ATTRIBUTE_ARCHIVE);
+    ok(rc, "SetFileAttributes error %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    rc = DeleteFile(file);
+    ok(rc, "DeleteFile error %d\n", GetLastError());
+
+    CloseHandle(token);
+    HeapFree(GetProcessHeap(), 0, sd);
 }
 
 static void test_AccessCheck(void)
@@ -1205,6 +1442,24 @@ static void test_token_attr(void)
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
 
     /* groups */
+    /* insufficient buffer length */
+    SetLastError(0xdeadbeef);
+    Size2 = 0;
+    ret = GetTokenInformation(Token, TokenGroups, NULL, 0, &Size2);
+    ok(Size2 > 1, "got %d\n", Size2);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "%d with error %d\n", ret, GetLastError());
+    Size2 -= 1;
+    Groups = HeapAlloc(GetProcessHeap(), 0, Size2);
+    memset(Groups, 0xcc, Size2);
+    Size = 0;
+    ret = GetTokenInformation(Token, TokenGroups, Groups, Size2, &Size);
+    ok(Size > 1, "got %d\n", Size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "%d with error %d\n", ret, GetLastError());
+    ok(*((BYTE*)Groups) == 0xcc, "buffer altered\n");
+    HeapFree(GetProcessHeap(), 0, Groups);
+
     SetLastError(0xdeadbeef);
     ret = GetTokenInformation(Token, TokenGroups, NULL, 0, &Size);
     ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
@@ -1917,9 +2172,9 @@ static void test_LookupAccountName(void)
     domain_size = domain_save;
     sid_size = sid_save;
 
-    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_ENGLISH)
     {
-        skip("Non-english locale (test with hardcoded 'Everyone')\n");
+        skip("Non-English locale (test with hardcoded 'Everyone')\n");
     }
     else
     {
@@ -2055,9 +2310,9 @@ static void test_LookupAccountName(void)
         return;
     }
 
-    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_ENGLISH)
     {
-        skip("Non-english locale (skipping well known name creation tests)\n");
+        skip("Non-English locale (skipping well known name creation tests)\n");
         return;
     }
 
@@ -2542,13 +2797,13 @@ static void test_SetEntriesInAclW(void)
     ok(NewAcl != NULL, "returned acl was NULL\n");
     LocalFree(NewAcl);
 
-    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_ENGLISH)
     {
-        skip("Non-english locale (test with hardcoded 'Everyone')\n");
+        skip("Non-English locale (test with hardcoded 'Everyone')\n");
     }
     else
     {
-        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
         ExplicitAccess.Trustee.ptstrName = (LPWSTR)wszEveryone;
         res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
         ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
@@ -2564,7 +2819,7 @@ static void test_SetEntriesInAclW(void)
             broken(NewAcl != NULL), /* NT4 */
             "returned acl wasn't NULL: %p\n", NewAcl);
 
-        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
         ExplicitAccess.Trustee.MultipleTrusteeOperation = TRUSTEE_IS_IMPERSONATE;
         res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
         ok(res == ERROR_INVALID_PARAMETER ||
@@ -2582,7 +2837,7 @@ static void test_SetEntriesInAclW(void)
         LocalFree(NewAcl);
     }
 
-    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
     ExplicitAccess.Trustee.ptstrName = (LPWSTR)wszCurrentUser;
     res = pSetEntriesInAclW(1, &ExplicitAccess, OldAcl, &NewAcl);
     ok(res == ERROR_SUCCESS, "SetEntriesInAclW failed: %u\n", res);
@@ -2658,8 +2913,8 @@ static void test_SetEntriesInAclA(void)
     ExplicitAccess.Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
     ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_SID;
     ExplicitAccess.Trustee.ptstrName = EveryoneSid;
-    ExplicitAccess.Trustee.MultipleTrusteeOperation = 0xDEADBEEF;
-    ExplicitAccess.Trustee.pMultipleTrustee = (PVOID)0xDEADBEEF;
+    ExplicitAccess.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+    ExplicitAccess.Trustee.pMultipleTrustee = NULL;
     res = pSetEntriesInAclA(1, &ExplicitAccess, OldAcl, &NewAcl);
     ok(res == ERROR_SUCCESS, "SetEntriesInAclA failed: %u\n", res);
     ok(NewAcl != NULL, "returned acl was NULL\n");
@@ -2673,13 +2928,13 @@ static void test_SetEntriesInAclA(void)
     ok(NewAcl != NULL, "returned acl was NULL\n");
     LocalFree(NewAcl);
 
-    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
+    if (PRIMARYLANGID(GetSystemDefaultLangID()) != LANG_ENGLISH)
     {
-        skip("Non-english locale (test with hardcoded 'Everyone')\n");
+        skip("Non-English locale (test with hardcoded 'Everyone')\n");
     }
     else
     {
-        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
         ExplicitAccess.Trustee.ptstrName = (LPSTR)szEveryone;
         res = pSetEntriesInAclA(1, &ExplicitAccess, OldAcl, &NewAcl);
         ok(res == ERROR_SUCCESS, "SetEntriesInAclA failed: %u\n", res);
@@ -2695,7 +2950,7 @@ static void test_SetEntriesInAclA(void)
             broken(NewAcl != NULL), /* NT4 */
             "returned acl wasn't NULL: %p\n", NewAcl);
 
-        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+        ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
         ExplicitAccess.Trustee.MultipleTrusteeOperation = TRUSTEE_IS_IMPERSONATE;
         res = pSetEntriesInAclA(1, &ExplicitAccess, OldAcl, &NewAcl);
         ok(res == ERROR_INVALID_PARAMETER ||
@@ -2713,7 +2968,7 @@ static void test_SetEntriesInAclA(void)
         LocalFree(NewAcl);
     }
 
-    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_USER;
+    ExplicitAccess.Trustee.TrusteeForm = TRUSTEE_IS_NAME;
     ExplicitAccess.Trustee.ptstrName = (LPSTR)szCurrentUser;
     res = pSetEntriesInAclA(1, &ExplicitAccess, OldAcl, &NewAcl);
     ok(res == ERROR_SUCCESS, "SetEntriesInAclA failed: %u\n", res);
@@ -3403,21 +3658,23 @@ static void test_CheckTokenMembership(void)
         return;
     }
 
+    is_member = FALSE;
     ret = pCheckTokenMembership(token, token_groups->Groups[i].Sid, &is_member);
     ok(ret, "CheckTokenMembership failed with error %d\n", GetLastError());
     ok(is_member, "CheckTokenMembership should have detected sid as member\n");
 
+    is_member = FALSE;
     ret = pCheckTokenMembership(NULL, token_groups->Groups[i].Sid, &is_member);
     ok(ret, "CheckTokenMembership failed with error %d\n", GetLastError());
     ok(is_member, "CheckTokenMembership should have detected sid as member\n");
 
+    is_member = TRUE;
+    SetLastError(0xdeadbeef);
     ret = pCheckTokenMembership(process_token, token_groups->Groups[i].Sid, &is_member);
-todo_wine {
     ok(!ret && GetLastError() == ERROR_NO_IMPERSONATION_TOKEN,
         "CheckTokenMembership with process token %s with error %d\n",
         ret ? "succeeded" : "failed", GetLastError());
     ok(!is_member, "CheckTokenMembership should have cleared is_member\n");
-}
 
     HeapFree(GetProcessHeap(), 0, token_groups);
     CloseHandle(token);
@@ -3489,6 +3746,241 @@ static void test_EqualSid(void)
     FreeSid(sid2);
 }
 
+static void test_GetUserNameA(void)
+{
+    char buffer[UNLEN + 1], filler[UNLEN + 1];
+    DWORD required_len, buffer_len;
+    BOOL ret;
+
+    /* Test crashes on Windows. */
+    if (0)
+    {
+        SetLastError(0xdeadbeef);
+        GetUserNameA(NULL, NULL);
+    }
+
+    SetLastError(0xdeadbeef);
+    required_len = 0;
+    ret = GetUserNameA(NULL, &required_len);
+    ok(ret == FALSE, "GetUserNameA returned %d\n", ret);
+    ok(required_len != 0, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    required_len = 1;
+    ret = GetUserNameA(NULL, &required_len);
+    ok(ret == FALSE, "GetUserNameA returned %d\n", ret);
+    ok(required_len != 0 && required_len != 1, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    /* Tests crashes on Windows. */
+    if (0)
+    {
+        SetLastError(0xdeadbeef);
+        required_len = UNLEN + 1;
+        GetUserNameA(NULL, &required_len);
+
+        SetLastError(0xdeadbeef);
+        GetUserNameA(buffer, NULL);
+    }
+
+    memset(filler, 'x', sizeof(filler));
+
+    /* Note that GetUserNameA on XP and newer outputs the number of bytes
+     * required for a Unicode string, which affects a test in the next block. */
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    required_len = 0;
+    ret = GetUserNameA(buffer, &required_len);
+    ok(ret == FALSE, "GetUserNameA returned %d\n", ret);
+    ok(!memcmp(buffer, filler, sizeof(filler)), "Output buffer was altered\n");
+    ok(required_len != 0, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    buffer_len = required_len;
+    ret = GetUserNameA(buffer, &buffer_len);
+    ok(ret == TRUE, "GetUserNameA returned %d, last error %u\n", ret, GetLastError());
+    ok(memcmp(buffer, filler, sizeof(filler)) != 0, "Output buffer was untouched\n");
+    ok(buffer_len == required_len ||
+       broken(buffer_len == required_len / sizeof(WCHAR)), /* XP+ */
+       "Outputted buffer length was %u\n", buffer_len);
+
+    /* Use the reported buffer size from the last GetUserNameA call and pass
+     * a length that is one less than the required value. */
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    buffer_len--;
+    ret = GetUserNameA(buffer, &buffer_len);
+    ok(ret == FALSE, "GetUserNameA returned %d\n", ret);
+    ok(!memcmp(buffer, filler, sizeof(filler)), "Output buffer was untouched\n");
+    ok(buffer_len == required_len, "Outputted buffer length was %u\n", buffer_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+}
+
+static void test_GetUserNameW(void)
+{
+    WCHAR buffer[UNLEN + 1], filler[UNLEN + 1];
+    DWORD required_len, buffer_len;
+    BOOL ret;
+
+    /* Test crashes on Windows. */
+    if (0)
+    {
+        SetLastError(0xdeadbeef);
+        GetUserNameW(NULL, NULL);
+    }
+
+    SetLastError(0xdeadbeef);
+    required_len = 0;
+    ret = GetUserNameW(NULL, &required_len);
+    ok(ret == FALSE, "GetUserNameW returned %d\n", ret);
+    ok(required_len != 0, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    required_len = 1;
+    ret = GetUserNameW(NULL, &required_len);
+    ok(ret == FALSE, "GetUserNameW returned %d\n", ret);
+    ok(required_len != 0 && required_len != 1, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    /* Tests crash on Windows. */
+    if (0)
+    {
+        SetLastError(0xdeadbeef);
+        required_len = UNLEN + 1;
+        GetUserNameW(NULL, &required_len);
+
+        SetLastError(0xdeadbeef);
+        GetUserNameW(buffer, NULL);
+    }
+
+    memset(filler, 'x', sizeof(filler));
+
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    required_len = 0;
+    ret = GetUserNameW(buffer, &required_len);
+    ok(ret == FALSE, "GetUserNameW returned %d\n", ret);
+    ok(!memcmp(buffer, filler, sizeof(filler)), "Output buffer was altered\n");
+    ok(required_len != 0, "Outputted buffer length was %u\n", required_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    buffer_len = required_len;
+    ret = GetUserNameW(buffer, &buffer_len);
+    ok(ret == TRUE, "GetUserNameW returned %d, last error %u\n", ret, GetLastError());
+    ok(memcmp(buffer, filler, sizeof(filler)) != 0, "Output buffer was untouched\n");
+    ok(buffer_len == required_len, "Outputted buffer length was %u\n", buffer_len);
+
+    /* GetUserNameW on XP and newer writes a truncated portion of the username string to the buffer. */
+    SetLastError(0xdeadbeef);
+    memcpy(buffer, filler, sizeof(filler));
+    buffer_len--;
+    ret = GetUserNameW(buffer, &buffer_len);
+    ok(ret == FALSE, "GetUserNameW returned %d\n", ret);
+    ok(!memcmp(buffer, filler, sizeof(filler)) ||
+       broken(memcmp(buffer, filler, sizeof(filler)) != 0), /* XP+ */
+       "Output buffer was altered\n");
+    ok(buffer_len == required_len, "Outputted buffer length was %u\n", buffer_len);
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "Last error was %u\n", GetLastError());
+}
+
+static void test_CreateRestrictedToken(void)
+{
+    HANDLE process_token, token, r_token;
+    PTOKEN_GROUPS token_groups, groups2;
+    SID_AND_ATTRIBUTES sattr;
+    BOOL is_member;
+    DWORD size;
+    BOOL ret;
+    DWORD i, j;
+
+    if (!pCreateRestrictedToken)
+    {
+        win_skip("CreateRestrictedToken is not available\n");
+        return;
+    }
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE|TOKEN_QUERY, &process_token);
+    ok(ret, "got error %d\n", GetLastError());
+
+    ret = DuplicateTokenEx(process_token, TOKEN_DUPLICATE|TOKEN_ADJUST_GROUPS|TOKEN_QUERY,
+        NULL, SecurityImpersonation, TokenImpersonation, &token);
+    ok(ret, "got error %d\n", GetLastError());
+
+    /* groups */
+    ret = GetTokenInformation(token, TokenGroups, NULL, 0, &size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "got %d with error %d\n", ret, GetLastError());
+    token_groups = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = GetTokenInformation(token, TokenGroups, token_groups, size, &size);
+    ok(ret, "got error %d\n", GetLastError());
+
+    for (i = 0; i < token_groups->GroupCount; i++)
+    {
+        if (token_groups->Groups[i].Attributes & SE_GROUP_ENABLED)
+            break;
+    }
+
+    if (i == token_groups->GroupCount)
+    {
+        HeapFree(GetProcessHeap(), 0, token_groups);
+        CloseHandle(token);
+        skip("User not a member of any group\n");
+        return;
+    }
+
+    is_member = FALSE;
+    ret = pCheckTokenMembership(token, token_groups->Groups[i].Sid, &is_member);
+    ok(ret, "got error %d\n", GetLastError());
+    ok(is_member, "not a member\n");
+
+    /* disable a SID in new token */
+    sattr.Sid = token_groups->Groups[i].Sid;
+    sattr.Attributes = 0;
+    r_token = NULL;
+    ret = pCreateRestrictedToken(token, 0, 1, &sattr, 0, NULL, 0, NULL, &r_token);
+    todo_wine ok(ret, "got error %d\n", GetLastError());
+
+    if (ret)
+    {
+        /* check if a SID is enabled */
+        is_member = TRUE;
+        ret = pCheckTokenMembership(r_token, token_groups->Groups[i].Sid, &is_member);
+        ok(ret, "got error %d\n", GetLastError());
+        ok(!is_member, "not a member\n");
+
+        ret = GetTokenInformation(r_token, TokenGroups, NULL, 0, &size);
+        ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %d with error %d\n",
+            ret, GetLastError());
+        groups2 = HeapAlloc(GetProcessHeap(), 0, size);
+        ret = GetTokenInformation(r_token, TokenGroups, groups2, size, &size);
+        ok(ret, "got error %d\n", GetLastError());
+
+        for (j = 0; j < groups2->GroupCount; j++)
+        {
+            if (EqualSid(groups2->Groups[j].Sid, token_groups->Groups[i].Sid))
+                break;
+        }
+
+        ok(groups2->Groups[j].Attributes & SE_GROUP_USE_FOR_DENY_ONLY,
+            "got wrong attributes\n");
+        ok((groups2->Groups[j].Attributes & SE_GROUP_ENABLED) == 0,
+            "got wrong attributes\n");
+
+        HeapFree(GetProcessHeap(), 0, groups2);
+    }
+
+    HeapFree(GetProcessHeap(), 0, token_groups);
+    CloseHandle(r_token);
+    CloseHandle(token);
+    CloseHandle(process_token);
+}
+
 START_TEST(security)
 {
     init();
@@ -3522,4 +4014,7 @@ START_TEST(security)
     test_GetSidSubAuthority();
     test_CheckTokenMembership();
     test_EqualSid();
+    test_GetUserNameA();
+    test_GetUserNameW();
+    test_CreateRestrictedToken();
 }

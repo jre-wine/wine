@@ -28,6 +28,7 @@
 #define NUMELEMS(array) (sizeof((array))/sizeof((array)[0]))
 
 static BOOL (WINAPI *pImmAssociateContextEx)(HWND,HIMC,DWORD);
+static BOOL (WINAPI *pImmIsUIMessageA)(HWND,UINT,WPARAM,LPARAM);
 
 /*
  * msgspy - record and analyse message traces sent to a certain window
@@ -156,6 +157,7 @@ static BOOL init(void) {
 
     hmod = GetModuleHandleA("imm32.dll");
     pImmAssociateContextEx = (void*)GetProcAddress(hmod, "ImmAssociateContextEx");
+    pImmIsUIMessageA = (void*)GetProcAddress(hmod, "ImmIsUIMessageA");
 
     wc.cbSize        = sizeof(WNDCLASSEX);
     wc.style         = 0;
@@ -507,6 +509,115 @@ static void test_ImmThreads(void)
     todo_wine ok(himc == NULL, "Should not be able to get himc from other process window\n");
 }
 
+static void test_ImmIsUIMessage(void)
+{
+    struct test
+    {
+        UINT msg;
+        BOOL ret;
+    };
+
+    static const struct test tests[] =
+    {
+        { WM_MOUSEMOVE,            FALSE },
+        { WM_IME_STARTCOMPOSITION, TRUE  },
+        { WM_IME_ENDCOMPOSITION,   TRUE  },
+        { WM_IME_COMPOSITION,      TRUE  },
+        { WM_IME_SETCONTEXT,       TRUE  },
+        { WM_IME_NOTIFY,           TRUE  },
+        { WM_IME_CONTROL,          FALSE },
+        { WM_IME_COMPOSITIONFULL,  TRUE  },
+        { WM_IME_SELECT,           TRUE  },
+        { WM_IME_CHAR,             FALSE },
+        { 0x287 /* FIXME */,       TRUE  },
+        { WM_IME_REQUEST,          FALSE },
+        { WM_IME_KEYDOWN,          FALSE },
+        { WM_IME_KEYUP,            FALSE },
+        { 0, FALSE } /* mark the end */
+    };
+
+    const struct test *test;
+    BOOL ret;
+
+    if (!pImmIsUIMessageA) return;
+
+    for (test = tests; test->msg; test++)
+    {
+        msg_spy_flush_msgs();
+        ret = pImmIsUIMessageA(NULL, test->msg, 0, 0);
+        ok(ret == test->ret, "ImmIsUIMessageA returned %x for %x\n", ret, test->msg);
+        ok(!msg_spy_find_msg(test->msg), "Windows does not send 0x%x for NULL hwnd\n", test->msg);
+
+        ret = pImmIsUIMessageA(hwnd, test->msg, 0, 0);
+        ok(ret == test->ret, "ImmIsUIMessageA returned %x for %x\n", ret, test->msg);
+        if (ret)
+            ok(msg_spy_find_msg(test->msg) != NULL, "Windows does send 0x%x\n", test->msg);
+        else
+            ok(!msg_spy_find_msg(test->msg), "Windows does not send 0x%x\n", test->msg);
+    }
+}
+
+static void test_ImmGetContext(void)
+{
+    HIMC himc;
+    DWORD err;
+
+    SetLastError(0xdeadbeef);
+    himc = ImmGetContext((HWND)0xffffffff);
+    err = GetLastError();
+    ok(himc == NULL, "ImmGetContext succeeded\n");
+    ok(err == ERROR_INVALID_WINDOW_HANDLE, "got %u\n", err);
+
+    himc = ImmGetContext(hwnd);
+    ok(himc != NULL, "ImmGetContext failed\n");
+    ok(ImmReleaseContext(hwnd, himc), "ImmReleaseContext failed\n");
+}
+
+static void test_ImmGetDescription(void)
+{
+    HKL hkl;
+    WCHAR japime[] = { 'E', '0', '0', '1', '0', '4', '1', '1', 0 };
+    WCHAR descW[100];
+    CHAR descA[100];
+    UINT ret, lret;
+
+    /* FIXME: invalid keyboard layouts should not pass */
+    ret = ImmGetDescriptionW(NULL, NULL, 0);
+    todo_wine ok(!ret, "ImmGetDescriptionW failed, expected 0 received %d.\n", ret);
+
+    /* load a language with valid IMM descriptions */
+    hkl = LoadKeyboardLayoutW(japime, KLF_ACTIVATE);
+    todo_wine ok(hkl != 0, "LoadKeyboardLayoutW failed, expected != 0.\n");
+
+    ret = ImmGetDescriptionW(hkl, NULL, 0);
+    if(!ret)
+    {
+        win_skip("ImmGetDescriptionW is not working for current loaded keyboard.\n");
+        return;
+    }
+
+    ret = ImmGetDescriptionW(hkl, descW, 0);
+    ok(ret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
+
+    lret = ImmGetDescriptionW(hkl, descW, ret + 1);
+    ok(lret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
+    ok(lret == ret, "ImmGetDescriptionW failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
+
+    lret = ImmGetDescriptionA(hkl, descA, ret + 1);
+    ok(lret, "ImmGetDescriptionA failed, expected != 0 received 0.\n");
+    todo_wine ok(lret == ret, "ImmGetDescriptionA failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
+
+    ret /= 2; /* try to copy partially */
+    lret = ImmGetDescriptionW(hkl, descW, ret + 1);
+    ok(lret, "ImmGetDescriptionW failed, expected != 0 received 0.\n");
+    ok(lret == ret, "ImmGetDescriptionW failed to return the correct amount of data. Expected %d, got %d.\n", ret, lret);
+
+    ret = ImmGetDescriptionW(hkl, descW, 1);
+    ok(!ret, "ImmGetDescriptionW failed, expected 0 received %d.\n", ret);
+
+    UnloadKeyboardLayout(hkl);
+}
+
 START_TEST(imm32) {
     if (init())
     {
@@ -516,6 +627,9 @@ START_TEST(imm32) {
         test_ImmIME();
         test_ImmAssociateContextEx();
         test_ImmThreads();
+        test_ImmIsUIMessage();
+        test_ImmGetContext();
+        test_ImmGetDescription();
     }
     cleanup();
 }

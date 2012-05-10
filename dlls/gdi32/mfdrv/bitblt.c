@@ -28,9 +28,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(metafile);
 /***********************************************************************
  *           MFDRV_PatBlt
  */
-BOOL  CDECL MFDRV_PatBlt( PHYSDEV dev, INT left, INT top, INT width, INT height, DWORD rop )
+BOOL MFDRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop )
 {
-    MFDRV_MetaParam6( dev, META_PATBLT, left, top, width, height, HIWORD(rop), LOWORD(rop) );
+    MFDRV_MetaParam6( dev, META_PATBLT, dst->log_x, dst->log_y, dst->log_width, dst->log_height,
+                      HIWORD(rop), LOWORD(rop) );
     return TRUE;
 }
 
@@ -43,24 +44,24 @@ BOOL  CDECL MFDRV_PatBlt( PHYSDEV dev, INT left, INT top, INT width, INT height,
  */
 #define STRETCH_VIA_DIB
 
-BOOL  CDECL MFDRV_StretchBlt( PHYSDEV devDst, INT xDst, INT yDst, INT widthDst,
-                              INT heightDst, PHYSDEV devSrc, INT xSrc, INT ySrc,
-                              INT widthSrc, INT heightSrc, DWORD rop )
+BOOL MFDRV_StretchBlt( PHYSDEV devDst, struct bitblt_coords *dst,
+                       PHYSDEV devSrc, struct bitblt_coords *src, DWORD rop )
 {
     BOOL ret;
     DWORD len;
     METARECORD *mr;
     BITMAP BM;
-    METAFILEDRV_PDEVICE *physDevSrc = (METAFILEDRV_PDEVICE *)devSrc;
 #ifdef STRETCH_VIA_DIB
     LPBITMAPINFOHEADER lpBMI;
     WORD nBPP;
 #endif
-    HBITMAP hBitmap = GetCurrentObject(physDevSrc->hdc, OBJ_BITMAP);
+    HBITMAP hBitmap = GetCurrentObject(devSrc->hdc, OBJ_BITMAP);
+
+    if (devSrc->funcs == devDst->funcs) return FALSE;  /* can't use a metafile DC as source */
 
     if (GetObjectW(hBitmap, sizeof(BITMAP), &BM) != sizeof(BITMAP))
     {
-        WARN("bad bitmap object %p passed for hdc %p\n", hBitmap, physDevSrc->hdc);
+        WARN("bad bitmap object %p passed for hdc %p\n", hBitmap, devSrc->hdc);
         return FALSE;
     }
 #ifdef STRETCH_VIA_DIB
@@ -68,7 +69,7 @@ BOOL  CDECL MFDRV_StretchBlt( PHYSDEV devDst, INT xDst, INT yDst, INT widthDst,
     if(nBPP > 8) nBPP = 24; /* FIXME Can't get 16bpp to work for some reason */
     len = sizeof(METARECORD) + 10 * sizeof(INT16)
             + sizeof(BITMAPINFOHEADER) + (nBPP <= 8 ? 1 << nBPP: 0) * sizeof(RGBQUAD)
-              + DIB_GetDIBWidthBytes(BM.bmWidth, nBPP) * BM.bmHeight;
+              + get_dib_stride( BM.bmWidth, nBPP ) * BM.bmHeight;
     if (!(mr = HeapAlloc( GetProcessHeap(), 0, len)))
 	return FALSE;
     mr->rdFunction = META_DIBSTRETCHBLT;
@@ -78,19 +79,18 @@ BOOL  CDECL MFDRV_StretchBlt( PHYSDEV devDst, INT xDst, INT yDst, INT widthDst,
     lpBMI->biHeight    = BM.bmHeight;
     lpBMI->biPlanes    = 1;
     lpBMI->biBitCount  = nBPP;
-    lpBMI->biSizeImage = DIB_GetDIBWidthBytes(BM.bmWidth, nBPP) * lpBMI->biHeight;
+    lpBMI->biSizeImage = get_dib_image_size( (BITMAPINFO *)lpBMI );
     lpBMI->biClrUsed   = nBPP <= 8 ? 1 << nBPP : 0;
     lpBMI->biCompression = BI_RGB;
-    lpBMI->biXPelsPerMeter = MulDiv(GetDeviceCaps(physDevSrc->hdc,LOGPIXELSX),3937,100);
-    lpBMI->biYPelsPerMeter = MulDiv(GetDeviceCaps(physDevSrc->hdc,LOGPIXELSY),3937,100);
+    lpBMI->biXPelsPerMeter = MulDiv(GetDeviceCaps(devSrc->hdc,LOGPIXELSX),3937,100);
+    lpBMI->biYPelsPerMeter = MulDiv(GetDeviceCaps(devSrc->hdc,LOGPIXELSY),3937,100);
     lpBMI->biClrImportant  = 0;                          /* 1 meter  = 39.37 inch */
 
     TRACE("MF_StretchBltViaDIB->len = %d  rop=%x  PixYPM=%d Caps=%d\n",
-	  len,rop,lpBMI->biYPelsPerMeter,GetDeviceCaps(physDevSrc->hdc, LOGPIXELSY));
+	  len,rop,lpBMI->biYPelsPerMeter,GetDeviceCaps(devSrc->hdc, LOGPIXELSY));
 
-    if (GetDIBits(physDevSrc->hdc, hBitmap, 0, (UINT)lpBMI->biHeight,
-                  (LPSTR)lpBMI + bitmap_info_size( (BITMAPINFO *)lpBMI,
-                                                     DIB_RGB_COLORS ),
+    if (GetDIBits(devSrc->hdc, hBitmap, 0, (UINT)lpBMI->biHeight,
+                  (LPSTR)lpBMI + get_dib_info_size( (BITMAPINFO *)lpBMI, DIB_RGB_COLORS ),
                   (LPBITMAPINFO)lpBMI, DIB_RGB_COLORS))
 #else
     len = sizeof(METARECORD) + 15 * sizeof(INT16) + BM.bmWidthBytes * BM.bmHeight;
@@ -109,14 +109,14 @@ BOOL  CDECL MFDRV_StretchBlt( PHYSDEV devDst, INT xDst, INT yDst, INT widthDst,
       mr->rdSize = len / sizeof(INT16);
       *(mr->rdParm) = LOWORD(rop);
       *(mr->rdParm + 1) = HIWORD(rop);
-      *(mr->rdParm + 2) = heightSrc;
-      *(mr->rdParm + 3) = widthSrc;
-      *(mr->rdParm + 4) = ySrc;
-      *(mr->rdParm + 5) = xSrc;
-      *(mr->rdParm + 6) = heightDst;
-      *(mr->rdParm + 7) = widthDst;
-      *(mr->rdParm + 8) = yDst;
-      *(mr->rdParm + 9) = xDst;
+      *(mr->rdParm + 2) = src->log_height;
+      *(mr->rdParm + 3) = src->log_width;
+      *(mr->rdParm + 4) = src->log_y;
+      *(mr->rdParm + 5) = src->log_x;
+      *(mr->rdParm + 6) = dst->log_height;
+      *(mr->rdParm + 7) = dst->log_width;
+      *(mr->rdParm + 8) = dst->log_y;
+      *(mr->rdParm + 9) = dst->log_x;
       ret = MFDRV_WriteRecord( devDst, mr, mr->rdSize * 2);
     }
     else
@@ -129,21 +129,14 @@ BOOL  CDECL MFDRV_StretchBlt( PHYSDEV devDst, INT xDst, INT yDst, INT widthDst,
 /***********************************************************************
  *           MFDRV_StretchDIBits
  */
-INT  CDECL MFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
-                                INT heightDst, INT xSrc, INT ySrc, INT widthSrc,
-                                INT heightSrc, const void *bits,
-                                const BITMAPINFO *info, UINT wUsage, DWORD dwRop )
+INT MFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
+                         INT heightDst, INT xSrc, INT ySrc, INT widthSrc,
+                         INT heightSrc, const void *bits,
+                         BITMAPINFO *info, UINT wUsage, DWORD dwRop )
 {
-    DWORD len, infosize, imagesize;
-    METARECORD *mr;
-
-    infosize = bitmap_info_size(info, wUsage);
-    imagesize = DIB_GetDIBImageBytes( info->bmiHeader.biWidth,
-				      info->bmiHeader.biHeight,
-				      info->bmiHeader.biBitCount );
-
-    len = sizeof(METARECORD) + 10 * sizeof(WORD) + infosize + imagesize;
-    mr = HeapAlloc( GetProcessHeap(), 0, len );
+    DWORD infosize = get_dib_info_size(info, wUsage);
+    DWORD len = sizeof(METARECORD) + 10 * sizeof(WORD) + infosize + info->bmiHeader.biSizeImage;
+    METARECORD *mr = HeapAlloc( GetProcessHeap(), 0, len );
     if(!mr) return 0;
 
     mr->rdSize = len / 2;
@@ -160,7 +153,7 @@ INT  CDECL MFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
     mr->rdParm[9] = (INT16)yDst;
     mr->rdParm[10] = (INT16)xDst;
     memcpy(mr->rdParm + 11, info, infosize);
-    memcpy(mr->rdParm + 11 + infosize / 2, bits, imagesize);
+    memcpy(mr->rdParm + 11 + infosize / 2, bits, info->bmiHeader.biSizeImage);
     MFDRV_WriteRecord( dev, mr, mr->rdSize * 2 );
     HeapFree( GetProcessHeap(), 0, mr );
     return heightSrc;
@@ -170,22 +163,14 @@ INT  CDECL MFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
 /***********************************************************************
  *           MFDRV_SetDIBitsToDeivce
  */
-INT  CDECL MFDRV_SetDIBitsToDevice( PHYSDEV dev, INT xDst, INT yDst, DWORD cx,
-                                    DWORD cy, INT xSrc, INT ySrc, UINT startscan,
-                                    UINT lines, LPCVOID bits, const BITMAPINFO *info,
-                                    UINT coloruse )
+INT MFDRV_SetDIBitsToDevice( PHYSDEV dev, INT xDst, INT yDst, DWORD cx,
+                             DWORD cy, INT xSrc, INT ySrc, UINT startscan,
+                             UINT lines, LPCVOID bits, BITMAPINFO *info, UINT coloruse )
 
 {
-    DWORD len, infosize, imagesize;
-    METARECORD *mr;
-
-    infosize = bitmap_info_size(info, coloruse);
-    imagesize = DIB_GetDIBImageBytes( info->bmiHeader.biWidth,
-				      info->bmiHeader.biHeight,
-				      info->bmiHeader.biBitCount );
-
-    len = sizeof(METARECORD) + 8 * sizeof(WORD) + infosize + imagesize;
-    mr = HeapAlloc( GetProcessHeap(), 0, len );
+    DWORD infosize = get_dib_info_size(info, coloruse);
+    DWORD len = sizeof(METARECORD) + 8 * sizeof(WORD) + infosize + info->bmiHeader.biSizeImage;
+    METARECORD *mr = HeapAlloc( GetProcessHeap(), 0, len );
     if(!mr) return 0;
 
     mr->rdSize = len / 2;
@@ -200,7 +185,7 @@ INT  CDECL MFDRV_SetDIBitsToDevice( PHYSDEV dev, INT xDst, INT yDst, DWORD cx,
     mr->rdParm[7] = (INT16)yDst;
     mr->rdParm[8] = (INT16)xDst;
     memcpy(mr->rdParm + 9, info, infosize);
-    memcpy(mr->rdParm + 9 + infosize / 2, bits, imagesize);
+    memcpy(mr->rdParm + 9 + infosize / 2, bits, info->bmiHeader.biSizeImage);
     MFDRV_WriteRecord( dev, mr, mr->rdSize * 2 );
     HeapFree( GetProcessHeap(), 0, mr );
     return lines;

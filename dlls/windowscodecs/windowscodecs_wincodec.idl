@@ -19,6 +19,12 @@
 #include "wincodec.idl"
 
 [
+    threading(both),
+    uuid(00000301-a8f2-4877-ba0a-fd2b6645fb94)  /* IWICFormatConverter */
+]
+coclass PSFactoryBuffer { interface IFactoryBuffer; }
+
+[
     helpstring("WIC Imaging Factory"),
     threading(both),
     uuid(cacaf262-9370-4615-a13b-9f5539da4c0a)
@@ -82,6 +88,13 @@ coclass WICJpegDecoder { interface IWICBitmapDecoder; }
 coclass WICTiffDecoder { interface IWICBitmapDecoder; }
 
 [
+    helpstring("WIC TIFF Encoder"),
+    threading(both),
+    uuid(0131be10-2001-4c5f-a9b0-cc88fab64ce8)
+]
+coclass WICTiffEncoder { interface IWICBitmapEncoder; }
+
+[
     helpstring("WIC ICNS Encoder"),
     threading(both),
     uuid(312fb6f1-b767-409d-8a6d-0fc154d4f05c)
@@ -101,3 +114,10 @@ coclass WICDefaultFormatConverter { interface IWICFormatConverter; }
     uuid(b11fc79a-67cc-43e6-a9ce-e3d54945d304)
 ]
 coclass WineTgaDecoder { interface IWICBitmapDecoder; }
+
+[
+    helpstring("WIC Unknown Metadata Reader"),
+    threading(both),
+    uuid(699745c2-5066-4b82-a8e3-d40478dbec8c)
+]
+coclass WICUnknownMetadataReader { interface IWICMetadataReader; }

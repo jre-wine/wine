@@ -672,8 +672,7 @@ static BOOL CRYPT_QueryEmbeddedMessageObject(DWORD dwObjectType,
                              pdwMsgAndCertEncodingType, NULL, NULL,
                              phCertStore, phMsg);
                             if (ret && pdwContentType)
-                                *pdwContentType =
-                                 CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED;
+                                *pdwContentType = CERT_QUERY_CONTENT_PKCS7_SIGNED_EMBED;
                         }
                         CryptMemFree(blob.pbData);
                     }
@@ -1112,7 +1111,6 @@ static BOOL WINAPI CRYPT_FormatBasicConstraints2(DWORD dwCertEncodingType,
             strcpyW(str, pathLengthHeader);
             str += strlenW(pathLengthHeader);
             strcpyW(str, pathLength);
-            str += strlenW(pathLength);
         }
         LocalFree(info);
     }
@@ -2469,7 +2467,6 @@ static BOOL WINAPI CRYPT_FormatSpcFinancialCriteria(DWORD dwCertEncodingType,
             else
             {
                 strcpyW(str, notAvailable);
-                str += strlenW(notAvailable);
             }
         }
     }

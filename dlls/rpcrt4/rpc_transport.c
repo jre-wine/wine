@@ -111,41 +111,31 @@ typedef struct _RpcConnection_np
 {
   RpcConnection common;
   HANDLE pipe;
-  OVERLAPPED ovl;
+  HANDLE listen_thread;
   BOOL listening;
 } RpcConnection_np;
 
 static RpcConnection *rpcrt4_conn_np_alloc(void)
 {
-  RpcConnection_np *npc = HeapAlloc(GetProcessHeap(), 0, sizeof(RpcConnection_np));
-  if (npc)
-  {
-    npc->pipe = NULL;
-    memset(&npc->ovl, 0, sizeof(npc->ovl));
-    npc->listening = FALSE;
-  }
+  RpcConnection_np *npc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(RpcConnection_np));
   return &npc->common;
 }
 
-static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
+static DWORD CALLBACK listen_thread(void *arg)
 {
-  if (npc->listening)
-    return RPC_S_OK;
-
-  npc->listening = TRUE;
+  RpcConnection_np *npc = arg;
   for (;;)
   {
-      if (ConnectNamedPipe(npc->pipe, &npc->ovl))
+      if (ConnectNamedPipe(npc->pipe, NULL))
           return RPC_S_OK;
 
       switch(GetLastError())
       {
       case ERROR_PIPE_CONNECTED:
-          SetEvent(npc->ovl.hEvent);
           return RPC_S_OK;
-      case ERROR_IO_PENDING:
-          /* will be completed in rpcrt4_protseq_np_wait_for_new_connection */
-          return RPC_S_OK;
+      case ERROR_HANDLES_CLOSED:
+          /* connection closed during listen */
+          return RPC_S_NO_CONTEXT_AVAILABLE;
       case ERROR_NO_DATA_DETECTED:
           /* client has disconnected, retry */
           DisconnectNamedPipe( npc->pipe );
@@ -156,6 +146,22 @@ static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
           return RPC_S_OUT_OF_RESOURCES;
       }
   }
+}
+
+static RPC_STATUS rpcrt4_conn_listen_pipe(RpcConnection_np *npc)
+{
+  if (npc->listening)
+    return RPC_S_OK;
+
+  npc->listening = TRUE;
+  npc->listen_thread = CreateThread(NULL, 0, listen_thread, npc, 0, NULL);
+  if (!npc->listen_thread)
+  {
+      npc->listening = FALSE;
+      ERR("Couldn't create listen thread (error was %d)\n", GetLastError());
+      return RPC_S_OUT_OF_RESOURCES;
+  }
+  return RPC_S_OK;
 }
 
 static RPC_STATUS rpcrt4_conn_create_pipe(RpcConnection *Connection, LPCSTR pname)
@@ -174,9 +180,6 @@ static RPC_STATUS rpcrt4_conn_create_pipe(RpcConnection *Connection, LPCSTR pnam
     else
       return RPC_S_CANT_CREATE_ENDPOINT;
   }
-
-  memset(&npc->ovl, 0, sizeof(npc->ovl));
-  npc->ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
 
   /* Note: we don't call ConnectNamedPipe here because it must be done in the
    * server thread as the thread must be alertable */
@@ -233,11 +236,9 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
   }
 
   /* success */
-  memset(&npc->ovl, 0, sizeof(npc->ovl));
   /* pipe is connected; change to message-read mode. */
   dwMode = PIPE_READMODE_MESSAGE;
   SetNamedPipeHandleState(pipe, &dwMode, NULL, NULL);
-  npc->ovl.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
   npc->pipe = pipe;
 
   return RPC_S_OK;
@@ -365,9 +366,9 @@ static void rpcrt4_conn_np_handoff(RpcConnection_np *old_npc, RpcConnection_np *
    * to the child, then reopen the server binding to continue listening */
 
   new_npc->pipe = old_npc->pipe;
-  new_npc->ovl = old_npc->ovl;
+  new_npc->listen_thread = old_npc->listen_thread;
   old_npc->pipe = 0;
-  memset(&old_npc->ovl, 0, sizeof(old_npc->ovl));
+  old_npc->listen_thread = 0;
   old_npc->listening = FALSE;
 }
 
@@ -455,9 +456,9 @@ static int rpcrt4_conn_np_close(RpcConnection *Connection)
     CloseHandle(npc->pipe);
     npc->pipe = 0;
   }
-  if (npc->ovl.hEvent) {
-    CloseHandle(npc->ovl.hEvent);
-    npc->ovl.hEvent = 0;
+  if (npc->listen_thread) {
+    CloseHandle(npc->listen_thread);
+    npc->listen_thread = 0;
   }
   return 0;
 }
@@ -661,7 +662,7 @@ static void *rpcrt4_protseq_np_get_wait_array(RpcServerProtseq *protseq, void *p
     conn = CONTAINING_RECORD(protseq->conn, RpcConnection_np, common);
     while (conn) {
         rpcrt4_conn_listen_pipe(conn);
-        if (conn->ovl.hEvent)
+        if (conn->listen_thread)
             (*count)++;
         conn = CONTAINING_RECORD(conn->common.Next, RpcConnection_np, common);
     }
@@ -682,7 +683,7 @@ static void *rpcrt4_protseq_np_get_wait_array(RpcServerProtseq *protseq, void *p
     *count = 1;
     conn = CONTAINING_RECORD(protseq->conn, RpcConnection_np, common);
     while (conn) {
-        if ((objs[*count] = conn->ovl.hEvent))
+        if ((objs[*count] = conn->listen_thread))
             (*count)++;
         conn = CONTAINING_RECORD(conn->common.Next, RpcConnection_np, common);
     }
@@ -729,12 +730,18 @@ static int rpcrt4_protseq_np_wait_for_new_connection(RpcServerProtseq *protseq, 
         EnterCriticalSection(&protseq->cs);
         conn = CONTAINING_RECORD(protseq->conn, RpcConnection_np, common);
         while (conn) {
-            if (b_handle == conn->ovl.hEvent) break;
+            if (b_handle == conn->listen_thread) break;
             conn = CONTAINING_RECORD(conn->common.Next, RpcConnection_np, common);
         }
         cconn = NULL;
         if (conn)
-            RPCRT4_SpawnConnection(&cconn, &conn->common);
+        {
+            DWORD exit_code;
+            if (GetExitCodeThread(conn->listen_thread, &exit_code) && exit_code == RPC_S_OK)
+                RPCRT4_SpawnConnection(&cconn, &conn->common);
+            CloseHandle(conn->listen_thread);
+            conn->listen_thread = 0;
+        }
         else
             ERR("failed to locate connection for handle %p\n", b_handle);
         LeaveCriticalSection(&protseq->cs);
@@ -1367,7 +1374,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         if (ret < 0)
         {
             WARN("listen failed: %s\n", strerror(errno));
-            RPCRT4_DestroyConnection(&tcpc->common);
+            RPCRT4_ReleaseConnection(&tcpc->common);
             status = RPC_S_OUT_OF_RESOURCES;
             continue;
         }
@@ -1380,7 +1387,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_ip_tcp_open_endpoint(RpcServerProtseq *pr
         if (ret < 0)
         {
             WARN("couldn't make socket non-blocking, error %d\n", ret);
-            RPCRT4_DestroyConnection(&tcpc->common);
+            RPCRT4_ReleaseConnection(&tcpc->common);
             status = RPC_S_OUT_OF_RESOURCES;
             continue;
         }
@@ -1856,6 +1863,7 @@ static ULONG RpcHttpAsyncData_Release(RpcHttpAsyncData *data)
         TRACE("destroying async data %p\n", data);
         CloseHandle(data->completion_event);
         HeapFree(GetProcessHeap(), 0, data->inet_buffers.lpvBuffer);
+        data->cs.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&data->cs);
         HeapFree(GetProcessHeap(), 0, data);
     }
@@ -1899,6 +1907,7 @@ static RpcConnection *rpcrt4_ncacn_http_alloc(void)
     httpc->async_data->inet_buffers.lpvBuffer = NULL;
     httpc->async_data->destination_buffer = NULL;
     InitializeCriticalSection(&httpc->async_data->cs);
+    httpc->async_data->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": RpcHttpAsyncData.cs");
     return &httpc->common;
 }
 
@@ -2937,6 +2946,7 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server,
   }
 
   NewConnection = ops->alloc();
+  NewConnection->ref = 1;
   NewConnection->Next = NULL;
   NewConnection->server_binding = NULL;
   NewConnection->server = server;
@@ -2982,9 +2992,17 @@ static RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnecti
   return err;
 }
 
-RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection)
+RpcConnection *RPCRT4_GrabConnection( RpcConnection *conn )
 {
-  TRACE("connection: %p\n", Connection);
+    InterlockedIncrement( &conn->ref );
+    return conn;
+}
+
+RPC_STATUS RPCRT4_ReleaseConnection(RpcConnection* Connection)
+{
+  if (InterlockedDecrement( &Connection->ref ) > 0) return RPC_S_OK;
+
+  TRACE("destroying connection %p\n", Connection);
 
   RPCRT4_CloseConnection(Connection);
   RPCRT4_strfree(Connection->Endpoint);
@@ -3123,4 +3141,105 @@ RPC_STATUS WINAPI RpcNetworkIsProtseqValidA(RPC_CSTR protseq)
     return ret;
   }
   return RPC_S_OUT_OF_MEMORY;
+}
+
+/***********************************************************************
+ *             RpcProtseqVectorFreeA (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcProtseqVectorFreeA(RPC_PROTSEQ_VECTORA **protseqs)
+{
+  TRACE("(%p)\n", protseqs);
+
+  if (*protseqs)
+  {
+    int i;
+    for (i = 0; i < (*protseqs)->Count; i++)
+      HeapFree(GetProcessHeap(), 0, (*protseqs)->Protseq[i]);
+    HeapFree(GetProcessHeap(), 0, *protseqs);
+    *protseqs = NULL;
+  }
+  return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcProtseqVectorFreeW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcProtseqVectorFreeW(RPC_PROTSEQ_VECTORW **protseqs)
+{
+  TRACE("(%p)\n", protseqs);
+
+  if (*protseqs)
+  {
+    int i;
+    for (i = 0; i < (*protseqs)->Count; i++)
+      HeapFree(GetProcessHeap(), 0, (*protseqs)->Protseq[i]);
+    HeapFree(GetProcessHeap(), 0, *protseqs);
+    *protseqs = NULL;
+  }
+  return RPC_S_OK;
+}
+
+/***********************************************************************
+ *             RpcNetworkInqProtseqsW (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcNetworkInqProtseqsW( RPC_PROTSEQ_VECTORW** protseqs )
+{
+  RPC_PROTSEQ_VECTORW *pvector;
+  int i = 0;
+  RPC_STATUS status = RPC_S_OUT_OF_MEMORY;
+
+  TRACE("(%p)\n", protseqs);
+
+  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned short*)*ARRAYSIZE(protseq_list)));
+  if (!*protseqs)
+    goto end;
+  pvector = *protseqs;
+  pvector->Count = 0;
+  for (i = 0; i < ARRAYSIZE(protseq_list); i++)
+  {
+    pvector->Protseq[i] = HeapAlloc(GetProcessHeap(), 0, (strlen(protseq_list[i].name)+1)*sizeof(unsigned short));
+    if (pvector->Protseq[i] == NULL)
+      goto end;
+    MultiByteToWideChar(CP_ACP, 0, (CHAR*)protseq_list[i].name, -1,
+      (WCHAR*)pvector->Protseq[i], strlen(protseq_list[i].name) + 1);
+    pvector->Count++;
+  }
+  status = RPC_S_OK;
+
+end:
+  if (status != RPC_S_OK)
+    RpcProtseqVectorFreeW(protseqs);
+  return status;
+}
+
+/***********************************************************************
+ *             RpcNetworkInqProtseqsA (RPCRT4.@)
+ */
+RPC_STATUS WINAPI RpcNetworkInqProtseqsA(RPC_PROTSEQ_VECTORA** protseqs)
+{
+  RPC_PROTSEQ_VECTORA *pvector;
+  int i = 0;
+  RPC_STATUS status = RPC_S_OUT_OF_MEMORY;
+
+  TRACE("(%p)\n", protseqs);
+
+  *protseqs = HeapAlloc(GetProcessHeap(), 0, sizeof(RPC_PROTSEQ_VECTORW)+(sizeof(unsigned char*)*ARRAYSIZE(protseq_list)));
+  if (!*protseqs)
+    goto end;
+  pvector = *protseqs;
+  pvector->Count = 0;
+  for (i = 0; i < ARRAYSIZE(protseq_list); i++)
+  {
+    pvector->Protseq[i] = HeapAlloc(GetProcessHeap(), 0, strlen(protseq_list[i].name)+1);
+    if (pvector->Protseq[i] == NULL)
+      goto end;
+    strcpy((char*)pvector->Protseq[i], protseq_list[i].name);
+    pvector->Count++;
+  }
+  status = RPC_S_OK;
+
+end:
+  if (status != RPC_S_OK)
+    RpcProtseqVectorFreeA(protseqs);
+  return status;
 }

@@ -181,6 +181,9 @@ static BSTR a2bstr(const char *str)
     BSTR ret;
     int len;
 
+    if(!str)
+        return NULL;
+
     len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
     ret = SysAllocStringLen(NULL, len);
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
@@ -883,7 +886,7 @@ static HRESULT WINAPI InPlaceSite_GetWindowContext(IOleInPlaceSite *iface,
     *lprcPosRect = rect;
     *lprcClipRect = rect;
 
-    lpFrameInfo->cb = sizeof(*lpFrameInfo);
+    ok(lpFrameInfo->cb == sizeof(*lpFrameInfo), "lpFrameInfo->cb = %u, expected %u\n", lpFrameInfo->cb, (unsigned)sizeof(*lpFrameInfo));
     lpFrameInfo->fMDIApp = FALSE;
     lpFrameInfo->hwndFrame = container_hwnd;
     lpFrameInfo->haccel = NULL;
@@ -1948,6 +1951,9 @@ static void test_script_run(void)
     SysFreeString(tmp);
     ok(hres == S_OK, "GetDispID(document) failed: %08x\n", hres);
 
+    hres = IDispatchEx_DeleteMemberByDispID(document, id);
+    ok(hres == E_NOTIMPL, "DeleteMemberByDispID failed = %08x\n", hres);
+
     VariantInit(&var);
     memset(&dp, 0, sizeof(dp));
     memset(&ei, 0, sizeof(ei));
@@ -2109,7 +2115,6 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
         LPCOLESTR pstrDelimiter, CTXARG_T dwSourceContextCookie, ULONG ulStartingLine,
         DWORD dwFlags, VARIANT *pvarResult, EXCEPINFO *pexcepinfo)
 {
-    ok(!punkContext, "punkContext = %p\n", punkContext);
     ok(pvarResult != NULL, "pvarResult == NULL\n");
     ok(pexcepinfo != NULL, "pexcepinfo == NULL\n");
 
@@ -2179,7 +2184,7 @@ static HRESULT WINAPI ActiveScript_QueryInterface(IActiveScript *iface, REFIID r
     if(IsEqualGUID(&IID_IActiveScriptDebug, riid))
         return E_NOINTERFACE;
 
-    ok(0, "unexpected riid %s\n", debugstr_guid(riid));
+    trace("QI(%s)\n", debugstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -2454,7 +2459,7 @@ static const char simple_script_str[] =
     "<script language=\"TestScript\">simple script</script>"
     "</body></html>";
 
-static void test_exec_script(IHTMLDocument2 *doc)
+static void test_exec_script(IHTMLDocument2 *doc, const char *codea, const char *langa)
 {
     IHTMLWindow2 *window;
     BSTR code, lang;
@@ -2464,8 +2469,8 @@ static void test_exec_script(IHTMLDocument2 *doc)
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
 
-    code = a2bstr("execScript call");
-    lang = a2bstr("TestScript");
+    code = a2bstr(codea);
+    lang = a2bstr(langa);
 
     SET_EXPECT(ParseScriptText_execScript);
     hres = IHTMLWindow2_execScript(window, code, lang, &v);
@@ -2524,7 +2529,7 @@ static void test_simple_script(void)
     CHECK_CALLED(ParseScriptText_script);
     CHECK_CALLED(SetScriptState_CONNECTED);
 
-    test_exec_script(doc);
+    test_exec_script(doc, "execScript call", "TestScript");
 
     if(site)
         IActiveScriptSite_Release(site);
@@ -2619,7 +2624,7 @@ static BOOL register_script_engine(void)
 
     hres = CoRegisterClassObject(&CLSID_TestScript, (IUnknown *)&script_cf,
                                  CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, &regid);
-    ok(hres == S_OK, "Could not register screipt engine: %08x\n", hres);
+    ok(hres == S_OK, "Could not register script engine: %08x\n", hres);
 
     return TRUE;
 }

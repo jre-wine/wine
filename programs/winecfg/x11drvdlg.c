@@ -55,17 +55,6 @@ static const WCHAR x11_driverW[] = {'X','1','1',' ','D','r','i','v','e','r',0};
 static const WCHAR default_resW[] = {'8','0','0','x','6','0','0',0};
 
 
-static struct SHADERMODE
-{
-  UINT displayStrID;
-  const char* settingStr;
-} const D3D_VS_Modes[] = {
-  {IDS_SHADER_MODE_HARDWARE,  "hardware"},
-  {IDS_SHADER_MODE_NONE,      "none"},
-  {0, 0}
-};
-
-
 int updating_ui;
 
 /* convert the x11 desktop key to the new explorer config */
@@ -96,8 +85,8 @@ static void update_gui_for_desktop_mode(HWND dialog)
         SetWindowTextW(GetDlgItem(dialog, IDC_DESKTOP_WIDTH), buf);
         SetWindowTextW(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), bufindex);
     } else {
-        SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_WIDTH), "800");
-        SetWindowText(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), "600");
+        SetWindowTextA(GetDlgItem(dialog, IDC_DESKTOP_WIDTH), "800");
+        SetWindowTextA(GetDlgItem(dialog, IDC_DESKTOP_HEIGHT), "600");
     }
     HeapFree(GetProcessHeap(), 0, buf);
 
@@ -124,22 +113,21 @@ static void update_gui_for_desktop_mode(HWND dialog)
 
 static void init_dialog(HWND dialog)
 {
-    unsigned int it;
     char* buf;
 
     convert_x11_desktop_key();
     update_gui_for_desktop_mode(dialog);
 
     updating_ui = TRUE;
-    
-    SendDlgItemMessage(dialog, IDC_DESKTOP_WIDTH, EM_LIMITTEXT, RES_MAXLEN, 0);
-    SendDlgItemMessage(dialog, IDC_DESKTOP_HEIGHT, EM_LIMITTEXT, RES_MAXLEN, 0);
 
-    buf = get_reg_key(config_key, keypath("X11 Driver"), "DXGrab", "N");
+    SendDlgItemMessageW(dialog, IDC_DESKTOP_WIDTH, EM_LIMITTEXT, RES_MAXLEN, 0);
+    SendDlgItemMessageW(dialog, IDC_DESKTOP_HEIGHT, EM_LIMITTEXT, RES_MAXLEN, 0);
+
+    buf = get_reg_key(config_key, keypath("X11 Driver"), "GrabFullscreen", "N");
     if (IS_OPTION_TRUE(*buf))
-	CheckDlgButton(dialog, IDC_DX_MOUSE_GRAB, BST_CHECKED);
+	CheckDlgButton(dialog, IDC_FULLSCREEN_GRAB, BST_CHECKED);
     else
-	CheckDlgButton(dialog, IDC_DX_MOUSE_GRAB, BST_UNCHECKED);
+	CheckDlgButton(dialog, IDC_FULLSCREEN_GRAB, BST_UNCHECKED);
     HeapFree(GetProcessHeap(), 0, buf);
 
     buf = get_reg_key(config_key, keypath("X11 Driver"), "Managed", "Y");
@@ -154,31 +142,6 @@ static void init_dialog(HWND dialog)
 	CheckDlgButton(dialog, IDC_ENABLE_DECORATED, BST_CHECKED);
     else
 	CheckDlgButton(dialog, IDC_ENABLE_DECORATED, BST_UNCHECKED);
-    HeapFree(GetProcessHeap(), 0, buf);
-
-
-    SendDlgItemMessage(dialog, IDC_D3D_VSHADER_MODE, CB_RESETCONTENT, 0, 0);
-    for (it = 0; 0 != D3D_VS_Modes[it].displayStrID; ++it) {
-      SendDlgItemMessageW (dialog, IDC_D3D_VSHADER_MODE, CB_ADDSTRING, 0,
-          (LPARAM)load_string (D3D_VS_Modes[it].displayStrID));
-    }  
-    buf = get_reg_key(config_key, keypath("Direct3D"), "VertexShaderMode", "hardware"); 
-    for (it = 0; NULL != D3D_VS_Modes[it].settingStr; ++it) {
-      if (strcmp(buf, D3D_VS_Modes[it].settingStr) == 0) {
-	SendDlgItemMessage(dialog, IDC_D3D_VSHADER_MODE, CB_SETCURSEL, it, 0);
-	break ;
-      }
-    }
-    if (NULL == D3D_VS_Modes[it].settingStr) {
-      WINE_ERR("Invalid Direct3D VertexShader Mode read from registry (%s)\n", buf);
-    }
-    HeapFree(GetProcessHeap(), 0, buf);
-
-    buf = get_reg_key(config_key, keypath("Direct3D"), "PixelShaderMode", "enabled");
-    if (!strcmp(buf, "enabled"))
-      CheckDlgButton(dialog, IDC_D3D_PSHADER_MODE, BST_CHECKED);
-    else
-      CheckDlgButton(dialog, IDC_D3D_PSHADER_MODE, BST_UNCHECKED);
     HeapFree(GetProcessHeap(), 0, buf);
 
     updating_ui = FALSE;
@@ -264,25 +227,14 @@ static void on_enable_decorated_clicked(HWND dialog) {
     }
 }
 
-static void on_dx_mouse_grab_clicked(HWND dialog) {
-    if (IsDlgButtonChecked(dialog, IDC_DX_MOUSE_GRAB) == BST_CHECKED) 
-        set_reg_key(config_key, keypath("X11 Driver"), "DXGrab", "Y");
+static void on_fullscreen_grab_clicked(HWND dialog)
+{
+    if (IsDlgButtonChecked(dialog, IDC_FULLSCREEN_GRAB) == BST_CHECKED)
+        set_reg_key(config_key, keypath("X11 Driver"), "GrabFullscreen", "Y");
     else
-        set_reg_key(config_key, keypath("X11 Driver"), "DXGrab", "N");
+        set_reg_key(config_key, keypath("X11 Driver"), "GrabFullscreen", "N");
 }
 
-static void on_d3d_vshader_mode_changed(HWND dialog) {
-  int selected_mode = SendDlgItemMessage(dialog, IDC_D3D_VSHADER_MODE, CB_GETCURSEL, 0, 0);  
-  set_reg_key(config_key, keypath("Direct3D"), "VertexShaderMode",
-      D3D_VS_Modes[selected_mode].settingStr); 
-}
-
-static void on_d3d_pshader_mode_clicked(HWND dialog) {
-    if (IsDlgButtonChecked(dialog, IDC_D3D_PSHADER_MODE) == BST_CHECKED)
-        set_reg_key(config_key, keypath("Direct3D"), "PixelShaderMode", "enabled");
-    else
-        set_reg_key(config_key, keypath("Direct3D"), "PixelShaderMode", "disabled");
-}
 static INT read_logpixels_reg(void)
 {
     DWORD dwLogPixels;
@@ -294,16 +246,17 @@ static INT read_logpixels_reg(void)
 
 static void init_dpi_editbox(HWND hDlg)
 {
+    static const WCHAR fmtW[] = {'%','u',0};
     DWORD dwLogpixels;
-    char szLogpixels[MAXBUFLEN];
+    WCHAR szLogpixels[MAXBUFLEN];
 
     updating_ui = TRUE;
 
     dwLogpixels = read_logpixels_reg();
     WINE_TRACE("%u\n", dwLogpixels);
 
-    sprintf(szLogpixels, "%u", dwLogpixels);
-    SetDlgItemText(hDlg, IDC_RES_DPIEDIT, szLogpixels);
+    sprintfW(szLogpixels, fmtW, dwLogpixels);
+    SetDlgItemTextW(hDlg, IDC_RES_DPIEDIT, szLogpixels);
 
     updating_ui = FALSE;
 }
@@ -325,6 +278,7 @@ static void init_trackbar(HWND hDlg)
 
 static void update_dpi_trackbar_from_edit(HWND hDlg, BOOL fix)
 {
+    static const WCHAR fmtW[] = {'%','u',0};
     DWORD dpi;
 
     updating_ui = TRUE;
@@ -340,17 +294,17 @@ static void update_dpi_trackbar_from_edit(HWND hDlg, BOOL fix)
 
         if (fixed_dpi != dpi)
         {
-            char buf[16];
+            WCHAR buf[16];
 
             dpi = fixed_dpi;
-            sprintf(buf, "%u", dpi);
-            SetDlgItemText(hDlg, IDC_RES_DPIEDIT, buf);
+            sprintfW(buf, fmtW, dpi);
+            SetDlgItemTextW(hDlg, IDC_RES_DPIEDIT, buf);
         }
     }
 
     if (dpi >= MINDPI && dpi <= MAXDPI)
     {
-        SendDlgItemMessage(hDlg, IDC_RES_TRACKBAR, TBM_SETPOS, TRUE, dpi);
+        SendDlgItemMessageW(hDlg, IDC_RES_TRACKBAR, TBM_SETPOS, TRUE, dpi);
         set_reg_key_dwordW(HKEY_LOCAL_MACHINE, logpixels_reg, logpixels, dpi);
     }
 
@@ -367,21 +321,21 @@ static void update_font_preview(HWND hDlg)
 
     if (dpi >= MINDPI && dpi <= MAXDPI)
     {
-        LOGFONT lf;
+        static const WCHAR tahomaW[] = {'T','a','h','o','m','a',0};
+        LOGFONTW lf;
         HFONT hfont;
 
-        hfont = (HFONT)SendDlgItemMessage(hDlg, IDC_RES_FONT_PREVIEW, WM_GETFONT, 0, 0);
+        hfont = (HFONT)SendDlgItemMessageW(hDlg, IDC_RES_FONT_PREVIEW, WM_GETFONT, 0, 0);
 
-        GetObject(hfont, sizeof(lf), &lf);
+        GetObjectW(hfont, sizeof(lf), &lf);
 
-        if (lstrcmp(lf.lfFaceName, "Tahoma") != 0)
-            lstrcpy(lf.lfFaceName, "Tahoma");
+        if (strcmpW(lf.lfFaceName, tahomaW) != 0)
+            strcpyW(lf.lfFaceName, tahomaW);
         else
             DeleteObject(hfont);
-
         lf.lfHeight = MulDiv(-10, dpi, 72);
-        hfont = CreateFontIndirect(&lf);
-        SendDlgItemMessage(hDlg, IDC_RES_FONT_PREVIEW, WM_SETFONT, (WPARAM)hfont, 1);
+        hfont = CreateFontIndirectW(&lf);
+        SendDlgItemMessageW(hDlg, IDC_RES_FONT_PREVIEW, WM_SETFONT, (WPARAM)hfont, 1);
     }
 
     updating_ui = FALSE;
@@ -414,7 +368,7 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	    switch(HIWORD(wParam)) {
 		case EN_CHANGE: {
 		    if (updating_ui) break;
-		    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
+		    SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
 		    if ( ((LOWORD(wParam) == IDC_DESKTOP_WIDTH) || (LOWORD(wParam) == IDC_DESKTOP_HEIGHT)) && !updating_ui )
 			set_from_desktop_edits(hDlg);
                     else if (LOWORD(wParam) == IDC_RES_DPIEDIT)
@@ -427,21 +381,17 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 		case BN_CLICKED: {
 		    if (updating_ui) break;
-		    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
+		    SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
 		    switch(LOWORD(wParam)) {
 			case IDC_ENABLE_DESKTOP: on_enable_desktop_clicked(hDlg); break;
                         case IDC_ENABLE_MANAGED: on_enable_managed_clicked(hDlg); break;
                         case IDC_ENABLE_DECORATED: on_enable_decorated_clicked(hDlg); break;
-			case IDC_DX_MOUSE_GRAB:  on_dx_mouse_grab_clicked(hDlg); break;
-		        case IDC_D3D_PSHADER_MODE: on_d3d_pshader_mode_clicked(hDlg); break;
+			case IDC_FULLSCREEN_GRAB:  on_fullscreen_grab_clicked(hDlg); break;
 		    }
 		    break;
 		}
 		case CBN_SELCHANGE: {
-		    SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
-		    switch (LOWORD(wParam)) {
-		    case IDC_D3D_VSHADER_MODE: on_d3d_vshader_mode_changed(hDlg); break;
-		    }
+		    SendMessageW(GetParent(hDlg), PSM_CHANGED, 0, 0);
 		    break;
 		}
 		    
@@ -454,12 +404,12 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_NOTIFY:
 	    switch (((LPNMHDR)lParam)->code) {
 		case PSN_KILLACTIVE: {
-		    SetWindowLongPtr(hDlg, DWLP_MSGRESULT, FALSE);
+		    SetWindowLongPtrW(hDlg, DWLP_MSGRESULT, FALSE);
 		    break;
 		}
 		case PSN_APPLY: {
                     apply();
-		    SetWindowLongPtr(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
+		    SetWindowLongPtrW(hDlg, DWLP_MSGRESULT, PSNRET_NOERROR);
 		    break;
 		}
 		case PSN_SETACTIVE: {
@@ -472,11 +422,12 @@ GraphDlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case WM_HSCROLL:
 	    switch (wParam) {
 		default: {
-		    char buf[MAXBUFLEN];
+                    static const WCHAR fmtW[] = {'%','d',0};
+		    WCHAR buf[MAXBUFLEN];
 		    int i = SendMessageW(GetDlgItem(hDlg, IDC_RES_TRACKBAR), TBM_GETPOS, 0, 0);
 		    buf[0] = 0;
-		    sprintf(buf, "%d", i);
-		    SendMessage(GetDlgItem(hDlg, IDC_RES_DPIEDIT), WM_SETTEXT, 0, (LPARAM) buf);
+		    sprintfW(buf, fmtW, i);
+		    SendMessageW(GetDlgItem(hDlg, IDC_RES_DPIEDIT), WM_SETTEXT, 0, (LPARAM) buf);
                     update_font_preview(hDlg);
 		    set_reg_key_dwordW(HKEY_LOCAL_MACHINE, logpixels_reg, logpixels, i);
 		    break;

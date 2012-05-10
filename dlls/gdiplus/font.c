@@ -126,27 +126,27 @@ GpStatus WINGDIPAPI GdipCreateFont(GDIPCONST GpFontFamily *fontFamily,
     {
         case UnitWorld:
             /* FIXME: Figure out when World != Pixel */
-            lfw->lfHeight = emSize; break;
+            (*font)->pixel_size = emSize; break;
         case UnitDisplay:
             FIXME("Unknown behavior for UnitDisplay! Please report!\n");
             /* FIXME: Figure out how this works...
              * MSDN says that if "DISPLAY" is a monitor, then pixel should be
              * used. That's not what I got. Tests on Windows revealed no output,
              * and the tests in tests/font crash windows */
-            lfw->lfHeight = 0; break;
+            (*font)->pixel_size = 0; break;
         case UnitPixel:
-            lfw->lfHeight = emSize; break;
+            (*font)->pixel_size = emSize; break;
         case UnitPoint:
-            lfw->lfHeight = point_to_pixel(emSize); break;
+            (*font)->pixel_size = point_to_pixel(emSize); break;
         case UnitInch:
-            lfw->lfHeight = inch_to_pixel(emSize); break;
+            (*font)->pixel_size = inch_to_pixel(emSize); break;
         case UnitDocument:
-            lfw->lfHeight = document_to_pixel(emSize); break;
+            (*font)->pixel_size = document_to_pixel(emSize); break;
         case UnitMillimeter:
-            lfw->lfHeight = mm_to_pixel(emSize); break;
+            (*font)->pixel_size = mm_to_pixel(emSize); break;
     }
 
-    lfw->lfHeight *= -1;
+    lfw->lfHeight = (*font)->pixel_size * -1;
 
     lfw->lfWeight = style & FontStyleBold ? 700 : 400;
     lfw->lfItalic = style & FontStyleItalic;
@@ -190,7 +190,7 @@ GpStatus WINGDIPAPI GdipCreateFontFromLogfontW(HDC hdc,
     (*font)->lfw.lfUnderline = logfont->lfUnderline;
     (*font)->lfw.lfStrikeOut = logfont->lfStrikeOut;
 
-    (*font)->emSize = logfont->lfHeight;
+    (*font)->pixel_size = (*font)->emSize = logfont->lfHeight;
     (*font)->unit = UnitPixel;
 
     hfont = CreateFontIndirectW(&(*font)->lfw);
@@ -816,10 +816,20 @@ GpStatus WINGDIPAPI GdipIsStyleAvailable(GDIPCONST GpFontFamily* family,
 GpStatus WINGDIPAPI GdipGetGenericFontFamilyMonospace(GpFontFamily **nativeFamily)
 {
     static const WCHAR CourierNew[] = {'C','o','u','r','i','e','r',' ','N','e','w','\0'};
+    static const WCHAR LiberationMono[] = {'L','i','b','e','r','a','t','i','o','n',' ','M','o','n','o','\0'};
+    GpStatus stat;
 
     if (nativeFamily == NULL) return InvalidParameter;
 
-    return GdipCreateFontFamilyFromName(CourierNew, NULL, nativeFamily);
+    stat = GdipCreateFontFamilyFromName(CourierNew, NULL, nativeFamily);
+
+    if (stat == FontFamilyNotFound)
+        stat = GdipCreateFontFamilyFromName(LiberationMono, NULL, nativeFamily);
+
+    if (stat == FontFamilyNotFound)
+        ERR("Missing 'Courier New' font\n");
+
+    return stat;
 }
 
 /*****************************************************************************
@@ -837,12 +847,22 @@ GpStatus WINGDIPAPI GdipGetGenericFontFamilyMonospace(GpFontFamily **nativeFamil
 GpStatus WINGDIPAPI GdipGetGenericFontFamilySerif(GpFontFamily **nativeFamily)
 {
     static const WCHAR TimesNewRoman[] = {'T','i','m','e','s',' ','N','e','w',' ','R','o','m','a','n','\0'};
+    static const WCHAR LiberationSerif[] = {'L','i','b','e','r','a','t','i','o','n',' ','S','e','r','i','f','\0'};
+    GpStatus stat;
 
     TRACE("(%p)\n", nativeFamily);
 
     if (nativeFamily == NULL) return InvalidParameter;
 
-    return GdipCreateFontFamilyFromName(TimesNewRoman, NULL, nativeFamily);
+    stat = GdipCreateFontFamilyFromName(TimesNewRoman, NULL, nativeFamily);
+
+    if (stat == FontFamilyNotFound)
+        stat = GdipCreateFontFamilyFromName(LiberationSerif, NULL, nativeFamily);
+
+    if (stat == FontFamilyNotFound)
+        ERR("Missing 'Times New Roman' font\n");
+
+    return stat;
 }
 
 /*****************************************************************************
@@ -974,7 +994,7 @@ typedef struct _tagTT_NAME_RECORD {
  * Code based off of code located here
  * http://www.codeproject.com/gdi/fontnamefromfile.asp
  */
-WCHAR *load_ttf_name_id( const char *mem, DWORD_PTR size, DWORD id, WCHAR *ret, DWORD len )
+static WCHAR *load_ttf_name_id( const char *mem, DWORD_PTR size, DWORD id, WCHAR *ret, DWORD len )
 {
     const TT_TABLE_DIRECTORY *tblDir;
     TT_OFFSET_TABLE ttOffsetTable;

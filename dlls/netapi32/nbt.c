@@ -577,7 +577,7 @@ static UCHAR NetBTinetResolve(const UCHAR name[NCBNAMSZ],
                         (*cacheEntry)->numAddresses = i;
                         for (i = 0; i < (*cacheEntry)->numAddresses; i++)
                             (*cacheEntry)->addresses[i] =
-                             (DWORD)host->h_addr_list[i];
+                             *(DWORD*)host->h_addr_list[i];
                     }
                     else
                         ret = NRC_OSRESNOTAV;
@@ -1497,13 +1497,17 @@ void NetBTInit(void)
                NetBTNameEncode */
             char *ptr, *lenPtr;
 
-            for (ptr = gScopeID + 1; ptr - gScopeID < sizeof(gScopeID) && *ptr; )
+            for (ptr = gScopeID + 1, lenPtr = gScopeID; ptr - gScopeID < sizeof(gScopeID) && *ptr; ++ptr)
             {
-                for (lenPtr = ptr - 1, *lenPtr = 0;
-                     ptr - gScopeID < sizeof(gScopeID) && *ptr && *ptr != '.';
-                     ptr++)
-                    *lenPtr += 1;
-                ptr++;
+                if (*ptr == '.')
+                {
+                    lenPtr = ptr;
+                    *lenPtr = 0;
+                }
+                else
+                {
+                    ++*lenPtr;
+                }
             }
         }
         if (RegQueryValueExW(hKey, CacheTimeoutW, NULL, NULL,

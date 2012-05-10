@@ -26,6 +26,7 @@
 #define OEMRESOURCE
 
 #include <windows.h>
+#include <rpc.h>
 #include <wine/debug.h>
 #include "explorer_private.h"
 
@@ -42,7 +43,7 @@ static BOOL start_screensaver( void )
     if (using_root)
     {
         const char *argv[3] = { "xdg-screensaver", "activate", NULL };
-        int pid = spawnvp( _P_NOWAIT, argv[0], argv );
+        int pid = spawnvp( _P_DETACH, argv[0], argv );
         if (pid > 0)
         {
             WINE_TRACE( "started process %d\n", pid );
@@ -334,6 +335,7 @@ void manage_desktop( WCHAR *arg )
         if (name) set_desktop_window_title( hwnd, name );
         SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
         SetDeskWallPaper( (LPSTR)-1 );
+        ClipCursor( NULL );
         initialize_display_settings( hwnd );
         initialize_appbar();
         initialize_systray( using_root );

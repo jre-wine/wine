@@ -74,7 +74,7 @@ static UINT EMFDRV_FindObject( PHYSDEV dev, HGDIOBJ obj )
 /******************************************************************
  *         EMFDRV_DeleteObject
  */
-BOOL CDECL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+BOOL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
 {
     EMRDELETEOBJECT emr;
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*) dev;
@@ -99,41 +99,11 @@ BOOL CDECL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
 /***********************************************************************
  *           EMFDRV_SelectBitmap
  */
-HBITMAP CDECL EMFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
+HBITMAP EMFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
 {
     return 0;
 }
 
-
-/* Internal helper for EMFDRV_CreateBrushIndirect():
- * Change the padding of a bitmap from 16 (BMP) to 32 (DIB) bits.
- */
-static inline void EMFDRV_PadTo32(LPBYTE lpRows, int height, int width)
-{
-    int bytes16 = 2 * ((width + 15) / 16);
-    int bytes32 = 4 * ((width + 31) / 32);
-    LPBYTE lpSrc, lpDst;
-    int i;
-
-    if (!height)
-        return;
-
-    height = abs(height) - 1;
-    lpSrc = lpRows + height * bytes16;
-    lpDst = lpRows + height * bytes32;
-
-    /* Note that we work backwards so we can re-pad in place */
-    while (height >= 0)
-    {
-        for (i = bytes32; i > bytes16; i--)
-            lpDst[i - 1] = 0; /* Zero the padding bytes */
-        for (; i > 0; i--)
-            lpDst[i - 1] = lpSrc[i - 1]; /* Move image bytes into alignment */
-        lpSrc -= bytes16;
-        lpDst -= bytes32;
-        height--;
-    }
-}
 
 /***********************************************************************
  *           EMFDRV_CreateBrushIndirect
@@ -162,99 +132,54 @@ DWORD EMFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush )
 	    index = 0;
       }
       break;
+    case BS_PATTERN:
     case BS_DIBPATTERN:
       {
-	EMRCREATEDIBPATTERNBRUSHPT *emr;
-	DWORD bmSize, biSize, size;
-	BITMAPINFO *info = GlobalLock( (HGLOBAL)logbrush.lbHatch );
-
-	if (info->bmiHeader.biCompression)
-            bmSize = info->bmiHeader.biSizeImage;
-        else
-	    bmSize = DIB_GetDIBImageBytes(info->bmiHeader.biWidth,
-					  info->bmiHeader.biHeight,
-					  info->bmiHeader.biBitCount);
-	biSize = bitmap_info_size(info, LOWORD(logbrush.lbColor));
-	size = sizeof(EMRCREATEDIBPATTERNBRUSHPT) + biSize + bmSize;
-	emr = HeapAlloc( GetProcessHeap(), 0, size );
-	if(!emr) break;
-	emr->emr.iType = EMR_CREATEDIBPATTERNBRUSHPT;
-	emr->emr.nSize = size;
-	emr->ihBrush = index = EMFDRV_AddHandle( dev, hBrush );
-	emr->iUsage = LOWORD(logbrush.lbColor);
-	emr->offBmi = sizeof(EMRCREATEDIBPATTERNBRUSHPT);
-	emr->cbBmi = biSize;
-	emr->offBits = sizeof(EMRCREATEDIBPATTERNBRUSHPT) + biSize;
-	emr->cbBits = bmSize;
-	memcpy((char *)emr + sizeof(EMRCREATEDIBPATTERNBRUSHPT), info,
-	       biSize + bmSize );
-
-	if(!EMFDRV_WriteRecord( dev, &emr->emr ))
-	    index = 0;
-	HeapFree( GetProcessHeap(), 0, emr );
-	GlobalUnlock( (HGLOBAL)logbrush.lbHatch );
-      }
-      break;
-
-    case BS_PATTERN:
-      {
         EMRCREATEDIBPATTERNBRUSHPT *emr;
-        BITMAPINFOHEADER *info;
-        BITMAP bm;
-        DWORD bmSize, biSize, size;
+        char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
+        BITMAPINFO *info = (BITMAPINFO *)buffer;
+        DWORD info_size;
+        void *bits;
+        UINT usage;
 
-        GetObjectA((HANDLE)logbrush.lbHatch, sizeof(bm), &bm);
+        if (!get_brush_bitmap_info( hBrush, info, &bits, &usage )) break;
+        info_size = get_dib_info_size( info, usage );
 
-        if (bm.bmBitsPixel != 1 || bm.bmPlanes != 1)
+        emr = HeapAlloc( GetProcessHeap(), 0,
+                         sizeof(EMRCREATEDIBPATTERNBRUSHPT)+info_size+info->bmiHeader.biSizeImage );
+        if(!emr) break;
+
+        if (logbrush.lbStyle == BS_PATTERN && info->bmiHeader.biBitCount == 1)
         {
-            FIXME("Trying to create a color pattern brush\n");
-            break;
+            /* Presumably to reduce the size of the written EMF, MS supports an
+             * undocumented iUsage value of 2, indicating a mono bitmap without the
+             * 8 byte 2 entry black/white palette. Stupidly, they could have saved
+             * over 20 bytes more by also ignoring the BITMAPINFO fields that are
+             * irrelevant/constant for monochrome bitmaps.
+             * FIXME: It may be that the DIB functions themselves accept this value.
+             */
+            emr->emr.iType = EMR_CREATEMONOBRUSH;
+            usage = DIB_PAL_MONO;
+            /* FIXME: There is an extra DWORD written by native before the BMI.
+             *        Not sure what its meant to contain.
+             */
+            emr->offBmi = sizeof( EMRCREATEDIBPATTERNBRUSHPT ) + sizeof(DWORD);
+            emr->cbBmi = sizeof( BITMAPINFOHEADER );
         }
-
-        /* BMP will be aligned to 32 bits, not 16 */
-        bmSize = DIB_GetDIBImageBytes(bm.bmWidth, bm.bmHeight, bm.bmBitsPixel);
-
-        biSize = sizeof(BITMAPINFOHEADER);
-        /* FIXME: There is an extra DWORD written by native before the BMI.
-         *        Not sure what its meant to contain.
-         */
-        size = sizeof(EMRCREATEDIBPATTERNBRUSHPT) + biSize + bmSize + sizeof(DWORD);
-
-        emr = HeapAlloc( GetProcessHeap(), 0, size );
-        if(!emr)
-          break;
-
-        info = (BITMAPINFOHEADER *)((LPBYTE)emr +
-                sizeof(EMRCREATEDIBPATTERNBRUSHPT) + sizeof(DWORD));
-        info->biSize = sizeof(BITMAPINFOHEADER);
-        info->biWidth = bm.bmWidth;
-        info->biHeight = bm.bmHeight;
-        info->biPlanes = bm.bmPlanes;
-        info->biBitCount = bm.bmBitsPixel;
-        info->biSizeImage = bmSize;
-        GetBitmapBits((HANDLE)logbrush.lbHatch,
-                      bm.bmHeight * BITMAP_GetWidthBytes(bm.bmWidth, bm.bmBitsPixel),
-                      (LPBYTE)info + sizeof(BITMAPINFOHEADER));
-
-        /* Change the padding to be DIB compatible if needed */
-        if (bm.bmWidth & 31)
-            EMFDRV_PadTo32((LPBYTE)info + sizeof(BITMAPINFOHEADER), bm.bmWidth, bm.bmHeight);
-
-        emr->emr.iType = EMR_CREATEMONOBRUSH;
-        emr->emr.nSize = size;
+        else
+        {
+            emr->emr.iType = EMR_CREATEDIBPATTERNBRUSHPT;
+            emr->offBmi = sizeof( EMRCREATEDIBPATTERNBRUSHPT );
+            emr->cbBmi = info_size;
+        }
         emr->ihBrush = index = EMFDRV_AddHandle( dev, hBrush );
-        /* Presumably to reduce the size of the written EMF, MS supports an
-         * undocumented iUsage value of 2, indicating a mono bitmap without the
-         * 8 byte 2 entry black/white palette. Stupidly, they could have saved
-         * over 20 bytes more by also ignoring the BITMAPINFO fields that are
-         * irrelevant/constant for monochrome bitmaps.
-         * FIXME: It may be that the DIB functions themselves accept this value.
-         */
-        emr->iUsage = DIB_PAL_MONO;
-        emr->offBmi = (LPBYTE)info - (LPBYTE)emr;
-        emr->cbBmi = biSize;
-        emr->offBits = emr->offBmi + biSize;
-        emr->cbBits = bmSize;
+        emr->iUsage = usage;
+        emr->offBits = emr->offBmi + emr->cbBmi;
+        emr->cbBits = info->bmiHeader.biSizeImage;
+        emr->emr.nSize = emr->offBits + emr->cbBits;
+
+        memcpy( (BYTE *)emr + emr->offBmi, info, emr->cbBmi );
+        memcpy( (BYTE *)emr + emr->offBits, bits, emr->cbBits );
 
         if(!EMFDRV_WriteRecord( dev, &emr->emr ))
             index = 0;
@@ -273,7 +198,7 @@ DWORD EMFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush )
 /***********************************************************************
  *           EMFDRV_SelectBrush
  */
-HBRUSH CDECL EMFDRV_SelectBrush(PHYSDEV dev, HBRUSH hBrush )
+HBRUSH EMFDRV_SelectBrush( PHYSDEV dev, HBRUSH hBrush, const struct brush_pattern *pattern )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
@@ -287,7 +212,7 @@ HBRUSH CDECL EMFDRV_SelectBrush(PHYSDEV dev, HBRUSH hBrush )
      * We do however have to handle setting the higher order bit to
      * designate that this is a stock object.
      */
-    for (i = WHITE_BRUSH; i <= NULL_BRUSH; i++)
+    for (i = WHITE_BRUSH; i <= DC_BRUSH; i++)
     {
         if (hBrush == GetStockObject(i))
         {
@@ -299,7 +224,7 @@ HBRUSH CDECL EMFDRV_SelectBrush(PHYSDEV dev, HBRUSH hBrush )
         goto found;
 
     if (!(index = EMFDRV_CreateBrushIndirect(dev, hBrush ))) return 0;
-    GDI_hdc_using_object(hBrush, physDev->hdc);
+    GDI_hdc_using_object(hBrush, dev->hdc);
 
  found:
     emr.emr.iType = EMR_SELECTOBJECT;
@@ -352,14 +277,14 @@ static BOOL EMFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont )
 /***********************************************************************
  *           EMFDRV_SelectFont
  */
-HFONT CDECL EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont, HANDLE gdiFont )
+HFONT EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
     DWORD index;
     int i;
 
-    if (physDev->restoring) return 0;  /* don't output SelectObject records during RestoreDC */
+    if (physDev->restoring) goto done;  /* don't output SelectObject records during RestoreDC */
 
     /* If the object is a stock font object, do not need to create it.
      * See definitions in  wingdi.h for range of stock fonts.
@@ -379,16 +304,19 @@ HFONT CDECL EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont, HANDLE gdiFont )
     if((index = EMFDRV_FindObject(dev, hFont)) != 0)
         goto found;
 
-    if (!(index = EMFDRV_CreateFontIndirect(dev, hFont ))) return HGDI_ERROR;
-    GDI_hdc_using_object(hFont, physDev->hdc);
+    if (!(index = EMFDRV_CreateFontIndirect(dev, hFont ))) return 0;
+    GDI_hdc_using_object(hFont, dev->hdc);
 
  found:
     emr.emr.iType = EMR_SELECTOBJECT;
     emr.emr.nSize = sizeof(emr);
     emr.ihObject = index;
     if(!EMFDRV_WriteRecord( dev, &emr.emr ))
-        return HGDI_ERROR;
-    return 0;
+        return 0;
+done:
+    dev = GET_NEXT_PHYSDEV( dev, pSelectFont );
+    dev->funcs->pSelectFont( dev, hFont );
+    return hFont;
 }
 
 
@@ -433,7 +361,7 @@ static DWORD EMFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen)
 /******************************************************************
  *         EMFDRV_SelectPen
  */
-HPEN CDECL EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
+HPEN EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen, const struct brush_pattern *pattern )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
@@ -448,7 +376,7 @@ HPEN CDECL EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
      * designate that this is a stock object.
      */
 
-    for (i = WHITE_PEN; i <= NULL_PEN; i++)
+    for (i = WHITE_PEN; i <= DC_PEN; i++)
     {
         if (hPen == GetStockObject(i))
         {
@@ -460,7 +388,7 @@ HPEN CDECL EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
         goto found;
 
     if (!(index = EMFDRV_CreatePenIndirect(dev, hPen))) return 0;
-    GDI_hdc_using_object(hPen, physDev->hdc);
+    GDI_hdc_using_object(hPen, dev->hdc);
 
  found:
     emr.emr.iType = EMR_SELECTOBJECT;
@@ -501,7 +429,7 @@ static DWORD EMFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPal)
 /******************************************************************
  *         EMFDRV_SelectPalette
  */
-HPALETTE CDECL EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force )
+HPALETTE EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTPALETTE emr;
@@ -519,7 +447,7 @@ HPALETTE CDECL EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force )
         goto found;
 
     if (!(index = EMFDRV_CreatePalette( dev, hPal ))) return 0;
-    GDI_hdc_using_object( hPal, physDev->hdc );
+    GDI_hdc_using_object( hPal, dev->hdc );
 
 found:
     emr.emr.iType = EMR_SELECTPALETTE;
@@ -528,11 +456,53 @@ found:
     return EMFDRV_WriteRecord( dev, &emr.emr ) ? hPal : 0;
 }
 
+/******************************************************************
+ *         EMFDRV_SetDCBrushColor
+ */
+COLORREF EMFDRV_SetDCBrushColor( PHYSDEV dev, COLORREF color )
+{
+    EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
+    EMRSELECTOBJECT emr;
+    DWORD index;
+
+    if (GetCurrentObject( dev->hdc, OBJ_BRUSH ) != GetStockObject( DC_BRUSH )) return color;
+
+    if (physDev->dc_brush) DeleteObject( physDev->dc_brush );
+    if (!(physDev->dc_brush = CreateSolidBrush( color ))) return CLR_INVALID;
+    if (!(index = EMFDRV_CreateBrushIndirect(dev, physDev->dc_brush ))) return CLR_INVALID;
+    GDI_hdc_using_object( physDev->dc_brush, dev->hdc );
+    emr.emr.iType = EMR_SELECTOBJECT;
+    emr.emr.nSize = sizeof(emr);
+    emr.ihObject = index;
+    return EMFDRV_WriteRecord( dev, &emr.emr ) ? color : CLR_INVALID;
+}
+
+/******************************************************************
+ *         EMFDRV_SetDCPenColor
+ */
+COLORREF EMFDRV_SetDCPenColor( PHYSDEV dev, COLORREF color )
+{
+    EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
+    EMRSELECTOBJECT emr;
+    DWORD index;
+    LOGPEN logpen = { PS_SOLID, { 0, 0 }, color };
+
+    if (GetCurrentObject( dev->hdc, OBJ_PEN ) != GetStockObject( DC_PEN )) return color;
+
+    if (physDev->dc_pen) DeleteObject( physDev->dc_pen );
+    if (!(physDev->dc_pen = CreatePenIndirect( &logpen ))) return CLR_INVALID;
+    if (!(index = EMFDRV_CreatePenIndirect(dev, physDev->dc_pen))) return CLR_INVALID;
+    GDI_hdc_using_object( physDev->dc_pen, dev->hdc );
+    emr.emr.iType = EMR_SELECTOBJECT;
+    emr.emr.nSize = sizeof(emr);
+    emr.ihObject = index;
+    return EMFDRV_WriteRecord( dev, &emr.emr ) ? color : CLR_INVALID;
+}
 
 /******************************************************************
  *         EMFDRV_GdiComment
  */
-BOOL CDECL EMFDRV_GdiComment(PHYSDEV dev, UINT bytes, CONST BYTE *buffer)
+BOOL EMFDRV_GdiComment(PHYSDEV dev, UINT bytes, CONST BYTE *buffer)
 {
     EMRGDICOMMENT *emr;
     UINT total, rounded_size;

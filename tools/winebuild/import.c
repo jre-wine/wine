@@ -670,16 +670,10 @@ static void output_import_thunk( const char *name, const char *table, int pos )
             output( "\trestore\n" );
         }
         break;
-    case CPU_ALPHA:
-        output( "\tlda $0,%s\n", table );
-        output( "\tlda $0,%d($0)\n", pos );
-        output( "\tjmp $31,($0)\n" );
-        break;
     case CPU_ARM:
         output( "\tldr IP,[PC,#0]\n");
-        output( "\tmov PC,PC\n");
-        output( "\t%s %s\n", get_asm_ptr_keyword(), table );
         output( "\tldr PC,[IP,#%d]\n", pos);
+        output( "\t.long %s\n", table );
         break;
     case CPU_POWERPC:
         output( "\tmr %s, %s\n", ppc_reg(0), ppc_reg(31) );
@@ -989,16 +983,12 @@ static void output_delayed_import_thunks( const DLLSPEC *spec )
         output( "\tjmp %%o0\n" );
         output( "\trestore\n" );
         break;
-    case CPU_ALPHA:
-        output( "\tjsr $26,%s\n", asm_name("__wine_spec_delay_load") );
-        output( "\tjmp $31,($0)\n" );
-        break;
     case CPU_ARM:
         output( "\tstmfd  SP!, {r4-r10,FP,LR}\n" );
         output( "\tmov LR,PC\n");
         output( "\tadd LR,LR,#8\n");
         output( "\tldr PC,[PC,#-4]\n");
-        output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name("__wine_spec_delay_load") );
+        output( "\t.long %s\n", asm_name("__wine_spec_delay_load") );
         output( "\tmov IP,r0\n");
         output( "\tldmfd  SP!, {r4-r10,FP,LR}\n" );
         output( "\tldmfd  SP!, {r0-r3}\n" );
@@ -1081,11 +1071,7 @@ static void output_delayed_import_thunks( const DLLSPEC *spec )
             case CPU_SPARC:
                 output( "\tset %d, %%g1\n", (idx << 16) | j );
                 output( "\tb,a %s\n", asm_name("__wine_delay_load_asm") );
-                break;
-            case CPU_ALPHA:
-                output( "\tlda $0,%d($31)\n", j);
-                output( "\tldah $0,%d($0)\n", idx);
-                output( "\tjmp $31,%s\n", asm_name("__wine_delay_load_asm") );
+                output( "\tnop\n" );
                 break;
             case CPU_ARM:
                 output( "\tstmfd  SP!, {r0-r3}\n" );
@@ -1098,7 +1084,7 @@ static void output_delayed_import_thunks( const DLLSPEC *spec )
                 output( "\tmov r0, r1\n" );
                 output( "\tadd r0, #%d\n", j );
                 output( "\tldr PC,[PC,#-4]\n");
-                output( "\t%s %s\n", get_asm_ptr_keyword(), asm_name("__wine_delay_load_asm") );
+                output( "\t.long %s\n", asm_name("__wine_delay_load_asm") );
                 break;
             case CPU_POWERPC:
                 switch(target_platform)

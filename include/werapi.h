@@ -1,5 +1,5 @@
 /*
- * Windows Error Reporing definitions
+ * Windows Error Reporting definitions
  *
  * Copyright (C) 2010 Louis Lenders
  *
@@ -53,6 +53,9 @@ extern "C" {
 #define WER_SUBMIT_BYPASS_DATA_THROTTLING   0x0800
 #define WER_SUBMIT_ARCHIVE_PARAMETERS_ONLY  0x1000
 #define WER_SUBMIT_REPORT_MACHINE_ID        0x2000
+
+#define WER_MAX_PREFERRED_MODULES           128
+#define WER_MAX_PREFERRED_MODULES_BUFFER    256
 
 /* #### */
 
@@ -110,6 +113,54 @@ typedef enum _WER_SUBMIT_RESULT
     WerCustomAction
 } WER_SUBMIT_RESULT, *PWER_SUBMIT_RESULT;
 
+typedef enum _WER_DUMP_TYPE
+{
+    WerDumpTypeMicroDump = 1,
+    WerDumpTypeMiniDump,
+    WerDumpTypeHeapDump,
+    WerDumpTypeMax
+} WER_DUMP_TYPE;
+
+typedef enum _WER_REPORT_UI
+{
+    WerUIAdditionalDataDlgHeader = 1,
+    WerUIIconFilePath = 2,
+    WerUIConsentDlgHeader = 3,
+    WerUIConsentDlgBody = 4,
+    WerUIOnlineSolutionCheckText = 5,
+    WerUIOfflineSolutionCheckText = 6,
+    WerUICloseText = 7,
+    WerUICloseDlgHeader = 8,
+    WerUICloseDlgBody = 9,
+    WerUICloseDlgButtonText = 10,
+    WerUICustomActionButtonText = 11,
+    WerUIMax
+} WER_REPORT_UI;
+
+/* #### */
+
+typedef struct _WER_DUMP_CUSTOM_OPTIONS
+{
+    DWORD dwSize;
+    DWORD dwMask;
+    DWORD dwDumpFlags;
+    BOOL  bOnlyThisThread;
+    DWORD dwExceptionThreadFlags;
+    DWORD dwOtherThreadFlags;
+    DWORD dwExceptionThreadExFlags;
+    DWORD dwOtherThreadExFlags;
+    DWORD dwPreferredModuleFlags;
+    DWORD dwOtherModuleFlags;
+    WCHAR wzPreferredModuleList[WER_MAX_PREFERRED_MODULES_BUFFER];
+
+} WER_DUMP_CUSTOM_OPTIONS, *PWER_DUMP_CUSTOM_OPTIONS;
+
+typedef struct _WER_EXCEPTION_INFORMATION
+{
+    PEXCEPTION_POINTERS pExceptionPointers;
+    BOOL bClientPointers;
+} WER_EXCEPTION_INFORMATION, *PWER_EXCEPTION_INFORMATION;
+
 /* #### */
 
 HRESULT WINAPI WerAddExcludedApplication(PCWSTR, BOOL);
@@ -118,6 +169,7 @@ HRESULT WINAPI WerRemoveExcludedApplication(PCWSTR, BOOL);
 HRESULT WINAPI WerReportCloseHandle(HREPORT);
 HRESULT WINAPI WerReportCreate(PCWSTR, WER_REPORT_TYPE, PWER_REPORT_INFORMATION, HREPORT*);
 HRESULT WINAPI WerReportSetParameter(HREPORT, DWORD, PCWSTR, PCWSTR);
+HRESULT WINAPI WerReportSetUIOption(HREPORT, WER_REPORT_UI, PCWSTR);
 HRESULT WINAPI WerReportSubmit(HREPORT, WER_CONSENT, DWORD, PWER_SUBMIT_RESULT);
 
 #ifdef __cplusplus

@@ -46,7 +46,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(netapi32);
  *
  * Checks whether the server name indicates local machine.
  */
-BOOL NETAPI_IsLocalComputer(LMCSTR ServerName)
+DECLSPEC_HIDDEN BOOL NETAPI_IsLocalComputer(LMCSTR ServerName)
 {
     if (!ServerName)
     {
@@ -584,10 +584,16 @@ NET_API_STATUS NET_API_FUNCTION NetGetJoinInformation(
     LPWSTR *Name,
     PNETSETUP_JOIN_STATUS type)
 {
-    FIXME("Stub %s %p %p\n", wine_dbgstr_w(Server), Name, type);
+    static const WCHAR workgroupW[] = {'W','o','r','k','g','r','o','u','p',0};
 
-    *Name = NULL;
-    *type = NetSetupUnknownStatus;
+    FIXME("Semi-stub %s %p %p\n", wine_dbgstr_w(Server), Name, type);
+
+    if (!Name || !type)
+        return ERROR_INVALID_PARAMETER;
+
+    NetApiBufferAllocate(sizeof(workgroupW), (LPVOID *)Name);
+    lstrcpyW(*Name, workgroupW);
+    *type = NetSetupWorkgroupName;
 
     return NERR_Success;
 }

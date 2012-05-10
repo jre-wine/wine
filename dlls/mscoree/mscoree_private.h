@@ -20,24 +20,37 @@
 #ifndef __MSCOREE_PRIVATE__
 #define __MSCOREE_PRIVATE__
 
-extern char *WtoA(LPCWSTR wstr);
+extern char *WtoA(LPCWSTR wstr) DECLSPEC_HIDDEN;
 
-extern HRESULT CLRMetaHost_CreateInstance(REFIID riid, void **ppobj);
+extern HRESULT CLRMetaHost_CreateInstance(REFIID riid, void **ppobj) DECLSPEC_HIDDEN;
 
 extern HRESULT WINAPI CLRMetaHost_GetVersionFromFile(ICLRMetaHost* iface,
-    LPCWSTR pwzFilePath, LPWSTR pwzBuffer, DWORD *pcchBuffer);
+    LPCWSTR pwzFilePath, LPWSTR pwzBuffer, DWORD *pcchBuffer) DECLSPEC_HIDDEN;
 
 typedef struct tagASSEMBLY ASSEMBLY;
 
-HRESULT assembly_create(ASSEMBLY **out, LPCWSTR file);
-HRESULT assembly_release(ASSEMBLY *assembly);
-HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version);
+HRESULT assembly_create(ASSEMBLY **out, LPCWSTR file) DECLSPEC_HIDDEN;
+HRESULT assembly_release(ASSEMBLY *assembly) DECLSPEC_HIDDEN;
+HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version) DECLSPEC_HIDDEN;
 
+/* Mono embedding */
+typedef struct _MonoDomain MonoDomain;
+typedef struct _MonoAssembly MonoAssembly;
+typedef struct _MonoAssemblyName MonoAssemblyName;
+typedef struct _MonoType MonoType;
+typedef struct _MonoImage MonoImage;
+typedef struct _MonoClass MonoClass;
+typedef struct _MonoObject MonoObject;
+typedef struct _MonoString MonoString;
+typedef struct _MonoMethod MonoMethod;
+typedef struct _MonoProfiler MonoProfiler;
+
+typedef struct loaded_mono loaded_mono;
 typedef struct RuntimeHost RuntimeHost;
 
 typedef struct CLRRuntimeInfo
 {
-    const struct ICLRRuntimeInfoVtbl *ICLRRuntimeInfo_vtbl;
+    ICLRRuntimeInfo ICLRRuntimeInfo_iface;
     LPCWSTR mono_libdir;
     DWORD major;
     DWORD minor;
@@ -48,14 +61,46 @@ typedef struct CLRRuntimeInfo
     struct RuntimeHost *loaded_runtime;
 } CLRRuntimeInfo;
 
+struct RuntimeHost
+{
+    ICorRuntimeHost ICorRuntimeHost_iface;
+    ICLRRuntimeHost ICLRRuntimeHost_iface;
+    const CLRRuntimeInfo *version;
+    loaded_mono *mono;
+    struct list domains;
+    MonoDomain *default_domain;
+    CRITICAL_SECTION lock;
+    LONG ref;
+};
+
+typedef struct CorProcess
+{
+    struct list entry;
+    ICorDebugProcess *pProcess;
+} CorProcess;
+
+typedef struct CorDebug
+{
+    ICorDebug ICorDebug_iface;
+    ICorDebugProcessEnum ICorDebugProcessEnum_iface;
+    LONG ref;
+
+    ICLRRuntimeHost *runtimehost;
+
+    /* ICorDebug Callback */
+    ICorDebugManagedCallback *pCallback;
+    ICorDebugManagedCallback2 *pCallback2;
+
+    /* Debug Processes */
+    struct list processes;
+} CorDebug;
+
 extern HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config_file,
-    DWORD startup_flags, DWORD runtimeinfo_flags, BOOL legacy, ICLRRuntimeInfo **result);
+    DWORD startup_flags, DWORD runtimeinfo_flags, BOOL legacy, ICLRRuntimeInfo **result) DECLSPEC_HIDDEN;
 
-extern HRESULT force_get_runtime_info(ICLRRuntimeInfo **result);
+extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **result) DECLSPEC_HIDDEN;
 
-extern HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **result);
-
-extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk);
+extern HRESULT MetaDataDispenser_CreateInstance(IUnknown **ppUnk) DECLSPEC_HIDDEN;
 
 typedef struct parsed_config_file
 {
@@ -68,20 +113,9 @@ typedef struct supported_runtime
     LPWSTR version;
 } supported_runtime;
 
-extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result);
+extern HRESULT parse_config_file(LPCWSTR filename, parsed_config_file *result) DECLSPEC_HIDDEN;
 
-extern void free_parsed_config_file(parsed_config_file *file);
-
-/* Mono embedding */
-typedef struct _MonoDomain MonoDomain;
-typedef struct _MonoAssembly MonoAssembly;
-typedef struct _MonoAssemblyName MonoAssemblyName;
-typedef struct _MonoType MonoType;
-typedef struct _MonoImage MonoImage;
-typedef struct _MonoClass MonoClass;
-typedef struct _MonoObject MonoObject;
-typedef struct _MonoMethod MonoMethod;
-typedef struct _MonoProfiler MonoProfiler;
+extern void free_parsed_config_file(parsed_config_file *file) DECLSPEC_HIDDEN;
 
 typedef enum {
 	MONO_IMAGE_OK,
@@ -94,7 +128,7 @@ typedef MonoAssembly* (*MonoAssemblyPreLoadFunc)(MonoAssemblyName *aname, char *
 
 typedef void (*MonoProfileFunc)(MonoProfiler *prof);
 
-typedef struct loaded_mono
+struct loaded_mono
 {
     HMODULE mono_handle;
     HMODULE glib_handle;
@@ -128,23 +162,30 @@ typedef struct loaded_mono
     void (CDECL *mono_thread_pool_cleanup)(void);
     void (CDECL *mono_thread_suspend_all_other_threads)(void);
     void (CDECL *mono_threads_set_shutting_down)(void);
-} loaded_mono;
+    MonoString* (CDECL *mono_string_new)(MonoDomain *domain, const char *str);
+};
 
 /* loaded runtime interfaces */
-extern void unload_all_runtimes(void);
+extern void unload_all_runtimes(void) DECLSPEC_HIDDEN;
 
-extern void expect_no_runtimes(void);
+extern void expect_no_runtimes(void) DECLSPEC_HIDDEN;
 
 extern HRESULT RuntimeHost_Construct(const CLRRuntimeInfo *runtime_version,
-    loaded_mono *loaded_mono, RuntimeHost** result);
+    loaded_mono *loaded_mono, RuntimeHost** result) DECLSPEC_HIDDEN;
 
-extern HRESULT RuntimeHost_GetInterface(RuntimeHost *This, REFCLSID clsid, REFIID riid, void **ppv);
+extern HRESULT RuntimeHost_GetInterface(RuntimeHost *This, REFCLSID clsid, REFIID riid, void **ppv) DECLSPEC_HIDDEN;
 
-extern HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *obj, IUnknown **ppUnk);
+extern HRESULT RuntimeHost_GetIUnknownForObject(RuntimeHost *This, MonoObject *obj, IUnknown **ppUnk) DECLSPEC_HIDDEN;
 
 extern HRESULT RuntimeHost_CreateManagedInstance(RuntimeHost *This, LPCWSTR name,
-    MonoDomain *domain, MonoObject **result);
+    MonoDomain *domain, MonoObject **result) DECLSPEC_HIDDEN;
 
-extern HRESULT RuntimeHost_Destroy(RuntimeHost *This);
+extern HRESULT RuntimeHost_Destroy(RuntimeHost *This) DECLSPEC_HIDDEN;
+
+HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface, LPCWSTR pwzVersion, REFIID iid, LPVOID *ppRuntime) DECLSPEC_HIDDEN;
+
+extern HRESULT CorDebug_Create(ICLRRuntimeHost *runtimehost, IUnknown** ppUnk) DECLSPEC_HIDDEN;
+
+extern HRESULT create_monodata(REFIID riid, LPVOID *ppObj) DECLSPEC_HIDDEN;
 
 #endif   /* __MSCOREE_PRIVATE__ */

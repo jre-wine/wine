@@ -39,9 +39,6 @@
 # include <sys/ioctl.h>
 #endif
 #include <errno.h>
-#ifdef HAVE_SYS_ERRNO_H
-# include <sys/errno.h>
-#endif
 #ifdef HAVE_LINUX_INPUT_H
 # include <linux/input.h>
 # undef SW_MAX
@@ -110,6 +107,8 @@ struct JoyDev {
 
 	/* data returned by the EVIOCGABS() ioctl */
         struct wine_input_absinfo       axes[ABS_MAX];
+
+        WORD vendor_id, product_id;
 };
 
 struct JoystickImpl
@@ -187,6 +186,7 @@ static void find_joydevs(void)
         int no_ff_check = 0;
         int j;
         struct JoyDev *new_joydevs;
+        struct input_id device_id = {0};
 
         snprintf(buf, sizeof(buf), EVDEVPREFIX"%d", i);
 
@@ -281,6 +281,14 @@ static void find_joydevs(void)
 		  );
 	    }
 	}
+
+        if (ioctl(fd, EVIOCGID, &device_id) == -1)
+            WARN("ioct(EVIOCGBIT, EV_ABS) failed: %d %s\n", errno, strerror(errno));
+        else
+        {
+            joydev.vendor_id = device_id.vendor;
+            joydev.product_id = device_id.product;
+        }
 
         if (!have_joydevs)
             new_joydevs = HeapAlloc(GetProcessHeap(), 0, sizeof(struct JoyDev));
@@ -416,7 +424,7 @@ static JoystickImpl *alloc_device(REFGUID rguid, IDirectInputImpl *dinput, unsig
     newDevice->ff_state    = FF_STATUS_STOPPED;
 #endif
     /* There is no way in linux to query force feedback autocenter status.
-       Instead, track it with ff_autocenter, and assume it's initialy
+       Instead, track it with ff_autocenter, and assume it's initially
        enabled. */
     newDevice->ff_autocenter = 1;
     newDevice->ff_gain = 0xFFFF;
@@ -705,8 +713,8 @@ static HRESULT WINAPI JoystickWImpl_Unacquire(LPDIRECTINPUTDEVICE8W iface)
       /* Enable autocenter. */
       event.type = EV_FF;
       event.code = FF_AUTOCENTER;
-      /* TODO: Read autocenter strengh before disabling it, and use it here
-       * instead of 0xFFFF (maximum strengh).
+      /* TODO: Read autocenter strength before disabling it, and use it here
+       * instead of 0xFFFF (maximum strength).
        */
       event.value = 0xFFFF;
       if (write(This->joyfd, &event, sizeof(event)) == -1)
@@ -943,6 +951,17 @@ static HRESULT WINAPI JoystickWImpl_GetProperty(LPDIRECTINPUTDEVICE8W iface, REF
 
         pd->dwData = MulDiv(This->ff_gain, 10000, 0xFFFF);
         TRACE("DIPROP_FFGAIN(%d)\n", pd->dwData);
+        break;
+    }
+
+    case (DWORD_PTR) DIPROP_VIDPID:
+    {
+        LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
+
+        if (!This->joydev->product_id || !This->joydev->vendor_id)
+            return DIERR_UNSUPPORTED;
+        pd->dwData = MAKELONG(This->joydev->vendor_id, This->joydev->product_id);
+        TRACE("DIPROP_VIDPID(%08x)\n", pd->dwData);
         break;
     }
 
@@ -1395,8 +1414,8 @@ static const IDirectInputDevice8AVtbl JoystickAvt =
 	IDirectInputDevice2AImpl_SendDeviceData,
 	IDirectInputDevice7AImpl_EnumEffectsInFile,
         IDirectInputDevice7AImpl_WriteEffectToFile,
-        IDirectInputDevice8AImpl_BuildActionMap,
-        IDirectInputDevice8AImpl_SetActionMap,
+        JoystickAGenericImpl_BuildActionMap,
+        JoystickAGenericImpl_SetActionMap,
         IDirectInputDevice8AImpl_GetImageInfo
 };
 
@@ -1431,8 +1450,8 @@ static const IDirectInputDevice8WVtbl JoystickWvt =
     IDirectInputDevice2WImpl_SendDeviceData,
     IDirectInputDevice7WImpl_EnumEffectsInFile,
     IDirectInputDevice7WImpl_WriteEffectToFile,
-    IDirectInputDevice8WImpl_BuildActionMap,
-    IDirectInputDevice8WImpl_SetActionMap,
+    JoystickWGenericImpl_BuildActionMap,
+    JoystickWGenericImpl_SetActionMap,
     IDirectInputDevice8WImpl_GetImageInfo
 };
 

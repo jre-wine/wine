@@ -56,6 +56,8 @@ static HRESULT (WINAPI *pHashData)(LPBYTE, DWORD, LPBYTE, DWORD);
 static const char* TEST_URL_1 = "http://www.winehq.org/tests?date=10/10/1923";
 static const char* TEST_URL_2 = "http://localhost:8080/tests%2e.html?date=Mon%2010/10/1923";
 static const char* TEST_URL_3 = "http://foo:bar@localhost:21/internal.php?query=x&return=y";
+static const char* TEST_URL_4 = "http://foo:bar@google.*.com:21/internal.php?query=x&return=y";
+
 static const WCHAR winehqW[] = {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g','/',0};
 static const  CHAR winehqA[] = {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g','/',0};
 
@@ -83,9 +85,18 @@ static const TEST_URL_APPLY TEST_APPLY[] = {
     {"winehq.org", URL_APPLY_GUESSSCHEME | URL_APPLY_DEFAULT, S_OK, 17, "http://winehq.org"},
     {"winehq.org", URL_APPLY_GUESSSCHEME, S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
     {"winehq.org", URL_APPLY_DEFAULT, S_OK, 17, "http://winehq.org"},
+    {"http://www.winehq.org", URL_APPLY_GUESSSCHEME , S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
+    {"http://www.winehq.org", URL_APPLY_GUESSSCHEME | URL_APPLY_FORCEAPPLY, S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
+    {"http://www.winehq.org", URL_APPLY_GUESSSCHEME | URL_APPLY_FORCEAPPLY | URL_APPLY_DEFAULT, S_OK, 28, "http://http://www.winehq.org"},
+    {"http://www.winehq.org", URL_APPLY_GUESSSCHEME | URL_APPLY_DEFAULT, S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
     {"", URL_APPLY_GUESSSCHEME | URL_APPLY_DEFAULT, S_OK, 7, "http://"},
     {"", URL_APPLY_GUESSSCHEME, S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
-    {"", URL_APPLY_DEFAULT, S_OK, 7, "http://"}
+    {"", URL_APPLY_DEFAULT, S_OK, 7, "http://"},
+    {"u:\\windows", URL_APPLY_GUESSFILE | URL_APPLY_DEFAULT, S_OK, 18, "file:///u:/windows"},
+    {"u:\\windows", URL_APPLY_GUESSFILE, S_OK, 18, "file:///u:/windows"},
+    {"u:\\windows", URL_APPLY_DEFAULT, S_OK, 17, "http://u:\\windows"},
+    {"file:///c:/windows", URL_APPLY_GUESSFILE , S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
+    {"aa:\\windows", URL_APPLY_GUESSFILE , S_FALSE, TEST_APPLY_MAX_LENGTH, untouchedA},
 };
 
 /* ################ */
@@ -373,6 +384,7 @@ static const struct {
     {"c:foo\\bar", "file:///c:foo/bar", S_OK},
     {"c:\\foo/b a%r", "file:///c:/foo/b%20a%25r", S_OK},
     {"c:\\foo\\foo bar", "file:///c:/foo/foo%20bar", S_OK},
+    {"file:///c:/foo/bar", "file:///c:/foo/bar", S_FALSE},
 #if 0
     /* The following test fails on native shlwapi as distributed with Win95/98.
      * Wine matches the behaviour of later versions.
@@ -690,6 +702,8 @@ static void test_UrlGetPart(void)
   test_url_part(TEST_URL_3, URL_PART_SCHEME, 0, "http");
   test_url_part(TEST_URL_3, URL_PART_QUERY, 0, "?query=x&return=y");
 
+  test_url_part(TEST_URL_4, URL_PART_HOSTNAME, 0, "google.*.com");
+
   test_url_part(file_url, URL_PART_HOSTNAME, 0, "h o s t");
 
   test_url_part(http_url, URL_PART_HOSTNAME, 0, "www.wine hq.org");
@@ -868,16 +882,27 @@ static void test_UrlEscape(void)
     ok(size == 1, "got %d, expected %d\n", size, 1);
 
     size = 1;
+    empty_string[0] = 127;
     ret = pUrlEscapeA("/woningplan/woonkamer basis.swf", empty_string, &size, URL_ESCAPE_SPACES_ONLY);
     ok(ret == E_POINTER, "got %x, expected %x\n", ret, E_POINTER);
     ok(size == 34, "got %d, expected %d\n", size, 34);
+    ok(empty_string[0] == 127, "String has changed, empty_string[0] = %d\n", empty_string[0]);
 
     if(pUrlEscapeW) {
+        WCHAR wc;
+
         size = sizeof(overwrite)/sizeof(WCHAR);
         ret = pUrlEscapeW(overwrite, overwrite, &size, URL_ESCAPE_SPACES_ONLY);
         ok(ret == S_OK, "got %x, expected S_OK\n", ret);
         ok(size == 9, "got %d, expected 9\n", size);
         ok(!lstrcmpW(overwrite, out), "got %s, expected %s\n", wine_dbgstr_w(overwrite), wine_dbgstr_w(out));
+
+        size = 1;
+        wc = 127;
+        ret = pUrlEscapeW(overwrite, &wc, &size, URL_ESCAPE_SPACES_ONLY);
+        ok(ret == E_POINTER, "got %x, expected %x\n", ret, E_POINTER);
+        ok(size == 10, "got %d, expected 9\n", size);
+        ok(wc == 127, "String has changed, wc = %d\n", wc);
     }
 
     for(i=0; i<sizeof(TEST_ESCAPE)/sizeof(TEST_ESCAPE[0]); i++) {

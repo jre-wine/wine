@@ -24,10 +24,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "objbase.h"
 #include "propsys.h"
+#include "propvarutil.h"
 #include "initguid.h"
 #include "wine/test.h"
 
@@ -37,6 +40,11 @@ DEFINE_GUID(expect_guid, 0x12345678, 0x1234, 0x1234, 0x12, 0x34, 0x12, 0x34, 0x5
 
 static char *show_guid(const GUID *guid, char *buf)
 {
+    static char static_buf[40];
+
+    if(!buf)
+        buf = static_buf;
+
     sprintf(buf,
         "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
         guid->Data1, guid->Data2, guid->Data3,
@@ -44,6 +52,13 @@ static char *show_guid(const GUID *guid, char *buf)
         guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
 
     return buf;
+}
+
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
 }
 
 static void test_PSStringFromPropertyKey(void)
@@ -450,9 +465,180 @@ static void test_PSRefreshPropertySchema(void)
     CoUninitialize();
 }
 
+static void test_InitPropVariantFromGUIDAsString(void)
+{
+    PROPVARIANT propvar;
+    VARIANT var;
+    HRESULT hres;
+    int i;
+
+    const struct {
+        REFGUID guid;
+        const char *str;
+    } testcases[] = {
+        {&IID_NULL,             "{00000000-0000-0000-0000-000000000000}" },
+        {&dummy_guid,           "{DEADBEEF-DEAD-BEEF-DEAD-BEEFCAFEBABE}" },
+    };
+
+    hres = InitPropVariantFromGUIDAsString(NULL, &propvar);
+    ok(hres == E_FAIL, "InitPropVariantFromGUIDAsString returned %x\n", hres);
+
+    if(0) {
+        /* Returns strange data on Win7, crashes on older systems */
+        InitVariantFromGUIDAsString(NULL, &var);
+
+        /* Crashes on windows */
+        InitPropVariantFromGUIDAsString(&IID_NULL, NULL);
+        InitVariantFromGUIDAsString(&IID_NULL, NULL);
+    }
+
+    for(i=0; i<sizeof(testcases)/sizeof(testcases[0]); i++) {
+        memset(&propvar, 0, sizeof(PROPVARIANT));
+        hres = InitPropVariantFromGUIDAsString(testcases[i].guid, &propvar);
+        ok(hres == S_OK, "%d) InitPropVariantFromGUIDAsString returned %x\n", i, hres);
+        ok(propvar.vt == VT_LPWSTR, "%d) propvar.vt = %d\n", i, propvar.vt);
+        ok(!strcmp_wa(propvar.u.pwszVal, testcases[i].str), "%d) propvar.u.pwszVal = %s\n",
+                i, wine_dbgstr_w(propvar.u.pwszVal));
+        CoTaskMemFree(propvar.u.pwszVal);
+
+        memset(&var, 0, sizeof(VARIANT));
+        hres = InitVariantFromGUIDAsString(testcases[i].guid, &var);
+        ok(hres == S_OK, "%d) InitVariantFromGUIDAsString returned %x\n", i, hres);
+        ok(V_VT(&var) == VT_BSTR, "%d) V_VT(&var) = %d\n", i, V_VT(&var));
+        ok(SysStringLen(V_BSTR(&var)) == 38, "SysStringLen returned %d\n",
+                SysStringLen(V_BSTR(&var)));
+        ok(!strcmp_wa(V_BSTR(&var), testcases[i].str), "%d) V_BSTR(&var) = %s\n",
+                i, wine_dbgstr_w(V_BSTR(&var)));
+        VariantClear(&var);
+    }
+}
+
+static void test_InitPropVariantFromBuffer(void)
+{
+    static const char data_in[] = "test";
+    PROPVARIANT propvar;
+    VARIANT var;
+    HRESULT hres;
+    void *data_out;
+    LONG size;
+
+    hres = InitPropVariantFromBuffer(NULL, 0, &propvar);
+    ok(hres == S_OK, "InitPropVariantFromBuffer returned %x\n", hres);
+    ok(propvar.vt == (VT_VECTOR|VT_UI1), "propvar.vt = %d\n", propvar.vt);
+    ok(propvar.u.caub.cElems == 0, "cElems = %d\n", propvar.u.caub.cElems == 0);
+    PropVariantClear(&propvar);
+
+    hres = InitPropVariantFromBuffer(data_in, 4, &propvar);
+    ok(hres == S_OK, "InitPropVariantFromBuffer returned %x\n", hres);
+    ok(propvar.vt == (VT_VECTOR|VT_UI1), "propvar.vt = %d\n", propvar.vt);
+    ok(propvar.u.caub.cElems == 4, "cElems = %d\n", propvar.u.caub.cElems == 0);
+    ok(!memcmp(propvar.u.caub.pElems, data_in, 4), "Data inside array is incorrect\n");
+    PropVariantClear(&propvar);
+
+    hres = InitVariantFromBuffer(NULL, 0, &var);
+    ok(hres == S_OK, "InitVariantFromBuffer returned %x\n", hres);
+    ok(V_VT(&var) == (VT_ARRAY|VT_UI1), "V_VT(&var) = %d\n", V_VT(&var));
+    size = SafeArrayGetDim(V_ARRAY(&var));
+    ok(size == 1, "SafeArrayGetDim returned %d\n", size);
+    hres = SafeArrayGetLBound(V_ARRAY(&var), 1, &size);
+    ok(hres == S_OK, "SafeArrayGetLBound returned %x\n", hres);
+    ok(size == 0, "LBound = %d\n", size);
+    hres = SafeArrayGetUBound(V_ARRAY(&var), 1, &size);
+    ok(hres == S_OK, "SafeArrayGetUBound returned %x\n", hres);
+    ok(size == -1, "UBound = %d\n", size);
+    VariantClear(&var);
+
+    hres = InitVariantFromBuffer(data_in, 4, &var);
+    ok(hres == S_OK, "InitVariantFromBuffer returned %x\n", hres);
+    ok(V_VT(&var) == (VT_ARRAY|VT_UI1), "V_VT(&var) = %d\n", V_VT(&var));
+    size = SafeArrayGetDim(V_ARRAY(&var));
+    ok(size == 1, "SafeArrayGetDim returned %d\n", size);
+    hres = SafeArrayGetLBound(V_ARRAY(&var), 1, &size);
+    ok(hres == S_OK, "SafeArrayGetLBound returned %x\n", hres);
+    ok(size == 0, "LBound = %d\n", size);
+    hres = SafeArrayGetUBound(V_ARRAY(&var), 1, &size);
+    ok(hres == S_OK, "SafeArrayGetUBound returned %x\n", hres);
+    ok(size == 3, "UBound = %d\n", size);
+    hres = SafeArrayAccessData(V_ARRAY(&var), &data_out);
+    ok(hres == S_OK, "SafeArrayAccessData failed %x\n", hres);
+    ok(!memcmp(data_in, data_out, 4), "Data inside safe array is incorrect\n");
+    hres = SafeArrayUnaccessData(V_ARRAY(&var));
+    ok(hres == S_OK, "SafeArrayUnaccessData failed %x\n", hres);
+    VariantClear(&var);
+}
+
+static void test_PropVariantToGUID(void)
+{
+    PROPVARIANT propvar;
+    VARIANT var;
+    GUID guid;
+    HRESULT hres;
+
+    hres = InitPropVariantFromGUIDAsString(&IID_NULL, &propvar);
+    ok(hres == S_OK, "InitPropVariantFromGUIDAsString failed %x\n", hres);
+
+    hres = PropVariantToGUID(&propvar, &guid);
+    ok(hres == S_OK, "PropVariantToGUID failed %x\n", hres);
+    ok(!memcmp(&IID_NULL, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+    PropVariantClear(&propvar);
+
+    hres = InitPropVariantFromGUIDAsString(&dummy_guid, &propvar);
+    ok(hres == S_OK, "InitPropVariantFromGUIDAsString failed %x\n", hres);
+
+    hres = PropVariantToGUID(&propvar, &guid);
+    ok(hres == S_OK, "PropVariantToGUID failed %x\n", hres);
+    ok(!memcmp(&dummy_guid, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+
+    ok(propvar.vt == VT_LPWSTR, "incorrect PROPVARIANT type: %d\n", propvar.vt);
+    propvar.u.pwszVal[1] = 'd';
+    propvar.u.pwszVal[2] = 'E';
+    propvar.u.pwszVal[3] = 'a';
+    hres = PropVariantToGUID(&propvar, &guid);
+    ok(hres == S_OK, "PropVariantToGUID failed %x\n", hres);
+    ok(!memcmp(&dummy_guid, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+
+    propvar.u.pwszVal[1] = 'z';
+    hres = PropVariantToGUID(&propvar, &guid);
+    ok(hres == E_INVALIDARG, "PropVariantToGUID returned %x\n", hres);
+    PropVariantClear(&propvar);
+
+
+    hres = InitVariantFromGUIDAsString(&IID_NULL, &var);
+    ok(hres == S_OK, "InitVariantFromGUIDAsString failed %x\n", hres);
+
+    hres = VariantToGUID(&var, &guid);
+    ok(hres == S_OK, "VariantToGUID failed %x\n", hres);
+    ok(!memcmp(&IID_NULL, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+    VariantClear(&var);
+
+    hres = InitVariantFromGUIDAsString(&dummy_guid, &var);
+    ok(hres == S_OK, "InitVariantFromGUIDAsString failed %x\n", hres);
+
+    hres = VariantToGUID(&var, &guid);
+    ok(hres == S_OK, "VariantToGUID failed %x\n", hres);
+    ok(!memcmp(&dummy_guid, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+
+    ok(V_VT(&var) == VT_BSTR, "incorrect VARIANT type: %d\n", V_VT(&var));
+    V_BSTR(&var)[1] = 'z';
+    hres = VariantToGUID(&var, &guid);
+    ok(hres == E_FAIL, "VariantToGUID returned %x\n", hres);
+
+    V_BSTR(&var)[1] = 'd';
+    propvar.vt = V_VT(&var);
+    propvar.u.bstrVal = V_BSTR(&var);
+    V_VT(&var) = VT_EMPTY;
+    hres = PropVariantToGUID(&propvar, &guid);
+    ok(hres == S_OK, "PropVariantToGUID failed %x\n", hres);
+    ok(!memcmp(&dummy_guid, &guid, sizeof(GUID)), "incorrect GUID created: %s\n", show_guid(&guid, NULL));
+    PropVariantClear(&propvar);
+}
+
 START_TEST(propsys)
 {
     test_PSStringFromPropertyKey();
     test_PSPropertyKeyFromString();
     test_PSRefreshPropertySchema();
+    test_InitPropVariantFromGUIDAsString();
+    test_InitPropVariantFromBuffer();
+    test_PropVariantToGUID();
 }

@@ -20,9 +20,7 @@
 #ifndef __USP10_H
 #define __USP10_H
 
-#ifndef __WINESRC__
-# include <windows.h>
-#endif
+#include <windows.h>
 /* FIXME: #include <specstrings.h> */
 
 #ifdef __cplusplus
@@ -86,7 +84,7 @@ typedef enum tag_SCRIPT_JUSTIFY {
   SCRIPT_JUSTIFY_ARABIC_BA      = 12,
   SCRIPT_JUSTIFY_ARABIC_BARA    = 13,
   SCRIPT_JUSTIFY_ARABIC_SEEN    = 14,
-  SCRIPT_JUSTIFY_RESERVED4      = 15,
+  SCRIPT_JUSTIFY_ARABIC_SEEN_M  = 15,
 } SCRIPT_JUSTIFY;
 
 typedef struct tag_SCRIPT_CONTROL {
@@ -209,6 +207,18 @@ typedef struct tagOPENTYPE_FEATURE_RECORD
     OPENTYPE_TAG tagFeature;
     LONG         lParameter;
 } OPENTYPE_FEATURE_RECORD;
+
+typedef struct tagSCRIPT_GLYPHPROP
+{
+    SCRIPT_VISATTR sva;
+    WORD           reserved;
+} SCRIPT_GLYPHPROP;
+
+typedef struct tagSCRIPT_CHARPROP
+{
+    WORD fCanGlyphAlone  :1;
+    WORD reserved        :15;
+} SCRIPT_CHARPROP;
 
 typedef struct tagTEXTRANGE_PROPERTIES
 {

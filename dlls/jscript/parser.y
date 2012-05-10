@@ -83,9 +83,9 @@ static variable_declaration_t *new_variable_declaration(parser_ctx_t*,const WCHA
 static variable_list_t *new_variable_list(parser_ctx_t*,variable_declaration_t*);
 static variable_list_t *variable_list_add(parser_ctx_t*,variable_list_t*,variable_declaration_t*);
 
+static void *new_statement(parser_ctx_t*,statement_type_t,size_t);
 static statement_t *new_block_statement(parser_ctx_t*,statement_list_t*);
 static statement_t *new_var_statement(parser_ctx_t*,variable_list_t*);
-static statement_t *new_empty_statement(parser_ctx_t*);
 static statement_t *new_expression_statement(parser_ctx_t*,expression_t*);
 static statement_t *new_if_statement(parser_ctx_t*,expression_t*,statement_t*,statement_t*);
 static statement_t *new_while_statement(parser_ctx_t*,BOOL,expression_t*,statement_t*);
@@ -123,16 +123,15 @@ static inline void pop_func(parser_ctx_t *ctx)
     ctx->func_stack = ctx->func_stack->next;
 }
 
+static void *new_expression(parser_ctx_t *ctx,expression_type_t,size_t);
 static expression_t *new_function_expression(parser_ctx_t*,const WCHAR*,parameter_list_t*,
         source_elements_t*,const WCHAR*,DWORD);
 static expression_t *new_binary_expression(parser_ctx_t*,expression_type_t,expression_t*,expression_t*);
 static expression_t *new_unary_expression(parser_ctx_t*,expression_type_t,expression_t*);
 static expression_t *new_conditional_expression(parser_ctx_t*,expression_t*,expression_t*,expression_t*);
-static expression_t *new_array_expression(parser_ctx_t*,expression_t*,expression_t*);
 static expression_t *new_member_expression(parser_ctx_t*,expression_t*,const WCHAR*);
 static expression_t *new_new_expression(parser_ctx_t*,expression_t*,argument_list_t*);
 static expression_t *new_call_expression(parser_ctx_t*,expression_t*,argument_list_t*);
-static expression_t *new_this_expression(parser_ctx_t*);
 static expression_t *new_identifier_expression(parser_ctx_t*,const WCHAR*);
 static expression_t *new_literal_expression(parser_ctx_t*,literal_t*);
 static expression_t *new_array_literal_expression(parser_ctx_t*,element_list_t*,int);
@@ -294,7 +293,7 @@ Statement
         : Block                 { $$ = $1; }
         | VariableStatement     { $$ = $1; }
         | EmptyStatement        { $$ = $1; }
-        | FunctionExpression    { $$ = new_empty_statement(ctx); } /* FIXME: return NULL */
+        | FunctionExpression    { $$ = new_statement(ctx, STAT_EMPTY, 0); }
         | ExpressionStatement   { $$ = $1; }
         | IfStatement           { $$ = $1; }
         | IterationStatement    { $$ = $1; }
@@ -373,7 +372,7 @@ InitialiserNoIn
 
 /* ECMA-262 3rd Edition    12.3 */
 EmptyStatement
-        : ';'                   { $$ = new_empty_statement(ctx); }
+        : ';'                   { $$ = new_statement(ctx, STAT_EMPTY, 0); }
 
 /* ECMA-262 3rd Edition    12.4 */
 ExpressionStatement
@@ -710,7 +709,7 @@ MemberExpression
         : PrimaryExpression     { $$ = $1; }
         | FunctionExpression    { $$ = $1; }
         | MemberExpression '[' Expression ']'
-                                { $$ = new_array_expression(ctx, $1, $3); }
+                                { $$ = new_binary_expression(ctx, EXPR_ARRAY, $1, $3); }
         | MemberExpression '.' tIdentifier
                                 { $$ = new_member_expression(ctx, $1, $3); }
         | kNEW MemberExpression Arguments
@@ -723,7 +722,7 @@ CallExpression
         | CallExpression Arguments
                                 { $$ = new_call_expression(ctx, $1, $2); }
         | CallExpression '[' Expression ']'
-                                { $$ = new_array_expression(ctx, $1, $3); }
+                                { $$ = new_binary_expression(ctx, EXPR_ARRAY, $1, $3); }
         | CallExpression '.' tIdentifier
                                 { $$ = new_member_expression(ctx, $1, $3); }
 
@@ -740,7 +739,7 @@ ArgumentList
 
 /* ECMA-262 3rd Edition    11.1 */
 PrimaryExpression
-        : kTHIS                 { $$ = new_this_expression(ctx); }
+        : kTHIS                 { $$ = new_expression(ctx, EXPR_THIS, 0); }
         | tIdentifier           { $$ = new_identifier_expression(ctx, $1); }
         | Literal               { $$ = new_literal_expression(ctx, $1); }
         | ArrayLiteral          { $$ = $1; }
@@ -834,6 +833,20 @@ semicolon
 static BOOL allow_auto_semicolon(parser_ctx_t *ctx)
 {
     return ctx->nl || ctx->ptr == ctx->end || *(ctx->ptr-1) == '}';
+}
+
+static void *new_statement(parser_ctx_t *ctx, statement_type_t type, size_t size)
+{
+    statement_t *stat;
+
+    stat = parser_alloc(ctx, size ? size : sizeof(*stat));
+    if(!stat)
+        return NULL;
+
+    stat->type = type;
+    stat->next = NULL;
+
+    return stat;
 }
 
 static literal_t *new_string_literal(parser_ctx_t *ctx, const WCHAR *str)
@@ -1024,10 +1037,12 @@ static case_clausule_t *new_case_block(parser_ctx_t *ctx, case_list_t *case_list
 
 static statement_t *new_block_statement(parser_ctx_t *ctx, statement_list_t *list)
 {
-    block_statement_t *ret = parser_alloc(ctx, sizeof(block_statement_t));
+    block_statement_t *ret;
 
-    ret->stat.eval = block_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_BLOCK, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->stat_list = list ? list->head : NULL;
 
     return &ret->stat;
@@ -1071,31 +1086,25 @@ static variable_list_t *variable_list_add(parser_ctx_t *ctx, variable_list_t *li
 
 static statement_t *new_var_statement(parser_ctx_t *ctx, variable_list_t *variable_list)
 {
-    var_statement_t *ret = parser_alloc(ctx, sizeof(var_statement_t));
+    var_statement_t *ret;
 
-    ret->stat.eval = var_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_VAR, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->variable_list = variable_list->head;
 
     return &ret->stat;
 }
 
-static statement_t *new_empty_statement(parser_ctx_t *ctx)
-{
-    statement_t *ret = parser_alloc(ctx, sizeof(statement_t));
-
-    ret->eval = empty_statement_eval;
-    ret->next = NULL;
-
-    return ret;
-}
-
 static statement_t *new_expression_statement(parser_ctx_t *ctx, expression_t *expr)
 {
-    expression_statement_t *ret = parser_alloc(ctx, sizeof(expression_statement_t));
+    expression_statement_t *ret;
 
-    ret->stat.eval = expression_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_EXPR, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
 
     return &ret->stat;
@@ -1103,10 +1112,12 @@ static statement_t *new_expression_statement(parser_ctx_t *ctx, expression_t *ex
 
 static statement_t *new_if_statement(parser_ctx_t *ctx, expression_t *expr, statement_t *if_stat, statement_t *else_stat)
 {
-    if_statement_t *ret = parser_alloc(ctx, sizeof(if_statement_t));
+    if_statement_t *ret;
 
-    ret->stat.eval = if_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_IF, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
     ret->if_stat = if_stat;
     ret->else_stat = else_stat;
@@ -1116,10 +1127,12 @@ static statement_t *new_if_statement(parser_ctx_t *ctx, expression_t *expr, stat
 
 static statement_t *new_while_statement(parser_ctx_t *ctx, BOOL dowhile, expression_t *expr, statement_t *stat)
 {
-    while_statement_t *ret = parser_alloc(ctx, sizeof(while_statement_t));
+    while_statement_t *ret;
 
-    ret->stat.eval = while_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_WHILE, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->do_while = dowhile;
     ret->expr = expr;
     ret->statement = stat;
@@ -1130,10 +1143,12 @@ static statement_t *new_while_statement(parser_ctx_t *ctx, BOOL dowhile, express
 static statement_t *new_for_statement(parser_ctx_t *ctx, variable_list_t *variable_list, expression_t *begin_expr,
         expression_t *expr, expression_t *end_expr, statement_t *statement)
 {
-    for_statement_t *ret = parser_alloc(ctx, sizeof(for_statement_t));
+    for_statement_t *ret;
 
-    ret->stat.eval = for_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_FOR, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->variable_list = variable_list ? variable_list->head : NULL;
     ret->begin_expr = begin_expr;
     ret->expr = expr;
@@ -1146,10 +1161,12 @@ static statement_t *new_for_statement(parser_ctx_t *ctx, variable_list_t *variab
 static statement_t *new_forin_statement(parser_ctx_t *ctx, variable_declaration_t *variable, expression_t *expr,
         expression_t *in_expr, statement_t *statement)
 {
-    forin_statement_t *ret = parser_alloc(ctx, sizeof(forin_statement_t));
+    forin_statement_t *ret;
 
-    ret->stat.eval = forin_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_FORIN, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->variable = variable;
     ret->expr = expr;
     ret->in_expr = in_expr;
@@ -1160,10 +1177,12 @@ static statement_t *new_forin_statement(parser_ctx_t *ctx, variable_declaration_
 
 static statement_t *new_continue_statement(parser_ctx_t *ctx, const WCHAR *identifier)
 {
-    branch_statement_t *ret = parser_alloc(ctx, sizeof(branch_statement_t));
+    branch_statement_t *ret;
 
-    ret->stat.eval = continue_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_CONTINUE, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->identifier = identifier;
 
     return &ret->stat;
@@ -1171,10 +1190,12 @@ static statement_t *new_continue_statement(parser_ctx_t *ctx, const WCHAR *ident
 
 static statement_t *new_break_statement(parser_ctx_t *ctx, const WCHAR *identifier)
 {
-    branch_statement_t *ret = parser_alloc(ctx, sizeof(branch_statement_t));
+    branch_statement_t *ret;
 
-    ret->stat.eval = break_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_BREAK, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->identifier = identifier;
 
     return &ret->stat;
@@ -1182,10 +1203,12 @@ static statement_t *new_break_statement(parser_ctx_t *ctx, const WCHAR *identifi
 
 static statement_t *new_return_statement(parser_ctx_t *ctx, expression_t *expr)
 {
-    expression_statement_t *ret = parser_alloc(ctx, sizeof(expression_statement_t));
+    expression_statement_t *ret;
 
-    ret->stat.eval = return_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_RETURN, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
 
     return &ret->stat;
@@ -1193,10 +1216,12 @@ static statement_t *new_return_statement(parser_ctx_t *ctx, expression_t *expr)
 
 static statement_t *new_with_statement(parser_ctx_t *ctx, expression_t *expr, statement_t *statement)
 {
-    with_statement_t *ret = parser_alloc(ctx, sizeof(with_statement_t));
+    with_statement_t *ret;
 
-    ret->stat.eval = with_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_WITH, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
     ret->statement = statement;
 
@@ -1205,10 +1230,12 @@ static statement_t *new_with_statement(parser_ctx_t *ctx, expression_t *expr, st
 
 static statement_t *new_labelled_statement(parser_ctx_t *ctx, const WCHAR *identifier, statement_t *statement)
 {
-    labelled_statement_t *ret = parser_alloc(ctx, sizeof(labelled_statement_t));
+    labelled_statement_t *ret;
 
-    ret->stat.eval = labelled_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_LABEL, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->identifier = identifier;
     ret->statement = statement;
 
@@ -1217,10 +1244,12 @@ static statement_t *new_labelled_statement(parser_ctx_t *ctx, const WCHAR *ident
 
 static statement_t *new_switch_statement(parser_ctx_t *ctx, expression_t *expr, case_clausule_t *case_list)
 {
-    switch_statement_t *ret = parser_alloc(ctx, sizeof(switch_statement_t));
+    switch_statement_t *ret;
 
-    ret->stat.eval = switch_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_SWITCH, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
     ret->case_list = case_list;
 
@@ -1229,10 +1258,12 @@ static statement_t *new_switch_statement(parser_ctx_t *ctx, expression_t *expr, 
 
 static statement_t *new_throw_statement(parser_ctx_t *ctx, expression_t *expr)
 {
-    expression_statement_t *ret = parser_alloc(ctx, sizeof(expression_statement_t));
+    expression_statement_t *ret;
 
-    ret->stat.eval = throw_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_THROW, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->expr = expr;
 
     return &ret->stat;
@@ -1241,10 +1272,12 @@ static statement_t *new_throw_statement(parser_ctx_t *ctx, expression_t *expr)
 static statement_t *new_try_statement(parser_ctx_t *ctx, statement_t *try_statement,
        catch_block_t *catch_block, statement_t *finally_statement)
 {
-    try_statement_t *ret = parser_alloc(ctx, sizeof(try_statement_t));
+    try_statement_t *ret;
 
-    ret->stat.eval = try_statement_eval;
-    ret->stat.next = NULL;
+    ret = new_statement(ctx, STAT_TRY, sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->try_statement = try_statement;
     ret->catch_block = catch_block;
     ret->finally_statement = finally_statement;
@@ -1281,9 +1314,8 @@ static parameter_list_t *parameter_list_add(parser_ctx_t *ctx, parameter_list_t 
 static expression_t *new_function_expression(parser_ctx_t *ctx, const WCHAR *identifier,
        parameter_list_t *parameter_list, source_elements_t *source_elements, const WCHAR *src_str, DWORD src_len)
 {
-    function_expression_t *ret = parser_alloc(ctx, sizeof(function_expression_t));
+    function_expression_t *ret = new_expression(ctx, EXPR_FUNC, sizeof(*ret));
 
-    ret->expr.eval = function_expression_eval;
     ret->identifier = identifier;
     ret->parameter_list = parameter_list ? parameter_list->head : NULL;
     ret->source_elements = source_elements;
@@ -1305,62 +1337,20 @@ static expression_t *new_function_expression(parser_ctx_t *ctx, const WCHAR *ide
     return &ret->expr;
 }
 
-static const expression_eval_t expression_eval_table[] = {
-   comma_expression_eval,
-   logical_or_expression_eval,
-   logical_and_expression_eval,
-   binary_or_expression_eval,
-   binary_xor_expression_eval,
-   binary_and_expression_eval,
-   instanceof_expression_eval,
-   in_expression_eval,
-   add_expression_eval,
-   sub_expression_eval,
-   mul_expression_eval,
-   div_expression_eval,
-   mod_expression_eval,
-   delete_expression_eval,
-   void_expression_eval,
-   typeof_expression_eval,
-   minus_expression_eval,
-   plus_expression_eval,
-   post_increment_expression_eval,
-   post_decrement_expression_eval,
-   pre_increment_expression_eval,
-   pre_decrement_expression_eval,
-   equal_expression_eval,
-   equal2_expression_eval,
-   not_equal_expression_eval,
-   not_equal2_expression_eval,
-   less_expression_eval,
-   lesseq_expression_eval,
-   greater_expression_eval,
-   greatereq_expression_eval,
-   binary_negation_expression_eval,
-   logical_negation_expression_eval,
-   left_shift_expression_eval,
-   right_shift_expression_eval,
-   right2_shift_expression_eval,
-   assign_expression_eval,
-   assign_lshift_expression_eval,
-   assign_rshift_expression_eval,
-   assign_rrshift_expression_eval,
-   assign_add_expression_eval,
-   assign_sub_expression_eval,
-   assign_mul_expression_eval,
-   assign_div_expression_eval,
-   assign_mod_expression_eval,
-   assign_and_expression_eval,
-   assign_or_expression_eval,
-   assign_xor_expression_eval,
-};
+static void *new_expression(parser_ctx_t *ctx, expression_type_t type, size_t size)
+{
+    expression_t *ret = parser_alloc(ctx, size ? size : sizeof(*ret));
+
+    ret->type = type;
+
+    return ret;
+}
 
 static expression_t *new_binary_expression(parser_ctx_t *ctx, expression_type_t type,
        expression_t *expression1, expression_t *expression2)
 {
-    binary_expression_t *ret = parser_alloc(ctx, sizeof(binary_expression_t));
+    binary_expression_t *ret = new_expression(ctx, type, sizeof(*ret));
 
-    ret->expr.eval = expression_eval_table[type];
     ret->expression1 = expression1;
     ret->expression2 = expression2;
 
@@ -1369,9 +1359,8 @@ static expression_t *new_binary_expression(parser_ctx_t *ctx, expression_type_t 
 
 static expression_t *new_unary_expression(parser_ctx_t *ctx, expression_type_t type, expression_t *expression)
 {
-    unary_expression_t *ret = parser_alloc(ctx, sizeof(unary_expression_t));
+    unary_expression_t *ret = new_expression(ctx, type, sizeof(*ret));
 
-    ret->expr.eval = expression_eval_table[type];
     ret->expression = expression;
 
     return &ret->expr;
@@ -1380,9 +1369,8 @@ static expression_t *new_unary_expression(parser_ctx_t *ctx, expression_type_t t
 static expression_t *new_conditional_expression(parser_ctx_t *ctx, expression_t *expression,
        expression_t *true_expression, expression_t *false_expression)
 {
-    conditional_expression_t *ret = parser_alloc(ctx, sizeof(conditional_expression_t));
+    conditional_expression_t *ret = new_expression(ctx, EXPR_COND, sizeof(*ret));
 
-    ret->expr.eval = conditional_expression_eval;
     ret->expression = expression;
     ret->true_expression = true_expression;
     ret->false_expression = false_expression;
@@ -1390,22 +1378,10 @@ static expression_t *new_conditional_expression(parser_ctx_t *ctx, expression_t 
     return &ret->expr;
 }
 
-static expression_t *new_array_expression(parser_ctx_t *ctx, expression_t *member_expr, expression_t *expression)
-{
-    array_expression_t *ret = parser_alloc(ctx, sizeof(array_expression_t));
-
-    ret->expr.eval = array_expression_eval;
-    ret->member_expr = member_expr;
-    ret->expression = expression;
-
-    return &ret->expr;
-}
-
 static expression_t *new_member_expression(parser_ctx_t *ctx, expression_t *expression, const WCHAR *identifier)
 {
-    member_expression_t *ret = parser_alloc(ctx, sizeof(member_expression_t));
+    member_expression_t *ret = new_expression(ctx, EXPR_MEMBER, sizeof(*ret));
 
-    ret->expr.eval = member_expression_eval;
     ret->expression = expression;
     ret->identifier = identifier;
 
@@ -1414,9 +1390,8 @@ static expression_t *new_member_expression(parser_ctx_t *ctx, expression_t *expr
 
 static expression_t *new_new_expression(parser_ctx_t *ctx, expression_t *expression, argument_list_t *argument_list)
 {
-    call_expression_t *ret = parser_alloc(ctx, sizeof(call_expression_t));
+    call_expression_t *ret = new_expression(ctx, EXPR_NEW, sizeof(*ret));
 
-    ret->expr.eval = new_expression_eval;
     ret->expression = expression;
     ret->argument_list = argument_list ? argument_list->head : NULL;
 
@@ -1425,22 +1400,12 @@ static expression_t *new_new_expression(parser_ctx_t *ctx, expression_t *express
 
 static expression_t *new_call_expression(parser_ctx_t *ctx, expression_t *expression, argument_list_t *argument_list)
 {
-    call_expression_t *ret = parser_alloc(ctx, sizeof(call_expression_t));
+    call_expression_t *ret = new_expression(ctx, EXPR_CALL, sizeof(*ret));
 
-    ret->expr.eval = call_expression_eval;
     ret->expression = expression;
     ret->argument_list = argument_list ? argument_list->head : NULL;
 
     return &ret->expr;
-}
-
-static expression_t *new_this_expression(parser_ctx_t *ctx)
-{
-    expression_t *ret = parser_alloc(ctx, sizeof(expression_t));
-
-    ret->eval = this_expression_eval;
-
-    return ret;
 }
 
 static int parser_error(const char *str)
@@ -1464,9 +1429,8 @@ static BOOL explicit_error(parser_ctx_t *ctx, void *obj, WCHAR next)
 
 static expression_t *new_identifier_expression(parser_ctx_t *ctx, const WCHAR *identifier)
 {
-    identifier_expression_t *ret = parser_alloc(ctx, sizeof(identifier_expression_t));
+    identifier_expression_t *ret = new_expression(ctx, EXPR_IDENT, sizeof(*ret));
 
-    ret->expr.eval = identifier_expression_eval;
     ret->identifier = identifier;
 
     return &ret->expr;
@@ -1474,9 +1438,8 @@ static expression_t *new_identifier_expression(parser_ctx_t *ctx, const WCHAR *i
 
 static expression_t *new_array_literal_expression(parser_ctx_t *ctx, element_list_t *element_list, int length)
 {
-    array_literal_expression_t *ret = parser_alloc(ctx, sizeof(array_literal_expression_t));
+    array_literal_expression_t *ret = new_expression(ctx, EXPR_ARRAYLIT, sizeof(*ret));
 
-    ret->expr.eval = array_literal_expression_eval;
     ret->element_list = element_list ? element_list->head : NULL;
     ret->length = length;
 
@@ -1485,9 +1448,8 @@ static expression_t *new_array_literal_expression(parser_ctx_t *ctx, element_lis
 
 static expression_t *new_prop_and_value_expression(parser_ctx_t *ctx, property_list_t *property_list)
 {
-    property_value_expression_t *ret = parser_alloc(ctx, sizeof(property_value_expression_t));
+    property_value_expression_t *ret = new_expression(ctx, EXPR_PROPVAL, sizeof(*ret));
 
-    ret->expr.eval = property_value_expression_eval;
     ret->property_list = property_list ? property_list->head : NULL;
 
     return &ret->expr;
@@ -1495,9 +1457,8 @@ static expression_t *new_prop_and_value_expression(parser_ctx_t *ctx, property_l
 
 static expression_t *new_literal_expression(parser_ctx_t *ctx, literal_t *literal)
 {
-    literal_expression_t *ret = parser_alloc(ctx, sizeof(literal_expression_t));
+    literal_expression_t *ret = new_expression(ctx, EXPR_LITERAL, sizeof(*ret));
 
-    ret->expr.eval = literal_expression_eval;
     ret->literal = literal;
 
     return &ret->expr;
@@ -1508,6 +1469,7 @@ static source_elements_t *new_source_elements(parser_ctx_t *ctx)
     source_elements_t *ret = parser_alloc(ctx, sizeof(source_elements_t));
 
     memset(ret, 0, sizeof(*ret));
+    ret->instr_off = 0;
 
     return ret;
 }
@@ -1574,6 +1536,10 @@ void parser_release(parser_ctx_t *ctx)
     if(--ctx->ref)
         return;
 
+    if(ctx->code)
+        release_bytecode(ctx->code);
+    if(ctx->compiler)
+        release_compiler(ctx->compiler);
     script_release(ctx->script);
     heap_free(ctx->begin);
     jsheap_free(&ctx->heap);

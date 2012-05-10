@@ -1516,7 +1516,9 @@ static void test_import_private(void)
         0x40, 0x64, 0x28, 0xe8, 0x8a, 0xe7, 0xa4, 0xd4,
         0x1c, 0xfd, 0xde, 0x71
     };
-            
+    BLOBHEADER *blobHeader = (BLOBHEADER *)abPlainPrivateKey;
+    RSAPUBKEY *rsaPubKey = (RSAPUBKEY *)(blobHeader+1);
+
     dwLen = (DWORD)sizeof(abPlainPrivateKey);
     result = CryptImportKey(hProv, abPlainPrivateKey, dwLen, 0, 0, &hKeyExchangeKey);
     if (!result) {
@@ -1561,6 +1563,21 @@ static void test_import_private(void)
 
     CryptDestroyKey(hSessionKey);
     CryptDestroyKey(hKeyExchangeKey);
+
+    /* Test importing a private key with a buffer that's smaller than the
+     * actual buffer.  The private exponent can be omitted, its length is
+     * inferred from the passed-in length parameter.
+     */
+    dwLen = sizeof(BLOBHEADER) + sizeof(RSAPUBKEY) +
+        rsaPubKey->bitlen / 8 + 5 * rsaPubKey->bitlen / 16;
+    for (; dwLen < sizeof(abPlainPrivateKey); dwLen++)
+    {
+        result = CryptImportKey(hProv, abPlainPrivateKey, dwLen, 0, 0, &hKeyExchangeKey);
+        ok(result, "CryptImportKey failed at size %d: %d (%08x)\n", dwLen,
+           GetLastError(), GetLastError());
+        if (result)
+            CryptDestroyKey(hKeyExchangeKey);
+    }
 }
 
 static void test_verify_signature(void) {
@@ -1771,15 +1788,14 @@ static void test_verify_signature(void) {
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 
-    result = CryptVerifySignature(hHash, abSignatureMD2NoOID, 128, hPubSignKey, NULL, CRYPT_NOHASHOID);
+    /* It seems that CPVerifySignature doesn't care about the OID at all. */
+    result = CryptVerifySignature(hHash, abSignatureMD2NoOID, 128, hPubSignKey, NULL, 0);
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 
-    /* Next test fails on WinXP SP2. It seems that CPVerifySignature doesn't care about 
-     * the OID at all. */
-    /*result = CryptVerifySignature(hHash, abSignatureMD2NoOID, 128, hPubSignKey, NULL, 0);
-    ok(!result && GetLastError()==NTE_BAD_SIGNATURE, "%08lx\n", GetLastError());
-    if (result) return;*/
+    result = CryptVerifySignature(hHash, abSignatureMD2NoOID, 128, hPubSignKey, NULL, CRYPT_NOHASHOID);
+    ok(result, "%08x\n", GetLastError());
+    if (!result) return;
 
     CryptDestroyHash(hHash);
 
@@ -1792,6 +1808,10 @@ static void test_verify_signature(void) {
     if (!result) return;
 
     result = CryptVerifySignature(hHash, abSignatureMD4, 128, hPubSignKey, NULL, 0);
+    ok(result, "%08x\n", GetLastError());
+    if (!result) return;
+
+    result = CryptVerifySignature(hHash, abSignatureMD4NoOID, 128, hPubSignKey, NULL, 0);
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 
@@ -1813,6 +1833,10 @@ static void test_verify_signature(void) {
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 
+    result = CryptVerifySignature(hHash, abSignatureMD5NoOID, 128, hPubSignKey, NULL, 0);
+    ok(result, "%08x\n", GetLastError());
+    if (!result) return;
+
     result = CryptVerifySignature(hHash, abSignatureMD5NoOID, 128, hPubSignKey, NULL, CRYPT_NOHASHOID);
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
@@ -1828,6 +1852,10 @@ static void test_verify_signature(void) {
     if (!result) return;
 
     result = CryptVerifySignature(hHash, abSignatureSHA, 128, hPubSignKey, NULL, 0);
+    ok(result, "%08x\n", GetLastError());
+    if (!result) return;
+
+    result = CryptVerifySignature(hHash, abSignatureSHANoOID, 128, hPubSignKey, NULL, 0);
     ok(result, "%08x\n", GetLastError());
     if (!result) return;
 

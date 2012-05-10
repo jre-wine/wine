@@ -25,8 +25,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(devenum);
 
-LONG dll_refs;
-HINSTANCE DEVENUM_hInstance;
+DECLSPEC_HIDDEN LONG dll_refs;
+DECLSPEC_HIDDEN HINSTANCE DEVENUM_hInstance;
 
 typedef struct
 {
@@ -34,8 +34,6 @@ typedef struct
     LPCWSTR friendly_name;
     BOOL instance;
 } register_info;
-
-static void DEVENUM_RegisterQuartz(void);
 
 /***********************************************************************
  *		Global string constant definitions
@@ -75,7 +73,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
      * Oh well - works just fine as it is */
     if (IsEqualGUID(rclsid, &CLSID_SystemDeviceEnum) ||
         IsEqualGUID(rclsid, &CLSID_CDeviceMoniker))
-        return IClassFactory_QueryInterface((IClassFactory*)&DEVENUM_ClassFactory, iid, ppv);
+        return IClassFactory_QueryInterface(&DEVENUM_ClassFactory.IClassFactory_iface, iid, ppv);
 
     FIXME("CLSID: %s, IID: %s\n", debugstr_guid(rclsid), debugstr_guid(iid));
     return CLASS_E_CLASSNOTAVAILABLE;
@@ -100,10 +98,7 @@ HRESULT WINAPI DllRegisterServer(void)
 
     TRACE("\n");
 
-    res = __wine_register_resources( DEVENUM_hInstance, NULL );
-
-    /* Quartz is needed for IFilterMapper2 */
-    DEVENUM_RegisterQuartz();
+    res = __wine_register_resources( DEVENUM_hInstance );
 
 /*** ActiveMovieFilter Categories ***/
 
@@ -149,22 +144,5 @@ HRESULT WINAPI DllRegisterServer(void)
 HRESULT WINAPI DllUnregisterServer(void)
 {
     FIXME("stub!\n");
-    return __wine_unregister_resources( DEVENUM_hInstance, NULL );
-}
-
-typedef HRESULT (WINAPI *DllRegisterServer_func)(void);
-
-/* calls DllRegisterServer() for the Quartz DLL */
-static void DEVENUM_RegisterQuartz(void)
-{
-    HANDLE hDLL = LoadLibraryA("quartz.dll");
-    DllRegisterServer_func pDllRegisterServer = NULL;
-    if (hDLL)
-        pDllRegisterServer = (DllRegisterServer_func)GetProcAddress(hDLL, "DllRegisterServer");
-    if (pDllRegisterServer)
-    {
-        HRESULT hr = pDllRegisterServer();
-        if (FAILED(hr))
-            ERR("Failed to register Quartz. Error was 0x%x)\n", hr);
-    }
+    return __wine_unregister_resources( DEVENUM_hInstance );
 }

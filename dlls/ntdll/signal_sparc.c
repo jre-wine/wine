@@ -71,6 +71,8 @@ static inline int dispatch_signal(unsigned int sig)
  */
 static void save_context( CONTEXT *context, ucontext_t *ucontext )
 {
+    context->ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+
     /* Special registers */
     context->psr = ucontext->uc_mcontext.gregs[REG_PSR];
     context->pc  = ucontext->uc_mcontext.gregs[REG_PC];
@@ -816,9 +818,9 @@ void signal_init_process(void)
        this is correct, because that is what x86 does, or it is harmful 
        because it could obscure problems in user code */
     __asm__("ta 6"); /* 6 == ST_FIX_ALIGN defined in sys/trap.h */
-    return;
 #endif
 
+    return;
  error:
     perror("sigaction");
     exit(1);

@@ -29,17 +29,15 @@
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
-#ifdef HAVE_SYS_ERRNO_H
-# include <sys/errno.h>
-#endif
+#include <errno.h>
 #ifdef HAVE_SYS_TIME_H
 # include <sys/time.h>
 #endif
 #ifdef HAVE_ASM_TYPES_H
 # include <asm/types.h>
 #endif
-#ifdef HAVE_LINUX_VIDEODEV_H
-# include <linux/videodev.h>
+#ifdef HAVE_LINUX_VIDEODEV2_H
+# include <linux/videodev2.h>
 #endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
@@ -66,9 +64,8 @@ HWND VFWAPI capCreateCaptureWindowW(LPCWSTR lpszWindowName, DWORD dwStyle, INT x
                                     INT y, INT nWidth, INT nHeight, HWND hWnd,
                                     INT nID)
 {
-    FIXME("%s, %08x, %08x, %08x, %08x, %08x, %p, %08x\n",
-           debugstr_w(lpszWindowName), dwStyle,
-           x, y, nWidth, nHeight, hWnd, nID);
+    FIXME("(%s, %08x, %08x, %08x, %08x, %08x, %p, %08x): stub\n",
+           debugstr_w(lpszWindowName), dwStyle, x, y, nWidth, nHeight, hWnd, nID);
     return 0;
 }
 
@@ -91,7 +88,7 @@ HWND VFWAPI capCreateCaptureWindowA(LPCSTR lpszWindowName, DWORD dwStyle, INT x,
     return retW;
 }
 
-#ifdef HAVE_LINUX_VIDEODEV_H
+#ifdef HAVE_LINUX_VIDEODEV2_H
 
 static int xioctl(int fd, int request, void * arg)
 {
@@ -108,10 +105,7 @@ static BOOL query_video_device(int devnum, char *name, int namesize, char *versi
    int fd;
    char device[16];
    struct stat st;
-   struct video_capability capa;
-#ifdef HAVE_V4L2
    struct v4l2_capability caps;
-#endif
 
    snprintf(device, sizeof(device), "/dev/video%i", devnum);
 
@@ -132,7 +126,6 @@ static BOOL query_video_device(int devnum, char *name, int namesize, char *versi
       return FALSE;
    }
 
-#ifdef HAVE_V4L2
    memset(&caps, 0, sizeof(caps));
    if (xioctl(fd, VIDIOC_QUERYCAP, &caps) != -1) {
       lstrcpynA(name, (char *)caps.card, namesize);
@@ -143,27 +136,15 @@ static BOOL query_video_device(int devnum, char *name, int namesize, char *versi
    }
 
    if (errno != EINVAL && errno != 515)
-      WARN("%s: ioctl failed: %s -- Falling back to V4L\n", device, strerror(errno));
-   else WARN("%s: Not a V4L2 compatible device, trying V4l 1\n", device);
-#endif /* HAVE_V4L2 */
-
-   memset(&capa, 0, sizeof(capa));
-   if (xioctl(fd, VIDIOCGCAP, &capa) == -1) {
 /* errno 515 is used by some webcam drivers for unknown IOICTL command */
-      if (errno != EINVAL && errno != 515)
-         ERR("%s: Querying failed: %s\n", device, strerror(errno));
-      else ERR("%s: Querying failed: Not a V4L compatible device\n", device);
-      close(fd);
-      return FALSE;
-   }
+      ERR("%s: Querying failed: %s\n", device, strerror(errno));
+   else ERR("%s: Querying failed: Not a V4L compatible device\n", device);
 
-   lstrcpynA(name, capa.name, namesize);
-   lstrcpynA(version, device, versionsize);
    close(fd);
-   return TRUE;
+   return FALSE;
 }
 
-#else /* HAVE_LINUX_VIDEODEV_H */
+#else /* HAVE_LINUX_VIDEODEV2_H */
 
 static BOOL query_video_device(int devnum, char *name, int namesize, char *version, int versionsize)
 {
@@ -171,7 +152,7 @@ static BOOL query_video_device(int devnum, char *name, int namesize, char *versi
    return FALSE;
 }
 
-#endif /* HAVE_LINUX_VIDEODEV_H */
+#endif /* HAVE_LINUX_VIDEODEV2_H */
 
 /***********************************************************************
  *             capGetDriverDescriptionA   (AVICAP32.@)

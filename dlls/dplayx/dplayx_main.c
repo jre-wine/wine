@@ -47,9 +47,9 @@
  *  - Handles need to be correctly reference counted
  *  - Check if we need to deallocate any list objects when destroying 
  *    a dplay interface
- *  - RunApplication process spawning needs to have correct syncronization.
+ *  - RunApplication process spawning needs to have correct synchronization.
  *  - Need to get inter lobby messages working.
- *  - Decypher dplay messages between applications and implement...
+ *  - Decipher dplay messages between applications and implement...
  *  - Need to implement lobby session spawning.
  *  - Improve footprint and realtime blocking by setting up a separate data share
  *    between lobby application and client since there can be multiple apps per
@@ -120,7 +120,7 @@ HRESULT WINAPI DllCanUnloadNow(void)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( instance, NULL );
+    return __wine_register_resources( instance );
 }
 
 /***********************************************************************
@@ -128,5 +128,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( instance, NULL );
+    return __wine_unregister_resources( instance );
 }

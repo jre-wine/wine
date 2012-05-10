@@ -831,6 +831,18 @@ static void test_LockBits_UserBuf(void)
     expect(Ok, stat);
 }
 
+struct BITMAPINFOWITHBITFIELDS
+{
+    BITMAPINFOHEADER bmiHeader;
+    DWORD masks[3];
+};
+
+union BITMAPINFOUNION
+{
+    BITMAPINFO bi;
+    struct BITMAPINFOWITHBITFIELDS bf;
+};
+
 static void test_GdipCreateBitmapFromHBITMAP(void)
 {
     GpBitmap* gpbm = NULL;
@@ -845,8 +857,9 @@ static void test_GdipCreateBitmapFromHBITMAP(void)
     const REAL WIDTH2 = 10;
     const REAL HEIGHT2 = 20;
     HDC hdc;
-    BITMAPINFO bmi;
+    union BITMAPINFOUNION bmi;
     BYTE *bits;
+    PixelFormat format;
 
     stat = GdipCreateBitmapFromHBITMAP(NULL, NULL, NULL);
     expect(InvalidParameter, stat);
@@ -880,14 +893,15 @@ static void test_GdipCreateBitmapFromHBITMAP(void)
 
     hdc = CreateCompatibleDC(0);
     ok(hdc != NULL, "CreateCompatibleDC failed\n");
-    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
-    bmi.bmiHeader.biHeight = HEIGHT1;
-    bmi.bmiHeader.biWidth = WIDTH1;
-    bmi.bmiHeader.biBitCount = 24;
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biCompression = BI_RGB;
+    bmi.bi.bmiHeader.biSize = sizeof(bmi.bi.bmiHeader);
+    bmi.bi.bmiHeader.biHeight = HEIGHT1;
+    bmi.bi.bmiHeader.biWidth = WIDTH1;
+    bmi.bi.bmiHeader.biBitCount = 24;
+    bmi.bi.bmiHeader.biPlanes = 1;
+    bmi.bi.bmiHeader.biCompression = BI_RGB;
+    bmi.bi.bmiHeader.biClrUsed = 0;
 
-    hbm = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+    hbm = CreateDIBSection(hdc, &bmi.bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
     ok(hbm != NULL, "CreateDIBSection failed\n");
 
     bits[0] = 0;
@@ -917,15 +931,100 @@ static void test_GdipCreateBitmapFromHBITMAP(void)
     GdipFree(LogPal);
 
     stat = GdipCreateBitmapFromHBITMAP(hbm, hpal, &gpbm);
-    todo_wine
-    {
-        expect(Ok, stat);
-    }
+    expect(Ok, stat);
+
     if (stat == Ok)
         GdipDisposeImage((GpImage*)gpbm);
 
     DeleteObject(hpal);
     DeleteObject(hbm);
+
+    /* 16-bit 555 dib, rgb */
+    bmi.bi.bmiHeader.biBitCount = 16;
+    bmi.bi.bmiHeader.biCompression = BI_RGB;
+
+    hbm = CreateDIBSection(hdc, &bmi.bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+    ok(hbm != NULL, "CreateDIBSection failed\n");
+
+    bits[0] = 0;
+
+    stat = GdipCreateBitmapFromHBITMAP(hbm, NULL, &gpbm);
+    expect(Ok, stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipGetImageDimension((GpImage*) gpbm, &width, &height);
+        expect(Ok, stat);
+        expectf(WIDTH1,  width);
+        expectf(HEIGHT1, height);
+
+        stat = GdipGetImagePixelFormat((GpImage*) gpbm, &format);
+        expect(Ok, stat);
+        expect(PixelFormat16bppRGB555, format);
+
+        GdipDisposeImage((GpImage*)gpbm);
+    }
+    DeleteObject(hbm);
+
+    /* 16-bit 555 dib, with bitfields */
+    bmi.bi.bmiHeader.biSize = sizeof(bmi);
+    bmi.bi.bmiHeader.biCompression = BI_BITFIELDS;
+    bmi.bf.masks[0] = 0x7c00;
+    bmi.bf.masks[1] = 0x3e0;
+    bmi.bf.masks[2] = 0x1f;
+
+    hbm = CreateDIBSection(hdc, &bmi.bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+    ok(hbm != NULL, "CreateDIBSection failed\n");
+
+    bits[0] = 0;
+
+    stat = GdipCreateBitmapFromHBITMAP(hbm, NULL, &gpbm);
+    expect(Ok, stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipGetImageDimension((GpImage*) gpbm, &width, &height);
+        expect(Ok, stat);
+        expectf(WIDTH1,  width);
+        expectf(HEIGHT1, height);
+
+        stat = GdipGetImagePixelFormat((GpImage*) gpbm, &format);
+        expect(Ok, stat);
+        expect(PixelFormat16bppRGB555, format);
+
+        GdipDisposeImage((GpImage*)gpbm);
+    }
+    DeleteObject(hbm);
+
+    /* 16-bit 565 dib, with bitfields */
+    bmi.bf.masks[0] = 0xf800;
+    bmi.bf.masks[1] = 0x7e0;
+    bmi.bf.masks[2] = 0x1f;
+
+    hbm = CreateDIBSection(hdc, &bmi.bi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
+    ok(hbm != NULL, "CreateDIBSection failed\n");
+
+    bits[0] = 0;
+
+    stat = GdipCreateBitmapFromHBITMAP(hbm, NULL, &gpbm);
+    expect(Ok, stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipGetImageDimension((GpImage*) gpbm, &width, &height);
+        expect(Ok, stat);
+        expectf(WIDTH1,  width);
+        expectf(HEIGHT1, height);
+
+        stat = GdipGetImagePixelFormat((GpImage*) gpbm, &format);
+        expect(Ok, stat);
+        expect(PixelFormat16bppRGB565, format);
+
+        GdipDisposeImage((GpImage*)gpbm);
+    }
+    DeleteObject(hbm);
+
+    DeleteDC(hdc);
 }
 
 static void test_GdipGetImageFlags(void)
@@ -1516,6 +1615,12 @@ static void test_createhbitmap(void)
         expect(32, bm.bmBitsPixel);
         ok(bm.bmBits != NULL, "got DDB, expected DIB\n");
 
+        if (bm.bmBits)
+        {
+            DWORD val = *(DWORD*)bm.bmBits;
+            ok(val == 0xff686868, "got %x, expected 0xff686868\n", val);
+        }
+
         hdc = CreateCompatibleDC(NULL);
 
         oldhbitmap = SelectObject(hdc, hbitmap);
@@ -1525,6 +1630,49 @@ static void test_createhbitmap(void)
         DeleteDC(hdc);
 
         expect(0x686868, pixel);
+
+        DeleteObject(hbitmap);
+    }
+
+    stat = GdipDisposeImage((GpImage*)bitmap);
+    expect(Ok, stat);
+
+    /* create alpha Bitmap */
+    stat = GdipCreateBitmapFromScan0(8, 20, 32, PixelFormat32bppARGB, bits, &bitmap);
+    expect(Ok, stat);
+
+    /* create HBITMAP */
+    stat = GdipCreateHBITMAPFromBitmap(bitmap, &hbitmap, 0);
+    expect(Ok, stat);
+
+    if (stat == Ok)
+    {
+        ret = GetObjectA(hbitmap, sizeof(BITMAP), &bm);
+        expect(sizeof(BITMAP), ret);
+
+        expect(0, bm.bmType);
+        expect(8, bm.bmWidth);
+        expect(20, bm.bmHeight);
+        expect(32, bm.bmWidthBytes);
+        expect(1, bm.bmPlanes);
+        expect(32, bm.bmBitsPixel);
+        ok(bm.bmBits != NULL, "got DDB, expected DIB\n");
+
+        if (bm.bmBits)
+        {
+            DWORD val = *(DWORD*)bm.bmBits;
+            ok(val == 0x682a2a2a, "got %x, expected 0x682a2a2a\n", val);
+        }
+
+        hdc = CreateCompatibleDC(NULL);
+
+        oldhbitmap = SelectObject(hdc, hbitmap);
+        pixel = GetPixel(hdc, 5, 5);
+        SelectObject(hdc, oldhbitmap);
+
+        DeleteDC(hdc);
+
+        expect(0x2a2a2a, pixel);
 
         DeleteObject(hbitmap);
     }
@@ -1728,6 +1876,7 @@ static void test_palette(void)
     INT size;
     BYTE buffer[1040];
     ColorPalette *palette=(ColorPalette*)buffer;
+    ARGB *entries = palette->Entries;
     ARGB color=0;
 
     /* test initial palette from non-indexed bitmap */
@@ -1771,8 +1920,8 @@ static void test_palette(void)
     expect(PaletteFlagsGrayScale, palette->Flags);
     expect(2, palette->Count);
 
-    expect(0xff000000, palette->Entries[0]);
-    expect(0xffffffff, palette->Entries[1]);
+    expect(0xff000000, entries[0]);
+    expect(0xffffffff, entries[1]);
 
     /* test getting/setting pixels */
     stat = GdipBitmapGetPixel(bitmap, 0, 0, &color);
@@ -1857,12 +2006,12 @@ static void test_palette(void)
     }
 
     /* test setting/getting a different palette */
-    palette->Entries[1] = 0xffcccccc;
+    entries[1] = 0xffcccccc;
 
     stat = GdipSetImagePalette((GpImage*)bitmap, palette);
     expect(Ok, stat);
 
-    palette->Entries[1] = 0;
+    entries[1] = 0;
 
     stat = GdipGetImagePaletteSize((GpImage*)bitmap, &size);
     expect(Ok, stat);
@@ -1872,7 +2021,7 @@ static void test_palette(void)
     expect(Ok, stat);
     expect(PaletteFlagsHalftone, palette->Flags);
     expect(256, palette->Count);
-    expect(0xffcccccc, palette->Entries[1]);
+    expect(0xffcccccc, entries[1]);
 
     /* test count < 256 */
     palette->Flags = 12345;
@@ -1881,8 +2030,8 @@ static void test_palette(void)
     stat = GdipSetImagePalette((GpImage*)bitmap, palette);
     expect(Ok, stat);
 
-    palette->Entries[1] = 0;
-    palette->Entries[3] = 0xdeadbeef;
+    entries[1] = 0;
+    entries[3] = 0xdeadbeef;
 
     stat = GdipGetImagePaletteSize((GpImage*)bitmap, &size);
     expect(Ok, stat);
@@ -1892,8 +2041,8 @@ static void test_palette(void)
     expect(Ok, stat);
     expect(12345, palette->Flags);
     expect(3, palette->Count);
-    expect(0xffcccccc, palette->Entries[1]);
-    expect(0xdeadbeef, palette->Entries[3]);
+    expect(0xffcccccc, entries[1]);
+    expect(0xdeadbeef, entries[3]);
 
     /* test count > 256 */
     palette->Count = 257;
@@ -1922,6 +2071,12 @@ static void test_colormatrix(void)
         {0.0,1.0,0.0,0.0,0.0},
         {0.0,0.0,1.0,0.0,0.0},
         {0.0,0.0,0.0,1.0,0.0},
+        {0.0,0.0,0.0,0.0,1.0}}};
+    const ColorMatrix asymmetric = {{
+        {0.0,1.0,0.0,0.0,0.0},
+        {0.0,0.0,1.0,0.0,0.0},
+        {0.0,0.0,0.0,1.0,0.0},
+        {1.0,0.0,0.0,0.0,0.0},
         {0.0,0.0,0.0,0.0,1.0}}};
     GpBitmap *bitmap1, *bitmap2;
     GpGraphics *graphics;
@@ -1983,13 +2138,13 @@ static void test_colormatrix(void)
         TRUE, &colormatrix, NULL, ColorMatrixFlagsDefault);
     expect(Ok, stat);
 
-    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppRGB, NULL, &bitmap1);
+    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppARGB, NULL, &bitmap1);
     expect(Ok, stat);
 
-    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppRGB, NULL, &bitmap2);
+    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppARGB, NULL, &bitmap2);
     expect(Ok, stat);
 
-    stat = GdipBitmapSetPixel(bitmap1, 0, 0, 0xff40ffff);
+    stat = GdipBitmapSetPixel(bitmap1, 0, 0, 0xff40ccee);
     expect(Ok, stat);
 
     stat = GdipGetImageGraphicsContext((GpImage*)bitmap2, &graphics);
@@ -2001,7 +2156,23 @@ static void test_colormatrix(void)
 
     stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
     expect(Ok, stat);
-    todo_wine expect(0xff80ffff, color);
+    expect(0xff80ccee, color);
+
+    colormatrix = asymmetric;
+    stat = GdipSetImageAttributesColorMatrix(imageattr, ColorAdjustTypeDefault,
+        TRUE, &colormatrix, NULL, ColorMatrixFlagsDefault);
+    expect(Ok, stat);
+
+    stat = GdipBitmapSetPixel(bitmap2, 0, 0, 0);
+    expect(Ok, stat);
+
+    stat = GdipDrawImageRectRectI(graphics, (GpImage*)bitmap1, 0,0,1,1, 0,0,1,1,
+        UnitPixel, imageattr, NULL, NULL);
+    expect(Ok, stat);
+
+    stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
+    expect(Ok, stat);
+    ok(color_match(0xeeff40cc, color, 3), "expected 0xeeff40cc, got 0x%08x\n", color);
 
     GdipDeleteGraphics(graphics);
     GdipDisposeImage((GpImage*)bitmap1);
@@ -2063,7 +2234,7 @@ static void test_gamma(void)
 
     stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
     expect(Ok, stat);
-    todo_wine ok(color_match(0xff20ffff, color, 1), "Expected ff20ffff, got %.8x\n", color);
+    ok(color_match(0xff20ffff, color, 1), "Expected ff20ffff, got %.8x\n", color);
 
     GdipDeleteGraphics(graphics);
     GdipDisposeImage((GpImage*)bitmap1);

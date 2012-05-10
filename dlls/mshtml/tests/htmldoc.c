@@ -29,6 +29,7 @@
 #include "ole2.h"
 #include "mshtml.h"
 #include "docobj.h"
+#include "docobjectservice.h"
 #include "wininet.h"
 #include "mshtmhst.h"
 #include "mshtmdid.h"
@@ -37,13 +38,17 @@
 #include "dispex.h"
 #include "idispids.h"
 #include "shlguid.h"
+#include "shdeprecated.h"
 #include "perhist.h"
 #include "shobjidl.h"
+#include "htiface.h"
+#include "tlogstg.h"
 #include "mshtml_test.h"
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 DEFINE_GUID(IID_IProxyManager,0x00000008,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 DEFINE_OLEGUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0);
+DEFINE_GUID(SID_SContainerDispatch,0xb722be00,0x4e68,0x101b,0xa2,0xbc,0x00,0xaa,0x00,0x40,0x47,0x70);
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -71,6 +76,21 @@ DEFINE_OLEGUID(CGID_DocHostCmdPriv, 0x000214D4L, 0, 0);
         ok(called_ ## func, "expected " #func "\n"); \
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
+
+#define CHECK_NOT_CALLED(func) \
+    do { \
+        ok(!called_ ## func, "unexpected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+#define CHECK_CALLED_BROKEN(func) \
+    do { \
+        ok(called_ ## func || broken(!called_ ## func), "expected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
+#define CLEAR_CALLED(func) \
+    expect_ ## func = called_ ## func = FALSE
 
 static IOleDocumentView *view = NULL;
 static HWND container_hwnd = NULL, hwnd = NULL, last_hwnd = NULL;
@@ -114,6 +134,7 @@ DEFINE_EXPECT(Exec_UPDATECOMMANDS);
 DEFINE_EXPECT(Exec_SETTITLE);
 DEFINE_EXPECT(Exec_HTTPEQUIV);
 DEFINE_EXPECT(Exec_MSHTML_PARSECOMPLETE);
+DEFINE_EXPECT(Exec_Explorer_38);
 DEFINE_EXPECT(Exec_Explorer_69);
 DEFINE_EXPECT(Exec_DOCCANNAVIGATE);
 DEFINE_EXPECT(Invoke_AMBIENT_USERMODE);
@@ -122,6 +143,9 @@ DEFINE_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
 DEFINE_EXPECT(Invoke_AMBIENT_SILENT);
 DEFINE_EXPECT(Invoke_AMBIENT_USERAGENT);
 DEFINE_EXPECT(Invoke_AMBIENT_PALETTE);
+DEFINE_EXPECT(Invoke_OnReadyStateChange_Interactive);
+DEFINE_EXPECT(Invoke_OnReadyStateChange_Loading);
+DEFINE_EXPECT(Invoke_OnReadyStateChange_Complete);
 DEFINE_EXPECT(GetDropTarget);
 DEFINE_EXPECT(UpdateUI);
 DEFINE_EXPECT(Navigate);
@@ -157,6 +181,15 @@ DEFINE_EXPECT(TranslateUrl);
 DEFINE_EXPECT(Advise_Close);
 DEFINE_EXPECT(OnViewChange);
 DEFINE_EXPECT(EvaluateNewWindow);
+DEFINE_EXPECT(GetTravelLog);
+DEFINE_EXPECT(UpdateBackForwardState);
+DEFINE_EXPECT(FireBeforeNavigate2);
+DEFINE_EXPECT(FireNavigateComplete2);
+DEFINE_EXPECT(FireDocumentComplete);
+DEFINE_EXPECT(GetPendingUrl);
+DEFINE_EXPECT(ActiveElementChanged);
+DEFINE_EXPECT(IsErrorUrl);
+DEFINE_EXPECT(get_LocationURL);
 
 static IUnknown *doc_unk;
 static IMoniker *doc_mon;
@@ -165,8 +198,12 @@ static BOOL expect_InPlaceUIWindow_SetActiveObject_active = TRUE;
 static BOOL ipsex, ipsw;
 static BOOL set_clientsite, container_locked;
 static BOOL readystate_set_loading = FALSE, readystate_set_interactive = FALSE, load_from_stream;
-static BOOL editmode = FALSE;
+static BOOL editmode = FALSE, ignore_external_qi;
 static BOOL inplace_deactivated, open_call;
+static BOOL complete, loading_js, loading_hash;
+static DWORD status_code = HTTP_STATUS_OK;
+static BOOL asynchronous_binding = FALSE;
+static BOOL support_wbapp, allow_new_window;
 static int stream_read, protocol_read;
 static enum load_state_t {
     LD_DOLOAD,
@@ -178,15 +215,15 @@ static enum load_state_t {
 } load_state;
 
 static LPCOLESTR expect_status_text = NULL;
-static const char *nav_url;
+static const char *nav_url, *nav_serv_url, *prev_url;
 
 static const char html_page[] =
 "<html>"
 "<head><link rel=\"stylesheet\" type=\"text/css\" href=\"test.css\"></head>"
-"<body>test</body>"
+"<body><div>test</div></body>"
 "</html>";
 
-static const char css_data[] = "body {color: red}";
+static const char css_data[] = "body {color: red; margin: 0}";
 
 static const WCHAR http_urlW[] =
     {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g',0};
@@ -194,6 +231,7 @@ static const WCHAR http_urlW[] =
 static const WCHAR doc_url[] = {'w','i','n','e','t','e','s','t',':','d','o','c',0};
 
 #define DOCHOST_DOCCANNAVIGATE 0
+#define WM_CONTINUE_BINDING (WM_APP+1)
 
 static HRESULT QueryInterface(REFIID riid, void **ppv);
 static void test_MSHTML_QueryStatus(IHTMLDocument2*,DWORD);
@@ -252,10 +290,42 @@ static BSTR a2bstr(const char *str)
     return ret;
 }
 
-static BOOL is_english(void)
+/* Returns true if the user interface is in English. Note that this does not
+ * presume of the formatting of dates, numbers, etc.
+ */
+static BOOL is_lang_english(void)
 {
-    return PRIMARYLANGID(GetSystemDefaultLangID()) == LANG_ENGLISH
-        && PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+    static HMODULE hkernel32 = NULL;
+    static LANGID (WINAPI *pGetThreadUILanguage)(void) = NULL;
+    static LANGID (WINAPI *pGetUserDefaultUILanguage)(void) = NULL;
+
+    if (!hkernel32)
+    {
+        hkernel32 = GetModuleHandleA("kernel32.dll");
+        pGetThreadUILanguage = (void*)GetProcAddress(hkernel32, "GetThreadUILanguage");
+        pGetUserDefaultUILanguage = (void*)GetProcAddress(hkernel32, "GetUserDefaultUILanguage");
+    }
+    if (pGetThreadUILanguage)
+        return PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH;
+    if (pGetUserDefaultUILanguage)
+        return PRIMARYLANGID(pGetUserDefaultUILanguage()) == LANG_ENGLISH;
+
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
+
+static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
+{
+    IUnknown *unk1, *unk2;
+
+    if(iface1 == iface2)
+        return TRUE;
+
+    IUnknown_QueryInterface(iface1, &IID_IUnknown, (void**)&unk1);
+    IUnknown_Release(unk1);
+    IUnknown_QueryInterface(iface2, &IID_IUnknown, (void**)&unk2);
+    IUnknown_Release(unk2);
+
+    return unk1 == unk2;
 }
 
 #define EXPECT_UPDATEUI  1
@@ -332,7 +402,10 @@ static void _test_GetCurMoniker(unsigned line, IUnknown *unk, IMoniker *exmon, c
         expect_GetDisplayName = exb;
         called_GetDisplayName = clb;
 
-        ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
+        if(!loading_hash)
+            ok(!lstrcmpW(url, doc_url), "url != doc_url\n");
+        else
+            ok(!strcmp_wa(url, nav_serv_url), "url = %s, expected %s\n", wine_dbgstr_w(url), nav_serv_url);
         CoTaskMemFree(url);
     }else if(exurl) {
         LPOLESTR url;
@@ -359,6 +432,24 @@ static void _test_GetCurMoniker(unsigned line, IUnknown *unk, IMoniker *exmon, c
         IMoniker_Release(mon);
 }
 
+#define test_current_url(a,b) _test_current_url(__LINE__,a,b)
+static void _test_current_url(unsigned line, IUnknown *unk, const char *exurl)
+{
+    IHTMLDocument2 *doc;
+    BSTR url;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDocument2, (void**)&doc);
+    ok_(__FILE__,line)(hres == S_OK, "QueryInterface(IID_IHTMLDocument2) failed: %08x\n", hres);
+
+    hres = IHTMLDocument2_get_URL(doc, &url);
+    ok_(__FILE__,line)(hres == S_OK, "get_URL failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(url, exurl), "Unexpected URL %s, expected %s\n", wine_dbgstr_w(url), exurl);
+    SysFreeString(url);
+
+    IHTMLDocument2_Release(doc);
+}
+
 DEFINE_GUID(IID_External_unk,0x30510406,0x98B5,0x11CF,0xBB,0x82,0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 
 static HRESULT WINAPI External_QueryInterface(IDispatch *iface, REFIID riid, void **ppv)
@@ -377,7 +468,8 @@ static HRESULT WINAPI External_QueryInterface(IDispatch *iface, REFIID riid, voi
     if(IsEqualGUID(&IID_External_unk, riid))
         return E_NOINTERFACE; /* TODO */
 
-    ok(0, "unexpected riid: %s\n", debugstr_guid(riid));
+    if(!ignore_external_qi)
+        ok(0, "unexpected riid: %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -696,7 +788,6 @@ static HRESULT WINAPI HlinkFrame_Navigate(IHlinkFrame *iface, DWORD grfHLNF, LPB
         DWORD site_data = 0xdeadbeef;
 
         hres = IHlink_GetTargetFrameName(pihlNavigate, &frame_name);
-        todo_wine
         ok(hres == S_FALSE, "GetTargetFrameName failed: %08x\n", hres);
         ok(frame_name == NULL, "frame_name = %p\n", frame_name);
 
@@ -704,6 +795,12 @@ static HRESULT WINAPI HlinkFrame_Navigate(IHlinkFrame *iface, DWORD grfHLNF, LPB
         ok(hres == S_OK, "GetMonikerReference failed: %08x\n", hres);
         ok(location == NULL, "location = %p\n", location);
         ok(mon != NULL, "mon == NULL\n");
+
+        hres = IMoniker_GetDisplayName(mon, NULL, NULL, &location);
+        ok(hres == S_OK, "GetDisplayName failed: %08x\n", hres);
+        ok(!strcmp_wa(location, nav_url), "unexpected display name %s, expected %s\n", wine_dbgstr_w(location), nav_url);
+        CoTaskMemFree(location);
+        IMoniker_Release(mon);
 
         hres = IHlink_GetHlinkSite(pihlNavigate, &site, &site_data);
         ok(hres == S_OK, "GetHlinkSite failed: %08x\n", hres);
@@ -768,10 +865,10 @@ static HRESULT WINAPI NewWindowManager_EvaluateNewWindow(INewWindowManager *ifac
     ok(!strcmp_wa(pszUrlContext, "about:replace"), "pszUrlContext = %s\n", wine_dbgstr_w(pszUrlContext));
     ok(!pszFeatures, "pszFeatures = %s\n", wine_dbgstr_w(pszFeatures));
     ok(!fReplace, "fReplace = %x\n", fReplace);
-    ok(dwFlags == NWMF_FIRST, "dwFlags = %x\n", dwFlags);
+    ok(dwFlags == (allow_new_window ? 0 : NWMF_FIRST), "dwFlags = %x\n", dwFlags);
     ok(!dwUserActionTime, "dwUserActionime = %d\n", dwUserActionTime);
 
-    return E_FAIL;
+    return allow_new_window ? S_OK : E_FAIL;
 }
 
 static const INewWindowManagerVtbl NewWindowManagerVtbl = {
@@ -833,6 +930,8 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
         CHECK_EXPECT(OnChanged_1012);
         return S_OK;
     case 1030:
+    case 3000022:
+    case 3000023:
     case 3000024:
     case 3000025:
     case 3000028:
@@ -865,7 +964,13 @@ static IPropertyNotifySink PropertyNotifySink = { &PropertyNotifySinkVtbl };
 
 static HRESULT WINAPI Stream_QueryInterface(IStream *iface, REFIID riid, void **ppv)
 {
-    ok(0, "unexpected call\n");
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_ISequentialStream, riid) || IsEqualGUID(&IID_IStream, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "unexpected call %s\n", debugstr_guid(riid));
+    *ppv = NULL;
     return E_NOINTERFACE;
 }
 
@@ -981,13 +1086,78 @@ static const IStreamVtbl StreamVtbl = {
 
 static IStream Stream = { &StreamVtbl };
 
+static HRESULT WINAPI WinInetHttpInfo_QueryInterface(
+        IWinInetHttpInfo* This,
+        REFIID riid,
+        void **ppvObject)
+{
+    ok(0, "unexpected call\n");
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI WinInetHttpInfo_AddRef(
+        IWinInetHttpInfo* This)
+{
+    return 2;
+}
+
+static ULONG WINAPI WinInetHttpInfo_Release(
+        IWinInetHttpInfo* This)
+{
+    return 1;
+}
+
+static HRESULT WINAPI WinInetHttpInfo_QueryOption(
+        IWinInetHttpInfo* This,
+        DWORD dwOption,
+        LPVOID pBuffer,
+        DWORD *pcbBuf)
+{
+    return E_NOTIMPL; /* TODO */
+}
+
+static HRESULT WINAPI WinInetHttpInfo_QueryInfo(
+        IWinInetHttpInfo* This,
+        DWORD dwOption,
+        LPVOID pBuffer,
+        DWORD *pcbBuf,
+        DWORD *pdwFlags,
+        DWORD *pdwReserved)
+{
+    ok(pdwReserved == NULL, "pdwReserved != NULL\n");
+
+    if(dwOption == (HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER)) {
+        ok(pBuffer != NULL, "pBuffer == NULL\n");
+        ok(*pcbBuf == sizeof(DWORD), "*pcbBuf = %d\n", *pcbBuf);
+        ok(pdwFlags == NULL, "*pdwFlags != NULL\n");
+        *((DWORD*)pBuffer) = status_code;
+        return S_OK;
+    }
+
+    return E_NOTIMPL; /* TODO */
+}
+
+static const IWinInetHttpInfoVtbl WinInetHttpInfoVtbl = {
+    WinInetHttpInfo_QueryInterface,
+    WinInetHttpInfo_AddRef,
+    WinInetHttpInfo_Release,
+    WinInetHttpInfo_QueryOption,
+    WinInetHttpInfo_QueryInfo
+};
+
+static IWinInetHttpInfo WinInetHttpInfo = { &WinInetHttpInfoVtbl };
+
 static HRESULT WINAPI Binding_QueryInterface(IBinding *iface, REFIID riid, void **ppv)
 {
-    if(IsEqualGUID(&IID_IWinInetHttpInfo, riid))
-        return E_NOINTERFACE; /* TODO */
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
 
-    if(IsEqualGUID(&IID_IWinInetInfo, riid))
-        return E_NOINTERFACE; /* TODO */
+    if(IsEqualGUID(&IID_IWinInetInfo, riid) || IsEqualGUID(&IID_IWinInetHttpInfo, riid)) {
+        *ppv = &WinInetHttpInfo;
+        return S_OK;
+    }
 
     ok(0, "unexpected call\n");
     return E_NOINTERFACE;
@@ -1006,6 +1176,8 @@ static ULONG WINAPI Binding_Release(IBinding *iface)
 static HRESULT WINAPI Binding_Abort(IBinding *iface)
 {
     CHECK_EXPECT(Abort);
+    if(asynchronous_binding)
+        PeekMessage(NULL, container_hwnd, WM_CONTINUE_BINDING, WM_CONTINUE_BINDING, PM_REMOVE);
     return S_OK;
 }
 
@@ -1118,18 +1290,57 @@ static HRESULT WINAPI Moniker_BindToObject(IMoniker *iface, IBindCtx *pcb, IMoni
     return E_NOTIMPL;
 }
 
+static void continue_binding(IBindStatusCallback *callback)
+{
+    FORMATETC formatetc = {0xc02d, NULL, 1, -1, TYMED_ISTREAM};
+    STGMEDIUM stgmedium;
+    HRESULT hres;
+
+    static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
+
+    hres = IBindStatusCallback_OnProgress(callback, 0, 0, BINDSTATUS_MIMETYPEAVAILABLE,
+            wszTextHtml);
+    ok(hres == S_OK, "OnProgress(BINDSTATUS_MIMETYPEAVAILABLE) failed: %08x\n", hres);
+
+    hres = IBindStatusCallback_OnProgress(callback, sizeof(html_page)-1, sizeof(html_page)-1,
+            BINDSTATUS_BEGINDOWNLOADDATA, doc_url);
+    ok(hres == S_OK, "OnProgress(BINDSTATUS_BEGINDOWNLOADDATA) failed: %08x\n", hres);
+    if(status_code != HTTP_STATUS_OK) {
+        CHECK_CALLED_BROKEN(IsErrorUrl);
+        SET_EXPECT(IsErrorUrl);
+    }
+
+    SET_EXPECT(Read);
+    stgmedium.tymed = TYMED_ISTREAM;
+    U(stgmedium).pstm = &Stream;
+    stgmedium.pUnkForRelease = (IUnknown*)&Moniker;
+    hres = IBindStatusCallback_OnDataAvailable(callback,
+            BSCF_FIRSTDATANOTIFICATION|BSCF_LASTDATANOTIFICATION,
+            sizeof(html_page)-1, &formatetc, &stgmedium);
+    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
+    CHECK_CALLED(Read);
+
+    hres = IBindStatusCallback_OnProgress(callback, sizeof(html_page)-1, sizeof(html_page)-1,
+            BINDSTATUS_ENDDOWNLOADDATA, NULL);
+    ok(hres == S_OK, "OnProgress(BINDSTATUS_ENDDOWNLOADDATA) failed: %08x\n", hres);
+
+    SET_EXPECT(GetBindResult);
+    hres = IBindStatusCallback_OnStopBinding(callback, S_OK, NULL);
+    ok(hres == S_OK, "OnStopBinding failed: %08x\n", hres);
+    CLEAR_CALLED(GetBindResult); /* IE7 */
+
+    IBindStatusCallback_Release(callback);
+}
+
 static HRESULT WINAPI Moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMoniker *pmkToLeft,
         REFIID riid, void **ppv)
 {
     IBindStatusCallback *callback = NULL;
-    FORMATETC formatetc = {0xc02d, NULL, 1, -1, TYMED_ISTREAM};
-    STGMEDIUM stgmedium;
     BINDINFO bindinfo;
     DWORD bindf;
     HRESULT hres;
 
     static OLECHAR BSCBHolder[] = { '_','B','S','C','B','_','H','o','l','d','e','r','_',0 };
-    static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
 
     CHECK_EXPECT(BindToStorage);
 
@@ -1150,7 +1361,7 @@ static HRESULT WINAPI Moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMon
 
     hres = IBindStatusCallback_GetBindInfo(callback, &bindf, &bindinfo);
     ok(hres == S_OK, "GetBindInfo failed: %08x\n", hres);
-    ok(bindf == (BINDF_PULLDATA|BINDF_ASYNCSTORAGE|BINDF_ASYNCHRONOUS), "bindf = %08x\n", bindf);
+    ok((bindf & ~BINDF_HYPERLINK /* IE9 */) == (BINDF_PULLDATA|BINDF_ASYNCSTORAGE|BINDF_ASYNCHRONOUS), "bindf = %08x\n", bindf);
     ok(bindinfo.cbSize == sizeof(bindinfo), "bindinfo.cbSize=%d\n", bindinfo.cbSize);
     ok(bindinfo.szExtraInfo == NULL, "bindinfo.szExtraInfo=%p\n", bindinfo.szExtraInfo);
     /* TODO: test stgmedData */
@@ -1170,35 +1381,12 @@ static HRESULT WINAPI Moniker_BindToStorage(IMoniker *iface, IBindCtx *pbc, IMon
     hres = IBindStatusCallback_OnStartBinding(callback, 0, &Binding);
     ok(hres == S_OK, "OnStartBinding failed: %08x\n", hres);
 
-    hres = IBindStatusCallback_OnProgress(callback, 0, 0, BINDSTATUS_MIMETYPEAVAILABLE,
-                                          wszTextHtml);
-    ok(hres == S_OK, "OnProgress(BINDSTATUS_MIMETYPEAVAILABLE) failed: %08x\n", hres);
+    if(asynchronous_binding) {
+        PostMessageW(container_hwnd, WM_CONTINUE_BINDING, (WPARAM)callback, 0);
+        return MK_S_ASYNCHRONOUS;
+    }
 
-    hres = IBindStatusCallback_OnProgress(callback, sizeof(html_page)-1, sizeof(html_page)-1,
-                                          BINDSTATUS_BEGINDOWNLOADDATA, doc_url);
-    ok(hres == S_OK, "OnProgress(BINDSTATUS_BEGINDOWNLOADDATA) failed: %08x\n", hres);
-
-    SET_EXPECT(Read);
-    stgmedium.tymed = TYMED_ISTREAM;
-    U(stgmedium).pstm = &Stream;
-    stgmedium.pUnkForRelease = (IUnknown*)iface;
-    hres = IBindStatusCallback_OnDataAvailable(callback,
-            BSCF_FIRSTDATANOTIFICATION|BSCF_LASTDATANOTIFICATION,
-            sizeof(html_page)-1, &formatetc, &stgmedium);
-    ok(hres == S_OK, "OnDataAvailable failed: %08x\n", hres);
-    CHECK_CALLED(Read);
-
-    hres = IBindStatusCallback_OnProgress(callback, sizeof(html_page)-1, sizeof(html_page)-1,
-            BINDSTATUS_ENDDOWNLOADDATA, NULL);
-    ok(hres == S_OK, "OnProgress(BINDSTATUS_ENDDOWNLOADDATA) failed: %08x\n", hres);
-
-    SET_EXPECT(GetBindResult);
-    hres = IBindStatusCallback_OnStopBinding(callback, S_OK, NULL);
-    ok(hres == S_OK, "OnStopBinding failed: %08x\n", hres);
-    SET_CALLED(GetBindResult); /* IE7 */
-
-    IBindStatusCallback_Release(callback);
-
+    continue_binding(callback);
     return S_OK;
 }
 
@@ -1502,8 +1690,8 @@ static HRESULT WINAPI InPlaceUIWindow_SetActiveObject(IOleInPlaceFrame *iface,
 
     if(expect_InPlaceUIWindow_SetActiveObject_active) {
         ok(pActiveObject != NULL, "pActiveObject = NULL\n");
-        if(pActiveObject && is_english())
-            ok(!lstrcmpW(wszHTML_Document, pszObjName), "pszObjName != \"HTML Document\"\n");
+        if(pActiveObject && is_lang_english())
+            ok(!lstrcmpW(wszHTML_Document, pszObjName), "%s != \"HTML Document\"\n", wine_dbgstr_w(pszObjName));
     }
     else {
         ok(pActiveObject == NULL, "pActiveObject=%p, expected NULL\n", pActiveObject);
@@ -1522,8 +1710,8 @@ static HRESULT WINAPI InPlaceFrame_SetActiveObject(IOleInPlaceFrame *iface,
     if(pActiveObject) {
         CHECK_EXPECT2(SetActiveObject);
 
-        if(pActiveObject && is_english())
-            ok(!lstrcmpW(wszHTML_Document, pszObjName), "pszObjName != \"HTML Document\"\n");
+        if(pActiveObject && is_lang_english())
+            ok(!lstrcmpW(wszHTML_Document, pszObjName), "%s != \"HTML Document\"\n", wine_dbgstr_w(pszObjName));
     }else {
         CHECK_EXPECT(SetActiveObject_null);
 
@@ -1701,7 +1889,7 @@ static HRESULT WINAPI InPlaceSiteWindowless_GetWindowContext(
         memcpy(lprcClipRect, &rect, sizeof(RECT));
     ok(lpFrameInfo != NULL, "lpFrameInfo = NULL\n");
     if(lpFrameInfo) {
-        lpFrameInfo->cb = sizeof(*lpFrameInfo);
+        ok(lpFrameInfo->cb == sizeof(*lpFrameInfo), "lpFrameInfo->cb = %u, expected %u\n", lpFrameInfo->cb, (unsigned)sizeof(*lpFrameInfo));
         lpFrameInfo->fMDIApp = FALSE;
         lpFrameInfo->hwndFrame = container_hwnd;
         lpFrameInfo->haccel = NULL;
@@ -1969,9 +2157,9 @@ static HRESULT WINAPI DocumentSite_ActivateMe(IOleDocumentSite *iface, IOleDocum
             if(activeobj) {
                 IOleInPlaceActiveObject_GetWindow(activeobj, &hwnd);
                 ok(hres == S_OK, "GetWindow failed: %08x\n", hres);
-                ok(hwnd == NULL, "hwnd=%p, expeted NULL\n", hwnd);
+                ok(hwnd == NULL, "hwnd=%p, expected NULL\n", hwnd);
             }
-            
+
             if(call_UIActivate == CallUIActivate_ActivateMe) {
                 SET_EXPECT(CanInPlaceActivate);
                 SET_EXPECT(GetWindowContext);
@@ -2319,7 +2507,10 @@ static HRESULT WINAPI DocHostUIHandler_TranslateUrl(IDocHostUIHandler2 *iface, D
     CHECK_EXPECT(TranslateUrl);
     ok(iface == expect_uihandler_iface, "called on unexpected iface\n");
     ok(!dwTranslate, "dwTranslate = %x\n", dwTranslate);
-    ok(!strcmp_wa(pchURLIn, nav_url), "pchURLIn = %s, expected %s\n", wine_dbgstr_w(pchURLIn), nav_url);
+    if(!loading_hash)
+        ok(!strcmp_wa(pchURLIn, nav_serv_url), "pchURLIn = %s, expected %s\n", wine_dbgstr_w(pchURLIn), nav_serv_url);
+    else
+        todo_wine ok(!strcmp_wa(pchURLIn, nav_serv_url), "pchURLIn = %s, expected %s\n", wine_dbgstr_w(pchURLIn), nav_serv_url);
     ok(ppchURLOut != NULL, "ppchURLOut == NULL\n");
     ok(!*ppchURLOut, "*ppchURLOut = %p\n", *ppchURLOut);
 
@@ -2503,7 +2694,8 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             switch(V_I4(pvaIn)) {
             case 0:
                 CHECK_EXPECT(Exec_SETDOWNLOADSTATE_0);
-                load_state = LD_INTERACTIVE;
+                if(!loading_js)
+                    load_state = LD_INTERACTIVE;
                 break;
             case 1:
                 CHECK_EXPECT(Exec_SETDOWNLOADSTATE_1);
@@ -2538,6 +2730,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             test_readyState(NULL);
             return S_OK;
         case OLECMDID_UPDATETRAVELENTRY_DATARECOVERY:
+        case 6058:
             return E_FAIL; /* FIXME */
         default:
             ok(0, "unexpected command %d\n", nCmdID);
@@ -2583,7 +2776,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             if(SUCCEEDED(hres))
                 IHTMLPrivateWindow_Release(priv_window);
 
-            load_state = LD_LOADING;
+            load_state = loading_js ? LD_COMPLETE : LD_LOADING;
             return S_OK; /* TODO */
         }
 
@@ -2591,11 +2784,15 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             CHECK_EXPECT(Exec_ShellDocView_67);
             ok(pvaIn != NULL, "pvaIn == NULL\n");
             ok(V_VT(pvaIn) == VT_BSTR, "V_VT(pvaIn) = %d\n", V_VT(pvaIn));
-            ok(!strcmp_wa(V_BSTR(pvaIn), nav_url), "V_BSTR(pvaIn) = %s, expected %s\n", wine_dbgstr_w(V_BSTR(pvaIn)), nav_url);
+            if(!loading_hash)
+                ok(!strcmp_wa(V_BSTR(pvaIn), nav_serv_url), "V_BSTR(pvaIn) = %s, expected %s\n", wine_dbgstr_w(V_BSTR(pvaIn)), nav_serv_url);
+            else
+                todo_wine ok(!strcmp_wa(V_BSTR(pvaIn), nav_serv_url), "V_BSTR(pvaIn) = %s, expected %s\n", wine_dbgstr_w(V_BSTR(pvaIn)), nav_serv_url);
             ok(pvaOut != NULL, "pvaOut == NULL\n");
             ok(V_VT(pvaOut) == VT_BOOL, "V_VT(pvaOut) = %d\n", V_VT(pvaOut));
             ok(V_BOOL(pvaOut) == VARIANT_TRUE, "V_BOOL(pvaOut) = %x\n", V_BOOL(pvaOut));
-            load_state = LD_DOLOAD;
+            if(!loading_hash)
+                load_state = LD_DOLOAD;
             return S_OK;
 
         case 84:
@@ -2632,6 +2829,10 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
 
             return E_NOTIMPL;
 
+        case 143: /* TODO */
+        case 144: /* TODO */
+            return E_NOTIMPL;
+
         default:
             ok(0, "unexpected command %d\n", nCmdID);
             return E_FAIL;
@@ -2661,6 +2862,58 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             ok(V_VT(pvaIn) == VT_UNKNOWN, "V_VT(pvaIn) != VT_UNKNOWN\n");
             /* FIXME: test V_UNKNOWN(pvaIn) == window */
             return S_OK;
+        case 1: {
+            SAFEARRAY *sa;
+            UINT dim;
+            LONG ind=0;
+            VARIANT var;
+            HRESULT hres;
+
+            ok(pvaIn != NULL, "pvaIn == NULL\n");
+            ok(pvaOut != NULL || broken(!pvaOut), "pvaOut != NULL\n");
+            ok(V_VT(pvaIn) == VT_ARRAY, "V_VT(pvaIn) = %d\n", V_VT(pvaIn));
+            if(pvaOut)
+                ok(V_VT(pvaOut) == VT_BOOL, "V_VT(pvaOut) = %d\n", V_VT(pvaOut));
+            sa = V_ARRAY(pvaIn);
+
+            dim = SafeArrayGetDim(sa);
+            ok(dim == 1, "dim = %d\n", dim);
+            hres = SafeArrayGetLBound(sa, 1, &ind);
+            ok(hres == S_OK, "SafeArrayGetLBound failed: %x\n", hres);
+            ok(ind == 0, "Lower bound = %d\n", ind);
+            hres = SafeArrayGetUBound(sa, 1, &ind);
+            ok(hres == S_OK, "SafeArrayGetUBound failed: %x\n", hres);
+            ok(ind == 7 || broken(ind == 5), "Upper bound = %d\n", ind);
+
+            ind = 0;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_I4, "Incorrect data type: %d\n", V_VT(&var));
+            ok(V_I4(&var) == status_code, "Incorrect error code: %d\n", V_I4(&var));
+            VariantClear(&var);
+            ind = 1;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_BSTR, "Incorrect data type: %d\n", V_VT(&var));
+            ok(!strcmp_wa(V_BSTR(&var), "winetest:doc"), "Page address: %s\n", wine_dbgstr_w(V_BSTR(&var)));
+            VariantClear(&var);
+            ind = 2;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_UNKNOWN, "Incorrect data type: %d\n", V_VT(&var));
+            VariantClear(&var);
+            ind = 3;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_UNKNOWN, "Incorrect data type: %d\n", V_VT(&var));
+            VariantClear(&var);
+            ind = 4;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_BOOL, "Incorrect data type: %d\n", V_VT(&var));
+            ok(!V_BOOL(&var), "Unknown value is incorrect\n");
+            VariantClear(&var);
+            ind = 5;
+            SafeArrayGetElement(sa, &ind, &var);
+            ok(V_VT(&var) == VT_BOOL, "Incorrect data type: %d\n", V_VT(&var));
+            ok(!V_BOOL(&var), "Unknown value is incorrect\n");
+            VariantClear(&var);
+        }
         default:
             return E_FAIL; /* TODO */
         }
@@ -2670,10 +2923,22 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
         ok(nCmdexecopt == 0, "nCmdexecopts=%08x\n", nCmdexecopt);
 
         switch(nCmdID) {
+        case 38:
+            CHECK_EXPECT2(Exec_Explorer_38);
+            ok(pvaIn != NULL, "pvaIn == NULL\n");
+            ok(V_VT(pvaIn) == VT_I4 , "V_VT(pvaIn) = %d\n", V_VT(pvaIn));
+            ok(!V_I4(pvaIn), "V_I4(pvaIn) = %d\n", V_I4(pvaIn));
+            ok(!pvaOut, "pvaOut != NULL\n");
+
+            test_current_url(doc_unk, prev_url);
+
+            return S_OK;
         case 69:
             CHECK_EXPECT2(Exec_Explorer_69);
             ok(pvaIn == NULL, "pvaIn != NULL\n");
             ok(pvaOut != NULL, "pvaOut == NULL\n");
+            return E_NOTIMPL;
+        case 109: /* TODO */
             return E_NOTIMPL;
         default:
             ok(0, "unexpected cmd %d of CGID_Explorer\n", nCmdID);
@@ -2769,6 +3034,1338 @@ static const IDispatchVtbl DispatchVtbl = {
 
 static IDispatch Dispatch = { &DispatchVtbl };
 
+static HRESULT WINAPI EventDispatch_QueryInterface(IDispatch *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IDispatch, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "Unexpected call\n");
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI EventDispatch_Invoke(IDispatch *iface, DISPID dispIdMember, REFIID riid,
+        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    HRESULT hres;
+    IHTMLDocument2 *doc;
+    BSTR state;
+
+    ok(IsEqualGUID(&IID_NULL, riid), "riid = %s\n", debugstr_guid(riid));
+    ok(pDispParams != NULL, "pDispParams == NULL\n");
+    ok(pExcepInfo != NULL, "pExcepInfo == NULL\n");
+    ok(puArgErr != NULL, "puArgErr == NULL\n");
+    ok(V_VT(pVarResult) == 0, "V_VT(pVarResult) = %d\n", V_VT(pVarResult));
+    ok(wFlags == DISPATCH_METHOD, "wFlags = %d, expected DISPATCH_METHOD\n", wFlags);
+
+    hres = IUnknown_QueryInterface(doc_unk, &IID_IHTMLDocument2, (void**)&doc);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument2) failed: %08x\n", hres);
+
+    switch(dispIdMember) {
+    case DISPID_HTMLDOCUMENTEVENTS2_ONREADYSTATECHANGE:
+        hres = IHTMLDocument2_get_readyState(doc, &state);
+        ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
+
+        if(!strcmp_wa(state, "interactive"))
+            CHECK_EXPECT(Invoke_OnReadyStateChange_Interactive);
+        else if(!strcmp_wa(state, "loading"))
+            CHECK_EXPECT(Invoke_OnReadyStateChange_Loading);
+        else if(!strcmp_wa(state, "complete")) {
+            CHECK_EXPECT(Invoke_OnReadyStateChange_Complete);
+            complete = TRUE;
+        } else
+            ok(0, "Unexpected readyState: %s\n", wine_dbgstr_w(state));
+
+        SysFreeString(state);
+        break;
+    case DISPID_HTMLDOCUMENTEVENTS2_ONPROPERTYCHANGE:
+    case 1026:
+    case 1027:
+    case 1034:
+    case 1035:
+    case 1037:
+    case 1047:
+    case 1045:
+    case 1044:
+    case 1048:
+    case 1049:
+        break; /* FIXME: Handle these events. */
+    default:
+        ok(0, "Unexpected DISPID: %d\n", dispIdMember);
+    }
+
+    IHTMLDocument2_Release(doc);
+    return S_OK;
+}
+
+static const IDispatchVtbl EventDispatchVtbl = {
+    EventDispatch_QueryInterface,
+    Dispatch_AddRef,
+    Dispatch_Release,
+    Dispatch_GetTypeInfoCount,
+    Dispatch_GetTypeInfo,
+    Dispatch_GetIDsOfNames,
+    EventDispatch_Invoke
+};
+
+static IDispatch EventDispatch = { &EventDispatchVtbl };
+
+static HRESULT WINAPI TravelLog_QueryInterface(ITravelLog *iface, REFIID riid, void **ppv)
+{
+    static const IID IID_IIETravelLog2 = {0xb67cefd2,0xe3f1,0x478a,{0x9b,0xfa,0xd8,0x93,0x70,0x37,0x5e,0x94}};
+
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_ITravelLog, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    if(!IsEqualGUID(&IID_IIETravelLog2, riid))
+        ok(0, "unexpected call %s\n", debugstr_guid(riid));
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI TravelLog_AddRef(ITravelLog *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI TravelLog_Release(ITravelLog *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI TravelLog_AddEntry(ITravelLog *iface, IUnknown *punk, BOOL fIsLocalAnchor)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_UpdateEntry(ITravelLog *iface, IUnknown *punk, BOOL fIsLocalAnchor)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_UpdateExternal(ITravelLog *iface, IUnknown *punk, IUnknown *punkHLBrowseContext)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_Travel(ITravelLog *iface, IUnknown *punk, int iOffset)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_GetTravelEntry(ITravelLog *iface, IUnknown *punk, int iOffset, ITravelEntry **ppte)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_FindTravelEntry(ITravelLog *iface, IUnknown *punk, LPCITEMIDLIST pidl, ITravelEntry **ppte)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_GetTooltipText(ITravelLog *iface, IUnknown *punk, int iOffset, int idsTemplate,
+        LPWSTR pwzText, DWORD cchText)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_InsertMenuEntries(ITravelLog *iface, IUnknown *punk, HMENU hmenu, int nPos,
+        int idFirst, int idLast, DWORD dwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_Clone(ITravelLog *iface, ITravelLog **pptl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static DWORD WINAPI TravelLog_CountEntries(ITravelLog *iface, IUnknown *punk)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI TravelLog_Revert(ITravelLog *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const ITravelLogVtbl TravelLogVtbl = {
+    TravelLog_QueryInterface,
+    TravelLog_AddRef,
+    TravelLog_Release,
+    TravelLog_AddEntry,
+    TravelLog_UpdateEntry,
+    TravelLog_UpdateExternal,
+    TravelLog_Travel,
+    TravelLog_GetTravelEntry,
+    TravelLog_FindTravelEntry,
+    TravelLog_GetTooltipText,
+    TravelLog_InsertMenuEntries,
+    TravelLog_Clone,
+    TravelLog_CountEntries,
+    TravelLog_Revert
+};
+
+static ITravelLog TravelLog = { &TravelLogVtbl };
+
+static HRESULT browserservice_qi(REFIID,void**);
+
+static HRESULT  WINAPI DocObjectService_QueryInterface(IDocObjectService* This, REFIID riid, void **ppv)
+{
+    return browserservice_qi(riid, ppv);
+}
+
+static ULONG  WINAPI DocObjectService_AddRef(
+        IDocObjectService* This)
+{
+    return 2;
+}
+
+static ULONG  WINAPI DocObjectService_Release(
+        IDocObjectService* This)
+{
+    return 1;
+}
+
+static HRESULT  WINAPI DocObjectService_FireBeforeNavigate2(IDocObjectService *iface, IDispatch *pDispatch,
+        LPCWSTR lpszUrl, DWORD dwFlags, LPCWSTR lpszFrameName, BYTE *pPostData, DWORD cbPostData,
+        LPCWSTR lpszHeaders, BOOL fPlayNavSound, BOOL *pfCancel)
+{
+    CHECK_EXPECT(FireBeforeNavigate2);
+
+    ok(!pDispatch, "pDispatch = %p\n", pDispatch);
+    ok(!strcmp_wa(lpszUrl, nav_url), "lpszUrl = %s, expected %s\n", wine_dbgstr_w(lpszUrl), nav_url);
+    ok(dwFlags == 0x40 || !dwFlags, "dwFlags = %x\n", dwFlags);
+    ok(!lpszFrameName, "lpszFrameName = %s\n", wine_dbgstr_w(lpszFrameName));
+    ok(!pPostData, "pPostData = %p\n", pPostData);
+    ok(!cbPostData, "cbPostData = %d\n", cbPostData);
+    ok(!lpszHeaders, "lpszHeaders = %s\n", wine_dbgstr_w(lpszHeaders));
+    ok(fPlayNavSound, "fPlayNavSound = %x\n", fPlayNavSound);
+    ok(pfCancel != NULL, "pfCancel = NULL\n");
+    ok(!*pfCancel, "*pfCancel = %x\n", *pfCancel);
+
+    return S_OK;
+}
+
+static HRESULT  WINAPI DocObjectService_FireNavigateComplete2(
+        IDocObjectService* This,
+        IHTMLWindow2 *pHTMLWindow2,
+        DWORD dwFlags)
+{
+    CHECK_EXPECT(FireNavigateComplete2);
+    test_readyState(NULL);
+
+    if(loading_hash)
+        ok(dwFlags == 0x10 || broken(!dwFlags), "dwFlags = %x, expected 0x10\n", dwFlags);
+    else
+        ok(!(dwFlags &~1), "dwFlags = %x\n", dwFlags);
+
+    ok(pHTMLWindow2 != NULL, "pHTMLWindow2 = NULL\n");
+
+    return S_OK;
+}
+
+static HRESULT  WINAPI DocObjectService_FireDownloadBegin(
+        IDocObjectService* This)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_FireDownloadComplete(
+        IDocObjectService* This)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_FireDocumentComplete(
+        IDocObjectService* This,
+        IHTMLWindow2 *pHTMLWindow,
+        DWORD dwFlags)
+{
+    CHECK_EXPECT(FireDocumentComplete);
+
+    ok(pHTMLWindow != NULL, "pHTMLWindow == NULL\n");
+    ok(!dwFlags, "dwFlags = %x\n", dwFlags);
+
+    return S_OK;
+}
+
+static HRESULT  WINAPI DocObjectService_UpdateDesktopComponent(
+        IDocObjectService* This,
+        IHTMLWindow2 *pHTMLWindow)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_GetPendingUrl(
+        IDocObjectService* This,
+        BSTR *pbstrPendingUrl)
+{
+    CHECK_EXPECT(GetPendingUrl);
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_ActiveElementChanged(
+        IDocObjectService* This,
+        IHTMLElement *pHTMLElement)
+{
+    CHECK_EXPECT(ActiveElementChanged);
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_GetUrlSearchComponent(
+        IDocObjectService* This,
+        BSTR *pbstrSearch)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI DocObjectService_IsErrorUrl(
+        IDocObjectService* This,
+        LPCWSTR lpszUrl,
+        BOOL *pfIsError)
+{
+    CHECK_EXPECT(IsErrorUrl);
+    *pfIsError = FALSE;
+    return S_OK;
+}
+
+static IDocObjectServiceVtbl DocObjectServiceVtbl = {
+    DocObjectService_QueryInterface,
+    DocObjectService_AddRef,
+    DocObjectService_Release,
+    DocObjectService_FireBeforeNavigate2,
+    DocObjectService_FireNavigateComplete2,
+    DocObjectService_FireDownloadBegin,
+    DocObjectService_FireDownloadComplete,
+    DocObjectService_FireDocumentComplete,
+    DocObjectService_UpdateDesktopComponent,
+    DocObjectService_GetPendingUrl,
+    DocObjectService_ActiveElementChanged,
+    DocObjectService_GetUrlSearchComponent,
+    DocObjectService_IsErrorUrl
+};
+
+static IDocObjectService DocObjectService = { &DocObjectServiceVtbl };
+
+static HRESULT WINAPI ShellBrowser_QueryInterface(IShellBrowser *iface, REFIID riid, void **ppv)
+{
+    return browserservice_qi(riid, ppv);
+}
+
+static ULONG WINAPI ShellBrowser_AddRef(IShellBrowser *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI ShellBrowser_Release(IShellBrowser *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI ShellBrowser_GetWindow(IShellBrowser *iface, HWND *phwnd)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_ContextSensitiveHelp(IShellBrowser *iface, BOOL fEnterMode)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_InsertMenusSB(IShellBrowser *iface, HMENU hmenuShared, LPOLEMENUGROUPWIDTHS lpMenuWidths)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetMenuSB(IShellBrowser *iface, HMENU hmenuShared, HOLEMENU holemenuReserved,
+        HWND hwndActiveObject)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_RemoveMenusSB(IShellBrowser *iface, HMENU hmenuShared)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetStatusTextSB(IShellBrowser *iface, LPCOLESTR pszStatusText)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_EnableModelessSB(IShellBrowser *iface, BOOL fEnable)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_TranslateAcceleratorSB(IShellBrowser *iface, MSG *pmsg, WORD wID)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_BrowseObject(IShellBrowser *iface, LPCITEMIDLIST pidl, UINT wFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_GetViewStateStream(IShellBrowser *iface, DWORD grfMode, IStream **ppStrm)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_GetControlWindow(IShellBrowser *iface, UINT id, HWND *phwnd)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SendControlMsg(IShellBrowser *iface, UINT id, UINT uMsg, WPARAM wParam,
+        LPARAM lParam, LRESULT *pret)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_QueryActiveShellView(IShellBrowser *iface, IShellView **ppshv)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_OnViewWindowActive(IShellBrowser* iface, IShellView *pshv)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ShellBrowser_SetToolbarItems(IShellBrowser *iface, LPTBBUTTONSB lpButtons,
+        UINT nButtons, UINT uFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IShellBrowserVtbl ShellBrowserVtbl = {
+    ShellBrowser_QueryInterface,
+    ShellBrowser_AddRef,
+    ShellBrowser_Release,
+    ShellBrowser_GetWindow,
+    ShellBrowser_ContextSensitiveHelp,
+    ShellBrowser_InsertMenusSB,
+    ShellBrowser_SetMenuSB,
+    ShellBrowser_RemoveMenusSB,
+    ShellBrowser_SetStatusTextSB,
+    ShellBrowser_EnableModelessSB,
+    ShellBrowser_TranslateAcceleratorSB,
+    ShellBrowser_BrowseObject,
+    ShellBrowser_GetViewStateStream,
+    ShellBrowser_GetControlWindow,
+    ShellBrowser_SendControlMsg,
+    ShellBrowser_QueryActiveShellView,
+    ShellBrowser_OnViewWindowActive,
+    ShellBrowser_SetToolbarItems
+};
+
+static IShellBrowser ShellBrowser = { &ShellBrowserVtbl };
+
+static HRESULT  WINAPI BrowserService_QueryInterface(IBrowserService *iface, REFIID riid, void **ppv)
+{
+    return browserservice_qi(riid, ppv);
+}
+
+static ULONG  WINAPI BrowserService_AddRef(
+        IBrowserService* This)
+{
+    return 2;
+}
+
+static ULONG  WINAPI BrowserService_Release(
+        IBrowserService* This)
+{
+    return 1;
+}
+
+static HRESULT  WINAPI BrowserService_GetParentSite(
+        IBrowserService* This,
+        IOleInPlaceSite **ppipsite)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_SetTitle(
+        IBrowserService* This,
+        IShellView *psv,
+        LPCWSTR pszName)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetTitle(
+        IBrowserService* This,
+        IShellView *psv,
+        LPWSTR pszName,
+        DWORD cchName)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetOleObject(
+        IBrowserService* This,
+        IOleObject **ppobjv)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetTravelLog(IBrowserService* This, ITravelLog **pptl)
+{
+    CHECK_EXPECT(GetTravelLog);
+
+    ok(pptl != NULL, "pptl = NULL\n");
+
+    if(!support_wbapp)
+        return E_NOTIMPL;
+
+    *pptl = &TravelLog;
+    return S_OK;
+}
+
+static HRESULT  WINAPI BrowserService_ShowControlWindow(
+        IBrowserService* This,
+        UINT id,
+        BOOL fShow)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_IsControlWindowShown(
+        IBrowserService* This,
+        UINT id,
+        BOOL *pfShown)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_IEGetDisplayName(
+        IBrowserService* This,
+        PCIDLIST_ABSOLUTE pidl,
+        LPWSTR pwszName,
+        UINT uFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_IEParseDisplayName(
+        IBrowserService* This,
+        UINT uiCP,
+        LPCWSTR pwszPath,
+        PIDLIST_ABSOLUTE *ppidlOut)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_DisplayParseError(
+        IBrowserService* This,
+        HRESULT hres,
+        LPCWSTR pwszPath)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_NavigateToPidl(
+        IBrowserService* This,
+        PCIDLIST_ABSOLUTE pidl,
+        DWORD grfHLNF)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_SetNavigateState(
+        IBrowserService* This,
+        BNSTATE bnstate)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetNavigateState(
+        IBrowserService* This,
+        BNSTATE *pbnstate)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_NotifyRedirect(
+        IBrowserService* This,
+        IShellView *psv,
+        PCIDLIST_ABSOLUTE pidl,
+        BOOL *pfDidBrowse)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_UpdateWindowList(
+        IBrowserService* This)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_UpdateBackForwardState(
+        IBrowserService* This)
+{
+    CHECK_EXPECT(UpdateBackForwardState);
+    return S_OK;
+}
+
+static HRESULT  WINAPI BrowserService_SetFlags(
+        IBrowserService* This,
+        DWORD dwFlags,
+        DWORD dwFlagMask)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetFlags(
+        IBrowserService* This,
+        DWORD *pdwFlags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_CanNavigateNow(
+        IBrowserService* This)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetPidl(
+        IBrowserService* This,
+        PIDLIST_ABSOLUTE *ppidl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_SetReferrer(
+        IBrowserService* This,
+        PCIDLIST_ABSOLUTE pidl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static DWORD  WINAPI BrowserService_GetBrowserIndex(
+        IBrowserService* This)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetBrowserByIndex(
+        IBrowserService* This,
+        DWORD dwID,
+        IUnknown **ppunk)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetHistoryObject(
+        IBrowserService* This,
+        IOleObject **ppole,
+        IStream **pstm,
+        IBindCtx **ppbc)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_SetHistoryObject(
+        IBrowserService* This,
+        IOleObject *pole,
+        BOOL fIsLocalAnchor)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_CacheOLEServer(
+        IBrowserService* This,
+        IOleObject *pole)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetSetCodePage(
+        IBrowserService* This,
+        VARIANT *pvarIn,
+        VARIANT *pvarOut)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_OnHttpEquiv(
+        IBrowserService* This,
+        IShellView *psv,
+        BOOL fDone,
+        VARIANT *pvarargIn,
+        VARIANT *pvarargOut)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_GetPalette(
+        IBrowserService* This,
+        HPALETTE *hpal)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT  WINAPI BrowserService_RegisterWindow(
+        IBrowserService* This,
+        BOOL fForceRegister,
+        int swc)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static IBrowserServiceVtbl BrowserServiceVtbl = {
+    BrowserService_QueryInterface,
+    BrowserService_AddRef,
+    BrowserService_Release,
+    BrowserService_GetParentSite,
+    BrowserService_SetTitle,
+    BrowserService_GetTitle,
+    BrowserService_GetOleObject,
+    BrowserService_GetTravelLog,
+    BrowserService_ShowControlWindow,
+    BrowserService_IsControlWindowShown,
+    BrowserService_IEGetDisplayName,
+    BrowserService_IEParseDisplayName,
+    BrowserService_DisplayParseError,
+    BrowserService_NavigateToPidl,
+    BrowserService_SetNavigateState,
+    BrowserService_GetNavigateState,
+    BrowserService_NotifyRedirect,
+    BrowserService_UpdateWindowList,
+    BrowserService_UpdateBackForwardState,
+    BrowserService_SetFlags,
+    BrowserService_GetFlags,
+    BrowserService_CanNavigateNow,
+    BrowserService_GetPidl,
+    BrowserService_SetReferrer,
+    BrowserService_GetBrowserIndex,
+    BrowserService_GetBrowserByIndex,
+    BrowserService_GetHistoryObject,
+    BrowserService_SetHistoryObject,
+    BrowserService_CacheOLEServer,
+    BrowserService_GetSetCodePage,
+    BrowserService_OnHttpEquiv,
+    BrowserService_GetPalette,
+    BrowserService_RegisterWindow
+};
+
+static IBrowserService BrowserService = { &BrowserServiceVtbl };
+
+DEFINE_GUID(IID_ITabBrowserService, 0x5E8FA523,0x83D4,0x4DBE,0x81,0x99,0x4C,0x18,0xE4,0x85,0x87,0x25);
+
+static HRESULT browserservice_qi(REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(&IID_IShellBrowser, riid)) {
+        *ppv = &ShellBrowser;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IDocObjectService, riid)) {
+        *ppv = &DocObjectService;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IBrowserService, riid)) {
+        *ppv = &BrowserService;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static HRESULT WINAPI WebBrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid, void **ppv)
+{
+    *ppv = NULL;
+
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(&IID_IWebBrowser, riid)
+            || IsEqualGUID(&IID_IWebBrowserApp, riid) || IsEqualGUID(&IID_IWebBrowser2, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    if(IsEqualGUID(riid, &IID_IOleObject))
+        return E_NOINTERFACE; /* TODO */
+
+    ok(0, "unexpected call %s\n", debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI WebBrowser_AddRef(IWebBrowser2 *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI WebBrowser_Release(IWebBrowser2 *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI WebBrowser_GetTypeInfoCount(IWebBrowser2 *iface, UINT *pctinfo)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetTypeInfo(IWebBrowser2 *iface, UINT iTInfo, LCID lcid,
+        LPTYPEINFO *ppTInfo)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetIDsOfNames(IWebBrowser2 *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Invoke(IWebBrowser2 *iface, DISPID dispIdMember,
+        REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExepInfo, UINT *puArgErr)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoBack(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoForward(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoHome(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GoSearch(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Navigate(IWebBrowser2 *iface, BSTR szUrl,
+        VARIANT *Flags, VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Refresh(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Refresh2(IWebBrowser2 *iface, VARIANT *Level)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Stop(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Application(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Parent(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Container(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Document(IWebBrowser2 *iface, IDispatch **ppDisp)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_TopLevelContainer(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Type(IWebBrowser2 *iface, BSTR *Type)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Left(IWebBrowser2 *iface, LONG *pl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Left(IWebBrowser2 *iface, LONG Left)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Top(IWebBrowser2 *iface, LONG *pl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Top(IWebBrowser2 *iface, LONG Top)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Width(IWebBrowser2 *iface, LONG *pl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Width(IWebBrowser2 *iface, LONG Width)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Height(IWebBrowser2 *iface, LONG *pl)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Height(IWebBrowser2 *iface, LONG Height)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_LocationName(IWebBrowser2 *iface, BSTR *LocationName)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_LocationURL(IWebBrowser2 *iface, BSTR *LocationURL)
+{
+    CHECK_EXPECT(get_LocationURL);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Busy(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Quit(IWebBrowser2 *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ClientToWindow(IWebBrowser2 *iface, int *pcx, int *pcy)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_PutProperty(IWebBrowser2 *iface, BSTR szProperty, VARIANT vtValue)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_GetProperty(IWebBrowser2 *iface, BSTR szProperty, VARIANT *pvtValue)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Name(IWebBrowser2 *iface, BSTR *Name)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_HWND(IWebBrowser2 *iface, LONG *pHWND)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_FullName(IWebBrowser2 *iface, BSTR *FullName)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Path(IWebBrowser2 *iface, BSTR *Path)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Visible(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Visible(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_StatusBar(IWebBrowser2 *iface, VARIANT_BOOL *pBool)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_StatusBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_StatusText(IWebBrowser2 *iface, BSTR *StatusText)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_StatusText(IWebBrowser2 *iface, BSTR StatusText)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_ToolBar(IWebBrowser2 *iface, int *Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_ToolBar(IWebBrowser2 *iface, int Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_MenuBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL *pbFullScreen)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_FullScreen(IWebBrowser2 *iface, VARIANT_BOOL bFullScreen)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_Navigate2(IWebBrowser2 *iface, VARIANT *URL, VARIANT *Flags,
+        VARIANT *TargetFrameName, VARIANT *PostData, VARIANT *Headers)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_QueryStatusWB(IWebBrowser2 *iface, OLECMDID cmdID, OLECMDF *pcmdf)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ExecWB(IWebBrowser2 *iface, OLECMDID cmdID,
+        OLECMDEXECOPT cmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_ShowBrowserBar(IWebBrowser2 *iface, VARIANT *pvaClsid,
+        VARIANT *pvarShow, VARIANT *pvarSize)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_ReadyState(IWebBrowser2 *iface, READYSTATE *lpReadyState)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Offline(IWebBrowser2 *iface, VARIANT_BOOL *pbOffline)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Offline(IWebBrowser2 *iface, VARIANT_BOOL bOffline)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Silent(IWebBrowser2 *iface, VARIANT_BOOL *pbSilent)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Silent(IWebBrowser2 *iface, VARIANT_BOOL bSilent)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_RegisterAsBrowser(IWebBrowser2 *iface,
+        VARIANT_BOOL *pbRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_RegisterAsBrowser(IWebBrowser2 *iface,
+        VARIANT_BOOL bRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_RegisterAsDropTarget(IWebBrowser2 *iface,
+        VARIANT_BOOL *pbRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_RegisterAsDropTarget(IWebBrowser2 *iface,
+        VARIANT_BOOL bRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_TheaterMode(IWebBrowser2 *iface, VARIANT_BOOL *pbRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_TheaterMode(IWebBrowser2 *iface, VARIANT_BOOL bRegister)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_AddressBar(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_AddressBar(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_get_Resizable(IWebBrowser2 *iface, VARIANT_BOOL *Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI WebBrowser_put_Resizable(IWebBrowser2 *iface, VARIANT_BOOL Value)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IWebBrowser2Vtbl WebBrowser2Vtbl =
+{
+    WebBrowser_QueryInterface,
+    WebBrowser_AddRef,
+    WebBrowser_Release,
+    WebBrowser_GetTypeInfoCount,
+    WebBrowser_GetTypeInfo,
+    WebBrowser_GetIDsOfNames,
+    WebBrowser_Invoke,
+    WebBrowser_GoBack,
+    WebBrowser_GoForward,
+    WebBrowser_GoHome,
+    WebBrowser_GoSearch,
+    WebBrowser_Navigate,
+    WebBrowser_Refresh,
+    WebBrowser_Refresh2,
+    WebBrowser_Stop,
+    WebBrowser_get_Application,
+    WebBrowser_get_Parent,
+    WebBrowser_get_Container,
+    WebBrowser_get_Document,
+    WebBrowser_get_TopLevelContainer,
+    WebBrowser_get_Type,
+    WebBrowser_get_Left,
+    WebBrowser_put_Left,
+    WebBrowser_get_Top,
+    WebBrowser_put_Top,
+    WebBrowser_get_Width,
+    WebBrowser_put_Width,
+    WebBrowser_get_Height,
+    WebBrowser_put_Height,
+    WebBrowser_get_LocationName,
+    WebBrowser_get_LocationURL,
+    WebBrowser_get_Busy,
+    WebBrowser_Quit,
+    WebBrowser_ClientToWindow,
+    WebBrowser_PutProperty,
+    WebBrowser_GetProperty,
+    WebBrowser_get_Name,
+    WebBrowser_get_HWND,
+    WebBrowser_get_FullName,
+    WebBrowser_get_Path,
+    WebBrowser_get_Visible,
+    WebBrowser_put_Visible,
+    WebBrowser_get_StatusBar,
+    WebBrowser_put_StatusBar,
+    WebBrowser_get_StatusText,
+    WebBrowser_put_StatusText,
+    WebBrowser_get_ToolBar,
+    WebBrowser_put_ToolBar,
+    WebBrowser_get_MenuBar,
+    WebBrowser_put_MenuBar,
+    WebBrowser_get_FullScreen,
+    WebBrowser_put_FullScreen,
+    WebBrowser_Navigate2,
+    WebBrowser_QueryStatusWB,
+    WebBrowser_ExecWB,
+    WebBrowser_ShowBrowserBar,
+    WebBrowser_get_ReadyState,
+    WebBrowser_get_Offline,
+    WebBrowser_put_Offline,
+    WebBrowser_get_Silent,
+    WebBrowser_put_Silent,
+    WebBrowser_get_RegisterAsBrowser,
+    WebBrowser_put_RegisterAsBrowser,
+    WebBrowser_get_RegisterAsDropTarget,
+    WebBrowser_put_RegisterAsDropTarget,
+    WebBrowser_get_TheaterMode,
+    WebBrowser_put_TheaterMode,
+    WebBrowser_get_AddressBar,
+    WebBrowser_put_AddressBar,
+    WebBrowser_get_Resizable,
+    WebBrowser_put_Resizable
+};
+
+static IWebBrowser2 WebBrowser2 = { &WebBrowser2Vtbl };
+
 static HRESULT WINAPI ServiceProvider_QueryInterface(IServiceProvider *iface,
                                                      REFIID riid, void **ppv)
 {
@@ -2807,7 +4404,6 @@ static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface, REFG
      * STopLevelBrowser
      * IHTMLWindow2
      * IInternetProtocol
-     * IWebBrowserApp
      * UrlHostory
      * IHTMLEditHost
      * IHlinkFrame
@@ -2823,6 +4419,20 @@ static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface, REFG
         ok(IsEqualGUID(&IID_INewWindowManager, riid), "unexpected riid\n");
         *ppv = &NewWindowManager;
         return S_OK;
+    }
+
+    if(IsEqualGUID(&IID_IShellBrowser, guidService)) {
+        ok(IsEqualGUID(&IID_IBrowserService, riid), "unexpected riid\n");
+        *ppv = &BrowserService;
+        return S_OK;
+    }
+
+    if(support_wbapp && IsEqualGUID(&IID_IWebBrowserApp, guidService)) {
+        if(IsEqualGUID(riid, &IID_IWebBrowser2)) {
+            *ppv = &WebBrowser2;
+            return S_OK;
+        }
+        ok(0, "unexpected riid %s\n", debugstr_guid(riid));
     }
 
     return E_NOINTERFACE;
@@ -2996,6 +4606,11 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
 
 static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if(msg == WM_CONTINUE_BINDING) {
+        IBindStatusCallback *callback = (IBindStatusCallback*)wParam;
+        continue_binding(callback);
+    }
+
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
@@ -3149,6 +4764,7 @@ static void test_ConnectionPoint(IConnectionPointContainer *container, REFIID ri
     IConnectionPoint *cp;
     IID iid;
     HRESULT hres;
+    DWORD cookie;
 
     hres = IConnectionPointContainer_FindConnectionPoint(container, riid, &cp);
     ok(hres == S_OK, "FindConnectionPoint failed: %08x\n", hres);
@@ -3172,9 +4788,14 @@ static void test_ConnectionPoint(IConnectionPointContainer *container, REFIID ri
     ok(hres == E_POINTER, "GetConnectionPointContainer failed: %08x, expected E_POINTER\n", hres);
 
     if(IsEqualGUID(&IID_IPropertyNotifySink, riid)) {
-        DWORD cookie;
-
         hres = IConnectionPoint_Advise(cp, (IUnknown*)&PropertyNotifySink, &cookie);
+        ok(hres == S_OK, "Advise failed: %08x\n", hres);
+        hres = IConnectionPoint_Unadvise(cp, cookie);
+        ok(hres == S_OK, "Unadvise failed: %08x\n", hres);
+        hres = IConnectionPoint_Advise(cp, (IUnknown*)&PropertyNotifySink, NULL);
+        ok(hres == S_OK, "Advise failed: %08x\n", hres);
+    } else if(IsEqualGUID(&IID_IDispatch, riid)) {
+        hres = IConnectionPoint_Advise(cp, (IUnknown*)&EventDispatch, &cookie);
         ok(hres == S_OK, "Advise failed: %08x\n", hres);
     }
 
@@ -3254,6 +4875,7 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
         SET_EXPECT(LockContainer);
     }
     SET_EXPECT(OnChanged_READYSTATE);
+    SET_EXPECT(Invoke_OnReadyStateChange_Loading);
     SET_EXPECT(Exec_ShellDocView_84);
     SET_EXPECT(IsSystemMoniker);
     if(mon == &Moniker)
@@ -3263,7 +4885,11 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
         SET_EXPECT(Invoke_AMBIENT_SILENT);
         SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
         SET_EXPECT(Exec_ShellDocView_37);
+        SET_EXPECT(IsErrorUrl);
     }
+    else
+        SET_EXPECT(GetTravelLog);
+    SET_EXPECT(GetPendingUrl);
     load_state = LD_DOLOAD;
     expect_LockContainer_fLock = TRUE;
     readystate_set_loading = TRUE;
@@ -3280,8 +4906,8 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
         CHECK_CALLED(Invoke_AMBIENT_SILENT);
         CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
         CHECK_CALLED(Invoke_AMBIENT_USERAGENT);
-        CHECK_CALLED(Invoke_AMBIENT_PALETTE);
-        CHECK_CALLED(GetOptionKeyPath);
+        CLEAR_CALLED(Invoke_AMBIENT_PALETTE); /* not called on IE9 */
+        CLEAR_CALLED(GetOptionKeyPath); /* not called on some IE9 */
         CHECK_CALLED(GetOverrideKeyPath);
         CHECK_CALLED(GetWindow);
         CHECK_CALLED(Exec_DOCCANNAVIGATE);
@@ -3296,16 +4922,21 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
         container_locked = TRUE;
     }
     CHECK_CALLED(OnChanged_READYSTATE);
-    SET_CALLED(IsSystemMoniker); /* IE7 */
+    CHECK_CALLED(Invoke_OnReadyStateChange_Loading);
+    CLEAR_CALLED(IsSystemMoniker); /* IE7 */
     SET_CALLED(Exec_ShellDocView_84);
     if(mon == &Moniker)
         CHECK_CALLED(BindToStorage);
-    SET_CALLED(SetActiveObject); /* FIXME */
+    CLEAR_CALLED(SetActiveObject); /* FIXME */
     if(set_clientsite) {
         CHECK_CALLED(Invoke_AMBIENT_SILENT);
         CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
         CHECK_CALLED(Exec_ShellDocView_37);
+        todo_wine CHECK_CALLED_BROKEN(IsErrorUrl);
     }
+    else
+        todo_wine CHECK_CALLED(GetTravelLog);
+    todo_wine CHECK_CALLED(GetPendingUrl);
 
     set_clientsite = container_locked = TRUE;
 
@@ -3316,16 +4947,23 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
     test_readyState((IUnknown*)persist);
 }
 
-#define DWL_VERBDONE  0x0001
-#define DWL_CSS       0x0002
-#define DWL_TRYCSS    0x0004
-#define DWL_HTTP      0x0008
-#define DWL_EMPTY     0x0010
+#define DWL_VERBDONE           0x0001
+#define DWL_CSS                0x0002
+#define DWL_TRYCSS             0x0004
+#define DWL_HTTP               0x0008
+#define DWL_EMPTY              0x0010
+#define DWL_JAVASCRIPT         0x0020
+#define DWL_ONREADY_LOADING    0x0040
+#define DWL_EXPECT_HISTUPDATE  0x0080
 
 static void test_download(DWORD flags)
 {
+    const BOOL is_js = (flags & DWL_JAVASCRIPT) != 0;
     HWND hwnd;
+    BOOL *b;
     MSG msg;
+
+    b = is_js ? &called_Exec_SETDOWNLOADSTATE_0 : &called_Exec_HTTPEQUIV_DONE;
 
     hwnd = FindWindowA("Internet Explorer_Hidden", NULL);
     ok(hwnd != NULL, "Could not find hidden window\n");
@@ -3334,11 +4972,13 @@ static void test_download(DWORD flags)
 
     if(flags & (DWL_VERBDONE|DWL_HTTP))
         SET_EXPECT(Exec_SETPROGRESSMAX);
-    if((flags & DWL_VERBDONE) && !load_from_stream)
+    if((flags & DWL_VERBDONE) && !load_from_stream && !is_js)
         SET_EXPECT(GetHostInfo);
     SET_EXPECT(SetStatusText);
     if(!(flags & DWL_EMPTY))
         SET_EXPECT(Exec_SETDOWNLOADSTATE_1);
+    if(is_js)
+        SET_EXPECT(GetExternal);
     SET_EXPECT(OnViewChange);
     SET_EXPECT(GetDropTarget);
     if(flags & DWL_TRYCSS)
@@ -3351,19 +4991,26 @@ static void test_download(DWORD flags)
         SET_EXPECT(Protocol_Read);
         SET_EXPECT(UnlockRequest);
     }
+    if(flags & DWL_ONREADY_LOADING)
+        SET_EXPECT(Invoke_OnReadyStateChange_Loading);
+    if(!(flags & (DWL_EMPTY|DWL_JAVASCRIPT)))
+        SET_EXPECT(Invoke_OnReadyStateChange_Interactive);
+    if(!is_js)
+        SET_EXPECT(Invoke_OnReadyStateChange_Complete);
     SET_EXPECT(Exec_Explorer_69);
     SET_EXPECT(EnableModeless_TRUE); /* IE7 */
     SET_EXPECT(Frame_EnableModeless_TRUE); /* IE7 */
     SET_EXPECT(EnableModeless_FALSE); /* IE7 */
     SET_EXPECT(Frame_EnableModeless_FALSE); /* IE7 */
-    if(nav_url)
+    if((nav_url && !is_js) || (flags & (DWL_CSS|DWL_HTTP)))
         SET_EXPECT(Exec_ShellDocView_37);
     if(flags & DWL_HTTP) {
         SET_EXPECT(OnChanged_1012);
         SET_EXPECT(Exec_HTTPEQUIV);
         SET_EXPECT(Exec_SETTITLE);
     }
-    SET_EXPECT(OnChanged_1005);
+    if(!is_js)
+        SET_EXPECT(OnChanged_1005);
     SET_EXPECT(OnChanged_READYSTATE);
     SET_EXPECT(Exec_SETPROGRESSPOS);
     if(!(flags & DWL_EMPTY))
@@ -3371,17 +5018,31 @@ static void test_download(DWORD flags)
     SET_EXPECT(Exec_ShellDocView_103);
     SET_EXPECT(Exec_ShellDocView_105);
     SET_EXPECT(Exec_ShellDocView_140);
-    SET_EXPECT(Exec_MSHTML_PARSECOMPLETE);
-    SET_EXPECT(Exec_HTTPEQUIV_DONE);
+    if(!is_js) {
+        SET_EXPECT(Exec_MSHTML_PARSECOMPLETE);
+        SET_EXPECT(Exec_HTTPEQUIV_DONE);
+    }
     SET_EXPECT(SetStatusText);
-    if(nav_url) {
+    if(nav_url || support_wbapp) {
         SET_EXPECT(UpdateUI);
         SET_EXPECT(Exec_UPDATECOMMANDS);
         SET_EXPECT(Exec_SETTITLE);
+        if(flags & DWL_EXPECT_HISTUPDATE)
+            SET_EXPECT(Exec_Explorer_38);
+        SET_EXPECT(UpdateBackForwardState);
     }
+    if(!is_js) {
+        if(!editmode) {
+            if(!(flags & DWL_EMPTY))
+                SET_EXPECT(FireNavigateComplete2);
+            SET_EXPECT(FireDocumentComplete);
+        }
+        SET_EXPECT(ActiveElementChanged);
+    }
+    SET_EXPECT(IsErrorUrl);
     expect_status_text = (LPWSTR)0xdeadbeef; /* TODO */
 
-    while(!called_Exec_HTTPEQUIV_DONE && GetMessage(&msg, NULL, 0, 0)) {
+    while(!*b && GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
@@ -3390,7 +5051,7 @@ static void test_download(DWORD flags)
         CHECK_CALLED(Exec_SETPROGRESSMAX);
     if(flags & DWL_HTTP)
         SET_CALLED(Exec_SETPROGRESSMAX);
-    if((flags & DWL_VERBDONE) && !load_from_stream) {
+    if((flags & DWL_VERBDONE) && !load_from_stream && !is_js) {
         if(nav_url)
             todo_wine CHECK_CALLED(GetHostInfo);
         else
@@ -3399,8 +5060,10 @@ static void test_download(DWORD flags)
     CHECK_CALLED(SetStatusText);
     if(!(flags & DWL_EMPTY))
         CHECK_CALLED(Exec_SETDOWNLOADSTATE_1);
+    if(is_js)
+        CHECK_CALLED(GetExternal);
     CHECK_CALLED(OnViewChange);
-    SET_CALLED(GetDropTarget);
+    CLEAR_CALLED(GetDropTarget);
     if(flags & DWL_TRYCSS)
         SET_CALLED(Exec_ShellDocView_84);
     if(flags & DWL_CSS) {
@@ -3411,34 +5074,65 @@ static void test_download(DWORD flags)
         CHECK_CALLED(Protocol_Read);
         CHECK_CALLED(UnlockRequest);
     }
+    if(flags & DWL_ONREADY_LOADING)
+        CHECK_CALLED(Invoke_OnReadyStateChange_Loading);
+    if(!(flags & (DWL_EMPTY|DWL_JAVASCRIPT)))
+        CHECK_CALLED(Invoke_OnReadyStateChange_Interactive);
+    if(!is_js)
+        CHECK_CALLED(Invoke_OnReadyStateChange_Complete);
     SET_CALLED(Exec_Explorer_69);
     SET_CALLED(EnableModeless_TRUE); /* IE7 */
     SET_CALLED(Frame_EnableModeless_TRUE); /* IE7 */
     SET_CALLED(EnableModeless_FALSE); /* IE7 */
     SET_CALLED(Frame_EnableModeless_FALSE); /* IE7 */
-    if(nav_url)
+    if(nav_url && !is_js)
         todo_wine CHECK_CALLED(Exec_ShellDocView_37);
-    if(flags & DWL_HTTP) todo_wine {
-        CHECK_CALLED(OnChanged_1012);
-        CHECK_CALLED(Exec_HTTPEQUIV);
-        CHECK_CALLED(Exec_SETTITLE);
+    else if(flags & (DWL_CSS|DWL_HTTP))
+        CLEAR_CALLED(Exec_ShellDocView_37); /* Called by IE9 */
+    if(flags & DWL_HTTP)  {
+        todo_wine CHECK_CALLED(OnChanged_1012);
+        todo_wine CHECK_CALLED(Exec_HTTPEQUIV);
+        todo_wine CHECK_CALLED(Exec_SETTITLE);
     }
-    CHECK_CALLED(OnChanged_1005);
-    CHECK_CALLED(OnChanged_READYSTATE);
-    CHECK_CALLED(Exec_SETPROGRESSPOS);
+    if(!is_js) {
+        CHECK_CALLED(OnChanged_1005);
+        CHECK_CALLED(OnChanged_READYSTATE);
+        CHECK_CALLED(Exec_SETPROGRESSPOS);
+    }else {
+        CLEAR_CALLED(OnChanged_READYSTATE); /* sometimes called */
+        todo_wine CHECK_CALLED(Exec_SETPROGRESSPOS);
+    }
     if(!(flags & DWL_EMPTY))
         CHECK_CALLED(Exec_SETDOWNLOADSTATE_0);
-    SET_CALLED(Exec_ShellDocView_103);
-    SET_CALLED(Exec_ShellDocView_105);
-    SET_CALLED(Exec_ShellDocView_140);
-    CHECK_CALLED(Exec_MSHTML_PARSECOMPLETE);
-    CHECK_CALLED(Exec_HTTPEQUIV_DONE);
-    SET_CALLED(SetStatusText);
-    if(nav_url) { /* avoiding race, FIXME: fund better way */
-        SET_CALLED(UpdateUI);
-        SET_CALLED(Exec_UPDATECOMMANDS);
-        SET_CALLED(Exec_SETTITLE);
+    CLEAR_CALLED(Exec_ShellDocView_103);
+    CLEAR_CALLED(Exec_ShellDocView_105);
+    CLEAR_CALLED(Exec_ShellDocView_140);
+    if(!is_js) {
+        CHECK_CALLED(Exec_MSHTML_PARSECOMPLETE);
+        CHECK_CALLED(Exec_HTTPEQUIV_DONE);
     }
+    SET_CALLED(SetStatusText);
+    if(nav_url || support_wbapp) { /* avoiding race, FIXME: find better way */
+        CLEAR_CALLED(UpdateUI);
+        CLEAR_CALLED(Exec_UPDATECOMMANDS);
+        CLEAR_CALLED(Exec_SETTITLE);
+        if(flags & DWL_EXPECT_HISTUPDATE)
+            CHECK_CALLED(Exec_Explorer_38);
+        todo_wine CHECK_CALLED_BROKEN(UpdateBackForwardState);
+    }
+    if(!is_js) {
+        if(!editmode) {
+            if(!(flags & DWL_EMPTY)) {
+                if(support_wbapp)
+                    CHECK_CALLED(FireNavigateComplete2);
+                else
+                    todo_wine CHECK_CALLED(FireNavigateComplete2);
+            }
+            CHECK_CALLED(FireDocumentComplete);
+        }
+        todo_wine CHECK_CALLED(ActiveElementChanged);
+    }
+    todo_wine CHECK_CALLED_BROKEN(IsErrorUrl);
 
     load_state = LD_COMPLETE;
 
@@ -3484,36 +5178,100 @@ static void test_Persist(IHTMLDocument2 *doc, IMoniker *mon)
     }
 }
 
-static void test_put_href(IHTMLDocument2 *doc, BOOL use_replace)
+static void test_put_href(IHTMLDocument2 *doc, BOOL use_replace, const char *href, const char *new_nav_url, BOOL is_js,
+        BOOL is_hash, DWORD dwl_flags)
 {
+    const char *prev_nav_url = NULL;
     IHTMLPrivateWindow *priv_window;
-    IHTMLWindow2 *window;
     IHTMLLocation *location;
+    IHTMLWindow2 *window;
     BSTR str, str2;
-    VARIANT vempty;
     HRESULT hres;
+
+    trace("put_href %s...\n", new_nav_url);
+
+    loading_js = is_js;
+    loading_hash = is_hash;
 
     location = NULL;
     hres = IHTMLDocument2_get_location(doc, &location);
     ok(hres == S_OK, "get_location failed: %08x\n", hres);
     ok(location != NULL, "location == NULL\n");
 
-    nav_url = use_replace ? "about:replace" : "about:blank";
+    prev_url = prev_nav_url = nav_url;
+    nav_url = new_nav_url;
+    if(!loading_hash)
+        nav_serv_url = new_nav_url;
+    if(!href)
+        href = new_nav_url;
 
-    str = a2bstr(nav_url);
+    str = a2bstr(href);
     SET_EXPECT(TranslateUrl);
-    SET_EXPECT(Navigate);
+    if(support_wbapp) {
+        SET_EXPECT(FireBeforeNavigate2);
+        SET_EXPECT(Exec_ShellDocView_67);
+        if(!is_hash) {
+            SET_EXPECT(Invoke_AMBIENT_SILENT);
+            SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+            SET_EXPECT(Exec_ShellDocView_63);
+        }else {
+            SET_EXPECT(FireNavigateComplete2);
+            SET_EXPECT(FireDocumentComplete);
+        }
+    }else {
+        SET_EXPECT(Navigate);
+    }
     if(use_replace) {
         hres = IHTMLLocation_replace(location, str);
         ok(hres == S_OK, "put_href failed: %08x\n", hres);
     }else {
         hres = IHTMLLocation_put_href(location, str);
-        ok(hres == S_OK, "put_href failed: %08x\n", hres);
+        if(is_js && hres == E_ACCESSDENIED)
+            win_skip("put_href: got E_ACCESSDENIED\n");
+        else
+            ok(hres == S_OK, "put_href failed: %08x\n", hres);
     }
-    CHECK_CALLED(TranslateUrl);
-    CHECK_CALLED(Navigate);
+    SysFreeString(str);
+    if(hres == S_OK) {
+        CHECK_CALLED(TranslateUrl);
+        if(support_wbapp) {
+            CHECK_CALLED(FireBeforeNavigate2);
+            CHECK_CALLED(Exec_ShellDocView_67);
+            if(!is_hash) {
+                CHECK_CALLED(Invoke_AMBIENT_SILENT);
+                CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+                CHECK_CALLED(Exec_ShellDocView_63);
+            }else {
+                CHECK_CALLED(FireNavigateComplete2);
+                CHECK_CALLED(FireDocumentComplete);
+            }
+        }else {
+            CHECK_CALLED(Navigate);
+        }
+    }else {
+        CLEAR_CALLED(TranslateUrl);
+        if(support_wbapp) {
+            CLEAR_CALLED(FireBeforeNavigate2);
+            SET_CALLED(Exec_ShellDocView_67);
+            if(!is_hash) {
+                CLEAR_CALLED(Invoke_AMBIENT_SILENT);
+                CLEAR_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+                CLEAR_CALLED(Exec_ShellDocView_63);
+            }else {
+                CLEAR_CALLED(FireNavigateComplete2);
+                CLEAR_CALLED(FireDocumentComplete);
+            }
+        }else {
+            CLEAR_CALLED(Navigate);
+        }
+    }
 
     IHTMLLocation_Release(location);
+
+    if(is_js && hres == E_ACCESSDENIED) {
+        nav_url = prev_nav_url;
+        return;
+    }
 
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
@@ -3522,52 +5280,84 @@ static void test_put_href(IHTMLDocument2 *doc, BOOL use_replace)
     IHTMLWindow2_Release(window);
     ok(hres == S_OK, "QueryInterface(IID_IHTMLPrivateWindow) failed: %08x\n", hres);
 
-    readystate_set_loading = TRUE;
-    SET_EXPECT(TranslateUrl);
-    SET_EXPECT(Exec_ShellDocView_67);
-    SET_EXPECT(Invoke_AMBIENT_SILENT);
-    SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
-    SET_EXPECT(OnChanged_READYSTATE);
-    SET_EXPECT(Exec_ShellDocView_63);
+    if(!support_wbapp) {
+        VARIANT vempty;
 
-    str2 = a2bstr("");
-    V_VT(&vempty) = VT_EMPTY;
-    hres = IHTMLPrivateWindow_SuperNavigate(priv_window, str, str2, NULL, NULL, &vempty, &vempty, 0);
-    SysFreeString(str);
-    SysFreeString(str2);
-    ok(hres == S_OK, "SuperNavigate failed: %08x\n", hres);
+        readystate_set_loading = TRUE;
+        SET_EXPECT(TranslateUrl);
+        SET_EXPECT(Exec_ShellDocView_67);
+        SET_EXPECT(Invoke_AMBIENT_SILENT);
+        SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+        SET_EXPECT(Exec_ShellDocView_63);
 
-    CHECK_CALLED(TranslateUrl);
-    CHECK_CALLED(Exec_ShellDocView_67);
-    CHECK_CALLED(Invoke_AMBIENT_SILENT);
-    CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
-    SET_CALLED(OnChanged_READYSTATE); /* not always called */
-    CHECK_CALLED(Exec_ShellDocView_63);
+        str = a2bstr(nav_url);
+        str2 = a2bstr("");
+        V_VT(&vempty) = VT_EMPTY;
+        hres = IHTMLPrivateWindow_SuperNavigate(priv_window, str, str2, NULL, NULL, &vempty, &vempty, 0);
+        SysFreeString(str);
+        SysFreeString(str2);
+        ok(hres == S_OK, "SuperNavigate failed: %08x\n", hres);
+
+        CHECK_CALLED(TranslateUrl);
+        CHECK_CALLED(Exec_ShellDocView_67);
+        CHECK_CALLED(Invoke_AMBIENT_SILENT);
+        CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+        CHECK_CALLED(Exec_ShellDocView_63);
+    }
 
     if(doc_mon) {
         test_GetCurMoniker(doc_unk, doc_mon, NULL);
         doc_mon = NULL;
     }
+
+    if(!is_hash) {
+        hres = IHTMLPrivateWindow_GetAddressBarUrl(priv_window, &str2);
+        ok(hres == S_OK, "GetAddressBarUrl failed: %08x\n", hres);
+        ok(!strcmp_wa(str2, prev_nav_url), "unexpected address bar url:  %s, expected %s\n", wine_dbgstr_w(str2), prev_nav_url);
+        SysFreeString(str2);
+
+        if(is_js)
+            ignore_external_qi = TRUE;
+        test_download(DWL_VERBDONE | (is_js ? DWL_JAVASCRIPT : DWL_ONREADY_LOADING) | dwl_flags);
+        if(is_js)
+            ignore_external_qi = FALSE;
+
+    }
+
+    hres = IHTMLPrivateWindow_GetAddressBarUrl(priv_window, &str2);
+    ok(hres == S_OK, "GetAddressBarUrl failed: %08x\n", hres);
+    if(is_js)
+        ok(!strcmp_wa(str2, prev_nav_url), "unexpected address bar url:  %s\n", wine_dbgstr_w(str2));
+    else
+        ok(!strcmp_wa(str2, nav_url), "unexpected address bar url:  %s\n", wine_dbgstr_w(str2));
+    SysFreeString(str2);
     IHTMLPrivateWindow_Release(priv_window);
 
-    test_download(DWL_VERBDONE);
+    loading_js = FALSE;
+    if(is_js)
+        nav_url = prev_nav_url;
 }
 
-static void test_open_window(IHTMLDocument2 *doc)
+static void test_open_window(IHTMLDocument2 *doc, BOOL do_block)
 {
     IHTMLWindow2 *window, *new_window;
     BSTR name, url;
     HRESULT hres;
 
+    allow_new_window = !do_block;
+
     hres = IHTMLDocument2_get_parentWindow(doc, &window);
     ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
 
-    url = a2bstr(nav_url = "about:blank");
+    url = a2bstr(nav_serv_url = nav_url = "about:blank");
     name = a2bstr("test");
     new_window = (void*)0xdeadbeef;
 
+    trace("open...\n");
     open_call = TRUE;
 
+    if(support_wbapp)
+        SET_EXPECT(get_LocationURL);
     SET_EXPECT(TranslateUrl);
     SET_EXPECT(EvaluateNewWindow);
 
@@ -3576,27 +5366,49 @@ static void test_open_window(IHTMLDocument2 *doc)
     SysFreeString(url);
     SysFreeString(name);
 
+    if(support_wbapp)
+        todo_wine CHECK_CALLED_BROKEN(get_LocationURL);
     todo_wine
     CHECK_CALLED(TranslateUrl);
 
     if(!called_EvaluateNewWindow) {
-        todo_wine
         win_skip("INewWindowManager not supported\n");
         if(SUCCEEDED(hres) && new_window)
             IHTMLWindow2_Release(new_window);
         IHTMLWindow2_Release(window);
         return;
     }
-
-    todo_wine
     CHECK_CALLED(EvaluateNewWindow);
 
-    todo_wine
     ok(hres == S_OK, "open failed: %08x\n", hres);
-    todo_wine
-    ok(new_window == NULL, "new_window != NULL\n");
+
+    if(do_block) {
+        ok(!new_window, "new_window != NULL\n");
+    }else {
+        ok(new_window != NULL, "new_window == NULL\n");
+
+        hres = IHTMLWindow2_close(new_window);
+        ok(hres == S_OK, "close failed: %08x\n", hres);
+    }
 
     IHTMLWindow2_Release(window);
+}
+
+static void test_elem_from_point(IHTMLDocument2 *doc)
+{
+    IHTMLElement *elem;
+    BSTR tag;
+    HRESULT hres;
+
+    elem = NULL;
+    hres = IHTMLDocument2_elementFromPoint(doc, 3, 3, &elem);
+    ok(hres == S_OK, "elementFromPoint failed: %08x\n", hres);
+    ok(elem != NULL, "elem == NULL\n");
+
+    hres = IHTMLElement_get_tagName(elem, &tag);
+    IHTMLElement_Release(elem);
+    ok(hres == S_OK, "get_tagName failed: %08x\n", hres);
+    ok(!strcmp_wa(tag, "DIV"), "tag = %s\n", wine_dbgstr_w(tag));
 }
 
 static void test_clear(IHTMLDocument2 *doc)
@@ -3832,6 +5644,7 @@ static void test_exec_editmode(IUnknown *unk, BOOL loaded)
     SET_EXPECT(Invoke_AMBIENT_SILENT);
     SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     SET_EXPECT(OnChanged_READYSTATE);
+    SET_EXPECT(Invoke_OnReadyStateChange_Loading);
     SET_EXPECT(IsSystemMoniker);
     SET_EXPECT(Exec_ShellDocView_84);
     if(loaded)
@@ -3858,7 +5671,8 @@ static void test_exec_editmode(IUnknown *unk, BOOL loaded)
     CHECK_CALLED(Invoke_AMBIENT_SILENT);
     CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     CHECK_CALLED(OnChanged_READYSTATE);
-    SET_CALLED(IsSystemMoniker); /* IE7 */
+    CHECK_CALLED(Invoke_OnReadyStateChange_Loading);
+    CLEAR_CALLED(IsSystemMoniker); /* IE7 */
     SET_CALLED(Exec_ShellDocView_84);
     if(loaded)
         CHECK_CALLED(BindToStorage);
@@ -4028,8 +5842,10 @@ static void test_ClientSite(IOleObject *oleobj, DWORD flags)
         else
             ok(!clientsite, "clientsite != NULL\n");
 
+        SET_EXPECT(GetOverrideKeyPath);
         hres = IOleObject_SetClientSite(oleobj, NULL);
         ok(hres == S_OK, "SetClientSite failed: %08x\n", hres);
+        CLEAR_CALLED(GetOverrideKeyPath); /* IE9 sometimes calls it */
 
         set_clientsite = FALSE;
     }
@@ -4064,6 +5880,8 @@ static void test_ClientSite(IOleObject *oleobj, DWORD flags)
         SET_EXPECT(Invoke_AMBIENT_SILENT);
         SET_EXPECT(Invoke_AMBIENT_USERAGENT);
         SET_EXPECT(Invoke_AMBIENT_PALETTE);
+        SET_EXPECT(GetOverrideKeyPath);
+        SET_EXPECT(GetTravelLog);
 
         hres = IOleObject_SetClientSite(oleobj, &ClientSite);
         ok(hres == S_OK, "SetClientSite failed: %08x\n", hres);
@@ -4071,7 +5889,7 @@ static void test_ClientSite(IOleObject *oleobj, DWORD flags)
         if(expect_uihandler_iface)
             CHECK_CALLED(GetHostInfo);
         if(flags & CLIENTSITE_EXPECTPATH) {
-            CHECK_CALLED(GetOptionKeyPath);
+            CLEAR_CALLED(GetOptionKeyPath); /* not called on some IE9 */
             CHECK_CALLED(GetOverrideKeyPath);
         }
         CHECK_CALLED(GetWindow);
@@ -4085,7 +5903,9 @@ static void test_ClientSite(IOleObject *oleobj, DWORD flags)
         CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED); 
         CHECK_CALLED(Invoke_AMBIENT_SILENT);
         CHECK_CALLED(Invoke_AMBIENT_USERAGENT);
-        CHECK_CALLED(Invoke_AMBIENT_PALETTE);
+        CLEAR_CALLED(Invoke_AMBIENT_PALETTE); /* not called on IE9 */
+        CLEAR_CALLED(GetOverrideKeyPath); /* Called by IE9 */
+        todo_wine CHECK_CALLED(GetTravelLog);
 
         set_clientsite = TRUE;
     }
@@ -4140,7 +5960,7 @@ static void test_OnAmbientPropertyChange(IHTMLDocument2 *doc)
     SET_EXPECT(Invoke_AMBIENT_PALETTE);
     hres = IOleControl_OnAmbientPropertyChange(control, DISPID_AMBIENT_PALETTE);
     ok(hres == S_OK, "OnAmbientChange failed: %08x\n", hres);
-    CHECK_CALLED(Invoke_AMBIENT_PALETTE);
+    CLEAR_CALLED(Invoke_AMBIENT_PALETTE); /* not called on IE9 */
 
     IOleControl_Release(control);
 }
@@ -4292,6 +6112,7 @@ static void test_InPlaceDeactivate(IHTMLDocument2 *doc, BOOL expect_call)
         return;
 
     if(expect_call) {
+        SET_EXPECT(SetStatusText);
         SET_EXPECT(OnFocus_FALSE);
         if(ipsex)
             SET_EXPECT(OnInPlaceDeactivateEx);
@@ -4301,6 +6122,7 @@ static void test_InPlaceDeactivate(IHTMLDocument2 *doc, BOOL expect_call)
     hres = IOleInPlaceObjectWindowless_InPlaceDeactivate(windowlessobj);
     ok(hres == S_OK, "InPlaceDeactivate failed: %08x\n", hres);
     if(expect_call) {
+        CLEAR_CALLED(SetStatusText); /* Called by IE9 */
         CHECK_CALLED(OnFocus_FALSE);
         if(ipsex)
             CHECK_CALLED(OnInPlaceDeactivateEx);
@@ -4522,6 +6344,91 @@ static void test_external(IHTMLDocument2 *doc, BOOL initialized)
     IHTMLWindow2_Release(htmlwin);
 }
 
+static void test_enum_objects(IOleContainer *container)
+{
+    IEnumUnknown *enum_unknown;
+    IUnknown *buf[100] = {(void*)0xdeadbeef};
+    ULONG fetched;
+    HRESULT hres;
+
+    enum_unknown = NULL;
+    hres = IOleContainer_EnumObjects(container, OLECONTF_EMBEDDINGS, &enum_unknown);
+    ok(hres == S_OK, "EnumObjects failed: %08x\n", hres);
+    ok(enum_unknown != NULL, "enum_unknown == NULL\n");
+
+    fetched = 0xdeadbeef;
+    hres = IEnumUnknown_Next(enum_unknown, sizeof(buf)/sizeof(*buf), buf, &fetched);
+    ok(hres == S_FALSE, "Next returned %08x\n", hres);
+    ok(!fetched, "fetched = %d\n", fetched);
+    ok(buf[0] == (void*)0xdeadbeef, "buf[0] = %p\n", buf[0]);
+
+    fetched = 0xdeadbeef;
+    hres = IEnumUnknown_Next(enum_unknown, 1, buf, &fetched);
+    ok(hres == S_FALSE, "Next returned %08x\n", hres);
+    ok(!fetched, "fetched = %d\n", fetched);
+
+    hres = IEnumUnknown_Next(enum_unknown, 1, buf, NULL);
+    ok(hres == S_FALSE, "Next returned %08x\n", hres);
+
+    IEnumUnknown_Release(enum_unknown);
+}
+
+static void test_target_container(IHTMLDocument2 *doc)
+{
+    IOleContainer *ole_container, *doc_ole_container;
+    ITargetContainer *target_container;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_ITargetContainer, (void**)&target_container);
+    ok(hres == S_OK, "Could not get ITargetContainer iface: %08x\n", hres);
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IOleContainer, (void**)&doc_ole_container);
+    ok(hres == S_OK, "Could not get ITargetContainer iface: %08x\n", hres);
+
+    ole_container = (void*)0xdeadbeef;
+    hres = ITargetContainer_GetFramesContainer(target_container, &ole_container);
+    ok(hres == S_OK, "GetFramesContainer failed: %08x\n", hres);
+    ok(ole_container != NULL, "ole_container == NULL\n");
+    ok(iface_cmp((IUnknown*)ole_container, (IUnknown*)doc_ole_container), "ole_container != doc_ole_container\n");
+    test_enum_objects(ole_container);
+    IOleContainer_Release(ole_container);
+
+    ITargetContainer_Release(target_container);
+    IOleContainer_Release(doc_ole_container);
+}
+
+static void test_travellog(IHTMLDocument2 *doc)
+{
+    ITravelLogClient *travellog_client;
+    IHTMLWindow2 *window, *top_window;
+    IUnknown *unk;
+    HRESULT hres;
+
+    window = NULL;
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
+    ok(window != NULL, "window = NULL\n");
+
+    hres = IHTMLWindow2_get_top(window, &top_window);
+    IHTMLWindow2_Release(window);
+    ok(hres == S_OK, "get_top failed: %08x\n", hres);
+
+    hres = IHTMLWindow2_QueryInterface(top_window, &IID_ITravelLogClient, (void**)&travellog_client);
+    IHTMLWindow2_Release(top_window);
+    if(hres == E_NOINTERFACE) {
+        win_skip("ITravelLogClient not supported\n");
+        return;
+    }
+    ok(hres == S_OK, "Could not get ITraveLogClient iface: %08x\n", hres);
+
+    unk = (void*)0xdeadbeef;
+    hres = ITravelLogClient_FindWindowByIndex(travellog_client, 0, &unk);
+    ok(hres == E_FAIL, "FindWindowByIndex failed: %08x\n", hres);
+    ok(!unk, "unk != NULL\n");
+
+    ITravelLogClient_Release(travellog_client);
+}
+
 static void test_StreamLoad(IHTMLDocument2 *doc)
 {
     IPersistStreamInit *init;
@@ -4536,7 +6443,9 @@ static void test_StreamLoad(IHTMLDocument2 *doc)
     SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     SET_EXPECT(Exec_ShellDocView_37);
     SET_EXPECT(OnChanged_READYSTATE);
+    SET_EXPECT(Invoke_OnReadyStateChange_Loading);
     SET_EXPECT(Read);
+    SET_EXPECT(GetPendingUrl);
     readystate_set_loading = TRUE;
 
     hres = IPersistStreamInit_Load(init, &Stream);
@@ -4546,7 +6455,9 @@ static void test_StreamLoad(IHTMLDocument2 *doc)
     CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     CHECK_CALLED(Exec_ShellDocView_37);
     CHECK_CALLED(OnChanged_READYSTATE);
+    CHECK_CALLED(Invoke_OnReadyStateChange_Loading);
     CHECK_CALLED(Read);
+    todo_wine CHECK_CALLED(GetPendingUrl);
 
     test_timer(EXPECT_SETTITLE);
     test_GetCurMoniker((IUnknown*)doc, NULL, "about:blank");
@@ -4568,6 +6479,8 @@ static void test_StreamInitNew(IHTMLDocument2 *doc)
     SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     SET_EXPECT(Exec_ShellDocView_37);
     SET_EXPECT(OnChanged_READYSTATE);
+    SET_EXPECT(Invoke_OnReadyStateChange_Loading);
+    SET_EXPECT(GetPendingUrl);
     readystate_set_loading = TRUE;
 
     hres = IPersistStreamInit_InitNew(init);
@@ -4577,6 +6490,8 @@ static void test_StreamInitNew(IHTMLDocument2 *doc)
     CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     CHECK_CALLED(Exec_ShellDocView_37);
     CHECK_CALLED(OnChanged_READYSTATE);
+    CHECK_CALLED(Invoke_OnReadyStateChange_Loading);
+    todo_wine CHECK_CALLED(GetPendingUrl);
 
     test_timer(EXPECT_SETTITLE);
     test_GetCurMoniker((IUnknown*)doc, NULL, "about:blank");
@@ -4632,6 +6547,11 @@ static void test_QueryInterface(IHTMLDocument2 *doc)
     ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
     ok(qi == NULL, "qi=%p, expected NULL\n", qi);
 
+    qi = (void*)0xdeadbeef;
+    hres = IUnknown_QueryInterface(doc, &IID_ITargetFrame, (void**)&qi);
+    ok(hres == E_NOINTERFACE, "QueryInterface returned %08x, expected E_NOINTERFACE\n", hres);
+    ok(qi == NULL, "qi=%p, expected NULL\n", qi);
+
     hres = IUnknown_QueryInterface(doc, &IID_IDispatch, (void**)&qi);
     ok(hres == S_OK, "Could not get IDispatch interface: %08x\n", hres);
     ok(qi != (IUnknown*)doc, "disp == doc\n");
@@ -4651,6 +6571,7 @@ static void init_test(enum load_state_t ls) {
     nav_url = NULL;
     ipsex = FALSE;
     inplace_deactivated = FALSE;
+    complete = FALSE;
     expect_uihandler_iface = &DocHostUIHandler;
 }
 
@@ -4683,6 +6604,7 @@ static void test_HTMLDocument(BOOL do_load)
         set_custom_uihandler(doc, &CustomDocHostUIHandler);
         test_download(DWL_CSS|DWL_TRYCSS);
         test_GetCurMoniker((IUnknown*)doc, &Moniker, NULL);
+        test_elem_from_point(doc);
     }
 
     test_MSHTML_QueryStatus(doc, OLECMDF_SUPPORTED);
@@ -4691,6 +6613,7 @@ static void test_HTMLDocument(BOOL do_load)
     test_OnAmbientPropertyChange(doc);
     test_Window(doc, TRUE);
     test_external(doc, TRUE);
+    test_target_container(doc);
 
     test_UIDeactivate();
     test_OleCommandTarget(doc);
@@ -4752,7 +6675,7 @@ static void test_HTMLDocument(BOOL do_load)
     ok(!IsWindow(hwnd), "hwnd is not destroyed\n");
 }
 
-static void test_HTMLDocument_hlink(void)
+static void test_HTMLDocument_hlink(DWORD status)
 {
     IHTMLDocument2 *doc;
 
@@ -4771,7 +6694,9 @@ static void test_HTMLDocument_hlink(void)
     test_Persist(doc, &Moniker);
     test_Navigate(doc);
 
+    status_code = status;
     test_download(DWL_CSS|DWL_TRYCSS);
+    status_code = HTTP_STATUS_OK;
 
     test_IsDirty(doc, S_FALSE);
     test_MSHTML_QueryStatus(doc, OLECMDF_SUPPORTED);
@@ -4843,14 +6768,16 @@ static void test_cookies(IHTMLDocument2 *doc)
     SysFreeString(str2);
 }
 
-static void test_HTMLDocument_http(void)
+static void test_HTMLDocument_http(BOOL with_wbapp)
 {
     IMoniker *http_mon;
     IHTMLDocument2 *doc;
     ULONG ref;
     HRESULT hres;
 
-    trace("Testing HTMLDocument (http)...\n");
+    trace("Testing HTMLDocument (http%s)...\n", with_wbapp ? " with IWebBrowserApp" : "");
+
+    support_wbapp = with_wbapp;
 
     if(!winetest_interactive && is_ie_hardened()) {
         win_skip("IE running in Enhanced Security Configuration\n");
@@ -4876,10 +6803,20 @@ static void test_HTMLDocument_http(void)
     test_IsDirty(doc, S_FALSE);
     test_MSHTML_QueryStatus(doc, OLECMDF_SUPPORTED);
     test_GetCurMoniker((IUnknown*)doc, http_mon, NULL);
+    test_travellog(doc);
 
-    test_put_href(doc, FALSE);
-    test_put_href(doc, TRUE);
-    test_open_window(doc);
+    nav_url = nav_serv_url = "http://www.winehq.org/"; /* for valid prev nav_url */
+    if(support_wbapp) {
+        test_put_href(doc, FALSE, "#test", "http://www.winehq.org/#test", FALSE, TRUE, 0);
+        test_travellog(doc);
+    }
+    test_put_href(doc, FALSE, NULL, "javascript:external&&undefined", TRUE, FALSE, 0);
+    test_put_href(doc, FALSE, NULL, "about:blank", FALSE, FALSE, support_wbapp ? DWL_EXPECT_HISTUPDATE : 0);
+    test_put_href(doc, TRUE, NULL, "about:replace", FALSE, FALSE, 0);
+
+    test_open_window(doc, TRUE);
+    if(!support_wbapp) /* FIXME */
+        test_open_window(doc, FALSE);
 
     test_InPlaceDeactivate(doc, TRUE);
     test_Close(doc, FALSE);
@@ -5033,7 +6970,11 @@ static void test_HTMLDocument_StreamInitNew(void)
 
     test_GetCurMoniker((IUnknown*)doc, NULL, NULL);
     test_StreamInitNew(doc);
+
+    SET_EXPECT(Invoke_OnReadyStateChange_Interactive);
     test_download(DWL_VERBDONE|DWL_TRYCSS|DWL_EMPTY);
+    todo_wine CHECK_NOT_CALLED(Invoke_OnReadyStateChange_Interactive);
+
     test_MSHTML_QueryStatus(doc, OLECMDF_SUPPORTED);
 
     test_UIDeactivate();
@@ -5121,7 +7062,7 @@ static void test_editing_mode(BOOL do_load)
 
     SET_EXPECT(SetStatusText); /* ignore race in native mshtml */
     test_timer(EXPECT_UPDATEUI);
-    SET_CALLED(SetStatusText);
+    CLEAR_CALLED(SetStatusText);
 
     test_MSHTML_QueryStatus(doc, OLECMDF_SUPPORTED|OLECMDF_ENABLED);
 
@@ -5200,6 +7141,7 @@ static void test_UIActivate(BOOL do_load, BOOL use_ipsex, BOOL use_ipsw)
     SET_EXPECT(QueryStatus_SETPROGRESSTEXT);
     SET_EXPECT(Exec_SETPROGRESSMAX);
     SET_EXPECT(Exec_SETPROGRESSPOS);
+    SET_EXPECT(GetTravelLog);
 
     hres = IOleObject_SetClientSite(oleobj, &ClientSite);
     ok(hres == S_OK, "SetClientSite failed: %08x\n", hres);
@@ -5211,14 +7153,15 @@ static void test_UIActivate(BOOL do_load, BOOL use_ipsex, BOOL use_ipsw)
     CHECK_CALLED(Invoke_AMBIENT_SILENT);
     CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
     CHECK_CALLED(Invoke_AMBIENT_USERAGENT);
-    CHECK_CALLED(Invoke_AMBIENT_PALETTE);
-    CHECK_CALLED(GetOptionKeyPath);
+    CLEAR_CALLED(Invoke_AMBIENT_PALETTE); /* not called on IE9 */
+    CLEAR_CALLED(GetOptionKeyPath); /* not called on some IE9 */
     CHECK_CALLED(GetOverrideKeyPath);
     CHECK_CALLED(GetWindow);
     CHECK_CALLED(Exec_DOCCANNAVIGATE);
     CHECK_CALLED(QueryStatus_SETPROGRESSTEXT);
     CHECK_CALLED(Exec_SETPROGRESSMAX);
     CHECK_CALLED(Exec_SETPROGRESSPOS);
+    todo_wine CHECK_CALLED(GetTravelLog);
 
     hres = IOleDocumentView_GetInPlaceSite(view, &inplacesite);
     ok(hres == S_OK, "GetInPlaceSite failed: %08x\n", hres);
@@ -5289,6 +7232,7 @@ static void test_UIActivate(BOOL do_load, BOOL use_ipsex, BOOL use_ipsw)
     ok(inplacesite != NULL, "inplacesite = NULL\n");
     IOleInPlaceSite_Release(inplacesite);
 
+    SET_EXPECT(SetStatusText);
     SET_EXPECT(OnFocus_FALSE);
     if(use_ipsex)
         SET_EXPECT(OnInPlaceDeactivateEx);
@@ -5297,6 +7241,7 @@ static void test_UIActivate(BOOL do_load, BOOL use_ipsex, BOOL use_ipsw)
 
     test_CloseView();
 
+    CLEAR_CALLED(SetStatusText); /* Called by IE9 */
     CHECK_CALLED(OnFocus_FALSE);
     if(use_ipsex)
         CHECK_CALLED(OnInPlaceDeactivateEx);
@@ -5384,6 +7329,46 @@ static BOOL check_ie(void)
     return SUCCEEDED(hres);
 }
 
+static void test_ServiceProvider(void)
+{
+    IHTMLDocument3 *doc3, *doc3_2;
+    IServiceProvider *provider;
+    IHTMLDocument2 *doc, *doc2;
+    IUnknown *unk;
+    HRESULT hres;
+
+    doc = create_document();
+    if(!doc)
+        return;
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IServiceProvider, (void**)&provider);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+
+    hres = IServiceProvider_QueryService(provider, &SID_SContainerDispatch, &IID_IHTMLDocument2, (void**)&doc2);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(iface_cmp((IUnknown*)doc2, (IUnknown*)doc), "got wrong pointer\n");
+    IHTMLDocument2_Release(doc2);
+
+    hres = IServiceProvider_QueryService(provider, &SID_SContainerDispatch, &IID_IHTMLDocument3, (void**)&doc3);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(iface_cmp((IUnknown*)doc3, (IUnknown*)doc), "got wrong pointer\n");
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3_2);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(iface_cmp((IUnknown*)doc3_2, (IUnknown*)doc), "got wrong pointer\n");
+    ok(iface_cmp((IUnknown*)doc3_2, (IUnknown*)doc3), "got wrong pointer\n");
+    IHTMLDocument3_Release(doc3);
+    IHTMLDocument3_Release(doc3_2);
+
+    hres = IServiceProvider_QueryService(provider, &SID_SContainerDispatch, &IID_IUnknown, (void**)&unk);
+    ok(hres == S_OK, "got 0x%08x\n", hres);
+    ok(iface_cmp((IUnknown*)doc, unk), "got wrong pointer\n");
+
+    IUnknown_Release(unk);
+    IServiceProvider_Release(provider);
+    release_document(doc);
+}
+
 START_TEST(htmldoc)
 {
     CoInitialize(NULL);
@@ -5397,14 +7382,19 @@ START_TEST(htmldoc)
     container_hwnd = create_container_window();
     register_protocol();
 
-    test_HTMLDocument_hlink();
+    asynchronous_binding = TRUE;
+    test_HTMLDocument_hlink(HTTP_STATUS_NOT_FOUND);
+
+    asynchronous_binding = FALSE;
+    test_HTMLDocument_hlink(HTTP_STATUS_OK);
     test_HTMLDocument(FALSE);
     test_HTMLDocument(TRUE);
     test_HTMLDocument_StreamLoad();
     test_HTMLDocument_StreamInitNew();
     test_editing_mode(FALSE);
     test_editing_mode(TRUE);
-    test_HTMLDocument_http();
+    test_HTMLDocument_http(FALSE);
+    test_HTMLDocument_http(TRUE);
     test_UIActivate(FALSE, FALSE, FALSE);
     test_UIActivate(FALSE, TRUE, FALSE);
     test_UIActivate(FALSE, TRUE, TRUE);
@@ -5413,6 +7403,7 @@ START_TEST(htmldoc)
     test_UIActivate(TRUE, TRUE, TRUE);
     test_HTMLDoc_ISupportErrorInfo();
     test_IPersistHistory();
+    test_ServiceProvider();
 
     DestroyWindow(container_hwnd);
     CoUninitialize();

@@ -90,7 +90,7 @@ static void test_LoadStringA (void)
                                   {sizeof str, sizeof str - 1},
                                   {sizeof str - 1, sizeof str - 2}};
     unsigned int i;
-    int ret;
+    int ret, ret2;
 
     assert (sizeof str < sizeof buf);
     for (i = 0; i < sizeof tests / sizeof tests[0]; i++) {
@@ -110,17 +110,17 @@ static void test_LoadStringA (void)
 
     ret = LoadStringA(hInst, 1, buf, sizeof(buf) );
     ok( ret > 0, "LoadString failed: ret %d err %d\n", ret, GetLastError());
-    ok( LoadStringA( hInst, MAKELONG( 1, 0x8000 ), buf, sizeof(buf)) == ret,
-        "LoadString failed: ret %d err %d\n", ret, GetLastError());
-    ok( LoadStringA( hInst, MAKELONG( 1, 0xffff ), buf, sizeof(buf)) == ret,
-        "LoadString failed: ret %d err %d\n", ret, GetLastError());
+    ret2 = LoadStringA( hInst, MAKELONG( 1, 0x8000 ), buf, sizeof(buf));
+    ok( ret2 == ret, "LoadString failed: ret %d err %d\n", ret, GetLastError());
+    ret2 = LoadStringA( hInst, MAKELONG( 1, 0xffff ), buf, sizeof(buf));
+    ok( ret2 == ret, "LoadString failed: ret %d err %d\n", ret, GetLastError());
 
     ret = LoadStringA(hInst, 65534, buf, sizeof(buf) );
     ok( ret > 0, "LoadString failed: ret %d err %d\n", ret, GetLastError());
-    ok( LoadStringA( hInst, MAKELONG( 65534, 0x8000 ), buf, sizeof(buf)) == ret,
-        "LoadString failed: ret %d err %d\n", ret, GetLastError());
-    ok( LoadStringA( hInst, MAKELONG( 65534, 0xffff ), buf, sizeof(buf)) == ret,
-        "LoadString failed: ret %d err %d\n", ret, GetLastError());
+    ret2 = LoadStringA( hInst, MAKELONG( 65534, 0x8000 ), buf, sizeof(buf));
+    ok( ret2 == ret, "LoadString failed: ret %d err %d\n", ret, GetLastError());
+    ret2 = LoadStringA( hInst, MAKELONG( 65534, 0xffff ), buf, sizeof(buf));
+    ok( ret2 == ret, "LoadString failed: ret %d err %d\n", ret, GetLastError());
 
     ret = LoadStringA(hInst, 0, buf, 0);
     ok( ret == -1 || broken(ret == 0),
@@ -180,12 +180,10 @@ static void test_accel1(void)
     ok( hAccel != NULL, "create accelerator table\n");
 
     r = CopyAcceleratorTable( hAccel, NULL, 0 );
-    ok( r == n || broken(r == 2), /* win9x */
-        "two entries in table %u/%u\n", r, n);
+    ok( r == n, "two entries in table %u/%u\n", r, n);
 
     r = CopyAcceleratorTable( hAccel, &ac[0], n );
-    ok( r == n || broken(r == 2), /* win9x */
-        "still should be two entries in table %u/%u\n", r, n);
+    ok( r == n, "still should be two entries in table %u/%u\n", r, n);
 
     n=0;
     ok( ac[n].cmd == 1000, "cmd 0 not preserved got %x\n", ac[n].cmd);
@@ -262,11 +260,11 @@ static void test_accel2(void)
     hac = CreateAcceleratorTable( &ac[0], 2);
     ok( hac != NULL , "fail\n");
     res = CopyAcceleratorTable( hac, NULL, 100 );
-    ok( res == 2 || broken(res == 0), /* win9x */ "copy null failed %d\n", res);
+    ok( res == 2, "copy null failed %d\n", res);
     res = CopyAcceleratorTable( hac, NULL, 0 );
     ok( res == 2, "copy null failed %d\n", res);
     res = CopyAcceleratorTable( hac, NULL, 1 );
-    ok( res == 2 || broken(res == 0), /* win9x */ "copy null failed %d\n", res);
+    ok( res == 2, "copy null failed %d\n", res);
     ok( 1 == CopyAcceleratorTable( hac, out, 1 ), "copy 1 failed\n");
     ok( 2 == CopyAcceleratorTable( hac, out, 2 ), "copy 2 failed\n");
     ok( DestroyAcceleratorTable( hac ), "destroy failed\n");
@@ -318,7 +316,7 @@ static void test_accel2(void)
     hac = CreateAcceleratorTable( &ac[0], 2);
     ok( hac != NULL , "fail\n");
     res = CopyAcceleratorTable( hac, out, 2 );
-    ok( res == 2 || broken(res == 1), /* win9x */ "copy 2 failed %d\n", res);
+    ok( res == 2, "copy 2 failed %d\n", res);
     /* ok( memcmp( ac, out, sizeof ac ), "tables not different\n"); */
     ok( out[0].cmd == ac[0].cmd, "cmd modified\n");
     ok( out[0].fVirt == (ac[0].fVirt&0x7f), "fVirt not modified\n");

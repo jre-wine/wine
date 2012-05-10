@@ -3,9 +3,6 @@
  *
  * Copyright 2010 Christian Costa
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -26,7 +23,10 @@
 
 #include "d3drm.h"
 
-HRESULT Direct3DRM_create(LPDIRECT3DRM* ppDirect3DRM);
-HRESULT Direct3DRMMeshBuilder_create(LPDIRECT3DRMMESHBUILDER* ppMeshBuilder);
+HRESULT Direct3DRM_create(IUnknown** ppObj) DECLSPEC_HIDDEN;
+HRESULT Direct3DRMDevice_create(REFIID riid, IUnknown** ppObj) DECLSPEC_HIDDEN;
+HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown** ppObj) DECLSPEC_HIDDEN;
+HRESULT Direct3DRMMeshBuilder_create(REFIID riid, IUnknown** ppObj) DECLSPEC_HIDDEN;
+HRESULT Direct3DRMViewport_create(REFIID riid, IUnknown** ppObj) DECLSPEC_HIDDEN;
 
 #endif /* __D3DRM_PRIVATE_INCLUDED__ */

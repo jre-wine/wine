@@ -558,7 +558,7 @@ ITfContext *pic)
     ITfContext *test;
 
     hr = ITfContext_GetDocumentMgr(pic,&docmgr);
-    ok(SUCCEEDED(hr),"GetDocumenMgr failed\n");
+    ok(SUCCEEDED(hr),"GetDocumentMgr failed\n");
     test = (ITfContext*)0xdeadbeef;
     ITfDocumentMgr_Release(docmgr);
     hr = ITfDocumentMgr_GetTop(docmgr,&test);
@@ -579,7 +579,7 @@ ITfContext *pic)
     ITfContext *test;
 
     hr = ITfContext_GetDocumentMgr(pic,&docmgr);
-    ok(SUCCEEDED(hr),"GetDocumenMgr failed\n");
+    ok(SUCCEEDED(hr),"GetDocumentMgr failed\n");
     ITfDocumentMgr_Release(docmgr);
     test = (ITfContext*)0xdeadbeef;
     hr = ITfDocumentMgr_GetTop(docmgr,&test);
@@ -1025,7 +1025,7 @@ static void test_ThreadMgrAdviseSinks(void)
     ok(SUCCEEDED(hr),"Failed to Advise Sink\n");
     ok(tmSinkCookie!=0,"Failed to get sink cookie\n");
 
-    /* Advising the sink adds a ref, Relesing here lets the object be deleted
+    /* Advising the sink adds a ref, Releasing here lets the object be deleted
        when unadvised */
     tmSinkRefCount = 2;
     IUnknown_Release(sink);
@@ -1453,17 +1453,19 @@ static void test_startSession(void)
     ok(SUCCEEDED(hr),"GetFocus Failed\n");
     ok(g_dm == dmtest,"Expected DocumentMgr not focused\n");
 
-    cnt = ITfDocumentMgr_Release(g_dm);
+    ITfDocumentMgr_Release(g_dm);
 
     hr = ITfThreadMgr_GetFocus(g_tm,&dmtest);
     ok(SUCCEEDED(hr),"GetFocus Failed\n");
     ok(g_dm == dmtest,"Expected DocumentMgr not focused\n");
     ITfDocumentMgr_Release(dmtest);
 
-    TextStoreACP_Constructor((IUnknown**)&ts);
-
-    hr = ITfDocumentMgr_CreateContext(g_dm, cid, 0, (IUnknown*)ts, &cxt, &editCookie);
-    ok(SUCCEEDED(hr),"CreateContext Failed\n");
+    hr = TextStoreACP_Constructor((IUnknown**)&ts);
+    if (SUCCEEDED(hr))
+    {
+        hr = ITfDocumentMgr_CreateContext(g_dm, cid, 0, (IUnknown*)ts, &cxt, &editCookie);
+        ok(SUCCEEDED(hr),"CreateContext Failed\n");
+    }
 
     hr = ITfDocumentMgr_CreateContext(g_dm, cid, 0, NULL, &cxt2, &editCookie);
     ok(SUCCEEDED(hr),"CreateContext Failed\n");
@@ -1805,6 +1807,7 @@ TfEditCookie ec)
     selection.style.fInterimChar = FALSE;
     test_ACP_SetSelection = SINK_EXPECTED;
     hr = ITfContext_SetSelection(cxt, ec, 1, &selection);
+    ok(SUCCEEDED(hr),"ITfContext_SetSelection failed\n");
     sink_check_ok(&test_ACP_SetSelection,"SetSelection");
     ITfRange_Release(range);
 
@@ -1863,7 +1866,7 @@ static void test_TStoApplicationText(void)
     }
 
     hrSession = 0xfeedface;
-    /* Test no premissions flags */
+    /* Test no permissions flags */
     hr = ITfContext_RequestEditSession(cxt, tid, es, TF_ES_SYNC, &hrSession);
     ok(hr == E_INVALIDARG,"RequestEditSession should have failed with %x not %x\n",E_INVALIDARG,hr);
     ok(hrSession == E_FAIL,"hrSession should be %x not %x\n",E_FAIL,hrSession);
@@ -1990,9 +1993,20 @@ static void test_Compartments(void)
 static void processPendingMessages(void)
 {
     MSG msg;
-    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+    int diff = 200;
+    int min_timeout = 100;
+    DWORD time = GetTickCount() + diff;
+
+    while (diff > 0)
+    {
+        if (MsgWaitForMultipleObjects(0, NULL, FALSE, min_timeout, QS_ALLINPUT) == WAIT_TIMEOUT)
+            break;
+        while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+        diff = time - GetTickCount();
     }
 }
 
@@ -2008,6 +2022,7 @@ static void test_AssociateFocus(void)
     test_OnSetFocus  = SINK_OPTIONAL; /* Doesn't always fire on Win7 */
     test_ACP_GetStatus = SINK_OPTIONAL;
     hr = ITfThreadMgr_SetFocus(g_tm,NULL);
+    ok(SUCCEEDED(hr),"ITfThreadMgr_SetFocus failed\n");
     sink_check_ok(&test_OnSetFocus,"OnSetFocus");
     test_ACP_GetStatus = SINK_UNEXPECTED;
     ITfDocumentMgr_Release(dmorig);

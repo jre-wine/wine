@@ -147,7 +147,7 @@ static DWORD validate_service_handle(SC_RPC_HANDLE handle, DWORD needed_access, 
     return err;
 }
 
-DWORD svcctl_OpenSCManagerW(
+DWORD __cdecl svcctl_OpenSCManagerW(
     MACHINE_HANDLEW MachineName, /* Note: this parameter is ignored */
     LPCWSTR DatabaseName,
     DWORD dwAccessMask,
@@ -204,7 +204,7 @@ static void SC_RPC_HANDLE_destroy(SC_RPC_HANDLE handle)
     }
 }
 
-DWORD svcctl_GetServiceDisplayNameW(
+DWORD __cdecl svcctl_GetServiceDisplayNameW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceName,
     WCHAR *lpBuffer,
@@ -250,7 +250,7 @@ DWORD svcctl_GetServiceDisplayNameW(
     return err;
 }
 
-DWORD svcctl_GetServiceKeyNameW(
+DWORD __cdecl svcctl_GetServiceKeyNameW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceDisplayName,
     WCHAR *lpBuffer,
@@ -315,7 +315,7 @@ static DWORD create_handle_for_service(struct service_entry *entry, DWORD dwDesi
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_OpenServiceW(
+DWORD __cdecl svcctl_OpenServiceW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceName,
     DWORD dwDesiredAccess,
@@ -416,7 +416,7 @@ static DWORD parse_dependencies(const WCHAR *dependencies, struct service_entry 
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_CreateServiceW(
+DWORD __cdecl svcctl_CreateServiceW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceName,
     LPCWSTR lpDisplayName,
@@ -510,7 +510,7 @@ DWORD svcctl_CreateServiceW(
     return create_handle_for_service(entry, dwDesiredAccess, phService);
 }
 
-DWORD svcctl_DeleteService(
+DWORD __cdecl svcctl_DeleteService(
     SC_RPC_HANDLE hService)
 {
     struct sc_service_handle *service;
@@ -533,7 +533,7 @@ DWORD svcctl_DeleteService(
     return err;
 }
 
-DWORD svcctl_QueryServiceConfigW(
+DWORD __cdecl svcctl_QueryServiceConfigW(
         SC_RPC_HANDLE hService,
         QUERY_SERVICE_CONFIGW *config)
 {
@@ -560,7 +560,7 @@ DWORD svcctl_QueryServiceConfigW(
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_ChangeServiceConfigW(
+DWORD __cdecl svcctl_ChangeServiceConfigW(
         SC_RPC_HANDLE hService,
         DWORD dwServiceType,
         DWORD dwStartType,
@@ -673,7 +673,7 @@ DWORD svcctl_ChangeServiceConfigW(
     return err;
 }
 
-DWORD svcctl_SetServiceStatus(
+DWORD __cdecl svcctl_SetServiceStatus(
     SC_RPC_HANDLE hServiceStatus,
     LPSERVICE_STATUS lpServiceStatus)
 {
@@ -697,13 +697,15 @@ DWORD svcctl_SetServiceStatus(
     service->service_entry->status.dwWaitHint = lpServiceStatus->dwWaitHint;
     service_unlock(service->service_entry);
 
-    if (service->service_entry->status_changed_event)
+    if (lpServiceStatus->dwCurrentState == SERVICE_STOPPED)
+        service_terminate(service->service_entry);
+    else if (service->service_entry->status_changed_event)
         SetEvent(service->service_entry->status_changed_event);
 
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE_CONFIG2W *config )
+DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE_CONFIG2W *config )
 {
     struct sc_service_handle *service;
     DWORD err;
@@ -737,6 +739,14 @@ DWORD svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE
                     wine_dbgstr_w(config->actions.lpRebootMsg),
                     wine_dbgstr_w(config->actions.lpCommand) );
         break;
+    case SERVICE_CONFIG_PRESHUTDOWN_INFO:
+        WINE_TRACE( "changing service %p preshutdown timeout to %d\n",
+                service, config->preshutdown.dwPreshutdownTimeout );
+        service_lock_exclusive( service->service_entry );
+        service->service_entry->preshutdown_timeout = config->preshutdown.dwPreshutdownTimeout;
+        save_service_config( service->service_entry );
+        service_unlock( service->service_entry );
+        break;
     default:
         WINE_FIXME("level %u not implemented\n", level);
         err = ERROR_INVALID_LEVEL;
@@ -745,8 +755,8 @@ DWORD svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE
     return err;
 }
 
-DWORD svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
-                                   BYTE *buffer, DWORD size, LPDWORD needed )
+DWORD __cdecl svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
+                                           BYTE *buffer, DWORD size, LPDWORD needed )
 {
     struct sc_service_handle *service;
     DWORD err;
@@ -781,6 +791,18 @@ DWORD svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
         }
         break;
 
+    case SERVICE_CONFIG_PRESHUTDOWN_INFO:
+        service_lock_shared(service->service_entry);
+
+        *needed = sizeof(SERVICE_PRESHUTDOWN_INFO);
+        if (size >= *needed)
+            ((LPSERVICE_PRESHUTDOWN_INFO)buffer)->dwPreshutdownTimeout =
+                service->service_entry->preshutdown_timeout;
+        else err = ERROR_INSUFFICIENT_BUFFER;
+
+        service_unlock(service->service_entry);
+        break;
+
     default:
         WINE_FIXME("level %u not implemented\n", level);
         err = ERROR_INVALID_LEVEL;
@@ -789,7 +811,7 @@ DWORD svcctl_QueryServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
     return err;
 }
 
-DWORD svcctl_QueryServiceStatusEx(
+DWORD __cdecl svcctl_QueryServiceStatusEx(
     SC_RPC_HANDLE hService,
     SC_STATUS_TYPE InfoLevel,
     BYTE *lpBuffer,
@@ -888,12 +910,65 @@ static BOOL service_accepts_control(const struct service_entry *service, DWORD d
 }
 
 /******************************************************************************
+ * service_send_command
+ */
+BOOL service_send_command( struct service_entry *service, HANDLE pipe,
+                           const void *data, DWORD size, DWORD *result )
+{
+    OVERLAPPED overlapped;
+    DWORD count, ret;
+    BOOL r;
+
+    overlapped.hEvent = service->overlapped_event;
+    r = WriteFile(pipe, data, size, &count, &overlapped);
+    if (!r && GetLastError() == ERROR_IO_PENDING)
+    {
+        ret = WaitForSingleObject( service->overlapped_event, service_pipe_timeout );
+        if (ret == WAIT_TIMEOUT)
+        {
+            WINE_ERR("sending command timed out\n");
+            *result = ERROR_SERVICE_REQUEST_TIMEOUT;
+            return FALSE;
+        }
+        r = GetOverlappedResult( pipe, &overlapped, &count, FALSE );
+    }
+    if (!r || count != size)
+    {
+        WINE_ERR("service protocol error - failed to write pipe!\n");
+        *result  = (!r ? GetLastError() : ERROR_WRITE_FAULT);
+        return FALSE;
+    }
+    r = ReadFile(pipe, result, sizeof *result, &count, &overlapped);
+    if (!r && GetLastError() == ERROR_IO_PENDING)
+    {
+        ret = WaitForSingleObject( service->overlapped_event, service_pipe_timeout );
+        if (ret == WAIT_TIMEOUT)
+        {
+            WINE_ERR("receiving command result timed out\n");
+            *result = ERROR_SERVICE_REQUEST_TIMEOUT;
+            return FALSE;
+        }
+        r = GetOverlappedResult( pipe, &overlapped, &count, FALSE );
+    }
+    if (!r || count != sizeof *result)
+    {
+        WINE_ERR("service protocol error - failed to read pipe "
+            "r = %d  count = %d!\n", r, count);
+        *result = (!r ? GetLastError() : ERROR_READ_FAULT);
+        return FALSE;
+    }
+
+    *result = ERROR_SUCCESS;
+    return TRUE;
+}
+
+/******************************************************************************
  * service_send_control
  */
 static BOOL service_send_control(struct service_entry *service, HANDLE pipe, DWORD dwControl, DWORD *result)
 {
     service_start_info *ssi;
-    DWORD len, count = 0;
+    DWORD len;
     BOOL r;
 
     /* calculate how much space we need to send the startup info */
@@ -906,20 +981,12 @@ static BOOL service_send_control(struct service_entry *service, HANDLE pipe, DWO
     ssi->name_size = strlenW(service->name) + 1;
     strcpyW( ssi->data, service->name );
 
-    r = WriteFile(pipe, ssi, ssi->total_size, &count, NULL);
-    if (!r || count != ssi->total_size)
-    {
-        WINE_ERR("service protocol error - failed to write pipe!\n");
-        return r;
-    }
-    r = ReadFile(pipe, result, sizeof *result, &count, NULL);
-    if (!r || count != sizeof *result)
-        WINE_ERR("service protocol error - failed to read pipe "
-            "r = %d  count = %d!\n", r, count);
+    r = service_send_command( service, pipe, ssi, ssi->total_size, result );
+    HeapFree( GetProcessHeap(), 0, ssi );
     return r;
 }
 
-DWORD svcctl_StartServiceW(
+DWORD __cdecl svcctl_StartServiceW(
     SC_RPC_HANDLE hService,
     DWORD dwNumServiceArgs,
     LPCWSTR *lpServiceArgVectors)
@@ -932,22 +999,24 @@ DWORD svcctl_StartServiceW(
     if ((err = validate_service_handle(hService, SERVICE_START, &service)) != 0)
         return err;
 
+    if (service->service_entry->config.dwStartType == SERVICE_DISABLED)
+        return ERROR_SERVICE_DISABLED;
+
     err = service_start(service->service_entry, dwNumServiceArgs, lpServiceArgVectors);
 
     return err;
 }
 
-DWORD svcctl_ControlService(
+DWORD __cdecl svcctl_ControlService(
     SC_RPC_HANDLE hService,
     DWORD dwControl,
     SERVICE_STATUS *lpServiceStatus)
 {
     DWORD access_required;
     struct sc_service_handle *service;
-    DWORD err;
+    DWORD result;
     BOOL ret;
     HANDLE control_mutex;
-    HANDLE control_pipe;
 
     WINE_TRACE("(%p, %d, %p)\n", hService, dwControl, lpServiceStatus);
 
@@ -975,20 +1044,45 @@ DWORD svcctl_ControlService(
             return ERROR_INVALID_PARAMETER;
     }
 
-    if ((err = validate_service_handle(hService, access_required, &service)) != 0)
-        return err;
+    if ((result = validate_service_handle(hService, access_required, &service)) != 0)
+        return result;
 
     service_lock_exclusive(service->service_entry);
 
-    if (lpServiceStatus)
+    result = ERROR_SUCCESS;
+    switch (service->service_entry->status.dwCurrentState)
     {
-        lpServiceStatus->dwServiceType = service->service_entry->status.dwServiceType;
-        lpServiceStatus->dwCurrentState = service->service_entry->status.dwCurrentState;
-        lpServiceStatus->dwControlsAccepted = service->service_entry->status.dwControlsAccepted;
-        lpServiceStatus->dwWin32ExitCode = service->service_entry->status.dwWin32ExitCode;
-        lpServiceStatus->dwServiceSpecificExitCode = service->service_entry->status.dwServiceSpecificExitCode;
-        lpServiceStatus->dwCheckPoint = service->service_entry->status.dwCheckPoint;
-        lpServiceStatus->dwWaitHint = service->service_entry->status.dwWaitHint;
+    case SERVICE_STOPPED:
+        result = ERROR_SERVICE_NOT_ACTIVE;
+        break;
+    case SERVICE_START_PENDING:
+        if (dwControl==SERVICE_CONTROL_STOP)
+            break;
+        /* fall thru */
+    case SERVICE_STOP_PENDING:
+        result = ERROR_SERVICE_CANNOT_ACCEPT_CTRL;
+        break;
+    }
+
+    if (result==ERROR_SUCCESS && !service->service_entry->control_mutex) {
+        result = ERROR_SERVICE_CANNOT_ACCEPT_CTRL;
+        service_terminate(service->service_entry);
+    }
+
+    if (result != ERROR_SUCCESS)
+    {
+        if (lpServiceStatus)
+        {
+            lpServiceStatus->dwServiceType = service->service_entry->status.dwServiceType;
+            lpServiceStatus->dwCurrentState = service->service_entry->status.dwCurrentState;
+            lpServiceStatus->dwControlsAccepted = service->service_entry->status.dwControlsAccepted;
+            lpServiceStatus->dwWin32ExitCode = service->service_entry->status.dwWin32ExitCode;
+            lpServiceStatus->dwServiceSpecificExitCode = service->service_entry->status.dwServiceSpecificExitCode;
+            lpServiceStatus->dwCheckPoint = service->service_entry->status.dwCheckPoint;
+            lpServiceStatus->dwWaitHint = service->service_entry->status.dwWaitHint;
+        }
+        service_unlock(service->service_entry);
+        return result;
     }
 
     if (!service_accepts_control(service->service_entry, dwControl))
@@ -997,44 +1091,35 @@ DWORD svcctl_ControlService(
         return ERROR_INVALID_SERVICE_CONTROL;
     }
 
-    switch (service->service_entry->status.dwCurrentState)
-    {
-    case SERVICE_STOPPED:
-        service_unlock(service->service_entry);
-        return ERROR_SERVICE_NOT_ACTIVE;
-    case SERVICE_START_PENDING:
-        if (dwControl==SERVICE_CONTROL_STOP)
-            break;
-        /* fall thru */
-    case SERVICE_STOP_PENDING:
-        service_unlock(service->service_entry);
-        return ERROR_SERVICE_CANNOT_ACCEPT_CTRL;
-    }
-
-    /* prevent races by caching these variables and clearing them on
-     * stop here instead of outside the services lock */
+    /* prevent races by caching control_mutex and clearing it on
+     * stop instead of outside the services lock */
     control_mutex = service->service_entry->control_mutex;
-    control_pipe = service->service_entry->control_pipe;
     if (dwControl == SERVICE_CONTROL_STOP)
-    {
         service->service_entry->control_mutex = NULL;
-        service->service_entry->control_pipe = INVALID_HANDLE_VALUE;
-    }
 
     service_unlock(service->service_entry);
 
     ret = WaitForSingleObject(control_mutex, 30000);
     if (ret == WAIT_OBJECT_0)
     {
-        DWORD result = ERROR_SUCCESS;
+        service_send_control(service->service_entry, service->service_entry->control_pipe,
+                dwControl, &result);
 
-        ret = service_send_control(service->service_entry, control_pipe, dwControl, &result);
+        if (lpServiceStatus)
+        {
+            service_lock_shared(service->service_entry);
+            lpServiceStatus->dwServiceType = service->service_entry->status.dwServiceType;
+            lpServiceStatus->dwCurrentState = service->service_entry->status.dwCurrentState;
+            lpServiceStatus->dwControlsAccepted = service->service_entry->status.dwControlsAccepted;
+            lpServiceStatus->dwWin32ExitCode = service->service_entry->status.dwWin32ExitCode;
+            lpServiceStatus->dwServiceSpecificExitCode = service->service_entry->status.dwServiceSpecificExitCode;
+            lpServiceStatus->dwCheckPoint = service->service_entry->status.dwCheckPoint;
+            lpServiceStatus->dwWaitHint = service->service_entry->status.dwWaitHint;
+            service_unlock(service->service_entry);
+        }
 
         if (dwControl == SERVICE_CONTROL_STOP)
-        {
             CloseHandle(control_mutex);
-            CloseHandle(control_pipe);
-        }
         else
             ReleaseMutex(control_mutex);
 
@@ -1043,15 +1128,12 @@ DWORD svcctl_ControlService(
     else
     {
         if (dwControl == SERVICE_CONTROL_STOP)
-        {
             CloseHandle(control_mutex);
-            CloseHandle(control_pipe);
-        }
         return ERROR_SERVICE_REQUEST_TIMEOUT;
     }
 }
 
-DWORD svcctl_CloseServiceHandle(
+DWORD __cdecl svcctl_CloseServiceHandle(
     SC_RPC_HANDLE *handle)
 {
     WINE_TRACE("(&%p)\n", *handle);
@@ -1074,7 +1156,7 @@ void __RPC_USER SC_RPC_LOCK_rundown(SC_RPC_LOCK hLock)
     SC_RPC_LOCK_destroy(hLock);
 }
 
-DWORD svcctl_LockServiceDatabase(
+DWORD __cdecl svcctl_LockServiceDatabase(
     SC_RPC_HANDLE hSCManager,
     SC_RPC_LOCK *phLock)
 {
@@ -1104,7 +1186,7 @@ DWORD svcctl_LockServiceDatabase(
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_UnlockServiceDatabase(
+DWORD __cdecl svcctl_UnlockServiceDatabase(
     SC_RPC_LOCK *phLock)
 {
     WINE_TRACE("(&%p)\n", *phLock);
@@ -1137,7 +1219,7 @@ static BOOL map_state(DWORD state, DWORD mask)
     return FALSE;
 }
 
-DWORD svcctl_EnumServicesStatusW(
+DWORD __cdecl svcctl_EnumServicesStatusW(
     SC_RPC_HANDLE hmngr,
     DWORD type,
     DWORD state,
@@ -1212,7 +1294,7 @@ DWORD svcctl_EnumServicesStatusW(
     return ERROR_SUCCESS;
 }
 
-struct service_entry *find_service_by_group(struct scmdatabase *db, const WCHAR *group)
+static struct service_entry *find_service_by_group(struct scmdatabase *db, const WCHAR *group)
 {
     struct service_entry *service;
     LIST_FOR_EACH_ENTRY(service, &db->services, struct service_entry, entry)
@@ -1231,7 +1313,7 @@ static BOOL match_group(const WCHAR *g1, const WCHAR *g2)
     return FALSE;
 }
 
-DWORD svcctl_EnumServicesStatusExW(
+DWORD __cdecl svcctl_EnumServicesStatusExW(
     SC_RPC_HANDLE hmngr,
     DWORD type,
     DWORD state,
@@ -1316,164 +1398,141 @@ DWORD svcctl_EnumServicesStatusExW(
     return ERROR_SUCCESS;
 }
 
-DWORD svcctl_QueryServiceObjectSecurity(
-    void)
+DWORD __cdecl svcctl_QueryServiceObjectSecurity(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_SetServiceObjectSecurity(
-    void)
+DWORD __cdecl svcctl_SetServiceObjectSecurity(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_QueryServiceStatus(
-    void)
-{
-    WINE_FIXME("\n");
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-
-DWORD svcctl_NotifyBootConfigStatus(
-    void)
-{
-    WINE_FIXME("\n");
-    return ERROR_CALL_NOT_IMPLEMENTED;
-}
-
-DWORD svcctl_SCSetServiceBitsW(
-    void)
+DWORD __cdecl svcctl_QueryServiceStatus(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
 
-DWORD svcctl_EnumDependentServicesW(
-    void)
+DWORD __cdecl svcctl_NotifyBootConfigStatus(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_QueryServiceLockStatusW(
-    void)
+DWORD __cdecl svcctl_SCSetServiceBitsW(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_SCSetServiceBitsA(
-    void)
+
+DWORD __cdecl svcctl_EnumDependentServicesW(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_ChangeServiceConfigA(
-    void)
+DWORD __cdecl svcctl_QueryServiceLockStatusW(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_CreateServiceA(
-    void)
+DWORD __cdecl svcctl_SCSetServiceBitsA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_EnumDependentServicesA(
-    void)
+DWORD __cdecl svcctl_ChangeServiceConfigA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_EnumServicesStatusA(
-    void)
+DWORD __cdecl svcctl_CreateServiceA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_OpenSCManagerA(
-    void)
+DWORD __cdecl svcctl_EnumDependentServicesA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_OpenServiceA(
-    void)
+DWORD __cdecl svcctl_EnumServicesStatusA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_QueryServiceConfigA(
-    void)
+DWORD __cdecl svcctl_OpenSCManagerA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_QueryServiceLockStatusA(
-    void)
+DWORD __cdecl svcctl_OpenServiceA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_StartServiceA(
-    void)
+DWORD __cdecl svcctl_QueryServiceConfigA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_GetServiceDisplayNameA(
-    void)
+DWORD __cdecl svcctl_QueryServiceLockStatusA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_GetServiceKeyNameA(
-    void)
+DWORD __cdecl svcctl_StartServiceA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_GetCurrentGroupStateW(
-    void)
+DWORD __cdecl svcctl_GetServiceDisplayNameA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_EnumServiceGroupW(
-    void)
+DWORD __cdecl svcctl_GetServiceKeyNameA(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_ChangeServiceConfig2A(
-    void)
+DWORD __cdecl svcctl_GetCurrentGroupStateW(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD svcctl_QueryServiceConfig2A(
-    void)
+DWORD __cdecl svcctl_EnumServiceGroupW(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_ChangeServiceConfig2A(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_QueryServiceConfig2A(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;

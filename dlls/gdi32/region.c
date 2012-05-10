@@ -1,6 +1,6 @@
 /*
  * GDI region objects. Shamelessly ripped out from the X11 distribution
- * Thanks for the nice licence.
+ * Thanks for the nice license.
  *
  * Copyright 1993, 1994, 1995 Alexandre Julliard
  * Modifications and additions: Copyright 1998 Huw Davies
@@ -104,13 +104,6 @@ SOFTWARE.
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(region);
-
-typedef struct {
-    INT size;
-    INT numRects;
-    RECT *rects;
-    RECT extents;
-} WINEREGION;
 
   /* GDI logical region object */
 typedef struct
@@ -761,101 +754,81 @@ HRGN WINAPI CreateRoundRectRgn( INT left, INT top,
 {
     RGNOBJ * obj;
     HRGN hrgn = 0;
-    int asq, bsq, d, xd, yd;
-    RECT rect;
+    int a, b, i, x, y;
+    INT64 asq, bsq, dx, dy, err;
+    RECT *rects;
 
       /* Make the dimensions sensible */
 
     if (left > right) { INT tmp = left; left = right; right = tmp; }
     if (top > bottom) { INT tmp = top; top = bottom; bottom = tmp; }
+    /* the region is for the rectangle interior, but only at right and bottom for some reason */
+    right--;
+    bottom--;
 
-    ellipse_width = abs(ellipse_width);
-    ellipse_height = abs(ellipse_height);
-
-      /* Check parameters */
-
-    if (ellipse_width > right-left) ellipse_width = right-left;
-    if (ellipse_height > bottom-top) ellipse_height = bottom-top;
+    ellipse_width = min( right - left, abs( ellipse_width ));
+    ellipse_height = min( bottom - top, abs( ellipse_height ));
 
       /* Check if we can do a normal rectangle instead */
 
     if ((ellipse_width < 2) || (ellipse_height < 2))
         return CreateRectRgn( left, top, right, bottom );
 
-      /* Create region */
-
-    d = (ellipse_height < 128) ? ((3 * ellipse_height) >> 2) : 64;
     if (!(obj = HeapAlloc( GetProcessHeap(), 0, sizeof(*obj) ))) return 0;
-    if (!init_region( &obj->rgn, d ))
+    obj->rgn.size = ellipse_height;
+    obj->rgn.numRects = ellipse_height;
+    obj->rgn.extents.left   = left;
+    obj->rgn.extents.top    = top;
+    obj->rgn.extents.right  = right;
+    obj->rgn.extents.bottom = bottom;
+
+    obj->rgn.rects = rects = HeapAlloc( GetProcessHeap(), 0, obj->rgn.size * sizeof(RECT) );
+    if (!rects) goto done;
+
+    /* based on an algorithm by Alois Zingl */
+
+    a = ellipse_width - 1;
+    b = ellipse_height - 1;
+    asq = (INT64)8 * a * a;
+    bsq = (INT64)8 * b * b;
+    dx  = (INT64)4 * b * b * (1 - a);
+    dy  = (INT64)4 * a * a * (1 + (b % 2));
+    err = dx + dy + a * a * (b % 2);
+
+    x = 0;
+    y = ellipse_height / 2;
+
+    rects[y].left = left;
+    rects[y].right = right;
+
+    while (x <= ellipse_width / 2)
     {
-        HeapFree( GetProcessHeap(), 0, obj );
-        return 0;
+        INT64 e2 = 2 * err;
+        if (e2 >= dx)
+        {
+            x++;
+            err += dx += bsq;
+        }
+        if (e2 <= dy)
+        {
+            y++;
+            err += dy += asq;
+            rects[y].left = left + x;
+            rects[y].right = right - x;
+        }
     }
-
-      /* Ellipse algorithm, based on an article by K. Porter */
-      /* in DDJ Graphics Programming Column, 8/89 */
-
-    asq = ellipse_width * ellipse_width / 4;        /* a^2 */
-    bsq = ellipse_height * ellipse_height / 4;      /* b^2 */
-    d = bsq - asq * ellipse_height / 2 + asq / 4;   /* b^2 - a^2b + a^2/4 */
-    xd = 0;
-    yd = asq * ellipse_height;                      /* 2a^2b */
-
-    rect.left   = left + ellipse_width / 2;
-    rect.right  = right - ellipse_width / 2;
-
-      /* Loop to draw first half of quadrant */
-
-    while (xd < yd)
+    for (i = 0; i < ellipse_height / 2; i++)
     {
-	if (d > 0)  /* if nearest pixel is toward the center */
-	{
-	      /* move toward center */
-	    rect.top = top++;
-	    rect.bottom = rect.top + 1;
-	    if (!REGION_UnionRectWithRegion( &rect, &obj->rgn )) goto done;
-	    rect.top = --bottom;
-	    rect.bottom = rect.top + 1;
-	    if (!REGION_UnionRectWithRegion( &rect, &obj->rgn )) goto done;
-	    yd -= 2*asq;
-	    d  -= yd;
-	}
-	rect.left--;        /* next horiz point */
-	rect.right++;
-	xd += 2*bsq;
-	d  += bsq + xd;
+        rects[i].left = rects[b - i].left;
+        rects[i].right = rects[b - i].right;
+        rects[i].top = top + i;
+        rects[i].bottom = rects[i].top + 1;
     }
-
-      /* Loop to draw second half of quadrant */
-
-    d += (3 * (asq-bsq) / 2 - (xd+yd)) / 2;
-    while (yd >= 0)
+    rects[i - 1].bottom = bottom - ellipse_height + i;  /* extend to bottom of rectangle */
+    for (; i < ellipse_height; i++)
     {
-	  /* next vertical point */
-	rect.top = top++;
-	rect.bottom = rect.top + 1;
-	if (!REGION_UnionRectWithRegion( &rect, &obj->rgn )) goto done;
-	rect.top = --bottom;
-	rect.bottom = rect.top + 1;
-	if (!REGION_UnionRectWithRegion( &rect, &obj->rgn )) goto done;
-	if (d < 0)   /* if nearest pixel is outside ellipse */
-	{
-	    rect.left--;     /* move away from center */
-	    rect.right++;
-	    xd += 2*bsq;
-	    d  += xd;
-	}
-	yd -= 2*asq;
-	d  += asq - yd;
-    }
-
-      /* Add the inside rectangle */
-
-    if (top <= bottom)
-    {
-	rect.top = top;
-	rect.bottom = bottom;
-	if (!REGION_UnionRectWithRegion( &rect, &obj->rgn )) goto done;
+        rects[i].top = bottom - ellipse_height + i;
+        rects[i].bottom = rects[i].top + 1;
     }
 
     hrgn = alloc_gdi_handle( &obj->header, OBJ_REGION, &region_funcs );
@@ -922,6 +895,20 @@ HRGN WINAPI CreateEllipticRgnIndirect( const RECT *rect )
     return CreateRoundRectRgn( rect->left, rect->top, rect->right,
 				 rect->bottom, rect->right - rect->left,
 				 rect->bottom - rect->top );
+}
+
+/*********************************************************************
+ *   get_wine_region
+ *
+ * Return the region data without making a copy.  The caller
+ * must not alter anything and must call GDI_ReleaseObj() when
+ * they have finished with the data.
+ */
+const WINEREGION *get_wine_region(HRGN rgn)
+{
+    RGNOBJ *obj = GDI_GetObjPtr( rgn, OBJ_REGION );
+    if(!obj) return NULL;
+    return &obj->rgn;
 }
 
 /***********************************************************************
@@ -1260,6 +1247,17 @@ static BOOL REGION_UnionRectWithRegion(const RECT *rect, WINEREGION *rgn)
     return REGION_UnionRegion(rgn, rgn, &region);
 }
 
+
+BOOL add_rect_to_region( HRGN rgn, const RECT *rect )
+{
+    RGNOBJ *obj = GDI_GetObjPtr( rgn, OBJ_REGION );
+    BOOL ret;
+
+    if (!obj) return FALSE;
+    ret = REGION_UnionRectWithRegion( rect, &obj->rgn );
+    GDI_ReleaseObj( rgn );
+    return ret;
+}
 
 /***********************************************************************
  *           REGION_CreateFrameRgn

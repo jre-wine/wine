@@ -24,11 +24,16 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static inline struct dxgi_device *impl_from_IWineDXGIDevice(IWineDXGIDevice *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_device, IWineDXGIDevice_iface);
+}
+
 /* IUnknown methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_QueryInterface(IWineDXGIDevice *iface, REFIID riid, void **object)
 {
-    struct dxgi_device *This = (struct dxgi_device *)iface;
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
 
     TRACE("iface %p, riid %s, object %p\n", iface, debugstr_guid(riid), object);
 
@@ -56,7 +61,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_QueryInterface(IWineDXGIDevice *ifa
 
 static ULONG STDMETHODCALLTYPE dxgi_device_AddRef(IWineDXGIDevice *iface)
 {
-    struct dxgi_device *This = (struct dxgi_device *)iface;
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
     ULONG refcount = InterlockedIncrement(&This->refcount);
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
@@ -66,7 +71,7 @@ static ULONG STDMETHODCALLTYPE dxgi_device_AddRef(IWineDXGIDevice *iface)
 
 static ULONG STDMETHODCALLTYPE dxgi_device_Release(IWineDXGIDevice *iface)
 {
-    struct dxgi_device *This = (struct dxgi_device *)iface;
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
     ULONG refcount = InterlockedDecrement(&This->refcount);
 
     TRACE("%p decreasing refcount to %u\n", This, refcount);
@@ -75,7 +80,7 @@ static ULONG STDMETHODCALLTYPE dxgi_device_Release(IWineDXGIDevice *iface)
     {
         if (This->child_layer) IUnknown_Release(This->child_layer);
         EnterCriticalSection(&dxgi_cs);
-        IWineD3DDevice_Release(This->wined3d_device);
+        wined3d_device_decref(This->wined3d_device);
         LeaveCriticalSection(&dxgi_cs);
         IWineDXGIFactory_Release(This->factory);
         HeapFree(GetProcessHeap(), 0, This);
@@ -134,15 +139,15 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_GetParent(IWineDXGIDevice *iface, R
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_GetAdapter(IWineDXGIDevice *iface, IDXGIAdapter **adapter)
 {
-    struct dxgi_device *This = (struct dxgi_device *)iface;
-    WINED3DDEVICE_CREATION_PARAMETERS create_parameters;
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
+    struct wined3d_device_creation_parameters create_parameters;
     HRESULT hr;
 
     TRACE("iface %p, adapter %p\n", iface, adapter);
 
     EnterCriticalSection(&dxgi_cs);
 
-    hr = IWineD3DDevice_GetCreationParameters(This->wined3d_device, &create_parameters);
+    hr = wined3d_device_get_creation_parameters(This->wined3d_device, &create_parameters);
     if (FAILED(hr))
     {
         LeaveCriticalSection(&dxgi_cs);
@@ -151,14 +156,15 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_GetAdapter(IWineDXGIDevice *iface, 
 
     LeaveCriticalSection(&dxgi_cs);
 
-    return IWineDXGIFactory_EnumAdapters(This->factory, create_parameters.AdapterOrdinal, adapter);
+    return IWineDXGIFactory_EnumAdapters(This->factory, create_parameters.adapter_idx, adapter);
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *iface,
         const DXGI_SURFACE_DESC *desc, UINT surface_count, DXGI_USAGE usage,
         const DXGI_SHARED_RESOURCE *shared_resource, IDXGISurface **surface)
 {
-    IWineD3DDeviceParent *device_parent;
+    struct wined3d_device_parent *device_parent;
+    IWineDXGIDeviceParent *dxgi_device_parent;
     HRESULT hr;
     UINT i;
     UINT j;
@@ -166,33 +172,35 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
     TRACE("iface %p, desc %p, surface_count %u, usage %#x, shared_resource %p, surface %p\n",
             iface, desc, surface_count, usage, shared_resource, surface);
 
-    hr = IWineDXGIDevice_QueryInterface(iface, &IID_IWineD3DDeviceParent, (void **)&device_parent);
+    hr = IWineDXGIDevice_QueryInterface(iface, &IID_IWineDXGIDeviceParent, (void **)&dxgi_device_parent);
     if (FAILED(hr))
     {
         ERR("Device should implement IWineD3DDeviceParent\n");
         return E_FAIL;
     }
 
+    device_parent = IWineDXGIDeviceParent_get_wined3d_device_parent(dxgi_device_parent);
+
     FIXME("Implement DXGI<->wined3d usage conversion\n");
 
     memset(surface, 0, surface_count * sizeof(*surface));
     for (i = 0; i < surface_count; ++i)
     {
-        IWineD3DSurface *wined3d_surface;
+        struct wined3d_surface *wined3d_surface;
         IUnknown *parent;
 
-        hr = IWineD3DDeviceParent_CreateSurface(device_parent, NULL, desc->Width, desc->Height,
-                wined3dformat_from_dxgi_format(desc->Format), usage, WINED3DPOOL_DEFAULT, 0,
-                WINED3DCUBEMAP_FACE_POSITIVE_X, &wined3d_surface);
+        hr = device_parent->ops->create_surface(device_parent, NULL, desc->Width, desc->Height,
+                wined3dformat_from_dxgi_format(desc->Format), usage, WINED3D_POOL_DEFAULT, 0,
+                WINED3D_CUBEMAP_FACE_POSITIVE_X, &wined3d_surface);
         if (FAILED(hr))
         {
             ERR("CreateSurface failed, returning %#x\n", hr);
             goto fail;
         }
 
-        parent = IWineD3DSurface_GetParent(wined3d_surface);
+        parent = wined3d_surface_get_parent(wined3d_surface);
         hr = IUnknown_QueryInterface(parent, &IID_IDXGISurface, (void **)&surface[i]);
-        IWineD3DSurface_Release(wined3d_surface);
+        wined3d_surface_decref(wined3d_surface);
         if (FAILED(hr))
         {
             ERR("Surface should implement IDXGISurface\n");
@@ -201,7 +209,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_CreateSurface(IWineDXGIDevice *ifac
 
         TRACE("Created IDXGISurface %p (%u/%u)\n", surface[i], i + 1, surface_count);
     }
-    IWineD3DDeviceParent_Release(device_parent);
+    IWineDXGIDeviceParent_Release(dxgi_device_parent);
 
     return S_OK;
 
@@ -210,7 +218,7 @@ fail:
     {
         IDXGISurface_Release(surface[i]);
     }
-    IWineD3DDeviceParent_Release(device_parent);
+    IWineDXGIDeviceParent_Release(dxgi_device_parent);
     return hr;
 }
 
@@ -239,14 +247,14 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_GetGPUThreadPriority(IWineDXGIDevic
 
 /* IWineDXGIDevice methods */
 
-static IWineD3DDevice * STDMETHODCALLTYPE dxgi_device_get_wined3d_device(IWineDXGIDevice *iface)
+static struct wined3d_device * STDMETHODCALLTYPE dxgi_device_get_wined3d_device(IWineDXGIDevice *iface)
 {
-    struct dxgi_device *This = (struct dxgi_device *)iface;
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
 
     TRACE("iface %p\n", iface);
 
     EnterCriticalSection(&dxgi_cs);
-    IWineD3DDevice_AddRef(This->wined3d_device);
+    wined3d_device_incref(This->wined3d_device);
     LeaveCriticalSection(&dxgi_cs);
     return This->wined3d_device;
 }
@@ -282,13 +290,14 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_create_surface(IWineDXGIDevice *ifa
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_device_create_swapchain(IWineDXGIDevice *iface,
-        WINED3DPRESENT_PARAMETERS *present_parameters, IWineD3DSwapChain **wined3d_swapchain)
+        struct wined3d_swapchain_desc *desc, struct wined3d_swapchain **wined3d_swapchain)
 {
+    struct dxgi_device *This = impl_from_IWineDXGIDevice(iface);
     struct dxgi_swapchain *object;
     HRESULT hr;
 
-    TRACE("iface %p, present_parameters %p, wined3d_swapchain %p.\n",
-            iface, present_parameters, wined3d_swapchain);
+    TRACE("iface %p, desc %p, wined3d_swapchain %p.\n",
+            iface, desc, wined3d_swapchain);
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
     if (!object)
@@ -297,7 +306,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_device_create_swapchain(IWineDXGIDevice *i
         return E_OUTOFMEMORY;
     }
 
-    hr = dxgi_swapchain_init(object, (struct dxgi_device *)iface, present_parameters);
+    hr = dxgi_swapchain_init(object, This, desc);
     if (FAILED(hr))
     {
         WARN("Failed to initialize swapchain, hr %#x.\n", hr);
@@ -337,14 +346,16 @@ static const struct IWineDXGIDeviceVtbl dxgi_device_vtbl =
 HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *layer,
         IDXGIFactory *factory, IDXGIAdapter *adapter)
 {
-    IWineD3DDeviceParent *wined3d_device_parent;
+    struct wined3d_device_parent *wined3d_device_parent;
+    IWineDXGIDeviceParent *dxgi_device_parent;
     IWineDXGIAdapter *wine_adapter;
     UINT adapter_ordinal;
     struct wined3d *wined3d;
     void *layer_base;
     HRESULT hr;
+    WINED3DCAPS caps;
 
-    device->vtbl = &dxgi_device_vtbl;
+    device->IWineDXGIDevice_iface.lpVtbl = &dxgi_device_vtbl;
     device->refcount = 1;
 
     layer_base = device + 1;
@@ -377,18 +388,31 @@ HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *l
     adapter_ordinal = IWineDXGIAdapter_get_ordinal(wine_adapter);
     IWineDXGIAdapter_Release(wine_adapter);
 
-    hr = IUnknown_QueryInterface((IUnknown *)device, &IID_IWineD3DDeviceParent, (void **)&wined3d_device_parent);
+    hr = IWineDXGIDevice_QueryInterface(&device->IWineDXGIDevice_iface, &IID_IWineDXGIDeviceParent,
+            (void **)&dxgi_device_parent);
     if (FAILED(hr))
     {
         ERR("DXGI device should implement IWineD3DDeviceParent.\n");
         goto fail;
     }
 
+    wined3d_device_parent = IWineDXGIDeviceParent_get_wined3d_device_parent(dxgi_device_parent);
+
     FIXME("Ignoring adapter type.\n");
+
+    hr = wined3d_get_device_caps(wined3d, adapter_ordinal, WINED3D_DEVICE_TYPE_HAL, &caps);
+    if (FAILED(hr) || caps.VertexShaderVersion < 4 || caps.PixelShaderVersion < 4)
+    {
+        WARN("Direct3D 10 is not supported on this GPU with the current shader backend.\n");
+        if (SUCCEEDED(hr))
+            hr = E_FAIL;
+        goto fail;
+    }
+
     EnterCriticalSection(&dxgi_cs);
-    hr = wined3d_device_create(wined3d, adapter_ordinal, WINED3DDEVTYPE_HAL, NULL, 0,
+    hr = wined3d_device_create(wined3d, adapter_ordinal, WINED3D_DEVICE_TYPE_HAL, NULL, 0, 4,
             wined3d_device_parent, &device->wined3d_device);
-    IWineD3DDeviceParent_Release(wined3d_device_parent);
+    IWineDXGIDeviceParent_Release(dxgi_device_parent);
     wined3d_decref(wined3d);
     LeaveCriticalSection(&dxgi_cs);
     if (FAILED(hr))
@@ -403,7 +427,7 @@ fail:
     if (device->wined3d_device)
     {
         EnterCriticalSection(&dxgi_cs);
-        IWineD3DDevice_Release(device->wined3d_device);
+        wined3d_device_decref(device->wined3d_device);
         LeaveCriticalSection(&dxgi_cs);
     }
     if (device->factory) IWineDXGIFactory_Release(device->factory);

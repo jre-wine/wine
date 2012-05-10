@@ -38,9 +38,6 @@ static const CLSID CLSID_JScript =
 #define SET_EXPECT(func) \
     expect_ ## func = TRUE
 
-#define SET_CALLED(func) \
-    called_ ## func = TRUE
-
 #define CHECK_EXPECT2(func) \
     do { \
         ok(expect_ ##func, "unexpected call " #func "\n"); \
@@ -189,8 +186,6 @@ static HRESULT WINAPI ActiveScriptSite_OnLeaveScript(IActiveScriptSite *iface)
     return S_OK;
 }
 
-#undef ACTSCPSITE_THIS
-
 static const IActiveScriptSiteVtbl ActiveScriptSiteVtbl = {
     ActiveScriptSite_QueryInterface,
     ActiveScriptSite_AddRef,
@@ -328,6 +323,38 @@ static void test_safety(IUnknown *unk)
        "supported=%x\n", supported);
     ok(enabled == (INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER),
        "enabled=%x\n", enabled);
+
+    hres = IObjectSafety_SetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse, INTERFACESAFE_FOR_UNTRUSTED_DATA, 0);
+    ok(hres == S_OK, "SetInterfaceSafetyOptions failed: %08x\n", hres);
+
+    supported = enabled = 0xdeadbeef;
+    hres = IObjectSafety_GetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse, &supported, &enabled);
+    ok(hres == S_OK, "GetInterfaceSafetyOptions failed: %08x\n", hres);
+    ok(supported == (INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER),
+       "supported=%x\n", supported);
+    ok(enabled == (INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER), "enabled=%x\n", enabled);
+
+    hres = IObjectSafety_SetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse,
+            INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER, 0);
+    ok(hres == S_OK, "SetInterfaceSafetyOptions failed: %08x\n", hres);
+
+    supported = enabled = 0xdeadbeef;
+    hres = IObjectSafety_GetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse, &supported, &enabled);
+    ok(hres == S_OK, "GetInterfaceSafetyOptions failed: %08x\n", hres);
+    ok(supported == (INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER),
+       "supported=%x\n", supported);
+    ok(enabled == INTERFACE_USES_DISPEX, "enabled=%x\n", enabled);
+
+    hres = IObjectSafety_SetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse,
+            INTERFACE_USES_DISPEX, 0);
+    ok(hres == S_OK, "SetInterfaceSafetyOptions failed: %08x\n", hres);
+
+    supported = enabled = 0xdeadbeef;
+    hres = IObjectSafety_GetInterfaceSafetyOptions(safety, &IID_IActiveScriptParse, &supported, &enabled);
+    ok(hres == S_OK, "GetInterfaceSafetyOptions failed: %08x\n", hres);
+    ok(supported == (INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_DISPEX|INTERFACE_USES_SECURITY_MANAGER),
+       "supported=%x\n", supported);
+    ok(enabled == INTERFACE_USES_DISPEX, "enabled=%x\n", enabled);
 
     IObjectSafety_Release(safety);
 }
@@ -605,6 +632,18 @@ static void test_jscript_uninitializing(void)
     ok(!ref, "ref = %d\n", ref);
 }
 
+static void test_aggregation(void)
+{
+    IUnknown *unk = (IUnknown*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = CoCreateInstance(&CLSID_JScript, (IUnknown*)0xdeadbeef, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
+            &IID_IUnknown, (void**)&unk);
+    ok(hres == CLASS_E_NOAGGREGATION || broken(E_INVALIDARG) /* win2k */,
+       "CoCreateInstance failed: %08x, expected CLASS_E_NOAGGREGATION\n", hres);
+    ok(!unk || broken(unk != NULL), "unk = %p\n", unk);
+}
+
 static BOOL check_jscript(void)
 {
     IActiveScriptProperty *script_prop;
@@ -626,6 +665,7 @@ START_TEST(jscript)
         test_jscript();
         test_jscript2();
         test_jscript_uninitializing();
+        test_aggregation();
     }else {
         win_skip("Broken engine, probably too old\n");
     }

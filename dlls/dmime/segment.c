@@ -563,8 +563,8 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_IDirectMusicObject_SetDescriptor 
 	if (pDesc->dwValidData & DMUS_OBJ_DATE)
 		This->pDesc->ftDate = pDesc->ftDate;
 	if (pDesc->dwValidData & DMUS_OBJ_MEMORY) {
-		memcpy (&This->pDesc->llMemLength, &pDesc->llMemLength, sizeof (pDesc->llMemLength));				
-		memcpy (This->pDesc->pbMemData, pDesc->pbMemData, sizeof (pDesc->pbMemData));
+		This->pDesc->llMemLength = pDesc->llMemLength;
+		memcpy (This->pDesc->pbMemData, pDesc->pbMemData, pDesc->llMemLength);
 	}
 	if (pDesc->dwValidData & DMUS_OBJ_STREAM) {
 		/* according to MSDN, we copy the stream */
@@ -674,7 +674,7 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_IDirectMusicObject_ParseDescripto
 												break;
 											}
 											default: {
-												TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+												TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 												liMove.QuadPart = Chunk.dwSize;
 												IStream_Seek (pStream, liMove, STREAM_SEEK_CUR, NULL);
 												break;						
@@ -692,7 +692,7 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_IDirectMusicObject_ParseDescripto
                                                                     TRACE_(dmfile)(": %s chunk (size = %d)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
 								    switch (Chunk.fccID) {
 								    default: {
-								      TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+								      TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 								      liMove.QuadPart = Chunk.dwSize;
 								      IStream_Seek (pStream, liMove, STREAM_SEEK_CUR, NULL);
 								      break;						
@@ -712,7 +712,7 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_IDirectMusicObject_ParseDescripto
 							break;
 						}	
 						default: {
-							TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+							TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 							liMove.QuadPart = Chunk.dwSize;
 							IStream_Seek (pStream, liMove, STREAM_SEEK_CUR, NULL);
 							break;						
@@ -971,7 +971,7 @@ static HRESULT IDirectMusicSegment8Impl_IPersistStream_ParseTrackForm (LPPERSIST
 	break;
       }
 
-      TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+      TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
       liMove.QuadPart = Chunk.dwSize;
       IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
       break;						
@@ -1015,7 +1015,7 @@ static HRESULT IDirectMusicSegment8Impl_IPersistStream_ParseTrackList (LPPERSIST
 	break;
       }
       default: {
-	TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+	TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 	liMove.QuadPart = StreamSize;
 	IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
 	break;
@@ -1024,7 +1024,7 @@ static HRESULT IDirectMusicSegment8Impl_IPersistStream_ParseTrackList (LPPERSIST
       break;
     }
     default: {
-      TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+      TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
       liMove.QuadPart = Chunk.dwSize;
       IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
       break;						
@@ -1124,7 +1124,7 @@ static HRESULT IDirectMusicSegment8Impl_IPersistStream_ParseSegmentForm (LPPERSI
 	    if (hr == S_FALSE) {
 	      switch (Chunk.fccID) {
 	      default: {
-		TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+		TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 		liMove.QuadPart = Chunk.dwSize;
 		IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
 		break;						
@@ -1152,7 +1152,7 @@ static HRESULT IDirectMusicSegment8Impl_IPersistStream_ParseSegmentForm (LPPERSI
 	break;
       }
       default: {
-	TRACE_(dmfile)(": unknown chunk (irrevelant & skipping)\n");
+	TRACE_(dmfile)(": unknown chunk (irrelevant & skipping)\n");
 	liMove.QuadPart = Chunk.dwSize;
 	IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
 	break;						
@@ -1226,8 +1226,7 @@ static HRESULT WINAPI IDirectMusicSegment8Impl_IPersistStream_Load (LPPERSISTSTR
 
       IStream_Clone (pStm, &pClonedStream);
 	
-      liMove.QuadPart = 0;
-      liMove.QuadPart -= sizeof(FOURCC) + (sizeof(FOURCC)+sizeof(DWORD));
+      liMove.QuadPart = - (LONGLONG)(sizeof(FOURCC) * 2 + sizeof(DWORD));
       IStream_Seek (pClonedStream, liMove, STREAM_SEEK_CUR, NULL);
 	
       hr = IDirectMusicSegment8Impl_IPersistStream_LoadWave (iface, pClonedStream, &pWave);

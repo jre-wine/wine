@@ -28,7 +28,8 @@
 #include <sys/types.h>
 #ifdef HAVE_SYS_WAIT_H
 #include <sys/wait.h>
-#endif 
+#endif
+#include <errno.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include "windef.h"
@@ -276,7 +277,7 @@ void cleanup_helper(PNegoHelper helper)
 {
 
     TRACE("Killing helper %p\n", helper);
-    if( (helper == NULL) || (helper->helper_pid == 0))
+    if(helper == NULL)
         return;
 
     HeapFree(GetProcessHeap(), 0, helper->com_buf);
@@ -285,7 +286,16 @@ void cleanup_helper(PNegoHelper helper)
     close(helper->pipe_out);
     close(helper->pipe_in);
 
-    helper->helper_pid = 0;
+#ifdef HAVE_FORK
+    if (helper->helper_pid > 0) /* reap child */
+    {
+        pid_t wret;
+        do {
+            wret = waitpid(helper->helper_pid, NULL, 0);
+        } while (wret < 0 && errno == EINTR);
+    }
+#endif
+
     HeapFree(GetProcessHeap(), 0, helper);
 }
 

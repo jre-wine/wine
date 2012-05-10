@@ -1,6 +1,6 @@
 MODULE    = d3dx9_36.dll
 IMPORTLIB = d3dx9
-IMPORTS   = d3d9 d3dcompiler ole32 gdi32 user32
+IMPORTS   = d3d9 d3dcompiler dxguid d3dxof ole32 gdi32 user32
 
 C_SRCS = \
 	core.c \
@@ -11,6 +11,7 @@ C_SRCS = \
 	math.c \
 	mesh.c \
 	shader.c \
+	skin.c \
 	sprite.c \
 	surface.c \
 	texture.c \

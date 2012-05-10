@@ -44,9 +44,14 @@ extern BOOL WINAPI GUIDFromStringW(LPCWSTR psz, LPGUID pguid);
 /*******************************************************************************
  * GAMEUX_initGameData
  *
- * Internal helper function. Description available in gameux_private.h file
+ * Internal helper function.
+ * Initializes GAME_DATA structure fields with proper values. Should be
+ * called always before first usage of this structure. Implemented in gameexplorer.c
+ *
+ * Parameters:
+ *  GameData                        [I/O]   pointer to structure to initialize
  */
-void GAMEUX_initGameData(struct GAMEUX_GAME_DATA *GameData)
+static void GAMEUX_initGameData(struct GAMEUX_GAME_DATA *GameData)
 {
     GameData->sGDFBinaryPath = NULL;
     GameData->sGameInstallDirectory = NULL;
@@ -56,9 +61,14 @@ void GAMEUX_initGameData(struct GAMEUX_GAME_DATA *GameData)
 /*******************************************************************************
  * GAMEUX_uninitGameData
  *
- * Internal helper function. Description available in gameux_private.h file
+ * Internal helper function.
+ * Properly frees all data stored or pointed by fields of GAME_DATA structure.
+ * Should be called before freeing this structure. Implemented in gameexplorer.c
+ *
+ * Parameters:
+ *  GameData                        [I/O]   pointer to structure to uninitialize
  */
-void GAMEUX_uninitGameData(struct GAMEUX_GAME_DATA *GameData)
+static void GAMEUX_uninitGameData(struct GAMEUX_GAME_DATA *GameData)
 {
     HeapFree(GetProcessHeap(), 0, GameData->sGDFBinaryPath);
     HeapFree(GetProcessHeap(), 0, GameData->sGameInstallDirectory);
@@ -377,6 +387,13 @@ static HRESULT GAMEUX_ParseGameDefinition(
 
     return hr;
 }
+
+struct parse_gdf_thread_param
+{
+    struct GAMEUX_GAME_DATA *GameData;
+    HRESULT hr;
+};
+
 /*******************************************************************************
  * GAMEUX_ParseGDFBinary
  *
@@ -389,8 +406,10 @@ static HRESULT GAMEUX_ParseGameDefinition(
  *                                  GDF will be stored in other fields of this
  *                                  structure.
  */
-static HRESULT GAMEUX_ParseGDFBinary(struct GAMEUX_GAME_DATA *GameData)
+static DWORD WINAPI GAMEUX_ParseGDFBinary(void *thread_param)
 {
+    struct parse_gdf_thread_param *ctx = thread_param;
+    struct GAMEUX_GAME_DATA *GameData = ctx->GameData;
     static const WCHAR sRes[] = {'r','e','s',':','/','/',0};
     static const WCHAR sDATA[] = {'D','A','T','A',0};
     static const WCHAR sSlash[] = {'/',0};
@@ -412,6 +431,8 @@ static HRESULT GAMEUX_ParseGDFBinary(struct GAMEUX_GAME_DATA *GameData)
     lstrcatW(sResourcePath, sDATA);
     lstrcatW(sResourcePath, sSlash);
     lstrcatW(sResourcePath, ID_GDF_XML_STR);
+
+    CoInitialize(NULL);
 
     hr = CoCreateInstance(&CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER,
             &IID_IXMLDOMDocument, (void**)&document);
@@ -464,8 +485,11 @@ static HRESULT GAMEUX_ParseGDFBinary(struct GAMEUX_GAME_DATA *GameData)
         IXMLDOMDocument_Release(document);
     }
 
-    return hr;
+    CoUninitialize();
+    ctx->hr = hr;
+    return 0;
 }
+
 /*******************************************************************
  * GAMEUX_RemoveRegistryRecord
  *
@@ -497,11 +521,23 @@ static HRESULT GAMEUX_RemoveRegistryRecord(GUID* pInstanceID)
     return hr;
 }
 /*******************************************************************************
- * GAMEUX_RegisterGame
+ *  GAMEUX_RegisterGame
  *
- * Internal helper function. Description available in gameux_private.h file
+ * Internal helper function. Registers game associated with given GDF binary in
+ * Game Explorer. Implemented in gameexplorer.c
+ *
+ * Parameters:
+ *  sGDFBinaryPath                  [I]     path to binary containing GDF file in
+ *                                          resources
+ *  sGameInstallDirectory           [I]     path to directory, where game installed
+ *                                          it's files.
+ *  installScope                    [I]     scope of game installation
+ *  pInstanceID                     [I/O]   pointer to game instance identifier.
+ *                                          If pointing to GUID_NULL, then new
+ *                                          identifier will be generated automatically
+ *                                          and returned via this parameter
  */
-HRESULT WINAPI GAMEUX_RegisterGame(LPCWSTR sGDFBinaryPath,
+static HRESULT GAMEUX_RegisterGame(LPCWSTR sGDFBinaryPath,
         LPCWSTR sGameInstallDirectory,
         GAME_INSTALL_SCOPE installScope,
         GUID *pInstanceID)
@@ -526,12 +562,34 @@ HRESULT WINAPI GAMEUX_RegisterGame(LPCWSTR sGDFBinaryPath,
 
     /* load data from GDF binary */
     if(SUCCEEDED(hr))
-        hr = GAMEUX_ParseGDFBinary(&GameData);
+    {
+        struct parse_gdf_thread_param thread_param;
+        HANDLE thread;
+        DWORD ret;
+
+        thread_param.GameData = &GameData;
+        if(!(thread = CreateThread(NULL, 0, GAMEUX_ParseGDFBinary, &thread_param, 0, &ret)))
+        {
+            ERR("Failed to create thread.\n");
+            hr = E_FAIL;
+            goto done;
+        }
+        ret = WaitForSingleObject(thread, INFINITE);
+        CloseHandle(thread);
+        if(ret != WAIT_OBJECT_0)
+        {
+            ERR("Wait failed (%#x).\n", ret);
+            hr = E_FAIL;
+            goto done;
+        }
+        hr = thread_param.hr;
+    }
 
     /* save data to registry */
     if(SUCCEEDED(hr))
         hr = GAMEUX_WriteRegistryRecord(&GameData);
 
+done:
     GAMEUX_uninitGameData(&GameData);
     TRACE("returning 0x%08x\n", hr);
     return hr;
@@ -752,29 +810,19 @@ HRESULT GAMEUX_FindGameInstanceId(
 
 typedef struct _GameExplorerImpl
 {
-    const struct IGameExplorerVtbl *lpGameExplorerVtbl;
-    const struct IGameExplorer2Vtbl *lpGameExplorer2Vtbl;
+    IGameExplorer IGameExplorer_iface;
+    IGameExplorer2 IGameExplorer2_iface;
     LONG ref;
 } GameExplorerImpl;
 
 static inline GameExplorerImpl *impl_from_IGameExplorer(IGameExplorer *iface)
 {
-    return (GameExplorerImpl*)((char*)iface - FIELD_OFFSET(GameExplorerImpl, lpGameExplorerVtbl));
-}
-
-static inline IGameExplorer* IGameExplorer_from_impl(GameExplorerImpl* This)
-{
-    return (struct IGameExplorer*)&This->lpGameExplorerVtbl;
+    return CONTAINING_RECORD(iface, GameExplorerImpl, IGameExplorer_iface);
 }
 
 static inline GameExplorerImpl *impl_from_IGameExplorer2(IGameExplorer2 *iface)
 {
-    return (GameExplorerImpl*)((char*)iface - FIELD_OFFSET(GameExplorerImpl, lpGameExplorer2Vtbl));
-}
-
-static inline IGameExplorer2* IGameExplorer2_from_impl(GameExplorerImpl* This)
-{
-    return (struct IGameExplorer2*)&This->lpGameExplorer2Vtbl;
+    return CONTAINING_RECORD(iface, GameExplorerImpl, IGameExplorer2_iface);
 }
 
 static HRESULT WINAPI GameExplorerImpl_QueryInterface(
@@ -791,11 +839,11 @@ static HRESULT WINAPI GameExplorerImpl_QueryInterface(
     if(IsEqualGUID(riid, &IID_IUnknown) ||
        IsEqualGUID(riid, &IID_IGameExplorer))
     {
-        *ppvObject = IGameExplorer_from_impl(This);
+        *ppvObject = &This->IGameExplorer_iface;
     }
     else if(IsEqualGUID(riid, &IID_IGameExplorer2))
     {
-        *ppvObject = IGameExplorer2_from_impl(This);
+        *ppvObject = &This->IGameExplorer2_iface;
     }
     else
     {
@@ -897,19 +945,19 @@ static HRESULT WINAPI GameExplorer2Impl_QueryInterface(
         void **ppvObject)
 {
     GameExplorerImpl *This = impl_from_IGameExplorer2(iface);
-    return GameExplorerImpl_QueryInterface(IGameExplorer_from_impl(This), riid, ppvObject);
+    return GameExplorerImpl_QueryInterface(&This->IGameExplorer_iface, riid, ppvObject);
 }
 
 static ULONG WINAPI GameExplorer2Impl_AddRef(IGameExplorer2 *iface)
 {
     GameExplorerImpl *This = impl_from_IGameExplorer2(iface);
-    return GameExplorerImpl_AddRef(IGameExplorer_from_impl(This));
+    return GameExplorerImpl_AddRef(&This->IGameExplorer_iface);
 }
 
 static ULONG WINAPI GameExplorer2Impl_Release(IGameExplorer2 *iface)
 {
     GameExplorerImpl *This = impl_from_IGameExplorer2(iface);
-    return GameExplorerImpl_Release(IGameExplorer_from_impl(This));
+    return GameExplorerImpl_Release(&This->IGameExplorer_iface);
 }
 
 static HRESULT WINAPI GameExplorer2Impl_CheckAccess(
@@ -1004,11 +1052,11 @@ HRESULT GameExplorer_create(
     if(!pGameExplorer)
         return E_OUTOFMEMORY;
 
-    pGameExplorer->lpGameExplorerVtbl = &GameExplorerImplVtbl;
-    pGameExplorer->lpGameExplorer2Vtbl = &GameExplorer2ImplVtbl;
+    pGameExplorer->IGameExplorer_iface.lpVtbl = &GameExplorerImplVtbl;
+    pGameExplorer->IGameExplorer2_iface.lpVtbl = &GameExplorer2ImplVtbl;
     pGameExplorer->ref = 1;
 
-    *ppObj = (IUnknown*)(&pGameExplorer->lpGameExplorerVtbl);
+    *ppObj = (IUnknown*)&pGameExplorer->IGameExplorer_iface;
 
     TRACE("returning iface: %p\n", *ppObj);
     return S_OK;

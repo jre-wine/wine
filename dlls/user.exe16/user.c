@@ -1357,7 +1357,7 @@ LONG WINAPI TabbedTextOut16( HDC16 hdc, INT16 x, INT16 y, LPCSTR lpstr,
                              INT16 count, INT16 nb_tabs, const INT16 *tabs16, INT16 tab_org )
 {
     LONG ret;
-    INT i, *tabs = HeapAlloc( GetProcessHeap(), 0, nb_tabs * sizeof(tabs) );
+    INT i, *tabs = HeapAlloc( GetProcessHeap(), 0, nb_tabs * sizeof(*tabs) );
     if (!tabs) return 0;
     for (i = 0; i < nb_tabs; i++) tabs[i] = tabs16[i];
     ret = TabbedTextOutA( HDC_32(hdc), x, y, lpstr, count, nb_tabs, tabs, tab_org );
@@ -1373,7 +1373,7 @@ DWORD WINAPI GetTabbedTextExtent16( HDC16 hdc, LPCSTR lpstr, INT16 count,
                                     INT16 nb_tabs, const INT16 *tabs16 )
 {
     LONG ret;
-    INT i, *tabs = HeapAlloc( GetProcessHeap(), 0, nb_tabs * sizeof(tabs) );
+    INT i, *tabs = HeapAlloc( GetProcessHeap(), 0, nb_tabs * sizeof(*tabs) );
     if (!tabs) return 0;
     for (i = 0; i < nb_tabs; i++) tabs[i] = tabs16[i];
     ret = GetTabbedTextExtentA( HDC_32(hdc), lpstr, count, nb_tabs, tabs );
@@ -2506,7 +2506,6 @@ INT16 WINAPI wvsprintf16( LPSTR buffer, LPCSTR spec, VA_LIST16 args )
             /* wsprintf16 ignores null characters */
             if (*p != '\0') p++;
             else if (format.width > 1) *p++ = ' ';
-            else len = 0;
             break;
         case WPR_STRING:
             if (len) memcpy( p, lpcstr_view, len );

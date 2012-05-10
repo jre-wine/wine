@@ -117,7 +117,20 @@ static DWORD SOFTPUB_GetFileSubject(CRYPT_PROVIDER_DATA *data)
          data->pWintrustData->u.pFile->pcwszFilePath,
          data->pWintrustData->u.pFile->hFile,
          &data->u.pPDSip->gSubject))
-            err = GetLastError();
+        {
+            LARGE_INTEGER fileSize;
+            DWORD sipError = GetLastError();
+
+            /* Special case for empty files: the error is expected to be
+             * TRUST_E_SUBJECT_FORM_UNKNOWN, rather than whatever
+             * CryptSIPRetrieveSubjectGuid returns.
+             */
+            if (GetFileSizeEx(data->pWintrustData->u.pFile->hFile, &fileSize)
+             && !fileSize.QuadPart)
+                err = TRUST_E_SUBJECT_FORM_UNKNOWN;
+            else
+                err = sipError;
+        }
     }
     else
         data->u.pPDSip->gSubject = *data->pWintrustData->u.pFile->pgKnownSubject;
@@ -1194,7 +1207,8 @@ HRESULT WINAPI SoftpubCleanup(CRYPT_PROVIDER_DATA *data)
     CryptMsgClose(data->hMsg);
 
     if (data->fOpenedFile &&
-     data->pWintrustData->dwUnionChoice == WTD_CHOICE_FILE)
+     data->pWintrustData->dwUnionChoice == WTD_CHOICE_FILE &&
+     data->pWintrustData->u.pFile)
         CloseHandle(data->pWintrustData->u.pFile->hFile);
 
     return S_OK;

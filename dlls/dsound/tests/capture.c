@@ -177,7 +177,7 @@ EXIT:
        "should have 0\n", ref);
 }
 
-static void IDirectSoundCapture_tests(void)
+static void test_capture(void)
 {
     HRESULT rc;
     LPDIRECTSOUNDCAPTURE dsco=NULL;
@@ -379,8 +379,6 @@ static void test_capture_buffer(LPDIRECTSOUNDCAPTURE dsco,
                                                 (void **)&(state.notify));
     ok((rc==DS_OK)&&(state.notify!=NULL),
        "IDirectSoundCaptureBuffer_QueryInterface() failed: %08x\n", rc);
-    if (rc!=DS_OK)
-	return;
 
     for (i = 0; i < NOTIFICATIONS; i++) {
 	state.posnotify[i].dwOffset = (i * state.size) + state.size - 1;
@@ -390,27 +388,19 @@ static void test_capture_buffer(LPDIRECTSOUNDCAPTURE dsco,
     rc=IDirectSoundNotify_SetNotificationPositions(state.notify,NOTIFICATIONS,
                                                    state.posnotify);
     ok(rc==DS_OK,"IDirectSoundNotify_SetNotificationPositions() failed: %08x\n", rc);
-    if (rc!=DS_OK)
-	return;
 
     ref=IDirectSoundNotify_Release(state.notify);
     ok(ref==0,"IDirectSoundNotify_Release(): has %d references, should have "
        "0\n",ref);
-    if (ref!=0)
-	return;
 
     if (record) {
 	rc=IDirectSoundCaptureBuffer_Start(dscbo,DSCBSTART_LOOPING);
 	ok(rc==DS_OK,"IDirectSoundCaptureBuffer_Start() failed: %08x\n", rc);
-	if (rc!=DS_OK)
-	    return;
 
 	rc=IDirectSoundCaptureBuffer_GetStatus(dscbo,&status);
 	ok(rc==DS_OK,"IDirectSoundCaptureBuffer_GetStatus() failed: %08x\n", rc);
 	ok(status==(DSCBSTATUS_CAPTURING|DSCBSTATUS_LOOPING),
            "GetStatus: bad status: %x\n",status);
-	if (rc!=DS_OK)
-	    return;
 
 	/* wait for the notifications */
 	for (i = 0; i < (NOTIFICATIONS * 2); i++) {
@@ -428,8 +418,6 @@ static void test_capture_buffer(LPDIRECTSOUNDCAPTURE dsco,
 
 	rc=IDirectSoundCaptureBuffer_Stop(dscbo);
 	ok(rc==DS_OK,"IDirectSoundCaptureBuffer_Stop() failed: %08x\n", rc);
-	if (rc!=DS_OK)
-	    return;
     }
 }
 
@@ -671,11 +659,79 @@ EXIT:
     return TRUE;
 }
 
-static void capture_tests(void)
+static void test_enumerate(void)
 {
     HRESULT rc;
     rc=pDirectSoundCaptureEnumerateA(&dscenum_callback,NULL);
     ok(rc==DS_OK,"DirectSoundCaptureEnumerateA() failed: %08x\n", rc);
+}
+
+static void test_COM(void)
+{
+    IDirectSoundCapture *dsc = (IDirectSoundCapture*)0xdeadbeef;
+    IDirectSoundCaptureBuffer *buffer = (IDirectSoundCaptureBuffer*)0xdeadbeef;
+    IDirectSoundNotify *notify;
+    DSCBUFFERDESC bufdesc;
+    WAVEFORMATEX wfx;
+    HRESULT hr;
+    ULONG refcount;
+
+    hr = pDirectSoundCaptureCreate(NULL, &dsc, (IUnknown*)0xdeadbeef);
+    ok(hr == DSERR_NOAGGREGATION,
+       "DirectSoundCaptureCreate failed: %08x, expected DSERR_NOAGGREGATION\n", hr);
+    ok(dsc == (IDirectSoundCapture*)0xdeadbeef, "dsc = %p\n", dsc);
+
+    hr = pDirectSoundCaptureCreate(NULL, &dsc, NULL);
+    if (hr == DSERR_NODRIVER) {
+        skip("No driver\n");
+        return;
+    }
+    ok(hr == DS_OK, "DirectSoundCaptureCreate failed: %08x, expected DS_OK\n", hr);
+
+    init_format(&wfx, WAVE_FORMAT_PCM, 44100, 16, 1);
+    ZeroMemory(&bufdesc, sizeof(bufdesc));
+    bufdesc.dwSize = sizeof(bufdesc);
+    bufdesc.dwBufferBytes = wfx.nAvgBytesPerSec;
+    bufdesc.lpwfxFormat = &wfx;
+
+    hr = IDirectSoundCapture_CreateCaptureBuffer(dsc, &bufdesc, &buffer, (IUnknown*)0xdeadbeef);
+    if (hr == E_INVALIDARG) {
+        /* Old DirectX has only the 1st version of the DSCBUFFERDESC struct */
+        bufdesc.dwSize = sizeof(DSCBUFFERDESC1);
+        hr = IDirectSoundCapture_CreateCaptureBuffer(dsc, &bufdesc, &buffer, (IUnknown*)0xdeadbeef);
+    }
+    ok(hr == DSERR_NOAGGREGATION,
+       "IDirectSoundCapture_CreateCaptureBuffer failed: %08x, expected DSERR_NOAGGREGATION\n", hr);
+    ok(buffer == (IDirectSoundCaptureBuffer*)0xdeadbeef || !buffer /* Win2k without DirectX9 */,
+       "buffer = %p\n", buffer);
+
+    hr = IDirectSoundCapture_CreateCaptureBuffer(dsc, &bufdesc, &buffer, NULL);
+    ok(hr == DS_OK, "IDirectSoundCapture_CreateCaptureBuffer failed: %08x, expected DS_OK\n", hr);
+
+    /* IDirectSoundCaptureBuffer and IDirectSoundNotify have separate refcounts */
+    IDirectSoundCaptureBuffer_AddRef(buffer);
+    refcount = IDirectSoundCaptureBuffer_AddRef(buffer);
+    ok(refcount == 3, "IDirectSoundCaptureBuffer refcount is %u, expected 3\n", refcount);
+    hr = IDirectSoundCaptureBuffer_QueryInterface(buffer, &IID_IDirectSoundNotify, (void**)&notify);
+    ok(hr == DS_OK, "IDirectSoundCapture_QueryInterface failed: %08x, expected DS_OK\n", hr);
+    refcount = IDirectSoundNotify_AddRef(notify);
+    ok(refcount == 2, "IDirectSoundNotify refcount is %u, expected 2\n", refcount);
+    IDirectSoundCaptureBuffer_AddRef(buffer);
+    refcount = IDirectSoundCaptureBuffer_Release(buffer);
+    ok(refcount == 3, "IDirectSoundCaptureBuffer refcount is %u, expected 3\n", refcount);
+
+    /* Release IDirectSoundCaptureBuffer while keeping IDirectSoundNotify alive */
+    while (IDirectSoundCaptureBuffer_Release(buffer) > 0);
+    refcount = IDirectSoundNotify_AddRef(notify);
+    ok(refcount == 3, "IDirectSoundNotify refcount is %u, expected 3\n", refcount);
+    refcount = IDirectSoundCaptureBuffer_AddRef(buffer);
+    ok(refcount == 1, "IDirectSoundCaptureBuffer refcount is %u, expected 1\n", refcount);
+
+    while (IDirectSoundNotify_Release(notify) > 0);
+    refcount = IDirectSoundCaptureBuffer_Release(buffer);
+    ok(refcount == 0, "IDirectSoundCaptureBuffer refcount is %u, expected 0\n", refcount);
+    refcount = IDirectSoundCapture_Release(dsc);
+    ok(refcount == 0, "IDirectSoundCapture refcount is %u, expected 0\n", refcount);
 }
 
 START_TEST(capture)
@@ -685,25 +741,22 @@ START_TEST(capture)
     CoInitialize(NULL);
 
     hDsound = LoadLibrary("dsound.dll");
-    if (hDsound)
-    {
-
-        pDirectSoundCaptureCreate=(void*)GetProcAddress(hDsound,
-            "DirectSoundCaptureCreate");
-        pDirectSoundCaptureEnumerateA=(void*)GetProcAddress(hDsound,
-            "DirectSoundCaptureEnumerateA");
-        if (pDirectSoundCaptureCreate && pDirectSoundCaptureEnumerateA)
-        {
-            IDirectSoundCapture_tests();
-            capture_tests();
-        }
-        else
-            skip("capture test skipped\n");
-
-        FreeLibrary(hDsound);
-    }
-    else
+    if (!hDsound) {
         skip("dsound.dll not found!\n");
+        return;
+    }
 
+    pDirectSoundCaptureCreate = (void*)GetProcAddress(hDsound, "DirectSoundCaptureCreate");
+    pDirectSoundCaptureEnumerateA = (void*)GetProcAddress(hDsound, "DirectSoundCaptureEnumerateA");
+    if (!pDirectSoundCaptureCreate || !pDirectSoundCaptureEnumerateA) {
+        skip("capture test skipped\n");
+        return;
+    }
+
+    test_COM();
+    test_capture();
+    test_enumerate();
+
+    FreeLibrary(hDsound);
     CoUninitialize();
 }

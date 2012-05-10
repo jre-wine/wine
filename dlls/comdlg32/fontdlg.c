@@ -1055,8 +1055,13 @@ static LRESULT CFn_WMCommand(HWND hDlg, WPARAM wParam, LPARAM lParam, LPCHOOSEFO
         {
             WCHAR buffer[80];
             WCHAR format[80];
+            DWORD_PTR args[2];
             LoadStringW(COMDLG32_hInstance, IDS_FONT_SIZE, format, sizeof(format)/sizeof(WCHAR));
-            wsprintfW(buffer, format, lpcf->nSizeMin,lpcf->nSizeMax);
+            args[0] = lpcf->nSizeMin;
+            args[1] = lpcf->nSizeMax;
+            FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                           format, 0, 0, buffer, sizeof(buffer)/sizeof(*buffer),
+                           (__ms_va_list*)args);
             MessageBoxW(hDlg, buffer, NULL, MB_OK);
         }
         return(TRUE);
@@ -1110,7 +1115,6 @@ static LRESULT CFn_WMPaint(HWND hDlg, WPARAM wParam, LPARAM lParam, const CHOOSE
     {
         PAINTSTRUCT ps;
         HDC hdc;
-        HPEN hOrigPen;
         HFONT hOrigFont;
         LOGFONTW lf = *(lpcf->lpLogFont);
 
@@ -1122,22 +1126,9 @@ static LRESULT CFn_WMPaint(HWND hDlg, WPARAM wParam, LPARAM lParam, const CHOOSE
               ps.rcPaint.right, ps.rcPaint.bottom);
 
         /* Paint frame */
-        MoveToEx( hdc, info.rcWindow.left, info.rcWindow.bottom, NULL );
-        hOrigPen=SelectObject( hdc, CreatePen( PS_SOLID, 2,
-                                               GetSysColor( COLOR_3DSHADOW ) ));
-        LineTo( hdc, info.rcWindow.left, info.rcWindow.top );
-        LineTo( hdc, info.rcWindow.right, info.rcWindow.top );
-        DeleteObject(SelectObject( hdc, CreatePen( PS_SOLID, 2,
-                                                   GetSysColor( COLOR_3DLIGHT ) )));
-        LineTo( hdc, info.rcWindow.right, info.rcWindow.bottom );
-        LineTo( hdc, info.rcWindow.left, info.rcWindow.bottom );
-        DeleteObject(SelectObject( hdc, hOrigPen ));
+        DrawEdge( hdc, &info.rcWindow, EDGE_SUNKEN, BF_RECT|BF_ADJUST );
 
         /* Draw the sample text itself */
-        info.rcWindow.right--;
-        info.rcWindow.bottom--;
-        info.rcWindow.top++;
-        info.rcWindow.left++;
         hOrigFont = SelectObject( hdc, CreateFontIndirectW( &lf ) );
         SetTextColor( hdc, lpcf->rgbColors );
 

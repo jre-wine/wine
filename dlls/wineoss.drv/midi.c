@@ -60,6 +60,7 @@
 #ifdef HAVE_SYS_POLL_H
 #include <sys/poll.h>
 #endif
+#include <sys/soundcard.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -67,7 +68,6 @@
 #include "winuser.h"
 #include "winnls.h"
 #include "mmddk.h"
-#include "oss.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
@@ -152,7 +152,7 @@ static	int 	MIDI_UnixToWindowsDeviceType(int type)
      * MOD_SQSYNTH      square wave internal synth
      * MOD_FMSYNTH      FM internal synth
      * MOD_MAPPER       MIDI mapper
-     * MOD_WAVETABLE    hardware watetable internal synth
+     * MOD_WAVETABLE    hardware wavetable internal synth
      * MOD_SWSYNTH      software internal synth
      */
 
@@ -399,14 +399,14 @@ static LRESULT OSS_MidiExit(void)
  * 			MIDI_NotifyClient			[internal]
  */
 static void MIDI_NotifyClient(UINT wDevID, WORD wMsg,
-			      DWORD dwParam1, DWORD dwParam2)
+			      DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     DWORD 		dwCallBack;
     UINT 		uFlags;
     HANDLE		hDev;
     DWORD 		dwInstance;
 
-    TRACE("wDevID = %04X wMsg = %d dwParm1 = %04X dwParam2 = %04X\n",
+    TRACE("wDevID = %04X wMsg = %d dwParm1 = %04lX dwParam2 = %04lX\n",
 	  wDevID, wMsg, dwParam1, dwParam2);
 
     switch (wMsg) {
@@ -1772,4 +1772,29 @@ DWORD WINAPI OSS_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
     return MMSYSERR_NOTSUPPORTED;
 }
 
-/*-----------------------------------------------------------------------*/
+/**************************************************************************
+ * 				DriverProc (WINEOSS.1)
+ */
+LRESULT CALLBACK OSS_DriverProc(DWORD_PTR dwDevID, HDRVR hDriv, UINT wMsg,
+                                LPARAM dwParam1, LPARAM dwParam2)
+{
+     TRACE("(%08lX, %p, %08X, %08lX, %08lX)\n",
+           dwDevID, hDriv, wMsg, dwParam1, dwParam2);
+
+    switch(wMsg) {
+    case DRV_LOAD:
+    case DRV_FREE:
+    case DRV_OPEN:
+    case DRV_CLOSE:
+    case DRV_ENABLE:
+    case DRV_DISABLE:
+    case DRV_QUERYCONFIGURE:
+    case DRV_CONFIGURE:
+        return 1;
+    case DRV_INSTALL:
+    case DRV_REMOVE:
+        return DRV_SUCCESS;
+    default:
+	return 0;
+    }
+}

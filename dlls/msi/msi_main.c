@@ -49,8 +49,6 @@ LPVOID                   gUIContext       = NULL;
 WCHAR                   *gszLogFile       = NULL;
 HINSTANCE msi_hInstance;
 
-static WCHAR msi_path[MAX_PATH];
-static ITypeLib *msi_typelib;
 
 /*
  * Dll lifetime tracking declaration
@@ -77,46 +75,12 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         DisableThreadLibraryCalls(hinstDLL);
         break;
     case DLL_PROCESS_DETACH:
-        if (msi_typelib) ITypeLib_Release( msi_typelib );
         msi_dialog_unregister_class();
         msi_free_handle_table();
         msi_free( gszLogFile );
         break;
     }
     return TRUE;
-}
-
-static CRITICAL_SECTION MSI_typelib_cs;
-static CRITICAL_SECTION_DEBUG MSI_typelib_cs_debug =
-{
-    0, 0, &MSI_typelib_cs,
-    { &MSI_typelib_cs_debug.ProcessLocksList,
-      &MSI_typelib_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": MSI_typelib_cs") }
-};
-static CRITICAL_SECTION MSI_typelib_cs = { &MSI_typelib_cs_debug, -1, 0, 0, 0, 0 };
-
-ITypeLib *get_msi_typelib( LPWSTR *path )
-{
-    EnterCriticalSection( &MSI_typelib_cs );
-
-    if (!msi_typelib)
-    {
-        TRACE("loading typelib\n");
-
-        if (GetModuleFileNameW( msi_hInstance, msi_path, MAX_PATH ))
-            LoadTypeLib( msi_path, &msi_typelib );
-    }
-
-    LeaveCriticalSection( &MSI_typelib_cs );
-
-    if (path)
-        *path = msi_path;
-
-    if (msi_typelib)
-        ITypeLib_AddRef( msi_typelib );
-
-    return msi_typelib;
 }
 
 typedef struct tagIClassFactoryImpl {
@@ -264,17 +228,17 @@ HRESULT WINAPI DllCanUnloadNow(void)
 }
 
 /***********************************************************************
- *		DllRegisterServer (MSI.@)
+ *  DllRegisterServer (MSI.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( msi_hInstance, NULL );
+    return __wine_register_resources( msi_hInstance );
 }
 
 /***********************************************************************
- *		DllUnregisterServer (MSI.@)
+ *  DllUnregisterServer (MSI.@)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( msi_hInstance, NULL );
+    return __wine_unregister_resources( msi_hInstance );
 }

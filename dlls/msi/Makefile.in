@@ -1,7 +1,7 @@
 MODULE    = msi.dll
 IMPORTLIB = msi
 IMPORTS   = uuid urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32
-DELAYIMPORTS = odbccp32
+DELAYIMPORTS = odbccp32 wintrust crypt32 imagehlp
 
 C_SRCS = \
 	action.c \
@@ -22,16 +22,14 @@ C_SRCS = \
 	font.c \
 	format.c \
 	handle.c \
-	helpers.c \
 	insert.c \
 	install.c \
-	join.c \
 	media.c \
 	msi.c \
 	msi_main.c \
 	msiquery.c \
 	package.c \
-	preview.c \
+	patch.c \
 	record.c \
 	registry.c \
 	script.c \

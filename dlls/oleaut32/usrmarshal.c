@@ -167,11 +167,12 @@ unsigned char * WINAPI BSTR_UserUnmarshal(ULONG *pFlags, unsigned char *Buffer, 
     if(header->len != header->len2)
         FIXME("len %08x != len2 %08x\n", header->len, header->len2);
 
-    SysFreeString(*pstr);
-    *pstr = NULL;
-
-    if(header->byte_len != 0xffffffff)
-        *pstr = SysAllocStringByteLen((char*)(header + 1), header->byte_len);
+    if (header->byte_len == 0xffffffff)
+    {
+        SysFreeString(*pstr);
+        *pstr = NULL;
+    }
+    else SysReAllocStringLen( pstr, (OLECHAR *)(header + 1), header->len );
 
     if (*pstr) TRACE("string=%s\n", debugstr_w(*pstr));
     return Buffer + sizeof(*header) + sizeof(OLECHAR) * header->len;
@@ -189,7 +190,7 @@ void WINAPI BSTR_UserFree(ULONG *pFlags, BSTR *pstr)
 typedef struct
 {
     DWORD clSize;
-    DWORD rpcReserverd;
+    DWORD rpcReserved;
     USHORT vt;
     USHORT wReserved1;
     USHORT wReserved2;
@@ -458,7 +459,7 @@ unsigned char * WINAPI VARIANT_UserMarshal(ULONG *pFlags, unsigned char *Buffer,
     header = (variant_wire_t *)Buffer; 
 
     header->clSize = 0; /* fixed up at the end */
-    header->rpcReserverd = 0;
+    header->rpcReserved = 0;
     header->vt = pvar->n1.n2.vt;
     header->wReserved1 = pvar->n1.n2.wReserved1;
     header->wReserved2 = pvar->n1.n2.wReserved2;
@@ -2190,7 +2191,7 @@ HRESULT __RPC_STUB IPropertyBag_Read_Stub(
     DWORD varType,
     IUnknown *pUnkObj)
 {
-  static const WCHAR emptyWstr[1] = {0};
+  static const WCHAR emptyWstr[] = {0};
   IDispatch *disp;
   HRESULT hr;
   TRACE("(%p, %s, %p, %p, %x, %p)\n", This, debugstr_w(pszPropName), pVar,

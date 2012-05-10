@@ -263,6 +263,13 @@ static inline void notify_free( void const *ptr )
 #endif
 }
 
+static inline void notify_realloc( void const *ptr, SIZE_T size_old, SIZE_T size_new )
+{
+#ifdef VALGRIND_RESIZEINPLACE_BLOCK
+    VALGRIND_RESIZEINPLACE_BLOCK( ptr, size_old, size_new, 0 );
+#endif
+}
+
 static void subheap_notify_free_all(SUBHEAP const *subheap)
 {
 #ifdef VALGRIND_FREELIKE_BLOCK
@@ -655,8 +662,9 @@ static void HEAP_MakeInUseBlockFree( SUBHEAP *subheap, ARENA_INUSE *pArena )
     if (((char *)pFree == (char *)subheap->base + subheap->headerSize) &&
         (subheap != &subheap->heap->subheap))
     {
-        SIZE_T size = 0;
         void *addr = subheap->base;
+
+        size = 0;
         /* Remove the free block from the list */
         list_remove( &pFree->entry );
         /* Remove the subheap from the list */
@@ -752,6 +760,11 @@ static void *realloc_large_block( HEAP *heap, DWORD flags, void *ptr, SIZE_T siz
         SIZE_T unused = arena->block_size - sizeof(*arena) - size;
 
         /* FIXME: we could remap zero-pages instead */
+#ifdef VALGRIND_RESIZEINPLACE_BLOCK
+        if (RUNNING_ON_VALGRIND)
+            notify_realloc( arena + 1, arena->data_size, size );
+        else
+#endif
         if (size > arena->data_size)
             initialize_block( (char *)ptr + arena->data_size, size - arena->data_size, unused, flags );
         else
@@ -1538,6 +1551,8 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
 
     if (!(subheap = HEAP_CreateSubHeap( NULL, addr, flags, commitSize, totalSize ))) return 0;
 
+    heap_set_debug_flags( subheap->heap );
+
     /* link it into the per-process heap list */
     if (processHeap)
     {
@@ -1552,7 +1567,6 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
         list_init( &processHeap->entry );
     }
 
-    heap_set_debug_flags( subheap->heap );
     return subheap->heap;
 }
 
@@ -1842,11 +1856,8 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
             list_remove( &pFree->entry );
             pArena->size += (pFree->size & ARENA_SIZE_MASK) + sizeof(*pFree);
             if (!HEAP_Commit( subheap, pArena, rounded_size )) goto oom;
-            notify_free( pArena + 1 );
+            notify_realloc( pArena + 1, oldActualSize, size );
             HEAP_ShrinkBlock( subheap, pArena, rounded_size );
-            notify_alloc( pArena + 1, size, FALSE );
-            /* FIXME: this is wrong as we may lose old VBits settings */
-            mark_block_initialized( pArena + 1, oldActualSize );
         }
         else  /* Do it the hard way */
         {
@@ -1881,12 +1892,8 @@ PVOID WINAPI RtlReAllocateHeap( HANDLE heap, ULONG flags, PVOID ptr, SIZE_T size
     }
     else
     {
-        /* Shrink the block */
-        notify_free( pArena + 1 );
         HEAP_ShrinkBlock( subheap, pArena, rounded_size );
-        notify_alloc( pArena + 1, size, FALSE );
-        /* FIXME: this is wrong as we may lose old VBits settings */
-        mark_block_initialized( pArena + 1, size );
+        notify_realloc( pArena + 1, oldActualSize, size );
     }
 
     pArena->unused_bytes = (pArena->size & ARENA_SIZE_MASK) - size;

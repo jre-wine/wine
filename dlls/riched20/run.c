@@ -434,7 +434,7 @@ int ME_CharFromPoint(ME_Context *c, int cx, ME_Run *run)
   int fit = 0;
   HGDIOBJ hOldFont;
   SIZE sz;
-  if (!run->strText->nLen)
+  if (!run->strText->nLen || cx <= 0)
     return 0;
 
   if (run->nFlags & MERF_TAB ||
@@ -492,7 +492,7 @@ int ME_CharFromPointCursor(ME_TextEditor *editor, int cx, ME_Run *run)
   ME_Context c;
   HGDIOBJ hOldFont;
   SIZE sz, sz2, sz3;
-  if (!run->strText->nLen)
+  if (!run->strText->nLen || cx <= 0)
     return 0;
 
   if (run->nFlags & (MERF_TAB | MERF_ENDCELL))
@@ -894,8 +894,8 @@ void ME_GetCharFormat(ME_TextEditor *editor, const ME_Cursor *from,
 
   do {
     /* FIXME add more style feature comparisons */
-    int nAttribs = CFM_SIZE | CFM_FACE | CFM_COLOR | CFM_UNDERLINETYPE;
-    int nEffects = CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT | CFM_PROTECTED | CFM_LINK | CFM_SUPERSCRIPT;
+    DWORD dwAttribs = CFM_SIZE | CFM_FACE | CFM_COLOR | CFM_UNDERLINETYPE;
+    DWORD dwEffects = CFM_BOLD | CFM_ITALIC | CFM_UNDERLINE | CFM_STRIKEOUT | CFM_PROTECTED | CFM_LINK | CFM_SUPERSCRIPT;
 
     run = ME_FindItemFwd(run, diRun);
 
@@ -903,7 +903,7 @@ void ME_GetCharFormat(ME_TextEditor *editor, const ME_Cursor *from,
     tmp.cbSize = sizeof(tmp);
     ME_GetRunCharFormat(editor, run, &tmp);
 
-    assert((tmp.dwMask & nAttribs) == nAttribs);
+    assert((tmp.dwMask & dwAttribs) == dwAttribs);
     /* reset flags that differ */
 
     if (pFmt->yHeight != tmp.yHeight)
@@ -929,7 +929,7 @@ void ME_GetCharFormat(ME_TextEditor *editor, const ME_Cursor *from,
       }
     }
 
-    pFmt->dwMask &= ~((pFmt->dwEffects ^ tmp.dwEffects) & nEffects);
+    pFmt->dwMask &= ~((pFmt->dwEffects ^ tmp.dwEffects) & dwEffects);
     pFmt->dwEffects = tmp.dwEffects;
 
   } while(run != run_end);

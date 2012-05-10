@@ -56,7 +56,7 @@ static WCHAR regpath_exclude[] = {'S','o','f','t','w','a','r','e','\\',
                                   'E','x','c','l','u','d','e','d','A','p','p','l','i','c','a','t','i','o','n','s',0};
 
 /***********************************************************************
- * Memory alloccation helper
+ * Memory allocation helper
  */
 
 static inline void * __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t len)
@@ -98,7 +98,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
  *
  * RETURNS
  *  Success: S_OK
- *  Faulure: A HRESULT error code
+ *  Failure: A HRESULT error code
  *
  */
 HRESULT WINAPI WerAddExcludedApplication(PCWSTR exeName, BOOL allUsers)
@@ -139,7 +139,7 @@ HRESULT WINAPI WerAddExcludedApplication(PCWSTR exeName, BOOL allUsers)
  *
  * RETURNS
  *  Success: S_OK
- *  Faulure: A HRESULT error code
+ *  Failure: A HRESULT error code
  *
  */
 HRESULT WINAPI WerRemoveExcludedApplication(PCWSTR exeName, BOOL allUsers)
@@ -167,6 +167,35 @@ HRESULT WINAPI WerRemoveExcludedApplication(PCWSTR exeName, BOOL allUsers)
         return lres ? __HRESULT_FROM_WIN32(ERROR_ENVVAR_NOT_FOUND) : S_OK;
     }
     return E_ACCESSDENIED;
+}
+
+/***********************************************************************
+ * WerReportAddDump (wer.@)
+ *
+ * Add a dump of dumpType to hReportHandle.
+ *
+ * PARAMS
+ *  hReportHandle      [i] error reporting handle to add the dump
+ *  hProcess           [i] handle to the regarding process
+ *  hThread            [o] handle to the regarding thread
+ *  dumpType           [i] type of the dump
+ *  pExceptionParam    [o] pointer to a WER_EXCEPTION_INFORMATION
+ *  pDumpCustomOptions [o] pointer to a WER_DUMP_CUSTOM_OPTIONS
+ *  dwFlags            [i] flag to control the heap dump
+ *
+ * RETURNS
+ *  Success: S_OK
+ *  Failure: A HRESULT error code
+ *
+ */
+HRESULT WINAPI WerReportAddDump(HREPORT hReportHandle, HANDLE hProcess, HANDLE hThread,
+                                WER_DUMP_TYPE dumpType, PWER_EXCEPTION_INFORMATION pExceptionParam,
+                                PWER_DUMP_CUSTOM_OPTIONS pDumpCustomOptions, DWORD dwFlags)
+{
+    FIXME("(%p, %p, %p, %d, %p, %p, %u) :stub\n", hReportHandle, hProcess, hThread, dumpType,
+          pExceptionParam, pDumpCustomOptions, dwFlags);
+
+    return E_NOTIMPL;
 }
 
 /***********************************************************************
@@ -317,5 +346,14 @@ HRESULT WINAPI WerReportSubmit(HREPORT hreport, WER_CONSENT consent, DWORD flags
         return E_INVALIDARG;
 
     *presult = WerDisabled;
+    return E_NOTIMPL;
+}
+
+/***********************************************************************
+ * WerReportSetUIOption (wer.@)
+ */
+HRESULT WINAPI WerReportSetUIOption(HREPORT hreport, WER_REPORT_UI uitype, PCWSTR value)
+{
+    FIXME("(%p, %d, %s) :stub\n", hreport, uitype, debugstr_w(value));
     return E_NOTIMPL;
 }

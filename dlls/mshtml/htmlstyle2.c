@@ -29,7 +29,6 @@
 #include "htmlstyle.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -121,15 +120,19 @@ static HRESULT WINAPI HTMLStyle2_get_borderCollapse(IHTMLStyle2 *iface, BSTR *p)
 static HRESULT WINAPI HTMLStyle2_put_direction(IHTMLStyle2 *iface, BSTR v)
 {
     HTMLStyle *This = impl_from_IHTMLStyle2(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return set_nsstyle_attr(This->nsstyle, STYLEID_DIRECTION, v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle2_get_direction(IHTMLStyle2 *iface, BSTR *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_nsstyle_attr(This->nsstyle, STYLEID_DIRECTION, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle2_put_behavior(IHTMLStyle2 *iface, BSTR v)
@@ -182,7 +185,7 @@ static HRESULT WINAPI HTMLStyle2_get_position(IHTMLStyle2 *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    return get_nsstyle_attr(This->nsstyle, STYLEID_POSITION, p);
+    return get_nsstyle_attr(This->nsstyle, STYLEID_POSITION, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle2_put_unicodeBidi(IHTMLStyle2 *iface, BSTR v)

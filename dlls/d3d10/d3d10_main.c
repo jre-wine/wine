@@ -84,6 +84,7 @@ HRESULT WINAPI D3D10CreateDevice(IDXGIAdapter *adapter, D3D10_DRIVER_TYPE driver
 
             case D3D10_DRIVER_TYPE_NULL:
                 FIXME("NULL device not implemented, falling back to refrast\n");
+                /* fall through, for now */
             case D3D10_DRIVER_TYPE_REFERENCE:
             {
                 HMODULE refrast = LoadLibraryA("d3d10ref.dll");
@@ -222,7 +223,7 @@ HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT fl
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_effect_vtbl;
+    object->ID3D10Effect_iface.lpVtbl = &d3d10_effect_vtbl;
     object->refcount = 1;
     ID3D10Device_AddRef(device);
     object->device = device;
@@ -231,16 +232,34 @@ HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT fl
     if (FAILED(hr))
     {
         ERR("Failed to parse effect\n");
-        IUnknown_Release((IUnknown *)object);
+        IUnknown_Release(&object->ID3D10Effect_iface);
         return hr;
     }
 
-    *effect = (ID3D10Effect *)object;
+    *effect = &object->ID3D10Effect_iface;
 
     TRACE("Created ID3D10Effect %p\n", object);
 
     return S_OK;
 }
+
+HRESULT WINAPI D3D10CompileEffectFromMemory(void *data, SIZE_T data_size, const char *filename,
+        const D3D10_SHADER_MACRO *defines, ID3D10Include *include, UINT hlsl_flags, UINT fx_flags,
+        ID3D10Blob **effect, ID3D10Blob **errors)
+{
+    FIXME("data %p, data_size %lu, filename %s, defines %p, include %p,"
+            " hlsl_flags %#x, fx_flags %#x, effect %p, errors %p stub!\n",
+            data, data_size, wine_dbgstr_a(filename), defines, include,
+            hlsl_flags, fx_flags, effect, errors);
+
+    if (effect)
+        *effect = NULL;
+    if (errors)
+        *errors = NULL;
+
+    return E_NOTIMPL;
+}
+
 
 LPCSTR WINAPI D3D10GetVertexShaderProfile(ID3D10Device *device)
 {
@@ -276,10 +295,10 @@ HRESULT WINAPI D3D10ReflectShader(const void *data, SIZE_T data_size, ID3D10Shad
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_shader_reflection_vtbl;
+    object->ID3D10ShaderReflection_iface.lpVtbl = &d3d10_shader_reflection_vtbl;
     object->refcount = 1;
 
-    *reflector = (ID3D10ShaderReflection *)object;
+    *reflector = &object->ID3D10ShaderReflection_iface;
 
     TRACE("Created ID3D10ShaderReflection %p\n", object);
 

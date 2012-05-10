@@ -39,14 +39,17 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define IE_MAJOR_VERSION 7
 #define IE_MINOR_VERSION 0
 
-static BOOL handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *comment)
+static const IID NS_ICONTENTUTILS_CID =
+    {0x762C4AE7,0xB923,0x422F,{0xB9,0x7E,0xB9,0xBF,0xC1,0xEF,0x7B,0xF0}};
+
+static nsIContentUtils *content_utils;
+
+static PRUnichar *handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *comment)
 {
-    DWORD len;
     int majorv = 0, minorv = 0;
     const PRUnichar *ptr, *end;
-    nsAString nsstr;
     PRUnichar *buf;
-    nsresult nsres;
+    DWORD len;
 
     enum {
         CMP_EQ,
@@ -59,7 +62,7 @@ static BOOL handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *commen
     static const PRUnichar endifW[] = {'<','!','[','e','n','d','i','f',']'};
 
     if(comment[0] != '[' || comment[1] != 'i' || comment[2] != 'f')
-        return FALSE;
+        return NULL;
 
     ptr = comment+3;
     while(isspaceW(*ptr))
@@ -84,28 +87,28 @@ static BOOL handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *commen
     }
 
     if(!isspaceW(*ptr++))
-        return FALSE;
+        return NULL;
     while(isspaceW(*ptr))
         ptr++;
 
     if(ptr[0] != 'I' || ptr[1] != 'E')
-        return FALSE;
+        return NULL;
 
     ptr +=2;
     if(!isspaceW(*ptr++))
-        return FALSE;
+        return NULL;
     while(isspaceW(*ptr))
         ptr++;
 
     if(!isdigitW(*ptr))
-        return FALSE;
+        return NULL;
     while(isdigitW(*ptr))
         majorv = majorv*10 + (*ptr++ - '0');
 
     if(*ptr == '.') {
         ptr++;
         if(!isdigitW(*ptr))
-            return FALSE;
+            return NULL;
         while(isdigitW(*ptr))
             minorv = minorv*10 + (*ptr++ - '0');
     }
@@ -113,74 +116,64 @@ static BOOL handle_insert_comment(HTMLDocumentNode *doc, const PRUnichar *commen
     while(isspaceW(*ptr))
         ptr++;
     if(ptr[0] != ']' || ptr[1] != '>')
-        return FALSE;
+        return NULL;
     ptr += 2;
 
     len = strlenW(ptr);
     if(len < sizeof(endifW)/sizeof(WCHAR))
-        return FALSE;
+        return NULL;
 
     end = ptr + len-sizeof(endifW)/sizeof(WCHAR);
     if(memcmp(end, endifW, sizeof(endifW)))
-        return FALSE;
+        return NULL;
 
     switch(cmpt) {
     case CMP_EQ:
         if(majorv == IE_MAJOR_VERSION && minorv == IE_MINOR_VERSION)
             break;
-        return FALSE;
+        return NULL;
     case CMP_LT:
         if(majorv > IE_MAJOR_VERSION)
             break;
         if(majorv == IE_MAJOR_VERSION && minorv > IE_MINOR_VERSION)
             break;
-        return FALSE;
+        return NULL;
     case CMP_LTE:
         if(majorv > IE_MAJOR_VERSION)
             break;
         if(majorv == IE_MAJOR_VERSION && minorv >= IE_MINOR_VERSION)
             break;
-        return FALSE;
+        return NULL;
     case CMP_GT:
         if(majorv < IE_MAJOR_VERSION)
             break;
         if(majorv == IE_MAJOR_VERSION && minorv < IE_MINOR_VERSION)
             break;
-        return FALSE;
+        return NULL;
     case CMP_GTE:
         if(majorv < IE_MAJOR_VERSION)
             break;
         if(majorv == IE_MAJOR_VERSION && minorv <= IE_MINOR_VERSION)
             break;
-        return FALSE;
+        return NULL;
     }
 
     buf = heap_alloc((end-ptr+1)*sizeof(WCHAR));
     if(!buf)
-        return FALSE;
+        return NULL;
 
     memcpy(buf, ptr, (end-ptr)*sizeof(WCHAR));
     buf[end-ptr] = 0;
-    nsAString_InitDepend(&nsstr, buf);
 
-    /* FIXME: Find better way to insert HTML to document. */
-    nsres = nsIDOMHTMLDocument_Write(doc->nsdoc, &nsstr);
-    nsAString_Finish(&nsstr);
-    heap_free(buf);
-    if(NS_FAILED(nsres)) {
-        ERR("Write failed: %08x\n", nsres);
-        return FALSE;
-    }
-
-    return TRUE;
+    return buf;
 }
 
 static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_iface, nsISupports *arg2)
 {
     const PRUnichar *comment;
     nsIDOMComment *nscomment;
+    PRUnichar *replace_html;
     nsAString comment_str;
-    BOOL remove_comment;
     nsresult nsres;
 
     nsres = nsISupports_QueryInterface(comment_iface, &IID_nsIDOMComment, (void**)&nscomment);
@@ -195,32 +188,21 @@ static nsresult run_insert_comment(HTMLDocumentNode *doc, nsISupports *comment_i
         return nsres;
 
     nsAString_GetData(&comment_str, &comment);
-    remove_comment = handle_insert_comment(doc, comment);
+    replace_html = handle_insert_comment(doc, comment);
     nsAString_Finish(&comment_str);
 
-    if(remove_comment) {
-        nsIDOMNode *nsparent, *tmp;
-        nsAString magic_str;
+    if(replace_html) {
+        HRESULT hres;
 
-        static const PRUnichar remove_comment_magicW[] =
-            {'#','!','w','i','n','e', 'r','e','m','o','v','e','!','#',0};
-
-        nsAString_InitDepend(&magic_str, remove_comment_magicW);
-        nsres = nsIDOMComment_SetData(nscomment, &magic_str);
-        nsAString_Finish(&magic_str);
-        if(NS_FAILED(nsres))
-            ERR("SetData failed: %08x\n", nsres);
-
-        nsIDOMComment_GetParentNode(nscomment, &nsparent);
-        if(nsparent) {
-            nsIDOMNode_RemoveChild(nsparent, (nsIDOMNode*)nscomment, &tmp);
-            nsIDOMNode_Release(nsparent);
-            nsIDOMNode_Release(tmp);
-        }
+        hres = replace_node_by_html(doc->nsdoc, (nsIDOMNode*)nscomment, replace_html);
+        heap_free(replace_html);
+        if(FAILED(hres))
+            nsres = NS_ERROR_FAILURE;
     }
 
+
     nsIDOMComment_Release(nscomment);
-    return NS_OK;
+    return nsres;
 }
 
 static nsresult run_bind_to_tree(HTMLDocumentNode *doc, nsISupports *nsiface, nsISupports *arg2)
@@ -283,6 +265,9 @@ static void parse_complete(HTMLDocumentObj *doc)
     call_property_onchanged(&doc->basedoc.cp_propnotif, 1005);
     call_explorer_69(doc);
 
+    if(doc->is_webbrowser && doc->usermode != EDITMODE)
+        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->IHTMLWindow2_iface, 0);
+
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
 }
 
@@ -305,9 +290,10 @@ static nsresult run_end_load(HTMLDocumentNode *This, nsISupports *arg1, nsISuppo
     return NS_OK;
 }
 
-static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_iface, nsISupports *arg)
+static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_iface, nsISupports *parser_iface)
 {
     nsIDOMHTMLScriptElement *nsscript;
+    nsIParser *nsparser = NULL;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", doc, script_iface);
@@ -318,7 +304,24 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
         return nsres;
     }
 
+    if(parser_iface) {
+        nsres = nsISupports_QueryInterface(parser_iface, &IID_nsIParser, (void**)&nsparser);
+        if(NS_FAILED(nsres)) {
+            ERR("Could not get nsIParser iface: %08x\n", nsres);
+            nsparser = NULL;
+        }
+    }
+
+    if(nsparser)
+        nsIParser_BeginEvaluatingParserInsertedScript(nsparser);
+
     doc_insert_script(doc->basedoc.window, nsscript);
+
+    if(nsparser) {
+        nsIParser_EndEvaluatingParserInsertedScript(nsparser);
+        nsIParser_Release(nsparser);
+    }
+
     nsIDOMHTMLScriptElement_Release(nsscript);
     return NS_OK;
 }
@@ -410,9 +413,7 @@ static const nsIRunnableVtbl nsRunnableVtbl = {
 
 static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsISupports *arg1, nsISupports *arg2)
 {
-    nsIDOMNSDocument *nsdoc;
     nsRunnable *runnable;
-    nsresult nsres;
 
     runnable = heap_alloc_zero(sizeof(*runnable));
     if(!runnable)
@@ -433,13 +434,7 @@ static void add_script_runner(HTMLDocumentNode *This, runnable_proc_t proc, nsIS
         nsISupports_AddRef(arg2);
     runnable->arg2 = arg2;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(This->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
-    if(NS_SUCCEEDED(nsres)) {
-        nsIDOMNSDocument_WineAddScriptRunner(nsdoc, &runnable->nsIRunnable_iface);
-        nsIDOMNSDocument_Release(nsdoc);
-    }else {
-        ERR("Could not get nsIDOMNSDocument: %08x\n", nsres);
-    }
+    nsIContentUtils_AddScriptRunner(content_utils, &runnable->nsIRunnable_iface);
 
     nsIRunnable_Release(&runnable->nsIRunnable_iface);
 }
@@ -557,12 +552,12 @@ static void NSAPI nsDocumentObserver_EndLoad(nsIDocumentObserver *iface, nsIDocu
 }
 
 static void NSAPI nsDocumentObserver_ContentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        nsIContent *aContent1, nsIContent *aContent2, PRInt32 aStateMask)
+        nsIContent *aContent, nsEventStates *aStateMask)
 {
 }
 
 static void NSAPI nsDocumentObserver_DocumentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
-        PRInt32 aStateMask)
+        nsEventStates *aStateMask)
 {
 }
 
@@ -639,8 +634,8 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
     }
 }
 
-static void NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *iface, nsIContent *aContent,
-        PRBool aHaveNotified)
+static nsresult NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *iface, nsIContent *aContent,
+        PRBool aHaveNotified, nsIParser *aParser)
 {
     HTMLDocumentNode *This = impl_from_nsIDocumentObserver(iface);
     nsIDOMHTMLScriptElement *nsscript;
@@ -652,9 +647,11 @@ static void NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *ifa
     if(NS_SUCCEEDED(nsres)) {
         TRACE("script node\n");
 
-        add_script_runner(This, run_insert_script, (nsISupports*)nsscript, NULL);
+        add_script_runner(This, run_insert_script, (nsISupports*)nsscript, (nsISupports*)aParser);
         nsIDOMHTMLScriptElement_Release(nsscript);
     }
+
+    return NS_OK;
 }
 
 static const nsIDocumentObserverVtbl nsDocumentObserverVtbl = {
@@ -686,34 +683,60 @@ static const nsIDocumentObserverVtbl nsDocumentObserverVtbl = {
     nsDocumentObserver_DoneAddingChildren
 };
 
-void init_mutation(HTMLDocumentNode *doc)
+void init_document_mutation(HTMLDocumentNode *doc)
 {
-    nsIDOMNSDocument *nsdoc;
+    nsIDocument *nsdoc;
     nsresult nsres;
 
     doc->nsIDocumentObserver_iface.lpVtbl = &nsDocumentObserverVtbl;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
+    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08x\n", nsres);
         return;
     }
 
-    nsIDOMNSDocument_WineAddObserver(nsdoc, &doc->nsIDocumentObserver_iface);
-    nsIDOMNSDocument_Release(nsdoc);
+    nsIContentUtils_AddDocumentObserver(content_utils, nsdoc, &doc->nsIDocumentObserver_iface);
+    nsIDocument_Release(nsdoc);
 }
 
-void release_mutation(HTMLDocumentNode *doc)
+void release_document_mutation(HTMLDocumentNode *doc)
 {
-    nsIDOMNSDocument *nsdoc;
+    nsIDocument *nsdoc;
     nsresult nsres;
 
-    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDOMNSDocument, (void**)&nsdoc);
+    nsres = nsIDOMHTMLDocument_QueryInterface(doc->nsdoc, &IID_nsIDocument, (void**)&nsdoc);
     if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSDocument: %08x\n", nsres);
+        ERR("Could not get nsIDocument: %08x\n", nsres);
         return;
     }
 
-    nsIDOMNSDocument_WineRemoveObserver(nsdoc, &doc->nsIDocumentObserver_iface);
-    nsIDOMNSDocument_Release(nsdoc);
+    nsIContentUtils_RemoveDocumentObserver(content_utils, nsdoc, &doc->nsIDocumentObserver_iface);
+    nsIDocument_Release(nsdoc);
+}
+
+void init_mutation(nsIComponentManager *component_manager)
+{
+    nsIFactory *factory;
+    nsresult nsres;
+
+    if(!component_manager) {
+        if(content_utils) {
+            nsIContentUtils_Release(content_utils);
+            content_utils = NULL;
+        }
+        return;
+    }
+
+    nsres = nsIComponentManager_GetClassObject(component_manager, &NS_ICONTENTUTILS_CID,
+            &IID_nsIFactory, (void**)&factory);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not create nsIContentUtils service: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIFactory_CreateInstance(factory, NULL, &IID_nsIContentUtils, (void**)&content_utils);
+    nsIFactory_Release(factory);
+    if(NS_FAILED(nsres))
+        ERR("Could not create nsIContentUtils instance: %08x\n", nsres);
 }

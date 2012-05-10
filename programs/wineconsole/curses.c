@@ -55,6 +55,8 @@
 
 #include "wine/library.h"
 #include "wine/debug.h"
+#undef ERR
+#define ERR (-1)
 
 WINE_DEFAULT_DEBUG_CHANNEL(curses);
 
@@ -668,7 +670,7 @@ static unsigned WCCURSES_FillMouse(INPUT_RECORD* ir)
     WINE_TRACE("[%u]: (%d, %d) %08lx\n", 
                mevt.id, mevt.x, mevt.y, (unsigned long)mevt.bstate);
 
-    /* macros to ease mapping ncurse button numbering to windows's one */
+    /* macros to ease mapping ncurse button numbering to windows' one */
 #define	BTN1_BIT	FROM_LEFT_1ST_BUTTON_PRESSED
 #define	BTN2_BIT	RIGHTMOST_BUTTON_PRESSED
 #define	BTN3_BIT	FROM_LEFT_2ND_BUTTON_PRESSED
@@ -985,6 +987,7 @@ static void WCCURSES_DeleteBackend(struct inner_data* data)
         WaitForSingleObject( PRIVATE(data)->input_thread, INFINITE );
         CloseHandle( PRIVATE(data)->input_thread );
     }
+    PRIVATE(data)->lock.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&PRIVATE(data)->lock);
 
     delwin(PRIVATE(data)->pad);
@@ -1009,17 +1012,16 @@ static void WCCURSES_DeleteBackend(struct inner_data* data)
 static int WCCURSES_MainLoop(struct inner_data* data)
 {
     DWORD       id;
-    BOOL        cont = TRUE;
 
     WCCURSES_Resize(data);
 
     if (pipe( PRIVATE(data)->sync_pipe ) == -1) return 0;
     PRIVATE(data)->input_thread = CreateThread( NULL, 0, input_thread, data, 0, &id );
 
-    while (cont && WaitForSingleObject(data->hSynchro, INFINITE) == WAIT_OBJECT_0)
+    while (!data->dying && WaitForSingleObject(data->hSynchro, INFINITE) == WAIT_OBJECT_0)
     {
         EnterCriticalSection(&PRIVATE(data)->lock);
-        cont = WINECON_GrabChanges(data);
+        WINECON_GrabChanges(data);
         LeaveCriticalSection(&PRIVATE(data)->lock);
     }
 
@@ -1104,6 +1106,7 @@ enum init_return WCCURSES_InitBackend(struct inner_data* data)
     }
 #endif
     InitializeCriticalSection(&PRIVATE(data)->lock);
+    PRIVATE(data)->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": curses");
 
     return init_success;
 }

@@ -38,6 +38,7 @@
 #include "winbase.h"
 #include "winnt.h"
 #include "winternl.h"
+#include "psapi.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "ddk/wdm.h"
@@ -156,7 +157,16 @@ VOID WINAPI GetSystemInfo(
     case PROCESSOR_ARCHITECTURE_AMD64:
         si->dwProcessorType = PROCESSOR_AMD_X8664;
         break;
-    default: FIXME("Unknown processor architecture %x\n", sci.Architecture);
+    case PROCESSOR_ARCHITECTURE_ARM:
+        switch (sci.Level)
+        {
+        case 4:  si->dwProcessorType = PROCESSOR_ARM_7TDMI;     break;
+        default: si->dwProcessorType = PROCESSOR_ARM920;
+        }
+        break;
+    default:
+        FIXME("Unknown processor architecture %x\n", sci.Architecture);
+        si->dwProcessorType = 0;
     }
     si->dwAllocationGranularity     = sbi.AllocationGranularity;
     si->wProcessorLevel             = sci.Level;
@@ -206,4 +216,23 @@ BOOL WINAPI IsProcessorFeaturePresent (
     return SHARED_DATA->ProcessorFeatures[feature];
   else
     return FALSE;
+}
+
+/***********************************************************************
+ *           K32GetPerformanceInfo (KERNEL32.@)
+ */
+BOOL WINAPI K32GetPerformanceInfo(PPERFORMANCE_INFORMATION info, DWORD size)
+{
+    NTSTATUS status;
+
+    TRACE( "(%p, %d)\n", info, size );
+
+    status = NtQuerySystemInformation( SystemPerformanceInformation, info, size, NULL );
+
+    if (status)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    return TRUE;
 }

@@ -127,7 +127,7 @@
 @ stdcall NdrCStdStubBuffer_Release(ptr ptr)
 @ stdcall NdrClearOutParameters(ptr ptr ptr)
 @ varargs NdrClientCall2(ptr ptr)
-@ varargs NdrClientCall(ptr ptr) NdrClientCall2
+@ varargs -arch=i386 NdrClientCall(ptr ptr) NdrClientCall2
 @ stdcall NdrClientContextMarshall(ptr ptr long)
 @ stdcall NdrClientContextUnmarshall(ptr ptr ptr)
 @ stub NdrClientInitialize
@@ -273,7 +273,7 @@
 @ stub NdrRpcSsEnableAllocate
 @ stdcall NdrSendReceive(ptr ptr)
 @ stdcall NdrServerCall2(ptr)
-@ stub NdrServerCall
+@ stdcall NdrServerCall(ptr)
 @ stdcall NdrServerContextMarshall(ptr ptr long)
 @ stdcall NdrServerContextNewMarshall(ptr ptr ptr ptr) # wxp
 @ stdcall NdrServerContextNewUnmarshall(ptr ptr) # wxp
@@ -293,7 +293,7 @@
 @ stdcall NdrSimpleTypeMarshall(ptr ptr long)
 @ stdcall NdrSimpleTypeUnmarshall(ptr ptr long)
 @ stdcall NdrStubCall2(ptr ptr ptr ptr)
-@ stub NdrStubCall
+@ stdcall NdrStubCall(ptr ptr ptr ptr)
 @ stdcall NdrStubForwardingFunction(ptr ptr ptr ptr)
 @ stdcall NdrStubGetBuffer(ptr ptr ptr)
 @ stdcall NdrStubInitialize(ptr ptr ptr ptr)
@@ -369,8 +369,8 @@
 @ stub RpcCertGeneratePrincipalNameW
 @ stdcall RpcCompleteAsyncCall(ptr ptr) RpcAsyncCompleteCall
 @ stdcall RpcEpRegisterA(ptr ptr ptr str)
-@ stub RpcEpRegisterNoReplaceA
-@ stub RpcEpRegisterNoReplaceW
+@ stdcall RpcEpRegisterNoReplaceA(ptr ptr ptr str)
+@ stdcall RpcEpRegisterNoReplaceW(ptr ptr ptr wstr)
 @ stdcall RpcEpRegisterW(ptr ptr ptr wstr)
 @ stdcall RpcEpResolveBinding(ptr ptr)
 @ stdcall RpcEpUnregister(ptr ptr ptr)
@@ -409,8 +409,8 @@
 @ stdcall RpcMgmtStatsVectorFree(ptr)
 @ stdcall RpcMgmtStopServerListening(ptr)
 @ stdcall RpcMgmtWaitServerListen()
-@ stub RpcNetworkInqProtseqsA
-@ stub RpcNetworkInqProtseqsW
+@ stdcall RpcNetworkInqProtseqsA(ptr)
+@ stdcall RpcNetworkInqProtseqsW(ptr)
 @ stdcall RpcNetworkIsProtseqValidA(ptr)
 @ stdcall RpcNetworkIsProtseqValidW(ptr)
 @ stub RpcNsBindingInqEntryNameA
@@ -418,8 +418,8 @@
 @ stub RpcObjectInqType
 @ stub RpcObjectSetInqFn
 @ stdcall RpcObjectSetType(ptr ptr)
-@ stub RpcProtseqVectorFreeA
-@ stub RpcProtseqVectorFreeW
+@ stdcall RpcProtseqVectorFreeA(ptr)
+@ stdcall RpcProtseqVectorFreeW(ptr)
 @ stdcall RpcRaiseException(long)
 @ stub RpcRegisterAsyncInfo
 @ stdcall RpcRevertToSelf()

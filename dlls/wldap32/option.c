@@ -19,22 +19,20 @@
  */
 
 #include "config.h"
-
 #include "wine/port.h"
-#include "wine/debug.h"
 
 #include <stdarg.h>
+#ifdef HAVE_LDAP_H
+#include <ldap.h>
+#endif
 
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
 
-#ifdef HAVE_LDAP_H
-#include <ldap.h>
-#endif
-
 #include "winldap_private.h"
 #include "wldap32.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wldap32);
 
@@ -319,7 +317,7 @@ ULONG CDECL ldap_set_optionA( WLDAP32_LDAP *ld, int option, void *value )
 
     TRACE( "(%p, 0x%08x, %p)\n", ld, option, value );
 
-    if (!ld || !value) return WLDAP32_LDAP_PARAM_ERROR;
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
     switch (option)
     {
@@ -422,7 +420,7 @@ ULONG CDECL ldap_set_optionW( WLDAP32_LDAP *ld, int option, void *value )
 
     TRACE( "(%p, 0x%08x, %p)\n", ld, option, value );
 
-    if (!ld || !value) return WLDAP32_LDAP_PARAM_ERROR;
+    if (!ld) return WLDAP32_LDAP_PARAM_ERROR;
 
     switch (option)
     {

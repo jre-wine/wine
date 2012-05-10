@@ -21,11 +21,13 @@
 @ stdcall CoInternetGetSecurityUrlEx(ptr ptr long long)
 @ stdcall CoInternetGetSession(long ptr long)
 @ stdcall CoInternetIsFeatureEnabled(long long)
+@ stdcall CoInternetIsFeatureEnabledForUrl(long long wstr ptr)
+@ stdcall CoInternetIsFeatureZoneElevationEnabled(wstr wstr ptr long)
 @ stdcall CoInternetParseUrl(wstr long long wstr long ptr long)
 @ stdcall CoInternetParseIUri(ptr long long wstr long ptr long)
 @ stdcall CoInternetQueryInfo(ptr long long ptr long ptr long)
 @ stdcall CoInternetSetFeatureEnabled(long long long)
-@ stub CompareSecurityIds
+@ stdcall CompareSecurityIds(ptr long ptr long long)
 @ stub CopyBindInfo
 @ stdcall CopyStgMedium(ptr ptr)
 @ stdcall CreateAsyncBindCtx(long ptr ptr ptr)
@@ -36,6 +38,7 @@
 @ stdcall CreateUriWithFragment(wstr wstr long long ptr)
 @ stdcall CreateURLMoniker(ptr wstr ptr)
 @ stdcall CreateURLMonikerEx(ptr wstr ptr long)
+@ stdcall CreateURLMonikerEx2(ptr ptr ptr long)
 @ stdcall -private DllCanUnloadNow()
 @ stdcall -private DllGetClassObject(ptr ptr ptr)
 @ stdcall -private DllInstall(long wstr)
@@ -58,6 +61,7 @@
 @ stdcall HlinkNavigateString(ptr wstr)
 @ stdcall HlinkSimpleNavigateToMoniker(ptr wstr wstr ptr ptr ptr long long)
 @ stdcall HlinkSimpleNavigateToString(wstr wstr wstr ptr ptr ptr long long)
+@ stub IEInstallScope
 @ stdcall IsAsyncMoniker(ptr)
 @ stdcall IsLoggingEnabledA(str)
 @ stdcall IsLoggingEnabledW(wstr)
@@ -68,7 +72,7 @@
 @ stdcall RegisterBindStatusCallback(ptr ptr ptr long)
 @ stdcall RegisterFormatEnumerator(ptr ptr long)
 @ stub RegisterMediaTypeClass
-@ stub RegisterMediaTypes
+@ stdcall RegisterMediaTypes(long ptr ptr)
 @ stdcall ReleaseBindInfo(ptr)
 @ stdcall RevokeBindStatusCallback(ptr ptr)
 @ stdcall RevokeFormatEnumerator(ptr ptr)
@@ -91,5 +95,13 @@
 @ stub WriteHitLogging
 @ stub ZonesReInit
 
-410 stdcall @(long long) URLMON_410
-423 stdcall @(long long long long) URLMON_423
+111 stdcall @(wstr) IsProtectedModeURL
+329 stdcall @(ptr ptr) propsys.VariantToGUID
+331 stdcall @(ptr long ptr) propsys.InitPropVariantFromBuffer
+335 stdcall @(ptr long ptr) propsys.InitVariantFromBuffer
+350 stdcall @(ptr ptr) propsys.PropVariantToGUID
+362 stdcall @(ptr ptr) propsys.InitVariantFromGUIDAsString
+410 stdcall @(long long) LogSqmBits
+423 stdcall @(long long long long) LogSqmUXCommandOffsetInternal
+444 stdcall @(long long long) MapUriToBrowserEmulationState
+445 stdcall @(long long) MapBrowserEmulationModeToUserAgent

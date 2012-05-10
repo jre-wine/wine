@@ -147,8 +147,13 @@ static int amt_from_gst_caps_audio(GstCaps *caps, AM_MEDIA_TYPE *amt) {
     if (!strcmp(typename, "audio/x-raw-float")) {
         wfe->SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
         wfx->wBitsPerSample = wfe->Samples.wValidBitsPerSample = 32;
-    } else
+    } else {
         wfe->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+        if (wfx->nChannels <= 2 && bpp <= 16 && depth == bpp)  {
+            wfx->wFormatTag = WAVE_FORMAT_PCM;
+            wfx->cbSize = 0;
+        }
+    }
     wfx->nBlockAlign = wfx->nChannels * wfx->wBitsPerSample/8;
     wfx->nAvgBytesPerSec = wfx->nSamplesPerSec * wfx->nBlockAlign;
     return 1;
@@ -727,7 +732,7 @@ static void init_new_decoded_pad(GstElement *bin, GstPad *pad, gboolean last, GS
     gst_pad_set_event_function(mypad, event_sink);
     gst_pad_set_bufferalloc_function(mypad, request_buffer_sink);
     gst_pad_set_acceptcaps_function(mypad, accept_caps_sink);
-    gst_pad_set_acceptcaps_function(mypad, setcaps_sink);
+    gst_pad_set_setcaps_function(mypad, setcaps_sink);
 
     if (!strcmp(typename, "audio/x-raw-int") ||
         !strcmp(typename, "audio/x-raw-float")) {
@@ -1475,7 +1480,7 @@ static HRESULT WINAPI GSTOutPin_DecideAllocator(BaseOutputPin *iface, IMemInputP
     GSTOutPin *This = (GSTOutPin *)iface;
     GSTImpl *GSTfilter = (GSTImpl*)This->pin.pin.pinInfo.pFilter;
 
-    pAlloc = NULL;
+    *pAlloc = NULL;
     if (GSTfilter->pInputPin.pAlloc)
         hr = IMemInputPin_NotifyAllocator(pPin, GSTfilter->pInputPin.pAlloc, FALSE);
     else

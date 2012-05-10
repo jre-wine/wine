@@ -25,6 +25,9 @@
 #include <X11/Xlib.h>
 #include <X11/cursorfont.h>
 #include <stdarg.h>
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+#include <X11/extensions/XInput2.h>
+#endif
 
 #ifdef SONAME_LIBXCURSOR
 # include <X11/Xcursor/Xcursor.h>
@@ -92,13 +95,51 @@ static const UINT button_up_flags[NB_BUTTONS] =
     MOUSEEVENTF_XUP
 };
 
+static const UINT button_down_data[NB_BUTTONS] =
+{
+    0,
+    0,
+    0,
+    WHEEL_DELTA,
+    -WHEEL_DELTA,
+    XBUTTON1,
+    XBUTTON2,
+    XBUTTON1,
+    XBUTTON2
+};
+
+static const UINT button_up_data[NB_BUTTONS] =
+{
+    0,
+    0,
+    0,
+    0,
+    0,
+    XBUTTON1,
+    XBUTTON2,
+    XBUTTON1,
+    XBUTTON2
+};
+
 static HWND cursor_window;
-static DWORD last_time_modified;
+static HCURSOR last_cursor;
+static DWORD last_cursor_change;
 static XContext cursor_context;
+static RECT clip_rect;
 static Cursor create_cursor( HANDLE handle );
 
-BOOL CDECL X11DRV_SetCursorPos( INT x, INT y );
-
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+static BOOL xinput2_available;
+static int xinput2_core_pointer;
+static int xinput2_device_count;
+static XIDeviceInfo *xinput2_devices;
+#define MAKE_FUNCPTR(f) static typeof(f) * p##f
+MAKE_FUNCPTR(XIFreeDeviceInfo);
+MAKE_FUNCPTR(XIQueryDevice);
+MAKE_FUNCPTR(XIQueryVersion);
+MAKE_FUNCPTR(XISelectEvents);
+#undef MAKE_FUNCPTR
+#endif
 
 /***********************************************************************
  *		X11DRV_Xcursor_Init
@@ -158,7 +199,7 @@ static Cursor get_empty_cursor(void)
 /***********************************************************************
  *		set_window_cursor
  */
-void set_window_cursor( struct x11drv_win_data *data, HCURSOR handle )
+void set_window_cursor( Window window, HCURSOR handle )
 {
     Cursor cursor, prev;
 
@@ -185,17 +226,16 @@ void set_window_cursor( struct x11drv_win_data *data, HCURSOR handle )
         }
     }
 
-    XDefineCursor( gdi_display, data->whole_window, cursor );
+    XDefineCursor( gdi_display, window, cursor );
     /* make the change take effect immediately */
     XFlush( gdi_display );
-    data->cursor = handle;
     wine_tsx11_unlock();
 }
 
 /***********************************************************************
  *              sync_window_cursor
  */
-void sync_window_cursor( struct x11drv_win_data *data )
+void sync_window_cursor( Window window )
 {
     HCURSOR cursor;
 
@@ -207,7 +247,294 @@ void sync_window_cursor( struct x11drv_win_data *data )
     }
     SERVER_END_REQ;
 
-    if (data->cursor != cursor) set_window_cursor( data, cursor );
+    set_window_cursor( window, cursor );
+}
+
+/***********************************************************************
+ *              enable_xinput2
+ */
+static void enable_xinput2(void)
+{
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+    struct x11drv_thread_data *data = x11drv_thread_data();
+    XIEventMask mask;
+    unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)];
+    int i, j;
+
+    if (!xinput2_available) return;
+
+    if (data->xi2_state == xi_unknown)
+    {
+        int major = 2, minor = 0;
+        wine_tsx11_lock();
+        if (!pXIQueryVersion( data->display, &major, &minor )) data->xi2_state = xi_disabled;
+        else
+        {
+            data->xi2_state = xi_unavailable;
+            WARN( "X Input 2 not available\n" );
+        }
+        wine_tsx11_unlock();
+    }
+    if (data->xi2_state == xi_unavailable) return;
+
+    wine_tsx11_lock();
+    if (xinput2_devices) pXIFreeDeviceInfo( xinput2_devices );
+    xinput2_devices = pXIQueryDevice( data->display, XIAllDevices, &xinput2_device_count );
+    for (i = 0; i < xinput2_device_count; ++i)
+    {
+        if (xinput2_devices[i].use != XIMasterPointer) continue;
+        for (j = 0; j < xinput2_devices[i].num_classes; j++)
+        {
+            XIValuatorClassInfo *class = (XIValuatorClassInfo *)xinput2_devices[i].classes[j];
+
+            if (xinput2_devices[i].classes[j]->type != XIValuatorClass) continue;
+            if (class->number != 0 && class->number != 1) continue;
+            TRACE( "Device %u (%s) class %u num %u %f,%f res %u mode %u\n",
+                   xinput2_devices[i].deviceid, debugstr_a(xinput2_devices[i].name),
+                   j, class->number, class->min, class->max, class->resolution, class->mode );
+            if (class->mode == XIModeAbsolute)
+            {
+                TRACE( "Device is absolute, not enabling XInput2\n" );
+                goto done;
+            }
+        }
+        TRACE( "Using %u (%s) as core pointer\n",
+               xinput2_devices[i].deviceid, debugstr_a(xinput2_devices[i].name) );
+        xinput2_core_pointer = xinput2_devices[i].deviceid;
+        break;
+    }
+
+    mask.mask     = mask_bits;
+    mask.mask_len = sizeof(mask_bits);
+    memset( mask_bits, 0, sizeof(mask_bits) );
+    XISetMask( mask_bits, XI_RawMotion );
+    XISetMask( mask_bits, XI_ButtonPress );
+
+    for (i = 0; i < xinput2_device_count; ++i)
+    {
+        if (xinput2_devices[i].use == XISlavePointer &&
+            xinput2_devices[i].attachment == xinput2_core_pointer)
+        {
+            TRACE( "Device %u (%s) is attached to the core pointer\n",
+                   xinput2_devices[i].deviceid, debugstr_a(xinput2_devices[i].name) );
+            mask.deviceid = xinput2_devices[i].deviceid;
+            pXISelectEvents( data->display, DefaultRootWindow( data->display ), &mask, 1 );
+            data->xi2_state = xi_enabled;
+        }
+    }
+
+done:
+    wine_tsx11_unlock();
+#endif
+}
+
+/***********************************************************************
+ *              disable_xinput2
+ */
+static void disable_xinput2(void)
+{
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+    struct x11drv_thread_data *data = x11drv_thread_data();
+    XIEventMask mask;
+    int i;
+
+    if (data->xi2_state != xi_enabled) return;
+
+    TRACE( "disabling\n" );
+    data->xi2_state = xi_disabled;
+
+    mask.mask = NULL;
+    mask.mask_len = 0;
+
+    wine_tsx11_lock();
+    for (i = 0; i < xinput2_device_count; ++i)
+    {
+        if (xinput2_devices[i].use == XISlavePointer &&
+            xinput2_devices[i].attachment == xinput2_core_pointer)
+        {
+            mask.deviceid = xinput2_devices[i].deviceid;
+            pXISelectEvents( data->display, DefaultRootWindow( data->display ), &mask, 1 );
+        }
+    }
+    pXIFreeDeviceInfo( xinput2_devices );
+    xinput2_devices = NULL;
+    xinput2_device_count = 0;
+    wine_tsx11_unlock();
+#endif
+}
+
+
+/***********************************************************************
+ *		grab_clipping_window
+ *
+ * Start a pointer grab on the clip window.
+ */
+static BOOL grab_clipping_window( const RECT *clip, BOOL only_with_xinput )
+{
+    static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
+    struct x11drv_thread_data *data = x11drv_thread_data();
+    Window clip_window;
+    HWND msg_hwnd = 0;
+
+    if (!data) return FALSE;
+    if (!(clip_window = init_clip_window())) return TRUE;
+
+    if (!(msg_hwnd = CreateWindowW( messageW, NULL, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
+                                    GetModuleHandleW(0), NULL )))
+        return TRUE;
+
+    /* enable XInput2 unless we are already clipping */
+    if (!data->clip_hwnd) enable_xinput2();
+
+    /* don't clip to 1x1 rectangle if we don't have XInput */
+    if (clip->right - clip->left == 1 && clip->bottom - clip->top == 1) only_with_xinput = TRUE;
+    /* don't clip to fullscreen rectangle either (with 1-pixel offset to catch the dinput case) */
+    if (clip->left <= virtual_screen_rect.left + 1 || clip->right >= virtual_screen_rect.right - 1 ||
+        clip->top <= virtual_screen_rect.top + 1 || clip->bottom >= virtual_screen_rect.bottom - 1)
+        only_with_xinput = TRUE;
+
+    if (only_with_xinput && data->xi2_state != xi_enabled)
+    {
+        WARN( "XInput2 not supported, refusing to clip to %s\n", wine_dbgstr_rect(clip) );
+        DestroyWindow( msg_hwnd );
+        ClipCursor( NULL );
+        return TRUE;
+    }
+
+    TRACE( "clipping to %s win %lx\n", wine_dbgstr_rect(clip), clip_window );
+
+    wine_tsx11_lock();
+    if (!data->clip_hwnd) XUnmapWindow( data->display, clip_window );
+    XMoveResizeWindow( data->display, clip_window,
+                       clip->left - virtual_screen_rect.left, clip->top - virtual_screen_rect.top,
+                       max( 1, clip->right - clip->left ), max( 1, clip->bottom - clip->top ) );
+    XMapWindow( data->display, clip_window );
+
+    /* if the rectangle is shrinking we may get a pointer warp */
+    if (!data->clip_hwnd || clip->left > clip_rect.left || clip->top > clip_rect.top ||
+        clip->right < clip_rect.right || clip->bottom < clip_rect.bottom)
+        data->warp_serial = NextRequest( data->display );
+
+    if (!XGrabPointer( data->display, clip_window, False,
+                       PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
+                       GrabModeAsync, GrabModeAsync, clip_window, None, CurrentTime ))
+        clipping_cursor = 1;
+    wine_tsx11_unlock();
+
+    if (!clipping_cursor)
+    {
+        disable_xinput2();
+        DestroyWindow( msg_hwnd );
+        return FALSE;
+    }
+    clip_rect = *clip;
+    if (!data->clip_hwnd) sync_window_cursor( clip_window );
+    InterlockedExchangePointer( (void **)&cursor_window, msg_hwnd );
+    data->clip_hwnd = msg_hwnd;
+    SendMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR, 0, (LPARAM)msg_hwnd );
+    return TRUE;
+}
+
+/***********************************************************************
+ *		ungrab_clipping_window
+ *
+ * Release the pointer grab on the clip window.
+ */
+void ungrab_clipping_window(void)
+{
+    Display *display = thread_init_display();
+    Window clip_window = init_clip_window();
+
+    if (!clip_window) return;
+
+    TRACE( "no longer clipping\n" );
+    wine_tsx11_lock();
+    XUnmapWindow( display, clip_window );
+    wine_tsx11_unlock();
+    clipping_cursor = 0;
+    SendMessageW( GetDesktopWindow(), WM_X11DRV_CLIP_CURSOR, 0, 0 );
+}
+
+/***********************************************************************
+ *		reset_clipping_window
+ *
+ * Forcibly reset the window clipping on external events.
+ */
+void reset_clipping_window(void)
+{
+    ungrab_clipping_window();
+    ClipCursor( NULL );  /* make sure the clip rectangle is reset too */
+}
+
+/***********************************************************************
+ *             clip_cursor_notify
+ *
+ * Notification function called upon receiving a WM_X11DRV_CLIP_CURSOR.
+ */
+LRESULT clip_cursor_notify( HWND hwnd, HWND new_clip_hwnd )
+{
+    struct x11drv_thread_data *data = x11drv_thread_data();
+
+    if (hwnd == GetDesktopWindow())  /* change the clip window stored in the desktop process */
+    {
+        static HWND clip_hwnd;
+
+        HWND prev = clip_hwnd;
+        clip_hwnd = new_clip_hwnd;
+        if (prev || new_clip_hwnd) TRACE( "clip hwnd changed from %p to %p\n", prev, new_clip_hwnd );
+        if (prev) SendNotifyMessageW( prev, WM_X11DRV_CLIP_CURSOR, 0, 0 );
+    }
+    else if (hwnd == data->clip_hwnd)  /* this is a notification that clipping has been reset */
+    {
+        TRACE( "clip hwnd reset from %p\n", hwnd );
+        data->clip_hwnd = 0;
+        data->clip_reset = GetTickCount();
+        disable_xinput2();
+        DestroyWindow( hwnd );
+    }
+    else if (hwnd == GetForegroundWindow())  /* request to clip */
+    {
+        RECT clip;
+
+        GetClipCursor( &clip );
+        if (clip.left > virtual_screen_rect.left || clip.right < virtual_screen_rect.right ||
+            clip.top > virtual_screen_rect.top   || clip.bottom < virtual_screen_rect.bottom)
+            return grab_clipping_window( &clip, FALSE );
+    }
+    return 0;
+}
+
+/***********************************************************************
+ *		clip_fullscreen_window
+ *
+ * Turn on clipping if the active window is fullscreen.
+ */
+BOOL clip_fullscreen_window( HWND hwnd, BOOL reset )
+{
+    struct x11drv_win_data *data;
+    struct x11drv_thread_data *thread_data;
+    RECT rect;
+    DWORD style;
+
+    if (hwnd == GetDesktopWindow()) return FALSE;
+    if (!(data = X11DRV_get_win_data( hwnd ))) return FALSE;
+    style = GetWindowLongW( hwnd, GWL_STYLE );
+    if (!(style & WS_VISIBLE)) return FALSE;
+    if ((style & (WS_POPUP | WS_CHILD)) == WS_CHILD) return FALSE;
+    /* maximized windows don't count as full screen */
+    if ((style & WS_MAXIMIZE) && (style & WS_CAPTION) == WS_CAPTION) return FALSE;
+    if (!is_window_rect_fullscreen( &data->whole_rect )) return FALSE;
+    if (!(thread_data = x11drv_thread_data())) return FALSE;
+    if (GetTickCount() - thread_data->clip_reset < 1000) return FALSE;
+    if (!reset && clipping_cursor && thread_data->clip_hwnd) return FALSE;  /* already clipping */
+    SetRect( &rect, 0, 0, screen_width, screen_height );
+    if (!grab_fullscreen)
+    {
+        if (!EqualRect( &rect, &virtual_screen_rect )) return FALSE;
+        if (root_window != DefaultRootWindow( gdi_display )) return FALSE;
+    }
+    TRACE( "win %p clipping fullscreen\n", hwnd );
+    return grab_clipping_window( &rect, TRUE );
 }
 
 /***********************************************************************
@@ -215,40 +542,63 @@ void sync_window_cursor( struct x11drv_win_data *data )
  *
  * Update the various window states on a mouse event.
  */
-static void send_mouse_input( HWND hwnd, UINT flags, Window window, int x, int y,
-                              unsigned int state, DWORD mouse_data, Time time )
+static void send_mouse_input( HWND hwnd, Window window, unsigned int state, INPUT *input )
 {
-    struct x11drv_win_data *data = X11DRV_get_win_data( hwnd );
+    struct x11drv_win_data *data;
     POINT pt;
-    INPUT input;
 
-    if (!data) return;
+    input->type = INPUT_MOUSE;
+
+    if (!hwnd)
+    {
+        struct x11drv_thread_data *thread_data = x11drv_thread_data();
+        HWND clip_hwnd = thread_data->clip_hwnd;
+
+        if (!clip_hwnd) return;
+        if (thread_data->clip_window != window) return;
+        if (InterlockedExchangePointer( (void **)&cursor_window, clip_hwnd ) != clip_hwnd ||
+            input->u.mi.time - last_cursor_change > 100)
+        {
+            sync_window_cursor( window );
+            last_cursor_change = input->u.mi.time;
+        }
+        input->u.mi.dx += clip_rect.left;
+        input->u.mi.dy += clip_rect.top;
+        __wine_send_input( hwnd, input );
+        return;
+    }
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return;
 
     if (window == data->whole_window)
     {
-        x += data->whole_rect.left - data->client_rect.left;
-        y += data->whole_rect.top - data->client_rect.top;
+        input->u.mi.dx += data->whole_rect.left - data->client_rect.left;
+        input->u.mi.dy += data->whole_rect.top - data->client_rect.top;
     }
     if (window == root_window)
     {
-        x += virtual_screen_rect.left;
-        y += virtual_screen_rect.top;
+        input->u.mi.dx += virtual_screen_rect.left;
+        input->u.mi.dy += virtual_screen_rect.top;
     }
-    pt.x = x;
-    pt.y = y;
+    pt.x = input->u.mi.dx;
+    pt.y = input->u.mi.dy;
     if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL)
         pt.x = data->client_rect.right - data->client_rect.left - 1 - pt.x;
     MapWindowPoints( hwnd, 0, &pt, 1 );
 
     if (InterlockedExchangePointer( (void **)&cursor_window, hwnd ) != hwnd ||
-        GetTickCount() - last_time_modified > 100)
+        input->u.mi.time - last_cursor_change > 100)
     {
-        cursor_window = hwnd;
-        sync_window_cursor( data );
+        sync_window_cursor( data->whole_window );
+        last_cursor_change = input->u.mi.time;
     }
-    last_time_modified = GetTickCount();
 
-    if (hwnd != GetDesktopWindow()) hwnd = GetAncestor( hwnd, GA_ROOT );
+    if (hwnd != GetDesktopWindow())
+    {
+        hwnd = GetAncestor( hwnd, GA_ROOT );
+        if ((input->u.mi.dwFlags & (MOUSEEVENTF_LEFTDOWN|MOUSEEVENTF_RIGHTDOWN)) && hwnd == GetForegroundWindow())
+            clip_fullscreen_window( hwnd, FALSE );
+    }
 
     /* update the wine server Z-order */
 
@@ -272,15 +622,9 @@ static void send_mouse_input( HWND hwnd, UINT flags, Window window, int x, int y
         SERVER_END_REQ;
     }
 
-    input.type             = INPUT_MOUSE;
-    input.u.mi.dx          = pt.x;
-    input.u.mi.dy          = pt.y;
-    input.u.mi.mouseData   = mouse_data;
-    input.u.mi.dwFlags     = flags;
-    input.u.mi.time        = EVENT_x11_time_to_win32_time( time );
-    input.u.mi.dwExtraInfo = 0;
-
-    __wine_send_input( hwnd, &input );
+    input->u.mi.dx = pt.x;
+    input->u.mi.dy = pt.y;
+    __wine_send_input( hwnd, input );
 }
 
 #ifdef SONAME_LIBXCURSOR
@@ -296,7 +640,8 @@ static XcursorImage *create_xcursor_frame( HDC hdc, const ICONINFOEXW *iinfo, HA
                                            int width, int height, int istep )
 {
     XcursorImage *image, *ret = NULL;
-    int x, y, i, has_alpha;
+    DWORD delay_jiffies, num_steps;
+    int x, y, i, has_alpha = FALSE;
     XcursorPixel *ptr;
 
     wine_tsx11_lock();
@@ -310,7 +655,12 @@ static XcursorImage *create_xcursor_frame( HDC hdc, const ICONINFOEXW *iinfo, HA
 
     image->xhot = iinfo->xHotspot;
     image->yhot = iinfo->yHotspot;
-    image->delay = 100; /* TODO: find a way to get the proper delay */
+
+    image->delay = 100; /* fallback delay, 100 ms */
+    if (GetCursorFrameInfo(icon, 0x0 /* unknown parameter */, istep, &delay_jiffies, &num_steps) != 0)
+        image->delay = (100 * delay_jiffies) / 6; /* convert jiffies (1/60s) to milliseconds */
+    else
+        WARN("Failed to retrieve animated cursor frame-rate for frame %d.\n", istep);
 
     /* draw the cursor frame to a temporary buffer then copy it into the XcursorImage */
     memset( color_bits, 0x00, color_size );
@@ -361,14 +711,16 @@ static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE i
 {
     unsigned char *color_bits, *mask_bits;
     HBITMAP hbmColor = 0, hbmMask = 0;
-    XcursorImage **imgs, *image;
+    DWORD nFrames, delay_jiffies, i;
     int color_size, mask_size;
     BITMAPINFO *info = NULL;
     XcursorImages *images;
+    XcursorImage **imgs;
     Cursor cursor = 0;
-    int nFrames = 0;
 
-    if (!(imgs = HeapAlloc( GetProcessHeap(), 0, sizeof(XcursorImage*) ))) return 0;
+    /* Retrieve the number of frames to render */
+    if (!GetCursorFrameInfo(icon, 0x0 /* unknown parameter */, 0, &delay_jiffies, &nFrames)) return 0;
+    if (!(imgs = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(XcursorImage*)*nFrames ))) return 0;
 
     /* Allocate all of the resources necessary to obtain a cursor frame */
     if (!(info = HeapAlloc( GetProcessHeap(), 0, FIELD_OFFSET( BITMAPINFO, bmiColors[256] )))) goto cleanup;
@@ -391,6 +743,15 @@ static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE i
         goto cleanup;
     }
     info->bmiHeader.biBitCount = 1;
+    info->bmiColors[0].rgbRed      = 0;
+    info->bmiColors[0].rgbGreen    = 0;
+    info->bmiColors[0].rgbBlue     = 0;
+    info->bmiColors[0].rgbReserved = 0;
+    info->bmiColors[1].rgbRed      = 0xff;
+    info->bmiColors[1].rgbGreen    = 0xff;
+    info->bmiColors[1].rgbBlue     = 0xff;
+    info->bmiColors[1].rgbReserved = 0;
+
     mask_size = ((width + 31) / 32 * 4) * height; /* width_bytes * height */
     info->bmiHeader.biSizeImage = mask_size;
     hbmMask = CreateDIBSection( hdc, info, DIB_RGB_COLORS, (VOID **) &mask_bits, NULL, 0);
@@ -401,19 +762,13 @@ static Cursor create_xcursor_cursor( HDC hdc, const ICONINFOEXW *iinfo, HANDLE i
     }
 
     /* Create an XcursorImage for each frame of the cursor */
-    while (1)
+    for (i=0; i<nFrames; i++)
     {
-        XcursorImage **imgstmp;
-
-        image = create_xcursor_frame( hdc, iinfo, icon,
-                                      hbmColor, color_bits, color_size,
-                                      hbmMask, mask_bits, mask_size,
-                                      width, height, nFrames );
-        if (!image) break; /* no more drawable frames */
-
-        imgs[nFrames++] = image;
-        if (!(imgstmp = HeapReAlloc( GetProcessHeap(), 0, imgs, (nFrames+1)*sizeof(XcursorImage*) ))) goto cleanup;
-        imgs = imgstmp;
+        imgs[i] = create_xcursor_frame( hdc, iinfo, icon,
+                                        hbmColor, color_bits, color_size,
+                                        hbmMask, mask_bits, mask_size,
+                                        width, height, i );
+        if (!imgs[i]) goto cleanup;
     }
 
     /* Build an X cursor out of all of the frames */
@@ -431,8 +786,8 @@ cleanup:
     if (imgs)
     {
         /* Failed to produce a cursor, free previously allocated frames */
-        for (nFrames--; nFrames >= 0; nFrames--)
-            pXcursorImageDestroy( imgs[nFrames] );
+        for (i=0; i<nFrames && imgs[i]; i++)
+            pXcursorImageDestroy( imgs[i] );
         HeapFree( GetProcessHeap(), 0, imgs );
     }
     /* Cleanup all of the resources used to obtain the frame data */
@@ -752,6 +1107,11 @@ static Cursor create_xlib_cursor( HDC hdc, const ICONINFOEXW *icon, int width, i
 
     if (has_alpha)
     {
+        /* make sure the bitmaps are owned by x11drv */
+        HBITMAP orig = SelectObject( hdc, icon->hbmMask );
+        SelectObject( hdc, xor_bitmap );
+        SelectObject( hdc, orig );
+
         memset( mask_bits, 0, width_bytes * height );
         for (y = 0, ptr = color_bits; y < height; y++)
             for (x = 0; x < width; x++, ptr++)
@@ -810,7 +1170,7 @@ static Cursor create_cursor( HANDLE handle )
 #endif
 
     GetObjectW( info.hbmMask, sizeof(bm), &bm );
-    if (!info.hbmColor) bm.bmHeight /= 2;
+    if (!info.hbmColor) bm.bmHeight = max( 1, bm.bmHeight / 2 );
 
     /* make sure hotspot is valid */
     if (info.xHotspot >= bm.bmWidth || info.yHotspot >= bm.bmHeight)
@@ -868,7 +1228,12 @@ void CDECL X11DRV_DestroyCursorIcon( HCURSOR handle )
  */
 void CDECL X11DRV_SetCursor( HCURSOR handle )
 {
-    if (cursor_window) SendNotifyMessageW( cursor_window, WM_X11DRV_SET_CURSOR, 0, (LPARAM)handle );
+    if (InterlockedExchangePointer( (void **)&last_cursor, handle ) != handle ||
+        GetTickCount() - last_cursor_change > 100)
+    {
+        last_cursor_change = GetTickCount();
+        if (cursor_window) SendNotifyMessageW( cursor_window, WM_X11DRV_SET_CURSOR, 0, (LPARAM)handle );
+    }
 }
 
 /***********************************************************************
@@ -876,15 +1241,16 @@ void CDECL X11DRV_SetCursor( HCURSOR handle )
  */
 BOOL CDECL X11DRV_SetCursorPos( INT x, INT y )
 {
-    Display *display = thread_init_display();
-
-    TRACE( "warping to (%d,%d)\n", x, y );
+    struct x11drv_thread_data *data = x11drv_init_thread_data();
 
     wine_tsx11_lock();
-    XWarpPointer( display, root_window, root_window, 0, 0, 0, 0,
+    XWarpPointer( data->display, root_window, root_window, 0, 0, 0, 0,
                   x - virtual_screen_rect.left, y - virtual_screen_rect.top );
-    XFlush( display ); /* avoids bad mouse lag in games that do their own mouse warping */
+    data->warp_serial = NextRequest( data->display );
+    XNoOp( data->display );
+    XFlush( data->display ); /* avoids bad mouse lag in games that do their own mouse warping */
     wine_tsx11_unlock();
+    TRACE( "warped to %d,%d serial %lu\n", x, y, data->warp_serial );
     return TRUE;
 }
 
@@ -903,12 +1269,146 @@ BOOL CDECL X11DRV_GetCursorPos(LPPOINT pos)
     ret = XQueryPointer( display, root_window, &root, &child, &rootX, &rootY, &winX, &winY, &xstate );
     if (ret)
     {
+        POINT old = *pos;
         pos->x = winX + virtual_screen_rect.left;
         pos->y = winY + virtual_screen_rect.top;
-        TRACE("pointer at (%d,%d)\n", pos->x, pos->y );
+        TRACE( "pointer at (%d,%d) server pos %d,%d\n", pos->x, pos->y, old.x, old.y );
     }
     wine_tsx11_unlock();
     return ret;
+}
+
+/***********************************************************************
+ *		ClipCursor (X11DRV.@)
+ */
+BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
+{
+    if (!clip)
+    {
+        ungrab_clipping_window();
+        return TRUE;
+    }
+
+    if (GetWindowThreadProcessId( GetDesktopWindow(), NULL ) == GetCurrentThreadId())
+        return TRUE;  /* don't clip in the desktop process */
+
+    if (grab_pointer)
+    {
+        HWND foreground = GetForegroundWindow();
+
+        /* we are clipping if the clip rectangle is smaller than the screen */
+        if (clip->left > virtual_screen_rect.left || clip->right < virtual_screen_rect.right ||
+            clip->top > virtual_screen_rect.top || clip->bottom < virtual_screen_rect.bottom)
+        {
+            DWORD tid, pid;
+
+            /* forward request to the foreground window if it's in a different thread */
+            tid = GetWindowThreadProcessId( foreground, &pid );
+            if (tid && tid != GetCurrentThreadId() && pid == GetCurrentProcessId())
+            {
+                TRACE( "forwarding clip request to %p\n", foreground );
+                SendNotifyMessageW( foreground, WM_X11DRV_CLIP_CURSOR, 0, 0 );
+                return TRUE;
+            }
+            else if (grab_clipping_window( clip, FALSE )) return TRUE;
+        }
+        else /* if currently clipping, check if we should switch to fullscreen clipping */
+        {
+            struct x11drv_thread_data *data = x11drv_thread_data();
+            if (data && data->clip_hwnd)
+            {
+                if (EqualRect( clip, &clip_rect ) || clip_fullscreen_window( foreground, TRUE ))
+                    return TRUE;
+            }
+        }
+    }
+    ungrab_clipping_window();
+    return TRUE;
+}
+
+/***********************************************************************
+ *           move_resize_window
+ */
+void move_resize_window( Display *display, struct x11drv_win_data *data, int dir )
+{
+    DWORD pt;
+    int x, y, rootX, rootY, ret, button = 0;
+    XEvent xev;
+    Window root, child;
+    unsigned int xstate;
+
+    pt = GetMessagePos();
+    x = (short)LOWORD( pt );
+    y = (short)HIWORD( pt );
+
+    if (GetKeyState( VK_LBUTTON ) & 0x8000) button = 1;
+    else if (GetKeyState( VK_MBUTTON ) & 0x8000) button = 2;
+    else if (GetKeyState( VK_RBUTTON ) & 0x8000) button = 3;
+
+    TRACE( "hwnd %p/%lx, x %d, y %d, dir %d, button %d\n",
+           data->hwnd, data->whole_window, x, y, dir, button );
+
+    xev.xclient.type = ClientMessage;
+    xev.xclient.window = data->whole_window;
+    xev.xclient.message_type = x11drv_atom(_NET_WM_MOVERESIZE);
+    xev.xclient.serial = 0;
+    xev.xclient.display = display;
+    xev.xclient.send_event = True;
+    xev.xclient.format = 32;
+    xev.xclient.data.l[0] = x - virtual_screen_rect.left; /* x coord */
+    xev.xclient.data.l[1] = y - virtual_screen_rect.top;  /* y coord */
+    xev.xclient.data.l[2] = dir; /* direction */
+    xev.xclient.data.l[3] = button; /* button */
+    xev.xclient.data.l[4] = 0; /* unused */
+
+    /* need to ungrab the pointer that may have been automatically grabbed
+     * with a ButtonPress event */
+    wine_tsx11_lock();
+    XUngrabPointer( display, CurrentTime );
+    XSendEvent(display, root_window, False, SubstructureNotifyMask | SubstructureRedirectMask, &xev);
+    wine_tsx11_unlock();
+
+    /* try to detect the end of the size/move by polling for the mouse button to be released */
+    /* (some apps don't like it if we return before the size/move is done) */
+
+    if (!button) return;
+    for (;;)
+    {
+        MSG msg;
+        INPUT input;
+
+        wine_tsx11_lock();
+        ret = XQueryPointer( display, root_window, &root, &child, &rootX, &rootY, &x, &y, &xstate );
+        wine_tsx11_unlock();
+        if (!ret) break;
+
+        if (!(xstate & (Button1Mask << (button - 1))))
+        {
+            /* fake a button release event */
+            input.type = INPUT_MOUSE;
+            input.u.mi.dx          = x + virtual_screen_rect.left;
+            input.u.mi.dy          = y + virtual_screen_rect.top;
+            input.u.mi.mouseData   = button_up_data[button - 1];
+            input.u.mi.dwFlags     = button_up_flags[button - 1] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+            input.u.mi.time        = GetTickCount();
+            input.u.mi.dwExtraInfo = 0;
+            __wine_send_input( data->hwnd, &input );
+        }
+
+        while (PeekMessageW( &msg, 0, 0, 0, PM_REMOVE ))
+        {
+            if (!CallMsgFilterW( &msg, MSGF_SIZE ))
+            {
+                TranslateMessage( &msg );
+                DispatchMessageW( &msg );
+            }
+        }
+
+        if (!(xstate & (Button1Mask << (button - 1)))) break;
+        MsgWaitForMultipleObjects( 0, NULL, FALSE, 100, QS_ALLINPUT );
+    }
+
+    TRACE( "hwnd %p/%lx done\n", data->hwnd, data->whole_window );
 }
 
 
@@ -919,35 +1419,21 @@ void X11DRV_ButtonPress( HWND hwnd, XEvent *xev )
 {
     XButtonEvent *event = &xev->xbutton;
     int buttonNum = event->button - 1;
-    WORD wData = 0;
+    INPUT input;
 
     if (buttonNum >= NB_BUTTONS) return;
 
-    switch (buttonNum)
-    {
-    case 3:
-        wData = WHEEL_DELTA;
-        break;
-    case 4:
-        wData = -WHEEL_DELTA;
-        break;
-    case 5:
-        wData = XBUTTON1;
-        break;
-    case 6:
-        wData = XBUTTON2;
-        break;
-    case 7:
-        wData = XBUTTON1;
-        break;
-    case 8:
-        wData = XBUTTON2;
-        break;
-    }
+    TRACE( "hwnd %p/%lx button %u pos %d,%d\n", hwnd, event->window, buttonNum, event->x, event->y );
+
+    input.u.mi.dx          = event->x;
+    input.u.mi.dy          = event->y;
+    input.u.mi.mouseData   = button_down_data[buttonNum];
+    input.u.mi.dwFlags     = button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( event->time );
+    input.u.mi.dwExtraInfo = 0;
 
     update_user_time( event->time );
-    send_mouse_input( hwnd, button_down_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
-                      event->window, event->x, event->y, event->state, wData, event->time );
+    send_mouse_input( hwnd, event->window, event->state, &input );
 }
 
 
@@ -958,28 +1444,20 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
 {
     XButtonEvent *event = &xev->xbutton;
     int buttonNum = event->button - 1;
-    WORD wData = 0;
+    INPUT input;
 
     if (buttonNum >= NB_BUTTONS || !button_up_flags[buttonNum]) return;
 
-    switch (buttonNum)
-    {
-    case 5:
-        wData = XBUTTON1;
-        break;
-    case 6:
-        wData = XBUTTON2;
-        break;
-    case 7:
-        wData = XBUTTON1;
-        break;
-    case 8:
-        wData = XBUTTON2;
-        break;
-    }
+    TRACE( "hwnd %p/%lx button %u pos %d,%d\n", hwnd, event->window, buttonNum, event->x, event->y );
 
-    send_mouse_input( hwnd, button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE,
-                      event->window, event->x, event->y, event->state, wData, event->time );
+    input.u.mi.dx          = event->x;
+    input.u.mi.dy          = event->y;
+    input.u.mi.mouseData   = button_up_data[buttonNum];
+    input.u.mi.dwFlags     = button_up_flags[buttonNum] | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( event->time );
+    input.u.mi.dwExtraInfo = 0;
+
+    send_mouse_input( hwnd, event->window, event->state, &input );
 }
 
 
@@ -989,11 +1467,25 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
 void X11DRV_MotionNotify( HWND hwnd, XEvent *xev )
 {
     XMotionEvent *event = &xev->xmotion;
+    INPUT input;
 
-    TRACE("hwnd %p, event->is_hint %d\n", hwnd, event->is_hint);
+    TRACE( "hwnd %p/%lx pos %d,%d is_hint %d serial %lu\n",
+           hwnd, event->window, event->x, event->y, event->is_hint, event->serial );
 
-    send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                      event->window, event->x, event->y, event->state, 0, event->time );
+    input.u.mi.dx          = event->x;
+    input.u.mi.dy          = event->y;
+    input.u.mi.mouseData   = 0;
+    input.u.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( event->time );
+    input.u.mi.dwExtraInfo = 0;
+
+    if (!hwnd)
+    {
+        struct x11drv_thread_data *thread_data = x11drv_thread_data();
+        if (thread_data->warp_serial && (long)(event->serial - thread_data->warp_serial) < 0) return;
+    }
+
+    send_mouse_input( hwnd, event->window, event->state, &input );
 }
 
 
@@ -1003,13 +1495,148 @@ void X11DRV_MotionNotify( HWND hwnd, XEvent *xev )
 void X11DRV_EnterNotify( HWND hwnd, XEvent *xev )
 {
     XCrossingEvent *event = &xev->xcrossing;
+    INPUT input;
 
-    TRACE("hwnd %p, event->detail %d\n", hwnd, event->detail);
+    TRACE( "hwnd %p/%lx pos %d,%d detail %d\n", hwnd, event->window, event->x, event->y, event->detail );
 
     if (event->detail == NotifyVirtual || event->detail == NotifyNonlinearVirtual) return;
     if (event->window == x11drv_thread_data()->grab_window) return;
 
     /* simulate a mouse motion event */
-    send_mouse_input( hwnd, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                      event->window, event->x, event->y, event->state, 0, event->time );
+    input.u.mi.dx          = event->x;
+    input.u.mi.dy          = event->y;
+    input.u.mi.mouseData   = 0;
+    input.u.mi.dwFlags     = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( event->time );
+    input.u.mi.dwExtraInfo = 0;
+
+    send_mouse_input( hwnd, event->window, event->state, &input );
+}
+
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+
+/***********************************************************************
+ *           X11DRV_RawMotion
+ */
+static void X11DRV_RawMotion( XGenericEventCookie *xev )
+{
+    XIRawEvent *event = xev->data;
+    const double *values = event->valuators.values;
+    INPUT input;
+    int i, j;
+    double dx = 0, dy = 0;
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+
+    if (!event->valuators.mask_len) return;
+    if (thread_data->xi2_state != xi_enabled) return;
+
+    input.u.mi.mouseData   = 0;
+    input.u.mi.dwFlags     = MOUSEEVENTF_MOVE;
+    input.u.mi.time        = EVENT_x11_time_to_win32_time( event->time );
+    input.u.mi.dwExtraInfo = 0;
+
+    if (XIMaskIsSet( event->valuators.mask, 0 )) dx = *values++;
+    if (XIMaskIsSet( event->valuators.mask, 1 )) dy = *values++;
+    input.u.mi.dx = dx;
+    input.u.mi.dy = dy;
+
+    wine_tsx11_lock();
+    for (i = 0; i < xinput2_device_count; ++i)
+    {
+        if (xinput2_devices[i].deviceid != event->deviceid) continue;
+        for (j = 0; j < xinput2_devices[i].num_classes; j++)
+        {
+            XIValuatorClassInfo *class = (XIValuatorClassInfo *)xinput2_devices[i].classes[j];
+
+            if (xinput2_devices[i].classes[j]->type != XIValuatorClass) continue;
+            if (class->min >= class->max) continue;
+            if (class->number == 0)
+                input.u.mi.dx = dx * (virtual_screen_rect.right - virtual_screen_rect.left)
+                                   / (class->max - class->min);
+            else if (class->number == 1)
+                input.u.mi.dy = dy * (virtual_screen_rect.bottom - virtual_screen_rect.top)
+                                   / (class->max - class->min);
+        }
+        break;
+    }
+
+    wine_tsx11_unlock();
+
+    if (thread_data->warp_serial)
+    {
+        if ((long)(xev->serial - thread_data->warp_serial) < 0)
+        {
+            TRACE( "pos %d,%d old serial %lu, ignoring\n", input.u.mi.dx, input.u.mi.dy, xev->serial );
+            return;
+        }
+        thread_data->warp_serial = 0;  /* we caught up now */
+    }
+
+    TRACE( "pos %d,%d (event %f,%f)\n", input.u.mi.dx, input.u.mi.dy, dx, dy );
+
+    input.type = INPUT_MOUSE;
+    __wine_send_input( 0, &input );
+}
+
+#endif /* HAVE_X11_EXTENSIONS_XINPUT2_H */
+
+
+/***********************************************************************
+ *              X11DRV_XInput2_Init
+ */
+void X11DRV_XInput2_Init(void)
+{
+#if defined(SONAME_LIBXI) && defined(HAVE_X11_EXTENSIONS_XINPUT2_H)
+    int event, error;
+    void *libxi_handle = wine_dlopen( SONAME_LIBXI, RTLD_NOW, NULL, 0 );
+
+    if (!libxi_handle)
+    {
+        WARN( "couldn't load %s\n", SONAME_LIBXI );
+        return;
+    }
+#define LOAD_FUNCPTR(f) \
+    if (!(p##f = wine_dlsym( libxi_handle, #f, NULL, 0))) \
+    { \
+        WARN("Failed to load %s.\n", #f); \
+        return; \
+    }
+
+    LOAD_FUNCPTR(XIFreeDeviceInfo);
+    LOAD_FUNCPTR(XIQueryDevice);
+    LOAD_FUNCPTR(XIQueryVersion);
+    LOAD_FUNCPTR(XISelectEvents);
+#undef LOAD_FUNCPTR
+
+    wine_tsx11_lock();
+    xinput2_available = XQueryExtension( gdi_display, "XInputExtension", &xinput2_opcode, &event, &error );
+    wine_tsx11_unlock();
+#else
+    TRACE( "X Input 2 support not compiled in.\n" );
+#endif
+}
+
+
+/***********************************************************************
+ *           X11DRV_GenericEvent
+ */
+void X11DRV_GenericEvent( HWND hwnd, XEvent *xev )
+{
+#ifdef HAVE_X11_EXTENSIONS_XINPUT2_H
+    XGenericEventCookie *event = &xev->xcookie;
+
+    if (!event->data) return;
+    if (event->extension != xinput2_opcode) return;
+
+    switch (event->evtype)
+    {
+    case XI_RawMotion:
+        X11DRV_RawMotion( event );
+        break;
+
+    default:
+        TRACE( "Unhandled event %#x\n", event->evtype );
+        break;
+    }
+#endif
 }

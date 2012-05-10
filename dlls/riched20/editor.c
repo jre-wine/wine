@@ -285,9 +285,10 @@ static LRESULT ME_StreamInText(ME_TextEditor *editor, DWORD dwFormat, ME_InStrea
 {
   WCHAR wszText[STREAMIN_BUFFER_SIZE+1];
   WCHAR *pText;
-  
+  LRESULT total_bytes_read = 0;
+
   TRACE("%08x %p\n", dwFormat, stream);
-  
+
   do {
     LONG nWideChars = 0;
 
@@ -298,8 +299,9 @@ static LRESULT ME_StreamInText(ME_TextEditor *editor, DWORD dwFormat, ME_InStrea
         break;
       if (!stream->dwSize)
         break;
+      total_bytes_read += stream->dwSize;
     }
-      
+
     if (!(dwFormat & SF_UNICODE))
     {
       /* FIXME? this is doomed to fail on true MBCS like UTF-8, luckily they're unlikely to be used as CP_ACP */
@@ -311,13 +313,13 @@ static LRESULT ME_StreamInText(ME_TextEditor *editor, DWORD dwFormat, ME_InStrea
       nWideChars = stream->dwSize >> 1;
       pText = (WCHAR *)stream->buffer;
     }
-    
+
     ME_InsertTextFromCursor(editor, 0, pText, nWideChars, style);
     if (stream->dwSize == 0)
       break;
     stream->dwSize = 0;
   } while(1);
-  return 0;
+  return total_bytes_read;
 }
 
 static void ME_ApplyBorderProperties(RTF_Info *info,
@@ -1390,6 +1392,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
   ME_InStream inStream;
   BOOL invalidRTF = FALSE;
   ME_Cursor *selStart, *selEnd;
+  LRESULT num_read = 0; /* bytes read for SF_TEXT, non-control chars inserted for SF_RTF */
 
   TRACE("stream==%p editor==%p format==0x%X\n", stream, editor, format);
   editor->nEventMask = 0;
@@ -1467,6 +1470,8 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
   if (!invalidRTF && !inStream.editstream->dwError)
   {
     if (format & SF_RTF) {
+      from = ME_GetCursorOfs(&editor->pCursors[0]);
+
       /* setup the RTF parser */
       memset(&parser, 0, sizeof parser);
       RTFSetEditStream(&parser, &inStream);
@@ -1560,11 +1565,13 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
           }
         }
       }
+      to = ME_GetCursorOfs(&editor->pCursors[0]);
+      num_read = to - from;
 
       style = parser.style;
     }
     else if (format & SF_TEXT)
-      ME_StreamInText(editor, format, &inStream, style);
+      num_read = ME_StreamInText(editor, format, &inStream, style);
     else
       ERR("EM_STREAMIN without SF_TEXT or SF_RTF\n");
     /* put the cursor at the top */
@@ -1594,7 +1601,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
   ME_SendSelChange(editor);
   ME_SendRequestResize(editor, FALSE);
 
-  return 0;
+  return num_read;
 }
 
 
@@ -2173,6 +2180,7 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
         ME_DisplayItem *para = cursor.pPara;
         int from, to;
         const WCHAR endl = '\r';
+        const WCHAR endlv10[] = {'\r','\n'};
         ME_Style *style;
 
         if (editor->styleFlags & ES_READONLY) {
@@ -2275,7 +2283,10 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
           if (shift_is_down)
             ME_InsertEndRowFromCursor(editor, 0);
           else
-            ME_InsertTextFromCursor(editor, 0, &endl, 1, style);
+            if (!editor->bEmulateVersion10)
+              ME_InsertTextFromCursor(editor, 0, &endl, 1, style);
+            else
+              ME_InsertTextFromCursor(editor, 0, endlv10, 2, style);
           ME_ReleaseStyle(style);
           ME_CommitCoalescingUndo(editor);
           SetCursor(NULL);

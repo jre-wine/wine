@@ -37,6 +37,8 @@ static BOOL emr_processed = FALSE;
 
 static INT (WINAPI * pGetRelAbs)(HDC, DWORD);
 static INT (WINAPI * pSetRelAbs)(HDC, INT);
+static COLORREF (WINAPI *pSetDCBrushColor)(HDC,COLORREF);
+static COLORREF (WINAPI *pSetDCPenColor)(HDC,COLORREF);
 
 #define GDI_GET_PROC(func)                                     \
     p ## func = (void *)GetProcAddress(hGDI, #func);           \
@@ -54,6 +56,8 @@ static void init_function_pointers(void)
     assert(hGDI);
     GDI_GET_PROC(GetRelAbs);
     GDI_GET_PROC(SetRelAbs);
+    GDI_GET_PROC(SetDCBrushColor);
+    GDI_GET_PROC(SetDCPenColor);
 }
 
 static int CALLBACK eto_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
@@ -846,10 +850,18 @@ static void test_mf_SaveDC(void)
     /* Need to write something to the emf, otherwise Windows won't play it back */
     LineTo(hdcMetafile, 150, 150);
 
-    SetWindowOrgEx(hdcMetafile, 0, 0, NULL);
-    SetViewportOrgEx(hdcMetafile, 0, 0, NULL);
-    SetWindowExtEx(hdcMetafile, 110, 110, NULL );
-    SetViewportExtEx(hdcMetafile, 120, 120, NULL );
+    pt.x = pt.y = 5555;
+    SetWindowOrgEx(hdcMetafile, 0, 0, &pt);
+    ok( pt.x == 5555 && pt.y == 5555, "wrong origin %d,%d\n", pt.x, pt.y);
+    pt.x = pt.y = 5555;
+    SetViewportOrgEx(hdcMetafile, 0, 0, &pt);
+    ok( pt.x == 5555 && pt.y == 5555, "wrong origin %d,%d\n", pt.x, pt.y);
+    size.cx = size.cy = 5555;
+    SetWindowExtEx(hdcMetafile, 110, 110, &size );
+    ok( size.cx == 5555 && size.cy == 5555, "wrong size %d,%d\n", size.cx, size.cy );
+    size.cx = size.cy = 5555;
+    SetViewportExtEx(hdcMetafile, 120, 120, &size );
+    ok( size.cx == 5555 && size.cy == 5555, "wrong size %d,%d\n", size.cx, size.cy );
 
     /* Force Win9x to update DC state */
     SetPixelV(hdcMetafile, 50, 50, 0);
@@ -1021,6 +1033,21 @@ static const unsigned char MF_PATTERN_BRUSH_BITS[] = {
     0x01, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
     0x2d, 0x01, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
     0x00, 0x00
+};
+
+static const unsigned char MF_DCBRUSH_BITS[] =
+{
+    0x01, 0x00, 0x09, 0x00, 0x00, 0x03, 0x2a, 0x00,
+    0x00, 0x00, 0x02, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0xfc, 0x02,
+    0x00, 0x00, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x2d, 0x01, 0x00, 0x00,
+    0x08, 0x00, 0x00, 0x00, 0xfa, 0x02, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x2d, 0x01, 0x01, 0x00,
+    0x07, 0x00, 0x00, 0x00, 0x1b, 0x04, 0x14, 0x00,
+    0x14, 0x00, 0x0a, 0x00, 0x0a, 0x00, 0x03, 0x00,
+    0x00, 0x00, 0x00, 0x00
 };
 
 static const unsigned char MF_TEXTOUT_ON_PATH_BITS[] =
@@ -1249,6 +1276,95 @@ static const unsigned char EMF_BITBLT[] =
     0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00
 };
 
+static const unsigned char EMF_DCBRUSH_BITS[] =
+{
+    0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00,
+    0x0a, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
+    0x13, 0x00, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00,
+    0x39, 0x01, 0x00, 0x00, 0x39, 0x01, 0x00, 0x00,
+    0x52, 0x02, 0x00, 0x00, 0x52, 0x02, 0x00, 0x00,
+    0x20, 0x45, 0x4d, 0x46, 0x00, 0x00, 0x01, 0x00,
+    0x44, 0x01, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00,
+    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x04, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+    0x40, 0x01, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0xe2, 0x04, 0x00,
+    0x80, 0xa9, 0x03, 0x00, 0x25, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x12, 0x00, 0x00, 0x80,
+    0x25, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
+    0x13, 0x00, 0x00, 0x80, 0x27, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x55, 0x55, 0x55, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x25, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x26, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x33, 0x44, 0x55, 0x00, 0x25, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x2b, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00,
+    0x0a, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
+    0x13, 0x00, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x27, 0x00, 0x00, 0x00,
+    0x18, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x12, 0x34, 0x56, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x25, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00,
+    0x0c, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x0e, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00
+};
+
+static const unsigned char EMF_BEZIER_BITS[] =
+{
+    0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x1a, 0x2a, 0x0d, 0x00, 0x1a, 0x2f, 0x0d, 0x00,
+    0x20, 0x45, 0x4d, 0x46, 0x00, 0x00, 0x01, 0x00,
+    0x44, 0x01, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+    0x51, 0x01, 0x00, 0x00, 0x0e, 0x01, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x68, 0x24, 0x05, 0x00,
+    0xb0, 0x1e, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00,
+    0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x0a, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x14, 0x00,
+    0x0f, 0x00, 0x0f, 0x00, 0x55, 0x00, 0x00, 0x00,
+    0x2c, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00,
+    0x0a, 0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00,
+    0x19, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+    0x0a, 0x00, 0x0a, 0x00, 0x14, 0x00, 0x14, 0x00,
+    0x0f, 0x00, 0x0f, 0x00, 0x19, 0x00, 0x19, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00,
+    0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+    0x0f, 0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00,
+    0x19, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
+    0x34, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+    0x0f, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x01, 0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+    0x0e, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x14, 0x00, 0x00, 0x00
+};
 
 /* For debugging or dumping the raw metafiles produced by
  * new test functions.
@@ -1517,6 +1633,28 @@ static BOOL match_emf_record(const ENHMETARECORD *emr1, const ENHMETARECORD *emr
             HeapFree(GetProcessHeap(), 0, emr_nt4);
         }
     }
+    else if (emr1->iType == EMR_POLYBEZIERTO16 || emr1->iType == EMR_POLYBEZIER16)
+    {
+        EMRPOLYBEZIER16 *eto1, *eto2;
+
+        eto1 = (EMRPOLYBEZIER16*)emr1;
+        eto2 = (EMRPOLYBEZIER16*)emr2;
+
+        diff = eto1->cpts != eto1->cpts;
+        if(!diff)
+            diff = memcmp(eto1->apts, eto2->apts, eto1->cpts * sizeof(POINTS));
+    }
+    else if (emr1->iType == EMR_POLYBEZIERTO || emr1->iType == EMR_POLYBEZIER)
+    {
+        EMRPOLYBEZIER *eto1, *eto2;
+
+        eto1 = (EMRPOLYBEZIER*)emr1;
+        eto2 = (EMRPOLYBEZIER*)emr2;
+
+        diff = eto1->cptl != eto1->cptl;
+        if(!diff)
+            diff = memcmp(eto1->aptl, eto2->aptl, eto1->cptl * sizeof(POINTL));
+    }
     else
         diff = memcmp(emr1, emr2, emr1->nSize);
 
@@ -1587,17 +1725,17 @@ static int compare_emf_bits(const HENHMETAFILE mf, const unsigned char *bits,
     offset2 = emh2->nSize; /* Needed for Win9x/WinME/NT4 */
     while (offset1 < emh1->nBytes)
     {
-	const ENHMETARECORD *emr1 = (const ENHMETARECORD *)(bits + offset1);
-	const ENHMETARECORD *emr2 = (const ENHMETARECORD *)(buf + offset2);
+        const ENHMETARECORD *emr1 = (const ENHMETARECORD *)(bits + offset1);
+        const ENHMETARECORD *emr2 = (const ENHMETARECORD *)(buf + offset2);
 
-	trace("%s: EMF record %u, size %u/record %u, size %u\n",
+        trace("%s: EMF record %u, size %u/record %u, size %u\n",
               desc, emr1->iType, emr1->nSize, emr2->iType, emr2->nSize);
 
         if (!match_emf_record(emr1, emr2, desc, ignore_scaling)) return -1;
 
         /* We have already bailed out if iType or nSize don't match */
-	offset1 += emr1->nSize;
-	offset2 += emr2->nSize;
+        offset1 += emr1->nSize;
+        offset2 += emr2->nSize;
     }
     return 0;
 }
@@ -1664,6 +1802,58 @@ static void test_emf_BitBlt(void)
     DeleteDC(hdcBitmap);
     DeleteDC(hdcDisplay);
 #undef BMP_DIM
+}
+
+static void test_emf_DCBrush(void)
+{
+    HDC hdcMetafile;
+    HENHMETAFILE hMetafile;
+    HBRUSH hBrush;
+    HPEN hPen;
+    BOOL ret;
+    COLORREF color;
+
+    if (!pSetDCBrushColor || !pSetDCPenColor)
+    {
+        win_skip( "SetDCBrush/PenColor not supported\n" );
+        return;
+    }
+
+    hdcMetafile = CreateEnhMetaFileA(GetDC(0), NULL, NULL, NULL);
+    ok( hdcMetafile != 0, "CreateEnhMetaFileA failed\n" );
+
+    hBrush = SelectObject(hdcMetafile, GetStockObject(DC_BRUSH));
+    ok(hBrush != 0, "SelectObject error %d.\n", GetLastError());
+
+    hPen = SelectObject(hdcMetafile, GetStockObject(DC_PEN));
+    ok(hPen != 0, "SelectObject error %d.\n", GetLastError());
+
+    color = pSetDCBrushColor( hdcMetafile, RGB(0x55,0x55,0x55) );
+    ok( color == 0xffffff, "SetDCBrushColor returned %x\n", color );
+
+    color = pSetDCPenColor( hdcMetafile, RGB(0x33,0x44,0x55) );
+    ok( color == 0, "SetDCPenColor returned %x\n", color );
+
+    Rectangle( hdcMetafile, 10, 10, 20, 20 );
+
+    color = pSetDCBrushColor( hdcMetafile, RGB(0x12,0x34,0x56) );
+    ok( color == 0x555555, "SetDCBrushColor returned %x\n", color );
+
+    hMetafile = CloseEnhMetaFile(hdcMetafile);
+    ok( hMetafile != 0, "CloseEnhMetaFile failed\n" );
+
+    if (compare_emf_bits (hMetafile, EMF_DCBRUSH_BITS, sizeof(EMF_DCBRUSH_BITS),
+                          "emf_DC_Brush", FALSE ) != 0)
+    {
+        dump_emf_bits(hMetafile, "emf_DC_Brush");
+        dump_emf_records(hMetafile, "emf_DC_Brush");
+    }
+    ret = DeleteEnhMetaFile(hMetafile);
+    ok( ret, "DeleteEnhMetaFile error %d\n", GetLastError());
+    ret = DeleteObject(hBrush);
+    ok( ret, "DeleteObject(HBRUSH) error %d\n", GetLastError());
+    ret = DeleteObject(hPen);
+    ok( ret, "DeleteObject(HPEN) error %d\n", GetLastError());
 }
 
 /* Test a blank metafile.  May be used as a template for new tests. */
@@ -1942,6 +2132,53 @@ static void test_mf_PatternBrush(void)
     HeapFree (GetProcessHeap(), 0, orig_lb);
 }
 
+static void test_mf_DCBrush(void)
+{
+    HDC hdcMetafile;
+    HMETAFILE hMetafile;
+    HBRUSH hBrush;
+    HPEN hPen;
+    BOOL ret;
+    COLORREF color;
+
+    if (!pSetDCBrushColor || !pSetDCPenColor)
+    {
+        win_skip( "SetDCBrush/PenColor not supported\n" );
+        return;
+    }
+
+    hdcMetafile = CreateMetaFileA(NULL);
+    ok( hdcMetafile != 0, "CreateMetaFileA failed\n" );
+
+    hBrush = SelectObject(hdcMetafile, GetStockObject(DC_BRUSH));
+    ok(hBrush != 0, "SelectObject error %d.\n", GetLastError());
+
+    hPen = SelectObject(hdcMetafile, GetStockObject(DC_PEN));
+    ok(hPen != 0, "SelectObject error %d.\n", GetLastError());
+
+    color = pSetDCBrushColor( hdcMetafile, RGB(0x55,0x55,0x55) );
+    ok( color == CLR_INVALID, "SetDCBrushColor returned %x\n", color );
+
+    color = pSetDCPenColor( hdcMetafile, RGB(0x33,0x44,0x55) );
+    ok( color == CLR_INVALID, "SetDCPenColor returned %x\n", color );
+
+    Rectangle( hdcMetafile, 10, 10, 20, 20 );
+
+    color = pSetDCBrushColor( hdcMetafile, RGB(0x12,0x34,0x56) );
+    ok( color == CLR_INVALID, "SetDCBrushColor returned %x\n", color );
+
+    hMetafile = CloseMetaFile(hdcMetafile);
+    ok( hMetafile != 0, "CloseMetaFile failed\n" );
+
+    if (compare_mf_bits(hMetafile, MF_DCBRUSH_BITS, sizeof(MF_DCBRUSH_BITS), "mf_DCBrush") != 0)
+    {
+        dump_mf_bits(hMetafile, "mf_DCBrush");
+        EnumMetaFile(0, hMetafile, mf_enum_proc, 0);
+    }
+    ret = DeleteMetaFile(hMetafile);
+    ok(ret, "DeleteMetaFile(%p) error %d\n", hMetafile, GetLastError());
+}
+
 static void test_mf_ExtTextOut_on_path(void)
 {
     HDC hdcMetafile;
@@ -2080,7 +2317,7 @@ static int CALLBACK clip_emf_enum_proc(HDC hdc, HANDLETABLE *handle_table,
 {
     if (emr->iType == EMR_EXTSELECTCLIPRGN)
     {
-	const EMREXTSELECTCLIPRGN *clip = (const EMREXTSELECTCLIPRGN *)emr;
+        const EMREXTSELECTCLIPRGN *clip = (const EMREXTSELECTCLIPRGN *)emr;
         union _rgn
         {
             RGNDATA data;
@@ -2636,6 +2873,7 @@ static void getwinmetafilebits(UINT mode, int scale, RECT *rc)
     METAHEADER *mh = NULL;
     METARECORD *rec;
     INT horz_res, vert_res, horz_size, vert_size;
+    INT curve_caps, line_caps, poly_caps;
 
     display_dc = GetDC(NULL);
     ok(display_dc != NULL, "display_dc is NULL\n");
@@ -2647,6 +2885,16 @@ static void getwinmetafilebits(UINT mode, int scale, RECT *rc)
 
     emf_dc = CreateEnhMetaFileA(display_dc, NULL, rc, NULL);
     ok(emf_dc != NULL, "emf_dc is NULL\n");
+
+    curve_caps = GetDeviceCaps(emf_dc, CURVECAPS);
+    ok(curve_caps == 511, "expect 511 got %d\n", curve_caps);
+
+    line_caps = GetDeviceCaps(emf_dc, LINECAPS);
+    ok(line_caps == 254, "expect 254 got %d\n", line_caps);
+
+    poly_caps = GetDeviceCaps(emf_dc, POLYGONALCAPS);
+    ok(poly_caps == 255, "expect 511 got %d\n", poly_caps);
+
     for(i = 0; i < 3000; i++) /* This is enough to take emf_size > 0xffff */
         Rectangle(emf_dc, 0, 0, 1000, 20);
     emf = CloseEnhMetaFile(emf_dc);
@@ -2908,6 +3156,45 @@ static void test_SetEnhMetaFileBits(void)
     DeleteEnhMetaFile(hemf);
 }
 
+static void test_emf_polybezier(void)
+{
+    HDC hdcMetafile;
+    HENHMETAFILE hemf;
+    POINT pts[4];
+    BOOL ret;
+
+    SetLastError(0xdeadbeef);
+    hdcMetafile = CreateEnhMetaFileA(GetDC(0), NULL, NULL, NULL);
+    ok(hdcMetafile != 0, "CreateEnhMetaFileA error %d\n", GetLastError());
+
+    pts[0].x = pts[0].y = 10;
+    pts[1].x = pts[1].y = 20;
+    pts[2].x = pts[2].y = 15;
+    pts[3].x = pts[3].y = 25;
+    ret = PolyBezierTo(hdcMetafile, pts, 3);  /* EMR_POLYBEZIERTO16 */
+    ok( ret, "PolyBezierTo failed\n" );
+    ret = PolyBezier(hdcMetafile, pts, 4);    /* EMR_POLYBEZIER16   */
+    ok( ret, "PolyBezier failed\n" );
+
+    pts[0].x = pts[0].y = 32769;
+    ret = PolyBezier(hdcMetafile, pts, 4);    /* EMR_POLYBEZIER   */
+    ok( ret, "PolyBezier failed\n" );
+    ret = PolyBezierTo(hdcMetafile, pts, 3);  /* EMR_POLYBEZIERTO */
+    ok( ret, "PolyBezierTo failed\n" );
+
+    hemf = CloseEnhMetaFile(hdcMetafile);
+    ok(hemf != 0, "CloseEnhMetaFile error %d\n", GetLastError());
+
+    if(compare_emf_bits(hemf, EMF_BEZIER_BITS, sizeof(EMF_BEZIER_BITS),
+        "emf_Bezier", FALSE) != 0)
+    {
+        dump_emf_bits(hemf, "emf_Bezier");
+        dump_emf_records(hemf, "emf_Bezier");
+    }
+
+    DeleteEnhMetaFile(hemf);
+}
+
 START_TEST(metafile)
 {
     init_function_pointers();
@@ -2917,17 +3204,20 @@ START_TEST(metafile)
     test_ExtTextOutScale();
     test_SaveDC();
     test_emf_BitBlt();
+    test_emf_DCBrush();
 
     /* For win-format metafiles (mfdrv) */
     test_mf_SaveDC();
     test_mf_Blank();
     test_mf_Graphics();
     test_mf_PatternBrush();
+    test_mf_DCBrush();
     test_CopyMetaFile();
     test_SetMetaFileBits();
     test_mf_ExtTextOut_on_path();
     test_emf_ExtTextOut_on_path();
     test_emf_clipping();
+    test_emf_polybezier();
 
     /* For metafile conversions */
     test_mf_conversions();

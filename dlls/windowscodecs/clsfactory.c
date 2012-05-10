@@ -29,6 +29,7 @@
 #include "ocidl.h"
 #include "initguid.h"
 #include "wincodec.h"
+#include "wincodecsdk.h"
 
 #include "wincodecs_private.h"
 
@@ -53,9 +54,11 @@ static classinfo wic_classes[] = {
     {&CLSID_WICIcoDecoder, IcoDecoder_CreateInstance},
     {&CLSID_WICJpegDecoder, JpegDecoder_CreateInstance},
     {&CLSID_WICTiffDecoder, TiffDecoder_CreateInstance},
+    {&CLSID_WICTiffEncoder, TiffEncoder_CreateInstance},
     {&CLSID_WICIcnsEncoder, IcnsEncoder_CreateInstance},
     {&CLSID_WICDefaultFormatConverter, FormatConverter_CreateInstance},
     {&CLSID_WineTgaDecoder, TgaDecoder_CreateInstance},
+    {&CLSID_WICUnknownMetadataReader, UnknownMetadataReader_CreateInstance},
     {0}};
 
 typedef struct {

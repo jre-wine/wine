@@ -114,6 +114,7 @@ static const struct IClassFactoryVtbl wucf_vtbl =
 
 static wucf sessioncf = { { &wucf_vtbl }, UpdateSession_create };
 static wucf updatescf = { { &wucf_vtbl }, AutomaticUpdates_create };
+static wucf sysinfocf = { { &wucf_vtbl }, SystemInformation_create };
 
 static HINSTANCE instance;
 
@@ -147,6 +148,10 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
     {
        cf = &updatescf.IClassFactory_iface;
     }
+    else if (IsEqualGUID( rclsid, &CLSID_SystemInformation ))
+    {
+       cf = &sysinfocf.IClassFactory_iface;
+    }
     if (!cf) return CLASS_E_CLASSNOTAVAILABLE;
     return IClassFactory_QueryInterface( cf, iid, ppv );
 }
@@ -161,7 +166,7 @@ HRESULT WINAPI DllCanUnloadNow( void )
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( instance, NULL );
+    return __wine_register_resources( instance );
 }
 
 /***********************************************************************
@@ -169,5 +174,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( instance, NULL );
+    return __wine_unregister_resources( instance );
 }

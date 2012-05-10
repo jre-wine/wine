@@ -20,17 +20,16 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-    
-#define WIN32_LEAN_AND_MEAN    /* Exclude rarely-used stuff from Windows headers */
-#include <windows.h>
+
 #include <ctype.h>
-#include <commctrl.h>
-#include <stdlib.h>
-#include <memory.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#include <windows.h>
+#include <commctrl.h>
 #include <winnt.h>
 #include <dbghelp.h>
-    
+
 #include "taskmgr.h"
 #include "perfdata.h"
 #include "column.h"
@@ -81,26 +80,27 @@ BOOL AreDebugChannelsSupported(void)
 
 static DWORD    get_selected_pid(void)
 {
-    LVITEM      lvitem;
-    ULONG       Index;
+    LVITEMW     lvitem;
+    ULONG       Index, Count;
     DWORD       dwProcessId;
 
-    for (Index = 0; Index < (ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++)
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETITEMCOUNT, 0, 0);
+    for (Index = 0; Index < Count; Index++)
     {
         lvitem.mask = LVIF_STATE;
         lvitem.stateMask = LVIS_SELECTED;
         lvitem.iItem = Index;
         lvitem.iSubItem = 0;
 
-        SendMessage(hProcessPageListCtrl, LVM_GETITEM, 0, (LPARAM) &lvitem);
+        SendMessageW(hProcessPageListCtrl, LVM_GETITEMW, 0, (LPARAM) &lvitem);
 
         if (lvitem.state & LVIS_SELECTED)
             break;
     }
 
+    Count = SendMessageW(hProcessPageListCtrl, LVM_GETSELECTEDCOUNT, 0, 0);
     dwProcessId = PerfDataGetProcessId(Index);
-
-    if ((ListView_GetSelectedCount(hProcessPageListCtrl) != 1) || (dwProcessId == 0))
+    if ((Count != 1) || (dwProcessId == 0))
         return 0;
     return dwProcessId;
 }
@@ -108,17 +108,19 @@ static DWORD    get_selected_pid(void)
 static int     list_channel_CB(HANDLE hProcess, void* addr, struct __wine_debug_channel* channel, void* user)
 {
     int         j;
-    WCHAR       val[2];
-    LVITEMA     lvitem;
+    WCHAR       nameW[sizeof(channel->name)], val[2];
+    LVITEMW     lvitem;
     int         index;
     HWND        hChannelLV = user;
 
+    MultiByteToWideChar(CP_ACP, 0, channel->name, sizeof(channel->name), nameW, sizeof(nameW)/sizeof(WCHAR));
+
     lvitem.mask = LVIF_TEXT;
-    lvitem.pszText = channel->name;
+    lvitem.pszText = nameW;
     lvitem.iItem = 0;
     lvitem.iSubItem = 0;
 
-    index = ListView_InsertItem(hChannelLV, &lvitem);
+    index = ListView_InsertItemW(hChannelLV, &lvitem);
     if (index == -1) return 0;
 
     val[1] = '\0';
@@ -209,32 +211,27 @@ static void DebugChannels_FillList(HWND hChannelLV)
 {
     HANDLE      hProcess;
 
-    SendMessage(hChannelLV, LVM_DELETEALLITEMS, 0, 0);
+    SendMessageW(hChannelLV, LVM_DELETEALLITEMS, 0, 0);
 
     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, get_selected_pid());
     if (!hProcess) return; /* FIXME messagebox */
-    SendMessage(hChannelLV, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(hChannelLV, WM_SETREDRAW, FALSE, 0);
     enum_channel(hProcess, list_channel_CB, (void*)hChannelLV);
-    SendMessage(hChannelLV, WM_SETREDRAW, TRUE, 0);
+    SendMessageW(hChannelLV, WM_SETREDRAW, TRUE, 0);
     CloseHandle(hProcess);
 }
 
 static void DebugChannels_OnCreate(HWND hwndDlg)
 {
+    static WCHAR fixmeW[] = {'F','i','x','m','e','\0'};
+    static WCHAR errW[]   = {'E','r','r','\0'};
+    static WCHAR warnW[]  = {'W','a','r','n','\0'};
+    static WCHAR traceW[] = {'T','r','a','c','e','\0'};
     HWND        hLV = GetDlgItem(hwndDlg, IDC_DEBUG_CHANNELS_LIST);
     LVCOLUMNW   lvc;
-
     WCHAR debug_channelW[255];
-    WCHAR fixmeW[255];
-    WCHAR errW[255];
-    WCHAR warnW[255];
-    WCHAR traceW[255];
 
     LoadStringW(hInst, IDS_DEBUG_CHANNEL, debug_channelW, sizeof(debug_channelW)/sizeof(WCHAR));
-    LoadStringW(hInst, IDS_DEBUG_CHANNEL_FIXME, fixmeW, sizeof(fixmeW)/sizeof(WCHAR));
-    LoadStringW(hInst, IDS_DEBUG_CHANNEL_ERR, errW, sizeof(errW)/sizeof(WCHAR));
-    LoadStringW(hInst, IDS_DEBUG_CHANNEL_WARN, warnW, sizeof(warnW)/sizeof(WCHAR));
-    LoadStringW(hInst, IDS_DEBUG_CHANNEL_TRACE, traceW, sizeof(traceW)/sizeof(WCHAR));
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_LEFT;
@@ -287,7 +284,7 @@ static void DebugChannels_OnNotify(HWND hDlg, LPARAM lParam)
             if (!hProcess) return; /* FIXME message box */
             lhti.pt = nmia->ptAction;
             hChannelLV = GetDlgItem(hDlg, IDC_DEBUG_CHANNELS_LIST);
-            SendMessage(hChannelLV, LVM_SUBITEMHITTEST, 0, (LPARAM)&lhti);
+            SendMessageW(hChannelLV, LVM_SUBITEMHITTEST, 0, (LPARAM)&lhti);
             if (nmia->iSubItem >= 1 && nmia->iSubItem <= 4)
             {
                 WCHAR           val[2];

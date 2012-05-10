@@ -263,7 +263,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         sizeof(SECURITY_IMPERSONATION_LEVEL), /* TokenImpersonationLevel */
         sizeof(TOKEN_STATISTICS), /* TokenStatistics */
         0,    /* TokenRestrictedSids */
-        0,    /* TokenSessionId */
+        sizeof(DWORD), /* TokenSessionId */
         0,    /* TokenGroupsAndPrivileges */
         0,    /* TokenSessionReference */
         0,    /* TokenSandBoxInert */
@@ -320,68 +320,48 @@ NTSTATUS WINAPI NtQueryInformationToken(
         break;
     case TokenGroups:
     {
-        char stack_buffer[256];
-        unsigned int server_buf_len = sizeof(stack_buffer);
-        void *buffer = stack_buffer;
-        BOOLEAN need_more_memory;
+        void *buffer;
 
-        /* we cannot work out the size of the server buffer required for the
-         * input size, since there are two factors affecting how much can be
-         * stored in the buffer - number of groups and lengths of sids */
-        do
+        /* reply buffer is always shorter than output one */
+        buffer = tokeninfolength ? RtlAllocateHeap(GetProcessHeap(), 0, tokeninfolength) : NULL;
+
+        SERVER_START_REQ( get_token_groups )
         {
-            need_more_memory = FALSE;
+            TOKEN_GROUPS *groups = tokeninfo;
 
-            SERVER_START_REQ( get_token_groups )
+            req->handle = wine_server_obj_handle( token );
+            wine_server_set_reply( req, buffer, tokeninfolength );
+            status = wine_server_call( req );
+            if (status == STATUS_BUFFER_TOO_SMALL)
             {
-                TOKEN_GROUPS *groups = tokeninfo;
-
-                req->handle = wine_server_obj_handle( token );
-                wine_server_set_reply( req, buffer, server_buf_len );
-                status = wine_server_call( req );
-                if (status == STATUS_BUFFER_TOO_SMALL)
-                {
-                    if (buffer == stack_buffer)
-                        buffer = RtlAllocateHeap(GetProcessHeap(), 0, reply->user_len);
-                    else
-                        buffer = RtlReAllocateHeap(GetProcessHeap(), 0, buffer, reply->user_len);
-                    if (!buffer) return STATUS_NO_MEMORY;
-
-                    server_buf_len = reply->user_len;
-                    need_more_memory = TRUE;
-                }
-                else if (status == STATUS_SUCCESS)
-                {
-                    struct token_groups *tg = buffer;
-                    unsigned int *attr = (unsigned int *)(tg + 1);
-                    ULONG i;
-                    const int non_sid_portion = (sizeof(struct token_groups) + tg->count * sizeof(unsigned int));
-                    SID *sids = (SID *)((char *)tokeninfo + FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ));
-                    ULONG needed_bytes = FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ) +
-                        reply->user_len - non_sid_portion;
-
-                    if (retlen) *retlen = needed_bytes;
-
-                    if (needed_bytes <= tokeninfolength)
-                    {
-                        groups->GroupCount = tg->count;
-                        memcpy( sids, (char *)buffer + non_sid_portion,
-                                reply->user_len - non_sid_portion );
-
-                        for (i = 0; i < tg->count; i++)
-                        {
-                            groups->Groups[i].Attributes = attr[i];
-                            groups->Groups[i].Sid = sids;
-                            sids = (SID *)((char *)sids + RtlLengthSid(sids));
-                        }
-                    }
-                    else status = STATUS_BUFFER_TOO_SMALL;
-                }
-                else if (retlen) *retlen = 0;
+                if (retlen) *retlen = reply->user_len;
             }
-            SERVER_END_REQ;
-        } while (need_more_memory);
-        if (buffer != stack_buffer) RtlFreeHeap(GetProcessHeap(), 0, buffer);
+            else if (status == STATUS_SUCCESS)
+            {
+                struct token_groups *tg = buffer;
+                unsigned int *attr = (unsigned int *)(tg + 1);
+                ULONG i;
+                const int non_sid_portion = (sizeof(struct token_groups) + tg->count * sizeof(unsigned int));
+                SID *sids = (SID *)((char *)tokeninfo + FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ));
+
+                if (retlen) *retlen = reply->user_len;
+
+                groups->GroupCount = tg->count;
+                memcpy( sids, (char *)buffer + non_sid_portion,
+                        reply->user_len - FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ));
+
+                for (i = 0; i < tg->count; i++)
+                {
+                    groups->Groups[i].Attributes = attr[i];
+                    groups->Groups[i].Sid = sids;
+                    sids = (SID *)((char *)sids + RtlLengthSid(sids));
+                }
+             }
+             else if (retlen) *retlen = 0;
+        }
+        SERVER_END_REQ;
+
+        RtlFreeHeap(GetProcessHeap(), 0, buffer);
         break;
     }
     case TokenPrimaryGroup:
@@ -519,6 +499,12 @@ NTSTATUS WINAPI NtQueryInformationToken(
             TOKEN_ELEVATION *elevation = tokeninfo;
             FIXME("QueryInformationToken( ..., TokenElevation, ...) semi-stub\n");
             elevation->TokenIsElevated = TRUE;
+        }
+        break;
+    case TokenSessionId:
+        {
+            *((DWORD*)tokeninfo) = 0;
+            FIXME("QueryInformationToken( ..., TokenSessionId, ...) semi-stub\n");
         }
         break;
     default:
@@ -929,8 +915,6 @@ void fill_cpu_info(void)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_PPC;
 #elif defined(__arm__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ARM;
-#elif defined(__ALPHA__)
-    cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_ALPHA;
 #elif defined(__sparc__)
     cached_sci.Architecture     = PROCESSOR_ARCHITECTURE_SPARC;
 #else
@@ -992,8 +976,8 @@ void fill_cpu_info(void)
                 continue;
             }
 
-            /* 2.1 method */
-            if (!strcasecmp(line, "cpu family"))
+            /* 2.1 and ARM method */
+            if (!strcasecmp(line, "cpu family") || !strcasecmp(line, "CPU architecture"))
             {
                 if (isdigit(value[0]))
                 {
@@ -1060,6 +1044,8 @@ void fill_cpu_info(void)
                     user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128] = TRUE;
                 if (strstr(value, "mmx"))
                     user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
+                if (strstr(value, "nx"))
+                    user_shared_data->ProcessorFeatures[PF_NX_ENABLED] = TRUE;
                 if (strstr(value, "tsc"))
                     user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
                 if (strstr(value, "3dnow"))
@@ -1192,7 +1178,7 @@ void fill_cpu_info(void)
             NtCurrentTeb()->Peb->NumberOfProcessors = num;
 
         len = sizeof(num);
-        if (!sysctlbyname("dev.cpu.0.freq", &num, &len, NULL, 0))
+        if (!sysctlbyname("hw.clockrate", &num, &len, NULL, 0))
             cpuHz = num * 1000 * 1000;
     }
 #elif defined(__sun)
@@ -1294,6 +1280,7 @@ void fill_cpu_info(void)
                     if (strstr(buffer, "SSE2"))  user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "SSE3"))  user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE] = TRUE;
                     if (strstr(buffer, "PAE"))   user_shared_data->ProcessorFeatures[PF_PAE_ENABLED] = TRUE;
+                    if (strstr(buffer, "HTT"))   cached_sci.FeatureSet |= CPU_FEATURE_HTT;
                 }
                 break; /* CPU_TYPE_I386 */
             default: break;
@@ -1586,78 +1573,36 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 FILE *cpuinfo = fopen("/proc/stat", "r");
                 if (cpuinfo)
                 {
+                    unsigned long clk_tck = sysconf(_SC_CLK_TCK);
                     unsigned long usr,nice,sys,idle,remainder[8];
-                    int count;
-                    char name[10];
+                    int i, count;
+                    char name[32];
                     char line[255];
 
                     /* first line is combined usage */
-                    if (fgets(line,255,cpuinfo))
-                        count = sscanf(line, "%s %lu %lu %lu %lu "
-                                       "%lu %lu %lu %lu %lu %lu %lu %lu",
-                                    name, &usr, &nice, &sys, &idle,
-                                    &remainder[0], &remainder[1], &remainder[2],
-                                    &remainder[3], &remainder[4], &remainder[5],
-                                    &remainder[6], &remainder[7]);
-                    else
-                        count = 0;
-                    /* we set this up in the for older non-smp enabled kernels */
-                    if (count >= 5 && strcmp(name, "cpu") == 0)
+                    while (fgets(line,255,cpuinfo))
                     {
-                        int i;
-                        for (i = 0; i + 5 < count; ++i)
-                            sys += remainder[i];
-                        usr += nice;
-                        sppi = RtlAllocateHeap(GetProcessHeap(), 0,
-                                               sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
-                        sppi->IdleTime.QuadPart = idle;
-                        sppi->KernelTime.QuadPart = sys;
-                        sppi->UserTime.QuadPart = usr+nice;
-                        sppi->Reserved1[0].QuadPart = 0;
-                        sppi->Reserved1[1].QuadPart = 0;
-                        cpus = 1;
-                        len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION);
-                    }
+                        count = sscanf(line, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu",
+                                       name, &usr, &nice, &sys, &idle,
+                                       &remainder[0], &remainder[1], &remainder[2], &remainder[3],
+                                       &remainder[4], &remainder[5], &remainder[6], &remainder[7]);
 
-                    do
-                    {
-                        if (fgets(line, 255, cpuinfo))
-                            count = sscanf(line, "%s %lu %lu %lu %lu "
-                                        "%lu %lu %lu %lu %lu %lu %lu %lu",
-                                        name, &usr, &nice, &sys, &idle,
-                                        &remainder[0], &remainder[1], &remainder[2],
-                                        &remainder[3], &remainder[4], &remainder[5],
-                                        &remainder[6], &remainder[7]);
+                        if (count < 5 || strncmp( name, "cpu", 3 )) break;
+                        for (i = 0; i + 5 < count; ++i) sys += remainder[i];
+                        sys += idle;
+                        usr += nice;
+                        cpus = atoi( name + 3 ) + 1;
+                        if (cpus > out_cpus) break;
+                        len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * cpus;
+                        if (sppi)
+                            sppi = RtlReAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, sppi, len );
                         else
-                            count = 0;
-                        if (count >= 5 && strncmp(name, "cpu", 3)==0)
-                        {
-                            int i;
-                            for (i = 0; i + 5 < count; ++i)
-                                sys += remainder[i];
-                            usr += nice;
-                            out_cpus --;
-                            if (name[3]=='0') /* first cpu */
-                            {
-                                sppi->IdleTime.QuadPart = idle;
-                                sppi->KernelTime.QuadPart = sys;
-                                sppi->UserTime.QuadPart = usr;
-                            }
-                            else /* new cpu */
-                            {
-                                len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * (cpus+1);
-                                sppi = RtlReAllocateHeap(GetProcessHeap(), 0, sppi, len);
-                                sppi[cpus].IdleTime.QuadPart = idle;
-                                sppi[cpus].KernelTime.QuadPart = sys;
-                                sppi[cpus].UserTime.QuadPart = usr;
-                                sppi[cpus].Reserved1[0].QuadPart = 0;
-                                sppi[cpus].Reserved1[1].QuadPart = 0;
-                                cpus++;
-                            }
-                        }
-                        else
-                            break;
-                    } while (out_cpus > 0);
+                            sppi = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, len );
+
+                        sppi[cpus-1].IdleTime.QuadPart   = (ULONGLONG)idle * 10000000 / clk_tck;
+                        sppi[cpus-1].KernelTime.QuadPart = (ULONGLONG)sys * 10000000 / clk_tck;
+                        sppi[cpus-1].UserTime.QuadPart   = (ULONGLONG)usr * 10000000 / clk_tck;
+                    }
                     fclose(cpuinfo);
                 }
             }

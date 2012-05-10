@@ -28,7 +28,6 @@
 #include "ole2.h"
 #include "activscp.h"
 #include "activdbg.h"
-#include "objsafe.h"
 
 #include "wine/debug.h"
 
@@ -49,6 +48,8 @@ static const WCHAR emptyW[] = {0};
 
 static const CLSID CLSID_JScript =
     {0xf414c260,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
+static const CLSID CLSID_VBScript =
+    {0xb54f3741,0x5b07,0x11cf,{0xa4,0xb0,0x00,0xaa,0x00,0x4a,0x55,0xe8}};
 
 struct ScriptHost {
     IActiveScriptSite              IActiveScriptSite_iface;
@@ -719,10 +720,14 @@ static BOOL get_guid_from_type(LPCWSTR type, GUID *guid)
 {
     const WCHAR text_javascriptW[] =
         {'t','e','x','t','/','j','a','v','a','s','c','r','i','p','t',0};
+    const WCHAR text_vbscriptW[] =
+        {'t','e','x','t','/','v','b','s','c','r','i','p','t',0};
 
     /* FIXME: Handle more types */
     if(!strcmpiW(type, text_javascriptW)) {
         *guid = CLSID_JScript;
+    }else if(!strcmpiW(type, text_vbscriptW)) {
+        *guid = CLSID_VBScript;
     }else {
         FIXME("Unknown type %s\n", debugstr_w(type));
         return FALSE;
@@ -795,11 +800,6 @@ static ScriptHost *get_script_host(HTMLWindow *window, const GUID *guid)
 {
     ScriptHost *iter;
 
-    if(IsEqualGUID(&CLSID_JScript, guid) && window->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
-        TRACE("Ignoring JScript\n");
-        return NULL;
-    }
-
     LIST_FOR_EACH_ENTRY(iter, &window->script_hosts, ScriptHost, entry) {
         if(IsEqualGUID(guid, &iter->guid))
             return iter;
@@ -815,6 +815,11 @@ void doc_insert_script(HTMLWindow *window, nsIDOMHTMLScriptElement *nsscript)
 
     if(!get_script_guid(nsscript, &guid)) {
         WARN("Could not find script GUID\n");
+        return;
+    }
+
+    if(IsEqualGUID(&CLSID_JScript, &guid) && window->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
+        TRACE("Ignoring JScript\n");
         return;
     }
 
@@ -857,6 +862,11 @@ IDispatch *script_parse_event(HTMLWindow *window, LPCWSTR text)
         ptr++;
     }else {
         ptr = text;
+    }
+
+    if(IsEqualGUID(&CLSID_JScript, &guid) && window->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
+        TRACE("Ignoring JScript\n");
+        return NULL;
     }
 
     script_host = get_script_host(window, &guid);

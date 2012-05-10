@@ -35,7 +35,7 @@ enum startup_state { STARTUP_IN_PROGRESS, STARTUP_DONE, STARTUP_ABORTED };
 struct process_dll
 {
     struct list          entry;           /* entry in per-process dll list */
-    struct file         *file;            /* dll file */
+    struct mapping      *mapping;         /* dll file */
     mod_handle_t         base;            /* dll base address (in process addr space) */
     client_ptr_t         name;            /* ptr to ptr to name (in process addr space) */
     data_size_t          size;            /* dll size */
@@ -66,8 +66,8 @@ struct process
     affinity_t           affinity;        /* process affinity mask */
     int                  priority;        /* priority class */
     int                  suspend;         /* global process suspend count */
-    int                  is_system;       /* is it a system process? */
-    unsigned int         create_flags;    /* process creation flags */
+    unsigned int         is_system:1;     /* is it a system process? */
+    unsigned int         debug_children:1;/* also debug all child processes */
     struct list          locks;           /* list of file locks owned by the process */
     struct list          classes;         /* window classes owned by the process */
     struct console_input*console;         /* console input */

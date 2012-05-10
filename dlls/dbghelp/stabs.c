@@ -47,9 +47,6 @@
 # include <unistd.h>
 #endif
 #include <stdio.h>
-#ifndef PATH_MAX
-#define PATH_MAX MAX_PATH
-#endif
 #include <assert.h>
 #include <stdarg.h>
 
@@ -583,7 +580,7 @@ static int stabs_pts_read_range(struct ParseTypedefData* ptd, const char* typena
 static inline int stabs_pts_read_method_info(struct ParseTypedefData* ptd)
 {
     struct symt*        dt;
-    char*               tmp;
+    const char*         tmp;
     char                mthd;
 
     do
@@ -740,7 +737,7 @@ static inline int stabs_pts_read_aggregate(struct ParseTypedefData* ptd,
             break;
         case ':':
             {
-                char* tmp;
+                const char* tmp;
                 /* method parameters... terminated by ';' */
                 PTS_ABORTIF(ptd, !(tmp = strchr(ptd->ptr, ';')));
                 ptd->ptr = tmp + 1;
@@ -1272,7 +1269,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     struct symt_function*       curr_func = NULL;
     struct symt_block*          block = NULL;
     struct symt_compiland*      compiland = NULL;
-    char                        srcpath[PATH_MAX]; /* path to directory source file is in */
+    char*                       srcpath = NULL;
     int                         i;
     int                         nstab;
     const char*                 ptr;
@@ -1294,7 +1291,6 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     nstab = stablen / sizeof(struct stab_nlist);
     strs_end = strs + strtablen;
 
-    memset(srcpath, 0, sizeof(srcpath));
     memset(stabs_basic, 0, sizeof(stabs_basic));
     memset(&pending_block, 0, sizeof(pending_block));
     memset(&pending_func, 0, sizeof(pending_func));
@@ -1417,7 +1413,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 struct symt*    param_type = stabs_parse_type(ptr);
                 stab_strcpy(symname, sizeof(symname), ptr);
                 loc.kind = loc_regrel;
-                loc.reg = 0; /* FIXME */
+                loc.reg = dbghelp_current_cpu->frame_regno;
                 loc.offset = stab_ptr->n_value;
                 symt_add_func_local(module, curr_func,
                                     (int)stab_ptr->n_value >= 0 ? DataIsParam : DataIsLocal,
@@ -1492,7 +1488,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
         case N_LSYM:
             /* These are local variables */
             loc.kind = loc_regrel;
-            loc.reg = 0; /* FIXME */
+            loc.reg = dbghelp_current_cpu->frame_regno;
             loc.offset = stab_ptr->n_value;
             if (curr_func != NULL) pending_add_var(&pending_block, ptr, DataIsLocal, &loc);
             break;
@@ -1565,7 +1561,8 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             if (*ptr == '\0') /* end of N_SO file */
             {
                 /* Nuke old path. */
-                srcpath[0] = '\0';
+                HeapFree(GetProcessHeap(), 0, srcpath);
+                srcpath = NULL;
                 stabs_finalize_function(module, curr_func, 0);
                 curr_func = NULL;
                 source_idx = -1;
@@ -1583,7 +1580,10 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                     compiland = symt_new_compiland(module, 0 /* FIXME */, source_idx);
                 }
                 else
+                {
+                    srcpath = HeapAlloc(GetProcessHeap(), 0, len + 1);
                     strcpy(srcpath, ptr);
+                }
             }
             break;
         case N_SOL:

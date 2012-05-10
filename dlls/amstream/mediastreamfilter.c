@@ -3,9 +3,6 @@
  *
  * Copyright 2008 Christian Costa
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -27,6 +24,9 @@
 
 #include "winbase.h"
 #include "wingdi.h"
+#include "dshow.h"
+
+#include "wine/strmbase.h"
 
 #include "amstream_private.h"
 #include "amstream.h"
@@ -36,46 +36,21 @@
 WINE_DEFAULT_DEBUG_CHANNEL(amstream);
 
 typedef struct {
-    const IMediaStreamFilterVtbl *lpVtbl;
-    LONG ref;
-    CRITICAL_SECTION csFilter;
-    FILTER_STATE state;
-    REFERENCE_TIME rtStreamStart;
-    IReferenceClock * pClock;
-    FILTER_INFO filterInfo;
+    BaseFilter filter;
+
 } IMediaStreamFilterImpl;
 
-static const struct IMediaStreamFilterVtbl MediaStreamFilter_Vtbl;
-
-HRESULT MediaStreamFilter_create(IUnknown *pUnkOuter, LPVOID *ppObj)
+static inline IMediaStreamFilterImpl *impl_from_IMediaStreamFilter(IMediaStreamFilter *iface)
 {
-    IMediaStreamFilterImpl* object;
-
-    TRACE("(%p,%p)\n", pUnkOuter, ppObj);
-
-    if( pUnkOuter )
-        return CLASS_E_NOAGGREGATION;
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IMediaStreamFilterImpl));
-    if (!object)
-    {
-        ERR("Out of memory\n");
-        return E_OUTOFMEMORY;
-    }
-
-    object->lpVtbl = &MediaStreamFilter_Vtbl;
-    object->ref = 1;
-
-    *ppObj = object;
-
-    return S_OK;
+    return CONTAINING_RECORD(iface, IMediaStreamFilterImpl, filter);
 }
 
 /*** IUnknown methods ***/
 
-static HRESULT WINAPI MediaStreamFilterImpl_QueryInterface(IMediaStreamFilter * iface, REFIID riid, LPVOID * ppv)
+static HRESULT WINAPI MediaStreamFilterImpl_QueryInterface(IMediaStreamFilter *iface, REFIID riid,
+        void **ppv)
 {
-    IMediaStreamFilterImpl *This = (IMediaStreamFilterImpl *)iface;
+    IMediaStreamFilterImpl *This = impl_from_IMediaStreamFilter(iface);
 
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
@@ -101,28 +76,20 @@ static HRESULT WINAPI MediaStreamFilterImpl_QueryInterface(IMediaStreamFilter * 
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI MediaStreamFilterImpl_AddRef(IMediaStreamFilter * iface)
+static ULONG WINAPI MediaStreamFilterImpl_AddRef(IMediaStreamFilter *iface)
 {
-    IMediaStreamFilterImpl *This = (IMediaStreamFilterImpl *)iface;
-    ULONG refCount = InterlockedIncrement(&This->ref);
-
-    TRACE("(%p)->() AddRef from %d\n", iface, refCount - 1);
-
-    return refCount;
+    return BaseFilterImpl_AddRef((IBaseFilter*)iface);
 }
 
-static ULONG WINAPI MediaStreamFilterImpl_Release(IMediaStreamFilter * iface)
+static ULONG WINAPI MediaStreamFilterImpl_Release(IMediaStreamFilter *iface)
 {
-    IMediaStreamFilterImpl *This = (IMediaStreamFilterImpl *)iface;
-    ULONG refCount = InterlockedDecrement(&This->ref);
+    IMediaStreamFilterImpl *This = impl_from_IMediaStreamFilter(iface);
+    ULONG refCount = BaseFilterImpl_Release((IBaseFilter*)iface);
 
     TRACE("(%p)->() Release from %d\n", iface, refCount + 1);
 
     if (!refCount)
-    {
-        This->lpVtbl = NULL;
         HeapFree(GetProcessHeap(), 0, This);
-    }
 
     return refCount;
 }
@@ -131,14 +98,10 @@ static ULONG WINAPI MediaStreamFilterImpl_Release(IMediaStreamFilter * iface)
 
 static HRESULT WINAPI MediaStreamFilterImpl_GetClassID(IMediaStreamFilter * iface, CLSID * pClsid)
 {
-    TRACE("(%p)->(%p)\n", iface, pClsid);
-
-    *pClsid = CLSID_MediaStreamFilter;
-
-    return S_OK;
+    return BaseFilterImpl_GetClassID((IBaseFilter*)iface, pClsid);
 }
 
-/*** IMediaFilter methods ***/
+/*** IBaseFilter methods ***/
 
 static HRESULT WINAPI MediaStreamFilterImpl_Stop(IMediaStreamFilter * iface)
 {
@@ -163,32 +126,22 @@ static HRESULT WINAPI MediaStreamFilterImpl_Run(IMediaStreamFilter * iface, REFE
 
 static HRESULT WINAPI MediaStreamFilterImpl_GetState(IMediaStreamFilter * iface, DWORD dwMilliSecsTimeout, FILTER_STATE *pState)
 {
-    FIXME("(%p)->(%d,%p): Stub!\n", iface, dwMilliSecsTimeout, pState);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_GetState((IBaseFilter*)iface, dwMilliSecsTimeout, pState);
 }
 
 static HRESULT WINAPI MediaStreamFilterImpl_SetSyncSource(IMediaStreamFilter * iface, IReferenceClock *pClock)
 {
-    TRACE("(%p)->(%p): Stub!\n", iface, pClock);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_SetSyncSource((IBaseFilter*)iface, pClock);
 }
 
 static HRESULT WINAPI MediaStreamFilterImpl_GetSyncSource(IMediaStreamFilter * iface, IReferenceClock **ppClock)
 {
-    FIXME("(%p)->(%p): Stub!\n", iface, ppClock);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_GetSyncSource((IBaseFilter*)iface, ppClock);
 }
-
-/*** IBaseFilter methods ***/
 
 static HRESULT WINAPI MediaStreamFilterImpl_EnumPins(IMediaStreamFilter * iface, IEnumPins **ppEnum)
 {
-    FIXME("(%p)->(%p): Stub!\n", iface, ppEnum);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_EnumPins((IBaseFilter*)iface, ppEnum);
 }
 
 static HRESULT WINAPI MediaStreamFilterImpl_FindPin(IMediaStreamFilter * iface, LPCWSTR Id, IPin **ppPin)
@@ -200,23 +153,17 @@ static HRESULT WINAPI MediaStreamFilterImpl_FindPin(IMediaStreamFilter * iface, 
 
 static HRESULT WINAPI MediaStreamFilterImpl_QueryFilterInfo(IMediaStreamFilter * iface, FILTER_INFO *pInfo)
 {
-    FIXME("(%p)->(%p): Stub!\n", iface, pInfo);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_QueryFilterInfo((IBaseFilter*)iface, pInfo);
 }
 
 static HRESULT WINAPI MediaStreamFilterImpl_JoinFilterGraph(IMediaStreamFilter * iface, IFilterGraph *pGraph, LPCWSTR pName)
 {
-    FIXME("(%p)->(%p, %s): Stub!\n", iface, pGraph, debugstr_w(pName));
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_JoinFilterGraph((IBaseFilter*)iface, pGraph, pName);
 }
 
 static HRESULT WINAPI MediaStreamFilterImpl_QueryVendorInfo(IMediaStreamFilter * iface, LPWSTR *pVendorInfo)
 {
-    FIXME("(%p)->(%p): Stub!\n", iface, pVendorInfo);
-
-    return E_NOTIMPL;
+    return BaseFilterImpl_QueryVendorInfo((IBaseFilter*)iface, pVendorInfo);
 }
 
 /*** IMediaStreamFilter methods ***/
@@ -311,3 +258,43 @@ static const IMediaStreamFilterVtbl MediaStreamFilter_Vtbl =
     MediaStreamFilterImpl_Flush,
     MediaStreamFilterImpl_EndOfStream
 };
+
+static IPin* WINAPI MediaStreamFilterImpl_GetPin(BaseFilter *iface, int pos)
+{
+    /* No pins */
+    return NULL;
+}
+
+static LONG WINAPI MediaStreamFilterImpl_GetPinCount(BaseFilter *iface)
+{
+    /* No pins */
+    return 0;
+}
+
+static const BaseFilterFuncTable BaseFuncTable = {
+    MediaStreamFilterImpl_GetPin,
+    MediaStreamFilterImpl_GetPinCount
+};
+
+HRESULT MediaStreamFilter_create(IUnknown *pUnkOuter, void **ppObj)
+{
+    IMediaStreamFilterImpl* object;
+
+    TRACE("(%p,%p)\n", pUnkOuter, ppObj);
+
+    if( pUnkOuter )
+        return CLASS_E_NOAGGREGATION;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IMediaStreamFilterImpl));
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    BaseFilter_Init(&object->filter, (IBaseFilterVtbl*)&MediaStreamFilter_Vtbl, &CLSID_MediaStreamFilter, (DWORD_PTR)(__FILE__ ": MediaStreamFilterImpl.csFilter"), &BaseFuncTable);
+
+    *ppObj = object;
+
+    return S_OK;
+}

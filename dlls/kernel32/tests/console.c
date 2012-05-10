@@ -992,6 +992,37 @@ static void test_GetConsoleProcessList(void)
     HeapFree(GetProcessHeap(), 0, list);
 }
 
+static void test_OpenCON(void)
+{
+    static const WCHAR conW[] = {'C','O','N',0};
+    static const DWORD accesses[] = {CREATE_NEW, CREATE_ALWAYS, OPEN_EXISTING,
+                                     OPEN_ALWAYS, TRUNCATE_EXISTING};
+    unsigned            i;
+    HANDLE              h;
+
+    for (i = 0; i < sizeof(accesses) / sizeof(accesses[0]); i++)
+    {
+        h = CreateFileW(conW, GENERIC_WRITE, 0, NULL, accesses[i], 0, NULL);
+        ok(h != INVALID_HANDLE_VALUE, "Expected to open the CON device on write (%x)\n", accesses[i]);
+        CloseHandle(h);
+
+        h = CreateFileW(conW, GENERIC_READ, 0, NULL, accesses[i], 0, NULL);
+        /* Windows versions differ here:
+         * MSDN states in CreateFile that TRUNCATE_EXISTING requires GENERIC_WRITE
+         * NT, XP, Vista comply, but Win7 doesn't and allows to open CON with TRUNCATE_EXISTING
+         * So don't test when disposition is TRUNCATE_EXISTING
+         */
+        if (accesses[i] != TRUNCATE_EXISTING)
+        {
+            ok(h != INVALID_HANDLE_VALUE, "Expected to open the CON device on read (%x)\n", accesses[i]);
+        }
+        CloseHandle(h);
+        h = CreateFileW(conW, GENERIC_READ|GENERIC_WRITE, 0, NULL, accesses[i], 0, NULL);
+        ok(h == INVALID_HANDLE_VALUE, "Expected not to open the CON device on read-write (%x)\n", accesses[i]);
+        ok(GetLastError() == ERROR_FILE_NOT_FOUND, "Unexpected error %x\n", GetLastError());
+    }
+}
+
 static void test_OpenConsoleW(void)
 {
     static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
@@ -1083,6 +1114,68 @@ static void test_OpenConsoleW(void)
        "Expected the last error to be untouched, got %u\n", GetLastError());
     if (ret != INVALID_HANDLE_VALUE)
         CloseHandle(ret);
+}
+
+static void test_CreateFileW(void)
+{
+    static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
+    static const WCHAR conoutW[] = {'C','O','N','O','U','T','$',0};
+
+    static const struct
+    {
+        LPCWSTR name;
+        DWORD access;
+        BOOL inherit;
+        DWORD creation;
+        DWORD gle;
+        BOOL is_broken;
+    } cf_table[] = {
+        {coninW,   0,                            FALSE,      0,                 ERROR_INVALID_PARAMETER,        TRUE},
+        {coninW,   0,                            FALSE,      OPEN_ALWAYS,       0,                              FALSE},
+        {coninW,   GENERIC_READ | GENERIC_WRITE, FALSE,      0,                 ERROR_INVALID_PARAMETER,        TRUE},
+        {coninW,   GENERIC_READ | GENERIC_WRITE, FALSE,      CREATE_NEW,        0,                              FALSE},
+        {coninW,   GENERIC_READ | GENERIC_WRITE, FALSE,      CREATE_ALWAYS,     0,                              FALSE},
+        {coninW,   GENERIC_READ | GENERIC_WRITE, FALSE,      OPEN_ALWAYS,       0,                              FALSE},
+        {coninW,   GENERIC_READ | GENERIC_WRITE, FALSE,      TRUNCATE_EXISTING, 0,                              FALSE},
+        {conoutW,  0,                            FALSE,      0,                 ERROR_INVALID_PARAMETER,        TRUE},
+        {conoutW,  0,                            FALSE,      OPEN_ALWAYS,       0,                              FALSE},
+        {conoutW,  GENERIC_READ | GENERIC_WRITE, FALSE,      0,                 ERROR_INVALID_PARAMETER,        TRUE},
+        {conoutW,  GENERIC_READ | GENERIC_WRITE, FALSE,      CREATE_NEW,        0,                              FALSE},
+        {conoutW,  GENERIC_READ | GENERIC_WRITE, FALSE,      CREATE_ALWAYS,     0,                              FALSE},
+        {conoutW,  GENERIC_READ | GENERIC_WRITE, FALSE,      OPEN_ALWAYS,       0,                              FALSE},
+        {conoutW,  GENERIC_READ | GENERIC_WRITE, FALSE,      TRUNCATE_EXISTING, 0,                              FALSE},
+    };
+
+    int index;
+    HANDLE ret;
+    SECURITY_ATTRIBUTES sa;
+
+    for (index = 0; index < sizeof(cf_table)/sizeof(cf_table[0]); index++)
+    {
+        SetLastError(0xdeadbeef);
+
+        sa.nLength = sizeof(sa);
+        sa.lpSecurityDescriptor = NULL;
+        sa.bInheritHandle = cf_table[index].inherit;
+
+        ret = CreateFileW(cf_table[index].name, cf_table[index].access,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, &sa,
+                          cf_table[index].creation, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (ret == INVALID_HANDLE_VALUE)
+        {
+            ok(cf_table[index].gle,
+               "Expected CreateFileW not to return INVALID_HANDLE_VALUE for index %d\n", index);
+            ok(GetLastError() == cf_table[index].gle,
+                "Expected GetLastError() to return %u for index %d, got %u\n",
+                cf_table[index].gle, index, GetLastError());
+        }
+        else
+        {
+            ok(!cf_table[index].gle || broken(cf_table[index].is_broken) /* Win7 */,
+               "Expected CreateFileW to succeed for index %d\n", index);
+            CloseHandle(ret);
+        }
+    }
 }
 
 static void test_VerifyConsoleIoHandle( HANDLE handle )
@@ -1728,27 +1821,27 @@ static void test_WriteConsoleOutputCharacterA(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, output, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, output, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, output, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, output, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, output, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, output, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, output, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, output, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, output, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, output, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, output, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, output, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, output, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, output, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, output, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, output, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, output, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, output, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, output, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, output, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -1812,27 +1905,27 @@ static void test_WriteConsoleOutputCharacterW(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, outputW, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, outputW, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, outputW, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, outputW, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, outputW, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, outputW, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, outputW, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, outputW, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, outputW, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, outputW, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, outputW, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, outputW, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, outputW, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, outputW, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, outputW, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, outputW, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, outputW, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, outputW, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, outputW, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, outputW, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -1895,27 +1988,27 @@ static void test_WriteConsoleOutputAttribute(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &attr, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &attr, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &attr, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &attr, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &attr, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &attr, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &attr, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &attr, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -1977,16 +2070,16 @@ static void test_FillConsoleOutputCharacterA(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, 'a', 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, 'a', 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, 'a', 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, 'a', 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, 'a', 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, 'a', 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2043,16 +2136,16 @@ static void test_FillConsoleOutputCharacterW(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, 'a', 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, 'a', 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, 'a', 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, 'a', 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, 'a', 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, 'a', 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, 'a', 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, 'a', 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, 'a', 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, 'a', 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, 'a', 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2109,16 +2202,16 @@ static void test_FillConsoleOutputAttribute(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, FOREGROUND_BLUE, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, FOREGROUND_BLUE, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, FOREGROUND_BLUE, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, FOREGROUND_BLUE, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, FOREGROUND_BLUE, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, FOREGROUND_BLUE, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, FOREGROUND_BLUE, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, FOREGROUND_BLUE, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, FOREGROUND_BLUE, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, FOREGROUND_BLUE, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, FOREGROUND_BLUE, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, FOREGROUND_BLUE, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, FOREGROUND_BLUE, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2181,28 +2274,28 @@ static void test_ReadConsoleOutputCharacterA(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {NULL, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &read, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &read, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {INVALID_HANDLE_VALUE, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &read, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &read, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 1, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 10, origin, &count, 10, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {NULL, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &read, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &read, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {INVALID_HANDLE_VALUE, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &read, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &read, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 1, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 10, {0, 0}, &count, 10, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2265,28 +2358,28 @@ static void test_ReadConsoleOutputCharacterW(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {NULL, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &read, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &read, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {INVALID_HANDLE_VALUE, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &read, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &read, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 1, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 10, origin, &count, 10, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &read, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &read, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {NULL, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &read, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &read, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {INVALID_HANDLE_VALUE, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &read, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &read, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 1, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 10, {0, 0}, &count, 10, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &read, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &read, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2349,27 +2442,27 @@ static void test_ReadConsoleOutputAttribute(HANDLE output_handle)
         int win7_crash;
     } invalid_table[] =
     {
-        {NULL, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {NULL, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &attr, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {NULL, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {NULL, &attr, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, NULL, 1, origin, &count, 0, ERROR_INVALID_HANDLE, 1},
-        {INVALID_HANDLE_VALUE, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &attr, 0, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {INVALID_HANDLE_VALUE, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {INVALID_HANDLE_VALUE, &attr, 1, origin, &count, 0, ERROR_INVALID_HANDLE},
-        {output_handle, NULL, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, NULL, 1, origin, &count, 1, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &attr, 0, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
-        {output_handle, &attr, 1, origin, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {NULL, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &attr, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {NULL, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {NULL, &attr, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, NULL, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE, 1},
+        {INVALID_HANDLE_VALUE, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &attr, 0, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {INVALID_HANDLE_VALUE, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {INVALID_HANDLE_VALUE, &attr, 1, {0, 0}, &count, 0, ERROR_INVALID_HANDLE},
+        {output_handle, NULL, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, NULL, 1, {0, 0}, &count, 1, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &attr, 0, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
+        {output_handle, &attr, 1, {0, 0}, NULL, 0xdeadbeef, ERROR_INVALID_ACCESS, 1},
     };
 
     for (i = 0; i < sizeof(invalid_table)/sizeof(invalid_table[0]); i++)
@@ -2515,6 +2608,8 @@ START_TEST(console)
 
     test_GetConsoleProcessList();
     test_OpenConsoleW();
+    test_CreateFileW();
+    test_OpenCON();
     test_VerifyConsoleIoHandle(hConOut);
     test_GetSetStdHandle();
     test_GetNumberOfConsoleInputEvents(hConIn);

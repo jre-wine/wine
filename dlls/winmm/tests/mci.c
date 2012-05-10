@@ -241,13 +241,16 @@ static void test_mciParser(HWND hwnd)
     ok(!buf[0], "status error buffer %s\n", buf);
 
     err = mciSendString("status x track", buf, sizeof(buf), NULL);
-    todo_wine ok(err==MCIERR_BAD_INTEGER,"status waveaudio no track: %s\n", dbg_mcierr(err));
+    ok(err==MCIERR_BAD_INTEGER,"status waveaudio no track: %s\n", dbg_mcierr(err));
 
     err = mciSendString("status x track 3", buf, sizeof(buf), NULL);
     ok(err==MCIERR_MISSING_PARAMETER,"status waveaudio track 3: %s\n", dbg_mcierr(err));
 
     err = mciSendString("status x 2 track 3", buf, sizeof(buf), NULL);
     todo_wine ok(err==MCIERR_OUTOFRANGE,"status 2(position) track 3: %s\n", dbg_mcierr(err));
+
+    err = mciSendString("status x 0x4", buf, sizeof(buf), NULL);
+    todo_wine ok(err==MCIERR_BAD_CONSTANT, "status 0x4: %s\n", dbg_mcierr(err));
 
     err = mciSendString("status x 4", buf, sizeof(buf), hwnd);
     ok(!err,"status 4(mode): %s\n", dbg_mcierr(err));
@@ -269,6 +272,21 @@ static void test_mciParser(HWND hwnd)
 
     err = mciSendString("status x nsa", buf, sizeof(buf), hwnd);
     todo_wine ok(err==MCIERR_BAD_CONSTANT,"status nsa: %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek x to 0:0:0:0:0", buf, sizeof(buf), NULL);
+    ok(err==MCIERR_BAD_INTEGER,"seek to 0:0:0:0:0 returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek x to 0:0:0:0:", buf, sizeof(buf), NULL);
+    ok(err==MCIERR_BAD_INTEGER,"seek to 0:0:0:0: returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek x to :0:0:0:0", buf, sizeof(buf), NULL);
+    ok(err==MCIERR_BAD_INTEGER,"seek to :0:0:0:0 returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek x to 256:0:0:0", buf, sizeof(buf), NULL);
+    ok(err==MCIERR_BAD_INTEGER,"seek to 256:0:0:0 returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek x to 0:256", buf, sizeof(buf), NULL);
+    ok(err==MCIERR_BAD_INTEGER,"seek to 0:256 returned %s\n", dbg_mcierr(err));
 
     err = mciSendString("status all time format", buf, sizeof(buf), hwnd);
     ok(err==MCIERR_CANNOT_USE_ALL,"status all: %s\n", dbg_mcierr(err));
@@ -293,7 +311,7 @@ static void test_mciParser(HWND hwnd)
     if(!err) ok(!strcmp(buf,"1"), "sysinfo digitalvideo quantity open returned %s\n", buf);
 
     err = mciSendString("put a window at 0 0", buf, sizeof(buf), NULL);
-    todo_wine ok(err==MCIERR_BAD_INTEGER,"put incomplete rect: %s\n", dbg_mcierr(err));
+    ok(err==MCIERR_BAD_INTEGER,"put incomplete rect: %s\n", dbg_mcierr(err));
 
     /*w9X-w2k report code from device last opened, newer versions compare them all
      * and return the one error code or MCIERR_MULTIPLE if they differ. */
@@ -841,8 +859,8 @@ static void test_playWAVE(HWND hwnd)
     /* No notification (checked below) sent if error */
 
     /* A second play caused Wine<1.1.33 to hang */
-    err = mciSendString("play mysound from 500 to 1500 wait", NULL, 0, NULL);
-    ok(!err,"mci play from 500 to 1500 returned %s\n", dbg_mcierr(err));
+    err = mciSendString("play mysound from 500 to 220:5:0 wait", NULL, 0, NULL);
+    ok(!err,"mci play from 500 to 220:5:0 (=1500) returned %s\n", dbg_mcierr(err));
 
     err = mciSendString("status mysound position", buf, sizeof(buf), hwnd);
     ok(!err,"mci status position returned %s\n", dbg_mcierr(err));
@@ -873,6 +891,19 @@ static void test_playWAVE(HWND hwnd)
     err = mciSendString("Seek Mysound to 250 wait Notify", NULL, 0, hwnd);
     ok(!err,"mci seek to 250 wait notify returned %s\n", dbg_mcierr(err));
     test_notification(hwnd,"seek wait notify",MCI_NOTIFY_SUCCESSFUL);
+
+    err = mciSendString("seek mysound to 0xfa", NULL, 0, NULL);
+    ok(err==MCIERR_BAD_INTEGER,"mci seek to 0xfa returned %s\n", dbg_mcierr(err));
+
+    /* MCI_INTEGER always accepts colon notation */
+    err = mciSendString("seek mysound to :1", NULL, 0, NULL);
+    ok(!err,"mci seek to :1 (=256) returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek mysound to 250::", NULL, 0, NULL);
+    ok(!err,"mci seek to 250:: returned %s\n", dbg_mcierr(err));
+
+    err = mciSendString("seek mysound to 250:0", NULL, 0, NULL);
+    ok(!err,"mci seek to 250:0 returned %s\n", dbg_mcierr(err));
 
     err = mciSendString("status mysound position notify", buf, sizeof(buf), hwnd);
     ok(!err,"mci status position notify returned %s\n", dbg_mcierr(err));
@@ -1265,9 +1296,12 @@ START_TEST(mci)
     test_mciParser(hwnd);
     test_openCloseWAVE(hwnd);
     test_recordWAVE(hwnd);
-    test_playWAVE(hwnd);
-    test_asyncWAVE(hwnd);
-    test_AutoOpenWAVE(hwnd);
+    if(waveOutGetNumDevs()){
+        test_playWAVE(hwnd);
+        test_asyncWAVE(hwnd);
+        test_AutoOpenWAVE(hwnd);
+    }else
+        skip("No output devices available, skipping all output tests\n");
     /* Win9X hangs when exiting with something still open. */
     err = mciSendString("close all", NULL, 0, hwnd);
     ok(!err,"final close all returned %s\n", dbg_mcierr(err));

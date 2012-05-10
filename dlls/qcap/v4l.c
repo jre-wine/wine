@@ -24,38 +24,21 @@
 
 #include "config.h"
 #include "wine/port.h"
-#include "wine/library.h"
 
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #define COBJMACROS
 
 #include <stdarg.h>
-#include "windef.h"
-#include "winbase.h"
-#include "wtypes.h"
-#include "wingdi.h"
-#include "winuser.h"
-#include "dshow.h"
-#include "vfwmsgs.h"
-#include "amvideo.h"
-#include "wine/debug.h"
-
-#include "capture.h"
-#include "qcap_main.h"
-
 #include <stdio.h>
 #include <fcntl.h>
-
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
-#ifdef HAVE_SYS_ERRNO_H
-#include <sys/errno.h>
-#endif
+#include <errno.h>
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -68,6 +51,20 @@
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
+
+#include "windef.h"
+#include "winbase.h"
+#include "wtypes.h"
+#include "wingdi.h"
+#include "winuser.h"
+#include "dshow.h"
+#include "vfwmsgs.h"
+#include "amvideo.h"
+#include "wine/debug.h"
+#include "wine/library.h"
+
+#include "capture.h"
+#include "qcap_main.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap_v4l);
 

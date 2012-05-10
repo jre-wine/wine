@@ -19,24 +19,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/*
- * NOTES:
- * On entry, global variables quals, param1, param2 contain
- * the qualifiers (uppercased and concatenated) and parameters entered, with
- * environment-variable and batch parameter substitution already done.
- */
-
 #define WIN32_LEAN_AND_MEAN
 
 #include "wcmd.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cmd);
-
-
-extern int echo_mode;
-extern WCHAR quals[MAX_PATH], param1[MAX_PATH], param2[MAX_PATH];
-extern DWORD errorlevel;
 
 typedef enum _DISPLAYTIME
 {
@@ -53,21 +41,13 @@ typedef enum _DISPLAYORDER
     Date
 } DISPLAYORDER;
 
-static int file_total, dir_total, recurse, wide, bare, max_width, lower;
-static int shortname, usernames;
+static int file_total, dir_total, max_width;
 static ULONGLONG byte_total;
 static DISPLAYTIME dirTime;
 static DISPLAYORDER dirOrder;
 static BOOL orderReverse, orderGroupDirs, orderGroupDirsReverse, orderByCol;
-static BOOL separator;
+static BOOL paged_mode, recurse, wide, bare, lower, shortname, usernames, separator;
 static ULONG showattrs, attrsbits;
-
-static const WCHAR dotW[]    = {'.','\0'};
-static const WCHAR dotdotW[] = {'.','.','\0'};
-static const WCHAR starW[]   = {'*','\0'};
-static const WCHAR slashW[]  = {'\\','\0'};
-static const WCHAR emptyW[]  = {'\0'};
-static const WCHAR spaceW[]  = {' ','\0'};
 
 /*****************************************************************************
  * WCMD_strrev
@@ -274,14 +254,14 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
   int concurrentDirs = 0;
   BOOL done_header = FALSE;
 
-  static const WCHAR fmtDir[]  = {'%','1','0','s',' ',' ','%','8','s',' ',' ',
+  static const WCHAR fmtDir[]  = {'%','1','!','1','0','s','!',' ',' ','%','2','!','8','s','!',' ',' ',
                                   '<','D','I','R','>',' ',' ',' ',' ',' ',' ',' ',' ',' ','\0'};
-  static const WCHAR fmtFile[] = {'%','1','0','s',' ',' ','%','8','s',' ',' ',
-                                  ' ',' ','%','1','0','s',' ',' ','\0'};
-  static const WCHAR fmt2[]  = {'%','-','1','3','s','\0'};
-  static const WCHAR fmt3[]  = {'%','-','2','3','s','\0'};
-  static const WCHAR fmt4[]  = {'%','s','\0'};
-  static const WCHAR fmt5[]  = {'%','s','%','s','\0'};
+  static const WCHAR fmtFile[] = {'%','1','!','1','0','s','!',' ',' ','%','2','!','8','s','!',' ',' ',
+                                  ' ',' ','%','3','!','1','0','s','!',' ',' ','\0'};
+  static const WCHAR fmt2[]  = {'%','1','!','-','1','3','s','!','\0'};
+  static const WCHAR fmt3[]  = {'%','1','!','-','2','3','s','!','\0'};
+  static const WCHAR fmt4[]  = {'%','1','\0'};
+  static const WCHAR fmt5[]  = {'%','1','%','2','\0'};
 
   dir_count = 0;
   file_count = 0;
@@ -336,10 +316,10 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
 
     /* Output the results */
     if (!bare) {
-       if (level != 0 && (entry_count > 0)) WCMD_output (newline);
+       if (level != 0 && (entry_count > 0)) WCMD_output_asis (newlineW);
        if (!recurse || ((entry_count > 0) && done_header==FALSE)) {
            static const WCHAR headerW[] = {'D','i','r','e','c','t','o','r','y',' ','o','f',
-                                           ' ','%','s','\n','\n','\0'};
+                                           ' ','%','1','\n','\n','\0'};
            WCMD_output (headerW, real_path);
            done_header = TRUE;
        }
@@ -411,12 +391,12 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
 
         tmp_width = cur_width;
         if ((fd+i)->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            static const WCHAR fmt[] = {'[','%','s',']','\0'};
+            static const WCHAR fmt[] = {'[','%','1',']','\0'};
             WCMD_output (fmt, (fd+i)->cFileName);
             dir_count++;
             tmp_width = tmp_width + strlenW((fd+i)->cFileName) + 2;
         } else {
-            static const WCHAR fmt[] = {'%','s','\0'};
+            static const WCHAR fmt[] = {'%','1','\0'};
             WCMD_output (fmt, (fd+i)->cFileName);
             tmp_width = tmp_width + strlenW((fd+i)->cFileName) ;
             file_count++;
@@ -429,24 +409,8 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
         if ((cur_width + widest) > max_width) {
             cur_width = 0;
         } else {
-            int padding = cur_width - tmp_width;
-            int toWrite = 0;
-            WCHAR temp[101];
-
-            /* Note: WCMD_output uses wvsprintf which does not allow %*
-                 so manually pad with spaces to appropriate width       */
-            strcpyW(temp, emptyW);
-            while (padding > 0) {
-                strcatW(&temp[toWrite], spaceW);
-                toWrite++;
-                if (toWrite > 99) {
-                    WCMD_output(temp);
-                    toWrite = 0;
-                    strcpyW(temp, emptyW);
-                }
-                padding--;
-            }
-            WCMD_output(temp);
+            static const WCHAR padfmt[] = {'%','1','!','*','s','!','\0'};
+            WCMD_output(padfmt, cur_width - tmp_width, nullW);
         }
 
       } else if ((fd+i)->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
@@ -460,7 +424,7 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
         } else {
            if (!((strcmpW((fd+i)->cFileName, dotW) == 0) ||
                  (strcmpW((fd+i)->cFileName, dotdotW) == 0))) {
-              WCMD_output (fmt5, recurse?inputparms->dirName:emptyW, (fd+i)->cFileName);
+              WCMD_output (fmt5, recurse?inputparms->dirName:nullW, (fd+i)->cFileName);
            } else {
               addNewLine = FALSE;
            }
@@ -478,22 +442,22 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
            if (usernames) WCMD_output (fmt3, username);
            WCMD_output(fmt4,(fd+i)->cFileName);
         } else {
-           WCMD_output (fmt5, recurse?inputparms->dirName:emptyW, (fd+i)->cFileName);
+           WCMD_output (fmt5, recurse?inputparms->dirName:nullW, (fd+i)->cFileName);
         }
       }
      }
-     if (addNewLine) WCMD_output (newline);
+     if (addNewLine) WCMD_output_asis (newlineW);
      cur_width = 0;
     }
 
     if (!bare) {
        if (file_count == 1) {
          static const WCHAR fmt[] = {' ',' ',' ',' ',' ',' ',' ','1',' ','f','i','l','e',' ',
-                                     '%','2','5','s',' ','b','y','t','e','s','\n','\0'};
+                                     '%','1','!','2','5','s','!',' ','b','y','t','e','s','\n','\0'};
          WCMD_output (fmt, WCMD_filesize64 (byte_count.QuadPart));
        }
        else {
-         static const WCHAR fmt[] = {'%','8','d',' ','f','i','l','e','s',' ','%','2','4','s',
+         static const WCHAR fmt[] = {'%','1','!','8','d','!',' ','f','i','l','e','s',' ','%','2','!','2','4','s','!',
                                      ' ','b','y','t','e','s','\n','\0'};
          WCMD_output (fmt, file_count, WCMD_filesize64 (byte_count.QuadPart));
        }
@@ -504,11 +468,11 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
 
     if (!bare && !recurse) {
        if (dir_count == 1) {
-           static const WCHAR fmt[] = {'%','8','d',' ','d','i','r','e','c','t','o','r','y',
+           static const WCHAR fmt[] = {'%','1','!','8','d','!',' ','d','i','r','e','c','t','o','r','y',
                                        ' ',' ',' ',' ',' ',' ',' ',' ',' ','\0'};
            WCMD_output (fmt, 1);
        } else {
-           static const WCHAR fmt[] = {'%','8','d',' ','d','i','r','e','c','t','o','r','i',
+           static const WCHAR fmt[] = {'%','1','!','8','d','!',' ','d','i','r','e','c','t','o','r','i',
                                        'e','s','\0'};
            WCMD_output (fmt, dir_count);
        }
@@ -598,7 +562,7 @@ static DIRECTORY_STACK *WCMD_list_directory (DIRECTORY_STACK *inputparms, int le
 static void WCMD_dir_trailer(WCHAR drive) {
     ULARGE_INTEGER avail, total, freebytes;
     DWORD status;
-    WCHAR driveName[4] = {'c',':','\\','\0'};
+    WCHAR driveName[] = {'c',':','\\','\0'};
 
     driveName[0] = drive;
     status = GetDiskFreeSpaceExW(driveName, &avail, &total, &freebytes);
@@ -608,15 +572,15 @@ static void WCMD_dir_trailer(WCHAR drive) {
     if (errorlevel==0 && !bare) {
       if (recurse) {
         static const WCHAR fmt1[] = {'\n',' ',' ',' ',' ',' ','T','o','t','a','l',' ','f','i','l','e','s',
-                                     ' ','l','i','s','t','e','d',':','\n','%','8','d',' ','f','i','l','e',
-                                     's','%','2','5','s',' ','b','y','t','e','s','\n','\0'};
-        static const WCHAR fmt2[] = {'%','8','d',' ','d','i','r','e','c','t','o','r','i','e','s',' ','%',
-                                     '1','8','s',' ','b','y','t','e','s',' ','f','r','e','e','\n','\n',
+                                     ' ','l','i','s','t','e','d',':','\n','%','1','!','8','d','!',' ','f','i','l','e',
+                                     's','%','2','!','2','5','s','!',' ','b','y','t','e','s','\n','\0'};
+        static const WCHAR fmt2[] = {'%','1','!','8','d','!',' ','d','i','r','e','c','t','o','r','i','e','s',' ','%',
+                                     '2','!','1','8','s','!',' ','b','y','t','e','s',' ','f','r','e','e','\n','\n',
                                      '\0'};
         WCMD_output (fmt1, file_total, WCMD_filesize64 (byte_total));
         WCMD_output (fmt2, dir_total, WCMD_filesize64 (freebytes.QuadPart));
       } else {
-        static const WCHAR fmt[] = {' ','%','1','8','s',' ','b','y','t','e','s',' ','f','r','e','e',
+        static const WCHAR fmt[] = {' ','%','1','!','1','8','s','!',' ','b','y','t','e','s',' ','f','r','e','e',
                                     '\n','\n','\0'};
         WCMD_output (fmt, WCMD_filesize64 (freebytes.QuadPart));
       }
@@ -630,10 +594,10 @@ static void WCMD_dir_trailer(WCHAR drive) {
  *
  */
 
-void WCMD_directory (WCHAR *cmd) {
-
+void WCMD_directory (WCHAR *cmd)
+{
   WCHAR path[MAX_PATH], cwd[MAX_PATH];
-  int status, paged_mode;
+  DWORD status;
   CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
   WCHAR *p;
   WCHAR string[MAXSTRING];
@@ -839,7 +803,7 @@ void WCMD_directory (WCHAR *cmd) {
   prevEntry = NULL;
   while (argN) {
     WCHAR fullname[MAXSTRING];
-    WCHAR *thisArg = WCMD_parameter (cmd, argno++, &argN);
+    WCHAR *thisArg = WCMD_parameter(cmd, argno++, &argN, NULL);
     if (argN && argN[0] != '/') {
 
       WINE_TRACE("Found parm '%s'\n", wine_dbgstr_w(thisArg));
@@ -878,7 +842,7 @@ void WCMD_directory (WCHAR *cmd) {
             strcatW (path, starW);
           }
           else {
-            const WCHAR slashStarW[]  = {'\\','*','\0'};
+            static const WCHAR slashStarW[]  = {'\\','*','\0'};
             strcatW (path, slashStarW);
           }
         }
@@ -959,7 +923,7 @@ void WCMD_directory (WCHAR *cmd) {
       }
     } else {
       static const WCHAR newLine2[] = {'\n','\n','\0'};
-      if (!bare) WCMD_output (newLine2);
+      if (!bare) WCMD_output_asis (newLine2);
     }
 
     /* Clear any errors from previous invocations, and process it */

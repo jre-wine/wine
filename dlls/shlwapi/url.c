@@ -744,7 +744,7 @@ HRESULT WINAPI UrlCombineW(LPCWSTR pszBase, LPCWSTR pszRelative,
 
             if (base.nScheme == URL_SCHEME_HTTP || base.nScheme == URL_SCHEME_HTTPS)
                 manual_search = TRUE;
-            else if (work - base.pszSuffix > len_htmW * sizeof(WCHAR)) {
+            else if (work - base.pszSuffix > len_htmW) {
                 work -= len_htmW;
                 if (strncmpiW(work, htmW, len_htmW) == 0)
                     manual_search = TRUE;
@@ -752,7 +752,7 @@ HRESULT WINAPI UrlCombineW(LPCWSTR pszBase, LPCWSTR pszRelative,
             }
 
             if (!manual_search &&
-                    work - base.pszSuffix > len_htmlW * sizeof(WCHAR)) {
+                    work - base.pszSuffix > len_htmlW) {
                 work -= len_htmlW;
                 if (strncmpiW(work, htmlW, len_htmlW) == 0)
                     manual_search = TRUE;
@@ -1072,7 +1072,7 @@ HRESULT WINAPI UrlEscapeW(
     LPCWSTR src;
     DWORD needed = 0, ret;
     BOOL stop_escaping = FALSE;
-    WCHAR next[5], *dst = pszEscaped, *dst_ptr = NULL;
+    WCHAR next[5], *dst, *dst_ptr;
     INT len;
     PARSEDURLW parsed_url;
     DWORD int_flags;
@@ -1091,11 +1091,9 @@ HRESULT WINAPI UrlEscapeW(
 		   URL_ESCAPE_PERCENT))
         FIXME("Unimplemented flags: %08x\n", dwFlags);
 
-    if(pszUrl == pszEscaped) {
-        dst_ptr = dst = HeapAlloc(GetProcessHeap(), 0, *pcchEscaped*sizeof(WCHAR));
-        if(!dst)
-            return E_OUTOFMEMORY;
-    }
+    dst_ptr = dst = HeapAlloc(GetProcessHeap(), 0, *pcchEscaped*sizeof(WCHAR));
+    if(!dst_ptr)
+        return E_OUTOFMEMORY;
 
     /* fix up flags */
     if (dwFlags & URL_ESCAPE_SPACES_ONLY)
@@ -1213,8 +1211,7 @@ HRESULT WINAPI UrlEscapeW(
 
     if(needed < *pcchEscaped) {
         *dst = '\0';
-        if(pszUrl == pszEscaped)
-            memcpy(pszEscaped, dst-needed, (needed+1)*sizeof(WCHAR));
+        memcpy(pszEscaped, dst_ptr, (needed+1)*sizeof(WCHAR));
 
         ret = S_OK;
     } else {
@@ -1223,8 +1220,7 @@ HRESULT WINAPI UrlEscapeW(
     }
     *pcchEscaped = needed;
 
-    if(pszUrl == pszEscaped)
-        HeapFree(GetProcessHeap(), 0, dst_ptr);
+    HeapFree(GetProcessHeap(), 0, dst_ptr);
     return ret;
 }
 
@@ -1700,6 +1696,39 @@ static HRESULT URL_GuessScheme(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut)
     return E_FAIL;
 }
 
+static HRESULT URL_CreateFromPath(LPCWSTR pszPath, LPWSTR pszUrl, LPDWORD pcchUrl)
+{
+    DWORD needed;
+    HRESULT ret = S_OK;
+    WCHAR *pszNewUrl;
+    WCHAR file_colonW[] = {'f','i','l','e',':',0};
+    WCHAR three_slashesW[] = {'/','/','/',0};
+    PARSEDURLW parsed_url;
+
+    parsed_url.cbSize = sizeof(parsed_url);
+    if(ParseURLW(pszPath, &parsed_url) == S_OK) {
+        if(parsed_url.nScheme != URL_SCHEME_INVALID && parsed_url.cchProtocol > 1) {
+            needed = strlenW(pszPath);
+            if (needed >= *pcchUrl) {
+                *pcchUrl = needed + 1;
+                return E_POINTER;
+            } else {
+                *pcchUrl = needed;
+                return S_FALSE;
+            }
+        }
+    }
+
+    pszNewUrl = HeapAlloc(GetProcessHeap(), 0, (strlenW(pszPath) + 9) * sizeof(WCHAR)); /* "file:///" + pszPath_len + 1 */
+    strcpyW(pszNewUrl, file_colonW);
+    if(isalphaW(pszPath[0]) && pszPath[1] == ':')
+        strcatW(pszNewUrl, three_slashesW);
+    strcatW(pszNewUrl, pszPath);
+    ret = UrlEscapeW(pszNewUrl, pszUrl, pcchUrl, URL_ESCAPE_PERCENT);
+    HeapFree(GetProcessHeap(), 0, pszNewUrl);
+    return ret;
+}
+
 static HRESULT URL_ApplyDefault(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut)
 {
     HKEY newkey;
@@ -1747,11 +1776,18 @@ HRESULT WINAPI UrlApplySchemeW(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut, DW
     if (!pszIn || !pszOut || !pcchOut) return E_INVALIDARG;
 
     if (dwFlags & URL_APPLY_GUESSFILE) {
-	FIXME("(%s %p %p(%d) 0x%08x): stub URL_APPLY_GUESSFILE not implemented\n",
-	      debugstr_w(pszIn), pszOut, pcchOut, *pcchOut, dwFlags);
-	strcpyW(pszOut, pszIn);
-	*pcchOut = strlenW(pszOut);
-	return S_FALSE;
+        if (*pcchOut > 1 && ':' == pszIn[1]) {
+            res1 = *pcchOut;
+            ret = URL_CreateFromPath(pszIn, pszOut, &res1);
+            if (ret == S_OK || ret == E_POINTER){
+                *pcchOut = res1;
+                return ret;
+            }
+            else if (ret == S_FALSE)
+            {
+                return ret;
+            }
+        }
     }
 
     in_scheme.cbSize = sizeof(in_scheme);
@@ -1762,20 +1798,6 @@ HRESULT WINAPI UrlApplySchemeW(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut, DW
 	if (dwFlags & URL_APPLY_GUESSSCHEME) {
 	    if ((ret = URL_GuessScheme(pszIn, pszOut, pcchOut)) != E_FAIL)
 		return ret;
-	}
-    }
-    else {
-	/* we have a scheme, see if valid (known scheme) */
-	if (in_scheme.nScheme) {
-	    /* have valid scheme, so just copy and exit */
-	    if (strlenW(pszIn) + 1 > *pcchOut) {
-		*pcchOut = strlenW(pszIn) + 1;
-		return E_POINTER;
-	    }
-	    strcpyW(pszOut, pszIn);
-	    *pcchOut = strlenW(pszOut);
-	    TRACE("valid scheme, returning copy\n");
-	    return S_OK;
 	}
     }
 
@@ -2049,7 +2071,8 @@ static LPCWSTR  URL_ScanID(LPCWSTR start, LPDWORD size, WINE_URL_SCAN_TYPE type)
 	    if (isalnumW(*start) ||
                 (*start == '-') ||
                 (*start == '.') ||
-                (*start == ' ') ) {
+                (*start == ' ') ||
+                (*start == '*') ) {
 		start++;
 		(*size)++;
 	    }
@@ -2421,12 +2444,7 @@ HRESULT WINAPI UrlCreateFromPathA(LPCSTR pszPath, LPSTR pszUrl, LPDWORD pcchUrl,
  */
 HRESULT WINAPI UrlCreateFromPathW(LPCWSTR pszPath, LPWSTR pszUrl, LPDWORD pcchUrl, DWORD dwReserved)
 {
-    DWORD needed;
     HRESULT ret;
-    WCHAR *pszNewUrl;
-    WCHAR file_colonW[] = {'f','i','l','e',':',0};
-    WCHAR three_slashesW[] = {'/','/','/',0};
-    PARSEDURLW parsed_url;
 
     TRACE("(%s, %p, %p, 0x%08x)\n", debugstr_w(pszPath), pszUrl, pcchUrl, dwReserved);
 
@@ -2436,30 +2454,11 @@ HRESULT WINAPI UrlCreateFromPathW(LPCWSTR pszPath, LPWSTR pszUrl, LPDWORD pcchUr
     if (!pszUrl || !pcchUrl)
         return E_INVALIDARG;
 
+    ret = URL_CreateFromPath(pszPath, pszUrl, pcchUrl);
 
-    parsed_url.cbSize = sizeof(parsed_url);
-    if(ParseURLW(pszPath, &parsed_url) == S_OK) {
-        if(parsed_url.nScheme != URL_SCHEME_INVALID && parsed_url.cchProtocol > 1) {
-            needed = strlenW(pszPath);
-            if (needed >= *pcchUrl) {
-                *pcchUrl = needed + 1;
-                return E_POINTER;
-            } else {
-                *pcchUrl = needed;
-                strcpyW(pszUrl, pszPath);
-                return S_FALSE;
-            }
-	}
-    }
+    if (S_FALSE == ret)
+        strcpyW(pszUrl, pszPath);
 
-    pszNewUrl = HeapAlloc(GetProcessHeap(), 0, (strlenW(pszPath) + 9) * sizeof(WCHAR)); /* "file:///" + pszPath_len + 1 */
-    strcpyW(pszNewUrl, file_colonW);
-    if(isalphaW(pszPath[0]) && pszPath[1] == ':')
-        strcatW(pszNewUrl, three_slashesW);
-    strcatW(pszNewUrl, pszPath);
-    ret = UrlEscapeW(pszNewUrl, pszUrl, pcchUrl, URL_ESCAPE_PERCENT);
-
-    HeapFree(GetProcessHeap(), 0, pszNewUrl);
     return ret;
 }
 

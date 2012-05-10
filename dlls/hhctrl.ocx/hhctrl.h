@@ -102,6 +102,7 @@ typedef struct CHMInfo
     char **strings;
     DWORD strings_size;
 
+    WCHAR *compiledFile;
     WCHAR *defTopic;
     WCHAR *defTitle;
     WCHAR *defToc;
@@ -111,6 +112,7 @@ typedef struct CHMInfo
 #define TAB_INDEX      1
 #define TAB_SEARCH     2
 #define TAB_FAVORITES  3
+#define TAB_NUMTABS    TAB_FAVORITES
 
 typedef struct {
     HWND hwnd;
@@ -162,32 +164,34 @@ typedef struct {
     DWORD current_tab;
 } HHInfo;
 
-BOOL InitWebBrowser(HHInfo*,HWND);
-void ReleaseWebBrowser(HHInfo*);
-void ResizeWebBrowser(HHInfo*,DWORD,DWORD);
-void DoPageAction(HHInfo*,DWORD);
+BOOL InitWebBrowser(HHInfo*,HWND) DECLSPEC_HIDDEN;
+void ReleaseWebBrowser(HHInfo*) DECLSPEC_HIDDEN;
+void ResizeWebBrowser(HHInfo*,DWORD,DWORD) DECLSPEC_HIDDEN;
+void DoPageAction(HHInfo*,DWORD) DECLSPEC_HIDDEN;
 
-void InitContent(HHInfo*);
-void ReleaseContent(HHInfo*);
-void ActivateContentTopic(HWND,LPCWSTR,ContentItem *);
+void InitContent(HHInfo*) DECLSPEC_HIDDEN;
+void ReleaseContent(HHInfo*) DECLSPEC_HIDDEN;
+void ActivateContentTopic(HWND,LPCWSTR,ContentItem *) DECLSPEC_HIDDEN;
 
-void InitIndex(HHInfo*);
-void ReleaseIndex(HHInfo*);
+void InitIndex(HHInfo*) DECLSPEC_HIDDEN;
+void ReleaseIndex(HHInfo*) DECLSPEC_HIDDEN;
 
-CHMInfo *OpenCHM(LPCWSTR szFile);
-BOOL LoadWinTypeFromCHM(HHInfo *info);
-CHMInfo *CloseCHM(CHMInfo *pCHMInfo);
-void SetChmPath(ChmPath*,LPCWSTR,LPCWSTR);
-IStream *GetChmStream(CHMInfo*,LPCWSTR,ChmPath*);
-LPWSTR FindContextAlias(CHMInfo*,DWORD);
+CHMInfo *OpenCHM(LPCWSTR szFile) DECLSPEC_HIDDEN;
+BOOL LoadWinTypeFromCHM(HHInfo *info) DECLSPEC_HIDDEN;
+CHMInfo *CloseCHM(CHMInfo *pCHMInfo) DECLSPEC_HIDDEN;
+void SetChmPath(ChmPath*,LPCWSTR,LPCWSTR) DECLSPEC_HIDDEN;
+IStream *GetChmStream(CHMInfo*,LPCWSTR,ChmPath*) DECLSPEC_HIDDEN;
+LPWSTR FindContextAlias(CHMInfo*,DWORD) DECLSPEC_HIDDEN;
 
-HHInfo *CreateHelpViewer(LPCWSTR);
-void ReleaseHelpViewer(HHInfo*);
-BOOL NavigateToUrl(HHInfo*,LPCWSTR);
-BOOL NavigateToChm(HHInfo*,LPCWSTR,LPCWSTR);
+HHInfo *CreateHelpViewer(LPCWSTR) DECLSPEC_HIDDEN;
+void ReleaseHelpViewer(HHInfo*) DECLSPEC_HIDDEN;
+BOOL NavigateToUrl(HHInfo*,LPCWSTR) DECLSPEC_HIDDEN;
+BOOL NavigateToChm(HHInfo*,LPCWSTR,LPCWSTR) DECLSPEC_HIDDEN;
 
-void InitSearch(HHInfo *info, const char *needle);
-void ReleaseSearch(HHInfo *info);
+void InitSearch(HHInfo *info, const char *needle) DECLSPEC_HIDDEN;
+void ReleaseSearch(HHInfo *info) DECLSPEC_HIDDEN;
+
+LPCWSTR skip_schema(LPCWSTR url) DECLSPEC_HIDDEN;
 
 /* memory allocation functions */
 
@@ -261,7 +265,7 @@ static inline LPWSTR strdupAtoW(LPCSTR str)
 
 
 
-extern HINSTANCE hhctrl_hinstance;
-extern BOOL hh_process;
+extern HINSTANCE hhctrl_hinstance DECLSPEC_HIDDEN;
+extern BOOL hh_process DECLSPEC_HIDDEN;
 
 #endif

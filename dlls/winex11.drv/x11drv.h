@@ -31,9 +31,6 @@
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
-#ifdef HAVE_LIBXXSHM
-# include <X11/extensions/XShm.h>
-#endif /* defined(HAVE_LIBXXSHM) */
 
 #define BOOL X_BOOL
 #define BYTE X_BYTE
@@ -59,6 +56,7 @@ typedef int Status;
 #include "wingdi.h"
 #include "winuser.h"
 #include "ddrawi.h"
+#include "wine/gdi_driver.h"
 #include "wine/list.h"
 
 #define MAX_PIXELFORMATS 8
@@ -92,13 +90,6 @@ typedef struct
     Pixmap       pixmap;
 } X_PHYSBRUSH;
 
-enum x11drv_shm_mode
-{
-    X11DRV_SHM_NONE = 0,
-    X11DRV_SHM_PIXMAP,
-    X11DRV_SHM_IMAGE,
-};
-
 typedef struct {
     int shift;
     int scale;
@@ -107,8 +98,8 @@ typedef struct {
 
 typedef struct
 {
-    ChannelShift physicalRed, physicalBlue, physicalGreen;
-    ChannelShift logicalRed, logicalBlue, logicalGreen;
+    ChannelShift physicalRed, physicalGreen, physicalBlue;
+    ChannelShift logicalRed, logicalGreen, logicalBlue;
 } ColorShifts;
 
   /* X physical bitmap */
@@ -117,34 +108,19 @@ typedef struct
     HBITMAP      hbitmap;
     Pixmap       pixmap;
     XID          glxpixmap;
-    int          pixmap_depth;
-    ColorShifts  pixmap_color_shifts;
-    /* the following fields are only used for DIB section bitmaps */
-    int          status, p_status;  /* mapping status */
-    XImage      *image;             /* cached XImage */
-    int         *colorMap;          /* color map info */
-    int          nColorMap;
+    int          depth;             /* depth of the X pixmap */
+    int          format;            /* color format (used by XRender) */
+    ColorShifts  color_shifts;      /* color shifts of the X pixmap */
     BOOL         trueColor;
-    BOOL         topdown;
-    CRITICAL_SECTION lock;          /* GDI access lock */
-    enum x11drv_shm_mode shm_mode;
-#ifdef HAVE_LIBXXSHM
-    XShmSegmentInfo shminfo;        /* shared memory segment info */
-#endif
-    struct list   entry;            /* Entry in global DIB list */
-    BYTE         *base;             /* Base address */
-    SIZE_T        size;             /* Size in bytes */
 } X_PHYSBITMAP;
 
   /* X physical font */
 typedef UINT	 X_PHYSFONT;
 
-struct xrender_info;
-
   /* X physical device */
 typedef struct
 {
-    HDC           hdc;
+    struct gdi_physdev dev;
     GC            gc;          /* X Window GC */
     Drawable      drawable;
     RECT          dc_rect;       /* DC rectangle relative to drawable */
@@ -155,8 +131,6 @@ typedef struct
     X_PHYSBRUSH   brush;
     X_PHYSBITMAP *bitmap;       /* currently selected bitmap for memory DCs */
     BOOL          has_gdi_font; /* is current font a GDI font? */
-    int           backgroundPixel;
-    int           textPixel;
     int           depth;       /* bit depth of the DC */
     ColorShifts  *color_shifts; /* color shifts of the DC */
     int           exposures;   /* count of graphics exposures operations */
@@ -164,320 +138,165 @@ typedef struct
     Drawable      gl_drawable;
     Pixmap        pixmap;      /* Pixmap for a GLXPixmap gl_drawable */
     int           gl_copy;
-    struct xrender_info *xrender;
 } X11DRV_PDEVICE;
 
-struct bitblt_coords
+static inline X11DRV_PDEVICE *get_x11drv_dev( PHYSDEV dev )
 {
-    int  x;      /* original position and width */
-    int  y;
-    int  width;
-    int  height;
-    RECT visrect;   /* rectangle clipped to the visible part */
-    DWORD layout;   /* DC layout */
-};
+    return (X11DRV_PDEVICE *)dev;
+}
 
-
-extern X_PHYSBITMAP BITMAP_stock_phys_bitmap;  /* phys bitmap for the default stock bitmap */
+extern X_PHYSBITMAP BITMAP_stock_phys_bitmap DECLSPEC_HIDDEN;  /* phys bitmap for the default stock bitmap */
 
 /* Retrieve the GC used for bitmap operations */
-extern GC get_bitmap_gc(int depth);
+extern GC get_bitmap_gc(int depth) DECLSPEC_HIDDEN;
 
 /* Wine driver X11 functions */
 
-extern BOOL CDECL X11DRV_AlphaBlend( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
-                                     INT widthDst, INT heightDst,
-                                     X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc,
-                                     INT widthSrc, INT heightSrc, BLENDFUNCTION blendfn );
-extern BOOL CDECL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
-                                          FONTENUMPROCW dfeproc, LPARAM lp );
-extern LONG CDECL X11DRV_GetBitmapBits( HBITMAP hbitmap, void *bits, LONG count );
-extern BOOL CDECL X11DRV_GetCharWidth( X11DRV_PDEVICE *physDev, UINT firstChar,
-                                       UINT lastChar, LPINT buffer );
-extern BOOL CDECL X11DRV_GetTextExtentExPoint( X11DRV_PDEVICE *physDev, LPCWSTR str, INT count,
-                                               INT maxExt, LPINT lpnFit, LPINT alpDx, LPSIZE size );
-extern BOOL CDECL X11DRV_GetTextMetrics(X11DRV_PDEVICE *physDev, TEXTMETRICW *metrics);
-extern BOOL CDECL X11DRV_StretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
-                                     INT widthDst, INT heightDst,
-                                     X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc,
-                                     INT widthSrc, INT heightSrc, DWORD rop );
-extern BOOL CDECL X11DRV_LineTo( X11DRV_PDEVICE *physDev, INT x, INT y);
-extern BOOL CDECL X11DRV_Arc( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
-                              INT bottom, INT xstart, INT ystart, INT xend, INT yend );
-extern BOOL CDECL X11DRV_Pie( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
-                              INT bottom, INT xstart, INT ystart, INT xend,
-                              INT yend );
-extern BOOL CDECL X11DRV_Chord( X11DRV_PDEVICE *physDev, INT left, INT top,
-                                INT right, INT bottom, INT xstart,
-                                INT ystart, INT xend, INT yend );
-extern BOOL CDECL X11DRV_Ellipse( X11DRV_PDEVICE *physDev, INT left, INT top,
-                                  INT right, INT bottom );
-extern BOOL CDECL X11DRV_Rectangle(X11DRV_PDEVICE *physDev, INT left, INT top,
-                                   INT right, INT bottom);
-extern BOOL CDECL X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top,
-                                    INT right, INT bottom, INT ell_width,
-                                    INT ell_height );
-extern COLORREF CDECL X11DRV_SetPixel( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color );
-extern COLORREF CDECL X11DRV_GetPixel( X11DRV_PDEVICE *physDev, INT x, INT y);
-extern BOOL CDECL X11DRV_PaintRgn( X11DRV_PDEVICE *physDev, HRGN hrgn );
-extern BOOL CDECL X11DRV_Polyline( X11DRV_PDEVICE *physDev,const POINT* pt,INT count);
-extern BOOL CDECL X11DRV_Polygon( X11DRV_PDEVICE *physDev, const POINT* pt, INT count );
-extern BOOL CDECL X11DRV_PolyPolygon( X11DRV_PDEVICE *physDev, const POINT* pt,
-                                      const INT* counts, UINT polygons);
-extern BOOL CDECL X11DRV_PolyPolyline( X11DRV_PDEVICE *physDev, const POINT* pt,
-                                       const DWORD* counts, DWORD polylines);
-
-extern COLORREF CDECL X11DRV_SetBkColor( X11DRV_PDEVICE *physDev, COLORREF color );
-extern COLORREF CDECL X11DRV_SetTextColor( X11DRV_PDEVICE *physDev, COLORREF color );
-extern BOOL CDECL X11DRV_ExtFloodFill( X11DRV_PDEVICE *physDev, INT x, INT y,
-                                       COLORREF color, UINT fillType );
-extern BOOL CDECL X11DRV_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y,
-                                     UINT flags, const RECT *lprect,
-                                     LPCWSTR str, UINT count, const INT *lpDx );
-extern LONG CDECL X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count );
-extern void CDECL X11DRV_SetDeviceClipping( X11DRV_PDEVICE *physDev, HRGN vis_rgn, HRGN clip_rgn );
-extern INT CDECL X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest,
-                                           INT yDest, DWORD cx, DWORD cy,
-                                           INT xSrc, INT ySrc,
-                                           UINT startscan, UINT lines,
-                                           LPCVOID bits, const BITMAPINFO *info,
-                                           UINT coloruse );
-extern BOOL CDECL X11DRV_GetDeviceGammaRamp( X11DRV_PDEVICE *physDev, LPVOID ramp );
-extern BOOL CDECL X11DRV_SetDeviceGammaRamp( X11DRV_PDEVICE *physDev, LPVOID ramp );
+extern BOOL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
+                        INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                          INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_CopyBitmap( HBITMAP src, HBITMAP dst ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_CreateBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_DeleteBitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW dfeproc, LPARAM lp ) DECLSPEC_HIDDEN;
+extern INT X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *lprect,
+                               LPCWSTR str, UINT count, const INT *lpDx ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename ) DECLSPEC_HIDDEN;
+extern DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
+                              struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
+extern COLORREF X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
+extern UINT X11DRV_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, LPPALETTEENTRY entries ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR str, INT count, INT maxExt,
+                                         LPINT lpnFit, LPINT alpDx, LPSIZE size ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GetTextMetrics(PHYSDEV dev, TEXTMETRICW *metrics) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
+                                 void *grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_LineTo( PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_PaintRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Pie( PHYSDEV dev, INT left, INT top, INT right,
+                        INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Polyline( PHYSDEV dev,const POINT* pt,INT count) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, UINT polygons) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines) DECLSPEC_HIDDEN;
+extern DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+                              const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                              struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
+extern UINT X11DRV_RealizeDefaultPalette( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern UINT X11DRV_RealizePalette( PHYSDEV dev, HPALETTE hpal, BOOL primary ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_Rectangle(PHYSDEV dev, INT left, INT top, INT right, INT bottom) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
+                              INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
+extern HBITMAP X11DRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern HFONT X11DRV_SelectFont( PHYSDEV dev, HFONT hfont ) DECLSPEC_HIDDEN;
+extern HPEN X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern COLORREF X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
+extern COLORREF X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
+extern void X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_SetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
+extern COLORREF X11DRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_SetPixelFormat(PHYSDEV dev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
+                               PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_UnrealizePalette( HPALETTE hpal ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglCopyContext( HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask ) DECLSPEC_HIDDEN;
+extern HGLRC X11DRV_wglCreateContext( PHYSDEV dev ) DECLSPEC_HIDDEN;
+extern HGLRC X11DRV_wglCreateContextAttribsARB( PHYSDEV dev, HGLRC hShareContext, const int* attribList ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglDeleteContext( HGLRC hglrc ) DECLSPEC_HIDDEN;
+extern PROC X11DRV_wglGetProcAddress( LPCSTR proc ) DECLSPEC_HIDDEN;
+extern HDC X11DRV_wglGetPbufferDCARB( PHYSDEV dev, void *pbuffer ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglMakeContextCurrentARB( PHYSDEV draw_dev, PHYSDEV read_dev, HGLRC hglrc ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglMakeCurrent( PHYSDEV dev, HGLRC hglrc ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglSetPixelFormatWINE( PHYSDEV dev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglShareLists( HGLRC hglrc1, HGLRC hglrc2 ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglUseFontBitmapsA( PHYSDEV dev, DWORD first, DWORD count, DWORD listBase ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_wglUseFontBitmapsW( PHYSDEV dev, DWORD first, DWORD count, DWORD listBase ) DECLSPEC_HIDDEN;
 
 /* OpenGL / X11 driver functions */
-extern int CDECL X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
-		                      const PIXELFORMATDESCRIPTOR *pppfd);
-extern int CDECL X11DRV_DescribePixelFormat(X11DRV_PDEVICE *physDev,
+extern int X11DRV_ChoosePixelFormat(PHYSDEV dev,
+		                      const PIXELFORMATDESCRIPTOR *pppfd) DECLSPEC_HIDDEN;
+extern int X11DRV_DescribePixelFormat(PHYSDEV dev,
 		                        int iPixelFormat, UINT nBytes,
-					PIXELFORMATDESCRIPTOR *ppfd);
-extern int CDECL X11DRV_GetPixelFormat(X11DRV_PDEVICE *physDev);
-extern BOOL CDECL X11DRV_SwapBuffers(X11DRV_PDEVICE *physDev);
-extern void X11DRV_OpenGL_Cleanup(void);
+					PIXELFORMATDESCRIPTOR *ppfd) DECLSPEC_HIDDEN;
+extern int X11DRV_GetPixelFormat(PHYSDEV dev) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_SwapBuffers(PHYSDEV dev) DECLSPEC_HIDDEN;
+extern void X11DRV_OpenGL_Cleanup(void) DECLSPEC_HIDDEN;
 
 /* X11 driver internal functions */
 
-extern void X11DRV_Xcursor_Init(void);
-extern void X11DRV_BITMAP_Init(void);
-extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y );
+extern void X11DRV_Xcursor_Init(void) DECLSPEC_HIDDEN;
+extern void X11DRV_BITMAP_Init(void) DECLSPEC_HIDDEN;
+extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y ) DECLSPEC_HIDDEN;
+extern void X11DRV_XInput2_Init(void) DECLSPEC_HIDDEN;
 
-extern int bitmap_info_size( const BITMAPINFO * info, WORD coloruse );
-extern XImage *X11DRV_DIB_CreateXImage( int width, int height, int depth );
-extern void X11DRV_DIB_DestroyXImage( XImage *image );
-extern HGLOBAL X11DRV_DIB_CreateDIBFromBitmap(HDC hdc, HBITMAP hBmp);
-extern HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc);
-extern Pixmap X11DRV_DIB_CreatePixmapFromDIB( HGLOBAL hPackedDIB, HDC hdc );
-extern X_PHYSBITMAP *X11DRV_get_phys_bitmap( HBITMAP hbitmap );
-extern X_PHYSBITMAP *X11DRV_init_phys_bitmap( HBITMAP hbitmap );
-extern Pixmap X11DRV_get_pixmap( HBITMAP hbitmap );
+extern HBITMAP create_brush_bitmap( X11DRV_PDEVICE *physDev, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern X_PHYSBITMAP *X11DRV_get_phys_bitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern X_PHYSBITMAP *X11DRV_init_phys_bitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern X_PHYSBITMAP *X11DRV_create_phys_bitmap( HBITMAP hbitmap, const BITMAP *bitmap, int depth ) DECLSPEC_HIDDEN;
+extern Pixmap X11DRV_get_pixmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
+extern DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
+                              const struct gdi_image_bits *src_bits, struct gdi_image_bits *dst_bits,
+                              struct bitblt_coords *coords, const int *mapping, unsigned int zeropad_mask ) DECLSPEC_HIDDEN;
 
-extern RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp );
+extern RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp ) DECLSPEC_HIDDEN;
+extern BOOL add_extra_clipping_region( X11DRV_PDEVICE *dev, HRGN rgn ) DECLSPEC_HIDDEN;
+extern void restore_clipping_region( X11DRV_PDEVICE *dev ) DECLSPEC_HIDDEN;
 
-extern BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors );
-extern BOOL X11DRV_SetupGCForBrush( X11DRV_PDEVICE *physDev );
-extern BOOL X11DRV_SetupGCForText( X11DRV_PDEVICE *physDev );
-extern INT X11DRV_XWStoDS( X11DRV_PDEVICE *physDev, INT width );
-extern INT X11DRV_YWStoDS( X11DRV_PDEVICE *physDev, INT height );
+extern void execute_rop( X11DRV_PDEVICE *physdev, Pixmap src_pixmap, GC gc, const RECT *visrect, DWORD rop ) DECLSPEC_HIDDEN;
+
+extern BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_SetupGCForBrush( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_SetupGCForText( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
+extern INT X11DRV_XWStoDS( HDC hdc, INT width ) DECLSPEC_HIDDEN;
+extern INT X11DRV_YWStoDS( HDC hdc, INT height ) DECLSPEC_HIDDEN;
 
 extern const int X11DRV_XROPfunction[];
 
-extern void _XInitImageFuncPtrs(XImage *);
+extern void _XInitImageFuncPtrs(XImage *) DECLSPEC_HIDDEN;
 
-extern int client_side_with_core;
-extern int client_side_with_render;
-extern int client_side_antialias_with_core;
-extern int client_side_antialias_with_render;
-extern int using_client_side_fonts;
-extern void X11DRV_XRender_Init(void);
-extern void X11DRV_XRender_Finalize(void);
-extern BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE*, HFONT);
-extern void X11DRV_XRender_SetDeviceClipping(X11DRV_PDEVICE *physDev, const RGNDATA *data);
-extern void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE*);
-extern void X11DRV_XRender_CopyBrush(X11DRV_PDEVICE *physDev, X_PHYSBITMAP *physBitmap, int width, int height);
-extern BOOL X11DRV_XRender_ExtTextOut(X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
-				      const RECT *lprect, LPCWSTR wstr,
-				      UINT count, const INT *lpDx);
-extern BOOL X11DRV_XRender_SetPhysBitmapDepth(X_PHYSBITMAP *physBitmap, int bits_pixel, const DIBSECTION *dib);
-BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                                      Pixmap pixmap, GC gc,
-                                      const struct bitblt_coords *src, const struct bitblt_coords *dst );
-extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);
-extern BOOL XRender_AlphaBlend( X11DRV_PDEVICE *devDst, X11DRV_PDEVICE *devSrc,
-                                struct bitblt_coords *dst, struct bitblt_coords *src,
-                                BLENDFUNCTION blendfn );
+extern int client_side_with_core DECLSPEC_HIDDEN;
+extern int client_side_with_render DECLSPEC_HIDDEN;
+extern int client_side_antialias_with_core DECLSPEC_HIDDEN;
+extern int client_side_antialias_with_render DECLSPEC_HIDDEN;
+extern int using_client_side_fonts DECLSPEC_HIDDEN;
+extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
+extern void X11DRV_XRender_Finalize(void) DECLSPEC_HIDDEN;
 
-extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev);
-extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap);
+extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev) DECLSPEC_HIDDEN;
+extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap) DECLSPEC_HIDDEN;
 
 /* IME support */
-extern void IME_UnregisterClasses(void);
-extern void IME_SetOpenStatus(BOOL fOpen, BOOL force);
-extern INT IME_GetCursorPos(void);
-extern void IME_SetCursorPos(DWORD pos);
-extern void IME_UpdateAssociation(HWND focus);
+extern void IME_UnregisterClasses(void) DECLSPEC_HIDDEN;
+extern void IME_SetOpenStatus(BOOL fOpen) DECLSPEC_HIDDEN;
+extern void IME_SetCompositionStatus(BOOL fOpen) DECLSPEC_HIDDEN;
+extern INT IME_GetCursorPos(void) DECLSPEC_HIDDEN;
+extern void IME_SetCursorPos(DWORD pos) DECLSPEC_HIDDEN;
+extern void IME_UpdateAssociation(HWND focus) DECLSPEC_HIDDEN;
 extern BOOL IME_SetCompositionString(DWORD dwIndex, LPCVOID lpComp,
                                      DWORD dwCompLen, LPCVOID lpRead,
-                                     DWORD dwReadLen);
-extern void IME_SetResultString(LPWSTR lpResult, DWORD dwResultlen);
+                                     DWORD dwReadLen) DECLSPEC_HIDDEN;
+extern void IME_SetResultString(LPWSTR lpResult, DWORD dwResultlen) DECLSPEC_HIDDEN;
 
-extern void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event );
-extern void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event );
-extern void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event );
-extern void X11DRV_XDND_LeaveEvent( HWND hWnd, XClientMessageEvent *event );
-
-/* exported dib functions for now */
-
-/* DIB Section sync state */
-enum { DIB_Status_None, DIB_Status_InSync, DIB_Status_GdiMod, DIB_Status_AppMod };
-
-typedef struct {
-    void (*Convert_5x5_asis)(int width, int height,
-                             const void* srcbits, int srclinebytes,
-                             void* dstbits, int dstlinebytes);
-    void (*Convert_555_reverse)(int width, int height,
-                                const void* srcbits, int srclinebytes,
-                                void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_565_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_565_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_888_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_888_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_0888_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_555_to_0888_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_5x5_to_any0888)(int width, int height,
-                                   const void* srcbits, int srclinebytes,
-                                   WORD rsrc, WORD gsrc, WORD bsrc,
-                                   void* dstbits, int dstlinebytes,
-                                   DWORD rdst, DWORD gdst, DWORD bdst);
-    void (*Convert_565_reverse)(int width, int height,
-                                const void* srcbits, int srclinebytes,
-                                void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_555_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_555_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_888_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_888_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_0888_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_565_to_0888_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_888_asis)(int width, int height,
-                             const void* srcbits, int srclinebytes,
-                             void* dstbits, int dstlinebytes);
-    void (*Convert_888_reverse)(int width, int height,
-                                const void* srcbits, int srclinebytes,
-                                void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_555_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_555_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_565_asis)(int width, int height,
-                                    const void* srcbits, int srclinebytes,
-                                    void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_565_reverse)(int width, int height,
-                                       const void* srcbits, int srclinebytes,
-                                       void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_0888_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_888_to_0888_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_rgb888_to_any0888)(int width, int height,
-                                      const void* srcbits, int srclinebytes,
-                                      void* dstbits, int dstlinebytes,
-                                      DWORD rdst, DWORD gdst, DWORD bdst);
-    void (*Convert_bgr888_to_any0888)(int width, int height,
-                                      const void* srcbits, int srclinebytes,
-                                      void* dstbits, int dstlinebytes,
-                                      DWORD rdst, DWORD gdst, DWORD bdst);
-    void (*Convert_0888_asis)(int width, int height,
-                              const void* srcbits, int srclinebytes,
-                              void* dstbits, int dstlinebytes);
-    void (*Convert_0888_reverse)(int width, int height,
-                                 const void* srcbits, int srclinebytes,
-                                 void* dstbits, int dstlinebytes);
-    void (*Convert_0888_any)(int width, int height,
-                             const void* srcbits, int srclinebytes,
-                             DWORD rsrc, DWORD gsrc, DWORD bsrc,
-                             void* dstbits, int dstlinebytes,
-                             DWORD rdst, DWORD gdst, DWORD bdst);
-    void (*Convert_0888_to_555_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_0888_to_555_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_0888_to_565_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_0888_to_565_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_any0888_to_5x5)(int width, int height,
-                                   const void* srcbits, int srclinebytes,
-                                   DWORD rsrc, DWORD gsrc, DWORD bsrc,
-                                   void* dstbits, int dstlinebytes,
-                                   WORD rdst, WORD gdst, WORD bdst);
-    void (*Convert_0888_to_888_asis)(int width, int height,
-                                     const void* srcbits, int srclinebytes,
-                                     void* dstbits, int dstlinebytes);
-    void (*Convert_0888_to_888_reverse)(int width, int height,
-                                        const void* srcbits, int srclinebytes,
-                                        void* dstbits, int dstlinebytes);
-    void (*Convert_any0888_to_rgb888)(int width, int height,
-                                      const void* srcbits, int srclinebytes,
-                                      DWORD rsrc, DWORD gsrc, DWORD bsrc,
-                                      void* dstbits, int dstlinebytes);
-    void (*Convert_any0888_to_bgr888)(int width, int height,
-                                      const void* srcbits, int srclinebytes,
-                                      DWORD rsrc, DWORD gsrc, DWORD bsrc,
-                                      void* dstbits, int dstlinebytes);
-} dib_conversions;
-
-extern const dib_conversions dib_normal, dib_src_byteswap, dib_dst_byteswap;
-
-extern INT X11DRV_DIB_MaskToShift(DWORD mask);
-extern INT X11DRV_CoerceDIBSection(X11DRV_PDEVICE *physDev,INT);
-extern INT X11DRV_LockDIBSection(X11DRV_PDEVICE *physDev,INT);
-extern void X11DRV_UnlockDIBSection(X11DRV_PDEVICE *physDev,BOOL);
-
-extern void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib);
-extern void X11DRV_DIB_CopyDIBSection(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                                      DWORD xSrc, DWORD ySrc, DWORD xDest, DWORD yDest,
-                                      DWORD width, DWORD height);
-struct _DCICMD;
-extern INT X11DRV_DCICommand(INT cbInput, const struct _DCICMD *lpCmd, LPVOID lpOutData);
+extern void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_XDND_LeaveEvent( HWND hWnd, XClientMessageEvent *event ) DECLSPEC_HIDDEN;
 
 /**************************************************************************
  * X11 GDI driver
  */
 
-extern void X11DRV_GDI_Finalize(void);
+extern void X11DRV_GDI_Finalize(void) DECLSPEC_HIDDEN;
 
-extern Display *gdi_display;  /* display to use for all GDI functions */
+extern Display *gdi_display DECLSPEC_HIDDEN;  /* display to use for all GDI functions */
 
 /* X11 GDI palette driver */
 
@@ -487,26 +306,24 @@ extern Display *gdi_display;  /* display to use for all GDI functions */
 #define X11DRV_PALETTE_PRIVATE  0x1000 /* private colormap, identity mapping */
 #define X11DRV_PALETTE_WHITESET 0x2000
 
-extern Colormap X11DRV_PALETTE_PaletteXColormap;
-extern UINT16 X11DRV_PALETTE_PaletteFlags;
+extern Colormap X11DRV_PALETTE_PaletteXColormap DECLSPEC_HIDDEN;
+extern UINT16 X11DRV_PALETTE_PaletteFlags DECLSPEC_HIDDEN;
 
-extern int *X11DRV_PALETTE_PaletteToXPixel;
-extern int *X11DRV_PALETTE_XPixelToPalette;
-extern ColorShifts X11DRV_PALETTE_default_shifts;
+extern int *X11DRV_PALETTE_PaletteToXPixel DECLSPEC_HIDDEN;
+extern int *X11DRV_PALETTE_XPixelToPalette DECLSPEC_HIDDEN;
+extern ColorShifts X11DRV_PALETTE_default_shifts DECLSPEC_HIDDEN;
 
-extern int X11DRV_PALETTE_mapEGAPixel[16];
+extern int X11DRV_PALETTE_mapEGAPixel[16] DECLSPEC_HIDDEN;
 
-extern int X11DRV_PALETTE_Init(void);
-extern void X11DRV_PALETTE_Cleanup(void);
-extern BOOL X11DRV_IsSolidColor(COLORREF color);
+extern int X11DRV_PALETTE_Init(void) DECLSPEC_HIDDEN;
+extern void X11DRV_PALETTE_Cleanup(void) DECLSPEC_HIDDEN;
+extern BOOL X11DRV_IsSolidColor(COLORREF color) DECLSPEC_HIDDEN;
 
-extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel);
-extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color);
-extern COLORREF X11DRV_PALETTE_GetColor( X11DRV_PDEVICE *physDev, COLORREF color );
-extern int X11DRV_PALETTE_LookupPixel(ColorShifts *shifts, COLORREF color);
-extern void X11DRV_PALETTE_ComputeColorShifts(ColorShifts *shifts, unsigned long redMask, unsigned long greenMask, unsigned long blueMask);
-
-extern unsigned int depth_to_bpp( unsigned int depth );
+extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel) DECLSPEC_HIDDEN;
+extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color) DECLSPEC_HIDDEN;
+extern COLORREF X11DRV_PALETTE_GetColor( X11DRV_PDEVICE *physDev, COLORREF color ) DECLSPEC_HIDDEN;
+extern int X11DRV_PALETTE_LookupPixel(ColorShifts *shifts, COLORREF color) DECLSPEC_HIDDEN;
+extern void X11DRV_PALETTE_ComputeColorShifts(ColorShifts *shifts, unsigned long redMask, unsigned long greenMask, unsigned long blueMask) DECLSPEC_HIDDEN;
 
 /* GDI escapes */
 
@@ -553,11 +370,16 @@ struct x11drv_thread_data
     HWND     last_xic_hwnd;        /* last xic window */
     XFontSet font_set;             /* international text drawing font set */
     Window   selection_wnd;        /* window used for selection interactions */
+    unsigned long warp_serial;     /* serial number of last pointer warp request */
+    Window   clip_window;          /* window used for cursor clipping */
+    HWND     clip_hwnd;            /* message window stored in desktop while clipping is active */
+    DWORD    clip_reset;           /* time when clipping was last reset */
     HKL      kbd_layout;           /* active keyboard layout */
+    enum { xi_unavailable = -1, xi_unknown, xi_disabled, xi_enabled } xi2_state; /* XInput2 state */
 };
 
-extern struct x11drv_thread_data *x11drv_init_thread_data(void);
-extern DWORD thread_data_tls_index;
+extern struct x11drv_thread_data *x11drv_init_thread_data(void) DECLSPEC_HIDDEN;
+extern DWORD thread_data_tls_index DECLSPEC_HIDDEN;
 
 static inline struct x11drv_thread_data *x11drv_thread_data(void)
 {
@@ -585,29 +407,35 @@ static inline size_t get_property_size( int format, unsigned long count )
     return count * (format / 8);
 }
 
-extern Visual *visual;
-extern Window root_window;
-extern unsigned int screen_width;
-extern unsigned int screen_height;
-extern unsigned int screen_bpp;
-extern unsigned int screen_depth;
-extern RECT virtual_screen_rect;
-extern unsigned int text_caps;
-extern int dxgrab;
-extern int use_xkb;
-extern int use_take_focus;
-extern int use_primary_selection;
-extern int use_system_cursors;
-extern int show_systray;
-extern int usexcomposite;
-extern int managed_mode;
-extern int decorated_mode;
-extern int private_color_map;
-extern int primary_monitor;
-extern int copy_default_colors;
-extern int alloc_system_colors;
-extern int xrender_error_base;
-extern HMODULE x11drv_module;
+extern Visual *visual DECLSPEC_HIDDEN;
+extern XPixmapFormatValues **pixmap_formats DECLSPEC_HIDDEN;
+extern Window root_window DECLSPEC_HIDDEN;
+extern int clipping_cursor DECLSPEC_HIDDEN;
+extern unsigned int screen_width DECLSPEC_HIDDEN;
+extern unsigned int screen_height DECLSPEC_HIDDEN;
+extern unsigned int screen_bpp DECLSPEC_HIDDEN;
+extern unsigned int screen_depth DECLSPEC_HIDDEN;
+extern RECT virtual_screen_rect DECLSPEC_HIDDEN;
+extern unsigned int text_caps DECLSPEC_HIDDEN;
+extern int use_xkb DECLSPEC_HIDDEN;
+extern int usexrandr DECLSPEC_HIDDEN;
+extern int usexvidmode DECLSPEC_HIDDEN;
+extern BOOL ximInComposeMode DECLSPEC_HIDDEN;
+extern int use_take_focus DECLSPEC_HIDDEN;
+extern int use_primary_selection DECLSPEC_HIDDEN;
+extern int use_system_cursors DECLSPEC_HIDDEN;
+extern int show_systray DECLSPEC_HIDDEN;
+extern int grab_pointer DECLSPEC_HIDDEN;
+extern int grab_fullscreen DECLSPEC_HIDDEN;
+extern int usexcomposite DECLSPEC_HIDDEN;
+extern int managed_mode DECLSPEC_HIDDEN;
+extern int decorated_mode DECLSPEC_HIDDEN;
+extern int private_color_map DECLSPEC_HIDDEN;
+extern int primary_monitor DECLSPEC_HIDDEN;
+extern int copy_default_colors DECLSPEC_HIDDEN;
+extern int alloc_system_colors DECLSPEC_HIDDEN;
+extern int xrender_error_base DECLSPEC_HIDDEN;
+extern HMODULE x11drv_module DECLSPEC_HIDDEN;
 
 /* atoms */
 
@@ -709,8 +537,8 @@ enum x11drv_atoms
     NB_XATOMS
 };
 
-extern Atom X11DRV_Atoms[NB_XATOMS - FIRST_XATOM];
-extern Atom systray_atom;
+extern Atom X11DRV_Atoms[NB_XATOMS - FIRST_XATOM] DECLSPEC_HIDDEN;
+extern Atom systray_atom DECLSPEC_HIDDEN;
 
 #define x11drv_atom(name) (X11DRV_Atoms[XATOM_##name - FIRST_XATOM])
 
@@ -718,20 +546,25 @@ extern Atom systray_atom;
 
 typedef void (*x11drv_event_handler)( HWND hwnd, XEvent *event );
 
-extern void X11DRV_register_event_handler( int type, x11drv_event_handler handler );
+extern void X11DRV_register_event_handler( int type, x11drv_event_handler handler, const char *name ) DECLSPEC_HIDDEN;
 
-extern void X11DRV_ButtonPress( HWND hwnd, XEvent *event );
-extern void X11DRV_ButtonRelease( HWND hwnd, XEvent *event );
-extern void X11DRV_MotionNotify( HWND hwnd, XEvent *event );
-extern void X11DRV_EnterNotify( HWND hwnd, XEvent *event );
-extern void X11DRV_KeyEvent( HWND hwnd, XEvent *event );
-extern void X11DRV_KeymapNotify( HWND hwnd, XEvent *event );
-extern void X11DRV_DestroyNotify( HWND hwnd, XEvent *event );
-extern void X11DRV_SelectionRequest( HWND hWnd, XEvent *event );
-extern void X11DRV_SelectionClear( HWND hWnd, XEvent *event );
-extern void X11DRV_MappingNotify( HWND hWnd, XEvent *event );
+extern void X11DRV_ButtonPress( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_ButtonRelease( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_MotionNotify( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_EnterNotify( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_KeyEvent( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_KeymapNotify( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_DestroyNotify( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_SelectionRequest( HWND hWnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_SelectionClear( HWND hWnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_MappingNotify( HWND hWnd, XEvent *event ) DECLSPEC_HIDDEN;
+extern void X11DRV_GenericEvent( HWND hwnd, XEvent *event ) DECLSPEC_HIDDEN;
 
-extern DWORD EVENT_x11_time_to_win32_time(Time time);
+extern int xinput2_opcode DECLSPEC_HIDDEN;
+extern Bool (*pXGetEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
+extern void (*pXFreeEventData)( Display *display, XEvent /*XGenericEventCookie*/ *event ) DECLSPEC_HIDDEN;
+
+extern DWORD EVENT_x11_time_to_win32_time(Time time) DECLSPEC_HIDDEN;
 
 /* X11 driver private messages, must be in the range 0x80001000..0x80001fff */
 enum x11drv_window_messages
@@ -740,7 +573,8 @@ enum x11drv_window_messages
     WM_X11DRV_SET_WIN_FORMAT,
     WM_X11DRV_SET_WIN_REGION,
     WM_X11DRV_RESIZE_DESKTOP,
-    WM_X11DRV_SET_CURSOR
+    WM_X11DRV_SET_CURSOR,
+    WM_X11DRV_CLIP_CURSOR
 };
 
 /* _NET_WM_STATE properties that we keep track of */
@@ -770,7 +604,6 @@ struct x11drv_win_data
     RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
     RECT        client_rect;    /* client area relative to parent */
     XIC         xic;            /* X input context */
-    HCURSOR     cursor;         /* current cursor */
     XWMHints   *wm_hints;       /* window manager hints */
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
@@ -785,24 +618,25 @@ struct x11drv_win_data
     HBITMAP     hWMIconMask;
 };
 
-extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd );
-extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd );
-extern Window X11DRV_get_whole_window( HWND hwnd );
-extern XIC X11DRV_get_ic( HWND hwnd );
+extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd ) DECLSPEC_HIDDEN;
+extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd ) DECLSPEC_HIDDEN;
+extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
+extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
 
-extern int pixelformat_from_fbconfig_id( XID fbconfig_id );
-extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id );
-extern void mark_drawable_dirty( Drawable old, Drawable new );
-extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent );
-extern void flush_gl_drawable( X11DRV_PDEVICE *physDev );
+extern int pixelformat_from_fbconfig_id( XID fbconfig_id ) DECLSPEC_HIDDEN;
+extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id ) DECLSPEC_HIDDEN;
+extern void mark_drawable_dirty( Drawable old, Drawable new ) DECLSPEC_HIDDEN;
+extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent ) DECLSPEC_HIDDEN;
+extern void flush_gl_drawable( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
 
-extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set );
-extern void update_user_time( Time time );
-extern void update_net_wm_states( Display *display, struct x11drv_win_data *data );
-extern void make_window_embedded( Display *display, struct x11drv_win_data *data );
-extern void change_systray_owner( Display *display, Window systray_window );
-extern void update_systray_balloon_position(void);
-extern HWND create_foreign_window( Display *display, Window window );
+extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set ) DECLSPEC_HIDDEN;
+extern Window init_clip_window(void) DECLSPEC_HIDDEN;
+extern void update_user_time( Time time ) DECLSPEC_HIDDEN;
+extern void update_net_wm_states( Display *display, struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
+extern void make_window_embedded( Display *display, struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
+extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
+extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
+extern HWND create_foreign_window( Display *display, Window window ) DECLSPEC_HIDDEN;
 
 static inline void mirror_rect( const RECT *window_rect, RECT *rect )
 {
@@ -812,43 +646,59 @@ static inline void mirror_rect( const RECT *window_rect, RECT *rect )
     rect->right = width - tmp;
 }
 
-/* X context to associate a hwnd to an X window */
-extern XContext winContext;
+static inline BOOL is_window_rect_mapped( const RECT *rect )
+{
+    return (rect->left < virtual_screen_rect.right &&
+            rect->top < virtual_screen_rect.bottom &&
+            max( rect->right, rect->left + 1 ) > virtual_screen_rect.left &&
+            max( rect->bottom, rect->top + 1 ) > virtual_screen_rect.top);
+}
 
-extern void X11DRV_InitClipboard(void);
-extern int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow);
-extern void X11DRV_Clipboard_Cleanup(void);
-extern void X11DRV_ResetSelectionOwner(void);
-extern void CDECL X11DRV_SetFocus( HWND hwnd );
-extern void set_window_cursor( struct x11drv_win_data *data, HCURSOR handle );
-extern void sync_window_cursor( struct x11drv_win_data *data );
-extern BOOL CDECL X11DRV_ClipCursor( LPCRECT clip );
-extern void X11DRV_InitKeyboard( Display *display );
+static inline BOOL is_window_rect_fullscreen( const RECT *rect )
+{
+    return (rect->left <= 0 && rect->right >= screen_width &&
+            rect->top <= 0 && rect->bottom >= screen_height);
+}
+
+/* X context to associate a hwnd to an X window */
+extern XContext winContext DECLSPEC_HIDDEN;
+
+extern void X11DRV_InitClipboard(void) DECLSPEC_HIDDEN;
+extern int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow) DECLSPEC_HIDDEN;
+extern void X11DRV_Clipboard_Cleanup(void) DECLSPEC_HIDDEN;
+extern void X11DRV_ResetSelectionOwner(void) DECLSPEC_HIDDEN;
+extern void CDECL X11DRV_SetFocus( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void set_window_cursor( Window window, HCURSOR handle ) DECLSPEC_HIDDEN;
+extern void sync_window_cursor( Window window ) DECLSPEC_HIDDEN;
+extern LRESULT clip_cursor_notify( HWND hwnd, HWND new_clip_hwnd ) DECLSPEC_HIDDEN;
+extern void ungrab_clipping_window(void) DECLSPEC_HIDDEN;
+extern void reset_clipping_window(void) DECLSPEC_HIDDEN;
+extern BOOL clip_fullscreen_window( HWND hwnd, BOOL reset ) DECLSPEC_HIDDEN;
+extern void move_resize_window( Display *display, struct x11drv_win_data *data, int dir ) DECLSPEC_HIDDEN;
+extern void X11DRV_InitKeyboard( Display *display ) DECLSPEC_HIDDEN;
 extern DWORD CDECL X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
-                                                       DWORD mask, DWORD flags );
+                                                       DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;
 
 typedef int (*x11drv_error_callback)( Display *display, XErrorEvent *event, void *arg );
 
-extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg );
-extern int X11DRV_check_error(void);
-extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect );
-extern void xinerama_init( unsigned int width, unsigned int height );
+extern void X11DRV_expect_error( Display *display, x11drv_error_callback callback, void *arg ) DECLSPEC_HIDDEN;
+extern int X11DRV_check_error(void) DECLSPEC_HIDDEN;
+extern void X11DRV_X_to_window_rect( struct x11drv_win_data *data, RECT *rect ) DECLSPEC_HIDDEN;
+extern void xinerama_init( unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 
-extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height );
-extern void X11DRV_resize_desktop(unsigned int width, unsigned int height);
-extern void X11DRV_Settings_AddDepthModes(void);
-extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq);
-extern int X11DRV_Settings_CreateDriver(LPDDHALINFO info);
-extern LPDDHALMODEINFO X11DRV_Settings_CreateModes(unsigned int max_modes, int reserve_depths);
-unsigned int X11DRV_Settings_GetModeCount(void);
-void X11DRV_Settings_Init(void);
+extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
+extern void X11DRV_resize_desktop(unsigned int width, unsigned int height) DECLSPEC_HIDDEN;
+extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
+extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq) DECLSPEC_HIDDEN;
+extern int X11DRV_Settings_CreateDriver(LPDDHALINFO info) DECLSPEC_HIDDEN;
+extern LPDDHALMODEINFO X11DRV_Settings_CreateModes(unsigned int max_modes, int reserve_depths) DECLSPEC_HIDDEN;
+unsigned int X11DRV_Settings_GetModeCount(void) DECLSPEC_HIDDEN;
+void X11DRV_Settings_Init(void) DECLSPEC_HIDDEN;
 LPDDHALMODEINFO X11DRV_Settings_SetHandlers(const char *name,
                                             int (*pNewGCM)(void),
                                             LONG (*pNewSCM)(int),
                                             unsigned int nmodes,
-                                            int reserve_depths);
-
-extern void X11DRV_DDHAL_SwitchMode(DWORD dwModeIndex, LPVOID fb_addr, LPVIDMEM fb_mem);
+                                            int reserve_depths) DECLSPEC_HIDDEN;
 
 /* XIM support */
 extern BOOL X11DRV_InitXIM( const char *input_style ) DECLSPEC_HIDDEN;
@@ -856,10 +706,7 @@ extern XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data) DECLSPEC_HIDDE
 extern void X11DRV_SetupXIM(void) DECLSPEC_HIDDEN;
 extern void X11DRV_XIMLookupChars( const char *str, DWORD count ) DECLSPEC_HIDDEN;
 extern void X11DRV_ForceXIMReset(HWND hwnd) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_SetPreeditState(HWND hwnd, BOOL fOpen);
-
-/* FIXME: private functions imported from user32 */
-extern LRESULT HOOK_CallHooks( INT id, INT code, WPARAM wparam, LPARAM lparam, BOOL unicode );
+extern void X11DRV_SetPreeditState(HWND hwnd, BOOL fOpen) DECLSPEC_HIDDEN;
 
 #define XEMBED_MAPPED  (1 << 0)
 

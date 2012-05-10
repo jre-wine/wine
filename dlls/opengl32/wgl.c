@@ -45,16 +45,28 @@
 WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 WINE_DECLARE_DEBUG_CHANNEL(opengl);
 
-typedef struct wine_wgl_s {
-    PROC WINAPI  (*p_wglGetProcAddress)(LPCSTR  lpszProc);
+static struct
+{
+    PROC  (WINAPI *p_wglGetProcAddress)(LPCSTR  lpszProc);
+    BOOL  (WINAPI *p_SetPixelFormat)(HDC hdc, INT iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd);
+    BOOL  (WINAPI *p_wglCopyContext)(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask);
+    BOOL  (WINAPI *p_wglDeleteContext)(HGLRC hglrc);
+    BOOL  (WINAPI *p_wglMakeCurrent)(HDC hdc, HGLRC hglrc);
+    BOOL  (WINAPI *p_wglShareLists)(HGLRC hglrc1, HGLRC hglrc2);
+    BOOL  (WINAPI *p_wglUseFontBitmapsA)(HDC hdc, DWORD first, DWORD count, DWORD listBase);
+    BOOL  (WINAPI *p_wglUseFontBitmapsW)(HDC hdc, DWORD first, DWORD count, DWORD listBase);
+    HDC   (WINAPI *p_wglGetCurrentDC)(void);
+    HGLRC (WINAPI *p_wglCreateContext)(HDC hdc);
+    HGLRC (WINAPI *p_wglGetCurrentContext)(void);
+    INT   (WINAPI *p_ChoosePixelFormat)(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd);
+    INT   (WINAPI *p_DescribePixelFormat)(HDC hdc, INT iPixelFormat, UINT nBytes, LPPIXELFORMATDESCRIPTOR ppfd);
+    INT   (WINAPI *p_GetPixelFormat)(HDC hdc);
 
-    void WINAPI  (*p_wglGetIntegerv)(GLenum pname, GLint* params);
-    void WINAPI  (*p_wglFinish)(void);
-    void WINAPI  (*p_wglFlush)(void);
-} wine_wgl_t;
-
-/** global wgl object */
-static wine_wgl_t wine_wgl;
+    /* Interal WGL function */
+    void  (WINAPI *p_wglGetIntegerv)(GLenum pname, GLint* params);
+    void  (WINAPI *p_wglFinish)(void);
+    void  (WINAPI *p_wglFlush)(void);
+} wine_wgl;
 
 #ifdef SONAME_LIBGLU
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f;
@@ -69,22 +81,6 @@ MAKE_FUNCPTR(gluTessVertex)
 #undef MAKE_FUNCPTR
 #endif /* SONAME_LIBGLU */
 
-/* x11drv GDI escapes */
-#define X11DRV_ESCAPE 6789
-enum x11drv_escape_codes
-{
-    X11DRV_GET_DISPLAY,         /* get X11 display for a DC */
-    X11DRV_GET_DRAWABLE,        /* get current drawable for a DC */
-    X11DRV_GET_FONT,            /* get current X font for a DC */
-    X11DRV_SET_DRAWABLE,        /* set current drawable for a DC */
-    X11DRV_START_EXPOSURES,     /* start graphics exposures */
-    X11DRV_END_EXPOSURES,       /* end graphics exposures */
-    X11DRV_GET_DCE,             /* get the DCE pointer */
-    X11DRV_SET_DCE,             /* set the DCE pointer */
-    X11DRV_GET_GLX_DRAWABLE,    /* get current glx drawable for a DC */
-    X11DRV_SYNC_PIXMAP          /* sync the dibsection to its pixmap */
-};
-
 void (*wine_tsx11_lock_ptr)(void) = NULL;
 void (*wine_tsx11_unlock_ptr)(void) = NULL;
 
@@ -94,27 +90,112 @@ static void* libglu_handle = NULL;
 static char* internal_gl_disabled_extensions = NULL;
 static char* internal_gl_extensions = NULL;
 
-typedef struct wine_glcontext {
-  HDC hdc;
-  BOOL do_escape;
-  /* ... more stuff here */
-} Wine_GLContext;
+const GLubyte * WINAPI wine_glGetString( GLenum name );
 
-void enter_gl(void)
+/***********************************************************************
+ *		 wglSetPixelFormat(OPENGL32.@)
+ */
+BOOL WINAPI wglSetPixelFormat( HDC hdc, INT iPixelFormat,
+                               const PIXELFORMATDESCRIPTOR *ppfd)
 {
-    Wine_GLContext *curctx = NtCurrentTeb()->glContext;
-
-    if (curctx && curctx->do_escape)
-    {
-        enum x11drv_escape_codes escape = X11DRV_SYNC_PIXMAP;
-        ExtEscape(curctx->hdc, X11DRV_ESCAPE, sizeof(escape), (LPCSTR)&escape, 0, NULL);
-    }
-
-    wine_tsx11_lock_ptr();
-    return;
+  return wine_wgl.p_SetPixelFormat(hdc, iPixelFormat, ppfd);
 }
 
-const GLubyte * WINAPI wine_glGetString( GLenum name );
+/***********************************************************************
+ *		wglCopyContext (OPENGL32.@)
+ */
+BOOL WINAPI wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask)
+{
+  return wine_wgl.p_wglCopyContext(hglrcSrc, hglrcDst, mask);
+}
+
+/***********************************************************************
+ *		wglDeleteContext (OPENGL32.@)
+ */
+BOOL WINAPI wglDeleteContext(HGLRC hglrc)
+{
+  return wine_wgl.p_wglDeleteContext(hglrc);
+}
+
+/***********************************************************************
+ *		wglMakeCurrent (OPENGL32.@)
+ */
+BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC hglrc)
+{
+  return wine_wgl.p_wglMakeCurrent(hdc, hglrc);
+}
+
+/***********************************************************************
+ *		wglShareLists (OPENGL32.@)
+ */
+BOOL WINAPI wglShareLists(HGLRC hglrc1, HGLRC hglrc2)
+{
+  return wine_wgl.p_wglShareLists(hglrc1, hglrc2);
+}
+
+/***********************************************************************
+ *		wglUseFontBitmapsA (OPENGL32.@)
+ */
+BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase)
+{
+  return wine_wgl.p_wglUseFontBitmapsA(hdc, first, count, listBase);
+}
+
+/***********************************************************************
+ *		wglUseFontBitmapsW (OPENGL32.@)
+ */
+BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase)
+{
+  return wine_wgl.p_wglUseFontBitmapsW(hdc, first, count, listBase);
+}
+
+/***********************************************************************
+ *		wglGetCurrentDC (OPENGL32.@)
+ */
+HDC WINAPI wglGetCurrentDC(void)
+{
+  return wine_wgl.p_wglGetCurrentDC();
+}
+
+/***********************************************************************
+ *		wglCreateContext (OPENGL32.@)
+ */
+HGLRC WINAPI wglCreateContext(HDC hdc)
+{
+  return wine_wgl.p_wglCreateContext(hdc);
+}
+
+/***********************************************************************
+ *		wglGetCurrentContext (OPENGL32.@)
+ */
+HGLRC WINAPI wglGetCurrentContext(void)
+{
+  return wine_wgl.p_wglGetCurrentContext();
+}
+
+/***********************************************************************
+ *		wglChoosePixelFormat (OPENGL32.@)
+ */
+INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
+{
+  return wine_wgl.p_ChoosePixelFormat(hdc, ppfd);
+}
+
+/***********************************************************************
+ *		wglDescribePixelFormat (OPENGL32.@)
+ */
+INT WINAPI wglDescribePixelFormat(HDC hdc, INT iPixelFormat, UINT nBytes,
+                                LPPIXELFORMATDESCRIPTOR ppfd)
+{
+  return wine_wgl.p_DescribePixelFormat(hdc, iPixelFormat, nBytes, ppfd);
+}
+/***********************************************************************
+ *		wglGetPixelFormat (OPENGL32.@)
+ */
+INT WINAPI wglGetPixelFormat(HDC hdc)
+{
+  return wine_wgl.p_GetPixelFormat(hdc);
+}
 
 /***********************************************************************
  *		wglCreateLayerContext (OPENGL32.@)
@@ -345,7 +426,7 @@ static void *load_libglu(void)
         return NULL;
     }
 
-#define LOAD_FUNCPTR(f) if((p##f = (void*)wine_dlsym(handle, #f, NULL, 0)) == NULL) goto sym_not_found;
+#define LOAD_FUNCPTR(f) if((p##f = wine_dlsym(handle, #f, NULL, 0)) == NULL) goto sym_not_found;
 LOAD_FUNCPTR(gluNewTess)
 LOAD_FUNCPTR(gluDeleteTess)
 LOAD_FUNCPTR(gluTessBeginContour)
@@ -720,6 +801,19 @@ static BOOL process_attach(void)
   wine_tsx11_unlock_ptr = (void *)GetProcAddress( mod_x11, "wine_tsx11_unlock" );
 
   wine_wgl.p_wglGetProcAddress = (void *)GetProcAddress(mod_gdi32, "wglGetProcAddress");
+  wine_wgl.p_SetPixelFormat = (void *)GetProcAddress(mod_gdi32, "SetPixelFormat");
+  wine_wgl.p_wglCopyContext = (void *)GetProcAddress(mod_gdi32, "wglCopyContext");
+  wine_wgl.p_wglDeleteContext = (void *)GetProcAddress(mod_gdi32, "wglDeleteContext");
+  wine_wgl.p_wglMakeCurrent = (void *)GetProcAddress(mod_gdi32, "wglMakeCurrent");
+  wine_wgl.p_wglShareLists = (void *)GetProcAddress(mod_gdi32, "wglShareLists");
+  wine_wgl.p_wglUseFontBitmapsA = (void *)GetProcAddress(mod_gdi32, "wglUseFontBitmapsA");
+  wine_wgl.p_wglUseFontBitmapsW = (void *)GetProcAddress(mod_gdi32, "wglUseFontBitmapsW");
+  wine_wgl.p_wglGetCurrentDC = (void *)GetProcAddress(mod_gdi32, "wglGetCurrentDC");
+  wine_wgl.p_wglCreateContext = (void *)GetProcAddress(mod_gdi32, "wglCreateContext");
+  wine_wgl.p_wglGetCurrentContext = (void *)GetProcAddress(mod_gdi32, "wglGetCurrentContext");
+  wine_wgl.p_ChoosePixelFormat = (void *)GetProcAddress(mod_gdi32, "ChoosePixelFormat");
+  wine_wgl.p_DescribePixelFormat = (void *)GetProcAddress(mod_gdi32, "DescribePixelFormat");
+  wine_wgl.p_GetPixelFormat = (void *)GetProcAddress(mod_gdi32, "GetPixelFormat");
 
   /* Interal WGL function */
   wine_wgl.p_wglGetIntegerv = (void *)wine_wgl.p_wglGetProcAddress("wglGetIntegerv");

@@ -30,9 +30,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
-#ifdef HAVE_SYS_ERRNO_H
-# include <sys/errno.h>
-#endif
 #include <sys/time.h>
 #include <sys/types.h>
 #ifdef HAVE_SYS_SOCKET_H
@@ -777,7 +774,7 @@ static int accept_into_socket( struct sock *sock, struct sock *acceptsock )
     acceptsock->family  = sock->family;
     acceptsock->wparam  = 0;
     acceptsock->deferred = NULL;
-    if (acceptsock->fd) release_object( acceptsock->fd );
+    release_object( acceptsock->fd );
     acceptsock->fd = newfd;
 
     clear_error();

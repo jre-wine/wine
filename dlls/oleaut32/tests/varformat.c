@@ -39,6 +39,7 @@
 
 static HMODULE hOleaut32;
 
+static HRESULT (WINAPI *pVarBstrCmp)(BSTR,BSTR,LCID,ULONG);
 static HRESULT (WINAPI *pVarFormatNumber)(LPVARIANT,int,int,int,int,ULONG,BSTR*);
 static HRESULT (WINAPI *pVarFormat)(LPVARIANT,LPOLESTR,int,int,ULONG,BSTR*);
 static HRESULT (WINAPI *pVarWeekdayName)(int,int,int,ULONG,BSTR*);
@@ -51,7 +52,7 @@ static HRESULT (WINAPI *pVarWeekdayName)(int,int,int,ULONG,BSTR*);
 
 /* Get a conversion function ptr, return if function not available */
 #define CHECKPTR(func) p##func = (void*)GetProcAddress(hOleaut32, #func); \
-  if (!p##func) { trace("function " # func " not available, not testing it\n"); return; }
+  if (!p##func) { win_skip("function " # func " not available, not testing it\n"); return; }
 
 static inline int strcmpW( const WCHAR *str1, const WCHAR *str2 )
 {
@@ -255,7 +256,7 @@ static void test_VarFormat(void)
 
   if (PRIMARYLANGID(LANGIDFROMLCID(GetUserDefaultLCID())) != LANG_ENGLISH)
   {
-    skip("Skipping VarFormat tests for non english language\n");
+    skip("Skipping VarFormat tests for non English language\n");
     return;
   }
   GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_SDECIMAL, buff, sizeof(buff)/sizeof(char));
@@ -310,10 +311,10 @@ static void test_VarFormat(void)
   }
 
   /* Named time formats */
-  GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_STIME, buff, sizeof(buff)/sizeof(char));
-  if (buff[0] != ':' || buff[1])
+  GetLocaleInfoA(LOCALE_USER_DEFAULT, LOCALE_STIMEFORMAT, buff, sizeof(buff)/sizeof(char));
+  if (strcmp(buff, "h:mm:ss tt"))
   {
-    skip("Skipping namedtime tests as time separator is '%s'\n", buff);
+    skip("Skipping named time tests as time format is '%s'\n", buff);
   }
   else
   {
@@ -525,28 +526,30 @@ static void test_VarWeekdayName(void)
      "Null pointer: expected E_INVALIDARG, got 0x%08x\n", hres);
 
   /* Check all combinations */
-  for (iWeekday = 1; iWeekday <= 7; ++iWeekday)
-  {
-    for (fAbbrev = 0; fAbbrev <= 1; ++fAbbrev)
+  pVarBstrCmp = (void*)GetProcAddress(hOleaut32, "VarBstrCmp");
+  if (pVarBstrCmp)
+    for (iWeekday = 1; iWeekday <= 7; ++iWeekday)
     {
-      /* 0 = Default, 1 = Sunday, 2 = Monday, .. */
-      for (iFirstDay = 0; iFirstDay <= 7; ++iFirstDay)
+      for (fAbbrev = 0; fAbbrev <= 1; ++fAbbrev)
       {
-        VARWDN_O(iWeekday, fAbbrev, iFirstDay, 0);
-        if (iFirstDay == 0)
-          firstDay = defaultFirstDay;
-        else
-          /* Translate from 0=Sunday to 0=Monday in the modulo 7 space */
-          firstDay = iFirstDay - 2;
-        day = (7 + iWeekday - 1 + firstDay) % 7;
-        ok(VARCMP_EQ == VarBstrCmp(out, dayNames[day][fAbbrev],
-                                   LOCALE_USER_DEFAULT, 0),
-           "VarWeekdayName(%d,%d,%d): got wrong dayname: '%s'\n",
-           iWeekday, fAbbrev, iFirstDay, buff);
-        SysFreeString(out);
+        /* 0 = Default, 1 = Sunday, 2 = Monday, .. */
+        for (iFirstDay = 0; iFirstDay <= 7; ++iFirstDay)
+        {
+          VARWDN_O(iWeekday, fAbbrev, iFirstDay, 0);
+          if (iFirstDay == 0)
+            firstDay = defaultFirstDay;
+          else
+            /* Translate from 0=Sunday to 0=Monday in the modulo 7 space */
+            firstDay = iFirstDay - 2;
+          day = (7 + iWeekday - 1 + firstDay) % 7;
+          ok(VARCMP_EQ == pVarBstrCmp(out, dayNames[day][fAbbrev],
+                                      LOCALE_USER_DEFAULT, 0),
+             "VarWeekdayName(%d,%d,%d): got wrong dayname: '%s'\n",
+             iWeekday, fAbbrev, iFirstDay, buff);
+          SysFreeString(out);
+        }
       }
     }
-  }
 
   /* Cleanup */
   for (day = 0; day <= 6; ++day)

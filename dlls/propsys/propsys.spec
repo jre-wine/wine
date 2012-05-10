@@ -28,12 +28,12 @@
 @ stub DllRegisterServer
 @ stub DllUnregisterServer
 @ stub InitPropVariantFromBooleanVector
-@ stub InitPropVariantFromBuffer
+@ stdcall InitPropVariantFromBuffer(ptr long ptr)
 @ stub InitPropVariantFromCLSID
 @ stub InitPropVariantFromDoubleVector
 @ stub InitPropVariantFromFileTime
 @ stub InitPropVariantFromFileTimeVector
-@ stub InitPropVariantFromGUIDAsString
+@ stdcall InitPropVariantFromGUIDAsString(ptr ptr)
 @ stub InitPropVariantFromInt16Vector
 @ stub InitPropVariantFromInt32Vector
 @ stub InitPropVariantFromInt64Vector
@@ -47,11 +47,11 @@
 @ stub InitPropVariantFromUInt64Vector
 @ stub InitPropVariantVectorFromPropVariant
 @ stub InitVariantFromBooleanArray
-@ stub InitVariantFromBuffer
+@ stdcall InitVariantFromBuffer(ptr long ptr)
 @ stub InitVariantFromDoubleArray
 @ stub InitVariantFromFileTime
 @ stub InitVariantFromFileTimeArray
-@ stub InitVariantFromGUIDAsString
+@ stdcall InitVariantFromGUIDAsString(ptr ptr)
 @ stub InitVariantFromInt16Array
 @ stub InitVariantFromInt32Array
 @ stub InitVariantFromInt64Array
@@ -119,7 +119,7 @@
 @ stub PropVariantToFileTime
 @ stub PropVariantToFileTimeVector
 @ stub PropVariantToFileTimeVectorAlloc
-@ stub PropVariantToGUID
+@ stdcall PropVariantToGUID(ptr ptr)
 @ stub PropVariantToInt16
 @ stub PropVariantToInt16Vector
 @ stub PropVariantToInt16VectorAlloc
@@ -175,7 +175,7 @@
 @ stub VariantToDoubleArrayAlloc
 @ stub VariantToDoubleWithDefault
 @ stub VariantToFileTime
-@ stub VariantToGUID
+@ stdcall VariantToGUID(ptr ptr)
 @ stub VariantToInt16
 @ stub VariantToInt16Array
 @ stub VariantToInt16ArrayAlloc

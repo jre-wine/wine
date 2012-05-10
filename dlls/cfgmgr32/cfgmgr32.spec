@@ -52,24 +52,26 @@
 @ stub CM_Get_Class_NameW
 @ stub CM_Get_Class_Name_ExA
 @ stub CM_Get_Class_Name_ExW
+@ stdcall CM_Get_Class_Registry_PropertyA(ptr long ptr ptr long long ptr) setupapi.CM_Get_Class_Registry_PropertyA
+@ stdcall CM_Get_Class_Registry_PropertyW(ptr long ptr ptr long long ptr) setupapi.CM_Get_Class_Registry_PropertyW
 @ stub CM_Get_Depth
 @ stub CM_Get_Depth_Ex
 @ stub CM_Get_DevNode_Registry_PropertyA
 @ stub CM_Get_DevNode_Registry_PropertyW
-@ stub CM_Get_DevNode_Registry_Property_ExA
-@ stub CM_Get_DevNode_Registry_Property_ExW
+@ stdcall CM_Get_DevNode_Registry_Property_ExA(long long ptr ptr ptr long ptr) setupapi.CM_Get_DevNode_Registry_Property_ExA
+@ stdcall CM_Get_DevNode_Registry_Property_ExW(long long ptr ptr ptr long ptr) setupapi.CM_Get_DevNode_Registry_Property_ExW
 @ stub CM_Get_DevNode_Status
 @ stub CM_Get_DevNode_Status_Ex
 @ stdcall CM_Get_Device_IDA(ptr ptr long long) setupapi.CM_Get_Device_IDA
 @ stdcall CM_Get_Device_IDW(ptr ptr long long) setupapi.CM_Get_Device_IDW
 @ stub CM_Get_Device_ID_ExA
 @ stdcall CM_Get_Device_ID_ExW(ptr ptr long long ptr) setupapi.CM_Get_Device_ID_ExW
-@ stdcall CM_Get_Device_ID_ListA(ptr ptr long long) setupapi.CM_Get_Device_ID_ListA
+@ stdcall CM_Get_Device_ID_ListA(str ptr long long) setupapi.CM_Get_Device_ID_ListA
 @ stdcall CM_Get_Device_ID_ListW(wstr ptr long long) setupapi.CM_Get_Device_ID_ListW
 @ stub CM_Get_Device_ID_List_ExA
 @ stub CM_Get_Device_ID_List_ExW
-@ stub CM_Get_Device_ID_List_SizeA
-@ stub CM_Get_Device_ID_List_SizeW
+@ stdcall CM_Get_Device_ID_List_SizeA(ptr str long) setupapi.CM_Get_Device_ID_List_SizeA
+@ stdcall CM_Get_Device_ID_List_SizeW(ptr wstr long) setupapi.CM_Get_Device_ID_List_SizeW
 @ stub CM_Get_Device_ID_List_Size_ExA
 @ stub CM_Get_Device_ID_List_Size_ExW
 @ stdcall CM_Get_Device_ID_Size(ptr ptr long) setupapi.CM_Get_Device_ID_Size
@@ -156,6 +158,8 @@
 @ stub CM_Reset_Children_Marks_Ex
 @ stub CM_Run_Detection
 @ stub CM_Run_Detection_Ex
+@ stdcall CM_Set_Class_Registry_PropertyA(ptr long ptr long long ptr) setupapi.CM_Set_Class_Registry_PropertyA
+@ stdcall CM_Set_Class_Registry_PropertyW(ptr long ptr long long ptr) setupapi.CM_Set_Class_Registry_PropertyW
 @ stub CM_Set_DevNode_Problem
 @ stub CM_Set_DevNode_Problem_Ex
 @ stub CM_Set_DevNode_Registry_PropertyA

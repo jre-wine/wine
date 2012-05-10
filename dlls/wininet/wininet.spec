@@ -222,7 +222,7 @@
 @ stdcall RetrieveUrlCacheEntryFileW(wstr ptr ptr long)
 @ stdcall RetrieveUrlCacheEntryStreamA(str ptr ptr long long)
 @ stdcall RetrieveUrlCacheEntryStreamW(wstr ptr ptr long long)
-@ stub RunOnceUrlCache
+@ stdcall RunOnceUrlCache(ptr ptr str long)
 @ stdcall SetUrlCacheConfigInfoA(ptr long)
 @ stdcall SetUrlCacheConfigInfoW(ptr long)
 @ stdcall SetUrlCacheEntryGroup(str long int64 ptr long ptr) SetUrlCacheEntryGroupA
@@ -234,9 +234,9 @@
 @ stdcall SetUrlCacheGroupAttributeW(int64 long long ptr ptr)
 @ stub SetUrlCacheHeaderData
 @ stub ShowCertificate
-@ stub ShowClientAuthCerts
+@ stdcall ShowClientAuthCerts(ptr)
 @ stub ShowSecurityInfo
-@ stub ShowX509EncodedCertificate
+@ stdcall ShowX509EncodedCertificate(ptr ptr long)
 @ stdcall UnlockUrlCacheEntryFile(str long) UnlockUrlCacheEntryFileA
 @ stdcall UnlockUrlCacheEntryFileA(str long)
 @ stdcall UnlockUrlCacheEntryFileW(wstr long)

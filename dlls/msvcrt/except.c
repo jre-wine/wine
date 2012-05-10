@@ -39,6 +39,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
 
+static MSVCRT_security_error_handler security_error_handler;
+
 /* VC++ extensions to Win32 SEH */
 typedef struct _SCOPETABLE
 {
@@ -517,6 +519,15 @@ void __stdcall _seh_longjmp_unwind(struct MSVCRT___JUMP_BUFFER *jmp)
     msvcrt_local_unwind2( (MSVCRT_EXCEPTION_FRAME *)jmp->Registration, jmp->TryLevel, (void *)jmp->Ebp );
 }
 
+/*********************************************************************
+ *		_seh_longjmp_unwind4 (MSVCRT.@)
+ */
+void __stdcall _seh_longjmp_unwind4(struct MSVCRT___JUMP_BUFFER *jmp)
+{
+    msvcrt_local_unwind4( (void *)jmp->Cookie, (MSVCRT_EXCEPTION_FRAME *)jmp->Registration,
+                          jmp->TryLevel, (void *)jmp->Ebp );
+}
+
 #elif defined(__x86_64__)
 
 /*******************************************************************
@@ -601,6 +612,15 @@ void __cdecl MSVCRT_longjmp( struct MSVCRT___JUMP_BUFFER *jmp, int retval )
         RtlUnwind( (void *)jmp->Frame, (void *)jmp->Rip, &rec, IntToPtr(retval) );
     }
     longjmp_set_regs( jmp, retval );
+}
+
+/*******************************************************************
+ *		_local_unwind (MSVCRT.@)
+ */
+void __cdecl _local_unwind( void *frame, void *target )
+{
+    CONTEXT context;
+    RtlUnwindEx( frame, target, NULL, 0, &context, NULL );
 }
 
 #endif /* __x86_64__ */
@@ -819,4 +839,16 @@ int CDECL _abnormal_termination(void)
 BOOL CDECL MSVCRT___uncaught_exception(void)
 {
     return FALSE;
+}
+
+/* _set_security_error_handler - not exported in native msvcrt, added in msvcr70 */
+MSVCRT_security_error_handler CDECL _set_security_error_handler(
+    MSVCRT_security_error_handler handler )
+{
+    MSVCRT_security_error_handler old = security_error_handler;
+
+    TRACE("(%p)\n", handler);
+
+    security_error_handler = handler;
+    return old;
 }

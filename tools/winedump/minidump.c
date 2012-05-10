@@ -267,12 +267,12 @@ void mdmp_dump(void)
                 strcat(tmp, " (");
                 if (msi->ProcessorLevel == 3 || msi->ProcessorLevel == 4)
                 {
-                    if (HIWORD(msi->ProcessorRevision) == 0xFF)
-                        sprintf(tmp + strlen(tmp), "%c%d", 'A' + HIBYTE(LOWORD(msi->ProcessorRevision)), LOBYTE(LOWORD(msi->ProcessorRevision)));
+                    if (HIBYTE(msi->ProcessorRevision) == 0xFF)
+                        sprintf(tmp + strlen(tmp), "%c%d", 'A' + ((msi->ProcessorRevision>>4)&0xf)-0x0a, msi->ProcessorRevision&0xf);
                     else
-                        sprintf(tmp + strlen(tmp), "%c%d", 'A' + HIWORD(msi->ProcessorRevision), LOWORD(msi->ProcessorRevision));
+                        sprintf(tmp + strlen(tmp), "%c%d", 'A' + HIBYTE(msi->ProcessorRevision), LOBYTE(msi->ProcessorRevision));
                 }
-                else sprintf(tmp + strlen(tmp), "%d.%d", HIWORD(msi->ProcessorRevision), LOWORD(msi->ProcessorRevision));
+                else sprintf(tmp + strlen(tmp), "%d.%d", HIBYTE(msi->ProcessorRevision), LOBYTE(msi->ProcessorRevision));
                 str = tmp;
                 break;
             case PROCESSOR_ARCHITECTURE_MIPS:
@@ -340,6 +340,21 @@ void mdmp_dump(void)
                        msi->Cpu.X86CpuInfo.FeatureInformation);
                 printf("  x86.AMDExtendedCpuFeatures: %x\n",
                        msi->Cpu.X86CpuInfo.AMDExtendedCpuFeatures);
+            }
+            if (sizeof(MINIDUMP_SYSTEM_INFO) + 4 > dir->Location.DataSize &&
+                msi->CSDVersionRva >= dir->Location.Rva + 4)
+            {
+                const char*  code = PRD(dir->Location.Rva + sizeof(MINIDUMP_SYSTEM_INFO), 4);
+                const DWORD* wes;
+                if (code && code[0] == 'W' && code[1] == 'I' && code[2] == 'N' && code[3] == 'E' &&
+                    *(wes = (const DWORD*)(code += 4)) >= 3)
+                {
+                    /* assume we have wine extensions */
+                    printf("  Wine details:\n");
+                    printf("    build-id: %s\n", code + wes[1]);
+                    printf("    system: %s\n", code + wes[2]);
+                    printf("    release: %s\n", code + wes[3]);
+                }
             }
         }
         break;

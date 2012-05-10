@@ -129,7 +129,7 @@ typedef union
 
 enum cpu_type
 {
-    CPU_x86, CPU_x86_64, CPU_ALPHA, CPU_POWERPC, CPU_ARM, CPU_SPARC
+    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_SPARC
 };
 typedef int cpu_type_t;
 
@@ -143,8 +143,6 @@ typedef struct
         struct { unsigned int eip, ebp, esp, eflags, cs, ss; } i386_regs;
         struct { unsigned __int64 rip, rbp, rsp;
                  unsigned int cs, ss, flags, __pad; } x86_64_regs;
-        struct { unsigned __int64 fir;
-                 unsigned int psr, __pad; } alpha_regs;
         struct { unsigned int iar, msr, ctr, lr, dar, dsisr, trap, __pad; } powerpc_regs;
         struct { unsigned int sp, lr, pc, cpsr; } arm_regs;
         struct { unsigned int psr, pc, npc, y, wim, tbr; } sparc_regs;
@@ -154,8 +152,6 @@ typedef struct
         struct { unsigned int eax, ebx, ecx, edx, esi, edi; } i386_regs;
         struct { unsigned __int64 rax,rbx, rcx, rdx, rsi, rdi,
                                   r8, r9, r10, r11, r12, r13, r14, r15; } x86_64_regs;
-        struct { unsigned __int64 v0, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12,
-                                  s0, s1, s2, s3, s4, s5, s6, a0, a1, a2, a3, a4, a5, at; } alpha_regs;
         struct { unsigned int gpr[32], cr, xer; } powerpc_regs;
         struct { unsigned int r[13]; } arm_regs;
         struct { unsigned int g[8], o[8], l[8], i[8]; } sparc_regs;
@@ -170,7 +166,6 @@ typedef struct
         struct { unsigned int ctrl, status, tag, err_off, err_sel, data_off, data_sel, cr0npx;
                  unsigned char regs[80]; } i386_regs;
         struct { struct { unsigned __int64 low, high; } fpregs[32]; } x86_64_regs;
-        struct { unsigned __int64 f[32], fpcr, softfpcr; } alpha_regs;
         struct { double fpr[32], fpscr; } powerpc_regs;
     } fp;
     union
@@ -884,7 +879,7 @@ struct resume_thread_reply
 struct load_dll_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    obj_handle_t mapping;
     mod_handle_t base;
     client_ptr_t name;
     data_size_t  size;
@@ -2801,7 +2796,12 @@ struct send_hardware_message_reply
 {
     struct reply_header __header;
     int             wait;
-    char __pad_12[4];
+    int             prev_x;
+    int             prev_y;
+    int             new_x;
+    int             new_y;
+    /* VARARG(keystate,bytes); */
+    char __pad_28[4];
 };
 #define SEND_HWMSG_INJECTED    0x01
 
@@ -3035,13 +3035,15 @@ struct create_named_pipe_request
     unsigned int   attributes;
     obj_handle_t   rootdir;
     unsigned int   options;
+    unsigned int   sharing;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
+    char __pad_44[4];
     timeout_t      timeout;
     unsigned int   flags;
     /* VARARG(name,unicode_str); */
-    char __pad_52[4];
+    char __pad_60[4];
 };
 struct create_named_pipe_reply
 {
@@ -3066,11 +3068,11 @@ struct get_named_pipe_info_reply
 {
     struct reply_header __header;
     unsigned int   flags;
+    unsigned int   sharing;
     unsigned int   maxinstances;
     unsigned int   instances;
     unsigned int   outsize;
     unsigned int   insize;
-    char __pad_28[4];
 };
 
 
@@ -3729,6 +3731,42 @@ struct set_user_object_info_reply
 
 
 
+struct register_hotkey_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    int            id;
+    unsigned int   flags;
+    unsigned int   vkey;
+    char __pad_28[4];
+};
+struct register_hotkey_reply
+{
+    struct reply_header __header;
+    int            replaced;
+    unsigned int   flags;
+    unsigned int   vkey;
+    char __pad_20[4];
+};
+
+
+
+struct unregister_hotkey_request
+{
+    struct request_header __header;
+    user_handle_t  window;
+    int            id;
+    char __pad_20[4];
+};
+struct unregister_hotkey_reply
+{
+    struct reply_header __header;
+    unsigned int   flags;
+    unsigned int   vkey;
+};
+
+
+
 struct attach_thread_input_request
 {
     struct request_header __header;
@@ -3800,7 +3838,9 @@ struct set_key_state_request
 {
     struct request_header __header;
     thread_id_t    tid;
+    int            async;
     /* VARARG(keystate,bytes); */
+    char __pad_20[4];
 };
 struct set_key_state_reply
 {
@@ -4580,6 +4620,8 @@ struct get_next_device_request_reply
     obj_handle_t next;
     ioctl_code_t code;
     client_ptr_t user_ptr;
+    process_id_t client_pid;
+    thread_id_t  client_tid;
     data_size_t  in_size;
     data_size_t  out_size;
     /* VARARG(next_data,bytes); */
@@ -4798,20 +4840,53 @@ struct set_cursor_request
     int            x;
     int            y;
     rectangle_t    clip;
+    unsigned int   clip_msg;
+    char __pad_52[4];
 };
 struct set_cursor_reply
 {
     struct reply_header __header;
     user_handle_t  prev_handle;
     int            prev_count;
+    int            prev_x;
+    int            prev_y;
     int            new_x;
     int            new_y;
     rectangle_t    new_clip;
+    unsigned int   last_change;
+    char __pad_52[4];
 };
 #define SET_CURSOR_HANDLE 0x01
 #define SET_CURSOR_COUNT  0x02
 #define SET_CURSOR_POS    0x04
 #define SET_CURSOR_CLIP   0x08
+#define SET_CURSOR_NOCLIP 0x10
+
+
+
+struct get_suspend_context_request
+{
+    struct request_header __header;
+    char __pad_12[4];
+};
+struct get_suspend_context_reply
+{
+    struct reply_header __header;
+    /* VARARG(context,context); */
+};
+
+
+
+struct set_suspend_context_request
+{
+    struct request_header __header;
+    /* VARARG(context,context); */
+    char __pad_12[4];
+};
+struct set_suspend_context_reply
+{
+    struct reply_header __header;
+};
 
 
 enum request
@@ -4996,6 +5071,8 @@ enum request
     REQ_set_thread_desktop,
     REQ_enum_desktop,
     REQ_set_user_object_info,
+    REQ_register_hotkey,
+    REQ_unregister_hotkey,
     REQ_attach_thread_input,
     REQ_get_thread_input,
     REQ_get_last_input_time,
@@ -5059,6 +5136,8 @@ enum request
     REQ_alloc_user_handle,
     REQ_free_user_handle,
     REQ_set_cursor,
+    REQ_get_suspend_context,
+    REQ_set_suspend_context,
     REQ_NB_REQUESTS
 };
 
@@ -5246,6 +5325,8 @@ union generic_request
     struct set_thread_desktop_request set_thread_desktop_request;
     struct enum_desktop_request enum_desktop_request;
     struct set_user_object_info_request set_user_object_info_request;
+    struct register_hotkey_request register_hotkey_request;
+    struct unregister_hotkey_request unregister_hotkey_request;
     struct attach_thread_input_request attach_thread_input_request;
     struct get_thread_input_request get_thread_input_request;
     struct get_last_input_time_request get_last_input_time_request;
@@ -5309,6 +5390,8 @@ union generic_request
     struct alloc_user_handle_request alloc_user_handle_request;
     struct free_user_handle_request free_user_handle_request;
     struct set_cursor_request set_cursor_request;
+    struct get_suspend_context_request get_suspend_context_request;
+    struct set_suspend_context_request set_suspend_context_request;
 };
 union generic_reply
 {
@@ -5494,6 +5577,8 @@ union generic_reply
     struct set_thread_desktop_reply set_thread_desktop_reply;
     struct enum_desktop_reply enum_desktop_reply;
     struct set_user_object_info_reply set_user_object_info_reply;
+    struct register_hotkey_reply register_hotkey_reply;
+    struct unregister_hotkey_reply unregister_hotkey_reply;
     struct attach_thread_input_reply attach_thread_input_reply;
     struct get_thread_input_reply get_thread_input_reply;
     struct get_last_input_time_reply get_last_input_time_reply;
@@ -5557,8 +5642,10 @@ union generic_reply
     struct alloc_user_handle_reply alloc_user_handle_reply;
     struct free_user_handle_reply free_user_handle_reply;
     struct set_cursor_reply set_cursor_reply;
+    struct get_suspend_context_reply get_suspend_context_reply;
+    struct set_suspend_context_reply set_suspend_context_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 417
+#define SERVER_PROTOCOL_VERSION 431
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

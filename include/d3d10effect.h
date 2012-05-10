@@ -30,6 +30,34 @@
 #define D3D10_BYTES_FROM_BITS(x) (((x) + 7) >> 3)
 #endif
 
+typedef enum _D3D10_DEVICE_STATE_TYPES
+{
+    D3D10_DST_SO_BUFFERS = 1,
+    D3D10_DST_OM_RENDER_TARGETS,
+    D3D10_DST_DEPTH_STENCIL_STATE,
+    D3D10_DST_BLEND_STATE,
+    D3D10_DST_VS,
+    D3D10_DST_VS_SAMPLERS,
+    D3D10_DST_VS_SHADER_RESOURCES,
+    D3D10_DST_VS_CONSTANT_BUFFERS,
+    D3D10_DST_GS,
+    D3D10_DST_GS_SAMPLERS,
+    D3D10_DST_GS_SHADER_RESOURCES,
+    D3D10_DST_GS_CONSTANT_BUFFERS,
+    D3D10_DST_PS,
+    D3D10_DST_PS_SAMPLERS,
+    D3D10_DST_PS_SHADER_RESOURCES,
+    D3D10_DST_PS_CONSTANT_BUFFERS,
+    D3D10_DST_IA_VERTEX_BUFFERS,
+    D3D10_DST_IA_INDEX_BUFFER,
+    D3D10_DST_IA_INPUT_LAYOUT,
+    D3D10_DST_IA_PRIMITIVE_TOPOLOGY,
+    D3D10_DST_RS_VIEWPORTS,
+    D3D10_DST_RS_SCISSOR_RECTS,
+    D3D10_DST_RS_RASTERIZER_STATE,
+    D3D10_DST_PREDICATION,
+} D3D10_DEVICE_STATE_TYPES;
+
 typedef struct _D3D10_EFFECT_TYPE_DESC
 {
     LPCSTR TypeName;
@@ -126,6 +154,10 @@ typedef struct _D3D10_PASS_SHADER_DESC
     struct ID3D10EffectShaderVariable *pShaderVariable;
     UINT ShaderIndex;
 } D3D10_PASS_SHADER_DESC;
+
+#define D3D10_EFFECT_COMPILE_CHILD_EFFECT    0x0001
+#define D3D10_EFFECT_COMPILE_ALLOW_SLOW_OPS  0x0002
+#define D3D10_EFFECT_SINGLE_THREADED         0x0008
 
 DEFINE_GUID(IID_ID3D10EffectType, 0x4e9e1ddc, 0xcd9d, 0x4772, 0xa8, 0x37, 0x00, 0x18, 0x0b, 0x9b, 0x88, 0xfd);
 
@@ -774,12 +806,49 @@ DECLARE_INTERFACE(ID3D10EffectPass)
 };
 #undef INTERFACE
 
+DEFINE_GUID(IID_ID3D10StateBlock, 0x0803425a, 0x57f5, 0x4dd6, 0x94, 0x65, 0xa8, 0x75, 0x70, 0x83, 0x4a, 0x08);
+
+#define INTERFACE ID3D10StateBlock
+DECLARE_INTERFACE_(ID3D10StateBlock, IUnknown)
+{
+    /* IUnknown methods */
+    STDMETHOD(QueryInterface)(THIS_ REFIID iid, void **object) PURE;
+    STDMETHOD_(ULONG, AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG, Release)(THIS) PURE;
+    /* ID3D10StateBlock methods */
+    STDMETHOD(Capture)(THIS) PURE;
+    STDMETHOD(Apply)(THIS) PURE;
+    STDMETHOD(ReleaseAllDeviceObjects)(THIS) PURE;
+    STDMETHOD(GetDevice)(THIS_ ID3D10Device **device) PURE;
+};
+#undef INTERFACE
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+HRESULT WINAPI D3D10CompileEffectFromMemory(void *data, SIZE_T data_size, const char *filename,
+        const D3D10_SHADER_MACRO *defines, ID3D10Include *include, UINT hlsl_flags, UINT fx_flags,
+        ID3D10Blob **effect, ID3D10Blob **errors);
 HRESULT WINAPI D3D10CreateEffectFromMemory(void *data, SIZE_T data_size, UINT flags,
         ID3D10Device *device, ID3D10EffectPool *effect_pool, ID3D10Effect **effect);
+HRESULT WINAPI D3D10CreateStateBlock(ID3D10Device *device,
+        D3D10_STATE_BLOCK_MASK *mask, ID3D10StateBlock **stateblock);
+
+HRESULT WINAPI D3D10StateBlockMaskDifference(D3D10_STATE_BLOCK_MASK *mask_x,
+        D3D10_STATE_BLOCK_MASK *mask_y, D3D10_STATE_BLOCK_MASK *result);
+HRESULT WINAPI D3D10StateBlockMaskDisableAll(D3D10_STATE_BLOCK_MASK *mask);
+HRESULT WINAPI D3D10StateBlockMaskDisableCapture(D3D10_STATE_BLOCK_MASK *mask,
+        D3D10_DEVICE_STATE_TYPES state_type, UINT start_idx, UINT count);
+HRESULT WINAPI D3D10StateBlockMaskEnableAll(D3D10_STATE_BLOCK_MASK *mask);
+HRESULT WINAPI D3D10StateBlockMaskEnableCapture(D3D10_STATE_BLOCK_MASK *mask,
+        D3D10_DEVICE_STATE_TYPES state_type, UINT start_idx, UINT count);
+BOOL WINAPI D3D10StateBlockMaskGetSetting(D3D10_STATE_BLOCK_MASK *mask,
+        D3D10_DEVICE_STATE_TYPES state_type, UINT idx);
+HRESULT WINAPI D3D10StateBlockMaskIntersect(D3D10_STATE_BLOCK_MASK *mask_x,
+        D3D10_STATE_BLOCK_MASK *mask_y, D3D10_STATE_BLOCK_MASK *result);
+HRESULT WINAPI D3D10StateBlockMaskUnion(D3D10_STATE_BLOCK_MASK *mask_x,
+        D3D10_STATE_BLOCK_MASK *mask_y, D3D10_STATE_BLOCK_MASK *result);
 
 #ifdef __cplusplus
 }

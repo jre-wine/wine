@@ -28,12 +28,12 @@ STRINGTABLE
 STRINGTABLE
 {
     IDS_PRINT_HEADER_TEMPLATE "&w&bPage &p" /* FIXME: should be "&w&bPage &p of &P" */
-    IDS_PRINT_FOOTER_TEMPLATE "&u&b&d"
+    IDS_PRINT_FOOTER_TEMPLATE "#msgctxt#do not translate#&u&b&d"
 }
 
 IDR_BROWSE_CONTEXT_MENU MENU
 {
-    POPUP "Default"
+    POPUP "" /* Default */
     {
         MENUITEM "&Back",                  IDM_GOBACKWARD
         MENUITEM "F&orward",               IDM_GOFORWARD
@@ -47,7 +47,7 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "&Paste",                 IDM_PASTE
         MENUITEM SEPARATOR
         MENUITEM "Create Shor&tcut",       IDM_CREATESHORTCUT
-        MENUITEM "Add to &Favorites",      IDM_ADDFAVORITES
+        MENUITEM "Add to &Favorites...",   IDM_ADDFAVORITES
         MENUITEM "&View Source",           IDM_VIEWSOURCE
         MENUITEM SEPARATOR
         MENUITEM "&Encoding",              IDM_LANGUAGE
@@ -55,11 +55,10 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "Pr&int",                 IDM_PRINT
         MENUITEM "&Refresh",               _IDM_REFRESH
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "&Properties",            IDM_PROPERTIES
     }
 
-    POPUP "Image"
+    POPUP "" /* Image */
     {
         MENUITEM "&Open Link",               IDM_FOLLOWLINKC
         MENUITEM "Open Link in &New Window", IDM_FOLLOWLINKN
@@ -81,11 +80,10 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM SEPARATOR
         MENUITEM "Add to &Favorites...",     IDM_ADDFAVORITES
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "P&roperties",              IDM_PROPERTIES
     }
 
-    POPUP "Control"
+    POPUP "" /* Control */
     {
         MENUITEM "&Undo",       IDM_UNDO
         MENUITEM SEPARATOR
@@ -94,11 +92,10 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "&Paste",      IDM_PASTE
         MENUITEM "&Delete",     IDM_DELETE
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "Select &All", IDM_SELECTALL
     }
 
-    POPUP "Table"
+    POPUP "" /* Table */
     {
         POPUP "&Select"
         {
@@ -108,12 +105,11 @@ IDR_BROWSE_CONTEXT_MENU MENU
             MENUITEM "&Table",        IDM_TABLESELECT
         }
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "&Cell Properties",  IDM_CELLPROPERTIES
         MENUITEM "&Table Properties", IDM_TABLEPROPERTIES
     }
 
-    POPUP "1DSite Select"
+    POPUP "" /* 1DSite Select */
     {
         MENUITEM "Cu&t",        IDM_CUT
         MENUITEM "&Copy",       IDM_COPY
@@ -123,7 +119,7 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM SEPARATOR
     }
 
-    POPUP "Anchor"
+    POPUP "" /* Anchor */
     {
         MENUITEM "&Open",                IDM_FOLLOWLINKC
         MENUITEM "Open in &New Window",  IDM_FOLLOWLINKN
@@ -137,16 +133,15 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM SEPARATOR
         MENUITEM "Add to &Favorites...", IDM_ADDFAVORITES
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "P&roperties",          IDM_PROPERTIES
     }
 
-    POPUP "Context Unknown"
+    POPUP "" /* Context Unknown */
     {
         MENUITEM SEPARATOR
     }
 
-    POPUP "DYNSRC Image"
+    POPUP "" /* DYNSRC Image */
     {
         MENUITEM "&Open Link",               IDM_FOLLOWLINKC
         MENUITEM "Open Link in &New Window", IDM_FOLLOWLINKN
@@ -165,13 +160,12 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM SEPARATOR
         MENUITEM "Add to &Favorites...",     IDM_ADDFAVORITES
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "Play",                     IDM_DYNSRCPLAY
         MENUITEM "Stop",                     IDM_DYNSRCSTOP
         MENUITEM "P&roperties",              IDM_PROPERTIES
     }
 
-    POPUP "ART Image"
+    POPUP "" /* ART Image */
     {
         MENUITEM "&Open Link",               IDM_FOLLOWLINKC
         MENUITEM "Open Link in &New Window", IDM_FOLLOWLINKN
@@ -194,11 +188,10 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "Stop",                     IDM_IMGARTSTOP
         MENUITEM "Rewind",                   IDM_IMGARTREWIND
         MENUITEM SEPARATOR
-        MENUITEM SEPARATOR
         MENUITEM "P&roperties",              IDM_PROPERTIES
     }
 
-    POPUP "Debug"
+    POPUP "" /* Debug */
     {
         MENUITEM "Trace Tags",         IDM_TRACETAGS
         MENUITEM "Resource Failures",  IDM_RESOURCEFAILURES
@@ -218,7 +211,7 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "&Edit View",         IDM_EDITMODE
     }
 
-    POPUP "Vertical Scrollbar"
+    POPUP "" /* Vertical Scrollbar */
     {
         MENUITEM "Scroll Here",  IDM_SCROLL_HERE
         MENUITEM SEPARATOR
@@ -232,7 +225,7 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "Scroll Down",  IDM_SCROLL_DOWN
     }
 
-    POPUP "Horizontal Scrollbar"
+    POPUP "" /* Horizontal Scrollbar */
     {
         MENUITEM "Scroll Here",  IDM_SCROLL_HERE
         MENUITEM SEPARATOR

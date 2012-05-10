@@ -108,7 +108,7 @@ static void *xmalloc( size_t size )
 {
     void *res;
     if (!(res = malloc (size ? size : 1)))
-        fatal_error( "%s: Virtual memory exhausted.\n", ProgramName );
+        fatal_error( "%s: error: Virtual memory exhausted.\n", ProgramName );
     return res;
 }
 
@@ -121,7 +121,7 @@ static void *xrealloc (void *ptr, size_t size)
     void *res;
     assert( size );
     if (!(res = realloc( ptr, size )))
-        fatal_error( "%s: Virtual memory exhausted.\n", ProgramName );
+        fatal_error( "%s: error: Virtual memory exhausted.\n", ProgramName );
     return res;
 }
 
@@ -131,7 +131,7 @@ static void *xrealloc (void *ptr, size_t size)
 static char *xstrdup( const char *str )
 {
     char *res = strdup( str );
-    if (!res) fatal_error( "%s: Virtual memory exhausted.\n", ProgramName );
+    if (!res) fatal_error( "%s: error: Virtual memory exhausted.\n", ProgramName );
     return res;
 }
 
@@ -286,36 +286,36 @@ static INCL_FILE *add_include( INCL_FILE *pFile, const char *name, int line, int
 
     for (pos = 0; pos < MAX_INCLUDES; pos++) if (!pFile->files[pos]) break;
     if (pos >= MAX_INCLUDES)
-        fatal_error( "%s: %s: too many included files, please fix MAX_INCLUDES\n",
+        fatal_error( "%s: %s: error: too many included files, please fix MAX_INCLUDES\n",
                      ProgramName, pFile->name );
 
     /* enforce some rules for the Wine tree */
 
     if (!memcmp( name, "../", 3 ))
-        fatal_error( "%s:%d: #include directive with relative path not allowed\n",
+        fatal_error( "%s:%d: error: #include directive with relative path not allowed\n",
                      pFile->filename, line );
 
     if (!strcmp( name, "config.h" ))
     {
         if ((ext = strrchr( pFile->filename, '.' )) && !strcmp( ext, ".h" ))
-            fatal_error( "%s:%d: config.h must not be included by a header file\n",
+            fatal_error( "%s:%d: error: config.h must not be included by a header file\n",
                          pFile->filename, line );
         if (pos)
-            fatal_error( "%s:%d: config.h must be included before anything else\n",
+            fatal_error( "%s:%d: error: config.h must be included before anything else\n",
                          pFile->filename, line );
     }
     else if (!strcmp( name, "wine/port.h" ))
     {
         if ((ext = strrchr( pFile->filename, '.' )) && !strcmp( ext, ".h" ))
-            fatal_error( "%s:%d: wine/port.h must not be included by a header file\n",
+            fatal_error( "%s:%d: error: wine/port.h must not be included by a header file\n",
                          pFile->filename, line );
-        if (!pos) fatal_error( "%s:%d: config.h must be included before wine/port.h\n",
+        if (!pos) fatal_error( "%s:%d: error: config.h must be included before wine/port.h\n",
                                pFile->filename, line );
         if (pos > 1)
-            fatal_error( "%s:%d: wine/port.h must be included before everything except config.h\n",
+            fatal_error( "%s:%d: error: wine/port.h must be included before everything except config.h\n",
                          pFile->filename, line );
         if (strcmp( pFile->files[0]->name, "config.h" ))
-            fatal_error( "%s:%d: config.h must be included before wine/port.h\n",
+            fatal_error( "%s:%d: error: config.h must be included before wine/port.h\n",
                          pFile->filename, line );
     }
 
@@ -356,6 +356,7 @@ static FILE *open_src_file( INCL_FILE *pFile )
     }
     if (!file)
     {
+        fprintf( stderr, "%s: error: ", ProgramName );
         perror( pFile->name );
         exit(1);
     }
@@ -471,6 +472,28 @@ static FILE *open_include_file( INCL_FILE *pFile )
         free( filename );
     }
 
+    /* check for corresponding .x file in global includes */
+
+    if (strendswith( pFile->name, "tmpl.h" ))
+    {
+        if (top_src_dir)
+            filename = strmake( "%s/include/%.*s.x",
+                                top_src_dir, strlen(pFile->name) - 2, pFile->name );
+        else if (top_obj_dir)
+            filename = strmake( "%s/include/%.*s.x",
+                                top_obj_dir, strlen(pFile->name) - 2, pFile->name );
+        else
+            filename = NULL;
+
+        if (filename && (file = fopen( filename, "r" )))
+        {
+            pFile->sourcename = filename;
+            pFile->filename = strmake( "%s/include/%s", top_obj_dir, pFile->name );
+            return file;
+        }
+        free( filename );
+    }
+
     /* now try in global includes */
     if (top_obj_dir)
     {
@@ -505,13 +528,15 @@ static FILE *open_include_file( INCL_FILE *pFile )
         free( filename );
     }
 
+    fprintf( stderr, "%s:%d: error: ", pFile->included_by->filename, pFile->included_line );
     perror( pFile->name );
-    while (pFile->included_by)
+    pFile = pFile->included_by;
+    while (pFile && pFile->included_by)
     {
         const char *parent = pFile->included_by->sourcename;
         if (!parent) parent = pFile->included_by->name;
-        fprintf( stderr, "  %s was first included from %s:%d\n",
-                 pFile->name, parent, pFile->included_line );
+        fprintf( stderr, "%s:%d: note: %s was first included here\n",
+                 parent, pFile->included_line, pFile->name );
         pFile = pFile->included_by;
     }
     exit(1);
@@ -553,7 +578,8 @@ static void parse_idl_file( INCL_FILE *pFile, FILE *file, int for_h_file )
             if (*p != '"') continue;
             include = ++p;
             while (*p && (*p != '"')) p++;
-            if (!*p) fatal_error( "%s:%d: Malformed import directive\n", pFile->filename, input_line );
+            if (!*p) fatal_error( "%s:%d: error: Malformed import directive\n",
+                                  pFile->filename, input_line );
             *p = 0;
             if (for_h_file && strendswith( include, ".idl" )) strcpy( p - 4, ".h" );
             add_include( pFile, include, input_line, 0 );
@@ -586,7 +612,7 @@ static void parse_idl_file( INCL_FILE *pFile, FILE *file, int for_h_file )
             include = p;
             while (*p && (*p != quote)) p++;
             if (!*p || (quote == '"' && p[-1] != '\\'))
-                fatal_error( "%s:%d: Malformed #include directive inside cpp_quote\n",
+                fatal_error( "%s:%d: error: Malformed #include directive inside cpp_quote\n",
                              pFile->filename, input_line );
             if (quote == '"') p--;  /* remove backslash */
             *p = 0;
@@ -605,7 +631,8 @@ static void parse_idl_file( INCL_FILE *pFile, FILE *file, int for_h_file )
         if (quote == '<') quote = '>';
         include = p;
         while (*p && (*p != quote)) p++;
-        if (!*p) fatal_error( "%s:%d: Malformed #include directive\n", pFile->filename, input_line );
+        if (!*p) fatal_error( "%s:%d: error: Malformed #include directive\n",
+                              pFile->filename, input_line );
         *p = 0;
         add_include( pFile, include, input_line, (quote == '>') );
     }
@@ -634,7 +661,7 @@ static void parse_c_file( INCL_FILE *pFile, FILE *file )
         if (quote == '<') quote = '>';
         include = p;
         while (*p && (*p != quote)) p++;
-        if (!*p) fatal_error( "%s:%d: Malformed #include directive\n",
+        if (!*p) fatal_error( "%s:%d: error: Malformed #include directive\n",
                               pFile->filename, input_line );
         *p = 0;
         add_include( pFile, include, input_line, (quote == '>') );
@@ -675,7 +702,7 @@ static void parse_rc_file( INCL_FILE *pFile, FILE *file )
                 while (*p && !isspace(*p) && *p != '*') p++;
             }
             if (!*p)
-                fatal_error( "%s:%d: Malformed makedep comment\n", pFile->filename, input_line );
+                fatal_error( "%s:%d: error: Malformed makedep comment\n", pFile->filename, input_line );
             *p = 0;
         }
         else  /* check for #include */
@@ -690,7 +717,7 @@ static void parse_rc_file( INCL_FILE *pFile, FILE *file )
             if (quote == '<') quote = '>';
             include = p;
             while (*p && (*p != quote)) p++;
-            if (!*p) fatal_error( "%s:%d: Malformed #include directive\n",
+            if (!*p) fatal_error( "%s:%d: error: Malformed #include directive\n",
                                   pFile->filename, input_line );
             *p = 0;
         }
@@ -761,9 +788,10 @@ static void parse_file( INCL_FILE *pFile, int src )
         return;
     }
 
-    /* don't try to open .tlb or .res files */
+    /* don't try to open certain types of files */
     if (strendswith( pFile->name, ".tlb" ) ||
-        strendswith( pFile->name, ".res" ))
+        strendswith( pFile->name, ".res" ) ||
+        strendswith( pFile->name, ".x" ))
     {
         pFile->filename = xstrdup( pFile->name );
         return;
@@ -867,7 +895,7 @@ static int output_src( FILE *file, INCL_FILE *pFile, int *column )
             const char *suffix = "cips";
 
             name = strmake( "%s.tlb", obj );
-            if (find_src_file( name )) *column += fprintf( file, "%s", name );
+            if (find_src_file( name )) *column += fprintf( file, "%s %s_t.res", name, obj );
             else
             {
                 got_header = 1;
@@ -931,7 +959,8 @@ static FILE *create_temp_file( char **tmp_name )
         if (errno != EEXIST) break;
         id += 7777;
     }
-    if (!ret) fatal_error( "failed to create output file for '%s'\n", OutputFileName );
+    if (!ret) fatal_error( "%s: error: failed to create output file for '%s'\n",
+                           ProgramName, OutputFileName );
     *tmp_name = name;
     return ret;
 }
@@ -956,7 +985,7 @@ static void output_dependencies(void)
         while (fgets( buffer, sizeof(buffer), file ) && !found)
         {
             if (fwrite( buffer, 1, strlen(buffer), tmp_file ) != strlen(buffer))
-                fatal_error( "error writing to %s\n", tmp_name );
+                fatal_error( "%s: error: failed to write to %s\n", ProgramName, tmp_name );
             found = !strncmp( buffer, Separator, strlen(Separator) );
         }
         fclose( file );
@@ -994,7 +1023,8 @@ static void output_dependencies(void)
         if (ret == -1)
         {
             unlink( tmp_name );
-            fatal_error( "failed to rename output file to '%s'\n", OutputFileName );
+            fatal_error( "%s: error: failed to rename output file to '%s'\n",
+                         ProgramName, OutputFileName );
         }
         free( tmp_name );
     }
@@ -1047,7 +1077,8 @@ int main( int argc, char *argv[] )
     INCL_PATH *path, *next;
     int i, j;
 
-    ProgramName = argv[0];
+    if ((ProgramName = strrchr( argv[0], '/' ))) ProgramName++;
+    else ProgramName = argv[0];
 
     i = 1;
     while (i < argc)

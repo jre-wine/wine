@@ -29,6 +29,7 @@
 #  include <linux/input.h>
 #  undef SW_MAX
 #endif
+#include <limits.h>
 #include <errno.h>
 #ifdef HAVE_UNISTD_H
 #  include <unistd.h>
@@ -518,7 +519,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_Start(
 
     event.type = EV_FF;
     event.code = This->effect.id;
-    event.value = dwIterations;
+    event.value = min( dwIterations, INT_MAX );
     if (write(*(This->fd), &event, sizeof(event)) == -1) {
 	FIXME("Unable to write event.  Assuming device disconnected.\n");
 	return DIERR_INPUTLOST;
@@ -606,13 +607,12 @@ static HRESULT WINAPI LinuxInputEffectImpl_SetParameters(
         else env = NULL; 
 
 	if (peff->lpEnvelope == NULL) {
-	    /* if this type had an envelope, reset it
-	     * note that length can never be zero, so we set it to something minuscule */
+	    /* if this type had an envelope, reset it */
 	    if (env) {
-		env->attack_length = 0x10;
-		env->attack_level = 0x7FFF;
-		env->fade_length = 0x10;
-		env->fade_level = 0x7FFF;
+		env->attack_length = 0;
+		env->attack_level = 0;
+		env->fade_length = 0;
+		env->fade_level = 0;
 	    }
 	} else {
 	    /* did we get passed an envelope for a type that doesn't even have one? */
@@ -673,7 +673,7 @@ static HRESULT WINAPI LinuxInputEffectImpl_SetParameters(
                 return DIERR_INVALIDPARAM;
             tsp = peff->lpvTypeSpecificParams;
 	    This->effect.u.ramp.start_level = (tsp->lStart / 10) * 32;
-	    This->effect.u.ramp.end_level = (tsp->lStart / 10) * 32;
+	    This->effect.u.ramp.end_level = (tsp->lEnd / 10) * 32;
 	} else if (type == DIEFT_CONDITION) {
             LPCDICONDITION tsp = peff->lpvTypeSpecificParams;
             if (peff->cbTypeSpecificParams == sizeof(DICONDITION)) {
@@ -780,7 +780,7 @@ static ULONG WINAPI LinuxInputEffectImpl_Release(LPDIRECTINPUTEFFECT iface)
  *      LinuxInputEffect
  */
 
-HRESULT linuxinput_create_effect(
+DECLSPEC_HIDDEN HRESULT linuxinput_create_effect(
 	int* fd,
 	REFGUID rguid,
         struct list *parent_list_entry,
@@ -852,7 +852,7 @@ HRESULT linuxinput_create_effect(
     return DI_OK;
 }
 
-HRESULT linuxinput_get_info_A(
+DECLSPEC_HIDDEN HRESULT linuxinput_get_info_A(
 	int fd,
 	REFGUID rguid,
 	LPDIEFFECTINFOA info)
@@ -886,7 +886,7 @@ HRESULT linuxinput_get_info_A(
     return DI_OK;
 }
 
-HRESULT linuxinput_get_info_W(
+DECLSPEC_HIDDEN HRESULT linuxinput_get_info_W(
 	int fd,
 	REFGUID rguid,
 	LPDIEFFECTINFOW info)

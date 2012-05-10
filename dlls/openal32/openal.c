@@ -25,10 +25,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "wine/debug.h"
-
 #ifdef HAVE_AL_AL_H
 #include <AL/al.h>
 #include <AL/alc.h>
@@ -36,6 +32,10 @@
 #include <OpenAL/al.h>
 #include <OpenAL/alc.h>
 #endif
+
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(openal32);
 
@@ -79,15 +79,10 @@ static ALvoid (AL_APIENTRY*alGetAuxiliaryEffectSlotfv)(ALuint sid, ALenum param,
 static ALvoid (AL_APIENTRY*alGetAuxiliaryEffectSloti)(ALuint sid, ALenum param, ALint* value);
 static ALvoid (AL_APIENTRY*alGetAuxiliaryEffectSlotiv)(ALuint sid, ALenum param, ALint* values);
 
-struct FuncList {
-    const char *name;
-    void *proc;
-};
+extern ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *, const ALCchar *);
+extern ALvoid*  CDECL wine_alGetProcAddress(const ALchar*);
 
-static const struct FuncList ALCFuncs[];
-static const struct FuncList ALFuncs[];
-
-CRITICAL_SECTION openal_cs;
+static CRITICAL_SECTION openal_cs;
 static CRITICAL_SECTION_DEBUG openal_cs_debug =
 {
     0, 0, &openal_cs,
@@ -95,7 +90,7 @@ static CRITICAL_SECTION_DEBUG openal_cs_debug =
     &openal_cs_debug.ProcessLocksList},
     0, 0, {(DWORD_PTR)(__FILE__ ": openal_cs")}
 };
-CRITICAL_SECTION openal_cs = {&openal_cs_debug, -1, 0, 0, 0, 0};
+static CRITICAL_SECTION openal_cs = {&openal_cs_debug, -1, 0, 0, 0, 0};
 
 /***********************************************************************
  *           OpenAL initialisation routine
@@ -111,6 +106,8 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         LOADFUNC(alcGetThreadContext);
 #undef LOADFUNC
         break;
+    case DLL_PROCESS_DETACH:
+        DeleteCriticalSection(&openal_cs);
     }
 
     return TRUE;
@@ -238,25 +235,6 @@ ALCboolean CDECL wine_alcIsExtensionPresent(ALCdevice *device, const ALCchar *ex
     return alcIsExtensionPresent(device, extname);
 }
 
-ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *device, const ALCchar *funcname)
-{
-    void *proc;
-    int i;
-
-    /* Make sure the host implementation has the requested function */
-    proc = alcGetProcAddress(device, funcname);
-    if(!proc)
-        return NULL;
-
-    for(i = 0;ALCFuncs[i].name;i++)
-    {
-        if(strcmp(funcname, ALCFuncs[i].name) == 0)
-            return ALCFuncs[i].proc;
-    }
-    FIXME("Could not find function in list: %s\n", funcname);
-    return NULL;
-}
-
 ALCenum CDECL wine_alcGetEnumValue(ALCdevice *device, const ALCchar *enumname)
 {
     return alcGetEnumValue(device, enumname);
@@ -269,7 +247,7 @@ const ALCchar* CDECL wine_alcGetString(ALCdevice *device, ALCenum param)
 
 ALvoid CDECL wine_alcGetIntegerv(ALCdevice *device, ALCenum param, ALCsizei size, ALCint *dest)
 {
-    return alcGetIntegerv(device, param, size, dest);
+    alcGetIntegerv(device, param, size, dest);
 }
 
 
@@ -342,27 +320,6 @@ ALenum CDECL wine_alGetError(ALvoid)
 ALboolean CDECL wine_alIsExtensionPresent(const ALchar* extname)
 {
     return alIsExtensionPresent(extname);
-}
-
-ALvoid* CDECL wine_alGetProcAddress(const ALchar* funcname)
-{
-    void *proc;
-    int i;
-
-    /* Make sure the host implementation has the requested function. This will
-     * also set the last AL error properly if the function should not be
-     * returned (eg. no current context). */
-    proc = alGetProcAddress(funcname);
-    if(!proc)
-        return NULL;
-
-    for(i = 0;ALFuncs[i].name;i++)
-    {
-        if(strcmp(funcname, ALFuncs[i].name) == 0)
-            return ALFuncs[i].proc;
-    }
-    FIXME("Could not find function in list: %s\n", funcname);
-    return NULL;
 }
 
 ALenum CDECL wine_alGetEnumValue(const ALchar* ename)
@@ -545,7 +502,7 @@ ALvoid CDECL wine_alBufferData(ALuint bid, ALenum format, const ALvoid* data, AL
     alBufferData(bid, format, data, size, freq);
 }
 
-ALvoid CDECL wine_alBufferDataStatic(const ALuint bid, ALenum format, const ALvoid* data, ALsizei size, ALsizei freq)
+static ALvoid CDECL wine_alBufferDataStatic(const ALuint bid, ALenum format, const ALvoid* data, ALsizei size, ALsizei freq)
 {
     alBufferDataStatic(bid, format, data, size, freq);
 }
@@ -689,176 +646,176 @@ ALvoid CDECL wine_alSpeedOfSound(ALfloat value)
 }
 
 /* OpenAL EFX extension functions */
-ALvoid CDECL wine_alGenFilters(ALsizei n, ALuint* filters)
+static ALvoid CDECL wine_alGenFilters(ALsizei n, ALuint* filters)
 {
     alGenFilters(n, filters);
 }
 
-ALvoid CDECL wine_alDeleteFilters(ALsizei n, const ALuint* filters)
+static ALvoid CDECL wine_alDeleteFilters(ALsizei n, const ALuint* filters)
 {
     alDeleteFilters(n, filters);
 }
 
-ALboolean CDECL wine_alIsFilter(ALuint fid)
+static ALboolean CDECL wine_alIsFilter(ALuint fid)
 {
     return alIsFilter(fid);
 }
 
-ALvoid CDECL wine_alFilterf(ALuint fid, ALenum param, ALfloat value)
+static ALvoid CDECL wine_alFilterf(ALuint fid, ALenum param, ALfloat value)
 {
     alFilterf(fid, param, value);
 }
 
-ALvoid CDECL wine_alFilterfv(ALuint fid, ALenum param, const ALfloat* values)
+static ALvoid CDECL wine_alFilterfv(ALuint fid, ALenum param, const ALfloat* values)
 {
     alFilterfv(fid, param, values);
 }
 
-ALvoid CDECL wine_alFilteri(ALuint fid, ALenum param, ALint value)
+static ALvoid CDECL wine_alFilteri(ALuint fid, ALenum param, ALint value)
 {
     alFilteri(fid, param, value);
 }
 
-ALvoid CDECL wine_alFilteriv(ALuint fid, ALenum param, const ALint* values)
+static ALvoid CDECL wine_alFilteriv(ALuint fid, ALenum param, const ALint* values)
 {
     alFilteriv(fid, param, values);
 }
 
-ALvoid CDECL wine_alGetFilterf(ALuint fid, ALenum param, ALfloat* value)
+static ALvoid CDECL wine_alGetFilterf(ALuint fid, ALenum param, ALfloat* value)
 {
     alGetFilterf(fid, param, value);
 }
 
-ALvoid CDECL wine_alGetFilterfv(ALuint fid, ALenum param, ALfloat* values)
+static ALvoid CDECL wine_alGetFilterfv(ALuint fid, ALenum param, ALfloat* values)
 {
     alGetFilterfv(fid, param, values);
 }
 
-ALvoid CDECL wine_alGetFilteri(ALuint fid, ALenum param, ALint* value)
+static ALvoid CDECL wine_alGetFilteri(ALuint fid, ALenum param, ALint* value)
 {
     alGetFilteri(fid, param, value);
 }
 
-ALvoid CDECL wine_alGetFilteriv(ALuint fid, ALenum param, ALint* values)
+static ALvoid CDECL wine_alGetFilteriv(ALuint fid, ALenum param, ALint* values)
 {
     alGetFilteriv(fid, param, values);
 }
 
 
-ALvoid CDECL wine_alGenEffects(ALsizei n, ALuint* effects)
+static ALvoid CDECL wine_alGenEffects(ALsizei n, ALuint* effects)
 {
     alGenEffects(n, effects);
 }
 
-ALvoid CDECL wine_alDeleteEffects(ALsizei n, const ALuint* effects)
+static ALvoid CDECL wine_alDeleteEffects(ALsizei n, const ALuint* effects)
 {
     alDeleteEffects(n, effects);
 }
 
-ALboolean CDECL wine_alIsEffect(ALuint eid)
+static ALboolean CDECL wine_alIsEffect(ALuint eid)
 {
     return alIsEffect(eid);
 }
 
-ALvoid CDECL wine_alEffectf(ALuint eid, ALenum param, ALfloat value)
+static ALvoid CDECL wine_alEffectf(ALuint eid, ALenum param, ALfloat value)
 {
     alEffectf(eid, param, value);
 }
 
-ALvoid CDECL wine_alEffectfv(ALuint eid, ALenum param, const ALfloat* values)
+static ALvoid CDECL wine_alEffectfv(ALuint eid, ALenum param, const ALfloat* values)
 {
     alEffectfv(eid, param, values);
 }
 
-ALvoid CDECL wine_alEffecti(ALuint eid, ALenum param, ALint value)
+static ALvoid CDECL wine_alEffecti(ALuint eid, ALenum param, ALint value)
 {
     alEffecti(eid, param, value);
 }
 
-ALvoid CDECL wine_alEffectiv(ALuint eid, ALenum param, const ALint* values)
+static ALvoid CDECL wine_alEffectiv(ALuint eid, ALenum param, const ALint* values)
 {
     alEffectiv(eid, param, values);
 }
 
-ALvoid CDECL wine_alGetEffectf(ALuint eid, ALenum param, ALfloat* value)
+static ALvoid CDECL wine_alGetEffectf(ALuint eid, ALenum param, ALfloat* value)
 {
     alGetEffectf(eid, param, value);
 }
 
-ALvoid CDECL wine_alGetEffectfv(ALuint eid, ALenum param, ALfloat* values)
+static ALvoid CDECL wine_alGetEffectfv(ALuint eid, ALenum param, ALfloat* values)
 {
     alGetEffectfv(eid, param, values);
 }
 
-ALvoid CDECL wine_alGetEffecti(ALuint eid, ALenum param, ALint* value)
+static ALvoid CDECL wine_alGetEffecti(ALuint eid, ALenum param, ALint* value)
 {
     alGetEffecti(eid, param, value);
 }
 
-ALvoid CDECL wine_alGetEffectiv(ALuint eid, ALenum param, ALint* values)
+static ALvoid CDECL wine_alGetEffectiv(ALuint eid, ALenum param, ALint* values)
 {
     alGetEffectiv(eid, param, values);
 }
 
 
-ALvoid CDECL wine_alGenAuxiliaryEffectSlots(ALsizei n, ALuint* slots)
+static ALvoid CDECL wine_alGenAuxiliaryEffectSlots(ALsizei n, ALuint* slots)
 {
     alGenAuxiliaryEffectSlots(n, slots);
 }
 
-ALvoid CDECL wine_alDeleteAuxiliaryEffectSlots(ALsizei n, const ALuint* slots)
+static ALvoid CDECL wine_alDeleteAuxiliaryEffectSlots(ALsizei n, const ALuint* slots)
 {
     alDeleteAuxiliaryEffectSlots(n, slots);
 }
 
-ALboolean CDECL wine_alIsAuxiliaryEffectSlot(ALuint sid)
+static ALboolean CDECL wine_alIsAuxiliaryEffectSlot(ALuint sid)
 {
     return alIsAuxiliaryEffectSlot(sid);
 }
 
-ALvoid CDECL wine_alAuxiliaryEffectSlotf(ALuint sid, ALenum param, ALfloat value)
+static ALvoid CDECL wine_alAuxiliaryEffectSlotf(ALuint sid, ALenum param, ALfloat value)
 {
     alAuxiliaryEffectSlotf(sid, param, value);
 }
 
-ALvoid CDECL wine_alAuxiliaryEffectSlotfv(ALuint sid, ALenum param, const ALfloat* values)
+static ALvoid CDECL wine_alAuxiliaryEffectSlotfv(ALuint sid, ALenum param, const ALfloat* values)
 {
     alAuxiliaryEffectSlotfv(sid, param, values);
 }
 
-ALvoid CDECL wine_alAuxiliaryEffectSloti(ALuint sid, ALenum param, ALint value)
+static ALvoid CDECL wine_alAuxiliaryEffectSloti(ALuint sid, ALenum param, ALint value)
 {
     alAuxiliaryEffectSloti(sid, param, value);
 }
 
-ALvoid CDECL wine_alAuxiliaryEffectSlotiv(ALuint sid, ALenum param, const ALint* values)
+static ALvoid CDECL wine_alAuxiliaryEffectSlotiv(ALuint sid, ALenum param, const ALint* values)
 {
     alAuxiliaryEffectSlotiv(sid, param, values);
 }
 
-ALvoid CDECL wine_alGetAuxiliaryEffectSlotf(ALuint sid, ALenum param, ALfloat* value)
+static ALvoid CDECL wine_alGetAuxiliaryEffectSlotf(ALuint sid, ALenum param, ALfloat* value)
 {
     alGetAuxiliaryEffectSlotf(sid, param, value);
 }
 
-ALvoid CDECL wine_alGetAuxiliaryEffectSlotfv(ALuint sid, ALenum param, ALfloat* values)
+static ALvoid CDECL wine_alGetAuxiliaryEffectSlotfv(ALuint sid, ALenum param, ALfloat* values)
 {
     alGetAuxiliaryEffectSlotfv(sid, param, values);
 }
 
-ALvoid CDECL wine_alGetAuxiliaryEffectSloti(ALuint sid, ALenum param, ALint* value)
+static ALvoid CDECL wine_alGetAuxiliaryEffectSloti(ALuint sid, ALenum param, ALint* value)
 {
     alGetAuxiliaryEffectSloti(sid, param, value);
 }
 
-ALvoid CDECL wine_alGetAuxiliaryEffectSlotiv(ALuint sid, ALenum param, ALint* values)
+static ALvoid CDECL wine_alGetAuxiliaryEffectSlotiv(ALuint sid, ALenum param, ALint* values)
 {
     alGetAuxiliaryEffectSlotiv(sid, param, values);
 }
 
 
 /* Thread-local context functions */
-ALCboolean CDECL wine_alcSetThreadContext(ALCcontext *context)
+static ALCboolean CDECL wine_alcSetThreadContext(ALCcontext *context)
 {
     EnterCriticalSection(&openal_cs);
     if(alcSetThreadContext(context) == ALC_FALSE)
@@ -878,11 +835,15 @@ ALCboolean CDECL wine_alcSetThreadContext(ALCcontext *context)
     return ALC_TRUE;
 }
 
-ALCcontext* CDECL wine_alcGetThreadContext(ALCvoid)
+static ALCcontext* CDECL wine_alcGetThreadContext(ALCvoid)
 {
     return alcGetThreadContext();
 }
 
+struct FuncList {
+    const char *name;
+    void *proc;
+};
 
 static const struct FuncList ALCFuncs[] = {
     { "alcCreateContext",           wine_alcCreateContext        },
@@ -1023,3 +984,45 @@ static const struct FuncList ALFuncs[] = {
 
     { NULL,                         NULL                         }
 };
+
+
+ALCvoid* CDECL wine_alcGetProcAddress(ALCdevice *device, const ALCchar *funcname)
+{
+    void *proc;
+    int i;
+
+    /* Make sure the host implementation has the requested function */
+    proc = alcGetProcAddress(device, funcname);
+    if(!proc)
+        return NULL;
+
+    for(i = 0;ALCFuncs[i].name;i++)
+    {
+        if(strcmp(funcname, ALCFuncs[i].name) == 0)
+            return ALCFuncs[i].proc;
+    }
+    FIXME("Could not find function in list: %s\n", funcname);
+    return NULL;
+}
+
+
+ALvoid* CDECL wine_alGetProcAddress(const ALchar* funcname)
+{
+    void *proc;
+    int i;
+
+    /* Make sure the host implementation has the requested function. This will
+     * also set the last AL error properly if the function should not be
+     * returned (eg. no current context). */
+    proc = alGetProcAddress(funcname);
+    if(!proc)
+        return NULL;
+
+    for(i = 0;ALFuncs[i].name;i++)
+    {
+        if(strcmp(funcname, ALFuncs[i].name) == 0)
+            return ALFuncs[i].proc;
+    }
+    FIXME("Could not find function in list: %s\n", funcname);
+    return NULL;
+}

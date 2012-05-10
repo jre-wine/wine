@@ -91,6 +91,7 @@ struct named_pipe
 {
     struct object       obj;         /* object header */
     unsigned int        flags;
+    unsigned int        sharing;
     unsigned int        maxinstances;
     unsigned int        outsize;
     unsigned int        insize;
@@ -803,11 +804,21 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
     struct named_pipe *pipe = (struct named_pipe *)obj;
     struct pipe_server *server;
     struct pipe_client *client;
+    unsigned int pipe_sharing;
     int fds[2];
 
     if (!(server = find_available_server( pipe )))
     {
         set_error( STATUS_PIPE_NOT_AVAILABLE );
+        return NULL;
+    }
+
+    pipe_sharing = server->pipe->sharing;
+    if (((access & GENERIC_READ) && !(pipe_sharing & FILE_SHARE_READ)) ||
+        ((access & GENERIC_WRITE) && !(pipe_sharing & FILE_SHARE_WRITE)))
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        release_object( server );
         return NULL;
     }
 
@@ -939,6 +950,13 @@ DECL_HANDLER(create_named_pipe)
     struct unicode_str name;
     struct directory *root = NULL;
 
+    if (!req->sharing || (req->sharing & ~(FILE_SHARE_READ | FILE_SHARE_WRITE)) ||
+        (!(req->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE) && (req->flags & NAMED_PIPE_MESSAGE_STREAM_READ)))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
     reply->handle = 0;
     get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
@@ -960,6 +978,7 @@ DECL_HANDLER(create_named_pipe)
         pipe->maxinstances = req->maxinstances;
         pipe->timeout = req->timeout;
         pipe->flags = req->flags;
+        pipe->sharing = req->sharing;
     }
     else
     {
@@ -969,9 +988,7 @@ DECL_HANDLER(create_named_pipe)
             release_object( pipe );
             return;
         }
-        if ((pipe->maxinstances != req->maxinstances) ||
-            (pipe->timeout != req->timeout) ||
-            (pipe->flags != req->flags))
+        if (pipe->sharing != req->sharing)
         {
             set_error( STATUS_ACCESS_DENIED );
             release_object( pipe );
@@ -999,14 +1016,18 @@ DECL_HANDLER(get_named_pipe_info)
     server = get_pipe_server_obj( current->process, req->handle, FILE_READ_ATTRIBUTES );
     if (!server)
     {
+        if (get_error() != STATUS_OBJECT_TYPE_MISMATCH)
+            return;
+
         clear_error();
         client = (struct pipe_client *)get_handle_obj( current->process, req->handle,
-                                                       FILE_READ_ATTRIBUTES, &pipe_client_ops );
+                                                       0, &pipe_client_ops );
         if (!client) return;
         server = client->server;
     }
 
     reply->flags        = server->pipe->flags;
+    reply->sharing      = server->pipe->sharing;
     reply->maxinstances = server->pipe->maxinstances;
     reply->instances    = server->pipe->instances;
     reply->insize       = server->pipe->insize;

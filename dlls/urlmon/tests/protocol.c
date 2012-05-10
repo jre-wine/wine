@@ -112,7 +112,6 @@ DEFINE_EXPECT(UnlockRequest);
 DEFINE_EXPECT(Abort);
 DEFINE_EXPECT(MimeFilter_CreateInstance);
 DEFINE_EXPECT(MimeFilter_Start);
-DEFINE_EXPECT(MimeFilter_ReportProgress);
 DEFINE_EXPECT(MimeFilter_ReportData);
 DEFINE_EXPECT(MimeFilter_ReportResult);
 DEFINE_EXPECT(MimeFilter_Terminate);
@@ -152,6 +151,7 @@ static PROTOCOLDATA protocoldata, *pdata, continue_protdata;
 static DWORD prot_read, pi, filter_state, http_post_test, thread_id;
 static BOOL security_problem, test_async_req, impl_protex;
 static BOOL async_read_pending, mimefilter_test, direct_read, wait_for_switch, emulate_prot, short_read, test_abort;
+static BOOL empty_file;
 
 enum {
     STATE_CONNECTING,
@@ -213,25 +213,6 @@ static int strcmp_wa(LPCWSTR strw, const char *stra)
     CHAR buf[512];
     WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
     return lstrcmpA(stra, buf);
-}
-
-static BOOL proxy_active(void)
-{
-    HKEY internet_settings;
-    DWORD proxy_enable;
-    DWORD size;
-
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings",
-                      0, KEY_QUERY_VALUE, &internet_settings) != ERROR_SUCCESS)
-        return FALSE;
-
-    size = sizeof(DWORD);
-    if (RegQueryValueExA(internet_settings, "ProxyEnable", NULL, NULL, (LPBYTE) &proxy_enable, &size) != ERROR_SUCCESS)
-        proxy_enable = 0;
-
-    RegCloseKey(internet_settings);
-
-    return proxy_enable != 0;
 }
 
 static HRESULT WINAPI HttpSecurity_QueryInterface(IHttpSecurity *iface, REFIID riid, void **ppv)
@@ -589,20 +570,11 @@ static void call_continue(PROTOCOLDATA *protocol_data)
         if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST)
             CLEAR_CALLED(ReportProgress_COOKIE_SENT);
         if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST || tested_protocol == FTP_TEST) {
-            if (http_is_first) {
+            if (http_is_first){
                 CLEAR_CALLED(ReportProgress_FINDINGRESOURCE);
-                CLEAR_CALLED(ReportProgress_CONNECTING);
                 CLEAR_CALLED(ReportProgress_PROXYDETECTING);
-            }else if(test_redirect) {
-                if (! proxy_active())
-                    CHECK_CALLED(ReportProgress_FINDINGRESOURCE);
-                else
-                    CLEAR_CALLED(ReportProgress_FINDINGRESOURCE);
-            }else todo_wine {
-                CHECK_NOT_CALLED(ReportProgress_FINDINGRESOURCE);
-                /* IE7 does call this */
-                CLEAR_CALLED(ReportProgress_CONNECTING);
             }
+            CLEAR_CALLED(ReportProgress_CONNECTING);
         }
         if(tested_protocol == FTP_TEST)
             todo_wine CHECK_CALLED(ReportProgress_SENDINGREQUEST);
@@ -621,7 +593,7 @@ static void call_continue(PROTOCOLDATA *protocol_data)
     case STATE_STARTDOWNLOADING:
         if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST) {
             SET_EXPECT(OnResponse);
-            if(tested_protocol == HTTPS_TEST || test_redirect || test_abort)
+            if(tested_protocol == HTTPS_TEST || test_redirect || test_abort || empty_file)
                 SET_EXPECT(ReportProgress_ACCEPTRANGES);
             SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
             if(bindf & BINDF_NEEDFILE)
@@ -652,9 +624,9 @@ static void call_continue(PROTOCOLDATA *protocol_data)
             state = STATE_DOWNLOADING;
             if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST) {
                 CHECK_CALLED(OnResponse);
-                if(tested_protocol == HTTPS_TEST || test_abort)
+                if(tested_protocol == HTTPS_TEST || empty_file)
                     CHECK_CALLED(ReportProgress_ACCEPTRANGES);
-                else if(test_redirect)
+                else if(test_redirect || test_abort)
                     CLEAR_CALLED(ReportProgress_ACCEPTRANGES);
                 CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
                 if(bindf & BINDF_NEEDFILE)
@@ -728,11 +700,13 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText) {
             if(tested_protocol == BIND_TEST)
-                ok(szStatusText == expect_wsz, "unexpected szStatusText\n");
+                ok(!lstrcmpW(szStatusText, expect_wsz), "unexpected szStatusText %s\n", wine_dbgstr_w(szStatusText));
             else if (http_post_test)
                 ok(lstrlenW(text_plain) <= lstrlenW(szStatusText) &&
                    !memcmp(szStatusText, text_plain, lstrlenW(text_plain)*sizeof(WCHAR)),
                    "szStatusText != text/plain\n");
+            else if(empty_file)
+                ok(!strcmp_wa(szStatusText, "application/javascript"), "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
             else if(!mimefilter_test)
                 ok(lstrlenW(text_htmlW) <= lstrlenW(szStatusText) &&
                    !memcmp(szStatusText, text_htmlW, lstrlenW(text_htmlW)*sizeof(WCHAR)),
@@ -783,7 +757,7 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         CHECK_EXPECT(ReportProgress_VERIFIEDMIMETYPEAVAILABLE);
         ok(szStatusText != NULL, "szStatusText == NULL\n");
         if(szStatusText)
-            ok(!lstrcmpW(szStatusText, text_htmlW), "szStatusText != text/html\n");
+            ok(!strcmp_wa(szStatusText, "text/html"), "szStatusText != text/html\n");
         break;
     case BINDSTATUS_PROTOCOLCLASSID:
         CHECK_EXPECT(ReportProgress_PROTOCOLCLASSID);
@@ -797,7 +771,7 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
     case BINDSTATUS_REDIRECTING:
         CHECK_EXPECT(ReportProgress_REDIRECTING);
         if(test_redirect)
-            ok(!strcmp_wa(szStatusText, "http://test.winehq.org/hello.html"), "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
+            ok(!strcmp_wa(szStatusText, "http://test.winehq.org/tests/hello.html"), "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
         else
             ok(szStatusText == NULL, "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
         break;
@@ -810,8 +784,9 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         ok(!szStatusText, "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
         break;
     case BINDSTATUS_PROXYDETECTING:
-        CHECK_EXPECT(ReportProgress_PROXYDETECTING);
-        SET_EXPECT(ReportProgress_CONNECTING);
+        if(!called_ReportProgress_PROXYDETECTING)
+            SET_EXPECT(ReportProgress_CONNECTING);
+        CHECK_EXPECT2(ReportProgress_PROXYDETECTING);
         ok(!szStatusText, "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
         break;
     case BINDSTATUS_LOADINGMIMEHANDLER:
@@ -924,14 +899,25 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
         }
     }else if(!binding_test && (tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST
             || tested_protocol == FTP_TEST)) {
-        if(!(grfBSCF & BSCF_LASTDATANOTIFICATION) || (grfBSCF & BSCF_DATAFULLYAVAILABLE))
+        if(empty_file)
+            CHECK_EXPECT2(ReportData);
+        else if(!(grfBSCF & BSCF_LASTDATANOTIFICATION) || (grfBSCF & BSCF_DATAFULLYAVAILABLE))
             CHECK_EXPECT(ReportData);
         else if (http_post_test)
             ok(ulProgress == 13, "Read %u bytes instead of 13\n", ulProgress);
 
-        ok(ulProgress, "ulProgress == 0\n");
+        if(empty_file) {
+            ok(!ulProgress, "ulProgress = %d\n", ulProgress);
+            ok(!ulProgressMax, "ulProgressMax = %d\n", ulProgressMax);
+        }else {
+            ok(ulProgress, "ulProgress == 0\n");
+        }
 
-        if(first_data_notif) {
+        if(empty_file) {
+            ok(grfBSCF == (BSCF_FIRSTDATANOTIFICATION|BSCF_LASTDATANOTIFICATION),
+               "grcfBSCF = %08x\n", grfBSCF);
+            first_data_notif = FALSE;
+        }else if(first_data_notif) {
             ok(grfBSCF == BSCF_FIRSTDATANOTIFICATION
                || grfBSCF == (BSCF_LASTDATANOTIFICATION|BSCF_DATAFULLYAVAILABLE),
                "grcfBSCF = %08x\n", grfBSCF);
@@ -950,9 +936,6 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
                 if(http_is_first) {
                     CHECK_CALLED(ReportProgress_FINDINGRESOURCE);
                     CHECK_CALLED(ReportProgress_CONNECTING);
-                } else todo_wine {
-                    CHECK_NOT_CALLED(ReportProgress_FINDINGRESOURCE);
-                    CHECK_NOT_CALLED(ReportProgress_CONNECTING);
                 }
                 CHECK_CALLED(ReportProgress_SENDINGREQUEST);
                 CHECK_CALLED(OnResponse);
@@ -1059,7 +1042,20 @@ static HRESULT WINAPI MimeProtocolSink_Switch(IInternetProtocolSink *iface, PROT
 static HRESULT WINAPI MimeProtocolSink_ReportProgress(IInternetProtocolSink *iface, ULONG ulStatusCode,
         LPCWSTR szStatusText)
 {
-    CHECK_EXPECT(MimeFilter_ReportProgress);
+    switch(ulStatusCode) {
+    case BINDSTATUS_LOADINGMIMEHANDLER:
+        /*
+         * IE9 for some reason (bug?) calls this on mime handler's protocol sink instead of the
+         * main protocol sink. We check ReportProgress_LOADINGMIMEHANDLER both here and in
+         * ProtocolSink_ReportProgress to workaround it.
+         */
+        CHECK_EXPECT(ReportProgress_LOADINGMIMEHANDLER);
+        ok(!szStatusText, "szStatusText = %s\n", wine_dbgstr_w(szStatusText));
+        break;
+    default:
+        ok(0, "Unexpected status code %d\n", ulStatusCode);
+    }
+
     return S_OK;
 }
 
@@ -1758,6 +1754,7 @@ static HRESULT WINAPI ProtocolEmul_Continue(IInternetProtocolEx *iface,
         if(pr == 200) {
             if(!mimefilter_test)
                 SET_EXPECT(Read); /* checked in BINDSTATUS_MIMETYPEAVAILABLE or ReportData */
+            SET_EXPECT(GetBindInfo);
             SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
         }
         if(pr >= 200)
@@ -1775,6 +1772,7 @@ static HRESULT WINAPI ProtocolEmul_Continue(IInternetProtocolEx *iface,
         if(!short_read && pr < 200)
             CHECK_CALLED(Read);
         if(pr == 200) {
+            CLEAR_CALLED(GetBindInfo); /* IE9 */
             CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
         }
     }else {
@@ -1832,6 +1830,7 @@ static HRESULT WINAPI ProtocolEmul_Read(IInternetProtocolEx *iface, void *pv,
         prot_state = 4;
         if(short_read) {
             SET_EXPECT(Read2); /* checked in BINDSTATUS_MIMETYPEAVAILABLE */
+            SET_EXPECT(GetBindInfo);
             SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
         }
         if(mimefilter_test)
@@ -1843,8 +1842,10 @@ static HRESULT WINAPI ProtocolEmul_Read(IInternetProtocolEx *iface, void *pv,
                 BSCF_LASTDATANOTIFICATION|BSCF_INTERMEDIATEDATANOTIFICATION, 0, 0);
         read_report_data--;
         ok(hres == S_OK, "ReportData failed: %08x\n", hres);
-        if(short_read)
+        if(short_read) {
+            CLEAR_CALLED(GetBindInfo); /* IE9 */
             CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
+        }
         if(mimefilter_test)
             CHECK_CALLED(MimeFilter_ReportData);
         else if(direct_read)
@@ -2200,6 +2201,7 @@ static IClassFactory mimefilter_cf = { &MimeFilterCFVtbl };
 #define TEST_ASYNCREQ    0x0200
 #define TEST_USEIURI     0x0400
 #define TEST_IMPLPROTEX  0x0800
+#define TEST_EMPTY       0x1000
 
 static void register_filter(BOOL do_register)
 {
@@ -2251,6 +2253,7 @@ static void init_test(int prot, DWORD flags)
     test_redirect = (flags & TEST_REDIRECT) != 0;
     test_abort = (flags & TEST_ABORT) != 0;
     impl_protex = (flags & TEST_IMPLPROTEX) != 0;
+    empty_file = (flags & TEST_EMPTY) != 0;
 
     register_filter(mimefilter_test);
 }
@@ -2446,6 +2449,24 @@ static void test_file_protocol_url(LPCWSTR url)
         IUri *uri;
 
         hres = pCreateUri(url, Uri_CREATE_FILE_USE_DOS_PATH, 0, &uri);
+        ok(hres == S_OK, "CreateUri failed: %08x\n", hres);
+
+        hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocolEx, (void**)&protocolex);
+        ok(hres == S_OK, "Could not get IInternetProtocolEx: %08x\n", hres);
+
+        if(file_protocol_start(NULL, NULL, protocolex, uri, TRUE)) {
+            hres = IInternetProtocolEx_Read(protocolex, buf, 2, &cb);
+            ok(hres == S_OK, "Read failed: %08x\n", hres);
+            hres = IInternetProtocolEx_LockRequest(protocolex, 0);
+            ok(hres == S_OK, "LockRequest failed: %08x\n", hres);
+            hres = IInternetProtocolEx_UnlockRequest(protocolex);
+            ok(hres == S_OK, "UnlockRequest failed: %08x\n", hres);
+        }
+
+        IUri_Release(uri);
+        IInternetProtocolEx_Release(protocolex);
+
+        hres = pCreateUri(url, 0, 0, &uri);
         ok(hres == S_OK, "CreateUri failed: %08x\n", hres);
 
         hres = IClassFactory_CreateInstance(factory, NULL, &IID_IInternetProtocolEx, (void**)&protocolex);
@@ -2785,8 +2806,10 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
         test_http_info(async_protocol);
 
         SET_EXPECT(ReportProgress_COOKIE_SENT);
-        SET_EXPECT(ReportProgress_FINDINGRESOURCE);
-        SET_EXPECT(ReportProgress_CONNECTING);
+        if(http_is_first) {
+            SET_EXPECT(ReportProgress_FINDINGRESOURCE);
+            SET_EXPECT(ReportProgress_CONNECTING);
+        }
         SET_EXPECT(ReportProgress_SENDINGREQUEST);
         if(test_redirect)
             SET_EXPECT(ReportProgress_REDIRECTING);
@@ -2892,35 +2915,33 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
 
 static void test_http_protocol(void)
 {
-    static const WCHAR winehq_url[] =
-        {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.',
-            'o','r','g','/','s','i','t','e','/','a','b','o','u','t',0};
     static const WCHAR posttest_url[] =
-        {'h','t','t','p',':','/','/','c','r','o','s','s','o','v','e','r','.',
-         'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m','/',
-         'p','o','s','t','t','e','s','t','.','p','h','p',0};
+        {'h','t','t','p',':','/','/','t','e','s','t','.','w','i','n','e','h','q','.','o','r','g','/',
+         't','e','s','t','s','/','p','o','s','t','.','p','h','p',0};
     static const WCHAR redirect_url[] =
         {'h','t','t','p',':','/','/','t','e','s','t','.','w','i','n','e','h','q','.','o','r','g','/',
-         't','e','s','t','r','e','d','i','r','e','c','t',0};
+         't','e','s','t','s','/','r','e','d','i','r','e','c','t',0};
     static const WCHAR winetest_url[] =
-        {'h','t','t','p',':','/','/','t','e','s','t','.','w','i','n','e','h','q','.','o','r','g','/','d','a','t','a','/',0};
+        {'h','t','t','p',':','/','/','t','e','s','t','.','w','i','n','e','h','q','.','o','r','g','/',
+         't','e','s','t','s','/','d','a','t','a','.','p','h','p',0};
+    static const WCHAR empty_url[] =
+        {'h','t','t','p',':','/','/','t','e','s','t','.','w','i','n','e','h','q','.','o','r','g','/',
+         't','e','s','t','s','/','e','m','p','t','y','.','j','s',0};
 
     trace("Testing http protocol (not from urlmon)...\n");
     bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
-    test_http_protocol_url(winehq_url, HTTP_TEST, TEST_FIRST_HTTP, TYMED_NULL);
+    test_http_protocol_url(winetest_url, HTTP_TEST, TEST_FIRST_HTTP, TYMED_NULL);
 
     trace("Testing http protocol (from urlmon)...\n");
     bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
-    test_http_protocol_url(winehq_url, HTTP_TEST, 0, TYMED_NULL);
+    test_http_protocol_url(winetest_url, HTTP_TEST, 0, TYMED_NULL);
 
     trace("Testing http protocol (to file)...\n");
     bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON | BINDF_NEEDFILE;
-    test_http_protocol_url(winehq_url, HTTP_TEST, 0, TYMED_NULL);
+    test_http_protocol_url(winetest_url, HTTP_TEST, 0, TYMED_NULL);
 
     trace("Testing http protocol (post data)...\n");
-    /* Without this flag we get a ReportProgress_CACHEFILENAMEAVAILABLE
-     * notification with BINDVERB_POST */
-    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON | BINDF_NOWRITECACHE;
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
     test_http_protocol_url(posttest_url, HTTP_TEST, TEST_FIRST_HTTP|TEST_POST, TYMED_HGLOBAL);
 
     trace("Testing http protocol (post data stream)...\n");
@@ -2928,11 +2949,14 @@ static void test_http_protocol(void)
 
     trace("Testing http protocol (direct read)...\n");
     bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
-    test_http_protocol_url(winehq_url, HTTP_TEST, TEST_DIRECT_READ|TEST_USEIURI, TYMED_NULL);
+    test_http_protocol_url(winetest_url, HTTP_TEST, TEST_DIRECT_READ|TEST_USEIURI, TYMED_NULL);
 
     trace("Testing http protocol (redirected)...\n");
-    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON;
+    bindf = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA | BINDF_FROMURLMON | BINDF_NOWRITECACHE;
     test_http_protocol_url(redirect_url, HTTP_TEST, TEST_REDIRECT, TYMED_NULL);
+
+    trace("Testing http protocol empty file...\n");
+    test_http_protocol_url(empty_url, HTTP_TEST, TEST_EMPTY, TYMED_NULL);
 
     trace("Testing http protocol abort...\n");
     test_http_protocol_url(winetest_url, HTTP_TEST, TEST_ABORT, TYMED_NULL);

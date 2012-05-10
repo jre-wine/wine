@@ -24,6 +24,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static inline struct dxgi_factory *impl_from_IWineDXGIFactory(IWineDXGIFactory *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_factory, IWineDXGIFactory_iface);
+}
+
 /* IUnknown methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *iface, REFIID riid, void **object)
@@ -48,7 +53,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_QueryInterface(IWineDXGIFactory *i
 
 static ULONG STDMETHODCALLTYPE dxgi_factory_AddRef(IWineDXGIFactory *iface)
 {
-    struct dxgi_factory *This = (struct dxgi_factory *)iface;
+    struct dxgi_factory *This = impl_from_IWineDXGIFactory(iface);
     ULONG refcount = InterlockedIncrement(&This->refcount);
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
@@ -58,7 +63,7 @@ static ULONG STDMETHODCALLTYPE dxgi_factory_AddRef(IWineDXGIFactory *iface)
 
 static ULONG STDMETHODCALLTYPE dxgi_factory_Release(IWineDXGIFactory *iface)
 {
-    struct dxgi_factory *This = (struct dxgi_factory *)iface;
+    struct dxgi_factory *This = impl_from_IWineDXGIFactory(iface);
     ULONG refcount = InterlockedDecrement(&This->refcount);
 
     TRACE("%p decreasing refcount to %u\n", This, refcount);
@@ -122,7 +127,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_GetParent(IWineDXGIFactory *iface,
 static HRESULT STDMETHODCALLTYPE dxgi_factory_EnumAdapters(IWineDXGIFactory *iface,
         UINT adapter_idx, IDXGIAdapter **adapter)
 {
-    struct dxgi_factory *This = (struct dxgi_factory *)iface;
+    struct dxgi_factory *This = impl_from_IWineDXGIFactory(iface);
 
     TRACE("iface %p, adapter_idx %u, adapter %p\n", iface, adapter_idx, adapter);
 
@@ -156,14 +161,12 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_GetWindowAssociation(IWineDXGIFact
     return E_NOTIMPL;
 }
 
-/* TODO: The DXGI swapchain desc is a bit nicer than WINED3DPRESENT_PARAMETERS,
- * change wined3d to use a structure more similar to DXGI. */
 static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSwapChain(IWineDXGIFactory *iface,
         IUnknown *device, DXGI_SWAP_CHAIN_DESC *desc, IDXGISwapChain **swapchain)
 {
-    WINED3DPRESENT_PARAMETERS present_parameters;
-    IWineD3DSwapChain *wined3d_swapchain;
-    IWineD3DDevice *wined3d_device;
+    struct wined3d_swapchain *wined3d_swapchain;
+    struct wined3d_swapchain_desc wined3d_desc;
+    struct wined3d_device *wined3d_device;
     IWineDXGIDevice *dxgi_device;
     UINT count;
     HRESULT hr;
@@ -180,11 +183,11 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSwapChain(IWineDXGIFactory *
     wined3d_device = IWineDXGIDevice_get_wined3d_device(dxgi_device);
     IWineDXGIDevice_Release(dxgi_device);
 
-    count = IWineD3DDevice_GetNumberOfSwapChains(wined3d_device);
+    count = wined3d_device_get_swapchain_count(wined3d_device);
     if (count)
     {
         FIXME("Only a single swapchain supported.\n");
-        IWineD3DDevice_Release(wined3d_device);
+        wined3d_device_decref(wined3d_device);
         return E_FAIL;
     }
 
@@ -195,48 +198,47 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSwapChain(IWineDXGIFactory *
 
     FIXME("Ignoring SwapEffect and Flags\n");
 
-    present_parameters.BackBufferWidth = desc->BufferDesc.Width;
-    present_parameters.BackBufferHeight = desc->BufferDesc.Height;
-    present_parameters.BackBufferFormat = wined3dformat_from_dxgi_format(desc->BufferDesc.Format);
-    present_parameters.BackBufferCount = desc->BufferCount;
+    wined3d_desc.backbuffer_width = desc->BufferDesc.Width;
+    wined3d_desc.backbuffer_height = desc->BufferDesc.Height;
+    wined3d_desc.backbuffer_format = wined3dformat_from_dxgi_format(desc->BufferDesc.Format);
+    wined3d_desc.backbuffer_count = desc->BufferCount;
     if (desc->SampleDesc.Count > 1)
     {
-        present_parameters.MultiSampleType = desc->SampleDesc.Count;
-        present_parameters.MultiSampleQuality = desc->SampleDesc.Quality;
+        wined3d_desc.multisample_type = desc->SampleDesc.Count;
+        wined3d_desc.multisample_quality = desc->SampleDesc.Quality;
     }
     else
     {
-        present_parameters.MultiSampleType = WINED3DMULTISAMPLE_NONE;
-        present_parameters.MultiSampleQuality = 0;
+        wined3d_desc.multisample_type = WINED3D_MULTISAMPLE_NONE;
+        wined3d_desc.multisample_quality = 0;
     }
-    present_parameters.SwapEffect = WINED3DSWAPEFFECT_DISCARD;
-    present_parameters.hDeviceWindow = desc->OutputWindow;
-    present_parameters.Windowed = desc->Windowed;
-    present_parameters.EnableAutoDepthStencil = FALSE;
-    present_parameters.AutoDepthStencilFormat = 0;
-    present_parameters.Flags = 0; /* WINED3DPRESENTFLAG_DISCARD_DEPTHSTENCIL? */
-    present_parameters.FullScreen_RefreshRateInHz =
-            desc->BufferDesc.RefreshRate.Numerator / desc->BufferDesc.RefreshRate.Denominator;
-    present_parameters.PresentationInterval = WINED3DPRESENT_INTERVAL_DEFAULT;
+    wined3d_desc.swap_effect = WINED3D_SWAP_EFFECT_DISCARD;
+    wined3d_desc.device_window = desc->OutputWindow;
+    wined3d_desc.windowed = desc->Windowed;
+    wined3d_desc.enable_auto_depth_stencil = FALSE;
+    wined3d_desc.auto_depth_stencil_format = 0;
+    wined3d_desc.flags = 0; /* WINED3DPRESENTFLAG_DISCARD_DEPTHSTENCIL? */
+    wined3d_desc.refresh_rate = desc->BufferDesc.RefreshRate.Numerator / desc->BufferDesc.RefreshRate.Denominator;
+    wined3d_desc.swap_interval = WINED3DPRESENT_INTERVAL_DEFAULT;
 
-    hr = IWineD3DDevice_Init3D(wined3d_device, &present_parameters);
+    hr = wined3d_device_init_3d(wined3d_device, &wined3d_desc);
     if (FAILED(hr))
     {
         WARN("Failed to initialize 3D, returning %#x\n", hr);
-        IWineD3DDevice_Release(wined3d_device);
+        wined3d_device_decref(wined3d_device);
         return hr;
     }
 
-    hr = IWineD3DDevice_GetSwapChain(wined3d_device, 0, &wined3d_swapchain);
-    IWineD3DDevice_Release(wined3d_device);
+    hr = wined3d_device_get_swapchain(wined3d_device, 0, &wined3d_swapchain);
+    wined3d_device_decref(wined3d_device);
     if (FAILED(hr))
     {
         WARN("Failed to get swapchain, returning %#x\n", hr);
         return hr;
     }
 
-    *swapchain = IWineD3DSwapChain_GetParent(wined3d_swapchain);
-    IUnknown_Release(wined3d_swapchain);
+    *swapchain = wined3d_swapchain_get_parent(wined3d_swapchain);
+    wined3d_swapchain_decref(wined3d_swapchain);
 
     /* FIXME? The swapchain is created with refcount 1 by the wined3d device,
      * but the wined3d device can't hold a real reference. */
@@ -258,7 +260,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_factory_CreateSoftwareAdapter(IWineDXGIFac
 
 static struct wined3d * STDMETHODCALLTYPE dxgi_factory_get_wined3d(IWineDXGIFactory *iface)
 {
-    struct dxgi_factory *This = (struct dxgi_factory *)iface;
+    struct dxgi_factory *This = impl_from_IWineDXGIFactory(iface);
 
     TRACE("iface %p\n", iface);
 
@@ -294,11 +296,11 @@ HRESULT dxgi_factory_init(struct dxgi_factory *factory)
     HRESULT hr;
     UINT i;
 
-    factory->vtbl = &dxgi_factory_vtbl;
+    factory->IWineDXGIFactory_iface.lpVtbl = &dxgi_factory_vtbl;
     factory->refcount = 1;
 
     EnterCriticalSection(&dxgi_cs);
-    factory->wined3d = wined3d_create(10, factory);
+    factory->wined3d = wined3d_create(10, 0, factory);
     if (!factory->wined3d)
     {
         LeaveCriticalSection(&dxgi_cs);
@@ -332,7 +334,7 @@ HRESULT dxgi_factory_init(struct dxgi_factory *factory)
             goto fail;
         }
 
-        hr = dxgi_adapter_init(adapter, (IWineDXGIFactory *)factory, i);
+        hr = dxgi_adapter_init(adapter, &factory->IWineDXGIFactory_iface, i);
         if (FAILED(hr))
         {
             UINT j;

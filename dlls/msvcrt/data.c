@@ -156,6 +156,36 @@ char** CDECL __p__pgmptr(void) { return &MSVCRT__pgmptr; }
 WCHAR** CDECL __p__wpgmptr(void) { return &MSVCRT__wpgmptr; }
 
 /***********************************************************************
+ *              _get_pgmptr (MSVCRT.@)
+ */
+int CDECL _get_pgmptr(char** p)
+{
+  if (!MSVCRT_CHECK_PMT(p))
+  {
+    *MSVCRT__errno() = MSVCRT_EINVAL;
+    return MSVCRT_EINVAL;
+  }
+
+  *p = MSVCRT__pgmptr;
+  return 0;
+}
+
+/***********************************************************************
+ *              _get_wpgmptr (MSVCRT.@)
+ */
+int CDECL _get_wpgmptr(WCHAR** p)
+{
+  if (!MSVCRT_CHECK_PMT(p))
+  {
+    *MSVCRT__errno() = MSVCRT_EINVAL;
+    return MSVCRT_EINVAL;
+  }
+
+  *p = MSVCRT__wpgmptr;
+  return 0;
+}
+
+/***********************************************************************
  *		__p__fmode (MSVCRT.@)
  */
 unsigned int* CDECL __p__fmode(void) { return &MSVCRT__fmode; }
@@ -203,7 +233,7 @@ MSVCRT_wchar_t*** CDECL __p___wargv(void) { return &MSVCRT___wargv; }
 /*********************************************************************
  *		__p__environ (MSVCRT.@)
  */
-char*** CDECL __p__environ(void)
+char*** CDECL MSVCRT___p__environ(void)
 {
   return &MSVCRT__environ;
 }
@@ -211,7 +241,7 @@ char*** CDECL __p__environ(void)
 /*********************************************************************
  *		__p__wenviron (MSVCRT.@)
  */
-MSVCRT_wchar_t*** CDECL __p__wenviron(void)
+MSVCRT_wchar_t*** CDECL MSVCRT___p__wenviron(void)
 {
   return &MSVCRT__wenviron;
 }
@@ -276,7 +306,7 @@ void msvcrt_init_args(void)
 {
   OSVERSIONINFOW osvi;
 
-  MSVCRT__acmdln = _strdup( GetCommandLineA() );
+  MSVCRT__acmdln = MSVCRT__strdup( GetCommandLineA() );
   MSVCRT__wcmdln = msvcrt_wstrdupa(MSVCRT__acmdln);
   MSVCRT___argc = __wine_main_argc;
   MSVCRT___argv = __wine_main_argv;

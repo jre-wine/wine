@@ -31,7 +31,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
 /* ptr to fonts for which we have afm files */
-FONTFAMILY *PSDRV_AFMFontList = NULL;
+DECLSPEC_HIDDEN FONTFAMILY *PSDRV_AFMFontList = NULL;
 
 
 /***********************************************************
@@ -289,11 +289,6 @@ BOOL PSDRV_GetFontMetrics(void)
 
     if (PSDRV_GetType1Metrics() == FALSE)
     	return FALSE;
-
-#ifdef HAVE_FREETYPE
-    if (PSDRV_GetTrueTypeMetrics() == FALSE)
-    	return FALSE;
-#endif
 
     if (AddBuiltinAFMs() == FALSE)
     	return FALSE;

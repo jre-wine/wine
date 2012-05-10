@@ -63,6 +63,8 @@
 # include <sys/poll.h>
 #endif
 
+#define USE_WS_PREFIX
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -187,7 +189,7 @@ BOOL WINAPI IcmpCloseHandle(HANDLE  IcmpHandle)
         return FALSE;
     }
 
-    shutdown(icp->sid,2);
+    close( icp->sid );
     HeapFree(GetProcessHeap (), 0, icp);
     return TRUE;
 }
@@ -512,6 +514,48 @@ DWORD WINAPI IcmpSendEcho2(
         FIXME("unsupported for APCs\n");
         return 0;
     }
+    return IcmpSendEcho(IcmpHandle, DestinationAddress, RequestData,
+            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+}
+
+/***********************************************************************
+ *		IcmpSendEcho2Ex (IPHLPAPI.@)
+ */
+DWORD WINAPI IcmpSendEcho2Ex(
+    HANDLE                   IcmpHandle,
+    HANDLE                   Event,
+    PIO_APC_ROUTINE          ApcRoutine,
+    PVOID                    ApcContext,
+    IPAddr                   SourceAddress,
+    IPAddr                   DestinationAddress,
+    LPVOID                   RequestData,
+    WORD                     RequestSize,
+    PIP_OPTION_INFORMATION   RequestOptions,
+    LPVOID                   ReplyBuffer,
+    DWORD                    ReplySize,
+    DWORD                    Timeout
+    )
+{
+    TRACE("(%p, %p, %p, %p, %08x, %08x, %p, %d, %p, %p, %d, %d): stub\n", IcmpHandle,
+            Event, ApcRoutine, ApcContext, SourceAddress, DestinationAddress, RequestData,
+            RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
+
+    if (Event)
+    {
+        FIXME("unsupported for events\n");
+        return 0;
+    }
+    if (ApcRoutine)
+    {
+        FIXME("unsupported for APCs\n");
+        return 0;
+    }
+    if (SourceAddress)
+    {
+        FIXME("unsupported for source addresses\n");
+        return 0;
+    }
+
     return IcmpSendEcho(IcmpHandle, DestinationAddress, RequestData,
             RequestSize, RequestOptions, ReplyBuffer, ReplySize, Timeout);
 }

@@ -9,8 +9,8 @@
 @ stub DsGetDcOpen
 @ stub DsGetDcSiteCoverage
 @ stub DsGetForestTrustInformationW
-@ stub DsGetSiteNameA # (str str)
-@ stdcall DsGetSiteNameW(wstr wstr)
+@ stdcall DsGetSiteNameA(str ptr)
+@ stdcall DsGetSiteNameW(wstr ptr)
 @ stub DsMergeForestTrustInformationW
 @ stdcall DsRoleFreeMemory(ptr)
 @ stdcall DsRoleGetPrimaryDomainInformation(wstr long ptr)
@@ -168,7 +168,7 @@
 @ stub NetRplWkstaSetInfo
 @ stub NetScheduleJobAdd
 @ stub NetScheduleJobDel
-@ stub NetScheduleJobEnum
+@ stdcall NetScheduleJobEnum(wstr ptr long ptr ptr ptr)
 @ stub NetScheduleJobGetInfo
 @ stub NetServerComputerNameAdd
 @ stub NetServerComputerNameDel
@@ -200,7 +200,7 @@
 @ stdcall NetUseAdd(wstr long ptr ptr)
 @ stdcall NetUseDel(wstr wstr long)
 @ stdcall NetUseEnum(wstr long ptr long ptr ptr ptr)
-@ stub NetUseGetInfo
+@ stdcall NetUseGetInfo(ptr ptr long ptr)
 @ stdcall NetUserAdd(wstr long ptr ptr)
 @ stdcall NetUserChangePassword(wstr wstr wstr wstr)
 @ stdcall NetUserDel(wstr wstr)

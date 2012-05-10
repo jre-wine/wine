@@ -163,9 +163,9 @@ static int mutex_satisfied( struct object *obj, struct thread *thread )
 
 static unsigned int mutex_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | SYNCHRONIZE;
-    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | MUTEX_MODIFY_STATE;
-    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE;
+    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ;
+    if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE;
+    if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE;
     if (access & GENERIC_ALL)     access |= STANDARD_RIGHTS_ALL | MUTEX_ALL_ACCESS;
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
@@ -175,7 +175,7 @@ static int mutex_signal( struct object *obj, unsigned int access )
     struct mutex *mutex = (struct mutex *)obj;
     assert( obj->ops == &mutex_ops );
 
-    if (!(access & SYNCHRONIZE))  /* FIXME: MUTEX_MODIFY_STATE? */
+    if (!(access & SYNCHRONIZE))
     {
         set_error( STATUS_ACCESS_DENIED );
         return 0;
@@ -238,6 +238,14 @@ DECL_HANDLER(open_mutex)
     struct directory *root = NULL;
     struct mutex *mutex;
 
+    if ((req->access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL |
+                         MUTEX_ALL_ACCESS | STANDARD_RIGHTS_ALL | MAXIMUM_ALLOWED)) ||
+        !req->access)
+    {
+        set_error(STATUS_INVALID_PARAMETER);
+        return;
+    }
+
     get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
         return;
@@ -257,7 +265,7 @@ DECL_HANDLER(release_mutex)
     struct mutex *mutex;
 
     if ((mutex = (struct mutex *)get_handle_obj( current->process, req->handle,
-                                                 MUTEX_MODIFY_STATE, &mutex_ops )))
+                                                 0, &mutex_ops )))
     {
         if (!mutex->count || (mutex->owner != current)) set_error( STATUS_MUTANT_NOT_OWNED );
         else

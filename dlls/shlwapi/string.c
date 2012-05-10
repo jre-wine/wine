@@ -865,10 +865,7 @@ BOOL WINAPI StrToIntExA(LPCSTR lpszStr, DWORD dwFlags, LPINT lpiRet)
     WARN("Invalid parameter would crash under Win32!\n");
     return FALSE;
   }
-  if (dwFlags > STIF_SUPPORT_HEX)
-  {
-    WARN("Unknown flags (%08lX)!\n", dwFlags & ~STIF_SUPPORT_HEX);
-  }
+  if (dwFlags > STIF_SUPPORT_HEX) WARN("Unknown flags %08x\n", dwFlags);
 
   /* Skip leading space, '+', '-' */
   while (isspace(*lpszStr))
@@ -935,10 +932,7 @@ BOOL WINAPI StrToIntExW(LPCWSTR lpszStr, DWORD dwFlags, LPINT lpiRet)
     WARN("Invalid parameter would crash under Win32!\n");
     return FALSE;
   }
-  if (dwFlags > STIF_SUPPORT_HEX)
-  {
-    WARN("Unknown flags (%08lX)!\n", dwFlags & ~STIF_SUPPORT_HEX);
-  }
+  if (dwFlags > STIF_SUPPORT_HEX) WARN("Unknown flags %08x\n", dwFlags);
 
   /* Skip leading space, '+', '-' */
   while (isspaceW(*lpszStr)) lpszStr++;
@@ -2344,7 +2338,7 @@ LPWSTR WINAPI StrFormatByteSizeW(LONGLONG llBytes, LPWSTR lpszDest, UINT cchMax)
   {
     WCHAR wszBytesFormat[64];
     LoadStringW(shlwapi_hInstance, IDS_BYTES_FORMAT, wszBytesFormat, 64);
-    snprintfW(lpszDest, cchMax, wszBytesFormat, (long)llBytes);
+    snprintfW(lpszDest, cchMax, wszBytesFormat, (int)llBytes);
     return lpszDest;
   }
 
@@ -2364,7 +2358,7 @@ LPWSTR WINAPI StrFormatByteSizeW(LONGLONG llBytes, LPWSTR lpszDest, UINT cchMax)
    * counts that lie exactly on a 1024 byte boundary.
    */
   if (i > 8)
-    dBytes = (double)(llBytes >> 20) + 0.001; /* Scale down by I MB */
+    dBytes = (double)(llBytes >> 20) + 0.001; /* Scale down by 1 MB */
   else
     dBytes = (double)llBytes + 0.00001;
 
@@ -2473,17 +2467,12 @@ char WINAPI SHStripMneumonicA(LPCSTR lpszStr)
   if ((lpszIter = StrChrA(lpszStr, '&')))
   {
     lpszTmp = CharNextA(lpszIter);
-    if (lpszTmp && *lpszTmp)
+    if (*lpszTmp)
     {
       if (*lpszTmp != '&')
         ch =  *lpszTmp;
 
-      while (lpszIter && *lpszIter)
-      {
-        lpszTmp = CharNextA(lpszIter);
-        *lpszIter = *lpszTmp;
-        lpszIter = lpszTmp;
-      }
+      memmove( lpszIter, lpszTmp, strlen(lpszTmp) + 1 );
     }
   }
 
@@ -2507,17 +2496,12 @@ WCHAR WINAPI SHStripMneumonicW(LPCWSTR lpszStr)
   if ((lpszIter = StrChrW(lpszStr, '&')))
   {
     lpszTmp = lpszIter + 1;
-    if (lpszTmp && *lpszTmp)
+    if (*lpszTmp)
     {
       if (*lpszTmp != '&')
         ch =  *lpszTmp;
 
-      while (lpszIter && *lpszIter)
-      {
-        lpszTmp = lpszIter + 1;
-        *lpszIter = *lpszTmp;
-        lpszIter = lpszTmp;
-      }
+      memmove( lpszIter, lpszTmp, (strlenW(lpszTmp) + 1) * sizeof(WCHAR) );
     }
   }
 

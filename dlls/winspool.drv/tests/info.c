@@ -75,6 +75,7 @@ static BOOL  (WINAPI * pGetPrinterDriverW)(HANDLE, LPWSTR, DWORD, LPBYTE, DWORD,
 static BOOL  (WINAPI * pGetPrinterW)(HANDLE, DWORD, LPBYTE, DWORD, LPDWORD);
 static BOOL  (WINAPI * pSetDefaultPrinterA)(LPCSTR);
 static DWORD (WINAPI * pXcvDataW)(HANDLE, LPCWSTR, PBYTE, DWORD, PBYTE, DWORD, PDWORD, PDWORD);
+static BOOL  (WINAPI * pIsValidDevmodeW)(PDEVMODEW, SIZE_T);
 
 
 /* ################################ */
@@ -146,7 +147,7 @@ static void find_default_printer(VOID)
         needed = sizeof(buffer);
         res = pGetDefaultPrinterA(buffer, &needed);
         if(res)  default_printer = buffer;
-        trace("default_printer: '%s'\n", default_printer);
+        trace("default_printer: '%s'\n", default_printer ? default_printer : "(null)");
     }
     if (default_printer == NULL)
     {
@@ -169,7 +170,7 @@ static void find_default_printer(VOID)
             }
             RegCloseKey(hwindows);
         }
-        trace("default_printer: '%s'\n", default_printer);
+        trace("default_printer: '%s'\n", default_printer ? default_printer : "(null)");
     }
     if (default_printer == NULL)
     {
@@ -183,7 +184,7 @@ static void find_default_printer(VOID)
                 default_printer = buffer;
             }
         }
-        trace("default_printer: '%s'\n", default_printer);
+        trace("default_printer: '%s'\n", default_printer ? default_printer : "(null)");
     }
 }
 
@@ -806,7 +807,7 @@ static void test_EnumForms(LPSTR pName)
     RETURN_ON_DEACTIVATED_SPOOLER(res)
     if (!res || !hprinter)
     {
-        /* Open the local Prinserver is not supported on win9x */
+        /* Open the local Printserver is not supported on win9x */
         if (pName) skip("Failed to open '%s' (not supported on win9x)\n", pName);
         return;
     }
@@ -2608,14 +2609,11 @@ static void test_GetPrinterDriver(void)
             ok(filled >= calculated,"calculated %d != filled %d\n", calculated, filled);
 
             /* Obscure test - demonstrate that Windows zero fills the buffer, even on failure */
-            if (di_2->pDataFile)
-            {
-                ret = GetPrinterDriver(hprn, NULL, level, buf, needed - 2, &filled);
-                ok(!ret, "level %d: GetPrinterDriver succeeded with less buffer than it should\n", level);
-                ok(di_2->pDataFile == NULL ||
-                   broken(di_2->pDataFile != NULL), /* Win9x/WinMe */
-                   "Even on failure, GetPrinterDriver clears the buffer to zeros\n");
-            }
+            ret = GetPrinterDriver(hprn, NULL, level, buf, needed - 2, &filled);
+            ok(!ret, "level %d: GetPrinterDriver succeeded with less buffer than it should\n", level);
+            ok(di_2->pDataFile == NULL ||
+               broken(di_2->pDataFile != NULL), /* Win9x/WinMe */
+               "Even on failure, GetPrinterDriver clears the buffer to zeros\n");
         }
 
         HeapFree(GetProcessHeap(), 0, buf);
@@ -2843,13 +2841,34 @@ static void test_DeviceCapabilities(void)
     ok(fields != (DWORD)-1, "DeviceCapabilities DC_FIELDS failed\n");
     todo_wine
     ok(fields == (dm->dmFields | DM_FORMNAME) ||
+       fields == ((dm->dmFields | DM_FORMNAME | DM_PAPERSIZE) & ~(DM_PAPERLENGTH|DM_PAPERWIDTH)) ||
         broken(fields == dm->dmFields), /* Win9x/WinMe */
-        "fields %x != (dm->dmFields | DM_FORMNAME) %lx\n", fields, (dm->dmFields | DM_FORMNAME));
+        "fields %x, dm->dmFields %x\n", fields, dm->dmFields);
 
     GlobalUnlock(prn_dlg.hDevMode);
     GlobalFree(prn_dlg.hDevMode);
     GlobalUnlock(prn_dlg.hDevNames);
     GlobalFree(prn_dlg.hDevNames);
+}
+
+static void test_IsValidDevmodeW(void)
+{
+    BOOL br;
+
+    if (!pIsValidDevmodeW)
+    {
+        win_skip("IsValidDevmodeW not implemented.\n");
+        return;
+    }
+
+    br = pIsValidDevmodeW(NULL, 0);
+    ok(br == FALSE, "Got %d\n", br);
+
+    br = pIsValidDevmodeW(NULL, 1);
+    ok(br == FALSE, "Got %d\n", br);
+
+    br = pIsValidDevmodeW(NULL, sizeof(DEVMODEW));
+    ok(br == FALSE, "Got %d\n", br);
 }
 
 START_TEST(info)
@@ -2863,6 +2882,7 @@ START_TEST(info)
     pGetPrinterW = (void *) GetProcAddress(hwinspool, "GetPrinterW");
     pSetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "SetDefaultPrinterA");
     pXcvDataW = (void *) GetProcAddress(hwinspool, "XcvDataW");
+    pIsValidDevmodeW = (void *) GetProcAddress(hwinspool, "IsValidDevmodeW");
 
     on_win9x = check_win9x();
     if (on_win9x)
@@ -2898,6 +2918,7 @@ START_TEST(info)
     test_SetDefaultPrinter();
     test_XcvDataW_MonitorUI();
     test_XcvDataW_PortIsValid();
+    test_IsValidDevmodeW();
 
     /* Cleanup our temporary file */
     DeleteFileA(tempfileA);

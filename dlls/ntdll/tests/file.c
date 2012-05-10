@@ -3,6 +3,7 @@
  * Copyright 2007 Jeff Latimer
  * Copyright 2007 Andrey Turkin
  * Copyright 2008 Jeff Zaroyko
+ * Copyright 2011 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -159,8 +160,10 @@ static void create_file_test(void)
 {
     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t',
                                         '\\','f','a','i','l','i','n','g',0};
+    static const WCHAR questionmarkInvalidNameW[] = {'a','f','i','l','e','?',0};
+    static const WCHAR pipeInvalidNameW[]  = {'a','|','b',0};
     NTSTATUS status;
-    HANDLE dir;
+    HANDLE dir, file;
     WCHAR path[MAX_PATH];
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
@@ -248,6 +251,35 @@ static void create_file_test(void)
     todo_wine
     ok( status == STATUS_INVALID_PARAMETER,
         "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    /* Invalid chars in file/dirnames */
+    pRtlDosPathNameToNtPathName_U(questionmarkInvalidNameW, &nameW, NULL, NULL);
+    attr.ObjectName = &nameW;
+    status = pNtCreateFile(&dir, GENERIC_READ|SYNCHRONIZE, &attr, &io, NULL, 0,
+                           FILE_SHARE_READ, FILE_CREATE,
+                           FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    ok(status == STATUS_OBJECT_NAME_INVALID,
+       "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status);
+
+    status = pNtCreateFile(&file, GENERIC_WRITE|SYNCHRONIZE, &attr, &io, NULL, 0,
+                           0, FILE_CREATE,
+                           FILE_NON_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    ok(status == STATUS_OBJECT_NAME_INVALID,
+       "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status);
+
+    pRtlDosPathNameToNtPathName_U(pipeInvalidNameW, &nameW, NULL, NULL);
+    attr.ObjectName = &nameW;
+    status = pNtCreateFile(&dir, GENERIC_READ|SYNCHRONIZE, &attr, &io, NULL, 0,
+                           FILE_SHARE_READ, FILE_CREATE,
+                           FILE_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    ok(status == STATUS_OBJECT_NAME_INVALID,
+       "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status);
+
+    status = pNtCreateFile(&file, GENERIC_WRITE|SYNCHRONIZE, &attr, &io, NULL, 0,
+                           0, FILE_CREATE,
+                           FILE_NON_DIRECTORY_FILE|FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0);
+    ok(status == STATUS_OBJECT_NAME_INVALID,
+       "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status);
 }
 
 static void open_file_test(void)
@@ -714,6 +746,7 @@ static void read_file_test(void)
     ResetEvent( event );
     status = pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
     ok( status == STATUS_SUCCESS || status == STATUS_PENDING, "wrong status %x\n", status );
+    if (status == STATUS_PENDING) WaitForSingleObject( event, 1000 );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
     ok( is_signaled( event ), "event is signaled\n" );
@@ -730,6 +763,7 @@ static void read_file_test(void)
     ok( status == STATUS_SUCCESS ||
         status == STATUS_PENDING, /* vista */
         "wrong status %x\n", status );
+    if (status == STATUS_PENDING) WaitForSingleObject( event, 1000 );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
     ok( is_signaled( event ), "event is signaled\n" );
@@ -745,6 +779,7 @@ static void read_file_test(void)
     status = pNtReadFile( handle, event, apc, &apc_count, &iosb, buffer, 2, &offset, NULL );
     if (status == STATUS_PENDING)  /* vista */
     {
+        WaitForSingleObject( event, 1000 );
         ok( U(iosb).Status == STATUS_END_OF_FILE, "wrong status %x\n", U(iosb).Status );
         ok( iosb.Information == 0, "wrong info %lu\n", iosb.Information );
         ok( is_signaled( event ), "event is signaled\n" );
@@ -775,6 +810,7 @@ static void read_file_test(void)
         status == STATUS_SUCCESS ||
         status == STATUS_PENDING,  /* vista */
         "wrong status %x\n", status );
+    if (status == STATUS_PENDING) WaitForSingleObject( event, 1000 );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
     ok( is_signaled( event ), "event is signaled\n" );
@@ -840,12 +876,12 @@ static void append_file_test(void)
     U(iosb).Status = STATUS_PENDING;
     iosb.Information = 0;
 
-    status = NtWriteFile(handle, NULL, NULL, NULL, &iosb,
-                         text, sizeof(text), NULL, NULL);
+    status = pNtWriteFile(handle, NULL, NULL, NULL, &iosb,
+                          text, sizeof(text), NULL, NULL);
 
     if (status == STATUS_PENDING)
     {
-        WaitForSingleObject( handle, INFINITE );
+        WaitForSingleObject( handle, 1000 );
         status = U(iosb).Status;
     }
     written = iosb.Information;
@@ -901,7 +937,7 @@ static void nt_mailslot_test(void)
         "rc = %x not STATUS_SUCCESS or STATUS_INVALID_PARAMETER\n", rc);
     ok( hslot != 0, "Handle is invalid\n");
 
-    if  ( rc == STATUS_SUCCESS ) rc = pNtClose(hslot);
+    if  ( rc == STATUS_SUCCESS ) pNtClose(hslot);
 
     /*
      * Test that the length field is checked properly
@@ -1554,6 +1590,92 @@ todo_wine
     CloseHandle( dir );
 }
 
+static void test_NtCreateFile(void)
+{
+    static const struct test_data
+    {
+        DWORD disposition, attrib_in, status, result, attrib_out, needs_cleanup;
+    } td[] =
+    {
+    /* 0*/{ FILE_CREATE, FILE_ATTRIBUTE_READONLY, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, FALSE },
+    /* 1*/{ FILE_CREATE, 0, STATUS_OBJECT_NAME_COLLISION, 0, 0, TRUE },
+    /* 2*/{ FILE_CREATE, 0, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE, FALSE },
+    /* 3*/{ FILE_OPEN, FILE_ATTRIBUTE_READONLY, 0, FILE_OPENED, FILE_ATTRIBUTE_ARCHIVE, TRUE },
+    /* 4*/{ FILE_OPEN, FILE_ATTRIBUTE_READONLY, STATUS_OBJECT_NAME_NOT_FOUND, 0, 0, FALSE },
+    /* 5*/{ FILE_OPEN_IF, 0, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE, FALSE },
+    /* 6*/{ FILE_OPEN_IF, FILE_ATTRIBUTE_READONLY, 0, FILE_OPENED, FILE_ATTRIBUTE_ARCHIVE, TRUE },
+    /* 7*/{ FILE_OPEN_IF, FILE_ATTRIBUTE_READONLY, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, FALSE },
+    /* 8*/{ FILE_OPEN_IF, 0, 0, FILE_OPENED, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, FALSE },
+    /* 9*/{ FILE_OVERWRITE, 0, STATUS_ACCESS_DENIED, 0, 0, TRUE },
+    /*10*/{ FILE_OVERWRITE, 0, STATUS_OBJECT_NAME_NOT_FOUND, 0, 0, FALSE },
+    /*11*/{ FILE_CREATE, 0, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE, FALSE },
+    /*12*/{ FILE_OVERWRITE, FILE_ATTRIBUTE_READONLY, 0, FILE_OVERWRITTEN, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, FALSE },
+    /*13*/{ FILE_OVERWRITE_IF, 0, STATUS_ACCESS_DENIED, 0, 0, TRUE },
+    /*14*/{ FILE_OVERWRITE_IF, 0, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE, FALSE },
+    /*15*/{ FILE_OVERWRITE_IF, FILE_ATTRIBUTE_READONLY, 0, FILE_OVERWRITTEN, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, FALSE },
+    /*16*/{ FILE_SUPERSEDE, 0, 0, FILE_SUPERSEDED, FILE_ATTRIBUTE_ARCHIVE, FALSE },
+    /*17*/{ FILE_SUPERSEDE, FILE_ATTRIBUTE_READONLY, 0, FILE_SUPERSEDED, FILE_ATTRIBUTE_ARCHIVE|FILE_ATTRIBUTE_READONLY, TRUE },
+    /*18*/{ FILE_SUPERSEDE, 0, 0, FILE_CREATED, FILE_ATTRIBUTE_ARCHIVE, TRUE }
+    };
+    static const WCHAR fooW[] = {'f','o','o',0};
+    static const WCHAR dotW[] = {'.',0};
+    NTSTATUS status;
+    HANDLE handle;
+    WCHAR path[MAX_PATH];
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
+    UNICODE_STRING nameW;
+    DWORD ret, i;
+
+    GetTempFileNameW(dotW, fooW, 0, path);
+    DeleteFileW(path);
+    pRtlDosPathNameToNtPathName_U(path, &nameW, NULL, NULL);
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = NULL;
+    attr.ObjectName = &nameW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        status = pNtCreateFile(&handle, GENERIC_READ, &attr, &io, NULL,
+                               td[i].attrib_in, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                               td[i].disposition, 0, NULL, 0);
+
+        ok(status == td[i].status, "%d: expected %#x got %#x\n", i, td[i].status, status);
+
+        if (!status)
+        {
+            ok(io.Information == td[i].result,"%d: expected %#x got %#lx\n", i, td[i].result, io.Information);
+
+            ret = GetFileAttributesW(path);
+            ret &= ~FILE_ATTRIBUTE_NOT_CONTENT_INDEXED;
+            /* FIXME: leave only 'else' case below once Wine is fixed */
+            if (ret != td[i].attrib_out)
+            {
+            todo_wine
+                ok(ret == td[i].attrib_out, "%d: expected %#x got %#x\n", i, td[i].attrib_out, ret);
+                SetFileAttributesW(path, td[i].attrib_out);
+            }
+            else
+                ok(ret == td[i].attrib_out, "%d: expected %#x got %#x\n", i, td[i].attrib_out, ret);
+
+            CloseHandle(handle);
+        }
+
+        if (td[i].needs_cleanup)
+        {
+            SetFileAttributesW(path, FILE_ATTRIBUTE_ARCHIVE);
+            DeleteFileW(path);
+        }
+    }
+
+    SetFileAttributesW(path, FILE_ATTRIBUTE_ARCHIVE);
+    DeleteFileW( path );
+}
+
 START_TEST(file)
 {
     HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
@@ -1590,6 +1712,7 @@ START_TEST(file)
     pNtQueryDirectoryFile   = (void *)GetProcAddress(hntdll, "NtQueryDirectoryFile");
     pNtQueryVolumeInformationFile = (void *)GetProcAddress(hntdll, "NtQueryVolumeInformationFile");
 
+    test_NtCreateFile();
     create_file_test();
     open_file_test();
     delete_file_test();

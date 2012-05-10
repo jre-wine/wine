@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Jacek Caban for CodeWeavers
+ * Copyright 2008,2011 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +18,8 @@
 
 typedef struct _source_elements_t source_elements_t;
 typedef struct _function_expression_t function_expression_t;
+typedef struct _expression_t expression_t;
+typedef struct _statement_t statement_t;
 
 typedef struct _function_declaration_t {
     function_expression_t *expr;
@@ -40,6 +42,128 @@ typedef struct _func_stack {
     struct _func_stack *next;
 } func_stack_t;
 
+#define OP_LIST                            \
+    X(add,        1, 0,0)                  \
+    X(and,        1, 0,0)                  \
+    X(array,      1, 0,0)                  \
+    X(assign,     1, 0,0)                  \
+    X(bool,       1, ARG_INT,    0)        \
+    X(bneg,       1, 0,0)                  \
+    X(call,       1, ARG_UINT,   ARG_UINT) \
+    X(call_member,1, ARG_UINT,   ARG_UINT) \
+    X(carray,     1, ARG_UINT,   0)        \
+    X(case,       0, ARG_ADDR,   0)        \
+    X(cnd_nz,     0, ARG_ADDR,   0)        \
+    X(cnd_z,      0, ARG_ADDR,   0)        \
+    X(delete,     1, 0,0)                  \
+    X(delete_ident,1,ARG_BSTR,   0)        \
+    X(div,        1, 0,0)                  \
+    X(double,     1, ARG_DBL,    0)        \
+    X(end_finally,1, 0,0)                  \
+    X(eq,         1, 0,0)                  \
+    X(eq2,        1, 0,0)                  \
+    X(forin,      0, ARG_ADDR,   0)        \
+    X(func,       1, ARG_FUNC,   0)        \
+    X(gt,         1, 0,0)                  \
+    X(gteq,       1, 0,0)                  \
+    X(ident,      1, ARG_BSTR,   0)        \
+    X(identid,    1, ARG_BSTR,   ARG_INT)  \
+    X(in,         1, 0,0)                  \
+    X(instanceof, 1, 0,0)                  \
+    X(int,        1, ARG_INT,    0)        \
+    X(jmp,        0, ARG_ADDR,   0)        \
+    X(jmp_z,      0, ARG_ADDR,   0)        \
+    X(lshift,     1, 0,0)                  \
+    X(lt,         1, 0,0)                  \
+    X(lteq,       1, 0,0)                  \
+    X(member,     1, ARG_BSTR,   0)        \
+    X(memberid,   1, ARG_UINT,   0)        \
+    X(minus,      1, 0,0)                  \
+    X(mod,        1, 0,0)                  \
+    X(mul,        1, 0,0)                  \
+    X(neg,        1, 0,0)                  \
+    X(neq,        1, 0,0)                  \
+    X(neq2,       1, 0,0)                  \
+    X(new,        1, ARG_INT,    0)        \
+    X(new_obj,    1, 0,0)                  \
+    X(null,       1, 0,0)                  \
+    X(obj_prop,   1, ARG_BSTR,   0)        \
+    X(or,         1, 0,0)                  \
+    X(pop,        1, 0,0)                  \
+    X(pop_except, 1, 0,0)                  \
+    X(pop_scope,  1, 0,0)                  \
+    X(postinc,    1, ARG_INT,    0)        \
+    X(preinc,     1, ARG_INT,    0)        \
+    X(push_except,1, ARG_ADDR,   ARG_BSTR) \
+    X(push_scope, 1, 0,0)                  \
+    X(regexp,     1, ARG_STR,    ARG_INT)  \
+    X(rshift,     1, 0,0)                  \
+    X(rshift2,    1, 0,0)                  \
+    X(str,        1, ARG_STR,    0)        \
+    X(this,       1, 0,0)                  \
+    X(throw,      0, 0,0)                  \
+    X(throw_ref,  0, ARG_UINT,   0)        \
+    X(throw_type, 0, ARG_UINT,   ARG_STR)  \
+    X(tonum,      1, 0,0)                  \
+    X(typeof,     1, 0,0)                  \
+    X(typeofid,   1, 0,0)                  \
+    X(typeofident,1, 0,0)                  \
+    X(refval,     1, 0,0)                  \
+    X(ret,        0, 0,0)                  \
+    X(sub,        1, 0,0)                  \
+    X(undefined,  1, 0,0)                  \
+    X(var_set,    1, ARG_BSTR,   0)        \
+    X(void,       1, 0,0)                  \
+    X(xor,        1, 0,0)
+
+typedef enum {
+#define X(x,a,b,c) OP_##x,
+OP_LIST
+#undef X
+    OP_LAST
+} jsop_t;
+
+typedef union {
+    BSTR bstr;
+    double *dbl;
+    LONG lng;
+    WCHAR *str;
+    unsigned uint;
+    function_expression_t *func; /* FIXME */
+} instr_arg_t;
+
+typedef enum {
+    ARG_NONE = 0,
+    ARG_ADDR,
+    ARG_BSTR,
+    ARG_DBL,
+    ARG_FUNC,
+    ARG_INT,
+    ARG_STR,
+    ARG_UINT
+} instr_arg_type_t;
+
+typedef struct {
+    jsop_t op;
+    instr_arg_t arg1;
+    instr_arg_t arg2;
+} instr_t;
+
+typedef struct {
+    instr_t *instrs;
+    jsheap_t heap;
+
+    BSTR *bstr_pool;
+    unsigned bstr_pool_size;
+    unsigned bstr_cnt;
+} bytecode_t;
+
+void release_bytecode(bytecode_t*);
+
+typedef struct _compiler_ctx_t compiler_ctx_t;
+
+void release_compiler(compiler_ctx_t*);
+
 typedef struct _parser_ctx_t {
     LONG ref;
 
@@ -58,13 +182,16 @@ typedef struct _parser_ctx_t {
 
     func_stack_t *func_stack;
 
+    bytecode_t *code;
+    compiler_ctx_t *compiler;
+
     struct _parser_ctx_t *next;
 } parser_ctx_t;
 
-HRESULT script_parse(script_ctx_t*,const WCHAR*,const WCHAR*,parser_ctx_t**);
-void parser_release(parser_ctx_t*);
+HRESULT script_parse(script_ctx_t*,const WCHAR*,const WCHAR*,parser_ctx_t**) DECLSPEC_HIDDEN;
+void parser_release(parser_ctx_t*) DECLSPEC_HIDDEN;
 
-int parser_lex(void*,parser_ctx_t*);
+int parser_lex(void*,parser_ctx_t*) DECLSPEC_HIDDEN;
 
 static inline void parser_addref(parser_ctx_t *ctx)
 {
@@ -87,13 +214,15 @@ typedef struct _scope_chain_t {
     struct _scope_chain_t *next;
 } scope_chain_t;
 
-HRESULT scope_push(scope_chain_t*,jsdisp_t*,scope_chain_t**);
-void scope_release(scope_chain_t*);
+HRESULT scope_push(scope_chain_t*,jsdisp_t*,scope_chain_t**) DECLSPEC_HIDDEN;
+void scope_release(scope_chain_t*) DECLSPEC_HIDDEN;
 
 static inline void scope_addref(scope_chain_t *scope)
 {
     scope->ref++;
 }
+
+typedef struct _except_frame_t except_frame_t;
 
 struct _exec_ctx_t {
     LONG ref;
@@ -103,6 +232,14 @@ struct _exec_ctx_t {
     jsdisp_t *var_disp;
     IDispatch *this_obj;
     BOOL is_global;
+
+    VARIANT *stack;
+    unsigned stack_size;
+    unsigned top;
+    except_frame_t *except_frame;
+
+    unsigned ip;
+    jsexcept_t *ei;
 };
 
 static inline void exec_addref(exec_ctx_t *ctx)
@@ -110,16 +247,14 @@ static inline void exec_addref(exec_ctx_t *ctx)
     ctx->ref++;
 }
 
-void exec_release(exec_ctx_t*);
-HRESULT create_exec_ctx(script_ctx_t*,IDispatch*,jsdisp_t*,scope_chain_t*,BOOL,exec_ctx_t**);
-HRESULT exec_source(exec_ctx_t*,parser_ctx_t*,source_elements_t*,BOOL,jsexcept_t*,VARIANT*);
+void exec_release(exec_ctx_t*) DECLSPEC_HIDDEN;
+HRESULT create_exec_ctx(script_ctx_t*,IDispatch*,jsdisp_t*,scope_chain_t*,BOOL,exec_ctx_t**) DECLSPEC_HIDDEN;
+HRESULT exec_source(exec_ctx_t*,parser_ctx_t*,source_elements_t*,BOOL,jsexcept_t*,VARIANT*) DECLSPEC_HIDDEN;
 
-typedef struct _statement_t statement_t;
-typedef struct _expression_t expression_t;
 typedef struct _parameter_t parameter_t;
 
 HRESULT create_source_function(parser_ctx_t*,parameter_t*,source_elements_t*,scope_chain_t*,
-        const WCHAR*,DWORD,jsdisp_t**);
+        const WCHAR*,DWORD,jsdisp_t**) DECLSPEC_HIDDEN;
 
 typedef enum {
     LT_INT,
@@ -137,7 +272,6 @@ typedef struct {
         double dval;
         const WCHAR *wstr;
         VARIANT_BOOL bval;
-        IDispatch *disp;
         struct {
             const WCHAR *str;
             DWORD str_len;
@@ -146,8 +280,8 @@ typedef struct {
     } u;
 } literal_t;
 
-literal_t *parse_regexp(parser_ctx_t*);
-literal_t *new_boolean_literal(parser_ctx_t*,VARIANT_BOOL);
+literal_t *parse_regexp(parser_ctx_t*) DECLSPEC_HIDDEN;
+literal_t *new_boolean_literal(parser_ctx_t*,VARIANT_BOOL) DECLSPEC_HIDDEN;
 
 typedef struct _variable_declaration_t {
     const WCHAR *identifier;
@@ -156,20 +290,27 @@ typedef struct _variable_declaration_t {
     struct _variable_declaration_t *next;
 } variable_declaration_t;
 
-typedef struct {
-    enum{
-        RT_NORMAL,
-        RT_RETURN,
-        RT_BREAK,
-        RT_CONTINUE
-    } type;
-    jsexcept_t ei;
-} return_type_t;
-
-typedef HRESULT (*statement_eval_t)(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
+typedef enum {
+    STAT_BLOCK,
+    STAT_BREAK,
+    STAT_CONTINUE,
+    STAT_EMPTY,
+    STAT_EXPR,
+    STAT_FOR,
+    STAT_FORIN,
+    STAT_IF,
+    STAT_LABEL,
+    STAT_RETURN,
+    STAT_SWITCH,
+    STAT_THROW,
+    STAT_TRY,
+    STAT_VAR,
+    STAT_WHILE,
+    STAT_WITH
+} statement_type_t;
 
 struct _statement_t {
-    statement_eval_t eval;
+    statement_type_t type;
     statement_t *next;
 };
 
@@ -261,28 +402,10 @@ typedef struct {
     statement_t *finally_statement;
 } try_statement_t;
 
-HRESULT block_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT var_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT empty_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT expression_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT if_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT while_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT for_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT forin_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT continue_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT break_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT return_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT with_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT labelled_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT switch_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT throw_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-HRESULT try_statement_eval(script_ctx_t*,statement_t*,return_type_t*,VARIANT*);
-
 typedef struct {
     enum {
         EXPRVAL_VARIANT,
         EXPRVAL_IDREF,
-        EXPRVAL_NAMEREF,
         EXPRVAL_INVALID
     } type;
     union {
@@ -291,18 +414,72 @@ typedef struct {
             IDispatch *disp;
             DISPID id;
         } idref;
-        struct {
-            IDispatch *disp;
-            BSTR name;
-        } nameref;
-        BSTR identifier;
     } u;
 } exprval_t;
 
-typedef HRESULT (*expression_eval_t)(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
+typedef enum {
+     EXPR_COMMA,
+     EXPR_OR,
+     EXPR_AND,
+     EXPR_BOR,
+     EXPR_BXOR,
+     EXPR_BAND,
+     EXPR_INSTANCEOF,
+     EXPR_IN,
+     EXPR_ADD,
+     EXPR_SUB,
+     EXPR_MUL,
+     EXPR_DIV,
+     EXPR_MOD,
+     EXPR_DELETE,
+     EXPR_VOID,
+     EXPR_TYPEOF,
+     EXPR_MINUS,
+     EXPR_PLUS,
+     EXPR_POSTINC,
+     EXPR_POSTDEC,
+     EXPR_PREINC,
+     EXPR_PREDEC,
+     EXPR_EQ,
+     EXPR_EQEQ,
+     EXPR_NOTEQ,
+     EXPR_NOTEQEQ,
+     EXPR_LESS,
+     EXPR_LESSEQ,
+     EXPR_GREATER,
+     EXPR_GREATEREQ,
+     EXPR_BITNEG,
+     EXPR_LOGNEG,
+     EXPR_LSHIFT,
+     EXPR_RSHIFT,
+     EXPR_RRSHIFT,
+     EXPR_ASSIGN,
+     EXPR_ASSIGNLSHIFT,
+     EXPR_ASSIGNRSHIFT,
+     EXPR_ASSIGNRRSHIFT,
+     EXPR_ASSIGNADD,
+     EXPR_ASSIGNSUB,
+     EXPR_ASSIGNMUL,
+     EXPR_ASSIGNDIV,
+     EXPR_ASSIGNMOD,
+     EXPR_ASSIGNAND,
+     EXPR_ASSIGNOR,
+     EXPR_ASSIGNXOR,
+     EXPR_COND,
+     EXPR_ARRAY,
+     EXPR_MEMBER,
+     EXPR_NEW,
+     EXPR_CALL,
+     EXPR_THIS,
+     EXPR_FUNC,
+     EXPR_IDENT,
+     EXPR_ARRAYLIT,
+     EXPR_PROPVAL,
+     EXPR_LITERAL
+} expression_type_t;
 
 struct _expression_t {
-    expression_eval_t eval;
+    expression_type_t type;
 };
 
 struct _parameter_t {
@@ -316,6 +493,7 @@ struct _source_elements_t {
     statement_t *statement_tail;
     function_declaration_t *functions;
     var_list_t *variables;
+    unsigned instr_off;
 };
 
 struct _function_expression_t {
@@ -344,12 +522,6 @@ typedef struct {
     expression_t *true_expression;
     expression_t *false_expression;
 } conditional_expression_t;
-
-typedef struct {
-    expression_t expr;
-    expression_t *member_expr;
-    expression_t *expression;
-} array_expression_t;
 
 typedef struct {
     expression_t expr;
@@ -404,112 +576,4 @@ typedef struct {
     prop_val_t *property_list;
 } property_value_expression_t;
 
-typedef enum {
-     EXPR_COMMA,
-     EXPR_OR,
-     EXPR_AND,
-     EXPR_BOR,
-     EXPR_BXOR,
-     EXPR_BAND,
-     EXPR_INSTANCEOF,
-     EXPR_IN,
-     EXPR_ADD,
-     EXPR_SUB,
-     EXPR_MUL,
-     EXPR_DIV,
-     EXPR_MOD,
-     EXPR_DELETE,
-     EXPR_VOID,
-     EXPR_TYPEOF,
-     EXPR_MINUS,
-     EXPR_PLUS,
-     EXPR_POSTINC,
-     EXPR_POSTDEC,
-     EXPR_PREINC,
-     EXPR_PREDEC,
-     EXPR_EQ,
-     EXPR_EQEQ,
-     EXPR_NOTEQ,
-     EXPR_NOTEQEQ,
-     EXPR_LESS,
-     EXPR_LESSEQ,
-     EXPR_GREATER,
-     EXPR_GREATEREQ,
-     EXPR_BITNEG,
-     EXPR_LOGNEG,
-     EXPR_LSHIFT,
-     EXPR_RSHIFT,
-     EXPR_RRSHIFT,
-     EXPR_ASSIGN,
-     EXPR_ASSIGNLSHIFT,
-     EXPR_ASSIGNRSHIFT,
-     EXPR_ASSIGNRRSHIFT,
-     EXPR_ASSIGNADD,
-     EXPR_ASSIGNSUB,
-     EXPR_ASSIGNMUL,
-     EXPR_ASSIGNDIV,
-     EXPR_ASSIGNMOD,
-     EXPR_ASSIGNAND,
-     EXPR_ASSIGNOR,
-     EXPR_ASSIGNXOR
-} expression_type_t;
-
-HRESULT function_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT conditional_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT array_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT member_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT new_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT call_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT this_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT identifier_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT literal_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT array_literal_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT property_value_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-
-HRESULT comma_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT logical_or_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT logical_and_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT binary_or_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT binary_xor_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT binary_and_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT instanceof_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT in_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT add_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT sub_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT mul_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT div_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT mod_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT delete_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT void_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT typeof_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT minus_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT plus_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT post_increment_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT post_decrement_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT pre_increment_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT pre_decrement_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT equal_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT equal2_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT not_equal_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT not_equal2_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT less_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT lesseq_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT greater_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT greatereq_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT binary_negation_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT logical_negation_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT left_shift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT right_shift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT right2_shift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_lshift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_rshift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_rrshift_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_add_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_sub_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_mul_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_div_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_mod_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_and_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_or_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
-HRESULT assign_xor_expression_eval(script_ctx_t*,expression_t*,DWORD,jsexcept_t*,exprval_t*);
+HRESULT compile_subscript_stat(parser_ctx_t*,statement_t*,BOOL,unsigned*) DECLSPEC_HIDDEN;

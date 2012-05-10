@@ -60,9 +60,9 @@ static inline AsyncReader *impl_from_IFileSourceFilter( IFileSourceFilter *iface
     return (AsyncReader *)((char*)iface - FIELD_OFFSET(AsyncReader, lpVtblFSF));
 }
 
-static WCHAR const mediatype_name[11] = {
+static const WCHAR mediatype_name[] = {
     'M', 'e', 'd', 'i', 'a', ' ', 'T', 'y', 'p', 'e', 0 };
-static WCHAR const subtype_name[8] = {
+static const WCHAR subtype_name[] = {
     'S', 'u', 'b', 't', 'y', 'p', 'e', 0 };
 
 static HRESULT process_extensions(HKEY hkeyExtensions, LPCOLESTR pszFileName, GUID * majorType, GUID * minorType)
@@ -179,8 +179,8 @@ static HRESULT process_pattern_string(LPCWSTR wszPatternString, IAsyncReader * p
 
         if (!(wszPatternString = strchrW(wszPatternString, ',')))
             hr = E_INVALIDARG;
-    
-        wszPatternString++; /* skip ',' */
+        else
+            wszPatternString++; /* skip ',' */
     }
 
     if (hr == S_OK)
@@ -1357,7 +1357,7 @@ static AsyncReader *from_IAMFilterMiscFlags(IAMFilterMiscFlags *iface) {
     return (AsyncReader*)((char*)iface - offsetof(AsyncReader, IAMFilterMiscFlags_vtbl));
 }
 
-static HRESULT WINAPI AMFilterMiscFlags_QueryInterface(IAMFilterMiscFlags *iface, const REFIID riid, void **ppv) {
+static HRESULT WINAPI AMFilterMiscFlags_QueryInterface(IAMFilterMiscFlags *iface, REFIID riid, void **ppv) {
     AsyncReader *This = from_IAMFilterMiscFlags(iface);
     return IUnknown_QueryInterface((IUnknown*)This, riid, ppv);
 }

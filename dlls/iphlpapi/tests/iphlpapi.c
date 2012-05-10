@@ -354,7 +354,7 @@ static void testGetIpForwardTable(void)
               sprintf( buffer + strlen(buffer), " mask %s", ntoa( buf->table[i].dwForwardMask ));
               trace( "%u: %s gw %s if %u type %u\n", i, buffer,
                      ntoa( buf->table[i].dwForwardNextHop ),
-                     buf->table[i].dwForwardIfIndex, buf->table[i].dwForwardType );
+                     buf->table[i].dwForwardIfIndex, U1(buf->table[i]).dwForwardType );
           }
       }
       HeapFree(GetProcessHeap(), 0, buf);
@@ -399,7 +399,7 @@ static void testGetIpNetTable(void)
           for (i = 0; i < buf->dwNumEntries; i++)
           {
               trace( "%u: idx %u type %u addr %s phys",
-                     i, buf->table[i].dwIndex, buf->table[i].dwType, ntoa( buf->table[i].dwAddr ));
+                     i, buf->table[i].dwIndex, U(buf->table[i]).dwType, ntoa( buf->table[i].dwAddr ));
               for (j = 0; j < buf->table[i].dwPhysAddrLen; j++)
                   printf( " %02x", buf->table[i].bPhysAddr[j] );
               printf( "\n" );
@@ -474,7 +474,7 @@ static void testGetIpStatistics(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "IP stats:\n" );
-        trace( "    dwForwarding:      %u\n", stats.dwForwarding );
+        trace( "    dwForwarding:      %u\n", U(stats).dwForwarding );
         trace( "    dwDefaultTTL:      %u\n", stats.dwDefaultTTL );
         trace( "    dwInReceives:      %u\n", stats.dwInReceives );
         trace( "    dwInHdrErrors:     %u\n", stats.dwInHdrErrors );
@@ -521,7 +521,7 @@ static void testGetTcpStatistics(void)
     if (apiReturn == NO_ERROR && winetest_debug > 1)
     {
         trace( "TCP stats:\n" );
-        trace( "    dwRtoAlgorithm: %u\n", stats.dwRtoAlgorithm );
+        trace( "    dwRtoAlgorithm: %u\n", U(stats).dwRtoAlgorithm );
         trace( "    dwRtoMin:       %u\n", stats.dwRtoMin );
         trace( "    dwRtoMax:       %u\n", stats.dwRtoMax );
         trace( "    dwMaxConn:      %u\n", stats.dwMaxConn );
@@ -603,7 +603,7 @@ static void testGetTcpTable(void)
                        ntoa(buf->table[i].dwLocalAddr), ntohs(buf->table[i].dwLocalPort) );
               trace( "%u: %s remote %s:%u state %u\n",
                      i, buffer, ntoa( buf->table[i].dwRemoteAddr ),
-                     ntohs(buf->table[i].dwRemotePort), buf->table[i].dwState );
+                     ntohs(buf->table[i].dwRemotePort), U(buf->table[i]).dwState );
           }
       }
       HeapFree(GetProcessHeap(), 0, buf);
@@ -834,7 +834,7 @@ static void testNotifyAddrChange(void)
     }
     ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected ERROR_IO_PENDING\n", ret);
     ret = GetLastError();
-    todo_wine ok(ret == ERROR_IO_PENDING, "GetLastError returned %d, excepted ERROR_IO_PENDING\n", ret);
+    todo_wine ok(ret == ERROR_IO_PENDING, "GetLastError returned %d, expected ERROR_IO_PENDING\n", ret);
     success = gCancelIPChangeNotify(&overlapped);
     todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
 
@@ -849,9 +849,9 @@ static void testNotifyAddrChange(void)
     ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected ERROR_IO_PENDING\n", ret);
     todo_wine ok(handle != INVALID_HANDLE_VALUE, "NotifyAddrChange returned invalid file handle\n");
     success = GetOverlappedResult(handle, &overlapped, &bytes, FALSE);
-    todo_wine ok(success == FALSE, "GetOverlappedResult returned TRUE, excepted FALSE\n");
+    ok(success == FALSE, "GetOverlappedResult returned TRUE, expected FALSE\n");
     ret = GetLastError();
-    todo_wine ok(ret == ERROR_IO_INCOMPLETE, "GetLastError returned %d, excepted ERROR_IO_INCOMPLETE\n", ret);
+    ok(ret == ERROR_IO_INCOMPLETE, "GetLastError returned %d, expected ERROR_IO_INCOMPLETE\n", ret);
     success = gCancelIPChangeNotify(&overlapped);
     todo_wine ok(success == TRUE, "CancelIPChangeNotify returned FALSE, expected TRUE\n");
 
@@ -860,19 +860,19 @@ static void testNotifyAddrChange(void)
         handle = NULL;
         ZeroMemory(&overlapped, sizeof(overlapped));
         overlapped.hEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-        trace("Testing asyncronous ipv4 address change notification. Please "
-              "change ipv4 address of one of your network interfaces\n");
+        trace("Testing asynchronous ipv4 address change notification. Please "
+              "change the ipv4 address of one of your network interfaces\n");
         ret = gNotifyAddrChange(&handle, &overlapped);
         ok(ret == ERROR_IO_PENDING, "NotifyAddrChange returned %d, expected NO_ERROR\n", ret);
         success = GetOverlappedResult(handle, &overlapped, &bytes, TRUE);
-        ok(success == TRUE, "GetOverlappedResult returned FALSE, excepted TRUE\n");
+        ok(success == TRUE, "GetOverlappedResult returned FALSE, expected TRUE\n");
     }
 
-    /* test syncronous functionality */
+    /* test synchronous functionality */
     if (winetest_interactive)
     {
-        trace("Testing syncronous ipv4 address change notification. Please "
-              "change ipv4 address of one of your network interfaces\n");
+        trace("Testing synchronous ipv4 address change notification. Please "
+              "change the ipv4 address of one of your network interfaces\n");
         ret = gNotifyAddrChange(NULL, NULL);
         todo_wine ok(ret == NO_ERROR, "NotifyAddrChange returned %d, expected NO_ERROR\n", ret);
     }

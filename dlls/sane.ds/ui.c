@@ -26,14 +26,11 @@
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
-#include "windef.h"
-#include "winbase.h"
+#include "sane_i.h"
 #include "winuser.h"
 #include "winnls.h"
 #include "wingdi.h"
 #include "prsht.h"
-#include "twain.h"
-#include "sane_i.h"
 #include "wine/debug.h"
 #include "resource.h"
 #include "wine/unicode.h"
@@ -531,7 +528,7 @@ BOOL DoScannerUI(void)
 
     hdc = GetDC(0);
 
-    memset(&psp,0,sizeof(psp));
+    memset(psp,0,sizeof(psp));
     rc = psane_control_option(activeDS.deviceHandle, 0, SANE_ACTION_GET_VALUE,
             &optcount, NULL);
     if (rc != SANE_STATUS_GOOD)
@@ -588,7 +585,7 @@ BOOL DoScannerUI(void)
     psh.pszCaption = szCaption;
     psh.nPages = page_count;
     psh.u2.nStartPage = 0;
-    psh.u3.ppsp = (LPCPROPSHEETPAGEW) &psp;
+    psh.u3.ppsp = (LPCPROPSHEETPAGEW)psp;
     psh.pfnCallback = PropSheetProc;
 
     psrc = PropertySheetW(&psh);
@@ -997,7 +994,7 @@ static INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
                 switch (((NMHDR*)lParam)->code)
                 {
                     case PSN_APPLY:
-                        if (psn->lParam == TRUE)
+                        if (psn->lParam)
                         {
                             activeDS.currentState = 6;
                             if (activeDS.windowMessage)
@@ -1014,17 +1011,13 @@ static INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
                 }
             }
         case WM_COMMAND:
+            switch (HIWORD(wParam))
             {
-                switch (HIWORD(wParam))
-                {
-                    case BN_CLICKED:
-                        ButtonClicked(hwndDlg,LOWORD(wParam),
-                                (HWND)lParam);
-                        break;
-                    case CBN_SELCHANGE:
-                        ComboChanged(hwndDlg,LOWORD(wParam),
-                                (HWND)lParam);
-                }
+                case BN_CLICKED:
+                    ButtonClicked(hwndDlg,LOWORD(wParam), (HWND)lParam);
+                    break;
+                case CBN_SELCHANGE:
+                    ComboChanged(hwndDlg,LOWORD(wParam), (HWND)lParam);
             }
     }
 

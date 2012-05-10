@@ -23,6 +23,8 @@
 #include <fcntl.h>
 #include <share.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <locale.h>
 
 #include <windef.h>
 #include <winbase.h>
@@ -78,6 +80,36 @@ static int (__cdecl *p_wsopen_s)(int*, const wchar_t*, int, int, int);
 static void* (__cdecl *p_realloc_crt)(void*, size_t);
 static void* (__cdecl *p_malloc)(size_t);
 static void (__cdecl *p_free)(void*);
+static void* (__cdecl *p_getptd)(void);
+static int* (__cdecl *p_errno)(void);
+static __msvcrt_ulong* (__cdecl *p_doserrno)(void);
+static void (__cdecl *p_srand)(unsigned int);
+static char* (__cdecl *p_strtok)(char*, const char*);
+static wchar_t* (__cdecl *p_wcstok)(wchar_t*, const wchar_t*);
+static char* (__cdecl *p_strerror)(int);
+static wchar_t* (__cdecl *p_wcserror)(int);
+static char* (__cdecl *p_tmpnam)(char*);
+static wchar_t* (__cdecl *p_wtmpnam)(wchar_t*);
+static char* (__cdecl *p_asctime)(struct tm*);
+static wchar_t* (__cdecl *p_wasctime)(struct tm*);
+static struct tm* (__cdecl *p_localtime64)(__time64_t*);
+static char* (__cdecl *p_ecvt)(double, int, int*, int*);
+static int* (__cdecl *p_fpecode)(void);
+static int (__cdecl *p_configthreadlocale)(int);
+static void* (__cdecl *p_get_terminate)(void);
+static void* (__cdecl *p_get_unexpected)(void);
+static int (__cdecl *p__vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, __ms_va_list);
+static int (__cdecl *p_vswprintf_l)(wchar_t*, const wchar_t*, _locale_t, __ms_va_list);
+static FILE* (__cdecl *p_fopen)(const char*, const char*);
+static int (__cdecl *p_fclose)(FILE*);
+static int (__cdecl *p_unlink)(const char*);
+static void (__cdecl *p_lock_file)(FILE*);
+static void (__cdecl *p_unlock_file)(FILE*);
+static int (__cdecl *p_fileno)(FILE*);
+static int (__cdecl *p_feof)(FILE*);
+static int (__cdecl *p_ferror)(FILE*);
+static int (__cdecl *p_flsbuf)(int, FILE*);
+
 
 /* type info */
 typedef struct __type_info
@@ -185,6 +217,91 @@ static void __cdecl test_invalid_parameter_handler(const wchar_t *expression,
     ok(arg == 0, "arg = %lx\n", (UINT_PTR)arg);
 }
 
+#define SETNOFAIL(x,y) x = (void*)GetProcAddress(hcrt,y)
+#define SET(x,y) do { SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y); } while(0)
+static BOOL init(void)
+{
+    HMODULE hcrt;
+    HMODULE hkernel32;
+
+    SetLastError(0xdeadbeef);
+    hcrt = LoadLibraryA("msvcr90.dll");
+    if (!hcrt) {
+        win_skip("msvcr90.dll not installed (got %d)\n", GetLastError());
+        return FALSE;
+    }
+
+    SET(p_set_invalid_parameter_handler, "_set_invalid_parameter_handler");
+    if(p_set_invalid_parameter_handler)
+        ok(p_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
+                "Invalid parameter handler was already set\n");
+
+    SET(p_initterm_e, "_initterm_e");
+    SET(p_encode_pointer, "_encode_pointer");
+    SET(p_decode_pointer, "_decode_pointer");
+    SET(p_encoded_null, "_encoded_null");
+    SET(p_sys_nerr, "_sys_nerr");
+    SET(p__sys_nerr, "__sys_nerr");
+    SET(p_sys_errlist, "_sys_errlist");
+    SET(p__sys_errlist, "__sys_errlist");
+    SET(p_strtoi64, "_strtoi64");
+    SET(p_strtoui64, "_strtoui64");
+    SET(p_itoa_s, "_itoa_s");
+    SET(p_wcsncat_s,"wcsncat_s" );
+    SET(p_qsort_s, "qsort_s");
+    SET(p_controlfp_s, "_controlfp_s");
+    SET(p_atoflt, "_atoflt");
+    SET(p_set_abort_behavior, "_set_abort_behavior");
+    SET(p_sopen_s, "_sopen_s");
+    SET(p_wsopen_s, "_wsopen_s");
+    SET(p_realloc_crt, "_realloc_crt");
+    SET(p_malloc, "malloc");
+    SET(p_free, "free");
+    SET(p_getptd, "_getptd");
+    SET(p_errno, "_errno");
+    SET(p_doserrno, "__doserrno");
+    SET(p_srand, "srand");
+    SET(p_strtok, "strtok");
+    SET(p_wcstok, "wcstok");
+    SET(p_strerror, "strerror");
+    SET(p_wcserror, "_wcserror");
+    SET(p_tmpnam, "tmpnam");
+    SET(p_wtmpnam, "_wtmpnam");
+    SET(p_asctime, "asctime");
+    SET(p_wasctime, "_wasctime");
+    SET(p_localtime64, "_localtime64");
+    SET(p_ecvt, "_ecvt");
+    SET(p_fpecode, "__fpecode");
+    SET(p_configthreadlocale, "_configthreadlocale");
+    SET(p_get_terminate, "_get_terminate");
+    SET(p_get_unexpected, "_get_unexpected");
+    SET(p__vswprintf_l, "__vswprintf_l");
+    SET(p_vswprintf_l, "_vswprintf_l");
+    SET(p_fopen, "fopen");
+    SET(p_fclose, "fclose");
+    SET(p_unlink, "_unlink");
+    SET(p_lock_file, "_lock_file");
+    SET(p_unlock_file, "_unlock_file");
+    SET(p_fileno, "_fileno");
+    SET(p_feof, "feof");
+    SET(p_ferror, "ferror");
+    SET(p_flsbuf, "_flsbuf");
+    if (sizeof(void *) == 8)
+    {
+        SET(p_type_info_name_internal_method, "?_name_internal_method@type_info@@QEBAPEBDPEAU__type_info_node@@@Z");
+        SET(ptype_info_dtor, "??1type_info@@UEAA@XZ");
+    }
+    else
+    {
+        SET(p_type_info_name_internal_method, "?_name_internal_method@type_info@@QBEPBDPAU__type_info_node@@@Z");
+        SET(ptype_info_dtor, "??1type_info@@UAE@XZ");
+    }
+
+    hkernel32 = GetModuleHandleA("kernel32.dll");
+    pEncodePointer = (void *) GetProcAddress(hkernel32, "EncodePointer");
+    return TRUE;
+}
+
 static int __cdecl initterm_cb0(void)
 {
     cb_called[0]++;
@@ -208,11 +325,6 @@ static void test__initterm_e(void)
 {
     _INITTERM_E_FN table[4];
     int res;
-
-    if (!p_initterm_e) {
-        skip("_initterm_e not found\n");
-        return;
-    }
 
     memset(table, 0, sizeof(table));
 
@@ -290,11 +402,6 @@ static void test__encode_pointer(void)
 {
     void *ptr, *res;
 
-    if(!p_encode_pointer || !p_decode_pointer || !p_encoded_null) {
-        win_skip("_encode_pointer, _decode_pointer or _encoded_null not found\n");
-        return;
-    }
-
     ptr = (void*)0xdeadbeef;
     res = p_encode_pointer(ptr);
     res = p_decode_pointer(res);
@@ -320,11 +427,6 @@ static void test_error_messages(void)
 {
     int *size, size_copy;
 
-    if(!p_sys_nerr || !p__sys_nerr || !p_sys_errlist || !p__sys_errlist) {
-        win_skip("Skipping test_error_messages tests\n");
-        return;
-    }
-
     size = p__sys_nerr();
     size_copy = *size;
     ok(*p_sys_nerr == *size, "_sys_nerr = %u, size = %u\n", *p_sys_nerr, *size);
@@ -341,16 +443,6 @@ static void test__strtoi64(void)
 {
     __int64 res;
     unsigned __int64 ures;
-
-    if(!p_strtoi64 || !p_strtoui64) {
-        win_skip("_strtoi64 or _strtoui64 not found\n");
-        return;
-    }
-
-    if(!p_set_invalid_parameter_handler) {
-        win_skip("_set_invalid_parameter_handler not found\n");
-        return;
-    }
 
     errno = 0xdeadbeef;
     SET_EXPECT(invalid_parameter_handler);
@@ -389,17 +481,6 @@ static void test__itoa_s(void)
 {
     errno_t ret;
     char buffer[33];
-
-    if (!p_itoa_s)
-    {
-        win_skip("Skipping _itoa_s tests\n");
-        return;
-    }
-
-    if(!p_set_invalid_parameter_handler) {
-        win_skip("_set_invalid_parameter_handler not found\n");
-        return;
-    }
 
     /* _itoa_s (on msvcr90) doesn't set errno (in case of errors) while msvcrt does
      * as we always set errno in our msvcrt implementation, don't test here that errno
@@ -493,17 +574,6 @@ static void test_wcsncat_s(void)
     wchar_t dst[4];
     wchar_t src[4];
 
-    if (!p_wcsncat_s)
-    {
-        win_skip("skipping wcsncat_s tests\n");
-        return;
-    }
-
-    if(!p_set_invalid_parameter_handler) {
-        win_skip("_set_invalid_parameter_handler not found\n");
-        return;
-    }
-
     memcpy(src, abcW, sizeof(abcW));
     dst[0] = 0;
     SET_EXPECT(invalid_parameter_handler);
@@ -589,11 +659,6 @@ static void test_qsort_s(void)
     "Sorted",
     "."
     };
-
-    if(!p_qsort_s) {
-        win_skip("qsort_s not found\n");
-        return;
-    }
 
     SET_EXPECT(invalid_parameter_handler);
     p_qsort_s(NULL, 0, 0, NULL, NULL);
@@ -688,12 +753,6 @@ static void test_controlfp_s(void)
     unsigned int cur;
     int ret;
 
-    if (!p_controlfp_s)
-    {
-        win_skip("_controlfp_s not found\n");
-        return;
-    }
-
     SET_EXPECT(invalid_parameter_handler);
     ret = p_controlfp_s( NULL, ~0, ~0 );
     ok( ret == EINVAL, "wrong result %d\n", ret );
@@ -753,12 +812,6 @@ static void test__atoflt(void)
     _CRT_FLOAT flt;
     int ret, i = 0;
 
-    if (!p_atoflt)
-    {
-        win_skip("_atoflt not found\n");
-        return;
-    }
-
 if (0)
 {
     /* crashes on native */
@@ -785,12 +838,6 @@ static void test__set_abort_behavior(void)
 {
     unsigned int res;
 
-    if (!p_set_abort_behavior)
-    {
-        win_skip("_set_abort_behavior not found\n");
-        return;
-    }
-
     /* default is _WRITE_ABORT_MSG | _CALL_REPORTFAULT */
     res = p_set_abort_behavior(0, 0);
     ok (res == (_WRITE_ABORT_MSG | _CALL_REPORTFAULT),
@@ -809,12 +856,6 @@ static void test__sopen_s(void)
 {
     int ret, fd;
 
-    if(!p_sopen_s)
-    {
-        win_skip("_sopen_s not found\n");
-        return;
-    }
-
     SET_EXPECT(invalid_parameter_handler);
     ret = p_sopen_s(NULL, "test", _O_RDONLY, _SH_DENYNO, _S_IREAD);
     ok(ret == EINVAL, "got %d, expected EINVAL\n", ret);
@@ -831,12 +872,6 @@ static void test__wsopen_s(void)
     wchar_t testW[] = {'t','e','s','t',0};
     int ret, fd;
 
-    if(!p_wsopen_s)
-    {
-        win_skip("_wsopen_s not found\n");
-        return;
-    }
-
     SET_EXPECT(invalid_parameter_handler);
     ret = p_wsopen_s(NULL, testW, _O_RDONLY, _SH_DENYNO, _S_IREAD);
     ok(ret == EINVAL, "got %d, expected EINVAL\n", ret);
@@ -851,12 +886,6 @@ static void test__wsopen_s(void)
 static void test__realloc_crt(void)
 {
     void *mem;
-
-    if(!p_realloc_crt)
-    {
-        win_skip("_realloc_crt not found\n");
-        return;
-    }
 
 if (0)
 {
@@ -884,13 +913,6 @@ static void test_typeinfo(void)
     struct __type_info_node node;
     char *name;
 
-    if (!p_type_info_name_internal_method)
-    {
-        win_skip("public: char const * __thiscall type_info::_name_internal_method(struct \
-                  __type_info_node *)const not supported\n");
-        return;
-    }
-
     /* name */
     t1.name = NULL;
     node.memPtr = NULL;
@@ -903,59 +925,222 @@ static void test_typeinfo(void)
     call_func1(ptype_info_dtor, &t1);
 }
 
-START_TEST(msvcr90)
-{
-    HMODULE hcrt;
-    HMODULE hkernel32;
+/* Keep in sync with msvcrt/msvcrt.h */
+struct __thread_data {
+    DWORD                           tid;
+    HANDLE                          handle;
+    int                             thread_errno;
+    __msvcrt_ulong                  thread_doserrno;
+    int                             unk1;
+    unsigned int                    random_seed;
+    char                            *strtok_next;
+    wchar_t                         *wcstok_next;
+    unsigned char                   *mbstok_next;
+    char                            *strerror_buffer;
+    wchar_t                         *wcserror_buffer;
+    char                            *tmpnam_buffer;
+    wchar_t                         *wtmpnam_buffer;
+    void                            *unk2[2];
+    char                            *asctime_buffer;
+    wchar_t                         *wasctime_buffer;
+    struct tm                       *time_buffer;
+    char                            *efcvt_buffer;
+    int                             unk3[2];
+    void                            *unk4[4];
+    int                             fpecode;
+    pthreadmbcinfo                  mbcinfo;
+    pthreadlocinfo                  locinfo;
+    BOOL                            have_locale;
+    int                             unk5[1];
+    void*                           terminate_handler;
+    void*                           unexpected_handler;
+    void*                           se_translator;
+    void                            *unk6[3];
+    int                             unk7;
+    EXCEPTION_RECORD                *exc_record;
+};
 
-    SetLastError(0xdeadbeef);
-    hcrt = LoadLibraryA("msvcr90.dll");
-    if (!hcrt) {
-        win_skip("msvcr90.dll not installed (got %d)\n", GetLastError());
+static void test_getptd(void)
+{
+    struct __thread_data *ptd = p_getptd();
+    DWORD tid = GetCurrentThreadId();
+    wchar_t testW[] = {'t','e','s','t',0}, tW[] = {'t',0}, *wp;
+    char test[] = "test", *p;
+    struct tm time;
+    __time64_t secs = 0;
+    int dec, sign;
+    void *mbcinfo, *locinfo;
+
+    ok(ptd->tid == tid, "ptd->tid = %x, expected %x\n", ptd->tid, tid);
+    ok(ptd->handle == INVALID_HANDLE_VALUE, "ptd->handle = %p\n", ptd->handle);
+    ok(p_errno() == &ptd->thread_errno, "ptd->thread_errno is different then _errno()\n");
+    ok(p_doserrno() == &ptd->thread_doserrno, "ptd->thread_doserrno is different then __doserrno()\n");
+    p_srand(1234);
+    ok(ptd->random_seed == 1234, "ptd->random_seed = %d\n", ptd->random_seed);
+    p = p_strtok(test, "t");
+    ok(ptd->strtok_next == p+3, "ptd->strtok_next is incorrect\n");
+    wp = p_wcstok(testW, tW);
+    ok(ptd->wcstok_next == wp+3, "ptd->wcstok_next is incorrect\n");
+    ok(p_strerror(0) == ptd->strerror_buffer, "ptd->strerror_buffer is incorrect\n");
+    ok(p_wcserror(0) == ptd->wcserror_buffer, "ptd->wcserror_buffer is incorrect\n");
+    ok(p_tmpnam(NULL) == ptd->tmpnam_buffer, "ptd->tmpnam_buffer is incorrect\n");
+    ok(p_wtmpnam(NULL) == ptd->wtmpnam_buffer, "ptd->wtmpnam_buffer is incorrect\n");
+    memset(&time, 0, sizeof(time));
+    time.tm_mday = 1;
+    ok(p_asctime(&time) == ptd->asctime_buffer, "ptd->asctime_buffer is incorrect\n");
+    ok(p_wasctime(&time) == ptd->wasctime_buffer, "ptd->wasctime_buffer is incorrect\n");
+    ok(p_localtime64(&secs) == ptd->time_buffer, "ptd->time_buffer is incorrect\n");
+    ok(p_ecvt(3.12, 1, &dec, &sign) == ptd->efcvt_buffer, "ptd->efcvt_buffer is incorrect\n");
+    ok(p_fpecode() == &ptd->fpecode, "ptd->fpecode is incorrect\n");
+    mbcinfo = ptd->mbcinfo;
+    locinfo = ptd->locinfo;
+    todo_wine ok(ptd->have_locale == 1, "ptd->have_locale = %x\n", ptd->have_locale);
+    p_configthreadlocale(1);
+    todo_wine ok(mbcinfo == ptd->mbcinfo, "ptd->mbcinfo != mbcinfo\n");
+    todo_wine ok(locinfo == ptd->locinfo, "ptd->locinfo != locinfo\n");
+    todo_wine ok(ptd->have_locale == 3, "ptd->have_locale = %x\n", ptd->have_locale);
+    ok(p_get_terminate() == ptd->terminate_handler, "ptd->terminate_handler != _get_terminate()\n");
+    ok(p_get_unexpected() == ptd->unexpected_handler, "ptd->unexpected_handler != _get_unexpected()\n");
+}
+
+static int __cdecl __vswprintf_l_wrapper(wchar_t *buf,
+        const wchar_t *format, _locale_t locale, ...)
+{
+    int ret;
+    __ms_va_list valist;
+    __ms_va_start(valist, locale);
+    ret = p__vswprintf_l(buf, format, locale, valist);
+    __ms_va_end(valist);
+    return ret;
+}
+
+static int __cdecl _vswprintf_l_wrapper(wchar_t *buf,
+        const wchar_t *format, _locale_t locale, ...)
+{
+    int ret;
+    __ms_va_list valist;
+    __ms_va_start(valist, locale);
+    ret = p_vswprintf_l(buf, format, locale, valist);
+    __ms_va_end(valist);
+    return ret;
+}
+
+static void test__vswprintf_l(void)
+{
+    static const wchar_t format[] = {'t','e','s','t',0};
+
+    wchar_t buf[32];
+    int ret;
+
+    ret = __vswprintf_l_wrapper(buf, format, NULL);
+    ok(ret == 4, "ret = %d\n", ret);
+    ok(!memcmp(buf, format, sizeof(format)), "buf = %s, expected %s\n",
+            wine_dbgstr_w(buf), wine_dbgstr_w(format));
+
+    ret = _vswprintf_l_wrapper(buf, format, NULL);
+    ok(ret == 4, "ret = %d\n", ret);
+    ok(!memcmp(buf, format, sizeof(format)), "buf = %s, expected %s\n",
+            wine_dbgstr_w(buf), wine_dbgstr_w(format));
+}
+
+struct block_file_arg
+{
+    FILE *read;
+    FILE *write;
+    HANDLE blocked;
+};
+
+static DWORD WINAPI block_file(void *arg)
+{
+    struct block_file_arg *files = arg;
+
+    p_lock_file(files->read);
+    p_lock_file(files->write);
+    SetEvent(files->blocked);
+    WaitForSingleObject(files->blocked, INFINITE);
+    p_unlock_file(files->read);
+    p_unlock_file(files->write);
+    return 0;
+}
+
+static void test_nonblocking_file_access(void)
+{
+    HANDLE thread;
+    struct block_file_arg arg;
+    FILE *filer, *filew;
+    int ret;
+
+    if(!p_lock_file || !p_unlock_file) {
+        win_skip("_lock_file not available\n");
         return;
     }
 
-    p_set_invalid_parameter_handler = (void *) GetProcAddress(hcrt, "_set_invalid_parameter_handler");
-    if(p_set_invalid_parameter_handler)
-        ok(p_set_invalid_parameter_handler(test_invalid_parameter_handler) == NULL,
-                "Invalid parameter handler was already set\n");
-
-    p_initterm_e = (void *) GetProcAddress(hcrt, "_initterm_e");
-    p_encode_pointer = (void *) GetProcAddress(hcrt, "_encode_pointer");
-    p_decode_pointer = (void *) GetProcAddress(hcrt, "_decode_pointer");
-    p_encoded_null = (void *) GetProcAddress(hcrt, "_encoded_null");
-    p_sys_nerr = (void *) GetProcAddress(hcrt, "_sys_nerr");
-    p__sys_nerr = (void *) GetProcAddress(hcrt, "__sys_nerr");
-    p_sys_errlist = (void *) GetProcAddress(hcrt, "_sys_errlist");
-    p__sys_errlist = (void *) GetProcAddress(hcrt, "__sys_errlist");
-    p_strtoi64 = (void *) GetProcAddress(hcrt, "_strtoi64");
-    p_strtoui64 = (void *) GetProcAddress(hcrt, "_strtoui64");
-    p_itoa_s = (void *)GetProcAddress(hcrt, "_itoa_s");
-    p_wcsncat_s = (void *)GetProcAddress( hcrt,"wcsncat_s" );
-    p_qsort_s = (void *) GetProcAddress(hcrt, "qsort_s");
-    p_controlfp_s = (void *) GetProcAddress(hcrt, "_controlfp_s");
-    p_atoflt = (void* )GetProcAddress(hcrt, "_atoflt");
-    p_set_abort_behavior = (void *) GetProcAddress(hcrt, "_set_abort_behavior");
-    p_sopen_s = (void*) GetProcAddress(hcrt, "_sopen_s");
-    p_wsopen_s = (void*) GetProcAddress(hcrt, "_wsopen_s");
-    p_realloc_crt = (void*) GetProcAddress(hcrt, "_realloc_crt");
-    p_malloc = (void*) GetProcAddress(hcrt, "malloc");
-    p_free = (void*)GetProcAddress(hcrt, "free");
-    if (sizeof(void *) == 8)
-    {
-        p_type_info_name_internal_method = (void*)GetProcAddress(hcrt,
-                                "?_name_internal_method@type_info@@QEBAPEBDPEAU__type_info_node@@@Z");
-        ptype_info_dtor = (void*)GetProcAddress(hcrt, "??1type_info@@UEAA@XZ");
-    }
-    else
-    {
-        p_type_info_name_internal_method = (void*)GetProcAddress(hcrt,
-                                "?_name_internal_method@type_info@@QBEPBDPAU__type_info_node@@@Z");
-        ptype_info_dtor = (void*)GetProcAddress(hcrt, "??1type_info@@UAE@XZ");
+    filew = p_fopen("test_file", "w");
+    ok(filew != NULL, "unable to create test file\n");
+    if(!filew)
+        return;
+    filer = p_fopen("test_file", "r");
+    ok(filer != NULL, "unable to open test file\n");
+    if(!filer) {
+        p_fclose(filew);
+        p_unlink("test_file");
+        return;
     }
 
-    hkernel32 = GetModuleHandleA("kernel32.dll");
-    pEncodePointer = (void *) GetProcAddress(hkernel32, "EncodePointer");
+    arg.read = filer;
+    arg.write = filew;
+    arg.blocked = CreateEvent(NULL, FALSE, FALSE, NULL);
+    ok(arg.blocked != NULL, "CreateEvent failed\n");
+    if(!arg.blocked) {
+        p_fclose(filer);
+        p_fclose(filew);
+        p_unlink("test_file");
+        return;
+    }
+    thread = CreateThread(NULL, 0, block_file, (void*)&arg, 0, NULL);
+    ok(thread != NULL, "CreateThread failed\n");
+    if(!thread) {
+        CloseHandle(arg.blocked);
+        p_fclose(filer);
+        p_fclose(filew);
+        p_unlink("test_file");
+        return;
+    }
+    WaitForSingleObject(arg.blocked, INFINITE);
+
+    ret = p_fileno(filer);
+    ok(ret, "_fileno(filer) returned %d\n", ret);
+    ret = p_fileno(filew);
+    ok(ret, "_fileno(filew) returned %d\n", ret);
+
+    ret = p_feof(filer);
+    ok(ret==0, "feof(filer) returned %d\n", ret);
+    ret = p_feof(filew);
+    ok(ret==0, "feof(filew) returned %d\n", ret);
+
+    ret = p_ferror(filer);
+    ok(ret==0, "ferror(filer) returned %d\n", ret);
+    ret = p_ferror(filew);
+    ok(ret==0, "ferror(filew) returned %d\n", ret);
+
+    ret = p_flsbuf('a', filer);
+    ok(ret==-1, "_flsbuf(filer) returned %d\n", ret);
+    ret = p_flsbuf('a', filew);
+    ok(ret=='a', "_flsbuf(filew) returned %d\n", ret);
+
+    SetEvent(arg.blocked);
+    WaitForSingleObject(thread, INFINITE);
+    CloseHandle(arg.blocked);
+    CloseHandle(thread);
+    p_fclose(filer);
+    p_fclose(filew);
+    p_unlink("test_file");
+}
+
+START_TEST(msvcr90)
+{
+    if(!init())
+        return;
 
     test__initterm_e();
     test__encode_pointer();
@@ -971,4 +1156,7 @@ START_TEST(msvcr90)
     test__wsopen_s();
     test__realloc_crt();
     test_typeinfo();
+    test_getptd();
+    test__vswprintf_l();
+    test_nonblocking_file_access();
 }

@@ -24,6 +24,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxgi);
 
+static inline struct dxgi_swapchain *impl_from_IDXGISwapChain(IDXGISwapChain *iface)
+{
+    return CONTAINING_RECORD(iface, struct dxgi_swapchain, IDXGISwapChain_iface);
+}
+
 /* IUnknown methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_swapchain_QueryInterface(IDXGISwapChain *iface, REFIID riid, void **object)
@@ -48,51 +53,37 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_QueryInterface(IDXGISwapChain *i
 
 static ULONG STDMETHODCALLTYPE dxgi_swapchain_AddRef(IDXGISwapChain *iface)
 {
-    struct dxgi_swapchain *This = (struct dxgi_swapchain *)iface;
+    struct dxgi_swapchain *This = impl_from_IDXGISwapChain(iface);
     ULONG refcount = InterlockedIncrement(&This->refcount);
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
 
+    if (refcount == 1)
+        wined3d_swapchain_incref(This->wined3d_swapchain);
+
     return refcount;
-}
-
-static ULONG STDMETHODCALLTYPE destroy_swapchain(IWineD3DSwapChain *swapchain)
-{
-    TRACE("swapchain %p\n", swapchain);
-
-    return IWineD3DSwapChain_Release(swapchain);
 }
 
 static ULONG STDMETHODCALLTYPE dxgi_swapchain_Release(IDXGISwapChain *iface)
 {
-    struct dxgi_swapchain *This = (struct dxgi_swapchain *)iface;
+    struct dxgi_swapchain *This = impl_from_IDXGISwapChain(iface);
     ULONG refcount = InterlockedDecrement(&This->refcount);
 
     TRACE("%p decreasing refcount to %u\n", This, refcount);
 
     if (!refcount)
     {
-        IWineD3DDevice *wined3d_device;
+        struct wined3d_device *wined3d_device;
         HRESULT hr;
 
         FIXME("Only a single swapchain is supported\n");
 
-        hr = IWineD3DSwapChain_GetDevice(This->wined3d_swapchain, &wined3d_device);
+        wined3d_device = wined3d_swapchain_get_device(This->wined3d_swapchain);
+        hr = wined3d_device_uninit_3d(wined3d_device);
         if (FAILED(hr))
         {
-            ERR("Failed to get the wined3d device, hr %#x\n", hr);
+            ERR("Uninit3D failed, hr %#x\n", hr);
         }
-        else
-        {
-            hr = IWineD3DDevice_Uninit3D(wined3d_device, destroy_swapchain);
-            IWineD3DDevice_Release(wined3d_device);
-            if (FAILED(hr))
-            {
-                ERR("Uninit3D failed, hr %#x\n", hr);
-            }
-        }
-
-        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return refcount;
@@ -144,21 +135,21 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_GetDevice(IDXGISwapChain *iface,
 
 static HRESULT STDMETHODCALLTYPE dxgi_swapchain_Present(IDXGISwapChain *iface, UINT sync_interval, UINT flags)
 {
-    struct dxgi_swapchain *This = (struct dxgi_swapchain *)iface;
+    struct dxgi_swapchain *This = impl_from_IDXGISwapChain(iface);
 
     TRACE("iface %p, sync_interval %u, flags %#x\n", iface, sync_interval, flags);
 
     if (sync_interval) FIXME("Unimplemented sync interval %u\n", sync_interval);
     if (flags) FIXME("Unimplemented flags %#x\n", flags);
 
-    return IWineD3DSwapChain_Present(This->wined3d_swapchain, NULL, NULL, NULL, NULL, 0);
+    return wined3d_swapchain_present(This->wined3d_swapchain, NULL, NULL, NULL, NULL, 0);
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_swapchain_GetBuffer(IDXGISwapChain *iface,
         UINT buffer_idx, REFIID riid, void **surface)
 {
-    struct dxgi_swapchain *This = (struct dxgi_swapchain *)iface;
-    IWineD3DSurface *backbuffer;
+    struct dxgi_swapchain *This = impl_from_IDXGISwapChain(iface);
+    struct wined3d_surface *backbuffer;
     IUnknown *parent;
     HRESULT hr;
 
@@ -167,16 +158,17 @@ static HRESULT STDMETHODCALLTYPE dxgi_swapchain_GetBuffer(IDXGISwapChain *iface,
 
     EnterCriticalSection(&dxgi_cs);
 
-    hr = IWineD3DSwapChain_GetBackBuffer(This->wined3d_swapchain, buffer_idx, WINED3DBACKBUFFER_TYPE_MONO, &backbuffer);
+    hr = wined3d_swapchain_get_back_buffer(This->wined3d_swapchain,
+            buffer_idx, WINED3D_BACKBUFFER_TYPE_MONO, &backbuffer);
     if (FAILED(hr))
     {
         LeaveCriticalSection(&dxgi_cs);
         return hr;
     }
 
-    parent = IWineD3DSurface_GetParent(backbuffer);
+    parent = wined3d_surface_get_parent(backbuffer);
     hr = IUnknown_QueryInterface(parent, riid, surface);
-    IWineD3DSurface_Release(backbuffer);
+    wined3d_surface_decref(backbuffer);
     LeaveCriticalSection(&dxgi_cs);
 
     return hr;
@@ -269,16 +261,27 @@ static const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl =
     dxgi_swapchain_GetLastPresentCount,
 };
 
+static void STDMETHODCALLTYPE dxgi_swapchain_wined3d_object_released(void *parent)
+{
+    HeapFree(GetProcessHeap(), 0, parent);
+}
+
+static const struct wined3d_parent_ops dxgi_swapchain_wined3d_parent_ops =
+{
+    dxgi_swapchain_wined3d_object_released,
+};
+
 HRESULT dxgi_swapchain_init(struct dxgi_swapchain *swapchain, struct dxgi_device *device,
-        WINED3DPRESENT_PARAMETERS *present_parameters)
+        struct wined3d_swapchain_desc *desc)
 {
     HRESULT hr;
 
-    swapchain->vtbl = &dxgi_swapchain_vtbl;
+    swapchain->IDXGISwapChain_iface.lpVtbl = &dxgi_swapchain_vtbl;
     swapchain->refcount = 1;
 
-    hr = IWineD3DDevice_CreateSwapChain(device->wined3d_device, present_parameters,
-            SURFACE_OPENGL, swapchain, &swapchain->wined3d_swapchain);
+    hr = wined3d_swapchain_create(device->wined3d_device, desc,
+            WINED3D_SURFACE_TYPE_OPENGL, swapchain, &dxgi_swapchain_wined3d_parent_ops,
+            &swapchain->wined3d_swapchain);
     if (FAILED(hr))
     {
         WARN("Failed to create wined3d swapchain, hr %#x.\n", hr);

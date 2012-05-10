@@ -63,12 +63,14 @@
 @ stub CM_Get_Class_NameW
 @ stub CM_Get_Class_Name_ExA
 @ stub CM_Get_Class_Name_ExW
+@ stdcall CM_Get_Class_Registry_PropertyA(ptr long ptr ptr long long ptr)
+@ stdcall CM_Get_Class_Registry_PropertyW(ptr long ptr ptr long long ptr)
 @ stub CM_Get_Depth
 @ stub CM_Get_Depth_Ex
 @ stub CM_Get_DevNode_Registry_PropertyA
 @ stub CM_Get_DevNode_Registry_PropertyW
-@ stub CM_Get_DevNode_Registry_Property_ExA
-@ stub CM_Get_DevNode_Registry_Property_ExW
+@ stdcall CM_Get_DevNode_Registry_Property_ExA(long long ptr ptr ptr long ptr)
+@ stdcall CM_Get_DevNode_Registry_Property_ExW(long long ptr ptr ptr long ptr)
 @ stub CM_Get_DevNode_Status
 @ stub CM_Get_DevNode_Status_Ex
 @ stdcall CM_Get_Device_IDA(ptr ptr long long)
@@ -79,8 +81,8 @@
 @ stdcall CM_Get_Device_ID_ListW(wstr ptr long long)
 @ stub CM_Get_Device_ID_List_ExA
 @ stub CM_Get_Device_ID_List_ExW
-@ stub CM_Get_Device_ID_List_SizeA
-@ stub CM_Get_Device_ID_List_SizeW
+@ stdcall CM_Get_Device_ID_List_SizeA(ptr str long)
+@ stdcall CM_Get_Device_ID_List_SizeW(ptr wstr long)
 @ stub CM_Get_Device_ID_List_Size_ExA
 @ stub CM_Get_Device_ID_List_Size_ExW
 @ stdcall CM_Get_Device_ID_Size(ptr ptr long)
@@ -173,6 +175,8 @@
 @ stub CM_Reset_Children_Marks_Ex
 @ stub CM_Run_Detection
 @ stub CM_Run_Detection_Ex
+@ stdcall CM_Set_Class_Registry_PropertyA(ptr long ptr long long ptr)
+@ stdcall CM_Set_Class_Registry_PropertyW(ptr long ptr long long ptr)
 @ stub CM_Set_DevNode_Problem
 @ stub CM_Set_DevNode_Problem_Ex
 @ stub CM_Set_DevNode_Registry_PropertyA
@@ -242,8 +246,8 @@
 @ stub SetupAddInstallSectionToDiskSpaceListW
 @ stub SetupAddSectionToDiskSpaceListA
 @ stub SetupAddSectionToDiskSpaceListW
-@ stub SetupAddToDiskSpaceListA
-@ stub SetupAddToDiskSpaceListW
+@ stdcall SetupAddToDiskSpaceListA(long str int64 long ptr long)
+@ stdcall SetupAddToDiskSpaceListW(long wstr int64 long ptr long)
 @ stub SetupAddToSourceListA
 @ stub SetupAddToSourceListW
 @ stub SetupAdjustDiskSpaceListA
@@ -304,14 +308,14 @@
 @ stdcall SetupDiDestroyClassImageList(ptr)
 @ stdcall SetupDiDestroyDeviceInfoList(long)
 @ stub SetupDiDestroyDriverInfoList
-@ stub SetupDiDrawMiniIcon
+@ stdcall SetupDiDrawMiniIcon(ptr int128 long long)
 @ stdcall SetupDiEnumDeviceInfo(long long ptr)
 @ stdcall SetupDiEnumDeviceInterfaces(long ptr ptr long ptr)
 @ stub SetupDiEnumDriverInfoA
 @ stub SetupDiEnumDriverInfoW
 @ stdcall SetupDiGetActualSectionToInstallA(long str str long ptr ptr)
 @ stdcall SetupDiGetActualSectionToInstallW(long wstr wstr long ptr ptr)
-@ stub SetupDiGetClassBitmapIndex
+@ stdcall SetupDiGetClassBitmapIndex(ptr ptr)
 @ stdcall SetupDiGetClassDescriptionA(ptr str long ptr)
 @ stdcall SetupDiGetClassDescriptionExA(ptr str long ptr str ptr)
 @ stdcall SetupDiGetClassDescriptionExW(ptr wstr long ptr wstr ptr)
@@ -557,6 +561,7 @@
 @ stub pSetupAppendStringToMultiSz
 @ stub pSetupDestroyRunOnceNodeList
 @ stub pSetupDirectoryIdToPath
+@ stdcall pSetupFree(ptr) MyFree
 @ stdcall pSetupGetField(ptr long)
 @ stdcall pSetupGetGlobalFlags()
 @ stub pSetupGetOsLoaderDriveAndPath
@@ -567,6 +572,8 @@
 @ stdcall pSetupInstallCatalog(wstr wstr ptr)
 @ stdcall pSetupIsUserAdmin() IsUserAdmin
 @ stub pSetupMakeSurePathExists
+@ stdcall pSetupMalloc(long) MyMalloc
+@ stdcall pSetupRealloc(ptr long) MyRealloc
 @ stdcall pSetupSetGlobalFlags(long)
 @ stdcall pSetupSetQueueFlags(ptr long)
 @ stub pSetupSetSystemSourceFlags

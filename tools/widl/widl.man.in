@@ -48,7 +48,9 @@ Use old naming conventions.
 .PP
 .B Type library options:
 .IP \fB-t\fR
-Generate a type library. The default output filename is \fIinfile\fB.tlb\fR.
+Generate a type library. The default output filename is
+\fIinfile\fB.tlb\fR.  If the output file name ends in \fB.res\fR, a
+binary resource file containing the type library is generated instead.
 .IP "\fB-m32, -m64\fR"
 Generate a Win32, respectively Win64, type library.
 .PP
@@ -59,6 +61,12 @@ Generate a UUID file. The default output filename is \fIinfile\fB_i.c\fR.
 .B Proxy/stub generation options:
 .IP "\fB-c\fR"
 Generate a client stub file. The default output filename is \fIinfile\fB_c.c\fR.
+.IP "\fB-Os\fR"
+Generate inline stubs.
+.IP "\fB-Oi\fR"
+Generate old-style interpreted stubs.
+.IP "\fB-Oif, -Oic, -Oicf\fR"
+Generate new-style fully interpreted stubs.
 .IP "\fB-p\fR"
 Generate a proxy. The default output filename is \fIinfile\fB_p.c\fR.
 .IP "\fB--prefix-all=\fIprefix\fR"

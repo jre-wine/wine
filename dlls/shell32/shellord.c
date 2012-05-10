@@ -1162,7 +1162,7 @@ HRESULT WINAPI SHGetInstanceExplorer (IUnknown **lpUnknown)
 	  return E_FAIL;
 
 	IUnknown_AddRef(SHELL32_IExplorerInterface);
-	return NOERROR;
+	return S_OK;
 }
 /*************************************************************************
  * SHFreeUnusedLibraries			[SHELL32.123]
@@ -2098,45 +2098,11 @@ HRESULT WINAPI SHStartNetConnectionDialog(HWND hwnd, LPCSTR pszRemoteName, DWORD
     return S_OK;
 }
 
-HRESULT WINAPI SHEmptyRecycleBinA(HWND hwnd, LPCSTR pszRootPath, DWORD dwFlags)
-{
-    FIXME("%p, %s, 0x%08x - stub\n", hwnd, debugstr_a(pszRootPath), dwFlags);
-
-    return S_OK;
-}
-
-HRESULT WINAPI SHEmptyRecycleBinW(HWND hwnd, LPCWSTR pszRootPath, DWORD dwFlags)
-{
-    FIXME("%p, %s, 0x%08x - stub\n", hwnd, debugstr_w(pszRootPath), dwFlags);
-
-    return S_OK;
-}
-
 DWORD WINAPI SHFormatDrive(HWND hwnd, UINT drive, UINT fmtID, UINT options)
 {
     FIXME("%p, 0x%08x, 0x%08x, 0x%08x - stub\n", hwnd, drive, fmtID, options);
 
     return SHFMT_NOFORMAT;
-}
-
-HRESULT WINAPI SHQueryRecycleBinA(LPCSTR pszRootPath, LPSHQUERYRBINFO pSHQueryRBInfo)
-{
-    FIXME("%s, %p - stub\n", debugstr_a(pszRootPath), pSHQueryRBInfo);
-
-    pSHQueryRBInfo->i64Size = 0;
-    pSHQueryRBInfo->i64NumItems = 0;
-
-    return S_OK;
-}
-
-HRESULT WINAPI SHQueryRecycleBinW(LPCWSTR pszRootPath, LPSHQUERYRBINFO pSHQueryRBInfo)
-{
-    FIXME("%s, %p - stub\n", debugstr_w(pszRootPath), pSHQueryRBInfo);
-
-    pSHQueryRBInfo->i64Size = 0;
-    pSHQueryRBInfo->i64NumItems = 0;
-
-    return S_OK;
 }
 
 /*************************************************************************

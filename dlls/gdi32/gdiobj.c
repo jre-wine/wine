@@ -42,6 +42,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
 #define GDI_HEAP_SIZE 0xffe0
 
+HMODULE gdi32_module = 0;
+
 /***********************************************************************
  *          GDI stock objects
  */
@@ -578,6 +580,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 
     if (reason != DLL_PROCESS_ATTACH) return TRUE;
 
+    gdi32_module = inst;
     DisableThreadLibraryCalls( inst );
     WineEngInit();
 
@@ -845,12 +848,10 @@ BOOL WINAPI DeleteObject( HGDIOBJ obj )
 
         if(dc)
         {
-            if(dc->funcs->pDeleteObject)
-            {
-                GDI_ReleaseObj( obj );  /* release the GDI lock */
-                dc->funcs->pDeleteObject( dc->physDev, obj );
-                header = GDI_GetObjPtr( obj, 0 );  /* and grab it again */
-            }
+            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pDeleteObject );
+            GDI_ReleaseObj( obj );  /* release the GDI lock */
+            physdev->funcs->pDeleteObject( physdev, obj );
+            header = GDI_GetObjPtr( obj, 0 );  /* and grab it again */
             release_dc_ptr( dc );
         }
         HeapFree(GetProcessHeap(), 0, hdcs_head);
@@ -1280,10 +1281,11 @@ BOOL WINAPI GdiComment(HDC hdc, UINT cbSize, const BYTE *lpData)
 {
     DC *dc = get_dc_ptr(hdc);
     BOOL ret = FALSE;
+
     if(dc)
     {
-        if (dc->funcs->pGdiComment)
-            ret = dc->funcs->pGdiComment( dc->physDev, cbSize, lpData );
+        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGdiComment );
+        ret = physdev->funcs->pGdiComment( physdev, cbSize, lpData );
         release_dc_ptr( dc );
     }
     return ret;

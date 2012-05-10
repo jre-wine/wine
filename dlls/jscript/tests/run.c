@@ -36,9 +36,6 @@ static const CLSID CLSID_JScript =
 #define SET_EXPECT(func) \
     expect_ ## func = TRUE
 
-#define SET_CALLED(func) \
-    called_ ## func = TRUE
-
 #define CHECK_EXPECT2(func) \
     do { \
         ok(expect_ ##func, "unexpected call " #func "\n"); \
@@ -61,9 +58,12 @@ DEFINE_EXPECT(global_propget_d);
 DEFINE_EXPECT(global_propget_i);
 DEFINE_EXPECT(global_propput_d);
 DEFINE_EXPECT(global_propput_i);
+DEFINE_EXPECT(global_propdelete_d);
 DEFINE_EXPECT(global_success_d);
 DEFINE_EXPECT(global_success_i);
 DEFINE_EXPECT(global_notexists_d);
+DEFINE_EXPECT(puredisp_prop_d);
+DEFINE_EXPECT(puredisp_noprop_d);
 DEFINE_EXPECT(testobj_delete);
 DEFINE_EXPECT(testobj_value);
 DEFINE_EXPECT(testobj_prop_d);
@@ -73,6 +73,7 @@ DEFINE_EXPECT(testobj_onlydispid_i);
 DEFINE_EXPECT(GetItemInfo_testVal);
 DEFINE_EXPECT(ActiveScriptSite_OnScriptError);
 DEFINE_EXPECT(invoke_func);
+DEFINE_EXPECT(DeleteMemberByDispID);
 
 #define DISPID_GLOBAL_TESTPROPGET   0x1000
 #define DISPID_GLOBAL_TESTPROPPUT   0x1001
@@ -90,6 +91,8 @@ DEFINE_EXPECT(invoke_func);
 #define DISPID_GLOBAL_PROPGETFUNC   0x100d
 #define DISPID_GLOBAL_OBJECT_FLAG   0x100e
 #define DISPID_GLOBAL_ISWIN64       0x100f
+#define DISPID_GLOBAL_PUREDISP      0x1010
+#define DISPID_GLOBAL_TESTPROPDELETE  0x1010
 
 #define DISPID_TESTOBJ_PROP         0x2000
 #define DISPID_TESTOBJ_ONLYDISPID   0x2001
@@ -104,6 +107,29 @@ static const char *test_name = "(null)";
 static IDispatch *script_disp;
 static int invoke_version;
 static IActiveScriptError *script_error;
+
+/* Returns true if the user interface is in English. Note that this does not
+ * presume of the formatting of dates, numbers, etc.
+ */
+static BOOL is_lang_english(void)
+{
+    static HMODULE hkernel32 = NULL;
+    static LANGID (WINAPI *pGetThreadUILanguage)(void) = NULL;
+    static LANGID (WINAPI *pGetUserDefaultUILanguage)(void) = NULL;
+
+    if (!hkernel32)
+    {
+        hkernel32 = GetModuleHandleA("kernel32.dll");
+        pGetThreadUILanguage = (void*)GetProcAddress(hkernel32, "GetThreadUILanguage");
+        pGetUserDefaultUILanguage = (void*)GetProcAddress(hkernel32, "GetUserDefaultUILanguage");
+    }
+    if (pGetThreadUILanguage)
+        return PRIMARYLANGID(pGetThreadUILanguage()) == LANG_ENGLISH;
+    if (pGetUserDefaultUILanguage)
+        return PRIMARYLANGID(pGetUserDefaultUILanguage()) == LANG_ENGLISH;
+
+    return PRIMARYLANGID(GetUserDefaultLangID()) == LANG_ENGLISH;
+}
 
 static BSTR a2bstr(const char *str)
 {
@@ -172,6 +198,18 @@ static HRESULT WINAPI DispatchEx_GetIDsOfNames(IDispatchEx *iface, REFIID riid,
                                                 LPOLESTR *rgszNames, UINT cNames,
                                                 LCID lcid, DISPID *rgDispId)
 {
+    ok(IsEqualGUID(riid, &IID_NULL), "Expected IID_NULL\n");
+    ok(cNames==1, "cNames = %d\n", cNames);
+
+    if(!strcmp_wa(*rgszNames, "prop")) {
+        CHECK_EXPECT(puredisp_prop_d);
+        *rgDispId = DISPID_TESTOBJ_PROP;
+        return S_OK;
+    } else if(!strcmp_wa(*rgszNames, "noprop")) {
+        CHECK_EXPECT(puredisp_noprop_d);
+        return DISP_E_UNKNOWNNAME;
+    }
+
     ok(0, "unexpected call\n");
     return E_NOTIMPL;
 }
@@ -324,6 +362,29 @@ static IDispatchExVtbl testObjVtbl = {
 
 static IDispatchEx testObj = { &testObjVtbl };
 
+static HRESULT WINAPI pureDisp_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
+{
+    if(IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDispatch)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static IDispatchExVtbl pureDispVtbl = {
+    pureDisp_QueryInterface,
+    DispatchEx_AddRef,
+    DispatchEx_Release,
+    DispatchEx_GetTypeInfoCount,
+    DispatchEx_GetTypeInfo,
+    DispatchEx_GetIDsOfNames,
+    DispatchEx_Invoke
+};
+
+static IDispatchEx pureDisp = { &pureDispVtbl };
+
 static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
     if(!strcmp_wa(bstrName, "ok")) {
@@ -352,6 +413,12 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         CHECK_EXPECT(global_propput_d);
         test_grfdex(grfdex, fdexNameCaseSensitive);
         *pid = DISPID_GLOBAL_TESTPROPPUT;
+        return S_OK;
+    }
+    if(!strcmp_wa(bstrName, "testPropDelete")) {
+        CHECK_EXPECT(global_propdelete_d);
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_TESTPROPDELETE;
         return S_OK;
     }
     if(!strcmp_wa(bstrName, "getVT")) {
@@ -414,6 +481,12 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
     if(!strcmp_wa(bstrName, "isWin64")) {
         test_grfdex(grfdex, fdexNameCaseSensitive);
         *pid = DISPID_GLOBAL_ISWIN64;
+        return S_OK;
+    }
+
+    if(!strcmp_wa(bstrName, "pureDisp")) {
+        test_grfdex(grfdex, fdexNameCaseSensitive);
+        *pid = DISPID_GLOBAL_PUREDISP;
         return S_OK;
     }
 
@@ -566,6 +639,21 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_DISPATCH(pvarRes) = (IDispatch*)&testObj;
         return S_OK;
 
+    case DISPID_GLOBAL_PUREDISP:
+        ok(wFlags == INVOKE_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) ==  VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        V_VT(pvarRes) = VT_DISPATCH;
+        V_DISPATCH(pvarRes) = (IDispatch*)&pureDisp;
+        return S_OK;
+
     case DISPID_GLOBAL_NULL_BSTR:
         if(pvarRes) {
             V_VT(pvarRes) = VT_BSTR;
@@ -647,7 +735,7 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
 
         ok(wFlags == INVOKE_FUNC, "wFlags = %x\n", wFlags);
         ok(pdp != NULL, "pdp == NULL\n");
-        todo_wine ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
         ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
         ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
         ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
@@ -753,6 +841,13 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
     return DISP_E_MEMBERNOTFOUND;
 }
 
+static HRESULT WINAPI Global_DeleteMemberByDispID(IDispatchEx *iface, DISPID id)
+{
+    CHECK_EXPECT(DeleteMemberByDispID);
+    ok(id == DISPID_GLOBAL_TESTPROPDELETE, "id = %d\n", id);
+    return S_OK;
+}
+
 static IDispatchExVtbl GlobalVtbl = {
     DispatchEx_QueryInterface,
     DispatchEx_AddRef,
@@ -764,7 +859,7 @@ static IDispatchExVtbl GlobalVtbl = {
     Global_GetDispID,
     Global_InvokeEx,
     DispatchEx_DeleteMemberByName,
-    DispatchEx_DeleteMemberByDispID,
+    Global_DeleteMemberByDispID,
     DispatchEx_GetMemberProperties,
     DispatchEx_GetMemberName,
     DispatchEx_GetNextDispID,
@@ -1086,8 +1181,8 @@ static void test_IActiveScriptError(IActiveScriptError *error, SCODE errorcode, 
 
     ok(excep.wCode == 0, "IActiveScriptError_GetExceptionInfo -- excep.wCode: expected 0, got 0x%08x\n", excep.wCode);
     ok(excep.wReserved == 0, "IActiveScriptError_GetExceptionInfo -- excep.wReserved: expected 0, got %d\n", excep.wReserved);
-    if (PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale())) != LANG_ENGLISH)
-        skip("Non-english locale (test with hardcoded strings)\n");
+    if (!is_lang_english())
+        skip("Non-english UI (test with hardcoded strings)\n");
     else {
         ok(excep.bstrSource != NULL && !lstrcmpW(excep.bstrSource, script_source),
            "IActiveScriptError_GetExceptionInfo -- excep.bstrSource is not valid: expected %s, got %s\n",
@@ -1383,6 +1478,14 @@ static void run_tests(void)
     parse_script_a("delete testObj.deleteTest;");
     CHECK_CALLED(testobj_delete);
 
+    SET_EXPECT(global_propdelete_d);
+    SET_EXPECT(DeleteMemberByDispID);
+    parse_script_a("delete testPropDelete;");
+    CHECK_CALLED(global_propdelete_d);
+    CHECK_CALLED(DeleteMemberByDispID);
+
+    parse_script_a("(function reportSuccess() {})()");
+
     parse_script_a("ok(typeof(test) === 'object', \"typeof(test) != 'object'\");");
 
     parse_script_a("function reportSuccess() {}; reportSuccess();");
@@ -1430,6 +1533,22 @@ static void run_tests(void)
     SET_EXPECT(testobj_noprop_d);
     parse_script_a("ok(('noprop' in testObj) === false, 'noprop is in testObj');");
     CHECK_CALLED(testobj_noprop_d);
+
+    SET_EXPECT(testobj_prop_d);
+    parse_script_a("ok(Object.prototype.hasOwnProperty.call(testObj, 'prop') === true, 'hasOwnProperty(\\\"prop\\\") returned false');");
+    CHECK_CALLED(testobj_prop_d);
+
+    SET_EXPECT(testobj_noprop_d);
+    parse_script_a("ok(Object.prototype.hasOwnProperty.call(testObj, 'noprop') === false, 'hasOwnProperty(\\\"noprop\\\") returned true');");
+    CHECK_CALLED(testobj_noprop_d);
+
+    SET_EXPECT(puredisp_prop_d);
+    parse_script_a("ok(Object.prototype.hasOwnProperty.call(pureDisp, 'prop') === true, 'hasOwnProperty(\\\"noprop\\\") returned false');");
+    CHECK_CALLED(puredisp_prop_d);
+
+    SET_EXPECT(puredisp_noprop_d);
+    parse_script_a("ok(Object.prototype.hasOwnProperty.call(pureDisp, 'noprop') === false, 'hasOwnProperty(\\\"noprop\\\") returned true');");
+    CHECK_CALLED(puredisp_noprop_d);
 
     SET_EXPECT(testobj_value);
     parse_script_a("ok(String(testObj) === '1', 'wrong testObj value');");
@@ -1558,6 +1677,7 @@ START_TEST(run)
     if(!check_jscript()) {
         win_skip("Broken engine, probably too old\n");
     }else if(argc > 2) {
+        invoke_version = 2;
         run_from_file(argv[2]);
     }else {
         trace("invoke version 0\n");

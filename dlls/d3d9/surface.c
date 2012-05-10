@@ -20,13 +20,21 @@
  */
 
 #include "config.h"
+#include <assert.h>
 #include "d3d9_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d9);
 
+static inline IDirect3DSurface9Impl *impl_from_IDirect3DSurface9(IDirect3DSurface9 *iface)
+{
+    return CONTAINING_RECORD(iface, IDirect3DSurface9Impl, IDirect3DSurface9_iface);
+}
+
 /* IDirect3DSurface9 IUnknown parts follow: */
-static HRESULT WINAPI IDirect3DSurface9Impl_QueryInterface(LPDIRECT3DSURFACE9 iface, REFIID riid, LPVOID* ppobj) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_QueryInterface(IDirect3DSurface9 *iface, REFIID riid,
+        void **ppobj)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
 
     TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), ppobj);
 
@@ -43,8 +51,9 @@ static HRESULT WINAPI IDirect3DSurface9Impl_QueryInterface(LPDIRECT3DSURFACE9 if
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static ULONG WINAPI IDirect3DSurface9Impl_AddRef(IDirect3DSurface9 *iface)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
 
     TRACE("iface %p.\n", iface);
 
@@ -62,7 +71,7 @@ static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
         {
             if (This->parentDevice) IDirect3DDevice9Ex_AddRef(This->parentDevice);
             wined3d_mutex_lock();
-            IWineD3DSurface_AddRef(This->wineD3DSurface);
+            wined3d_surface_incref(This->wined3d_surface);
             wined3d_mutex_unlock();
         }
 
@@ -71,8 +80,9 @@ static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
 
 }
 
-static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static ULONG WINAPI IDirect3DSurface9Impl_Release(IDirect3DSurface9 *iface)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
 
     TRACE("iface %p.\n", iface);
 
@@ -90,7 +100,7 @@ static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
             IDirect3DDevice9Ex *parentDevice = This->parentDevice;
 
             wined3d_mutex_lock();
-            IWineD3DSurface_Release(This->wineD3DSurface);
+            wined3d_surface_decref(This->wined3d_surface);
             wined3d_mutex_unlock();
 
             /* Release the device last, as it may cause the device to be destroyed. */
@@ -102,9 +112,10 @@ static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
 }
 
 /* IDirect3DSurface9 IDirect3DResource9 Interface follow: */
-static HRESULT WINAPI IDirect3DSurface9Impl_GetDevice(IDirect3DSurface9 *iface, IDirect3DDevice9 **device)
+static HRESULT WINAPI IDirect3DSurface9Impl_GetDevice(IDirect3DSurface9 *iface,
+        IDirect3DDevice9 **device)
 {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
 
     TRACE("iface %p, device %p.\n", iface, device);
 
@@ -133,99 +144,109 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetDevice(IDirect3DSurface9 *iface, 
     return D3D_OK;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_SetPrivateData(LPDIRECT3DSURFACE9 iface, REFGUID refguid, CONST void* pData, DWORD SizeOfData, DWORD Flags) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_SetPrivateData(IDirect3DSurface9 *iface, REFGUID guid,
+        const void *data, DWORD data_size, DWORD flags)
+{
+    IDirect3DSurface9Impl *surface = impl_from_IDirect3DSurface9(iface);
+    struct wined3d_resource *resource;
     HRESULT hr;
 
     TRACE("iface %p, guid %s, data %p, data_size %u, flags %#x.\n",
-            iface, debugstr_guid(refguid), pData, SizeOfData, Flags);
+            iface, debugstr_guid(guid), data, data_size, flags);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_SetPrivateData(This->wineD3DSurface, refguid, pData, SizeOfData, Flags);
+    resource = wined3d_surface_get_resource(surface->wined3d_surface);
+    hr = wined3d_resource_set_private_data(resource, guid, data, data_size, flags);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_GetPrivateData(LPDIRECT3DSURFACE9 iface, REFGUID refguid, void* pData, DWORD* pSizeOfData) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_GetPrivateData(IDirect3DSurface9 *iface, REFGUID guid,
+        void *data, DWORD *data_size)
+{
+    IDirect3DSurface9Impl *surface = impl_from_IDirect3DSurface9(iface);
+    struct wined3d_resource *resource;
     HRESULT hr;
 
     TRACE("iface %p, guid %s, data %p, data_size %p.\n",
-            iface, debugstr_guid(refguid), pData, pSizeOfData);
+            iface, debugstr_guid(guid), data, data_size);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_GetPrivateData(This->wineD3DSurface, refguid, pData, pSizeOfData);
+    resource = wined3d_surface_get_resource(surface->wined3d_surface);
+    hr = wined3d_resource_get_private_data(resource, guid, data, data_size);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_FreePrivateData(LPDIRECT3DSURFACE9 iface, REFGUID refguid) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_FreePrivateData(IDirect3DSurface9 *iface, REFGUID guid)
+{
+    IDirect3DSurface9Impl *surface = impl_from_IDirect3DSurface9(iface);
+    struct wined3d_resource *resource;
     HRESULT hr;
 
-    TRACE("iface %p, guid %s.\n", iface, debugstr_guid(refguid));
+    TRACE("iface %p, guid %s.\n", iface, debugstr_guid(guid));
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_FreePrivateData(This->wineD3DSurface, refguid);
+    resource = wined3d_surface_get_resource(surface->wined3d_surface);
+    hr = wined3d_resource_free_private_data(resource, guid);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static DWORD WINAPI IDirect3DSurface9Impl_SetPriority(LPDIRECT3DSURFACE9 iface, DWORD PriorityNew) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static DWORD WINAPI IDirect3DSurface9Impl_SetPriority(IDirect3DSurface9 *iface, DWORD PriorityNew)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p, priority %u.\n", iface, PriorityNew);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_SetPriority(This->wineD3DSurface, PriorityNew);
+    hr = wined3d_surface_set_priority(This->wined3d_surface, PriorityNew);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static DWORD WINAPI IDirect3DSurface9Impl_GetPriority(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static DWORD WINAPI IDirect3DSurface9Impl_GetPriority(IDirect3DSurface9 *iface)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_GetPriority(This->wineD3DSurface);
+    hr = wined3d_surface_get_priority(This->wined3d_surface);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static void WINAPI IDirect3DSurface9Impl_PreLoad(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static void WINAPI IDirect3DSurface9Impl_PreLoad(IDirect3DSurface9 *iface)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
 
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    IWineD3DSurface_PreLoad(This->wineD3DSurface);
+    wined3d_surface_preload(This->wined3d_surface);
     wined3d_mutex_unlock();
 }
 
-static D3DRESOURCETYPE WINAPI IDirect3DSurface9Impl_GetType(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
-    D3DRESOURCETYPE ret;
-
+static D3DRESOURCETYPE WINAPI IDirect3DSurface9Impl_GetType(IDirect3DSurface9 *iface)
+{
     TRACE("iface %p.\n", iface);
 
-    wined3d_mutex_lock();
-    ret = IWineD3DSurface_GetType(This->wineD3DSurface);
-    wined3d_mutex_unlock();
-
-    return ret;
+    return D3DRTYPE_SURFACE;
 }
 
 /* IDirect3DSurface9 Interface follow: */
-static HRESULT WINAPI IDirect3DSurface9Impl_GetContainer(LPDIRECT3DSURFACE9 iface, REFIID riid, void** ppContainer) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_GetContainer(IDirect3DSurface9 *iface, REFIID riid,
+        void **ppContainer)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT res;
 
     TRACE("iface %p, riid %s, container %p.\n", iface, debugstr_guid(riid), ppContainer);
@@ -239,49 +260,55 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetContainer(LPDIRECT3DSURFACE9 ifac
     return res;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_GetDesc(LPDIRECT3DSURFACE9 iface, D3DSURFACE_DESC* pDesc) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
-    WINED3DSURFACE_DESC wined3ddesc;
+static HRESULT WINAPI IDirect3DSurface9Impl_GetDesc(IDirect3DSurface9 *iface, D3DSURFACE_DESC *desc)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
+    struct wined3d_resource_desc wined3d_desc;
+    struct wined3d_resource *wined3d_resource;
 
-    TRACE("iface %p, desc %p.\n", iface, pDesc);
+    TRACE("iface %p, desc %p.\n", iface, desc);
 
     wined3d_mutex_lock();
-    IWineD3DSurface_GetDesc(This->wineD3DSurface, &wined3ddesc);
+    wined3d_resource = wined3d_surface_get_resource(This->wined3d_surface);
+    wined3d_resource_get_desc(wined3d_resource, &wined3d_desc);
     wined3d_mutex_unlock();
 
-    pDesc->Format = d3dformat_from_wined3dformat(wined3ddesc.format);
-    pDesc->Type = wined3ddesc.resource_type;
-    pDesc->Usage = wined3ddesc.usage;
-    pDesc->Pool = wined3ddesc.pool;
-    pDesc->MultiSampleType = wined3ddesc.multisample_type;
-    pDesc->MultiSampleQuality = wined3ddesc.multisample_quality;
-    pDesc->Width = wined3ddesc.width;
-    pDesc->Height = wined3ddesc.height;
+    desc->Format = d3dformat_from_wined3dformat(wined3d_desc.format);
+    desc->Type = wined3d_desc.resource_type;
+    desc->Usage = wined3d_desc.usage & WINED3DUSAGE_MASK;
+    desc->Pool = wined3d_desc.pool;
+    desc->MultiSampleType = wined3d_desc.multisample_type;
+    desc->MultiSampleQuality = wined3d_desc.multisample_quality;
+    desc->Width = wined3d_desc.width;
+    desc->Height = wined3d_desc.height;
 
     return D3D_OK;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_LockRect(LPDIRECT3DSURFACE9 iface, D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_LockRect(IDirect3DSurface9 *iface,
+        D3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD Flags)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p, locked_rect %p, rect %p, flags %#x.\n", iface, pLockedRect, pRect, Flags);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_Map(This->wineD3DSurface, (WINED3DLOCKED_RECT *)pLockedRect, pRect, Flags);
+    hr = wined3d_surface_map(This->wined3d_surface, (struct wined3d_mapped_rect *)pLockedRect, pRect, Flags);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_UnlockRect(LPDIRECT3DSURFACE9 iface) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_UnlockRect(IDirect3DSurface9 *iface)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_Unmap(This->wineD3DSurface);
+    hr = wined3d_surface_unmap(This->wined3d_surface);
     wined3d_mutex_unlock();
 
     switch(hr)
@@ -291,8 +318,9 @@ static HRESULT WINAPI IDirect3DSurface9Impl_UnlockRect(LPDIRECT3DSURFACE9 iface)
     }
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_GetDC(LPDIRECT3DSURFACE9 iface, HDC* phdc) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_GetDC(IDirect3DSurface9 *iface, HDC* phdc)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p, hdc %p.\n", iface, phdc);
@@ -305,20 +333,21 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetDC(LPDIRECT3DSURFACE9 iface, HDC*
     }
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_GetDC(This->wineD3DSurface, phdc);
+    hr = wined3d_surface_getdc(This->wined3d_surface, phdc);
     wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI IDirect3DSurface9Impl_ReleaseDC(LPDIRECT3DSURFACE9 iface, HDC hdc) {
-    IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+static HRESULT WINAPI IDirect3DSurface9Impl_ReleaseDC(IDirect3DSurface9 *iface, HDC hdc)
+{
+    IDirect3DSurface9Impl *This = impl_from_IDirect3DSurface9(iface);
     HRESULT hr;
 
     TRACE("iface %p, hdc %p.\n", iface, hdc);
 
     wined3d_mutex_lock();
-    hr = IWineD3DSurface_ReleaseDC(This->wineD3DSurface, hdc);
+    hr = wined3d_surface_releasedc(This->wined3d_surface, hdc);
     wined3d_mutex_unlock();
 
     switch (hr)
@@ -366,9 +395,10 @@ HRESULT surface_init(IDirect3DSurface9Impl *surface, IDirect3DDevice9Impl *devic
         UINT width, UINT height, D3DFORMAT format, BOOL lockable, BOOL discard, UINT level,
         DWORD usage, D3DPOOL pool, D3DMULTISAMPLE_TYPE multisample_type, DWORD multisample_quality)
 {
+    DWORD flags = 0;
     HRESULT hr;
 
-    surface->lpVtbl = &Direct3DSurface9_Vtbl;
+    surface->IDirect3DSurface9_iface.lpVtbl = &Direct3DSurface9_Vtbl;
     surface->ref = 1;
 
     switch (format)
@@ -394,10 +424,15 @@ HRESULT surface_init(IDirect3DSurface9Impl *surface, IDirect3DDevice9Impl *devic
         multisample_quality = 0;
     }
 
+    if (lockable)
+        flags |= WINED3D_SURFACE_MAPPABLE;
+    if (discard)
+        flags |= WINED3D_SURFACE_DISCARD;
+
     wined3d_mutex_lock();
-    hr = IWineD3DDevice_CreateSurface(device->WineD3DDevice, width, height, wined3dformat_from_d3dformat(format),
-            lockable, discard, level, usage & WINED3DUSAGE_MASK, (WINED3DPOOL)pool, multisample_type,
-            multisample_quality, SURFACE_OPENGL, surface, &d3d9_surface_wined3d_parent_ops, &surface->wineD3DSurface);
+    hr = wined3d_surface_create(device->wined3d_device, width, height, wined3dformat_from_d3dformat(format),
+            level, usage & WINED3DUSAGE_MASK, (enum wined3d_pool)pool, multisample_type, multisample_quality,
+            WINED3D_SURFACE_TYPE_OPENGL, flags, surface, &d3d9_surface_wined3d_parent_ops, &surface->wined3d_surface);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {
@@ -405,8 +440,17 @@ HRESULT surface_init(IDirect3DSurface9Impl *surface, IDirect3DDevice9Impl *devic
         return hr;
     }
 
-    surface->parentDevice = (IDirect3DDevice9Ex *)device;
+    surface->parentDevice = &device->IDirect3DDevice9Ex_iface;
     IDirect3DDevice9Ex_AddRef(surface->parentDevice);
 
     return D3D_OK;
+}
+
+IDirect3DSurface9Impl *unsafe_impl_from_IDirect3DSurface9(IDirect3DSurface9 *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &Direct3DSurface9_Vtbl);
+
+    return impl_from_IDirect3DSurface9(iface);
 }

@@ -47,9 +47,8 @@ typedef struct IDirectPlay8ThreadPoolImpl IDirectPlay8ThreadPoolImpl;
  */
 struct IDirectPlay8ClientImpl
 {
-  /* IUnknown fields */
-  const IDirectPlay8ClientVtbl *lpVtbl;
-  LONG          ref;
+  IDirectPlay8Client IDirectPlay8Client_iface;
+  LONG ref;
   /* IDirectPlay8Client fields */
 };
 
@@ -62,9 +61,8 @@ struct IDirectPlay8ClientImpl
  */
 struct IDirectPlay8AddressImpl
 {
-  /* IUnknown fields */
-  const IDirectPlay8AddressVtbl *lpVtbl;
-  LONG          ref;
+  IDirectPlay8Address IDirectPlay8Address_iface;
+  LONG ref;
   /* IDirectPlay8Address fields */
   GUID SP_guid;
   const WCHAR *url;
@@ -75,10 +73,8 @@ struct IDirectPlay8AddressImpl
  */
 struct IDirectPlay8LobbiedApplicationImpl
 {
-  /* IUnknown fields */
-  const IDirectPlay8LobbiedApplicationVtbl *lpVtbl;
-  LONG          ref;
-  /* IDirectPlay8LobbiedApplication fields */
+  IDirectPlay8LobbiedApplication IDirectPlay8LobbiedApplication_iface;
+  LONG ref;
 };
 
 /*****************************************************************************
@@ -86,9 +82,8 @@ struct IDirectPlay8LobbiedApplicationImpl
  */
 struct IDirectPlay8PeerImpl
 {
-  /* IUnknown fields */
-  const IDirectPlay8PeerVtbl *lpVtbl;
-  LONG          ref;
+  IDirectPlay8Peer IDirectPlay8Peer_iface;
+  LONG ref;
 };
 
 /*****************************************************************************
@@ -96,20 +91,19 @@ struct IDirectPlay8PeerImpl
  */
 struct IDirectPlay8ThreadPoolImpl
 {
-  /* IUnknown fields */
-  const IDirectPlay8ThreadPoolVtbl *lpVtbl;
-  LONG          ref;
+  IDirectPlay8ThreadPool IDirectPlay8ThreadPool_iface;
+  LONG ref;
 };
 
 /**
  * factories
  */
-extern HRESULT DPNET_CreateDirectPlay8Client(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
-extern HRESULT DPNET_CreateDirectPlay8Server(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
-extern HRESULT DPNET_CreateDirectPlay8Peer(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
-extern HRESULT DPNET_CreateDirectPlay8Address(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
-extern HRESULT DPNET_CreateDirectPlay8LobbiedApp(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
-extern HRESULT DPNET_CreateDirectPlay8ThreadPool(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj);
+extern HRESULT DPNET_CreateDirectPlay8Client(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+extern HRESULT DPNET_CreateDirectPlay8Server(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+extern HRESULT DPNET_CreateDirectPlay8Peer(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+extern HRESULT DPNET_CreateDirectPlay8Address(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+extern HRESULT DPNET_CreateDirectPlay8LobbiedApp(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
+extern HRESULT DPNET_CreateDirectPlay8ThreadPool(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
 
 /* used for generic dumping (copied from ddraw) */
 typedef struct {

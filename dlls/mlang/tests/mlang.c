@@ -809,7 +809,7 @@ static void IMLangFontLink_Test(IMLangFontLink* iMLFL)
     DWORD dwCodePages, dwManyCodePages;
     DWORD dwCmpCodePages;
     UINT CodePage;
-    static const WCHAR str[3] = { 'd', 0x0436, 0xff90 };
+    static const WCHAR str[] = { 'd', 0x0436, 0xff90 };
     LONG processed;
     HRESULT ret;
 
@@ -1202,28 +1202,32 @@ static void test_GetRfc1766Info(IMultiLanguage2 *iML2)
         ok(!lstrcmpA(rfc1766A, info_table[i].rfc1766),
             "#%02d: got '%s' (expected '%s')\n", i, rfc1766A, info_table[i].rfc1766);
 
-        /* Some IE versions truncate an oversized name one character to short */
-        lstrcpyW(short_broken_name, info_table[i].broken_name);
-        short_broken_name[MAX_LOCALE_NAME - 2] = '\0';
+        /* Some IE versions truncate an oversized name one character too short */
+        if (info_table[i].broken_name) {
+            lstrcpyW(short_broken_name, info_table[i].broken_name);
+            short_broken_name[MAX_LOCALE_NAME - 2] = 0;
+        }
 
         if (info_table[i].todo & TODO_NAME) {
             todo_wine
             ok( (!lstrcmpW(prfc->wszLocaleName, info_table[i].localename)) ||
+               (info_table[i].broken_name && (
                 broken(!lstrcmpW(prfc->wszLocaleName, info_table[i].broken_name)) || /* IE < 6.0 */
-                broken(!lstrcmpW(prfc->wszLocaleName, short_broken_name)),
+                broken(!lstrcmpW(prfc->wszLocaleName, short_broken_name)))),
                 "#%02d: got %s (expected %s)\n", i,
                 wine_dbgstr_w(prfc->wszLocaleName), wine_dbgstr_w(info_table[i].localename));
         }
         else
             ok( (!lstrcmpW(prfc->wszLocaleName, info_table[i].localename)) ||
+               (info_table[i].broken_name && (
                 broken(!lstrcmpW(prfc->wszLocaleName, info_table[i].broken_name)) || /* IE < 6.0 */
-                broken(!lstrcmpW(prfc->wszLocaleName, short_broken_name)),
+                broken(!lstrcmpW(prfc->wszLocaleName, short_broken_name)))),
                 "#%02d: got %s (expected %s)\n", i,
                 wine_dbgstr_w(prfc->wszLocaleName), wine_dbgstr_w(info_table[i].localename));
 
     }
 
-    /* SUBLANG_NEUTRAL only allowed for english, arabic, chinese */
+    /* SUBLANG_NEUTRAL only allowed for English, Arabic, Chinese */
     ret = IMultiLanguage2_GetRfc1766Info(iML2, MAKELANGID(LANG_GERMAN, SUBLANG_NEUTRAL), LANG_ENGLISH, prfc);
     ok(ret == E_FAIL, "got 0x%x (expected E_FAIL)\n", ret);
 

@@ -578,7 +578,7 @@ static void testInitializeSecurityContextFlags(void)
 
     if(pQuerySecurityPackageInfoA( sec_pkg_name, &pkg_info) != SEC_E_OK)
     {
-        skip("Package not installed, skipping test!\n");
+        ok(0, "NTLM package not installed, skipping test.\n");
         return;
     }
 
@@ -800,7 +800,7 @@ static void testAuth(ULONG data_rep, BOOL fake)
 
     if(pQuerySecurityPackageInfoA( sec_pkg_name, &pkg_info)!= SEC_E_OK)
     {
-        skip("Package not installed, skipping test.\n");
+        ok(0, "NTLM package not installed, skipping test.\n");
         return;
     }
 
@@ -942,7 +942,7 @@ static void testSignSeal(void)
      */
     if(pQuerySecurityPackageInfoA( sec_pkg_name, &pkg_info) != SEC_E_OK)
     {
-        skip("Package not installed, skipping test.\n");
+        ok(0, "NTLM package not installed, skipping test.\n");
         return;
     }
 
@@ -1058,47 +1058,43 @@ static void testSignSeal(void)
     ok(sec_status == SEC_E_OK, "EncryptMessage returned %s, not SEC_E_OK.\n",
             getSecError(sec_status));
 
-    ok(!memcmp(crypt.pBuffers[0].pvBuffer, crypt_trailer_client,
-               crypt.pBuffers[0].cbBuffer), "Crypt trailer not as expected.\n");
-    if (memcmp(crypt.pBuffers[0].pvBuffer, crypt_trailer_client,
-               crypt.pBuffers[0].cbBuffer))
+    /* first 8 bytes must always be the same */
+    ok(!memcmp(crypt.pBuffers[0].pvBuffer, crypt_trailer_client, 8), "Crypt trailer not as expected.\n");
+
+    /* the rest depends on the session key */
+    if (!memcmp(crypt.pBuffers[0].pvBuffer, crypt_trailer_client, crypt.pBuffers[0].cbBuffer))
     {
-        int i;
-        for (i = 0; i < crypt.pBuffers[0].cbBuffer; i++)
+        ok(!memcmp(crypt.pBuffers[0].pvBuffer, crypt_trailer_client,
+                   crypt.pBuffers[0].cbBuffer), "Crypt trailer not as expected.\n");
+        ok(!memcmp(crypt.pBuffers[1].pvBuffer, crypt_message_client,
+                   crypt.pBuffers[1].cbBuffer), "Crypt message not as expected.\n");
+        if (memcmp(crypt.pBuffers[1].pvBuffer, crypt_message_client,
+                   crypt.pBuffers[1].cbBuffer))
         {
-            if (i % 8 == 0) printf("     ");
-            printf("0x%02x,", ((unsigned char *)crypt.pBuffers[0].pvBuffer)[i]);
-            if (i % 8 == 7) printf("\n");
+            int i;
+            for (i = 0; i < crypt.pBuffers[1].cbBuffer; i++)
+            {
+                if (i % 8 == 0) printf("     ");
+                printf("0x%02x,", ((unsigned char *)crypt.pBuffers[1].pvBuffer)[i]);
+                if (i % 8 == 7) printf("\n");
+            }
+            printf("\n");
         }
-        printf("\n");
+
+        data[0].cbBuffer = sizeof(crypt_trailer_server);
+        data[1].cbBuffer = sizeof(crypt_message_server);
+        memcpy(data[0].pvBuffer, crypt_trailer_server, data[0].cbBuffer);
+        memcpy(data[1].pvBuffer, crypt_message_server, data[1].cbBuffer);
+
+        sec_status = pDecryptMessage(&client.ctxt, &crypt, 0, &qop);
+
+        ok(sec_status == SEC_E_OK, "DecryptMessage returned %s, not SEC_E_OK.\n",
+           getSecError(sec_status));
+        ok(!memcmp(crypt.pBuffers[1].pvBuffer, message_binary,
+                   crypt.pBuffers[1].cbBuffer),
+           "Failed to decrypt message correctly.\n");
     }
-    ok(!memcmp(crypt.pBuffers[1].pvBuffer, crypt_message_client,
-               crypt.pBuffers[1].cbBuffer), "Crypt message not as expected.\n");
-    if (memcmp(crypt.pBuffers[1].pvBuffer, crypt_message_client,
-               crypt.pBuffers[1].cbBuffer))
-    {
-        int i;
-        for (i = 0; i < crypt.pBuffers[1].cbBuffer; i++)
-        {
-            if (i % 8 == 0) printf("     ");
-            printf("0x%02x,", ((unsigned char *)crypt.pBuffers[1].pvBuffer)[i]);
-            if (i % 8 == 7) printf("\n");
-        }
-        printf("\n");
-    }
-
-    data[0].cbBuffer = sizeof(crypt_trailer_server);
-    data[1].cbBuffer = sizeof(crypt_message_server);
-    memcpy(data[0].pvBuffer, crypt_trailer_server, data[0].cbBuffer);
-    memcpy(data[1].pvBuffer, crypt_message_server, data[1].cbBuffer);
-
-    sec_status = pDecryptMessage(&client.ctxt, &crypt, 0, &qop);
-
-    ok(sec_status == SEC_E_OK, "DecryptMessage returned %s, not SEC_E_OK.\n",
-            getSecError(sec_status));
-    ok(!memcmp(crypt.pBuffers[1].pvBuffer, message_binary,
-               crypt.pBuffers[1].cbBuffer),
-            "Failed to decrypt message correctly.\n");
+    else trace( "A different session key is being used\n" );
 
     trace("Testing with more than one buffer.\n");
 
@@ -1139,20 +1135,10 @@ static void testSignSeal(void)
     ok(sec_status == SEC_E_OK, "EncryptMessage returned %s, not SEC_E_OK.\n",
             getSecError(sec_status));
 
-    ok(!memcmp(crypt.pBuffers[3].pvBuffer, crypt_trailer_client2,
-               crypt.pBuffers[3].cbBuffer), "Crypt trailer not as expected.\n");
+    ok(!memcmp(crypt.pBuffers[3].pvBuffer, crypt_trailer_client2, 8), "Crypt trailer not as expected.\n");
+
     if (memcmp(crypt.pBuffers[3].pvBuffer, crypt_trailer_client2,
-               crypt.pBuffers[3].cbBuffer))
-    {
-        int i;
-        for (i = 0; i < crypt.pBuffers[3].cbBuffer; i++)
-        {
-            if (i % 8 == 0) printf("     ");
-            printf("0x%02x,", ((unsigned char *)crypt.pBuffers[3].pvBuffer)[i]);
-            if (i % 8 == 7) printf("\n");
-        }
-        printf("\n");
-    }
+               crypt.pBuffers[3].cbBuffer)) goto end;
 
     ok(!memcmp(crypt.pBuffers[1].pvBuffer, crypt_message_client2,
                crypt.pBuffers[1].cbBuffer), "Crypt message not as expected.\n");
@@ -1192,7 +1178,7 @@ end:
     HeapFree(GetProcessHeap(), 0, complex_data[3].pvBuffer);
 }
 
-static void testAcquireCredentialsHandle(void)
+static BOOL testAcquireCredentialsHandle(void)
 {
     CredHandle cred;
     TimeStamp ttl;
@@ -1206,8 +1192,8 @@ static void testAcquireCredentialsHandle(void)
 
     if(pQuerySecurityPackageInfoA(sec_pkg_name, &pkg_info) != SEC_E_OK)
     {
-        skip("NTLM package not installed, skipping test\n");
-        return;
+        ok(0, "NTLM package not installed, skipping test\n");
+        return FALSE;
     }
     pFreeContextBuffer(pkg_info);
 
@@ -1258,6 +1244,7 @@ static void testAcquireCredentialsHandle(void)
     ok(ret == SEC_E_OK, "AcquireCredentialsHande() returned %s\n",
             getSecError(ret));
     pFreeCredentialsHandle(&cred);
+    return TRUE;
 }
 
 static void test_cred_multiple_use(void)
@@ -1279,7 +1266,7 @@ static void test_cred_multiple_use(void)
 
     if(pQuerySecurityPackageInfoA(sec_pkg_name, &pkg_info) != SEC_E_OK)
     {
-        skip("NTLM package not installed, skipping test\n");
+        ok(0, "NTLM package not installed, skipping test\n");
         return;
     }
     buffers[0].cbBuffer = pkg_info->cbMaxToken;
@@ -1340,7 +1327,7 @@ static void test_null_auth_data(void)
 
     if(pQuerySecurityPackageInfoA((SEC_CHAR *)"NTLM", &info) != SEC_E_OK)
     {
-        skip("NTLM package not installed, skipping test\n");
+        ok(0, "NTLM package not installed, skipping test\n");
         return;
     }
 
@@ -1383,7 +1370,8 @@ START_TEST(ntlm)
        pInitializeSecurityContextA && pCompleteAuthToken &&
        pQuerySecurityPackageInfoA)
     {
-        testAcquireCredentialsHandle();
+        if(!testAcquireCredentialsHandle())
+            goto cleanup;
         testInitializeSecurityContextFlags();
         if(pAcceptSecurityContext)
         {
@@ -1402,6 +1390,7 @@ START_TEST(ntlm)
     else
         win_skip("Needed functions are not available\n");
 
+cleanup:
     if(secdll)
         FreeLibrary(secdll);
 }

@@ -762,7 +762,7 @@ static inline void setup_key(CRYPTKEY *pCryptKey) {
  *
  * PARAMS
  *  hProv      [I] Handle to the provider to which the created key will belong.
- *  aiAlgid    [I] The new key shall use the crypto algorithm idenfied by aiAlgid.
+ *  aiAlgid    [I] The new key shall use the crypto algorithm identified by aiAlgid.
  *  dwFlags    [I] Upper 16 bits give the key length.
  *                 Lower 16 bits: CRYPT_EXPORTABLE, CRYPT_CREATE_SALT,
  *                 CRYPT_NO_SALT
@@ -1804,7 +1804,7 @@ BOOL WINAPI RSAENH_CPAcquireContext(HCRYPTPROV *phProv, LPSTR pszContainer,
 /******************************************************************************
  * CPCreateHash (RSAENH.@)
  *
- * CPCreateHash creates and initalizes a new hash object.
+ * CPCreateHash creates and initializes a new hash object.
  *
  * PARAMS
  *  hProv   [I] Handle to the key container to which the new hash will belong.
@@ -1932,7 +1932,7 @@ BOOL WINAPI RSAENH_CPCreateHash(HCRYPTPROV hProv, ALG_ID Algid, HCRYPTKEY hKey, 
 /******************************************************************************
  * CPDestroyHash (RSAENH.@)
  * 
- * Releases the handle to a hash object. The object is destroyed if it's reference
+ * Releases the handle to a hash object. The object is destroyed if its reference
  * count reaches zero.
  *
  * PARAMS
@@ -1965,7 +1965,7 @@ BOOL WINAPI RSAENH_CPDestroyHash(HCRYPTPROV hProv, HCRYPTHASH hHash)
 /******************************************************************************
  * CPDestroyKey (RSAENH.@)
  *
- * Releases the handle to a key object. The object is destroyed if it's reference
+ * Releases the handle to a key object. The object is destroyed if its reference
  * count reaches zero.
  *
  * PARAMS
@@ -1998,7 +1998,7 @@ BOOL WINAPI RSAENH_CPDestroyKey(HCRYPTPROV hProv, HCRYPTKEY hKey)
 /******************************************************************************
  * CPDuplicateHash (RSAENH.@)
  *
- * Clones a hash object including it's current state.
+ * Clones a hash object including its current state.
  *
  * PARAMS
  *  hUID        [I] Handle to the key container the hash belongs to.
@@ -2054,7 +2054,7 @@ BOOL WINAPI RSAENH_CPDuplicateHash(HCRYPTPROV hUID, HCRYPTHASH hHash, DWORD *pdw
 /******************************************************************************
  * CPDuplicateKey (RSAENH.@)
  *
- * Clones a key object including it's current state.
+ * Clones a key object including its current state.
  *
  * PARAMS
  *  hUID        [I] Handle to the key container the hash belongs to.
@@ -2546,7 +2546,7 @@ static BOOL crypt_export_plaintext_key(CRYPTKEY *pCryptKey, BYTE *pbData,
         pBlobHeader->aiKeyAlg = pCryptKey->aiAlgid;
 
         *pKeyLen = pCryptKey->dwKeyLen;
-        memcpy(pbKey, &pCryptKey->abKeyValue, pCryptKey->dwKeyLen);
+        memcpy(pbKey, pCryptKey->abKeyValue, pCryptKey->dwKeyLen);
     }
     *pdwDataLen = dwDataLen;
     return TRUE;
@@ -2731,11 +2731,27 @@ static BOOL import_private_key(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
         return FALSE;
     }
 
-    if ((dwDataLen < sizeof(BLOBHEADER) + sizeof(RSAPUBKEY)) ||
-        (pRSAPubKey->magic != RSAENH_MAGIC_RSA2) ||
-        (dwDataLen < sizeof(BLOBHEADER) + sizeof(RSAPUBKEY) +
-            (2 * pRSAPubKey->bitlen >> 3) + (5 * ((pRSAPubKey->bitlen+8)>>4))))
+    if ((dwDataLen < sizeof(BLOBHEADER) + sizeof(RSAPUBKEY)))
     {
+        ERR("datalen %d not long enough for a BLOBHEADER + RSAPUBKEY\n",
+            dwDataLen);
+        SetLastError(NTE_BAD_DATA);
+        return FALSE;
+    }
+    if (pRSAPubKey->magic != RSAENH_MAGIC_RSA2)
+    {
+        ERR("unexpected magic %08x\n", pRSAPubKey->magic);
+        SetLastError(NTE_BAD_DATA);
+        return FALSE;
+    }
+    if ((dwDataLen < sizeof(BLOBHEADER) + sizeof(RSAPUBKEY) +
+            (pRSAPubKey->bitlen >> 3) + (5 * ((pRSAPubKey->bitlen+8)>>4))))
+    {
+        DWORD expectedLen = sizeof(BLOBHEADER) + sizeof(RSAPUBKEY) +
+            (pRSAPubKey->bitlen >> 3) + (5 * ((pRSAPubKey->bitlen+8)>>4));
+
+        ERR("blob too short for pub key: expect %d, got %d\n",
+            expectedLen, dwDataLen);
         SetLastError(NTE_BAD_DATA);
         return FALSE;
     }
@@ -2744,7 +2760,7 @@ static BOOL import_private_key(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
     if (*phKey == (HCRYPTKEY)INVALID_HANDLE_VALUE) return FALSE;
     setup_key(pCryptKey);
     ret = import_private_key_impl((CONST BYTE*)(pRSAPubKey+1), &pCryptKey->context,
-                                   pRSAPubKey->bitlen/8, pRSAPubKey->pubexp);
+                                   pRSAPubKey->bitlen/8, dwDataLen, pRSAPubKey->pubexp);
     if (ret) {
         if (dwFlags & CRYPT_EXPORTABLE)
             pCryptKey->dwPermissions |= CRYPT_EXPORT;
@@ -4472,81 +4488,33 @@ BOOL WINAPI RSAENH_CPVerifySignature(HCRYPTPROV hProv, HCRYPTHASH hHash, CONST B
         goto cleanup;
     }
 
-    if (!build_hash_signature(pbConstructed, dwSigLen, aiAlgid, abHashValue, dwHashLen, dwFlags)) {
+    if (build_hash_signature(pbConstructed, dwSigLen, aiAlgid, abHashValue, dwHashLen, dwFlags) &&
+        !memcmp(pbDecrypted, pbConstructed, dwSigLen)) {
+        res = TRUE;
         goto cleanup;
     }
 
-    if (memcmp(pbDecrypted, pbConstructed, dwSigLen)) {
-        SetLastError(NTE_BAD_SIGNATURE);
+    if (!(dwFlags & CRYPT_NOHASHOID) &&
+        build_hash_signature(pbConstructed, dwSigLen, aiAlgid, abHashValue, dwHashLen, dwFlags|CRYPT_NOHASHOID) &&
+        !memcmp(pbDecrypted, pbConstructed, dwSigLen)) {
+        res = TRUE;
         goto cleanup;
     }
-    
-    res = TRUE;
+
+    SetLastError(NTE_BAD_SIGNATURE);
+
 cleanup:
     HeapFree(GetProcessHeap(), 0, pbConstructed);
     HeapFree(GetProcessHeap(), 0, pbDecrypted);
     return res;
 }
 
-static const WCHAR szProviderKeys[6][116] = {
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ','B','a','s',
-        'e',' ','C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r',
-        'o','v','i','d','e','r',' ','v','1','.','0',0 },
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ',
-        'E','n','h','a','n','c','e','d',
-        ' ','C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r',
-        'o','v','i','d','e','r',' ','v','1','.','0',0 },
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ','S','t','r','o','n','g',
-        ' ','C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r',
-        'o','v','i','d','e','r',0 },
-    {   'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
-        'C','r','y','p','t','o','g','r','a','p','h','y','\\','D','e','f','a','u','l','t','s','\\',
-        'P','r','o','v','i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ',
-        'R','S','A',' ','S','C','h','a','n','n','e','l',' ',
-        'C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r','o','v','i','d','e','r',0 },
-    {   'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
-        'C','r','y','p','t','o','g','r','a','p','h','y','\\','D','e','f','a','u','l','t','s','\\',
-        'P','r','o','v','i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ',
-        'E','n','h','a','n','c','e','d',' ','R','S','A',' ','a','n','d',' ','A','E','S',' ',
-        'C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r','o','v','i','d','e','r',0 },
-    {   'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
-        'C','r','y','p','t','o','g','r','a','p','h','y','\\','D','e','f','a','u','l','t','s','\\',
-        'P','r','o','v','i','d','e','r','\\','M','i','c','r','o','s','o','f','t',' ',
-        'E','n','h','a','n','c','e','d',' ','R','S','A',' ','a','n','d',' ','A','E','S',' ',
-        'C','r','y','p','t','o','g','r','a','p','h','i','c',' ','P','r','o','v','i','d','e','r',
-        ' ','(','P','r','o','t','o','t','y','p','e',')',0 }
-};
-static const WCHAR szDefaultKeys[3][65] = {
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r',' ','T','y','p','e','s','\\','T','y','p','e',' ','0','0','1',0 },
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r',' ','T','y','p','e','s','\\','T','y','p','e',' ','0','1','2',0 },
-    {   'S','o','f','t','w','a','r','e','\\',
-        'M','i','c','r','o','s','o','f','t','\\','C','r','y','p','t','o','g','r',
-        'a','p','h','y','\\','D','e','f','a','u','l','t','s','\\','P','r','o','v',
-        'i','d','e','r',' ','T','y','p','e','s','\\','T','y','p','e',' ','0','2','4',0 }
-};
-
-
 /******************************************************************************
  * DllRegisterServer (RSAENH.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
-    return __wine_register_resources( instance, NULL );
+    return __wine_register_resources( instance );
 }
 
 /******************************************************************************
@@ -4554,5 +4522,5 @@ HRESULT WINAPI DllRegisterServer(void)
  */
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    return __wine_unregister_resources( instance, NULL );
+    return __wine_unregister_resources( instance );
 }

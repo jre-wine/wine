@@ -35,17 +35,24 @@
 
 #include "initguid.h"
 #include "msxml2.h"
-#include "cor.h"
 #include "corerror.h"
+#include "cor.h"
 #include "mscoree.h"
-#include "fusion.h"
+#include "corhdr.h"
+#include "cordebug.h"
 #include "metahost.h"
+#include "fusion.h"
 #include "wine/list.h"
 #include "mscoree_private.h"
+#include "rpcproxy.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL( mscoree );
+
+static HINSTANCE MSCOREE_hInstance;
+
+typedef HRESULT (*fnCreateInstance)(REFIID riid, LPVOID *ppObj);
 
 char *WtoA(LPCWSTR wstr)
 {
@@ -84,6 +91,105 @@ static BOOL get_install_root(LPWSTR install_dir)
     return TRUE;
 }
 
+typedef struct mscorecf
+{
+    IClassFactory    IClassFactory_iface;
+    LONG ref;
+
+    fnCreateInstance pfnCreateInstance;
+
+    CLSID clsid;
+} mscorecf;
+
+static inline mscorecf *impl_from_IClassFactory( IClassFactory *iface )
+{
+    return CONTAINING_RECORD(iface, mscorecf, IClassFactory_iface);
+}
+
+static HRESULT WINAPI mscorecf_QueryInterface(IClassFactory *iface, REFIID riid, LPVOID *ppobj )
+{
+    TRACE("%s %p\n", debugstr_guid(riid), ppobj);
+
+    if (IsEqualGUID(riid, &IID_IUnknown) ||
+        IsEqualGUID(riid, &IID_IClassFactory))
+    {
+        IClassFactory_AddRef( iface );
+        *ppobj = iface;
+        return S_OK;
+    }
+
+    ERR("interface %s not implemented\n", debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI mscorecf_AddRef(IClassFactory *iface )
+{
+    mscorecf *This = impl_from_IClassFactory(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("%p ref=%u\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI mscorecf_Release(IClassFactory *iface )
+{
+    mscorecf *This = impl_from_IClassFactory(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("%p ref=%u\n", This, ref);
+
+    if (ref == 0)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI mscorecf_CreateInstance(IClassFactory *iface,LPUNKNOWN pOuter,
+                            REFIID riid, LPVOID *ppobj )
+{
+    mscorecf *This = impl_from_IClassFactory( iface );
+    HRESULT hr;
+    IUnknown *punk;
+
+    TRACE("%p %s %p\n", pOuter, debugstr_guid(riid), ppobj );
+
+    *ppobj = NULL;
+
+    if (pOuter)
+        return CLASS_E_NOAGGREGATION;
+
+    hr = This->pfnCreateInstance( &This->clsid, (LPVOID*) &punk );
+    if (SUCCEEDED(hr))
+    {
+        hr = IUnknown_QueryInterface( punk, riid, ppobj );
+
+        IUnknown_Release( punk );
+    }
+    else
+    {
+        WARN("Cannot create an instance object. 0x%08x\n", hr);
+    }
+    return hr;
+}
+
+static HRESULT WINAPI mscorecf_LockServer(IClassFactory *iface, BOOL dolock)
+{
+    FIXME("(%p)->(%d),stub!\n",iface,dolock);
+    return S_OK;
+}
+
+static const struct IClassFactoryVtbl mscorecf_vtbl =
+{
+    mscorecf_QueryInterface,
+    mscorecf_AddRef,
+    mscorecf_Release,
+    mscorecf_CreateInstance,
+    mscorecf_LockServer
+};
+
 HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor,
                                     LPCWSTR pwszHostConfigFile, VOID *pReserved,
                                     DWORD startupFlags, REFCLSID rclsid,
@@ -113,6 +219,8 @@ HRESULT WINAPI CorBindToRuntimeHost(LPCWSTR pwszVersion, LPCWSTR pwszBuildFlavor
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     TRACE("(%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+
+    MSCOREE_hInstance = hinstDLL;
 
     switch (fdwReason)
     {
@@ -249,6 +357,22 @@ HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWST
     return ret;
 }
 
+HRESULT WINAPI GetRequestedRuntimeVersion(LPWSTR pExe, LPWSTR pVersion, DWORD cchBuffer, DWORD *dwlength)
+{
+    TRACE("(%s, %p, %d, %p)\n", debugstr_w(pExe), debugstr_w(pExe), cchBuffer, dwlength);
+
+    if(!dwlength)
+        return E_POINTER;
+
+    return GetRequestedRuntimeInfo(pExe, NULL, NULL, 0, 0, NULL, 0, NULL, pVersion, cchBuffer, dwlength);
+}
+
+HRESULT WINAPI GetRealProcAddress(LPCSTR procname, void **ppv)
+{
+    FIXME("(%s, %p)\n", debugstr_a(procname), ppv);
+    return CLR_E_SHIM_RUNTIMEEXPORT;
+}
+
 HRESULT WINAPI GetFileVersion(LPCWSTR szFilename, LPWSTR szBuffer, DWORD cchBuffer, DWORD *dwLength)
 {
     TRACE("(%s, %p, %d, %p)\n", debugstr_w(szFilename), szBuffer, cchBuffer, dwLength);
@@ -357,7 +481,7 @@ HRESULT WINAPI CorBindToRuntimeEx(LPWSTR szVersion, LPWSTR szBuildFlavor, DWORD 
 
     *ppv = NULL;
 
-    ret = get_runtime_info(NULL, szVersion, NULL, nflags, 0, TRUE, &info);
+    ret = get_runtime_info(NULL, szVersion, NULL, nflags, RUNTIME_INFO_UPGRADE_VERSION, TRUE, &info);
 
     if (SUCCEEDED(ret))
     {
@@ -422,6 +546,51 @@ BOOL WINAPI StrongNameSignatureVerificationEx(LPCWSTR filename, BOOL forceVerifi
     return FALSE;
 }
 
+HRESULT WINAPI CreateConfigStream(LPCWSTR filename, IStream **stream)
+{
+    FIXME("(%s, %p): stub\n", debugstr_w(filename), stream);
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI CreateDebuggingInterfaceFromVersion(int nDebugVersion, LPCWSTR version, IUnknown **ppv)
+{
+    const WCHAR v2_0[] = {'v','2','.','0','.','5','0','7','2','7',0};
+    HRESULT hr = E_FAIL;
+    ICLRRuntimeInfo *runtimeinfo;
+
+    if(nDebugVersion < 1 || nDebugVersion > 4)
+        return E_INVALIDARG;
+
+    TRACE("(%d %s, %p): stub\n", nDebugVersion, debugstr_w(version), ppv);
+
+    if(!ppv)
+        return E_INVALIDARG;
+
+    *ppv = NULL;
+
+    if(strcmpW(version, v2_0) != 0)
+    {
+        FIXME("Currently .NET Version '%s' not support.\n", debugstr_w(version));
+        return E_INVALIDARG;
+    }
+
+    if(nDebugVersion != 3)
+        return E_INVALIDARG;
+
+    hr = CLRMetaHost_GetRuntime(0, version, &IID_ICLRRuntimeInfo, (void**)&runtimeinfo);
+    if(hr == S_OK)
+    {
+        hr = ICLRRuntimeInfo_GetInterface(runtimeinfo, &CLSID_CLRDebuggingLegacy, &IID_ICorDebug, (void**)ppv);
+
+        ICLRRuntimeInfo_Release(runtimeinfo);
+    }
+
+    if(!*ppv)
+        return E_FAIL;
+
+    return hr;
+}
+
 HRESULT WINAPI CLRCreateInstance(REFCLSID clsid, REFIID riid, LPVOID *ppInterface)
 {
     TRACE("(%s,%s,%p)\n", debugstr_guid(clsid), debugstr_guid(riid), ppInterface);
@@ -436,23 +605,35 @@ HRESULT WINAPI CLRCreateInstance(REFCLSID clsid, REFIID riid, LPVOID *ppInterfac
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
 {
-    FIXME("(%s, %s, %p): stub\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+    mscorecf *This;
+    HRESULT hr;
+
+    TRACE("(%s, %s, %p): stub\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+
     if(!ppv)
         return E_INVALIDARG;
 
-    return E_NOTIMPL;
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(mscorecf));
+
+    This->IClassFactory_iface.lpVtbl = &mscorecf_vtbl;
+    This->pfnCreateInstance = &create_monodata;
+    This->ref = 1;
+    This->clsid = *rclsid;
+
+    hr = IClassFactory_QueryInterface( &This->IClassFactory_iface, riid, ppv );
+    IClassFactory_Release(&This->IClassFactory_iface);
+
+    return hr;
 }
 
 HRESULT WINAPI DllRegisterServer(void)
 {
-    FIXME("\n");
-    return S_OK;
+    return __wine_register_resources( MSCOREE_hInstance );
 }
 
 HRESULT WINAPI DllUnregisterServer(void)
 {
-    FIXME("\n");
-    return S_OK;
+    return __wine_unregister_resources( MSCOREE_hInstance );
 }
 
 HRESULT WINAPI DllCanUnloadNow(VOID)

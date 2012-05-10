@@ -21,6 +21,7 @@
 #define _INC_SETUPAPI
 
 #include <commctrl.h>
+#include <devpropdef.h>
 
 #ifdef _WIN64
 #include <pshpack8.h>
@@ -1516,7 +1517,7 @@ BOOL     WINAPI SetupDiGetActualSectionToInstallW(HINF, PCWSTR, PWSTR, DWORD, PD
 #define         SetupDiGetActualSectionToInstall WINELIB_NAME_AW(SetupDiGetActualSectionToInstall)
 BOOL     WINAPI SetupDiGetActualSectionToInstallExA(HINF, PCSTR, PSTR, DWORD, PDWORD, PSTR *, PVOID);
 BOOL     WINAPI SetupDiGetActualSectionToInstallExW(HINF, PCWSTR, PWSTR, DWORD, PDWORD, PWSTR *, PVOID);
-#define         SetupDiGetActualSectionToInstallEx WINELIB_NAME_AW(SetupDiGetActualSectionToInstalExl)
+#define         SetupDiGetActualSectionToInstallEx WINELIB_NAME_AW(SetupDiGetActualSectionToInstallEx)
 BOOL     WINAPI SetupDiGetClassBitmapIndex(const GUID *, PINT);
 BOOL     WINAPI SetupDiGetClassDescriptionA(const GUID*, PSTR, DWORD, PDWORD);
 BOOL     WINAPI SetupDiGetClassDescriptionW(const GUID*, PWSTR, DWORD, PDWORD);

@@ -24,6 +24,7 @@
 import "ocidl.idl";
 import "dimm.idl";
 import "shtypes.idl";
+import "dispex.idl";
 
 cpp_quote("#include <olectl.h>")
 
@@ -129,6 +130,7 @@ interface IHTMLDocument2;
 interface IHTMLElement2;
 interface IHTMLStyleSheetsCollection;
 interface IHTMLFrameBase;
+interface IHTMLStorage;
 
 /*****************************************************************************
  *    IHTMLFiltersCollection interface
@@ -2272,6 +2274,129 @@ methods:
 
     [propget, id(DISPID_IHTMLSTYLE4_MINHEIGHT), displaybind, bindable]
     VARIANT minHeight();
+
+    [propput, id(DISPID_IHTMLSTYLE5_MSINTERPOLATIONMODE), displaybind, bindable]
+    void msInterpolationMode(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MSINTERPOLATIONMODE), displaybind, bindable]
+    BSTR msInterpolationMode();
+
+    [propput, id(DISPID_IHTMLSTYLE5_MAXHEIGHT), displaybind, bindable]
+    void maxHeight(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MAXHEIGHT), displaybind, bindable]
+    VARIANT maxHeight();
+
+    [propput, id(DISPID_IHTMLSTYLE5_MINWIDTH), displaybind, bindable]
+    void minWidth(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MINWIDTH), displaybind, bindable]
+    VARIANT minWidth();
+
+    [propput, id(DISPID_IHTMLSTYLE5_MAXWIDTH), displaybind, bindable]
+    void maxWidth(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MAXWIDTH), displaybind, bindable]
+    VARIANT maxWidth();
+
+    [propput, id(DISPID_IHTMLSTYLE6_CONTENT), displaybind, bindable]
+    void content(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_CONTENT), displaybind, bindable]
+    BSTR content();
+
+    [propput, id(DISPID_IHTMLSTYLE6_CAPTIONSIDE), displaybind, bindable]
+    void captionSide(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_CAPTIONSIDE), displaybind, bindable]
+    BSTR captionSide();
+
+    [propput, id(DISPID_IHTMLSTYLE6_COUNTERINCREMENT), displaybind, bindable]
+    void counterIncrement(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_COUNTERINCREMENT), displaybind, bindable]
+    BSTR counterIncrement();
+
+    [propput, id(DISPID_IHTMLSTYLE6_COUNTERRESET), displaybind, bindable]
+    void counterReset(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_COUNTERRESET), displaybind, bindable]
+    BSTR counterReset();
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINE), displaybind, bindable]
+    void outline(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINE), displaybind, bindable]
+    BSTR outline();
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINEWIDTH), displaybind, bindable]
+    void outlineWidth(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINEWIDTH), displaybind, bindable]
+    VARIANT outlineWidth();
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINESTYLE), displaybind, bindable]
+    void outlineStyle(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINESTYLE), displaybind, bindable]
+    BSTR outlineStyle();
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINECOLOR), displaybind, bindable]
+    void outlineColor(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINECOLOR), displaybind, bindable]
+    VARIANT outlineColor();
+
+    [propput, id(DISPID_IHTMLSTYLE6_BOXSIZING), displaybind, bindable]
+    void boxSizing(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_BOXSIZING), displaybind, bindable]
+    BSTR boxSizing();
+
+    [propput, id(DISPID_IHTMLSTYLE6_BORDERSPACING), displaybind, bindable]
+    void borderSpacing(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_BORDERSPACING), displaybind, bindable]
+    BSTR borderSpacing();
+
+    [propput, id(DISPID_IHTMLSTYLE6_ORPHANS), displaybind, bindable]
+    void orphans(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_ORPHANS), displaybind, bindable]
+    VARIANT orphans();
+
+    [propput, id(DISPID_IHTMLSTYLE6_WIDOWS), displaybind, bindable]
+    void widows(VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_WIDOWS), displaybind, bindable]
+    VARIANT widows();
+
+    [propput, id(DISPID_IHTMLSTYLE6_PAGEBREAKINSIDE), displaybind, bindable]
+    void pageBreakInside(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_PAGEBREAKINSIDE), displaybind, bindable]
+    BSTR pageBreakInside();
+
+    [propput, id(DISPID_IHTMLSTYLE6_EMPTYCELLS), displaybind, bindable]
+    void emptyCells(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_EMPTYCELLS), displaybind, bindable]
+    BSTR emptyCells();
+
+    [propput, id(DISPID_IHTMLSTYLE6_MSBLOCKPROGRESSION), displaybind, bindable]
+    void msBlockProgression(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_MSBLOCKPROGRESSION), displaybind, bindable]
+    BSTR msBlockProgression();
+
+    [propput, id(DISPID_IHTMLSTYLE6_QUOTES), displaybind, bindable]
+    void quotes(BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_QUOTES), displaybind, bindable]
+    BSTR quotes();
+
+    [propget, id(DISPID_IHTMLDOMCONSTRUCTOR_CONSTRUCTOR), hidden]
+    IDispatch *constructor();
 }
 
 [
@@ -2397,6 +2522,150 @@ interface IHTMLStyle4 : IDispatch
     HRESULT minHeight([retval, out] VARIANT * p);
 }
 
+/*****************************************************************************
+ *    IHTMLSytyle5 interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f33a-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLStyle5 : IDispatch
+{
+    [propput, id(DISPID_IHTMLSTYLE5_MSINTERPOLATIONMODE), displaybind, bindable]
+    HRESULT msInterpolationMode([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MSINTERPOLATIONMODE), displaybind, bindable]
+    HRESULT msInterpolationMode([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE5_MAXHEIGHT), displaybind, bindable]
+    HRESULT maxHeight([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MAXHEIGHT), displaybind, bindable]
+    HRESULT maxHeight([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE5_MINWIDTH), displaybind, bindable]
+    HRESULT minWidth([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MINWIDTH), displaybind, bindable]
+    HRESULT minWidth([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE5_MAXWIDTH), displaybind, bindable]
+    HRESULT maxWidth([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE5_MAXWIDTH), displaybind, bindable]
+    HRESULT maxWidth([out, retval] VARIANT *p);
+}
+
+/*****************************************************************************
+ *    IHTMLSytyle6 interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510480-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLStyle6 : IDispatch
+{
+    [propput, id(DISPID_IHTMLSTYLE6_CONTENT), displaybind, bindable]
+    HRESULT content([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_CONTENT), displaybind, bindable]
+    HRESULT content([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_CAPTIONSIDE), displaybind, bindable]
+    HRESULT captionSide([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_CAPTIONSIDE), displaybind, bindable]
+    HRESULT captionSide([retval, out] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_COUNTERINCREMENT), displaybind, bindable]
+    HRESULT counterIncrement([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_COUNTERINCREMENT), displaybind, bindable]
+    HRESULT counterIncrement([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_COUNTERRESET), displaybind, bindable]
+    HRESULT counterReset([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_COUNTERRESET), displaybind, bindable]
+    HRESULT counterReset([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINE), displaybind, bindable]
+    HRESULT outline([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINE), displaybind, bindable]
+    HRESULT outline([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINEWIDTH), displaybind, bindable]
+    HRESULT outlineWidth([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINEWIDTH), displaybind, bindable]
+    HRESULT outlineWidth([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINESTYLE), displaybind, bindable]
+    HRESULT outlineStyle([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINESTYLE), displaybind, bindable]
+    HRESULT outlineStyle([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_OUTLINECOLOR), displaybind, bindable]
+    HRESULT outlineColor([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_OUTLINECOLOR), displaybind, bindable]
+    HRESULT outlineColor([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_BOXSIZING), displaybind, bindable]
+    HRESULT boxSizing([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_BOXSIZING), displaybind, bindable]
+    HRESULT boxSizing([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_BORDERSPACING), displaybind, bindable]
+    HRESULT borderSpacing([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_BORDERSPACING), displaybind, bindable]
+    HRESULT borderSpacing([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_ORPHANS), displaybind, bindable]
+    HRESULT orphans([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_ORPHANS), displaybind, bindable]
+    HRESULT orphans([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_WIDOWS), displaybind, bindable]
+    HRESULT widows([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_WIDOWS), displaybind, bindable]
+    HRESULT widows([out, retval] VARIANT *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_PAGEBREAKINSIDE), displaybind, bindable]
+    HRESULT pageBreakInside([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_PAGEBREAKINSIDE), displaybind, bindable]
+    HRESULT pageBreakInside([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_EMPTYCELLS), displaybind, bindable]
+    HRESULT emptyCells([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_EMPTYCELLS), displaybind, bindable]
+    HRESULT emptyCells([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_MSBLOCKPROGRESSION), displaybind, bindable]
+    HRESULT msBlockProgression([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_MSBLOCKPROGRESSION), displaybind, bindable]
+    HRESULT msBlockProgression([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLSTYLE6_QUOTES), displaybind, bindable]
+    HRESULT quotes([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLSTYLE6_QUOTES), displaybind, bindable]
+    HRESULT quotes([out, retval] BSTR *p);
+}
+
 [
     noncreatable,
     uuid(3050f285-98b5-11cf-bb82-00aa00bdce0b)
@@ -2408,7 +2677,8 @@ coclass HTMLStyle
     interface IHTMLStyle2;
     interface IHTMLStyle3;
     interface IHTMLStyle4;
-    /* interface IHTMLStyle5; */
+    interface IHTMLStyle5;
+    interface IHTMLStyle6;
 }
 
 /*****************************************************************************
@@ -3881,6 +4151,58 @@ methods:
 }
 
 /*****************************************************************************
+ *    IHTMLAttributeCollection interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f4c3-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLAttributeCollection : IDispatch
+{
+    [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION_LENGTH)]
+    HRESULT length(
+            [retval, out] long *p);
+
+    [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION__NEWENUM), hidden, restricted]
+    HRESULT _newEnum(
+            [retval, out] IUnknown **p);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION_ITEM)]
+    HRESULT item(
+            [optional, in] VARIANT *name,
+            [retval, out] IDispatch **pdisp);
+}
+
+/*****************************************************************************
+ *    IHTMLAttributeCollection2 interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f80a-98b5-11cf-bb82-00aa00bdce0b)
+    ]
+interface IHTMLAttributeCollection2 : IDispatch
+{
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_GETNAMEDITEM)]
+    HRESULT getNamedItem(
+            [in] BSTR bstrName,
+            [retval, out] IHTMLDOMAttribute **newretNode);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_SETNAMEDITEM)]
+    HRESULT setNamedItem(
+            [in] IHTMLDOMAttribute *ppNode,
+            [retval, out] IHTMLDOMAttribute **newretNode);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_REMOVENAMEDITEM)]
+    HRESULT removeNamedItem(
+            [in] BSTR bstrName,
+            [retval, out] IHTMLDOMAttribute **newretNode);
+}
+
+/*****************************************************************************
  *    IHTMLAttributeCollection3 interface
  */
 [
@@ -3913,6 +4235,54 @@ interface IHTMLAttributeCollection3 : IDispatch
 
     [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_LENGTH)]
     HRESULT length([retval, out] long *p);
+}
+
+/*****************************************************************************
+ *    DispHTMLAttributeCollection dispinterface
+ */
+[
+    hidden,
+    uuid(3050f56c-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLAttributeCollection
+{
+properties:
+methods:
+    [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION_LENGTH)]
+    long length();
+
+    [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION__NEWENUM), hidden, restricted]
+    IUnknown *_newEnum();
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION_ITEM)]
+    IDispatch *item([optional, in] VARIANT *name);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_GETNAMEDITEM)]
+    IHTMLDOMAttribute *getNamedItem([in] BSTR bstrName);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_SETNAMEDITEM)]
+    IHTMLDOMAttribute *setNamedItem([in] IHTMLDOMAttribute *ppNode);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION2_REMOVENAMEDITEM)]
+    IHTMLDOMAttribute *removeNamedItem([in] BSTR bstrName);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_GETNAMEDITEM)]
+    IHTMLDOMAttribute *ie8_getNamedItem([in] BSTR bstrName);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_SETNAMEDITEM)]
+    IHTMLDOMAttribute *ie8_setNamedItem([in] IHTMLDOMAttribute *pNodeIn);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_REMOVENAMEDITEM)]
+    IHTMLDOMAttribute *ie8_removeNamedItem([in] BSTR bstrName);
+
+    [id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_ITEM)]
+    IHTMLDOMAttribute *ie8_item([in] long index);
+
+    [propget, id(DISPID_IHTMLATTRIBUTECOLLECTION3_IE8_LENGTH)]
+    long ie8_length();
+
+    [propget, id(DISPID_IHTMLDOMCONSTRUCTOR_CONSTRUCTOR), hidden]
+    IDispatch *constructor();
 }
 
 /*****************************************************************************
@@ -9187,6 +9557,106 @@ methods:
 }
 
 /*****************************************************************************
+ *    IHTMLHeadElement interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f81d-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLHeadElement : IDispatch
+{
+    [propput, id(DISPID_IHTMLHEADELEMENT_PROFILE), displaybind, bindable]
+    HRESULT profile([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLHEADELEMENT_PROFILE), displaybind, bindable]
+    HRESULT profile([retval, out] BSTR *p);
+}
+
+/*****************************************************************************
+ *    IHTMLHeadElement2 interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3051042f-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLHeadElement2 : IDispatch
+{
+    [propput, id(DISPID_IHTMLHEADELEMENT2_IE8_PROFILE), displaybind, bindable]
+    HRESULT profile([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLHEADELEMENT2_IE8_PROFILE), displaybind, bindable]
+    HRESULT profile([retval, out] BSTR *p);
+}
+
+/*****************************************************************************
+ *    IHTMLTitleElement interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f322-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLTitleElement : IDispatch
+{
+    [propput, id(DISPID_IHTMLTITLEELEMENT_TEXT), bindable]
+    HRESULT text([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLTITLEELEMENT_TEXT), bindable]
+    HRESULT text([retval, out] BSTR *p);
+}
+
+/*****************************************************************************
+ *    DispHTMLHeadElement interface
+ */
+[
+    hidden,
+    uuid(3050f561-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLHeadElement
+{
+properties:
+methods:
+    WINE_HTMLELEMENT_DISPINTERFACE_DECL;
+
+    [propput, id(DISPID_IHTMLHEADELEMENT_PROFILE), displaybind, bindable]
+    void profile(BSTR v);
+
+    [propget, id(DISPID_IHTMLHEADELEMENT_PROFILE), displaybind, bindable]
+    BSTR profile();
+
+    [propput, id(DISPID_IHTMLHEADELEMENT2_IE8_PROFILE), displaybind, bindable]
+    void ie8_profile(BSTR v);
+
+    [propget, id(DISPID_IHTMLHEADELEMENT2_IE8_PROFILE), displaybind, bindable]
+    BSTR ie8_profile();
+}
+
+/*****************************************************************************
+ *    DispHTMLTitleElement interface
+ */
+[
+    hidden,
+    uuid(3050f516-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLTitleElement
+{
+properties:
+methods:
+    WINE_HTMLELEMENT_DISPINTERFACE_DECL;
+
+    [propput, id(DISPID_IHTMLTITLEELEMENT_TEXT), bindable]
+    void text(BSTR v);
+
+    [propget, id(DISPID_IHTMLTITLEELEMENT_TEXT), bindable]
+    BSTR text();
+}
+
+/*****************************************************************************
  *    DispHTMLUnknownElement interface
  */
 [
@@ -10502,6 +10972,58 @@ interface IHTMLWindow5 : IDispatch
 }
 
 /*****************************************************************************
+ *    IHTMLWindow6 interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510453-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLWindow6 : IDispatch
+{
+    [propput, id(DISPID_IHTMLWINDOW6_XDOMAINREQUEST)]
+    HRESULT XDomainRequest([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_XDOMAINREQUEST)]
+    HRESULT XDomainRequest([out, retval] VARIANT *p);
+
+    [propget, id(DISPID_IHTMLWINDOW6_SESSIONSTORAGE)]
+    HRESULT sessionStorage([out, retval] IHTMLStorage **p);
+
+    [propget, id(DISPID_IHTMLWINDOW6_LOCALSTORAGE)]
+    HRESULT localStorage([out, retval] IHTMLStorage **p);
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    HRESULT onhashchange([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    HRESULT onhashchange([out, retval] VARIANT *p);
+
+    [propget, id(DISPID_IHTMLWINDOW6_MAXCONNECTIONSPERSERVER)]
+    HRESULT maxConnectionsPerServer([out, retval] long *p);
+
+    [id(DISPID_IHTMLWINDOW6_POSTMESSAGE)]
+    HRESULT postMessage(
+            [in] BSTR msg,
+            [in, optional] VARIANT targetOrigin);
+
+    [id(DISPID_IHTMLWINDOW6_TOSTATICHTML)]
+    HRESULT toStaticHTML(
+            [in] BSTR bstrHTML,
+            [out, retval] BSTR *pbstrStaticHTML);
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    HRESULT onmessage([in] VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    HRESULT onmessage([out, retval] VARIANT *p);
+
+    [id(DISPID_IHTMLWINDOW6_MSWRITEPROFILERMARK)]
+    HRESULT msWriteProfilerMark([in] BSTR bstrProfilerMarkName);
+}
+
+/*****************************************************************************
  *    DispHTMLScreen dispinterface
  */
 [
@@ -10847,6 +11369,40 @@ methods:
 
     [propget, id(DISPID_IHTMLWINDOW4_FRAMEELEMENT)]
     IHTMLFrameBase *frameElement();
+
+    [propget, id(DISPID_IHTMLWINDOW6_SESSIONSTORAGE)]
+    IHTMLStorage *sessionStorage();
+
+    [propget, id(DISPID_IHTMLWINDOW6_LOCALSTORAGE)]
+    IHTMLStorage *localStorage();
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    void onhashchange(VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    VARIANT onhashchange();
+
+    [propget, id(DISPID_IHTMLWINDOW6_MAXCONNECTIONSPERSERVER)]
+    long maxConnectionsPerServer();
+
+    [id(DISPID_IHTMLWINDOW6_POSTMESSAGE)]
+    void postMessage(
+            [in] BSTR msg,
+            [in, optional] VARIANT targetOrigin);
+
+    [id(DISPID_IHTMLWINDOW6_TOSTATICHTML)]
+    BSTR toStaticHTML([in] BSTR bstrHTML);
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    void onmessage(VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    VARIANT onmessage();
+
+    [id(DISPID_IHTMLWINDOW6_MSWRITEPROFILERMARK)]
+    void msWriteProfilerMark([in] BSTR bstrProfilerMarkName);
+
+    WINE_IHTMLDOMCONSTRUCTOR_DISPINTERFACE_DECL;
 }
 
 /*****************************************************************************
@@ -11138,6 +11694,40 @@ methods:
 
     [propget, id(DISPID_IHTMLWINDOW5_XMLHTTPREQUEST)]
     VARIANT XMLHttpRequest();
+
+    [propget, id(DISPID_IHTMLWINDOW6_SESSIONSTORAGE)]
+    IHTMLStorage *sessionStorage();
+
+    [propget, id(DISPID_IHTMLWINDOW6_LOCALSTORAGE)]
+    IHTMLStorage *localStorage();
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    void onhashchange(VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONHASHCHANGE), displaybind, bindable]
+    VARIANT onhashchange();
+
+    [propget, id(DISPID_IHTMLWINDOW6_MAXCONNECTIONSPERSERVER)]
+    long maxConnectionsPerServer();
+
+    [id(DISPID_IHTMLWINDOW6_POSTMESSAGE)]
+    void postMessage(
+            [in] BSTR msg,
+            [in, optional] VARIANT targetOrigin);
+
+    [id(DISPID_IHTMLWINDOW6_TOSTATICHTML)]
+    BSTR toStaticHTML([in] BSTR bstrHTML);
+
+    [propput, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    void onmessage(VARIANT v);
+
+    [propget, id(DISPID_IHTMLWINDOW6_ONMESSAGE), displaybind, bindable]
+    VARIANT onmessage();
+
+    [id(DISPID_IHTMLWINDOW6_MSWRITEPROFILERMARK)]
+    void msWriteProfilerMark([in] BSTR bstrProfilerMarkName);
+
+    WINE_IHTMLDOMCONSTRUCTOR_DISPINTERFACE_DECL;
 }
 
 /*****************************************************************************
@@ -13332,7 +13922,6 @@ interface IWebBridge : IDispatch
     helpstring("Microsoft Scriptlet Component"),
     progid("ScriptBridge.ScriptBridge.1"),
     vi_progid("ScriptBridge.ScriptBridge"),
-    threading(apartment),
     uuid(ae24fdae-03c6-11d1-8b76-0080c744f389)
 ]
 coclass Scriptlet
@@ -15986,6 +16575,45 @@ methods:
 
     [propget, id(DISPID_IHTMLSTYLEELEMENT_MEDIA), displaybind, bindable]
     BSTR media();
+}
+
+/*****************************************************************************
+ *    IHTMLStorage interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510474-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLStorage : IDispatch
+{
+    [propget, id(DISPID_IHTMLSTORAGE_LENGTH), hidden]
+    HRESULT length([out, retval] long *p);
+
+    [propget, id(DISPID_IHTMLSTORAGE_REMAININGSPACE), hidden]
+    HRESULT remainingSpace([out, retval] long *p);
+
+    [id(DISPID_IHTMLSTORAGE_KEY)]
+    HRESULT key(
+            [in] long lIndex,
+            [out, retval] BSTR *);
+
+    [id(DISPID_IHTMLSTORAGE_GETITEM)]
+    HRESULT getItem(
+            [in] BSTR bstrKey,
+            [out, retval] VARIANT *);
+
+    [id(DISPID_IHTMLSTORAGE_SETITEM)]
+    HRESULT setItem(
+            [in] BSTR bstrKey,
+            [in] BSTR bstrValue);
+
+    [id(DISPID_IHTMLSTORAGE_REMOVEITEM)]
+    HRESULT removeItem([in] BSTR bstrKey);
+
+    [id(DISPID_IHTMLSTORAGE_CLEAR)]
+    HRESULT clear();
 }
 
 /*****************************************************************************

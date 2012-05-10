@@ -1,6 +1,4 @@
 /*
- * IWineD3DResource Implementation
- *
  * Copyright 2002-2004 Jason Edmeades
  * Copyright 2003-2004 Raphael Junqueira
  * Copyright 2004 Christian Costa
@@ -43,23 +41,70 @@ struct private_data
     DWORD size;
 };
 
-HRESULT resource_init(struct wined3d_resource *resource, WINED3DRESOURCETYPE resource_type,
-        IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct wined3d_format *format,
-        WINED3DPOOL pool, void *parent, const struct wined3d_parent_ops *parent_ops,
+static DWORD resource_access_from_pool(enum wined3d_pool pool)
+{
+    switch (pool)
+    {
+        case WINED3D_POOL_DEFAULT:
+            return WINED3D_RESOURCE_ACCESS_GPU;
+
+        case WINED3D_POOL_MANAGED:
+            return WINED3D_RESOURCE_ACCESS_GPU | WINED3D_RESOURCE_ACCESS_CPU;
+
+        case WINED3D_POOL_SYSTEM_MEM:
+            return WINED3D_RESOURCE_ACCESS_CPU;
+
+        case WINED3D_POOL_SCRATCH:
+            return WINED3D_RESOURCE_ACCESS_SCRATCH;
+
+        default:
+            FIXME("Unhandled pool %#x.\n", pool);
+            return 0;
+    }
+}
+
+static void resource_check_usage(DWORD usage)
+{
+    static const DWORD handled = WINED3DUSAGE_RENDERTARGET
+            | WINED3DUSAGE_DEPTHSTENCIL
+            | WINED3DUSAGE_DYNAMIC
+            | WINED3DUSAGE_AUTOGENMIPMAP
+            | WINED3DUSAGE_STATICDECL
+            | WINED3DUSAGE_OVERLAY;
+
+    if (usage & ~handled)
+        FIXME("Unhandled usage flags %#x.\n", usage & ~handled);
+}
+
+HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *device,
+        enum wined3d_resource_type type, const struct wined3d_format *format,
+        enum wined3d_multisample_type multisample_type, UINT multisample_quality,
+        DWORD usage, enum wined3d_pool pool, UINT width, UINT height, UINT depth, UINT size,
+        void *parent, const struct wined3d_parent_ops *parent_ops,
         const struct wined3d_resource_ops *resource_ops)
 {
-    resource->device = device;
-    resource->resourceType = resource_type;
     resource->ref = 1;
-    resource->pool = pool;
+    resource->device = device;
+    resource->type = type;
     resource->format = format;
+    resource->multisample_type = multisample_type;
+    resource->multisample_quality = multisample_quality;
     resource->usage = usage;
+    resource->pool = pool;
+    resource->access_flags = resource_access_from_pool(pool);
+    if (usage & WINED3DUSAGE_DYNAMIC)
+        resource->access_flags |= WINED3D_RESOURCE_ACCESS_CPU;
+    resource->width = width;
+    resource->height = height;
+    resource->depth = depth;
     resource->size = size;
     resource->priority = 0;
     resource->parent = parent;
     resource->parent_ops = parent_ops;
     resource->resource_ops = resource_ops;
     list_init(&resource->privateData);
+
+    resource_check_usage(usage);
 
     if (size)
     {
@@ -78,15 +123,15 @@ HRESULT resource_init(struct wined3d_resource *resource, WINED3DRESOURCETYPE res
             + (RESOURCE_ALIGNMENT - 1)) & ~(RESOURCE_ALIGNMENT - 1));
 
     /* Check that we have enough video ram left */
-    if (pool == WINED3DPOOL_DEFAULT)
+    if (pool == WINED3D_POOL_DEFAULT)
     {
-        if (size > IWineD3DDevice_GetAvailableTextureMem((IWineD3DDevice *)device))
+        if (size > wined3d_device_get_available_texture_mem(device))
         {
             ERR("Out of adapter memory\n");
             HeapFree(GetProcessHeap(), 0, resource->heapMemory);
             return WINED3DERR_OUTOFVIDEOMEMORY;
         }
-        WineD3DAdapterChangeGLRam(device, size);
+        adapter_adjust_memory(device->adapter, size);
     }
 
     device_resource_add(device, resource);
@@ -102,16 +147,16 @@ void resource_cleanup(struct wined3d_resource *resource)
 
     TRACE("Cleaning up resource %p.\n", resource);
 
-    if (resource->pool == WINED3DPOOL_DEFAULT)
+    if (resource->pool == WINED3D_POOL_DEFAULT)
     {
         TRACE("Decrementing device memory pool by %u.\n", resource->size);
-        WineD3DAdapterChangeGLRam(resource->device, -resource->size);
+        adapter_adjust_memory(resource->device->adapter, 0 - resource->size);
     }
 
     LIST_FOR_EACH_SAFE(e1, e2, &resource->privateData)
     {
         data = LIST_ENTRY(e1, struct private_data, entry);
-        hr = resource_free_private_data(resource, &data->tag);
+        hr = wined3d_resource_free_private_data(resource, &data->tag);
         if (FAILED(hr))
             ERR("Failed to free private data when destroying resource %p, hr = %#x.\n", resource, hr);
     }
@@ -127,7 +172,7 @@ void resource_cleanup(struct wined3d_resource *resource)
 void resource_unload(struct wined3d_resource *resource)
 {
     context_resource_unloaded(resource->device,
-            resource, resource->resourceType);
+            resource, resource->type);
 }
 
 static struct private_data *resource_find_private_data(const struct wined3d_resource *resource, REFGUID tag)
@@ -148,7 +193,7 @@ static struct private_data *resource_find_private_data(const struct wined3d_reso
     return NULL;
 }
 
-HRESULT resource_set_private_data(struct wined3d_resource *resource, REFGUID guid,
+HRESULT CDECL wined3d_resource_set_private_data(struct wined3d_resource *resource, REFGUID guid,
         const void *data, DWORD data_size, DWORD flags)
 {
     struct private_data *d;
@@ -156,7 +201,7 @@ HRESULT resource_set_private_data(struct wined3d_resource *resource, REFGUID gui
     TRACE("resource %p, riid %s, data %p, data_size %u, flags %#x.\n",
             resource, debugstr_guid(guid), data, data_size, flags);
 
-    resource_free_private_data(resource, guid);
+    wined3d_resource_free_private_data(resource, guid);
 
     d = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d));
     if (!d) return E_OUTOFMEMORY;
@@ -192,7 +237,8 @@ HRESULT resource_set_private_data(struct wined3d_resource *resource, REFGUID gui
     return WINED3D_OK;
 }
 
-HRESULT resource_get_private_data(const struct wined3d_resource *resource, REFGUID guid, void *data, DWORD *data_size)
+HRESULT CDECL wined3d_resource_get_private_data(const struct wined3d_resource *resource, REFGUID guid,
+        void *data, DWORD *data_size)
 {
     const struct private_data *d;
 
@@ -226,7 +272,7 @@ HRESULT resource_get_private_data(const struct wined3d_resource *resource, REFGU
 
     return WINED3D_OK;
 }
-HRESULT resource_free_private_data(struct wined3d_resource *resource, REFGUID guid)
+HRESULT CDECL wined3d_resource_free_private_data(struct wined3d_resource *resource, REFGUID guid)
 {
     struct private_data *data;
 
@@ -265,13 +311,21 @@ DWORD resource_get_priority(const struct wined3d_resource *resource)
     return resource->priority;
 }
 
-WINED3DRESOURCETYPE resource_get_type(const struct wined3d_resource *resource)
-{
-    TRACE("resource %p, returning %#x.\n", resource, resource->resourceType);
-    return resource->resourceType;
-}
-
 void * CDECL wined3d_resource_get_parent(const struct wined3d_resource *resource)
 {
     return resource->parent;
+}
+
+void CDECL wined3d_resource_get_desc(const struct wined3d_resource *resource, struct wined3d_resource_desc *desc)
+{
+    desc->resource_type = resource->type;
+    desc->format = resource->format->id;
+    desc->multisample_type = resource->multisample_type;
+    desc->multisample_quality = resource->multisample_quality;
+    desc->usage = resource->usage;
+    desc->pool = resource->pool;
+    desc->width = resource->width;
+    desc->height = resource->height;
+    desc->depth = resource->depth;
+    desc->size = resource->size;
 }

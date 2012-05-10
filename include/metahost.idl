@@ -16,8 +16,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-import "wtypes.idl";
-import "propidl.idl";
+import "unknwn.idl";
+import "oaidl.idl";
+import "ocidl.idl";
+import "mscoree.idl";
 
 cpp_quote("#ifdef WINE_NO_UNICODE_MACROS")
 cpp_quote("#undef LoadLibrary")
@@ -88,6 +90,7 @@ typedef void (__stdcall *RuntimeLoadedCallbackFnPtr)(
     CallbackThreadSetFnPtr pfnCallbackThreadSet,
     CallbackThreadUnsetFnPtr pfnCallbackThreadUnset);
 
+cpp_quote("DEFINE_GUID(CLSID_CLRDebuggingLegacy, 0xDF8395B5,0xA4BA,0x450b,0xA7,0x7C,0xA9,0xA4,0x77,0x62,0xC5,0x20);")
 cpp_quote("DEFINE_GUID(CLSID_CLRMetaHost, 0x9280188d,0x0e8e,0x4867,0xb3,0x0c,0x7f,0xa8,0x38,0x84,0xe8,0xde);")
 
 [

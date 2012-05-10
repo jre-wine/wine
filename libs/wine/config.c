@@ -217,12 +217,12 @@ static void init_server_dir( dev_t dev, ino_t ino )
     sprintf( server_dir, "%s%u%s", server_root_prefix, uid, server_dir_prefix );
     p = server_dir + strlen(server_dir);
 
-    if (sizeof(dev) > sizeof(unsigned long) && dev > ~0UL)
+    if (dev != (unsigned long)dev)
         p += sprintf( p, "%lx%08lx-", (unsigned long)((unsigned long long)dev >> 32), (unsigned long)dev );
     else
         p += sprintf( p, "%lx-", (unsigned long)dev );
 
-    if (sizeof(ino) > sizeof(unsigned long) && ino > ~0UL)
+    if (ino != (unsigned long)ino)
         sprintf( p, "%lx%08lx", (unsigned long)((unsigned long long)ino >> 32), (unsigned long)ino );
     else
         sprintf( p, "%lx", (unsigned long)ino );
@@ -456,7 +456,6 @@ const char *wine_get_build_id(void)
 /* exec a binary using the preloader if requested; helper for wine_exec_wine_binary */
 static void preloader_exec( char **argv, int use_preloader )
 {
-#ifdef linux
     if (use_preloader)
     {
         static const char preloader[] = "wine-preloader";
@@ -483,7 +482,6 @@ static void preloader_exec( char **argv, int use_preloader )
         free( new_argv );
         free( full_name );
     }
-#endif
     execv( argv[0], argv );
 }
 
@@ -494,7 +492,12 @@ void wine_exec_wine_binary( const char *name, char **argv, const char *env_var )
     int use_preloader;
 
     if (!name) name = argv0_name;  /* no name means default loader */
+
+#ifdef linux
     use_preloader = !strendswith( name, "wineserver" );
+#else
+    use_preloader = 0;
+#endif
 
     if ((ptr = strrchr( name, '/' )))
     {

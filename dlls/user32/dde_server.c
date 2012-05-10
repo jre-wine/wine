@@ -72,7 +72,7 @@ BOOL WINAPI DdePostAdvise(DWORD idInst, HSZ hszTopic, HSZ hszItem)
 
     pInstance = WDML_GetInstance(idInst);
 
-    if (pInstance == NULL || pInstance->links == NULL)
+    if (pInstance == NULL)
         return FALSE;
 
     atom = WDML_MakeAtomFromHsz(hszItem);
@@ -718,7 +718,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandleUnadvise(WDML_CONV* pConv, WDML_XACT* p
 			  pXAct->hszItem, TRUE, pXAct->wFmt);
     if (pLink == NULL)
     {
-	ERR("Couln'd find link for %p, dropping request\n", pXAct->hszItem);
+	ERR("Couldn't find link for %p, dropping request\n", pXAct->hszItem);
 	FreeDDElParam(WM_DDE_UNADVISE, pXAct->lParam);
 	return WDML_QS_ERROR;
     }

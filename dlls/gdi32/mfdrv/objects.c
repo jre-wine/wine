@@ -95,7 +95,7 @@ static INT16 MFDRV_FindObject( PHYSDEV dev, HGDIOBJ obj )
 /******************************************************************
  *         MFDRV_DeleteObject
  */
-BOOL CDECL MFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+BOOL MFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
 {
     METARECORD mr;
     METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
@@ -137,72 +137,9 @@ static BOOL MFDRV_SelectObject( PHYSDEV dev, INT16 index)
 /***********************************************************************
  *           MFDRV_SelectBitmap
  */
-HBITMAP CDECL MFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
+HBITMAP MFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
 {
     return 0;
-}
-
-/***********************************************************************
- * Internal helper for MFDRV_CreateBrushIndirect():
- * Change the padding of a bitmap from 16 (BMP) to 32 (DIB) bits.
- */
-static inline void MFDRV_PadTo32(LPBYTE lpRows, int height, int width)
-{
-    int bytes16 = 2 * ((width + 15) / 16);
-    int bytes32 = 4 * ((width + 31) / 32);
-    LPBYTE lpSrc, lpDst;
-    int i;
-
-    if (!height)
-        return;
-
-    height = abs(height) - 1;
-    lpSrc = lpRows + height * bytes16;
-    lpDst = lpRows + height * bytes32;
-
-    /* Note that we work backwards so we can re-pad in place */
-    while (height >= 0)
-    {
-        for (i = bytes32; i > bytes16; i--)
-            lpDst[i - 1] = 0; /* Zero the padding bytes */
-        for (; i > 0; i--)
-            lpDst[i - 1] = lpSrc[i - 1]; /* Move image bytes into alignment */
-        lpSrc -= bytes16;
-        lpDst -= bytes32;
-        height--;
-    }
-}
-
-/***********************************************************************
- * Internal helper for MFDRV_CreateBrushIndirect():
- * Reverse order of bitmap rows in going from BMP to DIB.
- */
-static inline void MFDRV_Reverse(LPBYTE lpRows, int height, int width)
-{
-    int bytes = 4 * ((width + 31) / 32);
-    LPBYTE lpSrc, lpDst;
-    BYTE temp;
-    int i;
-
-    if (!height)
-        return;
-
-    lpSrc = lpRows;
-    lpDst = lpRows + (height-1) * bytes;
-    height = height/2;
-
-    while (height > 0)
-    {
-        for (i = 0; i < bytes; i++)
-        {
-            temp = lpDst[i];
-            lpDst[i] = lpSrc[i];
-            lpSrc[i] = temp;
-        }
-        lpSrc += bytes;
-        lpDst -= bytes;
-        height--;
-    }
 }
 
 /******************************************************************
@@ -214,7 +151,6 @@ INT16 MFDRV_CreateBrushIndirect(PHYSDEV dev, HBRUSH hBrush )
     DWORD size;
     METARECORD *mr;
     LOGBRUSH logbrush;
-    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     BOOL r;
 
     if (!GetObjectA( hBrush, sizeof(logbrush), &logbrush )) return -1;
@@ -238,91 +174,45 @@ INT16 MFDRV_CreateBrushIndirect(PHYSDEV dev, HBRUSH hBrush )
 	    break;
 	}
     case BS_PATTERN:
+    case BS_DIBPATTERN:
         {
-	    BITMAP bm;
-	    BITMAPINFO *info;
-	    DWORD bmSize;
-	    COLORREF cref;
+            char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
+            BITMAPINFO *dst_info, *src_info = (BITMAPINFO *)buffer;
+            DWORD info_size;
+            char *dst_ptr;
+            void *bits;
+            UINT usage;
 
-	    GetObjectA((HANDLE)logbrush.lbHatch, sizeof(bm), &bm);
-	    if(bm.bmBitsPixel != 1 || bm.bmPlanes != 1) {
-	        FIXME("Trying to store a colour pattern brush\n");
-		goto done;
-	    }
+            if (!get_brush_bitmap_info( hBrush, src_info, &bits, &usage )) goto done;
 
-	    bmSize = DIB_GetDIBImageBytes(bm.bmWidth, bm.bmHeight, DIB_PAL_COLORS);
+            info_size = get_dib_info_size( src_info, usage );
+	    size = FIELD_OFFSET( METARECORD, rdParm[2] ) + info_size + src_info->bmiHeader.biSizeImage;
 
-	    size = sizeof(METARECORD) + sizeof(WORD) + sizeof(BITMAPINFO) +
-	      sizeof(RGBQUAD) + bmSize;
-
-	    mr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-	    if(!mr) goto done;
+            if (!(mr = HeapAlloc( GetProcessHeap(), 0, size ))) goto done;
 	    mr->rdFunction = META_DIBCREATEPATTERNBRUSH;
 	    mr->rdSize = size / 2;
-	    mr->rdParm[0] = BS_PATTERN;
-	    mr->rdParm[1] = DIB_RGB_COLORS;
-	    info = (BITMAPINFO *)(mr->rdParm + 2);
+	    mr->rdParm[0] = logbrush.lbStyle;
+	    mr->rdParm[1] = usage;
+            dst_info = (BITMAPINFO *)(mr->rdParm + 2);
+            memcpy( dst_info, src_info, info_size );
+            if (dst_info->bmiHeader.biClrUsed == 1 << dst_info->bmiHeader.biBitCount)
+                dst_info->bmiHeader.biClrUsed = 0;
+            dst_ptr = (char *)dst_info + info_size;
 
-	    info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-	    info->bmiHeader.biWidth = bm.bmWidth;
-	    info->bmiHeader.biHeight = bm.bmHeight;
-	    info->bmiHeader.biPlanes = 1;
-	    info->bmiHeader.biBitCount = 1;
-	    info->bmiHeader.biSizeImage = bmSize;
-
-	    GetBitmapBits((HANDLE)logbrush.lbHatch,
-		      bm.bmHeight * BITMAP_GetWidthBytes (bm.bmWidth, bm.bmBitsPixel),
-		      (LPBYTE)info + sizeof(BITMAPINFO) + sizeof(RGBQUAD));
-
-	    /* Change the padding to be DIB compatible if needed */
-	    if(bm.bmWidth & 31)
-	        MFDRV_PadTo32((LPBYTE)info + sizeof(BITMAPINFO) + sizeof(RGBQUAD),
-		      bm.bmWidth, bm.bmHeight);
-	    /* BMP and DIB have opposite row order conventions */
-            MFDRV_Reverse((LPBYTE)info + sizeof(BITMAPINFO) + sizeof(RGBQUAD),
-		      bm.bmWidth, bm.bmHeight);
-
-	    cref = GetTextColor(physDev->hdc);
-	    info->bmiColors[0].rgbRed = GetRValue(cref);
-	    info->bmiColors[0].rgbGreen = GetGValue(cref);
-	    info->bmiColors[0].rgbBlue = GetBValue(cref);
-	    info->bmiColors[0].rgbReserved = 0;
-	    cref = GetBkColor(physDev->hdc);
-	    info->bmiColors[1].rgbRed = GetRValue(cref);
-	    info->bmiColors[1].rgbGreen = GetGValue(cref);
-	    info->bmiColors[1].rgbBlue = GetBValue(cref);
-	    info->bmiColors[1].rgbReserved = 0;
+            /* always return a bottom-up DIB */
+            if (dst_info->bmiHeader.biHeight < 0)
+            {
+                int i, width_bytes = get_dib_stride( dst_info->bmiHeader.biWidth,
+                                                     dst_info->bmiHeader.biBitCount );
+                dst_info->bmiHeader.biHeight = -dst_info->bmiHeader.biHeight;
+                dst_ptr += (dst_info->bmiHeader.biHeight - 1) * width_bytes;
+                for (i = 0; i < dst_info->bmiHeader.biHeight; i++, dst_ptr -= width_bytes)
+                    memcpy( dst_ptr, (char *)bits + i * width_bytes, width_bytes );
+            }
+            else memcpy( dst_ptr, bits, src_info->bmiHeader.biSizeImage );
 	    break;
 	}
 
-    case BS_DIBPATTERN:
-        {
-	      BITMAPINFO *info;
-	      DWORD bmSize, biSize;
-
-	      info = GlobalLock( (HGLOBAL)logbrush.lbHatch );
-	      if (info->bmiHeader.biCompression)
-		  bmSize = info->bmiHeader.biSizeImage;
-	      else
-		  bmSize = DIB_GetDIBImageBytes(info->bmiHeader.biWidth,
-						info->bmiHeader.biHeight,
-						info->bmiHeader.biBitCount);
-	      biSize = bitmap_info_size(info, LOWORD(logbrush.lbColor));
-	      size = sizeof(METARECORD) + biSize + bmSize + 2;
-	      mr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-              if (!mr)
-              {
-                  GlobalUnlock( (HGLOBAL)logbrush.lbHatch );
-                  goto done;
-              }
-	      mr->rdFunction = META_DIBCREATEPATTERNBRUSH;
-	      mr->rdSize = size / 2;
-	      *(mr->rdParm) = logbrush.lbStyle;
-	      *(mr->rdParm + 1) = LOWORD(logbrush.lbColor);
-	      memcpy(mr->rdParm + 2, info, biSize + bmSize);
-              GlobalUnlock( (HGLOBAL)logbrush.lbHatch );
-	      break;
-	}
 	default:
 	    FIXME("Unkonwn brush style %x\n", logbrush.lbStyle);
 	    return 0;
@@ -339,9 +229,8 @@ done:
 /***********************************************************************
  *           MFDRV_SelectBrush
  */
-HBRUSH CDECL MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush )
+HBRUSH MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern )
 {
-    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     INT16 index;
 
     index = MFDRV_FindObject(dev, hbrush);
@@ -350,9 +239,9 @@ HBRUSH CDECL MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush )
         index = MFDRV_CreateBrushIndirect( dev, hbrush );
         if( index < 0 )
             return 0;
-        GDI_hdc_using_object(hbrush, physDev->hdc);
+        GDI_hdc_using_object(hbrush, dev->hdc);
     }
-    return MFDRV_SelectObject( dev, index ) ? hbrush : HGDI_ERROR;
+    return MFDRV_SelectObject( dev, index ) ? hbrush : 0;
 }
 
 /******************************************************************
@@ -396,9 +285,8 @@ static UINT16 MFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont, LOGFONTW *logfo
 /***********************************************************************
  *           MFDRV_SelectFont
  */
-HFONT CDECL MFDRV_SelectFont( PHYSDEV dev, HFONT hfont, HANDLE gdiFont )
+HFONT MFDRV_SelectFont( PHYSDEV dev, HFONT hfont )
 {
-    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     LOGFONTW font;
     INT16 index;
 
@@ -406,13 +294,13 @@ HFONT CDECL MFDRV_SelectFont( PHYSDEV dev, HFONT hfont, HANDLE gdiFont )
     if( index < 0 )
     {
         if (!GetObjectW( hfont, sizeof(font), &font ))
-            return HGDI_ERROR;
+            return 0;
         index = MFDRV_CreateFontIndirect(dev, hfont, &font);
         if( index < 0 )
-            return HGDI_ERROR;
-        GDI_hdc_using_object(hfont, physDev->hdc);
+            return 0;
+        GDI_hdc_using_object(hfont, dev->hdc);
     }
-    return MFDRV_SelectObject( dev, index ) ? hfont : HGDI_ERROR;
+    return MFDRV_SelectObject( dev, index ) ? hfont : 0;
 }
 
 /******************************************************************
@@ -435,9 +323,8 @@ static UINT16 MFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen, LOGPEN16 *logpen)
 /***********************************************************************
  *           MFDRV_SelectPen
  */
-HPEN CDECL MFDRV_SelectPen( PHYSDEV dev, HPEN hpen )
+HPEN MFDRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern )
 {
-    METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     LOGPEN16 logpen;
     INT16 index;
 
@@ -476,9 +363,9 @@ HPEN CDECL MFDRV_SelectPen( PHYSDEV dev, HPEN hpen )
         index = MFDRV_CreatePenIndirect( dev, hpen, &logpen );
         if( index < 0 )
             return 0;
-        GDI_hdc_using_object(hpen, physDev->hdc);
+        GDI_hdc_using_object(hpen, dev->hdc);
     }
-    return MFDRV_SelectObject( dev, index ) ? hpen : HGDI_ERROR;
+    return MFDRV_SelectObject( dev, index ) ? hpen : 0;
 }
 
 
@@ -518,7 +405,7 @@ static BOOL MFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPalette, LOGPALETTE* logP
 /***********************************************************************
  *           MFDRV_SelectPalette
  */
-HPALETTE CDECL MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackground )
+HPALETTE MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackground )
 {
 #define PALVERSION 0x0300
 
@@ -554,7 +441,7 @@ HPALETTE CDECL MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceB
 /***********************************************************************
  *           MFDRV_RealizePalette
  */
-UINT CDECL MFDRV_RealizePalette(PHYSDEV dev, HPALETTE hPalette, BOOL dummy)
+UINT MFDRV_RealizePalette(PHYSDEV dev, HPALETTE hPalette, BOOL dummy)
 {
     char buffer[sizeof(METARECORD) - sizeof(WORD)];
     METARECORD *mr = (METARECORD *)&buffer;

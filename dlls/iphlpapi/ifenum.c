@@ -1,4 +1,4 @@
-/* Copyright (C) 2003,2006 Juan Lang
+/* Copyright (C) 2003,2006,2011 Juan Lang
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -13,18 +13,6 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * Implementation notes
- * FIXME:
- * - I don't support IPv6 addresses here, since SIOCGIFCONF can't return them
- *
- * There are three implemented methods for determining the MAC address of an
- * interface:
- * - a specific IOCTL (Linux)
- * - looking in the ARP cache (at least Solaris)
- * - using the sysctl interface (FreeBSD and Mac OS X)
- * Solaris and some others have SIOCGENADDR, but I haven't gotten that to work
- * on the Solaris boxes at SourceForge's compile farm, whereas SIOCGARP does.
  */
 
 #include "config.h"
@@ -134,12 +122,12 @@ static int isLoopbackInterface(int fd, const char *name)
 /* The comments say MAX_ADAPTER_NAME is required, but really only IF_NAMESIZE
  * bytes are necessary.
  */
-char *getInterfaceNameByIndex(DWORD index, char *name)
+char *getInterfaceNameByIndex(IF_INDEX index, char *name)
 {
   return if_indextoname(index, name);
 }
 
-DWORD getInterfaceIndexByName(const char *name, PDWORD index)
+DWORD getInterfaceIndexByName(const char *name, IF_INDEX *index)
 {
   DWORD ret;
   unsigned int idx;
@@ -473,7 +461,7 @@ static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr
   u_char *p, *buf;
   size_t mibLen;
   int mib[] = { CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, 0 };
-  int addrLen;
+  unsigned addrLen;
   BOOL found = FALSE;
 
   if (!name || !len || !addr || !type)
@@ -554,7 +542,7 @@ static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr
 }
 #endif
 
-DWORD getInterfacePhysicalByIndex(DWORD index, PDWORD len, PBYTE addr,
+DWORD getInterfacePhysicalByIndex(IF_INDEX index, PDWORD len, PBYTE addr,
  PDWORD type)
 {
   char nameBuf[IF_NAMESIZE];
@@ -598,7 +586,7 @@ DWORD getInterfaceMtuByName(const char *name, PDWORD mtu)
   return ret;
 }
 
-DWORD getInterfaceStatusByName(const char *name, PDWORD status)
+DWORD getInterfaceStatusByName(const char *name, INTERNAL_IF_OPER_STATUS *status)
 {
   DWORD ret;
   int fd;
@@ -669,6 +657,165 @@ DWORD getInterfaceEntryByName(const char *name, PMIB_IFROW entry)
     ret = ERROR_INVALID_DATA;
   return ret;
 }
+
+static DWORD getIPAddrRowByName(PMIB_IPADDRROW ipAddrRow, const char *ifName,
+ const struct sockaddr *sa)
+{
+  DWORD ret, bcast;
+
+  ret = getInterfaceIndexByName(ifName, &ipAddrRow->dwIndex);
+  memcpy(&ipAddrRow->dwAddr, sa->sa_data + 2, sizeof(DWORD));
+  ipAddrRow->dwMask = getInterfaceMaskByName(ifName);
+  /* the dwBCastAddr member isn't the broadcast address, it indicates whether
+   * the interface uses the 1's broadcast address (1) or the 0's broadcast
+   * address (0).
+   */
+  bcast = getInterfaceBCastAddrByName(ifName);
+  ipAddrRow->dwBCastAddr = (bcast & ipAddrRow->dwMask) ? 1 : 0;
+  /* FIXME: hardcoded reasm size, not sure where to get it */
+  ipAddrRow->dwReasmSize = 65535;
+  ipAddrRow->unused1 = 0;
+  ipAddrRow->wType = 0;
+  return ret;
+}
+
+#ifdef HAVE_IFADDRS_H
+
+/* Counts the IPv4 addresses in the system using the return value from
+ * getifaddrs, returning the count.
+ */
+static DWORD countIPv4Addresses(struct ifaddrs *ifa)
+{
+  DWORD numAddresses = 0;
+
+  for (; ifa; ifa = ifa->ifa_next)
+    if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_INET)
+      numAddresses++;
+  return numAddresses;
+}
+
+DWORD getNumIPAddresses(void)
+{
+  DWORD numAddresses = 0;
+  struct ifaddrs *ifa;
+
+  if (!getifaddrs(&ifa))
+  {
+    numAddresses = countIPv4Addresses(ifa);
+    freeifaddrs(ifa);
+  }
+  return numAddresses;
+}
+
+DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
+{
+  DWORD ret;
+
+  if (!ppIpAddrTable)
+    ret = ERROR_INVALID_PARAMETER;
+  else
+  {
+    struct ifaddrs *ifa;
+
+    if (!getifaddrs(&ifa))
+    {
+      DWORD size = sizeof(MIB_IPADDRTABLE);
+      DWORD numAddresses = countIPv4Addresses(ifa);
+
+      if (numAddresses > 1)
+        size += (numAddresses - 1) * sizeof(MIB_IPADDRROW);
+      *ppIpAddrTable = HeapAlloc(heap, flags, size);
+      if (*ppIpAddrTable)
+      {
+        DWORD i = 0;
+        struct ifaddrs *ifp;
+
+        ret = NO_ERROR;
+        (*ppIpAddrTable)->dwNumEntries = numAddresses;
+        for (ifp = ifa; !ret && ifp; ifp = ifp->ifa_next)
+        {
+          if (!ifp->ifa_addr || ifp->ifa_addr->sa_family != AF_INET)
+            continue;
+
+          ret = getIPAddrRowByName(&(*ppIpAddrTable)->table[i], ifp->ifa_name,
+           ifp->ifa_addr);
+          i++;
+        }
+      }
+      else
+        ret = ERROR_OUTOFMEMORY;
+      freeifaddrs(ifa);
+    }
+    else
+      ret = ERROR_INVALID_PARAMETER;
+  }
+  return ret;
+}
+
+ULONG v6addressesFromIndex(IF_INDEX index, SOCKET_ADDRESS **addrs, ULONG *num_addrs)
+{
+  struct ifaddrs *ifa;
+  ULONG ret;
+
+  if (!getifaddrs(&ifa))
+  {
+    struct ifaddrs *p;
+    ULONG n;
+    char name[IFNAMSIZ];
+
+    getInterfaceNameByIndex(index, name);
+    for (p = ifa, n = 0; p; p = p->ifa_next)
+      if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET6 &&
+          !strcmp(name, p->ifa_name))
+        n++;
+    if (n)
+    {
+      *addrs = HeapAlloc(GetProcessHeap(), 0, n * (sizeof(SOCKET_ADDRESS) +
+                         sizeof(struct WS_sockaddr_in6)));
+      if (*addrs)
+      {
+        struct WS_sockaddr_in6 *next_addr = (struct WS_sockaddr_in6 *)(
+            (BYTE *)*addrs + n * sizeof(SOCKET_ADDRESS));
+
+        for (p = ifa, n = 0; p; p = p->ifa_next)
+        {
+          if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET6 &&
+              !strcmp(name, p->ifa_name))
+          {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)p->ifa_addr;
+
+            next_addr->sin6_family = WS_AF_INET6;
+            next_addr->sin6_port = addr->sin6_port;
+            next_addr->sin6_flowinfo = addr->sin6_flowinfo;
+            memcpy(&next_addr->sin6_addr, &addr->sin6_addr,
+             sizeof(next_addr->sin6_addr));
+            next_addr->sin6_scope_id = addr->sin6_scope_id;
+            (*addrs)[n].lpSockaddr = (LPSOCKADDR)next_addr;
+            (*addrs)[n].iSockaddrLength = sizeof(struct WS_sockaddr_in6);
+            next_addr++;
+            n++;
+          }
+        }
+        *num_addrs = n;
+        ret = ERROR_SUCCESS;
+      }
+      else
+        ret = ERROR_OUTOFMEMORY;
+    }
+    else
+    {
+      *addrs = NULL;
+      *num_addrs = 0;
+      ret = ERROR_SUCCESS;
+    }
+    freeifaddrs(ifa);
+  }
+  else
+    ret = ERROR_NO_DATA;
+  return ret;
+}
+
+#else
 
 /* Enumerates the IP addresses in the system using SIOCGIFCONF, returning
  * the count to you in *pcAddresses.  It also returns to you the struct ifconf
@@ -763,7 +910,7 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
         size += (numAddresses - 1) * sizeof(MIB_IPADDRROW);
       *ppIpAddrTable = HeapAlloc(heap, flags, size);
       if (*ppIpAddrTable) {
-        DWORD i = 0, bcast;
+        DWORD i = 0;
         caddr_t ifPtr;
 
         ret = NO_ERROR;
@@ -777,24 +924,8 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
           if (ifr->ifr_addr.sa_family != AF_INET)
              continue;
 
-          ret = getInterfaceIndexByName(ifr->ifr_name,
-           &(*ppIpAddrTable)->table[i].dwIndex);
-          memcpy(&(*ppIpAddrTable)->table[i].dwAddr, ifr->ifr_addr.sa_data + 2,
-           sizeof(DWORD));
-          (*ppIpAddrTable)->table[i].dwMask =
-           getInterfaceMaskByName(ifr->ifr_name);
-          /* the dwBCastAddr member isn't the broadcast address, it indicates
-           * whether the interface uses the 1's broadcast address (1) or the
-           * 0's broadcast address (0).
-           */
-          bcast = getInterfaceBCastAddrByName(ifr->ifr_name);
-          (*ppIpAddrTable)->table[i].dwBCastAddr =
-           (bcast & (*ppIpAddrTable)->table[i].dwMask) ? 1 : 0;
-          /* FIXME: hardcoded reasm size, not sure where to get it */
-          (*ppIpAddrTable)->table[i].dwReasmSize = 65535;
-
-          (*ppIpAddrTable)->table[i].unused1 = 0;
-          (*ppIpAddrTable)->table[i].wType = 0;
+          ret = getIPAddrRowByName(&(*ppIpAddrTable)->table[i], ifr->ifr_name,
+           &ifr->ifr_addr);
           i++;
         }
       }
@@ -806,76 +937,13 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags)
   return ret;
 }
 
-#ifdef HAVE_IFADDRS_H
-ULONG v6addressesFromIndex(DWORD index, SOCKET_ADDRESS **addrs, ULONG *num_addrs)
-{
-  struct ifaddrs *ifa;
-  ULONG ret;
-
-  if (!getifaddrs(&ifa))
-  {
-    struct ifaddrs *p;
-    ULONG n;
-    char name[IFNAMSIZ];
-
-    getInterfaceNameByIndex(index, name);
-    for (p = ifa, n = 0; p; p = p->ifa_next)
-      if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET6 &&
-          !strcmp(name, p->ifa_name))
-        n++;
-    if (n)
-    {
-      *addrs = HeapAlloc(GetProcessHeap(), 0, n * (sizeof(SOCKET_ADDRESS) +
-                         sizeof(struct WS_sockaddr_in6)));
-      if (*addrs)
-      {
-        struct WS_sockaddr_in6 *next_addr = (struct WS_sockaddr_in6 *)(
-            (BYTE *)*addrs + n * sizeof(SOCKET_ADDRESS));
-
-        for (p = ifa, n = 0; p; p = p->ifa_next)
-        {
-          if (p->ifa_addr && p->ifa_addr->sa_family == AF_INET6 &&
-              !strcmp(name, p->ifa_name))
-          {
-            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)p->ifa_addr;
-
-            next_addr->sin6_family = WS_AF_INET6;
-            next_addr->sin6_port = addr->sin6_port;
-            next_addr->sin6_flowinfo = addr->sin6_flowinfo;
-            memcpy(&next_addr->sin6_addr, &addr->sin6_addr,
-             sizeof(next_addr->sin6_addr));
-            next_addr->sin6_scope_id = addr->sin6_scope_id;
-            (*addrs)[n].lpSockaddr = (LPSOCKADDR)next_addr;
-            (*addrs)[n].iSockaddrLength = sizeof(struct WS_sockaddr_in6);
-            next_addr++;
-            n++;
-          }
-        }
-        *num_addrs = n;
-        ret = ERROR_SUCCESS;
-      }
-      else
-        ret = ERROR_OUTOFMEMORY;
-    }
-    else
-    {
-      *addrs = NULL;
-      *num_addrs = 0;
-      ret = ERROR_SUCCESS;
-    }
-    freeifaddrs(ifa);
-  }
-  else
-    ret = ERROR_NO_DATA;
-  return ret;
-}
-#else
-ULONG v6addressesFromIndex(DWORD index, SOCKET_ADDRESS **addrs, ULONG *num_addrs)
+ULONG v6addressesFromIndex(IF_INDEX index, SOCKET_ADDRESS **addrs, ULONG *num_addrs)
 {
   *addrs = NULL;
   *num_addrs = 0;
   return ERROR_SUCCESS;
 }
+
 #endif
 
 char *toIPAddressString(unsigned int addr, char string[16])

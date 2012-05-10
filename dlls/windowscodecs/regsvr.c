@@ -99,39 +99,39 @@ static HRESULT unregister_converters(struct regsvr_converter const *list);
 /***********************************************************************
  *		static string constants
  */
-static WCHAR const clsid_keyname[6] = {
+static const WCHAR clsid_keyname[] = {
     'C', 'L', 'S', 'I', 'D', 0 };
-static WCHAR const curver_keyname[7] = {
+static const WCHAR curver_keyname[] = {
     'C', 'u', 'r', 'V', 'e', 'r', 0 };
-static WCHAR const ips_keyname[13] = {
+static const WCHAR ips_keyname[] = {
     'I', 'n', 'P', 'r', 'o', 'c', 'S', 'e', 'r', 'v', 'e', 'r',
     0 };
-static WCHAR const ips32_keyname[15] = {
+static const WCHAR ips32_keyname[] = {
     'I', 'n', 'P', 'r', 'o', 'c', 'S', 'e', 'r', 'v', 'e', 'r',
     '3', '2', 0 };
-static WCHAR const progid_keyname[7] = {
+static const WCHAR progid_keyname[] = {
     'P', 'r', 'o', 'g', 'I', 'D', 0 };
-static WCHAR const viprogid_keyname[25] = {
+static const WCHAR viprogid_keyname[] = {
     'V', 'e', 'r', 's', 'i', 'o', 'n', 'I', 'n', 'd', 'e', 'p',
     'e', 'n', 'd', 'e', 'n', 't', 'P', 'r', 'o', 'g', 'I', 'D',
     0 };
-static char const tmodel_valuename[] = "ThreadingModel";
-static char const author_valuename[] = "Author";
-static char const friendlyname_valuename[] = "FriendlyName";
-static WCHAR const vendor_valuename[] = {'V','e','n','d','o','r',0};
-static char const version_valuename[] = "Version";
-static char const mimetypes_valuename[] = "MimeTypes";
-static char const extensions_valuename[] = "FileExtensions";
-static WCHAR const formats_keyname[] = {'F','o','r','m','a','t','s',0};
-static WCHAR const patterns_keyname[] = {'P','a','t','t','e','r','n','s',0};
-static WCHAR const instance_keyname[] = {'I','n','s','t','a','n','c','e',0};
-static WCHAR const clsid_valuename[] = {'C','L','S','I','D',0};
-static char const length_valuename[] = "Length";
-static char const position_valuename[] = "Position";
-static char const pattern_valuename[] = "Pattern";
-static char const mask_valuename[] = "Mask";
-static char const endofstream_valuename[] = "EndOfStream";
-static WCHAR const pixelformats_keyname[] = {'P','i','x','e','l','F','o','r','m','a','t','s',0};
+static const char tmodel_valuename[] = "ThreadingModel";
+static const char author_valuename[] = "Author";
+static const char friendlyname_valuename[] = "FriendlyName";
+static const WCHAR vendor_valuename[] = {'V','e','n','d','o','r',0};
+static const char version_valuename[] = "Version";
+static const char mimetypes_valuename[] = "MimeTypes";
+static const char extensions_valuename[] = "FileExtensions";
+static const WCHAR formats_keyname[] = {'F','o','r','m','a','t','s',0};
+static const WCHAR patterns_keyname[] = {'P','a','t','t','e','r','n','s',0};
+static const WCHAR instance_keyname[] = {'I','n','s','t','a','n','c','e',0};
+static const WCHAR clsid_valuename[] = {'C','L','S','I','D',0};
+static const char length_valuename[] = "Length";
+static const char position_valuename[] = "Position";
+static const char pattern_valuename[] = "Pattern";
+static const char mask_valuename[] = "Mask";
+static const char endofstream_valuename[] = "EndOfStream";
+static const WCHAR pixelformats_keyname[] = {'P','i','x','e','l','F','o','r','m','a','t','s',0};
 
 /***********************************************************************
  *		register_decoders
@@ -720,7 +720,7 @@ static struct decoder_pattern const ico_patterns[] = {
     {0}
 };
 
-static const BYTE jpeg_magic[] = {0xff, 0xd8, 0xff, 0xe0};
+static const BYTE jpeg_magic[] = {0xff, 0xd8};
 
 static GUID const * const jpeg_formats[] = {
     &GUID_WICPixelFormat24bppBGR,
@@ -730,7 +730,7 @@ static GUID const * const jpeg_formats[] = {
 };
 
 static struct decoder_pattern const jpeg_patterns[] = {
-    {4,0,jpeg_magic,mask_all,0},
+    {2,0,jpeg_magic,mask_all,0},
     {0}
 };
 
@@ -761,12 +761,13 @@ static struct decoder_pattern const png_patterns[] = {
 static const BYTE tiff_magic_le[] = {0x49,0x49,42,0};
 static const BYTE tiff_magic_be[] = {0x4d,0x4d,0,42};
 
-static GUID const * const tiff_formats[] = {
+static GUID const * const tiff_decode_formats[] = {
     &GUID_WICPixelFormatBlackWhite,
     &GUID_WICPixelFormat4bppGray,
     &GUID_WICPixelFormat8bppGray,
     &GUID_WICPixelFormat4bppIndexed,
     &GUID_WICPixelFormat8bppIndexed,
+    &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat32bppBGR,
     &GUID_WICPixelFormat32bppBGRA,
     &GUID_WICPixelFormat32bppPBGRA,
@@ -870,7 +871,7 @@ static struct regsvr_decoder const decoder_list[] = {
 	&GUID_VendorMicrosoft,
 	"image/tiff",
 	".tif;.tiff",
-	tiff_formats,
+	tiff_decode_formats,
 	tiff_patterns
     },
     {   &CLSID_WineTgaDecoder,
@@ -908,6 +909,19 @@ static GUID const * const png_encode_formats[] = {
     NULL
 };
 
+static GUID const * const tiff_encode_formats[] = {
+    &GUID_WICPixelFormatBlackWhite,
+    &GUID_WICPixelFormat4bppGray,
+    &GUID_WICPixelFormat8bppGray,
+    &GUID_WICPixelFormat24bppBGR,
+    &GUID_WICPixelFormat32bppBGRA,
+    &GUID_WICPixelFormat32bppPBGRA,
+    &GUID_WICPixelFormat48bppRGB,
+    &GUID_WICPixelFormat64bppRGBA,
+    &GUID_WICPixelFormat64bppPRGBA,
+    NULL
+};
+
 static GUID const * const icns_encode_formats[] = {
     &GUID_WICPixelFormat32bppBGRA,
     NULL
@@ -931,6 +945,15 @@ static struct regsvr_encoder const encoder_list[] = {
 	"image/png",
 	".png",
 	png_encode_formats
+    },
+    {   &CLSID_WICTiffEncoder,
+	"The Wine Project",
+	"TIFF Encoder",
+	"1.0.0.0",
+	&GUID_VendorMicrosoft,
+	"image/tiff",
+	".tif;.tiff",
+	tiff_encode_formats
     },
     {   &CLSID_WICIcnsEncoder,
 	"The Wine Project",
@@ -960,6 +983,7 @@ static GUID const * const converter_formats[] = {
     &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat32bppBGR,
     &GUID_WICPixelFormat32bppBGRA,
+    &GUID_WICPixelFormat32bppPBGRA,
     &GUID_WICPixelFormat48bppRGB,
     &GUID_WICPixelFormat64bppRGBA,
     &GUID_WICPixelFormat32bppCMYK,

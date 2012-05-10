@@ -23,6 +23,7 @@
 #include "wine/debug.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 
@@ -376,6 +377,7 @@ static LPVOID dns_strcpyX( LPCVOID src, DNS_CHARSET in, DNS_CHARSET out )
             WARN( "unhandled target charset: %d\n", out );
             break;
         }
+        break;
     }
     case DnsCharSetUtf8:
         switch (out)
@@ -387,6 +389,7 @@ static LPVOID dns_strcpyX( LPCVOID src, DNS_CHARSET in, DNS_CHARSET out )
             WARN( "unhandled target charset: %d\n", out );
             break;
         }
+        break;
     case DnsCharSetAnsi:
         switch (out)
         {
@@ -397,6 +400,7 @@ static LPVOID dns_strcpyX( LPCVOID src, DNS_CHARSET in, DNS_CHARSET out )
             WARN( "unhandled target charset: %d\n", out );
             break;
         }
+        break;
     default:
         WARN( "unhandled source charset: %d\n", in );
         break;
@@ -634,6 +638,15 @@ VOID WINAPI DnsRecordListFree( PDNS_RECORD list, DNS_FREE_TYPE type )
         WARN( "unknown free type: %d\n", type );
         break;
     }
+}
+
+/******************************************************************************
+ * DnsFree                     [DNSAPI.@]
+ *
+ */
+void WINAPI DnsFree( PVOID data, DNS_FREE_TYPE type )
+{
+    DnsRecordListFree( data, type );
 }
 
 /******************************************************************************

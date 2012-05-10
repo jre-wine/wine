@@ -113,7 +113,6 @@ static HDDEDATA	CALLBACK WDML_InvokeCallback16(DWORD pfn16, UINT uType, UINT uFm
             map3216_conv_context(&cc16, (const CONVCONTEXT*)dwData1);
             d1 = MapLS(&cc16);
         }
-        else
         break;
     default:
         d1 = dwData1;
@@ -155,7 +154,7 @@ static HDDEDATA	CALLBACK WDML_InvokeCallback16(DWORD pfn16, UINT uType, UINT uFm
  * a 32bit callback. This thunk also stores (in the code!) the 16bit
  * address of the 16bit callback, and passes it back to
  * WDML_InvokeCallback16.
- * The code below is mainly to create the thunks themselved
+ * The code below is mainly to create the thunks themselves
  */
 #include "pshpack1.h"
 static struct ddeml_thunk

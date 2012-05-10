@@ -1150,7 +1150,7 @@ static void HTMLInputElement_destructor(HTMLDOMNode *iface)
     HTMLElement_destructor(&This->element.node);
 }
 
-static HRESULT HTMLInputElementImpl_call_event(HTMLDOMNode *iface, eventid_t eid, BOOL *handled)
+static HRESULT HTMLInputElementImpl_fire_event(HTMLDOMNode *iface, eventid_t eid, BOOL *handled)
 {
     HTMLInputElement *This = impl_from_HTMLDOMNode(iface);
 
@@ -1185,8 +1185,10 @@ static const NodeImplVtbl HTMLInputElementImplVtbl = {
     HTMLInputElement_QI,
     HTMLInputElement_destructor,
     HTMLElement_clone,
+    HTMLElement_get_attr_col,
     NULL,
-    HTMLInputElementImpl_call_event,
+    HTMLInputElementImpl_fire_event,
+    NULL,
     HTMLInputElementImpl_put_disabled,
     HTMLInputElementImpl_get_disabled,
 };

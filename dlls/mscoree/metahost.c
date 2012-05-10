@@ -32,9 +32,12 @@
 #include "ole2.h"
 
 #include "corerror.h"
+#include "cor.h"
 #include "mscoree.h"
-#include "fusion.h"
+#include "corhdr.h"
+#include "cordebug.h"
 #include "metahost.h"
+#include "fusion.h"
 #include "wine/list.h"
 #include "mscoree_private.h"
 
@@ -46,14 +49,14 @@ static const WCHAR net_11_subdir[] = {'1','.','0',0};
 static const WCHAR net_20_subdir[] = {'2','.','0',0};
 static const WCHAR net_40_subdir[] = {'4','.','0',0};
 
-const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl;
+static const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl;
 
 #define NUM_RUNTIMES 3
 
 static struct CLRRuntimeInfo runtimes[NUM_RUNTIMES] = {
-    {&CLRRuntimeInfoVtbl, net_11_subdir, 1, 1, 4322, 0},
-    {&CLRRuntimeInfoVtbl, net_20_subdir, 2, 0, 50727, 0},
-    {&CLRRuntimeInfoVtbl, net_40_subdir, 4, 0, 30319, 0}
+    {{&CLRRuntimeInfoVtbl}, net_11_subdir, 1, 1, 4322, 0},
+    {{&CLRRuntimeInfoVtbl}, net_20_subdir, 2, 0, 50727, 0},
+    {{&CLRRuntimeInfoVtbl}, net_40_subdir, 4, 0, 30319, 0}
 };
 
 static int runtimes_initialized;
@@ -97,6 +100,16 @@ static void CDECL do_nothing(void)
 {
 }
 
+static void missing_runtime_message(const CLRRuntimeInfo *This)
+{
+    if (This->major == 1)
+        MESSAGE("wine: Install Mono 2.6 for Windows to run .NET 1.1 applications.\n");
+    else if (This->major == 2)
+        MESSAGE("wine: Install Mono for Windows to run .NET 2.0 applications.\n");
+    else if (This->major == 4)
+        MESSAGE("wine: Install Mono 2.8 or greater for Windows to run .NET 4.0 applications.\n");
+}
+
 static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
 {
     static const WCHAR bin[] = {'\\','b','i','n',0};
@@ -109,17 +122,17 @@ static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
     int trace_size;
     char trace_setting[256];
 
-    if (This->mono_abi_version == -1)
-        MESSAGE("wine: Install the Windows version of Mono to run .NET executables\n");
-
     if (This->mono_abi_version <= 0 || This->mono_abi_version > NUM_ABI_VERSIONS)
+    {
+        missing_runtime_message(This);
         return E_FAIL;
+    }
 
     *result = &loaded_monos[This->mono_abi_version-1];
 
     if ((*result)->is_shutdown)
     {
-        ERR("Cannot load Mono after it has been shut down.");
+        ERR("Cannot load Mono after it has been shut down.\n");
         *result = NULL;
         return E_FAIL;
     }
@@ -172,6 +185,7 @@ static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
         LOAD_MONO_FUNCTION(mono_runtime_quit);
         LOAD_MONO_FUNCTION(mono_set_dirs);
         LOAD_MONO_FUNCTION(mono_stringify_assembly_name);
+        LOAD_MONO_FUNCTION(mono_string_new);
 
         /* GLib imports obsoleted by the 2.0 ABI */
         if (This->mono_abi_version == 1)
@@ -301,6 +315,11 @@ void expect_no_runtimes(void)
     }
 }
 
+static inline CLRRuntimeInfo *impl_from_ICLRRuntimeInfo(ICLRRuntimeInfo *iface)
+{
+    return CONTAINING_RECORD(iface, CLRRuntimeInfo, ICLRRuntimeInfo_iface);
+}
+
 static HRESULT WINAPI CLRRuntimeInfo_QueryInterface(ICLRRuntimeInfo* iface,
         REFIID riid,
         void **ppvObject)
@@ -336,7 +355,7 @@ static ULONG WINAPI CLRRuntimeInfo_Release(ICLRRuntimeInfo* iface)
 static HRESULT WINAPI CLRRuntimeInfo_GetVersionString(ICLRRuntimeInfo* iface,
     LPWSTR pwzBuffer, DWORD *pcchBuffer)
 {
-    struct CLRRuntimeInfo *This = (struct CLRRuntimeInfo*)iface;
+    struct CLRRuntimeInfo *This = impl_from_ICLRRuntimeInfo(iface);
     DWORD buffer_size = *pcchBuffer;
     HRESULT hr = S_OK;
     char version[11];
@@ -465,7 +484,7 @@ static HRESULT WINAPI CLRRuntimeInfo_GetProcAddress(ICLRRuntimeInfo* iface,
 static HRESULT WINAPI CLRRuntimeInfo_GetInterface(ICLRRuntimeInfo* iface,
     REFCLSID rclsid, REFIID riid, LPVOID *ppUnk)
 {
-    struct CLRRuntimeInfo *This = (struct CLRRuntimeInfo*)iface;
+    struct CLRRuntimeInfo *This = impl_from_ICLRRuntimeInfo(iface);
     RuntimeHost *host;
     HRESULT hr;
 
@@ -518,7 +537,7 @@ static HRESULT WINAPI CLRRuntimeInfo_IsStarted(ICLRRuntimeInfo* iface,
     return E_NOTIMPL;
 }
 
-const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl = {
+static const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl = {
     CLRRuntimeInfo_QueryInterface,
     CLRRuntimeInfo_AddRef,
     CLRRuntimeInfo_Release,
@@ -538,9 +557,9 @@ const struct ICLRRuntimeInfoVtbl CLRRuntimeInfoVtbl = {
 
 HRESULT ICLRRuntimeInfo_GetRuntimeHost(ICLRRuntimeInfo *iface, RuntimeHost **result)
 {
-    struct CLRRuntimeInfo *This = (struct CLRRuntimeInfo*)iface;
+    struct CLRRuntimeInfo *This = impl_from_ICLRRuntimeInfo(iface);
 
-    assert(This->ICLRRuntimeInfo_vtbl == &CLRRuntimeInfoVtbl);
+    assert(This->ICLRRuntimeInfo_iface.lpVtbl == &CLRRuntimeInfoVtbl);
 
     return CLRRuntimeInfo_GetRuntimeHost(This, result);
 }
@@ -752,15 +771,19 @@ end:
 
 struct InstalledRuntimeEnum
 {
-    const struct IEnumUnknownVtbl *Vtbl;
+    IEnumUnknown IEnumUnknown_iface;
     LONG ref;
     ULONG pos;
 };
 
-const struct IEnumUnknownVtbl InstalledRuntimeEnum_Vtbl;
+static const struct IEnumUnknownVtbl InstalledRuntimeEnum_Vtbl;
 
-static HRESULT WINAPI InstalledRuntimeEnum_QueryInterface(IEnumUnknown* iface,
-        REFIID riid,
+static inline struct InstalledRuntimeEnum *impl_from_IEnumUnknown(IEnumUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, struct InstalledRuntimeEnum, IEnumUnknown_iface);
+}
+
+static HRESULT WINAPI InstalledRuntimeEnum_QueryInterface(IEnumUnknown* iface, REFIID riid,
         void **ppvObject)
 {
     TRACE("%p %s %p\n", iface, debugstr_guid(riid), ppvObject);
@@ -783,7 +806,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_QueryInterface(IEnumUnknown* iface,
 
 static ULONG WINAPI InstalledRuntimeEnum_AddRef(IEnumUnknown* iface)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) refcount=%u\n", iface, ref);
@@ -793,7 +816,7 @@ static ULONG WINAPI InstalledRuntimeEnum_AddRef(IEnumUnknown* iface)
 
 static ULONG WINAPI InstalledRuntimeEnum_Release(IEnumUnknown* iface)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) refcount=%u\n", iface, ref);
@@ -809,7 +832,7 @@ static ULONG WINAPI InstalledRuntimeEnum_Release(IEnumUnknown* iface)
 static HRESULT WINAPI InstalledRuntimeEnum_Next(IEnumUnknown *iface, ULONG celt,
     IUnknown **rgelt, ULONG *pceltFetched)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     int num_fetched = 0;
     HRESULT hr=S_OK;
     IUnknown *item;
@@ -825,7 +848,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Next(IEnumUnknown *iface, ULONG celt,
         }
         if (runtimes[This->pos].mono_abi_version)
         {
-            item = (IUnknown*)&runtimes[This->pos];
+            item = (IUnknown*)&runtimes[This->pos].ICLRRuntimeInfo_iface;
             IUnknown_AddRef(item);
             rgelt[num_fetched] = item;
             num_fetched++;
@@ -841,7 +864,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Next(IEnumUnknown *iface, ULONG celt,
 
 static HRESULT WINAPI InstalledRuntimeEnum_Skip(IEnumUnknown *iface, ULONG celt)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     int num_fetched = 0;
     HRESULT hr=S_OK;
 
@@ -866,7 +889,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Skip(IEnumUnknown *iface, ULONG celt)
 
 static HRESULT WINAPI InstalledRuntimeEnum_Reset(IEnumUnknown *iface)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
 
     TRACE("(%p)\n", iface);
 
@@ -877,7 +900,7 @@ static HRESULT WINAPI InstalledRuntimeEnum_Reset(IEnumUnknown *iface)
 
 static HRESULT WINAPI InstalledRuntimeEnum_Clone(IEnumUnknown *iface, IEnumUnknown **ppenum)
 {
-    struct InstalledRuntimeEnum *This = (struct InstalledRuntimeEnum*)iface;
+    struct InstalledRuntimeEnum *This = impl_from_IEnumUnknown(iface);
     struct InstalledRuntimeEnum *new_enum;
 
     TRACE("(%p)\n", iface);
@@ -886,16 +909,16 @@ static HRESULT WINAPI InstalledRuntimeEnum_Clone(IEnumUnknown *iface, IEnumUnkno
     if (!new_enum)
         return E_OUTOFMEMORY;
 
-    new_enum->Vtbl = &InstalledRuntimeEnum_Vtbl;
+    new_enum->IEnumUnknown_iface.lpVtbl = &InstalledRuntimeEnum_Vtbl;
     new_enum->ref = 1;
     new_enum->pos = This->pos;
 
-    *ppenum = (IEnumUnknown*)new_enum;
+    *ppenum = &new_enum->IEnumUnknown_iface;
 
     return S_OK;
 }
 
-const struct IEnumUnknownVtbl InstalledRuntimeEnum_Vtbl = {
+static const struct IEnumUnknownVtbl InstalledRuntimeEnum_Vtbl = {
     InstalledRuntimeEnum_QueryInterface,
     InstalledRuntimeEnum_AddRef,
     InstalledRuntimeEnum_Release,
@@ -907,10 +930,10 @@ const struct IEnumUnknownVtbl InstalledRuntimeEnum_Vtbl = {
 
 struct CLRMetaHost
 {
-    const struct ICLRMetaHostVtbl *CLRMetaHost_vtbl;
+    ICLRMetaHost ICLRMetaHost_iface;
 };
 
-static const struct CLRMetaHost GlobalCLRMetaHost;
+static struct CLRMetaHost GlobalCLRMetaHost;
 
 static HRESULT WINAPI CLRMetaHost_QueryInterface(ICLRMetaHost* iface,
         REFIID riid,
@@ -983,7 +1006,7 @@ static BOOL parse_runtime_version(LPCWSTR version, DWORD *major, DWORD *minor, D
         return FALSE;
 }
 
-static HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
+HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
     LPCWSTR pwzVersion, REFIID iid, LPVOID *ppRuntime)
 {
     int i;
@@ -1008,10 +1031,11 @@ static HRESULT WINAPI CLRMetaHost_GetRuntime(ICLRMetaHost* iface,
             runtimes[i].build == build)
         {
             if (runtimes[i].mono_abi_version)
-                return IUnknown_QueryInterface((IUnknown*)&runtimes[i], iid, ppRuntime);
+                return ICLRRuntimeInfo_QueryInterface(&runtimes[i].ICLRRuntimeInfo_iface, iid,
+                        ppRuntime);
             else
             {
-                ERR("Mono is missing %s runtime\n", debugstr_w(pwzVersion));
+                missing_runtime_message(&runtimes[i]);
                 return CLR_E_SHIM_RUNTIME;
             }
         }
@@ -1069,11 +1093,11 @@ static HRESULT WINAPI CLRMetaHost_EnumerateInstalledRuntimes(ICLRMetaHost* iface
     if (!new_enum)
         return E_OUTOFMEMORY;
 
-    new_enum->Vtbl = &InstalledRuntimeEnum_Vtbl;
+    new_enum->IEnumUnknown_iface.lpVtbl = &InstalledRuntimeEnum_Vtbl;
     new_enum->ref = 1;
     new_enum->pos = 0;
 
-    *ppEnumerator = (IEnumUnknown*)new_enum;
+    *ppEnumerator = &new_enum->IEnumUnknown_iface;
 
     return S_OK;
 }
@@ -1123,13 +1147,13 @@ static const struct ICLRMetaHostVtbl CLRMetaHost_vtbl =
     CLRMetaHost_ExitProcess
 };
 
-static const struct CLRMetaHost GlobalCLRMetaHost = {
-    &CLRMetaHost_vtbl
+static struct CLRMetaHost GlobalCLRMetaHost = {
+    { &CLRMetaHost_vtbl }
 };
 
-extern HRESULT CLRMetaHost_CreateInstance(REFIID riid, void **ppobj)
+HRESULT CLRMetaHost_CreateInstance(REFIID riid, void **ppobj)
 {
-    return ICLRMetaHost_QueryInterface((ICLRMetaHost*)&GlobalCLRMetaHost, riid, ppobj);
+    return ICLRMetaHost_QueryInterface(&GlobalCLRMetaHost.ICLRMetaHost_iface, riid, ppobj);
 }
 
 static MonoAssembly* mono_assembly_search_hook_fn(MonoAssemblyName *aname, char **assemblies_path, void *user_data)
@@ -1147,7 +1171,7 @@ static MonoAssembly* mono_assembly_search_hook_fn(MonoAssemblyName *aname, char 
     MonoImageOpenStatus stat;
     static WCHAR fusiondll[] = {'f','u','s','i','o','n',0};
     HMODULE hfusion=NULL;
-    static HRESULT WINAPI (*pCreateAssemblyCache)(IAssemblyCache**,DWORD);
+    static HRESULT (WINAPI *pCreateAssemblyCache)(IAssemblyCache**,DWORD);
 
     stringname = mono->mono_stringify_assembly_name(aname);
 
@@ -1301,19 +1325,17 @@ HRESULT get_runtime_info(LPCWSTR exefile, LPCWSTR version, LPCWSTR config_file,
         while (i--)
         {
             if (runtimes[i].mono_abi_version)
-                return IUnknown_QueryInterface((IUnknown*)&runtimes[i],
-                    &IID_ICLRRuntimeInfo, (void**)result);
+                return ICLRRuntimeInfo_QueryInterface(&runtimes[i].ICLRRuntimeInfo_iface,
+                        &IID_ICLRRuntimeInfo, (void **)result);
         }
 
-        ERR("No %s.NET runtime installed\n", legacy ? "legacy " : "");
+        if (legacy)
+            missing_runtime_message(&runtimes[1]);
+        else
+            missing_runtime_message(&runtimes[NUM_RUNTIMES-1]);
 
         return CLR_E_SHIM_RUNTIME;
     }
 
     return CLR_E_SHIM_RUNTIME;
-}
-
-HRESULT force_get_runtime_info(ICLRRuntimeInfo **result)
-{
-    return IUnknown_QueryInterface((IUnknown*)&runtimes[0], &IID_ICLRRuntimeInfo, (void**)result);
 }

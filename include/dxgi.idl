@@ -16,7 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-import "dxgitype.idl";
+import "oaidl.idl";
+import "ocidl.idl";
+import "dxgitype.h";
 
 const UINT _FACDXGI = 0x87a;
 
@@ -58,6 +60,9 @@ const DXGI_USAGE DXGI_USAGE_RENDER_TARGET_OUTPUT    = 0x20L;
 const DXGI_USAGE DXGI_USAGE_BACK_BUFFER             = 0x40L;
 const DXGI_USAGE DXGI_USAGE_SHARED                  = 0x80L;
 const DXGI_USAGE DXGI_USAGE_READ_ONLY               = 0x100L;
+
+const UINT DXGI_ENUM_MODES_INTERLACED               = 1;
+const UINT DXGI_ENUM_MODES_SCALING                  = 2;
 
 typedef enum DXGI_SWAP_EFFECT {
     DXGI_SWAP_EFFECT_DISCARD    = 0,
@@ -109,6 +114,12 @@ typedef struct DXGI_ADAPTER_DESC {
     SIZE_T SharedSystemMemory;
     LUID AdapterLuid;
 } DXGI_ADAPTER_DESC;
+
+typedef enum DXGI_SWAP_CHAIN_FLAG {
+    DXGI_SWAP_CHAIN_FLAG_NONPREROTATED      = 1,
+    DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH  = 2,
+    DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE     = 4
+} DXGI_SWAP_CHAIN_FLAG;
 
 typedef struct DXGI_SWAP_CHAIN_DESC {
     DXGI_MODE_DESC BufferDesc;
@@ -163,6 +174,20 @@ interface IDXGIDeviceSubObject : IDXGIObject
         [in] REFIID riid,
         [out] void **device
     );
+}
+
+[
+    object,
+    uuid(035f3ab4-482e-4e50-b41f-8a7f8bd8960b),
+    local,
+    pointer_default(unique)
+]
+interface IDXGIResource : IDXGIDeviceSubObject
+{
+    HRESULT GetSharedHandle([out] HANDLE *pSharedHandle);
+    HRESULT GetUsage([out] DXGI_USAGE *pUsage);
+    HRESULT SetEvictionPriority([in] UINT EvictionPriority);
+    HRESULT GetEvictionPriority([out, retval] UINT *pEvictionPriority);
 }
 
 [
@@ -300,6 +325,11 @@ interface IDXGISwapChain : IDXGIDeviceSubObject
     );
 }
 
+cpp_quote("#define DXGI_MWA_NO_WINDOW_CHANGES  0x1")
+cpp_quote("#define DXGI_MWA_NO_ALT_ENTER       0x2")
+cpp_quote("#define DXGI_MWA_NO_PRINT_SCREEN    0x4")
+cpp_quote("#define DXGI_MWA_VALID              0x7")
+
 [
     object,
     local,
@@ -359,4 +389,46 @@ interface IDXGIDevice : IDXGIObject
     HRESULT GetGPUThreadPriority(
         [out] INT *priority
     );
+}
+
+typedef enum DXGI_ADAPTER_FLAG {
+    DXGI_ADAPTER_FLAG_NONE         = 0,
+    DXGI_ADAPTER_FLAG_REMOTE       = 1,
+    DXGI_ADAPTER_FLAG_FORCE_DWORD  = 0xFFFFFFFF
+} DXGI_ADAPTER_FLAG;
+
+typedef struct DXGI_ADAPTER_DESC1 {
+    WCHAR  Description[128];
+    UINT   VendorId;
+    UINT   DeviceId;
+    UINT   SubSysId;
+    UINT   Revision;
+    SIZE_T DedicatedVideoMemory;
+    SIZE_T DedicatedSystemMemory;
+    SIZE_T SharedSystemMemory;
+    LUID   AdapterLuid;
+    UINT   Flags;
+} DXGI_ADAPTER_DESC1;
+
+[
+    object,
+    uuid(29038f61-3839-4626-91fd-086879011a05),
+    local,
+    pointer_default(unique)
+]
+interface IDXGIAdapter1 : IDXGIAdapter
+{
+    HRESULT GetDesc1([out] DXGI_ADAPTER_DESC1 *pDesc);
+}
+
+[
+    object,
+    uuid(770aae78-f26f-4dba-a829-253c83d1b387),
+    local,
+    pointer_default(unique)
+ ]
+interface IDXGIFactory1 : IDXGIFactory
+{
+    HRESULT EnumAdapters1([in] UINT Adapter, [out] IDXGIAdapter1 **ppAdapter);
+    BOOL IsCurrent();
 }

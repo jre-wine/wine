@@ -44,6 +44,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 typedef struct _domimpl
 {
+    DispatchEx dispex;
     IXMLDOMImplementation IXMLDOMImplementation_iface;
     LONG ref;
 } domimpl;
@@ -67,9 +68,13 @@ static HRESULT WINAPI dimimpl_QueryInterface(
     {
         *ppvObject = iface;
     }
+    else if (dispex_query_interface(&This->dispex, riid, ppvObject))
+    {
+        return *ppvObject ? S_OK : E_NOINTERFACE;
+    }
     else
     {
-        FIXME("Unsupported interface %s\n", debugstr_guid(riid));
+        TRACE("Unsupported interface %s\n", debugstr_guid(riid));
         *ppvObject = NULL;
         return E_NOINTERFACE;
     }
@@ -83,18 +88,21 @@ static ULONG WINAPI dimimpl_AddRef(
     IXMLDOMImplementation *iface )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-    return InterlockedIncrement( &This->ref );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref);
+    return ref;
 }
 
 static ULONG WINAPI dimimpl_Release(
     IXMLDOMImplementation *iface )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-    ULONG ref;
+    ULONG ref = InterlockedDecrement( &This->ref );
 
-    ref = InterlockedDecrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref);
     if ( ref == 0 )
     {
+        release_dispex(&This->dispex);
         heap_free( This );
     }
 
@@ -106,12 +114,7 @@ static HRESULT WINAPI dimimpl_GetTypeInfoCount(
     UINT* pctinfo )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-
-    TRACE("(%p)->(%p)\n", This, pctinfo);
-
-    *pctinfo = 1;
-
-    return S_OK;
+    return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI dimimpl_GetTypeInfo(
@@ -120,13 +123,8 @@ static HRESULT WINAPI dimimpl_GetTypeInfo(
     ITypeInfo** ppTInfo )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-    HRESULT hr;
-
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
-
-    hr = get_typeinfo(IXMLDOMImplementation_tid, ppTInfo);
-
-    return hr;
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface,
+        iTInfo, lcid, ppTInfo);
 }
 
 static HRESULT WINAPI dimimpl_GetIDsOfNames(
@@ -135,23 +133,8 @@ static HRESULT WINAPI dimimpl_GetIDsOfNames(
     UINT cNames, LCID lcid, DISPID* rgDispId )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
-          lcid, rgDispId);
-
-    if(!rgszNames || cNames == 0 || !rgDispId)
-        return E_INVALIDARG;
-
-    hr = get_typeinfo(IXMLDOMImplementation_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface,
+        riid, rgszNames, cNames, lcid, rgDispId);
 }
 
 static HRESULT WINAPI dimimpl_Invoke(
@@ -161,21 +144,8 @@ static HRESULT WINAPI dimimpl_Invoke(
     EXCEPINFO* pExcepInfo, UINT* puArgErr )
 {
     domimpl *This = impl_from_IXMLDOMImplementation( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
-          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-
-    hr = get_typeinfo(IXMLDOMImplementation_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLDOMImplementation_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface,
+        dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
 
 static HRESULT WINAPI dimimpl_hasFeature(IXMLDOMImplementation* This, BSTR feature, BSTR version, VARIANT_BOOL *hasFeature)
@@ -218,6 +188,18 @@ static const struct IXMLDOMImplementationVtbl dimimpl_vtbl =
     dimimpl_hasFeature
 };
 
+static const tid_t dimimpl_iface_tids[] = {
+    IXMLDOMImplementation_tid,
+    0
+};
+
+static dispex_static_data_t dimimpl_dispex = {
+    NULL,
+    IXMLDOMImplementation_tid,
+    NULL,
+    dimimpl_iface_tids
+};
+
 IUnknown* create_doc_Implementation(void)
 {
     domimpl *This;
@@ -228,6 +210,7 @@ IUnknown* create_doc_Implementation(void)
 
     This->IXMLDOMImplementation_iface.lpVtbl = &dimimpl_vtbl;
     This->ref = 1;
+    init_dispex(&This->dispex, (IUnknown*)&This->IXMLDOMImplementation_iface, &dimimpl_dispex);
 
     return (IUnknown*)&This->IXMLDOMImplementation_iface;
 }

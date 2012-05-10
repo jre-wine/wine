@@ -257,6 +257,7 @@
  688 stdcall SHPropStgReadMultiple(ptr long long ptr ptr)
  689 stdcall SHPropStgWriteMultiple(ptr ptr long ptr ptr long)
 
+ 701 stdcall CDefFolderMenu_Create2(ptr ptr long ptr ptr ptr long ptr ptr)
  704 stdcall -noname GUIDFromStringW(wstr ptr)
 
  714 stdcall @(ptr) SHELL32_714 # PathIsTemporaryW
@@ -324,6 +325,7 @@
 @ stub RealShellExecuteExW
 @ stub RealShellExecuteW
 @ stub RegenerateUserEnvironment
+@ stdcall SetCurrentProcessExplicitAppUserModelID(wstr)
 @ stdcall SHAddToRecentDocs (long ptr)
 @ stdcall SHAppBarMessage(long ptr)
 @ stdcall SHBindToParent(ptr ptr ptr ptr)
@@ -332,6 +334,7 @@
 @ stdcall SHBrowseForFolderW(ptr)
 @ stdcall SHChangeNotify (long long ptr ptr)
 @ stub SHChangeNotifySuspendResume
+@ stdcall SHCreateDefaultContextMenu(ptr ptr ptr)
 @ stdcall SHCreateDirectoryExA(long str ptr)
 @ stdcall SHCreateDirectoryExW(long wstr ptr)
 @ stdcall SHCreateItemFromIDList(ptr ptr ptr)
@@ -392,6 +395,7 @@
 @ stdcall SHIsFileAvailableOffline(wstr ptr)
 @ stdcall SHLoadInProc(long)
 @ stdcall SHLoadNonloadedIconOverlayIdentifiers()
+@ stdcall SHOpenFolderAndSelectItems(ptr long ptr long)
 @ stdcall SHParseDisplayName(wstr ptr ptr long ptr)
 @ stdcall SHPathPrepareForWriteA(long ptr str long)
 @ stdcall SHPathPrepareForWriteW(long ptr wstr long)

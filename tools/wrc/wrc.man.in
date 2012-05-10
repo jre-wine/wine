@@ -37,9 +37,9 @@ Set debug level to \fInn\fR. The value is a bitmask consisting of
 1=verbose, 2=dump internals, 4=resource parser trace, 8=preprocessor
 messages, 16=preprocessor scanner and 32=preprocessor parser trace.
 .TP
-.I \fB\-\-endianess\fR=\fIe\fR
+.I \fB\-\-endianness\fR=\fIe\fR
 Win32 only; set output byte\-ordering, where \fIe\fR is one of n[ative],
-l[ittle] or b[ig].  Only resources in source-form can be reorderd. Native
+l[ittle] or b[ig].  Only resources in source-form can be reordered. Native
 ordering depends on the system on which \fBwrc\fR was built. You can see
 the native ordering by typing \fIwrc \-h\fR.
 .TP
@@ -108,9 +108,9 @@ Enable pedantic warnings. Notably redefinition of #define statements can
 be discovered with this option.
 .TP
 .I \fB\-\-po-dir=\fIdir\fR
-Enable the generation of resource translations based on po files
+Enable the generation of resource translations based on mo files
 loaded from the specified directory. That directory must follow the
-gettext convention, in particular in must contain one .po file for
+gettext convention, in particular in must contain one .mo file for
 each language, and a LINGUAS file listing the available languages.
 .TP
 .I \fB\-r\fR
@@ -188,12 +188,12 @@ CHARACTERISTICS 876
 .B wrc
 was written by Bertho A. Stultiens and is a nearly complete rewrite of
 the first wine resource compiler (1994) by Martin von Loewis.
-Additional resource\-types were contributed Ulrich Czekalla and Albert
+Additional resource\-types were contributed by Ulrich Czekalla and Albert
 den Haan. Many cleanups by Dimitrie O. Paun in 2002-2003.
 Bugfixes have been contributed by many Wine developers.
 .SH BUGS
 \- The preprocessor recognizes variable argument macros, but does not
-expanded them correctly.
+expand them correctly.
 .br
 \- Error reporting should be more precise, as currently the column and
 line number reported are those of the next token. 

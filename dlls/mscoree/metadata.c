@@ -29,8 +29,10 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "ole2.h"
-
 #include "cor.h"
+#include "mscoree.h"
+#include "corhdr.h"
+#include "cordebug.h"
 #include "metahost.h"
 #include "wine/list.h"
 #include "mscoree_private.h"
@@ -169,7 +171,7 @@ static HRESULT WINAPI MetaDataDispenser_FindAssemblyModule(IMetaDataDispenserEx*
     return E_NOTIMPL;
 }
 
-const struct IMetaDataDispenserExVtbl MetaDataDispenserVtbl =
+static const struct IMetaDataDispenserExVtbl MetaDataDispenserVtbl =
 {
     MetaDataDispenser_QueryInterface,
     MetaDataDispenser_AddRef,

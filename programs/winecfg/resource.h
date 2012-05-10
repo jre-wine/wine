@@ -46,7 +46,6 @@
 #define IDS_LINKS_TO                    17
 #define IDS_WINECFG_TITLE_APP           18   /* App specific title */
 #define IDI_WINECFG                     100
-#define IDD_MAINDLG                     101
 #define IDI_LOGO                        102
 #define IDD_ABOUTCFG                    107
 #define IDD_APPCFG                      108
@@ -55,20 +54,11 @@
 #define IDD_DLLCFG                      111
 #define IDD_DRIVECFG                    112
 #define IDD_DESKTOP_INTEGRATION         115
-#define IDB_WINE_LOGO                   200
-#define IDC_TABABOUT                    1001
-#define IDC_APPLYBTN                    1002
 #define IDC_WINVER                      1012
-#define IDC_SYSCOLORS                   1017
-#define IDC_PRIVATEMAP                  1018
-#define IDC_PERFECTGRAPH                1019
-#define IDC_MANAGED                     1022
 #define IDC_DESKTOP_WIDTH               1023
 #define IDC_DESKTOP_HEIGHT              1024
 #define IDC_DESKTOP_SIZE                1025
 #define IDC_DESKTOP_BY                  1026
-#define IDC_XDGA                        1027
-#define IDC_XSHM                        1028
 
 /* dll editing  */
 #define IDC_RAD_BUILTIN                 1029
@@ -100,21 +90,7 @@
 #define IDC_BUTTON_ADD                  1043
 #define IDC_BUTTON_REMOVE               1044
 #define IDC_BUTTON_EDIT                 1045
-#define IDC_BUTTON7                     1046
 #define IDC_BUTTON_AUTODETECT           1046
-#define IDC_DRIVE_ADD                   1047
-#define IDC_DRIVE_REMOVE                1048
-#define IDC_DRIVE_EDIT                  1049
-#define IDC_DRIVE_EDIT_NAME             1050
-#define IDC_DRIVE_EDIT_LABEL            1051
-#define IDC_DRIVE_EDIT_TYPE             1052
-#define IDC_DRIVE_EDIT_FS               1053
-#define IDC_DRIVE_EDIT_PATH             1054
-#define IDC_DRIVE_EDIT_DEVICE           1055
-#define ID_DRIVE_OK                     1056
-#define ID_DRIVE_CANCEL                 1057
-#define ID_BUTTON_CANCEL                1058
-#define ID_BUTTON_OK                    1059
 #define IDC_EDIT_LABEL                  1060
 #define IDC_EDIT_PATH                   1061
 #define IDC_EDIT_SERIAL                 1062
@@ -131,8 +107,6 @@
 #define IDC_BUTTON_SHOW_HIDE_ADVANCED   1076
 #define IDC_STATIC_TYPE                 1077
 #define IDC_SHOW_DOT_FILES              1080
-
-#define IDC_DRIVE_LABEL                 1078
 
 #define IDS_DRIVE_UNKNOWN               8200
 #define IDS_DRIVE_FIXED                 8201
@@ -151,13 +125,7 @@
 /* graphics */
 #define IDC_ENABLE_MANAGED              1100
 #define IDC_ENABLE_DECORATED            1101
-#define IDC_DX_MOUSE_GRAB               1102
-#define IDC_USE_TAKE_FOCUS              1103
-#define IDC_DOUBLE_BUFFER               1104
-#define IDC_D3D_VSHADER_MODE            1105
-#define IDC_D3D_PSHADER_MODE            1106
-#define IDS_SHADER_MODE_HARDWARE        8100
-#define IDS_SHADER_MODE_NONE            8101
+#define IDC_FULLSCREEN_GRAB             1102
 
 #define IDC_RES_TRACKBAR                1107
 #define IDC_RES_DPIEDIT                 1108
@@ -169,40 +137,18 @@
 #define IDC_APP_REMOVEAPP               1202
 
 /* audio tab */
-#define IDC_AUDIO_CONFIGURE             1300
-#define IDC_AUDIO_TEST                  1301
-#define IDC_AUDIO_CONTROL_PANEL         1302
-#define IDC_DSOUND_HW_ACCEL             1303
-#define IDC_AUDIO_TREE			1305
-#define IDR_WINECFG			1306
-#define IDB_CHECKBOX                    1307
-#define IDB_DEVICE                      1308
-#define IDS_AUDIO_MISSING               1309
-#define IDC_DSOUND_RATES                1310
-#define IDC_DSOUND_BITS                 1311
-#define IDW_TESTSOUND                   1312
-#define IDS_ACCEL_FULL                  8300
-#define IDS_ACCEL_STANDARD              8301
-#define IDS_ACCEL_BASIC                 8302
-#define IDS_ACCEL_EMULATION             8303
-#define IDS_DRIVER_ALSA                 8304
-
-#define IDS_DRIVER_ESOUND               8306
-#define IDS_DRIVER_OSS                  8307
-#define IDS_DRIVER_JACK                 8308
-#define IDS_DRIVER_NAS                  8309
-
-#define IDS_DRIVER_COREAUDIO            8311
-#define IDS_OPEN_DRIVER_ERROR           8312
-#define IDS_SOUNDDRIVERS                8313
-#define IDS_DEVICES_WAVEOUT             8314
-#define IDS_DEVICES_WAVEIN              8315
-#define IDS_DEVICES_MIDIOUT             8316
-#define IDS_DEVICES_MIDIIN              8317
-#define IDS_DEVICES_AUX                 8318
-#define IDS_DEVICES_MIXER               8319
-#define IDS_UNAVAILABLE_DRIVER          8320
-#define IDS_WARNING                     8321
+#define IDC_AUDIO_TEST                  1300
+#define IDC_AUDIO_DRIVER                1301
+#define IDS_AUDIO_DRIVER                1302
+#define IDS_AUDIO_DRIVER_NONE           1303
+#define IDC_AUDIOOUT_DEVICE             1304
+#define IDC_VOICEOUT_DEVICE             1305
+#define IDC_AUDIOIN_DEVICE              1306
+#define IDC_VOICEIN_DEVICE              1307
+#define IDW_TESTSOUND                   1308
+#define IDS_AUDIO_TEST_FAILED           1309
+#define IDS_AUDIO_TEST_FAILED_TITLE     1310
+#define IDS_AUDIO_SYSDEFAULT            1311
 
 /* desktop integration tab */
 #define IDC_THEME_COLORCOMBO            1401

@@ -65,8 +65,7 @@ struct SysMouseImpl
     /* SysMouseAImpl */
     /* These are used in case of relative -> absolute transitions */
     POINT                           org_coords;
-    POINT      			    mapped_center;
-    DWORD			    win_centerX, win_centerY;
+    BOOL                            clipped;
     /* warping: whether we need to move mouse back to middle once we
      * reach window borders (for e.g. shooters, "surface movement" games) */
     BOOL                            need_warp;
@@ -320,14 +319,11 @@ static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM
 {
     MSLLHOOKSTRUCT *hook = (MSLLHOOKSTRUCT *)lparam;
     SysMouseImpl* This = impl_from_IDirectInputDevice8A(iface);
-    DWORD dwCoop;
-    int wdata = 0, inst_id = -1, ret;
+    int wdata = 0, inst_id = -1, ret = 0;
 
     TRACE("msg %lx @ (%d %d)\n", wparam, hook->pt.x, hook->pt.y);
 
     EnterCriticalSection(&This->base.crit);
-    dwCoop = This->base.dwCoopLevel;
-    ret = dwCoop & DISCL_EXCLUSIVE;
 
     switch(wparam) {
         case WM_MOUSEMOVE:
@@ -360,14 +356,20 @@ static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM
                 wdata = pt1.y;
             }
 
-            This->need_warp = This->warp_override != WARP_DISABLE &&
-                              (pt.x || pt.y) &&
-                              (dwCoop & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON);
+            if (pt.x || pt.y)
+            {
+                if ((This->warp_override == WARP_FORCE_ON) ||
+                    (This->warp_override != WARP_DISABLE && (This->base.dwCoopLevel & DISCL_EXCLUSIVE)))
+                    This->need_warp = TRUE;
+            }
             break;
         }
         case WM_MOUSEWHEEL:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_Z_AXIS_INSTANCE) | DIDFT_RELAXIS;
             This->m_state.lZ += wdata = (short)HIWORD(hook->mouseData);
+            /* FarCry crashes if it gets a mouse wheel message */
+            /* FIXME: should probably filter out other messages too */
+            ret = This->clipped;
             break;
         case WM_LBUTTONDOWN:
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 0) | DIDFT_PSHBUTTON;
@@ -401,8 +403,6 @@ static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2 + HIWORD(hook->mouseData)) | DIDFT_PSHBUTTON;
             This->m_state.rgbButtons[2 + HIWORD(hook->mouseData)] = wdata = 0x00;
             break;
-        default:
-            ret = 0;
     }
 
 
@@ -417,23 +417,39 @@ static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM
     return ret;
 }
 
-static BOOL dinput_window_check(SysMouseImpl* This) {
-    RECT rect;
-    DWORD centerX, centerY;
+static void warp_check( SysMouseImpl* This, BOOL force )
+{
+    DWORD now = GetCurrentTime();
+    const DWORD interval = This->clipped ? 500 : 10;
 
-    /* make sure the window hasn't moved */
-    if(!GetWindowRect(This->base.win, &rect))
-        return FALSE;
-    centerX = (rect.right  - rect.left) / 2;
-    centerY = (rect.bottom - rect.top ) / 2;
-    if (This->win_centerX != centerX || This->win_centerY != centerY) {
-	This->win_centerX = centerX;
-	This->win_centerY = centerY;
+    if (force || (This->need_warp && (now - This->last_warped > interval)))
+    {
+        RECT rect, new_rect;
+        POINT mapped_center;
+
+        This->last_warped = now;
+        This->need_warp = FALSE;
+        if (!GetClientRect(This->base.win, &rect)) return;
+        MapWindowPoints( This->base.win, 0, (POINT *)&rect, 2 );
+        if (!This->clipped)
+        {
+            mapped_center.x = (rect.left + rect.right) / 2;
+            mapped_center.y = (rect.top + rect.bottom) / 2;
+            TRACE("Warping mouse to %d - %d\n", mapped_center.x, mapped_center.y);
+            SetCursorPos( mapped_center.x, mapped_center.y );
+        }
+        if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
+        {
+            /* make sure we clip even if the window covers the whole screen */
+            rect.left = max( rect.left, GetSystemMetrics( SM_XVIRTUALSCREEN ) + 1 );
+            rect.top = max( rect.top, GetSystemMetrics( SM_YVIRTUALSCREEN ) + 1 );
+            rect.right = min( rect.right, rect.left + GetSystemMetrics( SM_CXVIRTUALSCREEN ) - 2 );
+            rect.bottom = min( rect.bottom, rect.top + GetSystemMetrics( SM_CYVIRTUALSCREEN ) - 2 );
+            TRACE("Clipping mouse to %s\n", wine_dbgstr_rect( &rect ));
+            ClipCursor( &rect );
+            This->clipped = GetClipCursor( &new_rect ) && EqualRect( &rect, &new_rect );
+        }
     }
-    This->mapped_center.x = This->win_centerX;
-    This->mapped_center.y = This->win_centerY;
-    MapWindowPoints(This->base.win, HWND_DESKTOP, &This->mapped_center, 1);
-    return TRUE;
 }
 
 
@@ -443,7 +459,6 @@ static BOOL dinput_window_check(SysMouseImpl* This) {
 static HRESULT WINAPI SysMouseWImpl_Acquire(LPDIRECTINPUTDEVICE8W iface)
 {
     SysMouseImpl *This = impl_from_IDirectInputDevice8W(iface);
-    RECT  rect;
     POINT point;
     HRESULT res;
 
@@ -466,42 +481,22 @@ static HRESULT WINAPI SysMouseWImpl_Acquire(LPDIRECTINPUTDEVICE8W iface)
     This->m_state.rgbButtons[0] = GetKeyState(VK_LBUTTON) & 0x80;
     This->m_state.rgbButtons[1] = GetKeyState(VK_RBUTTON) & 0x80;
     This->m_state.rgbButtons[2] = GetKeyState(VK_MBUTTON) & 0x80;
-    
-    /* Install our mouse hook */
+
     if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
     {
-      RECT rc;
-
-      ShowCursor(FALSE); /* hide cursor */
-      if (GetWindowRect(This->base.win, &rc))
-      {
-        FIXME("Clipping cursor to %s\n", wine_dbgstr_rect( &rc ));
-        ClipCursor(&rc);
-      }
-      else
-        ERR("Failed to get RECT: %d\n", GetLastError());
+        ShowCursor(FALSE); /* hide cursor */
+        warp_check( This, TRUE );
     }
-
-    /* Need a window to warp mouse in. */
-    if (This->warp_override == WARP_FORCE_ON && !This->base.win)
-        This->base.win = GetDesktopWindow();
-
-    /* Get the window dimension and find the center */
-    GetWindowRect(This->base.win, &rect);
-    This->win_centerX = (rect.right  - rect.left) / 2;
-    This->win_centerY = (rect.bottom - rect.top ) / 2;
-
-    /* Warp the mouse to the center of the window */
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON)
+    else if (This->warp_override == WARP_FORCE_ON)
     {
-      This->mapped_center.x = This->win_centerX;
-      This->mapped_center.y = This->win_centerY;
-      MapWindowPoints(This->base.win, HWND_DESKTOP, &This->mapped_center, 1);
-      TRACE("Warping mouse to %d - %d\n", This->mapped_center.x, This->mapped_center.y);
-      SetCursorPos( This->mapped_center.x, This->mapped_center.y );
-      This->last_warped = GetCurrentTime();
-
-      This->need_warp = FALSE;
+        /* Need a window to warp mouse in. */
+        if (!This->base.win) This->base.win = GetDesktopWindow();
+        warp_check( This, TRUE );
+    }
+    else if (This->clipped)
+    {
+        ClipCursor( NULL );
+        This->clipped = FALSE;
     }
 
     return DI_OK;
@@ -529,6 +524,7 @@ static HRESULT WINAPI SysMouseWImpl_Unacquire(LPDIRECTINPUTDEVICE8W iface)
     {
         ClipCursor(NULL);
         ShowCursor(TRUE); /* show cursor */
+        This->clipped = FALSE;
     }
 
     /* And put the mouse cursor back where it was at acquire time */
@@ -575,18 +571,7 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceState(LPDIRECTINPUTDEVICE8W iface, 
     }
     LeaveCriticalSection(&This->base.crit);
 
-    /* Check if we need to do a mouse warping */
-    if (This->need_warp && (GetCurrentTime() - This->last_warped > 10))
-    {
-        if(!dinput_window_check(This))
-            return DIERR_GENERIC;
-	TRACE("Warping mouse to %d - %d\n", This->mapped_center.x, This->mapped_center.y);
-	SetCursorPos( This->mapped_center.x, This->mapped_center.y );
-        This->last_warped = GetCurrentTime();
-
-        This->need_warp = FALSE;
-    }
-
+    warp_check( This, FALSE );
     return DI_OK;
 }
 
@@ -606,19 +591,7 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceData(LPDIRECTINPUTDEVICE8W iface,
     HRESULT res;
 
     res = IDirectInputDevice2WImpl_GetDeviceData(iface, dodsize, dod, entries, flags);
-    if (FAILED(res)) return res;
-
-    /* Check if we need to do a mouse warping */
-    if (This->need_warp && (GetCurrentTime() - This->last_warped > 10))
-    {
-        if(!dinput_window_check(This))
-            return DIERR_GENERIC;
-	TRACE("Warping mouse to %d - %d\n", This->mapped_center.x, This->mapped_center.y);
-	SetCursorPos( This->mapped_center.x, This->mapped_center.y );
-        This->last_warped = GetCurrentTime();
-
-        This->need_warp = FALSE;
-    }
+    if (SUCCEEDED(res)) warp_check( This, FALSE );
     return res;
 }
 
@@ -696,7 +669,7 @@ static HRESULT WINAPI SysMouseWImpl_GetCapabilities(LPDIRECTINPUTDEVICE8W iface,
     }
 
     devcaps.dwSize = lpDIDevCaps->dwSize;
-    devcaps.dwFlags = DIDC_ATTACHED;
+    devcaps.dwFlags = DIDC_ATTACHED | DIDC_EMULATED;
     if (This->base.dinput->dwVersion >= 0x0800)
 	devcaps.dwDevType = DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_TRADITIONAL << 8);
     else
@@ -779,7 +752,7 @@ static HRESULT WINAPI SysMouseAImpl_GetDeviceInfo(
     TRACE("(this=%p,%p)\n", This, pdidi);
 
     if (pdidi->dwSize != sizeof(DIDEVICEINSTANCEA)) {
-        WARN(" dinput3 not supporte yet...\n");
+        WARN(" dinput3 not supported yet...\n");
 	return DI_OK;
     }
 
@@ -794,7 +767,7 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceInfo(LPDIRECTINPUTDEVICE8W iface, L
     TRACE("(this=%p,%p)\n", This, pdidi);
 
     if (pdidi->dwSize != sizeof(DIDEVICEINSTANCEW)) {
-        WARN(" dinput3 not supporte yet...\n");
+        WARN(" dinput3 not supported yet...\n");
 	return DI_OK;
     }
 
@@ -803,6 +776,84 @@ static HRESULT WINAPI SysMouseWImpl_GetDeviceInfo(LPDIRECTINPUTDEVICE8W iface, L
     return DI_OK;
 }
 
+static HRESULT WINAPI SysMouseWImpl_BuildActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                   LPDIACTIONFORMATW lpdiaf,
+                                                   LPCWSTR lpszUserName,
+                                                   DWORD dwFlags)
+{
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    return _build_action_map(iface, lpdiaf, lpszUserName, dwFlags, DIMOUSE_MASK, &c_dfDIMouse2);
+}
+
+static HRESULT WINAPI SysMouseAImpl_BuildActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                   LPDIACTIONFORMATA lpdiaf,
+                                                   LPCSTR lpszUserName,
+                                                   DWORD dwFlags)
+{
+    SysMouseImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = SysMouseWImpl_BuildActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    _copy_diactionformatWtoA(lpdiaf, &diafW);
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
+}
+
+static HRESULT WINAPI SysMouseWImpl_SetActionMap(LPDIRECTINPUTDEVICE8W iface,
+                                                 LPDIACTIONFORMATW lpdiaf,
+                                                 LPCWSTR lpszUserName,
+                                                 DWORD dwFlags)
+{
+    FIXME("(%p)->(%p,%s,%08x): semi-stub !\n", iface, lpdiaf, debugstr_w(lpszUserName), dwFlags);
+
+    return _set_action_map(iface, lpdiaf, lpszUserName, dwFlags, &c_dfDIMouse2);
+}
+
+static HRESULT WINAPI SysMouseAImpl_SetActionMap(LPDIRECTINPUTDEVICE8A iface,
+                                                 LPDIACTIONFORMATA lpdiaf,
+                                                 LPCSTR lpszUserName,
+                                                 DWORD dwFlags)
+{
+    SysMouseImpl *This = impl_from_IDirectInputDevice8A(iface);
+    DIACTIONFORMATW diafW;
+    HRESULT hr;
+    WCHAR *lpszUserNameW = NULL;
+    int username_size;
+
+    diafW.rgoAction = HeapAlloc(GetProcessHeap(), 0, sizeof(DIACTIONW)*lpdiaf->dwNumActions);
+    _copy_diactionformatAtoW(&diafW, lpdiaf);
+
+    if (lpszUserName != NULL)
+    {
+        username_size = MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, NULL, 0);
+        lpszUserNameW = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR)*username_size);
+        MultiByteToWideChar(CP_ACP, 0, lpszUserName, -1, lpszUserNameW, username_size);
+    }
+
+    hr = SysMouseWImpl_SetActionMap(&This->base.IDirectInputDevice8W_iface, &diafW, lpszUserNameW, dwFlags);
+
+    HeapFree(GetProcessHeap(), 0, diafW.rgoAction);
+    HeapFree(GetProcessHeap(), 0, lpszUserNameW);
+
+    return hr;
+}
 
 static const IDirectInputDevice8AVtbl SysMouseAvt =
 {
@@ -835,8 +886,8 @@ static const IDirectInputDevice8AVtbl SysMouseAvt =
     IDirectInputDevice2AImpl_SendDeviceData,
     IDirectInputDevice7AImpl_EnumEffectsInFile,
     IDirectInputDevice7AImpl_WriteEffectToFile,
-    IDirectInputDevice8AImpl_BuildActionMap,
-    IDirectInputDevice8AImpl_SetActionMap,
+    SysMouseAImpl_BuildActionMap,
+    SysMouseAImpl_SetActionMap,
     IDirectInputDevice8AImpl_GetImageInfo
 };
 
@@ -871,7 +922,7 @@ static const IDirectInputDevice8WVtbl SysMouseWvt =
     IDirectInputDevice2WImpl_SendDeviceData,
     IDirectInputDevice7WImpl_EnumEffectsInFile,
     IDirectInputDevice7WImpl_WriteEffectToFile,
-    IDirectInputDevice8WImpl_BuildActionMap,
-    IDirectInputDevice8WImpl_SetActionMap,
+    SysMouseWImpl_BuildActionMap,
+    SysMouseWImpl_SetActionMap,
     IDirectInputDevice8WImpl_GetImageInfo
 };

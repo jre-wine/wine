@@ -1,15 +1,10 @@
 MODULE    = winealsa.drv
-IMPORTS   = dxguid uuid winmm user32 advapi32
+IMPORTS   = uuid ole32 advapi32
+DELAYIMPORTS = winmm
 EXTRALIBS = @ALSALIBS@
 
 C_SRCS = \
-	alsa.c \
-	dscapture.c \
-	dsoutput.c \
 	midi.c \
-	mixer.c \
-	wavein.c \
-	waveinit.c \
-	waveout.c
+	mmdevdrv.c
 
 @MAKE_DLL_RULES@

@@ -1,7 +1,7 @@
 /*
  * Creation of Wine fake dlls for apps that access the dll file directly.
  *
- * Copyright 2006 Alexandre Julliard
+ * Copyright 2006, 2011 Alexandre Julliard
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +33,8 @@
 # include <unistd.h>
 #endif
 
+#define COBJMACROS
+#define ATL_INITGUID
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "ntstatus.h"
@@ -45,6 +47,8 @@
 #include "wine/unicode.h"
 #include "wine/library.h"
 #include "wine/debug.h"
+#include "ole2.h"
+#include "atliface.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(setupapi);
 
@@ -55,10 +59,11 @@ static const unsigned int section_alignment = 4096;
 static const unsigned int max_dll_name_len = 64;
 
 static void *file_buffer;
-static size_t file_buffer_size;
+static SIZE_T file_buffer_size;
 static unsigned int handled_count;
 static unsigned int handled_total;
 static char **handled_dlls;
+static IRegistrar *registrar;
 
 struct dll_info
 {
@@ -187,11 +192,9 @@ failed:
 
 /* read in the contents of a file into the global file buffer */
 /* return 1 on success, 0 on nonexistent file, -1 on other error */
-static int read_file( const char *name, void **data, size_t *size )
+static int read_file( const char *name, void **data, SIZE_T *size )
 {
-    static char static_file_buffer[4096];
     struct stat st;
-    void *buffer = static_file_buffer;
     int fd, ret = -1;
     size_t header_size;
     IMAGE_DOS_HEADER *dos;
@@ -202,29 +205,27 @@ static int read_file( const char *name, void **data, size_t *size )
     if ((fd = open( name, O_RDONLY | O_BINARY )) == -1) return 0;
     if (fstat( fd, &st ) == -1) goto done;
     *size = st.st_size;
-    if (st.st_size > sizeof(static_file_buffer))
+    if (!file_buffer || st.st_size > file_buffer_size)
     {
-        if (!file_buffer || st.st_size > file_buffer_size)
-        {
-            HeapFree( GetProcessHeap(), 0, file_buffer );
-            if (!(file_buffer = HeapAlloc( GetProcessHeap(), 0, st.st_size ))) goto done;
-            file_buffer_size = st.st_size;
-        }
-        buffer = file_buffer;
+        VirtualFree( file_buffer, 0, MEM_RELEASE );
+        file_buffer = NULL;
+        file_buffer_size = st.st_size;
+        if (NtAllocateVirtualMemory( GetCurrentProcess(), &file_buffer, 0, &file_buffer_size,
+                                     MEM_COMMIT, PAGE_READWRITE )) goto done;
     }
 
     /* check for valid fake dll file */
 
     if (st.st_size < min_size) goto done;
     header_size = min( st.st_size, 4096 );
-    if (pread( fd, buffer, header_size, 0 ) != header_size) goto done;
-    dos = buffer;
+    if (pread( fd, file_buffer, header_size, 0 ) != header_size) goto done;
+    dos = file_buffer;
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) goto done;
     if (dos->e_lfanew < sizeof(fakedll_signature)) goto done;
     if (memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) )) goto done;
     if (dos->e_lfanew + FIELD_OFFSET(IMAGE_NT_HEADERS,OptionalHeader.MajorLinkerVersion) > header_size)
         goto done;
-    nt = (IMAGE_NT_HEADERS *)((char *)buffer + dos->e_lfanew);
+    nt = (IMAGE_NT_HEADERS *)((char *)file_buffer + dos->e_lfanew);
     if (nt->Signature == IMAGE_NT_SIGNATURE && nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
     {
         /* wrong 32/64 type, pretend it doesn't exist */
@@ -232,10 +233,10 @@ static int read_file( const char *name, void **data, size_t *size )
         goto done;
     }
     if (st.st_size == header_size ||
-        pread( fd, (char *)buffer + header_size,
+        pread( fd, (char *)file_buffer + header_size,
                st.st_size - header_size, header_size ) == st.st_size - header_size)
     {
-        *data = buffer;
+        *data = file_buffer;
         ret = 1;
     }
 done:
@@ -380,7 +381,7 @@ static inline char *prepend( char *buffer, const char *str, size_t len )
 }
 
 /* try to load a pre-compiled fake dll */
-static void *load_fake_dll( const WCHAR *name, size_t *size )
+static void *load_fake_dll( const WCHAR *name, SIZE_T *size )
 {
     const char *build_dir = wine_get_build_dir();
     const char *path;
@@ -469,11 +470,360 @@ static HANDLE create_dest_file( const WCHAR *name )
     return h;
 }
 
+/* XML parsing code copied from ntdll */
+
+typedef struct
+{
+    const char  *ptr;
+    unsigned int len;
+} xmlstr_t;
+
+typedef struct
+{
+    const char *ptr;
+    const char *end;
+} xmlbuf_t;
+
+static inline BOOL xmlstr_cmp(const xmlstr_t* xmlstr, const char *str)
+{
+    return !strncmp(xmlstr->ptr, str, xmlstr->len) && !str[xmlstr->len];
+}
+
+static inline BOOL isxmlspace( char ch )
+{
+    return (ch == ' ' || ch == '\r' || ch == '\n' || ch == '\t');
+}
+
+static BOOL next_xml_elem( xmlbuf_t *xmlbuf, xmlstr_t *elem )
+{
+    const char *ptr;
+
+    for (;;)
+    {
+        ptr = memchr(xmlbuf->ptr, '<', xmlbuf->end - xmlbuf->ptr);
+        if (!ptr)
+        {
+            xmlbuf->ptr = xmlbuf->end;
+            return FALSE;
+        }
+        ptr++;
+        if (ptr + 3 < xmlbuf->end && ptr[0] == '!' && ptr[1] == '-' && ptr[2] == '-') /* skip comment */
+        {
+            for (ptr += 3; ptr + 3 <= xmlbuf->end; ptr++)
+                if (ptr[0] == '-' && ptr[1] == '-' && ptr[2] == '>') break;
+
+            if (ptr + 3 > xmlbuf->end)
+            {
+                xmlbuf->ptr = xmlbuf->end;
+                return FALSE;
+            }
+            xmlbuf->ptr = ptr + 3;
+        }
+        else break;
+    }
+
+    xmlbuf->ptr = ptr;
+    while (ptr < xmlbuf->end && !isxmlspace(*ptr) && *ptr != '>' && (*ptr != '/' || ptr == xmlbuf->ptr))
+        ptr++;
+
+    elem->ptr = xmlbuf->ptr;
+    elem->len = ptr - xmlbuf->ptr;
+    xmlbuf->ptr = ptr;
+    return xmlbuf->ptr != xmlbuf->end;
+}
+
+static BOOL next_xml_attr(xmlbuf_t* xmlbuf, xmlstr_t* name, xmlstr_t* value,
+                          BOOL* error, BOOL* end)
+{
+    const char *ptr;
+
+    *error = TRUE;
+
+    while (xmlbuf->ptr < xmlbuf->end && isxmlspace(*xmlbuf->ptr))
+        xmlbuf->ptr++;
+
+    if (xmlbuf->ptr == xmlbuf->end) return FALSE;
+
+    if (*xmlbuf->ptr == '/')
+    {
+        xmlbuf->ptr++;
+        if (xmlbuf->ptr == xmlbuf->end || *xmlbuf->ptr != '>')
+            return FALSE;
+
+        xmlbuf->ptr++;
+        *end = TRUE;
+        *error = FALSE;
+        return FALSE;
+    }
+
+    if (*xmlbuf->ptr == '>')
+    {
+        xmlbuf->ptr++;
+        *error = FALSE;
+        return FALSE;
+    }
+
+    ptr = xmlbuf->ptr;
+    while (ptr < xmlbuf->end && *ptr != '=' && *ptr != '>' && !isxmlspace(*ptr)) ptr++;
+
+    if (ptr == xmlbuf->end || *ptr != '=') return FALSE;
+
+    name->ptr = xmlbuf->ptr;
+    name->len = ptr-xmlbuf->ptr;
+    xmlbuf->ptr = ptr;
+
+    ptr++;
+    if (ptr == xmlbuf->end || (*ptr != '"' && *ptr != '\'')) return FALSE;
+
+    value->ptr = ++ptr;
+    if (ptr == xmlbuf->end) return FALSE;
+
+    ptr = memchr(ptr, ptr[-1], xmlbuf->end - ptr);
+    if (!ptr)
+    {
+        xmlbuf->ptr = xmlbuf->end;
+        return FALSE;
+    }
+
+    value->len = ptr - value->ptr;
+    xmlbuf->ptr = ptr + 1;
+
+    if (xmlbuf->ptr == xmlbuf->end) return FALSE;
+
+    *error = FALSE;
+    return TRUE;
+}
+
+static void get_manifest_filename( const xmlstr_t *arch, const xmlstr_t *name, const xmlstr_t *key,
+                                   const xmlstr_t *version, const xmlstr_t *lang, WCHAR *buffer, DWORD size )
+{
+    static const WCHAR trailerW[] = {'_','d','e','a','d','b','e','e','f',0};
+    DWORD pos;
+
+    pos = MultiByteToWideChar( CP_UTF8, 0, arch->ptr, arch->len, buffer, size );
+    buffer[pos++] = '_';
+    pos += MultiByteToWideChar( CP_UTF8, 0, name->ptr, name->len, buffer + pos, size - pos );
+    buffer[pos++] = '_';
+    pos += MultiByteToWideChar( CP_UTF8, 0, key->ptr, key->len, buffer + pos, size - pos );
+    buffer[pos++] = '_';
+    pos += MultiByteToWideChar( CP_UTF8, 0, version->ptr, version->len, buffer + pos, size - pos );
+    buffer[pos++] = '_';
+    pos += MultiByteToWideChar( CP_UTF8, 0, lang->ptr, lang->len, buffer + pos, size - pos );
+    memcpy( buffer + pos, trailerW, sizeof(trailerW) );
+    strlwrW( buffer );
+}
+
+static BOOL create_winsxs_dll( const WCHAR *dll_name, const xmlstr_t *arch, const xmlstr_t *name,
+                               const xmlstr_t *key, const xmlstr_t *version, const xmlstr_t *lang,
+                               const void *dll_data, size_t dll_size )
+{
+    static const WCHAR winsxsW[] = {'w','i','n','s','x','s','\\'};
+    WCHAR *path;
+    const WCHAR *filename;
+    DWORD pos, written, path_len;
+    HANDLE handle;
+    BOOL ret = FALSE;
+
+    if (!(filename = strrchrW( dll_name, '\\' ))) filename = dll_name;
+    else filename++;
+
+    path_len = GetWindowsDirectoryW( NULL, 0 ) + 1 + sizeof(winsxsW)/sizeof(WCHAR)
+        + arch->len + name->len + key->len + version->len + 18 + strlenW( filename ) + 1;
+
+    path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) );
+    pos = GetWindowsDirectoryW( path, path_len );
+    path[pos++] = '\\';
+    memcpy( path + pos, winsxsW, sizeof(winsxsW) );
+    pos += sizeof(winsxsW) / sizeof(WCHAR);
+    get_manifest_filename( arch, name, key, version, lang, path + pos, path_len - pos );
+    pos += strlenW( path + pos );
+    path[pos++] = '\\';
+    strcpyW( path + pos, filename );
+    handle = create_dest_file( path );
+    if (handle && handle != INVALID_HANDLE_VALUE)
+    {
+        TRACE( "creating %s\n", debugstr_w(path) );
+        ret = (WriteFile( handle, dll_data, dll_size, &written, NULL ) && written == dll_size);
+        if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(path), GetLastError() );
+        CloseHandle( handle );
+        if (!ret) DeleteFileW( path );
+    }
+    HeapFree( GetProcessHeap(), 0, path );
+    return ret;
+}
+
+static BOOL create_manifest( const xmlstr_t *arch, const xmlstr_t *name, const xmlstr_t *key,
+                             const xmlstr_t *version, const xmlstr_t *lang, const void *data, DWORD len )
+{
+    static const WCHAR winsxsW[] = {'w','i','n','s','x','s','\\','m','a','n','i','f','e','s','t','s','\\'};
+    static const WCHAR extensionW[] = {'.','m','a','n','i','f','e','s','t',0};
+    WCHAR *path;
+    DWORD pos, written, path_len;
+    HANDLE handle;
+    BOOL ret = FALSE;
+
+    path_len = GetWindowsDirectoryW( NULL, 0 ) + 1 + sizeof(winsxsW)/sizeof(WCHAR)
+        + arch->len + name->len + key->len + version->len + 18 + sizeof(extensionW)/sizeof(WCHAR);
+
+    path = HeapAlloc( GetProcessHeap(), 0, path_len * sizeof(WCHAR) );
+    pos = GetWindowsDirectoryW( path, MAX_PATH );
+    path[pos++] = '\\';
+    memcpy( path + pos, winsxsW, sizeof(winsxsW) );
+    pos += sizeof(winsxsW) / sizeof(WCHAR);
+    get_manifest_filename( arch, name, key, version, lang, path + pos, MAX_PATH - pos );
+    strcatW( path + pos, extensionW );
+    handle = CreateFileW( path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
+    if (handle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_PATH_NOT_FOUND)
+    {
+        create_directories( path );
+        handle = CreateFileW( path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
+    }
+
+    if (handle != INVALID_HANDLE_VALUE)
+    {
+        TRACE( "creating %s\n", debugstr_w(path) );
+        ret = (WriteFile( handle, data, len, &written, NULL ) && written == len);
+        if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(path), GetLastError() );
+        CloseHandle( handle );
+        if (!ret) DeleteFileW( path );
+    }
+    HeapFree( GetProcessHeap(), 0, path );
+    return ret;
+}
+
+static void register_manifest( const WCHAR *dll_name, const char *manifest, DWORD len,
+                               const void *dll_data, size_t dll_size )
+{
+#ifdef __i386__
+    static const char current_arch[] = "x86";
+#elif defined __x86_64__
+    static const char current_arch[] = "amd64";
+#else
+    static const char current_arch[] = "none";
+#endif
+    xmlbuf_t buffer;
+    xmlstr_t elem, attr_name, attr_value;
+    xmlstr_t name, version, arch, key, lang;
+    BOOL end = FALSE, error;
+
+    buffer.ptr = manifest;
+    buffer.end = manifest + len;
+    name.ptr = version.ptr = arch.ptr = key.ptr = lang.ptr = NULL;
+    name.len = version.len = arch.len = key.len = lang.len = 0;
+
+    while (next_xml_elem( &buffer, &elem ))
+    {
+        if (!xmlstr_cmp( &elem, "assemblyIdentity" )) continue;
+        while (next_xml_attr( &buffer, &attr_name, &attr_value, &error, &end ))
+        {
+            if (xmlstr_cmp(&attr_name, "name")) name = attr_value;
+            else if (xmlstr_cmp(&attr_name, "version")) version = attr_value;
+            else if (xmlstr_cmp(&attr_name, "processorArchitecture")) arch = attr_value;
+            else if (xmlstr_cmp(&attr_name, "publicKeyToken")) key = attr_value;
+            else if (xmlstr_cmp(&attr_name, "language")) lang = attr_value;
+        }
+        if (!error && name.ptr && version.ptr && arch.ptr && key.ptr)
+        {
+            if (!lang.ptr)
+            {
+                lang.ptr = "none";
+                lang.len = strlen( lang.ptr );
+            }
+            if (!arch.len)  /* fixup the architecture */
+            {
+                char *new_buffer = HeapAlloc( GetProcessHeap(), 0, len + sizeof(current_arch) );
+                memcpy( new_buffer, manifest, arch.ptr - manifest );
+                strcpy( new_buffer + (arch.ptr - manifest), current_arch );
+                memcpy( new_buffer + strlen(new_buffer), arch.ptr, len - (arch.ptr - manifest) );
+                arch.ptr = current_arch;
+                arch.len = strlen( current_arch );
+                if (create_winsxs_dll( dll_name, &arch, &name, &key, &version, &lang, dll_data, dll_size ))
+                    create_manifest( &arch, &name, &key, &version, &lang, new_buffer, len + arch.len );
+                HeapFree( GetProcessHeap(), 0, new_buffer );
+            }
+            else
+            {
+                if (create_winsxs_dll( dll_name, &arch, &name, &key, &version, &lang, dll_data, dll_size ))
+                    create_manifest( &arch, &name, &key, &version, &lang, manifest, len );
+            }
+        }
+    }
+}
+
+static BOOL CALLBACK register_resource( HMODULE module, LPCWSTR type, LPWSTR name, LONG_PTR arg )
+{
+    HRESULT *hr = (HRESULT *)arg;
+    WCHAR *buffer;
+    HRSRC rsrc = FindResourceW( module, name, type );
+    char *str = LoadResource( module, rsrc );
+    DWORD lenW, lenA = SizeofResource( module, rsrc );
+
+    if (!str) return FALSE;
+    lenW = MultiByteToWideChar( CP_UTF8, 0, str, lenA, NULL, 0 ) + 1;
+    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, lenW * sizeof(WCHAR) ))) return FALSE;
+    MultiByteToWideChar( CP_UTF8, 0, str, lenA, buffer, lenW );
+    buffer[lenW - 1] = 0;
+    *hr = IRegistrar_StringRegister( registrar, buffer );
+    HeapFree( GetProcessHeap(), 0, buffer );
+    return TRUE;
+}
+
+static void register_fake_dll( const WCHAR *name, const void *data, size_t size )
+{
+    static const WCHAR atlW[] = {'a','t','l','.','d','l','l',0};
+    static const WCHAR moduleW[] = {'M','O','D','U','L','E',0};
+    static const WCHAR regtypeW[] = {'W','I','N','E','_','R','E','G','I','S','T','R','Y',0};
+    static const WCHAR manifestW[] = {'W','I','N','E','_','M','A','N','I','F','E','S','T',0};
+    const IMAGE_RESOURCE_DIRECTORY *resdir;
+    LDR_RESOURCE_INFO info;
+    HRESULT hr = S_OK;
+    HMODULE module = (HMODULE)((ULONG_PTR)data | 1);
+    HRSRC rsrc;
+
+    if ((rsrc = FindResourceW( module, manifestW, MAKEINTRESOURCEW(RT_MANIFEST) )))
+    {
+        char *manifest = LoadResource( module, rsrc );
+        register_manifest( name, manifest, SizeofResource( module, rsrc ), data, size );
+    }
+
+    info.Type = (ULONG_PTR)regtypeW;
+    if (LdrFindResourceDirectory_U( module, &info, 1, &resdir )) return;
+
+    if (!registrar)
+    {
+        /* create the object by hand since we can't guarantee that atl and ole32 are registered */
+        IClassFactory *cf;
+        HRESULT (WINAPI *pDllGetClassObject)( REFCLSID clsid, REFIID iid, LPVOID *ppv );
+        HMODULE atl = LoadLibraryW( atlW );
+
+        if ((pDllGetClassObject = (void *)GetProcAddress( atl, "DllGetClassObject" )))
+        {
+            hr = pDllGetClassObject( &CLSID_Registrar, &IID_IClassFactory, (void **)&cf );
+            if (SUCCEEDED( hr ))
+            {
+                hr = IClassFactory_CreateInstance( cf, NULL, &IID_IRegistrar, (void **)&registrar );
+                IClassFactory_Release( cf );
+            }
+        }
+        if (!registrar)
+        {
+            ERR( "failed to create IRegistrar: %x\n", hr );
+            return;
+        }
+    }
+
+    TRACE( "registering %s\n", debugstr_w(name) );
+    IRegistrar_ClearReplacements( registrar );
+    IRegistrar_AddReplacement( registrar, moduleW, name );
+    EnumResourceNamesW( module, regtypeW, register_resource, (LONG_PTR)&hr );
+    if (FAILED(hr)) ERR( "failed to register %s: %x\n", debugstr_w(name), hr );
+}
+
 /* copy a fake dll file to the dest directory */
 static void install_fake_dll( WCHAR *dest, char *file, const char *ext )
 {
     int ret;
-    size_t size;
+    SIZE_T size;
     void *data;
     DWORD written;
     WCHAR *destname = dest + strlenW(dest);
@@ -498,7 +848,8 @@ static void install_fake_dll( WCHAR *dest, char *file, const char *ext )
             ret = (WriteFile( h, data, size, &written, NULL ) && written == size);
             if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(dest), GetLastError() );
             CloseHandle( h );
-            if (!ret) DeleteFileW( dest );
+            if (ret) register_fake_dll( dest, data, size );
+            else DeleteFileW( dest );
         }
     }
     *destname = 0;  /* restore it for next file */
@@ -581,7 +932,7 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
 {
     HANDLE h;
     BOOL ret;
-    size_t size;
+    SIZE_T size;
     const WCHAR *filename;
     void *buffer;
 
@@ -612,7 +963,8 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
         DWORD written;
 
         ret = (WriteFile( h, buffer, size, &written, NULL ) && written == size);
-        if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(name), GetLastError() );
+        if (ret) register_fake_dll( name, buffer, size );
+        else ERR( "failed to write to %s (error=%u)\n", debugstr_w(name), GetLastError() );
     }
     else
     {
@@ -631,9 +983,11 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
  */
 void cleanup_fake_dlls(void)
 {
-    HeapFree( GetProcessHeap(), 0, file_buffer );
+    if (file_buffer) VirtualFree( file_buffer, 0, MEM_RELEASE );
     file_buffer = NULL;
     HeapFree( GetProcessHeap(), 0, handled_dlls );
     handled_dlls = NULL;
     handled_count = handled_total = 0;
+    if (registrar) IRegistrar_Release( registrar );
+    registrar = NULL;
 }

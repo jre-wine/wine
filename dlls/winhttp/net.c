@@ -134,6 +134,7 @@ MAKE_FUNCPTR( ERR_free_strings );
 MAKE_FUNCPTR( ERR_get_error );
 MAKE_FUNCPTR( ERR_error_string );
 MAKE_FUNCPTR( X509_STORE_CTX_get_ex_data );
+MAKE_FUNCPTR( X509_STORE_CTX_get_chain );
 MAKE_FUNCPTR( i2d_X509 );
 MAKE_FUNCPTR( sk_value );
 MAKE_FUNCPTR( sk_num );
@@ -370,13 +371,14 @@ static int netconn_secure_verify( int preverify_ok, X509_STORE_CTX *ctx )
         X509 *cert;
         int i;
         PCCERT_CONTEXT endCert = NULL;
+        struct stack_st *chain = (struct stack_st *)pX509_STORE_CTX_get_chain( ctx );
 
         ret = TRUE;
-        for (i = 0; ret && i < psk_num((struct stack_st *)ctx->chain); i++)
+        for (i = 0; ret && i < psk_num(chain); i++)
         {
             PCCERT_CONTEXT context;
 
-            cert = (X509 *)psk_value((struct stack_st *)ctx->chain, i);
+            cert = (X509 *)psk_value(chain, i);
             if ((context = X509_to_cert_context( cert )))
             {
                 if (i == 0)
@@ -484,6 +486,7 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     LOAD_FUNCPTR( ERR_get_error );
     LOAD_FUNCPTR( ERR_error_string );
     LOAD_FUNCPTR( X509_STORE_CTX_get_ex_data );
+    LOAD_FUNCPTR( X509_STORE_CTX_get_chain );
     LOAD_FUNCPTR( i2d_X509 );
     LOAD_FUNCPTR( sk_value );
     LOAD_FUNCPTR( sk_num );
@@ -529,14 +532,18 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
 
     pCRYPTO_set_id_callback(ssl_thread_id);
     num_ssl_locks = pCRYPTO_num_locks();
-    ssl_locks = HeapAlloc(GetProcessHeap(), 0, num_ssl_locks * sizeof(CRITICAL_SECTION));
+    ssl_locks = heap_alloc(num_ssl_locks * sizeof(CRITICAL_SECTION));
     if (!ssl_locks)
     {
         set_last_error( ERROR_OUTOFMEMORY );
         LeaveCriticalSection( &init_ssl_cs );
         return FALSE;
     }
-    for (i = 0; i < num_ssl_locks; i++) InitializeCriticalSection( &ssl_locks[i] );
+    for (i = 0; i < num_ssl_locks; i++)
+    {
+        InitializeCriticalSection( &ssl_locks[i] );
+        ssl_locks[i].DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": ssl_locks");
+    }
     pCRYPTO_set_locking_callback(ssl_lock_callback);
 
     LeaveCriticalSection( &init_ssl_cs );
@@ -565,9 +572,17 @@ void netconn_unload( void )
     if (ssl_locks)
     {
         int i;
-        for (i = 0; i < num_ssl_locks; i++) DeleteCriticalSection( &ssl_locks[i] );
-        HeapFree( GetProcessHeap(), 0, ssl_locks );
+        for (i = 0; i < num_ssl_locks; i++)
+        {
+            ssl_locks[i].DebugInfo->Spare[0] = 0;
+            DeleteCriticalSection( &ssl_locks[i] );
+        }
+        heap_free( ssl_locks );
     }
+    DeleteCriticalSection(&init_ssl_cs);
+#endif
+#ifndef HAVE_GETADDRINFO
+    DeleteCriticalSection(&cs_gethostbyname);
 #endif
 }
 
@@ -732,8 +747,6 @@ BOOL netconn_send( netconn_t *conn, const void *msg, size_t len, int flags, int 
 
 BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd )
 {
-    int ret;
-
     *recvd = 0;
     if (!netconn_connected( conn )) return FALSE;
     if (!len) return TRUE;
@@ -741,6 +754,8 @@ BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd
     if (conn->secure)
     {
 #ifdef SONAME_LIBSSL
+        int ret;
+
         if (flags & ~(MSG_PEEK | MSG_WAITALL))
             FIXME("SSL_read does not support the following flags: %08x\n", flags);
 

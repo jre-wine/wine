@@ -24,6 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "dinput.h"
+#include "dinputd.h"
 #include "wine/list.h"
 
 /* Implementation specification */
@@ -34,9 +35,11 @@ struct IDirectInputImpl
     IDirectInput7W              IDirectInput7W_iface;
     IDirectInput8A              IDirectInput8A_iface;
     IDirectInput8W              IDirectInput8W_iface;
+    IDirectInputJoyConfig8      IDirectInputJoyConfig8_iface;
 
     LONG                        ref;
 
+    BOOL                        initialized;
     CRITICAL_SECTION            crit;
     struct list                 entry;          /* entry into list of all IDirectInputs */
 
@@ -53,17 +56,24 @@ struct dinput_device {
     HRESULT (*create_device)(IDirectInputImpl *dinput, REFGUID rguid, REFIID riid, LPVOID *pdev, int unicode);
 };
 
-extern const struct dinput_device mouse_device;
-extern const struct dinput_device keyboard_device;
-extern const struct dinput_device joystick_linux_device;
-extern const struct dinput_device joystick_linuxinput_device;
-extern const struct dinput_device joystick_osx_device;
+extern const struct dinput_device mouse_device DECLSPEC_HIDDEN;
+extern const struct dinput_device keyboard_device DECLSPEC_HIDDEN;
+extern const struct dinput_device joystick_linux_device DECLSPEC_HIDDEN;
+extern const struct dinput_device joystick_linuxinput_device DECLSPEC_HIDDEN;
+extern const struct dinput_device joystick_osx_device DECLSPEC_HIDDEN;
 
-extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8W);
+extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8W) DECLSPEC_HIDDEN;
 typedef int (*DI_EVENT_PROC)(LPDIRECTINPUTDEVICE8A, WPARAM, LPARAM);
 
-extern void _dump_diactionformatA(LPDIACTIONFORMATA);
+extern void _copy_diactionformatAtoW(LPDIACTIONFORMATW, LPDIACTIONFORMATA) DECLSPEC_HIDDEN;
+extern void _copy_diactionformatWtoA(LPDIACTIONFORMATA, LPDIACTIONFORMATW) DECLSPEC_HIDDEN;
+
+extern HRESULT _configure_devices(IDirectInput8W *iface, LPDICONFIGUREDEVICESCALLBACK lpdiCallback, LPDICONFIGUREDEVICESPARAMSW lpdiCDParams, DWORD dwFlags, LPVOID pvRefData) DECLSPEC_HIDDEN;
 
 #define IS_DIPROP(x)    (((ULONG_PTR)(x) >> 16) == 0)
+
+#define DIKEYBOARD_MASK    0x81000000
+#define DIMOUSE_MASK       0x82000000
+#define DIGENRE_ANY        0xFF000000
 
 #endif /* __WINE_DLLS_DINPUT_DINPUT_PRIVATE_H */

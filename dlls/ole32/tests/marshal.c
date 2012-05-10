@@ -36,6 +36,7 @@
 #include "wine/test.h"
 
 DEFINE_GUID(CLSID_StdGlobalInterfaceTable,0x00000323,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
+DEFINE_GUID(CLSID_ManualResetEvent,       0x0000032c,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
 /* functions that are not present on all versions of Windows */
 static HRESULT (WINAPI * pCoInitializeEx)(LPVOID lpReserved, DWORD dwCoInit);
@@ -1869,6 +1870,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
         /* note the use of the magic IID_IWineTest value to tell remote thread
          * to try to send a message back to us */
         hr = IClassFactory_CreateInstance(proxy, NULL, &IID_IWineTest, (void **)&object);
+        ok(hr == S_FALSE, "expected S_FALSE, got %d\n", hr);
 
         IClassFactory_Release(proxy);
 
@@ -2266,7 +2268,7 @@ static void test_freethreadedmarshaler(void)
     IMarshal_Release(pFTMarshal);
 }
 
-static void reg_unreg_wine_test_class(BOOL Register)
+static HRESULT reg_unreg_wine_test_class(BOOL Register)
 {
     HRESULT hr;
     char buffer[256];
@@ -2284,9 +2286,16 @@ static void reg_unreg_wine_test_class(BOOL Register)
     if (Register)
     {
         error = RegCreateKeyEx(HKEY_CLASSES_ROOT, buffer, 0, NULL, 0, KEY_SET_VALUE, NULL, &hkey, &dwDisposition);
+        if (error == ERROR_ACCESS_DENIED)
+        {
+            skip("Not authorized to modify the Classes key\n");
+            return E_FAIL;
+        }
         ok(error == ERROR_SUCCESS, "RegCreateKeyEx failed with error %d\n", error);
+        if (error != ERROR_SUCCESS) hr = E_FAIL;
         error = RegSetValueEx(hkey, NULL, 0, REG_SZ, (const unsigned char *)"\"ole32.dll\"", strlen("\"ole32.dll\"") + 1);
         ok(error == ERROR_SUCCESS, "RegSetValueEx failed with error %d\n", error);
+        if (error != ERROR_SUCCESS) hr = E_FAIL;
         RegCloseKey(hkey);
     }
     else
@@ -2295,6 +2304,7 @@ static void reg_unreg_wine_test_class(BOOL Register)
         *strrchr(buffer, '\\') = '\0';
         RegDeleteKey(HKEY_CLASSES_ROOT, buffer);
     }
+    return hr;
 }
 
 static void test_inproc_handler(void)
@@ -2303,7 +2313,8 @@ static void test_inproc_handler(void)
     IUnknown *pObject;
     IUnknown *pObject2;
 
-    reg_unreg_wine_test_class(TRUE);
+    if (FAILED(reg_unreg_wine_test_class(TRUE)))
+        return;
 
     hr = CoCreateInstance(&CLSID_WineTest, NULL, CLSCTX_INPROC_HANDLER, &IID_IUnknown, (void **)&pObject);
     ok_ole_success(hr, "CoCreateInstance");
@@ -2384,7 +2395,8 @@ static void test_handler_marshaling(void)
     HANDLE thread;
     static const LARGE_INTEGER ullZero;
 
-    reg_unreg_wine_test_class(TRUE);
+    if (FAILED(reg_unreg_wine_test_class(TRUE)))
+        return;
     cLocks = 0;
 
     hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
@@ -2836,6 +2848,68 @@ static void test_globalinterfacetable(void)
 	IGlobalInterfaceTable_Release(git);
 }
 
+static void test_manualresetevent(void)
+{
+    ISynchronize *psync1, *psync2;
+    IUnknown *punk;
+    LONG ref;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_ManualResetEvent, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&punk);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    ok(!!punk, "Got NULL.\n");
+    IUnknown_Release(punk);
+
+    hr = CoCreateInstance(&CLSID_ManualResetEvent, NULL, CLSCTX_INPROC_SERVER, &IID_ISynchronize, (void**)&psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    ok(!!psync1, "Got NULL.\n");
+
+    hr = ISynchronize_Wait(psync1, 0, 5);
+    ok(hr == RPC_S_CALLPENDING, "Got 0x%08x\n", hr);
+
+    hr = ISynchronize_Reset(psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Signal(psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Wait(psync1, 0, 5);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Wait(psync1, 0, 5);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Reset(psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Wait(psync1, 0, 5);
+    ok(hr == RPC_S_CALLPENDING, "Got 0x%08x\n", hr);
+
+    hr = CoCreateInstance(&CLSID_ManualResetEvent, NULL, CLSCTX_INPROC_SERVER, &IID_ISynchronize, (void**)&psync2);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    ok(!!psync2, "Got NULL.\n");
+    ok(psync1 != psync2, "psync1 == psync2.\n");
+    hr = ISynchronize_Wait(psync2, 0, 5);
+    ok(hr == RPC_S_CALLPENDING, "Got 0x%08x\n", hr);
+
+    hr = ISynchronize_Reset(psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Reset(psync2);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Signal(psync1);
+    ok(hr == S_OK, "Got 0x%08x\n", hr);
+    hr = ISynchronize_Wait(psync2, 0, 5);
+    ok(hr == RPC_S_CALLPENDING, "Got 0x%08x\n", hr);
+
+    ref = ISynchronize_AddRef(psync1);
+    ok(ref == 2, "Got ref: %d\n", ref);
+    ref = ISynchronize_AddRef(psync1);
+    ok(ref == 3, "Got ref: %d\n", ref);
+    ref = ISynchronize_Release(psync1);
+    ok(ref == 2, "Got nonzero ref: %d\n", ref);
+    ref = ISynchronize_Release(psync2);
+    ok(!ref, "Got nonzero ref: %d\n", ref);
+    ref = ISynchronize_Release(psync1);
+    ok(ref == 1, "Got nonzero ref: %d\n", ref);
+    ref = ISynchronize_Release(psync1);
+    ok(!ref, "Got nonzero ref: %d\n", ref);
+}
+
 static const char *debugstr_iid(REFIID riid)
 {
     static char name[256];
@@ -3120,6 +3194,7 @@ START_TEST(marshal)
     test_local_server();
 
     test_globalinterfacetable();
+    test_manualresetevent();
 
     /* must be last test as channel hooks can't be unregistered */
     test_channel_hook();

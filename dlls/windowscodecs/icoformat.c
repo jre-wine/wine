@@ -69,6 +69,7 @@ typedef struct {
     IWICBitmapFrameDecode IWICBitmapFrameDecode_iface;
     LONG ref;
     UINT width, height;
+    double dpiX, dpiY;
     BYTE *bits;
 } IcoFrameDecode;
 
@@ -155,8 +156,14 @@ static HRESULT WINAPI IcoFrameDecode_GetPixelFormat(IWICBitmapFrameDecode *iface
 static HRESULT WINAPI IcoFrameDecode_GetResolution(IWICBitmapFrameDecode *iface,
     double *pDpiX, double *pDpiY)
 {
-    FIXME("(%p,%p,%p): stub\n", iface, pDpiX, pDpiY);
-    return E_NOTIMPL;
+    IcoFrameDecode *This = impl_from_IWICBitmapFrameDecode(iface);
+
+    *pDpiX = This->dpiX;
+    *pDpiY = This->dpiY;
+
+    TRACE("(%p) -> (%f,%f)\n", iface, *pDpiX, *pDpiY);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IcoFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
@@ -275,6 +282,9 @@ static HRESULT ReadIcoDib(IStream *stream, IcoFrameDecode *result)
 
                 IWICBitmapSource_Release(source);
             }
+
+            if (SUCCEEDED(hr))
+                hr = IWICBitmapFrameDecode_GetResolution(framedecode, &result->dpiX, &result->dpiY);
 
             IWICBitmapFrameDecode_Release(framedecode);
         }
@@ -402,6 +412,9 @@ static HRESULT ReadIcoPng(IStream *stream, IcoFrameDecode *result)
     hr = IWICBitmapFrameDecode_GetSize(sourceFrame, &result->width, &result->height);
     if (FAILED(hr))
         goto end;
+    hr = IWICBitmapFrameDecode_GetResolution(sourceFrame, &result->dpiX, &result->dpiY);
+    if (FAILED(hr))
+        goto end;
     result->bits = HeapAlloc(GetProcessHeap(), 0, 4 * result->width * result->height);
     if (result->bits == NULL)
     {
@@ -527,15 +540,27 @@ end:
 static HRESULT WINAPI IcoDecoder_GetContainerFormat(IWICBitmapDecoder *iface,
     GUID *pguidContainerFormat)
 {
-    FIXME("(%p,%p): stub\n", iface, pguidContainerFormat);
-    return E_NOTIMPL;
+    memcpy(pguidContainerFormat, &GUID_ContainerFormatIco, sizeof(GUID));
+    return S_OK;
 }
 
 static HRESULT WINAPI IcoDecoder_GetDecoderInfo(IWICBitmapDecoder *iface,
     IWICBitmapDecoderInfo **ppIDecoderInfo)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIDecoderInfo);
-    return E_NOTIMPL;
+    HRESULT hr;
+    IWICComponentInfo *compinfo;
+
+    TRACE("(%p,%p)\n", iface, ppIDecoderInfo);
+
+    hr = CreateComponentInfo(&CLSID_WICIcoDecoder, &compinfo);
+    if (FAILED(hr)) return hr;
+
+    hr = IWICComponentInfo_QueryInterface(compinfo, &IID_IWICBitmapDecoderInfo,
+        (void**)ppIDecoderInfo);
+
+    IWICComponentInfo_Release(compinfo);
+
+    return hr;
 }
 
 static HRESULT WINAPI IcoDecoder_CopyPalette(IWICBitmapDecoder *iface,

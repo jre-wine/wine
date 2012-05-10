@@ -140,7 +140,7 @@
 @ stub ExGetPreviousMode
 @ stub ExGetSharedWaiterCount
 @ stdcall ExInitializeNPagedLookasideList(ptr ptr ptr long long long long)
-@ stub ExInitializePagedLookasideList
+@ stdcall ExInitializePagedLookasideList(ptr ptr ptr long long long long)
 @ stdcall ExInitializeResourceLite(ptr)
 @ stdcall ExInitializeZone(ptr long ptr long)
 @ stub ExInterlockedAddLargeInteger
@@ -346,7 +346,7 @@
 @ stub IoCreateStreamFileObjectEx
 @ stub IoCreateStreamFileObjectLite
 @ stdcall IoCreateSymbolicLink(ptr ptr)
-@ stub IoCreateSynchronizationEvent
+@ stdcall IoCreateSynchronizationEvent(ptr ptr)
 @ stub IoCreateUnprotectedSymbolicLink
 @ stub IoCsqInitialize
 @ stub IoCsqInsertIrp
@@ -378,7 +378,7 @@
 @ stub IoGetBaseFileSystemDeviceObject
 @ stub IoGetBootDiskInformation
 @ stdcall IoGetConfigurationInformation()
-@ stub IoGetCurrentProcess
+@ stdcall IoGetCurrentProcess()
 @ stub IoGetDeviceAttachmentBaseRef
 @ stub IoGetDeviceInterfaceAlias
 @ stdcall IoGetDeviceInterfaces(ptr ptr long ptr)
@@ -398,7 +398,7 @@
 @ stub IoGetStackLimits
 @ stub IoGetTopLevelIrp
 @ stdcall IoInitializeIrp(ptr long long)
-@ stub IoInitializeRemoveLockEx
+@ stdcall IoInitializeRemoveLockEx(ptr long long long long)
 @ stdcall IoInitializeTimer(ptr ptr ptr)
 @ stub IoInvalidateDeviceRelations
 @ stub IoInvalidateDeviceState
@@ -456,7 +456,7 @@
 @ stub IoSetShareAccess
 @ stub IoSetStartIoAttributes
 @ stub IoSetSystemPartition
-@ stub IoSetThreadHardErrorMode
+@ stdcall IoSetThreadHardErrorMode(long)
 @ stub IoSetTopLevelIrp
 @ stub IoStartNextPacket
 @ stub IoStartNextPacketByKey
@@ -470,7 +470,7 @@
 @ stdcall IoUnregisterFileSystem(ptr)
 @ stub IoUnregisterFsRegistrationChange
 @ stub IoUnregisterPlugPlayNotification
-@ stub IoUnregisterShutdownNotification
+@ stdcall IoUnregisterShutdownNotification(ptr)
 @ stub IoUpdateShareAccess
 @ stub IoValidateDeviceIoControlAccess
 @ stub IoVerifyPartitionTable
@@ -495,7 +495,7 @@
 @ stub IoWriteOperationCount
 @ stub IoWritePartitionTableEx
 @ stub IoWriteTransferCount
-@ stub KdDebuggerEnabled
+@ extern KdDebuggerEnabled
 @ stub KdDebuggerNotPresent
 @ stub KdDisableDebugger
 @ stub KdEnableDebugger
@@ -503,9 +503,9 @@
 @ stub KdPollBreakIn
 @ stub KdPowerTransition
 @ stub Ke386CallBios
-@ stub Ke386IoSetAccessProcess
+@ stdcall Ke386IoSetAccessProcess(ptr long)
 @ stub Ke386QueryIoAccessMap
-@ stub Ke386SetIoAccessMap
+@ stdcall Ke386SetIoAccessMap(long ptr)
 @ stub KeAcquireInterruptSpinLock
 @ stub KeAcquireSpinLockAtDpcLevel
 @ stub KeAddSystemServiceTable
@@ -587,7 +587,7 @@
 @ stub KeRegisterBugCheckReasonCallback
 @ stub KeReleaseInterruptSpinLock
 @ stub KeReleaseMutant
-@ stub KeReleaseMutex
+@ stdcall KeReleaseMutex(ptr long)
 @ stdcall KeReleaseSemaphore(ptr long long long)
 @ stub KeReleaseSpinLockFromDpcLevel
 @ stub KeRemoveByKeyDeviceQueue
@@ -628,7 +628,7 @@
 @ stub KeUpdateSystemTime
 @ stub KeUserModeCallback
 @ stub KeWaitForMultipleObjects
-@ stub KeWaitForMutexObject
+@ stdcall KeWaitForMutexObject(ptr long long long ptr)
 @ stdcall KeWaitForSingleObject(ptr long long long ptr)
 @ stub KiBugCheckData
 @ stub KiCoprocessorError
@@ -810,7 +810,7 @@
 @ stub ObQueryNameString
 @ stub ObQueryObjectAuditingByHandle
 @ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
-@ stub ObReferenceObjectByName
+@ stdcall ObReferenceObjectByName(ptr long ptr long ptr long ptr ptr)
 @ stub ObReferenceObjectByPointer
 @ stub ObReferenceSecurityDescriptor
 @ stub ObReleaseObjectSecurity
@@ -849,7 +849,7 @@
 @ stub PsDisableImpersonation
 @ stub PsEstablishWin32Callouts
 @ stub PsGetContextThread
-@ stub PsGetCurrentProcess
+@ stdcall PsGetCurrentProcess() IoGetCurrentProcess
 @ stdcall PsGetCurrentProcessId()
 @ stub PsGetCurrentProcessSessionId
 @ stdcall PsGetCurrentThread() KeGetCurrentThread
@@ -892,7 +892,7 @@
 @ stub PsIsThreadImpersonating
 @ stub PsIsThreadTerminating
 @ stub PsJobType
-@ stub PsLookupProcessByProcessId
+@ stdcall PsLookupProcessByProcessId(ptr ptr)
 @ stub PsLookupProcessThreadByCid
 @ stub PsLookupThreadByThreadId
 @ stub PsProcessType
@@ -911,7 +911,7 @@
 @ stdcall PsSetCreateThreadNotifyRoutine(ptr)
 @ stub PsSetJobUIRestrictionsClass
 @ stub PsSetLegoNotifyRoutine
-@ stub PsSetLoadImageNotifyRoutine
+@ stdcall PsSetLoadImageNotifyRoutine(ptr)
 @ stub PsSetProcessPriorityByClass
 @ stub PsSetProcessPriorityClass
 @ stub PsSetProcessSecurityPort
@@ -1411,7 +1411,8 @@
 @ cdecl -private -i386 _global_unwind2(ptr) msvcrt._global_unwind2
 @ cdecl -private _itoa(long ptr long) msvcrt._itoa
 @ cdecl -private _itow(long ptr long) msvcrt._itow
-@ cdecl -private _local_unwind2(ptr long) msvcrt._local_unwind2
+@ cdecl -private -arch=x86_64 _local_unwind(ptr ptr) msvcrt._local_unwind
+@ cdecl -private -arch=i386 _local_unwind2(ptr long) msvcrt._local_unwind2
 @ cdecl -private _purecall() msvcrt._purecall
 @ varargs -private _snprintf(str long str) msvcrt._snprintf
 @ varargs -private _snwprintf(wstr long wstr) msvcrt._snwprintf

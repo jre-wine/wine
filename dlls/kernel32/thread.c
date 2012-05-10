@@ -48,9 +48,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(thread);
 /***********************************************************************
  *           CreateThread   (KERNEL32.@)
  */
-HANDLE WINAPI CreateThread( SECURITY_ATTRIBUTES *sa, SIZE_T stack,
-                            LPTHREAD_START_ROUTINE start, LPVOID param,
-                            DWORD flags, LPDWORD id )
+HANDLE WINAPI DECLSPEC_HOTPATCH CreateThread( SECURITY_ATTRIBUTES *sa, SIZE_T stack, LPTHREAD_START_ROUTINE start,
+                                              LPVOID param, DWORD flags, LPDWORD id )
 {
      return CreateRemoteThread( GetCurrentProcess(),
                                 sa, stack, start, param, flags, id );
@@ -805,4 +804,64 @@ BOOL WINAPI GetThreadIOPendingFlag( HANDLE thread, PBOOL io_pending )
     FIXME("%p, %p\n", thread, io_pending);
     *io_pending = FALSE;
     return TRUE;
+}
+
+/***********************************************************************
+ *              SetThreadPreferredUILanguages (KERNEL32.@)
+ */
+BOOL WINAPI SetThreadPreferredUILanguages( DWORD flags, PCZZWSTR buffer, PULONG count )
+{
+    FIXME( "%u, %p, %p\n", flags, buffer, count );
+    return TRUE;
+}
+
+/***********************************************************************
+ *              GetThreadPreferredUILanguages (KERNEL32.@)
+ */
+BOOL WINAPI GetThreadPreferredUILanguages( DWORD flags, PULONG count, PCZZWSTR buffer, PULONG buffersize )
+{
+    FIXME( "%u, %p, %p %p\n", flags, count, buffer, buffersize );
+    *count = 0;
+    *buffersize = 0;
+    return TRUE;
+}
+
+/***********************************************************************
+ *              InitializeSRWLock (KERNEL32.@)
+ */
+VOID WINAPI InitializeSRWLock( PSRWLOCK srwlock )
+{
+    FIXME( "(%p): stub\n", srwlock );
+}
+
+/***********************************************************************
+ *              AcquireSRWLockExclusive (KERNEL32.@)
+ */
+VOID WINAPI AcquireSRWLockExclusive( PSRWLOCK srwlock )
+{
+    FIXME( "(%p): stub\n", srwlock );
+}
+
+/***********************************************************************
+ *              ReleaseSRWLockExclusive (KERNEL32.@)
+ */
+VOID WINAPI ReleaseSRWLockExclusive( PSRWLOCK srwlock )
+{
+    FIXME( "(%p): stub\n", srwlock );
+}
+
+/***********************************************************************
+ *              AcquireSRWLockShared (KERNEL32.@)
+ */
+VOID WINAPI AcquireSRWLockShared( PSRWLOCK srwlock )
+{
+    FIXME( "(%p): stub\n", srwlock );
+}
+
+/***********************************************************************
+ *              ReleaseSRWLockShared (KERNEL32.@)
+ */
+VOID WINAPI ReleaseSRWLockShared( PSRWLOCK srwlock )
+{
+    FIXME( "(%p): stub\n", srwlock );
 }

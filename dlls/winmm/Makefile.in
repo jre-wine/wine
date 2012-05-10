@@ -1,7 +1,7 @@
 EXTRADEFS = -D_WINMM_
 MODULE    = winmm.dll
 IMPORTLIB = winmm
-IMPORTS   = user32 advapi32
+IMPORTS   = uuid user32 advapi32 ole32 msacm32
 
 C_SRCS = \
 	driver.c \
@@ -11,6 +11,7 @@ C_SRCS = \
 	mmio.c \
 	playsound.c \
 	time.c \
+	waveform.c \
 	winmm.c
 
 RC_SRCS = \

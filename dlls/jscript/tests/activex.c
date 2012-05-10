@@ -39,9 +39,6 @@ static const CLSID CLSID_JScript =
 #define SET_EXPECT(func) \
     expect_ ## func = TRUE
 
-#define SET_CALLED(func) \
-    called_ ## func = TRUE
-
 #define CHECK_EXPECT2(func) \
     do { \
         ok(expect_ ##func, "unexpected call " #func "\n"); \
@@ -80,6 +77,7 @@ static DWORD QueryCustomPolicy_psize;
 static DWORD QueryCustomPolicy_policy;
 static HRESULT QI_IDispatch_hres;
 static HRESULT SetSite_hres;
+static BOOL AllowIServiceProvider;
 
 #define TESTOBJ_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80646}"
 
@@ -575,7 +573,7 @@ static HRESULT WINAPI ActiveScriptSite_QueryInterface(IActiveScriptSite *iface, 
         *ppv = iface;
     }else if(IsEqualGUID(&IID_IActiveScriptSite, riid)) {
         *ppv = iface;
-    }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
+    }else if(IsEqualGUID(&IID_IServiceProvider, riid) && AllowIServiceProvider) {
         *ppv = &ServiceProvider;
     }else {
         *ppv = NULL;
@@ -718,6 +716,7 @@ static IActiveScriptParse *create_script(BOOL skip_tests, BOOL use_sec_mgr)
     QueryCustomPolicy_policy = URLPOLICY_ALLOW;
     QI_IDispatch_hres = S_OK;
     SetSite_hres = S_OK;
+    AllowIServiceProvider = TRUE;
 
     hres = CoCreateInstance(&CLSID_JScript, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IActiveScript, (void**)&script);
@@ -773,7 +772,7 @@ static IDispatchEx *parse_procedure_a(IActiveScriptParse *parser, const char *sr
     HRESULT hres;
 
     hres = IUnknown_QueryInterface(parser, &IID_IActiveScriptParseProcedure2, (void**)&parse_proc);
-    ok(hres == S_OK, "Coult not get IActiveScriptParseProcedure2: %08x\n", hres);
+    ok(hres == S_OK, "Could not get IActiveScriptParseProcedure2: %08x\n", hres);
 
     str = a2bstr(src);
     hres = IActiveScriptParseProcedure2_64_ParseProcedureText(parse_proc, str, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, &disp);
@@ -1032,6 +1031,31 @@ static void test_ActiveXObject(void)
     CHECK_CALLED(SetSite);
 
     IUnknown_Release(parser);
+
+    /* No IServiceProvider Interface */
+    parser = create_script(FALSE, FALSE);
+    object_with_site = &ObjectWithSite;
+    AllowIServiceProvider = FALSE;
+
+    SET_EXPECT(CreateInstance);
+    SET_EXPECT(QI_IObjectWithSite);
+    SET_EXPECT(reportSuccess);
+    SET_EXPECT(SetSite);
+    parse_script_a(parser, "(new ActiveXObject('Wine.Test')).reportSuccess();");
+    CHECK_CALLED(CreateInstance);
+    CHECK_CALLED(QI_IObjectWithSite);
+    CHECK_CALLED(reportSuccess);
+    CHECK_CALLED(SetSite);
+
+    IUnknown_Release(parser);
+
+    parser = create_script(FALSE, TRUE);
+    object_with_site = &ObjectWithSite;
+    AllowIServiceProvider = FALSE;
+
+    parse_script_a(parser, "testException(function() { new ActiveXObject('Wine.Test'); }, 'Error', -2146827859);");
+
+    IUnknown_Release(parser);
 }
 
 static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
@@ -1073,7 +1097,7 @@ static BOOL register_activex(void)
 
     hres = CoRegisterClassObject(&CLSID_TestObj, (IUnknown *)&activex_cf,
                                  CLSCTX_INPROC_SERVER, REGCLS_MULTIPLEUSE, &regid);
-    ok(hres == S_OK, "Could not register screipt engine: %08x\n", hres);
+    ok(hres == S_OK, "Could not register script engine: %08x\n", hres);
 
     return TRUE;
 }

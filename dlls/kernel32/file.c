@@ -1272,9 +1272,10 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         return INVALID_HANDLE_VALUE;
     }
 
-    TRACE("%s %s%s%s%s%s%s creation %d attributes 0x%x\n", debugstr_w(filename),
+    TRACE("%s %s%s%s%s%s%s%s creation %d attributes 0x%x\n", debugstr_w(filename),
           (access & GENERIC_READ)?"GENERIC_READ ":"",
           (access & GENERIC_WRITE)?"GENERIC_WRITE ":"",
+          (access & GENERIC_EXECUTE)?"GENERIC_EXECUTE ":"",
           (!access)?"QUERY_ACCESS ":"",
           (sharing & FILE_SHARE_READ)?"FILE_SHARE_READ ":"",
           (sharing & FILE_SHARE_WRITE)?"FILE_SHARE_WRITE ":"",
@@ -1285,7 +1286,9 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
 
     if (!strcmpiW(filename, coninW) || !strcmpiW(filename, conoutW))
     {
-        ret = OpenConsoleW(filename, access, (sa && sa->bInheritHandle), creation);
+        ret = OpenConsoleW(filename, access, (sa && sa->bInheritHandle),
+                           creation ? OPEN_EXISTING : 0);
+        if (ret == INVALID_HANDLE_VALUE) SetLastError(ERROR_INVALID_PARAMETER);
         goto done;
     }
 
@@ -1321,10 +1324,10 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
             switch (access & (GENERIC_READ|GENERIC_WRITE))
             {
             case GENERIC_READ:
-                ret = OpenConsoleW(coninW, access, (sa && sa->bInheritHandle), creation);
+                ret = OpenConsoleW(coninW, access, (sa && sa->bInheritHandle), OPEN_EXISTING);
                 goto done;
             case GENERIC_WRITE:
-                ret = OpenConsoleW(conoutW, access, (sa && sa->bInheritHandle), creation);
+                ret = OpenConsoleW(conoutW, access, (sa && sa->bInheritHandle), OPEN_EXISTING);
                 goto done;
             default:
                 SetLastError( ERROR_FILE_NOT_FOUND );
@@ -1360,7 +1363,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
     if (attributes & FILE_FLAG_NO_BUFFERING)
         options |= FILE_NO_INTERMEDIATE_BUFFERING;
     if (!(attributes & FILE_FLAG_OVERLAPPED))
-        options |= FILE_SYNCHRONOUS_IO_ALERT;
+        options |= FILE_SYNCHRONOUS_IO_NONALERT;
     if (attributes & FILE_FLAG_RANDOM_ACCESS)
         options |= FILE_RANDOM_ACCESS;
     attributes &= FILE_ATTRIBUTE_VALID_FLAGS;
@@ -1525,6 +1528,10 @@ BOOL WINAPI ReplaceFileW(LPCWSTR lpReplacedFileName, LPCWSTR lpReplacementFileNa
     NTSTATUS status;
     IO_STATUS_BLOCK io;
     OBJECT_ATTRIBUTES attr;
+
+    TRACE("%s %s %s 0x%08x %p %p\n", debugstr_w(lpReplacedFileName),
+          debugstr_w(lpReplacementFileName), debugstr_w(lpBackupFileName),
+          dwReplaceFlags, lpExclude, lpReserved);
 
     if (dwReplaceFlags)
         FIXME("Ignoring flags %x\n", dwReplaceFlags);
@@ -2534,4 +2541,69 @@ error:  /* We get here if there was an error opening the file */
     ofs->nErrCode = GetLastError();
     WARN("(%s): return = HFILE_ERROR error= %d\n", name,ofs->nErrCode );
     return HFILE_ERROR;
+}
+
+/***********************************************************************
+ *           K32EnumDeviceDrivers (KERNEL32.@)
+ */
+BOOL WINAPI K32EnumDeviceDrivers(void **image_base, DWORD cb, DWORD *needed)
+{
+    FIXME("(%p, %d, %p): stub\n", image_base, cb, needed);
+
+    if (needed)
+        *needed = 0;
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *          K32GetDeviceDriverBaseNameA (KERNEL32.@)
+ */
+DWORD WINAPI K32GetDeviceDriverBaseNameA(void *image_base, LPSTR base_name, DWORD size)
+{
+    FIXME("(%p, %p, %d): stub\n", image_base, base_name, size);
+
+    if (base_name && size)
+        base_name[0] = '\0';
+
+    return 0;
+}
+
+/***********************************************************************
+ *           K32GetDeviceDriverBaseNameW (KERNEL32.@)
+ */
+DWORD WINAPI K32GetDeviceDriverBaseNameW(void *image_base, LPWSTR base_name, DWORD size)
+{
+    FIXME("(%p, %p, %d): stub\n", image_base, base_name, size);
+
+    if (base_name && size)
+        base_name[0] = '\0';
+
+    return 0;
+}
+
+/***********************************************************************
+ *           K32GetDeviceDriverFileNameA (KERNEL32.@)
+ */
+DWORD WINAPI K32GetDeviceDriverFileNameA(void *image_base, LPSTR file_name, DWORD size)
+{
+    FIXME("(%p, %p, %d): stub\n", image_base, file_name, size);
+
+    if (file_name && size)
+        file_name[0] = '\0';
+
+    return 0;
+}
+
+/***********************************************************************
+ *           K32GetDeviceDriverFileNameW (KERNEL32.@)
+ */
+DWORD WINAPI K32GetDeviceDriverFileNameW(void *image_base, LPWSTR file_name, DWORD size)
+{
+    FIXME("(%p, %p, %d): stub\n", image_base, file_name, size);
+
+    if (file_name && size)
+        file_name[0] = '\0';
+
+    return 0;
 }

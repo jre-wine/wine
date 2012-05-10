@@ -203,32 +203,33 @@ void X11DRV_XF86VM_Init(void)
   /* see if XVidMode is available */
   wine_tsx11_lock();
   ok = pXF86VidModeQueryExtension(gdi_display, &xf86vm_event, &xf86vm_error);
-  if (ok)
-  {
-      X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
-      ok = pXF86VidModeQueryVersion(gdi_display, &xf86vm_major, &xf86vm_minor);
-      if (X11DRV_check_error()) ok = FALSE;
-  }
-  if (ok)
-  {
-#ifdef X_XF86VidModeSetGammaRamp
-      if (xf86vm_major > 2 || (xf86vm_major == 2 && xf86vm_minor >= 1))
-      {
-          pXF86VidModeGetGammaRampSize(gdi_display, DefaultScreen(gdi_display),
-                                      &xf86vm_gammaramp_size);
-          if (xf86vm_gammaramp_size == 256)
-              xf86vm_use_gammaramp = TRUE;
-      }
-#endif /* X_XF86VidModeSetGammaRamp */
-
-      /* retrieve modes */
-      if (usexvidmode && root_window == DefaultRootWindow( gdi_display ))
-          ok = pXF86VidModeGetAllModeLines(gdi_display, DefaultScreen(gdi_display), &nmodes, &real_xf86vm_modes);
-      else
-          ok = FALSE; /* In desktop mode, do not switch resolution... But still use the Gamma ramp stuff */
-  }
   wine_tsx11_unlock();
   if (!ok) return;
+
+  X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
+  ok = pXF86VidModeQueryVersion(gdi_display, &xf86vm_major, &xf86vm_minor);
+  if (X11DRV_check_error() || !ok) return;
+
+#ifdef X_XF86VidModeSetGammaRamp
+  if (xf86vm_major > 2 || (xf86vm_major == 2 && xf86vm_minor >= 1))
+  {
+      X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
+      pXF86VidModeGetGammaRampSize(gdi_display, DefaultScreen(gdi_display),
+                                   &xf86vm_gammaramp_size);
+      if (X11DRV_check_error()) xf86vm_gammaramp_size = 0;
+      if (xf86vm_gammaramp_size == 256)
+          xf86vm_use_gammaramp = TRUE;
+  }
+#endif /* X_XF86VidModeSetGammaRamp */
+
+  /* retrieve modes */
+  if (usexvidmode && root_window == DefaultRootWindow( gdi_display ))
+  {
+      X11DRV_expect_error(gdi_display, XVidModeErrorHandler, NULL);
+      ok = pXF86VidModeGetAllModeLines(gdi_display, DefaultScreen(gdi_display), &nmodes, &real_xf86vm_modes);
+      if (X11DRV_check_error() || !ok) return;
+  }
+  else return; /* In desktop mode, do not switch resolution... But still use the Gamma ramp stuff */
 
   TRACE("XVidMode modes: count=%d\n", nmodes);
 
@@ -335,8 +336,13 @@ static BOOL ComputeGammaFromRamp(WORD ramp[256], float *gamma)
     return FALSE;
   }
   /* check that the gamma is reasonably uniform across the ramp */
-  if (g_max - g_min > 0.1) {
+  if (g_max - g_min > 12.8) {
     ERR("ramp not uniform (max=%f, min=%f, avg=%f), rejected\n", g_max, g_min, g_avg);
+    return FALSE;
+  }
+  /* check that the gamma is not too bright */
+  if (g_avg < 0.2) {
+    ERR("too bright gamma ( %5.3f), rejected\n", g_avg);
     return FALSE;
   }
   /* ok, now we're pretty sure we can set the desired gamma ramp,
@@ -386,35 +392,25 @@ static BOOL X11DRV_XF86VM_GetGammaRamp(LPDDGAMMARAMP ramp)
 
 static BOOL X11DRV_XF86VM_SetGammaRamp(LPDDGAMMARAMP ramp)
 {
+  Bool ret = FALSE;
 #ifdef X_XF86VidModeSetGamma
   XF86VidModeGamma gamma;
 
-  if (xf86vm_major < 2) return FALSE; /* no gamma control */
+  if (xf86vm_major < 2 || !usexvidmode) return FALSE; /* no gamma control */
+  if (!ComputeGammaFromRamp(ramp->red,   &gamma.red) || /* ramp validation */
+      !ComputeGammaFromRamp(ramp->green, &gamma.green) ||
+      !ComputeGammaFromRamp(ramp->blue,  &gamma.blue)) return FALSE;
+  wine_tsx11_lock();
 #ifdef X_XF86VidModeSetGammaRamp
-  else if (xf86vm_use_gammaramp)
-  {
-      Bool ret;
-      wine_tsx11_lock();
+  if (xf86vm_use_gammaramp)
       ret = pXF86VidModeSetGammaRamp(gdi_display, DefaultScreen(gdi_display), 256,
 				    ramp->red, ramp->green, ramp->blue);
-      wine_tsx11_unlock();
-      return ret;
-  }
-#endif
   else
-  {
-      if (ComputeGammaFromRamp(ramp->red,   &gamma.red) &&
-	  ComputeGammaFromRamp(ramp->green, &gamma.green) &&
-	  ComputeGammaFromRamp(ramp->blue,  &gamma.blue)) {
-	  Bool ret;
-	  wine_tsx11_lock();
-	  ret = pXF86VidModeSetGamma(gdi_display, DefaultScreen(gdi_display), &gamma);
-	  wine_tsx11_unlock();
-	  return ret;
-      }
-  }
+#endif
+      ret = pXF86VidModeSetGamma(gdi_display, DefaultScreen(gdi_display), &gamma);
+  wine_tsx11_unlock();
 #endif /* X_XF86VidModeSetGamma */
-  return FALSE;
+  return ret;
 }
 
 #endif /* SONAME_LIBXXF86VM */
@@ -426,8 +422,13 @@ static BOOL X11DRV_XF86VM_SetGammaRamp(LPDDGAMMARAMP ramp)
  * the stuff in graphics/x11drv/ has been moved to dlls/x11drv, so that
  * they can include xvidmode.h directly
  */
-BOOL CDECL X11DRV_GetDeviceGammaRamp(X11DRV_PDEVICE *physDev, LPVOID ramp)
+BOOL X11DRV_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
+    if (GetObjectType( dev->hdc ) == OBJ_MEMDC)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
 #ifdef SONAME_LIBXXF86VM
   return X11DRV_XF86VM_GetGammaRamp(ramp);
 #else
@@ -442,8 +443,13 @@ BOOL CDECL X11DRV_GetDeviceGammaRamp(X11DRV_PDEVICE *physDev, LPVOID ramp)
  * the stuff in graphics/x11drv/ has been moved to dlls/x11drv, so that
  * they can include xvidmode.h directly
  */
-BOOL CDECL X11DRV_SetDeviceGammaRamp(X11DRV_PDEVICE *physDev, LPVOID ramp)
+BOOL X11DRV_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp)
 {
+    if (GetObjectType( dev->hdc ) == OBJ_MEMDC)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
 #ifdef SONAME_LIBXXF86VM
   return X11DRV_XF86VM_SetGammaRamp(ramp);
 #else

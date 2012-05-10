@@ -808,7 +808,7 @@ HGLOBAL WINAPI GlobalFree(HGLOBAL hmem)
  */
 SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
 {
-   DWORD                retval;
+   SIZE_T               retval;
    PGLOBAL32_INTERN     pintern;
 
    if (!((ULONG_PTR)hmem >> 16))
@@ -820,6 +820,12 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
    if(ISPOINTER(hmem))
    {
       retval=HeapSize(GetProcessHeap(), 0, hmem);
+
+      if (retval == ~0ul) /* It might be a GMEM_MOVEABLE data pointer */
+      {
+          retval = HeapSize(GetProcessHeap(), 0, (char*)hmem - HGLOBAL_STORAGE);
+          if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
+      }
    }
    else
    {
@@ -832,9 +838,8 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
              retval = 0;
          else
          {
-             retval = HeapSize(GetProcessHeap(), 0,
-                         (char *)(pintern->Pointer) - HGLOBAL_STORAGE );
-             if (retval != (DWORD)-1) retval -= HGLOBAL_STORAGE;
+             retval = HeapSize(GetProcessHeap(), 0, (char *)pintern->Pointer - HGLOBAL_STORAGE );
+             if (retval != ~0ul) retval -= HGLOBAL_STORAGE;
          }
       }
       else
@@ -845,8 +850,7 @@ SIZE_T WINAPI GlobalSize(HGLOBAL hmem)
       }
       RtlUnlockHeap(GetProcessHeap());
    }
-   /* HeapSize returns 0xffffffff on failure */
-   if (retval == 0xffffffff) retval = 0;
+   if (retval == ~0ul) retval = 0;
    return retval;
 }
 
@@ -1200,17 +1204,17 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
 
             /* new style /proc/meminfo ... */
             if (sscanf(buffer, "MemTotal: %lu", &total))
-                lpmemex->ullTotalPhys = total*1024;
+                lpmemex->ullTotalPhys = (ULONG64)total*1024;
             if (sscanf(buffer, "MemFree: %lu", &free))
-                lpmemex->ullAvailPhys = free*1024;
+                lpmemex->ullAvailPhys = (ULONG64)free*1024;
             if (sscanf(buffer, "SwapTotal: %lu", &total))
-                lpmemex->ullTotalPageFile = total*1024;
+                lpmemex->ullTotalPageFile = (ULONG64)total*1024;
             if (sscanf(buffer, "SwapFree: %lu", &free))
-                lpmemex->ullAvailPageFile = free*1024;
+                lpmemex->ullAvailPageFile = (ULONG64)free*1024;
             if (sscanf(buffer, "Buffers: %lu", &buffers))
-                lpmemex->ullAvailPhys += buffers*1024;
+                lpmemex->ullAvailPhys += (ULONG64)buffers*1024;
             if (sscanf(buffer, "Cached: %lu", &cached))
-                lpmemex->ullAvailPhys += cached*1024;
+                lpmemex->ullAvailPhys += (ULONG64)cached*1024;
         }
         fclose( f );
     }

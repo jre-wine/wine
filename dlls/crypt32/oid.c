@@ -37,21 +37,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
 static const WCHAR DllW[] = { 'D','l','l',0 };
 
-static void init_oid_info(void);
-static void free_function_sets(void);
-static void free_oid_info(void);
-
-void crypt_oid_init(void)
-{
-    init_oid_info();
-}
-
-void crypt_oid_free(void)
-{
-    free_function_sets();
-    free_oid_info();
-}
-
 static CRITICAL_SECTION funcSetCS;
 static CRITICAL_SECTION_DEBUG funcSetCSDebug =
 {
@@ -107,6 +92,7 @@ static void free_function_sets(void)
         DeleteCriticalSection(&setCursor->cs);
         CryptMemFree(setCursor);
     }
+    DeleteCriticalSection(&funcSetCS);
 }
 
 /* There is no free function associated with this; therefore, the sets are
@@ -591,7 +577,7 @@ BOOL WINAPI CryptGetDefaultOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
  *             CryptRegisterOIDFunction (CRYPT32.@)
  *
  * Register the DLL and the functions it uses to cover the combination
- * of encoding type, functionname and OID.
+ * of encoding type, function name and OID.
  *
  * PARAMS
  *  dwEncodingType       [I] Encoding type to be used.
@@ -614,8 +600,8 @@ BOOL WINAPI CryptRegisterOIDFunction(DWORD dwEncodingType, LPCSTR pszFuncName,
     HKEY hKey;
     LPSTR szKey;
 
-    TRACE("(%x, %s, %s, %s, %s)\n", dwEncodingType, pszFuncName,
-     debugstr_a(pszOID), debugstr_w(pwszDll), pszOverrideFuncName);
+    TRACE("(%x, %s, %s, %s, %s)\n", dwEncodingType, debugstr_a(pszFuncName),
+          debugstr_a(pszOID), debugstr_w(pwszDll), debugstr_a(pszOverrideFuncName));
 
     /* Native does nothing pwszDll is NULL */
     if (!pwszDll)
@@ -1119,6 +1105,9 @@ static const WCHAR Phone[] = { 'P','h','o','n','e',0 };
 static const WCHAR X21Address[] = { 'X','2','1','A','d','d','r','e','s','s',0 };
 static const WCHAR dnQualifier[] =
  { 'd','n','Q','u','a','l','i','f','i','e','r',0 };
+static const WCHAR SpcSpAgencyInfo[] = { 'S','p','c','S','p','A','g','e','n','c','y','I','n','f','o',0 };
+static const WCHAR SpcFinancialCriteria[] = { 'S','p','c','F','i','n','a','n','c','i','a','l','C','r','i','t','e','r','i','a',0 };
+static const WCHAR SpcMinimalCriteria[] = { 'S','p','c','M','i','n','i','m','a','l','C','r','i','t','e','r','i','a',0 };
 static const WCHAR Email[] = { 'E','m','a','i','l',0 };
 static const WCHAR GN[] = { 'G','N',0 };
 
@@ -1287,9 +1276,9 @@ static const struct OIDInfoConstructor {
  { 6, szOID_NETSCAPE_CA_POLICY_URL, 0, (LPCWSTR)IDS_NETSCAPE_CA_POLICY_URL, NULL },
  { 6, szOID_NETSCAPE_SSL_SERVER_NAME, 0, (LPCWSTR)IDS_NETSCAPE_SSL_SERVER_NAME, NULL },
  { 6, szOID_NETSCAPE_COMMENT, 0, (LPCWSTR)IDS_NETSCAPE_COMMENT, NULL },
- { 6, "1.3.6.1.4.1.311.2.1.10", 0, (LPCWSTR)IDS_SPC_SP_AGENCY_INFO, NULL },
- { 6, "1.3.6.1.4.1.311.2.1.27", 0, (LPCWSTR)IDS_SPC_FINANCIAL_CRITERIA, NULL },
- { 6, "1.3.6.1.4.1.311.2.1.26", 0, (LPCWSTR)IDS_SPC_MINIMAL_CRITERIA, NULL },
+ { 6, "1.3.6.1.4.1.311.2.1.10", 0, SpcSpAgencyInfo, NULL },
+ { 6, "1.3.6.1.4.1.311.2.1.27", 0, SpcFinancialCriteria, NULL },
+ { 6, "1.3.6.1.4.1.311.2.1.26", 0, SpcMinimalCriteria, NULL },
  { 6, szOID_COUNTRY_NAME, 0, (LPCWSTR)IDS_COUNTRY, NULL },
  { 6, szOID_ORGANIZATION_NAME, 0, (LPCWSTR)IDS_ORGANIZATION, NULL },
  { 6, szOID_ORGANIZATIONAL_UNIT_NAME, 0, (LPCWSTR)IDS_ORGANIZATIONAL_UNIT, NULL },
@@ -1476,6 +1465,7 @@ static void free_oid_info(void)
         list_remove(&info->entry);
         CryptMemFree(info);
     }
+    DeleteCriticalSection(&oidInfoCS);
 }
 
 /***********************************************************************
@@ -1617,4 +1607,15 @@ DWORD WINAPI CertOIDToAlgId(LPCSTR pszObjId)
     else
         ret = 0;
     return ret;
+}
+
+void crypt_oid_init(void)
+{
+    init_oid_info();
+}
+
+void crypt_oid_free(void)
+{
+    free_function_sets();
+    free_oid_info();
 }

@@ -124,7 +124,7 @@ static const struct
     {"InfoText", RGB(0, 0, 0)},                     /* COLOR_INFOTEXT */
     {"InfoWindow", RGB(255, 255, 225)},             /* COLOR_INFOBK */
     {"ButtonAlternateFace", RGB(181, 181, 181)},    /* COLOR_ALTERNATEBTNFACE */
-    {"HotTrackingColor", RGB(0, 0, 128)},           /* COLOR_HOTLIGHT */
+    {"HotTrackingColor", RGB(0, 0, 200)},           /* COLOR_HOTLIGHT */
     {"GradientActiveTitle", RGB(166, 202, 240)},    /* COLOR_GRADIENTACTIVECAPTION */
     {"GradientInactiveTitle", RGB(192, 192, 192)},  /* COLOR_GRADIENTINACTIVECAPTION */
     {"MenuHilight", RGB(10, 36, 106)},              /* COLOR_MENUHILIGHT */
@@ -254,6 +254,7 @@ static const WCHAR METRICS_MENUWIDTH_VALNAME[]=       {'M','e','n','u','W','i','
 static const WCHAR METRICS_MENUHEIGHT_VALNAME[]=      {'M','e','n','u','H','e','i','g','h','t',0};
 static const WCHAR METRICS_ICONSIZE_VALNAME[]=        {'S','h','e','l','l',' ','I','c','o','n',' ','S','i','z','e',0};
 static const WCHAR METRICS_BORDERWIDTH_VALNAME[]=     {'B','o','r','d','e','r','W','i','d','t','h',0};
+static const WCHAR METRICS_PADDEDBORDERWIDTH_VALNAME[]={'P','a','d','d','e','d','B','o','r','d','e','r','W','i','d','t','h',0};
 static const WCHAR METRICS_CAPTIONLOGFONT_VALNAME[]=  {'C','a','p','t','i','o','n','F','o','n','t',0};
 static const WCHAR METRICS_SMCAPTIONLOGFONT_VALNAME[]={'S','m','C','a','p','t','i','o','n','F','o','n','t',0};
 static const WCHAR METRICS_MENULOGFONT_VALNAME[]=     {'M','e','n','u','F','o','n','t',0};
@@ -369,7 +370,8 @@ static NONCLIENTMETRICSW nonclient_metrics =
     18,    /* iMenuHeight */
     { 0 }, /* lfMenuFont */
     { 0 }, /* lfStatusFont */
-    { 0 }  /* lfMessageFont */
+    { 0 }, /* lfMessageFont */
+    0      /* iPaddedBorderWidth */
 };
 
 /* some additional non client metric info */
@@ -462,6 +464,13 @@ static void SYSPARAMS_NonClientMetrics32WTo32A( const NONCLIENTMETRICSW* lpnm32W
     SYSPARAMS_LogFont32WTo32A( &lpnm32W->lfMenuFont,		&lpnm32A->lfMenuFont );
     SYSPARAMS_LogFont32WTo32A( &lpnm32W->lfStatusFont,		&lpnm32A->lfStatusFont );
     SYSPARAMS_LogFont32WTo32A( &lpnm32W->lfMessageFont,		&lpnm32A->lfMessageFont );
+    if (lpnm32A->cbSize > FIELD_OFFSET(NONCLIENTMETRICSA, iPaddedBorderWidth))
+    {
+        if (lpnm32W->cbSize > FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth))
+            lpnm32A->iPaddedBorderWidth = lpnm32W->iPaddedBorderWidth;
+        else
+            lpnm32A->iPaddedBorderWidth = 0;
+    }
 }
 
 static void SYSPARAMS_NonClientMetrics32ATo32W( const NONCLIENTMETRICSA* lpnm32A, LPNONCLIENTMETRICSW lpnm32W )
@@ -480,6 +489,13 @@ static void SYSPARAMS_NonClientMetrics32ATo32W( const NONCLIENTMETRICSA* lpnm32A
     SYSPARAMS_LogFont32ATo32W( &lpnm32A->lfMenuFont,		&lpnm32W->lfMenuFont );
     SYSPARAMS_LogFont32ATo32W( &lpnm32A->lfStatusFont,		&lpnm32W->lfStatusFont );
     SYSPARAMS_LogFont32ATo32W( &lpnm32A->lfMessageFont,		&lpnm32W->lfMessageFont );
+    if (lpnm32W->cbSize > FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth))
+    {
+        if (lpnm32A->cbSize > FIELD_OFFSET(NONCLIENTMETRICSA, iPaddedBorderWidth))
+            lpnm32W->iPaddedBorderWidth = lpnm32A->iPaddedBorderWidth;
+        else
+            lpnm32W->iPaddedBorderWidth = 0;
+    }
 }
 
 
@@ -1064,6 +1080,7 @@ static void load_nonclient_metrics(void)
     ncm.iBorderWidth =  get_reg_metric(hkey, METRICS_BORDERWIDTH_VALNAME, 1);
     ncm.iScrollWidth = get_reg_metric(hkey, METRICS_SCROLLWIDTH_VALNAME, 16);
     ncm.iScrollHeight = get_reg_metric(hkey, METRICS_SCROLLHEIGHT_VALNAME, 16);
+    ncm.iPaddedBorderWidth = get_reg_metric(hkey, METRICS_PADDEDBORDERWIDTH_VALNAME, 0);
 
     /* size of the normal caption buttons */
     ncm.iCaptionHeight = get_reg_metric(hkey, METRICS_CAPTIONHEIGHT_VALNAME, 18);
@@ -1567,10 +1584,21 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
     {
         LPNONCLIENTMETRICSW lpnm = pvParam;
 
+        if (!lpnm)
+        {
+            ret = FALSE;
+            break;
+        }
+
         if (!spi_loaded[SPI_NONCLIENTMETRICS_IDX]) load_nonclient_metrics();
 
-        if (lpnm && lpnm->cbSize == sizeof(NONCLIENTMETRICSW))
+        if (lpnm->cbSize == sizeof(NONCLIENTMETRICSW))
             *lpnm = nonclient_metrics;
+        else if (lpnm->cbSize == FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth))
+        {
+            memcpy(lpnm, &nonclient_metrics, FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth));
+            lpnm->cbSize = FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth);
+        }
         else
             ret = FALSE;
         break;
@@ -1580,7 +1608,8 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
     {
         LPNONCLIENTMETRICSW lpnm = pvParam;
 
-        if (lpnm && lpnm->cbSize == sizeof(NONCLIENTMETRICSW))
+        if (lpnm && (lpnm->cbSize == sizeof(NONCLIENTMETRICSW) ||
+                     lpnm->cbSize == FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth)))
         {
             NONCLIENTMETRICSW ncm;
             ret = set_uint_param( SPI_SETBORDER_IDX,
@@ -1626,7 +1655,10 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
                     METRICS_REGKEY, METRICS_MESSAGELOGFONT_VALNAME,
                     &lpnm->lfMessageFont, fWinIni);
             if( ret) {
-                ncm = *lpnm;
+                memcpy(&ncm, lpnm, FIELD_OFFSET(NONCLIENTMETRICSW, iPaddedBorderWidth));
+                ncm.cbSize = sizeof(ncm);
+                ncm.iPaddedBorderWidth = (lpnm->cbSize == sizeof(NONCLIENTMETRICSW)) ?
+                                         lpnm->iPaddedBorderWidth : 0;
                 normalize_nonclientmetrics( &ncm);
                 nonclient_metrics = ncm;
                 spi_loaded[SPI_NONCLIENTMETRICS_IDX] = TRUE;
@@ -2526,7 +2558,8 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     {
 	NONCLIENTMETRICSW tmp;
         LPNONCLIENTMETRICSA lpnmA = pvParam;
-	if (lpnmA && lpnmA->cbSize == sizeof(NONCLIENTMETRICSA))
+        if (lpnmA && (lpnmA->cbSize == sizeof(NONCLIENTMETRICSA) ||
+                      lpnmA->cbSize == FIELD_OFFSET(NONCLIENTMETRICSA, iPaddedBorderWidth)))
 	{
 	    tmp.cbSize = sizeof(NONCLIENTMETRICSW);
 	    ret = SystemParametersInfoW( uiAction, uiParam, &tmp, fuWinIni );
@@ -2542,7 +2575,8 @@ BOOL WINAPI SystemParametersInfoA( UINT uiAction, UINT uiParam,
     {
         NONCLIENTMETRICSW tmp;
         LPNONCLIENTMETRICSA lpnmA = pvParam;
-        if (lpnmA && lpnmA->cbSize == sizeof(NONCLIENTMETRICSA))
+        if (lpnmA && (lpnmA->cbSize == sizeof(NONCLIENTMETRICSA) ||
+                      lpnmA->cbSize == FIELD_OFFSET(NONCLIENTMETRICSA, iPaddedBorderWidth)))
         {
             tmp.cbSize = sizeof(NONCLIENTMETRICSW);
             SYSPARAMS_NonClientMetrics32ATo32W( lpnmA, &tmp );
@@ -2910,7 +2944,7 @@ UINT WINAPI GetDoubleClickTime(void)
 /*************************************************************************
  *		GetSysColor (USER32.@)
  */
-COLORREF WINAPI GetSysColor( INT nIndex )
+COLORREF WINAPI DECLSPEC_HOTPATCH GetSysColor( INT nIndex )
 {
     if (nIndex >= 0 && nIndex < NUM_SYS_COLORS)
         return SysColors[nIndex];
@@ -2926,6 +2960,8 @@ BOOL WINAPI SetSysColors( INT nChanges, const INT *lpSysColor,
                               const COLORREF *lpColorValues )
 {
     int i;
+
+    if (IS_INTRESOURCE(lpSysColor)) return FALSE; /* stupid app passes a color instead of an array */
 
     for (i = 0; i < nChanges; i++) SYSPARAMS_SetSysColor( lpSysColor[i], lpColorValues[i] );
 
@@ -2985,7 +3021,7 @@ DWORD_PTR WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes
         LPVOID p = pOldCol;
         *(DWORD *)p = n; p = (char*)p + sizeof(DWORD);
         memcpy(p, SysColorPens, n*sizeof(HPEN)); p = (char*)p + n*sizeof(HPEN);
-        memcpy(p, SysColorBrushes, n*sizeof(HBRUSH)); p = (char*)p + n*sizeof(HBRUSH);
+        memcpy(p, SysColorBrushes, n*sizeof(HBRUSH));
 
         for (i=0; i < n; i++)
         {
@@ -3023,7 +3059,7 @@ DWORD_PTR WINAPI SetSysColorsTemp( const COLORREF *pPens, const HBRUSH *pBrushes
 /***********************************************************************
  *		GetSysColorBrush (USER32.@)
  */
-HBRUSH WINAPI GetSysColorBrush( INT index )
+HBRUSH WINAPI DECLSPEC_HOTPATCH GetSysColorBrush( INT index )
 {
     if (0 <= index && index < NUM_SYS_COLORS) return SysColorBrushes[index];
     WARN("Unknown index(%d)\n", index );
