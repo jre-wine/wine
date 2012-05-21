@@ -19,8 +19,7 @@ Build-Depends: debhelper (>= 5), flex, bison,
  libjpeg8-dev | libjpeg62-dev | libjpeg-dev , libpng-dev | libpng3-dev | libpng12-dev,
  libfreetype6-dev, libfontconfig1-dev, libopenal-dev,
  libasound2-dev [i386 amd64 powerpc sparc],
- libjack-dev | libjack0.100.0-dev | libjack0.80.0-dev | libjack0.71.2-dev | libjack0.50.0-dev,
- libaudio-dev | nas-dev, libesd0-dev, libsane-dev, libusb-dev, libgsm1-dev, libmpg123-dev,
+ libsane-dev, libusb-dev, libgsm1-dev, libmpg123-dev,
  libcapi20-dev (>= 1:3.3.0.20041024-2) [i386 amd64 powerpc sparc],
  libhal-dev, libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
  libssl-dev, libgnutls-dev, libxml2-dev, libxslt1-dev, unixodbc-dev, prelink [i386 amd64],
@@ -39,7 +38,7 @@ Package: wine
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Multi-Arch: foreign
 Depends: wine-bin (= ${binary:Version}),
- libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
+ libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
  libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version}),
  libwine-openal (= ${binary:Version})
@@ -154,17 +153,6 @@ Description: Windows API implementation - color management module
  This package contains a Color Management System implementation that
  lets Windows applications calibrate the colors used for display and print.
 
-Package: libwine-esd
-Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Multi-Arch: same
-Depends: ${shlibs:Depends}
-Description: Windows API implementation - EsounD sound module
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package contains an EsounD sound driver.
-
 Package: libwine-gl
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
@@ -190,17 +178,6 @@ Description: Windows API implementation - camera module
  This package contains a TWAIN interface that allows Windows applications
  to communicate with cameras supported by gphoto2.
 
-Package: libwine-jack
-Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Multi-Arch: same
-Depends: ${shlibs:Depends}
-Description: Windows API implementation - JACK sound module
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package contains a JACK sound driver.
-
 Package: libwine-ldap
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
@@ -212,18 +189,6 @@ Description: Windows API implementation - LDAP module
  .
  This package contains a module that allows Windows applications to access
  LDAP directory services.
-
-Package: libwine-nas
-Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Multi-Arch: same
-Depends: ${shlibs:Depends}
-Replaces: libwine (<< 0.0.20020710)
-Description: Windows API implementation - NAS sound module
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package contains a Network Audio System sound driver.
 
 Package: libwine-openal
 Section: libs
