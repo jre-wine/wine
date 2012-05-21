@@ -6,16 +6,14 @@ export SHELL=bash
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-ifneq (,$(filter noopt,$(DEB_BUILD_OPTIONS)))
-CFLAGS=-O0 -g
-else
-CFLAGS=-O2 -g
-endif
-LDFLAGS=
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 NUMJOBS = $(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 MAKEFLAGS += -j$(NUMJOBS)
 endif
+
+CFLAGS=$(shell dpkg-buildflags --get CFLAGS)
+LDFLAGS=$(shell dpkg-buildflags --get LDFLAGS)
+CPPFLAGS=$(shell dpkg-buildflags --get CPPFLAGS)
 
 CONFIGOPTS = --with-x --disable-tests
 
@@ -51,12 +49,14 @@ LIBDIRS=$(LIBDIR)
 IA32_CC := $(CC)
 IA32_CFLAGS := $(CFLAGS)
 IA32_LDFLAGS := $(LDFLAGS)
+IA32_CPPFLAGS := $(CPPFLAGS)
 IA32_LIBDIR := $(LIBDIR)
 
 # Win64 version requires gcc >= 4.4
 AMD64_CC := $(CC)
 AMD64_CFLAGS := $(CFLAGS)
 AMD64_LDFLAGS := $(LDFLAGS)
+AMD64_CPPFLAGS := $(CPPFLAGS)
 AMD64_LIBDIR := $(LIBDIR)
 
 ifeq ($(DEB_HOST_GNU_CPU),x86_64)
@@ -155,6 +155,7 @@ ifeq (,$(DEB_SAVEBUILD))
 	cd build32 && \
 	CC="$(IA32_CC)" \
 	CFLAGS="$(IA32_CFLAGS)" \
+	CPPFLAGS="$(IA32_CPPFLAGS)" \
 	LDFLAGS="$(IA32_LDFLAGS)" \
 	../configure --disable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
@@ -177,6 +178,7 @@ ifeq (,$(DEB_SAVEBUILD))
 	cd build64 && \
 	CC="$(AMD64_CC)" \
 	CFLAGS="$(AMD64_CFLAGS)" \
+	CPPFLAGS="$(AMD64_CPPFLAGS)" \
 	LDFLAGS="$(AMD64_LDFLAGS)" \
 	../configure --enable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
