@@ -40,7 +40,7 @@ MULTIARCH=n
 # Win64 is not ready yet
 ENABLE_WIN64=n
 
-CC=gcc-4.4
+CC=gcc
 ifneq (n,$(MULTIARCH))
 LIBDIR=usr/lib/$(DEB_HOST_GNU_TYPE)
 else
@@ -54,7 +54,7 @@ IA32_LDFLAGS := $(LDFLAGS)
 IA32_LIBDIR := $(LIBDIR)
 
 # Win64 version requires gcc >= 4.4
-AMD64_CC := gcc-4.4
+AMD64_CC := $(CC)
 AMD64_CFLAGS := $(CFLAGS)
 AMD64_LDFLAGS := $(LDFLAGS)
 AMD64_LIBDIR := $(LIBDIR)
