@@ -58,7 +58,7 @@ Multi-Arch: foreign
 Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib, libwine-gecko-1.4
 Suggests: libwine-print, libwine-gl
 Conflicts: binfmt-support (<< 1.1.2)
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1), wine (<< 0.9.35)
+Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1), wine (<< 0.9.35), wine-gecko-1.0.0
 Description: Windows API implementation - binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
