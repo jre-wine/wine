@@ -1,3 +1,10 @@
+wine (1.4-0.3) experimental; urgency=low
+
+  * non-maintainer upload
+  * fix wine-gecko symlink
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 22 May 2012 01:08:10 -0400
+
 wine (1.4-0.2) experimental; urgency=low
 
   * non-maintainer upload
