@@ -3,7 +3,7 @@ Section: otherosfs
 Priority: optional
 Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
 Uploaders: Ove Kaaven <ovek@arcticnet.no>, Arthur Loiret <arthur.loiret@gmail.com>
-Build-Depends: debhelper (>= 5), flex, bison,
+Build-Depends: debhelper (>= 9), dpkg-dev (>= 1.16.0), flex, bison,
  libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
  libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
  libxrender-dev | xlibs-dev (<< 4.3), libxt-dev | xlibs-dev (<< 4.3),
@@ -16,33 +16,25 @@ Build-Depends: debhelper (>= 5), flex, bison,
  libglu1-mesa-dev | libglu1-xorg-dev | xlibmesa-glu-dev | xlibmesa-dev (<= 4.2.1-4) | libglu-dev,
  freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
  libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcups2-dev | libcupsys2-dev,
- libjpeg8-dev | libjpeg62-dev | libjpeg-dev , libpng-dev | libpng3-dev | libpng12-dev,
+ libjpeg8-dev | libjpeg62-dev | libjpeg-dev, libpng-dev | libpng3-dev | libpng12-dev,
  libfreetype6-dev, libfontconfig1-dev, libopenal-dev,
- libasound2-dev [i386 amd64 powerpc sparc], oss4-dev,
+ libasound2-dev, oss4-dev,
  libsane-dev, libusb-dev, libgsm1-dev, libmpg123-dev,
- libcapi20-dev (>= 1:3.3.0.20041024-2) [i386 amd64 powerpc sparc],
- libhal-dev, libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
- libssl-dev, libgnutls-dev, libxml2-dev, libxslt1-dev, unixodbc-dev, prelink [i386 amd64],
+ libcapi20-dev (>= 1:3.3.0.20041024-2),
+ libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
+ libssl-dev, libgnutls-dev, libxml2-dev, libxslt1-dev, unixodbc-dev, prelink,
  dctrl-tools | grep-dctrl, lzma, sharutils,
- gcc (>= 4.4), gcc-multilib (>= 4.4) [any-amd64],
- ia32-libs (>= 1.19) [amd64 kfreebsd-amd64],
- ia32-libs-dev [amd64 kfreebsd-amd64] | ia32-libs (<< 20100908) [amd64 kfreebsd-amd64],
- lib32ncurses5-dev [amd64 kfreebsd-amd64], lib32asound2-dev [amd64],
- lib32z1-dev [amd64 kfreebsd-amd64],
+ gcc (>= 4.4),
 Standards-Version: 3.9.2
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
 Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
 
 Package: wine
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Multi-Arch: foreign
-Depends: wine-bin (= ${binary:Version}),
- libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}),
- libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
- libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version}),
- libwine-openal (= ${binary:Version})
-Recommends: ttf-liberation
+Architecture: any
+Multi-Arch: allowed
+Depends:
+ wine-bin (= ${binary:Version}), 
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
@@ -51,7 +43,7 @@ Description: Windows API implementation - standard suite
  This is a virtual package that depends on the standard Wine components.
 
 Package: wine-bin
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: foreign
 Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib, libwine-gecko-1.4
 Suggests: libwine-print, libwine-gl
@@ -65,7 +57,7 @@ Description: Windows API implementation - binary loader
  executables.
 
 Package: libwine-dbg
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Section: debug
 Priority: extra
@@ -77,9 +69,9 @@ Description: Windows API implementation - debugging symbols
  This package provides debugging symbols.
 
 Package: libwine-dev
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Section: libdevel
-Depends: ${shlibs:Depends}, libwine (= ${binary:Version}), libc6-dev, libc6-dev-i386 [amd64 kfreebsd-amd64]
+Depends: ${shlibs:Depends}, libwine (= ${binary:Version}), libc6-dev
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1)
 Suggests: wine-doc
 Description: Windows API implementation - development files
@@ -90,13 +82,27 @@ Description: Windows API implementation - development files
 
 Package: libwine
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${wine:Depends}, ${shlibs:Depends}
-Pre-Depends: ${wine:Pre-Depends}
+Depends:
+ ${wine:Depends},
+ ${shlibs:Depends},
+Recommends:
+ ${shlibs:Recommends},
+ ttf-liberation,
+ libwine-gl (= ${binary:Version}),
+ libwine-alsa (= ${binary:Version}) | libwine-oss (= ${binary:Version}),
+Suggests:
+ wine-doc,
+ libwine-cms (= ${binary:Version}),
+ libwine-sane (= ${binary:Version}),
+ libwine-ldap (= ${binary:Version}),
+ libwine-print (= ${binary:Version}),
+ libwine-openal (= ${binary:Version}),
+ libwine-gphoto2 (= ${binary:Version}),
+Pre-Depends:
+ ${wine:Pre-Depends}
 Replaces: wine (<< 0.9.11-1), libwine-twain (<< 0.9.13), libwine-gl (<< 0.9.53-1)
-Recommends: ${shlibs:Recommends}
-Suggests: wine-doc
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -105,7 +111,7 @@ Description: Windows API implementation - library
 
 Package: libwine-alsa
 Section: libs
-Architecture: i386 amd64 powerpc sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - ALSA sound module
@@ -116,7 +122,7 @@ Description: Windows API implementation - ALSA sound module
 
 Package: libwine-bin
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Replaces: wine-bin (<< 1.1.25-1), wine-utils (<< 1.1.25-1)
@@ -130,7 +136,7 @@ Description: Windows API implementation - system services
 Package: libwine-capi
 Section: libs
 Priority: extra
-Architecture: i386 amd64 powerpc sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - ISDN module
@@ -142,7 +148,7 @@ Description: Windows API implementation - ISDN module
 
 Package: libwine-cms
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.0.20050830)
@@ -155,7 +161,7 @@ Description: Windows API implementation - color management module
 
 Package: libwine-gl
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Replaces: libwine (<< 0.9.56)
@@ -168,7 +174,7 @@ Description: Windows API implementation - OpenGL module
 
 Package: libwine-gphoto2
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - camera module
@@ -180,7 +186,7 @@ Description: Windows API implementation - camera module
 
 Package: libwine-ldap
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - LDAP module
@@ -192,7 +198,7 @@ Description: Windows API implementation - LDAP module
 
 Package: libwine-openal
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Description: Windows API implementation - OpenAL module
@@ -204,7 +210,7 @@ Description: Windows API implementation - OpenAL module
 
 Package: libwine-oss
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}, oss-compat
 Replaces: libwine (<< 0.9.35)
@@ -216,7 +222,7 @@ Description: Windows API implementation - OSS sound module
 
 Package: libwine-print
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}, cups-bsd | cupsys-bsd | lpr
 Replaces: libwine (<< 0.0.20020710)
@@ -229,7 +235,7 @@ Description: Windows API implementation - printing module
 
 Package: libwine-sane
 Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends: ${shlibs:Depends}
 Replaces: libwine-twain (<< 0.9.13)
