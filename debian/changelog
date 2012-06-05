@@ -1,3 +1,9 @@
+wine (1.4-2) unstable; urgency=low
+
+  * Fix hurd/kfreebsd build dependencies
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 05 Jun 2012 19:20:50 -0400
+
 wine (1.4-1) unstable; urgency=low
 
   * Team upload to unstable
