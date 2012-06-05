@@ -34,6 +34,7 @@ Package: wine
 Architecture: any
 Multi-Arch: allowed
 Depends:
+ ${misc:Depends},
  wine-bin (= ${binary:Version}), 
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
@@ -45,10 +46,22 @@ Description: Windows API implementation - standard suite
 Package: wine-bin
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: foreign
-Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib, libwine-gecko-1.4
-Suggests: libwine-print, libwine-gl
-Conflicts: binfmt-support (<< 1.1.2)
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1), wine (<< 0.9.35), wine-gecko-1.0.0
+Depends:
+ ${misc:Depnends},
+ ${shlibs:Depends},
+ libwine-bin (= ${binary:Version}),
+ x11-utils | xbase-clients (>= 4.0) | xcontrib,
+ libwine-gecko-1.4
+Suggests:
+ libwine-print,
+ libwine-gl
+Conflicts:
+ binfmt-support (<< 1.1.2)
+Replaces:
+ libwine (<< 0.0.20010216),
+ wine-utils (<< 1.1.25-1),
+ wine (<< 0.9.35),
+ wine-gecko-1.0.0
 Description: Windows API implementation - binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -61,7 +74,10 @@ Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Section: debug
 Priority: extra
-Depends: libwine (= ${binary:Version})
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ libwine (= ${binary:Version}),
 Description: Windows API implementation - debugging symbols
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -71,9 +87,16 @@ Description: Windows API implementation - debugging symbols
 Package: libwine-dev
 Architecture: any-i386 any-powerpc any-sparc
 Section: libdevel
-Depends: ${shlibs:Depends}, libwine (= ${binary:Version}), libc6-dev
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1)
-Suggests: wine-doc
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ libwine (= ${binary:Version}),
+ libc6-dev,
+Replaces:
+ libwine (<< 0.0.20010216),
+ wine-utils (<< 1.1.25-1),
+Suggests:
+ wine-doc,
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -85,6 +108,7 @@ Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  ${wine:Depends},
  ${shlibs:Depends},
 Recommends:
@@ -102,7 +126,10 @@ Suggests:
  libwine-gphoto2 (= ${binary:Version}),
 Pre-Depends:
  ${wine:Pre-Depends}
-Replaces: wine (<< 0.9.11-1), libwine-twain (<< 0.9.13), libwine-gl (<< 0.9.53-1)
+Replaces:
+ wine (<< 0.9.11-1),
+ libwine-twain (<< 0.9.13),
+ libwine-gl (<< 0.9.53-1),
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -113,7 +140,9 @@ Package: libwine-alsa
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: Windows API implementation - ALSA sound module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -124,8 +153,12 @@ Package: libwine-bin
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
-Replaces: wine-bin (<< 1.1.25-1), wine-utils (<< 1.1.25-1)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Replaces:
+ wine-bin (<< 1.1.25-1),
+ wine-utils (<< 1.1.25-1),
 Description: Windows API implementation - system services
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -138,7 +171,9 @@ Section: libs
 Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: Windows API implementation - ISDN module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -150,8 +185,11 @@ Package: libwine-cms
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
-Replaces: libwine (<< 0.0.20050830)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Replaces:
+ libwine (<< 0.0.20050830),
 Description: Windows API implementation - color management module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -163,8 +201,11 @@ Package: libwine-gl
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
-Replaces: libwine (<< 0.9.56)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Replaces:
+ libwine (<< 0.9.56),
 Description: Windows API implementation - OpenGL module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -176,7 +217,9 @@ Package: libwine-gphoto2
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: Windows API implementation - camera module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -188,7 +231,9 @@ Package: libwine-ldap
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: Windows API implementation - LDAP module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -200,7 +245,9 @@ Package: libwine-openal
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
 Description: Windows API implementation - OpenAL module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -212,8 +259,12 @@ Package: libwine-oss
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}, oss-compat
-Replaces: libwine (<< 0.9.35)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ oss-compat,
+Replaces:
+ libwine (<< 0.9.35)
 Description: Windows API implementation - OSS sound module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -224,8 +275,12 @@ Package: libwine-print
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}, cups-bsd | cupsys-bsd | lpr
-Replaces: libwine (<< 0.0.20020710)
+Depends:
+ ${misc:Depend},
+ ${shlibs:Depends},
+ cups-bsd | cupsys-bsd | lpr,
+Replaces:
+ libwine (<< 0.0.20020710),
 Description: Windows API implementation - printing module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -237,8 +292,11 @@ Package: libwine-sane
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
-Replaces: libwine-twain (<< 0.9.13)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Replaces:
+ libwine-twain (<< 0.9.13),
 Description: Windows API implementation - scanner module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
