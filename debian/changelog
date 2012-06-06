@@ -1,3 +1,9 @@
+wine (1.4-3) unstable; urgency=low
+
+  * Fix prelink build dependency
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 05 Jun 2012 20:12:53 -0400
+
 wine (1.4-2) unstable; urgency=low
 
   * Fix hurd/kfreebsd build dependencies
