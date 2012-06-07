@@ -38,7 +38,7 @@ Architecture: any
 Multi-Arch: allowed
 Depends:
  ${misc:Depends},
- wine-bin (= ${binary:Version}), 
+ wine-bin (>= ${source:Version}),
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
