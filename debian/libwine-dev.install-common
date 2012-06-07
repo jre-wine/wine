@@ -13,9 +13,11 @@ debian/tmp/usr/bin/wrc
 debian/tmp/usr/include
 debian/tmp/usr/share/man/man1/widl.1
 debian/tmp/usr/share/man/man1/winebuild.1
+debian/tmp/usr/share/man/man1/winecpp.1
 debian/tmp/usr/share/man/man1/winedump.1
-debian/tmp/usr/share/man/man1/winegcc.1
 debian/tmp/usr/share/man/man1/wineg++.1
+debian/tmp/usr/share/man/man1/winegcc.1
+debian/tmp/usr/share/man/*/man1/winemaker.1
 debian/tmp/usr/share/man/man1/winemaker.1
 debian/tmp/usr/share/man/man1/wmc.1
 debian/tmp/usr/share/man/man1/wrc.1

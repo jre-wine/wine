@@ -12,5 +12,7 @@ debian/tmp/usr/bin/wineconsole
 debian/tmp/usr/bin/winefile
 debian/tmp/usr/bin/winemine 
 debian/tmp/usr/bin/winepath
+debian/tmp/usr/bin/wineprefixcreate
 debian/tmp/usr/share/man/man1/wine.1
 debian/tmp/usr/share/man/man1/winedbg.1
+debian/tmp/usr/share/man/man1/wineprefixcreate.1
