@@ -1,3 +1,12 @@
+wine (1.4-4) unstable; urgency=low
+
+  * Fix manpage alternatives (closes: #676320)
+  * Make multiarch wine binnmu safe (closes: #676457)
+  * Install additional wine exe files
+  * Install upstream manpages where available
+
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 07 Jun 2012 15:53:06 -0400
+
 wine (1.4-3) unstable; urgency=low
 
   * Fix prelink build dependency
