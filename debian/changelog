@@ -1,3 +1,11 @@
+wine (1.4-5) unstable; urgency=low
+
+  * Exclude lintian overrides and achitecture-specific font files
+    (closes: #676443)
+  * Replace wine-bin < 1.4-4 (closes: #676598)
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 08 Jun 2012 18:26:11 -0400
+
 wine (1.4-4) unstable; urgency=low
 
   * Fix manpage alternatives (closes: #676320)
