@@ -160,7 +160,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
 Replaces:
- wine-bin (<< 1.1.25-1),
+ wine-bin (<< 1.4-4),
  wine-utils (<< 1.1.25-1),
 Description: Windows API implementation - system services
  Wine is a free MS-Windows API implementation.
