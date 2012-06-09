@@ -50,7 +50,6 @@ usr/lib/libpulse.so.0.4.1        libpulse.so
 usr/lib/libpulse-simple.so.0.0.1 libpulse-simple.so
 usr/lib/libssl.so.0.9.8          libssl.so
 usr/lib/libXcomposite.so.1       libXcomposite.so
-usr/lib/libhal.so.1              libhal.so
 usr/lib/libcapi20.so.3           libcapi20.so
 usr/lib/libcrypto.so.0.9.8       libcrypto.so
 usr/lib/libdbus-1.so.3           libdbus-1.so

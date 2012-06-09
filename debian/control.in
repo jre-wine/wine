@@ -50,7 +50,7 @@ Package: wine-bin
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: foreign
 Depends:
- ${misc:Depnends},
+ ${misc:Depends},
  ${shlibs:Depends},
  libwine-bin (= ${binary:Version}),
  x11-utils | xbase-clients (>= 4.0) | xcontrib,
