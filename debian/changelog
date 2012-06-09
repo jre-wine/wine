@@ -1,3 +1,9 @@
+wine (1.4-6) unstable; urgency=low
+
+  * Eliminate additional hal references (closes: #613186)
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 09 Jun 2012 00:53:35 -0400
+
 wine (1.4-5) unstable; urgency=low
 
   * Exclude lintian overrides and achitecture-specific font files
