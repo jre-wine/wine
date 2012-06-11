@@ -106,12 +106,11 @@ ALTPRIO32 := 50
 ALTPRIO64 := 75
 endif
 
+# prepare debian/control from debian/control.in
 control-stamp: debian/control.in
-ifneq (,$(BUILDS))
-	bash debian/prep-control.sh "$(VERSUFFIX)"
-else
-	bash debian/prep-control-transit.sh "$(VERSUFFIX)" "$(TRANSPREFIX)" "$(TRANSSUFFIX)"
-endif
+	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
+	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
+	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' debian/control.in > debian/control
 	touch control-stamp
 
 configure-ia32: configure-ia32-stamp
@@ -224,7 +223,6 @@ endif
 
 clean: clean-arch32 clean-arch64
 	dh_testdir
-	dh_testroot
 	bash debian/clean-install.sh "$(VERSUFFIX)"
 	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp control-stamp
 	rm -rf lib32 debian/libwine$(VERSUFFIX)
@@ -400,8 +398,7 @@ binary-arch: install-arch-stamp
 	dh_builddeb -s
 else
 binary-arch: control-stamp
-	# Create dummy (transition) packages. The control-stamp rule
-	# will make them depend on the desired packages.
+	# Create transitional packages
 	dh_testdir
 	dh_testroot
 	# create installation directories
