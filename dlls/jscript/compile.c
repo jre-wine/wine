@@ -40,7 +40,7 @@ typedef struct _statement_ctx_t {
     struct _statement_ctx_t *next;
 } statement_ctx_t;
 
-struct _compiler_ctx_t {
+typedef struct {
     parser_ctx_t *parser;
     bytecode_t *code;
 
@@ -52,7 +52,7 @@ struct _compiler_ctx_t {
     unsigned labels_cnt;
 
     statement_ctx_t *stat_ctx;
-};
+} compiler_ctx_t;
 
 static const struct {
     const char *op_str;
@@ -1694,6 +1694,12 @@ void release_bytecode(bytecode_t *code)
 {
     unsigned i;
 
+    if(--code->ref)
+        return;
+
+    if(code->parser)
+        parser_release(code->parser);
+
     for(i=0; i < code->bstr_cnt; i++)
         SysFreeString(code->bstr_pool[i]);
 
@@ -1703,76 +1709,84 @@ void release_bytecode(bytecode_t *code)
     heap_free(code);
 }
 
-void release_compiler(compiler_ctx_t *ctx)
+static HRESULT init_code(compiler_ctx_t *compiler)
 {
-    heap_free(ctx);
-}
-
-static HRESULT init_compiler(parser_ctx_t *parser)
-{
-    compiler_ctx_t *compiler;
-
-    if(parser->compiler)
-        return S_OK;
-
-    compiler = heap_alloc_zero(sizeof(*compiler));
-    if(!compiler)
-        return E_OUTOFMEMORY;
-
     compiler->code = heap_alloc_zero(sizeof(bytecode_t));
-    if(!compiler->code) {
-        release_compiler(compiler);
+    if(!compiler->code)
         return E_OUTOFMEMORY;
-    }
 
+    compiler->code->ref = 1;
     jsheap_init(&compiler->code->heap);
 
     compiler->code->instrs = heap_alloc(64 * sizeof(instr_t));
     if(!compiler->code->instrs) {
         release_bytecode(compiler->code);
-        release_compiler(compiler);
         return E_OUTOFMEMORY;
     }
 
     compiler->code_size = 64;
     compiler->code_off = 1;
-
-    compiler->parser = parser;
-
-    parser->code = compiler->code;
-    parser->compiler = compiler;
     return S_OK;
 }
 
-HRESULT compile_subscript_stat(parser_ctx_t *parser, statement_t *stat, BOOL from_eval, unsigned *ret_off)
+static HRESULT compile_function(compiler_ctx_t *ctx, source_elements_t *source, BOOL from_eval)
 {
+    function_declaration_t *iter;
     unsigned off;
     HRESULT hres;
 
     TRACE("\n");
 
-    hres = init_compiler(parser);
+    off = ctx->code_off;
+    hres = compile_block_statement(ctx, source->statement);
     if(FAILED(hres))
         return hres;
 
-    off = parser->compiler->code_off;
-    if(stat->next)
-        hres = compile_block_statement(parser->compiler, stat);
-    else
-        hres = compile_statement(parser->compiler, NULL, stat);
-    if(FAILED(hres))
-        return hres;
+    resolve_labels(ctx, off);
 
-    resolve_labels(parser->compiler, off);
-
-    if(!from_eval && !push_instr(parser->compiler, OP_pop))
+    if(!from_eval && !push_instr(ctx, OP_pop))
         return E_OUTOFMEMORY;
-    if(!push_instr(parser->compiler, OP_ret))
+    if(!push_instr(ctx, OP_ret))
         return E_OUTOFMEMORY;
 
     if(TRACE_ON(jscript_disas))
-        dump_code(parser->compiler, off);
+        dump_code(ctx, off);
 
-    *ret_off = off;
+    source->instr_off = off;
+
+    for(iter = source->functions; iter; iter = iter->next) {
+        hres = compile_function(ctx, iter->expr->source_elements, FALSE);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    return S_OK;
+}
+
+HRESULT compile_script(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter, BOOL from_eval,
+        bytecode_t **ret)
+{
+    compiler_ctx_t compiler = {0};
+    HRESULT hres;
+
+    hres = script_parse(ctx, code, delimiter, from_eval, &compiler.parser);
+    if(FAILED(hres))
+        return hres;
+
+    hres = init_code(&compiler);
+    if(FAILED(hres)) {
+        parser_release(compiler.parser);
+        return hres;
+    }
+
+    compiler.code->parser = compiler.parser;
+
+    hres = compile_function(&compiler, compiler.parser->source, from_eval);
+    if(FAILED(hres)) {
+        release_bytecode(compiler.code);
+        return hres;
+    }
+
+    *ret = compiler.code;
     return S_OK;
 }

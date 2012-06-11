@@ -20,6 +20,7 @@
 #include "wine/port.h"
 
 #include <math.h>
+#include <assert.h>
 
 #include "jscript.h"
 #include "engine.h"
@@ -211,7 +212,7 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
         jsdisp = iface_to_jsdisp((IUnknown*)V_DISPATCH(v));
         if(!jsdisp) {
             V_VT(ret) = VT_EMPTY;
-            return disp_propget(ctx, V_DISPATCH(v), DISPID_VALUE, ret, ei, NULL /*FIXME*/);
+            return disp_propget(ctx, V_DISPATCH(v), DISPID_VALUE, ret, ei);
         }
 
         if(hint == NO_HINT)
@@ -221,7 +222,7 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
 
         hres = jsdisp_get_id(jsdisp, hint == HINT_STRING ? toStringW : valueOfW, 0, &id);
         if(SUCCEEDED(hres)) {
-            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
+            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei);
             if(FAILED(hres)) {
                 WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
@@ -237,7 +238,7 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
 
         hres = jsdisp_get_id(jsdisp, hint == HINT_STRING ? valueOfW : toStringW, 0, &id);
         if(SUCCEEDED(hres)) {
-            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
+            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei);
             if(FAILED(hres)) {
                 WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
@@ -654,5 +655,164 @@ HRESULT to_object(script_ctx_t *ctx, VARIANT *v, IDispatch **disp)
         return E_NOTIMPL;
     }
 
+    return S_OK;
+}
+
+HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTYPE vt)
+{
+    jsexcept_t ei;
+    HRESULT hres;
+
+    memset(&ei, 0, sizeof(ei));
+
+    switch(vt) {
+    case VT_I2:
+    case VT_I4: {
+        INT i;
+
+        hres = to_int32(ctx, src, &ei, &i);
+        if(SUCCEEDED(hres)) {
+            if(vt == VT_I4)
+                V_I4(dst) = i;
+            else
+                V_I2(dst) = i;
+        }
+        break;
+    }
+    case VT_R8:
+        hres = to_number(ctx, src, &ei, dst);
+        if(SUCCEEDED(hres) && V_VT(dst) == VT_I4)
+            V_R8(dst) = V_I4(dst);
+        break;
+    case VT_R4: {
+        VARIANT n;
+
+        hres = to_number(ctx, src, &ei, &n);
+        if(SUCCEEDED(hres))
+            V_R4(dst) = num_val(&n);
+        break;
+    }
+    case VT_BOOL: {
+        VARIANT_BOOL b;
+
+        hres = to_boolean(src, &b);
+        if(SUCCEEDED(hres))
+            V_BOOL(dst) = b;
+        break;
+    }
+    case VT_BSTR: {
+        BSTR str;
+
+        hres = to_string(ctx, src, &ei, &str);
+        if(SUCCEEDED(hres))
+            V_BSTR(dst) = str;
+        break;
+    }
+    case VT_EMPTY:
+        hres = V_VT(src) == VT_EMPTY ? S_OK : E_NOTIMPL;
+        break;
+    case VT_NULL:
+        hres = V_VT(src) == VT_NULL ? S_OK : E_NOTIMPL;
+        break;
+    default:
+        FIXME("vt %d not implemented\n", vt);
+        hres = E_NOTIMPL;
+    }
+
+    if(FAILED(hres)) {
+        VariantClear(&ei.var);
+        return hres;
+    }
+
+    V_VT(dst) = vt;
+    return S_OK;
+}
+
+static inline JSCaller *impl_from_IServiceProvider(IServiceProvider *iface)
+{
+    return CONTAINING_RECORD(iface, JSCaller, IServiceProvider_iface);
+}
+
+static HRESULT WINAPI JSCaller_QueryInterface(IServiceProvider *iface, REFIID riid, void **ppv)
+{
+    JSCaller *This = impl_from_IServiceProvider(iface);
+
+    if(IsEqualGUID(&IID_IUnknown, riid)) {
+        TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
+        *ppv = &This->IServiceProvider_iface;
+    }else if(IsEqualGUID(&IID_IServiceProvider, riid)) {
+        TRACE("(%p)->(IID_IServiceProvider %p)\n", This, ppv);
+        *ppv = &This->IServiceProvider_iface;
+    }else {
+        WARN("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI JSCaller_AddRef(IServiceProvider *iface)
+{
+    JSCaller *This = impl_from_IServiceProvider(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI JSCaller_Release(IServiceProvider *iface)
+{
+    JSCaller *This = impl_from_IServiceProvider(iface);
+    LONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) ref=%d\n", This, ref);
+
+    if(!ref) {
+        assert(!This->ctx);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI JSCaller_QueryService(IServiceProvider *iface, REFGUID guidService,
+        REFIID riid, void **ppv)
+{
+    JSCaller *This = impl_from_IServiceProvider(iface);
+
+    if(IsEqualGUID(guidService, &SID_VariantConversion) && This->ctx && This->ctx->active_script) {
+        TRACE("(%p)->(SID_VariantConversion)\n", This);
+        return IActiveScript_QueryInterface(This->ctx->active_script, riid, ppv);
+    }
+
+    FIXME("(%p)->(%s %s %p)\n", This, debugstr_guid(guidService), debugstr_guid(riid), ppv);
+
+    *ppv = NULL;
+    return E_NOINTERFACE;
+}
+
+static const IServiceProviderVtbl ServiceProviderVtbl = {
+    JSCaller_QueryInterface,
+    JSCaller_AddRef,
+    JSCaller_Release,
+    JSCaller_QueryService
+};
+
+HRESULT create_jscaller(script_ctx_t *ctx)
+{
+    JSCaller *ret;
+
+    ret = heap_alloc(sizeof(*ret));
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    ret->IServiceProvider_iface.lpVtbl = &ServiceProviderVtbl;
+    ret->ref = 1;
+    ret->ctx = ctx;
+
+    ctx->jscaller = ret;
     return S_OK;
 }

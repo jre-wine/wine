@@ -151,7 +151,7 @@ static HRESULT stack_pop_number(exec_ctx_t *ctx, VARIANT *r)
     HRESULT hres;
 
     v = stack_pop(ctx);
-    hres = to_number(ctx->parser->script, v, ctx->ei, r);
+    hres = to_number(ctx->script, v, ctx->ei, r);
     VariantClear(v);
     return hres;
 }
@@ -164,24 +164,24 @@ static HRESULT stack_pop_object(exec_ctx_t *ctx, IDispatch **r)
     v = stack_pop(ctx);
     if(V_VT(v) == VT_DISPATCH) {
         if(!V_DISPATCH(v))
-            return throw_type_error(ctx->parser->script, ctx->ei, JS_E_OBJECT_REQUIRED, NULL);
+            return throw_type_error(ctx->script, ctx->ei, JS_E_OBJECT_REQUIRED, NULL);
         *r = V_DISPATCH(v);
         return S_OK;
     }
 
-    hres = to_object(ctx->parser->script, v, r);
+    hres = to_object(ctx->script, v, r);
     VariantClear(v);
     return hres;
 }
 
 static inline HRESULT stack_pop_int(exec_ctx_t *ctx, INT *r)
 {
-    return to_int32(ctx->parser->script, stack_pop(ctx), ctx->ei, r);
+    return to_int32(ctx->script, stack_pop(ctx), ctx->ei, r);
 }
 
 static inline HRESULT stack_pop_uint(exec_ctx_t *ctx, DWORD *r)
 {
-    return to_uint32(ctx->parser->script, stack_pop(ctx), ctx->ei, r);
+    return to_uint32(ctx->script, stack_pop(ctx), ctx->ei, r);
 }
 
 static inline IDispatch *stack_pop_objid(exec_ctx_t *ctx, DISPID *id)
@@ -230,7 +230,7 @@ static HRESULT exprval_value(script_ctx_t *ctx, exprval_t *val, jsexcept_t *ei, 
             return E_FAIL;
         }
 
-        return disp_propget(ctx, val->u.idref.disp, val->u.idref.id, ret, ei, NULL/*FIXME*/);
+        return disp_propget(ctx, val->u.idref.disp, val->u.idref.id, ret, ei);
     case EXPRVAL_INVALID:
         assert(0);
     }
@@ -328,6 +328,9 @@ HRESULT create_exec_ctx(script_ctx_t *script_ctx, IDispatch *this_obj, jsdisp_t 
     jsdisp_addref(var_disp);
     ctx->var_disp = var_disp;
 
+    script_addref(script_ctx);
+    ctx->script = script_ctx;
+
     if(scope) {
         scope_addref(scope);
         ctx->scope_chain = scope;
@@ -348,6 +351,8 @@ void exec_release(exec_ctx_t *ctx)
         jsdisp_release(ctx->var_disp);
     if(ctx->this_obj)
         IDispatch_Release(ctx->this_obj);
+    if(ctx->script)
+        script_release(ctx->script);
     heap_free(ctx->stack);
     heap_free(ctx);
 }
@@ -552,14 +557,14 @@ static HRESULT identifier_eval(script_ctx_t *ctx, BSTR identifier, exprval_t *re
 /* ECMA-262 3rd Edition    12.2 */
 static HRESULT interp_var_set(exec_ctx_t *ctx)
 {
-    const BSTR name = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR name = ctx->code->instrs[ctx->ip].arg1.bstr;
     VARIANT *v;
     HRESULT hres;
 
     TRACE("%s\n", debugstr_w(name));
 
     v = stack_pop(ctx);
-    hres = jsdisp_propput_name(ctx->var_disp, name, v, ctx->ei, NULL/*FIXME*/);
+    hres = jsdisp_propput_name(ctx->var_disp, name, v, ctx->ei);
     VariantClear(v);
     return hres;
 }
@@ -567,7 +572,7 @@ static HRESULT interp_var_set(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    12.6.4 */
 static HRESULT interp_forin(exec_ctx_t *ctx)
 {
-    const HRESULT arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const HRESULT arg = ctx->code->instrs[ctx->ip].arg1.uint;
     IDispatch *var_obj, *obj = NULL;
     IDispatchEx *dispex;
     DISPID id, var_id;
@@ -617,7 +622,7 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
 
         V_VT(&v) = VT_BSTR;
         V_BSTR(&v) = name;
-        hres = disp_propput(ctx->parser->script, var_obj, var_id, &v, ctx->ei, NULL/*FIXME*/);
+        hres = disp_propput(ctx->script, var_obj, var_id, &v, ctx->ei);
         SysFreeString(name);
         if(FAILED(hres))
             return hres;
@@ -642,7 +647,7 @@ static HRESULT interp_push_scope(exec_ctx_t *ctx)
     TRACE("\n");
 
     v = stack_pop(ctx);
-    hres = to_object(ctx->parser->script, v, &disp);
+    hres = to_object(ctx->script, v, &disp);
     VariantClear(v);
     if(FAILED(hres))
         return hres;
@@ -671,7 +676,7 @@ static HRESULT interp_pop_scope(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    12.13 */
 static HRESULT interp_case(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
     VARIANT *v;
     BOOL b;
     HRESULT hres;
@@ -704,28 +709,28 @@ static HRESULT interp_throw(exec_ctx_t *ctx)
 
 static HRESULT interp_throw_ref(exec_ctx_t *ctx)
 {
-    const HRESULT arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const HRESULT arg = ctx->code->instrs[ctx->ip].arg1.uint;
 
     TRACE("%08x\n", arg);
 
-    return throw_reference_error(ctx->parser->script, ctx->ei, arg, NULL);
+    return throw_reference_error(ctx->script, ctx->ei, arg, NULL);
 }
 
 static HRESULT interp_throw_type(exec_ctx_t *ctx)
 {
-    const HRESULT hres = ctx->parser->code->instrs[ctx->ip].arg1.uint;
-    const WCHAR *str = ctx->parser->code->instrs[ctx->ip].arg2.str;
+    const HRESULT hres = ctx->code->instrs[ctx->ip].arg1.uint;
+    const WCHAR *str = ctx->code->instrs[ctx->ip].arg2.str;
 
     TRACE("%08x %s\n", hres, debugstr_w(str));
 
-    return throw_type_error(ctx->parser->script, ctx->ei, hres, str);
+    return throw_type_error(ctx->script, ctx->ei, hres, str);
 }
 
 /* ECMA-262 3rd Edition    12.14 */
 static HRESULT interp_push_except(exec_ctx_t *ctx)
 {
-    const unsigned arg1 = ctx->parser->code->instrs[ctx->ip].arg1.uint;
-    const BSTR arg2 = ctx->parser->code->instrs[ctx->ip].arg2.bstr;
+    const unsigned arg1 = ctx->code->instrs[ctx->ip].arg1.uint;
+    const BSTR arg2 = ctx->code->instrs[ctx->ip].arg2.bstr;
     except_frame_t *except;
     unsigned stack_top;
 
@@ -798,14 +803,14 @@ static HRESULT interp_end_finally(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    13 */
 static HRESULT interp_func(exec_ctx_t *ctx)
 {
-    function_expression_t *expr = ctx->parser->code->instrs[ctx->ip].arg1.func;
+    function_expression_t *expr = ctx->code->instrs[ctx->ip].arg1.func;
     jsdisp_t *dispex;
     VARIANT v;
     HRESULT hres;
 
     TRACE("\n");
 
-    hres = create_source_function(ctx->parser, expr->parameter_list, expr->source_elements, ctx->scope_chain,
+    hres = create_source_function(ctx->script, ctx->code, expr->parameter_list, expr->source_elements, ctx->scope_chain,
             expr->src_str, expr->src_len, &dispex);
     if(FAILED(hres))
         return hres;
@@ -833,17 +838,17 @@ static HRESULT interp_array(exec_ctx_t *ctx)
         return hres;
     }
 
-    hres = to_string(ctx->parser->script, namev, ctx->ei, &name);
+    hres = to_string(ctx->script, namev, ctx->ei, &name);
     VariantClear(namev);
     if(FAILED(hres)) {
         IDispatch_Release(obj);
         return hres;
     }
 
-    hres = disp_get_id(ctx->parser->script, obj, name, 0, &id);
+    hres = disp_get_id(ctx->script, obj, name, 0, &id);
     SysFreeString(name);
     if(SUCCEEDED(hres)) {
-        hres = disp_propget(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+        hres = disp_propget(ctx->script, obj, id, &v, ctx->ei);
     }else if(hres == DISP_E_UNKNOWNNAME) {
         V_VT(&v) = VT_EMPTY;
         hres = S_OK;
@@ -858,7 +863,7 @@ static HRESULT interp_array(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.2.1 */
 static HRESULT interp_member(exec_ctx_t *ctx)
 {
-    const BSTR arg = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR arg = ctx->code->instrs[ctx->ip].arg1.bstr;
     IDispatch *obj;
     VARIANT v;
     DISPID id;
@@ -870,10 +875,10 @@ static HRESULT interp_member(exec_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = disp_get_id(ctx->parser->script, obj, arg, 0, &id);
+    hres = disp_get_id(ctx->script, obj, arg, 0, &id);
     if(SUCCEEDED(hres)) {
         V_VT(&v) = VT_EMPTY;
-        hres = disp_propget(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+        hres = disp_propget(ctx->script, obj, id, &v, ctx->ei);
     }else if(hres == DISP_E_UNKNOWNNAME) {
         V_VT(&v) = VT_EMPTY;
         hres = S_OK;
@@ -888,7 +893,7 @@ static HRESULT interp_member(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.2.1 */
 static HRESULT interp_memberid(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.lng;
     VARIANT *objv, *namev;
     IDispatch *obj;
     BSTR name;
@@ -900,10 +905,10 @@ static HRESULT interp_memberid(exec_ctx_t *ctx)
     namev = stack_pop(ctx);
     objv = stack_pop(ctx);
 
-    hres = to_object(ctx->parser->script, objv, &obj);
+    hres = to_object(ctx->script, objv, &obj);
     VariantClear(objv);
     if(SUCCEEDED(hres)) {
-        hres = to_string(ctx->parser->script, namev, ctx->ei, &name);
+        hres = to_string(ctx->script, namev, ctx->ei, &name);
         if(FAILED(hres))
             IDispatch_Release(obj);
     }
@@ -911,7 +916,7 @@ static HRESULT interp_memberid(exec_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    hres = disp_get_id(ctx->parser->script, obj, name, arg, &id);
+    hres = disp_get_id(ctx->script, obj, name, arg, &id);
     SysFreeString(name);
     if(FAILED(hres)) {
         IDispatch_Release(obj);
@@ -938,9 +943,9 @@ static HRESULT interp_refval(exec_ctx_t *ctx)
 
     disp = stack_topn_objid(ctx, 0, &id);
     if(!disp)
-        return throw_reference_error(ctx->parser->script, ctx->ei, JS_E_ILLEGAL_ASSIGN, NULL);
+        return throw_reference_error(ctx->script, ctx->ei, JS_E_ILLEGAL_ASSIGN, NULL);
 
-    hres = disp_propget(ctx->parser->script, disp, id, &v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_propget(ctx->script, disp, id, &v, ctx->ei);
     if(FAILED(hres))
         return hres;
 
@@ -970,7 +975,7 @@ static void jsstack_to_dp(exec_ctx_t *ctx, unsigned arg_cnt, DISPPARAMS *dp)
 /* ECMA-262 3rd Edition    11.2.2 */
 static HRESULT interp_new(exec_ctx_t *ctx)
 {
-    const LONG arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const LONG arg = ctx->code->instrs[ctx->ip].arg1.lng;
     VARIANT *constr, v;
     DISPPARAMS dp;
     HRESULT hres;
@@ -982,15 +987,15 @@ static HRESULT interp_new(exec_ctx_t *ctx)
     /* NOTE: Should use to_object here */
 
     if(V_VT(constr) == VT_NULL)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
     else if(V_VT(constr) != VT_DISPATCH)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_INVALID_ACTION, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_INVALID_ACTION, NULL);
     else if(!V_DISPATCH(constr))
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
 
     jsstack_to_dp(ctx, arg, &dp);
-    hres = disp_call(ctx->parser->script, V_DISPATCH(constr), DISPID_VALUE,
-            DISPATCH_CONSTRUCT, &dp, &v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_call(ctx->script, V_DISPATCH(constr), DISPID_VALUE,
+            DISPATCH_CONSTRUCT, &dp, &v, ctx->ei);
     if(FAILED(hres))
         return hres;
 
@@ -1001,8 +1006,8 @@ static HRESULT interp_new(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.2.3 */
 static HRESULT interp_call(exec_ctx_t *ctx)
 {
-    const unsigned argn = ctx->parser->code->instrs[ctx->ip].arg1.uint;
-    const int do_ret = ctx->parser->code->instrs[ctx->ip].arg2.lng;
+    const unsigned argn = ctx->code->instrs[ctx->ip].arg1.uint;
+    const int do_ret = ctx->code->instrs[ctx->ip].arg2.lng;
     VARIANT v, *objv;
     DISPPARAMS dp;
     HRESULT hres;
@@ -1011,11 +1016,11 @@ static HRESULT interp_call(exec_ctx_t *ctx)
 
     objv = stack_topn(ctx, argn);
     if(V_VT(objv) != VT_DISPATCH)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
 
     jsstack_to_dp(ctx, argn, &dp);
-    hres = disp_call(ctx->parser->script, V_DISPATCH(objv), DISPID_VALUE, DISPATCH_METHOD, &dp,
-            do_ret ? &v : NULL, ctx->ei, NULL/*FIXME*/);
+    hres = disp_call(ctx->script, V_DISPATCH(objv), DISPID_VALUE, DISPATCH_METHOD, &dp,
+            do_ret ? &v : NULL, ctx->ei);
     if(FAILED(hres))
         return hres;
 
@@ -1027,8 +1032,8 @@ static HRESULT interp_call(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.2.3 */
 static HRESULT interp_call_member(exec_ctx_t *ctx)
 {
-    const unsigned argn = ctx->parser->code->instrs[ctx->ip].arg1.uint;
-    const int do_ret = ctx->parser->code->instrs[ctx->ip].arg2.lng;
+    const unsigned argn = ctx->code->instrs[ctx->ip].arg1.uint;
+    const int do_ret = ctx->code->instrs[ctx->ip].arg2.lng;
     IDispatch *obj;
     DISPPARAMS dp;
     VARIANT v;
@@ -1039,10 +1044,10 @@ static HRESULT interp_call_member(exec_ctx_t *ctx)
 
     obj = stack_topn_objid(ctx, argn, &id);
     if(!obj)
-        return throw_type_error(ctx->parser->script, ctx->ei, id, NULL);
+        return throw_type_error(ctx->script, ctx->ei, id, NULL);
 
     jsstack_to_dp(ctx, argn, &dp);
-    hres = disp_call(ctx->parser->script, obj, id, DISPATCH_METHOD, &dp, do_ret ? &v : NULL, ctx->ei, NULL/*FIXME*/);
+    hres = disp_call(ctx->script, obj, id, DISPATCH_METHOD, &dp, do_ret ? &v : NULL, ctx->ei);
     if(FAILED(hres))
         return hres;
 
@@ -1067,21 +1072,21 @@ static HRESULT interp_this(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    10.1.4 */
 static HRESULT interp_ident(exec_ctx_t *ctx)
 {
-    const BSTR arg = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR arg = ctx->code->instrs[ctx->ip].arg1.bstr;
     exprval_t exprval;
     VARIANT v;
     HRESULT hres;
 
     TRACE("%s\n", debugstr_w(arg));
 
-    hres = identifier_eval(ctx->parser->script, arg, &exprval);
+    hres = identifier_eval(ctx->script, arg, &exprval);
     if(FAILED(hres))
         return hres;
 
     if(exprval.type == EXPRVAL_INVALID)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_UNDEFINED_VARIABLE, arg);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_UNDEFINED_VARIABLE, arg);
 
-    hres = exprval_to_value(ctx->parser->script, &exprval, ctx->ei, &v);
+    hres = exprval_to_value(ctx->script, &exprval, ctx->ei, &v);
     exprval_release(&exprval);
     if(FAILED(hres))
         return hres;
@@ -1092,25 +1097,25 @@ static HRESULT interp_ident(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    10.1.4 */
 static HRESULT interp_identid(exec_ctx_t *ctx)
 {
-    const BSTR arg = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
-    const unsigned flags = ctx->parser->code->instrs[ctx->ip].arg2.uint;
+    const BSTR arg = ctx->code->instrs[ctx->ip].arg1.bstr;
+    const unsigned flags = ctx->code->instrs[ctx->ip].arg2.uint;
     exprval_t exprval;
     HRESULT hres;
 
     TRACE("%s %x\n", debugstr_w(arg), flags);
 
-    hres = identifier_eval(ctx->parser->script, arg, &exprval);
+    hres = identifier_eval(ctx->script, arg, &exprval);
     if(FAILED(hres))
         return hres;
 
     if(exprval.type == EXPRVAL_INVALID && (flags & fdexNameEnsure)) {
         DISPID id;
 
-        hres = jsdisp_get_id(ctx->parser->script->global, arg, fdexNameEnsure, &id);
+        hres = jsdisp_get_id(ctx->script->global, arg, fdexNameEnsure, &id);
         if(FAILED(hres))
             return hres;
 
-        exprval_set_idref(&exprval, to_disp(ctx->parser->script->global), id);
+        exprval_set_idref(&exprval, to_disp(ctx->script->global), id);
     }
 
     if(exprval.type != EXPRVAL_IDREF) {
@@ -1136,7 +1141,7 @@ static HRESULT interp_null(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    7.8.2 */
 static HRESULT interp_bool(exec_ctx_t *ctx)
 {
-    const LONG arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const LONG arg = ctx->code->instrs[ctx->ip].arg1.lng;
 
     TRACE("%s\n", arg ? "true" : "false");
 
@@ -1146,7 +1151,7 @@ static HRESULT interp_bool(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    7.8.3 */
 static HRESULT interp_int(exec_ctx_t *ctx)
 {
-    const LONG arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const LONG arg = ctx->code->instrs[ctx->ip].arg1.lng;
     VARIANT v;
 
     TRACE("%d\n", arg);
@@ -1159,7 +1164,7 @@ static HRESULT interp_int(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    7.8.3 */
 static HRESULT interp_double(exec_ctx_t *ctx)
 {
-    const double arg = *ctx->parser->code->instrs[ctx->ip].arg1.dbl;
+    const double arg = *ctx->code->instrs[ctx->ip].arg1.dbl;
     VARIANT v;
 
     TRACE("%lf\n", arg);
@@ -1172,7 +1177,7 @@ static HRESULT interp_double(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    7.8.4 */
 static HRESULT interp_str(exec_ctx_t *ctx)
 {
-    const WCHAR *str = ctx->parser->code->instrs[ctx->ip].arg1.str;
+    const WCHAR *str = ctx->code->instrs[ctx->ip].arg1.str;
     VARIANT v;
 
     TRACE("%s\n", debugstr_w(str));
@@ -1188,15 +1193,15 @@ static HRESULT interp_str(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    7.8 */
 static HRESULT interp_regexp(exec_ctx_t *ctx)
 {
-    const WCHAR *source = ctx->parser->code->instrs[ctx->ip].arg1.str;
-    const LONG flags = ctx->parser->code->instrs[ctx->ip].arg2.lng;
+    const WCHAR *source = ctx->code->instrs[ctx->ip].arg1.str;
+    const LONG flags = ctx->code->instrs[ctx->ip].arg2.lng;
     jsdisp_t *regexp;
     VARIANT v;
     HRESULT hres;
 
     TRACE("%s %x\n", debugstr_w(source), flags);
 
-    hres = create_regexp(ctx->parser->script, source, strlenW(source), flags, &regexp);
+    hres = create_regexp(ctx->script, source, strlenW(source), flags, &regexp);
     if(FAILED(hres))
         return hres;
 
@@ -1207,7 +1212,7 @@ static HRESULT interp_regexp(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.1.4 */
 static HRESULT interp_carray(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
     jsdisp_t *array;
     VARIANT *v, r;
     unsigned i;
@@ -1215,14 +1220,14 @@ static HRESULT interp_carray(exec_ctx_t *ctx)
 
     TRACE("%u\n", arg);
 
-    hres = create_array(ctx->parser->script, arg, &array);
+    hres = create_array(ctx->script, arg, &array);
     if(FAILED(hres))
         return hres;
 
     i = arg;
     while(i--) {
         v = stack_pop(ctx);
-        hres = jsdisp_propput_idx(array, i, v, ctx->ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_idx(array, i, v, ctx->ei);
         VariantClear(v);
         if(FAILED(hres)) {
             jsdisp_release(array);
@@ -1243,7 +1248,7 @@ static HRESULT interp_new_obj(exec_ctx_t *ctx)
 
     TRACE("\n");
 
-    hres = create_object(ctx->parser->script, NULL, &obj);
+    hres = create_object(ctx->script, NULL, &obj);
     if(FAILED(hres))
         return hres;
 
@@ -1254,7 +1259,7 @@ static HRESULT interp_new_obj(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.1.5 */
 static HRESULT interp_obj_prop(exec_ctx_t *ctx)
 {
-    const BSTR name = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR name = ctx->code->instrs[ctx->ip].arg1.bstr;
     jsdisp_t *obj;
     VARIANT *v;
     HRESULT hres;
@@ -1266,7 +1271,7 @@ static HRESULT interp_obj_prop(exec_ctx_t *ctx)
     assert(V_VT(stack_top(ctx)) == VT_DISPATCH);
     obj = as_jsdisp(V_DISPATCH(stack_top(ctx)));
 
-    hres = jsdisp_propput_name(obj, name, v, ctx->ei, NULL/*FIXME*/);
+    hres = jsdisp_propput_name(obj, name, v, ctx->ei);
     VariantClear(v);
     return hres;
 }
@@ -1274,7 +1279,7 @@ static HRESULT interp_obj_prop(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.11 */
 static HRESULT interp_cnd_nz(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
     VARIANT_BOOL b;
     HRESULT hres;
 
@@ -1296,7 +1301,7 @@ static HRESULT interp_cnd_nz(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.11 */
 static HRESULT interp_cnd_z(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
     VARIANT_BOOL b;
     HRESULT hres;
 
@@ -1385,7 +1390,7 @@ static HRESULT interp_instanceof(exec_ctx_t *ctx)
     v = stack_pop(ctx);
     if(V_VT(v) != VT_DISPATCH || !V_DISPATCH(v)) {
         VariantClear(v);
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_FUNCTION_EXPECTED, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_FUNCTION_EXPECTED, NULL);
     }
 
     obj = iface_to_jsdisp((IUnknown*)V_DISPATCH(v));
@@ -1396,9 +1401,9 @@ static HRESULT interp_instanceof(exec_ctx_t *ctx)
     }
 
     if(is_class(obj, JSCLASS_FUNCTION)) {
-        hres = jsdisp_propget_name(obj, prototypeW, &prot, ctx->ei, NULL/*FIXME*/);
+        hres = jsdisp_propget_name(obj, prototypeW, &prot, ctx->ei);
     }else {
-        hres = throw_type_error(ctx->parser->script, ctx->ei, JS_E_FUNCTION_EXPECTED, NULL);
+        hres = throw_type_error(ctx->script, ctx->ei, JS_E_FUNCTION_EXPECTED, NULL);
     }
     jsdisp_release(obj);
     if(FAILED(hres))
@@ -1447,17 +1452,17 @@ static HRESULT interp_in(exec_ctx_t *ctx)
     if(V_VT(obj) != VT_DISPATCH || !V_DISPATCH(obj)) {
         VariantClear(obj);
         VariantClear(v);
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
     }
 
-    hres = to_string(ctx->parser->script, v, ctx->ei, &str);
+    hres = to_string(ctx->script, v, ctx->ei, &str);
     VariantClear(v);
     if(FAILED(hres)) {
         IDispatch_Release(V_DISPATCH(obj));
         return hres;
     }
 
-    hres = disp_get_id(ctx->parser->script, V_DISPATCH(obj), str, 0, &id);
+    hres = disp_get_id(ctx->script, V_DISPATCH(obj), str, 0, &id);
     IDispatch_Release(V_DISPATCH(obj));
     SysFreeString(str);
     if(SUCCEEDED(hres))
@@ -1509,8 +1514,11 @@ static HRESULT add_eval(script_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jsexcep
 
             V_VT(retv) = VT_BSTR;
             V_BSTR(retv) = SysAllocStringLen(NULL, len1+len2);
-            memcpy(V_BSTR(retv), lstr, len1*sizeof(WCHAR));
-            memcpy(V_BSTR(retv)+len1, rstr, (len2+1)*sizeof(WCHAR));
+            if(len1)
+                memcpy(V_BSTR(retv), lstr, len1*sizeof(WCHAR));
+            if(len2)
+                memcpy(V_BSTR(retv)+len1, rstr, len2*sizeof(WCHAR));
+            V_BSTR(retv)[len1+len2] = 0;
         }
 
         if(V_VT(&l) != VT_BSTR)
@@ -1544,7 +1552,7 @@ static HRESULT interp_add(exec_ctx_t *ctx)
 
     TRACE("%s + %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = add_eval(ctx->parser->script, l, r, ctx->ei, &ret);
+    hres = add_eval(ctx->script, l, r, ctx->ei, &ret);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -1644,14 +1652,14 @@ static HRESULT interp_delete(exec_ctx_t *ctx)
     name_var = stack_pop(ctx);
     obj_var = stack_pop(ctx);
 
-    hres = to_object(ctx->parser->script, obj_var, &obj);
+    hres = to_object(ctx->script, obj_var, &obj);
     VariantClear(obj_var);
     if(FAILED(hres)) {
         VariantClear(name_var);
         return hres;
     }
 
-    hres = to_string(ctx->parser->script, name_var, ctx->ei, &name);
+    hres = to_string(ctx->script, name_var, ctx->ei, &name);
     VariantClear(name_var);
     if(FAILED(hres)) {
         IDispatch_Release(obj);
@@ -1660,7 +1668,7 @@ static HRESULT interp_delete(exec_ctx_t *ctx)
 
     hres = IDispatch_QueryInterface(obj, &IID_IDispatchEx, (void**)&dispex);
     if(SUCCEEDED(hres)) {
-        hres = IDispatchEx_DeleteMemberByName(dispex, name, make_grfdex(ctx->parser->script, fdexNameCaseSensitive));
+        hres = IDispatchEx_DeleteMemberByName(dispex, name, make_grfdex(ctx->script, fdexNameCaseSensitive));
         ret = TRUE;
         IDispatchEx_Release(dispex);
     }else {
@@ -1679,7 +1687,7 @@ static HRESULT interp_delete(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.4.2 */
 static HRESULT interp_delete_ident(exec_ctx_t *ctx)
 {
-    const BSTR arg = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR arg = ctx->code->instrs[ctx->ip].arg1.bstr;
     IDispatchEx *dispex;
     exprval_t exprval;
     BOOL ret = FALSE;
@@ -1687,7 +1695,7 @@ static HRESULT interp_delete_ident(exec_ctx_t *ctx)
 
     TRACE("%s\n", debugstr_w(arg));
 
-    hres = identifier_eval(ctx->parser->script, arg, &exprval);
+    hres = identifier_eval(ctx->script, arg, &exprval);
     if(FAILED(hres))
         return hres;
 
@@ -1781,7 +1789,7 @@ static HRESULT interp_typeofid(exec_ctx_t *ctx)
         return stack_push_string(ctx, undefinedW);
 
     V_VT(&v) = VT_EMPTY;
-    hres = disp_propget(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_propget(ctx->script, obj, id, &v, ctx->ei);
     IDispatch_Release(obj);
     if(FAILED(hres))
         return stack_push_string(ctx, unknownW);
@@ -1797,7 +1805,7 @@ static HRESULT interp_typeofid(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.4.3 */
 static HRESULT interp_typeofident(exec_ctx_t *ctx)
 {
-    const BSTR arg = ctx->parser->code->instrs[ctx->ip].arg1.bstr;
+    const BSTR arg = ctx->code->instrs[ctx->ip].arg1.bstr;
     exprval_t exprval;
     const WCHAR *ret;
     VARIANT v;
@@ -1805,7 +1813,7 @@ static HRESULT interp_typeofident(exec_ctx_t *ctx)
 
     TRACE("%s\n", debugstr_w(arg));
 
-    hres = identifier_eval(ctx->parser->script, arg, &exprval);
+    hres = identifier_eval(ctx->script, arg, &exprval);
     if(FAILED(hres))
         return hres;
 
@@ -1815,7 +1823,7 @@ static HRESULT interp_typeofident(exec_ctx_t *ctx)
         return hres;
     }
 
-    hres = exprval_to_value(ctx->parser->script, &exprval, ctx->ei, &v);
+    hres = exprval_to_value(ctx->script, &exprval, ctx->ei, &v);
     exprval_release(&exprval);
     if(FAILED(hres))
         return hres;
@@ -1870,7 +1878,7 @@ static HRESULT interp_tonum(exec_ctx_t *ctx)
     TRACE("\n");
 
     v = stack_pop(ctx);
-    hres = to_number(ctx->parser->script, v, ctx->ei, &num);
+    hres = to_number(ctx->script, v, ctx->ei, &num);
     VariantClear(v);
     if(FAILED(hres))
         return hres;
@@ -1881,7 +1889,7 @@ static HRESULT interp_tonum(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.3.1 */
 static HRESULT interp_postinc(exec_ctx_t *ctx)
 {
-    const int arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const int arg = ctx->code->instrs[ctx->ip].arg1.lng;
     IDispatch *obj;
     DISPID id;
     VARIANT v;
@@ -1891,16 +1899,16 @@ static HRESULT interp_postinc(exec_ctx_t *ctx)
 
     obj = stack_pop_objid(ctx, &id);
     if(!obj)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
 
-    hres = disp_propget(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_propget(ctx->script, obj, id, &v, ctx->ei);
     if(SUCCEEDED(hres)) {
         VARIANT n, inc;
 
-        hres = to_number(ctx->parser->script, &v, ctx->ei, &n);
+        hres = to_number(ctx->script, &v, ctx->ei, &n);
         if(SUCCEEDED(hres)) {
             num_set_val(&inc, num_val(&n)+(double)arg);
-            hres = disp_propput(ctx->parser->script, obj, id, &inc, ctx->ei, NULL/*FIXME*/);
+            hres = disp_propput(ctx->script, obj, id, &inc, ctx->ei);
         }
         if(FAILED(hres))
             VariantClear(&v);
@@ -1915,7 +1923,7 @@ static HRESULT interp_postinc(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.4.4, 11.4.5 */
 static HRESULT interp_preinc(exec_ctx_t *ctx)
 {
-    const int arg = ctx->parser->code->instrs[ctx->ip].arg1.lng;
+    const int arg = ctx->code->instrs[ctx->ip].arg1.lng;
     IDispatch *obj;
     DISPID id;
     VARIANT v;
@@ -1925,17 +1933,17 @@ static HRESULT interp_preinc(exec_ctx_t *ctx)
 
     obj = stack_pop_objid(ctx, &id);
     if(!obj)
-        return throw_type_error(ctx->parser->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
+        return throw_type_error(ctx->script, ctx->ei, JS_E_OBJECT_EXPECTED, NULL);
 
-    hres = disp_propget(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_propget(ctx->script, obj, id, &v, ctx->ei);
     if(SUCCEEDED(hres)) {
         VARIANT n;
 
-        hres = to_number(ctx->parser->script, &v, ctx->ei, &n);
+        hres = to_number(ctx->script, &v, ctx->ei, &n);
         VariantClear(&v);
         if(SUCCEEDED(hres)) {
             num_set_val(&v, num_val(&n)+(double)arg);
-            hres = disp_propput(ctx->parser->script, obj, id, &v, ctx->ei, NULL/*FIXME*/);
+            hres = disp_propput(ctx->script, obj, id, &v, ctx->ei);
         }
     }
     IDispatch_Release(obj);
@@ -2055,7 +2063,7 @@ static HRESULT interp_eq(exec_ctx_t *ctx)
 
     TRACE("%s == %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = equal_values(ctx->parser->script, l, r, ctx->ei, &b);
+    hres = equal_values(ctx->script, l, r, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2076,7 +2084,7 @@ static HRESULT interp_neq(exec_ctx_t *ctx)
 
     TRACE("%s != %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = equal_values(ctx->parser->script, l, r, ctx->ei, &b);
+    hres = equal_values(ctx->script, l, r, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2182,7 +2190,7 @@ static HRESULT interp_lt(exec_ctx_t *ctx)
 
     TRACE("%s < %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = less_eval(ctx->parser->script, l, r, FALSE, ctx->ei, &b);
+    hres = less_eval(ctx->script, l, r, FALSE, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2203,7 +2211,7 @@ static HRESULT interp_lteq(exec_ctx_t *ctx)
 
     TRACE("%s <= %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = less_eval(ctx->parser->script, r, l, TRUE, ctx->ei, &b);
+    hres = less_eval(ctx->script, r, l, TRUE, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2224,7 +2232,7 @@ static HRESULT interp_gt(exec_ctx_t *ctx)
 
     TRACE("%s > %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = less_eval(ctx->parser->script, r, l, FALSE, ctx->ei, &b);
+    hres = less_eval(ctx->script, r, l, FALSE, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2245,7 +2253,7 @@ static HRESULT interp_gteq(exec_ctx_t *ctx)
 
     TRACE("%s >= %s\n", debugstr_variant(l), debugstr_variant(r));
 
-    hres = less_eval(ctx->parser->script, l, r, TRUE, ctx->ei, &b);
+    hres = less_eval(ctx->script, l, r, TRUE, ctx->ei, &b);
     VariantClear(l);
     VariantClear(r);
     if(FAILED(hres))
@@ -2264,7 +2272,7 @@ static HRESULT interp_bneg(exec_ctx_t *ctx)
     TRACE("\n");
 
     v = stack_pop(ctx);
-    hres = to_int32(ctx->parser->script, v, ctx->ei, &i);
+    hres = to_int32(ctx->script, v, ctx->ei, &i);
     VariantClear(v);
     if(FAILED(hres))
         return hres;
@@ -2359,9 +2367,9 @@ static HRESULT interp_assign(exec_ctx_t *ctx)
     disp = stack_pop_objid(ctx, &id);
 
     if(!disp)
-        return throw_reference_error(ctx->parser->script, ctx->ei, JS_E_ILLEGAL_ASSIGN, NULL);
+        return throw_reference_error(ctx->script, ctx->ei, JS_E_ILLEGAL_ASSIGN, NULL);
 
-    hres = disp_propput(ctx->parser->script, disp, id, v, ctx->ei, NULL/*FIXME*/);
+    hres = disp_propput(ctx->script, disp, id, v, ctx->ei);
     IDispatch_Release(disp);
     if(FAILED(hres)) {
         VariantClear(v);
@@ -2383,7 +2391,7 @@ static HRESULT interp_undefined(exec_ctx_t *ctx)
 
 static HRESULT interp_jmp(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
 
     TRACE("\n");
 
@@ -2393,7 +2401,7 @@ static HRESULT interp_jmp(exec_ctx_t *ctx)
 
 static HRESULT interp_jmp_z(exec_ctx_t *ctx)
 {
-    const unsigned arg = ctx->parser->code->instrs[ctx->ip].arg1.uint;
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
     VARIANT_BOOL b;
     VARIANT *v;
     HRESULT hres;
@@ -2470,9 +2478,9 @@ static HRESULT unwind_exception(exec_ctx_t *ctx)
     if(ident) {
         jsdisp_t *scope_obj;
 
-        hres = create_dispex(ctx->parser->script, NULL, NULL, &scope_obj);
+        hres = create_dispex(ctx->script, NULL, NULL, &scope_obj);
         if(SUCCEEDED(hres)) {
-            hres = jsdisp_propput_name(scope_obj, ident, &except_val, ctx->ei, NULL/*FIXME*/);
+            hres = jsdisp_propput_name(scope_obj, ident, &except_val, ctx->ei);
             if(FAILED(hres))
                 jsdisp_release(scope_obj);
         }
@@ -2500,12 +2508,13 @@ static HRESULT unwind_exception(exec_ctx_t *ctx)
     return hres;
 }
 
-static HRESULT enter_bytecode(script_ctx_t *ctx, unsigned ip, jsexcept_t *ei, VARIANT *ret)
+static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, unsigned ip, jsexcept_t *ei, VARIANT *ret)
 {
     exec_ctx_t *exec_ctx = ctx->exec_ctx;
     except_frame_t *prev_except_frame;
     unsigned prev_ip, prev_top;
     scope_chain_t *prev_scope;
+    bytecode_t *prev_code;
     jsexcept_t *prev_ei;
     jsop_t op;
     HRESULT hres = S_OK;
@@ -2517,12 +2526,14 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, unsigned ip, jsexcept_t *ei, VA
     prev_except_frame = exec_ctx->except_frame;
     prev_ip = exec_ctx->ip;
     prev_ei = exec_ctx->ei;
+    prev_code = exec_ctx->code;
     exec_ctx->ip = ip;
     exec_ctx->ei = ei;
     exec_ctx->except_frame = NULL;
+    exec_ctx->code = code;
 
     while(exec_ctx->ip != -1) {
-        op = exec_ctx->parser->code->instrs[exec_ctx->ip].op;
+        op = code->instrs[exec_ctx->ip].op;
         hres = op_funcs[op](exec_ctx);
         if(FAILED(hres)) {
             TRACE("EXCEPTION\n");
@@ -2541,6 +2552,7 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, unsigned ip, jsexcept_t *ei, VA
     exec_ctx->ip = prev_ip;
     exec_ctx->ei = prev_ei;
     exec_ctx->except_frame = prev_except_frame;
+    exec_ctx->code = prev_code;
 
     if(FAILED(hres)) {
         while(exec_ctx->scope_chain != prev_scope)
@@ -2559,12 +2571,10 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, unsigned ip, jsexcept_t *ei, VA
     return S_OK;
 }
 
-HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *source, BOOL from_eval,
+HRESULT exec_source(exec_ctx_t *ctx, bytecode_t *code, source_elements_t *source, BOOL from_eval,
         jsexcept_t *ei, VARIANT *retv)
 {
-    script_ctx_t *script = parser->script;
     function_declaration_t *func;
-    parser_ctx_t *prev_parser;
     var_list_t *var;
     VARIANT val;
     exec_ctx_t *prev_ctx;
@@ -2574,13 +2584,16 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
         jsdisp_t *func_obj;
         VARIANT var;
 
-        hres = create_source_function(parser, func->expr->parameter_list, func->expr->source_elements,
+        if(!func->expr->identifier)
+            continue;
+
+        hres = create_source_function(ctx->script, code, func->expr->parameter_list, func->expr->source_elements,
                 ctx->scope_chain, func->expr->src_str, func->expr->src_len, &func_obj);
         if(FAILED(hres))
             return hres;
 
         var_set_jsdisp(&var, func_obj);
-        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, &var, ei, NULL);
+        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, &var, ei);
         jsdisp_release(func_obj);
         if(FAILED(hres))
             return hres;
@@ -2594,33 +2607,25 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
         if(!name)
             return E_OUTOFMEMORY;
 
-        if(!ctx->is_global || !lookup_global_members(parser->script, name, NULL))
+        if(!ctx->is_global || !lookup_global_members(ctx->script, name, NULL))
             hres = jsdisp_get_id(ctx->var_disp, var->identifier, fdexNameEnsure, &id);
         SysFreeString(name);
         if(FAILED(hres))
             return hres;
     }
 
-    prev_ctx = script->exec_ctx;
-    script->exec_ctx = ctx;
-
-    prev_parser = ctx->parser;
-    ctx->parser = parser;
+    prev_ctx = ctx->script->exec_ctx;
+    ctx->script->exec_ctx = ctx;
 
     if(source->statement) {
-        if(!source->instr_off) {
-            hres = compile_subscript_stat(ctx->parser, source->statement, from_eval, &source->instr_off);
-            if(FAILED(hres) && is_jscript_error(hres))
-                hres = throw_syntax_error(script, ei, hres, NULL);
-        }
-        if(SUCCEEDED(hres))
-            hres = enter_bytecode(script, source->instr_off, ei, &val);
+        assert(source->instr_off);
+        hres = enter_bytecode(ctx->script, code, source->instr_off, ei, &val);
     }else {
         V_VT(&val) = VT_EMPTY;
     }
 
-    script->exec_ctx = prev_ctx;
-    ctx->parser = prev_parser;
+    assert(ctx->script->exec_ctx == ctx);
+    ctx->script->exec_ctx = prev_ctx;
 
     if(FAILED(hres)) {
         VariantClear(&val);

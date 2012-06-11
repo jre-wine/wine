@@ -42,7 +42,7 @@ LONG URLMON_refCount = 0;
 static HMODULE hCabinet = NULL;
 static DWORD urlmon_tls = TLS_OUT_OF_INDEXES;
 
-static void init_session(BOOL);
+static void init_session(void);
 
 static struct list tls_list = LIST_INIT(tls_list);
 
@@ -136,7 +136,6 @@ static void process_detach(void)
     if (hCabinet)
         FreeLibrary(hCabinet);
 
-    init_session(FALSE);
     free_session();
     free_tls_list();
 }
@@ -152,7 +151,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
 
     switch(fdwReason) {
     case DLL_PROCESS_ATTACH:
-        init_session(TRUE);
+        init_session();
         break;
 
     case DLL_PROCESS_DETACH:
@@ -327,15 +326,14 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_CUri,                    &CUriCF.IClassFactory_iface,            NULL    }
 };
 
-static void init_session(BOOL init)
+static void init_session(void)
 {
     unsigned int i;
 
     for(i=0; i < sizeof(object_creation)/sizeof(object_creation[0]); i++) {
-
         if(object_creation[i].protocol)
-            register_urlmon_namespace(object_creation[i].cf, object_creation[i].clsid,
-                                      object_creation[i].protocol, init);
+            register_namespace(object_creation[i].cf, object_creation[i].clsid,
+                                      object_creation[i].protocol, TRUE);
     }
 }
 
@@ -533,6 +531,8 @@ HRESULT WINAPI CopyStgMedium(const STGMEDIUM *src, STGMEDIUM *dst)
         if(src->u.lpszFileName && !src->pUnkForRelease) {
             DWORD size = (strlenW(src->u.lpszFileName)+1)*sizeof(WCHAR);
             dst->u.lpszFileName = CoTaskMemAlloc(size);
+            if(!dst->u.lpszFileName)
+                return E_OUTOFMEMORY;
             memcpy(dst->u.lpszFileName, src->u.lpszFileName, size);
         }
         break;
@@ -554,6 +554,70 @@ HRESULT WINAPI CopyStgMedium(const STGMEDIUM *src, STGMEDIUM *dst)
     return S_OK;
 }
 
+/***********************************************************************
+ *           CopyBindInfo (URLMON.@)
+ */
+HRESULT WINAPI CopyBindInfo(const BINDINFO *pcbiSrc, BINDINFO *pcbiDest)
+{
+    DWORD size;
+    HRESULT hres;
+
+    TRACE("(%p %p)\n", pcbiSrc, pcbiDest);
+
+    if(!pcbiSrc || !pcbiDest)
+        return E_POINTER;
+    if(!pcbiSrc->cbSize || !pcbiDest->cbSize)
+        return E_INVALIDARG;
+
+    size = pcbiDest->cbSize;
+    if(size > pcbiSrc->cbSize) {
+        memcpy(pcbiDest, pcbiSrc, pcbiSrc->cbSize);
+        memset((char*)pcbiDest+pcbiSrc->cbSize, 0, size-pcbiSrc->cbSize);
+    } else {
+        memcpy(pcbiDest, pcbiSrc, size);
+    }
+    pcbiDest->cbSize = size;
+
+    size = FIELD_OFFSET(BINDINFO, szExtraInfo)+sizeof(void*);
+    if(pcbiSrc->cbSize>=size && pcbiDest->cbSize>=size && pcbiSrc->szExtraInfo) {
+        size = (strlenW(pcbiSrc->szExtraInfo)+1)*sizeof(WCHAR);
+        pcbiDest->szExtraInfo = CoTaskMemAlloc(size);
+        if(!pcbiDest->szExtraInfo)
+            return E_OUTOFMEMORY;
+        memcpy(pcbiDest->szExtraInfo, pcbiSrc->szExtraInfo, size);
+    }
+
+    size = FIELD_OFFSET(BINDINFO, stgmedData)+sizeof(STGMEDIUM);
+    if(pcbiSrc->cbSize>=size && pcbiDest->cbSize>=size) {
+        hres = CopyStgMedium(&pcbiSrc->stgmedData, &pcbiDest->stgmedData);
+        if(FAILED(hres)) {
+            CoTaskMemFree(pcbiDest->szExtraInfo);
+            return hres;
+        }
+    }
+
+    size = FIELD_OFFSET(BINDINFO, szCustomVerb)+sizeof(void*);
+    if(pcbiSrc->cbSize>=size && pcbiDest->cbSize>=size && pcbiSrc->szCustomVerb) {
+        size = (strlenW(pcbiSrc->szCustomVerb)+1)*sizeof(WCHAR);
+        pcbiDest->szCustomVerb = CoTaskMemAlloc(size);
+        if(!pcbiDest->szCustomVerb) {
+            CoTaskMemFree(pcbiDest->szExtraInfo);
+            ReleaseStgMedium(&pcbiDest->stgmedData);
+            return E_OUTOFMEMORY;
+        }
+        memcpy(pcbiDest->szCustomVerb, pcbiSrc->szCustomVerb, size);
+    }
+
+    size = FIELD_OFFSET(BINDINFO, securityAttributes)+sizeof(SECURITY_ATTRIBUTES);
+    if(pcbiDest->cbSize >= size)
+        memset(&pcbiDest->securityAttributes, 0, sizeof(SECURITY_ATTRIBUTES));
+
+    if(pcbiSrc->pUnk)
+        IUnknown_AddRef(pcbiDest->pUnk);
+
+    return S_OK;
+}
+
 static BOOL text_richtext_filter(const BYTE *b, DWORD size)
 {
     return size > 5 && !memcmp(b, "{\\rtf", 5);
@@ -561,25 +625,33 @@ static BOOL text_richtext_filter(const BYTE *b, DWORD size)
 
 static BOOL text_html_filter(const BYTE *b, DWORD size)
 {
-    DWORD i;
-
-    if(size < 5)
+    if(size < 6)
         return FALSE;
 
-    for(i = 0; i < size-5; i++) {
-        if((b[i] == '<'
-            && (b[i+1] == 'h' || b[i+1] == 'H')
-            && (b[i+2] == 't' || b[i+2] == 'T')
-            && (b[i+3] == 'm' || b[i+3] == 'M')
-            && (b[i+4] == 'l' || b[i+4] == 'L')) ||
-           ((size - i >= 6)
-            &&  b[i]   == '<'
-            && (b[i+1] == 'h' || b[i+1] == 'H')
-            && (b[i+2] == 'e' || b[i+2] == 'E')
-            && (b[i+3] == 'a' || b[i+3] == 'A')
-            && (b[i+4] == 'd' || b[i+4] == 'D')
-            &&  b[i+5] == '>')) return TRUE;
-    }
+    if((b[0] == '<'
+                && (b[1] == 'h' || b[1] == 'H')
+                && (b[2] == 't' || b[2] == 'T')
+                && (b[3] == 'm' || b[3] == 'M')
+                && (b[4] == 'l' || b[4] == 'L'))
+            || (b[0] == '<'
+                && (b[1] == 'h' || b[1] == 'H')
+                && (b[2] == 'e' || b[2] == 'E')
+                && (b[3] == 'a' || b[3] == 'A')
+                && (b[4] == 'd' || b[4] == 'D'))) return TRUE;
+
+    return FALSE;
+}
+
+static BOOL text_xml_filter(const BYTE *b, DWORD size)
+{
+    if(size < 7)
+        return FALSE;
+
+    if(b[0] == '<' && b[1] == '?'
+            && (b[2] == 'x' || b[2] == 'X')
+            && (b[3] == 'm' || b[3] == 'M')
+            && (b[4] == 'l' || b[4] == 'L')
+            && b[5] == ' ') return TRUE;
 
     return FALSE;
 }
@@ -678,12 +750,19 @@ static BOOL application_xmsdownload(const BYTE *b, DWORD size)
     return size > 2 && b[0] == 'M' && b[1] == 'Z';
 }
 
+static inline BOOL is_text_plain_char(BYTE b)
+{
+    if(b < 0x20 && b != '\n' && b != '\r' && b != '\t')
+        return FALSE;
+    return TRUE;
+}
+
 static BOOL text_plain_filter(const BYTE *b, DWORD size)
 {
     const BYTE *ptr;
 
     for(ptr = b; ptr < b+size-1; ptr++) {
-        if(*ptr < 0x20 && *ptr != '\n' && *ptr != '\r' && *ptr != '\t')
+        if(!is_text_plain_char(*ptr))
             return FALSE;
     }
 
@@ -698,10 +777,11 @@ static BOOL application_octet_stream_filter(const BYTE *b, DWORD size)
 static HRESULT find_mime_from_buffer(const BYTE *buf, DWORD size, const WCHAR *proposed_mime, WCHAR **ret_mime)
 {
     LPCWSTR ret = NULL;
-    DWORD len, i;
+    int len, i, any_pos_mime = -1;
 
     static const WCHAR text_htmlW[] = {'t','e','x','t','/','h','t','m','l',0};
     static const WCHAR text_richtextW[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
+    static const WCHAR text_xmlW[] = {'t','e','x','t','/','x','m','l',0};
     static const WCHAR audio_basicW[] = {'a','u','d','i','o','/','b','a','s','i','c',0};
     static const WCHAR audio_wavW[] = {'a','u','d','i','o','/','w','a','v',0};
     static const WCHAR image_gifW[] = {'i','m','a','g','e','/','g','i','f',0};
@@ -729,8 +809,10 @@ static HRESULT find_mime_from_buffer(const BYTE *buf, DWORD size, const WCHAR *p
     static const struct {
         LPCWSTR mime;
         BOOL (*filter)(const BYTE *,DWORD);
-    } mime_filters[] = {
+    } mime_filters_any_pos[] = {
         {text_htmlW,       text_html_filter},
+        {text_xmlW,        text_xml_filter}
+    }, mime_filters[] = {
         {text_richtextW,   text_richtext_filter},
      /* {audio_xaiffW,     audio_xaiff_filter}, */
         {audio_basicW,     audio_basic_filter},
@@ -772,20 +854,47 @@ static HRESULT find_mime_from_buffer(const BYTE *buf, DWORD size, const WCHAR *p
         return S_OK;
     }
 
-    if(proposed_mime && strcmpW(proposed_mime, app_octetstreamW)) {
-        for(i=0; i < sizeof(mime_filters)/sizeof(*mime_filters); i++) {
-            if(!strcmpW(proposed_mime, mime_filters[i].mime))
+    if(proposed_mime && (!strcmpW(proposed_mime, app_octetstreamW)
+                || !strcmpW(proposed_mime, text_plainW)))
+        proposed_mime = NULL;
+
+    if(proposed_mime) {
+        ret = proposed_mime;
+
+        for(i=0; i < sizeof(mime_filters_any_pos)/sizeof(*mime_filters_any_pos); i++) {
+            if(!strcmpW(proposed_mime, mime_filters_any_pos[i].mime)) {
+                any_pos_mime = i;
+                for(len=size; len>0; len--) {
+                    if(mime_filters_any_pos[i].filter(buf+size-len, len))
+                        break;
+                }
+                if(!len)
+                    ret = NULL;
                 break;
+            }
         }
 
-        if(i == sizeof(mime_filters)/sizeof(*mime_filters) || mime_filters[i].filter(buf, size)) {
-            len = strlenW(proposed_mime)+1;
-            *ret_mime = CoTaskMemAlloc(len*sizeof(WCHAR));
-            if(!*ret_mime)
-                return E_OUTOFMEMORY;
+        if(i == sizeof(mime_filters_any_pos)/sizeof(*mime_filters_any_pos)) {
+            for(i=0; i < sizeof(mime_filters)/sizeof(*mime_filters); i++) {
+                if(!strcmpW(proposed_mime, mime_filters[i].mime)) {
+                    if(!mime_filters[i].filter(buf, size))
+                        ret = NULL;
+                    break;
+                }
+            }
+        }
+    }
 
-            memcpy(*ret_mime, proposed_mime, len*sizeof(WCHAR));
-            return S_OK;
+    /* Looks like a bug in native implementation, html and xml mimes
+     * are not looked for if none of them was proposed */
+    if(!proposed_mime || any_pos_mime!=-1) {
+        for(len=size; !ret && len>0; len--) {
+            for(i=0; i<sizeof(mime_filters_any_pos)/sizeof(*mime_filters_any_pos); i++) {
+                if(mime_filters_any_pos[i].filter(buf+size-len, len)) {
+                    ret = mime_filters_any_pos[i].mime;
+                    break;
+                }
+            }
         }
     }
 
@@ -796,16 +905,24 @@ static HRESULT find_mime_from_buffer(const BYTE *buf, DWORD size, const WCHAR *p
         i++;
     }
 
-    TRACE("found %s for %s\n", debugstr_w(ret), debugstr_an((const char*)buf, min(32, size)));
+    if(any_pos_mime!=-1 && ret==text_plainW)
+        ret = mime_filters_any_pos[any_pos_mime].mime;
+    else if(proposed_mime && ret==app_octetstreamW) {
+        for(len=size; ret==app_octetstreamW && len>0; len--) {
+            if(!is_text_plain_char(buf[size-len]))
+                break;
+            for(i=0; i<sizeof(mime_filters_any_pos)/sizeof(*mime_filters_any_pos); i++) {
+                if(mime_filters_any_pos[i].filter(buf+size-len, len)) {
+                    ret = text_plainW;
+                    break;
+                }
+            }
+        }
 
-    if(proposed_mime) {
-        if(i == sizeof(mime_filters)/sizeof(*mime_filters))
+        if(ret == app_octetstreamW)
             ret = proposed_mime;
-
-        /* text/html is a special case */
-        if(!strcmpW(proposed_mime, text_htmlW) && !strcmpW(ret, text_plainW))
-            ret = text_htmlW;
     }
+    TRACE("found %s for %s\n", debugstr_w(ret), debugstr_an((const char*)buf, min(32, size)));
 
     len = strlenW(ret)+1;
     *ret_mime = CoTaskMemAlloc(len*sizeof(WCHAR));

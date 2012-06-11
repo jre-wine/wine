@@ -72,13 +72,14 @@ enum wined3d_gl_vendor
 static const GUID IID_D3DDEVICE_D3DUID = { 0xaeb2cdd4, 0x6e41, 0x43ea, { 0x94,0x1c,0x83,0x61,0xcc,0x76,0x07,0x81 } };
 
 /* Extension detection */
-static const struct
+struct wined3d_extension_map
 {
     const char *extension_string;
     enum wined3d_gl_extension extension;
     DWORD version;
-}
-EXTENSION_MAP[] =
+};
+
+static const struct wined3d_extension_map gl_extension_map[] =
 {
     /* APPLE */
     {"GL_APPLE_client_storage",             APPLE_CLIENT_STORAGE,           0                           },
@@ -197,6 +198,13 @@ EXTENSION_MAP[] =
 
     /* SGI */
     {"GL_SGIS_generate_mipmap",             SGIS_GENERATE_MIPMAP,           0                           },
+};
+
+static const struct wined3d_extension_map wgl_extension_map[] =
+{
+    {"WGL_ARB_pixel_format",                WGL_ARB_PIXEL_FORMAT,               0                        },
+    {"WGL_EXT_swap_control",                WGL_EXT_SWAP_CONTROL,               0                        },
+    {"WGL_WINE_pixel_format_passthrough",   WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,  0                        },
 };
 
 /**********************************************************
@@ -446,10 +454,11 @@ static inline BOOL test_arb_vs_offset_limit(const struct wined3d_gl_info *gl_inf
 static DWORD ver_for_ext(enum wined3d_gl_extension ext)
 {
     unsigned int i;
-    for (i = 0; i < (sizeof(EXTENSION_MAP) / sizeof(*EXTENSION_MAP)); ++i) {
-        if(EXTENSION_MAP[i].extension == ext) {
-            return EXTENSION_MAP[i].version;
-        }
+
+    for (i = 0; i < (sizeof(gl_extension_map) / sizeof(*gl_extension_map)); ++i)
+    {
+        if (gl_extension_map[i].extension == ext)
+            return gl_extension_map[i].version;
     }
     return 0;
 }
@@ -1452,6 +1461,7 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(const struct wined3d_gl_in
 static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_string, const char *gl_renderer)
 {
     if (strstr(gl_vendor_string, "NVIDIA")
+            || strstr(gl_vendor_string, "Nouveau")
             || strstr(gl_vendor_string, "nouveau"))
         return HW_VENDOR_NVIDIA;
 
@@ -2044,79 +2054,75 @@ static enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_i
         const char *gl_renderer)
 {
     UINT d3d_level;
+    unsigned int i;
 
-    if (strstr(gl_renderer, "Gallium"))
+    static const struct
     {
-        unsigned int i;
+        const char *renderer;
+        enum wined3d_pci_device id;
+    }
+    cards[] =
+    {
+        {"NVC8",    CARD_NVIDIA_GEFORCE_GTX570},
+        {"NVC4",    CARD_NVIDIA_GEFORCE_GTX460},
+        {"NVC3",    CARD_NVIDIA_GEFORCE_GT440},
+        {"NVC0",    CARD_NVIDIA_GEFORCE_GTX480},
+        {"NVAF",    CARD_NVIDIA_GEFORCE_GT320M},
+        {"NVAC",    CARD_NVIDIA_GEFORCE_8200},
+        {"NVAA",    CARD_NVIDIA_GEFORCE_8200},
+        {"NVA8",    CARD_NVIDIA_GEFORCE_210},
+        {"NVA5",    CARD_NVIDIA_GEFORCE_GT220},
+        {"NVA3",    CARD_NVIDIA_GEFORCE_GT240},
+        {"NVA0",    CARD_NVIDIA_GEFORCE_GTX280},
+        {"NV98",    CARD_NVIDIA_GEFORCE_9200},
+        {"NV96",    CARD_NVIDIA_GEFORCE_9400GT},
+        {"NV94",    CARD_NVIDIA_GEFORCE_9600GT},
+        {"NV92",    CARD_NVIDIA_GEFORCE_9800GT},
+        {"NV86",    CARD_NVIDIA_GEFORCE_8500GT},
+        {"NV84",    CARD_NVIDIA_GEFORCE_8600GT},
+        {"NV68",    CARD_NVIDIA_GEFORCE_6200},      /* 7050 */
+        {"NV67",    CARD_NVIDIA_GEFORCE_6200},      /* 7000M */
+        {"NV63",    CARD_NVIDIA_GEFORCE_6200},      /* 7100 */
+        {"NV50",    CARD_NVIDIA_GEFORCE_8800GTX},
+        {"NV4E",    CARD_NVIDIA_GEFORCE_6200},      /* 6100 Go / 6150 Go */
+        {"NV4C",    CARD_NVIDIA_GEFORCE_6200},      /* 6150SE */
+        {"NV4B",    CARD_NVIDIA_GEFORCE_7600},
+        {"NV4A",    CARD_NVIDIA_GEFORCE_6200},
+        {"NV49",    CARD_NVIDIA_GEFORCE_7800GT},    /* 7900 */
+        {"NV47",    CARD_NVIDIA_GEFORCE_7800GT},
+        {"NV46",    CARD_NVIDIA_GEFORCE_7400},
+        {"NV45",    CARD_NVIDIA_GEFORCE_6800},
+        {"NV44",    CARD_NVIDIA_GEFORCE_6200},
+        {"NV43",    CARD_NVIDIA_GEFORCE_6600GT},
+        {"NV42",    CARD_NVIDIA_GEFORCE_6800},
+        {"NV41",    CARD_NVIDIA_GEFORCE_6800},
+        {"NV40",    CARD_NVIDIA_GEFORCE_6800},
+        {"NV38",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5950 Ultra */
+        {"NV36",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5700/5750 */
+        {"NV35",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5900 */
+        {"NV34",    CARD_NVIDIA_GEFORCEFX_5200},
+        {"NV31",    CARD_NVIDIA_GEFORCEFX_5600},
+        {"NV30",    CARD_NVIDIA_GEFORCEFX_5800},
+        {"nv28",    CARD_NVIDIA_GEFORCE4_TI4200},
+        {"nv25",    CARD_NVIDIA_GEFORCE4_TI4200},
+        {"nv20",    CARD_NVIDIA_GEFORCE3},
+        {"nv1F",    CARD_NVIDIA_GEFORCE4_MX},       /* GF4 MX IGP */
+        {"nv1A",    CARD_NVIDIA_GEFORCE2},          /* GF2 IGP */
+        {"nv18",    CARD_NVIDIA_GEFORCE4_MX},
+        {"nv17",    CARD_NVIDIA_GEFORCE4_MX},
+        {"nv16",    CARD_NVIDIA_GEFORCE2},
+        {"nv15",    CARD_NVIDIA_GEFORCE2},
+        {"nv11",    CARD_NVIDIA_GEFORCE2_MX},
+        {"nv10",    CARD_NVIDIA_GEFORCE},
+        {"nv05",    CARD_NVIDIA_RIVA_TNT2},
+        {"nv04",    CARD_NVIDIA_RIVA_TNT},
+        {"nv03",    CARD_NVIDIA_RIVA_128},
+    };
 
-        static const struct
-        {
-            const char *renderer;
-            enum wined3d_pci_device id;
-        }
-        cards[] =
-        {
-            {"NVC8",    CARD_NVIDIA_GEFORCE_GTX570},
-            {"NVC4",    CARD_NVIDIA_GEFORCE_GTX460},
-            {"NVC3",    CARD_NVIDIA_GEFORCE_GT440},
-            {"NVC0",    CARD_NVIDIA_GEFORCE_GTX480},
-            {"NVAF",    CARD_NVIDIA_GEFORCE_GT320M},
-            {"NVAC",    CARD_NVIDIA_GEFORCE_8200},
-            {"NVAA",    CARD_NVIDIA_GEFORCE_8200},
-            {"NVA8",    CARD_NVIDIA_GEFORCE_210},
-            {"NVA5",    CARD_NVIDIA_GEFORCE_GT220},
-            {"NVA3",    CARD_NVIDIA_GEFORCE_GT240},
-            {"NVA0",    CARD_NVIDIA_GEFORCE_GTX280},
-            {"NV98",    CARD_NVIDIA_GEFORCE_9200},
-            {"NV96",    CARD_NVIDIA_GEFORCE_9400GT},
-            {"NV94",    CARD_NVIDIA_GEFORCE_9600GT},
-            {"NV92",    CARD_NVIDIA_GEFORCE_9800GT},
-            {"NV86",    CARD_NVIDIA_GEFORCE_8500GT},
-            {"NV84",    CARD_NVIDIA_GEFORCE_8600GT},
-            {"NV68",    CARD_NVIDIA_GEFORCE_6200},      /* 7050 */
-            {"NV67",    CARD_NVIDIA_GEFORCE_6200},      /* 7000M */
-            {"NV63",    CARD_NVIDIA_GEFORCE_6200},      /* 7100 */
-            {"NV50",    CARD_NVIDIA_GEFORCE_8800GTX},
-            {"NV4E",    CARD_NVIDIA_GEFORCE_6200},      /* 6100 Go / 6150 Go */
-            {"NV4C",    CARD_NVIDIA_GEFORCE_6200},      /* 6150SE */
-            {"NV4B",    CARD_NVIDIA_GEFORCE_7600},
-            {"NV4A",    CARD_NVIDIA_GEFORCE_6200},
-            {"NV49",    CARD_NVIDIA_GEFORCE_7800GT},    /* 7900 */
-            {"NV47",    CARD_NVIDIA_GEFORCE_7800GT},
-            {"NV46",    CARD_NVIDIA_GEFORCE_7400},
-            {"NV45",    CARD_NVIDIA_GEFORCE_6800},
-            {"NV44",    CARD_NVIDIA_GEFORCE_6200},
-            {"NV43",    CARD_NVIDIA_GEFORCE_6600GT},
-            {"NV42",    CARD_NVIDIA_GEFORCE_6800},
-            {"NV41",    CARD_NVIDIA_GEFORCE_6800},
-            {"NV40",    CARD_NVIDIA_GEFORCE_6800},
-            {"NV38",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5950 Ultra */
-            {"NV36",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5700/5750 */
-            {"NV35",    CARD_NVIDIA_GEFORCEFX_5800},    /* FX 5900 */
-            {"NV34",    CARD_NVIDIA_GEFORCEFX_5200},
-            {"NV31",    CARD_NVIDIA_GEFORCEFX_5600},
-            {"NV30",    CARD_NVIDIA_GEFORCEFX_5800},
-            {"NV28",    CARD_NVIDIA_GEFORCE4_TI4200},
-            {"NV25",    CARD_NVIDIA_GEFORCE4_TI4200},
-            {"NV20",    CARD_NVIDIA_GEFORCE3},
-            {"NV1F",    CARD_NVIDIA_GEFORCE4_MX},       /* GF4 MX IGP */
-            {"NV1A",    CARD_NVIDIA_GEFORCE2},          /* GF2 IGP */
-            {"NV18",    CARD_NVIDIA_GEFORCE4_MX},
-            {"NV17",    CARD_NVIDIA_GEFORCE4_MX},
-            {"NV16",    CARD_NVIDIA_GEFORCE2},
-            {"NV15",    CARD_NVIDIA_GEFORCE2},
-            {"NV11",    CARD_NVIDIA_GEFORCE2_MX},
-            {"NV10",    CARD_NVIDIA_GEFORCE},
-            {"NV05",    CARD_NVIDIA_RIVA_TNT2},
-            {"NV04",    CARD_NVIDIA_RIVA_TNT},
-            {"NV03",    CARD_NVIDIA_RIVA_128},
-        };
-
-        for (i = 0; i < sizeof(cards) / sizeof(*cards); ++i)
-        {
-            if (strstr(gl_renderer, cards[i].renderer))
-                return cards[i].id;
-        }
+    for (i = 0; i < sizeof(cards) / sizeof(*cards); ++i)
+    {
+        if (strstr(gl_renderer, cards[i].renderer))
+            return cards[i].id;
     }
 
     FIXME_(d3d_caps)("Unknown renderer %s.\n", debugstr_a(gl_renderer));
@@ -2280,6 +2286,40 @@ static const struct blit_shader *select_blit_implementation(const struct wined3d
     else return &ffp_blit;
 }
 
+static void parse_extension_string(struct wined3d_gl_info *gl_info, const char *extensions,
+        const struct wined3d_extension_map *map, UINT entry_count)
+{
+    while (*extensions)
+    {
+        const char *start;
+        size_t len;
+        UINT i;
+
+        while (isspace(*extensions))
+            ++extensions;
+        start = extensions;
+        while (!isspace(*extensions) && *extensions)
+            ++extensions;
+
+        len = extensions - start;
+        if (!len)
+            continue;
+
+        TRACE_(d3d_caps)("- %s\n", debugstr_an(start, len));
+
+        for (i = 0; i < entry_count; ++i)
+        {
+            if (len == strlen(map[i].extension_string)
+                    && !memcmp(start, map[i].extension_string, len))
+            {
+                TRACE_(d3d_caps)(" FOUND: %s support.\n", map[i].extension_string);
+                gl_info->supported[map[i].extension] = TRUE;
+                break;
+            }
+        }
+    }
+}
+
 static void load_gl_funcs(struct wined3d_gl_info *gl_info, DWORD gl_version)
 {
     DWORD ver;
@@ -2314,7 +2354,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     unsigned    i;
     HDC         hdc;
     DWORD gl_version;
-    size_t len;
 
     TRACE_(d3d_caps)("(%p)\n", gl_info);
 
@@ -2407,46 +2446,34 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
 
     gl_info->supported[WINED3D_GL_EXT_NONE] = TRUE;
 
-    while (*GL_Extensions)
-    {
-        const char *start;
-
-        while (isspace(*GL_Extensions)) ++GL_Extensions;
-        start = GL_Extensions;
-        while (!isspace(*GL_Extensions) && *GL_Extensions) ++GL_Extensions;
-
-        len = GL_Extensions - start;
-        if (!len) continue;
-
-        TRACE_(d3d_caps)("- %s\n", debugstr_an(start, len));
-
-        for (i = 0; i < (sizeof(EXTENSION_MAP) / sizeof(*EXTENSION_MAP)); ++i)
-        {
-            if (len == strlen(EXTENSION_MAP[i].extension_string)
-                    && !memcmp(start, EXTENSION_MAP[i].extension_string, len))
-            {
-                TRACE_(d3d_caps)(" FOUND: %s support.\n", EXTENSION_MAP[i].extension_string);
-                gl_info->supported[EXTENSION_MAP[i].extension] = TRUE;
-                break;
-            }
-        }
-    }
+    parse_extension_string(gl_info, GL_Extensions, gl_extension_map,
+            sizeof(gl_extension_map) / sizeof(*gl_extension_map));
 
     /* Now work out what GL support this card really has */
     load_gl_funcs( gl_info, gl_version );
+
+    hdc = pwglGetCurrentDC();
+    /* Not all GL drivers might offer WGL extensions e.g. VirtualBox. */
+    if (GL_EXTCALL(wglGetExtensionsStringARB))
+        WGL_Extensions = GL_EXTCALL(wglGetExtensionsStringARB(hdc));
+    if (!WGL_Extensions)
+        WARN_(d3d_caps)("WGL extensions not supported.\n");
+    else
+        parse_extension_string(gl_info, WGL_Extensions, wgl_extension_map,
+                sizeof(wgl_extension_map) / sizeof(*wgl_extension_map));
 
     ENTER_GL();
 
     /* Now mark all the extensions supported which are included in the opengl core version. Do this *after*
      * loading the functions, otherwise the code above will load the extension entry points instead of the
      * core functions, which may not work. */
-    for (i = 0; i < (sizeof(EXTENSION_MAP) / sizeof(*EXTENSION_MAP)); ++i)
+    for (i = 0; i < (sizeof(gl_extension_map) / sizeof(*gl_extension_map)); ++i)
     {
-        if (!gl_info->supported[EXTENSION_MAP[i].extension]
-                && EXTENSION_MAP[i].version <= gl_version && EXTENSION_MAP[i].version)
+        if (!gl_info->supported[gl_extension_map[i].extension]
+                && gl_extension_map[i].version <= gl_version && gl_extension_map[i].version)
         {
-            TRACE_(d3d_caps)(" GL CORE: %s support.\n", EXTENSION_MAP[i].extension_string);
-            gl_info->supported[EXTENSION_MAP[i].extension] = TRUE;
+            TRACE_(d3d_caps)(" GL CORE: %s support.\n", gl_extension_map[i].extension_string);
+            gl_info->supported[gl_extension_map[i].extension] = TRUE;
         }
     }
 
@@ -2545,20 +2572,21 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &gl_max);
         gl_info->limits.textures = min(MAX_TEXTURES, gl_max);
         TRACE_(d3d_caps)("Max textures: %d.\n", gl_info->limits.textures);
-        glGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, &gl_max);
-        gl_info->limits.texture_coords = min(MAX_TEXTURES, gl_max);
-        TRACE_(d3d_caps)("Max texture coords: %d.\n", gl_info->limits.texture_coords);
 
         if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
         {
             GLint tmp;
+            glGetIntegerv(GL_MAX_TEXTURE_COORDS_ARB, &gl_max);
+            gl_info->limits.texture_coords = min(MAX_TEXTURES, gl_max);
             glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &tmp);
             gl_info->limits.fragment_samplers = min(MAX_FRAGMENT_SAMPLERS, tmp);
         }
         else
         {
+            gl_info->limits.texture_coords = max(gl_info->limits.texture_coords, gl_max);
             gl_info->limits.fragment_samplers = max(gl_info->limits.fragment_samplers, gl_max);
         }
+        TRACE_(d3d_caps)("Max texture coords: %d.\n", gl_info->limits.texture_coords);
         TRACE_(d3d_caps)("Max fragment samplers: %d.\n", gl_info->limits.fragment_samplers);
 
         if (gl_info->supported[ARB_VERTEX_SHADER])
@@ -2824,53 +2852,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
             gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
     gl_info->wrap_lookup[WINED3D_TADDRESS_MIRROR_ONCE - WINED3D_TADDRESS_WRAP] =
             gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
-
-    /* Make sure there's an active HDC else the WGL extensions will fail */
-    hdc = pwglGetCurrentDC();
-    if (hdc) {
-        /* Not all GL drivers might offer WGL extensions e.g. VirtualBox */
-        if(GL_EXTCALL(wglGetExtensionsStringARB))
-            WGL_Extensions = GL_EXTCALL(wglGetExtensionsStringARB(hdc));
-
-        if (!WGL_Extensions)
-        {
-            ERR("   WGL_Extensions returns NULL\n");
-        }
-        else
-        {
-            TRACE_(d3d_caps)("WGL_Extensions reported:\n");
-            while (*WGL_Extensions)
-            {
-                const char *Start;
-                char ThisExtn[256];
-
-                while (isspace(*WGL_Extensions)) WGL_Extensions++;
-                Start = WGL_Extensions;
-                while (!isspace(*WGL_Extensions) && *WGL_Extensions) ++WGL_Extensions;
-
-                len = WGL_Extensions - Start;
-                if (!len || len >= sizeof(ThisExtn))
-                    continue;
-
-                memcpy(ThisExtn, Start, len);
-                ThisExtn[len] = '\0';
-                TRACE_(d3d_caps)("- %s\n", debugstr_a(ThisExtn));
-
-                if (!strcmp(ThisExtn, "WGL_ARB_pixel_format")) {
-                    gl_info->supported[WGL_ARB_PIXEL_FORMAT] = TRUE;
-                    TRACE_(d3d_caps)("FOUND: WGL_ARB_pixel_format support\n");
-                }
-                if (!strcmp(ThisExtn, "WGL_EXT_swap_control")) {
-                    gl_info->supported[WGL_EXT_SWAP_CONTROL] = TRUE;
-                    TRACE_(d3d_caps)("FOUND: WGL_EXT_swap_control support\n");
-                }
-                if (!strcmp(ThisExtn, "WGL_WINE_pixel_format_passthrough")) {
-                    gl_info->supported[WGL_WINE_PIXEL_FORMAT_PASSTHROUGH] = TRUE;
-                    TRACE_(d3d_caps)("FOUND: WGL_WINE_pixel_format_passthrough support\n");
-                }
-            }
-        }
-    }
 
     fixup_extensions(gl_info, gl_renderer_str, gl_vendor, card_vendor, device);
     init_driver_info(driver_info, card_vendor, device);

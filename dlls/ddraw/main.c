@@ -187,7 +187,7 @@ DDRAW_Create(const GUID *guid,
              REFIID iid)
 {
     enum wined3d_device_type device_type;
-    IDirectDrawImpl *This;
+    struct ddraw *ddraw;
     HRESULT hr;
 
     TRACE("driver_guid %s, ddraw %p, outer_unknown %p, interface_iid %s.\n",
@@ -220,25 +220,27 @@ DDRAW_Create(const GUID *guid,
         return CLASS_E_NOAGGREGATION;
 
     /* DirectDraw creation comes here */
-    This = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectDrawImpl));
-    if(!This)
+    ddraw = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ddraw));
+    if (!ddraw)
     {
         ERR("Out of memory when creating DirectDraw\n");
         return E_OUTOFMEMORY;
     }
 
-    hr = ddraw_init(This, device_type);
+    hr = ddraw_init(ddraw, device_type);
     if (FAILED(hr))
     {
         WARN("Failed to initialize ddraw object, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, This);
+        HeapFree(GetProcessHeap(), 0, ddraw);
         return hr;
     }
 
-    hr = IDirectDraw7_QueryInterface(&This->IDirectDraw7_iface, iid, DD);
-    IDirectDraw7_Release(&This->IDirectDraw7_iface);
-    if (SUCCEEDED(hr)) list_add_head(&global_ddraw_list, &This->ddraw_list_entry);
-    else WARN("Failed to query interface %s from ddraw object %p.\n", debugstr_guid(iid), This);
+    hr = IDirectDraw7_QueryInterface(&ddraw->IDirectDraw7_iface, iid, DD);
+    IDirectDraw7_Release(&ddraw->IDirectDraw7_iface);
+    if (SUCCEEDED(hr))
+        list_add_head(&global_ddraw_list, &ddraw->ddraw_list_entry);
+    else
+        WARN("Failed to query interface %s from ddraw object %p.\n", debugstr_guid(iid), ddraw);
 
     return hr;
 }
@@ -543,19 +545,18 @@ static inline IClassFactoryImpl *impl_from_IClassFactory(IClassFactory *iface)
 static HRESULT WINAPI IDirectDrawClassFactoryImpl_QueryInterface(IClassFactory *iface, REFIID riid,
         void **obj)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-
     TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), obj);
 
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IClassFactory))
     {
         IClassFactory_AddRef(iface);
-        *obj = This;
+        *obj = iface;
         return S_OK;
     }
 
-    WARN("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),obj);
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
+
     return E_NOINTERFACE;
 }
 
@@ -760,7 +761,7 @@ DestroyCallback(IDirectDrawSurface7 *surf,
                 DDSURFACEDESC2 *desc,
                 void *context)
 {
-    IDirectDrawSurfaceImpl *Impl = impl_from_IDirectDrawSurface7(surf);
+    struct ddraw_surface *Impl = impl_from_IDirectDrawSurface7(surf);
     ULONG ref7, ref4, ref3, ref2, ref1, gamma_count, iface_count;
 
     ref7 = IDirectDrawSurface7_Release(surf);  /* For the EnumSurfaces */
@@ -928,10 +929,10 @@ DllMain(HINSTANCE hInstDLL,
             /* We remove elements from this loop */
             LIST_FOR_EACH_SAFE(entry, entry2, &global_ddraw_list)
             {
+                struct ddraw *ddraw = LIST_ENTRY(entry, struct ddraw, ddraw_list_entry);
                 HRESULT hr;
                 DDSURFACEDESC2 desc;
                 int i;
-                IDirectDrawImpl *ddraw = LIST_ENTRY(entry, IDirectDrawImpl, ddraw_list_entry);
 
                 WARN("DDraw %p has a refcount of %d\n", ddraw, ddraw->ref7 + ddraw->ref4 + ddraw->ref3 + ddraw->ref2 + ddraw->ref1);
 

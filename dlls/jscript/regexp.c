@@ -3476,7 +3476,7 @@ HRESULT regexp_match(script_ctx_t *ctx, jsdisp_t *dispex, const WCHAR *str, DWOR
 }
 
 static HRESULT RegExp_source(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -3499,21 +3499,21 @@ static HRESULT RegExp_source(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
 }
 
 static HRESULT RegExp_global(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     FIXME("\n");
     return E_NOTIMPL;
 }
 
 static HRESULT RegExp_ignoreCase(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     FIXME("\n");
     return E_NOTIMPL;
 }
 
 static HRESULT RegExp_multiline(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     FIXME("\n");
     return E_NOTIMPL;
@@ -3541,7 +3541,7 @@ static INT index_from_var(script_ctx_t *ctx, VARIANT *v)
 }
 
 static HRESULT RegExp_lastIndex(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -3574,7 +3574,7 @@ static HRESULT RegExp_lastIndex(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
 }
 
 static HRESULT RegExp_toString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     FIXME("\n");
     return E_NOTIMPL;
@@ -3605,7 +3605,7 @@ static HRESULT create_match_array(script_ctx_t *ctx, BSTR input, const match_res
             break;
         }
 
-        hres = jsdisp_propput_idx(array, i+1, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_idx(array, i+1, &var, ei);
         SysFreeString(V_BSTR(&var));
         if(FAILED(hres))
             break;
@@ -3614,18 +3614,18 @@ static HRESULT create_match_array(script_ctx_t *ctx, BSTR input, const match_res
     while(SUCCEEDED(hres)) {
         V_VT(&var) = VT_I4;
         V_I4(&var) = result->str-input;
-        hres = jsdisp_propput_name(array, indexW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, indexW, &var, ei);
         if(FAILED(hres))
             break;
 
         V_I4(&var) = result->str-input+result->len;
-        hres = jsdisp_propput_name(array, lastIndexW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, lastIndexW, &var, ei);
         if(FAILED(hres))
             break;
 
         V_VT(&var) = VT_BSTR;
         V_BSTR(&var) = input;
-        hres = jsdisp_propput_name(array, inputW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, inputW, &var, ei);
         if(FAILED(hres))
             break;
 
@@ -3634,7 +3634,7 @@ static HRESULT create_match_array(script_ctx_t *ctx, BSTR input, const match_res
             hres = E_OUTOFMEMORY;
             break;
         }
-        hres = jsdisp_propput_name(array, zeroW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, zeroW, &var, ei);
         SysFreeString(V_BSTR(&var));
         break;
     }
@@ -3706,7 +3706,7 @@ static HRESULT run_exec(script_ctx_t *ctx, vdisp_t *jsthis, VARIANT *arg, jsexce
 }
 
 static HRESULT RegExp_exec(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     match_result_t *parens = NULL, match;
     DWORD parens_cnt = 0;
@@ -3740,7 +3740,7 @@ static HRESULT RegExp_exec(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPP
 }
 
 static HRESULT RegExp_test(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     match_result_t match;
     VARIANT undef_var;
@@ -3772,7 +3772,7 @@ static HRESULT RegExp_test(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPP
 }
 
 static HRESULT RegExp_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -3989,7 +3989,7 @@ HRESULT regexp_string_match(script_ctx_t *ctx, jsdisp_t *re, BSTR str,
             break;
         }
 
-        hres = jsdisp_propput_idx(array, i, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_idx(array, i, &var, ei);
         SysFreeString(V_BSTR(&var));
         if(FAILED(hres))
             break;
@@ -3998,18 +3998,18 @@ HRESULT regexp_string_match(script_ctx_t *ctx, jsdisp_t *re, BSTR str,
     while(SUCCEEDED(hres)) {
         V_VT(&var) = VT_I4;
         V_I4(&var) = match_result[match_cnt-1].str-str;
-        hres = jsdisp_propput_name(array, indexW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, indexW, &var, ei);
         if(FAILED(hres))
             break;
 
         V_I4(&var) = match_result[match_cnt-1].str-str+match_result[match_cnt-1].len;
-        hres = jsdisp_propput_name(array, lastIndexW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, lastIndexW, &var, ei);
         if(FAILED(hres))
             break;
 
         V_VT(&var) = VT_BSTR;
         V_BSTR(&var) = str;
-        hres = jsdisp_propput_name(array, inputW, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(array, inputW, &var, ei);
         break;
     }
 
@@ -4023,7 +4023,7 @@ HRESULT regexp_string_match(script_ctx_t *ctx, jsdisp_t *re, BSTR str,
 }
 
 static HRESULT RegExpConstr_leftContext(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-         DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+         DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -4050,7 +4050,7 @@ static HRESULT RegExpConstr_leftContext(script_ctx_t *ctx, vdisp_t *jsthis, WORD
 }
 
 static HRESULT RegExpConstr_rightContext(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-         DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+         DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -4077,7 +4077,7 @@ static HRESULT RegExpConstr_rightContext(script_ctx_t *ctx, vdisp_t *jsthis, WOR
 }
 
 static HRESULT RegExpConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
-        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 

@@ -349,8 +349,25 @@ else
 fi
 
 test "x$with_gettext" != xno || MSGFMT=false
+if test "$MSGFMT" != "false"
+then
+  AC_MSG_CHECKING([whether msgfmt supports contexts])
+  cat >conftest.po <<EOF
+# comment
+msgctxt "ctxt"
+msgid "id"
+msgstr "str"
+EOF
+  if $MSGFMT -o /dev/null conftest.po 2>&AS_MESSAGE_LOG_FD
+  then
+    AC_MSG_RESULT([yes])
+  else
+    AC_MSG_RESULT([no])
+    MSGFMT=false
+  fi
+fi
 WINE_WARNING_WITH(gettext,[test "$MSGFMT" = false],
-                  [gettext tools not found, translations won't be built.])
+                  [gettext tools not found (or too old), translations won't be built.])
 
 dnl **** Check for some libraries ****
 
@@ -375,6 +392,7 @@ AC_CHECK_HEADERS(\
 	CL/cl.h \
 	Carbon/Carbon.h \
 	CoreAudio/CoreAudio.h \
+	CoreServices/CoreServices.h \
 	DiskArbitration/DiskArbitration.h \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
@@ -697,6 +715,7 @@ case $host_os in
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
     AC_SUBST(APPLICATIONSERVICESLIB,"-framework ApplicationServices")
+    AC_SUBST(CORESERVICESLIB,"-framework CoreServices")
     case $host_os in
       darwin11*)
         AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-macosx_version_min,10.6,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000"]) ;;
@@ -2607,6 +2626,7 @@ WINE_CONFIG_DLL(mcicda)
 WINE_CONFIG_DLL(mciqtz32)
 WINE_CONFIG_DLL(mciseq)
 WINE_CONFIG_DLL(mciwave)
+WINE_CONFIG_DLL(mgmtapi)
 WINE_CONFIG_DLL(midimap)
 WINE_CONFIG_DLL(mlang,,[implib])
 WINE_CONFIG_TEST(dlls/mlang/tests)
@@ -2642,6 +2662,7 @@ WINE_CONFIG_DLL(mshtml,,[implib,po])
 WINE_CONFIG_TEST(dlls/mshtml/tests)
 WINE_CONFIG_DLL(msi,,[implib,po])
 WINE_CONFIG_TEST(dlls/msi/tests)
+WINE_CONFIG_DLL(msident)
 WINE_CONFIG_DLL(msimg32,,[implib])
 WINE_CONFIG_DLL(msimsg)
 WINE_CONFIG_DLL(msimtf)
@@ -2852,6 +2873,7 @@ WINE_CONFIG_DLL(w32sys.dll16,enable_win16)
 WINE_CONFIG_DLL(wbemprox)
 WINE_CONFIG_DLL(wer,,[implib])
 WINE_CONFIG_TEST(dlls/wer/tests)
+WINE_CONFIG_DLL(wevtapi)
 WINE_CONFIG_DLL(wiaservc)
 WINE_CONFIG_DLL(win32s16.dll16,enable_win16)
 WINE_CONFIG_DLL(win87em.dll16,enable_win16)
@@ -3001,6 +3023,7 @@ WINE_CONFIG_PROGRAM(wordpad,,[install,po])
 WINE_CONFIG_PROGRAM(write,,[install,po])
 WINE_CONFIG_PROGRAM(wscript,,[install])
 WINE_CONFIG_TEST(programs/wscript/tests)
+WINE_CONFIG_PROGRAM(wusa,,[install])
 WINE_CONFIG_PROGRAM(xcopy,,[install,po])
 WINE_CONFIG_MAKEFILE([server],,[install-lib,manpage])
 WINE_CONFIG_TOOL(tools,[install-dev,install-lib,manpage])
@@ -3089,7 +3112,7 @@ then
     WINE_APPEND_RULE([ALL_MAKEFILE_DEPENDS],
 [ALL_POT_FILES =$ALL_POT_FILES
 \$(LINGUAS:%=po/%.po): \$(srcdir)/po/wine.pot
-	msgmerge -q \$[@] \$(srcdir)/po/wine.pot | msgattrib --no-obsolete -o \$[@].new && mv \$[@].new \$[@]
+	msgmerge --previous -q \$[@] \$(srcdir)/po/wine.pot | msgattrib --no-obsolete -o \$[@].new && mv \$[@].new \$[@]
 \$(srcdir)/po/wine.pot: \$(ALL_POT_FILES)
 	msgcat -o \$[@] \$(ALL_POT_FILES)])
 fi

@@ -44,6 +44,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 #define CONTENT_LENGTH "Content-Length"
+#define UTF8_STR "utf-8"
 #define UTF16_STR "utf-16"
 
 static const WCHAR emptyW[] = {0};
@@ -185,7 +186,7 @@ static nsresult NSAPI nsInputStream_ReadSegments(nsIInputStream *iface,
     return nsres;
 }
 
-static nsresult NSAPI nsInputStream_IsNonBlocking(nsIInputStream *iface, PRBool *_retval)
+static nsresult NSAPI nsInputStream_IsNonBlocking(nsIInputStream *iface, cpp_bool *_retval)
 {
     nsProtocolStream *This = impl_from_nsIInputStream(iface);
     FIXME("(%p)->(%p)\n", This, _retval);
@@ -1058,6 +1059,8 @@ static void on_stop_nsrequest(nsChannelBSC *This, HRESULT result)
 
 static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
 {
+    static const WCHAR mimeTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
+
     DWORD read;
     nsresult nsres;
     HRESULT hres;
@@ -1090,11 +1093,17 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
                && (BYTE)This->nsstream->buf[0] == 0xff
                && (BYTE)This->nsstream->buf[1] == 0xfe)
                 This->nschannel->charset = heap_strdupA(UTF16_STR);
+            if(This->nsstream->buf_size >= 3
+               && (BYTE)This->nsstream->buf[0] == 0xef
+               && (BYTE)This->nsstream->buf[1] == 0xbb
+               && (BYTE)This->nsstream->buf[2] == 0xbf)
+                This->nschannel->charset = heap_strdupA(UTF8_STR);
 
             if(!This->nschannel->content_type) {
                 WCHAR *mime;
 
-                hres = FindMimeFromData(NULL, NULL, This->nsstream->buf, This->nsstream->buf_size, NULL, 0, &mime, 0);
+                hres = FindMimeFromData(NULL, NULL, This->nsstream->buf, This->nsstream->buf_size,
+                        This->window ? mimeTextHtml : NULL, 0, &mime, 0);
                 if(FAILED(hres))
                     return hres;
 

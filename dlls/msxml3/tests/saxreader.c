@@ -449,8 +449,12 @@ static HRESULT WINAPI contentHandler_startElement(
         int nQName,
         ISAXAttributes *pAttr)
 {
-    int len;
+    IMXAttributes *mxattr;
     HRESULT hres;
+    int len;
+
+    hres = ISAXAttributes_QueryInterface(pAttr, &IID_IMXAttributes, (void**)&mxattr);
+    EXPECT_HR(hres, E_NOINTERFACE);
 
     if(!test_expect_call(CH_STARTELEMENT))
         return E_FAIL;
@@ -1685,6 +1689,7 @@ static void test_mxwriter_handlers(void)
 {
     ISAXContentHandler *handler;
     IMXWriter *writer, *writer2;
+    ISAXDeclHandler *decl;
     ISAXLexicalHandler *lh;
     HRESULT hr;
 
@@ -1720,6 +1725,21 @@ static void test_mxwriter_handlers(void)
     EXPECT_REF(writer, 3);
     EXPECT_REF(writer2, 3);
     IMXWriter_Release(writer2);
+    ISAXLexicalHandler_Release(lh);
+
+    /* ISAXDeclHandler */
+    hr = IMXWriter_QueryInterface(writer, &IID_ISAXDeclHandler, (void**)&decl);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    EXPECT_REF(writer, 2);
+    EXPECT_REF(lh, 2);
+
+    hr = ISAXDeclHandler_QueryInterface(decl, &IID_IMXWriter, (void**)&writer2);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(writer2 == writer, "got %p, expected %p\n", writer2, writer);
+    EXPECT_REF(writer, 3);
+    EXPECT_REF(writer2, 3);
+    IMXWriter_Release(writer2);
+    ISAXDeclHandler_Release(decl);
 
     IMXWriter_Release(writer);
 }
@@ -3108,11 +3128,13 @@ static void test_mxwriter_cdata(void)
 
 static void test_mxwriter_dtd(void)
 {
+    static const WCHAR contentW[] = {'c','o','n','t','e','n','t'};
     static const WCHAR nameW[] = {'n','a','m','e'};
     static const WCHAR pubW[] = {'p','u','b'};
     static const WCHAR sysW[] = {'s','y','s'};
     ISAXContentHandler *content;
     ISAXLexicalHandler *lexical;
+    ISAXDeclHandler *decl;
     IMXWriter *writer;
     VARIANT dest;
     HRESULT hr;
@@ -3125,6 +3147,9 @@ static void test_mxwriter_dtd(void)
     EXPECT_HR(hr, S_OK);
 
     hr = IMXWriter_QueryInterface(writer, &IID_ISAXLexicalHandler, (void**)&lexical);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXWriter_QueryInterface(writer, &IID_ISAXDeclHandler, (void**)&decl);
     EXPECT_HR(hr, S_OK);
 
     hr = IMXWriter_put_omitXMLDeclaration(writer, VARIANT_TRUE);
@@ -3186,8 +3211,46 @@ static void test_mxwriter_dtd(void)
         V_BSTR(&dest)), "got wrong content %s\n", wine_dbgstr_w(V_BSTR(&dest)));
     VariantClear(&dest);
 
+    /* element declaration */
+    V_VT(&dest) = VT_EMPTY;
+    hr = IMXWriter_put_output(writer, dest);
+    EXPECT_HR(hr, S_OK);
+
+    hr = ISAXDeclHandler_elementDecl(decl, NULL, 0, NULL, 0);
+    EXPECT_HR(hr, E_INVALIDARG);
+
+    hr = ISAXDeclHandler_elementDecl(decl, nameW, sizeof(nameW)/sizeof(WCHAR), NULL, 0);
+    EXPECT_HR(hr, E_INVALIDARG);
+
+    hr = ISAXDeclHandler_elementDecl(decl, nameW, sizeof(nameW)/sizeof(WCHAR), contentW, sizeof(contentW)/sizeof(WCHAR));
+    EXPECT_HR(hr, S_OK);
+
+    V_VT(&dest) = VT_EMPTY;
+    hr = IMXWriter_get_output(writer, &dest);
+    EXPECT_HR(hr, S_OK);
+    ok(V_VT(&dest) == VT_BSTR, "got %d\n", V_VT(&dest));
+    ok(!lstrcmpW(_bstr_("<!ELEMENT name content>\r\n"),
+        V_BSTR(&dest)), "got wrong content %s\n", wine_dbgstr_w(V_BSTR(&dest)));
+    VariantClear(&dest);
+
+    V_VT(&dest) = VT_EMPTY;
+    hr = IMXWriter_put_output(writer, dest);
+    EXPECT_HR(hr, S_OK);
+
+    hr = ISAXDeclHandler_elementDecl(decl, nameW, sizeof(nameW)/sizeof(WCHAR), contentW, 0);
+    EXPECT_HR(hr, S_OK);
+
+    V_VT(&dest) = VT_EMPTY;
+    hr = IMXWriter_get_output(writer, &dest);
+    EXPECT_HR(hr, S_OK);
+    ok(V_VT(&dest) == VT_BSTR, "got %d\n", V_VT(&dest));
+    ok(!lstrcmpW(_bstr_("<!ELEMENT name >\r\n"),
+        V_BSTR(&dest)), "got wrong content %s\n", wine_dbgstr_w(V_BSTR(&dest)));
+    VariantClear(&dest);
+
     ISAXContentHandler_Release(content);
     ISAXLexicalHandler_Release(lexical);
+    ISAXDeclHandler_Release(decl);
     IMXWriter_Release(writer);
     free_bstrs();
 }
@@ -3235,8 +3298,9 @@ static void test_mxattr_addAttribute(void)
     {
         ISAXAttributes *saxattr;
         IMXAttributes *mxattr;
+        const WCHAR *value;
+        int len, index;
         HRESULT hr;
-        int len;
 
         if (!is_clsid_supported(table->clsid, mxattributes_support_data))
         {
@@ -3252,7 +3316,7 @@ static void test_mxattr_addAttribute(void)
         hr = IMXAttributes_QueryInterface(mxattr, &IID_ISAXAttributes, (void**)&saxattr);
         EXPECT_HR(hr, S_OK);
 
-        /* SAXAttributes30 and SAXAttributes60 both crash on this test */
+        /* SAXAttributes40 and SAXAttributes60 both crash on this test */
         if (IsEqualGUID(table->clsid, &CLSID_SAXAttributes) ||
             IsEqualGUID(table->clsid, &CLSID_SAXAttributes30))
         {
@@ -3265,9 +3329,149 @@ static void test_mxattr_addAttribute(void)
         EXPECT_HR(hr, S_OK);
         ok(len == 0, "got %d\n", len);
 
+        hr = ISAXAttributes_getValue(saxattr, 0, &value, &len);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getValue(saxattr, 0, NULL, &len);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getValue(saxattr, 0, &value, NULL);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getValue(saxattr, 0, NULL, NULL);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getType(saxattr, 0, &value, &len);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getType(saxattr, 0, NULL, &len);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getType(saxattr, 0, &value, NULL);
+        EXPECT_HR(hr, E_INVALIDARG);
+
+        hr = ISAXAttributes_getType(saxattr, 0, NULL, NULL);
+        EXPECT_HR(hr, E_INVALIDARG);
+
         hr = IMXAttributes_addAttribute(mxattr, _bstr_(table->uri), _bstr_(table->local),
             _bstr_(table->qname), _bstr_(table->type), _bstr_(table->value));
         ok(hr == table->hr, "%d: got 0x%08x, expected 0x%08x\n", i, hr, table->hr);
+
+        if (hr == S_OK)
+        {
+            /* SAXAttributes40 and SAXAttributes60 both crash on this test */
+            if (IsEqualGUID(table->clsid, &CLSID_SAXAttributes) ||
+                IsEqualGUID(table->clsid, &CLSID_SAXAttributes30))
+            {
+               hr = ISAXAttributes_getValue(saxattr, 0, NULL, &len);
+               EXPECT_HR(hr, E_POINTER);
+
+               hr = ISAXAttributes_getValue(saxattr, 0, &value, NULL);
+               EXPECT_HR(hr, E_POINTER);
+
+               hr = ISAXAttributes_getValue(saxattr, 0, NULL, NULL);
+               EXPECT_HR(hr, E_POINTER);
+
+               hr = ISAXAttributes_getType(saxattr, 0, NULL, &len);
+               EXPECT_HR(hr, E_POINTER);
+
+               hr = ISAXAttributes_getType(saxattr, 0, &value, NULL);
+               EXPECT_HR(hr, E_POINTER);
+
+               hr = ISAXAttributes_getType(saxattr, 0, NULL, NULL);
+               EXPECT_HR(hr, E_POINTER);
+            }
+
+            len = -1;
+            hr = ISAXAttributes_getValue(saxattr, 0, &value, &len);
+            EXPECT_HR(hr, S_OK);
+            ok(!lstrcmpW(_bstr_(table->value), value), "%d: got %s, expected %s\n", i, wine_dbgstr_w(value),
+                table->value);
+            ok(lstrlenW(value) == len, "%d: got wrong value length %d\n", i, len);
+
+            len = -1;
+            value = (void*)0xdeadbeef;
+            hr = ISAXAttributes_getType(saxattr, 0, &value, &len);
+            EXPECT_HR(hr, S_OK);
+
+            if (table->type)
+            {
+                ok(!lstrcmpW(_bstr_(table->type), value), "%d: got %s, expected %s\n", i, wine_dbgstr_w(value),
+                    table->type);
+                ok(lstrlenW(value) == len, "%d: got wrong type value length %d\n", i, len);
+            }
+            else
+            {
+                ok(*value == 0, "%d: got type value %s\n", i, wine_dbgstr_w(value));
+                ok(len == 0, "%d: got wrong type value length %d\n", i, len);
+            }
+
+            hr = ISAXAttributes_getIndexFromQName(saxattr, NULL, 0, NULL);
+            if (IsEqualGUID(table->clsid, &CLSID_SAXAttributes) ||
+                IsEqualGUID(table->clsid, &CLSID_SAXAttributes30))
+            {
+                EXPECT_HR(hr, E_POINTER);
+            }
+            else
+                EXPECT_HR(hr, E_INVALIDARG);
+
+            hr = ISAXAttributes_getIndexFromQName(saxattr, NULL, 0, &index);
+            EXPECT_HR(hr, E_INVALIDARG);
+
+            index = -1;
+            hr = ISAXAttributes_getIndexFromQName(saxattr, _bstr_("nonexistent"), 11, &index);
+            EXPECT_HR(hr, E_INVALIDARG);
+            ok(index == -1, "%d: got wrong index %d\n", i, index);
+
+            index = -1;
+            hr = ISAXAttributes_getIndexFromQName(saxattr, _bstr_(table->qname), 0, &index);
+            EXPECT_HR(hr, E_INVALIDARG);
+            ok(index == -1, "%d: got wrong index %d\n", i, index);
+
+            index = -1;
+            hr = ISAXAttributes_getIndexFromQName(saxattr, _bstr_(table->qname), strlen(table->qname), &index);
+            EXPECT_HR(hr, S_OK);
+            ok(index == 0, "%d: got wrong index %d\n", i, index);
+
+            index = -1;
+            hr = ISAXAttributes_getIndexFromQName(saxattr, _bstr_(table->qname), strlen(table->qname)-1, &index);
+            EXPECT_HR(hr, E_INVALIDARG);
+            ok(index == -1, "%d: got wrong index %d\n", i, index);
+
+            if (IsEqualGUID(table->clsid, &CLSID_SAXAttributes40) ||
+                IsEqualGUID(table->clsid, &CLSID_SAXAttributes60))
+            {
+                hr = ISAXAttributes_getValueFromQName(saxattr, NULL, 0, NULL, NULL);
+                EXPECT_HR(hr, E_INVALIDARG);
+
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), 0, NULL, NULL);
+                EXPECT_HR(hr, E_INVALIDARG);
+
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), 0, &value, NULL);
+                EXPECT_HR(hr, E_INVALIDARG);
+            }
+            else
+            {
+                hr = ISAXAttributes_getValueFromQName(saxattr, NULL, 0, NULL, NULL);
+                EXPECT_HR(hr, E_POINTER);
+
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), 0, NULL, NULL);
+                EXPECT_HR(hr, E_POINTER);
+
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), 0, &value, NULL);
+                EXPECT_HR(hr, E_POINTER);
+
+                /* versions 4 and 6 crash */
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), strlen(table->qname), NULL, NULL);
+                EXPECT_HR(hr, E_POINTER);
+
+                hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), strlen(table->qname), NULL, &len);
+                EXPECT_HR(hr, E_POINTER);
+            }
+
+            hr = ISAXAttributes_getValueFromQName(saxattr, _bstr_(table->qname), strlen(table->qname), &value, &len);
+            EXPECT_HR(hr, S_OK);
+        }
 
         len = -1;
         hr = ISAXAttributes_getLength(saxattr, &len);
@@ -3334,23 +3538,85 @@ static void test_mxattr_clear(void)
     ok(!lstrcmpW(ptr, _bstr_("qname")), "got %s\n", wine_dbgstr_w(ptr));
 
     hr = IMXAttributes_clear(mxattr);
+todo_wine
     EXPECT_HR(hr, S_OK);
 
     len = -1;
     hr = ISAXAttributes_getLength(saxattr, &len);
     EXPECT_HR(hr, S_OK);
+todo_wine
     ok(len == 0, "got %d\n", len);
 
     len = -1;
     ptr = (void*)0xdeadbeef;
     hr = ISAXAttributes_getQName(saxattr, 0, &ptr, &len);
+todo_wine {
     EXPECT_HR(hr, E_INVALIDARG);
     ok(len == -1, "got %d\n", len);
     ok(ptr == (void*)0xdeadbeef, "got %p\n", ptr);
-
+}
     IMXAttributes_Release(mxattr);
     ISAXAttributes_Release(saxattr);
     free_bstrs();
+}
+
+static void test_mxattr_dispex(void)
+{
+    IMXAttributes *mxattr;
+    IDispatchEx *dispex;
+    IUnknown *unk;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_SAXAttributes, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMXAttributes, (void**)&mxattr);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXAttributes_QueryInterface(mxattr, &IID_IDispatchEx, (void**)&dispex);
+    EXPECT_HR(hr, S_OK);
+    hr = IDispatchEx_QueryInterface(dispex, &IID_IUnknown, (void**)&unk);
+    test_obj_dispex(unk);
+    IUnknown_Release(unk);
+    IDispatchEx_Release(dispex);
+
+    IMXAttributes_Release(mxattr);
+}
+
+static void test_mxattr_qi(void)
+{
+    IVBSAXAttributes *vbsaxattr, *vbsaxattr2;
+    ISAXAttributes *saxattr;
+    IMXAttributes *mxattr;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_SAXAttributes, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IMXAttributes, (void**)&mxattr);
+    EXPECT_HR(hr, S_OK);
+
+    EXPECT_REF(mxattr, 1);
+    hr = IMXAttributes_QueryInterface(mxattr, &IID_ISAXAttributes, (void**)&saxattr);
+    EXPECT_HR(hr, S_OK);
+
+    EXPECT_REF(mxattr, 2);
+    EXPECT_REF(saxattr, 2);
+
+    hr = IMXAttributes_QueryInterface(mxattr, &IID_IVBSAXAttributes, (void**)&vbsaxattr);
+    EXPECT_HR(hr, S_OK);
+
+    EXPECT_REF(vbsaxattr, 3);
+    EXPECT_REF(mxattr, 3);
+    EXPECT_REF(saxattr, 3);
+
+    hr = ISAXAttributes_QueryInterface(saxattr, &IID_IVBSAXAttributes, (void**)&vbsaxattr2);
+    EXPECT_HR(hr, S_OK);
+
+    EXPECT_REF(vbsaxattr, 4);
+    EXPECT_REF(mxattr, 4);
+    EXPECT_REF(saxattr, 4);
+
+    IMXAttributes_Release(mxattr);
+    ISAXAttributes_Release(saxattr);
+    IVBSAXAttributes_Release(vbsaxattr);
+    IVBSAXAttributes_Release(vbsaxattr2);
 }
 
 START_TEST(saxreader)
@@ -3404,8 +3670,10 @@ START_TEST(saxreader)
     get_mxattributes_support_data(mxattributes_support_data);
     if (is_clsid_supported(&CLSID_SAXAttributes, mxattributes_support_data))
     {
+        test_mxattr_qi();
         test_mxattr_addAttribute();
         test_mxattr_clear();
+        test_mxattr_dispex();
     }
     else
         skip("SAXAttributes not supported\n");

@@ -1315,6 +1315,7 @@ static expression_t *new_function_expression(parser_ctx_t *ctx, const WCHAR *ide
        parameter_list_t *parameter_list, source_elements_t *source_elements, const WCHAR *src_str, DWORD src_len)
 {
     function_expression_t *ret = new_expression(ctx, EXPR_FUNC, sizeof(*ret));
+    function_declaration_t *decl;
 
     ret->identifier = identifier;
     ret->parameter_list = parameter_list ? parameter_list->head : NULL;
@@ -1322,17 +1323,15 @@ static expression_t *new_function_expression(parser_ctx_t *ctx, const WCHAR *ide
     ret->src_str = src_str;
     ret->src_len = src_len;
 
-    if(ret->identifier) {
-        function_declaration_t *decl = parser_alloc(ctx, sizeof(function_declaration_t));
+    decl = parser_alloc(ctx, sizeof(function_declaration_t));
 
-        decl->expr = ret;
-        decl->next = NULL;
+    decl->expr = ret;
+    decl->next = NULL;
 
-        if(ctx->func_stack->func_tail)
-            ctx->func_stack->func_tail = ctx->func_stack->func_tail->next = decl;
-        else
-            ctx->func_stack->func_head = ctx->func_stack->func_tail = decl;
-    }
+    if(ctx->func_stack->func_tail)
+        ctx->func_stack->func_tail = ctx->func_stack->func_tail->next = decl;
+    else
+        ctx->func_stack->func_head = ctx->func_stack->func_tail = decl;
 
     return &ret->expr;
 }
@@ -1533,20 +1532,13 @@ static void program_parsed(parser_ctx_t *ctx, source_elements_t *source)
 
 void parser_release(parser_ctx_t *ctx)
 {
-    if(--ctx->ref)
-        return;
-
-    if(ctx->code)
-        release_bytecode(ctx->code);
-    if(ctx->compiler)
-        release_compiler(ctx->compiler);
     script_release(ctx->script);
     heap_free(ctx->begin);
     jsheap_free(&ctx->heap);
     heap_free(ctx);
 }
 
-HRESULT script_parse(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter,
+HRESULT script_parse(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter, BOOL from_eval,
         parser_ctx_t **ret)
 {
     parser_ctx_t *parser_ctx;
@@ -1559,7 +1551,6 @@ HRESULT script_parse(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimite
     if(!parser_ctx)
         return E_OUTOFMEMORY;
 
-    parser_ctx->ref = 1;
     parser_ctx->hres = JS_E_SYNTAX;
     parser_ctx->is_html = delimiter && !strcmpiW(delimiter, html_tagW);
 
@@ -1582,8 +1573,8 @@ HRESULT script_parse(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimite
 
     parser_parse(parser_ctx);
     jsheap_clear(mark);
-    if(FAILED(parser_ctx->hres)) {
-        hres = parser_ctx->hres;
+    hres = parser_ctx->hres;
+    if(FAILED(hres)) {
         parser_release(parser_ctx);
         return hres;
     }

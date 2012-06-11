@@ -1,7 +1,7 @@
 /*
  * Implementation of IDirect3DRMMeshBuilder2 Interface
  *
- * Copyright 2010 Christian Costa
+ * Copyright 2010, 2012 Christian Costa
  * Copyright 2011 André Hentschel
  *
  * This library is free software; you can redistribute it and/or
@@ -322,10 +322,11 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_QueryInterface(IDirect3DRMMesh
 static ULONG WINAPI IDirect3DRMMeshBuilder2Impl_AddRef(IDirect3DRMMeshBuilder2* iface)
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p)\n", This);
+    TRACE("(%p)->(): new ref = %d\n", This, ref);
 
-    return InterlockedIncrement(&This->ref);
+    return ref;
 }
 
 static ULONG WINAPI IDirect3DRMMeshBuilder2Impl_Release(IDirect3DRMMeshBuilder2* iface)
@@ -333,13 +334,14 @@ static ULONG WINAPI IDirect3DRMMeshBuilder2Impl_Release(IDirect3DRMMeshBuilder2*
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p)\n", This);
+    TRACE("(%p)->(): new ref = %d\n", This, ref);
 
     if (!ref)
     {
         HeapFree(GetProcessHeap(), 0, This->pVertices);
         HeapFree(GetProcessHeap(), 0, This->pNormals);
         HeapFree(GetProcessHeap(), 0, This->pFaceData);
+        HeapFree(GetProcessHeap(), 0, This->pCoords2d);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -437,10 +439,13 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_Load(IDirect3DRMMeshBuilder2* 
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    TRACE("(%p)->(%p,%p,%x,%p,%p): partial stub\n", This, filename, name, loadflags, cb, arg);
+    TRACE("(%p)->(%p,%p,%x,%p,%p)\n", This, filename, name, loadflags, cb, arg);
+
+    if (cb)
+        FIXME("Texture callback is not yet supported\n");
 
     return IDirect3DRMMeshBuilder3_Load(&This->IDirect3DRMMeshBuilder3_iface, filename, name,
-                                        loadflags, (D3DRMLOADTEXTURE3CALLBACK)cb, arg);
+                                        loadflags, NULL, arg);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_Save(IDirect3DRMMeshBuilder2* iface,
@@ -676,9 +681,10 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetTextureCoordinates(IDirect3
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    FIXME("(%p)->(%f,%f): stub\n", This, u, v);
+    TRACE("(%p)->(%u,%f,%f)\n", This, index, u, v);
 
-    return E_NOTIMPL;
+    return IDirect3DRMMeshBuilder3_SetTextureCoordinates(&This->IDirect3DRMMeshBuilder3_iface,
+                                                         index, u, v);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetVertexColor(IDirect3DRMMeshBuilder2* iface,
@@ -733,7 +739,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GetVertices(IDirect3DRMMeshBui
     if (face_data_size)
         *face_data_size = This->face_data_size;
     if (face_data && This->face_data_size)
-        memcpy(face_data, This->pFaceData, This->face_data_size);
+        memcpy(face_data, This->pFaceData, This->face_data_size * sizeof(DWORD));
 
     return D3DRM_OK;
 }
@@ -744,7 +750,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GetTextureCoordinates(IDirect3
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    TRACE("(%p)->(%d,%p,%p)\n", This, index, u, v);
+    TRACE("(%p)->(%u,%p,%p)\n", This, index, u, v);
 
     return IDirect3DRMMeshBuilder3_GetTextureCoordinates(&This->IDirect3DRMMeshBuilder3_iface,
                                                          index, u, v);
@@ -1038,8 +1044,16 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
     LPBYTE ptr;
     HRESULT hr;
     HRESULT ret = D3DRMERR_BADOBJECT;
+    DWORD* faces_vertex_idx_data = NULL;
+    DWORD* faces_vertex_idx_ptr;
+    DWORD faces_vertex_idx_size;
+    DWORD* faces_normal_idx_data = NULL;
+    DWORD* faces_normal_idx_ptr = NULL;
+    DWORD* faces_data_ptr;
+    DWORD faces_data_size = 0;
+    DWORD i;
 
-    FIXME("(%p)->(%p,%p,%x,%p,%p): partial stub\n", This, filename, name, loadflags, cb, arg);
+    TRACE("(%p)->(%p,%p,%x,%p,%p)\n", This, filename, name, loadflags, cb, arg);
 
     /* First free allocated buffers of previous mesh data */
     HeapFree(GetProcessHeap(), 0, This->pVertices);
@@ -1130,22 +1144,27 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
 
     This->nb_vertices = *(DWORD*)ptr;
     This->nb_faces = *(DWORD*)(ptr + sizeof(DWORD) + This->nb_vertices * sizeof(D3DVECTOR));
-    This->face_data_size = size - sizeof(DWORD) - This->nb_vertices * sizeof(D3DVECTOR) - sizeof(DWORD);
+    faces_vertex_idx_size = size - sizeof(DWORD) - This->nb_vertices * sizeof(D3DVECTOR) - sizeof(DWORD);
+    faces_vertex_idx_ptr = (DWORD*)(ptr + sizeof(DWORD) + This->nb_vertices * sizeof(D3DVECTOR) + sizeof(DWORD));
 
-    TRACE("Mesh: nb_vertices = %d, nb_faces = %d, face_data_size = %d\n", This->nb_vertices, This->nb_faces, This->face_data_size);
+    TRACE("Mesh: nb_vertices = %d, nb_faces = %d, faces_vertex_idx_size = %d\n", This->nb_vertices, This->nb_faces, faces_vertex_idx_size);
 
     This->pVertices = HeapAlloc(GetProcessHeap(), 0, This->nb_vertices * sizeof(D3DVECTOR));
     memcpy(This->pVertices, ptr + sizeof(DWORD), This->nb_vertices * sizeof(D3DVECTOR));
 
-    This->pFaceData = HeapAlloc(GetProcessHeap(), 0, This->face_data_size);
-    memcpy(This->pFaceData, ptr + sizeof(DWORD) + This->nb_vertices * sizeof(D3DVECTOR) + sizeof(DWORD), This->face_data_size);
+    faces_vertex_idx_ptr = faces_vertex_idx_data = HeapAlloc(GetProcessHeap(), 0, faces_vertex_idx_size);
+    memcpy(faces_vertex_idx_data, ptr + sizeof(DWORD) + This->nb_vertices * sizeof(D3DVECTOR) + sizeof(DWORD), faces_vertex_idx_size);
+
+    /* Each vertex index will have its normal index counterpart so just allocate twice the size */
+    This->pFaceData = HeapAlloc(GetProcessHeap(), 0, faces_vertex_idx_size*2);
+    faces_data_ptr = (DWORD*)This->pFaceData;
 
     while (1)
     {
         hr =  IDirectXFileData_GetNextObject(pData, &pObject);
         if (hr == DXFILEERR_NOMOREOBJECTS)
         {
-            FIXME("no more object\n");
+            TRACE("No more object\n");
             break;
         }
         if (hr != DXFILE_OK)
@@ -1158,44 +1177,48 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
 
         hr = IDirectXFileData_GetType(pData2, &pGuid);
         if (hr != DXFILE_OK)
-        {
-            IDirectXFileData_Release(pData2);
             goto end;
-        }
 
-        FIXME("Found object type whose GUID = %s\n", debugstr_guid(pGuid));
+        TRACE("Found object type whose GUID = %s\n", debugstr_guid(pGuid));
 
-        if (!IsEqualGUID(pGuid, &TID_D3DRMMeshNormals))
+        if (IsEqualGUID(pGuid, &TID_D3DRMMeshNormals))
         {
-            DWORD tmp;
+            DWORD nb_faces_normals;
+            DWORD faces_normal_idx_size;
 
-            hr = IDirectXFileData_GetData(pData, NULL, &size, (void**)&ptr);
+            hr = IDirectXFileData_GetData(pData2, NULL, &size, (void**)&ptr);
             if (hr != DXFILE_OK)
                 goto end;
 
             This->nb_normals = *(DWORD*)ptr;
-            tmp = *(DWORD*)(ptr + sizeof(DWORD) + This->nb_normals * sizeof(D3DVECTOR));
+            nb_faces_normals = *(DWORD*)(ptr + sizeof(DWORD) + This->nb_normals * sizeof(D3DVECTOR));
 
-            FIXME("MeshNormals: nb_normals = %d, nb_faces_normals = %d\n", This->nb_normals, tmp);
+            TRACE("MeshNormals: nb_normals = %d, nb_faces_normals = %d\n", This->nb_normals, nb_faces_normals);
+            if (nb_faces_normals != This->nb_faces)
+                WARN("nb_face_normals (%d) != nb_faces (%d)\n", nb_faces_normals, This->nb_normals);
 
             This->pNormals = HeapAlloc(GetProcessHeap(), 0, This->nb_normals * sizeof(D3DVECTOR));
             memcpy(This->pNormals, ptr + sizeof(DWORD), This->nb_normals * sizeof(D3DVECTOR));
+
+            faces_normal_idx_size = size - (2*sizeof(DWORD) + This->nb_normals * sizeof(D3DVECTOR));
+            faces_normal_idx_ptr = faces_normal_idx_data = HeapAlloc(GetProcessHeap(), 0, faces_normal_idx_size);
+            memcpy(faces_normal_idx_data, ptr + sizeof(DWORD) + This->nb_normals * sizeof(D3DVECTOR) + sizeof(DWORD), faces_normal_idx_size);
         }
-        else if(!IsEqualGUID(pGuid, &TID_D3DRMMeshTextureCoords))
+        else if (IsEqualGUID(pGuid, &TID_D3DRMMeshTextureCoords))
         {
-            hr = IDirectXFileData_GetData(pData, NULL, &size, (void**)&ptr);
+            hr = IDirectXFileData_GetData(pData2, NULL, &size, (void**)&ptr);
             if (hr != DXFILE_OK)
                 goto end;
 
             This->nb_coords2d = *(DWORD*)ptr;
 
-            FIXME("MeshTextureCoords: nb_coords2d = %d\n", This->nb_coords2d);
+            TRACE("MeshTextureCoords: nb_coords2d = %d\n", This->nb_coords2d);
 
             This->pCoords2d = HeapAlloc(GetProcessHeap(), 0, This->nb_coords2d * sizeof(Coords2d));
             memcpy(This->pCoords2d, ptr + sizeof(DWORD), This->nb_coords2d * sizeof(Coords2d));
 
         }
-        else if(!IsEqualGUID(pGuid, &TID_D3DRMMeshMaterialList))
+        else if (IsEqualGUID(pGuid, &TID_D3DRMMeshMaterialList))
         {
             FIXME("MeshMaterialList not supported yet, ignoring...\n");
         }
@@ -1205,11 +1228,70 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
         }
 
         IDirectXFileData_Release(pData2);
+        pData2 = NULL;
+    }
+
+    for (i = 0; i < This->nb_faces; i++)
+    {
+        DWORD j;
+        DWORD nb_face_indexes;
+
+        if (faces_vertex_idx_size < sizeof(DWORD))
+            WARN("Not enough data to read number of indices of face %d\n", i);
+
+        nb_face_indexes  = *(faces_data_ptr + faces_data_size++) = *(faces_vertex_idx_ptr++);
+        faces_vertex_idx_size--;
+        if (faces_normal_idx_data && (*(faces_normal_idx_ptr++) != nb_face_indexes))
+            WARN("Faces indices number mismatch\n");
+
+        if (faces_vertex_idx_size < (nb_face_indexes * sizeof(DWORD)))
+            WARN("Not enough data to read all indices of face %d\n", i);
+
+        for (j = 0; j < nb_face_indexes; j++)
+        {
+            /* Copy vertex index */
+            *(faces_data_ptr + faces_data_size++) = *(faces_vertex_idx_ptr++);
+            /* Copy normal index */
+            if (faces_normal_idx_data)
+            {
+                /* Read from x file */
+                *(faces_data_ptr + faces_data_size++) = *(faces_normal_idx_ptr++);
+            }
+            else
+            {
+                FIXME("No normal available, generate a fake normal index\n");
+                /* Must be generated, put 0 for now */
+                *(faces_data_ptr + faces_data_size++) = 0;
+            }
+        }
+        faces_vertex_idx_size -= nb_face_indexes;
+    }
+
+    /* Last DWORD must be 0 */
+    *(faces_data_ptr + faces_data_size++) = 0;
+
+    /* Set size (in number of DWORD) of all faces data */
+    This->face_data_size = faces_data_size;
+
+    /* If there is no texture coordinates, generate default texture coordinates (0.0f, 0.0f) for each vertex */
+    if (!This->pCoords2d)
+    {
+        This->nb_coords2d = This->nb_vertices;
+        This->pCoords2d = HeapAlloc(GetProcessHeap(), 0, This->nb_coords2d * sizeof(Coords2d));
+        for (i = 0; i < This->nb_coords2d; i++)
+        {
+            This->pCoords2d[i].u = 0.0f;
+            This->pCoords2d[i].v = 0.0f;
+        }
     }
 
     ret = D3DRM_OK;
 
 end:
+    HeapFree(GetProcessHeap(), 0, faces_normal_idx_data);
+    HeapFree(GetProcessHeap(), 0, faces_vertex_idx_data);
+    if (pData2)
+        IDirectXFileData_Release(pData2);
     if (pData)
         IDirectXFileData_Release(pData);
     if (pEnumObject)
@@ -1474,9 +1556,15 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetTextureCoordinates(IDirect3
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
 
-    FIXME("(%p)->(%f,%f): stub\n", This, u, v);
+    TRACE("(%p)->(%u,%f,%f)\n", This, index, u, v);
 
-    return E_NOTIMPL;
+    if (index >= This->nb_coords2d)
+        return D3DRMERR_BADVALUE;
+
+    This->pCoords2d[index].u = u;
+    This->pCoords2d[index].v = v;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetVertexColor(IDirect3DRMMeshBuilder3* iface,
@@ -1534,7 +1622,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_GetTextureCoordinates(IDirect3
     TRACE("(%p)->(%d,%p,%p)\n", This, index, u, v);
 
     if (index >= This->nb_coords2d)
-        return D3DRMERR_NOTFOUND;
+        return D3DRMERR_BADVALUE;
 
     *u = This->pCoords2d[index].u;
     *v = This->pCoords2d[index].v;

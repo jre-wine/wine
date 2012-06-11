@@ -453,11 +453,13 @@ extern HRESULT DOMDocument_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HID
 extern HRESULT SchemaCache_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLDocument_create(IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXXMLReader_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
+extern HRESULT SAXAttributes_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLHTTPRequest_create(IUnknown*, void **) DECLSPEC_HIDDEN;
 extern HRESULT XSLTemplate_create(IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXWriter_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXNamespaceManager_create(IUnknown*,void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLParser_create(IUnknown*,void**) DECLSPEC_HIDDEN;
+extern HRESULT XMLView_create(IUnknown*,void**) DECLSPEC_HIDDEN;
 
 static inline const CLSID* DOMDocument_version(MSXML_VERSION v)
 {
@@ -485,7 +487,8 @@ static inline const CLSID* SchemaCache_version(MSXML_VERSION v)
 
 typedef struct bsc_t bsc_t;
 
-HRESULT bind_url(LPCWSTR, HRESULT (*onDataAvailable)(void*,char*,DWORD), void*, bsc_t**) DECLSPEC_HIDDEN;
+HRESULT create_moniker_from_url(LPCWSTR, IMoniker**) DECLSPEC_HIDDEN;
+HRESULT bind_url(IMoniker*, HRESULT (*onDataAvailable)(void*,char*,DWORD), void*, bsc_t**) DECLSPEC_HIDDEN;
 HRESULT detach_bsc(bsc_t*) DECLSPEC_HIDDEN;
 
 const char *debugstr_variant(const VARIANT*) DECLSPEC_HIDDEN;

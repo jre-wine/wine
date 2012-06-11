@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <assert.h>
 
 #define COBJMACROS
 
@@ -47,7 +48,10 @@ typedef struct {
     DISPID id;
     BSTR name;
     tid_t tid;
-    int func_disp_idx;
+    SHORT put_vtbl_off;
+    SHORT get_vtbl_off;
+    SHORT func_disp_idx;
+    VARTYPE prop_vt;
 } func_info_t;
 
 struct dispex_data_t {
@@ -185,23 +189,48 @@ HRESULT get_htmldoc_classinfo(ITypeInfo **typeinfo)
 
 static void add_func_info(dispex_data_t *data, DWORD *size, tid_t tid, const FUNCDESC *desc, ITypeInfo *dti)
 {
+    func_info_t *info;
     HRESULT hres;
 
-    if(data->func_cnt && data->funcs[data->func_cnt-1].id == desc->memid)
-        return;
+    if(data->func_cnt && data->funcs[data->func_cnt-1].id == desc->memid) {
+        info = data->funcs+data->func_cnt-1;
+    }else {
+        if(data->func_cnt == *size)
+            data->funcs = heap_realloc(data->funcs, (*size <<= 1)*sizeof(func_info_t));
 
-    if(data->func_cnt == *size)
-        data->funcs = heap_realloc(data->funcs, (*size <<= 1)*sizeof(func_info_t));
+        info = data->funcs+data->func_cnt;
+        hres = ITypeInfo_GetDocumentation(dti, desc->memid, &info->name, NULL, NULL, NULL);
+        if(FAILED(hres))
+            return;
 
-    hres = ITypeInfo_GetDocumentation(dti, desc->memid, &data->funcs[data->func_cnt].name, NULL, NULL, NULL);
-    if(FAILED(hres))
-        return;
+        data->func_cnt++;
 
-    data->funcs[data->func_cnt].id = desc->memid;
-    data->funcs[data->func_cnt].tid = tid;
-    data->funcs[data->func_cnt].func_disp_idx = (desc->invkind & DISPATCH_METHOD) ? data->func_disp_cnt++ : -1;
+        info->id = desc->memid;
+        info->tid = tid;
+        info->func_disp_idx = -1;
+        info->prop_vt = VT_EMPTY;
+        info->put_vtbl_off = 0;
+        info->get_vtbl_off = 0;
+    }
 
-    data->func_cnt++;
+    if(desc->invkind & DISPATCH_METHOD) {
+        info->func_disp_idx = data->func_disp_cnt++;
+    }else if(desc->invkind & (DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYGET)) {
+        VARTYPE vt = VT_EMPTY;
+
+        if(desc->invkind & DISPATCH_PROPERTYGET) {
+            vt = desc->elemdescFunc.tdesc.vt;
+            info->get_vtbl_off = desc->oVft/sizeof(void*);
+        }
+        if(desc->invkind & DISPATCH_PROPERTYPUT) {
+            assert(desc->cParams == 1);
+            vt = desc->lprgelemdescParam->tdesc.vt;
+            info->put_vtbl_off = desc->oVft/sizeof(void*);
+        }
+
+        assert(info->prop_vt == VT_EMPTY || vt == info->prop_vt);
+        info->prop_vt = vt;
+    }
 }
 
 static int dispid_cmp(const void *p1, const void *p2)
@@ -730,6 +759,124 @@ static HRESULT get_builtin_id(DispatchEx *This, BSTR name, DWORD grfdex, DISPID 
     return DISP_E_UNKNOWNNAME;
 }
 
+/* List all types used by IDispatchEx-based properties */
+#define BUILTIN_TYPES_SWITCH                            \
+    CASE_VT(VT_I2, INT16, V_I2);                        \
+    CASE_VT(VT_I4, INT32, V_I4);                        \
+    CASE_VT(VT_R4, float, V_R4);                        \
+    CASE_VT(VT_BSTR, BSTR, V_BSTR);                     \
+    CASE_VT(VT_BOOL, VARIANT_BOOL, V_BOOL);             \
+    CASE_VT(VT_VARIANT, VARIANT, *);                    \
+    CASE_VT(VT_PTR, void*, V_BYREF);                    \
+    CASE_VT(VT_UNKNOWN, IUnknown*, V_UNKNOWN);          \
+    CASE_VT(VT_DISPATCH, IDispatch*, V_DISPATCH)
+
+static HRESULT change_type(VARIANT *dst, VARIANT *src, VARTYPE vt, IServiceProvider *caller)
+{
+    V_VT(dst) = VT_EMPTY;
+
+    if(caller) {
+        IVariantChangeType *change_type = NULL;
+        HRESULT hres;
+
+        hres = IServiceProvider_QueryService(caller, &SID_VariantConversion, &IID_IVariantChangeType, (void**)&change_type);
+        if(SUCCEEDED(hres)) {
+            hres = IVariantChangeType_ChangeType(change_type, dst, src, LOCALE_NEUTRAL, vt);
+            IVariantChangeType_Release(change_type);
+            return hres;
+        }
+    }
+
+    return VariantChangeType(dst, src, 0, vt);
+}
+
+static HRESULT builtin_propget(DispatchEx *This, func_info_t *func, DISPPARAMS *dp, VARIANT *res)
+{
+    IUnknown *iface;
+    HRESULT hres;
+
+    if(dp->cArgs) {
+        FIXME("cArgs %d\n", dp->cArgs);
+        return E_NOTIMPL;
+    }
+
+    assert(func->get_vtbl_off);
+
+    hres = IUnknown_QueryInterface(This->outer, tid_ids[func->tid], (void**)&iface);
+    if(SUCCEEDED(hres)) {
+        switch(func->prop_vt) {
+#define CASE_VT(vt,type,access) \
+        case vt: { \
+            type val; \
+            hres = ((HRESULT (WINAPI*)(IUnknown*,type*))((void**)iface->lpVtbl)[func->get_vtbl_off])(iface,&val); \
+            if(SUCCEEDED(hres)) \
+                access(res) = val; \
+            } \
+            break
+        BUILTIN_TYPES_SWITCH;
+#undef CASE_VT
+        default:
+            FIXME("Unhandled vt %d\n", func->prop_vt);
+            hres = E_NOTIMPL;
+        }
+        IUnknown_Release(iface);
+    }
+
+    if(FAILED(hres))
+        return hres;
+
+    if(func->prop_vt != VT_VARIANT)
+        V_VT(res) = func->prop_vt == VT_PTR ? VT_DISPATCH : func->prop_vt;
+    return S_OK;
+}
+
+static HRESULT builtin_propput(DispatchEx *This, func_info_t *func, DISPPARAMS *dp, IServiceProvider *caller)
+{
+    VARIANT *v, tmpv;
+    IUnknown *iface;
+    HRESULT hres;
+
+    if(dp->cArgs != 1 || (dp->cNamedArgs == 1 && *dp->rgdispidNamedArgs != DISPID_PROPERTYPUT)
+            || dp->cNamedArgs > 1) {
+        FIXME("invalid args\n");
+        return E_INVALIDARG;
+    }
+
+    if(!func->put_vtbl_off) {
+        FIXME("No setter\n");
+        return E_FAIL;
+    }
+
+    v = dp->rgvarg;
+    if(func->prop_vt != VT_VARIANT && V_VT(v) != func->prop_vt) {
+        hres = change_type(&tmpv, v, func->prop_vt, caller);
+        if(FAILED(hres))
+            return hres;
+        v = &tmpv;
+    }
+
+    hres = IUnknown_QueryInterface(This->outer, tid_ids[func->tid], (void**)&iface);
+    if(SUCCEEDED(hres)) {
+        switch(func->prop_vt) {
+#define CASE_VT(vt,type,access) \
+        case vt: \
+            hres = ((HRESULT (WINAPI*)(IUnknown*,type))((void**)iface->lpVtbl)[func->put_vtbl_off])(iface,access(v)); \
+            break
+        BUILTIN_TYPES_SWITCH;
+#undef CASE_VT
+        default:
+            FIXME("Unimplemented vt %d\n", func->prop_vt);
+            hres = E_NOTIMPL;
+        }
+
+        IUnknown_Release(iface);
+    }
+
+    if(v == &tmpv)
+        VariantClear(v);
+    return hres;
+}
+
 static HRESULT invoke_builtin_prop(DispatchEx *This, DISPID id, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
 {
@@ -747,10 +894,21 @@ static HRESULT invoke_builtin_prop(DispatchEx *This, DISPID id, LCID lcid, WORD 
     if(FAILED(hres))
         return hres;
 
-    if(func->func_disp_idx == -1)
+    if(func->func_disp_idx != -1)
+        return function_invoke(This, func, flags, dp, res, ei);
+
+    switch(flags) {
+    case DISPATCH_PROPERTYPUT:
+        if(res)
+            V_VT(res) = VT_EMPTY;
+        hres = builtin_propput(This, func, dp, caller);
+        break;
+    case DISPATCH_PROPERTYGET:
+        hres = builtin_propget(This, func, dp, res);
+        break;
+    default:
         hres = typeinfo_invoke(This, func, flags, dp, res, ei);
-    else
-        hres = function_invoke(This, func, flags, dp, res, ei);
+    }
 
     return hres;
 }

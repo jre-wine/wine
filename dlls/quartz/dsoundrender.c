@@ -21,7 +21,6 @@
 #include "config.h"
 
 #include "quartz_private.h"
-#include "control_private.h"
 #include "pin.h"
 
 #include "uuids.h"
@@ -387,7 +386,7 @@ static HRESULT WINAPI DSoundRender_Receive(BaseInputPin *pin, IMediaSample * pSa
     }
 
     if (IMediaSample_GetMediaTime(pSample, &tStart, &tStop) == S_OK)
-        MediaSeekingPassThru_RegisterMediaTime(This->seekthru_unk, tStart);
+        RendererPosPassThru_RegisterMediaTime(This->seekthru_unk, tStart);
     hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
     if (FAILED(hr)) {
         ERR("Cannot get sample time (%x)\n", hr);
@@ -538,19 +537,17 @@ HRESULT DSoundRender_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     if (SUCCEEDED(hr))
     {
-        ISeekingPassThru *passthru;
         pDSoundRender->state_change = CreateEventW(NULL, TRUE, TRUE, NULL);
         pDSoundRender->blocked = CreateEventW(NULL, TRUE, TRUE, NULL);
-        hr = CoCreateInstance(&CLSID_SeekingPassThru, (IUnknown*)pDSoundRender, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&pDSoundRender->seekthru_unk);
+
+        hr = CreatePosPassThru((IUnknown*)pDSoundRender, TRUE, (IPin*)pDSoundRender->pInputPin, &pDSoundRender->seekthru_unk);
+
         if (!pDSoundRender->state_change || !pDSoundRender->blocked || FAILED(hr))
         {
             IUnknown_Release((IUnknown *)pDSoundRender);
             return HRESULT_FROM_WIN32(GetLastError());
         }
 
-        IUnknown_QueryInterface(pDSoundRender->seekthru_unk, &IID_ISeekingPassThru, (void**)&passthru);
-        ISeekingPassThru_Init(passthru, TRUE, (IPin*)pDSoundRender->pInputPin);
-        ISeekingPassThru_Release(passthru);
         QualityControlImpl_init(&pDSoundRender->qcimpl, (IPin*)pDSoundRender->pInputPin, (IBaseFilter*)pDSoundRender);
         pDSoundRender->qcimpl.lpVtbl = &DSoundRender_QualityControl_Vtbl;
         *ppv = pDSoundRender;
@@ -673,7 +670,7 @@ static HRESULT WINAPI DSoundRender_Stop(IBaseFilter * iface)
         This->writepos = This->buf_size;
         SetEvent(This->state_change);
         SetEvent(This->blocked);
-        MediaSeekingPassThru_ResetMediaTime(This->seekthru_unk);
+        RendererPosPassThru_ResetMediaTime(This->seekthru_unk);
     }
     LeaveCriticalSection(&This->filter.csFilter);
     
@@ -925,7 +922,7 @@ static HRESULT WINAPI DSoundRender_InputPin_EndOfStream(IPin * iface)
     }
 
     hr = DSoundRender_HandleEndOfStream(me);
-    MediaSeekingPassThru_EOS(me->seekthru_unk);
+    RendererPosPassThru_EOS(me->seekthru_unk);
     SetEvent(me->state_change);
     LeaveCriticalSection(This->pin.pCritSec);
 
@@ -980,7 +977,7 @@ static HRESULT WINAPI DSoundRender_InputPin_EndFlush(IPin * iface)
     QualityControlRender_Start(&pFilter->qcimpl, pFilter->filter.rtStreamStart);
     hr = BaseInputPinImpl_EndFlush(iface);
     LeaveCriticalSection(This->pin.pCritSec);
-    MediaSeekingPassThru_ResetMediaTime(pFilter->seekthru_unk);
+    RendererPosPassThru_ResetMediaTime(pFilter->seekthru_unk);
 
     return hr;
 }
