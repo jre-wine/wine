@@ -1,8 +1,21 @@
-wine-unstable (1.5.0-1) UNRELEASED; urgency=low
+wine-unstable (1.5.0-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.0, released Mar 16, 2012 (closes: 674619)
+    - New version of the Gecko engine.
+    - Partial support for using the Trash on Mac OS X.
+    - Support for path gradients in GdiPlus.
+    - Various MSXML improvements.
+    - Fixes to 64-bit exception handling.
+    - Various bug fixes.
+  * Switch to wine-unstable branch
+  * Provide wine-gecko 1.5 symlink
+  * Successfully Builds on kfreebsd (closes: 673774)
+  * Eliminate winecreateprefix references (closes: #677077)
+  * Simplify control file handling
+  * Remove a couple manpages that are automaticaly handled
+  * Update git import scripts
 
- -- Michael Gilbert <mgilbert@debian.org>  Mon, 11 Jun 2012 12:33:08 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 11 Jun 2012 15:15:36 -0400
 
 wine (1.4-6) unstable; urgency=low
 
