@@ -19,10 +19,10 @@ else
 fi
 
 case "$upstream_version" in
-  1.0.*)
+  1.0.*|1.2|1.2.*|1.4|1.4.*)
     package=wine
     ;;
-  1.1.*)
+  1.1.*|1.3.*|1.5.*)
     package=wine-unstable
     ;;
   *)
@@ -50,25 +50,18 @@ then
   exec uupdate --no-symlink "$*"
 fi
 
-# pull from upstream git repository
+# pull from upstream git repository (favoring "their" changes in the merge)
 upstream_tag="wine-$upstream_version"
+winehq="git://source.winehq.org/git/wine.git"
 git checkout upstream
-git pull winehq tag "$upstream_tag"
-# format my verbose "New upstream release" messages, including ANNOUNCE file
-tag_time=`git cat-file tag "$upstream_tag"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
-release_date=`LC_ALL=C date -u -d "@$tag_time" +"%b %-d, %Y"`
-echo "New upstream release $upstream_version, released $release_date." > announce.tmp
-sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE >> announce.tmp
+git pull --no-edit $winehq tag "$upstream_tag" 
 
-# load original .tar.bz2 into pristine-tar
-git checkout master
+# load original .tar.bz2 and .tar.gz into pristine-tar
 pristine-tar -v commit "$filename" "$upstream_tag"
-
-# load converted .tar.gz into pristine-tar
 pristine-tar -v commit "$debfilename" "$upstream_tag"
 
 # merge from upstream into master branch
-git checkout -q master
+git checkout master
 git merge upstream
 
 # amend the merge commit message

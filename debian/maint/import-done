@@ -10,11 +10,11 @@ upstream_version="$2"
 dch -v "$upstream_version-1" --distribution UNRELEASED --preserve \
  "UNRELEASED"
 git add debian/changelog
-# Amend the merge commit message
-if [ -f announce.tmp ]
-then
-  git commit --amend -F announce.tmp
-  rm announce.tmp
-else
-  git commit --amend
-fi
+
+# format verbose "New upstream release" messages, including ANNOUNCE file
+tag_time=`git cat-file tag "wine-$upstream_version"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
+release_date=`LC_ALL=C date -u -d "@$tag_time" +"%b %-d, %Y"`
+echo "New upstream release $upstream_version, released $release_date." > announce.tmp
+sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE >> announce.tmp
+git commit --amend -F announce.tmp
+rm announce.tmp
