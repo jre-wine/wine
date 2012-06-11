@@ -205,8 +205,6 @@ static void state_ditherenable(struct wined3d_context *context, const struct win
 
 static void state_zwritenable(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    /* TODO: Test if in d3d z writing is enabled even if ZENABLE is off.
-     * If yes, this has to be merged with ZENABLE and ZFUNC. */
     if (state->render_states[WINED3D_RS_ZWRITEENABLE])
     {
         glDepthMask(1);
@@ -530,16 +528,10 @@ static void state_alpha(struct wined3d_context *context, const struct wined3d_st
      */
     if (state->textures[0])
     {
-        struct wined3d_texture *texture = state->textures[0];
-        GLenum texture_dimensions = texture->target;
+        struct wined3d_surface *surface = surface_from_resource(state->textures[0]->sub_resources[0]);
 
-        if (texture_dimensions == GL_TEXTURE_2D || texture_dimensions == GL_TEXTURE_RECTANGLE_ARB)
-        {
-            struct wined3d_surface *surf = surface_from_resource(texture->sub_resources[0]);
-
-            if (surf->CKeyFlags & WINEDDSD_CKSRCBLT)
-                enable_ckey = TRUE;
-        }
+        if (surface->CKeyFlags & WINEDDSD_CKSRCBLT)
+            enable_ckey = TRUE;
     }
 
     if (enable_ckey || context->last_was_ckey)
@@ -4318,29 +4310,11 @@ static void load_vertex_data(const struct wined3d_context *context,
             curVBO = e->data.buffer_object;
         }
 
-        /* min(WINED3D_ATR_FORMAT(position),3) to Disable RHW mode as 'w' coord
-           handling for rhw mode should not impact screen position whereas in GL it does.
-           This may result in very slightly distorted textures in rhw mode.
-           There's always the other option of fixing the view matrix to
-           prevent w from having any effect.
-
-           This only applies to user pointer sources, in VBOs the vertices are fixed up
-         */
-        if (!e->data.buffer_object)
-        {
-            TRACE("glVertexPointer(3, %#x, %#x, %p);\n", e->format->gl_vtx_type, e->stride,
-                    e->data.addr + state->load_base_vertex_index * e->stride);
-            glVertexPointer(3 /* min(e->format->gl_vtx_format, 3) */, e->format->gl_vtx_type, e->stride,
-                    e->data.addr + state->load_base_vertex_index * e->stride);
-        }
-        else
-        {
-            TRACE("glVertexPointer(%#x, %#x, %#x, %p);\n",
-                    e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
-                    e->data.addr + state->load_base_vertex_index * e->stride);
-            glVertexPointer(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
-                    e->data.addr + state->load_base_vertex_index * e->stride);
-        }
+        TRACE("glVertexPointer(%#x, %#x, %#x, %p);\n",
+                e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
+                e->data.addr + state->load_base_vertex_index * e->stride);
+        glVertexPointer(e->format->gl_vtx_format, e->format->gl_vtx_type, e->stride,
+                e->data.addr + state->load_base_vertex_index * e->stride);
         checkGLcall("glVertexPointer(...)");
         glEnableClientState(GL_VERTEX_ARRAY);
         checkGLcall("glEnableClientState(GL_VERTEX_ARRAY)");
@@ -4372,14 +4346,6 @@ static void load_vertex_data(const struct wined3d_context *context,
     }
 
     /* Diffuse Colour --------------------------------------------*/
-    /*  WARNING: Data here MUST be in RGBA format, so cannot      */
-    /*     go directly into fast mode from app pgm, because       */
-    /*     directx requires data in BGRA format.                  */
-    /* currently fixupVertices swizzles the format, but this isn't*/
-    /* very practical when using VBOs                             */
-    /* NOTE: Unless we write a vertex shader to swizzle the colour*/
-    /* , or the user doesn't care and wants the speed advantage   */
-
     if (si->use_map & (1 << WINED3D_FFP_DIFFUSE))
     {
         e = &si->elements[WINED3D_FFP_DIFFUSE];

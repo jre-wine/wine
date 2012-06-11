@@ -23,7 +23,6 @@
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "quartz_private.h"
-#include "control_private.h"
 #include "pin.h"
 
 #include "uuids.h"
@@ -391,7 +390,7 @@ static HRESULT WINAPI VideoRenderer_Receive(BaseInputPin* pin, IMediaSample * pS
     }
 
     if (IMediaSample_GetMediaTime(pSample, &tStart, &tStop) == S_OK)
-        MediaSeekingPassThru_RegisterMediaTime(This->seekthru_unk, tStart);
+        RendererPosPassThru_RegisterMediaTime(This->seekthru_unk, tStart);
 
     /* Preroll means the sample isn't shown, this is used for key frames and things like that */
     if (IMediaSample_IsPreroll(pSample) == S_OK) {
@@ -545,7 +544,6 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
     HRESULT hr;
     PIN_INFO piInput;
     VideoRendererImpl * pVideoRenderer;
-    ISeekingPassThru *passthru;
 
     TRACE("(%p, %p)\n", pUnkOuter, ppv);
 
@@ -580,14 +578,12 @@ HRESULT VideoRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     if (SUCCEEDED(hr))
     {
-        hr = CoCreateInstance(&CLSID_SeekingPassThru, pUnkOuter ? pUnkOuter : (IUnknown*)&pVideoRenderer->IInner_vtbl, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&pVideoRenderer->seekthru_unk);
+        hr = CreatePosPassThru(pUnkOuter ? pUnkOuter : (IUnknown*)&pVideoRenderer->IInner_vtbl, TRUE, (IPin*)pVideoRenderer->pInputPin, &pVideoRenderer->seekthru_unk);
+
         if (FAILED(hr)) {
             IPin_Release((IPin*)pVideoRenderer->pInputPin);
             goto fail;
         }
-        IUnknown_QueryInterface(pVideoRenderer->seekthru_unk, &IID_ISeekingPassThru, (void**)&passthru);
-        ISeekingPassThru_Init(passthru, TRUE, (IPin*)pVideoRenderer->pInputPin);
-        ISeekingPassThru_Release(passthru);
         pVideoRenderer->sample_held = NULL;
         *ppv = pVideoRenderer;
     }
@@ -780,7 +776,7 @@ static HRESULT WINAPI VideoRenderer_Stop(IBaseFilter * iface)
         This->filter.state = State_Stopped;
         SetEvent(This->hEvent);
         SetEvent(This->blocked);
-        MediaSeekingPassThru_ResetMediaTime(This->seekthru_unk);
+        RendererPosPassThru_ResetMediaTime(This->seekthru_unk);
         if (This->AutoShow)
             /* Black it out */
             RedrawWindow(This->hWnd, NULL, NULL, RDW_INVALIDATE|RDW_ERASE);
@@ -932,7 +928,7 @@ static HRESULT WINAPI VideoRenderer_InputPin_EndOfStream(IPin * iface)
         hr = IMediaEventSink_Notify(pEventSink, EC_COMPLETE, S_OK, (LONG_PTR)pFilter);
         IMediaEventSink_Release(pEventSink);
     }
-    MediaSeekingPassThru_EOS(pFilter->seekthru_unk);
+    RendererPosPassThru_EOS(pFilter->seekthru_unk);
     This->end_of_stream = 1;
 out:
     LeaveCriticalSection(This->pin.pCritSec);
@@ -977,7 +973,7 @@ static HRESULT WINAPI VideoRenderer_InputPin_EndFlush(IPin * iface)
     QualityControlRender_Start(&pVideoRenderer->qcimpl, pVideoRenderer->filter.rtStreamStart);
     hr = BaseInputPinImpl_EndFlush(iface);
     LeaveCriticalSection(This->pin.pCritSec);
-    MediaSeekingPassThru_ResetMediaTime(pVideoRenderer->seekthru_unk);
+    RendererPosPassThru_ResetMediaTime(pVideoRenderer->seekthru_unk);
 
     return hr;
 }

@@ -152,7 +152,7 @@ static inline jsdisp_t *get_jsdisp(vdisp_t *vdisp)
     return is_jsdisp(vdisp) ? vdisp->u.jsdisp : NULL;
 }
 
-typedef HRESULT (*builtin_invoke_t)(script_ctx_t*,vdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
+typedef HRESULT (*builtin_invoke_t)(script_ctx_t*,vdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*);
 
 typedef struct {
     const WCHAR *name;
@@ -206,25 +206,25 @@ HRESULT create_dispex(script_ctx_t*,const builtin_info_t*,jsdisp_t*,jsdisp_t**) 
 HRESULT init_dispex(jsdisp_t*,script_ctx_t*,const builtin_info_t*,jsdisp_t*) DECLSPEC_HIDDEN;
 HRESULT init_dispex_from_constr(jsdisp_t*,script_ctx_t*,const builtin_info_t*,jsdisp_t*) DECLSPEC_HIDDEN;
 
-HRESULT disp_call(script_ctx_t*,IDispatch*,DISPID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_call_value(jsdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_call(jsdisp_t*,DISPID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_call_name(jsdisp_t*,const WCHAR*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT disp_propget(script_ctx_t*,IDispatch*,DISPID,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT disp_propput(script_ctx_t*,IDispatch*,DISPID,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_propget(jsdisp_t*,DISPID,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_propput_name(jsdisp_t*,const WCHAR*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
+HRESULT disp_call(script_ctx_t*,IDispatch*,DISPID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_call_value(jsdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_call(jsdisp_t*,DISPID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_call_name(jsdisp_t*,const WCHAR*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT disp_propget(script_ctx_t*,IDispatch*,DISPID,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT disp_propput(script_ctx_t*,IDispatch*,DISPID,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_propget(jsdisp_t*,DISPID,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_propput_name(jsdisp_t*,const WCHAR*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
 HRESULT jsdisp_propput_const(jsdisp_t*,const WCHAR*,VARIANT*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_propput_idx(jsdisp_t*,DWORD,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_propget_name(jsdisp_t*,LPCWSTR,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
-HRESULT jsdisp_get_idx(jsdisp_t*,DWORD,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_propput_idx(jsdisp_t*,DWORD,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_propget_name(jsdisp_t*,LPCWSTR,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
+HRESULT jsdisp_get_idx(jsdisp_t*,DWORD,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
 HRESULT jsdisp_get_id(jsdisp_t*,const WCHAR*,DWORD,DISPID*) DECLSPEC_HIDDEN;
 HRESULT jsdisp_delete_idx(jsdisp_t*,DWORD) DECLSPEC_HIDDEN;
 VARIANT_BOOL jsdisp_is_own_prop(jsdisp_t *obj, BSTR name) DECLSPEC_HIDDEN;
 
 HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const WCHAR*,const builtin_info_t*,DWORD,
         jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
-HRESULT Function_value(script_ctx_t*,vdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*) DECLSPEC_HIDDEN;
+HRESULT Function_value(script_ctx_t*,vdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*) DECLSPEC_HIDDEN;
 
 HRESULT throw_eval_error(script_ctx_t*,jsexcept_t*,HRESULT,const WCHAR*) DECLSPEC_HIDDEN;
 HRESULT throw_generic_error(script_ctx_t*,jsexcept_t*,HRESULT,const WCHAR*) DECLSPEC_HIDDEN;
@@ -260,6 +260,8 @@ HRESULT to_uint32(script_ctx_t*,VARIANT*,jsexcept_t*,DWORD*) DECLSPEC_HIDDEN;
 HRESULT to_string(script_ctx_t*,VARIANT*,jsexcept_t*,BSTR*) DECLSPEC_HIDDEN;
 HRESULT to_object(script_ctx_t*,VARIANT*,IDispatch**) DECLSPEC_HIDDEN;
 
+HRESULT variant_change_type(script_ctx_t*,VARIANT*,VARIANT*,VARTYPE);
+
 BSTR int_to_bstr(int) DECLSPEC_HIDDEN;
 HRESULT double_to_bstr(double,BSTR*) DECLSPEC_HIDDEN;
 
@@ -279,10 +281,20 @@ typedef struct {
 
 void release_cc(cc_ctx_t*) DECLSPEC_HIDDEN;
 
+typedef struct {
+    IServiceProvider IServiceProvider_iface;
+
+    LONG ref;
+
+    script_ctx_t *ctx;
+} JSCaller;
+
 struct _script_ctx_t {
     LONG ref;
 
     SCRIPTSTATE state;
+    IActiveScript *active_script;
+
     exec_ctx_t *exec_ctx;
     named_item_t *named_items;
     IActiveScriptSite *site;
@@ -291,6 +303,7 @@ struct _script_ctx_t {
     DWORD version;
     LCID lcid;
     cc_ctx_t *cc;
+    JSCaller *jscaller;
 
     jsheap_t tmp_heap;
 
@@ -344,6 +357,7 @@ HRESULT create_string_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN
 HRESULT create_vbarray_constr(script_ctx_t*,jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 
 IUnknown *create_ax_site(script_ctx_t*) DECLSPEC_HIDDEN;
+HRESULT create_jscaller(script_ctx_t*) DECLSPEC_HIDDEN;
 
 typedef struct {
     const WCHAR *str;

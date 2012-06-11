@@ -161,18 +161,19 @@
 @ stub __AdjustPointer
 @ stub __BuildCatchObject
 @ stub __BuildCatchObjectHelper
-@ cdecl __CppXcptFilter(long ptr) msvcrt.__CppXcptFilter
+@ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) msvcrt.__C_specific_handler
+@ cdecl -arch=i386,x86_64 __CppXcptFilter(long ptr) msvcrt.__CppXcptFilter
 @ stub __CxxCallUnwindDelDtor
 @ stub __CxxCallUnwindDtor
 @ stub __CxxCallUnwindStdDelDtor
 @ stub __CxxCallUnwindVecDtor
-@ cdecl __CxxDetectRethrow(ptr) msvcrt.__CxxDetectRethrow
+@ cdecl -arch=i386,x86_64 __CxxDetectRethrow(ptr) msvcrt.__CxxDetectRethrow
 @ stub __CxxExceptionFilter
-@ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
-@ cdecl -i386 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler2
-@ cdecl -i386 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler3
+@ cdecl -arch=i386,x86_64 -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
+@ cdecl -arch=i386,x86_64 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler2
+@ cdecl -arch=i386,x86_64 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler3
 @ stdcall -i386 __CxxLongjmpUnwind(ptr) msvcrt.__CxxLongjmpUnwind
-@ cdecl __CxxQueryExceptionSize() msvcrt.__CxxQueryExceptionSize
+@ cdecl -arch=i386,x86_64 __CxxQueryExceptionSize() msvcrt.__CxxQueryExceptionSize
 @ stub __CxxRegisterExceptionObject
 @ stub __CxxUnregisterExceptionObject
 @ stub __DestructExceptionObject

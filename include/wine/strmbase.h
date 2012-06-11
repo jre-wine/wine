@@ -320,6 +320,14 @@ HRESULT WINAPI SourceSeekingImpl_SetRate(IMediaSeeking * iface, double dRate);
 HRESULT WINAPI SourceSeekingImpl_GetRate(IMediaSeeking * iface, double * dRate);
 HRESULT WINAPI SourceSeekingImpl_GetPreroll(IMediaSeeking * iface, LONGLONG * pPreroll);
 
+/* PosPassThru */
+HRESULT WINAPI RendererPosPassThru_RegisterMediaTime(IUnknown *iface, REFERENCE_TIME start);
+HRESULT WINAPI RendererPosPassThru_ResetMediaTime(IUnknown *iface);
+HRESULT WINAPI RendererPosPassThru_EOS(IUnknown *iface);
+
+HRESULT WINAPI CreatePosPassThru(IUnknown* pUnkOuter, BOOL bRenderer, IPin *pPin, IUnknown **ppPassThru);
+HRESULT WINAPI PosPassThru_Construct(IUnknown* pUnkOuter, LPVOID *ppPassThru);
+
 /* Filter Registration */
 
 typedef REGPINTYPES AMOVIESETUP_MEDIATYPE;

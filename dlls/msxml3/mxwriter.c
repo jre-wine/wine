@@ -1,7 +1,7 @@
 /*
  *    MXWriter implementation
  *
- * Copyright 2011 Nikolay Sivov for CodeWeavers
+ * Copyright 2011-2012 Nikolay Sivov for CodeWeavers
  * Copyright 2011 Thomas Mullaly
  *
  * This library is free software; you can redistribute it and/or
@@ -94,6 +94,7 @@ typedef struct
     IMXWriter IMXWriter_iface;
     ISAXContentHandler ISAXContentHandler_iface;
     ISAXLexicalHandler ISAXLexicalHandler_iface;
+    ISAXDeclHandler    ISAXDeclHandler_iface;
 
     LONG ref;
     MSXML_VERSION class_version;
@@ -116,6 +117,55 @@ typedef struct
 
     output_buffer *buffer;
 } mxwriter;
+
+typedef struct
+{
+    BSTR qname;
+    BSTR local;
+    BSTR uri;
+    BSTR type;
+    BSTR value;
+} mxattribute;
+
+typedef struct
+{
+    DispatchEx dispex;
+    IMXAttributes IMXAttributes_iface;
+    ISAXAttributes ISAXAttributes_iface;
+    IVBSAXAttributes IVBSAXAttributes_iface;
+    LONG ref;
+
+    MSXML_VERSION class_version;
+
+    mxattribute *attr;
+    int length;
+    int allocated;
+} mxattributes;
+
+static inline mxattributes *impl_from_IMXAttributes( IMXAttributes *iface )
+{
+    return CONTAINING_RECORD(iface, mxattributes, IMXAttributes_iface);
+}
+
+static inline mxattributes *impl_from_ISAXAttributes( ISAXAttributes *iface )
+{
+    return CONTAINING_RECORD(iface, mxattributes, ISAXAttributes_iface);
+}
+
+static inline mxattributes *impl_from_IVBSAXAttributes( IVBSAXAttributes *iface )
+{
+    return CONTAINING_RECORD(iface, mxattributes, IVBSAXAttributes_iface);
+}
+
+static HRESULT mxattributes_grow(mxattributes *This)
+{
+    if (This->length < This->allocated) return S_OK;
+
+    This->allocated *= 2;
+    This->attr = heap_realloc(This->attr, This->allocated*sizeof(mxattribute));
+
+    return This->attr ? S_OK : E_OUTOFMEMORY;
+}
 
 static xml_encoding parse_encoding_name(const WCHAR *encoding)
 {
@@ -388,9 +438,6 @@ static HRESULT write_data_to_stream(mxwriter *This)
     if (!This->dest)
         return S_OK;
 
-    /* The xmlOutputBuffer doesn't copy its contents from its 'buffer' to the
-     * 'conv' buffer when UTF8 encoding is used.
-     */
     if (This->xml_enc != XmlEncoding_UTF16)
         buffer = &This->buffer->encoded;
     else
@@ -482,6 +529,11 @@ static inline mxwriter *impl_from_ISAXLexicalHandler(ISAXLexicalHandler *iface)
     return CONTAINING_RECORD(iface, mxwriter, ISAXLexicalHandler_iface);
 }
 
+static inline mxwriter *impl_from_ISAXDeclHandler(ISAXDeclHandler *iface)
+{
+    return CONTAINING_RECORD(iface, mxwriter, ISAXDeclHandler_iface);
+}
+
 static HRESULT WINAPI mxwriter_QueryInterface(IMXWriter *iface, REFIID riid, void **obj)
 {
     mxwriter *This = impl_from_IMXWriter( iface );
@@ -503,6 +555,10 @@ static HRESULT WINAPI mxwriter_QueryInterface(IMXWriter *iface, REFIID riid, voi
     else if ( IsEqualGUID( riid, &IID_ISAXLexicalHandler ) )
     {
         *obj = &This->ISAXLexicalHandler_iface;
+    }
+    else if ( IsEqualGUID( riid, &IID_ISAXDeclHandler ) )
+    {
+        *obj = &This->ISAXDeclHandler_iface;
     }
     else if (dispex_query_interface(&This->dispex, riid, obj))
     {
@@ -1279,6 +1335,91 @@ static const struct ISAXLexicalHandlerVtbl SAXLexicalHandlerVtbl =
     SAXLexicalHandler_comment
 };
 
+/*** ISAXDeclHandler ***/
+static HRESULT WINAPI SAXDeclHandler_QueryInterface(ISAXDeclHandler *iface,
+    REFIID riid, void **obj)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    return IMXWriter_QueryInterface(&This->IMXWriter_iface, riid, obj);
+}
+
+static ULONG WINAPI SAXDeclHandler_AddRef(ISAXDeclHandler *iface)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    return IMXWriter_AddRef(&This->IMXWriter_iface);
+}
+
+static ULONG WINAPI SAXDeclHandler_Release(ISAXDeclHandler *iface)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    return IMXWriter_Release(&This->IMXWriter_iface);
+}
+
+static HRESULT WINAPI SAXDeclHandler_elementDecl(ISAXDeclHandler *iface,
+    const WCHAR *name, int n_name, const WCHAR *model, int n_model)
+{
+    static const WCHAR elementW[] = {'<','!','E','L','E','M','E','N','T',' '};
+    static const WCHAR closeelementW[] = {'>','\r','\n'};
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+
+    TRACE("(%p)->(%s:%d %s:%d)\n", This, debugstr_wn(name, n_name), n_name,
+        debugstr_wn(model, n_model), n_model);
+
+    if (!name || !model) return E_INVALIDARG;
+
+    write_output_buffer(This->buffer, elementW, sizeof(elementW)/sizeof(WCHAR));
+    if (n_name) {
+        write_output_buffer(This->buffer, name, n_name);
+        write_output_buffer(This->buffer, spaceW, sizeof(spaceW)/sizeof(WCHAR));
+    }
+    if (n_model)
+        write_output_buffer(This->buffer, model, n_model);
+    write_output_buffer(This->buffer, closeelementW, sizeof(closeelementW)/sizeof(WCHAR));
+
+    return S_OK;
+}
+
+static HRESULT WINAPI SAXDeclHandler_attributeDecl(ISAXDeclHandler *iface,
+    const WCHAR *element, int n_element, const WCHAR *attr, int n_attr,
+    const WCHAR *type, int n_type, const WCHAR *Default, int n_default,
+    const WCHAR *value, int n_value)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    FIXME("(%p)->(%s:%d %s:%d %s:%d %s:%d %s:%d): stub\n", This, debugstr_wn(element, n_element), n_element,
+        debugstr_wn(attr, n_attr), n_attr, debugstr_wn(type, n_type), n_type, debugstr_wn(Default, n_default), n_default,
+        debugstr_wn(value, n_value), n_value);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXDeclHandler_internalEntityDecl(ISAXDeclHandler *iface,
+    const WCHAR *name, int n_name, const WCHAR *value, int n_value)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    FIXME("(%p)->(%s:%d %s:%d): stub\n", This, debugstr_wn(name, n_name), n_name,
+        debugstr_wn(value, n_value), n_value);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXDeclHandler_externalEntityDecl(ISAXDeclHandler *iface,
+    const WCHAR *name, int n_name, const WCHAR *publicId, int n_publicId,
+    const WCHAR *systemId, int n_systemId)
+{
+    mxwriter *This = impl_from_ISAXDeclHandler( iface );
+    FIXME("(%p)->(%s:%d %s:%d %s:%d): stub\n", This, debugstr_wn(name, n_name), n_name,
+        debugstr_wn(publicId, n_publicId), n_publicId, debugstr_wn(systemId, n_systemId), n_systemId);
+    return E_NOTIMPL;
+}
+
+static const ISAXDeclHandlerVtbl SAXDeclHandlerVtbl = {
+    SAXDeclHandler_QueryInterface,
+    SAXDeclHandler_AddRef,
+    SAXDeclHandler_Release,
+    SAXDeclHandler_elementDecl,
+    SAXDeclHandler_attributeDecl,
+    SAXDeclHandler_internalEntityDecl,
+    SAXDeclHandler_externalEntityDecl
+};
+
 static const tid_t mxwriter_iface_tids[] = {
     IMXWriter_tid,
     0
@@ -1308,6 +1449,7 @@ HRESULT MXWriter_create(MSXML_VERSION version, IUnknown *outer, void **ppObj)
     This->IMXWriter_iface.lpVtbl = &MXWriterVtbl;
     This->ISAXContentHandler_iface.lpVtbl = &SAXContentHandlerVtbl;
     This->ISAXLexicalHandler_iface.lpVtbl = &SAXLexicalHandlerVtbl;
+    This->ISAXDeclHandler_iface.lpVtbl = &SAXDeclHandlerVtbl;
     This->ref = 1;
     This->class_version = version;
 
@@ -1338,6 +1480,704 @@ HRESULT MXWriter_create(MSXML_VERSION version, IUnknown *outer, void **ppObj)
     init_dispex(&This->dispex, (IUnknown*)&This->IMXWriter_iface, &mxwriter_dispex);
 
     *ppObj = &This->IMXWriter_iface;
+
+    TRACE("returning iface %p\n", *ppObj);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI MXAttributes_QueryInterface(IMXAttributes *iface, REFIID riid, void **ppObj)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid( riid ), ppObj);
+
+    *ppObj = NULL;
+
+    if ( IsEqualGUID( riid, &IID_IUnknown )  ||
+         IsEqualGUID( riid, &IID_IDispatch ) ||
+         IsEqualGUID( riid, &IID_IMXAttributes ))
+    {
+        *ppObj = iface;
+    }
+    else if ( IsEqualGUID( riid, &IID_ISAXAttributes ))
+    {
+        *ppObj = &This->ISAXAttributes_iface;
+    }
+    else if ( IsEqualGUID( riid, &IID_IVBSAXAttributes ))
+    {
+        *ppObj = &This->IVBSAXAttributes_iface;
+    }
+    else if (dispex_query_interface(&This->dispex, riid, ppObj))
+    {
+        return *ppObj ? S_OK : E_NOINTERFACE;
+    }
+    else
+    {
+        FIXME("interface %s not implemented\n", debugstr_guid(riid));
+        return E_NOINTERFACE;
+    }
+
+    IMXAttributes_AddRef( iface );
+
+    return S_OK;
+}
+
+static ULONG WINAPI MXAttributes_AddRef(IMXAttributes *iface)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%d)\n", This, ref );
+    return ref;
+}
+
+static ULONG WINAPI MXAttributes_Release(IMXAttributes *iface)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    LONG ref = InterlockedDecrement( &This->ref );
+
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (ref == 0)
+    {
+        int i;
+
+        for (i = 0; i < This->length; i++)
+        {
+            SysFreeString(This->attr[i].qname);
+            SysFreeString(This->attr[i].local);
+            SysFreeString(This->attr[i].uri);
+            SysFreeString(This->attr[i].type);
+            SysFreeString(This->attr[i].value);
+        }
+
+        release_dispex(&This->dispex);
+        heap_free(This->attr);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI MXAttributes_GetTypeInfoCount(IMXAttributes *iface, UINT* pctinfo)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    return IDispatchEx_GetTypeInfoCount(&This->dispex.IDispatchEx_iface, pctinfo);
+}
+
+static HRESULT WINAPI MXAttributes_GetTypeInfo(IMXAttributes *iface, UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    return IDispatchEx_GetTypeInfo(&This->dispex.IDispatchEx_iface, iTInfo, lcid, ppTInfo);
+}
+
+static HRESULT WINAPI MXAttributes_GetIDsOfNames(
+    IMXAttributes *iface,
+    REFIID riid,
+    LPOLESTR* rgszNames,
+    UINT cNames,
+    LCID lcid,
+    DISPID* rgDispId)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    return IDispatchEx_GetIDsOfNames(&This->dispex.IDispatchEx_iface,
+        riid, rgszNames, cNames, lcid, rgDispId);
+}
+
+static HRESULT WINAPI MXAttributes_Invoke(
+    IMXAttributes *iface,
+    DISPID dispIdMember,
+    REFIID riid,
+    LCID lcid,
+    WORD wFlags,
+    DISPPARAMS* pDispParams,
+    VARIANT* pVarResult,
+    EXCEPINFO* pExcepInfo,
+    UINT* puArgErr)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    return IDispatchEx_Invoke(&This->dispex.IDispatchEx_iface,
+        dispIdMember, riid, lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+}
+
+static HRESULT WINAPI MXAttributes_addAttribute(IMXAttributes *iface,
+    BSTR uri, BSTR localName, BSTR QName, BSTR type, BSTR value)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    mxattribute *attr;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %s %s %s %s)\n", This, debugstr_w(uri), debugstr_w(localName),
+        debugstr_w(QName), debugstr_w(type), debugstr_w(value));
+
+    if ((!uri || !localName || !QName || !type || !value) && This->class_version != MSXML6)
+        return E_INVALIDARG;
+
+    /* ensure array is large enough */
+    hr = mxattributes_grow(This);
+    if (hr != S_OK) return hr;
+
+    attr = &This->attr[This->length];
+
+    attr->qname = SysAllocString(QName);
+    attr->local = SysAllocString(localName);
+    attr->uri   = SysAllocString(uri);
+    attr->type  = SysAllocString(type ? type : emptyW);
+    attr->value = SysAllocString(value);
+    This->length++;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI MXAttributes_addAttributeFromIndex(IMXAttributes *iface,
+    VARIANT atts, int index)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%s %d): stub\n", This, debugstr_variant(&atts), index);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_clear(IMXAttributes *iface)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p): stub\n", This);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_removeAttribute(IMXAttributes *iface, int index)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d): stub\n", This, index);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setAttribute(IMXAttributes *iface, int index,
+    BSTR uri, BSTR localName, BSTR QName, BSTR type, BSTR value)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d %s %s %s %s %s): stub\n", This, index, debugstr_w(uri),
+        debugstr_w(localName), debugstr_w(QName), debugstr_w(type), debugstr_w(value));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setAttributes(IMXAttributes *iface, VARIANT atts)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%s): stub\n", This, debugstr_variant(&atts));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setLocalName(IMXAttributes *iface, int index,
+    BSTR localName)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d %s): stub\n", This, index, debugstr_w(localName));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setQName(IMXAttributes *iface, int index, BSTR QName)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d %s): stub\n", This, index, debugstr_w(QName));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setURI(IMXAttributes *iface, int index, BSTR uri)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d %s): stub\n", This, index, debugstr_w(uri));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI MXAttributes_setValue(IMXAttributes *iface, int index, BSTR value)
+{
+    mxattributes *This = impl_from_IMXAttributes( iface );
+    FIXME("(%p)->(%d %s): stub\n", This, index, debugstr_w(value));
+    return E_NOTIMPL;
+}
+
+static const IMXAttributesVtbl MXAttributesVtbl = {
+    MXAttributes_QueryInterface,
+    MXAttributes_AddRef,
+    MXAttributes_Release,
+    MXAttributes_GetTypeInfoCount,
+    MXAttributes_GetTypeInfo,
+    MXAttributes_GetIDsOfNames,
+    MXAttributes_Invoke,
+    MXAttributes_addAttribute,
+    MXAttributes_addAttributeFromIndex,
+    MXAttributes_clear,
+    MXAttributes_removeAttribute,
+    MXAttributes_setAttribute,
+    MXAttributes_setAttributes,
+    MXAttributes_setLocalName,
+    MXAttributes_setQName,
+    MXAttributes_setURI,
+    MXAttributes_setValue
+};
+
+static HRESULT WINAPI SAXAttributes_QueryInterface(ISAXAttributes *iface, REFIID riid, void **ppObj)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    return IMXAttributes_QueryInterface(&This->IMXAttributes_iface, riid, ppObj);
+}
+
+static ULONG WINAPI SAXAttributes_AddRef(ISAXAttributes *iface)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    return IMXAttributes_AddRef(&This->IMXAttributes_iface);
+}
+
+static ULONG WINAPI SAXAttributes_Release(ISAXAttributes *iface)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    return IMXAttributes_Release(&This->IMXAttributes_iface);
+}
+
+static HRESULT WINAPI SAXAttributes_getLength(ISAXAttributes *iface, int *length)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    TRACE("(%p)->(%p)\n", This, length);
+
+    if (!length && (This->class_version == MSXML_DEFAULT || This->class_version == MSXML3))
+       return E_POINTER;
+
+    *length = This->length;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI SAXAttributes_getURI(ISAXAttributes *iface, int nIndex, const WCHAR **pUrl,
+    int *pUriSize)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%d %p %p): stub\n", This, nIndex, pUrl, pUriSize);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getLocalName(ISAXAttributes *iface, int nIndex, const WCHAR **localName,
+    int *length)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%d %p %p): stub\n", This, nIndex, localName, length);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getQName(ISAXAttributes *iface, int index, const WCHAR **qname, int *length)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+
+    TRACE("(%p)->(%d %p %p)\n", This, index, qname, length);
+
+    if (index >= This->length) return E_INVALIDARG;
+    if (!qname || !length) return E_POINTER;
+
+    *qname = This->attr[index].qname;
+    *length = SysStringLen(This->attr[index].qname);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI SAXAttributes_getName(ISAXAttributes *iface, int nIndex, const WCHAR **pUri, int *pUriLength,
+    const WCHAR ** pLocalName, int * pLocalNameSize, const WCHAR ** pQName, int * pQNameLength)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%d %p %p %p %p %p %p): stub\n", This, nIndex, pUri, pUriLength, pLocalName, pLocalNameSize,
+        pQName, pQNameLength);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getIndexFromName(ISAXAttributes *iface, const WCHAR * pUri, int cUriLength,
+    const WCHAR * pLocalName, int cocalNameLength, int * index)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%s:%d %s:%d %p): stub\n", This, debugstr_wn(pUri, cUriLength), cUriLength,
+        debugstr_wn(pLocalName, cocalNameLength), cocalNameLength, index);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getIndexFromQName(ISAXAttributes *iface, const WCHAR *qname,
+    int len, int *index)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    int i;
+
+    TRACE("(%p)->(%s:%d %p)\n", This, debugstr_wn(qname, len), len, index);
+
+    if (!index && (This->class_version == MSXML_DEFAULT || This->class_version == MSXML3))
+        return E_POINTER;
+
+    if (!qname || !index || !len) return E_INVALIDARG;
+
+    for (i = 0; i < This->length; i++)
+    {
+        if (len != SysStringLen(This->attr[i].qname)) continue;
+        if (strncmpW(qname, This->attr[i].qname, len)) continue;
+
+        *index = i;
+        return S_OK;
+    }
+
+    return E_INVALIDARG;
+}
+
+static HRESULT WINAPI SAXAttributes_getType(ISAXAttributes *iface, int index, const WCHAR **type,
+    int *len)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+
+    TRACE("(%p)->(%d %p %p)\n", This, index, type, len);
+
+    if (index >= This->length) return E_INVALIDARG;
+
+    if ((!type || !len) && (This->class_version == MSXML_DEFAULT || This->class_version == MSXML3))
+       return E_POINTER;
+
+    *type = This->attr[index].type;
+    *len = SysStringLen(This->attr[index].type);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI SAXAttributes_getTypeFromName(ISAXAttributes *iface, const WCHAR * pUri, int nUri,
+    const WCHAR * pLocalName, int nLocalName, const WCHAR ** pType, int * nType)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%s:%d %s:%d %p %p): stub\n", This, debugstr_wn(pUri, nUri), nUri,
+        debugstr_wn(pLocalName, nLocalName), nLocalName, pType, nType);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getTypeFromQName(ISAXAttributes *iface, const WCHAR * pQName,
+    int nQName, const WCHAR ** pType, int * nType)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%s:%d %p %p): stub\n", This, debugstr_wn(pQName, nQName), nQName, pType, nType);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getValue(ISAXAttributes *iface, int index, const WCHAR **value,
+    int *len)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+
+    TRACE("(%p)->(%d %p %p)\n", This, index, value, len);
+
+    if (index >= This->length) return E_INVALIDARG;
+
+    if ((!value || !len) && (This->class_version == MSXML_DEFAULT || This->class_version == MSXML3))
+       return E_POINTER;
+
+    *value = This->attr[index].value;
+    *len = SysStringLen(This->attr[index].value);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI SAXAttributes_getValueFromName(ISAXAttributes *iface, const WCHAR * pUri,
+    int nUri, const WCHAR * pLocalName, int nLocalName, const WCHAR ** pValue, int * nValue)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    FIXME("(%p)->(%s:%d %s:%d %p %p): stub\n", This, debugstr_wn(pUri, nUri), nUri,
+        debugstr_wn(pLocalName, nLocalName), nLocalName, pValue, nValue);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI SAXAttributes_getValueFromQName(ISAXAttributes *iface, const WCHAR *qname,
+    int qname_len, const WCHAR **value, int *value_len)
+{
+    mxattributes *This = impl_from_ISAXAttributes( iface );
+    HRESULT hr;
+    int index;
+
+    TRACE("(%p)->(%s:%d %p %p)\n", This, debugstr_wn(qname, qname_len), qname_len, value, value_len);
+
+    if (!qname || !value || !value_len)
+        return (This->class_version == MSXML_DEFAULT || This->class_version == MSXML3) ? E_POINTER : E_INVALIDARG;
+
+    hr = ISAXAttributes_getIndexFromQName(iface, qname, qname_len, &index);
+    if (hr == S_OK)
+        hr = ISAXAttributes_getValue(iface, index, value, value_len);
+
+    return hr;
+}
+
+static const ISAXAttributesVtbl SAXAttributesVtbl = {
+    SAXAttributes_QueryInterface,
+    SAXAttributes_AddRef,
+    SAXAttributes_Release,
+    SAXAttributes_getLength,
+    SAXAttributes_getURI,
+    SAXAttributes_getLocalName,
+    SAXAttributes_getQName,
+    SAXAttributes_getName,
+    SAXAttributes_getIndexFromName,
+    SAXAttributes_getIndexFromQName,
+    SAXAttributes_getType,
+    SAXAttributes_getTypeFromName,
+    SAXAttributes_getTypeFromQName,
+    SAXAttributes_getValue,
+    SAXAttributes_getValueFromName,
+    SAXAttributes_getValueFromQName
+};
+
+static HRESULT WINAPI VBSAXAttributes_QueryInterface(
+        IVBSAXAttributes* iface,
+        REFIID riid,
+        void **ppvObject)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
+    return ISAXAttributes_QueryInterface(&This->ISAXAttributes_iface, riid, ppvObject);
+}
+
+static ULONG WINAPI VBSAXAttributes_AddRef(IVBSAXAttributes* iface)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    return ISAXAttributes_AddRef(&This->ISAXAttributes_iface);
+}
+
+static ULONG WINAPI VBSAXAttributes_Release(IVBSAXAttributes* iface)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    return ISAXAttributes_Release(&This->ISAXAttributes_iface);
+}
+
+static HRESULT WINAPI VBSAXAttributes_GetTypeInfoCount( IVBSAXAttributes *iface, UINT* pctinfo )
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+
+    *pctinfo = 1;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI VBSAXAttributes_GetTypeInfo(
+    IVBSAXAttributes *iface,
+    UINT iTInfo, LCID lcid, ITypeInfo** ppTInfo )
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    return get_typeinfo(IVBSAXAttributes_tid, ppTInfo);
+}
+
+static HRESULT WINAPI VBSAXAttributes_GetIDsOfNames(
+    IVBSAXAttributes *iface,
+    REFIID riid,
+    LPOLESTR* rgszNames,
+    UINT cNames,
+    LCID lcid,
+    DISPID* rgDispId)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IVBSAXAttributes_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI VBSAXAttributes_Invoke(
+    IVBSAXAttributes *iface,
+    DISPID dispIdMember,
+    REFIID riid,
+    LCID lcid,
+    WORD wFlags,
+    DISPPARAMS* pDispParams,
+    VARIANT* pVarResult,
+    EXCEPINFO* pExcepInfo,
+    UINT* puArgErr)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IVBSAXAttributes_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &This->IVBSAXAttributes_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI VBSAXAttributes_get_length(IVBSAXAttributes* iface, int *len)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    return ISAXAttributes_getLength(&This->ISAXAttributes_iface, len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getURI(IVBSAXAttributes* iface, int index, BSTR *uri)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getURI(&This->ISAXAttributes_iface, index, (const WCHAR**)uri, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getLocalName(IVBSAXAttributes* iface, int index, BSTR *name)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getLocalName(&This->ISAXAttributes_iface, index, (const WCHAR**)name, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getQName(IVBSAXAttributes* iface, int index, BSTR *qname)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getQName(&This->ISAXAttributes_iface, index, (const WCHAR**)qname, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getIndexFromName(IVBSAXAttributes* iface, BSTR uri, BSTR name, int *index)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    return ISAXAttributes_getIndexFromName(&This->ISAXAttributes_iface, uri, SysStringLen(uri),
+            name, SysStringLen(name), index);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getIndexFromQName(IVBSAXAttributes* iface, BSTR qname, int *index)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    return ISAXAttributes_getIndexFromQName(&This->ISAXAttributes_iface, qname,
+            SysStringLen(qname), index);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getType(IVBSAXAttributes* iface, int index,BSTR *type)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getType(&This->ISAXAttributes_iface, index, (const WCHAR**)type, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getTypeFromName(IVBSAXAttributes* iface, BSTR uri,
+    BSTR name, BSTR *type)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getTypeFromName(&This->ISAXAttributes_iface, uri, SysStringLen(uri),
+            name, SysStringLen(name), (const WCHAR**)type, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getTypeFromQName(IVBSAXAttributes* iface, BSTR qname, BSTR *type)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getTypeFromQName(&This->ISAXAttributes_iface, qname, SysStringLen(qname),
+            (const WCHAR**)type, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getValue(IVBSAXAttributes* iface, int index, BSTR *value)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getValue(&This->ISAXAttributes_iface, index, (const WCHAR**)value, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getValueFromName(IVBSAXAttributes* iface, BSTR uri, BSTR name,
+    BSTR *value)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getValueFromName(&This->ISAXAttributes_iface, uri, SysStringLen(uri),
+            name, SysStringLen(name), (const WCHAR**)value, &len);
+}
+
+static HRESULT WINAPI VBSAXAttributes_getValueFromQName(IVBSAXAttributes* iface, BSTR qname, BSTR *value)
+{
+    mxattributes *This = impl_from_IVBSAXAttributes( iface );
+    int len;
+
+    return ISAXAttributes_getValueFromQName(&This->ISAXAttributes_iface, qname, SysStringLen(qname),
+        (const WCHAR**)value, &len);
+}
+
+static const struct IVBSAXAttributesVtbl VBSAXAttributesVtbl =
+{
+    VBSAXAttributes_QueryInterface,
+    VBSAXAttributes_AddRef,
+    VBSAXAttributes_Release,
+    VBSAXAttributes_GetTypeInfoCount,
+    VBSAXAttributes_GetTypeInfo,
+    VBSAXAttributes_GetIDsOfNames,
+    VBSAXAttributes_Invoke,
+    VBSAXAttributes_get_length,
+    VBSAXAttributes_getURI,
+    VBSAXAttributes_getLocalName,
+    VBSAXAttributes_getQName,
+    VBSAXAttributes_getIndexFromName,
+    VBSAXAttributes_getIndexFromQName,
+    VBSAXAttributes_getType,
+    VBSAXAttributes_getTypeFromName,
+    VBSAXAttributes_getTypeFromQName,
+    VBSAXAttributes_getValue,
+    VBSAXAttributes_getValueFromName,
+    VBSAXAttributes_getValueFromQName
+};
+
+static const tid_t mxattrs_iface_tids[] = {
+    IMXAttributes_tid,
+    0
+};
+
+static dispex_static_data_t mxattrs_dispex = {
+    NULL,
+    IMXAttributes_tid,
+    NULL,
+    mxattrs_iface_tids
+};
+
+HRESULT SAXAttributes_create(MSXML_VERSION version, IUnknown *outer, void **ppObj)
+{
+    static const int default_count = 10;
+    mxattributes *This;
+
+    TRACE("(%p, %p)\n", outer, ppObj);
+
+    This = heap_alloc( sizeof (*This) );
+    if( !This )
+        return E_OUTOFMEMORY;
+
+    This->IMXAttributes_iface.lpVtbl = &MXAttributesVtbl;
+    This->ISAXAttributes_iface.lpVtbl = &SAXAttributesVtbl;
+    This->IVBSAXAttributes_iface.lpVtbl = &VBSAXAttributesVtbl;
+    This->ref = 1;
+
+    This->class_version = version;
+
+    This->attr = heap_alloc(default_count*sizeof(mxattribute));
+    This->length = 0;
+    This->allocated = default_count;
+
+    *ppObj = &This->IMXAttributes_iface;
+
+    init_dispex(&This->dispex, (IUnknown*)&This->IMXAttributes_iface, &mxattrs_dispex);
 
     TRACE("returning iface %p\n", *ppObj);
 

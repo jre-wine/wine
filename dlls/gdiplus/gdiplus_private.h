@@ -170,9 +170,7 @@ struct GpGraphics{
 };
 
 struct GpBrush{
-    HBRUSH gdibrush;
     GpBrushType bt;
-    LOGBRUSH lb;
 };
 
 struct GpHatch{
@@ -185,12 +183,11 @@ struct GpHatch{
 struct GpSolidFill{
     GpBrush brush;
     ARGB color;
-    HBITMAP bmp;
 };
 
 struct GpPathGradient{
     GpBrush brush;
-    PathData pathdata;
+    GpPath* path;
     ARGB centercolor;
     GpWrapMode wrap;
     BOOL gamma;
@@ -199,6 +196,8 @@ struct GpPathGradient{
     REAL* blendfac;  /* blend factors */
     REAL* blendpos;  /* blend positions */
     INT blendcount;
+    ARGB *surroundcolors;
+    INT surroundcolorcount;
 };
 
 struct GpLineGradient{

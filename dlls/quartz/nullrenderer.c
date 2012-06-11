@@ -24,7 +24,6 @@
 #define NONAMELESSSTRUCT
 #define NONAMELESSUNION
 #include "quartz_private.h"
-#include "control_private.h"
 #include "pin.h"
 
 #include "uuids.h"
@@ -72,7 +71,7 @@ static HRESULT WINAPI NullRenderer_Receive(BaseInputPin *pin, IMediaSample * pSa
     TRACE("%p %p\n", pin, pSample);
 
     if (SUCCEEDED(IMediaSample_GetMediaTime(pSample, &start, &stop)))
-        MediaSeekingPassThru_RegisterMediaTime(This->seekthru_unk, start);
+        RendererPosPassThru_RegisterMediaTime(This->seekthru_unk, start);
     EnterCriticalSection(&This->filter.csFilter);
     if (This->pInputPin->flushing || This->pInputPin->end_of_stream)
         hr = S_FALSE;
@@ -148,15 +147,11 @@ HRESULT NullRenderer_create(IUnknown * pUnkOuter, LPVOID * ppv)
 
     if (SUCCEEDED(hr))
     {
-        ISeekingPassThru *passthru;
-        hr = CoCreateInstance(&CLSID_SeekingPassThru, pUnkOuter ? pUnkOuter : (IUnknown*)&pNullRenderer->IInner_vtbl, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void**)&pNullRenderer->seekthru_unk);
+        hr = CreatePosPassThru(pUnkOuter ? pUnkOuter : (IUnknown*)&pNullRenderer->IInner_vtbl, TRUE, (IPin*)pNullRenderer->pInputPin, &pNullRenderer->seekthru_unk);
         if (FAILED(hr)) {
             IUnknown_Release((IUnknown*)pNullRenderer);
             return hr;
         }
-        IUnknown_QueryInterface(pNullRenderer->seekthru_unk, &IID_ISeekingPassThru, (void**)&passthru);
-        ISeekingPassThru_Init(passthru, TRUE, (IPin*)pNullRenderer->pInputPin);
-        ISeekingPassThru_Release(passthru);
         *ppv = pNullRenderer;
     }
     else
@@ -313,7 +308,7 @@ static HRESULT WINAPI NullRenderer_Stop(IBaseFilter * iface)
     EnterCriticalSection(&This->filter.csFilter);
     {
         This->filter.state = State_Stopped;
-        MediaSeekingPassThru_ResetMediaTime(This->seekthru_unk);
+        RendererPosPassThru_ResetMediaTime(This->seekthru_unk);
     }
     LeaveCriticalSection(&This->filter.csFilter);
 
@@ -433,7 +428,7 @@ static HRESULT WINAPI NullRenderer_InputPin_EndOfStream(IPin * iface)
             IMediaEventSink_Release(pEventSink);
         }
     }
-    MediaSeekingPassThru_EOS(pNull->seekthru_unk);
+    RendererPosPassThru_EOS(pNull->seekthru_unk);
 
     return hr;
 }
@@ -448,7 +443,7 @@ static HRESULT WINAPI NullRenderer_InputPin_EndFlush(IPin * iface)
 
     hr = BaseInputPinImpl_EndOfStream(iface);
     pNull = (NullRendererImpl*)This->pin.pinInfo.pFilter;
-    MediaSeekingPassThru_ResetMediaTime(pNull->seekthru_unk);
+    RendererPosPassThru_ResetMediaTime(pNull->seekthru_unk);
     return hr;
 }
 

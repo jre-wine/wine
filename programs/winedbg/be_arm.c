@@ -205,13 +205,15 @@ static void be_arm_clear_watchpoint(CONTEXT* ctx, unsigned idx)
 
 static int be_arm_adjust_pc_for_break(CONTEXT* ctx, BOOL way)
 {
+    INT step = (ctx->Cpsr & 0x20) ? 2 : 4;
+
     if (way)
     {
-        ctx->Pc-=4;
-        return -4;
+        ctx->Pc -= step;
+        return -step;
     }
-    ctx->Pc+=4;
-    return 4;
+    ctx->Pc += step;
+    return step;
 }
 
 static int be_arm_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
@@ -237,8 +239,20 @@ static int be_arm_fetch_integer(const struct dbg_lvalue* lvalue, unsigned size,
 static int be_arm_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
                               long double* ret)
 {
-    dbg_printf("be_arm_fetch_float: not done\n");
-    return FALSE;
+    char        tmp[sizeof(long double)];
+
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (!memory_read_value(lvalue, size, tmp)) return FALSE;
+
+    switch (size)
+    {
+    case sizeof(float):         *ret = *(float*)tmp;            break;
+    case sizeof(double):        *ret = *(double*)tmp;           break;
+    default:                    return FALSE;
+    }
+    return TRUE;
 }
 
 struct backend_cpu be_arm =

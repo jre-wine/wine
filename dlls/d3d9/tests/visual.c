@@ -368,7 +368,7 @@ static void lighting_test(IDirect3DDevice9 *device)
                                                     2 /*PrimCount */, Indices, D3DFMT_INDEX16, litnquad, sizeof(litnquad[0]));
         ok(hr == D3D_OK, "IDirect3DDevice9_DrawIndexedPrimitiveUP failed with %08x\n", hr);
 
-        IDirect3DDevice9_EndScene(device);
+        hr = IDirect3DDevice9_EndScene(device);
         ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x\n", hr);
     }
 
@@ -403,7 +403,7 @@ static void lighting_test(IDirect3DDevice9 *device)
     material.Emissive.b = 0.0;
     material.Emissive.a = 0.0;
     material.Power = 0.0;
-    IDirect3DDevice9_SetMaterial(device, &material);
+    hr = IDirect3DDevice9_SetMaterial(device, &material);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetMaterial returned %08x\n", hr);
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_MATERIAL);
@@ -1688,8 +1688,9 @@ out:
     ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTexture returned %#x.\n", hr);
 
     /* restore things */
-    if(backbuffer) {
-        IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
+    if (backbuffer)
+    {
+        hr = IDirect3DDevice9_SetRenderTarget(device, 0, backbuffer);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetRenderTarget returned %#x.\n", hr);
         IDirect3DSurface9_Release(backbuffer);
     }
@@ -1719,7 +1720,8 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
     unsigned int i, j;
 
     /* basic vertex shader without fog computation ("non foggy") */
-    static const DWORD vertex_shader_code1[] = {
+    static const DWORD vertex_shader_code1[] =
+    {
         0xfffe0101,                                                             /* vs_1_1                       */
         0x0000001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0              */
         0x0000001f, 0x8000000a, 0x900f0001,                                     /* dcl_color0 v1                */
@@ -1728,7 +1730,8 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         0x0000ffff
     };
     /* basic vertex shader with reversed fog computation ("foggy") */
-    static const DWORD vertex_shader_code2[] = {
+    static const DWORD vertex_shader_code2[] =
+    {
         0xfffe0101,                                                             /* vs_1_1                        */
         0x0000001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0               */
         0x0000001f, 0x8000000a, 0x900f0001,                                     /* dcl_color0 v1                 */
@@ -1739,10 +1742,31 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         0x00000005, 0xc00f0001, 0x80000000, 0xa0000000,                         /* mul oFog, r0.x, c0.x          */
         0x0000ffff
     };
+    /* basic vertex shader with reversed fog computation ("foggy"), vs_2_0 */
+    static const DWORD vertex_shader_code3[] =
+    {
+        0xfffe0200,                                                             /* vs_2_0                        */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0               */
+        0x0200001f, 0x8000000a, 0x900f0001,                                     /* dcl_color0 v1                 */
+        0x05000051, 0xa00f0000, 0xbfa00000, 0x00000000, 0xbf666666, 0x00000000, /* def c0, -1.25, 0.0, -0.9, 0.0 */
+        0x02000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                  */
+        0x02000001, 0xd00f0000, 0x90e40001,                                     /* mov oD0, v1                   */
+        0x03000002, 0x800f0000, 0x90aa0000, 0xa0aa0000,                         /* add r0, v0.z, c0.z            */
+        0x03000005, 0xc00f0001, 0x80000000, 0xa0000000,                         /* mul oFog, r0.x, c0.x          */
+        0x0000ffff
+    };
     /* basic pixel shader */
-    static const DWORD pixel_shader_code[] = {
+    static const DWORD pixel_shader_code[] =
+    {
         0xffff0101,                                                             /* ps_1_1     */
-        0x00000001, 0x800f0000, 0x90e40000,                                     /* mov r0, vo */
+        0x00000001, 0x800f0000, 0x90e40000,                                     /* mov r0, v0 */
+        0x0000ffff
+    };
+    static const DWORD pixel_shader_code2[] =
+    {
+        0xffff0200,                                                             /* ps_2_0     */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl v0 */
+        0x02000001, 0x800f0800, 0x90e40000,                                     /* mov oC0, v0 */
         0x0000ffff
     };
 
@@ -1760,8 +1784,8 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
     };
 
     IDirect3DVertexDeclaration9 *vertex_declaration = NULL;
-    IDirect3DVertexShader9      *vertex_shader[3]   = {NULL, NULL, NULL};
-    IDirect3DPixelShader9       *pixel_shader[2]    = {NULL, NULL};
+    IDirect3DVertexShader9      *vertex_shader[4]   = {NULL, NULL, NULL, NULL};
+    IDirect3DPixelShader9       *pixel_shader[3]    = {NULL, NULL, NULL};
 
     /* This reference data was collected on a nVidia GeForce 7600GS driver version 84.19 DirectX version 9.0c on Windows XP */
     static const struct test_data_t {
@@ -1847,7 +1871,7 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {0x00fd0200, 0x00f50200, 0x00f50a00, 0x00e91600, 0x00d92600, 0x00c73800,
         0x00b24d00, 0x009c6300, 0x00867900, 0x00728d00, 0x005ea100}},
 
-#if 0  /* FIXME: these fail on GeForce 8500 */
+        /* These tests fail on older Nvidia drivers */
         /* foggy vertex shader */
         {2, 0, D3DFOG_NONE, D3DFOG_NONE,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
@@ -1861,11 +1885,24 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {2, 0, D3DFOG_LINEAR, D3DFOG_NONE,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
-#endif
+
+        {3, 0, D3DFOG_NONE, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 0, D3DFOG_EXP, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 0, D3DFOG_EXP2, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 0, D3DFOG_LINEAR, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
 
         /* foggy vertex shader and pixel shader. First 4 tests with vertex fog,
          * all using the fixed fog-coord linear fog
          */
+        /* vs_1_1 with ps_1_1 */
         {2, 1, D3DFOG_NONE, D3DFOG_NONE,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
@@ -1876,6 +1913,48 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
         {2, 1, D3DFOG_LINEAR, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+
+        /* vs_2_0 with ps_1_1 */
+        {3, 1, D3DFOG_NONE, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 1, D3DFOG_EXP, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 1, D3DFOG_EXP2, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 1, D3DFOG_LINEAR, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+
+        /* vs_1_1 with ps_2_0 */
+        {2, 2, D3DFOG_NONE, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {2, 2, D3DFOG_EXP, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {2, 2, D3DFOG_EXP2, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {2, 2, D3DFOG_LINEAR, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+
+        /* vs_2_0 with ps_2_0 */
+        {3, 2, D3DFOG_NONE, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 2, D3DFOG_EXP, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 2, D3DFOG_EXP2, D3DFOG_NONE,
+        {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
+         0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
+        {3, 2, D3DFOG_LINEAR, D3DFOG_NONE,
         {0x00ff0000, 0x00fe0100, 0x00de2100, 0x00bf4000, 0x009f6000, 0x007f8000,
          0x005fa000, 0x003fc000, 0x001fe000, 0x0000ff00, 0x0000ff00}},
 
@@ -1901,7 +1980,11 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
     ok(SUCCEEDED(hr), "CreateVertexShader failed (%08x)\n", hr);
     hr = IDirect3DDevice9_CreateVertexShader(device, vertex_shader_code2, &vertex_shader[2]);
     ok(SUCCEEDED(hr), "CreateVertexShader failed (%08x)\n", hr);
+    hr = IDirect3DDevice9_CreateVertexShader(device, vertex_shader_code3, &vertex_shader[3]);
+    ok(SUCCEEDED(hr), "CreateVertexShader failed (%08x)\n", hr);
     hr = IDirect3DDevice9_CreatePixelShader(device, pixel_shader_code, &pixel_shader[1]);
+    ok(SUCCEEDED(hr), "CreatePixelShader failed (%08x)\n", hr);
+    hr = IDirect3DDevice9_CreatePixelShader(device, pixel_shader_code2, &pixel_shader[2]);
     ok(SUCCEEDED(hr), "CreatePixelShader failed (%08x)\n", hr);
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &vertex_declaration);
     ok(SUCCEEDED(hr), "CreateVertexDeclaration failed (%08x)\n", hr);
@@ -1980,7 +2063,9 @@ static void fog_with_shader_test(IDirect3DDevice9 *device)
 
     IDirect3DVertexShader9_Release(vertex_shader[1]);
     IDirect3DVertexShader9_Release(vertex_shader[2]);
+    IDirect3DVertexShader9_Release(vertex_shader[3]);
     IDirect3DPixelShader9_Release(pixel_shader[1]);
+    IDirect3DPixelShader9_Release(pixel_shader[2]);
     IDirect3DVertexDeclaration9_Release(vertex_declaration);
 }
 
@@ -2503,9 +2588,9 @@ static void z_range_test(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.4, 0);
 
-    IDirect3DDevice9_SetVertexDeclaration(device, decl);
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, decl);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration returned %08x\n", hr);
-    IDirect3DDevice9_SetVertexShader(device, shader);
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader returned %08x\n", hr);
 
     hr = IDirect3DDevice9_BeginScene(device);
@@ -2527,9 +2612,9 @@ static void z_range_test(IDirect3DDevice9 *device)
         ok(hr == D3D_OK, "IDirect3DDevice9_EndScene failed with %08x\n", hr);
     }
 
-    IDirect3DDevice9_SetVertexDeclaration(device, NULL);
+    hr = IDirect3DDevice9_SetVertexDeclaration(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration returned %08x\n", hr);
-    IDirect3DDevice9_SetVertexShader(device, NULL);
+    hr = IDirect3DDevice9_SetVertexShader(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader returned %08x\n", hr);
 
     IDirect3DVertexDeclaration9_Release(decl);
@@ -3848,7 +3933,7 @@ static void projected_textures_test(IDirect3DDevice9 *device,
         hr = IDirect3DDevice9_SetVertexDeclaration(device, tests[i].decl);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %08x\n", hr);
 
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, tests[i].flags);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, tests[i].flags);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_GetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, &value);
         ok(SUCCEEDED(hr) && value == tests[i].flags,
@@ -4042,7 +4127,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
 
         /* What happens with transforms enabled? */
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad2, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4052,7 +4137,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         mat[13] = 1.0;
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT4);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT4);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad3, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4065,9 +4150,9 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
         hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZRHW | D3DFVF_TEX1);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+        ok(SUCCEEDED(hr), "IDirect3DDevice9_SetFVF failed with %08x\n", hr);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
-        ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %08x\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad4, 6 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
 
@@ -4123,20 +4208,18 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
                           0.0, 1.0, 0.0, 0.0,
                           0.0, 0.0, 0.0, 0.0};
 
-        /* What happens to the default 1 in the 3rd coordinate if it is disabled?
-         */
+        /* What happens to the default 1 in the 3rd coordinate if it is disabled? */
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
 
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad1, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
 
         /* D3DTFF_COUNT1 does not work on Nvidia drivers. It behaves like D3DTTFF_DISABLE. On ATI drivers
-         * it behaves like COUNT2 because normal textures require 2 coords
-         */
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
+         * it behaves like COUNT2 because normal textures require 2 coords. */
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad4, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4145,15 +4228,14 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         memset(mat, 0, sizeof(mat));
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad2, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
 
         /* Now, what happens to the 2nd coordinate(that is disabled in the matrix) if it is not
-         * used? And what happens to the first?
-         */
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
+         * used? And what happens to the first? */
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
         ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad3, 5 * sizeof(float));
         ok(SUCCEEDED(hr), "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4384,7 +4466,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
          */
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad1, 6 * sizeof(float));
         ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4393,9 +4475,8 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
          * are swapped by the matrix. If it changes the input, the v coord will be missing(green),
          * otherwise the w will be missing(blue).
          * turns out that on nvidia cards the blue color is missing, so it is an output modification.
-         * On ATI cards the COUNT2 is ignored, and it behaves in the same way as COUNT3.
-         */
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
+         * On ATI cards the COUNT2 is ignored, and it behaves in the same way as COUNT3. */
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT2);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad2, 6 * sizeof(float));
         ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4403,7 +4484,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         /* default values? Set up the identity matrix, pass in 2 vertex coords, and enable 3 */
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) identity);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX1);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed with %08x\n", hr);
@@ -4416,7 +4497,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
         memset(mat, 0, sizeof(mat));
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT1);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_SetVertexDeclaration(device, decl);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %08x\n", hr);
@@ -4483,7 +4564,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
          */
         hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) mat);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
-        IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
         hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad1, 6 * sizeof(float));
         ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
@@ -4523,7 +4604,7 @@ static void texture_transform_flags_test(IDirect3DDevice9 *device)
     out:
     hr = IDirect3DDevice9_SetVertexDeclaration(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed with %08x\n", hr);
-    IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+    hr = IDirect3DDevice9_SetTextureStageState(device, 0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_SetTextureStageState failed (%08x)\n", hr);
     hr = IDirect3DDevice9_SetTransform(device, D3DTS_TEXTURE0, (D3DMATRIX *) &identity);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetTransform failed with %08x\n", hr);
@@ -6183,7 +6264,7 @@ static void pretransformed_varying_test(IDirect3DDevice9 *device) {
         hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
         ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %08x\n", hr);
 
-        IDirect3DDevice9_SetPixelShader(device, tests[i].shader);
+        hr = IDirect3DDevice9_SetPixelShader(device, tests[i].shader);
         ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader returned %08x\n", hr);
 
         hr = IDirect3DDevice9_BeginScene(device);
@@ -7885,7 +7966,7 @@ static void test_vshader_float16(IDirect3DDevice9 *device)
     ok(hr == D3D_OK, "IDirect3DDevice9_SetStreamSource failed, hr=%08x\n", hr);
     hr = IDirect3DDevice9_SetVertexDeclaration(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexDeclaration failed, hr=%08x\n", hr);
-    IDirect3DDevice9_SetVertexShader(device, NULL);
+    hr = IDirect3DDevice9_SetVertexShader(device, NULL);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_SetVertexShader failed hr=%08x\n", hr);
 
     IDirect3DVertexDeclaration9_Release(vdecl);
@@ -8130,9 +8211,9 @@ static void vFace_register_test(IDirect3DDevice9 *device)
     ok(color == 0x0000ff00, "vFace: Offscreen rendered back facing quad has color 0x%08x, expected 0x0000ff00\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00ff0000, "vFace: Offscreen rendered front facing quad has color 0x%08x, expected 0x00ff0000\n", color);
-    IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Present failed, hr %#x.\n", hr);
 
-    ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed hr=%08x\n", hr);
     IDirect3DDevice9_SetTexture(device, 0, NULL);
     IDirect3DPixelShader9_Release(shader);
     IDirect3DVertexShader9_Release(vshader);
@@ -8462,7 +8543,8 @@ static void stencil_cull_test(IDirect3DDevice9 *device) {
 
     hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET | D3DCLEAR_STENCIL, 0x00ff0000, 0.0, 0x8);
     ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %08x\n", hr);
-    IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(SUCCEEDED(hr), "Failed to set FVF,hr %#x.\n", hr);
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_STENCILFAIL, D3DSTENCILOP_INCR);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %08x\n", hr);
@@ -8551,8 +8633,10 @@ static void stencil_cull_test(IDirect3DDevice9 *device) {
     ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %08x\n", hr);
     if(SUCCEEDED(hr))
     {
-        IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
-        for(i = 0; i < 16; i++) {
+        hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_DIFFUSE);
+        ok(SUCCEEDED(hr), "Failed to set FVF, hr %#x.\n", hr);
+        for (i = 0; i < 16; ++i)
+        {
             hr = IDirect3DDevice9_SetRenderState(device, D3DRS_STENCILREF, i);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState returned %08x\n", hr);
 
@@ -10089,7 +10173,7 @@ static void yuv_color_test(IDirect3DDevice9 *device) {
     hr = IDirect3DDevice9_GetRenderTarget(device, 0, &target);
     ok(hr == D3D_OK, "IDirect3DDevice9_GetRenderTarget failed, hr = %08x\n", hr);
 
-    IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX0);
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ | D3DFVF_TEX0);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF failed, hr = %08x\n", hr);
 
     for(fmt = 0; fmt < 2; fmt++) {
@@ -10507,7 +10591,7 @@ static void alphatest_test(IDirect3DDevice9 *device) {
                 0x0000ffff                                  /* end              */
             };
             memset(&caps, 0, sizeof(caps));
-            IDirect3DDevice9_GetDeviceCaps(device, &caps);
+            hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
             ok(hr == D3D_OK, "IDirect3DDevice9_GetDeviceCaps failed with 0x%08x\n", hr);
             if(caps.PixelShaderVersion < D3DPS_VERSION(1, 1)) {
                 break;
@@ -10515,7 +10599,7 @@ static void alphatest_test(IDirect3DDevice9 *device) {
 
             hr = IDirect3DDevice9_CreatePixelShader(device, shader_code, &ps);
             ok(hr == D3D_OK, "IDirect3DDevice9_CreatePixelShader failed with 0x%08x\n", hr);
-            IDirect3DDevice9_SetPixelShader(device, ps);
+            hr = IDirect3DDevice9_SetPixelShader(device, ps);
             ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with 0x%08x\n", hr);
             IDirect3DPixelShader9_Release(ps);
         }
@@ -10582,7 +10666,7 @@ static void alphatest_test(IDirect3DDevice9 *device) {
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ALPHATESTENABLE, FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetRenderState failed with 0x%08x\n", hr);
-    IDirect3DDevice9_SetPixelShader(device, NULL);
+    hr = IDirect3DDevice9_SetPixelShader(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetPixelShader failed with 0x%08x\n", hr);
 }
 
@@ -11990,7 +12074,7 @@ static void shadow_test(IDirect3DDevice9 *device)
         hr = IDirect3DDevice9_SetRenderTarget(device, 0, rt);
         ok(SUCCEEDED(hr), "SetRenderTarget failed, hr %#x.\n", hr);
 
-        IDirect3DDevice9_SetPixelShader(device, NULL);
+        hr = IDirect3DDevice9_SetPixelShader(device, NULL);
         ok(SUCCEEDED(hr), "SetPixelShader failed, hr %#x.\n", hr);
 
         /* Setup the depth/stencil surface. */
@@ -12161,7 +12245,7 @@ static void clip_planes_test(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_CreateVertexShader(device, shader_code, &shader);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexShader returned %08x\n", hr);
-    IDirect3DDevice9_SetVertexShader(device, shader);
+    hr = IDirect3DDevice9_SetVertexShader(device, shader);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader returned %08x\n", hr);
 
     hr = IDirect3DDevice9_SetRenderTarget(device, 0, original_rt);
@@ -12323,7 +12407,7 @@ static void fp_special_test(IDirect3DDevice9 *device)
 
     hr = IDirect3DDevice9_CreatePixelShader(device, ps_code, &ps);
     ok(SUCCEEDED(hr), "CreatePixelShader failed, hr %#x.\n", hr);
-    IDirect3DDevice9_SetPixelShader(device, ps);
+    hr = IDirect3DDevice9_SetPixelShader(device, ps);
     ok(SUCCEEDED(hr), "SetPixelShader failed, hr %#x.\n", hr);
 
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, D3DZB_FALSE);
@@ -12352,7 +12436,7 @@ static void fp_special_test(IDirect3DDevice9 *device)
 
         hr = IDirect3DDevice9_CreateVertexShader(device, vs_code, &vs);
         ok(SUCCEEDED(hr), "CreateVertexShader failed, hr %#x.\n", hr);
-        IDirect3DDevice9_SetVertexShader(device, vs);
+        hr = IDirect3DDevice9_SetVertexShader(device, vs);
         ok(SUCCEEDED(hr), "SetVertexShader failed, hr %#x.\n", hr);
 
         hr = IDirect3DDevice9_BeginScene(device);
@@ -14023,11 +14107,11 @@ START_TEST(visual)
     }
     else skip("No vs_2_0 support\n");
 
-    if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1) && caps.PixelShaderVersion >= D3DPS_VERSION(1, 1))
+    if (caps.VertexShaderVersion >= D3DVS_VERSION(2, 0) && caps.PixelShaderVersion >= D3DPS_VERSION(2, 0))
     {
         fog_with_shader_test(device_ptr);
     }
-    else skip("No vs_1_1 and ps_1_1 support\n");
+    else skip("No vs_2_0 and ps_2_0 support\n");
 
     if (caps.PixelShaderVersion >= D3DPS_VERSION(1, 1))
     {

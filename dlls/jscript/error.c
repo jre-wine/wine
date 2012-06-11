@@ -34,7 +34,7 @@ static const WCHAR toStringW[] = {'t','o','S','t','r','i','n','g',0};
 
 /* ECMA-262 3rd Edition    15.11.4.4 */
 static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     jsdisp_t *jsthis;
     BSTR name = NULL, msg = NULL, ret = NULL;
@@ -56,7 +56,7 @@ static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
         return S_OK;
     }
 
-    hres = jsdisp_propget_name(jsthis, nameW, &v, ei, caller);
+    hres = jsdisp_propget_name(jsthis, nameW, &v, ei);
     if(FAILED(hres))
         return hres;
 
@@ -71,7 +71,7 @@ static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
         }
     }
 
-    hres = jsdisp_propget_name(jsthis, messageW, &v, ei, caller);
+    hres = jsdisp_propget_name(jsthis, messageW, &v, ei);
     if(SUCCEEDED(hres)) {
         if(V_VT(&v) != VT_EMPTY) {
             hres = to_string(ctx, &v, ei, &msg);
@@ -126,7 +126,7 @@ static HRESULT Error_toString(script_ctx_t *ctx, vdisp_t *vthis, WORD flags,
 }
 
 static HRESULT Error_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
 
@@ -200,7 +200,7 @@ static HRESULT create_error(script_ctx_t *ctx, jsdisp_t *constr,
 
     V_VT(&v) = VT_I4;
     V_I4(&v) = number;
-    hres = jsdisp_propput_name(err, numberW, &v, NULL/*FIXME*/, NULL/*FIXME*/);
+    hres = jsdisp_propput_name(err, numberW, &v, NULL/*FIXME*/);
     if(FAILED(hres)) {
         jsdisp_release(err);
         return hres;
@@ -210,9 +210,9 @@ static HRESULT create_error(script_ctx_t *ctx, jsdisp_t *constr,
     if(msg) V_BSTR(&v) = SysAllocString(msg);
     else V_BSTR(&v) = SysAllocStringLen(NULL, 0);
     if(V_BSTR(&v)) {
-        hres = jsdisp_propput_name(err, messageW, &v, NULL/*FIXME*/, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(err, messageW, &v, NULL/*FIXME*/);
         if(SUCCEEDED(hres))
-            hres = jsdisp_propput_name(err, descriptionW, &v, NULL/*FIXME*/, NULL/*FIXME*/);
+            hres = jsdisp_propput_name(err, descriptionW, &v, NULL/*FIXME*/);
         SysFreeString(V_BSTR(&v));
     }else {
         hres = E_OUTOFMEMORY;
@@ -277,56 +277,56 @@ static HRESULT error_constr(script_ctx_t *ctx, WORD flags, DISPPARAMS *dp,
 }
 
 static HRESULT ErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->error_constr);
 }
 
 static HRESULT EvalErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->eval_error_constr);
 }
 
 static HRESULT RangeErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->range_error_constr);
 }
 
 static HRESULT ReferenceErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->reference_error_constr);
 }
 
 static HRESULT RegExpErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->regexp_error_constr);
 }
 
 static HRESULT SyntaxErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->syntax_error_constr);
 }
 
 static HRESULT TypeErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->type_error_constr);
 }
 
 static HRESULT URIErrorConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
-        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+        DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
 {
     TRACE("\n");
     return error_constr(ctx, flags, dp, retv, ei, ctx->uri_error_constr);
@@ -369,7 +369,7 @@ HRESULT init_error_constr(script_ctx_t *ctx, jsdisp_t *object_prototype)
             return E_OUTOFMEMORY;
         }
 
-        hres = jsdisp_propput_name(err, nameW, &v, NULL/*FIXME*/, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(err, nameW, &v, NULL/*FIXME*/);
 
         if(SUCCEEDED(hres))
             hres = create_builtin_function(ctx, constr_val[i], names[i], NULL,

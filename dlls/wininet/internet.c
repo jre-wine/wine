@@ -108,6 +108,8 @@ typedef struct
     LPWSTR proxyBypass;
 } proxyinfo_t;
 
+static ULONG max_conns = 2, max_1_0_conns = 4;
+
 static const WCHAR szInternetSettings[] =
     { 'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
       'W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
@@ -881,7 +883,7 @@ static const object_vtbl_t APPINFOVtbl = {
     APPINFO_Destroy,
     NULL,
     APPINFO_QueryOption,
-    NULL,
+    INET_SetOption,
     NULL,
     NULL,
     NULL,
@@ -2275,10 +2277,10 @@ BOOL WINAPI InternetReadFileExW(HINTERNET hFile, LPINTERNET_BUFFERSW lpBuffer,
     return res == ERROR_SUCCESS;
 }
 
-DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
+static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL unicode)
 {
-    static BOOL warn = TRUE;
-
+    /* FIXME: This function currently handles more options than it should. Options requiring
+     * proper handles should be moved to proper functions */
     switch(option) {
     case INTERNET_OPTION_REQUEST_FLAGS:
         TRACE("INTERNET_OPTION_REQUEST_FLAGS\n");
@@ -2305,10 +2307,8 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
         return ERROR_SUCCESS;
 
     case INTERNET_OPTION_CONNECTED_STATE:
-        if (warn) {
-            FIXME("INTERNET_OPTION_CONNECTED_STATE: semi-stub\n");
-            warn = FALSE;
-        }
+        FIXME("INTERNET_OPTION_CONNECTED_STATE: semi-stub\n");
+
         if (*size < sizeof(ULONG))
             return ERROR_INSUFFICIENT_BUFFER;
 
@@ -2336,7 +2336,7 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
         if (*size < sizeof(ULONG))
             return ERROR_INSUFFICIENT_BUFFER;
 
-        *(ULONG*)buffer = 2;
+        *(ULONG*)buffer = max_conns;
         *size = sizeof(ULONG);
 
         return ERROR_SUCCESS;
@@ -2347,7 +2347,7 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
             if (*size < sizeof(ULONG))
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            *(ULONG*)buffer = 4;
+            *(ULONG*)buffer = max_1_0_conns;
             *size = sizeof(ULONG);
 
             return ERROR_SUCCESS;
@@ -2438,15 +2438,20 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
         return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
     case INTERNET_OPTION_POLICY:
         return ERROR_INVALID_PARAMETER;
+    }
+
+    FIXME("Stub for %d\n", option);
+    return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+}
+
+DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *size, BOOL unicode)
+{
+    switch(option) {
     case INTERNET_OPTION_CONTEXT_VALUE:
-    {
-        if (!hdr)
-            return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
         if (!size)
             return ERROR_INVALID_PARAMETER;
 
-        if (*size < sizeof(DWORD_PTR))
-        {
+        if (*size < sizeof(DWORD_PTR)) {
             *size = sizeof(DWORD_PTR);
             return ERROR_INSUFFICIENT_BUFFER;
         }
@@ -2456,11 +2461,15 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
         *(DWORD_PTR *)buffer = hdr->dwContext;
         *size = sizeof(DWORD_PTR);
         return ERROR_SUCCESS;
-    }
+
+    case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
+    case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
+        WARN("Called on global option %u\n", option);
+        return ERROR_INTERNET_INVALID_OPERATION;
     }
 
-    FIXME("Stub for %d\n", option);
-    return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+    /* FIXME: we shouldn't call it here */
+    return query_global_option(option, buffer, size, unicode);
 }
 
 /***********************************************************************
@@ -2488,7 +2497,7 @@ BOOL WINAPI InternetQueryOptionW(HINTERNET hInternet, DWORD dwOption,
             WININET_Release(hdr);
         }
     }else {
-        res = INET_QueryOption(NULL, dwOption, lpBuffer, lpdwBufferLength, TRUE);
+        res = query_global_option(dwOption, lpBuffer, lpdwBufferLength, TRUE);
     }
 
     if(res != ERROR_SUCCESS)
@@ -2521,7 +2530,7 @@ BOOL WINAPI InternetQueryOptionA(HINTERNET hInternet, DWORD dwOption,
             WININET_Release(hdr);
         }
     }else {
-        res = INET_QueryOption(NULL, dwOption, lpBuffer, lpdwBufferLength, FALSE);
+        res = query_global_option(dwOption, lpBuffer, lpdwBufferLength, FALSE);
     }
 
     if(res != ERROR_SUCCESS)
@@ -2529,6 +2538,53 @@ BOOL WINAPI InternetQueryOptionA(HINTERNET hInternet, DWORD dwOption,
     return res == ERROR_SUCCESS;
 }
 
+DWORD INET_SetOption(object_header_t *hdr, DWORD option, void *buf, DWORD size)
+{
+    switch(option) {
+    case INTERNET_OPTION_CALLBACK:
+        WARN("Not settable option %u\n", option);
+        return ERROR_INTERNET_OPTION_NOT_SETTABLE;
+    case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
+    case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
+        WARN("Called on global option %u\n", option);
+        return ERROR_INTERNET_INVALID_OPERATION;
+    }
+
+    return ERROR_INTERNET_INVALID_OPTION;
+}
+
+static DWORD set_global_option(DWORD option, void *buf, DWORD size)
+{
+    switch(option) {
+    case INTERNET_OPTION_CALLBACK:
+        WARN("Not global option %u\n", option);
+        return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+
+    case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
+        TRACE("INTERNET_OPTION_MAX_CONNS_PER_SERVER\n");
+
+        if(size != sizeof(max_conns))
+            return ERROR_INTERNET_BAD_OPTION_LENGTH;
+        if(!*(ULONG*)buf)
+            return ERROR_BAD_ARGUMENTS;
+
+        max_conns = *(ULONG*)buf;
+        return ERROR_SUCCESS;
+
+    case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
+        TRACE("INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER\n");
+
+        if(size != sizeof(max_1_0_conns))
+            return ERROR_INTERNET_BAD_OPTION_LENGTH;
+        if(!*(ULONG*)buf)
+            return ERROR_BAD_ARGUMENTS;
+
+        max_1_0_conns = *(ULONG*)buf;
+        return ERROR_SUCCESS;
+    }
+
+    return ERROR_INTERNET_INVALID_OPTION;
+}
 
 /***********************************************************************
  *           InternetSetOptionW (WININET.@)
@@ -2545,37 +2601,28 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 {
     object_header_t *lpwhh;
     BOOL ret = TRUE;
+    DWORD res;
 
     TRACE("(%p %d %p %d)\n", hInternet, dwOption, lpBuffer, dwBufferLength);
 
     lpwhh = (object_header_t*) get_handle_object( hInternet );
-    if(lpwhh && lpwhh->vtbl->SetOption) {
-        DWORD res;
-
+    if(lpwhh)
         res = lpwhh->vtbl->SetOption(lpwhh, dwOption, lpBuffer, dwBufferLength);
-        if(res != ERROR_INTERNET_INVALID_OPTION) {
-            WININET_Release( lpwhh );
+    else
+        res = set_global_option(dwOption, lpBuffer, dwBufferLength);
 
-            if(res != ERROR_SUCCESS)
-                SetLastError(res);
+    if(res != ERROR_INTERNET_INVALID_OPTION) {
+        if(lpwhh)
+            WININET_Release(lpwhh);
 
-            return res == ERROR_SUCCESS;
-        }
+        if(res != ERROR_SUCCESS)
+            SetLastError(res);
+
+        return res == ERROR_SUCCESS;
     }
 
     switch (dwOption)
     {
-    case INTERNET_OPTION_CALLBACK:
-      {
-        if (!lpwhh)
-        {
-            SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-            return FALSE;
-        }
-        WININET_Release(lpwhh);
-        SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
-        return FALSE;
-      }
     case INTERNET_OPTION_HTTP_VERSION:
       {
         HTTP_VERSION_INFO* pVersion=(HTTP_VERSION_INFO*)lpBuffer;
@@ -2663,18 +2710,6 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
       {
         ULONG receivetimeout = *(ULONG *)lpBuffer;
         FIXME("Option INTERNET_OPTION_DATA_RECEIVE_TIMEOUT (%d): STUB\n", receivetimeout);
-      }
-      break;
-    case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
-      {
-        ULONG conns = *(ULONG *)lpBuffer;
-        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_SERVER (%d): STUB\n", conns);
-      }
-      break;
-    case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
-      {
-        ULONG conns = *(ULONG *)lpBuffer;
-        FIXME("Option INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER (%d): STUB\n", conns);
       }
       break;
     case INTERNET_OPTION_RESET_URLCACHE_SESSION:
@@ -2845,19 +2880,6 @@ BOOL WINAPI InternetSetOptionA(HINTERNET hInternet, DWORD dwOption,
 
     switch( dwOption )
     {
-    case INTERNET_OPTION_CALLBACK:
-        {
-        object_header_t *lpwh;
-
-        if (!(lpwh = get_handle_object(hInternet)))
-        {
-            INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-            return FALSE;
-        }
-        WININET_Release(lpwh);
-        INTERNET_SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
-        return FALSE;
-        }
     case INTERNET_OPTION_PROXY:
         {
         LPINTERNET_PROXY_INFOA pi = (LPINTERNET_PROXY_INFOA) lpBuffer;

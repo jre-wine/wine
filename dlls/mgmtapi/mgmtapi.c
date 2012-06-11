@@ -1,7 +1,5 @@
 /*
- * Filter Seeking and Control Interfaces
- *
- * Copyright 2003 Robert Shearman
+ * Copyright 2012 Stefan Leichter
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,11 +16,26 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef QUARTZ_CONTROL_H
-#define QUARTZ_CONTROL_H
+#include <stdarg.h>
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
-void MediaSeekingPassThru_RegisterMediaTime(IUnknown *iface, REFERENCE_TIME start);
-void MediaSeekingPassThru_ResetMediaTime(IUnknown *iface);
-void MediaSeekingPassThru_EOS(IUnknown *iface);
+WINE_DEFAULT_DEBUG_CHANNEL(mgmtapi);
 
-#endif /*QUARTZ_CONTROL_H*/
+BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
+{
+    TRACE("%p, %u, %p\n", hinst, reason, reserved);
+
+    switch (reason)
+    {
+        case DLL_WINE_PREATTACH:
+            return FALSE;    /* prefer native version */
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls( hinst );
+            break;
+        case DLL_PROCESS_DETACH:
+            break;
+    }
+    return TRUE;
+}

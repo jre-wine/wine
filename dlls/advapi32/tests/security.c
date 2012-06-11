@@ -35,6 +35,9 @@
 
 #include "wine/test.h"
 
+/* PROCESS_ALL_ACCESS in Vista+ PSDKs is incompatible with older Windows versions */
+#define PROCESS_ALL_ACCESS_NT4 (PROCESS_ALL_ACCESS & ~0xf000)
+
 /* copied from Wine winternl.h - not included in the Windows SDK */
 typedef enum _OBJECT_INFORMATION_CLASS {
     ObjectBasicInformation,
@@ -1455,9 +1458,11 @@ static void test_token_attr(void)
     Size = 0;
     ret = GetTokenInformation(Token, TokenGroups, Groups, Size2, &Size);
     ok(Size > 1, "got %d\n", Size);
-    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+    ok((!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER) || broken(ret) /* wow64 */,
         "%d with error %d\n", ret, GetLastError());
-    ok(*((BYTE*)Groups) == 0xcc, "buffer altered\n");
+    if(!ret)
+        ok(*((BYTE*)Groups) == 0xcc, "buffer altered\n");
+
     HeapFree(GetProcessHeap(), 0, Groups);
 
     SetLastError(0xdeadbeef);
@@ -2543,7 +2548,7 @@ static void test_process_security(void)
     /* Doesn't matter what ACL say we should get full access for ourselves */
     res = CreateProcessA( NULL, buffer, &psa, NULL, FALSE, 0, NULL, NULL, &startup, &info );
     ok(res, "CreateProcess with err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS2( info.hProcess, PROCESS_ALL_ACCESS,
+    TEST_GRANTED_ACCESS2( info.hProcess, PROCESS_ALL_ACCESS_NT4,
                           STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
     winetest_wait_child_process( info.hProcess );
 
@@ -2595,7 +2600,7 @@ static void test_process_security_child(void)
     ret = DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
                            &handle, 0, TRUE, DUPLICATE_SAME_ACCESS );
     ok(ret, "duplicating handle err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS,
+    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS_NT4,
                           STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL );
 
     CloseHandle( handle );
@@ -2604,7 +2609,7 @@ static void test_process_security_child(void)
     ret = DuplicateHandle( GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
                            &handle, PROCESS_ALL_ACCESS, TRUE, 0 );
     ok(ret, "duplicating handle err:%d\n", GetLastError());
-    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS,
+    TEST_GRANTED_ACCESS2( handle, PROCESS_ALL_ACCESS_NT4,
                           PROCESS_ALL_ACCESS | PROCESS_QUERY_LIMITED_INFORMATION );
     ret = DuplicateHandle( GetCurrentProcess(), handle, GetCurrentProcess(),
                            &handle1, PROCESS_VM_READ, TRUE, 0 );
@@ -3981,6 +3986,181 @@ static void test_CreateRestrictedToken(void)
     CloseHandle(process_token);
 }
 
+static void validate_default_security_descriptor(SECURITY_DESCRIPTOR *sd)
+{
+    BOOL ret, present, defaulted;
+    ACL *acl;
+    void *sid;
+
+    present = -1;
+    defaulted = -1;
+    acl = (void *)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetSecurityDescriptorDacl(sd, &present, &acl, &defaulted);
+    ok(ret, "GetSecurityDescriptorDacl error %d\n", GetLastError());
+todo_wine
+    ok(present == 1, "acl is not present\n");
+todo_wine
+    ok(acl != (void *)0xdeadbeef && acl != NULL, "acl pointer is not set\n");
+    ok(defaulted == 0, "defaulted is set to TRUE\n");
+
+    defaulted = -1;
+    sid = (void *)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetSecurityDescriptorOwner(sd, &sid, &defaulted);
+    ok(ret, "GetSecurityDescriptorOwner error %d\n", GetLastError());
+todo_wine
+    ok(sid != (void *)0xdeadbeef && sid != NULL, "sid pointer is not set\n");
+    ok(defaulted == 0, "defaulted is set to TRUE\n");
+
+    defaulted = -1;
+    sid = (void *)0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetSecurityDescriptorGroup(sd, &sid, &defaulted);
+    ok(ret, "GetSecurityDescriptorGroup error %d\n", GetLastError());
+todo_wine
+    ok(sid != (void *)0xdeadbeef && sid != NULL, "sid pointer is not set\n");
+    ok(defaulted == 0, "defaulted is set to TRUE\n");
+}
+
+static void test_default_handle_security(HANDLE token, HANDLE handle, GENERIC_MAPPING *mapping)
+{
+    DWORD ret, length, needed, granted, priv_set_len;
+    BOOL status;
+    PRIVILEGE_SET priv_set;
+    SECURITY_DESCRIPTOR *sd;
+
+    needed = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetKernelObjectSecurity(handle, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                  NULL, 0, &needed);
+    ok(!ret, "GetKernelObjectSecurity should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed != 0xdeadbeef, "GetKernelObjectSecurity should return required buffer length\n");
+
+    length = needed;
+    sd = HeapAlloc(GetProcessHeap(), 0, length);
+
+    needed = 0;
+    SetLastError(0xdeadbeef);
+    ret = GetKernelObjectSecurity(handle, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                  sd, length, &needed);
+    ok(ret, "GetKernelObjectSecurity error %d\n", GetLastError());
+    ok(needed == length, "GetKernelObjectSecurity should return required buffer length\n");
+
+    validate_default_security_descriptor(sd);
+
+    priv_set_len = sizeof(priv_set);
+    granted = 0xdeadbeef;
+    status = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = AccessCheck(sd, token, MAXIMUM_ALLOWED, mapping, &priv_set, &priv_set_len, &granted, &status);
+todo_wine {
+    ok(ret, "AccessCheck error %d\n", GetLastError());
+    ok(status == 1, "expected 1, got %d\n", status);
+    ok(granted == mapping->GenericAll, "expected %#x, got %#x\n", mapping->GenericAll, granted);
+}
+    HeapFree(GetProcessHeap(), 0, sd);
+}
+
+static void test_mutex_security(HANDLE token)
+{
+    HANDLE mutex;
+    GENERIC_MAPPING mapping = { STANDARD_RIGHTS_READ, STANDARD_RIGHTS_WRITE,
+                                STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE,
+                                STANDARD_RIGHTS_ALL | MUTEX_ALL_ACCESS };
+
+    SetLastError(0xdeadbeef);
+    mutex = OpenMutex(0, FALSE, "WineTestMutex");
+    ok(!mutex, "mutex should not exist\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND, "wrong error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    mutex = CreateMutex(NULL, FALSE, "WineTestMutex");
+    ok(mutex != 0, "CreateMutex error %d\n", GetLastError());
+
+    test_default_handle_security(token, mutex, &mapping);
+
+    CloseHandle (mutex);
+}
+
+static BOOL validate_impersonation_token(HANDLE token, DWORD *token_type)
+{
+    DWORD ret, needed;
+    TOKEN_TYPE type;
+    SECURITY_IMPERSONATION_LEVEL sil;
+
+    type = 0xdeadbeef;
+    needed = 0;
+    SetLastError(0xdeadbeef);
+    ret = GetTokenInformation(token, TokenType, &type, sizeof(type), &needed);
+    ok(ret, "GetTokenInformation error %d\n", GetLastError());
+    ok(needed == sizeof(type), "GetTokenInformation should return required buffer length\n");
+    ok(type == TokenPrimary || type == TokenImpersonation, "expected TokenPrimary or TokenImpersonation, got %d\n", type);
+
+    *token_type = type;
+    if (type != TokenImpersonation) return FALSE;
+
+    needed = 0;
+    SetLastError(0xdeadbeef);
+    ret = GetTokenInformation(token, TokenImpersonationLevel, &sil, sizeof(sil), &needed);
+    ok(ret, "GetTokenInformation error %d\n", GetLastError());
+    ok(needed == sizeof(sil), "GetTokenInformation should return required buffer length\n");
+    ok(sil == SecurityImpersonation, "expected SecurityImpersonation, got %d\n", sil);
+
+    needed = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetTokenInformation(token, TokenDefaultDacl, NULL, 0, &needed);
+    ok(!ret, "GetTokenInformation should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed != 0xdeadbeef, "GetTokenInformation should return required buffer length\n");
+    ok(needed > sizeof(TOKEN_DEFAULT_DACL), "GetTokenInformation returned empty default DACL\n");
+
+    needed = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetTokenInformation(token, TokenOwner, NULL, 0, &needed);
+    ok(!ret, "GetTokenInformation should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed != 0xdeadbeef, "GetTokenInformation should return required buffer length\n");
+    ok(needed > sizeof(TOKEN_OWNER), "GetTokenInformation returned empty token owner\n");
+
+    needed = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = GetTokenInformation(token, TokenPrimaryGroup, NULL, 0, &needed);
+    ok(!ret, "GetTokenInformation should fail\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(needed != 0xdeadbeef, "GetTokenInformation should return required buffer length\n");
+    ok(needed > sizeof(TOKEN_PRIMARY_GROUP), "GetTokenInformation returned empty token primary group\n");
+
+    return TRUE;
+}
+
+static void test_kernel_objects_security(void)
+{
+    HANDLE token, process_token;
+    DWORD ret, token_type;
+
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY, &process_token);
+    ok(ret, "OpenProcessToken error %d\n", GetLastError());
+
+    ret = validate_impersonation_token(process_token, &token_type);
+    ok(token_type == TokenPrimary, "expected TokenPrimary, got %d\n", token_type);
+    ok(!ret, "access token should not be an impersonation token\n");
+
+    ret = DuplicateToken(process_token, SecurityImpersonation, &token);
+    ok(ret, "DuplicateToken error %d\n", GetLastError());
+
+    ret = validate_impersonation_token(token, &token_type);
+    ok(ret, "access token should be a valid impersonation token\n");
+    ok(token_type == TokenImpersonation, "expected TokenImpersonation, got %d\n", token_type);
+
+    test_mutex_security(token);
+    /* FIXME: test other kernel object types */
+
+    CloseHandle(process_token);
+    CloseHandle(token);
+}
+
 START_TEST(security)
 {
     init();
@@ -3991,6 +4171,7 @@ START_TEST(security)
         test_process_security_child();
         return;
     }
+    test_kernel_objects_security();
     test_sid();
     test_trustee();
     test_luid();

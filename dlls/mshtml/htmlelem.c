@@ -507,7 +507,7 @@ static HRESULT WINAPI HTMLElement_get_style(IHTMLElement *iface, IHTMLStyle **p)
             return E_FAIL;
         }
 
-        hres = HTMLStyle_Create(nsstyle, &This->style);
+        hres = HTMLStyle_Create(This, nsstyle, &This->style);
         nsIDOMCSSStyleDeclaration_Release(nsstyle);
         if(FAILED(hres))
             return hres;
@@ -874,20 +874,12 @@ static HRESULT WINAPI HTMLElement_get_lang(IHTMLElement *iface, BSTR *p)
 static HRESULT WINAPI HTMLElement_get_offsetLeft(IHTMLElement *iface, LONG *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     PRInt32 off_left = 0;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMNSHTMLElement_GetOffsetLeft(nselem, &off_left);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetOffsetLeft(This->nselem, &off_left);
     if(NS_FAILED(nsres)) {
         ERR("GetOffsetLeft failed: %08x\n", nsres);
         return E_FAIL;
@@ -900,20 +892,12 @@ static HRESULT WINAPI HTMLElement_get_offsetLeft(IHTMLElement *iface, LONG *p)
 static HRESULT WINAPI HTMLElement_get_offsetTop(IHTMLElement *iface, LONG *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     PRInt32 top = 0;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMNSHTMLElement_GetOffsetTop(nselem, &top);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetOffsetTop(This->nselem, &top);
     if(NS_FAILED(nsres)) {
         ERR("GetOffsetTop failed: %08x\n", nsres);
         return E_FAIL;
@@ -926,20 +910,12 @@ static HRESULT WINAPI HTMLElement_get_offsetTop(IHTMLElement *iface, LONG *p)
 static HRESULT WINAPI HTMLElement_get_offsetWidth(IHTMLElement *iface, LONG *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     PRInt32 offset = 0;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMNSHTMLElement_GetOffsetWidth(nselem, &offset);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetOffsetWidth(This->nselem, &offset);
     if(NS_FAILED(nsres)) {
         ERR("GetOffsetWidth failed: %08x\n", nsres);
         return E_FAIL;
@@ -952,20 +928,12 @@ static HRESULT WINAPI HTMLElement_get_offsetWidth(IHTMLElement *iface, LONG *p)
 static HRESULT WINAPI HTMLElement_get_offsetHeight(IHTMLElement *iface, LONG *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     PRInt32 offset = 0;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMNSHTMLElement_GetOffsetHeight(nselem, &offset);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetOffsetHeight(This->nselem, &offset);
     if(NS_FAILED(nsres)) {
         ERR("GetOffsetHeight failed: %08x\n", nsres);
         return E_FAIL;
@@ -978,21 +946,13 @@ static HRESULT WINAPI HTMLElement_get_offsetHeight(IHTMLElement *iface, LONG *p)
 static HRESULT WINAPI HTMLElement_get_offsetParent(IHTMLElement *iface, IHTMLElement **p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     nsIDOMElement *nsparent;
     nsresult nsres;
     HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
-    nsres = nsIDOMNSHTMLElement_GetOffsetParent(nselem, &nsparent);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetOffsetParent(This->nselem, &nsparent);
     if(NS_FAILED(nsres)) {
         ERR("GetOffsetParent failed: %08x\n", nsres);
         return E_FAIL;
@@ -1018,7 +978,6 @@ static HRESULT WINAPI HTMLElement_get_offsetParent(IHTMLElement *iface, IHTMLEle
 static HRESULT WINAPI HTMLElement_put_innerHTML(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     nsAString html_str;
     nsresult nsres;
 
@@ -1029,16 +988,9 @@ static HRESULT WINAPI HTMLElement_put_innerHTML(IHTMLElement *iface, BSTR v)
         return E_NOTIMPL;
     }
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
     nsAString_InitDepend(&html_str, v);
-    nsres = nsIDOMNSHTMLElement_SetInnerHTML(nselem, &html_str);
+    nsres = nsIDOMHTMLElement_SetInnerHTML(This->nselem, &html_str);
     nsAString_Finish(&html_str);
-    nsIDOMNSHTMLElement_Release(nselem);
     if(NS_FAILED(nsres)) {
         FIXME("SetInnerHtml failed %08x\n", nsres);
         return E_FAIL;
@@ -1050,7 +1002,6 @@ static HRESULT WINAPI HTMLElement_put_innerHTML(IHTMLElement *iface, BSTR v)
 static HRESULT WINAPI HTMLElement_get_innerHTML(IHTMLElement *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    nsIDOMNSHTMLElement *nselem;
     nsAString html_str;
     nsresult nsres;
 
@@ -1061,15 +1012,8 @@ static HRESULT WINAPI HTMLElement_get_innerHTML(IHTMLElement *iface, BSTR *p)
         return E_NOTIMPL;
     }
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->nselem, &IID_nsIDOMNSHTMLElement, (void**)&nselem);
-    if(NS_FAILED(nsres)) {
-        ERR("Could not get nsIDOMNSHTMLElement: %08x\n", nsres);
-        return E_FAIL;
-    }
-
     nsAString_Init(&html_str, NULL);
-    nsres = nsIDOMNSHTMLElement_GetInnerHTML(nselem, &html_str);
-    nsIDOMNSHTMLElement_Release(nselem);
+    nsres = nsIDOMHTMLElement_GetInnerHTML(This->nselem, &html_str);
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *html;
 
@@ -1704,8 +1648,10 @@ void HTMLElement_destructor(HTMLDOMNode *iface)
 
     if(This->nselem)
         nsIDOMHTMLElement_Release(This->nselem);
-    if(This->style)
+    if(This->style) {
+        This->style->elem = NULL;
         IHTMLStyle_Release(&This->style->IHTMLStyle_iface);
+    }
     if(This->attrs) {
         HTMLDOMAttribute *attr;
 
@@ -1715,6 +1661,8 @@ void HTMLElement_destructor(HTMLDOMNode *iface)
         This->attrs->elem = NULL;
         IHTMLAttributeCollection_Release(&This->attrs->IHTMLAttributeCollection_iface);
     }
+
+    heap_free(This->filter);
 
     HTMLDOMNode_destructor(&This->node);
 }

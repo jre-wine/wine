@@ -69,7 +69,7 @@ static void _dump_D3DEXECUTEBUFFERDESC(const D3DEXECUTEBUFFERDESC *lpDesc) {
  *
  *****************************************************************************/
 HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *This,
-        IDirect3DDeviceImpl *lpDevice, IDirect3DViewportImpl *lpViewport)
+        IDirect3DDeviceImpl *lpDevice, struct d3d_viewport *viewport)
 {
     /* DWORD bs = This->desc.dwBufferSize; */
     DWORD vs = This->data.dwVertexOffset;
@@ -79,15 +79,15 @@ HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *This,
 
     char *instr = (char *)This->desc.lpData + is;
 
-    if (lpViewport->active_device != lpDevice)
+    if (viewport->active_device != lpDevice)
     {
         WARN("Viewport %p active device is %p.\n",
-                lpViewport, lpViewport->active_device);
+                viewport, viewport->active_device);
         return DDERR_INVALIDPARAMS;
     }
 
     /* Activate the viewport */
-    viewport_activate(lpViewport, FALSE);
+    viewport_activate(viewport, FALSE);
 
     TRACE("ExecuteData :\n");
     if (TRACE_ON(ddraw))
@@ -237,7 +237,7 @@ HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *This,
 			ERR("Unexpected Light State Type %d\n", ci->u1.dlstLightStateType);
                     else if (ci->u1.dlstLightStateType == D3DLIGHTSTATE_MATERIAL /* 1 */)
                     {
-                        IDirect3DMaterialImpl *m;
+                        struct d3d_material *m;
 
                         m = ddraw_get_object(&lpDevice->handle_table, ci->u2.dwArg[0] - 1, DDRAW_HANDLE_MATERIAL);
                         if (!m)
@@ -376,8 +376,8 @@ HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *This,
 		        unsigned int nb;
 			D3DVERTEX  *src = ((LPD3DVERTEX)  ((char *)This->desc.lpData + vs)) + ci->wStart;
 			D3DTLVERTEX *dst = ((LPD3DTLVERTEX) (This->vertex_data)) + ci->wDest;
+                        D3DVIEWPORT *Viewport = &viewport->viewports.vp1;
 			D3DMATRIX mat;
-			D3DVIEWPORT* Viewport = &lpViewport->viewports.vp1;
 			
                         if (TRACE_ON(ddraw))
                         {
@@ -421,8 +421,8 @@ HRESULT d3d_execute_buffer_execute(IDirect3DExecuteBufferImpl *This,
 		        unsigned int nb;
 			D3DLVERTEX *src  = ((LPD3DLVERTEX) ((char *)This->desc.lpData + vs)) + ci->wStart;
 			D3DTLVERTEX *dst = ((LPD3DTLVERTEX) (This->vertex_data)) + ci->wDest;
+                        D3DVIEWPORT *Viewport = &viewport->viewports.vp1;
 			D3DMATRIX mat;
-			D3DVIEWPORT* Viewport = &lpViewport->viewports.vp1;
 			
                         if (TRACE_ON(ddraw))
                         {

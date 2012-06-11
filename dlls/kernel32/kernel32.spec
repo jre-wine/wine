@@ -289,8 +289,8 @@
 @ stdcall DeleteTimerQueue(long)
 @ stdcall DeleteTimerQueueEx (long long)
 @ stdcall DeleteTimerQueueTimer(long long long)
-# @ stub DeleteVolumeMountPointA
-# @ stub DeleteVolumeMountPointW
+@ stdcall DeleteVolumeMountPointA(str)
+@ stdcall DeleteVolumeMountPointW(wstr)
 @ stdcall DeviceIoControl(long long ptr long ptr long ptr ptr)
 @ stdcall DisableThreadLibraryCalls(long)
 @ stdcall DisconnectNamedPipe(long)
@@ -1023,7 +1023,8 @@
 @ stdcall RtlFillMemory(ptr long long) ntdll.RtlFillMemory
 @ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
-@ stdcall -arch=x86_64 RtlPcToFileHeader(ptr ptr) ntdll.RtlPcToFileHeader
+@ stdcall -arch=x86_64,arm RtlPcToFileHeader(ptr ptr) ntdll.RtlPcToFileHeader
+@ stdcall -arch=arm -register RtlRaiseException(ptr) ntdll.RtlRaiseException
 @ stdcall RtlUnwind(ptr ptr ptr long) ntdll.RtlUnwind
 @ stdcall -arch=x86_64 RtlUnwindEx(long long ptr long ptr) ntdll.RtlUnwindEx
 @ stdcall -arch=x86_64 RtlVirtualUnwind(long long long ptr ptr ptr ptr ptr) ntdll.RtlVirtualUnwind
@@ -1243,6 +1244,7 @@
 @ stdcall WaitNamedPipeA (str long)
 @ stdcall WaitNamedPipeW (wstr long)
 @ stdcall WerRegisterFile(wstr long long)
+@ stdcall WerRegisterRuntimeExceptionModule(wstr ptr)
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)
 @ stdcall WinExec(str long)
 @ stdcall Wow64EnableWow64FsRedirection(long)

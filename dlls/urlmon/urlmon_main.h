@@ -68,7 +68,7 @@ IInternetProtocolInfo *get_protocol_info(LPCWSTR) DECLSPEC_HIDDEN;
 HRESULT get_protocol_handler(IUri*,CLSID*,BOOL*,IClassFactory**) DECLSPEC_HIDDEN;
 IInternetProtocol *get_mime_filter(LPCWSTR) DECLSPEC_HIDDEN;
 BOOL is_registered_protocol(LPCWSTR) DECLSPEC_HIDDEN;
-void register_urlmon_namespace(IClassFactory*,REFIID,LPCWSTR,BOOL) DECLSPEC_HIDDEN;
+HRESULT register_namespace(IClassFactory*,REFIID,LPCWSTR,BOOL) DECLSPEC_HIDDEN;
 HINTERNET get_internet_session(IInternetBindInfo*) DECLSPEC_HIDDEN;
 LPWSTR get_useragent(void) DECLSPEC_HIDDEN;
 void free_session(void) DECLSPEC_HIDDEN;
@@ -78,6 +78,8 @@ HRESULT bind_to_object(IMoniker*,IUri*,IBindCtx*,REFIID,void**ppv) DECLSPEC_HIDD
 
 HRESULT create_default_callback(IBindStatusCallback**) DECLSPEC_HIDDEN;
 HRESULT wrap_callback(IBindStatusCallback*,IBindStatusCallback**) DECLSPEC_HIDDEN;
+
+HRESULT WINAPI CopyBindInfo(const BINDINFO *pcbiSrc, BINDINFO *pcbiDest) DECLSPEC_HIDDEN;
 
 typedef struct ProtocolVtbl ProtocolVtbl;
 
@@ -153,18 +155,6 @@ void protocol_close_connection(Protocol*) DECLSPEC_HIDDEN;
 
 void find_domain_name(const WCHAR*,DWORD,INT*) DECLSPEC_HIDDEN;
 
-typedef struct {
-    IInternetProtocol     IInternetProtocol_iface;
-    IInternetProtocolSink IInternetProtocolSink_iface;
-
-    LONG ref;
-
-    IInternetProtocolSink *protocol_sink;
-    IInternetProtocol *protocol;
-} ProtocolProxy;
-
-HRESULT create_protocol_proxy(IInternetProtocol*,IInternetProtocolSink*,ProtocolProxy**) DECLSPEC_HIDDEN;
-
 typedef struct _task_header_t task_header_t;
 
 typedef struct {
@@ -186,8 +176,10 @@ typedef struct {
 
     struct {
         IInternetProtocol IInternetProtocol_iface;
+        IInternetProtocolSink IInternetProtocolSink_iface;
     } default_protocol_handler;
     IInternetProtocol *protocol_handler;
+    IInternetProtocolSink *protocol_sink_handler;
 
     LONG priority;
 
@@ -212,7 +204,6 @@ typedef struct {
     LPWSTR mime;
     IUri *uri;
     BSTR display_uri;
-    ProtocolProxy *filter_proxy;
 }  BindProtocol;
 
 HRESULT create_binding_protocol(BOOL,BindProtocol**) DECLSPEC_HIDDEN;
