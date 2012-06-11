@@ -23,7 +23,7 @@ DEB_HOST_MULTIARCH	?= $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 DEBIAN_VERSION := $(shell cat /etc/debian_version)
 VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
-VERSUFFIX=
+VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
 # Maybe make this conditional on debian version compiled for, for backports
 # Can be set to:
@@ -227,7 +227,7 @@ clean: clean-arch32 clean-arch64
 	dh_testroot
 	bash debian/clean-install.sh "$(VERSUFFIX)"
 	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp control-stamp
-	rm -rf lib32 debian/libwine
+	rm -rf lib32 debian/libwine$(VERSUFFIX)
 	dh_clean
 	# can't rm debian/control here because it'd break dpkg-buildpackage.
 

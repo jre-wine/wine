@@ -279,7 +279,7 @@ Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depend},
+ ${misc:Depends},
  ${shlibs:Depends},
  cups-bsd | cupsys-bsd | lpr,
 Replaces:
