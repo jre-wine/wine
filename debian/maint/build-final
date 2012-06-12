@@ -30,5 +30,6 @@ git commit -m "Release $version"
 git-buildpackage --git-pristine-tar \
  --git-upstream-tag="wine-%(version)s" \
  --git-debian-tag="wine-%(version)s" \
+ --git-ignore-branch \
  --git-tag \
  "$@"
