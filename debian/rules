@@ -404,6 +404,11 @@ binary-arch: control-stamp
 	# create installation directories
 	dh_installdirs -s
 
+	# install wine64.sh helper script
+	mkdir -p debian/wine64-bin-unstable/usr/bin
+	cp debian/wine64.sh debian/wine64-bin-unstable/usr/bin/wine
+	chmod +x debian/wine64-bin-unstable/usr/bin/wine
+
 	bash debian/doclink.sh libwine$(VERSUFFIX)
 
 	dh_installdocs -plibwine$(VERSUFFIX)
