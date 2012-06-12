@@ -280,6 +280,7 @@ static const IID * const tr_iids[] = {
 
 static const IID * const td_iids[] = {
     ELEM_IFACES,
+    &IID_IHTMLTableCell,
     &IID_IConnectionPointContainer,
     NULL
 };
@@ -309,6 +310,7 @@ static const IID * const title_iids[] = {
 static const IID * const object_iids[] = {
     ELEM_IFACES,
     &IID_IHTMLObjectElement,
+    &IID_IHTMLObjectElement2,
     /* FIXME: No IConnectionPointContainer */
     NULL
 };
@@ -408,7 +410,7 @@ static const elem_type_info_t elem_type_infos[] = {
     {"!",         comment_iids,     &DIID_DispHTMLCommentElement},
     {"IMG",       img_iids,         &DIID_DispHTMLImg},
     {"TR",        tr_iids,          &DIID_DispHTMLTableRow},
-    {"TD",        td_iids,          NULL},
+    {"TD",        td_iids,          &DIID_DispHTMLTableCell},
     {"IFRAME",    iframe_iids,      &DIID_DispHTMLIFrame},
     {"FORM",      form_iids,        &DIID_DispHTMLFormElement},
     {"FRAME",     frame_iids,       &DIID_DispHTMLFrameElement},

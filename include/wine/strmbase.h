@@ -28,7 +28,7 @@ void WINAPI DeleteMediaType(AM_MEDIA_TYPE * pMediaType);
 
 typedef struct BasePin
 {
-	const struct IPinVtbl * lpVtbl;
+	IPin IPin_iface;
 	LONG refCount;
 	LPCRITICAL_SECTION pCritSec;
 	PIN_INFO pinInfo;
@@ -82,7 +82,7 @@ typedef struct BaseInputPin
 	/* inheritance C style! */
 	BasePin pin;
 
-	const IMemInputPinVtbl * lpVtblMemInput;
+	IMemInputPin IMemInputPin_iface;
 	IMemAllocator * pAllocator;
 	BOOL flushing, end_of_stream;
 	IMemAllocator *preferred_allocator;
@@ -148,7 +148,7 @@ HRESULT BaseInputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * p
 
 typedef struct BaseFilter
 {
-	const struct IBaseFilterVtbl *lpVtbl;
+	IBaseFilter IBaseFilter_iface;
 	LONG refCount;
 	CRITICAL_SECTION csFilter;
 
@@ -287,7 +287,7 @@ typedef HRESULT (WINAPI *SourceSeeking_ChangeStop)(IMediaSeeking *iface);
 
 typedef struct SourceSeeking
 {
-	const IMediaSeekingVtbl * lpVtbl;
+	IMediaSeeking IMediaSeeking_iface;
 
 	ULONG refCount;
 	SourceSeeking_ChangeStop fnChangeStop;
@@ -390,6 +390,248 @@ HRESULT WINAPI OutputQueue_Receive(OutputQueue *pOutputQueue, IMediaSample *pSam
 VOID WINAPI OutputQueue_EOS(OutputQueue *pOutputQueue);
 VOID WINAPI OutputQueue_SendAnyway(OutputQueue *pOutputQueue);
 DWORD WINAPI OutputQueueImpl_ThreadProc(OutputQueue *pOutputQueue);
+
+typedef struct tagBaseWindow
+{
+	HWND hWnd;
+	LONG Width;
+	LONG Height;
+	HINSTANCE hInstance;
+	LPWSTR pClassName;
+	DWORD ClassStyles;
+	DWORD WindowStyles;
+	DWORD WindowStylesEx;
+	HDC hDC;
+
+	const struct BaseWindowFuncTable* pFuncsTable;
+} BaseWindow;
+
+typedef LPWSTR (WINAPI *BaseWindow_GetClassWindowStyles)(BaseWindow *This, DWORD *pClassStyles, DWORD *pWindowStyles, DWORD *pWindowStylesEx);
+typedef RECT (WINAPI *BaseWindow_GetDefaultRect)(BaseWindow *This);
+typedef BOOL (WINAPI *BaseWindow_PossiblyEatMessage)(BaseWindow *This, UINT uMsg, WPARAM wParam, LPARAM lParam);
+typedef LRESULT (WINAPI *BaseWindow_OnReceiveMessage)(BaseWindow *This, HWND hwnd, INT uMsg, WPARAM wParam, LPARAM lParam);
+typedef BOOL (WINAPI *BaseWindow_OnSize)(BaseWindow *This, LONG Height, LONG Width);
+
+typedef struct BaseWindowFuncTable
+{
+	/* Required */
+	BaseWindow_GetClassWindowStyles pfnGetClassWindowStyles;
+	BaseWindow_GetDefaultRect pfnGetDefaultRect;
+	/* Optional, WinProc Related */
+	BaseWindow_OnReceiveMessage pfnOnReceiveMessage;
+	BaseWindow_PossiblyEatMessage pfnPossiblyEatMessage;
+	BaseWindow_OnSize pfnOnSize;
+} BaseWindowFuncTable;
+
+HRESULT WINAPI BaseWindow_Init(BaseWindow *pBaseWindow, const BaseWindowFuncTable* pFuncsTable);
+HRESULT WINAPI BaseWindow_Destroy(BaseWindow *pBaseWindow);
+
+HRESULT WINAPI BaseWindowImpl_PrepareWindow(BaseWindow *This);
+HRESULT WINAPI BaseWindowImpl_DoneWithWindow(BaseWindow *This);
+RECT WINAPI BaseWindowImpl_GetDefaultRect(BaseWindow *This);
+LRESULT WINAPI BaseWindowImpl_OnReceiveMessage(BaseWindow *This, HWND hwnd, INT uMsg, WPARAM wParam, LPARAM lParam);
+BOOL WINAPI BaseWindowImpl_OnSize(BaseWindow *This, LONG Height, LONG Width);
+
+#ifdef __IVideoWindow_FWD_DEFINED__
+typedef struct tagBaseControlWindow
+{
+	BaseWindow baseWindow;
+	IVideoWindow IVideoWindow_iface;
+
+	BOOL AutoShow;
+	HWND hwndDrain;
+	HWND hwndOwner;
+	BaseFilter* pFilter;
+	CRITICAL_SECTION* pInterfaceLock;
+	BasePin*  pPin;
+} BaseControlWindow;
+
+HRESULT WINAPI BaseControlWindow_Init(BaseControlWindow *pControlWindow, const IVideoWindowVtbl *lpVtbl, BaseFilter *owner, CRITICAL_SECTION *lock, BasePin* pPin, const BaseWindowFuncTable* pFuncsTable);
+
+BOOL WINAPI BaseControlWindowImpl_PossiblyEatMessage(BaseWindow *This, UINT uMsg, WPARAM wParam, LPARAM lParam);
+HRESULT WINAPI BaseControlWindowImpl_GetTypeInfoCount(IVideoWindow *iface, UINT*pctinfo);
+HRESULT WINAPI BaseControlWindowImpl_GetTypeInfo(IVideoWindow *iface, UINT iTInfo, LCID lcid, ITypeInfo**ppTInfo);
+HRESULT WINAPI BaseControlWindowImpl_GetIDsOfNames(IVideoWindow *iface, REFIID riid, LPOLESTR*rgszNames, UINT cNames, LCID lcid, DISPID*rgDispId);
+HRESULT WINAPI BaseControlWindowImpl_Invoke(IVideoWindow *iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS*pDispParams, VARIANT*pVarResult, EXCEPINFO*pExepInfo, UINT*puArgErr);
+HRESULT WINAPI BaseControlWindowImpl_put_Caption(IVideoWindow *iface, BSTR strCaption);
+HRESULT WINAPI BaseControlWindowImpl_get_Caption(IVideoWindow *iface, BSTR *strCaption);
+HRESULT WINAPI BaseControlWindowImpl_put_WindowStyle(IVideoWindow *iface, LONG WindowStyle);
+HRESULT WINAPI BaseControlWindowImpl_get_WindowStyle(IVideoWindow *iface, LONG *WindowStyle);
+HRESULT WINAPI BaseControlWindowImpl_put_WindowStyleEx(IVideoWindow *iface, LONG WindowStyleEx);
+HRESULT WINAPI BaseControlWindowImpl_get_WindowStyleEx(IVideoWindow *iface, LONG *WindowStyleEx);
+HRESULT WINAPI BaseControlWindowImpl_put_AutoShow(IVideoWindow *iface, LONG AutoShow);
+HRESULT WINAPI BaseControlWindowImpl_get_AutoShow(IVideoWindow *iface, LONG *AutoShow);
+HRESULT WINAPI BaseControlWindowImpl_put_WindowState(IVideoWindow *iface, LONG WindowState);
+HRESULT WINAPI BaseControlWindowImpl_get_WindowState(IVideoWindow *iface, LONG *WindowState);
+HRESULT WINAPI BaseControlWindowImpl_put_BackgroundPalette(IVideoWindow *iface, LONG BackgroundPalette);
+HRESULT WINAPI BaseControlWindowImpl_get_BackgroundPalette(IVideoWindow *iface, LONG *pBackgroundPalette);
+HRESULT WINAPI BaseControlWindowImpl_put_Visible(IVideoWindow *iface, LONG Visible);
+HRESULT WINAPI BaseControlWindowImpl_get_Visible(IVideoWindow *iface, LONG *pVisible);
+HRESULT WINAPI BaseControlWindowImpl_put_Left(IVideoWindow *iface, LONG Left);
+HRESULT WINAPI BaseControlWindowImpl_get_Left(IVideoWindow *iface, LONG *pLeft);
+HRESULT WINAPI BaseControlWindowImpl_put_Width(IVideoWindow *iface, LONG Width);
+HRESULT WINAPI BaseControlWindowImpl_get_Width(IVideoWindow *iface, LONG *pWidth);
+HRESULT WINAPI BaseControlWindowImpl_put_Top(IVideoWindow *iface, LONG Top);
+HRESULT WINAPI BaseControlWindowImpl_get_Top(IVideoWindow *iface, LONG *pTop);
+
+HRESULT WINAPI BaseControlWindowImpl_put_Height(IVideoWindow *iface, LONG Height);
+HRESULT WINAPI BaseControlWindowImpl_get_Height(IVideoWindow *iface, LONG *pHeight);
+HRESULT WINAPI BaseControlWindowImpl_put_Owner(IVideoWindow *iface, OAHWND Owner);
+HRESULT WINAPI BaseControlWindowImpl_get_Owner(IVideoWindow *iface, OAHWND *Owner);
+HRESULT WINAPI BaseControlWindowImpl_put_MessageDrain(IVideoWindow *iface, OAHWND Drain);
+HRESULT WINAPI BaseControlWindowImpl_get_MessageDrain(IVideoWindow *iface, OAHWND *Drain);
+HRESULT WINAPI BaseControlWindowImpl_get_BorderColor(IVideoWindow *iface, LONG *Color);
+HRESULT WINAPI BaseControlWindowImpl_put_BorderColor(IVideoWindow *iface, LONG Color);
+HRESULT WINAPI BaseControlWindowImpl_get_FullScreenMode(IVideoWindow *iface, LONG *FullScreenMode);
+HRESULT WINAPI BaseControlWindowImpl_put_FullScreenMode(IVideoWindow *iface, LONG FullScreenMode);
+HRESULT WINAPI BaseControlWindowImpl_SetWindowForeground(IVideoWindow *iface, LONG Focus);
+HRESULT WINAPI BaseControlWindowImpl_SetWindowPosition(IVideoWindow *iface, LONG Left, LONG Top, LONG Width, LONG Height);
+HRESULT WINAPI BaseControlWindowImpl_GetWindowPosition(IVideoWindow *iface, LONG *pLeft, LONG *pTop, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlWindowImpl_NotifyOwnerMessage(IVideoWindow *iface, OAHWND hwnd, LONG uMsg, LONG_PTR wParam, LONG_PTR lParam);
+HRESULT WINAPI BaseControlWindowImpl_GetMinIdealImageSize(IVideoWindow *iface, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlWindowImpl_GetMaxIdealImageSize(IVideoWindow *iface, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlWindowImpl_GetRestorePosition(IVideoWindow *iface, LONG *pLeft, LONG *pTop, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlWindowImpl_HideCursor(IVideoWindow *iface, LONG HideCursor);
+HRESULT WINAPI BaseControlWindowImpl_IsCursorHidden(IVideoWindow *iface, LONG *CursorHidden);
+#endif
+
+#ifdef __IBasicVideo_FWD_DEFINED__
+#ifdef __amvideo_h__
+typedef struct tagBaseControlVideo
+{
+	IBasicVideo IBasicVideo_iface;
+
+	BaseFilter* pFilter;
+	CRITICAL_SECTION* pInterfaceLock;
+	BasePin*  pPin;
+
+	const struct BaseControlVideoFuncTable* pFuncsTable;
+} BaseControlVideo;
+
+typedef HRESULT (WINAPI *BaseControlVideo_GetSourceRect)(BaseControlVideo* This, RECT *pSourceRect);
+typedef HRESULT (WINAPI *BaseControlVideo_GetStaticImage)(BaseControlVideo* This, LONG *pBufferSize, LONG *pDIBImage);
+typedef HRESULT (WINAPI *BaseControlVideo_GetTargetRect)(BaseControlVideo* This, RECT *pTargetRect);
+typedef VIDEOINFOHEADER* (WINAPI *BaseControlVideo_GetVideoFormat)(BaseControlVideo* This);
+typedef HRESULT (WINAPI *BaseControlVideo_IsDefaultSourceRect)(BaseControlVideo* This);
+typedef HRESULT (WINAPI *BaseControlVideo_IsDefaultTargetRect)(BaseControlVideo* This);
+typedef HRESULT (WINAPI *BaseControlVideo_SetDefaultSourceRect)(BaseControlVideo* This);
+typedef HRESULT (WINAPI *BaseControlVideo_SetDefaultTargetRect)(BaseControlVideo* This);
+typedef HRESULT (WINAPI *BaseControlVideo_SetSourceRect)(BaseControlVideo* This, RECT *pSourceRect);
+typedef HRESULT (WINAPI *BaseControlVideo_SetTargetRect)(BaseControlVideo* This, RECT *pTargetRect);
+
+typedef struct BaseControlVideoFuncTable {
+	/* Required */
+	BaseControlVideo_GetSourceRect pfnGetSourceRect;
+	BaseControlVideo_GetStaticImage pfnGetStaticImage;
+	BaseControlVideo_GetTargetRect pfnGetTargetRect;
+	BaseControlVideo_GetVideoFormat pfnGetVideoFormat;
+	BaseControlVideo_IsDefaultSourceRect pfnIsDefaultSourceRect;
+	BaseControlVideo_IsDefaultTargetRect pfnIsDefaultTargetRect;
+	BaseControlVideo_SetDefaultSourceRect pfnSetDefaultSourceRect;
+	BaseControlVideo_SetDefaultTargetRect pfnSetDefaultTargetRect;
+	BaseControlVideo_SetSourceRect pfnSetSourceRect;
+	BaseControlVideo_SetTargetRect pfnSetTargetRect;
+} BaseControlVideoFuncTable;
+
+HRESULT WINAPI BaseControlVideo_Init(BaseControlVideo *pControlVideo, const IBasicVideoVtbl *lpVtbl, BaseFilter *owner, CRITICAL_SECTION *lock, BasePin* pPin, const BaseControlVideoFuncTable* pFuncsTable);
+
+HRESULT WINAPI BaseControlVideoImpl_GetTypeInfoCount(IBasicVideo *iface, UINT*pctinfo);
+HRESULT WINAPI BaseControlVideoImpl_GetTypeInfo(IBasicVideo *iface, UINT iTInfo, LCID lcid, ITypeInfo**ppTInfo);
+HRESULT WINAPI BaseControlVideoImpl_GetIDsOfNames(IBasicVideo *iface, REFIID riid, LPOLESTR*rgszNames, UINT cNames, LCID lcid, DISPID*rgDispId);
+HRESULT WINAPI BaseControlVideoImpl_Invoke(IBasicVideo *iface, DISPID dispIdMember, REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS*pDispParams, VARIANT*pVarResult, EXCEPINFO*pExepInfo, UINT*puArgErr);
+HRESULT WINAPI BaseControlVideoImpl_get_AvgTimePerFrame(IBasicVideo *iface, REFTIME *pAvgTimePerFrame);
+HRESULT WINAPI BaseControlVideoImpl_get_BitRate(IBasicVideo *iface, LONG *pBitRate);
+HRESULT WINAPI BaseControlVideoImpl_get_BitErrorRate(IBasicVideo *iface, LONG *pBitErrorRate);
+HRESULT WINAPI BaseControlVideoImpl_get_VideoWidth(IBasicVideo *iface, LONG *pVideoWidth);
+HRESULT WINAPI BaseControlVideoImpl_get_VideoHeight(IBasicVideo *iface, LONG *pVideoHeight);
+HRESULT WINAPI BaseControlVideoImpl_put_SourceLeft(IBasicVideo *iface, LONG SourceLeft);
+HRESULT WINAPI BaseControlVideoImpl_get_SourceLeft(IBasicVideo *iface, LONG *pSourceLeft);
+HRESULT WINAPI BaseControlVideoImpl_put_SourceWidth(IBasicVideo *iface, LONG SourceWidth);
+HRESULT WINAPI BaseControlVideoImpl_get_SourceWidth(IBasicVideo *iface, LONG *pSourceWidth);
+HRESULT WINAPI BaseControlVideoImpl_put_SourceTop(IBasicVideo *iface, LONG SourceTop);
+HRESULT WINAPI BaseControlVideoImpl_get_SourceTop(IBasicVideo *iface, LONG *pSourceTop);
+HRESULT WINAPI BaseControlVideoImpl_put_SourceHeight(IBasicVideo *iface, LONG SourceHeight);
+HRESULT WINAPI BaseControlVideoImpl_get_SourceHeight(IBasicVideo *iface, LONG *pSourceHeight);
+HRESULT WINAPI BaseControlVideoImpl_put_DestinationLeft(IBasicVideo *iface, LONG DestinationLeft);
+HRESULT WINAPI BaseControlVideoImpl_get_DestinationLeft(IBasicVideo *iface, LONG *pDestinationLeft);
+HRESULT WINAPI BaseControlVideoImpl_put_DestinationWidth(IBasicVideo *iface, LONG DestinationWidth);
+HRESULT WINAPI BaseControlVideoImpl_get_DestinationWidth(IBasicVideo *iface, LONG *pDestinationWidth);
+HRESULT WINAPI BaseControlVideoImpl_put_DestinationTop(IBasicVideo *iface, LONG DestinationTop);
+HRESULT WINAPI BaseControlVideoImpl_get_DestinationTop(IBasicVideo *iface, LONG *pDestinationTop);
+HRESULT WINAPI BaseControlVideoImpl_put_DestinationHeight(IBasicVideo *iface, LONG DestinationHeight);
+HRESULT WINAPI BaseControlVideoImpl_get_DestinationHeight(IBasicVideo *iface, LONG *pDestinationHeight);
+HRESULT WINAPI BaseControlVideoImpl_SetSourcePosition(IBasicVideo *iface, LONG Left, LONG Top, LONG Width, LONG Height);
+HRESULT WINAPI BaseControlVideoImpl_GetSourcePosition(IBasicVideo *iface, LONG *pLeft, LONG *pTop, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlVideoImpl_SetDefaultSourcePosition(IBasicVideo *iface);
+HRESULT WINAPI BaseControlVideoImpl_SetDestinationPosition(IBasicVideo *iface, LONG Left, LONG Top, LONG Width, LONG Height);
+HRESULT WINAPI BaseControlVideoImpl_GetDestinationPosition(IBasicVideo *iface, LONG *pLeft, LONG *pTop, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlVideoImpl_SetDefaultDestinationPosition(IBasicVideo *iface);
+HRESULT WINAPI BaseControlVideoImpl_GetVideoSize(IBasicVideo *iface, LONG *pWidth, LONG *pHeight);
+HRESULT WINAPI BaseControlVideoImpl_GetVideoPaletteEntries(IBasicVideo *iface, LONG StartIndex, LONG Entries, LONG *pRetrieved, LONG *pPalette);
+HRESULT WINAPI BaseControlVideoImpl_GetCurrentImage(IBasicVideo *iface, LONG *pBufferSize, LONG *pDIBImage);
+HRESULT WINAPI BaseControlVideoImpl_IsUsingDefaultSource(IBasicVideo *iface);
+HRESULT WINAPI BaseControlVideoImpl_IsUsingDefaultDestination(IBasicVideo *iface);
+#endif
+#endif
+
+/* BaseRenderer Filter */
+typedef struct BaseRendererTag
+{
+	BaseFilter filter;
+
+	BaseInputPin *pInputPin;
+	IUnknown *pPosition;
+	CRITICAL_SECTION csRenderLock;
+
+	const struct BaseRendererFuncTable * pFuncsTable;
+} BaseRenderer;
+
+typedef HRESULT (WINAPI *BaseRenderer_CheckMediaType)(BaseRenderer *This, const AM_MEDIA_TYPE *pmt);
+typedef HRESULT (WINAPI *BaseRenderer_DoRenderSample)(BaseRenderer *This, IMediaSample *pMediaSample);
+typedef VOID (WINAPI *BaseRenderer_OnReceiveFirstSample)(BaseRenderer *This, IMediaSample *pMediaSample);
+typedef VOID (WINAPI *BaseRenderer_OnRenderEnd)(BaseRenderer *This, IMediaSample *pMediaSample);
+typedef VOID (WINAPI *BaseRenderer_OnRenderStart)(BaseRenderer *This, IMediaSample *pMediaSample);
+typedef VOID (WINAPI *BaseRenderer_OnStartStreaming)(BaseRenderer *This);
+typedef VOID (WINAPI *BaseRenderer_OnStopStreaming)(BaseRenderer *This);
+typedef VOID (WINAPI *BaseRenderer_OnWaitEnd)(BaseRenderer *This);
+typedef VOID (WINAPI *BaseRenderer_OnWaitStart)(BaseRenderer *This);
+typedef VOID (WINAPI *BaseRenderer_PrepareRender)(BaseRenderer *This);
+typedef HRESULT (WINAPI *BaseRenderer_ShouldDrawSampleNow)(BaseRenderer *This, IMediaSample *pMediaSample, REFERENCE_TIME *pStartTime, REFERENCE_TIME *pEndTime);
+typedef HRESULT (WINAPI *BaseRenderer_PrepareReceive)(BaseRenderer *This, IMediaSample *pMediaSample);
+typedef HRESULT (WINAPI *BaseRenderer_EndOfStream)(BaseRenderer *This);
+typedef HRESULT (WINAPI *BaseRenderer_EndFlush) (BaseRenderer *This);
+
+typedef struct BaseRendererFuncTable {
+	/* Required */
+	BaseRenderer_CheckMediaType pfnCheckMediaType;
+	BaseRenderer_DoRenderSample pfnDoRenderSample;
+	/* Optional, Data Handlers */
+	BaseRenderer_OnReceiveFirstSample  pfnOnReceiveFirstSample;
+	BaseRenderer_OnRenderEnd  pfnOnRenderEnd;
+	BaseRenderer_OnRenderStart  pfnOnRenderStart;
+	BaseRenderer_OnStartStreaming  pfnOnStartStreaming;
+	BaseRenderer_OnStopStreaming  pfnOnStopStreaming;
+	BaseRenderer_OnWaitEnd  pfnOnWaitEnd;
+	BaseRenderer_OnWaitStart  pfnOnWaitStart;
+	BaseRenderer_PrepareRender  pfnPrepareRender;
+	BaseRenderer_ShouldDrawSampleNow  pfnShouldDrawSampleNow;
+	BaseRenderer_PrepareReceive pfnPrepareReceive;
+	/* Optional, Input Pin */
+	BaseRenderer_EndOfStream pfnEndOfStream;
+	BaseRenderer_EndFlush pfnEndFlush;
+} BaseRendererFuncTable;
+
+HRESULT WINAPI BaseRendererImpl_QueryInterface(IBaseFilter * iface, REFIID riid, LPVOID * ppv);
+ULONG   WINAPI BaseRendererImpl_Release(IBaseFilter * iface);
+HRESULT WINAPI BaseRendererImpl_Receive(BaseRenderer *This, IMediaSample * pSample);
+HRESULT WINAPI BaseRendererImpl_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **ppPin);
+HRESULT WINAPI BaseRendererImpl_Stop(IBaseFilter * iface);
+HRESULT WINAPI BaseRendererImpl_Run(IBaseFilter * iface, REFERENCE_TIME tStart);
+HRESULT WINAPI BaseRendererImpl_Pause(IBaseFilter * iface);
+HRESULT WINAPI BaseRendererImpl_EndOfStream(BaseRenderer* iface);
+HRESULT WINAPI BaseRendererImpl_EndFlush(BaseRenderer* iface);
+
+HRESULT WINAPI BaseRenderer_Init(BaseRenderer *This, const IBaseFilterVtbl *Vtbl, IUnknown *pUnkOuter, const CLSID *pClsid, DWORD_PTR DebugInfo, const BaseRendererFuncTable* pBaseFuncsTable);
 
 /* Dll Functions */
 BOOL WINAPI STRMBASE_DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv);

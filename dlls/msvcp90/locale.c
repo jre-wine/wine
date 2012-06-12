@@ -125,15 +125,10 @@ typedef struct {
     const wchar_t *true_name;
 } numpunct_wchar;
 
-typedef struct _num_get_char {
-    locale_facet    facet;
-    _Cvtvec         cvt;
-} num_get_char;
-
-typedef struct _num_get_wchar {
-    locale_facet    facet;
-    _Cvtvec         cvt;
-} num_get_wchar;
+typedef struct {
+    locale_facet facet;
+    _Cvtvec cvt;
+} num_get;
 
 struct _ios_base;
 typedef struct _istreambuf_iterator_char
@@ -187,9 +182,7 @@ locale_facet* __thiscall MSVCP_locale_facet_vector_dtor(locale_facet *this, unsi
     return this;
 }
 
-const vtable_ptr MSVCP_locale_facet_vtable[] = {
-    (vtable_ptr)THISCALL_NAME(MSVCP_locale_facet_vector_dtor)
-};
+extern const vtable_ptr MSVCP_locale_facet_vtable;
 
 /* ??0id@locale@std@@QAE@I@Z */
 /* ??0id@locale@std@@QEAA@_K@Z */
@@ -245,7 +238,7 @@ DEFINE_THISCALL_WRAPPER(locale_facet_ctor, 4)
 locale_facet* __thiscall locale_facet_ctor(locale_facet *this)
 {
     TRACE("(%p)\n", this);
-    this->vtable = MSVCP_locale_facet_vtable;
+    this->vtable = &MSVCP_locale_facet_vtable;
     this->refs = 0;
     return this;
 }
@@ -256,7 +249,7 @@ DEFINE_THISCALL_WRAPPER(locale_facet_ctor_refs, 8)
 locale_facet* __thiscall locale_facet_ctor_refs(locale_facet *this, MSVCP_size_t refs)
 {
     TRACE("(%p %lu)\n", this, refs);
-    this->vtable = MSVCP_locale_facet_vtable;
+    this->vtable = &MSVCP_locale_facet_vtable;
     this->refs = refs;
     return this;
 }
@@ -670,12 +663,6 @@ _Timevec*__thiscall _Locinfo__Gettnames(const _Locinfo *this, _Timevec *ret)
     _Timevec_ctor_timeptr(ret, _Gettnames());
     return ret;
 }
-
-static const type_info locale_facet_type_info = {
-    MSVCP_locale_facet_vtable,
-    NULL,
-    ".?AVfacet@locale@std@@"
-};
 
 /* ?id@?$collate@D@std@@2V0locale@2@A */
 locale_id collate_char_id = {0};
@@ -2463,7 +2450,6 @@ extern const vtable_ptr MSVCP_numpunct_char_vtable;
 DEFINE_THISCALL_WRAPPER(numpunct_char__Init, 12)
 void __thiscall numpunct_char__Init(numpunct_char *this, _Locinfo *locinfo, MSVCP_bool isdef)
 {
-    const struct lconv *lc = _Locinfo__Getlconv(locinfo);
     int len;
 
     TRACE("(%p %p %d)\n", this, locinfo, isdef);
@@ -2486,6 +2472,8 @@ void __thiscall numpunct_char__Init(numpunct_char *this, _Locinfo *locinfo, MSVC
         this->dp = '.';
         this->sep = ',';
     } else {
+        const struct lconv *lc = _Locinfo__Getlconv(locinfo);
+
         len = strlen(lc->grouping)+1;
         this->grouping = MSVCRT_operator_new(len);
         if(this->grouping)
@@ -2734,7 +2722,55 @@ extern const vtable_ptr MSVCP_numpunct_short_vtable;
 DEFINE_THISCALL_WRAPPER(numpunct_wchar__Init, 12)
 void __thiscall numpunct_wchar__Init(numpunct_wchar *this, _Locinfo *locinfo, MSVCP_bool isdef)
 {
-    FIXME("(%p %p %d) stub\n", this, locinfo, isdef);
+    const char *to_convert;
+    _Cvtvec cvt;
+    int len;
+
+    TRACE("(%p %p %d)\n", this, locinfo, isdef);
+
+    _Locinfo__Getcvt(locinfo, &cvt);
+
+    to_convert = _Locinfo__Getfalse(locinfo);
+    len = MultiByteToWideChar(cvt.page, 0, to_convert, -1, NULL, 0);
+    this->false_name = MSVCRT_operator_new(len*sizeof(WCHAR));
+    if(this->false_name)
+        MultiByteToWideChar(cvt.page, 0, to_convert, -1,
+                (wchar_t*)this->false_name, len);
+
+    to_convert = _Locinfo__Gettrue(locinfo);
+    len = MultiByteToWideChar(cvt.page, 0, to_convert, -1, NULL, 0);
+    this->true_name = MSVCRT_operator_new(len*sizeof(WCHAR));
+    if(this->true_name)
+        MultiByteToWideChar(cvt.page, 0, to_convert, -1,
+                (wchar_t*)this->true_name, len);
+
+    if(isdef) {
+        this->grouping = MSVCRT_operator_new(1);
+        if(this->grouping)
+            *(char*)this->grouping = 0;
+
+        this->dp = '.';
+        this->sep = ',';
+    } else {
+        const struct lconv *lc = _Locinfo__Getlconv(locinfo);
+
+        len = strlen(lc->grouping)+1;
+        this->grouping = MSVCRT_operator_new(len);
+        if(this->grouping)
+            memcpy((char*)this->grouping, lc->grouping, len);
+
+        this->dp = lc->decimal_point[0];
+        this->sep = lc->thousands_sep[0];
+    }
+
+    if(!this->false_name || !this->true_name || !this->grouping) {
+        MSVCRT_operator_delete((char*)this->grouping);
+        MSVCRT_operator_delete((wchar_t*)this->false_name);
+        MSVCRT_operator_delete((wchar_t*)this->true_name);
+
+        ERR("Out of memory\n");
+        throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+    }
 }
 
 /* ?_Tidy@?$numpunct@_W@std@@AAEXXZ */
@@ -2744,7 +2780,11 @@ void __thiscall numpunct_wchar__Init(numpunct_wchar *this, _Locinfo *locinfo, MS
 DEFINE_THISCALL_WRAPPER(numpunct_wchar__Tidy, 4)
 void __thiscall numpunct_wchar__Tidy(numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+
+    MSVCRT_operator_delete((char*)this->grouping);
+    MSVCRT_operator_delete((wchar_t*)this->false_name);
+    MSVCRT_operator_delete((wchar_t*)this->true_name);
 }
 
 /* ??0?$numpunct@_W@std@@QAE@ABV_Locinfo@1@I_N@Z */
@@ -2753,9 +2793,11 @@ DEFINE_THISCALL_WRAPPER(numpunct_wchar_ctor_locinfo, 16)
 numpunct_wchar* __thiscall numpunct_wchar_ctor_locinfo(numpunct_wchar *this,
         _Locinfo *locinfo, MSVCP_size_t refs, MSVCP_bool usedef)
 {
-    FIXME("(%p %p %lu %d) stub\n", this, locinfo, refs, usedef);
+    TRACE("(%p %p %lu %d)\n", this, locinfo, refs, usedef);
+    locale_facet_ctor_refs(&this->facet, refs);
     this->facet.vtable = &MSVCP_numpunct_wchar_vtable;
-    return NULL;
+    numpunct_wchar__Init(this, locinfo, usedef);
+    return this;
 }
 
 /* ??0?$numpunct@G@std@@QAE@ABV_Locinfo@1@I_N@Z */
@@ -2775,14 +2817,21 @@ DEFINE_THISCALL_WRAPPER(numpunct_wchar_ctor_name, 16)
 numpunct_wchar* __thiscall numpunct_wchar_ctor_name(numpunct_wchar *this,
         const char *name, MSVCP_size_t refs, MSVCP_bool usedef)
 {
-    FIXME("(%p %s %lu %d) stub\n", this, debugstr_a(name), refs, usedef);
+    _Locinfo locinfo;
+
+    TRACE("(%p %s %lu %d)\n", this, debugstr_a(name), refs, usedef);
+    locale_facet_ctor_refs(&this->facet, refs);
     this->facet.vtable = &MSVCP_numpunct_wchar_vtable;
-    return NULL;
+
+    _Locinfo_ctor_cstr(&locinfo, name);
+    numpunct_wchar__Init(this, &locinfo, usedef);
+    _Locinfo_dtor(&locinfo);
+    return this;
 }
 
 /* ??0?$numpunct@G@std@@IAE@PBDI_N@Z */
 /* ??0?$numpunct@G@std@@IEAA@PEBD_K_N@Z */
-DEFINE_THISCALL_WRAPPER(numpunct_short_ctor_name, 16)
+    DEFINE_THISCALL_WRAPPER(numpunct_short_ctor_name, 16)
 numpunct_wchar* __thiscall numpunct_short_ctor_name(numpunct_wchar *this,
         const char *name, MSVCP_size_t refs, MSVCP_bool usedef)
 {
@@ -2793,12 +2842,11 @@ numpunct_wchar* __thiscall numpunct_short_ctor_name(numpunct_wchar *this,
 
 /* ??0?$numpunct@_W@std@@QAE@I@Z */
 /* ??0?$numpunct@_W@std@@QEAA@_K@Z */
-DEFINE_THISCALL_WRAPPER(numpunct_wchar_ctor_refs, 8)
+    DEFINE_THISCALL_WRAPPER(numpunct_wchar_ctor_refs, 8)
 numpunct_wchar* __thiscall numpunct_wchar_ctor_refs(numpunct_wchar *this, MSVCP_size_t refs)
 {
-    FIXME("(%p %lu) stub\n", this, refs);
-    this->facet.vtable = &MSVCP_numpunct_wchar_vtable;
-    return NULL;
+    TRACE("(%p %lu)\n", this, refs);
+    return numpunct_wchar_ctor_name(this, "C", refs, FALSE);
 }
 
 /* ??0?$numpunct@G@std@@QAE@I@Z */
@@ -2834,7 +2882,8 @@ numpunct_wchar* __thiscall numpunct_short_ctor(numpunct_wchar *this)
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_dtor, 4)
 void __thiscall numpunct_wchar_dtor(numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    numpunct_wchar__Tidy(this);
 }
 
 DEFINE_THISCALL_WRAPPER(MSVCP_numpunct_wchar_vector_dtor, 8)
@@ -2867,16 +2916,40 @@ numpunct_wchar* __thiscall MSVCP_numpunct_short_vector_dtor(numpunct_wchar *this
 /* ?_Getcat@?$numpunct@_W@std@@SA_KPEAPEBVfacet@locale@2@PEBV42@@Z */
 MSVCP_size_t __cdecl numpunct_wchar__Getcat(const locale_facet **facet, const locale *loc)
 {
-    FIXME("(%p %p) stub\n", facet, loc);
-    return 0;
+    TRACE("(%p %p)\n", facet, loc);
+
+    if(facet && !*facet) {
+        *facet = MSVCRT_operator_new(sizeof(numpunct_wchar));
+        if(!*facet) {
+            ERR("Out of memory\n");
+            throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+            return 0;
+        }
+        numpunct_wchar_ctor_name((numpunct_wchar*)*facet,
+                MSVCP_basic_string_char_c_str(&loc->ptr->name), 0, TRUE);
+    }
+
+    return LC_NUMERIC;
 }
 
 /* ?_Getcat@?$numpunct@G@std@@SAIPAPBVfacet@locale@2@PBV42@@Z */
 /* ?_Getcat@?$numpunct@G@std@@SA_KPEAPEBVfacet@locale@2@PEBV42@@Z */
 MSVCP_size_t __cdecl numpunct_short__Getcat(const locale_facet **facet, const locale *loc)
 {
-    FIXME("(%p %p) stub\n", facet, loc);
-    return 0;
+    TRACE("(%p %p)\n", facet, loc);
+
+    if(facet && !*facet) {
+        *facet = MSVCRT_operator_new(sizeof(numpunct_wchar));
+        if(!*facet) {
+            ERR("Out of memory\n");
+            throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+            return 0;
+        }
+        numpunct_short_ctor_name((numpunct_wchar*)*facet,
+                MSVCP_basic_string_char_c_str(&loc->ptr->name), 0, TRUE);
+    }
+
+    return LC_NUMERIC;
 }
 
 /* ?do_decimal_point@?$numpunct@_W@std@@MBE_WXZ */
@@ -2884,10 +2957,12 @@ MSVCP_size_t __cdecl numpunct_short__Getcat(const locale_facet **facet, const lo
 /* ?do_decimal_point@?$numpunct@G@std@@MBEGXZ */
 /* ?do_decimal_point@?$numpunct@G@std@@MEBAGXZ */
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_do_decimal_point, 4)
+#define call_numpunct_wchar_do_decimal_point(this) CALL_VTBL_FUNC(this, 4, \
+        wchar_t, (const numpunct_wchar *this), (this))
 wchar_t __thiscall numpunct_wchar_do_decimal_point(const numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->dp;
 }
 
 /* ?decimal_point@?$numpunct@_W@std@@QBE_WXZ */
@@ -2897,8 +2972,8 @@ wchar_t __thiscall numpunct_wchar_do_decimal_point(const numpunct_wchar *this)
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_decimal_point, 4)
 wchar_t __thiscall numpunct_wchar_decimal_point(const numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return call_numpunct_wchar_do_decimal_point(this);
 }
 
 /* ?do_thousands_sep@?$numpunct@_W@std@@MBE_WXZ */
@@ -2906,10 +2981,12 @@ wchar_t __thiscall numpunct_wchar_decimal_point(const numpunct_wchar *this)
 /* ?do_thousands_sep@?$numpunct@G@std@@MBEGXZ */
 /* ?do_thousands_sep@?$numpunct@G@std@@MEBAGXZ */
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_do_thousands_sep, 4)
+#define call_numpunct_wchar_do_thousands_sep(this) CALL_VTBL_FUNC(this, 8, \
+        wchar_t, (const numpunct_wchar *this), (this))
 wchar_t __thiscall numpunct_wchar_do_thousands_sep(const numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->sep;
 }
 
 /* ?thousands_sep@?$numpunct@_W@std@@QBE_WXZ */
@@ -2919,8 +2996,8 @@ wchar_t __thiscall numpunct_wchar_do_thousands_sep(const numpunct_wchar *this)
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_thousands_sep, 4)
 wchar_t __thiscall numpunct_wchar_thousands_sep(const numpunct_wchar *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return call_numpunct_wchar_do_thousands_sep(this);
 }
 
 /* ?do_grouping@?$numpunct@_W@std@@MBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
@@ -2928,10 +3005,12 @@ wchar_t __thiscall numpunct_wchar_thousands_sep(const numpunct_wchar *this)
 /* ?do_grouping@?$numpunct@G@std@@MBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
 /* ?do_grouping@?$numpunct@G@std@@MEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_do_grouping, 8)
+#define call_numpunct_wchar_do_grouping(this, ret) CALL_VTBL_FUNC(this, 12, \
+        basic_string_char*, (const numpunct_wchar*, basic_string_char*), (this, ret))
 basic_string_char* __thiscall numpunct_wchar_do_grouping(const numpunct_wchar *this, basic_string_char *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return MSVCP_basic_string_char_ctor_cstr(ret, this->grouping);
 }
 
 /* ?grouping@?$numpunct@_W@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
@@ -2941,8 +3020,8 @@ basic_string_char* __thiscall numpunct_wchar_do_grouping(const numpunct_wchar *t
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_grouping, 8)
 basic_string_char* __thiscall numpunct_wchar_grouping(const numpunct_wchar *this, basic_string_char *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return call_numpunct_wchar_do_grouping(this, ret);
 }
 
 /* ?do_falsename@?$numpunct@_W@std@@MBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
@@ -2950,10 +3029,12 @@ basic_string_char* __thiscall numpunct_wchar_grouping(const numpunct_wchar *this
 /* ?do_falsename@?$numpunct@G@std@@MBE?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
 /* ?do_falsename@?$numpunct@G@std@@MEBA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_do_falsename, 8)
+#define call_numpunct_wchar_do_falsename(this, ret) CALL_VTBL_FUNC(this, 16, \
+        basic_string_wchar*, (const numpunct_wchar*, basic_string_wchar*), (this, ret))
 basic_string_wchar* __thiscall numpunct_wchar_do_falsename(const numpunct_wchar *this, basic_string_wchar *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return MSVCP_basic_string_wchar_ctor_cstr(ret, this->false_name);
 }
 
 /* ?falsename@?$numpunct@_W@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
@@ -2963,8 +3044,8 @@ basic_string_wchar* __thiscall numpunct_wchar_do_falsename(const numpunct_wchar 
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_falsename, 8)
 basic_string_wchar* __thiscall numpunct_wchar_falsename(const numpunct_wchar *this, basic_string_wchar *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return call_numpunct_wchar_do_falsename(this, ret);
 }
 
 /* ?do_truename@?$numpunct@_W@std@@MBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
@@ -2972,10 +3053,12 @@ basic_string_wchar* __thiscall numpunct_wchar_falsename(const numpunct_wchar *th
 /* ?do_truename@?$numpunct@G@std@@MBE?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
 /* ?do_truename@?$numpunct@G@std@@MEBA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_do_truename, 8)
+#define call_numpunct_wchar_do_truename(this, ret) CALL_VTBL_FUNC(this, 20, \
+        basic_string_wchar*, (const numpunct_wchar*, basic_string_wchar*), (this, ret))
 basic_string_wchar* __thiscall numpunct_wchar_do_truename(const numpunct_wchar *this, basic_string_wchar *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return MSVCP_basic_string_wchar_ctor_cstr(ret, this->true_name);
 }
 
 /* ?truename@?$numpunct@_W@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
@@ -2985,8 +3068,8 @@ basic_string_wchar* __thiscall numpunct_wchar_do_truename(const numpunct_wchar *
 DEFINE_THISCALL_WRAPPER(numpunct_wchar_truename, 8)
 basic_string_wchar* __thiscall numpunct_wchar_truename(const numpunct_wchar *this, basic_string_wchar *ret)
 {
-    FIXME("(%p) stub\n", this);
-    return ret;
+    TRACE("(%p)\n", this);
+    return call_numpunct_wchar_do_truename(this, ret);
 }
 
 /* ?id@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@2V0locale@2@A */
@@ -3004,7 +3087,7 @@ extern const vtable_ptr MSVCP_num_get_short_vtable;
 /* ?_Init@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@IAEXABV_Locinfo@2@@Z */
 /* ?_Init@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@IEAAXAEBV_Locinfo@2@@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_ctor__Init, 8)
-void __thiscall num_get_wchar_ctor__Init(num_get_wchar *this, const _Locinfo *locinfo)
+void __thiscall num_get_wchar_ctor__Init(num_get *this, const _Locinfo *locinfo)
 {
     FIXME("(%p %p) stub\n", this, locinfo);
 }
@@ -3012,7 +3095,7 @@ void __thiscall num_get_wchar_ctor__Init(num_get_wchar *this, const _Locinfo *lo
 /* ??0?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAE@ABV_Locinfo@1@I@Z */
 /* ??0?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QEAA@AEBV_Locinfo@1@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_ctor_locinfo, 12)
-num_get_wchar* __thiscall num_get_wchar_ctor_locinfo(num_get_wchar *this,
+num_get* __thiscall num_get_wchar_ctor_locinfo(num_get *this,
         _Locinfo *locinfo, MSVCP_size_t refs)
 {
     FIXME("(%p %p %lu) stub\n", this, locinfo, refs);
@@ -3022,7 +3105,7 @@ num_get_wchar* __thiscall num_get_wchar_ctor_locinfo(num_get_wchar *this,
 /* ??0?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QAE@ABV_Locinfo@1@I@Z */
 /* ??0?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEAA@AEBV_Locinfo@1@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_short_ctor_locinfo, 12)
-num_get_wchar* __thiscall num_get_short_ctor_locinfo(num_get_wchar *this,
+num_get* __thiscall num_get_short_ctor_locinfo(num_get *this,
         _Locinfo *locinfo, MSVCP_size_t refs)
 {
     FIXME("(%p %p %lu) stub\n", this, locinfo, refs);
@@ -3032,7 +3115,7 @@ num_get_wchar* __thiscall num_get_short_ctor_locinfo(num_get_wchar *this,
 /* ??0?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAE@I@Z */
 /* ??0?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QEAA@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_ctor_refs, 8)
-num_get_wchar* __thiscall num_get_wchar_ctor_refs(num_get_wchar *this, MSVCP_size_t refs)
+num_get* __thiscall num_get_wchar_ctor_refs(num_get *this, MSVCP_size_t refs)
 {
     FIXME("(%p %lu) stub\n", this, refs);
     return NULL;
@@ -3041,7 +3124,7 @@ num_get_wchar* __thiscall num_get_wchar_ctor_refs(num_get_wchar *this, MSVCP_siz
 /* ??0?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QAE@I@Z */
 /* ??0?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEAA@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_short_ctor_refs, 8)
-num_get_wchar* __thiscall num_get_short_ctor_refs(num_get_wchar *this, MSVCP_size_t refs)
+num_get* __thiscall num_get_short_ctor_refs(num_get *this, MSVCP_size_t refs)
 {
     FIXME("(%p %lu) stub\n", this, refs);
     return NULL;
@@ -3050,7 +3133,7 @@ num_get_wchar* __thiscall num_get_short_ctor_refs(num_get_wchar *this, MSVCP_siz
 /* ??_F?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAEXXZ */
 /* ??_F?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QEAAXXZ */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_ctor, 4)
-num_get_wchar* __thiscall num_get_wchar_ctor(num_get_wchar *this)
+num_get* __thiscall num_get_wchar_ctor(num_get *this)
 {
     FIXME("(%p) stub\n", this);
     return NULL;
@@ -3059,7 +3142,7 @@ num_get_wchar* __thiscall num_get_wchar_ctor(num_get_wchar *this)
 /* ??_F?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QAEXXZ */
 /* ??_F?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@QEAAXXZ */
 DEFINE_THISCALL_WRAPPER(num_get_short_ctor, 4)
-num_get_wchar* __thiscall num_get_short_ctor(num_get_wchar *this)
+num_get* __thiscall num_get_short_ctor(num_get *this)
 {
     FIXME("(%p) stub\n", this);
     return NULL;
@@ -3070,13 +3153,13 @@ num_get_wchar* __thiscall num_get_short_ctor(num_get_wchar *this)
 /* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MAE@XZ */
 /* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEAA@XZ */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_dtor, 4)
-void __thiscall num_get_wchar_dtor(num_get_wchar *this)
+void __thiscall num_get_wchar_dtor(num_get *this)
 {
     FIXME("(%p) stub\n", this);
 }
 
 DEFINE_THISCALL_WRAPPER(MSVCP_num_get_wchar_vector_dtor, 8)
-num_get_wchar* __thiscall MSVCP_num_get_wchar_vector_dtor(num_get_wchar *this, unsigned int flags)
+num_get* __thiscall MSVCP_num_get_wchar_vector_dtor(num_get *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
@@ -3096,7 +3179,7 @@ num_get_wchar* __thiscall MSVCP_num_get_wchar_vector_dtor(num_get_wchar *this, u
 }
 
 DEFINE_THISCALL_WRAPPER(MSVCP_num_get_short_vector_dtor, 8)
-num_get_wchar* __thiscall MSVCP_num_get_short_vector_dtor(num_get_wchar *this, unsigned int flags)
+num_get* __thiscall MSVCP_num_get_short_vector_dtor(num_get *this, unsigned int flags)
 {
     return MSVCP_num_get_wchar_vector_dtor(this, flags);
 }
@@ -3121,7 +3204,7 @@ MSVCP_size_t __cdecl num_get_short__Getcat(const locale_facet **facet, const loc
 /* ?_Getffld@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@2@1AEBVlocale@2@@Z */
 /* ?_Getffld@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1ABVlocale@2@@Z */
 /* ?_Getffld@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1AEBVlocale@2@@Z */
-int __cdecl num_get_wchar__Getffld(char *dest, istreambuf_iterator_wchar *first,
+int __cdecl num_get_wchar__Getffld(num_get *this, char *dest, istreambuf_iterator_wchar *first,
     istreambuf_iterator_wchar *last, const locale *loc)
 {
     FIXME("(%p %p %p %p) stub\n", dest, first, last, loc);
@@ -3132,7 +3215,7 @@ int __cdecl num_get_wchar__Getffld(char *dest, istreambuf_iterator_wchar *first,
 /* ?_Getffldx@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@2@1AEAVios_base@2@PEAH@Z */
 /* ?_Getffldx@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1AAVios_base@2@PAH@Z */
 /* ?_Getffldx@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1AEAVios_base@2@PEAH@Z */
-int __cdecl num_get_wchar__Getffldx(char *dest, istreambuf_iterator_wchar *first,
+int __cdecl num_get_wchar__Getffldx(num_get *this, char *dest, istreambuf_iterator_wchar *first,
     istreambuf_iterator_wchar *last, struct _ios_base *ios, int *phexexp)
 {
     FIXME("(%p %p %p %p %p) stub\n", dest, first, last, ios, phexexp);
@@ -3143,7 +3226,7 @@ int __cdecl num_get_wchar__Getffldx(char *dest, istreambuf_iterator_wchar *first
 /* ?_Getifld@?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@2@1HAEBVlocale@2@@Z */
 /* ?_Getifld@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1HABVlocale@2@@Z */
 /* ?_Getifld@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@1HAEBVlocale@2@@Z */
-int __cdecl num_get_wchar__Getifld(char *dest, istreambuf_iterator_wchar *first,
+int __cdecl num_get_wchar__Getifld(num_get *this, char *dest, istreambuf_iterator_wchar *first,
     istreambuf_iterator_wchar *last, int fmtflags, const locale *loc)
 {
     FIXME("(%p %p %p %04x %p) stub\n", dest, first, last, fmtflags, loc);
@@ -3155,7 +3238,7 @@ int __cdecl num_get_wchar__Getifld(char *dest, istreambuf_iterator_wchar *first,
 /* ?_Hexdig@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@ABEHGGGG@Z */
 /* ?_Hexdig@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@AEBAHGGGG@Z */
 DEFINE_THISCALL_WRAPPER(MSVCP_num_get_wchar__Hexdig, 20)
-int __thiscall MSVCP_num_get_wchar__Hexdig(num_get_wchar *this, wchar_t dig, wchar_t e0, wchar_t al, wchar_t au)
+int __thiscall MSVCP_num_get_wchar__Hexdig(num_get *this, wchar_t dig, wchar_t e0, wchar_t al, wchar_t au)
 {
     FIXME("(%p %c %c %c %c) stub\n", this, dig, e0, al, au);
     return -1;
@@ -3166,7 +3249,7 @@ int __thiscall MSVCP_num_get_wchar__Hexdig(num_get_wchar *this, wchar_t dig, wch
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAPAX@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAPEAX@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_void,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_void(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_void(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, void **pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3178,7 +3261,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_void(const num_get_wc
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAPAX@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAPEAX@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_void,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_void(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_void(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, void **pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3194,7 +3277,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_void(const num_get_wchar
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAN@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAN@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_double,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_double(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_double(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, double *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3210,7 +3293,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_double(const num_get_
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAN@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAN@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_double,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_double(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_double(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, double *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3222,7 +3305,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_double(const num_get_wch
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAM@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAM@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_float,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_float(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_float(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, float *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3234,7 +3317,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_float(const num_get_w
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAM@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAM@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_float,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_float(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_float(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, float *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3246,7 +3329,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_float(const num_get_wcha
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_K@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_uint64,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint64(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint64(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, ULONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3258,7 +3341,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint64(const num_get_
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_K@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_uint64,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint64(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint64(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, ULONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3270,7 +3353,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint64(const num_get_wch
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_J@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_J@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_int64,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_int64(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_int64(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, LONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3282,7 +3365,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_int64(const num_get_w
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_J@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_J@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_int64,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_int64(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_int64(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, LONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3294,7 +3377,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_int64(const num_get_wcha
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAK@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAK@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_ulong,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ulong(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ulong(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, ULONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3306,7 +3389,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ulong(const num_get_w
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAK@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAK@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_ulong,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ulong(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ulong(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, ULONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3318,7 +3401,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ulong(const num_get_wcha
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAJ@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAJ@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_long,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_long(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_long(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, LONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3330,7 +3413,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_long(const num_get_wc
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAJ@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAJ@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_long,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_long(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_long(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, LONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3342,7 +3425,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_long(const num_get_wchar
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAI@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAI@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_uint,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, unsigned int *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3354,7 +3437,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_uint(const num_get_wc
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAI@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAI@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_uint,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, unsigned int *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3366,7 +3449,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_uint(const num_get_wchar
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAG@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAG@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_ushort,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ushort(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ushort(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, unsigned short *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3378,7 +3461,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_ushort(const num_get_
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAAG@ */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEAG@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_ushort,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ushort(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ushort(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, unsigned short *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3390,7 +3473,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_get_ushort(const num_get_wch
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_N@Z */
 /* ?do_get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_N@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_do_get_bool,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_bool(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_bool(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, MSVCP_bool *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3402,7 +3485,7 @@ istreambuf_iterator_wchar *__thiscall num_get_wchar_do_get_bool(const num_get_wc
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AAVios_base@2@AAHAA_N@Z */
 /* ?get@?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@GU?$char_traits@G@std@@@2@V32@0AEAVios_base@2@AEAHAEA_N@Z */
 DEFINE_THISCALL_WRAPPER(num_get_wchar_get_bool,36)
-istreambuf_iterator_wchar *__thiscall num_get_wchar_get_bool(const num_get_wchar *this, istreambuf_iterator_wchar *ret,
+istreambuf_iterator_wchar *__thiscall num_get_wchar_get_bool(const num_get *this, istreambuf_iterator_wchar *ret,
     istreambuf_iterator_wchar first, istreambuf_iterator_wchar last, struct _ios_base *base, int *state, MSVCP_bool *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3418,7 +3501,7 @@ extern const vtable_ptr MSVCP_num_get_char_vtable;
 /* ?_Init@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@IAEXABV_Locinfo@2@@Z */
 /* ?_Init@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@IEAAXAEBV_Locinfo@2@@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_ctor__Init, 8)
-void __thiscall num_get_char_ctor__Init(num_get_char *this, const _Locinfo *locinfo)
+void __thiscall num_get_char_ctor__Init(num_get *this, const _Locinfo *locinfo)
 {
     FIXME("(%p %p) stub\n", this, locinfo);
 }
@@ -3426,7 +3509,7 @@ void __thiscall num_get_char_ctor__Init(num_get_char *this, const _Locinfo *loci
 /* ??0?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAE@ABV_Locinfo@1@I@Z */
 /* ??0?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEAA@AEBV_Locinfo@1@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_ctor_locinfo, 12)
-num_get_char* __thiscall num_get_char_ctor_locinfo(num_get_char *this,
+num_get* __thiscall num_get_char_ctor_locinfo(num_get *this,
         _Locinfo *locinfo, MSVCP_size_t refs)
 {
     FIXME("(%p %p %lu) stub\n", this, locinfo, refs);
@@ -3436,7 +3519,7 @@ num_get_char* __thiscall num_get_char_ctor_locinfo(num_get_char *this,
 /* ??0?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAE@I@Z */
 /* ??0?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEAA@_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_ctor_refs, 8)
-num_get_char* __thiscall num_get_char_ctor_refs(num_get_char *this, MSVCP_size_t refs)
+num_get* __thiscall num_get_char_ctor_refs(num_get *this, MSVCP_size_t refs)
 {
     FIXME("(%p %lu) stub\n", this, refs);
     return NULL;
@@ -3445,7 +3528,7 @@ num_get_char* __thiscall num_get_char_ctor_refs(num_get_char *this, MSVCP_size_t
 /* ??_F?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QAEXXZ */
 /* ??_F?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEAAXXZ */
 DEFINE_THISCALL_WRAPPER(num_get_char_ctor, 4)
-num_get_char* __thiscall num_get_char_ctor(num_get_char *this)
+num_get* __thiscall num_get_char_ctor(num_get *this)
 {
     FIXME("(%p) stub\n", this);
     return NULL;
@@ -3454,13 +3537,13 @@ num_get_char* __thiscall num_get_char_ctor(num_get_char *this)
 /* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAE@XZ */
 /* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEAA@XZ */
 DEFINE_THISCALL_WRAPPER(num_get_char_dtor, 4)
-void __thiscall num_get_char_dtor(num_get_char *this)
+void __thiscall num_get_char_dtor(num_get *this)
 {
     FIXME("(%p) stub\n", this);
 }
 
 DEFINE_THISCALL_WRAPPER(MSVCP_num_get_char_vector_dtor, 8)
-num_get_char* __thiscall MSVCP_num_get_char_vector_dtor(num_get_char *this, unsigned int flags)
+num_get* __thiscall MSVCP_num_get_char_vector_dtor(num_get *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
@@ -3489,7 +3572,7 @@ MSVCP_size_t __cdecl num_get_char__Getcat(const locale_facet **facet, const loca
 
 /* ?_Getffld@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1ABVlocale@2@@Z */
 /* ?_Getffld@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1AEBVlocale@2@@Z */
-int __cdecl num_get_char__Getffld(char *dest, istreambuf_iterator_char *first,
+int __cdecl num_get_char__Getffld(num_get *this, char *dest, istreambuf_iterator_char *first,
     istreambuf_iterator_char *last, const locale *loc)
 {
     FIXME("(%p %p %p %p) stub\n", dest, first, last, loc);
@@ -3498,7 +3581,7 @@ int __cdecl num_get_char__Getffld(char *dest, istreambuf_iterator_char *first,
 
 /* ?_Getffldx@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1AAVios_base@2@PAH@Z */
 /* ?_Getffldx@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1AEAVios_base@2@PEAH@Z */
-int __cdecl num_get_char__Getffldx(char *dest, istreambuf_iterator_char *first,
+int __cdecl num_get_char__Getffldx(num_get *this, char *dest, istreambuf_iterator_char *first,
     istreambuf_iterator_char *last, struct _ios_base *ios, int *phexexp)
 {
     FIXME("(%p %p %p %p %p) stub\n", dest, first, last, ios, phexexp);
@@ -3507,7 +3590,7 @@ int __cdecl num_get_char__Getffldx(char *dest, istreambuf_iterator_char *first,
 
 /* ?_Getifld@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABAHPADAAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1HABVlocale@2@@Z */
 /* ?_Getifld@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@AEBAHPEADAEAV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@1HAEBVlocale@2@@Z */
-int __cdecl num_get_char__Getifld(char *dest, istreambuf_iterator_char *first,
+int __cdecl num_get_char__Getifld(num_get *this, char *dest, istreambuf_iterator_char *first,
     istreambuf_iterator_char *last, int fmtflags, const locale *loc)
 {
     FIXME("(%p %p %p %04x %p) stub\n", dest, first, last, fmtflags, loc);
@@ -3517,7 +3600,7 @@ int __cdecl num_get_char__Getifld(char *dest, istreambuf_iterator_char *first,
 /* ?_Hexdig@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABEHD000@Z */
 /* ?_Hexdig@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@AEBAHD000@Z */
 DEFINE_THISCALL_WRAPPER(MSVCP_num_get_char__Hexdig, 20)
-int __thiscall MSVCP_num_get_char__Hexdig(num_get_char *this, char dig, char e0, char al, char au)
+int __thiscall MSVCP_num_get_char__Hexdig(num_get *this, char dig, char e0, char al, char au)
 {
     FIXME("(%p %c %c %c %c) stub\n", this, dig, e0, al, au);
     return -1;
@@ -3526,7 +3609,7 @@ int __thiscall MSVCP_num_get_char__Hexdig(num_get_char *this, char dig, char e0,
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAPAX@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAPEAX@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_void,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_void(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_void(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, void **pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3536,7 +3619,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_void(const num_get_char
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAPAX@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAPEAX@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_void,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_void(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_void(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, void **pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3548,7 +3631,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_void(const num_get_char *t
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAN@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAN@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_double,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_double(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_double(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, double *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3560,7 +3643,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_double(const num_get_ch
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAN@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAN@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_double,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_double(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_double(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, double *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3570,7 +3653,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_double(const num_get_char 
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAM@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAM@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_float,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_float(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_float(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, float *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3580,7 +3663,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_float(const num_get_cha
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAM@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAM@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_float,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_float(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_float(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, float *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3590,7 +3673,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_float(const num_get_char *
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_K@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_uint64,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_uint64(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_uint64(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, ULONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3600,7 +3683,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_uint64(const num_get_ch
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_K@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_K@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_uint64,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_uint64(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_uint64(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, ULONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3610,7 +3693,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_uint64(const num_get_char 
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_J@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_J@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_int64,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_int64(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_int64(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, LONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3620,7 +3703,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_int64(const num_get_cha
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_J@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_J@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_int64,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_int64(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_int64(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, LONGLONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3630,7 +3713,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_int64(const num_get_char *
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAK@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAK@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_ulong,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_ulong(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_ulong(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, ULONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3640,7 +3723,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_ulong(const num_get_cha
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAK@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAK@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_ulong,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_ulong(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_ulong(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, ULONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3650,7 +3733,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_ulong(const num_get_char *
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAJ@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAJ@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_long,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_long(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_long(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, LONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3660,7 +3743,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_long(const num_get_char
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAJ@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAJ@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_long,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_long(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_long(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, LONG *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3670,7 +3753,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_long(const num_get_char *t
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAI@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAI@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_uint,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_uint(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_uint(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, unsigned int *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3680,7 +3763,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_uint(const num_get_char
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAI@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAI@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_uint,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_uint(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_uint(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, unsigned int *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3690,7 +3773,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_uint(const num_get_char *t
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAG@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAG@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_ushort,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_ushort(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_ushort(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, unsigned short *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3700,7 +3783,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_ushort(const num_get_ch
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAAG@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEAG@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_ushort,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_ushort(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_ushort(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, unsigned short *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3710,7 +3793,7 @@ istreambuf_iterator_char *__thiscall num_get_char_get_ushort(const num_get_char 
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_N@Z */
 /* ?do_get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_N@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_do_get_bool,36)
-istreambuf_iterator_char *__thiscall num_get_char_do_get_bool(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_do_get_bool(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, MSVCP_bool *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -3720,7 +3803,7 @@ istreambuf_iterator_char *__thiscall num_get_char_do_get_bool(const num_get_char
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QBE?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AAVios_base@2@AAHAA_N@Z */
 /* ?get@?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@QEBA?AV?$istreambuf_iterator@DU?$char_traits@D@std@@@2@V32@0AEAVios_base@2@AEAHAEA_N@Z */
 DEFINE_THISCALL_WRAPPER(num_get_char_get_bool,36)
-istreambuf_iterator_char *__thiscall num_get_char_get_bool(const num_get_char *this, istreambuf_iterator_char *ret,
+istreambuf_iterator_char *__thiscall num_get_char_get_bool(const num_get *this, istreambuf_iterator_char *ret,
     istreambuf_iterator_char first, istreambuf_iterator_char last, struct _ios_base *base, int *state, MSVCP_bool *pval)
 {
     FIXME("(%p %p %p %p %p) stub\n", this, ret, base, state, pval);
@@ -4132,13 +4215,7 @@ basic_string_char* __thiscall locale_name(const locale *this, basic_string_char 
     return ret;
 }
 
-static const rtti_base_descriptor locale_facet_rtti_base_descriptor = {
-    &locale_facet_type_info,
-    0,
-    { 0, -1, 0},
-    64
-};
-
+DEFINE_RTTI_DATA(locale_facet, 0, 0, NULL, NULL, NULL, ".?AVfacet@locale@std@@");
 DEFINE_RTTI_DATA(collate_char, 0, 1, &locale_facet_rtti_base_descriptor, NULL, NULL, ".?AV?$collate@D@std@@");
 DEFINE_RTTI_DATA(collate_wchar, 0, 1, &locale_facet_rtti_base_descriptor, NULL, NULL, ".?AV?$collate@_W@std@@");
 DEFINE_RTTI_DATA(collate_short, 0, 1, &locale_facet_rtti_base_descriptor, NULL, NULL, ".?AV?$collate@G@std@@");
@@ -4156,6 +4233,7 @@ DEFINE_RTTI_DATA(num_get_short, 0, 1, &locale_facet_rtti_base_descriptor, NULL, 
 #ifndef __GNUC__
 void __asm_dummy_vtables(void) {
 #endif
+    __ASM_VTABLE(locale_facet, "");
     __ASM_VTABLE(collate_char,
             VTABLE_ADD_FUNC(collate_char_do_compare)
             VTABLE_ADD_FUNC(collate_char_do_transform)

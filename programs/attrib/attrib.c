@@ -128,11 +128,13 @@ int wmain(int argc, WCHAR *argv[])
     HANDLE hff;
     WIN32_FIND_DATAW fd;
     WCHAR flags[] = {' ',' ',' ',' ',' ',' ',' ',' ','\0'};
-    WCHAR name[128];
+    WCHAR name[MAX_PATH];
+    WCHAR curdir[MAX_PATH];
     DWORD attrib_set = 0;
     DWORD attrib_clear = 0;
     const WCHAR help_option[] = {'/','?','\0'};
-    const WCHAR slashStarW[]  = {'\\','*','\0'};
+    const WCHAR slash[]  = {'\\','\0'};
+    const WCHAR start[]  = {'*','\0'};
     int i = 1;
 
     if ((argc >= 2) && !strcmpW(argv[1], help_option)) {
@@ -141,8 +143,10 @@ int wmain(int argc, WCHAR *argv[])
     }
 
     /* By default all files from current directory are taken into account */
-    GetCurrentDirectoryW(sizeof(name)/sizeof(WCHAR), name);
-    strcatW (name, slashStarW);
+    GetCurrentDirectoryW(sizeof(curdir)/sizeof(WCHAR), curdir);
+    strcatW(curdir, slash);
+    strcpyW(name, curdir);
+    strcatW(name, start);
 
     while (i < argc) {
         WCHAR *param = argv[i++];
@@ -167,7 +171,7 @@ int wmain(int argc, WCHAR *argv[])
             } else if (((param[1] == 'R') || (param[1] == 'r')) && !param[2]) {
                 WINE_FIXME("Option /R not yet supported\n");
             } else {
-                WINE_FIXME("Unrecognize option\n");
+                WINE_FIXME("Unknown option %s\n", debugstr_w(param));
             }
         } else if (param[0]) {
             strcpyW(name, param);
@@ -180,6 +184,12 @@ int wmain(int argc, WCHAR *argv[])
     }
     else {
         do {
+            const WCHAR dot[] = {'.', 0};
+            const WCHAR dotdot[] = {'.', '.', 0};
+
+            if (!strcmpW(fd.cFileName, dot) || !strcmpW(fd.cFileName, dotdot))
+                continue;
+
             if (attrib_set || attrib_clear) {
                 fd.dwFileAttributes &= ~attrib_clear;
                 fd.dwFileAttributes |= attrib_set;
@@ -187,27 +197,29 @@ int wmain(int argc, WCHAR *argv[])
                     fd.dwFileAttributes |= FILE_ATTRIBUTE_NORMAL;
                 SetFileAttributesW(name, fd.dwFileAttributes);
             } else {
-                static const WCHAR fmt[] = {'%','1',' ',' ',' ','%','2','\n','\0'};
+                static const WCHAR fmt[] = {'%','1',' ',' ',' ',' ',' ','%','2','\n','\0'};
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) {
-                    flags[0] = 'H';
+                    flags[4] = 'H';
                 }
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) {
                     flags[1] = 'S';
                 }
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE) {
-                    flags[2] = 'A';
+                    flags[0] = 'A';
                 }
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_READONLY) {
-                    flags[3] = 'R';
+                    flags[5] = 'R';
                 }
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_TEMPORARY) {
-                    flags[4] = 'T';
+                    flags[6] = 'T';
                 }
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) {
-                    flags[5] = 'C';
+                    flags[7] = 'C';
                 }
-                ATTRIB_wprintf(fmt, flags, fd.cFileName);
-                for (count=0; count < 8; count++) flags[count] = ' ';
+                strcpyW(name, curdir);
+                strcatW(name, fd.cFileName);
+                ATTRIB_wprintf(fmt, flags, name);
+                for (count = 0; count < (sizeof(flags)/sizeof(WCHAR) - 1); count++) flags[count] = ' ';
             }
         } while (FindNextFileW(hff, &fd) != 0);
     }

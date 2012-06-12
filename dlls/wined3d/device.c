@@ -172,7 +172,7 @@ static BOOL fixed_get_input(BYTE usage, BYTE usage_idx, unsigned int *regnum)
 
 /* Context activation is done by the caller. */
 void device_stream_info_from_declaration(struct wined3d_device *device,
-        struct wined3d_stream_info *stream_info, BOOL *fixup)
+        struct wined3d_stream_info *stream_info, BOOL *all_vbo)
 {
     const struct wined3d_state *state = &device->stateBlock->state;
     /* We need to deal with frequency data! */
@@ -232,24 +232,6 @@ void device_stream_info_from_declaration(struct wined3d_device *device,
                 if ((UINT_PTR)data.addr < -state->load_base_vertex_index * stride)
                 {
                     FIXME("System memory vertex data load offset is negative!\n");
-                }
-            }
-
-            if (fixup)
-            {
-                if (data.buffer_object)
-                    *fixup = TRUE;
-                else if (*fixup && !use_vshader
-                        && (element->usage == WINED3D_DECL_USAGE_COLOR
-                        || element->usage == WINED3D_DECL_USAGE_POSITIONT))
-                {
-                    static BOOL warned = FALSE;
-                    if (!warned)
-                    {
-                        /* This may be bad with the fixed function pipeline. */
-                        FIXME("Missing vbo streams with unfixed colors or transformed position, expect problems\n");
-                        warned = TRUE;
-                    }
                 }
             }
         }
@@ -315,6 +297,8 @@ void device_stream_info_from_declaration(struct wined3d_device *device,
     if (!state->user_stream)
     {
         WORD map = stream_info->use_map;
+        if (all_vbo)
+            *all_vbo = TRUE;
 
         /* PreLoad all the vertex buffers. */
         for (i = 0; map; map >>= 1, ++i)
@@ -336,9 +320,16 @@ void device_stream_info_from_declaration(struct wined3d_device *device,
                         + (ptrdiff_t)element->data.addr;
             }
 
+            if (!buffer->buffer_object && all_vbo)
+                *all_vbo = FALSE;
+
             if (buffer->query)
                 device->buffer_queries[device->num_buffer_queries++] = buffer->query;
         }
+    }
+    else if (all_vbo)
+    {
+        *all_vbo = FALSE;
     }
 }
 
@@ -415,7 +406,7 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
 {
     struct wined3d_stream_info *stream_info = &device->strided_streams;
     const struct wined3d_state *state = &device->stateBlock->state;
-    BOOL fixup = FALSE;
+    BOOL all_vbo;
 
     if (device->up_strided)
     {
@@ -423,16 +414,17 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         TRACE("=============================== Strided Input ================================\n");
         device_stream_info_from_strided(gl_info, device->up_strided, stream_info);
         if (TRACE_ON(d3d)) device_trace_strided_stream_info(stream_info);
+        all_vbo = FALSE;
     }
     else
     {
         TRACE("============================= Vertex Declaration =============================\n");
-        device_stream_info_from_declaration(device, stream_info, &fixup);
+        device_stream_info_from_declaration(device, stream_info, &all_vbo);
     }
 
     if (state->vertex_shader && !stream_info->position_transformed)
     {
-        if (state->vertex_declaration->half_float_conv_needed && !fixup)
+        if (state->vertex_declaration->half_float_conv_needed && !all_vbo)
         {
             TRACE("Using drawStridedSlow with vertex shaders for FLOAT16 conversion.\n");
             device->useDrawStridedSlow = TRUE;
@@ -448,7 +440,7 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         slow_mask |= -!gl_info->supported[ARB_VERTEX_ARRAY_BGRA]
                 & ((1 << WINED3D_FFP_DIFFUSE) | (1 << WINED3D_FFP_SPECULAR));
 
-        if ((stream_info->position_transformed || (stream_info->use_map & slow_mask)) && !fixup)
+        if ((stream_info->position_transformed || (stream_info->use_map & slow_mask)) && !all_vbo)
         {
             device->useDrawStridedSlow = TRUE;
         }
@@ -3452,11 +3444,12 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
         const struct wined3d_vertex_declaration *declaration, DWORD flags, DWORD dst_fvf)
 {
     struct wined3d_state *state = &device->stateBlock->state;
-    BOOL vbo = FALSE, streamWasUP = state->user_stream;
     struct wined3d_stream_info stream_info;
     const struct wined3d_gl_info *gl_info;
+    BOOL streamWasUP = state->user_stream;
     struct wined3d_context *context;
     struct wined3d_shader *vs;
+    unsigned int i;
     HRESULT hr;
 
     TRACE("device %p, src_start_idx %u, dst_idx %u, vertex_count %u, "
@@ -3477,38 +3470,35 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     vs = state->vertex_shader;
     state->vertex_shader = NULL;
     state->user_stream = FALSE;
-    device_stream_info_from_declaration(device, &stream_info, &vbo);
+    device_stream_info_from_declaration(device, &stream_info, NULL);
     state->user_stream = streamWasUP;
     state->vertex_shader = vs;
 
-    if (vbo || src_start_idx)
+    /* We can't convert FROM a VBO, and vertex buffers used to source into
+     * process_vertices() are unlikely to ever be used for drawing. Release
+     * VBOs in those buffers and fix up the stream_info structure.
+     *
+     * Also apply the start index. */
+    for (i = 0; i < (sizeof(stream_info.elements) / sizeof(*stream_info.elements)); ++i)
     {
-        unsigned int i;
-        /* ProcessVertices can't convert FROM a vbo, and vertex buffers used to source into ProcessVertices are
-         * unlikely to ever be used for drawing. Release vbos in those buffers and fix up the stream_info structure
-         *
-         * Also get the start index in, but only loop over all elements if there's something to add at all.
-         */
-        for (i = 0; i < (sizeof(stream_info.elements) / sizeof(*stream_info.elements)); ++i)
+        struct wined3d_stream_info_element *e;
+
+        if (!(stream_info.use_map & (1 << i)))
+            continue;
+
+        e = &stream_info.elements[i];
+        if (e->data.buffer_object)
         {
-            struct wined3d_stream_info_element *e;
-
-            if (!(stream_info.use_map & (1 << i))) continue;
-
-            e = &stream_info.elements[i];
-            if (e->data.buffer_object)
-            {
-                struct wined3d_buffer *vb = state->streams[e->stream_idx].buffer;
-                e->data.buffer_object = 0;
-                e->data.addr = (BYTE *)((ULONG_PTR)e->data.addr + (ULONG_PTR)buffer_get_sysmem(vb, gl_info));
-                ENTER_GL();
-                GL_EXTCALL(glDeleteBuffersARB(1, &vb->buffer_object));
-                vb->buffer_object = 0;
-                LEAVE_GL();
-            }
-            if (e->data.addr)
-                e->data.addr += e->stride * src_start_idx;
+            struct wined3d_buffer *vb = state->streams[e->stream_idx].buffer;
+            e->data.buffer_object = 0;
+            e->data.addr = (BYTE *)((ULONG_PTR)e->data.addr + (ULONG_PTR)buffer_get_sysmem(vb, gl_info));
+            ENTER_GL();
+            GL_EXTCALL(glDeleteBuffersARB(1, &vb->buffer_object));
+            vb->buffer_object = 0;
+            LEAVE_GL();
         }
+        if (e->data.addr)
+            e->data.addr += e->stride * src_start_idx;
     }
 
     hr = process_vertices_strided(device, dst_idx, vertex_count,

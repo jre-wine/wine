@@ -4686,6 +4686,11 @@ GpStatus gdip_format_string(HDC hdc,
     StringAlignment halign;
     GpStatus stat = Ok;
     SIZE size;
+    HotkeyPrefix hkprefix;
+    INT *hotkeyprefix_offsets=NULL;
+    INT hotkeyprefix_count=0;
+    INT hotkeyprefix_pos=0, hotkeyprefix_end_pos=0;
+    int seen_prefix=0;
 
     if(length == -1) length = lstrlenW(string);
 
@@ -4698,10 +4703,39 @@ GpStatus gdip_format_string(HDC hdc,
     if (rect->Width >= INT_MAX || rect->Width < 0.5) nwidth = INT_MAX;
     if (rect->Height >= INT_MAX || rect->Height < 0.5) nheight = INT_MAX;
 
+    if (format)
+        hkprefix = format->hkprefix;
+    else
+        hkprefix = HotkeyPrefixNone;
+
+    if (hkprefix == HotkeyPrefixShow)
+    {
+        for (i=0; i<length; i++)
+        {
+            if (string[i] == '&')
+                hotkeyprefix_count++;
+        }
+    }
+
+    if (hotkeyprefix_count)
+        hotkeyprefix_offsets = GdipAlloc(sizeof(INT) * hotkeyprefix_count);
+
+    hotkeyprefix_count = 0;
+
     for(i = 0, j = 0; i < length; i++){
         /* FIXME: This makes the indexes passed to callback inaccurate. */
         if(!isprintW(string[i]) && (string[i] != '\n'))
             continue;
+
+        if (seen_prefix && hkprefix == HotkeyPrefixShow && string[i] != '&')
+            hotkeyprefix_offsets[hotkeyprefix_count++] = j;
+        else if (!seen_prefix && hkprefix != HotkeyPrefixNone && string[i] == '&')
+        {
+            seen_prefix = 1;
+            continue;
+        }
+
+        seen_prefix = 0;
 
         stringdup[j] = string[i];
         j++;
@@ -4777,8 +4811,14 @@ GpStatus gdip_format_string(HDC hdc,
             break;
         }
 
+        for (hotkeyprefix_end_pos=hotkeyprefix_pos; hotkeyprefix_end_pos<hotkeyprefix_count; hotkeyprefix_end_pos++)
+            if (hotkeyprefix_offsets[hotkeyprefix_end_pos] >= sum + lineend)
+                break;
+
         stat = callback(hdc, stringdup, sum, lineend,
-            font, rect, format, lineno, &bounds, user_data);
+            font, rect, format, lineno, &bounds,
+            &hotkeyprefix_offsets[hotkeyprefix_pos],
+            hotkeyprefix_end_pos-hotkeyprefix_pos, user_data);
 
         if (stat != Ok)
             break;
@@ -4786,6 +4826,8 @@ GpStatus gdip_format_string(HDC hdc,
         sum += fit + (lret < fitcpy ? 1 : 0);
         height += size.cy;
         lineno++;
+
+        hotkeyprefix_pos = hotkeyprefix_end_pos;
 
         if(height > nheight)
             break;
@@ -4796,6 +4838,7 @@ GpStatus gdip_format_string(HDC hdc,
     }
 
     GdipFree(stringdup);
+    GdipFree(hotkeyprefix_offsets);
 
     return stat;
 }
@@ -4807,7 +4850,8 @@ struct measure_ranges_args {
 static GpStatus measure_ranges_callback(HDC hdc,
     GDIPCONST WCHAR *string, INT index, INT length, GDIPCONST GpFont *font,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
-    INT lineno, const RectF *bounds, void *user_data)
+    INT lineno, const RectF *bounds, INT *underlined_indexes,
+    INT underlined_index_count, void *user_data)
 {
     int i;
     GpStatus stat = Ok;
@@ -4899,20 +4943,26 @@ struct measure_string_args {
     RectF *bounds;
     INT *codepointsfitted;
     INT *linesfilled;
+    REAL rel_width, rel_height;
 };
 
 static GpStatus measure_string_callback(HDC hdc,
     GDIPCONST WCHAR *string, INT index, INT length, GDIPCONST GpFont *font,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
-    INT lineno, const RectF *bounds, void *user_data)
+    INT lineno, const RectF *bounds, INT *underlined_indexes,
+    INT underlined_index_count, void *user_data)
 {
     struct measure_string_args *args = user_data;
+    REAL new_width, new_height;
 
-    if (bounds->Width > args->bounds->Width)
-        args->bounds->Width = bounds->Width;
+    new_width = bounds->Width / args->rel_width;
+    new_height = (bounds->Height + bounds->Y - args->bounds->Y) / args->rel_height;
 
-    if (bounds->Height + bounds->Y > args->bounds->Height + args->bounds->Y)
-        args->bounds->Height = bounds->Height + bounds->Y - args->bounds->Y;
+    if (new_width > args->bounds->Width)
+        args->bounds->Width = new_width;
+
+    if (new_height > args->bounds->Height)
+        args->bounds->Height = new_height;
 
     if (args->codepointsfitted)
         *args->codepointsfitted = index + length;
@@ -4932,9 +4982,10 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format, RectF *bounds,
     INT *codepointsfitted, INT *linesfilled)
 {
-    HFONT oldfont;
+    HFONT oldfont, gdifont;
     struct measure_string_args args;
     HDC temp_hdc=NULL, hdc;
+    GpPointF pt[3];
 
     TRACE("(%p, %s, %i, %p, %s, %p, %p, %p, %p)\n", graphics,
         debugstr_wn(string, length), length, font, debugstr_rectf(rect), format,
@@ -4957,7 +5008,20 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     if(format)
         TRACE("may be ignoring some format flags: attr %x\n", format->attr);
 
-    oldfont = SelectObject(hdc, CreateFontIndirectW(&font->lfw));
+    pt[0].X = 0.0;
+    pt[0].Y = 0.0;
+    pt[1].X = 1.0;
+    pt[1].Y = 0.0;
+    pt[2].X = 0.0;
+    pt[2].Y = 1.0;
+    GdipTransformPoints(graphics, CoordinateSpaceDevice, CoordinateSpaceWorld, pt, 3);
+    args.rel_width = sqrt((pt[1].Y-pt[0].Y)*(pt[1].Y-pt[0].Y)+
+                     (pt[1].X-pt[0].X)*(pt[1].X-pt[0].X));
+    args.rel_height = sqrt((pt[2].Y-pt[0].Y)*(pt[2].Y-pt[0].Y)+
+                      (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
+
+    get_font_hfont(graphics, font, &gdifont);
+    oldfont = SelectObject(hdc, gdifont);
 
     bounds->X = rect->X;
     bounds->Y = rect->Y;
@@ -4971,7 +5035,8 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     gdip_format_string(hdc, string, length, font, rect, format,
         measure_string_callback, &args);
 
-    DeleteObject(SelectObject(hdc, oldfont));
+    SelectObject(hdc, oldfont);
+    DeleteObject(gdifont);
 
     if (temp_hdc)
         DeleteDC(temp_hdc);
@@ -4988,17 +5053,48 @@ struct draw_string_args {
 static GpStatus draw_string_callback(HDC hdc,
     GDIPCONST WCHAR *string, INT index, INT length, GDIPCONST GpFont *font,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
-    INT lineno, const RectF *bounds, void *user_data)
+    INT lineno, const RectF *bounds, INT *underlined_indexes,
+    INT underlined_index_count, void *user_data)
 {
     struct draw_string_args *args = user_data;
     PointF position;
+    GpStatus stat;
 
     position.X = args->x + bounds->X / args->rel_width;
     position.Y = args->y + bounds->Y / args->rel_height + args->ascent;
 
-    return GdipDrawDriverString(args->graphics, &string[index], length, font,
+    stat = GdipDrawDriverString(args->graphics, &string[index], length, font,
         args->brush, &position,
         DriverStringOptionsCmapLookup|DriverStringOptionsRealizedAdvance, NULL);
+
+    if (stat == Ok && underlined_index_count)
+    {
+        OUTLINETEXTMETRICW otm;
+        REAL underline_y, underline_height;
+        int i;
+
+        GetOutlineTextMetricsW(hdc, sizeof(otm), &otm);
+
+        underline_height = otm.otmsUnderscoreSize / args->rel_height;
+        underline_y = position.Y - otm.otmsUnderscorePosition / args->rel_height - underline_height / 2;
+
+        for (i=0; i<underlined_index_count; i++)
+        {
+            REAL start_x, end_x;
+            SIZE text_size;
+            INT ofs = underlined_indexes[i] - index;
+
+            GetTextExtentExPointW(hdc, string + index, ofs, INT_MAX, NULL, NULL, &text_size);
+            start_x = text_size.cx / args->rel_width;
+
+            GetTextExtentExPointW(hdc, string + index, ofs+1, INT_MAX, NULL, NULL, &text_size);
+            end_x = text_size.cx / args->rel_width;
+
+            GdipFillRectangle(args->graphics, (GpBrush*)args->brush, position.X+start_x, underline_y, end_x-start_x, underline_height);
+        }
+    }
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string,
@@ -6404,4 +6500,16 @@ GpStatus WINGDIPAPI GdipIsVisibleClipEmpty(GpGraphics *graphics, BOOL *res)
 cleanup:
     GdipDeleteRegion(rgn);
     return stat;
+}
+
+GpStatus WINGDIPAPI GdipResetPageTransform(GpGraphics *graphics)
+{
+    static int calls;
+
+    TRACE("(%p) stub\n", graphics);
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
 }

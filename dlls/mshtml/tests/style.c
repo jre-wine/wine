@@ -555,11 +555,34 @@ static void test_body_style(IHTMLStyle *style)
     ok(V_VT(&v) == VT_BSTR, "V_VT(fontSize) = %d\n", V_VT(&v));
     ok(!V_BSTR(&v), "V_BSTR(fontSize) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
 
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 12;
+    hres = IHTMLStyle_put_fontSize(style, v);
+    ok(hres == S_OK, "put_fontSize failed: %08x\n", hres);
+
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLStyle_get_fontSize(style, &v);
+    ok(hres == S_OK, "get_fontSize failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(fontSize) = %d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "12px"), "V_BSTR(fontSize) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+
     V_VT(&v) = VT_NULL;
     hres = IHTMLStyle_get_color(style, &v);
     ok(hres == S_OK, "get_color failed: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(color) = %d\n", V_VT(&v));
     ok(!V_BSTR(&v), "V_BSTR(color) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 0xfdfd;
+    hres = IHTMLStyle_put_color(style, v);
+    ok(hres == S_OK, "put_color failed: %08x\n", hres);
+
+    V_VT(&v) = VT_NULL;
+    hres = IHTMLStyle_get_color(style, &v);
+    ok(hres == S_OK, "get_color failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(color) = %d\n", V_VT(&v));
+    todo_wine
+    ok(!strcmp_wa(V_BSTR(&v), "#00fdfd"), "V_BSTR(color) = %s\n", wine_dbgstr_w(V_BSTR(&v)));
 
     b = 0xfefe;
     hres = IHTMLStyle_get_textDecorationUnderline(style, &b);
@@ -1231,6 +1254,18 @@ static void test_body_style(IHTMLStyle *style)
     ok(hres == S_OK, "get_backgroundColor: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "type failed: %d\n", V_VT(&v));
     ok(!V_BSTR(&v), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = a2bstr("red");
+    hres = IHTMLStyle_put_backgroundColor(style, v);
+    ok(hres == S_OK, "put_backgroundColor failed: %08x\n", hres);
+    VariantClear(&v);
+
+    hres = IHTMLStyle_get_backgroundColor(style, &v);
+    ok(hres == S_OK, "get_backgroundColor: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "type failed: %d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     /* padding */

@@ -161,6 +161,161 @@ static LPWSTR strdupW(LPCWSTR p)
     return ret;
 }
 
+/***********************************************************************
+ * get_driver_info [internal]
+ *
+ * get DRIVER_INFO_3W for the current printer handle,
+ * alloc the buffer, when needed
+ */
+static DRIVER_INFO_3W * get_driver_infoW(HANDLE hprn)
+{
+    DRIVER_INFO_3W *di3 = NULL;
+    DWORD needed = 0;
+    BOOL res;
+
+    res = GetPrinterDriverW(hprn, NULL, 3, NULL, 0, &needed);
+    if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+        di3 = HeapAlloc(GetProcessHeap(), 0, needed);
+        res = GetPrinterDriverW(hprn, NULL, 3, (LPBYTE)di3, needed, &needed);
+    }
+
+    if (res)
+        return di3;
+
+    TRACE("GetPrinterDriverW failed with %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, di3);
+    return NULL;
+}
+
+static DRIVER_INFO_3A * get_driver_infoA(HANDLE hprn)
+{
+    DRIVER_INFO_3A *di3 = NULL;
+    DWORD needed = 0;
+    BOOL res;
+
+    res = GetPrinterDriverA(hprn, NULL, 3, NULL, 0, &needed);
+    if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+        di3 = HeapAlloc(GetProcessHeap(), 0, needed);
+        res = GetPrinterDriverA(hprn, NULL, 3, (LPBYTE)di3, needed, &needed);
+    }
+
+    if (res)
+        return di3;
+
+    TRACE("GetPrinterDriverA failed with %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, di3);
+    return NULL;
+}
+
+
+/***********************************************************************
+ * get_printer_info [internal]
+ *
+ * get PRINTER_INFO_2W for the current printer handle,
+ * alloc the buffer, when needed
+ */
+static PRINTER_INFO_2W * get_printer_infoW(HANDLE hprn)
+{
+    PRINTER_INFO_2W *pi2 = NULL;
+    DWORD needed = 0;
+    BOOL res;
+
+    res = GetPrinterW(hprn, 2, NULL, 0, &needed);
+    if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+        pi2 = HeapAlloc(GetProcessHeap(), 0, needed);
+        res = GetPrinterW(hprn, 2, (LPBYTE)pi2, needed, &needed);
+    }
+
+    if (res)
+        return pi2;
+
+    TRACE("GetPrinterW failed with %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, pi2);
+    return NULL;
+}
+
+static PRINTER_INFO_2A * get_printer_infoA(HANDLE hprn)
+{
+    PRINTER_INFO_2A *pi2 = NULL;
+    DWORD needed = 0;
+    BOOL res;
+
+    res = GetPrinterA(hprn, 2, NULL, 0, &needed);
+    if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
+        pi2 = HeapAlloc(GetProcessHeap(), 0, needed);
+        res = GetPrinterA(hprn, 2, (LPBYTE)pi2, needed, &needed);
+    }
+
+    if (res)
+        return pi2;
+
+    TRACE("GetPrinterA failed with %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, pi2);
+    return NULL;
+}
+
+
+/***********************************************************************
+ * update_devmode_handle [internal]
+ *
+ * update a devmode handle for the given DEVMODE, alloc the buffer, when needed
+ */
+static HGLOBAL update_devmode_handleW(HGLOBAL hdm, DEVMODEW *dm)
+{
+    SIZE_T size = GlobalSize(hdm);
+    LPVOID ptr;
+
+    /* Increase / alloc the global memory block, when needed */
+    if ((dm->dmSize + dm->dmDriverExtra) > size) {
+        if (hdm)
+            hdm = GlobalReAlloc(hdm, dm->dmSize + dm->dmDriverExtra, 0);
+        else
+            hdm = GlobalAlloc(GMEM_MOVEABLE, dm->dmSize + dm->dmDriverExtra);
+    }
+
+    if (hdm) {
+        ptr = GlobalLock(hdm);
+        if (ptr) {
+            memcpy(ptr, dm, dm->dmSize + dm->dmDriverExtra);
+            GlobalUnlock(hdm);
+        }
+        else
+        {
+            GlobalFree(hdm);
+            hdm = NULL;
+        }
+    }
+    return hdm;
+}
+
+static HGLOBAL update_devmode_handleA(HGLOBAL hdm, DEVMODEA *dm)
+{
+    SIZE_T size = GlobalSize(hdm);
+    LPVOID ptr;
+
+    /* Increase / alloc the global memory block, when needed */
+    if ((dm->dmSize + dm->dmDriverExtra) > size) {
+        if (hdm)
+            hdm = GlobalReAlloc(hdm, dm->dmSize + dm->dmDriverExtra, 0);
+        else
+            hdm = GlobalAlloc(GMEM_MOVEABLE, dm->dmSize + dm->dmDriverExtra);
+    }
+
+    if (hdm) {
+        ptr = GlobalLock(hdm);
+        if (ptr) {
+            memcpy(ptr, dm, dm->dmSize + dm->dmDriverExtra);
+            GlobalUnlock(hdm);
+        }
+        else
+        {
+            GlobalFree(hdm);
+            hdm = NULL;
+        }
+    }
+    return hdm;
+}
+
 /***********************************************************
  * convert_to_devmodeA
  *
@@ -3775,24 +3930,34 @@ BOOL WINAPI PageSetupDlgW(LPPAGESETUPDLGW setupdlg)
  */
 HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lppd)
 {
-    DWORD     ret = E_FAIL;
-    LPVOID    ptr;
+    PRINTER_INFO_2A *pbuf;
+    DRIVER_INFO_3A *dbuf;
+    DEVMODEA *dm;
+    HRESULT hr = S_OK;
+    HANDLE hprn;
 
-    FIXME("(%p) not fully implemented\n", lppd);
     if ((lppd == NULL) || (lppd->lStructSize != sizeof(PRINTDLGEXA)))
         return E_INVALIDARG;
 
     if (!IsWindow(lppd->hwndOwner))
         return E_HANDLE;
 
+    if (lppd->nStartPage != START_PAGE_GENERAL)
+    {
+        if (!lppd->nPropertyPages)
+            return E_INVALIDARG;
+
+        FIXME("custom property sheets (%d at %p) not supported\n", lppd->nPropertyPages, lppd->lphPropertyPages);
+    }
+
+    /* Use PD_NOPAGENUMS or set nMaxPageRanges and lpPageRanges */
+    if (!(lppd->Flags & PD_NOPAGENUMS) && (!lppd->nMaxPageRanges || !lppd->lpPageRanges))
+    {
+        return E_INVALIDARG;
+    }
+
     if (lppd->Flags & PD_RETURNDEFAULT)
     {
-        PRINTER_INFO_2A *pbuf;
-        DRIVER_INFO_2A  *dbuf;
-        HANDLE hprn;
-        DWORD needed = 1024;
-        BOOL bRet;
-
         if (lppd->hDevMode || lppd->hDevNames)
         {
             WARN("hDevMode or hDevNames non-zero for PD_RETURNDEFAULT\n");
@@ -3806,66 +3971,56 @@ HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lppd)
             return E_FAIL;
         }
 
-        pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-        bRet = GetPrinterA(hprn, 2, (LPBYTE)pbuf, needed, &needed);
-        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER))
+        pbuf = get_printer_infoA(hprn);
+        if (!pbuf)
         {
-            HeapFree(GetProcessHeap(), 0, pbuf);
-            pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-            bRet = GetPrinterA(hprn, 2, (LPBYTE)pbuf, needed, &needed);
-        }
-        if (!bRet)
-        {
-            HeapFree(GetProcessHeap(), 0, pbuf);
             ClosePrinter(hprn);
             return E_FAIL;
         }
 
-        needed = 1024;
-        dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-        bRet = GetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
-        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER))
+        dbuf = get_driver_infoA(hprn);
+        if (!dbuf)
         {
-            HeapFree(GetProcessHeap(), 0, dbuf);
-            dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-            bRet = GetPrinterDriverA(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
-        }
-        if (!bRet)
-        {
-            ERR("GetPrinterDriverА failed, last error %d, fix your config for printer %s!\n",
-                GetLastError(), pbuf->pPrinterName);
-            HeapFree(GetProcessHeap(), 0, dbuf);
             HeapFree(GetProcessHeap(), 0, pbuf);
             COMDLG32_SetCommDlgExtendedError(PDERR_RETDEFFAILURE);
             ClosePrinter(hprn);
             return E_FAIL;
         }
-        ClosePrinter(hprn);
+        dm = pbuf->pDevMode;
+    }
+    else
+    {
+        FIXME("(%p) dialog not implemented\n", lppd);
+        return E_NOTIMPL;
 
-        PRINTDLG_CreateDevNames(&(lppd->hDevNames),
-                      dbuf->pDriverPath,
-                      pbuf->pPrinterName,
-                      pbuf->pPortName);
-        lppd->hDevMode = GlobalAlloc(GMEM_MOVEABLE, pbuf->pDevMode->dmSize +
-                                     pbuf->pDevMode->dmDriverExtra);
-        if (lppd->hDevMode)
-        {
-            ptr = GlobalLock(lppd->hDevMode);
-            if (ptr)
-            {
-                memcpy(ptr, pbuf->pDevMode, pbuf->pDevMode->dmSize +
-                       pbuf->pDevMode->dmDriverExtra);
-                GlobalUnlock(lppd->hDevMode);
-                ret = S_OK;
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, pbuf);
-        HeapFree(GetProcessHeap(), 0, dbuf);
-
-        return ret;
     }
 
-    return E_NOTIMPL;
+    ClosePrinter(hprn);
+
+    PRINTDLG_CreateDevNames(&(lppd->hDevNames), dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName);
+    if (!lppd->hDevNames)
+        hr = E_FAIL;
+
+    lppd->hDevMode = update_devmode_handleA(lppd->hDevMode, dm);
+    if (!hr && lppd->hDevMode) {
+        if (lppd->Flags & PD_RETURNDC) {
+            lppd->hDC = CreateDCA(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, dm);
+            if (!lppd->hDC)
+                hr = E_FAIL;
+        }
+        else if (lppd->Flags & PD_RETURNIC) {
+            lppd->hDC = CreateICA(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, dm);
+            if (!lppd->hDC)
+                hr = E_FAIL;
+        }
+    }
+    else
+        hr = E_FAIL;
+
+    HeapFree(GetProcessHeap(), 0, pbuf);
+    HeapFree(GetProcessHeap(), 0, dbuf);
+
+    return hr;
 }
 
 /***********************************************************************
@@ -3896,10 +4051,11 @@ HRESULT WINAPI PrintDlgExA(LPPRINTDLGEXA lppd)
  */
 HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lppd)
 {
-    DWORD     ret = E_FAIL;
-    LPVOID    ptr;
-
-    FIXME("(%p) not fully implemented\n", lppd);
+    PRINTER_INFO_2W *pbuf;
+    DRIVER_INFO_3W *dbuf;
+    DEVMODEW *dm;
+    HRESULT hr = S_OK;
+    HANDLE hprn;
 
     if ((lppd == NULL) || (lppd->lStructSize != sizeof(PRINTDLGEXW))) {
         return E_INVALIDARG;
@@ -3909,12 +4065,21 @@ HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lppd)
         return E_HANDLE;
     }
 
+    if (lppd->nStartPage != START_PAGE_GENERAL)
+    {
+        if (!lppd->nPropertyPages)
+            return E_INVALIDARG;
+
+        FIXME("custom property sheets (%d at %p) not supported\n", lppd->nPropertyPages, lppd->lphPropertyPages);
+    }
+
+    /* Use PD_NOPAGENUMS or set nMaxPageRanges and lpPageRanges */
+    if (!(lppd->Flags & PD_NOPAGENUMS) && (!lppd->nMaxPageRanges || !lppd->lpPageRanges))
+    {
+        return E_INVALIDARG;
+    }
+
     if (lppd->Flags & PD_RETURNDEFAULT) {
-        PRINTER_INFO_2W *pbuf;
-        DRIVER_INFO_2W  *dbuf;
-        HANDLE hprn;
-        DWORD needed = 1024;
-        BOOL bRet;
 
         if (lppd->hDevMode || lppd->hDevNames) {
             WARN("hDevMode or hDevNames non-zero for PD_RETURNDEFAULT\n");
@@ -3927,58 +4092,54 @@ HRESULT WINAPI PrintDlgExW(LPPRINTDLGEXW lppd)
             return E_FAIL;
         }
 
-        pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-        bRet = GetPrinterW(hprn, 2, (LPBYTE)pbuf, needed, &needed);
-        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-            HeapFree(GetProcessHeap(), 0, pbuf);
-            pbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-            bRet = GetPrinterW(hprn, 2, (LPBYTE)pbuf, needed, &needed);
-        }
-        if (!bRet) {
-            HeapFree(GetProcessHeap(), 0, pbuf);
+        pbuf = get_printer_infoW(hprn);
+        if (!pbuf)
+        {
             ClosePrinter(hprn);
             return E_FAIL;
         }
 
-        needed = 1024;
-        dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-        bRet = GetPrinterDriverW(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
-        if (!bRet && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-            HeapFree(GetProcessHeap(), 0, dbuf);
-            dbuf = HeapAlloc(GetProcessHeap(), 0, needed);
-            bRet = GetPrinterDriverW(hprn, NULL, 3, (LPBYTE)dbuf, needed, &needed);
-        }
-        if (!bRet) {
-            ERR("GetPrinterDriverW failed, last error %d, fix your config for printer %s!\n",
-                GetLastError(), debugstr_w(pbuf->pPrinterName));
-            HeapFree(GetProcessHeap(), 0, dbuf);
+        dbuf = get_driver_infoW(hprn);
+        if (!dbuf)
+        {
             HeapFree(GetProcessHeap(), 0, pbuf);
             COMDLG32_SetCommDlgExtendedError(PDERR_RETDEFFAILURE);
             ClosePrinter(hprn);
             return E_FAIL;
         }
-        ClosePrinter(hprn);
+        dm = pbuf->pDevMode;
+    }
+    else
+    {
+        FIXME("(%p) dialog not implemented\n", lppd);
+        return E_NOTIMPL;
 
-        PRINTDLG_CreateDevNamesW(&(lppd->hDevNames),
-                      dbuf->pDriverPath,
-                      pbuf->pPrinterName,
-                      pbuf->pPortName);
-        lppd->hDevMode = GlobalAlloc(GMEM_MOVEABLE, pbuf->pDevMode->dmSize +
-                         pbuf->pDevMode->dmDriverExtra);
-        if (lppd->hDevMode) {
-            ptr = GlobalLock(lppd->hDevMode);
-            if (ptr) {
-                memcpy(ptr, pbuf->pDevMode, pbuf->pDevMode->dmSize +
-                    pbuf->pDevMode->dmDriverExtra);
-                GlobalUnlock(lppd->hDevMode);
-                ret = S_OK;
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, pbuf);
-        HeapFree(GetProcessHeap(), 0, dbuf);
-
-        return ret;
     }
 
-    return E_NOTIMPL;
+    ClosePrinter(hprn);
+
+    PRINTDLG_CreateDevNamesW(&(lppd->hDevNames), dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName);
+    if (!lppd->hDevNames)
+        hr = E_FAIL;
+
+    lppd->hDevMode = update_devmode_handleW(lppd->hDevMode, dm);
+    if (!hr && lppd->hDevMode) {
+        if (lppd->Flags & PD_RETURNDC) {
+            lppd->hDC = CreateDCW(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, dm);
+            if (!lppd->hDC)
+                hr = E_FAIL;
+        }
+        else if (lppd->Flags & PD_RETURNIC) {
+            lppd->hDC = CreateICW(dbuf->pDriverPath, pbuf->pPrinterName, pbuf->pPortName, dm);
+            if (!lppd->hDC)
+                hr = E_FAIL;
+        }
+    }
+    else
+        hr = E_FAIL;
+
+    HeapFree(GetProcessHeap(), 0, pbuf);
+    HeapFree(GetProcessHeap(), 0, dbuf);
+
+    return hr;
 }

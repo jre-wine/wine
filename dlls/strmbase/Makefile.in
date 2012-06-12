@@ -9,7 +9,10 @@ C_SRCS = \
 	pin.c \
 	pospass.c \
 	qualitycontrol.c \
+	renderer.c \
 	seeking.c \
-	transform.c
+	transform.c \
+	video.c \
+	window.c
 
 @MAKE_IMPLIB_RULES@

@@ -134,6 +134,27 @@ static char data_full[] =
 " }\n"
 "}\n";
 
+static char data_d3drm_load[] =
+"xof 0302txt 0064\n"
+"Header Object\n"
+"{\n"
+"1; 0; 1;\n"
+"}\n"
+"Mesh Object1\n"
+"{\n"
+" 1;\n"
+" 0.1; 0.2; 0.3;,\n"
+" 1;\n"
+" 3; 0, 1, 2;;\n"
+"}\n"
+"Mesh Object2\n"
+"{\n"
+" 1;\n"
+" 0.1; 0.2; 0.3;,\n"
+" 1;\n"
+" 3; 0, 1, 2;;\n"
+"}\n";
+
 static void test_MeshBuilder(void)
 {
     HRESULT hr;
@@ -243,24 +264,24 @@ static void test_MeshBuilder(void)
     ok(val1 == 3, "Wrong number of vertices %d (must be 3)\n", val1);
     ok(val2 == 3, "Wrong number of normals %d (must be 3)\n", val2);
     ok(val3 == 8, "Wrong number of face data bytes %d (must be 8)\n", val3);
-    ok(v[0].x == 0.1f, "Wrong component v[0].x = %f (expected 0.1)\n", v[0].x);
-    ok(v[0].y == 0.2f, "Wrong component v[0].y = %f (expected 0.2)\n", v[0].y);
-    ok(v[0].z == 0.3f, "Wrong component v[0].z = %f (expected 0.3)\n", v[0].z);
-    ok(v[1].x == 0.4f, "Wrong component v[1].x = %f (expected 0.4)\n", v[1].x);
-    ok(v[1].y == 0.5f, "Wrong component v[1].y = %f (expected 0.5)\n", v[1].y);
-    ok(v[1].z == 0.6f, "Wrong component v[1].z = %f (expected 0.6)\n", v[1].z);
-    ok(v[2].x == 0.7f, "Wrong component v[2].x = %f (expected 0.7)\n", v[2].x);
-    ok(v[2].y == 0.8f, "Wrong component v[2].y = %f (expected 0.8)\n", v[2].y);
-    ok(v[2].z == 0.9f, "Wrong component v[2].z = %f (expected 0.9)\n", v[2].z);
-    ok(n[0].x == 1.1f, "Wrong component n[0].x = %f (expected 1.1)\n", n[0].x);
-    ok(n[0].y == 1.2f, "Wrong component n[0].y = %f (expected 1.2)\n", n[0].y);
-    ok(n[0].z == 1.3f, "Wrong component n[0].z = %f (expected 1.3)\n", n[0].z);
-    ok(n[1].x == 1.4f, "Wrong component n[1].x = %f (expected 1.4)\n", n[1].x);
-    ok(n[1].y == 1.5f, "Wrong component n[1].y = %f (expected 1.5)\n", n[1].y);
-    ok(n[1].z == 1.6f, "Wrong component n[1].z = %f (expected 1.6)\n", n[1].z);
-    ok(n[2].x == 1.7f, "Wrong component n[2].x = %f (expected 1.7)\n", n[2].x);
-    ok(n[2].y == 1.8f, "Wrong component n[2].y = %f (expected 1.8)\n", n[2].y);
-    ok(n[2].z == 1.9f, "Wrong component n[2].z = %f (expected 1.9)\n", n[2].z);
+    ok(U1(v[0]).x == 0.1f, "Wrong component v[0].x = %f (expected 0.1)\n", U1(v[0]).x);
+    ok(U2(v[0]).y == 0.2f, "Wrong component v[0].y = %f (expected 0.2)\n", U2(v[0]).y);
+    ok(U3(v[0]).z == 0.3f, "Wrong component v[0].z = %f (expected 0.3)\n", U3(v[0]).z);
+    ok(U1(v[1]).x == 0.4f, "Wrong component v[1].x = %f (expected 0.4)\n", U1(v[1]).x);
+    ok(U2(v[1]).y == 0.5f, "Wrong component v[1].y = %f (expected 0.5)\n", U2(v[1]).y);
+    ok(U3(v[1]).z == 0.6f, "Wrong component v[1].z = %f (expected 0.6)\n", U3(v[1]).z);
+    ok(U1(v[2]).x == 0.7f, "Wrong component v[2].x = %f (expected 0.7)\n", U1(v[2]).x);
+    ok(U2(v[2]).y == 0.8f, "Wrong component v[2].y = %f (expected 0.8)\n", U2(v[2]).y);
+    ok(U3(v[2]).z == 0.9f, "Wrong component v[2].z = %f (expected 0.9)\n", U3(v[2]).z);
+    ok(U1(n[0]).x == 1.1f, "Wrong component n[0].x = %f (expected 1.1)\n", U1(n[0]).x);
+    ok(U2(n[0]).y == 1.2f, "Wrong component n[0].y = %f (expected 1.2)\n", U2(n[0]).y);
+    ok(U3(n[0]).z == 1.3f, "Wrong component n[0].z = %f (expected 1.3)\n", U3(n[0]).z);
+    ok(U1(n[1]).x == 1.4f, "Wrong component n[1].x = %f (expected 1.4)\n", U1(n[1]).x);
+    ok(U2(n[1]).y == 1.5f, "Wrong component n[1].y = %f (expected 1.5)\n", U2(n[1]).y);
+    ok(U3(n[1]).z == 1.6f, "Wrong component n[1].z = %f (expected 1.6)\n", U3(n[1]).z);
+    ok(U1(n[2]).x == 1.7f, "Wrong component n[2].x = %f (expected 1.7)\n", U1(n[2]).x);
+    ok(U2(n[2]).y == 1.8f, "Wrong component n[2].y = %f (expected 1.8)\n", U2(n[2]).y);
+    ok(U3(n[2]).z == 1.9f, "Wrong component n[2].z = %f (expected 1.9)\n", U3(n[2]).z);
     ok(f[0] == 3 , "Wrong component f[0] = %d (expected 3)\n", f[0]);
     ok(f[1] == 0 , "Wrong component f[1] = %d (expected 0)\n", f[1]);
     ok(f[2] == 0 , "Wrong component f[2] = %d (expected 0)\n", f[2]);
@@ -579,6 +600,40 @@ static void test_Frame(void)
     IDirect3DRM_Release(pD3DRM);
 }
 
+static int nb_objects = 0;
+static const GUID* refiids[] =
+{
+    &IID_IDirect3DRMMeshBuilder,
+    &IID_IDirect3DRMMeshBuilder
+};
+
+void __cdecl object_load_callback(LPDIRECT3DRMOBJECT object, REFIID objectguid, LPVOID arg)
+{
+    ok(object != NULL, "Arg 1 should not be null\n");
+    ok(IsEqualGUID(objectguid, refiids[nb_objects]), "Arg 2 should is incorrect\n");
+    ok(arg == (LPVOID)0xdeadbeef, "Arg 3 should be 0xdeadbeef (got %p)\n", arg);
+    nb_objects++;
+}
+
+static void test_d3drm_load(void)
+{
+    HRESULT hr;
+    LPDIRECT3DRM pD3DRM;
+    D3DRMLOADMEMORY info;
+    const GUID* req_refiids[] = { &IID_IDirect3DRMMeshBuilder };
+
+    hr = pDirect3DRMCreate(&pD3DRM);
+    ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
+
+    info.lpMemory = data_d3drm_load;
+    info.dSize = strlen(data_d3drm_load);
+    hr = IDirect3DRM_Load(pD3DRM, &info, NULL, (GUID**)req_refiids, 1, D3DRMLOAD_FROMMEMORY, object_load_callback, (LPVOID)0xdeadbeef, NULL, NULL, NULL);
+    ok(hr == D3DRM_OK, "Cannot load data (hr = %x)\n", hr);
+    ok(nb_objects == 2, "Should have loaded 2 objects (got %d)\n", nb_objects);
+
+    IDirect3DRM_Release(pD3DRM);
+}
+
 START_TEST(d3drm)
 {
     if (!InitFunctionPtrs())
@@ -587,6 +642,7 @@ START_TEST(d3drm)
     test_MeshBuilder();
     test_MeshBuilder3();
     test_Frame();
+    test_d3drm_load();
 
     FreeLibrary(d3drm_handle);
 }

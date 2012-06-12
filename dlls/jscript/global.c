@@ -371,7 +371,7 @@ static HRESULT JSGlobal_eval(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     }
 
     TRACE("parsing %s\n", debugstr_w(V_BSTR(arg)));
-    hres = compile_script(ctx, V_BSTR(arg), NULL, TRUE, &code);
+    hres = compile_script(ctx, V_BSTR(arg), NULL, TRUE, FALSE, &code);
     if(FAILED(hres)) {
         WARN("parse (%s) failed: %08x\n", debugstr_w(V_BSTR(arg)), hres);
         return throw_syntax_error(ctx, ei, hres, NULL);
@@ -386,21 +386,19 @@ static HRESULT JSGlobal_eval(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
 static HRESULT JSGlobal_isNaN(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
-    VARIANT_BOOL ret = VARIANT_FALSE;
-    VARIANT num;
+    VARIANT_BOOL ret = VARIANT_TRUE;
+    double n;
     HRESULT hres;
 
     TRACE("\n");
 
     if(arg_cnt(dp)) {
-        hres = to_number(ctx, get_arg(dp,0), ei, &num);
+        hres = to_number(ctx, get_arg(dp,0), ei, &n);
         if(FAILED(hres))
             return hres;
 
-        if(V_VT(&num) == VT_R8 && isnan(V_R8(&num)))
-            ret = VARIANT_TRUE;
-    }else {
-        ret = VARIANT_TRUE;
+        if(!isnan(n))
+            ret = VARIANT_FALSE;
     }
 
     if(retv) {
@@ -419,13 +417,13 @@ static HRESULT JSGlobal_isFinite(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
     TRACE("\n");
 
     if(arg_cnt(dp)) {
-        VARIANT num;
+        double n;
 
-        hres = to_number(ctx, get_arg(dp,0), ei, &num);
+        hres = to_number(ctx, get_arg(dp,0), ei, &n);
         if(FAILED(hres))
             return hres;
 
-        if(V_VT(&num) != VT_R8 || (!isinf(V_R8(&num)) && !isnan(V_R8(&num))))
+        if(!isinf(n) && !isnan(n))
             ret = VARIANT_TRUE;
     }
 

@@ -347,6 +347,9 @@ HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWST
 
         if (SUCCEEDED(ret))
         {
+            if(pwszVersion)
+                pVersion[0] = pwszVersion[0];
+
             *dwDirectoryLength = dwDirectory;
             ret = ICLRRuntimeInfo_GetRuntimeDirectory(info, pDirectory, dwDirectoryLength);
         }
@@ -359,7 +362,7 @@ HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWST
 
 HRESULT WINAPI GetRequestedRuntimeVersion(LPWSTR pExe, LPWSTR pVersion, DWORD cchBuffer, DWORD *dwlength)
 {
-    TRACE("(%s, %p, %d, %p)\n", debugstr_w(pExe), debugstr_w(pExe), cchBuffer, dwlength);
+    TRACE("(%s, %p, %d, %p)\n", debugstr_w(pExe), pVersion, cchBuffer, dwlength);
 
     if(!dwlength)
         return E_POINTER;

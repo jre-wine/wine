@@ -884,10 +884,9 @@ static VOID set_installer_properties(MSIPACKAGE *package)
 
     GetNativeSystemInfo( &sys_info );
     sprintfW( bufstr, szIntFormat, sys_info.wProcessorLevel );
+    msi_set_property( package->db, szIntel, bufstr );
     if (sys_info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_INTEL)
     {
-        msi_set_property( package->db, szIntel, bufstr );
-
         GetSystemDirectoryW( pth, MAX_PATH );
         PathAddBackslashW( pth );
         msi_set_property( package->db, szSystemFolder, pth );
@@ -1154,9 +1153,9 @@ void msi_adjust_privilege_properties( MSIPACKAGE *package )
 
 MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPCWSTR base_url )
 {
-    static const WCHAR szpi[] = {'%','i',0};
+    static const WCHAR fmtW[] = {'%','u',0};
     MSIPACKAGE *package;
-    WCHAR uilevel[10];
+    WCHAR uilevel[11];
     UINT r;
 
     TRACE("%p\n", db);
@@ -1181,7 +1180,7 @@ MSIPACKAGE *MSI_CreatePackage( MSIDATABASE *db, LPCWSTR base_url )
         set_installed_prop( package );
         set_installer_properties( package );
 
-        sprintfW(uilevel,szpi,gUILevel);
+        sprintfW( uilevel, fmtW, gUILevel & INSTALLUILEVEL_MASK );
         msi_set_property(package->db, szUILevel, uilevel);
 
         r = msi_load_summary_properties( package );
@@ -1297,6 +1296,8 @@ static UINT msi_parse_summary( MSISUMMARYINFO *si, MSIPACKAGE *package )
         package->platform = PLATFORM_INTEL64;
     else if (!strcmpW( template, szX64 ) || !strcmpW( template, szAMD64 ))
         package->platform = PLATFORM_X64;
+    else if (!strcmpW( template, szARM ))
+        package->platform = PLATFORM_ARM;
     else
     {
         WARN("unknown platform %s\n", debugstr_w(template));
@@ -1341,9 +1342,11 @@ static UINT validate_package( MSIPACKAGE *package )
     UINT i;
 
     if (package->platform == PLATFORM_INTEL64)
-    {
         return ERROR_INSTALL_PLATFORM_UNSUPPORTED;
-    }
+#ifndef __arm__
+    if (package->platform == PLATFORM_ARM)
+        return ERROR_INSTALL_PLATFORM_UNSUPPORTED;
+#endif
     IsWow64Process( GetCurrentProcess(), &is_wow64 );
     if (package->platform == PLATFORM_X64)
     {

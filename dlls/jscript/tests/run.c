@@ -29,6 +29,8 @@
 
 static const CLSID CLSID_JScript =
     {0xf414c260,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
+static const CLSID CLSID_JScriptEncode =
+    {0xf414c262,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -82,7 +84,7 @@ DEFINE_EXPECT(DeleteMemberByDispID);
 #define DISPID_GLOBAL_OK            0x1004
 #define DISPID_GLOBAL_GETVT         0x1005
 #define DISPID_GLOBAL_TESTOBJ       0x1006
-#define DISPID_GLOBAL_NULL_BSTR     0x1007
+#define DISPID_GLOBAL_GETNULLBSTR   0x1007
 #define DISPID_GLOBAL_NULL_DISP     0x1008
 #define DISPID_GLOBAL_TESTTHIS      0x1009
 #define DISPID_GLOBAL_TESTTHIS2     0x100a
@@ -93,9 +95,12 @@ DEFINE_EXPECT(DeleteMemberByDispID);
 #define DISPID_GLOBAL_ISWIN64       0x100f
 #define DISPID_GLOBAL_PUREDISP      0x1010
 #define DISPID_GLOBAL_TESTPROPDELETE  0x1010
+#define DISPID_GLOBAL_ISNULLBSTR    0x1011
 
 #define DISPID_TESTOBJ_PROP         0x2000
 #define DISPID_TESTOBJ_ONLYDISPID   0x2001
+
+#define JS_E_INVALID_CHAR 0x800a03f6
 
 static const WCHAR testW[] = {'t','e','s','t',0};
 static const CHAR testA[] = "test";
@@ -107,6 +112,7 @@ static const char *test_name = "(null)";
 static IDispatch *script_disp;
 static int invoke_version;
 static IActiveScriptError *script_error;
+static const CLSID *engine_clsid = &CLSID_JScript;
 
 /* Returns true if the user interface is in English. Note that this does not
  * presume of the formatting of dates, numbers, etc.
@@ -433,8 +439,12 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         *pid = DISPID_GLOBAL_TESTOBJ;
         return S_OK;
     }
-    if(!strcmp_wa(bstrName, "createNullBSTR")) {
-        *pid = DISPID_GLOBAL_NULL_BSTR;
+    if(!strcmp_wa(bstrName, "getNullBSTR")) {
+        *pid = DISPID_GLOBAL_GETNULLBSTR;
+        return S_OK;
+    }
+    if(!strcmp_wa(bstrName, "isNullBSTR")) {
+        *pid = DISPID_GLOBAL_ISNULLBSTR;
         return S_OK;
     }
     if(!strcmp_wa(bstrName, "nullDisp")) {
@@ -658,11 +668,26 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_DISPATCH(pvarRes) = (IDispatch*)&pureDisp;
         return S_OK;
 
-    case DISPID_GLOBAL_NULL_BSTR:
+    case DISPID_GLOBAL_GETNULLBSTR:
         if(pvarRes) {
             V_VT(pvarRes) = VT_BSTR;
             V_BSTR(pvarRes) = NULL;
         }
+        return S_OK;
+
+    case DISPID_GLOBAL_ISNULLBSTR:
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg == NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) ==  VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+        ok(V_VT(pdp->rgvarg) == VT_BSTR, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
+
+        V_VT(pvarRes) = VT_BOOL;
+        V_BOOL(pvarRes) = V_BSTR(pdp->rgvarg) ? VARIANT_FALSE : VARIANT_TRUE;
         return S_OK;
 
     case DISPID_GLOBAL_ISWIN64:
@@ -1016,7 +1041,7 @@ static IActiveScript *create_script(void)
     VARIANT v;
     HRESULT hres;
 
-    hres = CoCreateInstance(&CLSID_JScript, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
+    hres = CoCreateInstance(engine_clsid, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IActiveScript, (void**)&script);
     ok(hres == S_OK, "CoCreateInstance failed: %08x\n", hres);
 
@@ -1440,7 +1465,7 @@ static void test_isvisible(BOOL global_members)
     IUnknown_Release(parser);
 }
 
-static void run_tests(void)
+static BOOL run_tests(void)
 {
     HRESULT hres;
 
@@ -1450,7 +1475,7 @@ static void run_tests(void)
         script = create_script();
         if(!script) {
             win_skip("Could not create script\n");
-            return;
+            return FALSE;
         }
         IActiveScript_Release(script);
     }
@@ -1648,6 +1673,73 @@ static void run_tests(void)
         "Microsoft JScript runtime error",
         "Object expected",
         NULL);
+
+    return TRUE;
+}
+
+static void run_encoded_tests(void)
+{
+    BSTR src;
+    HRESULT hres;
+
+    engine_clsid = &CLSID_JScriptEncode;
+
+    SET_EXPECT(global_success_d);
+    SET_EXPECT(global_success_i);
+    /*             |reportSuccess();                           | */
+    parse_script_a("#@~^EAAAAA==.\x7fwGMYUEm1+kd`*iAQYAAA==^#~@");
+    CHECK_CALLED(global_success_d);
+    CHECK_CALLED(global_success_i);
+
+    SET_EXPECT(global_success_d);
+    SET_EXPECT(global_success_i);
+    parse_script_a("reportSuccess();");
+    CHECK_CALLED(global_success_d);
+    CHECK_CALLED(global_success_i);
+
+    SET_EXPECT(global_success_d);
+    SET_EXPECT(global_success_i);
+    /*                   |Success                         | */
+    parse_script_a("report#@~^BwAAAA==j!m^\x7f/k2QIAAA==^#~@();");
+    CHECK_CALLED(global_success_d);
+    CHECK_CALLED(global_success_i);
+
+    SET_EXPECT(global_success_d);
+    SET_EXPECT(global_success_i);
+    /*             |\r\n\treportSuccess();\r\n                        | */
+    parse_script_a("#@~^GQAAAA==@#@&d.\x7fwKDYUE1^+k/c#p@#@&OAYAAA==^#~@");
+    CHECK_CALLED(global_success_d);
+    CHECK_CALLED(global_success_i);
+
+    /*                   v                                   */
+    src = a2bstr("#@~^EAA*AA==.\x7fwGMYUEm1+kd`*iAQYAAA==^#~@");
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, src);
+    SysFreeString(src);
+    ok(hres == JS_E_INVALID_CHAR, "parse_script failed %08x\n", hres);
+
+    /*                      vv                                 */
+    src = a2bstr("#@~^EAAAAAAA==.\x7fwGMYUEm1+kd`*iAQYAAA==^#~@");
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, src);
+    SysFreeString(src);
+    ok(hres == JS_E_INVALID_CHAR, "parse_script failed %08x\n", hres);
+
+    /*                      v                                */
+    src = a2bstr("#@~^EAAAAA^=.\x7fwGMYUEm1+kd`*iAQYAAA==^#~@");
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, src);
+    SysFreeString(src);
+    ok(hres == JS_E_INVALID_CHAR, "parse_script failed %08x\n", hres);
+
+    /*                                     v                 */
+    src = a2bstr("#@~^EAAAAA==.\x7fwGMYUEm1ekd`*iAQYAAA==^#~@");
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, src);
+    SysFreeString(src);
+    ok(hres == JS_E_INVALID_CHAR, "parse_script failed %08x\n", hres);
+
+    /*                                                    vv  */
+    src = a2bstr("#@~^EAAAAA==.\x7fwGMYUEm1+kd`*iAQYAAA==^~#@");
+    hres = parse_script(SCRIPTITEM_GLOBALMEMBERS, src);
+    SysFreeString(src);
+    ok(hres == JS_E_INVALID_CHAR, "parse_script failed %08x\n", hres);
 }
 
 static BOOL check_jscript(void)
@@ -1690,7 +1782,10 @@ START_TEST(run)
 
         trace("invoke version 2\n");
         invoke_version = 2;
-        run_tests();
+        if(run_tests()) {
+            trace("JSctipt.Encode tests...\n");
+            run_encoded_tests();
+        }
     }
 
     CoUninitialize();

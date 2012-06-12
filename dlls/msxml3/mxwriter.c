@@ -1131,8 +1131,14 @@ static HRESULT WINAPI SAXContentHandler_ignorableWhitespace(
     int nchars)
 {
     mxwriter *This = impl_from_ISAXContentHandler( iface );
-    FIXME("(%p)->(%s)\n", This, debugstr_wn(chars, nchars));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_wn(chars, nchars));
+
+    if (!chars) return E_INVALIDARG;
+
+    write_output_buffer(This->buffer, chars, nchars);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI SAXContentHandler_processingInstruction(
@@ -1143,8 +1149,27 @@ static HRESULT WINAPI SAXContentHandler_processingInstruction(
     int ndata)
 {
     mxwriter *This = impl_from_ISAXContentHandler( iface );
-    FIXME("(%p)->(%s %s)\n", This, debugstr_wn(target, ntarget), debugstr_wn(data, ndata));
-    return E_NOTIMPL;
+    static const WCHAR openpiW[] = {'<','?'};
+    static const WCHAR closepiW[] = {'?','>','\r','\n'};
+
+    TRACE("(%p)->(%s %s)\n", This, debugstr_wn(target, ntarget), debugstr_wn(data, ndata));
+
+    if (!target) return E_INVALIDARG;
+
+    write_output_buffer(This->buffer, openpiW, sizeof(openpiW)/sizeof(WCHAR));
+
+    if (*target)
+        write_output_buffer(This->buffer, target, ntarget);
+
+    if (data && *data && ndata)
+    {
+        write_output_buffer(This->buffer, spaceW, 1);
+        write_output_buffer(This->buffer, data, ndata);
+    }
+
+    write_output_buffer(This->buffer, closepiW, sizeof(closepiW)/sizeof(WCHAR));
+
+    return S_OK;
 }
 
 static HRESULT WINAPI SAXContentHandler_skippedEntity(

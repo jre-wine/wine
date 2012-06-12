@@ -142,52 +142,58 @@ static HRESULT WINAPI ddraw_surface7_QueryInterface(IDirectDrawSurface7 *iface, 
     if(!riid)
         return DDERR_INVALIDPARAMS;
 
-    if (IsEqualGUID(riid, &IID_IUnknown)
-     || IsEqualGUID(riid, &IID_IDirectDrawSurface7) )
+    if (IsEqualGUID(riid, &IID_IDirectDrawSurface7))
     {
         IDirectDrawSurface7_AddRef(iface);
         *obj = iface;
         TRACE("(%p) returning IDirectDrawSurface7 interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if (IsEqualGUID(riid, &IID_IDirectDrawSurface4))
+
+    if (IsEqualGUID(riid, &IID_IDirectDrawSurface4))
     {
         IDirectDrawSurface4_AddRef(&This->IDirectDrawSurface4_iface);
         *obj = &This->IDirectDrawSurface4_iface;
         TRACE("(%p) returning IDirectDrawSurface4 interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if (IsEqualGUID(riid, &IID_IDirectDrawSurface3))
+
+    if (IsEqualGUID(riid, &IID_IDirectDrawSurface3))
     {
         IDirectDrawSurface3_AddRef(&This->IDirectDrawSurface3_iface);
         *obj = &This->IDirectDrawSurface3_iface;
         TRACE("(%p) returning IDirectDrawSurface3 interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if (IsEqualGUID(riid, &IID_IDirectDrawSurface2))
+
+    if (IsEqualGUID(riid, &IID_IDirectDrawSurface2))
     {
         IDirectDrawSurface2_AddRef(&This->IDirectDrawSurface2_iface);
         *obj = &This->IDirectDrawSurface2_iface;
         TRACE("(%p) returning IDirectDrawSurface2 interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if (IsEqualGUID(riid, &IID_IDirectDrawSurface))
+
+    if (IsEqualGUID(riid, &IID_IDirectDrawSurface)
+            || IsEqualGUID(riid, &IID_IUnknown))
     {
         IDirectDrawSurface_AddRef(&This->IDirectDrawSurface_iface);
         *obj = &This->IDirectDrawSurface_iface;
         TRACE("(%p) returning IDirectDrawSurface interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if( IsEqualGUID(riid, &IID_IDirectDrawGammaControl) )
+
+    if (IsEqualGUID(riid, &IID_IDirectDrawGammaControl))
     {
         IDirectDrawGammaControl_AddRef(&This->IDirectDrawGammaControl_iface);
         *obj = &This->IDirectDrawGammaControl_iface;
         TRACE("(%p) returning IDirectDrawGammaControl interface at %p\n", This, *obj);
         return S_OK;
     }
-    else if( IsEqualGUID(riid, &IID_D3DDEVICE_WineD3D) ||
-             IsEqualGUID(riid, &IID_IDirect3DHALDevice)||
-             IsEqualGUID(riid, &IID_IDirect3DRGBDevice) )
+
+    if (IsEqualGUID(riid, &IID_D3DDEVICE_WineD3D)
+            || IsEqualGUID(riid, &IID_IDirect3DHALDevice)
+            || IsEqualGUID(riid, &IID_IDirect3DRGBDevice))
     {
         IDirect3DDevice7 *d3d;
         IDirect3DDeviceImpl *device_impl;
@@ -208,8 +214,9 @@ static HRESULT WINAPI ddraw_surface7_QueryInterface(IDirectDrawSurface7 *iface, 
         WARN("Unable to create a IDirect3DDevice instance, returning E_NOINTERFACE\n");
         return E_NOINTERFACE;
     }
-    else if (IsEqualGUID( &IID_IDirect3DTexture, riid ) ||
-             IsEqualGUID( &IID_IDirect3DTexture2, riid ))
+
+    if (IsEqualGUID( &IID_IDirect3DTexture2, riid)
+            || IsEqualGUID(&IID_IDirect3DTexture, riid))
     {
         if (IsEqualGUID( &IID_IDirect3DTexture, riid ))
         {
@@ -225,7 +232,8 @@ static HRESULT WINAPI ddraw_surface7_QueryInterface(IDirectDrawSurface7 *iface, 
         return S_OK;
     }
 
-    ERR("No interface\n");
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
+
     return E_NOINTERFACE;
 }
 
@@ -5585,7 +5593,7 @@ static void STDMETHODCALLTYPE ddraw_surface_wined3d_object_destroyed(void *paren
     HeapFree(GetProcessHeap(), 0, surface);
 }
 
-const struct wined3d_parent_ops ddraw_surface_wined3d_parent_ops =
+static const struct wined3d_parent_ops ddraw_surface_wined3d_parent_ops =
 {
     ddraw_surface_wined3d_object_destroyed,
 };

@@ -2873,28 +2873,14 @@ BOOL WINAPI CreateScalableFontResourceA( DWORD fHidden,
 /***********************************************************************
  *           CreateScalableFontResourceW   (GDI32.@)
  */
-BOOL WINAPI CreateScalableFontResourceW( DWORD fHidden,
-                                             LPCWSTR lpszResourceFile,
-                                             LPCWSTR lpszFontFile,
-                                             LPCWSTR lpszCurrentPath )
+BOOL WINAPI CreateScalableFontResourceW( DWORD hidden, LPCWSTR resource_file,
+                                         LPCWSTR font_file, LPCWSTR font_path )
 {
-    HANDLE f;
-    FIXME("(%d,%s,%s,%s): stub\n",
-          fHidden, debugstr_w(lpszResourceFile), debugstr_w(lpszFontFile),
-          debugstr_w(lpszCurrentPath) );
+    TRACE("(%d, %s, %s, %s)\n", hidden, debugstr_w(resource_file),
+          debugstr_w(font_file), debugstr_w(font_path) );
 
-    /* fHidden=1 - only visible for the calling app, read-only, not
-     * enumerated with EnumFonts/EnumFontFamilies
-     * lpszCurrentPath can be NULL
-     */
-
-    /* If the output file already exists, return the ERROR_FILE_EXISTS error as specified in MSDN */
-    if ((f = CreateFileW(lpszResourceFile, 0, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)) != INVALID_HANDLE_VALUE) {
-        CloseHandle(f);
-        SetLastError(ERROR_FILE_EXISTS);
-        return FALSE;
-    }
-    return FALSE; /* create failed */
+    return WineEngCreateScalableFontResource( hidden, resource_file,
+                                              font_file, font_path );
 }
 
 /*************************************************************************
@@ -3460,12 +3446,85 @@ static BOOL CALLBACK load_enumed_resource(HMODULE hModule, LPCWSTR type, LPWSTR 
     return TRUE;
 }
 
+static void *map_file( const WCHAR *filename, LARGE_INTEGER *size )
+{
+    HANDLE file, mapping;
+    void *ptr;
+
+    file = CreateFileW( filename, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+
+    GetFileSizeEx( file, size );
+    mapping = CreateFileMappingW( file, NULL, PAGE_READONLY, 0, 0, NULL );
+    CloseHandle( file );
+    if (mapping == NULL) return NULL;
+
+    ptr = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, 0 );
+    CloseHandle( mapping );
+
+    return ptr;
+}
+
+static WCHAR *get_scalable_filename( const WCHAR *res )
+{
+    LARGE_INTEGER size;
+    BYTE *ptr = map_file( res, &size );
+    const IMAGE_DOS_HEADER *dos;
+    const IMAGE_OS2_HEADER *ne;
+    WCHAR *name = NULL;
+    WORD rsrc_off, align, type_id, count;
+    DWORD res_off, res_len, i;
+    int len;
+
+    if (!ptr) return NULL;
+
+    if (size.u.HighPart) goto fail;
+    if (size.u.LowPart < sizeof( *dos )) goto fail;
+    dos = (const IMAGE_DOS_HEADER *)ptr;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) goto fail;
+    if (size.u.LowPart < dos->e_lfanew + sizeof( *ne )) goto fail;
+    ne = (const IMAGE_OS2_HEADER *)(ptr + dos->e_lfanew);
+    rsrc_off = dos->e_lfanew + ne->ne_rsrctab;
+    if (size.u.LowPart < rsrc_off + 10) goto fail;
+    align = *(WORD *)(ptr + rsrc_off);
+    rsrc_off += 2;
+    type_id = *(WORD *)(ptr + rsrc_off);
+    while (type_id && type_id != 0x80cc)
+    {
+        count = *(WORD *)(ptr + rsrc_off + 2);
+        rsrc_off += 8 + count * 12;
+        if (size.u.LowPart < rsrc_off + 8) goto fail;
+        type_id = *(WORD *)(ptr + rsrc_off);
+    }
+    if (!type_id) goto fail;
+    count = *(WORD *)(ptr + rsrc_off + 2);
+    if (size.u.LowPart < rsrc_off + 8 + count * 12) goto fail;
+
+    res_off = *(WORD *)(ptr + rsrc_off + 8) << align;
+    res_len = *(WORD *)(ptr + rsrc_off + 10) << align;
+    if (size.u.LowPart < res_off + res_len) goto fail;
+
+    for (i = 0; i < res_len; i++)
+        if (ptr[ res_off + i ] == 0) break;
+    if (i == res_len) goto fail;
+
+    len = MultiByteToWideChar( CP_ACP, 0, (char *)ptr + res_off, -1, NULL, 0 );
+    name = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    if (name) MultiByteToWideChar( CP_ACP, 0, (char *)ptr + res_off, -1, name, len );
+
+fail:
+    UnmapViewOfFile( ptr );
+    return name;
+}
+
 /***********************************************************************
  *           AddFontResourceExW    (GDI32.@)
  */
 INT WINAPI AddFontResourceExW( LPCWSTR str, DWORD fl, PVOID pdv )
 {
     int ret = WineEngAddFontResourceEx(str, fl, pdv);
+    WCHAR *filename;
+
     if (ret == 0)
     {
         /* FreeType <2.3.5 has problems reading resources wrapped in PE files. */
@@ -3480,6 +3539,11 @@ INT WINAPI AddFontResourceExW( LPCWSTR str, DWORD fl, PVOID pdv )
             if (EnumResourceNamesW(hModule, rt_font, load_enumed_resource, (LONG_PTR)&num_resources))
                 ret = num_resources;
             FreeLibrary(hModule);
+        }
+        else if ((filename = get_scalable_filename( str )) != NULL)
+        {
+            ret = WineEngAddFontResourceEx( filename, fl, pdv );
+            HeapFree( GetProcessHeap(), 0, filename );
         }
     }
     return ret;

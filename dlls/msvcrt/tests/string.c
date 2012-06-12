@@ -863,21 +863,25 @@ static void test_mbcjisjms(void)
     /* List of value-pairs to test. The test assumes the last pair to be {0, ..} */
     unsigned int jisjms[][2] = { {0x2020, 0}, {0x2021, 0}, {0x2120, 0}, {0x2121, 0x8140},
                                  {0x7f7f, 0}, {0x7f7e, 0}, {0x7e7f, 0}, {0x7e7e, 0xeffc},
+                                 {0x255f, 0x837e}, {0x2560, 0x8380}, {0x2561, 0x8381},
                                  {0x2121FFFF, 0}, {0x2223, 0x81a1}, {0x237e, 0x829e}, {0, 0}};
-    unsigned int ret, exp, i;
+    int cp[] = { 932, 936, 939, 950, 1361, _MB_CP_SBCS };
+    unsigned int i, j;
+    int prev_cp = _getmbcp();
 
-    i = 0;
-    do
+    for (i = 0; i < sizeof(cp)/sizeof(cp[0]); i++)
     {
-        ret = _mbcjistojms(jisjms[i][0]);
-
-        if(_getmbcp() == 932)   /* Japanese codepage? */
-            exp = jisjms[i][1];
-        else
-            exp = jisjms[i][0]; /* If not, no conversion */
-
-        ok(ret == exp, "Expected 0x%x, got 0x%x\n", exp, ret);
-    } while(jisjms[i++][0] != 0);
+        _setmbcp(cp[i]);
+        for (j = 0; jisjms[j][0] != 0; j++)
+        {
+            unsigned int ret, exp;
+            ret = _mbcjistojms(jisjms[j][0]);
+            exp = (cp[i] == 932) ? jisjms[j][1] : jisjms[j][0];
+            ok(ret == exp, "Expected 0x%x, got 0x%x (0x%x, codepage=%d)\n",
+               exp, ret, jisjms[j][0], cp[i]);
+        }
+    }
+    _setmbcp(prev_cp);
 }
 
 static void test_mbcjmsjis(void)
@@ -903,6 +907,32 @@ static void test_mbcjmsjis(void)
             exp = (cp[i] == 932) ? jmsjis[j][1] : jmsjis[j][0];
             ok(ret == exp, "Expected 0x%x, got 0x%x (0x%x, codepage=%d)\n",
                exp, ret, jmsjis[j][0], cp[i]);
+        }
+    }
+    _setmbcp(prev_cp);
+}
+
+static void test_mbbtombc(void)
+{
+    static const unsigned int mbbmbc[][2] = {
+        {0x1f, 0x1f}, {0x20, 0x8140}, {0x39, 0x8258}, {0x40, 0x8197},
+        {0x41, 0x8260}, {0x5e, 0x814f}, {0x7e, 0x8150}, {0x7f, 0x7f},
+        {0x80, 0x80}, {0x81, 0x81}, {0xa0, 0xa0}, {0xa7, 0x8340},
+        {0xb0, 0x815b}, {0xd1, 0x8380}, {0xff, 0xff}, {0,0}};
+    int cp[] = { 932, 936, 939, 950, 1361, _MB_CP_SBCS };
+    int i, j;
+    int prev_cp = _getmbcp();
+
+    for (i = 0; i < sizeof(cp)/sizeof(cp[0]); i++)
+    {
+        _setmbcp(cp[i]);
+        for (j = 0; mbbmbc[j][0] != 0; j++)
+        {
+            unsigned int exp, ret;
+            ret = _mbbtombc(mbbmbc[j][0]);
+            exp = (cp[i] == 932) ? mbbmbc[j][1] : mbbmbc[j][0];
+            ok(ret == exp, "Expected 0x%x, got 0x%x (0x%x, codepage %d)\n",
+               exp, ret, mbbmbc[j][0], cp[i]);
         }
     }
     _setmbcp(prev_cp);
@@ -2134,6 +2164,7 @@ START_TEST(string)
     test__mbsnbcpy_s();
     test_mbcjisjms();
     test_mbcjmsjis();
+    test_mbbtombc();
     test_mbctombb();
     test_ismbclegal();
     test_strtok();
