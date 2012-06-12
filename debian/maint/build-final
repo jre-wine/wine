@@ -21,6 +21,7 @@ fi
 git-dch --release --auto --full --meta \
  --debian-tag="wine-$last_version" \
  --git-log="--first-parent" \
+ --ignore-branch \
  $version_arg
 # commit changelog
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
