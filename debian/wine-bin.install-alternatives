@@ -14,3 +14,6 @@ debian/tmp/usr/bin/winemine
 debian/tmp/usr/bin/winepath
 debian/tmp/usr/share/man/man1/wine.1
 debian/tmp/usr/share/man/man1/winedbg.1
+debian/tmp/usr/share/man/fr.UTF-8/man1/wine.1
+debian/tmp/usr/share/man/de.UTF-8/man1/wine.1
+debian/tmp/usr/share/man/pl.UTF-8/man1/wine.1
