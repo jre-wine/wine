@@ -51,6 +51,7 @@ static const WCHAR scriptW[]   = {'S','C','R','I','P','T',0};
 static const WCHAR selectW[]   = {'S','E','L','E','C','T',0};
 static const WCHAR styleW[]    = {'S','T','Y','L','E',0};
 static const WCHAR tableW[]    = {'T','A','B','L','E',0};
+static const WCHAR tdW[]       = {'T','D',0};
 static const WCHAR textareaW[] = {'T','E','X','T','A','R','E','A',0};
 static const WCHAR title_tagW[]= {'T','I','T','L','E',0};
 static const WCHAR trW[]       = {'T','R',0};
@@ -76,6 +77,7 @@ static const tag_desc_t tag_descs[] = {
     {selectW,    HTMLSelectElement_Create},
     {styleW,     HTMLStyleElement_Create},
     {tableW,     HTMLTable_Create},
+    {tdW,        HTMLTableCell_Create},
     {textareaW,  HTMLTextAreaElement_Create},
     {title_tagW, HTMLTitleElement_Create},
     {trW,        HTMLTableRow_Create}
@@ -521,7 +523,7 @@ static HRESULT WINAPI HTMLElement_get_style(IHTMLElement *iface, IHTMLStyle **p)
 static HRESULT WINAPI HTMLElement_put_onhelp(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -536,7 +538,7 @@ static HRESULT WINAPI HTMLElement_put_onclick(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
-    TRACE("(%p)->()\n", This);
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_CLICK, &v);
 }
@@ -590,7 +592,7 @@ static HRESULT WINAPI HTMLElement_put_onkeyup(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
-    TRACE("(%p)->()\n", This);
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_KEYUP, &v);
 }
@@ -605,7 +607,7 @@ static HRESULT WINAPI HTMLElement_get_onkeyup(IHTMLElement *iface, VARIANT *p)
 static HRESULT WINAPI HTMLElement_put_onkeypress(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -638,7 +640,7 @@ static HRESULT WINAPI HTMLElement_put_onmouseover(IHTMLElement *iface, VARIANT v
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
-    TRACE("(%p)->()\n", This);
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_MOUSEOVER, &v);
 }
@@ -656,7 +658,7 @@ static HRESULT WINAPI HTMLElement_put_onmousemove(IHTMLElement *iface, VARIANT v
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
-    TRACE("(%p)->()\n", This);
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_MOUSEMOVE, &v);
 }
@@ -674,7 +676,7 @@ static HRESULT WINAPI HTMLElement_put_onmousedown(IHTMLElement *iface, VARIANT v
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
 
-    TRACE("(%p)->()\n", This);
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_MOUSEDOWN, &v);
 }
@@ -831,7 +833,7 @@ static HRESULT WINAPI HTMLElement_get_onselectstart(IHTMLElement *iface, VARIANT
 static HRESULT WINAPI HTMLElement_scrollIntoView(IHTMLElement *iface, VARIANT varargStart)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&varargStart));
     return E_NOTIMPL;
 }
 
@@ -1321,7 +1323,7 @@ static HRESULT WINAPI HTMLElement_get_filters(IHTMLElement *iface,
 static HRESULT WINAPI HTMLElement_put_ondragstart(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1342,7 +1344,7 @@ static HRESULT WINAPI HTMLElement_toString(IHTMLElement *iface, BSTR *String)
 static HRESULT WINAPI HTMLElement_put_onbeforeupdate(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1356,7 +1358,7 @@ static HRESULT WINAPI HTMLElement_get_onbeforeupdate(IHTMLElement *iface, VARIAN
 static HRESULT WINAPI HTMLElement_put_onafterupdate(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1370,7 +1372,7 @@ static HRESULT WINAPI HTMLElement_get_onafterupdate(IHTMLElement *iface, VARIANT
 static HRESULT WINAPI HTMLElement_put_onerrorupdate(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1384,7 +1386,7 @@ static HRESULT WINAPI HTMLElement_get_onerrorupdate(IHTMLElement *iface, VARIANT
 static HRESULT WINAPI HTMLElement_put_onrowexit(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1398,7 +1400,7 @@ static HRESULT WINAPI HTMLElement_get_onrowexit(IHTMLElement *iface, VARIANT *p)
 static HRESULT WINAPI HTMLElement_put_onrowenter(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1412,7 +1414,7 @@ static HRESULT WINAPI HTMLElement_get_onrowenter(IHTMLElement *iface, VARIANT *p
 static HRESULT WINAPI HTMLElement_put_ondatasetchanged(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1426,7 +1428,7 @@ static HRESULT WINAPI HTMLElement_get_ondatasetchanged(IHTMLElement *iface, VARI
 static HRESULT WINAPI HTMLElement_put_ondataavailable(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1440,7 +1442,7 @@ static HRESULT WINAPI HTMLElement_get_ondataavailable(IHTMLElement *iface, VARIA
 static HRESULT WINAPI HTMLElement_put_ondatasetcomplete(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -1454,7 +1456,7 @@ static HRESULT WINAPI HTMLElement_get_ondatasetcomplete(IHTMLElement *iface, VAR
 static HRESULT WINAPI HTMLElement_put_onfilterchange(IHTMLElement *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
     return E_NOTIMPL;
 }
 
@@ -2292,7 +2294,7 @@ static HRESULT WINAPI HTMLAttributeCollection_item(IHTMLAttributeCollection *ifa
         hres = get_attr_dispid_by_name(This, V_BSTR(name), &id);
         break;
     default:
-        FIXME("unsupported vt %x\n", V_VT(name));
+        FIXME("unsupported name %s\n", debugstr_variant(name));
         hres = E_NOTIMPL;
     }
     if(hres == DISP_E_UNKNOWNNAME)

@@ -96,6 +96,7 @@ typedef struct {
     HANDLE backend_printer;
     jobqueue_t *queue;
     started_doc_t *doc;
+    DEVMODEW *devmode;
 } opened_printer_t;
 
 typedef struct {
@@ -335,6 +336,16 @@ static LPSTR strdupWtoA( LPCWSTR str )
     len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL );
     ret = HeapAlloc( GetProcessHeap(), 0, len );
     if(ret) WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL );
+    return ret;
+}
+
+static DEVMODEW *dup_devmode( const DEVMODEW *dm )
+{
+    DEVMODEW *ret;
+
+    if (!dm) return NULL;
+    ret = HeapAlloc( GetProcessHeap(), 0, dm->dmSize + dm->dmDriverExtra );
+    if (ret) memcpy( ret, dm, dm->dmSize + dm->dmDriverExtra );
     return ret;
 }
 
@@ -763,6 +774,15 @@ static LPCWSTR get_basename_from_name(LPCWSTR name)
     return name;
 }
 
+static void free_printer_entry( opened_printer_t *printer )
+{
+    /* the queue is shared, so don't free that here */
+    HeapFree( GetProcessHeap(), 0, printer->printername );
+    HeapFree( GetProcessHeap(), 0, printer->name );
+    HeapFree( GetProcessHeap(), 0, printer->devmode );
+    HeapFree( GetProcessHeap(), 0, printer );
+}
+
 /******************************************************************
  *  get_opened_printer_entry
  *  Get the first place empty in the opened printer table
@@ -854,6 +874,9 @@ static HANDLE get_opened_printer_entry(LPWSTR name, LPPRINTER_DEFAULTSW pDefault
         goto end;
     }
 
+    if (pDefault && pDefault->pDevMode)
+        printer->devmode = dup_devmode( pDefault->pDevMode );
+
     if(queue)
         printer->queue = queue;
     else
@@ -873,11 +896,8 @@ static HANDLE get_opened_printer_entry(LPWSTR name, LPPRINTER_DEFAULTSW pDefault
 end:
     LeaveCriticalSection(&printer_handles_cs);
     if (!handle && printer) {
-        /* Something failed: Free all resources */
-        HeapFree(GetProcessHeap(), 0, printer->printername);
-        HeapFree(GetProcessHeap(), 0, printer->name);
         if (!queue) HeapFree(GetProcessHeap(), 0, printer->queue);
-        HeapFree(GetProcessHeap(), 0, printer);
+        free_printer_entry( printer );
     }
 
     return (HANDLE)handle;
@@ -2712,9 +2732,7 @@ BOOL WINAPI ClosePrinter(HANDLE hPrinter)
             HeapFree(GetProcessHeap(), 0, printer->queue);
         }
 
-        HeapFree(GetProcessHeap(), 0, printer->printername);
-        HeapFree(GetProcessHeap(), 0, printer->name);
-        HeapFree(GetProcessHeap(), 0, printer);
+        free_printer_entry( printer );
         printer_handles[i - 1] = NULL;
         ret = TRUE;
     }
@@ -2888,7 +2906,6 @@ BOOL WINAPI SetJobW(HANDLE hPrinter, DWORD JobId, DWORD Level,
 {
     BOOL ret = FALSE;
     job_t *job;
-    DWORD size;
 
     TRACE("(%p, %d, %d, %p, %d)\n", hPrinter, JobId, Level, pJob, Command);
     FIXME("Ignoring everything other than document title\n");
@@ -2915,14 +2932,7 @@ BOOL WINAPI SetJobW(HANDLE hPrinter, DWORD JobId, DWORD Level,
         HeapFree(GetProcessHeap(), 0, job->document_title);
         job->document_title = strdupW(info2->pDocument);
         HeapFree(GetProcessHeap(), 0, job->devmode);
-        if (info2->pDevMode)
-        {
-            size = info2->pDevMode->dmSize + info2->pDevMode->dmDriverExtra;
-            job->devmode = HeapAlloc(GetProcessHeap(), 0, size);
-            memcpy(job->devmode, info2->pDevMode, size);
-        }
-        else
-            job->devmode = NULL;
+        job->devmode = dup_devmode( info2->pDevMode );
         break;
       }
     case 3:

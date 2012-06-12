@@ -102,6 +102,7 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLStyleElement) \
     XDIID(DispHTMLStyleSheetsCollection) \
     XDIID(DispHTMLTable) \
+    XDIID(DispHTMLTableCell) \
     XDIID(DispHTMLTableRow) \
     XDIID(DispHTMLTextAreaElement) \
     XDIID(DispHTMLTitleElement) \
@@ -149,6 +150,7 @@ typedef struct event_target_t event_target_t;
     XIID(IHTMLLocation) \
     XIID(IHTMLMimeTypesCollection) \
     XIID(IHTMLObjectElement) \
+    XIID(IHTMLObjectElement2) \
     XIID(IHTMLOptionElement) \
     XIID(IHTMLPluginsCollection) \
     XIID(IHTMLRect) \
@@ -166,6 +168,7 @@ typedef struct event_target_t event_target_t;
     XIID(IHTMLTable) \
     XIID(IHTMLTable2) \
     XIID(IHTMLTable3) \
+    XIID(IHTMLTableCell) \
     XIID(IHTMLTableRow) \
     XIID(IHTMLTextAreaElement) \
     XIID(IHTMLTextContainer) \
@@ -628,6 +631,7 @@ HRESULT create_document_fragment(nsIDOMNode*,HTMLDocumentNode*,HTMLDocumentNode*
 HRESULT HTMLWindow_Create(HTMLDocumentObj*,nsIDOMWindow*,HTMLWindow*,HTMLWindow**) DECLSPEC_HIDDEN;
 void update_window_doc(HTMLWindow*) DECLSPEC_HIDDEN;
 HTMLWindow *nswindow_to_window(const nsIDOMWindow*) DECLSPEC_HIDDEN;
+void get_top_window(HTMLWindow*,HTMLWindow**) DECLSPEC_HIDDEN;
 HTMLOptionElementFactory *HTMLOptionElementFactory_Create(HTMLWindow*) DECLSPEC_HIDDEN;
 HTMLImageElementFactory *HTMLImageElementFactory_Create(HTMLWindow*) DECLSPEC_HIDDEN;
 HRESULT HTMLLocation_Create(HTMLWindow*,HTMLLocation**) DECLSPEC_HIDDEN;
@@ -778,6 +782,7 @@ HRESULT HTMLOptionElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElemen
 HRESULT HTMLScriptElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLSelectElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLTable_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
+HRESULT HTMLTableCell_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLTableRow_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLTextAreaElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLTitleElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;

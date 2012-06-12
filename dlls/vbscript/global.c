@@ -105,6 +105,23 @@ static inline HRESULT return_null(VARIANT *res)
     return S_OK;
 }
 
+static HRESULT to_int(VARIANT *v, int *ret)
+{
+    switch(V_VT(v)) {
+    case VT_I2:
+        *ret = V_I2(v);
+        break;
+    case VT_I4:
+        *ret = V_I4(v);
+        break;
+    default:
+        FIXME("not supported %s\n", debugstr_variant(v));
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
 static IUnknown *create_object(script_ctx_t *ctx, const WCHAR *progid)
 {
     IInternetHostSecurityManager *secmgr = NULL;
@@ -471,10 +488,60 @@ static HRESULT Global_RightB(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VA
     return E_NOTIMPL;
 }
 
-static HRESULT Global_Mid(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_Mid(vbdisp_t *This, VARIANT *args, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    int len = -1, start, str_len;
+    BSTR str;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    switch(args_cnt) {
+    case 3:
+        hres = to_int(args, &len);
+        if(FAILED(hres))
+            return hres;
+
+        if(len < 0) {
+            FIXME("len = %d\n", len);
+            return E_FAIL;
+        }
+        /* fallthrough */
+    case 2:
+        hres = to_int(args+args_cnt-2, &start);
+        if(FAILED(hres))
+            return hres;
+
+        if(V_VT(args+args_cnt-1) != VT_BSTR) {
+            FIXME("args[0] = %s\n", debugstr_variant(args+args_cnt-1));
+            return E_NOTIMPL;
+        }
+
+        str = V_BSTR(args+args_cnt-1);
+        break;
+    default:
+        assert(0);
+    }
+
+
+    str_len = SysStringLen(str);
+    start--;
+    if(start > str_len)
+        start = str_len;
+
+    if(len == -1)
+        len = str_len-start;
+    else if(len > str_len-start)
+        len = str_len-start;
+
+    if(res) {
+        V_VT(res) = VT_BSTR;
+        V_BSTR(res) = SysAllocStringLen(str+start, len);
+        if(!V_BSTR(res))
+            return E_OUTOFMEMORY;
+    }
+
+    return S_OK;
 }
 
 static HRESULT Global_MidB(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -536,6 +603,7 @@ static HRESULT Global_InStr(vbdisp_t *This, VARIANT *args, unsigned args_cnt, VA
     VARIANT *startv, *str1v, *str2v;
     BSTR str1, str2;
     int start, ret;
+    HRESULT hres;
 
     TRACE("\n");
 
@@ -558,18 +626,9 @@ static HRESULT Global_InStr(vbdisp_t *This, VARIANT *args, unsigned args_cnt, VA
     }
 
     if(startv) {
-        /* FIXME: Move to helper */
-        switch(V_VT(startv)) {
-        case VT_I2:
-            start = V_I2(startv);
-            break;
-        case VT_I4:
-            start = V_I4(startv);
-            break;
-        default:
-            FIXME("unsupported start %s\n", debugstr_variant(startv));
-            return E_NOTIMPL;
-        }
+        hres = to_int(startv, &start);
+        if(FAILED(hres))
+            return hres;
         if(--start < 0) {
             FIXME("start %d\n", start);
             return E_FAIL;

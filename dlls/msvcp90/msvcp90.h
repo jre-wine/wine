@@ -157,16 +157,17 @@ typedef struct __exception
 
 /* Internal: throws selected exception */
 typedef enum __exception_type {
+    EXCEPTION_RERAISE,
     EXCEPTION,
     EXCEPTION_BAD_ALLOC,
     EXCEPTION_LOGIC_ERROR,
     EXCEPTION_LENGTH_ERROR,
     EXCEPTION_OUT_OF_RANGE,
     EXCEPTION_INVALID_ARGUMENT,
-    EXCEPTION_RUNTIME_ERROR
+    EXCEPTION_RUNTIME_ERROR,
+    EXCEPTION_FAILURE,
 } exception_type;
 void throw_exception(exception_type, const char *);
-void set_exception_vtable(void);
 
 /* rtti */
 typedef struct __type_info
@@ -244,6 +245,8 @@ typedef struct _basic_string_wchar
     MSVCP_size_t res;
 } basic_string_wchar;
 
+basic_string_wchar* __stdcall MSVCP_basic_string_wchar_ctor_cstr(basic_string_wchar*, const wchar_t*);
+
 char* __stdcall MSVCP_allocator_char_allocate(void*, MSVCP_size_t);
 void __stdcall MSVCP_allocator_char_deallocate(void*, char*, MSVCP_size_t);
 MSVCP_size_t __stdcall MSVCP_allocator_char_max_size(void*);
@@ -258,6 +261,8 @@ typedef struct
 } locale;
 
 locale* __thiscall locale_ctor(locale*);
+locale* __thiscall locale_copy_ctor(locale*, const locale*);
+locale* __thiscall locale_operator_assign(locale*, const locale*);
 void __thiscall locale_dtor(locale*);
 
 /* class _Lockit */

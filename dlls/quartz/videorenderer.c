@@ -694,7 +694,6 @@ static ULONG WINAPI VideoRendererInner_Release(IUnknown * iface)
 
         IPin_Release((IPin *)This->pInputPin);
 
-        This->filter.lpVtbl = NULL;
         IUnknown_Release(This->seekthru_unk);
         This->filter.csFilter.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->filter.csFilter);
@@ -883,7 +882,7 @@ static HRESULT WINAPI VideoRenderer_FindPin(IBaseFilter * iface, LPCWSTR Id, IPi
 {
     VideoRendererImpl *This = (VideoRendererImpl *)iface;
 
-    FIXME("(%p/%p)->(%p,%p): stub !!!\n", This, iface, debugstr_w(Id), ppPin);
+    FIXME("(%p/%p)->(%s,%p): stub !!!\n", This, iface, debugstr_w(Id), ppPin);
 
     /* FIXME: critical section */
 

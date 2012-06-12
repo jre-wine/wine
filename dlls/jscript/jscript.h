@@ -242,7 +242,7 @@ HRESULT create_regexp(script_ctx_t*,const WCHAR *,int,DWORD,jsdisp_t**) DECLSPEC
 HRESULT create_regexp_var(script_ctx_t*,VARIANT*,VARIANT*,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT create_string(script_ctx_t*,const WCHAR*,DWORD,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT create_bool(script_ctx_t*,VARIANT_BOOL,jsdisp_t**) DECLSPEC_HIDDEN;
-HRESULT create_number(script_ctx_t*,VARIANT*,jsdisp_t**) DECLSPEC_HIDDEN;
+HRESULT create_number(script_ctx_t*,double,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT create_vbarray(script_ctx_t*,SAFEARRAY*,jsdisp_t**) DECLSPEC_HIDDEN;
 
 typedef enum {
@@ -253,14 +253,16 @@ typedef enum {
 
 HRESULT to_primitive(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*, hint_t) DECLSPEC_HIDDEN;
 HRESULT to_boolean(VARIANT*,VARIANT_BOOL*) DECLSPEC_HIDDEN;
-HRESULT to_number(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*) DECLSPEC_HIDDEN;
+HRESULT to_number(script_ctx_t*,VARIANT*,jsexcept_t*,double*) DECLSPEC_HIDDEN;
 HRESULT to_integer(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*) DECLSPEC_HIDDEN;
 HRESULT to_int32(script_ctx_t*,VARIANT*,jsexcept_t*,INT*) DECLSPEC_HIDDEN;
 HRESULT to_uint32(script_ctx_t*,VARIANT*,jsexcept_t*,DWORD*) DECLSPEC_HIDDEN;
 HRESULT to_string(script_ctx_t*,VARIANT*,jsexcept_t*,BSTR*) DECLSPEC_HIDDEN;
 HRESULT to_object(script_ctx_t*,VARIANT*,IDispatch**) DECLSPEC_HIDDEN;
 
-HRESULT variant_change_type(script_ctx_t*,VARIANT*,VARIANT*,VARTYPE);
+HRESULT variant_change_type(script_ctx_t*,VARIANT*,VARIANT*,VARTYPE) DECLSPEC_HIDDEN;
+
+HRESULT decode_source(WCHAR*) DECLSPEC_HIDDEN;
 
 BSTR int_to_bstr(int) DECLSPEC_HIDDEN;
 HRESULT double_to_bstr(double,BSTR*) DECLSPEC_HIDDEN;
@@ -449,6 +451,13 @@ static inline void num_set_inf(VARIANT *v, BOOL positive)
 #endif
 }
 
+static inline DOUBLE ret_inf(void)
+{
+    VARIANT v;
+    num_set_inf(&v, TRUE);
+    return V_R8(&v);
+}
+
 static inline void var_set_jsdisp(VARIANT *v, jsdisp_t *jsdisp)
 {
     V_VT(v) = VT_DISPATCH;
@@ -476,6 +485,7 @@ static inline DWORD make_grfdex(script_ctx_t *ctx, DWORD flags)
 #define JS_E_MISSING_SEMICOLON       MAKE_JSERROR(IDS_SEMICOLON)
 #define JS_E_MISSING_LBRACKET        MAKE_JSERROR(IDS_LBRACKET)
 #define JS_E_MISSING_RBRACKET        MAKE_JSERROR(IDS_RBRACKET)
+#define JS_E_INVALID_CHAR            MAKE_JSERROR(IDS_INVALID_CHAR)
 #define JS_E_UNTERMINATED_STRING     MAKE_JSERROR(IDS_UNTERMINATED_STR)
 #define JS_E_INVALID_BREAK           MAKE_JSERROR(IDS_INVALID_BREAK)
 #define JS_E_INVALID_CONTINUE        MAKE_JSERROR(IDS_INVALID_CONTINUE)
@@ -505,7 +515,7 @@ static inline BOOL is_jscript_error(HRESULT hres)
 
 const char *debugstr_variant(const VARIANT*) DECLSPEC_HIDDEN;
 
-HRESULT WINAPI JScriptFactory_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
+HRESULT create_jscript_object(BOOL,REFIID,void**) DECLSPEC_HIDDEN;
 
 extern LONG module_ref DECLSPEC_HIDDEN;
 

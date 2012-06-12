@@ -1703,13 +1703,14 @@ void release_bytecode(bytecode_t *code)
     for(i=0; i < code->bstr_cnt; i++)
         SysFreeString(code->bstr_pool[i]);
 
+    heap_free(code->source);
     jsheap_free(&code->heap);
     heap_free(code->bstr_pool);
     heap_free(code->instrs);
     heap_free(code);
 }
 
-static HRESULT init_code(compiler_ctx_t *compiler)
+static HRESULT init_code(compiler_ctx_t *compiler, const WCHAR *source)
 {
     compiler->code = heap_alloc_zero(sizeof(bytecode_t));
     if(!compiler->code)
@@ -1717,6 +1718,12 @@ static HRESULT init_code(compiler_ctx_t *compiler)
 
     compiler->code->ref = 1;
     jsheap_init(&compiler->code->heap);
+
+    compiler->code->source = heap_strdupW(source);
+    if(!compiler->code->source) {
+        release_bytecode(compiler->code);
+        return E_OUTOFMEMORY;
+    }
 
     compiler->code->instrs = heap_alloc(64 * sizeof(instr_t));
     if(!compiler->code->instrs) {
@@ -1763,19 +1770,27 @@ static HRESULT compile_function(compiler_ctx_t *ctx, source_elements_t *source, 
     return S_OK;
 }
 
-HRESULT compile_script(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter, BOOL from_eval,
+HRESULT compile_script(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimiter, BOOL from_eval, BOOL use_decode,
         bytecode_t **ret)
 {
     compiler_ctx_t compiler = {0};
     HRESULT hres;
 
-    hres = script_parse(ctx, code, delimiter, from_eval, &compiler.parser);
+    hres = init_code(&compiler, code);
     if(FAILED(hres))
         return hres;
 
-    hres = init_code(&compiler);
+    if(use_decode) {
+        hres = decode_source(compiler.code->source);
+        if(FAILED(hres)) {
+            WARN("Decoding failed\n");
+            return hres;
+        }
+    }
+
+    hres = script_parse(ctx, compiler.code->source, delimiter, from_eval, &compiler.parser);
     if(FAILED(hres)) {
-        parser_release(compiler.parser);
+        release_bytecode(compiler.code);
         return hres;
     }
 
