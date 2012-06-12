@@ -35,7 +35,6 @@ Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
 
 Package: wine
 Architecture: any
-Multi-Arch: allowed
 Depends:
  ${misc:Depends},
  wine-bin (>= ${source:Version}) | wine64-bin (>= ${source:Version}),
