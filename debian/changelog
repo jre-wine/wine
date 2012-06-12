@@ -1,3 +1,19 @@
+wine (1.4-7) unstable; urgency=low
+
+  [ Michael Gilbert ]
+  * Set --git-ignore-branch in build scripts
+  * Ship a wine64-bin helper package
+  * Don't set wine as 'Multi-Arch: allowed' (closes: #676498)
+  * Pass --ignore-branch to git-dch
+
+  [ Hilko Bengen ]
+  * Exclude deprecated wineprefixcreate files (closes: #677077)
+  * Remove libusb dependency
+  * Fix mistyped misc:Depends
+  * Include localized manpages
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 13:13:41 -0400
+
 wine (1.4-6) unstable; urgency=low
 
   * Eliminate additional hal references (closes: #613186)
