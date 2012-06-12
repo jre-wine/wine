@@ -1,8 +1,21 @@
-wine-unstable (1.5.1-1) UNRELEASED; urgency=low
+wine-unstable (1.5.1-1) unstable; urgency=low
 
-  * UNRELEASED
+  [ Michael Gilbert ]
+  * New upstream release 1.5.1, released Mar 30, 2012.
+    - Built-in JavaScript now preferred over Gecko in most cases.
+    - Support for scalable font resources.
+    - Fixes for audio and video playback.
+    - Support for script decoding in JScript.
+    - Various bug fixes.
+  * Set --git-ignore-branch in build scripts
+  * Don't set wine as 'Multi-Arch: allowed' (closes: #676498)
+  * Ship a wine64-bin helper package
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 17:56:14 -0400
+  [ Hilko Bengen ]
+  * Remove libusb dependency
+  * Include localized manpages
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 18:08:15 -0400
 
 wine-unstable (1.5.0-1) unstable; urgency=low
 
