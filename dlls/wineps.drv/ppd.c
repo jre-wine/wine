@@ -583,23 +583,19 @@ static BOOL parse_resolution(const char *str, SIZE *sz)
  *	PSDRV_AddSlot
  *
  */
-static INT PSDRV_AddSlot(PPD *ppd, LPCSTR szName, LPCSTR szFullName,
+static BOOL PSDRV_AddSlot(PPD *ppd, LPCSTR szName, LPCSTR szFullName,
 	LPSTR szInvocationString, WORD wWinBin)
 {
-    INPUTSLOT	*slot, **insert = &ppd->InputSlots;
-
-    while (*insert)
-	insert = &((*insert)->next);
-
-    slot = *insert = HeapAlloc(PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(INPUTSLOT));
-    if (!slot) return 1;
+    INPUTSLOT *slot = HeapAlloc( PSDRV_Heap, 0, sizeof(INPUTSLOT) );
+    if (!slot) return FALSE;
 
     slot->Name = szName;
     slot->FullName = szFullName;
     slot->InvocationString = szInvocationString;
     slot->WinBin = wWinBin;
 
-    return 0;
+    list_add_tail( &ppd->InputSlots, &slot->entry );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -631,14 +627,22 @@ PPD *PSDRV_ParsePPD(char *fname)
     }
 
     ppd->ColorDevice = CD_NotSpecified;
-    list_init(&ppd->PageSizes);
+
+    list_init( &ppd->InstalledFonts );
+    list_init( &ppd->PageSizes );
+    list_init( &ppd->Constraints );
+    list_init( &ppd->InputSlots );
+    list_init( &ppd->Duplexes );
+
+    /* Some gimp-print ppd files don't contain a DefaultResolution line
+       so default to 300 */
+    ppd->DefaultResolution = 300;
 
     /*
      *	The Windows PostScript drivers create the following "virtual bin" for
      *	every PostScript printer
      */
-    if (PSDRV_AddSlot(ppd, NULL, "Automatically Select", NULL,
-	    DMBIN_FORMSOURCE))
+    if (!PSDRV_AddSlot( ppd, NULL, "Automatically Select", NULL, DMBIN_FORMSOURCE ))
     {
 	HeapFree (PSDRV_Heap, 0, ppd);
 	fclose(fp);
@@ -678,23 +682,13 @@ PPD *PSDRV_ParsePPD(char *fname)
                 WARN("failed to parse DefaultResolution %s\n", debugstr_a(tuple.value));
 	}
 
-	else if(!strcmp("*Font", tuple.key)) {
-	    FONTNAME *fn;
-
-	    for(fn = ppd->InstalledFonts; fn && fn->next; fn = fn->next)
-	        ;
-	    if(!fn) {
-	        ppd->InstalledFonts = HeapAlloc(PSDRV_Heap,
-					       HEAP_ZERO_MEMORY, sizeof(*fn));
-		fn = ppd->InstalledFonts;
-	    } else {
-	       fn->next = HeapAlloc(PSDRV_Heap,
-					       HEAP_ZERO_MEMORY, sizeof(*fn));
-	       fn = fn->next;
-	    }
-	    fn->Name = tuple.option;
-	    tuple.option = NULL;
-	}
+        else if(!strcmp("*Font", tuple.key))
+        {
+            FONTNAME *fn = HeapAlloc( PSDRV_Heap, 0, sizeof(*fn) );
+            fn->Name = tuple.option;
+            tuple.option = NULL;
+            list_add_tail( &ppd->InstalledFonts, &fn->entry );
+        }
 
 	else if(!strcmp("*DefaultFont", tuple.key)) {
 	    ppd->DefaultFont = tuple.value;
@@ -820,23 +814,19 @@ PPD *PSDRV_ParsePPD(char *fname)
 		  ppd->LandscapeOrientation);
 	}
 
-	else if(!strcmp("*UIConstraints", tuple.key)) {
+        else if(!strcmp("*UIConstraints", tuple.key))
+        {
 	    char *start;
-	    CONSTRAINT *con, **insert = &ppd->Constraints;
-
-	    while(*insert)
-	        insert = &((*insert)->next);
-
-	    con = *insert = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY,
-				       sizeof(*con) );
+            CONSTRAINT *con = HeapAlloc( PSDRV_Heap, 0, sizeof(*con) );
 
 	    start = tuple.value;
-
 	    con->Feature1 = PSDRV_PPDGetWord(start, &start);
 	    con->Value1 = PSDRV_PPDGetWord(start, &start);
 	    con->Feature2 = PSDRV_PPDGetWord(start, &start);
 	    con->Value2 = PSDRV_PPDGetWord(start, &start);
-	}
+
+            list_add_tail( &ppd->Constraints, &con->entry );
+        }
 
 	else if (!strcmp("*InputSlot", tuple.key))
 	{
@@ -884,29 +874,27 @@ PPD *PSDRV_ParsePPD(char *fname)
 	    TRACE("*TTRasterizer = %d\n", ppd->TTRasterizer);
 	}
 
-        else if(!strcmp("*Duplex", tuple.key)) {
-            DUPLEX **duplex;
-            for(duplex = &ppd->Duplexes; *duplex; duplex = &(*duplex)->next)
-                ;
-            *duplex = HeapAlloc(GetProcessHeap(), 0, sizeof(**duplex));
-            (*duplex)->Name = tuple.option;
-            (*duplex)->FullName = tuple.opttrans;
-            (*duplex)->InvocationString = tuple.value;
-            (*duplex)->next = NULL;
+        else if(!strcmp("*Duplex", tuple.key))
+        {
+            DUPLEX *duplex = HeapAlloc( GetProcessHeap(), 0, sizeof(*duplex) );
+            duplex->Name = tuple.option;
+            duplex->FullName = tuple.opttrans;
+            duplex->InvocationString = tuple.value;
             if(!strcasecmp("None", tuple.option) || !strcasecmp("False", tuple.option)
                || !strcasecmp("Simplex", tuple.option))
-                (*duplex)->WinDuplex = DMDUP_SIMPLEX;
+                duplex->WinDuplex = DMDUP_SIMPLEX;
             else if(!strcasecmp("DuplexNoTumble", tuple.option))
-                (*duplex)->WinDuplex = DMDUP_VERTICAL;
+                duplex->WinDuplex = DMDUP_VERTICAL;
             else if(!strcasecmp("DuplexTumble", tuple.option))
-                (*duplex)->WinDuplex = DMDUP_HORIZONTAL;
+                duplex->WinDuplex = DMDUP_HORIZONTAL;
             else if(!strcasecmp("Notcapable", tuple.option))
-                (*duplex)->WinDuplex = 0;
+                duplex->WinDuplex = 0;
             else {
                 FIXME("Unknown option %s for *Duplex defaulting to simplex\n", tuple.option);
-                (*duplex)->WinDuplex = DMDUP_SIMPLEX;
+                duplex->WinDuplex = DMDUP_SIMPLEX;
             }
             tuple.option = tuple.opttrans = tuple.value = NULL;
+            list_add_tail( &ppd->Duplexes, &duplex->entry );
         }
 
         else if(!strcmp("*DefaultDuplex", tuple.key)) {
@@ -960,10 +948,13 @@ PPD *PSDRV_ParsePPD(char *fname)
     }
 
     ppd->DefaultDuplex = NULL;
-    if(default_duplex) {
+    if (default_duplex)
+    {
 	DUPLEX *duplex;
-	for(duplex = ppd->Duplexes; duplex; duplex = duplex->next) {
-            if(!strcmp(duplex->Name, default_duplex)) {
+	LIST_FOR_EACH_ENTRY( duplex, &ppd->Duplexes, DUPLEX, entry )
+        {
+            if (!strcmp(duplex->Name, default_duplex))
+            {
                 ppd->DefaultDuplex = duplex;
                 TRACE("DefaultDuplex: %s\n", duplex->Name);
                 break;
@@ -971,8 +962,9 @@ PPD *PSDRV_ParsePPD(char *fname)
         }
         HeapFree(PSDRV_Heap, 0, default_duplex);
     }
-    if(!ppd->DefaultDuplex) {
-        ppd->DefaultDuplex = ppd->Duplexes;
+    if (!ppd->DefaultDuplex)
+    {
+        ppd->DefaultDuplex = LIST_ENTRY( list_head( &ppd->Duplexes ), DUPLEX, entry );
         TRACE("Setting DefaultDuplex to first in list\n");
     }
 
@@ -982,11 +974,9 @@ PPD *PSDRV_ParsePPD(char *fname)
 	PAGESIZE *page;
 	CONSTRAINT *con;
 	INPUTSLOT *slot;
-	OPTION *option;
-	OPTIONENTRY *optionEntry;
 
-	for(fn = ppd->InstalledFonts; fn; fn = fn->next)
-	    TRACE("'%s'\n", fn->Name);
+        LIST_FOR_EACH_ENTRY( fn, &ppd->InstalledFonts, FONTNAME, entry )
+            TRACE("'%s'\n", fn->Name);
 
 	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
 	    TRACE("'%s' aka '%s' (%d) invoked by '%s'\n", page->Name,
@@ -1000,20 +990,11 @@ PPD *PSDRV_ParsePPD(char *fname)
 		      page->PaperDimension->x, page->PaperDimension->y);
 	}
 
-	for(con = ppd->Constraints; con; con = con->next)
+        LIST_FOR_EACH_ENTRY( con, &ppd->Constraints, CONSTRAINT, entry )
 	    TRACE("CONSTRAINTS@ %s %s %s %s\n", con->Feature1,
 		  con->Value1, con->Feature2, con->Value2);
 
-	for(option = ppd->InstalledOptions; option; option = option->next) {
-	    TRACE("OPTION: %s %s %s\n", option->OptionName,
-		  option->FullName, option->DefaultOption);
-	    for(optionEntry = option->Options; optionEntry;
-		optionEntry = optionEntry->next)
-	        TRACE("\tOPTIONENTRY: %s %s %s\n", optionEntry->Name,
-		      optionEntry->FullName, optionEntry->InvocationString);
-	}
-
-	for(slot = ppd->InputSlots; slot; slot = slot->next)
+        LIST_FOR_EACH_ENTRY( slot, &ppd->InputSlots, INPUTSLOT, entry )
 	    TRACE("INPUTSLOTS '%s' Name '%s' (%d) Invocation '%s'\n",
 		  debugstr_a(slot->Name), slot->FullName, slot->WinBin,
 		  debugstr_a(slot->InvocationString));

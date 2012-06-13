@@ -50,14 +50,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 static void *cupshandle = NULL;
 #endif
 
-static const PSDRV_DEVMODEA DefaultDevmode =
+static const PSDRV_DEVMODE DefaultDevmode =
 {
   { /* dmPublic */
-/* dmDeviceName */	"Wine PostScript Driver",
+/* dmDeviceName */      {'W','i','n','e',' ','P','o','s','t','S','c','r','i','p','t',' ','D','r','i','v','e','r',0},
 /* dmSpecVersion */	0x30a,
 /* dmDriverVersion */	0x001,
-/* dmSize */		sizeof(DEVMODEA),
-/* dmDriverExtra */	sizeof(PSDRV_DEVMODEA)-sizeof(DEVMODEA),
+/* dmSize */		sizeof(DEVMODEW),
+/* dmDriverExtra */	sizeof(PSDRV_DEVMODE)-sizeof(DEVMODEW),
 /* dmFields */		DM_ORIENTATION | DM_PAPERSIZE | DM_SCALE |
 			DM_COPIES | DM_DEFAULTSOURCE | DM_COLOR |
 		        DM_YRESOLUTION | DM_TTOPTION,
@@ -78,7 +78,7 @@ static const PSDRV_DEVMODEA DefaultDevmode =
 /* dmYResolution */	0,
 /* dmTTOption */	DMTT_SUBDEV,
 /* dmCollate */		0,
-/* dmFormName */	"",
+/* dmFormName */        {},
 /* dmUnusedPadding */   0,
 /* dmBitsPerPel */	0,
 /* dmPelsWidth */	0,
@@ -113,7 +113,6 @@ static const LOGFONTA DefaultLogFont = {
     DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, ""
 };
 
-static const CHAR default_devmodeA[] = "Default DevMode";
 static const struct gdi_dc_funcs psdrv_funcs;
 
 /*********************************************************************
@@ -170,7 +169,6 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
 
     return TRUE;
 }
-
 
 static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
 {
@@ -259,57 +257,17 @@ static void PSDRV_UpdateDevCaps( PSDRV_PDEVICE *physDev )
 	  physDev->horzRes, physDev->vertRes);
 }
 
-
-/***********************************************************
- *      DEVMODEdupWtoA
- *
- * Creates an ascii copy of supplied devmode on heap
- *
- * Copied from dlls/winspool/info.c until full unicodification
- */
-static LPDEVMODEA DEVMODEdupWtoA(HANDLE heap, const DEVMODEW *dmW)
-{
-    LPDEVMODEA dmA;
-    DWORD size;
-    BOOL Formname;
-    /* there is no pointer dereference here, if your code checking tool complains it's broken */
-    ptrdiff_t off_formname = (const char *)dmW->dmFormName - (const char *)dmW;
-
-    if(!dmW) return NULL;
-    Formname = (dmW->dmSize > off_formname);
-    size = dmW->dmSize - CCHDEVICENAME - (Formname ? CCHFORMNAME : 0);
-    dmA = HeapAlloc(heap, HEAP_ZERO_MEMORY, size + dmW->dmDriverExtra);
-    WideCharToMultiByte(CP_ACP, 0, dmW->dmDeviceName, -1, (LPSTR)dmA->dmDeviceName,
-			CCHDEVICENAME, NULL, NULL);
-    if(!Formname) {
-      memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
-	     dmW->dmSize - CCHDEVICENAME * sizeof(WCHAR));
-    } else {
-      memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
-	     off_formname - CCHDEVICENAME * sizeof(WCHAR));
-      WideCharToMultiByte(CP_ACP, 0, dmW->dmFormName, -1, (LPSTR)dmA->dmFormName,
-			  CCHFORMNAME, NULL, NULL);
-      memcpy(&dmA->dmLogPixels, &dmW->dmLogPixels, dmW->dmSize -
-	     (off_formname + CCHFORMNAME * sizeof(WCHAR)));
-    }
-    dmA->dmSize = size;
-    memcpy((char *)dmA + dmA->dmSize, (const char *)dmW + dmW->dmSize,
-	   dmW->dmDriverExtra);
-    return dmA;
-}
-
-
 static PSDRV_PDEVICE *create_psdrv_physdev( PRINTERINFO *pi )
 {
     PSDRV_PDEVICE *physDev;
 
-    physDev = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(*physDev) );
+    physDev = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*physDev) );
     if (!physDev) return NULL;
 
-    physDev->Devmode = HeapAlloc( PSDRV_Heap, 0, sizeof(PSDRV_DEVMODEA) );
+    physDev->Devmode = HeapAlloc( GetProcessHeap(), 0, sizeof(PSDRV_DEVMODE) );
     if (!physDev->Devmode)
     {
-        HeapFree( PSDRV_Heap, 0, physDev );
+        HeapFree( GetProcessHeap(), 0, physDev );
 	return NULL;
     }
 
@@ -328,18 +286,12 @@ static BOOL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
 {
     PSDRV_PDEVICE *physDev;
     PRINTERINFO *pi;
-    DWORD len;
-    char *deviceA;
 
     TRACE("(%s %s %s %p)\n", debugstr_w(driver), debugstr_w(device),
                              debugstr_w(output), initData);
 
     if (!device) return FALSE;
-    len = WideCharToMultiByte(CP_ACP, 0, device, -1, NULL, 0, NULL, NULL);
-    deviceA = HeapAlloc(GetProcessHeap(), 0, len);
-    WideCharToMultiByte(CP_ACP, 0, device, -1, deviceA, len, NULL, NULL);
-    pi = PSDRV_FindPrinterInfo(deviceA);
-    HeapFree(GetProcessHeap(), 0, deviceA);
+    pi = PSDRV_FindPrinterInfo( device );
     if(!pi) return FALSE;
 
     if(!pi->Fonts) {
@@ -355,17 +307,10 @@ static BOOL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
 
     if (!(physDev = create_psdrv_physdev( pi ))) return FALSE;
 
-    if (output && *output) {
-        INT len = WideCharToMultiByte( CP_ACP, 0, output, -1, NULL, 0, NULL, NULL );
-        if ((physDev->job.output = HeapAlloc( PSDRV_Heap, 0, len )))
-            WideCharToMultiByte( CP_ACP, 0, output, -1, physDev->job.output, len, NULL, NULL );
-    }
+    if (output && *output) physDev->job.output = strdupW( output );
 
-    if(initData) {
-        DEVMODEA *devmodeA = DEVMODEdupWtoA(PSDRV_Heap, initData);
-        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODEA *)devmodeA, pi);
-        HeapFree(PSDRV_Heap, 0, devmodeA);
-    }
+    if(initData)
+        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODE *)initData, pi);
 
     PSDRV_UpdateDevCaps(physDev);
     SelectObject( (*pdev)->hdc, PSDRV_DefaultFont );
@@ -381,7 +326,7 @@ static BOOL PSDRV_CreateCompatibleDC( PHYSDEV orig, PHYSDEV *pdev )
 {
     HDC hdc = (*pdev)->hdc;
     PSDRV_PDEVICE *physDev, *orig_dev = get_psdrv_dev( orig );
-    PRINTERINFO *pi = PSDRV_FindPrinterInfo( orig_dev->pi->FriendlyName );
+    PRINTERINFO *pi = PSDRV_FindPrinterInfo( orig_dev->pi->friendly_name );
 
     if (!pi) return FALSE;
     if (!(physDev = create_psdrv_physdev( pi ))) return FALSE;
@@ -403,9 +348,9 @@ static BOOL PSDRV_DeleteDC( PHYSDEV dev )
 
     TRACE("\n");
 
-    HeapFree( PSDRV_Heap, 0, physDev->Devmode );
-    HeapFree( PSDRV_Heap, 0, physDev->job.output );
-    HeapFree( PSDRV_Heap, 0, physDev );
+    HeapFree( GetProcessHeap(), 0, physDev->Devmode );
+    HeapFree( GetProcessHeap(), 0, physDev->job.output );
+    HeapFree( GetProcessHeap(), 0, physDev );
 
     return TRUE;
 }
@@ -418,10 +363,9 @@ static HDC PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
 
-    if(lpInitData) {
-        DEVMODEA *devmodeA = DEVMODEdupWtoA(PSDRV_Heap, lpInitData);
-        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODEA *)devmodeA, physDev->pi);
-        HeapFree(PSDRV_Heap, 0, devmodeA);
+    if (lpInitData)
+    {
+        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODE *)lpInitData, physDev->pi);
         PSDRV_UpdateDevCaps(physDev);
     }
     return dev->hdc;
@@ -541,180 +485,263 @@ static INT PSDRV_GetDeviceCaps( PHYSDEV dev, INT cap )
     }
 }
 
-
-/**********************************************************************
- *		PSDRV_FindPrinterInfo
- */
-PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
+static PRINTER_ENUM_VALUESA *load_font_sub_table( HANDLE printer, DWORD *num_entries )
 {
-    static PRINTERINFO *PSDRV_PrinterList;
-    DWORD type = REG_BINARY, needed, res, dwPaperSize;
-    PRINTERINFO *pi = PSDRV_PrinterList, **last = &PSDRV_PrinterList;
-    FONTNAME *font;
-    const AFM *afm;
-    HANDLE hPrinter = 0;
-    const char *ppd = NULL;
-    DWORD ppdType;
-    char* ppdFileName = NULL;
-    HKEY hkey;
-    BOOL using_default_devmode = FALSE;
+    DWORD res, needed, num;
+    PRINTER_ENUM_VALUESA *table = NULL;
+    static const char fontsubkey[] = "PrinterDriverData\\FontSubTable";
 
-    TRACE("'%s'\n", name);
+    *num_entries = 0;
 
-    /*
-     *	If this loop completes, last will point to the 'next' element of the
-     *	final PRINTERINFO in the list
-     */
-    for( ; pi; last = &pi->next, pi = pi->next)
-        if(!strcmp(pi->FriendlyName, name))
-	    return pi;
+    res = EnumPrinterDataExA( printer, fontsubkey, NULL, 0, &needed, &num );
+    if (res != ERROR_MORE_DATA) return NULL;
 
-    pi = *last = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(*pi) );
-    if (pi == NULL)
-    	return NULL;
+    table = HeapAlloc( PSDRV_Heap, 0, needed );
+    if (!table) return NULL;
 
-    if (!(pi->FriendlyName = HeapAlloc( PSDRV_Heap, 0, strlen(name)+1 ))) goto fail;
-    strcpy( pi->FriendlyName, name );
-
-    if (OpenPrinterA (pi->FriendlyName, &hPrinter, NULL) == 0) {
-        ERR ("OpenPrinterA failed with code %i\n", GetLastError ());
-        goto cleanup;
+    res = EnumPrinterDataExA( printer, fontsubkey, (LPBYTE)table, needed, &needed, &num );
+    if (res != ERROR_SUCCESS)
+    {
+        HeapFree( PSDRV_Heap, 0, table );
+        return NULL;
     }
 
-    needed = 0;
-    res = GetPrinterDataExA(hPrinter, NULL, default_devmodeA, &type, NULL, 0, &needed);
+    *num_entries = num;
+    return table;
+}
 
-    if (needed < sizeof(DefaultDevmode)) {
-        pi->Devmode = HeapAlloc( PSDRV_Heap, 0, sizeof(DefaultDevmode) );
-        if (pi->Devmode == NULL)
-            goto closeprinter;
+static PSDRV_DEVMODE *get_printer_devmode( HANDLE printer )
+{
+    DWORD needed, dm_size;
+    BOOL res;
+    PRINTER_INFO_9W *info;
+    PSDRV_DEVMODE *dm;
 
-        *pi->Devmode = DefaultDevmode;
-        lstrcpynA((LPSTR)pi->Devmode->dmPublic.dmDeviceName,name,CCHDEVICENAME);
-        using_default_devmode = TRUE;
+    GetPrinterW( printer, 9, NULL, 0, &needed );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return NULL;
+
+    info = HeapAlloc( PSDRV_Heap, 0, needed );
+    res = GetPrinterW( printer, 9, (BYTE *)info, needed, &needed );
+    if (!res || !info->pDevMode)
+    {
+        HeapFree( PSDRV_Heap, 0, info );
+        return NULL;
     }
-    else {
-        pi->Devmode = HeapAlloc( PSDRV_Heap, 0, needed );
-        if (pi->Devmode == NULL)
-            goto closeprinter;
 
-        GetPrinterDataExA(hPrinter, NULL, default_devmodeA, &type, (LPBYTE)pi->Devmode, needed, &needed);
+    /* sanity check the sizes */
+    dm_size = info->pDevMode->dmSize + info->pDevMode->dmDriverExtra;
+    if ((char *)info->pDevMode - (char *)info + dm_size > needed)
+    {
+        HeapFree( PSDRV_Heap, 0, info );
+        return NULL;
     }
 
+    dm = (PSDRV_DEVMODE*)info;
+    memmove( dm, info->pDevMode, dm_size );
+    return dm;
+}
 
+static PSDRV_DEVMODE *get_devmode( HANDLE printer, const WCHAR *name, BOOL *is_default )
+{
+    PSDRV_DEVMODE *dm = get_printer_devmode( printer );
 
-#ifdef SONAME_LIBCUPS
-    if (cupshandle != (void*)-1) {
-	typeof(cupsGetPPD) * pcupsGetPPD = NULL;
+    *is_default = FALSE;
 
-	pcupsGetPPD = wine_dlsym(cupshandle, "cupsGetPPD", NULL, 0);
-	if (pcupsGetPPD) {
-	    ppd = pcupsGetPPD(name);
-
-	    if (ppd) {
-		needed=strlen(ppd)+1;
-		ppdFileName=HeapAlloc(PSDRV_Heap, 0, needed);
-		memcpy(ppdFileName, ppd, needed);
-		ppdType=REG_SZ;
-		res = ERROR_SUCCESS;
-		/* we should unlink() that file later */
-	    } else {
-		res = ERROR_FILE_NOT_FOUND;
-		WARN("Did not find ppd for %s\n",name);
-	    }
-	}
+    if (dm && dm->dmPublic.dmSize + dm->dmPublic.dmDriverExtra >= sizeof(DefaultDevmode))
+    {
+        TRACE( "Retrieved devmode from winspool\n" );
+        return dm;
     }
-#endif
-    if (!ppdFileName) {
-        res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "PPD File", NULL, NULL, 0, &needed);
-        if ((res==ERROR_SUCCESS) || (res==ERROR_MORE_DATA)) {
-            ppdFileName=HeapAlloc(PSDRV_Heap, 0, needed);
-            res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "PPD File", &ppdType,
-                                    (LPBYTE)ppdFileName, needed, &needed);
+    HeapFree( PSDRV_Heap, 0, dm );
+
+    TRACE( "Using default devmode\n" );
+    dm = HeapAlloc( PSDRV_Heap, 0, sizeof(DefaultDevmode) );
+    if (dm)
+    {
+        *dm = DefaultDevmode;
+        lstrcpynW( (WCHAR *)dm->dmPublic.dmDeviceName, name, CCHDEVICENAME );
+        *is_default = TRUE;
+    }
+    return dm;
+}
+
+static BOOL set_devmode( HANDLE printer, PSDRV_DEVMODE *dm )
+{
+    PRINTER_INFO_9W info;
+    info.pDevMode = &dm->dmPublic;
+
+    return SetPrinterW( printer, 9, (BYTE *)&info, 0 );
+}
+
+static inline char *expand_env_string( char *str, DWORD type )
+{
+    if (type == REG_EXPAND_SZ)
+    {
+        char *tmp;
+        DWORD needed = ExpandEnvironmentStringsA( str, NULL, 0 );
+        tmp = HeapAlloc( GetProcessHeap(), 0, needed );
+        if (tmp)
+        {
+            ExpandEnvironmentStringsA( str, tmp, needed );
+            HeapFree( GetProcessHeap(), 0, str );
+            return tmp;
         }
     }
+    return str;
+}
+
+static char *get_ppd_filename( HANDLE printer, const char *nameA, BOOL *needs_unlink )
+{
+    char *ret = NULL;
+    DWORD needed, err, type;
+    HKEY hkey;
+    const char *data_dir, *filename;
+
+    *needs_unlink = FALSE;
+
+#ifdef SONAME_LIBCUPS
+    if (cupshandle != (void*)-1)
+    {
+        typeof(cupsGetPPD) *pcupsGetPPD;
+
+        pcupsGetPPD = wine_dlsym( cupshandle, "cupsGetPPD", NULL, 0 );
+        if (pcupsGetPPD)
+        {
+            filename = pcupsGetPPD( nameA );
+
+            if (filename)
+            {
+                needed = strlen( filename ) + 1;
+                ret = HeapAlloc( GetProcessHeap(), 0, needed );
+                memcpy( ret, filename, needed );
+                *needs_unlink = TRUE;
+                return ret;
+            }
+            else
+                WARN( "CUPS did not find ppd for %s\n", debugstr_a(nameA) );
+        }
+    }
+#endif
+
+    err = GetPrinterDataExA( printer, "PrinterDriverData", "PPD File", NULL, NULL, 0, &needed );
+    if (err == ERROR_MORE_DATA)
+    {
+        ret = HeapAlloc( GetProcessHeap(), 0, needed );
+        if (!ret) return NULL;
+        GetPrinterDataExA( printer, "PrinterDriverData", "PPD File", &type,
+                           (BYTE *)ret, needed, &needed );
+        return expand_env_string( ret, type );
+    }
+
     /* Look for a ppd file for this printer in the config file.
      * First look under that printer's name, and then under 'generic'
      */
     /* @@ Wine registry key: HKCU\Software\Wine\Printing\PPD Files */
-    if((res != ERROR_SUCCESS) && !RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Printing\\PPD Files", &hkey))
+    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\Printing\\PPD Files", &hkey ) == ERROR_SUCCESS )
     {
-        const char* value_name;
+        const char *value_name = NULL;
 
-        if (RegQueryValueExA(hkey, name, 0, NULL, NULL, &needed) == ERROR_SUCCESS) {
-            value_name=name;
-        } else if (RegQueryValueExA(hkey, "generic", 0, NULL, NULL, &needed) == ERROR_SUCCESS) {
-            value_name="generic";
-        } else {
-            value_name=NULL;
-        }
-        if (value_name) {
-            HeapFree(PSDRV_Heap, 0, ppdFileName);
-            ppdFileName=HeapAlloc(PSDRV_Heap, 0, needed);
-            RegQueryValueExA(hkey, value_name, 0, &ppdType, (LPBYTE)ppdFileName, &needed);
-        }
-        RegCloseKey(hkey);
-    }
+        if (RegQueryValueExA( hkey, nameA, 0, NULL, NULL, &needed ) == ERROR_SUCCESS)
+            value_name = nameA;
+        else if (RegQueryValueExA( hkey, "generic", 0, NULL, NULL, &needed ) == ERROR_SUCCESS)
+            value_name = "generic";
 
-    if (!ppdFileName)
-    {
-        const char *data_dir, *filename;
-
-        if ((data_dir = wine_get_data_dir())) filename = "/generic.ppd";
-        else if ((data_dir = wine_get_build_dir())) filename = "/dlls/wineps.drv/generic.ppd";
-        else
+        if (value_name)
         {
-            res = ERROR_FILE_NOT_FOUND;
-            ERR ("Error %i getting PPD file name for printer '%s'\n", res, name);
-            goto closeprinter;
+            ret = HeapAlloc( GetProcessHeap(), 0, needed );
+            if (!ret) return NULL;
+            RegQueryValueExA( hkey, value_name, 0, &type, (BYTE *)ret, &needed );
         }
-        ppdFileName = HeapAlloc( PSDRV_Heap, 0, strlen(data_dir) + strlen(filename) + 1 );
-        strcpy( ppdFileName, data_dir );
-        strcat( ppdFileName, filename );
-    } else {
-        res = ERROR_SUCCESS;
-        if (ppdType==REG_EXPAND_SZ) {
-            char* tmp;
-
-            /* Expand environment variable references */
-            needed=ExpandEnvironmentStringsA(ppdFileName,NULL,0);
-            tmp=HeapAlloc(PSDRV_Heap, 0, needed);
-            ExpandEnvironmentStringsA(ppdFileName,tmp,needed);
-            HeapFree(PSDRV_Heap, 0, ppdFileName);
-            ppdFileName=tmp;
-        }
+        RegCloseKey( hkey );
+        if (ret) return expand_env_string( ret, type );
     }
 
-    pi->ppd = PSDRV_ParsePPD(ppdFileName);
-    if(!pi->ppd) {
-	MESSAGE("Couldn't find PPD file '%s', expect a crash now!\n",
-	    ppdFileName);
-	goto closeprinter;
+    if ((data_dir = wine_get_data_dir())) filename = "/generic.ppd";
+    else if ((data_dir = wine_get_build_dir())) filename = "/dlls/wineps.drv/generic.ppd";
+    else
+    {
+        ERR( "Error getting PPD file name for printer '%s'\n", debugstr_a(nameA) );
+        return NULL;
+    }
+    ret = HeapAlloc( GetProcessHeap(), 0, strlen(data_dir) + strlen(filename) + 1 );
+    if (ret)
+    {
+        strcpy( ret, data_dir );
+        strcat( ret, filename );
     }
 
-    /* Some gimp-print ppd files don't contain a DefaultResolution line
-       set it to 300 if it's not specified */
-    if(pi->ppd->DefaultResolution == 0)
-        pi->ppd->DefaultResolution = 300;
+    return ret;
+}
+
+static struct list printer_list = LIST_INIT( printer_list );
+
+/**********************************************************************
+ *		PSDRV_FindPrinterInfo
+ */
+PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
+{
+    DWORD needed, res, dwPaperSize;
+    PRINTERINFO *pi;
+    FONTNAME *font;
+    const AFM *afm;
+    HANDLE hPrinter = 0;
+    char *ppd_filename = NULL, *nameA = NULL;
+    BOOL using_default_devmode = FALSE, needs_unlink = FALSE;
+    int len;
+
+    TRACE("'%s'\n", debugstr_w(name));
+
+    LIST_FOR_EACH_ENTRY( pi, &printer_list, PRINTERINFO, entry )
+    {
+        if (!strcmpW( pi->friendly_name, name ))
+            return pi;
+    }
+
+    pi = HeapAlloc( PSDRV_Heap, HEAP_ZERO_MEMORY, sizeof(*pi) );
+    if (pi == NULL) return NULL;
+
+    if (!(pi->friendly_name = HeapAlloc( PSDRV_Heap, 0, (strlenW(name)+1)*sizeof(WCHAR) ))) goto fail;
+    strcpyW( pi->friendly_name, name );
+
+    if (OpenPrinterW( pi->friendly_name, &hPrinter, NULL ) == 0) {
+        ERR ("OpenPrinter failed with code %i\n", GetLastError ());
+        goto fail;
+    }
+
+    len = WideCharToMultiByte( CP_ACP, 0, name, -1, NULL, 0, NULL, NULL );
+    nameA = HeapAlloc( GetProcessHeap(), 0, len );
+    WideCharToMultiByte( CP_ACP, 0, name, -1, nameA, len, NULL, NULL );
+
+    pi->Devmode = get_devmode( hPrinter, name, &using_default_devmode );
+    if (!pi->Devmode) goto fail;
+
+    ppd_filename = get_ppd_filename( hPrinter, nameA, &needs_unlink );
+    if (!ppd_filename) goto fail;
+
+    pi->ppd = PSDRV_ParsePPD( ppd_filename );
+    if (!pi->ppd)
+    {
+        WARN( "Couldn't parse PPD file '%s'\n", ppd_filename );
+        goto fail;
+    }
 
     if(using_default_devmode) {
         DWORD papersize;
 
 	if(GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IPAPERSIZE | LOCALE_RETURN_NUMBER,
 			  (LPWSTR)&papersize, sizeof(papersize)/sizeof(WCHAR))) {
-	    PSDRV_DEVMODEA dm;
+	    PSDRV_DEVMODE dm;
 	    memset(&dm, 0, sizeof(dm));
 	    dm.dmPublic.dmFields = DM_PAPERSIZE;
 	    dm.dmPublic.u1.s1.dmPaperSize = papersize;
 	    PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
 	}
 
-        SetPrinterDataExA(hPrinter, NULL, default_devmodeA, REG_BINARY,
-                            (LPBYTE)pi->Devmode, sizeof(DefaultDevmode));
+        set_devmode( hPrinter, pi->Devmode );
     }
 
     if(pi->ppd->DefaultPageSize) { /* We'll let the ppd override the devmode */
-        PSDRV_DEVMODEA dm;
+        PSDRV_DEVMODE dm;
         memset(&dm, 0, sizeof(dm));
         dm.dmPublic.dmFields = DM_PAPERSIZE;
         dm.dmPublic.u1.s1.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
@@ -731,10 +758,10 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
     if (res == ERROR_SUCCESS)
 	pi->Devmode->dmPublic.u1.s1.dmPaperSize = (SHORT) dwPaperSize;
     else if (res == ERROR_FILE_NOT_FOUND)
-	TRACE ("No 'Paper Size' for printer '%s'\n", name);
+	TRACE ("No 'Paper Size' for printer '%s'\n", debugstr_w(name));
     else {
 	ERR ("GetPrinterDataA returned %i\n", res);
-	goto closeprinter;
+	goto fail;
     }
 
     /* Duplex is indicated by the setting of the DM_DUPLEX bit in dmFields.
@@ -751,40 +778,10 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
             pi->Devmode->dmPublic.dmDuplex = DMDUP_SIMPLEX;
     }
 
-    res = EnumPrinterDataExA (hPrinter, "PrinterDriverData\\FontSubTable", NULL,
-	    0, &needed, &pi->FontSubTableSize);
-    if (res == ERROR_SUCCESS || res == ERROR_FILE_NOT_FOUND) {
-	TRACE ("No 'FontSubTable' for printer '%s'\n", name);
-    }
-    else if (res == ERROR_MORE_DATA) {
-	pi->FontSubTable = HeapAlloc (PSDRV_Heap, 0, needed);
-	if (pi->FontSubTable == NULL) {
-	    ERR ("Failed to allocate %i bytes from heap\n", needed);
-	    goto closeprinter;
-	}
+    pi->FontSubTable = load_font_sub_table( hPrinter, &pi->FontSubTableSize );
 
-	res = EnumPrinterDataExA (hPrinter, "PrinterDriverData\\FontSubTable",
-		(LPBYTE) pi->FontSubTable, needed, &needed,
-		&pi->FontSubTableSize);
-	if (res != ERROR_SUCCESS) {
-	    ERR ("EnumPrinterDataExA returned %i\n", res);
-	    goto closeprinter;
-	}
-    }
-    else {
-	ERR("EnumPrinterDataExA returned %i\n", res);
-	goto closeprinter;
-    }
-
-    if (ClosePrinter (hPrinter) == 0) {
-	ERR ("ClosePrinter failed with code %i\n", GetLastError ());
-	goto cleanup;
-    }
-
-    pi->next = NULL;
-    pi->Fonts = NULL;
-
-    for(font = pi->ppd->InstalledFonts; font; font = font->next) {
+    LIST_FOR_EACH_ENTRY( font, &pi->ppd->InstalledFonts, FONTNAME, entry )
+    {
         afm = PSDRV_FindAFMinList(PSDRV_AFMFontList, font->Name);
 	if(!afm) {
 	    TRACE( "Couldn't find AFM file for installed printer font '%s' - "
@@ -794,25 +791,27 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
 	    BOOL added;
 	    if (PSDRV_AddAFMtoList(&pi->Fonts, afm, &added) == FALSE) {
 	    	PSDRV_FreeAFMList(pi->Fonts);
-		goto cleanup;
+		goto fail;
 	    }
 	}
 
     }
-    if (ppd) unlink(ppd);
+    ClosePrinter( hPrinter );
+    HeapFree( GetProcessHeap(), 0, nameA );
+    if (needs_unlink) unlink( ppd_filename );
+    HeapFree( GetProcessHeap(), 0, ppd_filename );
+    list_add_head( &printer_list, &pi->entry );
     return pi;
 
-closeprinter:
-    ClosePrinter(hPrinter);
-cleanup:
-    HeapFree(PSDRV_Heap, 0, ppdFileName);
-    HeapFree(PSDRV_Heap, 0, pi->FontSubTable);
-    HeapFree(PSDRV_Heap, 0, pi->FriendlyName);
-    HeapFree(PSDRV_Heap, 0, pi->Devmode);
 fail:
+    if (hPrinter) ClosePrinter( hPrinter );
+    HeapFree(PSDRV_Heap, 0, pi->FontSubTable);
+    HeapFree(PSDRV_Heap, 0, pi->friendly_name);
+    HeapFree(PSDRV_Heap, 0, pi->Devmode);
     HeapFree(PSDRV_Heap, 0, pi);
-    if (ppd) unlink(ppd);
-    *last = NULL;
+    HeapFree( GetProcessHeap(), 0, nameA );
+    if (needs_unlink) unlink( ppd_filename );
+    HeapFree( GetProcessHeap(), 0, ppd_filename );
     return NULL;
 }
 

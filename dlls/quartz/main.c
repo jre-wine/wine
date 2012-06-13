@@ -34,8 +34,6 @@ static DWORD dll_ref = 0;
 /* For the moment, do nothing here. */
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
-    if (fdwReason == DLL_PROCESS_DETACH)
-        video_unregister_windowclass();
     return QUARTZ_DllMain( hInstDLL, fdwReason, lpv );
 }
 
@@ -73,6 +71,7 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_MPEG1Splitter, MPEGSplitter_create },
     { &CLSID_VideoRenderer, VideoRenderer_create },
     { &CLSID_NullRenderer, NullRenderer_create },
+    { &CLSID_VideoMixingRenderer9, VMR9Impl_create },
     { &CLSID_VideoRendererDefault, VideoRendererDefault_create },
     { &CLSID_DSoundRender, DSoundRender_create },
     { &CLSID_AudioRender, DSoundRender_create },

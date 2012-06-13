@@ -43,8 +43,7 @@ AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
 AC_ARG_WITH(curses,    AS_HELP_STRING([--without-curses],[do not use (n)curses]),
             [if test "x$withval" = "xno"; then ac_cv_header_ncurses_h=no; ac_cv_header_curses_h=no; fi])
 AC_ARG_WITH(dbus,      AS_HELP_STRING([--without-dbus],[do not use DBus (dynamic device support)]))
-AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
-            [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
+AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]))
 AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeType library]))
 AC_ARG_WITH(gettext,   AS_HELP_STRING([--without-gettext],[do not use gettext]))
 AC_ARG_WITH(gettextpo, AS_HELP_STRING([--with-gettextpo],[use the GetTextPO library to rebuild po files]),
@@ -142,6 +141,7 @@ case $host in
       AC_SUBST(TARGETFLAGS,"-m32")
       enable_win16=${enable_win16:-yes}
     fi
+    with_fontconfig=${with_fontconfig:-no}
     ;;
   x86_64*)
     if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
@@ -380,6 +380,8 @@ AC_SUBST(XLIB,"")
 AC_SUBST(OPENGL_LIBS,"")
 
 dnl **** Check for header files ****
+
+test "x$with_fontconfig" != "xno" || ac_cv_header_fontconfig_fontconfig_h=no
 
 AC_SYS_LARGEFILE()
 
@@ -1382,11 +1384,17 @@ WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],
 dnl **** Check for FreeType 2 ****
 if test "x$with_freetype" != "xno"
 then
-    AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
-    if test "$ft_devel" != "no"
+    if test "$PKG_CONFIG" != "false"
     then
-        ac_freetype_incl=`$ft_devel --cflags`
-        ac_freetype_libs=`$ft_devel --libs`
+        ac_freetype_incl="`$PKG_CONFIG --cflags freetype2 2>/dev/null`"
+        ac_freetype_libs="`$PKG_CONFIG --libs freetype2 2>/dev/null`"
+    else
+        AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
+        if test "$ft_devel" != "no"
+        then
+            ac_freetype_incl=`$ft_devel --cflags`
+            ac_freetype_libs=`$ft_devel --libs`
+        fi
     fi
     ac_freetype_libs=${ac_freetype_libs:-"-lfreetype"}
     WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$ac_freetype_libs])
@@ -2402,6 +2410,7 @@ WINE_CONFIG_DLL(apphelp)
 WINE_CONFIG_DLL(appwiz.cpl,,[po])
 WINE_CONFIG_DLL(atl,,[implib])
 WINE_CONFIG_TEST(dlls/atl/tests)
+WINE_CONFIG_DLL(atl80)
 WINE_CONFIG_DLL(authz)
 WINE_CONFIG_DLL(avicap32,,[implib])
 WINE_CONFIG_DLL(avifil32,,[implib,po])
@@ -2527,6 +2536,7 @@ WINE_CONFIG_TEST(dlls/dmloader/tests)
 WINE_CONFIG_DLL(dmscript)
 WINE_CONFIG_DLL(dmstyle)
 WINE_CONFIG_DLL(dmsynth)
+WINE_CONFIG_TEST(dlls/dmsynth/tests)
 WINE_CONFIG_DLL(dmusic)
 WINE_CONFIG_TEST(dlls/dmusic/tests)
 WINE_CONFIG_DLL(dmusic32,,[implib])
@@ -2794,6 +2804,7 @@ WINE_CONFIG_DLL(sccbase)
 WINE_CONFIG_DLL(schannel)
 WINE_CONFIG_TEST(dlls/schannel/tests)
 WINE_CONFIG_DLL(scrrun)
+WINE_CONFIG_TEST(dlls/scrrun/tests)
 WINE_CONFIG_DLL(secur32,,[implib])
 WINE_CONFIG_TEST(dlls/secur32/tests)
 WINE_CONFIG_DLL(security)

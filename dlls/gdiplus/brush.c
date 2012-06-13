@@ -60,7 +60,7 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
         }
         case BrushTypePathGradient:{
             GpPathGradient *src, *dest;
-            INT count;
+            INT count, pcount;
             GpStatus stat;
 
             *clone = GdipAlloc(sizeof(GpPathGradient));
@@ -78,18 +78,36 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
                 return stat;
             }
 
+            stat = GdipCloneMatrix(src->transform, &dest->transform);
+
+            if(stat != Ok){
+                GdipDeletePath(dest->path);
+                GdipFree(dest);
+                return stat;
+            }
+
             /* blending */
             count = src->blendcount;
             dest->blendcount = count;
             dest->blendfac = GdipAlloc(count * sizeof(REAL));
             dest->blendpos = GdipAlloc(count * sizeof(REAL));
             dest->surroundcolors = GdipAlloc(dest->surroundcolorcount * sizeof(ARGB));
+            pcount = dest->pblendcount;
+            if (pcount)
+            {
+                dest->pblendcolor = GdipAlloc(pcount * sizeof(ARGB));
+                dest->pblendpos = GdipAlloc(pcount * sizeof(REAL));
+            }
 
-            if(!dest->blendfac || !dest->blendpos || !dest->surroundcolors){
+            if(!dest->blendfac || !dest->blendpos || !dest->surroundcolors ||
+               (pcount && (!dest->pblendcolor || !dest->pblendpos))){
                 GdipDeletePath(dest->path);
+                GdipDeleteMatrix(dest->transform);
                 GdipFree(dest->blendfac);
                 GdipFree(dest->blendpos);
                 GdipFree(dest->surroundcolors);
+                GdipFree(dest->pblendcolor);
+                GdipFree(dest->pblendpos);
                 GdipFree(dest);
                 return OutOfMemory;
             }
@@ -97,6 +115,12 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
             memcpy(dest->blendfac, src->blendfac, count * sizeof(REAL));
             memcpy(dest->blendpos, src->blendpos, count * sizeof(REAL));
             memcpy(dest->surroundcolors, src->surroundcolors, dest->surroundcolorcount * sizeof(ARGB));
+
+            if (pcount)
+            {
+                memcpy(dest->pblendcolor, src->pblendcolor, pcount * sizeof(ARGB));
+                memcpy(dest->pblendpos, src->pblendpos, pcount * sizeof(REAL));
+            }
 
             break;
         }
@@ -485,12 +509,16 @@ GpStatus WINGDIPAPI GdipCreateLineBrushFromRectWithAngleI(GDIPCONST GpRect* rect
                                         wrap, line);
 }
 
-static GpStatus create_path_gradient(GpPath *path, GpPathGradient **grad)
+static GpStatus create_path_gradient(GpPath *path, ARGB centercolor, GpPathGradient **grad)
 {
     GpRectF bounds;
+    GpStatus stat;
 
     if(!path || !grad)
         return InvalidParameter;
+
+    if (path->pathdata.Count < 2)
+        return OutOfMemory;
 
     GdipGetPathWorldBounds(path, &bounds, NULL, NULL);
 
@@ -500,10 +528,18 @@ static GpStatus create_path_gradient(GpPath *path, GpPathGradient **grad)
         return OutOfMemory;
     }
 
+    stat = GdipCreateMatrix(&(*grad)->transform);
+    if (stat != Ok)
+    {
+        GdipFree(*grad);
+        return stat;
+    }
+
     (*grad)->blendfac = GdipAlloc(sizeof(REAL));
     (*grad)->blendpos = GdipAlloc(sizeof(REAL));
     (*grad)->surroundcolors = GdipAlloc(sizeof(ARGB));
     if(!(*grad)->blendfac || !(*grad)->blendpos || !(*grad)->surroundcolors){
+        GdipDeleteMatrix((*grad)->transform);
         GdipFree((*grad)->blendfac);
         GdipFree((*grad)->blendpos);
         GdipFree((*grad)->surroundcolors);
@@ -518,7 +554,7 @@ static GpStatus create_path_gradient(GpPath *path, GpPathGradient **grad)
     (*grad)->path = path;
 
     (*grad)->brush.bt = BrushTypePathGradient;
-    (*grad)->centercolor = 0xffffffff;
+    (*grad)->centercolor = centercolor;
     (*grad)->wrap = WrapModeClamp;
     (*grad)->gamma = FALSE;
     /* FIXME: this should be set to the "centroid" of the path by default */
@@ -555,11 +591,14 @@ GpStatus WINGDIPAPI GdipCreatePathGradient(GDIPCONST GpPointF* points,
         stat = GdipAddPathLine2(path, points, count);
 
         if (stat == Ok)
-            stat = create_path_gradient(path, grad);
+            stat = create_path_gradient(path, 0xff000000, grad);
 
         if (stat != Ok)
             GdipDeletePath(path);
     }
+
+    if (stat == Ok)
+        (*grad)->wrap = wrap;
 
     return stat;
 }
@@ -585,11 +624,14 @@ GpStatus WINGDIPAPI GdipCreatePathGradientI(GDIPCONST GpPoint* points,
         stat = GdipAddPathLine2I(path, points, count);
 
         if (stat == Ok)
-            stat = create_path_gradient(path, grad);
+            stat = create_path_gradient(path, 0xff000000, grad);
 
         if (stat != Ok)
             GdipDeletePath(path);
     }
+
+    if (stat == Ok)
+        (*grad)->wrap = wrap;
 
     return stat;
 }
@@ -612,7 +654,7 @@ GpStatus WINGDIPAPI GdipCreatePathGradientFromPath(GDIPCONST GpPath* path,
 
     if (stat == Ok)
     {
-        stat = create_path_gradient(new_path, grad);
+        stat = create_path_gradient(new_path, 0xffffffff, grad);
 
         if (stat != Ok)
             GdipDeletePath(new_path);
@@ -875,9 +917,12 @@ GpStatus WINGDIPAPI GdipDeleteBrush(GpBrush *brush)
     {
         case BrushTypePathGradient:
             GdipDeletePath(((GpPathGradient*) brush)->path);
+            GdipDeleteMatrix(((GpPathGradient*) brush)->transform);
             GdipFree(((GpPathGradient*) brush)->blendfac);
             GdipFree(((GpPathGradient*) brush)->blendpos);
             GdipFree(((GpPathGradient*) brush)->surroundcolors);
+            GdipFree(((GpPathGradient*) brush)->pblendcolor);
+            GdipFree(((GpPathGradient*) brush)->pblendpos);
             break;
         case BrushTypeLinearGradient:
             GdipFree(((GpLineGradient*)brush)->blendfac);
@@ -994,14 +1039,14 @@ GpStatus WINGDIPAPI GdipGetPathGradientCenterPointI(GpPathGradient *grad,
 GpStatus WINGDIPAPI GdipGetPathGradientCenterColor(GpPathGradient *grad,
     ARGB *colors)
 {
-    static int calls;
-
     TRACE("(%p,%p)\n", grad, colors);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad || !colors)
+        return InvalidParameter;
 
-    return NotImplemented;
+    *colors = grad->centercolor;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetPathGradientFocusScales(GpPathGradient *grad,
@@ -1413,22 +1458,76 @@ GpStatus WINGDIPAPI GdipSetPathGradientLinearBlend(GpPathGradient *brush,
 GpStatus WINGDIPAPI GdipSetPathGradientPresetBlend(GpPathGradient *brush,
     GDIPCONST ARGB *blend, GDIPCONST REAL *pos, INT count)
 {
-    FIXME("(%p,%p,%p,%i): stub\n", brush, blend, pos, count);
-    return NotImplemented;
+    ARGB *new_color;
+    REAL *new_pos;
+    TRACE("(%p,%p,%p,%i)\n", brush, blend, pos, count);
+
+    if (!brush || !blend || !pos || count < 2 ||
+        pos[0] != 0.0f || pos[count-1] != 1.0f)
+    {
+        return InvalidParameter;
+    }
+
+    new_color = GdipAlloc(count * sizeof(ARGB));
+    new_pos = GdipAlloc(count * sizeof(REAL));
+    if (!new_color || !new_pos)
+    {
+        GdipFree(new_color);
+        GdipFree(new_pos);
+        return OutOfMemory;
+    }
+
+    memcpy(new_color, blend, sizeof(ARGB) * count);
+    memcpy(new_pos, pos, sizeof(REAL) * count);
+
+    GdipFree(brush->pblendcolor);
+    GdipFree(brush->pblendpos);
+
+    brush->pblendcolor = new_color;
+    brush->pblendpos = new_pos;
+    brush->pblendcount = count;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetPathGradientPresetBlend(GpPathGradient *brush,
     ARGB *blend, REAL *pos, INT count)
 {
-    FIXME("(%p,%p,%p,%i): stub\n", brush, blend, pos, count);
-    return NotImplemented;
+    TRACE("(%p,%p,%p,%i)\n", brush, blend, pos, count);
+
+    if (count < 0)
+        return OutOfMemory;
+
+    if (!brush || !blend || !pos || count < 2)
+        return InvalidParameter;
+
+    if (brush->pblendcount == 0)
+        return GenericError;
+
+    if (count != brush->pblendcount)
+    {
+        /* Native lines up the ends of each array, and copies the destination size. */
+        FIXME("Braindead behavior on wrong-sized buffer not implemented.\n");
+        return InvalidParameter;
+    }
+
+    memcpy(blend, brush->pblendcolor, sizeof(ARGB) * brush->pblendcount);
+    memcpy(pos, brush->pblendpos, sizeof(REAL) * brush->pblendcount);
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetPathGradientPresetBlendCount(GpPathGradient *brush,
     INT *count)
 {
     FIXME("(%p,%p): stub\n", brush, count);
-    return NotImplemented;
+
+    if (!brush || !count)
+        return InvalidParameter;
+
+    *count = brush->pblendcount;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetPathGradientCenterColor(GpPathGradient *grad,
@@ -1557,79 +1656,81 @@ GpStatus WINGDIPAPI GdipSetPathGradientWrapMode(GpPathGradient *grad,
 GpStatus WINGDIPAPI GdipSetPathGradientTransform(GpPathGradient *grad,
     GpMatrix *matrix)
 {
-    static int calls;
-
     TRACE("(%p,%p)\n", grad, matrix);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad || !matrix)
+        return InvalidParameter;
 
-    return NotImplemented;
+    memcpy(grad->transform, matrix, sizeof(GpMatrix));
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetPathGradientTransform(GpPathGradient *grad,
     GpMatrix *matrix)
 {
-    static int calls;
-
     TRACE("(%p,%p)\n", grad, matrix);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad || !matrix)
+        return InvalidParameter;
 
-    return NotImplemented;
+    memcpy(matrix, grad->transform, sizeof(GpMatrix));
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipMultiplyPathGradientTransform(GpPathGradient *grad,
     GDIPCONST GpMatrix *matrix, GpMatrixOrder order)
 {
-    static int calls;
-
     TRACE("(%p,%p,%i)\n", grad, matrix, order);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad)
+        return InvalidParameter;
 
-    return NotImplemented;
+    return GdipMultiplyMatrix(grad->transform, matrix, order);
+}
+
+GpStatus WINGDIPAPI GdipResetPathGradientTransform(GpPathGradient *grad)
+{
+    TRACE("(%p)\n", grad);
+
+    if (!grad)
+        return InvalidParameter;
+
+    return GdipSetMatrixElements(grad->transform, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
 }
 
 GpStatus WINGDIPAPI GdipRotatePathGradientTransform(GpPathGradient *grad,
     REAL angle, GpMatrixOrder order)
 {
-    static int calls;
-
     TRACE("(%p,%0.2f,%i)\n", grad, angle, order);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad)
+        return InvalidParameter;
 
-    return NotImplemented;
+    return GdipRotateMatrix(grad->transform, angle, order);
 }
 
 GpStatus WINGDIPAPI GdipScalePathGradientTransform(GpPathGradient *grad,
     REAL sx, REAL sy, GpMatrixOrder order)
 {
-    static int calls;
-
     TRACE("(%p,%0.2f,%0.2f,%i)\n", grad, sx, sy, order);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad)
+        return InvalidParameter;
 
-    return NotImplemented;
+    return GdipScaleMatrix(grad->transform, sx, sy, order);
 }
 
 GpStatus WINGDIPAPI GdipTranslatePathGradientTransform(GpPathGradient *grad,
     REAL dx, REAL dy, GpMatrixOrder order)
 {
-    static int calls;
-
     TRACE("(%p,%0.2f,%0.2f,%i)\n", grad, dx, dy, order);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!grad)
+        return InvalidParameter;
 
-    return NotImplemented;
+    return GdipTranslateMatrix(grad->transform, dx, dy, order);
 }
 
 GpStatus WINGDIPAPI GdipSetSolidFillColor(GpSolidFill *sf, ARGB argb)

@@ -83,7 +83,7 @@ extern void* (__cdecl *MSVCRT_set_new_handler)(void*);
 
 #define DEFINE_RTTI_DATA(name, off, base_classes, cl1, cl2, cl3, mangled_name) \
 static const type_info name ## _type_info = { \
-    &MSVCP_ ## name ## _vtable, \
+    &MSVCP_type_info_vtable, \
     NULL, \
     mangled_name \
 }; \
@@ -166,7 +166,6 @@ typedef enum __exception_type {
     EXCEPTION_RUNTIME_ERROR
 } exception_type;
 void throw_exception(exception_type, const char *);
-void set_exception_vtable(void);
 
 /* rtti */
 typedef struct __type_info

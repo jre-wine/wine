@@ -711,8 +711,11 @@ static HRESULT WINAPI HTMLWindow2_put_opener(IHTMLWindow2 *iface, VARIANT v)
 static HRESULT WINAPI HTMLWindow2_get_opener(IHTMLWindow2 *iface, VARIANT *p)
 {
     HTMLWindow *This = impl_from_IHTMLWindow2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    FIXME("(%p)->(%p) returning empty\n", This, p);
+
+    V_VT(p) = VT_EMPTY;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLWindow2_get_navigator(IHTMLWindow2 *iface, IOmNavigator **p)
@@ -747,43 +750,25 @@ static HRESULT WINAPI HTMLWindow2_get_name(IHTMLWindow2 *iface, BSTR *p)
     HTMLWindow *This = impl_from_IHTMLWindow2(iface);
     nsAString name_str;
     nsresult nsres;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
     nsAString_Init(&name_str, NULL);
     nsres = nsIDOMWindow_GetName(This->nswindow, &name_str);
-    if(NS_SUCCEEDED(nsres)) {
-        const PRUnichar *name;
-
-        nsAString_GetData(&name_str, &name);
-        if(*name) {
-            *p = SysAllocString(name);
-            hres = *p ? S_OK : E_OUTOFMEMORY;
-        }else {
-            *p = NULL;
-            hres = S_OK;
-        }
-    }else {
-        ERR("GetName failed: %08x\n", nsres);
-        hres = E_FAIL;
-    }
-    nsAString_Finish(&name_str);
-
-    return hres;
+    return return_nsstr(nsres, &name_str, p);
 }
 
 static HRESULT WINAPI HTMLWindow2_get_parent(IHTMLWindow2 *iface, IHTMLWindow2 **p)
 {
     HTMLWindow *This = impl_from_IHTMLWindow2(iface);
+
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(This->parent) {
-        *p = &This->parent->IHTMLWindow2_iface;
-        IHTMLWindow2_AddRef(*p);
-    }else
-        *p = NULL;
+    if(!This->parent)
+        return IHTMLWindow2_get_self(&This->IHTMLWindow2_iface, p);
 
+    *p = &This->parent->IHTMLWindow2_iface;
+    IHTMLWindow2_AddRef(*p);
     return S_OK;
 }
 
@@ -971,15 +956,19 @@ static HRESULT WINAPI HTMLWindow2_get_onhelp(IHTMLWindow2 *iface, VARIANT *p)
 static HRESULT WINAPI HTMLWindow2_put_onerror(IHTMLWindow2 *iface, VARIANT v)
 {
     HTMLWindow *This = impl_from_IHTMLWindow2(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
-    return E_NOTIMPL;
+
+    FIXME("(%p)->(%s) semi-stub\n", This, debugstr_variant(&v));
+
+    return set_window_event(This, EVENTID_ERROR, &v);
 }
 
 static HRESULT WINAPI HTMLWindow2_get_onerror(IHTMLWindow2 *iface, VARIANT *p)
 {
     HTMLWindow *This = impl_from_IHTMLWindow2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_window_event(This, EVENTID_ERROR, p);
 }
 
 static HRESULT WINAPI HTMLWindow2_put_onresize(IHTMLWindow2 *iface, VARIANT v)

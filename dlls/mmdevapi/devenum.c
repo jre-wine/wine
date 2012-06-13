@@ -261,88 +261,82 @@ static HRESULT MMDevice_SetPropValue(const GUID *devguid, DWORD flow, REFPROPERT
  * If GUID is null, a random guid will be assigned
  * and the device will be created
  */
-static MMDevice *MMDevice_Create(WCHAR *name, void *devkey, GUID *id, EDataFlow flow, DWORD state, BOOL setdefault)
+static MMDevice *MMDevice_Create(WCHAR *name, GUID *id, EDataFlow flow, DWORD state, BOOL setdefault)
 {
     HKEY key, root;
-    MMDevice *cur;
+    MMDevice *cur = NULL;
     WCHAR guidstr[39];
     DWORD i;
 
+    static const PROPERTYKEY deviceinterface_key = {
+        {0x233164c8, 0x1b2c, 0x4c7d, {0xbc, 0x68, 0xb6, 0x71, 0x68, 0x7a, 0x25, 0x67}}, 1
+    };
+
     for (i = 0; i < MMDevice_count; ++i)
     {
-        cur = MMDevice_head[i];
-        if (cur->flow == flow && !lstrcmpW(cur->drv_id, name))
-        {
-            LONG ret;
-            /* Same device, update state */
-            cur->state = state;
-            cur->key = devkey;
-            StringFromGUID2(&cur->devguid, guidstr, sizeof(guidstr)/sizeof(*guidstr));
-            ret = RegOpenKeyExW(flow == eRender ? key_render : key_capture, guidstr, 0, KEY_WRITE, &key);
-            if (ret == ERROR_SUCCESS)
-            {
-                RegSetValueExW(key, reg_devicestate, 0, REG_DWORD, (const BYTE*)&state, sizeof(DWORD));
-                RegCloseKey(key);
-            }
-            goto done;
+        MMDevice *device = MMDevice_head[i];
+        if (device->flow == flow && IsEqualGUID(&device->devguid, id)){
+            cur = device;
+            break;
         }
     }
 
-    /* No device found, allocate new one */
-    cur = HeapAlloc(GetProcessHeap(), 0, sizeof(*cur));
-    if (!cur){
-        HeapFree(GetProcessHeap(), 0, devkey);
-        return NULL;
-    }
-    cur->drv_id = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(name)+1)*sizeof(WCHAR));
-    if (!cur->drv_id)
-    {
-        HeapFree(GetProcessHeap(), 0, cur);
-        HeapFree(GetProcessHeap(), 0, devkey);
-        return NULL;
-    }
-    lstrcpyW(cur->drv_id, name);
-    cur->key = devkey;
-    cur->IMMDevice_iface.lpVtbl = &MMDeviceVtbl;
-    cur->IMMEndpoint_iface.lpVtbl = &MMEndpointVtbl;
-    cur->ref = 0;
-    InitializeCriticalSection(&cur->crst);
-    cur->crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": MMDevice.crst");
+    if(!cur){
+        /* No device found, allocate new one */
+        cur = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*cur));
+        if (!cur)
+            return NULL;
+
+        cur->IMMDevice_iface.lpVtbl = &MMDeviceVtbl;
+        cur->IMMEndpoint_iface.lpVtbl = &MMEndpointVtbl;
+
+        InitializeCriticalSection(&cur->crst);
+        cur->crst.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": MMDevice.crst");
+
+        if (!MMDevice_head)
+            MMDevice_head = HeapAlloc(GetProcessHeap(), 0, sizeof(*MMDevice_head));
+        else
+            MMDevice_head = HeapReAlloc(GetProcessHeap(), 0, MMDevice_head, sizeof(*MMDevice_head)*(1+MMDevice_count));
+        MMDevice_head[MMDevice_count++] = cur;
+    }else if(cur->ref > 0)
+        WARN("Modifying an MMDevice with postitive reference count!\n");
+
+    if(cur->drv_id)
+        HeapFree(GetProcessHeap(), 0, cur->drv_id);
+    cur->drv_id = name;
+
     cur->flow = flow;
     cur->state = state;
-    if (!id)
-    {
-        id = &cur->devguid;
-        CoCreateGuid(id);
-    }
     cur->devguid = *id;
-    StringFromGUID2(id, guidstr, sizeof(guidstr)/sizeof(*guidstr));
+
+    StringFromGUID2(&cur->devguid, guidstr, sizeof(guidstr)/sizeof(*guidstr));
+
     if (flow == eRender)
         root = key_render;
     else
         root = key_capture;
-    if (!RegCreateKeyExW(root, guidstr, 0, NULL, 0, KEY_WRITE|KEY_READ, NULL, &key, NULL))
+
+    if (RegCreateKeyExW(root, guidstr, 0, NULL, 0, KEY_WRITE|KEY_READ, NULL, &key, NULL) == ERROR_SUCCESS)
     {
         HKEY keyprop;
         RegSetValueExW(key, reg_devicestate, 0, REG_DWORD, (const BYTE*)&state, sizeof(DWORD));
         if (!RegCreateKeyExW(key, reg_properties, 0, NULL, 0, KEY_WRITE|KEY_READ, NULL, &keyprop, NULL))
         {
             PROPVARIANT pv;
+
             pv.vt = VT_LPWSTR;
             pv.u.pwszVal = name;
             MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv);
             MMDevice_SetPropValue(id, flow, (const PROPERTYKEY*)&DEVPKEY_Device_DeviceDesc, &pv);
+
+            pv.u.pwszVal = guidstr;
+            MMDevice_SetPropValue(id, flow, &deviceinterface_key, &pv);
+
             RegCloseKey(keyprop);
         }
         RegCloseKey(key);
     }
-    if (!MMDevice_head)
-        MMDevice_head = HeapAlloc(GetProcessHeap(), 0, sizeof(*MMDevice_head));
-    else
-        MMDevice_head = HeapReAlloc(GetProcessHeap(), 0, MMDevice_head, sizeof(*MMDevice_head)*(1+MMDevice_count));
-    MMDevice_head[MMDevice_count++] = cur;
 
-done:
     if (setdefault)
     {
         if (flow == eRender)
@@ -401,7 +395,10 @@ static HRESULT load_devices_from_reg(void)
             && SUCCEEDED(MMDevice_GetPropValue(&guid, curflow, (const PROPERTYKEY*)&DEVPKEY_Device_FriendlyName, &pv))
             && pv.vt == VT_LPWSTR)
         {
-            MMDevice_Create(pv.u.pwszVal, NULL, &guid, curflow,
+            DWORD size_bytes = (strlenW(pv.u.pwszVal) + 1) * sizeof(WCHAR);
+            WCHAR *name = HeapAlloc(GetProcessHeap(), 0, size_bytes);
+            memcpy(name, pv.u.pwszVal, size_bytes);
+            MMDevice_Create(name, &guid, curflow,
                     DEVICE_STATE_NOTPRESENT, FALSE);
             CoTaskMemFree(pv.u.pwszVal);
         }
@@ -417,7 +414,7 @@ static HRESULT set_format(MMDevice *dev)
     WAVEFORMATEX *fmt;
     PROPVARIANT pv = { VT_EMPTY };
 
-    hr = drvs.pGetAudioEndpoint(dev->key, &dev->IMMDevice_iface, dev->flow, &client);
+    hr = drvs.pGetAudioEndpoint(&dev->devguid, &dev->IMMDevice_iface, &client);
     if(FAILED(hr))
         return hr;
 
@@ -443,26 +440,25 @@ static HRESULT set_format(MMDevice *dev)
 static HRESULT load_driver_devices(EDataFlow flow)
 {
     WCHAR **ids;
-    void **keys;
+    GUID *guids;
     UINT num, def, i;
     HRESULT hr;
 
     if(!drvs.pGetEndpointIDs)
         return S_OK;
 
-    hr = drvs.pGetEndpointIDs(flow, &ids, &keys, &num, &def);
+    hr = drvs.pGetEndpointIDs(flow, &ids, &guids, &num, &def);
     if(FAILED(hr))
         return hr;
 
     for(i = 0; i < num; ++i){
         MMDevice *dev;
-        dev = MMDevice_Create(ids[i], keys[i], NULL, flow, DEVICE_STATE_ACTIVE,
+        dev = MMDevice_Create(ids[i], &guids[i], flow, DEVICE_STATE_ACTIVE,
                 def == i);
         set_format(dev);
-        HeapFree(GetProcessHeap(), 0, ids[i]);
     }
 
-    HeapFree(GetProcessHeap(), 0, keys);
+    HeapFree(GetProcessHeap(), 0, guids);
     HeapFree(GetProcessHeap(), 0, ids);
 
     return S_OK;
@@ -484,7 +480,6 @@ static void MMDevice_Destroy(MMDevice *This)
     This->crst.DebugInfo->Spare[0] = 0;
     DeleteCriticalSection(&This->crst);
     HeapFree(GetProcessHeap(), 0, This->drv_id);
-    HeapFree(GetProcessHeap(), 0, This->key);
     HeapFree(GetProcessHeap(), 0, This);
 }
 
@@ -546,7 +541,7 @@ static HRESULT WINAPI MMDevice_Activate(IMMDevice *iface, REFIID riid, DWORD cls
         return E_POINTER;
 
     if (IsEqualIID(riid, &IID_IAudioClient)){
-        hr = drvs.pGetAudioEndpoint(This->key, iface, This->flow, (IAudioClient**)ppv);
+        hr = drvs.pGetAudioEndpoint(&This->devguid, iface, (IAudioClient**)ppv);
     }else if (IsEqualIID(riid, &IID_IAudioEndpointVolume))
         hr = AudioEndpointVolume_Create(This, (IAudioEndpointVolume**)ppv);
     else if (IsEqualIID(riid, &IID_IAudioSessionManager)
@@ -634,7 +629,7 @@ static HRESULT WINAPI MMDevice_GetId(IMMDevice *iface, WCHAR **itemid)
     MMDevice *This = impl_from_IMMDevice(iface);
     WCHAR *str;
     GUID *id = &This->devguid;
-    static const WCHAR formatW[] = { '{','0','.','0','.','0','.','0','0','0','0','0','0','0','0','}','.',
+    static const WCHAR formatW[] = { '{','0','.','0','.','%','u','.','0','0','0','0','0','0','0','0','}','.',
                                      '{','%','0','8','X','-','%','0','4','X','-',
                                      '%','0','4','X','-','%','0','2','X','%','0','2','X','-',
                                      '%','0','2','X','%','0','2','X','%','0','2','X','%','0','2','X',
@@ -646,7 +641,7 @@ static HRESULT WINAPI MMDevice_GetId(IMMDevice *iface, WCHAR **itemid)
     *itemid = str = CoTaskMemAlloc(56 * sizeof(WCHAR));
     if (!str)
         return E_OUTOFMEMORY;
-    wsprintfW( str, formatW, id->Data1, id->Data2, id->Data3,
+    wsprintfW( str, formatW, This->flow, id->Data1, id->Data2, id->Data3,
                id->Data4[0], id->Data4[1], id->Data4[2], id->Data4[3],
                id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7] );
     TRACE("returning %s\n", wine_dbgstr_w(str));

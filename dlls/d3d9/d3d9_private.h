@@ -23,6 +23,7 @@
 #ifndef __WINE_D3D9_PRIVATE_H
 #define __WINE_D3D9_PRIVATE_H
 
+#include <assert.h>
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -156,6 +157,12 @@ typedef struct IDirect3D9Impl
 
 void filter_caps(D3DCAPS9* pCaps) DECLSPEC_HIDDEN;
 
+struct fvf_declaration
+{
+    struct wined3d_vertex_declaration *decl;
+    DWORD fvf;
+};
+
 /*****************************************************************************
  * IDirect3DDevice9 implementation structure
  */
@@ -169,8 +176,8 @@ typedef struct IDirect3DDevice9Impl
     /* Avoids recursion with nested ReleaseRef to 0 */
     BOOL                          inDestruction;
 
-    IDirect3DVertexDeclaration9  **convertedDecls;
-    unsigned int                 numConvertedDecls, declArraySize;
+    struct fvf_declaration *fvf_decls;
+    UINT fvf_decl_count, fvf_decl_size;
 
     BOOL                          notreset;
     BOOL                          in_scene;
@@ -205,14 +212,14 @@ HRESULT volume_init(IDirect3DVolume9Impl *volume, IDirect3DDevice9Impl *device, 
 typedef struct IDirect3DSwapChain9Impl
 {
     /* IUnknown fields */
-    const IDirect3DSwapChain9Vtbl *lpVtbl;
+    IDirect3DSwapChain9 IDirect3DSwapChain9_iface;
     LONG                    ref;
     struct wined3d_swapchain *wined3d_swapchain;
     IDirect3DDevice9Ex *parentDevice;
 } IDirect3DSwapChain9Impl;
 
-HRESULT swapchain_init(IDirect3DSwapChain9Impl *swapchain, IDirect3DDevice9Impl *device,
-        D3DPRESENT_PARAMETERS *present_parameters) DECLSPEC_HIDDEN;
+HRESULT d3d9_swapchain_create(IDirect3DDevice9Impl *device, D3DPRESENT_PARAMETERS *present_parameters,
+        IDirect3DSwapChain9Impl **swapchain) DECLSPEC_HIDDEN;
 
 /* ----------------- */
 /* IDirect3DSurface9 */
@@ -380,7 +387,7 @@ HRESULT stateblock_init(IDirect3DStateBlock9Impl *stateblock, IDirect3DDevice9Im
  */
 typedef struct IDirect3DVertexDeclaration9Impl {
   /* IUnknown fields */
-  const IDirect3DVertexDeclaration9Vtbl *lpVtbl;
+  IDirect3DVertexDeclaration9 IDirect3DVertexDeclaration9_iface;
   LONG    ref;
 
   D3DVERTEXELEMENT9 *elements;
@@ -394,9 +401,10 @@ typedef struct IDirect3DVertexDeclaration9Impl {
   LPDIRECT3DDEVICE9EX parentDevice;
 } IDirect3DVertexDeclaration9Impl;
 
-void IDirect3DVertexDeclaration9Impl_Destroy(LPDIRECT3DVERTEXDECLARATION9 iface) DECLSPEC_HIDDEN;
-HRESULT vertexdeclaration_init(IDirect3DVertexDeclaration9Impl *declaration,
-        IDirect3DDevice9Impl *device, const D3DVERTEXELEMENT9 *elements) DECLSPEC_HIDDEN;
+HRESULT d3d9_vertex_declaration_create(IDirect3DDevice9Impl *device,
+        const D3DVERTEXELEMENT9 *elements, IDirect3DVertexDeclaration9Impl **declaration) DECLSPEC_HIDDEN;
+IDirect3DVertexDeclaration9Impl *unsafe_impl_from_IDirect3DVertexDeclaration9(
+        IDirect3DVertexDeclaration9 *iface) DECLSPEC_HIDDEN;
 
 /* ---------------------- */
 /* IDirect3DVertexShader9 */

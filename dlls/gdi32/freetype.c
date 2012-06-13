@@ -484,10 +484,9 @@ static const WCHAR wine_fonts_key[] = {'S','o','f','t','w','a','r','e','\\','W',
 static const WCHAR wine_fonts_cache_key[] = {'C','a','c','h','e',0};
 static const WCHAR english_name_value[] = {'E','n','g','l','i','s','h',' ','N','a','m','e',0};
 static const WCHAR face_index_value[] = {'I','n','d','e','x',0};
-static const WCHAR face_italic_value[] = {'I','t','a','l','i','c',0};
-static const WCHAR face_bold_value[] = {'B','o','l','d',0};
+static const WCHAR face_ntmflags_value[] = {'N','t','m','f','l','a','g','s',0};
 static const WCHAR face_version_value[] = {'V','e','r','s','i','o','n',0};
-static const WCHAR face_external_value[] = {'E','x','t','e','r','n','a','l',0};
+static const WCHAR face_vertical_value[] = {'V','e','r','t','i','c','a','l',0};
 static const WCHAR face_height_value[] = {'H','e','i','g','h','t',0};
 static const WCHAR face_width_value[] = {'W','i','d','t','h',0};
 static const WCHAR face_size_value[] = {'S','i','z','e',0};
@@ -1194,7 +1193,7 @@ static inline BOOL faces_equal( const Face *f1, const Face *f2 )
 {
     if (strcmpiW( f1->StyleName, f2->StyleName )) return FALSE;
     if (f1->scalable) return TRUE;
-    if (f2->size.y_ppem != f2->size.y_ppem) return FALSE;
+    if (f1->size.y_ppem != f2->size.y_ppem) return FALSE;
     return !memcmp( &f1->fs, &f2->fs, sizeof(f1->fs) );
 }
 
@@ -1256,12 +1255,14 @@ static BOOL insert_face_in_family_list( Face *face, Family *family )
 
             if (face->font_version <= cursor->font_version)
             {
-                TRACE("Original font is newer so skipping this one\n");
+                TRACE("Original font %s is newer so skipping %s\n",
+                      debugstr_a(cursor->file), debugstr_a(face->file));
                 return FALSE;
             }
             else
             {
-                TRACE("Replacing original with this one\n");
+                TRACE("Replacing original %s with %s\n",
+                      debugstr_a(cursor->file), debugstr_a(face->file));
                 list_add_before( &cursor->entry, &face->entry );
                 face->family = family;
                 list_remove( &cursor->entry);
@@ -1269,6 +1270,8 @@ static BOOL insert_face_in_family_list( Face *face, Family *family )
                 return TRUE;
             }
         }
+        else
+            TRACE("Adding new %s\n", debugstr_a(face->file));
 
         if (style_order( face ) < style_order( cursor )) break;
     }
@@ -1316,7 +1319,6 @@ static void load_face(HKEY hkey_face, WCHAR *face_name, Family *family)
        key of a bunch of non-scalable strikes */
     if(RegQueryValueExA(hkey_face, "File Name", NULL, NULL, NULL, &needed) == ERROR_SUCCESS)
     {
-        DWORD italic, bold;
         Face *face;
         face = HeapAlloc(GetProcessHeap(), 0, sizeof(*face));
         face->cached_enum_data = NULL;
@@ -1325,7 +1327,6 @@ static void load_face(HKEY hkey_face, WCHAR *face_name, Family *family)
         RegQueryValueExA(hkey_face, "File Name", NULL, NULL, (BYTE*)face->file, &needed);
 
         face->StyleName = strdupW(face_name);
-        face->vertical = (family->FamilyName[0] == '@');
 
         if(RegQueryValueExW(hkey_face, face_full_name_value, NULL, NULL, NULL, &needed) == ERROR_SUCCESS)
         {
@@ -1337,10 +1338,9 @@ static void load_face(HKEY hkey_face, WCHAR *face_name, Family *family)
             face->FullName = NULL;
 
         reg_load_dword(hkey_face, face_index_value, (DWORD*)&face->face_index);
-        reg_load_dword(hkey_face, face_italic_value, &italic);
-        reg_load_dword(hkey_face, face_bold_value, &bold);
+        reg_load_dword(hkey_face, face_ntmflags_value, &face->ntmFlags);
         reg_load_dword(hkey_face, face_version_value, (DWORD*)&face->font_version);
-        reg_load_dword(hkey_face, face_external_value, (DWORD*)&face->external);
+        reg_load_dword(hkey_face, face_vertical_value, (DWORD*)&face->vertical);
 
         needed = sizeof(face->fs);
         RegQueryValueExW(hkey_face, face_font_sig_value, NULL, NULL, (BYTE*)&face->fs, &needed);
@@ -1363,11 +1363,6 @@ static void load_face(HKEY hkey_face, WCHAR *face_name, Family *family)
                   face->size.height, face->size.width, face->size.size >> 6,
                   face->size.x_ppem >> 6, face->size.y_ppem >> 6);
         }
-
-        face->ntmFlags = 0;
-        if (italic) face->ntmFlags |= NTM_ITALIC;
-        if (bold) face->ntmFlags |= NTM_BOLD;
-        if (face->ntmFlags == 0) face->ntmFlags = NTM_REGULAR;
 
         TRACE("fsCsb = %08x %08x/%08x %08x %08x %08x\n",
               face->fs.fsCsb[0], face->fs.fsCsb[1],
@@ -1517,10 +1512,9 @@ static void add_face_to_cache(Face *face)
                        (strlenW(face->FullName) + 1) * sizeof(WCHAR));
 
     reg_save_dword(hkey_face, face_index_value, face->face_index);
-    reg_save_dword(hkey_face, face_italic_value, (face->ntmFlags & NTM_ITALIC) != 0);
-    reg_save_dword(hkey_face, face_bold_value, (face->ntmFlags & NTM_BOLD) != 0);
+    reg_save_dword(hkey_face, face_ntmflags_value, face->ntmFlags);
     reg_save_dword(hkey_face, face_version_value, face->font_version);
-    reg_save_dword(hkey_face, face_external_value, face->external);
+    reg_save_dword(hkey_face, face_vertical_value, face->vertical);
 
     RegSetValueExW(hkey_face, face_font_sig_value, 0, REG_BINARY, (BYTE*)&face->fs, sizeof(face->fs));
 
@@ -2350,9 +2344,9 @@ static BOOL ReadFontDir(const char *dirname, BOOL external_fonts)
     return TRUE;
 }
 
+#ifdef SONAME_LIBFONTCONFIG
 static void load_fontconfig_fonts(void)
 {
-#ifdef SONAME_LIBFONTCONFIG
     void *fc_handle = NULL;
     FcConfig *config;
     FcPattern *pat;
@@ -2418,9 +2412,125 @@ LOAD_FUNCPTR(FcPatternGetString);
     pFcObjectSetDestroy(os);
     pFcPatternDestroy(pat);
  sym_not_found:
-#endif
     return;
 }
+
+#elif defined(HAVE_CARBON_CARBON_H)
+
+static void load_mac_font_callback(const void *value, void *context)
+{
+    CFStringRef pathStr = value;
+    CFIndex len;
+    char* path;
+
+    len = CFStringGetMaximumSizeOfFileSystemRepresentation(pathStr);
+    path = HeapAlloc(GetProcessHeap(), 0, len);
+    if (path && CFStringGetFileSystemRepresentation(pathStr, path, len))
+    {
+        TRACE("font file %s\n", path);
+        AddFontToList(path, NULL, 0, ADDFONT_EXTERNAL_FONT | ADDFONT_ADD_TO_CACHE);
+    }
+    HeapFree(GetProcessHeap(), 0, path);
+}
+
+static void load_mac_fonts(void)
+{
+    CFStringRef removeDupesKey;
+    CFBooleanRef removeDupesValue;
+    CFDictionaryRef options;
+    CTFontCollectionRef col;
+    CFArrayRef descs;
+    CFMutableSetRef paths;
+    CFIndex i;
+
+    removeDupesKey = kCTFontCollectionRemoveDuplicatesOption;
+    removeDupesValue = kCFBooleanTrue;
+    options = CFDictionaryCreate(NULL, (const void**)&removeDupesKey, (const void**)&removeDupesValue, 1,
+                                 &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    col = CTFontCollectionCreateFromAvailableFonts(options);
+    if (options) CFRelease(options);
+    if (!col)
+    {
+        WARN("CTFontCollectionCreateFromAvailableFonts failed\n");
+        return;
+    }
+
+    descs = CTFontCollectionCreateMatchingFontDescriptors(col);
+    CFRelease(col);
+    if (!descs)
+    {
+        WARN("CTFontCollectionCreateMatchingFontDescriptors failed\n");
+        return;
+    }
+
+    paths = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+    if (!paths)
+    {
+        WARN("CFSetCreateMutable failed\n");
+        CFRelease(descs);
+        return;
+    }
+
+    for (i = 0; i < CFArrayGetCount(descs); i++)
+    {
+        CTFontDescriptorRef desc;
+        CTFontRef font;
+        ATSFontRef atsFont;
+        OSStatus status;
+        FSRef fsref;
+        CFURLRef url;
+        CFStringRef ext;
+        CFStringRef path;
+
+        desc = CFArrayGetValueAtIndex(descs, i);
+
+        /* CTFontDescriptor doesn't support kCTFontURLAttribute until 10.6, so
+           we have to go CFFontDescriptor -> CTFont -> ATSFont -> FSRef -> CFURL. */
+        font = CTFontCreateWithFontDescriptor(desc, 0, NULL);
+        if (!font) continue;
+
+        atsFont = CTFontGetPlatformFont(font, NULL);
+        if (!atsFont)
+        {
+            CFRelease(font);
+            continue;
+        }
+
+        status = ATSFontGetFileReference(atsFont, &fsref);
+        CFRelease(font);
+        if (status != noErr) continue;
+
+        url = CFURLCreateFromFSRef(NULL, &fsref);
+        if (!url) continue;
+
+        ext = CFURLCopyPathExtension(url);
+        if (ext)
+        {
+            BOOL skip = (CFStringCompare(ext, CFSTR("pfa"), kCFCompareCaseInsensitive) == kCFCompareEqualTo ||
+                         CFStringCompare(ext, CFSTR("pfb"), kCFCompareCaseInsensitive) == kCFCompareEqualTo);
+            CFRelease(ext);
+            if (skip)
+            {
+                CFRelease(url);
+                continue;
+            }
+        }
+
+        path = CFURLCopyFileSystemPath(url, kCFURLPOSIXPathStyle);
+        CFRelease(url);
+        if (!path) continue;
+
+        CFSetAddValue(paths, path);
+        CFRelease(path);
+    }
+
+    CFRelease(descs);
+
+    CFSetApplyFunction(paths, load_mac_font_callback, NULL);
+    CFRelease(paths);
+}
+
+#endif
 
 static BOOL load_font_from_data_dir(LPCWSTR file)
 {
@@ -3039,7 +3149,7 @@ static const struct nls_update_font_list
 {
     UINT ansi_cp, oem_cp;
     const char *oem, *fixed, *system;
-    const char *courier, *serif, *small, *sserif;
+    const char *courier, *serif, *small, *sserif_96, *sserif_120;
     /* these are for font substitutes */
     const char *shelldlg, *tmsrmn;
     const char *fixed_0, *system_0, *courier_0, *serif_0, *small_0, *sserif_0,
@@ -3052,21 +3162,21 @@ static const struct nls_update_font_list
 {
     /* Latin 1 (United States) */
     { 1252, 437, "vgaoem.fon", "vgafix.fon", "vgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "Tahoma","Times New Roman",
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Latin 1 (Multilingual) */
     { 1252, 850, "vga850.fon", "vgafix.fon", "vgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "Tahoma","Times New Roman",  /* FIXME unverified */
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Eastern Europe */
     { 1250, 852, "vga852.fon", "vgafixe.fon", "vgasyse.fon",
-      "couree.fon", "serifee.fon", "smallee.fon", "sserifee.fon",
+      "couree.fon", "serifee.fon", "smallee.fon", "sserifee.fon", "sseriffe.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,238", "System,238",
       "Courier New,238", "MS Serif,238", "Small Fonts,238",
@@ -3077,7 +3187,7 @@ static const struct nls_update_font_list
     },
     /* Cyrillic */
     { 1251, 866, "vga866.fon", "vgafixr.fon", "vgasysr.fon",
-      "courer.fon", "serifer.fon", "smaller.fon", "sserifer.fon",
+      "courer.fon", "serifer.fon", "smaller.fon", "sserifer.fon", "sseriffr.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,204", "System,204",
       "Courier New,204", "MS Serif,204", "Small Fonts,204",
@@ -3088,7 +3198,7 @@ static const struct nls_update_font_list
     },
     /* Greek */
     { 1253, 737, "vga869.fon", "vgafixg.fon", "vgasysg.fon",
-      "coureg.fon", "serifeg.fon", "smalleg.fon", "sserifeg.fon",
+      "coureg.fon", "serifeg.fon", "smalleg.fon", "sserifeg.fon", "sseriffg.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,161", "System,161",
       "Courier New,161", "MS Serif,161", "Small Fonts,161",
@@ -3099,7 +3209,7 @@ static const struct nls_update_font_list
     },
     /* Turkish */
     { 1254, 857, "vga857.fon", "vgafixt.fon", "vgasyst.fon",
-      "couret.fon", "serifet.fon", "smallet.fon", "sserifet.fon",
+      "couret.fon", "serifet.fon", "smallet.fon", "sserifet.fon", "sserifft.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,162", "System,162",
       "Courier New,162", "MS Serif,162", "Small Fonts,162",
@@ -3110,7 +3220,7 @@ static const struct nls_update_font_list
     },
     /* Hebrew */
     { 1255, 862, "vgaoem.fon", "vgaf1255.fon", "vgas1255.fon",
-      "coue1255.fon", "sere1255.fon", "smae1255.fon", "ssee1255.fon",
+      "coue1255.fon", "sere1255.fon", "smae1255.fon", "ssee1255.fon", "ssef1255.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,177", "System,177",
       "Courier New,177", "MS Serif,177", "Small Fonts,177",
@@ -3119,7 +3229,7 @@ static const struct nls_update_font_list
     },
     /* Arabic */
     { 1256, 720, "vgaoem.fon", "vgaf1256.fon", "vgas1256.fon",
-      "coue1256.fon", "sere1256.fon", "smae1256.fon", "ssee1256.fon",
+      "coue1256.fon", "sere1256.fon", "smae1256.fon", "ssee1256.fon", "ssef1256.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,178", "System,178",
       "Courier New,178", "MS Serif,178", "Small Fonts,178",
@@ -3128,7 +3238,7 @@ static const struct nls_update_font_list
     },
     /* Baltic */
     { 1257, 775, "vga775.fon", "vgaf1257.fon", "vgas1257.fon",
-      "coue1257.fon", "sere1257.fon", "smae1257.fon", "ssee1257.fon",
+      "coue1257.fon", "sere1257.fon", "smae1257.fon", "ssee1257.fon", "ssef1257.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       "Fixedsys,186", "System,186",
       "Courier New,186", "MS Serif,186", "Small Fonts,186",
@@ -3139,42 +3249,42 @@ static const struct nls_update_font_list
     },
     /* Vietnamese */
     { 1258, 1258, "vga850.fon", "vgafix.fon", "vgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Thai */
     { 874, 874, "vga850.fon", "vgaf874.fon", "vgas874.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "ssee874.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "ssee874.fon", "ssef874.fon",
       "Tahoma","Times New Roman", /* FIXME unverified */
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Japanese */
     { 932, 932, "vga932.fon", "jvgafix.fon", "jvgasys.fon",
-      "coure.fon", "serife.fon", "jsmalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "jsmalle.fon", "sserife.fon", "sseriff.fon",
       "MS UI Gothic","MS Serif",
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Chinese Simplified */
     { 936, 936, "vga936.fon", "svgafix.fon", "svgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "SimSun", "NSimSun",
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Korean */
     { 949, 949, "vga949.fon", "hvgafix.fon", "hvgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "Gulim",  "Batang",
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
     },
     /* Chinese Traditional */
     { 950, 950, "vga950.fon", "cvgafix.fon", "cvgasys.fon",
-      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon",
+      "coure.fon", "serife.fon", "smalle.fon", "sserife.fon", "sseriff.fon",
       "PMingLiU",  "MingLiU",
       NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
       { 0 }, { 0 }, { 0 }
@@ -3216,11 +3326,13 @@ static inline HKEY create_config_fonts_registry_key(void)
     return hkey;
 }
 
-static void add_font_list(HKEY hkey, const struct nls_update_font_list *fl)
+static void add_font_list(HKEY hkey, const struct nls_update_font_list *fl, int dpi)
 {
+    const char *sserif = (dpi <= 108) ? fl->sserif_96 : fl->sserif_120;
+
     RegSetValueExA(hkey, "Courier", 0, REG_SZ, (const BYTE *)fl->courier, strlen(fl->courier)+1);
     RegSetValueExA(hkey, "MS Serif", 0, REG_SZ, (const BYTE *)fl->serif, strlen(fl->serif)+1);
-    RegSetValueExA(hkey, "MS Sans Serif", 0, REG_SZ, (const BYTE *)fl->sserif, strlen(fl->sserif)+1);
+    RegSetValueExA(hkey, "MS Sans Serif", 0, REG_SZ, (const BYTE *)sserif, strlen(sserif)+1);
     RegSetValueExA(hkey, "Small Fonts", 0, REG_SZ, (const BYTE *)fl->small, strlen(fl->small)+1);
 }
 
@@ -3234,14 +3346,26 @@ static void set_value_key(HKEY hkey, const char *name, const char *value)
 
 static void update_font_info(void)
 {
+    static const WCHAR logpixels[] = { 'L','o','g','P','i','x','e','l','s',0 };
     char buf[40], cpbuf[40];
     DWORD len, type;
     HKEY hkey = 0;
     UINT i, ansi_cp = 0, oem_cp = 0;
+    DWORD screen_dpi = 96, font_dpi = 0;
     BOOL done = FALSE;
+
+    if (RegOpenKeyA(HKEY_LOCAL_MACHINE,
+                    "System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts",
+                    &hkey) == ERROR_SUCCESS)
+    {
+        reg_load_dword(hkey, logpixels, &screen_dpi);
+        RegCloseKey(hkey);
+    }
 
     if (RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\Wine\\Fonts", 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL) != ERROR_SUCCESS)
         return;
+
+    reg_load_dword(hkey, logpixels, &font_dpi);
 
     GetLocaleInfoW(LOCALE_USER_DEFAULT, LOCALE_IDEFAULTANSICODEPAGE|LOCALE_RETURN_NUMBER|LOCALE_NOUSEROVERRIDE,
                    (WCHAR *)&ansi_cp, sizeof(ansi_cp)/sizeof(WCHAR));
@@ -3256,16 +3380,19 @@ static void update_font_info(void)
     len = sizeof(buf);
     if (RegQueryValueExA(hkey, "Codepages", 0, &type, (BYTE *)buf, &len) == ERROR_SUCCESS && type == REG_SZ)
     {
-        if (!strcmp( buf, cpbuf ))  /* already set correctly */
+        if (!strcmp( buf, cpbuf ) && screen_dpi == font_dpi)  /* already set correctly */
         {
             RegCloseKey(hkey);
             return;
         }
-        TRACE("updating registry, codepages changed %s -> %u,%u\n", buf, ansi_cp, oem_cp);
+        TRACE("updating registry, codepages/logpixels changed %s/%u -> %u,%u/%u\n",
+              buf, font_dpi, ansi_cp, oem_cp, screen_dpi);
     }
-    else TRACE("updating registry, codepages changed none -> %u,%u\n", ansi_cp, oem_cp);
+    else TRACE("updating registry, codepages/logpixels changed none -> %u,%u/%u\n",
+               ansi_cp, oem_cp, screen_dpi);
 
     RegSetValueExA(hkey, "Codepages", 0, REG_SZ, (const BYTE *)cpbuf, strlen(cpbuf)+1);
+    RegSetValueExW(hkey, logpixels, 0, REG_DWORD, (const BYTE *)&screen_dpi, sizeof(screen_dpi));
     RegCloseKey(hkey);
 
     for (i = 0; i < sizeof(nls_update_font_list)/sizeof(nls_update_font_list[0]); i++)
@@ -3282,11 +3409,11 @@ static void update_font_info(void)
             RegCloseKey(hkey);
 
             hkey = create_fonts_NT_registry_key();
-            add_font_list(hkey, &nls_update_font_list[i]);
+            add_font_list(hkey, &nls_update_font_list[i], screen_dpi);
             RegCloseKey(hkey);
 
             hkey = create_fonts_9x_registry_key();
-            add_font_list(hkey, &nls_update_font_list[i]);
+            add_font_list(hkey, &nls_update_font_list[i], screen_dpi);
             RegCloseKey(hkey);
 
             if (!RegCreateKeyA( HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows NT\\CurrentVersion\\FontSubstitutes", &hkey ))
@@ -3413,7 +3540,6 @@ static void init_font_list(void)
     DWORD valuelen, datalen, i = 0, type, dlen, vlen;
     WCHAR windowsdir[MAX_PATH];
     char *unixname;
-    const char *home;
     const char *data_dir;
 
     delete_external_font_keys();
@@ -3496,7 +3622,11 @@ static void init_font_list(void)
         RegCloseKey(hkey);
     }
 
+#ifdef SONAME_LIBFONTCONFIG
     load_fontconfig_fonts();
+#elif defined(HAVE_CARBON_CARBON_H)
+    load_mac_fonts();
+#endif
 
     /* then look in any directories that we've specified in the config file */
     /* @@ Wine registry key: HKCU\Software\Wine\Fonts */
@@ -3519,6 +3649,7 @@ static void init_font_list(void)
                 ptr = valueA;
                 while (ptr)
                 {
+                    const char* home;
                     LPSTR next = strchr( ptr, ':' );
                     if (next) *next++ = 0;
                     if (ptr[0] == '~' && ptr[1] == '/' && (home = getenv( "HOME" )) &&
@@ -3539,21 +3670,6 @@ static void init_font_list(void)
         }
         RegCloseKey(hkey);
     }
-
-#ifdef __APPLE__
-    /* Mac default font locations. */
-    ReadFontDir( "/Library/Fonts", TRUE );
-    ReadFontDir( "/Network/Library/Fonts", TRUE );
-    ReadFontDir( "/System/Library/Fonts", TRUE );
-    if ((home = getenv( "HOME" )))
-    {
-        unixname = HeapAlloc( GetProcessHeap(), 0, strlen(home)+15 );
-        strcpy( unixname, home );
-        strcat( unixname, "/Library/Fonts" );
-        ReadFontDir( unixname, TRUE);
-        HeapFree( GetProcessHeap(), 0, unixname );
-    }
-#endif
 }
 
 static BOOL move_to_front(const WCHAR *name)

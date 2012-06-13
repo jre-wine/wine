@@ -835,16 +835,283 @@ void CDECL MSVCRT__tzset(void)
     tzname_dst[sizeof(tzname_dst) - 1] = '\0';
 }
 
+static inline BOOL strftime_date(char *str, MSVCRT_size_t *pos, MSVCRT_size_t max,
+        BOOL alternate, const struct MSVCRT_tm *mstm, MSVCRT___lc_time_data *time_data)
+{
+    char *format;
+    SYSTEMTIME st;
+    MSVCRT_size_t ret;
+
+    st.wYear = mstm->tm_year + 1900;
+    st.wMonth = mstm->tm_mon + 1;
+    st.wDayOfWeek = mstm->tm_wday;
+    st.wDay = mstm->tm_mday;
+    st.wHour = mstm->tm_hour;
+    st.wMinute = mstm->tm_min;
+    st.wSecond = mstm->tm_sec;
+    st.wMilliseconds = 0;
+
+    format = alternate ? time_data->str.names.date : time_data->str.names.short_date;
+    ret = GetDateFormatA(time_data->lcid, 0, &st, format, NULL, 0);
+    if(ret && ret<max-*pos)
+        ret = GetDateFormatA(time_data->lcid, 0, &st, format, str+*pos, max-*pos);
+    if(!ret) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return FALSE;
+    }else if(ret > max-*pos) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return FALSE;
+    }
+    *pos += ret-1;
+    return TRUE;
+}
+
+static inline BOOL strftime_time(char *str, MSVCRT_size_t *pos, MSVCRT_size_t max,
+        const struct MSVCRT_tm *mstm, MSVCRT___lc_time_data *time_data)
+{
+    SYSTEMTIME st;
+    MSVCRT_size_t ret;
+
+    st.wYear = mstm->tm_year + 1900;
+    st.wMonth = mstm->tm_mon + 1;
+    st.wDayOfWeek = mstm->tm_wday;
+    st.wDay = mstm->tm_mday;
+    st.wHour = mstm->tm_hour;
+    st.wMinute = mstm->tm_min;
+    st.wSecond = mstm->tm_sec;
+    st.wMilliseconds = 0;
+
+    ret = GetTimeFormatA(time_data->lcid, 0, &st, time_data->str.names.time, NULL, 0);
+    if(ret && ret<max-*pos)
+        ret = GetTimeFormatA(time_data->lcid, 0, &st, time_data->str.names.time,
+                str+*pos, max-*pos);
+    if(!ret) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return FALSE;
+    }else if(ret > max-*pos) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return FALSE;
+    }
+    *pos += ret-1;
+    return TRUE;
+}
+
+static inline BOOL strftime_str(char *str, MSVCRT_size_t *pos, MSVCRT_size_t max, char *src)
+{
+    MSVCRT_size_t len = strlen(src);
+    if(len > max-*pos) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return FALSE;
+    }
+
+    memcpy(str+*pos, src, len);
+    *pos += len;
+    return TRUE;
+}
+
+static inline BOOL strftime_int(char *str, MSVCRT_size_t *pos, MSVCRT_size_t max,
+        int src, int prec, int l, int h)
+{
+    MSVCRT_size_t len;
+
+    if(src<l || src>h) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return FALSE;
+    }
+
+    len = MSVCRT__snprintf(str+*pos, max-*pos, "%0*d", prec, src);
+    if(len == -1) {
+        *str = 0;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return FALSE;
+    }
+
+    *pos += len;
+    return TRUE;
+}
+
+/*********************************************************************
+ *		_Strftime (MSVCRT.@)
+ */
+MSVCRT_size_t CDECL _Strftime(char *str, MSVCRT_size_t max, const char *format,
+        const struct MSVCRT_tm *mstm, MSVCRT___lc_time_data *time_data)
+{
+    MSVCRT_size_t ret, tmp;
+    BOOL alternate;
+
+    TRACE("(%p %ld %s %p %p)\n", str, max, format, mstm, time_data);
+
+    if(!str || !format) {
+        if(str && max)
+            *str = 0;
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return 0;
+    }
+
+    if(!time_data)
+        time_data = get_locinfo()->lc_time_curr;
+
+    for(ret=0; *format && ret<max; format++) {
+        if(*format != '%') {
+            str[ret++] = *format;
+            continue;
+        }
+
+        format++;
+        if(*format == '#') {
+            alternate = TRUE;
+            format++;
+        }else {
+            alternate = FALSE;
+        }
+
+        if(!mstm)
+            goto einval_error;
+
+        switch(*format) {
+        case 'c':
+            if(!strftime_date(str, &ret, max, alternate, mstm, time_data))
+                return 0;
+            if(ret < max)
+                str[ret++] = ' ';
+            if(!strftime_time(str, &ret, max, mstm, time_data))
+                return 0;
+            break;
+        case 'x':
+            if(!strftime_date(str, &ret, max, alternate, mstm, time_data))
+                return 0;
+            break;
+        case 'X':
+            if(!strftime_time(str, &ret, max, mstm, time_data))
+                return 0;
+            break;
+        case 'a':
+            if(mstm->tm_wday<0 || mstm->tm_wday>6)
+                goto einval_error;
+            if(!strftime_str(str, &ret, max, time_data->str.names.short_wday[mstm->tm_wday]))
+                return 0;
+            break;
+        case 'A':
+            if(mstm->tm_wday<0 || mstm->tm_wday>6)
+                goto einval_error;
+            if(!strftime_str(str, &ret, max, time_data->str.names.wday[mstm->tm_wday]))
+                return 0;
+            break;
+        case 'b':
+            if(mstm->tm_mon<0 || mstm->tm_mon>11)
+                goto einval_error;
+            if(!strftime_str(str, &ret, max, time_data->str.names.short_mon[mstm->tm_mon]))
+                return 0;
+            break;
+        case 'B':
+            if(mstm->tm_mon<0 || mstm->tm_mon>11)
+                goto einval_error;
+            if(!strftime_str(str, &ret, max, time_data->str.names.mon[mstm->tm_mon]))
+                return 0;
+            break;
+        case 'd':
+            if(!strftime_int(str, &ret, max, mstm->tm_mday, alternate ? 0 : 2, 0, 31))
+                return 0;
+            break;
+        case 'H':
+            if(!strftime_int(str, &ret, max, mstm->tm_hour, alternate ? 0 : 2, 0, 23))
+                return 0;
+            break;
+        case 'I':
+            tmp = mstm->tm_hour;
+            if(tmp > 12)
+                tmp -= 12;
+            else if(!tmp)
+                tmp = 12;
+            if(!strftime_int(str, &ret, max, tmp, alternate ? 0 : 2, 1, 12))
+                return 0;
+            break;
+        case 'j':
+            if(!strftime_int(str, &ret, max, mstm->tm_yday+1, alternate ? 0 : 3, 1, 366))
+                return 0;
+            break;
+        case 'm':
+            if(!strftime_int(str, &ret, max, mstm->tm_mon+1, alternate ? 0 : 2, 1, 12))
+                return 0;
+            break;
+        case 'M':
+            if(!strftime_int(str, &ret, max, mstm->tm_min, alternate ? 0 : 2, 0, 59))
+                return 0;
+            break;
+        case 'p':
+            if(mstm->tm_hour<0 || mstm->tm_hour>23)
+                goto einval_error;
+            if(!strftime_str(str, &ret, max, mstm->tm_hour<12 ?
+                        time_data->str.names.am : time_data->str.names.pm))
+                return 0;
+            break;
+        case 'S':
+            if(!strftime_int(str, &ret, max, mstm->tm_sec, alternate ? 0 : 2, 0, 59))
+                return 0;
+            break;
+        case 'w':
+            if(!strftime_int(str, &ret, max, mstm->tm_wday, 0, 0, 6))
+                return 0;
+            break;
+        case 'y':
+            if(!strftime_int(str, &ret, max, mstm->tm_year%100, alternate ? 0 : 2, 0, 99))
+                return 0;
+            break;
+        case 'Y':
+            tmp = 1900+mstm->tm_year;
+            if(!strftime_int(str, &ret, max, tmp, alternate ? 0 : 4, 0, 9999))
+                return 0;
+            break;
+        case 'z':
+        case 'Z':
+            MSVCRT__tzset();
+            if(MSVCRT__get_tzname(&tmp, str+ret, max-ret, mstm->tm_isdst ? 1 : 0))
+                return 0;
+            ret += tmp;
+            break;
+        case 'U':
+        case 'W':
+            FIXME("format %c not yet supported (%x)\n", *format, alternate);
+            str[0] = 0;
+            return 0;
+        case '%':
+            str[ret++] = '%';
+            break;
+        default:
+            WARN("unknown format %c\n", *format);
+            goto einval_error;
+        }
+    }
+
+    if(ret == max) {
+        if(max)
+            *str = 0;
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return 0;
+    }
+
+    str[ret] = 0;
+    return ret;
+
+einval_error:
+    *str = 0;
+    *MSVCRT__errno() = MSVCRT_EINVAL;
+    return 0;
+}
+
 /*********************************************************************
  *		strftime (MSVCRT.@)
  */
 MSVCRT_size_t CDECL MSVCRT_strftime( char *str, MSVCRT_size_t max, const char *format,
                                      const struct MSVCRT_tm *mstm )
 {
-    struct tm tm;
-
-    msvcrt_tm_to_unix( &tm, mstm );
-    return strftime( str, max, format, &tm );
+    return _Strftime(str, max, format, mstm, NULL);
 }
 
 /*********************************************************************
@@ -864,9 +1131,7 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
 
     if ((s = MSVCRT_malloc( max*4 )))
     {
-        struct tm tm;
-        msvcrt_tm_to_unix( &tm, mstm );
-        if (!strftime( s, max*4, fmt, &tm )) s[0] = 0;
+        if (!MSVCRT_strftime( s, max*4, fmt, mstm )) s[0] = 0;
         len = MultiByteToWideChar( CP_UNIXCP, 0, s, -1, str, max );
         if (len) len--;
         MSVCRT_free( s );
@@ -877,30 +1142,46 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
     return len;
 }
 
+static char* asctime_buf(char *buf, const struct MSVCRT_tm *mstm)
+{
+    static const char wday[7][4] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char month[12][4] = {"Jan", "Feb", "Mar", "Apr", "May",
+        "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    if (mstm->tm_sec<0 || mstm->tm_sec>59
+            || mstm->tm_min<0 || mstm->tm_min>59
+            || mstm->tm_hour<0 || mstm->tm_hour>23
+            || mstm->tm_mon<0 || mstm->tm_mon>11
+            || mstm->tm_wday<0 || mstm->tm_wday>6
+            || mstm->tm_year<0 || mstm->tm_mday<0
+            || mstm->tm_mday>MonthLengths[IsLeapYear(1900+mstm->tm_year)][mstm->tm_mon]) {
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return NULL;
+    }
+
+    MSVCRT__snprintf(buf, 26, "%s %s %02d %02d:%02d:%02d %c%03d\n", wday[mstm->tm_wday],
+            month[mstm->tm_mon], mstm->tm_mday, mstm->tm_hour, mstm->tm_min,
+            mstm->tm_sec, '1'+(mstm->tm_year+900)/1000, (900+mstm->tm_year)%1000);
+    return buf;
+}
+
 /*********************************************************************
  *		asctime (MSVCRT.@)
  */
 char * CDECL MSVCRT_asctime(const struct MSVCRT_tm *mstm)
 {
-    char bufferA[30];
-    WCHAR bufferW[30];
-
     thread_data_t *data = msvcrt_get_thread_data();
-    struct tm tm;
 
-    msvcrt_tm_to_unix( &tm, mstm );
+    /* asctime returns date in format that always has exactly 26 characters */
+    if (!data->asctime_buffer) {
+        data->asctime_buffer = MSVCRT_malloc(26);
+        if (!data->asctime_buffer) {
+            *MSVCRT__errno() = MSVCRT_ENOMEM;
+            return NULL;
+        }
+    }
 
-    if (!data->asctime_buffer)
-        data->asctime_buffer = MSVCRT_malloc( 30 ); /* ought to be enough */
-
-#ifdef HAVE_ASCTIME_R
-    asctime_r( &tm, bufferA );
-#else
-    strcpy( bufferA, asctime(&tm) );
-#endif
-    MultiByteToWideChar( CP_UNIXCP, 0, bufferA, -1, bufferW, 30 );
-    WideCharToMultiByte( CP_ACP, 0, bufferW, -1, data->asctime_buffer, 30, NULL, NULL );
-    return data->asctime_buffer;
+    return asctime_buf(data->asctime_buffer, mstm);
 }
 
 /*********************************************************************
@@ -908,23 +1189,27 @@ char * CDECL MSVCRT_asctime(const struct MSVCRT_tm *mstm)
  */
 int CDECL MSVCRT_asctime_s(char* time, MSVCRT_size_t size, const struct MSVCRT_tm *mstm)
 {
-    char* asc;
-    unsigned int len;
-
-    if (!MSVCRT_CHECK_PMT(time != NULL) || !MSVCRT_CHECK_PMT(mstm != NULL)) {
+    if (!MSVCRT_CHECK_PMT(time != NULL)
+            || !MSVCRT_CHECK_PMT(mstm != NULL)
+            || !MSVCRT_CHECK_PMT(size >= 26)) {
+        if (time && size)
+            time[0] = 0;
         *MSVCRT__errno() = MSVCRT_EINVAL;
         return MSVCRT_EINVAL;
     }
 
-    asc = MSVCRT_asctime(mstm);
-    len = strlen(asc) + 1;
-
-    if(!MSVCRT_CHECK_PMT(size >= len)) {
-        *MSVCRT__errno() = MSVCRT_ERANGE;
-        return MSVCRT_ERANGE;
+    if (!MSVCRT_CHECK_PMT(mstm->tm_sec>=0) || !MSVCRT_CHECK_PMT(mstm->tm_sec<60)
+            || !MSVCRT_CHECK_PMT(mstm->tm_min>=0) || !MSVCRT_CHECK_PMT(mstm->tm_min<60)
+            || !MSVCRT_CHECK_PMT(mstm->tm_hour>=0) || !MSVCRT_CHECK_PMT(mstm->tm_hour<24)
+            || !MSVCRT_CHECK_PMT(mstm->tm_mon>=0) || !MSVCRT_CHECK_PMT(mstm->tm_mon<12)
+            || !MSVCRT_CHECK_PMT(mstm->tm_wday>=0) || !MSVCRT_CHECK_PMT(mstm->tm_wday<7)
+            || !MSVCRT_CHECK_PMT(mstm->tm_year>=0) || !MSVCRT_CHECK_PMT(mstm->tm_mday>=0)
+            || !MSVCRT_CHECK_PMT(mstm->tm_mday <= MonthLengths[IsLeapYear(1900+mstm->tm_year)][mstm->tm_mon])) {
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
     }
 
-    strcpy(time, asc);
+    asctime_buf(time, mstm);
     return 0;
 }
 
@@ -934,19 +1219,20 @@ int CDECL MSVCRT_asctime_s(char* time, MSVCRT_size_t size, const struct MSVCRT_t
 MSVCRT_wchar_t * CDECL MSVCRT__wasctime(const struct MSVCRT_tm *mstm)
 {
     thread_data_t *data = msvcrt_get_thread_data();
-    struct tm tm;
-    char buffer[30];
+    char buffer[26];
 
-    msvcrt_tm_to_unix( &tm, mstm );
+    if(!data->wasctime_buffer) {
+        data->wasctime_buffer = MSVCRT_malloc(26*sizeof(MSVCRT_wchar_t));
+        if(!data->wasctime_buffer) {
+            *MSVCRT__errno() = MSVCRT_ENOMEM;
+            return NULL;
+        }
+    }
 
-    if (!data->wasctime_buffer)
-        data->wasctime_buffer = MSVCRT_malloc( 30*sizeof(MSVCRT_wchar_t) ); /* ought to be enough */
-#ifdef HAVE_ASCTIME_R
-    asctime_r( &tm, buffer );
-#else
-    strcpy( buffer, asctime(&tm) );
-#endif
-    MultiByteToWideChar( CP_UNIXCP, 0, buffer, -1, data->wasctime_buffer, 30 );
+    if(!asctime_buf(buffer, mstm))
+        return NULL;
+
+    MultiByteToWideChar(CP_ACP, 0, buffer, -1, data->wasctime_buffer, 26);
     return data->wasctime_buffer;
 }
 
@@ -955,23 +1241,22 @@ MSVCRT_wchar_t * CDECL MSVCRT__wasctime(const struct MSVCRT_tm *mstm)
  */
 int CDECL MSVCRT__wasctime_s(MSVCRT_wchar_t* time, MSVCRT_size_t size, const struct MSVCRT_tm *mstm)
 {
-    WCHAR* asc;
-    unsigned int len;
+    char buffer[26];
+    int ret;
 
-    if (!MSVCRT_CHECK_PMT(time != NULL) || !MSVCRT_CHECK_PMT(mstm != NULL)) {
+    if(!MSVCRT_CHECK_PMT(time != NULL)
+            || !MSVCRT_CHECK_PMT(mstm != NULL)
+            || !MSVCRT_CHECK_PMT(size >= 26)) {
+        if(time && size)
+            time[0] = 0;
         *MSVCRT__errno() = MSVCRT_EINVAL;
         return MSVCRT_EINVAL;
     }
 
-    asc = MSVCRT__wasctime(mstm);
-    len = (strlenW(asc) + 1) * sizeof(WCHAR);
-
-    if(!MSVCRT_CHECK_PMT(size >= len)) {
-        *MSVCRT__errno() = MSVCRT_ERANGE;
-        return MSVCRT_ERANGE;
-    }
-
-    strcpyW(time, asc);
+    ret = MSVCRT_asctime_s(buffer, sizeof(buffer), mstm);
+    if(!ret)
+        return ret;
+    MultiByteToWideChar(CP_ACP, 0, buffer, -1, time, size);
     return 0;
 }
 

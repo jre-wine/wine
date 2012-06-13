@@ -191,48 +191,58 @@ static HRESULT WINAPI ddraw_surface7_QueryInterface(IDirectDrawSurface7 *iface, 
         return S_OK;
     }
 
-    if (IsEqualGUID(riid, &IID_D3DDEVICE_WineD3D)
-            || IsEqualGUID(riid, &IID_IDirect3DHALDevice)
-            || IsEqualGUID(riid, &IID_IDirect3DRGBDevice))
+    if (IsEqualGUID(riid, &IID_IDirectDrawColorControl))
     {
-        IDirect3DDevice7 *d3d;
-        IDirect3DDeviceImpl *device_impl;
-
-        /* Call into IDirect3D7 for creation */
-        IDirect3D7_CreateDevice(&This->ddraw->IDirect3D7_iface, riid, &This->IDirectDrawSurface7_iface,
-                &d3d);
-
-        if (d3d)
-        {
-            device_impl = impl_from_IDirect3DDevice7(d3d);
-            device_impl->from_surface = TRUE;
-            *obj = &device_impl->IDirect3DDevice_iface;
-            TRACE("(%p) Returning IDirect3DDevice interface at %p\n", This, *obj);
-            return S_OK;
-        }
-
-        WARN("Unable to create a IDirect3DDevice instance, returning E_NOINTERFACE\n");
+        WARN("Color control not implemented.\n");
+        *obj = NULL;
         return E_NOINTERFACE;
     }
 
-    if (IsEqualGUID( &IID_IDirect3DTexture2, riid)
-            || IsEqualGUID(&IID_IDirect3DTexture, riid))
+    if (This->version != 7)
     {
+        if (IsEqualGUID(riid, &IID_D3DDEVICE_WineD3D)
+                || IsEqualGUID(riid, &IID_IDirect3DHALDevice)
+                || IsEqualGUID(riid, &IID_IDirect3DRGBDevice))
+        {
+            wined3d_mutex_lock();
+            if (!This->device1)
+            {
+                HRESULT hr = d3d_device_create(This->ddraw, This, 1, &This->device1,
+                        (IUnknown *)&This->IDirectDrawSurface_iface);
+                if (FAILED(hr))
+                {
+                    This->device1 = NULL;
+                    wined3d_mutex_unlock();
+                    WARN("Failed to create device, hr %#x.\n", hr);
+                    return hr;
+                }
+            }
+            wined3d_mutex_unlock();
+
+            IDirect3DDevice_AddRef(&This->device1->IDirect3DDevice_iface);
+            *obj = &This->device1->IDirect3DDevice_iface;
+            return S_OK;
+        }
+
+        if (IsEqualGUID(&IID_IDirect3DTexture2, riid))
+        {
+            IDirect3DTexture2_AddRef(&This->IDirect3DTexture2_iface);
+            *obj = &This->IDirect3DTexture2_iface;
+            return S_OK;
+        }
+
         if (IsEqualGUID( &IID_IDirect3DTexture, riid ))
         {
+            IDirect3DTexture2_AddRef(&This->IDirect3DTexture_iface);
             *obj = &This->IDirect3DTexture_iface;
-            TRACE(" returning Direct3DTexture interface at %p.\n", *obj);
+            return S_OK;
         }
-        else
-        {
-            *obj = &This->IDirect3DTexture2_iface;
-            TRACE(" returning Direct3DTexture2 interface at %p.\n", *obj);
-        }
-        IUnknown_AddRef( (IUnknown *) *obj);
-        return S_OK;
     }
 
     WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
+
+    if (This->version != 7)
+        return E_INVALIDARG;
 
     return E_NOINTERFACE;
 }
@@ -422,7 +432,7 @@ static ULONG WINAPI d3d_texture2_AddRef(IDirect3DTexture2 *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface1_AddRef(&surface->IDirectDrawSurface_iface);
+    return IUnknown_AddRef(surface->texture_outer);
 }
 
 static ULONG WINAPI d3d_texture1_AddRef(IDirect3DTexture *iface)
@@ -431,7 +441,7 @@ static ULONG WINAPI d3d_texture1_AddRef(IDirect3DTexture *iface)
 
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface1_AddRef(&surface->IDirectDrawSurface_iface);
+    return IUnknown_AddRef(surface->texture_outer);
 }
 
 /*****************************************************************************
@@ -496,6 +506,8 @@ static void ddraw_surface_cleanup(struct ddraw_surface *surface)
         }
     }
 
+    if (surface->device1)
+        IUnknown_Release(&surface->device1->IUnknown_inner);
     ifaceToRelease = surface->ifaceToRelease;
 
     /* Destroy the root surface. */
@@ -652,18 +664,20 @@ static ULONG WINAPI ddraw_gamma_control_Release(IDirectDrawGammaControl *iface)
 
 static ULONG WINAPI d3d_texture2_Release(IDirect3DTexture2 *iface)
 {
-    struct ddraw_surface *This = impl_from_IDirect3DTexture2(iface);
+    struct ddraw_surface *surface = impl_from_IDirect3DTexture2(iface);
+
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface1_Release(&This->IDirectDrawSurface_iface);
+    return IUnknown_Release(surface->texture_outer);
 }
 
 static ULONG WINAPI d3d_texture1_Release(IDirect3DTexture *iface)
 {
-    struct ddraw_surface *This = impl_from_IDirect3DTexture(iface);
+    struct ddraw_surface *surface = impl_from_IDirect3DTexture(iface);
+
     TRACE("iface %p.\n", iface);
 
-    return ddraw_surface1_Release(&This->IDirectDrawSurface_iface);
+    return IUnknown_Release(surface->texture_outer);
 }
 
 /*****************************************************************************
@@ -924,7 +938,7 @@ static HRESULT WINAPI ddraw_surface1_GetAttachedSurface(IDirectDrawSurface *ifac
 static HRESULT surface_lock(struct ddraw_surface *This,
         RECT *Rect, DDSURFACEDESC2 *DDSD, DWORD Flags, HANDLE h)
 {
-    struct wined3d_mapped_rect mapped_rect;
+    struct wined3d_map_desc map_desc;
     HRESULT hr = DD_OK;
 
     TRACE("This %p, rect %s, surface_desc %p, flags %#x, h %p.\n",
@@ -960,7 +974,7 @@ static HRESULT surface_lock(struct ddraw_surface *This,
     if (This->surface_desc.ddsCaps.dwCaps & DDSCAPS_FRONTBUFFER)
         hr = ddraw_surface_update_frontbuffer(This, Rect, TRUE);
     if (SUCCEEDED(hr))
-        hr = wined3d_surface_map(This->wined3d_surface, &mapped_rect, Rect, Flags);
+        hr = wined3d_surface_map(This->wined3d_surface, &map_desc, Rect, Flags);
     if (FAILED(hr))
     {
         wined3d_mutex_unlock();
@@ -991,7 +1005,7 @@ static HRESULT surface_lock(struct ddraw_surface *This,
      * does not set the LPSURFACE flag on locked surfaces !?!.
      * DDSD->dwFlags |= DDSD_LPSURFACE;
      */
-    This->surface_desc.lpSurface = mapped_rect.data;
+    This->surface_desc.lpSurface = map_desc.data;
     DD_STRUCT_COPY_BYSIZE(DDSD,&(This->surface_desc));
 
     TRACE("locked surface returning description :\n");
@@ -1605,10 +1619,8 @@ static HRESULT ddraw_surface_attach_surface(struct ddraw_surface *This, struct d
     This->next_attached = Surf;
 
     /* Check if the WineD3D depth stencil needs updating */
-    if(This->ddraw->d3ddevice)
-    {
-        IDirect3DDeviceImpl_UpdateDepthStencil(This->ddraw->d3ddevice);
-    }
+    if (This->ddraw->d3ddevice)
+        d3d_device_update_depth_stencil(This->ddraw->d3ddevice);
 
     wined3d_mutex_unlock();
 
@@ -1809,7 +1821,7 @@ static HRESULT ddraw_surface_delete_attached_surface(struct ddraw_surface *surfa
 
     /* Check if the wined3d depth stencil needs updating. */
     if (surface->ddraw->d3ddevice)
-        IDirect3DDeviceImpl_UpdateDepthStencil(surface->ddraw->d3ddevice);
+        d3d_device_update_depth_stencil(surface->ddraw->d3ddevice);
     wined3d_mutex_unlock();
 
     /* Set attached_iface to NULL before releasing it, the surface may go
@@ -4453,6 +4465,7 @@ static HRESULT WINAPI ddraw_surface7_GetPalette(IDirectDrawSurface7 *iface, IDir
 {
     struct ddraw_surface *surface = impl_from_IDirectDrawSurface7(iface);
     struct wined3d_palette *wined3d_palette;
+    struct ddraw_palette *palette_impl;
     HRESULT hr = DD_OK;
 
     TRACE("iface %p, palette %p.\n", iface, Pal);
@@ -4464,7 +4477,8 @@ static HRESULT WINAPI ddraw_surface7_GetPalette(IDirectDrawSurface7 *iface, IDir
     wined3d_palette = wined3d_surface_get_palette(surface->wined3d_surface);
     if (wined3d_palette)
     {
-        *Pal = wined3d_palette_get_parent(wined3d_palette);
+        palette_impl = wined3d_palette_get_parent(wined3d_palette);
+        *Pal = &palette_impl->IDirectDrawPalette_iface;
         IDirectDrawPalette_AddRef(*Pal);
     }
     else
@@ -4952,7 +4966,7 @@ static HRESULT WINAPI d3d_texture2_GetHandle(IDirect3DTexture2 *iface,
         IDirect3DDevice2 *device, D3DTEXTUREHANDLE *handle)
 {
     struct ddraw_surface *surface = impl_from_IDirect3DTexture2(iface);
-    IDirect3DDeviceImpl *device_impl = unsafe_impl_from_IDirect3DDevice2(device);
+    struct d3d_device *device_impl = unsafe_impl_from_IDirect3DDevice2(device);
 
     TRACE("iface %p, device %p, handle %p.\n", iface, device, handle);
 
@@ -4983,7 +4997,7 @@ static HRESULT WINAPI d3d_texture1_GetHandle(IDirect3DTexture *iface,
         IDirect3DDevice *device, D3DTEXTUREHANDLE *handle)
 {
     struct ddraw_surface *surface = impl_from_IDirect3DTexture(iface);
-    IDirect3DDeviceImpl *device_impl = unsafe_impl_from_IDirect3DDevice(device);
+    struct d3d_device *device_impl = unsafe_impl_from_IDirect3DDevice(device);
 
     TRACE("iface %p, device %p, handle %p.\n", iface, device, handle);
 
@@ -5057,7 +5071,6 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
     for (;;)
     {
         struct wined3d_palette *wined3d_dst_pal, *wined3d_src_pal;
-        IDirectDrawPalette *dst_pal = NULL, *src_pal = NULL;
         DDSURFACEDESC *src_desc, *dst_desc;
 
         TRACE("Copying surface %p to surface %p (mipmap level %d).\n",
@@ -5068,24 +5081,19 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
 
         /* Get the palettes */
         wined3d_dst_pal = wined3d_surface_get_palette(dst_surface->wined3d_surface);
-        if (wined3d_dst_pal)
-            dst_pal = wined3d_palette_get_parent(wined3d_dst_pal);
-
         wined3d_src_pal = wined3d_surface_get_palette(src_surface->wined3d_surface);
-        if (wined3d_src_pal)
-            src_pal = wined3d_palette_get_parent(wined3d_src_pal);
 
-        if (src_pal)
+        if (wined3d_src_pal)
         {
             PALETTEENTRY palent[256];
 
-            if (!dst_pal)
+            if (!wined3d_dst_pal)
             {
                 wined3d_mutex_unlock();
                 return DDERR_NOPALETTEATTACHED;
             }
-            IDirectDrawPalette_GetEntries(src_pal, 0, 0, 256, palent);
-            IDirectDrawPalette_SetEntries(dst_pal, 0, 0, 256, palent);
+            wined3d_palette_get_entries(wined3d_src_pal, 0, 0, 256, palent);
+            wined3d_palette_set_entries(wined3d_dst_pal, 0, 0, 256, palent);
         }
 
         /* Copy one surface on the other */
@@ -5101,7 +5109,7 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
         }
         else
         {
-            struct wined3d_mapped_rect src_rect, dst_rect;
+            struct wined3d_map_desc src_map_desc, dst_map_desc;
 
             /* Copy the src blit color key if the source has one, don't erase
              * the destination's ckey if the source has none */
@@ -5114,7 +5122,7 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
             /* Copy the main memory texture into the surface that corresponds
              * to the OpenGL texture object. */
 
-            hr = wined3d_surface_map(src_surface->wined3d_surface, &src_rect, NULL, 0);
+            hr = wined3d_surface_map(src_surface->wined3d_surface, &src_map_desc, NULL, 0);
             if (FAILED(hr))
             {
                 ERR("Failed to lock source surface, hr %#x.\n", hr);
@@ -5122,7 +5130,7 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
                 return D3DERR_TEXTURE_LOAD_FAILED;
             }
 
-            hr = wined3d_surface_map(dst_surface->wined3d_surface, &dst_rect, NULL, 0);
+            hr = wined3d_surface_map(dst_surface->wined3d_surface, &dst_map_desc, NULL, 0);
             if (FAILED(hr))
             {
                 ERR("Failed to lock destination surface, hr %#x.\n", hr);
@@ -5132,9 +5140,9 @@ static HRESULT WINAPI d3d_texture2_Load(IDirect3DTexture2 *iface, IDirect3DTextu
             }
 
             if (dst_surface->surface_desc.u4.ddpfPixelFormat.dwFlags & DDPF_FOURCC)
-                memcpy(dst_rect.data, src_rect.data, src_surface->surface_desc.u1.dwLinearSize);
+                memcpy(dst_map_desc.data, src_map_desc.data, src_surface->surface_desc.u1.dwLinearSize);
             else
-                memcpy(dst_rect.data, src_rect.data, src_rect.row_pitch * src_desc->dwHeight);
+                memcpy(dst_map_desc.data, src_map_desc.data, src_map_desc.row_pitch * src_desc->dwHeight);
 
             wined3d_surface_unmap(src_surface->wined3d_surface);
             wined3d_surface_unmap(dst_surface->wined3d_surface);
@@ -5726,14 +5734,17 @@ HRESULT ddraw_surface_init(struct ddraw_surface *surface, struct ddraw *ddraw,
     if (version == 7)
     {
         surface->ref7 = 1;
+        surface->texture_outer = (IUnknown *)&surface->IDirectDrawSurface7_iface;
     }
     else if (version == 4)
     {
         surface->ref4 = 1;
+        surface->texture_outer = (IUnknown *)&surface->IDirectDrawSurface4_iface;
     }
     else
     {
         surface->ref1 = 1;
+        surface->texture_outer = (IUnknown *)&surface->IDirectDrawSurface_iface;
     }
 
     copy_to_surfacedesc2(&surface->surface_desc, desc);

@@ -389,6 +389,7 @@ typedef struct tagMSIPACKAGE
     LPWSTR localfile;
     BOOL delete_on_close;
 
+    INSTALLUILEVEL ui_level;
     UINT CurrentInstallState;
     msi_dialog *dialog;
     LPWSTR next_dialog;
@@ -406,7 +407,8 @@ typedef struct tagMSIPACKAGE
     unsigned char scheduled_action_running : 1;
     unsigned char commit_action_running : 1;
     unsigned char rollback_action_running : 1;
-    unsigned char need_reboot : 1;
+    unsigned char need_reboot_at_end : 1;
+    unsigned char need_reboot_now : 1;
     unsigned char need_rollback : 1;
 } MSIPACKAGE;
 

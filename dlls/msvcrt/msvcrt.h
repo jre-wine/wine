@@ -109,18 +109,20 @@ typedef struct MSVCRT_tagLC_ID {
 } MSVCRT_LC_ID, *MSVCRT_LPLC_ID;
 
 typedef struct {
-    /* str table contains following strings:
-     * short weekday names [7];
-     * weekday names [7];
-     * short month names [12];
-     * month names [12];
-     * s1159 (AM);
-     * s2359 (PM);
-     * short date format;
-     * date format;
-     * time format;
-     */
-    char *str[43];
+    union {
+        char *str[43];
+        struct {
+            char *short_wday[7];
+            char *wday[7];
+            char *short_mon[12];
+            char *mon[12];
+            char *am;
+            char *pm;
+            char *short_date;
+            char *date;
+            char *time;
+        } names;
+    } str;
     LCID lcid;
     int  unk[2];
     MSVCRT_wchar_t *wstr[43];
@@ -895,6 +897,7 @@ int            __cdecl MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, MSVCRT_size_t len,
                                        const MSVCRT_wchar_t *format, __ms_va_list valist );
 int            __cdecl MSVCRT__snwprintf(MSVCRT_wchar_t*, unsigned int, const MSVCRT_wchar_t*, ...);
 int            __cdecl MSVCRT_sprintf(char*,const char*,...);
+int            __cdecl MSVCRT__snprintf(char*,unsigned int,const char*,...);
 int            __cdecl MSVCRT__scprintf(const char*,...);
 int            __cdecl MSVCRT_raise(int sig);
 

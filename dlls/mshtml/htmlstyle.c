@@ -1350,32 +1350,16 @@ static HRESULT WINAPI HTMLStyle_put_verticalAlign(IHTMLStyle *iface, VARIANT v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
-    switch(V_VT(&v)) {
-    case VT_BSTR:
-        return set_style_attr(This, STYLEID_VERTICAL_ALIGN, V_BSTR(&v), 0);
-    default:
-        FIXME("not implemented vt %d\n", V_VT(&v));
-        return E_NOTIMPL;
-    }
-
-    return S_OK;
+    return set_nsstyle_attr_var(This->nsstyle, STYLEID_VERTICAL_ALIGN, &v, ATTR_FIX_PX);
 }
 
 static HRESULT WINAPI HTMLStyle_get_verticalAlign(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
-    BSTR ret;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    hres = get_style_attr(This, STYLEID_VERTICAL_ALIGN, &ret);
-    if(FAILED(hres))
-        return hres;
-
-    V_VT(p) = VT_BSTR;
-    V_BSTR(p) = ret;
-    return S_OK;
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_VERTICAL_ALIGN, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_textTransform(IHTMLStyle *iface, BSTR v)
@@ -2017,18 +2001,10 @@ static HRESULT WINAPI HTMLStyle_put_height(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_height(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
-    BSTR ret;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    hres = get_style_attr(This, STYLEID_HEIGHT, &ret);
-    if(FAILED(hres))
-        return hres;
-
-    V_VT(p) = VT_BSTR;
-    V_BSTR(p) = ret;
-    return S_OK;
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_HEIGHT, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_styleFloat(IHTMLStyle *iface, BSTR v)
@@ -2177,18 +2153,10 @@ static HRESULT WINAPI HTMLStyle_put_top(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_top(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
-    BSTR ret;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    hres = get_style_attr(This, STYLEID_TOP, &ret);
-    if(FAILED(hres))
-        return hres;
-
-    V_VT(p) = VT_BSTR;
-    V_BSTR(p) = ret;
-    return S_OK;
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_TOP, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_left(IHTMLStyle *iface, VARIANT v)
@@ -2203,18 +2171,10 @@ static HRESULT WINAPI HTMLStyle_put_left(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_left(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
-    BSTR ret;
-    HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    hres = get_style_attr(This, STYLEID_LEFT, &ret);
-    if(FAILED(hres))
-        return hres;
-
-    V_VT(p) = VT_BSTR;
-    V_BSTR(p) = ret;
-    return S_OK;
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_LEFT, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_position(IHTMLStyle *iface, BSTR *p)
@@ -2230,22 +2190,7 @@ static HRESULT WINAPI HTMLStyle_put_zIndex(IHTMLStyle *iface, VARIANT v)
 
     TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
-    switch(V_VT(&v)) {
-    case VT_BSTR:
-        return set_style_attr(This, STYLEID_Z_INDEX, V_BSTR(&v), 0);
-    case VT_I4: {
-        WCHAR value[14];
-        static const WCHAR format[] = {'%','d',0};
-
-        wsprintfW(value, format, V_I4(&v));
-        return set_style_attr(This, STYLEID_Z_INDEX, value, 0);
-    }
-    default:
-        FIXME("unimplemented vt %d\n", V_VT(&v));
-        return E_NOTIMPL;
-    }
-
-    return S_OK;
+    return set_nsstyle_attr_var(This->nsstyle, STYLEID_Z_INDEX, &v, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_get_zIndex(IHTMLStyle *iface, VARIANT *p)

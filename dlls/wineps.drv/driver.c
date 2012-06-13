@@ -52,8 +52,7 @@ static inline int paper_size_from_points( float size )
  * Updates dm1 with some fields from dm2
  *
  */
-void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
-			 PRINTERINFO *pi)
+void PSDRV_MergeDevmodes( PSDRV_DEVMODE *dm1, PSDRV_DEVMODE *dm2, PRINTERINFO *pi )
 {
     /* some sanity checks here on dm2 */
 
@@ -116,20 +115,21 @@ void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
 	TRACE("Changing Copies to %d\n", dm2->dmPublic.u1.s1.dmCopies);
     }
 
-    if(dm2->dmPublic.dmFields & DM_DEFAULTSOURCE) {
+    if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE)
+    {
         INPUTSLOT *slot;
 
-	for(slot = pi->ppd->InputSlots; slot; slot = slot->next) {
+        LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
 	    if(slot->WinBin == dm2->dmPublic.u1.s1.dmDefaultSource)
 	        break;
-	}
-	if(slot) {
+
+        if (&slot->entry != &pi->ppd->InputSlots)
+        {
 	    dm1->dmPublic.u1.s1.dmDefaultSource = dm2->dmPublic.u1.s1.dmDefaultSource;
 	    TRACE("Changing bin to '%s'\n", slot->FullName);
-	} else {
-	  TRACE("Trying to change to unsupported bin %d\n",
-		dm2->dmPublic.u1.s1.dmDefaultSource);
 	}
+        else
+            TRACE("Trying to change to unsupported bin %d\n", dm2->dmPublic.u1.s1.dmDefaultSource);
     }
 
    if (dm2->dmPublic.dmFields & DM_DEFAULTSOURCE )
@@ -179,6 +179,12 @@ void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
 }
 
 
+typedef struct
+{
+    PRINTERINFO *pi;
+    PSDRV_DEVMODE *dlgdm;
+} PSDRV_DLGINFO;
+
 /****************************************************************
  *       PSDRV_PaperDlgProc
  *
@@ -188,7 +194,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
                                            WPARAM wParam, LPARAM lParam)
 {
   PSDRV_DLGINFO *di;
-  int i, Cursel = 0;
+  int i, Cursel;
   PAGESIZE *ps;
   DUPLEX *duplex;
 
@@ -197,7 +203,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
     di = (PSDRV_DLGINFO*)((PROPSHEETPAGEA*)lParam)->lParam;
     SetWindowLongPtrW(hwnd, DWLP_USER, (LONG_PTR)di);
 
-    i = 0;
+    i = Cursel = 0;
     LIST_FOR_EACH_ENTRY(ps, &di->pi->ppd->PageSizes, PAGESIZE, entry) {
       SendDlgItemMessageA(hwnd, IDD_PAPERS, LB_INSERTSTRING, i,
 			  (LPARAM)ps->FullName);
@@ -212,16 +218,21 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
 		     DMORIENT_PORTRAIT ? IDD_ORIENT_PORTRAIT :
 		     IDD_ORIENT_LANDSCAPE);
 
-    if(!di->pi->ppd->Duplexes) {
+    if (list_empty( &di->pi->ppd->Duplexes ))
+    {
         ShowWindow(GetDlgItem(hwnd, IDD_DUPLEX), SW_HIDE);
         ShowWindow(GetDlgItem(hwnd, IDD_DUPLEX_NAME), SW_HIDE);        
-    } else {
-        Cursel = 0;
-        for(duplex = di->pi->ppd->Duplexes, i = 0; duplex; duplex = duplex->next, i++) {
+    }
+    else
+    {
+        i = Cursel = 0;
+        LIST_FOR_EACH_ENTRY( duplex, &di->pi->ppd->Duplexes, DUPLEX, entry )
+        {
             SendDlgItemMessageA(hwnd, IDD_DUPLEX, CB_INSERTSTRING, i,
                                 (LPARAM)(duplex->FullName ? duplex->FullName : duplex->Name));
             if(di->pi->Devmode->dmPublic.dmDuplex == duplex->WinDuplex)
                 Cursel = i;
+            i++;
         }
         SendDlgItemMessageA(hwnd, IDD_DUPLEX, CB_SETCURSEL, Cursel, 0);
     }
@@ -254,8 +265,12 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
     case IDD_DUPLEX:
       if(HIWORD(wParam) == CBN_SELCHANGE) {
 	Cursel = SendDlgItemMessageA(hwnd, LOWORD(wParam), CB_GETCURSEL, 0, 0);
-	for(i = 0, duplex = di->pi->ppd->Duplexes; i < Cursel; i++, duplex = duplex->next)
-	  ;
+        i = 0;
+        LIST_FOR_EACH_ENTRY( duplex, &di->pi->ppd->Duplexes, DUPLEX, entry )
+        {
+            if (i >= Cursel) break;
+            i++;
+        }
         TRACE("Setting duplex to item %d Winduplex = %d\n", Cursel, duplex->WinDuplex);
         di->dlgdm->dmPublic.dmDuplex = duplex->WinDuplex;
         SendMessageW(GetParent(hwnd), PSM_CHANGED, 0, 0);
@@ -291,6 +306,59 @@ static void (WINAPI *pInitCommonControls) (void);
 static HPROPSHEETPAGE (WINAPI *pCreatePropertySheetPage) (LPCPROPSHEETPAGEW);
 static int (WINAPI *pPropertySheet) (LPCPROPSHEETHEADERW);
 
+static PRINTERINFO *PSDRV_FindPrinterInfoA(LPCSTR name)
+{
+    int len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
+    WCHAR *nameW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+    PRINTERINFO *pi;
+
+    MultiByteToWideChar( CP_ACP, 0, name, -1, nameW, len );
+    pi = PSDRV_FindPrinterInfo( nameW );
+    HeapFree( GetProcessHeap(), 0, nameW );
+
+    return pi;
+}
+
+/***********************************************************
+ *      DEVMODEdupWtoA
+ *
+ * Creates an ascii copy of supplied devmode on the process heap
+ *
+ * Copied from dlls/winspool/info.c until full unicodification
+ */
+static DEVMODEA *DEVMODEdupWtoA( const DEVMODEW *dmW )
+{
+    DEVMODEA *dmA;
+    DWORD size;
+    BOOL formname;
+    /* there is no pointer dereference here, if your code checking tool complains it's broken */
+    ptrdiff_t off_formname = (const char *)dmW->dmFormName - (const char *)dmW;
+
+    if (!dmW) return NULL;
+    formname = (dmW->dmSize > off_formname);
+    size = dmW->dmSize - CCHDEVICENAME - (formname ? CCHFORMNAME : 0);
+    dmA = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, size + dmW->dmDriverExtra );
+    WideCharToMultiByte( CP_ACP, 0, dmW->dmDeviceName, -1, (LPSTR)dmA->dmDeviceName,
+                         CCHDEVICENAME, NULL, NULL );
+    if (!formname)
+    {
+        memcpy( &dmA->dmSpecVersion, &dmW->dmSpecVersion,
+                dmW->dmSize - CCHDEVICENAME * sizeof(WCHAR) );
+    }
+    else
+    {
+        memcpy( &dmA->dmSpecVersion, &dmW->dmSpecVersion,
+               off_formname - CCHDEVICENAME * sizeof(WCHAR) );
+        WideCharToMultiByte( CP_ACP, 0, dmW->dmFormName, -1, (LPSTR)dmA->dmFormName,
+                             CCHFORMNAME, NULL, NULL );
+        memcpy( &dmA->dmLogPixels, &dmW->dmLogPixels, dmW->dmSize -
+                (off_formname + CCHFORMNAME * sizeof(WCHAR)) );
+    }
+    dmA->dmSize = size;
+    memcpy( (char *)dmA + dmA->dmSize, (const char *)dmW + dmW->dmSize,
+            dmW->dmDriverExtra );
+    return dmA;
+}
 
  /******************************************************************
  *         PSDRV_ExtDeviceMode
@@ -326,7 +394,7 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
                         LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
                         LPSTR lpszProfile, DWORD dwMode)
 {
-  PRINTERINFO *pi = PSDRV_FindPrinterInfo(lpszDevice);
+  PRINTERINFO *pi = PSDRV_FindPrinterInfoA(lpszDevice);
   if(!pi) return -1;
 
   TRACE("(Driver=%s, hwnd=%p, devOut=%p, Device='%s', Port='%s', devIn=%p, Profile='%s', Mode=%04x)\n",
@@ -334,12 +402,15 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
 
   /* If dwMode == 0, return size of DEVMODE structure */
   if(!dwMode)
-    return pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra;
+      return pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra - CCHDEVICENAME - CCHFORMNAME;
 
   /* If DM_MODIFY is set, change settings in accordance with lpdmInput */
-  if((dwMode & DM_MODIFY) && lpdmInput) {
+  if((dwMode & DM_MODIFY) && lpdmInput)
+  {
+    DEVMODEW *dmW = GdiConvertToDevmodeW( lpdmInput );
     TRACE("DM_MODIFY set. devIn->dmFields = %08x\n", lpdmInput->dmFields);
-    PSDRV_MergeDevmodes(pi->Devmode, (PSDRV_DEVMODEA *)lpdmInput, pi);
+    if (dmW) PSDRV_MergeDevmodes(pi->Devmode, (PSDRV_DEVMODE *)dmW, pi);
+    HeapFree( GetProcessHeap(), 0, dmW );
   }
 
   /* If DM_PROMPT is set, present modal dialog box */
@@ -348,8 +419,8 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
     HPROPSHEETPAGE hpsp[1];
     PROPSHEETPAGEW psp;
     PROPSHEETHEADERW psh;
-    PSDRV_DLGINFO *di;
-    PSDRV_DEVMODEA *dlgdm;
+    PSDRV_DLGINFO di;
+    PSDRV_DEVMODE dlgdm;
     static const WCHAR PAPERW[] = {'P','A','P','E','R','\0'};
     static const WCHAR SetupW[] = {'S','e','t','u','p','\0'};
 
@@ -360,17 +431,15 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
 						    "CreatePropertySheetPageW");
     pPropertySheet = (void*)GetProcAddress(hinstComctl32, "PropertySheetW");
     memset(&psp,0,sizeof(psp));
-    dlgdm = HeapAlloc( PSDRV_Heap, 0, sizeof(*dlgdm) );
-    *dlgdm = *pi->Devmode;
-    di = HeapAlloc( PSDRV_Heap, 0, sizeof(*di) );
-    di->pi = pi;
-    di->dlgdm = dlgdm;
+    dlgdm = *pi->Devmode;
+    di.pi = pi;
+    di.dlgdm = &dlgdm;
     psp.dwSize = sizeof(psp);
     psp.hInstance = PSDRV_hInstance;
     psp.u.pszTemplate = PAPERW;
     psp.u2.pszIcon = NULL;
     psp.pfnDlgProc = PSDRV_PaperDlgProc;
-    psp.lParam = (LPARAM)di;
+    psp.lParam = (LPARAM)&di;
     hpsp[0] = pCreatePropertySheetPage(&psp);
 
     memset(&psh, 0, sizeof(psh));
@@ -391,7 +460,11 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
   /* If DM_COPY is set, should write settings to lpdmOutput */
   if((dwMode & DM_COPY) || (dwMode & DM_UPDATE)) {
     if (lpdmOutput)
-        memcpy(lpdmOutput, pi->Devmode, pi->Devmode->dmPublic.dmSize + pi->Devmode->dmPublic.dmDriverExtra );
+    {
+        DEVMODEA *dmA = DEVMODEdupWtoA( &pi->Devmode->dmPublic );
+        if (dmA) memcpy( lpdmOutput, dmA, dmA->dmSize + dmA->dmDriverExtra );
+        HeapFree( GetProcessHeap(), 0, dmA );
+    }
     else
         FIXME("lpdmOutput is NULL what should we do??\n");
   }
@@ -417,9 +490,9 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
                                WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode)
 {
   PRINTERINFO *pi;
-  DEVMODEA *lpdm;
+  DEVMODEW *lpdm;
   DWORD ret;
-  pi = PSDRV_FindPrinterInfo(lpszDevice);
+  pi = PSDRV_FindPrinterInfoA(lpszDevice);
 
   TRACE("%s %s %s, %u, %p, %p\n", debugstr_a(lpszDriver), debugstr_a(lpszDevice),
         debugstr_a(lpszPort), fwCapability, lpszOutput, lpDevMode);
@@ -430,7 +503,8 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       return 0;
   }
 
-  lpdm = lpDevMode ? lpDevMode : (DEVMODEA *)pi->Devmode;
+  lpdm = &pi->Devmode->dmPublic;
+  if (lpDevMode) lpdm = GdiConvertToDevmodeW( lpDevMode );
 
   switch(fwCapability) {
 
@@ -447,7 +521,8 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
 	if(lpszOutput != NULL)
 	  *wp++ = ps->WinPage;
       }
-      return i;
+      ret = i;
+      break;
     }
 
   case DC_PAPERSIZE:
@@ -466,7 +541,8 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
 	  pt++;
 	}
       }
-      return i;
+      ret = i;
+      break;
     }
 
   case DC_PAPERNAMES:
@@ -484,11 +560,13 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
 	  cp += 64;
 	}
       }
-      return i;
+      ret = i;
+      break;
     }
 
   case DC_ORIENTATION:
-    return pi->ppd->LandscapeOrientation ? pi->ppd->LandscapeOrientation : 90;
+    ret = pi->ppd->LandscapeOrientation ? pi->ppd->LandscapeOrientation : 90;
+    break;
 
   case DC_BINS:
     {
@@ -496,10 +574,14 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       WORD *wp = (WORD *)lpszOutput;
       int i = 0;
 
-      for(slot = pi->ppd->InputSlots; slot; slot = slot->next, i++)
-	if(lpszOutput != NULL)
-	  *wp++ = slot->WinBin;
-      return i;
+      LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
+      {
+          i++;
+          if (lpszOutput != NULL)
+              *wp++ = slot->WinBin;
+      }
+      ret = i;
+      break;
     }
 
   case DC_BINNAMES:
@@ -508,17 +590,23 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       char *cp = lpszOutput;
       int i = 0;
 
-      for(slot = pi->ppd->InputSlots; slot; slot = slot->next, i++)
-	if(lpszOutput != NULL) {
-	  lstrcpynA(cp, slot->FullName, 24);
-	  cp += 24;
-	}
-      return i;
+      LIST_FOR_EACH_ENTRY( slot, &pi->ppd->InputSlots, INPUTSLOT, entry )
+      {
+          i++;
+          if (lpszOutput != NULL)
+          {
+              lstrcpynA( cp, slot->FullName, 24 );
+              cp += 24;
+          }
+      }
+      ret = i;
+      break;
     }
 
   case DC_BINADJUST:
     FIXME("DC_BINADJUST: stub.\n");
-    return DCBA_FACEUPNONE;
+    ret = DCBA_FACEUPNONE;
+    break;
 
   case DC_ENUMRESOLUTIONS:
     {
@@ -528,41 +616,49 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
 	lp[0] = pi->ppd->DefaultResolution;
 	lp[1] = pi->ppd->DefaultResolution;
       }
-      return 1;
+      ret = 1;
+      break;
     }
 
   /* Windows returns 9999 too */
   case DC_COPIES:
     TRACE("DC_COPIES: returning 9999\n");
-    return 9999;
+    ret = 9999;
+    break;
 
   case DC_DRIVER:
-    return lpdm->dmDriverVersion;
+    ret = lpdm->dmDriverVersion;
+    break;
 
   case DC_DATATYPE_PRODUCED:
     FIXME("DATA_TYPE_PRODUCED: stub.\n");
-    return -1; /* simulate that the driver supports 'RAW' */
+    ret = -1; /* simulate that the driver supports 'RAW' */
+    break;
 
   case DC_DUPLEX:
     ret = 0;
     if(pi->ppd->DefaultDuplex && pi->ppd->DefaultDuplex->WinDuplex != 0)
       ret = 1;
     TRACE("DC_DUPLEX: returning %d\n", ret);
-    return ret;
+    break;
 
   case DC_EMF_COMPLIANT:
     FIXME("DC_EMF_COMPLIANT: stub.\n");
-    return -1; /* simulate that the driver do not support EMF */
+    ret = -1; /* simulate that the driver do not support EMF */
+    break;
 
   case DC_EXTRA:
-    return lpdm->dmDriverExtra;
+    ret = lpdm->dmDriverExtra;
+    break;
 
   case DC_FIELDS:
-    return lpdm->dmFields;
+    ret = lpdm->dmFields;
+    break;
 
   case DC_FILEDEPENDENCIES:
     FIXME("DC_FILEDEPENDENCIES: stub.\n");
-    return 0;
+    ret = 0;
+    break;
 
   case DC_MAXEXTENT:
     {
@@ -574,7 +670,8 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
           if (ps->PaperDimension->x > x) x = ps->PaperDimension->x;
           if (ps->PaperDimension->y > y) y = ps->PaperDimension->y;
       }
-      return MAKELONG( paper_size_from_points(x), paper_size_from_points(y) );
+      ret = MAKELONG( paper_size_from_points(x), paper_size_from_points(y) );
+      break;
     }
 
   case DC_MINEXTENT:
@@ -587,50 +684,60 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
           if (ps->PaperDimension->x < x) x = ps->PaperDimension->x;
           if (ps->PaperDimension->y < y) y = ps->PaperDimension->y;
       }
-      return MAKELONG( paper_size_from_points(x), paper_size_from_points(y) );
+      ret = MAKELONG( paper_size_from_points(x), paper_size_from_points(y) );
+      break;
     }
 
   case DC_SIZE:
-    return lpdm->dmSize;
+    ret = lpdm->dmSize;
+    break;
 
   case DC_TRUETYPE:
     FIXME("DC_TRUETYPE: stub\n");
-    return DCTT_SUBDEV;
+    ret = DCTT_SUBDEV;
+    break;
 
   case DC_VERSION:
-    return lpdm->dmSpecVersion;
+    ret = lpdm->dmSpecVersion;
+    break;
 
   /* We'll just return false here, very few printers can collate anyway */
   case DC_COLLATE:
     TRACE("DC_COLLATE: returning FALSE\n");
-    return FALSE;
+    ret = FALSE;
+    break;
 
   /* Printer supports colour printing - 1 if yes, 0 if no (Win2k/XP only) */
   case DC_COLORDEVICE:
-    return (pi->ppd->ColorDevice != CD_False) ? TRUE : FALSE;
+    ret = (pi->ppd->ColorDevice != CD_False) ? TRUE : FALSE;
+    break;
 
   /* Identification number of the printer manufacturer for use with ICM (Win9x only) */
   case DC_MANUFACTURER:
     FIXME("DC_MANUFACTURER: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Identification number of the printer model for use with ICM (Win9x only) */
   case DC_MODEL:
     FIXME("DC_MODEL: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Nonzero if the printer supports stapling, zero otherwise (Win2k/XP only) */
   case DC_STAPLE: /* WINVER >= 0x0500 */
     FIXME("DC_STAPLE: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns an array of 64-character string buffers containing the names of the paper forms
    * available for use, unless pOutput is NULL.  The return value is the number of paper forms.
    * (Win2k/XP only)
    */
   case DC_MEDIAREADY: /* WINVER >= 0x0500 */
     FIXME("DC_MEDIAREADY: stub\n");
-    return -1;
+    ret = -1;
+    break;
 
   /* Returns an array of 64-character string buffers containing the names of the supported
    * media types, unless pOutput is NULL.  The return value is the number of supported.
@@ -638,14 +745,16 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
    */
   case DC_MEDIATYPENAMES: /* WINVER >= 0x0501 */
     FIXME("DC_MEDIATYPENAMES: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns an array of DWORD values which represent the supported media types, unless
    * pOutput is NULL.  The return value is the number of supported media types. (XP only)
    */
   case DC_MEDIATYPES: /* WINVER >= 0x0501 */
     FIXME("DC_MEDIATYPES: stub\n");
-    return -1;
+    ret = -1;
+    break;
 
   /* Returns an array of DWORD values, each representing a supported number of document
    * pages per printed page, unless pOutput is NULL.  The return value is the number of
@@ -653,8 +762,9 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
    */
   case DC_NUP:
     FIXME("DC_NUP: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns an array of 32-character string buffers containing a list of printer description
    * languages supported by the printer, unless pOutput is NULL.  The return value is
    * number of array entries. (Win2k/XP only)
@@ -662,34 +772,42 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
    
   case DC_PERSONALITY: /* WINVER >= 0x0500 */
     FIXME("DC_PERSONALITY: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns the amount of printer memory in kilobytes. (Win2k/XP only) */
   case DC_PRINTERMEM: /* WINVER >= 0x0500 */
     FIXME("DC_PRINTERMEM: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns the printer's print rate in PRINTRATEUNIT units. (Win2k/XP only) */
   case DC_PRINTRATE: /* WINVER >= 0x0500 */
     FIXME("DC_PRINTRATE: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   /* Returns the printer's print rate in pages per minute. (Win2k/XP only) */
   case DC_PRINTRATEPPM: /* WINVER >= 0x0500 */
     FIXME("DC_PRINTRATEPPM: stub\n");
-    return -1;
-   
+    ret = -1;
+    break;
+
   /* Returns the printer rate unit used for DC_PRINTRATE, which is one of
    * PRINTRATEUNIT_{CPS,IPM,LPM,PPM} (Win2k/XP only)
    */  
   case DC_PRINTRATEUNIT: /* WINVER >= 0x0500 */
     FIXME("DC_PRINTRATEUNIT: stub\n");
-    return -1;
-    
+    ret = -1;
+    break;
+
   default:
     FIXME("Unsupported capability %d\n", fwCapability);
+    ret = -1;
   }
-  return -1;
+
+  if (lpDevMode) HeapFree( GetProcessHeap(), 0, lpdm );
+  return ret;
 }
 
 #if 0

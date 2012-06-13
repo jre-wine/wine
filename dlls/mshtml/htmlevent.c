@@ -68,11 +68,17 @@ static const WCHAR ondragW[] = {'o','n','d','r','a','g',0};
 static const WCHAR dragstartW[] = {'d','r','a','g','s','t','a','r','t',0};
 static const WCHAR ondragstartW[] = {'o','n','d','r','a','g','s','t','a','r','t',0};
 
+static const WCHAR errorW[] = {'e','r','r','o','r',0};
+static const WCHAR onerrorW[] = {'o','n','e','r','r','o','r',0};
+
 static const WCHAR focusW[] = {'f','o','c','u','s',0};
 static const WCHAR onfocusW[] = {'o','n','f','o','c','u','s',0};
 
 static const WCHAR keydownW[] = {'k','e','y','d','o','w','n',0};
 static const WCHAR onkeydownW[] = {'o','n','k','e','y','d','o','w','n',0};
+
+static const WCHAR keypressW[] = {'k','e','y','p','r','e','s','s',0};
+static const WCHAR onkeypressW[] = {'o','n','k','e','y','p','r','e','s','s',0};
 
 static const WCHAR keyupW[] = {'k','e','y','u','p',0};
 static const WCHAR onkeyupW[] = {'o','n','k','e','y','u','p',0};
@@ -160,9 +166,13 @@ static const event_info_t event_info[] = {
         EVENT_CANCELABLE},
     {dragstartW,         ondragstartW,         EVENTT_MOUSE,  DISPID_EVMETH_ONDRAGSTART,
         EVENT_CANCELABLE},
+    {errorW,             onerrorW,             EVENTT_NONE,   DISPID_EVMETH_ONERROR,
+        EVENT_NODEHANDLER},
     {focusW,             onfocusW,             EVENTT_HTML,   DISPID_EVMETH_ONFOCUS,
         EVENT_DEFAULTLISTENER},
     {keydownW,           onkeydownW,           EVENTT_KEY,    DISPID_EVMETH_ONKEYDOWN,
+        EVENT_DEFAULTLISTENER|EVENT_BUBBLE},
+    {keypressW,          onkeypressW,          EVENTT_KEY,    DISPID_EVMETH_ONKEYPRESS,
         EVENT_DEFAULTLISTENER|EVENT_BUBBLE},
     {keyupW,             onkeyupW,             EVENTT_KEY,    DISPID_EVMETH_ONKEYUP,
         EVENT_DEFAULTLISTENER|EVENT_BUBBLE},
@@ -190,7 +200,7 @@ static const event_info_t event_info[] = {
         EVENT_DEFAULTLISTENER|EVENT_BUBBLE|EVENT_CANCELABLE}
 };
 
-static const eventid_t node_handled_list[] = { EVENTID_LOAD };
+static const eventid_t node_handled_list[] = { EVENTID_ERROR, EVENTID_LOAD };
 
 eventid_t str_to_eid(LPCWSTR str)
 {
@@ -1186,15 +1196,16 @@ static HRESULT ensure_nsevent_handler(HTMLDocumentNode *doc, event_target_t *eve
 
 void detach_events(HTMLDocumentNode *doc)
 {
-    int i;
+    if(doc->event_vector) {
+        int i;
 
-    if(!doc->event_vector)
-        return;
-
-    for(i=0; i < EVENTID_LAST; i++) {
-        if(doc->event_vector[i])
-            detach_nsevent(doc, event_info[i].name);
+        for(i=0; i < EVENTID_LAST; i++) {
+            if(doc->event_vector[i])
+                detach_nsevent(doc, event_info[i].name);
+        }
     }
+
+    release_nsevents(doc);
 }
 
 
