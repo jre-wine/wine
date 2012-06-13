@@ -2112,7 +2112,7 @@ UINT WINAPI MsiQueryComponentStateA(LPCSTR szProductCode,
 static BOOL msi_comp_find_prod_key(LPCWSTR prodcode, MSIINSTALLCONTEXT context)
 {
     UINT r;
-    HKEY hkey;
+    HKEY hkey = NULL;
 
     r = MSIREG_OpenProductKey(prodcode, NULL, context, &hkey, FALSE);
     RegCloseKey(hkey);
@@ -2148,7 +2148,7 @@ static BOOL msi_comp_find_package(LPCWSTR prodcode, MSIINSTALLCONTEXT context)
     return (res == ERROR_SUCCESS);
 }
 
-static BOOL msi_comp_find_prodcode(LPWSTR squished_pc,
+static UINT msi_comp_find_prodcode(LPWSTR squished_pc,
                                    MSIINSTALLCONTEXT context,
                                    LPCWSTR comp, LPWSTR val, DWORD *sz)
 {
@@ -2162,14 +2162,14 @@ static BOOL msi_comp_find_prodcode(LPWSTR squished_pc,
         r = MSIREG_OpenUserDataComponentKey(comp, NULL, &hkey, FALSE);
 
     if (r != ERROR_SUCCESS)
-        return FALSE;
+        return r;
 
     res = RegQueryValueExW(hkey, squished_pc, NULL, NULL, (BYTE *)val, sz);
     if (res != ERROR_SUCCESS)
-        return FALSE;
+        return res;
 
     RegCloseKey(hkey);
-    return TRUE;
+    return res;
 }
 
 UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
@@ -2177,7 +2177,6 @@ UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
                                     LPCWSTR szComponent, INSTALLSTATE *pdwState)
 {
     WCHAR squished_pc[GUID_SIZE];
-    WCHAR val[MAX_PATH];
     BOOL found;
     DWORD sz;
 
@@ -2208,21 +2207,29 @@ UINT WINAPI MsiQueryComponentStateW(LPCWSTR szProductCode,
 
     *pdwState = INSTALLSTATE_UNKNOWN;
 
-    sz = MAX_PATH;
-    if (!msi_comp_find_prodcode(squished_pc, dwContext, szComponent, val, &sz))
+    sz = 0;
+    if (msi_comp_find_prodcode(squished_pc, dwContext, szComponent, NULL, &sz))
         return ERROR_UNKNOWN_COMPONENT;
 
     if (sz == 0)
         *pdwState = INSTALLSTATE_NOTUSED;
     else
     {
+        WCHAR *val;
+        UINT r;
+
+        if (!(val = msi_alloc( sz ))) return ERROR_OUTOFMEMORY;
+        if ((r = msi_comp_find_prodcode(squished_pc, dwContext, szComponent, val, &sz)))
+            return r;
+
         if (lstrlenW(val) > 2 &&
-            val[0] >= '0' && val[0] <= '9' && val[1] >= '0' && val[1] <= '9')
+            val[0] >= '0' && val[0] <= '9' && val[1] >= '0' && val[1] <= '9' && val[2] != ':')
         {
             *pdwState = INSTALLSTATE_SOURCE;
         }
         else
             *pdwState = INSTALLSTATE_LOCAL;
+        msi_free( val );
     }
 
     TRACE("-> %d\n", *pdwState);
@@ -3126,11 +3133,7 @@ static UINT get_file_version( const WCHAR *path, WCHAR *verbuf, DWORD *verlen,
                               WCHAR *langbuf, DWORD *langlen )
 {
     static const WCHAR szVersionResource[] = {'\\',0};
-    static const WCHAR szVersionFormat[] = {
-        '%','d','.','%','d','.','%','d','.','%','d',0};
-    static const WCHAR szLangResource[] = {
-        '\\','V','a','r','F','i','l','e','I','n','f','o','\\',
-        'T','r','a','n','s','l','a','t','i','o','n',0};
+    static const WCHAR szVersionFormat[] = {'%','d','.','%','d','.','%','d','.','%','d',0};
     static const WCHAR szLangFormat[] = {'%','d',0};
     UINT ret = ERROR_SUCCESS;
     DWORD len, error;

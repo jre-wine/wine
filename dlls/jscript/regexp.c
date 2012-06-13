@@ -2307,8 +2307,6 @@ ProcessCharSet(REGlobalData *gData, RECharSet *charSet)
         }
         if (inRange) {
             if (gData->regexp->flags & JSREG_FOLD) {
-                int i;
-
                 assert(rangeStart <= thisCh);
                 for (i = rangeStart; i <= thisCh; i++) {
                     WCHAR uch, dch;
@@ -3322,7 +3320,7 @@ static HRESULT do_regexp_match_next(script_ctx_t *ctx, RegExpInstance *regexp, D
     REGlobalData gData;
     DWORD matchlen;
 
-    gData.cpbegin = *cp;
+    gData.cpbegin = str;
     gData.cpend = str + len;
     gData.start = *cp-str;
     gData.skipped = 0;
@@ -3384,7 +3382,7 @@ static HRESULT do_regexp_match_next(script_ctx_t *ctx, RegExpInstance *regexp, D
                 (*parens)[i].str = NULL;
                 (*parens)[i].len = 0;
             }else {
-                (*parens)[i].str = *cp + result->parens[i].index;
+                (*parens)[i].str = str + result->parens[i].index;
                 (*parens)[i].len = result->parens[i].length;
             }
         }
@@ -3491,7 +3489,7 @@ static HRESULT RegExp_source(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
         break;
     }
     default:
-        FIXME("Unimplemnted flags %x\n", flags);
+        FIXME("Unimplemented flags %x\n", flags);
         return E_NOTIMPL;
     }
 

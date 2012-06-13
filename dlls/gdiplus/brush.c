@@ -578,10 +578,10 @@ GpStatus WINGDIPAPI GdipCreatePathGradient(GDIPCONST GpPointF* points,
 
     TRACE("(%p, %d, %d, %p)\n", points, count, wrap, grad);
 
-    if(!points || !grad)
+    if(!grad)
         return InvalidParameter;
 
-    if(count <= 0)
+    if(!points || count <= 0)
         return OutOfMemory;
 
     stat = GdipCreatePath(FillModeAlternate, &path);
@@ -611,10 +611,10 @@ GpStatus WINGDIPAPI GdipCreatePathGradientI(GDIPCONST GpPoint* points,
 
     TRACE("(%p, %d, %d, %p)\n", points, count, wrap, grad);
 
-    if(!points || !grad)
+    if(!grad)
         return InvalidParameter;
 
-    if(count <= 0)
+    if(!points || count <= 0)
         return OutOfMemory;
 
     stat = GdipCreatePath(FillModeAlternate, &path);
@@ -647,8 +647,11 @@ GpStatus WINGDIPAPI GdipCreatePathGradientFromPath(GDIPCONST GpPath* path,
 
     TRACE("(%p, %p)\n", path, grad);
 
-    if(!path || !grad)
+    if(!grad)
         return InvalidParameter;
+
+    if (!path)
+        return OutOfMemory;
 
     stat = GdipClonePath((GpPath*)path, &new_path);
 
@@ -1432,27 +1435,67 @@ GpStatus WINGDIPAPI GdipSetLineWrapMode(GpLineGradient *line,
 GpStatus WINGDIPAPI GdipSetPathGradientBlend(GpPathGradient *brush, GDIPCONST REAL *blend,
     GDIPCONST REAL *pos, INT count)
 {
-    static int calls;
+    REAL *new_blendfac, *new_blendpos;
 
     TRACE("(%p,%p,%p,%i)\n", brush, blend, pos, count);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if(!brush || !blend || !pos || count <= 0 ||
+       (count >= 2 && (pos[0] != 0.0f || pos[count-1] != 1.0f)))
+        return InvalidParameter;
 
-    return NotImplemented;
+    new_blendfac = GdipAlloc(count * sizeof(REAL));
+    new_blendpos = GdipAlloc(count * sizeof(REAL));
+
+    if (!new_blendfac || !new_blendpos)
+    {
+        GdipFree(new_blendfac);
+        GdipFree(new_blendpos);
+        return OutOfMemory;
+    }
+
+    memcpy(new_blendfac, blend, count * sizeof(REAL));
+    memcpy(new_blendpos, pos, count * sizeof(REAL));
+
+    GdipFree(brush->blendfac);
+    GdipFree(brush->blendpos);
+
+    brush->blendcount = count;
+    brush->blendfac = new_blendfac;
+    brush->blendpos = new_blendpos;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetPathGradientLinearBlend(GpPathGradient *brush,
     REAL focus, REAL scale)
 {
-    static int calls;
+    REAL factors[3];
+    REAL positions[3];
+    int num_points = 0;
 
     TRACE("(%p,%0.2f,%0.2f)\n", brush, focus, scale);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!brush) return InvalidParameter;
 
-    return NotImplemented;
+    if (focus != 0.0)
+    {
+        factors[num_points] = 0.0;
+        positions[num_points] = 0.0;
+        num_points++;
+    }
+
+    factors[num_points] = scale;
+    positions[num_points] = focus;
+    num_points++;
+
+    if (focus != 1.0)
+    {
+        factors[num_points] = 0.0;
+        positions[num_points] = 1.0;
+        num_points++;
+    }
+
+    return GdipSetPathGradientBlend(brush, factors, positions, num_points);
 }
 
 GpStatus WINGDIPAPI GdipSetPathGradientPresetBlend(GpPathGradient *brush,
@@ -1520,7 +1563,7 @@ GpStatus WINGDIPAPI GdipGetPathGradientPresetBlend(GpPathGradient *brush,
 GpStatus WINGDIPAPI GdipGetPathGradientPresetBlendCount(GpPathGradient *brush,
     INT *count)
 {
-    FIXME("(%p,%p): stub\n", brush, count);
+    TRACE("(%p,%p)\n", brush, count);
 
     if (!brush || !count)
         return InvalidParameter;
@@ -1602,23 +1645,64 @@ GpStatus WINGDIPAPI GdipSetPathGradientGammaCorrection(GpPathGradient *grad,
 GpStatus WINGDIPAPI GdipSetPathGradientSigmaBlend(GpPathGradient *grad,
     REAL focus, REAL scale)
 {
-    static int calls;
+    REAL factors[33];
+    REAL positions[33];
+    int num_points = 0;
+    int i;
+    const int precision = 16;
+    REAL erf_range; /* we use values erf(-erf_range) through erf(+erf_range) */
+    REAL min_erf;
+    REAL scale_erf;
 
     TRACE("(%p,%0.2f,%0.2f)\n", grad, focus, scale);
 
     if(!grad || focus < 0.0 || focus > 1.0 || scale < 0.0 || scale > 1.0)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    /* we want 2 standard deviations */
+    erf_range = 2.0 / sqrt(2);
 
-    return NotImplemented;
+    /* calculate the constants we need to normalize the error function to be
+        between 0.0 and scale over the range we need */
+    min_erf = erf(-erf_range);
+    scale_erf = scale / (-2.0 * min_erf);
+
+    if (focus != 0.0)
+    {
+        positions[0] = 0.0;
+        factors[0] = 0.0;
+        for (i=1; i<precision; i++)
+        {
+            positions[i] = focus * i / precision;
+            factors[i] = scale_erf * (erf(2 * erf_range * i / precision - erf_range) - min_erf);
+        }
+        num_points += precision;
+    }
+
+    positions[num_points] = focus;
+    factors[num_points] = scale;
+    num_points += 1;
+
+    if (focus != 1.0)
+    {
+        for (i=1; i<precision; i++)
+        {
+            positions[i+num_points-1] = (focus + ((1.0-focus) * i / precision));
+            factors[i+num_points-1] = scale_erf * (erf(erf_range - 2 * erf_range * i / precision) - min_erf);
+        }
+        num_points += precision;
+        positions[num_points-1] = 1.0;
+        factors[num_points-1] = 0.0;
+    }
+
+    return GdipSetPathGradientBlend(grad, factors, positions, num_points);
 }
 
 GpStatus WINGDIPAPI GdipSetPathGradientSurroundColorsWithCount(GpPathGradient
     *grad, GDIPCONST ARGB *argb, INT *count)
 {
     ARGB *new_surroundcolors;
+    INT i, num_colors;
 
     TRACE("(%p,%p,%p)\n", grad, argb, count);
 
@@ -1626,16 +1710,29 @@ GpStatus WINGDIPAPI GdipSetPathGradientSurroundColorsWithCount(GpPathGradient
         (*count > grad->path->pathdata.Count))
         return InvalidParameter;
 
-    new_surroundcolors = GdipAlloc(*count * sizeof(ARGB));
+    num_colors = *count;
+
+    /* If all colors are the same, only store 1 color. */
+    if (*count > 1)
+    {
+        for (i=1; i < num_colors; i++)
+            if (argb[i] != argb[i-1])
+                break;
+
+        if (i == num_colors)
+            num_colors = 1;
+    }
+
+    new_surroundcolors = GdipAlloc(num_colors * sizeof(ARGB));
     if (!new_surroundcolors)
         return OutOfMemory;
 
-    memcpy(new_surroundcolors, argb, *count * sizeof(ARGB));
+    memcpy(new_surroundcolors, argb, num_colors * sizeof(ARGB));
 
     GdipFree(grad->surroundcolors);
 
     grad->surroundcolors = new_surroundcolors;
-    grad->surroundcolorcount = *count;
+    grad->surroundcolorcount = num_colors;
 
     return Ok;
 }

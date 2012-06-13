@@ -26,6 +26,7 @@
 # error You must include config.h to use this header
 #endif
 
+#include <limits.h>
 #include <stdarg.h>
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
@@ -114,9 +115,6 @@ typedef struct
     BOOL         trueColor;
 } X_PHYSBITMAP;
 
-  /* X physical font */
-typedef UINT	 X_PHYSFONT;
-
   /* X physical device */
 typedef struct
 {
@@ -125,12 +123,11 @@ typedef struct
     Drawable      drawable;
     RECT          dc_rect;       /* DC rectangle relative to drawable */
     RECT          drawable_rect; /* Drawable rectangle relative to screen */
+    RECT         *bounds;        /* Graphics bounds */
     HRGN          region;        /* Device region (visible region & clip region) */
-    X_PHYSFONT    font;
     X_PHYSPEN     pen;
     X_PHYSBRUSH   brush;
     X_PHYSBITMAP *bitmap;       /* currently selected bitmap for memory DCs */
-    BOOL          has_gdi_font; /* is current font a GDI font? */
     int           depth;       /* bit depth of the DC */
     ColorShifts  *color_shifts; /* color shifts of the DC */
     int           exposures;   /* count of graphics exposures operations */
@@ -143,6 +140,21 @@ typedef struct
 static inline X11DRV_PDEVICE *get_x11drv_dev( PHYSDEV dev )
 {
     return (X11DRV_PDEVICE *)dev;
+}
+
+static inline void reset_bounds( RECT *bounds )
+{
+    bounds->left = bounds->top = INT_MAX;
+    bounds->right = bounds->bottom = INT_MIN;
+}
+
+static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
+{
+    if (rect->left >= rect->right || rect->top >= rect->bottom) return;
+    bounds->left   = min( bounds->left, rect->left );
+    bounds->top    = min( bounds->top, rect->top );
+    bounds->right  = max( bounds->right, rect->right );
+    bounds->bottom = max( bounds->bottom, rect->bottom );
 }
 
 extern X_PHYSBITMAP BITMAP_stock_phys_bitmap DECLSPEC_HIDDEN;  /* phys bitmap for the default stock bitmap */
@@ -160,21 +172,14 @@ extern BOOL X11DRV_CopyBitmap( HBITMAP src, HBITMAP dst ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_CreateBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_DeleteBitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW dfeproc, LPARAM lp ) DECLSPEC_HIDDEN;
 extern INT X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *lprect,
-                               LPCWSTR str, UINT count, const INT *lpDx ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GetCharWidth( PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename ) DECLSPEC_HIDDEN;
 extern DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
                               struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern UINT X11DRV_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, LPPALETTEENTRY entries ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GetTextExtentExPoint( PHYSDEV dev, LPCWSTR str, INT count, INT maxExt,
-                                         LPINT lpnFit, LPINT alpDx, LPSIZE size ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_GetTextMetrics(PHYSDEV dev, TEXTMETRICW *metrics) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
                                  void *grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_LineTo( PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;
@@ -182,7 +187,6 @@ extern BOOL X11DRV_PaintRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_PatBlt( PHYSDEV dev, struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_Pie( PHYSDEV dev, INT left, INT top, INT right,
                         INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_Polyline( PHYSDEV dev,const POINT* pt,INT count) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, UINT polygons) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines) DECLSPEC_HIDDEN;
@@ -196,7 +200,6 @@ extern BOOL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bot
                               INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
 extern HBITMAP X11DRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
-extern HFONT X11DRV_SelectFont( PHYSDEV dev, HFONT hfont ) DECLSPEC_HIDDEN;
 extern HPEN X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
@@ -234,7 +237,6 @@ extern void X11DRV_OpenGL_Cleanup(void) DECLSPEC_HIDDEN;
 
 extern void X11DRV_Xcursor_Init(void) DECLSPEC_HIDDEN;
 extern void X11DRV_BITMAP_Init(void) DECLSPEC_HIDDEN;
-extern void X11DRV_FONT_Init( int log_pixels_x, int log_pixels_y ) DECLSPEC_HIDDEN;
 extern void X11DRV_XInput2_Init(void) DECLSPEC_HIDDEN;
 
 extern HBITMAP create_brush_bitmap( X11DRV_PDEVICE *physDev, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
@@ -249,12 +251,12 @@ extern DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
 extern RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp ) DECLSPEC_HIDDEN;
 extern BOOL add_extra_clipping_region( X11DRV_PDEVICE *dev, HRGN rgn ) DECLSPEC_HIDDEN;
 extern void restore_clipping_region( X11DRV_PDEVICE *dev ) DECLSPEC_HIDDEN;
+extern void add_device_bounds( X11DRV_PDEVICE *dev, const RECT *rect ) DECLSPEC_HIDDEN;
 
 extern void execute_rop( X11DRV_PDEVICE *physdev, Pixmap src_pixmap, GC gc, const RECT *visrect, DWORD rop ) DECLSPEC_HIDDEN;
 
 extern BOOL X11DRV_SetupGCForPatBlt( X11DRV_PDEVICE *physDev, GC gc, BOOL fMapColors ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_SetupGCForBrush( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_SetupGCForText( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
 extern INT X11DRV_XWStoDS( HDC hdc, INT width ) DECLSPEC_HIDDEN;
 extern INT X11DRV_YWStoDS( HDC hdc, INT height ) DECLSPEC_HIDDEN;
 
@@ -262,11 +264,9 @@ extern const int X11DRV_XROPfunction[];
 
 extern void _XInitImageFuncPtrs(XImage *) DECLSPEC_HIDDEN;
 
-extern int client_side_with_core DECLSPEC_HIDDEN;
 extern int client_side_with_render DECLSPEC_HIDDEN;
 extern int client_side_antialias_with_core DECLSPEC_HIDDEN;
 extern int client_side_antialias_with_render DECLSPEC_HIDDEN;
-extern int using_client_side_fonts DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 extern void X11DRV_XRender_Finalize(void) DECLSPEC_HIDDEN;
 
@@ -416,7 +416,6 @@ extern unsigned int screen_height DECLSPEC_HIDDEN;
 extern unsigned int screen_bpp DECLSPEC_HIDDEN;
 extern unsigned int screen_depth DECLSPEC_HIDDEN;
 extern RECT virtual_screen_rect DECLSPEC_HIDDEN;
-extern unsigned int text_caps DECLSPEC_HIDDEN;
 extern int use_xkb DECLSPEC_HIDDEN;
 extern int usexrandr DECLSPEC_HIDDEN;
 extern int usexvidmode DECLSPEC_HIDDEN;

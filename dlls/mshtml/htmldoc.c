@@ -595,8 +595,15 @@ static HRESULT WINAPI HTMLDocument_get_lastModified(IHTMLDocument2 *iface, BSTR 
 static HRESULT WINAPI HTMLDocument_put_URL(IHTMLDocument2 *iface, BSTR v)
 {
     HTMLDocument *This = impl_from_IHTMLDocument2(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!This->window) {
+        FIXME("No window available\n");
+        return E_FAIL;
+    }
+
+    return navigate_url(This->window, v, This->window->url);
 }
 
 static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
@@ -792,8 +799,8 @@ static HRESULT WINAPI HTMLDocument_get_nameProp(IHTMLDocument2 *iface, BSTR *p)
 
 static HRESULT document_write(HTMLDocument *This, SAFEARRAY *psarray, BOOL ln)
 {
+    VARIANT *var, tmp;
     nsAString nsstr;
-    VARIANT *var;
     ULONG i, argc;
     nsresult nsres;
     HRESULT hres;
@@ -817,27 +824,38 @@ static HRESULT document_write(HTMLDocument *This, SAFEARRAY *psarray, BOOL ln)
         return hres;
     }
 
-    nsAString_Init(&nsstr, NULL);
+    V_VT(&tmp) = VT_EMPTY;
 
     argc = psarray->rgsabound[0].cElements;
     for(i=0; i < argc; i++) {
         if(V_VT(var+i) == VT_BSTR) {
-            nsAString_SetData(&nsstr, V_BSTR(var+i));
-            if(!ln || i != argc-1)
-                nsres = nsIDOMHTMLDocument_Write(This->doc_node->nsdoc, &nsstr, NULL /* FIXME! */);
-            else
-                nsres = nsIDOMHTMLDocument_Writeln(This->doc_node->nsdoc, &nsstr, NULL /* FIXME! */);
-            if(NS_FAILED(nsres))
-                ERR("Write failed: %08x\n", nsres);
+            nsAString_InitDepend(&nsstr, V_BSTR(var+i));
         }else {
-            FIXME("unsupported arg[%d] = %s\n", i, debugstr_variant(var+i));
+            hres = VariantChangeType(&tmp, var+i, 0, VT_BSTR);
+            if(FAILED(hres)) {
+                WARN("Could not convert %s to string\n", debugstr_variant(var+i));
+                break;
+            }
+            nsAString_InitDepend(&nsstr, V_BSTR(&tmp));
+        }
+
+        if(!ln || i != argc-1)
+            nsres = nsIDOMHTMLDocument_Write(This->doc_node->nsdoc, &nsstr, NULL /* FIXME! */);
+        else
+            nsres = nsIDOMHTMLDocument_Writeln(This->doc_node->nsdoc, &nsstr, NULL /* FIXME! */);
+        nsAString_Finish(&nsstr);
+        if(V_VT(var+i) != VT_BSTR)
+            VariantClear(&tmp);
+        if(NS_FAILED(nsres)) {
+            ERR("Write failed: %08x\n", nsres);
+            hres = E_FAIL;
+            break;
         }
     }
 
-    nsAString_Finish(&nsstr);
     SafeArrayUnaccessData(psarray);
 
-    return S_OK;
+    return hres;
 }
 
 static HRESULT WINAPI HTMLDocument_write(IHTMLDocument2 *iface, SAFEARRAY *psarray)

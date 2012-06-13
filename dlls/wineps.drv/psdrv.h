@@ -401,6 +401,10 @@ extern HINSTANCE PSDRV_hInstance DECLSPEC_HIDDEN;
 extern HANDLE PSDRV_Heap DECLSPEC_HIDDEN;
 extern char *PSDRV_ANSIVector[256] DECLSPEC_HIDDEN;
 
+extern INPUTSLOT *find_slot( PPD *ppd, PSDRV_DEVMODE *dm );
+extern PAGESIZE *find_pagesize( PPD *ppd, PSDRV_DEVMODE *dm );
+extern DUPLEX *find_duplex( PPD *ppd, PSDRV_DEVMODE *dm );
+
 /* GDI driver functions */
 extern BOOL PSDRV_Arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                        INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;

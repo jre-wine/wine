@@ -2124,7 +2124,7 @@ msgid ""
 "Add the object identifier (OID) for the certificate purpose you wish to add:"
 msgstr ""
 "Tilføj objekt identifikator (OID) for det cerifikat formål du ønsker at "
-"tilføje"
+"tilføje:"
 
 #: cryptui.rc:265 cryptui.rc:66
 msgid "Select Certificate Store"
@@ -3534,10 +3534,22 @@ msgid "URI to be decoded is incorrect"
 msgstr "URI der skal afkodes er forkert"
 
 #: jscript.rc:57
+#, fuzzy
+#| msgid "Enumeration value out of range.\n"
+msgid "Number of fraction digits is out of range"
+msgstr "Opregnings værdi uden for intervallet.\n"
+
+#: jscript.rc:58
+#, fuzzy
+#| msgid "Subscript out of range"
+msgid "Precision is out of range"
+msgstr "Indekset er uden for grænserne"
+
+#: jscript.rc:59
 msgid "Array length must be a finite positive integer"
 msgstr "Array længde skal være et endeligt positivt heltal"
 
-#: jscript.rc:58
+#: jscript.rc:60
 msgid "Array object expected"
 msgstr "Array objekt forventet"
 
@@ -3946,7 +3958,7 @@ msgid "Drive is already JOINed.\n"
 msgstr "Drev er allerede JOINed.\n"
 
 #: winerror.mc:541
-msgid "Drive is already SUBST-ed.\n"
+msgid "Drive is already SUBSTed.\n"
 msgstr "Drev er allerede erstattet.\n"
 
 #: winerror.mc:546
@@ -9445,6 +9457,7 @@ msgid ""
 msgstr ""
 "PAUSE viser meldingen 'Tryk Enter for at fortsætte', og venter på at\n"
 "brugeren trykker Enter.\n"
+"\n"
 "Dette er hovedsageligt nyttigt i batchfiler, for at lade brugeren læse\n"
 "uddata fra en tidligere kommando før det forsvinder væk fra skærmen.\n"
 
@@ -9717,7 +9730,7 @@ msgstr ""
 "Hvis brugt med kun en filtype, vises den tilknyttede åbnings kommando "
 "streng, hvis der en.\n"
 "Angives ingen åbnings kommando efter lighedstegnet fjernes åbnings "
-"kommandoen der er tilknyttet den angivne fil type\n"
+"kommandoen der er tilknyttet den angivne fil type.\n"
 
 #: cmd.rc:258
 msgid "MORE displays output of files or piped input in pages.\n"
@@ -13076,9 +13089,9 @@ msgid ""
 "                           try to setup the current terminal as a Wine "
 "console.\n"
 msgstr ""
-"  --backend={user|curses} Vælges user vil det frembringe et nyt vindue. "
+"  --backend={user|curses}  Vælges user vil det frembringe et nyt vindue. "
 "Vælges curses\n"
-"                          vil det prøve at ændre det nuværende terminal "
+"                           vil det prøve at ændre det nuværende terminal "
 "vindue til en Wine konsol.\n"
 
 #: wineconsole.rc:50
@@ -14026,7 +14039,7 @@ msgid ""
 "\t\tthan source.\n"
 "\n"
 msgstr ""
-"XCOPY - Kopierer filer eller mapper til en målplassering\n"
+"XCOPY - Kopierer filer eller mapper til en målplassering.\n"
 "\n"
 "Syntaks:\n"
 "XCOPY kilde [mål] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U]\n"

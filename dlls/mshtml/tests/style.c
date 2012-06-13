@@ -52,6 +52,16 @@ static BSTR a2bstr(const char *str)
     return ret;
 }
 
+#define test_var_bstr(a,b) _test_var_bstr(__LINE__,a,b)
+static void _test_var_bstr(unsigned line, const VARIANT *v, const char *expect)
+{
+    ok_(__FILE__,line)(V_VT(v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(v));
+    if(expect)
+        ok_(__FILE__,line)(!strcmp_wa(V_BSTR(v), expect), "V_BSTR(v) = %s, expected %s\n", wine_dbgstr_w(V_BSTR(v)), expect);
+    else
+        ok_(__FILE__,line)(!V_BSTR(v), "V_BSTR(v) = %s, expected NULL\n", wine_dbgstr_w(V_BSTR(v)));
+}
+
 #define get_elem2_iface(u) _get_elem2_iface(__LINE__,u)
 static IHTMLElement2 *_get_elem2_iface(unsigned line, IUnknown *unk)
 {
@@ -232,6 +242,19 @@ static void _test_style_set_csstext(unsigned line, IHTMLStyle *style, const char
     SysFreeString(tmp);
 }
 
+#define test_style_remove_attribute(a,b,c) _test_style_remove_attribute(__LINE__,a,b,c)
+static void _test_style_remove_attribute(unsigned line, IHTMLStyle *style, const char *attr, VARIANT_BOOL exb)
+{
+    BSTR str = a2bstr(attr);
+    VARIANT_BOOL b = 100;
+    HRESULT hres;
+
+    hres = IHTMLStyle_removeAttribute(style, str, 1, &b);
+    SysFreeString(str);
+    ok_(__FILE__,line)(hres == S_OK, "removeAttribute failed: %08x\n", hres);
+    ok_(__FILE__,line)(b == exb, "removeAttribute returned %x, expected %x\n", b, exb);
+}
+
 static void test_set_csstext(IHTMLStyle *style)
 {
     VARIANT v;
@@ -305,6 +328,54 @@ static void test_style2(IHTMLStyle2 *style2)
     ok(hres == S_OK, "get_direction failed: %08x\n", hres);
     ok(!strcmp_wa(str, "ltr"), "str = %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
+
+    /* bottom */
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle2_get_bottom(style2, &v);
+    ok(hres == S_OK, "get_bottom failed: %08x\n", hres);
+    test_var_bstr(&v, NULL);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 4;
+    hres = IHTMLStyle2_put_bottom(style2, v);
+    ok(hres == S_OK, "put_bottom failed: %08x\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle2_get_bottom(style2, &v);
+    ok(hres == S_OK, "get_bottom failed: %08x\n", hres);
+    test_var_bstr(&v, "4px");
+
+    /* overflowX */
+    str = (void*)0xdeadbeef;
+    hres = IHTMLStyle2_get_overflowX(style2, &str);
+    ok(hres == S_OK, "get_overflowX failed: %08x\n", hres);
+    ok(!str, "overflowX = %s\n", wine_dbgstr_w(str));
+
+    str = a2bstr("hidden");
+    hres = IHTMLStyle2_put_overflowX(style2, str);
+    ok(hres == S_OK, "put_overflowX failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLStyle2_get_overflowX(style2, &str);
+    ok(hres == S_OK, "get_overflowX failed: %08x\n", hres);
+    ok(!strcmp_wa(str, "hidden"), "overflowX = %s\n", wine_dbgstr_w(str));
+
+    /* overflowY */
+    str = (void*)0xdeadbeef;
+    hres = IHTMLStyle2_get_overflowY(style2, &str);
+    ok(hres == S_OK, "get_overflowY failed: %08x\n", hres);
+    ok(!str, "overflowY = %s\n", wine_dbgstr_w(str));
+
+    str = a2bstr("hidden");
+    hres = IHTMLStyle2_put_overflowY(style2, str);
+    ok(hres == S_OK, "put_overflowY failed: %08x\n", hres);
+    SysFreeString(str);
+
+    str = NULL;
+    hres = IHTMLStyle2_get_overflowY(style2, &str);
+    ok(hres == S_OK, "get_overflowY failed: %08x\n", hres);
+    ok(!strcmp_wa(str, "hidden"), "overflowX = %s\n", wine_dbgstr_w(str));
 }
 
 static void test_style3(IHTMLStyle3 *style3)
@@ -1857,6 +1928,13 @@ static void test_body_style(IHTMLStyle *style)
     ok(!strcmp_wa(str, "always"), "pageBreakBefore = %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
+    test_style_remove_attribute(style, "pageBreakBefore", VARIANT_TRUE);
+    test_style_remove_attribute(style, "pageBreakBefore", VARIANT_FALSE);
+
+    hres = IHTMLStyle_get_pageBreakBefore(style, &str);
+    ok(hres == S_OK, "get_pageBreakBefore failed: %08x\n", hres);
+    ok(!str, "pageBreakBefore = %s\n", wine_dbgstr_w(str));
+
     hres = IHTMLStyle_QueryInterface(style, &IID_IHTMLStyle2, (void**)&style2);
     ok(hres == S_OK, "Could not get IHTMLStyle2 iface: %08x\n", hres);
     if(SUCCEEDED(hres)) {
@@ -1958,6 +2036,11 @@ static void test_style_filters(IHTMLElement *elem)
     test_style_filter(style, "alpha(opacity=100)");
     set_style_filter(style, "xxx(a,b,c) alpha(opacity=100)");
     set_style_filter(style, NULL);
+    set_style_filter(style, "alpha(opacity=100)");
+    test_style_remove_attribute(style, "filter", VARIANT_TRUE);
+    test_style_remove_attribute(style, "filter", VARIANT_FALSE);
+    test_style_filter(style, NULL);
+
 
     IHTMLCurrentStyle2_Release(current_style2);
     IHTMLStyle_Release(style);

@@ -28,12 +28,9 @@ typedef struct {
     builtin_invoke_t value_proc;
     const WCHAR *name;
     DWORD flags;
-    source_elements_t *source;
-    parameter_t *parameters;
     scope_chain_t *scope_chain;
     bytecode_t *code;
-    const WCHAR *src_str;
-    DWORD src_len;
+    function_code_t *func_code;
     DWORD length;
     jsdisp_t *arguments;
 } FunctionInstance;
@@ -77,7 +74,6 @@ static IDispatch *get_this(DISPPARAMS *dp)
 static HRESULT init_parameters(jsdisp_t *var_disp, FunctionInstance *function, DISPPARAMS *dp,
         jsexcept_t *ei)
 {
-    parameter_t *param;
     VARIANT var_empty;
     DWORD cargs, i=0;
     HRESULT hres;
@@ -85,13 +81,11 @@ static HRESULT init_parameters(jsdisp_t *var_disp, FunctionInstance *function, D
     V_VT(&var_empty) = VT_EMPTY;
     cargs = arg_cnt(dp);
 
-    for(param = function->parameters; param; param = param->next) {
-        hres = jsdisp_propput_name(var_disp, param->identifier,
+    for(i=0; i < function->func_code->param_cnt; i++) {
+        hres = jsdisp_propput_name(var_disp, function->func_code->params[i],
                 i < cargs ? get_arg(dp,i) : &var_empty, ei);
         if(FAILED(hres))
             return hres;
-
-        i++;
     }
 
     return S_OK;
@@ -191,7 +185,7 @@ static HRESULT invoke_source(script_ctx_t *ctx, FunctionInstance *function, IDis
     scope_chain_t *scope;
     HRESULT hres;
 
-    if(!function->source) {
+    if(!function->func_code) {
         FIXME("no source\n");
         return E_FAIL;
     }
@@ -217,7 +211,7 @@ static HRESULT invoke_source(script_ctx_t *ctx, FunctionInstance *function, IDis
 
         prev_args = function->arguments;
         function->arguments = arg_disp;
-        hres = exec_source(exec_ctx, function->code, function->source, FALSE, ei, retv);
+        hres = exec_source(exec_ctx, function->code, function->func_code, FALSE, ei, retv);
         function->arguments = prev_args;
 
         jsdisp_release(arg_disp);
@@ -303,7 +297,7 @@ static HRESULT function_to_string(FunctionInstance *function, BSTR *ret)
         memcpy(str + sizeof(native_prefixW)/sizeof(WCHAR), function->name, name_len*sizeof(WCHAR));
         memcpy(str + sizeof(native_prefixW)/sizeof(WCHAR) + name_len, native_suffixW, sizeof(native_suffixW));
     }else {
-        str = SysAllocStringLen(function->src_str, function->src_len);
+        str = SysAllocStringLen(function->func_code->source, function->func_code->source_len);
         if(!str)
             return E_OUTOFMEMORY;
     }
@@ -660,13 +654,11 @@ HRESULT create_builtin_function(script_ctx_t *ctx, builtin_invoke_t value_proc, 
     return S_OK;
 }
 
-HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, parameter_t *parameters, source_elements_t *source,
-        scope_chain_t *scope_chain, const WCHAR *src_str, DWORD src_len, jsdisp_t **ret)
+HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, function_code_t *func_code,
+        scope_chain_t *scope_chain, jsdisp_t **ret)
 {
     FunctionInstance *function;
     jsdisp_t *prototype;
-    parameter_t *iter;
-    DWORD length = 0;
     HRESULT hres;
 
     hres = create_object(ctx, NULL, &prototype);
@@ -683,9 +675,6 @@ HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, parameter_t 
     if(FAILED(hres))
         return hres;
 
-    function->source = source;
-    function->parameters = parameters;
-
     if(scope_chain) {
         scope_addref(scope_chain);
         function->scope_chain = scope_chain;
@@ -693,13 +682,8 @@ HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, parameter_t 
 
     bytecode_addref(code);
     function->code = code;
-
-    for(iter = parameters; iter; iter = iter->next)
-        length++;
-    function->length = length;
-
-    function->src_str = src_str;
-    function->src_len = src_len;
+    function->func_code = func_code;
+    function->length = function->func_code->param_cnt;
 
     *ret = &function->dispex;
     return S_OK;
@@ -707,10 +691,8 @@ HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, parameter_t 
 
 static HRESULT construct_function(script_ctx_t *ctx, DISPPARAMS *dp, jsexcept_t *ei, IDispatch **ret)
 {
-    function_expression_t *expr;
     WCHAR *str = NULL, *ptr;
     DWORD argc, len = 0, l;
-    parser_ctx_t *parser;
     bytecode_t *code;
     jsdisp_t *function;
     BSTR *params = NULL;
@@ -780,16 +762,13 @@ static HRESULT construct_function(script_ctx_t *ctx, DISPPARAMS *dp, jsexcept_t 
     if(FAILED(hres))
         return hres;
 
-    parser = code->parser;
-    if(!parser->source || !parser->source->functions || parser->source->functions->next || parser->source->variables) {
+    if(code->global_code.func_cnt != 1 || code->global_code.var_cnt) {
         ERR("Invalid parser result!\n");
         release_bytecode(code);
         return E_UNEXPECTED;
     }
-    expr = parser->source->functions->expr;
 
-    hres = create_source_function(ctx, code, expr->parameter_list, expr->source_elements, NULL, expr->src_str,
-            expr->src_len, &function);
+    hres = create_source_function(ctx, code, code->global_code.funcs, NULL, &function);
     release_bytecode(code);
     if(FAILED(hres))
         return hres;

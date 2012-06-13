@@ -134,6 +134,10 @@ static const WCHAR attrMinHeight[] =
     {'m','i','n','-','h','e','i','g','h','t',0};
 static const WCHAR attrOverflow[] =
     {'o','v','e','r','f','l','o','w',0};
+static const WCHAR attrOverflowX[] =
+    {'o','v','e','r','f','l','o','w','-','x',0};
+static const WCHAR attrOverflowY[] =
+    {'o','v','e','r','f','l','o','w','-','y',0};
 static const WCHAR attrPadding[] =
     {'p','a','d','d','i','n','g',0};
 static const WCHAR attrPaddingBottom[] =
@@ -173,10 +177,12 @@ static const WCHAR attrWordWrap[] =
 static const WCHAR attrZIndex[] =
     {'z','-','i','n','d','e','x',0};
 
-static const struct{
+typedef struct {
     const WCHAR *name;
     DISPID dispid;
-} style_tbl[] = {
+} style_tbl_entry_t;
+
+static const style_tbl_entry_t style_tbl[] = {
     {attrBackground,           DISPID_IHTMLSTYLE_BACKGROUND},
     {attrBackgroundColor,      DISPID_IHTMLSTYLE_BACKGROUNDCOLOR},
     {attrBackgroundImage,      DISPID_IHTMLSTYLE_BACKGROUNDIMAGE},
@@ -227,6 +233,8 @@ static const struct{
     {attrMarginTop,            DISPID_IHTMLSTYLE_MARGINTOP},
     {attrMinHeight,            DISPID_IHTMLSTYLE4_MINHEIGHT},
     {attrOverflow,             DISPID_IHTMLSTYLE_OVERFLOW},
+    {attrOverflowX,            DISPID_IHTMLSTYLE2_OVERFLOWX},
+    {attrOverflowY,            DISPID_IHTMLSTYLE2_OVERFLOWY},
     {attrPadding,              DISPID_IHTMLSTYLE_PADDING},
     {attrPaddingBottom,        DISPID_IHTMLSTYLE_PADDINGBOTTOM},
     {attrPaddingLeft,          DISPID_IHTMLSTYLE_PADDINGLEFT},
@@ -263,6 +271,26 @@ static const WCHAR valBlink[] =
 
 static const WCHAR px_formatW[] = {'%','d','p','x',0};
 static const WCHAR emptyW[] = {0};
+
+static const style_tbl_entry_t *lookup_style_tbl(const WCHAR *name)
+{
+    int c, i, min = 0, max = sizeof(style_tbl)/sizeof(*style_tbl)-1;
+
+    while(min <= max) {
+        i = (min+max)/2;
+
+        c = strcmpW(style_tbl[i].name, name);
+        if(!c)
+            return style_tbl+i;
+
+        if(c > 0)
+            max = i-1;
+        else
+            min = i+1;
+    }
+
+    return NULL;
+}
 
 static LPWSTR fix_px_value(LPCWSTR val)
 {
@@ -2726,9 +2754,57 @@ static HRESULT WINAPI HTMLStyle_removeAttribute(IHTMLStyle *iface, BSTR strAttri
                                                 LONG lFlags, VARIANT_BOOL *pfSuccess)
 {
     HTMLStyle *This = impl_from_IHTMLStyle(iface);
-    FIXME("(%p)->(%s %08x %p)\n", This, debugstr_w(strAttributeName),
-         lFlags, pfSuccess);
-    return E_NOTIMPL;
+    const style_tbl_entry_t *style_entry;
+    nsAString name_str, ret_str;
+    nsresult nsres;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %08x %p)\n", This, debugstr_w(strAttributeName), lFlags, pfSuccess);
+
+    style_entry = lookup_style_tbl(strAttributeName);
+    if(!style_entry) {
+        DISPID dispid;
+        unsigned i;
+
+        hres = IDispatchEx_GetDispID(&This->dispex.IDispatchEx_iface, strAttributeName,
+                (lFlags&1) ? fdexNameCaseSensitive : fdexNameCaseInsensitive, &dispid);
+        if(hres != S_OK) {
+            *pfSuccess = VARIANT_FALSE;
+            return S_OK;
+        }
+
+        for(i=0; i < sizeof(style_tbl)/sizeof(*style_tbl); i++) {
+            if(dispid == style_tbl[i].dispid)
+                break;
+        }
+
+        if(i == sizeof(style_tbl)/sizeof(*style_tbl))
+            return remove_prop(&This->dispex, strAttributeName, pfSuccess);
+        style_entry = style_tbl+i;
+    }
+
+    /* filter property is a special case */
+    if(style_entry->dispid == DISPID_IHTMLSTYLE_FILTER) {
+        *pfSuccess = This->elem->filter && *This->elem->filter ? VARIANT_TRUE : VARIANT_FALSE;
+        heap_free(This->elem->filter);
+        This->elem->filter = NULL;
+        update_filter(This);
+        return S_OK;
+    }
+
+    nsAString_InitDepend(&name_str, style_entry->name);
+    nsAString_Init(&ret_str, NULL);
+    nsres = nsIDOMCSSStyleDeclaration_RemoveProperty(This->nsstyle, &name_str, &ret_str);
+    if(NS_SUCCEEDED(nsres)) {
+        const PRUnichar *ret;
+        nsAString_GetData(&ret_str, &ret);
+        *pfSuccess = *ret ? VARIANT_TRUE : VARIANT_FALSE;
+    }else {
+        ERR("RemoveProperty failed: %08x\n", nsres);
+    }
+    nsAString_Finish(&name_str);
+    nsAString_Finish(&ret_str);
+    return NS_SUCCEEDED(nsres) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI HTMLStyle_toString(IHTMLStyle *iface, BSTR *String)
@@ -2929,21 +3005,12 @@ static const IHTMLStyleVtbl HTMLStyleVtbl = {
 
 static HRESULT HTMLStyle_get_dispid(DispatchEx *dispex, BSTR name, DWORD flags, DISPID *dispid)
 {
-    int c, i, min=0, max = sizeof(style_tbl)/sizeof(*style_tbl)-1;
+    const style_tbl_entry_t *style_entry;
 
-    while(min <= max) {
-        i = (min+max)/2;
-
-        c = strcmpW(style_tbl[i].name, name);
-        if(!c) {
-            *dispid = style_tbl[i].dispid;
-            return S_OK;
-        }
-
-        if(c > 0)
-            max = i-1;
-        else
-            min = i+1;
+    style_entry = lookup_style_tbl(name);
+    if(style_entry) {
+        *dispid = style_entry->dispid;
+        return S_OK;
     }
 
     return DISP_E_UNKNOWNNAME;

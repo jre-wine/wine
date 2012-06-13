@@ -289,73 +289,21 @@ HRESULT indexbuffer_init(IDirect3DIndexBuffer9Impl *buffer, IDirect3DDevice9Impl
         UINT size, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
 IDirect3DIndexBuffer9Impl *unsafe_impl_from_IDirect3DIndexBuffer9(IDirect3DIndexBuffer9 *iface) DECLSPEC_HIDDEN;
 
-/* --------------------- */
-/* IDirect3DBaseTexture9 */
-/* --------------------- */
-
-/*****************************************************************************
- * IDirect3DBaseTexture9 implementation structure
- */
-typedef struct IDirect3DBaseTexture9Impl
+struct d3d9_texture
 {
-    const IDirect3DBaseTexture9Vtbl *lpVtbl;
-    LONG                    ref;
+    IDirect3DBaseTexture9 IDirect3DBaseTexture9_iface;
+    LONG refcount;
     struct wined3d_texture *wined3d_texture;
-} IDirect3DBaseTexture9Impl;
+    IDirect3DDevice9Ex *parent_device;
+};
 
-/* --------------------- */
-/* IDirect3DCubeTexture9 */
-/* --------------------- */
-
-/*****************************************************************************
- * IDirect3DCubeTexture9 implementation structure
- */
-typedef struct IDirect3DCubeTexture9Impl
-{
-    IDirect3DCubeTexture9 IDirect3DCubeTexture9_iface;
-    LONG ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice9Ex *parentDevice;
-}  IDirect3DCubeTexture9Impl;
-
-HRESULT cubetexture_init(IDirect3DCubeTexture9Impl *texture, IDirect3DDevice9Impl *device,
+HRESULT cubetexture_init(struct d3d9_texture *texture, IDirect3DDevice9Impl *device,
         UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-
-/* ----------------- */
-/* IDirect3DTexture9 */
-/* ----------------- */
-
-/*****************************************************************************
- * IDirect3DTexture9 implementation structure
- */
-typedef struct IDirect3DTexture9Impl
-{
-    IDirect3DTexture9 IDirect3DTexture9_iface;
-    LONG ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice9Ex *parentDevice;
-} IDirect3DTexture9Impl;
-
-HRESULT texture_init(IDirect3DTexture9Impl *texture, IDirect3DDevice9Impl *device,
+HRESULT texture_init(struct d3d9_texture *texture, IDirect3DDevice9Impl *device,
         UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-
-/* ----------------------- */
-/* IDirect3DVolumeTexture9 */
-/* ----------------------- */
-
-/*****************************************************************************
- * IDirect3DVolumeTexture9 implementation structure
- */
-typedef struct IDirect3DVolumeTexture9Impl
-{
-    IDirect3DVolumeTexture9 IDirect3DVolumeTexture9_iface;
-    LONG ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice9Ex *parentDevice;
-} IDirect3DVolumeTexture9Impl;
-
-HRESULT volumetexture_init(IDirect3DVolumeTexture9Impl *texture, IDirect3DDevice9Impl *device,
+HRESULT volumetexture_init(struct d3d9_texture *texture, IDirect3DDevice9Impl *device,
         UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
+struct d3d9_texture *unsafe_impl_from_IDirect3DBaseTexture9(IDirect3DBaseTexture9 *iface) DECLSPEC_HIDDEN;
 
 /* ----------------------- */
 /* IDirect3DStateBlock9 */

@@ -340,6 +340,30 @@ static void transform_and_round_points(GpGraphics *graphics, POINT *pti,
     }
 }
 
+static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_width, INT dst_height,
+                            HDC hdc, INT src_x, INT src_y, INT src_width, INT src_height)
+{
+    if (GetDeviceCaps(graphics->hdc, SHADEBLENDCAPS) == SB_NONE)
+    {
+        TRACE("alpha blending not supported by device, fallback to StretchBlt\n");
+
+        StretchBlt(graphics->hdc, dst_x, dst_y, dst_width, dst_height,
+                   hdc, src_x, src_y, src_width, src_height, SRCCOPY);
+    }
+    else
+    {
+        BLENDFUNCTION bf;
+
+        bf.BlendOp = AC_SRC_OVER;
+        bf.BlendFlags = 0;
+        bf.SourceConstantAlpha = 255;
+        bf.AlphaFormat = AC_SRC_ALPHA;
+
+        GdiAlphaBlend(graphics->hdc, dst_x, dst_y, dst_width, dst_height,
+                      hdc, src_x, src_y, src_width, src_height, bf);
+    }
+}
+
 /* Draw non-premultiplied ARGB data to the given graphics object */
 static GpStatus alpha_blend_pixels(GpGraphics *graphics, INT dst_x, INT dst_y,
     const BYTE *src, INT src_width, INT src_height, INT src_stride)
@@ -370,10 +394,9 @@ static GpStatus alpha_blend_pixels(GpGraphics *graphics, INT dst_x, INT dst_y,
     else
     {
         HDC hdc;
-        HBITMAP hbitmap, old_hbm=NULL;
+        HBITMAP hbitmap;
         BITMAPINFOHEADER bih;
         BYTE *temp_bits;
-        BLENDFUNCTION bf;
 
         hdc = CreateCompatibleDC(0);
 
@@ -395,17 +418,9 @@ static GpStatus alpha_blend_pixels(GpGraphics *graphics, INT dst_x, INT dst_y,
         convert_32bppARGB_to_32bppPARGB(src_width, src_height, temp_bits,
             4 * src_width, src, src_stride);
 
-        old_hbm = SelectObject(hdc, hbitmap);
-
-        bf.BlendOp = AC_SRC_OVER;
-        bf.BlendFlags = 0;
-        bf.SourceConstantAlpha = 255;
-        bf.AlphaFormat = AC_SRC_ALPHA;
-
-        GdiAlphaBlend(graphics->hdc, dst_x, dst_y, src_width, src_height,
-            hdc, 0, 0, src_width, src_height, bf);
-
-        SelectObject(hdc, old_hbm);
+        SelectObject(hdc, hbitmap);
+        gdi_alpha_blend(graphics, dst_x, dst_y, src_width, src_height,
+                        hdc, 0, 0, src_width, src_height);
         DeleteDC(hdc);
         DeleteObject(hbitmap);
 
@@ -918,19 +933,12 @@ static void brush_fill_path(GpGraphics *graphics, GpBrush* brush)
             if (GetClipBox(graphics->hdc, &rc) != NULLREGION)
             {
                 HDC hdc = CreateCompatibleDC(NULL);
-                BLENDFUNCTION bf;
 
                 if (!hdc) break;
 
                 SelectObject(hdc, bmp);
-
-                bf.BlendOp = AC_SRC_OVER;
-                bf.BlendFlags = 0;
-                bf.SourceConstantAlpha = 255;
-                bf.AlphaFormat = AC_SRC_ALPHA;
-
-                GdiAlphaBlend(graphics->hdc, rc.left, rc.top, rc.right-rc.left, rc.bottom-rc.top, hdc, 0, 0, 1, 1, bf);
-
+                gdi_alpha_blend(graphics, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top,
+                                hdc, 0, 0, 1, 1);
                 DeleteDC(hdc);
             }
 
@@ -1968,6 +1976,7 @@ typedef struct _GraphicsContainerItem {
     UINT textcontrast;
     GpMatrix* worldtrans;
     GpRegion* clip;
+    INT origin_x, origin_y;
 } GraphicsContainerItem;
 
 static GpStatus init_container(GraphicsContainerItem** container,
@@ -1989,6 +1998,8 @@ static GpStatus init_container(GraphicsContainerItem** container,
     (*container)->unit = graphics->unit;
     (*container)->textcontrast = graphics->textcontrast;
     (*container)->pixeloffset = graphics->pixeloffset;
+    (*container)->origin_x = graphics->origin_x;
+    (*container)->origin_y = graphics->origin_y;
 
     sts = GdipCloneMatrix(graphics->worldtrans, &(*container)->worldtrans);
     if(sts != Ok){
@@ -2047,6 +2058,8 @@ static GpStatus restore_container(GpGraphics* graphics,
     graphics->unit = container->unit;
     graphics->textcontrast = container->textcontrast;
     graphics->pixeloffset = container->pixeloffset;
+    graphics->origin_x = container->origin_x;
+    graphics->origin_y = container->origin_y;
 
     return Ok;
 }
@@ -3288,15 +3301,8 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 
             if (bitmap->format & (PixelFormatAlpha|PixelFormatPAlpha))
             {
-                BLENDFUNCTION bf;
-
-                bf.BlendOp = AC_SRC_OVER;
-                bf.BlendFlags = 0;
-                bf.SourceConstantAlpha = 255;
-                bf.AlphaFormat = AC_SRC_ALPHA;
-
-                GdiAlphaBlend(graphics->hdc, pti[0].x, pti[0].y, pti[1].x-pti[0].x, pti[2].y-pti[0].y,
-                    hdc, srcx, srcy, srcwidth, srcheight, bf);
+                gdi_alpha_blend(graphics, pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
+                                hdc, srcx, srcy, srcwidth, srcheight);
             }
             else
             {
@@ -5498,23 +5504,28 @@ GpStatus WINGDIPAPI GdipSetRenderingOrigin(GpGraphics *graphics, INT x, INT y)
     TRACE("(%p,%i,%i)\n", graphics, x, y);
 
     if (!(calls++))
-        FIXME("not implemented\n");
+        FIXME("value is unused in rendering\n");
 
-    return NotImplemented;
+    if (!graphics)
+        return InvalidParameter;
+
+    graphics->origin_x = x;
+    graphics->origin_y = y;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipGetRenderingOrigin(GpGraphics *graphics, INT *x, INT *y)
 {
-    static int calls;
-
     TRACE("(%p,%p,%p)\n", graphics, x, y);
 
-    if (!(calls++))
-        FIXME("not implemented\n");
+    if (!graphics || !x || !y)
+        return InvalidParameter;
 
-    *x = *y = 0;
+    *x = graphics->origin_x;
+    *y = graphics->origin_y;
 
-    return NotImplemented;
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetSmoothingMode(GpGraphics *graphics, SmoothingMode mode)

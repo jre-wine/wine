@@ -3550,10 +3550,22 @@ msgid "URI to be decoded is incorrect"
 msgstr "URI a decodificar es incorrecta"
 
 #: jscript.rc:57
+#, fuzzy
+#| msgid "Enumeration value out of range.\n"
+msgid "Number of fraction digits is out of range"
+msgstr "Valor de la enumeración fuera de rango.\n"
+
+#: jscript.rc:58
+#, fuzzy
+#| msgid "Subscript out of range"
+msgid "Precision is out of range"
+msgstr "Subíndice fuera de rango"
+
+#: jscript.rc:59
 msgid "Array length must be a finite positive integer"
 msgstr "La longitud del array debe ser un entero positivo finito"
 
-#: jscript.rc:58
+#: jscript.rc:60
 msgid "Array object expected"
 msgstr "Objeto array esperado"
 
@@ -9587,6 +9599,7 @@ msgstr ""
 "un subdirectorio.\n"
 
 #: cmd.rc:160
+#, fuzzy
 msgid "RMDIR <dir> deletes a subdirectory.\n"
 msgstr ""
 "RMDIR <directorio> es la versión corta de RMDIR. Este comando borra un "

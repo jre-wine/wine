@@ -99,7 +99,7 @@ static inline BOOL is_uri_unescaped(WCHAR c)
     return c < 128 && uri_char_table[c] == 2;
 }
 
-/* Check that the character is one of the 69 nonblank characters as defined by ECMA-262 B.2.1 */
+/* Check that the character is one of the 69 non-blank characters as defined by ECMA-262 B.2.1 */
 static inline BOOL is_ecma_nonblank(const WCHAR c)
 {
     return ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
@@ -377,7 +377,7 @@ static HRESULT JSGlobal_eval(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
         return throw_syntax_error(ctx, ei, hres, NULL);
     }
 
-    hres = exec_source(ctx->exec_ctx, code, code->parser->source, TRUE, ei, retv);
+    hres = exec_source(ctx->exec_ctx, code, &code->global_code, TRUE, ei, retv);
 
     release_bytecode(code);
     return hres;
@@ -621,7 +621,9 @@ static HRESULT JSGlobal_parseFloat(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
     }
 
     V_VT(retv) = VT_R8;
-    V_R8(retv) = (double)(positive?d:-d)*pow(10, exp);
+    if(!positive)
+        d = -d;
+    V_R8(retv) = (exp>0 ? d*pow(10, exp) : d/pow(10, -exp));
     return S_OK;
 }
 

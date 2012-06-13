@@ -151,7 +151,7 @@ static void test_renderfile(void)
     if (FAILED(hr)) goto error;
 
     hr = IDirectDrawMediaStream_CreateSample(pddstream, NULL, NULL, 0, &pddsample);
-    todo_wine ok(hr==S_OK, "IDirectDrawMediaStream_CreateSample returned: %x\n", hr);
+    ok(hr == S_OK, "IDirectDrawMediaStream_CreateSample returned: %x\n", hr);
 
 error:
     if (pddsample)
@@ -249,7 +249,7 @@ static void test_media_streams(void)
         if (SUCCEEDED(hr))
         {
             hr = IDirectDrawMediaStream_CreateSample(ddraw_stream, NULL, NULL, 0, &ddraw_sample);
-            todo_wine ok(hr==S_OK, "IDirectDrawMediaStream_CreateSample returned: %x\n", hr);
+            ok(hr == S_OK, "IDirectDrawMediaStream_CreateSample returned: %x\n", hr);
         }
 
         if (ddraw_sample)
@@ -325,10 +325,10 @@ static void test_media_streams(void)
             IAMMediaStream_Release(am_media_stream);
 
         hr = IMediaStream_QueryInterface(audio_stream, &IID_IDirectDrawMediaStream, (LPVOID*)&ddraw_stream);
-        todo_wine ok(hr == E_NOINTERFACE, "IMediaStream_QueryInterface returned: %x\n", hr);
+        ok(hr == E_NOINTERFACE, "IMediaStream_QueryInterface returned: %x\n", hr);
 
         hr = IMediaStream_QueryInterface(audio_stream, &IID_IAudioMediaStream, (LPVOID*)&audio_media_stream);
-        todo_wine ok(hr == S_OK, "IMediaStream_QueryInterface returned: %x\n", hr);
+        ok(hr == S_OK, "IMediaStream_QueryInterface returned: %x\n", hr);
 
         if (SUCCEEDED(hr))
         {
@@ -337,9 +337,9 @@ static void test_media_streams(void)
             ok(hr == S_OK, "CoCreateInstance returned: %x\n", hr);
 
             hr = IAudioMediaStream_CreateSample(audio_media_stream, NULL, 0, &audio_sample);
-            todo_wine ok(hr == E_POINTER, "IAudioMediaStream_CreateSample returned: %x\n", hr);
+            ok(hr == E_POINTER, "IAudioMediaStream_CreateSample returned: %x\n", hr);
             hr = IAudioMediaStream_CreateSample(audio_media_stream, audio_data, 0, &audio_sample);
-            todo_wine ok(hr == S_OK, "IAudioMediaStream_CreateSample returned: %x\n", hr);
+            ok(hr == S_OK, "IAudioMediaStream_CreateSample returned: %x\n", hr);
 
             if (audio_data)
                 IAudioData_Release(audio_data);

@@ -27,7 +27,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 /*
  * This IID is used to get jsdisp_t objecto from interface.
- * We might consider using private insteface instead.
+ * We might consider using private interface instead.
  */
 static const IID IID_IDispatchJS =
         {0x719c3050,0xf9d3,0x11cf,{0xa4,0x93,0x00,0x40,0x05,0x23,0xa8,0xa6}};
@@ -1030,6 +1030,11 @@ HRESULT disp_call(script_ctx_t *ctx, IDispatch *disp, DISPID id, WORD flags, DIS
 
     jsdisp = iface_to_jsdisp((IUnknown*)disp);
     if(jsdisp) {
+        if(flags & DISPATCH_PROPERTYPUT) {
+            FIXME("disp_call(propput) on builtin object\n");
+            return E_FAIL;
+        }
+
         hres = jsdisp_call(jsdisp, id, flags, dp, retv, ei);
         jsdisp_release(jsdisp);
         return hres;

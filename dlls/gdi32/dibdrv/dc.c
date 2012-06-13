@@ -298,6 +298,24 @@ int get_clipped_rects( const dib_info *dib, const RECT *rc, HRGN clip, struct cl
     return clip_rects->count;
 }
 
+void add_clipped_bounds( dibdrv_physdev *dev, const RECT *rect, HRGN clip )
+{
+    const WINEREGION *region;
+    RECT rc;
+
+    if (!dev->bounds) return;
+    if (clip)
+    {
+        if (!(region = get_wine_region( clip ))) return;
+        if (!rect) rc = region->extents;
+        else intersect_rect( &rc, rect, &region->extents );
+        release_wine_region( clip );
+    }
+    else rc = *rect;
+
+    add_bounds_rect( dev->bounds, &rc );
+}
+
 /**********************************************************************
  *	     dibdrv_CreateDC
  */
@@ -376,6 +394,18 @@ static void dibdrv_SetDeviceClipping( PHYSDEV dev, HRGN rgn )
     TRACE("(%p, %p)\n", dev, rgn);
 
     pdev->clip = rgn;
+}
+
+/***********************************************************************
+ *           dibdrv_SetBoundsRect
+ */
+static UINT dibdrv_SetBoundsRect( PHYSDEV dev, RECT *rect, UINT flags )
+{
+    dibdrv_physdev *pdev = get_dibdrv_pdev( dev );
+
+    if (flags & DCB_DISABLE) pdev->bounds = NULL;
+    else if (flags & DCB_ENABLE) pdev->bounds = rect;
+    return DCB_RESET;  /* we don't have device-specific bounds */
 }
 
 /***********************************************************************
@@ -599,6 +629,7 @@ const struct gdi_dc_funcs dib_driver =
     NULL,                               /* pFrameRgn */
     NULL,                               /* pGdiComment */
     NULL,                               /* pGdiRealizationInfo */
+    NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
     NULL,                               /* pGetCharWidth */
@@ -660,6 +691,7 @@ const struct gdi_dc_funcs dib_driver =
     NULL,                               /* pSetArcDirection */
     NULL,                               /* pSetBkColor */
     NULL,                               /* pSetBkMode */
+    dibdrv_SetBoundsRect,               /* pSetBoundsRect */
     dibdrv_SetDCBrushColor,             /* pSetDCBrushColor */
     dibdrv_SetDCPenColor,               /* pSetDCPenColor */
     NULL,                               /* pSetDIBitsToDevice */

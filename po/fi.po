@@ -3526,10 +3526,18 @@ msgid "URI to be decoded is incorrect"
 msgstr "Dekoodattava URI on virheellinen"
 
 #: jscript.rc:57
+msgid "Number of fraction digits is out of range"
+msgstr "Desimaalien määrä ei kelpaa"
+
+#: jscript.rc:58
+msgid "Precision is out of range"
+msgstr "Tarkkuus ei kelpaa"
+
+#: jscript.rc:59
 msgid "Array length must be a finite positive integer"
 msgstr "Taulukon pituuden täytyy olla positiivinen kokonaisluku"
 
-#: jscript.rc:58
+#: jscript.rc:60
 msgid "Array object expected"
 msgstr "Odotettiin taulukkoa"
 

@@ -403,11 +403,22 @@ RECT WINAPI BaseWindowImpl_GetDefaultRect(BaseWindow *This);
 LRESULT WINAPI BaseWindowImpl_OnReceiveMessage(BaseWindow *This, HWND hwnd, INT uMsg, WPARAM wParam, LPARAM lParam);
 BOOL WINAPI BaseWindowImpl_OnSize(BaseWindow *This, LONG Height, LONG Width);
 
+typedef struct{
+    ITypeInfo *pTypeInfo;
+} BaseDispatch;
+
+HRESULT WINAPI BaseDispatch_Init(BaseDispatch *This, REFIID riid);
+HRESULT WINAPI BaseDispatch_Destroy(BaseDispatch *This);
+HRESULT WINAPI BaseDispatchImpl_GetIDsOfNames(BaseDispatch *This, REFIID riid, OLECHAR **rgszNames, UINT cNames, LCID lcid, DISPID *rgdispid);
+HRESULT WINAPI BaseDispatchImpl_GetTypeInfo(BaseDispatch *This, REFIID riid, UINT itinfo, LCID lcid, ITypeInfo **pptinfo);
+HRESULT WINAPI BaseDispatchImpl_GetTypeInfoCount(BaseDispatch *This, UINT *pctinfo);
+
 #ifdef __IVideoWindow_FWD_DEFINED__
 typedef struct tagBaseControlWindow
 {
 	BaseWindow baseWindow;
 	IVideoWindow IVideoWindow_iface;
+	BaseDispatch baseDispatch;
 
 	BOOL AutoShow;
 	HWND hwndDrain;
@@ -418,6 +429,7 @@ typedef struct tagBaseControlWindow
 } BaseControlWindow;
 
 HRESULT WINAPI BaseControlWindow_Init(BaseControlWindow *pControlWindow, const IVideoWindowVtbl *lpVtbl, BaseFilter *owner, CRITICAL_SECTION *lock, BasePin* pPin, const BaseWindowFuncTable* pFuncsTable);
+HRESULT WINAPI BaseControlWindow_Destroy(BaseControlWindow *pControlWindow);
 
 BOOL WINAPI BaseControlWindowImpl_PossiblyEatMessage(BaseWindow *This, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HRESULT WINAPI BaseControlWindowImpl_GetTypeInfoCount(IVideoWindow *iface, UINT*pctinfo);
@@ -471,6 +483,7 @@ HRESULT WINAPI BaseControlWindowImpl_IsCursorHidden(IVideoWindow *iface, LONG *C
 typedef struct tagBaseControlVideo
 {
 	IBasicVideo IBasicVideo_iface;
+	BaseDispatch baseDispatch;
 
 	BaseFilter* pFilter;
 	CRITICAL_SECTION* pInterfaceLock;
@@ -505,6 +518,7 @@ typedef struct BaseControlVideoFuncTable {
 } BaseControlVideoFuncTable;
 
 HRESULT WINAPI BaseControlVideo_Init(BaseControlVideo *pControlVideo, const IBasicVideoVtbl *lpVtbl, BaseFilter *owner, CRITICAL_SECTION *lock, BasePin* pPin, const BaseControlVideoFuncTable* pFuncsTable);
+HRESULT WINAPI BaseControlVideo_Destroy(BaseControlVideo *pControlVideo);
 
 HRESULT WINAPI BaseControlVideoImpl_GetTypeInfoCount(IBasicVideo *iface, UINT*pctinfo);
 HRESULT WINAPI BaseControlVideoImpl_GetTypeInfo(IBasicVideo *iface, UINT iTInfo, LCID lcid, ITypeInfo**ppTInfo);

@@ -469,11 +469,20 @@ static BOOL add_printer_driver(WCHAR *name)
 }
 
 #ifdef SONAME_LIBCUPS
-static typeof(cupsFreeDests) *pcupsFreeDests;
-static typeof(cupsGetDests)  *pcupsGetDests;
-static typeof(cupsGetPPD)    *pcupsGetPPD;
-static typeof(cupsPrintFile) *pcupsPrintFile;
+
 static void *cupshandle;
+
+#define CUPS_FUNCS \
+    DO_FUNC(cupsFreeDests); \
+    DO_FUNC(cupsFreeOptions); \
+    DO_FUNC(cupsGetDests); \
+    DO_FUNC(cupsGetPPD); \
+    DO_FUNC(cupsParseOptions); \
+    DO_FUNC(cupsPrintFile);
+
+#define DO_FUNC(f) static typeof(f) *p##f
+CUPS_FUNCS;
+#undef DO_FUNC
 
 static BOOL CUPS_LoadPrinters(void)
 {
@@ -485,6 +494,7 @@ static BOOL CUPS_LoadPrinters(void)
     HKEY hkeyPrinter, hkeyPrinters;
     char    loaderror[256];
     WCHAR   nameW[MAX_PATH];
+    HANDLE  added_printer;
 
     cupshandle = wine_dlopen(SONAME_LIBCUPS, RTLD_NOW, loaderror, sizeof(loaderror));
     if (!cupshandle) {
@@ -493,15 +503,9 @@ static BOOL CUPS_LoadPrinters(void)
     }
     TRACE("%p: %s loaded\n", cupshandle, SONAME_LIBCUPS);
 
-#define DYNCUPS(x) 					\
-    	p##x = wine_dlsym(cupshandle, #x, NULL,0);	\
-	if (!p##x) return FALSE;
-
-    DYNCUPS(cupsFreeDests);
-    DYNCUPS(cupsGetPPD);
-    DYNCUPS(cupsGetDests);
-    DYNCUPS(cupsPrintFile);
-#undef DYNCUPS
+#define DO_FUNC(x) p##x = wine_dlsym( cupshandle, #x, NULL, 0 ); if (!p##x) return FALSE;
+    CUPS_FUNCS;
+#undef DO_FUNC
 
     if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) !=
        ERROR_SUCCESS) {
@@ -545,10 +549,10 @@ static BOOL CUPS_LoadPrinters(void)
             pi2.pShareName      = emptyStringW;
             pi2.pSepFile        = emptyStringW;
 
-            if (!AddPrinterW(NULL, 2, (LPBYTE)&pi2)) {
-                if (GetLastError() != ERROR_PRINTER_ALREADY_EXISTS)
-                    ERR("printer '%s' not added by AddPrinter (error %d)\n", debugstr_w(nameW), GetLastError());
-            }
+            added_printer = AddPrinterW( NULL, 2, (LPBYTE)&pi2 );
+            if (added_printer) ClosePrinter( added_printer );
+            else if (GetLastError() != ERROR_PRINTER_ALREADY_EXISTS)
+                ERR( "printer '%s' not added by AddPrinter (error %d)\n", debugstr_w(nameW), GetLastError() );
         }
 	HeapFree(GetProcessHeap(),0,port);
 
@@ -564,12 +568,12 @@ static BOOL CUPS_LoadPrinters(void)
     }
     pcupsFreeDests(nrofdests, dests);
     RegCloseKey(hkeyPrinters);
-    return hadprinter;
+    return TRUE;
 }
 #endif
 
-static BOOL
-PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
+static BOOL PRINTCAP_ParseEntry( const char *pent, BOOL isfirst )
+{
     PRINTER_INFO_2A	pinfo2a;
     const char	*r;
     size_t		name_len;
@@ -578,6 +582,7 @@ PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
     char *port = NULL, *env_default;
     HKEY hkeyPrinter, hkeyPrinters;
     WCHAR devnameW[MAX_PATH];
+    HANDLE added_printer;
 
     while (isspace(*pent)) pent++;
     r = strchr(pent,':');
@@ -675,10 +680,10 @@ PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
         pinfo2a.pShareName      = share_name;
         pinfo2a.pSepFile        = sep_file;
 
-        if (!AddPrinterA(NULL,2,(LPBYTE)&pinfo2a)) {
-            if (GetLastError()!=ERROR_PRINTER_ALREADY_EXISTS)
-                ERR("%s not added by AddPrinterA (%d)\n",name,GetLastError());
-        }
+        added_printer = AddPrinterA( NULL, 2, (LPBYTE)&pinfo2a );
+        if (added_printer) ClosePrinter( added_printer );
+        else if (GetLastError() != ERROR_PRINTER_ALREADY_EXISTS)
+            ERR( "printer '%s' not added by AddPrinter (error %d)\n", debugstr_a(name), GetLastError() );
     }
     RegCloseKey(hkeyPrinters);
 
@@ -992,6 +997,21 @@ static LPCWSTR get_opened_printer_name(HANDLE hprn)
     return printer->name;
 }
 
+static DWORD open_printer_reg_key( const WCHAR *name, HKEY *key )
+{
+    HKEY printers;
+    DWORD err;
+
+    *key = NULL;
+    err = RegCreateKeyW( HKEY_LOCAL_MACHINE, PrintersW, &printers );
+    if (err) return err;
+
+    err = RegOpenKeyW( printers, name, key );
+    if (err) err = ERROR_INVALID_PRINTER_NAME;
+    RegCloseKey( printers );
+    return err;
+}
+
 /******************************************************************
  *  WINSPOOL_GetOpenedPrinterRegKey
  *
@@ -999,30 +1019,61 @@ static LPCWSTR get_opened_printer_name(HANDLE hprn)
 static DWORD WINSPOOL_GetOpenedPrinterRegKey(HANDLE hPrinter, HKEY *phkey)
 {
     LPCWSTR name = get_opened_printer_name(hPrinter);
-    DWORD ret;
-    HKEY hkeyPrinters;
 
     if(!name) return ERROR_INVALID_HANDLE;
+    return open_printer_reg_key( name, phkey );
+}
 
-    if((ret = RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters)) !=
-       ERROR_SUCCESS)
-        return ret;
+static void old_printer_check( BOOL delete_phase )
+{
+    PRINTER_INFO_5W* pi;
+    DWORD needed, type, num, delete, i, size;
+    const DWORD one = 1;
+    HKEY key;
+    HANDLE hprn;
 
-    if(RegOpenKeyW(hkeyPrinters, name, phkey) != ERROR_SUCCESS)
+    EnumPrintersW( PRINTER_ENUM_LOCAL, NULL, 5, NULL, 0, &needed, &num );
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) return;
+
+    pi = HeapAlloc( GetProcessHeap(), 0, needed );
+    EnumPrintersW( PRINTER_ENUM_LOCAL, NULL, 5, (LPBYTE)pi, needed, &needed, &num );
+    for (i = 0; i < num; i++)
     {
-        ERR("Can't find opened printer %s in registry\n",
-            debugstr_w(name));
-        RegCloseKey(hkeyPrinters);
-        return ERROR_INVALID_PRINTER_NAME; /* ? */
+        if (strncmpW( pi[i].pPortName, CUPS_Port, strlenW(CUPS_Port) ) &&
+            strncmpW( pi[i].pPortName, LPR_Port, strlenW(LPR_Port) ))
+            continue;
+
+        if (open_printer_reg_key( pi[i].pPrinterName, &key )) continue;
+
+        if (!delete_phase)
+        {
+            RegSetValueExW( key, May_Delete_Value, 0, REG_DWORD, (LPBYTE)&one, sizeof(one) );
+            RegCloseKey( key );
+        }
+        else
+        {
+            delete = 0;
+            size = sizeof( delete );
+            RegQueryValueExW( key, May_Delete_Value, NULL, &type, (LPBYTE)&delete, &size );
+            RegCloseKey( key );
+            if (delete)
+            {
+                TRACE( "Deleting old printer %s\n", debugstr_w(pi[i].pPrinterName) );
+                if (OpenPrinterW( pi[i].pPrinterName, &hprn, NULL ))
+                {
+                    DeletePrinter( hprn );
+                    ClosePrinter( hprn );
+                }
+                DeletePrinterDriverExW( NULL, NULL, pi[i].pPrinterName, 0, 0 );
+            }
+        }
     }
-    RegCloseKey(hkeyPrinters);
-    return ERROR_SUCCESS;
+    HeapFree(GetProcessHeap(), 0, pi);
 }
 
 void WINSPOOL_LoadSystemPrinters(void)
 {
     HKEY                hkey, hkeyPrinters;
-    HANDLE              hprn;
     DWORD               needed, num, i;
     WCHAR               PrinterName[256];
     BOOL                done = FALSE;
@@ -1031,7 +1082,7 @@ void WINSPOOL_LoadSystemPrinters(void)
        problems later if they don't.  If one is found to be missed we create one
        and set it equal to the name of the key */
     if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) == ERROR_SUCCESS) {
-        if(RegQueryInfoKeyA(hkeyPrinters, NULL, NULL, NULL, &num, NULL, NULL,
+        if(RegQueryInfoKeyW(hkeyPrinters, NULL, NULL, NULL, &num, NULL, NULL,
                             NULL, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
             for(i = 0; i < num; i++) {
                 if(RegEnumKeyW(hkeyPrinters, i, PrinterName, sizeof(PrinterName)/sizeof(PrinterName[0])) == ERROR_SUCCESS) {
@@ -1047,31 +1098,7 @@ void WINSPOOL_LoadSystemPrinters(void)
         RegCloseKey(hkeyPrinters);
     }
 
-    /* We want to avoid calling AddPrinter on printers as much as
-       possible, because on cups printers this will (eventually) lead
-       to a call to cupsGetPPD which takes forever, even with non-cups
-       printers AddPrinter takes a while.  So we'll tag all printers that
-       were automatically added last time around, if they still exist
-       we'll leave them be otherwise we'll delete them. */
-    if (EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 5, NULL, 0, &needed, &num) && needed) {
-        PRINTER_INFO_5A* pi = HeapAlloc(GetProcessHeap(), 0, needed);
-        if(EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 5, (LPBYTE)pi, needed, &needed, &num)) {
-            for(i = 0; i < num; i++) {
-                if(pi[i].pPortName == NULL || !strncmp(pi[i].pPortName,"CUPS:", 5) || !strncmp(pi[i].pPortName, "LPR:", 4)) {
-                    if(OpenPrinterA(pi[i].pPrinterName, &hprn, NULL)) {
-                        if(WINSPOOL_GetOpenedPrinterRegKey(hprn, &hkey) == ERROR_SUCCESS) {
-                            DWORD dw = 1;
-                            RegSetValueExW(hkey, May_Delete_Value, 0, REG_DWORD, (LPBYTE)&dw, sizeof(dw));
-                            RegCloseKey(hkey);
-                        }
-                        ClosePrinter(hprn);
-                    }
-                }
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, pi);
-    }
-
+    old_printer_check( FALSE );
 
 #ifdef SONAME_LIBCUPS
     done = CUPS_LoadPrinters();
@@ -1080,36 +1107,9 @@ void WINSPOOL_LoadSystemPrinters(void)
     if(!done) /* If we have any CUPS based printers, skip looking for printcap printers */
         PRINTCAP_LoadPrinters();
 
-    /* Now enumerate the list again and delete any printers that are still tagged */
-    EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 5, NULL, 0, &needed, &num);
-    if(needed) {
-        PRINTER_INFO_5A* pi = HeapAlloc(GetProcessHeap(), 0, needed);
-        if(EnumPrintersA(PRINTER_ENUM_LOCAL, NULL, 5, (LPBYTE)pi, needed, &needed, &num)) {
-            for(i = 0; i < num; i++) {
-                if(pi[i].pPortName == NULL || !strncmp(pi[i].pPortName,"CUPS:", 5) || !strncmp(pi[i].pPortName, "LPR:", 4)) {
-                    if(OpenPrinterA(pi[i].pPrinterName, &hprn, NULL)) {
-                        BOOL delete_driver = FALSE;
-                        if(WINSPOOL_GetOpenedPrinterRegKey(hprn, &hkey) == ERROR_SUCCESS) {
-                            DWORD dw, type, size = sizeof(dw);
-                            if(RegQueryValueExW(hkey, May_Delete_Value, NULL, &type, (LPBYTE)&dw, &size) == ERROR_SUCCESS) {
-                                TRACE("Deleting old printer %s\n", pi[i].pPrinterName);
-                                DeletePrinter(hprn);
-                                delete_driver = TRUE;
-                            }
-                            RegCloseKey(hkey);
-                        }
-                        ClosePrinter(hprn);
-                        if(delete_driver)
-                            DeletePrinterDriverExA(NULL, NULL, pi[i].pPrinterName, 0, 0);
-                    }
-                }
-            }
-        }
-        HeapFree(GetProcessHeap(), 0, pi);
-    }
+    old_printer_check( TRUE );
 
     return;
-
 }
 
 /******************************************************************
@@ -2814,6 +2814,8 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
 {
     LPCWSTR lpNameW = get_opened_printer_name(hPrinter);
     HKEY hkeyPrinters, hkey;
+    WCHAR def[MAX_PATH];
+    DWORD size = sizeof( def ) / sizeof( def[0] );
 
     if(!lpNameW) {
         SetLastError(ERROR_INVALID_HANDLE);
@@ -2835,6 +2837,18 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
         RegDeleteValueW(hkey, lpNameW);
         RegCloseKey(hkey);
     }
+
+    if (GetDefaultPrinterW( def, &size ) && !strcmpW( def, lpNameW ))
+    {
+        WriteProfileStringW( windowsW, deviceW, NULL );
+        if (!RegCreateKeyW( HKEY_CURRENT_USER, user_default_reg_key, &hkey ))
+        {
+            RegDeleteValueW( hkey, deviceW );
+            RegCloseKey( hkey );
+        }
+        SetDefaultPrinterW( NULL );
+    }
+
     return TRUE;
 }
 
@@ -3869,30 +3883,18 @@ static BOOL WINSPOOL_GetPrinter_9(HKEY hkeyPrinter, PRINTER_INFO_9W *pi9, LPBYTE
 BOOL WINAPI GetPrinterW(HANDLE hPrinter, DWORD Level, LPBYTE pPrinter,
 			DWORD cbBuf, LPDWORD pcbNeeded)
 {
-    LPCWSTR name;
-    DWORD size, needed = 0;
+    DWORD size, needed = 0, err;
     LPBYTE ptr = NULL;
-    HKEY hkeyPrinter, hkeyPrinters;
+    HKEY hkeyPrinter;
     BOOL ret;
 
     TRACE("(%p,%d,%p,%d,%p)\n",hPrinter,Level,pPrinter,cbBuf, pcbNeeded);
 
-    if (!(name = get_opened_printer_name(hPrinter))) {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
-
-    if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) !=
-       ERROR_SUCCESS) {
-        ERR("Can't create Printers key\n");
-	return FALSE;
-    }
-    if(RegOpenKeyW(hkeyPrinters, name, &hkeyPrinter) != ERROR_SUCCESS)
+    err = WINSPOOL_GetOpenedPrinterRegKey( hPrinter, &hkeyPrinter );
+    if (err)
     {
-        ERR("Can't find opened printer %s in registry\n", debugstr_w(name));
-	RegCloseKey(hkeyPrinters);
-        SetLastError(ERROR_INVALID_PRINTER_NAME); /* ? */
-	return FALSE;
+        SetLastError( err );
+        return FALSE;
     }
 
     switch(Level) {
@@ -4013,13 +4015,11 @@ BOOL WINAPI GetPrinterW(HANDLE hPrinter, DWORD Level, LPBYTE pPrinter,
     default:
         FIXME("Unimplemented level %d\n", Level);
         SetLastError(ERROR_INVALID_LEVEL);
-	RegCloseKey(hkeyPrinters);
 	RegCloseKey(hkeyPrinter);
 	return FALSE;
     }
 
     RegCloseKey(hkeyPrinter);
-    RegCloseKey(hkeyPrinters);
 
     TRACE("returning %d needed = %d\n", ret, needed);
     if(pcbNeeded) *pcbNeeded = needed;
@@ -4556,7 +4556,7 @@ BOOL WINAPI GetPrinterDriverW(HANDLE hPrinter, LPWSTR pEnvironment,
     WCHAR DriverName[100];
     DWORD ret, type, size, needed = 0;
     LPBYTE ptr = NULL;
-    HKEY hkeyPrinter, hkeyPrinters, hkeyDrivers;
+    HKEY hkeyPrinter, hkeyDrivers;
     const printenv_t * env;
 
     TRACE("(%p,%s,%d,%p,%d,%p)\n",hPrinter,debugstr_w(pEnvironment),
@@ -4578,24 +4578,19 @@ BOOL WINAPI GetPrinterDriverW(HANDLE hPrinter, LPWSTR pEnvironment,
     env = validate_envW(pEnvironment);
     if (!env) return FALSE;     /* SetLastError() is in validate_envW */
 
-    if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) !=
-       ERROR_SUCCESS) {
-        ERR("Can't create Printers key\n");
-	return FALSE;
+    ret = open_printer_reg_key( name, &hkeyPrinter );
+    if (ret)
+    {
+        ERR( "Can't find opened printer %s in registry\n", debugstr_w(name) );
+        SetLastError( ret );
+        return FALSE;
     }
-    if(RegOpenKeyW(hkeyPrinters, name, &hkeyPrinter)
-       != ERROR_SUCCESS) {
-        ERR("Can't find opened printer %s in registry\n", debugstr_w(name));
-	RegCloseKey(hkeyPrinters);
-        SetLastError(ERROR_INVALID_PRINTER_NAME); /* ? */
-	return FALSE;
-    }
+
     size = sizeof(DriverName);
     DriverName[0] = 0;
     ret = RegQueryValueExW(hkeyPrinter, Printer_DriverW, 0, &type,
 			   (LPBYTE)DriverName, &size);
     RegCloseKey(hkeyPrinter);
-    RegCloseKey(hkeyPrinters);
     if(ret != ERROR_SUCCESS) {
         ERR("Can't get DriverName for printer %s\n", debugstr_w(name));
 	return FALSE;
@@ -7616,6 +7611,37 @@ static BOOL schedule_lpr(LPCWSTR printer_name, LPCWSTR filename)
     return r;
 }
 
+#ifdef SONAME_LIBCUPS
+/*****************************************************************************
+ *          get_cups_jobs_ticket_options
+ *
+ * Explicitly set CUPS options based on any %cupsJobTicket lines.
+ * The CUPS scheduler only looks for these in Print-File requests, and since
+ * cupsPrintFile uses Create-Job / Send-Document, the ticket lines don't get
+ * parsed.
+ */
+static int get_cups_job_ticket_options( const char *file, int num_options, cups_option_t **options )
+{
+    FILE *fp = fopen( file, "r" );
+    char buf[257]; /* DSC max of 256 + '\0' */
+    const char *ps_adobe = "%!PS-Adobe-";
+    const char *cups_job = "%cupsJobTicket:";
+
+    if (!fp) return num_options;
+    if (!fgets( buf, sizeof(buf), fp )) goto end;
+    if (strncmp( buf, ps_adobe, strlen( ps_adobe ) )) goto end;
+    while (fgets( buf, sizeof(buf), fp ))
+    {
+        if (strncmp( buf, cups_job, strlen( cups_job ) )) break;
+        num_options = pcupsParseOptions( buf + strlen( cups_job ), num_options, options );
+    }
+
+end:
+    fclose( fp );
+    return num_options;
+}
+#endif
+
 /*****************************************************************************
  *          schedule_cups
  */
@@ -7627,6 +7653,8 @@ static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR docume
         char *unixname, *queue, *unix_doc_title;
         DWORD len;
         BOOL ret;
+        int num_options = 0, i;
+        cups_option_t *options = NULL;
 
         if(!(unixname = wine_get_unix_file_name(filename)))
             return FALSE;
@@ -7639,8 +7667,16 @@ static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR docume
         unix_doc_title = HeapAlloc(GetProcessHeap(), 0, len);
         WideCharToMultiByte(CP_UNIXCP, 0, document_title, -1, unix_doc_title, len, NULL, NULL);
 
-        TRACE("printing via cups\n");
-        ret = pcupsPrintFile(queue, unixname, unix_doc_title, 0, NULL);
+        num_options = get_cups_job_ticket_options( unixname, num_options, &options );
+
+        TRACE( "printing via cups with options:\n" );
+        for (i = 0; i < num_options; i++)
+            TRACE( "\t%d: %s = %s\n", i, options[i].name, options[i].value );
+
+        ret = pcupsPrintFile( queue, unixname, unix_doc_title, num_options, options );
+
+        pcupsFreeOptions( num_options, options );
+
         HeapFree(GetProcessHeap(), 0, unix_doc_title);
         HeapFree(GetProcessHeap(), 0, queue);
         HeapFree(GetProcessHeap(), 0, unixname);

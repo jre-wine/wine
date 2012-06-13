@@ -20,6 +20,7 @@
 #include "wine/port.h"
 
 #include <math.h>
+#include <assert.h>
 
 #include "jscript.h"
 
@@ -41,6 +42,7 @@ static const WCHAR toPrecisionW[] = {'t','o','P','r','e','c','i','s','i','o','n'
 static const WCHAR valueOfW[] = {'v','a','l','u','e','O','f',0};
 
 #define NUMBER_TOSTRING_BUF_SIZE 64
+#define NUMBER_DTOA_SIZE 18
 
 static inline NumberInstance *number_from_vdisp(vdisp_t *vdisp)
 {
@@ -50,6 +52,169 @@ static inline NumberInstance *number_from_vdisp(vdisp_t *vdisp)
 static inline NumberInstance *number_this(vdisp_t *jsthis)
 {
     return is_vclass(jsthis, JSCLASS_NUMBER) ? number_from_vdisp(jsthis) : NULL;
+}
+
+static inline void dtoa(double d, WCHAR *buf, int size, int *dec_point)
+{
+    ULONGLONG l;
+    int i;
+
+    /* TODO: this function should print doubles with bigger precision */
+    assert(size>=2 && size<=NUMBER_DTOA_SIZE && d>=0);
+
+    if(d == 0)
+        *dec_point = 0;
+    else
+        *dec_point = floor(log10(d));
+    l = d*pow(10, size-*dec_point-1);
+
+    if(l%10 >= 5)
+        l = l/10+1;
+    else
+        l /= 10;
+
+    buf[size-1] = 0;
+    for(i=size-2; i>=0; i--) {
+        buf[i] = '0'+l%10;
+        l /= 10;
+    }
+
+    /* log10 was wrong by 1 or rounding changed number of digits */
+    if(l) {
+        (*dec_point)++;
+        memmove(buf+1, buf, size-2);
+        buf[0] = '0'+l;
+    }else if(buf[0]=='0' && buf[1]>='1' && buf[1]<='9') {
+        (*dec_point)--;
+        memmove(buf, buf+1, size-2);
+        buf[size-2] = '0';
+    }
+}
+
+static inline void number_to_fixed(double val, int prec, BSTR *out)
+{
+    WCHAR buf[NUMBER_DTOA_SIZE];
+    int dec_point, size, buf_size, buf_pos;
+    BOOL neg = FALSE;
+    BSTR str;
+
+    if(val < 0) {
+        neg = TRUE;
+        val = -val;
+    }
+
+    if(val<=-1 || val>=1)
+        buf_size = log10(val)+prec+2;
+    else
+        buf_size = prec+1;
+    if(buf_size > NUMBER_DTOA_SIZE)
+        buf_size = NUMBER_DTOA_SIZE;
+
+    dtoa(val, buf, buf_size, &dec_point);
+    dec_point++;
+    size = 0;
+    if(neg)
+        size++;
+    if(dec_point > 0)
+        size += dec_point;
+    else
+        size++;
+    if(prec)
+        size += prec+1;
+
+    str = SysAllocStringLen(NULL, size);
+    size = buf_pos = 0;
+    if(neg)
+        str[size++] = '-';
+    if(dec_point > 0) {
+        for(;buf_pos<buf_size-1 && dec_point; dec_point--)
+            str[size++] = buf[buf_pos++];
+    }else {
+        str[size++] = '0';
+    }
+    for(; dec_point>0; dec_point--)
+        str[size++] = '0';
+    if(prec) {
+        str[size++] = '.';
+
+        for(; dec_point<0 && prec; dec_point++, prec--)
+            str[size++] = '0';
+        for(; buf_pos<buf_size-1 && prec; prec--)
+            str[size++] = buf[buf_pos++];
+        for(; prec; prec--) {
+            str[size++] = '0';
+        }
+    }
+    str[size++] = 0;
+
+    *out = str;
+}
+
+static inline void number_to_exponential(double val, int prec, BSTR *out)
+{
+    WCHAR buf[NUMBER_DTOA_SIZE], *pbuf;
+    int dec_point, size, buf_size, exp_size = 1;
+    BOOL neg = FALSE;
+    BSTR str;
+
+    if(val < 0) {
+        neg = TRUE;
+        val = -val;
+    }
+
+    buf_size = prec+2;
+    if(buf_size<2 || buf_size>NUMBER_DTOA_SIZE)
+        buf_size = NUMBER_DTOA_SIZE;
+    dtoa(val, buf, buf_size, &dec_point);
+    buf_size--;
+    if(prec == -1)
+        for(; buf_size>1 && buf[buf_size-1]=='0'; buf_size--)
+            buf[buf_size-1] = 0;
+
+    size = 10;
+    while(dec_point>=size || dec_point<=-size) {
+        size *= 10;
+        exp_size++;
+    }
+
+    if(buf_size == 1)
+        size = buf_size+2+exp_size; /* 2 = strlen(e+) */
+    else if(prec == -1)
+        size = buf_size+3+exp_size; /* 3 = strlen(.e+) */
+    else
+        size = prec+4+exp_size; /* 4 = strlen(0.e+) */
+    if(neg)
+        size++;
+    str = SysAllocStringLen(NULL, size);
+
+    size = 0;
+    pbuf = buf;
+    if(neg)
+        str[size++] = '-';
+    str[size++] = *pbuf++;
+    if(buf_size != 1) {
+        str[size++] = '.';
+        while(*pbuf)
+            str[size++] = *pbuf++;
+        for(; prec>buf_size-1; prec--)
+            str[size++] = '0';
+    }
+    str[size++] = 'e';
+    if(dec_point >= 0) {
+        str[size++] = '+';
+    }else {
+        str[size++] = '-';
+        dec_point = -dec_point;
+    }
+    size += exp_size;
+    do {
+        str[--size] = '0'+dec_point%10;
+        dec_point /= 10;
+    }while(dec_point>0);
+    size += exp_size;
+    str[size] = 0;
+
+    *out = str;
 }
 
 /* ECMA-262 3rd Edition    15.7.4.2 */
@@ -188,22 +353,141 @@ static HRESULT Number_toLocaleString(script_ctx_t *ctx, vdisp_t *jsthis, WORD fl
 static HRESULT Number_toFixed(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    NumberInstance *number;
+    DOUBLE val;
+    INT prec = 0;
+    BSTR str;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!(number = number_this(jsthis)))
+        return throw_type_error(ctx, ei, JS_E_NUMBER_EXPECTED, NULL);
+
+    if(arg_cnt(dp)) {
+        hres = to_int32(ctx, get_arg(dp, 0), ei, &prec);
+        if(FAILED(hres))
+            return hres;
+
+        if(prec<0 || prec>20)
+            return throw_range_error(ctx, ei, JS_E_FRACTION_DIGITS_OUT_OF_RANGE, NULL);
+    }
+
+    val = number->value;
+    if(isinf(val) || isnan(val)) {
+        VARIANT v;
+
+        num_set_val(&v, val);
+        hres = to_string(ctx, &v, ei, &str);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        number_to_fixed(val, prec, &str);
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = str;
+    }else {
+        SysFreeString(str);
+    }
+    return S_OK;
 }
 
 static HRESULT Number_toExponential(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    NumberInstance *number;
+    DOUBLE val;
+    INT prec = 0;
+    BSTR str;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!(number = number_this(jsthis)))
+        return throw_type_error(ctx, ei, JS_E_NUMBER_EXPECTED, NULL);
+
+    if(arg_cnt(dp)) {
+        hres = to_int32(ctx, get_arg(dp, 0), ei, &prec);
+        if(FAILED(hres))
+            return hres;
+
+        if(prec<0 || prec>20)
+            return throw_range_error(ctx, ei, JS_E_FRACTION_DIGITS_OUT_OF_RANGE, NULL);
+    }
+
+    val = number->value;
+    if(isinf(val) || isnan(val)) {
+        VARIANT v;
+
+        num_set_val(&v, val);
+        hres = to_string(ctx, &v, ei, &str);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        if(!prec)
+            prec--;
+        number_to_exponential(val, prec, &str);
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = str;
+    }else {
+        SysFreeString(str);
+    }
+    return S_OK;
 }
 
 static HRESULT Number_toPrecision(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    NumberInstance *number;
+    INT prec = 0, size;
+    DOUBLE val;
+    BSTR str;
+    HRESULT hres;
+
+    if(!(number = number_this(jsthis)))
+        return throw_type_error(ctx, ei, JS_E_NUMBER_EXPECTED, NULL);
+
+    if(arg_cnt(dp)) {
+        hres = to_int32(ctx, get_arg(dp, 0), ei, &prec);
+        if(FAILED(hres))
+            return hres;
+
+        if(prec<1 || prec>21)
+            return throw_range_error(ctx, ei, JS_E_PRECISION_OUT_OF_RANGE, NULL);
+    }
+
+    val = number->value;
+    if(isinf(val) || isnan(val) || !prec) {
+        VARIANT v;
+
+        num_set_val(&v, val);
+        hres = to_string(ctx, &v, ei, &str);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        if(val != 0)
+            size = floor(log10(val>0 ? val : -val)) + 1;
+        else
+            size = 1;
+
+        if(size > prec)
+            number_to_exponential(val, prec-1, &str);
+        else
+            number_to_fixed(val, prec-size, &str);
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = str;
+    }else {
+        SysFreeString(str);
+    }
+    return S_OK;
 }
 
 static HRESULT Number_valueOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,

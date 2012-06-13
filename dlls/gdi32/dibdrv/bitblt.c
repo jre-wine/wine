@@ -964,6 +964,7 @@ DWORD dibdrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
             clip = tmp_rgn;
         }
         else if (!clip) clip = pdev->clip;
+        add_clipped_bounds( pdev, &dst->visrect, clip );
     }
 
     if (!get_clipped_rects( dib, &dst->visrect, clip, &clipped_rects ))
@@ -1020,6 +1021,7 @@ DWORD dibdrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct gdi_image_b
 
     init_dib_info_from_bitmapinfo( &src_dib, info, bits->ptr, 0 );
     src_dib.bits.is_copy = bits->is_copy;
+    add_clipped_bounds( pdev, &dst->visrect, pdev->clip );
     return blend_rect( &pdev->dib, &dst->visrect, &src_dib, &src->visrect, pdev->clip, blend );
 
 update_format:
@@ -1209,7 +1211,7 @@ DWORD stretch_bitmapinfo( const BITMAPINFO *src_info, void *src_bits, struct bit
             else
             {
                 last_row.top = dst_start.y - v_params.dst_inc;
-                last_row.bottom = dst_start.y;
+                last_row.bottom = last_row.top + 1;
                 this_row = last_row;
                 offset_rect( &this_row, 0, v_params.dst_inc );
                 copy_rect( &dst_dib, &this_row, &dst_dib, &last_row, NULL, R2_COPYPEN );
@@ -1405,6 +1407,7 @@ BOOL dibdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             /* Windows bug: no alpha on a8r8g8b8 created with bitfields */
             if (pdev->dib.funcs == &funcs_8888 && pdev->dib.compression == BI_BITFIELDS)
                 vert[0].Alpha = vert[1].Alpha = 0;
+            add_clipped_bounds( pdev, &bounds, pdev->clip );
             gradient_rect( &pdev->dib, vert, mode, pdev->clip, &bounds );
         }
         break;
@@ -1416,6 +1419,7 @@ BOOL dibdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             /* Windows bug: no alpha on a8r8g8b8 created with bitfields */
             if (pdev->dib.funcs == &funcs_8888 && pdev->dib.compression == BI_BITFIELDS)
                 vert[0].Alpha = vert[1].Alpha = 0;
+            add_clipped_bounds( pdev, &bounds, pdev->clip );
             gradient_rect( &pdev->dib, vert, mode, pdev->clip, &bounds );
         }
         break;
@@ -1427,6 +1431,7 @@ BOOL dibdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             /* Windows bug: no alpha on a8r8g8b8 created with bitfields */
             if (pdev->dib.funcs == &funcs_8888 && pdev->dib.compression == BI_BITFIELDS)
                 vert[0].Alpha = vert[1].Alpha = vert[2].Alpha = 0;
+            add_clipped_bounds( pdev, &bounds, pdev->clip );
             if (!gradient_rect( &pdev->dib, vert, mode, pdev->clip, &bounds )) ret = FALSE;
         }
         break;

@@ -368,7 +368,10 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_AddMediaStream(IAMMultiMediaStream
         }
     }
 
-    hr = mediastream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
+    if (IsEqualGUID(PurposeId, &MSPID_PrimaryVideo))
+        hr = ddrawmediastream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
+    else
+        hr = audiomediastream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
     if (SUCCEEDED(hr))
     {
         pNewStreams = CoTaskMemRealloc(This->pStreams, (This->nbStreams+1) * sizeof(IMediaStream*));

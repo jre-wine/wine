@@ -857,6 +857,7 @@ static const struct gdi_dc_funcs psdrv_funcs =
     NULL,                               /* pFrameRgn */
     NULL,                               /* pGdiComment */
     NULL,                               /* pGdiRealizationInfo */
+    NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
     PSDRV_GetCharWidth,                 /* pGetCharWidth */
@@ -918,6 +919,7 @@ static const struct gdi_dc_funcs psdrv_funcs =
     NULL,                               /* pSetArcDirection */
     PSDRV_SetBkColor,                   /* pSetBkColor */
     NULL,                               /* pSetBkMode */
+    NULL,                               /* pSetBoundsRect */
     PSDRV_SetDCBrushColor,              /* pSetDCBrushColor */
     PSDRV_SetDCPenColor,                /* pSetDCPenColor */
     NULL,                               /* pSetDIBitsToDevice */

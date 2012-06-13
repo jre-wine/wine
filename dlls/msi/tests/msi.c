@@ -1646,10 +1646,10 @@ static void test_MsiQueryComponentState(void)
     ok(state == INSTALLSTATE_SOURCE, "Expected INSTALLSTATE_SOURCE, got %d\n", state);
     ok(error == 0xdeadbeef, "expected 0xdeadbeef, got %u\n", error);
 
-    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01", 3);
+    res = RegSetValueExA(compkey, prod_squashed, 0, REG_SZ, (const BYTE *)"01:", 4);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
-    /* bad INSTALLSTATE_SOURCE */
+    /* registry component */
     state = MAGIC_ERROR;
     SetLastError(0xdeadbeef);
     r = pMsiQueryComponentStateA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE, component, &state);
@@ -11819,7 +11819,7 @@ static void test_MsiEnumProductsEx(void)
     char product0[39], product1[39], product2[39], product3[39], guid[39], sid[128];
     char product_squashed1[33], product_squashed2[33], product_squashed3[33];
     char keypath1[MAX_PATH], keypath2[MAX_PATH], keypath3[MAX_PATH];
-    HKEY key1, key2, key3;
+    HKEY key1 = NULL, key2 = NULL, key3 = NULL;
     REGSAM access = KEY_ALL_ACCESS;
     char *usersid = get_user_sid();
 
@@ -11837,8 +11837,7 @@ static void test_MsiEnumProductsEx(void)
     if (r == ERROR_ACCESS_DENIED)
     {
         skip( "insufficient rights\n" );
-        LocalFree( usersid );
-        return;
+        goto done;
     }
     ok( r == ERROR_SUCCESS, "got %u\n", r );
 
@@ -11882,6 +11881,13 @@ static void test_MsiEnumProductsEx(void)
     ok( len == sizeof(sid), "got %u\n", len );
     ok( !sid[0], "got %s\n", sid );
 
+    sid[0] = 0;
+    len = 0;
+    r = pMsiEnumProductsExA( NULL, usersid, MSIINSTALLCONTEXT_USERUNMANAGED, 0, NULL, NULL, sid, &len );
+    ok( r == ERROR_MORE_DATA, "got %u\n", r );
+    ok( len, "length unchanged\n" );
+    ok( !sid[0], "got %s\n", sid );
+
     guid[0] = 0;
     context = 0xdeadbeef;
     sid[0] = 0;
@@ -11912,8 +11918,7 @@ static void test_MsiEnumProductsEx(void)
     if (r == ERROR_ACCESS_DENIED)
     {
         skip( "insufficient rights\n" );
-        LocalFree( usersid );
-        return;
+        goto done;
     }
     ok( r == ERROR_SUCCESS, "got %u\n", r );
     ok( guid[0], "empty guid\n" );
@@ -11953,6 +11958,7 @@ static void test_MsiEnumProductsEx(void)
         len = sizeof(sid);
     }
 
+done:
     delete_key( key1, "", access );
     delete_key( key2, "", access );
     delete_key( key3, "", access );

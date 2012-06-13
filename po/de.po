@@ -3537,10 +3537,18 @@ msgid "URI to be decoded is incorrect"
 msgstr "Zu entschlüsselnde URI ist ungültig"
 
 #: jscript.rc:57
+msgid "Number of fraction digits is out of range"
+msgstr "Anzahl der Nachkommastellen außerhalb des zulässigen Bereichs"
+
+#: jscript.rc:58
+msgid "Precision is out of range"
+msgstr "Genauigkeit außerhalb des zulässigen Bereichs"
+
+#: jscript.rc:59
 msgid "Array length must be a finite positive integer"
 msgstr "Array-Größe muss eine natürliche Zahl sein"
 
-#: jscript.rc:58
+#: jscript.rc:60
 msgid "Array object expected"
 msgstr "Array Objekt erwartet"
 
@@ -12663,7 +12671,7 @@ msgstr "Bitte wählen Sie das Unix-Zielverzeichnis."
 
 #: winecfg.rc:34
 msgid "Hide &Advanced"
-msgstr "&Erw. ausblenden"
+msgstr "&Erweitert ausblenden"
 
 #: winecfg.rc:36
 msgid "(No Theme)"

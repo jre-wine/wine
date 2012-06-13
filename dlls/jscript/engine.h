@@ -17,30 +17,8 @@
  */
 
 typedef struct _source_elements_t source_elements_t;
-typedef struct _function_expression_t function_expression_t;
 typedef struct _expression_t expression_t;
 typedef struct _statement_t statement_t;
-
-typedef struct _function_declaration_t {
-    function_expression_t *expr;
-
-    struct _function_declaration_t *next;
-} function_declaration_t;
-
-typedef struct _var_list_t {
-    const WCHAR *identifier;
-
-    struct _var_list_t *next;
-} var_list_t;
-
-typedef struct _func_stack {
-    function_declaration_t *func_head;
-    function_declaration_t *func_tail;
-    var_list_t *var_head;
-    var_list_t *var_tail;
-
-    struct _func_stack *next;
-} func_stack_t;
 
 typedef struct {
     const WCHAR *begin;
@@ -55,8 +33,6 @@ typedef struct {
     HRESULT hres;
 
     jsheap_t heap;
-
-    func_stack_t *func_stack;
 } parser_ctx_t;
 
 #define OP_LIST                            \
@@ -64,6 +40,7 @@ typedef struct {
     X(and,        1, 0,0)                  \
     X(array,      1, 0,0)                  \
     X(assign,     1, 0,0)                  \
+    X(assign_call,1, ARG_UINT,   0)       \
     X(bool,       1, ARG_INT,    0)        \
     X(bneg,       1, 0,0)                  \
     X(call,       1, ARG_UINT,   ARG_UINT) \
@@ -80,7 +57,7 @@ typedef struct {
     X(eq,         1, 0,0)                  \
     X(eq2,        1, 0,0)                  \
     X(forin,      0, ARG_ADDR,   0)        \
-    X(func,       1, ARG_FUNC,   0)        \
+    X(func,       1, ARG_UINT,   0)        \
     X(gt,         1, 0,0)                  \
     X(gteq,       1, 0,0)                  \
     X(ident,      1, ARG_BSTR,   0)        \
@@ -146,7 +123,6 @@ typedef union {
     LONG lng;
     WCHAR *str;
     unsigned uint;
-    function_expression_t *func; /* FIXME */
 } instr_arg_t;
 
 typedef enum {
@@ -166,19 +142,36 @@ typedef struct {
     instr_arg_t arg2;
 } instr_t;
 
+typedef struct _function_code_t {
+    BSTR name;
+    unsigned instr_off;
+
+    const WCHAR *source;
+    unsigned source_len;
+
+    unsigned func_cnt;
+    struct _function_code_t *funcs;
+
+    unsigned var_cnt;
+    BSTR *variables;
+
+    unsigned param_cnt;
+    BSTR *params;
+} function_code_t;
+
 typedef struct _bytecode_t {
     LONG ref;
 
     instr_t *instrs;
     jsheap_t heap;
 
+    function_code_t global_code;
+
     WCHAR *source;
 
     BSTR *bstr_pool;
     unsigned bstr_pool_size;
     unsigned bstr_cnt;
-
-    parser_ctx_t *parser;
 
     struct _bytecode_t *next;
 } bytecode_t;
@@ -231,6 +224,7 @@ struct _exec_ctx_t {
     scope_chain_t *scope_chain;
     jsdisp_t *var_disp;
     IDispatch *this_obj;
+    function_code_t *func_code;
     BOOL is_global;
 
     VARIANT *stack;
@@ -249,12 +243,8 @@ static inline void exec_addref(exec_ctx_t *ctx)
 
 void exec_release(exec_ctx_t*) DECLSPEC_HIDDEN;
 HRESULT create_exec_ctx(script_ctx_t*,IDispatch*,jsdisp_t*,scope_chain_t*,BOOL,exec_ctx_t**) DECLSPEC_HIDDEN;
-HRESULT exec_source(exec_ctx_t*,bytecode_t*,source_elements_t*,BOOL,jsexcept_t*,VARIANT*) DECLSPEC_HIDDEN;
-
-typedef struct _parameter_t parameter_t;
-
-HRESULT create_source_function(script_ctx_t*,bytecode_t*,parameter_t*,source_elements_t*,scope_chain_t*,
-        const WCHAR*,DWORD,jsdisp_t**) DECLSPEC_HIDDEN;
+HRESULT exec_source(exec_ctx_t*,bytecode_t*,function_code_t*,BOOL,jsexcept_t*,VARIANT*) DECLSPEC_HIDDEN;
+HRESULT create_source_function(script_ctx_t*,bytecode_t*,function_code_t*,scope_chain_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 
 typedef enum {
     LT_INT,
@@ -288,6 +278,7 @@ typedef struct _variable_declaration_t {
     expression_t *expr;
 
     struct _variable_declaration_t *next;
+    struct _variable_declaration_t *global_next; /* for compiler */
 } variable_declaration_t;
 
 typedef enum {
@@ -482,28 +473,26 @@ struct _expression_t {
     expression_type_t type;
 };
 
-struct _parameter_t {
+typedef struct _parameter_t {
     const WCHAR *identifier;
-
     struct _parameter_t *next;
-};
+} parameter_t;
 
 struct _source_elements_t {
     statement_t *statement;
     statement_t *statement_tail;
-    function_declaration_t *functions;
-    var_list_t *variables;
-    unsigned instr_off;
 };
 
-struct _function_expression_t {
+typedef struct _function_expression_t {
     expression_t expr;
     const WCHAR *identifier;
     parameter_t *parameter_list;
     source_elements_t *source_elements;
     const WCHAR *src_str;
     DWORD src_len;
-};
+
+    struct _function_expression_t *next; /* for compiler */
+} function_expression_t;
 
 typedef struct {
     expression_t expr;

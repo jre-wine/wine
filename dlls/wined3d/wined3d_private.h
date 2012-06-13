@@ -1788,7 +1788,7 @@ struct wined3d_device
     struct list             patches[PATCHMAP_SIZE];
 };
 
-HRESULT device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
+void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
         UINT rect_count, const RECT *rects, const RECT *draw_rect, DWORD flags,
         const struct wined3d_color *color, float depth, DWORD stencil) DECLSPEC_HIDDEN;
 BOOL device_context_add(struct wined3d_device *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
@@ -1837,6 +1837,7 @@ struct wined3d_resource_ops
 struct wined3d_resource
 {
     LONG ref;
+    LONG bind_count;
     struct wined3d_device *device;
     enum wined3d_resource_type type;
     const struct wined3d_format *format;
@@ -1929,7 +1930,6 @@ struct wined3d_texture
     float pow2_matrix[16];
     UINT lod;
     enum wined3d_texture_filter_type filter_type;
-    LONG bind_count;
     DWORD sampler;
     DWORD flags;
     const struct min_lookup *min_mip_lookup;
@@ -2408,7 +2408,6 @@ struct wined3d_buffer
     GLenum buffer_object_usage;
     GLenum buffer_type_hint;
     UINT buffer_object_size;
-    LONG bind_count;
     DWORD flags;
 
     LONG lock_count;
@@ -2443,7 +2442,7 @@ struct wined3d_rendertarget_view
 
 struct wined3d_swapchain_ops
 {
-    HRESULT (*swapchain_present)(struct wined3d_swapchain *swapchain, const RECT *src_rect,
+    void (*swapchain_present)(struct wined3d_swapchain *swapchain, const RECT *src_rect,
             const RECT *dst_rect, const RGNDATA *dirty_region, DWORD flags);
 };
 

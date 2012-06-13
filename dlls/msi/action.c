@@ -884,6 +884,20 @@ static UINT ACTION_CreateFolders(MSIPACKAGE *package)
     return rc;
 }
 
+static void remove_persistent_folder( MSIFOLDER *folder )
+{
+    FolderList *fl;
+
+    LIST_FOR_EACH_ENTRY( fl, &folder->children, FolderList, entry )
+    {
+        remove_persistent_folder( fl->folder );
+    }
+    if (folder->persistent && folder->State != FOLDER_STATE_REMOVED)
+    {
+        if (RemoveDirectoryW( folder->ResolvedTarget )) folder->State = FOLDER_STATE_REMOVED;
+    }
+}
+
 static UINT ITERATE_RemoveFolders( MSIRECORD *row, LPVOID param )
 {
     MSIPACKAGE *package = param;
@@ -927,9 +941,8 @@ static UINT ITERATE_RemoveFolders( MSIRECORD *row, LPVOID param )
     msi_ui_actiondata( package, szRemoveFolders, uirow );
     msiobj_release( &uirow->hdr );
 
-    RemoveDirectoryW( full_path );
     folder = msi_get_loaded_folder( package, dir );
-    folder->State = FOLDER_STATE_REMOVED;
+    remove_persistent_folder( folder );
     return ERROR_SUCCESS;
 }
 
@@ -1620,16 +1633,19 @@ static void ACTION_GetComponentInstallStates(MSIPACKAGE *package)
         r = MsiQueryComponentStateW( package->ProductCode, NULL,
                                      MSIINSTALLCONTEXT_USERMANAGED, comp->ComponentId,
                                      &comp->Installed );
-        if (r != ERROR_SUCCESS)
-            r = MsiQueryComponentStateW( package->ProductCode, NULL,
-                                         MSIINSTALLCONTEXT_USERUNMANAGED, comp->ComponentId,
-                                         &comp->Installed );
-        if (r != ERROR_SUCCESS)
-            r = MsiQueryComponentStateW( package->ProductCode, NULL,
-                                         MSIINSTALLCONTEXT_MACHINE, comp->ComponentId,
-                                         &comp->Installed );
-        if (r != ERROR_SUCCESS)
-            comp->Installed = INSTALLSTATE_ABSENT;
+        if (r == ERROR_SUCCESS) continue;
+
+        r = MsiQueryComponentStateW( package->ProductCode, NULL,
+                                     MSIINSTALLCONTEXT_USERUNMANAGED, comp->ComponentId,
+                                     &comp->Installed );
+        if (r == ERROR_SUCCESS) continue;
+
+        r = MsiQueryComponentStateW( package->ProductCode, NULL,
+                                     MSIINSTALLCONTEXT_MACHINE, comp->ComponentId,
+                                     &comp->Installed );
+        if (r == ERROR_SUCCESS) continue;
+
+        comp->Installed = INSTALLSTATE_ABSENT;
     }
 }
 

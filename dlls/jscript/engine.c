@@ -364,7 +364,7 @@ static HRESULT disp_get_id(script_ctx_t *ctx, IDispatch *disp, BSTR name, DWORD 
 
     hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
     if(FAILED(hres)) {
-        TRACE("unsing IDispatch\n");
+        TRACE("using IDispatch\n");
 
         *id = 0;
         return IDispatch_GetIDsOfNames(disp, &IID_NULL, &name, 1, 0, id);
@@ -803,15 +803,15 @@ static HRESULT interp_end_finally(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    13 */
 static HRESULT interp_func(exec_ctx_t *ctx)
 {
-    function_expression_t *expr = ctx->code->instrs[ctx->ip].arg1.func;
+    unsigned func_idx = ctx->code->instrs[ctx->ip].arg1.uint;
     jsdisp_t *dispex;
     VARIANT v;
     HRESULT hres;
 
-    TRACE("\n");
+    TRACE("%d\n", func_idx);
 
-    hres = create_source_function(ctx->script, ctx->code, expr->parameter_list, expr->source_elements, ctx->scope_chain,
-            expr->src_str, expr->src_len, &dispex);
+    hres = create_source_function(ctx->script, ctx->code, ctx->func_code->funcs+func_idx,
+            ctx->scope_chain, &dispex);
     if(FAILED(hres))
         return hres;
 
@@ -2268,7 +2268,7 @@ static HRESULT interp_gteq(exec_ctx_t *ctx)
 /* ECMA-262 3rd Edition    11.4.8 */
 static HRESULT interp_bneg(exec_ctx_t *ctx)
 {
-    VARIANT *v, r;
+    VARIANT *v;
     INT i;
     HRESULT hres;
 
@@ -2280,9 +2280,7 @@ static HRESULT interp_bneg(exec_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    V_VT(&r) = VT_I4;
-    V_I4(&r) = ~i;
-    return stack_push(ctx, &r);
+    return stack_push_int(ctx, ~i);
 }
 
 /* ECMA-262 3rd Edition    11.4.9 */
@@ -2379,6 +2377,35 @@ static HRESULT interp_assign(exec_ctx_t *ctx)
         return hres;
     }
 
+    return stack_push(ctx, v);
+}
+
+/* JScript extension */
+static HRESULT interp_assign_call(exec_ctx_t *ctx)
+{
+    const unsigned arg = ctx->code->instrs[ctx->ip].arg1.uint;
+    DISPID propput_dispid = DISPID_PROPERTYPUT;
+    IDispatch *disp;
+    DISPPARAMS dp;
+    VARIANT *v;
+    DISPID id;
+    HRESULT hres;
+
+    TRACE("%u\n", arg);
+
+    disp = stack_topn_objid(ctx, arg+1, &id);
+    if(!disp)
+        return throw_reference_error(ctx->script, ctx->ei, JS_E_ILLEGAL_ASSIGN, NULL);
+
+    jsstack_to_dp(ctx, arg+1, &dp);
+    dp.cNamedArgs = 1;
+    dp.rgdispidNamedArgs = &propput_dispid;
+    hres = disp_call(ctx->script, disp, id, DISPATCH_PROPERTYPUT, &dp, NULL, ctx->ei);
+    if(FAILED(hres))
+        return hres;
+
+    v = stack_pop(ctx);
+    stack_popn(ctx, arg+2);
     return stack_push(ctx, v);
 }
 
@@ -2511,10 +2538,11 @@ static HRESULT unwind_exception(exec_ctx_t *ctx)
     return hres;
 }
 
-static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, unsigned ip, jsexcept_t *ei, VARIANT *ret)
+static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, function_code_t *func, jsexcept_t *ei, VARIANT *ret)
 {
     exec_ctx_t *exec_ctx = ctx->exec_ctx;
     except_frame_t *prev_except_frame;
+    function_code_t *prev_func;
     unsigned prev_ip, prev_top;
     scope_chain_t *prev_scope;
     bytecode_t *prev_code;
@@ -2530,10 +2558,12 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, unsigned ip, 
     prev_ip = exec_ctx->ip;
     prev_ei = exec_ctx->ei;
     prev_code = exec_ctx->code;
-    exec_ctx->ip = ip;
+    prev_func = exec_ctx->func_code;
+    exec_ctx->ip = func->instr_off;
     exec_ctx->ei = ei;
     exec_ctx->except_frame = NULL;
     exec_ctx->code = code;
+    exec_ctx->func_code = func;
 
     while(exec_ctx->ip != -1) {
         op = code->instrs[exec_ctx->ip].op;
@@ -2556,6 +2586,7 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, unsigned ip, 
     exec_ctx->ei = prev_ei;
     exec_ctx->except_frame = prev_except_frame;
     exec_ctx->code = prev_code;
+    exec_ctx->func_code = prev_func;
 
     if(FAILED(hres)) {
         while(exec_ctx->scope_chain != prev_scope)
@@ -2574,59 +2605,46 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, unsigned ip, 
     return S_OK;
 }
 
-HRESULT exec_source(exec_ctx_t *ctx, bytecode_t *code, source_elements_t *source, BOOL from_eval,
+HRESULT exec_source(exec_ctx_t *ctx, bytecode_t *code, function_code_t *func, BOOL from_eval,
         jsexcept_t *ei, VARIANT *retv)
 {
-    function_declaration_t *func;
-    var_list_t *var;
-    VARIANT val;
     exec_ctx_t *prev_ctx;
+    VARIANT val;
+    unsigned i;
     HRESULT hres = S_OK;
 
-    for(func = source->functions; func; func = func->next) {
+    for(i = 0; i < func->func_cnt; i++) {
         jsdisp_t *func_obj;
         VARIANT var;
 
-        if(!func->expr->identifier)
+        if(!func->funcs[i].name)
             continue;
 
-        hres = create_source_function(ctx->script, code, func->expr->parameter_list, func->expr->source_elements,
-                ctx->scope_chain, func->expr->src_str, func->expr->src_len, &func_obj);
+        hres = create_source_function(ctx->script, code, func->funcs+i, ctx->scope_chain, &func_obj);
         if(FAILED(hres))
             return hres;
 
         var_set_jsdisp(&var, func_obj);
-        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, &var, ei);
+        hres = jsdisp_propput_name(ctx->var_disp, func->funcs[i].name, &var, ei);
         jsdisp_release(func_obj);
         if(FAILED(hres))
             return hres;
     }
 
-    for(var = source->variables; var; var = var->next) {
-        DISPID id = 0;
-        BSTR name;
+    for(i=0; i < func->var_cnt; i++) {
+        if(!ctx->is_global || !lookup_global_members(ctx->script, func->variables[i], NULL)) {
+            DISPID id = 0;
 
-        name = SysAllocString(var->identifier);
-        if(!name)
-            return E_OUTOFMEMORY;
-
-        if(!ctx->is_global || !lookup_global_members(ctx->script, name, NULL))
-            hres = jsdisp_get_id(ctx->var_disp, var->identifier, fdexNameEnsure, &id);
-        SysFreeString(name);
-        if(FAILED(hres))
-            return hres;
+            hres = jsdisp_get_id(ctx->var_disp, func->variables[i], fdexNameEnsure, &id);
+            if(FAILED(hres))
+                return hres;
+        }
     }
 
     prev_ctx = ctx->script->exec_ctx;
     ctx->script->exec_ctx = ctx;
 
-    if(source->statement) {
-        assert(source->instr_off);
-        hres = enter_bytecode(ctx->script, code, source->instr_off, ei, &val);
-    }else {
-        V_VT(&val) = VT_EMPTY;
-    }
-
+    hres = enter_bytecode(ctx->script, code, func, ei, &val);
     assert(ctx->script->exec_ctx == ctx);
     ctx->script->exec_ctx = prev_ctx;
     if(FAILED(hres))
