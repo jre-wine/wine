@@ -251,11 +251,8 @@ install-arch32-stamp: build-arch32-stamp
 	# install manpages
 	$(MAKE) -C build32/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
-	install build32/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,$(IA32_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
-	# install tools
-	cp tools/font_convert.sh debian/tmp/usr/bin/wine-font-convert
 
 	bash debian/gen-alternatives.sh "$(VERSUFFIX)" 32 $(ALTPRIO32)
 
@@ -276,11 +273,8 @@ install-arch64-stamp: build-arch64-stamp $(patsubst build%,install-arch%-stamp,$
 	# install manpages
 	$(MAKE) -C build64/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
-	install build64/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,$(AMD64_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
-	# install tools
-	cp tools/font_convert.sh debian/tmp/usr/bin/wine-font-convert
 
 	bash debian/gen-alternatives.sh "$(VERSUFFIX)" 64 $(ALTPRIO64)
 
