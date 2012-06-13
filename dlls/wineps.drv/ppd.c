@@ -181,7 +181,7 @@ static WORD UserBinType = DMBIN_USER;
  *
  *		PSDRV_PPDDecodeHex
  *
- * Copies str into a newly allocated string from the process heap subsituting
+ * Copies str into a newly allocated string from the process heap substituting
  * hex strings enclosed in '<' and '>' for their byte codes.
  *
  */
@@ -459,14 +459,12 @@ static BOOL PSDRV_PPDGetNextTuple(FILE *fp, PPDTuple *tuple)
 }
 
 /*********************************************************************
+ *                       get_pagesize
  *
- *		PSDRV_PPDGetPageSizeInfo
- *
- * Searches ppd PageSize list to return entry matching name or creates new
+ * Searches ppd PageSize list to return entry matching name or optionally creates new
  * entry which is appended to the list if name is not found.
- *
  */
-static PAGESIZE *PSDRV_PPDGetPageSizeInfo(PPD *ppd, char *name)
+static PAGESIZE *get_pagesize( PPD *ppd, char *name, BOOL create )
 {
     PAGESIZE *page;
 
@@ -476,9 +474,24 @@ static PAGESIZE *PSDRV_PPDGetPageSizeInfo(PPD *ppd, char *name)
             return page;
     }
 
+    if (!create) return NULL;
+
     page = HeapAlloc( PSDRV_Heap,  HEAP_ZERO_MEMORY, sizeof(*page) );
     list_add_tail(&ppd->PageSizes, &page->entry);
     return page;
+}
+
+static DUPLEX *get_duplex( PPD *ppd, const char *name )
+{
+    DUPLEX *duplex;
+
+    LIST_FOR_EACH_ENTRY( duplex, &ppd->Duplexes, DUPLEX, entry )
+    {
+        if (!strcmp( duplex->Name, name ))
+            return duplex;
+    }
+
+    return NULL;
 }
 
 /**********************************************************************
@@ -711,7 +724,7 @@ PPD *PSDRV_ParsePPD(char *fname)
 	}
 
 	else if(!strcmp("*PageSize", tuple.key)) {
-	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
+            page = get_pagesize( ppd, tuple.option, TRUE );
 
 	    if(!page->Name) {
 	        int i;
@@ -747,17 +760,17 @@ PPD *PSDRV_ParsePPD(char *fname)
 	    }
 	}
 
-        else if(!strcmp("*DefaultPageSize", tuple.key)) {
-            if(default_pagesize) {
-                WARN("Already set default pagesize\n");
-            } else {
+        else if(!strcmp("*DefaultPageSize", tuple.key))
+        {
+            if (!default_pagesize)
+            {
                 default_pagesize = tuple.value;
                 tuple.value = NULL;
-           }
+            }
         }
 
         else if(!strcmp("*ImageableArea", tuple.key)) {
-	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
+            page = get_pagesize( ppd, tuple.option, TRUE );
 
 	    if(!page->Name) {
 	        page->Name = tuple.option;
@@ -779,9 +792,8 @@ PPD *PSDRV_ParsePPD(char *fname)
 #undef PIA
 	}
 
-
 	else if(!strcmp("*PaperDimension", tuple.key)) {
-	    page = PSDRV_PPDGetPageSizeInfo(ppd, tuple.option);
+            page = get_pagesize( ppd, tuple.option, TRUE );
 
 	    if(!page->Name) {
 	        page->Name = tuple.option;
@@ -897,13 +909,13 @@ PPD *PSDRV_ParsePPD(char *fname)
             list_add_tail( &ppd->Duplexes, &duplex->entry );
         }
 
-        else if(!strcmp("*DefaultDuplex", tuple.key)) {
-            if(default_duplex) {
-                WARN("Already set default duplex\n");
-            } else {
+        else if (!strcmp("*DefaultDuplex", tuple.key))
+        {
+            if (!default_duplex)
+            {
                 default_duplex = tuple.value;
                 tuple.value = NULL;
-           }
+            }
         }
 
         HeapFree(PSDRV_Heap, 0, tuple.key);
@@ -932,41 +944,32 @@ PPD *PSDRV_ParsePPD(char *fname)
     }
 
     ppd->DefaultPageSize = NULL;
-    if(default_pagesize) {
-	LIST_FOR_EACH_ENTRY(page, &ppd->PageSizes, PAGESIZE, entry) {
-            if(!strcmp(page->Name, default_pagesize)) {
-                ppd->DefaultPageSize = page;
-                TRACE("DefaultPageSize: %s\n", page->Name);
-                break;
-            }
-        }
-        HeapFree(PSDRV_Heap, 0, default_pagesize);
-    }
-    if(!ppd->DefaultPageSize) {
-        ppd->DefaultPageSize = LIST_ENTRY(list_head(&ppd->PageSizes), PAGESIZE, entry);
+    if (default_pagesize)
+        ppd->DefaultPageSize = get_pagesize( ppd, default_pagesize, FALSE );
+
+    if (!ppd->DefaultPageSize)
+    {
+        struct list *head = list_head( &ppd->PageSizes );
+        if (head) ppd->DefaultPageSize = LIST_ENTRY( head, PAGESIZE, entry );
         TRACE("Setting DefaultPageSize to first in list\n");
     }
+    TRACE( "DefaultPageSize: %s\n", ppd->DefaultPageSize ? ppd->DefaultPageSize->Name : "<not set>" );
+
+    HeapFree( PSDRV_Heap, 0, default_pagesize );
 
     ppd->DefaultDuplex = NULL;
     if (default_duplex)
-    {
-	DUPLEX *duplex;
-	LIST_FOR_EACH_ENTRY( duplex, &ppd->Duplexes, DUPLEX, entry )
-        {
-            if (!strcmp(duplex->Name, default_duplex))
-            {
-                ppd->DefaultDuplex = duplex;
-                TRACE("DefaultDuplex: %s\n", duplex->Name);
-                break;
-            }
-        }
-        HeapFree(PSDRV_Heap, 0, default_duplex);
-    }
+        ppd->DefaultDuplex = get_duplex( ppd, default_duplex );
+
     if (!ppd->DefaultDuplex)
     {
-        ppd->DefaultDuplex = LIST_ENTRY( list_head( &ppd->Duplexes ), DUPLEX, entry );
+        struct list *head = list_head( &ppd->Duplexes );
+        if (head) ppd->DefaultDuplex = LIST_ENTRY( head, DUPLEX, entry );
         TRACE("Setting DefaultDuplex to first in list\n");
     }
+    TRACE( "DefaultDuplex: %s\n", ppd->DefaultDuplex ? ppd->DefaultDuplex->Name : "<not set>" );
+
+    HeapFree( PSDRV_Heap, 0, default_duplex );
 
 
     {

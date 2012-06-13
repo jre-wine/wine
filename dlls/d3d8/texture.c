@@ -284,7 +284,7 @@ static HRESULT WINAPI d3d8_texture_2d_GetSurfaceLevel(IDirect3DTexture8 *iface,
 {
     struct d3d8_texture *texture = impl_from_IDirect3DTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
 
     TRACE("iface %p, level %u, surface %p.\n", iface, level, surface);
 
@@ -308,7 +308,7 @@ static HRESULT WINAPI d3d8_texture_2d_LockRect(IDirect3DTexture8 *iface, UINT le
 {
     struct d3d8_texture *texture = impl_from_IDirect3DTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u, locked_rect %p, rect %p, flags %#x.\n",
@@ -331,7 +331,7 @@ static HRESULT WINAPI d3d8_texture_2d_UnlockRect(IDirect3DTexture8 *iface, UINT 
 {
     struct d3d8_texture *texture = impl_from_IDirect3DTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u.\n", iface, level);
@@ -628,6 +628,12 @@ static HRESULT WINAPI d3d8_texture_cube_GetLevelDesc(IDirect3DCubeTexture8 *ifac
     TRACE("iface %p, level %u, desc %p.\n", iface, level, desc);
 
     wined3d_mutex_lock();
+    if (level >= wined3d_texture_get_level_count(texture->wined3d_texture))
+    {
+        wined3d_mutex_unlock();
+        return D3DERR_INVALIDCALL;
+    }
+
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
@@ -654,13 +660,21 @@ static HRESULT WINAPI d3d8_texture_cube_GetCubeMapSurface(IDirect3DCubeTexture8 
 {
     struct d3d8_texture *texture = impl_from_IDirect3DCubeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
     UINT sub_resource_idx;
+    DWORD level_count;
 
     TRACE("iface %p, face %#x, level %u, surface %p.\n", iface, face, level, surface);
 
     wined3d_mutex_lock();
-    sub_resource_idx = wined3d_texture_get_level_count(texture->wined3d_texture) * face + level;
+    level_count = wined3d_texture_get_level_count(texture->wined3d_texture);
+    if (level >= level_count)
+    {
+        wined3d_mutex_unlock();
+        return D3DERR_INVALIDCALL;
+    }
+
+    sub_resource_idx = level_count * face + level;
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
     {
         wined3d_mutex_unlock();
@@ -681,7 +695,7 @@ static HRESULT WINAPI d3d8_texture_cube_LockRect(IDirect3DCubeTexture8 *iface,
 {
     struct d3d8_texture *texture = impl_from_IDirect3DCubeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
     UINT sub_resource_idx;
     HRESULT hr;
 
@@ -707,7 +721,7 @@ static HRESULT WINAPI d3d8_texture_cube_UnlockRect(IDirect3DCubeTexture8 *iface,
 {
     struct d3d8_texture *texture = impl_from_IDirect3DCubeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DSurface8Impl *surface_impl;
+    struct d3d8_surface *surface_impl;
     UINT sub_resource_idx;
     HRESULT hr;
 
@@ -1031,7 +1045,7 @@ static HRESULT WINAPI d3d8_texture_3d_GetVolumeLevel(IDirect3DVolumeTexture8 *if
 {
     struct d3d8_texture *texture = impl_from_IDirect3DVolumeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DVolume8Impl *volume_impl;
+    struct d3d8_volume *volume_impl;
 
     TRACE("iface %p, level %u, volume %p.\n", iface, level, volume);
 
@@ -1055,7 +1069,7 @@ static HRESULT WINAPI d3d8_texture_3d_LockBox(IDirect3DVolumeTexture8 *iface,
 {
     struct d3d8_texture *texture = impl_from_IDirect3DVolumeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DVolume8Impl *volume_impl;
+    struct d3d8_volume *volume_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u, locked_box %p, box %p, flags %#x.\n",
@@ -1078,7 +1092,7 @@ static HRESULT WINAPI d3d8_texture_3d_UnlockBox(IDirect3DVolumeTexture8 *iface, 
 {
     struct d3d8_texture *texture = impl_from_IDirect3DVolumeTexture8(iface);
     struct wined3d_resource *sub_resource;
-    IDirect3DVolume8Impl *volume_impl;
+    struct d3d8_volume *volume_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u.\n", iface, level);
@@ -1157,7 +1171,7 @@ static const struct wined3d_parent_ops d3d8_texture_wined3d_parent_ops =
     d3d8_texture_wined3d_object_destroyed,
 };
 
-HRESULT texture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
+HRESULT texture_init(struct d3d8_texture *texture, struct d3d8_device *device,
         UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool)
 {
     HRESULT hr;
@@ -1182,7 +1196,7 @@ HRESULT texture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
     return D3D_OK;
 }
 
-HRESULT cubetexture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
+HRESULT cubetexture_init(struct d3d8_texture *texture, struct d3d8_device *device,
         UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool)
 {
     HRESULT hr;
@@ -1207,7 +1221,7 @@ HRESULT cubetexture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *dev
     return D3D_OK;
 }
 
-HRESULT volumetexture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
+HRESULT volumetexture_init(struct d3d8_texture *texture, struct d3d8_device *device,
         UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool)
 {
     HRESULT hr;

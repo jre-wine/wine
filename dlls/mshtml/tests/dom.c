@@ -3541,9 +3541,6 @@ static void test_elem_col_item(IHTMLElementCollection *col, const char *n,
 
     test_elem_collection((IUnknown*)disp, elem_types, len);
     IDispatch_Release(disp);
-    ok(hres == S_OK, "Could not get IHTMLElementCollection interface: %08x\n", hres);
-    if(hres != S_OK)
-        goto cleanup;
 
     V_VT(&index) = VT_I4;
 
@@ -3573,7 +3570,6 @@ static void test_elem_col_item(IHTMLElementCollection *col, const char *n,
     ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
     ok(disp == NULL, "disp != NULL\n");
 
-cleanup:
     SysFreeString(V_BSTR(&name));
 }
 
@@ -4418,7 +4414,7 @@ static void test_default_body(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_get_text(body, &v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
-    ok(bstr == NULL, "bstr != NULL\n");
+    ok(V_BSTR(&v) == NULL, "bstr != NULL\n");
 
     /* get_text - Invalid Text */
     V_VT(&v) = VT_BSTR;

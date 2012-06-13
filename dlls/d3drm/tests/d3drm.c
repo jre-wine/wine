@@ -165,6 +165,13 @@ static char data_d3drm_load[] =
 "{\n"
 " {Object1}\n"
 " {Object2}\n"
+"}\n"
+"Material\n"
+"{\n"
+" 0.1, 0.2, 0.3, 0.4;;\n"
+" 0.5;\n"
+" 0.6, 0.7, 0.8;;\n"
+" 0.9, 1.0, 1.1;;\n"
 "}\n";
 
 static void test_MeshBuilder(void)
@@ -172,6 +179,7 @@ static void test_MeshBuilder(void)
     HRESULT hr;
     LPDIRECT3DRM pD3DRM;
     LPDIRECT3DRMMESHBUILDER pMeshBuilder;
+    LPDIRECT3DRMMESH mesh;
     D3DRMLOADMEMORY info;
     int val;
     DWORD val1, val2, val3;
@@ -179,6 +187,8 @@ static void test_MeshBuilder(void)
     D3DVECTOR v[3];
     D3DVECTOR n[3];
     DWORD f[8];
+    char name[10];
+    DWORD size;
 
     hr = pDirect3DRMCreate(&pD3DRM);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
@@ -200,6 +210,26 @@ static void test_MeshBuilder(void)
     info.dSize = strlen(data_ok);
     hr = IDirect3DRMMeshBuilder_Load(pMeshBuilder, &info, NULL, D3DRMLOAD_FROMMEMORY, NULL, NULL);
     ok(hr == D3DRM_OK, "Cannot load mesh data (hr = %x)\n", hr);
+
+    size = sizeof(name);
+    hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
+    ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
+    ok(!strcmp(name, "Object"), "Retreived name '%s' instead of 'Object'\n", name);
+    size = strlen("Object"); /* No space for null character */
+    hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
+    ok(hr == E_INVALIDARG, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
+    hr = IDirect3DRMMeshBuilder_SetName(pMeshBuilder, NULL);
+    ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_SetName returned hr = %x\n", hr);
+    size = sizeof(name);
+    hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
+    ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
+    ok(size == 0, "Size should be 0 instead of %u\n", size);
+    hr = IDirect3DRMMeshBuilder_SetName(pMeshBuilder, "");
+    ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_SetName returned hr = %x\n", hr);
+    size = sizeof(name);
+    hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
+    ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
+    ok(!strcmp(name, ""), "Retreived name '%s' instead of ''\n", name);
 
     val = IDirect3DRMMeshBuilder_GetVertexCount(pMeshBuilder);
     ok(val == 4, "Wrong number of vertices %d (must be 4)\n", val);
@@ -260,6 +290,19 @@ static void test_MeshBuilder(void)
     hr = IDirect3DRM_CreateMeshBuilder(pD3DRM, &pMeshBuilder);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRMMeshBuilder interface (hr = %x)\n", hr);
 
+    /* No group in mesh when mesh builder is not loaded */
+    hr = IDirect3DRMMeshBuilder_CreateMesh(pMeshBuilder, &mesh);
+    ok(hr == D3DRM_OK, "CreateMesh failed returning hr = %x\n", hr);
+    if (hr == D3DRM_OK)
+    {
+        DWORD nb_groups;
+
+        nb_groups = IDirect3DRMMesh_GetGroupCount(mesh);
+        ok(nb_groups == 0, "GetCroupCount returned %u\n", nb_groups);
+
+        IDirect3DRMMesh_Release(mesh);
+    }
+
     info.lpMemory = data_full;
     info.dSize = strlen(data_full);
     hr = IDirect3DRMMeshBuilder_Load(pMeshBuilder, &info, NULL, D3DRMLOAD_FROMMEMORY, NULL, NULL);
@@ -302,6 +345,79 @@ static void test_MeshBuilder(void)
     ok(f[5] == 2 , "Wrong component f[5] = %d (expected 2)\n", f[5]);
     ok(f[6] == 2 , "Wrong component f[6] = %d (expected 2)\n", f[6]);
     ok(f[7] == 0 , "Wrong component f[7] = %d (expected 0)\n", f[7]);
+
+    hr = IDirect3DRMMeshBuilder_CreateMesh(pMeshBuilder, &mesh);
+    ok(hr == D3DRM_OK, "CreateMesh failed returning hr = %x\n", hr);
+    if (hr == D3DRM_OK)
+    {
+        DWORD nb_groups;
+        unsigned nb_vertices, nb_faces, nb_face_vertices;
+        DWORD data_size;
+        LPDIRECT3DRMMATERIAL material;
+        LPDIRECT3DRMTEXTURE texture;
+        D3DVALUE values[3];
+
+        nb_groups = IDirect3DRMMesh_GetGroupCount(mesh);
+        ok(nb_groups == 1, "GetCroupCount returned %u\n", nb_groups);
+        hr = IDirect3DRMMesh_GetGroup(mesh, 1, &nb_vertices, &nb_faces, &nb_face_vertices, &data_size, NULL);
+        ok(hr == D3DRMERR_BADVALUE, "GetCroup returned hr = %x\n", hr);
+        hr = IDirect3DRMMesh_GetGroup(mesh, 0, &nb_vertices, &nb_faces, &nb_face_vertices, &data_size, NULL);
+        ok(hr == D3DRM_OK, "GetCroup failed returning hr = %x\n", hr);
+        ok(nb_vertices == 3, "Wrong number of vertices %u (must be 3)\n", nb_vertices);
+        ok(nb_faces == 1, "Wrong number of faces %u (must be 1)\n", nb_faces);
+        todo_wine ok(nb_face_vertices == 3, "Wrong number of vertices per face %u (must be 3)\n", nb_face_vertices);
+        todo_wine ok(data_size == 3, "Wrong number of face data bytes %u (must be 3)\n", data_size);
+        hr = IDirect3DRMMesh_GetGroupTexture(mesh, 0, &texture);
+        todo_wine ok(hr == D3DRM_OK, "GetCroupTexture failed returning hr = %x\n", hr);
+        todo_wine ok(texture == NULL, "No texture should be present\n");
+        hr = IDirect3DRMMesh_GetGroupMaterial(mesh, 0, &material);
+        todo_wine ok(hr == D3DRM_OK, "GetCroupMaterial failed returning hr = %x\n", hr);
+        todo_wine ok(material != NULL, "No material should be present\n");
+        if ((hr == D3DRM_OK) && material)
+        {
+            hr = IDirect3DRMMaterial_GetEmissive(material, &values[0], &values[1], &values[2]);
+            ok(hr == D3DRM_OK, "GetMaterialEmissive failed returning hr = %x\n", hr);
+            ok(values[0] == 0.5f, "Emissive red component should be %f instead of %f\n", 0.5f, values[0]);
+            ok(values[1] == 0.5f, "Emissive green component should be %f instead of %f\n", 0.5f, values[1]);
+            ok(values[2] == 0.5f, "Emissive blue component should be %f instead of %f\n", 0.5f, values[2]);
+            hr = IDirect3DRMMaterial_GetSpecular(material, &values[0], &values[1], &values[2]);
+            ok(hr == D3DRM_OK, "GetMaterialEmissive failed returning hr = %x\n", hr);
+            ok(values[0] == 1.0f, "Specular red component should be %f instead of %f\n", 1.0f, values[0]);
+            ok(values[1] == 0.0f, "Specular green component should be %f instead of %f\n", 0.0f, values[1]);
+            ok(values[2] == 0.0f, "Specular blue component should be %f instead of %f\n", 0.0f, values[2]);
+            values[0] = IDirect3DRMMaterial_GetPower(material);
+            ok(values[0] == 30.0f, "Power value should be %f instead of %f\n", 30.0f, values[0]);
+        }
+
+        IDirect3DRMMesh_Release(mesh);
+    }
+
+    hr = IDirect3DRMMeshBuilder_Scale(pMeshBuilder, 2, 3 ,4);
+    ok(hr == D3DRM_OK, "Scale failed returning hr = %x\n", hr);
+
+    hr = IDirect3DRMMeshBuilder_GetVertices(pMeshBuilder, &val1, v, &val2, n, &val3, f);
+    ok(hr == D3DRM_OK, "Cannot get vertices information (hr = %x)\n", hr);
+    ok(val2 == 3, "Wrong number of normals %d (must be 3)\n", val2);
+    ok(val1 == 3, "Wrong number of vertices %d (must be 3)\n", val1);
+    ok(U1(v[0]).x == 0.1f*2, "Wrong component v[0].x = %f (expected %f)\n", U1(v[0]).x, 0.1f*2);
+    ok(U2(v[0]).y == 0.2f*3, "Wrong component v[0].y = %f (expected %f)\n", U2(v[0]).y, 0.2f*3);
+    ok(U3(v[0]).z == 0.3f*4, "Wrong component v[0].z = %f (expected %f)\n", U3(v[0]).z, 0.3f*4);
+    ok(U1(v[1]).x == 0.4f*2, "Wrong component v[1].x = %f (expected %f)\n", U1(v[1]).x, 0.4f*2);
+    ok(U2(v[1]).y == 0.5f*3, "Wrong component v[1].y = %f (expected %f)\n", U2(v[1]).y, 0.5f*3);
+    ok(U3(v[1]).z == 0.6f*4, "Wrong component v[1].z = %f (expected %f)\n", U3(v[1]).z, 0.6f*4);
+    ok(U1(v[2]).x == 0.7f*2, "Wrong component v[2].x = %f (expected %f)\n", U1(v[2]).x, 0.7f*2);
+    ok(U2(v[2]).y == 0.8f*3, "Wrong component v[2].y = %f (expected %f)\n", U2(v[2]).y, 0.8f*3);
+    ok(U3(v[2]).z == 0.9f*4, "Wrong component v[2].z = %f (expected %f)\n", U3(v[2]).z, 0.9f*4);
+    /* Normals are not affected by Scale */
+    ok(U1(n[0]).x == 1.1f, "Wrong component n[0].x = %f (expected %f)\n", U1(n[0]).x, 1.1f);
+    ok(U2(n[0]).y == 1.2f, "Wrong component n[0].y = %f (expected %f)\n", U2(n[0]).y, 1.2f);
+    ok(U3(n[0]).z == 1.3f, "Wrong component n[0].z = %f (expected %f)\n", U3(n[0]).z, 1.3f);
+    ok(U1(n[1]).x == 1.4f, "Wrong component n[1].x = %f (expected %f)\n", U1(n[1]).x, 1.4f);
+    ok(U2(n[1]).y == 1.5f, "Wrong component n[1].y = %f (expected %f)\n", U2(n[1]).y, 1.5f);
+    ok(U3(n[1]).z == 1.6f, "Wrong component n[1].z = %f (expected %f)\n", U3(n[1]).z, 1.6f);
+    ok(U1(n[2]).x == 1.7f, "Wrong component n[2].x = %f (expected %f)\n", U1(n[2]).x, 1.7f);
+    ok(U2(n[2]).y == 1.8f, "Wrong component n[2].y = %f (expected %f)\n", U2(n[2]).y, 1.8f);
+    ok(U3(n[2]).z == 1.9f, "Wrong component n[2].z = %f (expected %f)\n", U3(n[2]).z, 1.9f);
 
     IDirect3DRMMeshBuilder_Release(pMeshBuilder);
 
@@ -640,7 +756,7 @@ static void test_Frame(void)
 
     pVisualArray = NULL;
     hr = IDirect3DRMFrame_GetVisuals(pFrameP1, &pVisualArray);
-    todo_wine ok(hr == D3DRM_OK, "Cannot get visuals (hr = %x)\n", hr);
+    ok(hr == D3DRM_OK, "Cannot get visuals (hr = %x)\n", hr);
     if (pVisualArray)
     {
         count = IDirect3DRMVisualArray_GetSize(pVisualArray);
@@ -773,7 +889,8 @@ static const GUID* refiids[] =
 {
     &IID_IDirect3DRMMeshBuilder,
     &IID_IDirect3DRMMeshBuilder,
-    &IID_IDirect3DRMFrame
+    &IID_IDirect3DRMFrame,
+    &IID_IDirect3DRMMaterial /* Not taken into account and not notified */
 };
 
 static void __cdecl object_load_callback(LPDIRECT3DRMOBJECT object, REFIID objectguid, LPVOID arg)
@@ -789,14 +906,14 @@ static void test_d3drm_load(void)
     HRESULT hr;
     LPDIRECT3DRM pD3DRM;
     D3DRMLOADMEMORY info;
-    const GUID* req_refiids[] = { &IID_IDirect3DRMMeshBuilder, &IID_IDirect3DRMFrame };
+    const GUID* req_refiids[] = { &IID_IDirect3DRMMeshBuilder, &IID_IDirect3DRMFrame, &IID_IDirect3DRMMaterial };
 
     hr = pDirect3DRMCreate(&pD3DRM);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     info.lpMemory = data_d3drm_load;
     info.dSize = strlen(data_d3drm_load);
-    hr = IDirect3DRM_Load(pD3DRM, &info, NULL, (GUID**)req_refiids, 2, D3DRMLOAD_FROMMEMORY, object_load_callback, (LPVOID)0xdeadbeef, NULL, NULL, NULL);
+    hr = IDirect3DRM_Load(pD3DRM, &info, NULL, (GUID**)req_refiids, 3, D3DRMLOAD_FROMMEMORY, object_load_callback, (LPVOID)0xdeadbeef, NULL, NULL, NULL);
     ok(hr == D3DRM_OK, "Cannot load data (hr = %x)\n", hr);
     ok(nb_objects == 3, "Should have loaded 3 objects (got %d)\n", nb_objects);
 

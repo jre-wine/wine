@@ -567,7 +567,7 @@ static HRESULT parse_metadata_header(ASSEMBLY *assembly, DWORD *hdrsz)
     size = FIELD_OFFSET(METADATAHDR, Version);
     memcpy(assembly->metadatahdr, metadatahdr, size);
 
-    /* we don't care about the version string */
+    assembly->metadatahdr->Version = (LPSTR)&metadatahdr->Version;
 
     ofs = FIELD_OFFSET(METADATAHDR, Flags);
     ptr += FIELD_OFFSET(METADATAHDR, Version) + metadatahdr->VersionLength + 1;
@@ -811,10 +811,10 @@ HRESULT assembly_get_version(ASSEMBLY *assembly, LPWSTR *version)
     return S_OK;
 }
 
-BYTE assembly_get_architecture(ASSEMBLY *assembly)
+PEKIND assembly_get_architecture(ASSEMBLY *assembly)
 {
     if ((assembly->corhdr->MajorRuntimeVersion == 2) && (assembly->corhdr->MinorRuntimeVersion == 0))
-        return 0; /* .NET 1.x assembly */
+        return peNone; /* .NET 1.x assembly */
 
     if (assembly->nthdr->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
         return peAMD64; /* AMD64/IA64 assembly */
@@ -825,23 +825,22 @@ BYTE assembly_get_architecture(ASSEMBLY *assembly)
     return peI386; /* x86 assembly */
 }
 
-static BYTE *assembly_get_blob(ASSEMBLY *assembly, WORD index, ULONG *size)
+static BYTE *assembly_get_blob(ASSEMBLY *assembly, DWORD index, ULONG *size)
 {
     return GetData(&assembly->blobs[index], size);
 }
 
 HRESULT assembly_get_pubkey_token(ASSEMBLY *assembly, LPWSTR *token)
 {
-    ASSEMBLYTABLE *asmtbl;
     ULONG i, size;
     LONG offset;
-    BYTE *hashdata;
+    BYTE *hashdata, *pubkey, *ptr;
     HCRYPTPROV crypt;
     HCRYPTHASH hash;
-    BYTE *pubkey;
     BYTE tokbytes[BYTES_PER_TOKEN];
     HRESULT hr = E_FAIL;
     LPWSTR tok;
+    DWORD idx;
 
     *token = NULL;
 
@@ -849,11 +848,17 @@ HRESULT assembly_get_pubkey_token(ASSEMBLY *assembly, LPWSTR *token)
     if (offset == -1)
         return E_FAIL;
 
-    asmtbl = assembly_data_offset(assembly, offset);
-    if (!asmtbl)
+    ptr = assembly_data_offset(assembly, offset);
+    if (!ptr)
         return E_FAIL;
 
-    pubkey = assembly_get_blob(assembly, asmtbl->PublicKey, &size);
+    ptr += FIELD_OFFSET(ASSEMBLYTABLE, PublicKey);
+    if (assembly->blobsz == sizeof(DWORD))
+        idx = *(DWORD *)ptr;
+    else
+        idx = *(WORD *)ptr;
+
+    pubkey = assembly_get_blob(assembly, idx, &size);
 
     if (!CryptAcquireContextA(&crypt, NULL, NULL, PROV_RSA_FULL,
                               CRYPT_VERIFYCONTEXT))
@@ -900,4 +905,10 @@ done:
     CryptReleaseContext(crypt, 0);
 
     return hr;
+}
+
+HRESULT assembly_get_runtime_version(ASSEMBLY *assembly, LPSTR *version)
+{
+    *version = assembly->metadatahdr->Version;
+    return S_OK;
 }

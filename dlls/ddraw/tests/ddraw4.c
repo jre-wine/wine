@@ -331,6 +331,36 @@ static void destroy_viewport(IDirect3DDevice3 *device, IDirect3DViewport3 *viewp
     IDirect3DViewport3_Release(viewport);
 }
 
+static const UINT *expect_messages;
+
+static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (expect_messages && message == *expect_messages)
+        ++expect_messages;
+
+    return DefWindowProcA(hwnd, message, wparam, lparam);
+}
+
+/* Set the wndproc back to what ddraw expects it to be, and release the ddraw
+ * interface. This prevents subsequent SetCooperativeLevel() calls on a
+ * different window from failing with DDERR_HWNDALREADYSET. */
+static void fix_wndproc(HWND window, LONG_PTR proc)
+{
+    IDirectDraw4 *ddraw;
+    HRESULT hr;
+
+    if (!(ddraw = create_ddraw()))
+        return;
+
+    SetWindowLongPtrA(window, GWLP_WNDPROC, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+
+    IDirectDraw4_Release(ddraw);
+}
+
 static void test_process_vertices(void)
 {
     IDirect3DVertexBuffer *src_vb, *dst_vb;
@@ -1616,6 +1646,123 @@ static void test_ck_rgba(void)
     DestroyWindow(window);
 }
 
+static void test_ck_default(void)
+{
+    static D3DRECT clear_rect = {{0}, {0}, {640}, {480}};
+    static struct
+    {
+        struct vec4 position;
+        struct vec2 texcoord;
+    }
+    tquad[] =
+    {
+        {{  0.0f, 480.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
+        {{  0.0f,   0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+        {{640.0f, 480.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
+        {{640.0f,   0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+    };
+    IDirectDrawSurface4 *surface, *rt;
+    IDirect3DViewport3 *viewport;
+    DDSURFACEDESC2 surface_desc;
+    IDirect3DTexture2 *texture;
+    IDirect3DDevice3 *device;
+    IDirectDraw4 *ddraw;
+    IDirect3D3 *d3d;
+    D3DCOLOR color;
+    DWORD value;
+    HWND window;
+    DDBLTFX fx;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+
+    if (!(device = create_device(window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create D3D device, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice3_GetDirect3D(device, &d3d);
+    ok(SUCCEEDED(hr), "Failed to get d3d interface, hr %#x.\n", hr);
+    hr = IDirect3D3_QueryInterface(d3d, &IID_IDirectDraw4, (void **)&ddraw);
+    ok(SUCCEEDED(hr), "Failed to get ddraw interface, hr %#x.\n", hr);
+    IDirect3D3_Release(d3d);
+
+    hr = IDirect3DDevice3_GetRenderTarget(device, &rt);
+    ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
+
+    viewport = create_viewport(device, 0, 0, 640, 480);
+    hr = IDirect3DDevice3_SetCurrentViewport(device, viewport);
+    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_CKSRCBLT;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    surface_desc.dwWidth = 256;
+    surface_desc.dwHeight = 256;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    surface_desc.ddckCKSrcBlt.dwColorSpaceLowValue = 0x000000ff;
+    surface_desc.ddckCKSrcBlt.dwColorSpaceHighValue = 0x000000ff;
+    hr = IDirectDraw4_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface4_QueryInterface(surface, &IID_IDirect3DTexture2, (void **)&texture);
+    ok(SUCCEEDED(hr), "Failed to get texture interface, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetTexture(device, 0, texture);
+    ok(SUCCEEDED(hr), "Failed to set texture, hr %#x.\n", hr);
+
+    memset(&fx, 0, sizeof(fx));
+    fx.dwSize = sizeof(fx);
+    U5(fx).dwFillColor = 0x000000ff;
+    hr = IDirectDrawSurface4_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirect3DViewport3_Clear2(viewport, 1, &clear_rect, D3DCLEAR_TARGET, 0xff00ff00, 1.0f, 0);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_GetRenderState(device, D3DRENDERSTATE_COLORKEYENABLE, &value);
+    ok(SUCCEEDED(hr), "Failed to get render state, hr %#x.\n", hr);
+    ok(!value, "Got unexpected color keying state %#x.\n", value);
+    hr = IDirect3DDevice3_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_TEX1, &tquad[0], 4, 0);
+    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DViewport3_Clear2(viewport, 1, &clear_rect, D3DCLEAR_TARGET, 0xff00ff00, 1.0f, 0);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_SetRenderState(device, D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+    ok(SUCCEEDED(hr), "Failed to enable color keying, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZRHW | D3DFVF_TEX1, &tquad[0], 4, 0);
+    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+    hr = IDirect3DDevice3_GetRenderState(device, D3DRENDERSTATE_COLORKEYENABLE, &value);
+    ok(SUCCEEDED(hr), "Failed to get render state, hr %#x.\n", hr);
+    ok(!!value, "Got unexpected color keying state %#x.\n", value);
+    hr = IDirect3DDevice3_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+
+    IDirect3DTexture_Release(texture);
+    IDirectDrawSurface4_Release(surface);
+    destroy_viewport(device, viewport);
+    IDirectDrawSurface4_Release(rt);
+    IDirect3DDevice3_Release(device);
+    IDirectDraw4_Release(ddraw);
+    DestroyWindow(window);
+}
+
 struct qi_test
 {
     REFIID iid;
@@ -1821,6 +1968,133 @@ static void test_device_qi(void)
     DestroyWindow(window);
 }
 
+static void test_wndproc(void)
+{
+    LONG_PTR proc, ddraw_proc;
+    IDirectDraw4 *ddraw;
+    WNDCLASSA wc = {0};
+    HWND window;
+    HRESULT hr;
+    ULONG ref;
+
+    static const UINT messages[] =
+    {
+        WM_WINDOWPOSCHANGING,
+        WM_MOVE,
+        WM_SIZE,
+        WM_WINDOWPOSCHANGING,
+        WM_ACTIVATE,
+        WM_SETFOCUS,
+        0,
+    };
+
+    /* DDSCL_EXCLUSIVE replaces the window's window proc. */
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create IDirectDraw4 object, skipping tests.\n");
+        return;
+    }
+
+    wc.lpfnWndProc = test_proc;
+    wc.lpszClassName = "ddraw_test_wndproc_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+
+    window = CreateWindowA("ddraw_test_wndproc_wc", "ddraw_test",
+            WS_MAXIMIZE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
+
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    expect_messages = messages;
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
+    expect_messages = NULL;
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw4_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    /* DDSCL_NORMAL doesn't. */
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw4_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    /* The original window proc is only restored by ddraw if the current
+     * window proc matches the one ddraw set. This also affects switching
+     * from DDSCL_NORMAL to DDSCL_EXCLUSIVE. */
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ddraw_proc = proc;
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)ddraw_proc);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+    ref = IDirectDraw4_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw4_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+
+    fix_wndproc(window, (LONG_PTR)test_proc);
+    expect_messages = NULL;
+    DestroyWindow(window);
+    UnregisterClassA("ddraw_test_wndproc_wc", GetModuleHandleA(NULL));
+}
+
 START_TEST(ddraw4)
 {
     test_process_vertices();
@@ -1834,6 +2108,8 @@ START_TEST(ddraw4)
     test_viewport_interfaces();
     test_zenable();
     test_ck_rgba();
+    test_ck_default();
     test_surface_qi();
     test_device_qi();
+    test_wndproc();
 }

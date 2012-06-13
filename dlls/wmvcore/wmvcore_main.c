@@ -22,6 +22,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wmsdkidl.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmvcore);
@@ -42,4 +43,22 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     }
 
     return TRUE;
+}
+
+HRESULT WINAPI WMCreateReader(IUnknown *reserved, DWORD rights, IWMSyncReader **reader)
+{
+    FIXME("(%p, %x, %p): stub\n", reserved, rights, reader);
+
+    *reader = NULL;
+
+    return E_NOTIMPL;
+}
+
+HRESULT WINAPI WMCreateSyncReader(IUnknown *pcert, DWORD rights, IWMSyncReader **syncreader)
+{
+    FIXME("(%p, %x, %p): stub\n", pcert, rights, syncreader);
+
+    *syncreader = NULL;
+
+    return E_NOTIMPL;
 }

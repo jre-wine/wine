@@ -226,12 +226,12 @@ static const enum wined3d_format_id wined3d_format_lookup[] =
     /*WINED3DDECLTYPE_FLOAT16_4*/ WINED3DFMT_R16G16B16A16_FLOAT,
 };
 
-typedef struct {
+static const struct
+{
     BYTE usage;
     BYTE usage_idx;
-} wined3d_usage_t;
-
-static const wined3d_usage_t wined3d_usage_lookup[] =
+}
+wined3d_usage_lookup[] =
 {
     /* D3DVSDE_POSITION */      {WINED3D_DECL_USAGE_POSITION,      0},
     /* D3DVSDE_BLENDWEIGHT */   {WINED3D_DECL_USAGE_BLEND_WEIGHT,  0},
@@ -331,7 +331,7 @@ static const struct wined3d_parent_ops d3d8_vertexdeclaration_wined3d_parent_ops
 };
 
 HRESULT d3d8_vertex_declaration_init(struct d3d8_vertex_declaration *declaration,
-        IDirect3DDevice8Impl *device, const DWORD *elements, DWORD shader_handle)
+        struct d3d8_device *device, const DWORD *elements, DWORD shader_handle)
 {
     struct wined3d_vertex_element *wined3d_elements;
     UINT wined3d_element_count;
@@ -366,7 +366,7 @@ HRESULT d3d8_vertex_declaration_init(struct d3d8_vertex_declaration *declaration
 }
 
 HRESULT d3d8_vertex_declaration_init_fvf(struct d3d8_vertex_declaration *declaration,
-        IDirect3DDevice8Impl *device, DWORD fvf)
+        struct d3d8_device *device, DWORD fvf)
 {
     HRESULT hr;
 

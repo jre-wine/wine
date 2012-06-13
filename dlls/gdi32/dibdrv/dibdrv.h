@@ -18,11 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-enum dib_info_flags
-{
-    default_color_table = 1
-};
-
 typedef struct
 {
     int bit_count, width, height;
@@ -76,8 +71,7 @@ typedef struct dib_brush
     INT      rop;   /* rop2 last used to create the brush bits */
     COLORREF colorref;
     dib_info dib;
-    void    *and_bits;
-    void    *xor_bits;
+    rop_mask_bits masks;
     struct brush_pattern pattern;
     BOOL (*rects)(struct dibdrv_physdev *pdev, struct dib_brush *brush, dib_info *dib,
                   int num, const RECT *rects, INT rop);
@@ -180,7 +174,7 @@ typedef struct primitive_funcs
     void             (* solid_line)(const dib_info *dib, const POINT *start, const struct line_params *params,
                                     DWORD and, DWORD xor);
     void          (* pattern_rects)(const dib_info *dib, int num, const RECT *rc, const POINT *orign,
-                                    const dib_info *brush, void *and_bits, void *xor_bits);
+                                    const dib_info *brush, const rop_mask_bits *bits);
     void              (* copy_rect)(const dib_info *dst, const RECT *rc, const dib_info *src,
                                     const POINT *origin, int rop2, int overlap);
     void             (* blend_rect)(const dib_info *dst, const RECT *rc, const dib_info *src,
@@ -191,9 +185,10 @@ typedef struct primitive_funcs
     DWORD             (* get_pixel)(const dib_info *dib, int x, int y);
     DWORD     (* colorref_to_pixel)(const dib_info *dib, COLORREF color);
     COLORREF  (* pixel_to_colorref)(const dib_info *dib, DWORD pixel);
-    void             (* convert_to)(dib_info *dst, const dib_info *src, const RECT *src_rect);
-    BOOL       (* create_rop_masks)(const dib_info *dib, const dib_info *hatch,
+    void             (* convert_to)(dib_info *dst, const dib_info *src, const RECT *src_rect, BOOL dither);
+    void       (* create_rop_masks)(const dib_info *dib, const BYTE *hatch_ptr,
                                     const rop_mask *fg, const rop_mask *bg, rop_mask_bits *bits);
+    void    (* create_dither_masks)(const dib_info *dib, int rop2, COLORREF color, rop_mask_bits *bits);
     void            (* stretch_row)(const dib_info *dst_dib, const POINT *dst_start,
                                     const dib_info *src_dib, const POINT *src_start,
                                     const struct stretch_params *params, int mode, BOOL keep_dst);
@@ -238,8 +233,8 @@ struct clipped_rects
 
 extern void get_rop_codes(INT rop, struct rop_codes *codes) DECLSPEC_HIDDEN;
 extern void reset_dash_origin(dibdrv_physdev *pdev) DECLSPEC_HIDDEN;
-extern void init_dib_info_from_bitmapinfo(dib_info *dib, const BITMAPINFO *info, void *bits, enum dib_info_flags flags) DECLSPEC_HIDDEN;
-extern BOOL init_dib_info_from_bitmapobj(dib_info *dib, BITMAPOBJ *bmp, enum dib_info_flags flags) DECLSPEC_HIDDEN;
+extern void init_dib_info_from_bitmapinfo(dib_info *dib, const BITMAPINFO *info, void *bits) DECLSPEC_HIDDEN;
+extern BOOL init_dib_info_from_bitmapobj(dib_info *dib, BITMAPOBJ *bmp) DECLSPEC_HIDDEN;
 extern void free_dib_info(dib_info *dib) DECLSPEC_HIDDEN;
 extern void free_pattern_brush(dib_brush *brush) DECLSPEC_HIDDEN;
 extern void copy_dib_color_info(dib_info *dst, const dib_info *src) DECLSPEC_HIDDEN;
@@ -270,4 +265,9 @@ static inline int edge_coord( int y, int x1, int y1, int x2, int y2 )
         return x2 + (y - y2) * (x2 - x1) / (y2 - y1);
     else
         return x1 + (y - y1) * (x2 - x1) / (y2 - y1);
+}
+
+static inline const RGBQUAD *get_dib_color_table( const dib_info *dib )
+{
+    return dib->color_table ? dib->color_table : get_default_color_table( dib->bit_count );
 }

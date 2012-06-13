@@ -61,7 +61,8 @@ typedef struct {
     char addr_str[INET6_ADDRSTRLEN];
 
     LONG ref;
-    DWORD64 keep_until;
+
+    DWORD security_flags;
 
     struct list entry;
     struct list conn_pool;
@@ -69,7 +70,13 @@ typedef struct {
 
 void server_addref(server_t*) DECLSPEC_HIDDEN;
 void server_release(server_t*) DECLSPEC_HIDDEN;
-BOOL collect_connections(BOOL) DECLSPEC_HIDDEN;
+
+typedef enum {
+    COLLECT_TIMEOUT,
+    COLLECT_CONNECTIONS,
+    COLLECT_CLEANUP
+} collect_type_t;
+BOOL collect_connections(collect_type_t) DECLSPEC_HIDDEN;
 
 /* used for netconnection.c stuff */
 typedef struct
@@ -79,6 +86,7 @@ typedef struct
     void *ssl_s;
     server_t *server;
     DWORD security_flags;
+    BOOL mask_errors;
 
     BOOL keep_alive;
     DWORD64 keep_until;
@@ -253,6 +261,7 @@ typedef struct
     LPWSTR  proxyUsername;
     LPWSTR  proxyPassword;
     DWORD   accessType;
+    DWORD   connect_timeout;
 } appinfo_t;
 
 typedef struct
@@ -303,6 +312,7 @@ typedef struct
 {
     object_header_t hdr;
     http_session_t *session;
+    server_t *server;
     LPWSTR path;
     LPWSTR verb;
     LPWSTR rawHeaders;
@@ -523,7 +533,7 @@ VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
                            DWORD dwStatusInfoLength) DECLSPEC_HIDDEN;
 BOOL INTERNET_FindProxyForProtocol(LPCWSTR szProxy, LPCWSTR proto, WCHAR *foundProxy, DWORD *foundProxyLen) DECLSPEC_HIDDEN;
 
-DWORD create_netconn(BOOL, server_t *, DWORD, DWORD, netconn_t **) DECLSPEC_HIDDEN;
+DWORD create_netconn(BOOL,server_t*,DWORD,BOOL,DWORD,netconn_t**) DECLSPEC_HIDDEN;
 void free_netconn(netconn_t*) DECLSPEC_HIDDEN;
 void NETCON_unload(void) DECLSPEC_HIDDEN;
 DWORD NETCON_secure_connect(netconn_t *connection) DECLSPEC_HIDDEN;
@@ -549,5 +559,13 @@ typedef struct
     DWORD val;
     const char* name;
 } wininet_flag_info;
+
+/* Undocumented security flags */
+#define _SECURITY_FLAG_CERT_INVALID_CA  0x00800000
+#define _SECURITY_FLAG_CERT_INVALID_CN  0x02000000
+
+#define _SECURITY_ERROR_FLAGS_MASK              \
+    (_SECURITY_FLAG_CERT_INVALID_CA             \
+    |_SECURITY_FLAG_CERT_INVALID_CN)
 
 #endif /* _WINE_INTERNET_H_ */

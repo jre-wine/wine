@@ -78,7 +78,7 @@ typedef struct {
     X(neg,        1, 0,0)                  \
     X(neq,        1, 0,0)                  \
     X(neq2,       1, 0,0)                  \
-    X(new,        1, ARG_INT,    0)        \
+    X(new,        1, ARG_UINT,   0)        \
     X(new_obj,    1, 0,0)                  \
     X(null,       1, 0,0)                  \
     X(obj_prop,   1, ARG_BSTR,   0)        \
@@ -90,7 +90,7 @@ typedef struct {
     X(preinc,     1, ARG_INT,    0)        \
     X(push_except,1, ARG_ADDR,   ARG_BSTR) \
     X(push_scope, 1, 0,0)                  \
-    X(regexp,     1, ARG_STR,    ARG_INT)  \
+    X(regexp,     1, ARG_STR,    ARG_UINT) \
     X(rshift,     1, 0,0)                  \
     X(rshift2,    1, 0,0)                  \
     X(str,        1, ARG_STR,    0)        \
@@ -119,7 +119,6 @@ OP_LIST
 
 typedef union {
     BSTR bstr;
-    double *dbl;
     LONG lng;
     WCHAR *str;
     unsigned uint;
@@ -138,8 +137,10 @@ typedef enum {
 
 typedef struct {
     jsop_t op;
-    instr_arg_t arg1;
-    instr_arg_t arg2;
+    union {
+        instr_arg_t arg[2];
+        double dbl;
+    } u;
 } instr_t;
 
 typedef struct _function_code_t {

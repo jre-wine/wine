@@ -150,6 +150,7 @@ static HRESULT create_file(const char *filename, const unsigned char *data, cons
 #define DDS_PF_FOURCC 0x00000004
 #define DDS_PF_RGB 0x00000040
 #define DDS_PF_LUMINANCE 0x00020000
+#define DDS_PF_BUMPDUDV 0x00080000
 
 static void check_dds_pixel_format(DWORD flags, DWORD fourcc, DWORD bpp,
                                    DWORD rmask, DWORD gmask, DWORD bmask, DWORD amask,
@@ -397,13 +398,23 @@ static void test_D3DXGetImageInfo(void)
     check_dds_pixel_format(DDS_PF_RGB, 0, 32, 0xff0000, 0x00ff00, 0x0000ff, 0, D3DFMT_X8R8G8B8);
     check_dds_pixel_format(DDS_PF_RGB, 0, 32, 0x0000ffff, 0xffff0000, 0, 0, D3DFMT_G16R16);
     check_dds_pixel_format(DDS_PF_LUMINANCE, 0, 8, 0xff, 0, 0, 0, D3DFMT_L8);
+    check_dds_pixel_format(DDS_PF_LUMINANCE, 0, 16, 0xffff, 0, 0, 0, D3DFMT_L16);
     check_dds_pixel_format(DDS_PF_LUMINANCE | DDS_PF_ALPHA, 0, 16, 0x00ff, 0, 0, 0xff00, D3DFMT_A8L8);
     check_dds_pixel_format(DDS_PF_LUMINANCE | DDS_PF_ALPHA, 0, 8, 0x0f, 0, 0, 0xf0, D3DFMT_A4L4);
+    check_dds_pixel_format(DDS_PF_BUMPDUDV, 0, 16, 0x00ff, 0xff00, 0, 0, D3DFMT_V8U8);
+    check_dds_pixel_format(DDS_PF_BUMPDUDV, 0, 32, 0x0000ffff, 0xffff0000, 0, 0, D3DFMT_V16U16);
 
-    todo_wine {
-        hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit) - 1, &info);
-        ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
-    }
+    hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit) - 1, &info);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_24bit, sizeof(dds_24bit) - 1, &info);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_cube_map, sizeof(dds_cube_map) - 1, &info);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_volume_map, sizeof(dds_volume_map) - 1, &info);
+    todo_wine ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
 
 
     /* cleanup */
@@ -426,6 +437,7 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 {
     HRESULT hr;
     BOOL testdummy_ok, testbitmap_ok;
+    IDirect3DTexture9 *tex;
     IDirect3DSurface9 *surf, *newsurf;
     RECT rect, destrect;
     D3DLOCKED_RECT lockrect;
@@ -453,10 +465,8 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
     /* D3DXLoadSurfaceFromFile */
     if(testbitmap_ok) {
-        todo_wine {
-            hr = D3DXLoadSurfaceFromFileA(surf, NULL, NULL, "testbitmap.bmp", NULL, D3DX_DEFAULT, 0, NULL);
-            ok(hr == D3D_OK, "D3DXLoadSurfaceFromFile returned %#x, expected %#x\n", hr, D3D_OK);
-        }
+        hr = D3DXLoadSurfaceFromFileA(surf, NULL, NULL, "testbitmap.bmp", NULL, D3DX_DEFAULT, 0, NULL);
+        ok(hr == D3D_OK, "D3DXLoadSurfaceFromFile returned %#x, expected %#x\n", hr, D3D_OK);
 
         hr = D3DXLoadSurfaceFromFileA(NULL, NULL, NULL, "testbitmap.bmp", NULL, D3DX_DEFAULT, 0, NULL);
         ok(hr == D3DERR_INVALIDCALL, "D3DXLoadSurfaceFromFile returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
@@ -494,10 +504,8 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
 
     /* D3DXLoadSurfaceFromFileInMemory */
-    todo_wine {
-        hr = D3DXLoadSurfaceFromFileInMemory(surf, NULL, NULL, bmp01, sizeof(bmp01), NULL, D3DX_DEFAULT, 0, NULL);
-        ok(hr == D3D_OK, "D3DXLoadSurfaceFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-    }
+    hr = D3DXLoadSurfaceFromFileInMemory(surf, NULL, NULL, bmp01, sizeof(bmp01), NULL, D3DX_DEFAULT, 0, NULL);
+    ok(hr == D3D_OK, "D3DXLoadSurfaceFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
 
     hr = D3DXLoadSurfaceFromFileInMemory(surf, NULL, NULL, noimage, sizeof(noimage), NULL, D3DX_DEFAULT, 0, NULL);
     ok(hr == D3DXERR_INVALIDDATA, "D3DXLoadSurfaceFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
@@ -553,7 +561,8 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
     SetRect(&destrect, 0, 0, 0, 0); /* left = right, top = bottom */
     hr = D3DXLoadSurfaceFromMemory(surf, NULL, &destrect, pixdata, D3DFMT_A8R8G8B8, sizeof(pixdata), NULL, &rect, D3DX_FILTER_NONE, 0);
-    ok(hr == D3D_OK, "D3DXLoadSurfaceFromMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    /* fails when debug version of d3d9 is used */
+    ok(hr == D3D_OK || broken(hr == D3DERR_INVALIDCALL), "D3DXLoadSurfaceFromMemory returned %#x, expected %#x\n", hr, D3D_OK);
 
     SetRect(&destrect, 257, 257, 257, 257); /* left = right, top = bottom, but invalid values */
     hr = D3DXLoadSurfaceFromMemory(surf, NULL, &destrect, pixdata, D3DFMT_A8R8G8B8, sizeof(pixdata), NULL, &rect, D3DX_FILTER_NONE, 0);
@@ -574,6 +583,18 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
 
         check_release((IUnknown*)newsurf, 0);
     } else skip("Failed to create a second surface\n");
+
+    hr = IDirect3DDevice9_CreateTexture(device, 256, 256, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+    if (SUCCEEDED(hr))
+    {
+        IDirect3DTexture9_GetSurfaceLevel(tex, 0, &newsurf);
+
+        hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_DEFAULT, 0);
+        ok(hr == D3D_OK, "D3DXLoadSurfaceFromSurface returned %#x, expected %#x\n", hr, D3D_OK);
+
+        IDirect3DSurface9_Release(newsurf);
+        IDirect3DTexture9_Release(tex);
+    } else skip("Failed to create texture\n");
 
     check_release((IUnknown*)surf, 0);
 
@@ -828,6 +849,72 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
         check_release((IUnknown*)surf, 0);
     }
 
+    /* DXT1, DXT2, DXT3, DXT4, DXT5 */
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surf, NULL);
+    if (FAILED(hr))
+        skip("Failed to create R8G8B8 surface, hr %#x.\n", hr);
+    else
+    {
+        hr = D3DXLoadSurfaceFromFileInMemory(surf, NULL, NULL, dds_24bit, sizeof(dds_24bit), NULL, D3DX_FILTER_NONE, 0, NULL);
+        ok(SUCCEEDED(hr), "Failed to load surface, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_DXT2, D3DPOOL_SYSTEMMEM, &newsurf, NULL);
+        if (FAILED(hr))
+            skip("Failed to create DXT2 surface, hr %#x.\n", hr);
+        else
+        {
+            hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels to DXT2 format.\n");
+            check_release((IUnknown*)newsurf, 0);
+        }
+
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_DXT3, D3DPOOL_SYSTEMMEM, &newsurf, NULL);
+        if (FAILED(hr))
+            skip("Failed to create DXT3 surface, hr %#x.\n", hr);
+        else
+        {
+            hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels to DXT3 format.\n");
+            check_release((IUnknown*)newsurf, 0);
+        }
+
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_DXT4, D3DPOOL_SYSTEMMEM, &newsurf, NULL);
+        if (FAILED(hr))
+            skip("Failed to create DXT4 surface, hr %#x.\n", hr);
+        else
+        {
+            hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels to DXT4 format.\n");
+            check_release((IUnknown*)newsurf, 0);
+        }
+
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_DXT5, D3DPOOL_SYSTEMMEM, &newsurf, NULL);
+        if (FAILED(hr))
+            skip("Failed to create DXT5 surface, hr %#x.\n", hr);
+        else
+        {
+            hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels to DXT5 format.\n");
+            check_release((IUnknown*)newsurf, 0);
+        }
+
+        hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 4, 4, D3DFMT_DXT1, D3DPOOL_SYSTEMMEM, &newsurf, NULL);
+        if (FAILED(hr))
+            skip("Failed to create DXT1 surface, hr %#x.\n", hr);
+        else
+        {
+            hr = D3DXLoadSurfaceFromSurface(newsurf, NULL, NULL, surf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels to DXT1 format.\n");
+
+            hr = D3DXLoadSurfaceFromSurface(surf, NULL, NULL, newsurf, NULL, NULL, D3DX_FILTER_NONE, 0);
+            todo_wine ok(SUCCEEDED(hr), "Failed to convert pixels from DXT1 format.\n");
+
+            check_release((IUnknown*)newsurf, 0);
+        }
+
+        check_release((IUnknown*)surf, 0);
+    }
+
     /* cleanup */
     if(testdummy_ok) DeleteFileA("testdummy.bmp");
     if(testbitmap_ok) DeleteFileA("testbitmap.bmp");
@@ -906,7 +993,8 @@ next_tests:
     ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
     SetRect(&rect, 0, 0, 0, 0);
     hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
-    ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
+    /* fails when debug version of d3d9 is used */
+    ok(hr == D3D_OK || broken(hr == D3DERR_INVALIDCALL), "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
 
     DeleteFileA("saved_surface.bmp");
     DeleteFileA("saved_surface.ppm");

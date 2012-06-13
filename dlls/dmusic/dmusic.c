@@ -1,6 +1,8 @@
-/* IDirectMusic8 Implementation
+/*
+ * IDirectMusic8 Implementation
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
+ * Copyright (C) 2012 Christian Costa
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,51 +31,56 @@ static inline IDirectMusic8Impl *impl_from_IDirectMusic8(IDirectMusic8 *iface)
 }
 
 /* IDirectMusic8Impl IUnknown part: */
-static HRESULT WINAPI IDirectMusic8Impl_QueryInterface(LPDIRECTMUSIC8 iface, REFIID riid, LPVOID *ppobj)
+static HRESULT WINAPI IDirectMusic8Impl_QueryInterface(LPDIRECTMUSIC8 iface, REFIID riid, LPVOID *ret_iface)
 {
-	IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
-	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
+    IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
 
-	if (IsEqualIID (riid, &IID_IUnknown) || 
-	    IsEqualIID (riid, &IID_IDirectMusic) ||
-	    IsEqualIID (riid, &IID_IDirectMusic2) ||
-	    IsEqualIID (riid, &IID_IDirectMusic8)) {
-		IUnknown_AddRef(iface);
-		*ppobj = This;
-		return S_OK;
-	}
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_dmguid(riid), ret_iface);
 
-	WARN("(%p, %s, %p): not found\n", This, debugstr_dmguid(riid), ppobj);
-	return E_NOINTERFACE;
+    if (IsEqualIID (riid, &IID_IUnknown) ||
+        IsEqualIID (riid, &IID_IDirectMusic) ||
+        IsEqualIID (riid, &IID_IDirectMusic2) ||
+        IsEqualIID (riid, &IID_IDirectMusic8))
+    {
+        IDirectMusic8_AddRef(iface);
+        *ret_iface = iface;
+        return S_OK;
+    }
+
+    *ret_iface = NULL;
+
+    WARN("(%p, %s, %p): not found\n", This, debugstr_dmguid(riid), ret_iface);
+
+    return E_NOINTERFACE;
 }
 
 static ULONG WINAPI IDirectMusic8Impl_AddRef(LPDIRECTMUSIC8 iface)
 {
-	IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
-	ULONG refCount = InterlockedIncrement(&This->ref);
+    IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
 
-	TRACE("(%p)->(ref before=%u)\n", This, refCount - 1);
+    TRACE("(%p)->(): new ref = %u\n", This, ref);
 
-	DMUSIC_LockModule();
+    DMUSIC_LockModule();
 
-	return refCount;
+    return ref;
 }
 
 static ULONG WINAPI IDirectMusic8Impl_Release(LPDIRECTMUSIC8 iface)
 {
-	IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
-	ULONG refCount = InterlockedDecrement(&This->ref);
+    IDirectMusic8Impl *This = impl_from_IDirectMusic8(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
 
-	TRACE("(%p)->(ref before=%u)\n", This, refCount + 1);
+    TRACE("(%p)->(): new ref = %u\n", This, ref);
 
-	if (!refCount) {
-		HeapFree(GetProcessHeap(), 0, This->ppPorts);
-		HeapFree(GetProcessHeap(), 0, This);
-	}
+    if (!ref) {
+        HeapFree(GetProcessHeap(), 0, This->ppPorts);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
 
-	DMUSIC_UnlockModule();
-	
-	return refCount;
+    DMUSIC_UnlockModule();
+
+    return ref;
 }
 
 /* IDirectMusic8Impl IDirectMusic part: */
@@ -362,23 +369,37 @@ static const IDirectMusic8Vtbl DirectMusic8_Vtbl = {
 	IDirectMusic8Impl_SetExternalMasterClock
 };
 
-/* for ClassFactory */
-HRESULT WINAPI DMUSIC_CreateDirectMusicImpl (LPCGUID lpcGUID, LPVOID* ppobj, LPUNKNOWN pUnkOuter) {
-	IDirectMusic8Impl *dmusic;
+/* For ClassFactory */
+HRESULT WINAPI DMUSIC_CreateDirectMusicImpl(LPCGUID riid, LPVOID* ret_iface, LPUNKNOWN unkouter)
+{
+    IDirectMusic8Impl *dmusic;
+    HRESULT ret;
 
-	TRACE("(%p,%p,%p)\n",lpcGUID, ppobj, pUnkOuter);
+    TRACE("(%p,%p,%p)\n", riid, ret_iface, unkouter);
 
-	dmusic = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusic8Impl));
-	if (NULL == dmusic) {
-		*ppobj = NULL;
-		return E_OUTOFMEMORY;
-	}
-	dmusic->IDirectMusic8_iface.lpVtbl = &DirectMusic8_Vtbl;
-	dmusic->ref = 0; /* will be inited with QueryInterface */
-	dmusic->pMasterClock = NULL;
-	dmusic->ppPorts = NULL;
-	dmusic->nrofports = 0;
-	DMUSIC_CreateReferenceClockImpl (&IID_IReferenceClock, (LPVOID*)&dmusic->pMasterClock, NULL);
-	
-	return IDirectMusic8Impl_QueryInterface ((LPDIRECTMUSIC8)dmusic, lpcGUID, ppobj);
+    *ret_iface = NULL;
+
+    dmusic = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusic8Impl));
+    if (!dmusic)
+        return E_OUTOFMEMORY;
+
+    dmusic->IDirectMusic8_iface.lpVtbl = &DirectMusic8_Vtbl;
+    dmusic->ref = 0; /* Will be inited by QueryInterface */
+    dmusic->pMasterClock = NULL;
+    dmusic->ppPorts = NULL;
+    dmusic->nrofports = 0;
+    ret = DMUSIC_CreateReferenceClockImpl(&IID_IReferenceClock, (LPVOID*)&dmusic->pMasterClock, NULL);
+    if (FAILED(ret)) {
+        HeapFree(GetProcessHeap(), 0, dmusic);
+        return ret;
+    }
+
+    ret = IDirectMusic8Impl_QueryInterface(&dmusic->IDirectMusic8_iface, riid, ret_iface);
+    if (FAILED(ret)) {
+        IReferenceClock_Release(&dmusic->pMasterClock->IReferenceClock_iface);
+        HeapFree(GetProcessHeap(), 0, dmusic);
+        return ret;
+    }
+
+    return S_OK;
 }

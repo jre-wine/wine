@@ -1,4 +1,5 @@
-/* DirectMusic Private Include
+/*
+ * DirectMusic Private Include
  *
  * Copyright (C) 2003-2004 Rok Mandeljc
  *
@@ -143,20 +144,20 @@ struct IDirectMusicDownloadImpl {
  * IDirectMusicPortImpl implementation structure
  */
 struct IDirectMusicPortImpl {
-  /* IUnknown fields */
-  const IDirectMusicPortVtbl *lpVtbl;
-  const IDirectMusicPortDownloadVtbl *lpDownloadVtbl;
-  const IDirectMusicThruVtbl *lpThruVtbl;
-  LONG           ref;
+    /* IUnknown fields */
+    IDirectMusicPort IDirectMusicPort_iface;
+    IDirectMusicPortDownload IDirectMusicPortDownload_iface;
+    IDirectMusicThru IDirectMusicThru_iface;
+    LONG ref;
 
-  /* IDirectMusicPortImpl fields */
-  IDirectSound* pDirectSound;
-  IReferenceClock* pLatencyClock;
-  BOOL fActive;
-  DMUS_PORTCAPS caps;
-  DMUS_PORTPARAMS params;
-  int nrofgroups;
-  DMUSIC_PRIVATE_CHANNEL_GROUP group[1];
+    /* IDirectMusicPortImpl fields */
+    IDirectSound* pDirectSound;
+    IReferenceClock* pLatencyClock;
+    BOOL fActive;
+    DMUS_PORTCAPS caps;
+    DMUS_PORTPARAMS params;
+    int nrofgroups;
+    DMUSIC_PRIVATE_CHANNEL_GROUP group[1];
 };
 
 /** Internal factory */
@@ -166,13 +167,13 @@ extern HRESULT DMUSIC_CreateDirectMusicPortImpl (LPCGUID lpcGUID, LPVOID *ppobj,
  * IReferenceClockImpl implementation structure
  */
 struct IReferenceClockImpl {
-  /* IUnknown fields */
-  const IReferenceClockVtbl *lpVtbl;
-  LONG           ref;
+    /* IUnknown fields */
+    IReferenceClock IReferenceClock_iface;
+    LONG ref;
 
-  /* IReferenceClockImpl fields */
-  REFERENCE_TIME rtTime;
-  DMUS_CLOCKINFO pClockInfo;
+    /* IReferenceClockImpl fields */
+    REFERENCE_TIME rtTime;
+    DMUS_CLOCKINFO pClockInfo;
 };
 
 typedef struct _DMUS_PRIVATE_INSTRUMENT_ENTRY {
@@ -188,25 +189,24 @@ typedef struct _DMUS_PRIVATE_POOLCUE {
  * IDirectMusicCollectionImpl implementation structure
  */
 struct IDirectMusicCollectionImpl {
-  /* IUnknown fields */
-  const IUnknownVtbl *UnknownVtbl;
-  const IDirectMusicCollectionVtbl *CollectionVtbl;
-  const IDirectMusicObjectVtbl *ObjectVtbl;
-  const IPersistStreamVtbl *PersistStreamVtbl;
-  LONG           ref;
+    /* IUnknown fields */
+    IDirectMusicCollection IDirectMusicCollection_iface;
+    IDirectMusicObject IDirectMusicObject_iface;
+    IPersistStream IPersistStream_iface;
+    LONG ref;
 
-  /* IDirectMusicCollectionImpl fields */
-  IStream *pStm; /* stream from which we load collection and later instruments */
-  LARGE_INTEGER liCollectionPosition; /* offset in a stream where collection was loaded from */
-  LARGE_INTEGER liWavePoolTablePosition; /* offset in a stream where wave pool table can be found */
-  LPDMUS_OBJECTDESC pDesc;
-  CHAR* szCopyright; /* FIXME: should probably placed somewhere else */
-  LPDLSHEADER pHeader;
-  /* pool table */
-  LPPOOLTABLE pPoolTable;
-  LPPOOLCUE pPoolCues;
-  /* instruments */
-  struct list Instruments;
+    /* IDirectMusicCollectionImpl fields */
+    IStream *pStm; /* stream from which we load collection and later instruments */
+    LARGE_INTEGER liCollectionPosition; /* offset in a stream where collection was loaded from */
+    LARGE_INTEGER liWavePoolTablePosition; /* offset in a stream where wave pool table can be found */
+    LPDMUS_OBJECTDESC pDesc;
+    CHAR* szCopyright; /* FIXME: should probably placed somewhere else */
+    LPDLSHEADER pHeader;
+    /* pool table */
+    LPPOOLTABLE pPoolTable;
+    LPPOOLCUE pPoolCues;
+    /* instruments */
+    struct list Instruments;
 };
 
 /*****************************************************************************

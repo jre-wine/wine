@@ -30,6 +30,9 @@
 #ifdef HAVE_SYS_TIMES_H
 #include <sys/times.h>
 #endif
+#ifdef HAVE_SYS_SYSCALL_H
+#include <sys/syscall.h>
+#endif
 
 #define NONAMELESSUNION
 #include "ntstatus.h"
@@ -1172,4 +1175,46 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
         FIXME( "info class %d not supported yet\n", class );
         return STATUS_NOT_IMPLEMENTED;
     }
+}
+
+/******************************************************************************
+ * NtGetCurrentProcessorNumber (NTDLL.@)
+ *
+ * Return the processor, on which the thread is running
+ *
+ */
+ULONG WINAPI NtGetCurrentProcessorNumber(void)
+{
+    ULONG processor;
+
+#if defined(__linux__) && defined(__NR_getcpu)
+    int res = syscall(__NR_getcpu, &processor);
+    if (res != -1) return processor;
+#endif
+
+    if (NtCurrentTeb()->Peb->NumberOfProcessors > 1)
+    {
+        ULONG_PTR thread_mask, processor_mask;
+        NTSTATUS status;
+
+        status = NtQueryInformationThread(GetCurrentThread(), ThreadAffinityMask,
+                                          &thread_mask, sizeof(thread_mask), NULL);
+        if (status == STATUS_SUCCESS)
+        {
+            for (processor = 0; processor < NtCurrentTeb()->Peb->NumberOfProcessors; processor++)
+            {
+                processor_mask = (1 << processor);
+                if (thread_mask & processor_mask)
+                {
+                    if (thread_mask != processor_mask)
+                        FIXME("need multicore support (%d processors)\n",
+                              NtCurrentTeb()->Peb->NumberOfProcessors);
+                    return processor;
+                }
+            }
+        }
+    }
+
+    /* fallback to the first processor */
+    return 0;
 }

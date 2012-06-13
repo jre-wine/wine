@@ -489,7 +489,7 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain, const RECT
         TRACE("Rendering the cursor. Creating fake surface at %p\n", &cursor);
         /* Build a fake surface to call the Blitting code. It is not possible to use the interface passed by
          * the application because we are only supposed to copy the information out. Using a fake surface
-         * allows to use the Blitting engine and avoid copying the whole texture -> render target blitting code.
+         * allows us to use the Blitting engine and avoid copying the whole texture -> render target blitting code.
          */
         memset(&cursor, 0, sizeof(cursor));
         cursor.resource.ref = 1;
@@ -714,7 +714,7 @@ void x11_copy_to_screen(const struct wined3d_swapchain *swapchain, const RECT *r
     if (!(front->resource.usage & WINED3DUSAGE_RENDERTARGET))
         return;
 
-    if (front->flags & SFLAG_LOCKED)
+    if (front->resource.map_count)
         ERR("Trying to blit a mapped surface.\n");
 
     TRACE("Copying surface %p to screen.\n", front);

@@ -185,7 +185,7 @@ static const char *event_names[EVENT_LAST] = {
     "endElement",
     "characters",
     "ignorableWhitespace",
-    "processingIntruction",
+    "processingInstruction",
     "skippedEntity",
     "error",
     "fatalError",
@@ -2813,6 +2813,7 @@ static void test_mxwriter_properties(void)
 
 static void test_mxwriter_flush(void)
 {
+    static const WCHAR emptyW[] = {0};
     ISAXContentHandler *content;
     IMXWriter *writer;
     LARGE_INTEGER pos;
@@ -2820,6 +2821,7 @@ static void test_mxwriter_flush(void)
     IStream *stream;
     VARIANT dest;
     HRESULT hr;
+    char *buff;
 
     hr = CoCreateInstance(&CLSID_MXXMLWriter, NULL, CLSCTX_INPROC_SERVER,
             &IID_IMXWriter, (void**)&writer);
@@ -2886,9 +2888,89 @@ static void test_mxwriter_flush(void)
     ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(pos2.QuadPart != 0, "expected stream position moved\n");
 
+    IStream_Release(stream);
+
+    /* auto-flush feature */
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    EXPECT_HR(hr, S_OK);
+    EXPECT_REF(stream, 1);
+
+    V_VT(&dest) = VT_UNKNOWN;
+    V_UNKNOWN(&dest) = (IUnknown*)stream;
+    hr = IMXWriter_put_output(writer, dest);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXWriter_put_byteOrderMark(writer, VARIANT_FALSE);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXWriter_put_omitXMLDeclaration(writer, VARIANT_TRUE);
+    EXPECT_HR(hr, S_OK);
+
+    hr = ISAXContentHandler_startDocument(content);
+    EXPECT_HR(hr, S_OK);
+
+    hr = ISAXContentHandler_startElement(content, emptyW, 0, emptyW, 0, _bstr_("a"), -1, NULL);
+    EXPECT_HR(hr, S_OK);
+
+    /* internal buffer is flushed automatically on certain threshold */
+    pos.QuadPart = 0;
+    pos2.QuadPart = 1;
+    hr = IStream_Seek(stream, pos, STREAM_SEEK_CUR, &pos2);
+    EXPECT_HR(hr, S_OK);
+    ok(pos2.QuadPart == 0, "expected stream beginning\n");
+
+    buff = HeapAlloc(GetProcessHeap(), 0, 2048);
+    memset(buff, 'A', 2048);
+    hr = ISAXContentHandler_characters(content, _bstr_(buff), 2048);
+    EXPECT_HR(hr, S_OK);
+
+    pos.QuadPart = 0;
+    pos2.QuadPart = 0;
+    hr = IStream_Seek(stream, pos, STREAM_SEEK_CUR, &pos2);
+    EXPECT_HR(hr, S_OK);
+todo_wine
+    ok(pos2.QuadPart != 0, "unexpected stream beginning\n");
+
+    hr = ISAXContentHandler_endDocument(content);
+    EXPECT_HR(hr, S_OK);
+
+    IStream_Release(stream);
+
+    /* test char count lower than threshold */
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    EXPECT_HR(hr, S_OK);
+    EXPECT_REF(stream, 1);
+
+    hr = ISAXContentHandler_startDocument(content);
+    EXPECT_HR(hr, S_OK);
+
+    hr = ISAXContentHandler_startElement(content, emptyW, 0, emptyW, 0, _bstr_("a"), -1, NULL);
+    EXPECT_HR(hr, S_OK);
+
+    pos.QuadPart = 0;
+    pos2.QuadPart = 1;
+    hr = IStream_Seek(stream, pos, STREAM_SEEK_CUR, &pos2);
+    EXPECT_HR(hr, S_OK);
+    ok(pos2.QuadPart == 0, "expected stream beginning\n");
+
+    memset(buff, 'A', 2048);
+    hr = ISAXContentHandler_characters(content, _bstr_(buff), 2040);
+    EXPECT_HR(hr, S_OK);
+
+    pos.QuadPart = 0;
+    pos2.QuadPart = 1;
+    hr = IStream_Seek(stream, pos, STREAM_SEEK_CUR, &pos2);
+    EXPECT_HR(hr, S_OK);
+    ok(pos2.QuadPart == 0, "expected stream beginning\n");
+
+    hr = ISAXContentHandler_endDocument(content);
+    EXPECT_HR(hr, S_OK);
+
+    HeapFree(GetProcessHeap(), 0, buff);
     ISAXContentHandler_Release(content);
     IStream_Release(stream);
     IMXWriter_Release(writer);
+    free_bstrs();
 }
 
 static void test_mxwriter_startenddocument(void)
@@ -3647,16 +3729,31 @@ static void test_mxwriter_stream(void)
     free_bstrs();
 }
 
+static const char *encoding_names[] = {
+    "iso-8859-1",
+    "iso-8859-2",
+    "iso-8859-3",
+    "iso-8859-4",
+    "iso-8859-5",
+    "iso-8859-7",
+    "iso-8859-9",
+    "iso-8859-13",
+    "iso-8859-15",
+    NULL
+};
+
 static void test_mxwriter_encoding(void)
 {
     ISAXContentHandler *content;
     IMXWriter *writer;
     IStream *stream;
+    const char *enc;
     VARIANT dest;
     HRESULT hr;
     HGLOBAL g;
     char *ptr;
     BSTR s;
+    int i;
 
     hr = CoCreateInstance(&CLSID_MXXMLWriter, NULL, CLSCTX_INPROC_SERVER,
             &IID_IMXWriter, (void**)&writer);
@@ -3725,6 +3822,61 @@ static void test_mxwriter_encoding(void)
     SysFreeString(s);
 
     IStream_Release(stream);
+
+    i = 0;
+    enc = encoding_names[i];
+    while (enc)
+    {
+        char expectedA[200];
+
+        hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+        EXPECT_HR(hr, S_OK);
+
+        V_VT(&dest) = VT_UNKNOWN;
+        V_UNKNOWN(&dest) = (IUnknown*)stream;
+        hr = IMXWriter_put_output(writer, dest);
+        EXPECT_HR(hr, S_OK);
+
+        hr = IMXWriter_put_encoding(writer, _bstr_(enc));
+        ok(hr == S_OK || broken(hr != S_OK) /* old win versions do not support certain encodings */,
+            "%s: encoding not accepted\n", enc);
+        if (hr != S_OK)
+        {
+            enc = encoding_names[++i];
+            IStream_Release(stream);
+            continue;
+        }
+
+        hr = ISAXContentHandler_startDocument(content);
+        EXPECT_HR(hr, S_OK);
+
+        hr = ISAXContentHandler_endDocument(content);
+        EXPECT_HR(hr, S_OK);
+
+        hr = IMXWriter_flush(writer);
+        EXPECT_HR(hr, S_OK);
+
+        /* prepare expected string */
+        *expectedA = 0;
+        strcat(expectedA, "<?xml version=\"1.0\" encoding=\"");
+        strcat(expectedA, enc);
+        strcat(expectedA, "\" standalone=\"no\"?>\r\n");
+
+        hr = GetHGlobalFromStream(stream, &g);
+        EXPECT_HR(hr, S_OK);
+
+        ptr = GlobalLock(g);
+        ok(!strncmp(ptr, expectedA, strlen(expectedA)), "%s: got %s, expected %.50s\n", enc, ptr, expectedA);
+        GlobalUnlock(g);
+
+        V_VT(&dest) = VT_EMPTY;
+        hr = IMXWriter_put_output(writer, dest);
+        EXPECT_HR(hr, S_OK);
+
+        IStream_Release(stream);
+
+        enc = encoding_names[++i];
+    }
 
     ISAXContentHandler_Release(content);
     IMXWriter_Release(writer);

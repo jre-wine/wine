@@ -55,6 +55,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 static const WCHAR colspaceW[] = {':',' ',0};
 static const WCHAR crlfW[] = {'\r','\n',0};
+static const DWORD safety_supported_options =
+    INTERFACESAFE_FOR_UNTRUSTED_CALLER |
+    INTERFACESAFE_FOR_UNTRUSTED_DATA   |
+    INTERFACE_USES_SECURITY_MANAGER;
 
 typedef struct BindStatusCallback BindStatusCallback;
 
@@ -107,6 +111,13 @@ typedef struct
     DWORD safeopt;
 } httprequest;
 
+typedef struct
+{
+    httprequest req;
+    IServerXMLHTTPRequest IServerXMLHTTPRequest_iface;
+    LONG ref;
+} serverhttp;
+
 static inline httprequest *impl_from_IXMLHTTPRequest( IXMLHTTPRequest *iface )
 {
     return CONTAINING_RECORD(iface, httprequest, IXMLHTTPRequest_iface);
@@ -120,6 +131,11 @@ static inline httprequest *impl_from_IObjectWithSite(IObjectWithSite *iface)
 static inline httprequest *impl_from_IObjectSafety(IObjectSafety *iface)
 {
     return CONTAINING_RECORD(iface, httprequest, IObjectSafety_iface);
+}
+
+static inline serverhttp *impl_from_IServerXMLHTTPRequest(IServerXMLHTTPRequest *iface)
+{
+    return CONTAINING_RECORD(iface, serverhttp, IServerXMLHTTPRequest_iface);
 }
 
 static void httprequest_setreadystate(httprequest *This, READYSTATE state)
@@ -735,168 +751,15 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
     return hr;
 }
 
-static HRESULT WINAPI httprequest_QueryInterface(IXMLHTTPRequest *iface, REFIID riid, void **ppvObject)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
-
-    if ( IsEqualGUID( riid, &IID_IXMLHTTPRequest) ||
-         IsEqualGUID( riid, &IID_IDispatch) ||
-         IsEqualGUID( riid, &IID_IUnknown) )
-    {
-        *ppvObject = iface;
-    }
-    else if (IsEqualGUID(&IID_IObjectWithSite, riid))
-    {
-        *ppvObject = &This->IObjectWithSite_iface;
-    }
-    else if (IsEqualGUID(&IID_IObjectSafety, riid))
-    {
-        *ppvObject = &This->IObjectSafety_iface;
-    }
-    else
-    {
-        TRACE("Unsupported interface %s\n", debugstr_guid(riid));
-        *ppvObject = NULL;
-        return E_NOINTERFACE;
-    }
-
-    IXMLHTTPRequest_AddRef( iface );
-
-    return S_OK;
-}
-
-static ULONG WINAPI httprequest_AddRef(IXMLHTTPRequest *iface)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    ULONG ref = InterlockedIncrement( &This->ref );
-    TRACE("(%p)->(%u)\n", This, ref );
-    return ref;
-}
-
-static ULONG WINAPI httprequest_Release(IXMLHTTPRequest *iface)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    ULONG ref = InterlockedDecrement( &This->ref );
-
-    TRACE("(%p)->(%u)\n", This, ref );
-
-    if ( ref == 0 )
-    {
-        struct httpheader *header, *header2;
-
-        if (This->site)
-            IUnknown_Release( This->site );
-
-        SysFreeString(This->custom);
-        SysFreeString(This->siteurl);
-        SysFreeString(This->url);
-        SysFreeString(This->user);
-        SysFreeString(This->password);
-
-        /* request headers */
-        LIST_FOR_EACH_ENTRY_SAFE(header, header2, &This->reqheaders, struct httpheader, entry)
-        {
-            list_remove(&header->entry);
-            SysFreeString(header->header);
-            SysFreeString(header->value);
-            heap_free(header);
-        }
-        /* response headers */
-        free_response_headers(This);
-        SysFreeString(This->status_text);
-
-        /* detach callback object */
-        BindStatusCallback_Detach(This->bsc);
-
-        if (This->sink) IDispatch_Release(This->sink);
-
-        heap_free( This );
-    }
-
-    return ref;
-}
-
-static HRESULT WINAPI httprequest_GetTypeInfoCount(IXMLHTTPRequest *iface, UINT *pctinfo)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, pctinfo);
-
-    *pctinfo = 1;
-
-    return S_OK;
-}
-
-static HRESULT WINAPI httprequest_GetTypeInfo(IXMLHTTPRequest *iface, UINT iTInfo,
-        LCID lcid, ITypeInfo **ppTInfo)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
-
-    return get_typeinfo(IXMLHTTPRequest_tid, ppTInfo);
-}
-
-static HRESULT WINAPI httprequest_GetIDsOfNames(IXMLHTTPRequest *iface, REFIID riid,
-        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
-          lcid, rgDispId);
-
-    if(!rgszNames || cNames == 0 || !rgDispId)
-        return E_INVALIDARG;
-
-    hr = get_typeinfo(IXMLHTTPRequest_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
-}
-
-static HRESULT WINAPI httprequest_Invoke(IXMLHTTPRequest *iface, DISPID dispIdMember, REFIID riid,
-        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
-        EXCEPINFO *pExcepInfo, UINT *puArgErr)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
-
-    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
-          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-
-    hr = get_typeinfo(IXMLHTTPRequest_tid, &typeinfo);
-    if(SUCCEEDED(hr))
-    {
-        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLHTTPRequest_iface, dispIdMember, wFlags,
-                pDispParams, pVarResult, pExcepInfo, puArgErr);
-        ITypeInfo_Release(typeinfo);
-    }
-
-    return hr;
-}
-
-static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR url,
+static HRESULT httprequest_open(httprequest *This, BSTR method, BSTR url,
         VARIANT async, VARIANT user, VARIANT password)
 {
     static const WCHAR MethodGetW[] = {'G','E','T',0};
     static const WCHAR MethodPutW[] = {'P','U','T',0};
     static const WCHAR MethodPostW[] = {'P','O','S','T',0};
     static const WCHAR MethodDeleteW[] = {'D','E','L','E','T','E',0};
-
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     VARIANT str, is_async;
     HRESULT hr;
-
-    TRACE("(%p)->(%s %s %s)\n", This, debugstr_w(method), debugstr_w(url),
-        debugstr_variant(&async));
 
     if (!method || !url) return E_INVALIDARG;
 
@@ -966,12 +829,9 @@ static HRESULT WINAPI httprequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR header, BSTR value)
+static HRESULT httprequest_setRequestHeader(httprequest *This, BSTR header, BSTR value)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     struct httpheader *entry;
-
-    TRACE("(%p)->(%s %s)\n", This, debugstr_w(header), debugstr_w(value));
 
     if (!header || !*header) return E_INVALIDARG;
     if (This->state != READYSTATE_LOADING) return E_FAIL;
@@ -1010,12 +870,9 @@ static HRESULT WINAPI httprequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR 
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_getResponseHeader(IXMLHTTPRequest *iface, BSTR header, BSTR *value)
+static HRESULT httprequest_getResponseHeader(httprequest *This, BSTR header, BSTR *value)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     struct httpheader *entry;
-
-    TRACE("(%p)->(%s %p)\n", This, debugstr_w(header), value);
 
     if (!header || !value) return E_INVALIDARG;
 
@@ -1049,12 +906,8 @@ static HRESULT WINAPI httprequest_getResponseHeader(IXMLHTTPRequest *iface, BSTR
     return S_FALSE;
 }
 
-static HRESULT WINAPI httprequest_getAllResponseHeaders(IXMLHTTPRequest *iface, BSTR *respheaders)
+static HRESULT httprequest_getAllResponseHeaders(httprequest *This, BSTR *respheaders)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, respheaders);
-
     if (!respheaders) return E_INVALIDARG;
 
     *respheaders = SysAllocString(This->raw_respheaders);
@@ -1062,13 +915,10 @@ static HRESULT WINAPI httprequest_getAllResponseHeaders(IXMLHTTPRequest *iface, 
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_send(IXMLHTTPRequest *iface, VARIANT body)
+static HRESULT httprequest_send(httprequest *This, VARIANT body)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     BindStatusCallback *bsc = NULL;
     HRESULT hr;
-
-    TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
 
     if (This->state != READYSTATE_LOADING) return E_FAIL;
 
@@ -1081,12 +931,8 @@ static HRESULT WINAPI httprequest_send(IXMLHTTPRequest *iface, VARIANT body)
     return hr;
 }
 
-static HRESULT WINAPI httprequest_abort(IXMLHTTPRequest *iface)
+static HRESULT httprequest_abort(httprequest *This)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)\n", This);
-
     BindStatusCallback_Detach(This->bsc);
     This->bsc = NULL;
 
@@ -1095,12 +941,8 @@ static HRESULT WINAPI httprequest_abort(IXMLHTTPRequest *iface)
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_get_status(IXMLHTTPRequest *iface, LONG *status)
+static HRESULT httprequest_get_status(httprequest *This, LONG *status)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, status);
-
     if (!status) return E_INVALIDARG;
     if (This->state != READYSTATE_COMPLETE) return E_FAIL;
 
@@ -1109,12 +951,8 @@ static HRESULT WINAPI httprequest_get_status(IXMLHTTPRequest *iface, LONG *statu
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_get_statusText(IXMLHTTPRequest *iface, BSTR *status)
+static HRESULT httprequest_get_statusText(httprequest *This, BSTR *status)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, status);
-
     if (!status) return E_INVALIDARG;
     if (This->state != READYSTATE_COMPLETE) return E_FAIL;
 
@@ -1123,43 +961,10 @@ static HRESULT WINAPI httprequest_get_statusText(IXMLHTTPRequest *iface, BSTR *s
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_get_responseXML(IXMLHTTPRequest *iface, IDispatch **body)
+static HRESULT httprequest_get_responseText(httprequest *This, BSTR *body)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-    IXMLDOMDocument3 *doc;
-    HRESULT hr;
-    BSTR str;
-
-    TRACE("(%p)->(%p)\n", This, body);
-
-    if (!body) return E_INVALIDARG;
-    if (This->state != READYSTATE_COMPLETE) return E_FAIL;
-
-    hr = DOMDocument_create(MSXML_DEFAULT, NULL, (void**)&doc);
-    if (hr != S_OK) return hr;
-
-    hr = IXMLHTTPRequest_get_responseText(iface, &str);
-    if (hr == S_OK)
-    {
-        VARIANT_BOOL ok;
-
-        hr = IXMLDOMDocument3_loadXML(doc, str, &ok);
-        SysFreeString(str);
-    }
-
-    IXMLDOMDocument3_QueryInterface(doc, &IID_IDispatch, (void**)body);
-    IXMLDOMDocument3_Release(doc);
-
-    return hr;
-}
-
-static HRESULT WINAPI httprequest_get_responseText(IXMLHTTPRequest *iface, BSTR *body)
-{
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     HGLOBAL hglobal;
     HRESULT hr;
-
-    TRACE("(%p)->(%p)\n", This, body);
 
     if (!body) return E_INVALIDARG;
     if (This->state != READYSTATE_COMPLETE) return E_FAIL;
@@ -1206,13 +1011,37 @@ static HRESULT WINAPI httprequest_get_responseText(IXMLHTTPRequest *iface, BSTR 
     return hr;
 }
 
-static HRESULT WINAPI httprequest_get_responseBody(IXMLHTTPRequest *iface, VARIANT *body)
+static HRESULT httprequest_get_responseXML(httprequest *This, IDispatch **body)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    IXMLDOMDocument3 *doc;
+    HRESULT hr;
+    BSTR str;
+
+    if (!body) return E_INVALIDARG;
+    if (This->state != READYSTATE_COMPLETE) return E_FAIL;
+
+    hr = DOMDocument_create(MSXML_DEFAULT, NULL, (void**)&doc);
+    if (hr != S_OK) return hr;
+
+    hr = httprequest_get_responseText(This, &str);
+    if (hr == S_OK)
+    {
+        VARIANT_BOOL ok;
+
+        hr = IXMLDOMDocument3_loadXML(doc, str, &ok);
+        SysFreeString(str);
+    }
+
+    IXMLDOMDocument3_QueryInterface(doc, &IID_IDispatch, (void**)body);
+    IXMLDOMDocument3_Release(doc);
+
+    return hr;
+}
+
+static HRESULT httprequest_get_responseBody(httprequest *This, VARIANT *body)
+{
     HGLOBAL hglobal;
     HRESULT hr;
-
-    TRACE("(%p)->(%p)\n", This, body);
 
     if (!body) return E_INVALIDARG;
     V_VT(body) = VT_EMPTY;
@@ -1259,14 +1088,11 @@ static HRESULT WINAPI httprequest_get_responseBody(IXMLHTTPRequest *iface, VARIA
     return hr;
 }
 
-static HRESULT WINAPI httprequest_get_responseStream(IXMLHTTPRequest *iface, VARIANT *body)
+static HRESULT httprequest_get_responseStream(httprequest *This, VARIANT *body)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
     LARGE_INTEGER move;
     IStream *stream;
     HRESULT hr;
-
-    TRACE("(%p)->(%p)\n", This, body);
 
     if (!body) return E_INVALIDARG;
     V_VT(body) = VT_EMPTY;
@@ -1284,53 +1110,297 @@ static HRESULT WINAPI httprequest_get_responseStream(IXMLHTTPRequest *iface, VAR
     return hr;
 }
 
-static HRESULT WINAPI httprequest_get_readyState(IXMLHTTPRequest *iface, LONG *state)
+static HRESULT httprequest_get_readyState(httprequest *This, LONG *state)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, state);
-
     if (!state) return E_INVALIDARG;
 
     *state = This->state;
     return S_OK;
 }
 
-static HRESULT WINAPI httprequest_put_onreadystatechange(IXMLHTTPRequest *iface, IDispatch *sink)
+static HRESULT httprequest_put_onreadystatechange(httprequest *This, IDispatch *sink)
 {
-    httprequest *This = impl_from_IXMLHTTPRequest( iface );
-
-    TRACE("(%p)->(%p)\n", This, sink);
-
     if (This->sink) IDispatch_Release(This->sink);
     if ((This->sink = sink)) IDispatch_AddRef(This->sink);
 
     return S_OK;
 }
 
+static void httprequest_release(httprequest *This)
+{
+    struct httpheader *header, *header2;
+
+    if (This->site)
+        IUnknown_Release( This->site );
+
+    SysFreeString(This->custom);
+    SysFreeString(This->siteurl);
+    SysFreeString(This->url);
+    SysFreeString(This->user);
+    SysFreeString(This->password);
+
+    /* request headers */
+    LIST_FOR_EACH_ENTRY_SAFE(header, header2, &This->reqheaders, struct httpheader, entry)
+    {
+        list_remove(&header->entry);
+        SysFreeString(header->header);
+        SysFreeString(header->value);
+        heap_free(header);
+    }
+    /* response headers */
+    free_response_headers(This);
+    SysFreeString(This->status_text);
+
+    /* detach callback object */
+    BindStatusCallback_Detach(This->bsc);
+
+    if (This->sink) IDispatch_Release(This->sink);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_QueryInterface(IXMLHTTPRequest *iface, REFIID riid, void **ppvObject)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppvObject);
+
+    if ( IsEqualGUID( riid, &IID_IXMLHTTPRequest) ||
+         IsEqualGUID( riid, &IID_IDispatch) ||
+         IsEqualGUID( riid, &IID_IUnknown) )
+    {
+        *ppvObject = iface;
+    }
+    else if (IsEqualGUID(&IID_IObjectWithSite, riid))
+    {
+        *ppvObject = &This->IObjectWithSite_iface;
+    }
+    else if (IsEqualGUID(&IID_IObjectSafety, riid))
+    {
+        *ppvObject = &This->IObjectSafety_iface;
+    }
+    else
+    {
+        TRACE("Unsupported interface %s\n", debugstr_guid(riid));
+        *ppvObject = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IXMLHTTPRequest_AddRef( iface );
+
+    return S_OK;
+}
+
+static ULONG WINAPI XMLHTTPRequest_AddRef(IXMLHTTPRequest *iface)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%u)\n", This, ref );
+    return ref;
+}
+
+static ULONG WINAPI XMLHTTPRequest_Release(IXMLHTTPRequest *iface)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    ULONG ref = InterlockedDecrement( &This->ref );
+
+    TRACE("(%p)->(%u)\n", This, ref );
+
+    if ( ref == 0 )
+    {
+        httprequest_release( This );
+        heap_free( This );
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI XMLHTTPRequest_GetTypeInfoCount(IXMLHTTPRequest *iface, UINT *pctinfo)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+
+    *pctinfo = 1;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI XMLHTTPRequest_GetTypeInfo(IXMLHTTPRequest *iface, UINT iTInfo,
+        LCID lcid, ITypeInfo **ppTInfo)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+
+    return get_typeinfo(IXMLHTTPRequest_tid, ppTInfo);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_GetIDsOfNames(IXMLHTTPRequest *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IXMLHTTPRequest_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI XMLHTTPRequest_Invoke(IXMLHTTPRequest *iface, DISPID dispIdMember, REFIID riid,
+        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IXMLHTTPRequest_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLHTTPRequest_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI XMLHTTPRequest_open(IXMLHTTPRequest *iface, BSTR method, BSTR url,
+        VARIANT async, VARIANT user, VARIANT password)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %s %s)\n", This, debugstr_w(method), debugstr_w(url),
+        debugstr_variant(&async));
+    return httprequest_open(This, method, url, async, user, password);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_setRequestHeader(IXMLHTTPRequest *iface, BSTR header, BSTR value)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(header), debugstr_w(value));
+    return httprequest_setRequestHeader(This, header, value);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_getResponseHeader(IXMLHTTPRequest *iface, BSTR header, BSTR *value)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(header), value);
+    return httprequest_getResponseHeader(This, header, value);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_getAllResponseHeaders(IXMLHTTPRequest *iface, BSTR *respheaders)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, respheaders);
+    return httprequest_getAllResponseHeaders(This, respheaders);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_send(IXMLHTTPRequest *iface, VARIANT body)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
+    return httprequest_send(This, body);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_abort(IXMLHTTPRequest *iface)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)\n", This);
+    return httprequest_abort(This);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_status(IXMLHTTPRequest *iface, LONG *status)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, status);
+    return httprequest_get_status(This, status);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_statusText(IXMLHTTPRequest *iface, BSTR *status)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, status);
+    return httprequest_get_statusText(This, status);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_responseXML(IXMLHTTPRequest *iface, IDispatch **body)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseXML(This, body);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_responseText(IXMLHTTPRequest *iface, BSTR *body)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseText(This, body);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_responseBody(IXMLHTTPRequest *iface, VARIANT *body)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseBody(This, body);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_responseStream(IXMLHTTPRequest *iface, VARIANT *body)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseStream(This, body);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_get_readyState(IXMLHTTPRequest *iface, LONG *state)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, state);
+    return httprequest_get_readyState(This, state);
+}
+
+static HRESULT WINAPI XMLHTTPRequest_put_onreadystatechange(IXMLHTTPRequest *iface, IDispatch *sink)
+{
+    httprequest *This = impl_from_IXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, sink);
+    return httprequest_put_onreadystatechange(This, sink);
+}
+
 static const struct IXMLHTTPRequestVtbl XMLHTTPRequestVtbl =
 {
-    httprequest_QueryInterface,
-    httprequest_AddRef,
-    httprequest_Release,
-    httprequest_GetTypeInfoCount,
-    httprequest_GetTypeInfo,
-    httprequest_GetIDsOfNames,
-    httprequest_Invoke,
-    httprequest_open,
-    httprequest_setRequestHeader,
-    httprequest_getResponseHeader,
-    httprequest_getAllResponseHeaders,
-    httprequest_send,
-    httprequest_abort,
-    httprequest_get_status,
-    httprequest_get_statusText,
-    httprequest_get_responseXML,
-    httprequest_get_responseText,
-    httprequest_get_responseBody,
-    httprequest_get_responseStream,
-    httprequest_get_readyState,
-    httprequest_put_onreadystatechange
+    XMLHTTPRequest_QueryInterface,
+    XMLHTTPRequest_AddRef,
+    XMLHTTPRequest_Release,
+    XMLHTTPRequest_GetTypeInfoCount,
+    XMLHTTPRequest_GetTypeInfo,
+    XMLHTTPRequest_GetIDsOfNames,
+    XMLHTTPRequest_Invoke,
+    XMLHTTPRequest_open,
+    XMLHTTPRequest_setRequestHeader,
+    XMLHTTPRequest_getResponseHeader,
+    XMLHTTPRequest_getAllResponseHeaders,
+    XMLHTTPRequest_send,
+    XMLHTTPRequest_abort,
+    XMLHTTPRequest_get_status,
+    XMLHTTPRequest_get_statusText,
+    XMLHTTPRequest_get_responseXML,
+    XMLHTTPRequest_get_responseText,
+    XMLHTTPRequest_get_responseBody,
+    XMLHTTPRequest_get_responseStream,
+    XMLHTTPRequest_get_readyState,
+    XMLHTTPRequest_put_onreadystatechange
 };
 
 /* IObjectWithSite */
@@ -1429,8 +1499,6 @@ static ULONG WINAPI httprequest_Safety_Release(IObjectSafety *iface)
     return IXMLHTTPRequest_Release((IXMLHTTPRequest *)This);
 }
 
-#define SAFETY_SUPPORTED_OPTIONS (INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_SECURITY_MANAGER)
-
 static HRESULT WINAPI httprequest_Safety_GetInterfaceSafetyOptions(IObjectSafety *iface, REFIID riid,
         DWORD *supported, DWORD *enabled)
 {
@@ -1440,7 +1508,7 @@ static HRESULT WINAPI httprequest_Safety_GetInterfaceSafetyOptions(IObjectSafety
 
     if(!supported || !enabled) return E_POINTER;
 
-    *supported = SAFETY_SUPPORTED_OPTIONS;
+    *supported = safety_supported_options;
     *enabled = This->safeopt;
 
     return S_OK;
@@ -1452,15 +1520,13 @@ static HRESULT WINAPI httprequest_Safety_SetInterfaceSafetyOptions(IObjectSafety
     httprequest *This = impl_from_IObjectSafety(iface);
     TRACE("(%p)->(%s %x %x)\n", This, debugstr_guid(riid), mask, enabled);
 
-    if ((mask & ~SAFETY_SUPPORTED_OPTIONS) != 0)
+    if ((mask & ~safety_supported_options))
         return E_FAIL;
 
     This->safeopt = (This->safeopt & ~mask) | (mask & enabled);
 
     return S_OK;
 }
-
-#undef SAFETY_SUPPORTED_OPTIONS
 
 static const IObjectSafetyVtbl ObjectSafetyVtbl = {
     httprequest_Safety_QueryInterface,
@@ -1470,17 +1536,281 @@ static const IObjectSafetyVtbl ObjectSafetyVtbl = {
     httprequest_Safety_SetInterfaceSafetyOptions
 };
 
-HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **ppObj)
+/* IServerXMLHTTPRequest */
+static HRESULT WINAPI ServerXMLHTTPRequest_QueryInterface(IServerXMLHTTPRequest *iface, REFIID riid, void **obj)
 {
-    httprequest *req;
-    HRESULT hr = S_OK;
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
 
-    TRACE("(%p,%p)\n", pUnkOuter, ppObj);
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
 
-    req = heap_alloc( sizeof (*req) );
-    if( !req )
-        return E_OUTOFMEMORY;
+    if ( IsEqualGUID( riid, &IID_IServerXMLHTTPRequest) ||
+         IsEqualGUID( riid, &IID_IXMLHTTPRequest) ||
+         IsEqualGUID( riid, &IID_IDispatch) ||
+         IsEqualGUID( riid, &IID_IUnknown) )
+    {
+        *obj = iface;
+    }
+    else
+    {
+        TRACE("Unsupported interface %s\n", debugstr_guid(riid));
+        *obj = NULL;
+        return E_NOINTERFACE;
+    }
 
+    IServerXMLHTTPRequest_AddRef( iface );
+
+    return S_OK;
+}
+
+static ULONG WINAPI ServerXMLHTTPRequest_AddRef(IServerXMLHTTPRequest *iface)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    ULONG ref = InterlockedIncrement( &This->ref );
+    TRACE("(%p)->(%u)\n", This, ref );
+    return ref;
+}
+
+static ULONG WINAPI ServerXMLHTTPRequest_Release(IServerXMLHTTPRequest *iface)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    ULONG ref = InterlockedDecrement( &This->ref );
+
+    TRACE("(%p)->(%u)\n", This, ref );
+
+    if ( ref == 0 )
+    {
+        httprequest_release( &This->req );
+        heap_free( This );
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_GetTypeInfoCount(IServerXMLHTTPRequest *iface, UINT *pctinfo)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+    *pctinfo = 1;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_GetTypeInfo(IServerXMLHTTPRequest *iface, UINT iTInfo,
+        LCID lcid, ITypeInfo **ppTInfo)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+
+    return get_typeinfo(IServerXMLHTTPRequest_tid, ppTInfo);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_GetIDsOfNames(IServerXMLHTTPRequest *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IServerXMLHTTPRequest_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_Invoke(IServerXMLHTTPRequest *iface, DISPID dispIdMember, REFIID riid,
+        LCID lcid, WORD wFlags, DISPPARAMS *pDispParams, VARIANT *pVarResult,
+        EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+          lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IServerXMLHTTPRequest_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &This->IServerXMLHTTPRequest_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_open(IServerXMLHTTPRequest *iface, BSTR method, BSTR url,
+        VARIANT async, VARIANT user, VARIANT password)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %s %s)\n", This, debugstr_w(method), debugstr_w(url),
+        debugstr_variant(&async));
+    return httprequest_open(&This->req, method, url, async, user, password);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_setRequestHeader(IServerXMLHTTPRequest *iface, BSTR header, BSTR value)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %s)\n", This, debugstr_w(header), debugstr_w(value));
+    return httprequest_setRequestHeader(&This->req, header, value);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_getResponseHeader(IServerXMLHTTPRequest *iface, BSTR header, BSTR *value)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s %p)\n", This, debugstr_w(header), value);
+    return httprequest_getResponseHeader(&This->req, header, value);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_getAllResponseHeaders(IServerXMLHTTPRequest *iface, BSTR *respheaders)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, respheaders);
+    return httprequest_getAllResponseHeaders(&This->req, respheaders);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_send(IServerXMLHTTPRequest *iface, VARIANT body)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&body));
+    return httprequest_send(&This->req, body);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_abort(IServerXMLHTTPRequest *iface)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)\n", This);
+    return httprequest_abort(&This->req);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_status(IServerXMLHTTPRequest *iface, LONG *status)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, status);
+    return httprequest_get_status(&This->req, status);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_statusText(IServerXMLHTTPRequest *iface, BSTR *status)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, status);
+    return httprequest_get_statusText(&This->req, status);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_responseXML(IServerXMLHTTPRequest *iface, IDispatch **body)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseXML(&This->req, body);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_responseText(IServerXMLHTTPRequest *iface, BSTR *body)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseText(&This->req, body);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_responseBody(IServerXMLHTTPRequest *iface, VARIANT *body)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseBody(&This->req, body);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_responseStream(IServerXMLHTTPRequest *iface, VARIANT *body)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, body);
+    return httprequest_get_responseStream(&This->req, body);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_get_readyState(IServerXMLHTTPRequest *iface, LONG *state)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, state);
+    return httprequest_get_readyState(&This->req, state);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_put_onreadystatechange(IServerXMLHTTPRequest *iface, IDispatch *sink)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    TRACE("(%p)->(%p)\n", This, sink);
+    return httprequest_put_onreadystatechange(&This->req, sink);
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_setTimeouts(IServerXMLHTTPRequest *iface, LONG resolveTimeout, LONG connectTimeout,
+    LONG sendTimeout, LONG receiveTimeout)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    FIXME("(%p)->(%d %d %d %d): stub\n", This, resolveTimeout, connectTimeout, sendTimeout, receiveTimeout);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_waitForResponse(IServerXMLHTTPRequest *iface, VARIANT timeout, VARIANT_BOOL *isSuccessful)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    FIXME("(%p)->(%s %p): stub\n", This, debugstr_variant(&timeout), isSuccessful);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_getOption(IServerXMLHTTPRequest *iface, SERVERXMLHTTP_OPTION option, VARIANT *value)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    FIXME("(%p)->(%d %p): stub\n", This, option, value);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ServerXMLHTTPRequest_setOption(IServerXMLHTTPRequest *iface, SERVERXMLHTTP_OPTION option, VARIANT value)
+{
+    serverhttp *This = impl_from_IServerXMLHTTPRequest( iface );
+    FIXME("(%p)->(%d %s): stub\n", This, option, debugstr_variant(&value));
+    return E_NOTIMPL;
+}
+
+static const struct IServerXMLHTTPRequestVtbl ServerXMLHTTPRequestVtbl =
+{
+    ServerXMLHTTPRequest_QueryInterface,
+    ServerXMLHTTPRequest_AddRef,
+    ServerXMLHTTPRequest_Release,
+    ServerXMLHTTPRequest_GetTypeInfoCount,
+    ServerXMLHTTPRequest_GetTypeInfo,
+    ServerXMLHTTPRequest_GetIDsOfNames,
+    ServerXMLHTTPRequest_Invoke,
+    ServerXMLHTTPRequest_open,
+    ServerXMLHTTPRequest_setRequestHeader,
+    ServerXMLHTTPRequest_getResponseHeader,
+    ServerXMLHTTPRequest_getAllResponseHeaders,
+    ServerXMLHTTPRequest_send,
+    ServerXMLHTTPRequest_abort,
+    ServerXMLHTTPRequest_get_status,
+    ServerXMLHTTPRequest_get_statusText,
+    ServerXMLHTTPRequest_get_responseXML,
+    ServerXMLHTTPRequest_get_responseText,
+    ServerXMLHTTPRequest_get_responseBody,
+    ServerXMLHTTPRequest_get_responseStream,
+    ServerXMLHTTPRequest_get_readyState,
+    ServerXMLHTTPRequest_put_onreadystatechange,
+    ServerXMLHTTPRequest_setTimeouts,
+    ServerXMLHTTPRequest_waitForResponse,
+    ServerXMLHTTPRequest_getOption,
+    ServerXMLHTTPRequest_setOption
+};
+
+static void init_httprequest(httprequest *req)
+{
     req->IXMLHTTPRequest_iface.lpVtbl = &XMLHTTPRequestVtbl;
     req->IObjectWithSite_iface.lpVtbl = &ObjectWithSiteVtbl;
     req->IObjectSafety_iface.lpVtbl = &ObjectSafetyVtbl;
@@ -1506,12 +1836,45 @@ HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **ppObj)
 
     req->site = NULL;
     req->safeopt = 0;
+}
 
-    *ppObj = &req->IXMLHTTPRequest_iface;
+HRESULT XMLHTTPRequest_create(IUnknown *outer, void **obj)
+{
+    httprequest *req;
 
-    TRACE("returning iface %p\n", *ppObj);
+    TRACE("(%p, %p)\n", outer, obj);
 
-    return hr;
+    req = heap_alloc( sizeof (*req) );
+    if( !req )
+        return E_OUTOFMEMORY;
+
+    init_httprequest(req);
+    *obj = &req->IXMLHTTPRequest_iface;
+
+    TRACE("returning iface %p\n", *obj);
+
+    return S_OK;
+}
+
+HRESULT ServerXMLHTTP_create(IUnknown *outer, void **obj)
+{
+    serverhttp *req;
+
+    TRACE("(%p, %p)\n", outer, obj);
+
+    req = heap_alloc( sizeof (*req) );
+    if( !req )
+        return E_OUTOFMEMORY;
+
+    init_httprequest(&req->req);
+    req->IServerXMLHTTPRequest_iface.lpVtbl = &ServerXMLHTTPRequestVtbl;
+    req->ref = 1;
+
+    *obj = &req->IServerXMLHTTPRequest_iface;
+
+    TRACE("returning iface %p\n", *obj);
+
+    return S_OK;
 }
 
 #else
@@ -1519,6 +1882,13 @@ HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **ppObj)
 HRESULT XMLHTTPRequest_create(IUnknown *pUnkOuter, void **ppObj)
 {
     MESSAGE("This program tried to use a XMLHTTPRequest object, but\n"
+            "libxml2 support was not present at compile time.\n");
+    return E_NOTIMPL;
+}
+
+HRESULT ServerXMLHTTP_create(IUnknown *outer, void **obj)
+{
+    MESSAGE("This program tried to use a ServerXMLHTTP object, but\n"
             "libxml2 support was not present at compile time.\n");
     return E_NOTIMPL;
 }

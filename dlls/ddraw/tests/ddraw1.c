@@ -186,6 +186,20 @@ static void emit_end(void **ptr)
     *ptr = inst + 1;
 }
 
+static void set_execute_data(IDirect3DExecuteBuffer *execute_buffer, UINT vertex_count, UINT offset, UINT len)
+{
+    D3DEXECUTEDATA exec_data;
+    HRESULT hr;
+
+    memset(&exec_data, 0, sizeof(exec_data));
+    exec_data.dwSize = sizeof(exec_data);
+    exec_data.dwVertexCount = vertex_count;
+    exec_data.dwInstructionOffset = offset;
+    exec_data.dwInstructionLength = len;
+    hr = IDirect3DExecuteBuffer_SetExecuteData(execute_buffer, &exec_data);
+    ok(SUCCEEDED(hr), "Failed to set execute data, hr %#x.\n", hr);
+}
+
 static HRESULT CALLBACK enum_z_fmt(GUID *guid, char *description, char *name,
         D3DDEVICEDESC *hal_desc, D3DDEVICEDESC *hel_desc, void *ctx)
 {
@@ -377,6 +391,36 @@ static IDirect3DMaterial *create_diffuse_material(IDirect3DDevice *device, float
 static void destroy_material(IDirect3DMaterial *material)
 {
     IDirect3DMaterial_Release(material);
+}
+
+static const UINT *expect_messages;
+
+static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
+{
+    if (expect_messages && message == *expect_messages)
+        ++expect_messages;
+
+    return DefWindowProcA(hwnd, message, wparam, lparam);
+}
+
+/* Set the wndproc back to what ddraw expects it to be, and release the ddraw
+ * interface. This prevents subsequent SetCooperativeLevel() calls on a
+ * different window from failing with DDERR_HWNDALREADYSET. */
+static void fix_wndproc(HWND window, LONG_PTR proc)
+{
+    IDirectDraw *ddraw;
+    HRESULT hr;
+
+    if (!(ddraw = create_ddraw()))
+        return;
+
+    SetWindowLongPtrA(window, GWLP_WNDPROC, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+
+    IDirectDraw_Release(ddraw);
 }
 
 static HRESULT CALLBACK restore_callback(IDirectDrawSurface *surface, DDSURFACEDESC *desc, void *context)
@@ -997,7 +1041,6 @@ static void test_zenable(void)
     D3DEXECUTEBUFFERDESC exec_desc;
     IDirect3DMaterial *background;
     IDirect3DViewport *viewport;
-    D3DEXECUTEDATA exec_data;
     IDirect3DDevice *device;
     IDirectDrawSurface *rt;
     IDirectDraw *ddraw;
@@ -1050,18 +1093,11 @@ static void test_zenable(void)
     hr = IDirect3DExecuteBuffer_Unlock(execute_buffer);
     ok(SUCCEEDED(hr), "Failed to unlock execute buffer, hr %#x.\n", hr);
 
-    memset(&exec_data, 0, sizeof(exec_data));
-    exec_data.dwSize = sizeof(exec_data);
-    exec_data.dwVertexCount = 4;
-    exec_data.dwInstructionOffset = sizeof(tquad);
-    exec_data.dwInstructionLength = inst_length;
-    hr = IDirect3DExecuteBuffer_SetExecuteData(execute_buffer, &exec_data);
-    ok(SUCCEEDED(hr), "Failed to set execute data, hr %#x.\n", hr);
-
     hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
     ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
     hr = IDirect3DDevice_BeginScene(device);
     ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    set_execute_data(execute_buffer, 4, sizeof(tquad), inst_length);
     hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
     ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
     hr = IDirect3DDevice_EndScene(device);
@@ -1152,6 +1188,7 @@ static void test_ck_rgba(void)
     if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
     {
         skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
         DestroyWindow(window);
         return;
     }
@@ -1197,7 +1234,6 @@ static void test_ck_rgba(void)
     for (i = 0; i < sizeof(tests) / sizeof(*tests); ++i)
     {
         UINT draw1_len, draw2_len;
-        D3DEXECUTEDATA exec_data;
         void *ptr;
 
         hr = IDirect3DExecuteBuffer_Lock(execute_buffer, &exec_desc);
@@ -1227,25 +1263,18 @@ static void test_ck_rgba(void)
         hr = IDirectDrawSurface_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
         ok(SUCCEEDED(hr), "Failed to fill texture, hr %#x.\n", hr);
 
-        memset(&exec_data, 0, sizeof(exec_data));
-        exec_data.dwSize = sizeof(exec_data);
-        exec_data.dwVertexCount = 8;
-        exec_data.dwInstructionOffset = sizeof(tquad);
-        exec_data.dwInstructionLength = draw1_len;
-        hr = IDirect3DExecuteBuffer_SetExecuteData(execute_buffer, &exec_data);
-        ok(SUCCEEDED(hr), "Failed to set execute data, hr %#x.\n", hr);
-
         hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER);
         ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
         hr = IDirect3DDevice_BeginScene(device);
         ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+        set_execute_data(execute_buffer, 8, sizeof(tquad), draw1_len);
         hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
         ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
         hr = IDirect3DDevice_EndScene(device);
         ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
         color = get_surface_color(rt, 320, 240);
-        if (i == 2 || i == 3)
+        if (i == 2)
             todo_wine ok(compare_color(color, tests[i].result1, 1), "Expected color 0x%08x for test %u, got 0x%08x.\n",
                     tests[i].result1, i, color);
         else
@@ -1256,13 +1285,9 @@ static void test_ck_rgba(void)
         hr = IDirectDrawSurface_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
         ok(SUCCEEDED(hr), "Failed to fill texture, hr %#x.\n", hr);
 
-        exec_data.dwInstructionOffset = sizeof(tquad) + draw1_len;
-        exec_data.dwInstructionLength = draw2_len;
-        hr = IDirect3DExecuteBuffer_SetExecuteData(execute_buffer, &exec_data);
-        ok(SUCCEEDED(hr), "Failed to set execute data, hr %#x.\n", hr);
-
         hr = IDirect3DDevice_BeginScene(device);
         ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+        set_execute_data(execute_buffer, 8, sizeof(tquad) + draw1_len, draw2_len);
         hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
         ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
         hr = IDirect3DDevice_EndScene(device);
@@ -1271,7 +1296,7 @@ static void test_ck_rgba(void)
         /* This tests that fragments that are masked out by the color key are
          * discarded, instead of just fully transparent. */
         color = get_surface_color(rt, 320, 240);
-        if (i == 2 || i == 3)
+        if (i == 2)
             todo_wine ok(compare_color(color, tests[i].result2, 1), "Expected color 0x%08x for test %u, got 0x%08x.\n",
                     tests[i].result2, i, color);
         else
@@ -1284,6 +1309,185 @@ static void test_ck_rgba(void)
     IDirectDrawSurface_Release(surface);
     destroy_viewport(device, viewport);
     destroy_material(background);
+    IDirect3DDevice_Release(device);
+    IDirectDraw_Release(ddraw);
+    DestroyWindow(window);
+}
+
+static void test_ck_default(void)
+{
+    static D3DRECT clear_rect = {{0}, {0}, {640}, {480}};
+    static D3DTLVERTEX tquad[] =
+    {
+        {{  0.0f}, {480.0f}, {0.0f}, {1.0f}, {0xffffffff}, {0x00000000}, {0.0f}, {0.0f}},
+        {{  0.0f}, {  0.0f}, {0.0f}, {1.0f}, {0xffffffff}, {0x00000000}, {0.0f}, {1.0f}},
+        {{640.0f}, {480.0f}, {0.0f}, {1.0f}, {0xffffffff}, {0x00000000}, {1.0f}, {0.0f}},
+        {{640.0f}, {  0.0f}, {0.0f}, {1.0f}, {0xffffffff}, {0x00000000}, {1.0f}, {1.0f}},
+    };
+    IDirect3DExecuteBuffer *execute_buffer;
+    IDirectDrawSurface *surface, *rt;
+    D3DTEXTUREHANDLE texture_handle;
+    D3DEXECUTEBUFFERDESC exec_desc;
+    IDirect3DMaterial *background;
+    UINT draw1_offset, draw1_len;
+    UINT draw2_offset, draw2_len;
+    UINT draw3_offset, draw3_len;
+    UINT draw4_offset, draw4_len;
+    IDirect3DViewport *viewport;
+    DDSURFACEDESC surface_desc;
+    IDirect3DTexture *texture;
+    IDirect3DDevice *device;
+    IDirectDraw *ddraw;
+    D3DCOLOR color;
+    HWND window;
+    DDBLTFX fx;
+    HRESULT hr;
+    void *ptr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create ddraw object, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+    if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice_QueryInterface(device, &IID_IDirectDrawSurface, (void **)&rt);
+    ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
+
+    background = create_diffuse_material(device, 0.0, 1.0f, 0.0f, 1.0f);
+    viewport = create_viewport(device, 0, 0, 640, 480);
+    viewport_set_background(device, viewport, background);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_CKSRCBLT;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    surface_desc.dwWidth = 256;
+    surface_desc.dwHeight = 256;
+    surface_desc.ddpfPixelFormat.dwSize = sizeof(surface_desc.ddpfPixelFormat);
+    surface_desc.ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(surface_desc.ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(surface_desc.ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(surface_desc.ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(surface_desc.ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    surface_desc.ddckCKSrcBlt.dwColorSpaceLowValue = 0x000000ff;
+    surface_desc.ddckCKSrcBlt.dwColorSpaceHighValue = 0x000000ff;
+    hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirect3DTexture, (void **)&texture);
+    ok(SUCCEEDED(hr), "Failed to get texture interface, hr %#x.\n", hr);
+    hr = IDirect3DTexture_GetHandle(texture, device, &texture_handle);
+    ok(SUCCEEDED(hr), "Failed to get texture handle, hr %#x.\n", hr);
+    IDirect3DTexture_Release(texture);
+
+    memset(&fx, 0, sizeof(fx));
+    fx.dwSize = sizeof(fx);
+    U5(fx).dwFillColor = 0x000000ff;
+    hr = IDirectDrawSurface_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    memset(&exec_desc, 0, sizeof(exec_desc));
+    exec_desc.dwSize = sizeof(exec_desc);
+    exec_desc.dwFlags = D3DDEB_BUFSIZE | D3DDEB_CAPS;
+    exec_desc.dwBufferSize = 1024;
+    exec_desc.dwCaps = D3DDEBCAPS_SYSTEMMEMORY;
+    hr = IDirect3DDevice_CreateExecuteBuffer(device, &exec_desc, &execute_buffer, NULL);
+    ok(SUCCEEDED(hr), "Failed to create execute buffer, hr %#x.\n", hr);
+
+    hr = IDirect3DExecuteBuffer_Lock(execute_buffer, &exec_desc);
+    ok(SUCCEEDED(hr), "Failed to lock execute buffer, hr %#x.\n", hr);
+    memcpy(exec_desc.lpData, tquad, sizeof(tquad));
+    ptr = (BYTE *)exec_desc.lpData + sizeof(tquad);
+    emit_process_vertices(&ptr, 0, 4);
+    emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
+    emit_tquad(&ptr, 0);
+    emit_end(&ptr);
+    draw1_offset = sizeof(tquad);
+    draw1_len = (BYTE *)ptr - (BYTE *)exec_desc.lpData - draw1_offset;
+    emit_process_vertices(&ptr, 0, 4);
+    emit_set_rs(&ptr, D3DRENDERSTATE_COLORKEYENABLE, FALSE);
+    emit_tquad(&ptr, 0);
+    emit_end(&ptr);
+    draw2_offset = draw1_offset + draw1_len;
+    draw2_len = (BYTE *)ptr - (BYTE *)exec_desc.lpData - draw2_offset;
+    emit_process_vertices(&ptr, 0, 4);
+    emit_tquad(&ptr, 0);
+    emit_end(&ptr);
+    draw3_offset = draw2_offset + draw2_len;
+    draw3_len = (BYTE *)ptr - (BYTE *)exec_desc.lpData - draw3_offset;
+    emit_process_vertices(&ptr, 0, 4);
+    emit_set_rs(&ptr, D3DRENDERSTATE_COLORKEYENABLE, TRUE);
+    emit_tquad(&ptr, 0);
+    emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, 0);
+    emit_end(&ptr);
+    draw4_offset = draw3_offset + draw3_len;
+    draw4_len = (BYTE *)ptr - (BYTE *)exec_desc.lpData - draw4_offset;
+    hr = IDirect3DExecuteBuffer_Unlock(execute_buffer);
+    ok(SUCCEEDED(hr), "Failed to unlock execute buffer, hr %#x.\n", hr);
+
+    hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    set_execute_data(execute_buffer, 4, draw1_offset, draw1_len);
+    hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
+    ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
+    hr = IDirect3DDevice_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    set_execute_data(execute_buffer, 4, draw2_offset, draw2_len);
+    hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
+    ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
+    hr = IDirect3DDevice_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    set_execute_data(execute_buffer, 4, draw3_offset, draw3_len);
+    hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
+    ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
+    hr = IDirect3DDevice_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    hr = IDirect3DDevice_BeginScene(device);
+    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+    set_execute_data(execute_buffer, 4, draw4_offset, draw4_len);
+    hr = IDirect3DDevice_Execute(device, execute_buffer, viewport, D3DEXECUTE_CLIPPED);
+    ok(SUCCEEDED(hr), "Failed to execute exec buffer, hr %#x.\n", hr);
+    hr = IDirect3DDevice_EndScene(device);
+    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+
+    IDirect3DExecuteBuffer_Release(execute_buffer);
+    IDirectDrawSurface_Release(surface);
+    destroy_viewport(device, viewport);
+    destroy_material(background);
+    IDirectDrawSurface_Release(rt);
     IDirect3DDevice_Release(device);
     IDirectDraw_Release(ddraw);
     DestroyWindow(window);
@@ -1396,6 +1600,7 @@ static void test_surface_qi(void)
     if (!(ddraw = create_ddraw()))
     {
         skip("Failed to create a ddraw object, skipping test.\n");
+        DestroyWindow(window);
         return;
     }
     /* Try to create a D3D device to see if the ddraw implementation supports
@@ -1404,6 +1609,7 @@ static void test_surface_qi(void)
     if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
     {
         skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
         DestroyWindow(window);
         return;
     }
@@ -1489,6 +1695,7 @@ static void test_device_qi(void)
     if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
     {
         skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
         DestroyWindow(window);
         return;
     }
@@ -1498,6 +1705,133 @@ static void test_device_qi(void)
     IDirect3DDevice_Release(device);
     IDirectDraw_Release(ddraw);
     DestroyWindow(window);
+}
+
+static void test_wndproc(void)
+{
+    LONG_PTR proc, ddraw_proc;
+    IDirectDraw *ddraw;
+    WNDCLASSA wc = {0};
+    HWND window;
+    HRESULT hr;
+    ULONG ref;
+
+    static const UINT messages[] =
+    {
+        WM_WINDOWPOSCHANGING,
+        WM_MOVE,
+        WM_SIZE,
+        WM_WINDOWPOSCHANGING,
+        WM_ACTIVATE,
+        WM_SETFOCUS,
+        0,
+    };
+
+    /* DDSCL_EXCLUSIVE replaces the window's window proc. */
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create IDirectDraw object, skipping tests.\n");
+        return;
+    }
+
+    wc.lpfnWndProc = test_proc;
+    wc.lpszClassName = "ddraw_test_wndproc_wc";
+    ok(RegisterClassA(&wc), "Failed to register window class.\n");
+
+    window = CreateWindowA("ddraw_test_wndproc_wc", "ddraw_test",
+            WS_MAXIMIZE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
+
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    expect_messages = messages;
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
+    expect_messages = NULL;
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    /* DDSCL_NORMAL doesn't. */
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    /* The original window proc is only restored by ddraw if the current
+     * window proc matches the one ddraw set. This also affects switching
+     * from DDSCL_NORMAL to DDSCL_EXCLUSIVE. */
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ddraw_proc = proc;
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)ddraw_proc);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+
+    ddraw = create_ddraw();
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
+    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
+    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
+            (LONG_PTR)test_proc, proc);
+    ref = IDirectDraw_Release(ddraw);
+    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
+    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
+    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
+            (LONG_PTR)DefWindowProcA, proc);
+
+    fix_wndproc(window, (LONG_PTR)test_proc);
+    expect_messages = NULL;
+    DestroyWindow(window);
+    UnregisterClassA("ddraw_test_wndproc_wc", GetModuleHandleA(NULL));
 }
 
 START_TEST(ddraw1)
@@ -1510,6 +1844,8 @@ START_TEST(ddraw1)
     test_viewport_interfaces();
     test_zenable();
     test_ck_rgba();
+    test_ck_default();
     test_surface_qi();
     test_device_qi();
+    test_wndproc();
 }

@@ -2,6 +2,7 @@
  * Implementation of IDirect3DRMFrame Interface
  *
  * Copyright 2011, 2012 André Hentschel
+ * Copyright 2012 Christian Costa
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -63,7 +64,15 @@ typedef struct {
     LPDIRECT3DRMFRAME* frames;
 } IDirect3DRMFrameArrayImpl;
 
+typedef struct {
+    IDirect3DRMVisualArray IDirect3DRMVisualArray_iface;
+    LONG ref;
+    ULONG size;
+    LPDIRECT3DRMVISUAL* visuals;
+} IDirect3DRMVisualArrayImpl;
+
 HRESULT Direct3DRMFrameArray_create(IDirect3DRMFrameArray** obj);
+HRESULT Direct3DRMVisualArray_create(IDirect3DRMVisualArray** ret_iface);
 
 static inline IDirect3DRMFrameImpl *impl_from_IDirect3DRMFrame2(IDirect3DRMFrame2 *iface)
 {
@@ -131,6 +140,12 @@ static ULONG WINAPI IDirect3DRMFrame2Impl_Release(IDirect3DRMFrame2* iface)
         for (i = 0; i < This->nb_children; i++)
             IDirect3DRMFrame3_Release(This->children[i]);
         HeapFree(GetProcessHeap(), 0, This->children);
+        for (i = 0; i < This->nb_visuals; i++)
+            IDirect3DRMVisual_Release(This->visuals[i]);
+        HeapFree(GetProcessHeap(), 0, This->visuals);
+        for (i = 0; i < This->nb_lights; i++)
+            IDirect3DRMLight_Release(This->lights[i]);
+        HeapFree(GetProcessHeap(), 0, This->lights);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -260,9 +275,9 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_AddTransform(IDirect3DRMFrame2* ifac
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
-    FIXME("(%p/%p)->(%u,%p): stub\n", iface, This, type, matrix);
+    TRACE("(%p/%p)->(%u,%p)\n", iface, This, type, matrix);
 
-    return E_NOTIMPL;
+    return IDirect3DRMFrame3_AddTransform(&This->IDirect3DRMFrame3_iface, type, matrix);
 }
 
 static HRESULT WINAPI IDirect3DRMFrame2Impl_AddTranslation(IDirect3DRMFrame2* iface,
@@ -460,10 +475,36 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_GetVisuals(IDirect3DRMFrame2* iface,
                                                        LPDIRECT3DRMVISUALARRAY *visuals)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
+    IDirect3DRMVisualArrayImpl* obj;
+    HRESULT hr;
 
-    FIXME("(%p/%p)->(%p): stub\n", iface, This, visuals);
+    TRACE("(%p/%p)->(%p)\n", iface, This, visuals);
 
-    return E_NOTIMPL;
+    if (!visuals)
+        return D3DRMERR_BADVALUE;
+
+    hr = Direct3DRMVisualArray_create(visuals);
+
+    if (hr != D3DRM_OK)
+        return hr;
+
+    obj = (IDirect3DRMVisualArrayImpl*)*visuals;
+
+    obj->size = This->nb_visuals;
+    if (This->nb_visuals)
+    {
+        ULONG i;
+        obj->visuals = HeapAlloc(GetProcessHeap(), 0, This->nb_visuals * sizeof(LPDIRECT3DRMVISUAL));
+        if (!obj->visuals)
+            return E_OUTOFMEMORY;
+        for (i = 0; i < This->nb_visuals; i++)
+        {
+            obj->visuals[i] = This->visuals[i];
+            IDirect3DRMVisual_AddRef(This->visuals[i]);
+        }
+    }
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMFrame2Impl_GetTextureTopology(IDirect3DRMFrame2* iface,
@@ -1212,9 +1253,28 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_AddTransform(IDirect3DRMFrame3* ifac
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
-    FIXME("(%p/%p)->(%u,%p): stub\n", iface, This, type, matrix);
+    TRACE("(%p/%p)->(%u,%p)\n", iface, This, type, matrix);
 
-    return E_NOTIMPL;
+    switch (type)
+    {
+        case D3DRMCOMBINE_REPLACE:
+            memcpy(&This->transform[0][0], &matrix[0][0], sizeof(D3DRMMATRIX4D));
+            break;
+
+        case D3DRMCOMBINE_BEFORE:
+            FIXME("D3DRMCOMBINE_BEFORE not supported yed\n");
+            break;
+
+        case D3DRMCOMBINE_AFTER:
+            FIXME("D3DRMCOMBINE_AFTER not supported yed\n");
+            break;
+
+        default:
+            WARN("Unknown Combine Type %u\n", type);
+            return D3DRMERR_BADVALUE;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMFrame3Impl_AddTranslation(IDirect3DRMFrame3* iface,
@@ -2214,11 +2274,11 @@ static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame3(IDirect3D
     return impl_from_IDirect3DRMFrame3(iface);
 }
 
-HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown** ppObj)
+HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown* parent, IUnknown** ret_iface)
 {
     IDirect3DRMFrameImpl* object;
 
-    TRACE("(%p)\n", ppObj);
+    TRACE("(%s, %p, %p)\n", wine_dbgstr_guid(riid), parent, ret_iface);
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirect3DRMFrameImpl));
     if (!object)
@@ -2234,9 +2294,17 @@ HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown** ppObj)
     memcpy(&object->transform[0][0], &identity[0][0], sizeof(D3DRMMATRIX4D));
 
     if (IsEqualGUID(riid, &IID_IDirect3DRMFrame3))
-        *ppObj = (IUnknown*)&object->IDirect3DRMFrame3_iface;
+    {
+        if (parent)
+            IDirect3DRMFrame3_AddChild((IDirect3DRMFrame3*)parent, &object->IDirect3DRMFrame3_iface);
+        *ret_iface = (IUnknown*)&object->IDirect3DRMFrame3_iface;
+    }
     else
-        *ppObj = (IUnknown*)&object->IDirect3DRMFrame2_iface;
+    {
+        if (parent)
+            IDirect3DRMFrame2_AddChild((IDirect3DRMFrame2*)parent, (IDirect3DRMFrame*)&object->IDirect3DRMFrame2_iface);
+        *ret_iface = (IUnknown*)&object->IDirect3DRMFrame2_iface;
+    }
 
     return S_OK;
 }
@@ -2357,6 +2425,122 @@ HRESULT Direct3DRMFrameArray_create(IDirect3DRMFrameArray** obj)
     object->ref = 1;
 
     *obj = &object->IDirect3DRMFrameArray_iface;
+
+    return S_OK;
+}
+
+/*** IUnknown methods ***/
+static HRESULT WINAPI IDirect3DRMVisualArrayImpl_QueryInterface(IDirect3DRMVisualArray* iface,
+                                                                REFIID riid, void** ret_iface)
+{
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ret_iface);
+
+    if (IsEqualGUID(riid, &IID_IUnknown) ||
+        IsEqualGUID(riid, &IID_IDirect3DRMFrameArray))
+    {
+        *ret_iface = iface;
+        IDirect3DRMVisualArray_AddRef(iface);
+        return S_OK;
+    }
+
+    *ret_iface = NULL;
+
+    WARN("Interface %s not implemented\n", debugstr_guid(riid));
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI IDirect3DRMVisualArrayImpl_AddRef(IDirect3DRMVisualArray* iface)
+{
+    IDirect3DRMVisualArrayImpl *This = (IDirect3DRMVisualArrayImpl*)iface;
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p)->(): new ref = %u\n", iface, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI IDirect3DRMVisualArrayImpl_Release(IDirect3DRMVisualArray* iface)
+{
+    IDirect3DRMVisualArrayImpl *This = (IDirect3DRMVisualArrayImpl*)iface;
+    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG i;
+
+    TRACE("(%p)->(): new ref = %u\n", iface, ref);
+
+    if (!ref)
+    {
+        for (i = 0; i < This->size; i++)
+            IDirect3DRMVisual_Release(This->visuals[i]);
+        HeapFree(GetProcessHeap(), 0, This->visuals);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+/*** IDirect3DRMArray methods ***/
+static DWORD WINAPI IDirect3DRMVisualArrayImpl_GetSize(IDirect3DRMVisualArray* iface)
+{
+    IDirect3DRMVisualArrayImpl *This = (IDirect3DRMVisualArrayImpl*)iface;
+
+    TRACE("(%p)->() = %d\n", iface,  This->size);
+
+    return This->size;
+}
+
+/*** IDirect3DRMVisualArray methods ***/
+static HRESULT WINAPI IDirect3DRMVisualArrayImpl_GetElement(IDirect3DRMVisualArray* iface, DWORD index, LPDIRECT3DRMVISUAL* visual)
+{
+    IDirect3DRMVisualArrayImpl *This = (IDirect3DRMVisualArrayImpl*)iface;
+
+    TRACE("(%p)->(%u, %p)\n", iface, index, visual);
+
+    if (!visual)
+        return D3DRMERR_BADVALUE;
+
+    *visual = NULL;
+
+    if (index >= This->size)
+        return D3DRMERR_BADVALUE;
+
+    IDirect3DRMVisual_AddRef(This->visuals[index]);
+    *visual = This->visuals[index];
+
+    return D3DRM_OK;
+}
+
+static const struct IDirect3DRMVisualArrayVtbl Direct3DRMVisualArray_Vtbl =
+{
+    /*** IUnknown methods ***/
+    IDirect3DRMVisualArrayImpl_QueryInterface,
+    IDirect3DRMVisualArrayImpl_AddRef,
+    IDirect3DRMVisualArrayImpl_Release,
+    /*** IDirect3DRMArray methods ***/
+    IDirect3DRMVisualArrayImpl_GetSize,
+    /*** IDirect3DRMVisualArray methods ***/
+    IDirect3DRMVisualArrayImpl_GetElement
+};
+
+HRESULT Direct3DRMVisualArray_create(IDirect3DRMVisualArray** ret_iface)
+{
+    IDirect3DRMVisualArrayImpl* object;
+
+    TRACE("(%p)\n", ret_iface);
+
+    *ret_iface = NULL;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirect3DRMVisualArrayImpl));
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return E_OUTOFMEMORY;
+    }
+
+    object->IDirect3DRMVisualArray_iface.lpVtbl = &Direct3DRMVisualArray_Vtbl;
+    object->ref = 1;
+
+    *ret_iface = &object->IDirect3DRMVisualArray_iface;
 
     return S_OK;
 }

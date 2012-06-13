@@ -825,7 +825,7 @@ static void quirk_no_np2(struct wined3d_gl_info *gl_info)
      *
      *  Note that wine_normalized_texrect can't be used in this case because internally it uses ARB_tex_npot,
      *  triggering the software fallback. There is not much we can do here apart from disabling the
-     *  software-emulated extension and reenable ARB_tex_rect (which was previously disabled
+     *  software-emulated extension and re-enable ARB_tex_rect (which was previously disabled
      *  in wined3d_adapter_init_gl_caps).
      *  This fixup removes performance problems on both the FX 5900 and FX 5700 (e.g. for framebuffer
      *  post-processing effects in the game "Max Payne 2").
@@ -1124,6 +1124,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX560,     "NVIDIA GeForce GTX 560",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX570,     "NVIDIA GeForce GTX 570",           DRIVER_NVIDIA_GEFORCE6,  1280},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX580,     "NVIDIA GeForce GTX 580",           DRIVER_NVIDIA_GEFORCE6,  1536},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX670,     "NVIDIA GeForce GTX 670",           DRIVER_NVIDIA_GEFORCE6,  2048},
 
     /* AMD cards */
     {HW_VENDOR_AMD,        CARD_AMD_RAGE_128PRO,           "ATI Rage Fury",                    DRIVER_AMD_RAGE_128PRO,  16  },
@@ -1294,7 +1295,7 @@ static void init_driver_info(struct wined3d_driver_info *driver_info,
     }
 
     /* When we reach this stage we always have a vendor or device id (it can be a default one).
-     * This means that unless the ids are overriden, we will always find a GPU description. */
+     * This means that unless the ids are overridden, we will always find a GPU description. */
     for (i = 0; i < (sizeof(gpu_description_table) / sizeof(gpu_description_table[0])); i++)
     {
         if (vendor == gpu_description_table[i].vendor && device == gpu_description_table[i].card)
@@ -1516,6 +1517,7 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
         }
         cards[] =
         {
+            {"GTX 670",     CARD_NVIDIA_GEFORCE_GTX670},    /* Geforce 600 - midend high */
             {"GTX 580",     CARD_NVIDIA_GEFORCE_GTX580},    /* Geforce 500 - highend */
             {"GTX 570",     CARD_NVIDIA_GEFORCE_GTX570},    /* Geforce 500 - midend high */
             {"GTX 560 Ti",  CARD_NVIDIA_GEFORCE_GTX560TI},  /* Geforce 500 - midend */
@@ -3048,7 +3050,7 @@ HRESULT CDECL wined3d_get_adapter_identifier(const struct wined3d *wined3d,
     const struct wined3d_adapter *adapter;
     size_t len;
 
-    TRACE_(d3d_caps)("wined3d %p, adapter_idx %u, flags %#x, indentifier %p.\n",
+    TRACE_(d3d_caps)("wined3d %p, adapter_idx %u, flags %#x, identifier %p.\n",
             wined3d, adapter_idx, flags, identifier);
 
     if (adapter_idx >= wined3d->adapter_count)

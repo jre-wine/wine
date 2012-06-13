@@ -40,46 +40,22 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 
-/** Calculate how long a fragment length of about 10 ms should be in frames
- *
- * nSamplesPerSec: Frequency rate in samples per second
- * nBlockAlign: Size of a single blockalign
- *
- * Returns:
- * Size in bytes of a single fragment
- */
-DWORD DSOUND_fraglen(DWORD nSamplesPerSec, DWORD nBlockAlign)
+static DWORD DSOUND_fraglen(DirectSoundDevice *device)
 {
-    /* Given a timer delay of 10ms, the fragment size is approximately:
-     *     fraglen = (nSamplesPerSec * 10 / 1000) * nBlockAlign
-     * ==> fraglen = (nSamplesPerSec / 100) * nBlockSize
-     *
-     * ALSA uses buffers that are powers of 2. Because of this, fraglen
-     * is rounded up to the nearest power of 2:
-     */
+    REFERENCE_TIME period;
+    HRESULT hr;
+    DWORD ret;
 
-    if (nSamplesPerSec <= 12800)
-        return 128 * nBlockAlign;
+    hr = IAudioClient_GetDevicePeriod(device->client, &period, NULL);
+    if(FAILED(hr)){
+        /* just guess at 10ms */
+        WARN("GetDevicePeriod failed: %08x\n", hr);
+        ret = MulDiv(device->pwfx->nBlockAlign, device->pwfx->nSamplesPerSec, 100);
+    }else
+        ret = MulDiv(device->pwfx->nSamplesPerSec * device->pwfx->nBlockAlign, period, 10000000);
 
-    if (nSamplesPerSec <= 25600)
-        return 256 * nBlockAlign;
-
-    if (nSamplesPerSec <= 51200)
-        return 512 * nBlockAlign;
-
-    return 1024 * nBlockAlign;
-}
-
-static void DSOUND_RecalcPrimary(DirectSoundDevice *device)
-{
-    TRACE("(%p)\n", device);
-
-    device->fraglen = DSOUND_fraglen(device->pwfx->nSamplesPerSec, device->pwfx->nBlockAlign);
-    device->helfrags = device->buflen / device->fraglen;
-    TRACE("fraglen=%d helfrags=%d\n", device->fraglen, device->helfrags);
-
-    /* calculate the 10ms write lead */
-    device->writelead = (device->pwfx->nSamplesPerSec / 100) * device->pwfx->nBlockAlign;
+    ret -= ret % device->pwfx->nBlockAlign;
+    return ret;
 }
 
 HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
@@ -114,7 +90,7 @@ HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
         return hres;
     }
 
-    prebuf_frames = device->prebuf * DSOUND_fraglen(device->pwfx->nSamplesPerSec, device->pwfx->nBlockAlign) / device->pwfx->nBlockAlign;
+    prebuf_frames = device->prebuf * DSOUND_fraglen(device) / device->pwfx->nBlockAlign;
     prebuf_rt = (10000000 * (UINT64)prebuf_frames) / device->pwfx->nSamplesPerSec;
 
     hres = IAudioClient_Initialize(device->client,
@@ -165,34 +141,37 @@ HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
 
 static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
 {
-	DWORD buflen;
 	LPBYTE newbuf;
 
 	TRACE("(%p)\n", device);
+
+	device->fraglen = DSOUND_fraglen(device);
 
 	/* on original windows, the buffer it set to a fixed size, no matter what the settings are.
 	   on windows this size is always fixed (tested on win-xp) */
 	if (!device->buflen)
 		device->buflen = ds_hel_buflen;
-	buflen = device->buflen;
-	buflen -= buflen % device->pwfx->nBlockAlign;
-	device->buflen = buflen;
+	device->buflen -= device->buflen % device->pwfx->nBlockAlign;
+	while(device->buflen < device->fraglen * device->prebuf){
+		device->buflen += ds_hel_buflen;
+		device->buflen -= device->buflen % device->pwfx->nBlockAlign;
+	}
 
-	device->mix_buffer_len = DSOUND_bufpos_to_mixpos(device, device->buflen);
-	device->mix_buffer = HeapAlloc(GetProcessHeap(), 0, device->mix_buffer_len);
+	device->helfrags = device->buflen / device->fraglen;
+
+	device->mix_buffer_len = ((device->prebuf * device->fraglen) / (device->pwfx->wBitsPerSample / 8)) * sizeof(float);
+	device->mix_buffer = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, device->mix_buffer_len);
 	if (!device->mix_buffer)
 		return DSERR_OUTOFMEMORY;
 
 	if (device->state == STATE_PLAYING) device->state = STATE_STARTING;
 	else if (device->state == STATE_STOPPING) device->state = STATE_STOPPED;
 
-    TRACE("desired buflen=%d, old buffer=%p\n", buflen, device->buffer);
-
     /* reallocate emulated primary buffer */
     if (device->buffer)
-        newbuf = HeapReAlloc(GetProcessHeap(),0,device->buffer, buflen);
+        newbuf = HeapReAlloc(GetProcessHeap(),0,device->buffer, device->buflen);
     else
-        newbuf = HeapAlloc(GetProcessHeap(),0, buflen);
+        newbuf = HeapAlloc(GetProcessHeap(),0, device->buflen);
 
     if (!newbuf) {
         ERR("failed to allocate primary buffer\n");
@@ -200,17 +179,24 @@ static HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
         /* but the old buffer might still exist and must be re-prepared */
     }
 
-    DSOUND_RecalcPrimary(device);
+    device->writelead = (device->pwfx->nSamplesPerSec / 100) * device->pwfx->nBlockAlign;
 
     device->buffer = newbuf;
 
-    TRACE("fraglen=%d\n", device->fraglen);
+    TRACE("buflen: %u, fraglen: %u, helfrags: %u, mix_buffer_len: %u\n",
+            device->buflen, device->fraglen, device->helfrags, device->mix_buffer_len);
 
-	device->mixfunction = mixfunctions[device->pwfx->wBitsPerSample/8 - 1];
-	device->normfunction = normfunctions[device->pwfx->wBitsPerSample/8 - 1];
+    if(device->pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+            (device->pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+             IsEqualGUID(&((WAVEFORMATEXTENSIBLE*)device->pwfx)->SubFormat,
+                 &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)))
+        device->normfunction = normfunctions[4];
+    else
+        device->normfunction = normfunctions[device->pwfx->wBitsPerSample/8 - 1];
+
 	FillMemory(device->buffer, device->buflen, (device->pwfx->wBitsPerSample == 8) ? 128 : 0);
 	FillMemory(device->mix_buffer, device->mix_buffer_len, 0);
-	device->last_pos_bytes = device->pwplay = device->pwqueue = device->playpos = device->mixpos = 0;
+	device->playing_offs_bytes = device->in_mmdev_bytes = device->playpos = device->mixpos = 0;
 	return DS_OK;
 }
 
@@ -221,8 +207,6 @@ static void DSOUND_PrimaryClose(DirectSoundDevice *device)
 
     TRACE("(%p)\n", device);
 
-    device->pwqueue = (DWORD)-1; /* resetting queues */
-
     if(device->client){
         hr = IAudioClient_Stop(device->client);
         if(FAILED(hr))
@@ -230,7 +214,7 @@ static void DSOUND_PrimaryClose(DirectSoundDevice *device)
     }
 
     /* clear the queue */
-    device->pwqueue = 0;
+    device->in_mmdev_bytes = 0;
 }
 
 HRESULT DSOUND_PrimaryCreate(DirectSoundDevice *device)
@@ -308,17 +292,14 @@ HRESULT DSOUND_PrimaryGetPosition(DirectSoundDevice *device, LPDWORD playpos, LP
 {
 	TRACE("(%p,%p,%p)\n", device, playpos, writepos);
 
-	TRACE("pwplay=%i, pwqueue=%i\n", device->pwplay, device->pwqueue);
-
 	/* check if playpos was requested */
 	if (playpos)
-		/* use the cached play position */
-		*playpos = device->pwplay * device->fraglen;
+		*playpos = device->playing_offs_bytes;
 
 	/* check if writepos was requested */
 	if (writepos)
 		/* the writepos is the first non-queued position */
-		*writepos = ((device->pwplay + device->pwqueue) % device->helfrags) * device->fraglen;
+		*writepos = (device->playing_offs_bytes + device->in_mmdev_bytes) % device->buflen;
 
 	TRACE("playpos = %d, writepos = %d (%p, time=%d)\n", playpos?*playpos:-1, writepos?*writepos:-1, device, GetTickCount());
 	return DS_OK;
@@ -528,11 +509,14 @@ opened:
 			WARN("DSOUND_PrimaryOpen(2) failed: %08x\n", err);
 	}
 
-	device->mix_buffer_len = DSOUND_bufpos_to_mixpos(device, device->buflen);
-	device->mix_buffer = HeapReAlloc(GetProcessHeap(), 0, device->mix_buffer, device->mix_buffer_len);
-	FillMemory(device->mix_buffer, device->mix_buffer_len, 0);
-	device->mixfunction = mixfunctions[device->pwfx->wBitsPerSample/8 - 1];
-	device->normfunction = normfunctions[device->pwfx->wBitsPerSample/8 - 1];
+
+	if(device->pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+			(device->pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+			 IsEqualGUID(&((WAVEFORMATEXTENSIBLE*)device->pwfx)->SubFormat,
+				 &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)))
+		device->normfunction = normfunctions[4];
+	else
+		device->normfunction = normfunctions[device->pwfx->wBitsPerSample/8 - 1];
 
 	if (old_fmt->nSamplesPerSec != device->pwfx->nSamplesPerSec ||
 			old_fmt->wBitsPerSample != device->pwfx->wBitsPerSample ||
@@ -544,7 +528,6 @@ opened:
 
 			(*dsb)->freqAdjust = (*dsb)->freq / (float)device->pwfx->nSamplesPerSec;
 			DSOUND_RecalcFormat((*dsb));
-			(*dsb)->primary_mixpos = 0;
 
 			RtlReleaseResource(&(*dsb)->lock);
 			/* **** */

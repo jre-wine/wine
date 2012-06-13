@@ -55,11 +55,10 @@ typedef struct DirectSoundCaptureDevice      DirectSoundCaptureDevice;
 typedef float (*bitsgetfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD);
 typedef void (*bitsputfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD, float);
 extern const bitsgetfunc getbpp[5] DECLSPEC_HIDDEN;
-extern const bitsputfunc putbpp[4] DECLSPEC_HIDDEN;
-typedef void (*mixfunc)(const void *, void *, unsigned);
-extern const mixfunc mixfunctions[4] DECLSPEC_HIDDEN;
+void putieee32(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
+void mixieee32(float *src, float *dst, unsigned samples) DECLSPEC_HIDDEN;
 typedef void (*normfunc)(const void *, void *, unsigned);
-extern const normfunc normfunctions[4] DECLSPEC_HIDDEN;
+extern const normfunc normfunctions[5] DECLSPEC_HIDDEN;
 
 typedef struct _DSVOLUMEPAN
 {
@@ -83,8 +82,7 @@ struct DirectSoundDevice
     DSCAPS                      drvcaps;
     DWORD                       priolevel;
     PWAVEFORMATEX               pwfx;
-    UINT                        timerID, pwplay, pwqueue, prebuf, helfrags;
-    UINT64                      last_pos_bytes;
+    UINT                        timerID, playing_offs_bytes, in_mmdev_bytes, prebuf, helfrags;
     DWORD                       fraglen;
     LPBYTE                      buffer;
     DWORD                       writelead, buflen, state, playpos, mixpos;
@@ -94,12 +92,11 @@ struct DirectSoundDevice
     CRITICAL_SECTION            mixlock;
     IDirectSoundBufferImpl     *primary;
     DWORD                       speaker_config;
-    LPBYTE                      tmp_buffer, mix_buffer;
+    float *mix_buffer, *tmp_buffer;
     DWORD                       tmp_buffer_len, mix_buffer_len;
 
     DSVOLUMEPAN                 volpan;
 
-    mixfunc mixfunction;
     normfunc normfunction;
 
     /* DirectSound3DListener fields */
@@ -186,7 +183,7 @@ struct IDirectSoundBufferImpl
     DWORD                       firstep;
     float freqAcc, freqAdjust, firgain;
     /* used for mixing */
-    DWORD                       primary_mixpos, sec_mixpos;
+    DWORD                       sec_mixpos;
 
     /* IDirectSoundNotify fields */
     LPDSBPOSITIONNOTIFY         notifies;
@@ -276,7 +273,6 @@ HRESULT DSOUND_Create8(REFIID riid, LPDIRECTSOUND8 *ppDS) DECLSPEC_HIDDEN;
 
 /* primary.c */
 
-DWORD DSOUND_fraglen(DWORD nSamplesPerSec, DWORD nBlockAlign) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryCreate(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryDestroy(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryPlay(DirectSoundDevice *device) DECLSPEC_HIDDEN;
@@ -295,7 +291,6 @@ LONG capped_refcount_dec(LONG *ref) DECLSPEC_HIDDEN;
 HRESULT DSOUND_FullDuplexCreate(REFIID riid, LPDIRECTSOUNDFULLDUPLEX* ppDSFD) DECLSPEC_HIDDEN;
 
 /* mixer.c */
-DWORD DSOUND_bufpos_to_mixpos(const DirectSoundDevice* device, DWORD pos) DECLSPEC_HIDDEN;
 void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len) DECLSPEC_HIDDEN;
 void DSOUND_RecalcVolPan(PDSVOLUMEPAN volpan) DECLSPEC_HIDDEN;
 void DSOUND_AmpFactorToVolPan(PDSVOLUMEPAN volpan) DECLSPEC_HIDDEN;

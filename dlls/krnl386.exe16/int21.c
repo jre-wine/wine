@@ -1087,7 +1087,7 @@ static BOOL INT21_CreateFile( CONTEXT *context,
     {
         winHandle = CreateFileW( pathW, winAccess, winSharing, NULL,
                                  winMode, winAttributes, 0 );
-        /* DOS allows to open files on a CDROM R/W */
+        /* DOS allows opening files on a CDROM R/W */
         if( winHandle == INVALID_HANDLE_VALUE &&
                 (GetLastError() == ERROR_WRITE_PROTECT ||
                  GetLastError() == ERROR_ACCESS_DENIED)) {
@@ -2491,6 +2491,14 @@ static void INT21_Ioctl_Block( CONTEXT *context )
 
         if (drivetype == DRIVE_REMOTE)
             SET_DX( context, (1<<9) | (1<<12) ); /* remote + no direct IO */
+        else if (drivetype == DRIVE_CDROM)
+            /* CDROM should be set to remote. If it set the app will
+             * call int2f to check if it cdrom or remote drive. */
+            SET_DX( context, (1<<12) );
+        else if (drivetype == DRIVE_FIXED)
+            /* This should define if drive support 0x0d, 0x0f and 0x08
+             * requests. The local fixed drive should do. */
+            SET_DX( context, (1<<11) );
         else
             SET_DX( context, 0 ); /* FIXME: use driver attr here */
         break;

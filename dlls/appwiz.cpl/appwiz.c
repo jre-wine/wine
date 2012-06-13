@@ -590,7 +590,7 @@ static void SetInfoDialogText(HKEY hKey, LPCWSTR lpKeyName, LPCWSTR lpAltMessage
  *              msg     - reason for calling function
  *              wParam  - additional parameter
  *              lParam  - additional parameter
- * Returns    : Dependant on message
+ * Returns    : Depends on the message
  */
 static BOOL CALLBACK SupportInfoDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -820,7 +820,7 @@ static HIMAGELIST ResetApplicationList(BOOL bFirstRun, HWND hWnd, HIMAGELIST hIm
  *              msg     - reason for calling function
  *              wParam  - additional parameter
  *              lParam  - additional parameter
- * Returns    : Dependant on message
+ * Returns    : Depends on the message
  */
 static BOOL CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -970,12 +970,18 @@ static void StartApplet(HWND hWnd)
 static LONG start_params(const WCHAR *params)
 {
     static const WCHAR install_geckoW[] = {'i','n','s','t','a','l','l','_','g','e','c','k','o',0};
+    static const WCHAR install_monoW[] = {'i','n','s','t','a','l','l','_','m','o','n','o',0};
 
     if(!params)
         return FALSE;
 
     if(!strcmpW(params, install_geckoW)) {
-        install_wine_gecko();
+        install_addon(ADDON_GECKO);
+        return TRUE;
+    }
+
+    if(!strcmpW(params, install_monoW)) {
+        install_addon(ADDON_MONO);
         return TRUE;
     }
 
@@ -990,7 +996,7 @@ static LONG start_params(const WCHAR *params)
  *              message - reason for calling function
  *              lParam1 - additional parameter
  *              lParam2 - additional parameter
- * Returns    : Dependant on message
+ * Returns    : Depends on the message
  */
 LONG CALLBACK CPlApplet(HWND hwndCPL, UINT message, LPARAM lParam1, LPARAM lParam2)
 {
