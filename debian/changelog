@@ -1,8 +1,14 @@
-wine-unstable (1.5.3-1) UNRELEASED; urgency=low
+wine-unstable (1.5.3-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.3, released Apr 27, 2012.
+    - Support for graphics bounds tracking.
+    - A number of fixes to the builtin Internet Explorer.
+    - Support for displaying ARM code in the Wine debugger.
+    - Various DirectMusic improvements.
+    - Better namespace support in MSXML.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:05:45 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:05:55 -0400
 
 wine-unstable (1.5.2-1) unstable; urgency=low
 
