@@ -480,7 +480,7 @@ UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace)
 
 static BOOL needs_ui_sequence(MSIPACKAGE *package)
 {
-    return (gUILevel & INSTALLUILEVEL_MASK) >= INSTALLUILEVEL_REDUCED;
+    return (package->ui_level & INSTALLUILEVEL_MASK) >= INSTALLUILEVEL_REDUCED;
 }
 
 UINT msi_set_context(MSIPACKAGE *package)
@@ -536,6 +536,12 @@ static UINT ITERATE_Actions(MSIRECORD *row, LPVOID param)
     if (rc != ERROR_SUCCESS)
         ERR("Execution halted, action %s returned %i\n", debugstr_w(action), rc);
 
+    if (package->need_reboot_now)
+    {
+        TRACE("action %s asked for immediate reboot, suspending installation\n",
+              debugstr_w(action));
+        rc = ACTION_ForceReboot( package );
+    }
     return rc;
 }
 
@@ -2948,7 +2954,7 @@ static UINT ITERATE_LaunchConditions(MSIRECORD *row, LPVOID param)
     r = MSI_EvaluateConditionW(package,cond);
     if (r == MSICONDITION_FALSE)
     {
-        if ((gUILevel & INSTALLUILEVEL_MASK) != INSTALLUILEVEL_NONE)
+        if ((package->ui_level & INSTALLUILEVEL_MASK) != INSTALLUILEVEL_NONE)
         {
             LPWSTR deformated;
             message = MSI_RecordGetString(row,2);
@@ -6883,7 +6889,7 @@ static UINT ACTION_ValidateProductID( MSIPACKAGE *package )
 static UINT ACTION_ScheduleReboot( MSIPACKAGE *package )
 {
     TRACE("\n");
-    package->need_reboot = 1;
+    package->need_reboot_at_end = 1;
     return ERROR_SUCCESS;
 }
 
@@ -7508,7 +7514,7 @@ UINT MSI_InstallPackage( MSIPACKAGE *package, LPCWSTR szPackagePath,
     }
     msi_free( reinstall );
 
-    if (rc == ERROR_SUCCESS && package->need_reboot)
+    if (rc == ERROR_SUCCESS && package->need_reboot_at_end)
         return ERROR_SUCCESS_REBOOT_REQUIRED;
 
     return rc;

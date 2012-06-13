@@ -251,17 +251,7 @@ static HRESULT WINAPI HTMLImgElement_get_alt(IHTMLImgElement *iface, BSTR *p)
 
     nsAString_Init(&alt_str, NULL);
     nsres = nsIDOMHTMLImageElement_GetAlt(This->nsimg, &alt_str);
-    if(NS_SUCCEEDED(nsres)) {
-        const PRUnichar *alt;
-
-        nsAString_GetData(&alt_str, &alt);
-        *p = *alt ? SysAllocString(alt) : NULL;
-    }else {
-        ERR("GetAlt failed: %08x\n", nsres);
-    }
-    nsAString_Finish(&alt_str);
-
-    return NS_SUCCEEDED(nsres) ? S_OK : E_FAIL;
+    return return_nsstr(nsres, &alt_str, p);
 }
 
 static HRESULT WINAPI HTMLImgElement_put_src(IHTMLImgElement *iface, BSTR v)
@@ -420,15 +410,19 @@ static HRESULT WINAPI HTMLImgElement_get_onload(IHTMLImgElement *iface, VARIANT 
 static HRESULT WINAPI HTMLImgElement_put_onerror(IHTMLImgElement *iface, VARIANT v)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->()\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->()\n", This);
+
+    return set_node_event(&This->element.node, EVENTID_ERROR, &v);
 }
 
 static HRESULT WINAPI HTMLImgElement_get_onerror(IHTMLImgElement *iface, VARIANT *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_node_event(&This->element.node, EVENTID_ERROR, p);
 }
 
 static HRESULT WINAPI HTMLImgElement_put_onabort(IHTMLImgElement *iface, VARIANT v)
@@ -455,24 +449,14 @@ static HRESULT WINAPI HTMLImgElement_put_name(IHTMLImgElement *iface, BSTR v)
 static HRESULT WINAPI HTMLImgElement_get_name(IHTMLImgElement *iface, BSTR *p)
 {
     HTMLImgElement *This = impl_from_IHTMLImgElement(iface);
-    nsAString strName;
+    nsAString name;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    nsAString_Init(&strName, NULL);
-    nsres = nsIDOMHTMLImageElement_GetName(This->nsimg, &strName);
-    if(NS_SUCCEEDED(nsres)) {
-        const PRUnichar *str;
-
-        nsAString_GetData(&strName, &str);
-        *p = *str ? SysAllocString(str) : NULL;
-    }else {
-        ERR("GetName failed: %08x\n", nsres);
-    }
-    nsAString_Finish(&strName);
-
-    return NS_SUCCEEDED(nsres) ? S_OK : E_FAIL;
+    nsAString_Init(&name, NULL);
+    nsres = nsIDOMHTMLImageElement_GetName(This->nsimg, &name);
+    return return_nsstr(nsres, &name, p);
 }
 
 static HRESULT WINAPI HTMLImgElement_put_width(IHTMLImgElement *iface, LONG v)

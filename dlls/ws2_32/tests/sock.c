@@ -1600,6 +1600,7 @@ static DWORD WINAPI do_getservbyname( void *param )
         for ( j = 0; j < 2; j++ ) {
             pserv[j] = getservbyname ( serv[j].name, serv[j].proto );
             ok ( pserv[j] != NULL, "getservbyname could not retrieve information for %s: %d\n", serv[j].name, WSAGetLastError() );
+            if ( !pserv[j] ) continue;
             ok ( pserv[j]->s_port == htons(serv[j].port), "getservbyname returned the wrong port for %s: %d\n", serv[j].name, ntohs(pserv[j]->s_port) );
             ok ( !strcmp ( pserv[j]->s_proto, serv[j].proto ), "getservbyname returned the wrong protocol for %s: %s\n", serv[j].name, pserv[j]->s_proto );
             ok ( !strcmp ( pserv[j]->s_name, serv[j].name ), "getservbyname returned the wrong name for %s: %s\n", serv[j].name, pserv[j]->s_name );
@@ -2731,9 +2732,50 @@ static void test_getsockname(void)
 static void test_dns(void)
 {
     struct hostent *h;
+    union memaddress
+    {
+        char *chr;
+        void *mem;
+    } addr;
+    char **ptr;
+    int acount;
 
     h = gethostbyname("");
     ok(h != NULL, "gethostbyname(\"\") failed with %d\n", h_errno);
+
+    /* Use an address with valid alias names if possible */
+    h = gethostbyname("source.winehq.org");
+    if(!h)
+    {
+        skip("Can't test the hostent structure because gethostbyname failed\n");
+        return;
+    }
+
+    /* The returned struct must be allocated in a very strict way. First we need to
+     * count how many aliases there are because they must be located right after
+     * the struct hostent size. Knowing the amount of aliases we know the exact
+     * location of the first IP returned. Rule valid for >= XP, for older OS's
+     * it's somewhat the opposite. */
+    addr.mem = h + 1;
+    if(h->h_addr_list == addr.mem) /* <= W2K */
+    {
+        skip("Skipping hostent tests since this OS is unsupported\n");
+        return;
+    }
+
+    todo_wine ok(h->h_aliases == addr.mem,
+       "hostent->h_aliases should be in %p, it is in %p\n", addr.mem, h->h_aliases);
+
+    for(ptr = h->h_aliases, acount = 1; *ptr; ptr++) acount++;
+    addr.chr += sizeof(*ptr) * acount;
+    todo_wine ok(h->h_addr_list == addr.mem,
+       "hostent->h_addr_list should be in %p, it is in %p\n", addr.mem, h->h_addr_list);
+
+    for(ptr = h->h_addr_list, acount = 1; *ptr; ptr++) acount++;
+
+    addr.chr += sizeof(*ptr) * acount;
+    todo_wine ok(h->h_addr_list[0] == addr.mem,
+       "hostent->h_addr_list[0] should be in %p, it is in %p\n", addr.mem, h->h_addr_list[0]);
 }
 
 /* Our winsock headers don't define gethostname because it conflicts with the
@@ -4504,7 +4546,7 @@ static void test_AcceptEx(void)
     struct timeval timeout = {0,10}; /* wait for 10 milliseconds */
     int got, conn1, i;
     DWORD bytesReturned, connect_time;
-    char buffer[1024];
+    char buffer[1024], ipbuffer[32];
     OVERLAPPED overlapped;
     int iret, localSize = sizeof(struct sockaddr_in), remoteSize = localSize;
     BOOL bret;
@@ -4720,15 +4762,17 @@ static void test_AcceptEx(void)
     pGetAcceptExSockaddrs(buffer, 2, sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
                           (struct sockaddr **)&readBindAddress, &localSize,
                           (struct sockaddr **)&readRemoteAddress, &remoteSize);
+    strcpy( ipbuffer, inet_ntoa(readBindAddress->sin_addr));
     ok( readBindAddress->sin_addr.s_addr == bindAddress.sin_addr.s_addr,
             "Local socket address is different %s != %s\n",
-            inet_ntoa(readBindAddress->sin_addr), inet_ntoa(bindAddress.sin_addr));
+            ipbuffer, inet_ntoa(bindAddress.sin_addr));
     ok( readBindAddress->sin_port == bindAddress.sin_port,
             "Local socket port is different: %d != %d\n",
             readBindAddress->sin_port, bindAddress.sin_port);
+    strcpy( ipbuffer, inet_ntoa(readRemoteAddress->sin_addr));
     ok( readRemoteAddress->sin_addr.s_addr == peerAddress.sin_addr.s_addr,
             "Remote socket address is different %s != %s\n",
-            inet_ntoa(readRemoteAddress->sin_addr), inet_ntoa(peerAddress.sin_addr));
+            ipbuffer, inet_ntoa(peerAddress.sin_addr));
     ok( readRemoteAddress->sin_port == peerAddress.sin_port,
             "Remote socket port is different: %d != %d\n",
             readRemoteAddress->sin_port, peerAddress.sin_port);

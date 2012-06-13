@@ -1277,6 +1277,7 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSourc
     else if (LOFlags == D3DRMLOAD_FROMFILE)
     {
         load_options = DXFILELOAD_FROMFILE;
+        TRACE("Loading from file %s\n", debugstr_a(ObjSource));
     }
     else
     {
@@ -1389,6 +1390,8 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSourc
         else if (IsEqualGUID(pGuid, &TID_D3DRMFrame))
         {
             BOOL requested = FALSE;
+            HRESULT hr;
+            LPDIRECT3DRMFRAME3 frame;
 
             TRACE("Found TID_D3DRMFrame\n");
 
@@ -1400,7 +1403,18 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSourc
 
             if (requested)
             {
-                FIXME("Processing frame not supported yet\n");
+                FIXME("Fake frame data and notify application\n");
+
+                hr = IDirect3DRM3_CreateFrame(iface, NULL, &frame);
+                if (SUCCEEDED(hr))
+                {
+                    LoadProc((LPDIRECT3DRMOBJECT)frame, &IID_IDirect3DRMFrame, ArgLP);
+                    IDirect3DRMFrame3_Release(frame);
+                }
+
+                if (FAILED(hr))
+                    ERR("Cannot process mesh\n");
+
             }
         }
         else if (IsEqualGUID(pGuid, &TID_D3DRMMaterial))

@@ -1964,8 +1964,8 @@ static HRESULT WINAPI ddraw7_GetScanLine(IDirectDraw7 *iface, DWORD *Scanline)
 {
     struct ddraw *ddraw = impl_from_IDirectDraw7(iface);
     struct wined3d_display_mode mode;
-    static DWORD cur_scanline;
     static BOOL hide = FALSE;
+    DWORD time, frame_progress, lines;
 
     TRACE("iface %p, line %p.\n", iface, Scanline);
 
@@ -1982,11 +1982,20 @@ static HRESULT WINAPI ddraw7_GetScanLine(IDirectDraw7 *iface, DWORD *Scanline)
 
     /* Fake the line sweeping of the monitor */
     /* FIXME: We should synchronize with a source to keep the refresh rate */
-    *Scanline = cur_scanline++;
-    /* Assume 20 scan lines in the vertical blank */
-    if (cur_scanline >= mode.height + 20)
-        cur_scanline = 0;
 
+    /* Simulate a 60Hz display */
+    time = GetTickCount();
+    frame_progress = time & 15; /* time % (1000 / 60) */
+    if (!frame_progress)
+    {
+        *Scanline = 0;
+        return DDERR_VERTICALBLANKINPROGRESS;
+    }
+
+    /* Convert frame_progress to estimated scan line. Return any line from
+     * block determined by time. Some lines may be never returned */
+    lines = mode.height / 15;
+    *Scanline = (frame_progress - 1) * lines + time % lines;
     return DD_OK;
 }
 
@@ -2462,6 +2471,7 @@ static HRESULT WINAPI ddraw7_GetSurfaceFromDC(IDirectDraw7 *iface, HDC hdc,
 {
     struct ddraw *ddraw = impl_from_IDirectDraw7(iface);
     struct wined3d_surface *wined3d_surface;
+    struct ddraw_surface *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, dc %p, surface %p.\n", iface, hdc, Surface);
@@ -2476,7 +2486,8 @@ static HRESULT WINAPI ddraw7_GetSurfaceFromDC(IDirectDraw7 *iface, HDC hdc,
         return DDERR_NOTFOUND;
     }
 
-    *Surface = wined3d_surface_get_parent(wined3d_surface);
+    surface_impl = wined3d_surface_get_parent(wined3d_surface);
+    *Surface = &surface_impl->IDirectDrawSurface7_iface;
     IDirectDrawSurface7_AddRef(*Surface);
     TRACE("Returning surface %p.\n", Surface);
     return DD_OK;
@@ -4420,56 +4431,23 @@ static HRESULT WINAPI d3d7_CreateDevice(IDirect3D7 *iface, REFCLSID riid,
 {
     struct ddraw_surface *target = unsafe_impl_from_IDirectDrawSurface7(surface);
     struct ddraw *ddraw = impl_from_IDirect3D7(iface);
-    IDirect3DDeviceImpl *object;
+    struct d3d_device *object;
     HRESULT hr;
 
     TRACE("iface %p, riid %s, surface %p, device %p.\n", iface, debugstr_guid(riid), surface, device);
 
     wined3d_mutex_lock();
-    *device = NULL;
-
-    /* Fail device creation if non-opengl surfaces are used. */
-    if (DefaultSurfaceType != WINED3D_SURFACE_TYPE_OPENGL)
+    hr = d3d_device_create(ddraw, target, 7, &object, NULL);
+    if (SUCCEEDED(hr))
+        *device = &object->IDirect3DDevice7_iface;
+    else
     {
-        ERR("The application wants to create a Direct3D device, but non-opengl surfaces are set in the registry.\n");
-        ERR("Please set the surface implementation to opengl or autodetection to allow 3D rendering.\n");
-
-        /* We only hit this path if a default surface is set in the registry. Incorrect autodetection
-         * is caught in CreateSurface or QueryInterface. */
-        wined3d_mutex_unlock();
-        return DDERR_NO3D;
+        WARN("Failed to create device, hr %#x.\n", hr);
+        *device = NULL;
     }
-
-    if (ddraw->d3ddevice)
-    {
-        FIXME("Only one Direct3D device per DirectDraw object supported.\n");
-        wined3d_mutex_unlock();
-        return DDERR_INVALIDPARAMS;
-    }
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        ERR("Failed to allocate device memory.\n");
-        wined3d_mutex_unlock();
-        return DDERR_OUTOFMEMORY;
-    }
-
-    hr = d3d_device_init(object, ddraw, target);
-    if (FAILED(hr))
-    {
-        WARN("Failed to initialize device, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        wined3d_mutex_unlock();
-        return hr;
-    }
-
-    TRACE("Created device %p.\n", object);
-    *device = &object->IDirect3DDevice7_iface;
-
     wined3d_mutex_unlock();
 
-    return D3D_OK;
+    return hr;
 }
 
 static HRESULT WINAPI d3d3_CreateDevice(IDirect3D3 *iface, REFCLSID riid,
@@ -4477,22 +4455,25 @@ static HRESULT WINAPI d3d3_CreateDevice(IDirect3D3 *iface, REFCLSID riid,
 {
     struct ddraw_surface *surface_impl = unsafe_impl_from_IDirectDrawSurface4(surface);
     struct ddraw *ddraw = impl_from_IDirect3D3(iface);
-    IDirect3DDevice7 *device7;
-    IDirect3DDeviceImpl *device_impl;
+    struct d3d_device *device_impl;
     HRESULT hr;
 
     TRACE("iface %p, riid %s, surface %p, device %p, outer_unknown %p.\n",
             iface, debugstr_guid(riid), surface, device, outer_unknown);
 
-    if (outer_unknown) return CLASS_E_NOAGGREGATION;
+    if (outer_unknown)
+        return CLASS_E_NOAGGREGATION;
 
-    hr = d3d7_CreateDevice(&ddraw->IDirect3D7_iface, riid,
-            surface_impl ? &surface_impl->IDirectDrawSurface7_iface : NULL, device ? &device7 : NULL);
+    wined3d_mutex_lock();
+    hr = d3d_device_create(ddraw, surface_impl, 3, &device_impl, NULL);
     if (SUCCEEDED(hr))
-    {
-        device_impl = impl_from_IDirect3DDevice7(device7);
         *device = &device_impl->IDirect3DDevice3_iface;
+    else
+    {
+        WARN("Failed to create device, hr %#x.\n", hr);
+        *device = NULL;
     }
+    wined3d_mutex_unlock();
 
     return hr;
 }
@@ -4502,20 +4483,22 @@ static HRESULT WINAPI d3d2_CreateDevice(IDirect3D2 *iface, REFCLSID riid,
 {
     struct ddraw_surface *surface_impl = unsafe_impl_from_IDirectDrawSurface(surface);
     struct ddraw *ddraw = impl_from_IDirect3D2(iface);
-    IDirect3DDevice7 *device7;
-    IDirect3DDeviceImpl *device_impl;
+    struct d3d_device *device_impl;
     HRESULT hr;
 
     TRACE("iface %p, riid %s, surface %p, device %p.\n",
             iface, debugstr_guid(riid), surface, device);
 
-    hr = d3d7_CreateDevice(&ddraw->IDirect3D7_iface, riid,
-            surface_impl ? &surface_impl->IDirectDrawSurface7_iface : NULL, device ? &device7 : NULL);
+    wined3d_mutex_lock();
+    hr = d3d_device_create(ddraw, surface_impl, 2, &device_impl, NULL);
     if (SUCCEEDED(hr))
-    {
-        device_impl = impl_from_IDirect3DDevice7(device7);
         *device = &device_impl->IDirect3DDevice2_iface;
+    else
+    {
+        WARN("Failed to create device, hr %#x.\n", hr);
+        *device = NULL;
     }
+    wined3d_mutex_unlock();
 
     return hr;
 }
@@ -4544,7 +4527,7 @@ static HRESULT WINAPI d3d7_CreateVertexBuffer(IDirect3D7 *iface, D3DVERTEXBUFFER
         IDirect3DVertexBuffer7 **vertex_buffer, DWORD flags)
 {
     struct ddraw *ddraw = impl_from_IDirect3D7(iface);
-    IDirect3DVertexBufferImpl *object;
+    struct d3d_vertex_buffer *object;
     HRESULT hr;
 
     TRACE("iface %p, desc %p, vertex_buffer %p, flags %#x.\n",
@@ -4568,7 +4551,7 @@ static HRESULT WINAPI d3d3_CreateVertexBuffer(IDirect3D3 *iface, D3DVERTEXBUFFER
         IDirect3DVertexBuffer **vertex_buffer, DWORD flags, IUnknown *outer_unknown)
 {
     struct ddraw *ddraw = impl_from_IDirect3D3(iface);
-    IDirect3DVertexBufferImpl *object;
+    struct d3d_vertex_buffer *object;
     HRESULT hr;
 
     TRACE("iface %p, desc %p, vertex_buffer %p, flags %#x, outer_unknown %p.\n",

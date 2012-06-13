@@ -28,6 +28,7 @@
 #include "wingdi.h"
 #include "winspool.h"
 
+#include "wine/unicode.h"
 #include "wine/gdi_driver.h"
 #include "wine/list.h"
 
@@ -117,9 +118,10 @@ typedef struct _tagFONTFAMILY {
 extern FONTFAMILY   *PSDRV_AFMFontList DECLSPEC_HIDDEN;
 extern const AFM    *const PSDRV_BuiltinAFMs[] DECLSPEC_HIDDEN;     /* last element is NULL */
 
-typedef struct _tagFONTNAME {
+typedef struct
+{
+    struct list          entry;
     char		*Name;
-    struct _tagFONTNAME *next;
 } FONTNAME;
 
 typedef struct {
@@ -151,46 +153,34 @@ typedef struct _BANDINFOSTRUCT
     RECT GraphicsRect;
 } BANDINFOSTRUCT, *PBANDINFOSTRUCT;
 
-typedef struct _tagOPTIONENTRY {
-    char			*Name;		/* eg "True" */
-    char			*FullName;	/* eg "Installed" */
-    char			*InvocationString; /* Often NULL */
-    struct _tagOPTIONENTRY	*next;
-} OPTIONENTRY;
-
-typedef struct _tagOPTION { /* Treat bool as a special case of pickone */
-    char			*OptionName;	/* eg "*Option1" */
-    char			*FullName;	/* eg "Envelope Feeder" */
-    char			*DefaultOption; /* eg "False" */
-    OPTIONENTRY			*Options;
-    struct _tagOPTION		*next;
-} OPTION;
-
-typedef struct _tagCONSTRAINT {
+typedef struct
+{
+    struct list                 entry;
     char			*Feature1;
     char			*Value1;
     char			*Feature2;
     char			*Value2;
-    struct _tagCONSTRAINT	*next;
 } CONSTRAINT;
 
-typedef struct _tagINPUTSLOT {
+typedef struct
+{
+    struct list                 entry;
     const char			*Name;
     const char			*FullName;
     char			*InvocationString;
     WORD			WinBin; /* eg DMBIN_LOWER */
-    struct _tagINPUTSLOT	*next;
 } INPUTSLOT;
 
 typedef enum _RASTERIZEROPTION
   {RO_None, RO_Accept68K, RO_Type42, RO_TrueImage} RASTERIZEROPTION;
 
-typedef struct _tagDUPLEX {
+typedef struct
+{
+    struct list                 entry;
     char                        *Name;
     char                        *FullName;
     char                        *InvocationString;
     WORD                        WinDuplex; /* eg DMDUP_SIMPLEX */
-    struct _tagDUPLEX           *next;
 } DUPLEX;
 
 /* Many Mac OS X based ppd files don't include a *ColorDevice line, so
@@ -212,19 +202,18 @@ typedef struct {
     char		*JCLToPSInterpreter;
     char		*JCLEnd;
     char		*DefaultFont;
-    FONTNAME		*InstalledFonts; /* ptr to a list of FontNames */
+    struct list         InstalledFonts;
     struct list         PageSizes;
     PAGESIZE            *DefaultPageSize;
-    OPTION		*InstalledOptions;
-    CONSTRAINT		*Constraints;
-    INPUTSLOT		*InputSlots;
+    struct list         Constraints;
+    struct list         InputSlots;
     RASTERIZEROPTION    TTRasterizer;
-    DUPLEX              *Duplexes;
+    struct list         Duplexes;
     DUPLEX              *DefaultDuplex;
 } PPD;
 
 typedef struct {
-    DEVMODEA			dmPublic;
+    DEVMODEW			dmPublic;
     struct _tagdocprivate {
       int dummy;
     }				dmDocPrivate;
@@ -238,16 +227,17 @@ numInstalledOptions of OPTIONs
 
 */
 
-} PSDRV_DEVMODEA;
+} PSDRV_DEVMODE;
 
-typedef struct _tagPI {
-    char		    *FriendlyName;
+typedef struct
+{
+    struct list             entry;
+    WCHAR                   *friendly_name;
     PPD			    *ppd;
-    PSDRV_DEVMODEA	    *Devmode;
+    PSDRV_DEVMODE	    *Devmode;
     FONTFAMILY		    *Fonts;
     PPRINTER_ENUM_VALUESA   FontSubTable;
     DWORD		    FontSubTableSize;
-    struct _tagPI	    *next;
 } PRINTERINFO;
 
 typedef struct {
@@ -346,8 +336,8 @@ typedef struct {
 typedef struct {
     DWORD		id;             /* Job id */
     HANDLE              hprinter;       /* Printer handle */
-    LPSTR		output;		/* Output file/port */
-    LPSTR               DocName;        /* Document Name */
+    LPWSTR              output;	        /* Output file/port */
+    LPWSTR              doc_name;       /* Document Name */
     BOOL		banding;        /* Have we received a NEXTBAND */
     BOOL		OutOfPage;      /* Page header not sent yet */
     INT			PageNo;
@@ -366,7 +356,7 @@ typedef struct
     PSCOLOR		bkColor;
     PSCOLOR		inkColor;	/* Last colour set */
     JOB			job;
-    PSDRV_DEVMODEA	*Devmode;
+    PSDRV_DEVMODE	*Devmode;
     PRINTERINFO		*pi;
     SIZE                PageSize;      /* Physical page size in device units */
     RECT                ImageableArea; /* Imageable area in device units */
@@ -383,11 +373,6 @@ typedef struct
 
     int                 pathdepth;
 } PSDRV_PDEVICE;
-
-typedef struct {
-    PRINTERINFO *pi;
-    PSDRV_DEVMODEA *dlgdm;
-} PSDRV_DLGINFO;
 
 static inline PSDRV_PDEVICE *get_psdrv_dev( PHYSDEV dev )
 {
@@ -466,11 +451,11 @@ extern INT PSDRV_StartDoc( PHYSDEV dev, const DOCINFOW *doc ) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_StrokeAndFillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_StrokePath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 
-extern void PSDRV_MergeDevmodes(PSDRV_DEVMODEA *dm1, PSDRV_DEVMODEA *dm2,
+extern void PSDRV_MergeDevmodes(PSDRV_DEVMODE *dm1, PSDRV_DEVMODE *dm2,
 			 PRINTERINFO *pi) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_GetFontMetrics(void) DECLSPEC_HIDDEN;
 extern PPD *PSDRV_ParsePPD(char *fname) DECLSPEC_HIDDEN;
-extern PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name) DECLSPEC_HIDDEN;
+extern PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name) DECLSPEC_HIDDEN;
 extern const AFM *PSDRV_FindAFMinList(FONTFAMILY *head, LPCSTR name) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_AddAFMtoList(FONTFAMILY **head, const AFM *afm,
 	BOOL *p_added) DECLSPEC_HIDDEN;
@@ -491,7 +476,7 @@ extern void PSDRV_CreateColor( PHYSDEV dev, PSCOLOR *pscolor,
 		     COLORREF wincolor ) DECLSPEC_HIDDEN;
 extern char PSDRV_UnicodeToANSI(int u) DECLSPEC_HIDDEN;
 
-extern INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title ) DECLSPEC_HIDDEN;
+extern INT PSDRV_WriteHeader( PHYSDEV dev, LPCWSTR title ) DECLSPEC_HIDDEN;
 extern INT PSDRV_WriteFooter( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern INT PSDRV_WriteNewPage( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern INT PSDRV_WriteEndPage( PHYSDEV dev ) DECLSPEC_HIDDEN;
@@ -580,5 +565,16 @@ extern DWORD ASCII85_encode(BYTE *in_buf, DWORD len, BYTE *out_buf) DECLSPEC_HID
 	setlocale(LC_NUMERIC,tmplocale);			\
 } while (0)
 
+static inline WCHAR *strdupW( const WCHAR *str )
+{
+    int size;
+    WCHAR *ret;
+
+    if (!str) return NULL;
+    size = (strlenW( str ) + 1) * sizeof(WCHAR);
+    ret = HeapAlloc( GetProcessHeap(), 0, size );
+    if (ret) memcpy( ret, str, size );
+    return ret;
+}
 
 #endif

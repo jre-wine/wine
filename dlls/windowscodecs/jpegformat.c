@@ -62,7 +62,9 @@ WINE_DECLARE_DEBUG_CHANNEL(jpeg);
 static void *libjpeg_handle;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
+MAKE_FUNCPTR(jpeg_CreateCompress);
 MAKE_FUNCPTR(jpeg_CreateDecompress);
+MAKE_FUNCPTR(jpeg_destroy_compress);
 MAKE_FUNCPTR(jpeg_destroy_decompress);
 MAKE_FUNCPTR(jpeg_read_header);
 MAKE_FUNCPTR(jpeg_read_scanlines);
@@ -81,7 +83,9 @@ static void *load_libjpeg(void)
         return NULL; \
     }
 
+        LOAD_FUNCPTR(jpeg_CreateCompress);
         LOAD_FUNCPTR(jpeg_CreateDecompress);
+        LOAD_FUNCPTR(jpeg_destroy_compress);
         LOAD_FUNCPTR(jpeg_destroy_decompress);
         LOAD_FUNCPTR(jpeg_read_header);
         LOAD_FUNCPTR(jpeg_read_scanlines);
@@ -697,11 +701,499 @@ HRESULT JpegDecoder_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void** ppv)
     return ret;
 }
 
+typedef struct JpegEncoder {
+    IWICBitmapEncoder IWICBitmapEncoder_iface;
+    IWICBitmapFrameEncode IWICBitmapFrameEncode_iface;
+    LONG ref;
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    struct jpeg_destination_mgr dest_mgr;
+    int initialized;
+    int frame_count;
+    int frame_initialized;
+    int started_compress;
+    UINT width, height;
+    IStream *stream;
+    CRITICAL_SECTION lock;
+    BYTE dest_buffer[1024];
+} JpegEncoder;
+
+static inline JpegEncoder *impl_from_IWICBitmapEncoder(IWICBitmapEncoder *iface)
+{
+    return CONTAINING_RECORD(iface, JpegEncoder, IWICBitmapEncoder_iface);
+}
+
+static inline JpegEncoder *impl_from_IWICBitmapFrameEncode(IWICBitmapFrameEncode *iface)
+{
+    return CONTAINING_RECORD(iface, JpegEncoder, IWICBitmapFrameEncode_iface);
+}
+
+static inline JpegEncoder *encoder_from_compress(j_compress_ptr compress)
+{
+    return CONTAINING_RECORD(compress, JpegEncoder, cinfo);
+}
+
+static void dest_mgr_init_destination(j_compress_ptr cinfo)
+{
+    JpegEncoder *This = encoder_from_compress(cinfo);
+
+    This->dest_mgr.next_output_byte = This->dest_buffer;
+    This->dest_mgr.free_in_buffer = sizeof(This->dest_buffer);
+}
+
+static jpeg_boolean dest_mgr_empty_output_buffer(j_compress_ptr cinfo)
+{
+    JpegEncoder *This = encoder_from_compress(cinfo);
+    HRESULT hr;
+    ULONG byteswritten;
+
+    hr = IStream_Write(This->stream, This->dest_buffer,
+        sizeof(This->dest_buffer), &byteswritten);
+
+    if (hr != S_OK || byteswritten == 0)
+    {
+        ERR("Failed writing data, hr=%x\n", hr);
+        return FALSE;
+    }
+
+    This->dest_mgr.next_output_byte = This->dest_buffer;
+    This->dest_mgr.free_in_buffer = sizeof(This->dest_buffer);
+    return TRUE;
+}
+
+static void dest_mgr_term_destination(j_compress_ptr cinfo)
+{
+    JpegEncoder *This = encoder_from_compress(cinfo);
+    ULONG byteswritten;
+    HRESULT hr;
+
+    if (This->dest_mgr.free_in_buffer != sizeof(This->dest_buffer))
+    {
+        hr = IStream_Write(This->stream, This->dest_buffer,
+            sizeof(This->dest_buffer) - This->dest_mgr.free_in_buffer, &byteswritten);
+
+        if (hr != S_OK || byteswritten == 0)
+            ERR("Failed writing data, hr=%x\n", hr);
+    }
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_QueryInterface(IWICBitmapFrameEncode *iface, REFIID iid,
+    void **ppv)
+{
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    TRACE("(%p,%s,%p)\n", iface, debugstr_guid(iid), ppv);
+
+    if (!ppv) return E_INVALIDARG;
+
+    if (IsEqualIID(&IID_IUnknown, iid) ||
+        IsEqualIID(&IID_IWICBitmapFrameEncode, iid))
+    {
+        *ppv = &This->IWICBitmapFrameEncode_iface;
+    }
+    else
+    {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI JpegEncoder_Frame_AddRef(IWICBitmapFrameEncode *iface)
+{
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    return IWICBitmapEncoder_AddRef(&This->IWICBitmapEncoder_iface);
+}
+
+static ULONG WINAPI JpegEncoder_Frame_Release(IWICBitmapFrameEncode *iface)
+{
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    return IWICBitmapEncoder_Release(&This->IWICBitmapEncoder_iface);
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_Initialize(IWICBitmapFrameEncode *iface,
+    IPropertyBag2 *pIEncoderOptions)
+{
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    TRACE("(%p,%p)\n", iface, pIEncoderOptions);
+
+    EnterCriticalSection(&This->lock);
+
+    if (This->frame_initialized)
+    {
+        LeaveCriticalSection(&This->lock);
+        return WINCODEC_ERR_WRONGSTATE;
+    }
+
+    This->frame_initialized = TRUE;
+
+    LeaveCriticalSection(&This->lock);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetSize(IWICBitmapFrameEncode *iface,
+    UINT uiWidth, UINT uiHeight)
+{
+    JpegEncoder *This = impl_from_IWICBitmapFrameEncode(iface);
+    TRACE("(%p,%u,%u)\n", iface, uiWidth, uiHeight);
+
+    EnterCriticalSection(&This->lock);
+
+    if (!This->frame_initialized || This->started_compress)
+    {
+        LeaveCriticalSection(&This->lock);
+        return WINCODEC_ERR_WRONGSTATE;
+    }
+
+    This->width = uiWidth;
+    This->height = uiHeight;
+
+    LeaveCriticalSection(&This->lock);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetResolution(IWICBitmapFrameEncode *iface,
+    double dpiX, double dpiY)
+{
+    FIXME("(%p,%0.2f,%0.2f): stub\n", iface, dpiX, dpiY);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetPixelFormat(IWICBitmapFrameEncode *iface,
+    WICPixelFormatGUID *pPixelFormat)
+{
+    FIXME("(%p,%s): stub\n", iface, debugstr_guid(pPixelFormat));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetColorContexts(IWICBitmapFrameEncode *iface,
+    UINT cCount, IWICColorContext **ppIColorContext)
+{
+    FIXME("(%p,%u,%p): stub\n", iface, cCount, ppIColorContext);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetPalette(IWICBitmapFrameEncode *iface,
+    IWICPalette *pIPalette)
+{
+    FIXME("(%p,%p): stub\n", iface, pIPalette);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_SetThumbnail(IWICBitmapFrameEncode *iface,
+    IWICBitmapSource *pIThumbnail)
+{
+    FIXME("(%p,%p): stub\n", iface, pIThumbnail);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_WritePixels(IWICBitmapFrameEncode *iface,
+    UINT lineCount, UINT cbStride, UINT cbBufferSize, BYTE *pbPixels)
+{
+    FIXME("(%p,%u,%u,%u,%p): stub\n", iface, lineCount, cbStride, cbBufferSize, pbPixels);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_WriteSource(IWICBitmapFrameEncode *iface,
+    IWICBitmapSource *pIBitmapSource, WICRect *prc)
+{
+    FIXME("(%p,%p,%p): stub\n", iface, pIBitmapSource, prc);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_Commit(IWICBitmapFrameEncode *iface)
+{
+    FIXME("(%p): stub\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_Frame_GetMetadataQueryWriter(IWICBitmapFrameEncode *iface,
+    IWICMetadataQueryWriter **ppIMetadataQueryWriter)
+{
+    FIXME("(%p, %p): stub\n", iface, ppIMetadataQueryWriter);
+    return E_NOTIMPL;
+}
+
+static const IWICBitmapFrameEncodeVtbl JpegEncoder_FrameVtbl = {
+    JpegEncoder_Frame_QueryInterface,
+    JpegEncoder_Frame_AddRef,
+    JpegEncoder_Frame_Release,
+    JpegEncoder_Frame_Initialize,
+    JpegEncoder_Frame_SetSize,
+    JpegEncoder_Frame_SetResolution,
+    JpegEncoder_Frame_SetPixelFormat,
+    JpegEncoder_Frame_SetColorContexts,
+    JpegEncoder_Frame_SetPalette,
+    JpegEncoder_Frame_SetThumbnail,
+    JpegEncoder_Frame_WritePixels,
+    JpegEncoder_Frame_WriteSource,
+    JpegEncoder_Frame_Commit,
+    JpegEncoder_Frame_GetMetadataQueryWriter
+};
+
+static HRESULT WINAPI JpegEncoder_QueryInterface(IWICBitmapEncoder *iface, REFIID iid,
+    void **ppv)
+{
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    TRACE("(%p,%s,%p)\n", iface, debugstr_guid(iid), ppv);
+
+    if (!ppv) return E_INVALIDARG;
+
+    if (IsEqualIID(&IID_IUnknown, iid) ||
+        IsEqualIID(&IID_IWICBitmapEncoder, iid))
+    {
+        *ppv = This;
+    }
+    else
+    {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI JpegEncoder_AddRef(IWICBitmapEncoder *iface)
+{
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) refcount=%u\n", iface, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI JpegEncoder_Release(IWICBitmapEncoder *iface)
+{
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) refcount=%u\n", iface, ref);
+
+    if (ref == 0)
+    {
+        This->lock.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection(&This->lock);
+        if (This->initialized) pjpeg_destroy_compress(&This->cinfo);
+        if (This->stream) IStream_Release(This->stream);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI JpegEncoder_Initialize(IWICBitmapEncoder *iface,
+    IStream *pIStream, WICBitmapEncoderCacheOption cacheOption)
+{
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    jmp_buf jmpbuf;
+
+    TRACE("(%p,%p,%u)\n", iface, pIStream, cacheOption);
+
+    EnterCriticalSection(&This->lock);
+
+    if (This->initialized)
+    {
+        LeaveCriticalSection(&This->lock);
+        return WINCODEC_ERR_WRONGSTATE;
+    }
+
+    pjpeg_std_error(&This->jerr);
+
+    This->jerr.error_exit = error_exit_fn;
+    This->jerr.emit_message = emit_message_fn;
+
+    This->cinfo.err = &This->jerr;
+
+    This->cinfo.client_data = &jmpbuf;
+
+    if (setjmp(jmpbuf))
+    {
+        LeaveCriticalSection(&This->lock);
+        return E_FAIL;
+    }
+
+    pjpeg_CreateCompress(&This->cinfo, JPEG_LIB_VERSION, sizeof(struct jpeg_compress_struct));
+
+    This->stream = pIStream;
+    IStream_AddRef(pIStream);
+
+    This->dest_mgr.next_output_byte = This->dest_buffer;
+    This->dest_mgr.free_in_buffer = sizeof(This->dest_buffer);
+
+    This->dest_mgr.init_destination = dest_mgr_init_destination;
+    This->dest_mgr.empty_output_buffer = dest_mgr_empty_output_buffer;
+    This->dest_mgr.term_destination = dest_mgr_term_destination;
+
+    This->cinfo.dest = &This->dest_mgr;
+
+    This->initialized = TRUE;
+
+    LeaveCriticalSection(&This->lock);
+
+    return S_OK;
+}
+
+static HRESULT WINAPI JpegEncoder_GetContainerFormat(IWICBitmapEncoder *iface,
+    GUID *pguidContainerFormat)
+{
+    FIXME("(%p,%s): stub\n", iface, debugstr_guid(pguidContainerFormat));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_GetEncoderInfo(IWICBitmapEncoder *iface,
+    IWICBitmapEncoderInfo **ppIEncoderInfo)
+{
+    FIXME("(%p,%p): stub\n", iface, ppIEncoderInfo);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_SetColorContexts(IWICBitmapEncoder *iface,
+    UINT cCount, IWICColorContext **ppIColorContext)
+{
+    FIXME("(%p,%u,%p): stub\n", iface, cCount, ppIColorContext);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_SetPalette(IWICBitmapEncoder *iface, IWICPalette *pIPalette)
+{
+    TRACE("(%p,%p)\n", iface, pIPalette);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+}
+
+static HRESULT WINAPI JpegEncoder_SetThumbnail(IWICBitmapEncoder *iface, IWICBitmapSource *pIThumbnail)
+{
+    TRACE("(%p,%p)\n", iface, pIThumbnail);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+}
+
+static HRESULT WINAPI JpegEncoder_SetPreview(IWICBitmapEncoder *iface, IWICBitmapSource *pIPreview)
+{
+    TRACE("(%p,%p)\n", iface, pIPreview);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+}
+
+static HRESULT WINAPI JpegEncoder_CreateNewFrame(IWICBitmapEncoder *iface,
+    IWICBitmapFrameEncode **ppIFrameEncode, IPropertyBag2 **ppIEncoderOptions)
+{
+    JpegEncoder *This = impl_from_IWICBitmapEncoder(iface);
+    HRESULT hr;
+
+    TRACE("(%p,%p,%p)\n", iface, ppIFrameEncode, ppIEncoderOptions);
+
+    EnterCriticalSection(&This->lock);
+
+    if (This->frame_count != 0)
+    {
+        LeaveCriticalSection(&This->lock);
+        return WINCODEC_ERR_UNSUPPORTEDOPERATION;
+    }
+
+    if (!This->initialized)
+    {
+        LeaveCriticalSection(&This->lock);
+        return WINCODEC_ERR_NOTINITIALIZED;
+    }
+
+    hr = CreatePropertyBag2(ppIEncoderOptions);
+    if (FAILED(hr))
+    {
+        LeaveCriticalSection(&This->lock);
+        return hr;
+    }
+
+    This->frame_count = 1;
+
+    LeaveCriticalSection(&This->lock);
+
+    IWICBitmapEncoder_AddRef(iface);
+    *ppIFrameEncode = &This->IWICBitmapFrameEncode_iface;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI JpegEncoder_Commit(IWICBitmapEncoder *iface)
+{
+    FIXME("(%p): stub\n", iface);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI JpegEncoder_GetMetadataQueryWriter(IWICBitmapEncoder *iface,
+    IWICMetadataQueryWriter **ppIMetadataQueryWriter)
+{
+    FIXME("(%p,%p): stub\n", iface, ppIMetadataQueryWriter);
+    return E_NOTIMPL;
+}
+
+static const IWICBitmapEncoderVtbl JpegEncoder_Vtbl = {
+    JpegEncoder_QueryInterface,
+    JpegEncoder_AddRef,
+    JpegEncoder_Release,
+    JpegEncoder_Initialize,
+    JpegEncoder_GetContainerFormat,
+    JpegEncoder_GetEncoderInfo,
+    JpegEncoder_SetColorContexts,
+    JpegEncoder_SetPalette,
+    JpegEncoder_SetThumbnail,
+    JpegEncoder_SetPreview,
+    JpegEncoder_CreateNewFrame,
+    JpegEncoder_Commit,
+    JpegEncoder_GetMetadataQueryWriter
+};
+
+HRESULT JpegEncoder_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void** ppv)
+{
+    JpegEncoder *This;
+    HRESULT ret;
+
+    TRACE("(%p,%s,%p)\n", pUnkOuter, debugstr_guid(iid), ppv);
+
+    *ppv = NULL;
+
+    if (pUnkOuter) return CLASS_E_NOAGGREGATION;
+
+    if (!libjpeg_handle && !load_libjpeg())
+    {
+        ERR("Failed writing JPEG because unable to find %s\n",SONAME_LIBJPEG);
+        return E_FAIL;
+    }
+
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(JpegEncoder));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IWICBitmapEncoder_iface.lpVtbl = &JpegEncoder_Vtbl;
+    This->IWICBitmapFrameEncode_iface.lpVtbl = &JpegEncoder_FrameVtbl;
+    This->ref = 1;
+    This->initialized = 0;
+    This->frame_count = 0;
+    This->frame_initialized = 0;
+    This->started_compress = 0;
+    This->width = This->height = 0;
+    This->stream = NULL;
+    InitializeCriticalSection(&This->lock);
+    This->lock.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": JpegEncoder.lock");
+
+    ret = IUnknown_QueryInterface((IUnknown*)This, iid, ppv);
+    IUnknown_Release((IUnknown*)This);
+
+    return ret;
+}
+
 #else /* !defined(SONAME_LIBJPEG) */
 
 HRESULT JpegDecoder_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void** ppv)
 {
     ERR("Trying to load JPEG picture, but JPEG support is not compiled in.\n");
+    return E_FAIL;
+}
+
+HRESULT JpegEncoder_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void** ppv)
+{
+    ERR("Trying to save JPEG picture, but JPEG support is not compiled in.\n");
     return E_FAIL;
 }
 

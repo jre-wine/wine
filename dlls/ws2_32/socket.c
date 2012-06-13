@@ -383,6 +383,9 @@ static const int ws_ip_map[][2] =
 #ifdef IP_PKTINFO
     MAP_OPTION( IP_PKTINFO ),
 #endif
+#ifdef IP_UNICAST_IF
+    MAP_OPTION( IP_UNICAST_IF ),
+#endif
 };
 
 static const int ws_ipv6_map[][2] =
@@ -398,6 +401,9 @@ static const int ws_ipv6_map[][2] =
     MAP_OPTION( IPV6_MULTICAST_LOOP ),
     MAP_OPTION( IPV6_UNICAST_HOPS ),
     MAP_OPTION( IPV6_V6ONLY ),
+#ifdef IPV6_UNICAST_IF
+    MAP_OPTION( IPV6_UNICAST_IF ),
+#endif
 };
 
 static const int ws_af_map[][2] =
@@ -2846,6 +2852,9 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 #endif
         case WS_IP_TOS:
         case WS_IP_TTL:
+#ifdef IP_UNICAST_IF
+        case WS_IP_UNICAST_IF:
+#endif
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
@@ -2878,6 +2887,9 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         case WS_IPV6_MULTICAST_LOOP:
         case WS_IPV6_UNICAST_HOPS:
         case WS_IPV6_V6ONLY:
+#ifdef IPV6_UNICAST_IF
+        case WS_IPV6_UNICAST_IF:
+#endif
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
@@ -4268,6 +4280,9 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
 #endif
         case WS_IP_TOS:
         case WS_IP_TTL:
+#ifdef IP_UNICAST_IF
+        case WS_IP_UNICAST_IF:
+#endif
             convert_sockopt(&level, &optname);
             break;
         case WS_IP_DONTFRAGMENT:
@@ -4293,10 +4308,16 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
         case WS_IPV6_MULTICAST_LOOP:
         case WS_IPV6_UNICAST_HOPS:
         case WS_IPV6_V6ONLY:
+#ifdef IPV6_UNICAST_IF
+        case WS_IPV6_UNICAST_IF:
+#endif
             convert_sockopt(&level, &optname);
             break;
         case WS_IPV6_DONTFRAG:
             FIXME("IPV6_DONTFRAG is silently ignored!\n");
+            return 0;
+        case WS_IPV6_PROTECTION_LEVEL:
+            FIXME("IPV6_PROTECTION_LEVEL is ignored!\n");
             return 0;
         default:
             FIXME("Unknown IPPROTO_IPV6 optname 0x%08x\n", optname);

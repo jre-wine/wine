@@ -26,6 +26,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dib);
 
+/* paint a region with the brush (note: the region can be modified) */
+static BOOL brush_region( dibdrv_physdev *pdev, HRGN region )
+{
+    if (pdev->clip) CombineRgn( region, region, pdev->clip, RGN_AND );
+    return brush_rect( pdev, &pdev->brush, NULL, region, GetROP2( pdev->dev.hdc ));
+}
+
+/* paint a region with the pen (note: the region can be modified) */
+static BOOL pen_region( dibdrv_physdev *pdev, HRGN region )
+{
+    if (pdev->clip) CombineRgn( region, region, pdev->clip, RGN_AND );
+    return brush_rect( pdev, &pdev->pen_brush, NULL, region, GetROP2( pdev->dev.hdc ));
+}
+
 static RECT get_device_rect( HDC hdc, int left, int top, int right, int bottom, BOOL rtl_correction )
 {
     RECT rect;
@@ -813,7 +827,6 @@ BOOL dibdrv_LineTo( PHYSDEV dev, INT x, INT y )
 
     if (region)
     {
-        if (pdev->clip) CombineRgn( region, region, pdev->clip, RGN_AND );
         ret = pen_region( pdev, region );
         DeleteObject( region );
     }
@@ -936,19 +949,21 @@ BOOL dibdrv_PolyPolygon( PHYSDEV dev, const POINT *pt, const INT *counts, DWORD 
 BOOL dibdrv_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines )
 {
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
-    DWORD max_points = 0, i;
+    DWORD total, pos, i;
     POINT *points;
     BOOL ret = TRUE;
     HRGN outline = 0;
 
-    for (i = 0; i < polylines; i++)
+    for (i = total = 0; i < polylines; i++)
     {
         if (counts[i] < 2) return FALSE;
-        max_points = max( counts[i], max_points );
+        total += counts[i];
     }
 
-    points = HeapAlloc( GetProcessHeap(), 0, max_points * sizeof(*pt) );
+    points = HeapAlloc( GetProcessHeap(), 0, total * sizeof(*pt) );
     if (!points) return FALSE;
+    memcpy( points, pt, total * sizeof(*pt) );
+    LPtoDP( dev->hdc, points, total );
 
     if (pdev->pen_uses_region && !(outline = CreateRectRgn( 0, 0, 0, 0 )))
     {
@@ -956,19 +971,15 @@ BOOL dibdrv_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWO
         return FALSE;
     }
 
-    for (i = 0; i < polylines; i++)
+    for (i = pos = 0; i < polylines; i++)
     {
-        memcpy( points, pt, counts[i] * sizeof(*pt) );
-        pt += counts[i];
-        LPtoDP( dev->hdc, points, counts[i] );
-
         reset_dash_origin( pdev );
-        pdev->pen_lines( pdev, counts[i], points, FALSE, outline );
+        pdev->pen_lines( pdev, counts[i], points + pos, FALSE, outline );
+        pos += counts[i];
     }
 
     if (outline)
     {
-        if (pdev->clip) CombineRgn( outline, outline, pdev->clip, RGN_AND );
         ret = pen_region( pdev, outline );
         DeleteObject( outline );
     }

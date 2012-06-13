@@ -1116,15 +1116,13 @@ static inline struct ID3DXBaseEffectImpl *impl_from_ID3DXBaseEffect(ID3DXBaseEff
 /*** IUnknown methods ***/
 static HRESULT WINAPI ID3DXBaseEffectImpl_QueryInterface(ID3DXBaseEffect *iface, REFIID riid, void **object)
 {
-    struct ID3DXBaseEffectImpl *This = impl_from_ID3DXBaseEffect(iface);
-
-    TRACE("iface %p, riid %s, object %p\n", This, debugstr_guid(riid), object);
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_ID3DXBaseEffect))
     {
-        This->ID3DXBaseEffect_iface.lpVtbl->AddRef(iface);
-        *object = This;
+        iface->lpVtbl->AddRef(iface);
+        *object = iface;
         return S_OK;
     }
 
@@ -2778,15 +2776,13 @@ static inline struct ID3DXEffectImpl *impl_from_ID3DXEffect(ID3DXEffect *iface)
 /*** IUnknown methods ***/
 static HRESULT WINAPI ID3DXEffectImpl_QueryInterface(ID3DXEffect *iface, REFIID riid, void **object)
 {
-    struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
-
-    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), object);
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_ID3DXEffect))
     {
-        This->ID3DXEffect_iface.lpVtbl->AddRef(iface);
-        *object = This;
+        iface->lpVtbl->AddRef(iface);
+        *object = iface;
         return S_OK;
     }
 
@@ -3757,15 +3753,13 @@ static inline struct ID3DXEffectCompilerImpl *impl_from_ID3DXEffectCompiler(ID3D
 /*** IUnknown methods ***/
 static HRESULT WINAPI ID3DXEffectCompilerImpl_QueryInterface(ID3DXEffectCompiler *iface, REFIID riid, void **object)
 {
-    struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
-
-    TRACE("iface %p, riid %s, object %p\n", This, debugstr_guid(riid), object);
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_ID3DXEffectCompiler))
     {
-        This->ID3DXEffectCompiler_iface.lpVtbl->AddRef(iface);
-        *object = This;
+        iface->lpVtbl->AddRef(iface);
+        *object = iface;
         return S_OK;
     }
 
@@ -5917,15 +5911,13 @@ static inline struct ID3DXEffectPoolImpl *impl_from_ID3DXEffectPool(ID3DXEffectP
 /*** IUnknown methods ***/
 static HRESULT WINAPI ID3DXEffectPoolImpl_QueryInterface(ID3DXEffectPool *iface, REFIID riid, void **object)
 {
-    struct ID3DXEffectPoolImpl *This = impl_from_ID3DXEffectPool(iface);
-
-    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), object);
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), object);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_ID3DXEffectPool))
     {
-        This->ID3DXEffectPool_iface.lpVtbl->AddRef(iface);
-        *object = This;
+        iface->lpVtbl->AddRef(iface);
+        *object = iface;
         return S_OK;
     }
 

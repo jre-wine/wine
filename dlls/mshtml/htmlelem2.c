@@ -776,8 +776,17 @@ static HRESULT WINAPI HTMLElement2_get_onresize(IHTMLElement2 *iface, VARIANT *p
 static HRESULT WINAPI HTMLElement2_blur(IHTMLElement2 *iface)
 {
     HTMLElement *This = impl_from_IHTMLElement2(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+    nsresult nsres;
+
+    TRACE("(%p)\n", This);
+
+    nsres = nsIDOMHTMLElement_Blur(This->nselem);
+    if(NS_FAILED(nsres)) {
+        ERR("Blur failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLElement2_addFilter(IHTMLElement2 *iface, IUnknown *pUnk)
@@ -969,32 +978,18 @@ static HRESULT WINAPI HTMLElement2_put_dir(IHTMLElement2 *iface, BSTR v)
 static HRESULT WINAPI HTMLElement2_get_dir(IHTMLElement2 *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement2(iface);
+    nsAString dir_str;
+    nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    *p = NULL;
-
-    if(This->nselem) {
-        nsAString dir_str;
-        nsresult nsres;
-
-        nsAString_Init(&dir_str, NULL);
-
-        nsres = nsIDOMHTMLElement_GetDir(This->nselem, &dir_str);
-        if(NS_SUCCEEDED(nsres)) {
-            const PRUnichar *dir;
-            nsAString_GetData(&dir_str, &dir);
-            if(*dir)
-                *p = SysAllocString(dir);
-        }else {
-            ERR("GetDir failed: %08x\n", nsres);
-        }
-
-        nsAString_Finish(&dir_str);
+    if(!This->nselem) {
+        *p = NULL;
+        return S_OK;
     }
 
-    TRACE("ret %s\n", debugstr_w(*p));
-    return S_OK;
+    nsres = nsIDOMHTMLElement_GetDir(This->nselem, &dir_str);
+    return return_nsstr(nsres, &dir_str, p);
 }
 
 static HRESULT WINAPI HTMLElement2_createControlRange(IHTMLElement2 *iface, IDispatch **range)

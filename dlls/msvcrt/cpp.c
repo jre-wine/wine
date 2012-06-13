@@ -709,293 +709,81 @@ __ASM_EXCEPTION_VTABLE(__non_rtti_object)
 
 /* Static RTTI for exported objects */
 
-static const type_info exception_type_info =
-{
-  &MSVCRT_type_info_vtable,
-  NULL,
-  ".?AVexception@@"
-};
+#define DEFINE_RTTI_DATA(name, base_classes, cl1, cl2, mangled_name) \
+static const type_info name ## _type_info = { \
+    &MSVCRT_type_info_vtable, \
+    NULL, \
+    mangled_name \
+}; \
+\
+static const rtti_base_descriptor name ## _rtti_base_descriptor = { \
+    &name ##_type_info, \
+    base_classes, \
+    { 0, -1, 0}, \
+    0 \
+}; \
+\
+static const rtti_base_array name ## _rtti_base_array = { \
+    { \
+        &name ## _rtti_base_descriptor, \
+        cl1, \
+        cl2  \
+    } \
+}; \
+\
+static const rtti_object_hierarchy name ## _hierarchy = { \
+    0, \
+    0, \
+    base_classes+1, \
+    &name ## _rtti_base_array \
+}; \
+\
+const rtti_object_locator name ## _rtti = { \
+    0, \
+    0, \
+    0, \
+    &name ## _type_info, \
+    &name ## _hierarchy \
+}
 
-static const rtti_base_descriptor exception_rtti_base_descriptor =
-{
-  &exception_type_info,
-  0,
-  { 0, -1, 0 },
-  0
-};
+#define DEFINE_EXCEPTION_TYPE_INFO(name, base_classes, cl1, cl2) \
+static const cxx_type_info name ## _cxx_type_info = \
+{ \
+    0, \
+    &name ## _type_info, \
+    { 0, -1, 0 }, \
+    sizeof(name), \
+    (cxx_copy_ctor)THISCALL(MSVCRT_ ## name ## _copy_ctor) \
+}; \
+\
+static const cxx_type_info_table name ## _type_info_table = \
+{ \
+    base_classes+1, \
+    { \
+        &name ## _cxx_type_info, \
+        cl2, \
+        cl1 \
+    } \
+}; \
+\
+const cxx_exception_type name ## _exception_type = \
+{ \
+    0, \
+    (void *)THISCALL(MSVCRT_ ## name ## _dtor), \
+    NULL, \
+    &name ## _type_info_table \
+}
 
-static const rtti_base_array exception_rtti_base_array =
-{
-  {
-    &exception_rtti_base_descriptor,
-    NULL,
-    NULL
-  }
-};
+DEFINE_RTTI_DATA( type_info, 0, NULL, NULL, ".?AVtype_info@@" );
+DEFINE_RTTI_DATA( exception, 0, NULL, NULL, ".?AVexception@@" );
+DEFINE_RTTI_DATA( bad_typeid, 1, &exception_rtti_base_descriptor, NULL, ".?AVbad_typeid@@" );
+DEFINE_RTTI_DATA( bad_cast, 1, &exception_rtti_base_descriptor, NULL, ".?AVbad_cast@@" );
+DEFINE_RTTI_DATA( __non_rtti_object, 2, &bad_typeid_rtti_base_descriptor, &exception_rtti_base_descriptor, ".?AV__non_rtti_object@@" );
 
-static const rtti_object_hierarchy exception_type_hierarchy =
-{
-  0,
-  0,
-  1,
-  &exception_rtti_base_array
-};
-
-const rtti_object_locator exception_rtti =
-{
-  0,
-  0,
-  0,
-  &exception_type_info,
-  &exception_type_hierarchy
-};
-
-static const cxx_type_info exception_cxx_type_info =
-{
-  0,
-  &exception_type_info,
-  { 0, -1, 0 },
-  sizeof(exception),
-  (cxx_copy_ctor)THISCALL(MSVCRT_exception_copy_ctor)
-};
-
-static const type_info bad_typeid_type_info =
-{
-  &MSVCRT_type_info_vtable,
-  NULL,
-  ".?AVbad_typeid@@"
-};
-
-static const rtti_base_descriptor bad_typeid_rtti_base_descriptor =
-{
-  &bad_typeid_type_info,
-  1,
-  { 0, -1, 0 },
-  0
-};
-
-static const rtti_base_array bad_typeid_rtti_base_array =
-{
-  {
-    &bad_typeid_rtti_base_descriptor,
-    &exception_rtti_base_descriptor,
-    NULL
-  }
-};
-
-static const rtti_object_hierarchy bad_typeid_type_hierarchy =
-{
-  0,
-  0,
-  2,
-  &bad_typeid_rtti_base_array
-};
-
-const rtti_object_locator bad_typeid_rtti =
-{
-  0,
-  0,
-  0,
-  &bad_typeid_type_info,
-  &bad_typeid_type_hierarchy
-};
-
-static const cxx_type_info bad_typeid_cxx_type_info =
-{
-  0,
-  &bad_typeid_type_info,
-  { 0, -1, 0 },
-  sizeof(exception),
-  (cxx_copy_ctor)THISCALL(MSVCRT_bad_typeid_copy_ctor)
-};
-
-static const type_info bad_cast_type_info =
-{
-  &MSVCRT_type_info_vtable,
-  NULL,
-  ".?AVbad_cast@@"
-};
-
-static const rtti_base_descriptor bad_cast_rtti_base_descriptor =
-{
-  &bad_cast_type_info,
-  1,
-  { 0, -1, 0 },
-  0
-};
-
-static const rtti_base_array bad_cast_rtti_base_array =
-{
-  {
-    &bad_cast_rtti_base_descriptor,
-    &exception_rtti_base_descriptor,
-    NULL
-  }
-};
-
-static const rtti_object_hierarchy bad_cast_type_hierarchy =
-{
-  0,
-  0,
-  2,
-  &bad_cast_rtti_base_array
-};
-
-const rtti_object_locator bad_cast_rtti =
-{
-  0,
-  0,
-  0,
-  &bad_cast_type_info,
-  &bad_cast_type_hierarchy
-};
-
-static const cxx_type_info bad_cast_cxx_type_info =
-{
-  0,
-  &bad_cast_type_info,
-  { 0, -1, 0 },
-  sizeof(exception),
-  (cxx_copy_ctor)THISCALL(MSVCRT_bad_cast_copy_ctor)
-};
-
-static const type_info __non_rtti_object_type_info =
-{
-  &MSVCRT_type_info_vtable,
-  NULL,
-  ".?AV__non_rtti_object@@"
-};
-
-static const rtti_base_descriptor __non_rtti_object_rtti_base_descriptor =
-{
-  &__non_rtti_object_type_info,
-  2,
-  { 0, -1, 0 },
-  0
-};
-
-static const rtti_base_array __non_rtti_object_rtti_base_array =
-{
-  {
-    &__non_rtti_object_rtti_base_descriptor,
-    &bad_typeid_rtti_base_descriptor,
-    &exception_rtti_base_descriptor
-  }
-};
-
-static const rtti_object_hierarchy __non_rtti_object_type_hierarchy =
-{
-  0,
-  0,
-  3,
-  &__non_rtti_object_rtti_base_array
-};
-
-const rtti_object_locator __non_rtti_object_rtti =
-{
-  0,
-  0,
-  0,
-  &__non_rtti_object_type_info,
-  &__non_rtti_object_type_hierarchy
-};
-
-static const cxx_type_info __non_rtti_object_cxx_type_info =
-{
-  0,
-  &__non_rtti_object_type_info,
-  { 0, -1, 0 },
-  sizeof(exception),
-  (cxx_copy_ctor)THISCALL(MSVCRT___non_rtti_object_copy_ctor)
-};
-
-static const type_info type_info_type_info =
-{
-  &MSVCRT_type_info_vtable,
-  NULL,
-  ".?AVtype_info@@"
-};
-
-static const rtti_base_descriptor type_info_rtti_base_descriptor =
-{
-  &type_info_type_info,
-  0,
-  { 0, -1, 0 },
-  0
-};
-
-static const rtti_base_array type_info_rtti_base_array =
-{
-  {
-    &type_info_rtti_base_descriptor,
-    NULL,
-    NULL
-  }
-};
-
-static const rtti_object_hierarchy type_info_type_hierarchy =
-{
-  0,
-  0,
-  1,
-  &type_info_rtti_base_array
-};
-
-const rtti_object_locator type_info_rtti =
-{
-  0,
-  0,
-  0,
-  &type_info_type_info,
-  &type_info_type_hierarchy
-};
-
-/*
- * Exception RTTI for cpp objects
- */
-static const cxx_type_info_table bad_cast_type_info_table =
-{
-  3,
-  {
-   &__non_rtti_object_cxx_type_info,
-   &bad_typeid_cxx_type_info,
-   &exception_cxx_type_info
-  }
-};
-
-static const cxx_exception_type bad_cast_exception_type =
-{
-  0,
-  (void*)THISCALL(MSVCRT_bad_cast_dtor),
-  NULL,
-  &bad_cast_type_info_table
-};
-
-static const cxx_type_info_table bad_typeid_type_info_table =
-{
-  2,
-  {
-   &bad_cast_cxx_type_info,
-   &exception_cxx_type_info,
-   NULL
-  }
-};
-
-static const cxx_exception_type bad_typeid_exception_type =
-{
-  0,
-  (void*)THISCALL(MSVCRT_bad_typeid_dtor),
-  NULL,
-  &bad_cast_type_info_table
-};
-
-static const cxx_exception_type __non_rtti_object_exception_type =
-{
-  0,
-  (void*)THISCALL(MSVCRT___non_rtti_object_dtor),
-  NULL,
-  &bad_typeid_type_info_table
-};
+DEFINE_EXCEPTION_TYPE_INFO( exception, 0, NULL, NULL );
+DEFINE_EXCEPTION_TYPE_INFO( bad_typeid, 1, &exception_cxx_type_info, NULL );
+DEFINE_EXCEPTION_TYPE_INFO( bad_cast, 1, &exception_cxx_type_info, NULL );
+DEFINE_EXCEPTION_TYPE_INFO( __non_rtti_object, 2, &bad_typeid_cxx_type_info, &exception_cxx_type_info );
 
 
 /******************************************************************

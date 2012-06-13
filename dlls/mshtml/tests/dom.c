@@ -47,6 +47,7 @@ static const char range_test2_str[] =
     "<html><body>abc<hr />123<br /><hr />def</body></html>";
 static const char elem_test_str[] =
     "<html><head><title>test</title><style id=\"styleid\">.body { margin-right: 0px; }</style>"
+    "<meta id=\"metaid\" name=\"meta name\" http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">"
     "<body onload=\"Testing()\">text test<!-- a comment -->"
     "<a id=\"a\" href=\"http://test\" name=\"x\">link</a>"
     "<input id=\"in\" class=\"testclass\" tabIndex=\"2\" title=\"test title\" />"
@@ -113,7 +114,8 @@ typedef enum {
     ET_FRAME,
     ET_OBJECT,
     ET_EMBED,
-    ET_DIV
+    ET_DIV,
+    ET_META
 } elem_type_t;
 
 static const IID * const none_iids[] = {
@@ -307,6 +309,13 @@ static const IID * const title_iids[] = {
     NULL
 };
 
+static const IID * const meta_iids[] = {
+    ELEM_IFACES,
+    &IID_IHTMLMetaElement,
+    &IID_IConnectionPointContainer,
+    NULL
+};
+
 static const IID * const object_iids[] = {
     ELEM_IFACES,
     &IID_IHTMLObjectElement,
@@ -416,7 +425,8 @@ static const elem_type_info_t elem_type_infos[] = {
     {"FRAME",     frame_iids,       &DIID_DispHTMLFrameElement},
     {"OBJECT",    object_iids,      &DIID_DispHTMLObjectElement},
     {"EMBED",     embed_iids,       &DIID_DispHTMLEmbed},
-    {"DIV",       elem_iids,        NULL}
+    {"DIV",       elem_iids,        NULL},
+    {"META",      meta_iids,        &DIID_DispHTMLMetaElement}
 };
 
 static const char *dbgstr_guid(REFIID riid)
@@ -827,6 +837,17 @@ static IHTMLStyleElement *_get_style_iface(unsigned line, IUnknown *unk)
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLStyleElement, (void**)&obj);
     ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLStyleElement: %08x\n", hres);
     return obj;
+}
+
+#define get_metaelem_iface(u) _get_metaelem_iface(__LINE__,u)
+static IHTMLMetaElement *_get_metaelem_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLMetaElement *ret;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLMetaElement, (void**)&ret);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLMetaElement: %08x\n", hres);
+    return ret;
 }
 
 #define test_node_name(u,n) _test_node_name(__LINE__,u,n)
@@ -3222,6 +3243,54 @@ static void _test_form_elements(unsigned line, IUnknown *unk)
     IHTMLFormElement_Release(form);
 }
 
+#define test_meta_name(a,b) _test_meta_name(__LINE__,a,b)
+static void _test_meta_name(unsigned line, IUnknown *unk, const char *exname)
+{
+    IHTMLMetaElement *meta;
+    BSTR name = NULL;
+    HRESULT hres;
+
+
+    meta = _get_metaelem_iface(line, unk);
+    hres = IHTMLMetaElement_get_name(meta, &name);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(name, exname), "name = %s, expected %s\n", wine_dbgstr_w(name), exname);
+    SysFreeString(name);
+    IHTMLMetaElement_Release(meta);
+}
+
+#define test_meta_content(a,b) _test_meta_content(__LINE__,a,b)
+static void _test_meta_content(unsigned line, IUnknown *unk, const char *excontent)
+{
+    IHTMLMetaElement *meta;
+    BSTR content = NULL;
+    HRESULT hres;
+
+
+    meta = _get_metaelem_iface(line, unk);
+    hres = IHTMLMetaElement_get_content(meta, &content);
+    ok_(__FILE__,line)(hres == S_OK, "get_content failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(content, excontent), "content = %s, expected %s\n", wine_dbgstr_w(content), excontent);
+    SysFreeString(content);
+    IHTMLMetaElement_Release(meta);
+}
+
+#define test_meta_httpequiv(a,b) _test_meta_httpequiv(__LINE__,a,b)
+static void _test_meta_httpequiv(unsigned line, IUnknown *unk, const char *exval)
+{
+    IHTMLMetaElement *meta;
+    BSTR val = NULL;
+    HRESULT hres;
+
+
+    meta = _get_metaelem_iface(line, unk);
+    hres = IHTMLMetaElement_get_httpEquiv(meta, &val);
+    ok_(__FILE__,line)(hres == S_OK, "get_httpEquiv failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(val, exval), "httpEquiv = %s, expected %s\n", wine_dbgstr_w(val), exval);
+    SysFreeString(val);
+    IHTMLMetaElement_Release(meta);
+}
+
 #define get_elem_doc(e) _get_elem_doc(__LINE__,e)
 static IHTMLDocument2 *_get_elem_doc(unsigned line, IUnknown *unk)
 {
@@ -4410,10 +4479,11 @@ static void test_body_funs(IHTMLBodyElement *body)
 
 static void test_window(IHTMLDocument2 *doc)
 {
-    IHTMLWindow2 *window, *window2, *self;
+    IHTMLWindow2 *window, *window2, *self, *parent;
     IHTMLDocument2 *doc2 = NULL;
     IDispatch *disp;
     IUnknown *unk;
+    VARIANT v;
     BSTR str;
     HRESULT hres;
 
@@ -4458,7 +4528,6 @@ static void test_window(IHTMLDocument2 *doc)
     ok(self == window2, "self != window2\n");
 
     IHTMLWindow2_Release(window2);
-    IHTMLWindow2_Release(self);
 
     disp = NULL;
     hres = IHTMLDocument2_get_Script(doc, &disp);
@@ -4475,6 +4544,19 @@ static void test_window(IHTMLDocument2 *doc)
     ok(!strcmp_wa(str, "[object]") ||
        !strcmp_wa(str, "[object Window]") /* win7 ie9 */, "toString returned %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
+
+    V_VT(&v) = VT_ERROR;
+    hres = IHTMLWindow2_get_opener(window, &v);
+    ok(hres == S_OK, "get_opener failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_EMPTY, "V_VT(opener) = %d\n", V_VT(&v));
+
+    parent = NULL;
+    hres = IHTMLWindow2_get_parent(window, &parent);
+    ok(hres == S_OK, "get_parent failed: %08x\n", hres);
+    ok(parent != NULL, "parent == NULL\n");
+    ok(parent == self, "parent != window\n");
+    IHTMLWindow2_Release(parent);
+    IHTMLWindow2_Release(self);
 
     test_window_name(window, NULL);
     set_window_name(window, "test");
@@ -4910,6 +4992,7 @@ static void test_elems(IHTMLDocument2 *doc)
         ET_HEAD,
         ET_TITLE,
         ET_STYLE,
+        ET_META,
         ET_BODY,
         ET_COMMENT,
         ET_A,
@@ -5245,6 +5328,14 @@ static void test_elems(IHTMLDocument2 *doc)
         test_anchor_put_target((IUnknown*)elem, NULL);
         test_anchor_get_target((IUnknown*)elem, NULL);
 
+        IHTMLElement_Release(elem);
+    }
+
+    elem = get_doc_elem_by_id(doc, "metaid");
+    if(elem) {
+        test_meta_name((IUnknown*)elem, "meta name");
+        test_meta_content((IUnknown*)elem, "text/html; charset=utf-8");
+        test_meta_httpequiv((IUnknown*)elem, "Content-Type");
         IHTMLElement_Release(elem);
     }
 

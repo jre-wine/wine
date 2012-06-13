@@ -761,7 +761,11 @@ BOOL WINAPI MsiGetMode(MSIHANDLE hInstall, MSIRUNMODE iRunMode)
         break;
 
     case MSIRUNMODE_REBOOTATEND:
-        r = package->need_reboot;
+        r = package->need_reboot_at_end;
+        break;
+
+    case MSIRUNMODE_REBOOTNOW:
+        r = package->need_reboot_now;
         break;
 
     case MSIRUNMODE_LOGENABLED:
@@ -814,13 +818,13 @@ UINT WINAPI MsiSetMode(MSIHANDLE hInstall, MSIRUNMODE iRunMode, BOOL fState)
     switch (iRunMode)
     {
     case MSIRUNMODE_REBOOTATEND:
-        package->need_reboot = 1;
+        package->need_reboot_at_end = (fState != 0);
         r = ERROR_SUCCESS;
         break;
 
     case MSIRUNMODE_REBOOTNOW:
-        FIXME("unimplemented run mode: %d\n", iRunMode);
-        r = ERROR_FUNCTION_FAILED;
+        package->need_reboot_now = (fState != 0);
+        r = ERROR_SUCCESS;
         break;
 
     default:

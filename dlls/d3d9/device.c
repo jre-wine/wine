@@ -186,38 +186,39 @@ static inline IDirect3DDevice9Impl *impl_from_IDirect3DDevice9Ex(IDirect3DDevice
     return CONTAINING_RECORD(iface, IDirect3DDevice9Impl, IDirect3DDevice9Ex_iface);
 }
 
-static HRESULT WINAPI IDirect3DDevice9Impl_QueryInterface(IDirect3DDevice9Ex *iface, REFIID riid,
-        void **ppobj)
+static HRESULT WINAPI IDirect3DDevice9Impl_QueryInterface(IDirect3DDevice9Ex *iface, REFIID riid, void **out)
 {
-    IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
+    TRACE("iface %p, riid %s, out %p.\n", iface, debugstr_guid(riid), out);
 
-    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), ppobj);
-
-    if (IsEqualGUID(riid, &IID_IUnknown)
-        || IsEqualGUID(riid, &IID_IDirect3DDevice9)) {
+    if (IsEqualGUID(riid, &IID_IDirect3DDevice9)
+            || IsEqualGUID(riid, &IID_IUnknown))
+    {
         IDirect3DDevice9Ex_AddRef(iface);
-        *ppobj = This;
-        TRACE("Returning IDirect3DDevice9 interface at %p\n", *ppobj);
+        *out = iface;
         return S_OK;
-    } else if(IsEqualGUID(riid, &IID_IDirect3DDevice9Ex)) {
-        /* Find out if the creating d3d9 interface was created with Direct3DCreate9Ex.
-         * It doesn't matter with which function the device was created. */
-
-        if (This->d3d_parent->extended)
-        {
-            *ppobj = iface;
-            IDirect3DDevice9Ex_AddRef((IDirect3DDevice9Ex *) *ppobj);
-            TRACE("Returning IDirect3DDevice9Ex interface at %p\n", *ppobj);
-            return S_OK;
-        } else {
-            WARN("IDirect3D9 instance wasn't created with CreateDirect3D9Ex, returning E_NOINTERFACE\n");
-            *ppobj = NULL;
-            return E_NOINTERFACE;
-        }
     }
 
-    WARN("(%p)->(%s,%p),not found\n", This, debugstr_guid(riid), ppobj);
-    *ppobj = NULL;
+    if (IsEqualGUID(riid, &IID_IDirect3DDevice9Ex))
+    {
+        IDirect3DDevice9Impl *device = impl_from_IDirect3DDevice9Ex(iface);
+
+        /* Find out if the creating d3d9 interface was created with Direct3DCreate9Ex.
+         * It doesn't matter with which function the device was created. */
+        if (!device->d3d_parent->extended)
+        {
+            WARN("IDirect3D9 instance wasn't created with CreateDirect3D9Ex, returning E_NOINTERFACE.\n");
+            *out = NULL;
+            return E_NOINTERFACE;
+        }
+
+        IDirect3DDevice9Ex_AddRef(iface);
+        *out = iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
+
+    *out = NULL;
     return E_NOINTERFACE;
 }
 
@@ -233,36 +234,38 @@ static ULONG WINAPI IDirect3DDevice9Impl_AddRef(IDirect3DDevice9Ex *iface)
 
 static ULONG WINAPI DECLSPEC_HOTPATCH IDirect3DDevice9Impl_Release(IDirect3DDevice9Ex *iface)
 {
-    IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
+    IDirect3DDevice9Impl *device = impl_from_IDirect3DDevice9Ex(iface);
     ULONG ref;
 
-    if (This->inDestruction) return 0;
-    ref = InterlockedDecrement(&This->ref);
+    if (device->inDestruction)
+        return 0;
+
+    ref = InterlockedDecrement(&device->ref);
 
     TRACE("%p decreasing refcount to %u.\n", iface, ref);
 
-    if (ref == 0) {
-      unsigned i;
-      This->inDestruction = TRUE;
+    if (!ref)
+    {
+        unsigned i;
+        device->inDestruction = TRUE;
 
-      wined3d_mutex_lock();
-      for(i = 0; i < This->numConvertedDecls; i++) {
-          /* Unless Wine is buggy or the app has a bug the refcount will be 0, because decls hold a reference to the
-           * device
-           */
-          IDirect3DVertexDeclaration9Impl_Destroy(This->convertedDecls[i]);
-      }
-      HeapFree(GetProcessHeap(), 0, This->convertedDecls);
+        wined3d_mutex_lock();
+        for (i = 0; i < device->fvf_decl_count; ++i)
+        {
+            wined3d_vertex_declaration_decref(device->fvf_decls[i].decl);
+        }
+        HeapFree(GetProcessHeap(), 0, device->fvf_decls);
 
-      wined3d_device_uninit_3d(This->wined3d_device);
-      wined3d_device_release_focus_window(This->wined3d_device);
-      wined3d_device_decref(This->wined3d_device);
-      wined3d_mutex_unlock();
+        wined3d_device_uninit_3d(device->wined3d_device);
+        wined3d_device_release_focus_window(device->wined3d_device);
+        wined3d_device_decref(device->wined3d_device);
+        wined3d_mutex_unlock();
 
-      IDirect3D9Ex_Release(&This->d3d_parent->IDirect3D9Ex_iface);
+        IDirect3D9Ex_Release(&device->d3d_parent->IDirect3D9Ex_iface);
 
-      HeapFree(GetProcessHeap(), 0, This);
+        HeapFree(GetProcessHeap(), 0, device);
     }
+
     return ref;
 }
 
@@ -442,32 +445,17 @@ static BOOL WINAPI IDirect3DDevice9Impl_ShowCursor(IDirect3DDevice9Ex *iface, BO
 static HRESULT WINAPI DECLSPEC_HOTPATCH IDirect3DDevice9Impl_CreateAdditionalSwapChain(IDirect3DDevice9Ex *iface,
         D3DPRESENT_PARAMETERS *present_parameters, IDirect3DSwapChain9 **swapchain)
 {
-    IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
+    IDirect3DDevice9Impl *device = impl_from_IDirect3DDevice9Ex(iface);
     IDirect3DSwapChain9Impl *object;
     HRESULT hr;
 
     TRACE("iface %p, present_parameters %p, swapchain %p.\n",
             iface, present_parameters, swapchain);
 
-    object = HeapAlloc(GetProcessHeap(),  HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        ERR("Failed to allocate swapchain memory.\n");
-        return E_OUTOFMEMORY;
-    }
+    if (SUCCEEDED(hr = d3d9_swapchain_create(device, present_parameters, &object)))
+        *swapchain = &object->IDirect3DSwapChain9_iface;
 
-    hr = swapchain_init(object, This, present_parameters);
-    if (FAILED(hr))
-    {
-        WARN("Failed to initialize swapchain, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
-
-    TRACE("Created swapchain %p.\n", object);
-    *swapchain = (IDirect3DSwapChain9 *)object;
-
-    return D3D_OK;
+    return hr;
 }
 
 static HRESULT WINAPI DECLSPEC_HOTPATCH IDirect3DDevice9Impl_GetSwapChain(IDirect3DDevice9Ex *iface,
@@ -2070,7 +2058,7 @@ static HRESULT WINAPI IDirect3DDevice9Impl_ProcessVertices(IDirect3DDevice9Ex *i
 {
     IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
     IDirect3DVertexBuffer9Impl *dest = unsafe_impl_from_IDirect3DVertexBuffer9(pDestBuffer);
-    IDirect3DVertexDeclaration9Impl *Decl = (IDirect3DVertexDeclaration9Impl *) pVertexDecl;
+    IDirect3DVertexDeclaration9Impl *Decl = unsafe_impl_from_IDirect3DVertexDeclaration9(pVertexDecl);
     HRESULT hr;
 
     TRACE("iface %p, src_start_idx %u, dst_idx %u, vertex_count %u, dst_buffer %p, declaration %p, flags %#x.\n",
@@ -2087,7 +2075,7 @@ static HRESULT WINAPI IDirect3DDevice9Impl_ProcessVertices(IDirect3DDevice9Ex *i
 static HRESULT WINAPI IDirect3DDevice9Impl_CreateVertexDeclaration(IDirect3DDevice9Ex *iface,
         const D3DVERTEXELEMENT9 *elements, IDirect3DVertexDeclaration9 **declaration)
 {
-    IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
+    IDirect3DDevice9Impl *device = impl_from_IDirect3DDevice9Ex(iface);
     IDirect3DVertexDeclaration9Impl *object;
     HRESULT hr;
 
@@ -2099,38 +2087,24 @@ static HRESULT WINAPI IDirect3DDevice9Impl_CreateVertexDeclaration(IDirect3DDevi
         return D3DERR_INVALIDCALL;
     }
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        ERR("Failed to allocate vertex declaration memory.\n");
-        return E_OUTOFMEMORY;
-    }
+    if (SUCCEEDED(hr = d3d9_vertex_declaration_create(device, elements, &object)))
+        *declaration = &object->IDirect3DVertexDeclaration9_iface;
 
-    hr = vertexdeclaration_init(object, This, elements);
-    if (FAILED(hr))
-    {
-        WARN("Failed to initialize vertex declaration, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
-
-    TRACE("Created vertex declaration %p.\n", object);
-    *declaration = (IDirect3DVertexDeclaration9 *)object;
-
-    return D3D_OK;
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DDevice9Impl_SetVertexDeclaration(IDirect3DDevice9Ex *iface,
         IDirect3DVertexDeclaration9 *declaration)
 {
     IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
+    IDirect3DVertexDeclaration9Impl *decl_impl = unsafe_impl_from_IDirect3DVertexDeclaration9(declaration);
     HRESULT hr;
 
     TRACE("iface %p, declaration %p.\n", iface, declaration);
 
     wined3d_mutex_lock();
     hr = wined3d_device_set_vertex_declaration(This->wined3d_device,
-            declaration ? ((IDirect3DVertexDeclaration9Impl *)declaration)->wineD3DVertexDeclaration : NULL);
+            decl_impl ? decl_impl->wineD3DVertexDeclaration : NULL);
     wined3d_mutex_unlock();
 
     return hr;
@@ -2165,121 +2139,135 @@ static HRESULT WINAPI IDirect3DDevice9Impl_GetVertexDeclaration(IDirect3DDevice9
     return hr;
 }
 
-static IDirect3DVertexDeclaration9 *getConvertedDecl(IDirect3DDevice9Impl *This, DWORD fvf) {
-    HRESULT hr;
-    D3DVERTEXELEMENT9* elements = NULL;
-    IDirect3DVertexDeclaration9* pDecl = NULL;
+static struct wined3d_vertex_declaration *device_get_fvf_declaration(IDirect3DDevice9Impl *device, DWORD fvf)
+{
+    struct wined3d_vertex_declaration *wined3d_declaration;
+    struct fvf_declaration *fvf_decls = device->fvf_decls;
+    IDirect3DVertexDeclaration9Impl *d3d9_declaration;
+    D3DVERTEXELEMENT9 *elements;
     int p, low, high; /* deliberately signed */
-    IDirect3DVertexDeclaration9  **convertedDecls = This->convertedDecls;
+    HRESULT hr;
 
     TRACE("Searching for declaration for fvf %08x... ", fvf);
 
     low = 0;
-    high = This->numConvertedDecls - 1;
-    while(low <= high) {
+    high = device->fvf_decl_count - 1;
+    while (low <= high)
+    {
         p = (low + high) >> 1;
         TRACE("%d ", p);
-        if(((IDirect3DVertexDeclaration9Impl *) convertedDecls[p])->convFVF == fvf) {
-            TRACE("found %p\n", convertedDecls[p]);
-            return convertedDecls[p];
-        } else if(((IDirect3DVertexDeclaration9Impl *) convertedDecls[p])->convFVF < fvf) {
-            low = p + 1;
-        } else {
-            high = p - 1;
+
+        if (fvf_decls[p].fvf == fvf)
+        {
+            TRACE("found %p.\n", fvf_decls[p].decl);
+            return fvf_decls[p].decl;
         }
+
+        if (fvf_decls[p].fvf < fvf)
+            low = p + 1;
+        else
+            high = p - 1;
     }
     TRACE("not found. Creating and inserting at position %d.\n", low);
 
-    hr = vdecl_convert_fvf(fvf, &elements);
-    if (hr != S_OK) return NULL;
+    if (FAILED(hr = vdecl_convert_fvf(fvf, &elements)))
+        return NULL;
 
-    hr = IDirect3DDevice9Impl_CreateVertexDeclaration(&This->IDirect3DDevice9Ex_iface, elements,
-            &pDecl);
-    HeapFree(GetProcessHeap(), 0, elements); /* CreateVertexDeclaration makes a copy */
-    if (hr != S_OK) return NULL;
+    hr = d3d9_vertex_declaration_create(device, elements, &d3d9_declaration);
+    HeapFree(GetProcessHeap(), 0, elements);
+    if (FAILED(hr))
+        return NULL;
 
-    if(This->declArraySize == This->numConvertedDecls) {
-        int grow = max(This->declArraySize / 2, 8);
-        convertedDecls = HeapReAlloc(GetProcessHeap(), 0, convertedDecls,
-                                     sizeof(convertedDecls[0]) * (This->numConvertedDecls + grow));
-        if(!convertedDecls) {
-            /* This will destroy it */
-            IDirect3DVertexDeclaration9_Release(pDecl);
+    if (device->fvf_decl_size == device->fvf_decl_count)
+    {
+        UINT grow = max(device->fvf_decl_size / 2, 8);
+
+        fvf_decls = HeapReAlloc(GetProcessHeap(), 0, fvf_decls, sizeof(*fvf_decls) * (device->fvf_decl_size + grow));
+        if (!fvf_decls)
+        {
+            IDirect3DVertexDeclaration9_Release(&d3d9_declaration->IDirect3DVertexDeclaration9_iface);
             return NULL;
         }
-        This->convertedDecls = convertedDecls;
-        This->declArraySize += grow;
+        device->fvf_decls = fvf_decls;
+        device->fvf_decl_size += grow;
     }
 
-    memmove(convertedDecls + low + 1, convertedDecls + low, sizeof(IDirect3DVertexDeclaration9Impl *) * (This->numConvertedDecls - low));
-    convertedDecls[low] = pDecl;
-    This->numConvertedDecls++;
+    d3d9_declaration->convFVF = fvf;
+    wined3d_declaration = d3d9_declaration->wineD3DVertexDeclaration;
+    wined3d_vertex_declaration_incref(wined3d_declaration);
+    IDirect3DVertexDeclaration9_Release(&d3d9_declaration->IDirect3DVertexDeclaration9_iface);
 
-    /* Will prevent the decl from being destroyed */
-    ((IDirect3DVertexDeclaration9Impl *) pDecl)->convFVF = fvf;
-    IDirect3DVertexDeclaration9_Release(pDecl); /* Does not destroy now */
+    memmove(fvf_decls + low + 1, fvf_decls + low, sizeof(*fvf_decls) * (device->fvf_decl_count - low));
+    fvf_decls[low].decl = wined3d_declaration;
+    fvf_decls[low].fvf = fvf;
+    ++device->fvf_decl_count;
 
-    TRACE("Returning %p. %d decls in array\n", pDecl, This->numConvertedDecls);
-    return pDecl;
+    TRACE("Returning %p. %u declatations in array.\n", wined3d_declaration, device->fvf_decl_count);
+
+    return wined3d_declaration;
 }
 
-static HRESULT WINAPI IDirect3DDevice9Impl_SetFVF(IDirect3DDevice9Ex *iface, DWORD FVF)
+static HRESULT WINAPI IDirect3DDevice9Impl_SetFVF(IDirect3DDevice9Ex *iface, DWORD fvf)
 {
     IDirect3DDevice9Impl *This = impl_from_IDirect3DDevice9Ex(iface);
-    IDirect3DVertexDeclaration9 *decl;
+    struct wined3d_vertex_declaration *decl;
     HRESULT hr;
 
-    TRACE("iface %p, fvf %#x.\n", iface, FVF);
+    TRACE("iface %p, fvf %#x.\n", iface, fvf);
 
-    if (!FVF)
+    if (!fvf)
     {
-        WARN("%#x is not a valid FVF\n", FVF);
+        WARN("%#x is not a valid FVF.\n", fvf);
         return D3D_OK;
     }
 
     wined3d_mutex_lock();
-    decl = getConvertedDecl(This, FVF);
-    wined3d_mutex_unlock();
-
-    if (!decl)
+    if (!(decl = device_get_fvf_declaration(This, fvf)))
     {
-         /* Any situation when this should happen, except out of memory? */
-         ERR("Failed to create a converted vertex declaration\n");
-         return D3DERR_DRIVERINTERNALERROR;
+        wined3d_mutex_unlock();
+        ERR("Failed to create a vertex declaration for fvf %#x.\n", fvf);
+        return D3DERR_DRIVERINTERNALERROR;
     }
 
-    hr = IDirect3DDevice9Impl_SetVertexDeclaration(iface, decl);
-    if (FAILED(hr)) ERR("Failed to set vertex declaration\n");
+    hr = wined3d_device_set_vertex_declaration(This->wined3d_device, decl);
+    if (FAILED(hr))
+        ERR("Failed to set vertex declaration.\n");
+    wined3d_mutex_unlock();
 
     return hr;
 }
 
-static HRESULT WINAPI IDirect3DDevice9Impl_GetFVF(IDirect3DDevice9Ex *iface, DWORD *pFVF)
+static HRESULT WINAPI IDirect3DDevice9Impl_GetFVF(IDirect3DDevice9Ex *iface, DWORD *fvf)
 {
-    IDirect3DVertexDeclaration9 *decl;
+    IDirect3DDevice9Impl *device = impl_from_IDirect3DDevice9Ex(iface);
+    struct wined3d_vertex_declaration *wined3d_declaration;
+    IDirect3DVertexDeclaration9Impl *d3d9_declaration;
     HRESULT hr;
 
-    TRACE("iface %p, fvf %p.\n", iface, pFVF);
+    TRACE("iface %p, fvf %p.\n", iface, fvf);
 
-    hr = IDirect3DDevice9_GetVertexDeclaration(iface, &decl);
-    if (FAILED(hr))
+    wined3d_mutex_lock();
+    if (FAILED(hr = wined3d_device_get_vertex_declaration(device->wined3d_device, &wined3d_declaration)))
     {
-        WARN("Failed to get vertex declaration, %#x\n", hr);
-        *pFVF = 0;
+        wined3d_mutex_unlock();
+        WARN("Failed to get vertex declaration, hr %#x.\n", hr);
+        *fvf = 0;
         return hr;
     }
 
-    if (decl)
+    if (wined3d_declaration)
     {
-        *pFVF = ((IDirect3DVertexDeclaration9Impl *)decl)->convFVF;
-        IDirect3DVertexDeclaration9_Release(decl);
+        d3d9_declaration = wined3d_vertex_declaration_get_parent(wined3d_declaration);
+        *fvf = d3d9_declaration->convFVF;
+        wined3d_vertex_declaration_decref(wined3d_declaration);
     }
     else
     {
-        *pFVF = 0;
+        *fvf = 0;
     }
+    wined3d_mutex_unlock();
 
-    TRACE("Returning FVF %#x\n", *pFVF);
+    TRACE("Returning FVF %#x.\n", *fvf);
 
     return hr;
 }
@@ -3290,7 +3278,7 @@ static HRESULT CDECL device_parent_create_swapchain(struct wined3d_device_parent
 {
     struct IDirect3DDevice9Impl *device = device_from_device_parent(device_parent);
     D3DPRESENT_PARAMETERS local_parameters;
-    IDirect3DSwapChain9 *d3d_swapchain;
+    IDirect3DSwapChain9Impl *d3d_swapchain;
     HRESULT hr;
 
     TRACE("device_parent %p, desc %p, swapchain %p\n", device_parent, desc, swapchain);
@@ -3311,8 +3299,7 @@ static HRESULT CDECL device_parent_create_swapchain(struct wined3d_device_parent
     local_parameters.FullScreen_RefreshRateInHz = desc->refresh_rate;
     local_parameters.PresentationInterval = desc->swap_interval;
 
-    hr = IDirect3DDevice9Impl_CreateAdditionalSwapChain(&device->IDirect3DDevice9Ex_iface,
-            &local_parameters, &d3d_swapchain);
+    hr = d3d9_swapchain_create(device, &local_parameters, &d3d_swapchain);
     if (FAILED(hr))
     {
         WARN("Failed to create swapchain, hr %#x.\n", hr);
@@ -3320,9 +3307,9 @@ static HRESULT CDECL device_parent_create_swapchain(struct wined3d_device_parent
         return hr;
     }
 
-    *swapchain = ((IDirect3DSwapChain9Impl *)d3d_swapchain)->wined3d_swapchain;
+    *swapchain = d3d_swapchain->wined3d_swapchain;
     wined3d_swapchain_incref(*swapchain);
-    IDirect3DSwapChain9_Release((IDirect3DSwapChain9 *)d3d_swapchain);
+    IDirect3DSwapChain9_Release(&d3d_swapchain->IDirect3DSwapChain9_iface);
 
     /* Copy back the presentation parameters */
     desc->backbuffer_width = local_parameters.BackBufferWidth;
@@ -3496,8 +3483,8 @@ HRESULT device_init(IDirect3DDevice9Impl *device, IDirect3D9Impl *parent, struct
 
     /* Initialize the converted declaration array. This creates a valid pointer
      * and when adding decls HeapReAlloc() can be used without further checking. */
-    device->convertedDecls = HeapAlloc(GetProcessHeap(), 0, 0);
-    if (!device->convertedDecls)
+    device->fvf_decls = HeapAlloc(GetProcessHeap(), 0, 0);
+    if (!device->fvf_decls)
     {
         ERR("Failed to allocate FVF vertex declaration map memory.\n");
         wined3d_mutex_lock();

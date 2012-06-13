@@ -22,7 +22,448 @@
 
 #include "debugger.h"
 
-#if defined(__arm__)
+#if defined(__arm__) && !defined(__ARMEB__)
+
+/*
+ * Switch to disassemble Thumb code.
+ */
+static BOOL db_disasm_thumb = FALSE;
+
+/*
+ * Flag to indicate whether we need to display instruction,
+ * or whether we just need to know the address of the next
+ * instruction.
+ */
+static BOOL db_display = FALSE;
+
+#define ARM_INSN_SIZE    4
+#define THUMB_INSN_SIZE  2
+
+#define ROR32(n, r) (((n) >> (r)) | ((n) << (32 - (r))))
+
+#define get_cond(ins)           tbl_cond[(ins >> 28) & 0x0f]
+#define get_nibble(ins, num)    ((ins >> (num * 4)) & 0x0f)
+
+static char const tbl_addrmode[][3] = {
+    "da", "ia", "db", "ib"
+};
+
+static char const tbl_cond[][3] = {
+    "eq", "ne", "cs", "cc", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "", ""
+};
+
+static char const tbl_dataops[][4] = {
+    "and", "eor", "sub", "rsb", "add", "adc", "sbc", "rsc", "tst", "teq", "cmp", "cmn", "orr",
+    "mov", "bic", "mvn"
+};
+
+static char const tbl_hiops_t[][4] = {
+"add", "cmp", "mov", "bx"
+};
+
+static char const tbl_immops_t[][4] = {
+"mov", "cmp", "add", "sub"
+};
+
+static UINT db_get_inst(void* addr, int size)
+{
+    UINT result = 0;
+    char buffer[4];
+
+    if (dbg_read_memory(addr, buffer, size))
+    {
+        switch (size)
+        {
+        case 4:
+            result = *(UINT*)buffer;
+            break;
+        case 2:
+            result = *(WORD*)buffer;
+            break;
+        }
+    }
+    return result;
+}
+
+static UINT arm_disasm_branch(UINT inst)
+{
+    short link = (inst >> 24) & 0x01;
+    int offset = (inst << 2) & 0x03ffffff;
+
+    if (offset & 0x02000000) offset |= 0xfc000000;
+    offset += 8;
+
+    dbg_printf("\n\tb%s%s\t#%d/0x%08x", link ? "l" : "", get_cond(inst), offset, offset);
+    return 0;
+}
+
+static UINT arm_disasm_dataprocessing(UINT inst)
+{
+    short condcodes = (inst >> 20) & 0x01;
+    short opcode    = (inst >> 21) & 0x0f;
+    short immediate = (inst >> 25) & 0x01;
+    short no_op1    = (opcode & 0x0d) == 0x0d;
+
+    /* check for nop */
+    if (get_nibble(inst, 3) == 15 /* r15 */ && condcodes == 0 &&
+        opcode >= 8 /* tst */ && opcode <= 11 /* cmn */)
+    {
+        dbg_printf("\n\tnop");
+        return 0;
+    }
+
+    dbg_printf("\n\t%s%s%s", tbl_dataops[opcode], condcodes ? "s" : "", get_cond(inst));
+    if (no_op1)
+    {
+        if (immediate)
+            dbg_printf("\tr%u, #%u", get_nibble(inst, 3),
+                       ROR32(inst & 0xff, 2 * get_nibble(inst, 2)));
+        else
+            dbg_printf("\tr%u, r%u", get_nibble(inst, 3), get_nibble(inst, 0));
+    }
+    else
+    {
+        if (immediate)
+            dbg_printf("\tr%u, r%u, #%u", get_nibble(inst, 3), get_nibble(inst, 4),
+                       ROR32(inst & 0xff, 2 * get_nibble(inst, 2)));
+        else
+            dbg_printf("\tr%u, r%u, r%u", get_nibble(inst, 3), get_nibble(inst, 4),
+                       get_nibble(inst, 0));
+    }
+    return 0;
+}
+
+static UINT arm_disasm_singletrans(UINT inst)
+{
+    short load      = (inst >> 20) & 0x01;
+    short writeback = (inst >> 21) & 0x01;
+    short byte      = (inst >> 22) & 0x01;
+    short direction = (inst >> 23) & 0x01;
+    /* FIXME: what to do with bit 24 (indexing) */
+    short immediate = !((inst >> 25) & 0x01);
+    short offset    = inst & 0x0fff;
+
+    if (!direction) offset *= -1;
+
+    dbg_printf("\n\t%s%s%s%s", load ? "ldr" : "str", byte ? "b" : "", writeback ? "t" : "",
+               get_cond(inst));
+    if (immediate)
+        dbg_printf("\tr%u, [r%u, #%d]", get_nibble(inst, 3), get_nibble(inst, 4), offset);
+    else
+        dbg_printf("\tr%u, r%u, r%u", get_nibble(inst, 3), get_nibble(inst, 4),
+                   get_nibble(inst, 0));
+    return 0;
+}
+
+static UINT arm_disasm_halfwordtrans(UINT inst)
+{
+    short halfword  = (inst >> 5)  & 0x01;
+    short sign      = (inst >> 6)  & 0x01;
+    short load      = (inst >> 20) & 0x01;
+    short writeback = (inst >> 21) & 0x01;
+    short immediate = (inst >> 22) & 0x01;
+    short direction = (inst >> 23) & 0x01;
+    /* FIXME: what to do with bit 24 (indexing) */
+    short offset    = ((inst >> 4) & 0xf0) + (inst & 0x0f);
+
+    if (!direction) offset *= -1;
+
+    dbg_printf("\n\t%s%s%s%s%s", load ? "ldr" : "str", sign ? "s" : "",
+               halfword ? "h" : (sign ? "b" : ""), writeback ? "t" : "", get_cond(inst));
+    if (immediate)
+        dbg_printf("\tr%u, r%u, #%d", get_nibble(inst, 3), get_nibble(inst, 4), offset);
+    else
+        dbg_printf("\tr%u, r%u, r%u", get_nibble(inst, 3), get_nibble(inst, 4), get_nibble(inst, 0));
+    return 0;
+}
+
+static UINT arm_disasm_blocktrans(UINT inst)
+{
+    short load      = (inst >> 20) & 0x01;
+    short writeback = (inst >> 21) & 0x01;
+    short psr       = (inst >> 22) & 0x01;
+    short addrmode  = (inst >> 23) & 0x03;
+    short i;
+    short last=15;
+    for (i=15;i>=0;i--)
+        if ((inst>>i) & 1)
+        {
+            last = i;
+            break;
+        }
+
+    dbg_printf("\n\t%s%s%s\tr%u%s, {", load ? "ldm" : "stm", tbl_addrmode[addrmode], get_cond(inst),
+               get_nibble(inst, 4), writeback ? "!" : "");
+    for (i=0;i<=15;i++)
+        if ((inst>>i) & 1)
+        {
+            if (i == last) dbg_printf("r%u", i);
+            else dbg_printf("r%u, ", i);
+        }
+    dbg_printf("}%s", psr ? "^" : "");
+    return 0;
+}
+
+static UINT arm_disasm_swi(UINT inst)
+{
+    UINT comment = inst & 0x00ffffff;
+    dbg_printf("\n\tswi%s\t#%d/0x%08x", get_cond(inst), comment, comment);
+    return 0;
+}
+
+static UINT arm_disasm_coproctrans(UINT inst)
+{
+    WORD CRm    = inst & 0x0f;
+    WORD CP     = (inst >> 5)  & 0x07;
+    WORD CPnum  = (inst >> 8)  & 0x0f;
+    WORD CRn    = (inst >> 16) & 0x0f;
+    WORD load   = (inst >> 20) & 0x01;
+    WORD CP_Opc = (inst >> 21) & 0x07;
+
+    dbg_printf("\n\t%s%s\t%u, %u, r%u, cr%u, cr%u, {%u}", load ? "mrc" : "mcr", get_cond(inst), CPnum,
+               CP, get_nibble(inst, 3), CRn, CRm, CP_Opc);
+    return 0;
+}
+
+static UINT arm_disasm_coprocdataop(UINT inst)
+{
+    WORD CRm    = inst & 0x0f;
+    WORD CP     = (inst >> 5)  & 0x07;
+    WORD CPnum  = (inst >> 8)  & 0x0f;
+    WORD CRd    = (inst >> 12) & 0x0f;
+    WORD CRn    = (inst >> 16) & 0x0f;
+    WORD CP_Opc = (inst >> 20) & 0x0f;
+
+    dbg_printf("\n\tcdp%s\t%u, %u, cr%u, cr%u, cr%u, {%u}", get_cond(inst),
+               CPnum, CP, CRd, CRn, CRm, CP_Opc);
+    return 0;
+}
+
+static UINT arm_disasm_coprocdatatrans(UINT inst)
+{
+    WORD CPnum  = (inst >> 8)  & 0x0f;
+    WORD CRd    = (inst >> 12) & 0x0f;
+    WORD load      = (inst >> 20) & 0x01;
+    /* FIXME: what to do with bit 21 (writeback) */
+    WORD translen  = (inst >> 22) & 0x01;
+    WORD direction = (inst >> 23) & 0x01;
+    /* FIXME: what to do with bit 24 (indexing) */
+    short offset    = (inst & 0xff) << 2;
+
+    if (!direction) offset *= -1;
+
+    dbg_printf("\n\t%s%s%s", load ? "ldc" : "stc", translen ? "l" : "", get_cond(inst));
+    dbg_printf("\t%u, cr%u, [r%u, #%d]", CPnum, CRd, get_nibble(inst, 4), offset);
+    return 0;
+}
+
+static WORD thumb_disasm_hireg(WORD inst)
+{
+    short dst = inst & 0x07;
+    short src = (inst >> 3) & 0x07;
+    short h2  = (inst >> 6) & 0x01;
+    short h1  = (inst >> 7) & 0x01;
+    short op  = (inst >> 8) & 0x03;
+
+    if (h1) dst += 8;
+    if (h2) src += 8;
+
+    if (op == 3)
+        dbg_printf("\n\tb%sx\tr%u", h1?"l":"", src);
+    else
+        dbg_printf("\n\t%s\tr%u, r%u", tbl_hiops_t[op], dst, src);
+
+    return 0;
+}
+
+static WORD thumb_disasm_blocktrans(WORD inst)
+{
+    short lrpc = (inst >> 8)  & 0x01;
+    short load = (inst >> 11) & 0x01;
+    short i;
+    short last;
+
+    for (i=7;i>=0;i--)
+        if ((inst>>i) & 1) break;
+    last = i;
+
+    dbg_printf("\n\t%s\t{", load ? "pop" : "push");
+
+    for (i=0;i<=7;i++)
+        if ((inst>>i) & 1)
+        {
+            if (i == last) dbg_printf("r%u", i);
+            else dbg_printf("r%u, ", i);
+        }
+    if (lrpc)
+        dbg_printf(", %s", load ? "pc" : "lr");
+
+    dbg_printf("}");
+    return 0;
+}
+
+static WORD thumb_disasm_swi(WORD inst)
+{
+    WORD comment = inst & 0x00ff;
+    dbg_printf("\n\tswi\t#%d", comment);
+    return 0;
+}
+
+static WORD thumb_disasm_nop(WORD inst)
+{
+    dbg_printf("\n\tnop");
+    return 0;
+}
+
+static WORD thumb_disasm_ldrpcrel(WORD inst)
+{
+    WORD offset = (inst & 0xff) << 2;
+    dbg_printf("\n\tldr\tr%u, [pc, #%u]", (inst >> 8) & 0x07, offset);
+    return 0;
+}
+
+static WORD thumb_disasm_ldrsprel(WORD inst)
+{
+    WORD offset = (inst & 0xff) << 2;
+    dbg_printf("\n\t%s\tr%u, [sp, #%u]", (inst & 0x0800)?"ldr":"str", (inst >> 8) & 0x07, offset);
+    return 0;
+}
+
+static WORD thumb_disasm_ldrimm(WORD inst)
+{
+    WORD offset = (inst & 0x07c0) >> 6;
+    dbg_printf("\n\t%s%s\tr%u, [r%u, #%u]", (inst & 0x0800)?"ldr":"str", (inst & 0x1000)?"b":"",
+               inst & 0x07, (inst >> 3) & 0x07, (inst & 0x1000)?offset:(offset << 2));
+    return 0;
+}
+
+static WORD thumb_disasm_immop(WORD inst)
+{
+    WORD op = (inst >> 11) & 0x03;
+    dbg_printf("\n\t%s\tr%u, #%u", tbl_immops_t[op], (inst >> 8) & 0x07, inst & 0xff);
+    return 0;
+}
+
+struct inst_arm
+{
+        UINT mask;
+        UINT pattern;
+        UINT (*func)(UINT);
+};
+
+static const struct inst_arm tbl_arm[] = {
+    { 0x0e000000, 0x0a000000, arm_disasm_branch },
+    { 0x0c000000, 0x00000000, arm_disasm_dataprocessing },
+    { 0x0c000000, 0x04000000, arm_disasm_singletrans },
+    { 0x0e000090, 0x00000090, arm_disasm_halfwordtrans },
+    { 0x0e000000, 0x08000000, arm_disasm_blocktrans },
+    { 0x0f000000, 0x0f000000, arm_disasm_swi },
+    { 0x0f000010, 0x0e000010, arm_disasm_coproctrans },
+    { 0x0f000010, 0x0e000000, arm_disasm_coprocdataop },
+    { 0x0e000000, 0x0c000000, arm_disasm_coprocdatatrans },
+    { 0x00000000, 0x00000000, NULL }
+};
+
+struct inst_thumb16
+{
+        WORD mask;
+        WORD pattern;
+        WORD (*func)(WORD);
+};
+
+static const struct inst_thumb16 tbl_thumb16[] = {
+    { 0xfc00, 0x4400, thumb_disasm_hireg },
+    { 0xf600, 0xb400, thumb_disasm_blocktrans },
+    { 0xf800, 0x4800, thumb_disasm_ldrpcrel },
+    { 0xf000, 0x9000, thumb_disasm_ldrsprel },
+    { 0xe000, 0x6000, thumb_disasm_ldrimm },
+    { 0xe000, 0x2000, thumb_disasm_immop },
+    { 0xff00, 0xdf00, thumb_disasm_swi },
+    { 0xff00, 0xbf00, thumb_disasm_nop },
+    { 0x0000, 0x0000, NULL }
+};
+
+/***********************************************************************
+ *              disasm_one_insn
+ *
+ * Disassemble instruction at 'addr'. addr is changed to point to the
+ * start of the next instruction.
+ */
+void be_arm_disasm_one_insn(ADDRESS64 *addr, int display)
+{
+    struct inst_arm *a_ptr = (struct inst_arm *)&tbl_arm;
+    struct inst_thumb16 *t_ptr = (struct inst_thumb16 *)&tbl_thumb16;
+    UINT inst;
+    WORD tinst;
+    int size;
+    int matched = 0;
+
+    char tmp[64];
+    DWORD_PTR* pval;
+
+    if (!memory_get_register(CV_ARM_CPSR, &pval, tmp, sizeof(tmp)))
+        dbg_printf("\n\tmemory_get_register failed: %s\n",tmp);
+    else
+        db_disasm_thumb=(*pval & 0x20)?TRUE:FALSE;
+
+    if (db_disasm_thumb) size = THUMB_INSN_SIZE;
+    else size = ARM_INSN_SIZE;
+
+    db_display = display;
+    inst = db_get_inst( memory_to_linear_addr(addr), size );
+
+    if (!db_disasm_thumb)
+    {
+        while (a_ptr->func) {
+                if ((inst & a_ptr->mask) ==  a_ptr->pattern) {
+                        matched = 1;
+                        break;
+                }
+                a_ptr++;
+        }
+
+        if (!matched) {
+                dbg_printf("\n\tUnknown Instruction: %08x\n", inst);
+                addr->Offset += size;
+                return;
+        }
+        else
+        {
+            if (!a_ptr->func(inst))
+            {
+                dbg_printf("\n");
+                addr->Offset += size;
+            }
+            return;
+        }
+    }
+    else
+    {
+        tinst = inst;
+        while (t_ptr->func) {
+                if ((tinst & t_ptr->mask) ==  t_ptr->pattern) {
+                        matched = 1;
+                        break;
+                }
+                t_ptr++;
+        }
+
+        if (!matched) {
+                dbg_printf("\n\tUnknown Instruction: %08x\n", tinst);
+                addr->Offset += size;
+                return;
+        }
+        else
+        {
+            if (!t_ptr->func(tinst))
+            {
+                dbg_printf("\n");
+                addr->Offset += size;
+            }
+        }
+        return;
+    }
+}
 
 static unsigned be_arm_get_addr(HANDLE hThread, const CONTEXT* ctx,
                                 enum be_cpu_addr bca, ADDRESS64* addr)
@@ -150,11 +591,6 @@ static unsigned be_arm_is_jump(const void* insn, ADDRESS64* jumpee)
     return FALSE;
 }
 
-static void be_arm_disasm_one_insn(ADDRESS64* addr, int display)
-{
-    dbg_printf("Disasm NIY\n");
-}
-
 static unsigned be_arm_insert_Xpoint(HANDLE hProcess, const struct be_process_io* pio,
                                      CONTEXT* ctx, enum be_xpoint_type type,
                                      void* addr, unsigned long* val, unsigned size)
@@ -255,6 +691,13 @@ static int be_arm_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
     return TRUE;
 }
 
+static int be_arm_store_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                                unsigned is_signed, LONGLONG val)
+{
+    /* this is simple if we're on a little endian CPU */
+    return memory_write_value(lvalue, size, &val);
+}
+
 struct backend_cpu be_arm =
 {
     IMAGE_FILE_MACHINE_ARMV7,
@@ -280,5 +723,6 @@ struct backend_cpu be_arm =
     be_arm_adjust_pc_for_break,
     be_arm_fetch_integer,
     be_arm_fetch_float,
+    be_arm_store_integer,
 };
 #endif

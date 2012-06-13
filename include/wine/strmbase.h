@@ -194,36 +194,6 @@ HRESULT WINAPI EnumMediaTypes_Construct(BasePin *iface, BasePin_GetMediaType enu
 
 HRESULT WINAPI EnumPins_Construct(BaseFilter *base,  BaseFilter_GetPin receive_pin, BaseFilter_GetPinCount receive_pincount, BaseFilter_GetPinVersion receive_version, IEnumPins ** ppEnum);
 
-/* Quality Control */
-typedef struct QualityControlImpl {
-    const IQualityControlVtbl *lpVtbl;
-    IPin *input;
-    IBaseFilter *self;
-    IQualityControl *tonotify;
-
-    /* Render stuff */
-    IReferenceClock *clock;
-    REFERENCE_TIME last_in_time, last_left, avg_duration, avg_pt, avg_render, start, stop;
-    REFERENCE_TIME current_jitter, current_rstart, current_rstop, clockstart;
-    double avg_rate;
-    LONG64 rendered, dropped;
-    BOOL qos_handled, is_dropped;
-} QualityControlImpl;
-
-void QualityControlImpl_init(QualityControlImpl *This, IPin *input, IBaseFilter *self);
-HRESULT WINAPI QualityControlImpl_QueryInterface(IQualityControl *iface, REFIID riid, void **ppv);
-ULONG WINAPI QualityControlImpl_AddRef(IQualityControl *iface);
-ULONG WINAPI QualityControlImpl_Release(IQualityControl *iface);
-HRESULT WINAPI QualityControlImpl_Notify(IQualityControl *iface, IBaseFilter *sender, Quality qm);
-HRESULT WINAPI QualityControlImpl_SetSink(IQualityControl *iface, IQualityControl *tonotify);
-
-void QualityControlRender_Start(QualityControlImpl *This, REFERENCE_TIME tStart);
-void QualityControlRender_SetClock(QualityControlImpl *This, IReferenceClock *clock);
-HRESULT QualityControlRender_WaitFor(QualityControlImpl *This, IMediaSample *sample, HANDLE ev);
-void QualityControlRender_DoQOS(QualityControlImpl *priv);
-void QualityControlRender_BeginRender(QualityControlImpl *This);
-void QualityControlRender_EndRender(QualityControlImpl *This);
-
 /* Transform Filter */
 typedef struct TransformFilter
 {
@@ -235,7 +205,7 @@ typedef struct TransformFilter
 	CRITICAL_SECTION csReceive;
 
 	const struct TransformFilterFuncTable * pFuncsTable;
-	QualityControlImpl qcimpl;
+	struct QualityControlImpl *qcimpl;
 } TransformFilter;
 
 typedef HRESULT (WINAPI *TransformFilter_DecideBufferSize) (TransformFilter *iface, IMemAllocator *pAlloc, ALLOCATOR_PROPERTIES *ppropInputRequest);
@@ -277,6 +247,7 @@ HRESULT WINAPI TransformFilterImpl_Stop(IBaseFilter * iface);
 HRESULT WINAPI TransformFilterImpl_Pause(IBaseFilter * iface);
 HRESULT WINAPI TransformFilterImpl_Run(IBaseFilter * iface, REFERENCE_TIME tStart);
 HRESULT WINAPI TransformFilterImpl_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **ppPin);
+HRESULT WINAPI TransformFilterImpl_Notify(TransformFilter *iface, IBaseFilter *sender, Quality qm);
 
 HRESULT TransformFilter_Construct( const IBaseFilterVtbl *filterVtbl, LONG filter_size, const CLSID* pClsid, const TransformFilterFuncTable* pFuncsTable, IBaseFilter ** ppTransformFilter);
 
@@ -582,6 +553,13 @@ typedef struct BaseRendererTag
 	BaseInputPin *pInputPin;
 	IUnknown *pPosition;
 	CRITICAL_SECTION csRenderLock;
+	HANDLE evComplete;
+	HANDLE ThreadSignal;
+	HANDLE RenderEvent;
+	IMediaSample *pMediaSample;
+
+	IQualityControl *pQSink;
+	struct QualityControlImpl *qcimpl;
 
 	const struct BaseRendererFuncTable * pFuncsTable;
 } BaseRenderer;
@@ -599,7 +577,10 @@ typedef VOID (WINAPI *BaseRenderer_PrepareRender)(BaseRenderer *This);
 typedef HRESULT (WINAPI *BaseRenderer_ShouldDrawSampleNow)(BaseRenderer *This, IMediaSample *pMediaSample, REFERENCE_TIME *pStartTime, REFERENCE_TIME *pEndTime);
 typedef HRESULT (WINAPI *BaseRenderer_PrepareReceive)(BaseRenderer *This, IMediaSample *pMediaSample);
 typedef HRESULT (WINAPI *BaseRenderer_EndOfStream)(BaseRenderer *This);
+typedef HRESULT (WINAPI *BaseRenderer_BeginFlush) (BaseRenderer *This);
 typedef HRESULT (WINAPI *BaseRenderer_EndFlush) (BaseRenderer *This);
+typedef HRESULT (WINAPI *BaseRenderer_BreakConnect) (BaseRenderer *This);
+typedef HRESULT (WINAPI *BaseRenderer_CompleteConnect) (BaseRenderer *This, IPin *pReceivePin);
 
 typedef struct BaseRendererFuncTable {
 	/* Required */
@@ -617,7 +598,10 @@ typedef struct BaseRendererFuncTable {
 	BaseRenderer_ShouldDrawSampleNow  pfnShouldDrawSampleNow;
 	BaseRenderer_PrepareReceive pfnPrepareReceive;
 	/* Optional, Input Pin */
+	BaseRenderer_CompleteConnect pfnCompleteConnect;
+	BaseRenderer_BreakConnect pfnBreakConnect;
 	BaseRenderer_EndOfStream pfnEndOfStream;
+	BaseRenderer_BeginFlush pfnBeginFlush;
 	BaseRenderer_EndFlush pfnEndFlush;
 } BaseRendererFuncTable;
 
@@ -628,8 +612,12 @@ HRESULT WINAPI BaseRendererImpl_FindPin(IBaseFilter * iface, LPCWSTR Id, IPin **
 HRESULT WINAPI BaseRendererImpl_Stop(IBaseFilter * iface);
 HRESULT WINAPI BaseRendererImpl_Run(IBaseFilter * iface, REFERENCE_TIME tStart);
 HRESULT WINAPI BaseRendererImpl_Pause(IBaseFilter * iface);
+HRESULT WINAPI BaseRendererImpl_SetSyncSource(IBaseFilter *iface, IReferenceClock *clock);
+HRESULT WINAPI BaseRendererImpl_GetState(IBaseFilter * iface, DWORD dwMilliSecsTimeout, FILTER_STATE *pState);
 HRESULT WINAPI BaseRendererImpl_EndOfStream(BaseRenderer* iface);
+HRESULT WINAPI BaseRendererImpl_BeginFlush(BaseRenderer* iface);
 HRESULT WINAPI BaseRendererImpl_EndFlush(BaseRenderer* iface);
+HRESULT WINAPI BaseRendererImpl_ClearPendingSample(BaseRenderer *iface);
 
 HRESULT WINAPI BaseRenderer_Init(BaseRenderer *This, const IBaseFilterVtbl *Vtbl, IUnknown *pUnkOuter, const CLSID *pClsid, DWORD_PTR DebugInfo, const BaseRendererFuncTable* pBaseFuncsTable);
 

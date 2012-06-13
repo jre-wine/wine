@@ -44,6 +44,10 @@ ok(m[0] === "aa", "m[0] = " + m[0]);
 ok(RegExp.leftContext === " ", "RegExp.leftContext = " + RegExp.leftContext);
 ok(RegExp.rightContext === "baaa", "RegExp.rightContext = " + RegExp.rightContext);
 
+m = /^[^<]*(<(.|\s)+>)[^>]*$|^#(\w+)$/.exec(
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+ok(m === null, "m is not null");
+
 re = /a+/g;
 ok(re.lastIndex === 0, "re.lastIndex = " + re.lastIndex);
 
@@ -575,5 +579,8 @@ ok(i === 1, "String.prototype.seatch.apply(obj, 'b') = " + i);
 
 i = " undefined ".search();
 ok(i === null, "' undefined '.search() = " + i);
+
+tmp = "=)".replace(/=/, "?");
+ok(tmp === "?)", "'=)'.replace(/=/, '?') = " + tmp);
 
 reportSuccess();

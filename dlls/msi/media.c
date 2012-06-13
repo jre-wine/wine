@@ -77,7 +77,7 @@ static UINT msi_change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
 
     static const WCHAR error_prop[] = {'E','r','r','o','r','D','i','a','l','o','g',0};
 
-    if ((gUILevel & INSTALLUILEVEL_MASK) == INSTALLUILEVEL_NONE &&
+    if ((package->ui_level & INSTALLUILEVEL_MASK) == INSTALLUILEVEL_NONE &&
         !gUIHandlerA && !gUIHandlerW && !gUIHandlerRecord) return ERROR_SUCCESS;
 
     error = msi_build_error_string(package, 1302, 1, mi->disk_prompt);
@@ -477,7 +477,7 @@ static INT_PTR cabinet_copy_file(FDINOTIFICATIONTYPE fdint,
                 MoveFileExW(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT) &&
                 MoveFileExW(tmpfileW, path, MOVEFILE_DELAY_UNTIL_REBOOT))
             {
-                data->package->need_reboot = 1;
+                data->package->need_reboot_at_end = 1;
             }
             else
             {

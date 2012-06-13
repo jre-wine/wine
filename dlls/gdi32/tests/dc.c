@@ -345,6 +345,8 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr )
     unsigned int i;
     WORD ramp[3][256];
     BOOL ret;
+    RECT rect;
+    UINT type;
 
     if (GetObjectType( hdc ) == OBJ_METADC)
     {
@@ -358,6 +360,15 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr )
         ok( !ret, "GetDeviceGammaRamp succeeded on %s\n", descr );
         ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
             "wrong error %u on %s\n", GetLastError(), descr );
+        type = GetClipBox( hdc, &rect );
+        ok( type == ERROR, "GetClipBox returned %d on %s\n", type, descr );
+
+        SetBoundsRect( hdc, NULL, DCB_RESET | DCB_ENABLE );
+        SetMapMode( hdc, MM_TEXT );
+        Rectangle( hdc, 2, 2, 5, 5 );
+        type = GetBoundsRect( hdc, &rect, DCB_RESET );
+        todo_wine
+        ok( !type, "GetBoundsRect succeeded on %s\n", descr );
     }
     else
     {
@@ -371,7 +382,38 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr )
         ok( !ret, "GetDeviceGammaRamp succeeded on %s\n", descr );
         ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
             "wrong error %u on %s\n", GetLastError(), descr );
+        type = GetClipBox( hdc, &rect );
+        if (GetObjectType( hdc ) == OBJ_ENHMETADC)
+            todo_wine ok( type == SIMPLEREGION, "GetClipBox returned %d on memdc for %s\n", type, descr );
+        else
+            ok( type == SIMPLEREGION, "GetClipBox returned %d on memdc for %s\n", type, descr );
+
+        SetBoundsRect( hdc, NULL, DCB_RESET | DCB_ENABLE );
+        SetMapMode( hdc, MM_TEXT );
+        Rectangle( hdc, 2, 2, 4, 4 );
+        type = GetBoundsRect( hdc, &rect, DCB_RESET );
+        todo_wine
+        ok( rect.left == 2 && rect.top == 2 && rect.right == 4 && rect.bottom == 4 && type == DCB_SET,
+            "GetBoundsRect returned %d,%d,%d,%d type %x on memdc for %s\n",
+            rect.left, rect.top, rect.right, rect.bottom, type, descr );
     }
+
+    type = GetClipBox( ref_dc, &rect );
+    ok( type == SIMPLEREGION, "GetClipBox returned %d on %s\n", type, descr );
+    ok( rect.left == 0 && rect.top == 0 &&
+        rect.right == GetDeviceCaps( ref_dc, DESKTOPHORZRES ) &&
+        rect.bottom == GetDeviceCaps( ref_dc, DESKTOPVERTRES ),
+        "GetClipBox returned %d,%d,%d,%d on %s\n", rect.left, rect.top, rect.right, rect.bottom, descr );
+
+    SetBoundsRect( ref_dc, NULL, DCB_RESET | DCB_ACCUMULATE );
+    SetMapMode( ref_dc, MM_TEXT );
+    Rectangle( ref_dc, 3, 3, 5, 5 );
+    type = GetBoundsRect( ref_dc, &rect, DCB_RESET );
+    /* it may or may not work on non-memory DCs */
+    ok( (rect.left == 0 && rect.top == 0 && rect.right == 0 && rect.bottom == 0 && type == DCB_RESET) ||
+        (rect.left == 3 && rect.top == 3 && rect.right == 5 && rect.bottom == 5 && type == DCB_SET),
+        "GetBoundsRect returned %d,%d,%d,%d type %x on %s\n",
+        rect.left, rect.top, rect.right, rect.bottom, type, descr );
 
     if (GetObjectType( hdc ) == OBJ_MEMDC)
     {
@@ -400,6 +442,21 @@ static void test_device_caps( HDC hdc, HDC ref_dc, const char *descr )
         ok( GetLastError() == ERROR_INVALID_PARAMETER || broken(GetLastError() == 0xdeadbeef), /* nt4 */
             "wrong error %u on %s\n", GetLastError(), descr );
 
+        type = GetClipBox( hdc, &rect );
+        ok( type == SIMPLEREGION, "GetClipBox returned %d on memdc for %s\n", type, descr );
+        ok( rect.left == 0 && rect.top == 0 && rect.right == 16 && rect.bottom == 16,
+            "GetClipBox returned %d,%d,%d,%d on memdc for %s\n",
+            rect.left, rect.top, rect.right, rect.bottom, descr );
+
+        SetBoundsRect( hdc, NULL, DCB_RESET | DCB_ENABLE );
+        SetMapMode( hdc, MM_TEXT );
+        Rectangle( hdc, 5, 5, 12, 14 );
+        type = GetBoundsRect( hdc, &rect, DCB_RESET );
+        todo_wine
+        ok( rect.left == 5 && rect.top == 5 && rect.right == 12 && rect.bottom == 14 && type == DCB_SET,
+            "GetBoundsRect returned %d,%d,%d,%d type %x on memdc for %s\n",
+            rect.left, rect.top, rect.right, rect.bottom, type, descr );
+
         SelectObject( hdc, old );
         DeleteObject( dib );
     }
@@ -412,7 +469,7 @@ static void test_CreateCompatibleDC(void)
     HBITMAP bitmap;
     INT caps;
 
-    screen_dc = GetDC( 0 );
+    screen_dc = CreateDC( "DISPLAY", NULL, NULL, NULL );
     bitmap = CreateBitmap( 10, 10, 1, 1, NULL );
 
     /* Create a DC compatible with the screen */
@@ -440,8 +497,7 @@ static void test_CreateCompatibleDC(void)
     ok( SelectObject( hNewDC, bitmap ) != 0, "SelectObject failed\n" );
     caps = GetDeviceCaps( hdcMetafile, TECHNOLOGY );
     ok( caps == DT_RASDISPLAY, "wrong caps %u\n", caps );
-    caps = GetDeviceCaps( hNewDC, TECHNOLOGY );
-    ok( caps == DT_RASDISPLAY, "wrong caps %u\n", caps );
+    test_device_caps( hdcMetafile, hdc, "enhmetafile dc" );
     DeleteDC( hNewDC );
     DeleteEnhMetaFile( CloseEnhMetaFile( hdcMetafile ));
     ReleaseDC( 0, hdc );
@@ -456,7 +512,7 @@ static void test_CreateCompatibleDC(void)
     DeleteMetaFile( CloseMetaFile( hdcMetafile ));
 
     DeleteObject( bitmap );
-    ReleaseDC( 0, screen_dc );
+    DeleteDC( screen_dc );
 }
 
 static void test_DC_bitmap(void)
@@ -682,15 +738,18 @@ todo_wine
 
 static void test_boundsrect(void)
 {
+    char buffer[sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD)];
+    BITMAPINFO *info = (BITMAPINFO *)buffer;
     HDC hdc;
-    HBITMAP bitmap;
+    HBITMAP bitmap, dib, old;
     RECT rect, expect, set_rect;
     UINT ret;
+    int i, level;
 
     hdc = CreateCompatibleDC(0);
     ok(hdc != NULL, "CreateCompatibleDC failed\n");
     bitmap = CreateCompatibleBitmap( hdc, 200, 200 );
-    SelectObject( hdc, bitmap );
+    old = SelectObject( hdc, bitmap );
 
     ret = GetBoundsRect(hdc, NULL, 0);
     ok(ret == 0, "Expected GetBoundsRect to return 0, got %u\n", ret);
@@ -820,8 +879,161 @@ static void test_boundsrect(void)
            rect.left, rect.top, rect.right, rect.bottom);
     }
 
+    SetBoundsRect( hdc, NULL, DCB_RESET | DCB_ENABLE );
+    MoveToEx( hdc, 10, 10, NULL );
+    LineTo( hdc, 20, 20 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    todo_wine
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 10, 10, 21, 21 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    SetRect( &rect, 8, 8, 23, 23 );
+    expect = rect;
+    SetBoundsRect( hdc, &rect, DCB_ACCUMULATE );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    level = SaveDC( hdc );
+    LineTo( hdc, 30, 25 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 8, 8, 31, 26 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    SetBoundsRect( hdc, NULL, DCB_DISABLE );
+    LineTo( hdc, 40, 40 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 8, 8, 31, 26 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    SetRect( &rect, 6, 6, 30, 30 );
+    SetBoundsRect( hdc, &rect, DCB_ACCUMULATE );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 31, 30 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    RestoreDC( hdc, level );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    LineTo( hdc, 40, 40 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    SelectObject( hdc, old );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 1, 1 );
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    SetBoundsRect( hdc, NULL, DCB_ENABLE );
+    LineTo( hdc, 50, 40 );
+
+    SelectObject( hdc, bitmap );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 51, 41 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    SelectObject( hdc, GetStockObject( NULL_PEN ));
+    LineTo( hdc, 50, 50 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 51, 51 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    memset( buffer, 0, sizeof(buffer) );
+    info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info->bmiHeader.biWidth = 256;
+    info->bmiHeader.biHeight = 256;
+    info->bmiHeader.biPlanes = 1;
+    info->bmiHeader.biBitCount = 8;
+    info->bmiHeader.biCompression = BI_RGB;
+    dib = CreateDIBSection( 0, info, DIB_RGB_COLORS, NULL, NULL, 0 );
+    ok( dib != 0, "failed to create DIB\n" );
+    SelectObject( hdc, dib );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 51, 51 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    LineTo( hdc, 55, 30 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 56, 51 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    LineTo( hdc, 300, 30 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 6, 6, 256, 51 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+    LineTo( hdc, -300, -300 );
+    ret = GetBoundsRect( hdc, &rect, 0 );
+    ok( ret == DCB_SET, "GetBoundsRect returned %x\n", ret );
+    SetRect( &expect, 0, 0, 256, 51 );
+    todo_wine
+    ok( EqualRect(&rect, &expect), "Got (%d,%d)-(%d,%d)\n", rect.left, rect.top, rect.right, rect.bottom );
+
+    /* test the wide pen heuristics */
+    SetBoundsRect( hdc, NULL, DCB_ENABLE | DCB_RESET );
+    for (i = 0; i < 1000; i++)
+    {
+        static const UINT endcaps[3] = { PS_ENDCAP_ROUND, PS_ENDCAP_SQUARE, PS_ENDCAP_FLAT };
+        static const UINT joins[3] = { PS_JOIN_ROUND, PS_JOIN_BEVEL, PS_JOIN_MITER };
+        LOGBRUSH brush = { BS_SOLID, RGB(0,0,0), 0 };
+        UINT join = joins[i % 3];
+        UINT endcap = endcaps[(i / 3) % 3];
+        INT inflate, width = 1 + i / 9;
+        HPEN pen = ExtCreatePen( PS_GEOMETRIC | join | endcap | PS_SOLID, width, &brush, 0, NULL );
+        HPEN old = SelectObject( hdc, pen );
+        MoveToEx( hdc, 100, 100, NULL );
+        LineTo( hdc, 160, 100 );
+        LineTo( hdc, 100, 160 );
+        LineTo( hdc, 160, 160 );
+        GetBoundsRect( hdc, &rect, DCB_RESET );
+        SetRect( &expect, 100, 100, 161, 161 );
+
+        inflate = width + 2;
+        if (join == PS_JOIN_MITER)
+        {
+            inflate *= 5;
+            if (endcap == PS_ENDCAP_SQUARE)
+                InflateRect( &expect, (inflate * 3 + 1) / 2, (inflate * 3 + 1) / 2 );
+            else
+                InflateRect( &expect, inflate, inflate );
+        }
+        else
+        {
+            if (endcap == PS_ENDCAP_SQUARE)
+                InflateRect( &expect, inflate - inflate / 4, inflate - inflate / 4 );
+            else
+                InflateRect( &expect, (inflate + 1) / 2, (inflate + 1) / 2 );
+        }
+        expect.left   = max( expect.left, 0 );
+        expect.top    = max( expect.top, 0 );
+        expect.right  = min( expect.right, 256 );
+        expect.bottom = min( expect.bottom, 256 );
+        todo_wine
+        ok( EqualRect(&rect, &expect),
+            "Got %d,%d,%d,%d expected %d,%d,%d,%d %u/%x/%x\n",
+            rect.left, rect.top, rect.right, rect.bottom,
+            expect.left, expect.top, expect.right, expect.bottom, width, endcap, join );
+        DeleteObject( SelectObject( hdc, old ));
+    }
+
     DeleteDC( hdc );
     DeleteObject( bitmap );
+    DeleteObject( dib );
 }
 
 static void test_desktop_colorres(void)
@@ -981,7 +1193,7 @@ done:
 
 static void test_printer_dc(void)
 {
-    HDC memdc, display_memdc;
+    HDC memdc, display_memdc, enhmf_dc;
     HBITMAP orig, bmp;
     DWORD ret;
     HDC hdc = create_printer_dc();
@@ -1003,12 +1215,12 @@ static void test_printer_dc(void)
     ret = GetDeviceCaps( display_memdc, TECHNOLOGY );
     ok( ret == DT_RASDISPLAY, "wrong type %u\n", ret );
 
-    test_device_caps( memdc, hdc, "printer dc" );
-
     bmp = CreateBitmap( 100, 100, 1, GetDeviceCaps( hdc, BITSPIXEL ), NULL );
     orig = SelectObject( memdc, bmp );
     ok( orig != NULL, "SelectObject failed\n" );
     ok( BitBlt( hdc, 10, 10, 20, 20, memdc, 0, 0, SRCCOPY ), "BitBlt failed\n" );
+
+    test_device_caps( memdc, hdc, "printer dc" );
 
     ok( !SelectObject( display_memdc, bmp ), "SelectObject succeeded\n" );
     SelectObject( memdc, orig );
@@ -1024,6 +1236,11 @@ static void test_printer_dc(void)
 
     ret = GetPixel( hdc, 0, 0 );
     ok( ret == CLR_INVALID, "wrong pixel value %x\n", ret );
+
+    enhmf_dc = CreateEnhMetaFileA( hdc, NULL, NULL, NULL );
+    ok(enhmf_dc != 0, "CreateEnhMetaFileA failed\n");
+    test_device_caps( enhmf_dc, hdc, "enhmetafile printer dc" );
+    DeleteEnhMetaFile( CloseEnhMetaFile( enhmf_dc ));
 
     DeleteDC( memdc );
     DeleteDC( display_memdc );

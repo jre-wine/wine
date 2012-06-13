@@ -71,6 +71,7 @@ static HRESULT WINAPI NullRenderer_CheckMediaType(BaseRenderer *iface, const AM_
 static const BaseRendererFuncTable RendererFuncTable = {
     NullRenderer_CheckMediaType,
     NullRenderer_DoRenderSample,
+    /**/
     NULL,
     NULL,
     NULL,
@@ -78,6 +79,10 @@ static const BaseRendererFuncTable RendererFuncTable = {
     NULL,
     NULL,
     NULL,
+    NULL,
+    NULL,
+    NULL,
+    /**/
     NULL,
     NULL,
     NULL,
@@ -233,8 +238,8 @@ static const IBaseFilterVtbl NullRenderer_Vtbl =
     BaseRendererImpl_Stop,
     BaseRendererImpl_Pause,
     BaseRendererImpl_Run,
-    BaseFilterImpl_GetState,
-    BaseFilterImpl_SetSyncSource,
+    BaseRendererImpl_GetState,
+    BaseRendererImpl_SetSyncSource,
     BaseFilterImpl_GetSyncSource,
     BaseFilterImpl_EnumPins,
     BaseRendererImpl_FindPin,

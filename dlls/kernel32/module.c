@@ -508,6 +508,12 @@ BOOL WINAPI GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
     HMODULE ret;
     ULONG magic;
 
+    if (!module)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
     /* if we are messing with the refcount, grab the loader lock */
     if ((flags & GET_MODULE_HANDLE_EX_FLAG_PIN) ||
         !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
@@ -542,7 +548,9 @@ BOOL WINAPI GetModuleHandleExW( DWORD flags, LPCWSTR name, HMODULE *module )
         !(flags & GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT))
         LdrUnlockLoaderLock( 0, magic );
 
-    if (module) *module = ret;
+    if (status == STATUS_SUCCESS) *module = ret;
+    else *module = NULL;
+
     return (status == STATUS_SUCCESS);
 }
 
@@ -562,7 +570,7 @@ HMODULE WINAPI DECLSPEC_HOTPATCH GetModuleHandleA(LPCSTR module)
 {
     HMODULE ret;
 
-    if (!GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module, &ret )) ret = 0;
+    GetModuleHandleExA( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module, &ret );
     return ret;
 }
 
@@ -575,7 +583,7 @@ HMODULE WINAPI GetModuleHandleW(LPCWSTR module)
 {
     HMODULE ret;
 
-    if (!GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module, &ret )) ret = 0;
+    GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, module, &ret );
     return ret;
 }
 

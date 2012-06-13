@@ -48,6 +48,7 @@ static int*       (__cdecl *p__daylight)(void);
 static int*       (__cdecl *p___p__daylight)(void);
 static size_t     (__cdecl *p_strftime)(char *, size_t, const char *, const struct tm *);
 static size_t     (__cdecl *p_wcsftime)(wchar_t *, size_t, const wchar_t *, const struct tm *);
+static char*      (__cdecl *p_asctime)(const struct tm *);
 
 static void init(void)
 {
@@ -65,6 +66,7 @@ static void init(void)
     p___p__daylight = (void*)GetProcAddress(hmod, "__p__daylight");
     p_strftime = (void*)GetProcAddress(hmod, "strftime");
     p_wcsftime = (void*)GetProcAddress(hmod, "wcsftime");
+    p_asctime = (void*)GetProcAddress(hmod, "asctime");
 }
 
 static int get_test_year(time_t *start)
@@ -597,19 +599,183 @@ static void test_strftime(void)
     gmt_tm = p_gmtime(&gmt);
     ok(gmt_tm != NULL, "gmtime failed\n");
 
+    errno = 0xdeadbeef;
+    retA = strftime(NULL, 0, "copy", gmt_tm);
+    ok(retA == 0, "expected 0, got %ld\n", retA);
+    ok(errno==EINVAL || broken(errno==0xdeadbeef), "errno = %d\n", errno);
+
+    retA = strftime(bufA, 256, "copy", NULL);
+    ok(retA == 4, "expected 4, got %ld\n", retA);
+    ok(!strcmp(bufA, "copy"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "copy it", gmt_tm);
+    ok(retA == 7, "expected 7, got %ld\n", retA);
+    ok(!strcmp(bufA, "copy it"), "got %s\n", bufA);
+
+    errno = 0xdeadbeef;
+    retA = strftime(bufA, 2, "copy", gmt_tm);
+    ok(retA == 0, "expected 0, got %ld\n", retA);
+    ok(!strcmp(bufA, "") || broken(!strcmp(bufA, "copy it")), "got %s\n", bufA);
+    ok(errno==ERANGE || errno==0xdeadbeef, "errno = %d\n", errno);
+
+    errno = 0xdeadbeef;
+    retA = strftime(bufA, 256, "a%e", gmt_tm);
+    ok(retA==0 || broken(retA==1), "expected 0, got %ld\n", retA);
+    ok(!strcmp(bufA, "") || broken(!strcmp(bufA, "a")), "got %s\n", bufA);
+    ok(errno==EINVAL || broken(errno==0xdeadbeef), "errno = %d\n", errno);
+
+    if(0) { /* crashes on Win2k */
+        errno = 0xdeadbeef;
+        retA = strftime(bufA, 256, "%c", NULL);
+        ok(retA == 0, "expected 0, got %ld\n", retA);
+        ok(!strcmp(bufA, ""), "got %s\n", bufA);
+        ok(errno == EINVAL, "errno = %d\n", errno);
+    }
+
+    retA = strftime(bufA, 256, "e%#%e", gmt_tm);
+    ok(retA == 3, "expected 3, got %ld\n", retA);
+    ok(!strcmp(bufA, "e%e"), "got %s\n", bufA);
+
     retA = strftime(bufA, 256, "%c", gmt_tm);
-todo_wine {
     ok(retA == 17, "expected 17, got %ld\n", retA);
     ok(strcmp(bufA, expected) == 0, "expected %s, got %s\n", expected, bufA);
-}
+
     retW = wcsftime(bufW, 256, cW, gmt_tm);
-todo_wine
     ok(retW == 17, "expected 17, got %ld\n", retW);
     ok(retA == retW, "expected %ld, got %ld\n", retA, retW);
     buf[0] = 0;
     retA = WideCharToMultiByte(CP_ACP, 0, bufW, retW, buf, 256, NULL, NULL);
     buf[retA] = 0;
     ok(strcmp(bufA, buf) == 0, "expected %s, got %s\n", bufA, buf);
+
+    retA = strftime(bufA, 256, "%x", gmt_tm);
+    ok(retA == 8, "expected 8, got %ld\n", retA);
+    ok(!strcmp(bufA, "01/01/70"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%X", gmt_tm);
+    ok(retA == 8, "expected 8, got %ld\n", retA);
+    ok(!strcmp(bufA, "00:00:00"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%a", gmt_tm);
+    ok(retA == 3, "expected 3, got %ld\n", retA);
+    ok(!strcmp(bufA, "Thu"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%A", gmt_tm);
+    ok(retA == 8, "expected 8, got %ld\n", retA);
+    ok(!strcmp(bufA, "Thursday"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%b", gmt_tm);
+    ok(retA == 3, "expected 3, got %ld\n", retA);
+    ok(!strcmp(bufA, "Jan"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%B", gmt_tm);
+    ok(retA == 7, "expected 7, got %ld\n", retA);
+    ok(!strcmp(bufA, "January"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%d", gmt_tm);
+    ok(retA == 2, "expected 2, got %ld\n", retA);
+    ok(!strcmp(bufA, "01"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%#d", gmt_tm);
+    ok(retA == 1, "expected 1, got %ld\n", retA);
+    ok(!strcmp(bufA, "1"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%H", gmt_tm);
+    ok(retA == 2, "expected 2, got %ld\n", retA);
+    ok(!strcmp(bufA, "00"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%I", gmt_tm);
+    ok(retA == 2, "expected 2, got %ld\n", retA);
+    ok(!strcmp(bufA, "12"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%j", gmt_tm);
+    ok(retA == 3, "expected 3, got %ld\n", retA);
+    ok(!strcmp(bufA, "001"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%m", gmt_tm);
+    ok(retA == 2, "expected 2, got %ld\n", retA);
+    ok(!strcmp(bufA, "01"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%#M", gmt_tm);
+    ok(retA == 1, "expected 1, got %ld\n", retA);
+    ok(!strcmp(bufA, "0"), "got %s\n", bufA);
+
+    retA = strftime(bufA, 256, "%p", gmt_tm);
+    ok(retA == 2, "expected 2, got %ld\n", retA);
+    ok(!strcmp(bufA, "AM"), "got %s\n", bufA);
+
+    gmt_tm->tm_mon = 1;
+    gmt_tm->tm_mday = 30;
+    retA = strftime(bufA, 256, "%c", gmt_tm);
+    todo_wine {
+        ok(retA == 17, "expected 17, got %ld\n", retA);
+        ok(!strcmp(bufA, "02/30/70 00:00:00"), "got %s\n", bufA);
+    }
+}
+
+static void test_asctime(void)
+{
+    struct tm* gmt_tm;
+    time_t gmt;
+    char *ret;
+
+    if(!p_asctime || !p_gmtime)
+    {
+        win_skip("asctime or gmtime is not available\n");
+        return;
+    }
+
+    gmt = 0;
+    gmt_tm = p_gmtime(&gmt);
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Thu Jan 01 00:00:00 1970\n"), "asctime retunred %s\n", ret);
+
+    gmt = 312433121;
+    gmt_tm = p_gmtime(&gmt);
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Mon Nov 26 02:58:41 1979\n"), "asctime retunred %s\n", ret);
+
+    /* Week day is only checked if it's in 0..6 range */
+    gmt_tm->tm_wday = 3;
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Wed Nov 26 02:58:41 1979\n"), "asctime returned %s\n", ret);
+
+    errno = 0xdeadbeef;
+    gmt_tm->tm_wday = 7;
+    ret = p_asctime(gmt_tm);
+    ok(!ret || broken(!ret[0]), "asctime returned %s\n", ret);
+    ok(errno==EINVAL || broken(errno==0xdeadbeef), "errno = %d\n", errno);
+
+    /* Year day is ignored */
+    gmt_tm->tm_wday = 3;
+    gmt_tm->tm_yday = 1300;
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Wed Nov 26 02:58:41 1979\n"), "asctime returned %s\n", ret);
+
+    /* Dates that can't be displayed using 26 characters are broken */
+    gmt_tm->tm_mday = 28;
+    gmt_tm->tm_year = 8100;
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Wed Nov 28 02:58:41 :000\n"), "asctime returned %s\n", ret);
+
+    gmt_tm->tm_year = 264100;
+    ret = p_asctime(gmt_tm);
+    ok(!strcmp(ret, "Wed Nov 28 02:58:41 :000\n"), "asctime returned %s\n", ret);
+
+    /* asctime works from year 1900 */
+    errno = 0xdeadbeef;
+    gmt_tm->tm_year = -1;
+    ret = p_asctime(gmt_tm);
+    ok(!ret || broken(!strcmp(ret, "Wed Nov 28 02:58:41 190/\n")), "asctime returned %s\n", ret);
+    ok(errno==EINVAL || broken(errno == 0xdeadbeef), "errno = %d\n", errno);
+
+    errno = 0xdeadbeef;
+    gmt_tm->tm_mon = 1;
+    gmt_tm->tm_mday = 30;
+    gmt_tm->tm_year = 79;
+    ret = p_asctime(gmt_tm);
+    ok(!ret || broken(!strcmp(ret, "Wed Feb 30 02:58:41 1979\n")), "asctime returned %s\n", ret);
+    ok(errno==EINVAL || broken(errno==0xdeadbeef), "errno = %d\n", errno);
 }
 
 START_TEST(time)
@@ -628,4 +794,5 @@ START_TEST(time)
     test_localtime32_s();
     test_localtime64_s();
     test_daylight();
+    test_asctime();
 }

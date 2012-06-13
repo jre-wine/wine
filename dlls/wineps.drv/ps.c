@@ -221,7 +221,7 @@ DWORD PSDRV_WriteSpool(PHYSDEV dev, LPCSTR lpData, DWORD cch)
 static INT PSDRV_WriteFeature(PHYSDEV dev, LPCSTR feature, LPCSTR value, LPCSTR invocation)
 {
 
-    char *buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psbeginfeature) +
+    char *buf = HeapAlloc( GetProcessHeap(), 0, sizeof(psbeginfeature) +
                            strlen(feature) + strlen(value));
 
     sprintf(buf, psbeginfeature, feature, value);
@@ -229,7 +229,7 @@ static INT PSDRV_WriteFeature(PHYSDEV dev, LPCSTR feature, LPCSTR value, LPCSTR 
     write_spool( dev, invocation, strlen(invocation) );
     write_spool( dev, psendfeature, strlen(psendfeature) );
 
-    HeapFree( PSDRV_Heap, 0, buf );
+    HeapFree( GetProcessHeap(), 0, buf );
     return 1;
 }
 
@@ -241,17 +241,22 @@ static INT PSDRV_WriteFeature(PHYSDEV dev, LPCSTR feature, LPCSTR value, LPCSTR 
  * in brackets.  Truncate string to represent at most 0x80 characters.
  *
  */
-static char *escape_title(LPCSTR str)
+static char *escape_title(LPCWSTR wstr)
 {
-    char *ret, *cp;
+    char *ret, *cp, *str;
     int i, extra = 0;
 
-    if(!str)
+    if(!wstr)
     {
         ret = HeapAlloc(GetProcessHeap(), 0, 1);
         *ret = '\0';
         return ret;
     }
+
+    i = WideCharToMultiByte( CP_ACP, 0, wstr, -1, NULL, 0, NULL, NULL );
+    str = HeapAlloc( GetProcessHeap(), 0, i );
+    if (!str) return NULL;
+    WideCharToMultiByte( CP_ACP, 0, wstr, -1, str, i, NULL, NULL );
 
     for(i = 0; i < 0x80 && str[i]; i++)
     {
@@ -264,7 +269,7 @@ static char *escape_title(LPCSTR str)
         ret = HeapAlloc(GetProcessHeap(), 0, i + 1);
         memcpy(ret, str, i);
         ret[i] = '\0';
-        return ret;
+        goto done;
     }
 
     extra += 2; /* two for the brackets */
@@ -285,11 +290,14 @@ static char *escape_title(LPCSTR str)
     }
     *cp++ = ')';
     *cp = '\0';
+
+done:
+    HeapFree( GetProcessHeap(), 0, str );
     return ret;
 }
 
 
-INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
+INT PSDRV_WriteHeader( PHYSDEV dev, LPCWSTR title )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf, *escaped_title;
@@ -298,11 +306,12 @@ INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
     DUPLEX *duplex;
     int win_duplex;
     int llx, lly, urx, ury;
+    int ret, len;
 
-    TRACE("%s\n", debugstr_a(title));
+    TRACE("%s\n", debugstr_w(title));
 
     escaped_title = escape_title(title);
-    buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psheader) +
+    buf = HeapAlloc( GetProcessHeap(), 0, sizeof(psheader) +
                      strlen(escaped_title) + 30 );
     if(!buf) {
         WARN("HeapAlloc failed\n");
@@ -320,12 +329,15 @@ INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
     sprintf(buf, psheader, escaped_title, llx, lly, urx, ury);
 
     HeapFree(GetProcessHeap(), 0, escaped_title);
-    if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
+
+    len = strlen( buf );
+    ret = write_spool( dev, buf, len );
+    HeapFree( GetProcessHeap(), 0, buf );
+    if (ret != len)
+    {
         WARN("WriteSpool error\n");
-	HeapFree( PSDRV_Heap, 0, buf );
-	return 0;
+        return 0;
     }
-    HeapFree( PSDRV_Heap, 0, buf );
 
     write_spool( dev, psbeginprolog, strlen(psbeginprolog) );
     write_spool( dev, psprolog, strlen(psprolog) );
@@ -338,7 +350,7 @@ INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
         write_spool(dev, copies_buf, strlen(copies_buf));
     }
 
-    for(slot = physDev->pi->ppd->InputSlots; slot; slot = slot->next) {
+    LIST_FOR_EACH_ENTRY( slot, &physDev->pi->ppd->InputSlots, INPUTSLOT, entry ) {
         if(slot->WinBin == physDev->Devmode->dmPublic.u1.s1.dmDefaultSource) {
 	    if(slot->InvocationString) {
 	        PSDRV_WriteFeature(dev, "*InputSlot", slot->Name,
@@ -360,7 +372,8 @@ INT PSDRV_WriteHeader( PHYSDEV dev, LPCSTR title )
 
     win_duplex = physDev->Devmode->dmPublic.dmFields & DM_DUPLEX ?
         physDev->Devmode->dmPublic.dmDuplex : 0;
-    for(duplex = physDev->pi->ppd->Duplexes; duplex; duplex = duplex->next) {
+    LIST_FOR_EACH_ENTRY( duplex, &physDev->pi->ppd->Duplexes, DUPLEX, entry )
+    {
         if(duplex->WinDuplex == win_duplex) {
 	    if(duplex->InvocationString) {
 	        PSDRV_WriteFeature(dev, "*Duplex", duplex->Name,
@@ -381,8 +394,9 @@ INT PSDRV_WriteFooter( PHYSDEV dev )
 {
     PSDRV_PDEVICE *physDev = get_psdrv_dev( dev );
     char *buf;
+    int ret = 1;
 
-    buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psfooter) + 100 );
+    buf = HeapAlloc( GetProcessHeap(), 0, sizeof(psfooter) + 100 );
     if(!buf) {
         WARN("HeapAlloc failed\n");
         return 0;
@@ -392,11 +406,10 @@ INT PSDRV_WriteFooter( PHYSDEV dev )
 
     if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
-	HeapFree( PSDRV_Heap, 0, buf );
-	return 0;
+        ret = 0;
     }
-    HeapFree( PSDRV_Heap, 0, buf );
-    return 1;
+    HeapFree( GetProcessHeap(), 0, buf );
+    return ret;
 }
 
 
@@ -419,10 +432,11 @@ INT PSDRV_WriteNewPage( PHYSDEV dev )
     char *buf;
     char name[100];
     signed int xtrans, ytrans, rotation;
+    int ret = 1;
 
     sprintf(name, "%d", physDev->job.PageNo);
 
-    buf = HeapAlloc( PSDRV_Heap, 0, sizeof(psnewpage) + 200 );
+    buf = HeapAlloc( GetProcessHeap(), 0, sizeof(psnewpage) + 200 );
     if(!buf) {
         WARN("HeapAlloc failed\n");
         return 0;
@@ -450,11 +464,10 @@ INT PSDRV_WriteNewPage( PHYSDEV dev )
 
     if( write_spool( dev, buf, strlen(buf) ) != strlen(buf) ) {
         WARN("WriteSpool error\n");
-	HeapFree( PSDRV_Heap, 0, buf );
-	return 0;
+        ret = 0;
     }
-    HeapFree( PSDRV_Heap, 0, buf );
-    return 1;
+    HeapFree( GetProcessHeap(), 0, buf );
+    return ret;
 }
 
 
@@ -517,8 +530,7 @@ BOOL PSDRV_WriteSetFont(PHYSDEV dev, const char *name, matrix size, INT escapeme
 {
     char *buf;
 
-    buf = HeapAlloc( PSDRV_Heap, 0, sizeof(pssetfont) +
-			     strlen(name) + 40);
+    buf = HeapAlloc( GetProcessHeap(), 0, sizeof(pssetfont) + strlen(name) + 40 );
 
     if(!buf) {
         WARN("HeapAlloc failed\n");
@@ -528,7 +540,7 @@ BOOL PSDRV_WriteSetFont(PHYSDEV dev, const char *name, matrix size, INT escapeme
     sprintf(buf, pssetfont, name, size.xx, size.xy, size.yx, size.yy, -escapement);
 
     PSDRV_WriteSpool(dev, buf, strlen(buf));
-    HeapFree(PSDRV_Heap, 0, buf);
+    HeapFree( GetProcessHeap(), 0, buf );
     return TRUE;
 }
 
@@ -670,7 +682,7 @@ BOOL PSDRV_WriteIndexColorSpaceEnd(PHYSDEV dev)
 
 static BOOL PSDRV_WriteRGB(PHYSDEV dev, COLORREF *map, int number)
 {
-    char *buf = HeapAlloc(PSDRV_Heap, 0, number * 7 + 1), *ptr;
+    char *buf = HeapAlloc( GetProcessHeap(), 0, number * 7 + 1 ), *ptr;
     int i;
 
     ptr = buf;
@@ -681,13 +693,13 @@ static BOOL PSDRV_WriteRGB(PHYSDEV dev, COLORREF *map, int number)
 	ptr += 7;
     }
     PSDRV_WriteSpool(dev, buf, number * 7);
-    HeapFree(PSDRV_Heap, 0, buf);
+    HeapFree( GetProcessHeap(), 0, buf );
     return TRUE;
 }
 
 BOOL PSDRV_WriteRGBQUAD(PHYSDEV dev, const RGBQUAD *rgb, int number)
 {
-    char *buf = HeapAlloc(PSDRV_Heap, 0, number * 7 + 1), *ptr;
+    char *buf = HeapAlloc( GetProcessHeap(), 0, number * 7 + 1 ), *ptr;
     int i;
 
     ptr = buf;
@@ -696,7 +708,7 @@ BOOL PSDRV_WriteRGBQUAD(PHYSDEV dev, const RGBQUAD *rgb, int number)
                        ((i & 0x7) == 0x7) || (i == number - 1) ? '\n' : ' ');
 
     PSDRV_WriteSpool(dev, buf, ptr - buf);
-    HeapFree(PSDRV_Heap, 0, buf);
+    HeapFree( GetProcessHeap(), 0, buf );
     return TRUE;
 }
 
@@ -712,8 +724,7 @@ static BOOL PSDRV_WriteImageDict(PHYSDEV dev, WORD depth,
 
     static const char end[] = " /DataSource currentfile /ASCII85Decode filter /RunLengthDecode filter\n>>\n";
     static const char endbits[] = " /DataSource <%s>\n>>\n";
-
-    char *buf = HeapAlloc(PSDRV_Heap, 0, 1000);
+    char buf[1000];
 
     if (top_down)
         sprintf(buf, start, widthSrc, heightSrc,
@@ -751,7 +762,6 @@ static BOOL PSDRV_WriteImageDict(PHYSDEV dev, WORD depth,
         PSDRV_WriteSpool(dev, buf, strlen(buf));
     }
 
-    HeapFree(PSDRV_Heap, 0, buf);
     return TRUE;
 }
 
@@ -777,7 +787,7 @@ BOOL PSDRV_WriteImage(PHYSDEV dev, WORD depth, INT xDst, INT yDst,
 
 BOOL PSDRV_WriteBytes(PHYSDEV dev, const BYTE *bytes, DWORD number)
 {
-    char *buf = HeapAlloc(PSDRV_Heap, 0, number * 3 + 1);
+    char *buf = HeapAlloc( GetProcessHeap(), 0, number * 3 + 1 );
     char *ptr;
     unsigned int i;
 
@@ -792,7 +802,7 @@ BOOL PSDRV_WriteBytes(PHYSDEV dev, const BYTE *bytes, DWORD number)
         }
     }
     PSDRV_WriteSpool(dev, buf, ptr - buf);
-    HeapFree(PSDRV_Heap, 0, buf);
+    HeapFree( GetProcessHeap(), 0, buf );
     return TRUE;
 }
 
@@ -865,7 +875,7 @@ BOOL PSDRV_WriteDIBPatternDict(PHYSDEV dev, const BITMAPINFO *bmi, BYTE *bits, U
     w = bmi->bmiHeader.biWidth & ~0x7;
     h = bmi->bmiHeader.biHeight & ~0x7;
 
-    buf = HeapAlloc(PSDRV_Heap, 0, sizeof(do_pattern) + 100);
+    buf = HeapAlloc( GetProcessHeap(), 0, sizeof(do_pattern) + 100 );
     ptr = buf;
     for(y = h-1; y >= 0; y--) {
         for(x = 0; x < w/8; x++) {
@@ -889,6 +899,6 @@ BOOL PSDRV_WriteDIBPatternDict(PHYSDEV dev, const BITMAPINFO *bmi, BYTE *bits, U
     h_mult = (physDev->logPixelsY + 150) / 300;
     sprintf(buf, do_pattern, w * w_mult, h * h_mult, w * w_mult, h * h_mult, w * w_mult, h * h_mult);
     PSDRV_WriteSpool(dev,  buf, strlen(buf));
-    HeapFree(PSDRV_Heap, 0, buf);
+    HeapFree( GetProcessHeap(), 0, buf );
     return TRUE;
 }

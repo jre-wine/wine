@@ -336,7 +336,6 @@ INT nulldrv_SaveDC( PHYSDEV dev )
     DC *newdc, *dc = get_nulldrv_dc( dev );
 
     if (!(newdc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*newdc )))) return 0;
-    newdc->flags            = dc->flags;
     newdc->layout           = dc->layout;
     newdc->hPen             = dc->hPen;
     newdc->hBrush           = dc->hBrush;
@@ -379,7 +378,6 @@ INT nulldrv_SaveDC( PHYSDEV dev )
     newdc->vportExtY        = dc->vportExtY;
     newdc->virtual_res      = dc->virtual_res;
     newdc->virtual_size     = dc->virtual_size;
-    newdc->BoundsRect       = dc->BoundsRect;
     newdc->gdiFont          = dc->gdiFont;
 
     /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
@@ -428,7 +426,6 @@ BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level )
 
     if (!PATH_RestorePath( dc, dcs )) return FALSE;
 
-    dc->flags            = dcs->flags;
     dc->layout           = dcs->layout;
     dc->hDevice          = dcs->hDevice;
     dc->ROPmode          = dcs->ROPmode;
@@ -456,8 +453,6 @@ BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     dc->xformWorld2Vport = dcs->xformWorld2Vport;
     dc->xformVport2World = dcs->xformVport2World;
     dc->vport2WorldValid = dcs->vport2WorldValid;
-    dc->BoundsRect       = dcs->BoundsRect;
-
     dc->wndOrgX          = dcs->wndOrgX;
     dc->wndOrgY          = dcs->wndOrgY;
     dc->wndExtX          = dcs->wndExtX;
@@ -1323,6 +1318,10 @@ UINT WINAPI GetBoundsRect(HDC hdc, LPRECT rect, UINT flags)
     {
         *rect = dc->BoundsRect;
         ret = is_rect_empty( rect ) ? DCB_RESET : DCB_SET;
+        rect->left = max( rect->left, 0 );
+        rect->top = max( rect->top, 0 );
+        rect->right = min( rect->right, dc->vis_rect.right - dc->vis_rect.left );
+        rect->bottom = min( rect->bottom, dc->vis_rect.bottom - dc->vis_rect.top );
         DPtoLP( hdc, (POINT *)rect, 2 );
     }
     if (flags & DCB_RESET)
@@ -1348,7 +1347,7 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
     if ((flags & DCB_ENABLE) && (flags & DCB_DISABLE)) return 0;
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    ret = ((dc->flags & DC_BOUNDS_ENABLE) ? DCB_ENABLE : DCB_DISABLE) |
+    ret = (dc->bounds_enabled ? DCB_ENABLE : DCB_DISABLE) |
            (is_rect_empty( &dc->BoundsRect ) ? DCB_RESET : DCB_SET);
 
     if (flags & DCB_RESET)
@@ -1377,8 +1376,8 @@ UINT WINAPI SetBoundsRect(HDC hdc, const RECT* rect, UINT flags)
         }
     }
 
-    if (flags & DCB_ENABLE) dc->flags |= DC_BOUNDS_ENABLE;
-    if (flags & DCB_DISABLE) dc->flags &= ~DC_BOUNDS_ENABLE;
+    if (flags & DCB_ENABLE) dc->bounds_enabled = TRUE;
+    if (flags & DCB_DISABLE) dc->bounds_enabled = FALSE;
 
     release_dc_ptr( dc );
     return ret;
