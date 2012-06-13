@@ -23,6 +23,7 @@
 #include "d3dx9_36_private.h"
 
 #include "initguid.h"
+#include "ole2.h"
 #include "wincodec.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
@@ -766,15 +767,9 @@ HRESULT WINAPI D3DXGetImageInfoFromResourceW(HMODULE module, LPCWSTR resource, D
  *            D3DXERR_INVALIDDATA, if pSrcData is no valid image file
  *
  */
-HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(LPDIRECT3DSURFACE9 pDestSurface,
-                                               CONST PALETTEENTRY *pDestPalette,
-                                               CONST RECT *pDestRect,
-                                               LPCVOID pSrcData,
-                                               UINT SrcDataSize,
-                                               CONST RECT *pSrcRect,
-                                               DWORD dwFilter,
-                                               D3DCOLOR Colorkey,
-                                               D3DXIMAGE_INFO *pSrcInfo)
+HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(IDirect3DSurface9 *pDestSurface,
+        const PALETTEENTRY *pDestPalette, const RECT *pDestRect, const void *pSrcData, UINT SrcDataSize,
+        const RECT *pSrcRect, DWORD dwFilter, D3DCOLOR Colorkey, D3DXIMAGE_INFO *pSrcInfo)
 {
     D3DXIMAGE_INFO imginfo;
     HRESULT hr;
@@ -788,8 +783,10 @@ HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(LPDIRECT3DSURFACE9 pDestSurface,
     WICRect wicrect;
     RECT rect;
 
-    TRACE("(%p, %p, %p, %p, %d, %p, %d, %x, %p)\n", pDestSurface, pDestPalette, pDestRect, pSrcData,
-        SrcDataSize, pSrcRect, dwFilter, Colorkey, pSrcInfo);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_data %p, src_data_size %u, "
+            "src_rect %s, filter %#x, color_key 0x%08x, src_info %p.\n",
+            pDestSurface, pDestPalette, wine_dbgstr_rect(pDestRect), pSrcData, SrcDataSize,
+            wine_dbgstr_rect(pSrcRect), dwFilter, Colorkey, pSrcInfo);
 
     if (!pDestSurface || !pSrcData || !SrcDataSize)
         return D3DERR_INVALIDCALL;
@@ -896,136 +893,126 @@ cleanup_err:
     return D3D_OK;
 }
 
-/************************************************************
- * D3DXLoadSurfaceFromFile
- */
-HRESULT WINAPI D3DXLoadSurfaceFromFileA(LPDIRECT3DSURFACE9 pDestSurface,
-                                        CONST PALETTEENTRY *pDestPalette,
-                                        CONST RECT *pDestRect,
-                                        LPCSTR pSrcFile,
-                                        CONST RECT *pSrcRect,
-                                        DWORD dwFilter,
-                                        D3DCOLOR Colorkey,
-                                        D3DXIMAGE_INFO *pSrcInfo)
+HRESULT WINAPI D3DXLoadSurfaceFromFileA(IDirect3DSurface9 *dst_surface,
+        const PALETTEENTRY *dst_palette, const RECT *dst_rect, const char *src_file,
+        const RECT *src_rect, DWORD filter, D3DCOLOR color_key, D3DXIMAGE_INFO *src_info)
 {
     LPWSTR pWidename;
     HRESULT hr;
     int strlength;
 
-    TRACE("(%p, %p, %p, %s, %p, %u, %#x, %p): relay\n", pDestSurface, pDestPalette, pDestRect, debugstr_a(pSrcFile),
-        pSrcRect, dwFilter, Colorkey, pSrcInfo);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_file %s, "
+            "src_rect %s, filter %#x, color_key 0x%08x, src_info %p.\n",
+            dst_surface, dst_palette, wine_dbgstr_rect(dst_rect), debugstr_a(src_file),
+            wine_dbgstr_rect(src_rect), filter, color_key, src_info);
 
-    if( !pSrcFile || !pDestSurface ) return D3DERR_INVALIDCALL;
+    if (!src_file || !dst_surface)
+        return D3DERR_INVALIDCALL;
 
-    strlength = MultiByteToWideChar(CP_ACP, 0, pSrcFile, -1, NULL, 0);
+    strlength = MultiByteToWideChar(CP_ACP, 0, src_file, -1, NULL, 0);
     pWidename = HeapAlloc(GetProcessHeap(), 0, strlength * sizeof(*pWidename));
-    MultiByteToWideChar(CP_ACP, 0, pSrcFile, -1, pWidename, strlength);
+    MultiByteToWideChar(CP_ACP, 0, src_file, -1, pWidename, strlength);
 
-    hr = D3DXLoadSurfaceFromFileW(pDestSurface, pDestPalette, pDestRect, pWidename, pSrcRect, dwFilter, Colorkey, pSrcInfo);
+    hr = D3DXLoadSurfaceFromFileW(dst_surface, dst_palette, dst_rect,
+            pWidename, src_rect, filter, color_key, src_info);
     HeapFree(GetProcessHeap(), 0, pWidename);
 
     return hr;
 }
 
-HRESULT WINAPI D3DXLoadSurfaceFromFileW(LPDIRECT3DSURFACE9 pDestSurface,
-                                        CONST PALETTEENTRY *pDestPalette,
-                                        CONST RECT *pDestRect,
-                                        LPCWSTR pSrcFile,
-                                        CONST RECT *pSrcRect,
-                                        DWORD Filter,
-                                        D3DCOLOR Colorkey,
-                                        D3DXIMAGE_INFO *pSrcInfo)
+HRESULT WINAPI D3DXLoadSurfaceFromFileW(IDirect3DSurface9 *dst_surface,
+        const PALETTEENTRY *dst_palette, const RECT *dst_rect, const WCHAR *src_file,
+        const RECT *src_rect, DWORD filter, D3DCOLOR color_key, D3DXIMAGE_INFO *src_info)
 {
+    UINT data_size;
+    void *data;
     HRESULT hr;
-    DWORD dwSize;
-    LPVOID pBuffer;
 
-    TRACE("(%p, %p, %p, %s, %p, %u, %#x, %p): relay\n", pDestSurface, pDestPalette, pDestRect, debugstr_w(pSrcFile),
-        pSrcRect, Filter, Colorkey, pSrcInfo);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_file %s, "
+            "src_rect %s, filter %#x, color_key 0x%08x, src_info %p.\n",
+            dst_surface, dst_palette, wine_dbgstr_rect(dst_rect), debugstr_w(src_file),
+            wine_dbgstr_rect(src_rect), filter, color_key, src_info);
 
-    if( !pSrcFile || !pDestSurface ) return D3DERR_INVALIDCALL;
+    if (!src_file || !dst_surface)
+        return D3DERR_INVALIDCALL;
 
-    hr = map_view_of_file(pSrcFile, &pBuffer, &dwSize);
-    if(FAILED(hr)) return D3DXERR_INVALIDDATA;
+    if (FAILED(map_view_of_file(src_file, &data, &data_size)))
+        return D3DXERR_INVALIDDATA;
 
-    hr = D3DXLoadSurfaceFromFileInMemory(pDestSurface, pDestPalette, pDestRect, pBuffer, dwSize, pSrcRect, Filter, Colorkey, pSrcInfo);
-    UnmapViewOfFile(pBuffer);
+    hr = D3DXLoadSurfaceFromFileInMemory(dst_surface, dst_palette, dst_rect,
+            data, data_size, src_rect, filter, color_key, src_info);
+    UnmapViewOfFile(data);
 
     return hr;
 }
 
-/************************************************************
- * D3DXLoadSurfaceFromResource
- */
-HRESULT WINAPI D3DXLoadSurfaceFromResourceA(LPDIRECT3DSURFACE9 pDestSurface,
-                                            CONST PALETTEENTRY *pDestPalette,
-                                            CONST RECT *pDestRect,
-                                            HMODULE hSrcModule,
-                                            LPCSTR pResource,
-                                            CONST RECT *pSrcRect,
-                                            DWORD dwFilter,
-                                            D3DCOLOR Colorkey,
-                                            D3DXIMAGE_INFO *pSrcInfo)
+HRESULT WINAPI D3DXLoadSurfaceFromResourceA(IDirect3DSurface9 *dst_surface,
+        const PALETTEENTRY *dst_palette, const RECT *dst_rect, HMODULE src_module, const char *resource,
+        const RECT *src_rect, DWORD filter, D3DCOLOR color_key, D3DXIMAGE_INFO *src_info)
 {
     HRSRC hResInfo;
 
-    TRACE("(%p, %p, %p, %p, %s, %p, %u, %#x, %p): relay\n", pDestSurface, pDestPalette, pDestRect, hSrcModule,
-        debugstr_a(pResource), pSrcRect, dwFilter, Colorkey, pSrcInfo);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_module %p, resource %s, "
+            "src_rect %s, filter %#x, color_key 0x%08x, src_info %p.\n",
+            dst_surface, dst_palette, wine_dbgstr_rect(dst_rect), src_module, debugstr_a(resource),
+            wine_dbgstr_rect(src_rect), filter, color_key, src_info);
 
-    if( !pDestSurface ) return D3DERR_INVALIDCALL;
+    if (!dst_surface)
+        return D3DERR_INVALIDCALL;
 
-    hResInfo = FindResourceA(hSrcModule, pResource, (LPCSTR)RT_RCDATA);
-    if(hResInfo) {
-        LPVOID pBuffer;
-        HRESULT hr;
-        DWORD dwSize;
+    if ((hResInfo = FindResourceA(src_module, resource, (const char *)RT_RCDATA)))
+    {
+        UINT data_size;
+        void *data;
 
-        hr = load_resource_into_memory(hSrcModule, hResInfo, &pBuffer, &dwSize);
-        if(FAILED(hr)) return D3DXERR_INVALIDDATA;
-        return D3DXLoadSurfaceFromFileInMemory(pDestSurface, pDestPalette, pDestRect, pBuffer, dwSize, pSrcRect, dwFilter, Colorkey, pSrcInfo);
+        if (FAILED(load_resource_into_memory(src_module, hResInfo, &data, &data_size)))
+            return D3DXERR_INVALIDDATA;
+
+        return D3DXLoadSurfaceFromFileInMemory(dst_surface, dst_palette, dst_rect,
+                data, data_size, src_rect, filter, color_key, src_info);
     }
 
-    hResInfo = FindResourceA(hSrcModule, pResource, (LPCSTR)RT_BITMAP);
-    if(hResInfo) {
-        FIXME("Implement loading bitmaps from resource type RT_BITMAP\n");
+    if ((hResInfo = FindResourceA(src_module, resource, (const char *)RT_BITMAP)))
+    {
+        FIXME("Implement loading bitmaps from resource type RT_BITMAP.\n");
         return E_NOTIMPL;
     }
+
     return D3DXERR_INVALIDDATA;
 }
 
-HRESULT WINAPI D3DXLoadSurfaceFromResourceW(LPDIRECT3DSURFACE9 pDestSurface,
-                                            CONST PALETTEENTRY *pDestPalette,
-                                            CONST RECT *pDestRect,
-                                            HMODULE hSrcModule,
-                                            LPCWSTR pResource,
-                                            CONST RECT *pSrcRect,
-                                            DWORD dwFilter,
-                                            D3DCOLOR Colorkey,
-                                            D3DXIMAGE_INFO *pSrcInfo)
+HRESULT WINAPI D3DXLoadSurfaceFromResourceW(IDirect3DSurface9 *dst_surface,
+        const PALETTEENTRY *dst_palette, const RECT *dst_rect, HMODULE src_module, const WCHAR *resource,
+        const RECT *src_rect, DWORD filter, D3DCOLOR color_key, D3DXIMAGE_INFO *src_info)
 {
     HRSRC hResInfo;
 
-    TRACE("(%p, %p, %p, %p, %s, %p, %u, %#x, %p): relay\n", pDestSurface, pDestPalette, pDestRect, hSrcModule,
-        debugstr_w(pResource), pSrcRect, dwFilter, Colorkey, pSrcInfo);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_module %p, resource %s, "
+            "src_rect %s, filter %#x, color_key 0x%08x, src_info %p.\n",
+            dst_surface, dst_palette, wine_dbgstr_rect(dst_rect), src_module, debugstr_w(resource),
+            wine_dbgstr_rect(src_rect), filter, color_key, src_info);
 
-    if( !pDestSurface ) return D3DERR_INVALIDCALL;
+    if (!dst_surface)
+        return D3DERR_INVALIDCALL;
 
-    hResInfo = FindResourceW(hSrcModule, pResource, (LPCWSTR)RT_RCDATA);
-    if(hResInfo) {
-        LPVOID pBuffer;
-        HRESULT hr;
-        DWORD dwSize;
+    if ((hResInfo = FindResourceW(src_module, resource, (const WCHAR *)RT_RCDATA)))
+    {
+        UINT data_size;
+        void *data;
 
-        hr = load_resource_into_memory(hSrcModule, hResInfo, &pBuffer, &dwSize);
-        if(FAILED(hr)) return D3DXERR_INVALIDDATA;
-        return D3DXLoadSurfaceFromFileInMemory(pDestSurface, pDestPalette, pDestRect, pBuffer, dwSize, pSrcRect, dwFilter, Colorkey, pSrcInfo);
+        if (FAILED(load_resource_into_memory(src_module, hResInfo, &data, &data_size)))
+            return D3DXERR_INVALIDDATA;
+
+        return D3DXLoadSurfaceFromFileInMemory(dst_surface, dst_palette, dst_rect,
+                data, data_size, src_rect, filter, color_key, src_info);
     }
 
-    hResInfo = FindResourceW(hSrcModule, pResource, (LPCWSTR)RT_BITMAP);
-    if(hResInfo) {
-        FIXME("Implement loading bitmaps from resource type RT_BITMAP\n");
+    if ((hResInfo = FindResourceW(src_module, resource, (const WCHAR *)RT_BITMAP)))
+    {
+        FIXME("Implement loading bitmaps from resource type RT_BITMAP.\n");
         return E_NOTIMPL;
     }
+
     return D3DXERR_INVALIDDATA;
 }
 
@@ -1542,38 +1529,38 @@ HRESULT WINAPI D3DXLoadSurfaceFromMemory(IDirect3DSurface9 *dst_surface,
  *            D3DXERR_INVALIDDATA, if one of the surfaces is not lockable
  *
  */
-HRESULT WINAPI D3DXLoadSurfaceFromSurface(LPDIRECT3DSURFACE9 pDestSurface,
-                                          CONST PALETTEENTRY *pDestPalette,
-                                          CONST RECT *pDestRect,
-                                          LPDIRECT3DSURFACE9 pSrcSurface,
-                                          CONST PALETTEENTRY *pSrcPalette,
-                                          CONST RECT *pSrcRect,
-                                          DWORD dwFilter,
-                                          D3DCOLOR Colorkey)
+HRESULT WINAPI D3DXLoadSurfaceFromSurface(IDirect3DSurface9 *dst_surface,
+        const PALETTEENTRY *dst_palette, const RECT *dst_rect, IDirect3DSurface9 *src_surface,
+        const PALETTEENTRY *src_palette, const RECT *src_rect, DWORD filter, D3DCOLOR color_key)
 {
     RECT rect;
     D3DLOCKED_RECT lock;
     D3DSURFACE_DESC SrcDesc;
     HRESULT hr;
 
-    TRACE("(%p, %p, %p, %p, %p, %p, %u, %#x): relay\n", pDestSurface, pDestPalette, pDestRect,
-        pSrcSurface, pSrcPalette, pSrcRect, dwFilter, Colorkey);
+    TRACE("dst_surface %p, dst_palette %p, dst_rect %s, src_surface %p, "
+            "src_palette %p, src_rect %s, filter %#x, color_key 0x%08x.\n",
+            dst_surface, dst_palette, wine_dbgstr_rect(dst_rect), src_surface,
+            src_palette, wine_dbgstr_rect(src_rect), filter, color_key);
 
-    if( !pDestSurface || !pSrcSurface ) return D3DERR_INVALIDCALL;
+    if (!dst_surface || !src_surface)
+        return D3DERR_INVALIDCALL;
 
-    IDirect3DSurface9_GetDesc(pSrcSurface, &SrcDesc);
+    IDirect3DSurface9_GetDesc(src_surface, &SrcDesc);
 
-    if( !pSrcRect ) SetRect(&rect, 0, 0, SrcDesc.Width, SrcDesc.Height);
-    else rect = *pSrcRect;
+    if (!src_rect)
+        SetRect(&rect, 0, 0, SrcDesc.Width, SrcDesc.Height);
+    else
+        rect = *src_rect;
 
-    hr = IDirect3DSurface9_LockRect(pSrcSurface, &lock, NULL, D3DLOCK_READONLY);
-    if(FAILED(hr)) return D3DXERR_INVALIDDATA;
+    if (FAILED(IDirect3DSurface9_LockRect(src_surface, &lock, NULL, D3DLOCK_READONLY)))
+        return D3DXERR_INVALIDDATA;
 
-    hr = D3DXLoadSurfaceFromMemory(pDestSurface, pDestPalette, pDestRect,
-                                   lock.pBits, SrcDesc.Format, lock.Pitch,
-                                   pSrcPalette, &rect, dwFilter, Colorkey);
+    hr = D3DXLoadSurfaceFromMemory(dst_surface, dst_palette, dst_rect,
+            lock.pBits, SrcDesc.Format, lock.Pitch, src_palette, &rect, filter, color_key);
 
-    IDirect3DSurface9_UnlockRect(pSrcSurface);
+    IDirect3DSurface9_UnlockRect(src_surface);
+
     return hr;
 }
 
@@ -1584,6 +1571,7 @@ HRESULT WINAPI D3DXSaveSurfaceToFileA(const char *dst_filename, D3DXIMAGE_FILEFO
     int len;
     WCHAR *filename;
     HRESULT hr;
+    ID3DXBuffer *buffer;
 
     TRACE("(%s, %#x, %p, %p, %s): relay\n",
             wine_dbgstr_a(dst_filename), file_format, src_surface, src_palette, wine_dbgstr_rect(src_rect));
@@ -1595,7 +1583,12 @@ HRESULT WINAPI D3DXSaveSurfaceToFileA(const char *dst_filename, D3DXIMAGE_FILEFO
     if (!filename) return E_OUTOFMEMORY;
     MultiByteToWideChar(CP_ACP, 0, dst_filename, -1, filename, len);
 
-    hr = D3DXSaveSurfaceToFileW(filename, file_format, src_surface, src_palette, src_rect);
+    hr = D3DXSaveSurfaceToFileInMemory(&buffer, file_format, src_surface, src_palette, src_rect);
+    if (SUCCEEDED(hr))
+    {
+        hr = write_buffer_to_file(filename, buffer);
+        ID3DXBuffer_Release(buffer);
+    }
 
     HeapFree(GetProcessHeap(), 0, filename);
     return hr;
@@ -1604,11 +1597,31 @@ HRESULT WINAPI D3DXSaveSurfaceToFileA(const char *dst_filename, D3DXIMAGE_FILEFO
 HRESULT WINAPI D3DXSaveSurfaceToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEFORMAT file_format,
         IDirect3DSurface9 *src_surface, const PALETTEENTRY *src_palette, const RECT *src_rect)
 {
-    IWICImagingFactory *factory;
+    HRESULT hr;
+    ID3DXBuffer *buffer;
+
+    TRACE("(%s, %#x, %p, %p, %s): relay\n",
+        wine_dbgstr_w(dst_filename), file_format, src_surface, src_palette, wine_dbgstr_rect(src_rect));
+
+    if (!dst_filename) return D3DERR_INVALIDCALL;
+
+    hr = D3DXSaveSurfaceToFileInMemory(&buffer, file_format, src_surface, src_palette, src_rect);
+    if (SUCCEEDED(hr))
+    {
+        hr = write_buffer_to_file(dst_filename, buffer);
+        ID3DXBuffer_Release(buffer);
+    }
+
+    return hr;
+}
+
+HRESULT WINAPI D3DXSaveSurfaceToFileInMemory(ID3DXBuffer **dst_buffer, D3DXIMAGE_FILEFORMAT file_format,
+        IDirect3DSurface9 *src_surface, const PALETTEENTRY *src_palette, const RECT *src_rect)
+{
     IWICBitmapEncoder *encoder = NULL;
     IWICBitmapFrameEncode *frame = NULL;
     IPropertyBag2 *encoder_options = NULL;
-    IWICStream *stream = NULL;
+    IStream *stream = NULL;
     HRESULT hr;
     HRESULT initresult;
     const CLSID *encoder_clsid;
@@ -1618,11 +1631,15 @@ HRESULT WINAPI D3DXSaveSurfaceToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEF
     D3DSURFACE_DESC src_surface_desc;
     D3DLOCKED_RECT locked_rect;
     int width, height;
+    STATSTG stream_stats;
+    HGLOBAL stream_hglobal;
+    ID3DXBuffer *buffer;
+    DWORD size;
 
-    TRACE("(%s, %#x, %p, %p, %s)\n",
-        wine_dbgstr_w(dst_filename), file_format, src_surface, src_palette, wine_dbgstr_rect(src_rect));
+    TRACE("(%p, %#x, %p, %p, %s)\n",
+        dst_buffer, file_format, src_surface, src_palette, wine_dbgstr_rect(src_rect));
 
-    if (!dst_filename || !src_surface) return D3DERR_INVALIDCALL;
+    if (!dst_buffer || !src_surface) return D3DERR_INVALIDCALL;
 
     if (src_palette)
     {
@@ -1657,7 +1674,10 @@ HRESULT WINAPI D3DXSaveSurfaceToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEF
     if (src_rect)
     {
         if (src_rect->left == src_rect->right || src_rect->top == src_rect->bottom)
-            return D3D_OK;
+        {
+            WARN("Invalid rectangle with 0 area\n");
+            return D3DXCreateBuffer(64, dst_buffer);
+        }
         if (src_rect->left < 0 || src_rect->top < 0)
             return D3DERR_INVALIDCALL;
         if (src_rect->left > src_rect->right || src_rect->top > src_rect->bottom)
@@ -1676,24 +1696,14 @@ HRESULT WINAPI D3DXSaveSurfaceToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEF
 
     initresult = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
-    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-        &IID_IWICImagingFactory, (void **)&factory);
-    if (FAILED(hr)) goto cleanup_err;
-
-    hr = IWICImagingFactory_CreateStream(factory, &stream);
-    IWICImagingFactory_Release(factory);
-    if (FAILED(hr)) goto cleanup_err;
-
-    hr = IWICStream_InitializeFromFilename(stream, dst_filename, GENERIC_WRITE);
-    if (FAILED(hr)) goto cleanup_err;
-
     hr = CoCreateInstance(encoder_clsid, NULL, CLSCTX_INPROC_SERVER,
         &IID_IWICBitmapEncoder, (void **)&encoder);
     if (FAILED(hr)) goto cleanup_err;
 
-    hr = IWICBitmapEncoder_Initialize(encoder, (IStream *)stream, WICBitmapEncoderNoCache);
-    IStream_Release((IStream *)stream);
-    stream = NULL;
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    if (FAILED(hr)) goto cleanup_err;
+
+    hr = IWICBitmapEncoder_Initialize(encoder, stream, WICBitmapEncoderNoCache);
     if (FAILED(hr)) goto cleanup_err;
 
     hr = IWICBitmapEncoder_CreateNewFrame(encoder, &frame, &encoder_options);
@@ -1783,11 +1793,37 @@ HRESULT WINAPI D3DXSaveSurfaceToFileW(const WCHAR *dst_filename, D3DXIMAGE_FILEF
     }
     else WARN("Unsupported pixel format %#x\n", src_surface_desc.Format);
 
+    /* copy data from stream to ID3DXBuffer */
+    hr = IStream_Stat(stream, &stream_stats, STATFLAG_NONAME);
+    if (FAILED(hr)) goto cleanup_err;
+
+    if (stream_stats.cbSize.u.HighPart != 0)
+    {
+        hr = D3DXERR_INVALIDDATA;
+        goto cleanup;
+    }
+    size = stream_stats.cbSize.u.LowPart;
+
+    hr = D3DXCreateBuffer(size, &buffer);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = GetHGlobalFromStream(stream, &stream_hglobal);
+    if (SUCCEEDED(hr))
+    {
+        void *buffer_pointer = ID3DXBuffer_GetBufferPointer(buffer);
+        void *stream_data = GlobalLock(stream_hglobal);
+        memcpy(buffer_pointer, stream_data, size);
+        GlobalUnlock(stream_hglobal);
+        *dst_buffer = buffer;
+    }
+    else ID3DXBuffer_Release(buffer);
+
 cleanup_err:
-    if (FAILED(hr)) hr = D3DERR_INVALIDCALL;
+    if (FAILED(hr) && hr != E_OUTOFMEMORY)
+        hr = D3DERR_INVALIDCALL;
 
 cleanup:
-    if (stream) IStream_Release((IStream *)stream);
+    if (stream) IStream_Release(stream);
 
     if (frame) IWICBitmapFrameEncode_Release(frame);
     if (encoder_options) IPropertyBag2_Release(encoder_options);

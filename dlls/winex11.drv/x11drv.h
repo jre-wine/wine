@@ -60,7 +60,6 @@ typedef int Status;
 #include "wine/gdi_driver.h"
 #include "wine/list.h"
 
-#define MAX_PIXELFORMATS 8
 #define MAX_DASHLEN 16
 
 #define WINE_XDND_VERSION 4
@@ -103,17 +102,6 @@ typedef struct
     ChannelShift logicalRed, logicalGreen, logicalBlue;
 } ColorShifts;
 
-  /* X physical bitmap */
-typedef struct
-{
-    HBITMAP      hbitmap;
-    Pixmap       pixmap;
-    int          depth;             /* depth of the X pixmap */
-    int          format;            /* color format (used by XRender) */
-    ColorShifts  color_shifts;      /* color shifts of the X pixmap */
-    BOOL         trueColor;
-} X_PHYSBITMAP;
-
 enum dc_gl_type
 {
     DC_GL_NONE,       /* no GL support (pixel format not set yet) */
@@ -136,7 +124,6 @@ typedef struct
     HRGN          region;        /* Device region (visible region & clip region) */
     X_PHYSPEN     pen;
     X_PHYSBRUSH   brush;
-    X_PHYSBITMAP *bitmap;       /* currently selected bitmap for memory DCs */
     int           depth;       /* bit depth of the DC */
     ColorShifts  *color_shifts; /* color shifts of the DC */
     int           exposures;   /* count of graphics exposures operations */
@@ -162,25 +149,18 @@ static inline void add_bounds_rect( RECT *bounds, const RECT *rect )
     bounds->bottom = max( bounds->bottom, rect->bottom );
 }
 
-extern X_PHYSBITMAP BITMAP_stock_phys_bitmap DECLSPEC_HIDDEN;  /* phys bitmap for the default stock bitmap */
-
-/* Retrieve the GC used for bitmap operations */
-extern GC get_bitmap_gc(int depth) DECLSPEC_HIDDEN;
-
 /* Wine driver X11 functions */
 
 extern BOOL X11DRV_Arc( PHYSDEV dev, INT left, INT top, INT right,
                         INT bottom, INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                           INT xstart, INT ystart, INT xend, INT yend ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_CreateBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_DeleteBitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_Ellipse( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern INT X11DRV_EnumICMProfiles( PHYSDEV dev, ICMENUMPROCW proc, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillType ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_GetICMProfile( PHYSDEV dev, LPDWORD size, LPWSTR filename ) DECLSPEC_HIDDEN;
-extern DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
+extern DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
                               struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern UINT X11DRV_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, LPPALETTEENTRY entries ) DECLSPEC_HIDDEN;
@@ -194,7 +174,7 @@ extern BOOL X11DRV_Pie( PHYSDEV dev, INT left, INT top, INT right,
 extern BOOL X11DRV_Polygon( PHYSDEV dev, const POINT* pt, INT count ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_PolyPolygon( PHYSDEV dev, const POINT* pt, const INT* counts, UINT polygons) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_PolyPolyline( PHYSDEV dev, const POINT* pt, const DWORD* counts, DWORD polylines) DECLSPEC_HIDDEN;
-extern DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+extern DWORD X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
                               const struct gdi_image_bits *bits, struct bitblt_coords *src,
                               struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
 extern UINT X11DRV_RealizeDefaultPalette( PHYSDEV dev ) DECLSPEC_HIDDEN;
@@ -202,7 +182,6 @@ extern UINT X11DRV_RealizePalette( PHYSDEV dev, HPALETTE hpal, BOOL primary ) DE
 extern BOOL X11DRV_Rectangle(PHYSDEV dev, INT left, INT top, INT right, INT bottom) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                               INT ell_width, INT ell_height ) DECLSPEC_HIDDEN;
-extern HBITMAP X11DRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern HPEN X11DRV_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_SetDCBrushColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_HIDDEN;
@@ -217,13 +196,8 @@ extern BOOL X11DRV_UnrealizePalette( HPALETTE hpal ) DECLSPEC_HIDDEN;
 /* X11 driver internal functions */
 
 extern void X11DRV_Xcursor_Init(void) DECLSPEC_HIDDEN;
-extern void X11DRV_BITMAP_Init(void) DECLSPEC_HIDDEN;
 extern void X11DRV_XInput2_Init(void) DECLSPEC_HIDDEN;
 
-extern X_PHYSBITMAP *X11DRV_get_phys_bitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
-extern X_PHYSBITMAP *X11DRV_init_phys_bitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
-extern X_PHYSBITMAP *X11DRV_create_phys_bitmap( HBITMAP hbitmap, const BITMAP *bitmap, int depth ) DECLSPEC_HIDDEN;
-extern Pixmap X11DRV_get_pixmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
                               const struct gdi_image_bits *src_bits, struct gdi_image_bits *dst_bits,
                               struct bitblt_coords *coords, const int *mapping, unsigned int zeropad_mask ) DECLSPEC_HIDDEN;

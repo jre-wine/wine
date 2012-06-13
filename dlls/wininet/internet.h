@@ -269,11 +269,9 @@ typedef struct
     object_header_t hdr;
     appinfo_t *appInfo;
     LPWSTR  hostName; /* the final destination of the request */
-    LPWSTR  serverName; /* the name of the server we directly connect to */
     LPWSTR  userName;
     LPWSTR  password;
     INTERNET_PORT hostPort; /* the final destination port of the request */
-    INTERNET_PORT serverPort; /* the port of the server we directly connect to */
     DWORD connect_timeout;
     DWORD send_timeout;
     DWORD receive_timeout;
@@ -561,11 +559,15 @@ typedef struct
 } wininet_flag_info;
 
 /* Undocumented security flags */
-#define _SECURITY_FLAG_CERT_INVALID_CA  0x00800000
-#define _SECURITY_FLAG_CERT_INVALID_CN  0x02000000
+#define _SECURITY_FLAG_CERT_REV_FAILED    0x00800000
+#define _SECURITY_FLAG_CERT_INVALID_CA    0x01000000
+#define _SECURITY_FLAG_CERT_INVALID_CN    0x02000000
+#define _SECURITY_FLAG_CERT_INVALID_DATE  0x04000000
 
 #define _SECURITY_ERROR_FLAGS_MASK              \
-    (_SECURITY_FLAG_CERT_INVALID_CA             \
-    |_SECURITY_FLAG_CERT_INVALID_CN)
+    (_SECURITY_FLAG_CERT_REV_FAILED             \
+    |_SECURITY_FLAG_CERT_INVALID_CA             \
+    |_SECURITY_FLAG_CERT_INVALID_CN             \
+    |_SECURITY_FLAG_CERT_INVALID_DATE)
 
 #endif /* _WINE_INTERNET_H_ */

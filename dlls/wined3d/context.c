@@ -20,10 +20,13 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
+
 #include <stdio.h>
 #ifdef HAVE_FLOAT_H
 # include <float.h>
 #endif
+
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -2336,6 +2339,13 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
     device_preload_textures(device);
     if (isStateDirty(context, STATE_VDECL) || isStateDirty(context, STATE_STREAMSRC))
         device_update_stream_info(device, context->gl_info);
+    if (state->index_buffer && !state->user_stream)
+    {
+        if (device->strided_streams.all_vbo)
+            wined3d_buffer_preload(state->index_buffer);
+        else
+            buffer_get_sysmem(state->index_buffer, context->gl_info);
+    }
 
     ENTER_GL();
     if (context->last_was_blit)

@@ -876,6 +876,7 @@ static void test_bitmap_font_metrics(void)
 
         for(bit = 0; bit < 32; bit++)
         {
+            GLYPHMETRICS gm;
             DWORD fs[2];
             BOOL bRet;
 
@@ -904,15 +905,10 @@ static void test_bitmap_font_metrics(void)
 
             hfont = create_font(lf.lfFaceName, &lf);
             old_hfont = SelectObject(hdc, hfont);
-            bRet = GetTextMetrics(hdc, &tm);
-            ok(bRet, "GetTextMetrics error %d\n", GetLastError());
 
             SetLastError(0xdeadbeef);
             ret = GetTextFace(hdc, sizeof(face_name), face_name);
             ok(ret, "GetTextFace error %u\n", GetLastError());
-
-            SetLastError(0xdeadbeef);
-            ret = GetTextCharset(hdc);
 
             if (lstrcmp(face_name, fd[i].face_name) != 0)
             {
@@ -924,6 +920,19 @@ static void test_bitmap_font_metrics(void)
                 continue;
             }
 
+            memset(&gm, 0, sizeof(gm));
+            SetLastError(0xdeadbeef);
+            ret = GetGlyphOutline(hdc, 'A', GGO_METRICS, &gm, 0, NULL, &mat);
+            todo_wine {
+            ok(ret == GDI_ERROR, "GetGlyphOutline should fail for a bitmap font\n");
+            ok(GetLastError() == ERROR_CAN_NOT_COMPLETE, "expected ERROR_CAN_NOT_COMPLETE, got %u\n", GetLastError());
+            }
+
+            bRet = GetTextMetrics(hdc, &tm);
+            ok(bRet, "GetTextMetrics error %d\n", GetLastError());
+
+            SetLastError(0xdeadbeef);
+            ret = GetTextCharset(hdc);
             ok(ret == expected_cs, "got charset %d, expected %d\n", ret, expected_cs);
 
             trace("created %s, height %d charset %x dpi %d\n", face_name, tm.tmHeight, tm.tmCharSet, tm.tmDigitizedAspectX);
@@ -4341,10 +4350,91 @@ static void test_east_asian_font_selection(void)
     ReleaseDC(NULL, hdc);
 }
 
+static int get_font_dpi(const LOGFONT *lf)
+{
+    HDC hdc = CreateCompatibleDC(0);
+    HFONT hfont;
+    TEXTMETRIC tm;
+    int ret;
+
+    hfont = CreateFontIndirect(lf);
+    ok(hfont != 0, "CreateFontIndirect failed\n");
+
+    SelectObject(hdc, hfont);
+    ret = GetTextMetrics(hdc, &tm);
+    ok(ret, "GetTextMetrics failed\n");
+    ret = tm.tmDigitizedAspectX;
+
+    DeleteDC(hdc);
+    DeleteObject(hfont);
+
+    return ret;
+}
+
+static void test_stock_fonts(void)
+{
+    static const struct test_data
+    {
+        int id, weight, height, dpi;
+        const char face_name[LF_FACESIZE];
+    } td[] =
+    {
+        { ANSI_FIXED_FONT, FW_NORMAL, 12, 96, "Courier" },
+        { ANSI_FIXED_FONT, FW_NORMAL, 12, 120, "Courier" },
+        { ANSI_VAR_FONT, FW_NORMAL, 12, 96, "MS Sans Serif" },
+        { ANSI_VAR_FONT, FW_NORMAL, 12, 120, "MS Sans Serif" },
+        { SYSTEM_FONT, FW_BOLD, 16, 96, "System" },
+        { SYSTEM_FONT, FW_BOLD, 20, 120, "System" },
+        { DEVICE_DEFAULT_FONT, FW_BOLD, 16, 96, "System" },
+        { DEVICE_DEFAULT_FONT, FW_BOLD, 20, 120, "System" },
+        { DEFAULT_GUI_FONT, FW_NORMAL, -11, 96, "MS Shell Dlg" },
+        { DEFAULT_GUI_FONT, FW_NORMAL, -13, 120, "MS Shell Dlg" }
+
+        /*{ SYSTEM_FIXED_FONT, FW_NORMAL, 15, 96, "Fixedsys" },*/
+        /*{ SYSTEM_FIXED_FONT, FW_NORMAL, 20, 120, "Fixedsys" },*/
+        /*{ OEM_FIXED_FONT, FW_NORMAL, 16, 96, "Terminal" },*/
+        /*{ OEM_FIXED_FONT, FW_NORMAL, 20, 120, "Terminal" },*/
+    };
+    int i;
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        HFONT hfont;
+        LOGFONT lf;
+        int ret;
+
+        hfont = GetStockObject(td[i].id);
+        ok(hfont != 0, "%d: GetStockObject(%d) failed\n", i, td[i].id);
+
+        ret = GetObject(hfont, sizeof(lf), &lf);
+        if (ret != sizeof(lf))
+        {
+            /* NT4 */
+            win_skip("%d: GetObject returned %d instead of sizeof(LOGFONT)\n", i, ret);
+            continue;
+        }
+
+        ret = get_font_dpi(&lf);
+        if (ret != td[i].dpi)
+        {
+            trace("%d: font %s %d dpi doesn't match test data %d\n", i, lf.lfFaceName, ret, td[i].dpi);
+            continue;
+        }
+
+        ok(td[i].weight == lf.lfWeight, "%d: expected lfWeight %d, got %d\n", i, td[i].weight, lf.lfWeight);
+        if (td[i].height < 0) /* FIXME: remove once Wine is fixed */
+        todo_wine ok(td[i].height == lf.lfHeight, "%d: expected lfHeight %d, got %d\n", i, td[i].height, lf.lfHeight);
+        else
+        ok(td[i].height == lf.lfHeight, "%d: expected lfHeight %d, got %d\n", i, td[i].height, lf.lfHeight);
+        ok(!lstrcmp(td[i].face_name, lf.lfFaceName), "%d: expected lfFaceName %s, got %s\n", i, td[i].face_name, lf.lfFaceName);
+    }
+}
+
 START_TEST(font)
 {
     init();
 
+    test_stock_fonts();
     test_logfont();
     test_bitmap_font();
     test_outline_font();

@@ -3396,6 +3396,55 @@ msgstr ""
 msgid "High"
 msgstr ""
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr ""
+
+#: joy.rc:37
+msgid "&Enable"
+msgstr ""
+
+#: joy.rc:38
+msgid "Connected"
+msgstr ""
+
+#: joy.rc:40
+msgid "Disabled"
+msgstr ""
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+msgid "Game Controllers"
+msgstr "الم&حتويات"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr ""
@@ -12102,10 +12151,6 @@ msgstr ""
 
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
-msgstr ""
-
-#: winecfg.rc:204
-msgid "&Disable"
 msgstr ""
 
 #: winecfg.rc:211

@@ -3457,6 +3457,62 @@ msgstr "Aumentada"
 msgid "High"
 msgstr "Alta"
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "&Desactivar"
+
+#: joy.rc:37
+#, fuzzy
+#| msgid "&enable"
+msgid "&Enable"
+msgstr "&activar"
+
+#: joy.rc:38
+#, fuzzy
+#| msgid "Disconnected"
+msgid "Connected"
+msgstr "Desligado"
+
+#: joy.rc:40
+#, fuzzy
+#| msgid "&Disable"
+msgid "Disabled"
+msgstr "&Desactivar"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+#| msgid "Create Control"
+msgid "Game Controllers"
+msgstr "Criar controlo"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr "Erro ao converter objecto em tipo primitivo"
@@ -12537,10 +12593,6 @@ msgstr "E&mbutida depois Nativa"
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr "Nati&va depois Embutida"
-
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "&Desactivar"
 
 #: winecfg.rc:211
 msgid "Select Drive Letter"

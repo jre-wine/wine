@@ -54,8 +54,8 @@ struct IFD_entry
 
 struct IFD_rational
 {
-    ULONG numerator;
-    ULONG denominator;
+    LONG numerator;
+    LONG denominator;
 };
 
 static const struct
@@ -63,20 +63,21 @@ static const struct
     USHORT number_of_entries;
     struct IFD_entry entry[6];
     ULONG next_IFD;
-    struct IFD_rational rational;
+    struct IFD_rational xres;
 } IFD_data =
 {
     6,
     {
-        { 0xfe,  IFD_SHORT, 1, 1 },
-        { 0x100, IFD_LONG, 1, 222 },
-        { 0x101, IFD_LONG, 1, 333 },
-        { 0x102, IFD_SHORT, 1, 24 },
-        { 0x103, IFD_LONG, 1, 32773 },
-        { 0x11a, IFD_RATIONAL, 1, sizeof(USHORT) + sizeof(struct IFD_entry) * 6 + sizeof(ULONG) }
+        { 0xfe,  IFD_SHORT, 1, 1 }, /* NEWSUBFILETYPE */
+        { 0x100, IFD_LONG, 1, 222 }, /* IMAGEWIDTH */
+        { 0x101, IFD_LONG, 1, 333 }, /* IMAGELENGTH */
+        { 0x102, IFD_SHORT, 1, 24 }, /* BITSPERSAMPLE */
+        { 0x103, IFD_LONG, 1, 32773 }, /* COMPRESSION: packbits */
+        { 0x11a, IFD_RATIONAL, 1, /* XRESOLUTION */
+          sizeof(USHORT) + sizeof(struct IFD_entry) * 6 + sizeof(ULONG) }
     },
     0,
-    { 300, 1 }
+    { 900, 3 }
 };
 #include "poppack.h"
 
@@ -88,6 +89,16 @@ static const char metadata_tEXt[] = {
     'w','i','n','e','t','e','s','t',0, /* keyword */
     'v','a','l','u','e', /* text */
     0x3f,0x64,0x19,0xf3 /* chunk CRC */
+};
+
+static const char pngimage[285] = {
+0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0x00,0x00,0x00,0x0d,0x49,0x48,0x44,0x52,
+0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53,
+0xde,0x00,0x00,0x00,0x09,0x70,0x48,0x59,0x73,0x00,0x00,0x0b,0x13,0x00,0x00,0x0b,
+0x13,0x01,0x00,0x9a,0x9c,0x18,0x00,0x00,0x00,0x07,0x74,0x49,0x4d,0x45,0x07,0xd5,
+0x06,0x03,0x0f,0x07,0x2d,0x12,0x10,0xf0,0xfd,0x00,0x00,0x00,0x0c,0x49,0x44,0x41,
+0x54,0x08,0xd7,0x63,0xf8,0xff,0xff,0x3f,0x00,0x05,0xfe,0x02,0xfe,0xdc,0xcc,0x59,
+0xe7,0x00,0x00,0x00,0x00,0x49,0x45,0x4e,0x44,0xae,0x42,0x60,0x82
 };
 
 static const char *debugstr_guid(REFIID riid)
@@ -155,6 +166,7 @@ static void test_metadata_unknown(void)
     HRESULT hr;
     IWICMetadataReader *reader;
     IWICEnumMetadataItem *enumerator;
+    IWICMetadataBlockReader *blockreader;
     PROPVARIANT schema, id, value;
     ULONG items_returned;
 
@@ -195,6 +207,12 @@ static void test_metadata_unknown(void)
 
         IWICEnumMetadataItem_Release(enumerator);
     }
+
+    hr = IWICMetadataReader_QueryInterface(reader, &IID_IWICMetadataBlockReader, (void**)&blockreader);
+    ok(hr == E_NOINTERFACE, "QueryInterface failed, hr=%x\n", hr);
+
+    if (SUCCEEDED(hr))
+        IWICMetadataBlockReader_Release(blockreader);
 
     IWICMetadataReader_Release(reader);
 }
@@ -321,7 +339,8 @@ static void test_metadata_IFD(void)
 {
     static const struct test_data
     {
-        ULONG type, id, value;
+        ULONG type, id;
+        LONGLONG value;
     } td[6] =
     {
         { VT_UI2, 0xfe, 1 },
@@ -329,10 +348,11 @@ static void test_metadata_IFD(void)
         { VT_UI4, 0x101, 333 },
         { VT_UI2, 0x102, 24 },
         { VT_UI4, 0x103, 32773 },
-        { VT_UI8, 0x11a, 300 }
+        { VT_UI8, 0x11a,  ((LONGLONG)3 << 32) | 900 }
     };
     HRESULT hr;
     IWICMetadataReader *reader;
+    IWICMetadataBlockReader *blockreader;
     IWICEnumMetadataItem *enumerator;
     PROPVARIANT schema, id, value;
     ULONG items_returned, count, i;
@@ -344,8 +364,7 @@ static void test_metadata_IFD(void)
 
     hr = CoCreateInstance(&CLSID_WICIfdMetadataReader, NULL, CLSCTX_INPROC_SERVER,
         &IID_IWICMetadataReader, (void**)&reader);
-    todo_wine ok(hr == S_OK, "CoCreateInstance error %#x\n", hr);
-    if (FAILED(hr)) return;
+    ok(hr == S_OK, "CoCreateInstance error %#x\n", hr);
 
     hr = IWICMetadataReader_GetCount(reader, NULL);
     ok(hr == E_INVALIDARG, "GetCount error %#x\n", hr);
@@ -358,6 +377,7 @@ static void test_metadata_IFD(void)
 
     hr = IWICMetadataReader_GetCount(reader, &count);
     ok(hr == S_OK, "GetCount error %#x\n", hr);
+todo_wine
     ok(count == 6, "unexpected count %u\n", count);
 
     hr = IWICMetadataReader_GetEnumerator(reader, NULL);
@@ -376,7 +396,7 @@ static void test_metadata_IFD(void)
         ok(id.vt == VT_UI2, "%u: unexpected vt: %u\n", i, id.vt);
         ok(U(id).uiVal == td[i].id, "%u: unexpected id: %#x\n", i, U(id).uiVal);
         ok(value.vt == td[i].type, "%u: unexpected vt: %u\n", i, value.vt);
-        ok(U(value).ulVal == td[i].value, "%u: unexpected id: %u\n", i, U(value).ulVal);
+        ok(U(value).uhVal.QuadPart == td[i].value, "%u: unexpected id: %d/%d\n", i, U(value).uhVal.u.LowPart, U(value).uhVal.u.HighPart);
 
         PropVariantClear(&schema);
         PropVariantClear(&id);
@@ -390,14 +410,22 @@ static void test_metadata_IFD(void)
     IWICEnumMetadataItem_Release(enumerator);
 
     hr = IWICMetadataReader_GetMetadataFormat(reader, &format);
+todo_wine
     ok(hr == S_OK, "GetMetadataFormat error %#x\n", hr);
+todo_wine
     ok(IsEqualGUID(&format, &GUID_MetadataFormatIfd), "unexpected format %s\n", debugstr_guid(&format));
 
     hr = IWICMetadataReader_GetMetadataFormat(reader, NULL);
     ok(hr == E_INVALIDARG, "GetMetadataFormat should fail\n");
 
     hr = IWICMetadataReader_GetValueByIndex(reader, 0, NULL, NULL, NULL);
+todo_wine
     ok(hr == S_OK, "GetValueByIndex error %#x\n", hr);
+    if (FAILED(hr))
+    {
+        IWICMetadataReader_Release(reader);
+        return;
+    }
 
     hr = IWICMetadataReader_GetValueByIndex(reader, count - 1, NULL, NULL, NULL);
     ok(hr == S_OK, "GetValueByIndex error %#x\n", hr);
@@ -425,6 +453,40 @@ static void test_metadata_IFD(void)
     hr = IWICMetadataReader_GetValueByIndex(reader, count, &schema, NULL, NULL);
     ok(hr == E_INVALIDARG, "GetValueByIndex should fail\n");
 
+    hr = IWICMetadataReader_QueryInterface(reader, &IID_IWICMetadataBlockReader, (void**)&blockreader);
+    ok(hr == E_NOINTERFACE, "QueryInterface failed, hr=%x\n", hr);
+
+    if (SUCCEEDED(hr))
+        IWICMetadataBlockReader_Release(blockreader);
+
+    IWICMetadataReader_Release(reader);
+}
+
+static void test_metadata_Exif(void)
+{
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    IWICMetadataBlockReader *blockreader;
+    UINT count=0;
+
+    hr = CoCreateInstance(&CLSID_WICExifMetadataReader, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IWICMetadataReader, (void**)&reader);
+    todo_wine ok(hr == S_OK, "CoCreateInstance error %#x\n", hr);
+    if (FAILED(hr)) return;
+
+    hr = IWICMetadataReader_GetCount(reader, NULL);
+    ok(hr == E_INVALIDARG, "GetCount error %#x\n", hr);
+
+    hr = IWICMetadataReader_GetCount(reader, &count);
+    ok(hr == S_OK, "GetCount error %#x\n", hr);
+    ok(count == 0, "unexpected count %u\n", count);
+
+    hr = IWICMetadataReader_QueryInterface(reader, &IID_IWICMetadataBlockReader, (void**)&blockreader);
+    ok(hr == E_NOINTERFACE, "QueryInterface failed, hr=%x\n", hr);
+
+    if (SUCCEEDED(hr))
+        IWICMetadataBlockReader_Release(blockreader);
+
     IWICMetadataReader_Release(reader);
 }
 
@@ -439,15 +501,16 @@ static void test_create_reader(void)
 
     hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
         &IID_IWICComponentFactory, (void**)&factory);
-    todo_wine ok(hr == S_OK, "CoCreateInstance failed, hr=%x\n", hr);
-    if (FAILED(hr)) return;
+    ok(hr == S_OK, "CoCreateInstance failed, hr=%x\n", hr);
 
     stream = create_stream(metadata_tEXt, sizeof(metadata_tEXt));
 
     hr = IWICComponentFactory_CreateMetadataReaderFromContainer(factory,
         &GUID_ContainerFormatPng, NULL, WICPersistOptionsDefault,
         stream, &reader);
+todo_wine
     ok(hr == S_OK, "CreateMetadataReaderFromContainer failed, hr=%x\n", hr);
+    if (FAILED(hr)) return;
 
     if (SUCCEEDED(hr))
     {
@@ -485,6 +548,86 @@ static void test_create_reader(void)
     IWICComponentFactory_Release(factory);
 }
 
+static void test_metadata_png(void)
+{
+    IStream *stream;
+    IWICBitmapDecoder *decoder;
+    IWICBitmapFrameDecode *frame;
+    IWICMetadataBlockReader *blockreader;
+    IWICMetadataReader *reader;
+    GUID containerformat;
+    HRESULT hr;
+    UINT count;
+
+    hr = CoCreateInstance(&CLSID_WICPngDecoder, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IWICBitmapDecoder, (void**)&decoder);
+    ok(hr == S_OK, "CoCreateInstance failed, hr=%x\n", hr);
+
+    if (FAILED(hr)) return;
+
+    stream = create_stream(pngimage, sizeof(pngimage));
+
+    hr = IWICBitmapDecoder_Initialize(decoder, stream, WICDecodeMetadataCacheOnLoad);
+    ok(hr == S_OK, "Initialize failed, hr=%x\n", hr);
+
+    hr = IWICBitmapDecoder_QueryInterface(decoder, &IID_IWICMetadataBlockReader, (void**)&blockreader);
+    ok(hr == E_NOINTERFACE, "QueryInterface failed, hr=%x\n", hr);
+
+    hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+    ok(hr == S_OK, "GetFrame failed, hr=%x\n", hr);
+
+    hr = IWICBitmapFrameDecode_QueryInterface(frame, &IID_IWICMetadataBlockReader, (void**)&blockreader);
+    ok(hr == S_OK, "QueryInterface failed, hr=%x\n", hr);
+
+    if (SUCCEEDED(hr))
+    {
+        hr = IWICMetadataBlockReader_GetContainerFormat(blockreader, NULL);
+        ok(hr == E_INVALIDARG, "GetContainerFormat failed, hr=%x\n", hr);
+
+        hr = IWICMetadataBlockReader_GetContainerFormat(blockreader, &containerformat);
+        ok(hr == S_OK, "GetContainerFormat failed, hr=%x\n", hr);
+        ok(IsEqualGUID(&containerformat, &GUID_ContainerFormatPng), "unexpected container format\n");
+
+        hr = IWICMetadataBlockReader_GetCount(blockreader, NULL);
+        todo_wine ok(hr == E_INVALIDARG, "GetCount failed, hr=%x\n", hr);
+
+        hr = IWICMetadataBlockReader_GetCount(blockreader, &count);
+        todo_wine ok(hr == S_OK, "GetCount failed, hr=%x\n", hr);
+        todo_wine ok(count == 1, "unexpected count %d\n", count);
+
+        if (0)
+        {
+            /* Crashes on Windows XP */
+            hr = IWICMetadataBlockReader_GetReaderByIndex(blockreader, 0, NULL);
+            ok(hr == E_INVALIDARG, "GetReaderByIndex failed, hr=%x\n", hr);
+        }
+
+        hr = IWICMetadataBlockReader_GetReaderByIndex(blockreader, 0, &reader);
+        todo_wine ok(hr == S_OK, "GetReaderByIndex failed, hr=%x\n", hr);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = IWICMetadataReader_GetMetadataFormat(reader, &containerformat);
+            ok(IsEqualGUID(&containerformat, &GUID_MetadataFormatChunktIME) ||
+               broken(IsEqualGUID(&containerformat, &GUID_MetadataFormatUnknown)) /* Windows XP */,
+               "unexpected container format\n");
+
+            IWICMetadataReader_Release(reader);
+        }
+
+        hr = IWICMetadataBlockReader_GetReaderByIndex(blockreader, 1, &reader);
+        todo_wine ok(hr == WINCODEC_ERR_VALUEOUTOFRANGE, "GetReaderByIndex failed, hr=%x\n", hr);
+
+        IWICMetadataBlockReader_Release(blockreader);
+    }
+
+    IWICBitmapFrameDecode_Release(frame);
+
+    IWICBitmapDecoder_Release(decoder);
+
+    IWICStream_Release(stream);
+}
+
 START_TEST(metadata)
 {
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
@@ -492,7 +635,9 @@ START_TEST(metadata)
     test_metadata_unknown();
     test_metadata_tEXt();
     test_metadata_IFD();
+    test_metadata_Exif();
     test_create_reader();
+    test_metadata_png();
 
     CoUninitialize();
 }

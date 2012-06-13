@@ -599,7 +599,6 @@ static int BITBLT_GetDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, GC gc, cons
     int exposures = 0;
     INT width  = visRectDst->right - visRectDst->left;
     INT height = visRectDst->bottom - visRectDst->top;
-    BOOL memdc = (GetObjectType( physDev->dev.hdc ) == OBJ_MEMDC);
 
     wine_tsx11_lock();
 
@@ -613,25 +612,17 @@ static int BITBLT_GetDstArea(X11DRV_PDEVICE *physDev, Pixmap pixmap, GC gc, cons
     }
     else
     {
-        register INT x, y;
+        INT x, y;
         XImage *image;
 
-        if (memdc)
-            image = XGetImage( gdi_display, physDev->drawable,
-                               physDev->dc_rect.left + visRectDst->left,
-                               physDev->dc_rect.top + visRectDst->top,
-                               width, height, AllPlanes, ZPixmap );
-        else
-        {
-            /* Make sure we don't get a BadMatch error */
-            XCopyArea( gdi_display, physDev->drawable, pixmap, gc,
-                       physDev->dc_rect.left + visRectDst->left,
-                       physDev->dc_rect.top + visRectDst->top,
-                       width, height, 0, 0);
-            exposures++;
-            image = XGetImage( gdi_display, pixmap, 0, 0, width, height,
-                               AllPlanes, ZPixmap );
-        }
+        /* Make sure we don't get a BadMatch error */
+        XCopyArea( gdi_display, physDev->drawable, pixmap, gc,
+                   physDev->dc_rect.left + visRectDst->left,
+                   physDev->dc_rect.top + visRectDst->top,
+                   width, height, 0, 0);
+        exposures++;
+        image = XGetImage( gdi_display, pixmap, 0, 0, width, height,
+                           AllPlanes, ZPixmap );
         if (image)
         {
             for (y = 0; y < height; y++)
@@ -1199,12 +1190,11 @@ DWORD copy_image_bits( BITMAPINFO *info, BOOL is_r8g8b8, XImage *image,
 /***********************************************************************
  *           X11DRV_PutImage
  */
-DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+DWORD X11DRV_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
                        const struct gdi_image_bits *bits, struct bitblt_coords *src,
                        struct bitblt_coords *dst, DWORD rop )
 {
-    X11DRV_PDEVICE *physdev;
-    X_PHYSBITMAP *bitmap;
+    X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret;
     XImage *image;
     XVisualInfo vis;
@@ -1213,26 +1203,12 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
     const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
     const int *mapping = NULL;
 
-    if (hbitmap)
+    vis.depth = physdev->depth;
+    if (physdev->color_shifts)
     {
-        if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
-        physdev = NULL;
-        vis.depth      = bitmap->depth;
-        vis.red_mask   = bitmap->color_shifts.logicalRed.max   << bitmap->color_shifts.logicalRed.shift;
-        vis.green_mask = bitmap->color_shifts.logicalGreen.max << bitmap->color_shifts.logicalGreen.shift;
-        vis.blue_mask  = bitmap->color_shifts.logicalBlue.max  << bitmap->color_shifts.logicalBlue.shift;
-    }
-    else
-    {
-        physdev = get_x11drv_dev( dev );
-        bitmap = NULL;
-        vis.depth      = physdev->depth;
-        if (physdev->color_shifts)
-        {
-            vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
-            vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
-            vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
-        }
+        vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
+        vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
+        vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
     }
     format = pixmap_formats[vis.depth];
 
@@ -1251,7 +1227,7 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
 
     if (image->bits_per_pixel == 4 || image->bits_per_pixel == 8)
     {
-        if (bitmap || (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST)))
+        if (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST))
             mapping = X11DRV_PALETTE_PaletteToXPixel;
     }
 
@@ -1259,67 +1235,45 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
 
     if (!ret)
     {
+        BOOL restore_region = add_extra_clipping_region( physdev, clip );
         int width = dst->visrect.right - dst->visrect.left;
         int height = dst->visrect.bottom - dst->visrect.top;
 
         image->data = dst_bits.ptr;
 
-        if (bitmap)
+        /* optimization for single-op ROPs */
+        if (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST))
         {
-            RGNDATA *clip_data = NULL;
-            GC gc;
-
-            if (clip) clip_data = X11DRV_GetRegionData( clip, 0 );
-
             wine_tsx11_lock();
-            gc = XCreateGC( gdi_display, bitmap->pixmap, 0, NULL );
-            XSetGraphicsExposures( gdi_display, gc, False );
-            if (clip_data) XSetClipRectangles( gdi_display, gc, 0, 0, (XRectangle *)clip_data->Buffer,
-                                               clip_data->rdh.nCount, YXBanded );
-            XPutImage( gdi_display, bitmap->pixmap, gc, image, src->visrect.left, 0,
-                       dst->visrect.left, dst->visrect.top, width, height );
-            XFreeGC( gdi_display, gc );
+            XSetFunction( gdi_display, physdev->gc, OP_ROP(*opcode) );
+            XPutImage( gdi_display, physdev->drawable, physdev->gc, image, src->visrect.left, 0,
+                       physdev->dc_rect.left + dst->visrect.left,
+                       physdev->dc_rect.top + dst->visrect.top, width, height );
             wine_tsx11_unlock();
-            HeapFree( GetProcessHeap(), 0, clip_data );
         }
         else
         {
-            BOOL restore_region = add_extra_clipping_region( physdev, clip );
+            Pixmap src_pixmap;
+            GC gc;
 
-            /* optimization for single-op ROPs */
-            if (!opcode[1] && OP_SRCDST(opcode[0]) == OP_ARGS(SRC,DST))
-            {
-                wine_tsx11_lock();
-                XSetFunction( gdi_display, physdev->gc, OP_ROP(*opcode) );
-                XPutImage( gdi_display, physdev->drawable, physdev->gc, image, src->visrect.left, 0,
-                           physdev->dc_rect.left + dst->visrect.left,
-                           physdev->dc_rect.top + dst->visrect.top, width, height );
-                wine_tsx11_unlock();
-            }
-            else
-            {
-                Pixmap src_pixmap;
-                GC gc;
+            wine_tsx11_lock();
+            gc = XCreateGC( gdi_display, physdev->drawable, 0, NULL );
+            XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
+            XSetGraphicsExposures( gdi_display, gc, False );
+            src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
+            XPutImage( gdi_display, src_pixmap, gc, image, src->visrect.left, 0, 0, 0, width, height );
+            wine_tsx11_unlock();
 
-                wine_tsx11_lock();
-                gc = XCreateGC( gdi_display, physdev->drawable, 0, NULL );
-                XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
-                XSetGraphicsExposures( gdi_display, gc, False );
-                src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
-                XPutImage( gdi_display, src_pixmap, gc, image, src->visrect.left, 0, 0, 0, width, height );
-                wine_tsx11_unlock();
+            execute_rop( physdev, src_pixmap, gc, &dst->visrect, rop );
 
-                execute_rop( physdev, src_pixmap, gc, &dst->visrect, rop );
-
-                wine_tsx11_lock();
-                XFreePixmap( gdi_display, src_pixmap );
-                XFreeGC( gdi_display, gc );
-                wine_tsx11_unlock();
-            }
-
-            if (restore_region) restore_clipping_region( physdev );
-            add_device_bounds( physdev, &dst->visrect );
+            wine_tsx11_lock();
+            XFreePixmap( gdi_display, src_pixmap );
+            XFreeGC( gdi_display, gc );
+            wine_tsx11_unlock();
         }
+
+        if (restore_region) restore_clipping_region( physdev );
+        add_device_bounds( physdev, &dst->visrect );
         image->data = NULL;
     }
 
@@ -1340,11 +1294,10 @@ update_format:
 /***********************************************************************
  *           X11DRV_GetImage
  */
-DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
+DWORD X11DRV_GetImage( PHYSDEV dev, BITMAPINFO *info,
                        struct gdi_image_bits *bits, struct bitblt_coords *src )
 {
-    X11DRV_PDEVICE *physdev;
-    X_PHYSBITMAP *bitmap;
+    X11DRV_PDEVICE *physdev = get_x11drv_dev( dev );
     DWORD ret = ERROR_SUCCESS;
     XImage *image;
     XVisualInfo vis;
@@ -1353,26 +1306,12 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
     const XPixmapFormatValues *format;
     const int *mapping = NULL;
 
-    if (hbitmap)
+    vis.depth = physdev->depth;
+    if (physdev->color_shifts)
     {
-        if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
-        physdev = NULL;
-        vis.depth      = bitmap->depth;
-        vis.red_mask   = bitmap->color_shifts.logicalRed.max   << bitmap->color_shifts.logicalRed.shift;
-        vis.green_mask = bitmap->color_shifts.logicalGreen.max << bitmap->color_shifts.logicalGreen.shift;
-        vis.blue_mask  = bitmap->color_shifts.logicalBlue.max  << bitmap->color_shifts.logicalBlue.shift;
-    }
-    else
-    {
-        physdev = get_x11drv_dev( dev );
-        bitmap = NULL;
-        vis.depth      = physdev->depth;
-        if (physdev->color_shifts)
-        {
-            vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
-            vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
-            vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
-        }
+        vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
+        vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
+        vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
     }
     format = pixmap_formats[vis.depth];
 
@@ -1410,46 +1349,28 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
     src->y -= y;
     OffsetRect( &src->visrect, -x, -y );
 
-    if (bitmap)
+    X11DRV_expect_error( gdi_display, XGetImage_handler, NULL );
+    image = XGetImage( gdi_display, physdev->drawable,
+                       physdev->dc_rect.left + x, physdev->dc_rect.top + y,
+                       width, height, AllPlanes, ZPixmap );
+    if (X11DRV_check_error())
     {
-        BITMAP bm;
-        GetObjectW( hbitmap, sizeof(bm), &bm );
-        width = min( width, bm.bmWidth - x );
-        height = min( height, bm.bmHeight - y );
-        wine_tsx11_lock();
-        image = XGetImage( gdi_display, bitmap->pixmap, x, y, width, height, AllPlanes, ZPixmap );
-        wine_tsx11_unlock();
-    }
-    else if (GetObjectType( dev->hdc ) == OBJ_MEMDC)
-    {
-        width = min( width, physdev->dc_rect.right - physdev->dc_rect.left - x );
-        height = min( height, physdev->dc_rect.bottom - physdev->dc_rect.top - y );
-        wine_tsx11_lock();
-        image = XGetImage( gdi_display, physdev->drawable,
-                           physdev->dc_rect.left + x, physdev->dc_rect.top + y,
-                           width, height, AllPlanes, ZPixmap );
-        wine_tsx11_unlock();
-    }
-    else
-    {
-        X11DRV_expect_error( gdi_display, XGetImage_handler, NULL );
-        image = XGetImage( gdi_display, physdev->drawable,
-                           physdev->dc_rect.left + x, physdev->dc_rect.top + y,
-                           width, height, AllPlanes, ZPixmap );
-        if (X11DRV_check_error())
-        {
-            /* use a temporary pixmap to avoid the BadMatch error */
-            Pixmap pixmap;
+        /* use a temporary pixmap to avoid the BadMatch error */
+        GC gc;
+        Pixmap pixmap;
 
-            wine_tsx11_lock();
-            pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
-            XCopyArea( gdi_display, physdev->drawable, pixmap, get_bitmap_gc(vis.depth),
-                       physdev->dc_rect.left + x, physdev->dc_rect.top + y, width, height, 0, 0 );
-            image = XGetImage( gdi_display, pixmap, 0, 0, width, height, AllPlanes, ZPixmap );
-            XFreePixmap( gdi_display, pixmap );
-            wine_tsx11_unlock();
-        }
+        wine_tsx11_lock();
+        pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
+        gc = XCreateGC( gdi_display, pixmap, 0, NULL );
+        XSetGraphicsExposures( gdi_display, gc, False );
+        XCopyArea( gdi_display, physdev->drawable, pixmap, gc,
+                   physdev->dc_rect.left + x, physdev->dc_rect.top + y, width, height, 0, 0 );
+        image = XGetImage( gdi_display, pixmap, 0, 0, width, height, AllPlanes, ZPixmap );
+        XFreePixmap( gdi_display, pixmap );
+        XFreeGC( gdi_display, gc );
+        wine_tsx11_unlock();
     }
+
     if (!image) return ERROR_OUTOFMEMORY;
 
     info->bmiHeader.biWidth     = width;
@@ -1483,6 +1404,7 @@ static DWORD put_pixmap_image( Pixmap pixmap, const XVisualInfo *vis,
 {
     DWORD ret;
     XImage *image;
+    GC gc;
     struct bitblt_coords coords;
     struct gdi_image_bits dst_bits;
     const XPixmapFormatValues *format = pixmap_formats[vis->depth];
@@ -1514,8 +1436,9 @@ static DWORD put_pixmap_image( Pixmap pixmap, const XVisualInfo *vis,
     {
         image->data = dst_bits.ptr;
         wine_tsx11_lock();
-        XPutImage( gdi_display, pixmap, get_bitmap_gc( vis->depth ),
-                   image, 0, 0, 0, 0, coords.width, coords.height );
+        gc = XCreateGC( gdi_display, pixmap, 0, NULL );
+        XPutImage( gdi_display, pixmap, gc, image, 0, 0, 0, 0, coords.width, coords.height );
+        XFreeGC( gdi_display, gc );
         wine_tsx11_unlock();
         image->data = NULL;
     }

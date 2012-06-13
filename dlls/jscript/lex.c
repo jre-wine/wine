@@ -16,7 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <math.h>
+#include "config.h"
+#include "wine/port.h"
+
 #include <limits.h>
 
 #include "jscript.h"
@@ -933,7 +935,7 @@ static int cc_token(parser_ctx_t *ctx, void *lval)
     var = find_cc_var(ctx->script->cc, ctx->ptr, id_len);
     ctx->ptr += id_len;
     if(!var || var->is_num) {
-        *(literal_t**)lval = new_double_literal(ctx, var ? var->u.n : ret_nan());
+        *(literal_t**)lval = new_double_literal(ctx, var ? var->u.n : NAN);
         return tNumericLiteral;
     }
 

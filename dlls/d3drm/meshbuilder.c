@@ -43,6 +43,9 @@ typedef struct {
     unsigned vertex_per_face;
     DWORD face_data_size;
     unsigned* face_data;
+    D3DCOLOR color;
+    IDirect3DRMMaterial2* material;
+    IDirect3DRMTexture3* texture;
 } mesh_group;
 
 typedef struct {
@@ -72,6 +75,9 @@ typedef struct {
     LPVOID pFaceData;
     DWORD nb_coords2d;
     Coords2d* pCoords2d;
+    D3DCOLOR color;
+    IDirect3DRMMaterial2* material;
+    IDirect3DRMTexture3* texture;
 } IDirect3DRMMeshBuilderImpl;
 
 char templates[] = {
@@ -359,6 +365,8 @@ static ULONG WINAPI IDirect3DRMMeshBuilder2Impl_Release(IDirect3DRMMeshBuilder2*
 
     if (!ref)
     {
+        if (This->material)
+            IDirect3DRMMaterial2_Release(This->material);
         HeapFree(GetProcessHeap(), 0, This->name);
         HeapFree(GetProcessHeap(), 0, This->pVertices);
         HeapFree(GetProcessHeap(), 0, This->pNormals);
@@ -610,9 +618,9 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetColorRGB(IDirect3DRMMeshBui
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    FIXME("(%p)->(%f,%f,%f): stub\n", This, red, green, blue);
+    TRACE("(%p)->(%f,%f,%f)\n", This, red, green, blue);
 
-    return E_NOTIMPL;
+    return IDirect3DRMMeshBuilder3_SetColorRGB(&This->IDirect3DRMMeshBuilder3_iface, red, green, blue);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetColor(IDirect3DRMMeshBuilder2* iface,
@@ -620,29 +628,36 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetColor(IDirect3DRMMeshBuilde
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    FIXME("(%p)->(%x): stub\n", This, color);
+    TRACE("(%p)->(%x)\n", This, color);
 
-    return E_NOTIMPL;
+    return IDirect3DRMMeshBuilder3_SetColor(&This->IDirect3DRMMeshBuilder3_iface, color);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetTexture(IDirect3DRMMeshBuilder2* iface,
-                                                             LPDIRECT3DRMTEXTURE pTexture)
+                                                             LPDIRECT3DRMTEXTURE texture)
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
+    LPDIRECT3DRMTEXTURE3 texture3 = NULL;
+    HRESULT hr = D3DRM_OK;
 
-    FIXME("(%p)->(%p): stub\n", This, pTexture);
+    if (texture)
+        hr = IDirect3DRMTexture_QueryInterface(texture, &IID_IDirect3DRMTexture3, (LPVOID*)&texture3);
+    if (SUCCEEDED(hr))
+        hr = IDirect3DRMMeshBuilder3_SetTexture(&This->IDirect3DRMMeshBuilder3_iface, texture3);
+    if (texture3)
+        IDirect3DRMTexture3_Release(texture3);
 
-    return E_NOTIMPL;
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetMaterial(IDirect3DRMMeshBuilder2* iface,
-                                                              LPDIRECT3DRMMATERIAL pMaterial)
+                                                              LPDIRECT3DRMMATERIAL material)
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, pMaterial);
+    TRACE("(%p)->(%p)\n", This, material);
 
-    return E_NOTIMPL;
+    return IDirect3DRMMeshBuilder3_SetMaterial(&This->IDirect3DRMMeshBuilder3_iface, (LPDIRECT3DRMMATERIAL2)material);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_SetTextureTopology(IDirect3DRMMeshBuilder2* iface,
@@ -1116,6 +1131,8 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3* iface, LPDIRECTXFILEDATA pData)
 
     TRACE("Mesh name is '%s'\n", This->name ? This->name : "");
 
+    This->nb_normals = 0;
+
     hr = IDirectXFileData_GetData(pData, NULL, &size, (void**)&ptr);
     if (hr != DXFILE_OK)
         goto end;
@@ -1198,7 +1215,89 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3* iface, LPDIRECTXFILEDATA pData)
         }
         else if (IsEqualGUID(pGuid, &TID_D3DRMMeshMaterialList))
         {
-            FIXME("MeshMaterialList not supported yet, ignoring...\n");
+            DWORD nb_materials;
+            DWORD nb_face_indices;
+            DWORD data_size;
+            LPDIRECTXFILEOBJECT child;
+            DWORD i = 0;
+            float* values;
+
+            TRACE("Process MeshMaterialList\n");
+
+            hr = IDirectXFileData_GetData(pData2, NULL, &size, (void**)&ptr);
+            if (hr != DXFILE_OK)
+                goto end;
+
+            nb_materials = *(DWORD*)ptr;
+            nb_face_indices = *(DWORD*)(ptr + sizeof(DWORD));
+            data_size = 2 * sizeof(DWORD) + nb_face_indices * sizeof(DWORD);
+
+            TRACE("nMaterials = %u, nFaceIndexes = %u\n", nb_materials, nb_face_indices);
+
+            if (size != data_size)
+                WARN("Returned size %u does not match expected one %u\n", size, data_size);
+
+            if (nb_materials > 2)
+            {
+                FIXME("Only one material per mesh supported, first one applies to all faces\n");
+                nb_materials = 1;
+            }
+
+            while (SUCCEEDED(hr = IDirectXFileData_GetNextObject(pData2, &child)) && (i < nb_materials))
+            {
+                LPDIRECTXFILEDATA data;
+                LPDIRECTXFILEDATAREFERENCE reference;
+                LPDIRECT3DRMMATERIAL2 material;
+
+                hr = IDirectXFileObject_QueryInterface(child, &IID_IDirectXFileData, (void **)&data);
+                if (FAILED(hr))
+                {
+                    hr = IDirectXFileObject_QueryInterface(child, &IID_IDirectXFileDataReference, (void **)&reference);
+                    if (FAILED(hr))
+                        goto end;
+
+                    hr = IDirectXFileDataReference_Resolve(reference, &data);
+                    IDirectXFileDataReference_Release(reference);
+                    if (FAILED(hr))
+                        goto end;
+                }
+
+                hr = Direct3DRMMaterial_create(&material);
+                if (FAILED(hr))
+                {
+                    IDirectXFileData_Release(data);
+                    goto end;
+                }
+
+                hr = IDirectXFileData_GetData(data, NULL, &size, (void**)&ptr);
+                if (hr != DXFILE_OK)
+                {
+                    IDirectXFileData_Release(data);
+                    goto end;
+                }
+
+                if (size != 44)
+                    WARN("Material size %u does not match expected one %u\n", size, 44);
+
+                values = (float*)ptr;
+
+                IDirect3DRMMeshBuilder3_SetColorRGB(iface, values[0], values [1], values[2]); /* Alpha ignored */
+
+                IDirect3DRMMaterial2_SetAmbient(material, values[0], values [1], values[2]); /* Alpha ignored */
+                IDirect3DRMMaterial2_SetPower(material, values[4]);
+                IDirect3DRMMaterial2_SetSpecular(material, values[5], values[6], values[7]);
+                IDirect3DRMMaterial2_SetEmissive(material, values[8], values[9], values[10]);
+
+                This->material = material;
+
+                IDirectXFileData_Release(data);
+                i++;
+            }
+            if (hr == S_OK)
+                WARN("Found more sub-objects than expected\n");
+            else if (hr != DXFILEERR_NOMOREOBJECTS)
+                goto end;
+            hr = S_OK;
         }
         else
         {
@@ -1209,10 +1308,19 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3* iface, LPDIRECTXFILEDATA pData)
         pData2 = NULL;
     }
 
+    if (!This->nb_normals)
+    {
+        /* Allocate normals, one per vertex */
+        This->pNormals = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->nb_vertices * sizeof(D3DVECTOR));
+        if (!This->pNormals)
+            goto end;
+    }
+
     for (i = 0; i < This->nb_faces; i++)
     {
         DWORD j;
         DWORD nb_face_indexes;
+        D3DVECTOR face_normal;
 
         if (faces_vertex_idx_size < sizeof(DWORD))
             WARN("Not enough data to read number of indices of face %d\n", i);
@@ -1225,22 +1333,46 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3* iface, LPDIRECTXFILEDATA pData)
         if (faces_vertex_idx_size < (nb_face_indexes * sizeof(DWORD)))
             WARN("Not enough data to read all indices of face %d\n", i);
 
+        if (!This->nb_normals)
+        {
+            /* Compute face normal */
+            if (nb_face_indexes > 2)
+            {
+                D3DVECTOR a, b;
+
+                D3DRMVectorSubtract(&a, &This->pVertices[faces_vertex_idx_ptr[2]], &This->pVertices[faces_vertex_idx_ptr[1]]);
+                D3DRMVectorSubtract(&a, &This->pVertices[faces_vertex_idx_ptr[1]], &This->pVertices[faces_vertex_idx_ptr[0]]);
+                D3DRMVectorCrossProduct(&face_normal, &a, &b);
+                D3DRMVectorNormalize(&face_normal);
+            }
+            else
+            {
+                face_normal.u1.x = 0.0f;
+                face_normal.u2.y = 0.0f;
+                face_normal.u3.z = 0.0f;
+            }
+        }
+
         for (j = 0; j < nb_face_indexes; j++)
         {
             /* Copy vertex index */
-            *(faces_data_ptr + faces_data_size++) = *(faces_vertex_idx_ptr++);
+            *(faces_data_ptr + faces_data_size++) = *faces_vertex_idx_ptr;
             /* Copy normal index */
-            if (faces_normal_idx_data)
+            if (This->nb_normals)
             {
                 /* Read from x file */
                 *(faces_data_ptr + faces_data_size++) = *(faces_normal_idx_ptr++);
             }
             else
             {
-                FIXME("No normal available, generate a fake normal index\n");
-                /* Must be generated, put 0 for now */
-                *(faces_data_ptr + faces_data_size++) = 0;
+                DWORD vertex_idx = *faces_vertex_idx_ptr;
+                if (vertex_idx > This->nb_vertices)
+                    vertex_idx = 0;
+                *(faces_data_ptr + faces_data_size++) = vertex_idx;
+                /* Add face normal to vertex normal */
+                D3DRMVectorAdd(&This->pNormals[vertex_idx], &This->pNormals[vertex_idx], &face_normal);
             }
+            faces_vertex_idx_ptr++;
         }
         faces_vertex_idx_size -= nb_face_indexes;
     }
@@ -1250,6 +1382,16 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3* iface, LPDIRECTXFILEDATA pData)
 
     /* Set size (in number of DWORD) of all faces data */
     This->face_data_size = faces_data_size;
+
+    if (!This->nb_normals)
+    {
+        /* Normalize all normals */
+        for (i = 0; i < This->nb_vertices; i++)
+        {
+            D3DRMVectorNormalize(&This->pNormals[i]);
+        }
+        This->nb_normals = This->nb_vertices;
+    }
 
     /* If there is no texture coordinates, generate default texture coordinates (0.0f, 0.0f) for each vertex */
     if (!This->pCoords2d)
@@ -1572,9 +1714,13 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetColorRGB(IDirect3DRMMeshBui
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
 
-    FIXME("(%p)->(%f,%f,%f): stub\n", This, red, green, blue);
+    TRACE("(%p)->(%f,%f,%f)\n", This, red, green, blue);
 
-    return E_NOTIMPL;
+    This->color = D3DCOLOR_ARGB(0xff, (BYTE)(red   * 255.0f),
+                                      (BYTE)(green * 255.0f),
+                                      (BYTE)(blue  * 255.0f));
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetColor(IDirect3DRMMeshBuilder3* iface,
@@ -1582,9 +1728,11 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetColor(IDirect3DRMMeshBuilde
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
 
-    FIXME("(%p)->(%x): stub\n", This, color);
+    TRACE("(%p)->(%x)\n", This, color);
 
-    return E_NOTIMPL;
+    This->color = color;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetTexture(IDirect3DRMMeshBuilder3* iface,
@@ -1592,9 +1740,15 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetTexture(IDirect3DRMMeshBuil
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, texture);
+    TRACE("(%p)->(%p)\n", This, texture);
 
-    return E_NOTIMPL;
+    if (texture)
+        IDirect3DRMTexture3_AddRef(texture);
+    if (This->texture)
+        IDirect3DRMTexture3_Release(This->texture);
+    This->texture = texture;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetMaterial(IDirect3DRMMeshBuilder3* iface,
@@ -1602,9 +1756,15 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetMaterial(IDirect3DRMMeshBui
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
 
-    FIXME("(%p)->(%p): stub\n", This, material);
+    TRACE("(%p)->(%p)\n", This, material);
 
-    return E_NOTIMPL;
+    if (material)
+        IDirect3DRMTexture2_AddRef(material);
+    if (This->material)
+        IDirect3DRMTexture2_Release(This->material);
+    This->material = material;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetTextureTopology(IDirect3DRMMeshBuilder3* iface,
@@ -1880,6 +2040,18 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuil
             {
                 hr = E_OUTOFMEMORY;
             }
+        }
+        if (SUCCEEDED(hr))
+            hr = IDirect3DRMMesh_SetGroupColor(*mesh, 0, This->color);
+        if (SUCCEEDED(hr))
+            hr = IDirect3DRMMesh_SetGroupMaterial(*mesh, 0, (LPDIRECT3DRMMATERIAL)This->material);
+        if (SUCCEEDED(hr) && This->texture)
+        {
+             LPDIRECT3DRMTEXTURE texture;
+
+             IDirect3DRMTexture3_QueryInterface(This->texture, &IID_IDirect3DRMTexture, (LPVOID*)&texture);
+             hr = IDirect3DRMMesh_SetGroupTexture(*mesh, 0, texture);
+             IDirect3DRMTexture_Release(texture);
         }
         if (FAILED(hr))
             IDirect3DRMMesh_Release(*mesh);
@@ -2451,6 +2623,9 @@ static HRESULT WINAPI IDirect3DRMMeshImpl_AddGroup(IDirect3DRMMesh* iface,
 
     memcpy(group->face_data, face_data, group->face_data_size * sizeof(unsigned));
 
+    group->material = NULL;
+    group->texture = NULL;
+
     *return_id = This->nb_groups++;
 
     return D3DRM_OK;
@@ -2479,13 +2654,18 @@ static HRESULT WINAPI IDirect3DRMMeshImpl_SetVertices(IDirect3DRMMesh* iface,
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupColor(IDirect3DRMMesh* iface,
-                                                        D3DRMGROUPINDEX id, D3DCOLOR value)
+                                                        D3DRMGROUPINDEX id, D3DCOLOR color)
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u,%x): stub\n", This, id, value);
+    TRACE("(%p)->(%u,%x)\n", This, id, color);
 
-    return E_NOTIMPL;
+    if (id >= This->nb_groups)
+        return D3DRMERR_BADVALUE;
+
+    This->groups[id].color = color;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupColorRGB(IDirect3DRMMesh* iface,
@@ -2519,23 +2699,46 @@ static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupQuality(IDirect3DRMMesh* iface
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupMaterial(IDirect3DRMMesh* iface,
-                                                           D3DRMGROUPINDEX id, LPDIRECT3DRMMATERIAL value)
+                                                           D3DRMGROUPINDEX id, LPDIRECT3DRMMATERIAL material)
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u,%p): stub\n", This, id, value);
+    TRACE("(%p)->(%u,%p)\n", This, id, material);
 
-    return E_NOTIMPL;
+    if (id >= This->nb_groups)
+        return D3DRMERR_BADVALUE;
+
+    if (This->groups[id].material)
+        IDirect3DRMMaterial2_Release(This->groups[id].material);
+
+    This->groups[id].material = (LPDIRECT3DRMMATERIAL2)material;
+
+    if (material)
+        IDirect3DRMMaterial2_AddRef(This->groups[id].material);
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupTexture(IDirect3DRMMesh* iface,
-                                                          D3DRMGROUPINDEX id, LPDIRECT3DRMTEXTURE value)
+                                                          D3DRMGROUPINDEX id, LPDIRECT3DRMTEXTURE texture)
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u,%p): stub\n", This, id, value);
+    TRACE("(%p)->(%u,%p)\n", This, id, texture);
 
-    return E_NOTIMPL;
+    if (id >= This->nb_groups)
+        return D3DRMERR_BADVALUE;
+
+    if (This->groups[id].texture)
+        IDirect3DRMTexture3_Release(This->groups[id].texture);
+
+    if (!texture)
+    {
+        This->groups[id].texture = NULL;
+        return D3DRM_OK;
+    }
+
+    return IDirect3DRMTexture3_QueryInterface(texture, &IID_IDirect3DRMTexture, (LPVOID*)&This->groups[id].texture);
 }
 
 static DWORD WINAPI IDirect3DRMMeshImpl_GetGroupCount(IDirect3DRMMesh* iface)
@@ -2597,9 +2800,9 @@ static D3DCOLOR WINAPI IDirect3DRMMeshImpl_GetGroupColor(IDirect3DRMMesh* iface,
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u): stub\n", This, id);
+    TRACE("(%p)->(%u)\n", This, id);
 
-    return 0;
+    return This->groups[id].color;
 }
 
 static D3DRMMAPPING WINAPI IDirect3DRMMeshImpl_GetGroupMapping(IDirect3DRMMesh* iface, D3DRMGROUPINDEX id)
@@ -2620,23 +2823,45 @@ static D3DRMRENDERQUALITY WINAPI IDirect3DRMMeshImpl_GetGroupQuality(IDirect3DRM
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_GetGroupMaterial(IDirect3DRMMesh* iface,
-                                                           D3DRMGROUPINDEX id, LPDIRECT3DRMMATERIAL *returnPtr)
+                                                           D3DRMGROUPINDEX id, LPDIRECT3DRMMATERIAL *material)
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u,%p): stub\n", This, id, returnPtr);
+    TRACE("(%p)->(%u,%p)\n", This, id, material);
 
-    return E_NOTIMPL;
+    if (id >= This->nb_groups)
+        return D3DRMERR_BADVALUE;
+
+    if (!material)
+        return E_POINTER;
+
+    if (This->groups[id].material)
+        IDirect3DRMTexture_QueryInterface(This->groups[id].material, &IID_IDirect3DRMMaterial, (void**)material);
+    else
+        *material = NULL;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMMeshImpl_GetGroupTexture(IDirect3DRMMesh* iface,
-                                                          D3DRMGROUPINDEX id, LPDIRECT3DRMTEXTURE *returnPtr)
+                                                          D3DRMGROUPINDEX id, LPDIRECT3DRMTEXTURE *texture)
 {
     IDirect3DRMMeshImpl *This = impl_from_IDirect3DRMMesh(iface);
 
-    FIXME("(%p)->(%u,%p): stub\n", This, id, returnPtr);
+    TRACE("(%p)->(%u,%p)\n", This, id, texture);
 
-    return E_NOTIMPL;
+    if (id >= This->nb_groups)
+        return D3DRMERR_BADVALUE;
+
+    if (!texture)
+        return E_POINTER;
+
+    if (This->groups[id].texture)
+        IDirect3DRMTexture_QueryInterface(This->groups[id].texture, &IID_IDirect3DRMTexture, (void**)texture);
+    else
+        *texture = NULL;
+
+    return D3DRM_OK;
 }
 
 static const struct IDirect3DRMMeshVtbl Direct3DRMMesh_Vtbl =

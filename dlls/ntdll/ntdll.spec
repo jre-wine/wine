@@ -266,7 +266,7 @@
 @ stdcall NtQuerySemaphore (long long ptr long ptr)
 @ stdcall NtQuerySymbolicLinkObject(long ptr ptr)
 @ stdcall NtQuerySystemEnvironmentValue(ptr ptr long ptr)
-# @ stub NtQuerySystemEnvironmentValueEx
+@ stdcall NtQuerySystemEnvironmentValueEx(ptr ptr ptr ptr ptr)
 @ stdcall NtQuerySystemInformation(long long long long)
 @ stdcall NtQuerySystemTime(ptr)
 @ stdcall NtQueryTimer(ptr long ptr long ptr)
@@ -1270,6 +1270,7 @@
 @ cdecl -private _itoa(long ptr long)
 @ cdecl -private _itow(long ptr long)
 @ cdecl -private _lfind(ptr ptr ptr long ptr)
+@ stdcall -arch=x86_64 _local_unwind(ptr ptr)
 @ cdecl -private _ltoa(long ptr long)
 @ cdecl -private _ltow(long ptr long)
 @ cdecl -private _memccpy(ptr ptr long long)

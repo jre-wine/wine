@@ -2878,6 +2878,45 @@ static void release_cert_info(INTERNET_CERTIFICATE_INFOA *info)
     LocalFree(info->lpszEncryptionAlgName);
 }
 
+static void test_cert_struct(HINTERNET req)
+{
+    INTERNET_CERTIFICATE_INFOA info;
+    DWORD size;
+    BOOL res;
+
+    static const char ex_subject[] =
+        "US\r\n"
+        "Minnesota\r\n"
+        "Saint Paul\r\n"
+        "WineHQ\r\n"
+        "test.winehq.org\r\n"
+        "webmaster@winehq.org";
+
+    static const char ex_issuer[] =
+        "US\r\n"
+        "Minnesota\r\n"
+        "WineHQ\r\n"
+        "test.winehq.org\r\n"
+        "webmaster@winehq.org";
+
+    memset(&info, 0x5, sizeof(&info));
+
+    size = sizeof(info);
+    res = InternetQueryOption(req, INTERNET_OPTION_SECURITY_CERTIFICATE_STRUCT, &info, &size);
+    ok(res, "InternetQueryOption failed: %u\n", GetLastError());
+    ok(size == sizeof(info), "size = %u\n", size);
+
+    ok(!strcmp(info.lpszSubjectInfo, ex_subject), "lpszSubjectInfo = %s\n", info.lpszSubjectInfo);
+    ok(!strcmp(info.lpszIssuerInfo, ex_issuer), "lpszIssuerInfo = %s\n", info.lpszIssuerInfo);
+    ok(!info.lpszSignatureAlgName, "lpszSignatureAlgName = %s\n", info.lpszSignatureAlgName);
+    ok(!info.lpszEncryptionAlgName, "lpszEncryptionAlgName = %s\n", info.lpszEncryptionAlgName);
+    ok(!info.lpszProtocolName, "lpszProtocolName = %s\n", info.lpszProtocolName);
+    todo_wine
+    ok(info.dwKeySize == 128, "dwKeySize = %u\n", info.dwKeySize);
+
+    release_cert_info(&info);
+}
+
 #define test_secflags_option(a,b) _test_secflags_option(__LINE__,a,b)
 static void _test_secflags_option(unsigned line, HINTERNET req, DWORD ex_flags)
 {
@@ -2889,14 +2928,21 @@ static void _test_secflags_option(unsigned line, HINTERNET req, DWORD ex_flags)
     res = InternetQueryOptionW(req, INTERNET_OPTION_SECURITY_FLAGS, &flags, &size);
     ok_(__FILE__,line)(res, "InternetQueryOptionW(INTERNET_OPTION_SECURITY_FLAGS) failed: %u\n", GetLastError());
     ok_(__FILE__,line)(flags == ex_flags, "INTERNET_OPTION_SECURITY_FLAGS flags = %x, expected %x\n", flags, ex_flags);
+
+    /* Option 98 is undocumented and seems to be the same as INTERNET_OPTION_SECURITY_FLAGS */
+    flags = 0xdeadbeef;
+    size = sizeof(flags);
+    res = InternetQueryOptionW(req, 98, &flags, &size);
+    ok_(__FILE__,line)(res, "InternetQueryOptionW(98) failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(flags == ex_flags, "INTERNET_OPTION_SECURITY_FLAGS(98) flags = %x, expected %x\n", flags, ex_flags);
 }
 
-#define set_secflags(a,b) _set_secflags(__LINE__,a,b)
-static void _set_secflags(unsigned line, HINTERNET req, DWORD flags)
+#define set_secflags(a,b,c) _set_secflags(__LINE__,a,b,c)
+static void _set_secflags(unsigned line, HINTERNET req, BOOL use_undoc, DWORD flags)
 {
     BOOL res;
 
-    res = InternetSetOptionW(req, INTERNET_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
+    res = InternetSetOptionW(req, use_undoc ? 99 : INTERNET_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
     ok_(__FILE__,line)(res, "InternetSetOption(INTERNET_OPTION_SECURITY_FLAGS) failed: %u\n", GetLastError());
 }
 
@@ -2929,12 +2975,85 @@ static void test_security_flags(void)
     ok(req != NULL, "HttpOpenRequest failed\n");
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
 
+    flags = 0xdeadbeef;
+    size = sizeof(flags);
+    res = InternetQueryOptionW(req, 98, &flags, &size);
+    if(!res && GetLastError() == ERROR_INVALID_PARAMETER) {
+        win_skip("Incomplete security flags support, skipping\n");
+
+        close_async_handle(ses, hCompleteEvent, 2);
+        CloseHandle(hCompleteEvent);
+        return;
+    }
+
+    test_secflags_option(req, 0);
+
+    set_secflags(req, TRUE, SECURITY_FLAG_IGNORE_REVOCATION);
+    test_secflags_option(req, SECURITY_FLAG_IGNORE_REVOCATION);
+
+    set_secflags(req, TRUE, SECURITY_FLAG_IGNORE_CERT_CN_INVALID);
+    test_secflags_option(req, SECURITY_FLAG_IGNORE_REVOCATION|SECURITY_FLAG_IGNORE_CERT_CN_INVALID);
+
+    set_secflags(req, FALSE, SECURITY_FLAG_IGNORE_UNKNOWN_CA);
+    test_secflags_option(req, SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_REVOCATION|SECURITY_FLAG_IGNORE_CERT_CN_INVALID);
+
+    flags = SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_SECURE;
+    res = InternetSetOptionW(req, 99, &flags, sizeof(flags));
+    ok(!res && GetLastError() == ERROR_INTERNET_OPTION_NOT_SETTABLE, "InternetSetOption(99) failed: %u\n", GetLastError());
+
+    SET_EXPECT(INTERNET_STATUS_RESOLVING_NAME);
+    SET_EXPECT(INTERNET_STATUS_NAME_RESOLVED);
+    SET_EXPECT(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    SET_EXPECT(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    SET_EXPECT(INTERNET_STATUS_SENDING_REQUEST);
+    SET_EXPECT(INTERNET_STATUS_REQUEST_SENT);
+    SET_EXPECT(INTERNET_STATUS_RECEIVING_RESPONSE);
+    SET_EXPECT(INTERNET_STATUS_RESPONSE_RECEIVED);
+    SET_EXPECT(INTERNET_STATUS_REQUEST_COMPLETE);
+    SET_OPTIONAL(INTERNET_STATUS_DETECTING_PROXY);
+    SET_OPTIONAL(INTERNET_STATUS_COOKIE_SENT);
+
+    res = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(!res && GetLastError() == ERROR_IO_PENDING, "HttpSendRequest failed: %u\n", GetLastError());
+
+    WaitForSingleObject(hCompleteEvent, INFINITE);
+    ok(req_error == ERROR_SUCCESS, "req_error = %d\n", req_error);
+
+    todo_wine CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
+    todo_wine CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    CHECK_NOTIFIED(INTERNET_STATUS_SENDING_REQUEST);
+    CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_SENT);
+    CHECK_NOTIFIED(INTERNET_STATUS_RECEIVING_RESPONSE);
+    CHECK_NOTIFIED(INTERNET_STATUS_RESPONSE_RECEIVED);
+    CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
+    CLEAR_NOTIFIED(INTERNET_STATUS_DETECTING_PROXY);
+    CLEAR_NOTIFIED(INTERNET_STATUS_COOKIE_SENT);
+
+    test_request_flags(req, 0);
+    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA
+            |SECURITY_FLAG_IGNORE_REVOCATION|SECURITY_FLAG_IGNORE_CERT_CN_INVALID|SECURITY_FLAG_STRENGTH_STRONG);
+
+    res = InternetReadFile(req, buf, sizeof(buf), &size);
+    ok(res, "InternetReadFile failed: %u\n", GetLastError());
+    ok(size, "size = 0\n");
+
+    /* Collect all existing persistent connections */
+    res = InternetSetOptionA(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+    ok(res, "InternetSetOption(INTERNET_OPTION_END_BROWSER_SESSION) failed: %u\n", GetLastError());
+
+    SET_EXPECT(INTERNET_STATUS_HANDLE_CREATED);
+    req = HttpOpenRequest(conn, "GET", "/tests/hello.html", NULL, NULL, NULL,
+                          INTERNET_FLAG_SECURE|INTERNET_FLAG_KEEP_CONNECTION|INTERNET_FLAG_RELOAD|INTERNET_FLAG_NO_CACHE_WRITE,
+                          0xdeadbeef);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+    CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
+
     flags = INTERNET_ERROR_MASK_COMBINED_SEC_CERT|INTERNET_ERROR_MASK_LOGIN_FAILURE_DISPLAY_ENTITY_BODY;
     res = InternetSetOption(req, INTERNET_OPTION_ERROR_MASK, (void*)&flags, sizeof(flags));
     ok(res, "InternetQueryOption(INTERNET_OPTION_ERROR_MASK failed: %u\n", GetLastError());
 
-    SET_EXPECT(INTERNET_STATUS_RESOLVING_NAME);
-    SET_EXPECT(INTERNET_STATUS_NAME_RESOLVED);
     SET_EXPECT(INTERNET_STATUS_CONNECTING_TO_SERVER);
     SET_EXPECT(INTERNET_STATUS_CONNECTED_TO_SERVER);
     SET_EXPECT(INTERNET_STATUS_CLOSING_CONNECTION);
@@ -2950,8 +3069,6 @@ static void test_security_flags(void)
     ok(req_error == ERROR_INTERNET_SEC_CERT_REV_FAILED || broken(req_error == ERROR_INTERNET_SEC_CERT_ERRORS),
        "req_error = %d\n", req_error);
 
-    todo_wine CHECK_NOT_NOTIFIED(INTERNET_STATUS_RESOLVING_NAME);
-    todo_wine CHECK_NOT_NOTIFIED(INTERNET_STATUS_NAME_RESOLVED);
     CHECK_NOTIFIED(INTERNET_STATUS_CONNECTING_TO_SERVER);
     CHECK_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
     CHECK_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
@@ -2963,7 +3080,7 @@ static void test_security_flags(void)
     if(req_error != ERROR_INTERNET_SEC_CERT_REV_FAILED) {
         win_skip("Unexpected cert errors, skipping security flags tests\n");
 
-        close_async_handle(ses, hCompleteEvent, 2);
+        close_async_handle(ses, hCompleteEvent, 3);
         CloseHandle(hCompleteEvent);
         return;
     }
@@ -2975,8 +3092,37 @@ static void test_security_flags(void)
     test_request_flags(req, 8);
     test_secflags_option(req, 0x800000);
 
-    set_secflags(req, SECURITY_FLAG_IGNORE_UNKNOWN_CA);
-    test_secflags_option(req, 0x800000|SECURITY_FLAG_IGNORE_UNKNOWN_CA);
+    set_secflags(req, FALSE, SECURITY_FLAG_IGNORE_REVOCATION);
+    test_secflags_option(req, 0x800000|SECURITY_FLAG_IGNORE_REVOCATION);
+
+    SET_EXPECT(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    SET_EXPECT(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    SET_EXPECT(INTERNET_STATUS_CLOSING_CONNECTION);
+    SET_EXPECT(INTERNET_STATUS_CONNECTION_CLOSED);
+    SET_EXPECT(INTERNET_STATUS_REQUEST_COMPLETE);
+    SET_OPTIONAL(INTERNET_STATUS_COOKIE_SENT);
+    SET_OPTIONAL(INTERNET_STATUS_DETECTING_PROXY);
+
+    res = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(!res && GetLastError() == ERROR_IO_PENDING, "HttpSendRequest failed: %u\n", GetLastError());
+
+    WaitForSingleObject(hCompleteEvent, INFINITE);
+    ok(req_error == ERROR_INTERNET_SEC_CERT_ERRORS, "req_error = %d\n", req_error);
+
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    CHECK_NOTIFIED(INTERNET_STATUS_CLOSING_CONNECTION);
+    CHECK_NOTIFIED(INTERNET_STATUS_CONNECTION_CLOSED);
+    CHECK_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
+    CLEAR_NOTIFIED(INTERNET_STATUS_COOKIE_SENT);
+    CLEAR_NOTIFIED(INTERNET_STATUS_DETECTING_PROXY);
+
+    test_request_flags(req, INTERNET_REQFLAG_NO_HEADERS);
+    test_secflags_option(req, SECURITY_FLAG_IGNORE_REVOCATION|0x1800000);
+
+    set_secflags(req, FALSE, SECURITY_FLAG_IGNORE_UNKNOWN_CA);
+    test_secflags_option(req, 0x1800000|SECURITY_FLAG_IGNORE_REVOCATION|SECURITY_FLAG_IGNORE_UNKNOWN_CA
+            |SECURITY_FLAG_IGNORE_REVOCATION);
     test_http_version(req);
 
     SET_EXPECT(INTERNET_STATUS_CONNECTING_TO_SERVER);
@@ -3006,14 +3152,16 @@ static void test_security_flags(void)
     CLEAR_NOTIFIED(INTERNET_STATUS_DETECTING_PROXY);
 
     test_request_flags(req, 0);
-    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA
-                         |SECURITY_FLAG_STRENGTH_STRONG|0x800000);
+    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_IGNORE_REVOCATION
+            |SECURITY_FLAG_STRENGTH_STRONG|0x1800000);
+
+    test_cert_struct(req);
 
     res = InternetReadFile(req, buf, sizeof(buf), &size);
     ok(res, "InternetReadFile failed: %u\n", GetLastError());
     ok(size, "size = 0\n");
 
-    close_async_handle(ses, hCompleteEvent, 2);
+    close_async_handle(ses, hCompleteEvent, 3);
 
     /* Collect all existing persistent connections */
     res = InternetSetOptionA(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
@@ -3039,7 +3187,8 @@ static void test_security_flags(void)
     ok(req != NULL, "HttpOpenRequest failed\n");
     CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
 
-    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_STRENGTH_STRONG|0x800000);
+    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_STRENGTH_STRONG
+           |SECURITY_FLAG_IGNORE_REVOCATION|0x1800000);
     test_http_version(req);
 
     SET_EXPECT(INTERNET_STATUS_CONNECTING_TO_SERVER);
@@ -3067,7 +3216,8 @@ static void test_security_flags(void)
     CLEAR_NOTIFIED(INTERNET_STATUS_COOKIE_SENT);
 
     test_request_flags(req, 0);
-    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_STRENGTH_STRONG|0x800000);
+    test_secflags_option(req, SECURITY_FLAG_SECURE|SECURITY_FLAG_IGNORE_UNKNOWN_CA|SECURITY_FLAG_STRENGTH_STRONG
+            |SECURITY_FLAG_IGNORE_REVOCATION|0x1800000);
 
     res = InternetReadFile(req, buf, sizeof(buf), &size);
     ok(res, "InternetReadFile failed: %u\n", GetLastError());

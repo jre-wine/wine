@@ -200,7 +200,7 @@ static inline float float_16_to_32(const unsigned short *in) {
         return sgn * powf(2, (float)e - 15.0f) * (1.0f + ((float)m / 1024.0f));
     } else {
         if(m == 0) return sgn / 0.0f; /* +INF / -INF */
-        else return 0.0f / 0.0f; /* NAN */
+        else return NAN;
     }
 }
 
@@ -222,7 +222,7 @@ static inline float float_24_to_32(DWORD in)
     else
     {
         if (m == 0) return sgn / 0.0f; /* +INF / -INF */
-        else return 0.0f / 0.0f; /* NAN */
+        else return NAN;
     }
 }
 
@@ -1406,6 +1406,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX570      = 0x1081,
     CARD_NVIDIA_GEFORCE_GTX580      = 0x1080,
     CARD_NVIDIA_GEFORCE_GTX670      = 0x1189,
+    CARD_NVIDIA_GEFORCE_GTX680      = 0x1180,
 
     CARD_INTEL_830M                 = 0x3577,
     CARD_INTEL_855GM                = 0x3582,

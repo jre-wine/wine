@@ -3449,6 +3449,60 @@ msgstr ""
 msgid "High"
 msgstr ""
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+#, fuzzy
+msgid "&Disable"
+msgstr "табела"
+
+#: joy.rc:37
+#, fuzzy
+msgid "&Enable"
+msgstr "&Табела"
+
+#: joy.rc:38
+#, fuzzy
+msgid "Connected"
+msgstr "Датотека није пронађена"
+
+#: joy.rc:40
+#, fuzzy
+msgid "Disabled"
+msgstr "табела"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+#| msgid "Create Control"
+msgid "Game Controllers"
+msgstr "Направи контролу"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr "Грешка у претварању објекта у основну врсту"
@@ -12531,11 +12585,6 @@ msgstr ""
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr ""
-
-#: winecfg.rc:204
-#, fuzzy
-msgid "&Disable"
-msgstr "табела"
 
 #: winecfg.rc:211
 #, fuzzy

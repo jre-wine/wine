@@ -247,43 +247,73 @@ static DWORD netconn_verify_cert(netconn_t *conn, PCCERT_CONTEXT cert, HCERTSTOR
     errors = chain->TrustStatus.dwErrorStatus;
 
     if (chain->TrustStatus.dwErrorStatus & ~supportedErrors) {
-        WARN("CERT_TRUST_IS_NOT_TIME_VALID, unknown error flags\n");
-        err = ERROR_INTERNET_SEC_INVALID_CERT;
+        WARN("error status %x\n", chain->TrustStatus.dwErrorStatus & ~supportedErrors);
+        if(conn->mask_errors)
+            WARN("CERT_TRUST_IS_NOT_TIME_VALID, unknown error flags\n");
+        err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_INVALID_CERT;
         errors &= supportedErrors;
     }
 
     if(errors & CERT_TRUST_IS_NOT_TIME_VALID) {
-        WARN("CERT_TRUST_IS_NOT_TIME_VALID, unknown error flags\n");
+        WARN("CERT_TRUST_IS_NOT_TIME_VALID\n");
+        if(conn->mask_errors)
+            conn->security_flags |= _SECURITY_FLAG_CERT_INVALID_DATE;
         if(!(conn->security_flags & SECURITY_FLAG_IGNORE_CERT_DATE_INVALID))
-            err = ERROR_INTERNET_SEC_CERT_DATE_INVALID;
+            err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_CERT_DATE_INVALID;
         errors &= ~CERT_TRUST_IS_NOT_TIME_VALID;
     }
 
-    if(errors & (CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN)) {
-        conn->security_flags |= _SECURITY_FLAG_CERT_INVALID_CA;
+    if(errors & CERT_TRUST_IS_UNTRUSTED_ROOT) {
+        WARN("CERT_TRUST_IS_UNTRUSTED_ROOT\n");
+        if(conn->mask_errors)
+            WARN("CERT_TRUST_IS_UNTRUSTED_ROOT, unknown flags\n");
         if(!(conn->security_flags & SECURITY_FLAG_IGNORE_UNKNOWN_CA))
-            err = ERROR_INTERNET_INVALID_CA;
-        errors &= ~(CERT_TRUST_IS_UNTRUSTED_ROOT | CERT_TRUST_IS_PARTIAL_CHAIN);
+            err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_INVALID_CA;
+        errors &= ~CERT_TRUST_IS_UNTRUSTED_ROOT;
+    }
+
+    /* This seems strange, but that's what tests show */
+    if(errors & CERT_TRUST_IS_PARTIAL_CHAIN) {
+        WARN("CERT_TRUST_IS_PARTIAL_CHAIN\n");
+        if(!(conn->security_flags & SECURITY_FLAG_IGNORE_UNKNOWN_CA)) {
+            if(!(conn->security_flags & _SECURITY_FLAG_CERT_REV_FAILED))
+                err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_CERT_REV_FAILED;
+            else
+                err = conn->mask_errors ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_INVALID_CA;
+        }
+        if(conn->mask_errors) {
+            if(!(conn->security_flags & _SECURITY_FLAG_CERT_REV_FAILED))
+                conn->security_flags |= _SECURITY_FLAG_CERT_REV_FAILED;
+            else
+                conn->security_flags |= _SECURITY_FLAG_CERT_INVALID_CA;
+        }
+        errors &= ~CERT_TRUST_IS_PARTIAL_CHAIN;
     }
 
     if(errors & (CERT_TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN)) {
-        WARN("TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN, unknown error flags\n");
+        WARN("CERT_TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN\n");
+        if(conn->mask_errors)
+            WARN("TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN, unknown error flags\n");
         if(!(conn->security_flags & SECURITY_FLAG_IGNORE_REVOCATION))
-            err = ERROR_INTERNET_SEC_CERT_NO_REV;
+            err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_CERT_NO_REV;
         errors &= ~(CERT_TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN);
     }
 
     if(errors & CERT_TRUST_IS_REVOKED) {
-        WARN("TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN, unknown error flags\n");
+        WARN("CERT_TRUST_IS_REVOKED\n");
+        if(conn->mask_errors)
+            WARN("TRUST_IS_OFFLINE_REVOCATION | CERT_TRUST_REVOCATION_STATUS_UNKNOWN, unknown error flags\n");
         if(!(conn->security_flags & SECURITY_FLAG_IGNORE_REVOCATION))
-            err = ERROR_INTERNET_SEC_CERT_REVOKED;
+            err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_CERT_REVOKED;
         errors &= ~CERT_TRUST_IS_REVOKED;
     }
 
     if(errors & CERT_TRUST_IS_NOT_VALID_FOR_USAGE) {
-        WARN("CERT_TRUST_IS_NOT_VALID_FOR_USAGE, unknown error flags\n");
+        WARN("CERT_TRUST_IS_NOT_VALID_FOR_USAGE\n");
+        if(conn->mask_errors)
+            WARN("CERT_TRUST_IS_NOT_VALID_FOR_USAGE, unknown error flags\n");
         if(!(conn->security_flags & SECURITY_FLAG_IGNORE_WRONG_USAGE))
-            err = ERROR_INTERNET_SEC_INVALID_CERT;
+            err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_INVALID_CERT;
         errors &= ~CERT_TRUST_IS_NOT_VALID_FOR_USAGE;
     }
 
@@ -313,11 +343,15 @@ static DWORD netconn_verify_cert(netconn_t *conn, PCCERT_CONTEXT cert, HCERTSTOR
          */
         if(ret) {
             if(policyStatus.dwError == CERT_E_CN_NO_MATCH) {
-                conn->security_flags |= _SECURITY_FLAG_CERT_INVALID_CN;
-                err = ERROR_INTERNET_SEC_CERT_CN_INVALID;
+                WARN("CERT_E_CN_NO_MATCH\n");
+                if(conn->mask_errors)
+                    conn->security_flags |= _SECURITY_FLAG_CERT_INVALID_CN;
+                err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_CERT_CN_INVALID;
             }else if(policyStatus.dwError) {
-                WARN("unknown error flags for policy status %x\n", policyStatus.dwError);
-                err = ERROR_INTERNET_SEC_INVALID_CERT;
+                WARN("policyStatus.dwError %x\n", policyStatus.dwError);
+                if(conn->mask_errors)
+                    WARN("unknown error flags for policy status %x\n", policyStatus.dwError);
+                err = conn->mask_errors && err ? ERROR_INTERNET_SEC_CERT_ERRORS : ERROR_INTERNET_SEC_INVALID_CERT;
             }
         }else {
             err = GetLastError();
@@ -328,9 +362,8 @@ static DWORD netconn_verify_cert(netconn_t *conn, PCCERT_CONTEXT cert, HCERTSTOR
 
     if(err) {
         WARN("failed %u\n", err);
-        conn->server->security_flags |= conn->security_flags & _SECURITY_ERROR_FLAGS_MASK;
         if(conn->mask_errors)
-            return err == ERROR_INTERNET_INVALID_CA ? ERROR_INTERNET_SEC_CERT_REV_FAILED : ERROR_INTERNET_SEC_CERT_ERRORS;
+            conn->server->security_flags |= conn->security_flags & _SECURITY_ERROR_FLAGS_MASK;
         return err;
     }
 
@@ -772,7 +805,8 @@ DWORD NETCON_secure_connect(netconn_t *connection)
         connection->security_flags |= SECURITY_FLAG_STRENGTH_WEAK;
     connection->security_flags |= SECURITY_FLAG_SECURE;
 
-    connection->server->security_flags = connection->security_flags;
+    if(connection->mask_errors)
+        connection->server->security_flags = connection->security_flags;
     return ERROR_SUCCESS;
 
 fail:

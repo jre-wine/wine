@@ -3,6 +3,7 @@
  * Copyright 2009 Matteo Bruni
  * Copyright 2008-2009 Henri Verbeet for CodeWeavers
  * Copyright 2010 Rico Schüller
+ * Copyright 2012 Matteo Bruni for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -757,5 +758,308 @@ void compilation_message(struct compilation_messages *msg, const char *fmt, va_l
             msg->size += rc;
             return;
         }
+    }
+}
+
+BOOL add_declaration(struct hlsl_scope *scope, struct hlsl_ir_var *decl, BOOL local_var)
+{
+    struct hlsl_ir_var *var;
+
+    LIST_FOR_EACH_ENTRY(var, &scope->vars, struct hlsl_ir_var, scope_entry)
+    {
+        if (!strcmp(decl->name, var->name))
+            return FALSE;
+    }
+    if (local_var)
+    {
+        LIST_FOR_EACH_ENTRY(var, &scope->upper->vars, struct hlsl_ir_var, scope_entry)
+        {
+            if (!strcmp(decl->name, var->name))
+                return FALSE;
+        }
+    }
+
+    list_add_tail(&scope->vars, &decl->scope_entry);
+    return TRUE;
+}
+
+struct hlsl_ir_var *get_variable(struct hlsl_scope *scope, const char *name)
+{
+    struct hlsl_ir_var *var;
+
+    LIST_FOR_EACH_ENTRY(var, &scope->vars, struct hlsl_ir_var, scope_entry)
+    {
+        if (!strcmp(name, var->name))
+            return var;
+    }
+    if (!scope->upper)
+        return NULL;
+    return get_variable(scope->upper, name);
+}
+
+void free_declaration(struct hlsl_ir_var *decl)
+{
+    d3dcompiler_free((void *)decl->name);
+    d3dcompiler_free((void *)decl->semantic);
+    d3dcompiler_free(decl);
+}
+
+struct hlsl_type *new_hlsl_type(const char *name, enum hlsl_type_class type_class,
+        enum hlsl_base_type base_type, unsigned dimx, unsigned dimy)
+{
+    struct hlsl_type *type;
+
+    type = d3dcompiler_alloc(sizeof(*type));
+    if (!type)
+    {
+        ERR("Out of memory\n");
+        return NULL;
+    }
+    type->name = name;
+    type->type = type_class;
+    type->base_type = base_type;
+    type->dimx = dimx;
+    type->dimy = dimy;
+
+    list_add_tail(&hlsl_ctx.types, &type->entry);
+
+    return type;
+}
+
+struct hlsl_type *new_array_type(struct hlsl_type *basic_type, unsigned int array_size)
+{
+    FIXME("stub.\n");
+    return NULL;
+}
+
+struct hlsl_type *get_type(struct hlsl_scope *scope, const char *name, BOOL recursive)
+{
+    FIXME("stub.\n");
+    return NULL;
+}
+
+BOOL find_function(const char *name)
+{
+    FIXME("stub.\n");
+    return FALSE;
+}
+
+struct hlsl_ir_deref *new_var_deref(struct hlsl_ir_var *var)
+{
+    struct hlsl_ir_deref *deref = d3dcompiler_alloc(sizeof(*deref));
+
+    if (!deref)
+    {
+        ERR("Out of memory.\n");
+        return NULL;
+    }
+    deref->node.type = HLSL_IR_DEREF;
+    deref->node.data_type = var->node.data_type;
+    deref->type = HLSL_IR_DEREF_VAR;
+    deref->v.var = var;
+    return deref;
+}
+
+void push_scope(struct hlsl_parse_ctx *ctx)
+{
+    struct hlsl_scope *new_scope = d3dcompiler_alloc(sizeof(*new_scope));
+
+    if (!new_scope)
+    {
+        ERR("Out of memory!\n");
+        return;
+    }
+    list_init(&new_scope->vars);
+    list_init(&new_scope->types);
+    new_scope->upper = ctx->cur_scope;
+    ctx->cur_scope = new_scope;
+    list_add_tail(&ctx->scopes, &new_scope->entry);
+}
+
+BOOL pop_scope(struct hlsl_parse_ctx *ctx)
+{
+    struct hlsl_scope *prev_scope = ctx->cur_scope->upper;
+    if (!prev_scope)
+        return FALSE;
+
+    ctx->cur_scope = prev_scope;
+    return TRUE;
+}
+
+static const char *debug_base_type(const struct hlsl_type *type)
+{
+    const char *name = "(unknown)";
+
+    switch (type->base_type)
+    {
+        case HLSL_TYPE_FLOAT:        name = "float";         break;
+        case HLSL_TYPE_HALF:         name = "half";          break;
+        case HLSL_TYPE_INT:          name = "int";           break;
+        case HLSL_TYPE_UINT:         name = "uint";          break;
+        case HLSL_TYPE_BOOL:         name = "bool";          break;
+        default:
+            FIXME("Unhandled case %u\n", type->base_type);
+    }
+    return name;
+}
+
+const char *debug_hlsl_type(const struct hlsl_type *type)
+{
+    const char *name;
+
+    if (type->name)
+        return debugstr_a(type->name);
+
+    if (type->type == HLSL_CLASS_STRUCT)
+        name = "<anonymous struct>";
+    else
+        name = debug_base_type(type);
+
+    if (type->type == HLSL_CLASS_SCALAR)
+        return wine_dbg_sprintf("%s", name);
+    if (type->type == HLSL_CLASS_VECTOR)
+        return wine_dbg_sprintf("vector<%s, %u>", name, type->dimx);
+    if (type->type == HLSL_CLASS_MATRIX)
+        return wine_dbg_sprintf("matrix<%s, %u, %u>", name, type->dimx, type->dimy);
+    return "unexpected_type";
+}
+
+const char *debug_modifiers(DWORD modifiers)
+{
+    char string[110];
+
+    string[0] = 0;
+    if (modifiers & HLSL_STORAGE_EXTERN)
+        strcat(string, " extern");                       /* 7 */
+    if (modifiers & HLSL_STORAGE_NOINTERPOLATION)
+        strcat(string, " nointerpolation");              /* 16 */
+    if (modifiers & HLSL_MODIFIER_PRECISE)
+        strcat(string, " precise");                      /* 8 */
+    if (modifiers & HLSL_STORAGE_SHARED)
+        strcat(string, " shared");                       /* 7 */
+    if (modifiers & HLSL_STORAGE_GROUPSHARED)
+        strcat(string, " groupshared");                  /* 12 */
+    if (modifiers & HLSL_STORAGE_STATIC)
+        strcat(string, " static");                       /* 7 */
+    if (modifiers & HLSL_STORAGE_UNIFORM)
+        strcat(string, " uniform");                      /* 8 */
+    if (modifiers & HLSL_STORAGE_VOLATILE)
+        strcat(string, " volatile");                     /* 9 */
+    if (modifiers & HLSL_MODIFIER_CONST)
+        strcat(string, " const");                        /* 6 */
+    if (modifiers & HLSL_MODIFIER_ROW_MAJOR)
+        strcat(string, " row_major");                    /* 10 */
+    if (modifiers & HLSL_MODIFIER_COLUMN_MAJOR)
+        strcat(string, " column_major");                 /* 13 */
+    if ((modifiers & (HLSL_MODIFIER_IN | HLSL_MODIFIER_OUT)) == (HLSL_MODIFIER_IN | HLSL_MODIFIER_OUT))
+        strcat(string, " inout");                        /* 6 */
+    else if (modifiers & HLSL_MODIFIER_IN)
+        strcat(string, " in");                           /* 3 */
+    else if (modifiers & HLSL_MODIFIER_OUT)
+        strcat(string, " out");                          /* 4 */
+
+    return wine_dbg_sprintf("%s", string[0] ? string + 1 : "");
+}
+
+static const char *debug_node_type(enum hlsl_ir_node_type type)
+{
+    const char *names[] =
+    {
+        "HLSL_IR_VAR",
+        "HLSL_IR_CONSTANT",
+        "HLSL_IR_DEREF",
+    };
+
+    if (type > sizeof(names) / sizeof(names[0]))
+    {
+        return "Unexpected node type";
+    }
+    return names[type];
+}
+
+void free_hlsl_type(struct hlsl_type *type)
+{
+    struct hlsl_struct_field *field, *next_field;
+
+    d3dcompiler_free((void *)type->name);
+    if (type->type == HLSL_CLASS_STRUCT)
+    {
+        LIST_FOR_EACH_ENTRY_SAFE(field, next_field, type->e.elements, struct hlsl_struct_field, entry)
+        {
+            d3dcompiler_free((void *)field->name);
+            d3dcompiler_free((void *)field->semantic);
+            d3dcompiler_free(field);
+        }
+    }
+    d3dcompiler_free(type);
+}
+
+void free_instr_list(struct list *list)
+{
+    struct hlsl_ir_node *node, *next_node;
+
+    if (!list)
+        return;
+    LIST_FOR_EACH_ENTRY_SAFE(node, next_node, list, struct hlsl_ir_node, entry)
+        free_instr(node);
+}
+
+static void free_ir_constant(struct hlsl_ir_constant *constant)
+{
+    struct hlsl_type *type = constant->node.data_type;
+    unsigned int i;
+    struct hlsl_ir_constant *field, *next_field;
+
+    switch (type->type)
+    {
+        case HLSL_CLASS_ARRAY:
+            for (i = 0; i < type->e.array.elements_count; ++i)
+                free_ir_constant(&constant->v.array_elements[i]);
+            d3dcompiler_free(constant->v.array_elements);
+            break;
+        case HLSL_CLASS_STRUCT:
+            LIST_FOR_EACH_ENTRY_SAFE(field, next_field, constant->v.struct_elements, struct hlsl_ir_constant, node.entry)
+                free_ir_constant(field);
+            break;
+        default:
+            break;
+    }
+    d3dcompiler_free(constant);
+}
+
+static void free_ir_deref(struct hlsl_ir_deref *deref)
+{
+    switch (deref->type)
+    {
+        case HLSL_IR_DEREF_VAR:
+            /* Variables are shared among nodes in the tree. */
+            break;
+        case HLSL_IR_DEREF_ARRAY:
+            free_instr(deref->v.array.array);
+            free_instr(deref->v.array.index);
+            break;
+        case HLSL_IR_DEREF_RECORD:
+            free_instr(deref->v.record.record);
+            d3dcompiler_free((void *)deref->v.record.field);
+            break;
+    }
+    d3dcompiler_free(deref);
+}
+
+void free_instr(struct hlsl_ir_node *node)
+{
+    switch (node->type)
+    {
+        case HLSL_IR_VAR:
+            /* These are freed later on from the scopes. */
+            break;
+        case HLSL_IR_CONSTANT:
+            free_ir_constant(constant_from_node(node));
+            break;
+        case HLSL_IR_DEREF:
+            free_ir_deref(deref_from_node(node));
+            break;
+        default:
+            FIXME("Unsupported node type %s\n", debug_node_type(node->type));
     }
 }

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-05-24 02:18+0200\n"
+"PO-Revision-Date: 2012-06-06 01:03+0200\n"
 "Last-Translator: Julian Rüger\n"
 "Language-Team: none\n"
 "Language: German\n"
@@ -3428,6 +3428,54 @@ msgstr "Erhöht"
 #: inetcpl.rc:36
 msgid "High"
 msgstr "Hoch"
+
+#: joy.rc:33
+msgid "Joysticks"
+msgstr "Joysticks"
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "&Ausschalten"
+
+#: joy.rc:37
+msgid "&Enable"
+msgstr "&Einschalten"
+
+#: joy.rc:38
+msgid "Connected"
+msgstr "Verbunden"
+
+#: joy.rc:40
+msgid "Disabled"
+msgstr "Ausgeschaltet"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr "Joystick testen"
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr "Force Feedback testen"
+
+#: joy.rc:28
+msgid "Game Controllers"
+msgstr "Spielsteuerungsgeräte"
 
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
@@ -12561,10 +12609,6 @@ msgstr "Bui&ltin dann Native"
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr "Nati&ve dann Builtin"
-
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "&Ausschalten"
 
 #: winecfg.rc:211
 msgid "Select Drive Letter"

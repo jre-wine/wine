@@ -72,10 +72,8 @@ struct gdi_dc_funcs
     INT      (*pChoosePixelFormat)(PHYSDEV,const PIXELFORMATDESCRIPTOR *);
     BOOL     (*pChord)(PHYSDEV,INT,INT,INT,INT,INT,INT,INT,INT);
     BOOL     (*pCloseFigure)(PHYSDEV);
-    BOOL     (*pCreateBitmap)(PHYSDEV,HBITMAP);
     BOOL     (*pCreateCompatibleDC)(PHYSDEV,PHYSDEV*);
     BOOL     (*pCreateDC)(PHYSDEV*,LPCWSTR,LPCWSTR,LPCWSTR,const DEVMODEW*);
-    BOOL     (*pDeleteBitmap)(HBITMAP);
     BOOL     (*pDeleteDC)(PHYSDEV);
     BOOL     (*pDeleteObject)(PHYSDEV,HGDIOBJ);
     INT      (*pDescribePixelFormat)(PHYSDEV,INT,UINT,PIXELFORMATDESCRIPTOR *);
@@ -110,7 +108,7 @@ struct gdi_dc_funcs
     DWORD    (*pGetGlyphIndices)(PHYSDEV,LPCWSTR,INT,LPWORD,DWORD);
     DWORD    (*pGetGlyphOutline)(PHYSDEV,UINT,UINT,LPGLYPHMETRICS,DWORD,LPVOID,const MAT2*);
     BOOL     (*pGetICMProfile)(PHYSDEV,LPDWORD,LPWSTR);
-    DWORD    (*pGetImage)(PHYSDEV,HBITMAP,BITMAPINFO*,struct gdi_image_bits*,struct bitblt_coords*);
+    DWORD    (*pGetImage)(PHYSDEV,BITMAPINFO*,struct gdi_image_bits*,struct bitblt_coords*);
     DWORD    (*pGetKerningPairs)(PHYSDEV,DWORD,LPKERNINGPAIR);
     COLORREF (*pGetNearestColor)(PHYSDEV,COLORREF);
     UINT     (*pGetOutlineTextMetrics)(PHYSDEV,UINT,LPOUTLINETEXTMETRICW);
@@ -142,7 +140,7 @@ struct gdi_dc_funcs
     BOOL     (*pPolygon)(PHYSDEV,const POINT*,INT);
     BOOL     (*pPolyline)(PHYSDEV,const POINT*,INT);
     BOOL     (*pPolylineTo)(PHYSDEV,const POINT*,INT);
-    DWORD    (*pPutImage)(PHYSDEV,HBITMAP,HRGN,BITMAPINFO*,const struct gdi_image_bits*,struct bitblt_coords*,struct bitblt_coords*,DWORD);
+    DWORD    (*pPutImage)(PHYSDEV,HRGN,BITMAPINFO*,const struct gdi_image_bits*,struct bitblt_coords*,struct bitblt_coords*,DWORD);
     UINT     (*pRealizeDefaultPalette)(PHYSDEV);
     UINT     (*pRealizePalette)(PHYSDEV,HPALETTE,BOOL);
     BOOL     (*pRectangle)(PHYSDEV,INT,INT,INT,INT);
@@ -211,7 +209,7 @@ struct gdi_dc_funcs
 };
 
 /* increment this when you change the DC function table */
-#define WINE_GDI_DRIVER_VERSION 29
+#define WINE_GDI_DRIVER_VERSION 31
 
 #define GDI_PRIORITY_NULL_DRV        0  /* null driver */
 #define GDI_PRIORITY_FONT_DRV      100  /* any font driver */
@@ -236,5 +234,21 @@ static inline void push_dc_driver( PHYSDEV *dev, PHYSDEV physdev, const struct g
     physdev->hdc = (*dev)->hdc;
     *dev = physdev;
 }
+
+/* the DC hook support is only exported on Win16, the 32-bit version is a Wine extension */
+
+#define DCHC_INVALIDVISRGN      0x0001
+#define DCHC_DELETEDC           0x0002
+#define DCHF_INVALIDATEVISRGN   0x0001
+#define DCHF_VALIDATEVISRGN     0x0002
+
+typedef BOOL (CALLBACK *DCHOOKPROC)(HDC,WORD,DWORD_PTR,LPARAM);
+
+WINGDIAPI DWORD_PTR WINAPI GetDCHook(HDC,DCHOOKPROC*);
+WINGDIAPI BOOL      WINAPI SetDCHook(HDC,DCHOOKPROC,DWORD_PTR);
+WINGDIAPI WORD      WINAPI SetHookFlags(HDC,WORD);
+
+extern void CDECL __wine_make_gdi_object_system( HGDIOBJ handle, BOOL set );
+extern void CDECL __wine_set_visible_region( HDC hdc, HRGN hrgn, const RECT *vis_rect );
 
 #endif /* __WINE_WINE_GDI_DRIVER_H */

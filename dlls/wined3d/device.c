@@ -25,10 +25,13 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
+
 #include <stdio.h>
 #ifdef HAVE_FLOAT_H
 # include <float.h>
 #endif
+
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -447,15 +450,8 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         }
     }
 
-    if (state->index_buffer && !state->user_stream)
-    {
-        if (prev_all_vbo != stream_info->all_vbo)
-            device_invalidate_state(device, STATE_INDEXBUFFER);
-        if (stream_info->all_vbo)
-            wined3d_buffer_preload(state->index_buffer);
-        else
-            buffer_get_sysmem(state->index_buffer, gl_info);
-    }
+    if (prev_all_vbo != stream_info->all_vbo)
+        device_invalidate_state(device, STATE_INDEXBUFFER);
 }
 
 static void device_preload_texture(const struct wined3d_state *state, unsigned int idx)

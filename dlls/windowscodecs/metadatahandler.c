@@ -39,7 +39,6 @@ typedef struct MetadataHandler {
     IWICMetadataWriter IWICMetadataWriter_iface;
     LONG ref;
     IWICPersistStream IWICPersistStream_iface;
-    IWICMetadataBlockReader IWICMetadataBlockReader_iface;
     const MetadataHandlerVtbl *vtable;
     MetadataItem *items;
     DWORD item_count;
@@ -54,11 +53,6 @@ static inline MetadataHandler *impl_from_IWICMetadataWriter(IWICMetadataWriter *
 static inline MetadataHandler *impl_from_IWICPersistStream(IWICPersistStream *iface)
 {
     return CONTAINING_RECORD(iface, MetadataHandler, IWICPersistStream_iface);
-}
-
-static inline MetadataHandler *impl_from_IWICMetadataBlockReader(IWICMetadataBlockReader *iface)
-{
-    return CONTAINING_RECORD(iface, MetadataHandler, IWICMetadataBlockReader_iface);
 }
 
 static void MetadataHandler_FreeItems(MetadataHandler *This)
@@ -97,10 +91,6 @@ static HRESULT WINAPI MetadataHandler_QueryInterface(IWICMetadataWriter *iface, 
              IsEqualIID(&IID_IWICPersistStream, iid))
     {
         *ppv = &This->IWICPersistStream_iface;
-    }
-    else if (IsEqualIID(&IID_IWICMetadataBlockReader, iid))
-    {
-        *ppv = &This->IWICMetadataBlockReader_iface;
     }
     else
     {
@@ -143,6 +133,8 @@ static ULONG WINAPI MetadataHandler_Release(IWICMetadataWriter *iface)
 static HRESULT WINAPI MetadataHandler_GetMetadataFormat(IWICMetadataWriter *iface,
     GUID *pguidMetadataFormat)
 {
+    if (!pguidMetadataFormat) return E_INVALIDARG;
+
     FIXME("(%p,%s): stub\n", iface, debugstr_guid(pguidMetadataFormat));
     return E_NOTIMPL;
 }
@@ -157,8 +149,14 @@ static HRESULT WINAPI MetadataHandler_GetMetadataHandlerInfo(IWICMetadataWriter 
 static HRESULT WINAPI MetadataHandler_GetCount(IWICMetadataWriter *iface,
     UINT *pcCount)
 {
-    FIXME("(%p,%p): stub\n", iface, pcCount);
-    return E_NOTIMPL;
+    MetadataHandler *This = impl_from_IWICMetadataWriter(iface);
+
+    TRACE("%p,%p\n", iface, pcCount);
+
+    if (!pcCount) return E_INVALIDARG;
+
+    *pcCount = This->item_count;
+    return S_OK;
 }
 
 static HRESULT WINAPI MetadataHandler_GetValueByIndex(IWICMetadataWriter *iface,
@@ -327,65 +325,7 @@ static const IWICPersistStreamVtbl MetadataHandler_PersistStream_Vtbl = {
     MetadataHandler_SaveEx
 };
 
-static HRESULT WINAPI MetadataHandler_MetadataBlockReader_QueryInterface(IWICMetadataBlockReader *iface,
-    REFIID iid, void **ppv)
-{
-    MetadataHandler *This = impl_from_IWICMetadataBlockReader(iface);
-    return IWICMetadataWriter_QueryInterface(&This->IWICMetadataWriter_iface, iid, ppv);
-}
-
-static ULONG WINAPI MetadataHandler_MetadataBlockReader_AddRef(IWICMetadataBlockReader *iface)
-{
-    MetadataHandler *This = impl_from_IWICMetadataBlockReader(iface);
-    return IWICMetadataWriter_AddRef(&This->IWICMetadataWriter_iface);
-}
-
-static ULONG WINAPI MetadataHandler_MetadataBlockReader_Release(IWICMetadataBlockReader *iface)
-{
-    MetadataHandler *This = impl_from_IWICMetadataBlockReader(iface);
-    return IWICMetadataWriter_Release(&This->IWICMetadataWriter_iface);
-}
-
-static HRESULT WINAPI MetadataHandler_MetadataBlockReader_GetContainerFormat(
-        IWICMetadataBlockReader *iface, GUID *guid)
-{
-    FIXME("(%p,%p): stub\n", iface, guid);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI MetadataHandler_MetadataBlockReader_GetCount(
-        IWICMetadataBlockReader *iface, UINT *count)
-{
-    FIXME("(%p,%p): stub\n", iface, count);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI MetadataHandler_MetadataBlockReader_GetReaderByIndex(
-        IWICMetadataBlockReader *iface, UINT index, IWICMetadataReader **reader)
-{
-    FIXME("(%p,%u,%p): stub\n", iface, index, reader);
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI MetadataHandler_MetadataBlockReader_GetEnumerator(
-        IWICMetadataBlockReader *iface, IEnumUnknown **enum_metadata)
-{
-    FIXME("(%p,%p): stub\n", iface, enum_metadata);
-    return E_NOTIMPL;
-}
-
-static const IWICMetadataBlockReaderVtbl MetadataHandler_MetadataBlockReader_Vtbl =
-{
-    MetadataHandler_MetadataBlockReader_QueryInterface,
-    MetadataHandler_MetadataBlockReader_AddRef,
-    MetadataHandler_MetadataBlockReader_Release,
-    MetadataHandler_MetadataBlockReader_GetContainerFormat,
-    MetadataHandler_MetadataBlockReader_GetCount,
-    MetadataHandler_MetadataBlockReader_GetReaderByIndex,
-    MetadataHandler_MetadataBlockReader_GetEnumerator
-};
-
-HRESULT MetadataReader_Create(const MetadataHandlerVtbl *vtable, IUnknown *pUnkOuter, REFIID iid, void** ppv)
+static HRESULT MetadataReader_Create(const MetadataHandlerVtbl *vtable, IUnknown *pUnkOuter, REFIID iid, void** ppv)
 {
     MetadataHandler *This;
     HRESULT hr;
@@ -401,7 +341,6 @@ HRESULT MetadataReader_Create(const MetadataHandlerVtbl *vtable, IUnknown *pUnkO
 
     This->IWICMetadataWriter_iface.lpVtbl = &MetadataHandler_Vtbl;
     This->IWICPersistStream_iface.lpVtbl = &MetadataHandler_PersistStream_Vtbl;
-    This->IWICMetadataBlockReader_iface.lpVtbl = &MetadataHandler_MetadataBlockReader_Vtbl;
     This->ref = 1;
     This->vtable = vtable;
     This->items = NULL;
@@ -583,6 +522,8 @@ static HRESULT MetadataHandlerEnum_Create(MetadataHandler *parent, DWORD index,
 {
     MetadataHandlerEnum *This;
 
+    if (!ppIEnumMetadataItem) return E_INVALIDARG;
+
     *ppIEnumMetadataItem = NULL;
 
     This = HeapAlloc(GetProcessHeap(), 0, sizeof(MetadataHandlerEnum));
@@ -655,4 +596,26 @@ static const MetadataHandlerVtbl UnknownMetadataReader_Vtbl = {
 HRESULT UnknownMetadataReader_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void** ppv)
 {
     return MetadataReader_Create(&UnknownMetadataReader_Vtbl, pUnkOuter, iid, ppv);
+}
+
+static HRESULT LoadIfdMetadata(IStream *input, const GUID *preferred_vendor,
+    DWORD persist_options, MetadataItem **items, DWORD *item_count)
+{
+    FIXME("stub\n");
+
+    *items = NULL;
+    *item_count = 0;
+
+    return S_OK;
+}
+
+static const MetadataHandlerVtbl IfdMetadataReader_Vtbl = {
+    0,
+    &CLSID_WICIfdMetadataReader,
+    LoadIfdMetadata
+};
+
+HRESULT IfdMetadataReader_CreateInstance(IUnknown *pUnkOuter, REFIID iid, void **ppv)
+{
+    return MetadataReader_Create(&IfdMetadataReader_Vtbl, pUnkOuter, iid, ppv);
 }

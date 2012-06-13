@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-05-22 16:06+0300\n"
+"PO-Revision-Date: 2012-06-08 21:40+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: komp_lt@konf.lt\n"
 "Language: Lithuanian\n"
@@ -3429,6 +3429,54 @@ msgstr "Padidintos"
 #: inetcpl.rc:36
 msgid "High"
 msgstr "Aukštos"
+
+#: joy.rc:33
+msgid "Joysticks"
+msgstr "Vairasvirtės"
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "&Išjungti"
+
+#: joy.rc:37
+msgid "&Enable"
+msgstr "Įj&ungti"
+
+#: joy.rc:38
+msgid "Connected"
+msgstr "Prijungta"
+
+#: joy.rc:40
+msgid "Disabled"
+msgstr "Išjungta"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr "Testuoti vairasvirtę"
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr "Mygtukai"
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr "X,Y"
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr "Rx,Ry"
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr "Z, Rz"
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr "Testuoti „Force Feedback“"
+
+#: joy.rc:28
+msgid "Game Controllers"
+msgstr "Žaidimų valdikliai"
 
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
@@ -12499,10 +12547,6 @@ msgstr "Į&taisyta, po to sava"
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr "S&ava, po to įtaisyta"
-
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "&Išjungti"
 
 #: winecfg.rc:211
 msgid "Select Drive Letter"

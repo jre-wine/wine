@@ -159,9 +159,7 @@ void free_dc_ptr( DC *dc )
         PHYSDEV physdev = dc->physDev;
         dc->physDev = physdev->next;
         physdev->funcs->pDeleteDC( physdev );
-        if (physdev == dc->dibdrv) dc->dibdrv = NULL;
     }
-    if (dc->dibdrv) dc->dibdrv->funcs->pDeleteDC( dc->dibdrv );
     free_gdi_handle( dc->hSelf );
     free_dc_state( dc );
 }
@@ -709,6 +707,15 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
         free_dc_ptr( dc );
         return 0;
     }
+
+    if (!dib_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL ))
+    {
+        free_dc_ptr( dc );
+        return 0;
+    }
+    physDev = GET_DC_PHYSDEV( dc, pSelectBitmap );
+    physDev->funcs->pSelectBitmap( physDev, dc->hBitmap );
+
     DC_InitDC( dc );
     release_dc_ptr( dc );
     return ret;
@@ -1238,8 +1245,12 @@ BOOL WINAPI GetDeviceGammaRamp(HDC hDC, LPVOID ptr)
     TRACE("%p, %p\n", hDC, ptr);
     if( dc )
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
-        ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
+        if (GetObjectType( hDC ) != OBJ_MEMDC)
+        {
+            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pGetDeviceGammaRamp );
+            ret = physdev->funcs->pGetDeviceGammaRamp( physdev, ptr );
+        }
+        else SetLastError( ERROR_INVALID_PARAMETER );
 	release_dc_ptr( dc );
     }
     return ret;
@@ -1256,8 +1267,12 @@ BOOL WINAPI SetDeviceGammaRamp(HDC hDC, LPVOID ptr)
     TRACE("%p, %p\n", hDC, ptr);
     if( dc )
     {
-        PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceGammaRamp );
-        ret = physdev->funcs->pSetDeviceGammaRamp( physdev, ptr );
+        if (GetObjectType( hDC ) != OBJ_MEMDC)
+        {
+            PHYSDEV physdev = GET_DC_PHYSDEV( dc, pSetDeviceGammaRamp );
+            ret = physdev->funcs->pSetDeviceGammaRamp( physdev, ptr );
+        }
+        else SetLastError( ERROR_INVALID_PARAMETER );
 	release_dc_ptr( dc );
     }
     return ret;
