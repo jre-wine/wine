@@ -46,26 +46,6 @@ static const struct gdi_obj_funcs bitmap_funcs =
 };
 
 
-/***********************************************************************
- *           null driver fallback implementations
- */
-
-DWORD nulldrv_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
-                        struct gdi_image_bits *bits, struct bitblt_coords *src )
-{
-    if (!hbitmap) return ERROR_NOT_SUPPORTED;
-    return dib_driver.pGetImage( 0, hbitmap, info, bits, src );
-}
-
-DWORD nulldrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
-                        const struct gdi_image_bits *bits, struct bitblt_coords *src,
-                        struct bitblt_coords *dst, DWORD rop )
-{
-    if (!hbitmap) return ERROR_SUCCESS;
-    return dib_driver.pPutImage( NULL, hbitmap, clip, info, bits, src, dst, rop );
-}
-
-
 /******************************************************************************
  * CreateBitmap [GDI32.@]
  *
@@ -230,7 +210,6 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
 
     bmpobj->dib.dsBm = bm;
     bmpobj->dib.dsBm.bmBits = NULL;
-    bmpobj->funcs = &null_driver;
 
     if (!(hbitmap = alloc_gdi_handle( &bmpobj->header, OBJ_BITMAP, &bitmap_funcs )))
     {
@@ -285,7 +264,7 @@ LONG WINAPI GetBitmapBits(
     src.width = src.visrect.right - src.visrect.left;
     src.height = src.visrect.bottom - src.visrect.top;
 
-    if (!bmp->funcs->pGetImage( NULL, hbitmap, info, &src_bits, &src ))
+    if (!get_image_from_bitmap( bmp, info, &src_bits, &src ))
     {
         const char *src_ptr = src_bits.ptr;
         int src_stride = get_dib_stride( info->bmiHeader.biWidth, info->bmiHeader.biBitCount );
@@ -413,14 +392,14 @@ LONG WINAPI SetBitmapBits(
     info->bmiHeader.biWidth         = 0;
     info->bmiHeader.biHeight        = 0;
     info->bmiHeader.biSizeImage     = 0;
-    err = bmp->funcs->pPutImage( NULL, hbitmap, 0, info, NULL, NULL, NULL, SRCCOPY );
+    err = put_image_into_bitmap( bmp, 0, info, NULL, NULL, NULL );
 
     if (!err || err == ERROR_BAD_FORMAT)
     {
         info->bmiHeader.biWidth     = bmp->dib.dsBm.bmWidth;
         info->bmiHeader.biHeight    = -dst.height;
         info->bmiHeader.biSizeImage = dst.height * dst_stride;
-        err = bmp->funcs->pPutImage( NULL, hbitmap, clip, info, &src_bits, &src, &dst, SRCCOPY );
+        err = put_image_into_bitmap( bmp, clip, info, &src_bits, &src, &dst );
     }
     if (err) count = 0;
 
@@ -428,48 +407,6 @@ LONG WINAPI SetBitmapBits(
     if (src_bits.free) src_bits.free( &src_bits );
     GDI_ReleaseObj( hbitmap );
     return count;
-}
-
-
-static void set_initial_bitmap_bits( HBITMAP hbitmap, BITMAPOBJ *bmp )
-{
-    char src_bmibuf[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
-    BITMAPINFO *src_info = (BITMAPINFO *)src_bmibuf;
-    char dst_bmibuf[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
-    BITMAPINFO *dst_info = (BITMAPINFO *)dst_bmibuf;
-    DWORD err;
-    struct gdi_image_bits bits;
-    struct bitblt_coords src, dst;
-
-    if (!bmp->dib.dsBm.bmBits) return;
-    if (bmp->funcs->pPutImage == nulldrv_PutImage) return;
-
-    get_ddb_bitmapinfo( bmp, src_info );
-
-    bits.ptr = bmp->dib.dsBm.bmBits;
-    bits.is_copy = FALSE;
-    bits.free = NULL;
-    bits.param = NULL;
-
-    src.x      = 0;
-    src.y      = 0;
-    src.width  = bmp->dib.dsBm.bmWidth;
-    src.height = bmp->dib.dsBm.bmHeight;
-    src.visrect.left   = 0;
-    src.visrect.top    = 0;
-    src.visrect.right  = bmp->dib.dsBm.bmWidth;
-    src.visrect.bottom = bmp->dib.dsBm.bmHeight;
-    dst = src;
-
-    copy_bitmapinfo( dst_info, src_info );
-
-    err = bmp->funcs->pPutImage( NULL, hbitmap, 0, dst_info, &bits, &src, &dst, 0 );
-    if (err == ERROR_BAD_FORMAT)
-    {
-        err = convert_bits( src_info, &src, dst_info, &bits, FALSE );
-        if (!err) err = bmp->funcs->pPutImage( NULL, hbitmap, 0, dst_info, &bits, &src, &dst, 0 );
-        if (bits.free) bits.free( &bits );
-    }
 }
 
 
@@ -481,7 +418,7 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     HGDIOBJ ret;
     BITMAPOBJ *bitmap;
     DC *dc;
-    PHYSDEV physdev = NULL, old_physdev = NULL, createdev;
+    PHYSDEV physdev;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
@@ -516,51 +453,7 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         goto done;
     }
 
-    if (dc->dibdrv) old_physdev = pop_dc_driver( dc, dc->dibdrv );
-
-    if (bitmap->dib.dsBm.bmBitsPixel > 1)
-    {
-        physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
-        createdev = GET_DC_PHYSDEV( dc, pCreateBitmap );
-    }
-    else physdev = createdev = &dc->nulldrv;  /* force use of the DIB engine for 1-bpp */
-
-    if (physdev->funcs == &null_driver)
-    {
-        physdev = dc->dibdrv;
-        if (physdev) push_dc_driver( &dc->physDev, physdev, physdev->funcs );
-        else
-        {
-            if (!dib_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL )) goto done;
-            dc->dibdrv = physdev = dc->physDev;
-        }
-    }
-
-    /* never set the owner of the stock bitmap since it can be selected in multiple DCs */
-    if (handle != GetStockObject(DEFAULT_BITMAP) && bitmap->funcs != createdev->funcs)
-    {
-        /* we can only change from the null driver to some other driver */
-        if (bitmap->funcs != &null_driver)
-        {
-            FIXME( "Trying to select bitmap %p in different DC type\n", handle );
-            GDI_ReleaseObj( handle );
-            ret = 0;
-            goto done;
-        }
-        if (createdev->funcs != &null_driver)
-        {
-            if (!createdev->funcs->pCreateBitmap( createdev, handle ))
-            {
-                GDI_ReleaseObj( handle );
-                ret = 0;
-                goto done;
-            }
-            bitmap->funcs = createdev->funcs;
-            set_initial_bitmap_bits( handle, bitmap );
-        }
-        else bitmap->funcs = &dib_driver;  /* use the DIB driver to emulate DDB support */
-    }
-
+    physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
     if (!physdev->funcs->pSelectBitmap( physdev, handle ))
     {
         GDI_ReleaseObj( handle );
@@ -582,11 +475,6 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     }
 
  done:
-    if(!ret)
-    {
-        if (physdev && physdev == dc->dibdrv) pop_dc_driver( dc, dc->dibdrv );
-        if (old_physdev) push_dc_driver( &dc->physDev, old_physdev, old_physdev->funcs );
-    }
     release_dc_ptr( dc );
     return ret;
 }
@@ -597,17 +485,9 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
  */
 static BOOL BITMAP_DeleteObject( HGDIOBJ handle )
 {
-    const struct gdi_dc_funcs *funcs;
-    BITMAPOBJ *bmp = GDI_GetObjPtr( handle, OBJ_BITMAP );
+    BITMAPOBJ *bmp = free_gdi_handle( handle );
 
     if (!bmp) return FALSE;
-    funcs = bmp->funcs;
-    GDI_ReleaseObj( handle );
-
-    funcs->pDeleteBitmap( handle );
-
-    if (!(bmp = free_gdi_handle( handle ))) return FALSE;
-
     HeapFree( GetProcessHeap(), 0, bmp->dib.dsBm.bmBits );
     return HeapFree( GetProcessHeap(), 0, bmp );
 }

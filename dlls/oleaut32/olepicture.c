@@ -1402,6 +1402,8 @@ static HRESULT WINAPI OLEPictureImpl_Load(IPersistStream* iface, IStream *pStm) 
               !memcmp(&(header[0]), "BM",       2) ||   /* BMP header */
               !memcmp(&(header[0]), "\xff\xd8", 2) ||   /* JPEG header */
               (header[0] == EMR_HEADER)            ||   /* EMF header */
+              (header[0] == 0x10000)               ||   /* icon: idReserved 0, idType 1 */
+              (header[0] == 0x20000)               ||   /* cursor: idReserved 0, idType 2 */
               (header[1] > statstg.cbSize.QuadPart)||   /* invalid size */
               (header[1]==0)
           ) {/* Found start of bitmap data */
@@ -1640,6 +1642,7 @@ static int serializeIcon(HICON hIcon, void ** ppBuffer, unsigned int * pLength)
 			pIconDir = (CURSORICONFILEDIR *)pIconData;
 			pIconDir->idType = 1;
 			pIconDir->idCount = 1;
+			pIconDir->idReserved = 0;
 
 			/* Fill out the CURSORICONFILEDIRENTRY */
 			pIconEntry = (CURSORICONFILEDIRENTRY *)(pIconData + 3 * sizeof(WORD));
@@ -1746,6 +1749,7 @@ static HRESULT WINAPI OLEPictureImpl_Save(
     HRESULT hResult = E_NOTIMPL;
     void * pIconData;
     unsigned int iDataSize;
+    DWORD header[2];
     ULONG dummy;
     int iSerializeResult = 0;
     OLEPictureImpl *This = impl_from_IPersistStream(iface);
@@ -1764,15 +1768,11 @@ static HRESULT WINAPI OLEPictureImpl_Save(
             This->data = pIconData;
             This->datalen = iDataSize;
         }
-        if (This->loadtime_magic != 0xdeadbeef) {
-            DWORD header[2];
 
-            header[0] = This->loadtime_magic;
-            header[1] = This->datalen;
-            IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
-        }
+        header[0] = (This->loadtime_magic != 0xdeadbeef) ? This->loadtime_magic : 0x0000746c;
+        header[1] = This->datalen;
+        IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
         IStream_Write(pStm, This->data, This->datalen, &dummy);
-
         hResult = S_OK;
         break;
     case PICTYPE_BITMAP:
@@ -1794,38 +1794,23 @@ static HRESULT WINAPI OLEPictureImpl_Save(
                 FIXME("(%p,%p,%d), PICTYPE_BITMAP (format UNKNOWN, using BMP?) not implemented!\n",This,pStm,fClearDirty);
                 break;
             }
-            if (iSerializeResult) {
-                /*
-                if (This->loadtime_magic != 0xdeadbeef) {
-                */
-                if (1) {
-                    DWORD header[2];
 
-                    header[0] = (This->loadtime_magic != 0xdeadbeef) ? This->loadtime_magic : 0x0000746c;
-                    header[1] = iDataSize;
-                    IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
-                }
-                IStream_Write(pStm, pIconData, iDataSize, &dummy);
-
-                HeapFree(GetProcessHeap(), 0, This->data);
-                This->data = pIconData;
-                This->datalen = iDataSize;
-                hResult = S_OK;
+            if (!iSerializeResult)
+            {
+                hResult = E_FAIL;
+                break;
             }
-        } else {
-            /*
-            if (This->loadtime_magic != 0xdeadbeef) {
-            */
-            if (1) {
-                DWORD header[2];
 
-                header[0] = (This->loadtime_magic != 0xdeadbeef) ? This->loadtime_magic : 0x0000746c;
-                header[1] = This->datalen;
-                IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
-            }
-            IStream_Write(pStm, This->data, This->datalen, &dummy);
-            hResult = S_OK;
+            HeapFree(GetProcessHeap(), 0, This->data);
+            This->data = pIconData;
+            This->datalen = iDataSize;
         }
+
+        header[0] = (This->loadtime_magic != 0xdeadbeef) ? This->loadtime_magic : 0x0000746c;
+        header[1] = This->datalen;
+        IStream_Write(pStm, header, 2 * sizeof(DWORD), &dummy);
+        IStream_Write(pStm, This->data, This->datalen, &dummy);
+        hResult = S_OK;
         break;
     case PICTYPE_METAFILE:
         FIXME("(%p,%p,%d), PICTYPE_METAFILE not implemented!\n",This,pStm,fClearDirty);

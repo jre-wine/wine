@@ -1080,7 +1080,7 @@
 @ stdcall SetConsoleDisplayMode(long long ptr)
 @ stub SetConsoleFont
 @ stub SetConsoleHardwareState
-@ stub SetConsoleIcon
+@ stdcall SetConsoleIcon(ptr)
 @ stdcall SetConsoleInputExeNameA(ptr)
 @ stdcall SetConsoleInputExeNameW(ptr)
 @ stub SetConsoleKeyShortcuts
@@ -1160,6 +1160,7 @@
 @ stdcall SetThreadPreferredUILanguages(long ptr ptr)
 @ stdcall SetThreadPriority(long long)
 @ stdcall SetThreadPriorityBoost(long long)
+@ stdcall SetThreadStackGuarantee(ptr)
 @ stdcall SetThreadUILanguage(long)
 @ stdcall SetTimeZoneInformation(ptr)
 @ stub SetTimerQueueTimer
@@ -1288,6 +1289,7 @@
 @ stdcall _lclose(long)
 @ stdcall _lcreat(str long)
 @ stdcall _llseek(long long long)
+@ stdcall -arch=x86_64 -private _local_unwind(ptr ptr) ntdll._local_unwind
 @ stdcall _lopen(str long)
 @ stdcall _lread(long ptr long)
 @ stdcall _lwrite(long ptr long)

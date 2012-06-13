@@ -103,6 +103,11 @@ static inline HRESULT internet_error_to_hres(DWORD error)
     case ERROR_INTERNET_SEC_CERT_CN_INVALID:
     case ERROR_INTERNET_INVALID_CA:
     case ERROR_INTERNET_CLIENT_AUTH_CERT_NEEDED:
+    case ERROR_INTERNET_SEC_INVALID_CERT:
+    case ERROR_INTERNET_SEC_CERT_ERRORS:
+    case ERROR_INTERNET_SEC_CERT_REV_FAILED:
+    case ERROR_INTERNET_SEC_CERT_NO_REV:
+    case ERROR_INTERNET_SEC_CERT_REVOKED:
         return INET_E_INVALID_CERTIFICATE;
     case ERROR_INTERNET_HTTP_TO_HTTPS_ON_REDIR:
     case ERROR_INTERNET_HTTPS_TO_HTTP_ON_REDIR:
@@ -119,6 +124,9 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
     IWindowForBindingUI *wfb_ui;
     IHttpSecurity *http_security;
     BOOL security_problem;
+    DWORD dlg_flags;
+    HWND hwnd;
+    DWORD res;
     HRESULT hres;
 
     switch(error) {
@@ -126,9 +134,14 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
     case ERROR_INTERNET_SEC_CERT_CN_INVALID:
     case ERROR_INTERNET_HTTP_TO_HTTPS_ON_REDIR:
     case ERROR_INTERNET_HTTPS_TO_HTTP_ON_REDIR:
-    case ERROR_HTTP_REDIRECT_NEEDS_CONFIRMATION:
     case ERROR_INTERNET_INVALID_CA:
     case ERROR_INTERNET_CLIENT_AUTH_CERT_NEEDED:
+    case ERROR_INTERNET_SEC_INVALID_CERT:
+    case ERROR_INTERNET_SEC_CERT_ERRORS:
+    case ERROR_INTERNET_SEC_CERT_REV_FAILED:
+    case ERROR_INTERNET_SEC_CERT_NO_REV:
+    case ERROR_INTERNET_SEC_CERT_REVOKED:
+    case ERROR_HTTP_REDIRECT_NEEDS_CONFIRMATION:
         security_problem = TRUE;
         break;
     default:
@@ -180,42 +193,46 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
         }
     }
 
-    hres = IServiceProvider_QueryService(serv_prov, &IID_IWindowForBindingUI, &IID_IWindowForBindingUI,
-                                         (void**)&wfb_ui);
-    if(SUCCEEDED(hres)) {
-        HWND hwnd;
-        const IID *iid_reason;
-
-        if(security_problem)
-            iid_reason = &IID_IHttpSecurity;
-        else if(error == ERROR_INTERNET_INCORRECT_PASSWORD)
-            iid_reason = &IID_IAuthenticate;
-        else
-            iid_reason = &IID_IWindowForBindingUI;
-
-        hres = IWindowForBindingUI_GetWindow(wfb_ui, iid_reason, &hwnd);
-        if(SUCCEEDED(hres) && hwnd)
-        {
-            DWORD res;
-
-            res = InternetErrorDlg(hwnd, This->base.request, error,
-                                   FLAGS_ERROR_UI_FLAGS_CHANGE_OPTIONS | FLAGS_ERROR_UI_FLAGS_GENERATE_DATA,
-                                   NULL);
-
-            if(res == ERROR_INTERNET_FORCE_RETRY || res == ERROR_SUCCESS)
-                hres = RPC_E_RETRY;
-            else
-                hres = E_FAIL;
+    switch(error) {
+    case ERROR_INTERNET_SEC_CERT_REV_FAILED:
+        if(hres == S_FALSE) {
+            hres = internet_error_to_hres(error);
+        }else {
+            /* Silently ignore the error. We will get more detailed error from wininet anyway. */
+            set_security_flag(This, SECURITY_FLAG_IGNORE_REVOCATION);
+            hres = RPC_E_RETRY;
         }
-        IWindowForBindingUI_Release(wfb_ui);
+        break;
+
+    default:
+        hres = IServiceProvider_QueryService(serv_prov, &IID_IWindowForBindingUI, &IID_IWindowForBindingUI, (void**)&wfb_ui);
+        if(SUCCEEDED(hres)) {
+            const IID *iid_reason;
+
+            if(security_problem)
+                iid_reason = &IID_IHttpSecurity;
+            else if(error == ERROR_INTERNET_INCORRECT_PASSWORD)
+                iid_reason = &IID_IAuthenticate;
+            else
+                iid_reason = &IID_IWindowForBindingUI;
+
+            hres = IWindowForBindingUI_GetWindow(wfb_ui, iid_reason, &hwnd);
+            IWindowForBindingUI_Release(wfb_ui);
+            if(FAILED(hres))
+                hwnd = NULL;
+        }
+
+
+        dlg_flags = FLAGS_ERROR_UI_FLAGS_CHANGE_OPTIONS | FLAGS_ERROR_UI_FLAGS_GENERATE_DATA;
+        if(This->base.bindf & BINDF_NO_UI)
+            dlg_flags |= FLAGS_ERROR_UI_FLAGS_NO_UI;
+
+        res = InternetErrorDlg(hwnd, This->base.request, error, dlg_flags, NULL);
+        hres = res == ERROR_INTERNET_FORCE_RETRY || res == ERROR_SUCCESS ? RPC_E_RETRY : internet_error_to_hres(error);
     }
 
     IServiceProvider_Release(serv_prov);
-
-    if(hres == RPC_E_RETRY)
-        return hres;
-
-    return internet_error_to_hres(error);
+    return hres;
 }
 
 static ULONG send_http_request(HttpProtocol *This)
@@ -276,7 +293,7 @@ static HRESULT HttpProtocol_open_request(Protocol *prot, IUri *uri, DWORD reques
     LPOLESTR accept_mimes[257];
     const WCHAR **accept_types;
     BYTE security_id[512];
-    DWORD len, port;
+    DWORD len, port, flags;
     ULONG num, error;
     BOOL res, b;
     HRESULT hres;
@@ -419,10 +436,15 @@ static HRESULT HttpProtocol_open_request(Protocol *prot, IUri *uri, DWORD reques
         }
     }
 
+    flags = INTERNET_ERROR_MASK_COMBINED_SEC_CERT;
+    res = InternetSetOptionW(This->base.request, INTERNET_OPTION_ERROR_MASK, &flags, sizeof(flags));
+    if(!res)
+        WARN("InternetSetOption(INTERNET_OPTION_ERROR_MASK) failed: %u\n", GetLastError());
+
     b = TRUE;
     res = InternetSetOptionW(This->base.request, INTERNET_OPTION_HTTP_DECODING, &b, sizeof(b));
     if(!res)
-        WARN("InternetSetOption(INTERNET_OPTION_HTTP_DECODING) failed: %08x\n", GetLastError());
+        WARN("InternetSetOption(INTERNET_OPTION_HTTP_DECODING) failed: %u\n", GetLastError());
 
     do {
         error = send_http_request(This);

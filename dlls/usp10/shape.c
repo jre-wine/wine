@@ -42,8 +42,12 @@ typedef VOID (*ContextualShapingProc)(HDC, ScriptCache*, SCRIPT_ANALYSIS*,
                                       WCHAR*, INT, WORD*, INT*, INT, WORD*);
 
 static void ContextualShape_Arabic(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
+static void ContextualShape_Hebrew(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
 static void ContextualShape_Syriac(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
+static void ContextualShape_Thaana(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
 static void ContextualShape_Phags_pa(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
+static void ContextualShape_Thai(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
+static void ContextualShape_Lao(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
 static void ContextualShape_Sinhala(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
 static void ContextualShape_Devanagari(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
 static void ContextualShape_Bengali(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust);
@@ -113,6 +117,8 @@ typedef struct tagConsonantComponents
 } ConsonantComponents;
 
 typedef void (*second_reorder_function)(LPWSTR pwChar, IndicSyllable *syllable,WORD* pwGlyphs, IndicSyllable* glyph_index, lexical_function lex);
+
+typedef int (*combining_lexical_function)(WCHAR c);
 
 /* the orders of joined_forms and contextual_features need to line up */
 static const char* contextual_features[] =
@@ -392,10 +398,10 @@ static const ScriptShapeData ShapingData[] =
     {{ latin_features, 2}, NULL, 0, NULL, NULL},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
-    {{ hebrew_features, 1}, NULL, 0, NULL, NULL},
+    {{ hebrew_features, 1}, NULL, 0, ContextualShape_Hebrew, NULL},
     {{ syriac_features, 4}, required_syriac_features, 0, ContextualShape_Syriac, ShapeCharGlyphProp_None},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
-    {{ NULL, 0}, NULL, 0, NULL, ShapeCharGlyphProp_None},
+    {{ NULL, 0}, NULL, 0, ContextualShape_Thaana, ShapeCharGlyphProp_None},
     {{ standard_features, 2}, NULL, 0, NULL, NULL},
     {{ standard_features, 2}, NULL, 0, NULL, NULL},
     {{ standard_features, 2}, NULL, 0, NULL, NULL},
@@ -404,10 +410,10 @@ static const ScriptShapeData ShapingData[] =
     {{ tibetan_features, 2}, NULL, 0, NULL, ShapeCharGlyphProp_Tibet},
     {{ tibetan_features, 2}, NULL, 0, NULL, ShapeCharGlyphProp_Tibet},
     {{ phags_features, 3}, NULL, 0, ContextualShape_Phags_pa, ShapeCharGlyphProp_Thai},
-    {{ thai_features, 1}, NULL, 0, NULL, ShapeCharGlyphProp_Thai},
-    {{ thai_features, 1}, NULL, 0, NULL, ShapeCharGlyphProp_Thai},
-    {{ thai_features, 1}, required_lao_features, 0, NULL, ShapeCharGlyphProp_Thai},
-    {{ thai_features, 1}, required_lao_features, 0, NULL, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, required_lao_features, 0, ContextualShape_Lao, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, required_lao_features, 0, ContextualShape_Lao, ShapeCharGlyphProp_Thai},
     {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('d','e','v','2'), ContextualShape_Devanagari, ShapeCharGlyphProp_Devanagari},
     {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('d','e','v','2'), ContextualShape_Devanagari, ShapeCharGlyphProp_Devanagari},
     {{ devanagari_features, 6}, required_bengali_features, MS_MAKE_TAG('b','n','g','2'), ContextualShape_Bengali, ShapeCharGlyphProp_Bengali},
@@ -463,9 +469,9 @@ static const ScriptShapeData ShapingData[] =
     {{ NULL, 0}, NULL, 0, NULL, NULL},
     {{ NULL, 0}, NULL, 0, NULL, NULL},
     {{ NULL, 0}, NULL, 0, NULL, NULL},
-    {{ hebrew_features, 1}, NULL, 0, NULL, NULL},
+    {{ hebrew_features, 1}, NULL, 0, ContextualShape_Hebrew, NULL},
     {{ latin_features, 2}, NULL, 0, NULL, NULL},
-    {{ thai_features, 1}, NULL, 0, NULL, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, ShapeCharGlyphProp_Thai},
 };
 
 extern scriptData scriptInformation[];
@@ -784,6 +790,45 @@ static inline BOOL get_GSUB_Indic2(SCRIPT_ANALYSIS *psa, ScriptCache *psc)
     return(SUCCEEDED(hr));
 }
 
+static void insert_glyph(WORD *pwGlyphs, INT *pcGlyphs, INT cChars, INT write_dir, WORD glyph, INT index, WORD *pwLogClust)
+{
+    int i;
+    for (i = *pcGlyphs; i>=index; i--)
+        pwGlyphs[i+1] = pwGlyphs[i];
+    pwGlyphs[index] = glyph;
+    *pcGlyphs = *pcGlyphs+1;
+    if (write_dir < 0)
+        UpdateClusters(index-3, 1, write_dir, cChars, pwLogClust);
+    else
+        UpdateClusters(index, 1, write_dir, cChars, pwLogClust);
+}
+
+static void mark_invalid_combinations(HDC hdc, const WCHAR* pwcChars, INT cChars, WORD *pwGlyphs, INT *pcGlyphs, INT write_dir, WORD *pwLogClust, combining_lexical_function lex)
+{
+    CHAR *context_type;
+    int i,g;
+    WCHAR invalid = 0x25cc;
+    WORD invalid_glyph;
+
+    context_type = HeapAlloc(GetProcessHeap(),0,cChars);
+
+    /* Mark invalid combinations */
+    for (i = 0; i < cChars; i++)
+       context_type[i] = lex(pwcChars[i]);
+
+    GetGlyphIndicesW(hdc, &invalid, 1, &invalid_glyph, 0);
+    for (i = 1, g=1; i < cChars; i++, g++)
+    {
+        if (context_type[i] != 0 && context_type[i+write_dir]==context_type[i])
+        {
+            insert_glyph(pwGlyphs, pcGlyphs, cChars, write_dir, invalid_glyph, g, pwLogClust);
+            g++;
+        }
+    }
+
+    HeapFree(GetProcessHeap(),0,context_type);
+}
+
 static WCHAR neighbour_char(int i, int delta, const WCHAR* chars, INT cchLen)
 {
     if (i + delta < 0)
@@ -837,6 +882,51 @@ static inline BOOL word_break_causing(WCHAR chr)
        be within one script, Syriac, so we do not worry about any character
        other than the space character outside of that range */
     return (chr == 0 || chr == 0x20 );
+}
+
+static int combining_lexical_Arabic(WCHAR c)
+{
+    enum {Arab_Norm = 0, Arab_DIAC1, Arab_DIAC2, Arab_DIAC3, Arab_DIAC4, Arab_DIAC5, Arab_DIAC6, Arab_DIAC7, Arab_DIAC8};
+
+   switch(c)
+    {
+        case 0x064B:
+        case 0x064C:
+        case 0x064E:
+        case 0x064F:
+        case 0x0652:
+        case 0x0657:
+        case 0x0658:
+        case 0x06E1: return Arab_DIAC1; break;
+        case 0x064D:
+        case 0x0650:
+        case 0x0656: return Arab_DIAC2; break;
+        case 0x0651: return Arab_DIAC3; break;
+        case 0x0610:
+        case 0x0611:
+        case 0x0612:
+        case 0x0613:
+        case 0x0614:
+        case 0x0659:
+        case 0x06D6:
+        case 0x06DC:
+        case 0x06DF:
+        case 0x06E0:
+        case 0x06E2:
+        case 0x06E4:
+        case 0x06E7:
+        case 0x06E8:
+        case 0x06EB:
+        case 0x06EC: return Arab_DIAC4; break;
+        case 0x06E3:
+        case 0x06EA:
+        case 0x06ED: return Arab_DIAC5; break;
+        case 0x0670: return Arab_DIAC6; break;
+        case 0x0653: return Arab_DIAC7; break;
+        case 0x0655:
+        case 0x0654: return Arab_DIAC8; break;
+        default: return Arab_Norm;
+    }
 }
 
 /*
@@ -929,11 +1019,136 @@ static void ContextualShape_Arabic(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *p
 
     HeapFree(GetProcessHeap(),0,context_shape);
     HeapFree(GetProcessHeap(),0,context_type);
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Arabic);
+}
+
+static int combining_lexical_Hebrew(WCHAR c)
+{
+    enum {Hebr_Norm=0, Hebr_DIAC, Hebr_CANT1, Hebr_CANT2, Hebr_CANT3, Hebr_CANT4, Hebr_CANT5, Hebr_CANT6, Hebr_CANT7, Hebr_CANT8, Hebr_CANT9, Hebr_CANT10, Hebr_DAGESH, Hebr_DOTABV, Hebr_HOLAM, Hebr_METEG, Hebr_PATAH, Hebr_QAMATS, Hebr_RAFE, Hebr_SHINSIN};
+
+   switch(c)
+    {
+        case 0x05B0:
+        case 0x05B1:
+        case 0x05B2:
+        case 0x05B3:
+        case 0x05B4:
+        case 0x05B5:
+        case 0x05B6:
+        case 0x05BB: return Hebr_DIAC; break;
+        case 0x0599:
+        case 0x05A1:
+        case 0x05A9:
+        case 0x05AE: return Hebr_CANT1; break;
+        case 0x0597:
+        case 0x05A8:
+        case 0x05AC: return Hebr_CANT2; break;
+        case 0x0592:
+        case 0x0593:
+        case 0x0594:
+        case 0x0595:
+        case 0x05A7:
+        case 0x05AB: return Hebr_CANT3; break;
+        case 0x0598:
+        case 0x059C:
+        case 0x059E:
+        case 0x059F: return Hebr_CANT4; break;
+        case 0x059D:
+        case 0x05A0: return Hebr_CANT5; break;
+        case 0x059B:
+        case 0x05A5: return Hebr_CANT6; break;
+        case 0x0591:
+        case 0x05A3:
+        case 0x05A6: return Hebr_CANT7; break;
+        case 0x0596:
+        case 0x05A4:
+        case 0x05AA: return Hebr_CANT8; break;
+        case 0x059A:
+        case 0x05AD: return Hebr_CANT9; break;
+        case 0x05AF: return Hebr_CANT10; break;
+        case 0x05BC: return Hebr_DAGESH; break;
+        case 0x05C4: return Hebr_DOTABV; break;
+        case 0x05B9: return Hebr_HOLAM; break;
+        case 0x05BD: return Hebr_METEG; break;
+        case 0x05B7: return Hebr_PATAH; break;
+        case 0x05B8: return Hebr_QAMATS; break;
+        case 0x05BF: return Hebr_RAFE; break;
+        case 0x05C1:
+        case 0x05C2: return Hebr_SHINSIN; break;
+        default: return Hebr_Norm;
+    }
+}
+
+static void ContextualShape_Hebrew(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust)
+{
+    INT dirL;
+
+    if (*pcGlyphs != cChars)
+    {
+        ERR("Number of Glyphs and Chars need to match at the beginning\n");
+        return;
+    }
+
+    if (!psa->fLogicalOrder && psa->fRTL)
+        dirL = -1;
+    else
+        dirL = 1;
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Hebrew);
 }
 
 /*
  * ContextualShape_Syriac
  */
+
+static int combining_lexical_Syriac(WCHAR c)
+{
+    enum {Syriac_Norm=0, Syriac_DIAC1, Syriac_DIAC2, Syriac_DIAC3, Syriac_DIAC4, Syriac_DIAC5, Syriac_DIAC6, Syriac_DIAC7, Syriac_DIAC8, Syriac_DIAC9, Syriac_DIAC10, Syriac_DIAC11, Syriac_DIAC12, Syriac_DIAC13, Syriac_DIAC14, Syriac_DIAC15, Syriac_DIAC16, Syriac_DIAC17};
+
+   switch(c)
+    {
+        case 0x730:
+        case 0x733:
+        case 0x736:
+        case 0x73A:
+        case 0x73D: return Syriac_DIAC1; break;
+        case 0x731:
+        case 0x734:
+        case 0x737:
+        case 0x73B:
+        case 0x73E: return Syriac_DIAC2; break;
+        case 0x740:
+        case 0x749:
+        case 0x74A: return Syriac_DIAC3; break;
+        case 0x732:
+        case 0x735:
+        case 0x73F: return Syriac_DIAC4; break;
+        case 0x738:
+        case 0x739:
+        case 0x73C: return Syriac_DIAC5; break;
+        case 0x741:
+        case 0x30A: return Syriac_DIAC6; break;
+        case 0x742:
+        case 0x325: return Syriac_DIAC7; break;
+        case 0x747:
+        case 0x303: return Syriac_DIAC8; break;
+        case 0x748:
+        case 0x32D:
+        case 0x32E:
+        case 0x330:
+        case 0x331: return Syriac_DIAC9; break;
+        case 0x308: return Syriac_DIAC10; break;
+        case 0x304: return Syriac_DIAC11; break;
+        case 0x307: return Syriac_DIAC12; break;
+        case 0x323: return Syriac_DIAC13; break;
+        case 0x743: return Syriac_DIAC14; break;
+        case 0x744: return Syriac_DIAC15; break;
+        case 0x745: return Syriac_DIAC16; break;
+        case 0x746: return Syriac_DIAC17; break;
+        default: return Syriac_Norm;
+    }
+}
 
 #define ALAPH 0x710
 #define DALATH 0x715
@@ -1025,6 +1240,46 @@ right_join_causing(neighbour_joining_type(i,dirR,context_type,cChars,psa)))
 
     HeapFree(GetProcessHeap(),0,context_shape);
     HeapFree(GetProcessHeap(),0,context_type);
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Syriac);
+}
+
+static int combining_lexical_Thaana(WCHAR c)
+{
+    enum {Thaana_Norm=0, Thaana_FILI};
+
+   switch(c)
+    {
+        case 0x7A6:
+        case 0x7A7:
+        case 0x7A8:
+        case 0x7A9:
+        case 0x7AA:
+        case 0x7AB:
+        case 0x7AC:
+        case 0x7AD:
+        case 0x7AE:
+        case 0x7AF: return Thaana_FILI; break;
+        default: return Thaana_Norm;
+    }
+}
+
+static void ContextualShape_Thaana(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust)
+{
+    INT dirL;
+
+    if (*pcGlyphs != cChars)
+    {
+        ERR("Number of Glyphs and Chars need to match at the beginning\n");
+        return;
+    }
+
+    if (!psa->fLogicalOrder && psa->fRTL)
+        dirL = -1;
+    else
+        dirL = 1;
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Thaana);
 }
 
 /*
@@ -1110,6 +1365,95 @@ static void ContextualShape_Phags_pa(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS 
     }
 
     HeapFree(GetProcessHeap(),0,context_shape);
+}
+
+static int combining_lexical_Thai(WCHAR c)
+{
+    enum {Thai_Norm=0, Thai_ABOVE1, Thai_ABOVE2, Thai_ABOVE3, Thai_ABOVE4, Thai_BELOW1, Thai_BELOW2, Thai_AM};
+
+   switch(c)
+    {
+        case 0xE31:
+        case 0xE34:
+        case 0xE35:
+        case 0xE36:
+        case 0xE37: return Thai_ABOVE1; break;
+        case 0xE47:
+        case 0xE4D: return Thai_ABOVE2; break;
+        case 0xE48:
+        case 0xE49:
+        case 0xE4A:
+        case 0xE4B: return Thai_ABOVE3; break;
+        case 0xE4C:
+        case 0xE4E: return Thai_ABOVE4; break;
+        case 0xE38:
+        case 0xE39: return Thai_BELOW1; break;
+        case 0xE3A: return Thai_BELOW2; break;
+        case 0xE33: return Thai_AM; break;
+        default: return Thai_Norm;
+    }
+}
+
+static void ContextualShape_Thai(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust)
+{
+    INT dirL;
+
+    if (*pcGlyphs != cChars)
+    {
+        ERR("Number of Glyphs and Chars need to match at the beginning\n");
+        return;
+    }
+
+    if (!psa->fLogicalOrder && psa->fRTL)
+        dirL = -1;
+    else
+        dirL = 1;
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Thai);
+}
+
+static int combining_lexical_Lao(WCHAR c)
+{
+    enum {Lao_Norm=0, Lao_ABOVE1, Lao_ABOVE2, Lao_BELOW1, Lao_BELOW2, Lao_AM};
+
+   switch(c)
+    {
+        case 0xEB1:
+        case 0xEB4:
+        case 0xEB5:
+        case 0xEB6:
+        case 0xEB7:
+        case 0xEBB:
+        case 0xECD: return Lao_ABOVE1; break;
+        case 0xEC8:
+        case 0xEC9:
+        case 0xECA:
+        case 0xECB:
+        case 0xECC: return Lao_ABOVE2; break;
+        case 0xEBC: return Lao_BELOW1; break;
+        case 0xEB8:
+        case 0xEB9: return Lao_BELOW2; break;
+        case 0xEB3: return Lao_AM; break;
+        default: return Lao_Norm;
+    }
+}
+
+static void ContextualShape_Lao(HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, WCHAR* pwcChars, INT cChars, WORD* pwOutGlyphs, INT* pcGlyphs, INT cMaxGlyphs, WORD *pwLogClust)
+{
+    INT dirL;
+
+    if (*pcGlyphs != cChars)
+    {
+        ERR("Number of Glyphs and Chars need to match at the beginning\n");
+        return;
+    }
+
+    if (!psa->fLogicalOrder && psa->fRTL)
+        dirL = -1;
+    else
+        dirL = 1;
+
+    mark_invalid_combinations(hdc, pwcChars, cChars, pwOutGlyphs, pcGlyphs, dirL, pwLogClust, combining_lexical_Lao);
 }
 
 static void ReplaceInsertChars(HDC hdc, INT cWalk, INT* pcChars, WCHAR *pwOutChars, const WCHAR *replacements)

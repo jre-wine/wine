@@ -189,6 +189,7 @@ static void test_MeshBuilder(void)
     DWORD f[8];
     char name[10];
     DWORD size;
+    D3DCOLOR color;
 
     hr = pDirect3DRMCreate(&pD3DRM);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
@@ -214,7 +215,7 @@ static void test_MeshBuilder(void)
     size = sizeof(name);
     hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
     ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
-    ok(!strcmp(name, "Object"), "Retreived name '%s' instead of 'Object'\n", name);
+    ok(!strcmp(name, "Object"), "Retrieved name '%s' instead of 'Object'\n", name);
     size = strlen("Object"); /* No space for null character */
     hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
     ok(hr == E_INVALIDARG, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
@@ -229,7 +230,7 @@ static void test_MeshBuilder(void)
     size = sizeof(name);
     hr = IDirect3DRMMeshBuilder_GetName(pMeshBuilder, &size, name);
     ok(hr == D3DRM_OK, "IDirect3DRMMeshBuilder_GetName returned hr = %x\n", hr);
-    ok(!strcmp(name, ""), "Retreived name '%s' instead of ''\n", name);
+    ok(!strcmp(name, ""), "Retrieved name '%s' instead of ''\n", name);
 
     val = IDirect3DRMMeshBuilder_GetVertexCount(pMeshBuilder);
     ok(val == 4, "Wrong number of vertices %d (must be 4)\n", val);
@@ -240,7 +241,7 @@ static void test_MeshBuilder(void)
     hr = IDirect3DRMMeshBuilder_GetVertices(pMeshBuilder, &val1, NULL, &val2, NULL, &val3, NULL);
     ok(hr == D3DRM_OK, "Cannot get vertices information (hr = %x)\n", hr);
     ok(val1 == 4, "Wrong number of vertices %d (must be 4)\n", val1);
-    todo_wine ok(val2 == 4, "Wrong number of normals %d (must be 4)\n", val2);
+    ok(val2 == 4, "Wrong number of normals %d (must be 4)\n", val2);
     ok(val3 == 22, "Wrong number of face data bytes %d (must be 22)\n", val3);
 
     /* Check that Load method generated default texture coordinates (0.0f, 0.0f) for each vertex */
@@ -353,8 +354,8 @@ static void test_MeshBuilder(void)
         DWORD nb_groups;
         unsigned nb_vertices, nb_faces, nb_face_vertices;
         DWORD data_size;
-        LPDIRECT3DRMMATERIAL material;
-        LPDIRECT3DRMTEXTURE texture;
+        LPDIRECT3DRMMATERIAL material = (LPDIRECT3DRMMATERIAL)0xdeadbeef;
+        LPDIRECT3DRMTEXTURE texture = (LPDIRECT3DRMTEXTURE)0xdeadbeef;
         D3DVALUE values[3];
 
         nb_groups = IDirect3DRMMesh_GetGroupCount(mesh);
@@ -367,12 +368,14 @@ static void test_MeshBuilder(void)
         ok(nb_faces == 1, "Wrong number of faces %u (must be 1)\n", nb_faces);
         todo_wine ok(nb_face_vertices == 3, "Wrong number of vertices per face %u (must be 3)\n", nb_face_vertices);
         todo_wine ok(data_size == 3, "Wrong number of face data bytes %u (must be 3)\n", data_size);
+        color = IDirect3DRMMesh_GetGroupColor(mesh, 0);
+        ok(color == 0xff00ff00, "Wrong color returned %#x instead of %#x\n", color, 0xff00ff00);
         hr = IDirect3DRMMesh_GetGroupTexture(mesh, 0, &texture);
-        todo_wine ok(hr == D3DRM_OK, "GetCroupTexture failed returning hr = %x\n", hr);
-        todo_wine ok(texture == NULL, "No texture should be present\n");
+        ok(hr == D3DRM_OK, "GetCroupTexture failed returning hr = %x\n", hr);
+        ok(texture == NULL, "No texture should be present\n");
         hr = IDirect3DRMMesh_GetGroupMaterial(mesh, 0, &material);
-        todo_wine ok(hr == D3DRM_OK, "GetCroupMaterial failed returning hr = %x\n", hr);
-        todo_wine ok(material != NULL, "No material should be present\n");
+        ok(hr == D3DRM_OK, "GetCroupMaterial failed returning hr = %x\n", hr);
+        ok(material != NULL, "No material present\n");
         if ((hr == D3DRM_OK) && material)
         {
             hr = IDirect3DRMMaterial_GetEmissive(material, &values[0], &values[1], &values[2]);
@@ -600,7 +603,8 @@ static void test_Frame(void)
     hr = IDirect3DRMFrame_GetChildren(pFrameP1, &pArray);
     ok(hr == D3DRM_OK, "Cannot get children (hr = %x)\n", hr);
     /* In some older version of d3drm, creating IDirect3DRMFrameArray object with GetChildren does not increment refcount of children frames */
-    ok((get_refcount((IUnknown*)pFrameC) == 3) || broken(get_refcount((IUnknown*)pFrameC) == 2), "Invalid refcount. Expected 3 (or 2) got %d\n", get_refcount((IUnknown*)pFrameC)); \
+    ok((get_refcount((IUnknown*)pFrameC) == 3) || broken(get_refcount((IUnknown*)pFrameC) == 2),
+            "Invalid refcount. Expected 3 (or 2) got %d\n", get_refcount((IUnknown*)pFrameC));
     if (pArray)
     {
         count = IDirect3DRMFrameArray_GetSize(pArray);
@@ -608,9 +612,11 @@ static void test_Frame(void)
         hr = IDirect3DRMFrameArray_GetElement(pArray, 0, &pFrameTmp);
         ok(hr == D3DRM_OK, "Cannot get element (hr = %x)\n", hr);
         ok(pFrameTmp == pFrameC, "pFrameTmp = %p\n", pFrameTmp);
-        ok((get_refcount((IUnknown*)pFrameC) == 4) || broken(get_refcount((IUnknown*)pFrameC) == 3), "Invalid refcount. Expected 4 (or 3) got %d\n", get_refcount((IUnknown*)pFrameC)); \
+        ok((get_refcount((IUnknown*)pFrameC) == 4) || broken(get_refcount((IUnknown*)pFrameC) == 3),
+                "Invalid refcount. Expected 4 (or 3) got %d\n", get_refcount((IUnknown*)pFrameC));
         IDirect3DRMFrame_Release(pFrameTmp);
-        ok((get_refcount((IUnknown*)pFrameC) == 3) || broken(get_refcount((IUnknown*)pFrameC) == 2), "Invalid refcount. Expected 3 (or 2) got %d\n", get_refcount((IUnknown*)pFrameC)); \
+        ok((get_refcount((IUnknown*)pFrameC) == 3) || broken(get_refcount((IUnknown*)pFrameC) == 2),
+                "Invalid refcount. Expected 3 (or 2) got %d\n", get_refcount((IUnknown*)pFrameC));
         IDirect3DRMFrameArray_Release(pArray);
         CHECK_REFCOUNT(pFrameC, 2);
     }
@@ -795,7 +801,7 @@ static void test_Frame(void)
 
     pLightArray = NULL;
     hr = IDirect3DRMFrame_GetLights(pFrameP1, &pLightArray);
-    todo_wine ok(hr == D3DRM_OK, "Cannot get lights (hr = %x)\n", hr);
+    ok(hr == D3DRM_OK, "Cannot get lights (hr = %x)\n", hr);
     if (pLightArray)
     {
         count = IDirect3DRMLightArray_GetSize(pLightArray);
@@ -839,25 +845,25 @@ static void test_Light(void)
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRMLight interface (hr = %x)\n", hr);
 
     type = IDirect3DRMLight_GetType(pLight);
-    todo_wine ok(type == D3DRMLIGHT_SPOT, "wrong type (%u)\n", type);
+    ok(type == D3DRMLIGHT_SPOT, "wrong type (%u)\n", type);
 
     color = IDirect3DRMLight_GetColor(pLight);
-    todo_wine ok(color == 0xff7f7f7f, "wrong color (%x)\n", color);
+    ok(color == 0xff7f7f7f, "wrong color (%x)\n", color);
 
     hr = IDirect3DRMLight_SetType(pLight, D3DRMLIGHT_POINT);
-    todo_wine ok(hr == D3DRM_OK, "Cannot set type (hr = %x)\n", hr);
+    ok(hr == D3DRM_OK, "Cannot set type (hr = %x)\n", hr);
     type = IDirect3DRMLight_GetType(pLight);
-    todo_wine ok(type == D3DRMLIGHT_POINT, "wrong type (%u)\n", type);
+    ok(type == D3DRMLIGHT_POINT, "wrong type (%u)\n", type);
 
     hr = IDirect3DRMLight_SetColor(pLight, 0xff180587);
-    todo_wine ok(hr == D3DRM_OK, "Cannot set color (hr = %x)\n", hr);
+    ok(hr == D3DRM_OK, "Cannot set color (hr = %x)\n", hr);
     color = IDirect3DRMLight_GetColor(pLight);
-    todo_wine ok(color == 0xff180587, "wrong color (%x)\n", color);
+    ok(color == 0xff180587, "wrong color (%x)\n", color);
 
     hr = IDirect3DRMLight_SetColorRGB(pLight, 0.5, 0.5, 0.5);
-    todo_wine ok(hr == D3DRM_OK, "Cannot set color (hr = %x)\n", hr);
+    ok(hr == D3DRM_OK, "Cannot set color (hr = %x)\n", hr);
     color = IDirect3DRMLight_GetColor(pLight);
-    todo_wine ok(color == 0xff7f7f7f, "wrong color (%x)\n", color);
+    ok(color == 0xff7f7f7f, "wrong color (%x)\n", color);
 
     IDirect3DRMLight_Release(pLight);
 

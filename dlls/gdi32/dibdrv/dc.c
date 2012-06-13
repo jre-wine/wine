@@ -263,10 +263,11 @@ int get_clipped_rects( const dib_info *dib, const RECT *rc, HRGN clip, struct cl
 
     init_clipped_rects( clip_rects );
 
-    rect.left   = 0;
-    rect.top    = 0;
-    rect.right  = dib->rect.right - dib->rect.left;
-    rect.bottom = dib->rect.bottom - dib->rect.top;
+    rect.left   = max( 0, -dib->rect.left );
+    rect.top    = max( 0, -dib->rect.top );
+    rect.right  = min( dib->rect.right, dib->width ) - dib->rect.left;
+    rect.bottom = min( dib->rect.bottom, dib->height ) - dib->rect.top;
+    if (is_rect_empty( &rect )) return 0;
     if (rc && !intersect_rect( &rect, &rect, rc )) return 0;
 
     if (!clip)
@@ -346,14 +347,6 @@ static BOOL dibdrv_DeleteDC( PHYSDEV dev )
 }
 
 /***********************************************************************
- *           dibdrv_DeleteBitmap
- */
-static BOOL dibdrv_DeleteBitmap( HBITMAP bitmap )
-{
-    return TRUE;
-}
-
-/***********************************************************************
  *           dibdrv_SelectBitmap
  */
 static HBITMAP dibdrv_SelectBitmap( PHYSDEV dev, HBITMAP bitmap )
@@ -400,24 +393,6 @@ static UINT dibdrv_SetBoundsRect( PHYSDEV dev, RECT *rect, UINT flags )
     return DCB_RESET;  /* we don't have device-specific bounds */
 }
 
-/***********************************************************************
- *           dibdrv_GetDeviceGammaRamp
- */
-static BOOL dibdrv_GetDeviceGammaRamp( PHYSDEV dev, void *ramp )
-{
-    SetLastError( ERROR_INVALID_PARAMETER );
-    return FALSE;
-}
-
-/***********************************************************************
- *           dibdrv_SetDeviceGammaRamp
- */
-static BOOL dibdrv_SetDeviceGammaRamp( PHYSDEV dev, void *ramp )
-{
-    SetLastError( ERROR_INVALID_PARAMETER );
-    return FALSE;
-}
-
 const struct gdi_dc_funcs dib_driver =
 {
     NULL,                               /* pAbortDoc */
@@ -431,10 +406,8 @@ const struct gdi_dc_funcs dib_driver =
     NULL,                               /* pChoosePixelFormat */
     dibdrv_Chord,                       /* pChord */
     NULL,                               /* pCloseFigure */
-    NULL,                               /* pCreateBitmap */
     NULL,                               /* pCreateCompatibleDC */
     dibdrv_CreateDC,                    /* pCreateDC */
-    dibdrv_DeleteBitmap,                /* pDeleteBitmap */
     dibdrv_DeleteDC,                    /* pDeleteDC */
     NULL,                               /* pDeleteObject */
     NULL,                               /* pDescribePixelFormat */
@@ -463,7 +436,7 @@ const struct gdi_dc_funcs dib_driver =
     NULL,                               /* pGetCharABCWidthsI */
     NULL,                               /* pGetCharWidth */
     NULL,                               /* pGetDeviceCaps */
-    dibdrv_GetDeviceGammaRamp,          /* pGetDeviceGammaRamp */
+    NULL,                               /* pGetDeviceGammaRamp */
     NULL,                               /* pGetFontData */
     NULL,                               /* pGetFontUnicodeRanges */
     NULL,                               /* pGetGlyphIndices */
@@ -525,7 +498,7 @@ const struct gdi_dc_funcs dib_driver =
     dibdrv_SetDCPenColor,               /* pSetDCPenColor */
     NULL,                               /* pSetDIBitsToDevice */
     dibdrv_SetDeviceClipping,           /* pSetDeviceClipping */
-    dibdrv_SetDeviceGammaRamp,          /* pSetDeviceGammaRamp */
+    NULL,                               /* pSetDeviceGammaRamp */
     NULL,                               /* pSetLayout */
     NULL,                               /* pSetMapMode */
     NULL,                               /* pSetMapperFlags */

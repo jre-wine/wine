@@ -1987,6 +1987,9 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
         return ERROR_SUCCESS;
     }
 
+    case 98:
+        TRACE("Queried undocumented option 98, forwarding to INTERNET_OPTION_SECURITY_FLAGS\n");
+        /* fall through */
     case INTERNET_OPTION_SECURITY_FLAGS:
     {
         DWORD flags;
@@ -2130,18 +2133,18 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             info->ftExpiry = context->pCertInfo->NotAfter;
             info->ftStart = context->pCertInfo->NotBefore;
             len = CertNameToStrA(context->dwCertEncodingType,
-                     &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR, NULL, 0);
+                     &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
             info->lpszSubjectInfo = LocalAlloc(0, len);
             if(info->lpszSubjectInfo)
                 CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR,
+                         &context->pCertInfo->Subject, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
                          info->lpszSubjectInfo, len);
             len = CertNameToStrA(context->dwCertEncodingType,
-                     &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR, NULL, 0);
+                     &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG, NULL, 0);
             info->lpszIssuerInfo = LocalAlloc(0, len);
             if(info->lpszIssuerInfo)
                 CertNameToStrA(context->dwCertEncodingType,
-                         &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR,
+                         &context->pCertInfo->Issuer, CERT_SIMPLE_NAME_STR|CERT_NAME_STR_CRLF_FLAG,
                          info->lpszIssuerInfo, len);
             info->dwKeySize = NETCON_GetCipherStrength(req->netconn);
             CertFreeCertificateContext(context);
@@ -2187,6 +2190,15 @@ static DWORD HTTPREQ_SetOption(object_header_t *hdr, DWORD option, void *buffer,
     http_request_t *req = (http_request_t*)hdr;
 
     switch(option) {
+    case 99: /* Undocumented, seems to be INTERNET_OPTION_SECURITY_FLAGS with argument validation */
+        TRACE("Undocumented option 99\n");
+
+        if (!buffer || size != sizeof(DWORD))
+            return ERROR_INVALID_PARAMETER;
+        if(*(DWORD*)buffer & ~SECURITY_SET_MASK)
+            return ERROR_INTERNET_OPTION_NOT_SETTABLE;
+
+        /* fall through */
     case INTERNET_OPTION_SECURITY_FLAGS:
     {
         DWORD flags;
@@ -2194,10 +2206,11 @@ static DWORD HTTPREQ_SetOption(object_header_t *hdr, DWORD option, void *buffer,
         if (!buffer || size != sizeof(DWORD))
             return ERROR_INVALID_PARAMETER;
         flags = *(DWORD *)buffer;
-        TRACE("%08x\n", flags);
-        req->security_flags = flags;
+        TRACE("INTERNET_OPTION_SECURITY_FLAGS %08x\n", flags);
+        flags &= SECURITY_SET_MASK;
+        req->security_flags |= flags;
         if(req->netconn)
-            req->netconn->security_flags = flags;
+            req->netconn->security_flags |= flags;
         return ERROR_SUCCESS;
     }
     case INTERNET_OPTION_CONNECT_TIMEOUT:
@@ -3086,11 +3099,11 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
     request->session = session;
     list_add_head( &session->hdr.children, &request->hdr.entry );
 
-    port = session->serverPort;
+    port = session->hostPort;
     if(port == INTERNET_INVALID_PORT_NUMBER)
         port = dwFlags & INTERNET_FLAG_SECURE ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
 
-    request->server = get_server(session->serverName, port);
+    request->server = get_server(session->hostName, port);
     if(!request->server) {
         WININET_Release(&request->hdr);
         return ERROR_OUTOFMEMORY;
@@ -5450,7 +5463,6 @@ static void HTTPSESSION_Destroy(object_header_t *hdr)
     WININET_Release(&session->appInfo->hdr);
 
     heap_free(session->hostName);
-    heap_free(session->serverName);
     heap_free(session->password);
     heap_free(session->userName);
 }
@@ -5602,13 +5614,11 @@ DWORD HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
         if(hIC->proxyBypass)
             FIXME("Proxy bypass is ignored.\n");
     }
-    session->serverName = heap_strdupW(lpszServerName);
     session->hostName = heap_strdupW(lpszServerName);
     if (lpszUserName && lpszUserName[0])
         session->userName = heap_strdupW(lpszUserName);
     if (lpszPassword && lpszPassword[0])
         session->password = heap_strdupW(lpszPassword);
-    session->serverPort = serverPort;
     session->hostPort = serverPort;
     session->connect_timeout = hIC->connect_timeout;
     session->send_timeout = INFINITE;

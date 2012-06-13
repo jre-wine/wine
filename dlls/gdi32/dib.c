@@ -554,7 +554,7 @@ INT nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, INT he
 
     dev = GET_DC_PHYSDEV( dc, pPutImage );
     copy_bitmapinfo( dst_info, src_info );
-    err = dev->funcs->pPutImage( dev, 0, clip, dst_info, &src_bits, &src, &dst, rop );
+    err = dev->funcs->pPutImage( dev, clip, dst_info, &src_bits, &src, &dst, rop );
     if (err == ERROR_BAD_FORMAT)
     {
         /* 1-bpp destination without a color table requires a fake 1-entry table
@@ -573,7 +573,7 @@ INT nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, INT he
         {
             /* get rid of the fake 1-bpp table */
             if (dst_info->bmiHeader.biClrUsed == 1) dst_info->bmiHeader.biClrUsed = 0;
-            err = dev->funcs->pPutImage( dev, 0, clip, dst_info, &src_bits, &src, &dst, rop );
+            err = dev->funcs->pPutImage( dev, clip, dst_info, &src_bits, &src, &dst, rop );
         }
     }
 
@@ -581,7 +581,7 @@ INT nulldrv_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst, INT he
     {
         copy_bitmapinfo( src_info, dst_info );
         err = stretch_bits( src_info, &src, dst_info, &dst, &src_bits, GetStretchBltMode( dev->hdc ) );
-        if (!err) err = dev->funcs->pPutImage( dev, 0, NULL, dst_info, &src_bits, &src, &dst, rop );
+        if (!err) err = dev->funcs->pPutImage( dev, NULL, dst_info, &src_bits, &src, &dst, rop );
     }
     if (err) ret = 0;
     else if (rop == SRCCOPY) ret = height;
@@ -733,11 +733,11 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
     copy_bitmapinfo( dst_info, src_info );
 
-    err = bitmap->funcs->pPutImage( NULL, hbitmap, clip, dst_info, &src_bits, &src, &dst, 0 );
+    err = put_image_into_bitmap( bitmap, clip, dst_info, &src_bits, &src, &dst );
     if (err == ERROR_BAD_FORMAT)
     {
         err = convert_bits( src_info, &src, dst_info, &src_bits, FALSE );
-        if (!err) err = bitmap->funcs->pPutImage( NULL, hbitmap, clip, dst_info, &src_bits, &src, &dst, 0 );
+        if (!err) err = put_image_into_bitmap( bitmap, clip, dst_info, &src_bits, &src, &dst );
     }
     if(err) result = 0;
 
@@ -850,11 +850,11 @@ INT nulldrv_SetDIBitsToDevice( PHYSDEV dev, INT x_dst, INT y_dst, DWORD cx, DWOR
 
     dev = GET_DC_PHYSDEV( dc, pPutImage );
     copy_bitmapinfo( dst_info, src_info );
-    err = dev->funcs->pPutImage( dev, 0, clip, dst_info, &src_bits, &src, &dst, SRCCOPY );
+    err = dev->funcs->pPutImage( dev, clip, dst_info, &src_bits, &src, &dst, SRCCOPY );
     if (err == ERROR_BAD_FORMAT)
     {
         err = convert_bits( src_info, &src, dst_info, &src_bits, FALSE );
-        if (!err) err = dev->funcs->pPutImage( dev, 0, clip, dst_info, &src_bits, &src, &dst, SRCCOPY );
+        if (!err) err = dev->funcs->pPutImage( dev, clip, dst_info, &src_bits, &src, &dst, SRCCOPY );
     }
     if (err) lines = 0;
 
@@ -1334,7 +1334,7 @@ INT WINAPI GetDIBits(
         lines = src.height;
     }
 
-    err = bmp->funcs->pGetImage( NULL, hbitmap, src_info, bits ? &src_bits : NULL, bits ? &src : NULL );
+    err = get_image_from_bitmap( bmp, src_info, bits ? &src_bits : NULL, bits ? &src : NULL );
 
     if (err) goto done;
 
@@ -1492,8 +1492,6 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
     bmp->dib.dsBm.bmBitsPixel  = info->bmiHeader.biBitCount;
     bmp->dib.dsBmih            = info->bmiHeader;
 
-    bmp->funcs = &dib_driver;
-
     if (info->bmiHeader.biBitCount <= 8)  /* build the color table */
     {
         if (usage == DIB_PAL_COLORS && !fill_color_table_from_pal_colors( info, hdc ))
@@ -1570,7 +1568,7 @@ static HGDIOBJ DIB_SelectObject( HGDIOBJ handle, HDC hdc )
     HGDIOBJ ret;
     BITMAPOBJ *bitmap;
     DC *dc;
-    PHYSDEV physdev = NULL, old_physdev = NULL;
+    PHYSDEV physdev;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
@@ -1596,18 +1594,7 @@ static HGDIOBJ DIB_SelectObject( HGDIOBJ handle, HDC hdc )
         goto done;
     }
 
-    old_physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
-    physdev = dc->dibdrv;
-    if (old_physdev != dc->dibdrv)
-    {
-        if (physdev) push_dc_driver( &dc->physDev, physdev, physdev->funcs );
-        else
-        {
-            if (!dib_driver.pCreateDC( &dc->physDev, NULL, NULL, NULL, NULL )) goto done;
-            dc->dibdrv = physdev = dc->physDev;
-        }
-    }
-
+    physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
     if (!physdev->funcs->pSelectBitmap( physdev, handle ))
     {
         GDI_ReleaseObj( handle );
@@ -1629,10 +1616,6 @@ static HGDIOBJ DIB_SelectObject( HGDIOBJ handle, HDC hdc )
     }
 
  done:
-    if(!ret)
-    {
-        if (old_physdev && old_physdev != dc->dibdrv) pop_dc_driver( dc, dc->dibdrv );
-    }
     release_dc_ptr( dc );
     return ret;
 }

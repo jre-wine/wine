@@ -38,7 +38,6 @@ AddReg=\
     ControlPanel,\
     CurrentVersion,\
     Debugger,\
-    Dotnet,\
     DirectX,\
     Fonts,\
     MCI,\
@@ -63,7 +62,6 @@ AddReg=\
     ControlPanel,\
     CurrentVersion,\
     Debugger,\
-    Dotnet,\
     DirectX,\
     Fonts,\
     MCI,\
@@ -80,6 +78,7 @@ AddReg=\
 [DefaultInstall.ntamd64]
 RegisterDlls=RegisterDllsSection
 WineFakeDlls=FakeDlls
+WinePreInstall=Wow64
 UpdateInis=SystemIni
 CopyFiles=@l_intl.nls
 AddReg=\
@@ -102,8 +101,7 @@ AddReg=\
     SessionMgr,\
     Tapi,\
     Timezones,\
-    VersionInfo,\
-    Wow64
+    VersionInfo
 
 [Wow64Install]
 RegisterDlls=RegisterDllsSection
@@ -114,7 +112,6 @@ AddReg=\
     CurrentVersionWow64,\
     Debugger,\
     DirectX,\
-    Dotnet,\
     MCI,\
     Misc,\
     Tapi,\
@@ -540,6 +537,16 @@ HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,Install,0x10003,1
 HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,Version,2,4.0.30319
 HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,TargetVersion,2,4.0.0
 
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},,2,".NET Framework"
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"ComponentID",2,".NETFramework"
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"Locale",2,""
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"Version",2,"2,0,50727,0"
+
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},,2,".NET Framework"
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"ComponentID",2,".NETFramework"
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"Locale",2,""
+HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"Version",2,"1,0,4322,1"
+
 [DirectX]
 HKLM,Software\Microsoft\DirectX,"Version",,"4.09.00.0904"
 HKLM,Software\Microsoft\DirectX,"InstalledVersion",1,00,00,00,09,00,00,00,00
@@ -696,23 +703,11 @@ HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{44BBA855-CC51-11CF-AA
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{44BBA855-CC51-11CF-AAFA-00AA00B6015F},"Locale",2,"*"
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{44BBA855-CC51-11CF-AAFA-00AA00B6015F},"Version",2,"4,71,1113,0"
 
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},,2,".NET Framework"
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"ComponentID",2,".NETFramework"
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"Locale",2,""
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{7131646D-CD3C-40F4-97B9-CD9E4E6262EF},"Version",2,"2,0,50727,0"
-
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},,2,".NET Framework"
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"ComponentID",2,".NETFramework"
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"Locale",2,""
-HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{CB2F7EDD-9D1F-43C1-90FC-4F52EAE172A1},"Version",2,"1,0,4322,1"
-
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-9948-00c04f98bbc9},,2,"HTML Help"
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-9948-00c04f98bbc9},"ComponentID",2,"HTMLHelp"
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-9948-00c04f98bbc9},"IsInstalled",2,1
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-9948-00c04f98bbc9},"Locale",2,"*"
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-9948-00c04f98bbc9},"Version",2,"4,74,9273,0"
-
-HKCU,SOFTWARE\Wine\Dotnet,"MonoUrl",,"http://source.winehq.org/winemono.php"
 
 [Nls]
 HKLM,System\CurrentControlSet\Control\Nls\Codepage,"37",,""
@@ -2504,6 +2499,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,cryptdlg.dll,1
 11,,cryptnet.dll,1
 11,,devenum.dll,1
+11,,mscoree.dll,1
 11,,mshtml.dll,1
 11,,msisip.dll,1
 11,,qcap.dll,1
@@ -2538,6 +2534,14 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,iexplore.exe
 11,,winetest.exe,-
 12,,mountmgr.sys,-
+; skip .NET fake dlls in Wine Mono package
+11,,aspnet_regiis.exe,-
+11,,ngen.exe,-
+11,,fusion.dll,-
+11,,regsvcs.exe,-
+11,,regasm.exe,-
+11,,servicemodelreg.exe,-
+11,,presentationfontcache.exe,-
 ; registration order matters for these
 11,,msxml.dll
 11,,msxml2.dll
@@ -2566,6 +2570,14 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,notepad.exe
 11,,winetest.exe,-
 12,,mountmgr.sys
+; skip .NET fake dlls in Wine Mono package
+11,,aspnet_regiis.exe,-
+11,,ngen.exe,-
+11,,fusion.dll,-
+11,,regsvcs.exe,-
+11,,regasm.exe,-
+11,,servicemodelreg.exe,-
+11,,presentationfontcache.exe,-
 ; registration order matters for these
 11,,msxml.dll
 11,,msxml2.dll
@@ -2573,17 +2585,6 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,msxml4.dll
 11,,msxml6.dll
 11,,shdocvw.dll
-10,Microsoft.NET\Framework\v1.1.4322,aspnet_regiis.exe
-10,Microsoft.NET\Framework\v1.1.4322,ngen.exe
-10,Microsoft.NET\Framework\v1.1.4322,fusion.dll
-10,Microsoft.NET\Framework\v1.1.4322,regsvcs.exe
-10,Microsoft.NET\Framework\v2.0.50727,ngen.exe
-10,Microsoft.NET\Framework\v2.0.50727,fusion.dll
-10,Microsoft.NET\Framework\v2.0.50727,regasm.exe
-10,Microsoft.NET\Framework\v3.0\windows communication foundation,servicemodelreg.exe
-10,Microsoft.NET\Framework\v3.0\wpf,presentationfontcache.exe
-10,Microsoft.NET\Framework\v4.0.30319,ngen.exe
-10,Microsoft.NET\Framework\v4.0.30319,fusion.dll
 11,gecko\plugin,npmshtml.dll
 11,wbem,mofcomp.exe
 16422,Internet Explorer,iexplore.exe
@@ -3047,7 +3048,7 @@ HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe 
 HKLM,"System\CurrentControlSet\Services\VxD\MSTCP",,16
 HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters",,16
 HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
-HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters",,16
+HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
 
 [VersionInfo]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"5.1"

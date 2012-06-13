@@ -3336,6 +3336,62 @@ msgstr ""
 msgid "High"
 msgstr "高"
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "停用(&D)"
+
+#: joy.rc:37
+#, fuzzy
+#| msgid "&enable"
+msgid "&Enable"
+msgstr "启用(&E)"
+
+#: joy.rc:38
+#, fuzzy
+#| msgid "Disconnected"
+msgid "Connected"
+msgstr "连接断开"
+
+#: joy.rc:40
+#, fuzzy
+#| msgid "&Disable"
+msgid "Disabled"
+msgstr "停用(&D)"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+#| msgid "Create Control"
+msgid "Game Controllers"
+msgstr "建立控件"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr ""
@@ -11972,10 +12028,6 @@ msgstr "内建先于原装(&L)"
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr "原装先于内建(&V)"
-
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "停用(&D)"
 
 #: winecfg.rc:211
 msgid "Select Drive Letter"

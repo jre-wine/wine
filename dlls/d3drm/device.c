@@ -39,6 +39,11 @@ typedef struct {
     IDirect3DRMDevice3 IDirect3DRMDevice3_iface;
     IDirect3DRMWinDevice IDirect3DRMWinDevice_iface;
     LONG ref;
+    BOOL dither;
+    D3DRMRENDERQUALITY quality;
+    DWORD rendermode;
+    DWORD height;
+    DWORD width;
 } IDirect3DRMDeviceImpl;
 
 static inline IDirect3DRMDeviceImpl *impl_from_IDirect3DRMDevice2(IDirect3DRMDevice2 *iface)
@@ -201,9 +206,9 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_Init(IDirect3DRMDevice2* iface, ULO
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(%u, %u): stub\n", iface, This, width, height);
+    TRACE("(%p/%p)->(%u, %u)\n", iface, This, width, height);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_Init(&This->IDirect3DRMDevice3_iface, width, height);
 }
 
 /*** IDirect3DRMDevice2 methods ***/
@@ -224,9 +229,10 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_InitFromClipper(IDirect3DRMDevice2*
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(%p, %p, %u, %u): stub\n", iface, This, lpDDClipper, lpGUID, width, height);
+    TRACE("(%p/%p)->(%p, %p, %u, %u)\n", iface, This, lpDDClipper, lpGUID, width, height);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_InitFromClipper(&This->IDirect3DRMDevice3_iface, lpDDClipper, lpGUID,
+                                              width, height);
 }
 
 static HRESULT WINAPI IDirect3DRMDevice2Impl_Update(IDirect3DRMDevice2* iface)
@@ -235,7 +241,7 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_Update(IDirect3DRMDevice2* iface)
 
     FIXME("(%p/%p)->(): stub\n", iface, This);
 
-    return E_NOTIMPL;
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice2Impl_AddUpdateCallback(IDirect3DRMDevice2* iface,
@@ -281,9 +287,9 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_SetDither(IDirect3DRMDevice2* iface
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(%d): stub\n", iface, This, enable);
+    TRACE("(%p/%p)->(%d)\n", iface, This, enable);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_SetDither(&This->IDirect3DRMDevice3_iface, enable);
 }
 
 static HRESULT WINAPI IDirect3DRMDevice2Impl_SetShades(IDirect3DRMDevice2* iface, DWORD count)
@@ -300,9 +306,9 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_SetQuality(IDirect3DRMDevice2* ifac
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, quality);
+    TRACE("(%p/%p)->(%u)\n", iface, This, quality);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_SetQuality(&This->IDirect3DRMDevice3_iface, quality);
 }
 
 static HRESULT WINAPI IDirect3DRMDevice2Impl_SetTextureQuality(IDirect3DRMDevice2* iface,
@@ -329,9 +335,9 @@ static BOOL WINAPI IDirect3DRMDevice2Impl_GetDither(IDirect3DRMDevice2* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_GetDither(&This->IDirect3DRMDevice3_iface);
 }
 
 static DWORD WINAPI IDirect3DRMDevice2Impl_GetShades(IDirect3DRMDevice2* iface)
@@ -347,18 +353,18 @@ static DWORD WINAPI IDirect3DRMDevice2Impl_GetHeight(IDirect3DRMDevice2* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_GetHeight(&This->IDirect3DRMDevice3_iface);
 }
 
 static DWORD WINAPI IDirect3DRMDevice2Impl_GetWidth(IDirect3DRMDevice2* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_GetWidth(&This->IDirect3DRMDevice3_iface);
 }
 
 static DWORD WINAPI IDirect3DRMDevice2Impl_GetTrianglesDrawn(IDirect3DRMDevice2* iface)
@@ -383,9 +389,9 @@ static D3DRMRENDERQUALITY WINAPI IDirect3DRMDevice2Impl_GetQuality(IDirect3DRMDe
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_GetQuality(&This->IDirect3DRMDevice3_iface);
 }
 
 static D3DCOLORMODEL WINAPI IDirect3DRMDevice2Impl_GetColorModel(IDirect3DRMDevice2* iface)
@@ -442,18 +448,18 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_SetRenderMode(IDirect3DRMDevice2* i
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, dwFlags);
+    TRACE("(%p/%p)->(%u)\n", iface, This, dwFlags);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_SetRenderMode(&This->IDirect3DRMDevice3_iface, dwFlags);
 }
 
 static DWORD WINAPI IDirect3DRMDevice2Impl_GetRenderMode(IDirect3DRMDevice2* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return IDirect3DRMDevice3_GetRenderMode(&This->IDirect3DRMDevice3_iface);
 }
 
 static HRESULT WINAPI IDirect3DRMDevice2Impl_GetDirect3DDevice2(IDirect3DRMDevice2* iface,
@@ -624,7 +630,10 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_Init(IDirect3DRMDevice3* iface, ULO
 
     FIXME("(%p/%p)->(%u, %u): stub\n", iface, This, width, height);
 
-    return E_NOTIMPL;
+    This->height = height;
+    This->width = width;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_InitFromD3D(IDirect3DRMDevice3* iface,
@@ -646,7 +655,10 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_InitFromClipper(IDirect3DRMDevice3*
 
     FIXME("(%p/%p)->(%p, %p, %u, %u): stub\n", iface, This, lpDDClipper, lpGUID, width, height);
 
-    return E_NOTIMPL;
+    This->height = height;
+    This->width = width;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_Update(IDirect3DRMDevice3* iface)
@@ -655,7 +667,7 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_Update(IDirect3DRMDevice3* iface)
 
     FIXME("(%p/%p)->(): stub\n", iface, This);
 
-    return E_NOTIMPL;
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_AddUpdateCallback(IDirect3DRMDevice3* iface,
@@ -701,9 +713,11 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_SetDither(IDirect3DRMDevice3* iface
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(%d): stub\n", iface, This, enable);
+    TRACE("(%p/%p)->(%d)\n", iface, This, enable);
 
-    return E_NOTIMPL;
+    This->dither = enable;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_SetShades(IDirect3DRMDevice3* iface, DWORD count)
@@ -720,9 +734,11 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_SetQuality(IDirect3DRMDevice3* ifac
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, quality);
+    TRACE("(%p/%p)->(%u)\n", iface, This, quality);
 
-    return E_NOTIMPL;
+    This->quality = quality;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_SetTextureQuality(IDirect3DRMDevice3* iface,
@@ -749,9 +765,9 @@ static BOOL WINAPI IDirect3DRMDevice3Impl_GetDither(IDirect3DRMDevice3* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return This->dither;
 }
 
 static DWORD WINAPI IDirect3DRMDevice3Impl_GetShades(IDirect3DRMDevice3* iface)
@@ -767,18 +783,18 @@ static DWORD WINAPI IDirect3DRMDevice3Impl_GetHeight(IDirect3DRMDevice3* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return This->height;
 }
 
 static DWORD WINAPI IDirect3DRMDevice3Impl_GetWidth(IDirect3DRMDevice3* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return This->width;
 }
 
 static DWORD WINAPI IDirect3DRMDevice3Impl_GetTrianglesDrawn(IDirect3DRMDevice3* iface)
@@ -803,9 +819,9 @@ static D3DRMRENDERQUALITY WINAPI IDirect3DRMDevice3Impl_GetQuality(IDirect3DRMDe
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return This->quality;
 }
 
 static D3DCOLORMODEL WINAPI IDirect3DRMDevice3Impl_GetColorModel(IDirect3DRMDevice3* iface)
@@ -863,18 +879,20 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_SetRenderMode(IDirect3DRMDevice3* i
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, dwFlags);
+    TRACE("(%p/%p)->(%u)\n", iface, This, dwFlags);
 
-    return E_NOTIMPL;
+    This->rendermode = dwFlags;
+
+    return D3DRM_OK;
 }
 
 static DWORD WINAPI IDirect3DRMDevice3Impl_GetRenderMode(IDirect3DRMDevice3* iface)
 {
     IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return E_NOTIMPL;
+    return This->rendermode;
 }
 
 static HRESULT WINAPI IDirect3DRMDevice3Impl_GetDirect3DDevice2(IDirect3DRMDevice3* iface,
@@ -1107,7 +1125,7 @@ static HRESULT WINAPI IDirect3DRMWinDeviceImpl_HandlePaint(IDirect3DRMWinDevice*
 
     FIXME("(%p/%p)->(%p): stub\n", iface, This, hdc);
 
-    return E_NOTIMPL;
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMWinDeviceImpl_HandleActivate(IDirect3DRMWinDevice* iface, WORD wparam)
@@ -1116,7 +1134,7 @@ static HRESULT WINAPI IDirect3DRMWinDeviceImpl_HandleActivate(IDirect3DRMWinDevi
 
     FIXME("(%p/%p)->(%u): stub\n", iface, This, wparam);
 
-    return E_NOTIMPL;
+    return D3DRM_OK;
 }
 
 static const struct IDirect3DRMWinDeviceVtbl Direct3DRMWinDevice_Vtbl =

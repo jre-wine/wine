@@ -438,11 +438,11 @@ static int get_overlap( const dib_info *dst, const RECT *dst_rect,
     int height, ret = 0;
 
     if (dst->stride != src->stride) return 0;  /* can't be the same dib */
-    if (dst_rect->right <= src_rect->left) return 0;
-    if (dst_rect->left >= src_rect->right) return 0;
+    if (dst->rect.left + dst_rect->right <= src->rect.left + src_rect->left) return 0;
+    if (dst->rect.left + dst_rect->left >= src->rect.left + src_rect->right) return 0;
 
-    src_top = (const char *)src->bits.ptr + src_rect->top * src->stride;
-    dst_top = (const char *)dst->bits.ptr + dst_rect->top * dst->stride;
+    src_top = (const char *)src->bits.ptr + (src->rect.top + src_rect->top) * src->stride;
+    dst_top = (const char *)dst->bits.ptr + (dst->rect.top + dst_rect->top) * dst->stride;
     height = (dst_rect->bottom - dst_rect->top) * dst->stride;
 
     if (dst->stride > 0)
@@ -460,13 +460,13 @@ static int get_overlap( const dib_info *dst, const RECT *dst_rect,
         else if (dst_top < src_top) ret |= OVERLAP_BELOW;
     }
 
-    if (dst_rect->left < src_rect->left) ret |= OVERLAP_LEFT;
-    else if (dst_rect->left > src_rect->left) ret |= OVERLAP_RIGHT;
+    if (dst->rect.left + dst_rect->left < src->rect.left + src_rect->left) ret |= OVERLAP_LEFT;
+    else if (dst->rect.left + dst_rect->left > src->rect.left + src_rect->left) ret |= OVERLAP_RIGHT;
 
     return ret;
 }
 
-static DWORD copy_rect( dib_info *dst, const RECT *dst_rect, const dib_info *src, const RECT *src_rect,
+static void copy_rect( dib_info *dst, const RECT *dst_rect, const dib_info *src, const RECT *src_rect,
                         const struct clipped_rects *clipped_rects, INT rop2 )
 {
     POINT origin;
@@ -495,7 +495,7 @@ static DWORD copy_rect( dib_info *dst, const RECT *dst_rect, const dib_info *src
         dst->funcs->solid_rects( dst, count, rects, and, xor );
         /* fall through */
     case R2_NOP:
-        return ERROR_SUCCESS;
+        return;
     }
 
     overlap = get_overlap( dst, dst_rect, src, src_rect );
@@ -550,7 +550,6 @@ static DWORD copy_rect( dib_info *dst, const RECT *dst_rect, const dib_info *src
             dst->funcs->copy_rect( dst, &rects[i], src, &origin, rop2, overlap );
         }
     }
-    return ERROR_SUCCESS;
 }
 
 static DWORD blend_rect( dib_info *dst, const RECT *dst_rect, const dib_info *src, const RECT *src_rect,
@@ -808,46 +807,19 @@ static void set_color_info( const dib_info *dib, BITMAPINFO *info )
     }
 }
 
-/***********************************************************************
- *           dibdrv_GetImage
- */
-DWORD dibdrv_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
-                       struct gdi_image_bits *bits, struct bitblt_coords *src )
+static DWORD get_image_dib_info( dib_info *dib, BITMAPINFO *info,
+                                 struct gdi_image_bits *bits, struct bitblt_coords *src )
 {
-    DWORD ret = ERROR_SUCCESS;
-    dib_info *dib = NULL, stand_alone;
-
-    TRACE( "%p %p %p\n", dev, hbitmap, info );
-
     info->bmiHeader.biSize          = sizeof(info->bmiHeader);
     info->bmiHeader.biPlanes        = 1;
     info->bmiHeader.biCompression   = BI_RGB;
     info->bmiHeader.biXPelsPerMeter = 0;
     info->bmiHeader.biYPelsPerMeter = 0;
     info->bmiHeader.biClrImportant  = 0;
-
-    if (hbitmap)
-    {
-        BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
-
-        if (!bmp) return ERROR_INVALID_HANDLE;
-        if (!init_dib_info_from_bitmapobj( &stand_alone, bmp ))
-        {
-            ret = ERROR_OUTOFMEMORY;
-            goto done;
-        }
-        dib = &stand_alone;
-    }
-    else
-    {
-        dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
-        dib = &pdev->dib;
-    }
-
-    info->bmiHeader.biWidth     = dib->width;
-    info->bmiHeader.biHeight    = dib->rect.bottom - dib->rect.top;
-    info->bmiHeader.biBitCount  = dib->bit_count;
-    info->bmiHeader.biSizeImage = info->bmiHeader.biHeight * abs( dib->stride );
+    info->bmiHeader.biWidth         = dib->width;
+    info->bmiHeader.biHeight        = dib->rect.bottom - dib->rect.top;
+    info->bmiHeader.biBitCount      = dib->bit_count;
+    info->bmiHeader.biSizeImage     = info->bmiHeader.biHeight * abs( dib->stride );
     if (dib->stride > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
 
     set_color_info( dib, info );
@@ -863,24 +835,55 @@ DWORD dibdrv_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
         src->x += dib->rect.left;
         offset_rect( &src->visrect, dib->rect.left, 0 );
     }
+    return ERROR_SUCCESS;
+}
 
-done:
-   if (hbitmap) GDI_ReleaseObj( hbitmap );
-   return ret;
+DWORD get_image_from_bitmap( BITMAPOBJ *bmp, BITMAPINFO *info,
+                             struct gdi_image_bits *bits, struct bitblt_coords *src )
+{
+    dib_info dib;
+
+    if (!init_dib_info_from_bitmapobj( &dib, bmp )) return ERROR_OUTOFMEMORY;
+    return get_image_dib_info( &dib, info, bits, src );
+}
+
+/***********************************************************************
+ *           dibdrv_GetImage
+ */
+DWORD dibdrv_GetImage( PHYSDEV dev, BITMAPINFO *info, struct gdi_image_bits *bits,
+                       struct bitblt_coords *src )
+{
+    dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
+
+    TRACE( "%p %p\n", dev, info );
+
+    return get_image_dib_info( &pdev->dib, info, bits, src );
 }
 
 static BOOL matching_color_info( const dib_info *dib, const BITMAPINFO *info )
 {
+    const RGBQUAD *color_table = info->bmiColors;
+
+    if (info->bmiHeader.biPlanes != 1) return FALSE;
+    if (info->bmiHeader.biBitCount != dib->bit_count) return FALSE;
+
     switch (info->bmiHeader.biBitCount)
     {
     case 1:
-    case 4:
-    case 8:
-    {
-        RGBQUAD *color_table = (RGBQUAD *)((char *)info + info->bmiHeader.biSize);
         if (dib->color_table_size != info->bmiHeader.biClrUsed) return FALSE;
         return !memcmp( color_table, dib->color_table, dib->color_table_size * sizeof(RGBQUAD) );
-    }
+
+    case 4:
+    case 8:
+        if (!info->bmiHeader.biClrUsed)
+        {
+            if (!dib->color_table_size) return TRUE;
+            if (dib->color_table_size != 1 << info->bmiHeader.biBitCount) return FALSE;
+            color_table = get_default_color_table( info->bmiHeader.biBitCount );
+        }
+        else if (dib->color_table_size != info->bmiHeader.biClrUsed) return FALSE;
+
+        return !memcmp( color_table, dib->color_table, dib->color_table_size * sizeof(RGBQUAD) );
 
     case 16:
     {
@@ -908,6 +911,33 @@ static BOOL matching_color_info( const dib_info *dib, const BITMAPINFO *info )
     return FALSE;
 }
 
+DWORD put_image_into_bitmap( BITMAPOBJ *bmp, HRGN clip, BITMAPINFO *info,
+                             const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                             struct bitblt_coords *dst )
+{
+    struct clipped_rects clipped_rects;
+    dib_info dib, src_dib;
+
+    if (!init_dib_info_from_bitmapobj( &dib, bmp )) return ERROR_OUTOFMEMORY;
+    if (!matching_color_info( &dib, info )) goto update_format;
+    if (!bits) return ERROR_SUCCESS;
+    if ((src->width != dst->width) || (src->height != dst->height)) return ERROR_TRANSFORM_NOT_SUPPORTED;
+
+    init_dib_info_from_bitmapinfo( &src_dib, info, bits->ptr );
+    src_dib.bits.is_copy = bits->is_copy;
+
+    if (get_clipped_rects( &dib, &dst->visrect, clip, &clipped_rects ))
+        copy_rect( &dib, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, R2_COPYPEN );
+
+    return ERROR_SUCCESS;
+
+update_format:
+    info->bmiHeader.biPlanes   = 1;
+    info->bmiHeader.biBitCount = dib.bit_count;
+    set_color_info( &dib, info );
+    return ERROR_BAD_FORMAT;
+}
+
 static inline BOOL rop_uses_pat(DWORD rop)
 {
     return ((rop >> 4) & 0x0f0000) != (rop & 0x0f0000);
@@ -916,94 +946,52 @@ static inline BOOL rop_uses_pat(DWORD rop)
 /***********************************************************************
  *           dibdrv_PutImage
  */
-DWORD dibdrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
+DWORD dibdrv_PutImage( PHYSDEV dev, HRGN clip, BITMAPINFO *info,
                        const struct gdi_image_bits *bits, struct bitblt_coords *src,
                        struct bitblt_coords *dst, DWORD rop )
 {
-    dib_info *dib = NULL, stand_alone;
     struct clipped_rects clipped_rects;
-    DWORD ret;
+    DWORD ret = ERROR_SUCCESS;
     dib_info src_dib;
     HRGN tmp_rgn = 0;
-    dibdrv_physdev *pdev = NULL;
+    dibdrv_physdev *pdev = get_dibdrv_pdev( dev );
 
-    TRACE( "%p %p %p\n", dev, hbitmap, info );
+    TRACE( "%p %p\n", dev, info );
 
-    if (hbitmap)
-    {
-        BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
-
-        if (!bmp) return ERROR_INVALID_HANDLE;
-        if (!init_dib_info_from_bitmapobj( &stand_alone, bmp ))
-        {
-            ret = ERROR_OUTOFMEMORY;
-            goto done;
-        }
-        dib = &stand_alone;
-        rop = SRCCOPY;
-    }
-    else
-    {
-        pdev = get_dibdrv_pdev( dev );
-        dib = &pdev->dib;
-    }
-
-    if (info->bmiHeader.biPlanes != 1) goto update_format;
-    if (info->bmiHeader.biBitCount != dib->bit_count) goto update_format;
-    if (!matching_color_info( dib, info )) goto update_format;
-    if (!bits)
-    {
-        ret = ERROR_SUCCESS;
-        goto done;
-    }
-    if ((src->width != dst->width) || (src->height != dst->height))
-    {
-        ret = ERROR_TRANSFORM_NOT_SUPPORTED;
-        goto done;
-    }
+    if (!matching_color_info( &pdev->dib, info )) goto update_format;
+    if (!bits) return ERROR_SUCCESS;
+    if ((src->width != dst->width) || (src->height != dst->height)) return ERROR_TRANSFORM_NOT_SUPPORTED;
 
     init_dib_info_from_bitmapinfo( &src_dib, info, bits->ptr );
     src_dib.bits.is_copy = bits->is_copy;
 
-    if (!hbitmap)
+    if (clip && pdev->clip)
     {
-        if (clip && pdev->clip)
+        tmp_rgn = CreateRectRgn( 0, 0, 0, 0 );
+        CombineRgn( tmp_rgn, clip, pdev->clip, RGN_AND );
+        clip = tmp_rgn;
+    }
+    else if (!clip) clip = pdev->clip;
+    add_clipped_bounds( pdev, &dst->visrect, clip );
+
+    if (get_clipped_rects( &pdev->dib, &dst->visrect, clip, &clipped_rects ))
+    {
+        if (!rop_uses_pat( rop ))
         {
-            tmp_rgn = CreateRectRgn( 0, 0, 0, 0 );
-            CombineRgn( tmp_rgn, clip, pdev->clip, RGN_AND );
-            clip = tmp_rgn;
+            int rop2 = ((rop >> 16) & 0xf) + 1;
+            copy_rect( &pdev->dib, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop2 );
         }
-        else if (!clip) clip = pdev->clip;
-        add_clipped_bounds( pdev, &dst->visrect, clip );
+        else
+            ret = execute_rop( pdev, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop );
     }
-
-    if (!get_clipped_rects( dib, &dst->visrect, clip, &clipped_rects ))
-    {
-        ret = ERROR_SUCCESS;
-        goto done;
-    }
-
-    if (!rop_uses_pat( rop ))
-    {
-        int rop2 = ((rop >> 16) & 0xf) + 1;
-        ret = copy_rect( dib, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop2 );
-    }
-    else
-    {
-        ret = execute_rop( pdev, &dst->visrect, &src_dib, &src->visrect, &clipped_rects, rop );
-    }
-    goto done;
+    if (tmp_rgn) DeleteObject( tmp_rgn );
+    return ret;
 
 update_format:
     info->bmiHeader.biPlanes   = 1;
-    info->bmiHeader.biBitCount = dib->bit_count;
-    set_color_info( dib, info );
-    ret = ERROR_BAD_FORMAT;
-
-done:
-    if (tmp_rgn) DeleteObject( tmp_rgn );
-    if (hbitmap) GDI_ReleaseObj( hbitmap );
-    return ret;
+    info->bmiHeader.biBitCount = pdev->dib.bit_count;
+    set_color_info( &pdev->dib, info );
+    return ERROR_BAD_FORMAT;
 }
 
 /***********************************************************************

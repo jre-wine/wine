@@ -453,6 +453,8 @@ struct HTMLDocumentObj {
     ICustomDoc ICustomDoc_iface;
     ITargetContainer ITargetContainer_iface;
 
+    IWindowForBindingUI IWindowForBindingUI_iface;
+
     LONG ref;
 
     NSContainer *nscontainer;
@@ -657,6 +659,7 @@ void HTMLDocument_Service_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 void HTMLDocument_Hlink_Init(HTMLDocument*) DECLSPEC_HIDDEN;
 
 void TargetContainer_Init(HTMLDocumentObj*) DECLSPEC_HIDDEN;
+void init_binding_ui(HTMLDocumentObj*) DECLSPEC_HIDDEN;
 
 void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 
@@ -727,6 +730,7 @@ HRESULT start_binding(HTMLWindow*,HTMLDocumentNode*,BSCallback*,IBindCtx*) DECLS
 HRESULT async_start_doc_binding(HTMLWindow*,nsChannelBSC*) DECLSPEC_HIDDEN;
 void abort_document_bindings(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 void set_download_state(HTMLDocumentObj*,int) DECLSPEC_HIDDEN;
+void call_docview_84(HTMLDocumentObj*) DECLSPEC_HIDDEN;
 
 HRESULT bind_mon_to_buffer(HTMLDocumentNode*,IMoniker*,void**,DWORD*) DECLSPEC_HIDDEN;
 

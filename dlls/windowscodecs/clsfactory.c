@@ -45,7 +45,7 @@ typedef struct {
 } classinfo;
 
 static classinfo wic_classes[] = {
-    {&CLSID_WICImagingFactory, ImagingFactory_CreateInstance},
+    {&CLSID_WICImagingFactory, ComponentFactory_CreateInstance},
     {&CLSID_WICBmpDecoder, BmpDecoder_CreateInstance},
     {&CLSID_WICPngDecoder, PngDecoder_CreateInstance},
     {&CLSID_WICPngEncoder, PngEncoder_CreateInstance},
@@ -60,6 +60,7 @@ static classinfo wic_classes[] = {
     {&CLSID_WICDefaultFormatConverter, FormatConverter_CreateInstance},
     {&CLSID_WineTgaDecoder, TgaDecoder_CreateInstance},
     {&CLSID_WICUnknownMetadataReader, UnknownMetadataReader_CreateInstance},
+    {&CLSID_WICIfdMetadataReader, IfdMetadataReader_CreateInstance},
     {0}};
 
 typedef struct {

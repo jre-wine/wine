@@ -80,7 +80,6 @@ typedef struct tagDC
     GDIOBJHDR    header;
     HDC          hSelf;            /* Handle to this DC */
     struct gdi_physdev nulldrv;    /* physdev for the null driver */
-    PHYSDEV      dibdrv;           /* physdev for the dib driver */
     PHYSDEV      physDev;          /* current top of the physdev stack */
     DWORD        thread;           /* thread owning the DC */
     LONG         refcount;         /* thread refcount */
@@ -187,7 +186,6 @@ typedef struct tagBITMAPOBJ
     DIBSECTION          dib;
     SIZE                size;   /* For SetBitmapDimension() */
     RGBQUAD            *color_table;  /* DIB color table if <= 8bpp (always 1 << bpp in size) */
-    const struct gdi_dc_funcs *funcs; /* DC function table */
 } BITMAPOBJ;
 
 static inline BOOL is_bitmapobj_dib( const BITMAPOBJ *bmp )
@@ -270,6 +268,11 @@ extern COLORREF get_pixel_bitmapinfo( const BITMAPINFO *info, void *bits, struct
 extern BOOL render_aa_text_bitmapinfo( HDC hdc, BITMAPINFO *info, struct gdi_image_bits *bits,
                                        struct bitblt_coords *src, INT x, INT y, UINT flags,
                                        UINT aa_flags, LPCWSTR str, UINT count, const INT *dx ) DECLSPEC_HIDDEN;
+extern DWORD get_image_from_bitmap( BITMAPOBJ *bmp, BITMAPINFO *info,
+                                    struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
+extern DWORD put_image_into_bitmap( BITMAPOBJ *bmp, HRGN clip, BITMAPINFO *info,
+                                    const struct gdi_image_bits *bits, struct bitblt_coords *src,
+                                    struct bitblt_coords *dst ) DECLSPEC_HIDDEN;
 
 /* driver.c */
 extern const struct gdi_dc_funcs null_driver DECLSPEC_HIDDEN;
@@ -372,7 +375,6 @@ extern BOOL nulldrv_FillRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush ) DECLSPEC_HIDD
 extern BOOL nulldrv_FlattenPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, INT height ) DECLSPEC_HIDDEN;
 extern LONG nulldrv_GetBitmapBits( HBITMAP bitmap, void *bits, LONG size ) DECLSPEC_HIDDEN;
-extern DWORD nulldrv_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info, struct gdi_image_bits *bits, struct bitblt_coords *src ) DECLSPEC_HIDDEN;
 extern COLORREF nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF nulldrv_GetPixel( PHYSDEV dev, INT x, INT y ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
@@ -387,9 +389,6 @@ extern BOOL nulldrv_PolyBezier( PHYSDEV dev, const POINT *points, DWORD count ) 
 extern BOOL nulldrv_PolyBezierTo( PHYSDEV dev, const POINT *points, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_PolyDraw( PHYSDEV dev, const POINT *points, const BYTE *types, DWORD count ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_PolylineTo( PHYSDEV dev, const POINT *points, INT count ) DECLSPEC_HIDDEN;
-extern DWORD nulldrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info,
-                               const struct gdi_image_bits *bits, struct bitblt_coords *src,
-                               struct bitblt_coords *dst, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level ) DECLSPEC_HIDDEN;
 extern INT  nulldrv_SaveDC( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_ScaleViewportExtEx( PHYSDEV dev, INT x_num, INT x_denom, INT y_num, INT y_denom, SIZE *size ) DECLSPEC_HIDDEN;

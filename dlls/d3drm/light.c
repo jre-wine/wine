@@ -32,6 +32,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3drm);
 typedef struct {
     IDirect3DRMLight IDirect3DRMLight_iface;
     LONG ref;
+    D3DRMLIGHTTYPE type;
+    D3DCOLOR color;
+    D3DVALUE range;
+    D3DVALUE cattenuation;
+    D3DVALUE lattenuation;
+    D3DVALUE qattenuation;
+    D3DVALUE umbra;
+    D3DVALUE penumbra;
 } IDirect3DRMLightImpl;
 
 static inline IDirect3DRMLightImpl *impl_from_IDirect3DRMLight(IDirect3DRMLight *iface)
@@ -174,18 +182,22 @@ static HRESULT WINAPI IDirect3DRMLightImpl_SetType(IDirect3DRMLight* iface, D3DR
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, type);
+    TRACE("(%p/%p)->(%u)\n", iface, This, type);
 
-    return E_NOTIMPL;
+    This->type = type;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetColor(IDirect3DRMLight* iface, D3DCOLOR color)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%u): stub\n", iface, This, color);
+    TRACE("(%p/%p)->(%u)\n", iface, This, color);
 
-    return E_NOTIMPL;
+    This->color = color;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetColorRGB(IDirect3DRMLight* iface,
@@ -193,36 +205,46 @@ static HRESULT WINAPI IDirect3DRMLightImpl_SetColorRGB(IDirect3DRMLight* iface,
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f,%f,%f): stub\n", iface, This, red, green, blue);
+    TRACE("(%p/%p)->(%f,%f,%f)\n", iface, This, red, green, blue);
 
-    return E_NOTIMPL;
+    This->color = D3DCOLOR_ARGB(0xff, (BYTE)(red   * 255.0f),
+                                      (BYTE)(green * 255.0f),
+                                      (BYTE)(blue  * 255.0f));
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetRange(IDirect3DRMLight* iface, D3DVALUE range)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, range);
+    TRACE("(%p/%p)->(%f)\n", iface, This, range);
 
-    return E_NOTIMPL;
+    This->range = range;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetUmbra(IDirect3DRMLight* iface, D3DVALUE umbra)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, umbra);
+    TRACE("(%p/%p)->(%f)\n", iface, This, umbra);
 
-    return E_NOTIMPL;
+    This->umbra = umbra;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetPenumbra(IDirect3DRMLight* iface, D3DVALUE penumbra)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, penumbra);
+    TRACE("(%p/%p)->(%f)\n", iface, This, penumbra);
 
-    return E_NOTIMPL;
+    This->penumbra = penumbra;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetConstantAttenuation(IDirect3DRMLight* iface,
@@ -230,9 +252,11 @@ static HRESULT WINAPI IDirect3DRMLightImpl_SetConstantAttenuation(IDirect3DRMLig
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, cattenuation);
+    TRACE("(%p/%p)->(%f)\n", iface, This, cattenuation);
 
-    return E_NOTIMPL;
+    This->cattenuation = cattenuation;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetLinearAttenuation(IDirect3DRMLight* iface,
@@ -240,9 +264,11 @@ static HRESULT WINAPI IDirect3DRMLightImpl_SetLinearAttenuation(IDirect3DRMLight
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, lattenuation);
+    TRACE("(%p/%p)->(%f)\n", iface, This, lattenuation);
 
-    return E_NOTIMPL;
+    This->lattenuation = lattenuation;
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetQuadraticAttenuation(IDirect3DRMLight* iface,
@@ -250,81 +276,83 @@ static HRESULT WINAPI IDirect3DRMLightImpl_SetQuadraticAttenuation(IDirect3DRMLi
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(%f): stub\n", iface, This, qattenuation);
+    TRACE("(%p/%p)->(%f)\n", iface, This, qattenuation);
 
-    return E_NOTIMPL;
+    This->qattenuation = qattenuation;
+
+    return D3DRM_OK;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetRange(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->range;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetUmbra(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->umbra;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetPenumbra(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->penumbra;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetConstantAttenuation(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->cattenuation;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetLinearAttenuation(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->lattenuation;
 }
 
 static D3DVALUE WINAPI IDirect3DRMLightImpl_GetQuadraticAttenuation(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->qattenuation;
 }
 
 static D3DCOLOR WINAPI IDirect3DRMLightImpl_GetColor(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return 0;
+    return This->color;
 }
 
 static D3DRMLIGHTTYPE WINAPI IDirect3DRMLightImpl_GetType(IDirect3DRMLight* iface)
 {
     IDirect3DRMLightImpl *This = impl_from_IDirect3DRMLight(iface);
 
-    FIXME("(%p/%p)->(): stub\n", iface, This);
+    TRACE("(%p/%p)->()\n", iface, This);
 
-    return D3DRMLIGHT_AMBIENT;
+    return This->type;
 }
 
 static HRESULT WINAPI IDirect3DRMLightImpl_SetEnableFrame(IDirect3DRMLight* iface,

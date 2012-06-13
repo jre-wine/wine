@@ -2219,6 +2219,12 @@ AC_CHECK_MEMBERS([struct statvfs.f_blocks],,,
 #include <sys/statvfs.h>
 #endif])
 
+dnl Check for dirent.d_reclen
+AC_CHECK_MEMBERS([struct dirent.d_reclen],,,
+[#ifdef HAVE_DIRENT_H
+#include <dirent.h>
+#endif])
+
 dnl Check for socket structure members
 AC_CHECK_MEMBERS([struct msghdr.msg_accrights, struct sockaddr.sa_len, struct sockaddr_un.sun_len],,,
 [#include <sys/types.h>
@@ -2276,6 +2282,12 @@ AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 # include <arpa/nameser.h>
 #endif])
 
+dnl Check for struct icmpstat
+AC_CHECK_MEMBERS([struct icmpstat.icps_inhist],,,
+[#ifdef HAVE_NETINET_ICMP_VAR
+#include <netinet/icmp_var.h>
+#endif])
+
 dnl Check for struct icmpstat.icps_outhist
 AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
 [#ifdef HAVE_SYS_TYPES_H
@@ -2310,6 +2322,36 @@ AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
 #endif
 #ifdef HAVE_NETINET_ICMP_VAR
 #include <netinet/icmp_var.h>
+#endif])
+
+dnl Check for struct ipstat
+AC_CHECK_MEMBERS([struct ipstat.ips_total],,,
+[#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
+#endif])
+
+dnl Check for struct ip_stats
+AC_CHECK_MEMBERS([struct ip_stats.ips_total],,,
+[#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
+#endif])
+
+dnl Check for struct tcpstat
+AC_CHECK_MEMBERS([struct tcpstat.tcps_connattempt],,,
+[#ifdef HAVE_NETINET_TCP_VAR_H
+#include <netinet/tcp_var.h>
+#endif])
+
+dnl Check for struct tcp_stats
+AC_CHECK_MEMBERS([struct tcp_stats.tcps_connattempt],,,
+[#ifdef HAVE_NETINET_TCP_VAR_H
+#include <netinet/tcp_var.h>
+#endif])
+
+dnl Check for struct udpstat
+AC_CHECK_MEMBERS([struct udpstat.udps_ipackets],,,
+[#ifdef HAVE_NETINET_UDP_VAR_H
+#include <netinet/udp_var.h>
 #endif])
 
 dnl Check for struct ifreq.ifr_hwaddr
@@ -2624,6 +2666,7 @@ WINE_CONFIG_TEST(dlls/iphlpapi/tests)
 WINE_CONFIG_DLL(itircl)
 WINE_CONFIG_DLL(itss)
 WINE_CONFIG_TEST(dlls/itss/tests)
+WINE_CONFIG_DLL(joy.cpl,,[po])
 WINE_CONFIG_DLL(jscript,,[po])
 WINE_CONFIG_TEST(dlls/jscript/tests)
 WINE_CONFIG_DLL(kernel32,,[implib,mc])

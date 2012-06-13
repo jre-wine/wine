@@ -3413,6 +3413,62 @@ msgstr "מוגברת"
 msgid "High"
 msgstr "גבוהה"
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+#, fuzzy
+msgid "&Disable"
+msgstr "Table"
+
+#: joy.rc:37
+#, fuzzy
+#| msgid "&enable"
+msgid "&Enable"
+msgstr "ה&פעלה"
+
+#: joy.rc:38
+#, fuzzy
+#| msgid "Disconnected"
+msgid "Connected"
+msgstr "Disconnected"
+
+#: joy.rc:40
+#, fuzzy
+msgid "Disabled"
+msgstr "Table"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+#| msgid "Create Control"
+msgid "Game Controllers"
+msgstr "יצירת פקד"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr "שגיאה בהמרת הפריט לטיפוס פרימיטיבי"
@@ -12578,11 +12634,6 @@ msgstr "מובנה, טבעי"
 #, fuzzy
 msgid "Nati&ve then Builtin"
 msgstr "טבעי, מובנה"
-
-#: winecfg.rc:204
-#, fuzzy
-msgid "&Disable"
-msgstr "Table"
 
 #: winecfg.rc:211
 #, fuzzy

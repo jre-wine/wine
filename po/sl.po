@@ -3449,6 +3449,62 @@ msgstr "Povečano"
 msgid "High"
 msgstr "Visoka"
 
+#: joy.rc:33
+msgid "Joysticks"
+msgstr ""
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "&Onemogoči"
+
+#: joy.rc:37
+#, fuzzy
+#| msgid "&enable"
+msgid "&Enable"
+msgstr "&omogoči"
+
+#: joy.rc:38
+#, fuzzy
+#| msgid "Disconnected"
+msgid "Connected"
+msgstr "Povezava je bila prekinjena"
+
+#: joy.rc:40
+#, fuzzy
+#| msgid "&Disable"
+msgid "Disabled"
+msgstr "&Onemogoči"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr ""
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr ""
+
+#: joy.rc:28
+#, fuzzy
+#| msgid "Create Control"
+msgid "Game Controllers"
+msgstr "Ustvari nadzornik"
+
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
 msgstr "Napaka med pretvarjanjem predmeta v primitivno vrsto"
@@ -12547,10 +12603,6 @@ msgstr "Vgra&jena, izvorna"
 #: winecfg.rc:203
 msgid "Nati&ve then Builtin"
 msgstr "I&zvorna, vgrajena"
-
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "&Onemogoči"
 
 #: winecfg.rc:211
 msgid "Select Drive Letter"

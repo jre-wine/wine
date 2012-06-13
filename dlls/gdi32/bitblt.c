@@ -218,6 +218,27 @@ static DWORD blend_bits( const BITMAPINFO *src_info, const struct gdi_image_bits
     return blend_bitmapinfo( src_info, src_bits->ptr, src, dst_info, dst_bits->ptr, dst, blend );
 }
 
+/* helper to retrieve either both colors or only the background color for monochrome blits */
+static void get_mono_dc_colors( HDC hdc, BITMAPINFO *info, int count )
+{
+    COLORREF color = GetBkColor( hdc );
+
+    info->bmiColors[count - 1].rgbRed      = GetRValue( color );
+    info->bmiColors[count - 1].rgbGreen    = GetGValue( color );
+    info->bmiColors[count - 1].rgbBlue     = GetBValue( color );
+    info->bmiColors[count - 1].rgbReserved = 0;
+
+    if (count > 1)
+    {
+        color = GetTextColor( hdc );
+        info->bmiColors[0].rgbRed      = GetRValue( color );
+        info->bmiColors[0].rgbGreen    = GetGValue( color );
+        info->bmiColors[0].rgbBlue     = GetBValue( color );
+        info->bmiColors[0].rgbReserved = 0;
+    }
+    info->bmiHeader.biClrUsed = count;
+}
+
 /***********************************************************************
  *           null driver fallback implementations
  */
@@ -235,48 +256,39 @@ BOOL nulldrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
 
     if (!(dc_src = get_dc_ptr( src_dev->hdc ))) return FALSE;
     src_dev = GET_DC_PHYSDEV( dc_src, pGetImage );
-    err = src_dev->funcs->pGetImage( src_dev, 0, src_info, &bits, src );
-    release_dc_ptr( dc_src );
-    if (err) return FALSE;
-
-    /* 1-bpp source without a color table uses the destination DC colors */
-    if (src_info->bmiHeader.biBitCount == 1 && !src_info->bmiHeader.biClrUsed)
+    if (src_dev->funcs->pGetImage( src_dev, src_info, &bits, src ))
     {
-        COLORREF color = GetTextColor( dst_dev->hdc );
-        src_info->bmiColors[0].rgbRed      = GetRValue( color );
-        src_info->bmiColors[0].rgbGreen    = GetGValue( color );
-        src_info->bmiColors[0].rgbBlue     = GetBValue( color );
-        src_info->bmiColors[0].rgbReserved = 0;
-        color = GetBkColor( dst_dev->hdc );
-        src_info->bmiColors[1].rgbRed      = GetRValue( color );
-        src_info->bmiColors[1].rgbGreen    = GetGValue( color );
-        src_info->bmiColors[1].rgbBlue     = GetBValue( color );
-        src_info->bmiColors[1].rgbReserved = 0;
-        src_info->bmiHeader.biClrUsed = 2;
+        release_dc_ptr( dc_src );
+        return FALSE;
     }
 
     dst_dev = GET_DC_PHYSDEV( dc_dst, pPutImage );
     copy_bitmapinfo( dst_info, src_info );
-    err = dst_dev->funcs->pPutImage( dst_dev, 0, 0, dst_info, &bits, src, dst, rop );
+    err = dst_dev->funcs->pPutImage( dst_dev, 0, dst_info, &bits, src, dst, rop );
     if (err == ERROR_BAD_FORMAT)
     {
-        /* 1-bpp destination without a color table requires a fake 1-entry table
-         * that contains only the background color */
-        if (dst_info->bmiHeader.biBitCount == 1 && !dst_info->bmiHeader.biClrUsed)
+        DWORD dst_colors = dst_info->bmiHeader.biClrUsed;
+
+        /* 1-bpp source without a color table uses the destination DC colors */
+        if (src_info->bmiHeader.biBitCount == 1 && !src_info->bmiHeader.biClrUsed)
+            get_mono_dc_colors( dst_dev->hdc, src_info, 2 );
+
+        if (dst_info->bmiHeader.biBitCount == 1 && !dst_colors)
         {
-            COLORREF color = GetBkColor( src_dev->hdc );
-            dst_info->bmiColors[0].rgbRed      = GetRValue( color );
-            dst_info->bmiColors[0].rgbGreen    = GetGValue( color );
-            dst_info->bmiColors[0].rgbBlue     = GetBValue( color );
-            dst_info->bmiColors[0].rgbReserved = 0;
-            dst_info->bmiHeader.biClrUsed = 1;
+            /* 1-bpp destination without a color table requires a fake 1-entry table
+             * that contains only the background color; except with a 1-bpp source,
+             * in which case it uses the source colors */
+            if (src_info->bmiHeader.biBitCount > 1)
+                get_mono_dc_colors( src_dev->hdc, dst_info, 1 );
+            else
+                get_mono_dc_colors( src_dev->hdc, dst_info, 2 );
         }
 
         if (!(err = convert_bits( src_info, src, dst_info, &bits, FALSE )))
         {
-            /* get rid of the fake 1-bpp table */
-            if (dst_info->bmiHeader.biClrUsed == 1) dst_info->bmiHeader.biClrUsed = 0;
-            err = dst_dev->funcs->pPutImage( dst_dev, 0, 0, dst_info, &bits, src, dst, rop );
+            /* get rid of the fake destination table */
+            dst_info->bmiHeader.biClrUsed = dst_colors;
+            err = dst_dev->funcs->pPutImage( dst_dev, 0, dst_info, &bits, src, dst, rop );
         }
     }
 
@@ -285,10 +297,11 @@ BOOL nulldrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
     {
         copy_bitmapinfo( src_info, dst_info );
         err = stretch_bits( src_info, src, dst_info, dst, &bits, GetStretchBltMode( dst_dev->hdc ));
-        if (!err) err = dst_dev->funcs->pPutImage( dst_dev, 0, 0, dst_info, &bits, src, dst, rop );
+        if (!err) err = dst_dev->funcs->pPutImage( dst_dev, 0, dst_info, &bits, src, dst, rop );
     }
 
     if (bits.free) bits.free( &bits );
+    release_dc_ptr( dc_src );
     return !err;
 }
 
@@ -306,8 +319,7 @@ BOOL nulldrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
 
     if (!(dc_src = get_dc_ptr( src_dev->hdc ))) return FALSE;
     src_dev = GET_DC_PHYSDEV( dc_src, pGetImage );
-    err = src_dev->funcs->pGetImage( src_dev, 0, src_info, &bits, src );
-    release_dc_ptr( dc_src );
+    err = src_dev->funcs->pGetImage( src_dev, src_info, &bits, src );
     if (err) goto done;
 
     dst_dev = GET_DC_PHYSDEV( dc_dst, pBlendImage );
@@ -329,6 +341,7 @@ BOOL nulldrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
 
     if (bits.free) bits.free( &bits );
 done:
+    release_dc_ptr( dc_src );
     if (err) SetLastError( err );
     return !err;
 }
@@ -358,12 +371,12 @@ DWORD nulldrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct gdi_image_
 
     dev = GET_DC_PHYSDEV( dc, pGetImage );
     orig_dst = *dst;
-    err = dev->funcs->pGetImage( dev, 0, dst_info, &dst_bits, dst );
+    err = dev->funcs->pGetImage( dev, dst_info, &dst_bits, dst );
     if (err) return err;
 
     dev = GET_DC_PHYSDEV( dc, pPutImage );
     err = blend_bits( info, bits, src, dst_info, &dst_bits, dst, blend );
-    if (!err) err = dev->funcs->pPutImage( dev, 0, 0, dst_info, &dst_bits, dst, &orig_dst, SRCCOPY );
+    if (!err) err = dev->funcs->pPutImage( dev, 0, dst_info, &dst_bits, dst, &orig_dst, SRCCOPY );
 
     if (dst_bits.free) dst_bits.free( &dst_bits );
     return err;
@@ -431,7 +444,7 @@ BOOL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
     info->bmiHeader.biHeight        = dst.visrect.bottom - dst.visrect.top;
     info->bmiHeader.biSizeImage     = 0;
     dev = GET_DC_PHYSDEV( dc, pPutImage );
-    err = dev->funcs->pPutImage( dev, 0, 0, info, NULL, NULL, NULL, 0 );
+    err = dev->funcs->pPutImage( dev, 0, info, NULL, NULL, NULL, 0 );
     if (err && err != ERROR_BAD_FORMAT) goto done;
 
     info->bmiHeader.biSizeImage = get_dib_image_size( info );
@@ -454,7 +467,7 @@ BOOL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
     rgn = CreateRectRgn( 0, 0, 0, 0 );
     gradient_bitmapinfo( info, bits.ptr, vert_array, nvert, grad_array, ngrad, mode, pts, rgn );
     OffsetRgn( rgn, dst.visrect.left, dst.visrect.top );
-    ret = !dev->funcs->pPutImage( dev, 0, rgn, info, &bits, &src, &dst, SRCCOPY );
+    ret = !dev->funcs->pPutImage( dev, rgn, info, &bits, &src, &dst, SRCCOPY );
 
     if (bits.free) bits.free( &bits );
     DeleteObject( rgn );
@@ -485,7 +498,7 @@ COLORREF nulldrv_GetPixel( PHYSDEV dev, INT x, INT y )
     if (!clip_visrect( dc, &src.visrect, &src.visrect )) return CLR_INVALID;
 
     dev = GET_DC_PHYSDEV( dc, pGetImage );
-    if (dev->funcs->pGetImage( dev, 0, info, &bits, &src )) return CLR_INVALID;
+    if (dev->funcs->pGetImage( dev, info, &bits, &src )) return CLR_INVALID;
 
     ret = get_pixel_bitmapinfo( info, bits.ptr, &src );
     if (bits.free) bits.free( &bits );

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-03-06 21:30+0200\n"
+"PO-Revision-Date: 2012-06-06 21:20+0300\n"
 "Last-Translator: Lauri Kenttä <lauri.kentta@gmail.com>\n"
 "Language-Team: none\n"
 "Language: Swedish\n"
@@ -3411,6 +3411,54 @@ msgstr "Ökad"
 #: inetcpl.rc:36
 msgid "High"
 msgstr "Hög"
+
+#: joy.rc:33
+msgid "Joysticks"
+msgstr "Joysticks"
+
+#: joy.rc:36 winecfg.rc:204
+msgid "&Disable"
+msgstr "&Inaktivera"
+
+#: joy.rc:37
+msgid "&Enable"
+msgstr "&Aktivera"
+
+#: joy.rc:38
+msgid "Connected"
+msgstr "Ansluten"
+
+#: joy.rc:40
+msgid "Disabled"
+msgstr "Inaktiverad"
+
+#: joy.rc:46
+msgid "Test Joystick"
+msgstr "Testa joysticken"
+
+#: joy.rc:50
+msgid "Buttons"
+msgstr ""
+
+#: joy.rc:51
+msgid "X,Y"
+msgstr ""
+
+#: joy.rc:52
+msgid "Rx,Ry"
+msgstr ""
+
+#: joy.rc:53
+msgid "Z, Rz"
+msgstr ""
+
+#: joy.rc:58
+msgid "Test Force Feedback"
+msgstr "Testa kraftåterkoppling"
+
+#: joy.rc:28
+msgid "Game Controllers"
+msgstr "Spelkontroller"
 
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
@@ -7078,7 +7126,7 @@ msgstr "Skapa ny"
 
 #: oledlg.rc:60
 msgid "Create Control"
-msgstr "Create Control"
+msgstr "Skapa en kontroll"
 
 #: oledlg.rc:62
 msgid "Create From File"
@@ -12403,10 +12451,6 @@ msgstr "Inb&yggd sedan Ursprunglig"
 msgid "Nati&ve then Builtin"
 msgstr "Urs&prunglig sedan Inbyggd"
 
-#: winecfg.rc:204
-msgid "&Disable"
-msgstr "&Inaktivera"
-
 #: winecfg.rc:211
 msgid "Select Drive Letter"
 msgstr "Välj enhetsbokstav"
@@ -13089,6 +13133,10 @@ msgid ""
 "button, then <a href=\"http://wiki.winehq.org/Bugs\">file a bug report</a> "
 "and attach that file to the report."
 msgstr ""
+"Om denna problem inte presenterar sig i Windows och ännu inte har "
+"rapporterats, kan du spara detaljerna till ett fil med knappen \"Spara som\" "
+"och <a href=\"http://wiki.winehq.org/Bugs\">skicka en bugrapport</a> med "
+"filet som en bilaga."
 
 #: winedbg.rc:35
 msgid "Wine program crash"
