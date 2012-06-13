@@ -1,8 +1,14 @@
-wine-unstable (1.5.4-1) UNRELEASED; urgency=low
+wine-unstable (1.5.4-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.4, released May 11, 2012.
+    - A new DirectSound resampler.
+    - A Negotiate authentication provider.
+    - OpenGL support in the DIB engine.
+    - Beginnings of support for .NET mixed assemblies.
+    - Support routines for Internationalized Domain Names.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:12:17 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:12:35 -0400
 
 wine-unstable (1.5.3-1) unstable; urgency=low
 
