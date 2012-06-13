@@ -38,8 +38,6 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
-int using_client_side_fonts = FALSE;
-
 WINE_DEFAULT_DEBUG_CHANNEL(xrender);
 
 #ifdef SONAME_LIBXRENDER
@@ -364,8 +362,6 @@ const struct gdi_dc_funcs *X11DRV_XRender_Init(void)
 {
     int event_base, i;
     BOOL ok;
-
-    using_client_side_fonts = client_side_with_render || client_side_with_core;
 
     if (!client_side_with_render) return NULL;
     if (!(xrender_handle = wine_dlopen(SONAME_LIBXRENDER, RTLD_NOW, NULL, 0))) return NULL;
@@ -1109,50 +1105,39 @@ void X11DRV_XRender_Finalize(void)
  */
 static HFONT xrenderdrv_SelectFont( PHYSDEV dev, HFONT hfont )
 {
+    LFANDSIZE lfsz;
     struct xrender_physdev *physdev = get_xrender_dev( dev );
     PHYSDEV next = GET_NEXT_PHYSDEV( dev, pSelectFont );
     HFONT ret = next->funcs->pSelectFont( next, hfont );
 
     if (!ret) return 0;
 
-    if (physdev->x11dev->has_gdi_font)
-    {
-        LFANDSIZE lfsz;
+    GetObjectW( hfont, sizeof(lfsz.lf), &lfsz.lf );
 
-        GetObjectW( hfont, sizeof(lfsz.lf), &lfsz.lf );
+    TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
+          lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
+          lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
+    lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
+    lfsz.devsize.cx = X11DRV_XWStoDS( dev->hdc, lfsz.lf.lfWidth );
+    lfsz.devsize.cy = X11DRV_YWStoDS( dev->hdc, lfsz.lf.lfHeight );
 
-        TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
-              lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
-              lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
-        lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
-        lfsz.devsize.cx = X11DRV_XWStoDS( dev->hdc, lfsz.lf.lfWidth );
-        lfsz.devsize.cy = X11DRV_YWStoDS( dev->hdc, lfsz.lf.lfHeight );
+    GetTransform( dev->hdc, 0x204, &lfsz.xform );
+    TRACE("font transform %f %f %f %f\n", lfsz.xform.eM11, lfsz.xform.eM12,
+          lfsz.xform.eM21, lfsz.xform.eM22);
 
-        GetTransform( dev->hdc, 0x204, &lfsz.xform );
-        TRACE("font transform %f %f %f %f\n", lfsz.xform.eM11, lfsz.xform.eM12,
-              lfsz.xform.eM21, lfsz.xform.eM22);
+    if (GetGraphicsMode( dev->hdc ) == GM_COMPATIBLE && lfsz.xform.eM11 * lfsz.xform.eM22 < 0)
+        lfsz.lf.lfOrientation = -lfsz.lf.lfOrientation;
 
-        if (GetGraphicsMode( dev->hdc ) == GM_COMPATIBLE && lfsz.xform.eM11 * lfsz.xform.eM22 < 0)
-            lfsz.lf.lfOrientation = -lfsz.lf.lfOrientation;
+    /* Not used fields, would break hashing */
+    lfsz.xform.eDx = lfsz.xform.eDy = 0;
 
-        /* Not used fields, would break hashing */
-        lfsz.xform.eDx = lfsz.xform.eDy = 0;
+    lfsz_calc_hash(&lfsz);
 
-        lfsz_calc_hash(&lfsz);
-
-        EnterCriticalSection(&xrender_cs);
-        if (physdev->cache_index != -1)
-            dec_ref_cache( physdev->cache_index );
-        physdev->cache_index = GetCacheEntry( dev->hdc, &lfsz );
-        LeaveCriticalSection(&xrender_cs);
-    }
-    else
-    {
-        EnterCriticalSection( &xrender_cs );
-        if (physdev->cache_index != -1) dec_ref_cache( physdev->cache_index );
-        physdev->cache_index = -1;
-        LeaveCriticalSection( &xrender_cs );
-    }
+    EnterCriticalSection(&xrender_cs);
+    if (physdev->cache_index != -1)
+        dec_ref_cache( physdev->cache_index );
+    physdev->cache_index = GetCacheEntry( dev->hdc, &lfsz );
+    LeaveCriticalSection(&xrender_cs);
     return ret;
 }
 
@@ -1695,12 +1680,7 @@ static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
     POINT offset, desired, current;
     int render_op = PictOpOver;
     XRenderColor col;
-
-    if (!physdev->x11dev->has_gdi_font)
-    {
-        dev = GET_NEXT_PHYSDEV( dev, pExtTextOut );
-        return dev->funcs->pExtTextOut( dev, x, y, flags, lprect, wstr, count, lpDx );
-    }
+    RECT rect, bounds;
 
     get_xrender_color( physdev, GetTextColor( physdev->dev.hdc ), &col );
     pict = get_xrender_picture( physdev, 0, (flags & ETO_CLIPPED) ? lprect : NULL );
@@ -1723,6 +1703,7 @@ static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
                                lprect->right - lprect->left,
                                lprect->bottom - lprect->top );
         wine_tsx11_unlock();
+        add_device_bounds( physdev->x11dev, lprect );
     }
 
     if(count == 0) return TRUE;
@@ -1771,6 +1752,7 @@ static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
     if (physdev->format == WXR_FORMAT_MONO && col.red == 0 && col.green == 0 && col.blue == 0)
         render_op = PictOpOutReverse; /* This gives us 'black' text */
 
+    reset_bounds( &bounds );
     for(idx = 0; idx < count; idx++)
     {
         elts[idx].glyphset = formatEntry->glyphset;
@@ -1781,6 +1763,12 @@ static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
 
         current.x += (elts[idx].xOff + formatEntry->gis[wstr[idx]].xOff);
         current.y += (elts[idx].yOff + formatEntry->gis[wstr[idx]].yOff);
+
+        rect.left   = desired.x - physdev->x11dev->dc_rect.left - formatEntry->gis[wstr[idx]].x;
+        rect.top    = desired.y - physdev->x11dev->dc_rect.top - formatEntry->gis[wstr[idx]].y;
+        rect.right  = rect.left + formatEntry->gis[wstr[idx]].width;
+        rect.bottom = rect.top  + formatEntry->gis[wstr[idx]].height;
+        add_bounds_rect( &bounds, &rect );
 
         if(!lpDx)
         {
@@ -1813,6 +1801,7 @@ static BOOL xrenderdrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
     HeapFree(GetProcessHeap(), 0, elts);
 
     LeaveCriticalSection(&xrender_cs);
+    add_device_bounds( physdev->x11dev, &bounds );
     return TRUE;
 }
 
@@ -2191,6 +2180,7 @@ static BOOL xrenderdrv_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
     }
     else xrender_stretch_blit( physdev_src, physdev_dst, 0, src, dst );
 
+    add_device_bounds( physdev_dst->x11dev, &dst->visrect );
     return TRUE;
 
 x11drv_fallback:
@@ -2293,6 +2283,8 @@ static DWORD xrenderdrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMA
             }
             else xrender_put_image( src_pixmap, src_pict, mask_pict, clip,
                                     physdev->pict_format, physdev, 0, src, dst, use_repeat );
+
+            add_device_bounds( physdev->x11dev, &dst->visrect );
         }
 
         wine_tsx11_lock();
@@ -2375,6 +2367,7 @@ static DWORD xrenderdrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct 
         wine_tsx11_unlock();
 
         LeaveCriticalSection( &xrender_cs );
+        add_device_bounds( physdev->x11dev, &dst->visrect );
     }
     return ret;
 
@@ -2480,6 +2473,7 @@ static BOOL xrenderdrv_AlphaBlend( PHYSDEV dst_dev, struct bitblt_coords *dst,
     wine_tsx11_unlock();
 
     LeaveCriticalSection( &xrender_cs );
+    add_device_bounds( physdev_dst->x11dev, &dst->visrect );
     return TRUE;
 }
 
@@ -2497,6 +2491,7 @@ static BOOL xrenderdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG n
     Picture src_pict, dst_pict;
     unsigned int i;
     const GRADIENT_RECT *rect = grad_array;
+    RECT rc;
     POINT pt[2];
 
     if (!pXRenderCreateLinearGradient) goto fallback;
@@ -2556,8 +2551,13 @@ static BOOL xrenderdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG n
                 }
             }
 
-            TRACE( "%u gradient %d,%d - %d,%d colors %04x,%04x,%04x,%04x -> %04x,%04x,%04x,%04x\n",
-                   mode, pt[0].x, pt[0].y, pt[1].x, pt[1].y,
+            rc.left   = min( pt[0].x, pt[1].x );
+            rc.top    = min( pt[0].y, pt[1].y );
+            rc.right  = max( pt[0].x, pt[1].x );
+            rc.bottom = max( pt[0].y, pt[1].y );
+
+            TRACE( "%u gradient %s colors %04x,%04x,%04x,%04x -> %04x,%04x,%04x,%04x\n",
+                   mode, wine_dbgstr_rect( &rc ),
                    colors[0].red, colors[0].green, colors[0].blue, colors[0].alpha,
                    colors[1].red, colors[1].green, colors[1].blue, colors[1].alpha );
 
@@ -2566,12 +2566,13 @@ static BOOL xrenderdrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG n
             wine_tsx11_lock();
             src_pict = pXRenderCreateLinearGradient( gdi_display, &gradient, stops, colors, 2 );
             xrender_blit( PictOpSrc, src_pict, 0, dst_pict,
-                          0, 0, abs(pt[1].x - pt[0].x), abs(pt[1].y - pt[0].y),
-                          physdev->x11dev->dc_rect.left + min( pt[0].x, pt[1].x ),
-                          physdev->x11dev->dc_rect.top + min( pt[0].y, pt[1].y ),
-                          abs(pt[1].x - pt[0].x), abs(pt[1].y - pt[0].y), 1, 1 );
+                          0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                          physdev->x11dev->dc_rect.left + rc.left,
+                          physdev->x11dev->dc_rect.top + rc.top,
+                          rc.right - rc.left, rc.bottom - rc.top, 1, 1 );
             pXRenderFreePicture( gdi_display, src_pict );
             wine_tsx11_unlock();
+            add_device_bounds( physdev->x11dev, &rc );
         }
         return TRUE;
     }
@@ -2684,6 +2685,7 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pFrameRgn */
     NULL,                               /* pGdiComment */
     NULL,                               /* pGdiRealizationInfo */
+    NULL,                               /* pGetBoundsRect */
     NULL,                               /* pGetCharABCWidths */
     NULL,                               /* pGetCharABCWidthsI */
     NULL,                               /* pGetCharWidth */
@@ -2745,6 +2747,7 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pSetArcDirection */
     NULL,                               /* pSetBkColor */
     NULL,                               /* pSetBkMode */
+    NULL,                               /* pSetBoundsRect */
     NULL,                               /* pSetDCBrushColor */
     NULL,                               /* pSetDCPenColor */
     NULL,                               /* pSetDIBitsToDevice */

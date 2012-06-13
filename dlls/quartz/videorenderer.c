@@ -72,7 +72,6 @@ typedef struct VideoRendererImpl
     IUnknown * pUnkOuter;
     BOOL bUnkOuterValid;
     BOOL bAggregatable;
-    LONG WindowStyle;
 } VideoRendererImpl;
 
 static inline VideoRendererImpl *impl_from_BaseWindow(BaseWindow *iface)
@@ -249,7 +248,7 @@ static DWORD VideoRenderer_SendSampleData(VideoRendererImpl* This, LPBYTE data, 
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_ShouldDrawSampleNow(BaseRenderer *This, IMediaSample *pSample, REFERENCE_TIME *pStartTime, REFERENCE_TIME *pEndTime)
+static HRESULT WINAPI VideoRenderer_ShouldDrawSampleNow(BaseRenderer *This, IMediaSample *pSample, REFERENCE_TIME *pStartTime, REFERENCE_TIME *pEndTime)
 {
     /* Preroll means the sample isn't shown, this is used for key frames and things like that */
     if (IMediaSample_IsPreroll(pSample) == S_OK)
@@ -368,11 +367,11 @@ static HRESULT WINAPI VideoRenderer_EndFlush(BaseRenderer* iface)
     if (This->renderer.pMediaSample) {
         ResetEvent(This->hEvent);
         LeaveCriticalSection(iface->pInputPin->pin.pCritSec);
-        LeaveCriticalSection(&iface->filter.csFilter);
         LeaveCriticalSection(&iface->csRenderLock);
+        LeaveCriticalSection(&iface->filter.csFilter);
         WaitForSingleObject(This->hEvent, INFINITE);
-        EnterCriticalSection(&iface->csRenderLock);
         EnterCriticalSection(&iface->filter.csFilter);
+        EnterCriticalSection(&iface->csRenderLock);
         EnterCriticalSection(iface->pInputPin->pin.pCritSec);
     }
     if (This->renderer.filter.state == State_Paused) {
@@ -477,14 +476,14 @@ static const BaseWindowFuncTable renderer_BaseWindowFuncTable = {
     VideoRenderer_OnSize
 };
 
-HRESULT WINAPI VideoRenderer_GetSourceRect(BaseControlVideo* iface, RECT *pSourceRect)
+static HRESULT WINAPI VideoRenderer_GetSourceRect(BaseControlVideo* iface, RECT *pSourceRect)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     CopyRect(pSourceRect,&This->SourceRect);
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_GetStaticImage(BaseControlVideo* iface, LONG *pBufferSize, LONG *pDIBImage)
+static HRESULT WINAPI VideoRenderer_GetStaticImage(BaseControlVideo* iface, LONG *pBufferSize, LONG *pDIBImage)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     BITMAPINFOHEADER *bmiHeader;
@@ -543,14 +542,14 @@ HRESULT WINAPI VideoRenderer_GetStaticImage(BaseControlVideo* iface, LONG *pBuff
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_GetTargetRect(BaseControlVideo* iface, RECT *pTargetRect)
+static HRESULT WINAPI VideoRenderer_GetTargetRect(BaseControlVideo* iface, RECT *pTargetRect)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     CopyRect(pTargetRect,&This->DestRect);
     return S_OK;
 }
 
-VIDEOINFOHEADER* WINAPI VideoRenderer_GetVideoFormat(BaseControlVideo* iface)
+static VIDEOINFOHEADER* WINAPI VideoRenderer_GetVideoFormat(BaseControlVideo* iface)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     AM_MEDIA_TYPE *pmt;
@@ -572,7 +571,7 @@ VIDEOINFOHEADER* WINAPI VideoRenderer_GetVideoFormat(BaseControlVideo* iface)
     }
 }
 
-HRESULT WINAPI VideoRenderer_IsDefaultSourceRect(BaseControlVideo* iface)
+static HRESULT WINAPI VideoRenderer_IsDefaultSourceRect(BaseControlVideo* iface)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     FIXME("(%p/%p)->(): stub !!!\n", This, iface);
@@ -580,7 +579,7 @@ HRESULT WINAPI VideoRenderer_IsDefaultSourceRect(BaseControlVideo* iface)
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_IsDefaultTargetRect(BaseControlVideo* iface)
+static HRESULT WINAPI VideoRenderer_IsDefaultTargetRect(BaseControlVideo* iface)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     FIXME("(%p/%p)->(): stub !!!\n", This, iface);
@@ -588,7 +587,7 @@ HRESULT WINAPI VideoRenderer_IsDefaultTargetRect(BaseControlVideo* iface)
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_SetDefaultSourceRect(BaseControlVideo* iface)
+static HRESULT WINAPI VideoRenderer_SetDefaultSourceRect(BaseControlVideo* iface)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
 
@@ -600,7 +599,7 @@ HRESULT WINAPI VideoRenderer_SetDefaultSourceRect(BaseControlVideo* iface)
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_SetDefaultTargetRect(BaseControlVideo* iface)
+static HRESULT WINAPI VideoRenderer_SetDefaultTargetRect(BaseControlVideo* iface)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     RECT rect;
@@ -616,14 +615,14 @@ HRESULT WINAPI VideoRenderer_SetDefaultTargetRect(BaseControlVideo* iface)
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_SetSourceRect(BaseControlVideo* iface, RECT *pSourceRect)
+static HRESULT WINAPI VideoRenderer_SetSourceRect(BaseControlVideo* iface, RECT *pSourceRect)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     CopyRect(&This->SourceRect,pSourceRect);
     return S_OK;
 }
 
-HRESULT WINAPI VideoRenderer_SetTargetRect(BaseControlVideo* iface, RECT *pTargetRect)
+static HRESULT WINAPI VideoRenderer_SetTargetRect(BaseControlVideo* iface, RECT *pTargetRect)
 {
     VideoRendererImpl *This = impl_from_BaseControlVideo(iface);
     CopyRect(&This->DestRect,pTargetRect);
@@ -752,7 +751,8 @@ static ULONG WINAPI VideoRendererInner_Release(IUnknown * iface)
 
     if (!refCount)
     {
-        BaseWindowImpl_DoneWithWindow(&This->baseControlWindow.baseWindow);
+        BaseControlWindow_Destroy(&This->baseControlWindow);
+        BaseControlVideo_Destroy(&This->baseControlVideo);
         PostThreadMessageW(This->ThreadID, WM_QUIT, 0, 0);
         WaitForSingleObject(This->hThread, INFINITE);
         CloseHandle(This->hThread);
@@ -981,7 +981,7 @@ static HRESULT WINAPI Videowindow_put_FullScreenMode(IVideoWindow *iface,
     FIXME("(%p/%p)->(%d): stub !!!\n", This, iface, FullScreenMode);
 
     if (FullScreenMode) {
-        This->WindowStyle = GetWindowLongW(This->baseControlWindow.baseWindow.hWnd, GWL_STYLE);
+        This->baseControlWindow.baseWindow.WindowStyles = GetWindowLongW(This->baseControlWindow.baseWindow.hWnd, GWL_STYLE);
         ShowWindow(This->baseControlWindow.baseWindow.hWnd, SW_HIDE);
         SetParent(This->baseControlWindow.baseWindow.hWnd, 0);
         SetWindowLongW(This->baseControlWindow.baseWindow.hWnd, GWL_STYLE, WS_POPUP);
@@ -991,7 +991,7 @@ static HRESULT WINAPI Videowindow_put_FullScreenMode(IVideoWindow *iface,
     } else {
         ShowWindow(This->baseControlWindow.baseWindow.hWnd, SW_HIDE);
         SetParent(This->baseControlWindow.baseWindow.hWnd, This->baseControlWindow.hwndOwner);
-        SetWindowLongW(This->baseControlWindow.baseWindow.hWnd, GWL_STYLE, This->WindowStyle);
+        SetWindowLongW(This->baseControlWindow.baseWindow.hWnd, GWL_STYLE, This->baseControlWindow.baseWindow.WindowStyles);
         GetClientRect(This->baseControlWindow.baseWindow.hWnd, &This->DestRect);
         SetWindowPos(This->baseControlWindow.baseWindow.hWnd,0,This->DestRect.left,This->DestRect.top,This->DestRect.right,This->DestRect.bottom,SWP_NOZORDER|SWP_SHOWWINDOW);
         This->WindowPos = This->DestRect;

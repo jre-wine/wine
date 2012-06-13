@@ -52,6 +52,13 @@ typedef struct {
     unsigned labels_cnt;
 
     statement_ctx_t *stat_ctx;
+    function_code_t *func;
+
+    variable_declaration_t *var_head;
+    variable_declaration_t *var_tail;
+
+    function_expression_t *func_head;
+    function_expression_t *func_tail;
 } compiler_ctx_t;
 
 static const struct {
@@ -607,9 +614,43 @@ static HRESULT compile_delete_expression(compiler_ctx_t *ctx, unary_expression_t
 
 static HRESULT compile_assign_expression(compiler_ctx_t *ctx, binary_expression_t *expr, jsop_t op)
 {
+    BOOL use_throw_path = FALSE;
+    unsigned arg_cnt = 0;
     HRESULT hres;
 
-    if(!is_memberid_expr(expr->expression1->type)) {
+    if(expr->expression1->type == EXPR_CALL) {
+        call_expression_t *call_expr = (call_expression_t*)expr->expression1;
+        argument_t *arg;
+
+        if(op != OP_LAST) {
+            FIXME("op %d not supported on parametrized assign expressions\n", op);
+            return E_NOTIMPL;
+        }
+
+        if(is_memberid_expr(call_expr->expression->type) && call_expr->argument_list) {
+            hres = compile_memberid_expression(ctx, call_expr->expression, fdexNameEnsure);
+            if(FAILED(hres))
+                return hres;
+
+            for(arg = call_expr->argument_list; arg; arg = arg->next) {
+                hres = compile_expression(ctx, arg->expr);
+                if(FAILED(hres))
+                    return hres;
+                arg_cnt++;
+            }
+        }else {
+            use_throw_path = TRUE;
+        }
+    }else if(is_memberid_expr(expr->expression1->type)) {
+        hres = compile_memberid_expression(ctx, expr->expression1, fdexNameEnsure);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        use_throw_path = TRUE;
+    }
+
+    if(use_throw_path) {
+        /* Illegal assignment: evaluate and throw */
         hres = compile_expression(ctx, expr->expression1);
         if(FAILED(hres))
             return hres;
@@ -624,10 +665,6 @@ static HRESULT compile_assign_expression(compiler_ctx_t *ctx, binary_expression_
         return push_instr_uint(ctx, OP_throw_ref, JS_E_ILLEGAL_ASSIGN);
     }
 
-    hres = compile_memberid_expression(ctx, expr->expression1, fdexNameEnsure);
-    if(FAILED(hres))
-        return hres;
-
     if(op != OP_LAST && !push_instr(ctx, OP_refval))
         return E_OUTOFMEMORY;
 
@@ -637,6 +674,9 @@ static HRESULT compile_assign_expression(compiler_ctx_t *ctx, binary_expression_
 
     if(op != OP_LAST && !push_instr(ctx, op))
         return E_OUTOFMEMORY;
+
+    if(arg_cnt)
+        return push_instr_uint(ctx, OP_assign_call, arg_cnt);
 
     if(!push_instr(ctx, OP_assign))
         return E_OUTOFMEMORY;
@@ -778,18 +818,15 @@ static HRESULT compile_object_literal(compiler_ctx_t *ctx, property_value_expres
 
 static HRESULT compile_function_expression(compiler_ctx_t *ctx, function_expression_t *expr)
 {
-    unsigned instr;
+    ctx->func_tail = ctx->func_tail ? (ctx->func_tail->next = expr) : (ctx->func_head = expr);
 
     /* FIXME: not exactly right */
-    if(expr->identifier)
+    if(expr->identifier) {
+        ctx->func->func_cnt++;
         return push_instr_bstr(ctx, OP_ident, expr->identifier);
+    }
 
-    instr = push_instr(ctx, OP_func);
-    if(!instr)
-        return E_OUTOFMEMORY;
-
-    instr_ptr(ctx, instr)->arg1.func = expr;
-    return S_OK;
+    return push_instr_uint(ctx, OP_func, ctx->func->func_cnt++);
 }
 
 static HRESULT compile_expression_noret(compiler_ctx_t *ctx, expression_t *expr, BOOL *no_ret)
@@ -959,7 +996,19 @@ static HRESULT compile_variable_list(compiler_ctx_t *ctx, variable_declaration_t
     variable_declaration_t *iter;
     HRESULT hres;
 
+    assert(list != NULL);
+
+    if(ctx->var_tail)
+        ctx->var_tail->global_next = list;
+    else
+        ctx->var_head = list;
+
     for(iter = list; iter; iter = iter->next) {
+        ctx->func->var_cnt++;
+        iter->global_next = iter->next;
+        if(!iter->next)
+            ctx->var_tail = iter;
+
         if(!iter->expr)
             continue;
 
@@ -1516,6 +1565,9 @@ static HRESULT compile_switch_statement(compiler_ctx_t *ctx, switch_statement_t 
     assert(i == case_cnt);
 
     if(!have_default) {
+        hres = push_instr_uint(ctx, OP_jmp, stat_ctx.break_label);
+        if(FAILED(hres))
+            return hres;
         instr_ptr(ctx, default_jmp)->arg1.uint = ctx->code_off;
         if(!push_instr(ctx, OP_undefined))
             return E_OUTOFMEMORY;
@@ -1700,9 +1752,6 @@ void release_bytecode(bytecode_t *code)
     if(--code->ref)
         return;
 
-    if(code->parser)
-        parser_release(code->parser);
-
     for(i=0; i < code->bstr_cnt; i++)
         SysFreeString(code->bstr_pool[i]);
 
@@ -1739,15 +1788,21 @@ static HRESULT init_code(compiler_ctx_t *compiler, const WCHAR *source)
     return S_OK;
 }
 
-static HRESULT compile_function(compiler_ctx_t *ctx, source_elements_t *source, BOOL from_eval)
+static HRESULT compile_function(compiler_ctx_t *ctx, source_elements_t *source, function_expression_t *func_expr,
+        BOOL from_eval, function_code_t *func)
 {
-    function_declaration_t *iter;
-    unsigned off;
+    variable_declaration_t *var_iter;
+    function_expression_t *iter;
+    unsigned off, i;
     HRESULT hres;
 
     TRACE("\n");
 
+    ctx->var_head = ctx->var_tail = NULL;
+    ctx->func_head = ctx->func_tail = NULL;
+
     off = ctx->code_off;
+    ctx->func = func;
     hres = compile_block_statement(ctx, source->statement);
     if(FAILED(hres))
         return hres;
@@ -1762,13 +1817,58 @@ static HRESULT compile_function(compiler_ctx_t *ctx, source_elements_t *source, 
     if(TRACE_ON(jscript_disas))
         dump_code(ctx, off);
 
-    source->instr_off = off;
+    func->instr_off = off;
 
-    for(iter = source->functions; iter; iter = iter->next) {
-        hres = compile_function(ctx, iter->expr->source_elements, FALSE);
+    if(func_expr && func_expr->identifier) {
+        func->name = compiler_alloc_bstr(ctx, func_expr->identifier);
+        if(!func->name)
+            return E_OUTOFMEMORY;
+    }
+
+    if(func_expr) {
+        parameter_t *param_iter;
+
+        func->source = func_expr->src_str;
+        func->source_len = func_expr->src_len;
+
+        for(param_iter = func_expr->parameter_list; param_iter; param_iter = param_iter->next)
+            func->param_cnt++;
+
+        func->params = compiler_alloc(ctx->code, func->param_cnt * sizeof(*func->params));
+        if(!func->params)
+            return E_OUTOFMEMORY;
+
+        for(param_iter = func_expr->parameter_list, i=0; param_iter; param_iter = param_iter->next, i++) {
+            func->params[i] = compiler_alloc_bstr(ctx, param_iter->identifier);
+            if(!func->params[i])
+                return E_OUTOFMEMORY;
+        }
+    }
+
+    func->variables = compiler_alloc(ctx->code, func->var_cnt * sizeof(*func->variables));
+    if(!func->variables)
+        return E_OUTOFMEMORY;
+
+    for(var_iter = ctx->var_head, i=0; var_iter; var_iter = var_iter->global_next, i++) {
+        func->variables[i] = compiler_alloc_bstr(ctx, var_iter->identifier);
+        if(!func->variables[i])
+            return E_OUTOFMEMORY;
+    }
+
+    assert(i == func->var_cnt);
+
+    func->funcs = compiler_alloc(ctx->code, func->func_cnt * sizeof(*func->funcs));
+    if(!func->funcs)
+        return E_OUTOFMEMORY;
+    memset(func->funcs, 0, func->func_cnt * sizeof(*func->funcs));
+
+    for(iter = ctx->func_head, i=0; iter; iter = iter->next, i++) {
+        hres = compile_function(ctx, iter->source_elements, iter, FALSE, func->funcs+i);
         if(FAILED(hres))
             return hres;
     }
+
+    assert(i == func->func_cnt);
 
     return S_OK;
 }
@@ -1797,9 +1897,8 @@ HRESULT compile_script(script_ctx_t *ctx, const WCHAR *code, const WCHAR *delimi
         return hres;
     }
 
-    compiler.code->parser = compiler.parser;
-
-    hres = compile_function(&compiler, compiler.parser->source, from_eval);
+    hres = compile_function(&compiler, compiler.parser->source, NULL, from_eval, &compiler.code->global_code);
+    parser_release(compiler.parser);
     if(FAILED(hres)) {
         release_bytecode(compiler.code);
         return hres;

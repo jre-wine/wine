@@ -144,16 +144,20 @@ static HRESULT get_declared_prefix_idx(const struct nscontext *ctxt, LONG index,
 }
 
 /* returned stored pointer, caller needs to copy it */
-static HRESULT get_declared_prefix_uri(const struct nscontext *ctxt, const WCHAR *uri, BSTR *prefix)
+static HRESULT get_declared_prefix_uri(const struct list *ctxts, const WCHAR *uri, BSTR *prefix)
 {
-    int i;
+    struct nscontext *ctxt;
 
-    for (i = 0; i < ctxt->count; i++)
-        if (!strcmpW(ctxt->ns[i].uri, uri))
-        {
-            *prefix = ctxt->ns[i].prefix;
-            return S_OK;
-        }
+    LIST_FOR_EACH_ENTRY(ctxt, ctxts, struct nscontext, entry)
+    {
+        int i;
+        for (i = 0; i < ctxt->count; i++)
+            if (!strcmpW(ctxt->ns[i].uri, uri))
+            {
+                *prefix = ctxt->ns[i].prefix;
+                return S_OK;
+            }
+    }
 
     *prefix = NULL;
     return E_FAIL;
@@ -184,11 +188,22 @@ static struct nscontext* alloc_ns_context(void)
     ctxt->count = 0;
     ctxt->max_alloc = DEFAULT_PREFIX_ALLOC_COUNT;
     ctxt->ns = heap_alloc(ctxt->max_alloc*sizeof(*ctxt->ns));
+    if (!ctxt->ns)
+    {
+        heap_free(ctxt);
+        return NULL;
+    }
 
     /* first allocated prefix is always 'xml' */
     ctxt->ns[0].prefix = SysAllocString(xmlW);
     ctxt->ns[0].uri = SysAllocString(xmluriW);
     ctxt->count++;
+    if (!ctxt->ns[0].prefix || !ctxt->ns[0].uri)
+    {
+        heap_free(ctxt->ns);
+        heap_free(ctxt);
+        return NULL;
+    }
 
     return ctxt;
 }
@@ -310,7 +325,6 @@ static HRESULT WINAPI namespacemanager_getPrefix(IMXNamespaceManager *iface,
     const WCHAR *uri, LONG index, WCHAR *prefix, int *prefix_len)
 {
     namespacemanager *This = impl_from_IMXNamespaceManager( iface );
-    struct nscontext *ctxt;
     HRESULT hr;
     BSTR prfx;
 
@@ -318,9 +332,7 @@ static HRESULT WINAPI namespacemanager_getPrefix(IMXNamespaceManager *iface,
 
     if (!uri || !*uri || !prefix_len) return E_INVALIDARG;
 
-    ctxt = LIST_ENTRY(list_head(&This->ctxts), struct nscontext, entry);
-
-    hr = get_declared_prefix_uri(ctxt, uri, &prfx);
+    hr = get_declared_prefix_uri(&This->ctxts, uri, &prfx);
     if (hr == S_OK)
     {
         /* TODO: figure out what index argument is for */
@@ -521,8 +533,16 @@ static HRESULT WINAPI vbnamespacemanager_reset(IVBMXNamespaceManager *iface)
 static HRESULT WINAPI vbnamespacemanager_pushContext(IVBMXNamespaceManager *iface)
 {
     namespacemanager *This = impl_from_IVBMXNamespaceManager( iface );
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    struct nscontext *ctxt;
+
+    TRACE("(%p)\n", This);
+
+    ctxt = alloc_ns_context();
+    if (!ctxt) return E_OUTOFMEMORY;
+
+    list_add_head(&This->ctxts, &ctxt->entry);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI vbnamespacemanager_pushNodeContext(IVBMXNamespaceManager *iface,
@@ -536,8 +556,20 @@ static HRESULT WINAPI vbnamespacemanager_pushNodeContext(IVBMXNamespaceManager *
 static HRESULT WINAPI vbnamespacemanager_popContext(IVBMXNamespaceManager *iface)
 {
     namespacemanager *This = impl_from_IVBMXNamespaceManager( iface );
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    const struct list *next;
+    struct nscontext *ctxt;
+
+    TRACE("(%p)\n", This);
+
+    next = list_next(&This->ctxts, list_head(&This->ctxts));
+    if (!next) return E_FAIL;
+
+    ctxt = LIST_ENTRY(list_head(&This->ctxts), struct nscontext, entry);
+    list_remove(list_head(&This->ctxts));
+
+    free_ns_context(ctxt);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI vbnamespacemanager_declarePrefix(IVBMXNamespaceManager *iface,
@@ -605,6 +637,7 @@ static const tid_t namespacemanager_iface_tids[] = {
     IVBMXNamespaceManager_tid,
     0
 };
+
 static dispex_static_data_t namespacemanager_dispex = {
     NULL,
     IVBMXNamespaceManager_tid,
@@ -630,6 +663,12 @@ HRESULT MXNamespaceManager_create(IUnknown *outer, void **obj)
 
     list_init(&This->ctxts);
     ctxt = alloc_ns_context();
+    if (!ctxt)
+    {
+        heap_free(This);
+        return E_OUTOFMEMORY;
+    }
+
     list_add_head(&This->ctxts, &ctxt->entry);
 
     This->override = VARIANT_TRUE;

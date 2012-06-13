@@ -1853,28 +1853,8 @@ BOOL WINAPI GetRTTAndHopCount(IPAddr DestIpAddress, PULONG HopCount, ULONG MaxHo
  */
 DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
 {
-    DWORD ret;
-    PMIB_TCPTABLE table;
-
     TRACE("pTcpTable %p, pdwSize %p, bOrder %d\n", pTcpTable, pdwSize, bOrder);
-
-    if (!pdwSize) return ERROR_INVALID_PARAMETER;
-
-    ret = AllocateAndGetTcpTableFromStack(&table, bOrder, GetProcessHeap(), 0);
-    if (!ret) {
-        DWORD size = FIELD_OFFSET( MIB_TCPTABLE, table[table->dwNumEntries] );
-        if (!pTcpTable || *pdwSize < size) {
-          *pdwSize = size;
-          ret = ERROR_INSUFFICIENT_BUFFER;
-        }
-        else {
-          *pdwSize = size;
-          memcpy(pTcpTable, table, size);
-        }
-        HeapFree(GetProcessHeap(), 0, table);
-    }
-    TRACE("returning %d\n", ret);
-    return ret;
+    return GetExtendedTcpTable(pTcpTable, pdwSize, bOrder, AF_INET, TCP_TABLE_BASIC_ALL, 0);
 }
 
 /******************************************************************
@@ -1883,15 +1863,35 @@ DWORD WINAPI GetTcpTable(PMIB_TCPTABLE pTcpTable, PDWORD pdwSize, BOOL bOrder)
 DWORD WINAPI GetExtendedTcpTable(PVOID pTcpTable, PDWORD pdwSize, BOOL bOrder,
                                  ULONG ulAf, TCP_TABLE_CLASS TableClass, ULONG Reserved)
 {
+    DWORD ret, size;
+    void *table;
+
     TRACE("pTcpTable %p, pdwSize %p, bOrder %d, ulAf %u, TableClass %u, Reserved %u\n",
            pTcpTable, pdwSize, bOrder, ulAf, TableClass, Reserved);
 
-    if (ulAf == AF_INET6 || TableClass != TCP_TABLE_BASIC_ALL)
+    if (!pdwSize) return ERROR_INVALID_PARAMETER;
+
+    if (ulAf != AF_INET ||
+        (TableClass != TCP_TABLE_BASIC_ALL && TableClass != TCP_TABLE_OWNER_PID_ALL))
     {
-        FIXME("ulAf = %u, TableClass = %u not supportted\n", ulAf, TableClass);
+        FIXME("ulAf = %u, TableClass = %u not supported\n", ulAf, TableClass);
         return ERROR_NOT_SUPPORTED;
     }
-    return GetTcpTable(pTcpTable, pdwSize, bOrder);
+    if ((ret = build_tcp_table(TableClass, &table, bOrder, GetProcessHeap(), 0, &size)))
+        return ret;
+
+    if (!pTcpTable || *pdwSize < size)
+    {
+        *pdwSize = size;
+        ret = ERROR_INSUFFICIENT_BUFFER;
+    }
+    else
+    {
+        *pdwSize = size;
+        memcpy(pTcpTable, table, size);
+    }
+    HeapFree(GetProcessHeap(), 0, table);
+    return ret;
 }
 
 /******************************************************************

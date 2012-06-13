@@ -535,7 +535,7 @@ static HRESULT CDECL reset_enum_callback(struct wined3d_resource *resource)
     wined3d_resource_get_desc(resource, &desc);
     if (desc.pool == WINED3D_POOL_DEFAULT)
     {
-        IDirect3DSurface8 *surface;
+        IDirect3DSurface8Impl *surface;
 
         if (desc.resource_type != WINED3D_RTYPE_SURFACE)
         {
@@ -544,9 +544,7 @@ static HRESULT CDECL reset_enum_callback(struct wined3d_resource *resource)
         }
 
         surface = wined3d_resource_get_parent(resource);
-
-        IDirect3DSurface8_AddRef(surface);
-        if (IDirect3DSurface8_Release(surface))
+        if (surface->ref)
         {
             WARN("Surface %p (resource %p) in pool D3DPOOL_DEFAULT blocks the Reset call.\n", surface, resource);
             return D3DERR_DEVICELOST;
@@ -621,6 +619,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetBackBuffer(IDirect3DDevice8 *iface
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
     struct wined3d_surface *wined3d_surface = NULL;
+    IDirect3DSurface8Impl *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, backbuffer_idx %u, backbuffer_type %#x, backbuffer %p.\n",
@@ -631,7 +630,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetBackBuffer(IDirect3DDevice8 *iface
             BackBuffer, (enum wined3d_backbuffer_type)Type, &wined3d_surface);
     if (SUCCEEDED(hr) && wined3d_surface && ppBackBuffer)
     {
-        *ppBackBuffer = wined3d_surface_get_parent(wined3d_surface);
+        surface_impl = wined3d_surface_get_parent(wined3d_surface);
+        *ppBackBuffer = &surface_impl->IDirect3DSurface8_iface;
         IDirect3DSurface8_AddRef(*ppBackBuffer);
         wined3d_surface_decref(wined3d_surface);
     }
@@ -685,7 +685,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateTexture(IDirect3DDevice8 *iface
         D3DPOOL pool, IDirect3DTexture8 **texture)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
-    IDirect3DTexture8Impl *object;
+    struct d3d8_texture *object;
     HRESULT hr;
 
     TRACE("iface %p, width %u, height %u, levels %u, usage %#x, format %#x, pool %#x, texture %p.\n",
@@ -707,7 +707,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateTexture(IDirect3DDevice8 *iface
     }
 
     TRACE("Created texture %p.\n", object);
-    *texture = &object->IDirect3DTexture8_iface;
+    *texture = (IDirect3DTexture8 *)&object->IDirect3DBaseTexture8_iface;
 
     return D3D_OK;
 }
@@ -717,7 +717,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVolumeTexture(IDirect3DDevice8 
         D3DPOOL pool, IDirect3DVolumeTexture8 **texture)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
-    IDirect3DVolumeTexture8Impl *object;
+    struct d3d8_texture *object;
     HRESULT hr;
 
     TRACE("iface %p, width %u, height %u, depth %u, levels %u, usage %#x, format %#x, pool %#x, texture %p.\n",
@@ -739,7 +739,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateVolumeTexture(IDirect3DDevice8 
     }
 
     TRACE("Created volume texture %p.\n", object);
-    *texture = &object->IDirect3DVolumeTexture8_iface;
+    *texture = (IDirect3DVolumeTexture8 *)&object->IDirect3DBaseTexture8_iface;
 
     return D3D_OK;
 }
@@ -748,7 +748,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateCubeTexture(IDirect3DDevice8 *i
         UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool, IDirect3DCubeTexture8 **texture)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
-    IDirect3DCubeTexture8Impl *object;
+    struct d3d8_texture *object;
     HRESULT hr;
 
     TRACE("iface %p, edge_length %u, levels %u, usage %#x, format %#x, pool %#x, texture %p.\n",
@@ -770,7 +770,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_CreateCubeTexture(IDirect3DDevice8 *i
     }
 
     TRACE("Created cube texture %p.\n", object);
-    *texture = &object->IDirect3DCubeTexture8_iface;
+    *texture = (IDirect3DCubeTexture8 *)&object->IDirect3DBaseTexture8_iface;
 
     return hr;
 }
@@ -1032,14 +1032,17 @@ static HRESULT WINAPI IDirect3DDevice8Impl_UpdateTexture(IDirect3DDevice8 *iface
         IDirect3DBaseTexture8 *src_texture, IDirect3DBaseTexture8 *dst_texture)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
+    struct d3d8_texture *src_impl, *dst_impl;
     HRESULT hr;
 
     TRACE("iface %p, src_texture %p, dst_texture %p.\n", iface, src_texture, dst_texture);
 
+    src_impl = unsafe_impl_from_IDirect3DBaseTexture8(src_texture);
+    dst_impl = unsafe_impl_from_IDirect3DBaseTexture8(dst_texture);
+
     wined3d_mutex_lock();
     hr = wined3d_device_update_texture(This->wined3d_device,
-            ((IDirect3DBaseTexture8Impl *)src_texture)->wined3d_texture,
-            ((IDirect3DBaseTexture8Impl *)dst_texture)->wined3d_texture);
+            src_impl->wined3d_texture, dst_impl->wined3d_texture);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1136,6 +1139,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetRenderTarget(IDirect3DDevice8 *ifa
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
     struct wined3d_surface *wined3d_surface;
+    IDirect3DSurface8Impl *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, render_target %p.\n", iface, ppRenderTarget);
@@ -1148,7 +1152,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetRenderTarget(IDirect3DDevice8 *ifa
     hr = wined3d_device_get_render_target(This->wined3d_device, 0, &wined3d_surface);
     if (SUCCEEDED(hr) && wined3d_surface)
     {
-        *ppRenderTarget = wined3d_surface_get_parent(wined3d_surface);
+        surface_impl = wined3d_surface_get_parent(wined3d_surface);
+        *ppRenderTarget = &surface_impl->IDirect3DSurface8_iface;
         IDirect3DSurface8_AddRef(*ppRenderTarget);
         wined3d_surface_decref(wined3d_surface);
     }
@@ -1167,6 +1172,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetDepthStencilSurface(IDirect3DDevic
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
     struct wined3d_surface *wined3d_surface;
+    IDirect3DSurface8Impl *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, depth_stencil %p.\n", iface, ppZStencilSurface);
@@ -1179,7 +1185,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetDepthStencilSurface(IDirect3DDevic
     hr = wined3d_device_get_depth_stencil(This->wined3d_device, &wined3d_surface);
     if (SUCCEEDED(hr))
     {
-        *ppZStencilSurface = wined3d_surface_get_parent(wined3d_surface);
+        surface_impl = wined3d_surface_get_parent(wined3d_surface);
+        *ppZStencilSurface = &surface_impl->IDirect3DSurface8_iface;
         IDirect3DSurface8_AddRef(*ppZStencilSurface);
         wined3d_surface_decref(wined3d_surface);
     }
@@ -1699,6 +1706,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetTexture(IDirect3DDevice8 *iface,
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
     struct wined3d_texture *wined3d_texture;
+    struct d3d8_texture *texture_impl;
     HRESULT hr;
 
     TRACE("iface %p, stage %u, texture %p.\n", iface, Stage, ppTexture);
@@ -1719,7 +1727,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetTexture(IDirect3DDevice8 *iface,
 
     if (wined3d_texture)
     {
-        *ppTexture = wined3d_texture_get_parent(wined3d_texture);
+        texture_impl = wined3d_texture_get_parent(wined3d_texture);
+        *ppTexture = &texture_impl->IDirect3DBaseTexture8_iface;
         IDirect3DBaseTexture8_AddRef(*ppTexture);
         wined3d_texture_decref(wined3d_texture);
     }
@@ -1732,17 +1741,20 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetTexture(IDirect3DDevice8 *iface,
     return D3D_OK;
 }
 
-static HRESULT WINAPI IDirect3DDevice8Impl_SetTexture(IDirect3DDevice8 *iface, DWORD Stage,
-        IDirect3DBaseTexture8 *pTexture)
+static HRESULT WINAPI IDirect3DDevice8Impl_SetTexture(IDirect3DDevice8 *iface, DWORD stage,
+        IDirect3DBaseTexture8 *texture)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
+    struct d3d8_texture *texture_impl;
     HRESULT hr;
 
-    TRACE("iface %p, stage %u, texture %p.\n", iface, Stage, pTexture);
+    TRACE("iface %p, stage %u, texture %p.\n", iface, stage, texture);
+
+    texture_impl = unsafe_impl_from_IDirect3DBaseTexture8(texture);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_set_texture(This->wined3d_device, Stage,
-            pTexture ? ((IDirect3DBaseTexture8Impl *)pTexture)->wined3d_texture : NULL);
+    hr = wined3d_device_set_texture(This->wined3d_device, stage,
+            texture_impl ? texture_impl->wined3d_texture : NULL);
     wined3d_mutex_unlock();
 
     return hr;
@@ -2371,6 +2383,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetIndices(IDirect3DDevice8 *iface,
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
     struct wined3d_buffer *retIndexData = NULL;
+    IDirect3DIndexBuffer8Impl *buffer_impl;
     HRESULT hr;
 
     TRACE("iface %p, buffer %p, base_vertex_index %p.\n", iface, ppIndexData, pBaseVertexIndex);
@@ -2385,7 +2398,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetIndices(IDirect3DDevice8 *iface,
     hr = wined3d_device_get_index_buffer(This->wined3d_device, &retIndexData);
     if (SUCCEEDED(hr) && retIndexData)
     {
-        *ppIndexData = wined3d_buffer_get_parent(retIndexData);
+        buffer_impl = wined3d_buffer_get_parent(retIndexData);
+        *ppIndexData = &buffer_impl->IDirect3DIndexBuffer8_iface;
         IDirect3DIndexBuffer8_AddRef(*ppIndexData);
         wined3d_buffer_decref(retIndexData);
     } else {
@@ -2676,6 +2690,7 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetStreamSource(IDirect3DDevice8 *ifa
         UINT StreamNumber, IDirect3DVertexBuffer8 **pStream, UINT *pStride)
 {
     IDirect3DDevice8Impl *This = impl_from_IDirect3DDevice8(iface);
+    IDirect3DVertexBuffer8Impl *buffer_impl;
     struct wined3d_buffer *retStream = NULL;
     HRESULT hr;
 
@@ -2691,7 +2706,8 @@ static HRESULT WINAPI IDirect3DDevice8Impl_GetStreamSource(IDirect3DDevice8 *ifa
             &retStream, 0 /* Offset in bytes */, pStride);
     if (SUCCEEDED(hr) && retStream)
     {
-        *pStream = wined3d_buffer_get_parent(retStream);
+        buffer_impl = wined3d_buffer_get_parent(retStream);
+        *pStream = &buffer_impl->IDirect3DVertexBuffer8_iface;
         IDirect3DVertexBuffer8_AddRef(*pStream);
         wined3d_buffer_decref(retStream);
     }

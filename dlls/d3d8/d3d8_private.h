@@ -23,6 +23,7 @@
 #ifndef __WINE_D3D8_PRIVATE_H
 #define __WINE_D3D8_PRIVATE_H
 
+#include <assert.h>
 #include <stdarg.h>
 
 #define NONAMELESSUNION
@@ -101,11 +102,8 @@ void fixup_caps(WINED3DCAPS *pWineCaps) DECLSPEC_HIDDEN;
 
 /* Direct3D8 Interfaces: */
 typedef struct IDirect3DBaseTexture8Impl IDirect3DBaseTexture8Impl;
-typedef struct IDirect3DVolumeTexture8Impl IDirect3DVolumeTexture8Impl;
 typedef struct IDirect3D8Impl IDirect3D8Impl;
 typedef struct IDirect3DDevice8Impl IDirect3DDevice8Impl;
-typedef struct IDirect3DTexture8Impl IDirect3DTexture8Impl;
-typedef struct IDirect3DCubeTexture8Impl IDirect3DCubeTexture8Impl;
 typedef struct IDirect3DIndexBuffer8Impl IDirect3DIndexBuffer8Impl;
 typedef struct IDirect3DSurface8Impl IDirect3DSurface8Impl;
 typedef struct IDirect3DSwapChain8Impl IDirect3DSwapChain8Impl;
@@ -296,74 +294,21 @@ HRESULT indexbuffer_init(IDirect3DIndexBuffer8Impl *buffer, IDirect3DDevice8Impl
         UINT size, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
 IDirect3DIndexBuffer8Impl *unsafe_impl_from_IDirect3DIndexBuffer8(IDirect3DIndexBuffer8 *iface) DECLSPEC_HIDDEN;
 
-/* --------------------- */
-/* IDirect3DBaseTexture8 */
-/* --------------------- */
-
-/*****************************************************************************
- * IDirect3DBaseTexture8 implementation structure
- */
-struct IDirect3DBaseTexture8Impl
+struct d3d8_texture
 {
-    /* IUnknown fields */
-    const IDirect3DBaseTexture8Vtbl *lpVtbl;
-    LONG                   ref;
+    IDirect3DBaseTexture8 IDirect3DBaseTexture8_iface;
+    LONG refcount;
     struct wined3d_texture *wined3d_texture;
+    IDirect3DDevice8 *parent_device;
 };
 
-/* --------------------- */
-/* IDirect3DCubeTexture8 */
-/* --------------------- */
-
-/*****************************************************************************
- * IDirect3DCubeTexture8 implementation structure
- */
-struct IDirect3DCubeTexture8Impl
-{
-    IDirect3DCubeTexture8   IDirect3DCubeTexture8_iface;
-    LONG                    ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice8 *parentDevice;
-};
-
-HRESULT cubetexture_init(IDirect3DCubeTexture8Impl *texture, IDirect3DDevice8Impl *device,
+HRESULT cubetexture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
         UINT edge_length, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-
-/* ----------------- */
-/* IDirect3DTexture8 */
-/* ----------------- */
-
-/*****************************************************************************
- * IDirect3DTexture8 implementation structure
- */
-struct IDirect3DTexture8Impl
-{
-    IDirect3DTexture8   IDirect3DTexture8_iface;
-    LONG                ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice8 *parentDevice;
-};
-
-HRESULT texture_init(IDirect3DTexture8Impl *texture, IDirect3DDevice8Impl *device,
+HRESULT texture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
         UINT width, UINT height, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
-
-/* ----------------------- */
-/* IDirect3DVolumeTexture8 */
-/* ----------------------- */
-
-/*****************************************************************************
- * IDirect3DVolumeTexture8 implementation structure
- */
-struct IDirect3DVolumeTexture8Impl
-{
-    IDirect3DVolumeTexture8 IDirect3DVolumeTexture8_iface;
-    LONG ref;
-    struct wined3d_texture *wined3d_texture;
-    IDirect3DDevice8 *parentDevice;
-};
-
-HRESULT volumetexture_init(IDirect3DVolumeTexture8Impl *texture, IDirect3DDevice8Impl *device,
+HRESULT volumetexture_init(struct d3d8_texture *texture, IDirect3DDevice8Impl *device,
         UINT width, UINT height, UINT depth, UINT levels, DWORD usage, D3DFORMAT format, D3DPOOL pool) DECLSPEC_HIDDEN;
+struct d3d8_texture *unsafe_impl_from_IDirect3DBaseTexture8(IDirect3DBaseTexture8 *iface) DECLSPEC_HIDDEN;
 
 struct d3d8_vertex_declaration
 {

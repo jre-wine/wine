@@ -75,6 +75,7 @@ static const struct gdi_dc_funcs EMFDRV_Funcs =
     EMFDRV_FrameRgn,                 /* pFrameRgn */
     EMFDRV_GdiComment,               /* pGdiComment */
     NULL,                            /* pGdiRealizationInfo */
+    NULL,                            /* pGetBoundsRect */
     NULL,                            /* pGetCharABCWidths */
     NULL,                            /* pGetCharABCWidthsI */
     NULL,                            /* pGetCharWidth */
@@ -136,6 +137,7 @@ static const struct gdi_dc_funcs EMFDRV_Funcs =
     EMFDRV_SetArcDirection,          /* pSetArcDirection */
     EMFDRV_SetBkColor,               /* pSetBkColor */
     EMFDRV_SetBkMode,                /* pSetBkMode */
+    NULL,                            /* pSetBoundsRect */
     EMFDRV_SetDCBrushColor,          /* pSetDCBrushColor*/
     EMFDRV_SetDCPenColor,            /* pSetDCPenColor*/
     EMFDRV_SetDIBitsToDevice,        /* pSetDIBitsToDevice */

@@ -178,8 +178,7 @@ msgid ""
 "entry for this program from the registry?"
 msgstr ""
 "Spuštění odinstalování %s selhalo, možná příčína je předchozí smazání "
-"aplikace.\n"
-"Přejete si odstranit záznam odinstalace tohoto programu z registru?"
+"aplikace. Přejete si odstranit záznam odinstalace tohoto programu z registru?"
 
 #: appwiz.rc:33
 #, fuzzy
@@ -1166,11 +1165,11 @@ msgstr "mm"
 
 #: credui.rc:42
 msgid "&User name:"
-msgstr "&Uživatelské jméno"
+msgstr "&Uživatelské jméno:"
 
 #: credui.rc:45 cryptui.rc:394
 msgid "&Password:"
-msgstr "&Heslo"
+msgstr "&Heslo:"
 
 #: credui.rc:47
 msgid "&Remember my password"
@@ -1205,7 +1204,7 @@ msgid ""
 msgstr ""
 "Zapnutý Caps Lock může způsobit nesprávné zadání hesla.\n"
 "\n"
-"Stiskněte klávesu Caps Lock na své klávesnici pro vypnutí funkce Caps Lock "
+"Stiskněte klávesu Caps Lock na své klávesnici pro vypnutí funkce Caps Lock\n"
 "před napsáním hesla."
 
 #: credui.rc:31
@@ -3564,10 +3563,20 @@ msgid "URI to be decoded is incorrect"
 msgstr ""
 
 #: jscript.rc:57
-msgid "Array length must be a finite positive integer"
+msgid "Number of fraction digits is out of range"
 msgstr ""
 
 #: jscript.rc:58
+#, fuzzy
+#| msgid "Print range"
+msgid "Precision is out of range"
+msgstr "Rozsah tisku"
+
+#: jscript.rc:59
+msgid "Array length must be a finite positive integer"
+msgstr ""
+
+#: jscript.rc:60
 msgid "Array object expected"
 msgstr ""
 
@@ -12634,7 +12643,7 @@ msgstr "Zobrazit rozšířené možnosti"
 
 #: winecfg.rc:240
 msgid "De&vice:"
-msgstr "&Zařízení"
+msgstr "&Zařízení:"
 
 #: winecfg.rc:242
 msgid "Bro&wse..."

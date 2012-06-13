@@ -637,7 +637,7 @@ static void prepare_ds_clear(struct wined3d_surface *ds, struct wined3d_context 
 }
 
 /* Do not call while under the GL lock. */
-HRESULT device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
+void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
         UINT rect_count, const RECT *rects, const RECT *draw_rect, DWORD flags, const struct wined3d_color *color,
         float depth, DWORD stencil)
 {
@@ -673,7 +673,7 @@ HRESULT device_clear_render_targets(struct wined3d_device *device, UINT rt_count
     {
         context_release(context);
         WARN("Invalid context, skipping clear.\n");
-        return WINED3D_OK;
+        return;
     }
 
     if (target)
@@ -702,7 +702,7 @@ HRESULT device_clear_render_targets(struct wined3d_device *device, UINT rt_count
     {
         context_release(context);
         WARN("Failed to apply clear state, skipping clear.\n");
-        return WINED3D_OK;
+        return;
     }
 
     ENTER_GL();
@@ -819,8 +819,6 @@ HRESULT device_clear_render_targets(struct wined3d_device *device, UINT rt_count
         wglFlush(); /* Flush to ensure ordering across contexts. */
 
     context_release(context);
-
-    return WINED3D_OK;
 }
 
 ULONG CDECL wined3d_device_incref(struct wined3d_device *device)
@@ -1698,12 +1696,12 @@ HRESULT CDECL wined3d_device_set_stream_source(struct wined3d_device *device, UI
 
     if (buffer)
     {
-        InterlockedIncrement(&buffer->bind_count);
+        InterlockedIncrement(&buffer->resource.bind_count);
         wined3d_buffer_incref(buffer);
     }
     if (prev_buffer)
     {
-        InterlockedDecrement(&prev_buffer->bind_count);
+        InterlockedDecrement(&prev_buffer->resource.bind_count);
         wined3d_buffer_decref(prev_buffer);
     }
 
@@ -2330,12 +2328,12 @@ HRESULT CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
         device_invalidate_state(device, STATE_INDEXBUFFER);
         if (buffer)
         {
-            InterlockedIncrement(&buffer->bind_count);
+            InterlockedIncrement(&buffer->resource.bind_count);
             wined3d_buffer_incref(buffer);
         }
         if (prev_buffer)
         {
-            InterlockedDecrement(&prev_buffer->bind_count);
+            InterlockedDecrement(&prev_buffer->resource.bind_count);
             wined3d_buffer_decref(prev_buffer);
         }
     }
@@ -3671,7 +3669,7 @@ HRESULT CDECL wined3d_device_set_texture(struct wined3d_device *device,
 
     if (texture)
     {
-        LONG bind_count = InterlockedIncrement(&texture->bind_count);
+        LONG bind_count = InterlockedIncrement(&texture->resource.bind_count);
 
         wined3d_texture_incref(texture);
 
@@ -3693,7 +3691,7 @@ HRESULT CDECL wined3d_device_set_texture(struct wined3d_device *device,
 
     if (prev)
     {
-        LONG bind_count = InterlockedDecrement(&prev->bind_count);
+        LONG bind_count = InterlockedDecrement(&prev->resource.bind_count);
 
         wined3d_texture_decref(prev);
 
@@ -3958,10 +3956,10 @@ HRESULT CDECL wined3d_device_clear(struct wined3d_device *device, DWORD rect_cou
     }
 
     wined3d_get_draw_rect(&device->stateBlock->state, &draw_rect);
+    device_clear_render_targets(device, device->adapter->gl_info.limits.buffers,
+            &device->fb, rect_count, rects, &draw_rect, flags, color, depth, stencil);
 
-    return device_clear_render_targets(device, device->adapter->gl_info.limits.buffers,
-            &device->fb, rect_count, rects,
-            &draw_rect, flags, color, depth, stencil);
+    return WINED3D_OK;
 }
 
 void CDECL wined3d_device_set_primitive_type(struct wined3d_device *device,

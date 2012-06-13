@@ -667,7 +667,7 @@ static void test_MapViewOfFile(void)
     ok(ret, "VirtualQuery failed with error %d\n", GetLastError());
     ok(info.BaseAddress == ptr, "BaseAddress should have been %p but was %p instead\n", ptr, info.BaseAddress);
     ok(info.AllocationBase == ptr, "AllocationBase should have been %p but was %p instead\n", ptr, info.AllocationBase);
-    ok(info.RegionSize == MAPPING_SIZE, "RegionSize should have been 0x%x but was 0x%x\n", MAPPING_SIZE, (unsigned int)info.RegionSize);
+    ok(info.RegionSize == MAPPING_SIZE, "RegionSize should have been 0x%x but was 0x%lx\n", MAPPING_SIZE, info.RegionSize);
     ok(info.State == MEM_RESERVE, "State should have been MEM_RESERVE instead of 0x%x\n", info.State);
     if (info.Type == MEM_PRIVATE)  /* win9x is different for uncommitted mappings */
     {
@@ -695,7 +695,7 @@ static void test_MapViewOfFile(void)
         ok(info.AllocationProtect == PAGE_READWRITE,
            "AllocationProtect should have been PAGE_READWRITE but was 0x%x\n", info.AllocationProtect);
         ok(info.RegionSize == MAPPING_SIZE,
-           "RegionSize should have been 0x%x but was 0x%x\n", MAPPING_SIZE, (unsigned int)info.RegionSize);
+           "RegionSize should have been 0x%x but was 0x%lx\n", MAPPING_SIZE, info.RegionSize);
         ok(info.State == MEM_RESERVE,
            "State should have been MEM_RESERVE instead of 0x%x\n", info.State);
         ok(info.Protect == 0,
@@ -711,7 +711,7 @@ static void test_MapViewOfFile(void)
     ok(ret, "VirtualQuery failed with error %d\n", GetLastError());
     ok(info.BaseAddress == ptr, "BaseAddress should have been %p but was %p instead\n", ptr, info.BaseAddress);
     ok(info.AllocationBase == ptr, "AllocationBase should have been %p but was %p instead\n", ptr, info.AllocationBase);
-    ok(info.RegionSize == 0x10000, "RegionSize should have been 0x10000 but was 0x%x\n", (unsigned int)info.RegionSize);
+    ok(info.RegionSize == 0x10000, "RegionSize should have been 0x10000 but was 0x%lx\n", info.RegionSize);
     ok(info.State == MEM_COMMIT, "State should have been MEM_RESERVE instead of 0x%x\n", info.State);
     ok(info.Protect == PAGE_READONLY, "Protect should have been 0 instead of 0x%x\n", info.Protect);
     if (info.Type == MEM_PRIVATE)  /* win9x is different for uncommitted mappings */
@@ -740,11 +740,11 @@ static void test_MapViewOfFile(void)
         ok(info.AllocationProtect == PAGE_READWRITE,
            "AllocationProtect should have been PAGE_READWRITE but was 0x%x\n", info.AllocationProtect);
         ok(info.RegionSize == 0x10000,
-           "RegionSize should have been 0x10000 but was 0x%x\n", (unsigned int)info.RegionSize);
+           "RegionSize should have been 0x10000 but was 0x%lx\n", info.RegionSize);
         ok(info.State == MEM_COMMIT,
-           "State should have been MEM_RESERVE instead of 0x%x\n", info.State);
+           "State should have been MEM_COMMIT instead of 0x%x\n", info.State);
         ok(info.Protect == PAGE_READWRITE,
-           "Protect should have been 0 instead of 0x%x\n", info.Protect);
+           "Protect should have been PAGE_READWRITE instead of 0x%x\n", info.Protect);
         ok(info.Type == MEM_MAPPED, "Type should have been MEM_MAPPED instead of 0x%x\n", info.Type);
     }
 
@@ -792,8 +792,106 @@ static void test_MapViewOfFile(void)
     SetLastError(0xdeadbeef);
     map2 = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
     ok( map2 != 0, "OpenFileMappingA failed with error %d\n", GetLastError() );
-    CloseHandle(map2);
-    CloseHandle(mapping);
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(map2);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(mapping);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( !ret, "memory is not accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize == MAPPING_SIZE, "got %#lx != expected %#x\n", info.RegionSize, MAPPING_SIZE);
+    ok(info.Protect == PAGE_READWRITE, "got %#x != expected PAGE_READWRITE\n", info.Protect);
+    ok(info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr);
+    ok(info.AllocationProtect == PAGE_READWRITE, "%#x != PAGE_READWRITE\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
+    ok(info.Type == MEM_MAPPED, "%#x != MEM_MAPPED\n", info.Type);
+
+    SetLastError(0xdeadbeef);
+    map2 = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
+    todo_wine
+    ok( map2 == 0, "OpenFileMappingA succeeded\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_FILE_NOT_FOUND, "OpenFileMappingA set error %d\n", GetLastError() );
+    if (map2) CloseHandle(map2); /* FIXME: remove once Wine is fixed */
+    SetLastError(0xdeadbeef);
+    mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, MAPPING_SIZE, name);
+    ok( mapping != 0, "CreateFileMappingA failed\n" );
+    todo_wine
+    ok( GetLastError() == ERROR_SUCCESS, "CreateFileMappingA set error %d\n", GetLastError() );
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(mapping);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( !ret, "memory is not accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize == MAPPING_SIZE, "got %#lx != expected %#x\n", info.RegionSize, MAPPING_SIZE);
+    ok(info.Protect == PAGE_READWRITE, "got %#x != expected PAGE_READWRITE\n", info.Protect);
+    ok(info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr);
+    ok(info.AllocationProtect == PAGE_READWRITE, "%#x != PAGE_READWRITE\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
+    ok(info.Type == MEM_MAPPED, "%#x != MEM_MAPPED\n", info.Type);
+
+    SetLastError(0xdeadbeef);
+    ret = UnmapViewOfFile(ptr);
+    ok( ret, "UnmapViewOfFile failed with error %d\n", GetLastError() );
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( ret, "memory is accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize != MAPPING_SIZE, "got size %#lx\n", info.RegionSize);
+    ok(info.Protect == PAGE_NOACCESS, "got %#x != expected PAGE_NOACCESS\n", info.Protect);
+    ok(info.AllocationBase == NULL, "%p != NULL\n", info.AllocationBase);
+    ok(info.AllocationProtect == 0, "%#x != 0\n", info.AllocationProtect);
+    ok(info.State == MEM_FREE, "%#x != MEM_FREE\n", info.State);
+    ok(info.Type == 0, "%#x != 0\n", info.Type);
+
+    SetLastError(0xdeadbeef);
+    file = CreateFileA(testfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0);
+    ok( file != INVALID_HANDLE_VALUE, "CreateFile error %u\n", GetLastError() );
+    SetFilePointer(file, 4096, NULL, FILE_BEGIN);
+    SetEndOfFile(file);
+
+    SetLastError(0xdeadbeef);
+    mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, MAPPING_SIZE, name);
+    ok( mapping != 0, "CreateFileMappingA failed with error %d\n", GetLastError() );
+    SetLastError(0xdeadbeef);
+    ptr = MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 0);
+    ok( ptr != NULL, "MapViewOfFile failed with error %d\n", GetLastError() );
+    SetLastError(0xdeadbeef);
+    map2 = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
+    ok( map2 != 0, "OpenFileMappingA failed with error %d\n", GetLastError() );
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(map2);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(mapping);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( !ret, "memory is not accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize == MAPPING_SIZE, "got %#lx != expected %#x\n", info.RegionSize, MAPPING_SIZE);
+    ok(info.Protect == PAGE_READWRITE, "got %#x != expected PAGE_READWRITE\n", info.Protect);
+    ok(info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr);
+    ok(info.AllocationProtect == PAGE_READWRITE, "%#x != PAGE_READWRITE\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
+    ok(info.Type == MEM_MAPPED, "%#x != MEM_MAPPED\n", info.Type);
 
     SetLastError(0xdeadbeef);
     map2 = OpenFileMappingA(FILE_MAP_READ, FALSE, name);
@@ -803,15 +901,46 @@ static void test_MapViewOfFile(void)
     ok( GetLastError() == ERROR_FILE_NOT_FOUND, "OpenFileMappingA set error %d\n", GetLastError() );
     CloseHandle(map2);
     SetLastError(0xdeadbeef);
-    mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, MAPPING_SIZE, name);
+    mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, MAPPING_SIZE, name);
     ok( mapping != 0, "CreateFileMappingA failed\n" );
     todo_wine
     ok( GetLastError() == ERROR_SUCCESS, "CreateFileMappingA set error %d\n", GetLastError() );
-    CloseHandle(mapping);
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(mapping);
+    ok(ret, "CloseHandle error %d\n", GetLastError());
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( !ret, "memory is not accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize == MAPPING_SIZE, "got %#lx != expected %#x\n", info.RegionSize, MAPPING_SIZE);
+    ok(info.Protect == PAGE_READWRITE, "got %#x != expected PAGE_READWRITE\n", info.Protect);
+    ok(info.AllocationBase == ptr, "%p != %p\n", info.AllocationBase, ptr);
+    ok(info.AllocationProtect == PAGE_READWRITE, "%#x != PAGE_READWRITE\n", info.AllocationProtect);
+    ok(info.State == MEM_COMMIT, "%#x != MEM_COMMIT\n", info.State);
+    ok(info.Type == MEM_MAPPED, "%#x != MEM_MAPPED\n", info.Type);
 
     SetLastError(0xdeadbeef);
     ret = UnmapViewOfFile(ptr);
     ok( ret, "UnmapViewOfFile failed with error %d\n", GetLastError() );
+
+    ret = IsBadReadPtr(ptr, MAPPING_SIZE);
+    ok( ret, "memory is accessible\n" );
+
+    ret = VirtualQuery(ptr, &info, sizeof(info));
+    ok(ret, "VirtualQuery error %d\n", GetLastError());
+    ok(info.BaseAddress == ptr, "got %p != expected %p\n", info.BaseAddress, ptr);
+    ok(info.RegionSize != MAPPING_SIZE, "got size %#lx\n", info.RegionSize);
+    ok(info.Protect == PAGE_NOACCESS, "got %#x != expected PAGE_NOACCESS\n", info.Protect);
+    ok(info.AllocationBase == NULL, "%p != NULL\n", info.AllocationBase);
+    ok(info.AllocationProtect == 0, "%#x != 0\n", info.AllocationProtect);
+    ok(info.State == MEM_FREE, "%#x != MEM_FREE\n", info.State);
+    ok(info.Type == 0, "%#x != 0\n", info.Type);
+
+    CloseHandle(file);
+    DeleteFileA(testfile);
 }
 
 static void test_NtMapViewOfSection(void)

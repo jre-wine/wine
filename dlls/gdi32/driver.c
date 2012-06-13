@@ -311,6 +311,11 @@ static BOOL nulldrv_GdiRealizationInfo( PHYSDEV dev, void *info )
     return FALSE;
 }
 
+static UINT nulldrv_GetBoundsRect( PHYSDEV dev, RECT *rect, UINT flags )
+{
+    return DCB_RESET;
+}
+
 static BOOL nulldrv_GetCharABCWidths( PHYSDEV dev, UINT first, UINT last, LPABC abc )
 {
     return FALSE;
@@ -557,6 +562,11 @@ static INT nulldrv_SetBkMode( PHYSDEV dev, INT mode )
     return mode;
 }
 
+static UINT nulldrv_SetBoundsRect( PHYSDEV dev, RECT *rect, UINT flags )
+{
+    return DCB_RESET;
+}
+
 static COLORREF nulldrv_SetDCBrushColor( PHYSDEV dev, COLORREF color )
 {
     return color;
@@ -758,6 +768,7 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_FrameRgn,                   /* pFrameRgn */
     nulldrv_GdiComment,                 /* pGdiComment */
     nulldrv_GdiRealizationInfo,         /* pGdiRealizationInfo */
+    nulldrv_GetBoundsRect,              /* pGetBoundsRect */
     nulldrv_GetCharABCWidths,           /* pGetCharABCWidths */
     nulldrv_GetCharABCWidthsI,          /* pGetCharABCWidthsI */
     nulldrv_GetCharWidth,               /* pGetCharWidth */
@@ -819,6 +830,7 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_SetArcDirection,            /* pSetArcDirection */
     nulldrv_SetBkColor,                 /* pSetBkColor */
     nulldrv_SetBkMode,                  /* pSetBkMode */
+    nulldrv_SetBoundsRect,              /* pSetBoundsRect */
     nulldrv_SetDCBrushColor,            /* pSetDCBrushColor */
     nulldrv_SetDCPenColor,              /* pSetDCPenColor */
     nulldrv_SetDIBitsToDevice,          /* pSetDIBitsToDevice */
