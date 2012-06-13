@@ -108,12 +108,21 @@ typedef struct
 {
     HBITMAP      hbitmap;
     Pixmap       pixmap;
-    XID          glxpixmap;
     int          depth;             /* depth of the X pixmap */
     int          format;            /* color format (used by XRender) */
     ColorShifts  color_shifts;      /* color shifts of the X pixmap */
     BOOL         trueColor;
 } X_PHYSBITMAP;
+
+enum dc_gl_type
+{
+    DC_GL_NONE,       /* no GL support (pixel format not set yet) */
+    DC_GL_WINDOW,     /* normal top-level window */
+    DC_GL_CHILD_WIN,  /* child window using XComposite */
+    DC_GL_PIXMAP_WIN, /* child window using intermediate pixmap */
+    DC_GL_BITMAP,     /* memory DC with a standard bitmap */
+    DC_GL_PBUFFER     /* pseudo memory DC using a PBuffer */
+};
 
   /* X physical device */
 typedef struct
@@ -131,10 +140,6 @@ typedef struct
     int           depth;       /* bit depth of the DC */
     ColorShifts  *color_shifts; /* color shifts of the DC */
     int           exposures;   /* count of graphics exposures operations */
-    int           current_pf;
-    Drawable      gl_drawable;
-    Pixmap        pixmap;      /* Pixmap for a GLXPixmap gl_drawable */
-    int           gl_copy;
 } X11DRV_PDEVICE;
 
 static inline X11DRV_PDEVICE *get_x11drv_dev( PHYSDEV dev )
@@ -206,32 +211,9 @@ extern COLORREF X11DRV_SetDCPenColor( PHYSDEV dev, COLORREF crColor ) DECLSPEC_H
 extern void X11DRV_SetDeviceClipping( PHYSDEV dev, HRGN rgn ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_SetDeviceGammaRamp( PHYSDEV dev, LPVOID ramp ) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_SetPixel( PHYSDEV dev, INT x, INT y, COLORREF color ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_SetPixelFormat(PHYSDEV dev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_StretchBlt( PHYSDEV dst_dev, struct bitblt_coords *dst,
                                PHYSDEV src_dev, struct bitblt_coords *src, DWORD rop ) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_UnrealizePalette( HPALETTE hpal ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglCopyContext( HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask ) DECLSPEC_HIDDEN;
-extern HGLRC X11DRV_wglCreateContext( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern HGLRC X11DRV_wglCreateContextAttribsARB( PHYSDEV dev, HGLRC hShareContext, const int* attribList ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglDeleteContext( HGLRC hglrc ) DECLSPEC_HIDDEN;
-extern PROC X11DRV_wglGetProcAddress( LPCSTR proc ) DECLSPEC_HIDDEN;
-extern HDC X11DRV_wglGetPbufferDCARB( PHYSDEV dev, void *pbuffer ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglMakeContextCurrentARB( PHYSDEV draw_dev, PHYSDEV read_dev, HGLRC hglrc ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglMakeCurrent( PHYSDEV dev, HGLRC hglrc ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglSetPixelFormatWINE( PHYSDEV dev, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglShareLists( HGLRC hglrc1, HGLRC hglrc2 ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglUseFontBitmapsA( PHYSDEV dev, DWORD first, DWORD count, DWORD listBase ) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_wglUseFontBitmapsW( PHYSDEV dev, DWORD first, DWORD count, DWORD listBase ) DECLSPEC_HIDDEN;
-
-/* OpenGL / X11 driver functions */
-extern int X11DRV_ChoosePixelFormat(PHYSDEV dev,
-		                      const PIXELFORMATDESCRIPTOR *pppfd) DECLSPEC_HIDDEN;
-extern int X11DRV_DescribePixelFormat(PHYSDEV dev,
-		                        int iPixelFormat, UINT nBytes,
-					PIXELFORMATDESCRIPTOR *ppfd) DECLSPEC_HIDDEN;
-extern int X11DRV_GetPixelFormat(PHYSDEV dev) DECLSPEC_HIDDEN;
-extern BOOL X11DRV_SwapBuffers(PHYSDEV dev) DECLSPEC_HIDDEN;
-extern void X11DRV_OpenGL_Cleanup(void) DECLSPEC_HIDDEN;
 
 /* X11 driver internal functions */
 
@@ -270,7 +252,7 @@ extern int client_side_antialias_with_render DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 extern void X11DRV_XRender_Finalize(void) DECLSPEC_HIDDEN;
 
-extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev) DECLSPEC_HIDDEN;
+extern const struct gdi_dc_funcs *get_glx_driver(void) DECLSPEC_HIDDEN;
 extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap) DECLSPEC_HIDDEN;
 
 /* IME support */
@@ -330,16 +312,9 @@ extern void X11DRV_PALETTE_ComputeColorShifts(ColorShifts *shifts, unsigned long
 #define X11DRV_ESCAPE 6789
 enum x11drv_escape_codes
 {
-    X11DRV_GET_DISPLAY,      /* get X11 display for a DC */
-    X11DRV_GET_DRAWABLE,     /* get current drawable for a DC */
-    X11DRV_GET_FONT,         /* get current X font for a DC */
     X11DRV_SET_DRAWABLE,     /* set current drawable for a DC */
     X11DRV_START_EXPOSURES,  /* start graphics exposures */
     X11DRV_END_EXPOSURES,    /* end graphics exposures */
-    X11DRV_GET_DCE,          /* no longer used */
-    X11DRV_SET_DCE,          /* no longer used */
-    X11DRV_GET_GLX_DRAWABLE, /* get current glx drawable for a DC */
-    X11DRV_SYNC_PIXMAP,      /* sync the dibsection to its pixmap */
     X11DRV_FLUSH_GL_DRAWABLE /* flush changes made to the gl drawable */
 };
 
@@ -353,7 +328,7 @@ struct x11drv_escape_set_drawable
     XID                      fbconfig_id;  /* fbconfig id used by the GL drawable */
     Drawable                 gl_drawable;  /* GL drawable */
     Pixmap                   pixmap;       /* Pixmap for a GLXPixmap gl_drawable */
-    int                      gl_copy;      /* whether the GL contents need explicit copying */
+    enum dc_gl_type          gl_type;      /* type of GL device context */
 };
 
 /**************************************************************************
@@ -622,11 +597,9 @@ extern struct x11drv_win_data *X11DRV_create_win_data( HWND hwnd ) DECLSPEC_HIDD
 extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
 
-extern int pixelformat_from_fbconfig_id( XID fbconfig_id ) DECLSPEC_HIDDEN;
 extern XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id ) DECLSPEC_HIDDEN;
 extern void mark_drawable_dirty( Drawable old, Drawable new ) DECLSPEC_HIDDEN;
 extern Drawable create_glxpixmap( Display *display, XVisualInfo *vis, Pixmap parent ) DECLSPEC_HIDDEN;
-extern void flush_gl_drawable( X11DRV_PDEVICE *physDev ) DECLSPEC_HIDDEN;
 
 extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set ) DECLSPEC_HIDDEN;
 extern Window init_clip_window(void) DECLSPEC_HIDDEN;

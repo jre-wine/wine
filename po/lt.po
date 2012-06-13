@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-04-19 22:52+0300\n"
+"PO-Revision-Date: 2012-05-04 07:35+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: komp_lt@konf.lt\n"
 "Language: Lithuanian\n"
@@ -1082,7 +1082,7 @@ msgid "Processing; "
 msgstr "Apdorojimas; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inicijuojama; "
 
 #: comdlg32.rc:96
@@ -3736,7 +3736,7 @@ msgid "Too many commands.\n"
 msgstr "Per daug komandų.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Adapterio aparatinė klaida.\n"
 
 #: winerror.mc:256
@@ -3748,7 +3748,7 @@ msgid "Unexpected network error.\n"
 msgstr "Netikėta tinklo klaida.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Blogas nutolęs adapteris.\n"
 
 #: winerror.mc:271
@@ -4360,7 +4360,7 @@ msgid "Invalid flags.\n"
 msgstr "Neteisingi žymos bitai.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Neatpažintas tomas.\n"
 
 #: winerror.mc:1046
@@ -5018,7 +5018,7 @@ msgid "Continue work in progress.\n"
 msgstr "Tęsti pradėtą darbą.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Jau inicijuota.\n"
 
 #: winerror.mc:1871
@@ -6050,7 +6050,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Neteisinga tapatumo nustatymo tapatybė.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Nežinoma prieigos teisių tarnyba.\n"
 
 #: winerror.mc:3171
@@ -6186,7 +6186,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Netinkamas naudotojo buferis.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Neatpažinta laikmena.\n"
 
 #: winerror.mc:3341
@@ -6330,7 +6330,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC ryšio klaida.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nepalaikomas prieigos teisių lygis.\n"
 
 #: winerror.mc:3521
@@ -6358,7 +6358,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Neteisinga rodyklės operacija.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Neteisinga sekų išdėstymo paketo versija.\n"
 
 #: winerror.mc:3556
@@ -6670,12 +6670,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -6700,7 +6700,8 @@ msgstr ""
 "Pritaikyti pataisą:\n"
 "\t/p pataisos_paketas [savybė]\n"
 "\t/p pataisos_paketas /a paketas [savybė]\n"
-"Žurnalo ir sąsajos modifikatoriai aukščiau išvardintoms komandoms:\n"
+"Žurnalo ir naudotojo sąsajos modifikatoriai aukščiau išvardintoms "
+"komandoms:\n"
 "\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] žurnalo_failas\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
 "Registruoti MSI tarnybą:\n"
@@ -9131,7 +9132,7 @@ msgid "Filter Error"
 msgstr "Filtro klaida"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Nutraukta naudotojo"
 
 #: wldap32.rc:116
@@ -11227,7 +11228,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Pateikiamos komandos raktų ir reikšmių redagavimui"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Pateikiamos komandos registro lango adaptavimui"
 
 #: regedit.rc:137

@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <math.h>
 
 #include "jscript.h"
@@ -851,6 +854,8 @@ static HRESULT Array_splice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPP
     DWORD length, start=0, delete_cnt=0, argc, i, add_args = 0;
     jsdisp_t *ret_array = NULL, *jsthis;
     VARIANT v;
+    double d;
+    int n;
     HRESULT hres = S_OK;
 
     TRACE("\n");
@@ -861,29 +866,29 @@ static HRESULT Array_splice(script_ctx_t *ctx, vdisp_t *vthis, WORD flags, DISPP
 
     argc = arg_cnt(dp);
     if(argc >= 1) {
-        hres = to_integer(ctx, get_arg(dp,0), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,0), ei, &d);
         if(FAILED(hres))
             return hres;
 
-        if(V_VT(&v) == VT_I4) {
-            if(V_I4(&v) >= 0)
-                start = min(V_I4(&v), length);
+        if(is_int32(d)) {
+            if((n = d) >= 0)
+                start = min(n, length);
             else
-                start = -V_I4(&v) > length ? 0 : length + V_I4(&v);
+                start = -n > length ? 0 : length + n;
         }else {
-            start = V_R8(&v) < 0.0 ? 0 : length;
+            start = d < 0.0 ? 0 : length;
         }
     }
 
     if(argc >= 2) {
-        hres = to_integer(ctx, get_arg(dp,1), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
         if(FAILED(hres))
             return hres;
 
-        if(V_VT(&v) == VT_I4) {
-            if(V_I4(&v) > 0)
-                delete_cnt = min(V_I4(&v), length-start);
-        }else if(V_R8(&v) > 0.0) {
+        if(is_int32(d)) {
+            if((n = d) > 0)
+                delete_cnt = min(n, length-start);
+        }else if(d > 0.0) {
             delete_cnt = length-start;
         }
 

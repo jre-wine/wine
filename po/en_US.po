@@ -1080,8 +1080,8 @@ msgid "Processing; "
 msgstr "Processing; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
-msgstr "Initialising; "
+msgid "Initializing; "
+msgstr "Initializing; "
 
 #: comdlg32.rc:96
 msgid "Warming up; "
@@ -3727,8 +3727,8 @@ msgid "Too many commands.\n"
 msgstr "Too many commands.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
-msgstr "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
+msgstr "Adapter hardware error.\n"
 
 #: winerror.mc:256
 msgid "Bad network response.\n"
@@ -3739,8 +3739,8 @@ msgid "Unexpected network error.\n"
 msgstr "Unexpected network error.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
-msgstr "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
+msgstr "Bad remote adapter.\n"
 
 #: winerror.mc:271
 msgid "Print queue full.\n"
@@ -4351,8 +4351,8 @@ msgid "Invalid flags.\n"
 msgstr "Invalid flags.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
-msgstr "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
+msgstr "Unrecognized volume.\n"
 
 #: winerror.mc:1046
 msgid "File invalid.\n"
@@ -5007,8 +5007,8 @@ msgid "Continue work in progress.\n"
 msgstr "Continue work in progress.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
-msgstr "Already initialised.\n"
+msgid "Already initialized.\n"
+msgstr "Already initialized.\n"
 
 #: winerror.mc:1871
 msgid "No more local devices.\n"
@@ -6039,8 +6039,8 @@ msgid "Invalid authentication identity.\n"
 msgstr "Invalid authentication identity.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
-msgstr "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
+msgstr "Unknown authorization service.\n"
 
 #: winerror.mc:3171
 msgid "Invalid entry.\n"
@@ -6175,8 +6175,8 @@ msgid "Invalid user buffer.\n"
 msgstr "Invalid user buffer.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
-msgstr "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
+msgstr "Unrecognized media.\n"
 
 #: winerror.mc:3341
 msgid "No trust secret.\n"
@@ -6319,8 +6319,8 @@ msgid "RPC comm failure.\n"
 msgstr "RPC comm failure.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
-msgstr "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
+msgstr "Unsupported authorization level.\n"
 
 #: winerror.mc:3521
 msgid "No principal name registered.\n"
@@ -6347,8 +6347,8 @@ msgid "Invalid handle operation.\n"
 msgstr "Invalid handle operation.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
-msgstr "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
+msgstr "Wrong serializing package version.\n"
 
 #: winerror.mc:3556
 msgid "Wrong stub version.\n"
@@ -6659,12 +6659,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -6689,12 +6689,12 @@ msgstr ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -9114,8 +9114,8 @@ msgid "Filter Error"
 msgstr "Filter Error"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
-msgstr "User Cancelled"
+msgid "User Canceled"
+msgstr "User Canceled"
 
 #: wldap32.rc:116
 msgid "Parameter Error"
@@ -11209,8 +11209,8 @@ msgid "Contains commands for editing values or keys"
 msgstr "Contains commands for editing values or keys"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
-msgstr "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
+msgstr "Contains commands for customizing the registry window"
 
 #: regedit.rc:137
 msgid "Contains commands for accessing frequently used keys"

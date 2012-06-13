@@ -143,13 +143,13 @@ static HRESULT create_file(const char *filename, const unsigned char *data, cons
 #define DDS_WIDTH 0x00000004
 #define DDS_PIXELFORMAT 0x00001000
 
-#define DDSCAPS_TEXTURE 0x00001000
+#define DDS_CAPS_TEXTURE 0x00001000
 
-#define DDSPF_ALPHAPIXELS 0x00000001
-#define DDSPF_ALPHA 0x00000002
-#define DDSPF_FOURCC 0x00000004
-#define DDSPF_RGB 0x00000040
-#define DDSPF_LUMINANCE 0x00020000
+#define DDS_PF_ALPHA 0x00000001
+#define DDS_PF_ALPHA_ONLY 0x00000002
+#define DDS_PF_FOURCC 0x00000004
+#define DDS_PF_RGB 0x00000040
+#define DDS_PF_LUMINANCE 0x00020000
 
 static void check_dds_pixel_format(DWORD flags, DWORD fourcc, DWORD bpp,
                                    DWORD rmask, DWORD gmask, DWORD bmask, DWORD amask,
@@ -196,7 +196,7 @@ static void check_dds_pixel_format(DWORD flags, DWORD fourcc, DWORD bpp,
     dds.pixel_format.gmask = gmask;
     dds.pixel_format.bmask = bmask;
     dds.pixel_format.amask = amask;
-    dds.caps = DDSCAPS_TEXTURE;
+    dds.caps = DDS_CAPS_TEXTURE;
 
     hr = D3DXGetImageInfoFromFileInMemory(&dds, sizeof(dds), &info);
     ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x for pixel format %#x, expected %#x\n", hr, expected_format, D3D_OK);
@@ -327,82 +327,83 @@ static void test_D3DXGetImageInfo(void)
 
 
     /* test DDS support */
+    hr = D3DXGetImageInfoFromFileInMemory(dds_24bit, sizeof(dds_24bit), &info);
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (hr == D3D_OK) {
+        ok(info.Width == 2, "Got width %u, expected 2\n", info.Width);
+        ok(info.Height == 2, "Got height %u, expected 2\n", info.Height);
+        ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
+        ok(info.MipLevels == 2, "Got miplevels %u, expected 2\n", info.MipLevels);
+        ok(info.Format == D3DFMT_R8G8B8, "Got format %#x, expected %#x\n", info.Format, D3DFMT_R8G8B8);
+        ok(info.ResourceType == D3DRTYPE_TEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_TEXTURE);
+        ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
+    } else skip("Couldn't get image info from 24-bit DDS file in memory\n");
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit), &info);
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (hr == D3D_OK) {
+        ok(info.Width == 2, "Got width %u, expected 2\n", info.Width);
+        ok(info.Height == 2, "Got height %u, expected 2\n", info.Height);
+        ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
+        ok(info.MipLevels == 1, "Got miplevels %u, expected 1\n", info.MipLevels);
+        ok(info.Format == D3DFMT_X1R5G5B5, "Got format %#x, expected %#x\n", info.Format, D3DFMT_X1R5G5B5);
+        ok(info.ResourceType == D3DRTYPE_TEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_TEXTURE);
+        ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
+    } else skip("Couldn't get image info from 16-bit DDS file in memory\n");
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_cube_map, sizeof(dds_cube_map), &info);
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (hr == D3D_OK) {
+        ok(info.Width == 4, "Got width %u, expected 4\n", info.Width);
+        ok(info.Height == 4, "Got height %u, expected 4\n", info.Height);
+        ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
+        ok(info.MipLevels == 1, "Got miplevels %u, expected 1\n", info.MipLevels);
+        ok(info.Format == D3DFMT_DXT5, "Got format %#x, expected %#x\n", info.Format, D3DFMT_DXT5);
+        ok(info.ResourceType == D3DRTYPE_CUBETEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_CUBETEXTURE);
+        ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
+    } else skip("Couldn't get image info from cube map in memory\n");
+
+    hr = D3DXGetImageInfoFromFileInMemory(dds_volume_map, sizeof(dds_volume_map), &info);
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (hr == D3D_OK) {
+        ok(info.Width == 4, "Got width %u, expected 4\n", info.Width);
+        ok(info.Height == 4, "Got height %u, expected 4\n", info.Height);
+        ok(info.Depth == 2, "Got depth %u, expected 2\n", info.Depth);
+        ok(info.MipLevels == 3, "Got miplevels %u, expected 3\n", info.MipLevels);
+        ok(info.Format == D3DFMT_DXT3, "Got format %#x, expected %#x\n", info.Format, D3DFMT_DXT3);
+        ok(info.ResourceType == D3DRTYPE_VOLUMETEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_VOLUMETEXTURE);
+        ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
+    } else skip("Couldn't get image info from volume map in memory\n");
+
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('D','X','T','1'), 0, 0, 0, 0, 0, D3DFMT_DXT1);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('D','X','T','2'), 0, 0, 0, 0, 0, D3DFMT_DXT2);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('D','X','T','3'), 0, 0, 0, 0, 0, D3DFMT_DXT3);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('D','X','T','4'), 0, 0, 0, 0, 0, D3DFMT_DXT4);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('D','X','T','5'), 0, 0, 0, 0, 0, D3DFMT_DXT5);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('R','G','B','G'), 0, 0, 0, 0, 0, D3DFMT_R8G8_B8G8);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('G','R','G','B'), 0, 0, 0, 0, 0, D3DFMT_G8R8_G8B8);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('U','Y','V','Y'), 0, 0, 0, 0, 0, D3DFMT_UYVY);
+    check_dds_pixel_format(DDS_PF_FOURCC, MAKEFOURCC('Y','U','Y','2'), 0, 0, 0, 0, 0, D3DFMT_YUY2);
+    check_dds_pixel_format(DDS_PF_RGB, 0, 16, 0xf800, 0x07e0, 0x001f, 0, D3DFMT_R5G6B5);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 16, 0x7c00, 0x03e0, 0x001f, 0x8000, D3DFMT_A1R5G5B5);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 16, 0x0f00, 0x00f0, 0x000f, 0xf000, D3DFMT_A4R4G4B4);
+    check_dds_pixel_format(DDS_PF_RGB, 0, 8, 0xe0, 0x1c, 0x03, 0, D3DFMT_R3G3B2);
+    check_dds_pixel_format(DDS_PF_ALPHA_ONLY, 0, 8, 0, 0, 0, 0xff, D3DFMT_A8);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 16, 0x00e0, 0x001c, 0x0003, 0xff00, D3DFMT_A8R3G3B2);
+    check_dds_pixel_format(DDS_PF_RGB, 0, 16, 0xf00, 0x0f0, 0x00f, 0, D3DFMT_X4R4G4B4);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 32, 0x3ff00000, 0x000ffc00, 0x000003ff, 0xc0000000, D3DFMT_A2B10G10R10);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 32, 0x000003ff, 0x000ffc00, 0x3ff00000, 0xc0000000, D3DFMT_A2R10G10B10);
+    check_dds_pixel_format(DDS_PF_RGB | DDS_PF_ALPHA, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000, D3DFMT_A8R8G8B8);
+    check_dds_pixel_format(DDS_PF_RGB, 0, 32, 0xff0000, 0x00ff00, 0x0000ff, 0, D3DFMT_X8R8G8B8);
+    check_dds_pixel_format(DDS_PF_RGB, 0, 32, 0x0000ffff, 0xffff0000, 0, 0, D3DFMT_G16R16);
+    check_dds_pixel_format(DDS_PF_LUMINANCE, 0, 8, 0xff, 0, 0, 0, D3DFMT_L8);
+    check_dds_pixel_format(DDS_PF_LUMINANCE | DDS_PF_ALPHA, 0, 16, 0x00ff, 0, 0, 0xff00, D3DFMT_A8L8);
+    check_dds_pixel_format(DDS_PF_LUMINANCE | DDS_PF_ALPHA, 0, 8, 0x0f, 0, 0, 0xf0, D3DFMT_A4L4);
+
     todo_wine {
-        hr = D3DXGetImageInfoFromFileInMemory(dds_24bit, sizeof(dds_24bit), &info);
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-        if (hr == D3D_OK) {
-            ok(info.Width == 2, "Got width %u, expected 2\n", info.Width);
-            ok(info.Height == 2, "Got height %u, expected 2\n", info.Height);
-            ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
-            ok(info.MipLevels == 2, "Got miplevels %u, expected 2\n", info.MipLevels);
-            ok(info.Format == D3DFMT_R8G8B8, "Got format is %#x, expected %#x\n", info.Format, D3DFMT_R8G8B8);
-            ok(info.ResourceType == D3DRTYPE_TEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_TEXTURE);
-            ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
-        } else skip("Couldn't get image info from 24-bit DDS file in memory\n");
-
-        hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit), &info);
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-        if (hr == D3D_OK) {
-            ok(info.Width == 2, "Got width %u, expected 2\n", info.Width);
-            ok(info.Height == 2, "Got height %u, expected 2\n", info.Height);
-            ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
-            ok(info.MipLevels == 1, "Got miplevels %u, expected 1\n", info.MipLevels);
-            ok(info.Format == D3DFMT_X1R5G5B5, "Got format is %#x, expected %#x\n", info.Format, D3DFMT_X1R5G5B5);
-            ok(info.ResourceType == D3DRTYPE_TEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_TEXTURE);
-            ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
-        } else skip("Couldn't get image info from 16-bit DDS file in memory\n");
-
-        hr = D3DXGetImageInfoFromFileInMemory(dds_cube_map, sizeof(dds_cube_map), &info);
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-        if (hr == D3D_OK) {
-            ok(info.Width == 4, "Got width %u, expected 4\n", info.Width);
-            ok(info.Height == 4, "Got height %u, expected 4\n", info.Height);
-            ok(info.Depth == 1, "Got depth %u, expected 1\n", info.Depth);
-            ok(info.MipLevels == 1, "Got miplevels %u, expected 1\n", info.MipLevels);
-            ok(info.Format == D3DFMT_DXT5, "Got format is %#x, expected %#x\n", info.Format, D3DFMT_DXT5);
-            ok(info.ResourceType == D3DRTYPE_CUBETEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_CUBETEXTURE);
-            ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
-        } else skip("Couldn't get image info from cube map in memory\n");
-
-        hr = D3DXGetImageInfoFromFileInMemory(dds_volume_map, sizeof(dds_volume_map), &info);
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-        if (hr == D3D_OK) {
-            ok(info.Width == 4, "Got width %u, expected 4\n", info.Width);
-            ok(info.Height == 4, "Got height %u, expected 4\n", info.Height);
-            ok(info.Depth == 2, "Got depth %u, expected 2\n", info.Depth);
-            ok(info.MipLevels == 3, "Got miplevels %u, expected 3\n", info.MipLevels);
-            ok(info.Format == D3DFMT_DXT3, "Got format is %#x, expected %#x\n", info.Format, D3DFMT_DXT3);
-            ok(info.ResourceType == D3DRTYPE_VOLUMETEXTURE, "Got resource type %#x, expected %#x\n", info.ResourceType, D3DRTYPE_VOLUMETEXTURE);
-            ok(info.ImageFileFormat == D3DXIFF_DDS, "Got image file format %#x, expected %#x\n", info.ImageFileFormat, D3DXIFF_DDS);
-        } else skip("Couldn't get image info from volume map in memory\n");
-
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('D','X','T','1'), 0, 0, 0, 0, 0, D3DFMT_DXT1);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('D','X','T','2'), 0, 0, 0, 0, 0, D3DFMT_DXT2);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('D','X','T','3'), 0, 0, 0, 0, 0, D3DFMT_DXT3);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('D','X','T','4'), 0, 0, 0, 0, 0, D3DFMT_DXT4);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('D','X','T','5'), 0, 0, 0, 0, 0, D3DFMT_DXT5);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('R','G','B','G'), 0, 0, 0, 0, 0, D3DFMT_R8G8_B8G8);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('G','R','G','B'), 0, 0, 0, 0, 0, D3DFMT_G8R8_G8B8);
-        check_dds_pixel_format(DDSPF_FOURCC, MAKEFOURCC('U','Y','V','Y'), 0, 0, 0, 0, 0, D3DFMT_UYVY);
-        check_dds_pixel_format(DDSPF_RGB, 0, 16, 0xf800, 0x07e0, 0x001f, 0, D3DFMT_R5G6B5);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 16, 0x7c00, 0x03e0, 0x001f, 0x8000, D3DFMT_A1R5G5B5);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 16, 0x0f00, 0x00f0, 0x000f, 0xf000, D3DFMT_A4R4G4B4);
-        check_dds_pixel_format(DDSPF_RGB, 0, 8, 0xe0, 0x1c, 0x03, 0, D3DFMT_R3G3B2);
-        check_dds_pixel_format(DDSPF_ALPHA, 0, 8, 0, 0, 0, 0xff, D3DFMT_A8);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 16, 0x00e0, 0x001c, 0x0003, 0xff00, D3DFMT_A8R3G3B2);
-        check_dds_pixel_format(DDSPF_RGB, 0, 16, 0xf00, 0x0f0, 0x00f, 0, D3DFMT_X4R4G4B4);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 32, 0x3ff00000, 0x000ffc00, 0x000003ff, 0xc0000000, D3DFMT_A2B10G10R10);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 32, 0x000003ff, 0x000ffc00, 0x3ff00000, 0xc0000000, D3DFMT_A2R10G10B10);
-        check_dds_pixel_format(DDSPF_RGB | DDSPF_ALPHAPIXELS, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000, D3DFMT_A8R8G8B8);
-        check_dds_pixel_format(DDSPF_RGB, 0, 32, 0xff0000, 0x00ff00, 0x0000ff, 0, D3DFMT_X8R8G8B8);
-        check_dds_pixel_format(DDSPF_RGB, 0, 32, 0x0000ffff, 0xffff0000, 0, 0, D3DFMT_G16R16);
-        check_dds_pixel_format(DDSPF_LUMINANCE, 0, 8, 0xff, 0, 0, 0, D3DFMT_L8);
-        check_dds_pixel_format(DDSPF_LUMINANCE | DDSPF_ALPHAPIXELS, 0, 16, 0x00ff, 0, 0, 0xff00, D3DFMT_A8L8);
-        check_dds_pixel_format(DDSPF_LUMINANCE | DDSPF_ALPHAPIXELS, 0, 8, 0x0f, 0, 0, 0xf0, D3DFMT_A4L4);
+        hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit) - 1, &info);
+        ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
     }
-
-    hr = D3DXGetImageInfoFromFileInMemory(dds_16bit, sizeof(dds_16bit) - 1, &info);
-    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
 
 
     /* cleanup */
@@ -832,88 +833,87 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
     if(testbitmap_ok) DeleteFileA("testbitmap.bmp");
 }
 
-static void test_D3DXCreateCubeTexture(IDirect3DDevice9 *device)
+static void test_D3DXSaveSurfaceToFile(IDirect3DDevice9 *device)
 {
     HRESULT hr;
-    ULONG ref;
-    DWORD levelcount;
-    IDirect3DCubeTexture9 *cube_texture;
-    D3DSURFACE_DESC surface_desc;
+    IDirect3DSurface9 *surface;
+    RECT rect;
+    D3DLOCKED_RECT lock_rect;
+    D3DXIMAGE_INFO image_info;
+    const BYTE pixels[] = { 0xff, 0x00, 0x00, 0x00, 0xff, 0x00,
+                            0x00, 0x00, 0xff, 0x00, 0x00, 0xff };
+    DWORD pitch = sizeof(pixels) / 2;
 
-    todo_wine {
-        hr = D3DXCreateCubeTextureFromFileInMemory(NULL, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, NULL, sizeof(dds_cube_map), &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, 0, &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), NULL);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
-        if(SUCCEEDED(hr)) {
-            levelcount = IDirect3DCubeTexture9_GetLevelCount(cube_texture);
-            ok(levelcount == 3, "GetLevelCount returned %u, expected 3\n", levelcount);
-
-            hr = IDirect3DCubeTexture9_GetLevelDesc(cube_texture, 0, &surface_desc);
-            ok(hr == D3D_OK, "GetLevelDesc returned %#x, expected %#x\n", hr, D3D_OK);
-            ok(surface_desc.Width == 4, "Got width %u, expected 4\n", surface_desc.Width);
-            ok(surface_desc.Height == 4, "Got height %u, expected 4\n", surface_desc.Height);
-
-            hr = IDirect3DCubeTexture9_GetLevelDesc(cube_texture, 3, &surface_desc);
-            ok(hr == D3DERR_INVALIDCALL, "GetLevelDesc returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-            ref = IDirect3DCubeTexture9_Release(cube_texture);
-            ok(ref == 0, "Invalid reference count. Got %u, expected 0\n", ref);
-        } else skip("Couldn't create cube texture\n");
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 2, 2, D3DFMT_R8G8B8, D3DPOOL_SCRATCH, &surface, NULL);
+    if (FAILED(hr)) {
+       skip("Couldn't create surface\n");
+       return;
     }
-}
 
-static void test_D3DXCreateVolumeTexture(IDirect3DDevice9 *device)
-{
-    HRESULT hr;
-    ULONG ref;
-    DWORD levelcount;
-    IDirect3DVolumeTexture9 *volume_texture;
-    D3DVOLUME_DESC volume_desc;
+    SetRect(&rect, 0, 0, 2, 2);
+    hr = D3DXLoadSurfaceFromMemory(surface, NULL, NULL, pixels, D3DFMT_R8G8B8, pitch, NULL, &rect, D3DX_FILTER_NONE, 0);
+    if (SUCCEEDED(hr)) {
+        hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, NULL);
+        ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
 
+        hr = D3DXLoadSurfaceFromFileA(surface, NULL, NULL, "saved_surface.bmp", NULL, D3DX_FILTER_NONE, 0, &image_info);
+        ok(hr == D3D_OK, "Couldn't load saved surface %#x\n", hr);
+        if (FAILED(hr)) goto next_tests;
+
+        ok(image_info.Width == 2, "Wrong width %u\n", image_info.Width);
+        ok(image_info.Height == 2, "Wrong height %u\n", image_info.Height);
+        ok(image_info.Format == D3DFMT_R8G8B8, "Wrong format %#x\n", image_info.Format);
+        ok(image_info.ImageFileFormat == D3DXIFF_BMP, "Wrong file format %u\n", image_info.ImageFileFormat);
+
+        hr = IDirect3DSurface9_LockRect(surface, &lock_rect, NULL, D3DLOCK_READONLY);
+        ok(hr == D3D_OK, "Couldn't lock surface %#x\n", hr);
+        if (FAILED(hr)) goto next_tests;
+
+        ok(!memcmp(lock_rect.pBits, pixels, pitch), "Pixel data mismatch in first row\n");
+        ok(!memcmp((BYTE *)lock_rect.pBits + lock_rect.Pitch, pixels + pitch, pitch), "Pixel data mismatch in second row\n");
+
+        IDirect3DSurface9_UnlockRect(surface);
+    } else skip("Couldn't fill surface\n");
+
+next_tests:
+    hr = D3DXSaveSurfaceToFileA(NULL, D3DXIFF_BMP, surface, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+
+    /* PPM and TGA are supported, even though MSDN claims they aren't */
     todo_wine {
-        hr = D3DXCreateVolumeTextureFromFileInMemory(NULL, dds_volume_map, sizeof(dds_volume_map), &volume_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateVolumeTextureFromFileInMemory(device, NULL, sizeof(dds_volume_map), &volume_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateVolumeTextureFromFileInMemory(device, dds_volume_map, 0, &volume_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateVolumeTextureFromFileInMemory(device, dds_volume_map, sizeof(dds_volume_map), NULL);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateVolumeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
-
-        hr = D3DXCreateVolumeTextureFromFileInMemory(device, dds_volume_map, sizeof(dds_volume_map), &volume_texture);
-        if(SUCCEEDED(hr)) {
-            levelcount = IDirect3DVolumeTexture9_GetLevelCount(volume_texture);
-            ok(levelcount == 3, "GetLevelCount returned %u, expected 3\n", levelcount);
-
-            hr = IDirect3DVolumeTexture9_GetLevelDesc(volume_texture, 0, &volume_desc);
-            ok(hr == D3D_OK, "GetLevelDesc returend %#x, expected %#x\n", hr, D3D_OK);
-            ok(volume_desc.Width == 4, "Got width %u, expected 4\n", volume_desc.Width);
-            ok(volume_desc.Height == 4, "Got height %u, expected 4\n", volume_desc.Height);
-            ok(volume_desc.Depth == 2, "Got depth %u, expected 2\n", volume_desc.Depth);
-
-            hr = IDirect3DVolumeTexture9_GetLevelDesc(volume_texture, 1, &volume_desc);
-            ok(hr == D3D_OK, "GetLevelDesc returned %#x, expected %#x\n", hr, D3D_OK);
-            ok(volume_desc.Width == 2, "Got width %u, expected 2\n", volume_desc.Width);
-            ok(volume_desc.Height == 2, "Got height %u, expected 2\n", volume_desc.Height);
-            ok(volume_desc.Depth == 1, "Got depth %u, expected 1\n", volume_desc.Depth);
-
-            ref = IDirect3DVolumeTexture9_Release(volume_texture);
-            ok(ref == 0, "Invalid reference count. Got %u, expected 0\n", ref);
-        }
+    hr = D3DXSaveSurfaceToFileA("saved_surface.ppm", D3DXIFF_PPM, surface, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.tga", D3DXIFF_TGA, surface, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.dds", D3DXIFF_DDS, surface, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
     }
+
+    hr = D3DXSaveSurfaceToFileA("saved_surface", D3DXIFF_PFM + 1, surface, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+
+    SetRect(&rect, 0, 0, 4, 4);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    SetRect(&rect, 2, 0, 1, 4);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    SetRect(&rect, 0, 2, 4, 1);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    SetRect(&rect, -1, -1, 2, 2);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    SetRect(&rect, 0, 0, 0, 0);
+    hr = D3DXSaveSurfaceToFileA("saved_surface.bmp", D3DXIFF_BMP, surface, NULL, &rect);
+    ok(hr == D3D_OK, "D3DXSaveSurfaceToFileA returned %#x, expected %#x\n", hr, D3D_OK);
+
+    DeleteFileA("saved_surface.bmp");
+    DeleteFileA("saved_surface.ppm");
+    DeleteFileA("saved_surface.tga");
+    DeleteFileA("saved_surface.dds");
+
+    IDirect3DSurface9_Release(surface);
 }
 
 START_TEST(surface)
@@ -949,8 +949,7 @@ START_TEST(surface)
 
     test_D3DXGetImageInfo();
     test_D3DXLoadSurface(device);
-    test_D3DXCreateCubeTexture(device);
-    test_D3DXCreateVolumeTexture(device);
+    test_D3DXSaveSurfaceToFile(device);
 
     check_release((IUnknown*)device, 0);
     check_release((IUnknown*)d3d, 0);

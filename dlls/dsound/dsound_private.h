@@ -52,8 +52,10 @@ typedef struct DirectSoundDevice             DirectSoundDevice;
 typedef struct DirectSoundCaptureDevice      DirectSoundCaptureDevice;
 
 /* dsound_convert.h */
-typedef void (*bitsconvertfunc)(const void *, void *, UINT, UINT, INT, UINT, UINT);
-extern const bitsconvertfunc convertbpp[5][4] DECLSPEC_HIDDEN;
+typedef float (*bitsgetfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD);
+typedef void (*bitsputfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD, float);
+extern const bitsgetfunc getbpp[5] DECLSPEC_HIDDEN;
+extern const bitsputfunc putbpp[4] DECLSPEC_HIDDEN;
 typedef void (*mixfunc)(const void *, void *, unsigned);
 extern const mixfunc mixfunctions[4] DECLSPEC_HIDDEN;
 typedef void (*normfunc)(const void *, void *, unsigned);
@@ -176,13 +178,16 @@ struct IDirectSoundBufferImpl
     DWORD                       playflags,state,leadin;
     DWORD                       writelead,buflen;
     DWORD                       nAvgBytesPerSec;
-    DWORD                       freq, tmp_buffer_len;
+    DWORD                       freq;
     DSVOLUMEPAN                 volpan;
     DSBUFFERDESC                dsbd;
     /* used for frequency conversion (PerfectPitch) */
-    ULONG                       freqneeded, freqAdjust, freqAcc, freqAccNext;
+    ULONG                       freqneeded;
+    DWORD                       firstep;
+    float freqAcc, freqAdjust, firgain;
     /* used for mixing */
-    DWORD                       primary_mixpos, buf_mixpos, sec_mixpos;
+    DWORD                       primary_mixpos, sec_mixpos;
+
     /* IDirectSoundNotify fields */
     LPDSBPOSITIONNOTIFY         notifies;
     int                         nrofnotifies;
@@ -190,10 +195,16 @@ struct IDirectSoundBufferImpl
     DS3DBUFFER                  ds3db_ds3db;
     LONG                        ds3db_lVolume;
     BOOL                        ds3db_need_recalc;
-    /* IKsPropertySet fields */
-    bitsconvertfunc convert;
+    /* Used for bit depth conversion */
+    int                         mix_channels;
+    bitsgetfunc get, get_aux;
+    bitsputfunc put, put_aux;
+
     struct list entry;
 };
+
+float get_mono(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel) DECLSPEC_HIDDEN;
+void put_mono2stereo(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
 
 HRESULT IDirectSoundBufferImpl_Create(
     DirectSoundDevice *device,
@@ -277,6 +288,7 @@ HRESULT primarybuffer_create(DirectSoundDevice *device, IDirectSoundBufferImpl *
     const DSBUFFERDESC *dsbd) DECLSPEC_HIDDEN;
 void primarybuffer_destroy(IDirectSoundBufferImpl *This) DECLSPEC_HIDDEN;
 HRESULT primarybuffer_SetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex) DECLSPEC_HIDDEN;
+LONG capped_refcount_dec(LONG *ref) DECLSPEC_HIDDEN;
 
 /* duplex.c */
  
@@ -288,7 +300,7 @@ void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len
 void DSOUND_RecalcVolPan(PDSVOLUMEPAN volpan) DECLSPEC_HIDDEN;
 void DSOUND_AmpFactorToVolPan(PDSVOLUMEPAN volpan) DECLSPEC_HIDDEN;
 void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb) DECLSPEC_HIDDEN;
-DWORD DSOUND_secpos_to_bufpos(const IDirectSoundBufferImpl *dsb, DWORD secpos, DWORD secmixpos, DWORD* overshot) DECLSPEC_HIDDEN;
+DWORD DSOUND_secpos_to_bufpos(const IDirectSoundBufferImpl *dsb, DWORD secpos, DWORD secmixpos, float *overshot) DECLSPEC_HIDDEN;
 
 void CALLBACK DSOUND_timer(UINT timerID, UINT msg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2) DECLSPEC_HIDDEN;
 
@@ -306,8 +318,6 @@ HRESULT DSOUND_CaptureCreate8(REFIID riid, LPDIRECTSOUNDCAPTURE8 *ppDSC8) DECLSP
 #define STATE_PLAYING   2
 #define STATE_CAPTURING 2
 #define STATE_STOPPING  3
-
-#define DSOUND_FREQSHIFT (20)
 
 extern CRITICAL_SECTION DSOUND_renderers_lock DECLSPEC_HIDDEN;
 extern CRITICAL_SECTION DSOUND_capturers_lock DECLSPEC_HIDDEN;

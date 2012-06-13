@@ -568,8 +568,6 @@ static void call_continue(PROTOCOLDATA *protocol_data)
     HRESULT hres;
 
     if(state == STATE_CONNECTING) {
-        if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST)
-            CLEAR_CALLED(ReportProgress_COOKIE_SENT);
         if(tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST || tested_protocol == FTP_TEST) {
             if (http_is_first){
                 CLEAR_CALLED(ReportProgress_FINDINGRESOURCE);
@@ -596,6 +594,7 @@ static void call_continue(PROTOCOLDATA *protocol_data)
             SET_EXPECT(OnResponse);
             if(tested_protocol == HTTPS_TEST || test_redirect || test_abort || empty_file)
                 SET_EXPECT(ReportProgress_ACCEPTRANGES);
+            SET_EXPECT(ReportProgress_ENCODING);
             SET_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
             if(bindf & BINDF_NEEDFILE)
                 SET_EXPECT(ReportProgress_CACHEFILENAMEAVAILABLE);
@@ -629,6 +628,7 @@ static void call_continue(PROTOCOLDATA *protocol_data)
                     CHECK_CALLED(ReportProgress_ACCEPTRANGES);
                 else if(test_redirect || test_abort)
                     CLEAR_CALLED(ReportProgress_ACCEPTRANGES);
+                CLEAR_CALLED(ReportProgress_ENCODING);
                 CHECK_CALLED(ReportProgress_MIMETYPEAVAILABLE);
                 if(bindf & BINDF_NEEDFILE)
                     CHECK_CALLED(ReportProgress_CACHEFILENAMEAVAILABLE);
@@ -682,6 +682,63 @@ static HRESULT WINAPI ProtocolSink_Switch(IInternetProtocolSink *iface, PROTOCOL
     return S_OK;
 }
 
+static const char *status_names[] =
+{
+    "0",
+    "FINDINGRESOURCE",
+    "CONNECTING",
+    "REDIRECTING",
+    "BEGINDOWNLOADDATA",
+    "DOWNLOADINGDATA",
+    "ENDDOWNLOADDATA",
+    "BEGINDOWNLOADCOMPONENTS",
+    "INSTALLINGCOMPONENTS",
+    "ENDDOWNLOADCOMPONENTS",
+    "USINGCACHEDCOPY",
+    "SENDINGREQUEST",
+    "CLASSIDAVAILABLE",
+    "MIMETYPEAVAILABLE",
+    "CACHEFILENAMEAVAILABLE",
+    "BEGINSYNCOPERATION",
+    "ENDSYNCOPERATION",
+    "BEGINUPLOADDATA",
+    "UPLOADINGDATA",
+    "ENDUPLOADINGDATA",
+    "PROTOCOLCLASSID",
+    "ENCODING",
+    "VERIFIEDMIMETYPEAVAILABLE",
+    "CLASSINSTALLLOCATION",
+    "DECODING",
+    "LOADINGMIMEHANDLER",
+    "CONTENTDISPOSITIONATTACH",
+    "FILTERREPORTMIMETYPE",
+    "CLSIDCANINSTANTIATE",
+    "IUNKNOWNAVAILABLE",
+    "DIRECTBIND",
+    "RAWMIMETYPE",
+    "PROXYDETECTING",
+    "ACCEPTRANGES",
+    "COOKIE_SENT",
+    "COMPACT_POLICY_RECEIVED",
+    "COOKIE_SUPPRESSED",
+    "COOKIE_STATE_UNKNOWN",
+    "COOKIE_STATE_ACCEPT",
+    "COOKIE_STATE_REJECT",
+    "COOKIE_STATE_PROMPT",
+    "COOKIE_STATE_LEASH",
+    "COOKIE_STATE_DOWNGRADE",
+    "POLICY_HREF",
+    "P3P_HEADER",
+    "SESSION_COOKIE_RECEIVED",
+    "PERSISTENT_COOKIE_RECEIVED",
+    "SESSION_COOKIES_ALLOWED",
+    "CACHECONTROL",
+    "CONTENTDISPOSITIONFILENAME",
+    "MIMETEXTPLAINMISMATCH",
+    "PUBLISHERAVAILABLE",
+    "DISPLAYNAMEAVAILABLE"
+};
+
 static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, ULONG ulStatusCode,
         LPCWSTR szStatusText)
 {
@@ -689,9 +746,14 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         '0','0','0','0','-','0','0','0','0','-','0','0','0','0','0','0','0','0','0','0','0','0','}',0};
     static const WCHAR text_plain[] = {'t','e','x','t','/','p','l','a','i','n',0};
 
+    if (ulStatusCode < sizeof(status_names)/sizeof(status_names[0]))
+        trace( "progress: %s %s\n", status_names[ulStatusCode], wine_dbgstr_w(szStatusText) );
+    else
+          trace( "progress: %u %s\n", ulStatusCode, wine_dbgstr_w(szStatusText) );
+
     switch(ulStatusCode) {
     case BINDSTATUS_MIMETYPEAVAILABLE:
-        CHECK_EXPECT(ReportProgress_MIMETYPEAVAILABLE);
+        CHECK_EXPECT2(ReportProgress_MIMETYPEAVAILABLE);
         if(tested_protocol != FILE_TEST && tested_protocol != ITS_TEST && !mimefilter_test && (pi & PI_MIMEVERIFICATION)) {
             if(!short_read || !direct_read)
                 CHECK_CALLED(Read); /* set in Continue */
@@ -771,7 +833,7 @@ static HRESULT WINAPI ProtocolSink_ReportProgress(IInternetProtocolSink *iface, 
         ok(!lstrcmpW(szStatusText, null_guid), "unexpected classid %s\n", wine_dbgstr_w(szStatusText));
         break;
     case BINDSTATUS_COOKIE_SENT:
-        CHECK_EXPECT(ReportProgress_COOKIE_SENT);
+        CHECK_EXPECT2(ReportProgress_COOKIE_SENT);
         ok(szStatusText == NULL, "szStatusText != NULL\n");
         break;
     case BINDSTATUS_REDIRECTING:
@@ -2935,6 +2997,9 @@ static void test_http_protocol_url(LPCWSTR url, int prot, DWORD flags, DWORD tym
         }
         if(prot == HTTPS_TEST)
             CLEAR_CALLED(ReportProgress_SENDINGREQUEST);
+
+        if (prot == HTTP_TEST || prot == HTTPS_TEST)
+            CLEAR_CALLED(ReportProgress_COOKIE_SENT);
 
         hres = IInternetProtocol_Abort(async_protocol, E_ABORT, 0);
         ok(hres == INET_E_RESULT_DISPATCHED, "Abort failed: %08x\n", hres);

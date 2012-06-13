@@ -575,7 +575,7 @@ static void remove_vbos(const struct wined3d_gl_info *gl_info,
 }
 
 /* Routine common to the draw primitive and draw indexed primitive routines */
-void drawPrimitive(struct wined3d_device *device, UINT index_count, UINT StartIdx, UINT idxSize, const void *idxData)
+void drawPrimitive(struct wined3d_device *device, UINT index_count, UINT StartIdx, BOOL indexed, const void *idxData)
 {
     const struct wined3d_state *state = &device->stateBlock->state;
     struct wined3d_context *context;
@@ -669,6 +669,24 @@ void drawPrimitive(struct wined3d_device *device, UINT index_count, UINT StartId
         BOOL emulation = FALSE;
         const struct wined3d_stream_info *stream_info = &device->strided_streams;
         struct wined3d_stream_info stridedlcl;
+        UINT idx_size = 0;
+
+        if (indexed)
+        {
+            if (!state->user_stream)
+            {
+                struct wined3d_buffer *index_buffer = state->index_buffer;
+                if (!index_buffer->buffer_object || !stream_info->all_vbo)
+                    idxData = index_buffer->resource.allocatedMemory;
+                else
+                    idxData = NULL;
+            }
+
+            if (state->index_format == WINED3DFMT_R16_UINT)
+                idx_size = 2;
+            else
+                idx_size = 4;
+        }
 
         if (!use_vs(state))
         {
@@ -719,23 +737,23 @@ void drawPrimitive(struct wined3d_device *device, UINT index_count, UINT StartId
                     TRACE("Using immediate mode with vertex shaders for half float emulation\n");
                 }
                 drawStridedSlowVs(context->gl_info, state, stream_info,
-                        index_count, glPrimType, idxData, idxSize, StartIdx);
+                        index_count, glPrimType, idxData, idx_size, StartIdx);
             }
             else
             {
                 drawStridedSlow(device, context, stream_info, index_count,
-                        glPrimType, idxData, idxSize, StartIdx);
+                        glPrimType, idxData, idx_size, StartIdx);
             }
         }
         else if (device->instancedDraw)
         {
             /* Instancing emulation with mixing immediate mode and arrays */
             drawStridedInstanced(context->gl_info, state, stream_info,
-                    index_count, glPrimType, idxData, idxSize, StartIdx, base_vertex_index);
+                    index_count, glPrimType, idxData, idx_size, StartIdx, base_vertex_index);
         }
         else
         {
-            drawStridedFast(context->gl_info, glPrimType, index_count, idxSize, idxData, StartIdx, base_vertex_index);
+            drawStridedFast(context->gl_info, glPrimType, index_count, idx_size, idxData, StartIdx, base_vertex_index);
         }
     }
 
@@ -813,7 +831,7 @@ HRESULT tesselate_rectpatch(struct wined3d_device *This, struct wined3d_rect_pat
      * the stateblock. Beware of VBOs. */
     vs = state->vertex_shader;
     state->vertex_shader = NULL;
-    device_stream_info_from_declaration(This, &stream_info, NULL);
+    device_stream_info_from_declaration(This, &stream_info);
     state->vertex_shader = vs;
 
     e = &stream_info.elements[WINED3D_FFP_POSITION];

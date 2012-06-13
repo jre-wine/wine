@@ -493,49 +493,6 @@ static void set_initial_bitmap_bits( HBITMAP hbitmap, BITMAPOBJ *bmp )
     }
 }
 
-/***********************************************************************
- *           BITMAP_SetOwnerDC
- *
- * Set the type of DC that owns the bitmap. This is used when the
- * bitmap is selected into a device to initialize the bitmap function
- * table.
- */
-static BOOL BITMAP_SetOwnerDC( HBITMAP hbitmap, PHYSDEV physdev )
-{
-    BITMAPOBJ *bitmap;
-    BOOL ret = TRUE;
-
-    /* never set the owner of the stock bitmap since it can be selected in multiple DCs */
-    if (hbitmap == GetStockObject(DEFAULT_BITMAP)) return TRUE;
-
-    if (!(bitmap = GDI_GetObjPtr( hbitmap, OBJ_BITMAP ))) return FALSE;
-
-    if (bitmap->funcs != physdev->funcs)
-    {
-        /* we can only change from the null driver to some other driver */
-        if (bitmap->funcs == &null_driver)
-        {
-            if (physdev->funcs->pCreateBitmap)
-            {
-                ret = physdev->funcs->pCreateBitmap( physdev, hbitmap );
-                if (ret)
-                {
-                    bitmap->funcs = physdev->funcs;
-                    set_initial_bitmap_bits( hbitmap, bitmap );
-                }
-            }
-            else bitmap->funcs = &dib_driver;  /* use the DIB driver to emulate DDB support */
-        }
-        else
-        {
-            FIXME( "Trying to select bitmap %p in different DC type\n", hbitmap );
-            ret = FALSE;
-        }
-    }
-    GDI_ReleaseObj( hbitmap );
-    return ret;
-}
-
 
 /***********************************************************************
  *           BITMAP_SelectObject
@@ -545,7 +502,7 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     HGDIOBJ ret;
     BITMAPOBJ *bitmap;
     DC *dc;
-    PHYSDEV physdev = NULL, old_physdev = NULL, pathdev = NULL;
+    PHYSDEV physdev = NULL, old_physdev = NULL, createdev;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
@@ -571,13 +528,10 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         goto done;
     }
 
-    if (dc->physDev->funcs == &path_driver) pathdev = pop_dc_driver( &dc->physDev );
-
-    old_physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
-    if(old_physdev == dc->dibdrv)
-        old_physdev = pop_dc_driver( &dc->physDev );
+    if (dc->dibdrv) old_physdev = pop_dc_driver( dc, dc->dibdrv );
 
     physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
+    createdev = GET_DC_PHYSDEV( dc, pCreateBitmap );
     if (physdev->funcs == &null_driver)
     {
         physdev = dc->dibdrv;
@@ -589,12 +543,31 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         }
     }
 
-    if (!BITMAP_SetOwnerDC( handle, physdev ))
+    /* never set the owner of the stock bitmap since it can be selected in multiple DCs */
+    if (handle != GetStockObject(DEFAULT_BITMAP) && bitmap->funcs != createdev->funcs)
     {
-        GDI_ReleaseObj( handle );
-        ret = 0;
-        goto done;
+        /* we can only change from the null driver to some other driver */
+        if (bitmap->funcs != &null_driver)
+        {
+            FIXME( "Trying to select bitmap %p in different DC type\n", handle );
+            GDI_ReleaseObj( handle );
+            ret = 0;
+            goto done;
+        }
+        if (createdev->funcs != &null_driver)
+        {
+            if (!createdev->funcs->pCreateBitmap( createdev, handle ))
+            {
+                GDI_ReleaseObj( handle );
+                ret = 0;
+                goto done;
+            }
+            bitmap->funcs = createdev->funcs;
+            set_initial_bitmap_bits( handle, bitmap );
+        }
+        else bitmap->funcs = &dib_driver;  /* use the DIB driver to emulate DDB support */
     }
+
     if (!physdev->funcs->pSelectBitmap( physdev, handle ))
     {
         GDI_ReleaseObj( handle );
@@ -609,6 +582,7 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         dc->vis_rect.top    = 0;
         dc->vis_rect.right  = bitmap->dib.dsBm.bmWidth;
         dc->vis_rect.bottom = bitmap->dib.dsBm.bmHeight;
+        dc->device_rect = dc->vis_rect;
         GDI_ReleaseObj( handle );
         DC_InitDC( dc );
         GDI_dec_ref_count( ret );
@@ -617,12 +591,9 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
  done:
     if(!ret)
     {
-        if (physdev && physdev == dc->dibdrv)
-            pop_dc_driver( &dc->physDev );
-        if (old_physdev && old_physdev == dc->dibdrv)
-            push_dc_driver( &dc->physDev, old_physdev, old_physdev->funcs );
+        if (physdev && physdev == dc->dibdrv) pop_dc_driver( dc, dc->dibdrv );
+        if (old_physdev) push_dc_driver( &dc->physDev, old_physdev, old_physdev->funcs );
     }
-    if (pathdev) push_dc_driver( &dc->physDev, pathdev, pathdev->funcs );
     release_dc_ptr( dc );
     return ret;
 }

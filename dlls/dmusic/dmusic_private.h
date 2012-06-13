@@ -91,14 +91,14 @@ extern HRESULT DMUSIC_CreateDirectMusicInstrumentImpl (LPCGUID lpcGUID, LPVOID* 
  * IDirectMusic8Impl implementation structure
  */
 struct IDirectMusic8Impl {
-  /* IUnknown fields */
-  const IDirectMusic8Vtbl *lpVtbl;
-  LONG           ref;
+    /* IUnknown fields */
+    IDirectMusic8 IDirectMusic8_iface;
+    LONG ref;
 
-  /* IDirectMusicImpl fields */
-  IReferenceClockImpl* pMasterClock;
-  IDirectMusicPort** ppPorts;
-  int nrofports;
+    /* IDirectMusicImpl fields */
+    IReferenceClockImpl* pMasterClock;
+    IDirectMusicPort** ppPorts;
+    int nrofports;
 };
 
 /*****************************************************************************
@@ -214,8 +214,7 @@ struct IDirectMusicCollectionImpl {
  */
 struct IDirectMusicInstrumentImpl {
   /* IUnknown fields */
-  const IUnknownVtbl *UnknownVtbl;
-  const IDirectMusicInstrumentVtbl *InstrumentVtbl;
+  IDirectMusicInstrument IDirectMusicInstrument_iface;
   LONG           ref;
 
   /* IDirectMusicInstrumentImpl fields */
@@ -225,6 +224,11 @@ struct IDirectMusicInstrumentImpl {
   WCHAR wszName[DMUS_MAX_NAME];
   /* instrument data */
 };
+
+static inline IDirectMusicInstrumentImpl *impl_from_IDirectMusicInstrument(IDirectMusicInstrument *iface)
+{
+    return CONTAINING_RECORD(iface, IDirectMusicInstrumentImpl, IDirectMusicInstrument_iface);
+}
 
 /* custom :) */
 extern HRESULT IDirectMusicInstrumentImpl_Custom_Load (LPDIRECTMUSICINSTRUMENT iface, LPSTREAM pStm) DECLSPEC_HIDDEN;

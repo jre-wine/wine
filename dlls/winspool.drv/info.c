@@ -748,6 +748,11 @@ PRINTCAP_LoadPrinters(void) {
     return hadprinter;
 }
 
+static inline DWORD set_reg_DWORD(HKEY hkey, LPCSTR keyname, const DWORD value)
+{
+    return RegSetValueExA(hkey, keyname, 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
+}
+
 static inline DWORD set_reg_szW(HKEY hkey, const WCHAR *keyname, const WCHAR *value)
 {
     if (value)
@@ -1389,6 +1394,7 @@ static void convert_printerinfo_W_to_A(LPBYTE out, LPBYTE pPrintersW,
                     break;
                 }
 
+            case 8:
             case 9:
                 {
                     PRINTER_INFO_9W * piW = (PRINTER_INFO_9W *) pPrintersW;
@@ -2873,6 +2879,30 @@ BOOL WINAPI SetPrinterA( HANDLE printer, DWORD level, LPBYTE data, DWORD command
     return ret;
 }
 
+static void set_printer_2( HKEY key, const PRINTER_INFO_2W *pi )
+{
+    set_reg_szW( key, NameW, pi->pPrinterName );
+    set_reg_szW( key, Share_NameW, pi->pShareName );
+    set_reg_szW( key, PortW, pi->pPortName );
+    set_reg_szW( key, Printer_DriverW, pi->pDriverName );
+    set_reg_szW( key, DescriptionW, pi->pComment );
+    set_reg_szW( key, LocationW, pi->pLocation );
+
+    if (pi->pDevMode)
+        set_reg_devmode( key, Default_DevModeW, pi->pDevMode );
+
+    set_reg_szW( key, Separator_FileW, pi->pSepFile );
+    set_reg_szW( key, Print_ProcessorW, pi->pPrintProcessor );
+    set_reg_szW( key, DatatypeW, pi->pDatatype );
+    set_reg_szW( key, ParametersW, pi->pParameters );
+
+    set_reg_DWORD( key, "Attributes", pi->Attributes );
+    set_reg_DWORD( key, "Priority", pi->Priority );
+    set_reg_DWORD( key, "Default Priority", pi->DefaultPriority );
+    set_reg_DWORD( key, "StartTime", pi->StartTime );
+    set_reg_DWORD( key, "UntilTime", pi->UntilTime );
+}
+
 static BOOL set_printer_9( HKEY key, const PRINTER_INFO_9W *pi )
 {
     if (!pi->pDevMode) return FALSE;
@@ -2898,6 +2928,14 @@ BOOL WINAPI SetPrinterW( HANDLE printer, DWORD level, LPBYTE data, DWORD command
 
     switch (level)
     {
+    case 2:
+    {
+        PRINTER_INFO_2W *pi2 = (PRINTER_INFO_2W *)data;
+        set_printer_2( key, pi2 );
+        ret = TRUE;
+        break;
+    }
+
     case 9:
     {
         PRINTER_INFO_9W *pi = (PRINTER_INFO_9W *)data;
@@ -3992,6 +4030,10 @@ BOOL WINAPI GetPrinterW(HANDLE hPrinter, DWORD Level, LPBYTE pPrinter,
       }
 
 
+    case 8:
+        /* 8 is the global default printer info and 9 already gets it instead of the per-user one */
+        /* still, PRINTER_INFO_8W is the same as PRINTER_INFO_9W */
+        /* fall through */
     case 9:
       {
         PRINTER_INFO_9W *pi9 = (PRINTER_INFO_9W *)pPrinter;

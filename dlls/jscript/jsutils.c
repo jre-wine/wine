@@ -262,6 +262,9 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
         WARN("failed\n");
         return throw_type_error(ctx, ei, JS_E_TO_PRIMITIVE, NULL);
     }
+    case VT_I2:
+    case VT_INT:
+        assert(0);
     default:
         FIXME("Unimplemented for vt %d\n", V_VT(v));
         return E_NOTIMPL;
@@ -444,6 +447,9 @@ HRESULT to_number(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, double *ret)
     case VT_BOOL:
         *ret = V_BOOL(v) ? 1 : 0;
         break;
+    case VT_I2:
+    case VT_INT:
+        assert(0);
     default:
         FIXME("unimplemented for vt %d\n", V_VT(v));
         return E_NOTIMPL;
@@ -453,13 +459,13 @@ HRESULT to_number(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, double *ret)
 }
 
 /* ECMA-262 3rd Edition    9.4 */
-HRESULT to_integer(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret)
+HRESULT to_integer(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, double *ret)
 {
     double n;
     HRESULT hres;
 
     if(V_VT(v) == VT_I4) {
-        *ret = *v;
+        *ret = V_I4(v);
         return S_OK;
     }
 
@@ -467,13 +473,10 @@ HRESULT to_integer(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret)
     if(FAILED(hres))
         return hres;
 
-    if(isnan(n)) {
-        V_VT(ret) = VT_I4;
-        V_I4(ret) = 0;
-    }else {
-        num_set_val(ret, n >= 0.0 ? floor(n) : -floor(-n));
-    }
-
+    if(isnan(n))
+        *ret = 0;
+    else
+        *ret = n >= 0.0 ? floor(n) : -floor(-n);
     return S_OK;
 }
 

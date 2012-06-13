@@ -227,25 +227,13 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     case DLL_WINE_PREATTACH:
         return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
+        runtimehost_init();
         DisableThreadLibraryCalls(hinstDLL);
         break;
     case DLL_PROCESS_DETACH:
         expect_no_runtimes();
-        break;
-    }
-    return TRUE;
-}
-
-BOOL WINAPI _CorDllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
-{
-    FIXME("(%p, %d, %p): stub\n", hinstDLL, fdwReason, lpvReserved);
-
-    switch (fdwReason)
-    {
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hinstDLL);
-        break;
-    case DLL_PROCESS_DETACH:
+        if (lpvReserved) break; /* process is terminating */
+        runtimehost_uninit();
         break;
     }
     return TRUE;

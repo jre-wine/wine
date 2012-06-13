@@ -248,6 +248,13 @@ static void test_media_streams(void)
 
         if (SUCCEEDED(hr))
         {
+            DDSURFACEDESC current_format, desired_format;
+            IDirectDrawPalette *palette;
+            DWORD flags;
+
+            hr = IDirectDrawMediaStream_GetFormat(ddraw_stream, &current_format, &palette, &desired_format, &flags);
+            ok(hr == MS_E_NOSTREAM, "IDirectDrawoMediaStream_GetFormat returned: %x\n", hr);
+
             hr = IDirectDrawMediaStream_CreateSample(ddraw_stream, NULL, NULL, 0, &ddraw_sample);
             ok(hr == S_OK, "IDirectDrawMediaStream_CreateSample returned: %x\n", hr);
         }
@@ -333,8 +340,15 @@ static void test_media_streams(void)
         if (SUCCEEDED(hr))
         {
             IAudioData* audio_data = NULL;
+            WAVEFORMATEX format;
+
             hr = CoCreateInstance(&CLSID_AMAudioData, NULL, CLSCTX_INPROC_SERVER, &IID_IAudioData, (void **)&audio_data);
             ok(hr == S_OK, "CoCreateInstance returned: %x\n", hr);
+
+            hr = IAudioMediaStream_GetFormat(audio_media_stream, NULL);
+            ok(hr == E_POINTER, "IAudioMediaStream_GetFormat returned: %x\n", hr);
+            hr = IAudioMediaStream_GetFormat(audio_media_stream, &format);
+            ok(hr == MS_E_NOSTREAM, "IAudioMediaStream_GetFormat returned: %x\n", hr);
 
             hr = IAudioMediaStream_CreateSample(audio_media_stream, NULL, 0, &audio_sample);
             ok(hr == E_POINTER, "IAudioMediaStream_CreateSample returned: %x\n", hr);
@@ -347,6 +361,54 @@ static void test_media_streams(void)
                 IAudioStreamSample_Release(audio_sample);
             if (audio_media_stream)
                 IAudioMediaStream_Release(audio_media_stream);
+        }
+    }
+
+    if (media_stream_filter)
+    {
+        IEnumPins *enum_pins;
+
+        hr = IMediaStreamFilter_EnumPins(media_stream_filter, &enum_pins);
+        ok(hr == S_OK, "IBaseFilter_EnumPins returned: %x\n", hr);
+        if (hr == S_OK)
+        {
+            IPin* pins[3] = { NULL, NULL, NULL };
+            ULONG nb_pins;
+            ULONG expected_nb_pins = audio_stream ? 2 : 1;
+            int i;
+
+            hr = IEnumPins_Next(enum_pins, 3, pins, &nb_pins);
+            ok(SUCCEEDED(hr), "IEnumPins_Next returned: %x\n", hr);
+            ok(nb_pins == expected_nb_pins, "Number of pins is %u instead of %u\n", nb_pins, expected_nb_pins);
+            for (i = 0; i < min(nb_pins, expected_nb_pins); i++)
+            {
+                IEnumMediaTypes* enum_media_types;
+                AM_MEDIA_TYPE* media_types[10];
+                ULONG nb_media_types;
+                IPin* pin;
+                PIN_INFO info;
+                WCHAR id[40];
+
+                /* Pin name is "I{guid MSPID_PrimaryVideo or MSPID_PrimaryAudio}" */
+                id[0] = 'I';
+                StringFromGUID2(i ? &MSPID_PrimaryAudio : &MSPID_PrimaryVideo, id + 1, 40);
+
+                hr = IPin_ConnectedTo(pins[i], &pin);
+                ok(hr == VFW_E_NOT_CONNECTED, "IPin_ConnectedTo returned: %x\n", hr);
+                hr = IPin_QueryPinInfo(pins[i], &info);
+                ok(hr == S_OK, "IPin_QueryPinInfo returned: %x\n", hr);
+                IBaseFilter_Release(info.pFilter);
+                ok(info.dir == PINDIR_INPUT, "Pin direction is %u instead of %u\n", info.dir, PINDIR_INPUT);
+                ok(!lstrcmpW(info.achName, id), "Pin name is %s instead of %s\n", wine_dbgstr_w(info.achName), wine_dbgstr_w(id));
+                hr = IPin_EnumMediaTypes(pins[i], &enum_media_types);
+                ok(hr == S_OK, "IPin_EnumMediaTypes returned: %x\n", hr);
+                hr = IEnumMediaTypes_Next(enum_media_types, sizeof(media_types) / sizeof(AM_MEDIA_TYPE), media_types, &nb_media_types);
+                ok(SUCCEEDED(hr), "IEnumMediaTypes_Next returned: %x\n", hr);
+                ok(nb_media_types == 0, "nb_media_types should be 0 instead of %u\n", nb_media_types);
+                IEnumMediaTypes_Release(enum_media_types);
+                IPin_Release(pins[i]);
+            }
+            IEnumPins_Release(enum_pins);
         }
     }
 

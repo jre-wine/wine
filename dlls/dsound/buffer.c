@@ -252,7 +252,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(IDirectSoundBuffer8 *i
 	oldFreq = This->freq;
 	This->freq = freq;
 	if (freq != oldFreq) {
-		This->freqAdjust = ((DWORD64)This->freq << DSOUND_FREQSHIFT) / This->device->pwfx->nSamplesPerSec;
+		This->freqAdjust = This->freq / (float)This->device->pwfx->nSamplesPerSec;
 		This->nAvgBytesPerSec = freq * This->pwfx->nBlockAlign;
 		DSOUND_RecalcFormat(This);
 	}
@@ -327,16 +327,22 @@ static ULONG WINAPI IDirectSoundBufferImpl_AddRef(IDirectSoundBuffer8 *iface)
 static ULONG WINAPI IDirectSoundBufferImpl_Release(IDirectSoundBuffer8 *iface)
 {
     IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG ref;
 
-    TRACE("(%p) ref was %d\n", This, ref + 1);
-
-    if (!ref && !InterlockedDecrement(&This->numIfaces)) {
-        if (is_primary_buffer(This))
-            primarybuffer_destroy(This);
-        else
-            secondarybuffer_destroy(This);
+    if (is_primary_buffer(This)){
+        ref = capped_refcount_dec(&This->ref);
+        if(!ref)
+            capped_refcount_dec(&This->numIfaces);
+        TRACE("(%p) ref is now: %d\n", This, ref);
+        return ref;
     }
+
+    ref = InterlockedDecrement(&This->ref);
+    if (!ref && !InterlockedDecrement(&This->numIfaces))
+            secondarybuffer_destroy(This);
+
+    TRACE("(%p) ref is now %d\n", This, ref);
+
     return ref;
 }
 
@@ -516,14 +522,11 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetCurrentPosition(IDirectSoundBuff
 {
         IDirectSoundBufferImpl *This = impl_from_IDirectSoundBuffer8(iface);
 	HRESULT hres = DS_OK;
-	DWORD oldpos;
 
 	TRACE("(%p,%d)\n",This,newpos);
 
 	/* **** */
 	RtlAcquireResourceExclusive(&This->lock, TRUE);
-
-	oldpos = This->sec_mixpos;
 
 	/* start mixing from this new location instead */
 	newpos %= This->buflen;
@@ -532,10 +535,6 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetCurrentPosition(IDirectSoundBuff
 
 	/* at this point, do not attempt to reset buffers, mess with primary mix position,
            or anything like that to reduce latency. The data already prebuffered cannot be changed */
-
-	/* position HW buffer if applicable, else just start mixing from new location instead */
-	if (oldpos != newpos)
-		This->buf_mixpos = DSOUND_secpos_to_bufpos(This, newpos, 0, NULL);
 
 	RtlReleaseResource(&This->lock);
 	/* **** */
@@ -909,10 +908,10 @@ HRESULT IDirectSoundBufferImpl_Create(
 
 	/* It's not necessary to initialize values to zero since */
 	/* we allocated this structure with HEAP_ZERO_MEMORY... */
-	dsb->buf_mixpos = dsb->sec_mixpos = 0;
+	dsb->sec_mixpos = 0;
 	dsb->state = STATE_STOPPED;
 
-	dsb->freqAdjust = ((DWORD64)dsb->freq << DSOUND_FREQSHIFT) / device->pwfx->nSamplesPerSec;
+	dsb->freqAdjust = dsb->freq / (float)device->pwfx->nSamplesPerSec;
 	dsb->nAvgBytesPerSec = dsb->freq *
 		dsbd->lpwfxFormat->nBlockAlign;
 
@@ -1024,7 +1023,7 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     dsb->refiks = 0;
     dsb->numIfaces = 0;
     dsb->state = STATE_STOPPED;
-    dsb->buf_mixpos = dsb->sec_mixpos = 0;
+    dsb->sec_mixpos = 0;
     dsb->notifies = NULL;
     dsb->nrofnotifies = 0;
     dsb->device = device;
@@ -1084,16 +1083,22 @@ static ULONG WINAPI IKsPropertySetImpl_AddRef(IKsPropertySet *iface)
 static ULONG WINAPI IKsPropertySetImpl_Release(IKsPropertySet *iface)
 {
     IDirectSoundBufferImpl *This = impl_from_IKsPropertySet(iface);
-    ULONG ref = InterlockedDecrement(&This->refiks);
+    ULONG ref;
 
-    TRACE("(%p) ref was %d\n", This, ref + 1);
-
-    if (!ref && !InterlockedDecrement(&This->numIfaces)) {
-        if (is_primary_buffer(This))
-            primarybuffer_destroy(This);
-        else
-            secondarybuffer_destroy(This);
+    if (is_primary_buffer(This)){
+        ref = capped_refcount_dec(&This->refiks);
+        if(!ref)
+            capped_refcount_dec(&This->numIfaces);
+        TRACE("(%p) ref is now: %d\n", This, ref);
+        return ref;
     }
+
+    ref = InterlockedDecrement(&This->refiks);
+    if (!ref && !InterlockedDecrement(&This->numIfaces))
+        secondarybuffer_destroy(This);
+
+    TRACE("(%p) ref is now %d\n", This, ref);
+
     return ref;
 }
 

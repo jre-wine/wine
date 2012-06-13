@@ -2061,7 +2061,11 @@ static void test_domdoc( void )
     LONG code, ref;
     LONG nLength = 0;
     WCHAR buff[100];
+    char path[MAX_PATH];
     int index;
+
+    GetTempPathA(MAX_PATH, path);
+    strcat(path, "leading_spaces.xml");
 
     /* Load document with leading spaces
      *
@@ -2087,13 +2091,24 @@ static void test_domdoc( void )
         i = 0;
         while (*data_ptr) {
             BSTR data = _bstr_(*data_ptr);
+            DWORD written;
+            HANDLE file;
+
+            file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
+            ok(file != INVALID_HANDLE_VALUE, "can't create file %s: %u\n", path, GetLastError());
+
+            WriteFile(file, data, lstrlenW(data)*sizeof(WCHAR), &written, NULL);
+            CloseHandle(file);
 
             b = 0xc;
             V_VT(&var) = VT_BSTR;
-            V_BSTR(&var) = data;
+            V_BSTR(&var) = _bstr_(path);
             hr = IXMLDOMDocument_load(doc, var, &b);
+        todo_wine {
             EXPECT_HR(hr, class_ptr->ret[0].hr);
             ok(b == class_ptr->ret[0].b, "%d:%d, got %d, expected %d\n", index, i, b, class_ptr->ret[0].b);
+        }
+            DeleteFileA(path);
 
             b = 0xc;
             hr = IXMLDOMDocument_loadXML(doc, data, &b);
@@ -2103,8 +2118,10 @@ static void test_domdoc( void )
             data_ptr++;
             i++;
         }
+
         class_ptr++;
         index++;
+        free_bstrs();
     }
 
     doc = create_document(&IID_IXMLDOMDocument);
@@ -11675,6 +11692,123 @@ todo_wine
     free_bstrs();
 }
 
+static DOMNodeType put_data_types[] = {
+    NODE_TEXT,
+    NODE_CDATA_SECTION,
+    NODE_PROCESSING_INSTRUCTION,
+    NODE_COMMENT,
+    NODE_INVALID
+};
+
+static void test_put_data(void)
+{
+    static const WCHAR test_data[] = {'t','e','s','t',' ','n','o','d','e',' ','d','a','t','a',0};
+    WCHAR buff[100], *data;
+    IXMLDOMDocument *doc;
+    DOMNodeType *type;
+    BSTR get_data;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    memcpy(&buff[2], test_data, sizeof(test_data));
+    /* just a big length */
+    *(DWORD*)buff = 0xf0f0;
+    data = &buff[2];
+
+    type = put_data_types;
+    while (*type != NODE_INVALID)
+    {
+       IXMLDOMNode *node;
+       VARIANT v;
+
+       V_VT(&v) = VT_I2;
+       V_I2(&v) = *type;
+
+       hr = IXMLDOMDocument_createNode(doc, v, _bstr_("name"), NULL, &node);
+       EXPECT_HR(hr, S_OK);
+
+       /* put_data() is interface-specific */
+       switch (*type)
+       {
+           case NODE_TEXT:
+           {
+              IXMLDOMText *text;
+
+              hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMText, (void**)&text);
+              EXPECT_HR(hr, S_OK);
+              hr = IXMLDOMText_put_data(text, data);
+              EXPECT_HR(hr, S_OK);
+
+              hr = IXMLDOMText_get_data(text, &get_data);
+              EXPECT_HR(hr, S_OK);
+
+              IXMLDOMText_Release(text);
+              break;
+           }
+           case NODE_CDATA_SECTION:
+           {
+              IXMLDOMCDATASection *cdata;
+
+              hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMCDATASection, (void**)&cdata);
+              EXPECT_HR(hr, S_OK);
+              hr = IXMLDOMCDATASection_put_data(cdata, data);
+              EXPECT_HR(hr, S_OK);
+
+              hr = IXMLDOMCDATASection_get_data(cdata, &get_data);
+              EXPECT_HR(hr, S_OK);
+
+              IXMLDOMCDATASection_Release(cdata);
+              break;
+           }
+           case NODE_PROCESSING_INSTRUCTION:
+           {
+              IXMLDOMProcessingInstruction *pi;
+
+              hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMProcessingInstruction, (void**)&pi);
+              EXPECT_HR(hr, S_OK);
+              hr = IXMLDOMProcessingInstruction_put_data(pi, data);
+              EXPECT_HR(hr, S_OK);
+
+              hr = IXMLDOMProcessingInstruction_get_data(pi, &get_data);
+              EXPECT_HR(hr, S_OK);
+
+              IXMLDOMProcessingInstruction_Release(pi);
+              break;
+           }
+           case NODE_COMMENT:
+           {
+              IXMLDOMComment *comment;
+
+              hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMComment, (void**)&comment);
+              EXPECT_HR(hr, S_OK);
+              hr = IXMLDOMComment_put_data(comment, data);
+              EXPECT_HR(hr, S_OK);
+
+              hr = IXMLDOMComment_get_data(comment, &get_data);
+              EXPECT_HR(hr, S_OK);
+
+              IXMLDOMComment_Release(comment);
+              break;
+           }
+           default:
+              break;
+       }
+
+       /* compare */
+       ok(!lstrcmpW(data, get_data), "%d: got wrong data %s, expected %s\n", *type, wine_dbgstr_w(get_data),
+           wine_dbgstr_w(data));
+       SysFreeString(get_data);
+
+       IXMLDOMNode_Release(node);
+       type++;
+    }
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
 START_TEST(domdoc)
 {
     IXMLDOMDocument *doc;
@@ -11752,6 +11886,7 @@ START_TEST(domdoc)
     test_supporterrorinfo();
     test_nodeValue();
     test_get_namespaces();
+    test_put_data();
 
     test_xsltemplate();
 

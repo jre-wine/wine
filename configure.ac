@@ -168,6 +168,14 @@ case $host in
       AC_SUBST(TARGETFLAGS,"-m64")
     fi
     ;;
+  arm*)
+    AC_MSG_CHECKING([whether $CC supports Thumb2])
+    WINE_TRY_ASM_LINK([".syntax unified\n.thumb\nb.w ac_test\n.arm"],[int ac_test(int i) { return i; }], [if (ac_test(1)) return 1],
+                      [AC_MSG_RESULT([yes])],
+                      [AC_MSG_RESULT([no])
+                       AC_MSG_ERROR([You need a target with Thumb2 support to build Wine for ARM.])])
+    CFLAGS="$CFLAGS -marm"
+    ;;
   *-mingw32*|*-cygwin*)
     enable_win16=${enable_win16:-no}
     CFLAGS="$CFLAGS -D_WIN32"
@@ -2689,6 +2697,8 @@ WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask)
 WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
+WINE_CONFIG_DLL(msvcm80)
+WINE_CONFIG_DLL(msvcm90)
 WINE_CONFIG_DLL(msvcp100)
 WINE_CONFIG_DLL(msvcp60)
 WINE_CONFIG_DLL(msvcp70)
@@ -2936,12 +2946,14 @@ WINE_CONFIG_DLL(wldap32,,[implib,po])
 WINE_CONFIG_TEST(dlls/wldap32/tests)
 WINE_CONFIG_DLL(wmi)
 WINE_CONFIG_DLL(wmiutils)
+WINE_CONFIG_DLL(wmvcore)
 WINE_CONFIG_DLL(wnaspi32,,[implib])
 WINE_CONFIG_DLL(wow32,enable_win16,[implib])
 WINE_CONFIG_DLL(ws2_32,,[implib])
 WINE_CONFIG_TEST(dlls/ws2_32/tests)
 WINE_CONFIG_DLL(wshom.ocx)
 WINE_CONFIG_TEST(dlls/wshom.ocx/tests)
+WINE_CONFIG_DLL(wsnmp32)
 WINE_CONFIG_DLL(wsock32,,[implib])
 WINE_CONFIG_DLL(wtsapi32,,[implib])
 WINE_CONFIG_DLL(wuapi)

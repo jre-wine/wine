@@ -100,9 +100,6 @@
 
 void fixup_caps(WINED3DCAPS *pWineCaps) DECLSPEC_HIDDEN;
 
-/* Direct3D8 Interfaces: */
-typedef struct IDirect3DBaseTexture8Impl IDirect3DBaseTexture8Impl;
-typedef struct IDirect3D8Impl IDirect3D8Impl;
 typedef struct IDirect3DDevice8Impl IDirect3DDevice8Impl;
 typedef struct IDirect3DIndexBuffer8Impl IDirect3DIndexBuffer8Impl;
 typedef struct IDirect3DSurface8Impl IDirect3DSurface8Impl;
@@ -110,28 +107,14 @@ typedef struct IDirect3DSwapChain8Impl IDirect3DSwapChain8Impl;
 typedef struct IDirect3DVolume8Impl IDirect3DVolume8Impl;
 typedef struct IDirect3DVertexBuffer8Impl IDirect3DVertexBuffer8Impl;
 
-/* ===========================================================================
-    The interfaces themselves
-   =========================================================================== */
-
-/* ---------- */
-/* IDirect3D8 */
-/* ---------- */
-
-/*****************************************************************************
- * Predeclare the interface implementation structures
- */
-extern const IDirect3D8Vtbl Direct3D8_Vtbl DECLSPEC_HIDDEN;
-
-/*****************************************************************************
- * IDirect3D implementation structure
- */
-struct IDirect3D8Impl
+struct d3d8
 {
     IDirect3D8 IDirect3D8_iface;
-    LONG       ref;
-    struct wined3d *WineD3D;
+    LONG refcount;
+    struct wined3d *wined3d;
 };
+
+BOOL d3d8_init(struct d3d8 *d3d8) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * IDirect3DDevice8 implementation structure
@@ -187,7 +170,7 @@ struct IDirect3DDevice8Impl
     BOOL lost;
 };
 
-HRESULT device_init(IDirect3DDevice8Impl *device, IDirect3D8Impl *parent, struct wined3d *wined3d, UINT adapter,
+HRESULT device_init(IDirect3DDevice8Impl *device, struct d3d8 *parent, struct wined3d *wined3d, UINT adapter,
         D3DDEVTYPE device_type, HWND focus_window, DWORD flags, D3DPRESENT_PARAMETERS *parameters) DECLSPEC_HIDDEN;
 
 /* ---------------- */

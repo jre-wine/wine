@@ -8564,10 +8564,12 @@ static DWORD LISTVIEW_SetIconSpacing(LISTVIEW_INFO *infoPtr, INT cx, INT cy)
     if (cy == -1) cy = GetSystemMetrics(SM_CYICONSPACING);
 
     /* if 0 then compute width
-     * FIXME: Should scan each item and determine max width of
-     *        icon or label, then make that the width */
-    if (cx == 0)
-	cx = infoPtr->iconSpacing.cx;
+     * FIXME: computed cx and cy is not matching native behaviour */
+    if (cx == 0) {
+        cx = GetSystemMetrics(SM_CXICONSPACING);
+        if (infoPtr->iconSize.cx + ICON_LR_PADDING > cx)
+            cx = infoPtr->iconSize.cx + ICON_LR_PADDING;
+    }
 
     /* if 0 then compute height */
     if (cy == 0) 
@@ -8896,6 +8898,7 @@ static BOOL LISTVIEW_SetItemTextT(LISTVIEW_INFO *infoPtr, INT nItem, const LVITE
     LVITEMW lvItem;
 
     if (!lpLVItem || nItem < 0 || nItem >= infoPtr->nItemCount) return FALSE;
+    if (infoPtr->dwStyle & LVS_OWNERDATA) return FALSE;
 
     lvItem.iItem = nItem;
     lvItem.iSubItem = lpLVItem->iSubItem;

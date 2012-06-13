@@ -326,6 +326,7 @@ static HRESULT WINAPI d3d9_texture_2d_GetSurfaceLevel(IDirect3DTexture9 *iface,
 {
     struct d3d9_texture *texture = impl_from_IDirect3DTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
 
     TRACE("iface %p, level %u, surface %p.\n", iface, level, surface);
 
@@ -336,7 +337,8 @@ static HRESULT WINAPI d3d9_texture_2d_GetSurfaceLevel(IDirect3DTexture9 *iface,
         return D3DERR_INVALIDCALL;
     }
 
-    *surface = wined3d_resource_get_parent(sub_resource);
+    surface_impl = wined3d_resource_get_parent(sub_resource);
+    *surface = &surface_impl->IDirect3DSurface9_iface;
     IDirect3DSurface9_AddRef(*surface);
     wined3d_mutex_unlock();
 
@@ -348,6 +350,7 @@ static HRESULT WINAPI d3d9_texture_2d_LockRect(IDirect3DTexture9 *iface,
 {
     struct d3d9_texture *texture = impl_from_IDirect3DTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u, locked_rect %p, rect %p, flags %#x.\n",
@@ -357,8 +360,10 @@ static HRESULT WINAPI d3d9_texture_2d_LockRect(IDirect3DTexture9 *iface,
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DSurface9_LockRect((IDirect3DSurface9 *)wined3d_resource_get_parent(sub_resource),
-                locked_rect, rect, flags);
+    {
+        surface_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DSurface9_LockRect(&surface_impl->IDirect3DSurface9_iface, locked_rect, rect, flags);
+    }
     wined3d_mutex_unlock();
 
     return hr;
@@ -368,6 +373,7 @@ static HRESULT WINAPI d3d9_texture_2d_UnlockRect(IDirect3DTexture9 *iface, UINT 
 {
     struct d3d9_texture *texture = impl_from_IDirect3DTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u.\n", iface, level);
@@ -376,7 +382,10 @@ static HRESULT WINAPI d3d9_texture_2d_UnlockRect(IDirect3DTexture9 *iface, UINT 
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DSurface9_UnlockRect((IDirect3DSurface9 *)wined3d_resource_get_parent(sub_resource));
+    {
+        surface_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DSurface9_UnlockRect(&surface_impl->IDirect3DSurface9_iface);
+    }
     wined3d_mutex_unlock();
 
     return hr;
@@ -731,6 +740,7 @@ static HRESULT WINAPI d3d9_texture_cube_GetCubeMapSurface(IDirect3DCubeTexture9 
 {
     struct d3d9_texture *texture = impl_from_IDirect3DCubeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
     UINT sub_resource_idx;
 
     TRACE("iface %p, face %#x, level %u, surface %p.\n", iface, face, level, surface);
@@ -743,7 +753,8 @@ static HRESULT WINAPI d3d9_texture_cube_GetCubeMapSurface(IDirect3DCubeTexture9 
         return D3DERR_INVALIDCALL;
     }
 
-    *surface = wined3d_resource_get_parent(sub_resource);
+    surface_impl = wined3d_resource_get_parent(sub_resource);
+    *surface = &surface_impl->IDirect3DSurface9_iface;
     IDirect3DSurface9_AddRef(*surface);
     wined3d_mutex_unlock();
 
@@ -756,6 +767,7 @@ static HRESULT WINAPI d3d9_texture_cube_LockRect(IDirect3DCubeTexture9 *iface,
 {
     struct d3d9_texture *texture = impl_from_IDirect3DCubeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
     UINT sub_resource_idx;
     HRESULT hr;
 
@@ -767,8 +779,10 @@ static HRESULT WINAPI d3d9_texture_cube_LockRect(IDirect3DCubeTexture9 *iface,
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DSurface9_LockRect((IDirect3DSurface9 *)wined3d_resource_get_parent(sub_resource),
-                locked_rect, rect, flags);
+    {
+        surface_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DSurface9_LockRect(&surface_impl->IDirect3DSurface9_iface, locked_rect, rect, flags);
+    }
     wined3d_mutex_unlock();
 
     return hr;
@@ -779,6 +793,7 @@ static HRESULT WINAPI d3d9_texture_cube_UnlockRect(IDirect3DCubeTexture9 *iface,
 {
     struct d3d9_texture *texture = impl_from_IDirect3DCubeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DSurface9Impl *surface_impl;
     UINT sub_resource_idx;
     HRESULT hr;
 
@@ -789,7 +804,10 @@ static HRESULT WINAPI d3d9_texture_cube_UnlockRect(IDirect3DCubeTexture9 *iface,
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DSurface9_UnlockRect((IDirect3DSurface9 *)wined3d_resource_get_parent(sub_resource));
+    {
+        surface_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DSurface9_UnlockRect(&surface_impl->IDirect3DSurface9_iface);
+    }
     wined3d_mutex_unlock();
 
     return hr;
@@ -1142,6 +1160,7 @@ static HRESULT WINAPI d3d9_texture_3d_GetVolumeLevel(IDirect3DVolumeTexture9 *if
 {
     struct d3d9_texture *texture = impl_from_IDirect3DVolumeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DVolume9Impl *volume_impl;
 
     TRACE("iface %p, level %u, volume %p.\n", iface, level, volume);
 
@@ -1152,7 +1171,8 @@ static HRESULT WINAPI d3d9_texture_3d_GetVolumeLevel(IDirect3DVolumeTexture9 *if
         return D3DERR_INVALIDCALL;
     }
 
-    *volume = wined3d_resource_get_parent(sub_resource);
+    volume_impl = wined3d_resource_get_parent(sub_resource);
+    *volume = &volume_impl->IDirect3DVolume9_iface;
     IDirect3DVolume9_AddRef(*volume);
     wined3d_mutex_unlock();
 
@@ -1164,6 +1184,7 @@ static HRESULT WINAPI d3d9_texture_3d_LockBox(IDirect3DVolumeTexture9 *iface,
 {
     struct d3d9_texture *texture = impl_from_IDirect3DVolumeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DVolume9Impl *volume_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u, locked_box %p, box %p, flags %#x.\n",
@@ -1173,8 +1194,10 @@ static HRESULT WINAPI d3d9_texture_3d_LockBox(IDirect3DVolumeTexture9 *iface,
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DVolume9_LockBox((IDirect3DVolume9 *)wined3d_resource_get_parent(sub_resource),
-                locked_box, box, flags);
+    {
+        volume_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DVolume9_LockBox(&volume_impl->IDirect3DVolume9_iface, locked_box, box, flags);
+    }
     wined3d_mutex_unlock();
 
     return hr;
@@ -1184,6 +1207,7 @@ static HRESULT WINAPI d3d9_texture_3d_UnlockBox(IDirect3DVolumeTexture9 *iface, 
 {
     struct d3d9_texture *texture = impl_from_IDirect3DVolumeTexture9(iface);
     struct wined3d_resource *sub_resource;
+    IDirect3DVolume9Impl *volume_impl;
     HRESULT hr;
 
     TRACE("iface %p, level %u.\n", iface, level);
@@ -1192,7 +1216,10 @@ static HRESULT WINAPI d3d9_texture_3d_UnlockBox(IDirect3DVolumeTexture9 *iface, 
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
-        hr = IDirect3DVolume9_UnlockBox((IDirect3DVolume9 *)wined3d_resource_get_parent(sub_resource));
+    {
+        volume_impl = wined3d_resource_get_parent(sub_resource);
+        hr = IDirect3DVolume9_UnlockBox(&volume_impl->IDirect3DVolume9_iface);
+    }
     wined3d_mutex_unlock();
 
     return hr;

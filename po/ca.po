@@ -1082,7 +1082,7 @@ msgid "Processing; "
 msgstr "Realitzant; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inicialitzant; "
 
 #: comdlg32.rc:96
@@ -3759,7 +3759,7 @@ msgid "Too many commands.\n"
 msgstr "Massa ordres.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Error de maquinari d'adaptador.\n"
 
 #: winerror.mc:256
@@ -3771,7 +3771,7 @@ msgid "Unexpected network error.\n"
 msgstr "Error de xarxa inesperat.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Adaptador remot dolent.\n"
 
 #: winerror.mc:271
@@ -4383,7 +4383,7 @@ msgid "Invalid flags.\n"
 msgstr "Banderes invàlides.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Volum no reconegut.\n"
 
 #: winerror.mc:1046
@@ -5039,7 +5039,7 @@ msgid "Continue work in progress.\n"
 msgstr "Continua treball en curs.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Ja inicialitzat.\n"
 
 #: winerror.mc:1871
@@ -6071,7 +6071,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Identitat d'autenticació invàlid.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Servei d'autorització desconegut.\n"
 
 #: winerror.mc:3171
@@ -6207,7 +6207,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Memòria intermèdia d'usuari invàlida.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Mitjà no reconegut.\n"
 
 #: winerror.mc:3341
@@ -6353,7 +6353,7 @@ msgid "RPC comm failure.\n"
 msgstr "Fallada de comunicació RPC.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nivell d'autorització incompatible.\n"
 
 #: winerror.mc:3521
@@ -6381,7 +6381,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Operació de mànec invàlida.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Versió de paquet serialitzador incorrecta.\n"
 
 #: winerror.mc:3556
@@ -6675,6 +6675,37 @@ msgid "insert disk %s"
 msgstr "insereix disc %s"
 
 #: msi.rc:30
+#, fuzzy
+#| msgid ""
+#| "Windows Installer %s\n"
+#| "\n"
+#| "Usage:\n"
+#| "msiexec command {required parameter} [optional parameter]\n"
+#| "\n"
+#| "Install a product:\n"
+#| "\t/i {package|product_code} [property]\n"
+#| "\t/package {package|product_code} [property]\n"
+#| "\t/a package [property]\n"
+#| "Repair an installation:\n"
+#| "\t/f[p|o|e|d|c|a|u|m|s|v] {package|product_code}\n"
+#| "Uninstall a product:\n"
+#| "\t/uninstall {package|product_code} [property]\n"
+#| "\t/x {package|product_code} [property]\n"
+#| "Advertise a product:\n"
+#| "\t/j[u|m] package [/t transform] [/g languageid]\n"
+#| "Apply a patch:\n"
+#| "\t/p patch_package [property]\n"
+#| "\t/p patch_package /a package [property]\n"
+#| "Log and UI Modifiers for above commands:\n"
+#| "\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+#| "\t/q{|n|b|r|f|n+|b+|b-}\n"
+#| "Register MSI Service:\n"
+#| "\t/y\n"
+#| "Unregister MSI Service:\n"
+#| "\t/z\n"
+#| "Display this help:\n"
+#| "\t/help\n"
+#| "\t/?\n"
 msgid ""
 "Windows Installer %s\n"
 "\n"
@@ -6695,12 +6726,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -9178,7 +9209,7 @@ msgid "Filter Error"
 msgstr "Error de Filtre"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Cancel·lat per Usuari"
 
 #: wldap32.rc:116
@@ -11298,7 +11329,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Conté ordres per editar els valors o els claus"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Conté ordres per personalitzar la finestra de registre"
 
 #: regedit.rc:137

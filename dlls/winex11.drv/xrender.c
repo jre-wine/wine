@@ -2780,7 +2780,18 @@ static const struct gdi_dc_funcs xrender_funcs =
     NULL,                               /* pSwapBuffers */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
-    /* OpenGL not supported */
+    NULL,                               /* pwglCopyContext */
+    NULL,                               /* pwglCreateContext */
+    NULL,                               /* pwglCreateContextAttribsARB */
+    NULL,                               /* pwglDeleteContext */
+    NULL,                               /* pwglGetProcAddress */
+    NULL,                               /* pwglMakeContextCurrentARB */
+    NULL,                               /* pwglMakeCurrent */
+    NULL,                               /* pwglSetPixelFormatWINE */
+    NULL,                               /* pwglShareLists */
+    NULL,                               /* pwglUseFontBitmapsA */
+    NULL,                               /* pwglUseFontBitmapsW */
+    GDI_PRIORITY_GRAPHICS_DRV + 10      /* priority */
 };
 
 #else /* SONAME_LIBXRENDER */

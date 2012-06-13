@@ -302,20 +302,14 @@ static HRESULT String_charAt(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
         return hres;
 
     if(arg_cnt(dp)) {
-        VARIANT num;
+        double d;
 
-        hres = to_integer(ctx, get_arg(dp, 0), ei, &num);
+        hres = to_integer(ctx, get_arg(dp, 0), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
-
-        if(V_VT(&num) == VT_I4) {
-            pos = V_I4(&num);
-        }else {
-            WARN("pos = %lf\n", V_R8(&num));
-            pos = -1;
-        }
+        pos = is_int32(d) ? d : -1;
     }
 
     if(!retv) {
@@ -353,21 +347,22 @@ static HRESULT String_charCodeAt(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
         return hres;
 
     if(arg_cnt(dp) > 0) {
-        VARIANT v;
+        double d;
 
-        hres = to_integer(ctx, get_arg(dp, 0), ei, &v);
+        hres = to_integer(ctx, get_arg(dp, 0), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) != VT_I4 || V_I4(&v) < 0 || V_I4(&v) >= length) {
-            if(retv) num_set_nan(&v);
+        if(!is_int32(d) || d < 0 || d >= length) {
             SysFreeString(val_str);
+            if(retv)
+                num_set_nan(retv);
             return S_OK;
         }
 
-        idx = V_I4(&v);
+        idx = d;
     }
 
     if(retv) {
@@ -493,17 +488,11 @@ static HRESULT String_indexOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
     }
 
     if(arg_cnt(dp) >= 2) {
-        VARIANT ival;
+        double d;
 
-        hres = to_integer(ctx, get_arg(dp,1), ei, &ival);
-        if(SUCCEEDED(hres)) {
-            if(V_VT(&ival) == VT_I4)
-                pos = V_VT(&ival) > 0 ? V_I4(&ival) : 0;
-            else
-                pos = V_R8(&ival) > 0.0 ? length : 0;
-            if(pos > length)
-                pos = length;
-        }
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
+        if(SUCCEEDED(hres) && d > 0.0)
+            pos = is_int32(d) ? min(length, d) : length;
     }
 
     if(SUCCEEDED(hres)) {
@@ -540,7 +529,7 @@ static HRESULT String_lastIndexOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
         VARIANT *retv, jsexcept_t *ei)
 {
     BSTR search_str, val_str;
-    DWORD length, pos, search_len;
+    DWORD length, pos = 0, search_len;
     const WCHAR *str;
     INT ret = -1;
     HRESULT hres;
@@ -569,17 +558,11 @@ static HRESULT String_lastIndexOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     search_len = SysStringLen(search_str);
 
     if(arg_cnt(dp) >= 2) {
-        VARIANT ival;
+        double d;
 
-        hres = to_integer(ctx, get_arg(dp,1), ei, &ival);
-        if(SUCCEEDED(hres)) {
-            if(V_VT(&ival) == VT_I4)
-                pos = V_VT(&ival) > 0 ? V_I4(&ival) : 0;
-            else
-                pos = V_R8(&ival) > 0.0 ? length : 0;
-            if(pos > length)
-                pos = length;
-        }
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
+        if(SUCCEEDED(hres) && d > 0)
+            pos = is_int32(d) ? min(length, d) : length;
     }else {
         pos = length;
     }
@@ -1075,7 +1058,7 @@ static HRESULT String_slice(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     BSTR val_str;
     DWORD length;
     INT start=0, end;
-    VARIANT v;
+    double d;
     HRESULT hres;
 
     TRACE("\n");
@@ -1085,14 +1068,14 @@ static HRESULT String_slice(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
         return hres;
 
     if(arg_cnt(dp)) {
-        hres = to_integer(ctx, get_arg(dp,0), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,0), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            start = V_I4(&v);
+        if(is_int32(d)) {
+            start = d;
             if(start < 0) {
                 start = length + start;
                 if(start < 0)
@@ -1100,22 +1083,20 @@ static HRESULT String_slice(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
             }else if(start > length) {
                 start = length;
             }
-        }else {
-            start = V_R8(&v) < 0.0 ? 0 : length;
+        }else if(d > 0) {
+            start = length;
         }
-    }else {
-        start = 0;
     }
 
     if(arg_cnt(dp) >= 2) {
-        hres = to_integer(ctx, get_arg(dp,1), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            end = V_I4(&v);
+        if(is_int32(d)) {
+            end = d;
             if(end < 0) {
                 end = length + end;
                 if(end < 0)
@@ -1124,7 +1105,7 @@ static HRESULT String_slice(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
                 end = length;
             }
         }else {
-            end = V_R8(&v) < 0.0 ? 0 : length;
+            end = d < 0.0 ? 0 : length;
         }
     }else {
         end = length;
@@ -1302,7 +1283,7 @@ static HRESULT String_substring(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     BSTR val_str;
     INT start=0, end;
     DWORD length;
-    VARIANT v;
+    double d;
     HRESULT hres;
 
     TRACE("\n");
@@ -1312,39 +1293,27 @@ static HRESULT String_substring(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
         return hres;
 
     if(arg_cnt(dp) >= 1) {
-        hres = to_integer(ctx, get_arg(dp,0), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,0), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            start = V_I4(&v);
-            if(start < 0)
-                start = 0;
-            else if(start >= length)
-                start = length;
-        }else {
-            start = V_R8(&v) < 0.0 ? 0 : length;
-        }
+        if(d >= 0)
+            start = is_int32(d) ? min(length, d) : length;
     }
 
     if(arg_cnt(dp) >= 2) {
-        hres = to_integer(ctx, get_arg(dp,1), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            end = V_I4(&v);
-            if(end < 0)
-                end = 0;
-            else if(end > length)
-                end = length;
-        }else {
-            end = V_R8(&v) < 0.0 ? 0 : length;
-        }
+        if(d >= 0)
+            end = is_int32(d) ? min(length, d) : length;
+        else
+            end = 0;
     }else {
         end = length;
     }
@@ -1375,7 +1344,7 @@ static HRESULT String_substr(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     const WCHAR *str;
     INT start=0, len;
     DWORD length;
-    VARIANT v;
+    double d;
     HRESULT hres;
 
     TRACE("\n");
@@ -1385,39 +1354,27 @@ static HRESULT String_substr(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
         return hres;
 
     if(arg_cnt(dp) >= 1) {
-        hres = to_integer(ctx, get_arg(dp,0), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,0), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            start = V_I4(&v);
-            if(start < 0)
-                start = 0;
-            else if(start >= length)
-                start = length;
-        }else {
-            start = V_R8(&v) < 0.0 ? 0 : length;
-        }
+        if(d >= 0)
+            start = is_int32(d) ? min(length, d) : length;
     }
 
     if(arg_cnt(dp) >= 2) {
-        hres = to_integer(ctx, get_arg(dp,1), ei, &v);
+        hres = to_integer(ctx, get_arg(dp,1), ei, &d);
         if(FAILED(hres)) {
             SysFreeString(val_str);
             return hres;
         }
 
-        if(V_VT(&v) == VT_I4) {
-            len = V_I4(&v);
-            if(len < 0)
-                len = 0;
-            else if(len > length-start)
-                len = length-start;
-        }else {
-            len = V_R8(&v) < 0.0 ? 0 : length-start;
-        }
+        if(d >= 0.0)
+            len = is_int32(d) ? min(length-start, d) : length-start;
+        else
+            len = 0;
     }else {
         len = length-start;
     }
