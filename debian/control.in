@@ -129,14 +129,14 @@ Recommends:
  ${shlibs:Recommends},
  ttf-liberation,
  libwine-gl (= ${binary:Version}),
+ libwine-ldap (= ${binary:Version}),
+ libwine-openal (= ${binary:Version}),
  libwine-alsa (= ${binary:Version}) | libwine-oss (= ${binary:Version}),
 Suggests:
  wine-doc,
  libwine-cms (= ${binary:Version}),
  libwine-sane (= ${binary:Version}),
- libwine-ldap (= ${binary:Version}),
  libwine-print (= ${binary:Version}),
- libwine-openal (= ${binary:Version}),
  libwine-gphoto2 (= ${binary:Version}),
 Pre-Depends:
  ${wine:Pre-Depends}
