@@ -66,6 +66,7 @@ DEFINE_EXPECT(global_success_i);
 DEFINE_EXPECT(global_notexists_d);
 DEFINE_EXPECT(global_propargput_d);
 DEFINE_EXPECT(global_propargput_i);
+DEFINE_EXPECT(global_testargtypes_i);
 DEFINE_EXPECT(puredisp_prop_d);
 DEFINE_EXPECT(puredisp_noprop_d);
 DEFINE_EXPECT(testobj_delete);
@@ -96,9 +97,14 @@ DEFINE_EXPECT(DeleteMemberByDispID);
 #define DISPID_GLOBAL_OBJECT_FLAG   0x100e
 #define DISPID_GLOBAL_ISWIN64       0x100f
 #define DISPID_GLOBAL_PUREDISP      0x1010
-#define DISPID_GLOBAL_TESTPROPDELETE  0x1010
 #define DISPID_GLOBAL_ISNULLBSTR    0x1011
 #define DISPID_GLOBAL_PROPARGPUT    0x1012
+#define DISPID_GLOBAL_SHORTPROP     0x1013
+#define DISPID_GLOBAL_GETSHORT      0x1014
+#define DISPID_GLOBAL_TESTARGTYPES  0x1015
+#define DISPID_GLOBAL_INTPROP       0x1016
+
+#define DISPID_GLOBAL_TESTPROPDELETE  0x2000
 
 #define DISPID_TESTOBJ_PROP         0x2000
 #define DISPID_TESTOBJ_ONLYDISPID   0x2001
@@ -519,6 +525,26 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         return S_OK;
     }
 
+    if(!strcmp_wa(bstrName, "shortProp")) {
+        *pid = DISPID_GLOBAL_SHORTPROP;
+        return S_OK;
+    }
+
+    if(!strcmp_wa(bstrName, "getShort")) {
+        *pid = DISPID_GLOBAL_GETSHORT;
+        return S_OK;
+    }
+
+    if(!strcmp_wa(bstrName, "testArgTypes")) {
+        *pid = DISPID_GLOBAL_TESTARGTYPES;
+        return S_OK;
+    }
+
+    if(!strcmp_wa(bstrName, "intProp")) {
+        *pid = DISPID_GLOBAL_INTPROP;
+        return S_OK;
+    }
+
     if(strict_dispid_check && strcmp_wa(bstrName, "t"))
         ok(0, "unexpected call %s\n", wine_dbgstr_w(bstrName));
     return DISP_E_UNKNOWNNAME;
@@ -901,6 +927,52 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         ok(hres == S_OK, "hres = %x\n", hres);
         ok(V_VT(pvarRes) == VT_DISPATCH, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
         IDispatchEx_Release(dispex);
+        return S_OK;
+    }
+    case DISPID_GLOBAL_SHORTPROP:
+    case DISPID_GLOBAL_GETSHORT:
+        V_VT(pvarRes) = VT_I2;
+        V_I2(pvarRes) = 10;
+        return S_OK;
+
+    case DISPID_GLOBAL_INTPROP:
+        V_VT(pvarRes) = VT_INT;
+        V_INT(pvarRes) = 22;
+        return S_OK;
+
+    case DISPID_GLOBAL_TESTARGTYPES: {
+        VARIANT args[2];
+        DISPPARAMS dp = {args, NULL, sizeof(args)/sizeof(*args), 0};
+        HRESULT hres;
+
+        CHECK_EXPECT(global_testargtypes_i);
+        ok(wFlags == DISPATCH_METHOD, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->rgvarg != NULL, "rgvarg != NULL\n");
+        ok(pdp->cArgs == 5, "cArgs = %d\n", pdp->cArgs);
+        ok(!pvarRes, "pvarRes != NULL\n");
+
+        ok(V_VT(pdp->rgvarg+1) == VT_I4, "V_VT(psp->rgvargs+1) = %d\n", V_VT(pdp->rgvarg));
+        ok(V_I4(pdp->rgvarg+1) == 10, "V_I4(psp->rgvargs+1) = %d\n", V_I4(pdp->rgvarg));
+
+        ok(V_VT(pdp->rgvarg+2) == VT_I4, "V_VT(psp->rgvargs+2) = %d\n", V_VT(pdp->rgvarg+1));
+        ok(V_I4(pdp->rgvarg+2) == 10, "V_I4(psp->rgvargs+2) = %d\n", V_I4(pdp->rgvarg+1));
+
+        ok(V_VT(pdp->rgvarg+3) == VT_I4, "V_VT(psp->rgvargs+3) = %d\n", V_VT(pdp->rgvarg+3));
+        ok(V_I4(pdp->rgvarg+3) == 22, "V_I4(psp->rgvargs+3) = %d\n", V_I4(pdp->rgvarg+3));
+
+        ok(V_VT(pdp->rgvarg+4) == VT_I4, "V_VT(psp->rgvargs+4) = %d\n", V_VT(pdp->rgvarg+4));
+        ok(V_I4(pdp->rgvarg+4) == 22, "V_I4(psp->rgvargs+4) = %d\n", V_I4(pdp->rgvarg+4));
+
+        ok(V_VT(pdp->rgvarg) == VT_DISPATCH, "V_VT(psp->rgvargs) = %d\n", V_VT(pdp->rgvarg));
+
+        V_VT(args) = VT_I2;
+        V_I2(args) = 2;
+        V_VT(args+1) = VT_INT;
+        V_INT(args+1) = 22;
+        hres = IDispatch_Invoke(V_DISPATCH(pdp->rgvarg), DISPID_VALUE, &IID_NULL, 0, DISPATCH_METHOD, &dp, NULL, NULL, NULL);
+        ok(hres == S_OK, "Invoke failed: %08x\n", hres);
+
         return S_OK;
     }
     }
@@ -1658,6 +1730,13 @@ static BOOL run_tests(void)
     parse_script_a("var t=0; test.propArgPutO(t++, t++) = t++;");
     CHECK_CALLED(global_propargput_d);
     CHECK_CALLED(global_propargput_i);
+
+    SET_EXPECT(global_testargtypes_i);
+    parse_script_a("testArgTypes(intProp(), intProp, getShort(), shortProp, function(i,s) {"
+                   "    ok(getVT(i) === 'VT_I4', 'getVT(i) = ' + getVT(i));"
+                   "    ok(getVT(s) === 'VT_I4', 'getVT(s) = ' + getVT(s));"
+                   "});");
+    CHECK_CALLED(global_testargtypes_i);
 
     run_from_res("lang.js");
     run_from_res("api.js");

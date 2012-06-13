@@ -104,6 +104,7 @@ typedef struct tagDC
     SIZE         virtual_res;      /* Initially HORZRES,VERTRES. Changed by SetVirtualResolution */
     SIZE         virtual_size;     /* Initially HORZSIZE,VERTSIZE. Changed by SetVirtualResolution */
     RECT         vis_rect;         /* visible rectangle in screen coords */
+    RECT         device_rect;      /* rectangle for the whole device */
     FLOAT        miterLimit;
 
     int           flags;
@@ -169,6 +170,15 @@ static inline INT GDI_ROUND(double val)
 #define GET_DC_PHYSDEV(dc,func) \
     get_physdev_entry_point( (dc)->physDev, FIELD_OFFSET(struct gdi_dc_funcs,func))
 
+static inline PHYSDEV pop_dc_driver( DC *dc, PHYSDEV dev )
+{
+    PHYSDEV *pdev = &dc->physDev;
+    while (*pdev && *pdev != dev) pdev = &(*pdev)->next;
+    if (!*pdev) return NULL;
+    *pdev = dev->next;
+    return dev;
+}
+
 /* bitmap object */
 
 typedef struct tagBITMAPOBJ
@@ -217,6 +227,7 @@ extern void free_brush_pattern( struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void **bits, UINT *usage ) DECLSPEC_HIDDEN;
 
 /* clipping.c */
+extern BOOL clip_device_rect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
 extern BOOL clip_visrect( DC *dc, RECT *dst, const RECT *src ) DECLSPEC_HIDDEN;
 extern void update_dc_clipping( DC * dc ) DECLSPEC_HIDDEN;
 

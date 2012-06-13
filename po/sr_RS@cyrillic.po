@@ -1090,7 +1090,7 @@ msgid "Processing; "
 msgstr "Обрађивање; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Покретање; "
 
 #: comdlg32.rc:96
@@ -3781,7 +3781,7 @@ msgid "Too many commands.\n"
 msgstr ""
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr ""
 
 #: winerror.mc:256
@@ -3793,7 +3793,7 @@ msgid "Unexpected network error.\n"
 msgstr ""
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr ""
 
 #: winerror.mc:271
@@ -4438,7 +4438,7 @@ msgid "Invalid flags.\n"
 msgstr "Неисправна синтакса.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr ""
 
 #: winerror.mc:1046
@@ -5136,7 +5136,7 @@ msgstr ""
 
 #: winerror.mc:1866
 #, fuzzy
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Већ постоји.\n"
 
 #: winerror.mc:1871
@@ -6263,7 +6263,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Неприкладна потврда идентитета.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr ""
 
 #: winerror.mc:3171
@@ -6410,7 +6410,7 @@ msgid "Invalid user buffer.\n"
 msgstr ""
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr ""
 
 #: winerror.mc:3341
@@ -6564,7 +6564,7 @@ msgid "RPC comm failure.\n"
 msgstr ""
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr ""
 
 #: winerror.mc:3521
@@ -6594,7 +6594,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Неисправна синтакса.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr ""
 
 #: winerror.mc:3556
@@ -6931,12 +6931,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -9308,7 +9308,7 @@ msgid "Filter Error"
 msgstr "Грешка у филтеру"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Корисник је отказан"
 
 #: wldap32.rc:116
@@ -11234,7 +11234,7 @@ msgid "Contains commands for editing values or keys"
 msgstr ""
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr ""
 
 #: regedit.rc:137

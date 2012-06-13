@@ -2,6 +2,7 @@
  * Copyright 2008 Stefan Dösinger
  * Copyright 2009 Matteo Bruni
  * Copyright 2010 Rico Schüller
+ * Copyright 2012 Matteo Bruni for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -44,11 +45,11 @@ const char *debug_d3dcompiler_d3d_blob_part(D3D_BLOB_PART part) DECLSPEC_HIDDEN;
 const char *debug_d3dcompiler_shader_variable_class(D3D_SHADER_VARIABLE_CLASS c) DECLSPEC_HIDDEN;
 const char *debug_d3dcompiler_shader_variable_type(D3D_SHADER_VARIABLE_TYPE t) DECLSPEC_HIDDEN;
 
-/* Shader assembler definitions */
-typedef enum _shader_type {
+enum shader_type
+{
     ST_VERTEX,
     ST_PIXEL,
-} shader_type;
+};
 
 typedef enum BWRITER_COMPARISON_TYPE {
     BWRITER_COMPARISON_NONE,
@@ -111,7 +112,7 @@ struct samplerdecl {
 
 #define INSTRARRAY_INITIAL_SIZE 8
 struct bwriter_shader {
-    shader_type             type;
+    enum shader_type        type;
 
     /* Shader version selected */
     DWORD                   version;
@@ -138,15 +139,18 @@ struct bwriter_shader {
     unsigned int            num_instrs, instr_alloc_size;
 };
 
-static inline LPVOID asm_alloc(SIZE_T size) {
+static inline void *d3dcompiler_alloc(SIZE_T size)
+{
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
 }
 
-static inline LPVOID asm_realloc(LPVOID ptr, SIZE_T size) {
+static inline void *d3dcompiler_realloc(void *ptr, SIZE_T size)
+{
     return HeapReAlloc(GetProcessHeap(), 0, ptr, size);
 }
 
-static inline BOOL asm_free(LPVOID ptr) {
+static inline BOOL d3dcompiler_free(void *ptr)
+{
     return HeapFree(GetProcessHeap(), 0, ptr);
 }
 
@@ -209,7 +213,22 @@ BOOL record_sampler(struct bwriter_shader *shader, DWORD samptype, DWORD mod, DW
 
 #define MESSAGEBUFFER_INITIAL_SIZE 256
 
-struct asm_parser {
+enum parse_status
+{
+    PARSE_SUCCESS = 0,
+    PARSE_WARN = 1,
+    PARSE_ERR = 2
+};
+
+struct compilation_messages
+{
+    char *string;
+    unsigned int size;
+    unsigned int capacity;
+};
+
+struct asm_parser
+{
     /* The function table of the parser implementation */
     const struct asmparser_backend *funcs;
 
@@ -217,14 +236,8 @@ struct asm_parser {
     struct bwriter_shader *shader;
     unsigned int m3x3pad_count;
 
-    enum parse_status {
-        PARSE_SUCCESS = 0,
-        PARSE_WARN = 1,
-        PARSE_ERR = 2
-    } status;
-    char *messages;
-    unsigned int messagesize;
-    unsigned int messagecapacity;
+    enum parse_status status;
+    struct compilation_messages messages;
     unsigned int line_no;
 };
 
@@ -252,8 +265,15 @@ struct bwriter_shader *parse_asm_shader(char **messages) DECLSPEC_HIDDEN;
 #define PRINTF_ATTR(fmt,args)
 #endif
 
+void compilation_message(struct compilation_messages *msg, const char *fmt, va_list args) DECLSPEC_HIDDEN;
 void asmparser_message(struct asm_parser *ctx, const char *fmt, ...) PRINTF_ATTR(2,3) DECLSPEC_HIDDEN;
-void set_parse_status(struct asm_parser *ctx, enum parse_status status) DECLSPEC_HIDDEN;
+static inline void set_parse_status(enum parse_status *current, enum parse_status update)
+{
+    if (update == PARSE_ERR)
+        *current = PARSE_ERR;
+    else if (update == PARSE_WARN && *current == PARSE_SUCCESS)
+        *current = PARSE_WARN;
+}
 
 /* A reasonable value as initial size */
 #define BYTECODEBUFFER_INITIAL_SIZE 32

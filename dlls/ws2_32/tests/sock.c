@@ -5274,11 +5274,64 @@ static void test_WSAAsyncGetServByName(void)
     DestroyWindow(hwnd);
 }
 
+/*
+ * Provide consistent initialization for the AcceptEx IOCP tests.
+ */
+static SOCKET setup_iocp_src(struct sockaddr_in *bindAddress)
+{
+    SOCKET src, ret = INVALID_SOCKET;
+    int iret, socklen;
+
+    src = socket(AF_INET, SOCK_STREAM, 0);
+    if (src == INVALID_SOCKET)
+    {
+        skip("could not create listener socket, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    memset(bindAddress, 0, sizeof(*bindAddress));
+    bindAddress->sin_family = AF_INET;
+    bindAddress->sin_addr.s_addr = inet_addr("127.0.0.1");
+    iret = bind(src, (struct sockaddr*)bindAddress, sizeof(*bindAddress));
+    if (iret != 0)
+    {
+        skip("failed to bind, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    socklen = sizeof(*bindAddress);
+    iret = getsockname(src, (struct sockaddr*)bindAddress, &socklen);
+    if (iret != 0) {
+        skip("failed to lookup bind address, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    if (set_blocking(src, FALSE))
+    {
+        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    iret = listen(src, 5);
+    if (iret != 0)
+    {
+        skip("listening failed, errno = %d\n", WSAGetLastError());
+        goto end;
+    }
+
+    ret = src;
+end:
+    if (src != ret && ret == INVALID_SOCKET)
+        closesocket(src);
+    return ret;
+}
+
 static void test_completion_port(void)
 {
     HANDLE previous_port, io_port;
     WSAOVERLAPPED ov, *olp;
-    SOCKET src, dest, connector = INVALID_SOCKET;
+    SOCKET src, dest, dup, connector = INVALID_SOCKET;
+    WSAPROTOCOL_INFOA info;
     char buf[1024];
     WSABUF bufs;
     DWORD num_bytes, flags;
@@ -5289,7 +5342,6 @@ static void test_completion_port(void)
     struct sockaddr_in bindAddress;
     GUID acceptExGuid = WSAID_ACCEPTEX;
     LPFN_ACCEPTEX pAcceptEx = NULL;
-    int socklen;
 
     previous_port = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
     ok( previous_port != NULL, "Failed to create completion port %u\n", GetLastError());
@@ -5401,14 +5453,6 @@ static void test_completion_port(void)
     if (dest != INVALID_SOCKET)
         closesocket(dest);
 
-
-    src = socket(AF_INET, SOCK_STREAM, 0);
-    if (src == INVALID_SOCKET)
-    {
-        skip("could not create listener socket, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
     dest = socket(AF_INET, SOCK_STREAM, 0);
     if (dest == INVALID_SOCKET)
     {
@@ -5416,7 +5460,7 @@ static void test_completion_port(void)
         goto end;
     }
 
-    iret = WSAIoctl(src, SIO_GET_EXTENSION_FUNCTION_POINTER, &acceptExGuid, sizeof(acceptExGuid),
+    iret = WSAIoctl(dest, SIO_GET_EXTENSION_FUNCTION_POINTER, &acceptExGuid, sizeof(acceptExGuid),
             &pAcceptEx, sizeof(pAcceptEx), &num_bytes, NULL, NULL);
     if (iret)
     {
@@ -5424,28 +5468,10 @@ static void test_completion_port(void)
         goto end;
     }
 
-    memset(&bindAddress, 0, sizeof(bindAddress));
-    bindAddress.sin_family = AF_INET;
-    bindAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
-    iret = bind(src, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    if (iret != 0)
-    {
-        skip("failed to bind, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    /* Test IOCP response on socket close (IOCP created after AcceptEx) */
 
-    if (set_blocking(src, FALSE))
-    {
-        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
         goto end;
-    }
-
-    iret = listen(src, 5);
-    if (iret != 0)
-    {
-        skip("listening failed, errno = %d\n", WSAGetLastError());
-        goto end;
-    }
 
     SetLastError(0xdeadbeef);
 
@@ -5485,42 +5511,259 @@ static void test_completion_port(void)
     ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
     ok(!olp, "Overlapped structure is at %p\n", olp);
 
-    src = socket(AF_INET, SOCK_STREAM, 0);
-    if (src == INVALID_SOCKET)
-    {
-        skip("could not create listener socket, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    /* Test IOCP response on socket close (IOCP created before AcceptEx) */
 
-    memset(&bindAddress, 0, sizeof(bindAddress));
-    bindAddress.sin_family = AF_INET;
-    bindAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
-    iret = bind(src, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    if (iret != 0)
-    {
-        skip("failed to bind, error %d\n", WSAGetLastError());
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
         goto end;
-    }
 
-    socklen = sizeof(bindAddress);
-    iret = getsockname(src, (struct sockaddr*)&bindAddress, &socklen);
-    if (iret != 0) {
-        skip("failed to lookup bind address, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    SetLastError(0xdeadbeef);
 
-    if (set_blocking(src, FALSE))
-    {
-        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    io_port = CreateIoCompletionPort((HANDLE)src, previous_port, 125, 0);
+    ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
 
-    iret = listen(src, 5);
-    if (iret != 0)
-    {
-        skip("listening failed, errno = %d\n", WSAGetLastError());
+    bret = pAcceptEx(src, dest, buf, sizeof(buf) - 2*(sizeof(struct sockaddr_in) + 16),
+            sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
+            &num_bytes, &ov);
+    ok(bret == FALSE, "AcceptEx returned %d\n", bret);
+    ok(GetLastError() == ERROR_IO_PENDING, "Last error was %d\n", GetLastError());
+
+    closesocket(src);
+    src = INVALID_SOCKET;
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+
+    bret = GetQueuedCompletionStatus(io_port, &num_bytes, &key, &olp, 100);
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    todo_wine ok(GetLastError() == ERROR_OPERATION_ABORTED, "Last error was %d\n", GetLastError());
+    todo_wine ok(key == 125, "Key is %lu\n", key);
+    todo_wine ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
+    todo_wine ok(olp == &ov, "Overlapped structure is at %p\n", olp);
+    todo_wine ok(olp && (olp->Internal == (ULONG)STATUS_CANCELLED), "Internal status is %lx\n", olp ? olp->Internal : 0);
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    /* Test IOCP with duplicated handle */
+
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
         goto end;
-    }
+
+    SetLastError(0xdeadbeef);
+
+    io_port = CreateIoCompletionPort((HANDLE)src, previous_port, 125, 0);
+    ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
+
+    WSADuplicateSocket( src, GetCurrentProcessId(), &info );
+    dup = WSASocket(AF_INET, SOCK_STREAM, 0, &info, 0, WSA_FLAG_OVERLAPPED);
+    ok(dup != INVALID_SOCKET, "failed to duplicate socket!\n");
+
+    bret = pAcceptEx(dup, dest, buf, sizeof(buf) - 2*(sizeof(struct sockaddr_in) + 16),
+            sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
+            &num_bytes, &ov);
+    ok(bret == FALSE, "AcceptEx returned %d\n", bret);
+    ok(GetLastError() == ERROR_IO_PENDING, "Last error was %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    closesocket(src);
+    src = INVALID_SOCKET;
+    closesocket(dup);
+    dup = INVALID_SOCKET;
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus(io_port, &num_bytes, &key, &olp, 100);
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    todo_wine ok(GetLastError() == ERROR_OPERATION_ABORTED, "Last error was %d\n", GetLastError());
+    todo_wine ok(key == 125, "Key is %lu\n", key);
+    todo_wine ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
+    todo_wine ok(olp == &ov, "Overlapped structure is at %p\n", olp);
+    todo_wine ok(olp && olp->Internal == (ULONG)STATUS_CANCELLED, "Internal status is %lx\n", olp ? olp->Internal : 0);
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    /* Test IOCP with duplicated handle (closing duplicated handle) */
+
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
+        goto end;
+
+    SetLastError(0xdeadbeef);
+
+    io_port = CreateIoCompletionPort((HANDLE)src, previous_port, 125, 0);
+    ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
+
+    WSADuplicateSocket( src, GetCurrentProcessId(), &info );
+    dup = WSASocket(AF_INET, SOCK_STREAM, 0, &info, 0, WSA_FLAG_OVERLAPPED);
+    ok(dup != INVALID_SOCKET, "failed to duplicate socket!\n");
+
+    bret = pAcceptEx(dup, dest, buf, sizeof(buf) - 2*(sizeof(struct sockaddr_in) + 16),
+            sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
+            &num_bytes, &ov);
+    ok(bret == FALSE, "AcceptEx returned %d\n", bret);
+    ok(GetLastError() == ERROR_IO_PENDING, "Last error was %d\n", GetLastError());
+
+    closesocket(dup);
+    dup = INVALID_SOCKET;
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    closesocket(src);
+    src = INVALID_SOCKET;
+
+    bret = GetQueuedCompletionStatus(io_port, &num_bytes, &key, &olp, 100);
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    todo_wine ok(GetLastError() == ERROR_OPERATION_ABORTED, "Last error was %d\n", GetLastError());
+    todo_wine ok(key == 125, "Key is %lu\n", key);
+    todo_wine ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
+    todo_wine ok(olp == &ov, "Overlapped structure is at %p\n", olp);
+    todo_wine ok(olp && (olp->Internal == (ULONG)STATUS_CANCELLED), "Internal status is %lx\n", olp ? olp->Internal : 0);
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    /* Test IOCP with duplicated handle (closing original handle) */
+
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
+        goto end;
+
+    SetLastError(0xdeadbeef);
+
+    io_port = CreateIoCompletionPort((HANDLE)src, previous_port, 125, 0);
+    ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
+
+    WSADuplicateSocket( src, GetCurrentProcessId(), &info );
+    dup = WSASocket(AF_INET, SOCK_STREAM, 0, &info, 0, WSA_FLAG_OVERLAPPED);
+    ok(dup != INVALID_SOCKET, "failed to duplicate socket!\n");
+
+    bret = pAcceptEx(dup, dest, buf, sizeof(buf) - 2*(sizeof(struct sockaddr_in) + 16),
+            sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
+            &num_bytes, &ov);
+    ok(bret == FALSE, "AcceptEx returned %d\n", bret);
+    ok(GetLastError() == ERROR_IO_PENDING, "Last error was %d\n", GetLastError());
+
+    closesocket(src);
+    src = INVALID_SOCKET;
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    closesocket(dup);
+    dup = INVALID_SOCKET;
+
+    bret = GetQueuedCompletionStatus(io_port, &num_bytes, &key, &olp, 100);
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    todo_wine ok(GetLastError() == ERROR_OPERATION_ABORTED, "Last error was %d\n", GetLastError());
+    todo_wine ok(key == 125, "Key is %lu\n", key);
+    todo_wine ok(num_bytes == 0, "Number of bytes transferred is %u\n", num_bytes);
+    todo_wine ok(olp == &ov, "Overlapped structure is at %p\n", olp);
+    todo_wine ok(olp && (olp->Internal == (ULONG)STATUS_CANCELLED), "Internal status is %lx\n", olp ? olp->Internal : 0);
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    /* Test IOCP without AcceptEx */
+
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
+        goto end;
+
+    SetLastError(0xdeadbeef);
+
+    io_port = CreateIoCompletionPort((HANDLE)src, previous_port, 125, 0);
+    ok(io_port != NULL, "failed to create completion port %u\n", GetLastError());
+
+    closesocket(src);
+    src = INVALID_SOCKET;
+
+    SetLastError(0xdeadbeef);
+    key = 0xdeadbeef;
+    num_bytes = 0xdeadbeef;
+    olp = (WSAOVERLAPPED *)0xdeadbeef;
+    bret = GetQueuedCompletionStatus( io_port, &num_bytes, &key, &olp, 200 );
+    ok(bret == FALSE, "failed to get completion status %u\n", bret);
+    ok(GetLastError() == WAIT_TIMEOUT, "Last error was %d\n", GetLastError());
+    ok(key == 0xdeadbeef, "Key is %lu\n", key);
+    ok(num_bytes == 0xdeadbeef, "Number of bytes transferred is %u\n", num_bytes);
+    ok(!olp, "Overlapped structure is at %p\n", olp);
+
+    /* */
+
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
+        goto end;
 
     connector = socket(AF_INET, SOCK_STREAM, 0);
     if (connector == INVALID_SOCKET) {
@@ -5575,42 +5818,10 @@ static void test_completion_port(void)
     if (src != INVALID_SOCKET)
         closesocket(dest);
 
-    src = socket(AF_INET, SOCK_STREAM, 0);
-    if (src == INVALID_SOCKET)
-    {
-        skip("could not create listener socket, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    /* */
 
-    memset(&bindAddress, 0, sizeof(bindAddress));
-    bindAddress.sin_family = AF_INET;
-    bindAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
-    iret = bind(src, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    if (iret != 0)
-    {
-        skip("failed to bind, error %d\n", WSAGetLastError());
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
         goto end;
-    }
-
-    socklen = sizeof(bindAddress);
-    iret = getsockname(src, (struct sockaddr*)&bindAddress, &socklen);
-    if (iret != 0) {
-        skip("failed to lookup bind address, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
-    if (set_blocking(src, FALSE))
-    {
-        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
-    iret = listen(src, 5);
-    if (iret != 0)
-    {
-        skip("listening failed, errno = %d\n", WSAGetLastError());
-        goto end;
-    }
 
     dest = socket(AF_INET, SOCK_STREAM, 0);
     if (dest == INVALID_SOCKET)
@@ -5675,42 +5886,10 @@ static void test_completion_port(void)
     if (connector != INVALID_SOCKET)
         closesocket(connector);
 
-    src = socket(AF_INET, SOCK_STREAM, 0);
-    if (src == INVALID_SOCKET)
-    {
-        skip("could not create listener socket, error %d\n", WSAGetLastError());
-        goto end;
-    }
+    /* */
 
-    memset(&bindAddress, 0, sizeof(bindAddress));
-    bindAddress.sin_family = AF_INET;
-    bindAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
-    iret = bind(src, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    if (iret != 0)
-    {
-        skip("failed to bind, error %d\n", WSAGetLastError());
+    if ((src = setup_iocp_src(&bindAddress)) == INVALID_SOCKET)
         goto end;
-    }
-
-    socklen = sizeof(bindAddress);
-    iret = getsockname(src, (struct sockaddr*)&bindAddress, &socklen);
-    if (iret != 0) {
-        skip("failed to lookup bind address, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
-    if (set_blocking(src, FALSE))
-    {
-        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
-        goto end;
-    }
-
-    iret = listen(src, 5);
-    if (iret != 0)
-    {
-        skip("listening failed, errno = %d\n", WSAGetLastError());
-        goto end;
-    }
 
     dest = socket(AF_INET, SOCK_STREAM, 0);
     if (dest == INVALID_SOCKET)

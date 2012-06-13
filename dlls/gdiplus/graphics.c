@@ -131,14 +131,9 @@ static COLORREF get_gdi_brush_color(const GpBrush *brush)
 static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
 {
     HBITMAP hbmp;
-    HDC hdc;
     BITMAPINFOHEADER bmih;
     DWORD *bits;
     int x, y;
-
-    hdc = CreateCompatibleDC(0);
-
-    if (!hdc) return 0;
 
     bmih.biSize = sizeof(bmih);
     bmih.biWidth = 8;
@@ -148,7 +143,7 @@ static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
     bmih.biCompression = BI_RGB;
     bmih.biSizeImage = 0;
 
-    hbmp = CreateDIBSection(hdc, (BITMAPINFO *)&bmih, DIB_RGB_COLORS, (void **)&bits, NULL, 0);
+    hbmp = CreateDIBSection(0, (BITMAPINFO *)&bmih, DIB_RGB_COLORS, (void **)&bits, NULL, 0);
     if (hbmp)
     {
         const char *hatch_data;
@@ -175,7 +170,6 @@ static HBITMAP create_hatch_bitmap(const GpHatch *hatch)
         }
     }
 
-    DeleteDC(hdc);
     return hbmp;
 }
 
@@ -2142,15 +2136,13 @@ void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font, HFONT *hfont)
     rel_height = sqrt((pt[2].Y-pt[0].Y)*(pt[2].Y-pt[0].Y)+
                       (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
 
-    lfw = font->lfw;
-    lfw.lfHeight = roundr(-font->pixel_size * rel_height);
+    GdipGetLogFontW((GpFont *)font, graphics, &lfw);
+    lfw.lfHeight = roundr(lfw.lfHeight * rel_height);
     unscaled_font = CreateFontIndirectW(&lfw);
 
     SelectObject(hdc, unscaled_font);
     GetTextMetricsW(hdc, &textmet);
 
-    lfw = font->lfw;
-    lfw.lfHeight = roundr(-font->pixel_size * rel_height);
     lfw.lfWidth = roundr(textmet.tmAveCharWidth * rel_width / rel_height);
     lfw.lfEscapement = lfw.lfOrientation = roundr((angle / M_PI) * 1800.0);
 
@@ -4925,6 +4917,7 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
 {
     GpStatus stat;
     int i;
+    LOGFONTW lfw;
     HFONT oldfont;
     struct measure_ranges_args args;
     HDC hdc, temp_hdc=NULL;
@@ -4938,6 +4931,9 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     if (regionCount < stringFormat->range_count)
         return InvalidParameter;
 
+    stat = GdipGetLogFontW((GpFont *)font, graphics, &lfw);
+    if (stat != Ok) return stat;
+
     if(!graphics->hdc)
     {
         hdc = temp_hdc = CreateCompatibleDC(0);
@@ -4949,7 +4945,7 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     if (stringFormat->attr)
         TRACE("may be ignoring some format flags: attr %x\n", stringFormat->attr);
 
-    oldfont = SelectObject(hdc, CreateFontIndirectW(&font->lfw));
+    oldfont = SelectObject(hdc, CreateFontIndirectW(&lfw));
 
     for (i=0; i<stringFormat->range_count; i++)
     {

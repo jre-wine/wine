@@ -1079,7 +1079,7 @@ msgid "Processing; "
 msgstr "작업중; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "초기화중; "
 
 #: comdlg32.rc:96
@@ -3716,7 +3716,7 @@ msgid "Too many commands.\n"
 msgstr "명령이 너무 많습니다.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "어댑터 하드웨어 오류.\n"
 
 #: winerror.mc:256
@@ -3728,7 +3728,7 @@ msgid "Unexpected network error.\n"
 msgstr "예기치 않은 네트워크 오류.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "나쁜 원격 어댑터.\n"
 
 #: winerror.mc:271
@@ -4340,7 +4340,7 @@ msgid "Invalid flags.\n"
 msgstr "올바르지 않은 플래그.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "이해할 수 없는 볼륨.\n"
 
 #: winerror.mc:1046
@@ -4996,7 +4996,7 @@ msgid "Continue work in progress.\n"
 msgstr "계속 진행중인 작업.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "이미 초기화됨.\n"
 
 #: winerror.mc:1871
@@ -6028,7 +6028,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "올바르지 않은 인증 증명서.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "알 수 없는 허가 서비스.\n"
 
 #: winerror.mc:3171
@@ -6164,7 +6164,7 @@ msgid "Invalid user buffer.\n"
 msgstr "올바르지 않은 사용자 버퍼.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "이해할 수 없는 미디어.\n"
 
 #: winerror.mc:3341
@@ -6308,7 +6308,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC 일반 실패.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "지원하지 않는 인증 레벨.\n"
 
 #: winerror.mc:3521
@@ -6336,7 +6336,7 @@ msgid "Invalid handle operation.\n"
 msgstr "올바르지 않은 핸들 작업.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "잘못된 연속 패키지 버젼.\n"
 
 #: winerror.mc:3556
@@ -6647,38 +6647,38 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
 "\t/?\n"
 msgstr ""
-"Windows Installer %s\n"
+"윈도우즈 설치 프로그램 %s\n"
 "\n"
 "사용법:\n"
 "msiexec 명령 {필수 매개변수}  [선택적 매개변수]\n"
 "\n"
 "제품 설치:\n"
-"\t/i {package|productcode} [property]\n"
-"\t/package {package|productcode} [property]\n"
-"\t/a package [property]\n"
+"\t/i {패키지|제품코드} [속성}\n"
+"\t/package {패키지|제품코드} [속성]\n"
+"\t/a package [속성]\n"
 "설치 복구:\n"
-"\t/f[p|o|e|d|c|a|u|m|s|v] {package|productcode}\n"
+"\t/f[p|o|e|d|c|a|u|m|s|v] {패키지|제품코드}\n"
 "제품 제거:\n"
-"\t/uninstall {package|productcode} [property]\n"
-"\t/x {package|productcode} [property]\n"
+"\t/uninstall {제품|제품코드} [속성]\n"
+"\t/x {제품|제품코드} [속성]\n"
 "제품 알리기:\n"
-"\t/j[u|m] package [/t transform] [/g languageid]\n"
+"\t/j[u|m] 패키지 [/t 변환] [/g 언어아이디]\n"
 "패치 추가:\n"
-"\t/p patchpackage [property]\n"
-"\t/p patchpackage /a package [property]\n"
-"위의 명령어를 위한 Log 와 UI 한정자:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"\t/p 패치할 패키지 [속성]\n"
+"\t/p 패치할 패키지 /a 패키지 [속성]\n"
+"위의 명령어를 위한 사용자 인터페이스 한정자:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] 로그파일\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
 "MSI 서비스  등록:\n"
 "\t/y\n"
@@ -9076,7 +9076,7 @@ msgid "Filter Error"
 msgstr "필터 오류"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "사용자가 취소함"
 
 #: wldap32.rc:116
@@ -11167,7 +11167,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "키의 값 편집 명령 포함"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "레지스트리 창 사용자 정의하는 명령 포함"
 
 #: regedit.rc:137

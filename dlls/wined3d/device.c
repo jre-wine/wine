@@ -52,13 +52,13 @@ const struct wined3d_light WINED3D_default_light =
 /**********************************************************
  * Global variable / Constants follow
  **********************************************************/
-const float identity[] =
-{
+const struct wined3d_matrix identity =
+{{{
     1.0f, 0.0f, 0.0f, 0.0f,
     0.0f, 1.0f, 0.0f, 0.0f,
     0.0f, 0.0f, 1.0f, 0.0f,
     0.0f, 0.0f, 0.0f, 1.0f,
-};  /* When needed for comparisons */
+}}};  /* When needed for comparisons */
 
 /* Note that except for WINED3DPT_POINTLIST and WINED3DPT_LINELIST these
  * actually have the same values in GL and D3D. */
@@ -171,8 +171,7 @@ static BOOL fixed_get_input(BYTE usage, BYTE usage_idx, unsigned int *regnum)
 }
 
 /* Context activation is done by the caller. */
-void device_stream_info_from_declaration(struct wined3d_device *device,
-        struct wined3d_stream_info *stream_info, BOOL *all_vbo)
+void device_stream_info_from_declaration(struct wined3d_device *device, struct wined3d_stream_info *stream_info)
 {
     const struct wined3d_state *state = &device->stateBlock->state;
     /* We need to deal with frequency data! */
@@ -297,8 +296,7 @@ void device_stream_info_from_declaration(struct wined3d_device *device,
     if (!state->user_stream)
     {
         WORD map = stream_info->use_map;
-        if (all_vbo)
-            *all_vbo = TRUE;
+        stream_info->all_vbo = 1;
 
         /* PreLoad all the vertex buffers. */
         for (i = 0; map; map >>= 1, ++i)
@@ -320,16 +318,16 @@ void device_stream_info_from_declaration(struct wined3d_device *device,
                         + (ptrdiff_t)element->data.addr;
             }
 
-            if (!buffer->buffer_object && all_vbo)
-                *all_vbo = FALSE;
+            if (!buffer->buffer_object)
+                stream_info->all_vbo = 0;
 
             if (buffer->query)
                 device->buffer_queries[device->num_buffer_queries++] = buffer->query;
         }
     }
-    else if (all_vbo)
+    else
     {
-        *all_vbo = FALSE;
+        stream_info->all_vbo = 0;
     }
 }
 
@@ -406,7 +404,7 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
 {
     struct wined3d_stream_info *stream_info = &device->strided_streams;
     const struct wined3d_state *state = &device->stateBlock->state;
-    BOOL all_vbo;
+    DWORD prev_all_vbo = stream_info->all_vbo;
 
     if (device->up_strided)
     {
@@ -414,17 +412,16 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         TRACE("=============================== Strided Input ================================\n");
         device_stream_info_from_strided(gl_info, device->up_strided, stream_info);
         if (TRACE_ON(d3d)) device_trace_strided_stream_info(stream_info);
-        all_vbo = FALSE;
     }
     else
     {
         TRACE("============================= Vertex Declaration =============================\n");
-        device_stream_info_from_declaration(device, stream_info, &all_vbo);
+        device_stream_info_from_declaration(device, stream_info);
     }
 
     if (state->vertex_shader && !stream_info->position_transformed)
     {
-        if (state->vertex_declaration->half_float_conv_needed && !all_vbo)
+        if (state->vertex_declaration->half_float_conv_needed && !stream_info->all_vbo)
         {
             TRACE("Using drawStridedSlow with vertex shaders for FLOAT16 conversion.\n");
             device->useDrawStridedSlow = TRUE;
@@ -440,7 +437,7 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         slow_mask |= -!gl_info->supported[ARB_VERTEX_ARRAY_BGRA]
                 & ((1 << WINED3D_FFP_DIFFUSE) | (1 << WINED3D_FFP_SPECULAR));
 
-        if ((stream_info->position_transformed || (stream_info->use_map & slow_mask)) && !all_vbo)
+        if ((stream_info->position_transformed || (stream_info->use_map & slow_mask)) && !stream_info->all_vbo)
         {
             device->useDrawStridedSlow = TRUE;
         }
@@ -448,6 +445,16 @@ void device_update_stream_info(struct wined3d_device *device, const struct wined
         {
             device->useDrawStridedSlow = FALSE;
         }
+    }
+
+    if (state->index_buffer && !state->user_stream)
+    {
+        if (prev_all_vbo != stream_info->all_vbo)
+            device_invalidate_state(device, STATE_INDEXBUFFER);
+        if (stream_info->all_vbo)
+            wined3d_buffer_preload(state->index_buffer);
+        else
+            buffer_get_sysmem(state->index_buffer, gl_info);
     }
 }
 
@@ -1825,7 +1832,7 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
      * matrix.  The Projection matrix stay projection matrix. */
 
     if (d3dts == WINED3D_TS_VIEW)
-        device->view_ident = !memcmp(matrix, identity, 16 * sizeof(float));
+        device->view_ident = !memcmp(matrix, &identity, sizeof(identity));
 
     if (d3dts < WINED3D_TS_WORLD_MATRIX(device->adapter->gl_info.limits.blends))
         device_invalidate_state(device, STATE_TRANSFORM(d3dts));
@@ -3468,7 +3475,7 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     vs = state->vertex_shader;
     state->vertex_shader = NULL;
     state->user_stream = FALSE;
-    device_stream_info_from_declaration(device, &stream_info, NULL);
+    device_stream_info_from_declaration(device, &stream_info);
     state->user_stream = streamWasUP;
     state->vertex_shader = vs;
 
@@ -4006,21 +4013,17 @@ HRESULT CDECL wined3d_device_draw_primitive(struct wined3d_device *device, UINT 
 
     /* Account for the loading offset due to index buffers. Instead of
      * reloading all sources correct it with the startvertex parameter. */
-    drawPrimitive(device, vertex_count, start_vertex, 0, NULL);
+    drawPrimitive(device, vertex_count, start_vertex, FALSE, NULL);
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *device, UINT start_idx, UINT index_count)
 {
-    struct wined3d_buffer *index_buffer;
-    UINT index_size = 2;
-    GLuint vbo;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
     TRACE("device %p, start_idx %u, index_count %u.\n", device, start_idx, index_count);
 
-    index_buffer = device->stateBlock->state.index_buffer;
-    if (!index_buffer)
+    if (!device->stateBlock->state.index_buffer)
     {
         /* D3D9 returns D3DERR_INVALIDCALL when DrawIndexedPrimitive is called
          * without an index buffer set. (The first time at least...)
@@ -4041,12 +4044,6 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
         device_invalidate_state(device, STATE_INDEXBUFFER);
         device->stateBlock->state.user_stream = FALSE;
     }
-    vbo = index_buffer->buffer_object;
-
-    if (device->stateBlock->state.index_format == WINED3DFMT_R16_UINT)
-        index_size = 2;
-    else
-        index_size = 4;
 
     if (!gl_info->supported[ARB_DRAW_ELEMENTS_BASE_VERTEX] &&
         device->stateBlock->state.load_base_vertex_index != device->stateBlock->state.base_vertex_index)
@@ -4055,8 +4052,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
         device_invalidate_state(device, STATE_BASEVERTEXINDEX);
     }
 
-    drawPrimitive(device, index_count, start_idx, index_size,
-            vbo ? NULL : index_buffer->resource.allocatedMemory);
+    drawPrimitive(device, index_count, start_idx, TRUE, NULL);
 
     return WINED3D_OK;
 }
@@ -4094,7 +4090,7 @@ HRESULT CDECL wined3d_device_draw_primitive_up(struct wined3d_device *device, UI
     /* TODO: Only mark dirty if drawing from a different UP address */
     device_invalidate_state(device, STATE_STREAMSRC);
 
-    drawPrimitive(device, vertex_count, 0, 0, NULL);
+    drawPrimitive(device, vertex_count, 0, FALSE, NULL);
 
     /* MSDN specifies stream zero settings must be set to NULL */
     stream->buffer = NULL;
@@ -4112,7 +4108,6 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_up(struct wined3d_device *de
 {
     struct wined3d_stream_state *stream;
     struct wined3d_buffer *vb, *ib;
-    UINT index_size;
 
     TRACE("device %p, index_count %u, index_data %p, index_data_format %s, stream_data %p, stream_stride %u.\n",
             device, index_count, index_data, debug_d3dformat(index_data_format_id), stream_data, stream_stride);
@@ -4123,11 +4118,6 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_up(struct wined3d_device *de
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (index_data_format_id == WINED3DFMT_R16_UINT)
-        index_size = 2;
-    else
-        index_size = 4;
-
     stream = &device->stateBlock->state.streams[0];
     vb = stream->buffer;
     stream->buffer = (struct wined3d_buffer *)stream_data;
@@ -4136,6 +4126,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_up(struct wined3d_device *de
     stream->offset = 0;
     stream->stride = stream_stride;
     device->stateBlock->state.user_stream = TRUE;
+    device->stateBlock->state.index_format = index_data_format_id;
 
     /* Set to 0 as per msdn. Do it now due to the stream source loading during drawPrimitive */
     device->stateBlock->state.base_vertex_index = 0;
@@ -4148,7 +4139,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_up(struct wined3d_device *de
     device_invalidate_state(device, STATE_STREAMSRC);
     device_invalidate_state(device, STATE_INDEXBUFFER);
 
-    drawPrimitive(device, index_count, 0, index_size, index_data);
+    drawPrimitive(device, index_count, 0, TRUE, index_data);
 
     /* MSDN specifies stream zero settings and index buffer must be set to NULL */
     stream->buffer = NULL;
@@ -4178,7 +4169,7 @@ HRESULT CDECL wined3d_device_draw_primitive_strided(struct wined3d_device *devic
 
     device->stateBlock->state.base_vertex_index = 0;
     device->up_strided = strided_data;
-    drawPrimitive(device, vertex_count, 0, 0, NULL);
+    drawPrimitive(device, vertex_count, 0, FALSE, NULL);
     device->up_strided = NULL;
 
     /* Invalidate the states again to make sure the values from the stateblock
@@ -4195,7 +4186,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_strided(struct wined3d_devic
         UINT index_count, const struct wined3d_strided_data *strided_data,
         UINT vertex_count, const void *index_data, enum wined3d_format_id index_data_format_id)
 {
-    UINT index_size = index_data_format_id == WINED3DFMT_R32_UINT ? 4 : 2;
+    enum wined3d_format_id prev_idx_format;
 
     /* Mark the state dirty until we have nicer tracking
      * its fine to change baseVertexIndex because that call is only called by ddraw which does not need
@@ -4205,11 +4196,14 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_strided(struct wined3d_devic
     device_invalidate_state(device, STATE_STREAMSRC);
     device_invalidate_state(device, STATE_INDEXBUFFER);
 
+    prev_idx_format = device->stateBlock->state.index_format;
+    device->stateBlock->state.index_format = index_data_format_id;
     device->stateBlock->state.user_stream = TRUE;
     device->stateBlock->state.base_vertex_index = 0;
     device->up_strided = strided_data;
-    drawPrimitive(device, index_count, 0, index_size, index_data);
+    drawPrimitive(device, index_count, 0, TRUE, index_data);
     device->up_strided = NULL;
+    device->stateBlock->state.index_format = prev_idx_format;
 
     device_invalidate_state(device, STATE_VDECL);
     device_invalidate_state(device, STATE_STREAMSRC);

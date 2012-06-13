@@ -18,6 +18,8 @@
 
 var tmp, i;
 
+var bigInt = Math.pow(2,40);
+
 ok(ScriptEngine() === "JScript", "ScriptEngine() = " + ScriptEngine());
 ok(ScriptEngine(3) === "JScript", "ScriptEngine(3) = " + ScriptEngine(3));
 ok(ScriptEngineMajorVersion() === ScriptEngineMajorVersion(2), "ScriptEngineMajorVersion() !== ScriptEngineMajorVersion(2)");
@@ -306,6 +308,8 @@ tmp = "abc".charAt(0,2);
 ok(tmp === "a", "'abc',charAt(0.2) = " + tmp);
 tmp = "abc".charAt(NaN);
 ok(tmp === "a", "'abc',charAt(NaN) = " + tmp);
+tmp = "abc".charAt(bigInt);
+ok(tmp === "", "'abc',charAt(bigInt) = " + tmp);
 
 tmp = "abc".charCodeAt(0);
 ok(tmp === 0x61, "'abc'.charCodeAt(0) = " + tmp);
@@ -325,6 +329,8 @@ tmp = "\052".charCodeAt(0);
 ok(tmp === 0x2A, "'\052'.charCodeAt(0) = " + tmp);
 tmp = "\xa2".charCodeAt(0);
 ok(tmp === 0xA2, "'\xa2'.charCodeAt(0) = " + tmp);
+tmp = "abc".charCodeAt(bigInt);
+ok(isNaN(tmp), "'abc'.charCodeAt(bigInt) = " + tmp);
 
 tmp = "abcd".substring(1,3);
 ok(tmp === "bc", "'abcd'.substring(1,3) = " + tmp);
@@ -469,6 +475,8 @@ tmp = "abcd".indexOf("bc",0,"test");
 ok(tmp === 1, "indexOf = " + tmp);
 tmp = "abcd".indexOf();
 ok(tmp == -1, "indexOf = " + tmp);
+tmp = "abcd".indexOf("b", bigInt);
+ok(tmp == -1, "indexOf = " + tmp);
 
 tmp = "abcd".lastIndexOf("bc",1);
 ok(tmp === 1, "lastIndexOf = " + tmp);
@@ -488,6 +496,8 @@ tmp = "aaaa".lastIndexOf("a",2);
 ok(tmp == 2, "lastIndexOf = " + tmp);
 tmp = strObj.lastIndexOf("b");
 ok(tmp === 1, "lastIndexOf = " + tmp);
+tmp = "bbb".lastIndexOf("b", bigInt);
+ok(tmp === 2, "lastIndexOf = " + tmp);
 
 tmp = "".toLowerCase();
 ok(tmp === "", "''.toLowerCase() = " + tmp);
@@ -995,6 +1005,28 @@ arr = [1,2,3,4,5];
 tmp = arr.splice();
 ok(tmp.toString() == "", "arr.splice(2,-1) returned " + tmp.toString());
 ok(arr.toString() == "1,2,3,4,5", "arr.splice(2,-1) is " + arr.toString());
+
+arr = [1,2,3,4,5];
+tmp = arr.splice(bigInt);
+ok(tmp.toString() == "", "arr.splice(bigInt) returned " + tmp.toString());
+ok(arr.toString() == "1,2,3,4,5", "arr.splice(bigInt) is " + arr.toString());
+
+arr = [1,2,3,4,5];
+tmp = arr.splice(-bigInt);
+ok(tmp.toString() == "", "arr.splice(-bigInt) returned " + tmp.toString());
+ok(arr.toString() == "1,2,3,4,5", "arr.splice(-bigInt) is " + arr.toString());
+
+if(invokeVersion >= 2) {
+    arr = [1,2,3,4,5];
+    tmp = arr.splice(2, bigInt);
+    ok(tmp.toString() == "3,4,5", "arr.splice(2, bigInt) returned " + tmp.toString());
+    ok(arr.toString() == "1,2", "arr.splice(2, bigInt) is " + arr.toString());
+}
+
+arr = [1,2,3,4,5];
+tmp = arr.splice(2, -bigInt);
+ok(tmp.toString() == "", "arr.splice(2, -bigInt) returned " + tmp.toString());
+ok(arr.toString() == "1,2,3,4,5", "arr.splice(2, -bigInt) is " + arr.toString());
 
 obj = new Object();
 obj.length = 3;

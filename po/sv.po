@@ -1079,7 +1079,7 @@ msgid "Processing; "
 msgstr "Behandlar; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Initierar; "
 
 #: comdlg32.rc:96
@@ -3717,7 +3717,7 @@ msgid "Too many commands.\n"
 msgstr "För många kommandon.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Adapter-hårdvarufel.\n"
 
 #: winerror.mc:256
@@ -3729,7 +3729,7 @@ msgid "Unexpected network error.\n"
 msgstr "Oväntat nätverksfel.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Felaktig fjärradapter.\n"
 
 #: winerror.mc:271
@@ -4341,7 +4341,7 @@ msgid "Invalid flags.\n"
 msgstr "Ogiltiga flaggor.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Volymen ej igenkänd.\n"
 
 #: winerror.mc:1046
@@ -4997,7 +4997,7 @@ msgid "Continue work in progress.\n"
 msgstr "Fortsätt pågående arbete.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Redan initialiserad.\n"
 
 #: winerror.mc:1871
@@ -6029,7 +6029,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Okänd autentiseringsidentitet.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Okänd auktoriseringstjänst.\n"
 
 #: winerror.mc:3171
@@ -6165,7 +6165,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Ogiltig användarbuffert.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Ej igenkänt media.\n"
 
 #: winerror.mc:3341
@@ -6309,7 +6309,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC-kommunikationsfel.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Ostödd auktoriseringsnivå.\n"
 
 #: winerror.mc:3521
@@ -6337,7 +6337,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Ogiltig referensoperation.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Fel serialiserande paketversion.\n"
 
 #: winerror.mc:3556
@@ -6651,12 +6651,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -6681,12 +6681,12 @@ msgstr ""
 "Applicera en patch:\n"
 "\t/p patchpaket [egenskap]\n"
 "\t/p patchpaket /a paket [egenskap]\n"
-"Logg och UI-modifierare för ovanstående kommandon:\n"
+"Logg- och användargränssnittsmodifierare för ovanstående kommandon:\n"
 "\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] loggfil\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Registrera MSI-tjänst:\n"
+"Registrera MSI-tjänsten:\n"
 "\t/y\n"
-"Avregistrera MSI-tjänst:\n"
+"Avregistrera MSI-tjänsten:\n"
 "\t/z\n"
 "Visa denna hjälp:\n"
 "\t/help\n"
@@ -9083,7 +9083,7 @@ msgid "Filter Error"
 msgstr ""
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr ""
 
 #: wldap32.rc:116
@@ -11127,7 +11127,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Innehåller kommandon för att redigera värden och nycklar"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Innehåller kommandon för att anpassa registerfönstret"
 
 #: regedit.rc:137

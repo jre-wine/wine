@@ -6677,8 +6677,8 @@ static BOOL get_outline_text_metrics(GdiFont *font)
             TM.tmWeight = pOS2->usWeightClass;
     }
     TM.tmOverhang = 0;
-    TM.tmDigitizedAspectX = 300;
-    TM.tmDigitizedAspectY = 300;
+    TM.tmDigitizedAspectX = 96; /* FIXME */
+    TM.tmDigitizedAspectY = 96; /* FIXME */
     /* It appears that for fonts with SYMBOL_CHARSET Windows always sets
      * symbol range to 0 - f0ff
      */
@@ -7874,7 +7874,18 @@ static const struct gdi_dc_funcs freetype_funcs =
     NULL,                               /* pSwapBuffers */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
-    /* OpenGL not supported */
+    NULL,                               /* pwglCopyContext */
+    NULL,                               /* pwglCreateContext */
+    NULL,                               /* pwglCreateContextAttribsARB */
+    NULL,                               /* pwglDeleteContext */
+    NULL,                               /* pwglGetProcAddress */
+    NULL,                               /* pwglMakeContextCurrentARB */
+    NULL,                               /* pwglMakeCurrent */
+    NULL,                               /* pwglSetPixelFormatWINE */
+    NULL,                               /* pwglShareLists */
+    NULL,                               /* pwglUseFontBitmapsA */
+    NULL,                               /* pwglUseFontBitmapsW */
+    GDI_PRIORITY_FONT_DRV               /* priority */
 };
 
 #else /* HAVE_FREETYPE */

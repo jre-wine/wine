@@ -860,7 +860,7 @@ do {                                                                            
         debug_d3dformat(si->elements[name].format->id), si->elements[name].stream_idx); } while(0)
 
 /* Global variables */
-extern const float identity[16] DECLSPEC_HIDDEN;
+extern const struct wined3d_matrix identity DECLSPEC_HIDDEN;
 
 enum wined3d_ffp_idx
 {
@@ -920,7 +920,8 @@ struct wined3d_stream_info_element
 struct wined3d_stream_info
 {
     struct wined3d_stream_info_element elements[MAX_ATTRIBS];
-    BOOL position_transformed;
+    DWORD position_transformed : 1;
+    DWORD all_vbo : 1;
     WORD swizzle_map; /* MAX_ATTRIBS, 16 */
     WORD use_map; /* MAX_ATTRIBS, 16 */
 };
@@ -931,7 +932,7 @@ struct wined3d_stream_info
 
 /* Routine common to the draw primitive and draw indexed primitive routines */
 void drawPrimitive(struct wined3d_device *device, UINT index_count,
-        UINT start_idx, UINT idxBytes, const void *idxData) DECLSPEC_HIDDEN;
+        UINT start_idx, BOOL indexed, const void *idxData) DECLSPEC_HIDDEN;
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) DECLSPEC_HIDDEN;
 
 typedef void (WINE_GLAPI *glAttribFunc)(const void *data);
@@ -1655,14 +1656,13 @@ void wined3d_get_draw_rect(const struct wined3d_state *state, RECT *rect) DECLSP
 struct wined3d
 {
     LONG ref;
-    void *parent;
     DWORD flags;
     UINT dxVersion;
     UINT adapter_count;
     struct wined3d_adapter adapters[1];
 };
 
-HRESULT wined3d_init(struct wined3d *wined3d, UINT version, DWORD flags, void *parent) DECLSPEC_HIDDEN;
+HRESULT wined3d_init(struct wined3d *wined3d, UINT version, DWORD flags) DECLSPEC_HIDDEN;
 BOOL wined3d_register_window(HWND window, struct wined3d_device *device) DECLSPEC_HIDDEN;
 void wined3d_unregister_window(HWND window) DECLSPEC_HIDDEN;
 
@@ -1802,7 +1802,7 @@ LRESULT device_process_message(struct wined3d_device *device, HWND window, BOOL 
 void device_resource_add(struct wined3d_device *device, struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 void device_resource_released(struct wined3d_device *device, struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 void device_stream_info_from_declaration(struct wined3d_device *device,
-        struct wined3d_stream_info *stream_info, BOOL *fixup) DECLSPEC_HIDDEN;
+        struct wined3d_stream_info *stream_info) DECLSPEC_HIDDEN;
 void device_switch_onscreen_ds(struct wined3d_device *device, struct wined3d_context *context,
         struct wined3d_surface *depth_stencil) DECLSPEC_HIDDEN;
 void device_update_stream_info(struct wined3d_device *device, const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;

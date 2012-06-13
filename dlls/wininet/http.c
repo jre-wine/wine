@@ -2585,13 +2585,13 @@ static const data_stream_vtbl_t chunked_stream_vtbl = {
 };
 
 /* set the request content length based on the headers */
-static DWORD set_content_length(http_request_t *request, DWORD status_code)
+static DWORD set_content_length(http_request_t *request)
 {
     static const WCHAR szChunked[] = {'c','h','u','n','k','e','d',0};
     WCHAR encoding[20];
     DWORD size;
 
-    if(status_code == HTTP_STATUS_NO_CONTENT) {
+    if(request->status_code == HTTP_STATUS_NO_CONTENT) {
         request->contentLength = request->netconn_stream.content_length = 0;
         return ERROR_SUCCESS;
     }
@@ -3421,6 +3421,34 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
         index = HTTP_GetCustomHeaderIndex(request, header_lookup[request->read_gzip ? HTTP_QUERY_CONTENT_TYPE : level],
                 requested_index,request_only);
         break;
+    case HTTP_QUERY_STATUS_CODE: {
+        DWORD res = ERROR_SUCCESS;
+
+        if(request_only || requested_index)
+            break;
+
+        if(dwInfoLevel & HTTP_QUERY_FLAG_NUMBER) {
+            if(*lpdwBufferLength >= sizeof(DWORD))
+                *(DWORD*)lpBuffer = request->status_code;
+            else
+                res = ERROR_INSUFFICIENT_BUFFER;
+            *lpdwBufferLength = sizeof(DWORD);
+        }else {
+            WCHAR buf[12];
+            DWORD size;
+            static const WCHAR formatW[] = {'%','u',0};
+
+            size = (sprintfW(buf, formatW, request->status_code)+1) * sizeof(WCHAR);
+
+            if(size <= *lpdwBufferLength)
+                memcpy(lpBuffer, buf, size);
+            else
+                res = ERROR_INSUFFICIENT_BUFFER;
+
+            *lpdwBufferLength = size;
+        }
+        return res;
+    }
     default:
         assert (LAST_TABLE_HEADER == (HTTP_QUERY_UNLESS_MODIFIED_SINCE + 1));
 
@@ -3440,7 +3468,7 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
         return ERROR_HTTP_HEADER_NOT_FOUND;
     }
 
-    if (lpdwIndex && level != HTTP_QUERY_STATUS_CODE) (*lpdwIndex)++;
+    if (lpdwIndex) (*lpdwIndex)++;
 
     /* coalesce value to requested type */
     if (dwInfoLevel & HTTP_QUERY_FLAG_NUMBER && lpBuffer)
@@ -4616,7 +4644,7 @@ static DWORD open_http_connection(http_request_t *request, BOOL *reusing)
         if(session->appInfo->proxy)
             res = HTTP_SecureProxyConnect(request);
         if(res == ERROR_SUCCESS)
-            res = NETCON_secure_connect(request->netconn, session->hostName);
+            res = NETCON_secure_connect(request->netconn);
         if(res != ERROR_SUCCESS)
         {
             WARN("Couldn't connect securely to host\n");
@@ -4797,7 +4825,6 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         if (bEndRequest)
         {
             DWORD dwBufferSize;
-            DWORD dwStatusCode;
 
             INTERNET_SendCallback(&request->hdr, request->hdr.dwContext,
                                 INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
@@ -4821,12 +4848,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
             HTTP_ProcessExpires(request);
             HTTP_ProcessLastModified(request);
 
-            dwBufferSize = sizeof(dwStatusCode);
-            if (HTTP_HttpQueryInfoW(request,HTTP_QUERY_FLAG_NUMBER|HTTP_QUERY_STATUS_CODE,
-                                    &dwStatusCode,&dwBufferSize,NULL) != ERROR_SUCCESS)
-                dwStatusCode = 0;
-
-            res = set_content_length(request, dwStatusCode);
+            res = set_content_length(request);
             if(res != ERROR_SUCCESS)
                 goto lend;
             if(!request->contentLength)
@@ -4836,14 +4858,16 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
             {
                 WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
                 dwBufferSize=sizeof(szNewLocation);
-                if ((dwStatusCode == HTTP_STATUS_REDIRECT ||
-                     dwStatusCode == HTTP_STATUS_MOVED ||
-                     dwStatusCode == HTTP_STATUS_REDIRECT_KEEP_VERB ||
-                     dwStatusCode == HTTP_STATUS_REDIRECT_METHOD) &&
-                    HTTP_HttpQueryInfoW(request,HTTP_QUERY_LOCATION,szNewLocation,&dwBufferSize,NULL) == ERROR_SUCCESS)
-                {
+                switch(request->status_code) {
+                case HTTP_STATUS_REDIRECT:
+                case HTTP_STATUS_MOVED:
+                case HTTP_STATUS_REDIRECT_KEEP_VERB:
+                case HTTP_STATUS_REDIRECT_METHOD:
+                    if(HTTP_HttpQueryInfoW(request,HTTP_QUERY_LOCATION,szNewLocation,&dwBufferSize,NULL) != ERROR_SUCCESS)
+                        break;
+
                     if (strcmpW(request->verb, szGET) && strcmpW(request->verb, szHEAD) &&
-                        dwStatusCode != HTTP_STATUS_REDIRECT_KEEP_VERB)
+                        request->status_code != HTTP_STATUS_REDIRECT_KEEP_VERB)
                     {
                         heap_free(request->verb);
                         request->verb = heap_strdupW(szGET);
@@ -4868,7 +4892,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
             {
                 WCHAR szAuthValue[2048];
                 dwBufferSize=2048;
-                if (dwStatusCode == HTTP_STATUS_DENIED)
+                if (request->status_code == HTTP_STATUS_DENIED)
                 {
                     LPHTTPHEADERW Host = HTTP_GetHeader(request, hostW);
                     DWORD dwIndex = 0;
@@ -4892,7 +4916,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
                         request->authInfo = NULL;
                     }
                 }
-                if (dwStatusCode == HTTP_STATUS_PROXY_AUTH_REQ)
+                if (request->status_code == HTTP_STATUS_PROXY_AUTH_REQ)
                 {
                     DWORD dwIndex = 0;
                     while (HTTP_HttpQueryInfoW(request,HTTP_QUERY_PROXY_AUTHENTICATE,szAuthValue,&dwBufferSize,&dwIndex) == ERROR_SUCCESS)
@@ -4968,9 +4992,8 @@ static void AsyncHttpSendRequestProc(WORKREQUEST *workRequest)
 
 static DWORD HTTP_HttpEndRequestW(http_request_t *request, DWORD dwFlags, DWORD_PTR dwContext)
 {
-    INT responseLen;
-    DWORD dwCode, dwCodeLength;
     DWORD dwBufferSize;
+    INT responseLen;
     DWORD res = ERROR_SUCCESS;
 
     if(!request->netconn) {
@@ -4995,44 +5018,40 @@ static DWORD HTTP_HttpEndRequestW(http_request_t *request, DWORD dwFlags, DWORD_
     HTTP_ProcessExpires(request);
     HTTP_ProcessLastModified(request);
 
-    dwCodeLength = sizeof(dwCode);
-    if (HTTP_HttpQueryInfoW(request,HTTP_QUERY_FLAG_NUMBER|HTTP_QUERY_STATUS_CODE,
-                            &dwCode,&dwCodeLength,NULL) != ERROR_SUCCESS)
-        dwCode = 0;
-
-    if ((res = set_content_length( request, dwCode )) == ERROR_SUCCESS) {
+    if ((res = set_content_length(request)) == ERROR_SUCCESS) {
         if(!request->contentLength)
             http_release_netconn(request, TRUE);
     }
 
     if (res == ERROR_SUCCESS && !(request->hdr.dwFlags & INTERNET_FLAG_NO_AUTO_REDIRECT))
     {
-        if (dwCode == HTTP_STATUS_REDIRECT ||
-                dwCode == HTTP_STATUS_MOVED ||
-                dwCode == HTTP_STATUS_REDIRECT_METHOD ||
-                dwCode == HTTP_STATUS_REDIRECT_KEEP_VERB)
-        {
+        switch(request->status_code) {
+        case HTTP_STATUS_REDIRECT:
+        case HTTP_STATUS_MOVED:
+        case HTTP_STATUS_REDIRECT_METHOD:
+        case HTTP_STATUS_REDIRECT_KEEP_VERB: {
             WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
             dwBufferSize=sizeof(szNewLocation);
-            if (HTTP_HttpQueryInfoW(request, HTTP_QUERY_LOCATION, szNewLocation, &dwBufferSize, NULL) == ERROR_SUCCESS)
+            if (HTTP_HttpQueryInfoW(request, HTTP_QUERY_LOCATION, szNewLocation, &dwBufferSize, NULL) != ERROR_SUCCESS)
+                break;
+
+            if (strcmpW(request->verb, szGET) && strcmpW(request->verb, szHEAD) &&
+                request->status_code != HTTP_STATUS_REDIRECT_KEEP_VERB)
             {
-                if (strcmpW(request->verb, szGET) && strcmpW(request->verb, szHEAD) &&
-                    dwCode != HTTP_STATUS_REDIRECT_KEEP_VERB)
-                {
-                    heap_free(request->verb);
-                    request->verb = heap_strdupW(szGET);
-                }
-                drain_content(request);
-                if ((new_url = HTTP_GetRedirectURL( request, szNewLocation )))
-                {
-                    INTERNET_SendCallback(&request->hdr, request->hdr.dwContext, INTERNET_STATUS_REDIRECT,
-                                          new_url, (strlenW(new_url) + 1) * sizeof(WCHAR));
-                    res = HTTP_HandleRedirect(request, new_url);
-                    if (res == ERROR_SUCCESS)
-                        res = HTTP_HttpSendRequestW(request, NULL, 0, NULL, 0, 0, TRUE);
-                    heap_free( new_url );
-                }
+                heap_free(request->verb);
+                request->verb = heap_strdupW(szGET);
             }
+            drain_content(request);
+            if ((new_url = HTTP_GetRedirectURL( request, szNewLocation )))
+            {
+                INTERNET_SendCallback(&request->hdr, request->hdr.dwContext, INTERNET_STATUS_REDIRECT,
+                                      new_url, (strlenW(new_url) + 1) * sizeof(WCHAR));
+                res = HTTP_HandleRedirect(request, new_url);
+                if (res == ERROR_SUCCESS)
+                    res = HTTP_HttpSendRequestW(request, NULL, 0, NULL, 0, 0, TRUE);
+                heap_free( new_url );
+            }
+        }
         }
     }
 
@@ -5692,6 +5711,8 @@ static INT HTTP_GetResponseHeaders(http_request_t *request, BOOL clear)
                 goto lend;
             *status_text++=0;
 
+            request->status_code = atoiW(status_code);
+
             TRACE("version [%s] status code [%s] status text [%s]\n",
                debugstr_w(buffer), debugstr_w(status_code), debugstr_w(status_text) );
 
@@ -5704,6 +5725,7 @@ static INT HTTP_GetResponseHeaders(http_request_t *request, BOOL clear)
             heap_free(request->version);
             heap_free(request->statusText);
 
+            request->status_code = HTTP_STATUS_OK;
             request->version = heap_strdupW(g_szHttp1_0);
             request->statusText = heap_strdupW(szOK);
 

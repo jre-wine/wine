@@ -1050,7 +1050,7 @@ msgid "Processing; "
 msgstr ""
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Initialising; "
 
 #: comdlg32.rc:96
@@ -2521,7 +2521,7 @@ msgstr ""
 
 #: cryptui.rc:82
 msgid "The file format is not recognized. Please select another file."
-msgstr "The file format is not recognized. Please select another file."
+msgstr "The file format is not recognised. Please select another file."
 
 #: cryptui.rc:83
 msgid "Could not open "
@@ -3614,7 +3614,7 @@ msgid "Too many commands.\n"
 msgstr "Too many commands.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Adaptor hardware error.\n"
 
 #: winerror.mc:256
@@ -3626,7 +3626,7 @@ msgid "Unexpected network error.\n"
 msgstr "Unexpected network error.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Bad remote adaptor.\n"
 
 #: winerror.mc:271
@@ -4238,7 +4238,7 @@ msgid "Invalid flags.\n"
 msgstr "Invalid flags.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Unrecognised volume.\n"
 
 #: winerror.mc:1046
@@ -4894,7 +4894,7 @@ msgid "Continue work in progress.\n"
 msgstr "Continue work in progress.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Already initialised.\n"
 
 #: winerror.mc:1871
@@ -5926,7 +5926,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Invalid authentication identity.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Unknown authorisation service.\n"
 
 #: winerror.mc:3171
@@ -6062,7 +6062,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Invalid user buffer.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Unrecognised media.\n"
 
 #: winerror.mc:3341
@@ -6206,7 +6206,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC comm failure.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Unsupported authorisation level.\n"
 
 #: winerror.mc:3521
@@ -6234,7 +6234,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Invalid handle operation.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Wrong serialising package version.\n"
 
 #: winerror.mc:3556
@@ -6546,12 +6546,12 @@ msgid ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -6576,12 +6576,12 @@ msgstr ""
 "Apply a patch:\n"
 "\t/p patch_package [property]\n"
 "\t/p patch_package /a package [property]\n"
-"Log and UI Modifiers for above commands:\n"
-"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] logfile\n"
+"Log and user interface modifiers for the above commands:\n"
+"\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] log_file\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
-"Register MSI Service:\n"
+"Register the MSI Service:\n"
 "\t/y\n"
-"Unregister MSI Service:\n"
+"Unregister the MSI Service:\n"
 "\t/z\n"
 "Display this help:\n"
 "\t/help\n"
@@ -8382,7 +8382,7 @@ msgstr "The device driver is not ready."
 
 #: winmm.rc:74
 msgid "A problem occurred in initializing MCI. Try restarting Windows."
-msgstr "A problem occurred in initializing MCI. Try restarting Windows."
+msgstr "A problem occurred in initialising MCI. Try restarting Windows."
 
 #: winmm.rc:75
 msgid ""
@@ -8661,7 +8661,7 @@ msgid ""
 "The device you are trying to record from cannot recognize the current file "
 "format."
 msgstr ""
-"The device you are trying to record from cannot recognize the current file "
+"The device you are trying to record from cannot recognise the current file "
 "format."
 
 #: winmm.rc:122
@@ -8963,7 +8963,7 @@ msgid "Filter Error"
 msgstr "Filter Error"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "User Cancelled"
 
 #: wldap32.rc:116
@@ -9429,9 +9429,9 @@ msgstr ""
 "start [options] document_filename\n"
 "\n"
 "Options:\n"
-"/M[inimized] Start the program minimized.\n"
-"/MAX[imized] Start the program maximized.\n"
-"/R[estored]  Start the program normally (neither minimized nor maximized).\n"
+"/M[inimized] Start the program minimised.\n"
+"/MAX[imized] Start the program maximised.\n"
+"/R[estored]  Start the program normally (neither minimised nor maximised).\n"
 "/W[ait]      Wait for started program to finish, then exit with its exit "
 "code.\n"
 "/Unix        Use a Unix filename and start the file like windows explorer.\n"
@@ -9618,7 +9618,7 @@ msgstr ""
 "DEL (ERASE)\tDelete a file or set of files\n"
 "DIR\t\tList the contents of a directory\n"
 "ECHO\t\tCopy text directly to the console output\n"
-"ENDLOCAL\tEnd localization of environment changes in a batch file\n"
+"ENDLOCAL\tEnd localisation of environment changes in a batch file\n"
 "FTYPE\t\tShow or modify open commands associated with file types\n"
 "HELP\t\tShow brief help details on a topic\n"
 "MD (MKDIR)\tCreate a subdirectory\n"
@@ -9632,7 +9632,7 @@ msgstr ""
 "REN (RENAME)\tRename a file\n"
 "RD (RMDIR)\tDelete a subdirectory\n"
 "SET\t\tSet or show environment variables\n"
-"SETLOCAL\tStart localization of environment changes in a batch file\n"
+"SETLOCAL\tStart localisation of environment changes in a batch file\n"
 "START\t\tStart a program, or open a document in the associated program\n"
 "TIME\t\tSet or show the current system time\n"
 "TITLE\t\tSet the window title for the CMD session\n"
@@ -9839,7 +9839,7 @@ msgstr "Error: Unknown or invalid command line parameters specified\n"
 
 #: ipconfig.rc:29
 msgid "%1 adapter %2\n"
-msgstr "%1 adapter %2\n"
+msgstr "%1 adaptor %2\n"
 
 #: ipconfig.rc:30
 msgid "Ethernet"
@@ -10693,7 +10693,7 @@ msgstr ""
 
 #: progman.rc:176 progman.rc:212
 msgid "&Minimize at launch"
-msgstr "&Minimize at launch"
+msgstr "&Minimise at launch"
 
 #: progman.rc:180
 msgid "Change &icon..."
@@ -10992,7 +10992,7 @@ msgid "Contains commands for editing values or keys"
 msgstr ""
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr ""
 
 #: regedit.rc:137

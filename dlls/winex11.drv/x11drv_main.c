@@ -539,6 +539,7 @@ static BOOL process_attach(void)
 
     /* Open display */
 
+    if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
     if (!(display = XOpenDisplay( NULL ))) return FALSE;
 
     fcntl( ConnectionNumber(display), F_SETFD, 1 ); /* set close on exec flag */
@@ -632,7 +633,6 @@ static void process_detach(void)
 
     /* cleanup GDI */
     X11DRV_GDI_Finalize();
-    X11DRV_OpenGL_Cleanup();
 
     IME_UnregisterClasses();
     DeleteCriticalSection( &X11DRV_CritSection );

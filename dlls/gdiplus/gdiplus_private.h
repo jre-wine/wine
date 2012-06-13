@@ -346,11 +346,9 @@ struct GpImageAttributes{
 };
 
 struct GpFont{
-    LOGFONTW lfw;
-    REAL emSize;
-    REAL pixel_size;
-    UINT height;
-    LONG line_spacing;
+    GpFontFamily *family;
+    OUTLINETEXTMETRICW otm;
+    REAL emSize; /* in font units */
     Unit unit;
 };
 
@@ -377,8 +375,9 @@ struct GpFontCollection{
 };
 
 struct GpFontFamily{
-    OUTLINETEXTMETRICW otm;
     WCHAR FamilyName[LF_FACESIZE];
+    UINT16 em_height, ascent, descent, line_spacing; /* in font units */
+    int dpi;
 };
 
 /* internal use */
