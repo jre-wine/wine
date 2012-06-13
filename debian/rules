@@ -110,6 +110,9 @@ endif
 control-stamp: debian/control.in
 	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
+	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
+	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
+	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
 	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' debian/control.in > debian/control
 	touch control-stamp
 
