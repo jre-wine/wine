@@ -1,8 +1,14 @@
-wine-unstable (1.5.5-1) UNRELEASED; urgency=low
+wine-unstable (1.5.5-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.5, released May 25, 2012.
+    - Support for installing Mono as a Wine add-on package.
+    - Dithering of pattern brushes in the DIB engine.
+    - Support for installing the .NET 4.0 runtime.
+    - DDS files supported in D3DX9.
+    - Various bug fixes.
+  * Handle removal of the fnt2bdf and wine-font-convert tools
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:22:11 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:28:29 -0400
 
 wine-unstable (1.5.4-1) unstable; urgency=low
 
