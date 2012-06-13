@@ -1,8 +1,17 @@
-wine-unstable (1.5.6-1) UNRELEASED; urgency=low
+wine-unstable (1.5.6-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.5.6, released Jun 8, 2012.
+    - Automatic installation of the Mono add-on package.
+    - Control panel applet for joysticks.
+    - Device bitmap rendering now done through the DIB engine.
+    - Support for video rendering through DirectX (VMR-9).
+    - First steps towards a D3D shader compiler.
+    - Build fixes for DragonFly BSD.
+    - Various bug fixes.
+  * Correct maintainer and vcs fields (closes: #677317)
+  * Make libwine-ldap and libwine-openal recommended
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 12 Jun 2012 21:42:46 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 13 Jun 2012 14:18:30 -0400
 
 wine-unstable (1.5.5-1) unstable; urgency=low
 
