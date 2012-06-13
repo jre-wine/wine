@@ -145,13 +145,12 @@ COLORREF make_rgb_colorref( HDC hdc, dib_info *dib, COLORREF color, BOOL *got_pi
 
     if (color >> 16 == 0x10ff)  /* DIBINDEX */
     {
+        const RGBQUAD *color_table = get_dib_color_table( dib );
         WORD index = LOWORD( color );
         *got_pixel = TRUE;
-        if (!dib->color_table || index >= (1 << dib->bit_count)) return 0;
+        if (!color_table || index >= (1 << dib->bit_count)) return 0;
         *pixel = index;
-        return RGB( dib->color_table[index].rgbRed,
-                    dib->color_table[index].rgbGreen,
-                    dib->color_table[index].rgbBlue );
+        return RGB( color_table[index].rgbRed, color_table[index].rgbGreen, color_table[index].rgbBlue );
     }
 
     return color & 0xffffff;
@@ -172,6 +171,7 @@ DWORD get_pixel_color( dibdrv_physdev *pdev, COLORREF color, BOOL mono_fixup )
     BOOL got_pixel;
     DWORD pixel;
     COLORREF rgb_ref;
+    const RGBQUAD *color_table;
 
     rgb_ref = make_rgb_colorref( pdev->dev.hdc, &pdev->dib, color, &got_pixel, &pixel );
     if (got_pixel) return pixel;
@@ -179,10 +179,11 @@ DWORD get_pixel_color( dibdrv_physdev *pdev, COLORREF color, BOOL mono_fixup )
     if (pdev->dib.bit_count != 1 || !mono_fixup)
         return pdev->dib.funcs->colorref_to_pixel( &pdev->dib, rgb_ref );
 
+    color_table = get_dib_color_table( &pdev->dib );
     fg_quad = rgbquad_from_colorref( rgb_ref );
-    if(rgbquad_equal(&fg_quad, pdev->dib.color_table))
+    if(rgbquad_equal(&fg_quad, color_table))
         return 0;
-    if(rgbquad_equal(&fg_quad, pdev->dib.color_table + 1))
+    if(rgbquad_equal(&fg_quad, color_table + 1))
         return 1;
 
     pixel = get_pixel_color( pdev, GetBkColor(pdev->dev.hdc), FALSE );
@@ -1732,17 +1733,28 @@ static BOOL solid_brush(dibdrv_physdev *pdev, dib_brush *brush, dib_info *dib,
     return TRUE;
 }
 
-static void free_pattern_brush_bits( dib_brush *brush )
+static BOOL alloc_brush_mask_bits( dib_brush *brush )
 {
-    HeapFree(GetProcessHeap(), 0, brush->and_bits);
-    HeapFree(GetProcessHeap(), 0, brush->xor_bits);
-    brush->and_bits = NULL;
-    brush->xor_bits = NULL;
+    DWORD size = brush->dib.height * abs(brush->dib.stride);
+
+    assert(brush->masks.and == NULL);
+    assert(brush->masks.xor == NULL);
+    assert(brush->dib.stride > 0);
+
+    if (!(brush->masks.and = HeapAlloc(GetProcessHeap(), 0, 2 * size))) return FALSE;
+    brush->masks.xor = (char *)brush->masks.and + size;
+    return TRUE;
+}
+
+static void free_brush_mask_bits( dib_brush *brush )
+{
+    HeapFree(GetProcessHeap(), 0, brush->masks.and);
+    brush->masks.and = brush->masks.xor = NULL;
 }
 
 void free_pattern_brush( dib_brush *brush )
 {
-    free_pattern_brush_bits( brush );
+    free_brush_mask_bits( brush );
     free_dib_info( &brush->dib );
 }
 
@@ -1752,20 +1764,10 @@ static BOOL create_pattern_brush_bits( dib_brush *brush )
     DWORD *brush_bits = brush->dib.bits.ptr;
     DWORD *and_bits, *xor_bits;
 
-    assert(brush->and_bits == NULL);
-    assert(brush->xor_bits == NULL);
+    if (!alloc_brush_mask_bits( brush )) return FALSE;
 
-    assert(brush->dib.stride > 0);
-
-    and_bits = brush->and_bits = HeapAlloc(GetProcessHeap(), 0, size);
-    xor_bits = brush->xor_bits = HeapAlloc(GetProcessHeap(), 0, size);
-
-    if(!and_bits || !xor_bits)
-    {
-        ERR("Failed to create pattern brush bits\n");
-        free_pattern_brush_bits( brush );
-        return FALSE;
-    }
+    and_bits = brush->masks.and;
+    xor_bits = brush->masks.xor;
 
     while(size)
     {
@@ -1776,7 +1778,7 @@ static BOOL create_pattern_brush_bits( dib_brush *brush )
     return TRUE;
 }
 
-static const DWORD hatches[6][8] =
+static const BYTE hatches[6][8] =
 {
     { 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00 }, /* HS_HORIZONTAL */
     { 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08 }, /* HS_VERTICAL   */
@@ -1786,17 +1788,8 @@ static const DWORD hatches[6][8] =
     { 0x81, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x81 }  /* HS_DIAGCROSS  */
 };
 
-static BOOL create_hatch_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL *needs_reselect)
+static BOOL init_hatch_brush( dibdrv_physdev *pdev, dib_brush *brush )
 {
-    dib_info hatch;
-    rop_mask fg_mask, bg_mask;
-    rop_mask_bits mask_bits;
-    DWORD size;
-    BOOL ret;
-
-    assert(brush->and_bits == NULL);
-    assert(brush->xor_bits == NULL);
-
     /* Just initialise brush dib with the color / sizing info.  We don't
        need the bits as we'll calculate the rop masks straight from
        the hatch patterns. */
@@ -1809,29 +1802,14 @@ static BOOL create_hatch_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL
     brush->dib.rect.top    = 0;
     brush->dib.rect.right  = 8;
     brush->dib.rect.bottom = 8;
+    return alloc_brush_mask_bits( brush );
+}
 
-    size = brush->dib.height * brush->dib.stride;
+static BOOL create_hatch_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL *needs_reselect)
+{
+    rop_mask fg_mask, bg_mask;
 
-    mask_bits.and = brush->and_bits = HeapAlloc(GetProcessHeap(), 0, size);
-    mask_bits.xor = brush->xor_bits = HeapAlloc(GetProcessHeap(), 0, size);
-
-    if(!mask_bits.and || !mask_bits.xor)
-    {
-        ERR("Failed to create pattern brush bits\n");
-        free_pattern_brush_bits( brush );
-        return FALSE;
-    }
-
-    hatch.bit_count = 1;
-    hatch.height = hatch.width = 8;
-    hatch.stride = 4;
-    hatch.bits.ptr = (void *) hatches[brush->hatch];
-    hatch.bits.free = hatch.bits.param = NULL;
-    hatch.bits.is_copy = FALSE;
-    hatch.rect.left   = 0;
-    hatch.rect.top    = 0;
-    hatch.rect.right  = 8;
-    hatch.rect.bottom = 8;
+    if (!init_hatch_brush( pdev, brush )) return FALSE;
 
     get_color_masks( pdev, brush->rop, brush->colorref, GetBkMode(pdev->dev.hdc),
                      &fg_mask, &bg_mask );
@@ -1841,10 +1819,26 @@ static BOOL create_hatch_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL
     if (GetBkMode(pdev->dev.hdc) != TRANSPARENT && (GetBkColor(pdev->dev.hdc) & (1 << 24)))
         *needs_reselect = TRUE;
 
-    ret = brush->dib.funcs->create_rop_masks( &brush->dib, &hatch, &fg_mask, &bg_mask, &mask_bits );
-    if(!ret) free_pattern_brush_bits( brush );
+    brush->dib.funcs->create_rop_masks( &brush->dib, hatches[brush->hatch],
+                                        &fg_mask, &bg_mask, &brush->masks );
+    return TRUE;
+}
 
-    return ret;
+static BOOL create_dither_brush_bits(dibdrv_physdev *pdev, dib_brush *brush, BOOL *needs_reselect)
+{
+    COLORREF rgb;
+    DWORD pixel;
+    BOOL got_pixel;
+
+    if (!init_hatch_brush( pdev, brush )) return FALSE;
+
+    if (brush->colorref & (1 << 24))  /* PALETTEINDEX */
+        *needs_reselect = TRUE;
+
+    rgb = make_rgb_colorref( pdev->dev.hdc, &pdev->dib, brush->colorref, &got_pixel, &pixel );
+
+    brush->dib.funcs->create_dither_masks( &brush->dib, brush->rop, rgb, &brush->masks );
+    return TRUE;
 }
 
 static BOOL matching_pattern_format( dib_info *dib, dib_info *pattern )
@@ -1874,30 +1868,25 @@ static BOOL select_pattern_brush( dibdrv_physdev *pdev, dib_brush *brush, BOOL *
     BITMAPINFO *info = (BITMAPINFO *)buffer;
     RGBQUAD color_table[2];
     dib_info pattern;
+    BOOL dither = (brush->dib.bit_count == 1);
 
-    if (!brush->pattern.info)
-    {
-        BITMAPOBJ *bmp = GDI_GetObjPtr( brush->pattern.bitmap, OBJ_BITMAP );
-        BOOL ret;
+    if (pattern.bit_count == 1 && !pattern.color_table)
+        dither = FALSE;  /* monochrome DDB pattern brushes don't get dithered */
 
-        if (!bmp) return FALSE;
-        ret = init_dib_info_from_bitmapobj( &pattern, bmp, 0 );
-        GDI_ReleaseObj( brush->pattern.bitmap );
-        if (!ret) return FALSE;
-    }
-    else if (brush->pattern.info->bmiHeader.biClrUsed && brush->pattern.usage == DIB_PAL_COLORS)
+    if (brush->pattern.info->bmiHeader.biClrUsed && brush->pattern.usage == DIB_PAL_COLORS)
     {
         copy_bitmapinfo( info, brush->pattern.info );
         fill_color_table_from_pal_colors( info, pdev->dev.hdc );
-        init_dib_info_from_bitmapinfo( &pattern, info, brush->pattern.bits.ptr, 0 );
+        init_dib_info_from_bitmapinfo( &pattern, info, brush->pattern.bits.ptr );
         *needs_reselect = TRUE;
     }
     else
     {
-        init_dib_info_from_bitmapinfo( &pattern, brush->pattern.info, brush->pattern.bits.ptr, 0 );
+        init_dib_info_from_bitmapinfo( &pattern, brush->pattern.info, brush->pattern.bits.ptr );
     }
 
-    if (pattern.bit_count == 1 && !pattern.color_table)
+    if (pattern.bit_count == 1 && !pattern.color_table &&
+        (pdev->dib.bit_count != 1 || pdev->dib.color_table))
     {
         /* monochrome DDB pattern uses DC colors */
         DWORD pixel;
@@ -1930,7 +1919,7 @@ static BOOL select_pattern_brush( dibdrv_physdev *pdev, dib_brush *brush, BOOL *
     brush->dib.stride = get_dib_stride( brush->dib.width, brush->dib.bit_count );
     brush->dib.rect   = pattern.rect;
 
-    if (matching_pattern_format( &brush->dib, &pattern ))
+    if (!dither && matching_pattern_format( &brush->dib, &pattern ))
     {
         brush->dib.bits.ptr     = pattern.bits.ptr;
         brush->dib.bits.is_copy = FALSE;
@@ -1941,7 +1930,7 @@ static BOOL select_pattern_brush( dibdrv_physdev *pdev, dib_brush *brush, BOOL *
         brush->dib.bits.ptr     = HeapAlloc( GetProcessHeap(), 0, brush->dib.height * brush->dib.stride );
         brush->dib.bits.is_copy = TRUE;
         brush->dib.bits.free    = free_heap_bits;
-        brush->dib.funcs->convert_to(&brush->dib, &pattern, &pattern.rect);
+        brush->dib.funcs->convert_to(&brush->dib, &pattern, &pattern.rect, dither);
     }
     return TRUE;
 }
@@ -1960,11 +1949,11 @@ static BOOL pattern_brush(dibdrv_physdev *pdev, dib_brush *brush, dib_info *dib,
 
     if (rop != brush->rop)
     {
-        free_pattern_brush_bits( brush );
+        free_brush_mask_bits( brush );
         brush->rop = rop;
     }
 
-    if(brush->and_bits == NULL)
+    if(brush->masks.and == NULL)
     {
         switch(brush->style)
         {
@@ -1972,6 +1961,11 @@ static BOOL pattern_brush(dibdrv_physdev *pdev, dib_brush *brush, dib_info *dib,
             if (!brush->dib.bits.ptr && !select_pattern_brush( pdev, brush, &needs_reselect ))
                 return FALSE;
             if(!create_pattern_brush_bits( brush ))
+                return FALSE;
+            break;
+
+        case BS_SOLID:
+            if(!create_dither_brush_bits(pdev, brush, &needs_reselect))
                 return FALSE;
             break;
 
@@ -1988,7 +1982,7 @@ static BOOL pattern_brush(dibdrv_physdev *pdev, dib_brush *brush, dib_info *dib,
 
     GetBrushOrgEx(pdev->dev.hdc, &origin);
 
-    dib->funcs->pattern_rects( dib, num, rects, &origin, &brush->dib, brush->and_bits, brush->xor_bits );
+    dib->funcs->pattern_rects( dib, num, rects, &origin, &brush->dib, &brush->masks );
 
     if (needs_reselect) free_pattern_brush( brush );
     return TRUE;
@@ -2000,7 +1994,26 @@ static BOOL null_brush(dibdrv_physdev *pdev, dib_brush *brush, dib_info *dib,
     return TRUE;
 }
 
-static void select_brush( dib_brush *brush, const LOGBRUSH *logbrush, const struct brush_pattern *pattern )
+static BOOL brush_needs_dithering( dibdrv_physdev *pdev, COLORREF color )
+{
+    int i;
+    RGBQUAD rgb;
+    const RGBQUAD *color_table = get_default_color_table( pdev->dib.bit_count );
+
+    if (!color_table) return FALSE;
+    if (pdev->dib.color_table) return FALSE;
+    if (color & (1 << 24)) return TRUE;  /* PALETTEINDEX */
+    if (color >> 16 == 0x10ff) return FALSE;  /* DIBINDEX */
+
+    rgb = rgbquad_from_colorref( color );
+    for (i = 0; i < (1 << pdev->dib.bit_count); i++)
+        if (rgbquad_equal( &color_table[i], &rgb )) return FALSE;
+
+    return TRUE;
+}
+
+static void select_brush( dibdrv_physdev *pdev, dib_brush *brush,
+                          const LOGBRUSH *logbrush, const struct brush_pattern *pattern )
 {
     free_pattern_brush( brush );
 
@@ -2018,9 +2031,11 @@ static void select_brush( dib_brush *brush, const LOGBRUSH *logbrush, const stru
 
         switch (logbrush->lbStyle)
         {
-        case BS_SOLID:   brush->rects = solid_brush; break;
         case BS_NULL:    brush->rects = null_brush; break;
         case BS_HATCHED: brush->rects = pattern_brush; break;
+        case BS_SOLID:
+            brush->rects = brush_needs_dithering( pdev, brush->colorref ) ? pattern_brush : solid_brush;
+            break;
         }
     }
 }
@@ -2040,7 +2055,7 @@ HBRUSH dibdrv_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_patter
     if (hbrush == GetStockObject( DC_BRUSH ))
         logbrush.lbColor = GetDCBrushColor( dev->hdc );
 
-    select_brush( &pdev->brush, &logbrush, pattern );
+    select_brush( pdev, &pdev->brush, &logbrush, pattern );
     return hbrush;
 }
 
@@ -2090,7 +2105,7 @@ HPEN dibdrv_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *patte
         logbrush.lbColor = GetDCPenColor( dev->hdc );
 
     set_dash_pattern( &pdev->pen_pattern, 0, NULL );
-    select_brush( &pdev->pen_brush, &logbrush, pattern );
+    select_brush( pdev, &pdev->pen_brush, &logbrush, pattern );
 
     pdev->pen_style = logpen.lopnStyle & PS_STYLE_MASK;
 
@@ -2154,8 +2169,10 @@ COLORREF dibdrv_SetDCBrushColor( PHYSDEV dev, COLORREF color )
     dibdrv_physdev *pdev = get_dibdrv_pdev(dev);
 
     if (GetCurrentObject(dev->hdc, OBJ_BRUSH) == GetStockObject( DC_BRUSH ))
-        pdev->brush.colorref = color;
-
+    {
+        LOGBRUSH logbrush = { BS_SOLID, color, 0 };
+        select_brush( pdev, &pdev->brush, &logbrush, NULL );
+    }
     return color;
 }
 

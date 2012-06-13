@@ -1,7 +1,7 @@
 /*
  * Implementation of IDirect3DRM Interface
  *
- * Copyright 2010 Christian Costa
+ * Copyright 2010, 2012 Christian Costa
  * Copyright 2011 André Hentschel
  *
  * This library is free software; you can redistribute it and/or
@@ -137,16 +137,13 @@ static HRESULT WINAPI IDirect3DRMImpl_CreateObject(IDirect3DRM* iface, REFCLSID 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_CreateFrame(IDirect3DRM* iface, LPDIRECT3DRMFRAME pFrameParent, LPDIRECT3DRMFRAME * ppFrame)
+static HRESULT WINAPI IDirect3DRMImpl_CreateFrame(IDirect3DRM* iface, LPDIRECT3DRMFRAME parent_frame, LPDIRECT3DRMFRAME * frame)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
 
-    TRACE("(%p/%p)->(%p,%p)\n", iface, This, pFrameParent, ppFrame);
+    TRACE("(%p/%p)->(%p,%p)\n", iface, This, parent_frame, frame);
 
-    if (pFrameParent)
-        FIXME("(%p/%p): Parent frame not yet supported\n", iface, This);
-
-    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame, (IUnknown**)ppFrame);
+    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame, (IUnknown*)parent_frame, (IUnknown**)frame);
 }
 
 static HRESULT WINAPI IDirect3DRMImpl_CreateMesh(IDirect3DRM* iface, LPDIRECT3DRMMESH * ppMesh)
@@ -224,13 +221,13 @@ static HRESULT WINAPI IDirect3DRMImpl_CreateLightRGB(IDirect3DRM* iface, D3DRMLI
     return IDirect3DRM3_CreateLightRGB(&This->IDirect3DRM3_iface, type, red, green, blue, Light);
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_Material(IDirect3DRM* iface, D3DVALUE m, LPDIRECT3DRMMATERIAL * ppMaterial)
+static HRESULT WINAPI IDirect3DRMImpl_CreateMaterial(IDirect3DRM* iface, D3DVALUE power, LPDIRECT3DRMMATERIAL * material)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
 
-    FIXME("(%p/%p)->(%f,%p): stub\n", iface, This, m, ppMaterial);
+    TRACE("(%p/%p)->(%f,%p)\n", iface, This, power, material);
 
-    return E_NOTIMPL;
+    return IDirect3DRM3_CreateMaterial(&This->IDirect3DRM3_iface, power, (LPDIRECT3DRMMATERIAL2*)material);
 }
 
 static HRESULT WINAPI IDirect3DRMImpl_CreateDevice(IDirect3DRM* iface, DWORD width, DWORD height, LPDIRECT3DRMDEVICE * ppDevice)
@@ -449,7 +446,7 @@ static const struct IDirect3DRMVtbl Direct3DRM_Vtbl =
     IDirect3DRMImpl_CreateTexture,
     IDirect3DRMImpl_CreateLight,
     IDirect3DRMImpl_CreateLightRGB,
-    IDirect3DRMImpl_Material,
+    IDirect3DRMImpl_CreateMaterial,
     IDirect3DRMImpl_CreateDevice,
     IDirect3DRMImpl_CreateDeviceFromSurface,
     IDirect3DRMImpl_CreateDeviceFromD3D,
@@ -507,18 +504,14 @@ static HRESULT WINAPI IDirect3DRM2Impl_CreateObject(IDirect3DRM2* iface, REFCLSI
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_CreateFrame(IDirect3DRM2* iface,
-                                                   LPDIRECT3DRMFRAME pFrameParent,
-                                                   LPDIRECT3DRMFRAME2 * ppFrame)
+static HRESULT WINAPI IDirect3DRM2Impl_CreateFrame(IDirect3DRM2* iface, LPDIRECT3DRMFRAME parent_frame,
+                                                   LPDIRECT3DRMFRAME2 * frame)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
 
-    TRACE("(%p/%p)->(%p,%p)\n", iface, This, pFrameParent, ppFrame);
+    TRACE("(%p/%p)->(%p,%p)\n", iface, This, parent_frame, frame);
 
-    if (pFrameParent)
-        FIXME("(%p/%p): Parent frame not yet supported\n", iface, This);
-
-    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame2, (IUnknown**)ppFrame);
+    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame2, (IUnknown*)parent_frame, (IUnknown**)frame);
 }
 
 static HRESULT WINAPI IDirect3DRM2Impl_CreateMesh(IDirect3DRM2* iface, LPDIRECT3DRMMESH * ppMesh)
@@ -600,14 +593,14 @@ static HRESULT WINAPI IDirect3DRM2Impl_CreateLightRGB(IDirect3DRM2* iface, D3DRM
     return IDirect3DRM3_CreateLightRGB(&This->IDirect3DRM3_iface, type, red, green, blue, Light);
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_Material(IDirect3DRM2* iface, D3DVALUE m,
-                                                LPDIRECT3DRMMATERIAL * ppMaterial)
+static HRESULT WINAPI IDirect3DRM2Impl_CreateMaterial(IDirect3DRM2* iface, D3DVALUE power,
+                                                      LPDIRECT3DRMMATERIAL * material)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
 
-    FIXME("(%p/%p)->(%f,%p): stub\n", iface, This, m, ppMaterial);
+    TRACE("(%p/%p)->(%f,%p)\n", iface, This, power, material);
 
-    return E_NOTIMPL;
+    return IDirect3DRM3_CreateMaterial(&This->IDirect3DRM3_iface, power, (LPDIRECT3DRMMATERIAL2*)material);
 }
 
 static HRESULT WINAPI IDirect3DRM2Impl_CreateDevice(IDirect3DRM2* iface, DWORD width, DWORD height,
@@ -878,7 +871,7 @@ static const struct IDirect3DRM2Vtbl Direct3DRM2_Vtbl =
     IDirect3DRM2Impl_CreateTexture,
     IDirect3DRM2Impl_CreateLight,
     IDirect3DRM2Impl_CreateLightRGB,
-    IDirect3DRM2Impl_Material,
+    IDirect3DRM2Impl_CreateMaterial,
     IDirect3DRM2Impl_CreateDevice,
     IDirect3DRM2Impl_CreateDeviceFromSurface,
     IDirect3DRM2Impl_CreateDeviceFromD3D,
@@ -936,18 +929,14 @@ static HRESULT WINAPI IDirect3DRM3Impl_CreateObject(IDirect3DRM3* iface, REFCLSI
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_CreateFrame(IDirect3DRM3* iface,
-                                                   LPDIRECT3DRMFRAME3 FrameParent,
-                                                   LPDIRECT3DRMFRAME3* Frame)
+static HRESULT WINAPI IDirect3DRM3Impl_CreateFrame(IDirect3DRM3* iface, LPDIRECT3DRMFRAME3 parent_frame,
+                                                   LPDIRECT3DRMFRAME3* frame)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
 
-    TRACE("(%p/%p)->(%p,%p)\n", iface, This, FrameParent, Frame);
+    TRACE("(%p/%p)->(%p,%p)\n", iface, This, parent_frame, frame);
 
-    if (FrameParent)
-        FIXME("(%p/%p): Parent frame not yet supported\n", iface, This);
-
-    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame3, (IUnknown**)Frame);
+    return Direct3DRMFrame_create(&IID_IDirect3DRMFrame3, (IUnknown*)parent_frame, (IUnknown**)frame);
 }
 
 static HRESULT WINAPI IDirect3DRM3Impl_CreateMesh(IDirect3DRM3* iface, LPDIRECT3DRMMESH* Mesh)
@@ -1047,14 +1036,20 @@ static HRESULT WINAPI IDirect3DRM3Impl_CreateLightRGB(IDirect3DRM3* iface, D3DRM
     return ret;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_Material(IDirect3DRM3* iface, D3DVALUE m,
-                                                LPDIRECT3DRMMATERIAL2* Material)
+static HRESULT WINAPI IDirect3DRM3Impl_CreateMaterial(IDirect3DRM3* iface, D3DVALUE power,
+                                                      LPDIRECT3DRMMATERIAL2* material)
 {
     IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
+    HRESULT ret;
 
-    FIXME("(%p/%p)->(%f,%p): stub\n", iface, This, m, Material);
+    TRACE("(%p/%p)->(%f,%p)\n", iface, This, power, material);
 
-    return E_NOTIMPL;
+    ret = Direct3DRMMaterial_create(material);
+
+    if (SUCCEEDED(ret))
+        IDirect3DRMMaterial2_SetPower(*material, power);
+
+    return ret;
 }
 
 static HRESULT WINAPI IDirect3DRM3Impl_CreateDevice(IDirect3DRM3* iface, DWORD width, DWORD height,
@@ -1266,6 +1261,186 @@ static HRESULT WINAPI IDirect3DRM3Impl_EnumerateObjects(IDirect3DRM3* iface, D3D
     return E_NOTIMPL;
 }
 
+static HRESULT load_data(IDirect3DRM3* iface, LPDIRECTXFILEDATA data_object, LPIID* GUIDs, DWORD nb_GUIDs, D3DRMLOADCALLBACK LoadProc,
+                  LPVOID ArgLP, D3DRMLOADTEXTURECALLBACK LoadTextureProc, LPVOID ArgLTP, LPDIRECT3DRMFRAME3 parent_frame)
+{
+    HRESULT ret = D3DRMERR_BADOBJECT;
+    HRESULT hr;
+    const GUID* guid;
+    DWORD i;
+    BOOL requested = FALSE;
+
+    hr = IDirectXFileData_GetType(data_object, &guid);
+    if (hr != DXFILE_OK)
+        goto end;
+
+    TRACE("Found object type whose GUID = %s\n", debugstr_guid(guid));
+
+    if (IsEqualGUID(guid, &TID_D3DRMMesh))
+    {
+        TRACE("Found TID_D3DRMMesh\n");
+
+        for (i = 0; i < nb_GUIDs; i++)
+            if (IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder) ||
+                IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder2) ||
+                IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder3))
+            {
+                requested = TRUE;
+                break;
+            }
+
+        if (requested)
+        {
+            LPDIRECT3DRMMESHBUILDER3 meshbuilder;
+
+            TRACE("Load mesh data and notify application\n");
+
+            hr = IDirect3DRM3_CreateMeshBuilder(iface, &meshbuilder);
+            if (SUCCEEDED(hr))
+            {
+                LPDIRECT3DRMOBJECT object = NULL;
+
+                hr = IDirect3DRMMeshBuilder3_QueryInterface(meshbuilder, GUIDs[i], (void**)&object);
+                if (SUCCEEDED(hr))
+                {
+                    hr = load_mesh_data(meshbuilder, data_object);
+                    if (SUCCEEDED(hr))
+                    {
+                        /* Only top level objects are notified */
+                        if (parent_frame)
+                            IDirect3DRMFrame3_AddVisual(parent_frame, (IUnknown*)meshbuilder);
+                        else
+                            LoadProc(object, GUIDs[i], ArgLP);
+                    }
+                    IDirect3DRMObject_Release(object);
+                }
+                IDirect3DRMMeshBuilder3_Release(meshbuilder);
+            }
+
+            if (FAILED(hr))
+                ERR("Cannot process mesh\n");
+        }
+    }
+    else if (IsEqualGUID(guid, &TID_D3DRMFrame))
+    {
+        TRACE("Found TID_D3DRMFrame\n");
+
+        for (i = 0; i < nb_GUIDs; i++)
+            if (IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame) ||
+                IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame2) ||
+                IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame3))
+            {
+                requested = TRUE;
+                break;
+            }
+
+        if (requested)
+        {
+            LPDIRECT3DRMFRAME3 frame;
+
+            TRACE("Load frame data and notify application\n");
+
+            hr = IDirect3DRM3_CreateFrame(iface, parent_frame, &frame);
+            if (SUCCEEDED(hr))
+            {
+                LPDIRECT3DRMOBJECT object;
+
+                hr = IDirect3DRMFrame3_QueryInterface(frame, GUIDs[i], (void**)&object);
+                if (SUCCEEDED(hr))
+                {
+                    LPDIRECTXFILEOBJECT child;
+
+                    while (SUCCEEDED(hr = IDirectXFileData_GetNextObject(data_object, &child)))
+                    {
+                        LPDIRECTXFILEDATA data;
+                        LPDIRECTXFILEDATAREFERENCE reference;
+                        LPDIRECTXFILEBINARY binary;
+
+                        hr = IDirectXFileObject_QueryInterface(child, &IID_IDirectXFileBinary, (void **)&binary);
+                        if (SUCCEEDED(hr))
+                        {
+                            FIXME("Binary Object not supported yet\n");
+                            IDirectXFileBinary_Release(binary);
+                            continue;
+                        }
+
+                        hr = IDirectXFileObject_QueryInterface(child, &IID_IDirectXFileData, (void **)&data);
+                        if (SUCCEEDED(hr))
+                        {
+                            TRACE("Found Data Object\n");
+                            hr = load_data(iface, data, GUIDs, nb_GUIDs, LoadProc, ArgLP, LoadTextureProc, ArgLTP, frame);
+                            IDirectXFileData_Release(data);
+                            continue;
+                        }
+                        hr = IDirectXFileObject_QueryInterface(child, &IID_IDirectXFileDataReference, (void **)&reference);
+                        if (SUCCEEDED(hr))
+                        {
+                            TRACE("Found Data Object Reference\n");
+                            IDirectXFileDataReference_Resolve(reference, &data);
+                            hr = load_data(iface, data, GUIDs, nb_GUIDs, LoadProc, ArgLP, LoadTextureProc, ArgLTP, frame);
+                            IDirectXFileData_Release(data);
+                            IDirectXFileDataReference_Release(reference);
+                            continue;
+                        }
+                    }
+
+                    if (hr != DXFILEERR_NOMOREOBJECTS)
+                    {
+                        IDirect3DRMObject_Release(object);
+                        IDirect3DRMFrame3_Release(frame);
+                        goto end;
+                    }
+                    hr = S_OK;
+
+                    /* Only top level objects are notified */
+                    if (!parent_frame)
+                        LoadProc(object, GUIDs[i], ArgLP);
+                    IDirect3DRMObject_Release(object);
+                }
+                IDirect3DRMFrame3_Release(frame);
+            }
+
+            if (FAILED(hr))
+                ERR("Cannot process frame\n");
+        }
+    }
+    else if (IsEqualGUID(guid, &TID_D3DRMMaterial))
+    {
+        TRACE("Found TID_D3DRMMaterial => Will be taken into account when a mesh will reference it\n");
+    }
+    else if (IsEqualGUID(guid, &TID_D3DRMFrameTransformMatrix))
+    {
+        TRACE("Found TID_D3DRMFrameTransformMatrix\n");
+
+        if (parent_frame)
+        {
+            D3DRMMATRIX4D matrix;
+            DWORD size;
+
+            TRACE("Load Frame Transform Matrix data\n");
+
+            size = sizeof(matrix);
+            hr = IDirectXFileData_GetData(data_object, NULL, &size, (void**)matrix);
+            if ((hr != DXFILE_OK) || (size != sizeof(matrix)))
+                goto end;
+
+            hr = IDirect3DRMFrame3_AddTransform(parent_frame, D3DRMCOMBINE_REPLACE, matrix);
+            if (FAILED(hr))
+                goto end;
+        }
+    }
+    else
+    {
+        FIXME("Found unknown TID %s\n", debugstr_guid(guid));
+    }
+
+    ret = D3DRM_OK;
+
+end:
+
+    return ret;
+}
+
 static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSource, LPVOID ObjID,
                                             LPIID* GUIDs, DWORD nb_GUIDs, D3DRMLOADOPTIONS LOFlags,
                                             D3DRMLOADCALLBACK LoadProc, LPVOID ArgLP,
@@ -1284,7 +1459,7 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSourc
     HRESULT ret = D3DRMERR_BADOBJECT;
     DWORD i;
 
-    FIXME("(%p/%p)->(%p,%p,%p,%d,%d,%p,%p,%p,%p,%p): partial implementation\n", iface, This, ObjSource, ObjID, GUIDs,
+    TRACE("(%p/%p)->(%p,%p,%p,%d,%d,%p,%p,%p,%p,%p)\n", iface, This, ObjSource, ObjID, GUIDs,
           nb_GUIDs, LOFlags, LoadProc, ArgLP, LoadTextureProc, ArgLTP, ParentFrame);
 
     TRACE("Looking for GUIDs:\n");
@@ -1364,115 +1539,10 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3* iface, LPVOID ObjSourc
             goto end;
         }
 
-        hr = IDirectXFileData_GetType(pData, &pGuid);
-        if (hr != DXFILE_OK)
+        ret = load_data(iface, pData, GUIDs, nb_GUIDs, LoadProc, ArgLP, LoadTextureProc, ArgLTP, ParentFrame);
+        if (ret != D3DRM_OK)
             goto end;
 
-        TRACE("Found object type whose GUID = %s\n", debugstr_guid(pGuid));
-
-        if (IsEqualGUID(pGuid, &TID_D3DRMMesh))
-        {
-            BOOL requested = FALSE;
-            HRESULT hr;
-
-            TRACE("Found TID_D3DRMMesh\n");
-
-            for (i = 0; i < nb_GUIDs; i++)
-                if (IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder) ||
-                    IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder2) ||
-                    IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMeshBuilder3))
-                {
-                    requested = TRUE;
-                    break;
-                }
-
-            if (requested)
-            {
-                LPDIRECT3DRMMESHBUILDER3 meshbuilder;
-
-                FIXME("Load mesh data and notify application\n");
-
-                hr = IDirect3DRM3_CreateMeshBuilder(iface, &meshbuilder);
-                if (SUCCEEDED(hr))
-                {
-                    LPDIRECT3DRMOBJECT object = NULL;
-
-                    hr = IDirect3DRMMeshBuilder3_QueryInterface(meshbuilder, GUIDs[i], (void**)&object);
-                    if (SUCCEEDED(hr))
-                    {
-                        hr = load_mesh_data(meshbuilder, pData);
-                        if (SUCCEEDED(hr))
-                            LoadProc(object, GUIDs[i], ArgLP);
-                        IDirect3DRMObject_Release(object);
-                    }
-                    IDirect3DRMMeshBuilder3_Release(meshbuilder);
-                }
-
-                if (FAILED(hr))
-                    ERR("Cannot process mesh\n");
-            }
-        }
-        else if (IsEqualGUID(pGuid, &TID_D3DRMFrame))
-        {
-            BOOL requested = FALSE;
-            HRESULT hr;
-
-            TRACE("Found TID_D3DRMFrame\n");
-
-            for (i = 0; i < nb_GUIDs; i++)
-                if (IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame) ||
-                    IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame2) ||
-                    IsEqualGUID(GUIDs[i], &IID_IDirect3DRMFrame3))
-                {
-                    requested = TRUE;
-                    break;
-                }
-
-            if (requested)
-            {
-                LPDIRECT3DRMFRAME3 frame;
-
-                FIXME("Fake frame data and notify application\n");
-
-                hr = IDirect3DRM3_CreateFrame(iface, NULL, &frame);
-                if (SUCCEEDED(hr))
-                {
-                    LPDIRECT3DRMOBJECT object;
-
-                    hr = IDirect3DRMFrame3_QueryInterface(frame, GUIDs[i], (void**)&object);
-                    if (SUCCEEDED(hr))
-                    {
-                        LoadProc(object, GUIDs[i], ArgLP);
-                        IDirect3DRMObject_Release(object);
-                    }
-                    IDirect3DRMFrame3_Release(frame);
-                }
-
-                if (FAILED(hr))
-                    ERR("Cannot process frame\n");
-
-            }
-        }
-        else if (IsEqualGUID(pGuid, &TID_D3DRMMaterial))
-        {
-            BOOL requested = FALSE;
-
-            TRACE("Found TID_D3DRMMaterial\n");
-
-            for (i = 0; i < nb_GUIDs; i++)
-                if (IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMaterial) ||
-                    IsEqualGUID(GUIDs[i], &IID_IDirect3DRMMaterial2))
-                    requested = TRUE;
-
-            if (requested)
-            {
-                FIXME("Processing material not supported yet\n");
-            }
-        }
-        else
-        {
-            FIXME("Found unknown TID %s\n", debugstr_guid(pGuid));
-        }
         IDirectXFileData_Release(pData);
         pData = NULL;
     }
@@ -1572,7 +1642,7 @@ static const struct IDirect3DRM3Vtbl Direct3DRM3_Vtbl =
     IDirect3DRM3Impl_CreateTexture,
     IDirect3DRM3Impl_CreateLight,
     IDirect3DRM3Impl_CreateLightRGB,
-    IDirect3DRM3Impl_Material,
+    IDirect3DRM3Impl_CreateMaterial,
     IDirect3DRM3Impl_CreateDevice,
     IDirect3DRM3Impl_CreateDeviceFromSurface,
     IDirect3DRM3Impl_CreateDeviceFromD3D,

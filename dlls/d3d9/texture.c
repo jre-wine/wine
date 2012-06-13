@@ -710,10 +710,18 @@ static HRESULT WINAPI d3d9_texture_cube_GetLevelDesc(IDirect3DCubeTexture9 *ifac
     struct d3d9_texture *texture = impl_from_IDirect3DCubeTexture9(iface);
     struct wined3d_resource *sub_resource;
     HRESULT hr = D3D_OK;
+    DWORD level_count;
 
     TRACE("iface %p, level %u, desc %p.\n", iface, level, desc);
 
     wined3d_mutex_lock();
+    level_count = wined3d_texture_get_level_count(texture->wined3d_texture);
+    if (level >= level_count)
+    {
+        wined3d_mutex_unlock();
+        return D3DERR_INVALIDCALL;
+    }
+
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, level)))
         hr = D3DERR_INVALIDCALL;
     else
@@ -742,11 +750,19 @@ static HRESULT WINAPI d3d9_texture_cube_GetCubeMapSurface(IDirect3DCubeTexture9 
     struct wined3d_resource *sub_resource;
     IDirect3DSurface9Impl *surface_impl;
     UINT sub_resource_idx;
+    DWORD level_count;
 
     TRACE("iface %p, face %#x, level %u, surface %p.\n", iface, face, level, surface);
 
     wined3d_mutex_lock();
-    sub_resource_idx = wined3d_texture_get_level_count(texture->wined3d_texture) * face + level;
+    level_count = wined3d_texture_get_level_count(texture->wined3d_texture);
+    if (level >= level_count)
+    {
+        wined3d_mutex_unlock();
+        return D3DERR_INVALIDCALL;
+    }
+
+    sub_resource_idx = level_count * face + level;
     if (!(sub_resource = wined3d_texture_get_sub_resource(texture->wined3d_texture, sub_resource_idx)))
     {
         wined3d_mutex_unlock();

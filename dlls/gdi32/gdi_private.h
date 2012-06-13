@@ -221,7 +221,6 @@ extern DWORD stretch_bits( const BITMAPINFO *src_info, struct bitblt_coords *src
                            struct gdi_image_bits *bits, int mode ) DECLSPEC_HIDDEN;
 
 /* brush.c */
-extern void cache_pattern_bits( PHYSDEV physdev, struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern BOOL store_brush_pattern( LOGBRUSH *brush, struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern void free_brush_pattern( struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern BOOL get_brush_bitmap_info( HBRUSH handle, BITMAPINFO *info, void **bits, UINT *usage ) DECLSPEC_HIDDEN;
@@ -363,7 +362,6 @@ extern BOOL nulldrv_BeginPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern DWORD nulldrv_BlendImage( PHYSDEV dev, BITMAPINFO *info, const struct gdi_image_bits *bits,
                                  struct bitblt_coords *src, struct bitblt_coords *dst, BLENDFUNCTION func ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_CloseFigure( PHYSDEV dev ) DECLSPEC_HIDDEN;
-extern BOOL nulldrv_CopyBitmap( HBITMAP src, HBITMAP dst ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_EndPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern INT  nulldrv_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;
 extern INT  nulldrv_ExtSelectClipRgn( PHYSDEV dev, HRGN rgn, INT mode ) DECLSPEC_HIDDEN;

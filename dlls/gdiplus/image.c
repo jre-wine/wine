@@ -1767,6 +1767,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
     (*bitmap)->image.type = ImageTypeBitmap;
     memcpy(&(*bitmap)->image.format, &ImageFormatMemoryBMP, sizeof(GUID));
     (*bitmap)->image.flags = ImageFlagsNone;
+    (*bitmap)->image.frame_count = 1;
+    (*bitmap)->image.current_frame = 0;
     (*bitmap)->image.palette_flags = 0;
     (*bitmap)->image.palette_count = 0;
     (*bitmap)->image.palette_size = 0;
@@ -2454,23 +2456,24 @@ static struct image_format_dimension image_format_dimensions[] =
     {NULL}
 };
 
-/* FIXME: Need to handle multi-framed images */
 GpStatus WINGDIPAPI GdipImageGetFrameCount(GpImage *image,
     GDIPCONST GUID* dimensionID, UINT* count)
 {
-    static int calls;
-
     TRACE("(%p,%s,%p)\n", image, debugstr_guid(dimensionID), count);
 
     if(!image || !count)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("returning frame count of 1\n");
+    if (!dimensionID ||
+        IsEqualGUID(dimensionID, &image->format) ||
+        IsEqualGUID(dimensionID, &FrameDimensionPage) ||
+        IsEqualGUID(dimensionID, &FrameDimensionTime))
+    {
+        *count = image->frame_count;
+        return Ok;
+    }
 
-    *count = 1;
-
-    return Ok;
+    return InvalidParameter;
 }
 
 GpStatus WINGDIPAPI GdipImageGetFrameDimensionsCount(GpImage *image,
@@ -2591,7 +2594,7 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, GpImage **imag
     WICPixelFormatGUID wic_format;
     PixelFormat gdip_format=0;
     int i;
-    UINT width, height;
+    UINT width, height, frame_count;
     BitmapData lockeddata;
     WICRect wrc;
     HRESULT initresult;
@@ -2604,7 +2607,11 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, GpImage **imag
 
     hr = IWICBitmapDecoder_Initialize(decoder, (IStream*)stream, WICDecodeMetadataCacheOnLoad);
     if (SUCCEEDED(hr))
+    {
+        IWICBitmapDecoder_GetFrameCount(decoder, &frame_count);
+        /* FIXME: set current frame */
         hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+    }
 
     if (SUCCEEDED(hr)) /* got frame */
     {
@@ -2696,6 +2703,8 @@ end:
     {
         /* Native GDI+ used to be smarter, but since Win7 it just sets these flags. */
         bitmap->image.flags |= ImageFlagsReadOnly|ImageFlagsHasRealPixelSize|ImageFlagsHasRealDPI|ImageFlagsColorSpaceRGB;
+        bitmap->image.frame_count = frame_count;
+        bitmap->image.current_frame = 0;
     }
 
     return status;
@@ -2765,6 +2774,8 @@ static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid
     (*image)->type = ImageTypeMetafile;
     (*image)->picture = pic;
     (*image)->flags   = ImageFlagsNone;
+    (*image)->frame_count = 1;
+    (*image)->current_frame = 0;
     (*image)->palette_flags = 0;
     (*image)->palette_count = 0;
     (*image)->palette_size = 0;

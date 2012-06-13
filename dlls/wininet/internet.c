@@ -109,6 +109,7 @@ typedef struct
 } proxyinfo_t;
 
 static ULONG max_conns = 2, max_1_0_conns = 4;
+static ULONG connect_timeout = 60000;
 
 static const WCHAR szInternetSettings[] =
     { 'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
@@ -308,7 +309,7 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             break;
 
         case DLL_PROCESS_DETACH:
-            collect_connections(TRUE);
+            collect_connections(COLLECT_CLEANUP);
             NETCON_unload();
             URLCacheContainers_DeleteAll();
 
@@ -874,16 +875,51 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             *size = sizeof(INTERNET_PROXY_INFOA) + proxyBytesRequired + proxyBypassBytesRequired;
             return ERROR_SUCCESS;
         }
+
+    case INTERNET_OPTION_CONNECT_TIMEOUT:
+        TRACE("INTERNET_OPTION_CONNECT_TIMEOUT\n");
+
+        if (*size < sizeof(ULONG))
+            return ERROR_INSUFFICIENT_BUFFER;
+
+        *(ULONG*)buffer = ai->connect_timeout;
+        *size = sizeof(ULONG);
+
+        return ERROR_SUCCESS;
     }
 
     return INET_QueryOption(hdr, option, buffer, size, unicode);
+}
+
+static DWORD APPINFO_SetOption(object_header_t *hdr, DWORD option, void *buf, DWORD size)
+{
+    appinfo_t *ai = (appinfo_t*)hdr;
+
+    switch(option) {
+    case INTERNET_OPTION_CONNECT_TIMEOUT:
+        TRACE("INTERNET_OPTION_CONNECT_TIMEOUT\n");
+
+        if(size != sizeof(connect_timeout))
+            return ERROR_INTERNET_BAD_OPTION_LENGTH;
+        if(!*(ULONG*)buf)
+            return ERROR_BAD_ARGUMENTS;
+
+        ai->connect_timeout = *(ULONG*)buf;
+        return ERROR_SUCCESS;
+    case INTERNET_OPTION_USER_AGENT:
+        heap_free(ai->agent);
+        if (!(ai->agent = heap_strdupW(buf))) return ERROR_OUTOFMEMORY;
+        return ERROR_SUCCESS;
+    }
+
+    return INET_SetOption(hdr, option, buf, size);
 }
 
 static const object_vtbl_t APPINFOVtbl = {
     APPINFO_Destroy,
     NULL,
     APPINFO_QueryOption,
-    INET_SetOption,
+    APPINFO_SetOption,
     NULL,
     NULL,
     NULL,
@@ -946,6 +982,7 @@ HINTERNET WINAPI InternetOpenW(LPCWSTR lpszAgent, DWORD dwAccessType,
     lpwai->accessType = dwAccessType;
     lpwai->proxyUsername = NULL;
     lpwai->proxyPassword = NULL;
+    lpwai->connect_timeout = connect_timeout;
 
     lpwai->agent = heap_strdupW(lpszAgent);
     if(dwAccessType == INTERNET_OPEN_TYPE_PRECONFIG)
@@ -1177,7 +1214,7 @@ HINTERNET WINAPI InternetConnectW(HINTERNET hInternet,
     HINTERNET rc = NULL;
     DWORD res = ERROR_SUCCESS;
 
-    TRACE("(%p, %s, %i, %s, %s, %i, %i, %lx)\n", hInternet, debugstr_w(lpszServerName),
+    TRACE("(%p, %s, %i, %s, %s, %i, %x, %lx)\n", hInternet, debugstr_w(lpszServerName),
 	  nServerPort, debugstr_w(lpszUserName), debugstr_w(lpszPassword),
 	  dwService, dwFlags, dwContext);
 
@@ -2282,17 +2319,6 @@ static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL u
     /* FIXME: This function currently handles more options than it should. Options requiring
      * proper handles should be moved to proper functions */
     switch(option) {
-    case INTERNET_OPTION_REQUEST_FLAGS:
-        TRACE("INTERNET_OPTION_REQUEST_FLAGS\n");
-
-        if (*size < sizeof(ULONG))
-            return ERROR_INSUFFICIENT_BUFFER;
-
-        *(ULONG*)buffer = 4;
-        *size = sizeof(ULONG);
-
-        return ERROR_SUCCESS;
-
     case INTERNET_OPTION_HTTP_VERSION:
         if (*size < sizeof(HTTP_VERSION_INFO))
             return ERROR_INSUFFICIENT_BUFFER;
@@ -2434,10 +2460,22 @@ static DWORD query_global_option(DWORD option, void *buffer, DWORD *size, BOOL u
 
         return res;
     }
+    case INTERNET_OPTION_REQUEST_FLAGS:
     case INTERNET_OPTION_USER_AGENT:
+        *size = 0;
         return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
     case INTERNET_OPTION_POLICY:
         return ERROR_INVALID_PARAMETER;
+    case INTERNET_OPTION_CONNECT_TIMEOUT:
+        TRACE("INTERNET_OPTION_CONNECT_TIMEOUT\n");
+
+        if (*size < sizeof(ULONG))
+            return ERROR_INSUFFICIENT_BUFFER;
+
+        *(ULONG*)buffer = connect_timeout;
+        *size = sizeof(ULONG);
+
+        return ERROR_SUCCESS;
     }
 
     FIXME("Stub for %d\n", option);
@@ -2461,6 +2499,11 @@ DWORD INET_QueryOption(object_header_t *hdr, DWORD option, void *buffer, DWORD *
         *(DWORD_PTR *)buffer = hdr->dwContext;
         *size = sizeof(DWORD_PTR);
         return ERROR_SUCCESS;
+
+    case INTERNET_OPTION_REQUEST_FLAGS:
+        WARN("INTERNET_OPTION_REQUEST_FLAGS\n");
+        *size = sizeof(DWORD);
+        return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
 
     case INTERNET_OPTION_MAX_CONNS_PER_SERVER:
     case INTERNET_OPTION_MAX_CONNS_PER_1_0_SERVER:
@@ -2580,6 +2623,22 @@ static DWORD set_global_option(DWORD option, void *buf, DWORD size)
             return ERROR_BAD_ARGUMENTS;
 
         max_1_0_conns = *(ULONG*)buf;
+        return ERROR_SUCCESS;
+
+    case INTERNET_OPTION_CONNECT_TIMEOUT:
+        TRACE("INTERNET_OPTION_CONNECT_TIMEOUT\n");
+
+        if(size != sizeof(connect_timeout))
+            return ERROR_INTERNET_BAD_OPTION_LENGTH;
+        if(!*(ULONG*)buf)
+            return ERROR_BAD_ARGUMENTS;
+
+        connect_timeout = *(ULONG*)buf;
+        return ERROR_SUCCESS;
+
+    case INTERNET_OPTION_SETTINGS_CHANGED:
+        FIXME("INTERNETOPTION_SETTINGS_CHANGED semi-stub\n");
+        collect_connections(COLLECT_CONNECTIONS);
         return ERROR_SUCCESS;
     }
 
@@ -3779,13 +3838,13 @@ lend:
  *   data is available.
  */
 BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
-                                LPDWORD lpdwNumberOfBytesAvailble,
+                                LPDWORD lpdwNumberOfBytesAvailable,
                                 DWORD dwFlags, DWORD_PTR dwContext)
 {
     object_header_t *hdr;
     DWORD res;
 
-    TRACE("(%p %p %x %lx)\n", hFile, lpdwNumberOfBytesAvailble, dwFlags, dwContext);
+    TRACE("(%p %p %x %lx)\n", hFile, lpdwNumberOfBytesAvailable, dwFlags, dwContext);
 
     hdr = get_handle_object( hFile );
     if (!hdr) {
@@ -3794,7 +3853,7 @@ BOOL WINAPI InternetQueryDataAvailable( HINTERNET hFile,
     }
 
     if(hdr->vtbl->QueryDataAvailable) {
-        res = hdr->vtbl->QueryDataAvailable(hdr, lpdwNumberOfBytesAvailble, dwFlags, dwContext);
+        res = hdr->vtbl->QueryDataAvailable(hdr, lpdwNumberOfBytesAvailable, dwFlags, dwContext);
     }else {
         WARN("wrong handle\n");
         res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;

@@ -407,10 +407,37 @@ static HRESULT WINAPI IAssemblyNameImpl_GetVersion(IAssemblyName *iface,
 
 static HRESULT WINAPI IAssemblyNameImpl_IsEqual(IAssemblyName *iface,
                                                 IAssemblyName *pName,
-                                                DWORD dwCmpFlags)
+                                                DWORD flags)
 {
-    FIXME("(%p, %p, %d) stub!\n", iface, pName, dwCmpFlags);
-    return E_NOTIMPL;
+    IAssemblyNameImpl *name1 = impl_from_IAssemblyName(iface);
+    IAssemblyNameImpl *name2 = impl_from_IAssemblyName(pName);
+
+    TRACE("(%p, %p, 0x%08x)\n", iface, pName, flags);
+
+    if (!pName) return S_FALSE;
+    if (flags & ~ASM_CMPF_IL_ALL) FIXME("unsupported flags\n");
+
+    if ((flags & ASM_CMPF_NAME) && strcmpW(name1->name, name2->name)) return S_FALSE;
+    if (name1->versize && name2->versize)
+    {
+        if ((flags & ASM_CMPF_MAJOR_VERSION) &&
+            name1->version[0] != name2->version[0]) return S_FALSE;
+        if ((flags & ASM_CMPF_MINOR_VERSION) &&
+            name1->version[1] != name2->version[1]) return S_FALSE;
+        if ((flags & ASM_CMPF_BUILD_NUMBER) &&
+            name1->version[2] != name2->version[2]) return S_FALSE;
+        if ((flags & ASM_CMPF_REVISION_NUMBER) &&
+            name1->version[3] != name2->version[3]) return S_FALSE;
+    }
+    if ((flags & ASM_CMPF_PUBLIC_KEY_TOKEN) &&
+        name1->haspubkey && name2->haspubkey &&
+        memcmp(name1->pubkey, name2->pubkey, sizeof(name1->pubkey))) return S_FALSE;
+
+    if ((flags & ASM_CMPF_CULTURE) &&
+        name1->culture && name2->culture &&
+        strcmpW(name1->culture, name2->culture)) return S_FALSE;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IAssemblyNameImpl_Clone(IAssemblyName *iface,
@@ -553,10 +580,32 @@ static HRESULT parse_pubkey(IAssemblyNameImpl *name, LPCWSTR pubkey)
     return S_OK;
 }
 
+static WCHAR *parse_value( const WCHAR *str, unsigned int len )
+{
+    WCHAR *ret;
+    const WCHAR *p = str;
+    BOOL quoted = FALSE;
+    unsigned int i = 0;
+
+    if (!(ret = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) ))) return NULL;
+    if (*p == '\"')
+    {
+        quoted = TRUE;
+        p++;
+    }
+    while (*p && *p != '\"') ret[i++] = *p++;
+    if ((quoted && *p != '\"') || (!quoted && *p == '\"'))
+    {
+        HeapFree( GetProcessHeap(), 0, ret );
+        return NULL;
+    }
+    ret[i] = 0;
+    return ret;
+}
+
 static HRESULT parse_display_name(IAssemblyNameImpl *name, LPCWSTR szAssemblyName)
 {
-    LPWSTR str, save;
-    LPWSTR ptr, ptr2;
+    LPWSTR str, save, ptr, ptr2, value;
     HRESULT hr = S_OK;
     BOOL done = FALSE;
 
@@ -595,7 +644,7 @@ static HRESULT parse_display_name(IAssemblyNameImpl *name, LPCWSTR szAssemblyNam
     if (!ptr)
         goto done;
 
-    str = ptr + 2;
+    str = ptr + 1;
     while (!done)
     {
         ptr = strchrW(str, '=');
@@ -612,7 +661,7 @@ static HRESULT parse_display_name(IAssemblyNameImpl *name, LPCWSTR szAssemblyNam
             goto done;
         }
 
-        if (!(ptr2 = strstrW(ptr, separator)))
+        if (!(ptr2 = strchrW(ptr, ',')))
         {
             if (!(ptr2 = strchrW(ptr, '\0')))
             {
@@ -624,21 +673,25 @@ static HRESULT parse_display_name(IAssemblyNameImpl *name, LPCWSTR szAssemblyNam
         }
 
         *ptr2 = '\0';
-
+        if (!(value = parse_value( ptr, ptr2 - ptr )))
+        {
+            hr = FUSION_E_INVALID_NAME;
+            goto done;
+        }
         while (*str == ' ') str++;
 
-        if (!lstrcmpW(str, version))
-            hr = parse_version(name, ptr);
-        else if (!lstrcmpW(str, culture))
-            hr = parse_culture(name, ptr);
-        else if (!lstrcmpW(str, pubkey))
-            hr = parse_pubkey(name, ptr);
-        else if (!lstrcmpW(str, procarch))
+        if (!lstrcmpiW(str, version))
+            hr = parse_version( name, value );
+        else if (!lstrcmpiW(str, culture))
+            hr = parse_culture( name, value );
+        else if (!lstrcmpiW(str, pubkey))
+            hr = parse_pubkey( name, value );
+        else if (!lstrcmpiW(str, procarch))
         {
-            name->procarch = strdupW(ptr);
-            if (!name->procarch)
-                hr = E_OUTOFMEMORY;
+            name->procarch = value;
+            value = NULL;
         }
+        HeapFree( GetProcessHeap(), 0, value );
 
         if (FAILED(hr))
             goto done;

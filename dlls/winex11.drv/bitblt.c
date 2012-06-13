@@ -937,8 +937,18 @@ static void free_ximage_bits( struct gdi_image_bits *bits )
     wine_tsx11_unlock();
 }
 
+/* only for use on sanitized BITMAPINFO structures */
+static inline int get_dib_info_size( const BITMAPINFO *info, UINT coloruse )
+{
+    if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        return sizeof(BITMAPINFOHEADER) + 3 * sizeof(DWORD);
+    if (coloruse == DIB_PAL_COLORS)
+        return sizeof(BITMAPINFOHEADER) + info->bmiHeader.biClrUsed * sizeof(WORD);
+    return FIELD_OFFSET( BITMAPINFO, bmiColors[info->bmiHeader.biClrUsed] );
+}
+
 /* store the palette or color mask data in the bitmap info structure */
-static void set_color_info( PHYSDEV dev, const ColorShifts *color_shifts, BITMAPINFO *info )
+static void set_color_info( const XVisualInfo *vis, BITMAPINFO *info )
 {
     DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
 
@@ -955,7 +965,7 @@ static void set_color_info( PHYSDEV dev, const ColorShifts *color_shifts, BITMAP
         UINT i, count;
 
         info->bmiHeader.biClrUsed = 1 << info->bmiHeader.biBitCount;
-        count = X11DRV_GetSystemPaletteEntries( dev, 0, info->bmiHeader.biClrUsed, palette );
+        count = X11DRV_GetSystemPaletteEntries( NULL, 0, info->bmiHeader.biClrUsed, palette );
         for (i = 0; i < count; i++)
         {
             rgb[i].rgbRed   = palette[i].peRed;
@@ -967,15 +977,15 @@ static void set_color_info( PHYSDEV dev, const ColorShifts *color_shifts, BITMAP
         break;
     }
     case 16:
-        colors[0] = color_shifts->logicalRed.max << color_shifts->logicalRed.shift;
-        colors[1] = color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift;
-        colors[2] = color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift;
+        colors[0] = vis->red_mask;
+        colors[1] = vis->green_mask;
+        colors[2] = vis->blue_mask;
         info->bmiHeader.biCompression = BI_BITFIELDS;
         break;
     case 32:
-        colors[0] = color_shifts->logicalRed.max << color_shifts->logicalRed.shift;
-        colors[1] = color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift;
-        colors[2] = color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift;
+        colors[0] = vis->red_mask;
+        colors[1] = vis->green_mask;
+        colors[2] = vis->blue_mask;
         if (colors[0] != 0xff0000 || colors[1] != 0x00ff00 || colors[2] != 0x0000ff)
             info->bmiHeader.biCompression = BI_BITFIELDS;
         break;
@@ -983,7 +993,7 @@ static void set_color_info( PHYSDEV dev, const ColorShifts *color_shifts, BITMAP
 }
 
 /* check if the specified color info is suitable for PutImage */
-static BOOL matching_color_info( PHYSDEV dev, const ColorShifts *color_shifts, const BITMAPINFO *info )
+static BOOL matching_color_info( const XVisualInfo *vis, const BITMAPINFO *info )
 {
     DWORD *colors = (DWORD *)((char *)info + info->bmiHeader.biSize);
 
@@ -1000,7 +1010,7 @@ static BOOL matching_color_info( PHYSDEV dev, const ColorShifts *color_shifts, c
         UINT i, count;
 
         if (info->bmiHeader.biCompression != BI_RGB) return FALSE;
-        count = X11DRV_GetSystemPaletteEntries( dev, 0, 1 << info->bmiHeader.biBitCount, palette );
+        count = X11DRV_GetSystemPaletteEntries( NULL, 0, 1 << info->bmiHeader.biBitCount, palette );
         if (count != info->bmiHeader.biClrUsed) return FALSE;
         for (i = 0; i < count; i++)
         {
@@ -1012,33 +1022,29 @@ static BOOL matching_color_info( PHYSDEV dev, const ColorShifts *color_shifts, c
     }
     case 16:
         if (info->bmiHeader.biCompression == BI_BITFIELDS)
-            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift == colors[0] &&
-                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == colors[1] &&
-                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift == colors[2]);
+            return (vis->red_mask == colors[0] &&
+                    vis->green_mask == colors[1] &&
+                    vis->blue_mask == colors[2]);
         if (info->bmiHeader.biCompression == BI_RGB)
-            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift     == 0x7c00 &&
-                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == 0x03e0 &&
-                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift   == 0x001f);
+            return (vis->red_mask == 0x7c00 && vis->green_mask == 0x03e0 && vis->blue_mask == 0x001f);
         break;
     case 32:
         if (info->bmiHeader.biCompression == BI_BITFIELDS)
-            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift == colors[0] &&
-                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == colors[1] &&
-                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift == colors[2]);
+            return (vis->red_mask == colors[0] &&
+                    vis->green_mask == colors[1] &&
+                    vis->blue_mask == colors[2]);
         /* fall through */
     case 24:
         if (info->bmiHeader.biCompression == BI_RGB)
-            return (color_shifts->logicalRed.max << color_shifts->logicalRed.shift     == 0xff0000 &&
-                    color_shifts->logicalGreen.max << color_shifts->logicalGreen.shift == 0x00ff00 &&
-                    color_shifts->logicalBlue.max << color_shifts->logicalBlue.shift   == 0x0000ff);
+            return (vis->red_mask == 0xff0000 && vis->green_mask == 0x00ff00 && vis->blue_mask == 0x0000ff);
         break;
     }
     return FALSE;
 }
 
-static inline BOOL is_r8g8b8( int depth, const ColorShifts *color_shifts )
+static inline BOOL is_r8g8b8( const XVisualInfo *vis )
 {
-    return depth == 24 && color_shifts->logicalBlue.shift == 0 && color_shifts->logicalRed.shift == 16;
+    return vis->depth == 24 && vis->red_mask == 0xff0000 && vis->blue_mask == 0x0000ff;
 }
 
 /* copy the image bits, fixing up alignment and byte swapping as necessary */
@@ -1201,10 +1207,9 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
     X_PHYSBITMAP *bitmap;
     DWORD ret;
     XImage *image;
-    int depth;
+    XVisualInfo vis;
     struct gdi_image_bits dst_bits;
     const XPixmapFormatValues *format;
-    const ColorShifts *color_shifts;
     const BYTE *opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
     const int *mapping = NULL;
 
@@ -1212,27 +1217,34 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
     {
         if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
         physdev = NULL;
-        depth = bitmap->depth;
-        color_shifts = &bitmap->color_shifts;
+        vis.depth      = bitmap->depth;
+        vis.red_mask   = bitmap->color_shifts.logicalRed.max   << bitmap->color_shifts.logicalRed.shift;
+        vis.green_mask = bitmap->color_shifts.logicalGreen.max << bitmap->color_shifts.logicalGreen.shift;
+        vis.blue_mask  = bitmap->color_shifts.logicalBlue.max  << bitmap->color_shifts.logicalBlue.shift;
     }
     else
     {
         physdev = get_x11drv_dev( dev );
         bitmap = NULL;
-        depth = physdev->depth;
-        color_shifts = physdev->color_shifts;
+        vis.depth      = physdev->depth;
+        if (physdev->color_shifts)
+        {
+            vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
+            vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
+            vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
+        }
     }
-    format = pixmap_formats[depth];
+    format = pixmap_formats[vis.depth];
 
     if (info->bmiHeader.biPlanes != 1) goto update_format;
     if (info->bmiHeader.biBitCount != format->bits_per_pixel) goto update_format;
     /* FIXME: could try to handle 1-bpp using XCopyPlane */
-    if (!matching_color_info( dev, color_shifts, info )) goto update_format;
+    if (!matching_color_info( &vis, info )) goto update_format;
     if (!bits) return ERROR_SUCCESS;  /* just querying the format */
     if ((src->width != dst->width) || (src->height != dst->height)) return ERROR_TRANSFORM_NOT_SUPPORTED;
 
     wine_tsx11_lock();
-    image = XCreateImage( gdi_display, visual, depth, ZPixmap, 0, NULL,
+    image = XCreateImage( gdi_display, visual, vis.depth, ZPixmap, 0, NULL,
                           info->bmiHeader.biWidth, src->visrect.bottom - src->visrect.top, 32, 0 );
     wine_tsx11_unlock();
     if (!image) return ERROR_OUTOFMEMORY;
@@ -1243,7 +1255,7 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
             mapping = X11DRV_PALETTE_PaletteToXPixel;
     }
 
-    ret = copy_image_bits( info, is_r8g8b8(depth,color_shifts), image, bits, &dst_bits, src, mapping, ~0u );
+    ret = copy_image_bits( info, is_r8g8b8(&vis), image, bits, &dst_bits, src, mapping, ~0u );
 
     if (!ret)
     {
@@ -1293,7 +1305,7 @@ DWORD X11DRV_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *info
                 gc = XCreateGC( gdi_display, physdev->drawable, 0, NULL );
                 XSetSubwindowMode( gdi_display, gc, IncludeInferiors );
                 XSetGraphicsExposures( gdi_display, gc, False );
-                src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, depth );
+                src_pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
                 XPutImage( gdi_display, src_pixmap, gc, image, src->visrect.left, 0, 0, 0, width, height );
                 wine_tsx11_unlock();
 
@@ -1321,7 +1333,7 @@ update_format:
     info->bmiHeader.biPlanes   = 1;
     info->bmiHeader.biBitCount = format->bits_per_pixel;
     if (info->bmiHeader.biHeight > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
-    set_color_info( dev, color_shifts, info );
+    set_color_info( &vis, info );
     return ERROR_BAD_FORMAT;
 }
 
@@ -1335,28 +1347,34 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
     X_PHYSBITMAP *bitmap;
     DWORD ret = ERROR_SUCCESS;
     XImage *image;
+    XVisualInfo vis;
     UINT align, x, y, width, height;
-    int depth;
     struct gdi_image_bits src_bits;
     const XPixmapFormatValues *format;
-    const ColorShifts *color_shifts;
     const int *mapping = NULL;
 
     if (hbitmap)
     {
         if (!(bitmap = X11DRV_get_phys_bitmap( hbitmap ))) return ERROR_INVALID_HANDLE;
         physdev = NULL;
-        depth = bitmap->depth;
-        color_shifts = &bitmap->color_shifts;
+        vis.depth      = bitmap->depth;
+        vis.red_mask   = bitmap->color_shifts.logicalRed.max   << bitmap->color_shifts.logicalRed.shift;
+        vis.green_mask = bitmap->color_shifts.logicalGreen.max << bitmap->color_shifts.logicalGreen.shift;
+        vis.blue_mask  = bitmap->color_shifts.logicalBlue.max  << bitmap->color_shifts.logicalBlue.shift;
     }
     else
     {
         physdev = get_x11drv_dev( dev );
         bitmap = NULL;
-        depth = physdev->depth;
-        color_shifts = physdev->color_shifts;
+        vis.depth      = physdev->depth;
+        if (physdev->color_shifts)
+        {
+            vis.red_mask   = physdev->color_shifts->logicalRed.max   << physdev->color_shifts->logicalRed.shift;
+            vis.green_mask = physdev->color_shifts->logicalGreen.max << physdev->color_shifts->logicalGreen.shift;
+            vis.blue_mask  = physdev->color_shifts->logicalBlue.max  << physdev->color_shifts->logicalBlue.shift;
+        }
     }
-    format = pixmap_formats[depth];
+    format = pixmap_formats[vis.depth];
 
     /* align start and width to 32-bit boundary */
     switch (format->bits_per_pixel)
@@ -1368,7 +1386,7 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
     case 24: align = 4;  break;
     case 32: align = 1;  break;
     default:
-        FIXME( "depth %u bpp %u not supported yet\n", depth, format->bits_per_pixel );
+        FIXME( "depth %u bpp %u not supported yet\n", vis.depth, format->bits_per_pixel );
         return ERROR_BAD_FORMAT;
     }
 
@@ -1378,7 +1396,7 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
     info->bmiHeader.biXPelsPerMeter = 0;
     info->bmiHeader.biYPelsPerMeter = 0;
     info->bmiHeader.biClrImportant  = 0;
-    set_color_info( dev, color_shifts, info );
+    set_color_info( &vis, info );
 
     if (!bits) return ERROR_SUCCESS;  /* just querying the color information */
 
@@ -1424,8 +1442,8 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
             Pixmap pixmap;
 
             wine_tsx11_lock();
-            pixmap = XCreatePixmap( gdi_display, root_window, width, height, depth );
-            XCopyArea( gdi_display, physdev->drawable, pixmap, get_bitmap_gc(depth),
+            pixmap = XCreatePixmap( gdi_display, root_window, width, height, vis.depth );
+            XCopyArea( gdi_display, physdev->drawable, pixmap, get_bitmap_gc(vis.depth),
                        physdev->dc_rect.left + x, physdev->dc_rect.top + y, width, height, 0, 0 );
             image = XGetImage( gdi_display, pixmap, 0, 0, width, height, AllPlanes, ZPixmap );
             XFreePixmap( gdi_display, pixmap );
@@ -1440,7 +1458,182 @@ DWORD X11DRV_GetImage( PHYSDEV dev, HBITMAP hbitmap, BITMAPINFO *info,
 
     src_bits.ptr     = image->data;
     src_bits.is_copy = TRUE;
-    ret = copy_image_bits( info, is_r8g8b8(depth,color_shifts), image, &src_bits, bits, src, mapping,
+    ret = copy_image_bits( info, is_r8g8b8(&vis), image, &src_bits, bits, src, mapping,
+                           zeropad_masks[(width * image->bits_per_pixel) & 31] );
+
+    if (!ret && bits->ptr == image->data)
+    {
+        bits->free = free_ximage_bits;
+        image->data = NULL;
+    }
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
+    return ret;
+}
+
+
+/***********************************************************************
+ *           put_pixmap_image
+ *
+ * Simplified equivalent of X11DRV_PutImage that writes directly to a pixmap.
+ */
+static DWORD put_pixmap_image( Pixmap pixmap, const XVisualInfo *vis,
+                               BITMAPINFO *info, const struct gdi_image_bits *bits )
+{
+    DWORD ret;
+    XImage *image;
+    struct bitblt_coords coords;
+    struct gdi_image_bits dst_bits;
+    const XPixmapFormatValues *format = pixmap_formats[vis->depth];
+    const int *mapping = NULL;
+
+    if (!format) return ERROR_INVALID_PARAMETER;
+    if (info->bmiHeader.biPlanes != 1) goto update_format;
+    if (info->bmiHeader.biBitCount != format->bits_per_pixel) goto update_format;
+    /* FIXME: could try to handle 1-bpp using XCopyPlane */
+    if (!matching_color_info( vis, info )) goto update_format;
+    if (!bits) return ERROR_SUCCESS;  /* just querying the format */
+
+    coords.x = 0;
+    coords.y = 0;
+    coords.width = info->bmiHeader.biWidth;
+    coords.height = abs( info->bmiHeader.biHeight );
+    SetRect( &coords.visrect, 0, 0, coords.width, coords.height );
+
+    wine_tsx11_lock();
+    image = XCreateImage( gdi_display, visual, vis->depth, ZPixmap, 0, NULL,
+                          coords.width, coords.height, 32, 0 );
+    wine_tsx11_unlock();
+    if (!image) return ERROR_OUTOFMEMORY;
+
+    if (image->bits_per_pixel == 4 || image->bits_per_pixel == 8)
+        mapping = X11DRV_PALETTE_PaletteToXPixel;
+
+    if (!(ret = copy_image_bits( info, is_r8g8b8(vis), image, bits, &dst_bits, &coords, mapping, ~0u )))
+    {
+        image->data = dst_bits.ptr;
+        wine_tsx11_lock();
+        XPutImage( gdi_display, pixmap, get_bitmap_gc( vis->depth ),
+                   image, 0, 0, 0, 0, coords.width, coords.height );
+        wine_tsx11_unlock();
+        image->data = NULL;
+    }
+
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
+    if (dst_bits.free) dst_bits.free( &dst_bits );
+    return ret;
+
+update_format:
+    info->bmiHeader.biPlanes   = 1;
+    info->bmiHeader.biBitCount = format->bits_per_pixel;
+    if (info->bmiHeader.biHeight > 0) info->bmiHeader.biHeight = -info->bmiHeader.biHeight;
+    set_color_info( vis, info );
+    return ERROR_BAD_FORMAT;
+}
+
+
+/***********************************************************************
+ *           create_pixmap_from_image
+ */
+Pixmap create_pixmap_from_image( HDC hdc, const XVisualInfo *vis, const BITMAPINFO *info,
+                                 const struct gdi_image_bits *bits, UINT coloruse )
+{
+    static const RGBQUAD default_colortable[2] = { { 0x00, 0x00, 0x00 }, { 0xff, 0xff, 0xff } };
+    char dst_buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
+    char src_buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
+    BITMAPINFO *dst_info = (BITMAPINFO *)dst_buffer;
+    BITMAPINFO *src_info = (BITMAPINFO *)src_buffer;
+    struct gdi_image_bits dst_bits;
+    Pixmap pixmap;
+    DWORD err;
+    HBITMAP dib;
+
+    wine_tsx11_lock();
+    pixmap = XCreatePixmap( gdi_display, root_window,
+                            info->bmiHeader.biWidth, abs(info->bmiHeader.biHeight), vis->depth );
+    wine_tsx11_unlock();
+    if (!pixmap) return 0;
+
+    memcpy( src_info, info, get_dib_info_size( info, coloruse ));
+    memcpy( dst_info, info, get_dib_info_size( info, coloruse ));
+
+    if (coloruse == DIB_PAL_COLORS ||
+        (err = put_pixmap_image( pixmap, vis, dst_info, bits )) == ERROR_BAD_FORMAT)
+    {
+        if (dst_info->bmiHeader.biBitCount == 1)  /* set a default color table for 1-bpp */
+            memcpy( dst_info->bmiColors, default_colortable, sizeof(default_colortable) );
+        dib = CreateDIBSection( hdc, dst_info, coloruse, &dst_bits.ptr, 0, 0 );
+        if (dib)
+        {
+            if (src_info->bmiHeader.biBitCount == 1 && !src_info->bmiHeader.biClrUsed)
+                memcpy( src_info->bmiColors, default_colortable, sizeof(default_colortable) );
+            SetDIBits( hdc, dib, 0, abs(info->bmiHeader.biHeight), bits->ptr, src_info, coloruse );
+            dst_bits.free = NULL;
+            dst_bits.is_copy = TRUE;
+            err = put_pixmap_image( pixmap, vis, dst_info, &dst_bits );
+            DeleteObject( dib );
+        }
+        else err = ERROR_OUTOFMEMORY;
+    }
+
+    if (!err) return pixmap;
+
+    wine_tsx11_lock();
+    XFreePixmap( gdi_display, pixmap );
+    wine_tsx11_unlock();
+    return 0;
+
+}
+
+
+/***********************************************************************
+ *           get_pixmap_image
+ *
+ * Equivalent of X11DRV_GetImage that reads directly from a pixmap.
+ */
+DWORD get_pixmap_image( Pixmap pixmap, int width, int height, const XVisualInfo *vis,
+                        BITMAPINFO *info, struct gdi_image_bits *bits )
+{
+    DWORD ret = ERROR_SUCCESS;
+    XImage *image;
+    struct gdi_image_bits src_bits;
+    struct bitblt_coords coords;
+    const XPixmapFormatValues *format = pixmap_formats[vis->depth];
+    const int *mapping = NULL;
+
+    if (!format) return ERROR_INVALID_PARAMETER;
+
+    info->bmiHeader.biSize          = sizeof(info->bmiHeader);
+    info->bmiHeader.biWidth         = width;
+    info->bmiHeader.biHeight        = -height;
+    info->bmiHeader.biPlanes        = 1;
+    info->bmiHeader.biBitCount      = format->bits_per_pixel;
+    info->bmiHeader.biXPelsPerMeter = 0;
+    info->bmiHeader.biYPelsPerMeter = 0;
+    info->bmiHeader.biClrImportant  = 0;
+    set_color_info( vis, info );
+
+    if (!bits) return ERROR_SUCCESS;  /* just querying the color information */
+
+    coords.x = 0;
+    coords.y = 0;
+    coords.width = width;
+    coords.height = height;
+    SetRect( &coords.visrect, 0, 0, width, height );
+
+    wine_tsx11_lock();
+    image = XGetImage( gdi_display, pixmap, 0, 0, width, height, AllPlanes, ZPixmap );
+    wine_tsx11_unlock();
+    if (!image) return ERROR_OUTOFMEMORY;
+
+    info->bmiHeader.biSizeImage = height * image->bytes_per_line;
+
+    src_bits.ptr     = image->data;
+    src_bits.is_copy = TRUE;
+    ret = copy_image_bits( info, is_r8g8b8(vis), image, &src_bits, bits, &coords, mapping,
                            zeropad_masks[(width * image->bits_per_pixel) & 31] );
 
     if (!ret && bits->ptr == image->data)

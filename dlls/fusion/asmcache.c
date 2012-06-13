@@ -94,32 +94,48 @@ static BOOL create_full_path(LPCWSTR path)
     return ret;
 }
 
-static BOOL get_assembly_directory(LPWSTR dir, DWORD size, BYTE architecture)
+static BOOL get_assembly_directory(LPWSTR dir, DWORD size, const char *version, PEKIND architecture)
 {
+    static const WCHAR dotnet[] = {'\\','M','i','c','r','o','s','o','f','t','.','N','E','T','\\',0};
     static const WCHAR gac[] = {'\\','a','s','s','e','m','b','l','y','\\','G','A','C',0};
-
     static const WCHAR msil[] = {'_','M','S','I','L',0};
     static const WCHAR x86[] = {'_','3','2',0};
     static const WCHAR amd64[] = {'_','6','4',0};
+    DWORD len = GetWindowsDirectoryW(dir, size);
 
-    GetWindowsDirectoryW(dir, size);
-    strcatW(dir, gac);
-
+    if (!strcmp(version, "v4.0.30319"))
+    {
+        strcpyW(dir + len, dotnet);
+        len += sizeof(dotnet)/sizeof(WCHAR) -1;
+        strcpyW(dir + len, gac + 1);
+        len += sizeof(gac)/sizeof(WCHAR) - 2;
+    }
+    else
+    {
+        strcpyW(dir + len, gac);
+        len += sizeof(gac)/sizeof(WCHAR) - 1;
+    }
     switch (architecture)
     {
+        case peNone:
+            break;
+
         case peMSIL:
-            strcatW(dir, msil);
+            strcpyW(dir + len, msil);
             break;
 
         case peI386:
-            strcatW(dir, x86);
+            strcpyW(dir + len, x86);
             break;
 
         case peAMD64:
-            strcatW(dir, amd64);
+            strcpyW(dir + len, amd64);
             break;
-    }
 
+        default:
+            WARN("unhandled architecture %u\n", architecture);
+            return FALSE;
+    }
     return TRUE;
 }
 
@@ -308,11 +324,16 @@ static HRESULT WINAPI IAssemblyCacheImpl_QueryAssemblyInfo(IAssemblyCache *iface
     if (FAILED(hr))
         goto done;
 
-    hr = IAssemblyEnum_GetNextAssembly(asmenum, NULL, &next, 0);
-    if (hr == S_FALSE)
+    for (;;)
     {
-        hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-        goto done;
+        hr = IAssemblyEnum_GetNextAssembly(asmenum, NULL, &next, 0);
+        if (hr != S_OK)
+        {
+            hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+            goto done;
+        }
+        hr = IAssemblyName_IsEqual(asmname, next, ASM_CMPF_IL_ALL);
+        if (hr == S_OK) break;
     }
 
     if (!pAsmInfo)
@@ -354,19 +375,19 @@ static HRESULT WINAPI IAssemblyCacheImpl_InstallAssembly(IAssemblyCache *iface,
                                                          LPCWSTR pszManifestFilePath,
                                                          LPCFUSION_INSTALL_REFERENCE pRefData)
 {
-    static const WCHAR format[] = {'%','s','\\','%','s','\\','%','s','_','_','%','s','\\',0};
+    static const WCHAR format[] =
+        {'%','s','\\','%','s','\\','%','s','_','_','%','s','\\',0};
+    static const WCHAR format_v40[] =
+        {'%','s','\\','%','s','\\','v','4','.','0','_','%','s','_','_','%','s','\\',0};
     static const WCHAR ext_exe[] = {'.','e','x','e',0};
     static const WCHAR ext_dll[] = {'.','d','l','l',0};
     IAssemblyCacheImpl *cache = impl_from_IAssemblyCache(iface);
     ASSEMBLY *assembly;
-    LPWSTR filename;
-    LPWSTR name = NULL;
-    LPWSTR token = NULL;
-    LPWSTR version = NULL;
-    LPWSTR asmpath = NULL;
-    WCHAR path[MAX_PATH];
-    WCHAR asmdir[MAX_PATH];
-    LPWSTR ext;
+    WCHAR *filename, *ext;
+    WCHAR *name = NULL, *token = NULL, *version = NULL, *asmpath = NULL;
+    WCHAR path[MAX_PATH], asmdir[MAX_PATH];
+    PEKIND architecture;
+    char *clr_version;
     HRESULT hr;
 
     TRACE("(%p, %d, %s, %p)\n", iface, dwFlags,
@@ -403,11 +424,19 @@ static HRESULT WINAPI IAssemblyCacheImpl_InstallAssembly(IAssemblyCache *iface,
     if (FAILED(hr))
         goto done;
 
+    hr = assembly_get_runtime_version(assembly, &clr_version);
+    if (FAILED(hr))
+        goto done;
+
     cache_lock( cache );
 
-    get_assembly_directory(asmdir, MAX_PATH, assembly_get_architecture(assembly));
+    architecture = assembly_get_architecture(assembly);
+    get_assembly_directory(asmdir, MAX_PATH, clr_version, architecture);
 
-    sprintfW(path, format, asmdir, name, version, token);
+    if (!strcmp(clr_version, "v4.0.30319"))
+        sprintfW(path, format_v40, asmdir, name, version, token);
+    else
+        sprintfW(path, format, asmdir, name, version, token);
 
     create_full_path(path);
 

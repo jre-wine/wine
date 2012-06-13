@@ -25,6 +25,32 @@
 #include "d3dx9tex.h"
 #include "resources.h"
 
+/* 2x2 16-bit dds, no mipmaps */
+static const unsigned char dds_16bit[] = {
+0x44,0x44,0x53,0x20,0x7c,0x00,0x00,0x00,0x07,0x10,0x08,0x00,0x02,0x00,0x00,0x00,
+0x02,0x00,0x00,0x00,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x20,0x00,0x00,0x00,
+0x40,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x00,0x7c,0x00,0x00,
+0xe0,0x03,0x00,0x00,0x1f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0xff,0x7f,0xff,0x7f,0xff,0x7f,0xff,0x7f
+};
+
+/* 2x2 24-bit dds, 2 mipmaps */
+static const unsigned char dds_24bit[] = {
+0x44,0x44,0x53,0x20,0x7c,0x00,0x00,0x00,0x07,0x10,0x0a,0x00,0x02,0x00,0x00,0x00,
+0x02,0x00,0x00,0x00,0x0c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x20,0x00,0x00,0x00,
+0x40,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x18,0x00,0x00,0x00,0x00,0x00,0xff,0x00,
+0x00,0xff,0x00,0x00,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x08,0x10,0x40,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
+};
+
 /* 4x4 cube map dds */
 static const unsigned char dds_cube_map[] = {
 0x44,0x44,0x53,0x20,0x7c,0x00,0x00,0x00,0x07,0x10,0x08,0x00,0x04,0x00,0x00,0x00,
@@ -58,6 +84,29 @@ static const unsigned char dds_volume_map[] = {
 0xff,0x00,0xff,0x00,0x00,0x00,0x00,0x00,0x2f,0x7e,0xcf,0x79,0x01,0x54,0x5c,0x5c,
 0x0f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x84,0xef,0x7b,0xaa,0xab,0xab,0xab
 };
+
+static BOOL is_autogenmipmap_supported(IDirect3DDevice9 *device, D3DRESOURCETYPE resource_type)
+{
+    HRESULT hr;
+    D3DCAPS9 caps;
+    IDirect3D9 *d3d9;
+    D3DDISPLAYMODE mode;
+    D3DDEVICE_CREATION_PARAMETERS params;
+
+    IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    IDirect3DDevice9_GetDirect3D(device, &d3d9);
+    IDirect3DDevice9_GetCreationParameters(device, &params);
+    IDirect3DDevice9_GetDisplayMode(device, 0, &mode);
+
+    if (!(caps.Caps2 & D3DCAPS2_CANAUTOGENMIPMAP))
+        return FALSE;
+
+    hr = IDirect3D9_CheckDeviceFormat(d3d9, params.AdapterOrdinal, params.DeviceType,
+        mode.Format, D3DUSAGE_AUTOGENMIPMAP, resource_type, D3DFMT_A8R8G8B8);
+
+    IDirect3D9_Release(d3d9);
+    return SUCCEEDED(hr);
+}
 
 static void test_D3DXCheckTextureRequirements(IDirect3DDevice9 *device)
 {
@@ -172,6 +221,29 @@ static void test_D3DXCheckTextureRequirements(IDirect3DDevice9 *device)
     hr = D3DXCheckTextureRequirements(device, NULL, NULL, &mipmaps, 0, NULL, D3DPOOL_DEFAULT);
     ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
     ok(mipmaps == 9, "Returned mipmaps %d, expected %d\n", mipmaps, 9);
+
+    /* mipmaps when D3DUSAGE_AUTOGENMIPMAP is set */
+    if (is_autogenmipmap_supported(device, D3DRTYPE_TEXTURE))
+    {
+        mipmaps = 0;
+        hr = D3DXCheckTextureRequirements(device, NULL, NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
+        mipmaps = 1;
+        hr = D3DXCheckTextureRequirements(device, NULL, NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(mipmaps == 1, "Returned mipmaps %d, expected %d\n", mipmaps, 1);
+        mipmaps = 2;
+        hr = D3DXCheckTextureRequirements(device, NULL, NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
+        mipmaps = 6;
+        hr = D3DXCheckTextureRequirements(device, NULL, NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
+    }
+    else
+        skip("No D3DUSAGE_AUTOGENMIPMAP support for textures\n");
 
     /* usage */
     hr = D3DXCheckTextureRequirements(device, NULL, NULL, NULL, D3DUSAGE_WRITEONLY, NULL, D3DPOOL_DEFAULT);
@@ -295,6 +367,16 @@ static void test_D3DXCheckCubeTextureRequirements(IDirect3DDevice9 *device)
     hr = D3DXCheckCubeTextureRequirements(device, NULL, &mipmaps, 0, NULL, D3DPOOL_DEFAULT);
     ok(hr == D3D_OK, "D3DXCheckCubeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
     ok(mipmaps == 9, "Returned mipmaps %d, expected %d\n", mipmaps, 9);
+
+    if (is_autogenmipmap_supported(device, D3DRTYPE_CUBETEXTURE))
+    {
+        mipmaps = 3;
+        hr = D3DXCheckCubeTextureRequirements(device, NULL,  &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+        ok(hr == D3D_OK, "D3DXCheckCubeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
+    }
+    else
+        skip("No D3DUSAGE_AUTOGENMIPMAP support for cube textures\n");
 
     /* usage */
     hr = D3DXCheckCubeTextureRequirements(device, NULL, NULL, D3DUSAGE_WRITEONLY, NULL, D3DPOOL_DEFAULT);
@@ -435,6 +517,26 @@ static void test_D3DXCheckVolumeTextureRequirements(IDirect3DDevice9 *device)
     hr = D3DXCheckVolumeTextureRequirements(device, NULL, NULL, NULL, &mipmaps, 0, NULL, D3DPOOL_DEFAULT);
     ok(hr == D3D_OK, "D3DXCheckVolumeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
     ok(mipmaps == 9, "Returned mipmaps %d, expected %d\n", mipmaps, 9);
+
+    if (!is_autogenmipmap_supported(device, D3DRTYPE_VOLUMETEXTURE))
+    {
+        skip("No D3DUSAGE_AUTOGENMIPMAP support for volume textures\n");
+        return;
+    }
+
+    /* mipmaps when D3DUSAGE_AUTOGENMIPMAP is set */
+    mipmaps = 0;
+    hr = D3DXCheckVolumeTextureRequirements(device, NULL, NULL,NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+    ok(hr == D3D_OK, "D3DXCheckVolumeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+    ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
+    mipmaps = 1;
+    hr = D3DXCheckVolumeTextureRequirements(device, NULL, NULL,NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+    ok(hr == D3D_OK, "D3DXCheckVolumeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+    ok(mipmaps == 1, "Returned mipmaps %d, expected %d\n", mipmaps, 1);
+    mipmaps = 3;
+    hr = D3DXCheckVolumeTextureRequirements(device, NULL, NULL,NULL, &mipmaps, D3DUSAGE_AUTOGENMIPMAP, NULL, D3DPOOL_DEFAULT);
+    ok(hr == D3D_OK, "D3DXCheckVolumeTextureRequirements returned %#x, expected %#x\n", hr, D3D_OK);
+    ok(mipmaps == 0, "Returned mipmaps %d, expected %d\n", mipmaps, 0);
 }
 
 static void test_D3DXCreateTexture(IDirect3DDevice9 *device)
@@ -447,7 +549,7 @@ static void test_D3DXCreateTexture(IDirect3DDevice9 *device)
 
     IDirect3DDevice9_GetDeviceCaps(device, &caps);
 
-    hr = D3DXCreateTexture(NULL, 0, 0, 0, 0, D3DX_DEFAULT, 0, D3DPOOL_DEFAULT);
+    hr = D3DXCreateTexture(NULL, 0, 0, 0, 0, D3DX_DEFAULT, D3DPOOL_DEFAULT, NULL);
     ok(hr == D3DERR_INVALIDCALL, "D3DXCreateTexture returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
     /* width and height tests */
@@ -663,11 +765,11 @@ static void test_D3DXFilterTexture(IDirect3DDevice9 *device)
 
         hr = D3DXFilterTexture((IDirect3DBaseTexture9*) tex, NULL, 5, D3DX_FILTER_NONE); /* Invalid miplevel */
         ok(hr == D3DERR_INVALIDCALL, "D3DXFilterTexture returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+
+        IDirect3DTexture9_Release(tex);
     }
     else
         skip("Failed to create texture\n");
-
-    IDirect3DTexture9_Release(tex);
 
     hr = D3DXFilterTexture(NULL, NULL, 0, D3DX_FILTER_NONE);
     ok(hr == D3DERR_INVALIDCALL, "D3DXFilterTexture returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
@@ -695,6 +797,26 @@ static void test_D3DXFilterTexture(IDirect3DDevice9 *device)
     else
         skip("Failed to create texture\n");
 
+    hr = IDirect3DDevice9_CreateTexture(device, 256, 256, 0, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+    if (SUCCEEDED(hr))
+    {
+        hr = D3DXFilterTexture((IDirect3DBaseTexture9*) tex, NULL, 0, D3DX_FILTER_POINT);
+        ok(hr == D3D_OK, "D3DXFilterTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        IDirect3DTexture9_Release(tex);
+    }
+    else
+        skip("Failed to create texture\n");
+
+    hr = IDirect3DDevice9_CreateTexture(device, 256, 256, 0, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+    if (SUCCEEDED(hr))
+    {
+        hr = D3DXFilterTexture((IDirect3DBaseTexture9*) tex, NULL, 0, D3DX_FILTER_POINT);
+        ok(hr == D3D_OK, "D3DXFilterTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        IDirect3DTexture9_Release(tex);
+    }
+    else
+        skip("Failed to create texture\n");
+
     /* Cube texture test */
     hr = IDirect3DDevice9_CreateCubeTexture(device, 256, 5, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cubetex, NULL);
 
@@ -708,11 +830,37 @@ static void test_D3DXFilterTexture(IDirect3DDevice9 *device)
 
         hr = D3DXFilterTexture((IDirect3DBaseTexture9*) cubetex, NULL, 5, D3DX_FILTER_NONE); /* Invalid miplevel */
         ok(hr == D3DERR_INVALIDCALL, "D3DXFilterTexture returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        IDirect3DCubeTexture9_Release(cubetex);
     }
     else
         skip("Failed to create texture\n");
 
-    IDirect3DCubeTexture9_Release(cubetex);
+    /* Test textures with D3DUSAGE_AUTOGENMIPMAP usage */
+    if (!is_autogenmipmap_supported(device, D3DRTYPE_TEXTURE))
+    {
+        skip("No D3DUSAGE_AUTOGENMIPMAP supported for textures\n");
+        return;
+    }
+
+    hr = IDirect3DDevice9_CreateTexture(device, 256, 256, 0, D3DUSAGE_DYNAMIC | D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+    if (SUCCEEDED(hr))
+    {
+        hr = D3DXFilterTexture((IDirect3DBaseTexture9*) tex, NULL, 0, D3DX_FILTER_NONE);
+        ok(hr == D3D_OK, "D3dXFilteTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        IDirect3DTexture9_Release(tex);
+    }
+    else
+        skip("Failed to create texture\n");
+
+    hr = IDirect3DDevice9_CreateTexture(device, 256, 256, 1, D3DUSAGE_DYNAMIC | D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, NULL);
+    if (SUCCEEDED(hr))
+    {
+        hr = D3DXFilterTexture((IDirect3DBaseTexture9*) tex, NULL, 0, D3DX_FILTER_NONE);
+        ok(hr == D3D_OK, "D3dXFilteTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        IDirect3DTexture9_Release(tex);
+    }
+    else
+        skip("Failed to create texture\n");
 }
 
 static BOOL color_match(const DWORD *value, const DWORD *expected)
@@ -1106,6 +1254,50 @@ static void test_D3DXFillVolumeTexture(IDirect3DDevice9 *device)
     IDirect3DVolumeTexture9_Release(tex);
 }
 
+static void test_D3DXCreateTextureFromFileInMemory(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DTexture9 *texture;
+
+    hr = D3DXCreateTextureFromFileInMemory(device, dds_16bit, sizeof(dds_16bit), &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+
+    hr = D3DXCreateTextureFromFileInMemory(device, dds_24bit, sizeof(dds_24bit), &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+
+    hr = D3DXCreateTextureFromFileInMemory(device, dds_24bit, sizeof(dds_24bit) - 1, &texture);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXCreateTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
+}
+
+static void test_D3DXCreateTextureFromFileInMemoryEx(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DTexture9 *texture;
+
+    hr = D3DXCreateTextureFromFileInMemoryEx(device, dds_16bit, sizeof(dds_16bit), D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT,
+        0, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+
+    hr = D3DXCreateTextureFromFileInMemoryEx(device, dds_16bit, sizeof(dds_16bit), D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT,
+        D3DUSAGE_DYNAMIC, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+
+    if (!is_autogenmipmap_supported(device, D3DRTYPE_TEXTURE))
+    {
+        skip("No D3DUSAGE_AUTOGENMIPMAP support for textures\n");
+        return;
+    }
+
+    hr = D3DXCreateTextureFromFileInMemoryEx(device, dds_16bit, sizeof(dds_16bit), D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT,
+        D3DUSAGE_DYNAMIC | D3DUSAGE_AUTOGENMIPMAP, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &texture);
+    ok(hr == D3D_OK, "D3DXCreateTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DTexture9_Release(texture);
+}
+
 static void test_D3DXCreateCubeTextureFromFileInMemory(IDirect3DDevice9 *device)
 {
     HRESULT hr;
@@ -1114,37 +1306,49 @@ static void test_D3DXCreateCubeTextureFromFileInMemory(IDirect3DDevice9 *device)
     IDirect3DCubeTexture9 *cube_texture;
     D3DSURFACE_DESC surface_desc;
 
-    todo_wine {
-        hr = D3DXCreateCubeTextureFromFileInMemory(NULL, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateCubeTextureFromFileInMemory(NULL, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, NULL, sizeof(dds_cube_map), &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateCubeTextureFromFileInMemory(device, NULL, sizeof(dds_cube_map), &cube_texture);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, 0, &cube_texture);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, 0, &cube_texture);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), NULL);
-        ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+    hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXCreateCubeTextureFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
 
-        hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
-        if (SUCCEEDED(hr))
-        {
-            levelcount = IDirect3DCubeTexture9_GetLevelCount(cube_texture);
-            ok(levelcount == 3, "GetLevelCount returned %u, expected 3\n", levelcount);
+    hr = D3DXCreateCubeTextureFromFileInMemory(device, dds_cube_map, sizeof(dds_cube_map), &cube_texture);
+    if (SUCCEEDED(hr))
+    {
+        levelcount = IDirect3DCubeTexture9_GetLevelCount(cube_texture);
+        todo_wine ok(levelcount == 3, "GetLevelCount returned %u, expected 3\n", levelcount);
 
-            hr = IDirect3DCubeTexture9_GetLevelDesc(cube_texture, 0, &surface_desc);
-            ok(hr == D3D_OK, "GetLevelDesc returned %#x, expected %#x\n", hr, D3D_OK);
-            ok(surface_desc.Width == 4, "Got width %u, expected 4\n", surface_desc.Width);
-            ok(surface_desc.Height == 4, "Got height %u, expected 4\n", surface_desc.Height);
+        hr = IDirect3DCubeTexture9_GetLevelDesc(cube_texture, 0, &surface_desc);
+        ok(hr == D3D_OK, "GetLevelDesc returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(surface_desc.Width == 4, "Got width %u, expected 4\n", surface_desc.Width);
+        ok(surface_desc.Height == 4, "Got height %u, expected 4\n", surface_desc.Height);
 
-            hr = IDirect3DCubeTexture9_GetLevelDesc(cube_texture, 3, &surface_desc);
-            ok(hr == D3DERR_INVALIDCALL, "GetLevelDesc returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        ref = IDirect3DCubeTexture9_Release(cube_texture);
+        ok(ref == 0, "Invalid reference count. Got %u, expected 0\n", ref);
+    } else skip("Couldn't create cube texture\n");
+}
 
-            ref = IDirect3DCubeTexture9_Release(cube_texture);
-            ok(ref == 0, "Invalid reference count. Got %u, expected 0\n", ref);
-        } else skip("Couldn't create cube texture\n");
+static void test_D3DXCreateCubeTextureFromFileInMemoryEx(IDirect3DDevice9 *device)
+{
+    HRESULT hr;
+    IDirect3DCubeTexture9 *cube_texture;
+
+    if (!is_autogenmipmap_supported(device, D3DRTYPE_CUBETEXTURE))
+    {
+        skip("No D3DUSAGE_AUTOGENMIPMAP support for cube textures\n");
+        return;
     }
+
+    hr = D3DXCreateCubeTextureFromFileInMemoryEx(device, dds_cube_map, sizeof(dds_cube_map), D3DX_DEFAULT, D3DX_DEFAULT,
+        D3DUSAGE_DYNAMIC | D3DUSAGE_AUTOGENMIPMAP, D3DFMT_UNKNOWN, D3DPOOL_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, NULL, NULL, &cube_texture);
+    ok(hr == D3D_OK, "D3DXCreateCubeTextureFromFileInMemoryEx returned %#x, expected %#x\n", hr, D3D_OK);
+    if (SUCCEEDED(hr)) IDirect3DCubeTexture9_Release(cube_texture);
 }
 
 static void test_D3DXCreateVolumeTextureFromFileInMemory(IDirect3DDevice9 *device)
@@ -1231,7 +1435,10 @@ START_TEST(texture)
     test_D3DXFillTexture(device);
     test_D3DXFillCubeTexture(device);
     test_D3DXFillVolumeTexture(device);
+    test_D3DXCreateTextureFromFileInMemory(device);
+    test_D3DXCreateTextureFromFileInMemoryEx(device);
     test_D3DXCreateCubeTextureFromFileInMemory(device);
+    test_D3DXCreateCubeTextureFromFileInMemoryEx(device);
     test_D3DXCreateVolumeTextureFromFileInMemory(device);
 
     IDirect3DDevice9_Release(device);

@@ -1060,7 +1060,7 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
 
     if (gl_info->supported[APPLE_CLIENT_STORAGE])
     {
-        /* Reenable because if supported it is enabled by default */
+        /* Re-enable because if supported it is enabled by default */
         glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
         checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
     }
@@ -1801,6 +1801,10 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
 {
     TRACE("device %p, state %s, matrix %p.\n",
             device, debug_d3dtstype(d3dts), matrix);
+    TRACE("%.8e %.8e %.8e %.8e\n", matrix->u.s._11, matrix->u.s._12, matrix->u.s._13, matrix->u.s._14);
+    TRACE("%.8e %.8e %.8e %.8e\n", matrix->u.s._21, matrix->u.s._22, matrix->u.s._23, matrix->u.s._24);
+    TRACE("%.8e %.8e %.8e %.8e\n", matrix->u.s._31, matrix->u.s._32, matrix->u.s._33, matrix->u.s._34);
+    TRACE("%.8e %.8e %.8e %.8e\n", matrix->u.s._41, matrix->u.s._42, matrix->u.s._43, matrix->u.s._44);
 
     /* Handle recording of state blocks. */
     if (device->isRecordingState)
@@ -1823,14 +1827,7 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
         return WINED3D_OK;
     }
 
-    conv_mat(matrix, &device->stateBlock->state.transforms[d3dts].u.m[0][0]);
-
-    /* ScreenCoord = ProjectionMat * ViewMat * WorldMat * ObjectCoord
-     * where ViewMat = Camera space, WorldMat = world space.
-     *
-     * In OpenGL, camera and world space is combined into GL_MODELVIEW
-     * matrix.  The Projection matrix stay projection matrix. */
-
+    device->stateBlock->state.transforms[d3dts] = *matrix;
     if (d3dts == WINED3D_TS_VIEW)
         device->view_ident = !memcmp(matrix, &identity, sizeof(identity));
 
@@ -2183,7 +2180,8 @@ HRESULT CDECL wined3d_device_get_light_enable(const struct wined3d_device *devic
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_set_clip_plane(struct wined3d_device *device, UINT plane_idx, const float *plane)
+HRESULT CDECL wined3d_device_set_clip_plane(struct wined3d_device *device,
+        UINT plane_idx, const struct wined3d_vec4 *plane)
 {
     TRACE("device %p, plane_idx %u, plane %p.\n", device, plane_idx, plane);
 
@@ -2196,19 +2194,13 @@ HRESULT CDECL wined3d_device_set_clip_plane(struct wined3d_device *device, UINT 
 
     device->updateStateBlock->changed.clipplane |= 1 << plane_idx;
 
-    if (device->updateStateBlock->state.clip_planes[plane_idx][0] == plane[0]
-            && device->updateStateBlock->state.clip_planes[plane_idx][1] == plane[1]
-            && device->updateStateBlock->state.clip_planes[plane_idx][2] == plane[2]
-            && device->updateStateBlock->state.clip_planes[plane_idx][3] == plane[3])
+    if (!memcmp(&device->updateStateBlock->state.clip_planes[plane_idx], plane, sizeof(*plane)))
     {
         TRACE("Application is setting old values over, nothing to do.\n");
         return WINED3D_OK;
     }
 
-    device->updateStateBlock->state.clip_planes[plane_idx][0] = plane[0];
-    device->updateStateBlock->state.clip_planes[plane_idx][1] = plane[1];
-    device->updateStateBlock->state.clip_planes[plane_idx][2] = plane[2];
-    device->updateStateBlock->state.clip_planes[plane_idx][3] = plane[3];
+    device->updateStateBlock->state.clip_planes[plane_idx] = *plane;
 
     /* Handle recording of state blocks. */
     if (device->isRecordingState)
@@ -2222,7 +2214,8 @@ HRESULT CDECL wined3d_device_set_clip_plane(struct wined3d_device *device, UINT 
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_get_clip_plane(const struct wined3d_device *device, UINT plane_idx, float *plane)
+HRESULT CDECL wined3d_device_get_clip_plane(const struct wined3d_device *device,
+        UINT plane_idx, struct wined3d_vec4 *plane)
 {
     TRACE("device %p, plane_idx %u, plane %p.\n", device, plane_idx, plane);
 
@@ -2233,10 +2226,7 @@ HRESULT CDECL wined3d_device_get_clip_plane(const struct wined3d_device *device,
         return WINED3DERR_INVALIDCALL;
     }
 
-    plane[0] = (float)device->stateBlock->state.clip_planes[plane_idx][0];
-    plane[1] = (float)device->stateBlock->state.clip_planes[plane_idx][1];
-    plane[2] = (float)device->stateBlock->state.clip_planes[plane_idx][2];
-    plane[3] = (float)device->stateBlock->state.clip_planes[plane_idx][3];
+    *plane = device->stateBlock->state.clip_planes[plane_idx];
 
     return WINED3D_OK;
 }
@@ -5096,7 +5086,7 @@ void CDECL wined3d_device_evict_managed_resources(struct wined3d_device *device)
     {
         TRACE("Checking resource %p for eviction.\n", resource);
 
-        if (resource->pool == WINED3D_POOL_MANAGED)
+        if (resource->pool == WINED3D_POOL_MANAGED && !resource->map_count)
         {
             TRACE("Evicting %p.\n", resource);
             resource->resource_ops->resource_unload(resource);

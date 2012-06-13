@@ -212,6 +212,22 @@ static void test_InternetQueryOptionA(void)
   ok(retval == 0,"Got wrong return value %d\n",retval);
   ok(err == ERROR_INTERNET_INCORRECT_HANDLE_TYPE, "Got wrong error code %d\n",err);
 
+  SetLastError(0xdeadbeef);
+  len = sizeof(DWORD);
+  retval = InternetQueryOptionA(hurl,INTERNET_OPTION_REQUEST_FLAGS,NULL,&len);
+  err = GetLastError();
+  ok(retval == 0,"Got wrong return value %d\n",retval);
+  ok(err == ERROR_INTERNET_INCORRECT_HANDLE_TYPE, "Got wrong error code %d\n",err);
+  ok(len == sizeof(DWORD), "len = %d\n", len);
+
+  SetLastError(0xdeadbeef);
+  len = sizeof(DWORD);
+  retval = InternetQueryOptionA(NULL,INTERNET_OPTION_REQUEST_FLAGS,NULL,&len);
+  err = GetLastError();
+  ok(retval == 0,"Got wrong return value %d\n",retval);
+  ok(err == ERROR_INTERNET_INCORRECT_HANDLE_TYPE, "Got wrong error code %d\n",err);
+  ok(!len, "len = %d\n", len);
+
   InternetCloseHandle(hurl);
   InternetCloseHandle(hinet);
 
@@ -227,6 +243,16 @@ static void test_InternetQueryOptionA(void)
   ok(err == ERROR_INSUFFICIENT_BUFFER, "Got wrong error code%d\n",err);
 
   InternetCloseHandle(hinet);
+
+  val = 12345;
+  res = InternetSetOptionA(NULL, INTERNET_OPTION_CONNECT_TIMEOUT, &val, sizeof(val));
+  ok(res, "InternetSetOptionA(INTERNET_OPTION_CONNECT_TIMEOUT) failed (%u)\n", GetLastError());
+
+  len = sizeof(val);
+  res = InternetQueryOptionA(NULL, INTERNET_OPTION_CONNECT_TIMEOUT, &val, &len);
+  ok(res, "InternetQueryOptionA failed %d)\n", GetLastError());
+  ok(val == 12345, "val = %d\n", val);
+  ok(len == sizeof(val), "len = %d\n", len);
 
   hinet = InternetOpenA(NULL,INTERNET_OPEN_TYPE_DIRECT,NULL,NULL, 0);
   ok((hinet != 0x0),"InternetOpen Failed\n");
@@ -248,6 +274,28 @@ static void test_InternetQueryOptionA(void)
   res = InternetSetOptionA(hinet, INTERNET_OPTION_MAX_CONNS_PER_SERVER, &val, sizeof(val));
   ok(!res, "InternetSetOptionA(INTERNET_OPTION_MAX_CONNS_PER_SERVER) succeeded\n");
   ok(GetLastError() == ERROR_INTERNET_INVALID_OPERATION, "GetLastError() = %u\n", GetLastError());
+
+  len = sizeof(val);
+  res = InternetQueryOptionA(hinet, INTERNET_OPTION_CONNECT_TIMEOUT, &val, &len);
+  ok(res, "InternetQueryOptionA failed %d)\n", GetLastError());
+  ok(val == 12345, "val = %d\n", val);
+  ok(len == sizeof(val), "len = %d\n", len);
+
+  val = 1;
+  res = InternetSetOptionA(hinet, INTERNET_OPTION_CONNECT_TIMEOUT, &val, sizeof(val));
+  ok(res, "InternetSetOptionA(INTERNET_OPTION_CONNECT_TIMEOUT) failed (%u)\n", GetLastError());
+
+  len = sizeof(val);
+  res = InternetQueryOptionA(hinet, INTERNET_OPTION_CONNECT_TIMEOUT, &val, &len);
+  ok(res, "InternetQueryOptionA failed %d)\n", GetLastError());
+  ok(val == 1, "val = %d\n", val);
+  ok(len == sizeof(val), "len = %d\n", len);
+
+  len = sizeof(val);
+  res = InternetQueryOptionA(NULL, INTERNET_OPTION_CONNECT_TIMEOUT, &val, &len);
+  ok(res, "InternetQueryOptionA failed %d)\n", GetLastError());
+  ok(val == 12345, "val = %d\n", val);
+  ok(len == sizeof(val), "len = %d\n", len);
 
   InternetCloseHandle(hinet);
 }

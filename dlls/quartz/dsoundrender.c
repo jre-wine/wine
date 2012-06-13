@@ -243,9 +243,6 @@ end:
 
 static HRESULT DSoundRender_HandleEndOfStream(DSoundRenderImpl *This)
 {
-    HRESULT hr;
-    IMediaEventSink *pEventSink;
-
     while (1)
     {
         DWORD pos1, pos2;
@@ -260,23 +257,9 @@ static HRESULT DSoundRender_HandleEndOfStream(DSoundRenderImpl *This)
         EnterCriticalSection(&This->renderer.filter.csFilter);
         EnterCriticalSection(&This->renderer.csRenderLock);
         This->in_loop = 0;
-        if (This->renderer.pInputPin->flushing ||
-            This->renderer.filter.state != State_Running) {
-            SetEvent(This->renderer.evComplete);
-            return S_FALSE;
-        }
     }
 
-    if (!This->renderer.filter.filterInfo.pGraph)
-        return S_OK;
-
-    hr = IFilterGraph_QueryInterface(This->renderer.filter.filterInfo.pGraph, &IID_IMediaEventSink, (LPVOID*)&pEventSink);
-    if (SUCCEEDED(hr))
-    {
-        hr = IMediaEventSink_Notify(pEventSink, EC_COMPLETE, S_OK, (LONG_PTR)This);
-        IMediaEventSink_Release(pEventSink);
-    }
-    return hr;
+    return S_OK;
 }
 
 static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, REFERENCE_TIME tStart, REFERENCE_TIME tStop, const BYTE *data, DWORD size)
@@ -300,7 +283,6 @@ static HRESULT DSoundRender_SendSampleData(DSoundRenderImpl* This, REFERENCE_TIM
             This->in_loop = 0;
             if (This->renderer.pInputPin->flushing ||
                 This->renderer.filter.state == State_Stopped) {
-                SetEvent(This->renderer.evComplete);
                 return This->renderer.filter.state == State_Paused ? S_OK : VFW_E_WRONG_STATE;
             }
             if (ret != WAIT_TIMEOUT)
@@ -478,11 +460,6 @@ static VOID WINAPI DSoundRender_OnStartStreaming(BaseRenderer * iface)
             /* Unblock our thread, state changing from paused to running doesn't need a reset for state change */
             SetEvent(This->blocked);
         }
-        else if (This->renderer.filter.state == State_Stopped)
-        {
-            ResetEvent(This->renderer.evComplete);
-            This->renderer.pInputPin->end_of_stream = 0;
-        }
         IDirectSoundBuffer_Play(This->dsbuffer, 0, 0, DSBPLAY_LOOPING);
         ResetEvent(This->blocked);
     }
@@ -550,7 +527,9 @@ static HRESULT WINAPI DSoundRender_BreakConnect(BaseRenderer* iface)
 
     if (This->threadid) {
         PostThreadMessageW(This->threadid, WM_APP, 0, 0);
+        LeaveCriticalSection(This->renderer.pInputPin->pin.pCritSec);
         WaitForSingleObject(This->advisethread, INFINITE);
+        EnterCriticalSection(This->renderer.pInputPin->pin.pCritSec);
         CloseHandle(This->advisethread);
     }
     if (This->dsbuffer)
@@ -597,16 +576,6 @@ static HRESULT WINAPI DSoundRender_EndFlush(BaseRenderer* iface)
     TRACE("\n");
 
     BaseRendererImpl_EndFlush(iface);
-    if (This->in_loop) {
-        ResetEvent(This->renderer.evComplete);
-        LeaveCriticalSection(This->renderer.pInputPin->pin.pCritSec);
-        LeaveCriticalSection(&This->renderer.filter.csFilter);
-        LeaveCriticalSection(&This->renderer.csRenderLock);
-        WaitForSingleObject(This->renderer.evComplete, -1);
-        EnterCriticalSection(This->renderer.pInputPin->pin.pCritSec);
-        EnterCriticalSection(&This->renderer.filter.csFilter);
-        EnterCriticalSection(&This->renderer.csRenderLock);
-    }
     if (This->renderer.filter.state != State_Stopped)
         ResetEvent(This->blocked);
 
@@ -783,6 +752,36 @@ static ULONG WINAPI DSoundRender_Release(IBaseFilter * iface)
         return refCount;
 }
 
+static HRESULT WINAPI DSoundRender_Pause(IBaseFilter * iface)
+{
+    HRESULT hr = S_OK;
+    DSoundRenderImpl *This = (DSoundRenderImpl *)iface;
+
+    TRACE("(%p/%p)->()\n", This, iface);
+
+    EnterCriticalSection(&This->renderer.csRenderLock);
+    if (This->renderer.filter.state != State_Paused)
+    {
+        if (This->renderer.filter.state == State_Stopped)
+        {
+            if (This->renderer.pInputPin->pin.pConnectedTo)
+                ResetEvent(This->renderer.evComplete);
+            This->renderer.pInputPin->end_of_stream = 0;
+        }
+
+        hr = IDirectSoundBuffer_Stop(This->dsbuffer);
+        if (SUCCEEDED(hr))
+            This->renderer.filter.state = State_Paused;
+
+        ResetEvent(This->blocked);
+        ResetEvent(This->renderer.RenderEvent);
+    }
+    ResetEvent(This->renderer.ThreadSignal);
+    LeaveCriticalSection(&This->renderer.csRenderLock);
+
+    return hr;
+}
+
 static const IBaseFilterVtbl DSoundRender_Vtbl =
 {
     DSoundRender_QueryInterface,
@@ -790,7 +789,7 @@ static const IBaseFilterVtbl DSoundRender_Vtbl =
     DSoundRender_Release,
     BaseFilterImpl_GetClassID,
     BaseRendererImpl_Stop,
-    BaseRendererImpl_Pause,
+    DSoundRender_Pause,
     BaseRendererImpl_Run,
     BaseRendererImpl_GetState,
     BaseRendererImpl_SetSyncSource,
@@ -934,28 +933,26 @@ static DWORD WINAPI DSoundAdviseThread(LPVOID lpParam) {
         struct dsoundrender_timer *prev = &head, *cur;
 
         hr = IReferenceClock_GetTime(&This->IReferenceClock_iface, &curtime);
-        if (FAILED(hr)) {
-            FIXME("Could not get time: %08x\n", hr);
-            continue;
-        }
-        TRACE("Time: %s\n", wine_dbgstr_longlong(curtime));
-        while (prev->next) {
-            cur = prev->next;
-            if (cur->start > curtime) {
-                TRACE("Skipping %p\n", cur);
-                prev = cur;
-            } else if (cur->periodicity) {
-                while (cur->start <= curtime) {
-                    cur->start += cur->periodicity;
-                    ReleaseSemaphore(cur->handle, 1, NULL);
+        if (SUCCEEDED(hr)) {
+            TRACE("Time: %s\n", wine_dbgstr_longlong(curtime));
+            while (prev->next) {
+                cur = prev->next;
+                if (cur->start > curtime) {
+                    TRACE("Skipping %p\n", cur);
+                    prev = cur;
+                } else if (cur->periodicity) {
+                    while (cur->start <= curtime) {
+                        cur->start += cur->periodicity;
+                        ReleaseSemaphore(cur->handle, 1, NULL);
+                    }
+                    prev = cur;
+                } else {
+                    struct dsoundrender_timer *next = cur->next;
+                    TRACE("Firing %p %s < %s\n", cur, wine_dbgstr_longlong(cur->start), wine_dbgstr_longlong(curtime));
+                    SetEvent(cur->handle);
+                    HeapFree(GetProcessHeap(), 0, cur);
+                    prev->next = next;
                 }
-                prev = cur;
-            } else {
-                struct dsoundrender_timer *next = cur->next;
-                TRACE("Firing %p %s < %s\n", cur, wine_dbgstr_longlong(cur->start), wine_dbgstr_longlong(curtime));
-                SetEvent(cur->handle);
-                HeapFree(GetProcessHeap(), 0, cur);
-                prev->next = next;
             }
         }
         if (!head.next)
@@ -1042,9 +1039,17 @@ static HRESULT WINAPI ReferenceClock_GetTime(IReferenceClock *iface,
         DWORD writepos1, writepos2;
         EnterCriticalSection(&This->renderer.filter.csFilter);
         DSoundRender_UpdatePositions(This, &writepos1, &writepos2);
-        *pTime = This->play_time + time_from_pos(This, This->last_playpos);
+        if (This->renderer.pInputPin && This->renderer.pInputPin->pin.mtCurrent.pbFormat)
+        {
+            *pTime = This->play_time + time_from_pos(This, This->last_playpos);
+            hr = S_OK;
+        }
+        else
+        {
+            ERR("pInputPin Disconncted\n");
+            hr = E_FAIL;
+        }
         LeaveCriticalSection(&This->renderer.filter.csFilter);
-        hr = S_OK;
     }
     if (FAILED(hr))
         WARN("Could not get reference time (%x)!\n", hr);

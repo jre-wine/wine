@@ -9,9 +9,9 @@
 @ stub WMCreateEditor
 @ stub WMCreateIndexer
 @ stub WMCreateProfileManager
-@ stub WMCreateReader
+@ stdcall WMCreateReader(ptr long ptr)
 @ stub WMCreateReaderPriv
-@ stub WMCreateSyncReader
+@ stdcall WMCreateSyncReader(ptr long ptr)
 @ stub WMCreateWriter
 @ stub WMCreateWriterFileSink
 @ stub WMCreateWriterNetworkSink

@@ -66,7 +66,13 @@
 #include "wine/unicode.h"
 #include "wine/library.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(ole);
+WINE_DEFAULT_DEBUG_CHANNEL(olepicture);
+
+#define BITMAP_FORMAT_BMP   0x4d42 /* "BM" */
+#define BITMAP_FORMAT_JPEG  0xd8ff
+#define BITMAP_FORMAT_GIF   0x4947
+#define BITMAP_FORMAT_PNG   0x5089
+#define BITMAP_FORMAT_APM   0xcdd7
 
 #include "pshpack1.h"
 
@@ -212,6 +218,8 @@ static void OLEPictureImpl_SetBitmap(OLEPictureImpl *This)
   This->origWidth = bm.bmWidth;
   This->origHeight = bm.bmHeight;
 
+  TRACE("width %d, height %d, bpp %d\n", bm.bmWidth, bm.bmHeight, bm.bmBitsPixel);
+
   /* The width and height are stored in HIMETRIC units (0.01 mm),
      so we take our pixel width divide by pixels per inch and
      multiply by 25.4 * 100 */
@@ -221,6 +229,8 @@ static void OLEPictureImpl_SetBitmap(OLEPictureImpl *This)
   This->himetricWidth  = xpixels_to_himetric(bm.bmWidth, hdcRef);
   This->himetricHeight = ypixels_to_himetric(bm.bmHeight, hdcRef);
   This->stock_bitmap = GetCurrentObject( hdcRef, OBJ_BITMAP );
+
+  This->loadtime_format = BITMAP_FORMAT_BMP;
 
   DeleteDC(hdcRef);
 }
@@ -1322,17 +1332,6 @@ static HRESULT OLEPictureImpl_LoadAPM(OLEPictureImpl *This,
 }
 
 /************************************************************************
- * BITMAP FORMAT FLAGS -
- *   Flags that differentiate between different types of bitmaps.
- */
-
-#define BITMAP_FORMAT_BMP   0x4d42 /* "BM" */
-#define BITMAP_FORMAT_JPEG  0xd8ff
-#define BITMAP_FORMAT_GIF   0x4947
-#define BITMAP_FORMAT_PNG   0x5089
-#define BITMAP_FORMAT_APM   0xcdd7
-
-/************************************************************************
  * OLEPictureImpl_IPersistStream_Load (IUnknown)
  *
  * Loads the binary data from the IStream. Starts at current position.
@@ -1777,7 +1776,7 @@ static HRESULT WINAPI OLEPictureImpl_Save(
         hResult = S_OK;
         break;
     case PICTYPE_BITMAP:
-        if (This->bIsDirty) {
+        if (This->bIsDirty || !This->data) {
             switch (This->keepOrigFormat ? This->loadtime_format : BITMAP_FORMAT_BMP) {
             case BITMAP_FORMAT_BMP:
                 iSerializeResult = serializeBMP(This->desc.u.bmp.hbitmap, &pIconData, &iDataSize);

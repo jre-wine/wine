@@ -840,19 +840,6 @@ do {                                                                \
 #define checkGLcall(A) do {} while(0)
 #endif
 
-/* Trace routines / diagnostics */
-/* ---------------------------- */
-
-/* Dump out a matrix and copy it */
-#define conv_mat(mat,gl_mat)                                                                \
-do {                                                                                        \
-    TRACE("%f %f %f %f\n", (mat)->u.s._11, (mat)->u.s._12, (mat)->u.s._13, (mat)->u.s._14); \
-    TRACE("%f %f %f %f\n", (mat)->u.s._21, (mat)->u.s._22, (mat)->u.s._23, (mat)->u.s._24); \
-    TRACE("%f %f %f %f\n", (mat)->u.s._31, (mat)->u.s._32, (mat)->u.s._33, (mat)->u.s._34); \
-    TRACE("%f %f %f %f\n", (mat)->u.s._41, (mat)->u.s._42, (mat)->u.s._43, (mat)->u.s._44); \
-    memcpy(gl_mat, (mat), 16 * sizeof(float));                                              \
-} while (0)
-
 /* Trace vector and strided data information */
 #define TRACE_STRIDED(si, name) do { if (si->use_map & (1 << name)) \
         TRACE( #name " = (data {%#x:%p}, stride %d, format %s, stream %u)\n", \
@@ -1418,6 +1405,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX560      = 0x1201,
     CARD_NVIDIA_GEFORCE_GTX570      = 0x1081,
     CARD_NVIDIA_GEFORCE_GTX580      = 0x1080,
+    CARD_NVIDIA_GEFORCE_GTX670      = 0x1189,
 
     CARD_INTEL_830M                 = 0x3577,
     CARD_INTEL_855GM                = 0x3582,
@@ -1838,6 +1826,7 @@ struct wined3d_resource
 {
     LONG ref;
     LONG bind_count;
+    LONG map_count;
     struct wined3d_device *device;
     enum wined3d_resource_type type;
     const struct wined3d_format *format;
@@ -2139,7 +2128,7 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 #define SFLAG_NORMCOORD         0x00000008 /* Set if GL texture coordinates are normalized (non-texture rectangle). */
 #define SFLAG_LOCKABLE          0x00000010 /* Surface can be locked. */
 #define SFLAG_DYNLOCK           0x00000020 /* Surface is often locked by the application. */
-#define SFLAG_LOCKED            0x00000040 /* Surface is currently locked. */
+#define SFLAG_PIN_SYSMEM        0x00000040 /* Keep the surface in sysmem, at the same address. */
 #define SFLAG_DCINUSE           0x00000080 /* Set between GetDC and ReleaseDC calls. */
 #define SFLAG_LOST              0x00000100 /* Surface lost flag for ddraw. */
 #define SFLAG_GLCKEY            0x00000200 /* The GL texture was created with a color key. */
@@ -2156,20 +2145,17 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 #define SFLAG_INDRAWABLE        0x00100000 /* The GL drawable is current. */
 #define SFLAG_INRB_MULTISAMPLE  0x00200000 /* The multisample renderbuffer is current. */
 #define SFLAG_INRB_RESOLVED     0x00400000 /* The resolved renderbuffer is current. */
-#define SFLAG_PIN_SYSMEM        0x02000000 /* Keep the surface in sysmem, at the same address. */
-#define SFLAG_DISCARDED         0x04000000 /* Surface was discarded, allocating new location is enough. */
+#define SFLAG_DISCARDED         0x00800000 /* Surface was discarded, allocating new location is enough. */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_CONVERTED: Converting the data back would take too long
  * SFLAG_DIBSECTION: The dib code manages the memory
- * SFLAG_LOCKED: The app requires access to the surface data
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
  * SFLAG_PBO: PBOs don't use 'normal' memory. It is either allocated by the driver or must be NULL.
  * SFLAG_CLIENT: OpenGL uses our memory as backup
  */
 #define SFLAG_DONOTFREE     (SFLAG_CONVERTED        | \
                              SFLAG_DYNLOCK          | \
-                             SFLAG_LOCKED           | \
                              SFLAG_CLIENT           | \
                              SFLAG_DIBSECTION       | \
                              SFLAG_USERPTR          | \
@@ -2297,7 +2283,7 @@ struct wined3d_state
     DWORD lowest_disabled_stage;
 
     struct wined3d_matrix transforms[HIGHEST_TRANSFORMSTATE + 1];
-    double clip_planes[MAX_CLIPPLANES][4];
+    struct wined3d_vec4 clip_planes[MAX_CLIPPLANES];
     struct wined3d_material material;
     struct wined3d_viewport viewport;
     RECT scissor_rect;
@@ -2410,7 +2396,6 @@ struct wined3d_buffer
     UINT buffer_object_size;
     DWORD flags;
 
-    LONG lock_count;
     struct wined3d_map_range *maps;
     ULONG maps_size, modified_areas;
     struct wined3d_event_query *query;

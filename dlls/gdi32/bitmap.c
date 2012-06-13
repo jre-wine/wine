@@ -65,27 +65,6 @@ DWORD nulldrv_PutImage( PHYSDEV dev, HBITMAP hbitmap, HRGN clip, BITMAPINFO *inf
     return dib_driver.pPutImage( NULL, hbitmap, clip, info, bits, src, dst, rop );
 }
 
-BOOL nulldrv_CopyBitmap( HBITMAP src, HBITMAP dst )
-{
-    BOOL ret = TRUE;
-    BITMAPOBJ *src_bmp = GDI_GetObjPtr( src, OBJ_BITMAP );
-
-    if (!src_bmp) return FALSE;
-    if (src_bmp->dib.dsBm.bmBits)
-    {
-        BITMAPOBJ *dst_bmp = GDI_GetObjPtr( dst, OBJ_BITMAP );
-        int stride = get_dib_stride( dst_bmp->dib.dsBm.bmWidth, dst_bmp->dib.dsBm.bmBitsPixel );
-        dst_bmp->dib.dsBm.bmBits = HeapAlloc( GetProcessHeap(), 0, dst_bmp->dib.dsBm.bmHeight * stride );
-        if (dst_bmp->dib.dsBm.bmBits)
-            memcpy( dst_bmp->dib.dsBm.bmBits, src_bmp->dib.dsBm.bmBits, dst_bmp->dib.dsBm.bmHeight * stride );
-        else
-            ret = FALSE;
-        GDI_ReleaseObj( dst );
-    }
-    GDI_ReleaseObj( src );
-    return ret;
-}
-
 
 /******************************************************************************
  * CreateBitmap [GDI32.@]
@@ -528,10 +507,24 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
         goto done;
     }
 
+    if (bitmap->dib.dsBm.bmBitsPixel != 1 &&
+        bitmap->dib.dsBm.bmBitsPixel != GetDeviceCaps( hdc, BITSPIXEL ))
+    {
+        WARN( "Wrong format bitmap %u bpp\n", bitmap->dib.dsBm.bmBitsPixel );
+        GDI_ReleaseObj( handle );
+        ret = 0;
+        goto done;
+    }
+
     if (dc->dibdrv) old_physdev = pop_dc_driver( dc, dc->dibdrv );
 
-    physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
-    createdev = GET_DC_PHYSDEV( dc, pCreateBitmap );
+    if (bitmap->dib.dsBm.bmBitsPixel > 1)
+    {
+        physdev = GET_DC_PHYSDEV( dc, pSelectBitmap );
+        createdev = GET_DC_PHYSDEV( dc, pCreateBitmap );
+    }
+    else physdev = createdev = &dc->nulldrv;  /* force use of the DIB engine for 1-bpp */
+
     if (physdev->funcs == &null_driver)
     {
         physdev = dc->dibdrv;

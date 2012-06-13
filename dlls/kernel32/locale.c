@@ -1878,7 +1878,7 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
     const union cptable *table;
     int ret;
 
-    if (!src || (!dst && dstlen))
+    if (!src || !srclen || (!dst && dstlen))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
@@ -1889,14 +1889,19 @@ INT WINAPI MultiByteToWideChar( UINT page, DWORD flags, LPCSTR src, INT srclen,
     switch(page)
     {
     case CP_SYMBOL:
-        if( flags)
+        if (flags)
         {
-            SetLastError( ERROR_INVALID_PARAMETER );
+            SetLastError( ERROR_INVALID_FLAGS );
             return 0;
         }
         ret = wine_cpsymbol_mbstowcs( src, srclen, dst, dstlen );
         break;
     case CP_UTF7:
+        if (flags)
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
         FIXME("UTF-7 not supported\n");
         SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
         return 0;
@@ -1969,7 +1974,7 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
     const union cptable *table;
     int ret, used_tmp;
 
-    if (!src || (!dst && dstlen))
+    if (!src || !srclen || (!dst && dstlen))
     {
         SetLastError( ERROR_INVALID_PARAMETER );
         return 0;
@@ -1980,7 +1985,13 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
     switch(page)
     {
     case CP_SYMBOL:
-        if( flags || defchar || used)
+        /* when using CP_SYMBOL, ERROR_INVALID_FLAGS takes precedence */
+        if (flags)
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
+        if (defchar || used)
         {
             SetLastError( ERROR_INVALID_PARAMETER );
             return 0;
@@ -1988,6 +1999,17 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
         ret = wine_cpsymbol_wcstombs( src, srclen, dst, dstlen );
         break;
     case CP_UTF7:
+        /* when using CP_UTF7, ERROR_INVALID_PARAMETER takes precedence */
+        if (defchar || used)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
+        if (flags)
+        {
+            SetLastError( ERROR_INVALID_FLAGS );
+            return 0;
+        }
         FIXME("UTF-7 not supported\n");
         SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
         return 0;
@@ -2000,7 +2022,11 @@ INT WINAPI WideCharToMultiByte( UINT page, DWORD flags, LPCWSTR src, INT srclen,
         }
         /* fall through */
     case CP_UTF8:
-        if (used) *used = FALSE;  /* all chars are valid for UTF-8 */
+        if (defchar || used)
+        {
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return 0;
+        }
         ret = wine_utf8_wcstombs( flags, src, srclen, dst, dstlen );
         break;
     default:
@@ -2867,34 +2893,51 @@ INT WINAPI CompareStringA(LCID lcid, DWORD style,
 
     if (!(style & LOCALE_USE_CP_ACP)) locale_cp = get_lcid_codepage( lcid );
 
-    len1W = MultiByteToWideChar(locale_cp, 0, str1, len1, buf1W, 130);
-    if (len1W)
-        str1W = buf1W;
-    else
+    if (len1)
     {
-        len1W = MultiByteToWideChar(locale_cp, 0, str1, len1, NULL, 0);
-        str1W = HeapAlloc(GetProcessHeap(), 0, len1W * sizeof(WCHAR));
-        if (!str1W)
+        len1W = MultiByteToWideChar(locale_cp, 0, str1, len1, buf1W, 130);
+        if (len1W)
+            str1W = buf1W;
+        else
         {
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            return 0;
+            len1W = MultiByteToWideChar(locale_cp, 0, str1, len1, NULL, 0);
+            str1W = HeapAlloc(GetProcessHeap(), 0, len1W * sizeof(WCHAR));
+            if (!str1W)
+            {
+                SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                return 0;
+            }
+            MultiByteToWideChar(locale_cp, 0, str1, len1, str1W, len1W);
         }
-        MultiByteToWideChar(locale_cp, 0, str1, len1, str1W, len1W);
     }
-    len2W = MultiByteToWideChar(locale_cp, 0, str2, len2, buf2W, 130);
-    if (len2W)
-        str2W = buf2W;
     else
     {
-        len2W = MultiByteToWideChar(locale_cp, 0, str2, len2, NULL, 0);
-        str2W = HeapAlloc(GetProcessHeap(), 0, len2W * sizeof(WCHAR));
-        if (!str2W)
+        len1W = 0;
+        str1W = buf1W;
+    }
+
+    if (len2)
+    {
+        len2W = MultiByteToWideChar(locale_cp, 0, str2, len2, buf2W, 130);
+        if (len2W)
+            str2W = buf2W;
+        else
         {
-            if (str1W != buf1W) HeapFree(GetProcessHeap(), 0, str1W);
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            return 0;
+            len2W = MultiByteToWideChar(locale_cp, 0, str2, len2, NULL, 0);
+            str2W = HeapAlloc(GetProcessHeap(), 0, len2W * sizeof(WCHAR));
+            if (!str2W)
+            {
+                if (str1W != buf1W) HeapFree(GetProcessHeap(), 0, str1W);
+                SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+                return 0;
+            }
+            MultiByteToWideChar(locale_cp, 0, str2, len2, str2W, len2W);
         }
-        MultiByteToWideChar(locale_cp, 0, str2, len2, str2W, len2W);
+    }
+    else
+    {
+        len2W = 0;
+        str2W = buf2W;
     }
 
     ret = CompareStringW(lcid, style, str1W, len1W, str2W, len2W);

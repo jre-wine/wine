@@ -266,6 +266,7 @@ struct GpImage{
     ImageType type;
     GUID format;
     UINT flags;
+    UINT frame_count, current_frame;
     UINT palette_flags;
     UINT palette_count;
     UINT palette_size;
@@ -435,5 +436,7 @@ GpStatus gdip_format_string(HDC hdc,
     GDIPCONST WCHAR *string, INT length, GDIPCONST GpFont *font,
     GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
     gdip_format_string_callback callback, void *user_data) DECLSPEC_HIDDEN;
+
+void get_log_fontW(const GpFont *, GpGraphics *, LOGFONTW *) DECLSPEC_HIDDEN;
 
 #endif

@@ -938,11 +938,11 @@ static void ViewportTest(void)
 
     hr = IDirect3DViewport_QueryInterface(Viewport, &IID_IDirect3DViewport2, (void**) &Viewport2);
     ok(hr==D3D_OK, "QueryInterface returned: %x\n", hr);
-    ok(Viewport2 == (IDirect3DViewport2 *)Viewport, "IDirect3DViewport2 iface diffrent from IDirect3DViewport\n");
+    ok(Viewport2 == (IDirect3DViewport2 *)Viewport, "IDirect3DViewport2 iface different from IDirect3DViewport\n");
 
     hr = IDirect3DViewport_QueryInterface(Viewport, &IID_IDirect3DViewport3, (void**) &Viewport3);
     ok(hr==D3D_OK, "QueryInterface returned: %x\n", hr);
-    ok(Viewport3 == (IDirect3DViewport3 *)Viewport, "IDirect3DViewport3 iface diffrent from IDirect3DViewport\n");
+    ok(Viewport3 == (IDirect3DViewport3 *)Viewport, "IDirect3DViewport3 iface different from IDirect3DViewport\n");
     IDirect3DViewport3_Release(Viewport3);
 
     vp1_data.dwSize = sizeof(vp1_data);
@@ -2849,9 +2849,7 @@ static void ComputeSphereVisibility(void)
 
     ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
     ok(result[0] == 0x103d, "Expected 0x103d, got %x\n", result[0]);
-    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
     ok(result[1] == 0x3f, "Expected 0x3f, got %x\n", result[1]);
-    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
     ok(result[2] == 0x3f, "Expected 0x3f, got %x\n", result[2]);
 
     view._11=1.0; view._12=0.0; view._13=0.0; view._14=0.0;
@@ -3139,240 +3137,6 @@ static LRESULT CALLBACK test_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM
     if (expect_messages && message == *expect_messages) ++expect_messages;
 
     return DefWindowProcA(hwnd, message, wparam, lparam);
-}
-
-/* Set the wndproc back to what ddraw expects it to be, and release the ddraw
- * interface. This prevents subsequent SetCooperativeLevel() calls on a
- * different window from failing with DDERR_HWNDALREADYSET. */
-static void fix_wndproc(HWND window, LONG_PTR proc)
-{
-    IDirectDraw7 *ddraw7;
-    HRESULT hr;
-
-    hr = pDirectDrawCreateEx(NULL, (void **)&ddraw7, &IID_IDirectDraw7, NULL);
-    ok(SUCCEEDED(hr), "Failed to create IDirectDraw7 object, hr %#x.\n", hr);
-    if (FAILED(hr)) return;
-
-    SetWindowLongPtrA(window, GWLP_WNDPROC, proc);
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-
-    IDirectDraw7_Release(ddraw7);
-}
-
-static void test_wndproc(void)
-{
-    LONG_PTR proc, ddraw_proc;
-    IDirectDraw7 *ddraw7;
-    WNDCLASSA wc = {0};
-    HWND window;
-    HRESULT hr;
-    ULONG ref;
-
-    static const UINT messages[] =
-    {
-        WM_WINDOWPOSCHANGING,
-        WM_MOVE,
-        WM_SIZE,
-        WM_WINDOWPOSCHANGING,
-        WM_ACTIVATE,
-        WM_SETFOCUS,
-        0,
-    };
-
-    /* DDSCL_EXCLUSIVE replaces the window's window proc. */
-    hr = pDirectDrawCreateEx(NULL, (void **)&ddraw7, &IID_IDirectDraw7, NULL);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirectDraw7 object (%#x), skipping tests.\n", hr);
-        return;
-    }
-
-    wc.lpfnWndProc = test_proc;
-    wc.lpszClassName = "d3d7_test_wndproc_wc";
-    ok(RegisterClassA(&wc), "Failed to register window class.\n");
-
-    window = CreateWindowA("d3d7_test_wndproc_wc", "d3d7_test",
-            WS_MAXIMIZE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    expect_messages = messages;
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    ok(!*expect_messages, "Expected message %#x, but didn't receive it.\n", *expect_messages);
-    expect_messages = NULL;
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    ref = IDirectDraw7_Release(ddraw7);
-    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    /* DDSCL_NORMAL doesn't. */
-    hr = pDirectDrawCreateEx(NULL, (void **)&ddraw7, &IID_IDirectDraw7, NULL);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirectDraw7 object (%#x), skipping tests.\n", hr);
-        return;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_NORMAL | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    ref = IDirectDraw7_Release(ddraw7);
-    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    /* The original window proc is only restored by ddraw if the current
-     * window proc matches the one ddraw set. This also affects switching
-     * from DDSCL_NORMAL to DDSCL_EXCLUSIVE. */
-    hr = pDirectDrawCreateEx(NULL, (void **)&ddraw7, &IID_IDirectDraw7, NULL);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirectDraw7 object (%#x), skipping tests.\n", hr);
-        return;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-    ddraw_proc = proc;
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_NORMAL);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)DefWindowProcA, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)ddraw_proc);
-    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)DefWindowProcA, proc);
-
-    ref = IDirectDraw7_Release(ddraw7);
-    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = pDirectDrawCreateEx(NULL, (void **)&ddraw7, &IID_IDirectDraw7, NULL);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirectDraw7 object (%#x), skipping tests.\n", hr);
-        return;
-    }
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)test_proc, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    hr = IDirectDraw7_SetCooperativeLevel(ddraw7, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
-    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
-    if (FAILED(hr))
-    {
-        IDirectDraw7_Release(ddraw7);
-        goto done;
-    }
-
-    proc = SetWindowLongPtrA(window, GWLP_WNDPROC, (LONG_PTR)DefWindowProcA);
-    ok(proc != (LONG_PTR)test_proc, "Expected wndproc != %#lx, got %#lx.\n",
-            (LONG_PTR)test_proc, proc);
-
-    ref = IDirectDraw7_Release(ddraw7);
-    ok(ref == 0, "The ddraw object was not properly freed: refcount %u.\n", ref);
-
-    proc = GetWindowLongPtrA(window, GWLP_WNDPROC);
-    ok(proc == (LONG_PTR)DefWindowProcA, "Expected wndproc %#lx, got %#lx.\n",
-            (LONG_PTR)DefWindowProcA, proc);
-
-done:
-    fix_wndproc(window, (LONG_PTR)test_proc);
-    expect_messages = NULL;
-    DestroyWindow(window);
-    UnregisterClassA("d3d7_test_wndproc_wc", GetModuleHandleA(NULL));
 }
 
 static void VertexBufferLockRest(void)
@@ -4976,7 +4740,6 @@ START_TEST(d3d)
         D3D1_releaseObjects();
     }
 
-    test_wndproc();
     test_window_style();
     test_redundant_mode_set();
     test_coop_level_mode_set();

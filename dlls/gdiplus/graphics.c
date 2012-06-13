@@ -2136,7 +2136,7 @@ void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font, HFONT *hfont)
     rel_height = sqrt((pt[2].Y-pt[0].Y)*(pt[2].Y-pt[0].Y)+
                       (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
 
-    GdipGetLogFontW((GpFont *)font, graphics, &lfw);
+    get_log_fontW(font, graphics, &lfw);
     lfw.lfHeight = roundr(lfw.lfHeight * rel_height);
     unscaled_font = CreateFontIndirectW(&lfw);
 
@@ -4931,8 +4931,7 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     if (regionCount < stringFormat->range_count)
         return InvalidParameter;
 
-    stat = GdipGetLogFontW((GpFont *)font, graphics, &lfw);
-    if (stat != Ok) return stat;
+    get_log_fontW(font, graphics, &lfw);
 
     if(!graphics->hdc)
     {
@@ -5162,14 +5161,18 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
         /* Should be no need to explicitly test for StringAlignmentNear as
          * that is default behavior if no alignment is passed. */
         if(format->vertalign != StringAlignmentNear){
-            RectF bounds;
-            GdipMeasureString(graphics, string, length, font, rect, format, &bounds, 0, 0);
+            RectF bounds, in_rect = *rect;
+            in_rect.Height = 0.0; /* avoid height clipping */
+            GdipMeasureString(graphics, string, length, font, &in_rect, format, &bounds, 0, 0);
+
+            TRACE("bounds %s\n", debugstr_rectf(&bounds));
 
             if(format->vertalign == StringAlignmentCenter)
                 offsety = (rect->Height - bounds.Height) / 2;
             else if(format->vertalign == StringAlignmentFar)
                 offsety = (rect->Height - bounds.Height);
         }
+        TRACE("vertical align %d, offsety %f\n", format->vertalign, offsety);
     }
 
     save_state = SaveDC(hdc);
@@ -5187,9 +5190,9 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
                       (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
 
     rectcpy[3].X = rectcpy[0].X = rect->X;
-    rectcpy[1].Y = rectcpy[0].Y = rect->Y + offsety;
+    rectcpy[1].Y = rectcpy[0].Y = rect->Y;
     rectcpy[2].X = rectcpy[1].X = rect->X + rect->Width;
-    rectcpy[3].Y = rectcpy[2].Y = rect->Y + offsety + rect->Height;
+    rectcpy[3].Y = rectcpy[2].Y = rect->Y + rect->Height;
     transform_and_round_points(graphics, corners, rectcpy, 4);
 
     scaled_rect.X = 0.0;

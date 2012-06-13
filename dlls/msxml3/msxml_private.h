@@ -80,6 +80,7 @@ typedef enum tid_t {
     IMXReaderControl_tid,
     IMXWriter_tid,
     IVBMXNamespaceManager_tid,
+    IServerXMLHTTPRequest_tid,
     LAST_tid
 } tid_t;
 
@@ -329,7 +330,7 @@ extern HRESULT node_get_next_sibling(xmlnode*,IXMLDOMNode**) DECLSPEC_HIDDEN;
 extern HRESULT node_insert_before(xmlnode*,IXMLDOMNode*,const VARIANT*,IXMLDOMNode**) DECLSPEC_HIDDEN;
 extern HRESULT node_replace_child(xmlnode*,IXMLDOMNode*,IXMLDOMNode*,IXMLDOMNode**) DECLSPEC_HIDDEN;
 extern HRESULT node_put_text(xmlnode*,BSTR) DECLSPEC_HIDDEN;
-extern HRESULT node_get_xml(xmlnode*,BOOL,BOOL,BSTR*) DECLSPEC_HIDDEN;
+extern HRESULT node_get_xml(xmlnode*,BOOL,BSTR*) DECLSPEC_HIDDEN;
 extern HRESULT node_clone(xmlnode*,VARIANT_BOOL,IXMLDOMNode**) DECLSPEC_HIDDEN;
 extern HRESULT node_get_prefix(xmlnode*,BSTR*) DECLSPEC_HIDDEN;
 extern HRESULT node_get_base_name(xmlnode*,BSTR*) DECLSPEC_HIDDEN;
@@ -455,6 +456,7 @@ extern HRESULT XMLDocument_create(IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXXMLReader_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT SAXAttributes_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT XMLHTTPRequest_create(IUnknown*, void **) DECLSPEC_HIDDEN;
+extern HRESULT ServerXMLHTTP_create(IUnknown*, void **) DECLSPEC_HIDDEN;
 extern HRESULT XSLTemplate_create(IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXWriter_create(MSXML_VERSION, IUnknown*, void**) DECLSPEC_HIDDEN;
 extern HRESULT MXNamespaceManager_create(IUnknown*,void**) DECLSPEC_HIDDEN;

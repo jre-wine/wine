@@ -154,6 +154,21 @@ static inline BOOL d3dcompiler_free(void *ptr)
     return HeapFree(GetProcessHeap(), 0, ptr);
 }
 
+static inline char *d3dcompiler_strdup(const char *string)
+{
+    char *copy;
+    SIZE_T len;
+
+    if (!string)
+        return NULL;
+
+    len = strlen(string);
+    copy = d3dcompiler_alloc(len + 1);
+    if (copy)
+        memcpy(copy, string, len + 1);
+    return copy;
+}
+
 struct asm_parser;
 
 /* This structure is only used in asmshader.y, but since the .l file accesses the semantic types
@@ -570,8 +585,37 @@ typedef enum _BWRITERDECLUSAGE {
 #define T3_REG          5
 
 struct bwriter_shader *SlAssembleShader(const char *text, char **messages) DECLSPEC_HIDDEN;
-DWORD SlWriteBytecode(const struct bwriter_shader *shader, int dxversion, DWORD **result) DECLSPEC_HIDDEN;
+HRESULT SlWriteBytecode(const struct bwriter_shader *shader, int dxversion, DWORD **result, DWORD *size) DECLSPEC_HIDDEN;
 void SlDeleteShader(struct bwriter_shader *shader) DECLSPEC_HIDDEN;
+
+enum hlsl_matrix_majority
+{
+    HLSL_COLUMN_MAJOR,
+    HLSL_ROW_MAJOR
+};
+
+struct hlsl_parse_ctx
+{
+    char *source_file;
+    unsigned int line_no;
+    enum parse_status status;
+    struct compilation_messages messages;
+
+    struct hlsl_scope *cur_scope;
+    struct hlsl_scope *globals;
+    struct list scopes;
+
+    struct list types;
+    struct list functions;
+
+    enum hlsl_matrix_majority matrix_majority;
+};
+
+extern struct hlsl_parse_ctx hlsl_ctx DECLSPEC_HIDDEN;
+
+void hlsl_message(const char *fmt, ...) PRINTF_ATTR(1,2) DECLSPEC_HIDDEN;
+struct bwriter_shader *parse_hlsl_shader(const char *text, enum shader_type type, DWORD version,
+        const char *entrypoint, char **messages) DECLSPEC_HIDDEN;
 
 #define MAKE_TAG(ch0, ch1, ch2, ch3) \
     ((DWORD)(ch0) | ((DWORD)(ch1) << 8) | \

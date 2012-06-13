@@ -95,6 +95,9 @@ static const GUID *d3dformat_to_wic_guid(D3DFORMAT format)
 #define DDS_CAPS2_CUBEMAP_NEGATIVEY 0x2000
 #define DDS_CAPS2_CUBEMAP_POSITIVEZ 0x4000
 #define DDS_CAPS2_CUBEMAP_NEGATIVEZ 0x8000
+#define DDS_CAPS2_CUBEMAP_ALL_FACES ( DDS_CAPS2_CUBEMAP_POSITIVEX | DDS_CAPS2_CUBEMAP_NEGATIVEX \
+                                    | DDS_CAPS2_CUBEMAP_POSITIVEY | DDS_CAPS2_CUBEMAP_NEGATIVEY \
+                                    | DDS_CAPS2_CUBEMAP_POSITIVEZ | DDS_CAPS2_CUBEMAP_NEGATIVEZ )
 #define DDS_CAPS2_VOLUME 0x200000
 
 /* dds_pixel_format.flags */
@@ -104,6 +107,7 @@ static const GUID *d3dformat_to_wic_guid(D3DFORMAT format)
 #define DDS_PF_RGB 0x40
 #define DDS_PF_YUV 0x200
 #define DDS_PF_LUMINANCE 0x20000
+#define DDS_PF_BUMPDUDV 0x80000
 
 struct dds_pixel_format
 {
@@ -217,6 +221,8 @@ static D3DFORMAT dds_luminance_to_d3dformat(const struct dds_pixel_format *pixel
     }
     if (pixel_format->bpp == 16)
     {
+        if (pixel_format->rmask == 0xffff)
+            return D3DFMT_L16;
         if ((pixel_format->flags & DDS_PF_ALPHA) && pixel_format->rmask == 0x00ff && pixel_format->amask == 0xff00)
             return D3DFMT_A8L8;
     }
@@ -235,6 +241,18 @@ static D3DFORMAT dds_alpha_to_d3dformat(const struct dds_pixel_format *pixel_for
     return D3DFMT_UNKNOWN;
 }
 
+static D3DFORMAT dds_bump_to_d3dformat(const struct dds_pixel_format *pixel_format)
+{
+    if (pixel_format->bpp == 16 && pixel_format->rmask == 0x00ff && pixel_format->gmask == 0xff00)
+        return D3DFMT_V8U8;
+    if (pixel_format->bpp == 32 && pixel_format->rmask == 0x0000ffff && pixel_format->gmask == 0xffff0000)
+        return D3DFMT_V16U16;
+
+    WARN("Unknown bump pixel format (%#x, %#x, %#x, %#x, %#x)\n", pixel_format->bpp,
+        pixel_format->rmask, pixel_format->gmask, pixel_format->bmask, pixel_format->amask);
+    return D3DFMT_UNKNOWN;
+}
+
 static D3DFORMAT dds_pixel_format_to_d3dformat(const struct dds_pixel_format *pixel_format)
 {
     if (pixel_format->flags & DDS_PF_FOURCC)
@@ -245,11 +263,36 @@ static D3DFORMAT dds_pixel_format_to_d3dformat(const struct dds_pixel_format *pi
         return dds_luminance_to_d3dformat(pixel_format);
     if (pixel_format->flags & DDS_PF_ALPHA_ONLY)
         return dds_alpha_to_d3dformat(pixel_format);
+    if (pixel_format->flags & DDS_PF_BUMPDUDV)
+        return dds_bump_to_d3dformat(pixel_format);
 
-    WARN("Unknown pixel format (fourcc %#x, bpp %#x, r %#x, g %#x, b %#x, a %#x)\n",
-        pixel_format->fourcc, pixel_format->bpp, pixel_format->rmask, pixel_format->gmask,
-        pixel_format->bmask, pixel_format->amask);
+    WARN("Unknown pixel format (flags %#x, fourcc %#x, bpp %#x, r %#x, g %#x, b %#x, a %#x)\n",
+        pixel_format->flags, pixel_format->fourcc, pixel_format->bpp,
+        pixel_format->rmask, pixel_format->gmask, pixel_format->bmask, pixel_format->amask);
     return D3DFMT_UNKNOWN;
+}
+
+static HRESULT calculate_dds_surface_size(const D3DXIMAGE_INFO *img_info,
+    UINT width, UINT height, UINT *pitch, UINT *size)
+{
+    const PixelFormatDesc *format_desc = get_format_info(img_info->Format);
+    if (format_desc->format == D3DFMT_UNKNOWN)
+        return E_NOTIMPL;
+
+    if (format_desc->block_width != 1 || format_desc->block_height != 1)
+    {
+        *pitch = format_desc->block_byte_count
+            * max(1, (width + format_desc->block_width - 1) / format_desc->block_width);
+        *size = *pitch
+            * max(1, (height + format_desc->block_height - 1) / format_desc->block_height);
+    }
+    else
+    {
+        *pitch = width * format_desc->bytes_per_pixel;
+        *size = *pitch * height;
+    }
+
+    return D3D_OK;
 }
 
 /************************************************************
@@ -268,9 +311,13 @@ static D3DFORMAT dds_pixel_format_to_d3dformat(const struct dds_pixel_format *pi
 *   Failure: D3DXERR_INVALIDDATA
 *
 */
-static HRESULT get_image_info_from_dds(const void *buffer, DWORD length, D3DXIMAGE_INFO *info)
+static HRESULT get_image_info_from_dds(const void *buffer, UINT length, D3DXIMAGE_INFO *info)
 {
+   UINT i;
+   UINT faces = 0;
+   UINT width, height;
    const struct dds_header *header = buffer;
+   UINT expected_length = 0;
 
    if (length < sizeof(*header) || !info)
        return D3DXERR_INVALIDDATA;
@@ -287,6 +334,8 @@ static HRESULT get_image_info_from_dds(const void *buffer, DWORD length, D3DXIMA
    if (info->Format == D3DFMT_UNKNOWN)
        return D3DXERR_INVALIDDATA;
 
+   TRACE("Pixel format is %#x\n", info->Format);
+
    if (header->caps2 & DDS_CAPS2_VOLUME)
    {
        info->Depth = header->depth;
@@ -294,16 +343,157 @@ static HRESULT get_image_info_from_dds(const void *buffer, DWORD length, D3DXIMA
    }
    else if (header->caps2 & DDS_CAPS2_CUBEMAP)
    {
+       DWORD face;
+       for (face = DDS_CAPS2_CUBEMAP_POSITIVEX; face <= DDS_CAPS2_CUBEMAP_NEGATIVEZ; face <<= 1)
+       {
+           if (header->caps2 & face)
+               faces++;
+       }
        info->ResourceType = D3DRTYPE_CUBETEXTURE;
    }
    else
    {
+       faces = 1;
        info->ResourceType = D3DRTYPE_TEXTURE;
+   }
+
+   /* calculate the expected length */
+   width = info->Width;
+   height = info->Height;
+   for (i = 0; i < info->MipLevels; i++)
+   {
+       UINT pitch, size = 0;
+       calculate_dds_surface_size(info, width, height, &pitch, &size);
+       expected_length += size;
+       width = max(1, width / 2);
+       height = max(1, height / 2);
+   }
+
+   expected_length *= faces;
+   expected_length += sizeof(*header);
+   if (length < expected_length)
+   {
+       WARN("File is too short %u, expected at least %u bytes\n", length, expected_length);
+       return D3DXERR_INVALIDDATA;
    }
 
    info->ImageFileFormat = D3DXIFF_DDS;
 
    return D3D_OK;
+}
+
+static HRESULT load_surface_from_dds(IDirect3DSurface9 *dst_surface, const PALETTEENTRY *dst_palette,
+    const RECT *dst_rect, const void *src_data, const RECT *src_rect, DWORD filter, D3DCOLOR color_key,
+    const D3DXIMAGE_INFO *src_info)
+{
+    UINT size;
+    UINT src_pitch;
+    const struct dds_header *header = src_data;
+    const BYTE *pixels = (BYTE *)(header + 1);
+
+    if (src_info->ResourceType != D3DRTYPE_TEXTURE)
+        return D3DXERR_INVALIDDATA;
+
+    if (FAILED(calculate_dds_surface_size(src_info, src_info->Width, src_info->Height, &src_pitch, &size)))
+        return E_NOTIMPL;
+
+    return D3DXLoadSurfaceFromMemory(dst_surface, dst_palette, dst_rect, pixels, src_info->Format,
+        src_pitch, NULL, src_rect, filter, color_key);
+}
+
+HRESULT load_texture_from_dds(IDirect3DTexture9 *texture, const void *src_data, const PALETTEENTRY *palette,
+    DWORD filter, D3DCOLOR color_key, const D3DXIMAGE_INFO *src_info)
+
+{
+    HRESULT hr;
+    RECT src_rect;
+    UINT src_pitch;
+    UINT mip_level;
+    UINT mip_levels;
+    UINT mip_level_size;
+    UINT width, height;
+    IDirect3DSurface9 *surface;
+    const struct dds_header *header = src_data;
+    const BYTE *pixels = (BYTE *)(header + 1);
+
+    if (src_info->ResourceType != D3DRTYPE_TEXTURE)
+        return D3DXERR_INVALIDDATA;
+
+    width = src_info->Width;
+    height = src_info->Height;
+    mip_levels = min(src_info->MipLevels, IDirect3DTexture9_GetLevelCount(texture));
+    for (mip_level = 0; mip_level < mip_levels; mip_level++)
+    {
+        hr = calculate_dds_surface_size(src_info, width, height, &src_pitch, &mip_level_size);
+        if (FAILED(hr)) return hr;
+
+        SetRect(&src_rect, 0, 0, width, height);
+
+        IDirect3DTexture9_GetSurfaceLevel(texture, mip_level, &surface);
+        hr = D3DXLoadSurfaceFromMemory(surface, palette, NULL, pixels, src_info->Format, src_pitch,
+            NULL, &src_rect, filter, color_key);
+        IDirect3DSurface9_Release(surface);
+        if (FAILED(hr)) return hr;
+
+        pixels += mip_level_size;
+        width = max(1, width / 2);
+        height = max(1, height / 2);
+    }
+
+    return D3D_OK;
+}
+
+HRESULT load_cube_texture_from_dds(IDirect3DCubeTexture9 *cube_texture, const void *src_data,
+    const PALETTEENTRY *palette, DWORD filter, DWORD color_key, const D3DXIMAGE_INFO *src_info)
+{
+    HRESULT hr;
+    int face;
+    int mip_level;
+    UINT size;
+    RECT src_rect;
+    UINT src_pitch;
+    UINT mip_levels;
+    UINT mip_level_size;
+    IDirect3DSurface9 *surface;
+    const struct dds_header *header = src_data;
+    const BYTE *pixels = (BYTE *)(header + 1);
+
+    if (src_info->ResourceType != D3DRTYPE_CUBETEXTURE)
+        return D3DXERR_INVALIDDATA;
+
+    if ((header->caps2 & DDS_CAPS2_CUBEMAP_ALL_FACES) != DDS_CAPS2_CUBEMAP_ALL_FACES)
+    {
+        WARN("Only full cubemaps are supported\n");
+        return D3DXERR_INVALIDDATA;
+    }
+
+    mip_levels = min(src_info->MipLevels, IDirect3DCubeTexture9_GetLevelCount(cube_texture));
+    for (face = D3DCUBEMAP_FACE_POSITIVE_X; face <= D3DCUBEMAP_FACE_NEGATIVE_Z; face++)
+    {
+        size = src_info->Width;
+        for (mip_level = 0; mip_level < src_info->MipLevels; mip_level++)
+        {
+            hr = calculate_dds_surface_size(src_info, size, size, &src_pitch, &mip_level_size);
+            if (FAILED(hr)) return hr;
+
+            /* if texture has fewer mip levels than DDS file, skip excessive mip levels */
+            if (mip_level < mip_levels)
+            {
+                SetRect(&src_rect, 0, 0, size, size);
+
+                IDirect3DCubeTexture9_GetCubeMapSurface(cube_texture, face, mip_level, &surface);
+                hr = D3DXLoadSurfaceFromMemory(surface, palette, NULL, pixels, src_info->Format, src_pitch,
+                    NULL, &src_rect, filter, color_key);
+                IDirect3DSurface9_Release(surface);
+                if (FAILED(hr)) return hr;
+            }
+
+            pixels += mip_level_size;
+            size = max(1, size / 2);
+        }
+    }
+
+    return D3D_OK;
 }
 
 /************************************************************
@@ -343,8 +533,10 @@ HRESULT WINAPI D3DXGetImageInfoFromFileInMemory(LPCVOID data, UINT datasize, D3D
     if (!info)
         return D3D_OK;
 
-    if ((datasize >= 4) && !strncmp(data, "DDS ", 4))
+    if ((datasize >= 4) && !strncmp(data, "DDS ", 4)) {
+        TRACE("File type is DDS\n");
         return get_image_info_from_dds(data, datasize, info);
+    }
 
     initresult = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -464,7 +656,7 @@ HRESULT WINAPI D3DXGetImageInfoFromFileA(LPCSTR file, D3DXIMAGE_INFO *info)
     if( !file ) return D3DERR_INVALIDCALL;
 
     strlength = MultiByteToWideChar(CP_ACP, 0, file, -1, NULL, 0);
-    widename = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, strlength * sizeof(WCHAR));
+    widename = HeapAlloc(GetProcessHeap(), 0, strlength * sizeof(*widename));
     MultiByteToWideChar(CP_ACP, 0, file, -1, widename, strlength);
 
     hr = D3DXGetImageInfoFromFileW(widename, info);
@@ -607,6 +799,32 @@ HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(LPDIRECT3DSURFACE9 pDestSurface,
     if (FAILED(hr))
         return hr;
 
+    if (pSrcRect)
+    {
+        wicrect.X = pSrcRect->left;
+        wicrect.Y = pSrcRect->top;
+        wicrect.Width = pSrcRect->right - pSrcRect->left;
+        wicrect.Height = pSrcRect->bottom - pSrcRect->top;
+    }
+    else
+    {
+        wicrect.X = 0;
+        wicrect.Y = 0;
+        wicrect.Width = imginfo.Width;
+        wicrect.Height = imginfo.Height;
+    }
+
+    SetRect(&rect, 0, 0, wicrect.Width, wicrect.Height);
+
+    if (imginfo.ImageFileFormat == D3DXIFF_DDS)
+    {
+        hr = load_surface_from_dds(pDestSurface, pDestPalette, pDestRect, pSrcData, &rect,
+            dwFilter, Colorkey, &imginfo);
+        if (SUCCEEDED(hr) && pSrcInfo)
+            *pSrcInfo = imginfo;
+        return hr;
+    }
+
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
     if (FAILED(CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, &IID_IWICImagingFactory, (void**)&factory)))
@@ -632,23 +850,6 @@ HRESULT WINAPI D3DXLoadSurfaceFromFileInMemory(LPDIRECT3DSURFACE9 pDestSurface,
 
     if (FAILED(hr))
         goto cleanup_bmp;
-
-    if (pSrcRect)
-    {
-        wicrect.X = pSrcRect->left;
-        wicrect.Y = pSrcRect->top;
-        wicrect.Width = pSrcRect->right - pSrcRect->left;
-        wicrect.Height = pSrcRect->bottom - pSrcRect->top;
-    }
-    else
-    {
-        wicrect.X = 0;
-        wicrect.Y = 0;
-        wicrect.Width = imginfo.Width;
-        wicrect.Height = imginfo.Height;
-    }
-
-    SetRect(&rect, 0, 0, wicrect.Width, wicrect.Height);
 
     formatdesc = get_format_info(imginfo.Format);
 
@@ -717,7 +918,7 @@ HRESULT WINAPI D3DXLoadSurfaceFromFileA(LPDIRECT3DSURFACE9 pDestSurface,
     if( !pSrcFile || !pDestSurface ) return D3DERR_INVALIDCALL;
 
     strlength = MultiByteToWideChar(CP_ACP, 0, pSrcFile, -1, NULL, 0);
-    pWidename = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, strlength * sizeof(WCHAR));
+    pWidename = HeapAlloc(GetProcessHeap(), 0, strlength * sizeof(*pWidename));
     MultiByteToWideChar(CP_ACP, 0, pSrcFile, -1, pWidename, strlength);
 
     hr = D3DXLoadSurfaceFromFileW(pDestSurface, pDestPalette, pDestRect, pWidename, pSrcRect, dwFilter, Colorkey, pSrcInfo);
