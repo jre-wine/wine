@@ -1,9 +1,13 @@
-wine (1.4.1-1) UNRELEASED; urgency=low
+wine (1.4.1-1) unstable; urgency=medium
 
-  * UNRELEASED
-  * UNRELEASED
+  * New upstream release 1.4.1, released Jun 17, 2012.
+    - Translation updates.
+    - Various bug fixes.
+    - See http://www.winehq.org/announce/1.4.1 for complete details.
+  * Don't build libwine-alsa on kfreebsd (closes: #677715)
+  * Set libwine as 'Multi-Arch: foreign'
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 16 Jun 2012 22:21:41 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 16 Jun 2012 23:11:45 -0400
 
 wine (1.4-7) unstable; urgency=low
 
