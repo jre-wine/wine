@@ -347,6 +347,9 @@ HRESULT WINAPI GetRequestedRuntimeInfo(LPCWSTR pExe, LPCWSTR pwszVersion, LPCWST
 
         if (SUCCEEDED(ret))
         {
+            if(pwszVersion)
+                pVersion[0] = pwszVersion[0];
+
             *dwDirectoryLength = dwDirectory;
             ret = ICLRRuntimeInfo_GetRuntimeDirectory(info, pDirectory, dwDirectoryLength);
         }
@@ -639,6 +642,11 @@ HRESULT WINAPI DllUnregisterServer(void)
 HRESULT WINAPI DllCanUnloadNow(VOID)
 {
     return S_FALSE;
+}
+
+void WINAPI CoEEShutDownCOM(void)
+{
+    FIXME("stub.\n");
 }
 
 INT WINAPI ND_RU1( const void *ptr, INT offset )

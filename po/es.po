@@ -1083,7 +1083,7 @@ msgid "Processing; "
 msgstr "Procesando; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inicializando; "
 
 #: comdlg32.rc:96
@@ -2156,9 +2156,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2295,9 +2295,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2594,7 +2594,7 @@ msgstr "Lista de Revocación de Certificados (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Lista de Confianza de Certificados (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Almacén de Certificados Serializado de Microsoft (*.sst)"
 
@@ -2766,7 +2766,7 @@ msgstr ""
 "Los certificados emitidos por estas autoridades certificadoras raíz, o "
 "cualquier autoridad certificadora emitida por estas ya no serán de "
 "confianza.\n"
-"Está seguro de que quiere eliminiar estos certificados raíz de confianza?"
+"Está seguro de que quiere eliminar estos certificados raíz de confianza?"
 
 #: cryptui.rc:115
 msgid ""
@@ -2867,10 +2867,6 @@ msgstr "Mensajes CMS/PKCS #7 (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Intercambio de Información Personal (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Almacén de Certificados Serializados (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3740,7 +3736,7 @@ msgid "Too many commands.\n"
 msgstr "Demasiados comandos.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Error en el adaptador de hardware.\n"
 
 #: winerror.mc:256
@@ -3752,7 +3748,7 @@ msgid "Unexpected network error.\n"
 msgstr "Error de red inesperado.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Error en el adaptador remoto.\n"
 
 #: winerror.mc:271
@@ -4364,7 +4360,7 @@ msgid "Invalid flags.\n"
 msgstr "Indicadores inválidos.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "No se ha reconocido el volumen.\n"
 
 #: winerror.mc:1046
@@ -5020,7 +5016,7 @@ msgid "Continue work in progress.\n"
 msgstr "Continuar los trabajos en marcha.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Ya se ha inicializado.\n"
 
 #: winerror.mc:1871
@@ -6052,7 +6048,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Identidad de autenticación inválida.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Servicio de autorización desconocido.\n"
 
 #: winerror.mc:3171
@@ -6188,7 +6184,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Búfer del usuario inválido.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "No se ha reconocido el medio.\n"
 
 #: winerror.mc:3341
@@ -6333,7 +6329,7 @@ msgid "RPC comm failure.\n"
 msgstr "Fallo de comunicación RPC.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nivel de autorización no soportado.\n"
 
 #: winerror.mc:3521
@@ -6361,7 +6357,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Operación de descriptor inválida.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Versión del paquete de serialización incorrecta.\n"
 
 #: winerror.mc:3556
@@ -6582,9 +6578,9 @@ msgstr "Usuario"
 msgid "Password"
 msgstr "Contraseña"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
-msgstr "&Guardar esta contraseña (Inseguro)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
+msgstr "&Guardar esta contraseña (inseguro)"
 
 #: mpr.rc:27
 msgid "Entire Network"
@@ -7179,7 +7175,7 @@ msgid ""
 "activate it using %s. It will be displayed as an icon."
 msgstr ""
 "Inserta el contenido del portapapeles en su documento de modo que pueda "
-"activarlo usando %s.  Será mostrado como un icono."
+"activarlo usando %s. Será mostrado como un icono."
 
 #: oledlg.rc:37
 msgid ""
@@ -7187,7 +7183,7 @@ msgid ""
 "linked to the source file so that changes to the file will be reflected in "
 "your document."
 msgstr ""
-"Inserta el contenido del portapapeles en su documento como %s.  Los datos "
+"Inserta el contenido del portapapeles en su documento como %s. Los datos "
 "estarán enlazados al archivo de origen, por lo que los cambios en el archivo "
 "se reflejarán en su documento."
 
@@ -7197,9 +7193,9 @@ msgid ""
 "is linked to the source file so that changes to the file will be reflected "
 "in your document."
 msgstr ""
-"Inserta una imagen del contenido del portapapeles en su documento.  La "
-"imagen estará enlazada al archivo de origen, por lo que los cambios en el "
-"archivo se reflejarán en su documento."
+"Inserta una imagen del contenido del portapapeles en su documento. La imagen "
+"estará enlazada al archivo de origen, por lo que los cambios en el archivo "
+"se reflejarán en su documento."
 
 #: oledlg.rc:39
 msgid ""
@@ -7208,8 +7204,8 @@ msgid ""
 "be reflected in your document."
 msgstr ""
 "Inserta un acceso directo que apunte a la localización del contenido del "
-"portapapeles.  El acceso directo estará enlazado al archivo de origen, por "
-"lo que los cambios en el archivo se reflejarán en su documento."
+"portapapeles. El acceso directo estará enlazado al archivo de origen, por lo "
+"que los cambios en el archivo se reflejarán en su documento."
 
 #: oledlg.rc:40
 msgid "Inserts the contents of the clipboard into your document."
@@ -8276,10 +8272,6 @@ msgstr "Dúplex:"
 msgid "Realm"
 msgstr "Dominio"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Guardar esta contraseña (inseguro)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Autenticación Requerida"
@@ -8510,8 +8502,8 @@ msgid ""
 "The output string was too large to fit in the return buffer. Increase the "
 "size of the buffer."
 msgstr ""
-"La cadena de salida es muy grande para caber en el buffer de retorno. "
-"Aumente el tamaño del búfer."
+"La cadena de salida es muy grande para caber en el búfer de retorno. Aumente "
+"el tamaño del búfer."
 
 #: winmm.rc:66
 msgid ""
@@ -9160,7 +9152,7 @@ msgid "Filter Error"
 msgstr "Error de filtro"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Cancelado por el usuario"
 
 #: wldap32.rc:116
@@ -9589,6 +9581,7 @@ msgstr ""
 "un subdirectorio.\n"
 
 #: cmd.rc:160
+#, fuzzy
 msgid "RMDIR <dir> deletes a subdirectory.\n"
 msgstr ""
 "RMDIR <directorio> es la versión corta de RMDIR. Este comando borra un "
@@ -10598,7 +10591,7 @@ msgstr "Categorías de componente &ocultas"
 msgid "&Toolbar"
 msgstr "&Barra de herramientas"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "Barra de &estado"
 
@@ -11290,7 +11283,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Contiene comandos para editar valores o claves"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Contiene comandos para personalizar la ventana de registro"
 
 #: regedit.rc:137
@@ -13130,7 +13123,7 @@ msgstr ""
 "ventana"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Cada carácter tiene %1!u! píxeles de ancho por %2!u! píxeles de alto"
 
 #: wineconsole.rc:35
@@ -13244,10 +13237,10 @@ msgid ""
 "button, then <a href=\"http://wiki.winehq.org/Bugs\">file a bug report</a> "
 "and attach that file to the report."
 msgstr ""
-"Si este problema no esta presente en Windows y no ha sido reportado todavía, "
+"Si este problema no esta presente en Windows y no ha sido informado todavía, "
 "puedes salvar la información detallada usando el botón \"Salvar Como\", "
 "entonces podrás <a href=\"http://wiki.winehq.org/Bugs\">informar de un "
-"error</a> y adjuntar ese archivo al reporte de fallo."
+"error</a> y adjuntar ese archivo al informe de fallo."
 
 #: winedbg.rc:35
 msgid "Wine program crash"
@@ -13730,16 +13723,12 @@ msgid "&Get text"
 msgstr "&Obtener texto"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "Barra de &formato"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Regla"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "Barra de &estado"
 
 #: wordpad.rc:75
 msgid "&Insert"
@@ -14144,8 +14133,8 @@ msgstr ""
 "\n"
 "[/I]  Asumir directorio si el destino no existe y se copian dos o más\n"
 "\tarchivos.\n"
-"[/S]  Copia directorios and subdirectorios.\n"
-"[/E]  Copia directorios and subdirectorios, incluyendo los vacíos.\n"
+"[/S]  Copia directorios y subdirectorios.\n"
+"[/E]  Copia directorios y subdirectorios, incluyendo los vacíos.\n"
 "[/Q]  No muestra la lista de nombres mientras copia, ej: silencioso.\n"
 "[/F]  Muestrea la ruta completa de origen y destino mientras copia.\n"
 "[/L]  Simular la operación, mostrando los nombres que serán copiados.\n"

@@ -1515,8 +1515,14 @@ static HRESULT compile_switch_statement(compiler_ctx_t *ctx, switch_statement_t 
         return hres;
     assert(i == case_cnt);
 
-    if(!have_default)
+    if(!have_default) {
+        hres = push_instr_uint(ctx, OP_jmp, stat_ctx.break_label);
+        if(FAILED(hres))
+            return hres;
         instr_ptr(ctx, default_jmp)->arg1.uint = ctx->code_off;
+        if(!push_instr(ctx, OP_undefined))
+            return E_OUTOFMEMORY;
+    }
 
     label_set_addr(ctx, stat_ctx.break_label);
     return S_OK;

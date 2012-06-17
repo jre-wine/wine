@@ -492,7 +492,7 @@ const scriptData scriptInformation[] = {
     {{Script_Myanmar, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {0x55, 0, 1, 1, 1, DEFAULT_CHARSET, 0, 0, 0, 0, 1, 0, 0, 0, 0},
      MS_MAKE_TAG('m','y','m','r'),
-     {0}},
+     {'M','y','a','n','m','a','r',' ','T','e','x','t',0}},
     {{Script_Myanmar_Numeric, 0, 0, 0, 0, 0, 0, { 0,0,0,0,0,0,0,0,0,0,0}},
      {0x55, 1, 1, 0, 0, DEFAULT_CHARSET, 0, 0, 0, 0, 0, 0, 0, 0, 0},
      MS_MAKE_TAG('m','y','m','r'),
@@ -746,18 +746,24 @@ static inline BYTE get_cache_pitch_family(SCRIPT_CACHE *psc)
 
 static inline WORD get_cache_glyph(SCRIPT_CACHE *psc, DWORD c)
 {
-    WORD *block = ((ScriptCache *)*psc)->glyphs[c >> GLYPH_BLOCK_SHIFT];
+    CacheGlyphPage *page = ((ScriptCache *)*psc)->page[c / 0x10000];
+    WORD *block;
 
+    if (!page) return 0;
+    block = page->glyphs[(c % 0x10000) >> GLYPH_BLOCK_SHIFT];
     if (!block) return 0;
-    return block[c & GLYPH_BLOCK_MASK];
+    return block[(c % 0x10000) & GLYPH_BLOCK_MASK];
 }
 
 static inline WORD set_cache_glyph(SCRIPT_CACHE *psc, WCHAR c, WORD glyph)
 {
-    WORD **block = &((ScriptCache *)*psc)->glyphs[c >> GLYPH_BLOCK_SHIFT];
+    CacheGlyphPage **page = &((ScriptCache *)*psc)->page[c / 0x10000];
+    WORD **block;
+    if (!*page && !(*page = heap_alloc_zero(sizeof(CacheGlyphPage)))) return 0;
 
+    block = &(*page)->glyphs[(c % 0x10000) >> GLYPH_BLOCK_SHIFT];
     if (!*block && !(*block = heap_alloc_zero(sizeof(WORD) * GLYPH_BLOCK_SIZE))) return 0;
-    return ((*block)[c & GLYPH_BLOCK_MASK] = glyph);
+    return ((*block)[(c % 0x10000) & GLYPH_BLOCK_MASK] = glyph);
 }
 
 static inline BOOL get_cache_glyph_widths(SCRIPT_CACHE *psc, WORD glyph, ABC *abc)
@@ -965,8 +971,15 @@ HRESULT WINAPI ScriptFreeCache(SCRIPT_CACHE *psc)
         unsigned int i;
         for (i = 0; i < GLYPH_MAX / GLYPH_BLOCK_SIZE; i++)
         {
-            heap_free(((ScriptCache *)*psc)->glyphs[i]);
             heap_free(((ScriptCache *)*psc)->widths[i]);
+        }
+        for (i = 0; i < 0x10; i++)
+        {
+            int j;
+            if (((ScriptCache *)*psc)->page[i])
+                for (j = 0; j < GLYPH_MAX / GLYPH_BLOCK_SIZE; j++)
+                    heap_free(((ScriptCache *)*psc)->page[i]->glyphs[j]);
+            heap_free(((ScriptCache *)*psc)->page[i]);
         }
         heap_free(((ScriptCache *)*psc)->GSUB_Table);
         heap_free(((ScriptCache *)*psc)->GDEF_Table);
@@ -2665,7 +2678,8 @@ HRESULT WINAPI ScriptBreak(const WCHAR *chars, int count, const SCRIPT_ANALYSIS 
 {
     TRACE("(%s, %d, %p, %p)\n", debugstr_wn(chars, count), count, sa, la);
 
-    if (!la) return S_FALSE;
+    if (count < 0 || !la) return E_INVALIDARG;
+    if (count == 0) return E_FAIL;
 
     BREAK_line(chars, count, sa, la);
 

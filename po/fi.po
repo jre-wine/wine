@@ -1076,7 +1076,7 @@ msgid "Processing; "
 msgstr "Käsitellään; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Alustetaan; "
 
 #: comdlg32.rc:96
@@ -2147,9 +2147,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2283,9 +2283,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2575,7 +2575,7 @@ msgstr "Varmenteiden sulkulista (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Luotettujen varmenteiden lista (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoft Serialized Certificate Store (*.sst)"
 
@@ -2845,10 +2845,6 @@ msgstr "CMS/PKCS #7 -viestit (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Personal Information Exchange (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Serialized Certificate Store (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3718,7 +3714,7 @@ msgid "Too many commands.\n"
 msgstr "Liian monta komentoa.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Verkkosovittimessa tapahtui virhe.\n"
 
 #: winerror.mc:256
@@ -3730,7 +3726,7 @@ msgid "Unexpected network error.\n"
 msgstr "Odottamaton verkkovirhe.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Vastapuolen verkkosovitin ei ole yhteensopiva.\n"
 
 #: winerror.mc:271
@@ -4342,7 +4338,7 @@ msgid "Invalid flags.\n"
 msgstr "Vialliset liput.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Osiota ei tunnisteta.\n"
 
 #: winerror.mc:1046
@@ -4998,7 +4994,7 @@ msgid "Continue work in progress.\n"
 msgstr "Jatka kesken olevaa työtä.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Jo alustettu.\n"
 
 #: winerror.mc:1871
@@ -6030,7 +6026,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Tuntematon identiteetti tunnistautumisessa.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Tuntematon valtuutuspalvelu.\n"
 
 #: winerror.mc:3171
@@ -6166,7 +6162,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Annettu puskuri ei kelpaa.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Tuntematon media.\n"
 
 #: winerror.mc:3341
@@ -6310,7 +6306,7 @@ msgid "RPC comm failure.\n"
 msgstr "Yhteysvirhe RPC-kutsussa.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Valtuutuksen tasoa ei tueta.\n"
 
 #: winerror.mc:3521
@@ -6338,7 +6334,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Virheellinen kahvaoperaatio.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Sarjoituspaketin versio on väärä.\n"
 
 #: winerror.mc:3556
@@ -6558,9 +6554,9 @@ msgstr "Käyttäjä"
 msgid "Password"
 msgstr "Salasana"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
-msgstr "&Tallenna tämä salasana (Suojaamaton)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
+msgstr "&Tallenna tämä salasana (suojaamaton)"
 
 #: mpr.rc:27
 msgid "Entire Network"
@@ -8245,10 +8241,6 @@ msgstr "Kaksipuolinen:"
 msgid "Realm"
 msgstr "Alue"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Tallenna tämä salasana (suojaamaton)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Vaaditaan tunnistautuminen"
@@ -9087,7 +9079,7 @@ msgid "Filter Error"
 msgstr "Suodatinvirhe"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Käyttäjän peruma"
 
 #: wldap32.rc:116
@@ -10499,7 +10491,7 @@ msgstr "Piilotetut komponenttikategoriat"
 msgid "&Toolbar"
 msgstr "T&yökalupalkki"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "Ti&lapalkki"
 
@@ -11190,7 +11182,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Sisältää avainten arvojen muokkauskomentoja"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Sisältää rekisteri-ikkunan mukauttamiskomentoja"
 
 #: regedit.rc:137
@@ -13009,7 +13001,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "Näytön puskurin on oltava suurempi tai yhtä suuri kuin ikkunan"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Jokainen merkki on %1!u! pikseliä leveä ja %2!u! pikseliä korkea"
 
 #: wineconsole.rc:35
@@ -13605,16 +13597,12 @@ msgid "&Get text"
 msgstr "&Poimi teksti"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "&Muotoilupalkki"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Viivoitin"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "&Tilapalkki"
 
 #: wordpad.rc:75
 msgid "&Insert"

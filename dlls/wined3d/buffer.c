@@ -470,7 +470,7 @@ void buffer_get_memory(struct wined3d_buffer *buffer, const struct wined3d_gl_in
     data->buffer_object = buffer->buffer_object;
     if (!buffer->buffer_object)
     {
-        if (buffer->flags & WINED3D_BUFFER_CREATEBO)
+        if ((buffer->flags & WINED3D_BUFFER_CREATEBO) && !buffer->resource.map_count)
         {
             buffer_create_buffer_object(buffer, gl_info);
             buffer->flags &= ~WINED3D_BUFFER_CREATEBO;
@@ -747,6 +747,12 @@ void CDECL wined3d_buffer_preload(struct wined3d_buffer *buffer)
 
     TRACE("buffer %p.\n", buffer);
 
+    if (buffer->resource.map_count)
+    {
+        WARN("Buffer is mapped, skipping preload.\n");
+        return;
+    }
+
     buffer->flags &= ~(WINED3D_BUFFER_NOSYNC | WINED3D_BUFFER_DISCARD);
 
     if (!buffer->buffer_object)
@@ -767,7 +773,7 @@ void CDECL wined3d_buffer_preload(struct wined3d_buffer *buffer)
     }
 
     /* Reading the declaration makes only sense if the stateblock is finalized and the buffer bound to a stream */
-    if (device->isInDraw && buffer->bind_count > 0)
+    if (device->isInDraw && buffer->resource.bind_count > 0)
     {
         decl_changed = buffer_find_decl(buffer);
         buffer->flags |= WINED3D_BUFFER_HASDESC;
@@ -836,7 +842,7 @@ void CDECL wined3d_buffer_preload(struct wined3d_buffer *buffer)
                 FIXME("Too many full buffer conversions, stopping converting.\n");
                 buffer_unload(&buffer->resource);
                 buffer->flags &= ~WINED3D_BUFFER_CREATEBO;
-                if (buffer->bind_count)
+                if (buffer->resource.bind_count)
                     device_invalidate_state(device, STATE_STREAMSRC);
                 return;
             }
@@ -1002,7 +1008,7 @@ HRESULT CDECL wined3d_buffer_map(struct wined3d_buffer *buffer, UINT offset, UIN
         if (!buffer_add_dirty_area(buffer, offset, size)) return E_OUTOFMEMORY;
     }
 
-    count = InterlockedIncrement(&buffer->lock_count);
+    count = ++buffer->resource.map_count;
 
     if (buffer->buffer_object)
     {
@@ -1063,7 +1069,7 @@ HRESULT CDECL wined3d_buffer_map(struct wined3d_buffer *buffer, UINT offset, UIN
                         TRACE("Dynamic buffer, dropping VBO\n");
                         buffer_unload(&buffer->resource);
                         buffer->flags &= ~WINED3D_BUFFER_CREATEBO;
-                        if (buffer->bind_count)
+                        if (buffer->resource.bind_count)
                             device_invalidate_state(device, STATE_STREAMSRC);
                     }
                     else
@@ -1115,13 +1121,13 @@ void CDECL wined3d_buffer_unmap(struct wined3d_buffer *buffer)
      * number of Map calls, d3d returns always D3D_OK.
      * This is also needed to prevent Map from returning garbage on
      * the next call (this will happen if the lock_count is < 0). */
-    if (!buffer->lock_count)
+    if (!buffer->resource.map_count)
     {
         WARN("Unmap called without a previous map call.\n");
         return;
     }
 
-    if (InterlockedDecrement(&buffer->lock_count))
+    if (--buffer->resource.map_count)
     {
         /* Delay loading the buffer until everything is unlocked */
         TRACE("Ignoring unmap.\n");

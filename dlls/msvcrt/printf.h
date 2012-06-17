@@ -508,8 +508,14 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
             i = 0;
         } else if(flags.Format && strchr("diouxX", flags.Format)) {
             APICHAR *tmp = buf;
-            int max_len = (flags.FieldLength>flags.Precision ? flags.FieldLength : flags.Precision) + 10;
+            int max_len;
 
+            /* 0 padding is added after '0x' in Alternate flag is in use */
+            if((flags.Format=='x' || flags.Format=='X') && flags.PadZero && flags.Alternate
+                    && !flags.LeftAlign && flags.Precision<flags.FieldLength-2)
+                flags.Precision = flags.FieldLength - 2;
+
+            max_len = (flags.FieldLength>flags.Precision ? flags.FieldLength : flags.Precision) + 10;
             if(max_len > sizeof(buf)/sizeof(APICHAR))
                 tmp = HeapAlloc(GetProcessHeap(), 0, max_len);
             if(!tmp)
@@ -519,11 +525,13 @@ int FUNC_NAME(pf_printf)(FUNC_NAME(puts_clbk) pf_puts, void *puts_ctx, const API
                 FUNC_NAME(pf_integer_conv)(tmp, max_len, &flags, pf_args(args_ctx, pos,
                             VT_I8, valist).get_longlong);
             else if(flags.Format=='d' || flags.Format=='i')
-                FUNC_NAME(pf_integer_conv)(tmp, max_len, &flags, pf_args(args_ctx, pos,
-                            VT_INT, valist).get_int);
+                FUNC_NAME(pf_integer_conv)(tmp, max_len, &flags, flags.IntegerLength!='h' ?
+                        pf_args(args_ctx, pos, VT_INT, valist).get_int :
+                        (short)pf_args(args_ctx, pos, VT_INT, valist).get_int);
             else
-                FUNC_NAME(pf_integer_conv)(tmp, max_len, &flags, (unsigned)pf_args(
-                            args_ctx, pos, VT_INT, valist).get_int);
+                FUNC_NAME(pf_integer_conv)(tmp, max_len, &flags, flags.IntegerLength!='h' ?
+                        (unsigned)pf_args(args_ctx, pos, VT_INT, valist).get_int :
+                        (unsigned short)pf_args(args_ctx, pos, VT_INT, valist).get_int);
 
 #ifdef PRINTF_WIDE
             i = FUNC_NAME(pf_output_format_wstr)(pf_puts, puts_ctx, tmp, -1, &flags, locinfo);

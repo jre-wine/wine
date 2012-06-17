@@ -243,8 +243,8 @@ int __cdecl MSVCRT__set_new_mode(int mode);
 void* __cdecl MSVCRT_operator_new(MSVCRT_size_t);
 void __cdecl MSVCRT_operator_delete(void*);
 
-typedef void* (*__cdecl malloc_func_t)(MSVCRT_size_t);
-typedef void  (*__cdecl free_func_t)(void*);
+typedef void* (__cdecl *malloc_func_t)(MSVCRT_size_t);
+typedef void  (__cdecl *free_func_t)(void*);
 
 extern char* __cdecl __unDName(char *,const char*,int,malloc_func_t,free_func_t,unsigned short int);
 extern char* __cdecl __unDNameEx(char *,const char*,int,malloc_func_t,free_func_t,void *,unsigned short int);
@@ -913,6 +913,7 @@ int _setmbcp_l(int, LCID, MSVCRT_pthreadmbcinfo) DECLSPEC_HIDDEN;
 int            __cdecl MSVCRT__write(int,const void*,unsigned int);
 int            __cdecl _getch(void);
 int            __cdecl _ismbblead(unsigned int);
+int            __cdecl _ismbclegal(unsigned int c);
 int            __cdecl _ismbstrail(const unsigned char* start, const unsigned char* str);
 MSVCRT_size_t  __cdecl MSVCRT_mbstowcs(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 MSVCRT_intptr_t __cdecl MSVCRT__spawnve(int,const char*,const char* const *,const char* const *);

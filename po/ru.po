@@ -1081,7 +1081,7 @@ msgid "Processing; "
 msgstr "Обработка; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Подготовка; "
 
 #: comdlg32.rc:96
@@ -2151,9 +2151,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2289,9 +2289,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2584,7 +2584,7 @@ msgstr "Список отзыва сертификатов (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Список доверия сертификатов (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Хранилище сериализованных сертификатов Microsoft (*.sst)"
 
@@ -2855,10 +2855,6 @@ msgstr "Сообщения CMS/PKCS #7 (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Формат обмена личной информацией (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Хранилище сериализованных сертификатов (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3730,7 +3726,7 @@ msgid "Too many commands.\n"
 msgstr "Слишком много команд NetBIOS.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Аппаратная ошибка сетевой карты.\n"
 
 #: winerror.mc:256
@@ -3742,7 +3738,7 @@ msgid "Unexpected network error.\n"
 msgstr "Неожиданная сетевая ошибка.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Несовместимая удалённая сетевая карта.\n"
 
 #: winerror.mc:271
@@ -4354,7 +4350,7 @@ msgid "Invalid flags.\n"
 msgstr "Неверные флаги.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Нераспознанная файловая система.\n"
 
 #: winerror.mc:1046
@@ -5010,7 +5006,7 @@ msgid "Continue work in progress.\n"
 msgstr "Выполняется продолжение работы.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Инициализация уже выполнена.\n"
 
 #: winerror.mc:1871
@@ -6042,7 +6038,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Неверное удостоверение.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Неизвестная служба авторизации.\n"
 
 #: winerror.mc:3171
@@ -6178,7 +6174,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Неподходящий пользовательский буфер.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Нераспознанный носитель.\n"
 
 #: winerror.mc:3341
@@ -6323,7 +6319,7 @@ msgid "RPC comm failure.\n"
 msgstr "Сбой RPC-обмена.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Неподдерживаемый уровень авторизации.\n"
 
 #: winerror.mc:3521
@@ -6351,7 +6347,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Неверная операция с дескриптором.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Неверная версия пакета сериализации.\n"
 
 #: winerror.mc:3556
@@ -6570,8 +6566,8 @@ msgstr "Имя"
 msgid "Password"
 msgstr "Пароль"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr "&Сохранить этот пароль (небезопасно)"
 
 #: mpr.rc:27
@@ -8255,10 +8251,6 @@ msgstr "Двухсторонняя печать:"
 msgid "Realm"
 msgstr "Домен"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Сохранить этот пароль (небезопасно)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Требуется идентификация"
@@ -9113,7 +9105,7 @@ msgid "Filter Error"
 msgstr "Ошибка фильтра"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Отменено пользователем"
 
 #: wldap32.rc:116
@@ -10528,7 +10520,7 @@ msgstr "&Скрытые категории компонентов"
 msgid "&Toolbar"
 msgstr "Панель &инструментов"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "&Строка состояния"
 
@@ -11216,7 +11208,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Содержит команды для редактирования значений или разделов"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Содержит команды для настройки окна реестра"
 
 #: regedit.rc:137
@@ -13042,7 +13034,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "Размер буфера экрана должен быть не менее буфера окна"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Каждый символ %1!u! пикселей в ширину и %2!u! пикселей в высоту"
 
 #: wineconsole.rc:35
@@ -13640,16 +13632,12 @@ msgid "&Get text"
 msgstr "П&олучить текст"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "П&анель форматирования"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Линейка"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "&Строка состояния"
 
 #: wordpad.rc:75
 msgid "&Insert"

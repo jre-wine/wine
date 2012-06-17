@@ -1378,9 +1378,7 @@ BOOL X11DRV_ExtFloodFill( PHYSDEV dev, INT x, INT y, COLORREF color, UINT fillTy
     {
         unsigned long pixel = X11DRV_PALETTE_ToPhysical( physDev, color );
 
-          /* ROP mode is always GXcopy for flood-fill */
         wine_tsx11_lock();
-        XSetFunction( gdi_display, physDev->gc, GXcopy );
         X11DRV_InternalFloodFill(image, physDev,
                                  pt.x - rect.left,
                                  pt.y - rect.top,
@@ -1446,11 +1444,13 @@ BOOL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             }
             for (x = 0, pos = min( pt[0].x, pt[1].x ); x < dx; x++, pos++)
             {
-                COLORREF color = RGB( (v[0].Red   * (dx - x) + v[1].Red   * x) / dx / 256,
+                int color = X11DRV_PALETTE_ToPhysical( physdev,
+                                 RGB( (v[0].Red   * (dx - x) + v[1].Red   * x) / dx / 256,
                                       (v[0].Green * (dx - x) + v[1].Green * x) / dx / 256,
-                                      (v[0].Blue  * (dx - x) + v[1].Blue  * x) / dx / 256);
+                                      (v[0].Blue  * (dx - x) + v[1].Blue  * x) / dx / 256) );
+
                 wine_tsx11_lock();
-                XSetForeground( gdi_display, physdev->gc, X11DRV_PALETTE_ToPhysical( physdev, color ));
+                XSetForeground( gdi_display, physdev->gc, color );
                 XDrawLine( gdi_display, physdev->drawable, physdev->gc,
                            physdev->dc_rect.left + pos, physdev->dc_rect.top + pt[0].y,
                            physdev->dc_rect.left + pos, physdev->dc_rect.top + pt[1].y );
@@ -1491,11 +1491,13 @@ BOOL X11DRV_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
             }
             for (y = 0, pos = min( pt[0].y, pt[1].y ); y < dy; y++, pos++)
             {
-                COLORREF color = RGB( (v[0].Red   * (dy - y) + v[1].Red   * y) / dy / 256,
+                int color = X11DRV_PALETTE_ToPhysical( physdev,
+                                 RGB( (v[0].Red   * (dy - y) + v[1].Red   * y) / dy / 256,
                                       (v[0].Green * (dy - y) + v[1].Green * y) / dy / 256,
-                                      (v[0].Blue  * (dy - y) + v[1].Blue  * y) / dy / 256);
+                                      (v[0].Blue  * (dy - y) + v[1].Blue  * y) / dy / 256) );
+
                 wine_tsx11_lock();
-                XSetForeground( gdi_display, physdev->gc, X11DRV_PALETTE_ToPhysical( physdev, color ));
+                XSetForeground( gdi_display, physdev->gc, color );
                 XDrawLine( gdi_display, physdev->drawable, physdev->gc,
                            physdev->dc_rect.left + pt[0].x, physdev->dc_rect.top + pos,
                            physdev->dc_rect.left + pt[1].x, physdev->dc_rect.top + pos );

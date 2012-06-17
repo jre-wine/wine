@@ -148,8 +148,8 @@
 # @ stub CredIsMarshaledCredentialW
 # @ stub CredIsProtectedA
 # @ stub CredIsProtectedW
-# @ stub CredMarshalCredentialA
-# @ stub CredMarshalCredentialW
+@ stdcall CredMarshalCredentialA(long ptr ptr)
+@ stdcall CredMarshalCredentialW(long ptr ptr)
 # @ stub CredpConvertOneCredentialSize
 # @ stub CredpEncodeSecret
 @ stub CredProfileLoaded
@@ -164,8 +164,8 @@
 # @ stub CredRenameA
 # @ stub CredRenameW
 # @ stub CredRestoreCredentials
-# @ stub CredUnmarshalCredentialA
-# @ stub CredUnmarshalCredentialW
+@ stdcall CredUnmarshalCredentialA(str ptr ptr)
+@ stdcall CredUnmarshalCredentialW(wstr ptr ptr)
 # @ stub CredUnprotectA
 # @ stub CredUnprotectW
 @ stdcall CredWriteA(ptr long)
@@ -273,8 +273,8 @@
 @ stdcall EventEnabled(int64 ptr)
 # @ stub EventProviderEnabled
 @ stdcall EventRegister(ptr ptr ptr ptr)
-# @ stub EventUnregister
-# @ stub EventWrite
+@ stdcall EventUnregister(int64)
+@ stdcall EventWrite(int64 ptr long ptr)
 # @ stub EventWriteEndScenario
 # @ stub EventWriteEx
 # @ stub EventWriteStartScenario
@@ -596,7 +596,7 @@
 @ stdcall RegDeleteValueW(long wstr)
 @ stdcall RegDisablePredefinedCache()
 # @ stub RegDisablePredefinedCacheEx
-# @ stub RegDisableReflectionKey
+@ stdcall RegDisableReflectionKey(ptr)
 # @ stub RegEnableReflectionKey
 @ stdcall RegEnumKeyA(long long ptr long)
 @ stdcall RegEnumKeyExA(long long ptr ptr ptr ptr ptr ptr)

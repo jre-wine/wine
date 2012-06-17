@@ -1162,7 +1162,7 @@ msgid "Processing; "
 msgstr "Obrađivanje; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Pokretanje; "
 
 #: comdlg32.rc:96
@@ -2257,9 +2257,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2385,9 +2385,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2670,7 +2670,7 @@ msgstr ""
 msgid "Certificate Trust List (*.stl)"
 msgstr ""
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr ""
 
@@ -2920,10 +2920,6 @@ msgstr ""
 
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
-msgstr ""
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
 msgstr ""
 
 #: cryptui.rc:160
@@ -3859,7 +3855,7 @@ msgid "Too many commands.\n"
 msgstr ""
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr ""
 
 #: winerror.mc:256
@@ -3871,7 +3867,7 @@ msgid "Unexpected network error.\n"
 msgstr ""
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr ""
 
 #: winerror.mc:271
@@ -4520,7 +4516,7 @@ msgid "Invalid flags.\n"
 msgstr "Neispravna sintaksa.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr ""
 
 #: winerror.mc:1046
@@ -5219,7 +5215,7 @@ msgstr ""
 
 #: winerror.mc:1866
 #, fuzzy
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Već postoji.\n"
 
 #: winerror.mc:1871
@@ -6347,7 +6343,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Neprikladna potvrda identiteta.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr ""
 
 #: winerror.mc:3171
@@ -6494,7 +6490,7 @@ msgid "Invalid user buffer.\n"
 msgstr ""
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr ""
 
 #: winerror.mc:3341
@@ -6649,7 +6645,7 @@ msgid "RPC comm failure.\n"
 msgstr ""
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr ""
 
 #: winerror.mc:3521
@@ -6679,7 +6675,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Neispravna sintaksa.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr ""
 
 #: winerror.mc:3556
@@ -6921,9 +6917,9 @@ msgstr "Korisničko ime"
 msgid "Password"
 msgstr "Lozinka"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
-msgstr "&Sačuvaj ovu lozinku (nesigurno)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
+msgstr "&Sačuvaj ovu lozinku (nebezbedno)"
 
 #: mpr.rc:27
 msgid "Entire Network"
@@ -8649,10 +8645,6 @@ msgstr ""
 msgid "Realm"
 msgstr "Domen"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Sačuvaj ovu lozinku (nebezbedno)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Potvrda identiteta"
@@ -9399,7 +9391,7 @@ msgid "Filter Error"
 msgstr "Greška u filteru"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Korisnik je otkazan"
 
 #: wldap32.rc:116
@@ -10611,7 +10603,7 @@ msgstr ""
 msgid "&Toolbar"
 msgstr ""
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr ""
 
@@ -11367,7 +11359,7 @@ msgid "Contains commands for editing values or keys"
 msgstr ""
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr ""
 
 #: regedit.rc:137
@@ -13264,7 +13256,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr ""
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr ""
 
 #: wineconsole.rc:35
@@ -13891,15 +13883,11 @@ msgid "&Get text"
 msgstr ""
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr ""
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
-msgstr ""
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
 msgstr ""
 
 #: wordpad.rc:75

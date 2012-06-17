@@ -1244,6 +1244,7 @@
 # @ stub _CIsin
 # @ stub _CIsqrt
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
+@ stdcall -private -arch=x86_64 -norelay __chkstk()
 # @ stub __isascii
 # @ stub __iscsym
 # @ stub __iscsymf
@@ -1268,6 +1269,7 @@
 @ cdecl -private _itoa(long ptr long)
 @ cdecl -private _itow(long ptr long)
 @ cdecl -private _lfind(ptr ptr ptr long ptr)
+@ stdcall -arch=x86_64 _local_unwind(ptr ptr)
 @ cdecl -private _ltoa(long ptr long)
 @ cdecl -private _ltow(long ptr long)
 @ cdecl -private _memccpy(ptr ptr long long)

@@ -1122,6 +1122,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
 {
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
+    IMAGE_SECTION_HEADER sections[96];
     IMAGE_SECTION_HEADER *sec;
     IMAGE_DATA_DIRECTORY *imports;
     NTSTATUS status = STATUS_CONFLICTING_ADDRESSES;
@@ -1130,7 +1131,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     sigset_t sigset;
     struct stat st;
     struct file_view *view = NULL;
-    char *ptr, *header_end;
+    char *ptr, *header_end, *header_start;
     INT_PTR delta = 0;
 
     /* zero-map the whole range */
@@ -1167,8 +1168,13 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     header_end = ptr + ROUND_SIZE( 0, header_size );
     memset( ptr + header_size, 0, header_end - (ptr + header_size) );
     if ((char *)(nt + 1) > header_end) goto error;
-    sec = (IMAGE_SECTION_HEADER*)((char*)&nt->OptionalHeader+nt->FileHeader.SizeOfOptionalHeader);
-    if ((char *)(sec + nt->FileHeader.NumberOfSections) > header_end) goto error;
+    header_start = (char*)&nt->OptionalHeader+nt->FileHeader.SizeOfOptionalHeader;
+    if (nt->FileHeader.NumberOfSections > sizeof(sections)/sizeof(*sections)) goto error;
+    if (header_start + sizeof(*sections) * nt->FileHeader.NumberOfSections > header_end) goto error;
+    /* Some applications (e.g. the Steam version of Borderlands) map over the top of the section headers,
+     * copying the headers into local memory is necessary to properly load such applications. */
+    memcpy(sections, header_start, sizeof(*sections) * nt->FileHeader.NumberOfSections);
+    sec = sections;
 
     imports = nt->OptionalHeader.DataDirectory + IMAGE_DIRECTORY_ENTRY_IMPORT;
     if (!imports->Size || !imports->VirtualAddress) imports = NULL;
@@ -1338,7 +1344,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
 
     VIRTUAL_SetProt( view, ptr, ROUND_SIZE( 0, header_size ), VPROT_COMMITTED | VPROT_READ );
 
-    sec = (IMAGE_SECTION_HEADER*)((char *)&nt->OptionalHeader+nt->FileHeader.SizeOfOptionalHeader);
+    sec = sections;
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++)
     {
         SIZE_T size;

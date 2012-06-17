@@ -43,8 +43,7 @@ AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
 AC_ARG_WITH(curses,    AS_HELP_STRING([--without-curses],[do not use (n)curses]),
             [if test "x$withval" = "xno"; then ac_cv_header_ncurses_h=no; ac_cv_header_curses_h=no; fi])
 AC_ARG_WITH(dbus,      AS_HELP_STRING([--without-dbus],[do not use DBus (dynamic device support)]))
-AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
-            [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
+AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]))
 AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeType library]))
 AC_ARG_WITH(gettext,   AS_HELP_STRING([--without-gettext],[do not use gettext]))
 AC_ARG_WITH(gettextpo, AS_HELP_STRING([--with-gettextpo],[use the GetTextPO library to rebuild po files]),
@@ -142,6 +141,7 @@ case $host in
       AC_SUBST(TARGETFLAGS,"-m32")
       enable_win16=${enable_win16:-yes}
     fi
+    with_fontconfig=${with_fontconfig:-no}
     ;;
   x86_64*)
     if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
@@ -349,8 +349,25 @@ else
 fi
 
 test "x$with_gettext" != xno || MSGFMT=false
+if test "$MSGFMT" != "false"
+then
+  AC_MSG_CHECKING([whether msgfmt supports contexts])
+  cat >conftest.po <<EOF
+# comment
+msgctxt "ctxt"
+msgid "id"
+msgstr "str"
+EOF
+  if $MSGFMT -o /dev/null conftest.po 2>&AS_MESSAGE_LOG_FD
+  then
+    AC_MSG_RESULT([yes])
+  else
+    AC_MSG_RESULT([no])
+    MSGFMT=false
+  fi
+fi
 WINE_WARNING_WITH(gettext,[test "$MSGFMT" = false],
-                  [gettext tools not found, translations won't be built.])
+                  [gettext tools not found (or too old), translations won't be built.])
 
 dnl **** Check for some libraries ****
 
@@ -364,6 +381,8 @@ AC_SUBST(OPENGL_LIBS,"")
 
 dnl **** Check for header files ****
 
+test "x$with_fontconfig" != "xno" || ac_cv_header_fontconfig_fontconfig_h=no
+
 AC_SYS_LARGEFILE()
 
 AC_CHECK_HEADERS(\
@@ -375,6 +394,7 @@ AC_CHECK_HEADERS(\
 	CL/cl.h \
 	Carbon/Carbon.h \
 	CoreAudio/CoreAudio.h \
+	CoreServices/CoreServices.h \
 	DiskArbitration/DiskArbitration.h \
 	IOKit/IOKitLib.h \
 	IOKit/hid/IOHIDLib.h \
@@ -697,6 +717,7 @@ case $host_os in
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
     AC_SUBST(APPLICATIONSERVICESLIB,"-framework ApplicationServices")
+    AC_SUBST(CORESERVICESLIB,"-framework CoreServices")
     case $host_os in
       darwin11*)
         AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-macosx_version_min,10.6,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000"]) ;;
@@ -1363,11 +1384,17 @@ WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],
 dnl **** Check for FreeType 2 ****
 if test "x$with_freetype" != "xno"
 then
-    AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
-    if test "$ft_devel" != "no"
+    if test "$PKG_CONFIG" != "false"
     then
-        ac_freetype_incl=`$ft_devel --cflags`
-        ac_freetype_libs=`$ft_devel --libs`
+        ac_freetype_incl="`$PKG_CONFIG --cflags freetype2 2>/dev/null`"
+        ac_freetype_libs="`$PKG_CONFIG --libs freetype2 2>/dev/null`"
+    else
+        AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
+        if test "$ft_devel" != "no"
+        then
+            ac_freetype_incl=`$ft_devel --cflags`
+            ac_freetype_libs=`$ft_devel --libs`
+        fi
     fi
     ac_freetype_libs=${ac_freetype_libs:-"-lfreetype"}
     WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$ac_freetype_libs])

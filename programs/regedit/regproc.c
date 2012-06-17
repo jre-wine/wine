@@ -610,7 +610,7 @@ static void processRegEntry(WCHAR* stdInput, BOOL isUnicode)
 
 /******************************************************************************
  * Processes a registry file.
- * Correctly processes comments (in # form), line continuation.
+ * Correctly processes comments (in # and ; form), line continuation.
  *
  * Parameters:
  *   in - input stream to read from
@@ -710,7 +710,7 @@ static void processRegLinesA(FILE *in, char* first_chars)
             }
 
             /* If it is a comment line then discard it and go around again */
-            if (line [0] == '#') {
+            if (line [0] == '#' || line [0] == ';') {
                 s = line;
                 continue;
             }
@@ -837,7 +837,7 @@ static void processRegLinesW(FILE *in)
             }
 
             /* If it is a comment line then discard it and go around again */
-            if (*line == '#') {
+            if (*line == '#' || *line == ';') {
                 if (*s_eol == '\r' && *(s_eol+1) == '\n')
                     line = s_eol + 2;
                 else
@@ -998,7 +998,7 @@ static void REGPROC_export_binary(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
     if (type == REG_BINARY) {
         hex_prefix = hex;
     } else {
-        const WCHAR hex_format[] = {'h','e','x','(','%','u',')',':',0};
+        const WCHAR hex_format[] = {'h','e','x','(','%','x',')',':',0};
         hex_prefix = hex_buf;
         sprintfW(hex_buf, hex_format, type);
         if ((type == REG_SZ || type == REG_EXPAND_SZ || type == REG_MULTI_SZ) && !unicode)
@@ -1018,12 +1018,13 @@ static void REGPROC_export_binary(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
     /* - The 2 spaces that concat places at the start of the
      *   line effectively reduce the space available for data.
      * - If the value name and hex prefix are very long
-     *   ( > REG_FILE_HEX_LINE_LEN) then we may overestimate
+     *   ( > REG_FILE_HEX_LINE_LEN) or *line_len divides
+     *   without a remainder then we may overestimate
      *   the needed number of lines by one. But that's ok.
-     * - The trailing linefeed takes the place of a comma so
-     *   it's accounted for already.
+     * - The trailing '\r' takes the place of a comma so
+     *   we only need to add 1 for the trailing '\n'
      */
-    *line_len += *line_len / (REG_FILE_HEX_LINE_LEN - concat_prefix) * concat_len;
+    *line_len += *line_len / (REG_FILE_HEX_LINE_LEN - concat_prefix) * concat_len + 1;
     REGPROC_resize_char_buffer(line_buf, line_buf_size, *line_len);
     lstrcpyW(*line_buf + hex_pos, hex_prefix);
     if (value_size)

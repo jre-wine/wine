@@ -583,12 +583,21 @@ static void ME_WrapTextParagraph(ME_Context *c, ME_DisplayItem *tp) {
   tp->member.para.nRows = wc.nRow;
 }
 
+static void ME_MarkRepaintEnd(ME_DisplayItem *para,
+                              ME_DisplayItem **repaint_start,
+                              ME_DisplayItem **repaint_end)
+{
+    if (!*repaint_start)
+      *repaint_start = para;
+    *repaint_end = para;
+}
+
 BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
 {
   ME_DisplayItem *item;
   ME_Context c;
-  BOOL bModified = FALSE;
   int totalWidth = 0;
+  ME_DisplayItem *repaint_start = NULL, *repaint_end = NULL;
 
   ME_InitContext(&c, editor, ITextHost_TxGetDC(editor->texthost));
   c.pt.x = 0;
@@ -605,9 +614,7 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
     ME_WrapTextParagraph(&c, item);
 
     if (bRedraw)
-      item->member.para.nFlags |= MEPF_REPAINT;
-
-    bModified = bModified | bRedraw;
+      ME_MarkRepaintEnd(item, &repaint_start, &repaint_end);
 
     if (item->member.para.nFlags & MEPF_ROWSTART)
     {
@@ -678,10 +685,10 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
       {
         /* The height of the cells has grown, so invalidate the bottom of
          * the cells. */
-        item->member.para.nFlags |= MEPF_REPAINT;
+        ME_MarkRepaintEnd(item, &repaint_start, &repaint_end);
         cell = ME_FindItemBack(item, diCell);
         while (cell) {
-          ME_FindItemBack(cell, diParagraph)->member.para.nFlags |= MEPF_REPAINT;
+          ME_MarkRepaintEnd(ME_FindItemBack(cell, diParagraph), &repaint_start, &repaint_end);
           cell = cell->member.cell.prev_cell;
         }
       }
@@ -729,39 +736,36 @@ BOOL ME_WrapMarkedParagraphs(ME_TextEditor *editor)
 
   ME_DestroyContext(&c);
 
-  if (bModified || editor->nTotalLength < editor->nLastTotalLength)
-    ME_InvalidateMarkedParagraphs(editor);
-  return bModified;
+  if (repaint_start || editor->nTotalLength < editor->nLastTotalLength)
+    ME_InvalidateParagraphRange(editor, repaint_start, repaint_end);
+  return !!repaint_start;
 }
 
-void ME_InvalidateMarkedParagraphs(ME_TextEditor *editor)
+void ME_InvalidateParagraphRange(ME_TextEditor *editor,
+                                 ME_DisplayItem *start_para,
+                                 ME_DisplayItem *last_para)
 {
   ME_Context c;
   RECT rc;
   int ofs;
-  ME_DisplayItem *item;
 
   ME_InitContext(&c, editor, ITextHost_TxGetDC(editor->texthost));
   rc = c.rcView;
   ofs = editor->vert_si.nPos;
 
-  item = editor->pBuffer->pFirst;
-  while(item != editor->pBuffer->pLast) {
-    if (item->member.para.nFlags & MEPF_REPAINT) {
-      rc.top = c.rcView.top + item->member.para.pt.y - ofs;
-      rc.bottom = max(c.rcView.top + item->member.para.pt.y
-                      + item->member.para.nHeight - ofs,
-                      c.rcView.bottom);
-      ITextHost_TxInvalidateRect(editor->texthost, &rc, TRUE);
-    }
-    item = item->member.para.next_para;
+  if (start_para) {
+    start_para = ME_GetOuterParagraph(start_para);
+    last_para = ME_GetOuterParagraph(last_para);
+    rc.top = c.rcView.top + start_para->member.para.pt.y - ofs;
+  } else {
+    rc.top = c.rcView.top + editor->nTotalLength - ofs;
   }
   if (editor->nTotalLength < editor->nLastTotalLength)
-  {
-    rc.top = c.rcView.top + editor->nTotalLength - ofs;
     rc.bottom = c.rcView.top + editor->nLastTotalLength - ofs;
-    ITextHost_TxInvalidateRect(editor->texthost, &rc, TRUE);
-  }
+  else
+    rc.bottom = c.rcView.top + last_para->member.para.pt.y + last_para->member.para.nHeight - ofs;
+  ITextHost_TxInvalidateRect(editor->texthost, &rc, TRUE);
+
   ME_DestroyContext(&c);
 }
 

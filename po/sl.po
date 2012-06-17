@@ -1082,7 +1082,7 @@ msgid "Processing; "
 msgstr "Obdelovanje; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Začenjanje; "
 
 #: comdlg32.rc:96
@@ -2153,9 +2153,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2288,9 +2288,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2583,7 +2583,7 @@ msgstr "Seznam preklicanih potrdil (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Seznam zaupanih potrdil (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoftova shramba potrdil v zaporedjih (*.sst)"
 
@@ -2854,10 +2854,6 @@ msgstr "Sporočila CMS/PCKS #7 (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Izmenjava osebnih podatkov (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Shramba potrdila v zaporedju (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3726,7 +3722,7 @@ msgid "Too many commands.\n"
 msgstr "Preveč ukazov.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Napaka strojne opreme prilagodilnika.\n"
 
 #: winerror.mc:256
@@ -3738,7 +3734,7 @@ msgid "Unexpected network error.\n"
 msgstr "Nepričakovana napaka omrežja.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Slab oddaljeni vmesnik.\n"
 
 #: winerror.mc:271
@@ -4350,7 +4346,7 @@ msgid "Invalid flags.\n"
 msgstr "Neveljavne zastavice.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Nepoznan nosilec.\n"
 
 #: winerror.mc:1046
@@ -5006,7 +5002,7 @@ msgid "Continue work in progress.\n"
 msgstr "Nadaljuj z delom v teku.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Že začeto.\n"
 
 #: winerror.mc:1871
@@ -6038,7 +6034,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Neveljavna istovetnost overitve.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Neznana storitev overitve.\n"
 
 #: winerror.mc:3171
@@ -6174,7 +6170,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Neveljaven uporabniški medpomnilnik.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Neprepoznana predstavnost.\n"
 
 #: winerror.mc:3341
@@ -6318,7 +6314,7 @@ msgid "RPC comm failure.\n"
 msgstr "Spodletelo sporazumevanje RPC.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nepodprta raven overitve.\n"
 
 #: winerror.mc:3521
@@ -6346,7 +6342,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Neveljavno opravilo upravljanja.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Napačna različica paketa dajanja v zaporedje.\n"
 
 #: winerror.mc:3556
@@ -6566,8 +6562,8 @@ msgstr "Uporabniško ime"
 msgid "Password"
 msgstr "Geslo"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr "&Shrani geslo (nezaščiteno)"
 
 #: mpr.rc:27
@@ -8251,10 +8247,6 @@ msgstr "Duplex:"
 msgid "Realm"
 msgstr "Področje"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Shrani geslo (nezaščiteno)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Zahtevana je overitev"
@@ -9101,7 +9093,7 @@ msgid "Filter Error"
 msgstr "Napaka filtra"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Uporabnik je preklical"
 
 #: wldap32.rc:116
@@ -10525,7 +10517,7 @@ msgstr "&Skrite kategorije sestavnih delov"
 msgid "&Toolbar"
 msgstr "Orodna vrs&tica"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "Vrstica &stanja"
 
@@ -11212,7 +11204,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Vsebuje ukaze za urejanje vrednosti ali ključev"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Vsebuje ukaze za prilagajanje okna registra"
 
 #: regedit.rc:137
@@ -13042,7 +13034,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "Velikost zaslonskega medpomnilnika mora biti večja ali enaka okenskemu"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Vsak znak je širok %1!u! točk in visok %2!u! točk"
 
 #: wineconsole.rc:35
@@ -13641,16 +13633,12 @@ msgid "&Get text"
 msgstr "Pridobi &besedilo"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "O&blikovna vrstica"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Ravnilo"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "Vrstica &stanja"
 
 #: wordpad.rc:75
 msgid "&Insert"
