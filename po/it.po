@@ -1083,7 +1083,7 @@ msgid "Processing; "
 msgstr "Elaborazione; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inizializzazione; "
 
 #: comdlg32.rc:96
@@ -2157,9 +2157,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2294,9 +2294,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2592,7 +2592,7 @@ msgstr "Lista Revoca Certificati (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Lista Fiducia Certificati (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Deposito Certificati Serializzato Microsoft (*.sst)"
 
@@ -2864,10 +2864,6 @@ msgstr "Messaggi CMS/PKCS #7 (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Scambio Informazioni Personali (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Deposito certificati serializzato (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3737,7 +3733,7 @@ msgid "Too many commands.\n"
 msgstr "Troppi comandi.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Errore dell'adattatore hardware.\n"
 
 #: winerror.mc:256
@@ -3749,7 +3745,7 @@ msgid "Unexpected network error.\n"
 msgstr "Errore del network inaspettato.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Adattatore remoto non corretto.\n"
 
 #: winerror.mc:271
@@ -4361,7 +4357,7 @@ msgid "Invalid flags.\n"
 msgstr "Flag non valide.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Volume non riconosciuto.\n"
 
 #: winerror.mc:1046
@@ -5018,7 +5014,7 @@ msgid "Continue work in progress.\n"
 msgstr "Continua il lavoro in corso.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Già inizializzato.\n"
 
 #: winerror.mc:1871
@@ -6050,7 +6046,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Identità di autenticazione non valida.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Servizio di autorizzazione sconosciuto.\n"
 
 #: winerror.mc:3171
@@ -6186,7 +6182,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Buffer utente non valido.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Supporto non riconosciuto.\n"
 
 #: winerror.mc:3341
@@ -6330,7 +6326,7 @@ msgid "RPC comm failure.\n"
 msgstr "Fallimento comando RPC.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Livello autorizzazione non supportato.\n"
 
 #: winerror.mc:3521
@@ -6358,7 +6354,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Handle operazione non valido.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Versione di serializzazione del pacchetto sbagliata.\n"
 
 #: winerror.mc:3556
@@ -6579,8 +6575,8 @@ msgstr "Utente"
 msgid "Password"
 msgstr "Password"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr "&Memorizza la password (non sicuro)"
 
 #: mpr.rc:27
@@ -8271,10 +8267,6 @@ msgstr "Fronte retro:"
 msgid "Realm"
 msgstr "Dominio"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "&Memorizza la password (non sicuro)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Autenticazione richiesta"
@@ -9149,7 +9141,7 @@ msgid "Filter Error"
 msgstr "Errore del filtro"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Utente eliminato"
 
 #: wldap32.rc:116
@@ -10579,7 +10571,7 @@ msgstr "Categorie di componenti &nascoste"
 msgid "&Toolbar"
 msgstr "Barra degli s&trumenti"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "Barra di &stato"
 
@@ -11271,7 +11263,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Contiene i comandi per modificare valori o chiavi"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Contiene i comandi per personalizzare la finestra del registro"
 
 #: regedit.rc:137
@@ -13113,7 +13105,7 @@ msgstr ""
 "finestra"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Ogni carattere è largo %1!u! pixel e alto %2!u! pixel"
 
 #: wineconsole.rc:35
@@ -13714,16 +13706,12 @@ msgid "&Get text"
 msgstr "&Ricava il testo"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "Barra del &formato"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Righello"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "Barra di s&tato"
 
 #: wordpad.rc:75
 msgid "&Insert"

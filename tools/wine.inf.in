@@ -35,11 +35,10 @@ AddReg=\
     Classes,\
     ContentIndex,\
     ControlClass,\
+    ControlPanel,\
     CurrentVersion,\
     Debugger,\
-    Desktop,\
     Dotnet,\
-    Metrics,\
     DirectX,\
     Fonts,\
     MCI,\
@@ -61,11 +60,10 @@ AddReg=\
     Classes,\
     ContentIndex,\
     ControlClass,\
+    ControlPanel,\
     CurrentVersion,\
     Debugger,\
-    Desktop,\
     Dotnet,\
-    Metrics,\
     DirectX,\
     Fonts,\
     MCI,\
@@ -88,12 +86,11 @@ AddReg=\
     Classes,\
     ContentIndex,\
     ControlClass,\
+    ControlPanel,\
     CurrentVersion,\
     CurrentVersionWow64,\
     Debugger,\
-    Desktop,\
     Dotnet,\
-    Metrics,\
     DirectX,\
     Fonts,\
     MCI,\
@@ -156,8 +153,6 @@ AddService=FontCache3.0.0.0,0,FontCacheService
 [Strings]
 MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
 Mci32Str="Software\Microsoft\Windows NT\CurrentVersion\MCI32"
-Desktop="Control Panel\Desktop"
-Metrics="Control Panel\Desktop\WindowMetrics"
 CurrentVersion="Software\Microsoft\Windows\CurrentVersion"
 CurrentVersionNT="Software\Microsoft\Windows NT\CurrentVersion"
 FontSubStr="Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes"
@@ -500,13 +495,24 @@ HKLM,%CurrentVersionNT%\AeDebug,"Auto",2,"1"
 HKCU,Software\Wine\Debug,"RelayExclude",2,"ntdll.RtlEnterCriticalSection;ntdll.RtlLeaveCriticalSection;kernel32.48;kernel32.49;kernel32.94;kernel32.95;kernel32.96;kernel32.97;kernel32.98;kernel32.TlsGetValue;kernel32.TlsSetValue;kernel32.FlsGetValue;kernel32.FlsSetValue;kernel32.SetLastError"
 HKCU,Software\Wine\Debug,"RelayFromExclude",2,"winex11.drv;user32;gdi32;advapi32;kernel32"
 
-[Desktop]
-HKCU,%Desktop%,"FontSmoothing",2,"0"
-HKCU,%Desktop%,"DragFullWindows",2,"0"
-HKCU,%Desktop%,"SmoothScroll",3,00,00,00,00
-HKCU,%Desktop%,"UserPreferenceMask",3,10,00,00,80
-HKCU,%Desktop%,"LowPowerActive",,"0"
-HKCU,%Desktop%,"MenuShowDelay",2,"400"
+[ControlPanel]
+HKCU,Control Panel\Desktop,DragFullWindows,2,"0"
+HKCU,Control Panel\Desktop,FontSmoothing,2,"0"
+HKCU,Control Panel\Desktop,LowPowerActive,,"0"
+HKCU,Control Panel\Desktop,MenuShowDelay,2,"400"
+HKCU,Control Panel\Desktop,SmoothScroll,3,00,00,00,00
+HKCU,Control Panel\Desktop,UserPreferenceMask,3,10,00,00,80
+HKCU,Control Panel\Desktop\WindowMetrics,BorderWidth,2,"1"
+HKCU,Control Panel\Desktop\WindowMetrics,CaptionHeight,2,"18"
+HKCU,Control Panel\Desktop\WindowMetrics,CaptionWidth,2,"18"
+HKCU,Control Panel\Desktop\WindowMetrics,MenuHeight,2,"18"
+HKCU,Control Panel\Desktop\WindowMetrics,MenuWidth,2,"18"
+HKCU,Control Panel\Desktop\WindowMetrics,ScrollHeight,2,"16"
+HKCU,Control Panel\Desktop\WindowMetrics,ScrollWidth,2,"16"
+HKCU,Control Panel\Desktop\WindowMetrics,Shell Icon Size,2,"32"
+HKCU,Control Panel\Desktop\WindowMetrics,SmCaptionHeight,2,"15"
+HKCU,Control Panel\Desktop\WindowMetrics,SmCaptionWidth,2,"13"
+HKCU,Control Panel\Mouse,Beep,2,"No"
 
 [DotNet]
 HKLM,Software\Microsoft\.NETFramework,"InstallRoot",2,"%10%\Microsoft.NET\Framework\"
@@ -533,18 +539,6 @@ HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Client,TargetVersion,2,4.0.0
 HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,Install,0x10003,1
 HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,Version,2,4.0.30319
 HKLM,Software\Microsoft\NET Framework Setup\NDP\v4\Full,TargetVersion,2,4.0.0
-
-[Metrics]
-HKCU,%Metrics%,"ScrollWidth",2,"16"
-HKCU,%Metrics%,"ScrollHeight",2,"16"
-HKCU,%Metrics%,"CaptionWidth",2,"18"
-HKCU,%Metrics%,"CaptionHeight",2,"18"
-HKCU,%Metrics%,"SmCaptionWidth",2,"13"
-HKCU,%Metrics%,"SmCaptionHeight",2,"15"
-HKCU,%Metrics%,"MenuWidth",2,"18"
-HKCU,%Metrics%,"MenuHeight",2,"18"
-HKCU,%Metrics%,"BorderWidth",2,"1"
-HKCU,%Metrics%,"Shell Icon Size",2,"32"
 
 [DirectX]
 HKLM,Software\Microsoft\DirectX,"Version",,"4.09.00.0904"
@@ -3001,7 +2995,7 @@ Description="Loads files to memory for later printing"
 DisplayName="Print Spooler"
 ServiceBinary="%11%\spoolsv.exe"
 ServiceType=0x110
-StartType=4
+StartType=3
 ErrorControl=1
 LoadOrderGroup="SpoolerGroup"
 
@@ -3049,9 +3043,9 @@ ErrorControl=1
 [Services]
 HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
 HKLM,"System\CurrentControlSet\Services\VxD\MSTCP",,16
-HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters"
-HKLM,"System\CurrentControlSet\Services\Winsock\Parameters"
-HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters"
+HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters",,16
+HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
+HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
 
 [VersionInfo]
 HKLM,%CurrentVersionNT%,"CurrentVersion",2,"5.1"

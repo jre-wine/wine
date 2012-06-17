@@ -1079,7 +1079,7 @@ msgid "Processing; "
 msgstr "작업중; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "초기화중; "
 
 #: comdlg32.rc:96
@@ -2009,7 +2009,7 @@ msgstr "인증 방침"
 
 #: cryptdlg.rc:28
 msgid "Policy Identifier: "
-msgstr "접근 키 식별자:"
+msgstr "접근 키 식별자: "
 
 #: cryptdlg.rc:29
 msgid "Policy Qualifier Info"
@@ -2150,9 +2150,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2283,9 +2283,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2574,7 +2574,7 @@ msgstr "인증소 파기 목록 (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "인증서 신뢰 목록 (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoft 연속 인증서 보관소 (*.sst)"
 
@@ -2843,10 +2843,6 @@ msgstr "CMS/PKCS #7 메세지 (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "개인 정보 교환 (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "나열된 인증서 저장소 (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3712,7 +3708,7 @@ msgid "Too many commands.\n"
 msgstr "명령이 너무 많습니다.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "어댑터 하드웨어 오류.\n"
 
 #: winerror.mc:256
@@ -3724,7 +3720,7 @@ msgid "Unexpected network error.\n"
 msgstr "예기치 않은 네트워크 오류.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "나쁜 원격 어댑터.\n"
 
 #: winerror.mc:271
@@ -4336,7 +4332,7 @@ msgid "Invalid flags.\n"
 msgstr "올바르지 않은 플래그.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "이해할 수 없는 볼륨.\n"
 
 #: winerror.mc:1046
@@ -4992,7 +4988,7 @@ msgid "Continue work in progress.\n"
 msgstr "계속 진행중인 작업.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "이미 초기화됨.\n"
 
 #: winerror.mc:1871
@@ -6024,7 +6020,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "올바르지 않은 인증 증명서.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "알 수 없는 허가 서비스.\n"
 
 #: winerror.mc:3171
@@ -6160,7 +6156,7 @@ msgid "Invalid user buffer.\n"
 msgstr "올바르지 않은 사용자 버퍼.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "이해할 수 없는 미디어.\n"
 
 #: winerror.mc:3341
@@ -6304,7 +6300,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC 일반 실패.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "지원하지 않는 인증 레벨.\n"
 
 #: winerror.mc:3521
@@ -6332,7 +6328,7 @@ msgid "Invalid handle operation.\n"
 msgstr "올바르지 않은 핸들 작업.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "잘못된 연속 패키지 버젼.\n"
 
 #: winerror.mc:3556
@@ -6551,9 +6547,9 @@ msgstr "사용자"
 msgid "Password"
 msgstr "암호"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
-msgstr "암호 저장(&S) (보안에 주의)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
+msgstr "암호 저장(&S)(안전하지  못함)"
 
 #: mpr.rc:27
 msgid "Entire Network"
@@ -7266,8 +7262,7 @@ msgid ""
 "Insert the manufacturer's installation disk, and then\n"
 "make sure the correct drive is selected below"
 msgstr ""
-"제작사의 설치 디스크를 삽입하고, 아래의 선택된 드라이브가 올바른지 확인하시"
-"오 "
+"제작사의 설치 디스크를 삽입하고, 아래의 선택된 드라이브가 올바른지 확인하시오"
 
 #: setupapi.rc:54
 msgid "Copy manufacturer's files from:"
@@ -8233,10 +8228,6 @@ msgstr "양방향 통신:"
 msgid "Realm"
 msgstr "영역"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "암호 저장(&S)(안전하지  못함)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "인증 필요"
@@ -9073,7 +9064,7 @@ msgid "Filter Error"
 msgstr "필터 오류"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "사용자가 취소함"
 
 #: wldap32.rc:116
@@ -10478,7 +10469,7 @@ msgstr "컴포넌트 분류 숨기기(&H)"
 msgid "&Toolbar"
 msgstr "도구바(&T)"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "상태바(&S)"
 
@@ -11164,7 +11155,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "키의 값 편집 명령 포함"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "레지스트리 창 사용자 정의하는 명령 포함"
 
 #: regedit.rc:137
@@ -12982,7 +12973,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "스크린 버퍼 크기는 반드시 창보다 같거나 커야합니다"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "각각의 글자는 %1!u!  픽셀 너비에 %2!u! 픽셀 높이를 가집니다"
 
 #: wineconsole.rc:35
@@ -13579,16 +13570,12 @@ msgid "&Get text"
 msgstr "문자열 얻기(&G)"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "형식바(&F)"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "눈금바(&R)"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "상태바(&S)"
 
 #: wordpad.rc:75
 msgid "&Insert"

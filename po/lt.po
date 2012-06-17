@@ -1082,7 +1082,7 @@ msgid "Processing; "
 msgstr "Apdorojimas; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inicijuojama; "
 
 #: comdlg32.rc:96
@@ -2157,9 +2157,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2293,9 +2293,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2587,7 +2587,7 @@ msgstr "Atšauktų liudijimų sąrašas (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Patikintų liudijimų sąrašas (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Išdėstyta serijomis liudijimų saugykla (*.sst)"
 
@@ -2856,10 +2856,6 @@ msgstr "CMS/PKCS #7 pranešimai (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Asmeninės informacijos mainai (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Išdėstyta serijomis liudijimų saugykla (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3731,7 +3727,7 @@ msgid "Too many commands.\n"
 msgstr "Per daug komandų.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Adapterio aparatinė klaida.\n"
 
 #: winerror.mc:256
@@ -3743,7 +3739,7 @@ msgid "Unexpected network error.\n"
 msgstr "Netikėta tinklo klaida.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Blogas nutolęs adapteris.\n"
 
 #: winerror.mc:271
@@ -4355,7 +4351,7 @@ msgid "Invalid flags.\n"
 msgstr "Neteisingi žymos bitai.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Neatpažintas tomas.\n"
 
 #: winerror.mc:1046
@@ -5013,7 +5009,7 @@ msgid "Continue work in progress.\n"
 msgstr "Tęsti pradėtą darbą.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Jau inicijuota.\n"
 
 #: winerror.mc:1871
@@ -6045,7 +6041,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Neteisinga tapatumo nustatymo tapatybė.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Nežinoma prieigos teisių tarnyba.\n"
 
 #: winerror.mc:3171
@@ -6181,7 +6177,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Netinkamas naudotojo buferis.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Neatpažinta laikmena.\n"
 
 #: winerror.mc:3341
@@ -6325,7 +6321,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC ryšio klaida.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nepalaikomas prieigos teisių lygis.\n"
 
 #: winerror.mc:3521
@@ -6353,7 +6349,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Neteisinga rodyklės operacija.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Neteisinga sekų išdėstymo paketo versija.\n"
 
 #: winerror.mc:3556
@@ -6572,8 +6568,8 @@ msgstr "Naudotojas"
 msgid "Password"
 msgstr "Slaptažodis"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr "Į&rašyti šį slaptažodį (nesaugu)"
 
 #: mpr.rc:27
@@ -8261,10 +8257,6 @@ msgstr "Dvigubas:"
 msgid "Realm"
 msgstr "Sritis"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "Į&rašyti šį slaptažodį (nesaugu)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Reikalingas tapatumo nustatymas"
@@ -9126,7 +9118,7 @@ msgid "Filter Error"
 msgstr "Filtro klaida"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Nutraukta naudotojo"
 
 #: wldap32.rc:116
@@ -10535,7 +10527,7 @@ msgstr "&Paslėptų komponentų kategorijos"
 msgid "&Toolbar"
 msgstr "&Įrankių juosta"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "&Būsenos juosta"
 
@@ -11222,7 +11214,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "Pateikiamos komandos raktų ir reikšmių redagavimui"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Pateikiamos komandos registro lango adaptavimui"
 
 #: regedit.rc:137
@@ -13054,7 +13046,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "Ekrano buferio dydis turi būti didesnis arba lygus lango buferiui"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr ""
 "Kiekvienas simbolis yra %1!u! pikselių pločio ir %2!u! pikselių aukščio"
 
@@ -13652,16 +13644,12 @@ msgid "&Get text"
 msgstr "&Gauti tekstą"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "&Formatų juosta"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Liniuotė"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "&Būsenos juosta"
 
 #: wordpad.rc:75
 msgid "&Insert"

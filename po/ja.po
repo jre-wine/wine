@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-03-06 22:28+0900\n"
+"PO-Revision-Date: 2012-05-09 23:00+0900\n"
 "Last-Translator: Akihiro Sagawa <sagawa.aki@gmail.com>\n"
 "Language-Team: none\n"
 "Language: Japanese\n"
@@ -178,7 +178,7 @@ msgid ""
 "entry for this program from the registry?"
 msgstr ""
 "アンインストーラ '%s' を起動することができません。このプログラムに対するアン"
-"インストール項目をレジストリから削除しますか？"
+"インストール項目をレジストリから削除しますか?"
 
 #: appwiz.rc:33
 msgid "Not specified"
@@ -202,7 +202,7 @@ msgstr "インストール プログラム"
 
 #: appwiz.rc:39
 msgid "Programs (*.exe)"
-msgstr "プログラム(*.exe)"
+msgstr "プログラム (*.exe)"
 
 #: appwiz.rc:40 avifil32.rc:30 cryptui.rc:80 shell32.rc:196 notepad.rc:73
 #: oleview.rc:101 progman.rc:79 regedit.rc:195 winedbg.rc:39 winhlp32.rc:87
@@ -263,7 +263,7 @@ msgstr "Waveファイル"
 
 #: avifil32.rc:29
 msgid "All multimedia files"
-msgstr "全てのマルチメディアファイル"
+msgstr "全てのマルチメディア ファイル"
 
 #: avifil32.rc:31
 msgid "video"
@@ -315,7 +315,7 @@ msgstr "完了"
 
 #: comctl32.rc:78
 msgid "Customize Toolbar"
-msgstr "ツールバーのカスタマイズ"
+msgstr "ツール バーのカスタマイズ"
 
 #: comctl32.rc:81 cryptui.rc:348 ieframe.rc:40 oleview.rc:80 oleview.rc:185
 #: oleview.rc:198 oleview.rc:210 taskmgr.rc:139
@@ -338,11 +338,11 @@ msgstr "ヘルプ(&H)"
 
 #: comctl32.rc:84
 msgid "Move &Up"
-msgstr "上へ (&U)"
+msgstr "上へ(&U)"
 
 #: comctl32.rc:85
 msgid "Move &Down"
-msgstr "下へ (&D)"
+msgstr "下へ(&D)"
 
 #: comctl32.rc:86
 msgid "A&vailable buttons:"
@@ -358,7 +358,7 @@ msgstr "<- 削除(&R)"
 
 #: comctl32.rc:90
 msgid "&Toolbar buttons:"
-msgstr "ツールバーのボタン(&T):"
+msgstr "ツール バーのボタン(&T):"
 
 #: comctl32.rc:39
 msgid "Separator"
@@ -829,7 +829,7 @@ msgstr "ファイルが見つかりません"
 
 #: comdlg32.rc:41
 msgid "Up One Level"
-msgstr "一つ上のフォルダへ"
+msgstr "1つ上のフォルダへ"
 
 #: comdlg32.rc:42
 msgid "Create New Folder"
@@ -1082,12 +1082,12 @@ msgid "Processing; "
 msgstr "処理中 - "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "初期化中 - "
 
 #: comdlg32.rc:96
 msgid "Warming up; "
-msgstr "ウォーミング アップ - "
+msgstr "ウォーミングアップ - "
 
 #: comdlg32.rc:97
 msgid "Toner low; "
@@ -1192,15 +1192,15 @@ msgstr "Caps Lock がオン"
 
 #: crypt32.rc:27
 msgid "Authority Key Identifier"
-msgstr "認証局鍵識別子"
+msgstr "認証局キー識別子"
 
 #: crypt32.rc:28
 msgid "Key Attributes"
-msgstr "鍵の属性"
+msgstr "キーの属性"
 
 #: crypt32.rc:29
 msgid "Key Usage Restriction"
-msgstr "鍵の利用制限"
+msgstr "キー使用法の制限"
 
 #: crypt32.rc:30
 msgid "Subject Alternative Name"
@@ -1216,7 +1216,7 @@ msgstr "基本制約"
 
 #: crypt32.rc:33
 msgid "Key Usage"
-msgstr "鍵の使用法"
+msgstr "キー使用法"
 
 #: crypt32.rc:34
 msgid "Certificate Policies"
@@ -1224,7 +1224,7 @@ msgstr "証明書ポリシー"
 
 #: crypt32.rc:35
 msgid "Subject Key Identifier"
-msgstr "サブジェクト鍵識別子"
+msgstr "サブジェクト キー識別子"
 
 #: crypt32.rc:36
 msgid "CRL Reason Code"
@@ -1236,7 +1236,7 @@ msgstr "CRL 配布先"
 
 #: crypt32.rc:38
 msgid "Enhanced Key Usage"
-msgstr "拡張鍵の使用法"
+msgstr "拡張されたキー使用法"
 
 #: crypt32.rc:39
 msgid "Authority Information Access"
@@ -1305,7 +1305,7 @@ msgstr ""
 
 #: crypt32.rc:55
 msgid "On-line Certificate Status Protocol"
-msgstr ""
+msgstr "オンライン証明書状態プロトコル"
 
 #: crypt32.rc:56
 msgid "Certification Authority Issuer"
@@ -1357,55 +1357,55 @@ msgstr "Netscape コメント"
 
 #: crypt32.rc:68
 msgid "Country/Region"
-msgstr ""
+msgstr "国/地域"
 
 #: crypt32.rc:69
 msgid "Organization"
-msgstr ""
+msgstr "組織"
 
 #: crypt32.rc:70
 msgid "Organizational Unit"
-msgstr ""
+msgstr "組織単位"
 
 #: crypt32.rc:71
 msgid "Common Name"
-msgstr ""
+msgstr "一般名"
 
 #: crypt32.rc:72
 msgid "Locality"
-msgstr ""
+msgstr "市区町村"
 
 #: crypt32.rc:73
 msgid "State or Province"
-msgstr ""
+msgstr "都道府県"
 
 #: crypt32.rc:74
 msgid "Title"
-msgstr ""
+msgstr "役職"
 
 #: crypt32.rc:75
 msgid "Given Name"
-msgstr ""
+msgstr "名"
 
 #: crypt32.rc:76
 msgid "Initials"
-msgstr ""
+msgstr "イニシャル"
 
 #: crypt32.rc:77
 msgid "Surname"
-msgstr ""
+msgstr "姓"
 
 #: crypt32.rc:78
 msgid "Domain Component"
-msgstr ""
+msgstr "ドメイン構成要素"
 
 #: crypt32.rc:79
 msgid "Street Address"
-msgstr ""
+msgstr "番地"
 
 #: crypt32.rc:80
 msgid "Serial Number"
-msgstr ""
+msgstr "シリアル番号"
 
 #: crypt32.rc:81
 msgid "CA Version"
@@ -1565,11 +1565,11 @@ msgstr ""
 
 #: crypt32.rc:120
 msgid "Encrypted Private Key"
-msgstr ""
+msgstr "暗号化された秘密鍵"
 
 #: crypt32.rc:121
 msgid "Published CRL Locations"
-msgstr ""
+msgstr "公開された CRL の場所"
 
 #: crypt32.rc:122
 msgid "Enforce Certificate Chain Policy"
@@ -1577,35 +1577,35 @@ msgstr ""
 
 #: crypt32.rc:123
 msgid "Transaction Id"
-msgstr ""
+msgstr "処理識別子"
 
 #: crypt32.rc:124
 msgid "Sender Nonce"
-msgstr ""
+msgstr "送信者使い捨て値"
 
 #: crypt32.rc:125
 msgid "Recipient Nonce"
-msgstr ""
+msgstr "受領者使い捨て値"
 
 #: crypt32.rc:126
 msgid "Reg Info"
-msgstr ""
+msgstr "登録情報"
 
 #: crypt32.rc:127
 msgid "Get Certificate"
-msgstr ""
+msgstr "証明書の取得"
 
 #: crypt32.rc:128
 msgid "Get CRL"
-msgstr ""
+msgstr "CRL の取得"
 
 #: crypt32.rc:129
 msgid "Revoke Request"
-msgstr ""
+msgstr "失効要求"
 
 #: crypt32.rc:130
 msgid "Query Pending"
-msgstr ""
+msgstr "問い合わせ処理中"
 
 #: crypt32.rc:131 cryptui.rc:92
 msgid "Certificate Trust List"
@@ -1613,15 +1613,15 @@ msgstr "証明書信頼リスト"
 
 #: crypt32.rc:132
 msgid "Archived Key Certificate Hash"
-msgstr ""
+msgstr "アーカイブされたキー証明書ハッシュ"
 
 #: crypt32.rc:133
 msgid "Private Key Usage Period"
-msgstr ""
+msgstr "秘密鍵使用期限"
 
 #: crypt32.rc:134
 msgid "Client Information"
-msgstr ""
+msgstr "クライアント情報"
 
 #: crypt32.rc:135
 msgid "Server Authentication"
@@ -1769,31 +1769,31 @@ msgstr "信頼されない証明書"
 
 #: crypt32.rc:179
 msgid "KeyID="
-msgstr ""
+msgstr "鍵ID="
 
 #: crypt32.rc:180
 msgid "Certificate Issuer"
-msgstr ""
+msgstr "証明書発行者"
 
 #: crypt32.rc:181
 msgid "Certificate Serial Number="
-msgstr ""
+msgstr "証明書シリアル番号="
 
 #: crypt32.rc:182
 msgid "Other Name="
-msgstr ""
+msgstr "他の名前="
 
 #: crypt32.rc:183
 msgid "Email Address="
-msgstr ""
+msgstr "電子メール アドレス="
 
 #: crypt32.rc:184
 msgid "DNS Name="
-msgstr ""
+msgstr "DNS 名="
 
 #: crypt32.rc:185
 msgid "Directory Address"
-msgstr ""
+msgstr "ディレクトリ アドレス"
 
 #: crypt32.rc:186
 msgid "URL="
@@ -1801,23 +1801,23 @@ msgstr "URL="
 
 #: crypt32.rc:187
 msgid "IP Address="
-msgstr ""
+msgstr "IP アドレス="
 
 #: crypt32.rc:188
 msgid "Mask="
-msgstr ""
+msgstr "マスク="
 
 #: crypt32.rc:189
 msgid "Registered ID="
-msgstr ""
+msgstr "登録済 ID="
 
 #: crypt32.rc:190
 msgid "Unknown Key Usage"
-msgstr ""
+msgstr "未知のキー使用法"
 
 #: crypt32.rc:191
 msgid "Subject Type="
-msgstr ""
+msgstr "目的の種類="
 
 #: crypt32.rc:192
 msgctxt "Certificate Authority"
@@ -1830,7 +1830,7 @@ msgstr ""
 
 #: crypt32.rc:194
 msgid "Path Length Constraint="
-msgstr ""
+msgstr "パス長の制限="
 
 #: crypt32.rc:195
 msgctxt "path length"
@@ -1839,15 +1839,15 @@ msgstr "なし"
 
 #: crypt32.rc:196
 msgid "Information Not Available"
-msgstr ""
+msgstr "該当情報なし"
 
 #: crypt32.rc:197
 msgid "Authority Info Access"
-msgstr ""
+msgstr "認証情報のアクセス"
 
 #: crypt32.rc:198
 msgid "Access Method="
-msgstr ""
+msgstr "アクセス手段="
 
 #: crypt32.rc:199
 msgctxt "Online Certificate Status Protocol"
@@ -1856,67 +1856,67 @@ msgstr "OCSP"
 
 #: crypt32.rc:200
 msgid "CA Issuers"
-msgstr ""
+msgstr "CA 発行者"
 
 #: crypt32.rc:201
 msgid "Unknown Access Method"
-msgstr ""
+msgstr "アクセス手段不明"
 
 #: crypt32.rc:202
 msgid "Alternative Name"
-msgstr ""
+msgstr "代替名"
 
 #: crypt32.rc:203
 msgid "CRL Distribution Point"
-msgstr ""
+msgstr "CRL 配布点"
 
 #: crypt32.rc:204
 msgid "Distribution Point Name"
-msgstr ""
+msgstr "配布点名"
 
 #: crypt32.rc:205
 msgid "Full Name"
-msgstr ""
+msgstr "フル ネーム"
 
 #: crypt32.rc:206
 msgid "RDN Name"
-msgstr ""
+msgstr "RDN 名"
 
 #: crypt32.rc:207
 msgid "CRL Reason="
-msgstr ""
+msgstr "CRL 理由="
 
 #: crypt32.rc:208
 msgid "CRL Issuer"
-msgstr ""
+msgstr "CRL 発行者"
 
 #: crypt32.rc:209
 msgid "Key Compromise"
-msgstr ""
+msgstr "キーの危殆化"
 
 #: crypt32.rc:210
 msgid "CA Compromise"
-msgstr ""
+msgstr "CA の危殆化"
 
 #: crypt32.rc:211
 msgid "Affiliation Changed"
-msgstr ""
+msgstr "所属変更"
 
 #: crypt32.rc:212
 msgid "Superseded"
-msgstr ""
+msgstr "取り替え"
 
 #: crypt32.rc:213
 msgid "Operation Ceased"
-msgstr ""
+msgstr "運用廃止"
 
 #: crypt32.rc:214
 msgid "Certificate Hold"
-msgstr ""
+msgstr "証明書保留中"
 
 #: crypt32.rc:215
 msgid "Financial Information="
-msgstr ""
+msgstr "財務情報="
 
 #: crypt32.rc:216 taskmgr.rc:397
 msgid "Available"
@@ -1924,11 +1924,11 @@ msgstr "利用可能"
 
 #: crypt32.rc:217
 msgid "Not Available"
-msgstr ""
+msgstr "利用不可"
 
 #: crypt32.rc:218
 msgid "Meets Criteria="
-msgstr ""
+msgstr "基準の適合="
 
 #: crypt32.rc:219 cryptui.rc:163 oleaut32.rc:29 wininet.rc:80 ipconfig.rc:44
 msgid "Yes"
@@ -2008,11 +2008,11 @@ msgstr "署名認証局"
 
 #: cryptdlg.rc:27
 msgid "Certificate Policy"
-msgstr ""
+msgstr "証明書ポリシー"
 
 #: cryptdlg.rc:28
 msgid "Policy Identifier: "
-msgstr ""
+msgstr "ポリシー識別子: "
 
 #: cryptdlg.rc:29
 msgid "Policy Qualifier Info"
@@ -2028,19 +2028,19 @@ msgstr ""
 
 #: cryptdlg.rc:34
 msgid "Notice Reference"
-msgstr ""
+msgstr "通知の参照"
 
 #: cryptdlg.rc:35
 msgid "Organization="
-msgstr ""
+msgstr "組織="
 
 #: cryptdlg.rc:36
 msgid "Notice Number="
-msgstr ""
+msgstr "通知番号="
 
 #: cryptdlg.rc:37
 msgid "Notice Text="
-msgstr ""
+msgstr "通知テキスト="
 
 #: cryptui.rc:177 cryptui.rc:232 inetcpl.rc:43
 msgid "General"
@@ -2153,9 +2153,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2287,9 +2287,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2508,7 +2508,7 @@ msgstr "SHA1 ハッシュ"
 
 #: cryptui.rc:60
 msgid "Enhanced key usage (property)"
-msgstr "拡張鍵の使用法 (プロパティ)"
+msgstr "拡張されたキー使用法 (プロパティ)"
 
 #: cryptui.rc:61
 msgid "Friendly name"
@@ -2576,7 +2576,7 @@ msgstr "証明書失効リスト (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "証明書信頼リスト (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoft シリアル化された証明書ストア (*.sst)"
 
@@ -2674,8 +2674,8 @@ msgid ""
 "sign messages with it.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"削除後はこの証明書を利用してメッセージを復号化したり、メッセージに署名できな"
-"くなります。\n"
+"削除後はこの証明書を利用したメッセージの復号化やメッセージへの署名ができなく"
+"なります。\n"
 "この証明書を削除しますか?"
 
 #: cryptui.rc:108
@@ -2684,8 +2684,8 @@ msgid ""
 "sign messages with them.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"削除後はこれらの証明書を利用してメッセージを復号化したり、メッセージに署名で"
-"きなくなります。\n"
+"削除後はこれらの証明書を利用したメッセージの復号化やメッセージへの署名ができ"
+"なくなります。\n"
 "これらの証明書を削除しますか?"
 
 #: cryptui.rc:109
@@ -2694,8 +2694,8 @@ msgid ""
 "verify messages signed with it.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"削除後はこの証明書を利用してメッセージを暗号化したり、署名されたメッセージを"
-"検証できなくなります。\n"
+"削除後はこの証明書を利用したメッセージの暗号化や、この証明書で署名されたメッ"
+"セージの検証ができなくなります。\n"
 "この証明書を削除しますか?"
 
 #: cryptui.rc:110
@@ -2704,8 +2704,8 @@ msgid ""
 "verify messages signed with it.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"削除後はこれらの証明書を利用してメッセージを暗号化したり、署名されたメッセー"
-"ジを検証できなくなります。\n"
+"削除後はこれらの証明書を利用したメッセージの暗号化や、これらの証明書で署名さ"
+"れたメッセージの検証ができなくなります。\n"
 "これらの証明書を削除しますか?"
 
 #: cryptui.rc:111
@@ -2714,7 +2714,7 @@ msgid ""
 "trusted.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"この認証局によって発行された証明書は信頼されなくなります。\n"
+"削除後はこの認証局によって発行された証明書が信頼されなくなります。\n"
 "この証明書を削除しますか?"
 
 #: cryptui.rc:112
@@ -2723,7 +2723,7 @@ msgid ""
 "trusted.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"これらの認証局によって発行された証明書は信頼されなくなります。\n"
+"削除後はこれらの認証局によって発行された証明書が信頼されなくなります。\n"
 "これらの証明書を削除しますか?"
 
 #: cryptui.rc:113
@@ -2732,7 +2732,8 @@ msgid ""
 "certification authorities it issued, will no longer be trusted.\n"
 "Are you sure you want to remove this trusted root certificate?"
 msgstr ""
-"このルート認証局によって発行された証明書や認証局は信頼されなくなります。\n"
+"削除後はこのルート認証局によって発行された証明書や認証局が信頼されなくなりま"
+"す。\n"
 "この信頼されたルート証明書を削除しますか?"
 
 #: cryptui.rc:114
@@ -2741,8 +2742,8 @@ msgid ""
 "certification authorities they issued, will no longer be trusted.\n"
 "Are you sure you want to remove these trusted root certificates?"
 msgstr ""
-"これらのルート認証局によって発行された証明書や認証局は信頼されなくなりま"
-"す。\n"
+"削除後はこれらのルート認証局によって発行された証明書や認証局が信頼されなくな"
+"ります。\n"
 "これらの信頼されたルート証明書を削除しますか?"
 
 #: cryptui.rc:115
@@ -2750,7 +2751,7 @@ msgid ""
 "Software signed by this publisher will no longer be trusted.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"この発行元により署名されたソフトウェアは信頼されなくなります。\n"
+"削除後はこの発行元により署名されたソフトウェアが信頼されなくなります。\n"
 "この証明書を削除しますか?"
 
 #: cryptui.rc:116
@@ -2758,7 +2759,7 @@ msgid ""
 "Software signed by these publishers will no longer be trusted.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"これらの発行元により署名されたソフトウェアは信頼されなくなります。\n"
+"削除後はこれらの発行元により署名されたソフトウェアが信頼されなくなります。\n"
 "これらの証明書を削除しますか?"
 
 #: cryptui.rc:117
@@ -2844,10 +2845,6 @@ msgstr "CMS/PKCS #7 メッセージ (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr ""
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "シリアル化された証明書ストア (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3197,7 +3194,7 @@ msgstr "印刷プレビュー(&W)"
 
 #: ieframe.rc:44
 msgid "&Toolbars"
-msgstr "ツールバー(&T)"
+msgstr "ツール バー(&T)"
 
 #: ieframe.rc:46
 msgid "&Standard bar"
@@ -3462,7 +3459,7 @@ msgstr "ループ外で continue は使えません"
 
 #: jscript.rc:40
 msgid "Label redefined"
-msgstr ""
+msgstr "ラベルが再定義されました"
 
 #: jscript.rc:41
 msgid "Label not found"
@@ -3518,11 +3515,11 @@ msgstr "正規表現に構文誤りがあります"
 
 #: jscript.rc:55
 msgid "URI to be encoded contains invalid characters"
-msgstr "エンコードされるURIに無効な文字が含まれています"
+msgstr "エンコードされる URI に無効な文字が含まれています"
 
 #: jscript.rc:54
 msgid "URI to be decoded is incorrect"
-msgstr "デコードされるURIが正しくありません"
+msgstr "デコードされる URI が正しくありません"
 
 #: jscript.rc:56
 msgid "Array length must be a finite positive integer"
@@ -3713,7 +3710,7 @@ msgid "Too many commands.\n"
 msgstr "これ以上コマンドを実行できません。\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "アダプタのハードウェア エラーです。\n"
 
 #: winerror.mc:256
@@ -3725,7 +3722,7 @@ msgid "Unexpected network error.\n"
 msgstr "予期しないネットワーク エラーです。\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "リモート アダプタが不正です。\n"
 
 #: winerror.mc:271
@@ -3786,7 +3783,7 @@ msgstr "作成できません。\n"
 
 #: winerror.mc:341
 msgid "Int24 failure.\n"
-msgstr "INT 24 エラーです。\n"
+msgstr "Int24 エラーです。\n"
 
 #: winerror.mc:346
 msgid "Out of structures.\n"
@@ -4337,7 +4334,7 @@ msgid "Invalid flags.\n"
 msgstr "フラグが正しくありません。\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "ボリュームを認識できません。\n"
 
 #: winerror.mc:1046
@@ -4994,7 +4991,7 @@ msgid "Continue work in progress.\n"
 msgstr "続きの作業が処理中です。\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "すでに初期化済みです。\n"
 
 #: winerror.mc:1871
@@ -5319,7 +5316,7 @@ msgstr "ユーザはビルトイン ユーザです。\n"
 
 #: winerror.mc:2271
 msgid "Group is primary for user.\n"
-msgstr "ユーザのプライマリグループです。\n"
+msgstr "ユーザのプライマリ グループです。\n"
 
 #: winerror.mc:2276
 msgid "Token already in use.\n"
@@ -5335,7 +5332,7 @@ msgstr "ユーザはローカル グループにいません。\n"
 
 #: winerror.mc:2291
 msgid "User already in local group.\n"
-msgstr "ユーザはすでにローカルグループにいます。\n"
+msgstr "ユーザはすでにローカル グループにいます。\n"
 
 #: winerror.mc:2296
 msgid "Local group already exists.\n"
@@ -5471,7 +5468,7 @@ msgstr "インデックスが正しくありません。\n"
 
 #: winerror.mc:2466
 msgid "Invalid icon handle.\n"
-msgstr "アイコンハンドルが正しくありません。\n"
+msgstr "アイコン ハンドルが正しくありません。\n"
 
 #: winerror.mc:2471
 msgid "Private dialog index.\n"
@@ -5563,7 +5560,7 @@ msgstr "子ウィンドウのメニューは作れません。\n"
 
 #: winerror.mc:2581
 msgid "Window has no system menu.\n"
-msgstr "ウィンドウにはシステムメニューがありません。\n"
+msgstr "ウィンドウにはシステム メニューがありません。\n"
 
 #: winerror.mc:2586
 msgid "Invalid message box style.\n"
@@ -5579,7 +5576,7 @@ msgstr "スクリーンはすでにロックされています。\n"
 
 #: winerror.mc:2601
 msgid "Window handles have different parents.\n"
-msgstr "ウィンドウハンドルの親が同一ではありません。\n"
+msgstr "ウィンドウ ハンドルの親が同一ではありません。\n"
 
 #: winerror.mc:2606
 msgid "Not a child window.\n"
@@ -6026,7 +6023,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "認識できない認証 ID です。\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "認識できない認証サービスです。\n"
 
 #: winerror.mc:3171
@@ -6162,7 +6159,7 @@ msgid "Invalid user buffer.\n"
 msgstr "ユーザ バッファが正しくありません。\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "認識できないメディアです。\n"
 
 #: winerror.mc:3341
@@ -6235,7 +6232,7 @@ msgstr "プリンタはすでに存在します。\n"
 
 #: winerror.mc:3426
 msgid "Invalid printer command.\n"
-msgstr "プリンタ　コマンドは正しくありません。\n"
+msgstr "プリンタ コマンドは正しくありません。\n"
 
 #: winerror.mc:3431
 msgid "Invalid data type.\n"
@@ -6306,7 +6303,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC 通信が失敗しました。\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "サポートしていない認証レベルです。\n"
 
 #: winerror.mc:3521
@@ -6334,7 +6331,7 @@ msgid "Invalid handle operation.\n"
 msgstr "ハンドル操作が正しくありません。\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "直列化したパッケージのバージョンが間違っています。\n"
 
 #: winerror.mc:3556
@@ -6555,8 +6552,8 @@ msgstr "ユーザー名"
 msgid "Password"
 msgstr "パスワード"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr "パスワードを保存する(&S)(セキュアではありません)"
 
 #: mpr.rc:27
@@ -6668,17 +6665,17 @@ msgstr ""
 "\t/i {パッケージ|製品コード} [プロパティ]\n"
 "\t/package {パッケージ|製品コード} [プロパティ]\n"
 "\t/a パッケージ [プロパティ]\n"
-"インストールの修復:\n"
+"インストール済み製品の修復:\n"
 "\t/f[p|o|e|d|c|a|u|m|s|v] {パッケージ|製品コード}\n"
 "製品のアンインストール:\n"
 "\t/uninstall {パッケージ|製品コード} [プロパティ]\n"
 "\t/x {パッケージ|製品コード} [プロパティ]\n"
-"パッケージのアドバタイズ:\n"
+"製品のアドバタイズ:\n"
 "\t/j[u|m] パッケージ [/t トランスフォーム] [/g 言語ID]\n"
 "パッチの適用:\n"
 "\t/p パッチパッケージ [プロパティ]\n"
 "\t/p パッチパッケージ /a パッケージ [プロパティ]\n"
-"上記コマンドのログと UI の変更:\n"
+"上記コマンドのログとユーザ インタフェースの変更:\n"
 "\t/l[*][i|w|e|a|r|u|c|m|o|p|v|][+|!] ログファイル\n"
 "\t/q{|n|b|r|f|n+|b+|b-}\n"
 "MSI サービスの登録:\n"
@@ -6951,7 +6948,7 @@ msgstr "コンボ ボックス"
 
 #: oleacc.rc:74
 msgid "drop down"
-msgstr "ドロップ ダウン"
+msgstr "ドロップダウン"
 
 #: oleacc.rc:75
 msgid "progress bar"
@@ -6987,7 +6984,7 @@ msgstr "数式"
 
 #: oleacc.rc:83
 msgid "drop down button"
-msgstr "ドロップ ダウン ボタン"
+msgstr "ドロップダウン ボタン"
 
 #: oleacc.rc:84
 msgid "menu button"
@@ -6995,7 +6992,7 @@ msgstr "メニュー ボタン"
 
 #: oleacc.rc:85
 msgid "grid drop down button"
-msgstr "グリッド ドロップ ダウン ボタン"
+msgstr "グリッド ドロップダウン ボタン"
 
 #: oleacc.rc:86
 msgid "white space"
@@ -7127,8 +7124,8 @@ msgid ""
 "File does not appear to be a valid OLE module. Unable to register OLE "
 "control."
 msgstr ""
-"ファイルは有効なOLEモジュールではないようです。OLEコントロールを登録できませ"
-"ん。"
+"ファイルは有効な OLE モジュールではないようです。OLE コントロールを登録できま"
+"せん。"
 
 #: oledlg.rc:29
 msgid "Add Control"
@@ -7234,11 +7231,11 @@ msgstr "%sの設定"
 
 #: serialui.rc:28
 msgid "Baud Rate"
-msgstr "ボーレート"
+msgstr "ボー レート"
 
 #: serialui.rc:30
 msgid "Parity"
-msgstr "パリティビット"
+msgstr "パリティ"
 
 #: serialui.rc:32
 msgid "Flow Control"
@@ -7246,11 +7243,11 @@ msgstr "フロー制御"
 
 #: serialui.rc:34
 msgid "Data Bits"
-msgstr "データビット"
+msgstr "データ ビット"
 
 #: serialui.rc:36
 msgid "Stop Bits"
-msgstr "ストップビット"
+msgstr "ストップ ビット"
 
 #: setupapi.rc:36
 msgid "Copying Files..."
@@ -8238,10 +8235,6 @@ msgstr "両面印刷:"
 msgid "Realm"
 msgstr "領域"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "パスワードを保存する(&S)(セキュアではありません)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "認証が必要です"
@@ -8309,7 +8302,7 @@ msgstr ""
 
 #: winmm.rc:33
 msgid "The specified device handle is invalid."
-msgstr "無効なデバイスハンドルです。"
+msgstr "無効なデバイス ハンドルです。"
 
 #: winmm.rc:34
 msgid "There is no driver installed on your system!"
@@ -9093,7 +9086,7 @@ msgid "Filter Error"
 msgstr "フィルタ エラー"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "ユーザがキャンセル"
 
 #: wldap32.rc:116
@@ -9106,11 +9099,11 @@ msgstr "メモリ不足"
 
 #: wldap32.rc:118
 msgid "Can't connect to the LDAP server"
-msgstr "LDAPサーバに接続できません"
+msgstr "LDAP サーバに接続できません"
 
 #: wldap32.rc:119
 msgid "Operation not supported by this version of the LDAP protocol"
-msgstr "操作はこのバージョンのLDAPプロトコルでサポートされていません"
+msgstr "操作はこのバージョンの LDAP プロトコルでサポートされていません"
 
 #: wldap32.rc:120
 msgid "Specified control was not found in message"
@@ -9200,7 +9193,7 @@ msgstr "フォント(&F)..."
 
 #: clock.rc:34
 msgid "&Without Titlebar"
-msgstr "タイトルバーなし(&W)"
+msgstr "タイトル バーなし(&W)"
 
 #: clock.rc:36
 msgid "&Seconds"
@@ -9335,7 +9328,7 @@ msgstr ""
 "\n"
 "GOTO 文のターゲットとなるラベルは半角255文字以内ですが、空白\n"
 "を含んではいけません。(これは他のオペレーティングシステムでは\n"
-"異なります)。二つ以上同一のラベルが存在する場合は常に最初の物\n"
+"異なります)。2つ以上同一のラベルが存在する場合は常に最初の物\n"
 "が実行されます。GOTO文に存在しないラベルを指定した場合はバッ\n"
 "チファイルの実行を中断します。\n"
 "\n"
@@ -9366,7 +9359,7 @@ msgstr ""
 "        IF [NOT] 文字列1==文字列2 コマンド\n"
 "        IF [NOT] ERRORLEVEL 番号 コマンド\n"
 "\n"
-"二番目の形式において、文字列1と文字列2はダブルクオートで囲われ\n"
+"2番目の形式において、文字列1と文字列2はダブルクオートで囲われ\n"
 "ていなければなりません。大文字と小文字は区別されません。\n"
 
 #: cmd.rc:100
@@ -9377,11 +9370,11 @@ msgid ""
 "The command will prompt you for the new volume label for the given drive.\n"
 "You can display the disk volume label with the VOL command.\n"
 msgstr ""
-"LABEL はディスクのボリュームラベルを設定する場合に使用します。\n"
+"LABEL はディスクのボリューム ラベルを設定する場合に使用します。\n"
 "\n"
 "構文: LABEL [ドライブ:]\n"
 "コマンドを実行すると指定したドライブの新しいボリューム名を要求します。\n"
-"ディスクのボリュームラベルはVOLコマンドで表示できます。\n"
+"ディスクのボリューム ラベルは VOL コマンドで表示できます。\n"
 
 #: cmd.rc:103
 msgid "MD <name> is the short version of MKDIR. It creates a subdirectory.\n"
@@ -9401,13 +9394,13 @@ msgid ""
 "\n"
 "MOVE fails if the old and new locations are on different DOS drive letters.\n"
 msgstr ""
-"MOVE はファイルまたはディレクトリをファイルシステム中で新しい場所に移動しま"
+"MOVE はファイルかディレクトリをファイル システムでの新しい場所に移動しま"
 "す。\n"
 "\n"
-"移動する対象がディレクトリの場合は、ディレクトリ内の全てのファ\n"
-"イルとサブディレクトリも移動します。\n"
+"移動する対象がディレクトリの場合は、ディレクトリ内の全てのファイルとサブ\n"
+"ディレクトリも移動します。\n"
 "\n"
-"MOVE では移動元と移動先のドライブレターが異なる場合、移動は失敗します。\n"
+"MOVE では移動元と移動先のドライブ レターが異なる場合、移動は失敗します。\n"
 
 #: cmd.rc:122
 msgid ""
@@ -9421,14 +9414,13 @@ msgid ""
 "variable, for example:\n"
 "PATH %PATH%;c:\\temp\n"
 msgstr ""
-"PATH はcmdの検索パスを表示または変更します。\n"
+"PATH は cmd の検索パスを表示または変更します。\n"
 "\n"
-"PATH と入力すると現在のパス設定を表示します(初期状態では\n"
-"wine.confファイル中で指定された物になっています)。設定を\n"
-"変更するには、PATHコマンドに続けて新しい設定値を入力して\n"
-"下さい。\n"
+"PATH と入力すると現在のパス設定を表示します(初期状態ではレジストリから\n"
+"取得されます)。設定を変更するには、PATH コマンドに続けて新しい設定値を\n"
+"入力して下さい。\n"
 "\n"
-"パスを変更するときにPATH環境変数を使用することも可能です。\n"
+"パスを変更するときに PATH 環境変数を使用することも可能です。\n"
 "例えば：\n"
 "PATH %PATH%;c:\\temp\n"
 
@@ -9441,7 +9433,7 @@ msgid ""
 msgstr ""
 "PAUSE は画面にキーを押してくださいとメッセージを表示します。\n"
 "\n"
-"これは主にバッチファイル中で実行されたコマンドの結果がスクロールする前\n"
+"これは主にバッチ ファイル中で実行されたコマンドの結果がスクロールする前\n"
 "にユーザが読めるようにしたい場合に有用です。\n"
 
 #: cmd.rc:149
@@ -9598,15 +9590,15 @@ msgstr "TIME は現在の時刻を設定または表示します。\n"
 
 #: cmd.rc:202
 msgid "TITLE <string> sets the window title for the cmd window.\n"
-msgstr "TITLE <文字列> は cmd ウィンドウのウィンドウタイトルを設定します。\n"
+msgstr "TITLE <文字列> は cmd ウィンドウのウィンドウ タイトルを設定します。\n"
 
 #: cmd.rc:206
 msgid ""
 "TYPE <filename> copies <filename> to the console device (or elsewhere\n"
 "if redirected). No check is made that the file is readable text.\n"
 msgstr ""
-"TYPE <ファイル名> は <ファイル名> をコンソールデバイス(またはリダイレクト\n"
-"された所)にコピーします。ファイルが可読なテキストファイルかどうかチェック\n"
+"TYPE <ファイル名> は <ファイル名> をコンソール デバイス(またはリダイレクト\n"
+"された所)にコピーします。ファイルが可読なテキスト ファイルかどうかチェック\n"
 "されません。\n"
 
 #: cmd.rc:215
@@ -9784,9 +9776,9 @@ msgstr ""
 "CMD 内蔵のコマンド:\n"
 "ASSOC\t\tファイル拡張子の関連付けを表示または変更\n"
 "ATTRIB\t\tDOSファイルの属性を表示または変更\n"
-"CALL\t\t外部のバッチファイルを呼び出し\n"
-"CD (CHDIR)\tカレントディレクトリを変更\n"
-"CHOISE\t\t選択リストのキー入力を待機\n"
+"CALL\t\t外部のバッチ ファイルを呼び出し\n"
+"CD (CHDIR)\tカレント ディレクトリを変更\n"
+"CHOICE\t\t選択リストのキー入力を待機\n"
 "CLS\t\tコンソール画面をクリア\n"
 "COPY\t\tファイルをコピー\n"
 "CTTY\t\t入力/出力デバイスを変更\n"
@@ -9794,29 +9786,29 @@ msgstr ""
 "DEL (ERASE)\tファイルを削除\n"
 "DIR\t\tディレクトリの内容を表示\n"
 "ECHO\t\t文字列を直接コンソール出力にコピー\n"
-"ENDLOCAL\tバッチファイルでの環境変更の局所化を終了\n"
+"ENDLOCAL\tバッチ ファイルでの環境変更の局所化を終了\n"
 "FTYPE\t\tファイル タイプのオープン コマンドを表示または変更\n"
 "HELP\t\tトピックの詳細なヘルプを表示\n"
 "MD (MKDIR)\tサブディレクトリを作成\n"
 "MORE\t\t出力をページ区切りで表示\n"
-"MOVE\t\tファイルまたはディレクトリツリーを移動\n"
+"MOVE\t\tファイルまたはディレクトリ ツリーを移動\n"
 "PATH\t\tパスを表示または設定\n"
-"PAUSE\t\tバッチファイルの実行を一時停止\n"
+"PAUSE\t\tバッチ ファイルの実行を一時停止\n"
 "POPD\t\tPUSHDで最後に保存したディレクトリに変更\n"
-"PROMPT\t\tコマンドプロンプトを変更\n"
+"PROMPT\t\tコマンド プロンプトを変更\n"
 "PUSHD\t\t現在のディレクトリを保存し、新ディレクトリに変更\n"
 "REN (RENAME)\tファイルをリネーム\n"
 "RD (RMDIR)\tサブディレクトリを削除\n"
 "SET\t\t環境変数を設定または表示\n"
-"SETLOCAL\tバッチファイルでの環境変更の局所化を開始\n"
+"SETLOCAL\tバッチ ファイルでの環境変更の局所化を開始\n"
 "START\t\tプログラムを開始、または関連付けたプログラムで文書を開く\n"
 "TIME\t\tシステムの時刻を設定または表示\n"
-"TITLE\t\tCMDセッションのウィンドウタイトルを設定\n"
-"TYPE\t\tテキストファイルの内容を出力\n"
-"VER\t\tCMDのバージョンを表示\n"
-"VOL\t\tディスクデバイスのボリュームラベルを表示\n"
+"TITLE\t\tCMD セッションのウィンドウ タイトルを設定\n"
+"TYPE\t\tテキスト ファイルの内容を出力\n"
+"VER\t\tCMD のバージョンを表示\n"
+"VOL\t\tディスク デバイスのボリューム ラベルを表示\n"
 "XCOPY\t\t送り元のファイルやディレクトリ ツリーをあて先にコピー\n"
-"EXIT\t\tCMDを終了\n"
+"EXIT\t\tCMD を終了\n"
 "\n"
 "上記のコマンドに関する詳細を表示するには HELP <コマンド名> と入力して下さ"
 "い。\n"
@@ -9849,7 +9841,7 @@ msgstr "上書き %1?"
 
 #: cmd.rc:312
 msgid "More..."
-msgstr "続ける..."
+msgstr "続く..."
 
 #: cmd.rc:313
 msgid "Line in Batch processing possibly truncated. Using:\n"
@@ -9966,7 +9958,7 @@ msgstr "ドライブ %1!c! のボリューム ラベルは %2 です\n"
 
 #: cmd.rc:342
 msgid "Volume in drive %1!c! has no label.\n"
-msgstr "ドライブ %1!c! のボリュームラベルがありません。\n"
+msgstr "ドライブ %1!c! のボリューム ラベルがありません。\n"
 
 #: cmd.rc:343
 msgid " (Yes|No)"
@@ -10053,7 +10045,7 @@ msgstr "ハイブリッド"
 
 #: ipconfig.rc:40
 msgid "IP routing enabled"
-msgstr "IP ルーティング 有効"
+msgstr "IP ルーティング有効"
 
 #: ipconfig.rc:42
 msgid "Physical address"
@@ -10379,7 +10371,7 @@ msgstr "(無題)"
 
 #: notepad.rc:74 winedbg.rc:38
 msgid "Text files (*.txt)"
-msgstr "テキストファイル (*.txt)"
+msgstr "テキスト ファイル (*.txt)"
 
 #: notepad.rc:77
 msgid ""
@@ -10411,7 +10403,7 @@ msgstr "Unicode (UTF-16)"
 
 #: notepad.rc:83
 msgid "Unicode (UTF-16 big-endian)"
-msgstr "Unicode (UTF-16 ビッグ エンディアン)"
+msgstr "Unicode (UTF-16 ビッグエンディアン)"
 
 #: notepad.rc:84
 msgid "Unicode (UTF-8)"
@@ -10460,11 +10452,11 @@ msgstr "&CoCreateInstance フラグ"
 
 #: oleview.rc:41
 msgid "&In-process server"
-msgstr "イン プロセス サーバ(&I)"
+msgstr "インプロセス サーバ(&I)"
 
 #: oleview.rc:42
 msgid "In-process &handler"
-msgstr "イン プロセス ハンドラ(&H)"
+msgstr "インプロセス ハンドラ(&H)"
 
 #: oleview.rc:43
 msgid "&Local server"
@@ -10510,7 +10502,7 @@ msgstr "隠されたコンポーネントのカテゴリ(&H)"
 msgid "&Toolbar"
 msgstr "ツール バー(&T)"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "ステータス バー(&S)"
 
@@ -10559,7 +10551,7 @@ msgid ""
 "These settings change only registry values.\n"
 "They have no effect on Wine performance."
 msgstr ""
-"これらの設定はレジスターの値のみを変えます。\n"
+"これらの設定はレジストリの値のみを変えます。\n"
 "Wine のパフォーマンスには影響しません。"
 
 #: oleview.rc:178
@@ -10801,7 +10793,7 @@ msgstr "実行(&E)..."
 
 #: progman.rc:39
 msgid "E&xit Windows"
-msgstr "Windowsの終了(&X)"
+msgstr "Windows の終了(&X)"
 
 #: progman.rc:41 taskmgr.rc:41 winefile.rc:59 winhlp32.rc:44
 msgid "&Options"
@@ -11065,7 +11057,7 @@ msgstr "DWORD値(&D)"
 
 #: regedit.rc:51 regedit.rc:102
 msgid "&Multi String Value"
-msgstr "複数行文字列値(&M)"
+msgstr "複数文字列値(&M)"
 
 #: regedit.rc:52 regedit.rc:103
 msgid "&Expandable String Value"
@@ -11089,7 +11081,7 @@ msgstr "次の検索候補(&x)\tF3"
 
 #: regedit.rc:65
 msgid "Status &Bar"
-msgstr "ステータスバー(&B)"
+msgstr "ステータス バー(&B)"
 
 #: regedit.rc:67 winefile.rc:46
 msgid "Sp&lit"
@@ -11105,7 +11097,7 @@ msgstr "バージョン情報(&A)"
 
 #: regedit.rc:88
 msgid "Modify Binary Data..."
-msgstr "バイナリデータを変更..."
+msgstr "バイナリ データを変更..."
 
 #: regedit.rc:215
 msgid "Export registry"
@@ -11137,7 +11129,7 @@ msgstr "値の中身"
 
 #: regedit.rc:232
 msgid "Whole string only"
-msgstr "完全に一致するものだけ"
+msgstr "完全に一致する文字列のみ"
 
 #: regedit.rc:239
 msgid "Add Favorite"
@@ -11165,11 +11157,11 @@ msgstr "データ:"
 
 #: regedit.rc:274
 msgid "Edit DWORD"
-msgstr "DWORD値の編集"
+msgstr "DWORD の編集"
 
 #: regedit.rc:281
 msgid "Base"
-msgstr "ベース"
+msgstr "基数"
 
 #: regedit.rc:282
 msgid "Hexadecimal"
@@ -11185,7 +11177,7 @@ msgstr "バイナリ値の編集"
 
 #: regedit.rc:303
 msgid "Edit Multi String"
-msgstr "複数行文字列の編集"
+msgstr "複数文字列の編集"
 
 #: regedit.rc:134
 msgid "Contains commands for working with the whole registry"
@@ -11196,7 +11188,7 @@ msgid "Contains commands for editing values or keys"
 msgstr "値とキーを編集するコマンド"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "レジストリ ウィンドウをカスタマイズするコマンド"
 
 #: regedit.rc:137
@@ -11206,7 +11198,7 @@ msgstr "よく使うキーにアクセスするコマンド"
 #: regedit.rc:138
 msgid ""
 "Contains commands for displaying help and information about registry editor"
-msgstr "レジストリエディタについてのヘルプや情報を表示するコマンド"
+msgstr "レジストリ エディタについてのヘルプや情報を表示するコマンド"
 
 #: regedit.rc:139
 msgid "Contains commands for creating new keys or values"
@@ -11218,15 +11210,15 @@ msgstr "データ"
 
 #: regedit.rc:129
 msgid "Registry Editor"
-msgstr "レジストリエディタ"
+msgstr "レジストリ エディタ"
 
 #: regedit.rc:191
 msgid "Import Registry File"
-msgstr "レジストリファイルのインポート"
+msgstr "レジストリ ファイルのインポート"
 
 #: regedit.rc:192
 msgid "Export Registry File"
-msgstr "レジストリファイルのエクスポート"
+msgstr "レジストリ ファイルのエクスポート"
 
 #: regedit.rc:193
 msgid "Registry files (*.reg)"
@@ -11254,7 +11246,7 @@ msgstr "(不明 %d)"
 
 #: regedit.rc:160
 msgid "Quits the registry editor"
-msgstr "レジストリエディタを終了"
+msgstr "レジストリ エディタを終了"
 
 #: regedit.rc:161
 msgid "Adds keys to the favorites list"
@@ -11266,7 +11258,7 @@ msgstr "キーをお気に入りから削除"
 
 #: regedit.rc:163
 msgid "Shows or hides the status bar"
-msgstr "ステータスバーを表示・隠す"
+msgstr "ステータス バーを表示・隠す"
 
 #: regedit.rc:164
 msgid "Change position of split between two panes"
@@ -11314,15 +11306,15 @@ msgstr "新しいバイナリ値を追加"
 
 #: regedit.rc:148
 msgid "Adds a new double word value"
-msgstr "新しいDWORD値を追加"
+msgstr "新しい DWORD 値を追加"
 
 #: regedit.rc:150
 msgid "Imports a text file into the registry"
-msgstr "テキストファイルをレジストリにインポート"
+msgstr "テキスト ファイルをレジストリにインポート"
 
 #: regedit.rc:152
 msgid "Exports all or part of the registry to a text file"
-msgstr "レジストリの一部または全部をテキストファイルにエクスポート"
+msgstr "レジストリの一部または全部をテキスト ファイルにエクスポート"
 
 #: regedit.rc:153
 msgid "Prints all or part of the registry"
@@ -11374,11 +11366,11 @@ msgstr "キー '%s' を削除できません"
 
 #: regedit.rc:149
 msgid "Adds a new multi string value"
-msgstr "新しい複数行文字列値を追加"
+msgstr "新しい複数文字列値を追加"
 
 #: regedit.rc:171
 msgid "Exports selected branch of the registry to a text file"
-msgstr "選択したレジストリ キー以下をテキストファイルに出力"
+msgstr "選択したレジストリ キー以下をテキスト ファイルに出力"
 
 #: start.rc:41
 msgid ""
@@ -11454,7 +11446,7 @@ msgstr "エラー: プロセス(%1)を終了できません。\n"
 
 #: taskkill.rc:40
 msgid "Error: Process self-termination is not permitted.\n"
-msgstr "エラー: このプロセス自身を終了させることはできません。\n"
+msgstr "エラー: このプロセス自身を終了することはできません。\n"
 
 #: taskmgr.rc:37 taskmgr.rc:108
 msgid "&New Task (Run...)"
@@ -11474,7 +11466,7 @@ msgstr "最小化時に隠す(&H)"
 
 #: taskmgr.rc:49 taskmgr.rc:257
 msgid "&Show 16-bit tasks"
-msgstr "16bit タスクの表示(&S)"
+msgstr "16ビット タスクの表示(&S)"
 
 #: taskmgr.rc:54
 msgid "&Refresh Now"
@@ -12016,7 +12008,7 @@ msgstr "タスク マネージャ アプリケーションを終了します"
 
 #: taskmgr.rc:215
 msgid "Shows 16-bit tasks under the associated ntvdm.exe"
-msgstr "16 ビット Windows タスクを、関連付けられた ntvdm.exe の下に表示します"
+msgstr "16ビット Windows タスクを、関連付けられた ntvdm.exe の下に表示します"
 
 #: taskmgr.rc:216
 msgid "Select which columns will be visible on the Process page"
@@ -12048,7 +12040,7 @@ msgstr "フォーカスを選択したタスクのプロセスに移動します
 
 #: taskmgr.rc:229
 msgid "Restores the Task Manager from its hidden state"
-msgstr "最小化状態から タスク マネージャ を復元します"
+msgstr "最小化状態からタスク マネージャを復元します"
 
 #: taskmgr.rc:230
 msgid "Removes the process from the system"
@@ -12176,7 +12168,7 @@ msgstr "基本優先度"
 
 #: taskmgr.rc:301
 msgid "Task Manager Warning"
-msgstr "タスク　マネージャによる警告"
+msgstr "タスク マネージャによる警告"
 
 #: taskmgr.rc:304
 msgid ""
@@ -12298,10 +12290,10 @@ msgid ""
 "\n"
 "If you terminate the process you may lose all unsaved data."
 msgstr ""
-"ログオフおよび、再起動のプロセスをシミュレートしていますが、プログラムは反応"
-"していません。\n"
+"ログオフまたは再起動のシミュレートが進行中ですが、このプログラムは応答してい"
+"ません。\n"
 "\n"
-"プロセスを終了させると、保存していないデータは全て失われます。"
+"プロセスを終了すると、保存していないデータは全て失われます。"
 
 #: wineboot.rc:39
 msgid "Wine"
@@ -12345,9 +12337,9 @@ msgid ""
 "linked to the Libraries and Graphics tabs to allow you to change systemwide "
 "or per-application settings in those tabs as well."
 msgstr ""
-"Wineはアプリケーションによって異なるWindowsのバージョンをエミュレートできま"
-"す。 このタブはライブラリ及びグラフィック各タブと連動しますので、システム全体"
-"の設定や 個別アプリケーションの設定の変更が行えます。"
+"Wine はアプリケーションによって異なる Windows のバージョンをエミュレートでき"
+"ます。 このタブはライブラリ及びグラフィック各タブと連動しますので、システム全"
+"体の設定や 個別アプリケーションの設定の変更が行えます。"
 
 #: winecfg.rc:150
 msgid "&Add application..."
@@ -12463,7 +12455,7 @@ msgid ""
 "Failed to connect to the mount manager, the drive configuration cannot be "
 "edited."
 msgstr ""
-"マウントマネージャへの接続に失敗したため、ドライブ設定は変更できません。"
+"マウント マネージャへの接続に失敗したため、ドライブ設定は変更できません。"
 
 #: winecfg.rc:227
 msgid "&Add..."
@@ -12591,19 +12583,19 @@ msgstr "オーディオ"
 
 #: winecfg.rc:40
 msgid "About"
-msgstr "Wineについて"
+msgstr "Wine について"
 
 #: winecfg.rc:41
 msgid "Wine configuration"
-msgstr "Wine設定"
+msgstr "Wine 設定"
 
 #: winecfg.rc:43
 msgid "Theme files (*.msstyles; *.theme)"
-msgstr "テーマファイル (*.msstyles; *.theme)"
+msgstr "テーマ ファイル (*.msstyles; *.theme)"
 
 #: winecfg.rc:44
 msgid "Select a theme file"
-msgstr "テーマファイルを選んでください"
+msgstr "テーマ ファイルの選択"
 
 #: winecfg.rc:45
 msgid "Folder"
@@ -12687,7 +12679,7 @@ msgstr "自動検出..."
 
 #: winecfg.rc:67
 msgid "Local hard disk"
-msgstr "ローカルハードディスク"
+msgstr "ローカル ハード ディスク"
 
 #: winecfg.rc:68
 msgid "Network share"
@@ -12695,7 +12687,7 @@ msgstr "ネットワーク共有"
 
 #: winecfg.rc:69
 msgid "Floppy disk"
-msgstr "フロッピーディスク"
+msgstr "フロッピー ディスク"
 
 #: winecfg.rc:70
 msgid "CD-ROM"
@@ -12714,7 +12706,7 @@ msgstr ""
 
 #: winecfg.rc:72
 msgid "System drive"
-msgstr "システムドライブ"
+msgstr "システム ドライブ"
 
 #: winecfg.rc:73
 msgid ""
@@ -12746,7 +12738,7 @@ msgid ""
 msgstr ""
 "C ドライブがありません。これはあまり良くありません。\n"
 "\n"
-"C ドライブを作成するためにドライブタブ内の [追加] を忘れずにクリックしてくだ"
+"C ドライブを作成するためにドライブ タブ内の [追加] を忘れずにクリックしてくだ"
 "さい!\n"
 
 #: winecfg.rc:90
@@ -12767,7 +12759,7 @@ msgstr "メニューのテキスト"
 
 #: winecfg.rc:95
 msgid "Scrollbar"
-msgstr "スクロールバー"
+msgstr "スクロール バー"
 
 #: winecfg.rc:96
 msgid "Selection Background"
@@ -12895,7 +12887,7 @@ msgstr "コントロール"
 
 #: wineconsole.rc:66
 msgid "Popup menu"
-msgstr "ポップアップ"
+msgstr "ポップアップ メニュー"
 
 #: wineconsole.rc:67
 msgid "&Control"
@@ -13023,7 +13015,7 @@ msgstr ""
 "スクリーン バッファ サイズはウィンドウ バッファ サイズ以上にしてください"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "それぞれの文字は %1!u! ピクセルの幅、%2!u! ピクセルの高さ"
 
 #: wineconsole.rc:35
@@ -13184,11 +13176,11 @@ msgstr "ディスク(&D)"
 
 #: winefile.rc:41
 msgid "Connect &Network Drive..."
-msgstr "ネットワークドライブに接続(&N)..."
+msgstr "ネットワーク ドライブに接続(&N)..."
 
 #: winefile.rc:42
 msgid "&Disconnect Network Drive"
-msgstr "ネットワークドライブを切断(&D)"
+msgstr "ネットワーク ドライブを切断(&D)"
 
 #: winefile.rc:48
 msgid "&Name"
@@ -13220,7 +13212,7 @@ msgstr "フィルタ(&.)..."
 
 #: winefile.rc:63
 msgid "&Drivebar"
-msgstr "ドライブバー(&D)"
+msgstr "ドライブ バー(&D)"
 
 #: winefile.rc:66
 msgid "F&ull Screen\tCtrl+Shift+S"
@@ -13272,7 +13264,7 @@ msgstr "その他のファイル(&O)"
 
 #: winefile.rc:151
 msgid "Show Hidden/&System Files"
-msgstr "隠し/システムファイルの表示(&S)"
+msgstr "隠し/システム ファイルの表示(&S)"
 
 #: winefile.rc:162
 msgid "&File Name:"
@@ -13329,7 +13321,7 @@ msgstr "新しいフォントの選択中にエラーが発生しました。"
 
 #: winefile.rc:95
 msgid "Wine File Manager"
-msgstr "Wine ファイルマネージャ"
+msgstr "Wine ファイル マネージャ"
 
 #: winefile.rc:97
 msgid "root fs"
@@ -13412,7 +13404,7 @@ msgstr "盤面の変更(&C)..."
 
 #: winemine.rc:44
 msgid "&Fastest Times"
-msgstr "ハイスコア(&F)"
+msgstr "ハイ スコア(&F)"
 
 #: winemine.rc:49
 msgid "&About WineMine"
@@ -13540,7 +13532,7 @@ msgstr "Wine ヘルプ"
 
 #: winhlp32.rc:83
 msgid "Error while reading the help file `%s'"
-msgstr "ヘルプファイル `%s' を読み込んでいるときにエラー"
+msgstr "ヘルプ ファイル `%s' を読み込んでいるときにエラー"
 
 #: winhlp32.rc:85
 msgid "Summary"
@@ -13560,7 +13552,7 @@ msgstr "'%s' が見つかりません。自分でこのファイルを探しま�
 
 #: winhlp32.rc:90
 msgid "Cannot find a richedit implementation... Aborting"
-msgstr "リッチエディット実装が見つかりません... 終了します"
+msgstr "Richedit が見つかりません... 終了します"
 
 #: winhlp32.rc:91
 msgid "Help topics: "
@@ -13619,16 +13611,12 @@ msgid "&Get text"
 msgstr "テキストの取得(&G)"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "書式バー(&F)"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "ルーラー(&R)"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "ステータス バー(&S)"
 
 #: wordpad.rc:75
 msgid "&Insert"
@@ -13668,7 +13656,7 @@ msgstr "薄黄色(&P)\tCtrl+2"
 
 #: wordpad.rc:93
 msgid "&About Wine Wordpad"
-msgstr "Wine Wordpadについて(&A)"
+msgstr "Wine Wordpad について(&A)"
 
 #: wordpad.rc:130
 msgid "Automatic"
@@ -13704,11 +13692,11 @@ msgstr "右"
 
 #: wordpad.rc:229
 msgid "First line"
-msgstr "最初の行(&F)"
+msgstr "最初の行"
 
 #: wordpad.rc:231
 msgid "Alignment"
-msgstr "整列(&A)"
+msgstr "整列"
 
 #: wordpad.rc:239
 msgid "Tabs"
@@ -13716,7 +13704,7 @@ msgstr "タブの設定"
 
 #: wordpad.rc:242
 msgid "Tab stops"
-msgstr "タブの停止位置(&T)"
+msgstr "タブの停止位置"
 
 #: wordpad.rc:248
 msgid "Remove al&l"
@@ -13728,7 +13716,7 @@ msgstr "行の折り返し"
 
 #: wordpad.rc:257
 msgid "&No line wrapping"
-msgstr "折り返ししない"
+msgstr "折り返ししない(&N)"
 
 #: wordpad.rc:258
 msgid "Wrap text by the &window border"
@@ -13740,7 +13728,7 @@ msgstr "マージンで折り返す(&M)"
 
 #: wordpad.rc:260
 msgid "Toolbars"
-msgstr "ツールバー"
+msgstr "ツール バー"
 
 #: wordpad.rc:273
 msgctxt "accelerator Align Left"
@@ -13787,15 +13775,15 @@ msgstr "テキスト文書 (*.txt)"
 
 #: wordpad.rc:138
 msgid "Unicode text document (*.txt)"
-msgstr "Unicodeテキスト文書(*.txt)"
+msgstr "Unicode テキスト文書 (*.txt)"
 
 #: wordpad.rc:139
 msgid "Rich text format (*.rtf)"
-msgstr "リッチテキスト形式 (*.rtf)"
+msgstr "リッチ テキスト形式 (*.rtf)"
 
 #: wordpad.rc:140
 msgid "Rich text document"
-msgstr "リッチテキスト文書"
+msgstr "リッチ テキスト文書"
 
 #: wordpad.rc:141
 msgid "Text document"
@@ -13803,7 +13791,7 @@ msgstr "テキスト文書"
 
 #: wordpad.rc:142
 msgid "Unicode text document"
-msgstr "Unicodeテキスト文書"
+msgstr "Unicode テキスト文書"
 
 #: wordpad.rc:143
 msgid "Printer files (*.prn)"
@@ -13819,7 +13807,7 @@ msgstr "テキスト"
 
 #: wordpad.rc:157
 msgid "Rich text"
-msgstr "リッチテキスト"
+msgstr "リッチ テキスト"
 
 #: wordpad.rc:163
 msgid "Next page"
@@ -13886,15 +13874,15 @@ msgstr "文書の検索を完了。"
 
 #: wordpad.rc:183
 msgid "Failed to load the RichEdit library."
-msgstr "RichEditライブラリの読み込みに失敗。"
+msgstr "RichEdit ライブラリの読み込みに失敗。"
 
 #: wordpad.rc:184
 msgid ""
 "You have chosen to save in plain text format, which will cause all "
 "formatting to be lost. Are you sure that you wish to do this?"
 msgstr ""
-"プレーンテキスト形式で保存すると、すべての書式が失われます。それでもよいです"
-"か？"
+"プレーン テキスト形式で保存すると、すべての書式が失われます。それでもよいです"
+"か?"
 
 #: wordpad.rc:187
 msgid "Invalid number format."
@@ -13902,7 +13890,7 @@ msgstr "数の書式が不正です。"
 
 #: wordpad.rc:188
 msgid "OLE storage documents are not supported."
-msgstr "OLEストレージ文書はサポートされていません。"
+msgstr "OLE ストレージ文書はサポートされていません。"
 
 #: wordpad.rc:189
 msgid "Could not save the file."
@@ -13926,7 +13914,7 @@ msgstr "印刷は実装されていません。"
 
 #: wordpad.rc:194
 msgid "Cannot add more than 32 tab stops."
-msgstr "32以上なタブを追加できません。"
+msgstr "32 を超えるタブ位置は追加できません。"
 
 #: write.rc:27
 msgid "Starting Wordpad failed"
@@ -13959,7 +13947,7 @@ msgid ""
 "(F - File, D - Directory)\n"
 msgstr ""
 "送り先の '%1' はファイル名ですか、\n"
-"ディレクトリですか?\n"
+"それともディレクトリですか?\n"
 "(F - ファイル、D - ディレクトリ)\n"
 
 #: xcopy.rc:35
@@ -14036,7 +14024,7 @@ msgstr ""
 "[/S]  ディレクトリとサブディレクトリをコピーします。\n"
 "[/E]  空ディレクトリを含め、ディレクトリとサブディレクトリをコピー。\n"
 "[/Q]  コピー中にファイル名を一覧にしません。すなわち寡黙です。\n"
-"[/F]  コピー中にフルパスで送り元と送り先の名前を表示します。\n"
+"[/F]  コピー中に完全な送り元と送り先の名前を表示します。\n"
 "[/L]  操作を模擬実行し、コピー予定のファイル名を表示します。\n"
 "[/W]  コピーを開始する前に確認のメッセージを表示します。\n"
 "[/T]  空のディレクトリ構造を作成しますが、ファイルはコピーしません。\n"

@@ -91,7 +91,7 @@ static void FillNumberFmt(NUMBERFMTW *fmt, LPWSTR decimal_buffer, int decimal_bu
  * Format an integer according to the current locale
  *
  * RETURNS
- *  The number of bytes written on success or 0 on failure
+ *  The number of characters written on success or 0 on failure
  */
 static int FormatInt(LONGLONG qdwValue, LPWSTR pszBuf, int cchBuf)
 {
@@ -124,7 +124,7 @@ static int FormatInt(LONGLONG qdwValue, LPWSTR pszBuf, int cchBuf)
  * after the decimal point
  *
  * RETURNS
- *  The number of bytes written on success or 0 on failure
+ *  The number of characters written on success or 0 on failure
  */
 static int FormatDouble(double value, int decimals, LPWSTR pszBuf, int cchBuf)
 {
@@ -477,7 +477,8 @@ LPWSTR WINAPI StrCatW(LPWSTR lpszStr, LPCWSTR lpszSrc)
 {
   TRACE("(%s,%s)\n", debugstr_w(lpszStr), debugstr_w(lpszSrc));
 
-  strcatW(lpszStr, lpszSrc);
+  if (lpszStr && lpszSrc)
+    strcatW(lpszStr, lpszSrc);
   return lpszStr;
 }
 
@@ -497,7 +498,8 @@ LPWSTR WINAPI StrCpyW(LPWSTR lpszStr, LPCWSTR lpszSrc)
 {
   TRACE("(%p,%s)\n", lpszStr, debugstr_w(lpszSrc));
 
-  strcpyW(lpszStr, lpszSrc);
+  if (lpszStr && lpszSrc)
+    strcpyW(lpszStr, lpszSrc);
   return lpszStr;
 }
 
@@ -855,8 +857,25 @@ int WINAPI StrToIntW(LPCWSTR lpszStr)
  */
 BOOL WINAPI StrToIntExA(LPCSTR lpszStr, DWORD dwFlags, LPINT lpiRet)
 {
+  LONGLONG li;
+  BOOL bRes;
+
+  TRACE("(%s,%08X,%p)\n", debugstr_a(lpszStr), dwFlags, lpiRet);
+
+  bRes = StrToInt64ExA(lpszStr, dwFlags, &li);
+  if (bRes) *lpiRet = li;
+  return bRes;
+}
+
+/*************************************************************************
+ * StrToInt64ExA	[SHLWAPI.@]
+ *
+ * See StrToIntExA.
+ */
+BOOL WINAPI StrToInt64ExA(LPCSTR lpszStr, DWORD dwFlags, LONGLONG *lpiRet)
+{
   BOOL bNegative = FALSE;
-  int iRet = 0;
+  LONGLONG iRet = 0;
 
   TRACE("(%s,%08X,%p)\n", debugstr_a(lpszStr), dwFlags, lpiRet);
 
@@ -922,8 +941,25 @@ BOOL WINAPI StrToIntExA(LPCSTR lpszStr, DWORD dwFlags, LPINT lpiRet)
  */
 BOOL WINAPI StrToIntExW(LPCWSTR lpszStr, DWORD dwFlags, LPINT lpiRet)
 {
+  LONGLONG li;
+  BOOL bRes;
+
+  TRACE("(%s,%08X,%p)\n", debugstr_w(lpszStr), dwFlags, lpiRet);
+
+  bRes = StrToInt64ExW(lpszStr, dwFlags, &li);
+  if (bRes) *lpiRet = li;
+  return bRes;
+}
+
+/*************************************************************************
+ * StrToInt64ExW	[SHLWAPI.@]
+ *
+ * See StrToIntExA.
+ */
+BOOL WINAPI StrToInt64ExW(LPCWSTR lpszStr, DWORD dwFlags, LONGLONG *lpiRet)
+{
   BOOL bNegative = FALSE;
-  int iRet = 0;
+  LONGLONG iRet = 0;
 
   TRACE("(%s,%08X,%p)\n", debugstr_w(lpszStr), dwFlags, lpiRet);
 

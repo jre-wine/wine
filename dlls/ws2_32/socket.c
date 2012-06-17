@@ -383,6 +383,9 @@ static const int ws_ip_map[][2] =
 #ifdef IP_PKTINFO
     MAP_OPTION( IP_PKTINFO ),
 #endif
+#ifdef IP_UNICAST_IF
+    MAP_OPTION( IP_UNICAST_IF ),
+#endif
 };
 
 static const int ws_ipv6_map[][2] =
@@ -398,6 +401,9 @@ static const int ws_ipv6_map[][2] =
     MAP_OPTION( IPV6_MULTICAST_LOOP ),
     MAP_OPTION( IPV6_UNICAST_HOPS ),
     MAP_OPTION( IPV6_V6ONLY ),
+#ifdef IPV6_UNICAST_IF
+    MAP_OPTION( IPV6_UNICAST_IF ),
+#endif
 };
 
 static const int ws_af_map[][2] =
@@ -1700,7 +1706,9 @@ static NTSTATUS WS2_async_accept( void *arg, IO_STATUS_BLOCK *iosb, NTSTATUS sta
     if (status != STATUS_PENDING)
         goto finish;
 
-    return STATUS_SUCCESS;
+    /* The APC has finished but no completion should be sent for the operation yet, additional processing
+     * needs to be performed by WS2_async_accept_recv() first. */
+    return STATUS_MORE_PROCESSING_REQUIRED;
 
 finish:
     iosb->u.Status = status;
@@ -1708,8 +1716,6 @@ finish:
 
     if (wsa->user_overlapped->hEvent)
         SetEvent(wsa->user_overlapped->hEvent);
-    if (wsa->cvalue)
-        WS_AddCompletion( HANDLE2SOCKET(wsa->listen_socket), wsa->cvalue, iosb->u.Status, iosb->Information );
 
     *apc = ws2_async_accept_apc;
     return status;
@@ -2040,7 +2046,8 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
         req->async.callback = wine_server_client_ptr( WS2_async_accept );
         req->async.iosb     = wine_server_client_ptr( overlapped );
         req->async.arg      = wine_server_client_ptr( wsa );
-        /* We don't set event or completion since we may also have to read */
+        req->async.cvalue   = cvalue;
+        /* We don't set event since we may also have to read */
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -2846,6 +2853,9 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 #endif
         case WS_IP_TOS:
         case WS_IP_TTL:
+#ifdef IP_UNICAST_IF
+        case WS_IP_UNICAST_IF:
+#endif
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
@@ -2878,6 +2888,9 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         case WS_IPV6_MULTICAST_LOOP:
         case WS_IPV6_UNICAST_HOPS:
         case WS_IPV6_V6ONLY:
+#ifdef IPV6_UNICAST_IF
+        case WS_IPV6_UNICAST_IF:
+#endif
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
@@ -4268,6 +4281,9 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
 #endif
         case WS_IP_TOS:
         case WS_IP_TTL:
+#ifdef IP_UNICAST_IF
+        case WS_IP_UNICAST_IF:
+#endif
             convert_sockopt(&level, &optname);
             break;
         case WS_IP_DONTFRAGMENT:
@@ -4293,6 +4309,9 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
         case WS_IPV6_MULTICAST_LOOP:
         case WS_IPV6_UNICAST_HOPS:
         case WS_IPV6_V6ONLY:
+#ifdef IPV6_UNICAST_IF
+        case WS_IPV6_UNICAST_IF:
+#endif
             convert_sockopt(&level, &optname);
             break;
         case WS_IPV6_DONTFRAG:

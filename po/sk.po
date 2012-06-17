@@ -1076,7 +1076,7 @@ msgid "Processing; "
 msgstr "Prebieha spracovanie; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Inicializácia; "
 
 #: comdlg32.rc:96
@@ -2147,9 +2147,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2268,9 +2268,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2541,7 +2541,7 @@ msgstr ""
 msgid "Certificate Trust List (*.stl)"
 msgstr ""
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr ""
 
@@ -2781,10 +2781,6 @@ msgstr ""
 
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
-msgstr ""
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
 msgstr ""
 
 #: cryptui.rc:160
@@ -3649,7 +3645,7 @@ msgid "Too many commands.\n"
 msgstr ""
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr ""
 
 #: winerror.mc:256
@@ -3661,7 +3657,7 @@ msgid "Unexpected network error.\n"
 msgstr "Neočakávaná sieťová chyba.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr ""
 
 #: winerror.mc:271
@@ -4280,7 +4276,7 @@ msgid "Invalid flags.\n"
 msgstr ""
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr ""
 
 #: winerror.mc:1046
@@ -4948,7 +4944,7 @@ msgid "Continue work in progress.\n"
 msgstr ""
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr ""
 
 #: winerror.mc:1871
@@ -5999,7 +5995,7 @@ msgid "Invalid authentication identity.\n"
 msgstr ""
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr ""
 
 #: winerror.mc:3171
@@ -6139,7 +6135,7 @@ msgid "Invalid user buffer.\n"
 msgstr ""
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr ""
 
 #: winerror.mc:3341
@@ -6287,7 +6283,7 @@ msgid "RPC comm failure.\n"
 msgstr ""
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr ""
 
 #: winerror.mc:3521
@@ -6316,7 +6312,7 @@ msgid "Invalid handle operation.\n"
 msgstr ""
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr ""
 
 #: winerror.mc:3556
@@ -6537,8 +6533,8 @@ msgstr ""
 msgid "Password"
 msgstr ""
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
 msgstr ""
 
 #: mpr.rc:27
@@ -8202,10 +8198,6 @@ msgstr ""
 msgid "Realm"
 msgstr ""
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr ""
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr ""
@@ -8952,7 +8944,7 @@ msgid "Filter Error"
 msgstr ""
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr ""
 
 #: wldap32.rc:116
@@ -9455,12 +9447,12 @@ msgstr ""
 #: cmd.rc:307 xcopy.rc:40
 msgctxt "Yes key"
 msgid "Y"
-msgstr ""
+msgstr "O"
 
 #: cmd.rc:308 xcopy.rc:41
 msgctxt "No key"
 msgid "N"
-msgstr ""
+msgstr "N"
 
 #: cmd.rc:309
 msgid "File association missing for extension %1\n"
@@ -9530,7 +9522,7 @@ msgstr ""
 #: cmd.rc:327 xcopy.rc:42
 msgctxt "All key"
 msgid "A"
-msgstr ""
+msgstr "V"
 
 #: cmd.rc:328
 #, fuzzy
@@ -9601,11 +9593,11 @@ msgstr ""
 
 #: cmd.rc:343
 msgid " (Yes|No)"
-msgstr ""
+msgstr " (Áno|Nie)"
 
 #: cmd.rc:344
 msgid " (Yes|No|All)"
-msgstr ""
+msgstr " (Áno|Nie|Všetky)"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10115,7 +10107,7 @@ msgstr ""
 msgid "&Toolbar"
 msgstr "&Panel nástrojov"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr ""
 
@@ -10801,7 +10793,7 @@ msgid "Contains commands for editing values or keys"
 msgstr ""
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr ""
 
 #: regedit.rc:137
@@ -12600,7 +12592,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr ""
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr ""
 
 #: wineconsole.rc:35
@@ -13197,16 +13189,12 @@ msgid "&Get text"
 msgstr ""
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr ""
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "&Pravítko"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr ""
 
 #: wordpad.rc:75
 msgid "&Insert"

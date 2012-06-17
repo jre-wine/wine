@@ -1081,7 +1081,7 @@ msgid "Processing; "
 msgstr "In Bearbeitung; "
 
 #: comdlg32.rc:95
-msgid "Initialising; "
+msgid "Initializing; "
 msgstr "Initialisierend; "
 
 #: comdlg32.rc:96
@@ -2153,9 +2153,9 @@ msgid ""
 "certificate trust lists from a file to a certificate store.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2288,9 +2288,9 @@ msgid ""
 "certificate trust lists from a certificate store to a file.\n"
 "\n"
 "A certificate can be used to identify you or the computer with which you are "
-"communicating.  It can also be used for authentication, and to sign "
-"messages.  Certificate stores are collections of certificates, certificate "
-"revocation lists, and certificate trust lists.\n"
+"communicating. It can also be used for authentication, and to sign messages. "
+"Certificate stores are collections of certificates, certificate revocation "
+"lists, and certificate trust lists.\n"
 "\n"
 "To continue, click Next."
 msgstr ""
@@ -2580,7 +2580,7 @@ msgstr "Zertifikatssperrliste (*.crl)"
 msgid "Certificate Trust List (*.stl)"
 msgstr "Zertifikatsvertrauensliste (*.stl)"
 
-#: cryptui.rc:78
+#: cryptui.rc:78 cryptui.rc:159
 msgid "Microsoft Serialized Certificate Store (*.sst)"
 msgstr "Microsoft Speicher serieller Zertifikate (*.sst)"
 
@@ -2853,10 +2853,6 @@ msgstr "CMS/PKCS #7 Zertifikate (*.p7b)"
 #: cryptui.rc:158
 msgid "Personal Information Exchange (*.pfx)"
 msgstr "Privater Informationsaustausch (*.pfx)"
-
-#: cryptui.rc:159
-msgid "Serialized Certificate Store (*.sst)"
-msgstr "Zertifikatsspeicher (*.sst)"
 
 #: cryptui.rc:160
 msgid "File Format"
@@ -3729,7 +3725,7 @@ msgid "Too many commands.\n"
 msgstr "Zu viele Befehle.\n"
 
 #: winerror.mc:251
-msgid "Adaptor hardware error.\n"
+msgid "Adapter hardware error.\n"
 msgstr "Fehler in Adapter-Hardware.\n"
 
 #: winerror.mc:256
@@ -3741,7 +3737,7 @@ msgid "Unexpected network error.\n"
 msgstr "Unerwarteter Netzwerkfehler.\n"
 
 #: winerror.mc:266
-msgid "Bad remote adaptor.\n"
+msgid "Bad remote adapter.\n"
 msgstr "Fehlerhafter Remote-Adapter.\n"
 
 #: winerror.mc:271
@@ -4353,7 +4349,7 @@ msgid "Invalid flags.\n"
 msgstr "Ungültige Flags.\n"
 
 #: winerror.mc:1041
-msgid "Unrecognised volume.\n"
+msgid "Unrecognized volume.\n"
 msgstr "Unerkanntes Medium.\n"
 
 #: winerror.mc:1046
@@ -5011,7 +5007,7 @@ msgid "Continue work in progress.\n"
 msgstr "Vorgang in Arbeit fortsetzen.\n"
 
 #: winerror.mc:1866
-msgid "Already initialised.\n"
+msgid "Already initialized.\n"
 msgstr "Bereits initialisiert.\n"
 
 #: winerror.mc:1871
@@ -6043,7 +6039,7 @@ msgid "Invalid authentication identity.\n"
 msgstr "Ungültige Authentifizierungsidentität.\n"
 
 #: winerror.mc:3166
-msgid "Unknown authorisation service.\n"
+msgid "Unknown authorization service.\n"
 msgstr "Unbekannter Autorisierungsdienst.\n"
 
 #: winerror.mc:3171
@@ -6179,7 +6175,7 @@ msgid "Invalid user buffer.\n"
 msgstr "Ungültiger Benutzerpuffer.\n"
 
 #: winerror.mc:3336
-msgid "Unrecognised media.\n"
+msgid "Unrecognized media.\n"
 msgstr "Unerkanntes Medium.\n"
 
 #: winerror.mc:3341
@@ -6323,7 +6319,7 @@ msgid "RPC comm failure.\n"
 msgstr "RPC Kommunikationsausfall.\n"
 
 #: winerror.mc:3516
-msgid "Unsupported authorisation level.\n"
+msgid "Unsupported authorization level.\n"
 msgstr "Nicht unterstützte Berechtigungsstufe.\n"
 
 #: winerror.mc:3521
@@ -6351,7 +6347,7 @@ msgid "Invalid handle operation.\n"
 msgstr "Ungültige Handle-Operation.\n"
 
 #: winerror.mc:3551
-msgid "Wrong serialising package version.\n"
+msgid "Wrong serializing package version.\n"
 msgstr "Fehlerhafte Serialisierungs-Paket-Version.\n"
 
 #: winerror.mc:3556
@@ -6572,9 +6568,9 @@ msgstr "Benutzername"
 msgid "Password"
 msgstr "Kennwort"
 
-#: mpr.rc:44
-msgid "&Save this password (Insecure)"
-msgstr "Dieses Kennwort speichern (unsicher)"
+#: mpr.rc:44 wininet.rc:46 wininet.rc:66
+msgid "&Save this password (insecure)"
+msgstr "Dieses &Kennwort speichern (unsicher)"
 
 #: mpr.rc:27
 msgid "Entire Network"
@@ -6679,7 +6675,7 @@ msgstr ""
 "Windows Installer %s\n"
 "\n"
 "Aufruf:\n"
-"msiexec Befehl {Parameter} [Zusätzliche Parameter]\n"
+"msiexec Befehl {erforderliche Parameter} [zusätzliche Parameter]\n"
 "\n"
 "Produkt installieren:\n"
 "\t/i {Paket|Produktcode} [Eigenschaft]\n"
@@ -6702,7 +6698,7 @@ msgstr ""
 "\t/y\n"
 "Registrierung des MSI Service aufheben:\n"
 "\t/z\n"
-"Hilfe anzeigen:\n"
+"Diese Hilfe anzeigen:\n"
 "\t/help\n"
 "\t/?\n"
 
@@ -8268,10 +8264,6 @@ msgstr "Duplex:"
 msgid "Realm"
 msgstr "Bereich"
 
-#: wininet.rc:46 wininet.rc:66
-msgid "&Save this password (insecure)"
-msgstr "Dieses &Kennwort speichern (unsicher)"
-
 #: wininet.rc:54
 msgid "Authentication Required"
 msgstr "Benutzeranmeldung"
@@ -9156,7 +9148,7 @@ msgid "Filter Error"
 msgstr "Filterfehler"
 
 #: wldap32.rc:115
-msgid "User Cancelled"
+msgid "User Canceled"
 msgstr "Benutzerabbruch"
 
 #: wldap32.rc:116
@@ -9169,11 +9161,11 @@ msgstr "Nicht genügend Speicher"
 
 #: wldap32.rc:118
 msgid "Can't connect to the LDAP server"
-msgstr "Kann nicht zum LDAP Server verbinden"
+msgstr "Kann nicht zum LDAP-Server verbinden"
 
 #: wldap32.rc:119
 msgid "Operation not supported by this version of the LDAP protocol"
-msgstr "Die Operation wird durch dieses LDAP Protokoll nicht unterstützt"
+msgstr "Operation durch diese Version des LDAP-Protokoll nicht unterstützt"
 
 #: wldap32.rc:120
 msgid "Specified control was not found in message"
@@ -10588,7 +10580,7 @@ msgstr "&Versteckte Komponenten-Kategorien"
 msgid "&Toolbar"
 msgstr "&Symbolleiste"
 
-#: oleview.rc:65 oleview.rc:87 winefile.rc:64
+#: oleview.rc:65 oleview.rc:87 winefile.rc:64 wordpad.rc:71 wordpad.rc:264
 msgid "&Status Bar"
 msgstr "S&tatusleiste"
 
@@ -11276,24 +11268,24 @@ msgstr "Befehle zum Bearbeiten der ganzen Registry"
 
 #: regedit.rc:135
 msgid "Contains commands for editing values or keys"
-msgstr "Befehle zum Ändern von Schlüsseln oder Werten"
+msgstr "Befehle zum Ändern von Schlüsseln oder Datenwerten"
 
 #: regedit.rc:136
-msgid "Contains commands for customising the registry window"
+msgid "Contains commands for customizing the registry window"
 msgstr "Befehle zum Anpassen des Fensters"
 
 #: regedit.rc:137
 msgid "Contains commands for accessing frequently used keys"
-msgstr "Befehle für die Favoriten"
+msgstr "Befehle zum Zugriff auf häufig benutzte Schlüssel"
 
 #: regedit.rc:138
 msgid ""
 "Contains commands for displaying help and information about registry editor"
-msgstr "Befehle zum Anzeigen von Hilfe oder Informationen über das Programm"
+msgstr "Befehle zum Anzeigen der Hilfe oder Informationen über das Programm"
 
 #: regedit.rc:139
 msgid "Contains commands for creating new keys or values"
-msgstr "Befehle zum Erstellen von neuen Schlüsseln oder Daten"
+msgstr "Befehle zum Erstellen von neuen Schlüsseln oder Datenwerten"
 
 #: regedit.rc:124
 msgid "Data"
@@ -11329,7 +11321,7 @@ msgstr "(Wert nicht gesetzt)"
 
 #: regedit.rc:203
 msgid "(cannot display value)"
-msgstr "(kann Wert nicht darstellen)"
+msgstr "(Wert kann nicht dargestellt werden)"
 
 #: regedit.rc:204
 msgid "(unknown %d)"
@@ -11345,7 +11337,7 @@ msgstr "Fügt Schlüssel zu den Favoriten hinzu"
 
 #: regedit.rc:162
 msgid "Removes keys from the favorites list"
-msgstr "Löscht Schlüssel von den Favoriten"
+msgstr "Entfernt Schlüssel aus den Favoriten"
 
 #: regedit.rc:163
 msgid "Shows or hides the status bar"
@@ -11413,15 +11405,15 @@ msgstr "Druckt Teile oder die gesamte Registry aus"
 
 #: regedit.rc:155
 msgid "Displays program information, version number and copyright"
-msgstr "Zeigt Programmname, Version und Copyright an"
+msgstr "Zeigt Programminformationen, Version und Copyright an"
 
 #: regedit.rc:178
 msgid "Can't query value '%s'"
-msgstr "Kann den Wert '%s' nicht lesen"
+msgstr "Der Wert '%s' kann nicht gelesen werden"
 
 #: regedit.rc:179
 msgid "Can't edit keys of this type (%u)"
-msgstr "Kann Schlüssel von diesem Typ (%u) nicht ändern"
+msgstr "Schlüssel von diesem Typ (%u) können nicht geändert werden"
 
 #: regedit.rc:180
 msgid "Value is too big (%u)"
@@ -11433,7 +11425,7 @@ msgstr "Bitte bestätigen"
 
 #: regedit.rc:182
 msgid "Are you sure you want to delete value '%s'?"
-msgstr "Wollen Sie '%s' wirklich löschen?"
+msgstr "Möchten Sie den Wert '%s' wirklich löschen?"
 
 #: regedit.rc:186
 msgid "Search string '%s' not found"
@@ -11441,7 +11433,7 @@ msgstr "Suchfolge '%s' wurde nicht gefunden"
 
 #: regedit.rc:183
 msgid "Are you sure you want to delete these values?"
-msgstr "Wollen Sie diese Werte wirklich löschen?"
+msgstr "Möchten Sie diese Werte wirklich löschen?"
 
 #: regedit.rc:184
 msgid "New Key #%d"
@@ -11453,7 +11445,7 @@ msgstr "Neuer Wert #%d"
 
 #: regedit.rc:177
 msgid "Can't query key '%s'"
-msgstr "Kann den Schlüssel '%s' nicht lesen"
+msgstr "Der Schlüssel '%s' kann nicht gelesen werden"
 
 #: regedit.rc:149
 msgid "Adds a new multi string value"
@@ -11471,13 +11463,13 @@ msgid ""
 msgstr ""
 "Es konnte keine Anwendung gestartet werden, oder es ist keine Anwendung mit "
 "der angegebenen Datei verknüpft.\n"
-"ShellExecuteEx gescheitert"
+"ShellExecuteEx fehlgeschlagen"
 
 #: start.rc:43
 msgid "Could not translate the specified Unix filename to a DOS filename."
 msgstr ""
-"Der angegebene Unix Dateiname konnte nicht in einen DOS Dateinamen "
-"umgewandelt werden."
+"Der angegebene Unix-Dateiname konnte nicht in einen DOS-Dateinamen übersetzt "
+"werden."
 
 #: taskkill.rc:27
 msgid "Usage: taskkill [/?] [/f] [/im ProcessName | /pid ProcessID]\n"
@@ -13118,7 +13110,7 @@ msgid "Screen buffer size must be greater or equal to the window's one"
 msgstr "Die Bildschirmgröße muss größer oder gleich der des Fensters sein"
 
 #: wineconsole.rc:34
-msgid "Each character is %1!u! pixels wide on %2!u! pixels high"
+msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
 msgstr "Jeder Buchstabe ist %1!u! Pixel breit und %2!u! Pixel hoch"
 
 #: wineconsole.rc:35
@@ -13718,16 +13710,12 @@ msgid "&Get text"
 msgstr "&Text holen"
 
 #: wordpad.rc:69 wordpad.rc:262
-msgid "&Formatbar"
+msgid "&Format Bar"
 msgstr "&Formatierungsleiste"
 
 #: wordpad.rc:70 wordpad.rc:263
 msgid "&Ruler"
 msgstr "L&ineal"
-
-#: wordpad.rc:71 wordpad.rc:264
-msgid "&Statusbar"
-msgstr "Status&leiste"
 
 #: wordpad.rc:75
 msgid "&Insert"

@@ -748,13 +748,11 @@ int CDECL MSVCRT__wunlink(const MSVCRT_wchar_t *path)
   return -1;
 }
 
-/* _flushall calls MSVCRT_fflush which calls _flushall */
+/* flush_all_buffers calls MSVCRT_fflush which calls flush_all_buffers */
 int CDECL MSVCRT_fflush(MSVCRT_FILE* file);
 
-/*********************************************************************
- *		_flushall (MSVCRT.@)
- */
-int CDECL MSVCRT__flushall(void)
+/* INTERNAL: Flush all stream buffer */
+static int msvcrt_flush_all_buffers(int mask)
 {
   int i, num_flushed = 0;
   MSVCRT_FILE *file;
@@ -765,7 +763,7 @@ int CDECL MSVCRT__flushall(void)
 
     if (file->_flag)
     {
-      if(file->_flag & MSVCRT__IOWRT) {
+      if(file->_flag & mask) {
 	MSVCRT_fflush(file);
         num_flushed++;
       }
@@ -778,12 +776,20 @@ int CDECL MSVCRT__flushall(void)
 }
 
 /*********************************************************************
+ *		_flushall (MSVCRT.@)
+ */
+int CDECL MSVCRT__flushall(void)
+{
+    return msvcrt_flush_all_buffers(MSVCRT__IOWRT | MSVCRT__IOREAD);
+}
+
+/*********************************************************************
  *		fflush (MSVCRT.@)
  */
 int CDECL MSVCRT_fflush(MSVCRT_FILE* file)
 {
     if(!file) {
-        MSVCRT__flushall();
+        msvcrt_flush_all_buffers(MSVCRT__IOWRT);
     } else if(file->_flag & MSVCRT__IOWRT) {
         int res;
 
@@ -792,6 +798,13 @@ int CDECL MSVCRT_fflush(MSVCRT_FILE* file)
         MSVCRT__unlock_file(file);
 
         return res;
+    } else if(file->_flag & MSVCRT__IOREAD) {
+        MSVCRT__lock_file(file);
+        file->_cnt = 0;
+        file->_ptr = file->_base;
+        MSVCRT__unlock_file(file);
+
+        return 0;
     }
     return 0;
 }
@@ -1268,9 +1281,15 @@ static int msvcrt_get_flags(const MSVCRT_wchar_t* mode, int *open_flags, int* st
       *open_flags |=  MSVCRT__O_BINARY;
       *open_flags &= ~MSVCRT__O_TEXT;
       break;
-    case 'T': case 't':
+    case 't':
       *open_flags |=  MSVCRT__O_TEXT;
       *open_flags &= ~MSVCRT__O_BINARY;
+      break;
+    case 'D':
+      *open_flags |= MSVCRT__O_TEMPORARY;
+      break;
+    case 'T':
+      *open_flags |= MSVCRT__O_SHORT_LIVED;
       break;
     case '+':
     case ' ':

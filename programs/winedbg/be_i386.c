@@ -354,6 +354,11 @@ static unsigned be_i386_is_function_return(const void* insn)
     BYTE ch;
 
     if (!dbg_read_memory(insn, &ch, sizeof(ch))) return FALSE;
+    if (ch == 0xF3) /* REP */
+    {
+        insn = (const char*)insn + 1;
+        if (!dbg_read_memory(insn, &ch, sizeof(ch))) return FALSE;
+    }
     return (ch == 0xC2) || (ch == 0xC3);
 }
 
@@ -772,6 +777,13 @@ static int be_i386_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
     return TRUE;
 }
 
+static int be_i386_store_integer(const struct dbg_lvalue* lvalue, unsigned size,
+                                 unsigned is_signed, LONGLONG val)
+{
+    /* this is simple as we're on a little endian CPU */
+    return memory_write_value(lvalue, size, &val);
+}
+
 struct backend_cpu be_i386 =
 {
     IMAGE_FILE_MACHINE_I386,
@@ -797,5 +809,6 @@ struct backend_cpu be_i386 =
     be_i386_adjust_pc_for_break,
     be_i386_fetch_integer,
     be_i386_fetch_float,
+    be_i386_store_integer,
 };
 #endif
