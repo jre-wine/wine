@@ -120,7 +120,7 @@ Description: Windows API implementation - development files
 Package: libwine
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
-Multi-Arch: same
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  ${wine:Depends},
