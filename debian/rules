@@ -365,9 +365,6 @@ binary-arch: install-arch-stamp
 	# We don't need symbols for the build tools...
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
-	# exclude architecture-specific bitmap font files (closes: bug #676443)
-	rm -rf debian/libwine/usr/share/wine/fonts/*.fon
-
 	# install reportbug control files
 	for fn in debian/*.bugcontrol; do \
 	 sfn="`basename "$$fn" .bugcontrol`"; \
