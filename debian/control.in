@@ -84,6 +84,8 @@ Description: Windows API implementation - binary loader
 
 Package: wine64-bin
 Architecture: any-amd64
+Depends: ${misc:Depends},
+ x11-utils,
 Conflicts:
  wine-bin,
 Description: Windows API implementation - binary loader
