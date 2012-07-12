@@ -112,6 +112,7 @@ control-stamp: debian/control.in
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
 	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
 	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
+	    -e 's/wine64-bin$(VERSUFFIX)/wine64-bin/g' \
 	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
 	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' debian/control.in > debian/control
 	touch control-stamp
@@ -400,11 +401,6 @@ binary-arch: control-stamp
 	dh_testroot
 	# create installation directories
 	dh_installdirs -s
-
-	# install wine64.sh helper script
-	mkdir -p debian/wine64-bin-unstable/usr/bin
-	cp debian/wine64.sh debian/wine64-bin-unstable/usr/bin/wine
-	chmod +x debian/wine64-bin-unstable/usr/bin/wine
 
 	bash debian/doclink.sh libwine$(VERSUFFIX)
 

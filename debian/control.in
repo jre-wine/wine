@@ -37,7 +37,7 @@ Package: wine
 Architecture: any
 Depends:
  ${misc:Depends},
- wine-bin (>= ${source:Version}) | wine64-bin (>= ${source:Version}),
+ wine-bin (>= ${source:Version}) | wine64-bin,
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
@@ -71,17 +71,6 @@ Description: Windows API implementation - binary loader
  .
  This package provides the binary loader program for running Windows
  executables.
-
-Package: wine64-bin
-Architecture: any-amd64
-Conflicts:
- wine-bin,
-Description: Windows API implementation - binary loader
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides instructions for installing 32-bit wine on 64-bit
- systems.
 
 Package: libwine-dbg
 Architecture: any-i386 any-powerpc any-sparc
