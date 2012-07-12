@@ -39,6 +39,16 @@ Depends:
  ${misc:Depends},
  wine-bin (>= ${source:Version}) | wine64-bin (>= ${source:Version}),
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, klamav | clamav
+Conflicts:
+ wine1.0,
+ wine1.2,
+ wine1.3,
+ wine1.4,
+Replaces:
+ wine1.0,
+ wine1.2,
+ wine1.3,
+ wine1.4,
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
