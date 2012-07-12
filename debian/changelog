@@ -1,3 +1,15 @@
+wine (1.4.1-2) unstable; urgency=medium
+
+  [ Michael Gilbert ]
+  * Improve multiarch instructions (closes: #680120).
+
+  [ Hilko Bengen ]
+  * Conflict with ubuntu wine packages (closes: #678388).
+  * Add fontconfig and other library dependencies (closes: #680421).
+  * Add misc:Pre-Depends.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 12 Jul 2012 17:34:23 -0400
+
 wine (1.4.1-1) unstable; urgency=medium
 
   * New upstream release 1.4.1, released Jun 17, 2012.
