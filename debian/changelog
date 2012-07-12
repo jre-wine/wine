@@ -1,3 +1,10 @@
+wine-unstable (1.5.6-2) unstable; urgency=low
+
+  * Use the wine64-bin helper instead of wine64-bin-unstable
+   (closes: #679490).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 12 Jul 2012 17:15:08 -0400
+
 wine-unstable (1.5.6-1) unstable; urgency=medium
 
   * New upstream release 1.5.6, released Jun 8, 2012.
