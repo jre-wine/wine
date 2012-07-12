@@ -149,6 +149,7 @@ Suggests:
  libwine-openal (= ${binary:Version}),
  libwine-gphoto2 (= ${binary:Version}),
 Pre-Depends:
+ ${misc:Pre-Depends},
  ${wine:Pre-Depends}
 Replaces:
  wine (<< 0.9.11-1),
