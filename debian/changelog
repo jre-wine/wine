@@ -1,3 +1,9 @@
+wine (1.4.1-3) unstable; urgency=high
+
+  * Install wine64-bin copyright file (closes: #687062)
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 18 Sep 2012 23:36:11 -0400
+
 wine (1.4.1-2) unstable; urgency=medium
 
   [ Michael Gilbert ]
