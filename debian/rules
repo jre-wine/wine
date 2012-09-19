@@ -414,6 +414,10 @@ binary-arch: control-stamp
 
 	bash debian/doclink.sh libwine$(VERSUFFIX)
 
+	# install wine64-bin documentation
+	rm -f debian/wine64-bin/usr/share/doc/wine64-bin
+	dh_installdocs -pwine64-bin
+
 	dh_installdocs -plibwine$(VERSUFFIX)
 	dh_installchangelogs -plibwine$(VERSUFFIX)
 
