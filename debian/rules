@@ -345,6 +345,11 @@ binary-arch: install-arch-stamp
 	# split up libwine
 	bash debian/split.sh "$(VERSUFFIX)" libwine $(patsubst %,%/wine$(VERSUFFIX),$(LIBDIRS))
 
+	# install wine documentation and changelog
+	rm -f debian/wine/usr/share/doc/wine
+	dh_installdocs -pwine
+	dh_installchangelogs -pwine
+
 	dh_installdocs -plibwine$(VERSUFFIX)
 	dh_installchangelogs -plibwine$(VERSUFFIX)
 
@@ -411,9 +416,11 @@ binary-arch: control-stamp
 
 	bash debian/doclink.sh libwine$(VERSUFFIX)
 
-	# install wine64-bin documentation
+	# install wine, wine64-bin documentation and changelog
 	rm -f debian/wine64-bin/usr/share/doc/wine64-bin
-	dh_installdocs -pwine64-bin
+	rm -f debian/wine/usr/share/doc/wine
+	dh_installdocs -pwine64-bin -pwine
+	dh_installchangelogs -pwine64-bin -pwine
 
 	dh_installdocs -plibwine$(VERSUFFIX)
 	dh_installchangelogs -plibwine$(VERSUFFIX)
