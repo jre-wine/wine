@@ -6,6 +6,7 @@ Uploaders:
  Ove Kaaven <ovek@arcticnet.no>,
  Arthur Loiret <arthur.loiret@gmail.com>,
  Michael Gilbert <mgilbert@debian.org>,
+ Hilko Bengen <bengen@debian.org>,
 Build-Depends: debhelper (>= 9), dpkg-dev (>= 1.16.0), flex, bison,
  libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
  libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
