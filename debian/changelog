@@ -1,3 +1,19 @@
+wine (1.4.1-4) unstable; urgency=low
+
+  * sfnt2fnt: Fix broken *.fon files on big-endian architectures
+  * No longer remove *.fon files (affects: #680421)
+  * Remove libnss-mdns warning as the issue seems to have been fixed
+    (closes: #474289)
+  * wine64-bin: Use xmessage (with fallback to console) for multiarch
+    instructions
+  * Add SVG icon extracted from programs/winecfg/logo.svg (closes:
+    #677538, #679572)
+  * Install documentation and changelog for the wine and wine64-bin
+    [amd64] packages (closes: #687062)
+  * Add myself to uploaders
+
+ -- Hilko Bengen <bengen@debian.org>  Sun, 30 Sep 2012 23:56:44 +0200
+
 wine (1.4.1-3) unstable; urgency=high
 
   * Install wine64-bin copyright file (closes: #687062)
