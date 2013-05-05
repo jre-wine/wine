@@ -840,7 +840,9 @@ static float fromfixedpoint(const FIXED v)
 struct format_string_args
 {
     GpPath *path;
-    UINT maxY;
+    float maxY;
+    float scale;
+    float ascent;
 };
 
 static GpStatus format_string_callback(HDC dc,
@@ -853,12 +855,15 @@ static GpStatus format_string_callback(HDC dc,
     struct format_string_args *args = priv;
     GpPath *path = args->path;
     GpStatus status = Ok;
-    float x = bounds->X;
-    float y = bounds->Y;
+    float x = rect->X + (bounds->X - rect->X) * args->scale;
+    float y = rect->Y + (bounds->Y - rect->Y) * args->scale;
     int i;
 
     if (underlined_index_count)
         FIXME("hotkey underlines not drawn yet\n");
+
+    if (y + bounds->Height * args->scale > args->maxY)
+        args->maxY = y + bounds->Height * args->scale;
 
     for (i = index; i < length; ++i)
     {
@@ -866,7 +871,6 @@ static GpStatus format_string_callback(HDC dc,
         TTPOLYGONHEADER *ph = NULL;
         char *start;
         DWORD len, ofs = 0;
-        UINT bb_end;
         len = GetGlyphOutlineW(dc, string[i], GGO_BEZIER, &gm, 0, NULL, &identity);
         if (len == GDI_ERROR)
         {
@@ -881,9 +885,6 @@ static GpStatus format_string_callback(HDC dc,
             break;
         }
         GetGlyphOutlineW(dc, string[i], GGO_BEZIER, &gm, len, start, &identity);
-        bb_end = gm.gmBlackBoxY + gm.gmptGlyphOrigin.y;
-        if (bb_end + y > args->maxY)
-            args->maxY = bb_end + y;
 
         ofs = 0;
         while (ofs < len)
@@ -891,8 +892,8 @@ static GpStatus format_string_callback(HDC dc,
             DWORD ofs_start = ofs;
             ph = (TTPOLYGONHEADER*)&start[ofs];
             path->pathdata.Types[path->pathdata.Count] = PathPointTypeStart;
-            path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(ph->pfxStart.x);
-            path->pathdata.Points[path->pathdata.Count++].Y = y + bb_end - fromfixedpoint(ph->pfxStart.y);
+            path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(ph->pfxStart.x) * args->scale;
+            path->pathdata.Points[path->pathdata.Count++].Y = y + args->ascent - fromfixedpoint(ph->pfxStart.y) * args->scale;
             TRACE("Starting at count %i with pos %f, %f)\n", path->pathdata.Count, x, y);
             ofs += sizeof(*ph);
             while (ofs - ofs_start < ph->cb)
@@ -907,16 +908,16 @@ static GpStatus format_string_callback(HDC dc,
                     for (j = 0; j < curve->cpfx; ++j)
                     {
                         path->pathdata.Types[path->pathdata.Count] = PathPointTypeLine;
-                        path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(curve->apfx[j].x);
-                        path->pathdata.Points[path->pathdata.Count++].Y = y + bb_end - fromfixedpoint(curve->apfx[j].y);
+                        path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(curve->apfx[j].x) * args->scale;
+                        path->pathdata.Points[path->pathdata.Count++].Y = y + args->ascent - fromfixedpoint(curve->apfx[j].y) * args->scale;
                     }
                     break;
                 case TT_PRIM_CSPLINE:
                     for (j = 0; j < curve->cpfx; ++j)
                     {
                         path->pathdata.Types[path->pathdata.Count] = PathPointTypeBezier;
-                        path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(curve->apfx[j].x);
-                        path->pathdata.Points[path->pathdata.Count++].Y = y + bb_end - fromfixedpoint(curve->apfx[j].y);
+                        path->pathdata.Points[path->pathdata.Count].X = x + fromfixedpoint(curve->apfx[j].x) * args->scale;
+                        path->pathdata.Points[path->pathdata.Count++].Y = y + args->ascent - fromfixedpoint(curve->apfx[j].y) * args->scale;
                     }
                     break;
                 default:
@@ -927,8 +928,8 @@ static GpStatus format_string_callback(HDC dc,
             path->pathdata.Types[path->pathdata.Count - 1] |= PathPointTypeCloseSubpath;
         }
         path->newfigure = TRUE;
-        x += gm.gmCellIncX;
-        y += gm.gmCellIncY;
+        x += gm.gmCellIncX * args->scale;
+        y += gm.gmCellIncY * args->scale;
 
         GdipFree(ph);
         if (status != Ok)
@@ -948,12 +949,24 @@ GpStatus WINGDIPAPI GdipAddPathString(GpPath* path, GDIPCONST WCHAR* string, INT
     GpPath *backup;
     struct format_string_args args;
     int i;
+    UINT16 native_height;
+    RectF scaled_layout_rect;
+    TEXTMETRICW textmetric;
 
     FIXME("(%p, %s, %d, %p, %d, %f, %p, %p): stub\n", path, debugstr_w(string), length, family, style, emSize, layoutRect, format);
     if (!path || !string || !family || !emSize || !layoutRect || !format)
         return InvalidParameter;
 
-    status = GdipCreateFont(family, emSize, style, UnitPixel, &font);
+    status = GdipGetEmHeight(family, style, &native_height);
+    if (status != Ok)
+        return status;
+
+    scaled_layout_rect.X = layoutRect->X;
+    scaled_layout_rect.Y = layoutRect->Y;
+    scaled_layout_rect.Width = layoutRect->Width * native_height / emSize;
+    scaled_layout_rect.Height = layoutRect->Height * native_height / emSize;
+
+    status = GdipCreateFont(family, native_height, style, UnitPixel, &font);
     if (status != Ok)
         return status;
 
@@ -974,9 +987,13 @@ GpStatus WINGDIPAPI GdipAddPathString(GpPath* path, GDIPCONST WCHAR* string, INT
     dc = CreateCompatibleDC(0);
     SelectObject(dc, hfont);
 
+    GetTextMetricsW(dc, &textmetric);
+
     args.path = path;
     args.maxY = 0;
-    status = gdip_format_string(dc, string, length, NULL, layoutRect, format, format_string_callback, &args);
+    args.scale = emSize / native_height;
+    args.ascent = textmetric.tmAscent * args.scale;
+    status = gdip_format_string(dc, string, length, NULL, &scaled_layout_rect, format, format_string_callback, &args);
 
     DeleteDC(dc);
     DeleteObject(hfont);
@@ -991,12 +1008,12 @@ GpStatus WINGDIPAPI GdipAddPathString(GpPath* path, GDIPCONST WCHAR* string, INT
     }
     if (format && format->vertalign == StringAlignmentCenter && layoutRect->Y + args.maxY < layoutRect->Height)
     {
-        float inc = layoutRect->Height - args.maxY - layoutRect->Y;
+        float inc = layoutRect->Height + layoutRect->Y - args.maxY;
         inc /= 2;
         for (i = backup->pathdata.Count; i < path->pathdata.Count; ++i)
             path->pathdata.Points[i].Y += inc;
     } else if (format && format->vertalign == StringAlignmentFar) {
-        float inc = layoutRect->Height - args.maxY - layoutRect->Y;
+        float inc = layoutRect->Height + layoutRect->Y - args.maxY;
         for (i = backup->pathdata.Count; i < path->pathdata.Count; ++i)
             path->pathdata.Points[i].Y += inc;
     }

@@ -29,16 +29,18 @@ static inline int get_ref(IUnknown *obj)
     return IUnknown_Release(obj);
 }
 
-static inline void check_ref(IUnknown *obj, int exp)
+#define check_ref(obj, exp) _check_ref(__LINE__, obj, exp)
+static inline void _check_ref(unsigned int line, IUnknown *obj, int exp)
 {
     int ref = get_ref(obj);
-    ok (exp == ref, "Invalid refcount. Expected %d, got %d\n", exp, ref);
+    ok_(__FILE__, line)(exp == ref, "Invalid refcount. Expected %d, got %d\n", exp, ref);
 }
 
-static inline void check_release(IUnknown *obj, int exp)
+#define check_release(obj, exp) _check_release(__LINE__, obj, exp)
+static inline void _check_release(unsigned int line, IUnknown *obj, int exp)
 {
     int ref = IUnknown_Release(obj);
-    ok (ref == exp, "Invalid refcount. Expected %d, got %d\n", exp, ref);
+    ok_(__FILE__, line)(ref == exp, "Invalid refcount. Expected %d, got %d\n", exp, ref);
 }
 
 #define admitted_error 0.0001f
@@ -307,6 +309,18 @@ static void test_ID3DXFont(IDirect3DDevice9 *device)
     ID3DXFont *font;
     HRESULT hr;
     int ref;
+    int i;
+    static const struct {
+        INT font_height;
+        UINT expected_size;
+        DWORD expected_levels;
+    } texture_tests[] = {
+        {  6, 128, 4 },
+        {  8, 128, 4 },
+        { 10, 256, 5 },
+        { 12, 256, 5 },
+        { 72, 256, 8 }
+    };
 
 
     /* D3DXCreateFont */
@@ -444,9 +458,143 @@ static void test_ID3DXFont(IDirect3DDevice9 *device)
         }
         ID3DXFont_Release(font);
     } else skip("Failed to create a ID3DXFont object\n");
+
+
+    /* ID3DXFont_PreloadText */
+    hr = D3DXCreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Arial", &font);
+    if(SUCCEEDED(hr)) {
+        const WCHAR testW[] = {'t','e','s','t',0};
+
+        todo_wine {
+        hr = ID3DXFont_PreloadTextA(font, NULL, -1);
+        ok(hr == D3DERR_INVALIDCALL, "ID3DXFont_PreloadTextA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        hr = ID3DXFont_PreloadTextA(font, NULL, 0);
+        ok(hr == D3D_OK, "ID3DXFont_PreloadTextA returned %#x, expected %#x\n", hr, D3D_OK);
+        hr = ID3DXFont_PreloadTextA(font, NULL, 1);
+        ok(hr == D3DERR_INVALIDCALL, "ID3DXFont_PreloadTextA returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        hr = ID3DXFont_PreloadTextA(font, "test", -1);
+        ok(hr == D3D_OK, "ID3DXFont_PreloadTextA returned %#x, expected %#x\n", hr, D3D_OK);
+
+        hr = ID3DXFont_PreloadTextW(font, NULL, -1);
+        ok(hr == D3DERR_INVALIDCALL, "ID3DXFont_PreloadTextW returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        hr = ID3DXFont_PreloadTextW(font, NULL, 0);
+        ok(hr == D3D_OK, "ID3DXFont_PreloadTextW returned %#x, expected %#x\n", hr, D3D_OK);
+        hr = ID3DXFont_PreloadTextW(font, NULL, 1);
+        ok(hr == D3DERR_INVALIDCALL, "ID3DXFont_PreloadTextW returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
+        hr = ID3DXFont_PreloadTextW(font, testW, -1);
+        ok(hr == D3D_OK, "ID3DXFont_PreloadTextW returned %#x, expected %#x\n", hr, D3D_OK);
+        }
+
+        check_release((IUnknown*)font, 0);
+    } else skip("Failed to create a ID3DXFont object\n");
+
+
+    /* ID3DXFont_GetGlyphData, ID3DXFont_PreloadGlyphs, ID3DXFont_PreloadCharacters */
+    hr = D3DXCreateFontA(device, 12, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Arial", &font);
+    if(SUCCEEDED(hr)) {
+        char c;
+        HDC hdc;
+        DWORD ret;
+        HRESULT hr;
+        RECT blackbox;
+        POINT cellinc;
+        IDirect3DTexture9 *texture;
+
+        hdc = ID3DXFont_GetDC(font);
+
+        todo_wine {
+        hr = ID3DXFont_GetGlyphData(font, 0, NULL, &blackbox, &cellinc);
+        ok(hr == D3D_OK, "ID3DXFont_GetGlyphData returned %#x, expected %#x\n", hr, D3D_OK);
+        hr = ID3DXFont_GetGlyphData(font, 0, &texture, NULL, &cellinc);
+        if(SUCCEEDED(hr)) check_release((IUnknown*)texture, 1);
+        ok(hr == D3D_OK, "ID3DXFont_GetGlyphData returned %#x, expected %#x\n", hr, D3D_OK);
+        hr = ID3DXFont_GetGlyphData(font, 0, &texture, &blackbox, NULL);
+        if(SUCCEEDED(hr)) check_release((IUnknown*)texture, 1);
+        ok(hr == D3D_OK, "ID3DXFont_GetGlyphData returned %#x, expected %#x\n", hr, D3D_OK);
+
+        hr = ID3DXFont_PreloadCharacters(font, 'b', 'a');
+        ok(hr == D3D_OK, "ID3DXFont_PreloadCharacters returned %#x, expected %#x\n", hr, D3D_OK);
+        hr = ID3DXFont_PreloadGlyphs(font, 1, 0);
+        ok(hr == D3D_OK, "ID3DXFont_PreloadGlyphs returned %#x, expected %#x\n", hr, D3D_OK);
+
+        hr = ID3DXFont_PreloadCharacters(font, 'a', 'a');
+        ok(hr == D3D_OK, "ID3DXFont_PreloadCharacters returned %#x, expected %#x\n", hr, D3D_OK);
+        }
+
+        for(c = 'b'; c <= 'z'; c++) {
+            WORD glyph;
+
+            ret = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
+            ok(ret != GDI_ERROR, "GetGlyphIndicesA failed\n");
+
+            hr = ID3DXFont_GetGlyphData(font, glyph, &texture, &blackbox, &cellinc);
+            todo_wine ok(hr == D3D_OK, "ID3DXFont_GetGlyphData returned %#x, expected %#x\n", hr, D3D_OK);
+            if(SUCCEEDED(hr)) {
+                DWORD levels;
+                D3DSURFACE_DESC desc;
+
+                levels = IDirect3DTexture9_GetLevelCount(texture);
+                ok(levels == 5, "Got levels %u, expected %u\n", levels, 5);
+                hr = IDirect3DTexture9_GetLevelDesc(texture, 0, &desc);
+                ok(hr == D3D_OK, "IDirect3DTexture9_GetLevelDesc failed\n");
+                ok(desc.Format == D3DFMT_A8R8G8B8, "Got format %#x, expected %#x\n", desc.Format, D3DFMT_A8R8G8B8);
+                ok(desc.Usage == 0, "Got usage %#x, expected %#x\n", desc.Usage, 0);
+                ok(desc.Width == 256, "Got width %u, expected %u\n", desc.Width, 256);
+                ok(desc.Height == 256, "Got height %u, expected %u\n", desc.Height, 256);
+                ok(desc.Pool == D3DPOOL_MANAGED, "Got pool %u, expected %u\n", desc.Pool, D3DPOOL_MANAGED);
+
+                check_release((IUnknown*)texture, 1);
+            }
+        }
+
+        hr = ID3DXFont_PreloadCharacters(font, 'a', 'z');
+        todo_wine ok(hr == D3D_OK, "ID3DXFont_PreloadCharacters returned %#x, expected %#x\n", hr, D3D_OK);
+
+        check_release((IUnknown*)font, 0);
+    } else skip("Failed to create a ID3DXFont object\n");
+
+    for(i = 0; i < sizeof(texture_tests) / sizeof(texture_tests[0]); i++) {
+        HDC hdc;
+        DWORD ret;
+        HRESULT hr;
+        WORD glyph;
+        char c = 'a';
+        IDirect3DTexture9 *texture;
+
+        hr = D3DXCreateFontA(device, texture_tests[i].font_height, 0, FW_DONTCARE, 0, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, "Arial", &font);
+        if(FAILED(hr)) {
+            skip("Failed to create a ID3DXFont object\n");
+            continue;
+        }
+
+        hdc = ID3DXFont_GetDC(font);
+
+        ret = GetGlyphIndicesA(hdc, &c, 1, &glyph, 0);
+        ok(ret != GDI_ERROR, "GetGlyphIndicesA failed\n");
+
+        hr = ID3DXFont_GetGlyphData(font, glyph, &texture, NULL, NULL);
+        todo_wine ok(hr == D3D_OK, "ID3DXFont_GetGlyphData returned %#x, expected %#x\n", hr, D3D_OK);
+        if(SUCCEEDED(hr)) {
+            DWORD levels;
+            D3DSURFACE_DESC desc;
+
+            levels = IDirect3DTexture9_GetLevelCount(texture);
+            ok(levels == texture_tests[i].expected_levels, "Got levels %u, expected %u\n", levels, texture_tests[i].expected_levels);
+            hr = IDirect3DTexture9_GetLevelDesc(texture, 0, &desc);
+            ok(hr == D3D_OK, "IDirect3DTexture9_GetLevelDesc failed\n");
+            ok(desc.Format == D3DFMT_A8R8G8B8, "Got format %#x, expected %#x\n", desc.Format, D3DFMT_A8R8G8B8);
+            ok(desc.Usage == 0, "Got usage %#x, expected %#x\n", desc.Usage, 0);
+            ok(desc.Width == texture_tests[i].expected_size, "Got width %u, expected %u\n", desc.Width, texture_tests[i].expected_size);
+            ok(desc.Height == texture_tests[i].expected_size, "Got height %u, expected %u\n", desc.Height, texture_tests[i].expected_size);
+            ok(desc.Pool == D3DPOOL_MANAGED, "Got pool %u, expected %u\n", desc.Pool, D3DPOOL_MANAGED);
+
+            IDirect3DTexture9_Release(texture);
+        }
+        ID3DXFont_Release(font);
+    }
 }
 
-void test_D3DXCreateRenderToSurface(IDirect3DDevice9 *device)
+static void test_D3DXCreateRenderToSurface(IDirect3DDevice9 *device)
 {
     int i;
     HRESULT hr;
@@ -883,6 +1031,57 @@ static void test_ID3DXRenderToSurface(IDirect3DDevice9 *device)
     test_ID3DXRenderToSurface_device_state(device);
 }
 
+static void test_D3DXCreateRenderToEnvMap(IDirect3DDevice9 *device)
+{
+    int i;
+    HRESULT hr;
+    ULONG ref_count;
+    D3DXRTE_DESC desc;
+    ID3DXRenderToEnvMap *render;
+    static const struct {
+        D3DXRTE_DESC parameters;
+        D3DXRTE_DESC expected_values;
+    } tests[] = {
+        { {   0,   0, D3DFMT_A8R8G8B8, FALSE, D3DFMT_UNKNOWN }, {   1, 1, D3DFMT_A8R8G8B8, FALSE, D3DFMT_UNKNOWN } },
+        { { 256,   0, D3DFMT_A8R8G8B8, FALSE, D3DFMT_UNKNOWN }, { 256, 9, D3DFMT_A8R8G8B8, FALSE, D3DFMT_UNKNOWN } },
+        { { 256,   4, D3DFMT_A8R8G8B8, FALSE, D3DFMT_D24S8   }, { 256, 4, D3DFMT_A8R8G8B8, FALSE, D3DFMT_D24S8   } },
+        { { 256, 256, D3DFMT_UNKNOWN,  FALSE, D3DFMT_R8G8B8  }, { 256, 9, D3DFMT_A8R8G8B8, FALSE, D3DFMT_R8G8B8  } },
+        { {  -1,  -1, D3DFMT_A8R8G8B8, TRUE,  D3DFMT_DXT1    }, { 256, 9, D3DFMT_A8R8G8B8, TRUE,  D3DFMT_DXT1    } },
+        { { 256,   1, D3DFMT_X8R8G8B8, TRUE,  D3DFMT_UNKNOWN }, { 256, 1, D3DFMT_X8R8G8B8, TRUE,  D3DFMT_UNKNOWN } }
+    };
+
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+    {
+        const D3DXRTE_DESC *parameters = &tests[i].parameters;
+        const D3DXRTE_DESC *expected  = &tests[i].expected_values;
+        hr = D3DXCreateRenderToEnvMap(device, parameters->Size, parameters->MipLevels, parameters->Format,
+                parameters->DepthStencil, parameters->DepthStencilFormat, &render);
+        ok(hr == D3D_OK, "%d: D3DXCreateRenderToEnvMap returned %#x, expected %#x\n", i, hr, D3D_OK);
+        if (SUCCEEDED(hr))
+        {
+            hr = ID3DXRenderToEnvMap_GetDesc(render, &desc);
+            ok(hr == D3D_OK, "%d: GetDesc failed %#x\n", i, hr);
+            if (SUCCEEDED(hr))
+            {
+                ok(desc.Size == expected->Size, "%d: Got size %u, expected %u\n", i, desc.Size, expected->Size);
+                ok(desc.MipLevels == expected->MipLevels, "%d: Got miplevels %u, expected %u\n", i, desc.MipLevels, expected->MipLevels);
+                ok(desc.Format == expected->Format, "%d: Got format %#x, expected %#x\n", i, desc.Format, expected->Format);
+                ok(desc.DepthStencil == expected->DepthStencil, "%d: Got depth stencil %d, expected %d\n",
+                        i, expected->DepthStencil, expected->DepthStencil);
+                ok(desc.DepthStencilFormat == expected->DepthStencilFormat, "%d: Got depth stencil format %#x, expected %#x\n",
+                        i, expected->DepthStencilFormat, expected->DepthStencilFormat);
+            }
+            check_release((IUnknown *)render, 0);
+        }
+    }
+
+    /* check device ref count */
+    ref_count = get_ref((IUnknown *)device);
+    hr = D3DXCreateRenderToEnvMap(device, 0, 0, D3DFMT_UNKNOWN, FALSE, D3DFMT_UNKNOWN, &render);
+    check_ref((IUnknown *)device, ref_count + 1);
+    if (SUCCEEDED(hr)) ID3DXRenderToEnvMap_Release(render);
+}
+
 START_TEST(core)
 {
     HWND wnd;
@@ -919,6 +1118,7 @@ START_TEST(core)
     test_ID3DXFont(device);
     test_D3DXCreateRenderToSurface(device);
     test_ID3DXRenderToSurface(device);
+    test_D3DXCreateRenderToEnvMap(device);
 
     check_release((IUnknown*)device, 0);
     check_release((IUnknown*)d3d, 0);

@@ -106,6 +106,8 @@ typedef struct CHMInfo
     WCHAR *defTopic;
     WCHAR *defTitle;
     WCHAR *defToc;
+
+    UINT codePage;
 } CHMInfo;
 
 #define TAB_CONTENTS   0
@@ -192,6 +194,8 @@ void InitSearch(HHInfo *info, const char *needle) DECLSPEC_HIDDEN;
 void ReleaseSearch(HHInfo *info) DECLSPEC_HIDDEN;
 
 LPCWSTR skip_schema(LPCWSTR url) DECLSPEC_HIDDEN;
+
+WCHAR *decode_html(const char *html_fragment, int html_fragment_len, UINT code_page);
 
 /* memory allocation functions */
 

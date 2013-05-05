@@ -746,11 +746,24 @@ static void D3DXQuaternionTest(void)
     expectedquat.x = 0.093768f; expectedquat.y = 0.187536f; expectedquat.z = 0.375073f; expectedquat.w = 0.0f;
     D3DXQuaternionLn(&gotquat,&Nq);
     expect_vec4(expectedquat,gotquat);
-    /* Test the cas where the norm of the quaternion is <1 */
-    Nq1.x = 0.2f; Nq1.y = 0.1f; Nq1.z = 0.3; Nq1.w= 0.9f;
+    Nq.x = 0.0f; Nq.y = 0.0f; Nq.z = 0.0f; Nq.w = 1.0f;
+    expectedquat.x = 0.0f; expectedquat.y = 0.0f; expectedquat.z = 0.0f; expectedquat.w = 0.0f;
+    D3DXQuaternionLn(&gotquat,&Nq);
+    expect_vec4(expectedquat,gotquat);
+    Nq.x = 5.4f; Nq.y = 1.2f; Nq.z = -0.3f; Nq.w = -0.3f;
+    expectedquat.x = 10.616652f; expectedquat.y = 2.359256f; expectedquat.z = -0.589814f; expectedquat.w = 0.0f;
+    D3DXQuaternionLn(&gotquat,&Nq);
+    expect_vec4(expectedquat,gotquat);
+    /* Test the case where the norm of the quaternion is <1 */
+    Nq1.x = 0.2f; Nq1.y = 0.1f; Nq1.z = 0.3; Nq1.w = 0.9f;
     expectedquat.x = 0.206945f; expectedquat.y = 0.103473f; expectedquat.z = 0.310418f; expectedquat.w = 0.0f;
     D3DXQuaternionLn(&gotquat,&Nq1);
-    todo_wine{ expect_vec4(expectedquat,gotquat) };
+    expect_vec4(expectedquat,gotquat);
+    /* Test the case where the real part of the quaternion is -1.0f */
+    Nq1.x = 0.2f; Nq1.y = 0.1f; Nq1.z = 0.3; Nq1.w = -1.0f;
+    expectedquat.x = 0.2f; expectedquat.y = 0.1f; expectedquat.z = 0.3f; expectedquat.w = 0.0f;
+    D3DXQuaternionLn(&gotquat,&Nq1);
+    expect_vec4(expectedquat,gotquat);
 
 /*_______________D3DXQuaternionMultiply________________________*/
     expectedquat.x = 3.0f; expectedquat.y = 61.0f; expectedquat.z = -32.0f; expectedquat.w = 85.0f;
@@ -926,6 +939,48 @@ static void D3DXQuaternionTest(void)
     expectedquat.x = -156.296f; expectedquat.y = 30.242f; expectedquat.z = -2.5022f; expectedquat.w = 7.3576f;
     D3DXQuaternionSquad(&gotquat,&q,&r,&t,&u,scale);
     expect_vec4(expectedquat,gotquat);
+
+/*_______________D3DXQuaternionSquadSetup___________________*/
+    r.x = 1.0f, r.y = 2.0f; r.z = 4.0f; r.w = 10.0f;
+    s.x = -3.0f; s.y = 4.0f; s.z = -5.0f; s.w = 7.0;
+    t.x = -1111.0f, t.y = 111.0f; t.z = -11.0f; t.w = 1.0f;
+    u.x = 91.0f; u.y = - 82.0f; u.z = 7.3f; u.w = -6.4f;
+    D3DXQuaternionSquadSetup(&gotquat,&Nq,&Nq1,&r,&s,&t,&u);
+    expectedquat.x = 7.121285f; expectedquat.y = 2.159964f; expectedquat.z = -3.855094f; expectedquat.w = 5.362844f;
+    expect_vec4(expectedquat,gotquat);
+    expectedquat.x = -1113.492920f; expectedquat.y = 82.679260f; expectedquat.z = -6.696645f; expectedquat.w = -4.090050f;
+    expect_vec4(expectedquat,Nq);
+    expectedquat.x = -1111.0f; expectedquat.y = 111.0f; expectedquat.z = -11.0f; expectedquat.w = 1.0f;
+    expect_vec4(expectedquat,Nq1);
+    r.x = 0.2f; r.y = 0.3f; r.z = 1.3f; r.w = -0.6f;
+    s.x = -3.0f; s.y =-2.0f; s.z = 4.0f; s.w = 0.2f;
+    t.x = 0.4f; t.y = 8.3f; t.z = -3.1f; t.w = -2.7f;
+    u.x = 1.1f; u.y = -0.7f; u.z = 9.2f; u.w = 0.0f;
+    D3DXQuaternionSquadSetup(&gotquat,&Nq,&Nq1,&r,&s,&u,&t);
+    expectedquat.x = -4.139569f; expectedquat.y = -2.469115f; expectedquat.z = 2.364477f; expectedquat.w = 0.465494f;
+    expect_vec4(expectedquat,gotquat);
+    expectedquat.x = 2.342533f; expectedquat.y = 2.365127f; expectedquat.z = 8.628538f; expectedquat.w = -0.898356f;
+    expect_vec4(expectedquat,Nq);
+    expectedquat.x = 1.1f; expectedquat.y = -0.7f; expectedquat.z = 9.2f; expectedquat.w = 0.0f;
+    expect_vec4(expectedquat,Nq1);
+    D3DXQuaternionSquadSetup(&gotquat,&Nq,&Nq1,&r,&s,&t,&u);
+    expectedquat.x = -3.754567f; expectedquat.y = -0.586085f; expectedquat.z = 3.815818f; expectedquat.w = -0.198150f;
+    expect_vec4(expectedquat,gotquat);
+    expectedquat.x = 0.140773f; expectedquat.y = -8.737090f; expectedquat.z = -0.516593f; expectedquat.w = 3.053942f;
+    expect_vec4(expectedquat,Nq);
+    expectedquat.x = -0.4f; expectedquat.y = -8.3f; expectedquat.z = 3.1f; expectedquat.w = 2.7f;
+    expect_vec4(expectedquat,Nq1);
+    r.x = -1.0f; r.y = 0.0f; r.z = 0.0f; r.w = 0.0f;
+    s.x = 1.0f; s.y =0.0f; s.z = 0.0f; s.w = 0.0f;
+    t.x = 1.0f; t.y = 0.0f; t.z = 0.0f; t.w = 0.0f;
+    u.x = -1.0f; u.y = 0.0f; u.z = 0.0f; u.w = 0.0f;
+    D3DXQuaternionSquadSetup(&gotquat,&Nq,&Nq1,&r,&s,&t,&u);
+    expectedquat.x = 1.0f; expectedquat.y = 0.0f; expectedquat.z = 0.0f; expectedquat.w = 0.0f;
+    expect_vec4(expectedquat,gotquat);
+    expectedquat.x = 1.0f; expectedquat.y = 0.0f; expectedquat.z = 0.0f; expectedquat.w = 0.0f;
+    expect_vec4(expectedquat,Nq);
+    expectedquat.x = 1.0f; expectedquat.y = 0.0f; expectedquat.z = 0.0f; expectedquat.w = 0.0f;
+    expect_vec4(expectedquat,Nq1);
 
 /*_______________D3DXQuaternionToAxisAngle__________________*/
     Nq.x = 1.0f/22.0f; Nq.y = 2.0f/22.0f; Nq.z = 4.0f/22.0f; Nq.w = 10.0f/22.0f;
@@ -2344,6 +2399,33 @@ static void test_D3DXSHAdd(void)
     }
 }
 
+static void test_D3DXSHMultiply3(void)
+{
+    unsigned int i;
+    FLOAT a[20], b[20], c[20];
+    const FLOAT expected[] =
+    { 7.813913f, 2.256058f, 5.9484005f, 4.970894f, 2.899858f, 3.598946f, 1.726572f, 5.573538f,
+      0.622063f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f, 19.0f, };
+
+
+    for (i = 0; i < 20; i++)
+    {
+        a[i] = 1.0f + (FLOAT)i/100.0f;
+        b[i] = 3.0f - (FLOAT)i/100.0f;
+        c[i] = (FLOAT)i;
+    }
+
+    D3DXSHMultiply3(c, a, b);
+    for (i = 0; i < 9; i++)
+        ok(relative_error(c[i], expected[i]) < admitted_error, "Expected[%d] = %f, received = %f\n", i, expected[i], c[i]);
+
+/* D3DXSHMultiply does not modify the elements of the array after the nineth element */
+    for (i = 8; i < 19; i++)
+        ok(relative_error(c[i], expected[i]) < admitted_error, "Expected[%d] = %f, received = %f\n", i, expected[i], c[i]);
+
+    return;
+}
+
 START_TEST(math)
 {
     D3DXColorTest();
@@ -2361,4 +2443,5 @@ START_TEST(math)
     test_D3DXVec_Array();
     test_D3DXFloat_Array();
     test_D3DXSHAdd();
+    test_D3DXSHMultiply3();
 }

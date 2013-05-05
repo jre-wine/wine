@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <assert.h>
+
 #include "jscript.h"
 #include "engine.h"
 
@@ -133,8 +135,7 @@ static HRESULT create_arguments(script_ctx_t *ctx, IDispatch *calee, DISPPARAMS 
     }
 
     if(SUCCEEDED(hres)) {
-        V_VT(&var) = VT_I4;
-        V_I4(&var) = arg_cnt(dp);
+        num_set_int(&var, arg_cnt(dp));
         hres = jsdisp_propput_name(args, lengthW, &var, ei);
 
         if(SUCCEEDED(hres)) {
@@ -306,6 +307,25 @@ static HRESULT function_to_string(FunctionInstance *function, BSTR *ret)
     return S_OK;
 }
 
+HRESULT Function_invoke(jsdisp_t *func_this, IDispatch *jsthis, WORD flags, DISPPARAMS *dp, VARIANT *retv, jsexcept_t *ei)
+{
+    FunctionInstance *function;
+
+    TRACE("func %p this %p\n", func_this, jsthis);
+
+    assert(is_class(func_this, JSCLASS_FUNCTION));
+    function = (FunctionInstance*)func_this;
+
+    if(function->value_proc)
+        return invoke_value_proc(function->dispex.ctx, function, jsthis, flags, dp, retv, ei);
+
+    if(flags == DISPATCH_CONSTRUCT)
+        return invoke_constructor(function->dispex.ctx, function, dp, retv, ei);
+
+    assert(flags == DISPATCH_METHOD);
+    return invoke_source(function->dispex.ctx, function, jsthis, dp, retv, ei);
+}
+
 static HRESULT Function_length(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
@@ -315,8 +335,7 @@ static HRESULT Function_length(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
 
     switch(flags) {
     case DISPATCH_PROPERTYGET:
-        V_VT(retv) = VT_I4;
-        V_I4(retv) = This->length;
+        num_set_int(retv, This->length);
         break;
     default:
         FIXME("unimplemented flags %x\n", flags);
@@ -635,8 +654,7 @@ HRESULT create_builtin_function(script_ctx_t *ctx, builtin_invoke_t value_proc, 
     if(builtin_info) {
         VARIANT var;
 
-        V_VT(&var) = VT_I4;
-        V_I4(&var) = function->length;
+        num_set_int(&var, function->length);
         hres = jsdisp_propput_const(&function->dispex, lengthW, &var);
     }
 

@@ -1215,29 +1215,20 @@ D3DXQUATERNION* WINAPI D3DXQuaternionInverse(D3DXQUATERNION *pout, CONST D3DXQUA
 
 D3DXQUATERNION* WINAPI D3DXQuaternionLn(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
 {
-    FLOAT norm, normvec, theta;
+    FLOAT t;
 
-    norm = D3DXQuaternionLengthSq(pq);
-    if ( norm > 1.0001f )
-    {
-     pout->x = pq->x;
-     pout->y = pq->y;
-     pout->z = pq->z;
-     pout->w = 0.0f;
-    }
-    else if( norm > 0.99999f)
-    {
-     normvec = sqrt( pq->x * pq->x + pq->y * pq->y + pq->z * pq->z );
-     theta = atan2(normvec, pq->w) / normvec;
-     pout->x = theta * pq->x;
-     pout->y = theta * pq->y;
-     pout->z = theta * pq->z;
-     pout->w = 0.0f;
-    }
+    TRACE("(%p, %p)\n", pout, pq);
+
+    if ( (pq->w >= 1.0f) || (pq->w == -1.0f) )
+        t = 1.0f;
     else
-    {
-     FIXME("The quaternion (%f, %f, %f, %f) has a norm <1. This should not happen. Windows returns a result anyway. This case is not implemented yet.\n", pq->x, pq->y, pq->z, pq->w);
-    }
+        t = acos( pq->w ) / sqrt( 1.0f - pq->w * pq->w );
+
+    pout->x = t * pq->x;
+    pout->y = t * pq->y;
+    pout->z = t * pq->z;
+    pout->w = 0.0f;
+
     return pout;
 }
 
@@ -1373,6 +1364,73 @@ D3DXQUATERNION* WINAPI D3DXQuaternionSquad(D3DXQUATERNION *pout, CONST D3DXQUATE
 
     D3DXQuaternionSlerp(pout, D3DXQuaternionSlerp(&temp1, pq1, pq4, t), D3DXQuaternionSlerp(&temp2, pq2, pq3, t), 2.0f * t * (1.0f - t));
     return pout;
+}
+
+static D3DXQUATERNION add_diff(CONST D3DXQUATERNION *q1, CONST D3DXQUATERNION *q2, CONST FLOAT add)
+{
+    D3DXQUATERNION temp;
+
+    temp.x = q1->x + add * q2->x;
+    temp.y = q1->y + add * q2->y;
+    temp.z = q1->z + add * q2->z;
+    temp.w = q1->w + add * q2->w;
+
+    return temp;
+}
+
+void WINAPI D3DXQuaternionSquadSetup(D3DXQUATERNION *paout, D3DXQUATERNION *pbout, D3DXQUATERNION *pcout, CONST D3DXQUATERNION *pq0, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2, CONST D3DXQUATERNION *pq3)
+{
+    D3DXQUATERNION q, temp1, temp2, temp3, zero;
+
+    TRACE("(%p, %p, %p, %p, %p, %p, %p)\n", paout, pbout, pcout, pq0, pq1, pq2, pq3);
+
+    zero.x = 0.0f;
+    zero.y = 0.0f;
+    zero.z = 0.0f;
+    zero.w = 0.0f;
+
+    if ( D3DXQuaternionDot(pq0, pq1) <  0.0f )
+        temp2 = add_diff(&zero, pq0, -1.0f);
+    else
+        temp2 = *pq0;
+
+    if ( D3DXQuaternionDot(pq1, pq2) < 0.0f )
+        *pcout = add_diff(&zero, pq2, -1.0f);
+    else
+        *pcout = *pq2;
+
+    if ( D3DXQuaternionDot(pcout, pq3) < 0.0f )
+        temp3 = add_diff(&zero, pq3, -1.0f);
+    else
+        temp3 = *pq3;
+
+    D3DXQuaternionInverse(&temp1, pq1);
+    D3DXQuaternionMultiply(&temp2, &temp1, &temp2);
+    D3DXQuaternionLn(&temp2, &temp2);
+    D3DXQuaternionMultiply(&q, &temp1, pcout);
+    D3DXQuaternionLn(&q, &q);
+    temp1 = add_diff(&temp2, &q, 1.0f);
+    temp1.x *= -0.25f;
+    temp1.y *= -0.25f;
+    temp1.z *= -0.25f;
+    temp1.w *= -0.25f;
+    D3DXQuaternionExp(&temp1, &temp1);
+    D3DXQuaternionMultiply(paout, pq1, &temp1);
+
+    D3DXQuaternionInverse(&temp1, pcout);
+    D3DXQuaternionMultiply(&temp2, &temp1, pq1);
+    D3DXQuaternionLn(&temp2, &temp2);
+    D3DXQuaternionMultiply(&q, &temp1, &temp3);
+    D3DXQuaternionLn(&q, &q);
+    temp1 = add_diff(&temp2, &q, 1.0f);
+    temp1.x *= -0.25f;
+    temp1.y *= -0.25f;
+    temp1.z *= -0.25f;
+    temp1.w *= -0.25f;
+    D3DXQuaternionExp(&temp1, &temp1);
+    D3DXQuaternionMultiply(pbout, pcout, &temp1);
+
+    return;
 }
 
 void WINAPI D3DXQuaternionToAxisAngle(CONST D3DXQUATERNION *pq, D3DXVECTOR3 *paxis, FLOAT *pangle)
@@ -1909,6 +1967,8 @@ FLOAT *WINAPI D3DXFloat16To32Array(FLOAT *pout, CONST D3DXFLOAT16 *pin, UINT n)
     return pout;
 }
 
+/*_________________D3DXSH________________*/
+
 FLOAT* WINAPI D3DXSHAdd(FLOAT *out, UINT order, const FLOAT *a, const FLOAT *b)
 {
     UINT i;
@@ -1917,6 +1977,105 @@ FLOAT* WINAPI D3DXSHAdd(FLOAT *out, UINT order, const FLOAT *a, const FLOAT *b)
 
     for (i = 0; i < order * order; i++)
         out[i] = a[i] + b[i];
+
+    return out;
+}
+
+FLOAT* WINAPI D3DXSHMultiply3(FLOAT *out, CONST FLOAT *a, CONST FLOAT *b)
+{
+    FLOAT t, ta, tb;
+
+    TRACE("(%p, %p, %p)\n", out, a, b);
+
+    out[0]= 0.28209479f * a[0] * b[0];
+
+    ta = 0.28209479f * a[0] - 0.12615662f * a[6] - 0.21850968f * a[8];
+    tb = 0.28209479f * b[0] - 0.12615662f * b[6] - 0.21850968f * b[8];
+    out[1] = ta * b[1] + tb * a[1];
+    t = a[1] * b[1];
+    out[0] += 0.28209479f * t;
+    out[6] = -0.12615662f * t;
+    out[8] = -0.21850968f * t;
+
+    ta = 0.21850968f * a[5];
+    tb = 0.21850968f * b[5];
+    out[1] += ta * b[2] + tb * a[2];
+    out[2] = ta * b[1] + tb * a[1];
+    t = a[1] * b[2] +a[2] * b[1];
+    out[5] = 0.21850968f * t;
+
+    ta = 0.21850968f * a[4];
+    tb = 0.21850968f * b[4];
+    out[1] += ta * b[3] + tb * a[3];
+    out[3]  = ta * b[1] + tb * a[1];
+    t = a[1] * b[3] + a[3] * b[1];
+    out[4] = 0.21850968f * t;
+
+    ta = 0.28209480f * a[0] + 0.25231326f * a[6];
+    tb = 0.28209480f * b[0] + 0.25231326f * b[6];
+    out[2] += ta * b[2] + tb * a[2];
+    t = a[2] * b[2];
+    out[0] += 0.28209480f * t;
+    out[6] += 0.25231326f * t;
+
+    ta = 0.21850969f * a[7];
+    tb = 0.21850969f * b[7];
+    out[2] += ta * b[3] + tb * a[3];
+    out[3] += ta * b[2] + tb * a[2];
+    t = a[2] * b[3] + a[3] * b[2];
+    out[7] = 0.21850969f * t;
+
+    ta = 0.28209479f * a[0] - 0.12615663f * a[6] + 0.21850969f * a[8];
+    tb = 0.28209479f * b[0] - 0.12615663f * b[6] + 0.21850969f * b[8];
+    out[3] += ta * b[3] + tb * a[3];
+    t = a[3] * b[3];
+    out[0] += 0.28209479f * t;
+    out[6] -= 0.12615663f * t;
+    out[8] += 0.21850969f * t;
+
+    ta = 0.28209479f * a[0] - 0.18022375f * a[6];
+    tb = 0.28209479f * b[0] - 0.18022375f * b[6];
+    out[4] += ta * b[4] + tb * a[4];
+    t = a[4] * b[4];
+    out[0] += 0.28209479f * t;
+    out[6] -= 0.18022375f * t;
+
+    ta = 0.15607835f * a[7];
+    tb = 0.15607835f * b[7];
+    out[4] += ta * b[5] + tb * a[5];
+    out[5] += ta * b[4] + tb * a[4];
+    t = a[4] * b[5] + a[5] * b[4];
+    out[7] += 0.15607834f * t;
+
+    ta = 0.28209479f * a[0] + 0.09011186 * a[6] - 0.15607835f * a[8];
+    tb = 0.28209479f * b[0] + 0.09011186 * b[6] - 0.15607835f * b[8];
+    out[5] += ta * b[5] + tb * a[5];
+    t = a[5] * b[5];
+    out[0] += 0.28209479f * t;
+    out[6] += 0.09011186f * t;
+    out[8] -= 0.15607835f * t;
+
+    ta = 0.28209480f * a[0];
+    tb = 0.28209480f * b[0];
+    out[6] += ta * b[6] + tb * a[6];
+    t = a[6] * b[6];
+    out[0] += 0.28209480f * t;
+    out[6] += 0.18022376f * t;
+
+    ta = 0.28209479f * a[0] + 0.09011186 * a[6] + 0.15607835f * a[8];
+    tb = 0.28209479f * b[0] + 0.09011186 * b[6] + 0.15607835f * b[8];
+    out[7] += ta * b[7] + tb * a[7];
+    t = a[7] * b[7];
+    out[0] += 0.28209479f * t;
+    out[6] += 0.09011186f * t;
+    out[8] += 0.15607835f * t;
+
+    ta = 0.28209479f * a[0] - 0.18022375f * a[6];
+    tb = 0.28209479f * b[0] - 0.18022375f * b[6];
+    out[8] += ta * b[8] + tb * a[8];
+    t = a[8] * b[8];
+    out[0] += 0.28209479f * t;
+    out[6] -= 0.18022375f * t;
 
     return out;
 }

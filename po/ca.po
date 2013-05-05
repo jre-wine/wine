@@ -3494,18 +3494,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5531,7 +5519,7 @@ msgid "No user session key.\n"
 msgstr "Cap clau de sessió d'usuari.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "Quota de llicència superada.\n"
 
 #: winerror.mc:2381
@@ -13798,6 +13786,24 @@ msgstr "No es pot trobar una implementació de richedit...Avortant"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Temes d'ajuda: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "Error: Paràmetres de línia d'ordres no vàlids\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "Conjunt de propietats no trobat.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "Error: Nom de clau invàlid\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

@@ -27,6 +27,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wininet.h"
+#include "winineti.h"
 #include "winsock.h"
 
 #include "wine/test.h"
@@ -158,6 +159,14 @@ static const test_data_t test_data[] = {
 };
 
 static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackA)(HINTERNET ,INTERNET_STATUS_CALLBACK);
+static BOOL (WINAPI *pInternetGetSecurityInfoByURLA)(LPSTR,PCCERT_CHAIN_CONTEXT*,DWORD*);
+
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    WCHAR buf[512];
+    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(WCHAR));
+    return lstrcmpW(strw, buf);
+}
 
 static BOOL proxy_active(void)
 {
@@ -183,41 +192,70 @@ static void _test_status_code(unsigned line, HINTERNET req, DWORD excode)
 {
     DWORD code, size, index;
     char exbuf[10], bufa[10];
+    WCHAR bufw[10];
     BOOL res;
 
     code = 0xdeadbeef;
     size = sizeof(code);
-    res = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, NULL);
-    ok_(__FILE__,line)(res, "HttpQueryInfo(HTTP_QUERY_STATUS_CODE|number) failed: %u\n", GetLastError());
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, NULL);
+    ok_(__FILE__,line)(res, "[1] HttpQueryInfoA(HTTP_QUERY_STATUS_CODE|number) failed: %u\n", GetLastError());
     ok_(__FILE__,line)(code == excode, "code = %d, expected %d\n", code, excode);
+    ok_(__FILE__,line)(size == sizeof(code), "size = %u\n", size);
 
     code = 0xdeadbeef;
     index = 0;
     size = sizeof(code);
-    res = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, &index);
-    ok_(__FILE__,line)(res, "HttpQueryInfo(HTTP_QUERY_STATUS_CODE|number index) failed: %u\n", GetLastError());
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, &index);
+    ok_(__FILE__,line)(res, "[2] HttpQueryInfoA(HTTP_QUERY_STATUS_CODE|number index) failed: %u\n", GetLastError());
     ok_(__FILE__,line)(code == excode, "code = %d, expected %d\n", code, excode);
     ok_(__FILE__,line)(!index, "index = %d, expected 0\n", code);
+    ok_(__FILE__,line)(size == sizeof(code), "size = %u\n", size);
 
     sprintf(exbuf, "%u", excode);
 
     size = sizeof(bufa);
-    res = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE, bufa, &size, NULL);
-    ok_(__FILE__,line)(res, "HttpQueryInfo(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
-    ok_(__FILE__,line)(!strcmp(bufa, exbuf), "unexpected status code %s, expected %s", bufa, exbuf);
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE, bufa, &size, NULL);
+    ok_(__FILE__,line)(res, "[3] HttpQueryInfoA(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(!strcmp(bufa, exbuf), "unexpected status code %s, expected %s\n", bufa, exbuf);
+    ok_(__FILE__,line)(size == strlen(exbuf), "unexpected size %d for \"%s\"\n", size, exbuf);
+
+    size = 0;
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE, NULL, &size, NULL);
+    ok_(__FILE__,line)(!res && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+                       "[4] HttpQueryInfoA(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(size == strlen(exbuf)+1, "unexpected size %d for \"%s\"\n", size, exbuf);
+
+    size = sizeof(bufw);
+    res = HttpQueryInfoW(req, HTTP_QUERY_STATUS_CODE, bufw, &size, NULL);
+    ok_(__FILE__,line)(res, "[5] HttpQueryInfoW(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(!strcmp_wa(bufw, exbuf), "unexpected status code %s, expected %s\n", bufa, exbuf);
+    ok_(__FILE__,line)(size == strlen(exbuf)*sizeof(WCHAR), "unexpected size %d for \"%s\"\n", size, exbuf);
+
+    size = 0;
+    res = HttpQueryInfoW(req, HTTP_QUERY_STATUS_CODE, bufw, &size, NULL);
+    ok_(__FILE__,line)(!res && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+                       "[6] HttpQueryInfoW(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
+    ok_(__FILE__,line)(size == (strlen(exbuf)+1)*sizeof(WCHAR), "unexpected size %d for \"%s\"\n", size, exbuf);
+
+    if(0) {
+    size = sizeof(bufw);
+    res = HttpQueryInfoW(req, HTTP_QUERY_STATUS_CODE, NULL, &size, NULL);
+    ok(!res && GetLastError() == ERROR_INVALID_PARAMETER, "HttpQueryInfo(HTTP_QUERY_STATUS_CODE) failed: %u\n", GetLastError());
+    ok(size == sizeof(bufw), "unexpected size %d\n", size);
+    }
 
     code = 0xdeadbeef;
     index = 1;
     size = sizeof(code);
-    res = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, &index);
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_NUMBER, &code, &size, &index);
     ok_(__FILE__,line)(!res && GetLastError() == ERROR_HTTP_HEADER_NOT_FOUND,
-                       "[invalid 1] HttpQueryInfo failed: %x(%d)\n", res, GetLastError());
+                       "[7] HttpQueryInfoA failed: %x(%d)\n", res, GetLastError());
 
     code = 0xdeadbeef;
     size = sizeof(code);
-    res = HttpQueryInfo(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_REQUEST_HEADERS, &code, &size, NULL);
+    res = HttpQueryInfoA(req, HTTP_QUERY_STATUS_CODE|HTTP_QUERY_FLAG_REQUEST_HEADERS, &code, &size, NULL);
     ok_(__FILE__,line)(!res && GetLastError() == ERROR_HTTP_INVALID_QUERY_REQUEST,
-                       "[invalid 2] HttpQueryInfo failed: %x(%d)\n", res, GetLastError());
+                       "[8] HttpQueryInfoA failed: %x(%d)\n", res, GetLastError());
 }
 
 #define test_request_flags(a,b) _test_request_flags(__LINE__,a,b,FALSE)
@@ -2917,6 +2955,34 @@ static void test_cert_struct(HINTERNET req)
     release_cert_info(&info);
 }
 
+#define test_security_info(a,b,c) _test_security_info(__LINE__,a,b,c)
+static void _test_security_info(unsigned line, const char *urlc, DWORD error, DWORD ex_flags)
+{
+    char url[INTERNET_MAX_URL_LENGTH];
+    const CERT_CHAIN_CONTEXT *chain;
+    DWORD flags;
+    BOOL res;
+
+    if(!pInternetGetSecurityInfoByURLA) {
+        win_skip("pInternetGetSecurityInfoByURLA not available\n");
+        return;
+    }
+
+    strcpy(url, urlc);
+    chain = (void*)0xdeadbeef;
+    flags = 0xdeadbeef;
+    res = pInternetGetSecurityInfoByURLA(url, &chain, &flags);
+    if(error == ERROR_SUCCESS) {
+        ok_(__FILE__,line)(res, "InternetGetSecurityInfoByURLA failed: %u\n", GetLastError());
+        ok_(__FILE__,line)(chain != NULL, "chain = NULL\n");
+        ok_(__FILE__,line)(flags == ex_flags, "flags = %x\n", flags);
+        CertFreeCertificateChain(chain);
+    }else {
+        ok_(__FILE__,line)(!res && GetLastError() == error,
+                           "InternetGetSecurityInfoByURLA returned: %x(%u), exected %u\n", res, GetLastError(), error);
+    }
+}
+
 #define test_secflags_option(a,b) _test_secflags_option(__LINE__,a,b)
 static void _test_secflags_option(unsigned line, HINTERNET req, DWORD ex_flags)
 {
@@ -2987,6 +3053,7 @@ static void test_security_flags(void)
     }
 
     test_secflags_option(req, 0);
+    test_security_info("https://test.winehq.org/data/some_file.html?q", ERROR_INTERNET_ITEM_NOT_FOUND, 0);
 
     set_secflags(req, TRUE, SECURITY_FLAG_IGNORE_REVOCATION);
     test_secflags_option(req, SECURITY_FLAG_IGNORE_REVOCATION);
@@ -3119,6 +3186,7 @@ static void test_security_flags(void)
 
     test_request_flags(req, INTERNET_REQFLAG_NO_HEADERS);
     test_secflags_option(req, SECURITY_FLAG_IGNORE_REVOCATION|0x1800000);
+    test_security_info("https://test.winehq.org/data/some_file.html?q", ERROR_INTERNET_ITEM_NOT_FOUND, 0);
 
     set_secflags(req, FALSE, SECURITY_FLAG_IGNORE_UNKNOWN_CA);
     test_secflags_option(req, 0x1800000|SECURITY_FLAG_IGNORE_REVOCATION|SECURITY_FLAG_IGNORE_UNKNOWN_CA
@@ -3156,6 +3224,7 @@ static void test_security_flags(void)
             |SECURITY_FLAG_STRENGTH_STRONG|0x1800000);
 
     test_cert_struct(req);
+    test_security_info("https://test.winehq.org/data/some_file.html?q", 0, 0x1800000);
 
     res = InternetReadFile(req, buf, sizeof(buf), &size);
     ok(res, "InternetReadFile failed: %u\n", GetLastError());
@@ -3226,6 +3295,10 @@ static void test_security_flags(void)
     close_async_handle(ses, hCompleteEvent, 2);
 
     CloseHandle(hCompleteEvent);
+
+    test_security_info("http://test.winehq.org/data/some_file.html?q", ERROR_INTERNET_ITEM_NOT_FOUND, 0);
+    test_security_info("file:///c:/dir/file.txt", ERROR_INTERNET_ITEM_NOT_FOUND, 0);
+    test_security_info("xxx:///c:/dir/file.txt", ERROR_INTERNET_ITEM_NOT_FOUND, 0);
 }
 
 static void test_secure_connection(void)
@@ -4009,6 +4082,7 @@ START_TEST(http)
     }
 
     pInternetSetStatusCallbackA = (void*)GetProcAddress(hdll, "InternetSetStatusCallbackA");
+    pInternetGetSecurityInfoByURLA = (void*)GetProcAddress(hdll, "InternetGetSecurityInfoByURLA");
 
     init_status_tests();
     test_InternetCloseHandle();

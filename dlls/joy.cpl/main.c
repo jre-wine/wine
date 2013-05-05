@@ -126,7 +126,7 @@ static void destroy_joysticks(struct JoystickData *data)
  * list_dlgproc [internal]
  *
  */
-INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
     switch (msg)
@@ -308,7 +308,9 @@ static void draw_joystick_axes(HWND hwnd, struct JoystickData* data)
     struct Joystick *joy;
     DIPROPRANGE propRange;
     HINSTANCE hinst = (HINSTANCE) GetWindowLongPtrW(hwnd, GWLP_HINSTANCE);
-    static WCHAR button_class[] = {'B','u','t','t','o','n','\0'};
+    static const WCHAR button_class[] = {'B','u','t','t','o','n','\0'};
+    static const WCHAR axes_names[TEST_MAX_AXES][7] = { {'X',',','Y','\0'}, {'R','x',',','R','y','\0'}, {'Z',',','R','z','\0'} };
+    static const DWORD axes_idc[TEST_MAX_AXES] = { IDC_TESTGROUPXY, IDC_TESTGROUPRXRY, IDC_TESTGROUPZRZ };
 
     /* Set axis range to ease the GUI visualization */
     for (i = 0; i < data->num_joysticks; i++)
@@ -326,6 +328,9 @@ static void draw_joystick_axes(HWND hwnd, struct JoystickData* data)
 
     for (i = 0; i < TEST_MAX_AXES; i++)
     {
+        /* Set axis box name */
+        SetWindowTextW(GetDlgItem(hwnd, axes_idc[i]), axes_names[i]);
+
         data->axes[i] = CreateWindowW( button_class, NULL, WS_CHILD | WS_VISIBLE,
             TEST_AXIS_X + TEST_NEXT_AXIS_X*i, TEST_AXIS_Y,
             TEST_AXIS_SIZE_X, TEST_AXIS_SIZE_Y,

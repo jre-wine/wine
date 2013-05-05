@@ -117,7 +117,7 @@ static HRESULT constructor_call(jsdisp_t *constr, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei)
 {
     if(flags != DISPATCH_PROPERTYGET)
-        return jsdisp_call_value(constr, flags, dp, retv, ei);
+        return jsdisp_call_value(constr, NULL, flags, dp, retv, ei);
 
     jsdisp_addref(constr);
     var_set_jsdisp(retv, constr);
@@ -745,10 +745,8 @@ static HRESULT JSGlobal_ScriptEngineMajorVersion(script_ctx_t *ctx, vdisp_t *jst
 {
     TRACE("\n");
 
-    if(retv) {
-        V_VT(retv) = VT_I4;
-        V_I4(retv) = JSCRIPT_MAJOR_VERSION;
-    }
+    if(retv)
+        num_set_int(retv, JSCRIPT_MAJOR_VERSION);
     return S_OK;
 }
 
@@ -757,10 +755,8 @@ static HRESULT JSGlobal_ScriptEngineMinorVersion(script_ctx_t *ctx, vdisp_t *jst
 {
     TRACE("\n");
 
-    if(retv) {
-        V_VT(retv) = VT_I4;
-        V_I4(retv) = JSCRIPT_MINOR_VERSION;
-    }
+    if(retv)
+        num_set_int(retv, JSCRIPT_MINOR_VERSION);
     return S_OK;
 }
 
@@ -769,10 +765,8 @@ static HRESULT JSGlobal_ScriptEngineBuildVersion(script_ctx_t *ctx, vdisp_t *jst
 {
     TRACE("\n");
 
-    if(retv) {
-        V_VT(retv) = VT_I4;
-        V_I4(retv) = JSCRIPT_BUILD_VERSION;
-    }
+    if(retv)
+        num_set_int(retv, JSCRIPT_BUILD_VERSION);
     return S_OK;
 }
 
@@ -1289,7 +1283,7 @@ HRESULT init_global(script_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    num_set_inf(&var, TRUE);
+    num_set_val(&var, INFINITY);
     hres = jsdisp_propput_name(ctx->global, InfinityW, &var, NULL/*FIXME*/);
     return hres;
 }

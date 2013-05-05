@@ -3442,18 +3442,6 @@ msgstr "ジョイスティックのテスト"
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr "フォース フィードバックのテスト"
@@ -5472,7 +5460,7 @@ msgid "No user session key.\n"
 msgstr "ユーザー セッション キーがありません。\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "ライセンス数の制限を超えました。\n"
 
 #: winerror.mc:2381
@@ -13630,6 +13618,24 @@ msgstr "Richedit が見つかりません... 終了します"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "ヘルプ トピック: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "エラー: コマンド ライン引数が無効です\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "プロパティ セットが見つかりません。\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "エラー: キー名が無効です\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

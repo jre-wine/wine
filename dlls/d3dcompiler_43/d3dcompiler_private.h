@@ -644,6 +644,15 @@ enum hlsl_base_type
     HLSL_TYPE_VOID,
 };
 
+enum hlsl_sampler_dim
+{
+   HLSL_SAMPLER_DIM_GENERIC,
+   HLSL_SAMPLER_DIM_1D,
+   HLSL_SAMPLER_DIM_2D,
+   HLSL_SAMPLER_DIM_3D,
+   HLSL_SAMPLER_DIM_CUBE,
+};
+
 enum hlsl_matrix_majority
 {
     HLSL_COLUMN_MAJOR,
@@ -656,6 +665,7 @@ struct hlsl_type
     struct list scope_entry;
     enum hlsl_type_class type;
     enum hlsl_base_type base_type;
+    enum hlsl_sampler_dim sampler_dim;
     const char *name;
     unsigned int modifiers;
     unsigned int dimx;
@@ -684,7 +694,9 @@ enum hlsl_ir_node_type
 {
     HLSL_IR_VAR = 0,
     HLSL_IR_CONSTANT,
+    HLSL_IR_CONSTRUCTOR,
     HLSL_IR_DEREF,
+    HLSL_IR_FUNCTION_DECL,
 };
 
 struct hlsl_ir_node
@@ -721,6 +733,15 @@ struct hlsl_ir_var
     struct list scope_entry;
 
     struct hlsl_var_allocation *allocation;
+};
+
+struct hlsl_ir_function_decl
+{
+    struct hlsl_ir_node node;
+    const char *name;
+    const char *semantic;
+    struct list *parameters;
+    struct list *body;
 };
 
 enum hlsl_ir_deref_type
@@ -768,6 +789,12 @@ struct hlsl_ir_constant
     } v;
 };
 
+struct hlsl_ir_constructor
+{
+    struct hlsl_ir_node node;
+    struct list *arguments;
+};
+
 struct hlsl_scope
 {
     struct list entry;
@@ -777,6 +804,14 @@ struct hlsl_scope
 };
 
 /* Structures used only during parsing */
+struct parse_parameter
+{
+    struct hlsl_type *type;
+    const char *name;
+    const char *semantic;
+    unsigned int modifiers;
+};
+
 struct parse_variable_def
 {
     struct list entry;
@@ -819,9 +854,16 @@ static inline struct hlsl_ir_constant *constant_from_node(const struct hlsl_ir_n
     return CONTAINING_RECORD(node, struct hlsl_ir_constant, node);
 }
 
+static inline struct hlsl_ir_constructor *constructor_from_node(const struct hlsl_ir_node *node)
+{
+    assert(node->type == HLSL_IR_CONSTRUCTOR);
+    return CONTAINING_RECORD(node, struct hlsl_ir_constructor, node);
+}
+
 BOOL add_declaration(struct hlsl_scope *scope, struct hlsl_ir_var *decl, BOOL local_var) DECLSPEC_HIDDEN;
 struct hlsl_ir_var *get_variable(struct hlsl_scope *scope, const char *name) DECLSPEC_HIDDEN;
 void free_declaration(struct hlsl_ir_var *decl) DECLSPEC_HIDDEN;
+BOOL add_func_parameter(struct list *list, struct parse_parameter *param, unsigned int line) DECLSPEC_HIDDEN;
 struct hlsl_type *new_hlsl_type(const char *name, enum hlsl_type_class type_class,
         enum hlsl_base_type base_type, unsigned dimx, unsigned dimy) DECLSPEC_HIDDEN;
 struct hlsl_type *new_array_type(struct hlsl_type *basic_type, unsigned int array_size) DECLSPEC_HIDDEN;
@@ -831,14 +873,18 @@ unsigned int components_count_type(struct hlsl_type *type) DECLSPEC_HIDDEN;
 struct hlsl_ir_deref *new_var_deref(struct hlsl_ir_var *var) DECLSPEC_HIDDEN;
 void push_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 BOOL pop_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
+struct hlsl_ir_function_decl *new_func_decl(const char *name, struct hlsl_type *return_type, struct list *parameters) DECLSPEC_HIDDEN;
 struct bwriter_shader *parse_hlsl_shader(const char *text, enum shader_type type, DWORD version,
         const char *entrypoint, char **messages) DECLSPEC_HIDDEN;
 
 const char *debug_hlsl_type(const struct hlsl_type *type) DECLSPEC_HIDDEN;
 const char *debug_modifiers(DWORD modifiers) DECLSPEC_HIDDEN;
+void debug_dump_ir_function(const struct hlsl_ir_function_decl *func) DECLSPEC_HIDDEN;
+
 void free_hlsl_type(struct hlsl_type *type) DECLSPEC_HIDDEN;
 void free_instr(struct hlsl_ir_node *node) DECLSPEC_HIDDEN;
 void free_instr_list(struct list *list) DECLSPEC_HIDDEN;
+void free_function(struct hlsl_ir_function_decl *func) DECLSPEC_HIDDEN;
 
 
 #define MAKE_TAG(ch0, ch1, ch2, ch3) \
