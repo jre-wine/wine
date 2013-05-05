@@ -1206,6 +1206,7 @@ static HRESULT SAXAttributes_populate(saxlocator *locator,
         if (xmlStrEqual(xmlAttributes[i*5+1], xmlA))
             attrs[i].szURI = bstr_from_xmlChar(xmlAttributes[i*5+2]);
         else
+            /* that's an important feature to keep same uri pointer for every reported attribute */
             attrs[i].szURI = find_element_uri(locator, xmlAttributes[i*5+2]);
 
         attrs[i].szLocalname = bstr_from_xmlChar(xmlAttributes[i*5]);
@@ -2150,6 +2151,8 @@ static HRESULT internal_parseBuffer(saxreader *This, const char *buffer, int siz
     saxlocator *locator;
     HRESULT hr;
 
+    TRACE("(%p)->(%p %d)\n", This, buffer, size);
+
     hr = SAXLocator_create(This, &locator, vbInterface);
     if (FAILED(hr))
         return hr;
@@ -2440,7 +2443,7 @@ static HRESULT internal_parse(
     {
         case VT_BSTR:
             hr = internal_parseBuffer(This, (const char*)V_BSTR(&varInput),
-                    SysStringByteLen(V_BSTR(&varInput)), vbInterface);
+                    strlenW(V_BSTR(&varInput))*sizeof(WCHAR), vbInterface);
             break;
         case VT_ARRAY|VT_UI1: {
             void *pSAData;

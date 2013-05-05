@@ -1562,67 +1562,6 @@ void CDECL wined3d_device_set_multithreaded(struct wined3d_device *device)
     device->create_parms.flags |= WINED3DCREATE_MULTITHREADED;
 }
 
-HRESULT CDECL wined3d_device_set_display_mode(struct wined3d_device *device,
-        UINT swapchain_idx, const struct wined3d_display_mode *mode)
-{
-    struct wined3d_adapter *adapter = device->adapter;
-    const struct wined3d_format *format = wined3d_get_format(&adapter->gl_info, mode->format_id);
-    DEVMODEW devmode;
-    LONG ret;
-    RECT clip_rc;
-
-    TRACE("device %p, swapchain_idx %u, mode %p (%ux%u@%u %s).\n", device, swapchain_idx, mode,
-            mode->width, mode->height, mode->refresh_rate, debug_d3dformat(mode->format_id));
-
-    /* Resize the screen even without a window:
-     * The app could have unset it with SetCooperativeLevel, but not called
-     * RestoreDisplayMode first. Then the release will call RestoreDisplayMode,
-     * but we don't have any hwnd
-     */
-
-    memset(&devmode, 0, sizeof(devmode));
-    devmode.dmSize = sizeof(devmode);
-    devmode.dmFields = DM_BITSPERPEL | DM_PELSWIDTH | DM_PELSHEIGHT;
-    devmode.dmBitsPerPel = format->byte_count * CHAR_BIT;
-    devmode.dmPelsWidth = mode->width;
-    devmode.dmPelsHeight = mode->height;
-
-    devmode.dmDisplayFrequency = mode->refresh_rate;
-    if (mode->refresh_rate)
-        devmode.dmFields |= DM_DISPLAYFREQUENCY;
-
-    /* Only change the mode if necessary */
-    if (adapter->screen_size.cx == mode->width && adapter->screen_size.cy == mode->height
-            && adapter->screen_format == mode->format_id && !mode->refresh_rate)
-        return WINED3D_OK;
-
-    ret = ChangeDisplaySettingsExW(NULL, &devmode, NULL, CDS_FULLSCREEN, NULL);
-    if (ret != DISP_CHANGE_SUCCESSFUL)
-    {
-        if (devmode.dmDisplayFrequency)
-        {
-            WARN("ChangeDisplaySettingsExW failed, trying without the refresh rate\n");
-            devmode.dmFields &= ~DM_DISPLAYFREQUENCY;
-            devmode.dmDisplayFrequency = 0;
-            ret = ChangeDisplaySettingsExW(NULL, &devmode, NULL, CDS_FULLSCREEN, NULL) != DISP_CHANGE_SUCCESSFUL;
-        }
-        if(ret != DISP_CHANGE_SUCCESSFUL) {
-            return WINED3DERR_NOTAVAILABLE;
-        }
-    }
-
-    /* Store the new values */
-    adapter->screen_size.cx = mode->width;
-    adapter->screen_size.cy = mode->height;
-    adapter->screen_format = mode->format_id;
-
-    /* And finally clip mouse to our screen */
-    SetRect(&clip_rc, 0, 0, mode->width, mode->height);
-    ClipCursor(&clip_rc);
-
-    return WINED3D_OK;
-}
-
 HRESULT CDECL wined3d_device_get_wined3d(const struct wined3d_device *device, struct wined3d **wined3d)
 {
     TRACE("device %p, wined3d %p.\n", device, wined3d);
@@ -3784,31 +3723,10 @@ HRESULT CDECL wined3d_device_get_display_mode(const struct wined3d_device *devic
 
     TRACE("device %p, swapchain_idx %u, mode %p.\n", device, swapchain_idx, mode);
 
-    if (swapchain_idx)
+    if (SUCCEEDED(hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain)))
     {
-        hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain);
-        if (SUCCEEDED(hr))
-        {
-            hr = wined3d_swapchain_get_display_mode(swapchain, mode);
-            wined3d_swapchain_decref(swapchain);
-        }
-    }
-    else
-    {
-        const struct wined3d_adapter *adapter = device->adapter;
-
-        /* Don't read the real display mode, but return the stored mode
-         * instead. X11 can't change the color depth, and some apps are
-         * pretty angry if they SetDisplayMode from 24 to 16 bpp and find out
-         * that GetDisplayMode still returns 24 bpp.
-         *
-         * Also don't relay to the swapchain because with ddraw it's possible
-         * that there isn't a swapchain at all. */
-        mode->width = adapter->screen_size.cx;
-        mode->height = adapter->screen_size.cy;
-        mode->format_id = adapter->screen_format;
-        mode->refresh_rate = 0;
-        hr = WINED3D_OK;
+        hr = wined3d_swapchain_get_display_mode(swapchain, mode);
+        wined3d_swapchain_decref(swapchain);
     }
 
     return hr;
@@ -4210,10 +4128,9 @@ static HRESULT device_update_volume(struct wined3d_device *device,
 
     /* TODO: Implement direct loading into the gl volume instead of using
      * memcpy and dirtification to improve loading performance. */
-    hr = wined3d_volume_map(src_volume, &src, NULL, WINED3DLOCK_READONLY);
-    if (FAILED(hr)) return hr;
-    hr = wined3d_volume_map(dst_volume, &dst, NULL, WINED3DLOCK_DISCARD);
-    if (FAILED(hr))
+    if (FAILED(hr = wined3d_volume_map(src_volume, &src, NULL, WINED3D_MAP_READONLY)))
+        return hr;
+    if (FAILED(hr = wined3d_volume_map(dst_volume, &dst, NULL, WINED3D_MAP_DISCARD)))
     {
         wined3d_volume_unmap(src_volume);
         return hr;
@@ -4883,7 +4800,9 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
 
     if (cursor_image)
     {
+        struct wined3d_display_mode mode;
         struct wined3d_map_desc map_desc;
+        HRESULT hr;
 
         /* MSDN: Cursor must be A8R8G8B8 */
         if (cursor_image->resource.format->id != WINED3DFMT_B8G8R8A8_UNORM)
@@ -4892,13 +4811,18 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
             return WINED3DERR_INVALIDCALL;
         }
 
+        if (FAILED(hr = wined3d_get_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode)))
+        {
+            ERR("Failed to get display mode, hr %#x.\n", hr);
+            return WINED3DERR_INVALIDCALL;
+        }
+
         /* MSDN: Cursor must be smaller than the display mode */
-        if (cursor_image->resource.width > device->adapter->screen_size.cx
-                || cursor_image->resource.height > device->adapter->screen_size.cy)
+        if (cursor_image->resource.width > mode.width || cursor_image->resource.height > mode.height)
         {
             WARN("Surface %p dimensions are %ux%u, but screen dimensions are %ux%u.\n",
                     cursor_image, cursor_image->resource.width, cursor_image->resource.height,
-                    device->adapter->screen_size.cx, device->adapter->screen_size.cy);
+                    mode.width, mode.height);
             return WINED3DERR_INVALIDCALL;
         }
 
@@ -4911,7 +4835,7 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
          * instead. */
         device->cursorWidth = cursor_image->resource.width;
         device->cursorHeight = cursor_image->resource.height;
-        if (SUCCEEDED(wined3d_surface_map(cursor_image, &map_desc, NULL, WINED3DLOCK_READONLY)))
+        if (SUCCEEDED(wined3d_surface_map(cursor_image, &map_desc, NULL, WINED3D_MAP_READONLY)))
         {
             const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
             const struct wined3d_format *format = wined3d_get_format(gl_info, WINED3DFMT_B8G8R8A8_UNORM);
@@ -4981,7 +4905,7 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
             maskBits = HeapAlloc(GetProcessHeap(), 0, mask_size);
             memset(maskBits, 0xff, mask_size);
             wined3d_surface_map(cursor_image, &map_desc, NULL,
-                    WINED3DLOCK_NO_DIRTY_UPDATE | WINED3DLOCK_READONLY);
+                    WINED3D_MAP_NO_DIRTY_UPDATE | WINED3D_MAP_READONLY);
             TRACE("width: %u height: %u.\n", cursor_image->resource.width, cursor_image->resource.height);
 
             cursorInfo.fIcon = FALSE;
@@ -5249,11 +5173,27 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     struct wined3d_display_mode mode;
     BOOL DisplayModeChanged = FALSE;
     BOOL update_desc = FALSE;
+    unsigned int i;
     HRESULT hr;
 
     TRACE("device %p, swapchain_desc %p.\n", device, swapchain_desc);
 
+    if (FAILED(hr = wined3d_device_get_swapchain(device, 0, &swapchain)))
+    {
+        ERR("Failed to get the first implicit swapchain.\n");
+        return hr;
+    }
+
     stateblock_unbind_resources(device->stateBlock);
+    if (swapchain->back_buffers && swapchain->back_buffers[0])
+        wined3d_device_set_render_target(device, 0, swapchain->back_buffers[0], FALSE);
+    else
+        wined3d_device_set_render_target(device, 0, swapchain->front_buffer, FALSE);
+    for (i = 1; i < device->adapter->gl_info.limits.buffers; ++i)
+    {
+        wined3d_device_set_render_target(device, i, NULL, FALSE);
+    }
+    wined3d_device_set_depth_stencil(device, NULL);
 
     if (device->onscreen_depth_stencil)
     {
@@ -5265,14 +5205,10 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     {
         TRACE("Enumerating resource %p.\n", resource);
         if (FAILED(hr = callback(resource)))
+        {
+            wined3d_swapchain_decref(swapchain);
             return hr;
-    }
-
-    hr = wined3d_device_get_swapchain(device, 0, &swapchain);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get the first implicit swapchain\n");
-        return hr;
+        }
     }
 
     if (!is_display_mode_supported(device, swapchain_desc))
@@ -5362,8 +5298,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     /* Reset the depth stencil */
     if (swapchain_desc->enable_auto_depth_stencil)
         wined3d_device_set_depth_stencil(device, device->auto_depth_stencil);
-    else
-        wined3d_device_set_depth_stencil(device, NULL);
 
     TRACE("Resetting stateblock\n");
     wined3d_stateblock_decref(device->updateStateBlock);
@@ -5455,7 +5389,12 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     if (!swapchain_desc->windowed != !swapchain->desc.windowed
             || DisplayModeChanged)
     {
-        wined3d_device_set_display_mode(device, 0, &mode);
+        if (FAILED(hr = wined3d_set_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode)))
+        {
+            WARN("Failed to set display mode, hr %#x.\n", hr);
+            wined3d_swapchain_decref(swapchain);
+            return hr;
+        }
 
         if (!swapchain_desc->windowed)
         {
@@ -5739,7 +5678,6 @@ HRESULT device_init(struct wined3d_device *device, struct wined3d *wined3d,
 {
     struct wined3d_adapter *adapter = &wined3d->adapters[adapter_idx];
     const struct fragment_pipeline *fragment_pipeline;
-    struct wined3d_display_mode mode;
     struct shader_caps shader_caps;
     struct fragment_caps ffp_caps;
     unsigned int i;
@@ -5753,18 +5691,6 @@ HRESULT device_init(struct wined3d_device *device, struct wined3d *wined3d,
     list_init(&device->resources);
     list_init(&device->shaders);
     device->surface_alignment = surface_alignment;
-
-    /* Get the initial screen setup for ddraw. */
-    hr = wined3d_get_adapter_display_mode(wined3d, adapter_idx, &mode);
-    if (FAILED(hr))
-    {
-        ERR("Failed to get the adapter's display mode, hr %#x.\n", hr);
-        wined3d_decref(device->wined3d);
-        return hr;
-    }
-    adapter->screen_size.cx = mode.width;
-    adapter->screen_size.cy = mode.height;
-    adapter->screen_format = mode.format_id;
 
     /* Save the creation parameters. */
     device->create_parms.adapter_idx = adapter_idx;

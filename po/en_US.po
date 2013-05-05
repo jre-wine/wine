@@ -3450,18 +3450,6 @@ msgstr "Test Joystick"
 msgid "Buttons"
 msgstr "Buttons"
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr "X,Y"
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr "Rx,Ry"
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr "Z, Rz"
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr "Test Force Feedback"
@@ -5479,8 +5467,8 @@ msgid "No user session key.\n"
 msgstr "No user session key.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
-msgstr "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
+msgstr "License quota exceeded.\n"
 
 #: winerror.mc:2381
 msgid "Wrong target name.\n"
@@ -13637,6 +13625,18 @@ msgstr "Cannot find a richedit implementation... Aborting"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Help topics: "
+
+#: wmic.rc:25
+msgid "Error: Command line not supported\n"
+msgstr "Error: Command line not supported\n"
+
+#: wmic.rc:26
+msgid "Error: Alias not found\n"
+msgstr "Error: Alias not found\n"
+
+#: wmic.rc:27
+msgid "Error: Invalid query\n"
+msgstr "Error: Invalid query\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

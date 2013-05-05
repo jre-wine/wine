@@ -3463,18 +3463,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5494,7 +5482,7 @@ msgid "No user session key.\n"
 msgstr "Нет сеансового ключа пользователя.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "Превышена квота лицензий.\n"
 
 #: winerror.mc:2381
@@ -13658,6 +13646,24 @@ msgstr "Не могу найти richedit"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Содержание: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "Ошибка: неправильные параметры командной строки\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "Набор свойств не найден.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "Ошибка: неправильное имя раздела\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

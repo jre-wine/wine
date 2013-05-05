@@ -1014,8 +1014,7 @@ static HRESULT interp_new(exec_ctx_t *ctx)
         return throw_type_error(ctx->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
 
     jsstack_to_dp(ctx, arg, &dp);
-    hres = disp_call(ctx->script, V_DISPATCH(constr), DISPID_VALUE,
-            DISPATCH_CONSTRUCT, &dp, &v, ctx->ei);
+    hres = disp_call_value(ctx->script, V_DISPATCH(constr), NULL, DISPATCH_CONSTRUCT, &dp, &v, ctx->ei);
     if(FAILED(hres))
         return hres;
 
@@ -1039,7 +1038,7 @@ static HRESULT interp_call(exec_ctx_t *ctx)
         return throw_type_error(ctx->script, ctx->ei, JS_E_INVALID_PROPERTY, NULL);
 
     jsstack_to_dp(ctx, argn, &dp);
-    hres = disp_call(ctx->script, V_DISPATCH(objv), DISPID_VALUE, DISPATCH_METHOD, &dp,
+    hres = disp_call_value(ctx->script, V_DISPATCH(objv), NULL, DISPATCH_METHOD, &dp,
             do_ret ? &v : NULL, ctx->ei);
     if(FAILED(hres))
         return hres;
@@ -1185,13 +1184,10 @@ static HRESULT interp_int(exec_ctx_t *ctx)
 static HRESULT interp_double(exec_ctx_t *ctx)
 {
     const double arg = get_op_double(ctx);
-    VARIANT v;
 
     TRACE("%lf\n", arg);
 
-    V_VT(&v) = VT_R8;
-    V_R8(&v) = arg;
-    return stack_push(ctx, &v);
+    return stack_push_number(ctx, arg);
 }
 
 /* ECMA-262 3rd Edition    7.8.4 */
@@ -2033,16 +2029,14 @@ static HRESULT equal_values(script_ctx_t *ctx, VARIANT *lval, VARIANT *rval, jse
     if(V_VT(rval) == VT_BOOL) {
         VARIANT v;
 
-        V_VT(&v) = VT_I4;
-        V_I4(&v) = V_BOOL(rval) ? 1 : 0;
+        num_set_int(&v, V_BOOL(rval) ? 1 : 0);
         return equal_values(ctx, lval, &v, ei, ret);
     }
 
     if(V_VT(lval) == VT_BOOL) {
         VARIANT v;
 
-        V_VT(&v) = VT_I4;
-        V_I4(&v) = V_BOOL(lval) ? 1 : 0;
+        num_set_int(&v, V_BOOL(lval) ? 1 : 0);
         return equal_values(ctx, &v, rval, ei, ret);
     }
 

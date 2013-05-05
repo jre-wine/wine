@@ -3483,18 +3483,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5520,7 +5508,7 @@ msgid "No user session key.\n"
 msgstr "Ni ključa uporabniške seje.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "Kvota licence je bila presežena.\n"
 
 #: winerror.mc:2381
@@ -13721,6 +13709,24 @@ msgstr "Ni mogoče najti knjižnice richedit ... Prekinjanje"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Teme pomoči: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "Napaka: neveljaven parameter v ukazni vrstici\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "Nastavljene lastnosti ni mogoče najti.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "Napaka: neveljavno ime ključa\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

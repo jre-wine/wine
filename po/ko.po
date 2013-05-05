@@ -3446,18 +3446,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5477,7 +5465,7 @@ msgid "No user session key.\n"
 msgstr "사용자 세션 키가 없음.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "라이센스의 할당량을 초과했습니다.\n"
 
 #: winerror.mc:2381
@@ -13597,6 +13585,24 @@ msgstr "richedit 구현을 찾을수 없습니다... 취소중"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "도움말 목차: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "오류:올바르지 않은 명령라인 매개변수\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "속성 세트를 찾을 수 없습니다.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "오류: 올바르지 않은 키 이름\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

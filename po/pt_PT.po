@@ -3491,18 +3491,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5528,7 +5516,7 @@ msgid "No user session key.\n"
 msgstr "Nenhuma chave de sessão do utilizador.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "Quota da licença excedida.\n"
 
 #: winerror.mc:2381
@@ -13708,6 +13696,24 @@ msgstr "Não foi possível encontrar uma implementação do richedit... A aborta
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Tópicos de ajuda: "
+
+#: wmic.rc:25
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "Error: Command line not supported\n"
+msgstr "Erro: Parâmetros da linha de comandos inválidos\n"
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "Conjunto de propriedades não encontrado.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "Error: Invalid query\n"
+msgstr "Erro: Nome de chave inválido\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

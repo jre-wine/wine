@@ -112,6 +112,18 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
     return modifiers | mod;
 }
 
+static unsigned int components_count_expr_list(struct list *list)
+{
+    struct hlsl_ir_node *node;
+    unsigned int count = 0;
+
+    LIST_FOR_EACH_ENTRY(node, list, struct hlsl_ir_node, entry)
+    {
+        count += components_count_type(node->data_type);
+    }
+    return count;
+}
+
 %}
 
 %error-verbose
@@ -127,6 +139,8 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
     struct hlsl_ir_var *var;
     struct hlsl_ir_node *instr;
     struct list *list;
+    struct hlsl_ir_function_decl *function;
+    struct parse_parameter parameter;
     struct parse_variable_def *variable_def;
 }
 
@@ -213,8 +227,6 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
 %token OP_ELLIPSIS
 %token OP_LE
 %token OP_GE
-%token OP_LT
-%token OP_GT
 %token OP_NE
 %token OP_ADDASSIGN
 %token OP_SUBASSIGN
@@ -232,7 +244,7 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
 %token <intval> PRE_LINE
 
 %token <name> VAR_IDENTIFIER TYPE_IDENTIFIER NEW_IDENTIFIER
-%type <name> any_identifier
+%type <name> any_identifier var_identifier
 %token <name> STRING
 %token <floatval> C_FLOAT
 %token <intval> C_INTEGER
@@ -243,9 +255,17 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
 %type <list> initializer_expr_list
 %type <instr> initializer_expr
 %type <modifiers> var_modifiers
+%type <list> parameters
+%type <list> param_list
 %type <instr> expr
 %type <var> variable
 %type <intval> array
+%type <list> statement
+%type <list> statement_list
+%type <list> compound_statement
+%type <function> func_declaration
+%type <function> func_prototype
+%type <parameter> parameter
 %type <name> semantic
 %type <variable_def> variable_def
 %type <list> variables_def
@@ -264,10 +284,17 @@ static DWORD add_modifier(DWORD modifiers, DWORD mod)
 %type <instr> logicor_expr
 %type <instr> conditional_expr
 %type <instr> assignment_expr
+%type <list> expr_statement
+%type <modifiers> input_mod
 %%
 
 hlsl_prog:                /* empty */
                             {
+                            }
+                        | hlsl_prog func_declaration
+                            {
+                                FIXME("Check that the function doesn't conflict with an already declared one.\n");
+                                list_add_tail(&hlsl_ctx.functions, &$2->node.entry);
                             }
                         | hlsl_prog declaration_statement
                             {
@@ -289,6 +316,50 @@ any_identifier:           VAR_IDENTIFIER
                         | TYPE_IDENTIFIER
                         | NEW_IDENTIFIER
 
+func_declaration:         func_prototype compound_statement
+                            {
+                                TRACE("Function %s parsed.\n", $1->name);
+                                $$ = $1;
+                                $$->body = $2;
+                                pop_scope(&hlsl_ctx);
+                            }
+                        | func_prototype ';'
+                            {
+                                TRACE("Function prototype for %s.\n", $1->name);
+                                $$ = $1;
+                                pop_scope(&hlsl_ctx);
+                            }
+
+func_prototype:           var_modifiers type var_identifier '(' parameters ')' semantic
+                            {
+                                $$ = new_func_decl($3, $2, $5);
+                                if (!$$)
+                                {
+                                    ERR("Out of memory.\n");
+                                    return -1;
+                                }
+                                $$->semantic = $7;
+                            }
+
+compound_statement:       '{' '}'
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                            }
+                        | '{' scope_start statement_list '}'
+                            {
+                                pop_scope(&hlsl_ctx);
+                                $$ = $3;
+                            }
+
+scope_start:              /* Empty */
+                            {
+                                push_scope(&hlsl_ctx);
+                            }
+
+var_identifier:           VAR_IDENTIFIER
+                        | NEW_IDENTIFIER
+
 semantic:                 /* Empty */
                             {
                                 $$ = NULL;
@@ -298,14 +369,136 @@ semantic:                 /* Empty */
                                 $$ = $2;
                             }
 
+parameters:               scope_start
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                            }
+                        | scope_start param_list
+                            {
+                                $$ = $2;
+                            }
+
+param_list:               parameter
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                                if (!add_func_parameter($$, &$1, hlsl_ctx.line_no))
+                                {
+                                    ERR("Error adding function parameter %s.\n", $1.name);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return -1;
+                                }
+                            }
+                        | param_list ',' parameter
+                            {
+                                $$ = $1;
+                                if (!add_func_parameter($$, &$3, hlsl_ctx.line_no))
+                                {
+                                    hlsl_message("Line %u: duplicate parameter %s.\n",
+                                            hlsl_ctx.line_no, $3.name);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return 1;
+                                }
+                            }
+
+parameter:                input_mod var_modifiers type any_identifier semantic
+                            {
+                                $$.modifiers = $1;
+                                $$.modifiers |= $2;
+                                $$.type = $3;
+                                $$.name = $4;
+                                $$.semantic = $5;
+                            }
+
+input_mod:                /* Empty */
+                            {
+                                $$ = HLSL_MODIFIER_IN;
+                            }
+                        | KW_IN
+                            {
+                                $$ = HLSL_MODIFIER_IN;
+                            }
+                        | KW_OUT
+                            {
+                                $$ = HLSL_MODIFIER_OUT;
+                            }
+                        | KW_INOUT
+                            {
+                                $$ = HLSL_MODIFIER_IN | HLSL_MODIFIER_OUT;
+                            }
+
 type:                     base_type
                             {
                                 $$ = $1;
+                            }
+                        | KW_VECTOR '<' base_type ',' C_INTEGER '>'
+                            {
+                                if ($3->type != HLSL_CLASS_SCALAR)
+                                {
+                                    hlsl_message("Line %u: vectors of non-scalar types are not allowed.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return 1;
+                                }
+                                if ($5 < 1 || $5 > 4)
+                                {
+                                    hlsl_message("Line %u: vector size must be between 1 and 4.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return 1;
+                                }
+
+                                $$ = new_hlsl_type(NULL, HLSL_CLASS_VECTOR, $3->base_type, $5, 1);
+                            }
+                        | KW_MATRIX '<' base_type ',' C_INTEGER ',' C_INTEGER '>'
+                            {
+                                if ($3->type != HLSL_CLASS_SCALAR)
+                                {
+                                    hlsl_message("Line %u: matrices of non-scalar types are not allowed.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return 1;
+                                }
+                                if ($5 < 1 || $5 > 4 || $7 < 1 || $7 > 4)
+                                {
+                                    hlsl_message("Line %u: matrix dimensions must be between 1 and 4.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return 1;
+                                }
+
+                                $$ = new_hlsl_type(NULL, HLSL_CLASS_MATRIX, $3->base_type, $5, $7);
                             }
 
 base_type:                KW_VOID
                             {
                                 $$ = new_hlsl_type("void", HLSL_CLASS_SCALAR, HLSL_TYPE_VOID, 1, 1);
+                            }
+                        | KW_SAMPLER
+                            {
+                                $$ = new_hlsl_type("sampler", HLSL_CLASS_OBJECT, HLSL_TYPE_SAMPLER, 1, 1);
+                                $$->sampler_dim = HLSL_SAMPLER_DIM_GENERIC;
+                            }
+                        | KW_SAMPLER1D
+                            {
+                                $$ = new_hlsl_type("sampler1D", HLSL_CLASS_OBJECT, HLSL_TYPE_SAMPLER, 1, 1);
+                                $$->sampler_dim = HLSL_SAMPLER_DIM_1D;
+                            }
+                        | KW_SAMPLER2D
+                            {
+                                $$ = new_hlsl_type("sampler2D", HLSL_CLASS_OBJECT, HLSL_TYPE_SAMPLER, 1, 1);
+                                $$->sampler_dim = HLSL_SAMPLER_DIM_2D;
+                            }
+                        | KW_SAMPLER3D
+                            {
+                                $$ = new_hlsl_type("sampler3D", HLSL_CLASS_OBJECT, HLSL_TYPE_SAMPLER, 1, 1);
+                                $$->sampler_dim = HLSL_SAMPLER_DIM_3D;
+                            }
+                        | KW_SAMPLERCUBE
+                            {
+                                $$ = new_hlsl_type("samplerCUBE", HLSL_CLASS_OBJECT, HLSL_TYPE_SAMPLER, 1, 1);
+                                $$->sampler_dim = HLSL_SAMPLER_DIM_CUBE;
                             }
                         | TYPE_IDENTIFIER
                             {
@@ -507,6 +700,44 @@ boolean:                  KW_TRUE
                                 $$ = FALSE;
                             }
 
+statement_list:           statement
+                            {
+                                $$ = $1;
+                            }
+                        | statement_list statement
+                            {
+                                $$ = $1;
+                                list_move_tail($$, $2);
+                                d3dcompiler_free($2);
+                            }
+
+statement:                declaration_statement
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                            }
+                        | expr_statement
+                            {
+                                $$ = $1;
+                            }
+                        | compound_statement
+                            {
+                                $$ = $1;
+                            }
+
+expr_statement:           ';'
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                            }
+                        | expr ';'
+                            {
+                                $$ = d3dcompiler_alloc(sizeof(*$$));
+                                list_init($$);
+                                if ($1)
+                                    list_add_head($$, &$1->entry);
+                            }
+
 primary_expr:             C_FLOAT
                             {
                                 struct hlsl_ir_constant *c = d3dcompiler_alloc(sizeof(*c));
@@ -573,6 +804,42 @@ variable:                 VAR_IDENTIFIER
 postfix_expr:             primary_expr
                             {
                                 $$ = $1;
+                            }
+                          /* "var_modifiers" doesn't make sense in this case, but it's needed
+                             in the grammar to avoid shift/reduce conflicts. */
+                        | var_modifiers type '(' initializer_expr_list ')'
+                            {
+                                struct hlsl_ir_constructor *constructor;
+
+                                TRACE("%s constructor.\n", debug_hlsl_type($2));
+                                if ($1)
+                                {
+                                    hlsl_message("Line %u: unexpected modifier in a constructor.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return -1;
+                                }
+                                if ($2->type > HLSL_CLASS_LAST_NUMERIC)
+                                {
+                                    hlsl_message("Line %u: constructors are allowed only for numeric data types.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return -1;
+                                }
+                                if ($2->dimx * $2->dimy != components_count_expr_list($4))
+                                {
+                                    hlsl_message("Line %u: wrong number of components in constructor.\n",
+                                            hlsl_ctx.line_no);
+                                    set_parse_status(&hlsl_ctx.status, PARSE_ERR);
+                                    return -1;
+                                }
+
+                                constructor = d3dcompiler_alloc(sizeof(*constructor));
+                                constructor->node.type = HLSL_IR_CONSTRUCTOR;
+                                constructor->node.data_type = $2;
+                                constructor->arguments = $4;
+
+                                $$ = &constructor->node;
                             }
 
 unary_expr:               postfix_expr
@@ -653,6 +920,7 @@ expr:                     assignment_expr
 
 struct bwriter_shader *parse_hlsl(enum shader_type type, DWORD version, const char *entrypoint, char **messages)
 {
+    struct hlsl_ir_function_decl *function;
     struct hlsl_scope *scope, *next_scope;
     struct hlsl_type *hlsl_type, *next_type;
     struct hlsl_ir_var *var, *next_var;
@@ -670,7 +938,22 @@ struct bwriter_shader *parse_hlsl(enum shader_type type, DWORD version, const ch
 
     hlsl_parse();
 
+    if (TRACE_ON(hlsl_parser))
+    {
+        struct hlsl_ir_function_decl *func;
+
+        TRACE("IR dump.\n");
+        LIST_FOR_EACH_ENTRY(func, &hlsl_ctx.functions, struct hlsl_ir_function_decl, node.entry)
+        {
+            if (func->body)
+                debug_dump_ir_function(func);
+        }
+    }
+
     d3dcompiler_free(hlsl_ctx.source_file);
+    TRACE("Freeing functions IR.\n");
+    LIST_FOR_EACH_ENTRY(function, &hlsl_ctx.functions, struct hlsl_ir_function_decl, node.entry)
+        free_function(function);
 
     TRACE("Freeing variables.\n");
     LIST_FOR_EACH_ENTRY_SAFE(scope, next_scope, &hlsl_ctx.scopes, struct hlsl_scope, entry)

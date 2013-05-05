@@ -344,8 +344,9 @@ static void free_package_structures( MSIPACKAGE *package )
 
 static void MSI_FreePackage( MSIOBJECTHDR *arg)
 {
-    UINT i;
     MSIPACKAGE *package = (MSIPACKAGE *)arg;
+
+    msi_destroy_assembly_caches( package );
 
     if( package->dialog )
         msi_dialog_destroy( package->dialog );
@@ -353,10 +354,6 @@ static void MSI_FreePackage( MSIOBJECTHDR *arg)
     msiobj_release( &package->db->hdr );
     free_package_structures(package);
     CloseHandle( package->log_file );
-
-    for (i = 0; i < CLR_VERSION_MAX; i++)
-        if (package->cache_net[i]) IAssemblyCache_Release( package->cache_net[i] );
-    if (package->cache_sxs) IAssemblyCache_Release( package->cache_sxs );
 
     if (package->delete_on_close) DeleteFileW( package->localfile );
     msi_free( package->localfile );
@@ -1339,7 +1336,6 @@ static UINT msi_parse_summary( MSISUMMARYINFO *si, MSIPACKAGE *package )
 
 static UINT validate_package( MSIPACKAGE *package )
 {
-    BOOL is_wow64;
     UINT i;
 
     if (package->platform == PLATFORM_INTEL64)
@@ -1348,7 +1344,6 @@ static UINT validate_package( MSIPACKAGE *package )
     if (package->platform == PLATFORM_ARM)
         return ERROR_INSTALL_PLATFORM_UNSUPPORTED;
 #endif
-    IsWow64Process( GetCurrentProcess(), &is_wow64 );
     if (package->platform == PLATFORM_X64)
     {
         if (!is_64bit && !is_wow64)

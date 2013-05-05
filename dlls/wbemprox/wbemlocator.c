@@ -23,7 +23,6 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "initguid.h"
 #include "objbase.h"
 #include "wbemcli.h"
 
@@ -59,7 +58,7 @@ static ULONG WINAPI wbem_locator_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", wl);
-        HeapFree( GetProcessHeap(), 0, wl );
+        heap_free( wl );
     }
     return refs;
 }
@@ -98,8 +97,28 @@ static HRESULT WINAPI wbem_locator_ConnectServer(
     IWbemContext *pCtx,
     IWbemServices **ppNamespace)
 {
-    FIXME("%p, %s, %s, %s, %s, 0x%08x, %s, %p, %p)\n", iface, debugstr_w(NetworkResource), debugstr_w(User),
+    HRESULT hr;
+
+    TRACE("%p, %s, %s, %s, %s, 0x%08x, %s, %p, %p)\n", iface, debugstr_w(NetworkResource), debugstr_w(User),
           debugstr_w(Password), debugstr_w(Locale), SecurityFlags, debugstr_w(Authority), pCtx, ppNamespace);
+
+    if (((NetworkResource[0] == '\\' && NetworkResource[1] == '\\') ||
+         (NetworkResource[0] == '/' && NetworkResource[1] == '/')) && NetworkResource[2] != '.')
+    {
+        FIXME("remote computer not supported\n");
+        return WBEM_E_TRANSPORT_FAILURE;
+    }
+    if (User || Password || Authority)
+        FIXME("authentication not supported\n");
+    if (Locale)
+        FIXME("specific locale not supported\n");
+    if (SecurityFlags)
+        FIXME("unsupported flags\n");
+
+    hr = WbemServices_create( NULL, (void **)ppNamespace );
+    if (SUCCEEDED( hr ))
+        return WBEM_NO_ERROR;
+
     return WBEM_E_FAILED;
 }
 
@@ -117,7 +136,7 @@ HRESULT WbemLocator_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     TRACE("(%p,%p)\n", pUnkOuter, ppObj);
 
-    wl = HeapAlloc( GetProcessHeap(), 0, sizeof(*wl) );
+    wl = heap_alloc( sizeof(*wl) );
     if (!wl) return E_OUTOFMEMORY;
 
     wl->IWbemLocator_iface.lpVtbl = &wbem_locator_vtbl;

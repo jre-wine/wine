@@ -3384,18 +3384,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5458,7 +5446,7 @@ msgid "No user session key.\n"
 msgstr ""
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr ""
 
 #: winerror.mc:2381
@@ -13226,6 +13214,21 @@ msgstr ""
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr ""
+
+#: wmic.rc:25
+#, fuzzy
+msgid "Error: Command line not supported\n"
+msgstr "Επιλογές.\n"
+
+#: wmic.rc:26
+#, fuzzy
+msgid "Error: Alias not found\n"
+msgstr "Το αρχείο δε βρέθηκε.\n"
+
+#: wmic.rc:27
+#, fuzzy
+msgid "Error: Invalid query\n"
+msgstr "Μη έγγυρος(οι) χαρακτήρας(ες) στο μονοπάτι.\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

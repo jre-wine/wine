@@ -3360,18 +3360,6 @@ msgstr ""
 msgid "Buttons"
 msgstr ""
 
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
-
 #: joy.rc:58
 msgid "Test Force Feedback"
 msgstr ""
@@ -5395,7 +5383,7 @@ msgid "No user session key.\n"
 msgstr ""
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr ""
 
 #: winerror.mc:2381
@@ -13035,6 +13023,22 @@ msgstr "Ne eblas trovi realigon de richedit... Ĉesigante"
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Helpaj tempoj: "
+
+#: wmic.rc:25
+msgid "Error: Command line not supported\n"
+msgstr ""
+
+#: wmic.rc:26
+#, fuzzy
+#| msgid "Property set not found.\n"
+msgid "Error: Alias not found\n"
+msgstr "Ecaro ne estis trovita.\n"
+
+#: wmic.rc:27
+#, fuzzy
+#| msgid "Invalid query syntax.\n"
+msgid "Error: Invalid query\n"
+msgstr "Nevalida menda sintakso.\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

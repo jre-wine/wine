@@ -63,8 +63,6 @@ extern void calc_curve_bezier_endp(REAL xend, REAL yend, REAL xadj, REAL yadj,
 
 extern void free_installed_fonts(void) DECLSPEC_HIDDEN;
 
-extern void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font, HFONT *hfont) DECLSPEC_HIDDEN;
-
 extern BOOL lengthen_path(GpPath *path, INT len) DECLSPEC_HIDDEN;
 
 extern GpStatus trace_path(GpGraphics *graphics, GpPath *path) DECLSPEC_HIDDEN;
@@ -262,7 +260,8 @@ struct GpAdustableArrowCap{
 };
 
 struct GpImage{
-    IPicture* picture;
+    IPicture *picture;
+    IStream *stream; /* a copy of the source stream */
     ImageType type;
     GUID format;
     UINT flags;

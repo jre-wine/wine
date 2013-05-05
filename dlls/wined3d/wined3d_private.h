@@ -199,7 +199,7 @@ static inline float float_16_to_32(const unsigned short *in) {
     } else if(e < 31) {
         return sgn * powf(2, (float)e - 15.0f) * (1.0f + ((float)m / 1024.0f));
     } else {
-        if(m == 0) return sgn / 0.0f; /* +INF / -INF */
+        if(m == 0) return sgn * INFINITY;
         else return NAN;
     }
 }
@@ -221,7 +221,7 @@ static inline float float_24_to_32(DWORD in)
     }
     else
     {
-        if (m == 0) return sgn / 0.0f; /* +INF / -INF */
+        if (m == 0) return sgn * INFINITY;
         else return NAN;
     }
 }
@@ -1543,7 +1543,6 @@ struct wined3d_adapter
     BOOL                    opengl;
 
     POINT monitorPoint;
-    SIZE screen_size;
     enum wined3d_format_id screen_format;
 
     struct wined3d_gl_info  gl_info;
@@ -2085,11 +2084,9 @@ static inline GLuint surface_get_texture_name(const struct wined3d_surface *surf
 }
 
 void surface_add_dirty_rect(struct wined3d_surface *surface, const struct wined3d_box *dirty_rect) DECLSPEC_HIDDEN;
-void surface_bind(struct wined3d_surface *surface, struct wined3d_context *context, BOOL srgb) DECLSPEC_HIDDEN;
 HRESULT surface_color_fill(struct wined3d_surface *s,
         const RECT *rect, const struct wined3d_color *color) DECLSPEC_HIDDEN;
 GLenum surface_get_gl_buffer(const struct wined3d_surface *surface) DECLSPEC_HIDDEN;
-BOOL surface_init_sysmem(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 void surface_internal_preload(struct wined3d_surface *surface, enum WINED3DSRGB srgb) DECLSPEC_HIDDEN;
 BOOL surface_is_offscreen(const struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 HRESULT surface_load(struct wined3d_surface *surface, BOOL srgb) DECLSPEC_HIDDEN;
@@ -2182,8 +2179,6 @@ enum wined3d_conversion_type
     WINED3D_CT_CK_ARGB32,
 };
 
-HRESULT d3dfmt_get_conv(const struct wined3d_surface *surface, BOOL need_alpha_ck, BOOL use_texturing,
-        struct wined3d_format *format, enum wined3d_conversion_type *conversion_type) DECLSPEC_HIDDEN;
 void d3dfmt_p8_init_palette(const struct wined3d_surface *surface, BYTE table[256][4], BOOL colorkey) DECLSPEC_HIDDEN;
 
 struct wined3d_vertex_declaration_element

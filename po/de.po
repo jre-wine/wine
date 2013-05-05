@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-06-06 01:03+0200\n"
+"PO-Revision-Date: 2012-06-20 21:55+0200\n"
 "Last-Translator: Julian Rüger\n"
 "Language-Team: none\n"
 "Language: German\n"
@@ -3435,11 +3435,11 @@ msgstr "Joysticks"
 
 #: joy.rc:36 winecfg.rc:204
 msgid "&Disable"
-msgstr "&Ausschalten"
+msgstr "&Deaktivieren"
 
 #: joy.rc:37
 msgid "&Enable"
-msgstr "&Einschalten"
+msgstr "&Aktivieren"
 
 #: joy.rc:38
 msgid "Connected"
@@ -3447,7 +3447,7 @@ msgstr "Verbunden"
 
 #: joy.rc:40
 msgid "Disabled"
-msgstr "Ausgeschaltet"
+msgstr "Deaktiviert"
 
 #: joy.rc:46
 msgid "Test Joystick"
@@ -3455,19 +3455,7 @@ msgstr "Joystick testen"
 
 #: joy.rc:50
 msgid "Buttons"
-msgstr ""
-
-#: joy.rc:51
-msgid "X,Y"
-msgstr ""
-
-#: joy.rc:52
-msgid "Rx,Ry"
-msgstr ""
-
-#: joy.rc:53
-msgid "Z, Rz"
-msgstr ""
+msgstr "Tasten"
 
 #: joy.rc:58
 msgid "Test Force Feedback"
@@ -3475,7 +3463,7 @@ msgstr "Force Feedback testen"
 
 #: joy.rc:28
 msgid "Game Controllers"
-msgstr "Spielsteuerungsgeräte"
+msgstr "Gamecontroller"
 
 #: jscript.rc:25
 msgid "Error converting object to primitive type"
@@ -5488,7 +5476,7 @@ msgid "No user session key.\n"
 msgstr "Kein Benutzer Sitzungsschlüssel.\n"
 
 #: winerror.mc:2376
-msgid "Licence quota exceeded.\n"
+msgid "License quota exceeded.\n"
 msgstr "Lizenz-Quota überschritten.\n"
 
 #: winerror.mc:2381
@@ -13719,16 +13707,28 @@ msgstr "Hilfe-Dateien (*.hlp)"
 #: winhlp32.rc:89
 msgid "Cannot find '%s'. Do you want to find this file yourself?"
 msgstr ""
-"'%s' konnte nicht gefunden werden. Wollen Sie selber nach dieser Datei "
+"'%s' konnte nicht gefunden werden. Möchten Sie selbst nach dieser Datei "
 "suchen?"
 
 #: winhlp32.rc:90
 msgid "Cannot find a richedit implementation... Aborting"
-msgstr "Die Richedit Implementation konnte nicht gefunden werden... Breche ab"
+msgstr "Es konnte keine Richedit-Implementierung gefunden werden... Abbruch"
 
 #: winhlp32.rc:91
 msgid "Help topics: "
 msgstr "Hilfethemen: "
+
+#: wmic.rc:25
+msgid "Error: Command line not supported\n"
+msgstr "Fehler: Befehlszeile nicht unterstützt\n"
+
+#: wmic.rc:26
+msgid "Error: Alias not found\n"
+msgstr "Fehler: Alias nicht gefunden\n"
+
+#: wmic.rc:27
+msgid "Error: Invalid query\n"
+msgstr "Fehler: Ungültige Anfrage\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"

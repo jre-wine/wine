@@ -65,6 +65,7 @@ typedef VOID (*ShapeCharGlyphPropProc)( HDC , ScriptCache*, SCRIPT_ANALYSIS*, co
 
 static void ShapeCharGlyphProp_Default( HDC hdc, ScriptCache* psc, SCRIPT_ANALYSIS* psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD* pwLogClust, SCRIPT_CHARPROP* pCharProp, SCRIPT_GLYPHPROP* pGlyphProp);
 static void ShapeCharGlyphProp_Arabic( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP* pCharProp, SCRIPT_GLYPHPROP *pGlyphProp );
+static void ShapeCharGlyphProp_Hebrew( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP* pCharProp, SCRIPT_GLYPHPROP *pGlyphProp );
 static void ShapeCharGlyphProp_Thai( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp );
 static void ShapeCharGlyphProp_None( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp );
 static void ShapeCharGlyphProp_Tibet( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp );
@@ -398,7 +399,7 @@ static const ScriptShapeData ShapingData[] =
     {{ latin_features, 2}, NULL, 0, NULL, NULL},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
-    {{ hebrew_features, 1}, NULL, 0, ContextualShape_Hebrew, NULL},
+    {{ hebrew_features, 1}, NULL, 0, ContextualShape_Hebrew, ShapeCharGlyphProp_Hebrew},
     {{ syriac_features, 4}, required_syriac_features, 0, ContextualShape_Syriac, ShapeCharGlyphProp_None},
     {{ arabic_features, 6}, required_arabic_features, 0, ContextualShape_Arabic, ShapeCharGlyphProp_Arabic},
     {{ NULL, 0}, NULL, 0, ContextualShape_Thaana, ShapeCharGlyphProp_None},
@@ -411,29 +412,29 @@ static const ScriptShapeData ShapingData[] =
     {{ tibetan_features, 2}, NULL, 0, NULL, ShapeCharGlyphProp_Tibet},
     {{ phags_features, 3}, NULL, 0, ContextualShape_Phags_pa, ShapeCharGlyphProp_Thai},
     {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, ShapeCharGlyphProp_Thai},
-    {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, ShapeCharGlyphProp_Thai},
+    {{ thai_features, 1}, NULL, 0, ContextualShape_Thai, NULL},
     {{ thai_features, 1}, required_lao_features, 0, ContextualShape_Lao, ShapeCharGlyphProp_Thai},
     {{ thai_features, 1}, required_lao_features, 0, ContextualShape_Lao, ShapeCharGlyphProp_Thai},
     {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('d','e','v','2'), ContextualShape_Devanagari, ShapeCharGlyphProp_Devanagari},
-    {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('d','e','v','2'), ContextualShape_Devanagari, ShapeCharGlyphProp_Devanagari},
+    {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('d','e','v','2'), ContextualShape_Devanagari, NULL},
     {{ devanagari_features, 6}, required_bengali_features, MS_MAKE_TAG('b','n','g','2'), ContextualShape_Bengali, ShapeCharGlyphProp_Bengali},
-    {{ devanagari_features, 6}, required_bengali_features, MS_MAKE_TAG('b','n','g','2'), ContextualShape_Bengali, ShapeCharGlyphProp_Bengali},
+    {{ devanagari_features, 6}, required_bengali_features, MS_MAKE_TAG('b','n','g','2'), ContextualShape_Bengali, NULL},
     {{ devanagari_features, 6}, required_bengali_features, MS_MAKE_TAG('b','n','g','2'), ContextualShape_Bengali, ShapeCharGlyphProp_Bengali},
     {{ devanagari_features, 6}, required_gurmukhi_features, MS_MAKE_TAG('g','u','r','2'), ContextualShape_Gurmukhi, ShapeCharGlyphProp_Gurmukhi},
-    {{ devanagari_features, 6}, required_gurmukhi_features, MS_MAKE_TAG('g','u','r','2'), ContextualShape_Gurmukhi, ShapeCharGlyphProp_Gurmukhi},
+    {{ devanagari_features, 6}, required_gurmukhi_features, MS_MAKE_TAG('g','u','r','2'), ContextualShape_Gurmukhi, NULL},
     {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('g','j','r','2'), ContextualShape_Gujarati, ShapeCharGlyphProp_Gujarati},
-    {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('g','j','r','2'), ContextualShape_Gujarati, ShapeCharGlyphProp_Gujarati},
+    {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('g','j','r','2'), ContextualShape_Gujarati, NULL},
     {{ devanagari_features, 6}, required_devanagari_features, MS_MAKE_TAG('g','j','r','2'), ContextualShape_Gujarati, ShapeCharGlyphProp_Gujarati},
     {{ devanagari_features, 6}, required_oriya_features, MS_MAKE_TAG('o','r','y','2'), ContextualShape_Oriya, ShapeCharGlyphProp_Oriya},
-    {{ devanagari_features, 6}, required_oriya_features, MS_MAKE_TAG('o','r','y','2'), ContextualShape_Oriya, ShapeCharGlyphProp_Oriya},
+    {{ devanagari_features, 6}, required_oriya_features, MS_MAKE_TAG('o','r','y','2'), ContextualShape_Oriya, NULL},
     {{ devanagari_features, 6}, required_tamil_features, MS_MAKE_TAG('t','a','m','2'), ContextualShape_Tamil, ShapeCharGlyphProp_Tamil},
-    {{ devanagari_features, 6}, required_tamil_features, MS_MAKE_TAG('t','a','m','2'), ContextualShape_Tamil, ShapeCharGlyphProp_Tamil},
+    {{ devanagari_features, 6}, required_tamil_features, MS_MAKE_TAG('t','a','m','2'), ContextualShape_Tamil, NULL},
     {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('t','e','l','2'), ContextualShape_Telugu, ShapeCharGlyphProp_Telugu},
-    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('t','e','l','2'), ContextualShape_Telugu, ShapeCharGlyphProp_Telugu},
+    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('t','e','l','2'), ContextualShape_Telugu, NULL},
     {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('k','n','d','2'), ContextualShape_Kannada, ShapeCharGlyphProp_Kannada},
-    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('k','n','d','2'), ContextualShape_Kannada, ShapeCharGlyphProp_Kannada},
+    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('k','n','d','2'), ContextualShape_Kannada, NULL},
     {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('m','l','m','2'), ContextualShape_Malayalam, ShapeCharGlyphProp_Malayalam},
-    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('m','l','m','2'), ContextualShape_Malayalam, ShapeCharGlyphProp_Malayalam},
+    {{ devanagari_features, 6}, required_telugu_features, MS_MAKE_TAG('m','l','m','2'), ContextualShape_Malayalam, NULL},
     {{ standard_features, 2}, NULL, 0, NULL, NULL},
     {{ latin_features, 2}, NULL, 0, NULL, NULL},
     {{ standard_features, 2}, NULL, 0, NULL, NULL},
@@ -2836,38 +2837,9 @@ static void ShapeCharGlyphProp_Arabic( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSI
     HeapFree(GetProcessHeap(),0,spaces);
 }
 
-static void ShapeCharGlyphProp_Thai( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp )
+static void ShapeCharGlyphProp_Hebrew( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp )
 {
     int i,k;
-    int finaGlyph;
-    INT dirL;
-    BYTE *spaces;
-
-    spaces = HeapAlloc(GetProcessHeap(),0,cGlyphs);
-    memset(spaces,0,cGlyphs);
-
-    if (!psa->fLogicalOrder && psa->fRTL)
-    {
-        finaGlyph = 0;
-        dirL = -1;
-    }
-    else
-    {
-        finaGlyph = cGlyphs-1;
-        dirL = 1;
-    }
-
-    for (i = 0; i < cGlyphs; i++)
-    {
-        for (k = 0; k < cChars; k++)
-            if (pwLogClust[k] == i)
-            {
-                if (pwcChars[k] == 0x0020)
-                    spaces[i] = 1;
-            }
-    }
-
-    OpenType_GDEF_UpdateGlyphProps(hdc, psc, pwGlyphs, cGlyphs, pwLogClust, cChars, pGlyphProp);
 
     for (i = 0; i < cGlyphs; i++)
     {
@@ -2882,24 +2854,67 @@ static void ShapeCharGlyphProp_Thai( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS 
         }
 
         if (char_count == 0)
-            continue;
-
-        if (char_count ==1 && pwcChars[char_index[0]] == 0x0020)  /* space */
+            pGlyphProp[i].sva.uJustification = SCRIPT_JUSTIFY_NONE;
+        else
         {
             pGlyphProp[i].sva.uJustification = SCRIPT_JUSTIFY_CHARACTER;
-            pCharProp[char_index[0]].fCanGlyphAlone = 1;
+            if (char_count ==1 && pwcChars[char_index[0]] == 0x0020)  /* space */
+                pCharProp[char_index[0]].fCanGlyphAlone = 1;
         }
-        else if (i == finaGlyph)
+    }
+
+    OpenType_GDEF_UpdateGlyphProps(hdc, psc, pwGlyphs, cGlyphs, pwLogClust, cChars, pGlyphProp);
+    UpdateClustersFromGlyphProp(cGlyphs, cChars, pwLogClust, pGlyphProp);
+}
+
+static void ShapeCharGlyphProp_Thai( HDC hdc, ScriptCache *psc, SCRIPT_ANALYSIS *psa, const WCHAR* pwcChars, const INT cChars, const WORD* pwGlyphs, const INT cGlyphs, WORD *pwLogClust, SCRIPT_CHARPROP *pCharProp, SCRIPT_GLYPHPROP *pGlyphProp )
+{
+    int i;
+    int finaGlyph;
+    INT dirL;
+
+    if (!psa->fLogicalOrder && psa->fRTL)
+    {
+        finaGlyph = 0;
+        dirL = -1;
+    }
+    else
+    {
+        finaGlyph = cGlyphs-1;
+        dirL = 1;
+    }
+
+    OpenType_GDEF_UpdateGlyphProps(hdc, psc, pwGlyphs, cGlyphs, pwLogClust, cChars, pGlyphProp);
+
+    for (i = 0; i < cGlyphs; i++)
+    {
+        int k;
+        int char_index[20];
+        int char_count = 0;
+
+        k = USP10_FindGlyphInLogClust(pwLogClust, cChars, i);
+        if (k>=0)
+        {
+            for (; k < cChars && pwLogClust[k] == i; k++)
+                char_index[char_count++] = k;
+        }
+
+        if (i == finaGlyph)
             pGlyphProp[i].sva.uJustification = SCRIPT_JUSTIFY_NONE;
         else
             pGlyphProp[i].sva.uJustification = SCRIPT_JUSTIFY_CHARACTER;
+
+        if (char_count == 0)
+            continue;
+
+        if (char_count ==1 && pwcChars[char_index[0]] == 0x0020)  /* space */
+            pCharProp[char_index[0]].fCanGlyphAlone = 1;
 
         /* handle Thai SARA AM (U+0E33) differently than GDEF */
         if (char_count == 1 && pwcChars[char_index[0]] == 0x0e33)
             pGlyphProp[i].sva.fClusterStart = 0;
     }
 
-    HeapFree(GetProcessHeap(),0,spaces);
     UpdateClustersFromGlyphProp(cGlyphs, cChars, pwLogClust, pGlyphProp);
 
     /* Do not allow justification between marks and their base */
@@ -3007,7 +3022,10 @@ static void ShapeCharGlyphProp_BaseIndic( HDC hdc, ScriptCache *psc, SCRIPT_ANAL
         }
 
         if (char_count == 0)
+        {
+            pGlyphProp[i].sva.uJustification = SCRIPT_JUSTIFY_NONE;
             continue;
+        }
 
         if (char_count ==1 && pwcChars[char_index[0]] == 0x0020)  /* space */
         {

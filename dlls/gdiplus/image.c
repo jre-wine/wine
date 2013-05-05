@@ -1779,6 +1779,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
     (*bitmap)->height = height;
     (*bitmap)->format = format;
     (*bitmap)->image.picture = NULL;
+    (*bitmap)->image.stream = NULL;
     (*bitmap)->hbitmap = hbitmap;
     (*bitmap)->hdc = NULL;
     (*bitmap)->bits = bits;
@@ -1994,10 +1995,8 @@ static void move_bitmap(GpBitmap *dst, GpBitmap *src, BOOL clobber_palette)
     GdipFree(src);
 }
 
-GpStatus WINGDIPAPI GdipDisposeImage(GpImage *image)
+static GpStatus free_image_data(GpImage *image)
 {
-    TRACE("%p\n", image);
-
     if(!image)
         return InvalidParameter;
 
@@ -2029,7 +2028,21 @@ GpStatus WINGDIPAPI GdipDisposeImage(GpImage *image)
     }
     if (image->picture)
         IPicture_Release(image->picture);
+    if (image->stream)
+        IStream_Release(image->stream);
     GdipFree(image->palette_entries);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipDisposeImage(GpImage *image)
+{
+    GpStatus status;
+
+    TRACE("%p\n", image);
+
+    status = free_image_data(image);
+    if (status != Ok) return status;
     image->type = ~0;
     GdipFree(image);
 
@@ -2449,7 +2462,7 @@ struct image_format_dimension
     const GUID *dimension;
 };
 
-static struct image_format_dimension image_format_dimensions[] =
+static const struct image_format_dimension image_format_dimensions[] =
 {
     {&ImageFormatGIF, &FrameDimensionTime},
     {&ImageFormatIcon, &FrameDimensionResolution},
@@ -2519,22 +2532,6 @@ GpStatus WINGDIPAPI GdipImageGetFrameDimensionsList(GpImage* image,
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipImageSelectActiveFrame(GpImage *image,
-    GDIPCONST GUID* dimensionID, UINT frameidx)
-{
-    static int calls;
-
-    TRACE("(%p, %s, %u)\n", image, debugstr_guid(dimensionID), frameidx);
-
-    if(!image || !dimensionID)
-        return InvalidParameter;
-
-    if(!(calls++))
-        FIXME("not implemented\n");
-
-    return Ok;
-}
-
 GpStatus WINGDIPAPI GdipLoadImageFromFile(GDIPCONST WCHAR* filename,
                                           GpImage **image)
 {
@@ -2566,7 +2563,7 @@ GpStatus WINGDIPAPI GdipLoadImageFromFileICM(GDIPCONST WCHAR* filename,GpImage *
     return GdipLoadImageFromFile(filename, image);
 }
 
-static const WICPixelFormatGUID *wic_pixel_formats[] = {
+static const WICPixelFormatGUID * const wic_pixel_formats[] = {
     &GUID_WICPixelFormat16bppBGR555,
     &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat32bppBGR,
@@ -2583,7 +2580,7 @@ static const PixelFormat wic_gdip_formats[] = {
     PixelFormat32bppPARGB,
 };
 
-static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
     GpStatus status=Ok;
     GpBitmap *bitmap;
@@ -2605,12 +2602,11 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, GpImage **imag
         &IID_IWICBitmapDecoder, (void**)&decoder);
     if (FAILED(hr)) goto end;
 
-    hr = IWICBitmapDecoder_Initialize(decoder, (IStream*)stream, WICDecodeMetadataCacheOnLoad);
+    hr = IWICBitmapDecoder_Initialize(decoder, stream, WICDecodeMetadataCacheOnLoad);
     if (SUCCEEDED(hr))
     {
         IWICBitmapDecoder_GetFrameCount(decoder, &frame_count);
-        /* FIXME: set current frame */
-        hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+        hr = IWICBitmapDecoder_GetFrame(decoder, active_frame, &frame);
     }
 
     if (SUCCEEDED(hr)) /* got frame */
@@ -2704,23 +2700,24 @@ end:
         /* Native GDI+ used to be smarter, but since Win7 it just sets these flags. */
         bitmap->image.flags |= ImageFlagsReadOnly|ImageFlagsHasRealPixelSize|ImageFlagsHasRealDPI|ImageFlagsColorSpaceRGB;
         bitmap->image.frame_count = frame_count;
-        bitmap->image.current_frame = 0;
+        bitmap->image.current_frame = active_frame;
+        bitmap->image.stream = stream;
     }
 
     return status;
 }
 
-static GpStatus decode_image_icon(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_icon(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICIcoDecoder, image);
+    return decode_image_wic(stream, &CLSID_WICIcoDecoder, active_frame, image);
 }
 
-static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
     GpStatus status;
     GpBitmap* bitmap;
 
-    status = decode_image_wic(stream, &CLSID_WICBmpDecoder, image);
+    status = decode_image_wic(stream, &CLSID_WICBmpDecoder, active_frame, image);
 
     bitmap = (GpBitmap*)*image;
 
@@ -2733,27 +2730,27 @@ static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, GpImage **imag
     return status;
 }
 
-static GpStatus decode_image_jpeg(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_jpeg(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICJpegDecoder, image);
+    return decode_image_wic(stream, &CLSID_WICJpegDecoder, active_frame, image);
 }
 
-static GpStatus decode_image_png(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_png(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICPngDecoder, image);
+    return decode_image_wic(stream, &CLSID_WICPngDecoder, active_frame, image);
 }
 
-static GpStatus decode_image_gif(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_gif(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICGifDecoder, image);
+    return decode_image_wic(stream, &CLSID_WICGifDecoder, active_frame, image);
 }
 
-static GpStatus decode_image_tiff(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_tiff(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICTiffDecoder, image);
+    return decode_image_wic(stream, &CLSID_WICTiffDecoder, active_frame, image);
 }
 
-static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid, GpImage **image)
+static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
     IPicture *pic;
 
@@ -2772,6 +2769,7 @@ static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid
     *image = GdipAlloc(sizeof(GpMetafile));
     if(!*image) return OutOfMemory;
     (*image)->type = ImageTypeMetafile;
+    (*image)->stream = stream;
     (*image)->picture = pic;
     (*image)->flags   = ImageFlagsNone;
     (*image)->frame_count = 1;
@@ -2789,7 +2787,7 @@ static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid
 typedef GpStatus (*encode_image_func)(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params);
 
-typedef GpStatus (*decode_image_func)(IStream *stream, REFCLSID clsid, GpImage** image);
+typedef GpStatus (*decode_image_func)(IStream *stream, REFCLSID clsid, UINT active_frame, GpImage **image);
 
 typedef struct image_codec {
     ImageCodecInfo info;
@@ -2858,31 +2856,136 @@ static GpStatus get_decoder_info(IStream* stream, const struct image_codec **res
     return GenericError;
 }
 
-GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream* stream, GpImage **image)
+GpStatus WINGDIPAPI GdipImageSelectActiveFrame(GpImage *image, GDIPCONST GUID *dimensionID,
+                                               UINT frame)
+{
+    GpStatus stat;
+    LARGE_INTEGER seek;
+    HRESULT hr;
+    const struct image_codec *codec = NULL;
+    IStream *stream;
+    GpImage *new_image;
+
+    TRACE("(%p,%s,%u)\n", image, debugstr_guid(dimensionID), frame);
+
+    if (!image || !dimensionID)
+        return InvalidParameter;
+
+    if (frame >= image->frame_count)
+        return InvalidParameter;
+
+    if (image->type != ImageTypeBitmap && image->type != ImageTypeMetafile)
+    {
+        WARN("invalid image type %d\n", image->type);
+        return InvalidParameter;
+    }
+
+    if (image->current_frame == frame)
+        return Ok;
+
+    if (!image->stream)
+    {
+        TRACE("image doesn't have an associated stream\n");
+        return Ok;
+    }
+
+    hr = IStream_Clone(image->stream, &stream);
+    if (FAILED(hr))
+    {
+        STATSTG statstg;
+
+        hr = IStream_Stat(image->stream, &statstg, STATFLAG_NOOPEN);
+        if (FAILED(hr)) return hresult_to_status(hr);
+
+        stat = GdipCreateStreamOnFile(statstg.pwcsName, GENERIC_READ, &stream);
+        if (stat != Ok) return stat;
+    }
+
+    /* choose an appropriate image decoder */
+    stat = get_decoder_info(stream, &codec);
+    if (stat != Ok)
+    {
+        IStream_Release(stream);
+        return stat;
+    }
+
+    /* seek to the start of the stream */
+    seek.QuadPart = 0;
+    hr = IStream_Seek(stream, seek, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr))
+    {
+        IStream_Release(stream);
+        return hresult_to_status(hr);
+    }
+
+    /* call on the image decoder to do the real work */
+    stat = codec->decode_func(stream, &codec->info.Clsid, frame, &new_image);
+
+    if (stat == Ok)
+    {
+        memcpy(&new_image->format, &codec->info.FormatID, sizeof(GUID));
+        free_image_data(image);
+        if (image->type == ImageTypeBitmap)
+            *(GpBitmap *)image = *(GpBitmap *)new_image;
+        else if (image->type == ImageTypeMetafile)
+            *(GpMetafile *)image = *(GpMetafile *)new_image;
+        new_image->type = ~0;
+        GdipFree(new_image);
+        return Ok;
+    }
+
+    IStream_Release(stream);
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream *source, GpImage **image)
 {
     GpStatus stat;
     LARGE_INTEGER seek;
     HRESULT hr;
     const struct image_codec *codec=NULL;
+    IStream *stream;
+
+    hr = IStream_Clone(source, &stream);
+    if (FAILED(hr))
+    {
+        STATSTG statstg;
+
+        hr = IStream_Stat(source, &statstg, STATFLAG_NOOPEN);
+        if (FAILED(hr)) return hresult_to_status(hr);
+
+        stat = GdipCreateStreamOnFile(statstg.pwcsName, GENERIC_READ, &stream);
+        if(stat != Ok) return stat;
+    }
 
     /* choose an appropriate image decoder */
     stat = get_decoder_info(stream, &codec);
-    if (stat != Ok) return stat;
+    if (stat != Ok)
+    {
+        IStream_Release(stream);
+        return stat;
+    }
 
     /* seek to the start of the stream */
     seek.QuadPart = 0;
     hr = IStream_Seek(stream, seek, STREAM_SEEK_SET, NULL);
-    if (FAILED(hr)) return hresult_to_status(hr);
+    if (FAILED(hr))
+    {
+        IStream_Release(stream);
+        return hresult_to_status(hr);
+    }
 
     /* call on the image decoder to do the real work */
-    stat = codec->decode_func(stream, &codec->info.Clsid, image);
+    stat = codec->decode_func(stream, &codec->info.Clsid, 0, image);
 
     /* take note of the original data format */
     if (stat == Ok)
     {
         memcpy(&(*image)->format, &codec->info.FormatID, sizeof(GUID));
+        return Ok;
     }
 
+    IStream_Release(stream);
     return stat;
 }
 
@@ -3888,6 +3991,9 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
     GpStatus stat;
 
     TRACE("(%p, %u)\n", image, type);
+
+    if (!image)
+        return InvalidParameter;
 
     rotate_90 = type&1;
     flip_x = (type&6) == 2 || (type&6) == 4;

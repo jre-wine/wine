@@ -79,18 +79,13 @@ static LPWSTR query_http_info(HttpProtocol *This, DWORD option)
     return ret;
 }
 
-static inline BOOL set_security_flag(HttpProtocol *This, DWORD new_flag)
+static inline BOOL set_security_flag(HttpProtocol *This, DWORD flags)
 {
-    DWORD flags, size = sizeof(flags);
     BOOL res;
 
-    res = InternetQueryOptionW(This->base.request, INTERNET_OPTION_SECURITY_FLAGS, &flags, &size);
-    if(res) {
-        flags |= new_flag;
-        res = InternetSetOptionW(This->base.request, INTERNET_OPTION_SECURITY_FLAGS, &flags, size);
-    }
+    res = InternetSetOptionW(This->base.request, INTERNET_OPTION_SECURITY_FLAGS, &flags, sizeof(flags));
     if(!res)
-        ERR("Failed to set security flag(s): %x\n", new_flag);
+        ERR("Failed to set security flags: %x\n", flags);
 
     return res;
 }
@@ -129,6 +124,8 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
     DWORD res;
     HRESULT hres;
 
+    TRACE("(%p %u)\n", This, error);
+
     switch(error) {
     case ERROR_INTERNET_SEC_CERT_DATE_INVALID:
     case ERROR_INTERNET_SEC_CERT_CN_INVALID:
@@ -161,6 +158,8 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
         if(SUCCEEDED(hres)) {
             hres = IHttpSecurity_OnSecurityProblem(http_security, error);
             IHttpSecurity_Release(http_security);
+
+            TRACE("OnSecurityProblem returned %08x\n", hres);
 
             if(hres != S_FALSE)
             {
@@ -195,15 +194,13 @@ static HRESULT handle_http_error(HttpProtocol *This, DWORD error)
 
     switch(error) {
     case ERROR_INTERNET_SEC_CERT_REV_FAILED:
-        if(hres == S_FALSE) {
-            hres = internet_error_to_hres(error);
-        }else {
+        if(hres != S_FALSE) {
             /* Silently ignore the error. We will get more detailed error from wininet anyway. */
             set_security_flag(This, SECURITY_FLAG_IGNORE_REVOCATION);
             hres = RPC_E_RETRY;
+            break;
         }
-        break;
-
+        /* fallthrough */
     default:
         hres = IServiceProvider_QueryService(serv_prov, &IID_IWindowForBindingUI, &IID_IWindowForBindingUI, (void**)&wfb_ui);
         if(SUCCEEDED(hres)) {
