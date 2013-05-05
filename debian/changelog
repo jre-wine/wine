@@ -1,8 +1,15 @@
-wine-unstable (1.5.7-1) UNRELEASED; urgency=low
+wine-unstable (1.5.7-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.7, released Jun 22, 2012.
+    - New version of the Gecko engine based on Firefox 13.
+    - Dynamic device support with UDisks2.
+    - More stream classes implemented in the C++ runtime.
+    - Support for metadata in TIFF files.
+    - Fleshed out WBEM implementation.
+    - Improved support for printer paper sizes.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 May 2013 04:07:14 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 May 2013 04:45:07 +0000
 
 wine-unstable (1.5.6-2) unstable; urgency=low
 
