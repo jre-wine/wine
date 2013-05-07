@@ -1,3 +1,16 @@
+wine-unstable (1.5.7-2) unstable; urgency=low
+
+  * Convert to simplified debian/rules.
+    - Don't use symlinks for /usr/share/doc directories (closes: #689536).
+    - Remove unnecessary files in the debian directory.
+    - Use a standard gcc version (closes: #654742).
+  * Don't associate notepad with text files (closes: #589828).
+  * Enable initial wine64 support (closes: #670532).
+  * Pre-depend on multiarch-support.
+  * Bump standards to 3.9.4.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 May 2013 23:58:04 +0000
+
 wine-unstable (1.5.7-1) unstable; urgency=low
 
   * New upstream release 1.5.7, released Jun 22, 2012.

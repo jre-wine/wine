@@ -28,7 +28,7 @@ Build-Depends: debhelper (>= 9), dpkg-dev (>= 1.16.0), flex, bison,
  libssl-dev, libgnutls-dev, libxml2-dev, libxslt1-dev, unixodbc-dev, prelink [linux-any],
  dctrl-tools | grep-dctrl, lzma, sharutils,
  gcc (>= 4.4),
-Standards-Version: 3.9.2
+Standards-Version: 3.9.4
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
 Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
@@ -128,7 +128,8 @@ Suggests:
  libwine-print (= ${binary:Version}),
  libwine-gphoto2 (= ${binary:Version}),
 Pre-Depends:
- ${wine:Pre-Depends}
+ ${wine:Pre-Depends},
+ multiarch-support
 Replaces:
  wine (<< 0.9.11-1),
  libwine-twain (<< 0.9.13),
@@ -306,4 +307,3 @@ Description: Windows API implementation - scanner module
  .
  This package contains a TWAIN interface that allows Windows applications
  to communicate with scanners supported by SANE.
-

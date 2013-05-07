@@ -1,7 +1,6 @@
-debian/tmp/usr/share/binfmts
-debian/tmp/usr/share/mime-info
 debian/tmp/usr/share/applications/wine.desktop
 debian/tmp/usr/share/wine/wine.inf
 debian/tmp/usr/share/wine/l_intl.nls
 debian/uninstaller.desktop usr/share/applications
 debian/winecfg.desktop usr/share/applications
+debian/binfmt/wine usr/share/binfmts/wine
