@@ -5,6 +5,7 @@ VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine
 DEB_HOST_MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 LIBDIR=usr/lib/$(DEB_HOST_MULTIARCH)
 
+# 32-bit parameters
 BIT=32
 CONFIGURE=--libdir=/$(LIBDIR)
 ifeq (,$(VERSUFFIX))
@@ -13,6 +14,7 @@ else
 ALTPRIO := 50
 endif 
 
+# 64-bit parameters
 ifeq ($(DEB_BUILD_ARCH), amd64)
 BIT=64
 CONFIGURE+=--enable-win64 # enable wine64 on amd64
@@ -42,8 +44,6 @@ override_dh_install:
 	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIR)"
 	bash debian/gen-alternatives.sh "$(VERSUFFIX)" $(BIT) $(ALTPRIO)
 	mv debian/tmp/usr/share/wine debian/tmp/usr/share/wine$(VERSUFFIX) || true
-#	mkdir -p debian/tmp/$(LIBDIR)
-#	mv debian/tmp/usr/lib/* debian/tmp/$(LIBDIR) || true
 	mv debian/tmp/$(LIBDIR)/wine debian/tmp/$(LIBDIR)/wine$(VERSUFFIX) || true
 	cp tools/winedump/README debian/README.winedump
 	dh_install

@@ -1,3 +1,17 @@
+wine-unstable (1.5.7-4) unstable; urgency=low
+
+  * Unify many of the binary packages.
+  * Correct library installation paths (closes: #707976).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 12 May 2013 17:23:40 +0000
+
+wine-unstable (1.5.7-3) unstable; urgency=low
+
+  * Correct executable and binfmt installation paths (closes: #707046).
+  * Use svg icon (closes: #680875).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 11 May 2013 20:55:53 +0000
+
 wine-unstable (1.5.7-2) unstable; urgency=low
 
   * Convert to simplified debian/rules.

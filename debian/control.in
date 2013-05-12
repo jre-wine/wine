@@ -38,7 +38,12 @@ Architecture: any
 Depends:
  ${misc:Depends},
  wine-bin (>= ${source:Version}) | wine64-bin,
-Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
+Suggests:
+ wine-doc,
+ binfmt-support,
+ ttf-mscorefonts-installer,
+ winbind,
+ avscan | klamav | clamav
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -51,7 +56,6 @@ Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
- libwine-bin (= ${binary:Version}),
  x11-utils | xbase-clients (>= 4.0) | xcontrib,
  libwine-gecko-1.4
 Suggests:
@@ -112,28 +116,36 @@ Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
- ${wine:Depends},
  ${shlibs:Depends},
 Recommends:
  ${shlibs:Recommends},
  ttf-liberation,
- libwine-gl (= ${binary:Version}),
- libwine-ldap (= ${binary:Version}),
- libwine-openal (= ${binary:Version}),
- libwine-alsa (= ${binary:Version}) | libwine-oss (= ${binary:Version}),
 Suggests:
  wine-doc,
- libwine-cms (= ${binary:Version}),
- libwine-sane (= ${binary:Version}),
- libwine-print (= ${binary:Version}),
- libwine-gphoto2 (= ${binary:Version}),
 Pre-Depends:
- ${wine:Pre-Depends},
- multiarch-support
+ multiarch-support,
+Breaks:
+ libwine-alsa    (<< 1.5.7-3),
+ libwine-bin     (<< 1.5.7-3),
+ libwine-capi    (<< 1.5.7-3),
+ libwine-cms     (<< 1.5.7-3),
+ libwine-gl      (<< 1.5.7-3),
+ libwine-gphoto2 (<< 1.5.7-3),
+ libwine-ldap    (<< 1.5.7-3),
+ libwine-openal  (<< 1.5.7-3),
+ libwine-oss     (<< 1.5.7-3),
+ libwine-sane    (<< 1.5.7-3),
 Replaces:
- wine (<< 0.9.11-1),
- libwine-twain (<< 0.9.13),
- libwine-gl (<< 0.9.53-1),
+ libwine-alsa    (<< 1.5.7-3),
+ libwine-bin     (<< 1.5.7-3),
+ libwine-capi    (<< 1.5.7-3),
+ libwine-cms     (<< 1.5.7-3),
+ libwine-gl      (<< 1.5.7-3),
+ libwine-gphoto2 (<< 1.5.7-3),
+ libwine-ldap    (<< 1.5.7-3),
+ libwine-openal  (<< 1.5.7-3),
+ libwine-oss     (<< 1.5.7-3),
+ libwine-sane    (<< 1.5.7-3),
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -143,32 +155,24 @@ Description: Windows API implementation - library
 Package: libwine-alsa
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
-Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - ALSA sound module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains an ALSA sound driver.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-bin
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
-Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
-Replaces:
- wine-bin (<< 1.4-4),
- wine-utils (<< 1.1.25-1),
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - system services
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides system services and utilities needed to use many
- Windows applications.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-capi
 Section: libs
@@ -176,24 +180,19 @@ Priority: extra
 Architecture: i386 powerpc sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - ISDN module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a CAPI interface that allows Windows applications
- to communicate with ISDN cards supported by capi4linux.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-cms
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
-Replaces:
- libwine (<< 0.0.20050830),
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - color management module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -206,24 +205,18 @@ Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
-Replaces:
- libwine (<< 0.9.56),
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - OpenGL module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains the OpenGL and Direct3D modules that allow
- Windows applications to use 3D acceleration.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-gphoto2
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
-Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - camera module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -236,74 +229,57 @@ Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - LDAP module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a module that allows Windows applications to access
- LDAP directory services.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-openal
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - OpenAL module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains the OpenAL module, which allows Windows applications
- to use advanced 3D sound effects.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-oss
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
- oss-compat,
-Replaces:
- libwine (<< 0.9.35)
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - OSS sound module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains an OSS sound driver.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-print
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
- cups-bsd | cupsys-bsd | lpr,
-Replaces:
- libwine (<< 0.0.20020710),
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - printing module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a CUPS-enabled spooler and a PostScript driver,
- allowing Windows applications to print.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-sane
 Section: libs
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
- ${misc:Depends},
- ${shlibs:Depends},
-Replaces:
- libwine-twain (<< 0.9.13),
+ libwine (>= ${binary:Version})
 Description: Windows API implementation - scanner module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a TWAIN interface that allows Windows applications
- to communicate with scanners supported by SANE.
+ This is a transitional package and can be safely removed.

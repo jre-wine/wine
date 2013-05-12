@@ -5,6 +5,6 @@ Name=Wine Uninstaller
 Comment=Uninstall Windows programs
 Comment[ca]=Desinstaŀla programes de Windows
 Exec=wine uninstaller
-Icon=/usr/share/pixmaps/wine.xpm
+Icon=/usr/share/pixmaps/wine.svg
 Terminal=false
 Categories=Application;System;
