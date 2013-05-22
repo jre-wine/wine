@@ -1,3 +1,17 @@
+wine-unstable (1.5.7-6) unstable; urgency=low
+
+  * Install *.def and *.a files only to the -dev package (closes: #708429).
+  * Restore wine dll files (closes: #707976).
+  * Install wineserver (closes: #708541).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 15 May 2013 00:23:23 +0000
+
+wine-unstable (1.5.7-5) unstable; urgency=low
+
+  * Really correct library installation paths (closes: #707976).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 14 May 2013 01:46:30 +0000
+
 wine-unstable (1.5.7-4) unstable; urgency=low
 
   * Unify many of the binary packages.

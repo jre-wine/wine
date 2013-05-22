@@ -5,9 +5,13 @@ VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine
 DEB_HOST_MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 LIBDIR=usr/lib/$(DEB_HOST_MULTIARCH)
 
+# configure options
+CONFIGURE=--libdir=/$(LIBDIR)/wine-unstable \
+	  --without-hal \
+	  LDFLAGS=-Wl,-rpath,/$(LIBDIR)/wine-unstable
+
 # 32-bit parameters
 BIT=32
-CONFIGURE=--libdir=/$(LIBDIR)
 ifeq (,$(VERSUFFIX))
 ALTPRIO := 100
 else
@@ -38,13 +42,15 @@ override_dh_auto_configure:
 	dh_auto_configure -- $(CONFIGURE)
 
 override_dh_auto_build:
-	make $(JOBS)
+	test "$(BIT)" != "32" || make $(JOBS)
 
 override_dh_install:
 	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIR)"
 	bash debian/gen-alternatives.sh "$(VERSUFFIX)" $(BIT) $(ALTPRIO)
+	cp server/wineserver debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine
+	#for file in debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine/*.so; do \
+	    chrpath -r '$$ORIGIN/..' $$file; done
 	mv debian/tmp/usr/share/wine debian/tmp/usr/share/wine$(VERSUFFIX) || true
-	mv debian/tmp/$(LIBDIR)/wine debian/tmp/$(LIBDIR)/wine$(VERSUFFIX) || true
 	cp tools/winedump/README debian/README.winedump
 	dh_install
 
