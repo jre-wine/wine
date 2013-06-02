@@ -1,2 +1,1 @@
-# depends on libwine-bin, which depends on libwine
-wine-bin binary: usr-share-doc-symlink-without-dependency
+wine-bin binary: binary-or-shlib-defines-rpath

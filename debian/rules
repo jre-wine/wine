@@ -1,14 +1,13 @@
 #!/usr/bin/make -f
 export DH_VERBOSE=1
 
+LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
-DEB_HOST_MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
-LIBDIR=usr/lib/$(DEB_HOST_MULTIARCH)
 
 # configure options
-CONFIGURE=--libdir=/$(LIBDIR)/wine-unstable \
-	  --without-hal \
-	  LDFLAGS=-Wl,-rpath,/$(LIBDIR)/wine-unstable
+CONFIGURE=--without-hal \
+          --libdir=/$(LIBDIR)/wine-unstable \
+          LDFLAGS=-Wl,-rpath,/$(LIBDIR)/wine-unstable \
 
 # 32-bit parameters
 BIT=32
@@ -29,45 +28,50 @@ ALTPRIO := 75
 endif
 endif
 
+# add in version suffix
+MAKEFLAGS+=LIBSUFFIX="$(VERSUFFIX)" DATASUFFIX="$(VERSUFFIX)"
+
 # handle parallel build options
-JOBS=
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-JOBS=-j$(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
+MAKEFLAGS+=-j$(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 endif
 
-%:
-	dh $@
-
-override_dh_auto_configure:
-	dh_auto_configure -- $(CONFIGURE)
-
-override_dh_auto_build:
-	test "$(BIT)" != "32" || make $(JOBS)
-
-override_dh_install:
-	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIR)"
-	bash debian/gen-alternatives.sh "$(VERSUFFIX)" $(BIT) $(ALTPRIO)
-	cp server/wineserver debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine
-	#for file in debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine/*.so; do \
-	    chrpath -r '$$ORIGIN/..' $$file; done
-	mv debian/tmp/usr/share/wine debian/tmp/usr/share/wine$(VERSUFFIX) || true
-	cp tools/winedump/README debian/README.winedump
-	dh_install
-
-override_dh_auto_test:
-	# disable upstream's automated testing due to brokenness
-
-override_dh_strip:
-	dh_strip -Xwine-pthread -Xwine-kthread
-
-override_dh_auto_clean:
-	dh_auto_clean
-	rm -f debian/README.winedump
-	bash debian/clean-install.sh "$(VERSUFFIX)"
+debian/control: debian/control.in
 	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
 	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
 	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
 	    -e 's/wine64-bin$(VERSUFFIX)/wine64-bin/g' \
 	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
-	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' debian/control.in > debian/control	
+	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
+%:
+	dh $@
+
+override_dh_auto_configure:
+	ln -s /usr/share/misc/config.sub tools/config.sub
+	ln -s /usr/share/misc/config.guess tools/config.guess
+	dh_auto_configure -- $(CONFIGURE)
+
+override_dh_auto_build:
+	test "$(BIT)" != "32" || $(MAKE)
+
+override_dh_install:
+	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIR)"
+	bash debian/gen-alternatives.sh "$(VERSUFFIX)" $(BIT) $(ALTPRIO)
+	cp server/wineserver debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine
+	cp tools/winedump/README debian/README.winedump
+	dh_install
+
+override_dh_auto_test:
+	# disable upstream's automated testing due to various brokenness
+
+override_dh_strip:
+	dh_strip -Xwine-pthread -Xwine-kthread \
+	    --dbg-package=libwine-dbg$(VERSUFFIX)
+	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
+
+override_dh_auto_clean: debian/control
+	test ! -e Makefile || $(MAKE) distclean
+	rm -f debian/README.winedump libs/wine/libwine$(VERSUFFIX).so.*
+	rm -f tools/config.sub tools/config.guess tools/makedep
+	bash debian/clean-install.sh "$(VERSUFFIX)"

@@ -6,7 +6,8 @@ Uploaders:
  Ove Kaaven <ovek@arcticnet.no>,
  Arthur Loiret <arthur.loiret@gmail.com>,
  Michael Gilbert <mgilbert@debian.org>,
-Build-Depends: debhelper (>= 9), dpkg-dev (>= 1.16.0), flex, bison,
+Build-Depends:
+ debhelper (>= 9),
  libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
  libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
  libxrender-dev | xlibs-dev (<< 4.3), libxt-dev | xlibs-dev (<< 4.3),
@@ -18,15 +19,36 @@ Build-Depends: debhelper (>= 9), dpkg-dev (>= 1.16.0), flex, bison,
  libgl1-mesa-dev | xlibmesa-gl-dev | xlibmesa-dev (<< 4.3) | libgl-dev,
  libglu1-mesa-dev | libglu1-xorg-dev | xlibmesa-glu-dev | xlibmesa-dev (<= 4.2.1-4) | libglu-dev,
  freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
- libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcups2-dev | libcupsys2-dev,
- libjpeg8-dev | libjpeg62-dev | libjpeg-dev, libpng-dev | libpng3-dev | libpng12-dev,
- libfreetype6-dev, libfontconfig1-dev, libopenal-dev,
- libasound2-dev, oss4-dev,
- libsane-dev, libgsm1-dev, libmpg123-dev,
+ libxcursor-dev | xlibs-dev (<< 4.3),
+ libcups2-dev | libcupsys2-dev,
+ libdbus-1-dev | dbus-1-dev,
+ dctrl-tools | grep-dctrl,
+ lzma,
+ flex,
+ bison,
+ oss4-dev,
+ sharutils,
+ libpng-dev,
+ libssl-dev,
+ libxml2-dev,
+ libsane-dev,
+ libgsm1-dev,
+ libjpeg-dev,
+ liblcms1-dev,
+ libldap2-dev,
+ libxslt1-dev,
+ unixodbc-dev,
+ libgnutls-dev,
+ libopenal-dev,
+ libmpg123-dev,
+ autotools-dev,
+ libasound2-dev,
+ libncurses5-dev,
+ libgphoto2-2-dev,
+ libfreetype6-dev,
+ libfontconfig1-dev,
  libcapi20-dev (>= 1:3.3.0.20041024-2) [linux-any],
- libdbus-1-dev | dbus-1-dev, libgphoto2-2-dev, liblcms1-dev, libldap2-dev,
- libssl-dev, libgnutls-dev, libxml2-dev, libxslt1-dev, unixodbc-dev, prelink [linux-any],
- dctrl-tools | grep-dctrl, lzma, sharutils,
+ prelink [linux-any],
  gcc (>= 4.4),
 Standards-Version: 3.9.4
 Homepage: http://www.winehq.org/
@@ -153,9 +175,11 @@ Description: Windows API implementation - library
  This package provides the library that implements the Windows API.
 
 Package: libwine-alsa
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - ALSA sound module
  Wine is a free MS-Windows API implementation.
@@ -164,9 +188,11 @@ Description: Windows API implementation - ALSA sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-bin
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - system services
  Wine is a free MS-Windows API implementation.
@@ -175,11 +201,12 @@ Description: Windows API implementation - system services
  This is a transitional package and can be safely removed.
 
 Package: libwine-capi
-Section: libs
+Section: oldlibs
 Priority: extra
 Architecture: i386 powerpc sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - ISDN module
  Wine is a free MS-Windows API implementation.
@@ -188,23 +215,26 @@ Description: Windows API implementation - ISDN module
  This is a transitional package and can be safely removed.
 
 Package: libwine-cms
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - color management module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a Color Management System implementation that
- lets Windows applications calibrate the colors used for display and print.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-gl
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - OpenGL module
  Wine is a free MS-Windows API implementation.
@@ -213,22 +243,25 @@ Description: Windows API implementation - OpenGL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-gphoto2
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - camera module
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package contains a TWAIN interface that allows Windows applications
- to communicate with cameras supported by gphoto2.
+ This is a transitional package and can be safely removed.
 
 Package: libwine-ldap
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - LDAP module
  Wine is a free MS-Windows API implementation.
@@ -237,10 +270,12 @@ Description: Windows API implementation - LDAP module
  This is a transitional package and can be safely removed.
 
 Package: libwine-openal
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - OpenAL module
  Wine is a free MS-Windows API implementation.
@@ -249,10 +284,12 @@ Description: Windows API implementation - OpenAL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-oss
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - OSS sound module
  Wine is a free MS-Windows API implementation.
@@ -261,10 +298,12 @@ Description: Windows API implementation - OSS sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-print
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - printing module
  Wine is a free MS-Windows API implementation.
@@ -273,10 +312,12 @@ Description: Windows API implementation - printing module
  This is a transitional package and can be safely removed.
 
 Package: libwine-sane
-Section: libs
+Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc any-sparc
 Multi-Arch: same
 Depends:
+ ${misc:Depends},
  libwine (>= ${binary:Version})
 Description: Windows API implementation - scanner module
  Wine is a free MS-Windows API implementation.

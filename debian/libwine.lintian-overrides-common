@@ -6,3 +6,8 @@ libwine binary: unstripped-binary-or-object usr/lib/wine/wine-preloader
 libwine binary: unstripped-binary-or-object usr/lib/wine/wine-kthread
 libwine binary: unstripped-binary-or-object usr/lib/wine/wine-pthread
 libwine binary: unstripped-binary-or-object usr/lib/wine/wine.bin
+# debhelper bug causes these
+libwine binary: postinst-has-useless-call-to-ldconfig
+libwine binary: postrm-has-useless-call-to-ldconfig
+# rpath is used
+libwine binary: binary-or-shlib-defines-rpath
