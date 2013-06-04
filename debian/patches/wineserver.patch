@@ -1,0 +1,21 @@
+description: wineserver location info
+--- wine-unstable-1.5.10.orig/loader/wine.man.in
++++ wine-unstable-1.5.10/loader/wine.man.in
+@@ -87,7 +87,7 @@ processes.
+ Specifies the path and name of the
+ .B wineserver
+ binary. If not set, Wine will try to load
+-.BR @bindir@/wineserver ,
++.BR @dlldir@/wineserver,
+ and if this doesn't exist it will then look for a file named
+ "wineserver" in the path and in a few other likely locations.
+ .TP
+@@ -246,7 +246,7 @@ The
+ .B wine 
+ program loader for CUI (console) applications.
+ .TP
+-.I @bindir@/wineserver
++.I @dlldir@/wineserver
+ The 
+ .B wine 
+ server 
