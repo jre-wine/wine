@@ -98,7 +98,8 @@ static void dump_code(compile_ctx_t *ctx)
 {
     instr_t *instr;
 
-    for(instr = ctx->code->instrs; instr < ctx->code->instrs+ctx->instr_cnt; instr++) {
+    for(instr = ctx->code->instrs+1; instr < ctx->code->instrs+ctx->instr_cnt; instr++) {
+        assert(instr->op < OP_LAST);
         TRACE_(vbscript_disas)("%d:\t%s", (int)(instr-ctx->code->instrs), instr_info[instr->op].op_str);
         dump_instr_arg(instr_info[instr->op].arg1_type, &instr->arg1);
         dump_instr_arg(instr_info[instr->op].arg2_type, &instr->arg2);
@@ -289,6 +290,24 @@ static HRESULT push_instr_bstr_uint(compile_ctx_t *ctx, vbsop_t op, const WCHAR 
     return S_OK;
 }
 
+static HRESULT push_instr_uint_bstr(compile_ctx_t *ctx, vbsop_t op, unsigned arg1, const WCHAR *arg2)
+{
+    unsigned instr;
+    BSTR bstr;
+
+    bstr = alloc_bstr_arg(ctx, arg2);
+    if(!bstr)
+        return E_OUTOFMEMORY;
+
+    instr = push_instr(ctx, op);
+    if(!instr)
+        return E_OUTOFMEMORY;
+
+    instr_ptr(ctx, instr)->arg1.uint = arg1;
+    instr_ptr(ctx, instr)->arg2.bstr = bstr;
+    return S_OK;
+}
+
 #define LABEL_FLAG 0x80000000
 
 static unsigned alloc_label(compile_ctx_t *ctx)
@@ -421,6 +440,8 @@ static HRESULT compile_expression(compile_ctx_t *ctx, expression_t *expr)
         return compile_binary_expression(ctx, (binary_expression_t*)expr, OP_and);
     case EXPR_BOOL:
         return push_instr_int(ctx, OP_bool, ((bool_expression_t*)expr)->value);
+    case EXPR_BRACKETS:
+        return compile_expression(ctx, ((unary_expression_t*)expr)->subexpr);
     case EXPR_CONCAT:
         return compile_binary_expression(ctx, (binary_expression_t*)expr, OP_concat);
     case EXPR_DIV:
@@ -618,8 +639,34 @@ static HRESULT compile_dowhile_statement(compile_ctx_t *ctx, while_statement_t *
 
 static HRESULT compile_foreach_statement(compile_ctx_t *ctx, foreach_statement_t *stat)
 {
-    FIXME("for each loop not implemented\n");
-    return E_NOTIMPL;
+    unsigned loop_start, loop_end;
+    HRESULT hres;
+
+    hres = compile_expression(ctx, stat->group_expr);
+    if(FAILED(hres))
+        return hres;
+
+    if(!push_instr(ctx, OP_newenum))
+        return E_OUTOFMEMORY;
+
+    loop_start = ctx->instr_cnt;
+    if(!(loop_end = alloc_label(ctx)))
+        return E_OUTOFMEMORY;
+
+    hres = push_instr_uint_bstr(ctx, OP_enumnext, loop_end, stat->identifier);
+    if(FAILED(hres))
+        return hres;
+
+    hres = compile_statement(ctx, stat->body);
+    if(FAILED(hres))
+        return hres;
+
+    hres = push_instr_addr(ctx, OP_jmp, loop_start);
+    if(FAILED(hres))
+        return hres;
+
+    label_set_addr(ctx, loop_end);
+    return S_OK;
 }
 
 static HRESULT compile_forto_statement(compile_ctx_t *ctx, forto_statement_t *stat)
@@ -691,14 +738,14 @@ static HRESULT compile_forto_statement(compile_ctx_t *ctx, forto_statement_t *st
     return push_instr_uint(ctx, OP_pop, 2);
 }
 
-static HRESULT compile_assign_statement(compile_ctx_t *ctx, assign_statement_t *stat, BOOL is_set)
+static HRESULT compile_assignment(compile_ctx_t *ctx, member_expression_t *member_expr, expression_t *value_expr, BOOL is_set)
 {
     unsigned args_cnt;
     vbsop_t op;
     HRESULT hres;
 
-    if(stat->member_expr->obj_expr) {
-        hres = compile_expression(ctx, stat->member_expr->obj_expr);
+    if(member_expr->obj_expr) {
+        hres = compile_expression(ctx, member_expr->obj_expr);
         if(FAILED(hres))
             return hres;
 
@@ -707,15 +754,40 @@ static HRESULT compile_assign_statement(compile_ctx_t *ctx, assign_statement_t *
         op = is_set ? OP_set_ident : OP_assign_ident;
     }
 
-    hres = compile_expression(ctx, stat->value_expr);
+    hres = compile_expression(ctx, value_expr);
     if(FAILED(hres))
         return hres;
 
-    hres = compile_args(ctx, stat->member_expr->args, &args_cnt);
+    hres = compile_args(ctx, member_expr->args, &args_cnt);
     if(FAILED(hres))
         return hres;
 
-    return push_instr_bstr_uint(ctx, op, stat->member_expr->identifier, args_cnt);
+    return push_instr_bstr_uint(ctx, op, member_expr->identifier, args_cnt);
+}
+
+static HRESULT compile_assign_statement(compile_ctx_t *ctx, assign_statement_t *stat, BOOL is_set)
+{
+    return compile_assignment(ctx, stat->member_expr, stat->value_expr, is_set);
+}
+
+static HRESULT compile_call_statement(compile_ctx_t *ctx, call_statement_t *stat)
+{
+    /* It's challenging for parser to distinguish parameterized assignment with one argument from call
+     * with equality expression argument, so we do it in compiler. */
+    if(!stat->is_strict && stat->expr->args && !stat->expr->args->next && stat->expr->args->type == EXPR_EQUAL) {
+        binary_expression_t *eqexpr = (binary_expression_t*)stat->expr->args;
+
+        if(eqexpr->left->type == EXPR_BRACKETS) {
+            member_expression_t new_member = *stat->expr;
+
+            WARN("converting call expr to assign expr\n");
+
+            new_member.args = ((unary_expression_t*)eqexpr->left)->subexpr;
+            return compile_assignment(ctx, &new_member, eqexpr->right, FALSE);
+        }
+    }
+
+    return compile_member_expression(ctx, stat->expr, FALSE);
 }
 
 static BOOL lookup_dim_decls(compile_ctx_t *ctx, const WCHAR *name)
@@ -874,7 +946,7 @@ static HRESULT compile_statement(compile_ctx_t *ctx, statement_t *stat)
             hres = compile_assign_statement(ctx, (assign_statement_t*)stat, FALSE);
             break;
         case STAT_CALL:
-            hres = compile_member_expression(ctx, ((call_statement_t*)stat)->expr, FALSE);
+            hres = compile_call_statement(ctx, (call_statement_t*)stat);
             break;
         case STAT_CONST:
             hres = compile_const_statement(ctx, (const_statement_t*)stat);

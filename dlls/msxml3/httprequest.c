@@ -695,6 +695,7 @@ static HRESULT BindStatusCallback_create(httprequest* This, BindStatusCallback *
             break;
         }
         case VT_EMPTY:
+        case VT_ERROR:
             ptr = NULL;
             size = 0;
             break;
@@ -759,6 +760,7 @@ static HRESULT httprequest_open(httprequest *This, BSTR method, BSTR url,
     static const WCHAR MethodPutW[] = {'P','U','T',0};
     static const WCHAR MethodPostW[] = {'P','O','S','T',0};
     static const WCHAR MethodDeleteW[] = {'D','E','L','E','T','E',0};
+    static const WCHAR MethodPropFindW[] = {'P','R','O','P','F','I','N','D',0};
     VARIANT str, is_async;
     HRESULT hr;
 
@@ -782,7 +784,8 @@ static HRESULT httprequest_open(httprequest *This, BSTR method, BSTR url,
     {
         This->verb = BINDVERB_POST;
     }
-    else if (!strcmpiW(method, MethodDeleteW))
+    else if (!strcmpiW(method, MethodDeleteW) ||
+             !strcmpiW(method, MethodPropFindW))
     {
         This->verb = BINDVERB_CUSTOM;
         SysReAllocString(&This->custom, method);
@@ -813,7 +816,7 @@ static HRESULT httprequest_open(httprequest *This, BSTR method, BSTR url,
 
     VariantInit(&is_async);
     hr = VariantChangeType(&is_async, &async, 0, VT_BOOL);
-    This->async = hr == S_OK && V_BOOL(&is_async) == VARIANT_TRUE;
+    This->async = hr == S_OK && V_BOOL(&is_async);
 
     VariantInit(&str);
     hr = VariantChangeType(&str, &user, 0, VT_BSTR);

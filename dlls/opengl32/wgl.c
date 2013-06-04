@@ -39,6 +39,7 @@
 #undef near
 #include <GL/glu.h>
 #endif
+#include "wine/gdi_driver.h"
 #include "wine/library.h"
 #include "wine/debug.h"
 
@@ -47,25 +48,10 @@ WINE_DECLARE_DEBUG_CHANNEL(opengl);
 
 static struct
 {
-    PROC  (WINAPI *p_wglGetProcAddress)(LPCSTR  lpszProc);
-    BOOL  (WINAPI *p_SetPixelFormat)(HDC hdc, INT iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd);
-    BOOL  (WINAPI *p_wglCopyContext)(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask);
-    BOOL  (WINAPI *p_wglDeleteContext)(HGLRC hglrc);
-    BOOL  (WINAPI *p_wglMakeCurrent)(HDC hdc, HGLRC hglrc);
-    BOOL  (WINAPI *p_wglShareLists)(HGLRC hglrc1, HGLRC hglrc2);
-    BOOL  (WINAPI *p_wglUseFontBitmapsA)(HDC hdc, DWORD first, DWORD count, DWORD listBase);
-    BOOL  (WINAPI *p_wglUseFontBitmapsW)(HDC hdc, DWORD first, DWORD count, DWORD listBase);
-    HDC   (WINAPI *p_wglGetCurrentDC)(void);
-    HGLRC (WINAPI *p_wglCreateContext)(HDC hdc);
-    HGLRC (WINAPI *p_wglGetCurrentContext)(void);
-    INT   (WINAPI *p_ChoosePixelFormat)(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd);
-    INT   (WINAPI *p_DescribePixelFormat)(HDC hdc, INT iPixelFormat, UINT nBytes, LPPIXELFORMATDESCRIPTOR ppfd);
-    INT   (WINAPI *p_GetPixelFormat)(HDC hdc);
-
-    /* Interal WGL function */
-    void  (WINAPI *p_wglGetIntegerv)(GLenum pname, GLint* params);
+    /* internal WGL functions */
     void  (WINAPI *p_wglFinish)(void);
     void  (WINAPI *p_wglFlush)(void);
+    void  (WINAPI *p_wglGetIntegerv)(GLenum pname, GLint* params);
 } wine_wgl;
 
 #ifdef SONAME_LIBGLU
@@ -81,16 +67,109 @@ MAKE_FUNCPTR(gluTessVertex)
 #undef MAKE_FUNCPTR
 #endif /* SONAME_LIBGLU */
 
-void (*wine_tsx11_lock_ptr)(void) = NULL;
-void (*wine_tsx11_unlock_ptr)(void) = NULL;
-
 static HMODULE opengl32_handle;
 static void* libglu_handle = NULL;
 
-static char* internal_gl_disabled_extensions = NULL;
-static char* internal_gl_extensions = NULL;
-
 const GLubyte * WINAPI wine_glGetString( GLenum name );
+
+/* internal GDI functions */
+extern INT WINAPI GdiDescribePixelFormat( HDC hdc, INT fmt, UINT size, PIXELFORMATDESCRIPTOR *pfd );
+extern BOOL WINAPI GdiSetPixelFormat( HDC hdc, INT fmt, const PIXELFORMATDESCRIPTOR *pfd );
+extern BOOL WINAPI GdiSwapBuffers( HDC hdc );
+
+/* handle management */
+
+#define MAX_WGL_HANDLES 1024
+
+struct wgl_handle
+{
+    UINT                    handle;
+    DWORD                   tid;
+    struct wgl_context *    context;
+    const struct wgl_funcs *funcs;
+};
+
+static struct wgl_handle wgl_handles[MAX_WGL_HANDLES];
+static struct wgl_handle *next_free;
+static unsigned int handle_count;
+
+static CRITICAL_SECTION wgl_section;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &wgl_section,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": wgl_section") }
+};
+static CRITICAL_SECTION wgl_section = { &critsect_debug, -1, 0, 0, 0, 0 };
+
+static inline const struct wgl_funcs *get_dc_funcs( HDC hdc )
+{
+    return __wine_get_wgl_driver( hdc, WINE_GDI_DRIVER_VERSION );
+}
+
+static inline HGLRC next_handle( struct wgl_handle *ptr )
+{
+    WORD generation = HIWORD( ptr->handle ) + 1;
+    if (!generation) generation++;
+    ptr->handle = MAKELONG( ptr - wgl_handles, generation );
+    return ULongToHandle( ptr->handle );
+}
+
+/* the current handle is assumed valid and doesn't need locking */
+static inline struct wgl_handle *get_current_handle_ptr(void)
+{
+    if (!NtCurrentTeb()->glCurrentRC) return NULL;
+    return &wgl_handles[LOWORD(NtCurrentTeb()->glCurrentRC)];
+}
+
+static struct wgl_handle *get_handle_ptr( HGLRC handle )
+{
+    unsigned int index = LOWORD( handle );
+
+    EnterCriticalSection( &wgl_section );
+    if (index < handle_count && ULongToHandle(wgl_handles[index].handle) == handle)
+        return &wgl_handles[index];
+
+    LeaveCriticalSection( &wgl_section );
+    SetLastError( ERROR_INVALID_HANDLE );
+    return NULL;
+}
+
+static void release_handle_ptr( struct wgl_handle *ptr )
+{
+    if (ptr) LeaveCriticalSection( &wgl_section );
+}
+
+static HGLRC alloc_handle( struct wgl_context *context, const struct wgl_funcs *funcs )
+{
+    HGLRC handle = 0;
+    struct wgl_handle *ptr = NULL;
+
+    EnterCriticalSection( &wgl_section );
+    if ((ptr = next_free))
+        next_free = (struct wgl_handle *)next_free->context;
+    else if (handle_count < MAX_WGL_HANDLES)
+        ptr = &wgl_handles[handle_count++];
+
+    if (ptr)
+    {
+        ptr->context = context;
+        ptr->funcs = funcs;
+        handle = next_handle( ptr );
+    }
+    else SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+    LeaveCriticalSection( &wgl_section );
+    return handle;
+}
+
+static void free_handle_ptr( struct wgl_handle *ptr )
+{
+    ptr->handle &= ~0xffff;
+    ptr->context = (struct wgl_context *)next_free;
+    ptr->funcs = NULL;
+    next_free = ptr;
+    LeaveCriticalSection( &wgl_section );
+}
 
 /***********************************************************************
  *		 wglSetPixelFormat(OPENGL32.@)
@@ -98,7 +177,7 @@ const GLubyte * WINAPI wine_glGetString( GLenum name );
 BOOL WINAPI wglSetPixelFormat( HDC hdc, INT iPixelFormat,
                                const PIXELFORMATDESCRIPTOR *ppfd)
 {
-  return wine_wgl.p_SetPixelFormat(hdc, iPixelFormat, ppfd);
+    return GdiSetPixelFormat(hdc, iPixelFormat, ppfd);
 }
 
 /***********************************************************************
@@ -106,7 +185,18 @@ BOOL WINAPI wglSetPixelFormat( HDC hdc, INT iPixelFormat,
  */
 BOOL WINAPI wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask)
 {
-  return wine_wgl.p_wglCopyContext(hglrcSrc, hglrcDst, mask);
+    struct wgl_handle *src, *dst;
+    BOOL ret = FALSE;
+
+    if (!(src = get_handle_ptr( hglrcSrc ))) return FALSE;
+    if ((dst = get_handle_ptr( hglrcDst )))
+    {
+        if (src->funcs != dst->funcs) SetLastError( ERROR_INVALID_HANDLE );
+        else ret = src->funcs->p_wglCopyContext( src->context, dst->context, mask );
+    }
+    release_handle_ptr( dst );
+    release_handle_ptr( src );
+    return ret;
 }
 
 /***********************************************************************
@@ -114,7 +204,20 @@ BOOL WINAPI wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask)
  */
 BOOL WINAPI wglDeleteContext(HGLRC hglrc)
 {
-  return wine_wgl.p_wglDeleteContext(hglrc);
+    struct wgl_handle *ptr = get_handle_ptr( hglrc );
+
+    if (!ptr) return FALSE;
+
+    if (ptr->tid && ptr->tid != GetCurrentThreadId())
+    {
+        SetLastError( ERROR_BUSY );
+        release_handle_ptr( ptr );
+        return FALSE;
+    }
+    if (hglrc == NtCurrentTeb()->glCurrentRC) wglMakeCurrent( 0, 0 );
+    ptr->funcs->p_wglDeleteContext( ptr->context );
+    free_handle_ptr( ptr );
+    return TRUE;
 }
 
 /***********************************************************************
@@ -122,31 +225,120 @@ BOOL WINAPI wglDeleteContext(HGLRC hglrc)
  */
 BOOL WINAPI wglMakeCurrent(HDC hdc, HGLRC hglrc)
 {
-  return wine_wgl.p_wglMakeCurrent(hdc, hglrc);
+    BOOL ret = TRUE;
+    struct wgl_handle *ptr, *prev = get_current_handle_ptr();
+
+    if (hglrc)
+    {
+        if (!(ptr = get_handle_ptr( hglrc ))) return FALSE;
+        if (!ptr->tid || ptr->tid == GetCurrentThreadId())
+        {
+            ret = ptr->funcs->p_wglMakeCurrent( hdc, ptr->context );
+            if (ret)
+            {
+                if (prev) prev->tid = 0;
+                ptr->tid = GetCurrentThreadId();
+                NtCurrentTeb()->glCurrentRC = hglrc;
+            }
+        }
+        else
+        {
+            SetLastError( ERROR_BUSY );
+            ret = FALSE;
+        }
+        release_handle_ptr( ptr );
+    }
+    else if (prev)
+    {
+        if (!prev->funcs->p_wglMakeCurrent( 0, NULL )) return FALSE;
+        prev->tid = 0;
+        NtCurrentTeb()->glCurrentRC = 0;
+    }
+    else if (!hdc)
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        ret = FALSE;
+    }
+    return ret;
+}
+
+/***********************************************************************
+ *		wglCreateContextAttribsARB  (wrapper for the extension function returned by the driver)
+ */
+static HGLRC WINAPI wglCreateContextAttribsARB( HDC hdc, HGLRC share, const int *attribs )
+{
+    HGLRC ret = 0;
+    struct wgl_context *context;
+    struct wgl_handle *share_ptr = NULL;
+    const struct wgl_funcs *funcs = get_dc_funcs( hdc );
+
+    if (!funcs) return 0;
+    if (share && !(share_ptr = get_handle_ptr( share ))) return 0;
+    if ((context = funcs->p_wglCreateContextAttribsARB( hdc, share_ptr ? share_ptr->context : NULL,
+                                                        attribs )))
+    {
+        ret = alloc_handle( context, funcs );
+        if (!ret) funcs->p_wglDeleteContext( context );
+    }
+    release_handle_ptr( share_ptr );
+    return ret;
+
+}
+
+/***********************************************************************
+ *		wglMakeContextCurrentARB  (wrapper for the extension function returned by the driver)
+ */
+static BOOL WINAPI wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, HGLRC hglrc )
+{
+    BOOL ret = TRUE;
+    struct wgl_handle *ptr, *prev = get_current_handle_ptr();
+
+    if (hglrc)
+    {
+        if (!(ptr = get_handle_ptr( hglrc ))) return FALSE;
+        if (!ptr->tid || ptr->tid == GetCurrentThreadId())
+        {
+            ret = ptr->funcs->p_wglMakeContextCurrentARB( draw_hdc, read_hdc, ptr->context );
+            if (ret)
+            {
+                if (prev) prev->tid = 0;
+                ptr->tid = GetCurrentThreadId();
+                NtCurrentTeb()->glCurrentRC = hglrc;
+            }
+        }
+        else
+        {
+            SetLastError( ERROR_BUSY );
+            ret = FALSE;
+        }
+        release_handle_ptr( ptr );
+    }
+    else if (prev)
+    {
+        if (!prev->funcs->p_wglMakeCurrent( 0, NULL )) return FALSE;
+        prev->tid = 0;
+        NtCurrentTeb()->glCurrentRC = 0;
+    }
+    return ret;
 }
 
 /***********************************************************************
  *		wglShareLists (OPENGL32.@)
  */
-BOOL WINAPI wglShareLists(HGLRC hglrc1, HGLRC hglrc2)
+BOOL WINAPI wglShareLists(HGLRC hglrcSrc, HGLRC hglrcDst)
 {
-  return wine_wgl.p_wglShareLists(hglrc1, hglrc2);
-}
+    BOOL ret = FALSE;
+    struct wgl_handle *src, *dst;
 
-/***********************************************************************
- *		wglUseFontBitmapsA (OPENGL32.@)
- */
-BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase)
-{
-  return wine_wgl.p_wglUseFontBitmapsA(hdc, first, count, listBase);
-}
-
-/***********************************************************************
- *		wglUseFontBitmapsW (OPENGL32.@)
- */
-BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase)
-{
-  return wine_wgl.p_wglUseFontBitmapsW(hdc, first, count, listBase);
+    if (!(src = get_handle_ptr( hglrcSrc ))) return FALSE;
+    if ((dst = get_handle_ptr( hglrcDst )))
+    {
+        if (src->funcs != dst->funcs) SetLastError( ERROR_INVALID_HANDLE );
+        else ret = src->funcs->p_wglShareLists( src->context, dst->context );
+    }
+    release_handle_ptr( dst );
+    release_handle_ptr( src );
+    return ret;
 }
 
 /***********************************************************************
@@ -154,7 +346,9 @@ BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase
  */
 HDC WINAPI wglGetCurrentDC(void)
 {
-  return wine_wgl.p_wglGetCurrentDC();
+    struct wgl_handle *context = get_current_handle_ptr();
+    if (!context) return 0;
+    return context->funcs->p_wglGetCurrentDC( context->context );
 }
 
 /***********************************************************************
@@ -162,7 +356,15 @@ HDC WINAPI wglGetCurrentDC(void)
  */
 HGLRC WINAPI wglCreateContext(HDC hdc)
 {
-  return wine_wgl.p_wglCreateContext(hdc);
+    HGLRC ret = 0;
+    struct wgl_context *context;
+    const struct wgl_funcs *funcs = get_dc_funcs( hdc );
+
+    if (!funcs) return 0;
+    if (!(context = funcs->p_wglCreateContext( hdc ))) return 0;
+    ret = alloc_handle( context, funcs );
+    if (!ret) funcs->p_wglDeleteContext( context );
+    return ret;
 }
 
 /***********************************************************************
@@ -170,7 +372,7 @@ HGLRC WINAPI wglCreateContext(HDC hdc)
  */
 HGLRC WINAPI wglGetCurrentContext(void)
 {
-  return wine_wgl.p_wglGetCurrentContext();
+    return NtCurrentTeb()->glCurrentRC;
 }
 
 /***********************************************************************
@@ -178,7 +380,162 @@ HGLRC WINAPI wglGetCurrentContext(void)
  */
 INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
 {
-  return wine_wgl.p_ChoosePixelFormat(hdc, ppfd);
+    PIXELFORMATDESCRIPTOR format, best;
+    int i, count, best_format;
+    int bestDBuffer = -1, bestStereo = -1;
+
+    TRACE_(wgl)( "%p %p: size %u version %u flags %u type %u color %u %u,%u,%u,%u "
+                 "accum %u depth %u stencil %u aux %u\n",
+                 hdc, ppfd, ppfd->nSize, ppfd->nVersion, ppfd->dwFlags, ppfd->iPixelType,
+                 ppfd->cColorBits, ppfd->cRedBits, ppfd->cGreenBits, ppfd->cBlueBits, ppfd->cAlphaBits,
+                 ppfd->cAccumBits, ppfd->cDepthBits, ppfd->cStencilBits, ppfd->cAuxBuffers );
+
+    count = GdiDescribePixelFormat( hdc, 0, 0, NULL );
+    if (!count) return 0;
+
+    best_format = 0;
+    best.dwFlags = 0;
+    best.cAlphaBits = -1;
+    best.cColorBits = -1;
+    best.cDepthBits = -1;
+    best.cStencilBits = -1;
+    best.cAuxBuffers = -1;
+
+    for (i = 1; i <= count; i++)
+    {
+        if (!GdiDescribePixelFormat( hdc, i, sizeof(format), &format )) continue;
+
+        if (ppfd->iPixelType != format.iPixelType)
+        {
+            TRACE( "pixel type mismatch for iPixelFormat=%d\n", i );
+            continue;
+        }
+
+        /* only use bitmap capable for formats for bitmap rendering */
+        if( (ppfd->dwFlags & PFD_DRAW_TO_BITMAP) != (format.dwFlags & PFD_DRAW_TO_BITMAP))
+        {
+            TRACE( "PFD_DRAW_TO_BITMAP mismatch for iPixelFormat=%d\n", i );
+            continue;
+        }
+
+        /* The behavior of PDF_STEREO/PFD_STEREO_DONTCARE and PFD_DOUBLEBUFFER / PFD_DOUBLEBUFFER_DONTCARE
+         * is not very clear on MSDN. They specify that ChoosePixelFormat tries to match pixel formats
+         * with the flag (PFD_STEREO / PFD_DOUBLEBUFFERING) set. Otherwise it says that it tries to match
+         * formats without the given flag set.
+         * A test on Windows using a Radeon 9500pro on WinXP (the driver doesn't support Stereo)
+         * has indicated that a format without stereo is returned when stereo is unavailable.
+         * So in case PFD_STEREO is set, formats that support it should have priority above formats
+         * without. In case PFD_STEREO_DONTCARE is set, stereo is ignored.
+         *
+         * To summarize the following is most likely the correct behavior:
+         * stereo not set -> prefer non-stereo formats, but also accept stereo formats
+         * stereo set -> prefer stereo formats, but also accept non-stereo formats
+         * stereo don't care -> it doesn't matter whether we get stereo or not
+         *
+         * In Wine we will treat non-stereo the same way as don't care because it makes
+         * format selection even more complicated and second drivers with Stereo advertise
+         * each format twice anyway.
+         */
+
+        /* Doublebuffer, see the comments above */
+        if (!(ppfd->dwFlags & PFD_DOUBLEBUFFER_DONTCARE))
+        {
+            if (((ppfd->dwFlags & PFD_DOUBLEBUFFER) != bestDBuffer) &&
+                ((format.dwFlags & PFD_DOUBLEBUFFER) == (ppfd->dwFlags & PFD_DOUBLEBUFFER)))
+                goto found;
+
+            if (bestDBuffer != -1 && (format.dwFlags & PFD_DOUBLEBUFFER) != bestDBuffer) continue;
+        }
+
+        /* Stereo, see the comments above. */
+        if (!(ppfd->dwFlags & PFD_STEREO_DONTCARE))
+        {
+            if (((ppfd->dwFlags & PFD_STEREO) != bestStereo) &&
+                ((format.dwFlags & PFD_STEREO) == (ppfd->dwFlags & PFD_STEREO)))
+                goto found;
+
+            if (bestStereo != -1 && (format.dwFlags & PFD_STEREO) != bestStereo) continue;
+        }
+
+        /* Below we will do a number of checks to select the 'best' pixelformat.
+         * We assume the precedence cColorBits > cAlphaBits > cDepthBits > cStencilBits -> cAuxBuffers.
+         * The code works by trying to match the most important options as close as possible.
+         * When a reasonable format is found, we will try to match more options.
+         * It appears (see the opengl32 test) that Windows opengl drivers ignore options
+         * like cColorBits, cAlphaBits and friends if they are set to 0, so they are considered
+         * as DONTCARE. At least Serious Sam TSE relies on this behavior. */
+
+        if (ppfd->cColorBits)
+        {
+            if (((ppfd->cColorBits > best.cColorBits) && (format.cColorBits > best.cColorBits)) ||
+                ((format.cColorBits >= ppfd->cColorBits) && (format.cColorBits < best.cColorBits)))
+                goto found;
+
+            if (best.cColorBits != format.cColorBits)  /* Do further checks if the format is compatible */
+            {
+                TRACE( "color mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        if (ppfd->cAlphaBits)
+        {
+            if (((ppfd->cAlphaBits > best.cAlphaBits) && (format.cAlphaBits > best.cAlphaBits)) ||
+                ((format.cAlphaBits >= ppfd->cAlphaBits) && (format.cAlphaBits < best.cAlphaBits)))
+                goto found;
+
+            if (best.cAlphaBits != format.cAlphaBits)
+            {
+                TRACE( "alpha mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        if (ppfd->cDepthBits)
+        {
+            if (((ppfd->cDepthBits > best.cDepthBits) && (format.cDepthBits > best.cDepthBits)) ||
+                ((format.cDepthBits >= ppfd->cDepthBits) && (format.cDepthBits < best.cDepthBits)))
+                goto found;
+
+            if (best.cDepthBits != format.cDepthBits)
+            {
+                TRACE( "depth mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        if (ppfd->cStencilBits)
+        {
+            if (((ppfd->cStencilBits > best.cStencilBits) && (format.cStencilBits > best.cStencilBits)) ||
+                ((format.cStencilBits >= ppfd->cStencilBits) && (format.cStencilBits < best.cStencilBits)))
+                goto found;
+
+            if (best.cStencilBits != format.cStencilBits)
+            {
+                TRACE( "stencil mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        if (ppfd->cAuxBuffers)
+        {
+            if (((ppfd->cAuxBuffers > best.cAuxBuffers) && (format.cAuxBuffers > best.cAuxBuffers)) ||
+                ((format.cAuxBuffers >= ppfd->cAuxBuffers) && (format.cAuxBuffers < best.cAuxBuffers)))
+                goto found;
+
+            if (best.cAuxBuffers != format.cAuxBuffers)
+            {
+                TRACE( "aux mismatch for iPixelFormat=%d\n", i );
+                continue;
+            }
+        }
+        continue;
+
+    found:
+        best_format = i;
+        best = format;
+        bestDBuffer = format.dwFlags & PFD_DOUBLEBUFFER;
+        bestStereo = format.dwFlags & PFD_STEREO;
+    }
+
+    TRACE( "returning %u\n", best_format );
+    return best_format;
 }
 
 /***********************************************************************
@@ -187,14 +544,17 @@ INT WINAPI wglChoosePixelFormat(HDC hdc, const PIXELFORMATDESCRIPTOR* ppfd)
 INT WINAPI wglDescribePixelFormat(HDC hdc, INT iPixelFormat, UINT nBytes,
                                 LPPIXELFORMATDESCRIPTOR ppfd)
 {
-  return wine_wgl.p_DescribePixelFormat(hdc, iPixelFormat, nBytes, ppfd);
+  return GdiDescribePixelFormat(hdc, iPixelFormat, nBytes, ppfd);
 }
+
 /***********************************************************************
  *		wglGetPixelFormat (OPENGL32.@)
  */
 INT WINAPI wglGetPixelFormat(HDC hdc)
 {
-  return wine_wgl.p_GetPixelFormat(hdc);
+    const struct wgl_funcs *funcs = get_dc_funcs( hdc );
+    if (!funcs) return 0;
+    return funcs->p_GetPixelFormat( hdc );
 }
 
 /***********************************************************************
@@ -207,7 +567,7 @@ HGLRC WINAPI wglCreateLayerContext(HDC hdc,
   if (iLayerPlane == 0) {
       return wglCreateContext(hdc);
   }
-  FIXME(" no handler for layer %d\n", iLayerPlane);
+  FIXME("no handler for layer %d\n", iLayerPlane);
 
   return NULL;
 }
@@ -233,9 +593,23 @@ int WINAPI wglGetLayerPaletteEntries(HDC hdc,
 				     int iStart,
 				     int cEntries,
 				     const COLORREF *pcr) {
-  FIXME("(): stub !\n");
+  FIXME("(): stub!\n");
 
   return 0;
+}
+
+/* check if the extension is present in the list */
+static BOOL has_extension( const char *list, const char *ext )
+{
+    size_t len = strlen( ext );
+
+    while (list)
+    {
+        while (*list == ' ') list++;
+        if (!strncmp( list, ext, len ) && (!list[len] || list[len] == ' ')) return TRUE;
+        list = strchr( list, ' ' );
+    }
+    return FALSE;
 }
 
 static int compar(const void *elt_a, const void *elt_b) {
@@ -258,11 +632,11 @@ static BOOL is_extension_supported(const char* extension)
     /* We use the GetProcAddress function from the display driver to retrieve function pointers
      * for OpenGL and WGL extensions. In case of winex11.drv the OpenGL extension lookup is done
      * using glXGetProcAddress. This function is quite unreliable in the sense that its specs don't
-     * require the function to return NULL when a extension isn't found. For this reason we check
+     * require the function to return NULL when an extension isn't found. For this reason we check
      * if the OpenGL extension required for the function we are looking up is supported. */
 
     /* Check if the extension is part of the GL extension string to see if it is supported. */
-    if(strstr(gl_ext_string, extension) != NULL)
+    if (has_extension(gl_ext_string, extension))
         return TRUE;
 
     /* In general an OpenGL function starts as an ARB/EXT extension and at some stage
@@ -275,7 +649,7 @@ static BOOL is_extension_supported(const char* extension)
         const char *version = extension + 11; /* Move past 'GL_VERSION_' */
 
         if(!gl_version) {
-            ERR("Error no OpenGL version found,\n");
+            ERR("No OpenGL version found!\n");
             return FALSE;
         }
 
@@ -290,6 +664,12 @@ static BOOL is_extension_supported(const char* extension)
     return FALSE;
 }
 
+static const OpenGL_extension wgl_extensions[] =
+{
+    { "wglCreateContextAttribsARB", "WGL_ARB_create_context", wglCreateContextAttribsARB },
+    { "wglMakeContextCurrentARB", "WGL_ARB_make_current_read", wglMakeContextCurrentARB },
+};
+
 /***********************************************************************
  *		wglGetProcAddress (OPENGL32.@)
  */
@@ -297,30 +677,46 @@ PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
   void *local_func;
   OpenGL_extension  ext;
   const OpenGL_extension *ext_ret;
+  struct wgl_handle *context = get_current_handle_ptr();
 
   TRACE("(%s)\n", lpszProc);
 
-  if(lpszProc == NULL)
+  if (lpszProc == NULL)
     return NULL;
 
-  /* First, look if it's not already defined in the 'standard' OpenGL functions */
-  if ((local_func = GetProcAddress(opengl32_handle, lpszProc)) != NULL) {
-    TRACE(" found function in 'standard' OpenGL functions (%p)\n", local_func);
-    return local_func;
+  /* Without an active context opengl32 doesn't know to what
+   * driver it has to dispatch wglGetProcAddress.
+   */
+  if (!context)
+  {
+    WARN("No active WGL context found\n");
+    return NULL;
   }
 
-  /* After that, search in the thunks to find the real name of the extension */
+  /* Search in the thunks to find the real name of the extension */
   ext.name = lpszProc;
   ext_ret = bsearch(&ext, extension_registry, extension_registry_size,
                     sizeof(OpenGL_extension), compar);
 
   /* If nothing was found, we are looking for a WGL extension or an unknown GL extension. */
   if (ext_ret == NULL) {
-    /* If the function name starts with a w it is a WGL extension */
+    /* If the function name starts with a 'w', it is a WGL extension */
     if(lpszProc[0] == 'w')
-      return wine_wgl.p_wglGetProcAddress(lpszProc);
+    {
+        local_func = context->funcs->p_wglGetProcAddress( lpszProc );
+        if (local_func == (void *)1)  /* special function that needs a wrapper */
+        {
+            ext_ret = bsearch( &ext, wgl_extensions, sizeof(wgl_extensions)/sizeof(wgl_extensions[0]),
+                               sizeof(OpenGL_extension), compar );
+            if (ext_ret) return ext_ret->func;
 
-    /* We are dealing with an unknown GL extension. */
+            FIXME( "wrapper missing for %s\n", lpszProc );
+            return NULL;
+        }
+        return local_func;
+    }
+
+    /* We are dealing with an unknown GL extension */
     WARN("Extension '%s' not defined in opengl32.dll's function table!\n", lpszProc);
     return NULL;
   } else { /* We are looking for an OpenGL extension */
@@ -330,14 +726,14 @@ PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
         WARN("Extension '%s' required by function '%s' not supported!\n", ext_ret->extension, lpszProc);
     }
 
-    local_func = wine_wgl.p_wglGetProcAddress(ext_ret->name);
+    local_func = context->funcs->p_wglGetProcAddress( ext_ret->name );
 
     /* After that, look at the extensions defined in the Linux OpenGL library */
     if (local_func == NULL) {
       char buf[256];
       void *ret = NULL;
 
-      /* Remove the 3 last letters (EXT, ARB, ...).
+      /* Remove the last 3 letters (EXT, ARB, ...).
 
 	 I know that some extensions have more than 3 letters (MESA, NV,
 	 INTEL, ...), but this is only a stop-gap measure to fix buggy
@@ -346,18 +742,18 @@ PROC WINAPI wglGetProcAddress(LPCSTR  lpszProc) {
       */
       memcpy(buf, ext_ret->name, strlen(ext_ret->name) - 3);
       buf[strlen(ext_ret->name) - 3] = '\0';
-      TRACE(" extension not found in the Linux OpenGL library, checking against libGL bug with %s..\n", buf);
+      TRACE("Extension not found in the Linux OpenGL library, checking against libGL bug with %s..\n", buf);
 
       ret = GetProcAddress(opengl32_handle, buf);
       if (ret != NULL) {
-        TRACE(" found function in main OpenGL library (%p) !\n", ret);
+        TRACE("Found function in main OpenGL library (%p)!\n", ret);
       } else {
-        WARN("Did not find function %s (%s) in your OpenGL library !\n", lpszProc, ext_ret->name);
+        WARN("Did not find function %s (%s) in your OpenGL library!\n", lpszProc, ext_ret->name);
       }
 
       return ret;
     } else {
-      TRACE(" returning function  (%p)\n", ext_ret->func);
+      TRACE("returning function (%p)\n", ext_ret->func);
       extension_funcs[ext_ret - extension_registry] = local_func;
 
       return ext_ret->func;
@@ -384,7 +780,7 @@ int WINAPI wglSetLayerPaletteEntries(HDC hdc,
 				     int iStart,
 				     int cEntries,
 				     const COLORREF *pcr) {
-  FIXME("(): stub !\n");
+  FIXME("(): stub!\n");
 
   return 0;
 }
@@ -397,15 +793,132 @@ BOOL WINAPI wglSwapLayerBuffers(HDC hdc,
   TRACE_(opengl)("(%p, %08x)\n", hdc, fuPlanes);
 
   if (fuPlanes & WGL_SWAP_MAIN_PLANE) {
-    if (!SwapBuffers(hdc)) return FALSE;
+    if (!GdiSwapBuffers(hdc)) return FALSE;
     fuPlanes &= ~WGL_SWAP_MAIN_PLANE;
   }
 
   if (fuPlanes) {
-    WARN("Following layers unhandled : %08x\n", fuPlanes);
+    WARN("Following layers unhandled: %08x\n", fuPlanes);
   }
 
   return TRUE;
+}
+
+/***********************************************************************
+ *		wglUseFontBitmaps_common
+ */
+static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD listBase, BOOL unicode )
+{
+     GLYPHMETRICS gm;
+     unsigned int glyph, size = 0;
+     void *bitmap = NULL, *gl_bitmap = NULL;
+     int org_alignment;
+     BOOL ret = TRUE;
+
+     glGetIntegerv(GL_UNPACK_ALIGNMENT, &org_alignment);
+     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+     for (glyph = first; glyph < first + count; glyph++) {
+         static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
+         unsigned int needed_size, height, width, width_int;
+
+         if (unicode)
+             needed_size = GetGlyphOutlineW(hdc, glyph, GGO_BITMAP, &gm, 0, NULL, &identity);
+         else
+             needed_size = GetGlyphOutlineA(hdc, glyph, GGO_BITMAP, &gm, 0, NULL, &identity);
+
+         TRACE("Glyph: %3d / List: %d size %d\n", glyph, listBase, needed_size);
+         if (needed_size == GDI_ERROR) {
+             ret = FALSE;
+             break;
+         }
+
+         if (needed_size > size) {
+             size = needed_size;
+             HeapFree(GetProcessHeap(), 0, bitmap);
+             HeapFree(GetProcessHeap(), 0, gl_bitmap);
+             bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+             gl_bitmap = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+         }
+         if (unicode)
+             ret = (GetGlyphOutlineW(hdc, glyph, GGO_BITMAP, &gm, size, bitmap, &identity) != GDI_ERROR);
+         else
+             ret = (GetGlyphOutlineA(hdc, glyph, GGO_BITMAP, &gm, size, bitmap, &identity) != GDI_ERROR);
+         if (!ret) break;
+
+         if (TRACE_ON(wgl)) {
+             unsigned int bitmask;
+             unsigned char *bitmap_ = bitmap;
+
+             TRACE("  - bbox: %d x %d\n", gm.gmBlackBoxX, gm.gmBlackBoxY);
+             TRACE("  - origin: (%d, %d)\n", gm.gmptGlyphOrigin.x, gm.gmptGlyphOrigin.y);
+             TRACE("  - increment: %d - %d\n", gm.gmCellIncX, gm.gmCellIncY);
+             if (needed_size != 0) {
+                 TRACE("  - bitmap:\n");
+                 for (height = 0; height < gm.gmBlackBoxY; height++) {
+                     TRACE("      ");
+                     for (width = 0, bitmask = 0x80; width < gm.gmBlackBoxX; width++, bitmask >>= 1) {
+                         if (bitmask == 0) {
+                             bitmap_ += 1;
+                             bitmask = 0x80;
+                         }
+                         if (*bitmap_ & bitmask)
+                             TRACE("*");
+                         else
+                             TRACE(" ");
+                     }
+                     bitmap_ += (4 - ((UINT_PTR)bitmap_ & 0x03));
+                     TRACE("\n");
+                 }
+             }
+         }
+
+         /* In OpenGL, the bitmap is drawn from the bottom to the top... So we need to invert the
+         * glyph for it to be drawn properly.
+         */
+         if (needed_size != 0) {
+             width_int = (gm.gmBlackBoxX + 31) / 32;
+             for (height = 0; height < gm.gmBlackBoxY; height++) {
+                 for (width = 0; width < width_int; width++) {
+                     ((int *) gl_bitmap)[(gm.gmBlackBoxY - height - 1) * width_int + width] =
+                     ((int *) bitmap)[height * width_int + width];
+                 }
+             }
+         }
+
+         glNewList(listBase++, GL_COMPILE);
+         if (needed_size != 0) {
+             glBitmap(gm.gmBlackBoxX, gm.gmBlackBoxY,
+                     0 - gm.gmptGlyphOrigin.x, (int) gm.gmBlackBoxY - gm.gmptGlyphOrigin.y,
+                     gm.gmCellIncX, gm.gmCellIncY,
+                     gl_bitmap);
+         } else {
+             /* This is the case of 'empty' glyphs like the space character */
+             glBitmap(0, 0, 0, 0, gm.gmCellIncX, gm.gmCellIncY, NULL);
+         }
+         glEndList();
+     }
+
+     glPixelStorei(GL_UNPACK_ALIGNMENT, org_alignment);
+     HeapFree(GetProcessHeap(), 0, bitmap);
+     HeapFree(GetProcessHeap(), 0, gl_bitmap);
+     return ret;
+}
+
+/***********************************************************************
+ *		wglUseFontBitmapsA (OPENGL32.@)
+ */
+BOOL WINAPI wglUseFontBitmapsA(HDC hdc, DWORD first, DWORD count, DWORD listBase)
+{
+    return wglUseFontBitmaps_common( hdc, first, count, listBase, FALSE );
+}
+
+/***********************************************************************
+ *		wglUseFontBitmapsW (OPENGL32.@)
+ */
+BOOL WINAPI wglUseFontBitmapsW(HDC hdc, DWORD first, DWORD count, DWORD listBase)
+{
+    return wglUseFontBitmaps_common( hdc, first, count, listBase, TRUE );
 }
 
 #ifdef SONAME_LIBGLU
@@ -502,17 +1015,11 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
         return FALSE;
     }
 
-    ENTER_GL();
     tess = pgluNewTess();
-    if(tess)
-    {
-        pgluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
-        pgluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
-        pgluTessCallback(tess, GLU_TESS_END, tess_callback_end);
-    }
-    LEAVE_GL();
-
     if(!tess) return FALSE;
+    pgluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
+    pgluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
+    pgluTessCallback(tess, GLU_TESS_END, tess_callback_end);
 
     GetObjectW(GetCurrentObject(hdc, OBJ_FONT), sizeof(lf), &lf);
     rc.left = rc.right = rc.bottom = 0;
@@ -564,7 +1071,6 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
             lpgmf++;
         }
 
-	ENTER_GL();
 	glNewList(listBase++, GL_COMPILE);
         pgluTessBeginPolygon(tess, NULL);
 
@@ -598,7 +1104,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
                 case TT_PRIM_QSPLINE:
                     for(i = 0; i < ppc->cpfx/2; i++)
                     {
-                        /* FIXME just connecting the control points for now */
+                        /* FIXME: just connecting the control points for now */
                         TRACE("\t\tcurve  %d,%d %d,%d\n",
                               ppc->apfx[i * 2].x.value,     ppc->apfx[i * 3].y.value,
                               ppc->apfx[i * 2 + 1].x.value, ppc->apfx[i * 3 + 1].y.value);
@@ -627,7 +1133,6 @@ error_in_list:
         pgluTessEndPolygon(tess);
         glTranslated((GLdouble)gm.gmCellIncX / em_size, (GLdouble)gm.gmCellIncY / em_size, 0.0);
         glEndList();
-        LEAVE_GL();
         HeapFree(GetProcessHeap(), 0, buf);
         HeapFree(GetProcessHeap(), 0, vertices);
     }
@@ -688,6 +1193,14 @@ BOOL WINAPI wglUseFontOutlinesW(HDC hdc,
 }
 
 /***********************************************************************
+ *              glDebugEntry (OPENGL32.@)
+ */
+GLint WINAPI wine_glDebugEntry( GLint unknown1, GLint unknown2 )
+{
+    return 0;
+}
+
+/***********************************************************************
  *              glFinish (OPENGL32.@)
  */
 void WINAPI wine_glFinish( void )
@@ -705,62 +1218,74 @@ void WINAPI wine_glFlush( void )
     wine_wgl.p_wglFlush();
 }
 
+/* build the extension string by filtering out the disabled extensions */
+static char *build_gl_extensions( const char *extensions )
+{
+    char *p, *str, *disabled = NULL;
+    const char *end;
+    HKEY hkey;
+
+    TRACE( "GL_EXTENSIONS:\n" );
+
+    if (!extensions) extensions = "";
+
+    /* @@ Wine registry key: HKCU\Software\Wine\OpenGL */
+    if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey ))
+    {
+        DWORD size, ret = RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, NULL, &size );
+        if (!ret && (disabled = HeapAlloc( GetProcessHeap(), 0, size )))
+            ret = RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (BYTE *)disabled, &size );
+        RegCloseKey( hkey );
+        if (ret) *disabled = 0;
+    }
+
+    if ((str = HeapAlloc( GetProcessHeap(), 0, strlen(extensions) + 2 )))
+    {
+        p = str;
+        for (;;)
+        {
+            while (*extensions == ' ') extensions++;
+            if (!*extensions) break;
+            if (!(end = strchr( extensions, ' ' ))) end = extensions + strlen( extensions );
+            memcpy( p, extensions, end - extensions );
+            p[end - extensions] = 0;
+            if (!has_extension( disabled, p ))
+            {
+                TRACE("++ %s\n", p );
+                p += end - extensions;
+                *p++ = ' ';
+            }
+            else TRACE("-- %s (disabled by config)\n", p );
+            extensions = end;
+        }
+        *p = 0;
+    }
+    HeapFree( GetProcessHeap(), 0, disabled );
+    return str;
+}
+
 /***********************************************************************
  *              glGetString (OPENGL32.@)
  */
 const GLubyte * WINAPI wine_glGetString( GLenum name )
 {
-  const GLubyte *ret;
-  const char* GL_Extensions = NULL;
+  static const GLubyte *gl_extensions;
 
   /* this is for buggy nvidia driver, crashing if called from a different
      thread with no context */
   if(wglGetCurrentContext() == NULL)
     return NULL;
 
-  if (GL_EXTENSIONS != name) {
-    ENTER_GL();
-    ret = glGetString(name);
-    LEAVE_GL();
-    return ret;
+  if (name != GL_EXTENSIONS) return glGetString(name);
+
+  if (!gl_extensions)
+  {
+      const char *orig_ext = (const char *)glGetString(GL_EXTENSIONS);
+      char *new_ext = build_gl_extensions( orig_ext );
+      if (InterlockedCompareExchangePointer( (void **)&gl_extensions, new_ext, NULL ))
+          HeapFree( GetProcessHeap(), 0, new_ext );
   }
-
-  if (NULL == internal_gl_extensions) {
-    ENTER_GL();
-    GL_Extensions = (const char *) glGetString(GL_EXTENSIONS);
-
-    if (GL_Extensions)
-    {
-      size_t len = strlen(GL_Extensions);
-      internal_gl_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len + 2);
-
-      TRACE("GL_EXTENSIONS reported:\n");
-      while (*GL_Extensions != 0x00) {
-	const char* Start = GL_Extensions;
-	char        ThisExtn[256];
-
-	while (*GL_Extensions != ' ' && *GL_Extensions != 0x00) {
-	  GL_Extensions++;
-	}
-	memcpy(ThisExtn, Start, (GL_Extensions - Start));
-        ThisExtn[GL_Extensions - Start] = 0;
-	TRACE("- %s:", ThisExtn);
-	
-	/* test if supported API is disabled by config */
-	if (!internal_gl_disabled_extensions || !strstr(internal_gl_disabled_extensions, ThisExtn)) {
-	  strcat(internal_gl_extensions, " ");
-	  strcat(internal_gl_extensions, ThisExtn);
-	  TRACE(" active\n");
-	} else {
-	  TRACE(" deactived (by config)\n");
-	}
-
-	if (*GL_Extensions == ' ') GL_Extensions++;
-      }
-    }
-    LEAVE_GL();
-  }
-  return (const GLubyte *) internal_gl_extensions;
+  return gl_extensions;
 }
 
 /***********************************************************************
@@ -776,59 +1301,22 @@ void WINAPI wine_glGetIntegerv( GLenum pname, GLint* params )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH wglSwapBuffers( HDC hdc )
 {
-    return SwapBuffers(hdc);
+    return GdiSwapBuffers(hdc);
 }
 
 /* This is for brain-dead applications that use OpenGL functions before even
    creating a rendering context.... */
 static BOOL process_attach(void)
 {
-  HMODULE mod_x11, mod_gdi32;
-  DWORD size;
-  HKEY hkey = 0;
+  HDC hdc = GetDC( 0 );
+  const struct wgl_funcs *funcs = get_dc_funcs( hdc );
 
-  GetDesktopWindow();  /* make sure winex11 is loaded (FIXME) */
-  mod_x11 = GetModuleHandleA( "winex11.drv" );
-  mod_gdi32 = GetModuleHandleA( "gdi32.dll" );
+  ReleaseDC( 0, hdc );
 
-  if (!mod_x11 || !mod_gdi32)
-  {
-      ERR("X11DRV or GDI32 not loaded. Cannot create default context.\n");
-      return FALSE;
-  }
-
-  wine_tsx11_lock_ptr   = (void *)GetProcAddress( mod_x11, "wine_tsx11_lock" );
-  wine_tsx11_unlock_ptr = (void *)GetProcAddress( mod_x11, "wine_tsx11_unlock" );
-
-  wine_wgl.p_wglGetProcAddress = (void *)GetProcAddress(mod_gdi32, "wglGetProcAddress");
-  wine_wgl.p_SetPixelFormat = (void *)GetProcAddress(mod_gdi32, "SetPixelFormat");
-  wine_wgl.p_wglCopyContext = (void *)GetProcAddress(mod_gdi32, "wglCopyContext");
-  wine_wgl.p_wglDeleteContext = (void *)GetProcAddress(mod_gdi32, "wglDeleteContext");
-  wine_wgl.p_wglMakeCurrent = (void *)GetProcAddress(mod_gdi32, "wglMakeCurrent");
-  wine_wgl.p_wglShareLists = (void *)GetProcAddress(mod_gdi32, "wglShareLists");
-  wine_wgl.p_wglUseFontBitmapsA = (void *)GetProcAddress(mod_gdi32, "wglUseFontBitmapsA");
-  wine_wgl.p_wglUseFontBitmapsW = (void *)GetProcAddress(mod_gdi32, "wglUseFontBitmapsW");
-  wine_wgl.p_wglGetCurrentDC = (void *)GetProcAddress(mod_gdi32, "wglGetCurrentDC");
-  wine_wgl.p_wglCreateContext = (void *)GetProcAddress(mod_gdi32, "wglCreateContext");
-  wine_wgl.p_wglGetCurrentContext = (void *)GetProcAddress(mod_gdi32, "wglGetCurrentContext");
-  wine_wgl.p_ChoosePixelFormat = (void *)GetProcAddress(mod_gdi32, "ChoosePixelFormat");
-  wine_wgl.p_DescribePixelFormat = (void *)GetProcAddress(mod_gdi32, "DescribePixelFormat");
-  wine_wgl.p_GetPixelFormat = (void *)GetProcAddress(mod_gdi32, "GetPixelFormat");
-
-  /* Interal WGL function */
-  wine_wgl.p_wglGetIntegerv = (void *)wine_wgl.p_wglGetProcAddress("wglGetIntegerv");
-  wine_wgl.p_wglFinish = (void *)wine_wgl.p_wglGetProcAddress("wglFinish");
-  wine_wgl.p_wglFlush = (void *)wine_wgl.p_wglGetProcAddress("wglFlush");
-
-  if (!RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\OpenGL", &hkey)) {
-    if (!RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, NULL, &size)) {
-      internal_gl_disabled_extensions = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
-      RegQueryValueExA( hkey, "DisabledExtensions", 0, NULL, (LPBYTE)internal_gl_disabled_extensions, &size);
-      TRACE("found DisabledExtensions=%s\n", debugstr_a(internal_gl_disabled_extensions));
-    }
-    RegCloseKey(hkey);
-  }
-
+  /* internal WGL functions */
+  wine_wgl.p_wglFinish = (void *)funcs->p_wglGetProcAddress("wglFinish");
+  wine_wgl.p_wglFlush = (void *)funcs->p_wglGetProcAddress("wglFlush");
+  wine_wgl.p_wglGetIntegerv = (void *)funcs->p_wglGetProcAddress("wglGetIntegerv");
   return TRUE;
 }
 
@@ -838,8 +1326,6 @@ static BOOL process_attach(void)
 static void process_detach(void)
 {
   if (libglu_handle) wine_dlclose(libglu_handle, NULL, 0);
-  HeapFree(GetProcessHeap(), 0, internal_gl_extensions);
-  HeapFree(GetProcessHeap(), 0, internal_gl_disabled_extensions);
 }
 
 /***********************************************************************

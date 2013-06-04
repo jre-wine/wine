@@ -80,6 +80,8 @@ static void *load_libtiff(void)
     if (!libtiff_handle &&
         (libtiff_handle = wine_dlopen(SONAME_LIBTIFF, RTLD_NOW, NULL, 0)) != NULL)
     {
+        void * (*pTIFFSetWarningHandler)(void *);
+        void * (*pTIFFSetWarningHandlerExt)(void *);
 
 #define LOAD_FUNCPTR(f) \
     if((p##f = wine_dlsym(libtiff_handle, #f, NULL, 0)) == NULL) { \
@@ -103,6 +105,10 @@ static void *load_libtiff(void)
         LOAD_FUNCPTR(TIFFWriteScanline);
 #undef LOAD_FUNCPTR
 
+        if ((pTIFFSetWarningHandler = wine_dlsym(libtiff_handle, "TIFFSetWarningHandler", NULL, 0)))
+            pTIFFSetWarningHandler(NULL);
+        if ((pTIFFSetWarningHandlerExt = wine_dlsym(libtiff_handle, "TIFFSetWarningHandlerExt", NULL, 0)))
+            pTIFFSetWarningHandlerExt(NULL);
     }
 
     result = libtiff_handle;
@@ -628,8 +634,12 @@ static HRESULT WINAPI TiffDecoder_GetMetadataQueryReader(IWICBitmapDecoder *ifac
 static HRESULT WINAPI TiffDecoder_GetPreview(IWICBitmapDecoder *iface,
     IWICBitmapSource **ppIBitmapSource)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIBitmapSource);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIBitmapSource);
+
+    if (!ppIBitmapSource) return E_INVALIDARG;
+
+    *ppIBitmapSource = NULL;
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI TiffDecoder_GetColorContexts(IWICBitmapDecoder *iface,
@@ -643,6 +653,10 @@ static HRESULT WINAPI TiffDecoder_GetThumbnail(IWICBitmapDecoder *iface,
     IWICBitmapSource **ppIThumbnail)
 {
     TRACE("(%p,%p)\n", iface, ppIThumbnail);
+
+    if (!ppIThumbnail) return E_INVALIDARG;
+
+    *ppIThumbnail = NULL;
     return WINCODEC_ERR_CODECNOTHUMBNAIL;
 }
 
@@ -1088,8 +1102,12 @@ static HRESULT WINAPI TiffFrameDecode_GetColorContexts(IWICBitmapFrameDecode *if
 static HRESULT WINAPI TiffFrameDecode_GetThumbnail(IWICBitmapFrameDecode *iface,
     IWICBitmapSource **ppIThumbnail)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIThumbnail);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIThumbnail);
+
+    if (!ppIThumbnail) return E_INVALIDARG;
+
+    *ppIThumbnail = NULL;
+    return WINCODEC_ERR_CODECNOTHUMBNAIL;
 }
 
 static const IWICBitmapFrameDecodeVtbl TiffFrameDecode_Vtbl = {

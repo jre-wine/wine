@@ -16,8 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-
 #include <stdarg.h>
+#include <assert.h>
 
 #define COBJMACROS
 
@@ -920,6 +920,7 @@ static HRESULT WINAPI HTMLElement_get_offsetParent(IHTMLElement *iface, IHTMLEle
             return hres;
 
         hres = IHTMLDOMNode_QueryInterface(&node->IHTMLDOMNode_iface, &IID_IHTMLElement, (void**)p);
+        node_release(node);
     }else {
         *p = NULL;
         hres = S_OK;
@@ -1411,8 +1412,7 @@ static HRESULT WINAPI HTMLElement_get_children(IHTMLElement *iface, IDispatch **
         return E_FAIL;
     }
 
-    *p = (IDispatch*)create_collection_from_nodelist(This->node.doc,
-            (IUnknown*)&This->IHTMLElement_iface, nsnode_list);
+    *p = (IDispatch*)create_collection_from_nodelist(This->node.doc, nsnode_list);
 
     nsIDOMNodeList_Release(nsnode_list);
     return S_OK;
@@ -1578,8 +1578,6 @@ void HTMLElement_destructor(HTMLDOMNode *iface)
 
     ConnectionPointContainer_Destroy(&This->cp_container);
 
-    if(This->nselem)
-        nsIDOMHTMLElement_Release(This->nselem);
     if(This->style) {
         This->style->elem = NULL;
         IHTMLStyle_Release(&This->style->IHTMLStyle_iface);
@@ -1617,7 +1615,6 @@ HRESULT HTMLElement_clone(HTMLDOMNode *iface, nsIDOMNode *nsnode, HTMLDOMNode **
         }
     }
 
-    IHTMLElement_AddRef(&new_elem->IHTMLElement_iface);
     *ret = &new_elem->node;
     return S_OK;
 }
@@ -1772,11 +1769,13 @@ void HTMLElement_Init(HTMLElement *This, HTMLDocumentNode *doc, nsIDOMHTMLElemen
     init_dispex(&This->node.dispex, (IUnknown*)&This->IHTMLElement_iface,
             dispex_data ? dispex_data : &HTMLElement_dispex);
 
-    if(nselem)
-        nsIDOMHTMLElement_AddRef(nselem);
-    This->nselem = nselem;
+    if(nselem) {
+        HTMLDOMNode_Init(doc, &This->node, (nsIDOMNode*)nselem);
 
-    HTMLDOMNode_Init(doc, &This->node, (nsIDOMNode*)nselem);
+        /* No AddRef, share reference with HTMLDOMNode */
+        assert((nsIDOMNode*)nselem == This->node.nsnode);
+        This->nselem = nselem;
+    }
 
     ConnectionPointContainer_Init(&This->cp_container, (IUnknown*)&This->IHTMLElement_iface);
 }

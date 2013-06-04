@@ -30,6 +30,11 @@ typedef struct {
     int delfl;
 } MSVCP__Ctypevec;
 
+typedef struct {
+    LCID handle;
+    unsigned page;
+} MSVCP__Collvec;
+
 /* basic_string<char, char_traits<char>, allocator<char>> */
 #define BUF_SIZE_CHAR 16
 typedef struct
@@ -58,7 +63,8 @@ static BYTE (__cdecl *p_short_eq)(const void*, const void*);
 static char* (__cdecl *p_Copy_s)(char*, size_t, const char*, size_t);
 
 static unsigned short (__cdecl *p_wctype)(const char*);
-static MSVCP__Ctypevec (__cdecl *p__Getctype)(void);
+static MSVCP__Ctypevec* (__cdecl *p__Getctype)(MSVCP__Ctypevec*);
+static /*MSVCP__Collvec*/ULONGLONG (__cdecl *p__Getcoll)(void);
 
 #undef __thiscall
 #ifdef __i386__
@@ -172,6 +178,7 @@ static BOOL init(void)
 
     SET(p_wctype, "wctype");
     SET(p__Getctype, "_Getctype");
+    SET(p__Getcoll, "_Getcoll");
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_char_assign, "?assign@?$char_traits@D@std@@SAXAEADAEBD@Z");
         SET(p_wchar_assign, "?assign@?$char_traits@_W@std@@SAXAEA_WAEB_W@Z");
@@ -362,20 +369,41 @@ static void test__Getctype(void)
 {
     MSVCP__Ctypevec ret;
 
-    ret = p__Getctype();
+    ok(p__Getctype(&ret) == &ret, "__Getctype returned incorrect pointer\n");
     ok(ret.handle == 0, "ret.handle = %d\n", ret.handle);
     ok(ret.page == 0, "ret.page = %d\n", ret.page);
     ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
     ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
     p_free(ret.table);
 
-    p__get_current_locale()->locinfo->lc_handle[LC_COLLATE] = 1;
-    ret = p__Getctype();
-    ok(ret.handle == 1, "ret.handle = %d\n", ret.handle);
+    p__get_current_locale()->locinfo->lc_handle[LC_COLLATE] = 0x1234567;
+    ok(p__Getctype(&ret) == &ret, "__Getctype returned incorrect pointer\n");
+    ok(ret.handle == 0x1234567, "ret.handle = %d\n", ret.handle);
     ok(ret.page == 0, "ret.page = %d\n", ret.page);
     ok(ret.delfl == 1, "ret.delfl = %d\n", ret.delfl);
     ok(ret.table[0] == 32, "ret.table[0] = %d\n", ret.table[0]);
     p_free(ret.table);
+}
+
+static void test__Getcoll(void)
+{
+    ULONGLONG (__cdecl *p__Getcoll_arg)(MSVCP__Collvec*);
+
+    union {
+        MSVCP__Collvec collvec;
+        ULONGLONG ull;
+    }ret;
+
+    p__get_current_locale()->locinfo->lc_handle[LC_COLLATE] = 0x7654321;
+    ret.ull = 0;
+    p__Getcoll_arg = (void*)p__Getcoll;
+    p__Getcoll_arg(&ret.collvec);
+    ok(ret.collvec.handle == 0, "ret.handle = %x\n", ret.collvec.handle);
+    ok(ret.collvec.page == 0, "ret.page = %x\n", ret.collvec.page);
+
+    ret.ull = p__Getcoll();
+    ok(ret.collvec.handle == 0x7654321, "ret.collvec.handle = %x\n", ret.collvec.handle);
+    ok(ret.collvec.page == 0, "ret.page = %x\n", ret.collvec.page);
 }
 
 static void test_allocator_char(void)
@@ -418,6 +446,7 @@ static void test_virtual_call(void)
     char str2[] = "TEST";
     int ret;
 
+    p__get_current_locale()->locinfo->lc_handle[LC_COLLATE] = 1;
     call_func2(p_collate_char_ctor_refs, this, 0);
     ret = (int)call_func5(p_collate_char_compare, this, str1, str1+4, str1, str1+4);
     ok(ret == 0, "collate<char>::compare returned %d\n", ret);
@@ -445,6 +474,7 @@ START_TEST(misc)
     test_Copy_s();
     test_wctype();
     test__Getctype();
+    test__Getcoll();
     test_virtual_call();
 
     test_allocator_char();

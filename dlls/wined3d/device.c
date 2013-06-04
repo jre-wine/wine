@@ -944,7 +944,7 @@ static void device_load_logo(struct wined3d_device *device, const char *filename
     }
 
     hr = wined3d_surface_create(device, bm.bmWidth, bm.bmHeight, WINED3DFMT_B5G6R5_UNORM, 0, 0,
-            WINED3D_POOL_DEFAULT, WINED3D_MULTISAMPLE_NONE, 0, WINED3D_SURFACE_TYPE_OPENGL, WINED3D_SURFACE_MAPPABLE,
+            WINED3D_POOL_SYSTEM_MEM, WINED3D_MULTISAMPLE_NONE, 0, WINED3D_SURFACE_TYPE_OPENGL, WINED3D_SURFACE_MAPPABLE,
             NULL, &wined3d_null_parent_ops, &device->logo_surface);
     if (FAILED(hr))
     {
@@ -3715,17 +3715,18 @@ HRESULT CDECL wined3d_device_get_device_caps(const struct wined3d_device *device
             device->create_parms.device_type, caps);
 }
 
-HRESULT CDECL wined3d_device_get_display_mode(const struct wined3d_device *device,
-        UINT swapchain_idx, struct wined3d_display_mode *mode)
+HRESULT CDECL wined3d_device_get_display_mode(const struct wined3d_device *device, UINT swapchain_idx,
+        struct wined3d_display_mode *mode, enum wined3d_display_rotation *rotation)
 {
     struct wined3d_swapchain *swapchain;
     HRESULT hr;
 
-    TRACE("device %p, swapchain_idx %u, mode %p.\n", device, swapchain_idx, mode);
+    TRACE("device %p, swapchain_idx %u, mode %p, rotation %p.\n",
+            device, swapchain_idx, mode, rotation);
 
     if (SUCCEEDED(hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain)))
     {
-        hr = wined3d_swapchain_get_display_mode(swapchain, mode);
+        hr = wined3d_swapchain_get_display_mode(swapchain, mode, rotation);
         wined3d_swapchain_decref(swapchain);
     }
 
@@ -3820,18 +3821,18 @@ HRESULT CDECL wined3d_device_end_scene(struct wined3d_device *device)
 }
 
 HRESULT CDECL wined3d_device_present(const struct wined3d_device *device, const RECT *src_rect,
-        const RECT *dst_rect, HWND dst_window_override, const RGNDATA *dirty_region)
+        const RECT *dst_rect, HWND dst_window_override, const RGNDATA *dirty_region, DWORD flags)
 {
     UINT i;
 
-    TRACE("device %p, src_rect %s, dst_rect %s, dst_window_override %p, dirty_region %p.\n",
+    TRACE("device %p, src_rect %s, dst_rect %s, dst_window_override %p, dirty_region %p, flags %#x.\n",
             device, wine_dbgstr_rect(src_rect), wine_dbgstr_rect(dst_rect),
-            dst_window_override, dirty_region);
+            dst_window_override, dirty_region, flags);
 
     for (i = 0; i < device->swapchain_count; ++i)
     {
         wined3d_swapchain_present(device->swapchains[i], src_rect,
-                dst_rect, dst_window_override, dirty_region, 0);
+                dst_rect, dst_window_override, dirty_region, flags);
     }
 
     return WINED3D_OK;
@@ -4811,7 +4812,7 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
             return WINED3DERR_INVALIDCALL;
         }
 
-        if (FAILED(hr = wined3d_get_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode)))
+        if (FAILED(hr = wined3d_get_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode, NULL)))
         {
             ERR("Failed to get display mode, hr %#x.\n", hr);
             return WINED3DERR_INVALIDCALL;
@@ -5017,36 +5018,6 @@ void CDECL wined3d_device_evict_managed_resources(struct wined3d_device *device)
     device_invalidate_state(device, STATE_STREAMSRC);
 }
 
-static BOOL is_display_mode_supported(const struct wined3d_device *device,
-        const struct wined3d_swapchain_desc *swapchain_desc)
-{
-    struct wined3d_display_mode m;
-    UINT i, count;
-    HRESULT hr;
-
-    /* All Windowed modes are supported, as is leaving the current mode */
-    if (swapchain_desc->windowed)
-        return TRUE;
-    if (!swapchain_desc->backbuffer_width)
-        return TRUE;
-    if (!swapchain_desc->backbuffer_height)
-        return TRUE;
-
-    count = wined3d_get_adapter_mode_count(device->wined3d, device->adapter->ordinal, WINED3DFMT_UNKNOWN);
-    for (i = 0; i < count; ++i)
-    {
-        memset(&m, 0, sizeof(m));
-        hr = wined3d_enum_adapter_modes(device->wined3d, device->adapter->ordinal, WINED3DFMT_UNKNOWN, i, &m);
-        if (FAILED(hr))
-            ERR("Failed to enumerate adapter mode.\n");
-        if (m.width == swapchain_desc->backbuffer_width && m.height == swapchain_desc->backbuffer_height)
-            /* Mode found, it is supported. */
-            return TRUE;
-    }
-    /* Mode not found -> not supported */
-    return FALSE;
-}
-
 /* Do not call while under the GL lock. */
 static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d_swapchain *swapchain)
 {
@@ -5211,16 +5182,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         }
     }
 
-    if (!is_display_mode_supported(device, swapchain_desc))
-    {
-        WARN("Rejecting reset() call because the requested display mode is not supported.\n");
-        WARN("Requested mode: %ux%u.\n",
-                swapchain_desc->backbuffer_width,
-                swapchain_desc->backbuffer_height);
-        wined3d_swapchain_decref(swapchain);
-        return WINED3DERR_INVALIDCALL;
-    }
-
     /* Is it necessary to recreate the gl context? Actually every setting can be changed
      * on an existing gl context, so there's no real need for recreation.
      *
@@ -5289,19 +5250,9 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         }
     }
 
-    if (device->onscreen_depth_stencil)
-    {
-        wined3d_surface_decref(device->onscreen_depth_stencil);
-        device->onscreen_depth_stencil = NULL;
-    }
-
     /* Reset the depth stencil */
     if (swapchain_desc->enable_auto_depth_stencil)
         wined3d_device_set_depth_stencil(device, device->auto_depth_stencil);
-
-    TRACE("Resetting stateblock\n");
-    wined3d_stateblock_decref(device->updateStateBlock);
-    wined3d_stateblock_decref(device->stateBlock);
 
     if (swapchain_desc->windowed)
     {
@@ -5309,6 +5260,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         mode.height = swapchain->orig_height;
         mode.refresh_rate = 0;
         mode.format_id = swapchain->desc.backbuffer_format;
+        mode.scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
     }
     else
     {
@@ -5316,6 +5268,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         mode.height = swapchain_desc->backbuffer_height;
         mode.refresh_rate = swapchain_desc->refresh_rate;
         mode.format_id = swapchain_desc->backbuffer_format;
+        mode.scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
     }
 
     /* Should Width == 800 && Height == 0 set 800x600? */
@@ -5383,9 +5336,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         }
     }
 
-    if (device->d3d_initialized)
-        delete_opengl_contexts(device, swapchain);
-
     if (!swapchain_desc->windowed != !swapchain->desc.windowed
             || DisplayModeChanged)
     {
@@ -5393,7 +5343,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         {
             WARN("Failed to set display mode, hr %#x.\n", hr);
             wined3d_swapchain_decref(swapchain);
-            return hr;
+            return WINED3DERR_INVALIDCALL;
         }
 
         if (!swapchain_desc->windowed)
@@ -5448,6 +5398,13 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         device->style = style;
         device->exStyle = exStyle;
     }
+
+    TRACE("Resetting stateblock.\n");
+    wined3d_stateblock_decref(device->updateStateBlock);
+    wined3d_stateblock_decref(device->stateBlock);
+
+    if (device->d3d_initialized)
+        delete_opengl_contexts(device, swapchain);
 
     /* Note: No parent needed for initial internal stateblock */
     hr = wined3d_stateblock_create(device, WINED3D_SBT_INIT, &device->stateBlock);

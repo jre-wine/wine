@@ -2962,7 +2962,7 @@ void __thiscall MSVCP_basic_string_wchar_dtor(basic_string_wchar *this)
 /* ?length@?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QBEIXZ */
 /* ?length@?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEBA_KXZ */
 DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_length, 4)
-MSVCP_size_t __thiscall MSVCP_basic_string_wchar_length(basic_string_wchar *this)
+MSVCP_size_t __thiscall MSVCP_basic_string_wchar_length(const basic_string_wchar *this)
 {
     TRACE("%p\n", this);
     return this->size;
@@ -3218,15 +3218,13 @@ basic_string_wchar* __cdecl MSVCP_basic_string_wchar_concatenate(basic_string_wc
 /* ??$?H_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@AEBV10@_W@Z */
 /* ??$?HGU?$char_traits@G@std@@V?$allocator@G@1@@std@@YA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@ABV10@G@Z */
 /* ??$?HGU?$char_traits@G@std@@V?$allocator@G@1@@std@@YA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@AEBV10@G@Z */
-basic_string_wchar __cdecl MSVCP_basic_string_wchar_concatenate_bstr_ch(
-        const basic_string_wchar *left, wchar_t right)
+basic_string_wchar* __cdecl MSVCP_basic_string_wchar_concatenate_bstr_ch(
+        basic_string_wchar *ret, const basic_string_wchar *left, wchar_t right)
 {
-    basic_string_wchar ret = { 0 };
-
     TRACE("%p %c\n", left, right);
 
-    MSVCP_basic_string_wchar_copy_ctor(&ret, left);
-    MSVCP_basic_string_wchar_append_ch(&ret, right);
+    MSVCP_basic_string_wchar_copy_ctor(ret, left);
+    MSVCP_basic_string_wchar_append_ch(ret, right);
     return ret;
 }
 
@@ -3234,15 +3232,13 @@ basic_string_wchar __cdecl MSVCP_basic_string_wchar_concatenate_bstr_ch(
 /* ??$?H_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_WAEBV10@@Z */
 /* ??$?HGU?$char_traits@G@std@@V?$allocator@G@1@@std@@YA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@GABV10@@Z */
 /* ??$?HGU?$char_traits@G@std@@V?$allocator@G@1@@std@@YA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@GAEBV10@@Z */
-basic_string_wchar __cdecl MSVCP_basic_string_wchar_concatenate_ch_bstr(
-        wchar_t left, const basic_string_wchar *right)
+basic_string_wchar* __cdecl MSVCP_basic_string_wchar_concatenate_ch_bstr(
+        basic_string_wchar* ret, wchar_t left, const basic_string_wchar *right)
 {
-    basic_string_wchar ret = { 0 };
-
     TRACE("%c %p\n", left, right);
 
-    MSVCP_basic_string_wchar_ctor_cstr_len(&ret, &left, 1);
-    MSVCP_basic_string_wchar_append(&ret, right);
+    MSVCP_basic_string_wchar_ctor_cstr_len(ret, &left, 1);
+    MSVCP_basic_string_wchar_append(ret, right);
     return ret;
 }
 

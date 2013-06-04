@@ -2399,14 +2399,38 @@ static void test_D3DXSHAdd(void)
     }
 }
 
+static void test_D3DXSHDot(void)
+{
+    unsigned int i;
+    FLOAT a[64], b[64], got;
+    CONST FLOAT expected[] =
+    { 0.5f, 0.5f, 25.0f, 262.5f, 1428.0f, 5362.0f, 15873.0f, 39812.0f, 88400.0f, };
+
+    for (i = 0; i < 64; i++)
+    {
+        a[i] = (FLOAT)i + 1.0f;
+        b[i] = (FLOAT)i + 0.5f;
+    }
+
+    /* D3DXSHDot computes by using order * order elements */
+    for (i = 0; i < 9; i++)
+    {
+        got = D3DXSHDot(i, a, b);
+        ok(relative_error(got, expected[i]) < admitted_error, "order %d: expected %f, received %f\n", i, expected[i], got);
+    }
+
+    return;
+}
+
 static void test_D3DXSHMultiply3(void)
 {
     unsigned int i;
     FLOAT a[20], b[20], c[20];
-    const FLOAT expected[] =
-    { 7.813913f, 2.256058f, 5.9484005f, 4.970894f, 2.899858f, 3.598946f, 1.726572f, 5.573538f,
-      0.622063f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f, 19.0f, };
-
+    /* D3DXSHMultiply only modifies the first 9 elements of the array */
+    const FLOAT expected[20] =
+    { 7.813913f, 2.256058f, 5.9484005f, 4.970894f, 2.899858f, 3.598946f,
+      1.726572f, 5.573538f, 0.622063f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f,
+      14.0f, 15.0f, 16.0f, 17.0f, 18.0f, 19.0f };
 
     for (i = 0; i < 20; i++)
     {
@@ -2416,14 +2440,36 @@ static void test_D3DXSHMultiply3(void)
     }
 
     D3DXSHMultiply3(c, a, b);
-    for (i = 0; i < 9; i++)
+    for (i = 0; i < 20; i++)
         ok(relative_error(c[i], expected[i]) < admitted_error, "Expected[%d] = %f, received = %f\n", i, expected[i], c[i]);
+}
 
-/* D3DXSHMultiply does not modify the elements of the array after the nineth element */
-    for (i = 8; i < 19; i++)
-        ok(relative_error(c[i], expected[i]) < admitted_error, "Expected[%d] = %f, received = %f\n", i, expected[i], c[i]);
+static void test_D3DXSHScale(void)
+{
+    unsigned int i, order;
+    FLOAT a[100], b[100], expected, *received_array;
 
-    return;
+    for (i = 0; i < 100; i++)
+    {
+        a[i] = i;
+        b[i] = i;
+    }
+
+    for (order = 0; order < 10; order++)
+    {
+        received_array = D3DXSHScale(b, order, a, 5.0f);
+        ok(received_array == b, "Expected %p, received %p\n", b, received_array);
+
+        for (i = 0; i < 100; i++)
+        {
+            if (i < order * order)
+                expected = 5.0f * a[i];
+            /* D3DXSHScale does not modify the elements of the array after the order * order-th element */
+            else
+                expected = a[i];
+            ok(relative_error(b[i], expected) < admitted_error, "order %d, element %d, expected %f, received %f\n", order, i, expected, b[i]);
+        }
+    }
 }
 
 START_TEST(math)
@@ -2443,5 +2489,7 @@ START_TEST(math)
     test_D3DXVec_Array();
     test_D3DXFloat_Array();
     test_D3DXSHAdd();
+    test_D3DXSHDot();
     test_D3DXSHMultiply3();
+    test_D3DXSHScale();
 }

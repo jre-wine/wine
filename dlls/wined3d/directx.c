@@ -27,6 +27,9 @@
 #include <stdio.h>
 
 #include "wined3d_private.h"
+#ifndef USE_WIN32_OPENGL
+#include "wine/gdi_driver.h"
+#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
@@ -1148,6 +1151,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6550D,        "AMD Radeon HD 6550D",              DRIVER_AMD_R600,         1024},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6600,         "AMD Radeon HD 6600 Series",        DRIVER_AMD_R600,         1024},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6600M,        "AMD Radeon HD 6600M Series",       DRIVER_AMD_R600,         512 },
+    {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6700,         "AMD Radeon HD 6700 Series",        DRIVER_AMD_R600,         1024},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6800,         "AMD Radeon HD 6800 Series",        DRIVER_AMD_R600,         1024},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD6900,         "AMD Radeon HD 6900 Series",        DRIVER_AMD_R600,         2048},
     /* Intel cards */
@@ -1710,6 +1714,7 @@ static enum wined3d_pci_device select_card_amd_binary(const struct wined3d_gl_in
             {"HD 6800", CARD_AMD_RADEON_HD6800},
             {"HD 6770M",CARD_AMD_RADEON_HD6600M},
             {"HD 6750M",CARD_AMD_RADEON_HD6600M},
+            {"HD 6700", CARD_AMD_RADEON_HD6700},
             {"HD 6630M",CARD_AMD_RADEON_HD6600M},
             {"HD 6600M",CARD_AMD_RADEON_HD6600M},
             {"HD 6600", CARD_AMD_RADEON_HD6600},
@@ -2889,179 +2894,206 @@ HMONITOR CDECL wined3d_get_adapter_monitor(const struct wined3d *wined3d, UINT a
 
 /* Note: dx9 supplies a format. Calls from d3d8 supply WINED3DFMT_UNKNOWN */
 UINT CDECL wined3d_get_adapter_mode_count(const struct wined3d *wined3d, UINT adapter_idx,
-        enum wined3d_format_id format_id)
+        enum wined3d_format_id format_id, enum wined3d_scanline_ordering scanline_ordering)
 {
-    TRACE("wined3d %p, adapter_idx %u, format %s.\n", wined3d, adapter_idx, debug_d3dformat(format_id));
+    const struct wined3d_adapter *adapter;
+    const struct wined3d_format *format;
+    unsigned int i = 0;
+    unsigned int j = 0;
+    UINT format_bits;
+    DEVMODEW mode;
+
+    TRACE("wined3d %p, adapter_idx %u, format %s, scanline_ordering %#x.\n",
+            wined3d, adapter_idx, debug_d3dformat(format_id), scanline_ordering);
 
     if (adapter_idx >= wined3d->adapter_count)
         return 0;
 
-    /* TODO: Store modes per adapter and read it from the adapter structure */
-    if (!adapter_idx)
+    adapter = &wined3d->adapters[adapter_idx];
+    format = wined3d_get_format(&adapter->gl_info, format_id);
+    format_bits = format->byte_count * CHAR_BIT;
+
+    memset(&mode, 0, sizeof(mode));
+    mode.dmSize = sizeof(mode);
+
+    while (EnumDisplaySettingsExW(adapter->DeviceName, j++, &mode, 0))
     {
-        const struct wined3d_format *format = wined3d_get_format(&wined3d->adapters[adapter_idx].gl_info, format_id);
-        UINT format_bits = format->byte_count * CHAR_BIT;
-        unsigned int i = 0;
-        unsigned int j = 0;
-        DEVMODEW mode;
-
-        memset(&mode, 0, sizeof(mode));
-        mode.dmSize = sizeof(mode);
-
-        while (EnumDisplaySettingsExW(NULL, j, &mode, 0))
+        if (mode.dmFields & DM_DISPLAYFLAGS)
         {
-            ++j;
+            if (scanline_ordering == WINED3D_SCANLINE_ORDERING_PROGRESSIVE
+                    && (mode.u2.dmDisplayFlags & DM_INTERLACED))
+                continue;
 
-            if (format_id == WINED3DFMT_UNKNOWN)
-            {
-                /* This is for D3D8, do not enumerate P8 here */
-                if (mode.dmBitsPerPel == 32 || mode.dmBitsPerPel == 16) ++i;
-            }
-            else if (mode.dmBitsPerPel == format_bits)
-            {
-                ++i;
-            }
+            if (scanline_ordering == WINED3D_SCANLINE_ORDERING_INTERLACED
+                    && !(mode.u2.dmDisplayFlags & DM_INTERLACED))
+                continue;
         }
 
-        TRACE("Returning %u matching modes (out of %u total) for adapter %u.\n", i, j, adapter_idx);
-
-        return i;
+        if (format_id == WINED3DFMT_UNKNOWN)
+        {
+            /* This is for d3d8, do not enumerate P8 here. */
+            if (mode.dmBitsPerPel == 32 || mode.dmBitsPerPel == 16) ++i;
+        }
+        else if (mode.dmBitsPerPel == format_bits)
+        {
+            ++i;
+        }
     }
-    else
-    {
-        FIXME("Adapter not primary display.\n");
-    }
 
-    return 0;
+    TRACE("Returning %u matching modes (out of %u total) for adapter %u.\n", i, j, adapter_idx);
+
+    return i;
 }
 
 /* Note: dx9 supplies a format. Calls from d3d8 supply WINED3DFMT_UNKNOWN */
 HRESULT CDECL wined3d_enum_adapter_modes(const struct wined3d *wined3d, UINT adapter_idx,
-        enum wined3d_format_id format_id, UINT mode_idx, struct wined3d_display_mode *mode)
+        enum wined3d_format_id format_id, enum wined3d_scanline_ordering scanline_ordering,
+        UINT mode_idx, struct wined3d_display_mode *mode)
 {
-    TRACE("wined3d %p, adapter_idx %u, format %s, mode_idx %u, mode %p.\n",
-            wined3d, adapter_idx, debug_d3dformat(format_id), mode_idx, mode);
+    const struct wined3d_adapter *adapter;
+    const struct wined3d_format *format;
+    UINT format_bits;
+    DEVMODEW m;
+    UINT i = 0;
+    int j = 0;
 
-    /* Validate the parameters as much as possible */
-    if (!mode || adapter_idx >= wined3d->adapter_count
-            || mode_idx >= wined3d_get_adapter_mode_count(wined3d, adapter_idx, format_id))
-    {
+    TRACE("wined3d %p, adapter_idx %u, format %s, scanline_ordering %#x, mode_idx %u, mode %p.\n",
+            wined3d, adapter_idx, debug_d3dformat(format_id), scanline_ordering, mode_idx, mode);
+
+    if (!mode || adapter_idx >= wined3d->adapter_count)
         return WINED3DERR_INVALIDCALL;
-    }
 
-    /* TODO: Store modes per adapter and read it from the adapter structure */
-    if (!adapter_idx)
+    adapter = &wined3d->adapters[adapter_idx];
+    format = wined3d_get_format(&adapter->gl_info, format_id);
+    format_bits = format->byte_count * CHAR_BIT;
+
+    memset(&m, 0, sizeof(m));
+    m.dmSize = sizeof(m);
+
+    while (i <= mode_idx)
     {
-        const struct wined3d_format *format = wined3d_get_format(&wined3d->adapters[adapter_idx].gl_info, format_id);
-        UINT format_bits = format->byte_count * CHAR_BIT;
-        DEVMODEW DevModeW;
-        int ModeIdx = 0;
-        UINT i = 0;
-        int j = 0;
-
-        ZeroMemory(&DevModeW, sizeof(DevModeW));
-        DevModeW.dmSize = sizeof(DevModeW);
-
-        /* If we are filtering to a specific format (D3D9), then need to skip
-           all unrelated modes, but if mode is irrelevant (D3D8), then we can
-           just count through the ones with valid bit depths */
-        while (i <= mode_idx && EnumDisplaySettingsExW(NULL, j++, &DevModeW, 0))
+        if (!EnumDisplaySettingsExW(adapter->DeviceName, j++, &m, 0))
         {
-            if (format_id == WINED3DFMT_UNKNOWN)
-            {
-                /* This is for D3D8, do not enumerate P8 here */
-                if (DevModeW.dmBitsPerPel == 32 || DevModeW.dmBitsPerPel == 16) ++i;
-            }
-            else if (DevModeW.dmBitsPerPel == format_bits)
-            {
-                ++i;
-            }
-        }
-
-        if (!i)
-        {
-            TRACE("No modes found for format %s (%#x).\n", debug_d3dformat(format_id), format_id);
-            return WINED3DERR_INVALIDCALL;
-        }
-        ModeIdx = j - 1;
-
-        /* Now get the display mode via the calculated index */
-        if (EnumDisplaySettingsExW(NULL, ModeIdx, &DevModeW, 0))
-        {
-            mode->width = DevModeW.dmPelsWidth;
-            mode->height = DevModeW.dmPelsHeight;
-            mode->refresh_rate = DEFAULT_REFRESH_RATE;
-            if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
-                mode->refresh_rate = DevModeW.dmDisplayFrequency;
-
-            if (format_id == WINED3DFMT_UNKNOWN)
-                mode->format_id = pixelformat_for_depth(DevModeW.dmBitsPerPel);
-            else
-                mode->format_id = format_id;
-        }
-        else
-        {
-            TRACE("Requested mode %u out of range.\n", mode_idx);
+            WARN("Invalid mode_idx %u.\n", mode_idx);
             return WINED3DERR_INVALIDCALL;
         }
 
-        TRACE("%ux%u@%u %u bpp, %s.\n", mode->width, mode->height, mode->refresh_rate,
-                DevModeW.dmBitsPerPel, debug_d3dformat(mode->format_id));
+        if (m.dmFields & DM_DISPLAYFLAGS)
+        {
+            if (scanline_ordering == WINED3D_SCANLINE_ORDERING_PROGRESSIVE
+                    && (m.u2.dmDisplayFlags & DM_INTERLACED))
+                continue;
+
+            if (scanline_ordering == WINED3D_SCANLINE_ORDERING_INTERLACED
+                    && !(m.u2.dmDisplayFlags & DM_INTERLACED))
+                continue;
+        }
+
+        if (format_id == WINED3DFMT_UNKNOWN)
+        {
+            /* This is for d3d8, do not enumerate P8 here. */
+            if (m.dmBitsPerPel == 32 || m.dmBitsPerPel == 16) ++i;
+        }
+        else if (m.dmBitsPerPel == format_bits)
+        {
+            ++i;
+        }
     }
+
+    mode->width = m.dmPelsWidth;
+    mode->height = m.dmPelsHeight;
+    mode->refresh_rate = DEFAULT_REFRESH_RATE;
+    if (m.dmFields & DM_DISPLAYFREQUENCY)
+        mode->refresh_rate = m.dmDisplayFrequency;
+
+    if (format_id == WINED3DFMT_UNKNOWN)
+        mode->format_id = pixelformat_for_depth(m.dmBitsPerPel);
     else
-    {
-        FIXME("Adapter not primary display.\n");
-    }
+        mode->format_id = format_id;
+
+    if (!(m.dmFields & DM_DISPLAYFLAGS))
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
+    else if (m.u2.dmDisplayFlags & DM_INTERLACED)
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_INTERLACED;
+    else
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_PROGRESSIVE;
+
+    TRACE("%ux%u@%u %u bpp, %s %#x.\n", mode->width, mode->height, mode->refresh_rate,
+            m.dmBitsPerPel, debug_d3dformat(mode->format_id), mode->scanline_ordering);
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_get_adapter_display_mode(const struct wined3d *wined3d, UINT adapter_idx,
-        struct wined3d_display_mode *mode)
+        struct wined3d_display_mode *mode, enum wined3d_display_rotation *rotation)
 {
     const struct wined3d_adapter *adapter;
+    DEVMODEW m;
 
-    TRACE("wined3d %p, adapter_idx %u, display_mode %p.\n", wined3d, adapter_idx, mode);
+    TRACE("wined3d %p, adapter_idx %u, display_mode %p, rotation %p.\n",
+            wined3d, adapter_idx, mode, rotation);
 
     if (!mode || adapter_idx >= wined3d->adapter_count)
         return WINED3DERR_INVALIDCALL;
 
     adapter = &wined3d->adapters[adapter_idx];
 
-    if (!adapter_idx)
+    memset(&m, 0, sizeof(m));
+    m.dmSize = sizeof(m);
+
+    EnumDisplaySettingsExW(adapter->DeviceName, ENUM_CURRENT_SETTINGS, &m, 0);
+    mode->width = m.dmPelsWidth;
+    mode->height = m.dmPelsHeight;
+    mode->refresh_rate = DEFAULT_REFRESH_RATE;
+    if (m.dmFields & DM_DISPLAYFREQUENCY)
+        mode->refresh_rate = m.dmDisplayFrequency;
+    mode->format_id = pixelformat_for_depth(m.dmBitsPerPel);
+
+    /* Lie about the format. X11 can't change the color depth, and some apps
+     * are pretty angry if they SetDisplayMode from 24 to 16 bpp and find out
+     * that GetDisplayMode still returns 24 bpp. This should probably be
+     * handled in winex11 instead. */
+    if (adapter->screen_format && adapter->screen_format != mode->format_id)
     {
-        DEVMODEW DevModeW;
+        WARN("Overriding format %s with stored format %s.\n",
+                debug_d3dformat(mode->format_id),
+                debug_d3dformat(adapter->screen_format));
+        mode->format_id = adapter->screen_format;
+    }
 
-        ZeroMemory(&DevModeW, sizeof(DevModeW));
-        DevModeW.dmSize = sizeof(DevModeW);
+    if (!(m.dmFields & DM_DISPLAYFLAGS))
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
+    else if (m.u2.dmDisplayFlags & DM_INTERLACED)
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_INTERLACED;
+    else
+        mode->scanline_ordering = WINED3D_SCANLINE_ORDERING_PROGRESSIVE;
 
-        EnumDisplaySettingsExW(NULL, ENUM_CURRENT_SETTINGS, &DevModeW, 0);
-        mode->width = DevModeW.dmPelsWidth;
-        mode->height = DevModeW.dmPelsHeight;
-        mode->refresh_rate = DEFAULT_REFRESH_RATE;
-        if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
-            mode->refresh_rate = DevModeW.dmDisplayFrequency;
-        mode->format_id = pixelformat_for_depth(DevModeW.dmBitsPerPel);
-
-        /* Lie about the format. X11 can't change the color depth, and some
-         * apps are pretty angry if they SetDisplayMode from 24 to 16 bpp and
-         * find out that GetDisplayMode still returns 24 bpp. This should
-         * probably be handled in winex11 instead. */
-        if (adapter->screen_format && adapter->screen_format != mode->format_id)
+    if (rotation)
+    {
+        switch (m.u1.s2.dmDisplayOrientation)
         {
-            WARN("Overriding format %s with stored format %s.\n",
-                    debug_d3dformat(mode->format_id),
-                    debug_d3dformat(adapter->screen_format));
-            mode->format_id = adapter->screen_format;
+            case DMDO_DEFAULT:
+                *rotation = WINED3D_DISPLAY_ROTATION_0;
+                break;
+            case DMDO_90:
+                *rotation = WINED3D_DISPLAY_ROTATION_90;
+                break;
+            case DMDO_180:
+                *rotation = WINED3D_DISPLAY_ROTATION_180;
+                break;
+            case DMDO_270:
+                *rotation = WINED3D_DISPLAY_ROTATION_270;
+                break;
+            default:
+                FIXME("Unhandled display rotation %#x.\n", m.u1.s2.dmDisplayOrientation);
+                *rotation = WINED3D_DISPLAY_ROTATION_UNSPECIFIED;
+                break;
         }
     }
-    else
-    {
-        FIXME("Adapter not primary display.\n");
-    }
 
-    TRACE("Returning %ux%u@%u %s.\n", mode->width, mode->height,
-            mode->refresh_rate, debug_d3dformat(mode->format_id));
+    TRACE("Returning %ux%u@%u %s %#x.\n", mode->width, mode->height,
+            mode->refresh_rate, debug_d3dformat(mode->format_id),
+            mode->scanline_ordering);
     return WINED3D_OK;
 }
 
@@ -3076,8 +3108,9 @@ HRESULT CDECL wined3d_set_adapter_display_mode(struct wined3d *wined3d,
     HRESULT hr;
     LONG ret;
 
-    TRACE("wined3d %p, adapter_idx %u, mode %p (%ux%u@%u %s).\n", wined3d, adapter_idx, mode,
-            mode->width, mode->height, mode->refresh_rate, debug_d3dformat(mode->format_id));
+    TRACE("wined3d %p, adapter_idx %u, mode %p (%ux%u@%u %s %#x).\n", wined3d, adapter_idx, mode,
+            mode->width, mode->height, mode->refresh_rate, debug_d3dformat(mode->format_id),
+            mode->scanline_ordering);
 
     if (adapter_idx >= wined3d->adapter_count)
         return WINED3DERR_INVALIDCALL;
@@ -3096,8 +3129,15 @@ HRESULT CDECL wined3d_set_adapter_display_mode(struct wined3d *wined3d,
     if (mode->refresh_rate)
         devmode.dmFields |= DM_DISPLAYFREQUENCY;
 
+    if (mode->scanline_ordering != WINED3D_SCANLINE_ORDERING_UNKNOWN)
+    {
+        devmode.dmFields |= DM_DISPLAYFLAGS;
+        if (mode->scanline_ordering == WINED3D_SCANLINE_ORDERING_INTERLACED)
+            devmode.u2.dmDisplayFlags |= DM_INTERLACED;
+    }
+
     /* Only change the mode if necessary. */
-    if (FAILED(hr = wined3d_get_adapter_display_mode(wined3d, adapter_idx, &current_mode)))
+    if (FAILED(hr = wined3d_get_adapter_display_mode(wined3d, adapter_idx, &current_mode, NULL)))
     {
         ERR("Failed to get current display mode, hr %#x.\n", hr);
     }
@@ -3105,13 +3145,15 @@ HRESULT CDECL wined3d_set_adapter_display_mode(struct wined3d *wined3d,
             && current_mode.height == mode->height
             && current_mode.format_id == mode->format_id
             && (current_mode.refresh_rate == mode->refresh_rate
-            || !mode->refresh_rate))
+            || !mode->refresh_rate)
+            && (current_mode.scanline_ordering == mode->scanline_ordering
+            || mode->scanline_ordering == WINED3D_SCANLINE_ORDERING_UNKNOWN))
     {
         TRACE("Skipping redundant mode setting call.\n");
         return WINED3D_OK;
     }
 
-    ret = ChangeDisplaySettingsExW(NULL, &devmode, NULL, CDS_FULLSCREEN, NULL);
+    ret = ChangeDisplaySettingsExW(adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
     if (ret != DISP_CHANGE_SUCCESSFUL)
     {
         if (devmode.dmDisplayFrequency)
@@ -3119,7 +3161,7 @@ HRESULT CDECL wined3d_set_adapter_display_mode(struct wined3d *wined3d,
             WARN("ChangeDisplaySettingsExW failed, trying without the refresh rate.\n");
             devmode.dmFields &= ~DM_DISPLAYFREQUENCY;
             devmode.dmDisplayFrequency = 0;
-            ret = ChangeDisplaySettingsExW(NULL, &devmode, NULL, CDS_FULLSCREEN, NULL);
+            ret = ChangeDisplaySettingsExW(adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
         }
         if (ret != DISP_CHANGE_SUCCESSFUL)
             return WINED3DERR_NOTAVAILABLE;
@@ -3170,17 +3212,12 @@ HRESULT CDECL wined3d_get_adapter_identifier(const struct wined3d *wined3d,
     /* Note that d3d8 doesn't supply a device name. */
     if (identifier->device_name_size)
     {
-        static const char *device_name = "\\\\.\\DISPLAY1"; /* FIXME: May depend on desktop? */
-
-        len = strlen(device_name);
-        if (len >= identifier->device_name_size)
+        if (!WideCharToMultiByte(CP_ACP, 0, adapter->DeviceName, -1, identifier->device_name,
+                identifier->device_name_size, NULL, NULL))
         {
-            ERR("Device name size too small.\n");
+            ERR("Failed to convert device name, last error %#x.\n", GetLastError());
             return WINED3DERR_INVALIDCALL;
         }
-
-        memcpy(identifier->device_name, device_name, len);
-        identifier->device_name[len] = '\0';
     }
 
     identifier->driver_version.u.HighPart = adapter->driver_info.version_high;
@@ -4395,7 +4432,8 @@ HRESULT CDECL wined3d_check_device_type(const struct wined3d *wined3d, UINT adap
     }
 
     /* If the requested display format is not available, don't continue. */
-    mode_count = wined3d_get_adapter_mode_count(wined3d, adapter_idx, display_format);
+    mode_count = wined3d_get_adapter_mode_count(wined3d, adapter_idx,
+            display_format, WINED3D_SCANLINE_ORDERING_UNKNOWN);
     if (!mode_count)
     {
         TRACE("No available modes for display format %s.\n", debug_d3dformat(display_format));
@@ -5325,29 +5363,31 @@ static BOOL InitAdapters(struct wined3d *wined3d)
     TRACE("Initializing adapters\n");
 
     if(!mod_gl) {
-#ifdef USE_WIN32_OPENGL
-#define USE_GL_FUNC(pfn) pfn = (void*)GetProcAddress(mod_gl, #pfn);
         mod_gl = LoadLibraryA("opengl32.dll");
         if(!mod_gl) {
             ERR("Can't load opengl32.dll!\n");
             goto nogl_adapter;
         }
-#else
-#define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
-        /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 (glXGetProcAddress wrapper) instead of opengl32's */
-        mod_gl = GetModuleHandleA("gdi32.dll");
-#endif
     }
+
+#ifdef USE_WIN32_OPENGL
+    pwglGetProcAddress = (void*)GetProcAddress(mod_gl, "wglGetProcAddress");
+#define USE_GL_FUNC(pfn) pfn = (void*)GetProcAddress(mod_gl, #pfn);
+#else
+    /* To bypass the opengl32 thunks load wglGetProcAddress from gdi32 instead of opengl32 */
+    {
+        HDC hdc = GetDC( 0 );
+        const struct wgl_funcs *wgl_driver = __wine_get_wgl_driver( hdc, WINE_GDI_DRIVER_VERSION );
+        pwglGetProcAddress = wgl_driver->p_wglGetProcAddress;
+        ReleaseDC( 0, hdc );
+    }
+#define USE_GL_FUNC(pfn) pfn = (void*)pwglGetProcAddress(#pfn);
+#endif
 
 /* Load WGL core functions from opengl32.dll */
 #define USE_WGL_FUNC(pfn) p##pfn = (void*)GetProcAddress(mod_gl, #pfn);
     WGL_FUNCS_GEN;
 #undef USE_WGL_FUNC
-
-    if(!pwglGetProcAddress) {
-        ERR("Unable to load wglGetProcAddress!\n");
-        goto nogl_adapter;
-    }
 
 /* Dynamically load all GL core functions */
     GL_FUNCS_GEN;
@@ -5356,13 +5396,8 @@ static BOOL InitAdapters(struct wined3d *wined3d)
     /* Load glFinish and glFlush from opengl32.dll even if we're not using WIN32 opengl
      * otherwise because we have to use winex11.drv's override
      */
-#ifdef USE_WIN32_OPENGL
     wglFinish = (void*)GetProcAddress(mod_gl, "glFinish");
     wglFlush = (void*)GetProcAddress(mod_gl, "glFlush");
-#else
-    wglFinish = (void*)pwglGetProcAddress("wglFinish");
-    wglFlush = (void*)pwglGetProcAddress("wglFlush");
-#endif
 
     glEnableWINE = glEnable;
     glDisableWINE = glDisable;
