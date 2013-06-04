@@ -690,12 +690,20 @@ struct hlsl_struct_field
     DWORD modifiers;
 };
 
+struct source_location
+{
+    const char *file;
+    unsigned int line;
+    unsigned int col;
+};
+
 enum hlsl_ir_node_type
 {
     HLSL_IR_VAR = 0,
     HLSL_IR_CONSTANT,
     HLSL_IR_CONSTRUCTOR,
     HLSL_IR_DEREF,
+    HLSL_IR_EXPR,
     HLSL_IR_FUNCTION_DECL,
 };
 
@@ -705,9 +713,7 @@ struct hlsl_ir_node
     enum hlsl_ir_node_type type;
     struct hlsl_type *data_type;
 
-    char *source_file;
-    unsigned int line;
-    unsigned int column;
+    struct source_location loc;
 };
 
 #define HLSL_STORAGE_EXTERN          0x00000001
@@ -742,6 +748,81 @@ struct hlsl_ir_function_decl
     const char *semantic;
     struct list *parameters;
     struct list *body;
+};
+
+enum hlsl_ir_expr_op {
+    HLSL_IR_UNOP_BIT_NOT = 0,
+    HLSL_IR_UNOP_LOGIC_NOT,
+    HLSL_IR_UNOP_NEG,
+    HLSL_IR_UNOP_ABS,
+    HLSL_IR_UNOP_SIGN,
+    HLSL_IR_UNOP_RCP,
+    HLSL_IR_UNOP_RSQ,
+    HLSL_IR_UNOP_SQRT,
+    HLSL_IR_UNOP_NRM,
+    HLSL_IR_UNOP_EXP2,
+    HLSL_IR_UNOP_LOG2,
+
+    HLSL_IR_UNOP_CAST,
+
+    HLSL_IR_UNOP_FRACT,
+
+    HLSL_IR_UNOP_SIN,
+    HLSL_IR_UNOP_COS,
+    HLSL_IR_UNOP_SIN_REDUCED,    /* Reduced range [-pi, pi] */
+    HLSL_IR_UNOP_COS_REDUCED,    /* Reduced range [-pi, pi] */
+
+    HLSL_IR_UNOP_DSX,
+    HLSL_IR_UNOP_DSY,
+
+    HLSL_IR_UNOP_SAT,
+
+    HLSL_IR_BINOP_ADD,
+    HLSL_IR_BINOP_SUB,
+    HLSL_IR_BINOP_MUL,
+    HLSL_IR_BINOP_DIV,
+
+    HLSL_IR_BINOP_MOD,
+
+    HLSL_IR_BINOP_LESS,
+    HLSL_IR_BINOP_GREATER,
+    HLSL_IR_BINOP_LEQUAL,
+    HLSL_IR_BINOP_GEQUAL,
+    HLSL_IR_BINOP_EQUAL,
+    HLSL_IR_BINOP_NEQUAL,
+
+    HLSL_IR_BINOP_LOGIC_AND,
+    HLSL_IR_BINOP_LOGIC_OR,
+
+    HLSL_IR_BINOP_LSHIFT,
+    HLSL_IR_BINOP_RSHIFT,
+    HLSL_IR_BINOP_BIT_AND,
+    HLSL_IR_BINOP_BIT_OR,
+    HLSL_IR_BINOP_BIT_XOR,
+
+    HLSL_IR_BINOP_DOT,
+    HLSL_IR_BINOP_CRS,
+    HLSL_IR_BINOP_MIN,
+    HLSL_IR_BINOP_MAX,
+
+    HLSL_IR_BINOP_POW,
+
+    HLSL_IR_BINOP_PREINC,
+    HLSL_IR_BINOP_PREDEC,
+    HLSL_IR_BINOP_POSTINC,
+    HLSL_IR_BINOP_POSTDEC,
+
+    HLSL_IR_TEROP_LERP,
+
+    HLSL_IR_SEQUENCE,
+};
+
+struct hlsl_ir_expr
+{
+    struct hlsl_ir_node node;
+    enum hlsl_ir_expr_op op;
+    struct hlsl_ir_node *operands[3];
+    struct list *subexpressions;
 };
 
 enum hlsl_ir_deref_type
@@ -815,6 +896,8 @@ struct parse_parameter
 struct parse_variable_def
 {
     struct list entry;
+    struct source_location loc;
+
     char *name;
     unsigned int array_size;
     char *semantic;
@@ -823,8 +906,11 @@ struct parse_variable_def
 
 struct hlsl_parse_ctx
 {
-    char *source_file;
+    const char **source_files;
+    unsigned int source_files_count;
+    const char *source_file;
     unsigned int line_no;
+    unsigned int column;
     enum parse_status status;
     struct compilation_messages messages;
 
@@ -840,7 +926,22 @@ struct hlsl_parse_ctx
 
 extern struct hlsl_parse_ctx hlsl_ctx DECLSPEC_HIDDEN;
 
+enum hlsl_error_level
+{
+    HLSL_LEVEL_ERROR = 0,
+    HLSL_LEVEL_WARNING,
+    HLSL_LEVEL_NOTE,
+};
+
 void hlsl_message(const char *fmt, ...) PRINTF_ATTR(1,2) DECLSPEC_HIDDEN;
+void hlsl_report_message(const char *filename, DWORD line, DWORD column,
+        enum hlsl_error_level level, const char *fmt, ...) PRINTF_ATTR(5,6) DECLSPEC_HIDDEN;
+
+static inline struct hlsl_ir_expr *expr_from_node(const struct hlsl_ir_node *node)
+{
+    assert(node->type == HLSL_IR_EXPR);
+    return CONTAINING_RECORD(node, struct hlsl_ir_expr, node);
+}
 
 static inline struct hlsl_ir_deref *deref_from_node(const struct hlsl_ir_node *node)
 {
@@ -863,18 +964,25 @@ static inline struct hlsl_ir_constructor *constructor_from_node(const struct hls
 BOOL add_declaration(struct hlsl_scope *scope, struct hlsl_ir_var *decl, BOOL local_var) DECLSPEC_HIDDEN;
 struct hlsl_ir_var *get_variable(struct hlsl_scope *scope, const char *name) DECLSPEC_HIDDEN;
 void free_declaration(struct hlsl_ir_var *decl) DECLSPEC_HIDDEN;
-BOOL add_func_parameter(struct list *list, struct parse_parameter *param, unsigned int line) DECLSPEC_HIDDEN;
+BOOL add_func_parameter(struct list *list, struct parse_parameter *param,
+        const struct source_location *loc) DECLSPEC_HIDDEN;
 struct hlsl_type *new_hlsl_type(const char *name, enum hlsl_type_class type_class,
         enum hlsl_base_type base_type, unsigned dimx, unsigned dimy) DECLSPEC_HIDDEN;
 struct hlsl_type *new_array_type(struct hlsl_type *basic_type, unsigned int array_size) DECLSPEC_HIDDEN;
 struct hlsl_type *get_type(struct hlsl_scope *scope, const char *name, BOOL recursive) DECLSPEC_HIDDEN;
 BOOL find_function(const char *name) DECLSPEC_HIDDEN;
 unsigned int components_count_type(struct hlsl_type *type) DECLSPEC_HIDDEN;
+struct hlsl_ir_expr *new_expr(enum hlsl_ir_expr_op op, struct hlsl_ir_node **operands,
+        struct source_location *loc) DECLSPEC_HIDDEN;
+struct hlsl_ir_expr *hlsl_add(struct hlsl_ir_node *op1, struct hlsl_ir_node *op2,
+        struct source_location *loc) DECLSPEC_HIDDEN;
+struct hlsl_ir_expr *hlsl_sub(struct hlsl_ir_node *op1, struct hlsl_ir_node *op2,
+        struct source_location *loc) DECLSPEC_HIDDEN;
 struct hlsl_ir_deref *new_var_deref(struct hlsl_ir_var *var) DECLSPEC_HIDDEN;
 void push_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 BOOL pop_scope(struct hlsl_parse_ctx *ctx) DECLSPEC_HIDDEN;
 struct hlsl_ir_function_decl *new_func_decl(const char *name, struct hlsl_type *return_type, struct list *parameters) DECLSPEC_HIDDEN;
-struct bwriter_shader *parse_hlsl_shader(const char *text, enum shader_type type, DWORD version,
+struct bwriter_shader *parse_hlsl_shader(const char *text, enum shader_type type, DWORD major, DWORD minor,
         const char *entrypoint, char **messages) DECLSPEC_HIDDEN;
 
 const char *debug_hlsl_type(const struct hlsl_type *type) DECLSPEC_HIDDEN;

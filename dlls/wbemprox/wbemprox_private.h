@@ -20,12 +20,16 @@
 #include "wine/unicode.h"
 
 IClientSecurity client_security;
+struct list *table_list;
 
 #define SIZEOF(array) (sizeof(array)/sizeof((array)[0]))
 
 #define COL_TYPE_MASK    0x0000ffff
 #define COL_FLAG_DYNAMIC 0x00010000
 #define COL_FLAG_KEY     0x00020000
+#define COL_FLAG_METHOD  0x00040000
+
+typedef HRESULT (class_method)(IWbemClassObject *, IWbemClassObject **);
 
 struct column
 {
@@ -33,6 +37,8 @@ struct column
     UINT type;
     VARTYPE vartype; /* 0 for default mapping */
 };
+
+#define TABLE_FLAG_DYNAMIC 0x00000001
 
 struct table
 {
@@ -42,6 +48,8 @@ struct table
     UINT num_rows;
     BYTE *data;
     void (*fill)(struct table *);
+    UINT flags;
+    struct list entry;
 };
 
 struct property
@@ -119,7 +127,16 @@ HRESULT parse_query( const WCHAR *, struct view **, struct list * ) DECLSPEC_HID
 HRESULT create_view( const struct property *, const WCHAR *, const struct expr *,
                      struct view ** ) DECLSPEC_HIDDEN;
 void destroy_view( struct view * ) DECLSPEC_HIDDEN;
+void init_table_list( void ) DECLSPEC_HIDDEN;
 struct table *get_table( const WCHAR * ) DECLSPEC_HIDDEN;
+struct table *create_table( const WCHAR *, UINT, const struct column *, UINT,
+                            BYTE *, void (*)(struct table *)) DECLSPEC_HIDDEN;
+BOOL add_table( struct table * ) DECLSPEC_HIDDEN;
+void free_columns( struct column *, UINT ) DECLSPEC_HIDDEN;
+void free_table( struct table * ) DECLSPEC_HIDDEN;
+HRESULT get_column_index( const struct table *, const WCHAR *, UINT * ) DECLSPEC_HIDDEN;
+HRESULT get_value( const struct table *, UINT, UINT, LONGLONG * ) DECLSPEC_HIDDEN;
+BSTR get_value_bstr( const struct table *, UINT, UINT ) DECLSPEC_HIDDEN;
 HRESULT get_propval( const struct view *, UINT, const WCHAR *, VARIANT *,
                      CIMTYPE *, LONG * ) DECLSPEC_HIDDEN;
 HRESULT get_properties( const struct view *, SAFEARRAY ** ) DECLSPEC_HIDDEN;

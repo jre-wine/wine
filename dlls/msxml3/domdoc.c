@@ -371,13 +371,17 @@ void xmldoc_link_xmldecl(xmlDocPtr doc, xmlNodePtr node)
 /* unlinks a first "<?xml" child if it was created */
 xmlNodePtr xmldoc_unlink_xmldecl(xmlDocPtr doc)
 {
-    xmlNodePtr node;
+    static const xmlChar xmlA[] = "xml";
+    xmlNodePtr node, first_child;
 
     assert(doc != NULL);
 
-    if (doc->standalone != -1)
+    /* xml declaration node could be created automatically after parsing or added
+       to a tree later */
+    first_child = doc->children;
+    if (first_child && first_child->type == XML_PI_NODE && xmlStrEqual(first_child->name, xmlA))
     {
-        node = doc->children;
+        node = first_child;
         xmlUnlinkNode( node );
     }
     else
@@ -484,7 +488,6 @@ static xmlDocPtr doparse(domdoc* This, char const* ptr, int len, xmlCharEncoding
         xmlSAX2EndElementNs,            /* endElementNs */
         sax_serror                      /* serror */
     };
-    xmlInitParser();
 
     pctx = xmlCreateMemoryParserCtxt(ptr, len);
     if (!pctx)
@@ -2090,6 +2093,7 @@ static HRESULT WINAPI domdoc_load(
         }
         break;
     case VT_UNKNOWN:
+        if (!V_UNKNOWN(&source)) return E_INVALIDARG;
         hr = IUnknown_QueryInterface(V_UNKNOWN(&source), &IID_IXMLDOMDocument3, (void**)&pNewDoc);
         if(hr == S_OK)
         {
@@ -2328,13 +2332,14 @@ static int XMLCALL domdoc_stream_save_writecallback(void *ctx, const char *buffe
     HRESULT hr;
 
     hr = IStream_Write((IStream*)ctx, buffer, len, &written);
+    TRACE("0x%08x %p %d %u\n", hr, buffer, len, written);
     if (hr != S_OK)
     {
         WARN("stream write error: 0x%08x\n", hr);
         return -1;
     }
     else
-        return written;
+        return len;
 }
 
 static int XMLCALL domdoc_stream_save_closecallback(void *ctx)
@@ -2382,8 +2387,9 @@ static HRESULT WINAPI domdoc_save(
             ret = IUnknown_QueryInterface(pUnk, &IID_IStream, (void**)&stream);
             if(ret == S_OK)
             {
+                int options = get_doc(This)->standalone == -1 ? XML_SAVE_NO_DECL : 0;
                 ctx = xmlSaveToIO(domdoc_stream_save_writecallback,
-                    domdoc_stream_save_closecallback, stream, NULL, XML_SAVE_NO_DECL);
+                    domdoc_stream_save_closecallback, stream, NULL, options);
 
                 if(!ctx)
                 {
@@ -2397,6 +2403,8 @@ static HRESULT WINAPI domdoc_save(
     case VT_BSTR:
     case VT_BSTR | VT_BYREF:
         {
+            int options = get_doc(This)->standalone == -1 ? XML_SAVE_NO_DECL : 0;
+
             /* save with file path */
             HANDLE handle = CreateFileW( (V_VT(&destination) & VT_BYREF)? *V_BSTRREF(&destination) : V_BSTR(&destination),
                                          GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
@@ -2408,7 +2416,7 @@ static HRESULT WINAPI domdoc_save(
 
             /* disable top XML declaration */
             ctx = xmlSaveToIO(domdoc_save_writecallback, domdoc_save_closecallback,
-                              handle, NULL, XML_SAVE_NO_DECL);
+                              handle, NULL, options);
             if (!ctx)
             {
                 CloseHandle(handle);

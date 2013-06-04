@@ -1,5 +1,6 @@
 /*
  * Copyright 2009 Vincent Povirk for CodeWeavers
+ * Copyright 2012 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -98,11 +99,183 @@ static ULONG WINAPI PaletteImpl_Release(IWICPalette *iface)
     return ref;
 }
 
-static HRESULT WINAPI PaletteImpl_InitializePredefined(IWICPalette *iface,
-    WICBitmapPaletteType ePaletteType, BOOL fAddTransparentColor)
+static WICColor *generate_gray16_palette(UINT *count)
 {
-    FIXME("(%p,%u,%i): stub\n", iface, ePaletteType, fAddTransparentColor);
-    return E_NOTIMPL;
+    WICColor *entries;
+    UINT i;
+
+    *count = 16;
+    entries = HeapAlloc(GetProcessHeap(), 0, 16 * sizeof(WICColor));
+    if (!entries) return NULL;
+
+    for (i = 0; i < 16; i++)
+    {
+        entries[i] = 0xff000000;
+        entries[i] |= (i<<20) | (i<<16) | (i<<12) | (i<<8) | (i<<4) | i;
+    }
+    return entries;
+}
+
+static WICColor *generate_gray256_palette(UINT *count)
+{
+    WICColor *entries;
+    UINT i;
+
+    *count = 256;
+    entries = HeapAlloc(GetProcessHeap(), 0, 256 * sizeof(WICColor));
+    if (!entries) return NULL;
+
+    for (i = 0; i < 256; i++)
+    {
+        entries[i] = 0xff000000;
+        entries[i] |= (i<<16) | (i<<8) | i;
+    }
+    return entries;
+}
+
+static WICColor *generate_halftone8_palette(UINT *count)
+{
+    WICColor *entries;
+    UINT i;
+
+    *count = 16;
+    entries = HeapAlloc(GetProcessHeap(), 0, 16 * sizeof(WICColor));
+    if (!entries) return NULL;
+
+    for (i = 0; i < 8; i++)
+    {
+        entries[i] = 0xff000000;
+        if (i & 1) entries[i] |= 0xff;
+        if (i & 2) entries[i] |= 0xff00;
+        if (i & 4) entries[i] |= 0xff0000;
+    }
+
+    for (i = 8; i < 16; i++)
+    {
+        static const DWORD halftone[8] = { 0xc0c0c0, 0x808080, 0x800000, 0x008000,
+                                           0x000080, 0x808000, 0x800080, 0x008080 };
+        entries[i] = 0xff000000;
+        entries[i] |= halftone[i-8];
+    }
+    return entries;
+}
+
+static WICColor *generate_halftone64_palette(UINT *count)
+{
+    WICColor *entries;
+    UINT i;
+
+    *count = 72;
+    entries = HeapAlloc(GetProcessHeap(), 0, 72 * sizeof(WICColor));
+    if (!entries) return NULL;
+
+    for (i = 0; i < 64; i++)
+    {
+        static const BYTE halftone_values[4] = { 0x00,0x55,0xaa,0xff };
+        entries[i] = 0xff000000;
+        entries[i] |= halftone_values[i%4];
+        entries[i] |= halftone_values[(i/4)%4] << 8;
+        entries[i] |= halftone_values[(i/16)%4] << 16;
+    }
+
+    for (i = 64; i < 72; i++)
+    {
+        static const DWORD halftone[8] = { 0xc0c0c0, 0x808080, 0x800000, 0x008000,
+                                           0x000080, 0x808000, 0x800080, 0x008080 };
+        entries[i] = 0xff000000;
+        entries[i] |= halftone[i-64];
+    }
+    return entries;
+}
+
+static WICColor *generate_halftone256_palette(UINT *count)
+{
+    WICColor *entries;
+    UINT i;
+
+    *count = 256;
+    entries = HeapAlloc(GetProcessHeap(), 0, 256 * sizeof(WICColor));
+    if (!entries) return NULL;
+
+    for (i = 0; i < 256; i++)
+    {
+        static const BYTE halftone_values_b[4] = { 0x00,0x55,0xaa,0xff };
+        static const BYTE halftone_values_gr[8] = { 0x00,0x24,0x49,0x6d,0x92,0xb6,0xdb,0xff };
+        entries[i] = 0xff000000;
+        entries[i] |= halftone_values_b[i%4];
+        entries[i] |= halftone_values_gr[(i/4)%8] << 8;
+        entries[i] |= halftone_values_gr[(i/32)%8] << 16;
+    }
+    return entries;
+}
+
+static HRESULT WINAPI PaletteImpl_InitializePredefined(IWICPalette *iface,
+    WICBitmapPaletteType type, BOOL add_transparent)
+{
+    PaletteImpl *This = impl_from_IWICPalette(iface);
+    WICColor *colors;
+    UINT count;
+
+    TRACE("(%p,%u,%d)\n", iface, type, add_transparent);
+
+    switch (type)
+    {
+    case WICBitmapPaletteTypeFixedBW:
+        count = 2;
+        colors = HeapAlloc(GetProcessHeap(), 0, count * sizeof(WICColor));
+        if (!colors) return E_OUTOFMEMORY;
+        colors[0] = 0xff000000;
+        colors[1] = 0xffffffff;
+        break;
+
+    case WICBitmapPaletteTypeFixedGray4:
+        count = 4;
+        colors = HeapAlloc(GetProcessHeap(), 0, count * sizeof(WICColor));
+        if (!colors) return E_OUTOFMEMORY;
+        colors[0] = 0xff000000;
+        colors[1] = 0xff555555;
+        colors[2] = 0xffaaaaaa;
+        colors[3] = 0xffffffff;
+        break;
+
+    case WICBitmapPaletteTypeFixedGray16:
+        colors = generate_gray16_palette(&count);
+        if (!colors) return E_OUTOFMEMORY;
+        break;
+
+    case WICBitmapPaletteTypeFixedGray256:
+        colors = generate_gray256_palette(&count);
+        if (!colors) return E_OUTOFMEMORY;
+        break;
+
+    case WICBitmapPaletteTypeFixedHalftone8:
+        colors = generate_halftone8_palette(&count);
+        if (!colors) return E_OUTOFMEMORY;
+        break;
+
+    case WICBitmapPaletteTypeFixedHalftone64:
+        colors = generate_halftone64_palette(&count);
+        if (!colors) return E_OUTOFMEMORY;
+        break;
+
+    case WICBitmapPaletteTypeFixedHalftone256:
+        colors = generate_halftone256_palette(&count);
+        if (!colors) return E_OUTOFMEMORY;
+        break;
+
+    default:
+        FIXME("(%p,%u,%d): stub\n", iface, type, add_transparent);
+        return E_NOTIMPL;
+    }
+
+    EnterCriticalSection(&This->lock);
+    HeapFree(GetProcessHeap(), 0, This->colors);
+    This->colors = colors;
+    This->count = count;
+    This->type = type;
+    LeaveCriticalSection(&This->lock);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI PaletteImpl_InitializeCustom(IWICPalette *iface,

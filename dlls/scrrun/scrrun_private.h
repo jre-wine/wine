@@ -1,7 +1,5 @@
 /*
- * Wine X11drv Xrandr interface
- *
- * Copyright 2003 Alexander James Pasadyn
+ * Copyright 2012 Alistair Leslie-Hughes
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,16 +15,18 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
-#ifndef __WINE_XRANDR_H
-#define __WINE_XRANDR_H
+#ifndef _SCRRUN_PRIVATE_H_
+#define _SCRRUN_PRIVATE_H
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h to use this header
+extern HRESULT WINAPI FileSystem_CreateInstance(IClassFactory*,IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
+
+typedef enum tid_t
+{
+    NULL_tid,
+    IFileSystem3_tid,
+    LAST_tid
+} tid_t;
+
+HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo) DECLSPEC_HIDDEN;
+
 #endif
-
-#ifdef SONAME_LIBXRANDR
-
-void X11DRV_XRandR_Init(void) DECLSPEC_HIDDEN;
-
-#endif /* SONAME_LIBXRANDR */
-#endif /* __WINE_XRANDR_H */

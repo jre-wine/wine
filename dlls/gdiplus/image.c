@@ -290,18 +290,21 @@ GpStatus WINGDIPAPI GdipBitmapGetPixel(GpBitmap* bitmap, INT x, INT y,
     }
 
     if (bitmap->format & PixelFormatIndexed)
-        *color = bitmap->image.palette_entries[index];
+        *color = bitmap->image.palette->Entries[index];
     else
         *color = a<<24|r<<16|g<<8|b;
 
     return Ok;
 }
 
-static inline UINT get_palette_index(BYTE r, BYTE g, BYTE b, BYTE a, GpBitmap* bitmap) {
+static inline UINT get_palette_index(BYTE r, BYTE g, BYTE b, BYTE a, ColorPalette *palette)
+{
     BYTE index = 0;
     int best_distance = 0x7fff;
     int distance;
     int i;
+
+    if (!palette) return 0;
     /* This algorithm scans entire palette,
        computes difference from desired color (all color components have equal weight)
        and returns the index of color with least difference.
@@ -311,8 +314,8 @@ static inline UINT get_palette_index(BYTE r, BYTE g, BYTE b, BYTE a, GpBitmap* b
        tables and thus may actually be slower if this method is called only few times per
        every image.
     */
-    for(i=0;i<bitmap->image.palette_size;i++) {
-        ARGB color=bitmap->image.palette_entries[i];
+    for(i=0;i<palette->Count;i++) {
+        ARGB color=palette->Entries[i];
         distance=abs(b-(color & 0xff)) + abs(g-(color>>8 & 0xff)) + abs(r-(color>>16 & 0xff)) + abs(a-(color>>24 & 0xff));
         if (distance<best_distance) {
             best_distance=distance;
@@ -323,25 +326,25 @@ static inline UINT get_palette_index(BYTE r, BYTE g, BYTE b, BYTE a, GpBitmap* b
 }
 
 static inline void setpixel_8bppIndexed(BYTE r, BYTE g, BYTE b, BYTE a,
-    BYTE *row, UINT x, GpBitmap* bitmap)
+    BYTE *row, UINT x, ColorPalette *palette)
 {
-     BYTE index = get_palette_index(r,g,b,a,bitmap);
+     BYTE index = get_palette_index(r,g,b,a,palette);
      row[x]=index;
 }
 
 static inline void setpixel_1bppIndexed(BYTE r, BYTE g, BYTE b, BYTE a,
-    BYTE *row, UINT x, GpBitmap* bitmap)
+    BYTE *row, UINT x, ColorPalette *palette)
 {
-    row[x/8]  = (row[x/8] & ~(1<<(7-x%8))) | (get_palette_index(r,g,b,a,bitmap)<<(7-x%8));
+    row[x/8]  = (row[x/8] & ~(1<<(7-x%8))) | (get_palette_index(r,g,b,a,palette)<<(7-x%8));
 }
 
 static inline void setpixel_4bppIndexed(BYTE r, BYTE g, BYTE b, BYTE a,
-    BYTE *row, UINT x, GpBitmap* bitmap)
+    BYTE *row, UINT x, ColorPalette *palette)
 {
     if (x & 1)
-        row[x/2] = (row[x/2] & 0xf0) | get_palette_index(r,g,b,a,bitmap);
+        row[x/2] = (row[x/2] & 0xf0) | get_palette_index(r,g,b,a,palette);
     else
-        row[x/2] = (row[x/2] & 0x0f) | get_palette_index(r,g,b,a,bitmap)<<4;
+        row[x/2] = (row[x/2] & 0x0f) | get_palette_index(r,g,b,a,palette)<<4;
 }
 
 static inline void setpixel_16bppGrayScale(BYTE r, BYTE g, BYTE b, BYTE a,
@@ -483,13 +486,13 @@ GpStatus WINGDIPAPI GdipBitmapSetPixel(GpBitmap* bitmap, INT x, INT y,
             setpixel_64bppPARGB(r,g,b,a,row,x);
             break;
         case PixelFormat8bppIndexed:
-            setpixel_8bppIndexed(r,g,b,a,row,x,bitmap);
+            setpixel_8bppIndexed(r,g,b,a,row,x,bitmap->image.palette);
             break;
         case PixelFormat4bppIndexed:
-            setpixel_4bppIndexed(r,g,b,a,row,x,bitmap);
+            setpixel_4bppIndexed(r,g,b,a,row,x,bitmap->image.palette);
             break;
         case PixelFormat1bppIndexed:
-            setpixel_1bppIndexed(r,g,b,a,row,x,bitmap);
+            setpixel_1bppIndexed(r,g,b,a,row,x,bitmap->image.palette);
             break;
         default:
             FIXME("not implemented for format 0x%x\n", bitmap->format);
@@ -501,7 +504,8 @@ GpStatus WINGDIPAPI GdipBitmapSetPixel(GpBitmap* bitmap, INT x, INT y,
 
 GpStatus convert_pixels(INT width, INT height,
     INT dst_stride, BYTE *dst_bits, PixelFormat dst_format,
-    INT src_stride, const BYTE *src_bits, PixelFormat src_format, ARGB *src_palette)
+    INT src_stride, const BYTE *src_bits, PixelFormat src_format,
+    ColorPalette *palette)
 {
     INT x, y;
 
@@ -518,9 +522,10 @@ GpStatus convert_pixels(INT width, INT height,
     for (x=0; x<width; x++) \
         for (y=0; y<height; y++) { \
             BYTE index; \
-            BYTE *color; \
+            ARGB argb; \
+            BYTE *color = (BYTE *)&argb; \
             getpixel_function(&index, src_bits+src_stride*y, x); \
-            color = (BYTE*)(&src_palette[index]); \
+            argb = (palette && index < palette->Count) ? palette->Entries[index] : 0; \
             setpixel_function(color[2], color[1], color[0], color[3], dst_bits+dst_stride*y, x); \
         } \
     return Ok; \
@@ -532,6 +537,16 @@ GpStatus convert_pixels(INT width, INT height,
             BYTE r, g, b, a; \
             getpixel_function(&r, &g, &b, &a, src_bits+src_stride*y, x); \
             setpixel_function(r, g, b, a, dst_bits+dst_stride*y, x); \
+        } \
+    return Ok; \
+} while (0);
+
+#define convert_rgb_to_indexed(getpixel_function, setpixel_function) do { \
+    for (x=0; x<width; x++) \
+        for (y=0; y<height; y++) { \
+            BYTE r, g, b, a; \
+            getpixel_function(&r, &g, &b, &a, src_bits+src_stride*y, x); \
+            setpixel_function(r, g, b, a, dst_bits+dst_stride*y, x, palette); \
         } \
     return Ok; \
 } while (0);
@@ -622,6 +637,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat16bppGrayScale:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppGrayScale, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppGrayScale, setpixel_8bppIndexed);
         case PixelFormat16bppRGB555:
             convert_rgb_to_rgb(getpixel_16bppGrayScale, setpixel_16bppRGB555);
         case PixelFormat16bppRGB565:
@@ -647,6 +666,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat16bppRGB555:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppRGB555, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppRGB555, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_16bppRGB555, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB565:
@@ -672,6 +695,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat16bppRGB565:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppRGB565, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppRGB565, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_16bppRGB565, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -697,6 +724,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat16bppARGB1555:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppARGB1555, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_16bppARGB1555, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_16bppARGB1555, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -722,6 +753,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat24bppRGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_24bppRGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_24bppRGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_24bppRGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -747,6 +782,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat32bppRGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppRGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppRGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_32bppRGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -772,6 +811,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat32bppARGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppARGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppARGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_32bppARGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -796,6 +839,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat32bppPARGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppPARGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_32bppPARGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_32bppPARGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -821,6 +868,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat48bppRGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_48bppRGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_48bppRGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_48bppRGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -846,6 +897,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat64bppARGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_64bppARGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_64bppARGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_64bppARGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -871,6 +926,10 @@ GpStatus convert_pixels(INT width, INT height,
     case PixelFormat64bppPARGB:
         switch (dst_format)
         {
+        case PixelFormat1bppIndexed:
+            convert_rgb_to_indexed(getpixel_64bppPARGB, setpixel_1bppIndexed);
+        case PixelFormat8bppIndexed:
+            convert_rgb_to_indexed(getpixel_64bppPARGB, setpixel_8bppIndexed);
         case PixelFormat16bppGrayScale:
             convert_rgb_to_rgb(getpixel_64bppPARGB, setpixel_16bppGrayScale);
         case PixelFormat16bppRGB555:
@@ -953,7 +1012,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
         lockeddata->Scan0 = bitmap->bits + (bitspp / 8) * act_rect.X +
                             bitmap->stride * act_rect.Y;
 
-        bitmap->lockmode = flags;
+        bitmap->lockmode = flags | ImageLockModeRead;
         bitmap->numlocks++;
 
         return Ok;
@@ -1012,7 +1071,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
             lockeddata->Stride, lockeddata->Scan0, format,
             bitmap->stride,
             bitmap->bits + bitmap->stride * act_rect.Y + PIXELFORMATBPP(bitmap->format) * act_rect.X / 8,
-            bitmap->format, bitmap->image.palette_entries);
+            bitmap->format, bitmap->image.palette);
 
         if (stat != Ok)
         {
@@ -1022,7 +1081,7 @@ GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap* bitmap, GDIPCONST GpRect* rect,
         }
     }
 
-    bitmap->lockmode = flags;
+    bitmap->lockmode = flags | ImageLockModeRead;
     bitmap->numlocks++;
     bitmap->lockx = act_rect.X;
     bitmap->locky = act_rect.Y;
@@ -1770,10 +1829,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
     (*bitmap)->image.flags = ImageFlagsNone;
     (*bitmap)->image.frame_count = 1;
     (*bitmap)->image.current_frame = 0;
-    (*bitmap)->image.palette_flags = 0;
-    (*bitmap)->image.palette_count = 0;
-    (*bitmap)->image.palette_size = 0;
-    (*bitmap)->image.palette_entries = NULL;
+    (*bitmap)->image.palette = NULL;
     (*bitmap)->image.xres = xres;
     (*bitmap)->image.yres = yres;
     (*bitmap)->width = width;
@@ -1796,29 +1852,30 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
         format == PixelFormat4bppIndexed ||
         format == PixelFormat8bppIndexed)
     {
-        (*bitmap)->image.palette_size = (*bitmap)->image.palette_count = 1 << PIXELFORMATBPP(format);
-        (*bitmap)->image.palette_entries = GdipAlloc(sizeof(ARGB) * ((*bitmap)->image.palette_size));
+        (*bitmap)->image.palette = GdipAlloc(sizeof(UINT) * 2 + sizeof(ARGB) * (1 << PIXELFORMATBPP(format)));
 
-        if (!(*bitmap)->image.palette_entries)
+        if (!(*bitmap)->image.palette)
         {
             GdipDisposeImage(&(*bitmap)->image);
             *bitmap = NULL;
             return OutOfMemory;
         }
 
+        (*bitmap)->image.palette->Count = 1 << PIXELFORMATBPP(format);
+
         if (format == PixelFormat1bppIndexed)
         {
-            (*bitmap)->image.palette_flags = PaletteFlagsGrayScale;
-            (*bitmap)->image.palette_entries[0] = 0xff000000;
-            (*bitmap)->image.palette_entries[1] = 0xffffffff;
+            (*bitmap)->image.palette->Flags = PaletteFlagsGrayScale;
+            (*bitmap)->image.palette->Entries[0] = 0xff000000;
+            (*bitmap)->image.palette->Entries[1] = 0xffffffff;
         }
         else
         {
             if (format == PixelFormat8bppIndexed)
-                (*bitmap)->image.palette_flags = PaletteFlagsHalftone;
+                (*bitmap)->image.palette->Flags = PaletteFlagsHalftone;
 
-            generate_halftone_palette((*bitmap)->image.palette_entries,
-                (*bitmap)->image.palette_count);
+            generate_halftone_palette((*bitmap)->image.palette->Entries,
+                (*bitmap)->image.palette->Count);
         }
     }
 
@@ -1971,22 +2028,19 @@ static void move_bitmap(GpBitmap *dst, GpBitmap *src, BOOL clobber_palette)
 {
     assert(src->image.type == ImageTypeBitmap);
     assert(dst->image.type == ImageTypeBitmap);
-    assert(src->image.stream == NULL);
-    assert(dst->image.stream == NULL);
 
     GdipFree(dst->bitmapbits);
+    GdipFree(dst->own_bits);
     DeleteDC(dst->hdc);
     DeleteObject(dst->hbitmap);
 
     if (clobber_palette)
     {
-        GdipFree(dst->image.palette_entries);
-        dst->image.palette_flags = src->image.palette_flags;
-        dst->image.palette_count = src->image.palette_count;
-        dst->image.palette_entries = src->image.palette_entries;
+        GdipFree(dst->image.palette);
+        dst->image.palette = src->image.palette;
     }
     else
-        GdipFree(src->image.palette_entries);
+        GdipFree(src->image.palette);
 
     dst->image.xres = src->image.xres;
     dst->image.yres = src->image.yres;
@@ -2001,6 +2055,12 @@ static void move_bitmap(GpBitmap *dst, GpBitmap *src, BOOL clobber_palette)
     if (dst->metadata_reader)
         IWICMetadataReader_Release(dst->metadata_reader);
     dst->metadata_reader = src->metadata_reader;
+    if (dst->image.stream)
+        IStream_Release(dst->image.stream);
+    dst->image.stream = src->image.stream;
+    dst->image.frame_count = src->image.frame_count;
+    dst->image.current_frame = src->image.current_frame;
+    dst->image.format = src->image.format;
 
     src->image.type = ~0;
     GdipFree(src);
@@ -2043,7 +2103,7 @@ static GpStatus free_image_data(GpImage *image)
         IPicture_Release(image->picture);
     if (image->stream)
         IStream_Release(image->stream);
-    GdipFree(image->palette_entries);
+    GdipFree(image->palette);
 
     return Ok;
 }
@@ -2232,10 +2292,10 @@ GpStatus WINGDIPAPI GdipGetImagePaletteSize(GpImage *image, INT *size)
     if(!image || !size)
         return InvalidParameter;
 
-    if (image->palette_count == 0)
+    if (!image->palette || image->palette->Count == 0)
         *size = sizeof(ColorPalette);
     else
-        *size = sizeof(UINT)*2 + sizeof(ARGB)*image->palette_count;
+        *size = sizeof(UINT)*2 + sizeof(ARGB)*image->palette->Count;
 
     TRACE("<-- %u\n", *size);
 
@@ -2903,6 +2963,8 @@ GpStatus WINGDIPAPI GdipLoadImageFromFileICM(GDIPCONST WCHAR* filename,GpImage *
 }
 
 static const WICPixelFormatGUID * const wic_pixel_formats[] = {
+    &GUID_WICPixelFormatBlackWhite,
+    &GUID_WICPixelFormat1bppIndexed,
     &GUID_WICPixelFormat16bppBGR555,
     &GUID_WICPixelFormat24bppBGR,
     &GUID_WICPixelFormat32bppBGR,
@@ -2912,6 +2974,8 @@ static const WICPixelFormatGUID * const wic_pixel_formats[] = {
 };
 
 static const PixelFormat wic_gdip_formats[] = {
+    PixelFormat1bppIndexed,
+    PixelFormat1bppIndexed,
     PixelFormat16bppRGB555,
     PixelFormat24bppRGB,
     PixelFormat32bppRGB,
@@ -2974,6 +3038,7 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_fr
                 gdip_format = PixelFormat32bppARGB;
                 IWICBitmapSource_Release(bmp_source);
             }
+            TRACE("%s => %#x\n", wine_dbgstr_guid(&wic_format), gdip_format);
         }
 
         if (SUCCEEDED(hr)) /* got source */
@@ -3054,6 +3119,8 @@ end:
         bitmap->image.frame_count = frame_count;
         bitmap->image.current_frame = active_frame;
         bitmap->image.stream = stream;
+        if (IsEqualGUID(&wic_format, &GUID_WICPixelFormatBlackWhite))
+            bitmap->image.palette->Flags = 0;
         /* Pin the source stream */
         IStream_AddRef(stream);
     }
@@ -3128,10 +3195,7 @@ static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid
     (*image)->flags   = ImageFlagsNone;
     (*image)->frame_count = 1;
     (*image)->current_frame = 0;
-    (*image)->palette_flags = 0;
-    (*image)->palette_count = 0;
-    (*image)->palette_size = 0;
-    (*image)->palette_entries = NULL;
+    (*image)->palette = NULL;
 
     TRACE("<-- %p\n", *image);
 
@@ -3586,21 +3650,32 @@ GpStatus WINGDIPAPI GdipSaveAdd(GpImage *image, GDIPCONST EncoderParameters *par
  */
 GpStatus WINGDIPAPI GdipGetImagePalette(GpImage *image, ColorPalette *palette, INT size)
 {
+    INT count;
+
     TRACE("(%p,%p,%i)\n", image, palette, size);
 
     if (!image || !palette)
         return InvalidParameter;
 
-    if (size < (sizeof(UINT)*2+sizeof(ARGB)*image->palette_count))
+    count = image->palette ? image->palette->Count : 0;
+
+    if (size < (sizeof(UINT)*2+sizeof(ARGB)*count))
     {
         TRACE("<-- InsufficientBuffer\n");
         return InsufficientBuffer;
     }
 
-    palette->Flags = image->palette_flags;
-    palette->Count = image->palette_count;
-    memcpy(palette->Entries, image->palette_entries, sizeof(ARGB)*image->palette_count);
-
+    if (image->palette)
+    {
+        palette->Flags = image->palette->Flags;
+        palette->Count = image->palette->Count;
+        memcpy(palette->Entries, image->palette->Entries, sizeof(ARGB)*image->palette->Count);
+    }
+    else
+    {
+        palette->Flags = 0;
+        palette->Count = 0;
+    }
     return Ok;
 }
 
@@ -3610,26 +3685,21 @@ GpStatus WINGDIPAPI GdipGetImagePalette(GpImage *image, ColorPalette *palette, I
 GpStatus WINGDIPAPI GdipSetImagePalette(GpImage *image,
     GDIPCONST ColorPalette *palette)
 {
+    ColorPalette *new_palette;
+
     TRACE("(%p,%p)\n", image, palette);
 
     if(!image || !palette || palette->Count > 256)
         return InvalidParameter;
 
-    if (palette->Count > image->palette_size)
-    {
-        ARGB *new_palette;
+    new_palette = GdipAlloc(2 * sizeof(UINT) + palette->Count * sizeof(ARGB));
+    if (!new_palette) return OutOfMemory;
 
-        new_palette = GdipAlloc(sizeof(ARGB) * palette->Count);
-        if (!new_palette) return OutOfMemory;
-
-        GdipFree(image->palette_entries);
-        image->palette_entries = new_palette;
-        image->palette_size = palette->Count;
-    }
-
-    image->palette_flags = palette->Flags;
-    image->palette_count = palette->Count;
-    memcpy(image->palette_entries, palette->Entries, sizeof(ARGB)*palette->Count);
+    GdipFree(image->palette);
+    image->palette = new_palette;
+    image->palette->Flags = palette->Flags;
+    image->palette->Count = palette->Count;
+    memcpy(image->palette->Entries, palette->Entries, sizeof(ARGB)*palette->Count);
 
     return Ok;
 }

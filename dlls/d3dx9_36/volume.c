@@ -21,6 +21,65 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
+HRESULT WINAPI D3DXLoadVolumeFromFileA(IDirect3DVolume9 *dst_volume,
+                                       const PALETTEENTRY *dst_palette,
+                                       const D3DBOX *dst_box,
+                                       const char *filename,
+                                       const D3DBOX *src_box,
+                                       DWORD filter,
+                                       D3DCOLOR color_key,
+                                       D3DXIMAGE_INFO *info)
+{
+    HRESULT hr;
+    int length;
+    WCHAR *filenameW;
+
+    TRACE("(%p, %p, %p, %s, %p, %#x, %#x, %p)\n",
+            dst_volume, dst_palette, dst_box, debugstr_a(filename), src_box,
+            filter, color_key, info);
+
+    if (!dst_volume || !filename) return D3DERR_INVALIDCALL;
+
+    length = MultiByteToWideChar(CP_ACP, 0, filename, -1, NULL, 0);
+    filenameW = HeapAlloc(GetProcessHeap(), 0, length * sizeof(*filenameW));
+    if (!filenameW) return E_OUTOFMEMORY;
+
+    hr = D3DXLoadVolumeFromFileW(dst_volume, dst_palette, dst_box, filenameW,
+            src_box, filter, color_key, info);
+    HeapFree(GetProcessHeap(), 0, filenameW);
+
+    return hr;
+}
+
+HRESULT WINAPI D3DXLoadVolumeFromFileW(IDirect3DVolume9 *dst_volume,
+                                       const PALETTEENTRY *dst_palette,
+                                       const D3DBOX *dst_box,
+                                       const WCHAR *filename,
+                                       const D3DBOX *src_box,
+                                       DWORD filter,
+                                       D3DCOLOR color_key,
+                                       D3DXIMAGE_INFO *info)
+{
+    HRESULT hr;
+    void *data;
+    UINT data_size;
+
+    TRACE("(%p, %p, %p, %s, %p, %#x, %#x, %p)\n",
+            dst_volume, dst_palette, dst_box, debugstr_w(filename), src_box,
+            filter, color_key, info);
+
+    if (!dst_volume || !filename) return D3DERR_INVALIDCALL;
+
+    if (FAILED(map_view_of_file(filename, &data, &data_size)))
+        return D3DXERR_INVALIDDATA;
+
+    hr = D3DXLoadVolumeFromFileInMemory(dst_volume, dst_palette, dst_box,
+            data, data_size, src_box, filter, color_key, info);
+    UnmapViewOfFile(data);
+
+    return hr;
+}
+
 HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
                                         const PALETTEENTRY *dst_palette,
                                         const D3DBOX *dst_box,
@@ -36,8 +95,7 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
     HRESULT hr;
     D3DVOLUME_DESC desc;
     D3DLOCKED_BOX locked_box;
-    UINT dst_width, dst_height, dst_depth;
-    UINT src_width, src_height, src_depth;
+    struct volume dst_size, src_size;
     const PixelFormatDesc *src_format_desc, *dst_format_desc;
 
     TRACE("(%p, %p, %p, %p, %#x, %u, %u, %p, %p, %x, %x)\n", dst_volume, dst_palette, dst_box,
@@ -57,15 +115,15 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
 
     IDirect3DVolume9_GetDesc(dst_volume, &desc);
 
-    src_width = src_box->Right - src_box->Left;
-    src_height = src_box->Bottom - src_box->Top;
-    src_depth = src_box->Back - src_box->Front;
+    src_size.width = src_box->Right - src_box->Left;
+    src_size.height = src_box->Bottom - src_box->Top;
+    src_size.depth = src_box->Back - src_box->Front;
 
     if (!dst_box)
     {
-        dst_width = desc.Width;
-        dst_height = desc.Height;
-        dst_depth = desc.Depth;
+        dst_size.width = desc.Width;
+        dst_size.height = desc.Height;
+        dst_size.depth = desc.Depth;
     }
     else
     {
@@ -76,9 +134,9 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
         if (dst_box->Front >= dst_box->Back || dst_box->Back > desc.Depth)
             return D3DERR_INVALIDCALL;
 
-        dst_width = dst_box->Right - dst_box->Left;
-        dst_height = dst_box->Bottom - dst_box->Top;
-        dst_depth = dst_box->Back - dst_box->Front;
+        dst_size.width = dst_box->Right - dst_box->Left;
+        dst_size.height = dst_box->Bottom - dst_box->Top;
+        dst_size.depth = dst_box->Back - dst_box->Front;
     }
 
     src_format_desc = get_format_info(src_format);
@@ -90,20 +148,20 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
         return E_NOTIMPL;
 
     if (desc.Format == src_format
-            && dst_width == src_width && dst_height == src_height && dst_depth == src_depth)
+            && dst_size.width == src_size.width && dst_size.height == src_size.height && dst_size.depth == src_size.depth)
     {
         UINT row, slice;
         BYTE *dst_addr;
         const BYTE *src_addr;
-        UINT row_block_count = (src_width + src_format_desc->block_width - 1) / src_format_desc->block_width;
-        UINT row_count = (src_height + src_format_desc->block_height - 1) / src_format_desc->block_height;
+        UINT row_block_count = (src_size.width + src_format_desc->block_width - 1) / src_format_desc->block_width;
+        UINT row_count = (src_size.height + src_format_desc->block_height - 1) / src_format_desc->block_height;
 
         if (src_box->Left & (src_format_desc->block_width - 1)
                 || src_box->Top & (src_format_desc->block_height - 1)
                 || (src_box->Right & (src_format_desc->block_width - 1)
-                    && src_width != desc.Width)
+                    && src_size.width != desc.Width)
                 || (src_box->Bottom & (src_format_desc->block_height - 1)
-                    && src_height != desc.Height))
+                    && src_size.height != desc.Height))
         {
             FIXME("Source box (%u, %u, %u, %u) is misaligned\n",
                     src_box->Left, src_box->Top, src_box->Right, src_box->Bottom);
@@ -113,7 +171,7 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
         hr = IDirect3DVolume9_LockBox(dst_volume, &locked_box, dst_box, 0);
         if (FAILED(hr)) return hr;
 
-        for (slice = 0; slice < src_depth; slice++)
+        for (slice = 0; slice < src_size.depth; slice++)
         {
             src_addr = src_memory;
             src_addr += (src_box->Front + slice) * src_slice_pitch;
@@ -135,9 +193,96 @@ HRESULT WINAPI D3DXLoadVolumeFromMemory(IDirect3DVolume9 *dst_volume,
     }
     else
     {
-        FIXME("Stretching or format conversion not implemented\n");
+        const BYTE *src_addr;
+
+        if (src_format_desc->bytes_per_pixel > 4 || dst_format_desc->bytes_per_pixel > 4
+                || src_format_desc->block_height != 1 || src_format_desc->block_width != 1
+                || dst_format_desc->block_height != 1 || dst_format_desc->block_width != 1)
+        {
+            FIXME("Pixel format conversion not implemented %#x -> %#x\n",
+                    src_format_desc->format, dst_format_desc->format);
+            return E_NOTIMPL;
+        }
+
+        src_addr = src_memory;
+        src_addr += src_box->Front * src_slice_pitch;
+        src_addr += src_box->Top * src_row_pitch;
+        src_addr += src_box->Left * src_format_desc->bytes_per_pixel;
+
+        hr = IDirect3DVolume9_LockBox(dst_volume, &locked_box, dst_box, 0);
+        if (FAILED(hr)) return hr;
+
+        if ((filter & 0xf) == D3DX_FILTER_NONE)
+        {
+            copy_simple_data(src_memory, src_row_pitch, src_slice_pitch, &src_size, src_format_desc,
+                    locked_box.pBits, locked_box.RowPitch, locked_box.SlicePitch, &dst_size, dst_format_desc, color_key);
+        }
+        else
+        {
+            if ((filter & 0xf) != D3DX_FILTER_POINT)
+                FIXME("Unhandled filter %#x.\n", filter);
+
+            point_filter_simple_data(src_addr, src_row_pitch, src_slice_pitch, &src_size, src_format_desc,
+                    locked_box.pBits, locked_box.RowPitch, locked_box.SlicePitch, &dst_size, dst_format_desc, color_key);
+        }
+
+        IDirect3DVolume9_UnlockBox(dst_volume);
+    }
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXLoadVolumeFromFileInMemory(IDirect3DVolume9 *dst_volume,
+                                              const PALETTEENTRY *dst_palette,
+                                              const D3DBOX *dst_box,
+                                              const void *src_data,
+                                              UINT src_data_size,
+                                              const D3DBOX *src_box,
+                                              DWORD filter,
+                                              D3DCOLOR color_key,
+                                              D3DXIMAGE_INFO *src_info)
+{
+    HRESULT hr;
+    D3DBOX box;
+    D3DXIMAGE_INFO image_info;
+
+    if (!dst_volume || !src_data) return D3DERR_INVALIDCALL;
+
+    hr = D3DXGetImageInfoFromFileInMemory(src_data, src_data_size, &image_info);
+    if (FAILED(hr)) return hr;
+
+    if (src_box)
+    {
+        if (src_box->Right > image_info.Width
+                || src_box->Bottom > image_info.Height
+                || src_box->Back > image_info.Depth)
+            return D3DERR_INVALIDCALL;
+
+        box = *src_box;
+    }
+    else
+    {
+        box.Left = 0;
+        box.Top = 0;
+        box.Right = image_info.Width;
+        box.Bottom = image_info.Height;
+        box.Front = 0;
+        box.Back = image_info.Depth;
+
+    }
+
+    if (image_info.ImageFileFormat != D3DXIFF_DDS)
+    {
+        FIXME("File format %#x is not supported yet\n", image_info.ImageFileFormat);
         return E_NOTIMPL;
     }
+
+    hr = load_volume_from_dds(dst_volume, dst_palette, dst_box, src_data, &box,
+            filter, color_key, &image_info);
+    if (FAILED(hr)) return hr;
+
+    if (src_info)
+        *src_info = image_info;
 
     return D3D_OK;
 }
@@ -174,7 +319,7 @@ HRESULT WINAPI D3DXLoadVolumeFromVolume(IDirect3DVolume9 *dst_volume,
     }
     else box = *src_box;
 
-    hr = IDirect3DVolume9_LockBox(src_volume, &locked_box, &box, D3DLOCK_READONLY);
+    hr = IDirect3DVolume9_LockBox(src_volume, &locked_box, NULL, D3DLOCK_READONLY);
     if (FAILED(hr)) return hr;
 
     hr = D3DXLoadVolumeFromMemory(dst_volume, dst_palette, dst_box,

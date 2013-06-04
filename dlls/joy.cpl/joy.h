@@ -29,11 +29,22 @@
 
 extern HMODULE hcpl;
 
+struct Effect {
+    IDirectInputEffect *effect;
+    DIEFFECT params;
+    DIEFFECTINFOW info;
+};
+
 struct Joystick {
     IDirectInputDevice8W *device;
     DIDEVICEINSTANCEW instance;
     int num_buttons;
     int num_axes;
+    BOOL forcefeedback;
+    int num_effects;
+    int cur_effect;
+    int chosen_effect;
+    struct Effect *effects;
 };
 
 #define TEST_MAX_BUTTONS    32
@@ -43,10 +54,12 @@ struct JoystickData {
     IDirectInput8W *di;
     struct Joystick *joysticks;
     int num_joysticks;
+    int num_ff;
     int cur_joystick;
     int chosen_joystick;
     HWND buttons[TEST_MAX_BUTTONS];
     HWND axes[TEST_MAX_AXES];
+    HWND ff_axis;
     BOOL stop;
 };
 
@@ -76,6 +89,10 @@ struct JoystickData {
 #define IDC_JOYSTICKBUTTON  3000
 #define IDC_JOYSTICKAXES    4000
 
+#define IDC_FFSELECTCOMBO   2009
+#define IDC_FFEFFECTLIST    2010
+#define IDC_FFAXIS          2011
+
 /* constants */
 #define TEST_POLL_TIME      100
 
@@ -94,5 +111,13 @@ struct JoystickData {
 #define TEST_AXIS_SIZE_Y    5
 #define TEST_AXIS_MIN       -40
 #define TEST_AXIS_MAX       40
+
+#define FF_AXIS_X           373
+#define FF_AXIS_Y           98
+#define FF_AXIS_SIZE_X      5
+#define FF_AXIS_SIZE_Y      5
+
+#define FF_PLAY_TIME        2*DI_SECONDS
+#define FF_PERIOD_TIME      FF_PLAY_TIME/4
 
 #endif

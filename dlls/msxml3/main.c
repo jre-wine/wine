@@ -209,7 +209,6 @@ static void init_libxslt(void)
 #endif
 }
 
-
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
     MSXML_hInstance = hInstDLL;
@@ -268,6 +267,8 @@ const char *debugstr_variant(const VARIANT *v)
         return "{VT_EMPTY}";
     case VT_NULL:
         return "{VT_NULL}";
+    case VT_I1:
+        return wine_dbg_sprintf("{VT_I1: %d}", V_I1(v));
     case VT_I2:
         return wine_dbg_sprintf("{VT_I2: %d}", V_I2(v));
     case VT_I4:

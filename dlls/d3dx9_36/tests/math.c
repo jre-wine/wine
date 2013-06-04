@@ -2422,6 +2422,64 @@ static void test_D3DXSHDot(void)
     return;
 }
 
+static void test_D3DXSHEvalDirection(void)
+{
+    unsigned int i, order;
+    D3DXVECTOR3 d;
+    FLOAT a[100], expected[100], *received_ptr;
+    CONST FLOAT table[36] =
+    { 0.282095f, -0.977205f, 1.465808f, -0.488603f, 2.185097f, -6.555291f,
+      8.200181f, -3.277646f, -1.638823f, 1.180087f, 17.343668f, -40.220032f,
+      47.020218f, -20.110016f, -13.007751f, 6.490479f, -15.020058f, 10.620785f,
+      117.325661f, -240.856750f, 271.657288f, -120.428375f, -87.994247f, 58.414314f,
+      -4.380850f, 24.942520f, -149.447693f, 78.278130f, 747.791748f, -1427.687866f,
+      1574.619141, -713.843933f, -560.843811f, 430.529724, -43.588909, -26.911665, };
+
+    d.x = 1.0; d.y = 2.0f; d.z = 3.0f;
+
+    for(order = 0; order < 10; order++)
+    {
+        for(i = 0; i < 100; i++)
+            a[i] = 1.5f + i;
+
+        received_ptr = D3DXSHEvalDirection(a, order, &d);
+        ok(received_ptr == a, "Expected %p, received %p\n", a, received_ptr);
+
+        for(i = 0; i < 100; i++)
+        {
+            /* if the order is < D3DXSH_MINORDER or order > D3DXSH_MAXORDER or the index of the element is greater than order * order - 1, D3DXSHEvalDirection does not modify the output */
+            if ( (order < D3DXSH_MINORDER) || (order > D3DXSH_MAXORDER) || (i >= order * order) )
+                expected[i] = 1.5f + i;
+            else
+                expected[i] = table[i];
+
+            ok(relative_error(a[i], expected[i]) < admitted_error, "order %u, index %u: expected %f, received %f\n", order, i, expected[i], a[i]);
+        }
+    }
+}
+
+static void test_D3DXSHMultiply2(void)
+{
+    unsigned int i;
+    FLOAT a[20], b[20], c[20];
+    /* D3DXSHMultiply2 only modifies the first 4 elements of the array */
+    const FLOAT expected[20] =
+    { 3.418594f, 1.698211f, 1.703853f, 1.709494f, 4.0f, 5.0f,
+      6.0f, 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f,
+      14.0f, 15.0f, 16.0f, 17.0f, 18.0f, 19.0f };
+
+    for (i = 0; i < 20; i++)
+    {
+        a[i] = 1.0f + i / 100.0f;
+        b[i] = 3.0f - i / 100.0f;
+        c[i] = i;
+    }
+
+    D3DXSHMultiply2(c, a, b);
+    for (i = 0; i < 20; i++)
+        ok(relative_error(c[i], expected[i]) < admitted_error, "Expected[%d] = %f, received = %f\n", i, expected[i], c[i]);
+}
+
 static void test_D3DXSHMultiply3(void)
 {
     unsigned int i;
@@ -2490,6 +2548,8 @@ START_TEST(math)
     test_D3DXFloat_Array();
     test_D3DXSHAdd();
     test_D3DXSHDot();
+    test_D3DXSHEvalDirection();
+    test_D3DXSHMultiply2();
     test_D3DXSHMultiply3();
     test_D3DXSHScale();
 }

@@ -841,7 +841,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_assign_iter, 20)
 basic_string_char* __thiscall MSVCP_basic_string_char_assign_iter(basic_string_char *this,
         String_iterator_char beg, String_iterator_char end)
 {
-    return MSVCP_basic_string_char_assign_ptr_ptr(this, beg.pos, end.pos+1);
+    return MSVCP_basic_string_char_assign_ptr_ptr(this, beg.pos, end.pos);
 }
 
 /* ?_Chassign@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@IAEXIID@Z */
@@ -1060,7 +1060,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_ctor_iter, 20)
 basic_string_char* __thiscall MSVCP_basic_string_char_ctor_iter(basic_string_char *this,
         String_iterator_char beg, String_iterator_char end)
 {
-    return MSVCP_basic_string_char_ctor_cstr_len(this, beg.pos, end.pos-beg.pos+1);
+    return MSVCP_basic_string_char_ctor_cstr_len(this, beg.pos, end.pos-beg.pos);
 }
 
 /* ??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ */
@@ -1224,7 +1224,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_append_iter, 20)
 basic_string_char* __thiscall MSVCP_basic_string_char_append_iter(
         basic_string_char *this, String_iterator_char beg, String_iterator_char end)
 {
-    return MSVCP_basic_string_char_append_cstr_len(this, beg.pos, end.pos-beg.pos+1);
+    return MSVCP_basic_string_char_append_cstr_len(this, beg.pos, end.pos-beg.pos);
 }
 
 /* ?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@ID@Z */
@@ -1949,7 +1949,7 @@ basic_string_char* __thiscall basic_string_char_replace_cstr_len(basic_string_ch
     if(this->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+len > this->size)
+    if(len > this->size-off)
         len = this->size-off;
 
     if(MSVCP_basic_string_char_npos-str_len <= this->size-len)
@@ -2040,7 +2040,7 @@ basic_string_char* __thiscall basic_string_char_replace_ch(basic_string_char *th
     if(this->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+len > this->size)
+    if(len > this->size-off)
         len = this->size-off;
 
     if(MSVCP_basic_string_char_npos-count <= this->size-len)
@@ -2680,7 +2680,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_assign_iter, 20)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_assign_iter(basic_string_wchar *this,
         String_iterator_wchar beg, String_iterator_wchar end)
 {
-    return MSVCP_basic_string_wchar_assign_ptr_ptr(this, beg.pos, end.pos+1);
+    return MSVCP_basic_string_wchar_assign_ptr_ptr(this, beg.pos, end.pos);
 }
 
 /* ?_Chassign@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@IAEXII_W@Z */
@@ -2939,7 +2939,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_ctor_iter, 20)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor_iter(basic_string_wchar *this,
         String_iterator_wchar beg, String_iterator_wchar end)
 {
-    return MSVCP_basic_string_wchar_ctor_cstr_len(this, beg.pos, end.pos-beg.pos+1);
+    return MSVCP_basic_string_wchar_ctor_cstr_len(this, beg.pos, end.pos-beg.pos);
 }
 
 /* ??1?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@XZ */
@@ -3133,7 +3133,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_append_iter, 20)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_append_iter(
         basic_string_wchar *this, String_iterator_wchar beg, String_iterator_wchar end)
 {
-    return MSVCP_basic_string_wchar_append_cstr_len(this, beg.pos, end.pos-beg.pos+1);
+    return MSVCP_basic_string_wchar_append_cstr_len(this, beg.pos, end.pos-beg.pos);
 }
 
 /* ?append@?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEAAV12@I_W@Z */
@@ -3901,7 +3901,7 @@ basic_string_wchar* __thiscall basic_string_wchar_replace_cstr_len(basic_string_
     if(this->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+len > this->size)
+    if(len > this->size-off)
         len = this->size-off;
 
     if(MSVCP_basic_string_wchar_npos-str_len <= this->size-len)
@@ -4000,7 +4000,7 @@ basic_string_wchar* __thiscall basic_string_wchar_replace_ch(basic_string_wchar 
     if(this->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+len > this->size)
+    if(len > this->size-off)
         len = this->size-off;
 
     if(MSVCP_basic_string_wchar_npos-count <= this->size-len)

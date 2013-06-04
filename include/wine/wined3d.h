@@ -1997,15 +1997,13 @@ struct wined3d_device_parent_ops
 {
     void (__cdecl *wined3d_device_created)(struct wined3d_device_parent *device_parent, struct wined3d_device *device);
     void (__cdecl *mode_changed)(struct wined3d_device_parent *device_parent);
-    HRESULT (__cdecl *create_surface)(struct wined3d_device_parent *device_parent, void *container_parent,
+    HRESULT (__cdecl *create_swapchain_surface)(struct wined3d_device_parent *device_parent, void *container_parent,
+            UINT width, UINT height, enum wined3d_format_id format_id, DWORD usage,
+            enum wined3d_multisample_type multisample_type, DWORD multisample_quality,
+            struct wined3d_surface **surface);
+    HRESULT (__cdecl *create_texture_surface)(struct wined3d_device_parent *device_parent, void *container_parent,
             UINT width, UINT height, enum wined3d_format_id format_id, DWORD usage, enum wined3d_pool pool,
             UINT level, enum wined3d_cubemap_face face, struct wined3d_surface **surface);
-    HRESULT (__cdecl *create_rendertarget)(struct wined3d_device_parent *device_parent, void *container_parent,
-            UINT width, UINT height, enum wined3d_format_id format_id, enum wined3d_multisample_type multisample_type,
-            DWORD multisample_quality, BOOL lockable, struct wined3d_surface **surface);
-    HRESULT (__cdecl *create_depth_stencil)(struct wined3d_device_parent *device_parent,
-            UINT width, UINT height, enum wined3d_format_id format_id, enum wined3d_multisample_type multisample_type,
-            DWORD multisample_quality, BOOL discard, struct wined3d_surface **surface);
     HRESULT (__cdecl *create_volume)(struct wined3d_device_parent *device_parent, void *container_parent,
             UINT width, UINT height, UINT depth, enum wined3d_format_id format_id, enum wined3d_pool pool, DWORD usage,
             struct wined3d_volume **volume);
@@ -2188,7 +2186,8 @@ HRESULT __cdecl wined3d_device_process_vertices(struct wined3d_device *device,
         const struct wined3d_vertex_declaration *declaration, DWORD flags, DWORD dst_fvf);
 void __cdecl wined3d_device_release_focus_window(struct wined3d_device *device);
 HRESULT __cdecl wined3d_device_reset(struct wined3d_device *device,
-        const struct wined3d_swapchain_desc *swapchain_desc, wined3d_device_reset_cb callback);
+        const struct wined3d_swapchain_desc *swapchain_desc, const struct wined3d_display_mode *mode,
+        wined3d_device_reset_cb callback);
 void __cdecl wined3d_device_restore_fullscreen_window(struct wined3d_device *device, HWND window);
 HRESULT __cdecl wined3d_device_set_base_vertex_index(struct wined3d_device *device, INT base_index);
 HRESULT __cdecl wined3d_device_set_clip_plane(struct wined3d_device *device,
@@ -2326,6 +2325,7 @@ HRESULT __cdecl wined3d_surface_create(struct wined3d_device *device, UINT width
         const struct wined3d_parent_ops *parent_ops, struct wined3d_surface **surface);
 ULONG __cdecl wined3d_surface_decref(struct wined3d_surface *surface);
 HRESULT __cdecl wined3d_surface_flip(struct wined3d_surface *surface, struct wined3d_surface *override, DWORD flags);
+struct wined3d_surface * __cdecl wined3d_surface_from_resource(struct wined3d_resource *resource);
 HRESULT __cdecl wined3d_surface_get_blt_status(const struct wined3d_surface *surface, DWORD flags);
 HRESULT __cdecl wined3d_surface_get_flip_status(const struct wined3d_surface *surface, DWORD flags);
 HRESULT __cdecl wined3d_surface_get_overlay_position(const struct wined3d_surface *surface, LONG *x, LONG *y);
