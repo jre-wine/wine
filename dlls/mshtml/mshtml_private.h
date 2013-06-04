@@ -225,6 +225,32 @@ struct DispatchEx {
     dispex_dynamic_data_t *dynamic_data;
 };
 
+typedef struct {
+    void *x;
+} nsCycleCollectingAutoRefCnt;
+
+typedef struct {
+    void *x[3];
+} nsXPCOMCycleCollectionParticipant;
+
+typedef struct nsCycleCollectionTraversalCallback nsCycleCollectionTraversalCallback;
+
+typedef struct {
+    void (NSAPI *unmark_if_purple)(void*);
+    nsresult (NSAPI *traverse)(void*,void*,nsCycleCollectionTraversalCallback*);
+    nsresult (NSAPI *unlink)(void*);
+} CCObjCallback;
+
+DEFINE_GUID(IID_nsXPCOMCycleCollectionParticipant, 0x9674489b,0x1f6f,0x4550,0xa7,0x30, 0xcc,0xae,0xdd,0x10,0x4c,0xf9);
+
+nsrefcnt (__cdecl *ccref_incr)(nsCycleCollectingAutoRefCnt*,nsISupports*);
+nsrefcnt (__cdecl *ccref_decr)(nsCycleCollectingAutoRefCnt*,nsISupports*);
+void (__cdecl *ccref_init)(nsCycleCollectingAutoRefCnt*,nsrefcnt);
+void (__cdecl *ccref_unmark_if_purple)(nsCycleCollectingAutoRefCnt*);
+void (__cdecl *ccp_init)(nsXPCOMCycleCollectionParticipant*,const CCObjCallback*);
+void (__cdecl *describe_cc_node)(nsCycleCollectingAutoRefCnt*,size_t,const char*,nsCycleCollectionTraversalCallback*);
+void (__cdecl *note_cc_edge)(nsISupports*,const char*,nsCycleCollectionTraversalCallback*);
+
 void init_dispex(DispatchEx*,IUnknown*,dispex_static_data_t*) DECLSPEC_HIDDEN;
 void release_dispex(DispatchEx*) DECLSPEC_HIDDEN;
 BOOL dispex_query_interface(DispatchEx*,REFIID,void**) DECLSPEC_HIDDEN;
@@ -232,8 +258,18 @@ HRESULT dispex_get_dprop_ref(DispatchEx*,const WCHAR*,BOOL,VARIANT**) DECLSPEC_H
 HRESULT get_dispids(tid_t,DWORD*,DISPID**) DECLSPEC_HIDDEN;
 HRESULT remove_prop(DispatchEx*,BSTR,VARIANT_BOOL*) DECLSPEC_HIDDEN;
 HRESULT dispex_get_dynid(DispatchEx*,const WCHAR*,DISPID*) DECLSPEC_HIDDEN;
+void dispex_traverse(DispatchEx*,nsCycleCollectionTraversalCallback*) DECLSPEC_HIDDEN;
+void dispex_unlink(DispatchEx*) DECLSPEC_HIDDEN;
 void release_typelib(void) DECLSPEC_HIDDEN;
 HRESULT get_htmldoc_classinfo(ITypeInfo **typeinfo) DECLSPEC_HIDDEN;
+
+typedef enum {
+    DISPEXPROP_CUSTOM,
+    DISPEXPROP_DYNAMIC,
+    DISPEXPROP_BUILTIN
+} dispex_prop_type_t;
+
+dispex_prop_type_t get_dispid_type(DISPID) DECLSPEC_HIDDEN;
 
 typedef struct HTMLWindow HTMLWindow;
 typedef struct HTMLInnerWindow HTMLInnerWindow;
@@ -559,6 +595,8 @@ typedef struct {
     HRESULT (*get_dispid)(HTMLDOMNode*,BSTR,DWORD,DISPID*);
     HRESULT (*invoke)(HTMLDOMNode*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*bind_to_tree)(HTMLDOMNode*);
+    void (*traverse)(HTMLDOMNode*,nsCycleCollectionTraversalCallback*);
+    void (*unlink)(HTMLDOMNode*);
 } NodeImplVtbl;
 
 struct HTMLDOMNode {
@@ -567,14 +605,12 @@ struct HTMLDOMNode {
     IHTMLDOMNode2 IHTMLDOMNode2_iface;
     const NodeImplVtbl *vtbl;
 
-    LONG ref;
+    nsCycleCollectingAutoRefCnt ccref;
 
     nsIDOMNode *nsnode;
     HTMLDocumentNode *doc;
     event_target_t *event_target;
     ConnectionPointContainer *cp_container;
-
-    HTMLDOMNode *next;
 };
 
 static inline void node_addref(HTMLDOMNode *node)
@@ -598,6 +634,7 @@ typedef struct {
 
     nsIDOMHTMLElement *nselem;
     HTMLStyle *style;
+    HTMLStyle *runtime_style;
     HTMLAttributeCollection *attrs;
     WCHAR *filter;
 } HTMLElement;
@@ -642,8 +679,9 @@ struct HTMLDocumentNode {
 
     LONG ref;
 
+    HTMLInnerWindow *window;
+
     nsIDOMHTMLDocument *nsdoc;
-    HTMLDOMNode *nodes;
     BOOL content_ready;
     event_target_t *body_event_target;
 
@@ -664,7 +702,7 @@ struct HTMLDocumentNode {
 
 HRESULT HTMLDocument_Create(IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
 HRESULT HTMLLoadOptions_Create(IUnknown*,REFIID,void**) DECLSPEC_HIDDEN;
-HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument*,HTMLDocumentObj*,HTMLOuterWindow*,HTMLDocumentNode**) DECLSPEC_HIDDEN;
+HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument*,HTMLDocumentObj*,HTMLInnerWindow*,HTMLDocumentNode**) DECLSPEC_HIDDEN;
 HRESULT create_document_fragment(nsIDOMNode*,HTMLDocumentNode*,HTMLDocumentNode**) DECLSPEC_HIDDEN;
 
 HRESULT HTMLOuterWindow_Create(HTMLDocumentObj*,nsIDOMWindow*,HTMLOuterWindow*,HTMLOuterWindow**) DECLSPEC_HIDDEN;
@@ -723,6 +761,8 @@ void init_nsio(nsIComponentManager*,nsIComponentRegistrar*) DECLSPEC_HIDDEN;
 void release_nsio(void) DECLSPEC_HIDDEN;
 BOOL is_gecko_path(const char*) DECLSPEC_HIDDEN;
 
+void init_node_cc(void);
+
 HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*) DECLSPEC_HIDDEN;
 BOOL compare_ignoring_frag(IUri*,IUri*) DECLSPEC_HIDDEN;
 
@@ -752,6 +792,7 @@ HRESULT nsnode_to_nsstring(nsIDOMNode*,nsAString*) DECLSPEC_HIDDEN;
 void get_editor_controller(NSContainer*) DECLSPEC_HIDDEN;
 nsresult get_nsinterface(nsISupports*,REFIID,void**) DECLSPEC_HIDDEN;
 nsIWritableVariant *create_nsvariant(void) DECLSPEC_HIDDEN;
+nsresult create_nsfile(const PRUnichar*,nsIFile**) DECLSPEC_HIDDEN;
 
 HRESULT create_pending_window(HTMLOuterWindow*,nsChannelBSC*) DECLSPEC_HIDDEN;
 void set_current_mon(HTMLOuterWindow*,IMoniker*) DECLSPEC_HIDDEN;
@@ -762,13 +803,10 @@ void abort_window_bindings(HTMLInnerWindow*) DECLSPEC_HIDDEN;
 void set_download_state(HTMLDocumentObj*,int) DECLSPEC_HIDDEN;
 void call_docview_84(HTMLDocumentObj*) DECLSPEC_HIDDEN;
 
-HRESULT bind_mon_to_buffer(HTMLInnerWindow*,IMoniker*,void**,DWORD*) DECLSPEC_HIDDEN;
-
 void set_ready_state(HTMLOuterWindow*,READYSTATE) DECLSPEC_HIDDEN;
 
 HRESULT HTMLSelectionObject_Create(HTMLDocumentNode*,nsISelection*,IHTMLSelectionObject**) DECLSPEC_HIDDEN;
 HRESULT HTMLTxtRange_Create(HTMLDocumentNode*,nsIDOMRange*,IHTMLTxtRange**) DECLSPEC_HIDDEN;
-HRESULT HTMLStyle_Create(HTMLElement*,nsIDOMCSSStyleDeclaration*,HTMLStyle**) DECLSPEC_HIDDEN;
 IHTMLStyleSheet *HTMLStyleSheet_Create(nsIDOMStyleSheet*) DECLSPEC_HIDDEN;
 IHTMLStyleSheetsCollection *HTMLStyleSheetsCollection_Create(nsIDOMStyleSheetList*) DECLSPEC_HIDDEN;
 
@@ -849,7 +887,6 @@ HRESULT HTMLFrameBase_QI(HTMLFrameBase*,REFIID,void**) DECLSPEC_HIDDEN;
 void HTMLFrameBase_destructor(HTMLFrameBase*) DECLSPEC_HIDDEN;
 
 HRESULT get_node(HTMLDocumentNode*,nsIDOMNode*,BOOL,HTMLDOMNode**) DECLSPEC_HIDDEN;
-void release_nodes(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 
 HTMLElement *unsafe_impl_from_IHTMLElement(IHTMLElement*) DECLSPEC_HIDDEN;
 

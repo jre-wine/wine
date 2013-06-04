@@ -41,7 +41,6 @@ static INSTALLSTATE (WINAPI *pMsiGetComponentPathExA)
     (LPCSTR, LPCSTR, LPCSTR, MSIINSTALLCONTEXT, LPSTR, LPDWORD);
 
 static BOOL (WINAPI *pConvertSidToStringSidA)(PSID, LPSTR *);
-static BOOL (WINAPI *pGetTokenInformation)(HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD);
 static BOOL (WINAPI *pOpenProcessToken)(HANDLE, DWORD, PHANDLE);
 static LONG (WINAPI *pRegDeleteKeyExA)(HKEY, LPCSTR, REGSAM, DWORD);
 static BOOL (WINAPI *pIsWow64Process)(HANDLE, PBOOL);
@@ -1462,6 +1461,76 @@ static const char pa_install_exec_seq_dat[] =
     "PublishProduct\t\t5200\n"
     "InstallFinalize\t\t6000\n";
 
+static const char rep_file_dat[] =
+    "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+    "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+    "File\tFile\n"
+    "rep.txt\trep\trep.txt\t1000\t\t\t8192\t1\n";
+
+static const char rep_feature_dat[] =
+    "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+    "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+    "Feature\tFeature\n"
+    "rep\t\t\trep feature\t1\t2\tMSITESTDIR\t0\n";
+
+static const char rep_feature_comp_dat[] =
+    "Feature_\tComponent_\n"
+    "s38\ts72\n"
+    "FeatureComponents\tFeature_\tComponent_\n"
+    "rep\trep\n";
+
+static const char rep_component_dat[] =
+    "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+    "s72\tS38\ts72\ti2\tS255\tS72\n"
+    "Component\tComponent\n"
+    "rep\t{A24FAF2A-3B2E-41EF-AA78-331542E1A29D}\tMSITESTDIR\t0\t\trep.txt\n";
+
+static const char rep_upgrade_dat[] =
+    "UpgradeCode\tVersionMin\tVersionMax\tLanguage\tAttributes\tRemove\tActionProperty\n"
+    "s38\tS20\tS20\tS255\ti4\tS255\ts72\n"
+    "Upgrade\tUpgradeCode\tVersionMin\tVersionMax\tLanguage\tAttributes\n"
+    "{2967C1CC-34D4-42EE-8D96-CD6836F192BF}\t\t\t\t256\t\tPRODUCT\n";
+
+static const char rep_property_dat[] =
+    "Property\tValue\n"
+    "s72\tl0\n"
+    "Property\tProperty\n"
+    "HASUIRUN\t0\n"
+    "INSTALLLEVEL\t3\n"
+    "InstallMode\tTypical\n"
+    "Manufacturer\tWine\n"
+    "PIDTemplate\t###-#######\n"
+    "ProductCode\t{1699F0BB-0B61-4A89-AFE4-CFD60DFD76F3}\n"
+    "ProductLanguage\t1033\n"
+    "ProductName\tMSITEST\n"
+    "ProductVersion\t1.1.1\n"
+    "UpgradeCode\t{2967C1CC-34D4-42EE-8D96-CD6836F192BF}\n"
+    "PRODUCT\t2F41860D-7B4C-4DA7-BED9-B64F26594C56\n"
+    "MSIFASTINSTALL\t1\n";
+
+static const char rep_install_exec_seq_dat[] =
+    "Action\tCondition\tSequence\n"
+    "s72\tS255\tI2\n"
+    "InstallExecuteSequence\tAction\n"
+    "FindRelatedProducts\t\t100\n"
+    "CostInitialize\t\t800\n"
+    "FileCost\t\t900\n"
+    "CostFinalize\t\t1000\n"
+    "InstallValidate\t\t1400\n"
+    "RemoveExistingProducts\t\t1499\n"
+    "InstallInitialize\t\t1500\n"
+    "ProcessComponents\t\t1600\n"
+    "RemoveFiles\t\t1700\n"
+    "InstallFiles\t\t2000\n"
+    "UnregisterExtensionInfo\t\t3000\n"
+    "UnregisterMIMEInfo\t\t3500\n"
+    "RegisterExtensionInfo\t\t4000\n"
+    "RegisterMIMEInfo\t\t4500\n"
+    "RegisterProduct\t\t5000\n"
+    "PublishFeatures\t\t5100\n"
+    "PublishProduct\t\t5200\n"
+    "InstallFinalize\t\t6000\n";
+
 typedef struct _msi_table
 {
     const char *filename;
@@ -1819,6 +1888,19 @@ static const msi_table pa_tables[] =
     ADD_TABLE(property)
 };
 
+static const msi_table rep_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(rep_component),
+    ADD_TABLE(rep_feature),
+    ADD_TABLE(rep_feature_comp),
+    ADD_TABLE(rep_file),
+    ADD_TABLE(rep_upgrade),
+    ADD_TABLE(rep_property),
+    ADD_TABLE(rep_install_exec_seq),
+    ADD_TABLE(media)
+};
+
 /* based on RegDeleteTreeW from dlls/advapi32/registry.c */
 static LSTATUS action_RegDeleteTreeA(HKEY hKey, LPCSTR lpszSubKey, REGSAM access)
 {
@@ -2014,7 +2096,6 @@ static void init_functionpointers(void)
     GET_PROC(hmsi, MsiGetComponentPathExA);
 
     GET_PROC(hadvapi32, ConvertSidToStringSidA);
-    GET_PROC(hadvapi32, GetTokenInformation);
     GET_PROC(hadvapi32, OpenProcessToken);
     GET_PROC(hadvapi32, RegDeleteKeyExA)
     GET_PROC(hkernel32, IsWow64Process)
@@ -2030,7 +2111,7 @@ static BOOL is_process_limited(void)
 {
     HANDLE token;
 
-    if (!pOpenProcessToken || !pGetTokenInformation) return FALSE;
+    if (!pOpenProcessToken) return FALSE;
 
     if (pOpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
     {
@@ -2038,7 +2119,7 @@ static BOOL is_process_limited(void)
         TOKEN_ELEVATION_TYPE type = TokenElevationTypeDefault;
         DWORD size;
 
-        ret = pGetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
+        ret = GetTokenInformation(token, TokenElevationType, &type, sizeof(type), &size);
         CloseHandle(token);
         return (ret && type == TokenElevationTypeLimited);
     }
@@ -6127,6 +6208,42 @@ done:
     DeleteFile(msifile);
 }
 
+static void test_remove_existing_products(void)
+{
+    UINT r;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+
+    create_test_files();
+    create_file("msitest\\rep.txt", 1000);
+    create_database(msifile, rep_tables, sizeof(rep_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+        goto error;
+    }
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(!delete_pf("msitest\\rep.txt", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+error:
+    DeleteFileA("msitest\\rep.txt");
+    delete_test_files();
+    DeleteFile(msifile);
+}
+
 START_TEST(action)
 {
     DWORD len;
@@ -6204,6 +6321,7 @@ START_TEST(action)
     test_register_extension_info();
     test_register_mime_info();
     test_publish_assemblies();
+    test_remove_existing_products();
 
     DeleteFileA(log_file);
 

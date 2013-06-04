@@ -109,6 +109,15 @@ static void debug_dump_decl(struct hlsl_type *type, DWORD modifiers, const char 
     TRACE("%s %s;\n", debug_hlsl_type(type), declname);
 }
 
+static void check_invalid_matrix_modifiers(DWORD modifiers, struct source_location *loc)
+{
+    if (modifiers & (HLSL_MODIFIER_ROW_MAJOR | HLSL_MODIFIER_COLUMN_MAJOR))
+    {
+        hlsl_report_message(loc->file, loc->line, loc->col, HLSL_LEVEL_ERROR,
+                "'row_major' or 'column_major' modifiers are only allowed for matrices");
+    }
+}
+
 static BOOL declare_variable(struct hlsl_ir_var *decl, BOOL local)
 {
     BOOL ret;
@@ -122,6 +131,9 @@ static BOOL declare_variable(struct hlsl_ir_var *decl, BOOL local)
                     ? HLSL_MODIFIER_ROW_MAJOR : HLSL_MODIFIER_COLUMN_MAJOR;
         }
     }
+    else
+        check_invalid_matrix_modifiers(decl->modifiers, &decl->node.loc);
+
     if (local)
     {
         DWORD invalid = decl->modifiers & (HLSL_STORAGE_EXTERN | HLSL_STORAGE_SHARED
@@ -130,6 +142,12 @@ static BOOL declare_variable(struct hlsl_ir_var *decl, BOOL local)
         {
             hlsl_report_message(decl->node.loc.file, decl->node.loc.line, decl->node.loc.col, HLSL_LEVEL_ERROR,
                     "modifier '%s' invalid for local variables", debug_modifiers(invalid));
+        }
+        if (decl->semantic)
+        {
+            hlsl_report_message(decl->node.loc.file, decl->node.loc.line, decl->node.loc.col, HLSL_LEVEL_ERROR,
+                    "semantics are not allowed on local variables");
+            return FALSE;
         }
     }
     else
@@ -188,6 +206,8 @@ static unsigned int components_count_expr_list(struct list *list)
     struct hlsl_ir_function_decl *function;
     struct parse_parameter parameter;
     struct parse_variable_def *variable_def;
+    enum parse_unary_op unary_op;
+    enum parse_assign_op assign_op;
 }
 
 %token KW_BLENDSTATE
@@ -332,6 +352,8 @@ static unsigned int components_count_expr_list(struct list *list)
 %type <instr> conditional_expr
 %type <instr> assignment_expr
 %type <list> expr_statement
+%type <unary_op> unary_op
+%type <assign_op> assign_op
 %type <modifiers> input_mod
 %%
 
@@ -548,7 +570,7 @@ type:                     base_type
 
 base_type:                KW_VOID
                             {
-                                $$ = new_hlsl_type(d3dcompiler_strdup("void"), HLSL_CLASS_SCALAR, HLSL_TYPE_VOID, 1, 1);
+                                $$ = new_hlsl_type(d3dcompiler_strdup("void"), HLSL_CLASS_OBJECT, HLSL_TYPE_VOID, 1, 1);
                             }
                         | KW_SAMPLER
                             {
@@ -628,11 +650,6 @@ declaration:              var_modifiers type variables_def ';'
                                     var->name = v->name;
                                     var->modifiers = $1;
                                     var->semantic = v->semantic;
-                                    if (v->initializer)
-                                    {
-                                        FIXME("Variable with an initializer.\n");
-                                        free_instr_list(v->initializer);
-                                    }
 
                                     if (hlsl_ctx.cur_scope == hlsl_ctx.globals)
                                     {
@@ -640,11 +657,27 @@ declaration:              var_modifiers type variables_def ';'
                                         local = FALSE;
                                     }
 
+                                    if (var->modifiers & HLSL_MODIFIER_CONST && !v->initializer)
+                                    {
+                                        hlsl_report_message(v->loc.file, v->loc.line, v->loc.col,
+                                                HLSL_LEVEL_ERROR, "const variable without initializer");
+                                        free_declaration(var);
+                                        d3dcompiler_free(v);
+                                        continue;
+                                    }
+
                                     ret = declare_variable(var, local);
-                                    if (ret == FALSE)
+                                    if (!ret)
                                         free_declaration(var);
                                     else
                                         TRACE("Declared variable %s.\n", var->name);
+
+                                    if (v->initializer)
+                                    {
+                                        FIXME("Variable with an initializer.\n");
+                                        free_instr_list(v->initializer);
+                                    }
+
                                     d3dcompiler_free(v);
                                 }
                                 d3dcompiler_free($3);
@@ -662,7 +695,6 @@ variables_def:            variable_def
                                 list_add_tail($$, &$3->entry);
                             }
 
-                          /* FIXME: Local variables can't have semantics. */
 variable_def:             any_identifier array semantic
                             {
                                 $$ = d3dcompiler_alloc(sizeof(*$$));
@@ -892,6 +924,26 @@ postfix_expr:             primary_expr
                             {
                                 $$ = $1;
                             }
+                        | postfix_expr OP_INC
+                            {
+                                struct hlsl_ir_node *operands[3];
+                                struct source_location loc;
+
+                                operands[0] = $1;
+                                operands[1] = operands[2] = NULL;
+                                set_location(&loc, &@2);
+                                $$ = &new_expr(HLSL_IR_BINOP_POSTINC, operands, &loc)->node;
+                            }
+                        | postfix_expr OP_DEC
+                            {
+                                struct hlsl_ir_node *operands[3];
+                                struct source_location loc;
+
+                                operands[0] = $1;
+                                operands[1] = operands[2] = NULL;
+                                set_location(&loc, &@2);
+                                $$ = &new_expr(HLSL_IR_BINOP_POSTDEC, operands, &loc)->node;
+                            }
                           /* "var_modifiers" doesn't make sense in this case, but it's needed
                              in the grammar to avoid shift/reduce conflicts. */
                         | var_modifiers type '(' initializer_expr_list ')'
@@ -934,10 +986,87 @@ unary_expr:               postfix_expr
                             {
                                 $$ = $1;
                             }
+                        | OP_INC unary_expr
+                            {
+                                struct hlsl_ir_node *operands[3];
+                                struct source_location loc;
+
+                                operands[0] = $2;
+                                operands[1] = operands[2] = NULL;
+                                set_location(&loc, &@1);
+                                $$ = &new_expr(HLSL_IR_BINOP_PREINC, operands, &loc)->node;
+                            }
+                        | OP_DEC unary_expr
+                            {
+                                struct hlsl_ir_node *operands[3];
+                                struct source_location loc;
+
+                                operands[0] = $2;
+                                operands[1] = operands[2] = NULL;
+                                set_location(&loc, &@1);
+                                $$ = &new_expr(HLSL_IR_BINOP_PREDEC, operands, &loc)->node;
+                            }
+                        | unary_op unary_expr
+                            {
+                                enum hlsl_ir_expr_op ops[] = {0, HLSL_IR_UNOP_NEG,
+                                        HLSL_IR_UNOP_LOGIC_NOT, HLSL_IR_UNOP_BIT_NOT};
+                                struct hlsl_ir_node *operands[3];
+                                struct source_location loc;
+
+                                if ($1 == UNARY_OP_PLUS)
+                                {
+                                    $$ = $2;
+                                }
+                                else
+                                {
+                                    operands[0] = $2;
+                                    operands[1] = operands[2] = NULL;
+                                    set_location(&loc, &@1);
+                                    $$ = &new_expr(ops[$1], operands, &loc)->node;
+                                }
+                            }
+
+unary_op:                 '+'
+                            {
+                                $$ = UNARY_OP_PLUS;
+                            }
+                        | '-'
+                            {
+                                $$ = UNARY_OP_MINUS;
+                            }
+                        | '!'
+                            {
+                                $$ = UNARY_OP_LOGICNOT;
+                            }
+                        | '~'
+                            {
+                                $$ = UNARY_OP_BITNOT;
+                            }
 
 mul_expr:                 unary_expr
                             {
                                 $$ = $1;
+                            }
+                        | mul_expr '*' unary_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_mul($1, $3, &loc)->node;
+                            }
+                        | mul_expr '/' unary_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_div($1, $3, &loc)->node;
+                            }
+                        | mul_expr '%' unary_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_mod($1, $3, &loc)->node;
                             }
 
 add_expr:                 mul_expr
@@ -963,50 +1092,176 @@ shift_expr:               add_expr
                             {
                                 $$ = $1;
                             }
+                        | shift_expr OP_LEFTSHIFT add_expr
+                            {
+                                FIXME("Left shift\n");
+                            }
+                        | shift_expr OP_RIGHTSHIFT add_expr
+                            {
+                                FIXME("Right shift\n");
+                            }
 
 relational_expr:          shift_expr
                             {
                                 $$ = $1;
+                            }
+                        | relational_expr '<' shift_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_lt($1, $3, &loc)->node;
+                            }
+                        | relational_expr '>' shift_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_gt($1, $3, &loc)->node;
+                            }
+                        | relational_expr OP_LE shift_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_le($1, $3, &loc)->node;
+                            }
+                        | relational_expr OP_GE shift_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_ge($1, $3, &loc)->node;
                             }
 
 equality_expr:            relational_expr
                             {
                                 $$ = $1;
                             }
+                        | equality_expr OP_EQ relational_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_eq($1, $3, &loc)->node;
+                            }
+                        | equality_expr OP_NE relational_expr
+                            {
+                                struct source_location loc;
+
+                                set_location(&loc, &@2);
+                                $$ = &hlsl_ne($1, $3, &loc)->node;
+                            }
 
 bitand_expr:              equality_expr
                             {
                                 $$ = $1;
+                            }
+                        | bitand_expr '&' equality_expr
+                            {
+                                FIXME("bitwise AND\n");
                             }
 
 bitxor_expr:              bitand_expr
                             {
                                 $$ = $1;
                             }
+                        | bitxor_expr '^' bitand_expr
+                            {
+                                FIXME("bitwise XOR\n");
+                            }
 
 bitor_expr:               bitxor_expr
                             {
                                 $$ = $1;
+                            }
+                        | bitor_expr '|' bitxor_expr
+                            {
+                                FIXME("bitwise OR\n");
                             }
 
 logicand_expr:            bitor_expr
                             {
                                 $$ = $1;
                             }
+                        | logicand_expr OP_AND bitor_expr
+                            {
+                                FIXME("logic AND\n");
+                            }
 
 logicor_expr:             logicand_expr
                             {
                                 $$ = $1;
+                            }
+                        | logicor_expr OP_OR logicand_expr
+                            {
+                                FIXME("logic OR\n");
                             }
 
 conditional_expr:         logicor_expr
                             {
                                 $$ = $1;
                             }
+                        | logicor_expr '?' expr ':' assignment_expr
+                            {
+                                FIXME("ternary operator\n");
+                            }
 
 assignment_expr:          conditional_expr
                             {
                                 $$ = $1;
+                            }
+                        | unary_expr assign_op assignment_expr
+                            {
+                                $$ = make_assignment($1, $2, BWRITERSP_WRITEMASK_ALL, $3);
+                                if (!$$)
+                                    return 1;
+                                set_location(&$$->loc, &@2);
+                            }
+
+assign_op:                '='
+                            {
+                                $$ = ASSIGN_OP_ASSIGN;
+                            }
+                        | OP_ADDASSIGN
+                            {
+                                $$ = ASSIGN_OP_ADD;
+                            }
+                        | OP_SUBASSIGN
+                            {
+                                $$ = ASSIGN_OP_SUB;
+                            }
+                        | OP_MULASSIGN
+                            {
+                                $$ = ASSIGN_OP_MUL;
+                            }
+                        | OP_DIVASSIGN
+                            {
+                                $$ = ASSIGN_OP_DIV;
+                            }
+                        | OP_MODASSIGN
+                            {
+                                $$ = ASSIGN_OP_MOD;
+                            }
+                        | OP_LEFTSHIFTASSIGN
+                            {
+                                $$ = ASSIGN_OP_LSHIFT;
+                            }
+                        | OP_RIGHTSHIFTASSIGN
+                            {
+                                $$ = ASSIGN_OP_RSHIFT;
+                            }
+                        | OP_ANDASSIGN
+                            {
+                                $$ = ASSIGN_OP_AND;
+                            }
+                        | OP_ORASSIGN
+                            {
+                                $$ = ASSIGN_OP_OR;
+                            }
+                        | OP_XORASSIGN
+                            {
+                                $$ = ASSIGN_OP_XOR;
                             }
 
 expr:                     assignment_expr

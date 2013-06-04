@@ -2115,7 +2115,7 @@ static HRESULT WINAPI domdoc_load(
         if(hr == S_OK)
         {
             IPersistStream *pDocStream;
-            hr = IUnknown_QueryInterface(iface, &IID_IPersistStream, (void**)&pDocStream);
+            hr = IXMLDOMDocument3_QueryInterface(iface, &IID_IPersistStream, (void**)&pDocStream);
             if(hr == S_OK)
             {
                 hr = IPersistStream_Load(pDocStream, pStream);
@@ -2871,6 +2871,9 @@ static HRESULT WINAPI domdoc_setProperty(
                 pTokEnd = pTokBegin;
                 while (*pTokEnd != ' ' && *pTokEnd != 0)
                     ++pTokEnd;
+
+                /* so it failed to advance which means we've got some trailing spaces */
+                if (pTokEnd == pTokBegin) break;
 
                 if (xmlStrncmp(pTokBegin, (xmlChar const*)"xmlns", 5) != 0)
                 {

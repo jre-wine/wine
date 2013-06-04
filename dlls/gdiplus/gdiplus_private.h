@@ -49,6 +49,8 @@ extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
 extern REAL gdiplus_atan2(REAL dy, REAL dx) DECLSPEC_HIDDEN;
 extern GpStatus hresult_to_status(HRESULT res) DECLSPEC_HIDDEN;
 extern REAL convert_unit(REAL logpixels, GpUnit unit) DECLSPEC_HIDDEN;
+extern REAL units_to_pixels(REAL units, GpUnit unit, REAL dpi) DECLSPEC_HIDDEN;
+extern REAL pixels_to_units(REAL pixels, GpUnit unit, REAL dpi) DECLSPEC_HIDDEN;
 
 extern GpStatus graphics_from_image(GpImage *image, GpGraphics **graphics) DECLSPEC_HIDDEN;
 
@@ -154,6 +156,7 @@ struct GpGraphics{
     TextRenderingHint texthint;
     GpUnit unit;    /* page unit */
     REAL scale;     /* page scale */
+    REAL xres, yres;
     GpMatrix * worldtrans; /* world transform */
     BOOL busy;      /* hdc handle obtained by GdipGetDC */
     GpRegion *clip;
