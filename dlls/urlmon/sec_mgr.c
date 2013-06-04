@@ -854,31 +854,23 @@ static HRESULT WINAPI SecManagerImpl_QueryInterface(IInternetSecurityManagerEx2*
 {
     SecManagerImpl *This = impl_from_IInternetSecurityManagerEx2(iface);
 
-    TRACE("(%p)->(%s,%p)\n",This,debugstr_guid(riid),ppvObject);
+    TRACE("(%p)->(%s %p)\n",This,debugstr_guid(riid),ppvObject);
 
-    /* Perform a sanity check on the parameters.*/
-    if ( (This==0) || (ppvObject==0) )
+    if(!ppvObject)
 	return E_INVALIDARG;
 
-    /* Initialize the return parameter */
-    *ppvObject = 0;
-
-    /* Compare the riid with the interface IDs implemented by this object.*/
-    if (IsEqualIID(&IID_IUnknown, riid) ||
-        IsEqualIID(&IID_IInternetSecurityManager, riid) ||
-        IsEqualIID(&IID_IInternetSecurityManagerEx, riid) ||
-        IsEqualIID(&IID_IInternetSecurityManagerEx2, riid))
+    if(IsEqualIID(&IID_IUnknown, riid) ||
+       IsEqualIID(&IID_IInternetSecurityManager, riid) ||
+       IsEqualIID(&IID_IInternetSecurityManagerEx, riid) ||
+       IsEqualIID(&IID_IInternetSecurityManagerEx2, riid)) {
         *ppvObject = iface;
-
-    /* Check that we obtained an interface.*/
-    if (!*ppvObject) {
+    } else {
         WARN("not supported interface %s\n", debugstr_guid(riid));
+        *ppvObject = NULL;
         return E_NOINTERFACE;
     }
 
-    /* Query Interface always increases the reference count by one when it is successful */
-    IInternetSecurityManager_AddRef(iface);
-
+    IInternetSecurityManagerEx2_AddRef(iface);
     return S_OK;
 }
 
@@ -1371,7 +1363,7 @@ static HRESULT WINAPI ZoneMgrImpl_QueryInterface(IInternetZoneManagerEx2* iface,
     }
 
     *ppvObject = iface;
-    IInternetZoneManager_AddRef(iface);
+    IInternetZoneManagerEx2_AddRef(iface);
     return S_OK;
 }
 
@@ -1745,7 +1737,7 @@ static HRESULT WINAPI ZoneMgrImpl_GetZoneAttributesEx(IInternetZoneManagerEx2* i
     if (dwFlags)
         FIXME("dwFlags 0x%x ignored\n", dwFlags);
 
-    return IInternetZoneManager_GetZoneAttributes(iface, dwZone, pZoneAttributes);
+    return IInternetZoneManagerEx2_GetZoneAttributes(iface, dwZone, pZoneAttributes);
 }
 
 

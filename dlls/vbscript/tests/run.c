@@ -27,6 +27,22 @@
 
 #include "wine/test.h"
 
+#ifdef _WIN64
+
+#define IActiveScriptParse_QueryInterface IActiveScriptParse64_QueryInterface
+#define IActiveScriptParse_Release IActiveScriptParse64_Release
+#define IActiveScriptParse_InitNew IActiveScriptParse64_InitNew
+#define IActiveScriptParse_ParseScriptText IActiveScriptParse64_ParseScriptText
+
+#else
+
+#define IActiveScriptParse_QueryInterface IActiveScriptParse32_QueryInterface
+#define IActiveScriptParse_Release IActiveScriptParse32_Release
+#define IActiveScriptParse_InitNew IActiveScriptParse32_InitNew
+#define IActiveScriptParse_ParseScriptText IActiveScriptParse32_ParseScriptText
+
+#endif
+
 extern const CLSID CLSID_VBScript;
 
 #define DEFINE_EXPECT(func) \
@@ -82,6 +98,7 @@ DEFINE_EXPECT(Next);
 #define DISPID_GLOBAL_PROPARGPUT    1011
 #define DISPID_GLOBAL_PROPARGPUT1   1012
 #define DISPID_GLOBAL_COLLOBJ       1013
+#define DISPID_GLOBAL_DOUBLEASSTRING 1014
 
 #define DISPID_TESTOBJ_PROPGET      2000
 #define DISPID_TESTOBJ_PROPPUT      2001
@@ -90,7 +107,7 @@ DEFINE_EXPECT(Next);
 
 static const WCHAR testW[] = {'t','e','s','t',0};
 
-static BOOL strict_dispid_check;
+static BOOL strict_dispid_check, is_english;
 static const char *test_name = "(null)";
 static int test_counter;
 
@@ -815,6 +832,11 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
         *pid = DISPID_GLOBAL_COUNTER;
         return S_OK;
     }
+    if(!strcmp_wa(bstrName, "doubleAsString")) {
+        test_grfdex(grfdex, fdexNameCaseInsensitive);
+        *pid = DISPID_GLOBAL_DOUBLEASSTRING;
+        return S_OK;
+    }
 
     if(strict_dispid_check && strcmp_wa(bstrName, "x"))
         ok(0, "unexpected call %s %x\n", wine_dbgstr_w(bstrName), grfdex);
@@ -905,12 +927,7 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         ok(pei != NULL, "pei == NULL\n");
 
         V_VT(pvarRes) = VT_BOOL;
-        if(is_lang_english()) {
-            V_BOOL(pvarRes) = VARIANT_TRUE;
-        }else {
-            skip("Skipping some tests in non-English UIs\n");
-            V_BOOL(pvarRes) = VARIANT_FALSE;
-        }
+        V_BOOL(pvarRes) = is_english ? VARIANT_TRUE : VARIANT_FALSE;
         return S_OK;
 
     case DISPID_GLOBAL_VBVAR:
@@ -1069,6 +1086,15 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
         V_VT(pvarRes) = VT_I2;
         V_I2(pvarRes) = test_counter++;
         return S_OK;
+
+    case DISPID_GLOBAL_DOUBLEASSTRING:
+        ok(wFlags == (INVOKE_FUNC|INVOKE_PROPERTYGET), "wFlags = %x\n", wFlags);
+        ok(pdp->cArgs == 1, "cArgs = %d\n", pdp->cArgs);
+        ok(V_VT(pdp->rgvarg) == VT_R8, "V_VT(pdp->rgvarg) = %d\n", V_VT(pdp->rgvarg));
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+
+        V_VT(pvarRes) = VT_BSTR;
+        return VarBstrFromR8(V_R8(pdp->rgvarg), 0, 0, &V_BSTR(pvarRes));
     }
 
     ok(0, "unexpected call %d\n", id);
@@ -1220,7 +1246,7 @@ static HRESULT parse_script(DWORD flags, BSTR script_str)
         return hres;
     }
 
-    hres = IActiveScriptParse64_InitNew(parser);
+    hres = IActiveScriptParse_InitNew(parser);
     ok(hres == S_OK, "InitNew failed: %08x\n", hres);
 
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
@@ -1240,14 +1266,14 @@ static HRESULT parse_script(DWORD flags, BSTR script_str)
 
     test_counter = 0;
 
-    hres = IActiveScriptParse64_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
 
     IActiveScript_Close(engine);
 
     IDispatch_Release(script_disp);
     IActiveScript_Release(engine);
 
-    ref = IUnknown_Release(parser);
+    ref = IActiveScriptParse_Release(parser);
     ok(!ref, "ref=%d\n", ref);
     return hres;
 }
@@ -1284,7 +1310,7 @@ static void test_gc(void)
     hres = IActiveScript_QueryInterface(engine, &IID_IActiveScriptParse, (void**)&parser);
     ok(hres == S_OK, "Could not get IActiveScriptParse: %08x\n", hres);
 
-    hres = IActiveScriptParse64_InitNew(parser);
+    hres = IActiveScriptParse_InitNew(parser);
     ok(hres == S_OK, "InitNew failed: %08x\n", hres);
 
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
@@ -1309,7 +1335,7 @@ static void test_gc(void)
             "set x.ref = x\n"
             "set x = nothing\n");
 
-    hres = IActiveScriptParse64_ParseScriptText(parser, src, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, src, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     ok(hres == S_OK, "ParseScriptText failed: %08x\n", hres);
     SysFreeString(src);
 
@@ -1320,7 +1346,7 @@ static void test_gc(void)
     CHECK_CALLED(global_success_i);
 
     IActiveScript_Release(engine);
-    IUnknown_Release(parser);
+    IActiveScriptParse_Release(parser);
 }
 
 static HRESULT test_global_vars_ref(BOOL use_close)
@@ -1343,7 +1369,7 @@ static HRESULT test_global_vars_ref(BOOL use_close)
         return hres;
     }
 
-    hres = IActiveScriptParse64_InitNew(parser);
+    hres = IActiveScriptParse_InitNew(parser);
     ok(hres == S_OK, "InitNew failed: %08x\n", hres);
 
     hres = IActiveScript_SetScriptSite(engine, &ActiveScriptSite);
@@ -1358,7 +1384,7 @@ static HRESULT test_global_vars_ref(BOOL use_close)
     refobj_ref = 0;
 
     script_str = a2bstr("Dim x\nset x = RefObj\n");
-    hres = IActiveScriptParse64_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
+    hres = IActiveScriptParse_ParseScriptText(parser, script_str, NULL, NULL, NULL, 0, 0, 0, NULL, NULL);
     SysFreeString(script_str);
 
     ok(refobj_ref, "refobj_ref = 0\n");
@@ -1375,7 +1401,7 @@ static HRESULT test_global_vars_ref(BOOL use_close)
 
     IActiveScript_Release(engine);
 
-    ref = IUnknown_Release(parser);
+    ref = IActiveScriptParse_Release(parser);
     ok(!ref, "ref=%d\n", ref);
     return hres;
 }
@@ -1589,6 +1615,10 @@ START_TEST(run)
 {
     int argc;
     char **argv;
+
+    is_english = is_lang_english();
+    if(!is_english)
+        skip("Skipping some tests in non-English UIs\n");
 
     argc = winetest_get_mainargs(&argv);
 

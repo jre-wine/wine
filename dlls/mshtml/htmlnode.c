@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <assert.h>
 
 #define COBJMACROS
 
@@ -312,7 +313,7 @@ static HRESULT WINAPI HTMLDOMNode_QueryInterface(IHTMLDOMNode *iface,
 static ULONG WINAPI HTMLDOMNode_AddRef(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = impl_from_IHTMLDOMNode(iface);
-    LONG ref = InterlockedIncrement(&This->ref);
+    LONG ref = ccref_incr(&This->ccref, (nsISupports*)&This->IHTMLDOMNode_iface);
 
     TRACE("(%p) ref=%d\n", This, ref);
 
@@ -322,7 +323,7 @@ static ULONG WINAPI HTMLDOMNode_AddRef(IHTMLDOMNode *iface)
 static ULONG WINAPI HTMLDOMNode_Release(IHTMLDOMNode *iface)
 {
     HTMLDOMNode *This = impl_from_IHTMLDOMNode(iface);
-    LONG ref = InterlockedDecrement(&This->ref);
+    LONG ref = ccref_decr(&This->ccref, (nsISupports*)&This->IHTMLDOMNode_iface);
 
     TRACE("(%p) ref=%d\n", This, ref);
 
@@ -512,6 +513,8 @@ static HRESULT WINAPI HTMLDOMNode_insertBefore(IHTMLDOMNode *iface, IHTMLDOMNode
     case VT_NULL:
         break;
     case VT_DISPATCH: {
+        if(!V_DISPATCH(&refChild))
+            break;
         ref_node = get_node_obj(This->doc, (IUnknown*)V_DISPATCH(&refChild));
         if(!ref_node) {
             ERR("unvalid node\n");
@@ -977,6 +980,8 @@ static const IHTMLDOMNode2Vtbl HTMLDOMNode2Vtbl = {
     HTMLDOMNode2_get_ownerDocument
 };
 
+static nsXPCOMCycleCollectionParticipant node_ccp;
+
 HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
 {
     *ppv = NULL;
@@ -1001,6 +1006,14 @@ HRESULT HTMLDOMNode_QI(HTMLDOMNode *This, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IHTMLDOMNode2, riid)) {
         TRACE("(%p)->(IID_IHTMLDOMNode2 %p)\n", This, ppv);
         *ppv = &This->IHTMLDOMNode2_iface;
+    }else if(IsEqualGUID(&IID_nsXPCOMCycleCollectionParticipant, riid)) {
+        TRACE("(%p)->(IID_nsXPCOMCycleCollectionParticipant %p)\n", This, ppv);
+        *ppv = &node_ccp;
+        return NS_OK;
+    }else if(IsEqualGUID(&IID_nsCycleCollectionISupports, riid)) {
+        TRACE("(%p)->(IID_nsCycleCollectionISupports %p)\n", This, ppv);
+        *ppv = &This->IHTMLDOMNode_iface;
+        return NS_OK;
     }else if(dispex_query_interface(&This->dispex, riid, ppv)) {
         return *ppv ? S_OK : E_NOINTERFACE;
     }
@@ -1018,6 +1031,8 @@ void HTMLDOMNode_destructor(HTMLDOMNode *This)
 {
     if(This->nsnode)
         nsIDOMNode_Release(This->nsnode);
+    if(This->doc && &This->doc->node != This)
+        htmldoc_release(&This->doc->basedoc);
     if(This->event_target)
         release_event_target(This->event_target);
 }
@@ -1035,20 +1050,23 @@ static const NodeImplVtbl HTMLDOMNodeImplVtbl = {
 
 void HTMLDOMNode_Init(HTMLDocumentNode *doc, HTMLDOMNode *node, nsIDOMNode *nsnode)
 {
+    nsresult nsres;
+
     node->IHTMLDOMNode_iface.lpVtbl = &HTMLDOMNodeVtbl;
     node->IHTMLDOMNode2_iface.lpVtbl = &HTMLDOMNode2Vtbl;
-    node->ref = 2;
-    node->doc = doc;
+
+    ccref_init(&node->ccref, 1);
 
     if(&doc->node != node)
-        node->ref++; /* one extra for list entry reference */
+        htmldoc_addref(&doc->basedoc);
+    node->doc = doc;
 
     if(nsnode)
         nsIDOMNode_AddRef(nsnode);
     node->nsnode = nsnode;
 
-    node->next = doc->nodes;
-    doc->nodes = node;
+    nsres = nsIDOMNode_SetMshtmlNode(nsnode, (nsISupports*)&node->IHTMLDOMNode_iface);
+    assert(nsres == NS_OK);
 }
 
 static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNode **ret)
@@ -1100,43 +1118,88 @@ static HRESULT create_node(HTMLDocumentNode *doc, nsIDOMNode *nsnode, HTMLDOMNod
     return S_OK;
 }
 
-/*
- * FIXME
- * List looks really ugly here. We should use a better data structure or
- * (better) find a way to store HTMLDOMelement pointer in nsIDOMNode.
- */
+static void NSAPI HTMLDOMNode_unmark_if_purple(void *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode(p);
+    ccref_unmark_if_purple(&This->ccref);
+}
+
+static nsresult NSAPI HTMLDOMNode_traverse(void *ccp, void *p, nsCycleCollectionTraversalCallback *cb)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode(p);
+
+    TRACE("%p\n", This);
+
+    describe_cc_node(&This->ccref, sizeof(*This), "HTMLDOMNode", cb);
+
+    if(This->nsnode)
+        note_cc_edge((nsISupports*)This->nsnode, "This->nsnode", cb);
+    if(This->doc && &This->doc->node != This)
+        note_cc_edge((nsISupports*)&This->doc->node.IHTMLDOMNode_iface, "This->doc", cb);
+    dispex_traverse(&This->dispex, cb);
+
+    if(This->vtbl->traverse)
+        This->vtbl->traverse(This, cb);
+
+    return NS_OK;
+}
+
+static nsresult NSAPI HTMLDOMNode_unlink(void *p)
+{
+    HTMLDOMNode *This = impl_from_IHTMLDOMNode(p);
+
+    TRACE("%p\n", This);
+
+    if(This->vtbl->unlink)
+        This->vtbl->unlink(This);
+
+    dispex_unlink(&This->dispex);
+
+    if(This->nsnode) {
+        nsIDOMNode *nsnode = This->nsnode;
+        This->nsnode = NULL;
+        nsIDOMNode_Release(nsnode);
+    }
+
+    if(This->doc && &This->doc->node != This) {
+        HTMLDocument *doc = &This->doc->basedoc;
+        This->doc = NULL;
+        htmldoc_release(doc);
+    }else {
+        This->doc = NULL;
+    }
+
+    return NS_OK;
+}
+
+void init_node_cc(void)
+{
+    static const CCObjCallback node_ccp_callback = {
+        HTMLDOMNode_unmark_if_purple,
+        HTMLDOMNode_traverse,
+        HTMLDOMNode_unlink
+    };
+
+    ccp_init(&node_ccp, &node_ccp_callback);
+}
 
 HRESULT get_node(HTMLDocumentNode *This, nsIDOMNode *nsnode, BOOL create, HTMLDOMNode **ret)
 {
-    HTMLDOMNode *iter = This->nodes;
+    nsISupports *unk = NULL;
+    nsresult nsres;
 
-    while(iter) {
-        if(iter->nsnode == nsnode)
-            break;
-        iter = iter->next;
+    nsres = nsIDOMNode_GetMshtmlNode(nsnode, &unk);
+    assert(nsres == NS_OK);
+
+    if(unk) {
+        *ret = get_node_obj(This, (IUnknown*)unk);
+        return NS_OK;
     }
 
-    if(iter || !create) {
-        if(iter)
-            IHTMLDOMNode_AddRef(&iter->IHTMLDOMNode_iface);
-        *ret = iter;
+    if(!create) {
+        *ret = NULL;
         return S_OK;
     }
 
     return create_node(This, nsnode, ret);
-}
-
-void release_nodes(HTMLDocumentNode *This)
-{
-    HTMLDOMNode *iter, *next;
-
-    if(!This->nodes)
-        return;
-
-    for(iter = This->nodes; iter; iter = next) {
-        next = iter->next;
-        iter->doc = NULL;
-        if(&This->node != iter)
-            IHTMLDOMNode_Release(&iter->IHTMLDOMNode_iface);
-    }
 }

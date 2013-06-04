@@ -36,6 +36,7 @@
 #define WINAPI      __stdcall
 #define APIENTRY    WINAPI
 
+#include "windef.h"
 
 typedef struct {
   const char  *name;     /* name of the extension */
@@ -43,8 +44,9 @@ typedef struct {
   void  *func;     /* pointer to the Wine function for this extension */
 } OpenGL_extension;
 
-extern void *extension_funcs[];
 extern const OpenGL_extension extension_registry[];
 extern const int extension_registry_size;
+
+extern BOOL WINAPI wglSetPixelFormatWINE( HDC hdc, int format );
 
 #endif /* __DLLS_OPENGL32_OPENGL_EXT_H */
