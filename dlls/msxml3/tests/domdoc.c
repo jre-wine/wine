@@ -1288,6 +1288,118 @@ static const IServiceProviderVtbl testprovVtbl =
 
 testprov_t testprov = { { &testprovVtbl } };
 
+/* IStream */
+static HRESULT WINAPI istream_QueryInterface(IStream *iface, REFIID riid, void **ppvObject)
+{
+    *ppvObject = NULL;
+
+    if (IsEqualGUID(riid, &IID_IStream) ||
+        IsEqualGUID(riid, &IID_IUnknown))
+        *ppvObject = iface;
+    else
+        return E_NOINTERFACE;
+
+    return S_OK;
+}
+
+static ULONG WINAPI istream_AddRef(IStream *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI istream_Release(IStream *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI istream_Read(IStream *iface, void *ptr, ULONG len, ULONG *pread)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_Write(IStream *iface, const void *ptr, ULONG len, ULONG *written)
+{
+    *written = len/2;
+    return S_OK;
+}
+
+static HRESULT WINAPI istream_Seek(IStream *iface, LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER *new_pos)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_SetSize(IStream *iface, ULARGE_INTEGER size)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_CopyTo(IStream *iface, IStream *stream, ULARGE_INTEGER len,
+        ULARGE_INTEGER *pread, ULARGE_INTEGER *written)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_Commit(IStream *iface, DWORD flags)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_Revert(IStream *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_LockRegion(IStream *iface, ULARGE_INTEGER offset,
+        ULARGE_INTEGER len, DWORD locktype)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_UnlockRegion(IStream *iface, ULARGE_INTEGER offset,
+        ULARGE_INTEGER len, DWORD locktype)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_Stat(IStream *iface, STATSTG *pstatstg, DWORD flag)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI istream_Clone(IStream *iface, IStream **stream)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IStreamVtbl StreamVtbl = {
+    istream_QueryInterface,
+    istream_AddRef,
+    istream_Release,
+    istream_Read,
+    istream_Write,
+    istream_Seek,
+    istream_SetSize,
+    istream_CopyTo,
+    istream_Commit,
+    istream_Revert,
+    istream_LockRegion,
+    istream_UnlockRegion,
+    istream_Stat,
+    istream_Clone
+};
+
+static IStream savestream = { &StreamVtbl };
+
 #define EXPECT_CHILDREN(node) _expect_children((IXMLDOMNode*)node, __LINE__)
 static void _expect_children(IXMLDOMNode *node, int line)
 {
@@ -1392,9 +1504,16 @@ static const WCHAR szComplete6[] = {
     '<','o','p','e','n','>','<','/','o','p','e','n','>','\n',0
 };
 
-static const CHAR szNonUnicodeXML[] =
-"<?xml version='1.0' encoding='Windows-1252'?>\n"
-"<open></open>\n";
+#define DECL_WIN_1252 \
+"<?xml version=\"1.0\" encoding=\"Windows-1252\"?>"
+
+static const char win1252xml[] =
+DECL_WIN_1252
+"<open></open>";
+
+static const char win1252decl[] =
+DECL_WIN_1252
+;
 
 static const char szExampleXML[] =
 "<?xml version='1.0' encoding='utf-8'?>\n"
@@ -2215,7 +2334,7 @@ if (0)
 
     /* try a BSTR containing a Windows-1252 document */
     b = VARIANT_TRUE;
-    str = SysAllocStringByteLen( szNonUnicodeXML, sizeof(szNonUnicodeXML) - 1 );
+    str = SysAllocStringByteLen( win1252xml, strlen(win1252xml) );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
     ok( r == S_FALSE, "loadXML succeeded\n");
     ok( b == VARIANT_FALSE, "succeeded in loading XML string\n");
@@ -7124,12 +7243,16 @@ static void test_save(void)
 {
     IXMLDOMDocument *doc, *doc2;
     IXMLDOMElement *root;
-    VARIANT file, vDoc;
     BSTR sOrig, sNew, filename;
     char buffer[100];
+    IStream *stream;
+    HGLOBAL global;
+    VARIANT_BOOL b;
     DWORD read = 0;
+    VARIANT dest;
     HANDLE hfile;
     HRESULT hr;
+    char *ptr;
 
     doc = create_document(&IID_IXMLDOMDocument);
     if (!doc) return;
@@ -7148,10 +7271,10 @@ static void test_save(void)
     hr = IXMLDOMDocument_appendChild(doc, (IXMLDOMNode*)root, NULL);
     EXPECT_HR(hr, S_OK);
 
-    V_VT(&vDoc) = VT_UNKNOWN;
-    V_UNKNOWN(&vDoc) = (IUnknown*)doc2;
+    V_VT(&dest) = VT_UNKNOWN;
+    V_UNKNOWN(&dest) = (IUnknown*)doc2;
 
-    hr = IXMLDOMDocument_save(doc, vDoc);
+    hr = IXMLDOMDocument_save(doc, dest);
     EXPECT_HR(hr, S_OK);
 
     hr = IXMLDOMDocument_get_xml(doc, &sOrig);
@@ -7169,10 +7292,10 @@ static void test_save(void)
     IXMLDOMDocument_Release(doc2);
 
     /* save to path */
-    V_VT(&file) = VT_BSTR;
-    V_BSTR(&file) = _bstr_("test.xml");
+    V_VT(&dest) = VT_BSTR;
+    V_BSTR(&dest) = _bstr_("test.xml");
 
-    hr = IXMLDOMDocument_save(doc, file);
+    hr = IXMLDOMDocument_save(doc, dest);
     EXPECT_HR(hr, S_OK);
 
     hfile = CreateFileA("test.xml", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
@@ -7188,24 +7311,68 @@ static void test_save(void)
 
     /* save to path VT_BSTR | VT_BYREF */
     filename = _bstr_("test.xml");
-    V_VT(&file) = VT_BSTR | VT_BYREF;
-    V_BSTRREF(&file) = &filename;
+    V_VT(&dest) = VT_BSTR | VT_BYREF;
+    V_BSTRREF(&dest) = &filename;
 
-    hr = IXMLDOMDocument_save(doc, file);
+    hr = IXMLDOMDocument_save(doc, dest);
     EXPECT_HR(hr, S_OK);
-
-    IXMLDOMDocument_Release(doc);
 
     hfile = CreateFileA("test.xml", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
     ok(hfile != INVALID_HANDLE_VALUE, "Could not open file: %u\n", GetLastError());
     if(hfile == INVALID_HANDLE_VALUE) return;
 
-    ReadFile(hfile, buffer, sizeof(buffer), &read, NULL);
-    ok(read != 0, "could not read file\n");
-    ok(buffer[0] != '<' || buffer[1] != '?', "File contains processing instruction\n");
+    if (hfile != INVALID_HANDLE_VALUE)
+    {
+       ReadFile(hfile, buffer, sizeof(buffer), &read, NULL);
+       ok(read != 0, "could not read file\n");
+       ok(buffer[0] != '<' || buffer[1] != '?', "File contains processing instruction\n");
 
-    CloseHandle(hfile);
-    DeleteFile("test.xml");
+       CloseHandle(hfile);
+       DeleteFile("test.xml");
+    }
+
+    /* save to stream */
+    V_VT(&dest) = VT_UNKNOWN;
+    V_UNKNOWN(&dest) = (IUnknown*)&savestream;
+
+    hr = IXMLDOMDocument_save(doc, dest);
+    EXPECT_HR(hr, S_OK);
+
+    /* loaded data contains xml declaration */
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(win1252xml), &b);
+    EXPECT_HR(hr, S_OK);
+
+    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    V_VT(&dest) = VT_UNKNOWN;
+    V_UNKNOWN(&dest) = (IUnknown*)stream;
+    hr = IXMLDOMDocument_save(doc, dest);
+    EXPECT_HR(hr, S_OK);
+
+    hr = GetHGlobalFromStream(stream, &global);
+    EXPECT_HR(hr, S_OK);
+    ptr = GlobalLock(global);
+    ok(!memcmp(ptr, win1252decl, strlen(win1252decl)), "got wrong xml declaration\n");
+    GlobalUnlock(global);
+    IStream_Release(stream);
+
+    /* loaded data without xml declaration */
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_("<a/>"), &b);
+    EXPECT_HR(hr, S_OK);
+
+    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    V_VT(&dest) = VT_UNKNOWN;
+    V_UNKNOWN(&dest) = (IUnknown*)stream;
+    hr = IXMLDOMDocument_save(doc, dest);
+    EXPECT_HR(hr, S_OK);
+
+    hr = GetHGlobalFromStream(stream, &global);
+    EXPECT_HR(hr, S_OK);
+    ptr = GlobalLock(global);
+    ok(ptr[0] == '<' && ptr[1] != '?', "got wrong start tag %c%c\n", ptr[0], ptr[1]);
+    GlobalUnlock(global);
+    IStream_Release(stream);
+
+    IXMLDOMDocument_Release(doc);
     free_bstrs();
 }
 
@@ -10575,12 +10742,19 @@ static void test_load(void)
     ok(hfile != INVALID_HANDLE_VALUE, "failed to create test file\n");
     if(hfile == INVALID_HANDLE_VALUE) return;
 
-    ret = WriteFile(hfile, szNonUnicodeXML, sizeof(szNonUnicodeXML)-1, &written, NULL);
+    ret = WriteFile(hfile, win1252xml, strlen(win1252xml), &written, NULL);
     ok(ret, "WriteFile failed\n");
 
     CloseHandle(hfile);
 
     doc = create_document(&IID_IXMLDOMDocument);
+
+    /* null pointer as input */
+    V_VT(&src) = VT_UNKNOWN;
+    V_UNKNOWN(&src) = NULL;
+    hr = IXMLDOMDocument_load(doc, src, &b);
+    EXPECT_HR(hr, E_INVALIDARG);
+    ok(b == VARIANT_FALSE, "got %d\n", b);
 
     path = _bstr_("test.xml");
 

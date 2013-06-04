@@ -2520,6 +2520,27 @@ static HRESULT d3dfmt_get_conv(const struct wined3d_surface *surface, BOOL need_
     return WINED3D_OK;
 }
 
+static BOOL surface_check_block_align(struct wined3d_surface *surface, const RECT *rect)
+{
+    UINT width_mask, height_mask;
+
+    if (!rect->left && !rect->top
+            && rect->right == surface->resource.width
+            && rect->bottom == surface->resource.height)
+        return TRUE;
+
+    /* This assumes power of two block sizes, but NPOT block sizes would be
+     * silly anyway. */
+    width_mask = surface->resource.format->block_width - 1;
+    height_mask = surface->resource.format->block_height - 1;
+
+    if (!(rect->left & width_mask) && !(rect->top & height_mask)
+            && !(rect->right & width_mask) && !(rect->bottom & height_mask))
+        return TRUE;
+
+    return FALSE;
+}
+
 HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const POINT *dst_point,
         struct wined3d_surface *src_surface, const RECT *src_rect)
 {
@@ -2532,10 +2553,9 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
     struct wined3d_format format;
     UINT update_w, update_h;
     UINT dst_w, dst_h;
-    UINT src_w, src_h;
+    RECT r, dst_rect;
     UINT src_pitch;
     POINT p;
-    RECT r;
 
     TRACE("dst_surface %p, dst_point %s, src_surface %p, src_rect %s.\n",
             dst_surface, wine_dbgstr_point(dst_point),
@@ -2577,9 +2597,6 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
         return WINED3DERR_INVALIDCALL;
     }
 
-    src_w = src_surface->resource.width;
-    src_h = src_surface->resource.height;
-
     dst_w = dst_surface->resource.width;
     dst_h = dst_surface->resource.height;
 
@@ -2593,22 +2610,23 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* NPOT block sizes would be silly. */
-    if ((src_format->flags & WINED3DFMT_FLAG_BLOCKS)
-            && ((update_w & (src_format->block_width - 1) || update_h & (src_format->block_height - 1))
-            && (src_w != update_w || dst_w != update_w || src_h != update_h || dst_h != update_h)))
+    if ((src_format->flags & WINED3DFMT_FLAG_BLOCKS) && !surface_check_block_align(src_surface, src_rect))
     {
-        WARN("Update rect not block-aligned.\n");
+        WARN("Source rectangle not block-aligned.\n");
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    SetRect(&dst_rect, dst_point->x, dst_point->y, dst_point->x + update_w, dst_point->y + update_h);
+    if ((dst_format->flags & WINED3DFMT_FLAG_BLOCKS) && !surface_check_block_align(dst_surface, &dst_rect))
+    {
+        WARN("Destination rectangle not block-aligned.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
     /* Use wined3d_surface_blt() instead of uploading directly if we need conversion. */
     d3dfmt_get_conv(dst_surface, FALSE, TRUE, &format, &convert);
     if (convert != WINED3D_CT_NONE || format.convert)
-    {
-        RECT dst_rect = {dst_point->x,  dst_point->y, dst_point->x + update_w, dst_point->y + update_h};
         return wined3d_surface_blt(dst_surface, &dst_rect, src_surface, src_rect, 0, NULL, WINED3D_TEXF_POINT);
-    }
 
     context = context_acquire(dst_surface->resource.device, NULL);
     gl_info = context->gl_info;
@@ -2660,6 +2678,9 @@ static void surface_allocate_surface(struct wined3d_surface *surface, const stru
     {
         internal = format->glInternal;
     }
+
+    if (!internal)
+        FIXME("No GL internal format for format %s.\n", debug_d3dformat(format->id));
 
     if (format->flags & WINED3DFMT_FLAG_HEIGHT_SCALE)
     {
@@ -3827,6 +3848,11 @@ do { \
     return WINED3D_OK;
 }
 
+struct wined3d_surface * CDECL wined3d_surface_from_resource(struct wined3d_resource *resource)
+{
+    return surface_from_resource(resource);
+}
+
 HRESULT CDECL wined3d_surface_unmap(struct wined3d_surface *surface)
 {
     TRACE("surface %p.\n", surface);
@@ -3856,23 +3882,15 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
         WARN("Surface is already mapped.\n");
         return WINED3DERR_INVALIDCALL;
     }
-    if ((format->flags & WINED3DFMT_FLAG_BLOCKS)
-            && rect && (rect->left || rect->top
-            || rect->right != surface->resource.width
-            || rect->bottom != surface->resource.height))
+
+    if ((format->flags & WINED3DFMT_FLAG_BLOCKS) && rect
+            && !surface_check_block_align(surface, rect))
     {
-        UINT width_mask = format->block_width - 1;
-        UINT height_mask = format->block_height - 1;
+        WARN("Map rect %s is misaligned for %ux%u blocks.\n",
+                wine_dbgstr_rect(rect), format->block_width, format->block_height);
 
-        if ((rect->left & width_mask) || (rect->right & width_mask)
-                || (rect->top & height_mask) || (rect->bottom & height_mask))
-        {
-            WARN("Map rect %s is misaligned for %ux%u blocks.\n",
-                    wine_dbgstr_rect(rect), format->block_width, format->block_height);
-
-            if (surface->resource.pool == WINED3D_POOL_DEFAULT)
-                return WINED3DERR_INVALIDCALL;
-        }
+        if (surface->resource.pool == WINED3D_POOL_DEFAULT)
+            return WINED3DERR_INVALIDCALL;
     }
 
     ++surface->resource.map_count;
@@ -4870,6 +4888,12 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
     struct wined3d_context *context;
     BOOL upsidedown = FALSE;
     RECT dst_rect = *dst_rect_in;
+    GLenum dst_target;
+
+    if (dst_surface->container.type == WINED3D_CONTAINER_TEXTURE)
+        dst_target = dst_surface->container.u.texture->target;
+    else
+        dst_target = dst_surface->texture_target;
 
     /* Make sure that the top pixel is always above the bottom pixel, and keep a separate upside down flag
      * glCopyTexSubImage is a bit picky about the parameters we pass to it
@@ -4887,7 +4911,7 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
     ENTER_GL();
 
     /* Bind the target texture */
-    context_bind_texture(context, dst_surface->texture_target, dst_surface->texture_name);
+    context_bind_texture(context, dst_target, dst_surface->texture_name);
     if (surface_is_offscreen(src_surface))
     {
         TRACE("Reading from an offscreen target\n");
@@ -6309,12 +6333,18 @@ static void ffp_blit_p8_upload_palette(const struct wined3d_surface *surface, co
 {
     BYTE table[256][4];
     BOOL colorkey_active = (surface->CKeyFlags & WINEDDSD_CKSRCBLT) ? TRUE : FALSE;
+    GLenum target;
+
+    if (surface->container.type == WINED3D_CONTAINER_TEXTURE)
+        target = surface->container.u.texture->target;
+    else
+        target = surface->texture_target;
 
     d3dfmt_p8_init_palette(surface, table, colorkey_active);
 
     TRACE("Using GL_EXT_PALETTED_TEXTURE for 8-bit paletted texture support\n");
     ENTER_GL();
-    GL_EXTCALL(glColorTableEXT(surface->texture_target, GL_RGBA, 256, GL_RGBA, GL_UNSIGNED_BYTE, table));
+    GL_EXTCALL(glColorTableEXT(target, GL_RGBA, 256, GL_RGBA, GL_UNSIGNED_BYTE, table));
     LEAVE_GL();
 }
 
@@ -6322,6 +6352,12 @@ static void ffp_blit_p8_upload_palette(const struct wined3d_surface *surface, co
 static HRESULT ffp_blit_set(void *blit_priv, struct wined3d_context *context, const struct wined3d_surface *surface)
 {
     enum complex_fixup fixup = get_complex_fixup(surface->resource.format->color_fixup);
+    GLenum target;
+
+    if (surface->container.type == WINED3D_CONTAINER_TEXTURE)
+        target = surface->container.u.texture->target;
+    else
+        target = surface->texture_target;
 
     /* When EXT_PALETTED_TEXTURE is around, palette conversion is done by the GPU
      * else the surface is converted in software at upload time in LoadLocation.
@@ -6331,8 +6367,8 @@ static HRESULT ffp_blit_set(void *blit_priv, struct wined3d_context *context, co
         ffp_blit_p8_upload_palette(surface, context->gl_info);
 
     ENTER_GL();
-    glEnable(surface->texture_target);
-    checkGLcall("glEnable(surface->texture_target)");
+    glEnable(target);
+    checkGLcall("glEnable(target)");
     LEAVE_GL();
     return WINED3D_OK;
 }
@@ -6682,9 +6718,16 @@ static HRESULT surface_cpu_blt(struct wined3d_surface *dst_surface, const RECT *
             goto release;
         }
 
-        if (srcwidth & (src_format->block_width - 1) || srcheight & (src_format->block_height - 1))
+        if (!surface_check_block_align(src_surface, src_rect))
         {
-            WARN("Rectangle not block-aligned.\n");
+            WARN("Source rectangle not block-aligned.\n");
+            hr = WINED3DERR_INVALIDCALL;
+            goto release;
+        }
+
+        if (!surface_check_block_align(dst_surface, dst_rect))
+        {
+            WARN("Destination rectangle not block-aligned.\n");
             hr = WINED3DERR_INVALIDCALL;
             goto release;
         }

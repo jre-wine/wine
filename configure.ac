@@ -1051,7 +1051,12 @@ then
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>]], [[static typeof(XRRSetScreenConfigAndRate) * func; if (func) return 0;]])],
-                  [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])])
+                  [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,
+                    [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/extensions/Xrandr.h>]],
+                        [[static typeof(XRRGetScreenResources) *f; if (f) return 0;]])],
+                      [AC_DEFINE(HAVE_XRRGETSCREENRESOURCES, 1,
+                        [Define if Xrandr has the XRRGetScreenResources function])])],,
+                    [$X_LIBS $XLIB $X_EXTRA_LIBS])])
         fi
         WINE_NOTICE_WITH(xrandr,[test "x$ac_cv_lib_soname_Xrandr" = "x"],
                          [libxrandr ${notice_platform}development files not found, XRandr won't be supported.])
@@ -2696,6 +2701,7 @@ WINE_CONFIG_DLL(midimap)
 WINE_CONFIG_DLL(mlang,,[implib])
 WINE_CONFIG_TEST(dlls/mlang/tests)
 WINE_CONFIG_DLL(mmcndmgr)
+WINE_CONFIG_TEST(dlls/mmcndmgr/tests)
 WINE_CONFIG_DLL(mmdevapi)
 WINE_CONFIG_TEST(dlls/mmdevapi/tests)
 WINE_CONFIG_DLL(mmdevldr.vxd,enable_win16)
@@ -2704,6 +2710,7 @@ WINE_CONFIG_DLL(monodebg.vxd,enable_win16)
 WINE_CONFIG_DLL(mountmgr.sys)
 WINE_CONFIG_DLL(mouse.drv16,enable_win16)
 WINE_CONFIG_DLL(mpr,,[implib,po])
+WINE_CONFIG_TEST(dlls/mpr/tests)
 WINE_CONFIG_DLL(mprapi,,[implib])
 WINE_CONFIG_DLL(msacm.dll16,enable_win16)
 WINE_CONFIG_DLL(msacm32.drv)

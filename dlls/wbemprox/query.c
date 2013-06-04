@@ -30,156 +30,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wbemprox);
 
-static HRESULT get_column_index( const struct table *table, const WCHAR *name, UINT *column )
-{
-    UINT i;
-    for (i = 0; i < table->num_cols; i++)
-    {
-        if (!strcmpiW( table->columns[i].name, name ))
-        {
-            *column = i;
-            return S_OK;
-        }
-    }
-    return WBEM_E_INVALID_QUERY;
-}
-
-static UINT get_column_size( const struct table *table, UINT column )
-{
-    if (table->columns[column].type & CIM_FLAG_ARRAY) return sizeof(void *);
-
-    switch (table->columns[column].type & COL_TYPE_MASK)
-    {
-    case CIM_SINT16:
-    case CIM_UINT16:
-        return sizeof(INT16);
-    case CIM_SINT32:
-    case CIM_UINT32:
-        return sizeof(INT32);
-    case CIM_SINT64:
-    case CIM_UINT64:
-        return sizeof(INT64);
-    case CIM_DATETIME:
-    case CIM_STRING:
-        return sizeof(WCHAR *);
-    default:
-        ERR("unknown column type %u\n", table->columns[column].type & COL_TYPE_MASK);
-        break;
-    }
-    return sizeof(INT32);
-}
-
-static UINT get_column_offset( const struct table *table, UINT column )
-{
-    UINT i, offset = 0;
-    for (i = 0; i < column; i++) offset += get_column_size( table, i );
-    return offset;
-}
-
-static UINT get_row_size( const struct table *table )
-{
-    return get_column_offset( table, table->num_cols - 1 ) + get_column_size( table, table->num_cols - 1 );
-}
-
-static HRESULT get_value( const struct table *table, UINT row, UINT column, LONGLONG *val )
-{
-    UINT col_offset, row_size;
-    const BYTE *ptr;
-
-    col_offset = get_column_offset( table, column );
-    row_size = get_row_size( table );
-    ptr = table->data + row * row_size + col_offset;
-
-    if (table->columns[column].type & CIM_FLAG_ARRAY)
-    {
-        *val = (LONGLONG)(INT_PTR)*(const void **)ptr;
-        return S_OK;
-    }
-    switch (table->columns[column].type & COL_TYPE_MASK)
-    {
-    case CIM_DATETIME:
-    case CIM_STRING:
-        *val = (LONGLONG)(INT_PTR)*(const WCHAR **)ptr;
-        break;
-    case CIM_SINT16:
-        *val = *(const INT16 *)ptr;
-        break;
-    case CIM_UINT16:
-        *val = *(const UINT16 *)ptr;
-        break;
-    case CIM_SINT32:
-        *val = *(const INT32 *)ptr;
-        break;
-    case CIM_UINT32:
-        *val = *(const UINT32 *)ptr;
-        break;
-    case CIM_SINT64:
-        *val = *(const INT64 *)ptr;
-        break;
-    case CIM_UINT64:
-        *val = *(const UINT64 *)ptr;
-        break;
-    default:
-        ERR("invalid column type %u\n", table->columns[column].type & COL_TYPE_MASK);
-        *val = 0;
-        break;
-    }
-    return S_OK;
-}
-
-static BSTR get_value_bstr( const struct table *table, UINT row, UINT column )
-{
-    static const WCHAR fmt_signedW[] = {'%','d',0};
-    static const WCHAR fmt_unsignedW[] = {'%','u',0};
-    static const WCHAR fmt_signed64W[] = {'%','I','6','4','d',0};
-    static const WCHAR fmt_unsigned64W[] = {'%','I','6','4','u',0};
-    static const WCHAR fmt_strW[] = {'\"','%','s','\"',0};
-    LONGLONG val;
-    BSTR ret;
-    WCHAR number[22];
-    UINT len;
-
-    if (table->columns[column].type & CIM_FLAG_ARRAY)
-    {
-        FIXME("array to string conversion not handled\n");
-        return NULL;
-    }
-    if (get_value( table, row, column, &val ) != S_OK) return NULL;
-
-    switch (table->columns[column].type & COL_TYPE_MASK)
-    {
-    case CIM_DATETIME:
-    case CIM_STRING:
-        len = strlenW( (const WCHAR *)(INT_PTR)val ) + 2;
-        if (!(ret = SysAllocStringLen( NULL, len ))) return NULL;
-        sprintfW( ret, fmt_strW, (const WCHAR *)(INT_PTR)val );
-        return ret;
-
-    case CIM_SINT16:
-    case CIM_SINT32:
-        sprintfW( number, fmt_signedW, val );
-        return SysAllocString( number );
-
-    case CIM_UINT16:
-    case CIM_UINT32:
-        sprintfW( number, fmt_unsignedW, val );
-        return SysAllocString( number );
-
-    case CIM_SINT64:
-        wsprintfW( number, fmt_signed64W, val );
-        return SysAllocString( number );
-
-    case CIM_UINT64:
-        wsprintfW( number, fmt_unsigned64W, val );
-        return SysAllocString( number );
-
-    default:
-        FIXME("unhandled column type %u\n", table->columns[column].type & COL_TYPE_MASK);
-        break;
-    }
-    return NULL;
-}
-
 HRESULT create_view( const struct property *proplist, const WCHAR *class,
                      const struct expr *cond, struct view **ret )
 {
@@ -195,40 +45,16 @@ HRESULT create_view( const struct property *proplist, const WCHAR *class,
     return S_OK;
 }
 
-static void clear_table( struct table *table )
-{
-    UINT i, j, type;
-
-    if (!table->fill || !table->data) return;
-
-    for (i = 0; i < table->num_rows; i++)
-    {
-        for (j = 0; j < table->num_cols; j++)
-        {
-            if (!(table->columns[j].type & COL_FLAG_DYNAMIC)) continue;
-
-            type = table->columns[j].type & COL_TYPE_MASK;
-            if (type == CIM_STRING || type == CIM_DATETIME || (type & CIM_FLAG_ARRAY))
-            {
-                void *ptr;
-                if (get_value( table, i, j, (LONGLONG *)&ptr ) == S_OK) heap_free( ptr );
-            }
-        }
-    }
-    heap_free( table->data );
-    table->data = NULL;
-}
-
 void destroy_view( struct view *view )
 {
-    if (view->table) clear_table( view->table );
+    free_table( view->table );
     heap_free( view->result );
     heap_free( view );
 }
 
-static BOOL eval_like( LONGLONG lval, LONGLONG rval )
+static BOOL eval_like( const WCHAR *lstr, const WCHAR *rstr )
 {
-    const WCHAR *p = (const WCHAR *)(INT_PTR)lval, *q = (const WCHAR *)(INT_PTR)rval;
+    const WCHAR *p = lstr, *q = rstr;
 
     while (*p && *q)
     {
@@ -244,10 +70,48 @@ static BOOL eval_like( LONGLONG lval, LONGLONG rval )
     return TRUE;
 }
 
+static HRESULT eval_strcmp( UINT op, const WCHAR *lstr, const WCHAR *rstr, LONGLONG *val )
+{
+    switch (op)
+    {
+    case OP_EQ:
+        *val = !strcmpW( lstr, rstr );
+        break;
+    case OP_GT:
+        *val = strcmpW( lstr, rstr ) > 0;
+        break;
+    case OP_LT:
+        *val = strcmpW( lstr, rstr ) < 0;
+        break;
+    case OP_LE:
+        *val = strcmpW( lstr, rstr ) <= 0;
+        break;
+    case OP_GE:
+        *val = strcmpW( lstr, rstr ) >= 0;
+        break;
+    case OP_NE:
+        *val = strcmpW( lstr, rstr );
+        break;
+    case OP_LIKE:
+        *val = eval_like( lstr, rstr );
+        break;
+    default:
+        ERR("unhandled operator %u\n", op);
+        return WBEM_E_INVALID_QUERY;
+    }
+    return S_OK;
+}
+
+static inline BOOL is_strcmp( const struct complex_expr *expr )
+{
+    return ((expr->left->type == EXPR_PROPVAL && expr->right->type == EXPR_SVAL) ||
+            (expr->left->type == EXPR_SVAL && expr->right->type == EXPR_PROPVAL));
+}
+
 static HRESULT eval_cond( const struct table *, UINT, const struct expr *, LONGLONG * );
 
-static BOOL eval_binary( const struct table *table, UINT row, const struct complex_expr *expr,
-                         LONGLONG *val )
+static HRESULT eval_binary( const struct table *table, UINT row, const struct complex_expr *expr,
+                            LONGLONG *val )
 {
     HRESULT lret, rret;
     LONGLONG lval, rval;
@@ -256,6 +120,13 @@ static BOOL eval_binary( const struct table *table, UINT row, const struct compl
     rret = eval_cond( table, row, expr->right, &rval );
     if (lret != S_OK || rret != S_OK) return WBEM_E_INVALID_QUERY;
 
+    if (is_strcmp( expr ))
+    {
+        const WCHAR *lstr = (const WCHAR *)(INT_PTR)lval;
+        const WCHAR *rstr = (const WCHAR *)(INT_PTR)rval;
+
+        return eval_strcmp( expr->op, lstr, rstr, val );
+    }
     switch (expr->op)
     {
     case OP_EQ:
@@ -282,11 +153,8 @@ static BOOL eval_binary( const struct table *table, UINT row, const struct compl
     case OP_NE:
         *val = (lval != rval);
         break;
-    case OP_LIKE:
-        *val = eval_like( lval, rval );
-        break;
     default:
-        ERR("unknown operator %u\n", expr->op);
+        ERR("unhandled operator %u\n", expr->op);
         return WBEM_E_INVALID_QUERY;
     }
     return S_OK;
@@ -584,12 +452,28 @@ done:
     return ret;
 }
 
-static UINT count_selected_props( const struct view *view )
+static inline BOOL is_method( const struct table *table, UINT column )
+{
+    return table->columns[column].type & COL_FLAG_METHOD;
+}
+
+static UINT count_properties( const struct view *view )
+{
+    UINT i, num_props = 0;
+
+    for (i = 0; i < view->table->num_cols; i++)
+    {
+        if (!is_method( view->table, i)) num_props++;
+    }
+    return num_props;
+}
+
+static UINT count_selected_properties( const struct view *view )
 {
     const struct property *prop = view->proplist;
     UINT count;
 
-    if (!prop) return view->table->num_cols;
+    if (!prop) return count_properties( view );
 
     count = 1;
     while ((prop = prop->next)) count++;
@@ -640,7 +524,7 @@ static HRESULT get_system_propval( const struct view *view, UINT index, const WC
     if (!strcmpiW( name, propcountW ))
     {
         V_VT( ret ) = VT_I4;
-        V_I4( ret ) = count_selected_props( view );
+        V_I4( ret ) = count_selected_properties( view );
         if (type) *type = CIM_SINT32;
         return S_OK;
     }
@@ -686,6 +570,9 @@ static void set_variant( VARTYPE vartype, LONGLONG val, BSTR val_bstr, VARIANT *
         V_VT( ret ) = VT_UI4;
         V_UI4( ret ) = val;
         return;
+    case VT_NULL:
+        V_VT( ret ) = VT_NULL;
+        return;
     default:
         ERR("unhandled variant type %u\n", vartype);
         return;
@@ -705,7 +592,7 @@ HRESULT get_propval( const struct view *view, UINT index, const WCHAR *name, VAR
     if (!is_selected_prop( view, name )) return WBEM_E_NOT_FOUND;
 
     hr = get_column_index( view->table, name, &column );
-    if (hr != S_OK) return WBEM_E_NOT_FOUND;
+    if (hr != S_OK || is_method( view->table, column )) return WBEM_E_NOT_FOUND;
 
     vartype = view->table->columns[column].vartype;
 
@@ -716,8 +603,13 @@ HRESULT get_propval( const struct view *view, UINT index, const WCHAR *name, VAR
     {
     case CIM_STRING:
     case CIM_DATETIME:
-        vartype = VT_BSTR;
-        val_bstr = SysAllocString( (const WCHAR *)(INT_PTR)val );
+        if (val)
+        {
+            vartype = VT_BSTR;
+            val_bstr = SysAllocString( (const WCHAR *)(INT_PTR)val );
+        }
+        else
+            vartype = VT_NULL;
         break;
     case CIM_SINT16:
         if (!vartype) vartype = VT_I2;
@@ -754,11 +646,14 @@ HRESULT get_properties( const struct view *view, SAFEARRAY **props )
     SAFEARRAY *sa;
     BSTR str;
     LONG i;
+    UINT num_props = count_properties( view );
 
-    if (!(sa = SafeArrayCreateVector( VT_BSTR, 0, view->table->num_cols ))) return E_OUTOFMEMORY;
+    if (!(sa = SafeArrayCreateVector( VT_BSTR, 0, num_props ))) return E_OUTOFMEMORY;
 
     for (i = 0; i < view->table->num_cols; i++)
     {
+        if (is_method( view->table, i )) continue;
+
         str = SysAllocString( view->table->columns[i].name );
         if (!str || SafeArrayPutElement( sa, &i, str ) != S_OK)
         {

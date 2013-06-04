@@ -225,17 +225,7 @@ static nsresult before_async_open(nsChannel *channel, NSContainer *container, BO
 {
     HTMLDocumentObj *doc = container->doc;
     BSTR display_uri;
-    DWORD hlnf = 0;
     HRESULT hres;
-
-    if(!doc) {
-        NSContainer *container_iter = container;
-
-        hlnf = HLNF_OPENINNEWWINDOW;
-        while(!container_iter->doc)
-            container_iter = container_iter->parent;
-        doc = container_iter->doc;
-    }
 
     if(!doc->client) {
         *cancel = TRUE;
@@ -246,18 +236,13 @@ static nsresult before_async_open(nsChannel *channel, NSContainer *container, BO
     if(FAILED(hres))
         return NS_ERROR_FAILURE;
 
-    if(!hlnf) {
-        BOOL b;
-
-        b = !exec_shldocvw_67(doc, display_uri);
-        if(b) {
-            SysFreeString(display_uri);
-            *cancel = FALSE;
-            return NS_OK;
-        }
+    if(!exec_shldocvw_67(doc, display_uri)) {
+        SysFreeString(display_uri);
+        *cancel = FALSE;
+        return NS_OK;
     }
 
-    hres = hlink_frame_navigate(&doc->basedoc, display_uri, channel, hlnf, cancel);
+    hres = hlink_frame_navigate(&doc->basedoc, display_uri, channel, 0, cancel);
     SysFreeString(display_uri);
     if(FAILED(hres))
         *cancel = TRUE;
@@ -973,7 +958,7 @@ static HTMLOuterWindow *get_channel_window(nsChannel *This)
 
 typedef struct {
     task_t header;
-    HTMLDocumentNode *doc;
+    HTMLInnerWindow *window;
     nsChannelBSC *bscallback;
 } start_binding_task_t;
 
@@ -981,7 +966,7 @@ static void start_binding_proc(task_t *_task)
 {
     start_binding_task_t *task = (start_binding_task_t*)_task;
 
-    start_binding(NULL, task->doc, (BSCallback*)task->bscallback, NULL);
+    start_binding(task->window, (BSCallback*)task->bscallback, NULL);
 }
 
 static void start_binding_task_destr(task_t *_task)
@@ -1008,7 +993,7 @@ static nsresult async_open(nsChannel *This, HTMLOuterWindow *window, BOOL is_doc
     if(is_doc_channel)
         set_current_mon(window, mon);
 
-    hres = create_channelbsc(mon, NULL, NULL, 0, &bscallback);
+    hres = create_channelbsc(mon, NULL, NULL, 0, is_doc_channel, &bscallback);
     IMoniker_Release(mon);
     if(FAILED(hres))
         return NS_ERROR_UNEXPECTED;
@@ -1016,15 +1001,18 @@ static nsresult async_open(nsChannel *This, HTMLOuterWindow *window, BOOL is_doc
     channelbsc_set_channel(bscallback, This, listener, context);
 
     if(is_doc_channel) {
-        set_window_bscallback(window, bscallback);
-        async_start_doc_binding(window, bscallback);
+        hres = create_pending_window(window, bscallback);
+        if(SUCCEEDED(hres))
+            async_start_doc_binding(window, window->pending_window);
         IUnknown_Release((IUnknown*)bscallback);
+        if(FAILED(hres))
+            return NS_ERROR_UNEXPECTED;
     }else {
         start_binding_task_t *task = heap_alloc(sizeof(start_binding_task_t));
 
-        task->doc = window->base.inner_window->doc;
+        task->window = window->base.inner_window;
         task->bscallback = bscallback;
-        push_task(&task->header, start_binding_proc, start_binding_task_destr, window->base.inner_window->doc->basedoc.task_magic);
+        push_task(&task->header, start_binding_proc, start_binding_task_destr, window->base.inner_window->task_magic);
     }
 
     return NS_OK;

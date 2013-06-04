@@ -639,6 +639,37 @@ HRESULT create_builtin_function(script_ctx_t *ctx, builtin_invoke_t value_proc, 
     return S_OK;
 }
 
+static HRESULT set_constructor_prop(script_ctx_t *ctx, jsdisp_t *constr, jsdisp_t *prot)
+{
+    VARIANT v;
+
+    static const WCHAR constructorW[] = {'c','o','n','s','t','r','u','c','t','o','r',0};
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = to_disp(constr);
+    return jsdisp_propput_dontenum(prot, constructorW, &v);
+}
+
+HRESULT create_builtin_constructor(script_ctx_t *ctx, builtin_invoke_t value_proc, const WCHAR *name,
+        const builtin_info_t *builtin_info, DWORD flags, jsdisp_t *prototype, jsdisp_t **ret)
+{
+    jsdisp_t *constr;
+    HRESULT hres;
+
+    hres = create_builtin_function(ctx, value_proc, name, builtin_info, flags, prototype, &constr);
+    if(FAILED(hres))
+        return hres;
+
+    hres = set_constructor_prop(ctx, constr, prototype);
+    if(FAILED(hres)) {
+        jsdisp_release(constr);
+        return hres;
+    }
+
+    *ret = constr;
+    return S_OK;
+}
+
 HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, function_code_t *func_code,
         scope_chain_t *scope_chain, jsdisp_t **ret)
 {
@@ -653,6 +684,8 @@ HRESULT create_source_function(script_ctx_t *ctx, bytecode_t *code, function_cod
     hres = create_function(ctx, NULL, PROPF_CONSTR, FALSE, NULL, &function);
     if(SUCCEEDED(hres)) {
         hres = set_prototype(ctx, &function->dispex, prototype);
+        if(SUCCEEDED(hres))
+            hres = set_constructor_prop(ctx, &function->dispex, prototype);
         if(FAILED(hres))
             jsdisp_release(&function->dispex);
     }
@@ -814,6 +847,8 @@ HRESULT init_function_constr(script_ctx_t *ctx, jsdisp_t *object_prototype)
         constr->value_proc = FunctionConstr_value;
         constr->name = FunctionW;
         hres = set_prototype(ctx, &constr->dispex, &prot->dispex);
+        if(SUCCEEDED(hres))
+            hres = set_constructor_prop(ctx, &constr->dispex, &prot->dispex);
         if(FAILED(hres))
             jsdisp_release(&constr->dispex);
     }

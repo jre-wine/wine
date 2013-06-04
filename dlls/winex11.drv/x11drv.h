@@ -118,7 +118,6 @@ typedef struct
     GC            gc;          /* X Window GC */
     Drawable      drawable;
     RECT          dc_rect;       /* DC rectangle relative to drawable */
-    RECT          drawable_rect; /* Drawable rectangle relative to screen */
     RECT         *bounds;        /* Graphics bounds */
     HRGN          region;        /* Device region (visible region & clip region) */
     X_PHYSPEN     pen;
@@ -298,7 +297,6 @@ struct x11drv_escape_set_drawable
     Drawable                 drawable;     /* X drawable */
     int                      mode;         /* ClipByChildren or IncludeInferiors */
     RECT                     dc_rect;      /* DC rectangle relative to drawable */
-    RECT                     drawable_rect;/* Drawable rectangle relative to screen */
     XID                      fbconfig_id;  /* fbconfig id used by the GL drawable */
     Drawable                 gl_drawable;  /* GL drawable */
     Pixmap                   pixmap;       /* Pixmap for a GLXPixmap gl_drawable */
@@ -661,6 +659,10 @@ struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
                                                      LONG (*pNewSCM)(int),
                                                      unsigned int nmodes,
                                                      int reserve_depths) DECLSPEC_HIDDEN;
+
+void X11DRV_XF86VM_Init(void) DECLSPEC_HIDDEN;
+void X11DRV_XF86VM_Cleanup(void) DECLSPEC_HIDDEN;
+void X11DRV_XRandR_Init(void) DECLSPEC_HIDDEN;
 
 /* XIM support */
 extern BOOL X11DRV_InitXIM( const char *input_style ) DECLSPEC_HIDDEN;

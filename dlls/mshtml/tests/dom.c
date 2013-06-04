@@ -1296,6 +1296,37 @@ static void _test_anchor_put_target(unsigned line, IUnknown *unk, const char *ta
     SysFreeString(str);
 }
 
+#define test_anchor_name(a,h) _test_anchor_name(__LINE__,a,h)
+static void _test_anchor_name(unsigned line, IUnknown *unk, const char *name)
+{
+    IHTMLAnchorElement *anchor = _get_anchor_iface(line, unk);
+    BSTR str;
+    HRESULT hres;
+
+    hres = IHTMLAnchorElement_get_name(anchor, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08x\n", hres);
+    if(name)
+        ok_(__FILE__,line)(!strcmp_wa(str, name), "name = %s, expected %s\n", wine_dbgstr_w(str), name);
+    else
+        ok_(__FILE__,line)(str == NULL, "name = %s, expected NULL\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+}
+
+#define test_anchor_put_name(a,h) _test_anchor_put_name(__LINE__,a,h)
+static void _test_anchor_put_name(unsigned line, IUnknown *unk, const char *name)
+{
+    IHTMLAnchorElement *anchor = _get_anchor_iface(line, unk);
+    BSTR str;
+    HRESULT hres;
+
+    str = name ? a2bstr(name) : NULL;
+    hres = IHTMLAnchorElement_put_name(anchor, str);
+    ok_(__FILE__,line)(hres == S_OK, "put_name failed: %08x\n", hres);
+    SysFreeString(str);
+
+    _test_anchor_name(line, unk, name);
+}
+
 
 #define test_option_text(o,t) _test_option_text(__LINE__,o,t)
 static void _test_option_text(unsigned line, IHTMLOptionElement *option, const char *text)
@@ -2704,9 +2735,31 @@ static void _test_input_set_checked(unsigned line, IHTMLInputElement *input, VAR
     HRESULT hres;
 
     hres = IHTMLInputElement_put_checked(input, b);
-    ok_(__FILE__,line) (hres == S_OK, "get_checked failed: %08x\n", hres);
+    ok_(__FILE__,line) (hres == S_OK, "put_checked failed: %08x\n", hres);
 
     _test_input_get_checked(line, input, b);
+}
+
+#define test_input_maxlength(i,b) _test_input_maxlength(__LINE__,i,b)
+static void _test_input_maxlength(unsigned line, IHTMLInputElement *input, LONG exl)
+{
+    LONG maxlength = 0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_maxLength(input, &maxlength);
+    ok_(__FILE__,line) (hres == S_OK, "get_maxLength failed: %08x\n", hres);
+    ok_(__FILE__,line) (maxlength == exl, "maxLength=%x, expected %d\n", maxlength, exl);
+}
+
+#define test_input_set_maxlength(i,b) _test_input_set_maxlength(__LINE__,i,b)
+static void _test_input_set_maxlength(unsigned line, IHTMLInputElement *input, LONG l)
+{
+    HRESULT hres;
+
+    hres = IHTMLInputElement_put_maxLength(input, l);
+    ok_(__FILE__,line) (hres == S_OK, "put_maxLength failed: %08x\n", hres);
+
+    _test_input_maxlength(line, input, l);
 }
 
 #define test_input_value(o,t) _test_input_value(__LINE__,o,t)
@@ -5295,6 +5348,9 @@ static void test_elems(IHTMLDocument2 *doc)
         test_input_set_checked(input, VARIANT_TRUE);
         test_input_set_checked(input, VARIANT_FALSE);
 
+        test_input_maxlength(input, 0x7fffffff);
+        test_input_set_maxlength(input, 30);
+
         test_input_name(input, NULL);
         test_input_set_name(input, "test");
 
@@ -5382,6 +5438,11 @@ static void test_elems(IHTMLDocument2 *doc)
         /* Restore the target */
         test_anchor_put_target((IUnknown*)elem, NULL);
         test_anchor_get_target((IUnknown*)elem, NULL);
+
+        test_anchor_name((IUnknown*)elem, "x");
+        test_anchor_put_name((IUnknown*)elem, "anchor name");
+        test_anchor_put_name((IUnknown*)elem, NULL);
+        test_anchor_put_name((IUnknown*)elem, "x");
 
         IHTMLElement_Release(elem);
     }

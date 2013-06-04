@@ -415,6 +415,12 @@ for x = 1 to 100
     Call ok(false, "exit for not escaped the loop?")
 next
 
+do while true
+    for x = 1 to 100
+        exit do
+    next
+loop
+
 Call collectionObj.reset()
 y = 0
 x = 10
@@ -424,6 +430,15 @@ for each x in collectionObj
 next
 Call ok(y = 3, "y = " & y)
 Call ok(getVT(x) = "VT_EMPTY*", "getVT(x) = " & getVT(x))
+
+Call collectionObj.reset()
+y = false
+for each x in collectionObj
+    if x = 2 then exit for
+    y = 1
+next
+Call ok(y = 1, "y = " & y)
+Call ok(x = 2, "x = " & x)
 
 if false then
 Sub testsub
@@ -482,6 +497,13 @@ Sub TestSubExit(ByRef a)
 End Sub
 
 Call TestSubExit(true)
+
+Sub TestSubExit2
+    for x = 1 to 100
+        Exit Sub
+    next
+End Sub
+Call TestSubExit2
 
 TestSubMultiArgs 1, 2, 3, 4, 5
 Call TestSubMultiArgs(1, 2, 3, 4, 5)
@@ -577,6 +599,17 @@ Function TestFuncExit(ByRef a)
 End Function
 
 Call TestFuncExit(true)
+
+Function TestFuncExit2(ByRef a)
+    For x = 1 to 100
+        For y = 1 to 100
+            Exit Function
+        Next
+    Next
+    Call ok(false, "Exit Function not called?")
+End Function
+
+Call TestFuncExit2(true)
 
 Sub SubParseTest
 End Sub : x = false

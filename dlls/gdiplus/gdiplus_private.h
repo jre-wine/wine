@@ -120,7 +120,7 @@ extern void convert_32bppARGB_to_32bppPARGB(UINT width, UINT height,
 
 extern GpStatus convert_pixels(INT width, INT height,
     INT dst_stride, BYTE *dst_bits, PixelFormat dst_format,
-    INT src_stride, const BYTE *src_bits, PixelFormat src_format, ARGB *src_palette) DECLSPEC_HIDDEN;
+    INT src_stride, const BYTE *src_bits, PixelFormat src_format, ColorPalette *palette) DECLSPEC_HIDDEN;
 
 struct GpPen{
     UINT style;
@@ -267,10 +267,7 @@ struct GpImage{
     GUID format;
     UINT flags;
     UINT frame_count, current_frame;
-    UINT palette_flags;
-    UINT palette_count;
-    UINT palette_size;
-    ARGB *palette_entries;
+    ColorPalette *palette;
     REAL xres, yres;
 };
 
