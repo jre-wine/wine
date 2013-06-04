@@ -106,8 +106,12 @@ static HRESULT WINAPI client_security_SetBlanket(
     void *pAuthInfo,
     DWORD Capabilities )
 {
+    static const OLECHAR defaultW[] =
+        {'<','C','O','L','E','_','D','E','F','A','U','L','T','_','P','R','I','N','C','I','P','A','L','>',0};
+    const OLECHAR *princname = (pServerPrincName == COLE_DEFAULT_PRINCIPAL) ? defaultW : pServerPrincName;
+
     FIXME("%p, %p, %u, %u, %s, %u, %u, %p, 0x%08x\n", iface, pProxy, AuthnSvc, AuthzSvc,
-          debugstr_w(pServerPrincName), AuthnLevel, ImpLevel, pAuthInfo, Capabilities);
+          debugstr_w(princname), AuthnLevel, ImpLevel, pAuthInfo, Capabilities);
     return WBEM_NO_ERROR;
 }
 
@@ -130,12 +134,13 @@ static const IClientSecurityVtbl client_security_vtbl =
     client_security_CopyProxy
 };
 
-static IClientSecurity client_security = { &client_security_vtbl };
+IClientSecurity client_security = { &client_security_vtbl };
 
 struct wbem_services
 {
     IWbemServices IWbemServices_iface;
     LONG refs;
+    WCHAR *namespace;
 };
 
 static inline struct wbem_services *impl_from_IWbemServices( IWbemServices *iface )
@@ -158,6 +163,7 @@ static ULONG WINAPI wbem_services_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", ws);
+        heap_free( ws->namespace );
         heap_free( ws );
     }
     return refs;
@@ -199,8 +205,17 @@ static HRESULT WINAPI wbem_services_OpenNamespace(
     IWbemServices **ppWorkingNamespace,
     IWbemCallResult **ppResult )
 {
-    FIXME("\n");
-    return WBEM_E_FAILED;
+    static const WCHAR cimv2W[] = {'c','i','m','v','2',0};
+    static const WCHAR defaultW[] = {'d','e','f','a','u','l','t',0};
+    struct wbem_services *ws = impl_from_IWbemServices( iface );
+
+    TRACE("%p, %s, 0x%08x, %p, %p, %p\n", iface, debugstr_w(strNamespace), lFlags,
+          pCtx, ppWorkingNamespace, ppResult);
+
+    if ((strcmpiW( strNamespace, cimv2W ) && strcmpiW( strNamespace, defaultW )) || ws->namespace)
+        return WBEM_E_INVALID_NAMESPACE;
+
+    return WbemServices_create( NULL, cimv2W, (void **)ppWorkingNamespace );
 }
 
 static HRESULT WINAPI wbem_services_CancelAsyncCall(
@@ -228,8 +243,30 @@ static HRESULT WINAPI wbem_services_GetObject(
     IWbemClassObject **ppObject,
     IWbemCallResult **ppCallResult )
 {
-    FIXME("\n");
-    return WBEM_E_FAILED;
+    static const WCHAR selectW[] = {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',0};
+    IEnumWbemClassObject *iter;
+    WCHAR *query;
+    HRESULT hr;
+
+    TRACE("%p, %s, 0x%08x, %p, %p, %p\n", iface, debugstr_w(strObjectPath), lFlags,
+          pCtx, ppObject, ppCallResult);
+
+    if (lFlags) FIXME("unsupported flags 0x%08x\n", lFlags);
+
+    /* FIXME: parse path */
+
+    if (!(query = heap_alloc( strlenW( strObjectPath ) * sizeof(WCHAR) + sizeof(selectW) )))
+        return E_OUTOFMEMORY;
+    strcpyW( query, selectW );
+    strcatW( query, strObjectPath );
+
+    hr = exec_query( query, &iter );
+    heap_free( query );
+    if (hr != S_OK) return hr;
+
+    hr = WbemClassObject_create( NULL, iter, 0, (void **)ppObject );
+    IEnumWbemClassObject_Release( iter );
+    return hr;
 }
 
 static HRESULT WINAPI wbem_services_GetObjectAsync(
@@ -355,13 +392,27 @@ static HRESULT WINAPI wbem_services_DeleteInstanceAsync(
 
 static HRESULT WINAPI wbem_services_CreateInstanceEnum(
     IWbemServices *iface,
-    const BSTR strFilter,
+    const BSTR strClass,
     LONG lFlags,
     IWbemContext *pCtx,
     IEnumWbemClassObject **ppEnum )
 {
-    FIXME("\n");
-    return WBEM_E_FAILED;
+    static const WCHAR selectW[] = {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',0};
+    WCHAR *query;
+    HRESULT hr;
+
+    TRACE("%p, %s, 0%08x, %p, %p\n", iface, debugstr_w(strClass), lFlags, pCtx, ppEnum);
+
+    if (lFlags) FIXME("unsupported flags 0x%08x\n", lFlags);
+
+    if (!(query = heap_alloc( strlenW( strClass ) * sizeof(WCHAR) + sizeof(selectW) )))
+        return E_OUTOFMEMORY;
+    strcpyW( query, selectW );
+    strcatW( query, strClass );
+
+    hr = exec_query( query, ppEnum );
+    heap_free( query );
+    return hr;
 }
 
 static HRESULT WINAPI wbem_services_CreateInstanceEnumAsync(
@@ -486,7 +537,7 @@ static const IWbemServicesVtbl wbem_services_vtbl =
     wbem_services_ExecMethodAsync
 };
 
-HRESULT WbemServices_create( IUnknown *pUnkOuter, LPVOID *ppObj )
+HRESULT WbemServices_create( IUnknown *pUnkOuter, const WCHAR *namespace, LPVOID *ppObj )
 {
     struct wbem_services *ws;
 
@@ -497,6 +548,7 @@ HRESULT WbemServices_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     ws->IWbemServices_iface.lpVtbl = &wbem_services_vtbl;
     ws->refs = 1;
+    ws->namespace = heap_strdupW( namespace );
 
     *ppObj = &ws->IWbemServices_iface;
 

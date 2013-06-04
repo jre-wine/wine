@@ -19,6 +19,8 @@
 #include "wine/list.h"
 #include "wine/unicode.h"
 
+IClientSecurity client_security;
+
 #define SIZEOF(array) (sizeof(array)/sizeof((array)[0]))
 
 #define COL_TYPE_MASK    0x0000ffff
@@ -29,6 +31,7 @@ struct column
 {
     const WCHAR *name;
     UINT type;
+    VARTYPE vartype; /* 0 for default mapping */
 };
 
 struct table
@@ -100,16 +103,17 @@ struct view
     const struct expr *cond;
     UINT *result;
     UINT  count;
-    UINT  index;
 };
 
 struct query
 {
+    LONG refs;
     struct view *view;
     struct list mem;
 };
 
-void free_query( struct query * ) DECLSPEC_HIDDEN;
+void addref_query( struct query * ) DECLSPEC_HIDDEN;
+void release_query( struct query *query ) DECLSPEC_HIDDEN;
 HRESULT exec_query( const WCHAR *, IEnumWbemClassObject ** ) DECLSPEC_HIDDEN;
 HRESULT parse_query( const WCHAR *, struct view **, struct list * ) DECLSPEC_HIDDEN;
 HRESULT create_view( const struct property *, const WCHAR *, const struct expr *,
@@ -117,11 +121,11 @@ HRESULT create_view( const struct property *, const WCHAR *, const struct expr *
 void destroy_view( struct view * ) DECLSPEC_HIDDEN;
 struct table *get_table( const WCHAR * ) DECLSPEC_HIDDEN;
 HRESULT get_propval( const struct view *, UINT, const WCHAR *, VARIANT *,
-                     CIMTYPE * ) DECLSPEC_HIDDEN;
+                     CIMTYPE *, LONG * ) DECLSPEC_HIDDEN;
 HRESULT get_properties( const struct view *, SAFEARRAY ** ) DECLSPEC_HIDDEN;
 
 HRESULT WbemLocator_create(IUnknown *, LPVOID *) DECLSPEC_HIDDEN;
-HRESULT WbemServices_create(IUnknown *, LPVOID *) DECLSPEC_HIDDEN;
+HRESULT WbemServices_create(IUnknown *, const WCHAR *, LPVOID *) DECLSPEC_HIDDEN;
 HRESULT WbemClassObject_create(IUnknown *, IEnumWbemClassObject *, UINT, LPVOID *) DECLSPEC_HIDDEN;
 HRESULT EnumWbemClassObject_create(IUnknown *, struct query *, LPVOID *) DECLSPEC_HIDDEN;
 

@@ -694,24 +694,30 @@ static void test_bitmap_rendering( BOOL use_dib )
 struct wgl_thread_param
 {
     HANDLE test_finished;
+    HWND hwnd;
     HGLRC hglrc;
-    BOOL hglrc_deleted;
-    DWORD last_error;
+    BOOL make_current;
+    BOOL make_current_error;
+    BOOL deleted;
+    DWORD deleted_error;
 };
 
 static DWORD WINAPI wgl_thread(void *param)
 {
     struct wgl_thread_param *p = param;
+    HDC hdc = GetDC( p->hwnd );
 
     SetLastError(0xdeadbeef);
-    p->hglrc_deleted = wglDeleteContext(p->hglrc);
-    p->last_error = GetLastError();
+    p->make_current = wglMakeCurrent(hdc, p->hglrc);
+    p->make_current_error = GetLastError();
+    p->deleted = wglDeleteContext(p->hglrc);
+    p->deleted_error = GetLastError();
+    ReleaseDC( p->hwnd, hdc );
     SetEvent(p->test_finished);
-
     return 0;
 }
 
-static void test_deletecontext(HDC hdc)
+static void test_deletecontext(HWND hwnd, HDC hdc)
 {
     struct wgl_thread_param thread_params;
     HGLRC hglrc = wglCreateContext(hdc);
@@ -740,14 +746,17 @@ static void test_deletecontext(HDC hdc)
      * This differs from GLX which does allow it but it delays actual deletion until the context becomes not current.
      */
     thread_params.hglrc = hglrc;
+    thread_params.hwnd  = hwnd;
     thread_params.test_finished = CreateEvent(NULL, FALSE, FALSE, NULL);
     thread_handle = CreateThread(NULL, 0, wgl_thread, &thread_params, 0, &tid);
     ok(!!thread_handle, "Failed to create thread, last error %#x.\n", GetLastError());
     if(thread_handle)
     {
         WaitForSingleObject(thread_handle, INFINITE);
-        ok(thread_params.hglrc_deleted == FALSE, "Attempt to delete WGL context from another thread passed but should fail!\n");
-        ok(thread_params.last_error == ERROR_BUSY, "Expected last error to be ERROR_BUSY, got %u\n", thread_params.last_error);
+        ok(!thread_params.make_current, "Attempt to make WGL context from another thread passed\n");
+        ok(thread_params.make_current_error == ERROR_BUSY, "Expected last error to be ERROR_BUSY, got %u\n", thread_params.make_current_error);
+        ok(!thread_params.deleted, "Attempt to delete WGL context from another thread passed\n");
+        ok(thread_params.deleted_error == ERROR_BUSY, "Expected last error to be ERROR_BUSY, got %u\n", thread_params.deleted_error);
     }
     CloseHandle(thread_params.test_finished);
 
@@ -779,6 +788,16 @@ static void test_getprocaddress(HDC hdc)
         return;
     }
 
+    /* Core GL 1.0/1.1 functions should not be loadable through wglGetProcAddress.
+     * Try to load the function with and without a context.
+     */
+    func = wglGetProcAddress("glEnable");
+    ok(func == NULL, "Lookup of function glEnable with a context passed, expected a failure\n");
+    wglMakeCurrent(hdc, NULL);
+    func = wglGetProcAddress("glEnable");
+    ok(func == NULL, "Lookup of function glEnable without a context passed, expected a failure\n");
+    wglMakeCurrent(hdc, ctx);
+
     /* The goal of the test will be to test behavior of wglGetProcAddress when
      * no WGL context is active. Before the test we pick an extension (GL_ARB_multitexture)
      * which any GL >=1.2.1 implementation supports. Unfortunately the GDI renderer doesn't
@@ -797,7 +816,7 @@ static void test_getprocaddress(HDC hdc)
     /* Temporarily disable the context, so we can see that we can't retrieve functions now. */
     wglMakeCurrent(hdc, NULL);
     func = wglGetProcAddress("glActiveTextureARB");
-    todo_wine ok(func == NULL, "Function lookup without a context passed, expected a failure; last error %#x\n", GetLastError());
+    ok(func == NULL, "Function lookup without a context passed, expected a failure; last error %#x\n", GetLastError());
     wglMakeCurrent(hdc, ctx);
 }
 
@@ -885,7 +904,7 @@ static void test_opengl3(HDC hdc)
         HGLRC gl3Ctx;
         DWORD error;
         gl3Ctx = pwglCreateContextAttribsARB(hdc, (HGLRC)0xdeadbeef, 0);
-        todo_wine ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
+        ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
         error = GetLastError();
         /* The Nvidia implementation seems to return hresults instead of win32 error codes */
         todo_wine ok(error == ERROR_INVALID_OPERATION ||
@@ -1459,6 +1478,7 @@ START_TEST(opengl)
          * any WGL call :( On Wine this would work but not on real Windows because there can be different implementations (software, ICD, MCD).
          */
         init_functions();
+        test_deletecontext(hwnd, hdc);
         /* The lack of wglGetExtensionsStringARB in general means broken software rendering or the lack of decent OpenGL support, skip tests in such cases */
         if (!pwglGetExtensionsStringARB)
         {
@@ -1467,7 +1487,6 @@ START_TEST(opengl)
         }
 
         test_getprocaddress(hdc);
-        test_deletecontext(hdc);
         test_makecurrent(hdc);
         test_setpixelformat(hdc);
         test_destroy(hdc);

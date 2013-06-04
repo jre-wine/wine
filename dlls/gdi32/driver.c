@@ -50,6 +50,7 @@ static struct list drivers = LIST_INIT( drivers );
 static struct graphics_driver *display_driver;
 
 const struct gdi_dc_funcs *font_driver = NULL;
+static const struct wgl_funcs null_wgl_driver;
 
 static CRITICAL_SECTION driver_section;
 static CRITICAL_SECTION_DEBUG critsect_debug =
@@ -196,11 +197,6 @@ static BOOL nulldrv_Arc( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                          INT xstart, INT ystart, INT xend, INT yend )
 {
     return TRUE;
-}
-
-static INT nulldrv_ChoosePixelFormat( PHYSDEV dev, const PIXELFORMATDESCRIPTOR *descr )
-{
-    return 0;
 }
 
 static BOOL nulldrv_Chord( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
@@ -391,7 +387,7 @@ static UINT nulldrv_GetOutlineTextMetrics( PHYSDEV dev, UINT size, LPOUTLINETEXT
     return 0;
 }
 
-static INT nulldrv_GetPixelFormat( PHYSDEV dev )
+static INT nulldrv_GetPixelFormat( HDC hdc )
 {
     return 0;
 }
@@ -670,24 +666,29 @@ static BOOL nulldrv_UnrealizePalette( HPALETTE palette )
     return FALSE;
 }
 
-static BOOL nulldrv_wglCopyContext( HGLRC ctx_src, HGLRC ctx_dst, UINT mask )
+static BOOL nulldrv_wglCopyContext( struct wgl_context *src, struct wgl_context *dst, UINT mask )
 {
     return FALSE;
 }
 
-static HGLRC nulldrv_wglCreateContext( PHYSDEV dev )
+static struct wgl_context *nulldrv_wglCreateContext( HDC hdc )
 {
     return 0;
 }
 
-static HGLRC nulldrv_wglCreateContextAttribsARB( PHYSDEV dev, HGLRC share_ctx, const int *attribs )
+static struct wgl_context *nulldrv_wglCreateContextAttribsARB( HDC hdc, struct wgl_context *share_ctx,
+                                                               const int *attribs )
 {
     return 0;
 }
 
-static BOOL nulldrv_wglDeleteContext( HGLRC ctx )
+static void nulldrv_wglDeleteContext( struct wgl_context *context )
 {
-    return FALSE;
+}
+
+static HDC nulldrv_wglGetCurrentDC( struct wgl_context *context )
+{
+    return 0;
 }
 
 static PROC nulldrv_wglGetProcAddress( LPCSTR name )
@@ -695,34 +696,29 @@ static PROC nulldrv_wglGetProcAddress( LPCSTR name )
     return NULL;
 }
 
-static BOOL nulldrv_wglMakeCurrent( PHYSDEV dev, HGLRC ctx )
+static BOOL nulldrv_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct wgl_context *context )
 {
     return FALSE;
 }
 
-static BOOL nulldrv_wglMakeContextCurrentARB( PHYSDEV dev_draw, PHYSDEV dev_read, HGLRC ctx )
+static BOOL nulldrv_wglMakeCurrent( HDC hdc, struct wgl_context *context )
 {
     return FALSE;
 }
 
-static BOOL nulldrv_wglSetPixelFormatWINE( PHYSDEV dev, INT format, const PIXELFORMATDESCRIPTOR *descr )
+static BOOL nulldrv_wglShareLists( struct wgl_context *org, struct wgl_context *dst )
 {
     return FALSE;
 }
 
-static BOOL nulldrv_wglShareLists( HGLRC ctx1, HGLRC ctx2 )
+static const struct wgl_funcs *nulldrv_wine_get_wgl_driver( PHYSDEV dev, UINT version )
 {
-    return FALSE;
-}
-
-static BOOL nulldrv_wglUseFontBitmapsA( PHYSDEV dev, DWORD start, DWORD count, DWORD base )
-{
-    return FALSE;
-}
-
-static BOOL nulldrv_wglUseFontBitmapsW( PHYSDEV dev, DWORD start, DWORD count, DWORD base )
-{
-    return FALSE;
+    if (version != WINE_GDI_DRIVER_VERSION)
+    {
+        ERR( "version mismatch, opengl32 wants %u but driver has %u\n", version, WINE_GDI_DRIVER_VERSION );
+        return NULL;
+    }
+    return &null_wgl_driver;
 }
 
 const struct gdi_dc_funcs null_driver =
@@ -735,7 +731,6 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_ArcTo,                      /* pArcTo */
     nulldrv_BeginPath,                  /* pBeginPath */
     nulldrv_BlendImage,                 /* pBlendImage */
-    nulldrv_ChoosePixelFormat,          /* pChoosePixelFormat */
     nulldrv_Chord,                      /* pChord */
     nulldrv_CloseFigure,                /* pCloseFigure */
     nulldrv_CreateCompatibleDC,         /* pCreateCompatibleDC */
@@ -779,7 +774,6 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_GetNearestColor,            /* pGetNearestColor */
     nulldrv_GetOutlineTextMetrics,      /* pGetOutlineTextMetrics */
     nulldrv_GetPixel,                   /* pGetPixel */
-    nulldrv_GetPixelFormat,             /* pGetPixelFormat */
     nulldrv_GetSystemPaletteEntries,    /* pGetSystemPaletteEntries */
     nulldrv_GetTextCharsetInfo,         /* pGetTextCharsetInfo */
     nulldrv_GetTextExtentExPoint,       /* pGetTextExtentExPoint */
@@ -858,21 +852,24 @@ const struct gdi_dc_funcs null_driver =
     nulldrv_SwapBuffers,                /* pSwapBuffers */
     nulldrv_UnrealizePalette,           /* pUnrealizePalette */
     nulldrv_WidenPath,                  /* pWidenPath */
-    nulldrv_wglCopyContext,             /* pwglCopyContext */
-    nulldrv_wglCreateContext,           /* pwglCreateContext */
-    nulldrv_wglCreateContextAttribsARB, /* pwglCreateContextAttribsARB */
-    nulldrv_wglDeleteContext,           /* pwglDeleteContext */
-    nulldrv_wglGetProcAddress,          /* pwglGetProcAddress */
-    nulldrv_wglMakeContextCurrentARB,   /* pwglMakeContextCurrentARB */
-    nulldrv_wglMakeCurrent,             /* pwglMakeCurrent */
-    nulldrv_wglSetPixelFormatWINE,      /* pwglSetPixelFormatWINE */
-    nulldrv_wglShareLists,              /* pwglShareLists */
-    nulldrv_wglUseFontBitmapsA,         /* pwglUseFontBitmapsA */
-    nulldrv_wglUseFontBitmapsW,         /* pwglUseFontBitmapsW */
+    nulldrv_wine_get_wgl_driver,        /* wine_get_wgl_driver */
 
     GDI_PRIORITY_NULL_DRV               /* priority */
 };
 
+static const struct wgl_funcs null_wgl_driver =
+{
+    nulldrv_GetPixelFormat,             /* p_GetPixelFormat */
+    nulldrv_wglCopyContext,             /* p_wglCopyContext */
+    nulldrv_wglCreateContext,           /* p_wglCreateContext */
+    nulldrv_wglCreateContextAttribsARB, /* p_wglCreateContextAttribsARB */
+    nulldrv_wglDeleteContext,           /* p_wglDeleteContext */
+    nulldrv_wglGetCurrentDC,            /* p_wglGetCurrentDC */
+    nulldrv_wglGetProcAddress,          /* p_wglGetProcAddress */
+    nulldrv_wglMakeContextCurrentARB,   /* p_wglMakeContextCurrentARB */
+    nulldrv_wglMakeCurrent,             /* p_wglMakeCurrent */
+    nulldrv_wglShareLists,              /* p_wglShareLists */
+};
 
 /*****************************************************************************
  *      DRIVER_GetDriverName

@@ -17,6 +17,7 @@
  */
 
 #include <stdarg.h>
+#include <assert.h>
 
 #define NONAMELESSUNION
 
@@ -1785,6 +1786,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
     (*bitmap)->bits = bits;
     (*bitmap)->stride = stride;
     (*bitmap)->own_bits = own_bits;
+    (*bitmap)->metadata_reader = NULL;
 
     /* set format-related flags */
     if (format & (PixelFormatAlpha|PixelFormatPAlpha|PixelFormatIndexed))
@@ -1967,6 +1969,11 @@ GpStatus WINGDIPAPI GdipEmfToWmfBits(HENHMETAFILE hemf, UINT cbData16,
  * and free src. */
 static void move_bitmap(GpBitmap *dst, GpBitmap *src, BOOL clobber_palette)
 {
+    assert(src->image.type == ImageTypeBitmap);
+    assert(dst->image.type == ImageTypeBitmap);
+    assert(src->image.stream == NULL);
+    assert(dst->image.stream == NULL);
+
     GdipFree(dst->bitmapbits);
     DeleteDC(dst->hdc);
     DeleteObject(dst->hbitmap);
@@ -1991,7 +1998,11 @@ static void move_bitmap(GpBitmap *dst, GpBitmap *src, BOOL clobber_palette)
     dst->bits = src->bits;
     dst->stride = src->stride;
     dst->own_bits = src->own_bits;
+    if (dst->metadata_reader)
+        IWICMetadataReader_Release(dst->metadata_reader);
+    dst->metadata_reader = src->metadata_reader;
 
+    src->image.type = ~0;
     GdipFree(src);
 }
 
@@ -2006,6 +2017,8 @@ static GpStatus free_image_data(GpImage *image)
         GdipFree(((GpBitmap*)image)->own_bits);
         DeleteDC(((GpBitmap*)image)->hdc);
         DeleteObject(((GpBitmap*)image)->hbitmap);
+        if (((GpBitmap*)image)->metadata_reader)
+            IWICMetadataReader_Release(((GpBitmap*)image)->metadata_reader);
     }
     else if (image->type == ImageTypeMetafile)
     {
@@ -2377,83 +2390,409 @@ GpStatus WINGDIPAPI GdipGetMetafileHeaderFromStream(IStream *stream,
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage *image, UINT size,
-    UINT num, PropertyItem* items)
+GpStatus WINGDIPAPI GdipGetPropertyCount(GpImage *image, UINT *num)
 {
-    static int calls;
-
-    TRACE("(%p, %u, %u, %p)\n", image, size, num, items);
-
-    if(!(calls++))
-        FIXME("not implemented\n");
-
-    return InvalidParameter;
-}
-
-GpStatus WINGDIPAPI GdipGetPropertyCount(GpImage *image, UINT* num)
-{
-    static int calls;
-
     TRACE("(%p, %p)\n", image, num);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!image || !num) return InvalidParameter;
 
     *num = 0;
+
+    if (image->type == ImageTypeBitmap)
+    {
+        if (((GpBitmap *)image)->metadata_reader)
+            IWICMetadataReader_GetCount(((GpBitmap *)image)->metadata_reader, num);
+    }
+
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipGetPropertyIdList(GpImage *image, UINT num, PROPID* list)
+GpStatus WINGDIPAPI GdipGetPropertyIdList(GpImage *image, UINT num, PROPID *list)
 {
-    static int calls;
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    IWICEnumMetadataItem *enumerator;
+    UINT prop_count, i, items_returned;
 
     TRACE("(%p, %u, %p)\n", image, num, list);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!image || !list) return InvalidParameter;
 
-    return InvalidParameter;
+    if (image->type != ImageTypeBitmap)
+    {
+        FIXME("Not implemented for type %d\n", image->type);
+        return NotImplemented;
+    }
+
+    reader = ((GpBitmap *)image)->metadata_reader;
+    if (!reader)
+    {
+        if (num != 0) return InvalidParameter;
+        return Ok;
+    }
+
+    hr = IWICMetadataReader_GetCount(reader, &prop_count);
+    if (FAILED(hr)) return hresult_to_status(hr);
+
+    if (num != prop_count) return InvalidParameter;
+
+    hr = IWICMetadataReader_GetEnumerator(reader, &enumerator);
+    if (FAILED(hr)) return hresult_to_status(hr);
+
+    IWICEnumMetadataItem_Reset(enumerator);
+
+    for (i = 0; i < num; i++)
+    {
+        PROPVARIANT id;
+
+        hr = IWICEnumMetadataItem_Next(enumerator, 1, NULL, &id, NULL, &items_returned);
+        if (hr != S_OK) break;
+
+        if (id.vt != VT_UI2)
+        {
+            FIXME("not supported propvariant type for id: %u\n", id.vt);
+            list[i] = 0;
+            continue;
+        }
+        list[i] = id.u.uiVal;
+    }
+
+    IWICEnumMetadataItem_Release(enumerator);
+
+    return hr == S_OK ? Ok : hresult_to_status(hr);
 }
 
-GpStatus WINGDIPAPI GdipGetPropertyItem(GpImage *image, PROPID id, UINT size,
-    PropertyItem* buffer)
+static UINT propvariant_size(PROPVARIANT *value)
 {
-    static int calls;
-
-    TRACE("(%p, %u, %u, %p)\n", image, id, size, buffer);
-
-    if(!(calls++))
-        FIXME("not implemented\n");
-
-    return InvalidParameter;
+    switch (value->vt & ~VT_VECTOR)
+    {
+    case VT_EMPTY:
+        return 0;
+    case VT_I1:
+    case VT_UI1:
+        if (!(value->vt & VT_VECTOR)) return 1;
+        return value->u.caub.cElems;
+    case VT_I2:
+    case VT_UI2:
+        if (!(value->vt & VT_VECTOR)) return 2;
+        return value->u.caui.cElems * 2;
+    case VT_I4:
+    case VT_UI4:
+    case VT_R4:
+        if (!(value->vt & VT_VECTOR)) return 4;
+        return value->u.caul.cElems * 4;
+    case VT_I8:
+    case VT_UI8:
+    case VT_R8:
+        if (!(value->vt & VT_VECTOR)) return 8;
+        return value->u.cauh.cElems * 8;
+    case VT_LPSTR:
+        return value->u.pszVal ? strlen(value->u.pszVal) + 1 : 0;
+    case VT_BLOB:
+        return value->u.blob.cbSize;
+    default:
+        FIXME("not supported variant type %d\n", value->vt);
+        return 0;
+    }
 }
 
-GpStatus WINGDIPAPI GdipGetPropertyItemSize(GpImage *image, PROPID pid,
-    UINT* size)
+GpStatus WINGDIPAPI GdipGetPropertyItemSize(GpImage *image, PROPID propid, UINT *size)
 {
-    static int calls;
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    PROPVARIANT id, value;
 
-    TRACE("%p %x %p\n", image, pid, size);
+    TRACE("(%p,%#x,%p)\n", image, propid, size);
 
-    if(!size || !image)
+    if (!size || !image) return InvalidParameter;
+
+    if (image->type != ImageTypeBitmap)
+    {
+        FIXME("Not implemented for type %d\n", image->type);
+        return NotImplemented;
+    }
+
+    reader = ((GpBitmap *)image)->metadata_reader;
+    if (!reader) return PropertyNotFound;
+
+    id.vt = VT_UI2;
+    id.u.uiVal = propid;
+    hr = IWICMetadataReader_GetValue(reader, NULL, &id, &value);
+    if (FAILED(hr)) return PropertyNotFound;
+
+    *size = propvariant_size(&value);
+    if (*size) *size += sizeof(PropertyItem);
+    PropVariantClear(&value);
+
+    return Ok;
+}
+
+#ifndef PropertyTagTypeSByte
+#define PropertyTagTypeSByte  6
+#define PropertyTagTypeSShort 8
+#define PropertyTagTypeFloat  11
+#define PropertyTagTypeDouble 12
+#endif
+
+static UINT vt_to_itemtype(UINT vt)
+{
+    static const struct
+    {
+        UINT vt, type;
+    } vt2type[] =
+    {
+        { VT_I1, PropertyTagTypeSByte },
+        { VT_UI1, PropertyTagTypeByte },
+        { VT_I2, PropertyTagTypeSShort },
+        { VT_UI2, PropertyTagTypeShort },
+        { VT_I4, PropertyTagTypeSLONG },
+        { VT_UI4, PropertyTagTypeLong },
+        { VT_I8, PropertyTagTypeSRational },
+        { VT_UI8, PropertyTagTypeRational },
+        { VT_R4, PropertyTagTypeFloat },
+        { VT_R8, PropertyTagTypeDouble },
+        { VT_LPSTR, PropertyTagTypeASCII },
+        { VT_BLOB, PropertyTagTypeUndefined }
+    };
+    UINT i;
+    for (i = 0; i < sizeof(vt2type)/sizeof(vt2type[0]); i++)
+    {
+        if (vt2type[i].vt == vt) return vt2type[i].type;
+    }
+    FIXME("not supported variant type %u\n", vt);
+    return 0;
+}
+
+static GpStatus propvariant_to_item(PROPVARIANT *value, PropertyItem *item,
+                                    UINT size, PROPID id)
+{
+    UINT item_size, item_type;
+
+    item_size = propvariant_size(value);
+    if (size != item_size + sizeof(PropertyItem)) return InvalidParameter;
+
+    item_type = vt_to_itemtype(value->vt & ~VT_VECTOR);
+    if (!item_type) return InvalidParameter;
+
+    item->value = item + 1;
+
+    switch (value->vt & ~VT_VECTOR)
+    {
+    case VT_I1:
+    case VT_UI1:
+        if (!(value->vt & VT_VECTOR))
+            *(BYTE *)item->value = value->u.bVal;
+        else
+            memcpy(item->value, value->u.caub.pElems, item_size);
+        break;
+    case VT_I2:
+    case VT_UI2:
+        if (!(value->vt & VT_VECTOR))
+            *(USHORT *)item->value = value->u.uiVal;
+        else
+            memcpy(item->value, value->u.caui.pElems, item_size);
+        break;
+    case VT_I4:
+    case VT_UI4:
+    case VT_R4:
+        if (!(value->vt & VT_VECTOR))
+            *(ULONG *)item->value = value->u.ulVal;
+        else
+            memcpy(item->value, value->u.caul.pElems, item_size);
+        break;
+    case VT_I8:
+    case VT_UI8:
+    case VT_R8:
+        if (!(value->vt & VT_VECTOR))
+            *(ULONGLONG *)item->value = value->u.uhVal.QuadPart;
+        else
+            memcpy(item->value, value->u.cauh.pElems, item_size);
+        break;
+    case VT_LPSTR:
+        memcpy(item->value, value->u.pszVal, item_size);
+        break;
+    case VT_BLOB:
+        memcpy(item->value, value->u.blob.pBlobData, item_size);
+        break;
+    default:
+        FIXME("not supported variant type %d\n", value->vt);
         return InvalidParameter;
+    }
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    item->length = item_size;
+    item->type = item_type;
+    item->id = id;
 
-    return NotImplemented;
+    return Ok;
 }
 
-GpStatus WINGDIPAPI GdipGetPropertySize(GpImage *image, UINT* size, UINT* num)
+GpStatus WINGDIPAPI GdipGetPropertyItem(GpImage *image, PROPID propid, UINT size,
+                                        PropertyItem *buffer)
 {
-    static int calls;
+    GpStatus stat;
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    PROPVARIANT id, value;
 
-    TRACE("(%p,%p,%p)\n", image, size, num);
+    TRACE("(%p,%#x,%u,%p)\n", image, propid, size, buffer);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (!image || !buffer) return InvalidParameter;
 
-    return InvalidParameter;
+    if (image->type != ImageTypeBitmap)
+    {
+        FIXME("Not implemented for type %d\n", image->type);
+        return NotImplemented;
+    }
+
+    reader = ((GpBitmap *)image)->metadata_reader;
+    if (!reader) return PropertyNotFound;
+
+    id.vt = VT_UI2;
+    id.u.uiVal = propid;
+    hr = IWICMetadataReader_GetValue(reader, NULL, &id, &value);
+    if (FAILED(hr)) return PropertyNotFound;
+
+    stat = propvariant_to_item(&value, buffer, size, propid);
+    PropVariantClear(&value);
+
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipGetPropertySize(GpImage *image, UINT *size, UINT *count)
+{
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    IWICEnumMetadataItem *enumerator;
+    UINT prop_count, prop_size, i;
+    PROPVARIANT id, value;
+
+    TRACE("(%p,%p,%p)\n", image, size, count);
+
+    if (!image || !size || !count) return InvalidParameter;
+
+    if (image->type != ImageTypeBitmap)
+    {
+        FIXME("Not implemented for type %d\n", image->type);
+        return NotImplemented;
+    }
+
+    reader = ((GpBitmap *)image)->metadata_reader;
+    if (!reader) return PropertyNotFound;
+
+    hr = IWICMetadataReader_GetCount(reader, &prop_count);
+    if (FAILED(hr)) return hresult_to_status(hr);
+
+    hr = IWICMetadataReader_GetEnumerator(reader, &enumerator);
+    if (FAILED(hr)) return hresult_to_status(hr);
+
+    IWICEnumMetadataItem_Reset(enumerator);
+
+    prop_size = 0;
+
+    PropVariantInit(&id);
+    PropVariantInit(&value);
+
+    for (i = 0; i < prop_count; i++)
+    {
+        UINT items_returned, item_size;
+
+        hr = IWICEnumMetadataItem_Next(enumerator, 1, NULL, &id, &value, &items_returned);
+        if (hr != S_OK) break;
+
+        item_size = propvariant_size(&value);
+        if (item_size) prop_size += sizeof(PropertyItem) + item_size;
+
+        PropVariantClear(&id);
+        PropVariantClear(&value);
+    }
+
+    IWICEnumMetadataItem_Release(enumerator);
+
+    if (hr != S_OK) return PropertyNotFound;
+
+    *count = prop_count;
+    *size = prop_size;
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage *image, UINT size,
+                                            UINT count, PropertyItem *buf)
+{
+    GpStatus status;
+    HRESULT hr;
+    IWICMetadataReader *reader;
+    IWICEnumMetadataItem *enumerator;
+    UINT prop_count, prop_size, i;
+    PROPVARIANT id, value;
+    char *item_value;
+
+    TRACE("(%p,%u,%u,%p)\n", image, size, count, buf);
+
+    if (!image || !buf) return InvalidParameter;
+
+    if (image->type != ImageTypeBitmap)
+    {
+        FIXME("Not implemented for type %d\n", image->type);
+        return NotImplemented;
+    }
+
+    status = GdipGetPropertySize(image, &prop_size, &prop_count);
+    if (status != Ok) return status;
+
+    if (prop_count != count || prop_size != size) return InvalidParameter;
+
+    reader = ((GpBitmap *)image)->metadata_reader;
+    if (!reader) return PropertyNotFound;
+
+    hr = IWICMetadataReader_GetEnumerator(reader, &enumerator);
+    if (FAILED(hr)) return hresult_to_status(hr);
+
+    IWICEnumMetadataItem_Reset(enumerator);
+
+    item_value = (char *)(buf + prop_count);
+
+    PropVariantInit(&id);
+    PropVariantInit(&value);
+
+    for (i = 0; i < prop_count; i++)
+    {
+        PropertyItem *item;
+        UINT items_returned, item_size;
+
+        hr = IWICEnumMetadataItem_Next(enumerator, 1, NULL, &id, &value, &items_returned);
+        if (hr != S_OK) break;
+
+        if (id.vt != VT_UI2)
+        {
+            FIXME("not supported propvariant type for id: %u\n", id.vt);
+            continue;
+        }
+
+        item_size = propvariant_size(&value);
+        if (item_size)
+        {
+            item = HeapAlloc(GetProcessHeap(), 0, item_size + sizeof(*item));
+
+            propvariant_to_item(&value, item, item_size + sizeof(*item), id.u.uiVal);
+            buf[i].id = item->id;
+            buf[i].type = item->type;
+            buf[i].length = item_size;
+            buf[i].value = item_value;
+            memcpy(item_value, item->value, item_size);
+            item_value += item_size;
+
+            HeapFree(GetProcessHeap(), 0, item);
+        }
+
+        PropVariantClear(&id);
+        PropVariantClear(&value);
+    }
+
+    IWICEnumMetadataItem_Release(enumerator);
+
+    if (hr != S_OK) return PropertyNotFound;
+
+    return Ok;
 }
 
 struct image_format_dimension
@@ -2588,6 +2927,7 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_fr
     IWICBitmapDecoder *decoder;
     IWICBitmapFrameDecode *frame;
     IWICBitmapSource *source=NULL;
+    IWICMetadataBlockReader *block_reader;
     WICPixelFormatGUID wic_format;
     PixelFormat gdip_format=0;
     int i;
@@ -2615,12 +2955,14 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_fr
 
         if (SUCCEEDED(hr))
         {
+            IWICBitmapSource *bmp_source;
+            IWICBitmapFrameDecode_QueryInterface(frame, &IID_IWICBitmapSource, (void **)&bmp_source);
+
             for (i=0; wic_pixel_formats[i]; i++)
             {
                 if (IsEqualGUID(&wic_format, wic_pixel_formats[i]))
                 {
-                    source = (IWICBitmapSource*)frame;
-                    IWICBitmapSource_AddRef(source);
+                    source = bmp_source;
                     gdip_format = wic_gdip_formats[i];
                     break;
                 }
@@ -2628,8 +2970,9 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_fr
             if (!source)
             {
                 /* unknown format; fall back on 32bppARGB */
-                hr = WICConvertBitmapSource(&GUID_WICPixelFormat32bppBGRA, (IWICBitmapSource*)frame, &source);
+                hr = WICConvertBitmapSource(&GUID_WICPixelFormat32bppBGRA, bmp_source, &source);
                 gdip_format = PixelFormat32bppARGB;
+                IWICBitmapSource_Release(bmp_source);
             }
         }
 
@@ -2685,6 +3028,15 @@ static GpStatus decode_image_wic(IStream* stream, REFCLSID clsid, UINT active_fr
             IWICBitmapSource_Release(source);
         }
 
+        bitmap->metadata_reader = NULL;
+        if (IWICBitmapFrameDecode_QueryInterface(frame, &IID_IWICMetadataBlockReader, (void **)&block_reader) == S_OK)
+        {
+            UINT block_count = 0;
+            if (IWICMetadataBlockReader_GetCount(block_reader, &block_count) == S_OK && block_count)
+                IWICMetadataBlockReader_GetReaderByIndex(block_reader, 0, &bitmap->metadata_reader);
+            IWICMetadataBlockReader_Release(block_reader);
+        }
+
         IWICBitmapFrameDecode_Release(frame);
     }
 
@@ -2702,6 +3054,8 @@ end:
         bitmap->image.frame_count = frame_count;
         bitmap->image.current_frame = active_frame;
         bitmap->image.stream = stream;
+        /* Pin the source stream */
+        IStream_AddRef(stream);
     }
 
     return status;
@@ -2769,7 +3123,7 @@ static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid
     *image = GdipAlloc(sizeof(GpMetafile));
     if(!*image) return OutOfMemory;
     (*image)->type = ImageTypeMetafile;
-    (*image)->stream = stream;
+    (*image)->stream = NULL;
     (*image)->picture = pic;
     (*image)->flags   = ImageFlagsNone;
     (*image)->frame_count = 1;
@@ -2938,42 +3292,21 @@ GpStatus WINGDIPAPI GdipImageSelectActiveFrame(GpImage *image, GDIPCONST GUID *d
     return stat;
 }
 
-GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream *source, GpImage **image)
+GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream *stream, GpImage **image)
 {
     GpStatus stat;
     LARGE_INTEGER seek;
     HRESULT hr;
     const struct image_codec *codec=NULL;
-    IStream *stream;
-
-    hr = IStream_Clone(source, &stream);
-    if (FAILED(hr))
-    {
-        STATSTG statstg;
-
-        hr = IStream_Stat(source, &statstg, STATFLAG_NOOPEN);
-        if (FAILED(hr)) return hresult_to_status(hr);
-
-        stat = GdipCreateStreamOnFile(statstg.pwcsName, GENERIC_READ, &stream);
-        if(stat != Ok) return stat;
-    }
 
     /* choose an appropriate image decoder */
     stat = get_decoder_info(stream, &codec);
-    if (stat != Ok)
-    {
-        IStream_Release(stream);
-        return stat;
-    }
+    if (stat != Ok) return stat;
 
     /* seek to the start of the stream */
     seek.QuadPart = 0;
     hr = IStream_Seek(stream, seek, STREAM_SEEK_SET, NULL);
-    if (FAILED(hr))
-    {
-        IStream_Release(stream);
-        return hresult_to_status(hr);
-    }
+    if (FAILED(hr)) return hresult_to_status(hr);
 
     /* call on the image decoder to do the real work */
     stat = codec->decode_func(stream, &codec->info.Clsid, 0, image);
@@ -2985,7 +3318,6 @@ GpStatus WINGDIPAPI GdipLoadImageFromStream(IStream *source, GpImage **image)
         return Ok;
     }
 
-    IStream_Release(stream);
     return stat;
 }
 
@@ -3016,7 +3348,9 @@ GpStatus WINGDIPAPI GdipSetPropertyItem(GpImage *image, GDIPCONST PropertyItem* 
 {
     static int calls;
 
-    TRACE("(%p,%p)\n", image, item);
+    if (!image || !item) return InvalidParameter;
+
+    TRACE("(%p,%p:%#x,%u,%u,%p)\n", image, item, item->id, item->type, item->length, item->value);
 
     if(!(calls++))
         FIXME("not implemented\n");
@@ -3236,6 +3570,15 @@ GpStatus WINGDIPAPI GdipSaveImageToStream(GpImage *image, IStream* stream,
     stat = encode_image(image, stream, clsid, params);
 
     return stat;
+}
+
+/*****************************************************************************
+ * GdipSaveAdd [GDIPLUS.@]
+ */
+GpStatus WINGDIPAPI GdipSaveAdd(GpImage *image, GDIPCONST EncoderParameters *params)
+{
+    FIXME("(%p,%p): stub\n", image, params);
+    return Ok;
 }
 
 /*****************************************************************************

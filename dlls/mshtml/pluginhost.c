@@ -1216,7 +1216,7 @@ static HRESULT WINAPI PHServiceProvider_QueryService(IServiceProvider *iface, RE
         return E_NOINTERFACE;
     }
 
-    return IServiceProvider_QueryService(&This->doc->basedoc.window->IServiceProvider_iface,
+    return IServiceProvider_QueryService(&This->doc->basedoc.window->base.IServiceProvider_iface,
             guidService, riid, ppv);
 }
 
@@ -1239,6 +1239,7 @@ static HRESULT assoc_element(PluginHost *host, HTMLDocumentNode *doc, nsIDOMElem
 
     hres = IHTMLDOMNode_QueryInterface(&node->IHTMLDOMNode_iface, &IID_HTMLPluginContainer,
             (void**)&container_elem);
+    node_release(node);
     if(FAILED(hres)) {
         ERR("Not an object element\n");
         return hres;

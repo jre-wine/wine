@@ -228,6 +228,7 @@ static nsresult run_bind_to_tree(HTMLDocumentNode *doc, nsISupports *nsiface, ns
     if(node->vtbl->bind_to_tree)
         node->vtbl->bind_to_tree(node);
 
+    node_release(node);
     return nsres;
 }
 
@@ -266,7 +267,7 @@ static void parse_complete(HTMLDocumentObj *doc)
     call_explorer_69(doc);
 
     if(doc->is_webbrowser && doc->usermode != EDITMODE)
-        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->IHTMLWindow2_iface, 0);
+        IDocObjectService_FireNavigateComplete2(doc->doc_object_service, &doc->basedoc.window->base.IHTMLWindow2_iface, 0);
 
     /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
 }
@@ -315,7 +316,7 @@ static nsresult run_insert_script(HTMLDocumentNode *doc, nsISupports *script_ifa
     if(nsparser)
         nsIParser_BeginEvaluatingParserInsertedScript(nsparser);
 
-    doc_insert_script(doc->basedoc.window, nsscript);
+    doc_insert_script(doc->basedoc.window->base.inner_window, nsscript);
 
     if(nsparser) {
         nsIParser_EndEvaluatingParserInsertedScript(nsparser);

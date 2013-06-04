@@ -39,17 +39,12 @@
 #include "d3d9.h"
 #include "wine/wined3d.h"
 
-/* ===========================================================================
-   Internal use
-   =========================================================================== */
 extern HRESULT vdecl_convert_fvf(DWORD FVF, D3DVERTEXELEMENT9 **ppVertexElements) DECLSPEC_HIDDEN;
 D3DFORMAT d3dformat_from_wined3dformat(enum wined3d_format_id format) DECLSPEC_HIDDEN;
 enum wined3d_format_id wined3dformat_from_d3dformat(D3DFORMAT format) DECLSPEC_HIDDEN;
+void present_parameters_from_wined3d_swapchain_desc(D3DPRESENT_PARAMETERS *present_parameters,
+        const struct wined3d_swapchain_desc *swapchain_desc) DECLSPEC_HIDDEN;
 
-/* ===========================================================================
-    Macros
-   =========================================================================== */
-/* Not nice, but it lets wined3d support different versions of directx */
 #define WINECAPSTOD3D9CAPS(_pD3D9Caps, _pWineCaps) \
     _pD3D9Caps->DeviceType                        = (D3DDEVTYPE) _pWineCaps->DeviceType; \
     _pD3D9Caps->AdapterOrdinal                    = _pWineCaps->AdapterOrdinal; \
@@ -184,7 +179,7 @@ struct d3d9_swapchain
     IDirect3DDevice9Ex *parent_device;
 };
 
-HRESULT d3d9_swapchain_create(struct d3d9_device *device, D3DPRESENT_PARAMETERS *present_parameters,
+HRESULT d3d9_swapchain_create(struct d3d9_device *device, struct wined3d_swapchain_desc *desc,
         struct d3d9_swapchain **swapchain) DECLSPEC_HIDDEN;
 
 struct d3d9_surface

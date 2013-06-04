@@ -88,7 +88,6 @@ static inline IDirect3DRMFrameImpl *impl_from_IDirect3DRMFrame3(IDirect3DRMFrame
     return CONTAINING_RECORD(iface, IDirect3DRMFrameImpl, IDirect3DRMFrame3_iface);
 }
 
-static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame2(IDirect3DRMFrame2 *iface);
 static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame3(IDirect3DRMFrame3 *iface);
 
 static inline IDirect3DRMLightArrayImpl *impl_from_IDirect3DRMLightArray(IDirect3DRMLightArray *iface)
@@ -604,14 +603,19 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_AddChild(IDirect3DRMFrame2* iface,
                                                      LPDIRECT3DRMFRAME child)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
-    IDirect3DRMFrameImpl *frame = unsafe_impl_from_IDirect3DRMFrame2((LPDIRECT3DRMFRAME2)child);
+    IDirect3DRMFrame3 *frame;
+    HRESULT hr;
 
     TRACE("(%p/%p)->(%p)\n", iface, This, child);
 
-    if (!frame)
+    if (!child)
         return D3DRMERR_BADOBJECT;
+    hr = IDirect3DRMFrame_QueryInterface(child, &IID_IDirect3DRMFrame3, (void**)&frame);
+    if (hr != S_OK)
+        return D3DRMERR_BADOBJECT;
+    IDirect3DRMFrame_Release(child);
 
-    return IDirect3DRMFrame3_AddChild(&This->IDirect3DRMFrame3_iface, &frame->IDirect3DRMFrame3_iface);
+    return IDirect3DRMFrame3_AddChild(&This->IDirect3DRMFrame3_iface, frame);
 }
 
 static HRESULT WINAPI IDirect3DRMFrame2Impl_AddLight(IDirect3DRMFrame2* iface,
@@ -928,14 +932,19 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_DeleteChild(IDirect3DRMFrame2* iface
                                                         LPDIRECT3DRMFRAME frame)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
-    IDirect3DRMFrameImpl *child = unsafe_impl_from_IDirect3DRMFrame2((LPDIRECT3DRMFRAME2)frame);
+    IDirect3DRMFrame3 *child;
+    HRESULT hr;
 
     TRACE("(%p/%p)->(%p)\n", iface, This, frame);
 
-    if (!child)
+    if (!frame)
         return D3DRMERR_BADOBJECT;
+    hr = IDirect3DRMFrame_QueryInterface(frame, &IID_IDirect3DRMFrame3, (void**)&child);
+    if (hr != S_OK)
+        return D3DRMERR_BADOBJECT;
+    IDirect3DRMFrame_Release(frame);
 
-    return IDirect3DRMFrame3_DeleteChild(&This->IDirect3DRMFrame3_iface, &child->IDirect3DRMFrame3_iface);
+    return IDirect3DRMFrame3_DeleteChild(&This->IDirect3DRMFrame3_iface, child);
 }
 
 static HRESULT WINAPI IDirect3DRMFrame2Impl_DeleteLight(IDirect3DRMFrame2* iface,
@@ -2650,15 +2659,6 @@ static const struct IDirect3DRMFrame3Vtbl Direct3DRMFrame3_Vtbl =
     IDirect3DRMFrame3Impl_GetMaterialOverride
 };
 
-static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame2(IDirect3DRMFrame2 *iface)
-{
-    if (!iface)
-        return NULL;
-    assert(iface->lpVtbl == &Direct3DRMFrame2_Vtbl);
-
-    return impl_from_IDirect3DRMFrame2(iface);
-}
-
 static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame3(IDirect3DRMFrame3 *iface)
 {
     if (!iface)
@@ -2671,6 +2671,7 @@ static inline IDirect3DRMFrameImpl *unsafe_impl_from_IDirect3DRMFrame3(IDirect3D
 HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown* parent, IUnknown** ret_iface)
 {
     IDirect3DRMFrameImpl* object;
+    HRESULT hr;
 
     TRACE("(%s, %p, %p)\n", wine_dbgstr_guid(riid), parent, ret_iface);
 
@@ -2687,18 +2688,18 @@ HRESULT Direct3DRMFrame_create(REFIID riid, IUnknown* parent, IUnknown** ret_ifa
 
     memcpy(&object->transform[0][0], &identity[0][0], sizeof(D3DRMMATRIX4D));
 
-    if (IsEqualGUID(riid, &IID_IDirect3DRMFrame3))
+    if (parent)
     {
-        if (parent)
-            IDirect3DRMFrame3_AddChild((IDirect3DRMFrame3*)parent, &object->IDirect3DRMFrame3_iface);
-        *ret_iface = (IUnknown*)&object->IDirect3DRMFrame3_iface;
-    }
-    else
-    {
-        if (parent)
-            IDirect3DRMFrame2_AddChild((IDirect3DRMFrame2*)parent, (IDirect3DRMFrame*)&object->IDirect3DRMFrame2_iface);
-        *ret_iface = (IUnknown*)&object->IDirect3DRMFrame2_iface;
+        IDirect3DRMFrame3 *p;
+
+        hr = IDirect3DRMFrame_QueryInterface(parent, &IID_IDirect3DRMFrame3, (void**)&p);
+        if (hr != S_OK)
+            return hr;
+        IDirect3DRMFrame_Release(parent);
+        IDirect3DRMFrame3_AddChild(p, &object->IDirect3DRMFrame3_iface);
     }
 
+    hr = IDirect3DRMFrame3_QueryInterface(&object->IDirect3DRMFrame3_iface, riid, (void**)ret_iface);
+    IDirect3DRMFrame3_Release(&object->IDirect3DRMFrame3_iface);
     return S_OK;
 }

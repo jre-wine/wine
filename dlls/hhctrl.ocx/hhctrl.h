@@ -135,6 +135,10 @@ typedef struct {
 } SearchTab;
 
 typedef struct {
+    HIMAGELIST hImageList;
+} ContentsTab;
+
+typedef struct {
     IOleClientSite *client_site;
     IWebBrowser2 *web_browser;
     IOleObject *wb_object;
@@ -158,6 +162,7 @@ typedef struct {
     IndexItem *index;
     IndexPopup popup;
     SearchTab search;
+    ContentsTab contents;
     HWND hwndTabCtrl;
     HWND hwndSizeBar;
     HFONT hFont;
@@ -184,6 +189,7 @@ CHMInfo *CloseCHM(CHMInfo *pCHMInfo) DECLSPEC_HIDDEN;
 void SetChmPath(ChmPath*,LPCWSTR,LPCWSTR) DECLSPEC_HIDDEN;
 IStream *GetChmStream(CHMInfo*,LPCWSTR,ChmPath*) DECLSPEC_HIDDEN;
 LPWSTR FindContextAlias(CHMInfo*,DWORD) DECLSPEC_HIDDEN;
+WCHAR *GetDocumentTitle(CHMInfo*,LPCWSTR) DECLSPEC_HIDDEN;
 
 HHInfo *CreateHelpViewer(LPCWSTR) DECLSPEC_HIDDEN;
 void ReleaseHelpViewer(HHInfo*) DECLSPEC_HIDDEN;

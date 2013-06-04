@@ -362,6 +362,14 @@ static INT X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
                     return TRUE;
                 }
                 break;
+            case X11DRV_GET_DRAWABLE:
+                if (out_count >= sizeof(struct x11drv_escape_get_drawable))
+                {
+                    struct x11drv_escape_get_drawable *data = out_data;
+                    data->drawable = physDev->drawable;
+                    return TRUE;
+                }
+                break;
             case X11DRV_START_EXPOSURES:
                 wine_tsx11_lock();
                 XSetGraphicsExposures( gdi_display, physDev->gc, True );
@@ -439,15 +447,6 @@ static inline void opengl_error(void)
 }
 
 /***********************************************************************
- *		X11DRV_ChoosePixelFormat
- */
-static int X11DRV_ChoosePixelFormat( PHYSDEV dev, const PIXELFORMATDESCRIPTOR *ppfd )
-{
-    opengl_error();
-    return 0;
-}
-
-/***********************************************************************
  *		X11DRV_DescribePixelFormat
  */
 static int X11DRV_DescribePixelFormat( PHYSDEV dev, int fmt, UINT size, PIXELFORMATDESCRIPTOR *ppfd )
@@ -465,42 +464,6 @@ static BOOL X11DRV_SetPixelFormat( PHYSDEV dev, int fmt, const PIXELFORMATDESCRI
     return FALSE;
 }
 
-/***********************************************************************
- *		X11DRV_wglCreateContext
- */
-static HGLRC X11DRV_wglCreateContext( PHYSDEV dev )
-{
-    opengl_error();
-    return NULL;
-}
-
-/***********************************************************************
- *		X11DRV_wglCreateContextAttribsARB
- */
-static HGLRC X11DRV_wglCreateContextAttribsARB( PHYSDEV dev, HGLRC hShareContext, const int* attribList )
-{
-    opengl_error();
-    return NULL;
-}
-
-/***********************************************************************
- *		X11DRV_wglGetProcAddress
- */
-static PROC X11DRV_wglGetProcAddress( LPCSTR proc )
-{
-    opengl_error();
-    return NULL;
-}
-
-/***********************************************************************
- *		X11DRV_wglSetPixelFormatWINE
- */
-static BOOL X11DRV_wglSetPixelFormatWINE( PHYSDEV dev, int fmt, const PIXELFORMATDESCRIPTOR *ppfd )
-{
-    opengl_error();
-    return FALSE;
-}
-
 
 static const struct gdi_dc_funcs x11drv_funcs =
 {
@@ -512,7 +475,6 @@ static const struct gdi_dc_funcs x11drv_funcs =
     NULL,                               /* pArcTo */
     NULL,                               /* pBeginPath */
     NULL,                               /* pBlendImage */
-    X11DRV_ChoosePixelFormat,           /* pChoosePixelFormat */
     X11DRV_Chord,                       /* pChord */
     NULL,                               /* pCloseFigure */
     X11DRV_CreateCompatibleDC,          /* pCreateCompatibleDC */
@@ -556,7 +518,6 @@ static const struct gdi_dc_funcs x11drv_funcs =
     X11DRV_GetNearestColor,             /* pGetNearestColor */
     NULL,                               /* pGetOutlineTextMetrics */
     NULL,                               /* pGetPixel */
-    NULL,                               /* pGetPixelFormat */
     X11DRV_GetSystemPaletteEntries,     /* pGetSystemPaletteEntries */
     NULL,                               /* pGetTextCharsetInfo */
     NULL,                               /* pGetTextExtentExPoint */
@@ -635,17 +596,7 @@ static const struct gdi_dc_funcs x11drv_funcs =
     NULL,                               /* pSwapBuffers */
     X11DRV_UnrealizePalette,            /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
-    NULL,                               /* pwglCopyContext */
-    X11DRV_wglCreateContext,            /* pwglCreateContext */
-    X11DRV_wglCreateContextAttribsARB,  /* pwglCreateContextAttribsARB */
-    NULL,                               /* pwglDeleteContext */
-    X11DRV_wglGetProcAddress,           /* pwglGetProcAddress */
-    NULL,                               /* pwglMakeContextCurrentARB */
-    NULL,                               /* pwglMakeCurrent */
-    X11DRV_wglSetPixelFormatWINE,       /* pwglSetPixelFormatWINE */
-    NULL,                               /* pwglShareLists */
-    NULL,                               /* pwglUseFontBitmapsA */
-    NULL,                               /* pwglUseFontBitmapsW */
+    NULL,                               /* wine_get_wgl_driver */
     GDI_PRIORITY_GRAPHICS_DRV           /* priority */
 };
 

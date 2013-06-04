@@ -66,6 +66,28 @@ typedef struct {
     FILE *file;
 } basic_filebuf_char;
 
+typedef enum {
+    STRINGBUF_allocated = 1,
+    STRINGBUF_no_write = 2,
+    STRINGBUF_no_read = 4,
+    STRINGBUF_append = 8,
+    STRINGBUF_at_end = 16
+} basic_stringbuf_state;
+
+typedef struct {
+    basic_streambuf_char base;
+    char *seekhigh;
+    int state;
+    char allocator; /* empty struct */
+} basic_stringbuf_char;
+
+typedef struct {
+    basic_streambuf_wchar base;
+    wchar_t *seekhigh;
+    int state;
+    char allocator; /* empty struct */
+} basic_stringbuf_wchar;
+
 typedef struct {
     ios_base base;
     basic_streambuf_char *strbuf;
@@ -90,7 +112,7 @@ typedef struct _basic_ostream_char {
 typedef struct _basic_ostream_wchar {
     const int *vbtable;
     /* virtual inheritance
-     * basic_ios_char basic_ios;
+     * basic_ios_wchar basic_ios;
      */
 } basic_ostream_wchar;
 
@@ -103,12 +125,28 @@ typedef struct {
 } basic_istream_char;
 
 typedef struct {
+    const int *vbtable;
+    streamsize count;
+    /* virtual inheritance
+     * basic_ios_wchar basic_ios;
+     */
+} basic_istream_wchar;
+
+typedef struct {
     basic_istream_char base1;
     basic_ostream_char base2;
     /* virtual inheritance
      * basic_ios_char basic_ios;
      */
 } basic_iostream_char;
+
+typedef struct {
+    basic_istream_wchar base1;
+    basic_ostream_wchar base2;
+    /* virtual inheritance
+     * basic_ios_wchar basic_ios;
+     */
+} basic_iostream_wchar;
 
 typedef struct {
     basic_ostream_char base;
@@ -133,6 +171,54 @@ typedef struct {
      * basic_ios_char basic_ios;
      */
 } basic_fstream_char;
+
+typedef struct {
+    basic_ostream_char base;
+    basic_stringbuf_char strbuf;
+    /* virtual inheritance
+     * basic_ios_char basic_ios;
+     */
+} basic_ostringstream_char;
+
+typedef struct {
+    basic_ostream_wchar base;
+    basic_stringbuf_wchar strbuf;
+    /* virtual inheritance
+     * basic_ios_wchar basic_ios;
+     */
+} basic_ostringstream_wchar;
+
+typedef struct {
+    basic_istream_char base;
+    basic_stringbuf_char strbuf;
+    /* virtual inheritance
+     * basic_ios_char basic_ios;
+     */
+} basic_istringstream_char;
+
+typedef struct {
+    basic_istream_wchar base;
+    basic_stringbuf_wchar strbuf;
+    /* virtual inheritance
+     * basic_ios_wchar basic_ios;
+     */
+} basic_istringstream_wchar;
+
+typedef struct {
+    basic_iostream_char base;
+    basic_stringbuf_char strbuf;
+    /* virtual inheritance
+     * basic_ios_char basic_ios;
+     */
+} basic_stringstream_char;
+
+typedef struct {
+    basic_iostream_wchar base;
+    basic_stringbuf_wchar strbuf;
+    /* virtual inheritance
+     * basic_ios_wchar basic_ios;
+     */
+} basic_stringstream_wchar;
 
 extern const vtable_ptr MSVCP_iosb_vtable;
 
@@ -160,15 +246,34 @@ extern const vtable_ptr MSVCP_basic_streambuf_short_vtable;
 /* ??_7?$basic_filebuf@DU?$char_traits@D@std@@@std@@6B@ */
 extern const vtable_ptr MSVCP_basic_filebuf_char_vtable;
 
+/* ??_7?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_stringbuf_char_vtable;
+
+/* ??_7?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_stringbuf_wchar_vtable;
+
+/* ??_7?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_stringbuf_short_vtable;
+
 /* ??_8?$basic_ostream@DU?$char_traits@D@std@@@std@@7B@ */
 const int basic_ostream_char_vbtable[] = {0, sizeof(basic_ostream_char)};
 /* ??_7?$basic_ostream@DU?$char_traits@D@std@@@std@@6B@ */
 extern const vtable_ptr MSVCP_basic_ostream_char_vtable;
 
+/* ??_8?$basic_ostream@_WU?$char_traits@_W@std@@@std@@7B@ */
+const int basic_ostream_wchar_vbtable[] = {0, sizeof(basic_ostream_wchar)};
+/* ??_7?$basic_ostream@_WU?$char_traits@_W@std@@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_ostream_wchar_vtable;
+
 /* ??_8?$basic_istream@DU?$char_traits@D@std@@@std@@7B@ */
 const int basic_istream_char_vbtable[] = {0, sizeof(basic_istream_char)};
 /* ??_7?$basic_istream@DU?$char_traits@D@std@@@std@@6B@ */
 extern const vtable_ptr MSVCP_basic_istream_char_vtable;
+
+/* ??_8?$basic_istream@_WU?$char_traits@_W@std@@@std@@7B@ */
+const int basic_istream_wchar_vbtable[] = {0, sizeof(basic_istream_wchar)};
+/* ??_7?$basic_istream@_WU?$char_traits@_W@std@@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_istream_wchar_vtable;
 
 /* ??_8?$basic_iostream@DU?$char_traits@D@std@@@std@@7B?$basic_istream@DU?$char_traits@D@std@@@1@@ */
 const int basic_iostream_char_vbtable1[] = {0, sizeof(basic_iostream_char)};
@@ -176,6 +281,13 @@ const int basic_iostream_char_vbtable1[] = {0, sizeof(basic_iostream_char)};
 const int basic_iostream_char_vbtable2[] = {0, sizeof(basic_iostream_char)-FIELD_OFFSET(basic_iostream_char, base2)};
 /* ??_7?$basic_iostream@DU?$char_traits@D@std@@@std@@6B@ */
 extern const vtable_ptr MSVCP_basic_iostream_char_vtable;
+
+/* ??_8?$basic_iostream@_WU?$char_traits@_W@std@@@std@@7B?$basic_istream@_WU?$char_traits@_W@std@@@1@@ */
+const int basic_iostream_wchar_vbtable1[] = {0, sizeof(basic_iostream_wchar)};
+/* ??_8?$basic_iostream@_WU?$char_traits@_W@std@@@std@@7B?$basic_ostream@_WU?$char_traits@_W@std@@@1@@ */
+const int basic_iostream_wchar_vbtable2[] = {0, sizeof(basic_iostream_wchar)-FIELD_OFFSET(basic_iostream_wchar, base2)};
+/* ??_7?$basic_iostream@_WU?$char_traits@_W@std@@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_iostream_wchar_vtable;
 
 /* ??_8?$basic_ofstream@DU?$char_traits@D@std@@@std@@7B@ */
 const int basic_ofstream_char_vbtable[] = {0, sizeof(basic_ofstream_char)};
@@ -194,6 +306,40 @@ const int basic_fstream_char_vbtable2[] = {0, sizeof(basic_fstream_char)-FIELD_O
 /* ??_7?$basic_fstream@DU?$char_traits@D@std@@@std@@6B@ */
 extern const vtable_ptr MSVCP_basic_fstream_char_vtable;
 
+/* ??_8?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@7B@ */
+const int basic_ostringstream_char_vbtable[] = {0, sizeof(basic_ostringstream_char)};
+/* ??_7?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_ostringstream_char_vtable;
+
+/* ??_8?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@7B@ */
+const int basic_ostringstream_wchar_vbtable[] = {0, sizeof(basic_ostringstream_wchar)};
+/* ??_7?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_ostringstream_wchar_vtable;
+
+/* ??_8?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@7B@ */
+const int basic_istringstream_char_vbtable[] = {0, sizeof(basic_istringstream_char)};
+/* ??_7?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_istringstream_char_vtable;
+
+/* ??_8?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@7B@ */
+const int basic_istringstream_wchar_vbtable[] = {0, sizeof(basic_istringstream_wchar)};
+/* ??_7?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_istringstream_wchar_vtable;
+
+/* ??_8?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@7B?$basic_istream@DU?$char_traits@D@std@@@1@@ */
+const int basic_stringstream_char_vbtable1[] = {0, sizeof(basic_stringstream_char)};
+/* ??_8?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@7B?$basic_ostream@DU?$char_traits@D@std@@@1@@ */
+const int basic_stringstream_char_vbtable2[] = {0, sizeof(basic_stringstream_char)-FIELD_OFFSET(basic_stringstream_char, base.base2)};
+/* ??_7?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_stringstream_char_vtable;
+
+/* ??_8?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@7B?$basic_istream@_WU?$char_traits@_W@std@@@1@@ */
+const int basic_stringstream_wchar_vbtable1[] = {0, sizeof(basic_stringstream_wchar)};
+/* ??_8?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@7B?$basic_ostream@_WU?$char_traits@_W@std@@@1@@ */
+const int basic_stringstream_wchar_vbtable2[] = {0, sizeof(basic_stringstream_wchar)-FIELD_OFFSET(basic_stringstream_wchar, base.base2)};
+/* ??_7?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@6B@ */
+extern const vtable_ptr MSVCP_basic_stringstream_wchar_vtable;
+
 DEFINE_RTTI_DATA0(iosb, 0, ".?AV?$_Iosb@H@std@@");
 DEFINE_RTTI_DATA1(ios_base, 0, &iosb_rtti_base_descriptor, ".?AV?$_Iosb@H@std@@");
 DEFINE_RTTI_DATA2(basic_ios_char, 0, &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
@@ -210,18 +356,36 @@ DEFINE_RTTI_DATA0(basic_streambuf_short, 0,
         ".?AV?$basic_streambuf@GU?$char_traits@G@std@@@std@@");
 DEFINE_RTTI_DATA1(basic_filebuf_char, 0, &basic_streambuf_char_rtti_base_descriptor,
         ".?AV?$basic_filebuf@DU?$char_traits@D@std@@@std@@");
+DEFINE_RTTI_DATA1(basic_stringbuf_char, 0, &basic_streambuf_char_rtti_base_descriptor,
+        ".?AV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@");
+DEFINE_RTTI_DATA1(basic_stringbuf_wchar, 0, &basic_streambuf_wchar_rtti_base_descriptor,
+        ".?AV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@");
+DEFINE_RTTI_DATA1(basic_stringbuf_short, 0, &basic_streambuf_short_rtti_base_descriptor,
+        ".?AV?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@");
 DEFINE_RTTI_DATA3(basic_ostream_char, sizeof(basic_ostream_char), &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         ".?AV?$basic_ostream@DU?$char_traits@D@std@@@std@@");
+DEFINE_RTTI_DATA3(basic_ostream_wchar, sizeof(basic_ostream_wchar), &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_ostream@_WU?$char_traits@_W@std@@@std@@");
 DEFINE_RTTI_DATA3(basic_istream_char, sizeof(basic_istream_char), &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         ".?AV?$basic_istream@DU?$char_traits@D@std@@@std@@");
+DEFINE_RTTI_DATA3(basic_istream_wchar, sizeof(basic_istream_wchar), &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_istream@_WU?$char_traits@_W@std@@@std@@");
 DEFINE_RTTI_DATA8(basic_iostream_char, sizeof(basic_iostream_char),
         &basic_istream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         ".?AV?$basic_iostream@DU?$char_traits@D@std@@@std@@");
+DEFINE_RTTI_DATA8(basic_iostream_wchar, sizeof(basic_iostream_wchar),
+        &basic_istream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        &basic_ostream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_iostream@_WU?$char_traits@_W@std@@@std@@");
 DEFINE_RTTI_DATA4(basic_ofstream_char, sizeof(basic_ofstream_char),
         &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
@@ -230,12 +394,40 @@ DEFINE_RTTI_DATA4(basic_ifstream_char, sizeof(basic_ifstream_char),
         &basic_istream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         ".?AV?$basic_ifstream@DU?$char_traits@D@std@@@std@@");
-DEFINE_RTTI_DATA9(basic_fstream_char, sizeof(basic_fstream_char), &basic_istream_char_rtti_base_descriptor,
+DEFINE_RTTI_DATA8(basic_fstream_char, sizeof(basic_fstream_char),
         &basic_istream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
         &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
         ".?AV?$basic_fstream@DU?$char_traits@D@std@@@std@@");
+DEFINE_RTTI_DATA4(basic_ostringstream_char, sizeof(basic_ostringstream_char),
+        &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@");
+DEFINE_RTTI_DATA4(basic_ostringstream_wchar, sizeof(basic_ostringstream_wchar),
+        &basic_ostream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@");
+DEFINE_RTTI_DATA4(basic_istringstream_char, sizeof(basic_istringstream_char),
+        &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@");
+DEFINE_RTTI_DATA4(basic_istringstream_wchar, sizeof(basic_istringstream_wchar),
+        &basic_ostream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@");
+DEFINE_RTTI_DATA8(basic_stringstream_char, sizeof(basic_stringstream_char),
+        &basic_istream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        &basic_ostream_char_rtti_base_descriptor, &basic_ios_char_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@");
+DEFINE_RTTI_DATA8(basic_stringstream_wchar, sizeof(basic_stringstream_wchar),
+        &basic_istream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        &basic_ostream_wchar_rtti_base_descriptor, &basic_ios_wchar_rtti_base_descriptor,
+        &ios_base_rtti_base_descriptor, &iosb_rtti_base_descriptor,
+        ".?AV?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@");
 
 #ifndef __GNUC__
 void __asm_dummy_vtables(void) {
@@ -301,12 +493,63 @@ void __asm_dummy_vtables(void) {
             VTABLE_ADD_FUNC(basic_filebuf_char_setbuf)
             VTABLE_ADD_FUNC(basic_filebuf_char_sync)
             VTABLE_ADD_FUNC(basic_filebuf_char_imbue));
+    __ASM_VTABLE(basic_stringbuf_char,
+            VTABLE_ADD_FUNC(basic_stringbuf_char_overflow)
+            VTABLE_ADD_FUNC(basic_stringbuf_char_pbackfail)
+            VTABLE_ADD_FUNC(basic_streambuf_char_showmanyc)
+            VTABLE_ADD_FUNC(basic_stringbuf_char_underflow)
+            VTABLE_ADD_FUNC(basic_streambuf_char_uflow)
+            VTABLE_ADD_FUNC(basic_streambuf_char_xsgetn)
+            VTABLE_ADD_FUNC(basic_streambuf_char__Xsgetn_s)
+            VTABLE_ADD_FUNC(basic_streambuf_char_xsputn)
+            VTABLE_ADD_FUNC(basic_stringbuf_char_seekoff)
+            VTABLE_ADD_FUNC(basic_stringbuf_char_seekpos)
+            VTABLE_ADD_FUNC(basic_streambuf_char_setbuf)
+            VTABLE_ADD_FUNC(basic_streambuf_char_sync)
+            VTABLE_ADD_FUNC(basic_streambuf_char_imbue));
+    __ASM_VTABLE(basic_stringbuf_wchar,
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_overflow)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_pbackfail)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_showmanyc)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_underflow)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_uflow)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_xsgetn)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar__Xsgetn_s)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_xsputn)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_seekoff)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_seekpos)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_setbuf)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_sync)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_imbue));
+    __ASM_VTABLE(basic_stringbuf_short,
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_overflow)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_pbackfail)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_showmanyc)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_underflow)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_uflow)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_xsgetn)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar__Xsgetn_s)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_xsputn)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_seekoff)
+            VTABLE_ADD_FUNC(basic_stringbuf_wchar_seekpos)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_setbuf)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_sync)
+            VTABLE_ADD_FUNC(basic_streambuf_wchar_imbue));
     __ASM_VTABLE(basic_ostream_char, "");
+    __ASM_VTABLE(basic_ostream_wchar, "");
     __ASM_VTABLE(basic_istream_char, "");
+    __ASM_VTABLE(basic_istream_wchar, "");
     __ASM_VTABLE(basic_iostream_char, "");
+    __ASM_VTABLE(basic_iostream_wchar, "");
     __ASM_VTABLE(basic_ofstream_char, "");
     __ASM_VTABLE(basic_ifstream_char, "");
     __ASM_VTABLE(basic_fstream_char, "");
+    __ASM_VTABLE(basic_ostringstream_char, "");
+    __ASM_VTABLE(basic_ostringstream_wchar, "");
+    __ASM_VTABLE(basic_istringstream_char, "");
+    __ASM_VTABLE(basic_istringstream_wchar, "");
+    __ASM_VTABLE(basic_stringstream_char, "");
+    __ASM_VTABLE(basic_stringstream_wchar, "");
 #ifndef __GNUC__
 }
 #endif
@@ -1988,12 +2231,9 @@ MSVCP_bool __thiscall basic_filebuf_char_is_open(const basic_filebuf_char *this)
     return this->file != NULL;
 }
 
-/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QAEPAV12@PB_WHH@Z */
-/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QEAAPEAV12@PEB_WHH@Z */
-/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QAEPAV12@PBGHH@Z */
-/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QEAAPEAV12@PEBGHH@Z */
-DEFINE_THISCALL_WRAPPER(basic_filebuf_char_open_wchar, 16)
-basic_filebuf_char* __thiscall basic_filebuf_char_open_wchar(basic_filebuf_char *this, const wchar_t *name, int mode, int prot)
+/* ?_Fiopen@std@@YAPAU_iobuf@@PB_WHH@Z */
+/* ?_Fiopen@std@@YAPEAU_iobuf@@PEB_WHH@Z */
+FILE* __cdecl _Fiopen_wchar(const wchar_t *name, int mode, int prot)
 {
     static const wchar_t rW[] = {'r',0};
     static const struct {
@@ -2016,10 +2256,7 @@ basic_filebuf_char* __thiscall basic_filebuf_char_open_wchar(basic_filebuf_char 
     int mode_idx;
     FILE *f = NULL;
 
-    TRACE("(%p %s %d %d)\n", this, debugstr_w(name), mode, prot);
-
-    if(basic_filebuf_char_is_open(this))
-        return NULL;
+    TRACE("(%s %d %d)\n", debugstr_w(name), mode, prot);
 
     for(mode_idx=0; mode_idx<sizeof(str_mode)/sizeof(str_mode[0]); mode_idx++)
         if(str_mode[mode_idx].mode == real_mode)
@@ -2047,6 +2284,39 @@ basic_filebuf_char* __thiscall basic_filebuf_char_open_wchar(basic_filebuf_char 
         fclose(f);
         return NULL;
     }
+
+    return f;
+}
+
+/* ?_Fiopen@std@@YAPAU_iobuf@@PBDHH@Z */
+/* ?_Fiopen@std@@YAPEAU_iobuf@@PEBDHH@Z */
+FILE* __cdecl _Fiopen(const char *name, int mode, int prot)
+{
+    wchar_t nameW[FILENAME_MAX];
+
+    TRACE("(%s %d %d)\n", name, mode, prot);
+
+    if(mbstowcs_s(NULL, nameW, FILENAME_MAX, name, FILENAME_MAX-1) != 0)
+        return NULL;
+    return _Fiopen_wchar(nameW, mode, prot);
+}
+
+/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QAEPAV12@PB_WHH@Z */
+/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QEAAPEAV12@PEB_WHH@Z */
+/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QAEPAV12@PBGHH@Z */
+/* ?open@?$basic_filebuf@DU?$char_traits@D@std@@@std@@QEAAPEAV12@PEBGHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_filebuf_char_open_wchar, 16)
+basic_filebuf_char* __thiscall basic_filebuf_char_open_wchar(basic_filebuf_char *this, const wchar_t *name, int mode, int prot)
+{
+    FILE *f = NULL;
+
+    TRACE("(%p %s %d %d)\n", this, debugstr_w(name), mode, prot);
+
+    if(basic_filebuf_char_is_open(this))
+        return NULL;
+
+    if(!(f = _Fiopen_wchar(name, mode, prot)))
+        return NULL;
 
     basic_filebuf_char__Init(this, f, INITFL_open);
     basic_filebuf_char__Initcvt(this, codecvt_char_use_facet(this->base.loc));
@@ -2224,7 +2494,7 @@ int __thiscall basic_filebuf_char_uflow(basic_filebuf_char *this)
         }
     }
 
-    FIXME("buffer is to small\n");
+    FIXME("buffer is too small\n");
     return EOF;
 }
 
@@ -2348,6 +2618,792 @@ void __thiscall basic_filebuf_char_imbue(basic_filebuf_char *this, const locale 
 {
     TRACE("(%p %p)\n", this, loc);
     basic_filebuf_char__Initcvt(this, codecvt_char_use_facet(loc));
+}
+
+/* ?_Getstate@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AAEHH@Z */
+/* ?_Getstate@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char__Getstate, 8)
+int __thiscall basic_stringbuf_char__Getstate(basic_stringbuf_char *this, IOSB_openmode mode)
+{
+    int state = 0;
+
+    if(!(mode & OPENMODE_in))
+        state |= STRINGBUF_no_read;
+
+    if(!(mode & OPENMODE_out))
+        state |= STRINGBUF_no_write;
+
+    if(mode & OPENMODE_ate)
+        state |= STRINGBUF_at_end;
+
+    if(mode & OPENMODE_app)
+        state |= STRINGBUF_append;
+
+    return state;
+}
+
+/* ?_Init@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@IAEXPBDIH@Z */
+/* ?_Init@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@IEAAXPEBD_KH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char__Init, 16)
+void __thiscall basic_stringbuf_char__Init(basic_stringbuf_char *this, const char *str, MSVCP_size_t count, int state)
+{
+    TRACE("(%p, %p, %ld, %d)\n", this, str, count, state);
+
+    basic_streambuf_char__Init_empty(&this->base);
+
+    this->state = state;
+    this->seekhigh = NULL;
+
+    if(count && str) {
+        char *buf = MSVCRT_operator_new(count);
+        if(!buf) {
+            ERR("Out of memory\n");
+            throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+        }
+
+        memcpy(buf, str, count);
+        this->seekhigh = buf + count;
+
+        this->state |= STRINGBUF_allocated;
+
+        if(!(state & STRINGBUF_no_read))
+            basic_streambuf_char_setg(&this->base, buf, buf, buf + count);
+
+        if(!(state & STRINGBUF_no_write)) {
+            basic_streambuf_char_setp_next(&this->base, buf, (state & STRINGBUF_at_end) ? buf + count : buf, buf + count);
+
+            if(!basic_streambuf_char_gptr(&this->base))
+                basic_streambuf_char_setg(&this->base, buf, 0, buf);
+        }
+    }
+}
+
+/* ??0?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+/* ??0?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_ctor_str, 12)
+basic_stringbuf_char* __thiscall basic_stringbuf_char_ctor_str(basic_stringbuf_char *this,
+        const basic_string_char *str, IOSB_openmode mode)
+{
+    TRACE("(%p %p %d)\n", this, str, mode);
+
+    basic_streambuf_char_ctor(&this->base);
+    this->base.vtable = &MSVCP_basic_stringbuf_char_vtable;
+
+    basic_stringbuf_char__Init(this, MSVCP_basic_string_char_c_str(str),
+            str->size, basic_stringbuf_char__Getstate(this, mode));
+    return this;
+}
+
+/* ??0?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@H@Z */
+/* ??0?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_ctor_mode, 8)
+basic_stringbuf_char* __thiscall basic_stringbuf_char_ctor_mode(
+        basic_stringbuf_char *this, IOSB_openmode mode)
+{
+    TRACE("(%p %d)\n", this, mode);
+
+    basic_streambuf_char_ctor(&this->base);
+    this->base.vtable = &MSVCP_basic_stringbuf_char_vtable;
+
+    basic_stringbuf_char__Init(this, NULL, 0, basic_stringbuf_char__Getstate(this, mode));
+    return this;
+}
+
+/* ??_F?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_F?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_ctor, 4)
+basic_stringbuf_char* __thiscall basic_stringbuf_char_ctor(basic_stringbuf_char *this)
+{
+    return basic_stringbuf_char_ctor_mode(this, OPENMODE_in|OPENMODE_out);
+}
+
+/* ?_Tidy@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@IAEXXZ */
+/* ?_Tidy@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@IEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char__Tidy, 4)
+void __thiscall basic_stringbuf_char__Tidy(basic_stringbuf_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    if(this->state & STRINGBUF_allocated) {
+        MSVCRT_operator_delete(basic_streambuf_char_eback(&this->base));
+        this->seekhigh = NULL;
+        this->state &= ~STRINGBUF_allocated;
+    }
+
+    basic_streambuf_char__Init_empty(&this->base);
+}
+
+/* ??1?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAE@XZ */
+/* ??1?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_dtor, 4)
+void __thiscall basic_stringbuf_char_dtor(basic_stringbuf_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_char__Tidy(this);
+    basic_streambuf_char_dtor(&this->base);
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_stringbuf_char_vector_dtor, 8)
+basic_stringbuf_char* __thiscall MSVCP_basic_stringbuf_char_vector_dtor(basic_stringbuf_char *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *) this - 1;
+
+        for (i = *ptr - 1; i >= 0; i--)
+            basic_stringbuf_char_dtor(this+i);
+
+        MSVCRT_operator_delete(ptr);
+    }else {
+        basic_stringbuf_char_dtor(this);
+
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?overflow@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAEHH@Z */
+/* ?overflow@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_overflow, 8)
+int __thiscall basic_stringbuf_char_overflow(basic_stringbuf_char *this, int meta)
+{
+    MSVCP_size_t oldsize, size;
+    char *ptr, *buf;
+
+    TRACE("(%p %x)\n", this, meta);
+
+    if(meta == EOF)
+        return !EOF;
+    if(this->state & STRINGBUF_no_write)
+        return EOF;
+
+    ptr = basic_streambuf_char_pptr(&this->base);
+    if((this->state&STRINGBUF_append) && ptr<this->seekhigh)
+        basic_streambuf_char_setp_next(&this->base, basic_streambuf_char_pbase(&this->base),
+                this->seekhigh, basic_streambuf_char_epptr(&this->base));
+
+    if(ptr && ptr<basic_streambuf_char_epptr(&this->base))
+        return (*basic_streambuf_char__Pninc(&this->base) = meta);
+
+    oldsize = (ptr ? basic_streambuf_char_epptr(&this->base)-basic_streambuf_char_eback(&this->base): 0);
+    size = oldsize|0xf;
+    size += size/2;
+    buf = MSVCRT_operator_new(size);
+    if(!buf) {
+        ERR("Out of memory\n");
+        throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+    }
+
+    if(!oldsize) {
+        this->seekhigh = buf;
+        basic_streambuf_char_setp(&this->base, buf, buf+size);
+        if(this->state & STRINGBUF_no_read)
+            basic_streambuf_char_setg(&this->base, buf, NULL, buf);
+        else
+            basic_streambuf_char_setg(&this->base, buf, buf, buf+1);
+
+        this->state |= STRINGBUF_allocated;
+    }else {
+        ptr = basic_streambuf_char_eback(&this->base);
+        memcpy(buf, ptr, oldsize);
+
+        this->seekhigh = buf+(this->seekhigh-ptr);
+        basic_streambuf_char_setp_next(&this->base, buf,
+                buf+(basic_streambuf_char_pptr(&this->base)-ptr), buf+size);
+        if(this->state & STRINGBUF_no_read)
+            basic_streambuf_char_setg(&this->base, buf, NULL, buf);
+        else
+            basic_streambuf_char_setg(&this->base, buf,
+                    buf+(basic_streambuf_char_gptr(&this->base)-ptr),
+                    basic_streambuf_char_pptr(&this->base)+1);
+
+        MSVCRT_operator_delete(ptr);
+    }
+
+    return (*basic_streambuf_char__Pninc(&this->base) = meta);
+}
+
+/* ?pbackfail@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAEHH@Z */
+/* ?pbackfail@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_pbackfail, 8)
+int __thiscall basic_stringbuf_char_pbackfail(basic_stringbuf_char *this, int c)
+{
+    char *cur;
+
+    TRACE("(%p %x)\n", this, c);
+
+    cur = basic_streambuf_char_gptr(&this->base);
+    if(!cur || cur==basic_streambuf_char_eback(&this->base)
+            || (c!=EOF && c!=cur[-1] && this->state&STRINGBUF_no_write))
+        return EOF;
+
+    if(c != EOF)
+        cur[-1] = c;
+    basic_streambuf_char_gbump(&this->base, -1);
+    return c==EOF ? !EOF : c;
+}
+
+/* ?underflow@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAEHXZ */
+/* ?underflow@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAAHXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_underflow, 4)
+int __thiscall basic_stringbuf_char_underflow(basic_stringbuf_char *this)
+{
+    char *ptr, *cur;
+
+    TRACE("(%p)\n", this);
+
+    cur = basic_streambuf_char_gptr(&this->base);
+    if(!cur || this->state&STRINGBUF_no_read)
+        return EOF;
+
+    ptr  = basic_streambuf_char_pptr(&this->base);
+    if(this->seekhigh < ptr)
+        this->seekhigh = ptr;
+
+    ptr = basic_streambuf_char_egptr(&this->base);
+    if(this->seekhigh > ptr)
+        basic_streambuf_char_setg(&this->base, basic_streambuf_char_eback(&this->base), cur, this->seekhigh);
+
+    if(cur < this->seekhigh)
+        return *cur;
+    return EOF;
+}
+
+/* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
+/* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_seekoff, 20)
+fpos_int* __thiscall basic_stringbuf_char_seekoff(basic_stringbuf_char *this,
+        fpos_int *ret, streamoff off, int way, int mode)
+{
+    char *beg, *cur_r, *cur_w;
+
+    TRACE("(%p %p %ld %d %d)\n", this, ret, off, way, mode);
+
+    cur_w = basic_streambuf_char_pptr(&this->base);
+    if(cur_w > this->seekhigh)
+        this->seekhigh = cur_w;
+
+    ret->off = 0;
+    ret->state = 0;
+
+    beg = basic_streambuf_char_eback(&this->base);
+    cur_r = basic_streambuf_char_gptr(&this->base);
+    if((mode & OPENMODE_in) && cur_r) {
+        if(way==SEEKDIR_cur && !(mode & OPENMODE_out))
+            off += cur_r-beg;
+        else if(way == SEEKDIR_end)
+            off += this->seekhigh-beg;
+        else if(way != SEEKDIR_beg)
+            off = -1;
+
+        if(off<0 || off>this->seekhigh-beg) {
+            off = -1;
+        }else {
+            basic_streambuf_char_gbump(&this->base, beg-cur_r+off);
+            if((mode & OPENMODE_out) && cur_w) {
+                basic_streambuf_char_setp_next(&this->base, beg,
+                        basic_streambuf_char_gptr(&this->base),
+                        basic_streambuf_char_epptr(&this->base));
+            }
+        }
+    }else if((mode & OPENMODE_out) && cur_w) {
+        if(way == SEEKDIR_cur)
+            off += cur_w-beg;
+        else if(way == SEEKDIR_end)
+            off += this->seekhigh-beg;
+        else if(way != SEEKDIR_beg)
+            off = -1;
+
+        if(off<0 || off>this->seekhigh-beg)
+            off = -1;
+        else
+            basic_streambuf_char_pbump(&this->base, beg-cur_w+off);
+    }else {
+        off = -1;
+    }
+
+    ret->pos = off;
+    return ret;
+}
+
+/* ?seekpos@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAE?AV?$fpos@H@2@V32@H@Z */
+/* ?seekpos@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAA?AV?$fpos@H@2@V32@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_seekpos, 36)
+fpos_int* __thiscall basic_stringbuf_char_seekpos(basic_stringbuf_char *this,
+        fpos_int *ret, fpos_int pos, int mode)
+{
+    TRACE("(%p %p %s %d)\n", this, ret, debugstr_fpos_int(&pos), mode);
+
+    if(pos.off==0 && pos.pos==-1 && pos.state==0) {
+        *ret = pos;
+        return ret;
+    }
+
+    return basic_stringbuf_char_seekoff(this, ret, pos.off, SEEKDIR_beg, mode);
+}
+
+/* ?str@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+/* ?str@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_str_set, 8)
+void __thiscall basic_stringbuf_char_str_set(basic_stringbuf_char *this, const basic_string_char *str)
+{
+    TRACE("(%p %p)\n", this, str);
+
+    basic_stringbuf_char__Tidy(this);
+    basic_stringbuf_char__Init(this, MSVCP_basic_string_char_c_str(str), str->size, this->state);
+}
+
+/* ?str@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?str@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_char_str_get, 8)
+basic_string_char* __thiscall basic_stringbuf_char_str_get(const basic_stringbuf_char *this, basic_string_char *ret)
+{
+    char *ptr;
+
+    TRACE("(%p)\n", this);
+
+    if(!(this->state & STRINGBUF_no_write) && basic_streambuf_char_pptr(&this->base)) {
+        char *pptr;
+
+        ptr = basic_streambuf_char_pbase(&this->base);
+        pptr = basic_streambuf_char_pptr(&this->base);
+
+        return MSVCP_basic_string_char_ctor_cstr_len(ret, ptr, (this->seekhigh < pptr ? pptr : this->seekhigh) - ptr);
+    }
+
+    if(!(this->state & STRINGBUF_no_read) && basic_streambuf_char_gptr(&this->base)) {
+        ptr = basic_streambuf_char_eback(&this->base);
+        return MSVCP_basic_string_char_ctor_cstr_len(ret, ptr, basic_streambuf_char_egptr(&this->base) - ptr);
+    }
+
+    return MSVCP_basic_string_char_ctor(ret);
+}
+
+/* ?_Getstate@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@AAEHH@Z */
+/* ?_Getstate@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@AEAAHH@Z */
+/* ?_Getstate@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AAEHH@Z */
+/* ?_Getstate@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar__Getstate, 8)
+int __thiscall basic_stringbuf_wchar__Getstate(basic_stringbuf_wchar *this, IOSB_openmode mode)
+{
+    int state = 0;
+
+    if(!(mode & OPENMODE_in))
+        state |= STRINGBUF_no_read;
+
+    if(!(mode & OPENMODE_out))
+        state |= STRINGBUF_no_write;
+
+    if(mode & OPENMODE_ate)
+        state |= STRINGBUF_at_end;
+
+    if(mode & OPENMODE_app)
+        state |= STRINGBUF_append;
+
+    return state;
+}
+
+/* ?_Init@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@IAEXPB_WIH@Z */
+/* ?_Init@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@IEAAXPEB_W_KH@Z */
+/* ?_Init@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@IAEXPBGIH@Z */
+/* ?_Init@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@IEAAXPEBG_KH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar__Init, 16)
+void __thiscall basic_stringbuf_wchar__Init(basic_stringbuf_wchar *this, const wchar_t *str, MSVCP_size_t count, int state)
+{
+    TRACE("(%p, %p, %ld, %d)\n", this, str, count, state);
+
+    basic_streambuf_wchar__Init_empty(&this->base);
+
+    this->state = state;
+    this->seekhigh = NULL;
+
+    if(count && str) {
+        wchar_t *buf = MSVCRT_operator_new(count);
+        if(!buf) {
+            ERR("Out of memory\n");
+            throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+        }
+
+        memcpy(buf, str, count);
+        this->seekhigh = buf + count;
+
+        this->state |= STRINGBUF_allocated;
+
+        if(!(state & STRINGBUF_no_read))
+            basic_streambuf_wchar_setg(&this->base, buf, buf, buf + count);
+
+        if(!(state & STRINGBUF_no_write)) {
+            basic_streambuf_wchar_setp_next(&this->base, buf, (state & STRINGBUF_at_end) ? buf + count : buf, buf + count);
+
+            if(!basic_streambuf_wchar_gptr(&this->base))
+                basic_streambuf_wchar_setg(&this->base, buf, 0, buf);
+        }
+    }
+}
+
+/* ??0?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+/* ??0?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_ctor_str, 12)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_wchar_ctor_str(basic_stringbuf_wchar *this,
+        const basic_string_wchar *str, IOSB_openmode mode)
+{
+    TRACE("(%p %p %d)\n", this, str, mode);
+
+    basic_streambuf_wchar_ctor(&this->base);
+    this->base.vtable = &MSVCP_basic_stringbuf_wchar_vtable;
+
+    basic_stringbuf_wchar__Init(this, MSVCP_basic_string_wchar_c_str(str),
+            str->size, basic_stringbuf_wchar__Getstate(this, mode));
+    return this;
+}
+
+/* ??0?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAE@ABV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@1@H@Z */
+/* ??0?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEAA@AEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_short_ctor_str, 12)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_short_ctor_str(basic_stringbuf_wchar *this,
+        const basic_string_wchar *str, IOSB_openmode mode)
+{
+    basic_stringbuf_wchar_ctor_str(this, str, mode);
+    this->base.vtable = &MSVCP_basic_stringbuf_short_vtable;
+    return this;
+}
+
+/* ??0?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@H@Z */
+/* ??0?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_ctor_mode, 8)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_wchar_ctor_mode(
+        basic_stringbuf_wchar *this, IOSB_openmode mode)
+{
+    TRACE("(%p %d)\n", this, mode);
+
+    basic_streambuf_wchar_ctor(&this->base);
+    this->base.vtable = &MSVCP_basic_stringbuf_wchar_vtable;
+
+    basic_stringbuf_wchar__Init(this, NULL, 0, basic_stringbuf_wchar__Getstate(this, mode));
+    return this;
+}
+
+/* ??0?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAE@H@Z */
+/* ??0?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_short_ctor_mode, 8)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_short_ctor_mode(
+        basic_stringbuf_wchar *this, IOSB_openmode mode)
+{
+    basic_stringbuf_wchar_ctor_mode(this, mode);
+    this->base.vtable = &MSVCP_basic_stringbuf_short_vtable;
+    return this;
+}
+
+/* ??_F?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_F?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_ctor, 4)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_wchar_ctor(basic_stringbuf_wchar *this)
+{
+    return basic_stringbuf_wchar_ctor_mode(this, OPENMODE_in|OPENMODE_out);
+}
+
+/* ??_F?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEXXZ */
+/* ??_F?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_short_ctor, 4)
+basic_stringbuf_wchar* __thiscall basic_stringbuf_short_ctor(basic_stringbuf_wchar *this)
+{
+    return basic_stringbuf_short_ctor_mode(this, OPENMODE_in|OPENMODE_out);
+}
+
+/* ?_Tidy@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@IAEXXZ */
+/* ?_Tidy@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@IEAAXXZ */
+/* ?_Tidy@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@IAEXXZ */
+/* ?_Tidy@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@IEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar__Tidy, 4)
+void __thiscall basic_stringbuf_wchar__Tidy(basic_stringbuf_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    if(this->state & STRINGBUF_allocated) {
+        MSVCRT_operator_delete(basic_streambuf_wchar_eback(&this->base));
+        this->seekhigh = NULL;
+        this->state &= ~STRINGBUF_allocated;
+    }
+
+    basic_streambuf_wchar__Init_empty(&this->base);
+}
+
+/* ??1?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UAE@XZ */
+/* ??1?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UEAA@XZ */
+/* ??1?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@UAE@XZ */
+/* ??1?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_dtor, 4)
+void __thiscall basic_stringbuf_wchar_dtor(basic_stringbuf_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_wchar__Tidy(this);
+    basic_streambuf_wchar_dtor(&this->base);
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_stringbuf_wchar_vector_dtor, 8)
+basic_stringbuf_wchar* __thiscall MSVCP_basic_stringbuf_wchar_vector_dtor(basic_stringbuf_wchar *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *) this - 1;
+
+        for (i = *ptr - 1; i >= 0; i--)
+            basic_stringbuf_wchar_dtor(this+i);
+
+        MSVCRT_operator_delete(ptr);
+    }else {
+        basic_stringbuf_wchar_dtor(this);
+
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_stringbuf_short_vector_dtor, 8)
+basic_stringbuf_wchar* __thiscall MSVCP_basic_stringbuf_short_vector_dtor(basic_stringbuf_wchar *this, unsigned int flags)
+{
+    return MSVCP_basic_stringbuf_wchar_vector_dtor(this, flags);
+}
+
+/* ?overflow@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAEGG@Z */
+/* ?overflow@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAAGG@Z */
+/* ?overflow@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAEGG@Z */
+/* ?overflow@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAAGG@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_overflow, 8)
+unsigned short __thiscall basic_stringbuf_wchar_overflow(basic_stringbuf_wchar *this, unsigned short meta)
+{
+    MSVCP_size_t oldsize, size;
+    wchar_t *ptr, *buf;
+
+    TRACE("(%p %x)\n", this, meta);
+
+    if(meta == WEOF)
+        return !WEOF;
+    if(this->state & STRINGBUF_no_write)
+        return WEOF;
+
+    ptr = basic_streambuf_wchar_pptr(&this->base);
+    if((this->state&STRINGBUF_append) && ptr<this->seekhigh)
+        basic_streambuf_wchar_setp_next(&this->base, basic_streambuf_wchar_pbase(&this->base),
+                this->seekhigh, basic_streambuf_wchar_epptr(&this->base));
+
+    if(ptr && ptr<basic_streambuf_wchar_epptr(&this->base))
+        return (*basic_streambuf_wchar__Pninc(&this->base) = meta);
+
+    oldsize = (ptr ? basic_streambuf_wchar_epptr(&this->base)-basic_streambuf_wchar_eback(&this->base): 0);
+    size = oldsize|0xf;
+    size += size/2;
+    buf = MSVCRT_operator_new(size);
+    if(!buf) {
+        ERR("Out of memory\n");
+        throw_exception(EXCEPTION_BAD_ALLOC, NULL);
+    }
+
+    if(!oldsize) {
+        this->seekhigh = buf;
+        basic_streambuf_wchar_setp(&this->base, buf, buf+size);
+        if(this->state & STRINGBUF_no_read)
+            basic_streambuf_wchar_setg(&this->base, buf, NULL, buf);
+        else
+            basic_streambuf_wchar_setg(&this->base, buf, buf, buf+1);
+
+        this->state |= STRINGBUF_allocated;
+    }else {
+        ptr = basic_streambuf_wchar_eback(&this->base);
+        memcpy(buf, ptr, oldsize);
+
+        this->seekhigh = buf+(this->seekhigh-ptr);
+        basic_streambuf_wchar_setp_next(&this->base, buf,
+                buf+(basic_streambuf_wchar_pptr(&this->base)-ptr), buf+size);
+        if(this->state & STRINGBUF_no_read)
+            basic_streambuf_wchar_setg(&this->base, buf, NULL, buf);
+        else
+            basic_streambuf_wchar_setg(&this->base, buf,
+                    buf+(basic_streambuf_wchar_gptr(&this->base)-ptr),
+                    basic_streambuf_wchar_pptr(&this->base)+1);
+
+        MSVCRT_operator_delete(ptr);
+    }
+
+    return (*basic_streambuf_wchar__Pninc(&this->base) = meta);
+}
+
+/* ?pbackfail@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAEGG@Z */
+/* ?pbackfail@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAAGG@Z */
+/* ?pbackfail@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAEGG@Z */
+/* ?pbackfail@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAAGG@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_pbackfail, 8)
+unsigned short __thiscall basic_stringbuf_wchar_pbackfail(basic_stringbuf_wchar *this, unsigned short c)
+{
+    wchar_t *cur;
+
+    TRACE("(%p %x)\n", this, c);
+
+    cur = basic_streambuf_wchar_gptr(&this->base);
+    if(!cur || cur==basic_streambuf_wchar_eback(&this->base)
+            || (c!=WEOF && c!=cur[-1] && this->state&STRINGBUF_no_write))
+        return WEOF;
+
+    if(c != WEOF)
+        cur[-1] = c;
+    basic_streambuf_wchar_gbump(&this->base, -1);
+    return c==WEOF ? !WEOF : c;
+}
+
+/* ?underflow@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAEGXZ */
+/* ?underflow@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAAGXZ */
+/* ?underflow@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAEGXZ */
+/* ?underflow@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAAGXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_underflow, 4)
+unsigned short __thiscall basic_stringbuf_wchar_underflow(basic_stringbuf_wchar *this)
+{
+    wchar_t *ptr, *cur;
+
+    TRACE("(%p)\n", this);
+
+    cur = basic_streambuf_wchar_gptr(&this->base);
+    if(!cur || this->state&STRINGBUF_no_read)
+        return WEOF;
+
+    ptr  = basic_streambuf_wchar_pptr(&this->base);
+    if(this->seekhigh < ptr)
+        this->seekhigh = ptr;
+
+    ptr = basic_streambuf_wchar_egptr(&this->base);
+    if(this->seekhigh > ptr)
+        basic_streambuf_wchar_setg(&this->base, basic_streambuf_wchar_eback(&this->base), cur, this->seekhigh);
+
+    if(cur < this->seekhigh)
+        return *cur;
+    return WEOF;
+}
+
+/* ?seekoff@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
+/* ?seekoff@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
+/* ?seekoff@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
+/* ?seekoff@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_seekoff, 20)
+fpos_int* __thiscall basic_stringbuf_wchar_seekoff(basic_stringbuf_wchar *this,
+        fpos_int *ret, streamoff off, int way, int mode)
+{
+    wchar_t *beg, *cur_r, *cur_w;
+
+    TRACE("(%p %p %ld %d %d)\n", this, ret, off, way, mode);
+
+    cur_w = basic_streambuf_wchar_pptr(&this->base);
+    if(cur_w > this->seekhigh)
+        this->seekhigh = cur_w;
+
+    ret->off = 0;
+    ret->state = 0;
+
+    beg = basic_streambuf_wchar_eback(&this->base);
+    cur_r = basic_streambuf_wchar_gptr(&this->base);
+    if((mode & OPENMODE_in) && cur_r) {
+        if(way==SEEKDIR_cur && !(mode & OPENMODE_out))
+            off += cur_r-beg;
+        else if(way == SEEKDIR_end)
+            off += this->seekhigh-beg;
+        else if(way != SEEKDIR_beg)
+            off = -1;
+
+        if(off<0 || off>this->seekhigh-beg) {
+            off = -1;
+        }else {
+            basic_streambuf_wchar_gbump(&this->base, beg-cur_r+off);
+            if((mode & OPENMODE_out) && cur_w) {
+                basic_streambuf_wchar_setp_next(&this->base, beg,
+                        basic_streambuf_wchar_gptr(&this->base),
+                        basic_streambuf_wchar_epptr(&this->base));
+            }
+        }
+    }else if((mode & OPENMODE_out) && cur_w) {
+        if(way == SEEKDIR_cur)
+            off += cur_w-beg;
+        else if(way == SEEKDIR_end)
+            off += this->seekhigh-beg;
+        else if(way != SEEKDIR_beg)
+            off = -1;
+
+        if(off<0 || off>this->seekhigh-beg)
+            off = -1;
+        else
+            basic_streambuf_wchar_pbump(&this->base, beg-cur_w+off);
+    }else {
+        off = -1;
+    }
+
+    ret->pos = off;
+    return ret;
+}
+
+/* ?seekpos@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAE?AV?$fpos@H@2@V32@H@Z */
+/* ?seekpos@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAA?AV?$fpos@H@2@V32@H@Z */
+/* ?seekpos@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAE?AV?$fpos@H@2@V32@H@Z */
+/* ?seekpos@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAA?AV?$fpos@H@2@V32@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_seekpos, 36)
+fpos_int* __thiscall basic_stringbuf_wchar_seekpos(basic_stringbuf_wchar *this,
+        fpos_int *ret, fpos_int pos, int mode)
+{
+    TRACE("(%p %p %s %d)\n", this, ret, debugstr_fpos_int(&pos), mode);
+
+    if(pos.off==0 && pos.pos==-1 && pos.state==0) {
+        *ret = pos;
+        return ret;
+    }
+
+    return basic_stringbuf_wchar_seekoff(this, ret, pos.off, SEEKDIR_beg, mode);
+}
+
+/* ?str@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+/* ?str@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXAEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+/* ?str@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAEXABV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@@Z */
+/* ?str@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEAAXAEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_str_set, 8)
+void __thiscall basic_stringbuf_wchar_str_set(basic_stringbuf_wchar *this, const basic_string_wchar *str)
+{
+    TRACE("(%p %p)\n", this, str);
+
+    basic_stringbuf_wchar__Tidy(this);
+    basic_stringbuf_wchar__Init(this, MSVCP_basic_string_wchar_c_str(str), str->size, this->state);
+}
+
+/* ?str@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?str@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?str@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QBE?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
+/* ?str@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QEBA?AV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar_str_get, 8)
+basic_string_wchar* __thiscall basic_stringbuf_wchar_str_get(const basic_stringbuf_wchar *this, basic_string_wchar *ret)
+{
+    wchar_t *ptr;
+
+    TRACE("(%p)\n", this);
+
+    if(!(this->state & STRINGBUF_no_write) && basic_streambuf_wchar_pptr(&this->base)) {
+        wchar_t *pptr;
+
+        ptr = basic_streambuf_wchar_pbase(&this->base);
+        pptr = basic_streambuf_wchar_pptr(&this->base);
+
+        return MSVCP_basic_string_wchar_ctor_cstr_len(ret, ptr, (this->seekhigh < pptr ? pptr : this->seekhigh) - ptr);
+    }
+
+    if(!(this->state & STRINGBUF_no_read) && basic_streambuf_wchar_gptr(&this->base)) {
+        ptr = basic_streambuf_wchar_eback(&this->base);
+        return MSVCP_basic_string_wchar_ctor_cstr_len(ret, ptr, basic_streambuf_wchar_egptr(&this->base) - ptr);
+    }
+
+    return MSVCP_basic_string_wchar_ctor(ret);
 }
 
 /* ??0ios_base@std@@IAE@XZ */
@@ -4052,6 +5108,633 @@ basic_ostream_char* __thiscall basic_ostream_char_print_func_ios_base(
     return this;
 }
 
+/* Caution: basic_ostream uses virtual inheritance. */
+static inline basic_ios_wchar* basic_ostream_wchar_get_basic_ios(basic_ostream_wchar *this)
+{
+    return (basic_ios_wchar*)((char*)this+this->vbtable[1]);
+}
+
+/* ??0?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAE@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N@Z */
+/* ??0?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAA@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_ctor, 16)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_ctor(basic_ostream_wchar *this,
+        basic_streambuf_wchar *strbuf, MSVCP_bool isstd, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *base;
+
+    TRACE("(%p %p %d %d)\n", this, strbuf, isstd, virt_init);
+
+    if(virt_init) {
+        this->vbtable = basic_ostream_wchar_vbtable;
+        base = basic_ostream_wchar_get_basic_ios(this);
+        basic_ios_wchar_ctor(base);
+    }else {
+        base = basic_ostream_wchar_get_basic_ios(this);
+    }
+
+    base->base.vtable = &MSVCP_basic_ostream_wchar_vtable;
+    basic_ios_wchar_init(base, strbuf, isstd);
+    return this;
+}
+
+/* ??0?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAE@W4_Uninitialized@1@_N@Z */
+/* ??0?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAA@W4_Uninitialized@1@_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_ctor_uninitialized, 16)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_ctor_uninitialized(basic_ostream_wchar *this,
+        int uninitialized, MSVCP_bool addstd, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *base;
+
+    TRACE("(%p %d %x)\n", this, uninitialized, addstd);
+
+    if(virt_init) {
+        this->vbtable = basic_ostream_wchar_vbtable;
+        base = basic_ostream_wchar_get_basic_ios(this);
+        basic_ios_wchar_ctor(base);
+    }else {
+        base = basic_ostream_wchar_get_basic_ios(this);
+    }
+
+    base->base.vtable = &MSVCP_basic_ostream_wchar_vtable;
+    if(addstd)
+        ios_base_Addstd(&base->base);
+    return this;
+}
+
+/* ??1?$basic_ostream@_WU?$char_traits@_W@std@@@std@@UAE@XZ */
+/* ??1?$basic_ostream@_WU?$char_traits@_W@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_dtor, 4)
+void __thiscall basic_ostream_wchar_dtor(basic_ostream_wchar *this)
+{
+    /* don't destroy virtual base here */
+    TRACE("(%p)\n", this);
+}
+
+/* ??_D?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ??_D?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_vbase_dtor, 4)
+void __thiscall basic_ostream_wchar_vbase_dtor(basic_ostream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    basic_ostream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_ostream_wchar_get_basic_ios(this));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_ostream_wchar_vector_dtor, 8)
+basic_ostream_wchar* __thiscall MSVCP_basic_ostream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_ostream_wchar *this = (basic_ostream_wchar *)((char*)base - basic_ostream_wchar_vbtable[1] + basic_ostream_wchar_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_ostream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_ostream_wchar_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?flush@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@XZ */
+/* ?flush@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_flush, 4)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_flush(basic_ostream_wchar *this)
+{
+    /* this function is not matching C++ specification */
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p)\n", this);
+
+    if(basic_ios_wchar_rdbuf_get(base) && ios_base_good(&base->base)
+            && basic_streambuf_wchar_pubsync(basic_ios_wchar_rdbuf_get(base))==-1)
+        basic_ios_wchar_setstate(base, IOSTATE_badbit);
+    return this;
+}
+
+/* ?_Osfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ?_Osfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar__Osfx, 4)
+void __thiscall basic_ostream_wchar__Osfx(basic_ostream_wchar *this)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p)\n", this);
+
+    if(base->base.fmtfl & FMTFLAG_unitbuf)
+        basic_ostream_wchar_flush(this);
+}
+
+/* ?osfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ?osfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_osfx, 4)
+void __thiscall basic_ostream_wchar_osfx(basic_ostream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    basic_ostream_wchar__Osfx(this);
+}
+
+static BOOL basic_ostream_wchar_sentry_create(basic_ostream_wchar *ostr)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
+
+    if(basic_ios_wchar_rdbuf_get(base))
+        basic_streambuf_wchar__Lock(base->strbuf);
+
+    if(ios_base_good(&base->base) && base->stream)
+        basic_ostream_wchar_flush(base->stream);
+
+    return ios_base_good(&base->base);
+}
+
+static void basic_ostream_wchar_sentry_destroy(basic_ostream_wchar *ostr)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
+
+    if(ios_base_good(&base->base) && !__uncaught_exception())
+        basic_ostream_wchar_osfx(ostr);
+
+    if(basic_ios_wchar_rdbuf_get(base))
+        basic_streambuf_wchar__Unlock(base->strbuf);
+}
+
+/* ?opfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAE_NXZ */
+/* ?opfx@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAA_NXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_opfx, 4)
+MSVCP_bool __thiscall basic_ostream_wchar_opfx(basic_ostream_wchar *this)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p)\n", this);
+
+    if(ios_base_good(&base->base) && base->stream)
+        basic_ostream_wchar_flush(base->stream);
+    return ios_base_good(&base->base);
+}
+
+/* ?put@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@_W@Z */
+/* ?put@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_put, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_put(basic_ostream_wchar *this, wchar_t ch)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %c)\n", this, ch);
+
+    if(!basic_ostream_wchar_sentry_create(this)
+            || basic_streambuf_wchar_sputc(base->strbuf, ch)==WEOF) {
+        basic_ostream_wchar_sentry_destroy(this);
+        basic_ios_wchar_setstate(base, IOSTATE_badbit);
+        return this;
+    }
+
+    basic_ostream_wchar_sentry_destroy(this);
+    return this;
+}
+
+/* ?seekp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@JH@Z */
+/* ?seekp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_JH@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_seekp, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_seekp(basic_ostream_wchar *this, streamoff off, int way)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %ld %d)\n", this, off, way);
+
+    if(!ios_base_fail(&base->base)) {
+        fpos_int seek;
+
+        basic_streambuf_wchar_pubseekoff(basic_ios_wchar_rdbuf_get(base),
+                &seek, off, way, OPENMODE_out);
+        if(seek.off==0 && seek.pos==-1 && seek.state==0)
+            basic_ios_wchar_setstate(base, IOSTATE_failbit);
+    }
+    return this;
+}
+
+/* ?seekp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@V?$fpos@H@2@@Z */
+/* ?seekp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@V?$fpos@H@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_seekp_fpos, 28)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_seekp_fpos(basic_ostream_wchar *this, fpos_int pos)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %s)\n", this, debugstr_fpos_int(&pos));
+
+    if(!ios_base_fail(&base->base)) {
+        fpos_int seek;
+
+        basic_streambuf_wchar_pubseekpos(basic_ios_wchar_rdbuf_get(base),
+                &seek, pos, OPENMODE_out);
+        if(seek.off==0 && seek.pos==-1 && seek.state==0)
+            basic_ios_wchar_setstate(base, IOSTATE_failbit);
+    }
+    return this;
+}
+
+/* ?tellp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAE?AV?$fpos@H@2@XZ */
+/* ?tellp@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAA?AV?$fpos@H@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_tellp, 8)
+fpos_int* __thiscall basic_ostream_wchar_tellp(basic_ostream_wchar *this, fpos_int *ret)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p)\n", this);
+
+    if(!ios_base_fail(&base->base)) {
+        basic_streambuf_wchar_pubseekoff(basic_ios_wchar_rdbuf_get(base),
+                ret, 0, SEEKDIR_cur, OPENMODE_out);
+    }else {
+        ret->off = 0;
+        ret->pos = -1;
+        ret->state = 0;
+    }
+    return ret;
+}
+
+/* ?write@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PB_WH@Z */
+/* ?write@?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEB_W_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_write, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_write(basic_ostream_wchar *this, const wchar_t *str, streamsize count)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %s %ld)\n", this, debugstr_w(str), count);
+
+    if(!basic_ostream_wchar_sentry_create(this)
+            || basic_streambuf_wchar_sputn(base->strbuf, str, count)!=count) {
+        basic_ostream_wchar_sentry_destroy(this);
+        basic_ios_wchar_setstate(base, IOSTATE_badbit);
+        return this;
+    }
+
+    basic_ostream_wchar_sentry_destroy(this);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@F@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@F@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_short, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_short(basic_ostream_wchar *this, short val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %d)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_long(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base),
+                (ios_base_flags_get(&base->base) & FMTFLAG_basefield & (FMTFLAG_oct | FMTFLAG_hex))
+                ? (LONG)((unsigned short)val) : (LONG)val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@G@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@G@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ushort, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ushort(basic_ostream_wchar *this, unsigned short val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %u)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_ulong(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@H@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@H@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@J@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@J@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_int, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_int(basic_ostream_wchar *this, int val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %d)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_long(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@I@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@I@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@K@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@K@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_uint, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_uint(basic_ostream_wchar *this, unsigned int val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %u)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_ulong(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@M@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@M@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_float, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_float(basic_ostream_wchar *this, float val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %f)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_double(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@N@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@N@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_double, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_double(basic_ostream_wchar *this, double val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %lf)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_double(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@O@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@O@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ldouble, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ldouble(basic_ostream_wchar *this, double val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %lf)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_ldouble(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_streambuf, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_streambuf(basic_ostream_wchar *this, basic_streambuf_wchar *val)
+{
+    FIXME("(%p %p) stub\n", this, val);
+    return NULL;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@PBX@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@PEBX@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ptr, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ptr(basic_ostream_wchar *this, const void *val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_ptr(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@_J@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_int64, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_int64(basic_ostream_wchar *this, __int64 val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p)\n", this);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_int64(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@_K@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@_K@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_uint64, 12)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_uint64(basic_ostream_wchar *this, unsigned __int64 val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p)\n", this);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_uint64(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@_N@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_bool, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_bool(basic_ostream_wchar *this, MSVCP_bool val)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %x)\n", this, val);
+
+    if(basic_ostream_wchar_sentry_create(this)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_put *numput = num_put_wchar_use_facet(strbuf->loc);
+        ostreambuf_iterator_wchar dest = {0, strbuf};
+
+        num_put_wchar_put_bool(numput, &dest, dest, &base->base, basic_ios_wchar_fill_get(base), val);
+    }
+    basic_ostream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ?endl@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AAV21@@Z */
+/* ?endl@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AEAV21@@Z */
+basic_ostream_wchar* __cdecl basic_ostream_wchar_endl(basic_ostream_wchar *ostr)
+{
+    TRACE("(%p)\n", ostr);
+
+    basic_ostream_wchar_put(ostr, '\n');
+    basic_ostream_wchar_flush(ostr);
+    return ostr;
+}
+
+/* ??$?6_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AAV10@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+/* ??$?6_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AEAV10@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+basic_ostream_wchar* __cdecl basic_ostream_wchar_print_bstr(basic_ostream_wchar *ostr, const basic_string_wchar *str)
+{
+    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
+    IOSB_iostate state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", ostr, str);
+
+    if(basic_ostream_wchar_sentry_create(ostr)) {
+        MSVCP_size_t len = MSVCP_basic_string_wchar_length(str);
+        streamsize pad = (base->base.wide>len ? base->base.wide-len : 0);
+
+        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
+            for(; pad!=0; pad--) {
+                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
+                    state = IOSTATE_badbit;
+                    break;
+                }
+            }
+        }
+
+        if(state == IOSTATE_goodbit) {
+            if(basic_streambuf_wchar_sputn(base->strbuf, MSVCP_basic_string_wchar_c_str(str), len) != len)
+                state = IOSTATE_badbit;
+        }
+
+        for(; pad!=0; pad--) {
+            if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
+                state = IOSTATE_badbit;
+                break;
+            }
+        }
+
+        base->base.wide = 0;
+    }else {
+        state = IOSTATE_badbit;
+    }
+    basic_ostream_wchar_sentry_destroy(ostr);
+
+    basic_ios_wchar_setstate(base, state);
+    return ostr;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@P6AAAV01@AAV01@@Z@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@P6AAEAV01@AEAV01@@Z@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_func, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_func(basic_ostream_wchar *this,
+        basic_ostream_wchar* (__cdecl *pfunc)(basic_ostream_wchar*))
+{
+    TRACE("(%p %p)\n", this, pfunc);
+    pfunc(this);
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@P6AAAV?$basic_ios@_WU?$char_traits@_W@std@@@1@AAV21@@Z@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@P6AAEAV?$basic_ios@_WU?$char_traits@_W@std@@@1@AEAV21@@Z@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_func_basic_ios, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_func_basic_ios(basic_ostream_wchar *this,
+        basic_ios_wchar* (__cdecl *pfunc)(basic_ios_wchar*))
+{
+    TRACE("(%p %p)\n", this, pfunc);
+    pfunc(basic_ostream_wchar_get_basic_ios(this));
+    return this;
+}
+
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@P6AAAVios_base@1@AAV21@@Z@Z */
+/* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@P6AAEAVios_base@1@AEAV21@@Z@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_func_ios_base, 8)
+basic_ostream_wchar* __thiscall basic_ostream_wchar_print_func_ios_base(
+        basic_ostream_wchar *this, ios_base* (__cdecl *pfunc)(ios_base*))
+{
+    TRACE("(%p %p)\n", this, pfunc);
+    pfunc(&basic_ostream_wchar_get_basic_ios(this)->base);
+    return this;
+}
+
 /* Caution: basic_istream uses virtual inheritance. */
 static inline basic_ios_char* basic_istream_char_get_basic_ios(basic_istream_char *this)
 {
@@ -5080,6 +6763,1082 @@ basic_istream_char* __cdecl basic_istream_char_get_bstr(
     return istream;
 }
 
+/* ??$?5DU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAD@Z */
+/* ??$?5DU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAD@Z */
+basic_istream_char* __cdecl basic_istream_char_read_ch(basic_istream_char *istream, char *ch)
+{
+    IOSB_iostate state = IOSTATE_failbit;
+    int c = 0;
+
+    TRACE("(%p %p)\n", istream, ch);
+
+    if(basic_istream_char_sentry_create(istream, FALSE)) {
+        c = basic_streambuf_char_sbumpc(basic_ios_char_rdbuf_get(
+                    basic_istream_char_get_basic_ios(istream)));
+        if(c != EOF) {
+            state = IOSTATE_goodbit;
+            *ch = c;
+        }
+    }
+    basic_istream_char_sentry_destroy(istream);
+
+    basic_ios_char_setstate(basic_istream_char_get_basic_ios(istream),
+            state | (c==EOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    return istream;
+}
+
+/* Caution: basic_istream uses virtual inheritance. */
+static inline basic_ios_wchar* basic_istream_wchar_get_basic_ios(basic_istream_wchar *this)
+{
+    return (basic_ios_wchar*)((char*)this+this->vbtable[1]);
+}
+
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N1@Z */
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N1@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_ctor_init, 20)
+basic_istream_wchar* __thiscall basic_istream_wchar_ctor_init(basic_istream_wchar *this, basic_streambuf_wchar *strbuf, MSVCP_bool isstd, MSVCP_bool noinit, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *base;
+
+    TRACE("(%p %p %d %d %d)\n", this, strbuf, isstd, noinit, virt_init);
+
+    if(virt_init) {
+        this->vbtable = basic_istream_wchar_vbtable;
+        base = basic_istream_wchar_get_basic_ios(this);
+        basic_ios_wchar_ctor(base);
+    }else {
+        base = basic_istream_wchar_get_basic_ios(this);
+    }
+
+    base->base.vtable = &MSVCP_basic_istream_wchar_vtable;
+    this->count = 0;
+    if(!noinit)
+        basic_ios_wchar_init(base, strbuf, isstd);
+    return this;
+}
+
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N@Z */
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_ctor, 16)
+basic_istream_wchar* __thiscall basic_istream_wchar_ctor(basic_istream_wchar *this, basic_streambuf_wchar *strbuf, MSVCP_bool isstd, MSVCP_bool virt_init)
+{
+    return basic_istream_wchar_ctor_init(this, strbuf, isstd, FALSE, virt_init);
+}
+
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE@W4_Uninitialized@1@@Z */
+/* ??0?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA@W4_Uninitialized@1@@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_ctor_uninitialized, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_ctor_uninitialized(basic_istream_wchar *this, int uninitialized, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *base;
+
+    TRACE("(%p %d %d)\n", this, uninitialized, virt_init);
+
+    if(virt_init) {
+        this->vbtable = basic_istream_wchar_vbtable;
+        base = basic_istream_wchar_get_basic_ios(this);
+        basic_ios_wchar_ctor(base);
+    }else {
+        base = basic_istream_wchar_get_basic_ios(this);
+    }
+
+    base->base.vtable = &MSVCP_basic_istream_wchar_vtable;
+    ios_base_Addstd(&base->base);
+    return this;
+}
+
+/* ??1?$basic_istream@_WU?$char_traits@_W@std@@@std@@UAE@XZ */
+/* ??1?$basic_istream@_WU?$char_traits@_W@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_dtor, 4)
+void __thiscall basic_istream_wchar_dtor(basic_istream_wchar *this)
+{
+    /* don't destroy virtual base here */
+    TRACE("(%p)\n", this);
+}
+
+/* ??_D?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ??_D?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_vbase_dtor, 4)
+void __thiscall basic_istream_wchar_vbase_dtor(basic_istream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    basic_istream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_istream_wchar_get_basic_ios(this));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_istream_wchar_vector_dtor, 8)
+basic_istream_wchar* __thiscall MSVCP_basic_istream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_istream_wchar *this = (basic_istream_wchar *)((char*)base - basic_istream_wchar_vbtable[1] + basic_istream_wchar_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_istream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_istream_wchar_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?_Ipfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE_N_N@Z */
+/* ?_Ipfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA_N_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar__Ipfx, 8)
+MSVCP_bool __thiscall basic_istream_wchar__Ipfx(basic_istream_wchar *this, MSVCP_bool noskip)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %d)\n", this, noskip);
+
+    if(!ios_base_good(&base->base)) {
+        basic_ios_wchar_setstate(base, IOSTATE_failbit);
+        return FALSE;
+    }
+
+    if(basic_ios_wchar_tie_get(base))
+        basic_ostream_wchar_flush(basic_ios_wchar_tie_get(base));
+
+    if(!noskip && (ios_base_flags_get(&base->base) & FMTFLAG_skipws)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const ctype_wchar *ctype = ctype_wchar_use_facet(base->strbuf->loc);
+        int ch;
+
+        for(ch = basic_streambuf_wchar_sgetc(strbuf); ;
+                ch = basic_streambuf_wchar_snextc(strbuf)) {
+            if(ch == WEOF) {
+                basic_ios_wchar_setstate(base, IOSTATE_eofbit);
+                return FALSE;
+            }
+
+            if(!ctype_wchar_is_ch(ctype, _SPACE|_BLANK, ch))
+                break;
+        }
+    }
+
+    return TRUE;
+}
+
+/* ?ipfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE_N_N@Z */
+/* ?ipfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA_N_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_ipfx, 8)
+MSVCP_bool __thiscall basic_istream_wchar_ipfx(basic_istream_wchar *this, MSVCP_bool noskip)
+{
+    return basic_istream_wchar__Ipfx(this, noskip);
+}
+
+/* ?isfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ?isfx@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_isfx, 4)
+void __thiscall basic_istream_wchar_isfx(basic_istream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+}
+
+static BOOL basic_istream_wchar_sentry_create(basic_istream_wchar *istr, MSVCP_bool noskip)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(istr);
+
+    if(basic_ios_wchar_rdbuf_get(base))
+        basic_streambuf_wchar__Lock(base->strbuf);
+
+    return basic_istream_wchar_ipfx(istr, noskip);
+}
+
+static void basic_istream_wchar_sentry_destroy(basic_istream_wchar *istr)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(istr);
+
+    if(basic_ios_wchar_rdbuf_get(base))
+        basic_streambuf_wchar__Unlock(base->strbuf);
+}
+
+/* ?gcount@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QBEHXZ */
+/* ?gcount@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEBA_JXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_gcount, 4)
+int __thiscall basic_istream_wchar_gcount(const basic_istream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    return this->count;
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEGXZ */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAGXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get, 4)
+unsigned short __thiscall basic_istream_wchar_get(basic_istream_wchar *this)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int ret;
+
+    TRACE("(%p)\n", this);
+
+    this->count = 0;
+
+    if(!basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_istream_wchar_sentry_destroy(this);
+        return WEOF;
+    }
+
+    ret = basic_streambuf_wchar_sbumpc(basic_ios_wchar_rdbuf_get(base));
+    basic_istream_wchar_sentry_destroy(this);
+    if(ret == WEOF)
+        basic_ios_wchar_setstate(base, IOSTATE_eofbit|IOSTATE_failbit);
+    else
+        this->count++;
+
+    return ret;
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@AA_W@Z */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@AEA_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get_ch, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_get_ch(basic_istream_wchar *this, wchar_t *ch)
+{
+    unsigned short ret;
+
+    TRACE("(%p %p)\n", this, ch);
+
+    ret = basic_istream_wchar_get(this);
+    if(ret != WEOF)
+        *ch = (wchar_t)ret;
+    return this;
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WH_W@Z */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_J_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get_str_delim, 16)
+basic_istream_wchar* __thiscall basic_istream_wchar_get_str_delim(basic_istream_wchar *this, wchar_t *str, streamsize count, wchar_t delim)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    unsigned short ch = delim;
+
+    TRACE("(%p %p %ld %c)\n", this, str, count, delim);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        for(ch = basic_streambuf_wchar_sgetc(strbuf); count>1;
+                ch = basic_streambuf_wchar_snextc(strbuf)) {
+            if(ch==WEOF || ch==delim)
+                break;
+
+            *str++ = ch;
+            this->count++;
+            count--;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, (!this->count ? IOSTATE_failbit : IOSTATE_goodbit) |
+            (ch==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    if(count > 0)
+        *str = 0;
+    return this;
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WH@Z */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get_str, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_get_str(basic_istream_wchar *this, wchar_t *str, streamsize count)
+{
+    return basic_istream_wchar_get_str_delim(this, str, count, '\n');
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@AAV?$basic_streambuf@_WU?$char_traits@_W@std@@@2@_W@Z */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@AEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@2@_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get_streambuf_delim, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_get_streambuf_delim(basic_istream_wchar *this, basic_streambuf_wchar *strbuf, wchar_t delim)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    unsigned short ch = delim;
+
+    TRACE("(%p %p %c)\n", this, strbuf, delim);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf_read = basic_ios_wchar_rdbuf_get(base);
+
+        for(ch = basic_streambuf_wchar_sgetc(strbuf_read); ;
+                ch = basic_streambuf_wchar_snextc(strbuf_read)) {
+            if(ch==WEOF || ch==delim)
+                break;
+
+            if(basic_streambuf_wchar_sputc(strbuf, ch) == WEOF)
+                break;
+            this->count++;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, (!this->count ? IOSTATE_failbit : IOSTATE_goodbit) |
+            (ch==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    return this;
+}
+
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@AAV?$basic_streambuf@_WU?$char_traits@_W@std@@@2@@Z */
+/* ?get@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@AEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_get_streambuf, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_get_streambuf(basic_istream_wchar *this, basic_streambuf_wchar *strbuf)
+{
+    return basic_istream_wchar_get_streambuf_delim(this, strbuf, '\n');
+}
+
+/* ?getline@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WH_W@Z */
+/* ?getline@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_J_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_getline_delim, 16)
+basic_istream_wchar* __thiscall basic_istream_wchar_getline_delim(basic_istream_wchar *this, wchar_t *str, streamsize count, wchar_t delim)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    unsigned short ch = delim;
+
+    TRACE("(%p %p %ld %c)\n", this, str, count, delim);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE) && count>0) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        while(count > 1) {
+            ch = basic_streambuf_wchar_sbumpc(strbuf);
+
+            if(ch==WEOF || ch==delim)
+                break;
+
+            *str++ = ch;
+            this->count++;
+            count--;
+        }
+
+        if(ch == delim)
+            this->count++;
+        else if(ch != WEOF) {
+            ch = basic_streambuf_wchar_sgetc(strbuf);
+
+            if(ch == delim) {
+                basic_streambuf_wchar__Gninc(strbuf);
+                this->count++;
+            }
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, (ch==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit) |
+            (!this->count || (ch!=delim && ch!=WEOF) ? IOSTATE_failbit : IOSTATE_goodbit));
+    if(count > 0)
+        *str = 0;
+    return this;
+}
+
+/* ?getline@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WH@Z */
+/* ?getline@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_getline, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_getline(basic_istream_wchar *this, wchar_t *str, streamsize count)
+{
+    return basic_istream_wchar_getline_delim(this, str, count, '\n');
+}
+
+/* ?ignore@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@HG@Z */
+/* ?ignore@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_JG@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_ignore, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_ignore(basic_istream_wchar *this, streamsize count, unsigned short delim)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    unsigned short ch = delim;
+
+    TRACE("(%p %ld %d)\n", this, count, delim);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        while(count > 0) {
+            ch = basic_streambuf_wchar_sbumpc(strbuf);
+
+            if(ch==WEOF || ch==delim)
+                break;
+
+            this->count++;
+            if(count != INT_MAX)
+                count--;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    if(ch == WEOF)
+        basic_ios_wchar_setstate(base, IOSTATE_eofbit);
+    return this;
+}
+
+/* ?peek@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEGXZ */
+/* ?peek@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAGXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_peek, 4)
+unsigned short __thiscall basic_istream_wchar_peek(basic_istream_wchar *this)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    unsigned short ret = WEOF;
+
+    TRACE("(%p)\n", this);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE))
+        ret = basic_streambuf_wchar_sgetc(basic_ios_wchar_rdbuf_get(base));
+    basic_istream_wchar_sentry_destroy(this);
+    return ret;
+}
+
+/* ?_Read_s@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WIH@Z */
+/* ?_Read_s@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_K_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar__Read_s, 16)
+basic_istream_wchar* __thiscall basic_istream_wchar__Read_s(basic_istream_wchar *this, wchar_t *str, MSVCP_size_t size, streamsize count)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    IOSB_iostate state = IOSTATE_goodbit;
+
+    TRACE("(%p %p %lu %ld)\n", this, str, size, count);
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        this->count = basic_streambuf_wchar__Sgetn_s(strbuf, str, size, count);
+        if(this->count != count)
+            state |= IOSTATE_failbit | IOSTATE_eofbit;
+    }else {
+        this->count = 0;
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ?read@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@PA_WH@Z */
+/* ?read@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@PEA_W_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_read(basic_istream_wchar *this, wchar_t *str, streamsize count)
+{
+    return basic_istream_wchar__Read_s(this, str, count, count);
+}
+
+/* ?_Readsome_s@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEHPA_WIH@Z */
+/* ?_Readsome_s@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA_JPEA_W_K_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar__Readsome_s, 16)
+streamsize __thiscall basic_istream_wchar__Readsome_s(basic_istream_wchar *this, wchar_t *str, MSVCP_size_t size, streamsize count)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    IOSB_iostate state = IOSTATE_goodbit;
+
+    TRACE("(%p %p %lu %ld)\n", this, str, size, count);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        streamsize avail = basic_streambuf_wchar_in_avail(basic_ios_wchar_rdbuf_get(base));
+        if(avail > count)
+            avail = count;
+
+        if(avail == -1)
+            state |= IOSTATE_eofbit;
+        else if(avail > 0)
+            basic_istream_wchar__Read_s(this, str, size, avail);
+    }else {
+        state |= IOSTATE_failbit;
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this->count;
+}
+
+/* ?readsome@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEHPA_WH@Z */
+/* ?readsome@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA_JPEA_W_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_readsome, 12)
+streamsize __thiscall basic_istream_wchar_readsome(basic_istream_wchar *this, wchar_t *str, streamsize count)
+{
+    return basic_istream_wchar__Readsome_s(this, str, count, count);
+}
+
+/* ?putback@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@_W@Z */
+/* ?putback@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_W@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_putback, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_putback(basic_istream_wchar *this, wchar_t ch)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    IOSB_iostate state = IOSTATE_goodbit;
+
+    TRACE("(%p %c)\n", this, ch);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        if(!ios_base_good(&base->base))
+            state |= IOSTATE_failbit;
+        else if(!strbuf || basic_streambuf_wchar_sputbackc(strbuf, ch)==WEOF)
+            state |= IOSTATE_badbit;
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ?unget@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@XZ */
+/* ?unget@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_unget, 4)
+basic_istream_wchar* __thiscall basic_istream_wchar_unget(basic_istream_wchar *this)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    IOSB_iostate state = IOSTATE_goodbit;
+
+    TRACE("(%p)\n", this);
+
+    this->count = 0;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+        if(!ios_base_good(&base->base))
+            state |= IOSTATE_failbit;
+        else if(!strbuf || basic_streambuf_wchar_sungetc(strbuf)==WEOF)
+            state |= IOSTATE_badbit;
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ?sync@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEHXZ */
+/* ?sync@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAHXZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_sync, 4)
+int __thiscall basic_istream_wchar_sync(basic_istream_wchar *this)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+
+    TRACE("(%p)\n", this);
+
+    if(!strbuf)
+        return -1;
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        if(basic_streambuf_wchar_pubsync(strbuf) != -1) {
+            basic_istream_wchar_sentry_destroy(this);
+            return 0;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, IOSTATE_badbit);
+    return -1;
+}
+
+/* ?tellg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAE?AV?$fpos@H@2@XZ */
+/* ?tellg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAA?AV?$fpos@H@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_tellg, 8)
+fpos_int* __thiscall basic_istream_wchar_tellg(basic_istream_wchar *this, fpos_int *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+        if(!ios_base_fail(&base->base)) {
+            basic_streambuf_wchar_pubseekoff(basic_ios_wchar_rdbuf_get(base),
+                    ret, 0, SEEKDIR_cur, OPENMODE_in);
+            basic_istream_wchar_sentry_destroy(this);
+
+            if(ret->off==0 && ret->pos==-1 && ret->state==0)
+                basic_ios_wchar_setstate(base, IOSTATE_failbit);
+            return ret;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    ret->off = 0;
+    ret->pos = -1;
+    ret->state = 0;
+    return ret;
+}
+
+/* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@JH@Z */
+/* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_JH@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_seekg, 12)
+basic_istream_wchar* __thiscall basic_istream_wchar_seekg(basic_istream_wchar *this, streamoff off, int dir)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %ld %d)\n", this, off, dir);
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        if(!ios_base_fail(&base->base)) {
+            basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+            fpos_int ret;
+
+            basic_streambuf_wchar_pubseekoff(strbuf, &ret, off, dir, OPENMODE_in);
+            basic_istream_wchar_sentry_destroy(this);
+
+            if(ret.off==0 && ret.pos==-1 && ret.state==0)
+                basic_ios_wchar_setstate(base, IOSTATE_failbit);
+            else
+                basic_ios_wchar_clear(base, IOSTATE_goodbit);
+            return this;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, IOSTATE_failbit);
+    return this;
+}
+
+/* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@V?$fpos@H@2@@Z */
+/* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@V?$fpos@H@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_seekg_fpos, 28)
+basic_istream_wchar* __thiscall basic_istream_wchar_seekg_fpos(basic_istream_wchar *this, fpos_int pos)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+
+    TRACE("(%p %s)\n", this, debugstr_fpos_int(&pos));
+
+    if(basic_istream_wchar_sentry_create(this, TRUE)) {
+        if(!ios_base_fail(&base->base)) {
+            basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+            fpos_int ret;
+
+            basic_streambuf_wchar_pubseekpos(strbuf, &ret, pos, OPENMODE_in);
+            basic_istream_wchar_sentry_destroy(this);
+
+            if(ret.off==0 && ret.pos==-1 && ret.state==0)
+                basic_ios_wchar_setstate(base, IOSTATE_failbit);
+            else
+                basic_ios_wchar_clear(base, IOSTATE_goodbit);
+            return this;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, IOSTATE_failbit);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAF@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAF@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_short, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_short(basic_istream_wchar *this, short *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+        LONG tmp;
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_long(numget, &last, first, last, &base->base, &state, &tmp);
+
+        if(!(state&IOSTATE_failbit) && tmp==(LONG)((short)tmp))
+            *v = tmp;
+        else
+            state |= IOSTATE_failbit;
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAG@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAG@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ushort, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_ushort(basic_istream_wchar *this, unsigned short *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_ushort(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAH@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAH@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_int, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_int(basic_istream_wchar *this, int *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_long(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAI@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAI@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_uint, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_uint(basic_istream_wchar *this, unsigned int *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_uint(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAJ@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAJ@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_long, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_long(basic_istream_wchar *this, LONG *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_long(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAK@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAK@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ulong, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_ulong(basic_istream_wchar *this, ULONG *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_ulong(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAM@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAM@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_float, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_float(basic_istream_wchar *this, float *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_float(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAN@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAN@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_double, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_double(basic_istream_wchar *this, double *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_double(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAO@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAO@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ldouble, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_ldouble(basic_istream_wchar *this, double *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_ldouble(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAPAX@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEAPEAX@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ptr, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_ptr(basic_istream_wchar *this, void **v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_void(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AA_J@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEA_J@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_int64, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_int64(basic_istream_wchar *this, __int64 *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_int64(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AA_K@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEA_K@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_uint64, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_uint64(basic_istream_wchar *this, unsigned __int64 *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_uint64(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AA_N@Z */
+/* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@AEA_N@Z */
+DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_bool, 8)
+basic_istream_wchar* __thiscall basic_istream_wchar_read_bool(basic_istream_wchar *this, MSVCP_bool *v)
+{
+    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(this);
+    int state = IOSTATE_goodbit;
+
+    TRACE("(%p %p)\n", this, v);
+
+    if(basic_istream_wchar_sentry_create(this, FALSE)) {
+        basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
+        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        istreambuf_iterator_wchar first={0}, last={0};
+
+        first.strbuf = strbuf;
+        num_get_wchar_get_bool(numget, &last, first, last, &base->base, &state, v);
+    }
+    basic_istream_wchar_sentry_destroy(this);
+
+    basic_ios_wchar_setstate(base, state);
+    return this;
+}
+
+/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_W@Z */
+/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_W@Z */
+basic_istream_wchar* __cdecl basic_istream_wchar_getline_bstr_delim(
+        basic_istream_wchar *istream, basic_string_wchar *str, wchar_t delim)
+{
+    IOSB_iostate state = IOSTATE_failbit;
+    int c = delim;
+
+    TRACE("(%p %p %c)\n", istream, str, delim);
+
+    if(basic_istream_wchar_sentry_create(istream, TRUE)) {
+        MSVCP_basic_string_wchar_clear(str);
+
+        for(c = basic_istream_wchar_get(istream); c!=delim && c!=WEOF;
+                c = basic_istream_wchar_get(istream)) {
+            state = IOSTATE_goodbit;
+            MSVCP_basic_string_wchar_append_ch(str, c);
+        }
+    }
+    basic_istream_wchar_sentry_destroy(istream);
+
+    basic_ios_wchar_setstate(basic_istream_wchar_get_basic_ios(istream),
+            state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    return istream;
+}
+
+/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+basic_istream_wchar* __cdecl basic_istream_wchar_getline_bstr(
+        basic_istream_wchar *istream, basic_string_wchar *str)
+{
+    return basic_istream_wchar_getline_bstr_delim(istream, str, '\n');
+}
+
+/* ??$?5_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+/* ??$?5_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
+basic_istream_wchar* __cdecl basic_istream_wchar_get_bstr(
+        basic_istream_wchar *istream, basic_string_wchar *str)
+{
+    IOSB_iostate state = IOSTATE_failbit;
+    int c = '\n';
+
+    TRACE("(%p %p)\n", istream, str);
+
+    if(basic_istream_wchar_sentry_create(istream, FALSE)) {
+        basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(istream);
+        const ctype_wchar *ctype = ctype_wchar_use_facet(base->strbuf->loc);
+
+        MSVCP_basic_string_wchar_clear(str);
+
+        for(c = basic_streambuf_wchar_sgetc(basic_ios_wchar_rdbuf_get(base));
+                c!=WEOF && !ctype_wchar_is_ch(ctype, _SPACE|_BLANK, c);
+                c = basic_streambuf_wchar_snextc(basic_ios_wchar_rdbuf_get(base))) {
+            state = IOSTATE_goodbit;
+            MSVCP_basic_string_wchar_append_ch(str, c);
+        }
+    }
+    basic_istream_wchar_sentry_destroy(istream);
+
+    basic_ios_wchar_setstate(basic_istream_wchar_get_basic_ios(istream),
+            state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    return istream;
+}
+
+/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AA_W@Z */
+/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEA_W@Z */
+basic_istream_wchar* __cdecl basic_istream_wchar_read_ch(basic_istream_wchar *istream, wchar_t *ch)
+{
+    IOSB_iostate state = IOSTATE_failbit;
+    unsigned short c = 0;
+
+    TRACE("(%p %p)\n", istream, ch);
+
+    if(basic_istream_wchar_sentry_create(istream, FALSE)) {
+        c = basic_streambuf_wchar_sbumpc(basic_ios_wchar_rdbuf_get(
+                    basic_istream_wchar_get_basic_ios(istream)));
+        if(c != WEOF) {
+            state = IOSTATE_goodbit;
+            *ch = c;
+        }
+    }
+    basic_istream_wchar_sentry_destroy(istream);
+
+    basic_ios_wchar_setstate(basic_istream_wchar_get_basic_ios(istream),
+            state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
+    return istream;
+}
+
 /* ??0?$basic_iostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z */
 /* ??0?$basic_iostream@DU?$char_traits@D@std@@@std@@QEAA@PEAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z */
 DEFINE_THISCALL_WRAPPER(basic_iostream_char_ctor, 12)
@@ -5141,6 +7900,74 @@ basic_iostream_char* __thiscall MSVCP_basic_iostream_char_vector_dtor(basic_ios_
         MSVCRT_operator_delete(ptr);
     } else {
         basic_iostream_char_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ??0?$basic_iostream@_WU?$char_traits@_W@std@@@std@@QAE@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
+/* ??0?$basic_iostream@_WU?$char_traits@_W@std@@@std@@QEAA@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
+DEFINE_THISCALL_WRAPPER(basic_iostream_wchar_ctor, 12)
+basic_iostream_wchar* __thiscall basic_iostream_wchar_ctor(basic_iostream_wchar *this, basic_streambuf_wchar *strbuf, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %p %d)\n", this, strbuf, virt_init);
+
+    if(virt_init) {
+        this->base1.vbtable = basic_iostream_wchar_vbtable1;
+        this->base2.vbtable = basic_iostream_wchar_vbtable2;
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base1);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base1);
+    }
+
+    basic_ios->base.vtable = &MSVCP_basic_iostream_wchar_vtable;
+
+    basic_istream_wchar_ctor(&this->base1, strbuf, FALSE, FALSE);
+    basic_ostream_wchar_ctor_uninitialized(&this->base2, 0, FALSE, FALSE);
+    return this;
+}
+
+/* ??1?$basic_iostream@_WU?$char_traits@_W@std@@@std@@UAE@XZ */
+/* ??1?$basic_iostream@_WU?$char_traits@_W@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_iostream_wchar_dtor, 4)
+void __thiscall basic_iostream_wchar_dtor(basic_iostream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    basic_ostream_wchar_dtor(&this->base2);
+    basic_istream_wchar_dtor(&this->base1);
+}
+
+/* ??_D?$basic_iostream@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
+/* ??_D?$basic_iostream@_WU?$char_traits@_W@std@@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_iostream_wchar_vbase_dtor, 4)
+void __thiscall basic_iostream_wchar_vbase_dtor(basic_iostream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    basic_iostream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_istream_wchar_get_basic_ios(&this->base1));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_iostream_wchar_vector_dtor, 8)
+basic_iostream_wchar* __thiscall MSVCP_basic_iostream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_iostream_wchar *this = (basic_iostream_wchar *)((char*)base - basic_iostream_wchar_vbtable1[1] + basic_iostream_wchar_vbtable1[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_iostream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_iostream_wchar_vbase_dtor(this);
         if(flags & 1)
             MSVCRT_operator_delete(this);
     }
@@ -5777,6 +8604,786 @@ basic_filebuf_char* __thiscall basic_fstream_char_rdbuf(const basic_fstream_char
     return (basic_filebuf_char*)&this->filebuf;
 }
 
+/* ??0?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+/* ??0?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_ctor_str, 16)
+basic_ostringstream_char* __thiscall basic_ostringstream_char_ctor_str(basic_ostringstream_char *this,
+        const basic_string_char *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_ostringstream_char_vbtable;
+        basic_ios = basic_ostream_char_get_basic_ios(&this->base);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_ostream_char_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_char_ctor_str(&this->strbuf, str, mode|OPENMODE_out);
+    basic_ostream_char_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_ostringstream_char_vtable;
+    return this;
+}
+
+/* ??0?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@H@Z */
+/* ??0?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_ctor_mode, 12)
+basic_ostringstream_char* __thiscall basic_ostringstream_char_ctor_mode(
+        basic_ostringstream_char *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_ostringstream_char_vbtable;
+        basic_ios = basic_ostream_char_get_basic_ios(&this->base);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_ostream_char_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_char_ctor_mode(&this->strbuf, mode|OPENMODE_out);
+    basic_ostream_char_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_ostringstream_char_vtable;
+    return this;
+}
+
+/* ??_F?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_F?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_ctor, 8)
+basic_ostringstream_char* __thiscall basic_ostringstream_char_ctor(
+        basic_ostringstream_char *this, MSVCP_bool virt_init)
+{
+    return basic_ostringstream_char_ctor_mode(this, 0, virt_init);
+}
+
+/* ??1?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAE@XZ */
+/* ??1?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_dtor, 4)
+void __thiscall basic_ostringstream_char_dtor(basic_ostringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_char_dtor(&this->strbuf);
+    basic_ostream_char_dtor(&this->base);
+}
+
+/* ??_D?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_D?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_vbase_dtor, 4)
+void __thiscall basic_ostringstream_char_vbase_dtor(basic_ostringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_ostringstream_char_dtor(this);
+    basic_ios_char_dtor(basic_ostream_char_get_basic_ios(&this->base));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_ostringstream_char_vector_dtor, 8)
+basic_ostringstream_char* __thiscall MSVCP_basic_ostringstream_char_vector_dtor(basic_ios_char *base, unsigned int flags)
+{
+    basic_ostringstream_char *this = (basic_ostringstream_char *)((char*)base - basic_ostringstream_char_vbtable[1] + basic_ostringstream_char_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_ostringstream_char_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_ostringstream_char_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?rdbuf@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_rdbuf, 4)
+basic_stringbuf_char* __thiscall basic_ostringstream_char_rdbuf(const basic_ostringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_char*)&this->strbuf;
+}
+
+/* ?str@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+/* ?str@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_str_set, 8)
+void __thiscall basic_ostringstream_char_str_set(basic_ostringstream_char *this, const basic_string_char *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_char_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?str@?$basic_ostringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_char_str_get, 8)
+basic_string_char* __thiscall basic_ostringstream_char_str_get(const basic_ostringstream_char *this, basic_string_char *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_char_str_get(&this->strbuf, ret);
+}
+
+/* ??0?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+/* ??0?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_ctor_str, 16)
+basic_ostringstream_wchar* __thiscall basic_ostringstream_wchar_ctor_str(basic_ostringstream_wchar *this,
+        const basic_string_wchar *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_ostringstream_wchar_vbtable;
+        basic_ios = basic_ostream_wchar_get_basic_ios(&this->base);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_ostream_wchar_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_wchar_ctor_str(&this->strbuf, str, mode|OPENMODE_out);
+    basic_ostream_wchar_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_ostringstream_wchar_vtable;
+    return this;
+}
+
+/* ??0?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@H@Z */
+/* ??0?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_ctor_mode, 12)
+basic_ostringstream_wchar* __thiscall basic_ostringstream_wchar_ctor_mode(
+        basic_ostringstream_wchar *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_ostringstream_wchar_vbtable;
+        basic_ios = basic_ostream_wchar_get_basic_ios(&this->base);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_ostream_wchar_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_wchar_ctor_mode(&this->strbuf, mode|OPENMODE_out);
+    basic_ostream_wchar_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_ostringstream_wchar_vtable;
+    return this;
+}
+
+/* ??_F?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_F?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_ctor, 8)
+basic_ostringstream_wchar* __thiscall basic_ostringstream_wchar_ctor(
+        basic_ostringstream_wchar *this, MSVCP_bool virt_init)
+{
+    return basic_ostringstream_wchar_ctor_mode(this, 0, virt_init);
+}
+
+/* ??1?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UAE@XZ */
+/* ??1?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_dtor, 4)
+void __thiscall basic_ostringstream_wchar_dtor(basic_ostringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_wchar_dtor(&this->strbuf);
+    basic_ostream_wchar_dtor(&this->base);
+}
+
+/* ??_D?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_D?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_vbase_dtor, 4)
+void __thiscall basic_ostringstream_wchar_vbase_dtor(basic_ostringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_ostringstream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_ostream_wchar_get_basic_ios(&this->base));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_ostringstream_wchar_vector_dtor, 8)
+basic_ostringstream_wchar* __thiscall MSVCP_basic_ostringstream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_ostringstream_wchar *this = (basic_ostringstream_wchar *)((char*)base - basic_ostringstream_wchar_vbtable[1] + basic_ostringstream_wchar_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_ostringstream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_ostringstream_wchar_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?rdbuf@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_rdbuf, 4)
+basic_stringbuf_wchar* __thiscall basic_ostringstream_wchar_rdbuf(const basic_ostringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_wchar*)&this->strbuf;
+}
+
+/* ?str@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+/* ?str@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXAEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_str_set, 8)
+void __thiscall basic_ostringstream_wchar_str_set(basic_ostringstream_wchar *this, const basic_string_wchar *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_wchar_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?str@?$basic_ostringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_ostringstream_wchar_str_get, 8)
+basic_string_wchar* __thiscall basic_ostringstream_wchar_str_get(const basic_ostringstream_wchar *this, basic_string_wchar *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_wchar_str_get(&this->strbuf, ret);
+}
+
+/* ??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+/* ??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_ctor_str, 16)
+basic_istringstream_char* __thiscall basic_istringstream_char_ctor_str(basic_istringstream_char *this,
+        const basic_string_char *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_istringstream_char_vbtable;
+        basic_ios = basic_istream_char_get_basic_ios(&this->base);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_char_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_char_ctor_str(&this->strbuf, str, mode|OPENMODE_in);
+    basic_istream_char_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_istringstream_char_vtable;
+    return this;
+}
+
+/* ??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@H@Z */
+/* ??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_ctor_mode, 12)
+basic_istringstream_char* __thiscall basic_istringstream_char_ctor_mode(
+        basic_istringstream_char *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_istringstream_char_vbtable;
+        basic_ios = basic_istream_char_get_basic_ios(&this->base);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_char_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_char_ctor_mode(&this->strbuf, mode|OPENMODE_in);
+    basic_istream_char_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_istringstream_char_vtable;
+    return this;
+}
+
+/* ??_F?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_F?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_ctor, 8)
+basic_istringstream_char* __thiscall basic_istringstream_char_ctor(
+        basic_istringstream_char *this, MSVCP_bool virt_init)
+{
+    return basic_istringstream_char_ctor_mode(this, 0, virt_init);
+}
+
+/* ??1?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAE@XZ */
+/* ??1?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_dtor, 4)
+void __thiscall basic_istringstream_char_dtor(basic_istringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_char_dtor(&this->strbuf);
+    basic_istream_char_dtor(&this->base);
+}
+
+/* ??_D?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_D?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_vbase_dtor, 4)
+void __thiscall basic_istringstream_char_vbase_dtor(basic_istringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_istringstream_char_dtor(this);
+    basic_ios_char_dtor(basic_istream_char_get_basic_ios(&this->base));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_istringstream_char_vector_dtor, 8)
+basic_istringstream_char* __thiscall MSVCP_basic_istringstream_char_vector_dtor(basic_ios_char *base, unsigned int flags)
+{
+    basic_istringstream_char *this = (basic_istringstream_char *)((char*)base - basic_istringstream_char_vbtable[1] + basic_istringstream_char_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_istringstream_char_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_istringstream_char_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?rdbuf@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_rdbuf, 4)
+basic_stringbuf_char* __thiscall basic_istringstream_char_rdbuf(const basic_istringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_char*)&this->strbuf;
+}
+
+/* ?str@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+/* ?str@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_str_set, 8)
+void __thiscall basic_istringstream_char_str_set(basic_istringstream_char *this, const basic_string_char *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_char_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?str@?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_char_str_get, 8)
+basic_string_char* __thiscall basic_istringstream_char_str_get(const basic_istringstream_char *this, basic_string_char *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_char_str_get(&this->strbuf, ret);
+}
+
+/* ??0?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+/* ??0?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_ctor_str, 16)
+basic_istringstream_wchar* __thiscall basic_istringstream_wchar_ctor_str(basic_istringstream_wchar *this,
+        const basic_string_wchar *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_istringstream_wchar_vbtable;
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_wchar_ctor_str(&this->strbuf, str, mode|OPENMODE_in);
+    basic_istream_wchar_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_istringstream_wchar_vtable;
+    return this;
+}
+
+/* ??0?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@H@Z */
+/* ??0?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_ctor_mode, 12)
+basic_istringstream_wchar* __thiscall basic_istringstream_wchar_ctor_mode(
+        basic_istringstream_wchar *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.vbtable = basic_istringstream_wchar_vbtable;
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base);
+    }
+
+    basic_stringbuf_wchar_ctor_mode(&this->strbuf, mode|OPENMODE_in);
+    basic_istream_wchar_ctor(&this->base, &this->strbuf.base, FALSE, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_istringstream_wchar_vtable;
+    return this;
+}
+
+/* ??_F?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_F?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_ctor, 8)
+basic_istringstream_wchar* __thiscall basic_istringstream_wchar_ctor(
+        basic_istringstream_wchar *this, MSVCP_bool virt_init)
+{
+    return basic_istringstream_wchar_ctor_mode(this, 0, virt_init);
+}
+
+/* ??1?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UAE@XZ */
+/* ??1?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_dtor, 4)
+void __thiscall basic_istringstream_wchar_dtor(basic_istringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringbuf_wchar_dtor(&this->strbuf);
+    basic_istream_wchar_dtor(&this->base);
+}
+
+/* ??_D?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_D?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_vbase_dtor, 4)
+void __thiscall basic_istringstream_wchar_vbase_dtor(basic_istringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_istringstream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_istream_wchar_get_basic_ios(&this->base));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_istringstream_wchar_vector_dtor, 8)
+basic_istringstream_wchar* __thiscall MSVCP_basic_istringstream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_istringstream_wchar *this = (basic_istringstream_wchar *)((char*)base - basic_istringstream_wchar_vbtable[1] + basic_istringstream_wchar_vbtable[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_istringstream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_istringstream_wchar_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?rdbuf@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_rdbuf, 4)
+basic_stringbuf_wchar* __thiscall basic_istringstream_wchar_rdbuf(const basic_istringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_wchar*)&this->strbuf;
+}
+
+/* ?str@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+/* ?str@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXAEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_str_set, 8)
+void __thiscall basic_istringstream_wchar_str_set(basic_istringstream_wchar *this, const basic_string_wchar *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_wchar_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?str@?$basic_istringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_istringstream_wchar_str_get, 8)
+basic_string_wchar* __thiscall basic_istringstream_wchar_str_get(const basic_istringstream_wchar *this, basic_string_wchar *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_wchar_str_get(&this->strbuf, ret);
+}
+
+/* ??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+/* ??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_ctor_str, 16)
+basic_stringstream_char* __thiscall basic_stringstream_char_ctor_str(basic_stringstream_char *this,
+        const basic_string_char *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.base1.vbtable = basic_stringstream_char_vbtable1;
+        this->base.base2.vbtable = basic_stringstream_char_vbtable2;
+        basic_ios = basic_istream_char_get_basic_ios(&this->base.base1);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_char_get_basic_ios(&this->base.base1);
+    }
+
+    basic_stringbuf_char_ctor_str(&this->strbuf, str, mode);
+    basic_iostream_char_ctor(&this->base, &this->strbuf.base, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_stringstream_char_vtable;
+    return this;
+}
+
+/* ??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@H@Z */
+/* ??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_ctor_mode, 12)
+basic_stringstream_char* __thiscall basic_stringstream_char_ctor_mode(
+        basic_stringstream_char *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_char *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.base1.vbtable = basic_stringstream_char_vbtable1;
+        this->base.base2.vbtable = basic_stringstream_char_vbtable2;
+        basic_ios = basic_istream_char_get_basic_ios(&this->base.base1);
+        basic_ios_char_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_char_get_basic_ios(&this->base.base1);
+    }
+
+    basic_stringbuf_char_ctor_mode(&this->strbuf, mode);
+    basic_iostream_char_ctor(&this->base, &this->strbuf.base, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_stringstream_char_vtable;
+    return this;
+}
+
+/* ??_F?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_F?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_ctor, 8)
+basic_stringstream_char* __thiscall basic_stringstream_char_ctor(
+        basic_stringstream_char *this, MSVCP_bool virt_init)
+{
+    return basic_stringstream_char_ctor_mode(
+            this, OPENMODE_out|OPENMODE_in, virt_init);
+}
+
+/* ??1?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UAE@XZ */
+/* ??1?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_dtor, 4)
+void __thiscall basic_stringstream_char_dtor(basic_stringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_iostream_char_dtor(&this->base);
+    basic_stringbuf_char_dtor(&this->strbuf);
+}
+
+/* ??_D?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ */
+/* ??_D?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_vbase_dtor, 4)
+void __thiscall basic_stringstream_char_vbase_dtor(basic_stringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringstream_char_dtor(this);
+    basic_ios_char_dtor(basic_istream_char_get_basic_ios(&this->base.base1));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_stringstream_char_vector_dtor, 8)
+basic_stringstream_char* __thiscall MSVCP_basic_stringstream_char_vector_dtor(basic_ios_char *base, unsigned int flags)
+{
+    basic_stringstream_char *this = (basic_stringstream_char *)((char*)base - basic_stringstream_char_vbtable1[1] + basic_stringstream_char_vbtable1[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_stringstream_char_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_stringstream_char_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?rdbuf@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBAPEAV?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_rdbuf, 4)
+basic_stringbuf_char* __thiscall basic_stringstream_char_rdbuf(const basic_stringstream_char *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_char*)&this->strbuf;
+}
+
+/* ?str@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+/* ?str@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEAAXAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_str_set, 8)
+void __thiscall basic_stringstream_char_str_set(basic_stringstream_char *this, const basic_string_char *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_char_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+/* ?str@?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QEBA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_char_str_get, 8)
+basic_string_char* __thiscall basic_stringstream_char_str_get(const basic_stringstream_char *this, basic_string_char *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_char_str_get(&this->strbuf, ret);
+}
+
+/* ??0?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+/* ??0?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@1@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_ctor_str, 16)
+basic_stringstream_wchar* __thiscall basic_stringstream_wchar_ctor_str(basic_stringstream_wchar *this,
+        const basic_string_wchar *str, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %p %d %d)\n", this, str, mode, virt_init);
+
+    if(virt_init) {
+        this->base.base1.vbtable = basic_stringstream_wchar_vbtable1;
+        this->base.base2.vbtable = basic_stringstream_wchar_vbtable2;
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base.base1);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base.base1);
+    }
+
+    basic_stringbuf_wchar_ctor_str(&this->strbuf, str, mode);
+    basic_iostream_wchar_ctor(&this->base, &this->strbuf.base, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_stringstream_wchar_vtable;
+    return this;
+}
+
+/* ??0?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@H@Z */
+/* ??0?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_ctor_mode, 12)
+basic_stringstream_wchar* __thiscall basic_stringstream_wchar_ctor_mode(
+        basic_stringstream_wchar *this, int mode, MSVCP_bool virt_init)
+{
+    basic_ios_wchar *basic_ios;
+
+    TRACE("(%p %d %d)\n", this, mode, virt_init);
+
+    if(virt_init) {
+        this->base.base1.vbtable = basic_stringstream_wchar_vbtable1;
+        this->base.base2.vbtable = basic_stringstream_wchar_vbtable2;
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base.base1);
+        basic_ios_wchar_ctor(basic_ios);
+    }else {
+        basic_ios = basic_istream_wchar_get_basic_ios(&this->base.base1);
+    }
+
+    basic_stringbuf_wchar_ctor_mode(&this->strbuf, mode);
+    basic_iostream_wchar_ctor(&this->base, &this->strbuf.base, FALSE);
+    basic_ios->base.vtable = &MSVCP_basic_stringstream_wchar_vtable;
+    return this;
+}
+
+/* ??_F?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_F?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_ctor, 8)
+basic_stringstream_wchar* __thiscall basic_stringstream_wchar_ctor(
+        basic_stringstream_wchar *this, MSVCP_bool virt_init)
+{
+    return basic_stringstream_wchar_ctor_mode(
+            this, OPENMODE_out|OPENMODE_in, virt_init);
+}
+
+/* ??1?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UAE@XZ */
+/* ??1?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_dtor, 4)
+void __thiscall basic_stringstream_wchar_dtor(basic_stringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_iostream_wchar_dtor(&this->base);
+    basic_stringbuf_wchar_dtor(&this->strbuf);
+}
+
+/* ??_D?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXXZ */
+/* ??_D?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_vbase_dtor, 4)
+void __thiscall basic_stringstream_wchar_vbase_dtor(basic_stringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+
+    basic_stringstream_wchar_dtor(this);
+    basic_ios_wchar_dtor(basic_istream_wchar_get_basic_ios(&this->base.base1));
+}
+
+DEFINE_THISCALL_WRAPPER(MSVCP_basic_stringstream_wchar_vector_dtor, 8)
+basic_stringstream_wchar* __thiscall MSVCP_basic_stringstream_wchar_vector_dtor(basic_ios_wchar *base, unsigned int flags)
+{
+    basic_stringstream_wchar *this = (basic_stringstream_wchar *)((char*)base - basic_stringstream_wchar_vbtable1[1] + basic_stringstream_wchar_vbtable1[0]);
+
+    TRACE("(%p %x)\n", this, flags);
+
+    if(flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        int i, *ptr = (int *)this-1;
+
+        for(i=*ptr-1; i>=0; i--)
+            basic_stringstream_wchar_vbase_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        basic_stringstream_wchar_vbase_dtor(this);
+        if(flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+
+    return this;
+}
+
+/* ?rdbuf@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBEPAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?rdbuf@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBAPEAV?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_rdbuf, 4)
+basic_stringbuf_wchar* __thiscall basic_stringstream_wchar_rdbuf(const basic_stringstream_wchar *this)
+{
+    TRACE("(%p)\n", this);
+    return (basic_stringbuf_wchar*)&this->strbuf;
+}
+
+/* ?str@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAEXABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+/* ?str@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEAAXAEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@@Z */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_str_set, 8)
+void __thiscall basic_stringstream_wchar_str_set(basic_stringstream_wchar *this, const basic_string_wchar *str)
+{
+    TRACE("(%p %p)\n", this, str);
+    basic_stringbuf_wchar_str_set(&this->strbuf, str);
+}
+
+/* ?str@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QBE?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+/* ?str@?$basic_stringstream@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QEBA?AV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@2@XZ */
+DEFINE_THISCALL_WRAPPER(basic_stringstream_wchar_str_get, 8)
+basic_string_wchar* __thiscall basic_stringstream_wchar_str_get(const basic_stringstream_wchar *this, basic_string_wchar *ret)
+{
+    TRACE("(%p %p)\n", this, ret);
+    return basic_stringbuf_wchar_str_get(&this->strbuf, ret);
+}
+
 static void __cdecl setprecision_func(ios_base *base, streamsize prec)
 {
     ios_base_precision_set(base, prec);
@@ -5839,6 +9446,16 @@ struct {
 /* ?_Ptr_cerr@std@@3PEAV?$basic_ostream@DU?$char_traits@D@std@@@1@EA */
 basic_ostream_char *_Ptr_cerr = &cerr.obj;
 
+static basic_filebuf_char filebuf_log;
+/* ?clog@std@@3V?$basic_ostream@DU?$char_traits@D@std@@@1@A */
+struct {
+    basic_ostream_char obj;
+    basic_ios_char vbase;
+} clog = { { 0 } };
+/* ?_Ptr_clog@std@@3PAV?$basic_ostream@DU?$char_traits@D@std@@@1@A */
+/* ?_Ptr_clog@std@@3PEAV?$basic_ostream@DU?$char_traits@D@std@@@1@EA */
+basic_ostream_char *_Ptr_clog = &clog.obj;
+
 void init_io(void)
 {
     basic_filebuf_char_ctor_file(&filebuf_stdin, stdin);
@@ -5849,6 +9466,9 @@ void init_io(void)
 
     basic_filebuf_char_ctor_file(&filebuf_stderr, stderr);
     basic_ostream_char_ctor(&cerr.obj, &filebuf_stderr.base, FALSE/*FIXME*/, TRUE);
+
+    basic_filebuf_char_ctor_file(&filebuf_log, stderr);
+    basic_ostream_char_ctor(&clog.obj, &filebuf_log.base, FALSE/*FIXME*/, TRUE);
 }
 
 void free_io(void)
@@ -5861,4 +9481,7 @@ void free_io(void)
 
     basic_ostream_char_dtor(&cerr.obj);
     basic_filebuf_char_dtor(&filebuf_stderr);
+
+    basic_ostream_char_dtor(&clog.obj);
+    basic_filebuf_char_dtor(&filebuf_log);
 }
