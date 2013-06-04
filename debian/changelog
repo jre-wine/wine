@@ -1,8 +1,15 @@
-wine-unstable (1.5.8-1) UNRELEASED; urgency=low
+wine-unstable (1.5.8-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.8, released Jul 3, 2012.
+    - More stream functionality in the C++ runtime.
+    - A number of Windows Codecs improvements.
+    - More WBEM classes and properties.
+    - Some HTML Help fixes.
+    - Support for printing fake italic fonts.
+    - Various bug fixes.
+  * Update import scripts.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 04 Jun 2013 01:03:32 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 04 Jun 2013 01:29:01 +0000
 
 wine-unstable (1.5.7-8) unstable; urgency=low
 
