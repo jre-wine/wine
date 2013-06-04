@@ -1,8 +1,13 @@
-wine-unstable (1.5.10-1) UNRELEASED; urgency=low
+wine-unstable (1.5.10-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.10, released Jul 31, 2012.
+    - Support for OpenGL in the DIB engine using libOSMesa.
+    - Off-screen rendering is now the default in Direct3D.
+    - Some more WMI infrastructure.
+    - Various bug fixes.
+  * Convert source package to quilt format.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 04 Jun 2013 01:39:02 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 04 Jun 2013 01:58:22 +0000
 
 wine-unstable (1.5.9-1) unstable; urgency=low
 
