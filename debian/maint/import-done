@@ -7,8 +7,7 @@ then
 fi
 upstream_version="$2"
 # Create changelog entry, so build tools can find the upstream version
-dch -v "$upstream_version-1" --distribution UNRELEASED --preserve \
- "UNRELEASED"
+dch -v "$upstream_version-1" --distribution UNRELEASED --preserve "UNRELEASED"
 git add debian/changelog
 
 # format verbose "New upstream release" messages, including ANNOUNCE file

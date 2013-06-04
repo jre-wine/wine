@@ -1,23 +1,17 @@
 #!/bin/sh
 set -e
-if [ "$1" != "--upstream-version" ]
+if [ "$#" -lt "1" ]
 then
-  echo "Usage: $0 --upstream-version VERSION FILENAME"
+  echo "Usage: $0 <file name>"
   exit 1
 fi
-upstream_version="$2"
-origfilename="$3"
 
-# dereference symlink, we'll stash the original filename into pristine-tar
-# (currently, debian does not allow .tar.bz2 source packages anyway, so this
-# reserves the .orig.tar.* names for what's actually uploaded to Debian)
-if [ -L "$origfilename" ]
-then
-  filename="`find "$origfilename" -printf "%h/%l"`"
-else
-  filename="$origfilename"
-fi
+# check that the upstream file exists
+filename="$1"
+test ! -e "$filename" && echo "$filename not found" && exit 1 || true
 
+# figure out which branch we're on
+upstream_version=$(echo "$filename" | cut -d- -f2 | sed s/\.tar\.bz2//)
 case "$upstream_version" in
   1.0.*|1.2|1.2.*|1.4|1.4.*)
     package=wine
@@ -31,24 +25,15 @@ case "$upstream_version" in
     ;;
 esac
 
-# craft the .orig.tar.gz for the Debian source package
-debfilename="`dirname "$origfilename"`/${package}_$upstream_version.orig.tar.gz"
-if [ "$filename" != "$origfilename" ] && [ "$origfilename" != "$debfilename" ]
-then
-  # kill .orig.tar.bz2, we won't use it
-  rm "$origfilename"
-fi
-if [ ! -f "$debfilename" ]
-then
-  # convert .orig.tar.gz
-  bzcat "$filename"|gzip -9 > "$debfilename"
-fi
-
 # if we're not building from a git tree, use regular uupdate
 if [ ! -d ".git" ]
 then
   exec uupdate --no-symlink "$*"
 fi
+
+# provide orig symlink
+debfilename="$(dirname "$filename")/${package}_${upstream_version}.orig.tar.bz2"
+test -e $debfilename || ln -s $(basename "$filename") $debfilename
 
 # pull from upstream git repository (favoring "their" changes in the merge)
 upstream_tag="wine-$upstream_version"
@@ -58,7 +43,6 @@ git pull --no-edit $winehq tag "$upstream_tag"
 
 # load original .tar.bz2 and .tar.gz into pristine-tar
 pristine-tar -v commit "$filename" "$upstream_tag"
-pristine-tar -v commit "$debfilename" "$upstream_tag"
 
 # merge from upstream into master branch
 git checkout master
