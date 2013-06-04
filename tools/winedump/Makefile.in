@@ -26,8 +26,6 @@ C_SRCS = \
 
 INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
 
-MODCFLAGS = -DDATADIR=\"$(datadir)/wine$(DATASUFFIX)/\"
-
 all: $(PROGRAMS)
 
 @MAKE_RULES@
@@ -36,7 +34,6 @@ winedump$(EXEEXT): $(OBJS)
 	$(CC) $(CFLAGS) -o winedump$(EXEEXT) $(OBJS) $(LIBPORT) $(LDFLAGS)
 
 install install-dev:: $(PROGRAMS) $(DESTDIR)$(bindir)
-	mkdir -p $(DESTDIR)/$(datadir)/wine$(DATASUFFIX)
 	$(INSTALL_PROGRAM) winedump$(EXEEXT) $(DESTDIR)$(bindir)/winedump$(EXEEXT)
 	$(INSTALL_SCRIPT) $(srcdir)/function_grep.pl $(DESTDIR)$(bindir)/function_grep.pl
 

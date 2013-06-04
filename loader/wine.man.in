@@ -87,7 +87,7 @@ processes.
 Specifies the path and name of the
 .B wineserver
 binary. If not set, Wine will try to load
-.BR @dlldir@/wineserver,
+.BR @bindir@/wineserver ,
 and if this doesn't exist it will then look for a file named
 "wineserver" in the path and in a few other likely locations.
 .TP
@@ -246,7 +246,7 @@ The
 .B wine 
 program loader for CUI (console) applications.
 .TP
-.I @dlldir@/wineserver
+.I @bindir@/wineserver
 The 
 .B wine 
 server 

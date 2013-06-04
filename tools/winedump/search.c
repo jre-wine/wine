@@ -98,7 +98,7 @@ int symbol_search (parsed_symbol *sym)
       if (VERBOSE)
         puts (grep_buff);
 
-      cmd = str_create (5, DATADIR "function_grep.pl ", sym->symbol,
+      cmd = str_create (5, "function_grep.pl ", sym->symbol,
                         " \"", grep_buff, "\"");
 
       if (VERBOSE)

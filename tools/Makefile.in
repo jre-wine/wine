@@ -30,7 +30,7 @@ EXTRASUBDIRS = winapi
 INSTALLDIRS = \
 	$(DESTDIR)$(bindir) \
 	$(DESTDIR)$(datadir)/applications \
-	$(DESTDIR)$(datadir)/wine$(DATASUFFIX) \
+	$(DESTDIR)$(datadir)/wine \
 	$(DESTDIR)$(mandir)/man$(prog_manext) \
 	$(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext) \
 	$(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)
@@ -66,8 +66,8 @@ wineapploader: wineapploader.in
 	sed -e 's,@bindir\@,$(bindir),g' $(srcdir)/wineapploader.in >$@ || ($(RM) $@ && false)
 
 install install-lib:: wine.inf $(INSTALLDIRS)
-	$(INSTALL_DATA) wine.inf $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/wine.inf
-	$(INSTALL_DATA) $(srcdir)/l_intl.nls $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/l_intl.nls
+	$(INSTALL_DATA) wine.inf $(DESTDIR)$(datadir)/wine/wine.inf
+	$(INSTALL_DATA) $(srcdir)/l_intl.nls $(DESTDIR)$(datadir)/wine/l_intl.nls
 	$(INSTALL_DATA) $(srcdir)/wine.desktop $(DESTDIR)$(datadir)/applications/wine.desktop
 	-$(UPDATE_DESKTOP_DATABASE)
 
@@ -79,8 +79,8 @@ install-man-pages:: $(EXTRA_MANPAGES) $(INSTALLDIRS)
 	$(INSTALL_DATA) winemaker.fr.man $(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)/winemaker.$(prog_manext)
 
 uninstall::
-	$(RM) $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/wine.inf \
-		$(DESTDIR)$(datadir)/wine$(DATASUFFIX)/l_intl.nls \
+	$(RM) $(DESTDIR)$(datadir)/wine/wine.inf \
+		$(DESTDIR)$(datadir)/wine/l_intl.nls \
 		$(DESTDIR)$(datadir)/applications/wine.desktop \
 		$(DESTDIR)$(bindir)/winemaker \
 		$(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/winemaker.$(prog_manext) \
