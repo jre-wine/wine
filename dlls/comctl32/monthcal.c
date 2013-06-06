@@ -185,7 +185,14 @@ static inline void MONTHCAL_NotifySelectionChange(const MONTHCAL_INFO *infoPtr)
     nmsc.nmhdr.idFrom   = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
     nmsc.nmhdr.code     = MCN_SELCHANGE;
     nmsc.stSelStart     = infoPtr->minSel;
-    nmsc.stSelEnd       = infoPtr->maxSel;
+    nmsc.stSelStart.wDayOfWeek = 0;
+    if(infoPtr->dwStyle & MCS_MULTISELECT){
+        nmsc.stSelEnd = infoPtr->maxSel;
+        nmsc.stSelEnd.wDayOfWeek = 0;
+    }
+    else
+        nmsc.stSelEnd = st_null;
+
     SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, nmsc.nmhdr.idFrom, (LPARAM)&nmsc);
 }
 
@@ -198,7 +205,13 @@ static inline void MONTHCAL_NotifySelect(const MONTHCAL_INFO *infoPtr)
     nmsc.nmhdr.idFrom   = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
     nmsc.nmhdr.code     = MCN_SELECT;
     nmsc.stSelStart     = infoPtr->minSel;
-    nmsc.stSelEnd       = infoPtr->maxSel;
+    nmsc.stSelStart.wDayOfWeek = 0;
+    if(infoPtr->dwStyle & MCS_MULTISELECT){
+        nmsc.stSelEnd = infoPtr->maxSel;
+        nmsc.stSelEnd.wDayOfWeek = 0;
+    }
+    else
+        nmsc.stSelEnd = st_null;
 
     SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, nmsc.nmhdr.idFrom, (LPARAM)&nmsc);
 }
@@ -372,7 +385,7 @@ static BOOL MONTHCAL_IsDateInValidRange(const MONTHCAL_INFO *infoPtr,
     date->wMonth = fix_st->wMonth;
   }
 
-  return fix_st ? FALSE : TRUE;
+  return !fix_st;
 }
 
 /* Checks passed range width with configured maximum selection count
@@ -1276,7 +1289,7 @@ MONTHCAL_SetColor(MONTHCAL_INFO *infoPtr, UINT index, COLORREF color)
     infoPtr->pens[PenText] = CreatePen(PS_SOLID, 1, infoPtr->colors[index]);
   }
 
-  InvalidateRect(infoPtr->hwndSelf, NULL, index == MCSC_BACKGROUND ? TRUE : FALSE);
+  InvalidateRect(infoPtr->hwndSelf, NULL, index == MCSC_BACKGROUND);
   return prev;
 }
 

@@ -998,8 +998,12 @@ LCID WINAPI LocaleNameToLCID( LPCWSTR name, DWORD flags )
            locale_name.lcid, debugstr_w(name), locale_name.matches );
 
     if (!locale_name.matches)
-        WARN( "locale %s not recognized, defaulting to English\n", debugstr_w(name) );
-    else if (locale_name.matches == 1)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    if (locale_name.matches == 1)
         WARN( "locale %s not recognized, defaulting to %s\n",
               debugstr_w(name), debugstr_w(locale_name.lang) );
 
@@ -2210,6 +2214,21 @@ BOOL WINAPI IsValidLocale( LCID lcid, DWORD flags )
                             (LPCWSTR)LOCALE_ILANGUAGE, LANGIDFROMLCID(lcid)) != 0;
 }
 
+/******************************************************************************
+ *           IsValidLocaleName   (KERNEL32.@)
+ */
+BOOL WINAPI IsValidLocaleName( LPCWSTR locale )
+{
+    struct locale_name locale_name;
+
+    /* string parsing */
+    parse_locale_name( locale, &locale_name );
+
+    TRACE( "found lcid %x for %s, matches %d\n",
+           locale_name.lcid, debugstr_w(locale), locale_name.matches );
+
+    return locale_name.matches > 0;
+}
 
 static BOOL CALLBACK enum_lang_proc_a( HMODULE hModule, LPCSTR type,
                                        LPCSTR name, WORD LangID, LONG_PTR lParam )

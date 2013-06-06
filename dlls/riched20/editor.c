@@ -283,9 +283,10 @@ static ME_TextBuffer *ME_MakeText(void) {
 
 static LRESULT ME_StreamInText(ME_TextEditor *editor, DWORD dwFormat, ME_InStream *stream, ME_Style *style)
 {
-  WCHAR wszText[STREAMIN_BUFFER_SIZE+1];
   WCHAR *pText;
   LRESULT total_bytes_read = 0;
+  BOOL is_read = FALSE;
+  static const char bom_utf8[] = {0xEF, 0xBB, 0xBF};
 
   TRACE("%08x %p\n", dwFormat, stream);
 
@@ -304,8 +305,23 @@ static LRESULT ME_StreamInText(ME_TextEditor *editor, DWORD dwFormat, ME_InStrea
 
     if (!(dwFormat & SF_UNICODE))
     {
-      /* FIXME? this is doomed to fail on true MBCS like UTF-8, luckily they're unlikely to be used as CP_ACP */
-      nWideChars = MultiByteToWideChar(CP_ACP, 0, stream->buffer, stream->dwSize, wszText, STREAMIN_BUFFER_SIZE);
+      WCHAR wszText[STREAMIN_BUFFER_SIZE+1];
+      char * buf = stream->buffer;
+      DWORD size = stream->dwSize;
+      DWORD cp = CP_ACP;
+
+      if (!is_read)
+      {
+        is_read = TRUE;
+        if (stream->dwSize >= 3 && !memcmp(stream->buffer, bom_utf8, 3))
+        {
+          cp = CP_UTF8;
+          buf += 3;
+          size -= 3;
+        }
+      }
+
+      nWideChars = MultiByteToWideChar(cp, 0, buf, size, wszText, STREAMIN_BUFFER_SIZE);
       pText = wszText;
     }
     else
@@ -2793,8 +2809,8 @@ static void ME_DestroyEditor(ME_TextEditor *editor)
   if (editor->rgbBackColor != -1)
     DeleteObject(editor->hbrBackground);
   if(editor->lpOleCallback)
-    IUnknown_Release(editor->lpOleCallback);
-  IUnknown_Release(editor->texthost);
+    IRichEditOleCallback_Release(editor->lpOleCallback);
+  ITextHost_Release(editor->texthost);
   OleUninitialize();
 
   FREE_OBJ(editor->pBuffer);
@@ -4311,10 +4327,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case EM_SETOLECALLBACK:
     if(editor->lpOleCallback)
-      IUnknown_Release(editor->lpOleCallback);
-    editor->lpOleCallback = (LPRICHEDITOLECALLBACK)lParam;
+      IRichEditOleCallback_Release(editor->lpOleCallback);
+    editor->lpOleCallback = (IRichEditOleCallback*)lParam;
     if(editor->lpOleCallback)
-      IUnknown_AddRef(editor->lpOleCallback);
+      IRichEditOleCallback_AddRef(editor->lpOleCallback);
     return TRUE;
   case EM_GETWORDBREAKPROC:
     return (LRESULT)editor->pfnWordBreak;

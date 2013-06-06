@@ -371,6 +371,14 @@ void draw_textured_quad(const struct wined3d_surface *src_surface, struct wined3
     }
 }
 
+/* Works correctly only for <= 4 bpp formats. */
+static void get_color_masks(const struct wined3d_format *format, DWORD *masks)
+{
+    masks[0] = ((1 << format->red_size) - 1) << format->red_offset;
+    masks[1] = ((1 << format->green_size) - 1) << format->green_offset;
+    masks[2] = ((1 << format->blue_size) - 1) << format->blue_offset;
+}
+
 static HRESULT surface_create_dib_section(struct wined3d_surface *surface)
 {
     const struct wined3d_format *format = surface->resource.format;
@@ -456,9 +464,7 @@ static HRESULT surface_create_dib_section(struct wined3d_surface *surface)
         case WINED3DFMT_B5G6R5_UNORM:
         case WINED3DFMT_R16G16B16A16_UNORM:
             b_info->bmiHeader.biCompression = BI_BITFIELDS;
-            masks[0] = format->red_mask;
-            masks[1] = format->green_mask;
-            masks[2] = format->blue_mask;
+            get_color_masks(format, masks);
             break;
 
         default:
@@ -3704,13 +3710,13 @@ static void convert_yuy2_r5g6b5(const BYTE *src, BYTE *dst,
     }
 }
 
-struct d3dfmt_convertor_desc
+struct d3dfmt_converter_desc
 {
     enum wined3d_format_id from, to;
     void (*convert)(const BYTE *src, BYTE *dst, DWORD pitch_in, DWORD pitch_out, unsigned int w, unsigned int h);
 };
 
-static const struct d3dfmt_convertor_desc convertors[] =
+static const struct d3dfmt_converter_desc converters[] =
 {
     {WINED3DFMT_R32_FLOAT,      WINED3DFMT_R16_FLOAT,       convert_r32_float_r16_float},
     {WINED3DFMT_B5G6R5_UNORM,   WINED3DFMT_B8G8R8X8_UNORM,  convert_r5g6b5_x8r8g8b8},
@@ -3720,15 +3726,15 @@ static const struct d3dfmt_convertor_desc convertors[] =
     {WINED3DFMT_YUY2,           WINED3DFMT_B5G6R5_UNORM,    convert_yuy2_r5g6b5},
 };
 
-static inline const struct d3dfmt_convertor_desc *find_convertor(enum wined3d_format_id from,
+static inline const struct d3dfmt_converter_desc *find_converter(enum wined3d_format_id from,
         enum wined3d_format_id to)
 {
     unsigned int i;
 
-    for (i = 0; i < (sizeof(convertors) / sizeof(*convertors)); ++i)
+    for (i = 0; i < (sizeof(converters) / sizeof(*converters)); ++i)
     {
-        if (convertors[i].from == from && convertors[i].to == to)
-            return &convertors[i];
+        if (converters[i].from == from && converters[i].to == to)
+            return &converters[i];
     }
 
     return NULL;
@@ -3748,11 +3754,11 @@ static inline const struct d3dfmt_convertor_desc *find_convertor(enum wined3d_fo
 static struct wined3d_surface *surface_convert_format(struct wined3d_surface *source, enum wined3d_format_id to_fmt)
 {
     struct wined3d_map_desc src_map, dst_map;
-    const struct d3dfmt_convertor_desc *conv;
+    const struct d3dfmt_converter_desc *conv;
     struct wined3d_surface *ret = NULL;
     HRESULT hr;
 
-    conv = find_convertor(source->resource.format->id, to_fmt);
+    conv = find_converter(source->resource.format->id, to_fmt);
     if (!conv)
     {
         FIXME("Cannot find a conversion function from format %s to %s.\n",
@@ -6971,9 +6977,11 @@ do { \
                 }
                 else
                 {
-                    keymask = src_format->red_mask
-                            | src_format->green_mask
-                            | src_format->blue_mask;
+                    DWORD masks[3];
+                    get_color_masks(src_format, masks);
+                    keymask = masks[0]
+                            | masks[1]
+                            | masks[2];
                 }
                 flags &= ~(WINEDDBLT_KEYSRC | WINEDDBLT_KEYDEST | WINEDDBLT_KEYSRCOVERRIDE | WINEDDBLT_KEYDESTOVERRIDE);
             }

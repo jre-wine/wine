@@ -75,7 +75,7 @@ int clipping_cursor = 0;
 XContext winContext = 0;
 
 /* X context to associate a struct x11drv_win_data to an hwnd */
-static XContext win_data_context;
+XContext win_data_context = 0;
 
 /* time of last user event and window where it's stored */
 static Time last_user_time;
@@ -135,7 +135,6 @@ static void remove_startup_notification(Display *display, Window window)
     src = message;
     srclen = strlen(src) + 1;
 
-    wine_tsx11_lock();
     while (srclen > 0)
     {
         int msglen = srclen;
@@ -149,7 +148,6 @@ static void remove_startup_notification(Display *display, Window window)
         XSendEvent( display, DefaultRootWindow( display ), False, PropertyChangeMask, &xevent );
         xevent.xclient.message_type = x11drv_atom(_NET_STARTUP_INFO);
     }
-    wine_tsx11_unlock();
 }
 
 
@@ -343,8 +341,6 @@ static Window create_client_window( Display *display, struct x11drv_win_data *da
     if ((cy = data->client_rect.bottom - data->client_rect.top) <= 0) cy = 1;
     else if (cy > 65535) cy = 65535;
 
-    wine_tsx11_lock();
-
     if (vis)
     {
         attr.colormap = XCreateColormap( display, root_window, vis->visual,
@@ -360,7 +356,7 @@ static Window create_client_window( Display *display, struct x11drv_win_data *da
                             client_visual, mask, &attr );
     if (!client)
     {
-        wine_tsx11_unlock();
+        if (vis) XFreeColormap( display, attr.colormap );
         return 0;
     }
 
@@ -377,8 +373,6 @@ static Window create_client_window( Display *display, struct x11drv_win_data *da
 
     XMapWindow( display, data->client_window );
     XSaveContext( display, data->client_window, winContext, (char *)data->hwnd );
-    wine_tsx11_unlock();
-
     SetPropA( data->hwnd, client_window_prop, (HANDLE)data->client_window );
     return data->client_window;
 }
@@ -396,9 +390,7 @@ static void sync_window_style( Display *display, struct x11drv_win_data *data )
         XSetWindowAttributes attr;
         int mask = get_window_attributes( display, data, &attr );
 
-        wine_tsx11_lock();
         XChangeWindowAttributes( display, data->whole_window, mask, &attr );
-        wine_tsx11_unlock();
     }
 }
 
@@ -419,10 +411,8 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
     if (IsRectEmpty( &data->window_rect ))  /* set an empty shape */
     {
         static XRectangle empty_rect;
-        wine_tsx11_lock();
         XShapeCombineRectangles( display, data->whole_window, ShapeBounding, 0, 0,
                                  &empty_rect, 1, ShapeSet, YXBanded );
-        wine_tsx11_unlock();
         return;
     }
 
@@ -438,9 +428,7 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
 
     if (!hrgn)
     {
-        wine_tsx11_lock();
         XShapeCombineMask( display, data->whole_window, ShapeBounding, 0, 0, None, ShapeSet );
-        wine_tsx11_unlock();
     }
     else
     {
@@ -449,13 +437,11 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
         if (GetWindowLongW( data->hwnd, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL) MirrorRgn( data->hwnd, hrgn );
         if ((pRegionData = X11DRV_GetRegionData( hrgn, 0 )))
         {
-            wine_tsx11_lock();
             XShapeCombineRectangles( display, data->whole_window, ShapeBounding,
                                      data->window_rect.left - data->whole_rect.left,
                                      data->window_rect.top - data->whole_rect.top,
                                      (XRectangle *)pRegionData->Buffer,
                                      pRegionData->rdh.nCount, ShapeSet, YXBanded );
-            wine_tsx11_unlock();
             HeapFree(GetProcessHeap(), 0, pRegionData);
             data->shaped = TRUE;
         }
@@ -477,13 +463,11 @@ static void sync_window_opacity( Display *display, Window win,
 
     if (flags & LWA_COLORKEY) FIXME("LWA_COLORKEY not supported\n");
 
-    wine_tsx11_lock();
     if (opacity == 0xffffffff)
         XDeleteProperty( display, win, x11drv_atom(_NET_WM_WINDOW_OPACITY) );
     else
         XChangeProperty( display, win, x11drv_atom(_NET_WM_WINDOW_OPACITY),
                          XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&opacity, 1 );
-    wine_tsx11_unlock();
 }
 
 
@@ -509,7 +493,6 @@ static void sync_window_text( Display *display, Window win, const WCHAR *text )
     }
     WideCharToMultiByte(CP_UTF8, 0, text, strlenW(text), utf8_buffer, count, NULL, NULL);
 
-    wine_tsx11_lock();
     if (XmbTextListToTextProperty( display, &buffer, 1, XStdICCTextStyle, &prop ) == Success)
     {
         XSetWMName( display, win, &prop );
@@ -523,7 +506,6 @@ static void sync_window_text( Display *display, Window win, const WCHAR *text )
     */
     XChangeProperty( display, win, x11drv_atom(_NET_WM_NAME), x11drv_atom(UTF8_STRING),
                      8, PropModeReplace, (unsigned char *) utf8_buffer, count);
-    wine_tsx11_unlock();
 
     HeapFree( GetProcessHeap(), 0, utf8_buffer );
     HeapFree( GetProcessHeap(), 0, buffer );
@@ -554,10 +536,8 @@ static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
             client = create_client_window( display, data, vis );
             TRACE( "re-created client window %lx for %p fbconfig %lx\n", client, data->hwnd, fbconfig_id );
         }
-        wine_tsx11_lock();
         XFree(vis);
         XFlush( display );
-        wine_tsx11_unlock();
         if (client) goto done;
         return FALSE;
     }
@@ -574,7 +554,6 @@ static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
         XSetWindowAttributes attrib;
         static Window dummy_parent;
 
-        wine_tsx11_lock();
         attrib.override_redirect = True;
         if (!dummy_parent)
         {
@@ -603,21 +582,17 @@ static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
         }
         XFree(vis);
         XFlush( gdi_display );
-        wine_tsx11_unlock();
     }
     else
 #endif
     {
         WARN("XComposite is not available, using GLXPixmap hack\n");
 
-        wine_tsx11_lock();
-
         if(data->pixmap) XFreePixmap(gdi_display, data->pixmap);
         data->pixmap = XCreatePixmap(gdi_display, root_window, w, h, vis->depth);
         if(!data->pixmap)
         {
             XFree(vis);
-            wine_tsx11_unlock();
             return FALSE;
         }
 
@@ -630,7 +605,6 @@ static BOOL set_win_format( HWND hwnd, XID fbconfig_id )
         }
         XFree(vis);
         XFlush( gdi_display );
-        wine_tsx11_unlock();
         if (data->pixmap) SetPropA(hwnd, pixmap_prop, (HANDLE)data->pixmap);
     }
 
@@ -668,22 +642,18 @@ static void sync_gl_drawable(struct x11drv_win_data *data)
 #ifdef SONAME_LIBXCOMPOSITE
     if(usexcomposite)
     {
-        wine_tsx11_lock();
         XMoveResizeWindow(gdi_display, data->gl_drawable, 0, 0, w, h);
-        wine_tsx11_unlock();
         return;
     }
 #endif
 
     if (!(vis = visual_from_fbconfig_id(data->fbconfig_id))) return;
 
-    wine_tsx11_lock();
     pix = XCreatePixmap(gdi_display, root_window, w, h, vis->depth);
     if(!pix)
     {
         ERR("Failed to create pixmap for offscreen rendering\n");
         XFree(vis);
-        wine_tsx11_unlock();
         return;
     }
 
@@ -693,7 +663,6 @@ static void sync_gl_drawable(struct x11drv_win_data *data)
         ERR("Failed to create drawable for offscreen rendering\n");
         XFreePixmap(gdi_display, pix);
         XFree(vis);
-        wine_tsx11_unlock();
         return;
     }
 
@@ -709,7 +678,6 @@ static void sync_gl_drawable(struct x11drv_win_data *data)
     data->gl_drawable = glxp;
 
     XFlush( gdi_display );
-    wine_tsx11_unlock();
 
     SetPropA(data->hwnd, gl_drawable_prop, (HANDLE)data->gl_drawable);
     SetPropA(data->hwnd, pixmap_prop, (HANDLE)data->pixmap);
@@ -764,7 +732,6 @@ static Window create_icon_window( Display *display, struct x11drv_win_data *data
     attr.backing_store = NotUseful/*WhenMapped*/;
     attr.colormap      = X11DRV_PALETTE_PaletteXColormap; /* Needed due to our visual */
 
-    wine_tsx11_lock();
     data->icon_window = XCreateWindow( display, root_window, 0, 0,
                                        GetSystemMetrics( SM_CXICON ),
                                        GetSystemMetrics( SM_CYICON ),
@@ -773,7 +740,6 @@ static Window create_icon_window( Display *display, struct x11drv_win_data *data
                                        CWEventMask | CWBitGravity | CWBackingStore | CWColormap, &attr );
     XSaveContext( display, data->icon_window, winContext, (char *)data->hwnd );
     XFlush( display );  /* make sure the window exists before we start painting to it */
-    wine_tsx11_unlock();
 
     TRACE( "created %lx\n", data->icon_window );
     SetPropA( data->hwnd, icon_window_prop, (HANDLE)data->icon_window );
@@ -788,11 +754,9 @@ static Window create_icon_window( Display *display, struct x11drv_win_data *data
 static void destroy_icon_window( Display *display, struct x11drv_win_data *data )
 {
     if (!data->icon_window) return;
-    wine_tsx11_lock();
     XDeleteContext( display, data->icon_window, winContext );
     XDestroyWindow( display, data->icon_window );
     data->icon_window = 0;
-    wine_tsx11_unlock();
     RemovePropA( data->hwnd, icon_window_prop );
 }
 
@@ -915,10 +879,8 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, struct x11drv_wi
     return TRUE;
 
 failed:
-    wine_tsx11_lock();
     if (color_pixmap) XFreePixmap( gdi_display, color_pixmap );
     if (mask_pixmap) XFreePixmap( gdi_display, mask_pixmap );
-    wine_tsx11_unlock();
     HeapFree( GetProcessHeap(), 0, bits.ptr );
     return FALSE;
 }
@@ -945,11 +907,9 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data,
         if (!icon_small) icon_small = (HICON)GetClassLongPtrW( data->hwnd, GCLP_HICONSM );
     }
 
-    wine_tsx11_lock();
     if (data->icon_pixmap) XFreePixmap( gdi_display, data->icon_pixmap );
     if (data->icon_mask) XFreePixmap( gdi_display, data->icon_mask );
     data->icon_pixmap = data->icon_mask = 0;
-    wine_tsx11_unlock();
 
     if (!icon_big)
     {
@@ -988,13 +948,11 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data,
             DeleteObject( ii_small.hbmColor );
             DeleteObject( ii_small.hbmMask );
         }
-        wine_tsx11_lock();
         if (bits)
             XChangeProperty( display, data->whole_window, x11drv_atom(_NET_WM_ICON),
                              XA_CARDINAL, 32, PropModeReplace, (unsigned char *)bits, size );
         else
             XDeleteProperty( display, data->whole_window, x11drv_atom(_NET_WM_ICON) );
-        wine_tsx11_unlock();
         HeapFree( GetProcessHeap(), 0, bits );
 
         if (create_icon_pixmaps( hDC, &ii, data ))
@@ -1063,8 +1021,9 @@ static void set_mwm_hints( Display *display, struct x11drv_win_data *data, DWORD
 
     if (data->hwnd == GetDesktopWindow())
     {
-        mwm_hints.decorations = MWM_DECOR_TITLE | MWM_DECOR_BORDER | MWM_DECOR_MENU | MWM_DECOR_MINIMIZE;
-        mwm_hints.functions   = MWM_FUNC_MOVE | MWM_FUNC_MINIMIZE | MWM_FUNC_CLOSE;
+        if (is_desktop_fullscreen()) mwm_hints.decorations = 0;
+        else mwm_hints.decorations = MWM_DECOR_TITLE | MWM_DECOR_BORDER | MWM_DECOR_MENU | MWM_DECOR_MINIMIZE;
+        mwm_hints.functions        = MWM_FUNC_MOVE | MWM_FUNC_MINIMIZE | MWM_FUNC_CLOSE;
     }
     else
     {
@@ -1134,8 +1093,6 @@ static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data
     XClassHint *class_hints;
     char *process_name = get_process_name();
 
-    wine_tsx11_lock();
-
     /* wm protocols */
     i = 0;
     protocols[i++] = x11drv_atom(WM_DELETE_WINDOW);
@@ -1171,8 +1128,6 @@ static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data
                          XA_WINDOW, 32, PropModeReplace, (unsigned char *)&user_time_window, 1 );
 
     data->wm_hints = XAllocWMHints();
-    wine_tsx11_unlock();
-
     if (data->wm_hints)
     {
         data->wm_hints->flags = 0;
@@ -1236,8 +1191,6 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
         if ((owner_win = get_owner_whole_window( owner, data->managed ))) group_leader = owner_win;
     }
 
-    wine_tsx11_lock();
-
     if (owner_win) XSetTransientForHint( display, data->whole_window, owner_win );
 
     /* size hints */
@@ -1263,8 +1216,6 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
         data->wm_hints->window_group = group_leader;
         XSetWMHints( display, data->whole_window, data->wm_hints );
     }
-
-    wine_tsx11_unlock();
 }
 
 
@@ -1278,9 +1229,7 @@ Window init_clip_window(void)
     if (!data->clip_window &&
         (data->clip_window = (Window)GetPropA( GetDesktopWindow(), clip_window_prop )))
     {
-        wine_tsx11_lock();
         XSelectInput( data->display, data->clip_window, StructureNotifyMask );
-        wine_tsx11_unlock();
     }
     return data->clip_window;
 }
@@ -1291,20 +1240,24 @@ Window init_clip_window(void)
  */
 void update_user_time( Time time )
 {
-    wine_tsx11_lock();
     if (!user_time_window)
     {
-        user_time_window = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, 0, InputOnly,
-                                          DefaultVisual(gdi_display,DefaultScreen(gdi_display)), 0, NULL );
+        Window win = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, 0, InputOnly,
+                                    DefaultVisual(gdi_display,DefaultScreen(gdi_display)), 0, NULL );
+        if (InterlockedCompareExchangePointer( (void **)&user_time_window, (void *)win, 0 ))
+            XDestroyWindow( gdi_display, win );
         TRACE( "user time window %lx\n", user_time_window );
     }
-    if (time && (!last_user_time || (long)(time - last_user_time) > 0))
+
+    if (!time) return;
+    XLockDisplay( gdi_display );
+    if (!last_user_time || (long)(time - last_user_time) > 0)
     {
         last_user_time = time;
         XChangeProperty( gdi_display, user_time_window, x11drv_atom(_NET_WM_USER_TIME),
                          XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&time, 1 );
     }
-    wine_tsx11_unlock();
+    XUnlockDisplay( gdi_display );
 }
 
 /***********************************************************************
@@ -1359,10 +1312,8 @@ void update_net_wm_states( Display *display, struct x11drv_win_data *data )
             if (state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT)
                 atoms[count++] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ);
         }
-        wine_tsx11_lock();
         XChangeProperty( display, data->whole_window, x11drv_atom(_NET_WM_STATE), XA_ATOM,
                          32, PropModeReplace, (unsigned char *)atoms, count );
-        wine_tsx11_unlock();
     }
     else  /* ask the window manager to do it for us */
     {
@@ -1389,10 +1340,8 @@ void update_net_wm_states( Display *display, struct x11drv_win_data *data )
             xev.xclient.data.l[1] = X11DRV_Atoms[state_atoms[i] - FIRST_XATOM];
             xev.xclient.data.l[2] = ((state_atoms[i] == XATOM__NET_WM_STATE_MAXIMIZED_VERT) ?
                                      x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ) : 0);
-            wine_tsx11_lock();
             XSendEvent( display, root_window, False,
                         SubstructureRedirectMask | SubstructureNotifyMask, &xev );
-            wine_tsx11_unlock();
         }
     }
     data->net_wm_state = new_state;
@@ -1410,10 +1359,8 @@ static void set_xembed_flags( Display *display, struct x11drv_win_data *data, un
 
     info[0] = 0; /* protocol version */
     info[1] = flags;
-    wine_tsx11_lock();
     XChangeProperty( display, data->whole_window, x11drv_atom(_XEMBED_INFO),
                      x11drv_atom(_XEMBED_INFO), 32, PropModeReplace, (unsigned char*)info, 2 );
-    wine_tsx11_unlock();
 }
 
 
@@ -1432,9 +1379,7 @@ static void map_window( Display *display, struct x11drv_win_data *data, DWORD ne
     {
         update_net_wm_states( display, data );
         sync_window_style( display, data );
-        wine_tsx11_lock();
         XMapWindow( display, data->whole_window );
-        wine_tsx11_unlock();
     }
     else set_xembed_flags( display, data, XEMBED_MAPPED );
 
@@ -1453,10 +1398,8 @@ static void unmap_window( Display *display, struct x11drv_win_data *data )
     if (!data->embedded)
     {
         wait_for_withdrawn_state( display, data, FALSE );
-        wine_tsx11_lock();
         if (data->managed) XWithdrawWindow( display, data->whole_window, DefaultScreen(display) );
         else XUnmapWindow( display, data->whole_window );
-        wine_tsx11_unlock();
     }
     else set_xembed_flags( display, data, 0 );
 
@@ -1583,13 +1526,11 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
         /* and Above with a sibling doesn't work so well either, so we ignore it */
     }
 
-    wine_tsx11_lock();
     set_size_hints( display, data, style );
     set_mwm_hints( display, data, style, ex_style );
     data->configure_serial = NextRequest( display );
     XReconfigureWMWindow( display, data->whole_window,
                           DefaultScreen(display), mask, &changes );
-    wine_tsx11_unlock();
 #ifdef HAVE_LIBXSHAPE
     if (IsRectEmpty( old_window_rect ) != IsRectEmpty( &data->window_rect ))
         sync_window_region( display, data, (HRGN)1 );
@@ -1600,12 +1541,8 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
         int new_x_offset = data->window_rect.left - data->whole_rect.left;
         int new_y_offset = data->window_rect.top - data->whole_rect.top;
         if (old_x_offset != new_x_offset || old_y_offset != new_y_offset)
-        {
-            wine_tsx11_lock();
             XShapeOffsetShape( display, data->whole_window, ShapeBounding,
                                new_x_offset - old_x_offset, new_y_offset - old_y_offset );
-            wine_tsx11_unlock();
-        }
     }
 #endif
 
@@ -1640,9 +1577,7 @@ static void sync_client_position( Display *display, struct x11drv_win_data *data
         TRACE( "setting client win %lx pos %d,%d,%dx%d changes=%x\n",
                data->client_window, new.left, new.top,
                new.right - new.left, new.bottom - new.top, mask );
-        wine_tsx11_lock();
         XConfigureWindow( display, data->client_window, mask, &changes );
-        wine_tsx11_unlock();
     }
 
     if (data->gl_drawable && (mask & (CWWidth|CWHeight))) sync_gl_drawable( data );
@@ -1757,31 +1692,24 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     if (!(cy = data->whole_rect.bottom - data->whole_rect.top)) cy = 1;
     else if (cy > 65535) cy = 65535;
 
-    wine_tsx11_lock();
     data->whole_window = XCreateWindow( display, root_window,
                                         data->whole_rect.left - virtual_screen_rect.left,
                                         data->whole_rect.top - virtual_screen_rect.top,
                                         cx, cy, 0, screen_depth, InputOutput,
                                         visual, mask, &attr );
-
-    if (data->whole_window) XSaveContext( display, data->whole_window, winContext, (char *)data->hwnd );
-    wine_tsx11_unlock();
-
     if (!data->whole_window) goto done;
 
     if (!create_client_window( display, data, NULL ))
     {
-        wine_tsx11_lock();
-        XDeleteContext( display, data->whole_window, winContext );
         XDestroyWindow( display, data->whole_window );
         data->whole_window = 0;
-        wine_tsx11_unlock();
         goto done;
     }
 
     set_initial_wm_hints( display, data );
     set_wm_hints( display, data );
 
+    XSaveContext( display, data->whole_window, winContext, (char *)data->hwnd );
     SetPropA( data->hwnd, whole_window_prop, (HANDLE)data->whole_window );
 
     /* set the window text */
@@ -1797,9 +1725,7 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
 
     init_clip_window();  /* make sure the clip window is initialized in this thread */
 
-    wine_tsx11_lock();
     XFlush( display );  /* make sure the window exists before we start painting to it */
-    wine_tsx11_unlock();
 
     sync_window_cursor( data->whole_window );
 
@@ -1823,10 +1749,8 @@ static void destroy_whole_window( Display *display, struct x11drv_win_data *data
             Window xwin = (Window)GetPropA( data->hwnd, foreign_window_prop );
             if (xwin)
             {
-                wine_tsx11_lock();
                 if (!already_destroyed) XSelectInput( display, xwin, 0 );
                 XDeleteContext( display, xwin, winContext );
-                wine_tsx11_unlock();
                 RemovePropA( data->hwnd, foreign_window_prop );
             }
         }
@@ -1835,7 +1759,6 @@ static void destroy_whole_window( Display *display, struct x11drv_win_data *data
 
 
     TRACE( "win %p xwin %lx/%lx\n", data->hwnd, data->whole_window, data->client_window );
-    wine_tsx11_lock();
     XDeleteContext( display, data->whole_window, winContext );
     XDeleteContext( display, data->client_window, winContext );
     if (!already_destroyed) XDestroyWindow( display, data->whole_window );
@@ -1853,7 +1776,6 @@ static void destroy_whole_window( Display *display, struct x11drv_win_data *data
     XFlush( display );
     XFree( data->wm_hints );
     data->wm_hints = NULL;
-    wine_tsx11_unlock();
     RemovePropA( data->hwnd, whole_window_prop );
     RemovePropA( data->hwnd, client_window_prop );
 }
@@ -1921,35 +1843,24 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
 
     if (data->pixmap)
     {
-        wine_tsx11_lock();
         destroy_glxpixmap(gdi_display, data->gl_drawable);
         XFreePixmap(gdi_display, data->pixmap);
-        wine_tsx11_unlock();
     }
     else if (data->gl_drawable)
     {
-        wine_tsx11_lock();
         XDestroyWindow(gdi_display, data->gl_drawable);
-        wine_tsx11_unlock();
     }
 
     destroy_whole_window( thread_data->display, data, FALSE );
     destroy_icon_window( thread_data->display, data );
 
-    if (data->colormap)
-    {
-        wine_tsx11_lock();
-        XFreeColormap( thread_data->display, data->colormap );
-        wine_tsx11_unlock();
-    }
+    if (data->colormap) XFreeColormap( thread_data->display, data->colormap );
 
     if (thread_data->last_focus == hwnd) thread_data->last_focus = 0;
     if (thread_data->last_xic_hwnd == hwnd) thread_data->last_xic_hwnd = 0;
-    wine_tsx11_lock();
     if (data->icon_pixmap) XFreePixmap( gdi_display, data->icon_pixmap );
     if (data->icon_mask) XFreePixmap( gdi_display, data->icon_mask );
     XDeleteContext( thread_data->display, (XID)hwnd, win_data_context );
-    wine_tsx11_unlock();
     HeapFree( GetProcessHeap(), 0, data );
 }
 
@@ -1977,11 +1888,7 @@ static struct x11drv_win_data *alloc_win_data( Display *display, HWND hwnd )
     if ((data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data))))
     {
         data->hwnd = hwnd;
-        wine_tsx11_lock();
-        if (!winContext) winContext = XUniqueContext();
-        if (!win_data_context) win_data_context = XUniqueContext();
         XSaveContext( display, (XID)hwnd, win_data_context, (char *)data );
-        wine_tsx11_unlock();
     }
     return data;
 }
@@ -2064,11 +1971,9 @@ BOOL CDECL X11DRV_CreateWindow( HWND hwnd )
         /* create the cursor clipping window */
         attr.override_redirect = TRUE;
         attr.event_mask = StructureNotifyMask | FocusChangeMask;
-        wine_tsx11_lock();
         data->clip_window = XCreateWindow( data->display, root_window, 0, 0, 1, 1, 0, 0,
                                            InputOnly, visual, CWOverrideRedirect | CWEventMask, &attr );
         XFlush( data->display );
-        wine_tsx11_unlock();
         SetPropA( hwnd, clip_window_prop, (HANDLE)data->clip_window );
     }
     return TRUE;
@@ -2188,24 +2093,17 @@ HWND create_foreign_window( Display *display, Window xwin )
         class_registered = TRUE;
     }
 
-    wine_tsx11_lock();
     if (XFindContext( display, xwin, winContext, (char **)&hwnd )) hwnd = 0;
-    if (hwnd)  /* already created */
-    {
-        wine_tsx11_unlock();
-        return hwnd;
-    }
+    if (hwnd) return hwnd;  /* already created */
 
     XSelectInput( display, xwin, StructureNotifyMask );
     if (!XGetWindowAttributes( display, xwin, &attr ) ||
         !XQueryTree( display, xwin, &xroot, &xparent, &xchildren, &nchildren ))
     {
         XSelectInput( display, xwin, 0 );
-        wine_tsx11_unlock();
         return 0;
     }
     XFree( xchildren );
-    wine_tsx11_unlock();
 
     if (xparent == xroot)
     {
@@ -2235,9 +2133,7 @@ HWND create_foreign_window( Display *display, Window xwin )
     data->mapped = TRUE;
 
     SetPropA( hwnd, foreign_window_prop, (HANDLE)xwin );
-    wine_tsx11_lock();
     XSaveContext( display, xwin, winContext, (char *)data->hwnd );
-    wine_tsx11_unlock();
 
     ShowWindow( hwnd, SW_SHOW );
 
@@ -2404,21 +2300,17 @@ void CDECL X11DRV_SetCapture( HWND hwnd, UINT flags )
         Window grab_win = X11DRV_get_client_window( GetAncestor( hwnd, GA_ROOT ) );
 
         if (!grab_win) return;
-        wine_tsx11_lock();
         XFlush( gdi_display );
         XGrabPointer( thread_data->display, grab_win, False,
                       PointerMotionMask | ButtonPressMask | ButtonReleaseMask,
                       GrabModeAsync, GrabModeAsync, None, None, CurrentTime );
-        wine_tsx11_unlock();
         thread_data->grab_window = grab_win;
     }
     else  /* release capture */
     {
-        wine_tsx11_lock();
         XFlush( gdi_display );
         XUngrabPointer( thread_data->display, CurrentTime );
         XFlush( thread_data->display );
-        wine_tsx11_unlock();
         thread_data->grab_window = None;
     }
 }
@@ -2482,11 +2374,9 @@ void CDECL X11DRV_SetFocus( HWND hwnd )
         timestamp = CurrentTime;
 
     /* Set X focus and install colormap */
-    wine_tsx11_lock();
     changes.stack_mode = Above;
     XConfigureWindow( display, data->whole_window, CWStackMode, &changes );
     XSetInputFocus( display, data->whole_window, RevertToParent, timestamp );
-    wine_tsx11_unlock();
 }
 
 
@@ -2572,9 +2462,7 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
             move_window_bits( data, &valid_rects[1], &valid_rects[0], &old_client_rect );
     }
 
-    wine_tsx11_lock();
     XFlush( gdi_display );  /* make sure painting is done before we move the window */
-    wine_tsx11_unlock();
 
     sync_client_position( display, data, swp_flags, &old_client_rect, &old_whole_rect );
 
@@ -2620,12 +2508,10 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
         {
             data->iconic = (new_style & WS_MINIMIZE) != 0;
             TRACE( "changing win %p iconic state to %u\n", data->hwnd, data->iconic );
-            wine_tsx11_lock();
             if (data->iconic)
                 XIconifyWindow( display, data->whole_window, DefaultScreen(display) );
             else if (is_window_rect_mapped( rectWindow ))
                 XMapWindow( display, data->whole_window );
-            wine_tsx11_unlock();
             update_net_wm_states( display, data );
         }
         else if (!event_type)
@@ -2634,9 +2520,7 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
         }
     }
 
-    wine_tsx11_lock();
     XFlush( display );  /* make sure changes are done before we start painting again */
-    wine_tsx11_unlock();
 }
 
 
@@ -2668,11 +2552,9 @@ UINT CDECL X11DRV_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
     TRACE( "win %p/%lx cmd %d at %s flags %08x\n",
            hwnd, data->whole_window, cmd, wine_dbgstr_rect(rect), swp );
 
-    wine_tsx11_lock();
     XGetGeometry( thread_data->display, data->whole_window,
                   &root, &x, &y, &width, &height, &border, &depth );
     XTranslateCoordinates( thread_data->display, data->whole_window, root, 0, 0, &x, &y, &top );
-    wine_tsx11_unlock();
     rect->left   = x;
     rect->top    = y;
     rect->right  = x + width;
@@ -2707,9 +2589,7 @@ void CDECL X11DRV_SetWindowIcon( HWND hwnd, UINT type, HICON icon )
     {
         if (type == ICON_BIG) set_icon_hints( display, data, icon, 0 );
         else set_icon_hints( display, data, 0, icon );
-        wine_tsx11_lock();
         XSetWMHints( display, data->whole_window, data->wm_hints );
-        wine_tsx11_unlock();
     }
 }
 
@@ -2800,7 +2680,6 @@ static BOOL is_netwm_supported( Display *display, Atom atom )
     static int net_supported_count = -1;
     int i;
 
-    wine_tsx11_lock();
     if (net_supported_count == -1)
     {
         Atom type;
@@ -2814,7 +2693,6 @@ static BOOL is_netwm_supported( Display *display, Atom atom )
         else
             net_supported_count = 0;
     }
-    wine_tsx11_unlock();
 
     for (i = 0; i < net_supported_count; i++)
         if (net_supported[i] == atom) return TRUE;
