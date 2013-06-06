@@ -86,6 +86,7 @@ static INT (WINAPI *pIdnToNameprepUnicode)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pIdnToAscii)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pIdnToUnicode)(DWORD, LPCWSTR, INT, LPWSTR, INT);
 static INT (WINAPI *pGetLocaleInfoEx)(LPCWSTR, LCTYPE, LPWSTR, INT);
+static BOOL (WINAPI *pIsValidLocaleName)(LPCWSTR);
 
 static void InitFunctionPointers(void)
 {
@@ -104,6 +105,7 @@ static void InitFunctionPointers(void)
   pIdnToAscii = (void*)GetProcAddress(hKernel32, "IdnToAscii");
   pIdnToUnicode = (void*)GetProcAddress(hKernel32, "IdnToUnicode");
   pGetLocaleInfoEx = (void*)GetProcAddress(hKernel32, "GetLocaleInfoEx");
+  pIsValidLocaleName = (void*)GetProcAddress(hKernel32, "IsValidLocaleName");
 }
 
 #define eq(received, expected, label, type) \
@@ -1789,7 +1791,7 @@ static INT LCMapStringEx_wrapper(DWORD flags, LPCWSTR src, INT srclen, LPWSTR ds
 static void test_LCMapStringEx(void)
 {
     int ret;
-    WCHAR buf[256], badname[] = {'w', 'i', 'n', 'e', 't', 'e', 's', 't', 0};
+    WCHAR buf[256];
 
     if (!pLCMapStringEx)
     {
@@ -1800,7 +1802,7 @@ static void test_LCMapStringEx(void)
     trace("testing LCMapStringEx\n");
 
     SetLastError(0xdeadbeef);
-    ret = pLCMapStringEx(badname, LCMAP_LOWERCASE,
+    ret = pLCMapStringEx(fooW, LCMAP_LOWERCASE,
                          upper_case, -1, buf, sizeof(buf)/sizeof(WCHAR), NULL, NULL, 0);
     todo_wine {
     ok(!ret, "LCMapStringEx should fail with bad locale name\n");
@@ -1867,27 +1869,36 @@ static void test_LocaleNameToLCID(void)
 
     /* special cases */
     buffer[0] = 0;
+    SetLastError(0xdeadbeef);
     lcid = pLocaleNameToLCID(LOCALE_NAME_USER_DEFAULT, 0);
     ok(lcid == GetUserDefaultLCID() || broken(GetLastError() == ERROR_INVALID_PARAMETER /* Vista */),
-       "Expected lcid == %08x, got %08x, error %d\n", lcid, GetUserDefaultLCID(), GetLastError());
+       "Expected lcid == %08x, got %08x, error %d\n", GetUserDefaultLCID(), lcid, GetLastError());
     ret = pLCIDToLocaleName(lcid, buffer, LOCALE_NAME_MAX_LENGTH, 0);
     ok(ret > 0, "Expected ret > 0, got %d, error %d\n", ret, GetLastError());
     trace("%08x, %s\n", lcid, wine_dbgstr_w(buffer));
 
     buffer[0] = 0;
+    SetLastError(0xdeadbeef);
     lcid = pLocaleNameToLCID(LOCALE_NAME_SYSTEM_DEFAULT, 0);
-    todo_wine ok(!lcid && GetLastError() == ERROR_INVALID_PARAMETER,
-                 "Expected lcid != 0, got %08x, error %d\n", lcid, GetLastError());
+    ok(!lcid && GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected lcid == 0, got %08x, error %d\n", lcid, GetLastError());
     ret = pLCIDToLocaleName(lcid, buffer, LOCALE_NAME_MAX_LENGTH, 0);
     ok(ret > 0, "Expected ret > 0, got %d, error %d\n", ret, GetLastError());
     trace("%08x, %s\n", lcid, wine_dbgstr_w(buffer));
 
     buffer[0] = 0;
+    SetLastError(0xdeadbeef);
     lcid = pLocaleNameToLCID(LOCALE_NAME_INVARIANT, 0);
     todo_wine ok(lcid == 0x7F, "Expected lcid = 0x7F, got %08x, error %d\n", lcid, GetLastError());
     ret = pLCIDToLocaleName(lcid, buffer, LOCALE_NAME_MAX_LENGTH, 0);
     ok(ret > 0, "Expected ret > 0, got %d, error %d\n", ret, GetLastError());
     trace("%08x, %s\n", lcid, wine_dbgstr_w(buffer));
+
+    /* bad name */
+    SetLastError(0xdeadbeef);
+    lcid = pLocaleNameToLCID(fooW, 0);
+    ok(!lcid && GetLastError() == ERROR_INVALID_PARAMETER,
+       "Expected lcid == 0, got got %08x, error %d\n", lcid, GetLastError());
 
     /* english neutral name */
     lcid = pLocaleNameToLCID(enW, 0);
@@ -3431,6 +3442,30 @@ todo_wine
     }
 }
 
+static void test_IsValidLocaleName(void)
+{
+    static const WCHAR enW[] = {'e','n',0};
+    static const WCHAR enusW[] = {'e','n','-','U','S',0};
+    static const WCHAR zzW[] = {'z','z',0};
+    static const WCHAR zzzzW[] = {'z','z','-','Z','Z',0};
+    BOOL ret;
+
+    if (!pIsValidLocaleName)
+    {
+        win_skip("IsValidLocaleName not supported\n");
+        return;
+    }
+
+    ret = pIsValidLocaleName(enW);
+    ok(ret, "IsValidLocaleName failed\n");
+    ret = pIsValidLocaleName(enusW);
+    ok(ret, "IsValidLocaleName failed\n");
+    ret = pIsValidLocaleName(zzW);
+    ok(!ret, "IsValidLocaleName should have failed\n");
+    ret = pIsValidLocaleName(zzzzW);
+    ok(!ret, "IsValidLocaleName should have failed\n");
+}
+
 START_TEST(locale)
 {
   InitFunctionPointers();
@@ -3464,6 +3499,7 @@ START_TEST(locale)
   test_IdnToNameprepUnicode();
   test_IdnToAscii();
   test_IdnToUnicode();
+  test_IsValidLocaleName();
   /* this requires collation table patch to make it MS compatible */
   if (0) test_sorting();
 }

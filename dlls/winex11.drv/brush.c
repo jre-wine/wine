@@ -112,15 +112,15 @@ static Pixmap BRUSH_DitherColor( COLORREF color, int depth)
     Pixmap pixmap;
     GC gc;
 
-    wine_tsx11_lock();
+    XLockDisplay( gdi_display );
     if (!ditherImage)
     {
         ditherImage = XCreateImage( gdi_display, visual, depth, ZPixmap, 0,
                                     NULL, MATRIX_SIZE, MATRIX_SIZE, 32, 0 );
         if (!ditherImage)
         {
-            wine_tsx11_unlock();
             ERR("Could not create dither image\n");
+            XUnlockDisplay( gdi_display );
             return 0;
         }
         ditherImage->data = HeapAlloc( GetProcessHeap(), 0,
@@ -152,7 +152,7 @@ static Pixmap BRUSH_DitherColor( COLORREF color, int depth)
     gc = XCreateGC( gdi_display, pixmap, 0, NULL );
     XPutImage( gdi_display, pixmap, gc, ditherImage, 0, 0, 0, 0, MATRIX_SIZE, MATRIX_SIZE );
     XFreeGC( gdi_display, gc );
-    wine_tsx11_unlock();
+    XUnlockDisplay( gdi_display );
 
     return pixmap;
 }
@@ -171,16 +171,9 @@ static Pixmap BRUSH_DitherMono( COLORREF color )
     };                                      
     int gray = (30 * GetRValue(color) + 59 * GetGValue(color) + 11 * GetBValue(color)) / 100;
     int idx = gray * (sizeof gray_dither/sizeof gray_dither[0] + 1)/256 - 1;
-    Pixmap pixmap;
 
     TRACE("color=%06x -> gray=%x\n", color, gray);
-
-    wine_tsx11_lock();
-    pixmap = XCreateBitmapFromData( gdi_display, root_window, 
-                                    gray_dither[idx],
-                                    2, 2 );
-    wine_tsx11_unlock();
-    return pixmap;
+    return XCreateBitmapFromData( gdi_display, root_window, gray_dither[idx], 2, 2 );
 }
 
 /***********************************************************************
@@ -233,7 +226,6 @@ static BOOL select_pattern_brush( X11DRV_PDEVICE *physdev, const struct brush_pa
     pixmap = create_pixmap_from_image( physdev->dev.hdc, &vis, info, &pattern->bits, pattern->usage );
     if (!pixmap) return FALSE;
 
-    wine_tsx11_lock();
     if (physdev->brush.pixmap) XFreePixmap( gdi_display, physdev->brush.pixmap );
     physdev->brush.pixmap = pixmap;
 
@@ -247,7 +239,6 @@ static BOOL select_pattern_brush( X11DRV_PDEVICE *physdev, const struct brush_pa
 	physdev->brush.fillStyle = FillTiled;
 	physdev->brush.pixel = 0;  /* Ignored */
     }
-    wine_tsx11_unlock();
     return TRUE;
 }
 
@@ -273,9 +264,7 @@ HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_patter
 
     if (physDev->brush.pixmap)
     {
-        wine_tsx11_lock();
         XFreePixmap( gdi_display, physDev->brush.pixmap );
-        wine_tsx11_unlock();
         physDev->brush.pixmap = 0;
     }
     physDev->brush.style = logbrush.lbStyle;
@@ -296,10 +285,8 @@ HBRUSH X11DRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_patter
       case BS_HATCHED:
 	TRACE("BS_HATCHED\n" );
 	physDev->brush.pixel = X11DRV_PALETTE_ToPhysical( physDev, logbrush.lbColor );
-        wine_tsx11_lock();
         physDev->brush.pixmap = XCreateBitmapFromData( gdi_display, root_window,
                                                        HatchBrushes[logbrush.lbHatch], 8, 8 );
-        wine_tsx11_unlock();
 	physDev->brush.fillStyle = FillStippled;
 	break;
     }

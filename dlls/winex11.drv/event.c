@@ -366,13 +366,11 @@ static inline void call_event_handler( Display *display, XEvent *event )
 
     TRACE( "%lu %s for hwnd/window %p/%lx\n",
            event->xany.serial, dbgstr_event( event->type ), hwnd, event->xany.window );
-    wine_tsx11_unlock();
     thread_data = x11drv_thread_data();
     prev = thread_data->current_event;
     thread_data->current_event = event;
     handlers[event->type]( hwnd, event );
     thread_data->current_event = prev;
-    wine_tsx11_lock();
 }
 
 
@@ -386,7 +384,6 @@ static int process_events( Display *display, Bool (*filter)(Display*, XEvent*,XP
     enum event_merge_action action = MERGE_DISCARD;
 
     prev_event.type = 0;
-    wine_tsx11_lock();
     while (XCheckIfEvent( display, &event, filter, (char *)arg ))
     {
         count++;
@@ -442,7 +439,6 @@ static int process_events( Display *display, Bool (*filter)(Display*, XEvent*,XP
     if (prev_event.type) call_event_handler( display, &prev_event );
     free_event_data( &prev_event );
     XFlush( gdi_display );
-    wine_tsx11_unlock();
     if (count) TRACE( "processed %d events\n", count );
     return count;
 }
@@ -555,9 +551,7 @@ static void set_focus( Display *display, HWND hwnd, Time time )
     if (win)
     {
         TRACE( "setting focus to %p (%lx) time=%ld\n", focus, win, time );
-        wine_tsx11_lock();
         XSetInputFocus( display, win, RevertToParent, time );
-        wine_tsx11_unlock();
     }
 }
 
@@ -678,12 +672,8 @@ static void handle_wm_protocols( HWND hwnd, XClientMessageEvent *event )
       xev = *event;
       
       TRACE("NET_WM Ping\n");
-      wine_tsx11_lock();
       xev.window = DefaultRootWindow(xev.display);
       XSendEvent(xev.display, xev.window, False, SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*)&xev);
-      wine_tsx11_unlock();
-      /* this line is semi-stolen from gtk2 */
-      TRACE("NET_WM Pong\n");
     }
 }
 
@@ -715,12 +705,7 @@ static void X11DRV_FocusIn( HWND hwnd, XEvent *xev )
     if (event->detail == NotifyPointer) return;
     if (hwnd == GetDesktopWindow()) return;
 
-    if ((xic = X11DRV_get_ic( hwnd )))
-    {
-        wine_tsx11_lock();
-        XSetICFocus( xic );
-        wine_tsx11_unlock();
-    }
+    if ((xic = X11DRV_get_ic( hwnd ))) XSetICFocus( xic );
     if (use_take_focus)
     {
         if (hwnd == GetForegroundWindow()) clip_fullscreen_window( hwnd, FALSE );
@@ -763,12 +748,8 @@ static void X11DRV_FocusOut( HWND hwnd, XEvent *xev )
     if (ximInComposeMode) return;
 
     x11drv_thread_data()->last_focus = hwnd;
-    if ((xic = X11DRV_get_ic( hwnd )))
-    {
-        wine_tsx11_lock();
-        XUnsetICFocus( xic );
-        wine_tsx11_unlock();
-    }
+    if ((xic = X11DRV_get_ic( hwnd ))) XUnsetICFocus( xic );
+
     if (root_window != DefaultRootWindow(event->display))
     {
         if (hwnd == GetDesktopWindow()) reset_clipping_window();
@@ -780,14 +761,12 @@ static void X11DRV_FocusOut( HWND hwnd, XEvent *xev )
     /* don't reset the foreground window, if the window which is
        getting the focus is a Wine window */
 
-    wine_tsx11_lock();
     XGetInputFocus( event->display, &focus_win, &revert );
     if (focus_win)
     {
         if (XFindContext( event->display, focus_win, winContext, (char **)&hwnd_tmp ) != 0)
             focus_win = 0;
     }
-    wine_tsx11_unlock();
 
     if (!focus_win)
     {
@@ -897,7 +876,6 @@ static BOOL is_net_wm_state_maximized( Display *display, struct x11drv_win_data 
 
     if (!data->whole_window) return FALSE;
 
-    wine_tsx11_lock();
     if (!XGetWindowProperty( display, data->whole_window, x11drv_atom(_NET_WM_STATE), 0,
                              65536/sizeof(CARD32), False, XA_ATOM, &type, &format, &count,
                              &remaining, (unsigned char **)&state ))
@@ -913,7 +891,6 @@ static BOOL is_net_wm_state_maximized( Display *display, struct x11drv_win_data 
         }
         XFree( state );
     }
-    wine_tsx11_unlock();
     return (ret == 2);
 }
 
@@ -1004,10 +981,8 @@ void X11DRV_ConfigureNotify( HWND hwnd, XEvent *xev )
     if (!root_coords && parent == GetDesktopWindow()) /* normal event, map coordinates to the root */
     {
         Window child;
-        wine_tsx11_lock();
         XTranslateCoordinates( event->display, event->window, root_window,
                                0, 0, &x, &y, &child );
-        wine_tsx11_unlock();
         root_coords = TRUE;
     }
     rect.left   = x;
@@ -1118,7 +1093,6 @@ static int get_window_wm_state( Display *display, struct x11drv_win_data *data )
     int format, ret = -1;
     unsigned long count, remaining;
 
-    wine_tsx11_lock();
     if (!XGetWindowProperty( display, data->whole_window, x11drv_atom(WM_STATE), 0,
                              sizeof(*state)/sizeof(CARD32), False, x11drv_atom(WM_STATE),
                              &type, &format, &count, &remaining, (unsigned char **)&state ))
@@ -1127,7 +1101,6 @@ static int get_window_wm_state( Display *display, struct x11drv_win_data *data )
             ret = state->state;
         XFree( state );
     }
-    wine_tsx11_unlock();
     return ret;
 }
 
@@ -1242,20 +1215,13 @@ void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, B
         XEvent event;
         int count = 0;
 
-        wine_tsx11_lock();
         while (XCheckIfEvent( display, &event, is_wm_state_notify, (char *)data->whole_window ))
         {
             count++;
             if (XFilterEvent( &event, None )) continue;  /* filtered, ignore it */
             if (event.type == DestroyNotify) call_event_handler( display, &event );
-            else
-            {
-                wine_tsx11_unlock();
-                handle_wm_state_notify( data, &event.xproperty, FALSE );
-                wine_tsx11_lock();
-            }
+            else handle_wm_state_notify( data, &event.xproperty, FALSE );
         }
-        wine_tsx11_unlock();
 
         if (!count)
         {
@@ -1326,12 +1292,10 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
     Window		win, w_aux_root, w_aux_child;
 
     win = X11DRV_get_whole_window(hWnd);
-    wine_tsx11_lock();
     XQueryPointer( event->display, win, &w_aux_root, &w_aux_child,
                    &x, &y, &dummy, &dummy, (unsigned int*)&aux_long);
     x += virtual_screen_rect.left;
     y += virtual_screen_rect.top;
-    wine_tsx11_unlock();
 
     if (!(data = X11DRV_get_win_data( hWnd ))) return;
 
@@ -1362,12 +1326,10 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
 
     if (!bAccept) return;
 
-    wine_tsx11_lock();
     XGetWindowProperty( event->display, DefaultRootWindow(event->display),
                         x11drv_atom(DndSelection), 0, 65535, FALSE,
                         AnyPropertyType, &atom_aux, &dummy,
                         &data_length, &aux_long, &p_data);
-    wine_tsx11_unlock();
 
     if( !aux_long && p_data)  /* don't bother if > 64K */
     {
@@ -1410,9 +1372,7 @@ static void EVENT_DropFromOffiX( HWND hWnd, XClientMessageEvent *event )
             }
         }
     }
-    wine_tsx11_lock();
     if( p_data ) XFree(p_data);
-    wine_tsx11_unlock();
 }
 
 /**********************************************************************
@@ -1443,12 +1403,10 @@ static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
 
   if (!(GetWindowLongW( hWnd, GWL_EXSTYLE ) & WS_EX_ACCEPTFILES)) return;
 
-  wine_tsx11_lock();
   XGetWindowProperty( event->display, DefaultRootWindow(event->display),
                       x11drv_atom(DndSelection), 0, 65535, FALSE,
                       AnyPropertyType, &u.atom_aux, &u.i,
                       &data_length, &aux_long, &p_data);
-  wine_tsx11_unlock();
   if (aux_long)
     WARN("property too large, truncated!\n");
   TRACE("urls=%s\n", p_data);
@@ -1473,12 +1431,10 @@ static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
     }
 
     if( drop_len && drop_len < 65535 ) {
-      wine_tsx11_lock();
       XQueryPointer( event->display, root_window, &u.w_aux, &u.w_aux,
                      &x, &y, &u.i, &u.i, &u.u);
       x += virtual_screen_rect.left;
       y += virtual_screen_rect.top;
-      wine_tsx11_unlock();
 
       drop_len += sizeof(DROPFILES) + 1;
       hDrop = GlobalAlloc( GMEM_SHARE, drop_len );
@@ -1529,9 +1485,7 @@ static void EVENT_DropURLs( HWND hWnd, XClientMessageEvent *event )
         PostMessageA( hWnd, WM_DROPFILES, (WPARAM)hDrop, 0L );
       }
     }
-    wine_tsx11_lock();
     if( p_data ) XFree(p_data);
-    wine_tsx11_unlock();
   }
 }
 
@@ -1569,11 +1523,9 @@ static void handle_dnd_protocol( HWND hwnd, XClientMessageEvent *event )
     unsigned int u;
 
     /* query window (drag&drop event contains only drag window) */
-    wine_tsx11_lock();
     XQueryPointer( event->display, root_window, &root, &child,
                    &root_x, &root_y, &child_x, &child_y, &u);
     if (XFindContext( event->display, child, winContext, (char **)&hwnd ) != 0) hwnd = 0;
-    wine_tsx11_unlock();
     if (!hwnd) return;
     if (event->data.l[0] == DndFile || event->data.l[0] == DndFiles)
         EVENT_DropFromOffiX(hwnd, event);

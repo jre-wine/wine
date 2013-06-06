@@ -215,20 +215,27 @@ static HRESULT WINAPI filesys_DriveExists(IFileSystem3 *iface, BSTR DriveSpec,
 
 static HRESULT WINAPI filesys_FileExists(IFileSystem3 *iface, BSTR path, VARIANT_BOOL *ret)
 {
+    DWORD attrs;
     TRACE("%p %s %p\n", iface, debugstr_w(path), ret);
 
     if (!ret) return E_POINTER;
 
-    *ret = GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES ? VARIANT_TRUE : VARIANT_FALSE;
+    attrs = GetFileAttributesW(path);
+    *ret = attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY) ? VARIANT_TRUE : VARIANT_FALSE;
     return S_OK;
 }
 
-static HRESULT WINAPI filesys_FolderExists(IFileSystem3 *iface, BSTR FolderSpec,
-                                            VARIANT_BOOL *pfExists)
+static HRESULT WINAPI filesys_FolderExists(IFileSystem3 *iface, BSTR path, VARIANT_BOOL *ret)
 {
-    FIXME("%p %s %p\n", iface, debugstr_w(FolderSpec), pfExists);
+    DWORD attrs;
+    TRACE("%p %s %p\n", iface, debugstr_w(path), ret);
 
-    return E_NOTIMPL;
+    if (!ret) return E_POINTER;
+
+    attrs = GetFileAttributesW(path);
+    *ret = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) ? VARIANT_TRUE : VARIANT_FALSE;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI filesys_GetDrive(IFileSystem3 *iface, BSTR DriveSpec,

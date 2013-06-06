@@ -63,9 +63,6 @@ typedef int Status;
 
 #define WINE_XDND_VERSION 4
 
-extern void CDECL wine_tsx11_lock(void);
-extern void CDECL wine_tsx11_unlock(void);
-
   /* X physical pen */
 typedef struct
 {
@@ -221,13 +218,11 @@ extern int client_side_with_render DECLSPEC_HIDDEN;
 extern int client_side_antialias_with_core DECLSPEC_HIDDEN;
 extern int client_side_antialias_with_render DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
-extern void X11DRV_XRender_Finalize(void) DECLSPEC_HIDDEN;
 
 extern const struct gdi_dc_funcs *get_glx_driver(void) DECLSPEC_HIDDEN;
 extern BOOL destroy_glxpixmap(Display *display, XID glxpixmap) DECLSPEC_HIDDEN;
 
 /* IME support */
-extern void IME_UnregisterClasses(void) DECLSPEC_HIDDEN;
 extern void IME_SetOpenStatus(BOOL fOpen) DECLSPEC_HIDDEN;
 extern void IME_SetCompositionStatus(BOOL fOpen) DECLSPEC_HIDDEN;
 extern INT IME_GetCursorPos(void) DECLSPEC_HIDDEN;
@@ -246,8 +241,6 @@ extern void X11DRV_XDND_LeaveEvent( HWND hWnd, XClientMessageEvent *event ) DECL
 /**************************************************************************
  * X11 GDI driver
  */
-
-extern void X11DRV_GDI_Finalize(void) DECLSPEC_HIDDEN;
 
 extern Display *gdi_display DECLSPEC_HIDDEN;  /* display to use for all GDI functions */
 
@@ -269,7 +262,6 @@ extern ColorShifts X11DRV_PALETTE_default_shifts DECLSPEC_HIDDEN;
 extern int X11DRV_PALETTE_mapEGAPixel[16] DECLSPEC_HIDDEN;
 
 extern int X11DRV_PALETTE_Init(void) DECLSPEC_HIDDEN;
-extern void X11DRV_PALETTE_Cleanup(void) DECLSPEC_HIDDEN;
 extern BOOL X11DRV_IsSolidColor(COLORREF color) DECLSPEC_HIDDEN;
 
 extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel) DECLSPEC_HIDDEN;
@@ -332,6 +324,9 @@ struct x11drv_thread_data
     DWORD    clip_reset;           /* time when clipping was last reset */
     HKL      kbd_layout;           /* active keyboard layout */
     enum { xi_unavailable = -1, xi_unknown, xi_disabled, xi_enabled } xi2_state; /* XInput2 state */
+    void    *xi2_devices;          /* list of XInput2 devices (valid when state is enabled) */
+    int      xi2_device_count;
+    int      xi2_core_pointer;     /* XInput2 core pointer id */
 };
 
 extern struct x11drv_thread_data *x11drv_init_thread_data(void) DECLSPEC_HIDDEN;
@@ -409,6 +404,8 @@ enum x11drv_atoms
     XATOM_RAW_ASCENT,
     XATOM_RAW_DESCENT,
     XATOM_RAW_CAP_HEIGHT,
+    XATOM_Rel_X,
+    XATOM_Rel_Y,
     XATOM_WM_PROTOCOLS,
     XATOM_WM_DELETE_WINDOW,
     XATOM_WM_STATE,
@@ -615,10 +612,13 @@ static inline BOOL is_window_rect_fullscreen( const RECT *rect )
 
 /* X context to associate a hwnd to an X window */
 extern XContext winContext DECLSPEC_HIDDEN;
+/* X context to associate a struct x11drv_win_data to an hwnd */
+extern XContext win_data_context DECLSPEC_HIDDEN;
+/* X context to associate an X cursor to a Win32 cursor handle */
+extern XContext cursor_context DECLSPEC_HIDDEN;
 
 extern void X11DRV_InitClipboard(void) DECLSPEC_HIDDEN;
 extern int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow) DECLSPEC_HIDDEN;
-extern void X11DRV_Clipboard_Cleanup(void) DECLSPEC_HIDDEN;
 extern void X11DRV_ResetSelectionOwner(void) DECLSPEC_HIDDEN;
 extern void CDECL X11DRV_SetFocus( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void set_window_cursor( Window window, HCURSOR handle ) DECLSPEC_HIDDEN;
@@ -649,6 +649,7 @@ struct x11drv_mode_info
 
 extern void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height ) DECLSPEC_HIDDEN;
 extern void X11DRV_resize_desktop(unsigned int width, unsigned int height) DECLSPEC_HIDDEN;
+BOOL is_desktop_fullscreen(void) DECLSPEC_HIDDEN;
 extern void X11DRV_Settings_AddDepthModes(void) DECLSPEC_HIDDEN;
 extern void X11DRV_Settings_AddOneMode(unsigned int width, unsigned int height, unsigned int bpp, unsigned int freq) DECLSPEC_HIDDEN;
 unsigned int X11DRV_Settings_GetModeCount(void) DECLSPEC_HIDDEN;
@@ -660,7 +661,6 @@ struct x11drv_mode_info *X11DRV_Settings_SetHandlers(const char *name,
                                                      int reserve_depths) DECLSPEC_HIDDEN;
 
 void X11DRV_XF86VM_Init(void) DECLSPEC_HIDDEN;
-void X11DRV_XF86VM_Cleanup(void) DECLSPEC_HIDDEN;
 void X11DRV_XRandR_Init(void) DECLSPEC_HIDDEN;
 
 /* XIM support */

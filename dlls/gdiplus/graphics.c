@@ -254,8 +254,7 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
         width = sqrt((pt[1].X - pt[0].X) * (pt[1].X - pt[0].X) +
                      (pt[1].Y - pt[0].Y) * (pt[1].Y - pt[0].Y)) / sqrt(2.0);
 
-        width *= pen->width * convert_unit(graphics->xres,
-                              pen->unit == UnitWorld ? graphics->unit : pen->unit);
+        width *= units_to_pixels(pen->width, pen->unit == UnitWorld ? graphics->unit : pen->unit, graphics->xres);
     }
 
     if(pen->dash == DashStyleCustom){
@@ -311,8 +310,8 @@ static void transform_and_round_points(GpGraphics *graphics, POINT *pti,
     GpMatrix *matrix;
     int i;
 
-    scale_x = convert_unit(graphics->xres, graphics->unit);
-    scale_y = convert_unit(graphics->yres, graphics->unit);
+    scale_x = units_to_pixels(1.0, graphics->unit, graphics->xres);
+    scale_y = units_to_pixels(1.0, graphics->unit, graphics->yres);
 
     /* apply page scale */
     if(graphics->unit != UnitDisplay)
@@ -2115,10 +2114,26 @@ static void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font, HFONT *
 {
     HDC hdc = CreateCompatibleDC(0);
     GpPointF pt[3];
-    REAL angle, rel_width, rel_height;
+    REAL angle, rel_width, rel_height, font_height, font_to_pixel_scale;
     LOGFONTW lfw;
     HFONT unscaled_font;
     TEXTMETRICW textmet;
+
+    font_to_pixel_scale = units_scale(UnitPoint, UnitPixel, font->family->dpi);
+
+    if (font->unit == UnitPixel)
+        font_height = font->emSize * font_to_pixel_scale;
+    else
+    {
+        REAL unit_scale, res;
+
+        res = (graphics->unit == UnitDisplay || graphics->unit == UnitPixel) ? graphics->xres : graphics->yres;
+        unit_scale = units_scale(font->unit, graphics->unit, res);
+
+        font_height = font->emSize * font_to_pixel_scale * unit_scale;
+        if (graphics->unit != UnitDisplay)
+            font_height /= graphics->scale;
+    }
 
     pt[0].X = 0.0;
     pt[0].Y = 0.0;
@@ -2135,7 +2150,7 @@ static void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font, HFONT *
                       (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
 
     get_log_fontW(font, graphics, &lfw);
-    lfw.lfHeight = roundr(lfw.lfHeight * rel_height);
+    lfw.lfHeight = roundr(font_height * rel_height);
     unscaled_font = CreateFontIndirectW(&lfw);
 
     SelectObject(hdc, unscaled_font);
@@ -2928,7 +2943,6 @@ GpStatus WINGDIPAPI GdipDrawEllipseI(GpGraphics *graphics, GpPen *pen, INT x,
 GpStatus WINGDIPAPI GdipDrawImage(GpGraphics *graphics, GpImage *image, REAL x, REAL y)
 {
     UINT width, height;
-    GpPointF points[3];
 
     TRACE("(%p, %p, %.2f, %.2f)\n", graphics, image, x, y);
 
@@ -2938,15 +2952,8 @@ GpStatus WINGDIPAPI GdipDrawImage(GpGraphics *graphics, GpImage *image, REAL x, 
     GdipGetImageWidth(image, &width);
     GdipGetImageHeight(image, &height);
 
-    /* FIXME: we should use the graphics and image dpi, somehow */
-
-    points[0].X = points[2].X = x;
-    points[0].Y = points[1].Y = y;
-    points[1].X = x + width;
-    points[2].Y = y + height;
-
-    return GdipDrawImagePointsRect(graphics, image, points, 3, 0, 0, width, height,
-        UnitPixel, NULL, NULL, NULL);
+    return GdipDrawImagePointRect(graphics, image, x, y,
+                                  0.0, 0.0, (REAL)width, (REAL)height, UnitPixel);
 }
 
 GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
@@ -2962,14 +2969,21 @@ GpStatus WINGDIPAPI GdipDrawImagePointRect(GpGraphics *graphics, GpImage *image,
     GpUnit srcUnit)
 {
     GpPointF points[3];
+    REAL scale_x, scale_y, width, height;
+
     TRACE("(%p, %p, %f, %f, %f, %f, %f, %f, %d)\n", graphics, image, x, y, srcx, srcy, srcwidth, srcheight, srcUnit);
+
+    scale_x = units_scale(srcUnit, graphics->unit, graphics->xres);
+    scale_x *= graphics->xres / image->xres;
+    scale_y = units_scale(srcUnit, graphics->unit, graphics->yres);
+    scale_y *= graphics->yres / image->yres;
+    width = srcwidth * scale_x;
+    height = srcheight * scale_y;
 
     points[0].X = points[2].X = x;
     points[0].Y = points[1].Y = y;
-
-    /* FIXME: convert image coordinates to Graphics coordinates? */
-    points[1].X = x + srcwidth;
-    points[2].Y = y + srcheight;
+    points[1].X = x + width;
+    points[2].Y = y + height;
 
     return GdipDrawImagePointsRect(graphics, image, points, 3, srcx, srcy,
         srcwidth, srcheight, srcUnit, NULL, NULL, NULL);
@@ -3026,7 +3040,6 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 {
     GpPointF ptf[4];
     POINT pti[4];
-    REAL dx, dy;
     GpStatus stat;
 
     TRACE("(%p, %p, %p, %d, %f, %f, %f, %f, %d, %p, %p, %p)\n", graphics, image, points,
@@ -3049,6 +3062,15 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
         return Ok;
     transform_and_round_points(graphics, pti, ptf, 4);
 
+    TRACE("%s %s %s %s\n", wine_dbgstr_point(&pti[0]), wine_dbgstr_point(&pti[1]),
+        wine_dbgstr_point(&pti[2]), wine_dbgstr_point(&pti[3]));
+
+    srcx = units_to_pixels(srcx, srcUnit, image->xres);
+    srcy = units_to_pixels(srcy, srcUnit, image->yres);
+    srcwidth = units_to_pixels(srcwidth, srcUnit, image->xres);
+    srcheight = units_to_pixels(srcheight, srcUnit, image->yres);
+    TRACE("src pixels: %f,%f %fx%f\n", srcx, srcy, srcwidth, srcheight);
+
     if (image->picture)
     {
         if (!graphics->hdc)
@@ -3056,23 +3078,10 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
             FIXME("graphics object has no HDC\n");
         }
 
-        /* FIXME: partially implemented (only works for rectangular parallelograms) */
-        if(srcUnit == UnitInch)
-            dx = dy = (REAL) INCH_HIMETRIC;
-        else if(srcUnit == UnitPixel){
-            dx = ((REAL) INCH_HIMETRIC) /
-                 ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX));
-            dy = ((REAL) INCH_HIMETRIC) /
-                 ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY));
-        }
-        else
-            return NotImplemented;
-
         if(IPicture_Render(image->picture, graphics->hdc,
             pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
-            srcx * dx, srcy * dy,
-            srcwidth * dx, srcheight * dy,
-            NULL) != S_OK){
+            srcx, srcy, srcwidth, srcheight, NULL) != S_OK)
+        {
             if(callback)
                 callback(callbackData);
             return GenericError;
@@ -3082,18 +3091,6 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
     {
         GpBitmap* bitmap = (GpBitmap*)image;
         int use_software=0;
-
-        if (srcUnit == UnitInch)
-            dx = dy = 96.0; /* FIXME: use the image resolution */
-        else if (srcUnit == UnitPixel)
-            dx = dy = 1.0;
-        else
-            return NotImplemented;
-
-        srcx = srcx * dx;
-        srcy = srcy * dy;
-        srcwidth = srcwidth * dx;
-        srcheight = srcheight * dy;
 
         if (imageAttributes ||
             (graphics->image && graphics->image->type == ImageTypeBitmap) ||
@@ -3131,6 +3128,8 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
                 if (dst_area.bottom < pti[i].y) dst_area.bottom = pti[i].y;
             }
 
+            TRACE("dst_area: %s\n", wine_dbgstr_rect(&dst_area));
+
             m11 = (ptf[1].X - ptf[0].X) / srcwidth;
             m21 = (ptf[2].X - ptf[0].X) / srcheight;
             mdx = ptf[0].X - m11 * srcx - m21 * srcy;
@@ -3159,6 +3158,8 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
 
             get_bitmap_sample_size(interpolation, imageAttributes->wrap,
                 bitmap, srcx, srcy, srcwidth, srcheight, &src_area);
+
+            TRACE("src_area: %d x %d\n", src_area.Width, src_area.Height);
 
             src_data = GdipAlloc(sizeof(ARGB) * src_area.Width * src_area.Height);
             if (!src_data)
@@ -4910,30 +4911,6 @@ static GpStatus measure_ranges_callback(HDC hdc,
     return stat;
 }
 
-static void rect_to_pixels(const RectF *in, const GpGraphics *graphics, RectF *out)
-{
-    REAL dpi;
-
-    GdipGetDpiX((GpGraphics *)graphics, &dpi);
-    out->X = units_to_pixels(in->X, graphics->unit, dpi);
-    out->Width = units_to_pixels(in->Width, graphics->unit, dpi);
-    GdipGetDpiY((GpGraphics *)graphics, &dpi);
-    out->Y = units_to_pixels(in->Y, graphics->unit, dpi);
-    out->Height = units_to_pixels(in->Height, graphics->unit, dpi);
-}
-
-static void rect_to_units(const RectF *in, const GpGraphics *graphics, RectF *out)
-{
-    REAL dpi;
-
-    GdipGetDpiX((GpGraphics *)graphics, &dpi);
-    out->X = pixels_to_units(in->X, graphics->unit, dpi);
-    out->Width = pixels_to_units(in->Width, graphics->unit, dpi);
-    GdipGetDpiY((GpGraphics *)graphics, &dpi);
-    out->Y = pixels_to_units(in->Y, graphics->unit, dpi);
-    out->Height = pixels_to_units(in->Height, graphics->unit, dpi);
-}
-
 GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
         GDIPCONST WCHAR* string, INT length, GDIPCONST GpFont* font,
         GDIPCONST RectF* layoutRect, GDIPCONST GpStringFormat *stringFormat,
@@ -5007,7 +4984,7 @@ static GpStatus measure_string_callback(HDC hdc,
     REAL new_width, new_height;
 
     new_width = bounds->Width / args->rel_width;
-    new_height = (bounds->Height + bounds->Y - args->bounds->Y) / args->rel_height;
+    new_height = (bounds->Height + bounds->Y) / args->rel_height - args->bounds->Y;
 
     if (new_width > args->bounds->Width)
         args->bounds->Width = new_width;
@@ -5037,7 +5014,7 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     struct measure_string_args args;
     HDC temp_hdc=NULL, hdc;
     GpPointF pt[3];
-    RectF rect_pixels;
+    RectF scaled_rect;
 
     TRACE("(%p, %s, %i, %p, %s, %p, %p, %p, %p)\n", graphics,
         debugstr_wn(string, length), length, font, debugstr_rectf(rect), format,
@@ -5075,10 +5052,13 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     get_font_hfont(graphics, font, &gdifont);
     oldfont = SelectObject(hdc, gdifont);
 
-    rect_to_pixels(rect, graphics, &rect_pixels);
+    scaled_rect.X = rect->X * args.rel_width;
+    scaled_rect.Y = rect->Y * args.rel_height;
+    scaled_rect.Width = rect->Width * args.rel_width;
+    scaled_rect.Height = rect->Height * args.rel_height;
 
-    bounds->X = rect_pixels.X;
-    bounds->Y = rect_pixels.Y;
+    bounds->X = rect->X;
+    bounds->Y = rect->Y;
     bounds->Width = 0.0;
     bounds->Height = 0.0;
 
@@ -5086,10 +5066,8 @@ GpStatus WINGDIPAPI GdipMeasureString(GpGraphics *graphics,
     args.codepointsfitted = codepointsfitted;
     args.linesfilled = linesfilled;
 
-    gdip_format_string(hdc, string, length, font, &rect_pixels, format,
+    gdip_format_string(hdc, string, length, font, &scaled_rect, format,
         measure_string_callback, &args);
-
-    rect_to_units(bounds, graphics, bounds);
 
     SelectObject(hdc, oldfont);
     DeleteObject(gdifont);
@@ -5609,6 +5587,10 @@ GpStatus WINGDIPAPI GdipSetWorldTransform(GpGraphics *graphics, GpMatrix *matrix
     if(graphics->busy)
         return ObjectBusy;
 
+    TRACE("%f,%f,%f,%f,%f,%f\n",
+          matrix->matrix[0], matrix->matrix[1], matrix->matrix[2],
+          matrix->matrix[3], matrix->matrix[4], matrix->matrix[5]);
+
     GdipDeleteMatrix(graphics->worldtrans);
     return GdipCloneMatrix(matrix, &graphics->worldtrans);
 }
@@ -5997,8 +5979,8 @@ static GpStatus get_graphics_transform(GpGraphics *graphics, GpCoordinateSpace d
 
     if (dst_space != src_space && stat == Ok)
     {
-        scale_x = convert_unit(graphics->xres, graphics->unit);
-        scale_y = convert_unit(graphics->yres, graphics->unit);
+        scale_x = units_to_pixels(1.0, graphics->unit, graphics->xres);
+        scale_y = units_to_pixels(1.0, graphics->unit, graphics->yres);
 
         if(graphics->unit != UnitDisplay)
         {

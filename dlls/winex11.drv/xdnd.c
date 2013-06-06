@@ -230,11 +230,9 @@ void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event )
         unsigned long bytesret;
 
         /* Request supported formats from source window */
-        wine_tsx11_lock();
         XGetWindowProperty(event->display, event->data.l[0], x11drv_atom(XdndTypeList),
                            0, 65535, FALSE, AnyPropertyType, &acttype, &actfmt, &count,
                            &bytesret, (unsigned char**)&xdndtypes);
-        wine_tsx11_unlock();
     }
     else
     {
@@ -244,10 +242,9 @@ void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event )
 
     if (TRACE_ON(xdnd))
     {
-        unsigned int i = 0;
+        unsigned int i;
 
-        wine_tsx11_lock();
-        for (; i < count; i++)
+        for (i = 0; i < count; i++)
         {
             if (xdndtypes[i] != 0)
             {
@@ -256,7 +253,6 @@ void X11DRV_XDND_EnterEvent( HWND hWnd, XClientMessageEvent *event )
                 XFree(pn);
             }
         }
-        wine_tsx11_unlock();
     }
 
     /* Do a one-time data read and cache results */
@@ -374,9 +370,7 @@ void X11DRV_XDND_PositionEvent( HWND hWnd, XClientMessageEvent *event )
         e.data.l[4] = X11DRV_XDND_DROPEFFECTToXdndAction(effect);
     else
         e.data.l[4] = None;
-    wine_tsx11_lock();
     XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
-    wine_tsx11_unlock();
 }
 
 /**************************************************************************
@@ -429,9 +423,7 @@ void X11DRV_XDND_DropEvent( HWND hWnd, XClientMessageEvent *event )
     e.message_type = x11drv_atom(XdndFinished);
     e.format = 32;
     e.data.l[0] = event->window;
-    wine_tsx11_lock();
     XSendEvent(event->display, event->data.l[0], False, NoEventMask, (XEvent*)&e);
-    wine_tsx11_unlock();
 }
 
 /**************************************************************************
@@ -489,19 +481,15 @@ static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
         if (types[i] == 0)
             continue;
 
-        wine_tsx11_lock();
         XConvertSelection(display, x11drv_atom(XdndSelection), types[i],
                           x11drv_atom(XdndTarget), xwin, /*tm*/CurrentTime);
-        wine_tsx11_unlock();
 
         /*
          * Wait for SelectionNotify
          */
         for (j = 0; j < SELECTION_RETRIES; j++)
         {
-            wine_tsx11_lock();
             res = XCheckTypedWindowEvent(display, xwin, SelectionNotify, &xe);
-            wine_tsx11_unlock();
             if (res && xe.xselection.selection == x11drv_atom(XdndSelection)) break;
 
             usleep(SELECTION_WAIT);
@@ -510,15 +498,11 @@ static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
         if (xe.xselection.property == None)
             continue;
 
-        wine_tsx11_lock();
         XGetWindowProperty(display, xwin, x11drv_atom(XdndTarget), 0, 65535, FALSE,
             AnyPropertyType, &acttype, &actfmt, &icount, &bytesret, &data);
-        wine_tsx11_unlock();
 
         entries += X11DRV_XDND_MapFormat(types[i], data, get_property_size( actfmt, icount ));
-        wine_tsx11_lock();
         XFree(data);
-        wine_tsx11_unlock();
     }
 
     /* On Windows when there is a CF_HDROP, there are no other CF_ formats.

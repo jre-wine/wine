@@ -138,8 +138,6 @@ Window CDECL X11DRV_create_desktop( UINT width, UINT height )
 
     TRACE( "%u x %u\n", width, height );
 
-    wine_tsx11_lock();
-
     /* Create window */
     win_attr.event_mask = ExposureMask | KeyPressMask | KeyReleaseMask | EnterWindowMask |
                           PointerMotionMask | ButtonPressMask | ButtonReleaseMask | FocusChangeMask;
@@ -162,7 +160,6 @@ Window CDECL X11DRV_create_desktop( UINT width, UINT height )
             1);
     }
     XFlush( display );
-    wine_tsx11_unlock();
     if (win != None) X11DRV_init_desktop( win, width, height );
     return win;
 }
@@ -192,15 +189,18 @@ static BOOL CALLBACK update_windows_on_desktop_resize( HWND hwnd, LPARAM lparam 
     {
         XWindowChanges changes;
 
-        wine_tsx11_lock();
         changes.x = data->whole_rect.left - virtual_screen_rect.left;
         changes.y = data->whole_rect.top - virtual_screen_rect.top;
         XReconfigureWMWindow( display, data->whole_window,
                               DefaultScreen(display), mask, &changes );
-        wine_tsx11_unlock();
     }
     if (hwnd == GetForegroundWindow()) clip_fullscreen_window( hwnd, TRUE );
     return TRUE;
+}
+
+BOOL is_desktop_fullscreen(void)
+{
+    return screen_width == max_width && screen_height == max_height;
 }
 
 static void update_desktop_fullscreen( unsigned int width, unsigned int height)
@@ -227,10 +227,13 @@ static void update_desktop_fullscreen( unsigned int width, unsigned int height)
 
     TRACE("action=%li\n", xev.xclient.data.l[0]);
 
-    wine_tsx11_lock();
     XSendEvent( display, DefaultRootWindow(display), False,
                 SubstructureRedirectMask | SubstructureNotifyMask, &xev );
-    wine_tsx11_unlock();
+
+    xev.xclient.data.l[1] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_VERT);
+    xev.xclient.data.l[2] = x11drv_atom(_NET_WM_STATE_MAXIMIZED_HORZ);
+    XSendEvent( display, DefaultRootWindow(display), False,
+                SubstructureRedirectMask | SubstructureNotifyMask, &xev );
 }
 
 /***********************************************************************

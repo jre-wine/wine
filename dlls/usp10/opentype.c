@@ -43,6 +43,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(uniscribe);
 #define GET_BE_DWORD(x) RtlUlongByteSwap(x)
 #endif
 
+#define round(x) (((x) < 0) ? (int)((x) - 0.5) : (int)((x) + 0.5))
+
 /* These are all structures needed for the cmap format 12 table */
 #define CMAP_TAG MS_MAKE_TAG('c', 'm', 'a', 'p')
 
@@ -387,6 +389,24 @@ typedef struct {
     WORD MarkCount;
     GPOS_MarkRecord MarkRecord[1];
 } GPOS_MarkArray;
+
+typedef struct {
+    WORD PosFormat;
+    WORD Mark1Coverage;
+    WORD Mark2Coverage;
+    WORD ClassCount;
+    WORD Mark1Array;
+    WORD Mark2Array;
+} GPOS_MarkMarkPosFormat1;
+
+typedef struct {
+    WORD Mark2Anchor[1];
+} GPOS_Mark2Record;
+
+typedef struct {
+    WORD Mark2Count;
+    GPOS_Mark2Record Mark2Record[1];
+} GPOS_Mark2Array;
 
 typedef struct {
     WORD SequenceIndex;
@@ -1174,44 +1194,47 @@ static INT GPOS_apply_PairAdjustment(const OT_LookupTable *look, const WORD *gly
         ppf1 = (const GPOS_PairPosFormat1*)((const BYTE*)look+offset);
         if (GET_BE_WORD(ppf1->PosFormat) == 1)
         {
+            int index;
             offset = GET_BE_WORD(ppf1->Coverage);
-            if (GSUB_is_glyph_covered((const BYTE*)ppf1+offset, glyphs[glyph_index]) != -1)
+            index = GSUB_is_glyph_covered((const BYTE*)ppf1+offset, glyphs[glyph_index]);
+            if (index != -1 && index < GET_BE_WORD(ppf1->PairSetCount))
             {
-                int i;
-                int count = GET_BE_WORD(ppf1->PairSetCount);
-                for (i = 0; i < count; i++)
+                int k;
+                int pair_count;
+                const GPOS_PairSet *ps;
+                offset = GET_BE_WORD(ppf1->PairSetOffset[index]);
+                ps = (const GPOS_PairSet*)((const BYTE*)ppf1+offset);
+                pair_count = GET_BE_WORD(ps->PairValueCount);
+                for (k = 0; k < pair_count; k++)
                 {
-                    int k;
-                    int pair_count;
-                    const GPOS_PairSet *ps;
-                    offset = GET_BE_WORD(ppf1->PairSetOffset[i]);
-                    ps = (const GPOS_PairSet*)((const BYTE*)ppf1+offset);
-                    pair_count = GET_BE_WORD(ps->PairValueCount);
-                    for (k = 0; k < pair_count; k++)
+                    WORD second_glyph = GET_BE_WORD(ps->PairValueRecord[k].SecondGlyph);
+                    if (glyphs[glyph_index+write_dir] == second_glyph)
                     {
-                        if (glyphs[glyph_index+write_dir] == GET_BE_WORD(ps->PairValueRecord[k].SecondGlyph))
+                        int next = 1;
+                        GPOS_ValueRecord ValueRecord1 = {0,0,0,0,0,0,0,0};
+                        GPOS_ValueRecord ValueRecord2 = {0,0,0,0,0,0,0,0};
+                        WORD ValueFormat1 = GET_BE_WORD(ppf1->ValueFormat1);
+                        WORD ValueFormat2 = GET_BE_WORD(ppf1->ValueFormat2);
+
+                        TRACE("Format 1: Found Pair %x,%x\n",glyphs[glyph_index],glyphs[glyph_index+write_dir]);
+
+                        offset = GPOS_get_value_record(ValueFormat1, ps->PairValueRecord[k].Value1, &ValueRecord1);
+                        GPOS_get_value_record(ValueFormat2, (WORD*)((const BYTE*)(ps->PairValueRecord[k].Value2)+offset), &ValueRecord2);
+                        if (ValueFormat1)
                         {
-                            GPOS_ValueRecord ValueRecord1 = {0,0,0,0,0,0,0,0};
-                            GPOS_ValueRecord ValueRecord2 = {0,0,0,0,0,0,0,0};
-                            WORD ValueFormat1 = GET_BE_WORD(ppf1->ValueFormat1);
-                            WORD ValueFormat2 = GET_BE_WORD(ppf1->ValueFormat2);
-
-                            TRACE("Format 1: Found Pair %x,%x\n",glyphs[glyph_index],glyphs[glyph_index+write_dir]);
-
-                            offset = GPOS_get_value_record(ValueFormat1, ps->PairValueRecord[k].Value1, &ValueRecord1);
-                            GPOS_get_value_record(ValueFormat2, (WORD*)((const BYTE*)(ps->PairValueRecord[k].Value2)+offset), &ValueRecord2);
-                            if (ValueFormat1)
-                            {
-                                GPOS_get_value_record_offsets((const BYTE*)ppf1, &ValueRecord1,  ValueFormat1, ppem, &ptAdjust[0], &ptAdvance[0]);
-                                TRACE("Glyph 1 resulting cumulative offset is %i,%i design units\n",ptAdjust[0].x,ptAdjust[0].y);
-                            }
-                            if (ValueFormat2)
-                            {
-                                GPOS_get_value_record_offsets((const BYTE*)ppf1, &ValueRecord2,  ValueFormat2, ppem, &ptAdjust[1], &ptAdvance[1]);
-                                TRACE("Glyph 2 resulting cumulative offset is %i,%i design units\n",ptAdjust[1].x,ptAdjust[1].y);
-                                return glyph_index+2;
-                            }
+                            GPOS_get_value_record_offsets((const BYTE*)ppf1, &ValueRecord1,  ValueFormat1, ppem, &ptAdjust[0], &ptAdvance[0]);
+                            TRACE("Glyph 1 resulting cumulative offset is %i,%i design units\n",ptAdjust[0].x,ptAdjust[0].y);
+                            TRACE("Glyph 1 resulting cumulative advance is %i,%i design units\n",ptAdvance[0].x,ptAdvance[0].y);
                         }
+                        if (ValueFormat2)
+                        {
+                            GPOS_get_value_record_offsets((const BYTE*)ppf1, &ValueRecord2,  ValueFormat2, ppem, &ptAdjust[1], &ptAdvance[1]);
+                            TRACE("Glyph 2 resulting cumulative offset is %i,%i design units\n",ptAdjust[1].x,ptAdjust[1].y);
+                            TRACE("Glyph 2 resulting cumulative advance is %i,%i design units\n",ptAdvance[1].x,ptAdvance[1].y);
+                            next++;
+                        }
+                        if (next)
+                            return glyph_index + next;
                     }
                 }
             }
@@ -1284,6 +1307,71 @@ static VOID GPOS_apply_MarkToBase(const OT_LookupTable *look, const WORD *glyphs
         }
         else
             FIXME("Unhandled Mark To Base Format %i\n",GET_BE_WORD(mbpf1->PosFormat));
+    }
+}
+
+static VOID GPOS_apply_MarkToMark(const OT_LookupTable *look, const WORD *glyphs, INT glyph_index, INT write_dir, INT glyph_count, INT ppem, LPPOINT pt)
+{
+    int j;
+
+    TRACE("MarkToMark Attachment Positioning Subtable\n");
+
+    for (j = 0; j < GET_BE_WORD(look->SubTableCount); j++)
+    {
+        int offset;
+        const GPOS_MarkMarkPosFormat1 *mmpf1;
+        offset = GET_BE_WORD(look->SubTable[j]);
+        mmpf1 = (const GPOS_MarkMarkPosFormat1*)((const BYTE*)look+offset);
+        if (GET_BE_WORD(mmpf1->PosFormat) == 1)
+        {
+            int offset = GET_BE_WORD(mmpf1->Mark1Coverage);
+            int mark_index;
+            mark_index = GSUB_is_glyph_covered((const BYTE*)mmpf1+offset, glyphs[glyph_index]);
+            if (mark_index != -1)
+            {
+                int mark2_index;
+                offset = GET_BE_WORD(mmpf1->Mark2Coverage);
+                mark2_index = GSUB_is_glyph_covered((const BYTE*)mmpf1+offset, glyphs[glyph_index - write_dir]);
+                if (mark2_index != -1)
+                {
+                    const GPOS_MarkArray *ma;
+                    const GPOS_MarkRecord *mr;
+                    const GPOS_Mark2Array *m2a;
+                    const GPOS_Mark2Record *m2r;
+                    int mark_class;
+                    int class_count = GET_BE_WORD(mmpf1->ClassCount);
+                    int mark2record_size;
+                    POINT mark2_pt;
+                    POINT mark_pt;
+                    TRACE("Mark %x(%i) and Mark2 %x(%i)\n",glyphs[glyph_index], mark_index, glyphs[glyph_index - write_dir], mark2_index);
+                    offset = GET_BE_WORD(mmpf1->Mark1Array);
+                    ma = (const GPOS_MarkArray*)((const BYTE*)mmpf1 + offset);
+                    if (mark_index > GET_BE_WORD(ma->MarkCount))
+                    {
+                        ERR("Mark index exeeded mark count\n");
+                        return;
+                    }
+                    mr = &ma->MarkRecord[mark_index];
+                    mark_class = GET_BE_WORD(mr->Class);
+                    TRACE("Mark Class %i total classes %i\n",mark_class,class_count);
+                    offset = GET_BE_WORD(mmpf1->Mark2Array);
+                    m2a = (const GPOS_Mark2Array*)((const BYTE*)mmpf1 + offset);
+                    mark2record_size = class_count * sizeof(WORD);
+                    m2r = (const GPOS_Mark2Record*)((const BYTE*)m2a + sizeof(WORD) + (mark2record_size * mark2_index));
+                    offset = GET_BE_WORD(m2r->Mark2Anchor[mark_class]);
+                    GPOS_get_anchor_values((const BYTE*)m2a + offset, &mark2_pt, ppem);
+                    offset = GET_BE_WORD(mr->MarkAnchor);
+                    GPOS_get_anchor_values((const BYTE*)ma + offset, &mark_pt, ppem);
+                    TRACE("Offset on mark2 is %i,%i design units\n",mark2_pt.x,mark2_pt.y);
+                    TRACE("Offset on mark is %i,%i design units\n",mark_pt.x, mark_pt.y);
+                    pt->x += mark2_pt.x - mark_pt.x;
+                    pt->y += mark2_pt.y - mark_pt.y;
+                    TRACE("Resulting cumulative offset is %i,%i design units\n",pt->x,pt->y);
+                }
+            }
+        }
+        else
+            FIXME("Unhandled Mark To Mark Format %i\n",GET_BE_WORD(mmpf1->PosFormat));
     }
 }
 
@@ -1400,13 +1488,13 @@ static INT GPOS_apply_lookup(LPOUTLINETEXTMETRICW lpotm, LPLOGFONTW lplogfont, I
             if (adjust.x || adjust.y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, adjust.x, adjust.y, &devX, &devY);
-                pGoffset[glyph_index].du += (int)(devX+0.5);
-                pGoffset[glyph_index].dv += (int)(devY+0.5);
+                pGoffset[glyph_index].du += round(devX);
+                pGoffset[glyph_index].dv += round(devY);
             }
             if (advance.x || advance.y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, advance.x, advance.y, &devX, &devY);
-                piAdvance[glyph_index] += (int)(devX+0.5);
+                piAdvance[glyph_index] += round(devX);
                 if (advance.y)
                     FIXME("Unhandled adjustment to Y advancement\n");
             }
@@ -1421,24 +1509,24 @@ static INT GPOS_apply_lookup(LPOUTLINETEXTMETRICW lpotm, LPLOGFONTW lplogfont, I
             if (adjust[0].x || adjust[0].y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, adjust[0].x, adjust[0].y, &devX, &devY);
-                pGoffset[glyph_index].du += (int)(devX+0.5);
-                pGoffset[glyph_index].dv += (int)(devY+0.5);
+                pGoffset[glyph_index].du += round(devX);
+                pGoffset[glyph_index].dv += round(devY);
             }
             if (advance[0].x || advance[0].y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, advance[0].x, advance[0].y, &devX, &devY);
-                piAdvance[glyph_index] += (int)(devX+0.5);
+                piAdvance[glyph_index] += round(devX);
             }
             if (adjust[1].x || adjust[1].y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, adjust[1].x, adjust[1].y, &devX, &devY);
-                pGoffset[glyph_index + write_dir].du += (int)(devX+0.5);
-                pGoffset[glyph_index + write_dir].dv += (int)(devY+0.5);
+                pGoffset[glyph_index + write_dir].du += round(devX);
+                pGoffset[glyph_index + write_dir].dv += round(devY);
             }
             if (advance[1].x || advance[1].y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, advance[1].x, advance[1].y, &devX, &devY);
-                piAdvance[glyph_index + write_dir] += (int)(devX+0.5);
+                piAdvance[glyph_index + write_dir] += round(devX);
             }
             return index;
         }
@@ -1450,8 +1538,21 @@ static INT GPOS_apply_lookup(LPOUTLINETEXTMETRICW lpotm, LPLOGFONTW lplogfont, I
             if (desU.x || desU.y)
             {
                 GPOS_convert_design_units_to_device(lpotm, lplogfont, desU.x, desU.y, &devX, &devY);
-                pGoffset[glyph_index].du += ((int)(devX+0.5) - piAdvance[glyph_index-1]);
-                pGoffset[glyph_index].dv += (int)(devY+0.5);
+                pGoffset[glyph_index].du += (round(devX) - piAdvance[glyph_index-1]);
+                pGoffset[glyph_index].dv += round(devY);
+            }
+            break;
+        }
+        case 6:
+        {
+            double devX, devY;
+            POINT desU = {0,0};
+            GPOS_apply_MarkToMark(look, glyphs, glyph_index, write_dir, glyph_count, ppem, &desU);
+            if (desU.x || desU.y)
+            {
+                GPOS_convert_design_units_to_device(lpotm, lplogfont, desU.x, desU.y, &devX, &devY);
+                pGoffset[glyph_index].du += round(devX) + pGoffset[glyph_index-1].du;
+                pGoffset[glyph_index].dv += round(devY) + pGoffset[glyph_index-1].dv;
             }
             break;
         }
