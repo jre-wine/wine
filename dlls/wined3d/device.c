@@ -897,26 +897,18 @@ UINT CDECL wined3d_device_get_swapchain_count(const struct wined3d_device *devic
     return device->swapchain_count;
 }
 
-HRESULT CDECL wined3d_device_get_swapchain(const struct wined3d_device *device,
-        UINT swapchain_idx, struct wined3d_swapchain **swapchain)
+struct wined3d_swapchain * CDECL wined3d_device_get_swapchain(const struct wined3d_device *device, UINT swapchain_idx)
 {
-    TRACE("device %p, swapchain_idx %u, swapchain %p.\n",
-            device, swapchain_idx, swapchain);
+    TRACE("device %p, swapchain_idx %u.\n", device, swapchain_idx);
 
     if (swapchain_idx >= device->swapchain_count)
     {
         WARN("swapchain_idx %u >= swapchain_count %u.\n",
                 swapchain_idx, device->swapchain_count);
-        *swapchain = NULL;
-
-        return WINED3DERR_INVALIDCALL;
+        return NULL;
     }
 
-    *swapchain = device->swapchains[swapchain_idx];
-    wined3d_swapchain_incref(*swapchain);
-    TRACE("Returning %p.\n", *swapchain);
-
-    return WINED3D_OK;
+    return device->swapchains[swapchain_idx];
 }
 
 static void device_load_logo(struct wined3d_device *device, const char *filename)
@@ -1567,18 +1559,6 @@ void CDECL wined3d_device_set_multithreaded(struct wined3d_device *device)
     device->create_parms.flags |= WINED3DCREATE_MULTITHREADED;
 }
 
-HRESULT CDECL wined3d_device_get_wined3d(const struct wined3d_device *device, struct wined3d **wined3d)
-{
-    TRACE("device %p, wined3d %p.\n", device, wined3d);
-
-    *wined3d = device->wined3d;
-    wined3d_incref(*wined3d);
-
-    TRACE("Returning %p.\n", *wined3d);
-
-    return WINED3D_OK;
-}
-
 UINT CDECL wined3d_device_get_available_texture_mem(const struct wined3d_device *device)
 {
     TRACE("device %p.\n", device);
@@ -1736,7 +1716,7 @@ HRESULT CDECL wined3d_device_get_stream_source_freq(const struct wined3d_device 
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
+void CDECL wined3d_device_set_transform(struct wined3d_device *device,
         enum wined3d_transform_state d3dts, const struct wined3d_matrix *matrix)
 {
     TRACE("device %p, state %s, matrix %p.\n",
@@ -1752,7 +1732,7 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
         TRACE("Recording... not performing anything.\n");
         device->updateStateBlock->changed.transform[d3dts >> 5] |= 1 << (d3dts & 0x1f);
         device->updateStateBlock->state.transforms[d3dts] = *matrix;
-        return WINED3D_OK;
+        return;
     }
 
     /* If the new matrix is the same as the current one,
@@ -1764,7 +1744,7 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
     if (!memcmp(&device->stateBlock->state.transforms[d3dts].u.m[0][0], matrix, sizeof(*matrix)))
     {
         TRACE("The application is setting the same matrix over again.\n");
-        return WINED3D_OK;
+        return;
     }
 
     device->stateBlock->state.transforms[d3dts] = *matrix;
@@ -1773,25 +1753,20 @@ HRESULT CDECL wined3d_device_set_transform(struct wined3d_device *device,
 
     if (d3dts < WINED3D_TS_WORLD_MATRIX(device->adapter->gl_info.limits.blends))
         device_invalidate_state(device, STATE_TRANSFORM(d3dts));
-
-    return WINED3D_OK;
-
 }
 
-HRESULT CDECL wined3d_device_get_transform(const struct wined3d_device *device,
+void CDECL wined3d_device_get_transform(const struct wined3d_device *device,
         enum wined3d_transform_state state, struct wined3d_matrix *matrix)
 {
     TRACE("device %p, state %s, matrix %p.\n", device, debug_d3dtstype(state), matrix);
 
     *matrix = device->stateBlock->state.transforms[state];
-
-    return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_multiply_transform(struct wined3d_device *device,
+void CDECL wined3d_device_multiply_transform(struct wined3d_device *device,
         enum wined3d_transform_state state, const struct wined3d_matrix *matrix)
 {
-    const struct wined3d_matrix *mat = NULL;
+    const struct wined3d_matrix *mat;
     struct wined3d_matrix temp;
 
     TRACE("device %p, state %s, matrix %p.\n", device, debug_d3dtstype(state), matrix);
@@ -1803,14 +1778,14 @@ HRESULT CDECL wined3d_device_multiply_transform(struct wined3d_device *device,
     if (state > HIGHEST_TRANSFORMSTATE)
     {
         WARN("Unhandled transform state %#x.\n", state);
-        return WINED3D_OK;
+        return;
     }
 
     mat = &device->updateStateBlock->state.transforms[state];
     multiply_matrix(&temp, mat, matrix);
 
     /* Apply change via set transform - will reapply to eg. lights this way. */
-    return wined3d_device_set_transform(device, state, &temp);
+    wined3d_device_set_transform(device, state, &temp);
 }
 
 /* Note lights are real special cases. Although the device caps state only
@@ -2235,7 +2210,7 @@ HRESULT CDECL wined3d_device_get_material(const struct wined3d_device *device, s
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
+void CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
         struct wined3d_buffer *buffer, enum wined3d_format_id format_id)
 {
     struct wined3d_buffer *prev_buffer;
@@ -2257,7 +2232,7 @@ HRESULT CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
             wined3d_buffer_incref(buffer);
         if (prev_buffer)
             wined3d_buffer_decref(prev_buffer);
-        return WINED3D_OK;
+        return;
     }
 
     if (prev_buffer != buffer)
@@ -2274,43 +2249,20 @@ HRESULT CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
             wined3d_buffer_decref(prev_buffer);
         }
     }
-
-    return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_get_index_buffer(const struct wined3d_device *device, struct wined3d_buffer **buffer)
+struct wined3d_buffer * CDECL wined3d_device_get_index_buffer(const struct wined3d_device *device)
 {
-    TRACE("device %p, buffer %p.\n", device, buffer);
+    TRACE("device %p.\n", device);
 
-    *buffer = device->stateBlock->state.index_buffer;
-
-    if (*buffer)
-        wined3d_buffer_incref(*buffer);
-
-    TRACE("Returning %p.\n", *buffer);
-
-    return WINED3D_OK;
+    return device->stateBlock->state.index_buffer;
 }
 
-/* Method to offer d3d9 a simple way to set the base vertex index without messing with the index buffer */
-HRESULT CDECL wined3d_device_set_base_vertex_index(struct wined3d_device *device, INT base_index)
+void CDECL wined3d_device_set_base_vertex_index(struct wined3d_device *device, INT base_index)
 {
     TRACE("device %p, base_index %d.\n", device, base_index);
 
-    if (device->updateStateBlock->state.base_vertex_index == base_index)
-    {
-        TRACE("Application is setting the old value over, nothing to do\n");
-        return WINED3D_OK;
-    }
-
     device->updateStateBlock->state.base_vertex_index = base_index;
-
-    if (device->isRecordingState)
-    {
-        TRACE("Recording... not performing anything\n");
-        return WINED3D_OK;
-    }
-    return WINED3D_OK;
 }
 
 INT CDECL wined3d_device_get_base_vertex_index(const struct wined3d_device *device)
@@ -2320,7 +2272,7 @@ INT CDECL wined3d_device_get_base_vertex_index(const struct wined3d_device *devi
     return device->stateBlock->state.base_vertex_index;
 }
 
-HRESULT CDECL wined3d_device_set_viewport(struct wined3d_device *device, const struct wined3d_viewport *viewport)
+void CDECL wined3d_device_set_viewport(struct wined3d_device *device, const struct wined3d_viewport *viewport)
 {
     TRACE("device %p, viewport %p.\n", device, viewport);
     TRACE("x %u, y %u, w %u, h %u, min_z %.8e, max_z %.8e.\n",
@@ -2333,24 +2285,20 @@ HRESULT CDECL wined3d_device_set_viewport(struct wined3d_device *device, const s
     if (device->isRecordingState)
     {
         TRACE("Recording... not performing anything\n");
-        return WINED3D_OK;
+        return;
     }
 
     device_invalidate_state(device, STATE_VIEWPORT);
-
-    return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_get_viewport(const struct wined3d_device *device, struct wined3d_viewport *viewport)
+void CDECL wined3d_device_get_viewport(const struct wined3d_device *device, struct wined3d_viewport *viewport)
 {
     TRACE("device %p, viewport %p.\n", device, viewport);
 
     *viewport = device->stateBlock->state.viewport;
-
-    return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_set_render_state(struct wined3d_device *device,
+void CDECL wined3d_device_set_render_state(struct wined3d_device *device,
         enum wined3d_render_state state, DWORD value)
 {
     DWORD old_value = device->stateBlock->state.render_states[state];
@@ -2364,7 +2312,7 @@ HRESULT CDECL wined3d_device_set_render_state(struct wined3d_device *device,
     if (device->isRecordingState)
     {
         TRACE("Recording... not performing anything.\n");
-        return WINED3D_OK;
+        return;
     }
 
     /* Compared here and not before the assignment to allow proper stateblock recording. */
@@ -2372,18 +2320,13 @@ HRESULT CDECL wined3d_device_set_render_state(struct wined3d_device *device,
         TRACE("Application is setting the old value over, nothing to do.\n");
     else
         device_invalidate_state(device, STATE_RENDER(state));
-
-    return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_get_render_state(const struct wined3d_device *device,
-        enum wined3d_render_state state, DWORD *value)
+DWORD CDECL wined3d_device_get_render_state(const struct wined3d_device *device, enum wined3d_render_state state)
 {
-    TRACE("device %p, state %s (%#x), value %p.\n", device, debug_d3drenderstate(state), state, value);
+    TRACE("device %p, state %s (%#x).\n", device, debug_d3drenderstate(state), state);
 
-    *value = device->stateBlock->state.render_states[state];
-
-    return WINED3D_OK;
+    return device->stateBlock->state.render_states[state];
 }
 
 HRESULT CDECL wined3d_device_set_sampler_state(struct wined3d_device *device,
@@ -3689,27 +3632,14 @@ HRESULT CDECL wined3d_device_get_back_buffer(const struct wined3d_device *device
         UINT backbuffer_idx, enum wined3d_backbuffer_type backbuffer_type, struct wined3d_surface **backbuffer)
 {
     struct wined3d_swapchain *swapchain;
-    HRESULT hr;
 
     TRACE("device %p, swapchain_idx %u, backbuffer_idx %u, backbuffer_type %#x, backbuffer %p.\n",
             device, swapchain_idx, backbuffer_idx, backbuffer_type, backbuffer);
 
-    hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain);
-    if (FAILED(hr))
-    {
-        WARN("Failed to get swapchain %u, hr %#x.\n", swapchain_idx, hr);
-        return hr;
-    }
+    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
+        return WINED3DERR_INVALIDCALL;
 
-    hr = wined3d_swapchain_get_back_buffer(swapchain, backbuffer_idx, backbuffer_type, backbuffer);
-    wined3d_swapchain_decref(swapchain);
-    if (FAILED(hr))
-    {
-        WARN("Failed to get backbuffer %u, hr %#x.\n", backbuffer_idx, hr);
-        return hr;
-    }
-
-    return WINED3D_OK;
+    return wined3d_swapchain_get_back_buffer(swapchain, backbuffer_idx, backbuffer_type, backbuffer);
 }
 
 HRESULT CDECL wined3d_device_get_device_caps(const struct wined3d_device *device, WINED3DCAPS *caps)
@@ -3724,18 +3654,14 @@ HRESULT CDECL wined3d_device_get_display_mode(const struct wined3d_device *devic
         struct wined3d_display_mode *mode, enum wined3d_display_rotation *rotation)
 {
     struct wined3d_swapchain *swapchain;
-    HRESULT hr;
 
     TRACE("device %p, swapchain_idx %u, mode %p, rotation %p.\n",
             device, swapchain_idx, mode, rotation);
 
-    if (SUCCEEDED(hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain)))
-    {
-        hr = wined3d_swapchain_get_display_mode(swapchain, mode, rotation);
-        wined3d_swapchain_decref(swapchain);
-    }
+    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
+        return WINED3DERR_INVALIDCALL;
 
-    return hr;
+    return wined3d_swapchain_get_display_mode(swapchain, mode, rotation);
 }
 
 HRESULT CDECL wined3d_device_begin_stateblock(struct wined3d_device *device)
@@ -4263,17 +4189,13 @@ HRESULT CDECL wined3d_device_get_front_buffer_data(const struct wined3d_device *
         UINT swapchain_idx, struct wined3d_surface *dst_surface)
 {
     struct wined3d_swapchain *swapchain;
-    HRESULT hr;
 
     TRACE("device %p, swapchain_idx %u, dst_surface %p.\n", device, swapchain_idx, dst_surface);
 
-    hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain);
-    if (FAILED(hr)) return hr;
+    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
+        return WINED3DERR_INVALIDCALL;
 
-    hr = wined3d_swapchain_get_front_buffer_data(swapchain, dst_surface);
-    wined3d_swapchain_decref(swapchain);
-
-    return hr;
+    return wined3d_swapchain_get_front_buffer_data(swapchain, dst_surface);
 }
 
 HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device, DWORD *num_passes)
@@ -4375,27 +4297,14 @@ HRESULT CDECL wined3d_device_get_raster_status(const struct wined3d_device *devi
         UINT swapchain_idx, struct wined3d_raster_status *raster_status)
 {
     struct wined3d_swapchain *swapchain;
-    HRESULT hr;
 
     TRACE("device %p, swapchain_idx %u, raster_status %p.\n",
             device, swapchain_idx, raster_status);
 
-    hr = wined3d_device_get_swapchain(device, swapchain_idx, &swapchain);
-    if (FAILED(hr))
-    {
-        WARN("Failed to get swapchain %u, hr %#x.\n", swapchain_idx, hr);
-        return hr;
-    }
+    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
+        return WINED3DERR_INVALIDCALL;
 
-    hr = wined3d_swapchain_get_raster_status(swapchain, raster_status);
-    wined3d_swapchain_decref(swapchain);
-    if (FAILED(hr))
-    {
-        WARN("Failed to get raster status, hr %#x.\n", hr);
-        return hr;
-    }
-
-    return WINED3D_OK;
+    return wined3d_swapchain_get_raster_status(swapchain, raster_status);
 }
 
 HRESULT CDECL wined3d_device_set_npatch_mode(struct wined3d_device *device, float segments)
@@ -5154,10 +5063,10 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
 
     TRACE("device %p, swapchain_desc %p, mode %p, callback %p.\n", device, swapchain_desc, mode, callback);
 
-    if (FAILED(hr = wined3d_device_get_swapchain(device, 0, &swapchain)))
+    if (!(swapchain = wined3d_device_get_swapchain(device, 0)))
     {
         ERR("Failed to get the first implicit swapchain.\n");
-        return hr;
+        return WINED3DERR_INVALIDCALL;
     }
 
     stateblock_unbind_resources(device->stateBlock);
@@ -5184,10 +5093,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     {
         TRACE("Enumerating resource %p.\n", resource);
         if (FAILED(hr = callback(resource)))
-        {
-            wined3d_swapchain_decref(swapchain);
             return hr;
-        }
     }
 
     /* Is it necessary to recreate the gl context? Actually every setting can be changed
@@ -5249,7 +5155,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
                 &device->auto_depth_stencil)))
         {
             ERR("Failed to create the depth stencil buffer, hr %#x.\n", hr);
-            wined3d_swapchain_decref(swapchain);
             return WINED3DERR_INVALIDCALL;
         }
     }
@@ -5312,36 +5217,24 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     {
         UINT i;
 
-        hr = wined3d_surface_update_desc(swapchain->front_buffer, swapchain->desc.backbuffer_width,
+        if (FAILED(hr = wined3d_surface_update_desc(swapchain->front_buffer, swapchain->desc.backbuffer_width,
                 swapchain->desc.backbuffer_height, swapchain->desc.backbuffer_format,
-                swapchain->desc.multisample_type, swapchain->desc.multisample_quality);
-        if (FAILED(hr))
-        {
-            wined3d_swapchain_decref(swapchain);
+                swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
             return hr;
-        }
 
         for (i = 0; i < swapchain->desc.backbuffer_count; ++i)
         {
-            hr = wined3d_surface_update_desc(swapchain->back_buffers[i], swapchain->desc.backbuffer_width,
+            if (FAILED(hr = wined3d_surface_update_desc(swapchain->back_buffers[i], swapchain->desc.backbuffer_width,
                     swapchain->desc.backbuffer_height, swapchain->desc.backbuffer_format,
-                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality);
-            if (FAILED(hr))
-            {
-                wined3d_swapchain_decref(swapchain);
+                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
                 return hr;
-            }
         }
         if (device->auto_depth_stencil)
         {
-            hr = wined3d_surface_update_desc(device->auto_depth_stencil, swapchain->desc.backbuffer_width,
+            if (FAILED(hr = wined3d_surface_update_desc(device->auto_depth_stencil, swapchain->desc.backbuffer_width,
                     swapchain->desc.backbuffer_height, device->auto_depth_stencil->resource.format->id,
-                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality);
-            if (FAILED(hr))
-            {
-                wined3d_swapchain_decref(swapchain);
+                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
                 return hr;
-            }
         }
     }
 
@@ -5351,7 +5244,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         if (FAILED(hr = wined3d_set_adapter_display_mode(device->wined3d, device->adapter->ordinal, &m)))
         {
             WARN("Failed to set display mode, hr %#x.\n", hr);
-            wined3d_swapchain_decref(swapchain);
             return WINED3DERR_INVALIDCALL;
         }
 
@@ -5365,7 +5257,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
                 if (FAILED(hr = wined3d_device_acquire_focus_window(device, focus_window)))
                 {
                     ERR("Failed to acquire focus window, hr %#x.\n", hr);
-                    wined3d_swapchain_decref(swapchain);
                     return hr;
                 }
 
@@ -5431,7 +5322,6 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
 
     if (device->d3d_initialized)
         hr = create_primary_opengl_context(device, swapchain);
-    wined3d_swapchain_decref(swapchain);
 
     /* All done. There is no need to reload resources or shaders, this will happen automatically on the
      * first use
@@ -5466,11 +5356,8 @@ void CDECL wined3d_device_set_gamma_ramp(const struct wined3d_device *device,
     TRACE("device %p, swapchain_idx %u, flags %#x, ramp %p.\n",
             device, swapchain_idx, flags, ramp);
 
-    if (SUCCEEDED(wined3d_device_get_swapchain(device, swapchain_idx, &swapchain)))
-    {
+    if ((swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
         wined3d_swapchain_set_gamma_ramp(swapchain, flags, ramp);
-        wined3d_swapchain_decref(swapchain);
-    }
 }
 
 void CDECL wined3d_device_get_gamma_ramp(const struct wined3d_device *device,
@@ -5481,11 +5368,8 @@ void CDECL wined3d_device_get_gamma_ramp(const struct wined3d_device *device,
     TRACE("device %p, swapchain_idx %u, ramp %p.\n",
             device, swapchain_idx, ramp);
 
-    if (SUCCEEDED(wined3d_device_get_swapchain(device, swapchain_idx, &swapchain)))
-    {
+    if ((swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
         wined3d_swapchain_get_gamma_ramp(swapchain, ramp);
-        wined3d_swapchain_decref(swapchain);
-    }
 }
 
 void device_resource_add(struct wined3d_device *device, struct wined3d_resource *resource)

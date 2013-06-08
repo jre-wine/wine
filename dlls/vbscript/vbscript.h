@@ -100,6 +100,7 @@ typedef struct _class_desc_t {
     unsigned builtin_prop_cnt;
     const builtin_prop_t *builtin_props;
     ITypeInfo *typeinfo;
+    function_t *value_func;
 
     struct _class_desc_t *next;
 } class_desc_t;
@@ -115,12 +116,27 @@ struct _vbdisp_t {
     VARIANT props[1];
 };
 
+typedef struct _ident_map_t ident_map_t;
+
+typedef struct {
+    IDispatchEx IDispatchEx_iface;
+    LONG ref;
+
+    ident_map_t *ident_map;
+    unsigned ident_map_cnt;
+    unsigned ident_map_size;
+
+    script_ctx_t *ctx;
+} ScriptDisp;
+
 HRESULT create_vbdisp(const class_desc_t*,vbdisp_t**) DECLSPEC_HIDDEN;
 HRESULT disp_get_id(IDispatch*,BSTR,vbdisp_invoke_type_t,BOOL,DISPID*) DECLSPEC_HIDDEN;
 HRESULT vbdisp_get_id(vbdisp_t*,BSTR,vbdisp_invoke_type_t,BOOL,DISPID*) DECLSPEC_HIDDEN;
 HRESULT disp_call(script_ctx_t*,IDispatch*,DISPID,DISPPARAMS*,VARIANT*) DECLSPEC_HIDDEN;
 HRESULT disp_propput(script_ctx_t*,IDispatch*,DISPID,DISPPARAMS*) DECLSPEC_HIDDEN;
 void collect_objects(script_ctx_t*) DECLSPEC_HIDDEN;
+HRESULT create_procedure_disp(script_ctx_t*,vbscode_t*,IDispatch**) DECLSPEC_HIDDEN;
+HRESULT create_script_disp(script_ctx_t*,ScriptDisp**) DECLSPEC_HIDDEN;
 
 static inline unsigned arg_cnt(const DISPPARAMS *dp)
 {
@@ -148,8 +164,7 @@ struct _script_ctx_t {
 
     IDispatch *host_global;
 
-    class_desc_t script_desc;
-    vbdisp_t *script_obj;
+    ScriptDisp *script_obj;
 
     class_desc_t global_desc;
     vbdisp_t *global_obj;
@@ -160,6 +175,7 @@ struct _script_ctx_t {
     dynamic_var_t *global_vars;
     function_t *global_funcs;
     class_desc_t *classes;
+    class_desc_t *procs;
 
     vbsheap_t heap;
 
@@ -298,8 +314,8 @@ struct _vbscode_t {
 
     BOOL option_explicit;
 
-    BOOL global_executed;
-    function_t global_code;
+    BOOL pending_exec;
+    function_t main_code;
 
     BSTR *bstr_pool;
     unsigned bstr_pool_size;

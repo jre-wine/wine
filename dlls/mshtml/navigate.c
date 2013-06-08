@@ -19,6 +19,7 @@
 #include "config.h"
 
 #include <stdarg.h>
+#include <assert.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -753,6 +754,33 @@ static HRESULT process_response_headers(nsChannelBSC *This, const WCHAR *headers
     return S_OK;
 }
 
+static void query_http_info(nsChannelBSC *This, IWinInetHttpInfo *wininet_info)
+{
+    const WCHAR *ptr;
+    DWORD len = 0;
+    WCHAR *buf;
+
+    IWinInetHttpInfo_QueryInfo(wininet_info, HTTP_QUERY_RAW_HEADERS_CRLF, NULL, &len, NULL, NULL);
+    if(!len)
+        return;
+
+    buf = heap_alloc(len);
+    if(!buf)
+        return;
+
+    IWinInetHttpInfo_QueryInfo(wininet_info, HTTP_QUERY_RAW_HEADERS_CRLF, buf, &len, NULL, NULL);
+    if(!len)
+        return;
+
+    ptr = strchrW(buf, '\r');
+    if(ptr && ptr[1] == '\n') {
+        ptr += 2;
+        process_response_headers(This, ptr);
+    }
+
+    heap_free(buf);
+}
+
 HRESULT start_binding(HTMLInnerWindow *inner_window, BSCallback *bscallback, IBindCtx *bctx)
 {
     IStream *str = NULL;
@@ -1110,6 +1138,19 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
     nsresult nsres;
     HRESULT hres;
 
+    if(!This->response_processed) {
+        IWinInetHttpInfo *wininet_info;
+
+        This->response_processed = TRUE;
+        if(This->bsc.binding) {
+            hres = IBinding_QueryInterface(This->bsc.binding, &IID_IWinInetHttpInfo, (void**)&wininet_info);
+            if(SUCCEEDED(hres)) {
+                query_http_info(This, wininet_info);
+                IWinInetHttpInfo_Release(wininet_info);
+            }
+        }
+    }
+
     if(!This->nslistener) {
         BYTE buf[1024];
 
@@ -1269,10 +1310,12 @@ static nsresult NSAPI nsAsyncVerifyRedirectCallback_AsyncOnChannelRedirect(nsIAs
     }
 
     if(old_nschannel) {
-        nsres = nsILoadGroup_RemoveRequest(old_nschannel->load_group,
-                (nsIRequest*)&old_nschannel->nsIHttpChannel_iface, NULL, NS_OK);
-        if(NS_FAILED(nsres))
-            ERR("RemoveRequest failed: %08x\n", nsres);
+        if(old_nschannel->load_group) {
+            nsres = nsILoadGroup_RemoveRequest(old_nschannel->load_group,
+                    (nsIRequest*)&old_nschannel->nsIHttpChannel_iface, NULL, NS_OK);
+            if(NS_FAILED(nsres))
+                ERR("RemoveRequest failed: %08x\n", nsres);
+        }
         nsIHttpChannel_Release(&old_nschannel->nsIHttpChannel_iface);
     }
 
@@ -1600,6 +1643,7 @@ static HRESULT nsChannelBSC_on_response(BSCallback *bsc, DWORD response_code,
     nsChannelBSC *This = nsChannelBSC_from_BSCallback(bsc);
     HRESULT hres;
 
+    This->response_processed = TRUE;
     This->nschannel->response_status = response_code;
 
     if(response_headers) {
@@ -1925,9 +1969,12 @@ static HRESULT navigate_fragment(HTMLOuterWindow *window, IUri *uri)
 {
     nsIDOMLocation *nslocation;
     nsAString nsfrag_str;
+    WCHAR *selector;
     BSTR frag;
     nsresult nsres;
     HRESULT hres;
+
+    const WCHAR selector_formatW[] = {'a','[','i','d','=','"','%','s','"',']',0};
 
     set_current_uri(window, uri);
 
@@ -1945,11 +1992,44 @@ static HRESULT navigate_fragment(HTMLOuterWindow *window, IUri *uri)
     nsres = nsIDOMLocation_SetHash(nslocation, &nsfrag_str);
     nsAString_Finish(&nsfrag_str);
     nsIDOMLocation_Release(nslocation);
-    SysFreeString(frag);
-    if(NS_FAILED(nsres)) {
+    if(NS_FAILED(nsres))
         ERR("SetHash failed: %08x\n", nsres);
-        return E_FAIL;
+
+    /*
+     * IE supports scrolling to anchor elements with "#hash" ids (note that '#' is part of the id),
+     * while Gecko scrolls only to elements with "hash" ids. We scroll the page ourselves if
+     * a[id="#hash"] element can be found.
+     */
+    selector = heap_alloc(sizeof(selector_formatW)+SysStringLen(frag)*sizeof(WCHAR));
+    if(selector) {
+        nsIDOMNodeSelector *node_selector;
+        nsIDOMElement *nselem = NULL;
+        nsAString selector_str;
+
+        nsres = nsIDOMHTMLDocument_QueryInterface(window->base.inner_window->doc->nsdoc, &IID_nsIDOMNodeSelector,
+                (void**)&node_selector);
+        assert(nsres == NS_OK);
+
+        sprintfW(selector, selector_formatW, frag);
+        nsAString_InitDepend(&selector_str, selector);
+        /* NOTE: Gecko doesn't set result to NULL if there is no match, so nselem must be initialized */
+        nsres = nsIDOMNodeSelector_QuerySelector(node_selector, &selector_str, &nselem);
+        nsIDOMNodeSelector_Release(node_selector);
+        nsAString_Finish(&selector_str);
+        heap_free(selector);
+        if(NS_SUCCEEDED(nsres) && nselem) {
+            nsIDOMHTMLElement *html_elem;
+
+            nsres = nsIDOMElement_QueryInterface(nselem, &IID_nsIDOMHTMLElement, (void**)&html_elem);
+            nsIDOMElement_Release(nselem);
+            if(NS_SUCCEEDED(nsres)) {
+                nsIDOMHTMLElement_ScrollIntoView(html_elem, TRUE, 1);
+                nsIDOMHTMLElement_Release(html_elem);
+            }
+        }
     }
+
+    SysFreeString(frag);
 
     if(window->doc_obj->doc_object_service) {
         IDocObjectService_FireNavigateComplete2(window->doc_obj->doc_object_service, &window->base.IHTMLWindow2_iface, 0x10);

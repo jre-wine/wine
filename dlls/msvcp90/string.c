@@ -777,7 +777,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_assign_cstr_len, 12)
 basic_string_char* __thiscall MSVCP_basic_string_char_assign_cstr_len(
         basic_string_char *this, const char *str, MSVCP_size_t len)
 {
-    TRACE("%p %s %lu\n", this, debugstr_a(str), len);
+    TRACE("%p %s %lu\n", this, debugstr_an(str, len), len);
 
     if(basic_string_char_inside(this, str))
         return MSVCP_basic_string_char_assign_substr(this, this,
@@ -971,7 +971,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_ctor_cstr_len, 12)
 basic_string_char* __thiscall MSVCP_basic_string_char_ctor_cstr_len(
         basic_string_char *this, const char *str, MSVCP_size_t len)
 {
-    TRACE("%p %s %ld\n", this, debugstr_a(str), len);
+    TRACE("%p %s %ld\n", this, debugstr_an(str, len), len);
 
     basic_string_char_tidy(this, FALSE, 0);
     MSVCP_basic_string_char_assign_cstr_len(this, str, len);
@@ -1179,7 +1179,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_char_append_cstr_len, 12)
 basic_string_char* __thiscall MSVCP_basic_string_char_append_cstr_len(
         basic_string_char *this, const char *append, MSVCP_size_t count)
 {
-    TRACE("%p %s %lu\n", this, debugstr_a(append), count);
+    TRACE("%p %s %lu\n", this, debugstr_an(append, count), count);
 
     if(basic_string_char_inside(this, append))
         return MSVCP_basic_string_char_append_substr(this, this,
@@ -1326,12 +1326,12 @@ int __thiscall MSVCP_basic_string_char_compare_substr_cstr_len(
 {
     int ans;
 
-    TRACE("%p %lu %lu %s %lu\n", this, pos, num, debugstr_a(str), count);
+    TRACE("%p %lu %lu %s %lu\n", this, pos, num, debugstr_an(str, count), count);
 
     if(this->size < pos)
         MSVCP__String_base_Xran();
 
-    if(pos+num > this->size)
+    if(num > this->size-pos)
         num = this->size-pos;
 
     ans = MSVCP_char_traits_char_compare(basic_string_char_const_ptr(this)+pos,
@@ -1378,7 +1378,7 @@ int __thiscall MSVCP_basic_string_char_compare_substr_substr(
     if(compare->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+count > compare->size)
+    if(count > compare->size-off)
         count = compare->size-off;
 
     return MSVCP_basic_string_char_compare_substr_cstr_len(this, pos, num,
@@ -1558,7 +1558,7 @@ MSVCP_size_t __thiscall MSVCP_basic_string_char_find_cstr_substr(
 {
     const char *p, *end;
 
-    TRACE("%p %s %lu %lu\n", this, debugstr_a(find), pos, len);
+    TRACE("%p %s %lu %lu\n", this, debugstr_an(find, len), pos, len);
 
     if(len==0 && pos<=this->size)
         return pos;
@@ -1613,7 +1613,7 @@ MSVCP_size_t __thiscall MSVCP_basic_string_char_rfind_cstr_substr(
 {
     const char *p, *end;
 
-    TRACE("%p %s %lu %lu\n", this, debugstr_a(find), pos, len);
+    TRACE("%p %s %lu %lu\n", this, debugstr_an(find, len), pos, len);
 
     if(len==0)
         return pos<this->size ? pos : this->size;
@@ -2017,7 +2017,7 @@ basic_string_char* __thiscall basic_string_char_replace_substr(basic_string_char
     if(str->size < str_off)
         MSVCP__String_base_Xran();
 
-    if(str_off+str_len > str->size)
+    if(str_len > str->size-str_off)
         str_len = str->size-str_off;
 
     return basic_string_char_replace_cstr_len(this, off, len,
@@ -2611,7 +2611,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_assign_cstr_len, 12)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_assign_cstr_len(
             basic_string_wchar *this, const wchar_t *str, MSVCP_size_t len)
 {
-    TRACE("%p %s %lu\n", this, debugstr_w(str), len);
+    TRACE("%p %s %lu\n", this, debugstr_wn(str, len), len);
 
     if(basic_string_wchar_inside(this, str))
         return MSVCP_basic_string_wchar_assign_substr(this, this,
@@ -2841,7 +2841,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_ctor_cstr_len, 12)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_ctor_cstr_len(
         basic_string_wchar *this, const wchar_t *str, MSVCP_size_t len)
 {
-    TRACE("%p %s %ld\n", this, debugstr_w(str), len);
+    TRACE("%p %s %ld\n", this, debugstr_wn(str, len), len);
 
     basic_string_wchar_tidy(this, FALSE, 0);
     MSVCP_basic_string_wchar_assign_cstr_len(this, str, len);
@@ -3087,7 +3087,7 @@ DEFINE_THISCALL_WRAPPER(MSVCP_basic_string_wchar_append_cstr_len, 12)
 basic_string_wchar* __thiscall MSVCP_basic_string_wchar_append_cstr_len(
         basic_string_wchar *this, const wchar_t *append, MSVCP_size_t count)
 {
-    TRACE("%p %s %lu\n", this, debugstr_w(append), count);
+    TRACE("%p %s %lu\n", this, debugstr_wn(append, count), count);
 
     if(basic_string_wchar_inside(this, append))
         return MSVCP_basic_string_wchar_append_substr(this, this,
@@ -3260,12 +3260,12 @@ int __thiscall MSVCP_basic_string_wchar_compare_substr_cstr_len(
 {
     int ans;
 
-    TRACE("%p %lu %lu %s %lu\n", this, pos, num, debugstr_w(str), count);
+    TRACE("%p %lu %lu %s %lu\n", this, pos, num, debugstr_wn(str, count), count);
 
     if(this->size < pos)
         MSVCP__String_base_Xran();
 
-    if(pos+num > this->size)
+    if(num > this->size-pos)
         num = this->size-pos;
 
     ans = MSVCP_char_traits_wchar_compare(basic_string_wchar_const_ptr(this)+pos,
@@ -3318,7 +3318,7 @@ int __thiscall MSVCP_basic_string_wchar_compare_substr_substr(
     if(compare->size < off)
         MSVCP__String_base_Xran();
 
-    if(off+count > compare->size)
+    if(count > compare->size-off)
         count = compare->size-off;
 
     return MSVCP_basic_string_wchar_compare_substr_cstr_len(this, pos, num,
@@ -3540,7 +3540,7 @@ MSVCP_size_t __thiscall MSVCP_basic_string_wchar_find_cstr_substr(
 {
     const wchar_t *p, *end;
 
-    TRACE("%p %s %lu %lu\n", this, debugstr_w(find), pos, len);
+    TRACE("%p %s %lu %lu\n", this, debugstr_wn(find, len), pos, len);
 
     if(len==0 && pos<=this->size)
         return pos;
@@ -3603,7 +3603,7 @@ MSVCP_size_t __thiscall MSVCP_basic_string_wchar_rfind_cstr_substr(
 {
     const wchar_t *p, *end;
 
-    TRACE("%p %s %lu %lu\n", this, debugstr_w(find), pos, len);
+    TRACE("%p %s %lu %lu\n", this, debugstr_wn(find, len), pos, len);
 
     if(len==0)
         return pos<this->size ? pos : this->size;
@@ -3980,7 +3980,7 @@ basic_string_wchar* __thiscall basic_string_wchar_replace_substr(basic_string_wc
     if(str->size < str_off)
         MSVCP__String_base_Xran();
 
-    if(str_off+str_len > str->size)
+    if(str_len > str->size-str_off)
         str_len = str->size-str_off;
 
     return basic_string_wchar_replace_cstr_len(this, off, len,

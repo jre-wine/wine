@@ -86,6 +86,8 @@ static HRESULT navigate_anchor(HTMLAnchorElement *This)
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *target;
 
+        TRACE("target %s\n", debugstr_w(target));
+
         nsAString_GetData(&target_str, &target);
         if(*target && strcmpiW(target, _selfW)) {
             if(!strcmpiW(target, _topW)) {
@@ -96,9 +98,16 @@ static HRESULT navigate_anchor(HTMLAnchorElement *This)
                 nsAString_Finish(&target_str);
                 return S_OK;
             }else {
-                hres = navigate_anchor_window(This, target);
-                nsAString_Finish(&target_str);
-                return hres;
+                HTMLOuterWindow *top_window;
+
+                get_top_window(This->element.node.doc->basedoc.window, &top_window);
+
+                hres = get_frame_by_name(top_window, target, TRUE, &window);
+                if(FAILED(hres) || !window) {
+                    hres = navigate_anchor_window(This, target);
+                    nsAString_Finish(&target_str);
+                    return hres;
+                }
             }
         }
     }
@@ -664,17 +673,15 @@ static HRESULT HTMLAnchorElement_handle_event(HTMLDOMNode *iface, eventid_t eid,
         }
     }
 
-    return S_OK;
+    return HTMLElement_handle_event(&This->element.node, eid, event, prevent_default);
 }
 
 static const NodeImplVtbl HTMLAnchorElementImplVtbl = {
     HTMLAnchorElement_QI,
     HTMLElement_destructor,
     HTMLElement_clone,
-    HTMLElement_get_attr_col,
-    NULL,
-    NULL,
-    HTMLAnchorElement_handle_event
+    HTMLAnchorElement_handle_event,
+    HTMLElement_get_attr_col
 };
 
 static const tid_t HTMLAnchorElement_iface_tids[] = {

@@ -1146,7 +1146,7 @@ static BOOL get_name_table_entry(FT_Face ft_face, FT_SfntName *req)
             if(!pFT_Get_Sfnt_Name(ft_face, name_index, &name))
             {
                 if((name.platform_id == req->platform_id) &&
-                   (name.encoding_id == req->encoding_id) &&
+                   ((name.encoding_id == TT_MS_ID_UNICODE_CS) || (name.encoding_id == TT_MS_ID_SYMBOL_CS)) &&
                    (name.language_id == req->language_id) &&
                    (name.name_id     == req->name_id))
                 {
@@ -1168,7 +1168,6 @@ static WCHAR *get_face_name(FT_Face ft_face, FT_UShort name_id, FT_UShort langua
     FT_SfntName name;
 
     name.platform_id = TT_PLATFORM_MICROSOFT;
-    name.encoding_id = TT_MS_ID_UNICODE_CS;
     name.language_id = language_id;
     name.name_id     = name_id;
 
@@ -1552,7 +1551,7 @@ static void get_family_names( FT_Face ft_face, WCHAR **name, WCHAR **english, BO
     *english = get_face_name( ft_face, TT_NAME_ID_FONT_FAMILY, TT_MS_LANGID_ENGLISH_UNITED_STATES );
     if (!*english) *english = towstr( CP_ACP, ft_face->family_name );
 
-    *name = get_face_name( ft_face, TT_NAME_ID_FONT_FAMILY, GetUserDefaultLCID() );
+    *name = get_face_name( ft_face, TT_NAME_ID_FONT_FAMILY, GetSystemDefaultLCID() );
     if (!*name)
     {
         *name = *english;
@@ -1714,8 +1713,20 @@ static Face *create_face( FT_Face ft_face, FT_Long face_index, const char *file,
     Face *face = HeapAlloc( GetProcessHeap(), 0, sizeof(*face) );
     My_FT_Bitmap_Size *size = (My_FT_Bitmap_Size *)ft_face->available_sizes;
 
-    face->StyleName = towstr( CP_ACP, ft_face->style_name );
-    face->FullName = get_face_name( ft_face, TT_NAME_ID_FULL_NAME, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    face->StyleName = get_face_name( ft_face, TT_NAME_ID_FONT_SUBFAMILY, GetSystemDefaultLangID() );
+    if (!face->StyleName)
+        face->StyleName = get_face_name( ft_face, TT_NAME_ID_FONT_SUBFAMILY, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    if (!face->StyleName)
+    {
+        face->StyleName = towstr( CP_ACP, ft_face->style_name );
+    }
+
+    face->FullName = get_face_name( ft_face, TT_NAME_ID_FULL_NAME, GetSystemDefaultLangID() );
+    if (!face->FullName)
+        face->FullName = get_face_name( ft_face, TT_NAME_ID_FULL_NAME, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    if (vertical)
+        face->FullName = prepend_at( face->FullName );
+
     if (file)
     {
         face->file = strdupA( file );
@@ -2624,13 +2635,12 @@ static void update_reg_entries(void)
 {
     HKEY winnt_key = 0, win9x_key = 0, external_key = 0;
     LPWSTR valueW;
-    DWORD len, len_fam;
+    DWORD len;
     Family *family;
     Face *face;
     struct list *family_elem_ptr, *face_elem_ptr;
     WCHAR *file;
     static const WCHAR TrueType[] = {' ','(','T','r','u','e','T','y','p','e',')','\0'};
-    static const WCHAR spaceW[] = {' ', '\0'};
     char *path;
 
     if(RegCreateKeyExW(HKEY_LOCAL_MACHINE, winnt_font_reg_key,
@@ -2655,20 +2665,22 @@ static void update_reg_entries(void)
 
     LIST_FOR_EACH(family_elem_ptr, &font_list) {
         family = LIST_ENTRY(family_elem_ptr, Family, entry); 
-        len_fam = strlenW(family->FamilyName) + sizeof(TrueType) / sizeof(WCHAR) + 1;
         LIST_FOR_EACH(face_elem_ptr, &family->faces) {
             face = LIST_ENTRY(face_elem_ptr, Face, entry);
             if(!face->external) continue;
-            len = len_fam;
-            if (!(face->ntmFlags & NTM_REGULAR))
-                len = len_fam + strlenW(face->StyleName) + 1;
-            valueW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-            strcpyW(valueW, family->FamilyName);
-            if(len != len_fam) {
-                strcatW(valueW, spaceW);
-                strcatW(valueW, face->StyleName);
+
+            if(face->FullName)
+            {
+                len = strlenW(face->FullName) + sizeof(TrueType) / sizeof(WCHAR) + 1;
+                valueW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+                strcpyW(valueW, face->FullName);
             }
-            strcatW(valueW, TrueType);
+            else
+            {
+                len = strlenW(family->FamilyName) + sizeof(TrueType) / sizeof(WCHAR) + 1;
+                valueW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+                strcpyW(valueW, family->FamilyName);
+            }
 
             file = wine_get_dos_file_name(face->file);
             if(file)
@@ -5078,7 +5090,7 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
                  (WCHAR*)((char*)font->potm + (ULONG_PTR)font->potm->otmpFamilyName),
                  LF_FACESIZE);
         lstrcpynW(pelf->elfFullName,
-                 (WCHAR*)((char*)font->potm + (ULONG_PTR)font->potm->otmpFullName),
+                 (WCHAR*)((char*)font->potm + (ULONG_PTR)font->potm->otmpFaceName),
                  LF_FULLFACESIZE);
         lstrcpynW(pelf->elfStyle,
                  (WCHAR*)((char*)font->potm + (ULONG_PTR)font->potm->otmpStyleName),
@@ -5138,15 +5150,6 @@ static void GetEnumStructs(Face *face, LPENUMLOGFONTEXW pelf,
     free_font(font);
 }
 
-static void create_full_name(WCHAR *full_name, const WCHAR *family_name, const WCHAR *style_name)
-{
-    static const WCHAR spaceW[] = { ' ', 0 };
-
-    strcpyW(full_name, family_name);
-    strcatW(full_name, spaceW);
-    strcatW(full_name, style_name);
-}
-
 static BOOL family_matches(Family *family, const LOGFONTW *lf)
 {
     const struct list *face_list, *face_elem_ptr;
@@ -5156,18 +5159,9 @@ static BOOL family_matches(Family *family, const LOGFONTW *lf)
     face_list = get_face_list_from_family(family);
     LIST_FOR_EACH(face_elem_ptr, face_list)
     {
-        WCHAR full_family_name[LF_FULLFACESIZE];
         Face *face = LIST_ENTRY(face_elem_ptr, Face, entry);
 
-        if (strlenW(family->FamilyName) + strlenW(face->StyleName) + 2 > LF_FULLFACESIZE)
-        {
-            FIXME("Length of %s + %s + 2 is longer than LF_FULLFACESIZE\n",
-                  debugstr_w(family->FamilyName), debugstr_w(face->StyleName));
-            continue;
-        }
-
-        create_full_name(full_family_name, family->FamilyName, face->StyleName);
-        if (!strcmpiW(lf->lfFaceName, full_family_name)) return TRUE;
+        if (face->FullName && !strcmpiW(lf->lfFaceName, face->FullName)) return TRUE;
     }
 
     return FALSE;
@@ -5175,19 +5169,9 @@ static BOOL family_matches(Family *family, const LOGFONTW *lf)
 
 static BOOL face_matches(const WCHAR *family_name, Face *face, const LOGFONTW *lf)
 {
-    WCHAR full_family_name[LF_FULLFACESIZE];
-
     if (!strcmpiW(lf->lfFaceName, family_name)) return TRUE;
 
-    if (strlenW(family_name) + strlenW(face->StyleName) + 2 > LF_FULLFACESIZE)
-    {
-        FIXME("Length of %s + %s + 2 is longer than LF_FULLFACESIZE\n",
-              debugstr_w(family_name), debugstr_w(face->StyleName));
-        return FALSE;
-    }
-
-    create_full_name(full_family_name, family_name, face->StyleName);
-    return !strcmpiW(lf->lfFaceName, full_family_name);
+    return (face->FullName && !strcmpiW(lf->lfFaceName, face->FullName));
 }
 
 static BOOL enum_face_charsets(const Family *family, Face *face, struct enum_charset_list *list,
@@ -5216,7 +5200,10 @@ static BOOL enum_face_charsets(const Family *family, Face *face, struct enum_cha
         if (family != face->family)
         {
             strcpyW(elf.elfLogFont.lfFaceName, family->FamilyName);
-            create_full_name(elf.elfFullName, family->FamilyName, face->StyleName);
+            if (face->FullName)
+                strcpyW(elf.elfFullName, face->FullName);
+            else
+                strcpyW(elf.elfFullName, family->FamilyName);
         }
         TRACE("enuming face %s full %s style %s charset = %d type %d script %s it %d weight %d ntmflags %08x\n",
               debugstr_w(elf.elfLogFont.lfFaceName),
@@ -6552,13 +6539,12 @@ static BOOL get_outline_text_metrics(GdiFont *font)
 {
     BOOL ret = FALSE;
     FT_Face ft_face = font->ft_face;
-    UINT needed, lenfam, lensty;
+    UINT needed, lenfam, lensty, lenface, lenfull;
     TT_OS2 *pOS2;
     TT_HoriHeader *pHori;
     TT_Postscript *pPost;
     FT_Fixed x_scale, y_scale;
-    WCHAR *family_nameW, *style_nameW;
-    static const WCHAR spaceW[] = {' ', '\0'};
+    WCHAR *family_nameW, *style_nameW, *face_nameW, *full_nameW;
     char *cp;
     INT ascent, descent;
 
@@ -6572,11 +6558,40 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     lenfam = (strlenW(font->name) + 1) * sizeof(WCHAR);
     family_nameW = strdupW(font->name);
 
-    lensty = MultiByteToWideChar(CP_ACP, 0, ft_face->style_name, -1, NULL, 0)
-      * sizeof(WCHAR);
-    style_nameW = HeapAlloc(GetProcessHeap(), 0, lensty);
-    MultiByteToWideChar(CP_ACP, 0, ft_face->style_name, -1,
-			style_nameW, lensty/sizeof(WCHAR));
+    style_nameW = get_face_name( ft_face, TT_NAME_ID_FONT_SUBFAMILY, GetSystemDefaultLangID() );
+    if (!style_nameW)
+        style_nameW = get_face_name( ft_face, TT_NAME_ID_FONT_SUBFAMILY, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    if (!style_nameW)
+    {
+        FIXME("failed to read sytle_nameW for font %s!\n", wine_dbgstr_w(font->name));
+        lensty = MultiByteToWideChar(CP_ACP, 0, ft_face->style_name, -1, NULL, 0) * sizeof(WCHAR);
+        style_nameW = HeapAlloc(GetProcessHeap(), 0, lensty);
+        MultiByteToWideChar(CP_ACP, 0, ft_face->style_name, -1, style_nameW, lensty/sizeof(WCHAR));
+    }
+    else
+        lensty = (strlenW(style_nameW) + 1) * sizeof(WCHAR);
+
+    face_nameW = get_face_name( ft_face, TT_NAME_ID_FULL_NAME, GetSystemDefaultLangID() );
+    if (!face_nameW)
+        face_nameW = get_face_name( ft_face, TT_NAME_ID_FULL_NAME, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    if (!face_nameW)
+    {
+        FIXME("failed to read face_nameW for font %s!\n", wine_dbgstr_w(font->name));
+        face_nameW = strdupW(font->name);
+    }
+    if (font->name[0] == '@') face_nameW = prepend_at( face_nameW );
+    lenface = (strlenW(face_nameW) + 1) * sizeof(WCHAR);
+
+    full_nameW = get_face_name( ft_face, TT_NAME_ID_UNIQUE_ID, GetSystemDefaultLangID() );
+    if (!full_nameW)
+        full_nameW = get_face_name( ft_face, TT_NAME_ID_UNIQUE_ID, TT_MS_LANGID_ENGLISH_UNITED_STATES );
+    if (!full_nameW)
+    {
+        WCHAR fake_nameW[] = {'f','a','k','e',' ','n','a','m','e', 0};
+        FIXME("failed to read full_nameW for font %s!\n", wine_dbgstr_w(font->name));
+        full_nameW = strdupW(fake_nameW);
+    }
+    lenfull = (strlenW(full_nameW) + 1) * sizeof(WCHAR);
 
     /* These names should be read from the TT name table */
 
@@ -6584,17 +6599,13 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     needed += lenfam;
 
     /* length of otmpFaceName */
-    if ((ft_face->style_flags & (FT_STYLE_FLAG_ITALIC | FT_STYLE_FLAG_BOLD)) == 0) {
-      needed += lenfam; /* just the family name */
-    } else {
-      needed += lenfam + lensty; /* family + " " + style */
-    }
+    needed += lenface;
 
     /* length of otmpStyleName */
     needed += lensty;
 
     /* length of otmpFullName */
-    needed += lenfam + lensty;
+    needed += lenfull;
 
 
     x_scale = ft_face->size->metrics.x_scale;
@@ -6837,22 +6848,17 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     strcpyW((WCHAR*)cp, style_nameW);
     cp += lensty;
     font->potm->otmpFaceName = (LPSTR)(cp - (char*)font->potm);
-    strcpyW((WCHAR*)cp, family_nameW);
-    if (ft_face->style_flags & (FT_STYLE_FLAG_ITALIC | FT_STYLE_FLAG_BOLD)) {
-        strcatW((WCHAR*)cp, spaceW);
-	strcatW((WCHAR*)cp, style_nameW);
-	cp += lenfam + lensty;
-    } else
-        cp += lenfam;
+    strcpyW((WCHAR*)cp, face_nameW);
+	cp += lenface;
     font->potm->otmpFullName = (LPSTR)(cp - (char*)font->potm);
-    strcpyW((WCHAR*)cp, family_nameW);
-    strcatW((WCHAR*)cp, spaceW);
-    strcatW((WCHAR*)cp, style_nameW);
+    strcpyW((WCHAR*)cp, full_nameW);
     ret = TRUE;
 
 end:
     HeapFree(GetProcessHeap(), 0, style_nameW);
     HeapFree(GetProcessHeap(), 0, family_nameW);
+    HeapFree(GetProcessHeap(), 0, face_nameW);
+    HeapFree(GetProcessHeap(), 0, full_nameW);
     return ret;
 }
 
@@ -7864,7 +7870,6 @@ static const struct gdi_dc_funcs freetype_funcs =
     NULL,                               /* pStretchDIBits */
     NULL,                               /* pStrokeAndFillPath */
     NULL,                               /* pStrokePath */
-    NULL,                               /* pSwapBuffers */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     NULL,                               /* wine_get_wgl_driver */

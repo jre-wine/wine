@@ -1749,11 +1749,14 @@ then
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
   WINE_TRY_CFLAGS([-Wwrite-strings])
 
-  dnl Default to dwarf-2 debug info
+  dnl On Darwin, prefer stabs; everywhere else, default to dwarf-2 debug info
   for ac_flag in $CFLAGS; do
     case $ac_flag in
-      -g) WINE_TRY_CFLAGS([-gdwarf-2])
-          WINE_TRY_CFLAGS([-gstrict-dwarf]) ;;
+      -g) case $host_os in
+            darwin*) WINE_TRY_CFLAGS([-gstabs+]) ;;
+            *) WINE_TRY_CFLAGS([-gdwarf-2])
+               WINE_TRY_CFLAGS([-gstrict-dwarf]) ;;
+          esac ;;
     esac
   done
 
@@ -2308,7 +2311,16 @@ AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 
 dnl Check for struct icmpstat
 AC_CHECK_MEMBERS([struct icmpstat.icps_inhist],,,
-[#ifdef HAVE_NETINET_ICMP_VAR
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IP_ICMP_H
+#include <netinet/ip_icmp.h>
+#endif
+#ifdef HAVE_NETINET_ICMP_VAR_H
 #include <netinet/icmp_var.h>
 #endif])
 
@@ -2344,13 +2356,22 @@ AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
 #ifdef HAVE_NETINET_IP_ICMP_H
 #include <netinet/ip_icmp.h>
 #endif
-#ifdef HAVE_NETINET_ICMP_VAR
+#ifdef HAVE_NETINET_ICMP_VAR_H
 #include <netinet/icmp_var.h>
 #endif])
 
 dnl Check for struct ipstat
 AC_CHECK_MEMBERS([struct ipstat.ips_total],,,
-[#ifdef HAVE_NETINET_IP_VAR_H
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IP_VAR_H
 #include <netinet/ip_var.h>
 #endif])
 
@@ -2362,7 +2383,19 @@ AC_CHECK_MEMBERS([struct ip_stats.ips_total],,,
 
 dnl Check for struct tcpstat
 AC_CHECK_MEMBERS([struct tcpstat.tcps_connattempt],,,
-[#ifdef HAVE_NETINET_TCP_VAR_H
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_TCP_H
+#include <netinet/tcp.h>
+#endif
+#ifdef HAVE_NETINET_TCP_VAR_H
 #include <netinet/tcp_var.h>
 #endif])
 
@@ -2374,7 +2407,19 @@ AC_CHECK_MEMBERS([struct tcp_stats.tcps_connattempt],,,
 
 dnl Check for struct udpstat
 AC_CHECK_MEMBERS([struct udpstat.udps_ipackets],,,
-[#ifdef HAVE_NETINET_UDP_VAR_H
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
+#endif
+#ifdef HAVE_NETINET_UDP_H
+#include <netinet/udp.h>
+#endif
+#ifdef HAVE_NETINET_UDP_VAR_H
 #include <netinet/udp_var.h>
 #endif])
 
@@ -2762,6 +2807,7 @@ WINE_CONFIG_DLL(msimsg)
 WINE_CONFIG_DLL(msimtf)
 WINE_CONFIG_DLL(msisip)
 WINE_CONFIG_DLL(msisys.ocx)
+WINE_CONFIG_DLL(msls31)
 WINE_CONFIG_DLL(msnet32)
 WINE_CONFIG_DLL(mspatcha)
 WINE_CONFIG_DLL(msrle32,,[po])
@@ -2780,6 +2826,7 @@ WINE_CONFIG_DLL(msvcp80)
 WINE_CONFIG_DLL(msvcp90)
 WINE_CONFIG_TEST(dlls/msvcp90/tests)
 WINE_CONFIG_DLL(msvcr100)
+WINE_CONFIG_TEST(dlls/msvcr100/tests)
 WINE_CONFIG_DLL(msvcr70,,[implib])
 WINE_CONFIG_DLL(msvcr71,,[implib])
 WINE_CONFIG_DLL(msvcr80)

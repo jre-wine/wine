@@ -2331,7 +2331,8 @@ static HRESULT d3d_device7_GetRenderState(IDirect3DDevice7 *iface,
             break;
 
         case D3DRENDERSTATE_ZBIAS:
-            hr = wined3d_device_get_render_state(device->wined3d_device, WINED3D_RS_DEPTHBIAS, value);
+            *value = wined3d_device_get_render_state(device->wined3d_device, WINED3D_RS_DEPTHBIAS);
+            hr = D3D_OK;
             break;
 
         default:
@@ -2342,7 +2343,8 @@ static HRESULT d3d_device7_GetRenderState(IDirect3DDevice7 *iface,
                 hr = E_NOTIMPL;
                 break;
             }
-            hr = wined3d_device_get_render_state(device->wined3d_device, state, value);
+            *value = wined3d_device_get_render_state(device->wined3d_device, state);
+            hr = D3D_OK;
     }
     wined3d_mutex_unlock();
 
@@ -2627,7 +2629,8 @@ static HRESULT d3d_device7_SetRenderState(IDirect3DDevice7 *iface,
             break;
 
         case D3DRENDERSTATE_ZBIAS:
-            hr = wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_DEPTHBIAS, value);
+            wined3d_device_set_render_state(device->wined3d_device, WINED3D_RS_DEPTHBIAS, value);
+            hr = D3D_OK;
             break;
 
         default:
@@ -2639,7 +2642,8 @@ static HRESULT d3d_device7_SetRenderState(IDirect3DDevice7 *iface,
                 break;
             }
 
-            hr = wined3d_device_set_render_state(device->wined3d_device, state, value);
+            wined3d_device_set_render_state(device->wined3d_device, state, value);
+            hr = D3D_OK;
             break;
     }
     wined3d_mutex_unlock();
@@ -3080,7 +3084,6 @@ static HRESULT d3d_device7_SetTransform(IDirect3DDevice7 *iface,
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
     enum wined3d_transform_state wined3d_state;
-    HRESULT hr;
 
     TRACE("iface %p, state %#x, matrix %p.\n", iface, state, matrix);
 
@@ -3107,10 +3110,10 @@ static HRESULT d3d_device7_SetTransform(IDirect3DDevice7 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    hr = wined3d_device_set_transform(device->wined3d_device, wined3d_state, (struct wined3d_matrix *)matrix);
+    wined3d_device_set_transform(device->wined3d_device, wined3d_state, (struct wined3d_matrix *)matrix);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d_device7_SetTransform_FPUSetup(IDirect3DDevice7 *iface,
@@ -3145,17 +3148,15 @@ static HRESULT WINAPI d3d_device3_SetTransform(IDirect3DDevice3 *iface,
     if (state == D3DTRANSFORMSTATE_PROJECTION)
     {
         D3DMATRIX projection;
-        HRESULT hr;
 
         wined3d_mutex_lock();
         multiply_matrix(&projection, &device->legacy_clipspace, matrix);
-        hr = wined3d_device_set_transform(device->wined3d_device,
+        wined3d_device_set_transform(device->wined3d_device,
                 WINED3D_TS_PROJECTION, (struct wined3d_matrix *)&projection);
-        if (SUCCEEDED(hr))
-            device->legacy_projection = *matrix;
+        device->legacy_projection = *matrix;
         wined3d_mutex_unlock();
 
-        return hr;
+        return D3D_OK;
     }
 
     return IDirect3DDevice7_SetTransform(&device->IDirect3DDevice7_iface, state, matrix);
@@ -3193,7 +3194,6 @@ static HRESULT d3d_device7_GetTransform(IDirect3DDevice7 *iface,
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
     enum wined3d_transform_state wined3d_state;
-    HRESULT hr;
 
     TRACE("iface %p, state %#x, matrix %p.\n", iface, state, matrix);
 
@@ -3220,10 +3220,10 @@ static HRESULT d3d_device7_GetTransform(IDirect3DDevice7 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    hr = wined3d_device_get_transform(device->wined3d_device, wined3d_state, (struct wined3d_matrix *)matrix);
+    wined3d_device_get_transform(device->wined3d_device, wined3d_state, (struct wined3d_matrix *)matrix);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d_device7_GetTransform_FPUSetup(IDirect3DDevice7 *iface,
@@ -3299,7 +3299,6 @@ static HRESULT d3d_device7_MultiplyTransform(IDirect3DDevice7 *iface,
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
     enum wined3d_transform_state wined3d_state;
-    HRESULT hr;
 
     TRACE("iface %p, state %#x, matrix %p.\n", iface, state, matrix);
 
@@ -3323,11 +3322,11 @@ static HRESULT d3d_device7_MultiplyTransform(IDirect3DDevice7 *iface,
 
     /* Note: D3DMATRIX is compatible with struct wined3d_matrix. */
     wined3d_mutex_lock();
-    hr = wined3d_device_multiply_transform(device->wined3d_device,
+    wined3d_device_multiply_transform(device->wined3d_device,
             wined3d_state, (struct wined3d_matrix *)matrix);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d_device7_MultiplyTransform_FPUSetup(IDirect3DDevice7 *iface,
@@ -3359,18 +3358,16 @@ static HRESULT WINAPI d3d_device3_MultiplyTransform(IDirect3DDevice3 *iface,
     if (state == D3DTRANSFORMSTATE_PROJECTION)
     {
         D3DMATRIX projection, tmp;
-        HRESULT hr;
 
         wined3d_mutex_lock();
         multiply_matrix(&tmp, &device->legacy_projection, matrix);
         multiply_matrix(&projection, &device->legacy_clipspace, &tmp);
-        hr = wined3d_device_set_transform(device->wined3d_device,
+        wined3d_device_set_transform(device->wined3d_device,
                 WINED3D_TS_PROJECTION, (struct wined3d_matrix *)&projection);
-        if (SUCCEEDED(hr))
-            device->legacy_projection = tmp;
+        device->legacy_projection = tmp;
         wined3d_mutex_unlock();
 
-        return hr;
+        return D3D_OK;
     }
 
     return IDirect3DDevice7_MultiplyTransform(&device->IDirect3DDevice7_iface, state, matrix);
@@ -4158,7 +4155,7 @@ static HRESULT d3d_device7_DrawIndexedPrimitiveVB(IDirect3DDevice7 *iface,
 
     /* Set the index stream */
     wined3d_device_set_base_vertex_index(This->wined3d_device, StartVertex);
-    hr = wined3d_device_set_index_buffer(This->wined3d_device, This->indexbuffer, WINED3DFMT_R16_UINT);
+    wined3d_device_set_index_buffer(This->wined3d_device, This->indexbuffer, WINED3DFMT_R16_UINT);
 
     /* Set the vertex stream source */
     hr = wined3d_device_set_stream_source(This->wined3d_device, 0, vb->wineD3DVertexBuffer, 0, stride);
@@ -4992,7 +4989,6 @@ static HRESULT WINAPI d3d_device7_Clear_FPUPreserve(IDirect3DDevice7 *iface, DWO
 static HRESULT d3d_device7_SetViewport(IDirect3DDevice7 *iface, D3DVIEWPORT7 *viewport)
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
-    HRESULT hr;
 
     TRACE("iface %p, viewport %p.\n", iface, viewport);
 
@@ -5001,10 +4997,10 @@ static HRESULT d3d_device7_SetViewport(IDirect3DDevice7 *iface, D3DVIEWPORT7 *vi
 
     /* Note: D3DVIEWPORT7 is compatible with struct wined3d_viewport. */
     wined3d_mutex_lock();
-    hr = wined3d_device_set_viewport(device->wined3d_device, (struct wined3d_viewport *)viewport);
+    wined3d_device_set_viewport(device->wined3d_device, (struct wined3d_viewport *)viewport);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d_device7_SetViewport_FPUSetup(IDirect3DDevice7 *iface, D3DVIEWPORT7 *viewport)
@@ -5043,7 +5039,6 @@ static HRESULT WINAPI d3d_device7_SetViewport_FPUPreserve(IDirect3DDevice7 *ifac
 static HRESULT d3d_device7_GetViewport(IDirect3DDevice7 *iface, D3DVIEWPORT7 *viewport)
 {
     struct d3d_device *device = impl_from_IDirect3DDevice7(iface);
-    HRESULT hr;
 
     TRACE("iface %p, viewport %p.\n", iface, viewport);
 
@@ -5052,10 +5047,10 @@ static HRESULT d3d_device7_GetViewport(IDirect3DDevice7 *iface, D3DVIEWPORT7 *vi
 
     /* Note: D3DVIEWPORT7 is compatible with struct wined3d_viewport. */
     wined3d_mutex_lock();
-    hr = wined3d_device_get_viewport(device->wined3d_device, (struct wined3d_viewport *)viewport);
+    wined3d_device_get_viewport(device->wined3d_device, (struct wined3d_viewport *)viewport);
     wined3d_mutex_unlock();
 
-    return hr_ddraw_from_wined3d(hr);
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d_device7_GetViewport_FPUSetup(IDirect3DDevice7 *iface, D3DVIEWPORT7 *viewport)

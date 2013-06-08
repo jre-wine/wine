@@ -2125,8 +2125,7 @@ HRESULT __cdecl wined3d_device_get_front_buffer_data(const struct wined3d_device
         UINT swapchain_idx, struct wined3d_surface *dst_surface);
 void __cdecl wined3d_device_get_gamma_ramp(const struct wined3d_device *device,
         UINT swapchain_idx, struct wined3d_gamma_ramp *ramp);
-HRESULT __cdecl wined3d_device_get_index_buffer(const struct wined3d_device *device,
-        struct wined3d_buffer **index_buffer);
+struct wined3d_buffer * __cdecl wined3d_device_get_index_buffer(const struct wined3d_device *device);
 HRESULT __cdecl wined3d_device_get_light(const struct wined3d_device *device,
         UINT light_idx, struct wined3d_light *light);
 HRESULT __cdecl wined3d_device_get_light_enable(const struct wined3d_device *device, UINT light_idx, BOOL *enable);
@@ -2143,8 +2142,7 @@ HRESULT __cdecl wined3d_device_get_ps_consts_i(const struct wined3d_device *devi
         UINT start_register, int *constants, UINT vector4i_count);
 HRESULT __cdecl wined3d_device_get_raster_status(const struct wined3d_device *device,
         UINT swapchain_idx, struct wined3d_raster_status *raster_status);
-HRESULT __cdecl wined3d_device_get_render_state(const struct wined3d_device *device,
-        enum wined3d_render_state state, DWORD *value);
+DWORD __cdecl wined3d_device_get_render_state(const struct wined3d_device *device, enum wined3d_render_state state);
 HRESULT __cdecl wined3d_device_get_render_target(const struct wined3d_device *device,
         UINT render_target_idx, struct wined3d_surface **render_target);
 HRESULT __cdecl wined3d_device_get_sampler_state(const struct wined3d_device *device,
@@ -2157,30 +2155,29 @@ HRESULT __cdecl wined3d_device_get_stream_source_freq(const struct wined3d_devic
         UINT stream_idx, UINT *divider);
 HRESULT __cdecl wined3d_device_get_surface_from_dc(const struct wined3d_device *device,
         HDC dc, struct wined3d_surface **surface);
-HRESULT __cdecl wined3d_device_get_swapchain(const struct wined3d_device *device,
-        UINT swapchain_idx, struct wined3d_swapchain **swapchain);
+struct wined3d_swapchain * __cdecl wined3d_device_get_swapchain(const struct wined3d_device *device,
+        UINT swapchain_idx);
 UINT __cdecl wined3d_device_get_swapchain_count(const struct wined3d_device *device);
 HRESULT __cdecl wined3d_device_get_texture(const struct wined3d_device *device,
         UINT stage, struct wined3d_texture **texture);
 HRESULT __cdecl wined3d_device_get_texture_stage_state(const struct wined3d_device *device,
         UINT stage, enum wined3d_texture_stage_state state, DWORD *value);
-HRESULT __cdecl wined3d_device_get_transform(const struct wined3d_device *device,
+void __cdecl wined3d_device_get_transform(const struct wined3d_device *device,
         enum wined3d_transform_state state, struct wined3d_matrix *matrix);
 HRESULT __cdecl wined3d_device_get_vertex_declaration(const struct wined3d_device *device,
         struct wined3d_vertex_declaration **declaration);
 struct wined3d_shader * __cdecl wined3d_device_get_vertex_shader(const struct wined3d_device *device);
-HRESULT __cdecl wined3d_device_get_viewport(const struct wined3d_device *device, struct wined3d_viewport *viewport);
+void __cdecl wined3d_device_get_viewport(const struct wined3d_device *device, struct wined3d_viewport *viewport);
 HRESULT __cdecl wined3d_device_get_vs_consts_b(const struct wined3d_device *device,
         UINT start_register, BOOL *constants, UINT bool_count);
 HRESULT __cdecl wined3d_device_get_vs_consts_f(const struct wined3d_device *device,
         UINT start_register, float *constants, UINT vector4f_count);
 HRESULT __cdecl wined3d_device_get_vs_consts_i(const struct wined3d_device *device,
         UINT start_register, int *constants, UINT vector4i_count);
-HRESULT __cdecl wined3d_device_get_wined3d(const struct wined3d_device *device, struct wined3d **wined3d);
 ULONG __cdecl wined3d_device_incref(struct wined3d_device *device);
 HRESULT __cdecl wined3d_device_init_3d(struct wined3d_device *device, struct wined3d_swapchain_desc *swapchain_desc);
 HRESULT __cdecl wined3d_device_init_gdi(struct wined3d_device *device, struct wined3d_swapchain_desc *swapchain_desc);
-HRESULT __cdecl wined3d_device_multiply_transform(struct wined3d_device *device,
+void __cdecl wined3d_device_multiply_transform(struct wined3d_device *device,
         enum wined3d_transform_state state, const struct wined3d_matrix *matrix);
 HRESULT __cdecl wined3d_device_present(const struct wined3d_device *device, const RECT *src_rect,
         const RECT *dst_rect, HWND dst_window_override, const RGNDATA *dirty_region, DWORD flags);
@@ -2192,7 +2189,7 @@ HRESULT __cdecl wined3d_device_reset(struct wined3d_device *device,
         const struct wined3d_swapchain_desc *swapchain_desc, const struct wined3d_display_mode *mode,
         wined3d_device_reset_cb callback);
 void __cdecl wined3d_device_restore_fullscreen_window(struct wined3d_device *device, HWND window);
-HRESULT __cdecl wined3d_device_set_base_vertex_index(struct wined3d_device *device, INT base_index);
+void __cdecl wined3d_device_set_base_vertex_index(struct wined3d_device *device, INT base_index);
 HRESULT __cdecl wined3d_device_set_clip_plane(struct wined3d_device *device,
         UINT plane_idx, const struct wined3d_vec4 *plane);
 HRESULT __cdecl wined3d_device_set_clip_status(struct wined3d_device *device,
@@ -2205,7 +2202,7 @@ HRESULT __cdecl wined3d_device_set_depth_stencil(struct wined3d_device *device, 
 HRESULT __cdecl wined3d_device_set_dialog_box_mode(struct wined3d_device *device, BOOL enable_dialogs);
 void __cdecl wined3d_device_set_gamma_ramp(const struct wined3d_device *device,
         UINT swapchain_idx, DWORD flags, const struct wined3d_gamma_ramp *ramp);
-HRESULT __cdecl wined3d_device_set_index_buffer(struct wined3d_device *device,
+void __cdecl wined3d_device_set_index_buffer(struct wined3d_device *device,
         struct wined3d_buffer *index_buffer, enum wined3d_format_id format_id);
 HRESULT __cdecl wined3d_device_set_light(struct wined3d_device *device,
         UINT light_idx, const struct wined3d_light *light);
@@ -2222,7 +2219,7 @@ HRESULT __cdecl wined3d_device_set_ps_consts_f(struct wined3d_device *device,
         UINT start_register, const float *constants, UINT vector4f_count);
 HRESULT __cdecl wined3d_device_set_ps_consts_i(struct wined3d_device *device,
         UINT start_register, const int *constants, UINT vector4i_count);
-HRESULT __cdecl wined3d_device_set_render_state(struct wined3d_device *device,
+void __cdecl wined3d_device_set_render_state(struct wined3d_device *device,
         enum wined3d_render_state state, DWORD value);
 HRESULT __cdecl wined3d_device_set_render_target(struct wined3d_device *device,
         UINT render_target_idx, struct wined3d_surface *render_target, BOOL set_viewport);
@@ -2236,12 +2233,12 @@ HRESULT __cdecl wined3d_device_set_stream_source_freq(struct wined3d_device *dev
 HRESULT __cdecl wined3d_device_set_texture(struct wined3d_device *device, UINT stage, struct wined3d_texture *texture);
 HRESULT __cdecl wined3d_device_set_texture_stage_state(struct wined3d_device *device,
         UINT stage, enum wined3d_texture_stage_state state, DWORD value);
-HRESULT __cdecl wined3d_device_set_transform(struct wined3d_device *device,
+void __cdecl wined3d_device_set_transform(struct wined3d_device *device,
         enum wined3d_transform_state state, const struct wined3d_matrix *matrix);
 HRESULT __cdecl wined3d_device_set_vertex_declaration(struct wined3d_device *device,
         struct wined3d_vertex_declaration *declaration);
 HRESULT __cdecl wined3d_device_set_vertex_shader(struct wined3d_device *device, struct wined3d_shader *shader);
-HRESULT __cdecl wined3d_device_set_viewport(struct wined3d_device *device, const struct wined3d_viewport *viewport);
+void __cdecl wined3d_device_set_viewport(struct wined3d_device *device, const struct wined3d_viewport *viewport);
 HRESULT __cdecl wined3d_device_set_vs_consts_b(struct wined3d_device *device,
         UINT start_register, const BOOL *constants, UINT bool_count);
 HRESULT __cdecl wined3d_device_set_vs_consts_f(struct wined3d_device *device,

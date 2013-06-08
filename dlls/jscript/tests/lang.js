@@ -757,6 +757,32 @@ case 3:
     ok(false, "unexpected case 3");
 }
 
+switch(1) {
+case 2:
+    ok(false, "unexpected case 2");
+    break;
+default:
+    /* empty default */
+}
+
+switch(2) {
+default:
+    ok(false, "unexpected default");
+    break;
+case 2:
+    /* empty case */
+};
+
+switch(2) {
+default:
+    ok(false, "unexpected default");
+    break;
+case 1:
+case 2:
+case 3:
+    /* empty case */
+};
+
 (function() {
     var i=0;
 
@@ -1328,6 +1354,43 @@ name_override_func = 3;
 ok(name_override_func === 3, "name_override_func = " + name_override_func);
 function name_override_func() {};
 ok(name_override_func === 3, "name_override_func = " + name_override_func);
+
+tmp = (function() {
+    var ret = false;
+    with({ret: true})
+        return ret;
+})();
+ok(tmp, "tmp = " + tmp);
+
+/* NoNewline rule parser tests */
+while(true) {
+    if(true) break
+    tmp = false
+}
+
+while(true) {
+    if(true) break /*
+                    * no semicolon, but comment present */
+    tmp = false
+}
+
+while(true) {
+    if(true) break // no semicolon, but comment present
+    tmp = false
+}
+
+while(true) {
+    break
+    continue
+    tmp = false
+}
+
+function returnTest() {
+    return
+    true;
+}
+
+ok(returnTest() === undefined, "returnTest = " + returnTest());
 
 /* Keep this test in the end of file */
 undefined = 6;
