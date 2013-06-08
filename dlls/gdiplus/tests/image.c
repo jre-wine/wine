@@ -3712,6 +3712,174 @@ static void test_GdipDrawImagePointRect(void)
     expect(Ok, status);
 }
 
+static void test_image_format(void)
+{
+    static const PixelFormat fmt[] =
+    {
+        PixelFormat1bppIndexed, PixelFormat4bppIndexed, PixelFormat8bppIndexed,
+        PixelFormat16bppGrayScale, PixelFormat16bppRGB555, PixelFormat16bppRGB565,
+        PixelFormat16bppARGB1555, PixelFormat24bppRGB, PixelFormat32bppRGB,
+        PixelFormat32bppARGB, PixelFormat32bppPARGB, PixelFormat48bppRGB,
+        PixelFormat64bppARGB, PixelFormat64bppPARGB, PixelFormat32bppCMYK
+    };
+    GpStatus status;
+    GpBitmap *bitmap;
+    GpImage *thumb;
+    HBITMAP hbitmap;
+    BITMAP bm;
+    PixelFormat format;
+    BitmapData data;
+    UINT i, ret;
+
+    for (i = 0; i < sizeof(fmt)/sizeof(fmt[0]); i++)
+    {
+        status = GdipCreateBitmapFromScan0(1, 1, 0, fmt[i], NULL, &bitmap);
+        ok(status == Ok || broken(status == InvalidParameter) /* before win7 */,
+           "GdipCreateBitmapFromScan0 error %d\n", status);
+        if (status != Ok) continue;
+
+        status = GdipGetImagePixelFormat((GpImage *)bitmap, &format);
+        expect(Ok, status);
+        expect(fmt[i], format);
+
+        status = GdipCreateHBITMAPFromBitmap(bitmap, &hbitmap, 0);
+        if (fmt[i] == PixelFormat16bppGrayScale || fmt[i] == PixelFormat32bppCMYK)
+            todo_wine expect(InvalidParameter, status);
+        else
+        {
+            expect(Ok, status);
+            ret = GetObject(hbitmap, sizeof(bm), &bm);
+            expect(sizeof(bm), ret);
+            expect(0, bm.bmType);
+            expect(1, bm.bmWidth);
+            expect(1, bm.bmHeight);
+            expect(4, bm.bmWidthBytes);
+            expect(1, bm.bmPlanes);
+            expect(32, bm.bmBitsPixel);
+            DeleteObject(hbitmap);
+        }
+
+        status = GdipGetImageThumbnail((GpImage *)bitmap, 0, 0, &thumb, NULL, NULL);
+        if (fmt[i] == PixelFormat16bppGrayScale || fmt[i] == PixelFormat32bppCMYK)
+            todo_wine
+            ok(status == OutOfMemory || broken(status == InvalidParameter) /* before win7 */,
+               "expected OutOfMemory, got %d\n", status);
+        else
+        {
+            expect(Ok, status);
+            status = GdipGetImagePixelFormat(thumb, &format);
+            expect(Ok, status);
+            ok(format == PixelFormat32bppPARGB || broken(format != PixelFormat32bppPARGB) /* before win7 */,
+               "expected PixelFormat32bppPARGB, got %#x\n", format);
+            status = GdipDisposeImage(thumb);
+            expect(Ok, status);
+        }
+
+        status = GdipBitmapLockBits(bitmap, NULL, ImageLockModeRead, PixelFormat32bppPARGB, &data);
+        if (fmt[i] == PixelFormat16bppGrayScale || fmt[i] == PixelFormat32bppCMYK)
+            todo_wine expect(InvalidParameter, status);
+        else
+        {
+            expect(Ok, status);
+            status = GdipBitmapUnlockBits(bitmap, &data);
+            expect(Ok, status);
+        }
+
+        status = GdipDisposeImage((GpImage *)bitmap);
+        expect(Ok, status);
+    }
+}
+
+static void test_DrawImage_scale(void)
+{
+    static const BYTE back_8x1[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,
+                                       0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_080[24] = { 0x40,0x40,0x40,0x80,0x80,0x80,0x40,0x40,0x40,0x40,0x40,0x40,
+                                        0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_100[24] = { 0x40,0x40,0x40,0x80,0x80,0x80,0x80,0x80,0x80,0x40,0x40,0x40,
+                                        0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_120[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x80,0x80,0x80,0x40,0x40,0x40,
+                                        0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_150[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x80,0x80,0x80,0x80,0x80,0x80,
+                                        0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_180[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x80,0x80,0x80,0x80,0x80,0x80,
+                                        0x80,0x80,0x80,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_200[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x80,0x80,0x80,0x80,0x80,0x80,
+                                        0x80,0x80,0x80,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+    static const BYTE image_250[24] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x80,0x80,0x80,
+                                        0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x40,0x40,0x40 };
+    static const struct test_data
+    {
+        REAL scale_x;
+        const BYTE *image;
+    } td[] =
+    {
+        { 0.8, image_080 },
+        { 1.0, image_100 },
+        { 1.2, image_120 },
+        { 1.5, image_150 },
+        { 1.8, image_180 },
+        { 2.0, image_200 },
+        { 2.5, image_250 }
+    };
+    BYTE src_2x1[6] = { 0x80,0x80,0x80,0x80,0x80,0x80 };
+    BYTE dst_8x1[24];
+    GpStatus status;
+    union
+    {
+        GpBitmap *bitmap;
+        GpImage *image;
+    } u1, u2;
+    GpGraphics *graphics;
+    GpMatrix *matrix;
+    int i, match;
+
+    status = GdipCreateBitmapFromScan0(2, 1, 4, PixelFormat24bppRGB, src_2x1, &u1.bitmap);
+    expect(Ok, status);
+    status = GdipBitmapSetResolution(u1.bitmap, 100.0, 100.0);
+    expect(Ok, status);
+
+    status = GdipCreateBitmapFromScan0(8, 1, 24, PixelFormat24bppRGB, dst_8x1, &u2.bitmap);
+    expect(Ok, status);
+    status = GdipBitmapSetResolution(u2.bitmap, 100.0, 100.0);
+    expect(Ok, status);
+    status = GdipGetImageGraphicsContext(u2.image, &graphics);
+    expect(Ok, status);
+    status = GdipSetInterpolationMode(graphics, InterpolationModeNearestNeighbor);
+    expect(Ok, status);
+
+    for (i = 0; i < sizeof(td)/sizeof(td[0]); i++)
+    {
+        status = GdipCreateMatrix2(td[i].scale_x, 0.0, 0.0, 1.0, 0.0, 0.0, &matrix);
+        expect(Ok, status);
+        status = GdipSetWorldTransform(graphics, matrix);
+        expect(Ok, status);
+        GdipDeleteMatrix(matrix);
+
+        memcpy(dst_8x1, back_8x1, sizeof(dst_8x1));
+        status = GdipDrawImageI(graphics, u1.image, 1, 0);
+        expect(Ok, status);
+
+        match = memcmp(dst_8x1, td[i].image, sizeof(dst_8x1)) == 0;
+        ok(match, "%d: data should match\n", i);
+        if (!match)
+        {
+            UINT i, size = sizeof(dst_8x1);
+            const BYTE *bits = dst_8x1;
+            for (i = 0; i < size; i++)
+                printf(" %02x", bits[i]);
+            printf("\n");
+        }
+    }
+
+    status = GdipDeleteGraphics(graphics);
+    expect(Ok, status);
+    status = GdipDisposeImage(u1.image);
+    expect(Ok, status);
+    status = GdipDisposeImage(u2.image);
+    expect(Ok, status);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -3724,6 +3892,8 @@ START_TEST(image)
 
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
+    test_DrawImage_scale();
+    test_image_format();
     test_DrawImage();
     test_GdipDrawImagePointRect();
     test_bitmapbits();

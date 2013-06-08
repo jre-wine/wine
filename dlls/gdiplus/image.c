@@ -1248,10 +1248,10 @@ GpStatus WINGDIPAPI GdipCloneBitmapArea(REAL x, REAL y, REAL width, REAL height,
     if (format == PixelFormatDontCare)
         format = srcBitmap->format;
 
-    area.X = roundr(x);
-    area.Y = roundr(y);
-    area.Width = roundr(width);
-    area.Height = roundr(height);
+    area.X = gdip_round(x);
+    area.Y = gdip_round(y);
+    area.Width = gdip_round(width);
+    area.Height = gdip_round(height);
 
     stat = GdipBitmapLockBits(srcBitmap, &area, ImageLockModeRead, format,
         &lockeddata_src);
@@ -3759,8 +3759,8 @@ static const WCHAR gif_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ',
 static const WCHAR gif_extension[] = {'*','.','G','I','F',0};
 static const WCHAR gif_mimetype[] = {'i','m','a','g','e','/','g','i','f', 0};
 static const WCHAR gif_format[] = {'G','I','F',0};
-static const BYTE gif_sig_pattern[4] = "GIF8";
-static const BYTE gif_sig_mask[] = { 0xFF, 0xFF, 0xFF, 0xFF };
+static const BYTE gif_sig_pattern[12] = "GIF87aGIF89a";
+static const BYTE gif_sig_mask[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 static const WCHAR tiff_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'T','I','F','F', 0};
 static const WCHAR tiff_extension[] = {'*','.','T','I','F','F',';','*','.','T','I','F',0};
@@ -3847,8 +3847,8 @@ static const struct image_codec codecs[NUM_CODECS] = {
             /* MimeType */           gif_mimetype,
             /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
             /* Version */            1,
-            /* SigCount */           1,
-            /* SigSize */            4,
+            /* SigCount */           2,
+            /* SigSize */            6,
             /* SigPattern */         gif_sig_pattern,
             /* SigMask */            gif_sig_mask,
         },
@@ -4393,7 +4393,7 @@ GpStatus WINGDIPAPI GdipGetImageThumbnail(GpImage *image, UINT width, UINT heigh
     GdipGetImageWidth(image, &srcwidth);
     GdipGetImageHeight(image, &srcheight);
 
-    stat = GdipCreateBitmapFromScan0(width, height, 0, PixelFormat32bppARGB,
+    stat = GdipCreateBitmapFromScan0(width, height, 0, PixelFormat32bppPARGB,
         NULL, (GpBitmap**)ret_image);
 
     if (stat == Ok)
