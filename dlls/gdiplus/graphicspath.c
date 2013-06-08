@@ -946,6 +946,7 @@ GpStatus WINGDIPAPI GdipAddPathString(GpPath* path, GDIPCONST WCHAR* string, INT
     LOGFONTW lfw;
     HANDLE hfont;
     HDC dc;
+    GpGraphics *graphics;
     GpPath *backup;
     struct format_string_args args;
     int i;
@@ -966,25 +967,40 @@ GpStatus WINGDIPAPI GdipAddPathString(GpPath* path, GDIPCONST WCHAR* string, INT
     scaled_layout_rect.Width = layoutRect->Width * native_height / emSize;
     scaled_layout_rect.Height = layoutRect->Height * native_height / emSize;
 
-    status = GdipCreateFont(family, native_height, style, UnitPixel, &font);
-    if (status != Ok)
+    if ((status = GdipClonePath(path, &backup)) != Ok)
         return status;
 
-    get_log_fontW(font, NULL, &lfw);
+    dc = CreateCompatibleDC(0);
+    status = GdipCreateFromHDC(dc, &graphics);
+    if (status != Ok)
+    {
+        DeleteDC(dc);
+        GdipDeletePath(backup);
+        return status;
+    }
+
+    status = GdipCreateFont(family, native_height, style, UnitPixel, &font);
+    if (status != Ok)
+    {
+        GdipDeleteGraphics(graphics);
+        DeleteDC(dc);
+        GdipDeletePath(backup);
+        return status;
+    }
+
+    get_log_fontW(font, graphics, &lfw);
+    GdipDeleteFont(font);
+    GdipDeleteGraphics(graphics);
+
     hfont = CreateFontIndirectW(&lfw);
     if (!hfont)
     {
         WARN("Failed to create font\n");
+        DeleteDC(dc);
+        GdipDeletePath(backup);
         return GenericError;
     }
 
-    if ((status = GdipClonePath(path, &backup)) != Ok)
-    {
-        DeleteObject(hfont);
-        return status;
-    }
-
-    dc = CreateCompatibleDC(0);
     SelectObject(dc, hfont);
 
     GetTextMetricsW(dc, &textmetric);
@@ -1357,8 +1373,8 @@ GpStatus WINGDIPAPI GdipGetPathPointsI(GpPath *path, GpPoint* points, INT count)
     ret = GdipGetPathPoints(path,ptf,count);
     if(ret == Ok)
         for(i = 0;i < count;i++){
-            points[i].X = roundr(ptf[i].X);
-            points[i].Y = roundr(ptf[i].Y);
+            points[i].X = gdip_round(ptf[i].X);
+            points[i].Y = gdip_round(ptf[i].Y);
         };
     GdipFree(ptf);
 
@@ -1478,10 +1494,10 @@ GpStatus WINGDIPAPI GdipGetPathWorldBoundsI(GpPath* path, GpRect* bounds,
     ret = GdipGetPathWorldBounds(path,&boundsF,matrix,pen);
 
     if(ret == Ok){
-        bounds->X      = roundr(boundsF.X);
-        bounds->Y      = roundr(boundsF.Y);
-        bounds->Width  = roundr(boundsF.Width);
-        bounds->Height = roundr(boundsF.Height);
+        bounds->X      = gdip_round(boundsF.X);
+        bounds->Y      = gdip_round(boundsF.Y);
+        bounds->Width  = gdip_round(boundsF.Width);
+        bounds->Height = gdip_round(boundsF.Height);
     }
 
     return ret;
@@ -1607,7 +1623,7 @@ GpStatus WINGDIPAPI GdipIsVisiblePathPoint(GpPath* path, REAL x, REAL y, GpGraph
         return status;
     }
 
-    *result = PtInRegion(hrgn, roundr(x), roundr(y));
+    *result = PtInRegion(hrgn, gdip_round(x), gdip_round(y));
 
     DeleteObject(hrgn);
     GdipDeleteRegion(region);

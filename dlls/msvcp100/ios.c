@@ -937,7 +937,7 @@ basic_streambuf_char* __thiscall basic_streambuf_char_vector_dtor(basic_streambu
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_streambuf_char_dtor(this+i);
@@ -1071,8 +1071,6 @@ int __thiscall basic_streambuf_char_uflow(basic_streambuf_char *this)
 /* ?_Xsgetn_s@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPADIH@Z */
 /* ?_Xsgetn_s@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA_JPEAD_K_J@Z */
 DEFINE_THISCALL_WRAPPER(basic_streambuf_char__Xsgetn_s, 20)
-#define call_basic_streambuf_char__Xsgetn_s(this, ptr, size, count) CALL_VTBL_FUNC(this, 28, \
-        streamsize, (basic_streambuf_char*, char*, MSVCP_size_t, streamsize), (this, ptr, size, count))
 streamsize __thiscall basic_streambuf_char__Xsgetn_s(basic_streambuf_char *this, char *ptr, MSVCP_size_t size, streamsize count)
 {
     streamsize copied, chunk;
@@ -1109,7 +1107,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_char__Sgetn_s, 20)
 streamsize __thiscall basic_streambuf_char__Sgetn_s(basic_streambuf_char *this, char *ptr, MSVCP_size_t size, streamsize count)
 {
     TRACE("(%p %p %lu %s)\n", this, ptr, size, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_char__Xsgetn_s(this, ptr, size, count);
+    return basic_streambuf_char__Xsgetn_s(this, ptr, size, count);
 }
 
 /* ?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAEXXZ */
@@ -1366,7 +1364,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_char_sgetn, 16)
 streamsize __thiscall basic_streambuf_char_sgetn(basic_streambuf_char *this, char *ptr, streamsize count)
 {
     TRACE("(%p %p %s)\n", this, ptr, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_char__Xsgetn_s(this, ptr, -1, count);
+    return basic_streambuf_char__Xsgetn_s(this, ptr, -1, count);
 }
 
 /* ?showmanyc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ */
@@ -1487,7 +1485,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_char_xsgetn, 16)
 streamsize __thiscall basic_streambuf_char_xsgetn(basic_streambuf_char *this, char *ptr, streamsize count)
 {
     TRACE("(%p %p %s)\n", this, ptr, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_char__Xsgetn_s(this, ptr, -1, count);
+    return basic_streambuf_char__Xsgetn_s(this, ptr, -1, count);
 }
 
 /* ?xsputn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPBDH@Z */
@@ -1657,7 +1655,7 @@ basic_streambuf_wchar* __thiscall basic_streambuf_wchar_vector_dtor(basic_stream
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_streambuf_wchar_dtor(this+i);
@@ -1811,8 +1809,6 @@ unsigned short __thiscall basic_streambuf_wchar_uflow(basic_streambuf_wchar *thi
 /* ?_Xsgetn_s@?$basic_streambuf@GU?$char_traits@G@std@@@std@@MAEHPAGIH@Z */
 /* ?_Xsgetn_s@?$basic_streambuf@GU?$char_traits@G@std@@@std@@MEAA_JPEAG_K_J@Z */
 DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar__Xsgetn_s, 20)
-#define call_basic_streambuf_wchar__Xsgetn_s(this, ptr, size, count) CALL_VTBL_FUNC(this, 28, \
-        streamsize, (basic_streambuf_wchar*, wchar_t*, MSVCP_size_t, streamsize), (this, ptr, size, count))
 streamsize __thiscall basic_streambuf_wchar__Xsgetn_s(basic_streambuf_wchar *this, wchar_t *ptr, MSVCP_size_t size, streamsize count)
 {
     streamsize copied, chunk;
@@ -1851,7 +1847,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar__Sgetn_s, 20)
 streamsize __thiscall basic_streambuf_wchar__Sgetn_s(basic_streambuf_wchar *this, wchar_t *ptr, MSVCP_size_t size, streamsize count)
 {
     TRACE("(%p %p %lu %s)\n", this, ptr, size, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_wchar__Xsgetn_s(this, ptr, size, count);
+    return basic_streambuf_wchar__Xsgetn_s(this, ptr, size, count);
 }
 
 /* ?_Unlock@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@QAEXXZ */
@@ -2156,7 +2152,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_sgetn, 16)
 streamsize __thiscall basic_streambuf_wchar_sgetn(basic_streambuf_wchar *this, wchar_t *ptr, streamsize count)
 {
     TRACE("(%p %p %s)\n", this, ptr, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_wchar__Xsgetn_s(this, ptr, -1, count);
+    return basic_streambuf_wchar__Xsgetn_s(this, ptr, -1, count);
 }
 
 /* ?showmanyc@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEHXZ */
@@ -2297,7 +2293,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_xsgetn, 16)
 streamsize __thiscall basic_streambuf_wchar_xsgetn(basic_streambuf_wchar *this, wchar_t *ptr, streamsize count)
 {
     TRACE("(%p %p %s)\n", this, ptr, wine_dbgstr_longlong(count));
-    return call_basic_streambuf_wchar__Xsgetn_s(this, ptr, -1, count);
+    return basic_streambuf_wchar__Xsgetn_s(this, ptr, -1, count);
 }
 
 /* ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEHPB_WH@Z */
@@ -2497,7 +2493,7 @@ basic_filebuf_char* __thiscall basic_filebuf_char_vector_dtor(basic_filebuf_char
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_filebuf_char_dtor(this+i);
@@ -3104,7 +3100,7 @@ basic_filebuf_wchar* __thiscall basic_filebuf_wchar_vector_dtor(basic_filebuf_wc
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_filebuf_wchar_dtor(this+i);
@@ -3674,7 +3670,7 @@ basic_stringbuf_char* __thiscall basic_stringbuf_char_vector_dtor(basic_stringbu
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *) this - 1;
+        INT_PTR i, *ptr = (INT_PTR *) this - 1;
 
         for (i = *ptr - 1; i >= 0; i--)
             basic_stringbuf_char_dtor(this+i);
@@ -3946,7 +3942,7 @@ void __thiscall basic_stringbuf_wchar__Init(basic_stringbuf_wchar *this, const w
     this->seekhigh = NULL;
 
     if(count && str) {
-        wchar_t *buf = MSVCRT_operator_new(count);
+        wchar_t *buf = MSVCRT_operator_new(count*sizeof(wchar_t));
         if(!buf) {
             ERR("Out of memory\n");
             throw_exception(EXCEPTION_BAD_ALLOC, NULL);
@@ -4076,7 +4072,7 @@ basic_stringbuf_wchar* __thiscall basic_stringbuf_wchar_vector_dtor(basic_string
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *) this - 1;
+        INT_PTR i, *ptr = (INT_PTR *) this - 1;
 
         for (i = *ptr - 1; i >= 0; i--)
             basic_stringbuf_wchar_dtor(this+i);
@@ -4120,7 +4116,7 @@ unsigned short __thiscall basic_stringbuf_wchar_overflow(basic_stringbuf_wchar *
     oldsize = (ptr ? basic_streambuf_wchar_epptr(&this->base)-basic_streambuf_wchar_eback(&this->base): 0);
     size = oldsize|0xf;
     size += size/2;
-    buf = MSVCRT_operator_new(size);
+    buf = MSVCRT_operator_new(size*sizeof(wchar_t));
     if(!buf) {
         ERR("Out of memory\n");
         throw_exception(EXCEPTION_BAD_ALLOC, NULL);
@@ -4407,7 +4403,7 @@ ios_base* __thiscall ios_base_vector_dtor(ios_base *this, unsigned int flags)
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             ios_base_dtor(this+i);
@@ -4426,7 +4422,7 @@ void* __thiscall iosb_vector_dtor(void *this, unsigned int flags)
 {
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
-        int *ptr = (int *)this-1;
+        INT_PTR *ptr = (INT_PTR *)this-1;
         MSVCRT_operator_delete(ptr);
     } else {
         if(flags & 1)
@@ -4651,14 +4647,6 @@ void CDECL ios_base_Addstd(ios_base *add)
     FIXME("(%p) stub\n", add);
 }
 
-/* ?_Index_func@ios_base@std@@CAAAHXZ */
-/* ?_Index_func@ios_base@std@@CAAEAHXZ */
-int* CDECL ios_base_Index_func(void)
-{
-    TRACE("\n");
-    return &ios_base_Index;
-}
-
 /* ?_Init@ios_base@std@@IAEXXZ */
 /* ?_Init@ios_base@std@@IEAAXXZ */
 DEFINE_THISCALL_WRAPPER(ios_base_Init, 4)
@@ -4675,14 +4663,6 @@ void __thiscall ios_base_Init(ios_base *this)
     this->calls = NULL;
     this->loc = MSVCRT_operator_new(sizeof(locale));
     locale_ctor(this->loc);
-}
-
-/* ?_Sync_func@ios_base@std@@CAAA_NXZ */
-/* ?_Sync_func@ios_base@std@@CAAEA_NXZ */
-MSVCP_bool* CDECL ios_base_Sync_func(void)
-{
-    TRACE("\n");
-    return &ios_base_Sync;
 }
 
 /* ?bad@ios_base@std@@QBE_NXZ */
@@ -4950,7 +4930,7 @@ basic_ios_char* __thiscall basic_ios_char_vector_dtor(basic_ios_char *this, unsi
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ios_char_dtor(this+i);
@@ -5197,7 +5177,7 @@ basic_ios_wchar* __thiscall basic_ios_wchar_vector_dtor(basic_ios_wchar *this, u
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ios_wchar_dtor(this+i);
@@ -5485,7 +5465,7 @@ basic_ostream_char* __thiscall basic_ostream_char_vector_dtor(basic_ios_char *ba
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ostream_char_vbase_dtor(this+i);
@@ -5976,151 +5956,6 @@ basic_ostream_char* __cdecl basic_ostream_char_endl(basic_ostream_char *ostr)
     return ostr;
 }
 
-/* $?6DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-/* ??$?6DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@AEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-basic_ostream_char* __cdecl basic_ostream_char_print_bstr(basic_ostream_char *ostr, const basic_string_char *str)
-{
-    basic_ios_char *base = basic_ostream_char_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %p)\n", ostr, str);
-
-    if(basic_ostream_char_sentry_create(ostr)) {
-        MSVCP_size_t len = MSVCP_basic_string_char_length(str);
-        streamsize pad = (base->base.wide>len ? base->base.wide-len : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_char_sputn(base->strbuf, MSVCP_basic_string_char_c_str(str), len) != len)
-                    state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_char_sentry_destroy(ostr);
-
-    basic_ios_char_setstate(base, state);
-    return ostr;
-}
-
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@C@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@C@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@D@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@D@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@E@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@E@Z */
-basic_ostream_char* __cdecl basic_ostream_char_print_ch(basic_ostream_char *ostr, char ch)
-{
-    basic_ios_char *base = basic_ostream_char_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %d)\n", ostr, ch);
-
-    if(basic_ostream_char_sentry_create(ostr)) {
-        streamsize pad = (base->base.wide>1 ? base->base.wide-1 : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_char_sputc(base->strbuf, ch) == EOF)
-                state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_char_sentry_destroy(ostr);
-
-    basic_ios_char_setstate(base, state);
-    return ostr;
-}
-
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@PBC@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@PEBC@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@PBD@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@PEBD@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@PBE@Z */
-/* ??$?6U?$char_traits@D@std@@@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@0@AEAV10@PEBE@Z */
-basic_ostream_char* __cdecl basic_ostream_char_print_str(basic_ostream_char *ostr, const char *str)
-{
-    basic_ios_char *base = basic_ostream_char_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %s)\n", ostr, str);
-
-    if(basic_ostream_char_sentry_create(ostr)) {
-        MSVCP_size_t len = strlen(str);
-        streamsize pad = (base->base.wide>len ? base->base.wide-len : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_char_sputn(base->strbuf, str, len) != len)
-                state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_char_sputc(base->strbuf, base->fillch) == EOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_char_sentry_destroy(ostr);
-
-    basic_ios_char_setstate(base, state);
-    return ostr;
-}
-
 /* ??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@P6AAAV01@AAV01@@Z@Z */
 /* ??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QEAAAEAV01@P6AAEAV01@AEAV01@@Z@Z */
 DEFINE_THISCALL_WRAPPER(basic_ostream_char_print_func, 8)
@@ -6273,7 +6108,7 @@ basic_ostream_wchar* __thiscall basic_ostream_wchar_vector_dtor(basic_ios_wchar 
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ostream_wchar_vbase_dtor(this+i);
@@ -6930,149 +6765,6 @@ basic_ostream_wchar* __cdecl basic_ostream_wchar_endl(basic_ostream_wchar *ostr)
     return ostr;
 }
 
-/* ??$?6_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AAV10@ABV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-/* ??$?6_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AEAV10@AEBV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-/* ??$?6GU?$char_traits@G@std@@V?$allocator@G@1@@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@0@AAV10@ABV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-/* ??$?6GU?$char_traits@G@std@@V?$allocator@G@1@@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@0@AEAV10@AEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-basic_ostream_wchar* __cdecl basic_ostream_wchar_print_bstr(basic_ostream_wchar *ostr, const basic_string_wchar *str)
-{
-    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %p)\n", ostr, str);
-
-    if(basic_ostream_wchar_sentry_create(ostr)) {
-        MSVCP_size_t len = MSVCP_basic_string_wchar_length(str);
-        streamsize pad = (base->base.wide>len ? base->base.wide-len : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_wchar_sputn(base->strbuf, MSVCP_basic_string_wchar_c_str(str), len) != len)
-                state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_wchar_sentry_destroy(ostr);
-
-    basic_ios_wchar_setstate(base, state);
-    return ostr;
-}
-
-/* ??$?6_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AAV10@_W@Z */
-/* ??$?6_WU?$char_traits@_W@std@@@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AEAV10@_W@Z */
-/* ??$?6GU?$char_traits@G@std@@@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@0@AAV10@G@Z */
-/* ??$?6GU?$char_traits@G@std@@@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@0@AEAV10@G@Z */
-basic_ostream_wchar* __cdecl basic_ostream_wchar_print_ch(basic_ostream_wchar *ostr, wchar_t ch)
-{
-    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %d)\n", ostr, ch);
-
-    if(basic_ostream_wchar_sentry_create(ostr)) {
-        streamsize pad = (base->base.wide>1 ? base->base.wide-1 : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_wchar_sputc(base->strbuf, ch) == WEOF)
-                state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_wchar_sentry_destroy(ostr);
-
-    basic_ios_wchar_setstate(base, state);
-    return ostr;
-}
-
-/* ??$?6_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AAV10@PB_W@Z */
-/* ??$?6_WU?$char_traits@_W@std@@@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@0@AEAV10@PEB_W@Z */
-/* ??$?6GU?$char_traits@G@std@@@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@0@AAV10@PBG@Z */
-/* ??$?6GU?$char_traits@G@std@@@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@0@AEAV10@PEBG@Z */
-basic_ostream_wchar* __cdecl basic_ostream_wchar_print_str(basic_ostream_wchar *ostr, const wchar_t *str)
-{
-    basic_ios_wchar *base = basic_ostream_wchar_get_basic_ios(ostr);
-    IOSB_iostate state = IOSTATE_goodbit;
-
-    TRACE("(%p %s)\n", ostr, debugstr_w(str));
-
-    if(basic_ostream_wchar_sentry_create(ostr)) {
-        MSVCP_size_t len = wcslen(str);
-        streamsize pad = (base->base.wide>len ? base->base.wide-len : 0);
-
-        if((base->base.fmtfl & FMTFLAG_adjustfield) != FMTFLAG_left) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        if(state == IOSTATE_goodbit) {
-            if(basic_streambuf_wchar_sputn(base->strbuf, str, len) != len)
-                                        state = IOSTATE_badbit;
-        }
-
-        if(state == IOSTATE_goodbit) {
-            for(; pad!=0; pad--) {
-                if(basic_streambuf_wchar_sputc(base->strbuf, base->fillch) == WEOF) {
-                    state = IOSTATE_badbit;
-                    break;
-                }
-            }
-        }
-
-        base->base.wide = 0;
-    }else {
-        state = IOSTATE_badbit;
-    }
-    basic_ostream_wchar_sentry_destroy(ostr);
-
-    basic_ios_wchar_setstate(base, state);
-    return ostr;
-}
-
 /* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@P6AAAV01@AAV01@@Z@Z */
 /* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@P6AAEAV01@AEAV01@@Z@Z */
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@P6AAAV01@AAV01@@Z@Z */
@@ -7212,7 +6904,7 @@ basic_istream_char* __thiscall basic_istream_char_vector_dtor(basic_ios_char *ba
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_istream_char_vbase_dtor(this+i);
@@ -8088,135 +7780,6 @@ basic_istream_char* __thiscall basic_istream_char_read_bool(basic_istream_char *
     return this;
 }
 
-/* ??$getline@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@D@Z */
-/* ??$getline@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@D@Z */
-basic_istream_char* __cdecl basic_istream_char_getline_bstr_delim(
-        basic_istream_char *istream, basic_string_char *str, char delim)
-{
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = delim;
-
-    TRACE("(%p %p %c)\n", istream, str, delim);
-
-    if(basic_istream_char_sentry_create(istream, TRUE)) {
-        MSVCP_basic_string_char_clear(str);
-
-        for(c = basic_istream_char_get(istream); c!=delim && c!=EOF;
-                c = basic_istream_char_get(istream)) {
-            state = IOSTATE_goodbit;
-            MSVCP_basic_string_char_append_ch(str, c);
-        }
-    }
-    basic_istream_char_sentry_destroy(istream);
-
-    basic_ios_char_setstate(basic_istream_char_get_basic_ios(istream),
-        state | (c==EOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$getline@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-/* ??$getline@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-basic_istream_char* __cdecl basic_istream_char_getline_bstr(
-        basic_istream_char *istream, basic_string_char *str)
-{
-    return basic_istream_char_getline_bstr_delim(istream, str, '\n');
-}
-
-/* ??$?5DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-/* ??$?5DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z */
-basic_istream_char* __cdecl basic_istream_char_read_bstr(
-        basic_istream_char *istream, basic_string_char *str)
-{
-    basic_ios_char *base = basic_istream_char_get_basic_ios(istream);
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = '\n';
-
-    TRACE("(%p %p)\n", istream, str);
-
-    if(basic_istream_char_sentry_create(istream, FALSE)) {
-        const ctype_char *ctype = ctype_char_use_facet(base->strbuf->loc);
-        MSVCP_size_t count = ios_base_width_get(&base->base);
-
-        if(!count)
-            count = -1;
-
-        MSVCP_basic_string_char_clear(str);
-
-        for(c = basic_streambuf_char_sgetc(basic_ios_char_rdbuf_get(base));
-                c!=EOF && !ctype_char_is_ch(ctype, _SPACE|_BLANK, c) && count>0;
-                c = basic_streambuf_char_snextc(basic_ios_char_rdbuf_get(base)), count--) {
-            state = IOSTATE_goodbit;
-            MSVCP_basic_string_char_append_ch(str, c);
-        }
-    }
-    basic_istream_char_sentry_destroy(istream);
-
-    ios_base_width_set(&base->base, 0);
-    basic_ios_char_setstate(base, state | (c==EOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$?5DU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@PAD@Z */
-/* ??$?5DU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@PEAD@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@PAC@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@PEAC@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@PAE@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@PEAE@Z */
-basic_istream_char* __cdecl basic_istream_char_read_str(basic_istream_char *istream, char *str)
-{
-    basic_ios_char *base = basic_istream_char_get_basic_ios(istream);
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = '\n';
-
-    TRACE("(%p %p)\n", istream, str);
-
-    if(basic_istream_char_sentry_create(istream, FALSE)) {
-        const ctype_char *ctype = ctype_char_use_facet(base->strbuf->loc);
-        MSVCP_size_t count = ios_base_width_get(&base->base)-1;
-
-        for(c = basic_streambuf_char_sgetc(basic_ios_char_rdbuf_get(base));
-                c!=EOF && !ctype_char_is_ch(ctype, _SPACE|_BLANK, c) && count>0;
-                c = basic_streambuf_char_snextc(basic_ios_char_rdbuf_get(base)), count--) {
-            state = IOSTATE_goodbit;
-            *str++ = c;
-        }
-    }
-    basic_istream_char_sentry_destroy(istream);
-
-    *str = 0;
-    ios_base_width_set(&base->base, 0);
-    basic_ios_char_setstate(base, state | (c==EOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$?5DU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAD@Z */
-/* ??$?5DU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAD@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAC@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAC@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAE@Z */
-/* ??$?5U?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAE@Z */
-basic_istream_char* __cdecl basic_istream_char_read_ch(basic_istream_char *istream, char *ch)
-{
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = 0;
-
-    TRACE("(%p %p)\n", istream, ch);
-
-    if(basic_istream_char_sentry_create(istream, FALSE)) {
-        c = basic_streambuf_char_sbumpc(basic_ios_char_rdbuf_get(
-                    basic_istream_char_get_basic_ios(istream)));
-        if(c != EOF) {
-            state = IOSTATE_goodbit;
-            *ch = c;
-        }
-    }
-    basic_istream_char_sentry_destroy(istream);
-
-    basic_ios_char_setstate(basic_istream_char_get_basic_ios(istream),
-            state | (c==EOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
 /* ??5?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV01@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z */
 /* ??5?$basic_istream@DU?$char_traits@D@std@@@std@@QEAAAEAV01@PEAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z */
 DEFINE_THISCALL_WRAPPER(basic_istream_char_read_streambuf, 8)
@@ -8414,7 +7977,7 @@ basic_istream_wchar* __thiscall basic_istream_wchar_vector_dtor(basic_ios_wchar 
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_istream_wchar_vbase_dtor(this+i);
@@ -9506,161 +9069,6 @@ basic_istream_wchar* __thiscall basic_istream_short_read_bool(basic_istream_wcha
                 basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
 }
 
-/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_W@Z */
-/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_W@Z */
-/* ??$getline@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@AAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@G@Z */
-/* ??$getline@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@0@AEAV10@AEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@G@Z */
-basic_istream_wchar* __cdecl basic_istream_wchar_getline_bstr_delim(
-        basic_istream_wchar *istream, basic_string_wchar *str, wchar_t delim)
-{
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = delim;
-
-    TRACE("(%p %p %c)\n", istream, str, delim);
-
-    if(basic_istream_wchar_sentry_create(istream, TRUE)) {
-        MSVCP_basic_string_wchar_clear(str);
-
-        for(c = basic_istream_wchar_get(istream); c!=delim && c!=WEOF;
-                c = basic_istream_wchar_get(istream)) {
-            state = IOSTATE_goodbit;
-            MSVCP_basic_string_wchar_append_ch(str, c);
-        }
-    }
-    basic_istream_wchar_sentry_destroy(istream);
-
-    basic_ios_wchar_setstate(basic_istream_wchar_get_basic_ios(istream),
-            state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-/* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-/* ??$getline@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@AAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-/* ??$getline@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@0@AEAV10@AEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-basic_istream_wchar* __cdecl basic_istream_wchar_getline_bstr(
-        basic_istream_wchar *istream, basic_string_wchar *str)
-{
-    return basic_istream_wchar_getline_bstr_delim(istream, str, '\n');
-}
-
-static basic_istream_wchar* basic_istream_read_bstr(basic_istream_wchar *istream,
-        basic_string_wchar *str, const ctype_wchar *ctype)
-{
-    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(istream);
-    IOSB_iostate state = IOSTATE_failbit;
-    int c = '\n';
-
-    TRACE("(%p %p)\n", istream, str);
-
-    if(basic_istream_wchar_sentry_create(istream, FALSE)) {
-        MSVCP_size_t count = ios_base_width_get(&base->base);
-
-        if(!count)
-            count = -1;
-
-        MSVCP_basic_string_wchar_clear(str);
-
-        for(c = basic_streambuf_wchar_sgetc(basic_ios_wchar_rdbuf_get(base));
-                c!=WEOF && !ctype_wchar_is_ch(ctype, _SPACE|_BLANK, c) && count>0;
-                c = basic_streambuf_wchar_snextc(basic_ios_wchar_rdbuf_get(base)), count--) {
-            state = IOSTATE_goodbit;
-            MSVCP_basic_string_wchar_append_ch(str, c);
-        }
-    }
-    basic_istream_wchar_sentry_destroy(istream);
-
-    ios_base_width_set(&base->base, 0);
-    basic_ios_wchar_setstate(base, state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$?5_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-/* ??$?5_WU?$char_traits@_W@std@@V?$allocator@_W@1@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@@Z */
-basic_istream_wchar* __cdecl basic_istream_wchar_read_bstr(
-        basic_istream_wchar *istream, basic_string_wchar *str)
-{
-    return basic_istream_read_bstr(istream, str, ctype_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
-}
-
-/* ??$?5GU?$char_traits@G@std@@V?$allocator@G@1@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@AAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-/* ??$?5GU?$char_traits@G@std@@V?$allocator@G@1@@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@0@AEAV10@AEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
-basic_istream_wchar* __cdecl basic_istream_short_read_bstr(
-        basic_istream_wchar *istream, basic_string_wchar *str)
-{
-    return basic_istream_read_bstr(istream, str, ctype_short_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
-}
-
-basic_istream_wchar* basic_istream_read_str(basic_istream_wchar *istream, wchar_t *str, const ctype_wchar *ctype)
-{
-    basic_ios_wchar *base = basic_istream_wchar_get_basic_ios(istream);
-    IOSB_iostate state = IOSTATE_failbit;
-    unsigned short c = '\n';
-
-    TRACE("(%p %p)\n", istream, str);
-
-    if(basic_istream_wchar_sentry_create(istream, FALSE)) {
-        MSVCP_size_t count = ios_base_width_get(&base->base)-1;
-
-        for(c = basic_streambuf_wchar_sgetc(basic_ios_wchar_rdbuf_get(base));
-                c!=WEOF && !ctype_wchar_is_ch(ctype, _SPACE|_BLANK, c) && count>0;
-                c = basic_streambuf_wchar_snextc(basic_ios_wchar_rdbuf_get(base)), count--) {
-            state = IOSTATE_goodbit;
-            *str++ = c;
-        }
-    }
-    basic_istream_wchar_sentry_destroy(istream);
-
-    *str = 0;
-    ios_base_width_set(&base->base, 0);
-    basic_ios_wchar_setstate(base, state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
-/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@PA_W@Z */
-/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@PEA_W@Z */
-basic_istream_wchar* __cdecl basic_istream_wchar_read_str(basic_istream_wchar *istream, wchar_t *str)
-{
-    return basic_istream_read_str(istream, str, ctype_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
-}
-
-/* ??$?5GU?$char_traits@G@std@@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@PAG@Z */
-/* ??$?5GU?$char_traits@G@std@@@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@0@AEAV10@PEAG@Z */
-basic_istream_wchar* __cdecl basic_istream_short_read_str(basic_istream_wchar *istream, wchar_t *str)
-{
-    return basic_istream_read_str(istream, str, ctype_short_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
-}
-
-/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AA_W@Z */
-/* ??$?5_WU?$char_traits@_W@std@@@std@@YAAEAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AEAV10@AEA_W@Z */
-/* ??$?5GU?$char_traits@G@std@@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@AAG@Z */
-/* ??$?5GU?$char_traits@G@std@@@std@@YAAEAV?$basic_istream@GU?$char_traits@G@std@@@0@AEAV10@AEAG@Z */
-basic_istream_wchar* __cdecl basic_istream_wchar_read_ch(basic_istream_wchar *istream, wchar_t *ch)
-{
-    IOSB_iostate state = IOSTATE_failbit;
-    unsigned short c = 0;
-
-    TRACE("(%p %p)\n", istream, ch);
-
-    if(basic_istream_wchar_sentry_create(istream, FALSE)) {
-        c = basic_streambuf_wchar_sbumpc(basic_ios_wchar_rdbuf_get(
-                    basic_istream_wchar_get_basic_ios(istream)));
-        if(c != WEOF) {
-            state = IOSTATE_goodbit;
-            *ch = c;
-        }
-    }
-    basic_istream_wchar_sentry_destroy(istream);
-
-    basic_ios_wchar_setstate(basic_istream_wchar_get_basic_ios(istream),
-            state | (c==WEOF ? IOSTATE_eofbit : IOSTATE_goodbit));
-    return istream;
-}
-
 /* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
 /* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV01@PEAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@PAV?$basic_streambuf@GU?$char_traits@G@std@@@1@@Z */
@@ -9794,7 +9202,7 @@ basic_iostream_char* __thiscall basic_iostream_char_vector_dtor(basic_ios_char *
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_iostream_char_vbase_dtor(this+i);
@@ -9890,7 +9298,7 @@ basic_iostream_wchar* __thiscall basic_iostream_wchar_vector_dtor(basic_ios_wcha
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_iostream_wchar_vbase_dtor(this+i);
@@ -10030,7 +9438,7 @@ basic_ofstream_char* __thiscall basic_ofstream_char_vector_dtor(basic_ios_char *
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ofstream_char_vbase_dtor(this+i);
@@ -10300,7 +9708,7 @@ basic_ofstream_wchar* __thiscall basic_ofstream_wchar_vector_dtor(basic_ios_wcha
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ofstream_wchar_vbase_dtor(this+i);
@@ -10539,7 +9947,7 @@ basic_ifstream_char* __thiscall basic_ifstream_char_vector_dtor(basic_ios_char *
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ifstream_char_vbase_dtor(this+i);
@@ -10809,7 +10217,7 @@ basic_ifstream_wchar* __thiscall basic_ifstream_wchar_vector_dtor(basic_ios_wcha
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ifstream_wchar_vbase_dtor(this+i);
@@ -11050,7 +10458,7 @@ basic_fstream_char* __thiscall basic_fstream_char_vector_dtor(basic_ios_char *ba
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_fstream_char_vbase_dtor(this+i);
@@ -11322,7 +10730,7 @@ basic_fstream_wchar* __thiscall basic_fstream_wchar_vector_dtor(basic_ios_wchar 
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_fstream_wchar_vbase_dtor(this+i);
@@ -11535,7 +10943,7 @@ basic_ostringstream_char* __thiscall basic_ostringstream_char_vector_dtor(basic_
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ostringstream_char_vbase_dtor(this+i);
@@ -11711,7 +11119,7 @@ basic_ostringstream_wchar* __thiscall basic_ostringstream_wchar_vector_dtor(basi
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_ostringstream_wchar_vbase_dtor(this+i);
@@ -11858,7 +11266,7 @@ basic_istringstream_char* __thiscall basic_istringstream_char_vector_dtor(basic_
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_istringstream_char_vbase_dtor(this+i);
@@ -12034,7 +11442,7 @@ basic_istringstream_wchar* __thiscall basic_istringstream_wchar_vector_dtor(basi
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_istringstream_wchar_vbase_dtor(this+i);
@@ -12184,7 +11592,7 @@ basic_stringstream_char* __thiscall basic_stringstream_char_vector_dtor(basic_io
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_stringstream_char_vbase_dtor(this+i);
@@ -12364,7 +11772,7 @@ basic_stringstream_wchar* __thiscall basic_stringstream_wchar_vector_dtor(basic_
 
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             basic_stringstream_wchar_vbase_dtor(this+i);
@@ -12544,7 +11952,7 @@ strstreambuf* __thiscall strstreambuf_vector_dtor(strstreambuf *this, unsigned i
     TRACE("(%p %x)\n", this, flags);
     if(flags & 2) {
         /* we have an array, with the number of elements stored before the first object */
-        int i, *ptr = (int *)this-1;
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
 
         for(i=*ptr-1; i>=0; i--)
             strstreambuf_dtor(this+i);

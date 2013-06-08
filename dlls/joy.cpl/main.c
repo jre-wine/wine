@@ -32,6 +32,7 @@
 #include "ole2.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 #include "joy.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(joycpl);
@@ -90,6 +91,7 @@ static BOOL CALLBACK enum_callback(const DIDEVICEINSTANCEW *instance, void *cont
     joystick->num_buttons = caps.dwButtons;
     joystick->num_axes = caps.dwAxes;
     joystick->forcefeedback = caps.dwFlags & DIDC_FORCEFEEDBACK;
+    joystick->num_effects = 0;
 
     if (joystick->forcefeedback) data->num_ff++;
 
@@ -130,10 +132,10 @@ static void destroy_joysticks(struct JoystickData *data)
     for (i = 0; i < data->num_joysticks; i++)
     {
 
-        if (data->joysticks[i].forcefeedback)
+        if (data->joysticks[i].forcefeedback && data->joysticks[i].num_effects > 0)
         {
             for (j = 0; j < data->joysticks[i].num_effects; j++)
-            IDirectInputEffect_Release(data->joysticks[i].effects[j].effect);
+                IDirectInputEffect_Release(data->joysticks[i].effects[j].effect);
 
             HeapFree(GetProcessHeap(), 0, data->joysticks[i].effects);
         }
@@ -145,26 +147,134 @@ static void destroy_joysticks(struct JoystickData *data)
     HeapFree(GetProcessHeap(), 0, data->joysticks);
 }
 
+static void initialize_joysticks_list(HWND hwnd, struct JoystickData *data)
+{
+    int i;
+
+    SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_RESETCONTENT, 0, 0);
+
+    /* Add enumerated joysticks */
+    for (i = 0; i < data->num_joysticks; i++)
+    {
+        struct Joystick *joy = &data->joysticks[i];
+        SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
+    }
+}
+
+/******************************************************************************
+ * get_app_key [internal]
+ * Get the default DirectInput key and the selected app config key.
+ */
+static BOOL get_app_key(HKEY *defkey, HKEY *appkey)
+{
+    static const WCHAR reg_key[] = { 'S','o','f','t','w','a','r','e','\\',
+                                     'W','i','n','e','\\',
+                                     'D','i','r','e','c','t','I','n','p','u','t','\\',
+                                     'J','o','y','s','t','i','c','k','s','\0' };
+    *appkey = 0;
+
+    /* Registry key can be found in HKCU\Software\Wine\DirectInput */
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, reg_key, 0, NULL, 0, KEY_SET_VALUE | KEY_READ, NULL, defkey, NULL))
+        *defkey = 0;
+
+    return *defkey || *appkey;
+}
+
+/******************************************************************************
+ * set_config_key [internal]
+ * Writes a string value to a registry key, deletes the key if value == NULL
+ */
+static DWORD set_config_key(HKEY defkey, HKEY appkey, const WCHAR *name, const WCHAR *value, DWORD size)
+{
+    if (value == NULL)
+    {
+        if (appkey && !RegDeleteValueW(appkey, name))
+            return 0;
+
+        if (defkey && !RegDeleteValueW(defkey, name))
+            return 0;
+    }
+    else
+    {
+        if (appkey && !RegSetValueExW(appkey, name, 0, REG_SZ, (const BYTE*) value, (size + 1)*sizeof(WCHAR)))
+            return 0;
+
+        if (defkey && !RegSetValueExW(defkey, name, 0, REG_SZ, (const BYTE*) value, (size + 1)*sizeof(WCHAR)))
+            return 0;
+    }
+
+    return ERROR_FILE_NOT_FOUND;
+}
+
+/******************************************************************************
+ * enable_joystick [internal]
+ * Writes to the DirectInput registry key that enables/disables a joystick
+ * from being enumerated.
+ */
+static void enable_joystick(WCHAR *joy_name, BOOL enable)
+{
+    static const WCHAR disabled_str[] = {'d','i','s','a','b','l','e','d','\0'};
+    HKEY hkey, appkey;
+
+    get_app_key(&hkey, &appkey);
+
+    if (!enable)
+        set_config_key(hkey, appkey, joy_name, disabled_str, lstrlenW(disabled_str));
+    else
+        set_config_key(hkey, appkey, joy_name, NULL, 0);
+
+    if (hkey) RegCloseKey(hkey);
+    if (appkey) RegCloseKey(appkey);
+}
+
+static void initialize_disabled_joysticks_list(HWND hwnd)
+{
+    static const WCHAR disabled_str[] = {'d','i','s','a','b','l','e','d','\0'};
+    HKEY hkey, appkey;
+    DWORD values = 0;
+    HRESULT hr;
+    int i;
+
+    SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_RESETCONTENT, 0, 0);
+
+    /* Search for disabled joysticks */
+    get_app_key(&hkey, &appkey);
+    RegQueryInfoKeyW(hkey, NULL, NULL, NULL, NULL, NULL, NULL, &values, NULL, NULL, NULL, NULL);
+
+    for (i=0; i < values; i++)
+    {
+        DWORD name_len = MAX_PATH, data_len = MAX_PATH;
+        WCHAR buf_name[MAX_PATH + 9], buf_data[MAX_PATH];
+
+        hr = RegEnumValueW(hkey, i, buf_name, &name_len, NULL, NULL, (BYTE*) buf_data, &data_len);
+
+        if (SUCCEEDED(hr) && !lstrcmpW(disabled_str, buf_data))
+            SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_ADDSTRING, 0, (LPARAM) buf_name);
+    }
+
+    if (hkey) RegCloseKey(hkey);
+    if (appkey) RegCloseKey(appkey);
+}
+
 /*********************************************************************
  * list_dlgproc [internal]
  *
  */
 static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    static struct JoystickData *data;
     TRACE("(%p, 0x%08x/%d, 0x%lx)\n", hwnd, msg, msg, lparam);
     switch (msg)
     {
         case WM_INITDIALOG:
         {
-            int i;
-            struct JoystickData *data = (struct JoystickData*) ((PROPSHEETPAGEW*)lparam)->lParam;
+            data = (struct JoystickData*) ((PROPSHEETPAGEW*)lparam)->lParam;
 
-            /* Set dialog information */
-            for (i = 0; i < data->num_joysticks; i++)
-            {
-                struct Joystick *joy = &data->joysticks[i];
-                SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_ADDSTRING, 0, (LPARAM) joy->instance.tszInstanceName);
-            }
+            initialize_joysticks_list(hwnd, data);
+            initialize_disabled_joysticks_list(hwnd);
+
+            EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), FALSE);
+            EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), FALSE);
 
             /* Store the hwnd to be used with MapDialogRect for unit conversions */
             data->graphics.hwnd = hwnd;
@@ -177,12 +287,39 @@ static INT_PTR CALLBACK list_dlgproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM 
             switch (LOWORD(wparam))
             {
                 case IDC_BUTTONDISABLE:
-                    FIXME("Disable selected joystick from being enumerated\n");
-                    break;
+                {
+                    int sel = SendDlgItemMessageW(hwnd, IDC_JOYSTICKLIST, LB_GETCURSEL, 0, 0);
+
+                    if (sel >= 0)
+                    {
+                        enable_joystick(data->joysticks[sel].instance.tszInstanceName, FALSE);
+                        initialize_disabled_joysticks_list(hwnd);
+                    }
+                }
+                break;
 
                 case IDC_BUTTONENABLE:
-                    FIXME("Re-Enable selected joystick\n");
-                    break;
+                {
+                    int sel = SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETCURSEL, 0, 0);
+
+                    if (sel >= 0)
+                    {
+                        WCHAR text[MAX_PATH];
+                        SendDlgItemMessageW(hwnd, IDC_DISABLEDLIST, LB_GETTEXT, sel, (LPARAM) text);
+                        enable_joystick(text, TRUE);
+                        initialize_disabled_joysticks_list(hwnd);
+                    }
+                }
+
+                case IDC_JOYSTICKLIST:
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), FALSE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), TRUE);
+                break;
+
+                case IDC_DISABLEDLIST:
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONENABLE), TRUE);
+                    EnableWindow(GetDlgItem(hwnd, IDC_BUTTONDISABLE), FALSE);
+                break;
             }
 
             return TRUE;
@@ -289,6 +426,7 @@ static DWORD WINAPI input_thread(void *param)
 
             r.left = (TEST_AXIS_X + TEST_NEXT_AXIS_X*i + axes_pos[i][0]);
             r.top = (TEST_AXIS_Y + axes_pos[i][1]);
+            r.bottom = r.right = 0; /* unused */
             MapDialogRect(data->graphics.hwnd, &r);
 
             SetWindowPos(data->graphics.axes[i], 0, r.left, r.top, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
@@ -549,6 +687,7 @@ static DWORD WINAPI ff_input_thread(void *param)
 
         r.left = FF_AXIS_X + state.lX;
         r.top = FF_AXIS_Y + state.lY;
+        r.right = r.bottom = 0; /* unused */
         MapDialogRect(data->graphics.hwnd, &r);
 
         SetWindowPos(data->graphics.ff_axis, 0, r.left, r.top, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
