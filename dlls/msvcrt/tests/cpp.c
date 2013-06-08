@@ -828,13 +828,99 @@ static void test_type_info(void)
   ok(res == 1, "expected 1, got %d\n", res);
 }
 
+static inline vtable_ptr *get_vtable( void *obj )
+{
+    return *(vtable_ptr **)obj;
+}
+
+static inline void/*rtti_object_locator*/ *get_obj_locator( void *cppobj )
+{
+    const vtable_ptr *vtable = get_vtable( cppobj );
+    return (void *)vtable[-1];
+}
+
+#ifndef __x86_64__
+#define DEFINE_RTTI_REF(type, name) type *name
+#define RTTI_REF(instance, name) &instance.name
+#define RTTI_REF_SIG0(instance, name, base) RTTI_REF(instance, name)
+#else
+#define DEFINE_RTTI_REF(type, name) unsigned name
+#define RTTI_REF(instance, name) FIELD_OFFSET(struct rtti_data, name)
+#define RTTI_REF_SIG0(instance, name, base) ((char*)&instance.name-base)
+#endif
 /* Test RTTI functions */
 static void test_rtti(void)
 {
+  struct _object_locator
+  {
+      unsigned int signature;
+      int base_class_offset;
+      unsigned int flags;
+      DEFINE_RTTI_REF(type_info, type_descriptor);
+      DEFINE_RTTI_REF(struct _rtti_object_hierarchy, type_hierarchy);
+      DEFINE_RTTI_REF(void, object_locator);
+  } *obj_locator;
+
+  struct rtti_data
+  {
+    type_info type_info[4];
+
+    struct _rtti_base_descriptor
+    {
+      DEFINE_RTTI_REF(type_info, type_descriptor);
+      int num_base_classes;
+      struct {
+        int this_offset;
+        int vbase_descr;
+        int vbase_offset;
+      } this_ptr_offsets;
+      unsigned int attributes;
+    } base_descriptor[4];
+
+    struct _rtti_base_array {
+      DEFINE_RTTI_REF(struct _rtti_base_descriptor, bases[4]);
+    } base_array;
+
+    struct _rtti_object_hierarchy {
+      unsigned int signature;
+      unsigned int attributes;
+      int array_len;
+      DEFINE_RTTI_REF(struct _rtti_base_array, base_classes);
+    } object_hierarchy;
+
+    struct _object_locator object_locator;
+  } simple_class_rtti = {
+    { {NULL, NULL, "simple_class"} },
+    { {RTTI_REF(simple_class_rtti, type_info[0]), 0, {0, 0, 0}, 0} },
+    { {RTTI_REF(simple_class_rtti, base_descriptor[0])} },
+    {0, 0, 1, RTTI_REF(simple_class_rtti, base_array)},
+    {1, 0, 0, RTTI_REF(simple_class_rtti, type_info[0]), RTTI_REF(simple_class_rtti, object_hierarchy), RTTI_REF(simple_class_rtti, object_locator)}
+  }, child_class_rtti = {
+    { {NULL, NULL, "simple_class"}, {NULL, NULL, "child_class"} },
+    { {RTTI_REF(child_class_rtti, type_info[1]), 0, {4, -1, 0}, 0}, {RTTI_REF(child_class_rtti, type_info[0]), 0, {8, -1, 0}, 0} },
+    { {RTTI_REF(child_class_rtti, base_descriptor[0]), RTTI_REF(child_class_rtti, base_descriptor[1])} },
+    {0, 0, 2, RTTI_REF(child_class_rtti, base_array)},
+    {1, 0, 0, RTTI_REF(child_class_rtti, type_info[1]), RTTI_REF(child_class_rtti, object_hierarchy), RTTI_REF(child_class_rtti, object_locator)}
+  };
+  static struct rtti_data simple_class_sig0_rtti, child_class_sig0_rtti;
+
+  void *simple_class_vtbl[2] = {&simple_class_rtti.object_locator};
+  void *simple_class = &simple_class_vtbl[1];
+  void *child_class_vtbl[2] = {&child_class_rtti.object_locator};
+  void *child_class = &child_class_vtbl[1];
+  void *simple_class_sig0_vtbl[2] = {&simple_class_sig0_rtti.object_locator};
+  void *simple_class_sig0 = &simple_class_sig0_vtbl[1];
+  void *child_class_sig0_vtbl[2] = {&child_class_sig0_rtti.object_locator};
+  void *child_class_sig0 = &child_class_sig0_vtbl[1];
+
   static const char* e_name = "name";
   type_info *ti,*bti;
   exception e,b;
   void *casted;
+  BOOL old_signature;
+#ifdef __x86_64__
+  char *base = (char*)GetModuleHandleW(NULL);
+#endif
 
   if (bAncientVersion ||
       !p__RTCastToVoid || !p__RTtypeid || !pexception_ctor || !pbad_typeid_ctor
@@ -843,6 +929,12 @@ static void test_rtti(void)
 
   call_func2(pexception_ctor, &e, &e_name);
   call_func2(pbad_typeid_ctor, &b, e_name);
+
+  obj_locator = get_obj_locator(&e);
+  if(obj_locator->signature!=1 && sizeof(void*)>sizeof(int))
+    old_signature = TRUE;
+  else
+    old_signature = FALSE;
 
   /* dynamic_cast to void* */
   casted = p__RTCastToVoid(&e);
@@ -865,6 +957,75 @@ static void test_rtti(void)
 
   call_func1(pexception_dtor, &e);
   call_func1(pbad_typeid_dtor, &b);
+
+  memcpy(&simple_class_sig0_rtti, &simple_class_rtti, sizeof(struct rtti_data));
+  simple_class_sig0_rtti.object_locator.signature = 0;
+  simple_class_sig0_rtti.base_descriptor[0].type_descriptor = RTTI_REF_SIG0(simple_class_sig0_rtti, type_info[0], base);
+  simple_class_sig0_rtti.base_array.bases[0] = RTTI_REF_SIG0(simple_class_sig0_rtti, base_descriptor[0], base);
+  simple_class_sig0_rtti.object_hierarchy.base_classes = RTTI_REF_SIG0(simple_class_sig0_rtti, base_array, base);
+  simple_class_sig0_rtti.object_locator.type_descriptor = RTTI_REF_SIG0(simple_class_sig0_rtti, type_info[0], base);
+  simple_class_sig0_rtti.object_locator.type_hierarchy = RTTI_REF_SIG0(simple_class_sig0_rtti, object_hierarchy, base);
+
+  memcpy(&child_class_sig0_rtti, &child_class_rtti, sizeof(struct rtti_data));
+  child_class_sig0_rtti.object_locator.signature = 0;
+  child_class_sig0_rtti.base_descriptor[0].type_descriptor = RTTI_REF_SIG0(child_class_sig0_rtti, type_info[1], base);
+  child_class_sig0_rtti.base_descriptor[1].type_descriptor = RTTI_REF_SIG0(child_class_sig0_rtti, type_info[0], base);
+  child_class_sig0_rtti.base_array.bases[0] = RTTI_REF_SIG0(child_class_sig0_rtti, base_descriptor[0], base);
+  child_class_sig0_rtti.base_array.bases[1] = RTTI_REF_SIG0(child_class_sig0_rtti, base_descriptor[1], base);
+  child_class_sig0_rtti.object_hierarchy.base_classes = RTTI_REF_SIG0(child_class_sig0_rtti, base_array, base);
+  child_class_sig0_rtti.object_locator.type_descriptor = RTTI_REF_SIG0(child_class_sig0_rtti, type_info[1], base);
+  child_class_sig0_rtti.object_locator.type_hierarchy = RTTI_REF_SIG0(child_class_sig0_rtti, object_hierarchy, base);
+
+  ti = p__RTtypeid(&simple_class_sig0);
+  ok (ti && ti->mangled && !strcmp(ti->mangled, "simple_class"),
+          "incorrect rtti data\n");
+
+  casted = p__RTCastToVoid(&simple_class_sig0);
+  ok (casted == (void*)&simple_class_sig0, "failed cast to void\n");
+
+  ti = p__RTtypeid(&child_class_sig0);
+  ok (ti && ti->mangled && !strcmp(ti->mangled, "child_class"),
+          "incorrect rtti data\n");
+
+  casted = p__RTCastToVoid(&child_class_sig0);
+  ok (casted == (void*)&child_class_sig0, "failed cast to void\n");
+
+  casted = p__RTDynamicCast(&child_class_sig0, 0, NULL, simple_class_sig0_rtti.type_info, 0);
+  if(casted)
+  {
+      ok (casted == (char*)&child_class_sig0+8, "failed cast to simple_class (%p %p)\n", casted, &child_class_sig0);
+  }
+
+  casted = p__RTDynamicCast(&child_class_sig0, 0, &child_class_sig0_rtti.type_info[0], &child_class_sig0_rtti.type_info[1], 0);
+  ok(casted == (char*)&child_class_sig0+4, "failed cast to child class (%p %p)\n", casted, &child_class_sig0);
+
+  if(old_signature) {
+      skip("signature==1 is not supported\n");
+      return;
+  }
+
+  ti = p__RTtypeid(&simple_class);
+  ok (ti && ti->mangled && !strcmp(ti->mangled, "simple_class"),
+          "incorrect rtti data\n");
+
+  casted = p__RTCastToVoid(&simple_class);
+  ok (casted == (void*)&simple_class, "failed cast to void\n");
+
+  ti = p__RTtypeid(&child_class);
+  ok (ti && ti->mangled && !strcmp(ti->mangled, "child_class"),
+        "incorrect rtti data\n");
+
+  casted = p__RTCastToVoid(&child_class);
+  ok (casted == (void*)&child_class, "failed cast to void\n");
+
+  casted = p__RTDynamicCast(&child_class, 0, NULL, simple_class_rtti.type_info, 0);
+  if(casted)
+  {
+    ok (casted == (char*)&child_class+8, "failed cast to simple_class (%p %p)\n", casted, &child_class);
+  }
+
+  casted = p__RTDynamicCast(&child_class, 0, &child_class_rtti.type_info[0], &child_class_rtti.type_info[1], 0);
+  ok(casted == (char*)&child_class+4, "failed cast to child class (%p %p)\n", casted, &child_class);
 }
 
 struct _demangle {

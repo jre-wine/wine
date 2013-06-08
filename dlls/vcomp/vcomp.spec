@@ -85,7 +85,7 @@
 @ stub _vcomp_reduction_u8
 @ stub _vcomp_sections_init
 @ stub _vcomp_sections_next
-@ stub _vcomp_set_num_threads
+@ cdecl _vcomp_set_num_threads(long)
 @ stub _vcomp_single_begin
 @ stub _vcomp_single_end
 @ stub omp_destroy_lock
@@ -93,11 +93,11 @@
 @ stub omp_get_dynamic
 @ stub omp_get_max_threads
 @ stub omp_get_nested
-@ stub omp_get_num_procs
+@ cdecl omp_get_num_procs()
 @ stub omp_get_num_threads
 @ stub omp_get_thread_num
 @ stub omp_get_wtick
-@ stub omp_get_wtime
+@ cdecl omp_get_wtime()
 @ stub omp_in_parallel
 @ stub omp_init_lock
 @ stub omp_init_nest_lock

@@ -47,6 +47,7 @@
 #undef WINGDIAPI
 
 #include "x11drv.h"
+#include "xcomposite.h"
 #include "winternl.h"
 #include "wine/library.h"
 #include "wine/debug.h"
@@ -56,7 +57,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 #ifdef SONAME_LIBGL
 
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
-WINE_DECLARE_DEBUG_CHANNEL(fps);
 
 #include "wine/wgl_driver.h"
 #include "wine/wglext.h"
@@ -172,15 +172,40 @@ struct wgl_pbuffer
     int        texture_level;
 };
 
+enum dc_gl_type
+{
+    DC_GL_NONE,       /* no GL support (pixel format not set yet) */
+    DC_GL_WINDOW,     /* normal top-level window */
+    DC_GL_CHILD_WIN,  /* child window using XComposite */
+    DC_GL_PIXMAP_WIN, /* child window using intermediate pixmap */
+    DC_GL_PBUFFER     /* pseudo memory DC using a PBuffer */
+};
+
 struct glx_physdev
 {
-    struct gdi_physdev dev;
-    X11DRV_PDEVICE    *x11dev;
-    enum dc_gl_type    type;          /* type of GL device context */
-    int                pixel_format;
-    Drawable           drawable;
-    Pixmap             pixmap;        /* pixmap for a DL_GL_PIXMAP_WIN drawable */
+    struct gdi_physdev             dev;
+    X11DRV_PDEVICE                *x11dev;
+    enum dc_gl_type                type;          /* type of GL device context */
+    const struct wgl_pixel_format *format;
+    Drawable                       drawable;
+    Pixmap                         pixmap;        /* pixmap for a DL_GL_PIXMAP_WIN drawable */
 };
+
+struct gl_drawable
+{
+    enum dc_gl_type                type;         /* type of GL surface */
+    Drawable                       drawable;     /* drawable for rendering to the client area */
+    Pixmap                         pixmap;       /* base pixmap if drawable is a GLXPixmap */
+    Colormap                       colormap;     /* colormap used for the drawable */
+    const struct wgl_pixel_format *format;       /* pixel format for the drawable */
+    XVisualInfo                   *visual;       /* information about the GL visual */
+    RECT                           rect;         /* drawable rect, relative to whole window drawable */
+};
+
+/* X context to associate a struct gl_drawable to an hwnd */
+static XContext gl_hwnd_context;
+/* X context to associate a struct gl_drawable to a pbuffer hdc */
+static XContext gl_pbuffer_context;
 
 static const struct gdi_dc_funcs glxdrv_funcs;
 
@@ -568,6 +593,8 @@ static BOOL has_opengl(void)
         ERR( "GLX extension is missing, disabling OpenGL.\n" );
         goto failed;
     }
+    gl_hwnd_context = XUniqueContext();
+    gl_pbuffer_context = XUniqueContext();
 
     /* In case of GLX you have direct and indirect rendering. Most of the time direct rendering is used
      * as in general only that is hardware accelerated. In some cases like in case of remote X indirect
@@ -1060,11 +1087,10 @@ static int pixelformat_from_fbconfig_id(XID fbconfig_id)
 
 
 /* Mark any allocated context using the glx drawable 'old' to use 'new' */
-void mark_drawable_dirty(Drawable old, Drawable new)
+static void mark_drawable_dirty(Drawable old, Drawable new)
 {
     struct wgl_context *ctx;
 
-    EnterCriticalSection( &context_section );
     LIST_FOR_EACH_ENTRY( ctx, &context_list, struct wgl_context, entry )
     {
         if (old == ctx->drawables[0]) {
@@ -1076,7 +1102,6 @@ void mark_drawable_dirty(Drawable old, Drawable new)
             ctx->refresh_drawables = TRUE;
         }
     }
-    LeaveCriticalSection( &context_section );
 }
 
 /* Given the current context, make sure its drawable is sync'd */
@@ -1094,6 +1119,30 @@ static inline void sync_context(struct wgl_context *context)
     LeaveCriticalSection( &context_section );
 }
 
+static struct gl_drawable *get_gl_drawable( HWND hwnd, HDC hdc )
+{
+    struct gl_drawable *gl;
+
+    EnterCriticalSection( &context_section );
+    if (hwnd && !XFindContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char **)&gl )) return gl;
+    if (hdc && !XFindContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char **)&gl )) return gl;
+    LeaveCriticalSection( &context_section );
+    return NULL;
+}
+
+static void release_gl_drawable( struct gl_drawable *gl )
+{
+    if (gl) LeaveCriticalSection( &context_section );
+}
+
+BOOL has_gl_drawable( HWND hwnd )
+{
+    struct gl_drawable *gl;
+
+    gl = get_gl_drawable( hwnd, 0 );
+    release_gl_drawable( gl );
+    return gl != NULL;
+}
 
 static GLXContext create_glxcontext(Display *display, struct wgl_context *context, GLXContext shareList)
 {
@@ -1118,9 +1167,227 @@ static GLXContext create_glxcontext(Display *display, struct wgl_context *contex
 }
 
 
-Drawable create_glxpixmap(Display *display, XVisualInfo *vis, Pixmap parent)
+/***********************************************************************
+ *              free_gl_drawable
+ */
+static void free_gl_drawable( struct gl_drawable *gl )
 {
-    return pglXCreateGLXPixmap(display, vis, parent);
+    switch (gl->type)
+    {
+    case DC_GL_WINDOW:
+    case DC_GL_CHILD_WIN:
+        XDestroyWindow( gdi_display, gl->drawable );
+        XFreeColormap( gdi_display, gl->colormap );
+        break;
+    case DC_GL_PIXMAP_WIN:
+        pglXDestroyGLXPixmap( gdi_display, gl->drawable );
+        XFreePixmap( gdi_display, gl->pixmap );
+        break;
+    default:
+        break;
+    }
+    if (gl->visual) XFree( gl->visual );
+    HeapFree( GetProcessHeap(), 0, gl );
+}
+
+
+/***********************************************************************
+ *              set_win_format
+ */
+BOOL set_win_format( HWND hwnd, XID fbconfig_id )
+{
+    XSetWindowAttributes attrib;
+    struct gl_drawable *gl, *prev;
+    int format;
+
+    if (!(format = pixelformat_from_fbconfig_id( fbconfig_id ))) return FALSE;
+
+    gl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gl) );
+    gl->format = &pixel_formats[format - 1];
+    gl->visual = pglXGetVisualFromFBConfig( gdi_display, gl->format->fbconfig );
+    if (!gl->visual)
+    {
+        HeapFree( GetProcessHeap(), 0, gl );
+        return FALSE;
+    }
+
+    GetClientRect( hwnd, &gl->rect );
+    gl->rect.right  = min( max( 1, gl->rect.right ), 65535 );
+    gl->rect.bottom = min( max( 1, gl->rect.bottom ), 65535 );
+
+    if (GetAncestor( hwnd, GA_PARENT ) == GetDesktopWindow())  /* top-level window */
+    {
+        Window parent = X11DRV_get_whole_window( hwnd );
+
+        gl->type = DC_GL_WINDOW;
+        gl->colormap = XCreateColormap( gdi_display, root_window, gl->visual->visual,
+                                        (gl->visual->class == PseudoColor ||
+                                         gl->visual->class == GrayScale ||
+                                         gl->visual->class == DirectColor) ? AllocAll : AllocNone );
+        attrib.colormap = gl->colormap;
+        attrib.bit_gravity = NorthWestGravity;
+        attrib.win_gravity = NorthWestGravity;
+        attrib.backing_store = NotUseful;
+        /* put the initial rect outside of the window, it will be moved into place by SetWindowPos */
+        OffsetRect( &gl->rect, gl->rect.right, gl->rect.bottom );
+        if (parent)
+            gl->drawable = XCreateWindow( gdi_display, parent, gl->rect.left, gl->rect.top,
+                                          gl->rect.right - gl->rect.left, gl->rect.bottom - gl->rect.top,
+                                          0, screen_depth, InputOutput, gl->visual->visual,
+                                          CWBitGravity | CWWinGravity | CWBackingStore | CWColormap,
+                                          &attrib );
+        if (gl->drawable)
+            XMapWindow( gdi_display, gl->drawable );
+        else
+            XFreeColormap( gdi_display, gl->colormap );
+    }
+#ifdef SONAME_LIBXCOMPOSITE
+    else if(usexcomposite)
+    {
+        static Window dummy_parent;
+
+        attrib.override_redirect = True;
+        if (!dummy_parent)
+        {
+            dummy_parent = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, screen_depth,
+                                         InputOutput, visual, CWOverrideRedirect, &attrib );
+            XMapWindow( gdi_display, dummy_parent );
+        }
+        gl->colormap = XCreateColormap(gdi_display, dummy_parent, gl->visual->visual,
+                                       (gl->visual->class == PseudoColor ||
+                                        gl->visual->class == GrayScale ||
+                                        gl->visual->class == DirectColor) ?
+                                       AllocAll : AllocNone);
+        attrib.colormap = gl->colormap;
+        XInstallColormap(gdi_display, attrib.colormap);
+
+        gl->type = DC_GL_CHILD_WIN;
+        gl->drawable = XCreateWindow( gdi_display, dummy_parent, 0, 0,
+                                      gl->rect.right - gl->rect.left, gl->rect.bottom - gl->rect.top,
+                                      0, gl->visual->depth, InputOutput, gl->visual->visual,
+                                      CWColormap | CWOverrideRedirect, &attrib );
+        if (gl->drawable)
+        {
+            pXCompositeRedirectWindow(gdi_display, gl->drawable, CompositeRedirectManual);
+            XMapWindow(gdi_display, gl->drawable);
+        }
+        else XFreeColormap( gdi_display, gl->colormap );
+    }
+#endif
+    else
+    {
+        WARN("XComposite is not available, using GLXPixmap hack\n");
+
+        gl->type = DC_GL_PIXMAP_WIN;
+        gl->pixmap = XCreatePixmap( gdi_display, root_window,
+                                    gl->rect.right - gl->rect.left, gl->rect.bottom - gl->rect.top,
+                                    gl->visual->depth );
+        if (gl->pixmap)
+        {
+            gl->drawable = pglXCreateGLXPixmap( gdi_display, gl->visual, gl->pixmap );
+            if (!gl->drawable) XFreePixmap( gdi_display, gl->pixmap );
+        }
+    }
+
+    if (!gl->drawable)
+    {
+        XFree( gl->visual );
+        HeapFree( GetProcessHeap(), 0, gl );
+        return FALSE;
+    }
+
+    TRACE("Created GL drawable 0x%lx, using FBConfigID 0x%lx\n", gl->drawable, fbconfig_id);
+
+    XFlush( gdi_display );
+
+    EnterCriticalSection( &context_section );
+    if (!XFindContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char **)&prev ))
+        free_gl_drawable( prev );
+    XSaveContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char *)gl );
+    LeaveCriticalSection( &context_section );
+
+    /* force DCE invalidation */
+    SetWindowPos( hwnd, 0, 0, 0, 0, 0,
+                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE | SWP_NOMOVE |
+                  SWP_NOREDRAW | SWP_DEFERERASE | SWP_NOSENDCHANGING | SWP_STATECHANGED);
+    return TRUE;
+}
+
+/***********************************************************************
+ *              sync_gl_drawable
+ */
+void sync_gl_drawable( HWND hwnd, const RECT *visible_rect, const RECT *client_rect )
+{
+    struct gl_drawable *gl;
+    Drawable glxp;
+    Pixmap pix;
+    int mask = 0;
+    XWindowChanges changes;
+
+    changes.x      = client_rect->left - visible_rect->left;
+    changes.y      = client_rect->top - visible_rect->top;
+    changes.width  = min( max( 1, client_rect->right - client_rect->left ), 65535 );
+    changes.height = min( max( 1, client_rect->bottom - client_rect->top ), 65535 );
+
+    if (!(gl = get_gl_drawable( hwnd, 0 ))) return;
+
+    if (changes.width  != gl->rect.right - gl->rect.left) mask |= CWWidth;
+    if (changes.height != gl->rect.bottom - gl->rect.top) mask |= CWHeight;
+
+    TRACE( "setting drawable %lx pos %d,%d,%dx%d\n",
+           gl->drawable, changes.x, changes.y, changes.width, changes.height );
+
+    switch (gl->type)
+    {
+    case DC_GL_WINDOW:
+        if (changes.x != gl->rect.left) mask |= CWX;
+        if (changes.y != gl->rect.top)  mask |= CWY;
+        /* fallthrough */
+    case DC_GL_CHILD_WIN:
+        if (mask) XConfigureWindow( gdi_display, gl->drawable, mask, &changes );
+        break;
+    case DC_GL_PIXMAP_WIN:
+        if (!mask) break;
+        pix = XCreatePixmap(gdi_display, root_window, changes.width, changes.height, gl->visual->depth);
+        if (!pix) goto done;
+        glxp = pglXCreateGLXPixmap(gdi_display, gl->visual, pix);
+        if (!glxp)
+        {
+            XFreePixmap(gdi_display, pix);
+            goto done;
+        }
+        mark_drawable_dirty(gl->drawable, glxp);
+        XFlush( gdi_display );
+
+        XFreePixmap(gdi_display, gl->pixmap);
+        pglXDestroyGLXPixmap(gdi_display, gl->drawable);
+        TRACE( "Recreated GL drawable %lx to replace %lx\n", glxp, gl->drawable );
+
+        gl->pixmap = pix;
+        gl->drawable = glxp;
+        break;
+    default:
+        break;
+    }
+    SetRect( &gl->rect, changes.x, changes.y, changes.x + changes.width, changes.y + changes.height );
+done:
+    release_gl_drawable( gl );
+}
+
+/***********************************************************************
+ *              destroy_gl_drawable
+ */
+void destroy_gl_drawable( HWND hwnd )
+{
+    struct gl_drawable *gl;
+
+    EnterCriticalSection( &context_section );
+    if (!XFindContext( gdi_display, (XID)hwnd, gl_hwnd_context, (char **)&gl ))
+    {
+        XDeleteContext( gdi_display, (XID)hwnd, gl_hwnd_context );
+        free_gl_drawable( gl );
+    }
+    LeaveCriticalSection( &context_section );
 }
 
 
@@ -1263,26 +1530,19 @@ static int glxdrv_wglDescribePixelFormat( HDC hdc, int iPixelFormat,
  */
 static int glxdrv_wglGetPixelFormat( HDC hdc )
 {
-    struct x11drv_escape_get_drawable escape;
+    struct gl_drawable *gl;
+    int ret = 0;
 
-    TRACE( "(%p)\n", hdc );
-
-    escape.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape.code), (LPCSTR)&escape.code,
-                    sizeof(escape), (LPSTR)&escape ))
-        return 0;
-
-    if (!is_valid_pixel_format( escape.pixel_format )) return 0;  /* not set yet */
-
-    if (!is_onscreen_pixel_format( escape.pixel_format ))
+    if ((gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
     {
+        ret = gl->format - pixel_formats + 1;
         /* Offscreen formats can't be used with traditional WGL calls.
          * As has been verified on Windows GetPixelFormat doesn't fail but returns iPixelFormat=1. */
-        TRACE("Returning iPixelFormat=1 for offscreen format: %d\n", escape.pixel_format);
-        return 1;
+        if (!is_onscreen_pixel_format( ret )) ret = 1;
+        release_gl_drawable( gl );
     }
-    TRACE("(%p): returns %d\n", hdc, escape.pixel_format);
-    return escape.pixel_format;
+    TRACE( "%p -> %d\n", hdc, ret );
+    return ret;
 }
 
 /***********************************************************************
@@ -1290,25 +1550,16 @@ static int glxdrv_wglGetPixelFormat( HDC hdc )
  */
 static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd )
 {
-    struct x11drv_escape_get_drawable escape;
     const struct wgl_pixel_format *fmt;
     int value;
-    HWND hwnd;
+    struct gl_drawable *gl;
+    HWND hwnd = WindowFromDC( hdc );
 
     TRACE("(%p,%d,%p)\n", hdc, iPixelFormat, ppfd);
 
-    escape.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape.code), (LPCSTR)&escape.code,
-                    sizeof(escape), (LPSTR)&escape ))
-        return 0;
-
-    if (escape.pixel_format)  /* cannot change it if already set */
-        return (escape.pixel_format == iPixelFormat);
-
-    /* SetPixelFormat is not allowed on the X root_window e.g. GetDC(0) */
-    if (escape.drawable == root_window)
+    if (!hwnd || hwnd == GetDesktopWindow())
     {
-        ERR("Invalid operation on root_window\n");
+        WARN( "not a proper window DC %p/%p\n", hdc, hwnd );
         return FALSE;
     }
 
@@ -1320,21 +1571,24 @@ static BOOL glxdrv_wglSetPixelFormat( HDC hdc, int iPixelFormat, const PIXELFORM
     }
 
     pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
-
-    hwnd = WindowFromDC( hdc );
-    if(hwnd) {
-        if(!(value&GLX_WINDOW_BIT)) {
-            WARN("Pixel format %d is not compatible for window rendering\n", iPixelFormat);
-            return FALSE;
-        }
-
-        if(!SendMessageW(hwnd, WM_X11DRV_SET_WIN_FORMAT, fmt->fmt_id, 0)) {
-            ERR("Couldn't set format of the window, returning failure\n");
-            return FALSE;
-        }
-        /* physDev->current_pf will be set by the DCE update */
+    if (!(value & GLX_WINDOW_BIT))
+    {
+        WARN("Pixel format %d is not compatible for window rendering\n", iPixelFormat);
+        return FALSE;
     }
-    else FIXME("called on a non-window object?\n");
+
+    if ((gl = get_gl_drawable( hwnd, hdc )))
+    {
+        int prev = gl->format - pixel_formats + 1;
+        release_gl_drawable( gl );
+        return prev == iPixelFormat;  /* cannot change it if already set */
+    }
+
+    if(!SendMessageW(hwnd, WM_X11DRV_SET_WIN_FORMAT, fmt->fmt_id, 0)) {
+        ERR("Couldn't set format of the window, returning failure\n");
+        return FALSE;
+    }
+    /* physDev->current_pf will be set by the DCE update */
 
     if (TRACE_ON(wgl)) {
         int gl_test = 0;
@@ -1372,43 +1626,25 @@ static BOOL glxdrv_wglCopyContext(struct wgl_context *src, struct wgl_context *d
  */
 static struct wgl_context *glxdrv_wglCreateContext( HDC hdc )
 {
-    struct x11drv_escape_get_drawable escape;
-    struct wgl_context *ret;
-    const struct wgl_pixel_format *fmt;
+    struct wgl_context *ret = NULL;
+    struct gl_drawable *gl;
 
-    TRACE( "(%p)\n", hdc );
-
-    escape.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape.code), (LPCSTR)&escape.code,
-                    sizeof(escape), (LPSTR)&escape ))
-        return 0;
-
-    fmt = get_pixel_format(gdi_display, escape.pixel_format, TRUE /* Offscreen */);
-    /* We can render using the iPixelFormat (1) of Wine's Main visual AND using some offscreen formats.
-     * Note that standard WGL-calls don't recognize offscreen-only formats. For that reason pbuffers
-     * use a sort of 'proxy' HDC (wglGetPbufferDCARB).
-     * If this fails something is very wrong on the system. */
-    if(!fmt) {
-        ERR("Cannot get FB Config for iPixelFormat %d, expect problems!\n", escape.pixel_format);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+    if (!(gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
+    {
+        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
         return NULL;
     }
 
-    if (!(ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret)))) return 0;
-
-    ret->hdc = hdc;
-    ret->fmt = fmt;
-    ret->has_been_current = FALSE;
-    ret->sharing = FALSE;
-
-    ret->vis = pglXGetVisualFromFBConfig(gdi_display, fmt->fbconfig);
-    ret->ctx = create_glxcontext(gdi_display, ret, NULL);
-
-    EnterCriticalSection( &context_section );
-    list_add_head( &context_list, &ret->entry );
-    LeaveCriticalSection( &context_section );
-
-    TRACE(" creating context %p (GL context creation delayed)\n", ret);
+    if ((ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret))))
+    {
+        ret->hdc = hdc;
+        ret->fmt = gl->format;
+        ret->vis = pglXGetVisualFromFBConfig(gdi_display, gl->format->fbconfig);
+        ret->ctx = create_glxcontext(gdi_display, ret, NULL);
+        list_add_head( &context_list, &ret->entry );
+    }
+    release_gl_drawable( gl );
+    TRACE( "%p -> %p\n", hdc, ret );
     return ret;
 }
 
@@ -1442,8 +1678,8 @@ static PROC glxdrv_wglGetProcAddress(LPCSTR lpszProc)
  */
 static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
 {
-    BOOL ret;
-    struct x11drv_escape_get_drawable escape;
+    BOOL ret = FALSE;
+    struct gl_drawable *gl;
 
     TRACE("(%p,%p)\n", hdc, ctx);
 
@@ -1454,51 +1690,37 @@ static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
         return TRUE;
     }
 
-    escape.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape.code), (LPCSTR)&escape.code,
-                    sizeof(escape), (LPSTR)&escape ))
-        return FALSE;
-
-    if (!escape.pixel_format)
+    if ((gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
     {
-        WARN("Trying to use an invalid drawable\n");
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
-    if (ctx->fmt - pixel_formats != escape.pixel_format - 1)
-    {
-        WARN( "mismatched pixel format hdc %p %u ctx %p\n", hdc, escape.pixel_format, ctx );
-        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
-        return FALSE;
-    }
-    else
-    {
-        if (TRACE_ON(wgl)) {
-            int vis_id;
-            pglXGetFBConfigAttrib(gdi_display, ctx->fmt->fbconfig, GLX_VISUAL_ID, &vis_id);
-            describeContext(ctx);
-            TRACE("hdc %p drawable %lx fmt %u vis %x ctx %p\n", hdc,
-                  escape.gl_drawable, escape.pixel_format, vis_id, ctx->ctx);
+        if (ctx->fmt != gl->format)
+        {
+            WARN( "mismatched pixel format hdc %p %p ctx %p %p\n", hdc, gl->format, ctx, ctx->fmt );
+            SetLastError( ERROR_INVALID_PIXEL_FORMAT );
+            goto done;
         }
 
-        ret = pglXMakeCurrent(gdi_display, escape.gl_drawable, ctx->ctx);
+        if (TRACE_ON(wgl)) {
+            describeContext(ctx);
+            TRACE("hdc %p drawable %lx fmt %p ctx %p\n", hdc, gl->drawable, gl->format, ctx->ctx );
+        }
 
+        ret = pglXMakeCurrent(gdi_display, gl->drawable, ctx->ctx);
         if (ret)
         {
             NtCurrentTeb()->glContext = ctx;
-
-            EnterCriticalSection( &context_section );
             ctx->has_been_current = TRUE;
             ctx->hdc = hdc;
-            ctx->drawables[0] = escape.gl_drawable;
-            ctx->drawables[1] = escape.gl_drawable;
+            ctx->drawables[0] = gl->drawable;
+            ctx->drawables[1] = gl->drawable;
             ctx->refresh_drawables = FALSE;
-            LeaveCriticalSection( &context_section );
+            goto done;
         }
-        else
-            SetLastError(ERROR_INVALID_HANDLE);
     }
-    TRACE(" returning %s\n", (ret ? "True" : "False"));
+    SetLastError( ERROR_INVALID_HANDLE );
+
+done:
+    release_gl_drawable( gl );
+    TRACE( "%p,%p returning %d\n", hdc, ctx, ret );
     return ret;
 }
 
@@ -1507,8 +1729,8 @@ static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
  */
 static BOOL X11DRV_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct wgl_context *ctx )
 {
-    struct x11drv_escape_get_drawable escape_draw, escape_read;
-    BOOL ret;
+    BOOL ret = FALSE;
+    struct gl_drawable *draw_gl, *read_gl = NULL;
 
     TRACE("(%p,%p,%p)\n", draw_hdc, read_hdc, ctx);
 
@@ -1519,43 +1741,29 @@ static BOOL X11DRV_wglMakeContextCurrentARB( HDC draw_hdc, HDC read_hdc, struct 
         return TRUE;
     }
 
-    escape_draw.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( draw_hdc, X11DRV_ESCAPE, sizeof(escape_draw.code), (LPCSTR)&escape_draw.code,
-                    sizeof(escape_draw), (LPSTR)&escape_draw ))
-        return FALSE;
+    if (!pglXMakeContextCurrent) return FALSE;
 
-    escape_read.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( read_hdc, X11DRV_ESCAPE, sizeof(escape_read.code), (LPCSTR)&escape_read.code,
-                    sizeof(escape_read), (LPSTR)&escape_read ))
-        return FALSE;
-
-    if (!escape_draw.pixel_format)
+    if ((draw_gl = get_gl_drawable( WindowFromDC( draw_hdc ), draw_hdc )))
     {
-        WARN("Trying to use an invalid drawable\n");
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
-    else
-    {
-        if (!pglXMakeContextCurrent) return FALSE;
-
-        ret = pglXMakeContextCurrent(gdi_display, escape_draw.gl_drawable, escape_read.gl_drawable, ctx->ctx);
+        read_gl = get_gl_drawable( WindowFromDC( read_hdc ), read_hdc );
+        ret = pglXMakeContextCurrent(gdi_display, draw_gl->drawable,
+                                     read_gl ? read_gl->drawable : 0, ctx->ctx);
         if (ret)
         {
-            EnterCriticalSection( &context_section );
             ctx->has_been_current = TRUE;
             ctx->hdc = draw_hdc;
-            ctx->drawables[0] = escape_draw.gl_drawable;
-            ctx->drawables[1] = escape_read.gl_drawable;
+            ctx->drawables[0] = draw_gl->drawable;
+            ctx->drawables[1] = read_gl ? read_gl->drawable : 0;
             ctx->refresh_drawables = FALSE;
-            LeaveCriticalSection( &context_section );
             NtCurrentTeb()->glContext = ctx;
+            goto done;
         }
-        else
-            SetLastError(ERROR_INVALID_HANDLE);
     }
-
-    TRACE(" returning %s\n", (ret ? "True" : "False"));
+    SetLastError( ERROR_INVALID_HANDLE );
+done:
+    release_gl_drawable( read_gl );
+    release_gl_drawable( draw_gl );
+    TRACE( "%p,%p,%p returning %d\n", draw_hdc, read_hdc, ctx, ret );
     return ret;
 }
 
@@ -1660,90 +1868,75 @@ static void wglFlush(void)
 static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wgl_context *hShareContext,
                                                               const int* attribList )
 {
-    struct x11drv_escape_get_drawable escape;
-    struct wgl_context *ret;
-    const struct wgl_pixel_format *fmt;
+    struct wgl_context *ret = NULL;
+    struct gl_drawable *gl;
 
     TRACE("(%p %p %p)\n", hdc, hShareContext, attribList);
 
-    escape.code = X11DRV_GET_DRAWABLE;
-    if (!ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape.code), (LPCSTR)&escape.code,
-                    sizeof(escape), (LPSTR)&escape ))
-        return 0;
-
-    fmt = get_pixel_format(gdi_display, escape.pixel_format, TRUE /* Offscreen */);
-    /* wglCreateContextAttribsARB supports ALL pixel formats, so also offscreen ones.
-     * If this fails something is very wrong on the system. */
-    if(!fmt)
+    if (!(gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
     {
-        ERR("Cannot get FB Config for iPixelFormat %d, expect problems!\n", escape.pixel_format);
-        SetLastError(ERROR_INVALID_PIXEL_FORMAT);
+        SetLastError( ERROR_INVALID_PIXEL_FORMAT );
         return NULL;
     }
 
-    if (!(ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret)))) return 0;
-
-    ret->hdc = hdc;
-    ret->fmt = fmt;
-    ret->vis = NULL; /* glXCreateContextAttribsARB requires a fbconfig instead of a visual */
-    ret->gl3_context = TRUE;
-
-    ret->numAttribs = 0;
-    if(attribList)
+    if ((ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret))))
     {
-        int *pAttribList = (int*)attribList;
-        int *pContextAttribList = &ret->attribList[0];
-        /* attribList consists of pairs {token, value] terminated with 0 */
-        while(pAttribList[0] != 0)
+        ret->hdc = hdc;
+        ret->fmt = gl->format;
+        ret->vis = NULL; /* glXCreateContextAttribsARB requires a fbconfig instead of a visual */
+        ret->gl3_context = TRUE;
+        ret->numAttribs = 0;
+        if (attribList)
         {
-            TRACE("%#x %#x\n", pAttribList[0], pAttribList[1]);
-            switch(pAttribList[0])
+            int *pContextAttribList = &ret->attribList[0];
+            /* attribList consists of pairs {token, value] terminated with 0 */
+            while(attribList[0] != 0)
             {
+                TRACE("%#x %#x\n", attribList[0], attribList[1]);
+                switch(attribList[0])
+                {
                 case WGL_CONTEXT_MAJOR_VERSION_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_MAJOR_VERSION_ARB;
-                    pContextAttribList[1] = pAttribList[1];
+                    pContextAttribList[1] = attribList[1];
                     break;
                 case WGL_CONTEXT_MINOR_VERSION_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_MINOR_VERSION_ARB;
-                    pContextAttribList[1] = pAttribList[1];
+                    pContextAttribList[1] = attribList[1];
                     break;
                 case WGL_CONTEXT_LAYER_PLANE_ARB:
                     break;
                 case WGL_CONTEXT_FLAGS_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_FLAGS_ARB;
-                    pContextAttribList[1] = pAttribList[1];
+                    pContextAttribList[1] = attribList[1];
                     break;
                 case WGL_CONTEXT_PROFILE_MASK_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_PROFILE_MASK_ARB;
-                    pContextAttribList[1] = pAttribList[1];
+                    pContextAttribList[1] = attribList[1];
                     break;
                 default:
-                    ERR("Unhandled attribList pair: %#x %#x\n", pAttribList[0], pAttribList[1]);
+                    ERR("Unhandled attribList pair: %#x %#x\n", attribList[0], attribList[1]);
+                }
+                ret->numAttribs++;
+                attribList += 2;
+                pContextAttribList += 2;
             }
-
-            ret->numAttribs++;
-            pAttribList += 2;
-            pContextAttribList += 2;
         }
+
+        X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
+        ret->ctx = create_glxcontext(gdi_display, ret, NULL);
+        XSync(gdi_display, False);
+        if (X11DRV_check_error() || !ret->ctx)
+        {
+            /* In the future we should convert the GLX error to a win32 one here if needed */
+            ERR("Context creation failed\n");
+            HeapFree( GetProcessHeap(), 0, ret );
+            ret = NULL;
+        }
+        else list_add_head( &context_list, &ret->entry );
     }
 
-    X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
-    ret->ctx = create_glxcontext(gdi_display, ret, NULL);
-
-    XSync(gdi_display, False);
-    if(X11DRV_check_error() || !ret->ctx)
-    {
-        /* In the future we should convert the GLX error to a win32 one here if needed */
-        ERR("Context creation failed\n");
-        HeapFree( GetProcessHeap(), 0, ret );
-        return NULL;
-    }
-
-    EnterCriticalSection( &context_section );
-    list_add_head( &context_list, &ret->entry );
-    LeaveCriticalSection( &context_section );
-
-    TRACE(" creating context %p\n", ret);
+    release_gl_drawable( gl );
+    TRACE( "%p -> %p\n", hdc, ret );
     return ret;
 }
 
@@ -1963,19 +2156,33 @@ static BOOL X11DRV_wglDestroyPbufferARB( struct wgl_pbuffer *object )
 static HDC X11DRV_wglGetPbufferDCARB( struct wgl_pbuffer *object )
 {
     struct x11drv_escape_set_drawable escape;
+    struct gl_drawable *gl, *prev;
     HDC hdc;
 
     hdc = CreateDCA( "DISPLAY", NULL, NULL, NULL );
     if (!hdc) return 0;
 
+    if (!(gl = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*gl) )))
+    {
+        DeleteDC( hdc );
+        return 0;
+    }
+    gl->type = DC_GL_PBUFFER;
+    gl->drawable = object->drawable;
+    gl->format = object->fmt;
+
+    EnterCriticalSection( &context_section );
+    if (!XFindContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char **)&prev ))
+        free_gl_drawable( prev );
+    XSaveContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char *)gl );
+    LeaveCriticalSection( &context_section );
+
     escape.code = X11DRV_SET_DRAWABLE;
+    escape.hwnd = 0;
     escape.drawable = object->drawable;
     escape.mode = IncludeInferiors;
     SetRect( &escape.dc_rect, 0, 0, object->width, object->height );
     escape.fbconfig_id = object->fmt->fmt_id;
-    escape.gl_drawable = object->drawable;
-    escape.pixmap = 0;
-    escape.gl_type = DC_GL_PBUFFER;
     ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 
     TRACE( "(%p)->(%p)\n", object, hdc );
@@ -2078,7 +2285,18 @@ static BOOL X11DRV_wglQueryPbufferARB( struct wgl_pbuffer *object, int iAttribut
  */
 static int X11DRV_wglReleasePbufferDCARB( struct wgl_pbuffer *object, HDC hdc )
 {
+    struct gl_drawable *gl;
+
     TRACE("(%p, %p)\n", object, hdc);
+
+    EnterCriticalSection( &context_section );
+    if (!XFindContext( gdi_display, (XID)hdc, gl_pbuffer_context, (char **)&gl ))
+    {
+        XDeleteContext( gdi_display, (XID)hdc, gl_pbuffer_context );
+        free_gl_drawable( gl );
+    }
+    LeaveCriticalSection( &context_section );
+
     return DeleteDC(hdc);
 }
 
@@ -2804,90 +3022,49 @@ static void X11DRV_WineGL_LoadExtensions(void)
 }
 
 
-BOOL destroy_glxpixmap(Display *display, XID glxpixmap)
-{
-    pglXDestroyGLXPixmap(display, glxpixmap);
-    return TRUE;
-}
-
 /**
  * glxdrv_SwapBuffers
  *
  * Swap the buffers of this DC
  */
-static BOOL glxdrv_SwapBuffers(PHYSDEV dev)
+static BOOL glxdrv_wglSwapBuffers( HDC hdc )
 {
-  struct glx_physdev *physdev = get_glxdrv_dev( dev );
-  struct wgl_context *ctx = NtCurrentTeb()->glContext;
+    enum x11drv_escape_codes code = X11DRV_FLUSH_GL_DRAWABLE;
+    struct gl_drawable *gl;
+    struct wgl_context *ctx = NtCurrentTeb()->glContext;
 
-  TRACE("(%p)\n", dev->hdc);
+    TRACE("(%p)\n", hdc);
 
-  if (!ctx)
-  {
-      WARN("Using a NULL context, skipping\n");
-      SetLastError(ERROR_INVALID_HANDLE);
-      return FALSE;
-  }
+    if (!(gl = get_gl_drawable( WindowFromDC( hdc ), hdc )))
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
 
-  if (!physdev->drawable)
-  {
-      WARN("Using an invalid drawable, skipping\n");
-      SetLastError(ERROR_INVALID_HANDLE);
-      return FALSE;
-  }
+    switch (gl->type)
+    {
+    case DC_GL_PIXMAP_WIN:
+        if (ctx) sync_context( ctx );
+        if (pglXCopySubBufferMESA) {
+            /* (glX)SwapBuffers has an implicit glFlush effect, however
+             * GLX_MESA_copy_sub_buffer doesn't. Make sure GL is flushed before
+             * copying */
+            pglFlush();
+            pglXCopySubBufferMESA( gdi_display, gl->drawable, 0, 0,
+                                   gl->rect.right - gl->rect.left, gl->rect.bottom - gl->rect.top );
+            break;
+        }
+        /* fall through */
+    default:
+        pglXSwapBuffers(gdi_display, gl->drawable);
+        break;
+    }
 
-  sync_context(ctx);
-  switch (physdev->type)
-  {
-  case DC_GL_PIXMAP_WIN:
-      if(pglXCopySubBufferMESA) {
-          int w = physdev->x11dev->dc_rect.right - physdev->x11dev->dc_rect.left;
-          int h = physdev->x11dev->dc_rect.bottom - physdev->x11dev->dc_rect.top;
+    release_gl_drawable( gl );
 
-          /* (glX)SwapBuffers has an implicit glFlush effect, however
-           * GLX_MESA_copy_sub_buffer doesn't. Make sure GL is flushed before
-           * copying */
-          pglFlush();
-          if(w > 0 && h > 0)
-              pglXCopySubBufferMESA(gdi_display, physdev->drawable, 0, 0, w, h);
-          break;
-      }
-      /* fall through */
-  default:
-      pglXSwapBuffers(gdi_display, physdev->drawable);
-      break;
-  }
+    ExtEscape( hdc, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
 
-  flush_gl_drawable( physdev );
-
-  /* FPS support */
-  if (TRACE_ON(fps))
-  {
-      static long prev_time, start_time;
-      static unsigned long frames, frames_total;
-
-      DWORD time = GetTickCount();
-      frames++;
-      frames_total++;
-      /* every 1.5 seconds */
-      if (time - prev_time > 1500) {
-          TRACE_(fps)("@ approx %.2ffps, total %.2ffps\n",
-                      1000.0*frames/(time - prev_time), 1000.0*frames_total/(time - start_time));
-          prev_time = time;
-          frames = 0;
-          if(start_time == 0) start_time = time;
-      }
-  }
-
-  return TRUE;
-}
-
-XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
-{
-    int format = pixelformat_from_fbconfig_id( fbconfig_id );
-
-    if (!format) return NULL;
-    return pglXGetVisualFromFBConfig(gdi_display, pixel_formats[format - 1].fbconfig);
+    return TRUE;
 }
 
 static BOOL create_glx_dc( PHYSDEV *pdev )
@@ -2952,23 +3129,34 @@ static INT glxdrv_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
         case X11DRV_SET_DRAWABLE:
             if (in_count >= sizeof(struct x11drv_escape_set_drawable))
             {
+                struct gl_drawable *gl;
                 const struct x11drv_escape_set_drawable *data = in_data;
-                physdev->pixel_format = pixelformat_from_fbconfig_id( data->fbconfig_id );
-                physdev->type         = data->gl_type;
-                physdev->drawable     = data->gl_drawable;
-                physdev->pixmap       = data->pixmap;
-                TRACE( "SET_DRAWABLE hdc %p drawable %lx pf %u type %u\n",
-                       dev->hdc, physdev->drawable, physdev->pixel_format, physdev->type );
+
+                if ((gl = get_gl_drawable( data->hwnd, dev->hdc )))
+                {
+                    physdev->format       = gl->format;
+                    physdev->type         = gl->type;
+                    physdev->drawable     = gl->drawable;
+                    physdev->pixmap       = gl->pixmap;
+                    release_gl_drawable( gl );
+                }
+                else
+                {
+                    physdev->format       = NULL;
+                    physdev->type         = DC_GL_NONE;
+                    physdev->drawable     = 0;
+                    physdev->pixmap       = 0;
+                }
+                TRACE( "SET_DRAWABLE hdc %p drawable %lx pf %p type %u\n",
+                       dev->hdc, physdev->drawable, physdev->format, physdev->type );
             }
             break;
         case X11DRV_GET_DRAWABLE:
             if (out_count >= sizeof(struct x11drv_escape_get_drawable))
             {
                 struct x11drv_escape_get_drawable *data = out_data;
-                data->pixel_format = physdev->pixel_format;
-                data->gl_type      = physdev->type;
+                data->pixel_format = physdev->format ? physdev->format - pixel_formats + 1 : 0;
                 data->gl_drawable  = physdev->drawable;
-                data->pixmap       = physdev->pixmap;
             }
             break;
         case X11DRV_FLUSH_GL_DRAWABLE:
@@ -3124,7 +3312,6 @@ static const struct gdi_dc_funcs glxdrv_funcs =
     NULL,                               /* pStretchDIBits */
     NULL,                               /* pStrokeAndFillPath */
     NULL,                               /* pStrokePath */
-    glxdrv_SwapBuffers,                 /* pSwapBuffers */
     NULL,                               /* pUnrealizePalette */
     NULL,                               /* pWidenPath */
     glxdrv_wine_get_wgl_driver,         /* wine_get_wgl_driver */
@@ -3143,6 +3330,7 @@ static struct opengl_funcs opengl_funcs =
         glxdrv_wglMakeCurrent,              /* p_wglMakeCurrent */
         glxdrv_wglSetPixelFormat,           /* p_wglSetPixelFormat */
         glxdrv_wglShareLists,               /* p_wglShareLists */
+        glxdrv_wglSwapBuffers,              /* p_wglSwapBuffers */
     }
 };
 
@@ -3158,24 +3346,22 @@ const struct gdi_dc_funcs *get_glx_driver(void)
     return NULL;
 }
 
-void mark_drawable_dirty(Drawable old, Drawable new)
-{
-}
-
-Drawable create_glxpixmap(Display *display, XVisualInfo *vis, Pixmap parent)
-{
-    return 0;
-}
-
-
-BOOL destroy_glxpixmap(Display *display, XID glxpixmap)
+BOOL set_win_format( HWND hwnd, XID fbconfig_id )
 {
     return FALSE;
 }
 
-XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
+BOOL has_gl_drawable( HWND hwnd )
 {
-    return NULL;
+    return FALSE;
+}
+
+void sync_gl_drawable( HWND hwnd, const RECT *visible_rect, const RECT *client_rect )
+{
+}
+
+void destroy_gl_drawable( HWND hwnd )
+{
 }
 
 #endif /* defined(SONAME_LIBGL) */

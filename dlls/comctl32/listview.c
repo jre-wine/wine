@@ -3886,7 +3886,7 @@ static void LISTVIEW_MarqueeHighlight(LISTVIEW_INFO *infoPtr, const POINT *coord
     }
     iterator_destroy(&new_elems);
 
-    LISTVIEW_InvalidateRect(infoPtr, &rect);
+    LISTVIEW_InvalidateRect(infoPtr, &infoPtr->marqueeDrawRect);
 }
 
 /***
@@ -4943,10 +4943,7 @@ static void LISTVIEW_RefreshReportGrid(LISTVIEW_INFO *infoPtr, HDC hdc)
         itemheight =  LISTVIEW_CalculateItemHeight(infoPtr);
         rcItem.left   = infoPtr->rcList.left;
         rcItem.right  = infoPtr->rcList.right;
-        rcItem.bottom = rcItem.top = Origin.y - 1;
-        MoveToEx(hdc, rcItem.left, rcItem.top, NULL);
-        LineTo(hdc, rcItem.right, rcItem.top);
-        for(y=itemheight-1+Origin.y; y<=infoPtr->rcList.bottom; y+=itemheight)
+        for(y = Origin.y > 1 ? Origin.y - 1 : itemheight - 1 + Origin.y % itemheight; y<=infoPtr->rcList.bottom; y+=itemheight)
         {
             rcItem.bottom = rcItem.top = y;
             TRACE("horz rcItem=%s\n", wine_dbgstr_rect(&rcItem));
@@ -9267,21 +9264,15 @@ static BOOL LISTVIEW_Update(LISTVIEW_INFO *infoPtr, INT nItem)
  */
 static BOOL LISTVIEW_DrawTrackLine(const LISTVIEW_INFO *infoPtr)
 {
-    HPEN hOldPen;
     HDC hdc;
-    INT oldROP;
 
     if (infoPtr->xTrackLine == -1)
         return FALSE;
 
     if (!(hdc = GetDC(infoPtr->hwndSelf)))
         return FALSE;
-    hOldPen = SelectObject(hdc, GetStockObject(BLACK_PEN));
-    oldROP = SetROP2(hdc, R2_XORPEN);
-    MoveToEx(hdc, infoPtr->xTrackLine, infoPtr->rcList.top, NULL);
-    LineTo(hdc, infoPtr->xTrackLine, infoPtr->rcList.bottom);
-    SetROP2(hdc, oldROP);
-    SelectObject(hdc, hOldPen);
+    PatBlt( hdc, infoPtr->xTrackLine, infoPtr->rcList.top,
+            1, infoPtr->rcList.bottom - infoPtr->rcList.top, DSTINVERT );
     ReleaseDC(infoPtr->hwndSelf, hdc);
     return TRUE;
 }
