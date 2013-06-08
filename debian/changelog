@@ -1,8 +1,15 @@
-wine-unstable (1.5.13-1) UNRELEASED; urgency=low
+wine-unstable (1.5.13-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.13, released Sep 14, 2012.
+    - Client-side window rendering using the DIB engine.
+    - Raw input support for keyboard and mouse.
+    - Support for transparent window areas using color keying.
+    - Proper C++ RTTI support on 64-bit.
+    - Implementation of logical processor information.
+    - Support for fonts with localized names.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 08 Jun 2013 18:05:01 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 08 Jun 2013 18:07:25 +0000
 
 wine-unstable (1.5.12-1) unstable; urgency=low
 
