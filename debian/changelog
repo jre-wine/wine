@@ -1,8 +1,12 @@
-wine-unstable (1.5.12-1) UNRELEASED; urgency=low
+wine-unstable (1.5.12-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.12, released Aug 31, 2012.
+    - Support for disabling individual joysticks.
+    - Better support for D3DX9 constant tables.
+    - Some XRandR improvements.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 08 Jun 2013 00:28:23 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 08 Jun 2013 00:28:35 +0000
 
 wine-unstable (1.5.11-1) unstable; urgency=low
 
