@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-12-13 21:48+0300\n"
+"PO-Revision-Date: 2012-12-29 09:34+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: komp_lt@konf.lt\n"
 "Language: Lithuanian\n"
@@ -473,7 +473,7 @@ msgstr "n&uo:"
 msgid "&To:"
 msgstr "&iki:"
 
-#: comdlg32.rc:209
+#: comdlg32.rc:209 wineps.rc:39
 msgid "Print &Quality:"
 msgstr "Spausdinimo &kokybė:"
 
@@ -7313,7 +7313,7 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: sane.rc:34 winecfg.rc:174
+#: sane.rc:34 wineps.rc:46 winecfg.rc:174
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "tašk./col."
@@ -10129,27 +10129,27 @@ msgstr ""
 
 #: cmd.rc:357
 msgid "Division by zero error.\n"
-msgstr ""
+msgstr "Dalybos iš nulio klaida.\n"
 
 #: cmd.rc:358
 msgid "Expected an operand.\n"
-msgstr ""
+msgstr "Tikėtasi operando.\n"
 
 #: cmd.rc:359
-#, fuzzy
-#| msgid "Unexpected network error.\n"
 msgid "Expected an operator.\n"
-msgstr "Netikėta tinklo klaida.\n"
+msgstr "Tikėtasi operacijos ženklo.\n"
 
 #: cmd.rc:360
 msgid "Mismatch in parentheses.\n"
-msgstr ""
+msgstr "Skliaustų neatitiktis.\n"
 
 #: cmd.rc:361
 msgid ""
 "Badly formed number - must be one of decimal (12),\n"
 " hexadecimal (0x34) or octal (056).\n"
 msgstr ""
+"Blogai sudarytas skaičius – privalo būti dešimtainis (12),\n"
+" šešioliktainis (0x34) arba aštuntainis (056).\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10368,6 +10368,74 @@ msgstr "Jungiamasi iš naujo"
 #: net.rc:40
 msgid "The following services are running:\n"
 msgstr "Šios tarnybos vykdomos:\n"
+
+#: netstat.rc:27
+msgid "CLOSED"
+msgstr "NUTRAUKTAS"
+
+#: netstat.rc:28
+msgid "LISTENING"
+msgstr "KLAUSOMASI"
+
+#: netstat.rc:29
+msgid "SYN_SENT"
+msgstr "SYN_IŠSIŲSTAS"
+
+#: netstat.rc:30
+msgid "SYN_RCVD"
+msgstr "SYN_GAUTAS"
+
+#: netstat.rc:31
+msgid "ESTABLISHED"
+msgstr "UŽMEGZTAS"
+
+#: netstat.rc:32
+msgid "FIN_WAIT1"
+msgstr "FIN_LAUKIMAS1"
+
+#: netstat.rc:33
+msgid "FIN_WAIT2"
+msgstr "FIN_LAUKIMAS2"
+
+#: netstat.rc:34
+msgid "CLOSE_WAIT"
+msgstr "NUTRAUKIMO_LAUKIMAS"
+
+#: netstat.rc:35
+msgid "CLOSING"
+msgstr "NUTRAUKIAMA"
+
+#: netstat.rc:36
+msgid "LAST_ACK"
+msgstr "PASKUTINIS_ACK"
+
+#: netstat.rc:37
+msgid "TIME_WAIT"
+msgstr "PERIODO_LAUKIMAS"
+
+#: netstat.rc:38
+msgid "DELETE_TCB"
+msgstr "TCB_PAŠALINTAS"
+
+#: netstat.rc:40
+msgid "Active Connections"
+msgstr "Aktyvūs ryšiai"
+
+#: netstat.rc:41
+msgid "Proto"
+msgstr "Prot."
+
+#: netstat.rc:42
+msgid "Local Address"
+msgstr "Vietinis adresas"
+
+#: netstat.rc:43
+msgid "Foreign Address"
+msgstr "Svetimas adresas"
+
+#: netstat.rc:44
+msgid "State"
+msgstr "Būsena"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

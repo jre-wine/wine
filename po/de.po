@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-12-13 02:22+0100\n"
+"PO-Revision-Date: 2013-01-03 05:17+0100\n"
 "Last-Translator: Julian Rüger\n"
 "Language-Team: none\n"
 "Language: German\n"
@@ -473,7 +473,7 @@ msgstr "&Von:"
 msgid "&To:"
 msgstr "&Bis:"
 
-#: comdlg32.rc:209
+#: comdlg32.rc:209 wineps.rc:39
 msgid "Print &Quality:"
 msgstr "Druck&qualität:"
 
@@ -7321,7 +7321,7 @@ msgctxt "unit: bits"
 msgid "b"
 msgstr "b"
 
-#: sane.rc:34 winecfg.rc:174
+#: sane.rc:34 wineps.rc:46 winecfg.rc:174
 msgctxt "unit: dots/inch"
 msgid "dpi"
 msgstr "dpi"
@@ -10196,27 +10196,27 @@ msgstr ""
 
 #: cmd.rc:357
 msgid "Division by zero error.\n"
-msgstr ""
+msgstr "'Division durch Null'-Fehler.\n"
 
 #: cmd.rc:358
 msgid "Expected an operand.\n"
-msgstr ""
+msgstr "Operand erwartet.\n"
 
 #: cmd.rc:359
-#, fuzzy
-#| msgid "Unexpected network error.\n"
 msgid "Expected an operator.\n"
-msgstr "Unerwarteter Netzwerkfehler.\n"
+msgstr "Operator erwartet.\n"
 
 #: cmd.rc:360
 msgid "Mismatch in parentheses.\n"
-msgstr ""
+msgstr "Klammern stimmen nicht überein.\n"
 
 #: cmd.rc:361
 msgid ""
 "Badly formed number - must be one of decimal (12),\n"
 " hexadecimal (0x34) or octal (056).\n"
 msgstr ""
+"Zahl ungültig formatiert - muss dezimal (12),\n"
+" hexadezimal (0x34) oder oktal (056) sein.\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10435,6 +10435,74 @@ msgstr "Erneuter Verbindungsaufbau"
 #: net.rc:40
 msgid "The following services are running:\n"
 msgstr "Die folgenden Dienste laufen:\n"
+
+#: netstat.rc:27
+msgid "CLOSED"
+msgstr "GESCHLOSSEN"
+
+#: netstat.rc:28
+msgid "LISTENING"
+msgstr "LAUSCHEND"
+
+#: netstat.rc:29
+msgid "SYN_SENT"
+msgstr "SYN_GSNDT"
+
+#: netstat.rc:30
+msgid "SYN_RCVD"
+msgstr "SYN_EMPF"
+
+#: netstat.rc:31
+msgid "ESTABLISHED"
+msgstr "HERGESTELLT"
+
+#: netstat.rc:32
+msgid "FIN_WAIT1"
+msgstr "ABSCH_WARTEN1"
+
+#: netstat.rc:33
+msgid "FIN_WAIT2"
+msgstr "ABSCH_WARTEN2"
+
+#: netstat.rc:34
+msgid "CLOSE_WAIT"
+msgstr "SCHLIESSEN_WARTEN"
+
+#: netstat.rc:35
+msgid "CLOSING"
+msgstr "SCHLIESSEND"
+
+#: netstat.rc:36
+msgid "LAST_ACK"
+msgstr "LETZTES_ACK"
+
+#: netstat.rc:37
+msgid "TIME_WAIT"
+msgstr "ZEIT_WARTEN"
+
+#: netstat.rc:38
+msgid "DELETE_TCB"
+msgstr "TCB_LOESCHEN"
+
+#: netstat.rc:40
+msgid "Active Connections"
+msgstr "Aktive Verbindungen"
+
+#: netstat.rc:41
+msgid "Proto"
+msgstr "Proto"
+
+#: netstat.rc:42
+msgid "Local Address"
+msgstr "Lokale Adresse"
+
+#: netstat.rc:43
+msgid "Foreign Address"
+msgstr "Entfernte Adresse"
+
+#: netstat.rc:44
+msgid "State"
+msgstr "Zustand"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

@@ -262,7 +262,11 @@ static Window thread_selection_wnd(void)
         w = XCreateWindow(thread_data->display, root_window, 0, 0, 1, 1, 0, CopyFromParent,
                           InputOnly, CopyFromParent, 0, NULL);
         if (w)
+        {
             thread_data->selection_wnd = w;
+
+            XSelectInput(thread_data->display, w, PropertyChangeMask);
+        }
         else
             FIXME("Failed to create window. Fetching selection data will fail.\n");
     }
@@ -2356,11 +2360,11 @@ static BOOL X11DRV_CLIPBOARD_ReadProperty(Display *display, Window w, Atom prop,
     if (prop == None)
         return FALSE;
 
-    if (!X11DRV_CLIPBOARD_GetProperty(display, w, prop, &atype, data, datasize))
-        return FALSE;
-
     while (XCheckTypedWindowEvent(display, w, PropertyNotify, &xe))
         ;
+
+    if (!X11DRV_CLIPBOARD_GetProperty(display, w, prop, &atype, data, datasize))
+        return FALSE;
 
     if (atype == x11drv_atom(INCR))
     {

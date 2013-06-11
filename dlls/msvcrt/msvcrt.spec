@@ -918,7 +918,7 @@
 @ cdecl _stat64(str ptr) MSVCRT_stat64
 @ cdecl _stati64(str ptr) MSVCRT_stati64
 @ cdecl _statusfp()
-@ cdecl _strcmpi(str str) ntdll._strcmpi
+@ cdecl _strcmpi(str str) MSVCRT__stricmp
 @ cdecl _strcoll_l(str str ptr) MSVCRT_strcoll_l
 @ cdecl _strdate(ptr) MSVCRT__strdate
 @ cdecl _strdate_s(ptr long)
@@ -926,8 +926,8 @@
 # stub _strdup_dbg(str long str long)
 @ cdecl _strerror(long) MSVCRT__strerror
 # stub _strerror_s(ptr long long)
-@ cdecl _stricmp(str str) ntdll._stricmp
-# stub _stricmp_l(str str ptr)
+@ cdecl _stricmp(str str) MSVCRT__stricmp
+@ cdecl _stricmp_l(str str ptr) MSVCRT__stricmp_l
 @ cdecl _stricoll(str str) MSVCRT__stricoll
 @ cdecl _stricoll_l(str str ptr) MSVCRT__stricoll_l
 @ cdecl _strlwr(str) MSVCRT__strlwr
@@ -936,8 +936,8 @@
 @ cdecl _strlwr_s_l(ptr long ptr)
 @ cdecl _strncoll(str str long) MSVCRT_strncoll_l
 @ cdecl _strncoll_l(str str long ptr) MSVCRT_strncoll
-@ cdecl _strnicmp(str str long) ntdll._strnicmp
-# stub _strnicmp_l(str str long ptr)
+@ cdecl _strnicmp(str str long) MSVCRT__strnicmp
+@ cdecl _strnicmp_l(str str long ptr) MSVCRT__strnicmp_l
 @ cdecl _strnicoll(str str long) MSVCRT__strnicoll
 @ cdecl _strnicoll_l(str str long ptr) MSVCRT__strnicoll_l
 @ cdecl _strnset(str long long) MSVCRT__strnset

@@ -993,7 +993,7 @@
 @ stub _strerror_s
 @ stub _strftime_l
 @ cdecl _stricmp(str str) msvcrt._stricmp
-@ stub _stricmp_l
+@ cdecl _stricmp_l(str str ptr) msvcrt._stricmp_l
 @ cdecl _stricoll(str str) msvcrt._stricoll
 @ cdecl _stricoll_l(str str ptr) msvcrt._stricoll_l
 @ cdecl _strlwr(str) msvcrt._strlwr
@@ -1003,7 +1003,7 @@
 @ cdecl _strncoll(str str long) msvcrt._strncoll
 @ cdecl _strncoll_l(str str long ptr) msvcrt._strncoll_l
 @ cdecl _strnicmp(str str long) msvcrt._strnicmp
-@ stub _strnicmp_l
+@ cdecl _strnicmp_l(str str long ptr) msvcrt._strnicmp_l
 @ cdecl _strnicoll(str str long) msvcrt._strnicoll
 @ cdecl _strnicoll_l(str str long ptr) msvcrt._strnicoll_l
 @ cdecl _strnset(str long long) msvcrt._strnset
