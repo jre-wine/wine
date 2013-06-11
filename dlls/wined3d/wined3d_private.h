@@ -822,15 +822,6 @@ extern const struct wined3d_shader_backend_ops glsl_shader_backend DECLSPEC_HIDD
 extern const struct wined3d_shader_backend_ops arb_program_shader_backend DECLSPEC_HIDDEN;
 extern const struct wined3d_shader_backend_ops none_shader_backend DECLSPEC_HIDDEN;
 
-#define ENTER_GL() do {} while(0)
-#define LEAVE_GL() do {} while(0)
-
-/*****************************************************************************
- * Defines
- */
-
-/* GL related defines */
-/* ------------------ */
 #define GL_EXTCALL(f) (gl_info->gl_ops.ext.p_##f)
 
 #define D3DCOLOR_B_R(dw) (((dw) >> 16) & 0xff)
@@ -1424,6 +1415,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX465      = 0x06c4,
     CARD_NVIDIA_GEFORCE_GTX470      = 0x06cd,
     CARD_NVIDIA_GEFORCE_GTX480      = 0x06c0,
+    CARD_NVIDIA_GEFORCE_GT520       = 0x1040,
     CARD_NVIDIA_GEFORCE_GT540M      = 0x0df4,
     CARD_NVIDIA_GEFORCE_GTX550      = 0x1244,
     CARD_NVIDIA_GEFORCE_GT555M      = 0x04b8,
@@ -1431,9 +1423,14 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX560      = 0x1201,
     CARD_NVIDIA_GEFORCE_GTX570      = 0x1081,
     CARD_NVIDIA_GEFORCE_GTX580      = 0x1080,
+    CARD_NVIDIA_GEFORCE_GT610       = 0x104a,
     CARD_NVIDIA_GEFORCE_GT630M      = 0x0de9,
     CARD_NVIDIA_GEFORCE_GT640M      = 0x0fd2,
     CARD_NVIDIA_GEFORCE_GT650M      = 0x0fd1,
+    CARD_NVIDIA_GEFORCE_GTX650      = 0x0fc6,
+    CARD_NVIDIA_GEFORCE_GTX650TI    = 0x11c6,
+    CARD_NVIDIA_GEFORCE_GTX660      = 0x11c0,
+    CARD_NVIDIA_GEFORCE_GTX660TI    = 0x1183,
     CARD_NVIDIA_GEFORCE_GTX670      = 0x1189,
     CARD_NVIDIA_GEFORCE_GTX680      = 0x1180,
 
@@ -2319,6 +2316,7 @@ struct wined3d_state
 
     struct wined3d_shader *pixel_shader;
     struct wined3d_buffer *ps_cb[MAX_CONSTANT_BUFFERS];
+    struct wined3d_sampler *ps_sampler[MAX_SAMPLER_OBJECTS];
     BOOL ps_consts_b[MAX_CONST_B];
     INT ps_consts_i[MAX_CONST_I * 4];
     float *ps_consts_f;

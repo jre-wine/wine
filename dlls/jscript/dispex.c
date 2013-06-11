@@ -1501,7 +1501,7 @@ HRESULT disp_delete(IDispatch *disp, DISPID id, BOOL *ret)
     if(FAILED(hres))
         return hres;
 
-    *ret = TRUE;
+    *ret = hres == S_OK;
     return S_OK;
 }
 
@@ -1516,10 +1516,12 @@ HRESULT disp_delete_name(script_ctx_t *ctx, IDispatch *disp, jsstr_t *name, BOOL
         dispex_prop_t *prop;
 
         hres = find_prop_name(jsdisp, string_hash(name->str), name->str, &prop);
-        if(prop)
+        if(prop) {
             hres = delete_prop(prop, ret);
-        else
-            hres = DISP_E_MEMBERNOTFOUND;
+        }else {
+            *ret = TRUE;
+            hres = S_OK;
+        }
 
         jsdisp_release(jsdisp);
         return hres;
@@ -1533,15 +1535,26 @@ HRESULT disp_delete_name(script_ctx_t *ctx, IDispatch *disp, jsstr_t *name, BOOL
         if(bstr) {
             hres = IDispatchEx_DeleteMemberByName(dispex, bstr, make_grfdex(ctx, fdexNameCaseSensitive));
             SysFreeString(bstr);
-            *ret = TRUE;
+            if(SUCCEEDED(hres))
+                *ret = hres == S_OK;
         }else {
             hres = E_OUTOFMEMORY;
         }
 
         IDispatchEx_Release(dispex);
     }else {
-        hres = S_OK;
-        ret = FALSE;
+        WCHAR *name_str = name->str;
+        DISPID id;
+
+        hres = IDispatch_GetIDsOfNames(disp, &IID_NULL, &name_str, 1, 0, &id);
+        if(SUCCEEDED(hres)) {
+            /* Property exists and we can't delete it from pure IDispatch interface, so return false. */
+            *ret = FALSE;
+        }else if(hres == DISP_E_UNKNOWNNAME) {
+            /* Property doesn't exist, so nothing to delete */
+            *ret = TRUE;
+            hres = S_OK;
+        }
     }
 
     return hres;

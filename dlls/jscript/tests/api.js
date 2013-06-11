@@ -1204,6 +1204,14 @@ ok(tmp === "101.1", "num(5.5).toString(2) = " + tmp);
 
 tmp = (new Number(3)).toFixed(3);
 ok(tmp === "3.000", "num(3).toFixed(3) = " + tmp);
+tmp = (new Number(3)).toFixed();
+ok(tmp === "3", "Number(3).toFixed() = " + tmp);
+tmp = (new Number(0)).toFixed();
+ok(tmp === "0", "Number(0).toFixed() = " + tmp);
+tmp = (new Number(0)).toFixed(1);
+ok(tmp === "0.0", "Number(0).toFixed(1) = " + tmp);
+tmp = (new Number(0)).toFixed(2);
+ok(tmp === "0.00", "Number(0).toFixed(2) = " + tmp);
 tmp = (new Number(1.76)).toFixed(1);
 ok(tmp === "1.8", "num(1.76).toFixed(1) = " + tmp);
 tmp = (new Number(7.92)).toFixed(5);
@@ -2227,6 +2235,7 @@ var exception_array = {
     E_INVALID_CONTINUE:  { type: "SyntaxError",  number: -2146827268 },
     E_LABEL_NOT_FOUND:   { type: "SyntaxError",  number: -2146827262 },
     E_LABEL_REDEFINED:   { type: "SyntaxError",  number: -2146827263 },
+    E_MISPLACED_RETURN:  { type: "SyntaxError",  number: -2146827270 },
 
     E_ILLEGAL_ASSIGN:  { type: "ReferenceError", number: -2146823280 },
 
@@ -2291,6 +2300,8 @@ testException(function() {+nullDisp.prop;}, "E_OBJECT_REQUIRED");
 testException(function() {+nullDisp["prop"];}, "E_OBJECT_REQUIRED");
 testException(function() {delete (new Object());}, "E_INVALID_DELETE");
 testException(function() {delete false;}, "E_INVALID_DELETE");
+testException(function() {undefined.toString();}, "E_OBJECT_EXPECTED");
+testException(function() {null.toString();}, "E_OBJECT_EXPECTED");
 
 obj = new Object();
 obj.prop = 1;
@@ -2345,6 +2356,7 @@ testSyntaxError("ok(false, 'unexpected execution'); some_label: continue some_la
 testSyntaxError("ok(false, 'unexpected execution'); while(true) continue some_label;", "E_LABEL_NOT_FOUND");
 testSyntaxError("ok(false, 'unexpected execution'); some_label: { while(true) continue some_label; }", "E_INVALID_CONTINUE");
 testSyntaxError("ok(false, 'unexpected execution'); some_label: { some_label: while(true); }", "E_LABEL_REDEFINED");
+testSyntaxError("return;", "E_MISPLACED_RETURN");
 
 // ReferenceError tests
 testException(function() {test = function() {}}, "E_ILLEGAL_ASSIGN");

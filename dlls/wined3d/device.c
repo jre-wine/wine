@@ -710,8 +710,6 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
         return;
     }
 
-    ENTER_GL();
-
     /* Only set the values up once, as they are not changing. */
     if (flags & WINED3DCLEAR_STENCIL)
     {
@@ -815,8 +813,6 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
             checkGLcall("glClear");
         }
     }
-
-    LEAVE_GL();
 
     if (wined3d_settings.strict_draw_ordering || (flags & WINED3DCLEAR_TARGET
             && target->container.type == WINED3D_CONTAINER_SWAPCHAIN
@@ -978,7 +974,6 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
      * OpenGL will only allow that when a valid texture is bound.
      * We emulate this by creating dummy textures and binding them
      * to each texture stage when the currently set D3D texture is NULL. */
-    ENTER_GL();
 
     if (gl_info->supported[APPLE_CLIENT_STORAGE])
     {
@@ -1057,8 +1052,6 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
         gl_info->gl_ops.gl.p_glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
         checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
     }
-
-    LEAVE_GL();
 }
 
 /* Context activation is done by the caller. */
@@ -1066,7 +1059,6 @@ static void destroy_dummy_textures(struct wined3d_device *device, const struct w
 {
     unsigned int count = min(MAX_COMBINED_SAMPLERS, gl_info->limits.combined_samplers);
 
-    ENTER_GL();
     if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
     {
         gl_info->gl_ops.gl.p_glDeleteTextures(count, device->dummy_texture_cube);
@@ -1087,7 +1079,6 @@ static void destroy_dummy_textures(struct wined3d_device *device, const struct w
 
     gl_info->gl_ops.gl.p_glDeleteTextures(count, device->dummy_texture_2d);
     checkGLcall("glDeleteTextures(count, device->dummy_texture_2d)");
-    LEAVE_GL();
 
     memset(device->dummy_texture_cube, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_cube));
     memset(device->dummy_texture_3d, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_3d));
@@ -1297,8 +1288,6 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
 
     create_dummy_textures(device, context);
 
-    ENTER_GL();
-
     /* Initialize the current view state */
     device->view_ident = 1;
     device->contexts[0]->last_was_rhw = 0;
@@ -1325,7 +1314,6 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     }
 
     TRACE("All defaults now set up, leaving 3D init.\n");
-    LEAVE_GL();
 
     context_release(context);
 
@@ -1438,9 +1426,7 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
     /* Delete the mouse cursor texture */
     if (device->cursorTexture)
     {
-        ENTER_GL();
         gl_info->gl_ops.gl.p_glDeleteTextures(1, &device->cursorTexture);
-        LEAVE_GL();
         device->cursorTexture = 0;
     }
 
@@ -1449,9 +1435,7 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
      */
     if (device->depth_blt_texture)
     {
-        ENTER_GL();
         gl_info->gl_ops.gl.p_glDeleteTextures(1, &device->depth_blt_texture);
-        LEAVE_GL();
         device->depth_blt_texture = 0;
     }
 
@@ -3052,6 +3036,40 @@ struct wined3d_buffer * CDECL wined3d_device_get_ps_cb(const struct wined3d_devi
     return device->stateBlock->state.ps_cb[idx];
 }
 
+void CDECL wined3d_device_set_ps_sampler(struct wined3d_device *device, UINT idx, struct wined3d_sampler *sampler)
+{
+    struct wined3d_sampler *prev;
+
+    TRACE("device %p, idx %u, sampler %p.\n", device, idx, sampler);
+
+    if (idx >= MAX_SAMPLER_OBJECTS)
+    {
+        WARN("Invalid sampler index %u.\n", idx);
+        return;
+    }
+
+    prev = device->updateStateBlock->state.ps_sampler[idx];
+    device->updateStateBlock->state.ps_sampler[idx] = sampler;
+
+    if (sampler)
+        wined3d_sampler_incref(sampler);
+    if (prev)
+        wined3d_sampler_decref(prev);
+}
+
+struct wined3d_sampler * CDECL wined3d_device_get_ps_sampler(const struct wined3d_device *device, UINT idx)
+{
+    TRACE("device %p, idx %u.\n", device, idx);
+
+    if (idx >= MAX_SAMPLER_OBJECTS)
+    {
+        WARN("Invalid sampler index %u.\n", idx);
+        return NULL;
+    }
+
+    return device->stateBlock->state.ps_sampler[idx];
+}
+
 HRESULT CDECL wined3d_device_set_ps_consts_b(struct wined3d_device *device,
         UINT start_register, const BOOL *constants, UINT bool_count)
 {
@@ -3623,10 +3641,8 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
             struct wined3d_buffer *vb = state->streams[e->stream_idx].buffer;
             e->data.buffer_object = 0;
             e->data.addr = (BYTE *)((ULONG_PTR)e->data.addr + (ULONG_PTR)buffer_get_sysmem(vb, gl_info));
-            ENTER_GL();
             GL_EXTCALL(glDeleteBuffersARB(1, &vb->buffer_object));
             vb->buffer_object = 0;
-            LEAVE_GL();
         }
         if (e->data.addr)
             e->data.addr += e->stride * src_start_idx;
@@ -4142,106 +4158,6 @@ void CDECL wined3d_device_draw_indexed_primitive_instanced(struct wined3d_device
     TRACE("device %p, start_idx %u, index_count %u.\n", device, start_idx, index_count);
 
     draw_primitive(device, start_idx, index_count, start_instance, instance_count, TRUE, NULL);
-}
-
-HRESULT CDECL wined3d_device_draw_primitive_up(struct wined3d_device *device, UINT vertex_count,
-        const void *stream_data, UINT stream_stride)
-{
-    struct wined3d_stream_state *stream;
-    struct wined3d_buffer *vb;
-
-    TRACE("device %p, vertex count %u, stream_data %p, stream_stride %u.\n",
-            device, vertex_count, stream_data, stream_stride);
-
-    if (!device->stateBlock->state.vertex_declaration)
-    {
-        WARN("Called without a valid vertex declaration set.\n");
-        return WINED3DERR_INVALIDCALL;
-    }
-
-    /* Note in the following, it's not this type, but that's the purpose of streamIsUP */
-    stream = &device->stateBlock->state.streams[0];
-    vb = stream->buffer;
-    stream->buffer = (struct wined3d_buffer *)stream_data;
-    if (vb)
-        wined3d_buffer_decref(vb);
-    stream->offset = 0;
-    stream->stride = stream_stride;
-    device->stateBlock->state.user_stream = TRUE;
-    if (device->stateBlock->state.load_base_vertex_index)
-    {
-        device->stateBlock->state.load_base_vertex_index = 0;
-        device_invalidate_state(device, STATE_BASEVERTEXINDEX);
-    }
-
-    /* TODO: Only mark dirty if drawing from a different UP address */
-    device_invalidate_state(device, STATE_STREAMSRC);
-
-    draw_primitive(device, 0, vertex_count, 0, 0, FALSE, NULL);
-
-    /* MSDN specifies stream zero settings must be set to NULL */
-    stream->buffer = NULL;
-    stream->stride = 0;
-
-    /* stream zero settings set to null at end, as per the msdn. No need to
-     * mark dirty here, the app has to set the new stream sources or use UP
-     * drawing again. */
-    return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_device_draw_indexed_primitive_up(struct wined3d_device *device,
-        UINT index_count, const void *index_data, enum wined3d_format_id index_data_format_id,
-        const void *stream_data, UINT stream_stride)
-{
-    struct wined3d_stream_state *stream;
-    struct wined3d_buffer *vb, *ib;
-
-    TRACE("device %p, index_count %u, index_data %p, index_data_format %s, stream_data %p, stream_stride %u.\n",
-            device, index_count, index_data, debug_d3dformat(index_data_format_id), stream_data, stream_stride);
-
-    if (!device->stateBlock->state.vertex_declaration)
-    {
-        WARN("(%p) : Called without a valid vertex declaration set\n", device);
-        return WINED3DERR_INVALIDCALL;
-    }
-
-    stream = &device->stateBlock->state.streams[0];
-    vb = stream->buffer;
-    stream->buffer = (struct wined3d_buffer *)stream_data;
-    if (vb)
-        wined3d_buffer_decref(vb);
-    stream->offset = 0;
-    stream->stride = stream_stride;
-    device->stateBlock->state.user_stream = TRUE;
-    device->stateBlock->state.index_format = index_data_format_id;
-
-    /* Set to 0 as per MSDN. Do it now due to the stream source loading during draw_primitive(). */
-    device->stateBlock->state.base_vertex_index = 0;
-    if (device->stateBlock->state.load_base_vertex_index)
-    {
-        device->stateBlock->state.load_base_vertex_index = 0;
-        device_invalidate_state(device, STATE_BASEVERTEXINDEX);
-    }
-    /* Invalidate the state until we have nicer tracking of the stream source pointers */
-    device_invalidate_state(device, STATE_STREAMSRC);
-    device_invalidate_state(device, STATE_INDEXBUFFER);
-
-    draw_primitive(device, 0, index_count, 0, 0, TRUE, index_data);
-
-    /* MSDN specifies stream zero settings and index buffer must be set to NULL */
-    stream->buffer = NULL;
-    stream->stride = 0;
-    ib = device->stateBlock->state.index_buffer;
-    if (ib)
-    {
-        wined3d_buffer_decref(ib);
-        device->stateBlock->state.index_buffer = NULL;
-    }
-    /* No need to mark the stream source state dirty here. Either the app calls UP drawing again, or it has to call
-     * SetStreamSource to specify a vertex buffer
-     */
-
-    return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_draw_primitive_strided(struct wined3d_device *device,
@@ -4936,9 +4852,7 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
     if (device->cursorTexture)
     {
         struct wined3d_context *context = context_acquire(device, NULL);
-        ENTER_GL();
         context->gl_info->gl_ops.gl.p_glDeleteTextures(1, &device->cursorTexture);
-        LEAVE_GL();
         context_release(context);
         device->cursorTexture = 0;
     }
@@ -5003,8 +4917,6 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
 
             context = context_acquire(device, NULL);
 
-            ENTER_GL();
-
             if (gl_info->supported[APPLE_CLIENT_STORAGE])
             {
                 gl_info->gl_ops.gl.p_glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
@@ -5026,8 +4938,6 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
                 gl_info->gl_ops.gl.p_glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
                 checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
             }
-
-            LEAVE_GL();
 
             context_release(context);
         }
@@ -5185,7 +5095,6 @@ static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d
         device->shader_backend->shader_destroy(shader);
     }
 
-    ENTER_GL();
     if (device->depth_blt_texture)
     {
         gl_info->gl_ops.gl.p_glDeleteTextures(1, &device->depth_blt_texture);
@@ -5196,7 +5105,6 @@ static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d
         gl_info->gl_ops.gl.p_glDeleteTextures(1, &device->cursorTexture);
         device->cursorTexture = 0;
     }
-    LEAVE_GL();
 
     device->blitter->free_private(device);
     device->shader_backend->shader_free_private(device);

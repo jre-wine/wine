@@ -3055,7 +3055,7 @@ static void test_string_functions(void)
     expect(3, linesfilled);
 
     /* Cut off everything including the first space. */
-    rc.Width = char_bounds.Width + char_width * 1.5;
+    rc.Width = char_bounds.Width + char_width * 1.7;
 
     status = GdipMeasureString(graphics, teststring, 6, font, &rc, NULL, &bounds, &codepointsfitted, &linesfilled);
     expect(Ok, status);
@@ -3067,14 +3067,14 @@ static void test_string_functions(void)
     expect(3, linesfilled);
 
     /* Cut off everything after the first character. */
-    rc.Width = char_bounds.Width + char_width * 0.5;
+    rc.Width = char_bounds.Width + char_width * 0.8;
 
     status = GdipMeasureString(graphics, teststring, 6, font, &rc, NULL, &bounds, &codepointsfitted, &linesfilled);
     expect(Ok, status);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
     expectf_(char_bounds.Width, bounds.Width, 0.01);
-    todo_wine expectf_(char_bounds.Height + char_height * 3, bounds.Height, 0.05);
+    expectf_(char_bounds.Height + char_height * 3, bounds.Height, 0.05);
     expect(6, codepointsfitted);
     todo_wine expect(4, linesfilled);
 

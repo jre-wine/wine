@@ -44,6 +44,14 @@ typedef enum
     XmlEncoding_Unknown
 } xml_encoding;
 
+typedef enum
+{
+    XmlReadInState_Initial,
+    XmlReadInState_XmlDecl,
+    XmlReadInState_Misc_DTD,
+    XmlReadInState_DTD
+} XmlReaderInternalState;
+
 static const WCHAR utf16W[] = {'U','T','F','-','1','6',0};
 static const WCHAR utf8W[] = {'U','T','F','-','8',0};
 
@@ -109,6 +117,7 @@ typedef struct _xmlreader
     xmlreaderinput *input;
     IMalloc *imalloc;
     XmlReadState state;
+    XmlReaderInternalState instate;
     XmlNodeType nodetype;
     DtdProcessing dtdmode;
     UINT line, pos;           /* reader position in XML stream */
@@ -440,7 +449,7 @@ static int readerinput_get_utf8_convlen(xmlreaderinput *readerinput)
 static int readerinput_get_convlen(xmlreaderinput *readerinput, UINT cp)
 {
     encoded_buffer *buffer = &readerinput->buffer->encoded;
-    int len = buffer->written;
+    int len;
 
     if (cp == CP_UTF8)
         len = readerinput_get_utf8_convlen(readerinput);
@@ -457,6 +466,7 @@ static void readerinput_switchencoding(xmlreaderinput *readerinput, xml_encoding
     encoded_buffer *dest = &readerinput->buffer->utf16;
     int len, dest_len;
     HRESULT hr;
+    WCHAR *ptr;
     UINT cp;
 
     hr = get_code_page(enc, &cp);
@@ -477,8 +487,9 @@ static void readerinput_switchencoding(xmlreaderinput *readerinput, xml_encoding
 
     dest_len = MultiByteToWideChar(cp, 0, src->cur, len, NULL, 0);
     readerinput_grow(readerinput, dest_len);
-    MultiByteToWideChar(cp, 0, src->cur, len, (WCHAR*)dest->data, dest_len);
-    dest->data[dest_len] = 0;
+    ptr = (WCHAR*)dest->data;
+    MultiByteToWideChar(cp, 0, src->cur, len, ptr, dest_len);
+    ptr[dest_len] = 0;
     readerinput->buffer->code_page = cp;
 }
 
@@ -490,16 +501,7 @@ static inline const WCHAR *reader_get_cur(xmlreader *reader)
 static int reader_cmp(xmlreader *reader, const WCHAR *str)
 {
     const WCHAR *ptr = reader_get_cur(reader);
-    int i = 0;
-
     return strncmpW(str, ptr, strlenW(str));
-
-    while (str[i]) {
-        if (ptr[i] != str[i]) return 0;
-        i++;
-    }
-
-    return 1;
 }
 
 /* moves cursor n WCHARs forward */
@@ -515,13 +517,18 @@ static void reader_skipn(xmlreader *reader, int n)
     }
 }
 
+static inline int is_wchar_space(WCHAR ch)
+{
+    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
+}
+
 /* [3] S ::= (#x20 | #x9 | #xD | #xA)+ */
 static int reader_skipspaces(xmlreader *reader)
 {
     encoded_buffer *buffer = &reader->input->buffer->utf16;
     const WCHAR *ptr = reader_get_cur(reader), *start = ptr;
 
-    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\r' || *ptr == '\n')
+    while (is_wchar_space(*ptr))
     {
         buffer->cur += sizeof(WCHAR);
         if (*ptr == '\r')
@@ -753,7 +760,130 @@ static HRESULT reader_parse_xmldecl(xmlreader *reader)
     if (reader_cmp(reader, declcloseW)) return WC_E_XMLDECL;
     reader_skipn(reader, 2);
 
+    reader->nodetype = XmlNodeType_XmlDeclaration;
+
     return S_OK;
+}
+
+/* [15] Comment ::= '<!--' ((Char - '-') | ('-' (Char - '-')))* '-->' */
+static HRESULT reader_parse_comment(xmlreader *reader)
+{
+    const WCHAR *start, *ptr;
+
+    /* skip '<!--' */
+    reader_skipn(reader, 4);
+    ptr = start = reader_get_cur(reader);
+
+    while (*ptr)
+    {
+        if (ptr[0] == '-' && ptr[1] == '-')
+        {
+            if (ptr[2] == '>')
+            {
+                TRACE("%s\n", debugstr_wn(start, ptr-start));
+                /* skip '-->' */
+                reader_skipn(reader, 3);
+                reader->nodetype = XmlNodeType_Comment;
+                return S_OK;
+            }
+            else
+                return WC_E_COMMENT;
+        }
+        else
+        {
+            reader_skipn(reader, 1);
+            ptr = reader_get_cur(reader);
+        }
+    }
+
+    return MX_E_INPUTEND;
+}
+
+/* [16] PI ::= '<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>' */
+static HRESULT reader_parse_pi(xmlreader *reader)
+{
+    FIXME("PI not supported\n");
+    return E_NOTIMPL;
+}
+
+/* [27] Misc ::= Comment | PI | S */
+static HRESULT reader_parse_misc(xmlreader *reader)
+{
+    HRESULT hr = S_FALSE;
+
+    while (1)
+    {
+        static const WCHAR commentW[] = {'<','!','-','-',0};
+        static const WCHAR piW[] = {'<','?',0};
+        const WCHAR *cur = reader_get_cur(reader);
+
+        if (is_wchar_space(*cur))
+            reader_skipspaces(reader);
+        else if (!reader_cmp(reader, commentW))
+            hr = reader_parse_comment(reader);
+        else if (!reader_cmp(reader, piW))
+            hr = reader_parse_pi(reader);
+        else
+            break;
+
+        if (FAILED(hr)) return hr;
+        cur = reader_get_cur(reader);
+    }
+
+    return hr;
+}
+
+static HRESULT reader_parse_nextnode(xmlreader *reader)
+{
+    HRESULT hr;
+
+    while (1)
+    {
+        switch (reader->instate)
+        {
+        /* if it's a first call for a new input we need to detect stream encoding */
+        case XmlReadInState_Initial:
+            {
+                xml_encoding enc;
+
+                hr = readerinput_growraw(reader->input);
+                if (FAILED(hr)) return hr;
+
+                /* try to detect encoding by BOM or data and set input code page */
+                hr = readerinput_detectencoding(reader->input, &enc);
+                TRACE("detected encoding %s, 0x%08x\n", debugstr_w(xml_encoding_map[enc].name), hr);
+                if (FAILED(hr)) return hr;
+
+                /* always switch first time cause we have to put something in */
+                readerinput_switchencoding(reader->input, enc);
+
+                /* parse xml declaration */
+                hr = reader_parse_xmldecl(reader);
+                if (FAILED(hr)) return hr;
+
+                reader->instate = XmlReadInState_Misc_DTD;
+                if (hr == S_OK) return hr;
+            }
+            break;
+        case XmlReadInState_Misc_DTD:
+            hr = reader_parse_misc(reader);
+            if (FAILED(hr)) return hr;
+            if (hr == S_FALSE)
+            {
+                reader->instate = XmlReadInState_DTD;
+                return S_OK;
+            }
+            break;
+        case XmlReadInState_DTD:
+            FIXME("DTD parsing not supported\n");
+            return E_NOTIMPL;
+        default:
+            FIXME("internal state %d not handled\n", reader->instate);
+            return E_NOTIMPL;
+        }
+    }
+
+    return E_NOTIMPL;
 }
 
 static HRESULT WINAPI xmlreader_QueryInterface(IXmlReader *iface, REFIID riid, void** ppvObject)
@@ -844,7 +974,10 @@ static HRESULT WINAPI xmlreader_SetInput(IXmlReader* iface, IUnknown *input)
     /* set stream for supplied IXmlReaderInput */
     hr = readerinput_query_for_stream(This->input);
     if (hr == S_OK)
+    {
         This->state = XmlReadState_Initial;
+        This->instate = XmlReadInState_Initial;
+    }
 
     return hr;
 }
@@ -893,44 +1026,22 @@ static HRESULT WINAPI xmlreader_SetProperty(IXmlReader* iface, UINT property, LO
     return S_OK;
 }
 
-static HRESULT WINAPI xmlreader_Read(IXmlReader* iface, XmlNodeType *node_type)
+static HRESULT WINAPI xmlreader_Read(IXmlReader* iface, XmlNodeType *nodetype)
 {
     xmlreader *This = impl_from_IXmlReader(iface);
+    XmlNodeType oldtype = This->nodetype;
+    HRESULT hr;
 
-    FIXME("(%p)->(%p): stub\n", This, node_type);
+    TRACE("(%p)->(%p)\n", This, nodetype);
 
     if (This->state == XmlReadState_Closed) return S_FALSE;
 
-    /* if it's a first call for a new input we need to detect stream encoding */
-    if (This->state == XmlReadState_Initial)
-    {
-        xml_encoding enc;
-        HRESULT hr;
+    hr = reader_parse_nextnode(This);
+    if (oldtype == XmlNodeType_None && This->nodetype != oldtype)
+        This->state = XmlReadState_Interactive;
+    if (hr == S_OK) *nodetype = This->nodetype;
 
-        hr = readerinput_growraw(This->input);
-        if (FAILED(hr)) return hr;
-
-        /* try to detect encoding by BOM or data and set input code page */
-        hr = readerinput_detectencoding(This->input, &enc);
-        TRACE("detected encoding %s, 0x%08x\n", debugstr_w(xml_encoding_map[enc].name), hr);
-        if (FAILED(hr)) return hr;
-
-        /* always switch first time cause we have to put something in */
-        readerinput_switchencoding(This->input, enc);
-
-        /* parse xml declaration */
-        hr = reader_parse_xmldecl(This);
-        if (FAILED(hr)) return hr;
-
-        if (hr == S_OK)
-        {
-            This->state = XmlReadState_Interactive;
-            This->nodetype = *node_type = XmlNodeType_XmlDeclaration;
-            return S_OK;
-        }
-    }
-
-    return E_NOTIMPL;
+    return hr;
 }
 
 static HRESULT WINAPI xmlreader_GetNodeType(IXmlReader* iface, XmlNodeType *node_type)
@@ -1223,6 +1334,7 @@ HRESULT WINAPI CreateXmlReader(REFIID riid, void **obj, IMalloc *imalloc)
     reader->ref = 1;
     reader->input = NULL;
     reader->state = XmlReadState_Closed;
+    reader->instate = XmlReadInState_Initial;
     reader->dtdmode = DtdProcessing_Prohibit;
     reader->line  = reader->pos = 0;
     reader->imalloc = imalloc;

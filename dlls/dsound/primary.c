@@ -87,10 +87,9 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
             WAVEFORMATEXTENSIBLE testwfe = *mixwfe;
 
             testwfe.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-            testwfe.Format.wBitsPerSample = 32;
+            testwfe.Samples.wValidBitsPerSample = testwfe.Format.wBitsPerSample = 32;
             testwfe.Format.nBlockAlign = testwfe.Format.nChannels * testwfe.Format.wBitsPerSample / 8;
             testwfe.Format.nAvgBytesPerSec = testwfe.Format.nSamplesPerSec * testwfe.Format.nBlockAlign;
-            testwfe.Samples.wValidBitsPerSample = 0;
 
             if (FAILED(IAudioClient_IsFormatSupported(client, AUDCLNT_SHAREMODE_SHARED, &testwfe.Format, (WAVEFORMATEX**)&retwfe)))
                 w = DSOUND_CopyFormat(&mixwfe->Format);
@@ -121,12 +120,12 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
         w->nAvgBytesPerSec = w->nSamplesPerSec * w->nBlockAlign;
 
         wfe->dwChannelMask = 0;
-        wfe->Samples.wValidBitsPerSample = 0;
         if (wi->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
             w->wBitsPerSample = 32;
             wfe->SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
         } else
             wfe->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+        wfe->Samples.wValidBitsPerSample = w->wBitsPerSample;
     } else
         w = DSOUND_CopyFormat(device->primary_pwfx);
 
@@ -294,9 +293,9 @@ HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device)
     else
         device->normfunction = normfunctions[device->pwfx->wBitsPerSample/8 - 1];
 
-	FillMemory(device->buffer, device->buflen, (device->pwfx->wBitsPerSample == 8) ? 128 : 0);
-	FillMemory(device->mix_buffer, device->mix_buffer_len, 0);
-	device->playpos = 0;
+    FillMemory(device->buffer, device->buflen, (device->pwfx->wBitsPerSample == 8) ? 128 : 0);
+    FillMemory(device->mix_buffer, device->mix_buffer_len, 0);
+    device->playpos = 0;
 
     if (device->pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
 	 (device->pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
@@ -1086,11 +1085,9 @@ static HRESULT WINAPI PrimaryBufferImpl_Unlock(IDirectSoundBuffer *iface, void *
 		return DSERR_PRIOLEVELNEEDED;
 	}
 
-    if((p1 && ((BYTE*)p1 < device->buffer ||
-                    (BYTE*)p1 >= device->buffer + device->buflen)) ||
-            (p2 && ((BYTE*)p2 < device->buffer ||
-                    (BYTE*)p2 >= device->buffer + device->buflen)))
-        return DSERR_INVALIDPARAM;
+	if ((p1 && ((BYTE*)p1 < device->buffer || (BYTE*)p1 >= device->buffer + device->buflen)) ||
+	    (p2 && ((BYTE*)p2 < device->buffer || (BYTE*)p2 >= device->buffer + device->buflen)))
+		return DSERR_INVALIDPARAM;
 
 	return DS_OK;
 }

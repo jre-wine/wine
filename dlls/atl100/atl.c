@@ -22,7 +22,7 @@
 
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(atl);
+WINE_DEFAULT_DEBUG_CHANNEL(atl100);
 
 /***********************************************************************
  *           AtlAdvise         [atl100.@]
@@ -227,9 +227,166 @@ HRESULT WINAPI AtlIPersistStreamInit_Save(LPSTREAM pStm, BOOL fClearDirty,
 }
 
 /***********************************************************************
+ *           AtlModuleAddTermFunc            [atl100.@]
+ */
+HRESULT WINAPI AtlModuleAddTermFunc(_ATL_MODULE *pM, _ATL_TERMFUNC *pFunc, DWORD_PTR dw)
+{
+    _ATL_TERMFUNC_ELEM *termfunc_elem;
+
+    TRACE("(%p %p %ld)\n", pM, pFunc, dw);
+
+    termfunc_elem = HeapAlloc(GetProcessHeap(), 0, sizeof(_ATL_TERMFUNC_ELEM));
+    termfunc_elem->pFunc = pFunc;
+    termfunc_elem->dw = dw;
+    termfunc_elem->pNext = pM->m_pTermFuncs;
+
+    pM->m_pTermFuncs = termfunc_elem;
+
+    return S_OK;
+}
+
+/***********************************************************************
+ *           AtlCallTermFunc              [atl100.@]
+ */
+void WINAPI AtlCallTermFunc(_ATL_MODULE *pM)
+{
+    _ATL_TERMFUNC_ELEM *iter = pM->m_pTermFuncs, *tmp;
+
+    TRACE("(%p)\n", pM);
+
+    while(iter) {
+        iter->pFunc(iter->dw);
+        tmp = iter;
+        iter = iter->pNext;
+        HeapFree(GetProcessHeap(), 0, tmp);
+    }
+
+    pM->m_pTermFuncs = NULL;
+}
+
+/***********************************************************************
+ *           AtlLoadTypeLib             [atl100.@]
+ */
+HRESULT WINAPI AtlLoadTypeLib(HINSTANCE inst, LPCOLESTR lpszIndex,
+        BSTR *pbstrPath, ITypeLib **ppTypeLib)
+{
+    OLECHAR path[MAX_PATH+8]; /* leave some space for index */
+    HRESULT hres;
+
+    TRACE("(%p %s %p %p)\n", inst, debugstr_w(lpszIndex), pbstrPath, ppTypeLib);
+
+    GetModuleFileNameW(inst, path, MAX_PATH);
+    if(lpszIndex)
+        lstrcatW(path, lpszIndex);
+
+    hres = LoadTypeLib(path, ppTypeLib);
+    if(FAILED(hres))
+        return hres;
+
+    *pbstrPath = SysAllocString(path);
+    return S_OK;
+}
+
+/***********************************************************************
+ *           AtlWinModuleInit                          [atl100.65]
+ */
+HRESULT WINAPI AtlWinModuleInit(_ATL_WIN_MODULE *winmod)
+{
+    TRACE("(%p\n", winmod);
+
+    if(winmod->cbSize != sizeof(*winmod))
+        return E_INVALIDARG;
+
+    InitializeCriticalSection(&winmod->m_csWindowCreate);
+    winmod->m_pCreateWndList = NULL;
+    return S_OK;
+}
+
+/***********************************************************************
+ *           AtlWinModuleAddCreateWndData              [atl100.43]
+ */
+void WINAPI AtlWinModuleAddCreateWndData(_ATL_WIN_MODULE *pM, _AtlCreateWndData *pData, void *pvObject)
+{
+    TRACE("(%p, %p, %p)\n", pM, pData, pvObject);
+
+    pData->m_pThis = pvObject;
+    pData->m_dwThreadID = GetCurrentThreadId();
+
+    EnterCriticalSection(&pM->m_csWindowCreate);
+    pData->m_pNext = pM->m_pCreateWndList;
+    pM->m_pCreateWndList = pData;
+    LeaveCriticalSection(&pM->m_csWindowCreate);
+}
+
+/***********************************************************************
+ *           AtlWinModuleExtractCreateWndData          [atl100.44]
+ */
+void* WINAPI AtlWinModuleExtractCreateWndData(_ATL_WIN_MODULE *winmod)
+{
+    _AtlCreateWndData *iter, *prev = NULL;
+    DWORD thread_id;
+
+    TRACE("(%p)\n", winmod);
+
+    thread_id = GetCurrentThreadId();
+
+    EnterCriticalSection(&winmod->m_csWindowCreate);
+
+    for(iter = winmod->m_pCreateWndList; iter && iter->m_dwThreadID != thread_id; iter = iter->m_pNext)
+        prev = iter;
+    if(iter) {
+        if(prev)
+            prev->m_pNext = iter->m_pNext;
+        else
+            winmod->m_pCreateWndList = iter->m_pNext;
+    }
+
+    LeaveCriticalSection(&winmod->m_csWindowCreate);
+
+    return iter ? iter->m_pThis : NULL;
+}
+
+/***********************************************************************
+ *           AtlComModuleGetClassObject                [atl100.15]
+ */
+HRESULT WINAPI AtlComModuleGetClassObject(_ATL_COM_MODULE *pm, REFCLSID rclsid, REFIID riid, void **ppv)
+{
+    _ATL_OBJMAP_ENTRY **iter;
+    HRESULT hres;
+
+    TRACE("(%p %s %s %p)\n", pm, debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+
+    if(!pm)
+        return E_INVALIDARG;
+
+    for(iter = pm->m_ppAutoObjMapFirst; iter < pm->m_ppAutoObjMapLast; iter++) {
+        if(IsEqualCLSID((*iter)->pclsid, rclsid) && (*iter)->pfnGetClassObject) {
+            if(!(*iter)->pCF)
+                hres = (*iter)->pfnGetClassObject((*iter)->pfnCreateInstance, &IID_IUnknown, (void**)&(*iter)->pCF);
+            if((*iter)->pCF)
+                hres = IUnknown_QueryInterface((*iter)->pCF, riid, ppv);
+            TRACE("returning %p (%08x)\n", *ppv, hres);
+            return hres;
+        }
+    }
+
+    WARN("Class %s not found\n", debugstr_guid(rclsid));
+    return CLASS_E_CLASSNOTAVAILABLE;
+}
+
+/***********************************************************************
+ *           AtlRegisterClassCategoriesHelper          [atl100.49]
+ */
+HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid, const struct _ATL_CATMAP_ENTRY *catmap, BOOL reg)
+{
+    FIXME("(%s %p %x)\n", debugstr_guid(clsid), catmap, reg);
+    return E_NOTIMPL;
+}
+
+/***********************************************************************
  *           AtlGetVersion              [atl100.@]
  */
 DWORD WINAPI AtlGetVersion(void *pReserved)
 {
-   return 0x0a00;
+   return _ATL_VER;
 }
