@@ -833,11 +833,14 @@ static BOOL get_cups_ppd( const char *printer_name, const WCHAR *ppd )
 
     http_status = cupsGetPPD3_wrapper( 0, printer_name, &modtime,
                                        unix_name, strlen( unix_name ) + 1 );
+
+    if (http_status != HTTP_OK) unlink( unix_name );
     HeapFree( GetProcessHeap(), 0, unix_name );
 
     if (http_status == HTTP_OK) return TRUE;
 
-    TRACE( "failed to get ppd for printer %s from cups, calling fallback\n", debugstr_a(printer_name) );
+    TRACE( "failed to get ppd for printer %s from cups (status %d), calling fallback\n",
+           debugstr_a(printer_name), http_status );
     return get_fallback_ppd( printer_name, ppd );
 }
 
@@ -5579,7 +5582,6 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
     if (pEnvironment && !strcmpW(pEnvironment, allW))
     {
         DWORD i, needed, bufsize = cbBuf;
-        DWORD total_needed = 0;
         DWORD total_found = 0;
         DWORD data_offset;
 
@@ -5591,7 +5593,6 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
             ret = WINSPOOL_EnumPrinterDrivers(pName, all_printenv[i]->envname, Level,
                                               NULL, 0, 0, &needed, &found, 0);
             if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FALSE;
-            total_needed += needed;
             total_found += found;
         }
 
