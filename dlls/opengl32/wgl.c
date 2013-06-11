@@ -47,8 +47,6 @@ static HMODULE opengl32_handle;
 
 extern struct opengl_funcs null_opengl_funcs;
 
-const GLubyte * WINAPI wine_glGetString( GLenum name );
-
 /* handle management */
 
 #define MAX_WGL_HANDLES 1024
@@ -691,7 +689,7 @@ static int compar(const void *elt_a, const void *elt_b) {
 static BOOL is_extension_supported(const char* extension)
 {
     const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-    const char *gl_ext_string = (const char*)wine_glGetString(GL_EXTENSIONS);
+    const char *gl_ext_string = (const char*)glGetString(GL_EXTENSIONS);
 
     TRACE("Checking for extension '%s'\n", extension);
 
@@ -738,79 +736,50 @@ static BOOL is_extension_supported(const char* extension)
 /***********************************************************************
  *		wglGetProcAddress (OPENGL32.@)
  */
-PROC WINAPI wglGetProcAddress(LPCSTR lpszProc)
+PROC WINAPI wglGetProcAddress( LPCSTR name )
 {
-  struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
-  void **func_ptr;
-  void *local_func;
-  OpenGL_extension  ext;
-  const OpenGL_extension *ext_ret;
-  struct wgl_handle *context = get_current_context_ptr();
+    struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
+    void **func_ptr;
+    OpenGL_extension  ext;
+    const OpenGL_extension *ext_ret;
 
-  TRACE("(%s)\n", lpszProc);
+    if (!name) return NULL;
 
-  if (lpszProc == NULL)
-    return NULL;
-
-  /* Without an active context opengl32 doesn't know to what
-   * driver it has to dispatch wglGetProcAddress.
-   */
-  if (!context)
-  {
-    WARN("No active WGL context found\n");
-    return NULL;
-  }
-
-  /* Search in the thunks to find the real name of the extension */
-  ext.name = lpszProc;
-  ext_ret = bsearch(&ext, extension_registry, extension_registry_size,
-                    sizeof(OpenGL_extension), compar);
-  if (!ext_ret)
-  {
-      WARN("Extension '%s' not defined in opengl32.dll's function table!\n", lpszProc);
-      return NULL;
-  }
-
-  func_ptr = (void **)&funcs->ext + (ext_ret - extension_registry);
-  if (!*func_ptr)
-  {
-    /* Check if the GL extension required by the function is available */
-    if(!is_extension_supported(ext_ret->extension)) {
-        WARN("Extension '%s' required by function '%s' not supported!\n", ext_ret->extension, lpszProc);
+    /* Without an active context opengl32 doesn't know to what
+     * driver it has to dispatch wglGetProcAddress.
+     */
+    if (!get_current_context_ptr())
+    {
+        WARN("No active WGL context found\n");
+        return NULL;
     }
 
-    local_func = context->funcs->wgl.p_wglGetProcAddress( ext_ret->name );
-
-    /* After that, look at the extensions defined in the Linux OpenGL library */
-    if (local_func == NULL) {
-      char buf[256];
-      void *ret = NULL;
-
-      /* Remove the last 3 letters (EXT, ARB, ...).
-
-	 I know that some extensions have more than 3 letters (MESA, NV,
-	 INTEL, ...), but this is only a stop-gap measure to fix buggy
-	 OpenGL drivers (moreover, it is only useful for old 1.0 apps
-	 that query the glBindTextureEXT extension).
-      */
-      memcpy(buf, ext_ret->name, strlen(ext_ret->name) - 3);
-      buf[strlen(ext_ret->name) - 3] = '\0';
-      TRACE("Extension not found in the Linux OpenGL library, checking against libGL bug with %s..\n", buf);
-
-      ret = GetProcAddress(opengl32_handle, buf);
-      if (ret != NULL) {
-        TRACE("Found function in main OpenGL library (%p)!\n", ret);
-      } else {
-        WARN("Did not find function %s (%s) in your OpenGL library!\n", lpszProc, ext_ret->name);
-      }
-
-      return ret;
+    ext.name = name;
+    ext_ret = bsearch(&ext, extension_registry, extension_registry_size, sizeof(ext), compar);
+    if (!ext_ret)
+    {
+        WARN("Function %s unknown\n", name);
+        return NULL;
     }
-    *func_ptr = local_func;
-  }
 
-  TRACE("returning function (%p)\n", ext_ret->func);
-  return ext_ret->func;
+    func_ptr = (void **)&funcs->ext + (ext_ret - extension_registry);
+    if (!*func_ptr)
+    {
+        void *driver_func = funcs->wgl.p_wglGetProcAddress( name );
+
+        if (!is_extension_supported(ext_ret->extension))
+            WARN("Extension %s required for %s not supported\n", ext_ret->extension, name);
+
+        if (driver_func == NULL)
+        {
+            WARN("Function %s not supported by driver\n", name);
+            return NULL;
+        }
+        *func_ptr = driver_func;
+    }
+
+    TRACE("returning %s -> %p\n", name, ext_ret->func);
+    return ext_ret->func;
 }
 
 /***********************************************************************
@@ -1246,6 +1215,7 @@ typedef void (WINAPI *_GLUfuncptr)(void);
 
 static GLUtesselator * (WINAPI *pgluNewTess)(void);
 static void (WINAPI *pgluDeleteTess)(GLUtesselator *tess);
+static void (WINAPI *pgluTessNormal)(GLUtesselator *tess, GLdouble x, GLdouble y, GLdouble z);
 static void (WINAPI *pgluTessBeginPolygon)(GLUtesselator *tess, void *polygon_data);
 static void (WINAPI *pgluTessEndPolygon)(GLUtesselator *tess);
 static void (WINAPI *pgluTessCallback)(GLUtesselator *tess, GLenum which, _GLUfuncptr fn);
@@ -1273,6 +1243,7 @@ static HMODULE load_libglu(void)
     LOAD_FUNCPTR(gluNewTess);
     LOAD_FUNCPTR(gluDeleteTess);
     LOAD_FUNCPTR(gluTessBeginContour);
+    LOAD_FUNCPTR(gluTessNormal);
     LOAD_FUNCPTR(gluTessBeginPolygon);
     LOAD_FUNCPTR(gluTessCallback);
     LOAD_FUNCPTR(gluTessEndContour);
@@ -1311,6 +1282,74 @@ static void WINAPI tess_callback_end(void)
     funcs->gl.p_glEnd();
 }
 
+typedef struct _bezier_vector {
+    GLdouble x;
+    GLdouble y;
+} bezier_vector;
+
+static double bezier_deviation_squared(const bezier_vector *p)
+{
+    bezier_vector deviation;
+    bezier_vector vertex;
+    bezier_vector base;
+    double base_length;
+    double dot;
+
+    vertex.x = (p[0].x + p[1].x*2 + p[2].x)/4 - p[0].x;
+    vertex.y = (p[0].y + p[1].y*2 + p[2].y)/4 - p[0].y;
+
+    base.x = p[2].x - p[0].x;
+    base.y = p[2].y - p[0].y;
+
+    base_length = sqrt(base.x*base.x + base.y*base.y);
+    base.x /= base_length;
+    base.y /= base_length;
+
+    dot = base.x*vertex.x + base.y*vertex.y;
+    dot = min(max(dot, 0.0), base_length);
+    base.x *= dot;
+    base.y *= dot;
+
+    deviation.x = vertex.x-base.x;
+    deviation.y = vertex.y-base.y;
+
+    return deviation.x*deviation.x + deviation.y*deviation.y;
+}
+
+static int bezier_approximate(const bezier_vector *p, bezier_vector *points, FLOAT deviation)
+{
+    bezier_vector first_curve[3];
+    bezier_vector second_curve[3];
+    bezier_vector vertex;
+    int total_vertices;
+
+    if(bezier_deviation_squared(p) <= deviation*deviation)
+    {
+        if(points)
+            *points = p[2];
+        return 1;
+    }
+
+    vertex.x = (p[0].x + p[1].x*2 + p[2].x)/4;
+    vertex.y = (p[0].y + p[1].y*2 + p[2].y)/4;
+
+    first_curve[0] = p[0];
+    first_curve[1].x = (p[0].x + p[1].x)/2;
+    first_curve[1].y = (p[0].y + p[1].y)/2;
+    first_curve[2] = vertex;
+
+    second_curve[0] = vertex;
+    second_curve[1].x = (p[2].x + p[1].x)/2;
+    second_curve[1].y = (p[2].y + p[1].y)/2;
+    second_curve[2] = p[2];
+
+    total_vertices = bezier_approximate(first_curve, points, deviation);
+    if(points)
+        points += total_vertices;
+    total_vertices += bezier_approximate(second_curve, points, deviation);
+    return total_vertices;
+}
+
 /***********************************************************************
  *		wglUseFontOutlines_common
  */
@@ -1327,7 +1366,7 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
     const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
     UINT glyph;
     const MAT2 identity = {{0,1},{0,0},{0,0},{0,1}};
-    GLUtesselator *tess;
+    GLUtesselator *tess = NULL;
     LOGFONTW lf;
     HFONT old_font, unscaled_font;
     UINT em_size = 1024;
@@ -1336,17 +1375,23 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
     TRACE("(%p, %d, %d, %d, %f, %f, %d, %p, %s)\n", hdc, first, count,
           listBase, deviation, extrusion, format, lpgmf, unicode ? "W" : "A");
 
-    if (!load_libglu())
-    {
-        ERR("glu32 is required for this function but isn't available\n");
-        return FALSE;
-    }
+    if(deviation <= 0.0)
+        deviation = 1.0/em_size;
 
-    tess = pgluNewTess();
-    if(!tess) return FALSE;
-    pgluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
-    pgluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
-    pgluTessCallback(tess, GLU_TESS_END, tess_callback_end);
+    if(format == WGL_FONT_POLYGONS)
+    {
+        if (!load_libglu())
+        {
+            ERR("glu32 is required for this function but isn't available\n");
+            return FALSE;
+        }
+
+        tess = pgluNewTess();
+        if(!tess) return FALSE;
+        pgluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)tess_callback_vertex);
+        pgluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)tess_callback_begin);
+        pgluTessCallback(tess, GLU_TESS_END, tess_callback_end);
+    }
 
     GetObjectW(GetCurrentObject(hdc, OBJ_FONT), sizeof(lf), &lf);
     rc.left = rc.right = rc.bottom = 0;
@@ -1364,7 +1409,8 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
         BYTE *buf;
         TTPOLYGONHEADER *pph;
         TTPOLYCURVE *ppc;
-        GLdouble *vertices;
+        GLdouble *vertices = NULL;
+        int vertex_total = -1;
 
         if(unicode)
             needed = GetGlyphOutlineW(hdc, glyph, GGO_NATIVE, &gm, 0, NULL, &identity);
@@ -1375,7 +1421,6 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
             goto error;
 
         buf = HeapAlloc(GetProcessHeap(), 0, needed);
-        vertices = HeapAlloc(GetProcessHeap(), 0, needed / sizeof(POINTFX) * 3 * sizeof(GLdouble));
 
         if(unicode)
             GetGlyphOutlineW(hdc, glyph, GGO_NATIVE, &gm, needed, buf, &identity);
@@ -1398,66 +1443,144 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
             lpgmf++;
         }
 
-	funcs->gl.p_glNewList(listBase++, GL_COMPILE);
-        pgluTessBeginPolygon(tess, NULL);
-
-        pph = (TTPOLYGONHEADER*)buf;
-        while((BYTE*)pph < buf + needed)
+        funcs->gl.p_glNewList(listBase++, GL_COMPILE);
+        funcs->gl.p_glFrontFace(GL_CCW);
+        if(format == WGL_FONT_POLYGONS)
         {
-            TRACE("\tstart %d, %d\n", pph->pfxStart.x.value, pph->pfxStart.y.value);
+            funcs->gl.p_glNormal3d(0.0, 0.0, 1.0);
+            pgluTessNormal(tess, 0, 0, 1);
+            pgluTessBeginPolygon(tess, NULL);
+        }
 
-            pgluTessBeginContour(tess);
+        while(!vertices)
+        {
+            if(vertex_total != -1)
+                vertices = HeapAlloc(GetProcessHeap(), 0, vertex_total * 3 * sizeof(GLdouble));
+            vertex_total = 0;
 
-            fixed_to_double(pph->pfxStart, em_size, vertices);
-            pgluTessVertex(tess, vertices, vertices);
-            vertices += 3;
-
-            ppc = (TTPOLYCURVE*)((char*)pph + sizeof(*pph));
-            while((char*)ppc < (char*)pph + pph->cb)
+            pph = (TTPOLYGONHEADER*)buf;
+            while((BYTE*)pph < buf + needed)
             {
-                int i;
+                GLdouble previous[3];
+                fixed_to_double(pph->pfxStart, em_size, previous);
 
-                switch(ppc->wType) {
-                case TT_PRIM_LINE:
-                    for(i = 0; i < ppc->cpfx; i++)
-                    {
-                        TRACE("\t\tline to %d, %d\n", ppc->apfx[i].x.value, ppc->apfx[i].y.value);
-                        fixed_to_double(ppc->apfx[i], em_size, vertices); 
-                        pgluTessVertex(tess, vertices, vertices);
-                        vertices += 3;
-                    }
-                    break;
+                if(vertices)
+                    TRACE("\tstart %d, %d\n", pph->pfxStart.x.value, pph->pfxStart.y.value);
 
-                case TT_PRIM_QSPLINE:
-                    for(i = 0; i < ppc->cpfx/2; i++)
-                    {
-                        /* FIXME: just connecting the control points for now */
-                        TRACE("\t\tcurve  %d,%d %d,%d\n",
-                              ppc->apfx[i * 2].x.value,     ppc->apfx[i * 3].y.value,
-                              ppc->apfx[i * 2 + 1].x.value, ppc->apfx[i * 3 + 1].y.value);
-                        fixed_to_double(ppc->apfx[i * 2], em_size, vertices); 
+                if(format == WGL_FONT_POLYGONS)
+                    pgluTessBeginContour(tess);
+                else
+                    funcs->gl.p_glBegin(GL_LINE_LOOP);
+
+                if(vertices)
+                {
+                    fixed_to_double(pph->pfxStart, em_size, vertices);
+                    if(format == WGL_FONT_POLYGONS)
                         pgluTessVertex(tess, vertices, vertices);
-                        vertices += 3;
-                        fixed_to_double(ppc->apfx[i * 2 + 1], em_size, vertices); 
-                        pgluTessVertex(tess, vertices, vertices);
-                        vertices += 3;
-                    }
-                    break;
-                default:
-                    ERR("\t\tcurve type = %d\n", ppc->wType);
-                    pgluTessEndContour(tess);
-                    goto error_in_list;
+                    else
+                        funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                    vertices += 3;
                 }
+                vertex_total++;
 
-                ppc = (TTPOLYCURVE*)((char*)ppc + sizeof(*ppc) +
-                                     (ppc->cpfx - 1) * sizeof(POINTFX));
+                ppc = (TTPOLYCURVE*)((char*)pph + sizeof(*pph));
+                while((char*)ppc < (char*)pph + pph->cb)
+                {
+                    int i, j;
+                    int num;
+
+                    switch(ppc->wType) {
+                    case TT_PRIM_LINE:
+                        for(i = 0; i < ppc->cpfx; i++)
+                        {
+                            if(vertices)
+                            {
+                                TRACE("\t\tline to %d, %d\n",
+                                      ppc->apfx[i].x.value, ppc->apfx[i].y.value);
+                                fixed_to_double(ppc->apfx[i], em_size, vertices);
+                                if(format == WGL_FONT_POLYGONS)
+                                    pgluTessVertex(tess, vertices, vertices);
+                                else
+                                    funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                                vertices += 3;
+                            }
+                            fixed_to_double(ppc->apfx[i], em_size, previous);
+                            vertex_total++;
+                        }
+                        break;
+
+                    case TT_PRIM_QSPLINE:
+                        for(i = 0; i < ppc->cpfx-1; i++)
+                        {
+                            bezier_vector curve[3];
+                            bezier_vector *points;
+                            GLdouble curve_vertex[3];
+
+                            if(vertices)
+                                TRACE("\t\tcurve  %d,%d %d,%d\n",
+                                      ppc->apfx[i].x.value,     ppc->apfx[i].y.value,
+                                      ppc->apfx[i + 1].x.value, ppc->apfx[i + 1].y.value);
+
+                            curve[0].x = previous[0];
+                            curve[0].y = previous[1];
+                            fixed_to_double(ppc->apfx[i], em_size, curve_vertex);
+                            curve[1].x = curve_vertex[0];
+                            curve[1].y = curve_vertex[1];
+                            fixed_to_double(ppc->apfx[i + 1], em_size, curve_vertex);
+                            curve[2].x = curve_vertex[0];
+                            curve[2].y = curve_vertex[1];
+                            if(i < ppc->cpfx-2)
+                            {
+                                curve[2].x = (curve[1].x + curve[2].x)/2;
+                                curve[2].y = (curve[1].y + curve[2].y)/2;
+                            }
+                            num = bezier_approximate(curve, NULL, deviation);
+                            points = HeapAlloc(GetProcessHeap(), 0, num*sizeof(bezier_vector));
+                            num = bezier_approximate(curve, points, deviation);
+                            vertex_total += num;
+                            if(vertices)
+                            {
+                                for(j=0; j<num; j++)
+                                {
+                                    TRACE("\t\t\tvertex at %f,%f\n", points[j].x, points[j].y);
+                                    vertices[0] = points[j].x;
+                                    vertices[1] = points[j].y;
+                                    vertices[2] = 0.0;
+                                    if(format == WGL_FONT_POLYGONS)
+                                        pgluTessVertex(tess, vertices, vertices);
+                                    else
+                                        funcs->gl.p_glVertex3d(vertices[0], vertices[1], vertices[2]);
+                                    vertices += 3;
+                                }
+                            }
+                            HeapFree(GetProcessHeap(), 0, points);
+                            previous[0] = curve[2].x;
+                            previous[1] = curve[2].y;
+                        }
+                        break;
+                    default:
+                        ERR("\t\tcurve type = %d\n", ppc->wType);
+                        if(format == WGL_FONT_POLYGONS)
+                            pgluTessEndContour(tess);
+                        else
+                            funcs->gl.p_glEnd();
+                        goto error_in_list;
+                    }
+
+                    ppc = (TTPOLYCURVE*)((char*)ppc + sizeof(*ppc) +
+                                         (ppc->cpfx - 1) * sizeof(POINTFX));
+                }
+                if(format == WGL_FONT_POLYGONS)
+                    pgluTessEndContour(tess);
+                else
+                    funcs->gl.p_glEnd();
+                pph = (TTPOLYGONHEADER*)((char*)pph + pph->cb);
             }
-            pgluTessEndContour(tess);
-            pph = (TTPOLYGONHEADER*)((char*)pph + pph->cb);
         }
 
 error_in_list:
-        pgluTessEndPolygon(tess);
+        if(format == WGL_FONT_POLYGONS)
+            pgluTessEndPolygon(tess);
         funcs->gl.p_glTranslated((GLdouble)gm.gmCellIncX / em_size, (GLdouble)gm.gmCellIncY / em_size, 0.0);
         funcs->gl.p_glEndList();
         HeapFree(GetProcessHeap(), 0, buf);
@@ -1466,7 +1589,8 @@ error_in_list:
 
  error:
     DeleteObject(SelectObject(hdc, old_font));
-    pgluDeleteTess(tess);
+    if(format == WGL_FONT_POLYGONS)
+        pgluDeleteTess(tess);
     return TRUE;
 
 }
@@ -1504,7 +1628,7 @@ BOOL WINAPI wglUseFontOutlinesW(HDC hdc,
 /***********************************************************************
  *              glDebugEntry (OPENGL32.@)
  */
-GLint WINAPI wine_glDebugEntry( GLint unknown1, GLint unknown2 )
+GLint WINAPI glDebugEntry( GLint unknown1, GLint unknown2 )
 {
     return 0;
 }
@@ -1572,7 +1696,7 @@ static GLubyte *filter_extensions( const char *extensions )
 /***********************************************************************
  *              glGetString (OPENGL32.@)
  */
-const GLubyte * WINAPI wine_glGetString( GLenum name )
+const GLubyte * WINAPI glGetString( GLenum name )
 {
     const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
     const GLubyte *ret = funcs->gl.p_glGetString( name );

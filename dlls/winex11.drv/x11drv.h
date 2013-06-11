@@ -217,8 +217,6 @@ extern const int X11DRV_XROPfunction[];
 
 extern int client_side_graphics DECLSPEC_HIDDEN;
 extern int client_side_with_render DECLSPEC_HIDDEN;
-extern int client_side_antialias_with_core DECLSPEC_HIDDEN;
-extern int client_side_antialias_with_render DECLSPEC_HIDDEN;
 extern const struct gdi_dc_funcs *X11DRV_XRender_Init(void) DECLSPEC_HIDDEN;
 
 extern struct opengl_funcs *get_glx_driver(UINT) DECLSPEC_HIDDEN;
@@ -558,6 +556,7 @@ struct x11drv_win_data
     BOOL        iconic : 1;     /* is window in iconic state? */
     BOOL        embedded : 1;   /* is window an XEMBED client? */
     BOOL        shaped : 1;     /* is window using a custom region shape? */
+    BOOL        layered : 1;    /* is window layered and with valid attributes? */
     int         wm_state;       /* current value of the WM_STATE property */
     DWORD       net_wm_state;   /* bit mask of active x11drv_net_wm_state values */
     Window      embedder;       /* window id of embedder */

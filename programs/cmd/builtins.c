@@ -394,6 +394,7 @@ static BOOL WCMD_AppendEOF(WCHAR *filename)
       SetFilePointer (h, 0, NULL, FILE_END);
       if (!WriteFile(h, &eof, 1, NULL, NULL)) {
         WINE_ERR("Failed to append EOF to %s (%d)\n", wine_dbgstr_w(filename), GetLastError());
+        CloseHandle(h);
         return FALSE;
       }
       CloseHandle(h);
@@ -430,6 +431,7 @@ static BOOL WCMD_ManualCopy(WCHAR *srcname, WCHAR *dstname, BOOL ascii, BOOL app
                       append?OPEN_EXISTING:CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (out == NULL) {
       WINE_ERR("Failed to open %s (%d)\n", wine_dbgstr_w(dstname), GetLastError());
+      CloseHandle(in);
       return FALSE;
     }
 
@@ -1401,6 +1403,7 @@ void WCMD_echo (const WCHAR *args)
                  && origcommand[0]!=';') {
     if (echo_mode) WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), onW);
     else WCMD_output (WCMD_LoadMessage(WCMD_ECHOPROMPT), offW);
+    HeapFree(GetProcessHeap(), 0, trimmed);
     return;
   }
 
@@ -1423,15 +1426,13 @@ void WCMD_echo (const WCHAR *args)
  * commands->thiscommand string (eg. it may point after a DO or ELSE)
  */
 static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
-                              const WCHAR *variable, const WCHAR *value,
                               BOOL isIF, BOOL executecmds)
 {
   CMD_LIST *curPosition = *cmdList;
   int myDepth = (*cmdList)->bracketDepth;
 
-  WINE_TRACE("cmdList(%p), firstCmd(%p), with variable '%s'='%s', doIt(%d)\n",
+  WINE_TRACE("cmdList(%p), firstCmd(%p), doIt(%d)\n",
              cmdList, wine_dbgstr_w(firstcmd),
-             wine_dbgstr_w(variable), wine_dbgstr_w(value),
              executecmds);
 
   /* Skip leading whitespace between condition and the command */
@@ -1440,7 +1441,7 @@ static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
   /* Process the first command, if there is one */
   if (executecmds && firstcmd && *firstcmd) {
     WCHAR *command = WCMD_strdupW(firstcmd);
-    WCMD_execute (firstcmd, (*cmdList)->redirects, variable, value, cmdList, FALSE);
+    WCMD_execute (firstcmd, (*cmdList)->redirects, cmdList, FALSE);
     HeapFree(GetProcessHeap(), 0, command);
   }
 
@@ -1468,15 +1469,15 @@ static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
       if ((*cmdList)->prevDelim == CMD_ONFAILURE ||
           (*cmdList)->prevDelim == CMD_ONSUCCESS) {
         if (processThese && (*cmdList)->command) {
-          WCMD_execute ((*cmdList)->command, (*cmdList)->redirects, variable,
-                        value, cmdList, FALSE);
+          WCMD_execute ((*cmdList)->command, (*cmdList)->redirects,
+                        cmdList, FALSE);
         }
         if (curPosition == *cmdList) *cmdList = (*cmdList)->nextcommand;
 
       /* Execute any appended to the statement with (...) */
       } else if ((*cmdList)->bracketDepth > myDepth) {
         if (processThese) {
-          *cmdList = WCMD_process_commands(*cmdList, TRUE, variable, value, FALSE);
+          *cmdList = WCMD_process_commands(*cmdList, TRUE, FALSE);
           WINE_TRACE("Back from processing commands, (next = %p)\n", *cmdList);
         }
         if (curPosition == *cmdList) *cmdList = (*cmdList)->nextcommand;
@@ -1498,7 +1499,7 @@ static void WCMD_part_execute(CMD_LIST **cmdList, const WCHAR *firstcmd,
             /* Skip leading whitespace between condition and the command */
             while (*cmd && (*cmd==' ' || *cmd=='\t')) cmd++;
             if (*cmd) {
-              WCMD_execute (cmd, (*cmdList)->redirects, variable, value, cmdList, FALSE);
+              WCMD_execute (cmd, (*cmdList)->redirects, cmdList, FALSE);
             }
           }
           if (curPosition == *cmdList) *cmdList = (*cmdList)->nextcommand;
@@ -1700,7 +1701,7 @@ static void WCMD_add_dirstowalk(DIRECTORY_STACK *dirsToWalk) {
 static void WCMD_parse_line(CMD_LIST    *cmdStart,
                             const WCHAR *firstCmd,
                             CMD_LIST   **cmdEnd,
-                            const WCHAR *variable,
+                            const WCHAR  variable,
                             WCHAR       *buffer,
                             BOOL        *doExecuted,
                             int         *forf_skip,
@@ -1708,6 +1709,8 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
                             WCHAR       *forf_delims) {
 
   WCHAR *parm, *where;
+  FOR_CONTEXT oldcontext;
+  int varidx;
 
   /* Skip lines if requested */
   if (*forf_skip) {
@@ -1715,18 +1718,29 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
     return;
   }
 
+  /* Save away any existing for variable context (e.g. nested for loops) */
+  oldcontext = forloopcontext;
+
   /* Extract the parameter */
   parm = WCMD_parameter_with_delims(buffer, 0, &where, FALSE, FALSE, forf_delims);
   WINE_TRACE("Parsed parameter: %s from %s\n", wine_dbgstr_w(parm),
              wine_dbgstr_w(buffer));
 
+  /* FIXME: Use tokens= line to populate forloopcontext */
+  varidx = FOR_VAR_IDX(variable);
+  if (varidx >=0) forloopcontext.variable[varidx] = WCMD_strdupW(parm);
+
   if (where && where[0] != forf_eol) {
     CMD_LIST *thisCmdStart = cmdStart;
     *doExecuted = TRUE;
-    WCMD_part_execute(&thisCmdStart, firstCmd, variable, parm, FALSE, TRUE);
+    WCMD_part_execute(&thisCmdStart, firstCmd, FALSE, TRUE);
     *cmdEnd = thisCmdStart;
   }
 
+  if (varidx >=0) HeapFree(GetProcessHeap(), 0, forloopcontext.variable[varidx]);
+
+  /* Restore the original for variable contextx */
+  forloopcontext = oldcontext;
 }
 
 /**************************************************************************
@@ -1746,7 +1760,7 @@ static void WCMD_parse_line(CMD_LIST    *cmdStart,
  *
  * Returns a file handle which can be used to read the input lines from.
  */
-HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
+static HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
   WCHAR  temp_str[MAX_PATH];
   WCHAR  temp_file[MAX_PATH];
   WCHAR  temp_cmd[MAXSTRING];
@@ -1775,7 +1789,7 @@ HANDLE WCMD_forf_getinputhandle(BOOL usebackq, WCHAR *itemstr, BOOL iscmd) {
     wsprintfW(temp_cmd, cmdslashcW, itemstr);
     WINE_TRACE("Issuing '%s' with redirs '%s'\n",
                wine_dbgstr_w(temp_cmd), wine_dbgstr_w(temp_str));
-    WCMD_execute (temp_cmd, temp_str, NULL, NULL, NULL, FALSE);
+    WCMD_execute (temp_cmd, temp_str, NULL, FALSE);
 
     /* Open the file, read line by line and process */
     hinput = CreateFileW(temp_file, GENERIC_READ, FILE_SHARE_READ,
@@ -1811,6 +1825,8 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
   static const WCHAR doW[] = {'d','o'};
   CMD_LIST *setStart, *thisSet, *cmdStart, *cmdEnd;
   WCHAR variable[4];
+  int   varidx = -1;
+  WCHAR *oldvariablevalue;
   WCHAR *firstCmd;
   int thisDepth;
   WCHAR optionsRoot[MAX_PATH];
@@ -1902,6 +1918,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
   /* Variable should follow */
   strcpyW(variable, thisArg);
   WINE_TRACE("Variable identified as %s\n", wine_dbgstr_w(variable));
+  varidx = FOR_VAR_IDX(variable[1]);
 
   /* Ensure line continues with IN */
   thisArg = WCMD_parameter(p, parameterNo++, NULL, FALSE, FALSE);
@@ -2019,8 +2036,16 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
                           strcpyW(fullitem, fd.cFileName);
                       }
                       doExecuted = TRUE;
-                      WCMD_part_execute (&thisCmdStart, firstCmd, variable,
-                                                   fullitem, FALSE, TRUE);
+
+                      /* Save away any existing for variable context (e.g. nested for loops)
+                         and restore it after executing the body of this for loop           */
+                      if (varidx >= 0) {
+                        oldvariablevalue = forloopcontext.variable[varidx];
+                        forloopcontext.variable[varidx] = fullitem;
+                      }
+                      WCMD_part_execute (&thisCmdStart, firstCmd, FALSE, TRUE);
+                      if (varidx >= 0) forloopcontext.variable[varidx] = oldvariablevalue;
+
                       cmdEnd = thisCmdStart;
                   }
                 } while (FindNextFileW(hff, &fd) != 0);
@@ -2028,7 +2053,16 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
               }
             } else {
               doExecuted = TRUE;
-              WCMD_part_execute(&thisCmdStart, firstCmd, variable, fullitem, FALSE, TRUE);
+
+              /* Save away any existing for variable context (e.g. nested for loops)
+                 and restore it after executing the body of this for loop           */
+              if (varidx >= 0) {
+                oldvariablevalue = forloopcontext.variable[varidx];
+                forloopcontext.variable[varidx] = fullitem;
+              }
+              WCMD_part_execute (&thisCmdStart, firstCmd, FALSE, TRUE);
+              if (varidx >= 0) forloopcontext.variable[varidx] = oldvariablevalue;
+
               cmdEnd = thisCmdStart;
             }
 
@@ -2072,7 +2106,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
 
               /* Read line by line until end of file */
               while (WCMD_fgets(buffer, sizeof(buffer)/sizeof(WCHAR), input)) {
-                WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable, buffer, &doExecuted,
+                WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable[1], buffer, &doExecuted,
                                 &forf_skip, forf_eol, forf_delims);
                 buffer[0] = 0;
               }
@@ -2100,7 +2134,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
 
           /* Copy the item away from the global buffer used by WCMD_parameter */
           strcpyW(buffer, itemStart);
-          WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable, buffer, &doExecuted,
+          WCMD_parse_line(cmdStart, firstCmd, &cmdEnd, variable[1], buffer, &doExecuted,
                             &forf_skip, forf_eol, forf_delims);
 
           /* Only one string can be supplied in the whole set, abort future set processing */
@@ -2132,7 +2166,15 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
 
             thisCmdStart = cmdStart;
             doExecuted = TRUE;
-            WCMD_part_execute(&thisCmdStart, firstCmd, variable, thisNum, FALSE, TRUE);
+
+            /* Save away any existing for variable context (e.g. nested for loops)
+               and restore it after executing the body of this for loop           */
+            if (varidx >= 0) {
+              oldvariablevalue = forloopcontext.variable[varidx];
+              forloopcontext.variable[varidx] = thisNum;
+            }
+            WCMD_part_execute (&thisCmdStart, firstCmd, FALSE, TRUE);
+            if (varidx >= 0) forloopcontext.variable[varidx] = oldvariablevalue;
         }
         cmdEnd = thisCmdStart;
     }
@@ -2157,7 +2199,7 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
   if (!doExecuted) {
     thisCmdStart = cmdStart;
     WINE_TRACE("Skipping for loop commands due to no valid iterations\n");
-    WCMD_part_execute(&thisCmdStart, firstCmd, NULL, NULL, FALSE, FALSE);
+    WCMD_part_execute(&thisCmdStart, firstCmd, FALSE, FALSE);
     cmdEnd = thisCmdStart;
   }
 
@@ -2507,7 +2549,7 @@ void WCMD_if (WCHAR *p, CMD_LIST **cmdList)
 
   /* Process rest of IF statement which is on the same line
      Note: This may process all or some of the cmdList (eg a GOTO) */
-  WCMD_part_execute(cmdList, command, NULL, NULL, TRUE, (test != negate));
+  WCMD_part_execute(cmdList, command, TRUE, (test != negate));
   return;
 
 syntax_err:
@@ -2928,7 +2970,7 @@ void WCMD_endlocal (void) {
 
   /* delete the current environment, totally */
   env = GetEnvironmentStringsW ();
-  old = WCMD_dupenv (GetEnvironmentStringsW ());
+  old = WCMD_dupenv (env);
   len = 0;
   while (old[len]) {
     n = strlenW(&old[len]) + 1;

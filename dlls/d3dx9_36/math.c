@@ -1809,17 +1809,22 @@ D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv)
 D3DXVECTOR3* WINAPI D3DXVec3Project(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DVIEWPORT9 *pviewport, CONST D3DXMATRIX *pprojection, CONST D3DXMATRIX *pview, CONST D3DXMATRIX *pworld)
 {
     D3DXMATRIX m;
-    D3DXVECTOR3 out;
 
     TRACE("(%p, %p, %p, %p, %p, %p)\n", pout, pv, pviewport, pprojection, pview, pworld);
 
-    D3DXMatrixMultiply(&m, pworld, pview);
-    D3DXMatrixMultiply(&m, &m, pprojection);
-    D3DXVec3TransformCoord(&out, pv, &m);
-    out.x = pviewport->X +  ( 1.0f + out.x ) * pviewport->Width / 2.0f;
-    out.y = pviewport->Y +  ( 1.0f - out.y ) * pviewport->Height / 2.0f;
-    out.z = pviewport->MinZ + out.z * ( pviewport->MaxZ - pviewport->MinZ );
-    *pout = out;
+    D3DXMatrixIdentity(&m);
+    if (pworld) D3DXMatrixMultiply(&m, &m, pworld);
+    if (pview) D3DXMatrixMultiply(&m, &m, pview);
+    if (pprojection) D3DXMatrixMultiply(&m, &m, pprojection);
+
+    D3DXVec3TransformCoord(pout, pv, &m);
+
+    if (pviewport)
+    {
+        pout->x = pviewport->X +  ( 1.0f + pout->x ) * pviewport->Width / 2.0f;
+        pout->y = pviewport->Y +  ( 1.0f - pout->y ) * pviewport->Height / 2.0f;
+        pout->z = pviewport->MinZ + pout->z * ( pviewport->MaxZ - pviewport->MinZ );
+    }
     return pout;
 }
 
@@ -1928,22 +1933,23 @@ D3DXVECTOR3* WINAPI D3DXVec3TransformNormalArray(D3DXVECTOR3* out, UINT outstrid
 D3DXVECTOR3* WINAPI D3DXVec3Unproject(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DVIEWPORT9 *pviewport, CONST D3DXMATRIX *pprojection, CONST D3DXMATRIX *pview, CONST D3DXMATRIX *pworld)
 {
     D3DXMATRIX m;
-    D3DXVECTOR3 out;
 
     TRACE("(%p, %p, %p, %p, %p, %p)\n", pout, pv, pviewport, pprojection, pview, pworld);
 
-    if (pworld) {
-        D3DXMatrixMultiply(&m, pworld, pview);
-        D3DXMatrixMultiply(&m, &m, pprojection);
-    } else {
-        D3DXMatrixMultiply(&m, pview, pprojection);
-    }
+    D3DXMatrixIdentity(&m);
+    if (pworld) D3DXMatrixMultiply(&m, &m, pworld);
+    if (pview) D3DXMatrixMultiply(&m, &m, pview);
+    if (pprojection) D3DXMatrixMultiply(&m, &m, pprojection);
     D3DXMatrixInverse(&m, NULL, &m);
-    out.x = 2.0f * ( pv->x - pviewport->X ) / pviewport->Width - 1.0f;
-    out.y = 1.0f - 2.0f * ( pv->y - pviewport->Y ) / pviewport->Height;
-    out.z = ( pv->z - pviewport->MinZ) / ( pviewport->MaxZ - pviewport->MinZ );
-    D3DXVec3TransformCoord(&out, &out, &m);
-    *pout = out;
+
+    *pout = *pv;
+    if (pviewport)
+    {
+        pout->x = 2.0f * ( pout->x - pviewport->X ) / pviewport->Width - 1.0f;
+        pout->y = 1.0f - 2.0f * ( pout->y - pviewport->Y ) / pviewport->Height;
+        pout->z = ( pout->z - pviewport->MinZ) / ( pviewport->MaxZ - pviewport->MinZ );
+    }
+    D3DXVec3TransformCoord(pout, pout, &m);
     return pout;
 }
 

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-07-23 07:34+0100\n"
+"PO-Revision-Date: 2012-10-29 21:13+0100\n"
 "Last-Translator: Frédéric Delanoy <frederic.delanoy@gmail.com>\n"
 "Language-Team: none\n"
 "Language: French\n"
@@ -3475,6 +3475,8 @@ msgid ""
 "After disabling or enabling a device, the connected joysticks won't be "
 "updated here until you restart this applet."
 msgstr ""
+"Après l'activation ou désactivation d'un périphérique, la liste des "
+"joysticks connectés ne sera pas mise à jour à moins de redémarrer l'applet."
 
 #: joy.rc:47
 msgid "Test Joystick"
@@ -8293,6 +8295,50 @@ msgctxt "time unit: seconds"
 msgid " sec"
 msgstr " s"
 
+#: urlmon.rc:29 wininet.rc:74
+msgid "Security Warning"
+msgstr "Alerte de sécurité"
+
+#: urlmon.rc:32
+#, fuzzy
+#| msgid "Do you want to continue anyway?"
+msgid "Do you want to install this software?"
+msgstr "Voulez-vous tout de même continuer ?"
+
+#: urlmon.rc:34 explorer.rc:29
+msgid "Location:"
+msgstr "Emplacement :"
+
+#: urlmon.rc:36
+#, fuzzy
+#| msgid "Install/Uninstall"
+msgid "Don't install"
+msgstr "Installation/Désinstallation"
+
+#: urlmon.rc:40
+msgid ""
+"When installed, ActiveX has full access to your computer.Do not click "
+"install unless you have absolute trust in the above source."
+msgstr ""
+
+#: urlmon.rc:47
+#, fuzzy
+#| msgid "Installation transform failed to apply.\n"
+msgid "Installation of component failed: %08x"
+msgstr "Le fichier de transformation d'installation n'a pu être appliqué.\n"
+
+#: urlmon.rc:48
+#, fuzzy
+#| msgid "&Install"
+msgid "Install (%d)"
+msgstr "&Installer"
+
+#: urlmon.rc:49
+#, fuzzy
+#| msgid "&Install"
+msgid "Install"
+msgstr "&Installer"
+
 #: user32.rc:27 user32.rc:40 taskmgr.rc:138
 msgctxt "window"
 msgid "&Restore"
@@ -8377,10 +8423,6 @@ msgstr "Authentification requise"
 #: wininet.rc:58
 msgid "Server"
 msgstr "Serveur"
-
-#: wininet.rc:74
-msgid "Security Warning"
-msgstr "Alerte de sécurité"
 
 #: wininet.rc:77
 msgid "There is a problem with the certificate for this site."
@@ -10195,6 +10237,8 @@ msgstr " (Oui|Non|Tous)"
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
 msgstr ""
+"Ne reconnaît pas « %1 » comme commande interne ou externe, ou fichier de "
+"traitement par lots.\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10207,10 +10251,6 @@ msgstr "Usage : dxdiag [/whql:off | /whql:on] [/t fichier | /x fichier]"
 #: explorer.rc:28
 msgid "Wine Explorer"
 msgstr "Explorateur de Wine"
-
-#: explorer.rc:29
-msgid "Location:"
-msgstr "Emplacement :"
 
 #: hostname.rc:27
 msgid "Usage: hostname\n"

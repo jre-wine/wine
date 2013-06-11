@@ -94,7 +94,7 @@ IUri *nsuri_get_uri(nsWineURI *nsuri)
     return nsuri->uri;
 }
 
-static IUri *get_uri_nofrag(IUri *uri)
+IUri *get_uri_nofrag(IUri *uri)
 {
     IUriBuilder *uri_builder;
     IUri *ret;
@@ -121,7 +121,7 @@ static IUri *get_uri_nofrag(IUri *uri)
     return ret;
 }
 
-BOOL compare_ignoring_frag(IUri *uri1, IUri *uri2)
+static BOOL compare_ignoring_frag(IUri *uri1, IUri *uri2)
 {
     IUri *uri_nofrag1, *uri_nofrag2;
     BOOL ret = FALSE;

@@ -141,6 +141,7 @@ extern BOOL     dibdrv_Rectangle( PHYSDEV dev, INT left, INT top, INT right, INT
 extern BOOL     dibdrv_RoundRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom,
                                   INT ellipse_width, INT ellipse_height ) DECLSPEC_HIDDEN;
 extern HBRUSH   dibdrv_SelectBrush( PHYSDEV dev, HBRUSH hbrush, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
+extern HFONT    dibdrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags ) DECLSPEC_HIDDEN;
 extern HPEN     dibdrv_SelectPen( PHYSDEV dev, HPEN hpen, const struct brush_pattern *pattern ) DECLSPEC_HIDDEN;
 extern COLORREF dibdrv_SetDCBrushColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF dibdrv_SetDCPenColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
@@ -183,6 +184,8 @@ typedef struct primitive_funcs
     BOOL          (* gradient_rect)(const dib_info *dib, const RECT *rc, const TRIVERTEX *v, int mode);
     void             (* draw_glyph)(const dib_info *dst, const RECT *rc, const dib_info *glyph,
                                     const POINT *origin, DWORD text_pixel, const struct intensity_range *ranges);
+    void    (* draw_subpixel_glyph)(const dib_info *dst, const RECT *rc, const dib_info *glyph,
+                                    const POINT *origin, DWORD text_pixel );
     DWORD             (* get_pixel)(const dib_info *dib, int x, int y);
     DWORD     (* colorref_to_pixel)(const dib_info *dib, COLORREF color);
     COLORREF  (* pixel_to_colorref)(const dib_info *dib, DWORD pixel);

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-08-24 22:13+0300\n"
+"PO-Revision-Date: 2012-11-03 18:42+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: komp_lt@konf.lt\n"
 "Language: Lithuanian\n"
@@ -8265,6 +8265,42 @@ msgctxt "time unit: seconds"
 msgid " sec"
 msgstr " sek."
 
+#: urlmon.rc:29 wininet.rc:74
+msgid "Security Warning"
+msgstr "Įspėjimas apie saugumą"
+
+#: urlmon.rc:32
+msgid "Do you want to install this software?"
+msgstr "Ar norite įdiegti šią programinę įrangą?"
+
+#: urlmon.rc:34 explorer.rc:29
+msgid "Location:"
+msgstr "Vieta:"
+
+#: urlmon.rc:36
+msgid "Don't install"
+msgstr "Nediegti"
+
+#: urlmon.rc:40
+msgid ""
+"When installed, ActiveX has full access to your computer.Do not click "
+"install unless you have absolute trust in the above source."
+msgstr ""
+"Kai įdiegta, ActiveX turi visišką prieigą prie kompiuterio. Nespauskite "
+"„Įdiegti“, nebent visiškai pasitikite šaltiniu aukščiau."
+
+#: urlmon.rc:47
+msgid "Installation of component failed: %08x"
+msgstr "Nepavyko įdiegti komponento: %08x"
+
+#: urlmon.rc:48
+msgid "Install (%d)"
+msgstr "Įdiegti (%d)"
+
+#: urlmon.rc:49
+msgid "Install"
+msgstr "Įdiegti"
+
 #: user32.rc:27 user32.rc:40 taskmgr.rc:138
 msgctxt "window"
 msgid "&Restore"
@@ -8349,10 +8385,6 @@ msgstr "Reikalingas tapatumo nustatymas"
 #: wininet.rc:58
 msgid "Server"
 msgstr "Serveris"
-
-#: wininet.rc:74
-msgid "Security Warning"
-msgstr "Įspėjimas apie saugumą"
 
 #: wininet.rc:77
 msgid "There is a problem with the certificate for this site."
@@ -9568,7 +9600,7 @@ msgid ""
 "The prompt can also be changed by altering the PROMPT environment variable,\n"
 "so the command 'SET PROMPT=text' has the same effect as 'PROMPT text'.\n"
 msgstr ""
-"PROMPT nustato komandinės eilutės raginimą.\n"
+"PROMPT nustato komandos eilutės raginimą.\n"
 "\n"
 "Simbolių eilutė, einanti po PROMPT komandos (ir tarpas iškart po to),\n"
 "atsiranda eilutės pradžioje, kai cmd laukia įvedimo.\n"
@@ -10017,7 +10049,7 @@ msgstr "Nepavyko atverti „%1“\n"
 
 #: cmd.rc:337
 msgid "Cannot call batch label outside of a batch script\n"
-msgstr "Negalima iškviesti žymės esančios už komandos failo ribų\n"
+msgstr "Negalima iškviesti žymės esančios už komandų failo ribų\n"
 
 #: cmd.rc:338 xcopy.rc:42
 msgctxt "All key"
@@ -10100,6 +10132,8 @@ msgstr " (Taip|Ne|Visus)"
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
 msgstr ""
+"Nepavyko atpažinti „%1“ kaip vidinės ar išorinės komandos, ar komandų "
+"failo.\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10112,10 +10146,6 @@ msgstr "Naudojimas: dxdiag [/whql:off | /whql:on] [/t failas | /x failas]"
 #: explorer.rc:28
 msgid "Wine Explorer"
 msgstr "Wine naršyklė"
-
-#: explorer.rc:29
-msgid "Location:"
-msgstr "Vieta:"
 
 #: hostname.rc:27
 msgid "Usage: hostname\n"
@@ -10139,7 +10169,7 @@ msgstr "Naudojimas: ipconfig [ /? | /all ]\n"
 #: ipconfig.rc:28
 msgid "Error: Unknown or invalid command line parameters specified\n"
 msgstr ""
-"Klaida: nurodytas nežinomas arba netinkamas komandinės eilutės parametras\n"
+"Klaida: nurodytas nežinomas arba netinkamas komandos eilutės parametras\n"
 
 #: ipconfig.rc:29
 msgid "%1 adapter %2\n"
@@ -13168,7 +13198,7 @@ msgstr "wineconsole: neteisinga posistemė\n"
 
 #: wineconsole.rc:43
 msgid "wineconsole: Unrecognized command line option\n"
-msgstr "wineconsole: neatpažintas komandinės eilutės parametras\n"
+msgstr "wineconsole: neatpažintas komandos eilutės parametras\n"
 
 #: wineconsole.rc:44
 msgid "Starts a program in a Wine console\n"

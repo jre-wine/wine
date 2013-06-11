@@ -80,7 +80,7 @@ static ULONG WINAPI IDirectMusicCollectionImpl_IDirectMusicCollection_AddRef(LPD
     IDirectMusicCollectionImpl *This = impl_from_IDirectMusicCollection(iface);
     ULONG ref = InterlockedIncrement(&This->ref);
 
-    TRACE("(%p/%p)->(): new ref = %u)\n", iface, This, ref);
+    TRACE("(%p/%p)->(): new ref = %u\n", iface, This, ref);
 
     DMUSIC_LockModule();
 
@@ -92,7 +92,7 @@ static ULONG WINAPI IDirectMusicCollectionImpl_IDirectMusicCollection_Release(LP
     IDirectMusicCollectionImpl *This = impl_from_IDirectMusicCollection(iface);
     ULONG ref = InterlockedDecrement(&This->ref);
 
-    TRACE("(%p/%p)->(): new ref = %u)\n", iface, This, ref);
+    TRACE("(%p/%p)->(): new ref = %u\n", iface, This, ref);
 
     if (!ref)
         HeapFree(GetProcessHeap(), 0, This);
@@ -489,7 +489,7 @@ static HRESULT WINAPI IDirectMusicCollectionImpl_IPersistStream_Load(LPPERSISTST
 {
     IDirectMusicCollectionImpl *This = impl_from_IPersistStream(iface);
     DMUS_PRIVATE_CHUNK chunk;
-    DWORD StreamSize, StreamCount, ListSize[3], ListCount[3];
+    DWORD StreamSize, StreamCount, ListSize[2], ListCount[2];
     LARGE_INTEGER liMove; /* used when skipping chunks */
     ULARGE_INTEGER dlibCollectionPosition, dlibInstrumentPosition, dlibWavePoolPosition;
 
@@ -689,8 +689,6 @@ static HRESULT WINAPI IDirectMusicCollectionImpl_IPersistStream_Load(LPPERSISTST
                                                         case FOURCC_LIST: {
                                                             IStream_Read(stream, &chunk.fccID, sizeof(FOURCC), NULL);
                                                             TRACE_(dmfile)(": LIST chunk of type %s", debugstr_fourcc(chunk.fccID));
-                                                            ListSize[2] = chunk.dwSize - sizeof(FOURCC);
-                                                            ListCount[2] = 0;
                                                             switch (chunk.fccID) {
                                                                 default: {
                                                                     TRACE_(dmfile)(": unknown (skipping)\n");

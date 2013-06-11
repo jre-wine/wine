@@ -272,7 +272,7 @@ static inline BOOL is_drive_path(const WCHAR *str) {
 }
 
 static inline BOOL is_unc_path(const WCHAR *str) {
-    return (str[0] == '\\' && str[0] == '\\');
+    return (str[0] == '\\' && str[1] == '\\');
 }
 
 static inline BOOL is_forbidden_dos_path_char(WCHAR val) {
@@ -5185,8 +5185,10 @@ static HRESULT WINAPI PersistStream_Load(IPersistStream *iface, IStream *pStm)
     if(!data)
         return E_OUTOFMEMORY;
     hr = IStream_Read(pStm, &data->unk1, size-sizeof(DWORD)-2, NULL);
-    if(FAILED(hr))
+    if(FAILED(hr)) {
+        heap_free(data);
         return hr;
+    }
 
     if(size < sizeof(struct persist_uri)) {
         heap_free(data);
@@ -6356,8 +6358,10 @@ HRESULT WINAPI CreateIUriBuilder(IUri *pIUri, DWORD dwFlags, DWORD_PTR dwReserve
         Uri *uri;
 
         if((uri = get_uri_obj(pIUri))) {
-            if(!uri->create_flags)
+            if(!uri->create_flags) {
+                heap_free(ret);
                 return E_UNEXPECTED;
+            }
             IUri_AddRef(pIUri);
             ret->uri = uri;
 
