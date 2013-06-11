@@ -86,9 +86,8 @@ static HRESULT navigate_anchor(HTMLAnchorElement *This)
     if(NS_SUCCEEDED(nsres)) {
         const PRUnichar *target;
 
-        TRACE("target %s\n", debugstr_w(target));
-
         nsAString_GetData(&target_str, &target);
+        TRACE("target %s\n", debugstr_w(target));
         if(*target && strcmpiW(target, _selfW)) {
             if(!strcmpiW(target, _topW)) {
                 TRACE("target _top\n");
@@ -122,7 +121,7 @@ static HRESULT navigate_anchor(HTMLAnchorElement *This)
         if(*href) {
             if(!window)
                 window = This->element.node.doc->basedoc.window;
-            hres = navigate_url(window, href, window->url);
+            hres = navigate_url(window, href, window->uri);
         }else {
             TRACE("empty href\n");
             hres = S_OK;

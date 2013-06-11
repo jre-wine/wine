@@ -68,7 +68,6 @@
 #include "commdlg.h"
 #include "dlgs.h"
 #include "cdlg.h"
-#include "filedlg31.h"
 #include "cderr.h"
 #include "shellapi.h"
 #include "shlobj.h"
@@ -1152,8 +1151,9 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam)
              * move to bottom */
             switch( ctrlid)
             {
-                /* file name box and file types combo change also width */
+                /* file name (edit or comboboxex) and file types combo change also width */
                 case edt1:
+                case cmb13:
                 case cmb1:
                     DeferWindowPos( hdwp, ctrl, NULL, rc.left, rc.top + chgy,
                             rc.right - rc.left + chgx, rc.bottom - rc.top,
@@ -1407,6 +1407,12 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
   }
 }
 
+static inline BOOL filename_is_edit( const FileOpenDlgInfos *info )
+{
+    return (info->ofnInfos->lStructSize == OPENFILENAME_SIZE_VERSION_400W) &&
+        (info->ofnInfos->Flags & (OFN_ENABLEHOOK | OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE));
+}
+
 /***********************************************************************
  *      FILEDLG95_InitControls
  *
@@ -1457,8 +1463,20 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
   }
   TRACE("Running on 2000+ %d, 98+ %d\n", win2000plus, win98plus);
 
+
+  /* Use either the edit or the comboboxex for the filename control */
+  if (filename_is_edit( fodInfos ))
+  {
+      DestroyWindow( GetDlgItem( hwnd, cmb13 ) );
+      fodInfos->DlgInfos.hwndFileName = GetDlgItem( hwnd, edt1 );
+  }
+  else
+  {
+      DestroyWindow( GetDlgItem( hwnd, edt1 ) );
+      fodInfos->DlgInfos.hwndFileName = GetDlgItem( hwnd, cmb13 );
+  }
+
   /* Get the hwnd of the controls */
-  fodInfos->DlgInfos.hwndFileName = GetDlgItem(hwnd,IDC_FILENAME);
   fodInfos->DlgInfos.hwndFileTypeCB = GetDlgItem(hwnd,IDC_FILETYPE);
   fodInfos->DlgInfos.hwndLookInCB = GetDlgItem(hwnd,IDC_LOOKIN);
 
@@ -1547,10 +1565,10 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
             TRACE("Value in Filename includes path, overriding InitialDir: %s, %s\n",
                     debugstr_w(fodInfos->filename), debugstr_w(fodInfos->initdir));
          }
-         SetDlgItemTextW(hwnd, IDC_FILENAME, fodInfos->filename);
+         SetWindowTextW( fodInfos->DlgInfos.hwndFileName, fodInfos->filename );
 
       } else {
-         SetDlgItemTextW(hwnd, IDC_FILENAME, fodInfos->filename);
+         SetWindowTextW( fodInfos->DlgInfos.hwndFileName, fodInfos->filename );
       }
   }
 
@@ -1624,7 +1642,7 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
             TRACE("Value in Filename includes path, overriding initdir: %s, %s\n",
                  debugstr_w(fodInfos->filename), debugstr_w(fodInfos->initdir));
          }
-         SetDlgItemTextW(hwnd, IDC_FILENAME, fodInfos->filename);
+         SetWindowTextW( fodInfos->DlgInfos.hwndFileName, fodInfos->filename );
       }
 
       /* 4. Win2000+: Recently used */
@@ -1708,7 +1726,7 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
           TRACE("No initial dir specified, using current dir of %s\n", debugstr_w(fodInfos->initdir));
       }
   }
-  SetFocus(GetDlgItem(hwnd, IDC_FILENAME));
+  SetFocus( fodInfos->DlgInfos.hwndFileName );
   TRACE("After manipulation, file = %s, dir = %s\n", debugstr_w(fodInfos->filename), debugstr_w(fodInfos->initdir));
 
   /* Must the open as read only check box be checked ?*/
@@ -1904,7 +1922,8 @@ static LRESULT FILEDLG95_OnWMCommand(HWND hwnd, WPARAM wParam)
     FILEDLG95_SHELL_BrowseToDesktop(hwnd);
     break;
 
-  case IDC_FILENAME:
+  case edt1:
+  case cmb13:
     break;
 
   }
@@ -2526,7 +2545,8 @@ BOOL FILEDLG95_OnOpen(HWND hwnd)
               IShellView_Refresh(fodInfos->Shell.FOIShellView);
 	  }
           COMDLG32_SHFree(pidlCurrent);
-          SendMessageW(fodInfos->DlgInfos.hwndFileName, EM_SETSEL, 0, -1);
+          if (filename_is_edit( fodInfos ))
+              SendMessageW(fodInfos->DlgInfos.hwndFileName, EM_SETSEL, 0, -1);
         }
       }
       ret = FALSE;
@@ -3689,8 +3709,9 @@ void FILEDLG95_FILENAME_FillFromSelection (HWND hwnd)
       }
       SetWindowTextW( fodInfos->DlgInfos.hwndFileName, lpstrAllFile );
        
-      /* Select the file name like Windows does */ 
-      SendMessageW(fodInfos->DlgInfos.hwndFileName, EM_SETSEL, 0, -1);
+      /* Select the file name like Windows does */
+      if (filename_is_edit( fodInfos ))
+          SendMessageW(fodInfos->DlgInfos.hwndFileName, EM_SETSEL, 0, -1);
     }
     HeapFree(GetProcessHeap(),0, lpstrAllFile );
 }
@@ -3741,10 +3762,10 @@ static int FILEDLG95_FILENAME_GetFileNames (HWND hwnd, LPWSTR * lpstrFileList, U
 
 	TRACE("\n");
 
-	/* get the filenames from the edit control */
-	nStrLen = SendMessageW(fodInfos->DlgInfos.hwndFileName, WM_GETTEXTLENGTH, 0, 0);
+	/* get the filenames from the filename control */
+	nStrLen = GetWindowTextLengthW( fodInfos->DlgInfos.hwndFileName );
 	lpstrEdit = MemAlloc( (nStrLen+1)*sizeof(WCHAR) );
-	GetDlgItemTextW(hwnd, IDC_FILENAME, lpstrEdit, nStrLen+1);
+	GetWindowTextW( fodInfos->DlgInfos.hwndFileName, lpstrEdit, nStrLen+1);
 
 	TRACE("nStrLen=%u str=%s\n", nStrLen, debugstr_w(lpstrEdit));
 
@@ -4025,186 +4046,10 @@ static void MemFree(void *mem)
     HeapFree(GetProcessHeap(),0,mem);
 }
 
-/*
- * Old-style (win3.1) dialogs */
-
-/***********************************************************************
- *           FD32_GetTemplate                                  [internal]
- *
- * Get a template (or FALSE if failure) when 16 bits dialogs are used
- * by a 32 bits application
- *
- */
-BOOL FD32_GetTemplate(PFD31_DATA lfs)
+static inline BOOL valid_struct_size( DWORD size )
 {
-    LPOPENFILENAMEW ofnW = lfs->ofnW;
-    LPOPENFILENAMEA ofnA = lfs->ofnA;
-    HANDLE hDlgTmpl;
-
-    if (ofnW->Flags & OFN_ENABLETEMPLATEHANDLE)
-    {
-	if (!(lfs->template = LockResource( ofnW->hInstance )))
-	{
-	    COMDLG32_SetCommDlgExtendedError(CDERR_LOADRESFAILURE);
-	    return FALSE;
-	}
-    }
-    else if (ofnW->Flags & OFN_ENABLETEMPLATE)
-    {
-	HRSRC hResInfo;
-        if (ofnA)
-	    hResInfo = FindResourceA(ofnA->hInstance,
-				 ofnA->lpTemplateName,
-                                 (LPSTR)RT_DIALOG);
-        else
-	    hResInfo = FindResourceW(ofnW->hInstance,
-				 ofnW->lpTemplateName,
-                                 (LPWSTR)RT_DIALOG);
-        if (!hResInfo)
-	{
-	    COMDLG32_SetCommDlgExtendedError(CDERR_FINDRESFAILURE);
-	    return FALSE;
-	}
-	if (!(hDlgTmpl = LoadResource(ofnW->hInstance,
-				hResInfo)) ||
-		    !(lfs->template = LockResource(hDlgTmpl)))
-	{
-	    COMDLG32_SetCommDlgExtendedError(CDERR_LOADRESFAILURE);
-	    return FALSE;
-	}
-    } else { /* get it from internal Wine resource */
-	HRSRC hResInfo;
-	if (!(hResInfo = FindResourceA(COMDLG32_hInstance,
-             lfs->open? "OPEN_FILE":"SAVE_FILE", (LPSTR)RT_DIALOG)))
-	{
-	    COMDLG32_SetCommDlgExtendedError(CDERR_FINDRESFAILURE);
-	    return FALSE;
-        }
-        if (!(hDlgTmpl = LoadResource(COMDLG32_hInstance, hResInfo )) ||
-                !(lfs->template = LockResource( hDlgTmpl )))
-        {
-            COMDLG32_SetCommDlgExtendedError(CDERR_LOADRESFAILURE);
-            return FALSE;
-        }
-    }
-    return TRUE;
-}
-
-
-/***********************************************************************
- *                              FD32_WMMeasureItem           [internal]
- */
-static LONG FD32_WMMeasureItem(LPARAM lParam)
-{
-    LPMEASUREITEMSTRUCT lpmeasure;
-
-    lpmeasure = (LPMEASUREITEMSTRUCT)lParam;
-    lpmeasure->itemHeight = FD31_GetFldrHeight();
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           FileOpenDlgProc                                    [internal]
- *      Used for open and save, in fact.
- */
-static INT_PTR CALLBACK FD32_FileOpenDlgProc(HWND hWnd, UINT wMsg,
-                                             WPARAM wParam, LPARAM lParam)
-{
-    PFD31_DATA lfs = (PFD31_DATA)GetPropA(hWnd,FD31_OFN_PROP);
-
-    TRACE("msg=%x wparam=%lx lParam=%lx\n", wMsg, wParam, lParam);
-    if ((wMsg != WM_INITDIALOG) && lfs && lfs->hook)
-        {
-            INT_PTR lRet;
-            lRet  = (INT_PTR)FD31_CallWindowProc(lfs, wMsg, wParam, lParam);
-            if (lRet)
-                return lRet;         /* else continue message processing */
-        }
-    switch (wMsg)
-    {
-    case WM_INITDIALOG:
-        return FD31_WMInitDialog(hWnd, wParam, lParam);
-
-    case WM_MEASUREITEM:
-        return FD32_WMMeasureItem(lParam);
-
-    case WM_DRAWITEM:
-        return FD31_WMDrawItem(hWnd, wParam, lParam, !lfs->open, (DRAWITEMSTRUCT *)lParam);
-
-    case WM_COMMAND:
-        return FD31_WMCommand(hWnd, lParam, HIWORD(wParam), LOWORD(wParam), lfs);
-#if 0
-    case WM_CTLCOLOR:
-         SetBkColor((HDC16)wParam, 0x00C0C0C0);
-         switch (HIWORD(lParam))
-         {
-	 case CTLCOLOR_BTN:
-	     SetTextColor((HDC16)wParam, 0x00000000);
-             return hGRAYBrush;
-	case CTLCOLOR_STATIC:
-             SetTextColor((HDC16)wParam, 0x00000000);
-             return hGRAYBrush;
-	}
-      break;
-#endif
-    }
-    return FALSE;
-}
-
-
-/***********************************************************************
- *           GetFileName31A                                 [internal]
- *
- * Creates a win31 style dialog box for the user to select a file to open/save.
- */
-static BOOL GetFileName31A(LPOPENFILENAMEA lpofn, /* address of structure with data*/
-                           UINT dlgType /* type dialogue : open/save */
-                           )
-{
-    BOOL bRet = FALSE;
-    PFD31_DATA lfs;
-
-    if (!lpofn || !FD31_Init()) return FALSE;
-
-    TRACE("ofn flags %08x\n", lpofn->Flags);
-    lfs = FD31_AllocPrivate((LPARAM) lpofn, dlgType, FALSE);
-    if (lfs)
-    {
-        bRet = DialogBoxIndirectParamA( COMDLG32_hInstance, lfs->template, lpofn->hwndOwner,
-                                        FD32_FileOpenDlgProc, (LPARAM)lfs);
-        FD31_DestroyPrivate(lfs);
-    }
-
-    TRACE("return lpstrFile='%s' !\n", lpofn->lpstrFile);
-    return bRet;
-}
-
-/***********************************************************************
- *           GetFileName31W                                 [internal]
- *
- * Creates a win31 style dialog box for the user to select a file to open/save
- */
-static BOOL GetFileName31W(LPOPENFILENAMEW lpofn, /* address of structure with data*/
-                           UINT dlgType /* type dialogue : open/save */
-                           )
-{
-    BOOL bRet = FALSE;
-    PFD31_DATA lfs;
-
-    if (!lpofn || !FD31_Init()) return FALSE;
-
-    lfs = FD31_AllocPrivate((LPARAM) lpofn, dlgType, TRUE);
-    if (lfs)
-    {
-        bRet = DialogBoxIndirectParamW( COMDLG32_hInstance, lfs->template, lpofn->hwndOwner,
-                                        FD32_FileOpenDlgProc, (LPARAM)lfs);
-        FD31_DestroyPrivate(lfs);
-    }
-
-    TRACE("file %s, file offset %d, ext offset %d\n",
-          debugstr_w(lpofn->lpstrFile), lpofn->nFileOffset, lpofn->nFileExtension);
-    return bRet;
+    return (size == OPENFILENAME_SIZE_VERSION_400W) ||
+        (size == sizeof( OPENFILENAMEW ));
 }
 
 static inline BOOL is_win16_looks(DWORD flags)
@@ -4229,6 +4074,12 @@ BOOL WINAPI GetOpenFileNameA(
 	LPOPENFILENAMEA ofn) /* [in/out] address of init structure */
 {
     TRACE("flags %08x\n", ofn->Flags);
+
+    if (!valid_struct_size( ofn->lStructSize ))
+    {
+        COMDLG32_SetCommDlgExtendedError( CDERR_STRUCTSIZE );
+        return FALSE;
+    }
 
     /* OFN_FILEMUSTEXIST implies OFN_PATHMUSTEXIST */
     if (ofn->Flags & OFN_FILEMUSTEXIST)
@@ -4255,6 +4106,12 @@ BOOL WINAPI GetOpenFileNameW(
 {
     TRACE("flags %08x\n", ofn->Flags);
 
+    if (!valid_struct_size( ofn->lStructSize ))
+    {
+        COMDLG32_SetCommDlgExtendedError( CDERR_STRUCTSIZE );
+        return FALSE;
+    }
+
     /* OFN_FILEMUSTEXIST implies OFN_PATHMUSTEXIST */
     if (ofn->Flags & OFN_FILEMUSTEXIST)
         ofn->Flags |= OFN_PATHMUSTEXIST;
@@ -4279,6 +4136,12 @@ BOOL WINAPI GetOpenFileNameW(
 BOOL WINAPI GetSaveFileNameA(
 	LPOPENFILENAMEA ofn) /* [in/out] address of init structure */
 {
+    if (!valid_struct_size( ofn->lStructSize ))
+    {
+        COMDLG32_SetCommDlgExtendedError( CDERR_STRUCTSIZE );
+        return FALSE;
+    }
+
     if (is_win16_looks(ofn->Flags))
         return GetFileName31A(ofn, SAVE_DIALOG);
     else
@@ -4298,6 +4161,12 @@ BOOL WINAPI GetSaveFileNameA(
 BOOL WINAPI GetSaveFileNameW(
 	LPOPENFILENAMEW ofn) /* [in/out] address of init structure */
 {
+    if (!valid_struct_size( ofn->lStructSize ))
+    {
+        COMDLG32_SetCommDlgExtendedError( CDERR_STRUCTSIZE );
+        return FALSE;
+    }
+
     if (is_win16_looks(ofn->Flags))
         return GetFileName31W(ofn, SAVE_DIALOG);
     else

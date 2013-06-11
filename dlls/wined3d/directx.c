@@ -113,6 +113,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_point_parameters",             ARB_POINT_PARAMETERS          },
     {"GL_ARB_point_sprite",                 ARB_POINT_SPRITE              },
     {"GL_ARB_provoking_vertex",             ARB_PROVOKING_VERTEX          },
+    {"GL_ARB_shader_bit_encoding",          ARB_SHADER_BIT_ENCODING       },
     {"GL_ARB_shader_objects",               ARB_SHADER_OBJECTS            },
     {"GL_ARB_shader_texture_lod",           ARB_SHADER_TEXTURE_LOD        },
     {"GL_ARB_shading_language_100",         ARB_SHADING_LANGUAGE_100      },
@@ -1075,6 +1076,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    "NVIDIA GeForce 8800 GTS",          DRIVER_NVIDIA_GEFORCE6,  320 },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTX,    "NVIDIA GeForce 8800 GTX",          DRIVER_NVIDIA_GEFORCE6,  768 },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9200,       "NVIDIA GeForce 9200",              DRIVER_NVIDIA_GEFORCE6,  256 },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9300,       "NVIDIA GeForce 9300",              DRIVER_NVIDIA_GEFORCE6,  256 },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9400M,      "NVIDIA GeForce 9400M",             DRIVER_NVIDIA_GEFORCE6,  256 },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9400GT,     "NVIDIA GeForce 9400 GT",           DRIVER_NVIDIA_GEFORCE6,  256 },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9500GT,     "NVIDIA GeForce 9500 GT",           DRIVER_NVIDIA_GEFORCE6,  256 },
@@ -1553,7 +1555,7 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
             {"9500",        CARD_NVIDIA_GEFORCE_9500GT},    /* Geforce 9 - midend low / Geforce 200 - low */
             {"9400M",       CARD_NVIDIA_GEFORCE_9400M},     /* Geforce 9 - lowend */
             {"9400",        CARD_NVIDIA_GEFORCE_9400GT},    /* Geforce 9 - lowend */
-            {"9300",        CARD_NVIDIA_GEFORCE_9200},      /* Geforce 9 - lowend low */
+            {"9300",        CARD_NVIDIA_GEFORCE_9300},      /* Geforce 9 - lowend low */
             {"9200",        CARD_NVIDIA_GEFORCE_9200},      /* Geforce 9 - lowend low */
             {"9100",        CARD_NVIDIA_GEFORCE_9200},      /* Geforce 9 - lowend low */
             {"G 100",       CARD_NVIDIA_GEFORCE_9200},      /* Geforce 9 - lowend low */
@@ -4961,8 +4963,8 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
     }
     else
     {
-        caps->VertexShaderVersion          = shader_caps.VertexShaderVersion;
-        caps->MaxVertexShaderConst         = shader_caps.MaxVertexShaderConst;
+        caps->VertexShaderVersion = shader_caps.vs_version;
+        caps->MaxVertexShaderConst = shader_caps.vs_uniform_count;
     }
 
     if (ps_selected_mode == SHADER_NONE)
@@ -4971,8 +4973,8 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
         caps->PixelShaderVersion           = 0;
         caps->PixelShader1xMaxValue        = 0.0f;
     } else {
-        caps->PixelShaderVersion           = shader_caps.PixelShaderVersion;
-        caps->PixelShader1xMaxValue        = shader_caps.PixelShader1xMaxValue;
+        caps->PixelShaderVersion = shader_caps.ps_version;
+        caps->PixelShader1xMaxValue = shader_caps.ps_1x_max_value;
     }
 
     caps->TextureOpCaps                    = fragment_caps.TextureOpCaps;

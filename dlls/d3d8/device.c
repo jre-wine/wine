@@ -1333,31 +1333,29 @@ static HRESULT WINAPI d3d8_device_GetViewport(IDirect3DDevice8 *iface, D3DVIEWPO
 static HRESULT WINAPI d3d8_device_SetMaterial(IDirect3DDevice8 *iface, const D3DMATERIAL8 *material)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    HRESULT hr;
 
     TRACE("iface %p, material %p.\n", iface, material);
 
     /* Note: D3DMATERIAL8 is compatible with struct wined3d_material. */
     wined3d_mutex_lock();
-    hr = wined3d_device_set_material(device->wined3d_device, (const struct wined3d_material *)material);
+    wined3d_device_set_material(device->wined3d_device, (const struct wined3d_material *)material);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_GetMaterial(IDirect3DDevice8 *iface, D3DMATERIAL8 *material)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
-    HRESULT hr;
 
     TRACE("iface %p, material %p.\n", iface, material);
 
     /* Note: D3DMATERIAL8 is compatible with struct wined3d_material. */
     wined3d_mutex_lock();
-    hr = wined3d_device_get_material(device->wined3d_device, (struct wined3d_material *)material);
+    wined3d_device_get_material(device->wined3d_device, (struct wined3d_material *)material);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_SetLight(IDirect3DDevice8 *iface, DWORD index, const D3DLIGHT8 *light)
@@ -1693,7 +1691,6 @@ static HRESULT WINAPI d3d8_device_GetTexture(IDirect3DDevice8 *iface, DWORD stag
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct wined3d_texture *wined3d_texture;
     struct d3d8_texture *texture_impl;
-    HRESULT hr;
 
     TRACE("iface %p, stage %u, texture %p.\n", iface, stage, texture);
 
@@ -1701,21 +1698,11 @@ static HRESULT WINAPI d3d8_device_GetTexture(IDirect3DDevice8 *iface, DWORD stag
         return D3DERR_INVALIDCALL;
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_texture(device->wined3d_device, stage, &wined3d_texture);
-    if (FAILED(hr))
-    {
-        WARN("Failed to get texture for stage %u, hr %#x.\n", stage, hr);
-        wined3d_mutex_unlock();
-        *texture = NULL;
-        return hr;
-    }
-
-    if (wined3d_texture)
+    if ((wined3d_texture = wined3d_device_get_texture(device->wined3d_device, stage)))
     {
         texture_impl = wined3d_texture_get_parent(wined3d_texture);
         *texture = &texture_impl->IDirect3DBaseTexture8_iface;
         IDirect3DBaseTexture8_AddRef(*texture);
-        wined3d_texture_decref(wined3d_texture);
     }
     else
     {
@@ -1787,7 +1774,6 @@ static HRESULT WINAPI d3d8_device_GetTextureStageState(IDirect3DDevice8 *iface,
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     const struct tss_lookup *l;
-    HRESULT hr;
 
     TRACE("iface %p, stage %u, state %#x, value %p.\n", iface, stage, Type, value);
 
@@ -1801,12 +1787,12 @@ static HRESULT WINAPI d3d8_device_GetTextureStageState(IDirect3DDevice8 *iface,
 
     wined3d_mutex_lock();
     if (l->sampler_state)
-        hr = wined3d_device_get_sampler_state(device->wined3d_device, stage, l->state, value);
+        *value = wined3d_device_get_sampler_state(device->wined3d_device, stage, l->state);
     else
-        hr = wined3d_device_get_texture_stage_state(device->wined3d_device, stage, l->state, value);
+        *value = wined3d_device_get_texture_stage_state(device->wined3d_device, stage, l->state);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_SetTextureStageState(IDirect3DDevice8 *iface,
@@ -1814,7 +1800,6 @@ static HRESULT WINAPI d3d8_device_SetTextureStageState(IDirect3DDevice8 *iface,
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     const struct tss_lookup *l;
-    HRESULT hr;
 
     TRACE("iface %p, stage %u, state %#x, value %#x.\n", iface, stage, type, value);
 
@@ -1828,12 +1813,12 @@ static HRESULT WINAPI d3d8_device_SetTextureStageState(IDirect3DDevice8 *iface,
 
     wined3d_mutex_lock();
     if (l->sampler_state)
-        hr = wined3d_device_set_sampler_state(device->wined3d_device, stage, l->state, value);
+        wined3d_device_set_sampler_state(device->wined3d_device, stage, l->state, value);
     else
-        hr = wined3d_device_set_texture_stage_state(device->wined3d_device, stage, l->state, value);
+        wined3d_device_set_texture_stage_state(device->wined3d_device, stage, l->state, value);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_ValidateDevice(IDirect3DDevice8 *iface, DWORD *pass_count)
@@ -2112,7 +2097,6 @@ static HRESULT WINAPI d3d8_device_SetVertexShader(IDirect3DDevice8 *iface, DWORD
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_vertex_shader *shader_impl;
-    HRESULT hr;
 
     TRACE("iface %p, shader %#x.\n", iface, shader);
 
@@ -2140,15 +2124,12 @@ static HRESULT WINAPI d3d8_device_SetVertexShader(IDirect3DDevice8 *iface, DWORD
         return D3DERR_INVALIDCALL;
     }
 
-    hr = wined3d_device_set_vertex_declaration(device->wined3d_device,
+    wined3d_device_set_vertex_declaration(device->wined3d_device,
             shader_impl->vertex_declaration->wined3d_vertex_declaration);
-    if (SUCCEEDED(hr))
-        hr = wined3d_device_set_vertex_shader(device->wined3d_device, shader_impl->wined3d_shader);
+    wined3d_device_set_vertex_shader(device->wined3d_device, shader_impl->wined3d_shader);
     wined3d_mutex_unlock();
 
-    TRACE("Returning hr %#x\n", hr);
-
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_GetVertexShader(IDirect3DDevice8 *iface, DWORD *shader)
@@ -2156,40 +2137,30 @@ static HRESULT WINAPI d3d8_device_GetVertexShader(IDirect3DDevice8 *iface, DWORD
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct wined3d_vertex_declaration *wined3d_declaration;
     struct d3d8_vertex_declaration *d3d8_declaration;
-    HRESULT hr;
 
     TRACE("iface %p, shader %p.\n", iface, shader);
 
     wined3d_mutex_lock();
-    if (FAILED(hr = wined3d_device_get_vertex_declaration(device->wined3d_device, &wined3d_declaration)))
+    if ((wined3d_declaration = wined3d_device_get_vertex_declaration(device->wined3d_device)))
     {
-        wined3d_mutex_unlock();
-        WARN("Failed to get wined3d vertex declaration, hr %#x.\n", hr);
-        return hr;
+        d3d8_declaration = wined3d_vertex_declaration_get_parent(wined3d_declaration);
+        *shader = d3d8_declaration->shader_handle;
     }
-
-    if (!wined3d_declaration)
+    else
     {
-        wined3d_mutex_unlock();
         *shader = 0;
-        return D3D_OK;
     }
-
-    d3d8_declaration = wined3d_vertex_declaration_get_parent(wined3d_declaration);
-    wined3d_vertex_declaration_decref(wined3d_declaration);
     wined3d_mutex_unlock();
-    *shader = d3d8_declaration->shader_handle;
 
     TRACE("Returning %#x.\n", *shader);
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_DeleteVertexShader(IDirect3DDevice8 *iface, DWORD shader)
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_vertex_shader *shader_impl;
-    struct wined3d_shader *cur;
 
     TRACE("iface %p, shader %#x.\n", iface, shader);
 
@@ -2202,12 +2173,9 @@ static HRESULT WINAPI d3d8_device_DeleteVertexShader(IDirect3DDevice8 *iface, DW
         return D3DERR_INVALIDCALL;
     }
 
-    if ((cur = wined3d_device_get_vertex_shader(device->wined3d_device)))
-    {
-        if (cur == shader_impl->wined3d_shader)
-            IDirect3DDevice8_SetVertexShader(iface, 0);
-        wined3d_shader_decref(cur);
-    }
+    if (shader_impl->wined3d_shader
+            && wined3d_device_get_vertex_shader(device->wined3d_device) == shader_impl->wined3d_shader)
+        IDirect3DDevice8_SetVertexShader(iface, 0);
 
     wined3d_mutex_unlock();
 
@@ -2441,7 +2409,6 @@ static HRESULT WINAPI d3d8_device_SetPixelShader(IDirect3DDevice8 *iface, DWORD 
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_pixel_shader *shader_impl;
-    HRESULT hr;
 
     TRACE("iface %p, shader %#x.\n", iface, shader);
 
@@ -2449,9 +2416,9 @@ static HRESULT WINAPI d3d8_device_SetPixelShader(IDirect3DDevice8 *iface, DWORD 
 
     if (!shader)
     {
-        hr = wined3d_device_set_pixel_shader(device->wined3d_device, NULL);
+        wined3d_device_set_pixel_shader(device->wined3d_device, NULL);
         wined3d_mutex_unlock();
-        return hr;
+        return D3D_OK;
     }
 
     if (!(shader_impl = d3d8_get_object(&device->handle_table, shader - (VS_HIGHESTFIXEDFXF + 1), D3D8_HANDLE_PS)))
@@ -2462,10 +2429,10 @@ static HRESULT WINAPI d3d8_device_SetPixelShader(IDirect3DDevice8 *iface, DWORD 
     }
 
     TRACE("Setting shader %p.\n", shader_impl);
-    hr = wined3d_device_set_pixel_shader(device->wined3d_device, shader_impl->wined3d_shader);
+    wined3d_device_set_pixel_shader(device->wined3d_device, shader_impl->wined3d_shader);
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d8_device_GetPixelShader(IDirect3DDevice8 *iface, DWORD *shader)
@@ -2483,7 +2450,6 @@ static HRESULT WINAPI d3d8_device_GetPixelShader(IDirect3DDevice8 *iface, DWORD 
     {
         struct d3d8_pixel_shader *d3d8_shader;
         d3d8_shader = wined3d_shader_get_parent(object);
-        wined3d_shader_decref(object);
         *shader = d3d8_shader->handle;
     }
     else
@@ -2501,7 +2467,6 @@ static HRESULT WINAPI d3d8_device_DeletePixelShader(IDirect3DDevice8 *iface, DWO
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct d3d8_pixel_shader *shader_impl;
-    struct wined3d_shader *cur;
 
     TRACE("iface %p, shader %#x.\n", iface, shader);
 
@@ -2514,12 +2479,8 @@ static HRESULT WINAPI d3d8_device_DeletePixelShader(IDirect3DDevice8 *iface, DWO
         return D3DERR_INVALIDCALL;
     }
 
-    if ((cur = wined3d_device_get_pixel_shader(device->wined3d_device)))
-    {
-        if (cur == shader_impl->wined3d_shader)
-            IDirect3DDevice8_SetPixelShader(iface, 0);
-        wined3d_shader_decref(cur);
-    }
+    if (wined3d_device_get_pixel_shader(device->wined3d_device) == shader_impl->wined3d_shader)
+        IDirect3DDevice8_SetPixelShader(iface, 0);
 
     wined3d_mutex_unlock();
 

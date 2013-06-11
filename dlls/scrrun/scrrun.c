@@ -54,7 +54,7 @@ static HRESULT WINAPI scrruncf_QueryInterface(IClassFactory *iface, REFIID riid,
         return S_OK;
     }
 
-    FIXME("(%p)->(%s %p)\n", iface, debugstr_guid(riid), ppv);
+    WARN("(%p)->(%s %p)\n", iface, debugstr_guid(riid), ppv);
     return E_NOINTERFACE;
 }
 
@@ -85,13 +85,24 @@ static const struct IClassFactoryVtbl scrruncf_vtbl =
     scrruncf_LockServer
 };
 
+static const struct IClassFactoryVtbl dictcf_vtbl =
+{
+    scrruncf_QueryInterface,
+    scrruncf_AddRef,
+    scrruncf_Release,
+    Dictionary_CreateInstance,
+    scrruncf_LockServer
+};
+
 static IClassFactory FileSystemFactory = { &scrruncf_vtbl };
+static IClassFactory DictionaryFactory = { &dictcf_vtbl };
 
 static ITypeLib *typelib;
 static ITypeInfo *typeinfos[LAST_tid];
 
 static REFIID tid_ids[] = {
     &IID_NULL,
+    &IID_IDictionary,
     &IID_IFileSystem3,
 };
 
@@ -197,6 +208,10 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
     if(IsEqualGUID(&CLSID_FileSystemObject, rclsid)) {
         TRACE("(CLSID_WshShell %s %p)\n", debugstr_guid(riid), ppv);
         return IClassFactory_QueryInterface(&FileSystemFactory, riid, ppv);
+    }
+    else if(IsEqualGUID(&CLSID_Dictionary, rclsid)) {
+        TRACE("(CLSID_WshShell %s %p)\n", debugstr_guid(riid), ppv);
+        return IClassFactory_QueryInterface(&DictionaryFactory, riid, ppv);
     }
 
     FIXME("%s %s %p\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);

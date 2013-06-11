@@ -81,101 +81,124 @@ FLOAT WINAPI D3DXFresnelTerm(FLOAT costheta, FLOAT refractionindex)
 {
     FLOAT a, d, g, result;
 
-    TRACE("(%f, %f)\n", costheta, refractionindex);
+    TRACE("costheta %f, refractionindex %f)\n", costheta, refractionindex);
 
-    g = sqrt(refractionindex * refractionindex + costheta * costheta - 1.0f);
+    g = sqrtf(refractionindex * refractionindex + costheta * costheta - 1.0f);
     a = g + costheta;
     d = g - costheta;
-    result = ( costheta * a - 1.0f ) * ( costheta * a - 1.0f ) / ( ( costheta * d + 1.0f ) * ( costheta * d + 1.0f ) ) + 1.0f;
-    result = result * 0.5f * d * d / ( a * a );
+    result = (costheta * a - 1.0f) * (costheta * a - 1.0f) / ((costheta * d + 1.0f) * (costheta * d + 1.0f)) + 1.0f;
+    result *= 0.5f * d * d / (a * a);
+
     return result;
 }
 
 /*_________________D3DXMatrix____________________*/
 
-D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, FLOAT scaling, CONST D3DXVECTOR3 *rotationcenter, CONST D3DXQUATERNION *rotation, CONST D3DXVECTOR3 *translation)
+D3DXMATRIX * WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *out, FLOAT scaling, const D3DXVECTOR3 *rotationcenter,
+        const D3DXQUATERNION *rotation, const D3DXVECTOR3 *translation)
 {
-    D3DXMATRIX m1, m2, m3, m4, m5;
+    TRACE("out %p, scaling %f, rotationcenter %p, rotation %p, translation %p\n",
+            out, scaling, rotationcenter, rotation, translation);
 
-    TRACE("(%p, %f, %p, %p, %p)\n", pout, scaling, rotationcenter, rotation, translation);
+    D3DXMatrixIdentity(out);
 
-    D3DXMatrixScaling(&m1, scaling, scaling, scaling);
-
-    if ( !rotationcenter )
+    if (rotation)
     {
-        D3DXMatrixIdentity(&m2);
-        D3DXMatrixIdentity(&m4);
+        FLOAT temp00, temp01, temp02, temp10, temp11, temp12, temp20, temp21, temp22;
+
+        temp00 = 1.0f - 2.0f * (rotation->y * rotation->y + rotation->z * rotation->z);
+        temp01 = 2.0f * (rotation->x * rotation->y + rotation->z * rotation->w);
+        temp02 = 2.0f * (rotation->x * rotation->z - rotation->y * rotation->w);
+        temp10 = 2.0f * (rotation->x * rotation->y - rotation->z * rotation->w);
+        temp11 = 1.0f - 2.0f * (rotation->x * rotation->x + rotation->z * rotation->z);
+        temp12 = 2.0f * (rotation->y * rotation->z + rotation->x * rotation->w);
+        temp20 = 2.0f * (rotation->x * rotation->z + rotation->y * rotation->w);
+        temp21 = 2.0f * (rotation->y * rotation->z - rotation->x * rotation->w);
+        temp22 = 1.0f - 2.0f * (rotation->x * rotation->x + rotation->y * rotation->y);
+
+        out->u.m[0][0] = scaling * temp00;
+        out->u.m[0][1] = scaling * temp01;
+        out->u.m[0][2] = scaling * temp02;
+        out->u.m[1][0] = scaling * temp10;
+        out->u.m[1][1] = scaling * temp11;
+        out->u.m[1][2] = scaling * temp12;
+        out->u.m[2][0] = scaling * temp20;
+        out->u.m[2][1] = scaling * temp21;
+        out->u.m[2][2] = scaling * temp22;
+
+        if (rotationcenter)
+        {
+            FLOAT x, y, z;
+
+            x = -rotationcenter->x;
+            y = -rotationcenter->y;
+            z = -rotationcenter->z;
+
+            out->u.m[3][0] = x * temp00 + y * temp10 + z * temp20;
+            out->u.m[3][1] = x * temp01 + y * temp11 + z * temp21;
+            out->u.m[3][2] = x * temp02 + y * temp12 + z * temp22;
+        }
     }
     else
     {
-        D3DXMatrixTranslation(&m2, -rotationcenter->x, -rotationcenter->y, -rotationcenter->z);
-        D3DXMatrixTranslation(&m4, rotationcenter->x, rotationcenter->y, rotationcenter->z);
+        out->u.m[0][0] = scaling;
+        out->u.m[1][1] = scaling;
+        out->u.m[2][2] = scaling;
     }
 
-    if ( !rotation ) D3DXMatrixIdentity(&m3);
-    else D3DXMatrixRotationQuaternion(&m3, rotation);
+    if (rotationcenter)
+    {
+        out->u.m[3][0] += rotationcenter->x;
+        out->u.m[3][1] += rotationcenter->y;
+        out->u.m[3][2] += rotationcenter->z;
+    }
 
-    if ( !translation ) D3DXMatrixIdentity(&m5);
-    else D3DXMatrixTranslation(&m5, translation->x, translation->y, translation->z);
+    if (translation)
+    {
+        out->u.m[3][0] += translation->x;
+        out->u.m[3][1] += translation->y;
+        out->u.m[3][2] += translation->z;
+    }
 
-    D3DXMatrixMultiply(&m1, &m1, &m2);
-    D3DXMatrixMultiply(&m1, &m1, &m3);
-    D3DXMatrixMultiply(&m1, &m1, &m4);
-    D3DXMatrixMultiply(pout, &m1, &m5);
-    return pout;
+    return out;
 }
 
-D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation2D(D3DXMATRIX *pout, FLOAT scaling, CONST D3DXVECTOR2 *protationcenter, FLOAT rotation, CONST D3DXVECTOR2 *ptranslation)
+D3DXMATRIX * WINAPI D3DXMatrixAffineTransformation2D(D3DXMATRIX *out, FLOAT scaling,
+        const D3DXVECTOR2 *rotationcenter, FLOAT rotation, const D3DXVECTOR2 *translation)
 {
-    D3DXMATRIX m1, m2, m3, m4, m5;
-    D3DXQUATERNION rot;
-    D3DXVECTOR3 rot_center, trans;
+    FLOAT tmp1, tmp2, s;
 
-    TRACE("(%p, %f, %p, %f, %p)\n", pout, scaling, protationcenter, rotation, ptranslation);
+    TRACE("out %p, scaling %f, rotationcenter %p, rotation %f, translation %p\n",
+            out, scaling, rotationcenter, rotation, translation);
 
-    rot.w=cos(rotation/2.0f);
-    rot.x=0.0f;
-    rot.y=0.0f;
-    rot.z=sin(rotation/2.0f);
+    s = sinf(rotation / 2.0f);
+    tmp1 = 1.0f - 2.0f * s * s;
+    tmp2 = 2.0 * s * cosf(rotation / 2.0f);
 
-    if ( protationcenter )
-    {
-        rot_center.x=protationcenter->x;
-        rot_center.y=protationcenter->y;
-        rot_center.z=0.0f;
-    }
-    else
-    {
-        rot_center.x=0.0f;
-        rot_center.y=0.0f;
-        rot_center.z=0.0f;
-    }
+    D3DXMatrixIdentity(out);
+    out->u.m[0][0] = scaling * tmp1;
+    out->u.m[0][1] = scaling * tmp2;
+    out->u.m[1][0] = -scaling * tmp2;
+    out->u.m[1][1] = scaling * tmp1;
 
-    if ( ptranslation )
+    if (rotationcenter)
     {
-        trans.x=ptranslation->x;
-        trans.y=ptranslation->y;
-        trans.z=0.0f;
-    }
-    else
-    {
-        trans.x=0.0f;
-        trans.y=0.0f;
-        trans.z=0.0f;
+        FLOAT x, y;
+
+        x = rotationcenter->x;
+        y = rotationcenter->y;
+
+        out->u.m[3][0] = y * tmp2 - x * tmp1 + x;
+        out->u.m[3][1] = -x * tmp2 - y * tmp1 + y;
     }
 
-    D3DXMatrixScaling(&m1, scaling, scaling, 1.0f);
-    D3DXMatrixTranslation(&m2, -rot_center.x, -rot_center.y, -rot_center.z);
-    D3DXMatrixTranslation(&m4, rot_center.x, rot_center.y, rot_center.z);
-    D3DXMatrixRotationQuaternion(&m3, &rot);
-    D3DXMatrixTranslation(&m5, trans.x, trans.y, trans.z);
+    if (translation)
+    {
+        out->u.m[3][0] += translation->x;
+        out->u.m[3][1] += translation->y;
+    }
 
-    D3DXMatrixMultiply(&m1, &m1, &m2);
-    D3DXMatrixMultiply(&m1, &m1, &m3);
-    D3DXMatrixMultiply(&m1, &m1, &m4);
-    D3DXMatrixMultiply(pout, &m1, &m5);
-
-    return pout;
+    return out;
 }
 
 HRESULT WINAPI D3DXMatrixDecompose(D3DXVECTOR3 *poutscale, D3DXQUATERNION *poutrotation, D3DXVECTOR3 *pouttranslation, CONST D3DXMATRIX *pm)
@@ -528,24 +551,36 @@ D3DXMATRIX* WINAPI D3DXMatrixReflect(D3DXMATRIX *pout, CONST D3DXPLANE *pplane)
     return pout;
 }
 
-D3DXMATRIX* WINAPI D3DXMatrixRotationAxis(D3DXMATRIX *pout, CONST D3DXVECTOR3 *pv, FLOAT angle)
+D3DXMATRIX * WINAPI D3DXMatrixRotationAxis(D3DXMATRIX *out, const D3DXVECTOR3 *v, FLOAT angle)
 {
-    D3DXVECTOR3 v;
+    D3DXVECTOR3 nv;
+    FLOAT sangle, cangle, cdiff;
 
-    TRACE("(%p, %p, %f)\n", pout, pv, angle);
+    TRACE("out %p, v %p, angle %f\n", out, v, angle);
 
-    D3DXVec3Normalize(&v,pv);
-    D3DXMatrixIdentity(pout);
-    pout->u.m[0][0] = (1.0f - cos(angle)) * v.x * v.x + cos(angle);
-    pout->u.m[1][0] = (1.0f - cos(angle)) * v.x * v.y - sin(angle) * v.z;
-    pout->u.m[2][0] = (1.0f - cos(angle)) * v.x * v.z + sin(angle) * v.y;
-    pout->u.m[0][1] = (1.0f - cos(angle)) * v.y * v.x + sin(angle) * v.z;
-    pout->u.m[1][1] = (1.0f - cos(angle)) * v.y * v.y + cos(angle);
-    pout->u.m[2][1] = (1.0f - cos(angle)) * v.y * v.z - sin(angle) * v.x;
-    pout->u.m[0][2] = (1.0f - cos(angle)) * v.z * v.x - sin(angle) * v.y;
-    pout->u.m[1][2] = (1.0f - cos(angle)) * v.z * v.y + sin(angle) * v.x;
-    pout->u.m[2][2] = (1.0f - cos(angle)) * v.z * v.z + cos(angle);
-    return pout;
+    D3DXVec3Normalize(&nv, v);
+    sangle = sinf(angle);
+    cangle = cosf(angle);
+    cdiff = 1.0f - cangle;
+
+    out->u.m[0][0] = cdiff * nv.x * nv.x + cangle;
+    out->u.m[1][0] = cdiff * nv.x * nv.y - sangle * nv.z;
+    out->u.m[2][0] = cdiff * nv.x * nv.z + sangle * nv.y;
+    out->u.m[3][0] = 0.0f;
+    out->u.m[0][1] = cdiff * nv.y * nv.x + sangle * nv.z;
+    out->u.m[1][1] = cdiff * nv.y * nv.y + cangle;
+    out->u.m[2][1] = cdiff * nv.y * nv.z - sangle * nv.x;
+    out->u.m[3][1] = 0.0f;
+    out->u.m[0][2] = cdiff * nv.z * nv.x - sangle * nv.y;
+    out->u.m[1][2] = cdiff * nv.z * nv.y + sangle * nv.x;
+    out->u.m[2][2] = cdiff * nv.z * nv.z + cangle;
+    out->u.m[3][2] = 0.0f;
+    out->u.m[0][3] = 0.0f;
+    out->u.m[1][3] = 0.0f;
+    out->u.m[2][3] = 0.0f;
+    out->u.m[3][3] = 1.0f;
+
+    return out;
 }
 
 D3DXMATRIX* WINAPI D3DXMatrixRotationQuaternion(D3DXMATRIX *pout, CONST D3DXQUATERNION *pq)
@@ -1197,30 +1232,29 @@ D3DXVECTOR3* WINAPI D3DXPlaneIntersectLine(D3DXVECTOR3 *pout, CONST D3DXPLANE *p
     return pout;
 }
 
-D3DXPLANE* WINAPI D3DXPlaneNormalize(D3DXPLANE *pout, CONST D3DXPLANE *pp)
+D3DXPLANE * WINAPI D3DXPlaneNormalize(D3DXPLANE *out, const D3DXPLANE *p)
 {
-    D3DXPLANE out;
     FLOAT norm;
 
-    TRACE("(%p, %p)\n", pout, pp);
+    TRACE("out %p, p %p\n", out, p);
 
-    norm = sqrt(pp->a * pp->a + pp->b * pp->b + pp->c * pp->c);
-    if ( norm )
+    norm = sqrtf(p->a * p->a + p->b * p->b + p->c * p->c);
+    if (norm)
     {
-     out.a = pp->a / norm;
-     out.b = pp->b / norm;
-     out.c = pp->c / norm;
-     out.d = pp->d / norm;
+        out->a = p->a / norm;
+        out->b = p->b / norm;
+        out->c = p->c / norm;
+        out->d = p->d / norm;
     }
     else
     {
-     out.a = 0.0f;
-     out.b = 0.0f;
-     out.c = 0.0f;
-     out.d = 0.0f;
+        out->a = 0.0f;
+        out->b = 0.0f;
+        out->c = 0.0f;
+        out->d = 0.0f;
     }
-    *pout = out;
-    return pout;
+
+    return out;
 }
 
 D3DXPLANE* WINAPI D3DXPlaneTransform(D3DXPLANE *pout, CONST D3DXPLANE *pplane, CONST D3DXMATRIX *pm)
@@ -1263,28 +1297,29 @@ D3DXQUATERNION* WINAPI D3DXQuaternionBaryCentric(D3DXQUATERNION *pout, CONST D3D
     return pout;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionExp(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
+D3DXQUATERNION * WINAPI D3DXQuaternionExp(D3DXQUATERNION *out, const D3DXQUATERNION *q)
 {
     FLOAT norm;
 
-    TRACE("(%p, %p)\n", pout, pq);
+    TRACE("out %p, q %p\n", out, q);
 
-    norm = sqrt(pq->x * pq->x + pq->y * pq->y + pq->z * pq->z);
-    if (norm )
+    norm = sqrtf(q->x * q->x + q->y * q->y + q->z * q->z);
+    if (norm)
     {
-     pout->x = sin(norm) * pq->x / norm;
-     pout->y = sin(norm) * pq->y / norm;
-     pout->z = sin(norm) * pq->z / norm;
-     pout->w = cos(norm);
+        out->x = sinf(norm) * q->x / norm;
+        out->y = sinf(norm) * q->y / norm;
+        out->z = sinf(norm) * q->z / norm;
+        out->w = cosf(norm);
     }
     else
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
-     pout->z = 0.0f;
-     pout->w = 1.0f;
+        out->x = 0.0f;
+        out->y = 0.0f;
+        out->z = 0.0f;
+        out->w = 1.0f;
     }
-    return pout;
+
+    return out;
 }
 
 D3DXQUATERNION* WINAPI D3DXQuaternionInverse(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
@@ -1305,23 +1340,23 @@ D3DXQUATERNION* WINAPI D3DXQuaternionInverse(D3DXQUATERNION *pout, CONST D3DXQUA
     return pout;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionLn(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
+D3DXQUATERNION * WINAPI D3DXQuaternionLn(D3DXQUATERNION *out, const D3DXQUATERNION *q)
 {
     FLOAT t;
 
-    TRACE("(%p, %p)\n", pout, pq);
+    TRACE("out %p, q %p\n", out, q);
 
-    if ( (pq->w >= 1.0f) || (pq->w == -1.0f) )
+    if ((q->w >= 1.0f) || (q->w == -1.0f))
         t = 1.0f;
     else
-        t = acos( pq->w ) / sqrt( 1.0f - pq->w * pq->w );
+        t = acosf(q->w) / sqrtf(1.0f - q->w * q->w);
 
-    pout->x = t * pq->x;
-    pout->y = t * pq->y;
-    pout->z = t * pq->z;
-    pout->w = 0.0f;
+    out->x = t * q->x;
+    out->y = t * q->y;
+    out->z = t * q->z;
+    out->w = 0.0f;
 
-    return pout;
+    return out;
 }
 
 D3DXQUATERNION* WINAPI D3DXQuaternionMultiply(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2)
@@ -1338,129 +1373,144 @@ D3DXQUATERNION* WINAPI D3DXQuaternionMultiply(D3DXQUATERNION *pout, CONST D3DXQU
     return pout;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionNormalize(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
+D3DXQUATERNION * WINAPI D3DXQuaternionNormalize(D3DXQUATERNION *out, const D3DXQUATERNION *q)
 {
-    D3DXQUATERNION out;
     FLOAT norm;
 
-    TRACE("(%p, %p)\n", pout, pq);
+    TRACE("out %p, q %p\n", out, q);
 
-    norm = D3DXQuaternionLength(pq);
+    norm = D3DXQuaternionLength(q);
 
-    out.x = pq->x / norm;
-    out.y = pq->y / norm;
-    out.z = pq->z / norm;
-    out.w = pq->w / norm;
+    out->x = q->x / norm;
+    out->y = q->y / norm;
+    out->z = q->z / norm;
+    out->w = q->w / norm;
 
-    *pout=out;
-
-    return pout;
+    return out;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionRotationAxis(D3DXQUATERNION *pout, CONST D3DXVECTOR3 *pv, FLOAT angle)
+D3DXQUATERNION * WINAPI D3DXQuaternionRotationAxis(D3DXQUATERNION *out, const D3DXVECTOR3 *v, FLOAT angle)
 {
     D3DXVECTOR3 temp;
 
-    TRACE("(%p, %p, %f)\n", pout, pv, angle);
+    TRACE("out %p, v %p, angle %f\n", out, v, angle);
 
-    D3DXVec3Normalize(&temp, pv);
-    pout->x = sin( angle / 2.0f ) * temp.x;
-    pout->y = sin( angle / 2.0f ) * temp.y;
-    pout->z = sin( angle / 2.0f ) * temp.z;
-    pout->w = cos( angle / 2.0f );
-    return pout;
+    D3DXVec3Normalize(&temp, v);
+
+    out->x = sinf(angle / 2.0f) * temp.x;
+    out->y = sinf(angle / 2.0f) * temp.y;
+    out->z = sinf(angle / 2.0f) * temp.z;
+    out->w = cosf(angle / 2.0f);
+
+    return out;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionRotationMatrix(D3DXQUATERNION *pout, CONST D3DXMATRIX *pm)
+D3DXQUATERNION * WINAPI D3DXQuaternionRotationMatrix(D3DXQUATERNION *out, const D3DXMATRIX *m)
 {
-    int i, maxi;
-    FLOAT maxdiag, S, trace;
+    FLOAT s, trace;
 
-    TRACE("(%p, %p)\n", pout, pm);
+    TRACE("out %p, m %p\n", out, m);
 
-    trace = pm->u.m[0][0] + pm->u.m[1][1] + pm->u.m[2][2] + 1.0f;
-    if ( trace > 1.0f)
+    trace = m->u.m[0][0] + m->u.m[1][1] + m->u.m[2][2] + 1.0f;
+    if (trace > 1.0f)
     {
-     pout->x = ( pm->u.m[1][2] - pm->u.m[2][1] ) / ( 2.0f * sqrt(trace) );
-     pout->y = ( pm->u.m[2][0] - pm->u.m[0][2] ) / ( 2.0f * sqrt(trace) );
-     pout->z = ( pm->u.m[0][1] - pm->u.m[1][0] ) / ( 2.0f * sqrt(trace) );
-     pout->w = sqrt(trace) / 2.0f;
-     return pout;
-     }
-    maxi = 0;
-    maxdiag = pm->u.m[0][0];
-    for (i=1; i<3; i++)
-    {
-     if ( pm->u.m[i][i] > maxdiag )
-     {
-      maxi = i;
-      maxdiag = pm->u.m[i][i];
-     }
+        s = 2.0f * sqrtf(trace);
+        out->x = (m->u.m[1][2] - m->u.m[2][1]) / s;
+        out->y = (m->u.m[2][0] - m->u.m[0][2]) / s;
+        out->z = (m->u.m[0][1] - m->u.m[1][0]) / s;
+        out->w = 0.25f * s;
     }
-    switch( maxi )
+    else
     {
-     case 0:
-       S = 2.0f * sqrt(1.0f + pm->u.m[0][0] - pm->u.m[1][1] - pm->u.m[2][2]);
-       pout->x = 0.25f * S;
-       pout->y = ( pm->u.m[0][1] + pm->u.m[1][0] ) / S;
-       pout->z = ( pm->u.m[0][2] + pm->u.m[2][0] ) / S;
-       pout->w = ( pm->u.m[1][2] - pm->u.m[2][1] ) / S;
-     break;
-     case 1:
-       S = 2.0f * sqrt(1.0f + pm->u.m[1][1] - pm->u.m[0][0] - pm->u.m[2][2]);
-       pout->x = ( pm->u.m[0][1] + pm->u.m[1][0] ) / S;
-       pout->y = 0.25f * S;
-       pout->z = ( pm->u.m[1][2] + pm->u.m[2][1] ) / S;
-       pout->w = ( pm->u.m[2][0] - pm->u.m[0][2] ) / S;
-     break;
-     case 2:
-       S = 2.0f * sqrt(1.0f + pm->u.m[2][2] - pm->u.m[0][0] - pm->u.m[1][1]);
-       pout->x = ( pm->u.m[0][2] + pm->u.m[2][0] ) / S;
-       pout->y = ( pm->u.m[1][2] + pm->u.m[2][1] ) / S;
-       pout->z = 0.25f * S;
-       pout->w = ( pm->u.m[0][1] - pm->u.m[1][0] ) / S;
-     break;
+        int i, maxi = 0;
+
+        for (i = 1; i < 3; i++)
+        {
+            if (m->u.m[i][i] > m->u.m[maxi][maxi])
+                maxi = i;
+        }
+
+        switch (maxi)
+        {
+            case 0:
+                s = 2.0f * sqrtf(1.0f + m->u.m[0][0] - m->u.m[1][1] - m->u.m[2][2]);
+                out->x = 0.25f * s;
+                out->y = (m->u.m[0][1] + m->u.m[1][0]) / s;
+                out->z = (m->u.m[0][2] + m->u.m[2][0]) / s;
+                out->w = (m->u.m[1][2] - m->u.m[2][1]) / s;
+                break;
+
+            case 1:
+                s = 2.0f * sqrtf(1.0f + m->u.m[1][1] - m->u.m[0][0] - m->u.m[2][2]);
+                out->x = (m->u.m[0][1] + m->u.m[1][0]) / s;
+                out->y = 0.25f * s;
+                out->z = (m->u.m[1][2] + m->u.m[2][1]) / s;
+                out->w = (m->u.m[2][0] - m->u.m[0][2]) / s;
+                break;
+
+            case 2:
+                s = 2.0f * sqrtf(1.0f + m->u.m[2][2] - m->u.m[0][0] - m->u.m[1][1]);
+                out->x = (m->u.m[0][2] + m->u.m[2][0]) / s;
+                out->y = (m->u.m[1][2] + m->u.m[2][1]) / s;
+                out->z = 0.25f * s;
+                out->w = (m->u.m[0][1] - m->u.m[1][0]) / s;
+                break;
+        }
     }
-    return pout;
+
+    return out;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionRotationYawPitchRoll(D3DXQUATERNION *pout, FLOAT yaw, FLOAT pitch, FLOAT roll)
+D3DXQUATERNION * WINAPI D3DXQuaternionRotationYawPitchRoll(D3DXQUATERNION *out, FLOAT yaw, FLOAT pitch, FLOAT roll)
 {
-    TRACE("(%p, %f, %f, %f)\n", pout, yaw, pitch, roll);
+    FLOAT syaw, cyaw, spitch, cpitch, sroll, croll;
 
-    pout->x = sin( yaw / 2.0f) * cos(pitch / 2.0f) * sin(roll / 2.0f) + cos(yaw / 2.0f) * sin(pitch / 2.0f) * cos(roll / 2.0f);
-    pout->y = sin( yaw / 2.0f) * cos(pitch / 2.0f) * cos(roll / 2.0f) - cos(yaw / 2.0f) * sin(pitch / 2.0f) * sin(roll / 2.0f);
-    pout->z = cos(yaw / 2.0f) * cos(pitch / 2.0f) * sin(roll / 2.0f) - sin( yaw / 2.0f) * sin(pitch / 2.0f) * cos(roll / 2.0f);
-    pout->w = cos( yaw / 2.0f) * cos(pitch / 2.0f) * cos(roll / 2.0f) + sin(yaw / 2.0f) * sin(pitch / 2.0f) * sin(roll / 2.0f);
-    return pout;
+    TRACE("out %p, yaw %f, pitch %f, roll %f\n", out, yaw, pitch, roll);
+
+    syaw = sinf(yaw / 2.0f);
+    cyaw = cosf(yaw / 2.0f);
+    spitch = sinf(pitch / 2.0f);
+    cpitch = cosf(pitch / 2.0f);
+    sroll = sinf(roll / 2.0f);
+    croll = cosf(roll / 2.0f);
+
+    out->x = syaw * cpitch * sroll + cyaw * spitch * croll;
+    out->y = syaw * cpitch * croll - cyaw * spitch * sroll;
+    out->z = cyaw * cpitch * sroll - syaw * spitch * croll;
+    out->w = cyaw * cpitch * croll + syaw * spitch * sroll;
+
+    return out;
 }
 
-D3DXQUATERNION* WINAPI D3DXQuaternionSlerp(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2, FLOAT t)
+D3DXQUATERNION * WINAPI D3DXQuaternionSlerp(D3DXQUATERNION *out, const D3DXQUATERNION *q1,
+        const D3DXQUATERNION *q2, FLOAT t)
 {
-    FLOAT dot, epsilon, temp, theta, u;
+    FLOAT dot, temp;
 
-    TRACE("(%p, %p, %p, %f)\n", pout, pq1, pq2, t);
+    TRACE("out %p, q1 %p, q2 %p, t %f\n", out, q1, q2, t);
 
-    epsilon = 1.0f;
     temp = 1.0f - t;
-    u = t;
-    dot = D3DXQuaternionDot(pq1, pq2);
-    if ( dot < 0.0f )
+    dot = D3DXQuaternionDot(q1, q2);
+    if (dot < 0.0f)
     {
-        epsilon = -1.0f;
+        t = -t;
         dot = -dot;
     }
-    if( 1.0f - dot > 0.001f )
+
+    if (1.0f - dot > 0.001f)
     {
-        theta = acos(dot);
-        temp  = sin(theta * temp) / sin(theta);
-        u = sin(theta * u) / sin(theta);
+        FLOAT theta = acosf(dot);
+
+        temp = sinf(theta * temp) / sinf(theta);
+        t = sinf(theta * t) / sinf(theta);
     }
-    pout->x = temp * pq1->x + epsilon * u * pq2->x;
-    pout->y = temp * pq1->y + epsilon * u * pq2->y;
-    pout->z = temp * pq1->z + epsilon * u * pq2->z;
-    pout->w = temp * pq1->w + epsilon * u * pq2->w;
-    return pout;
+
+    out->x = temp * q1->x + t * q2->x;
+    out->y = temp * q1->y + t * q2->y;
+    out->z = temp * q1->z + t * q2->z;
+    out->w = temp * q1->w + t * q2->w;
+
+    return out;
 }
 
 D3DXQUATERNION* WINAPI D3DXQuaternionSquad(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2, CONST D3DXQUATERNION *pq3, CONST D3DXQUATERNION *pq4, FLOAT t)
@@ -1588,7 +1638,6 @@ D3DXVECTOR2* WINAPI D3DXVec2Hermite(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv1, C
 
 D3DXVECTOR2* WINAPI D3DXVec2Normalize(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv)
 {
-    D3DXVECTOR2 out;
     FLOAT norm;
 
     TRACE("(%p, %p)\n", pout, pv);
@@ -1596,15 +1645,15 @@ D3DXVECTOR2* WINAPI D3DXVec2Normalize(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv)
     norm = D3DXVec2Length(pv);
     if ( !norm )
     {
-     out.x = 0.0f;
-     out.y = 0.0f;
+        pout->x = 0.0f;
+        pout->y = 0.0f;
     }
     else
     {
-     out.x = pv->x / norm;
-     out.y = pv->y / norm;
+        pout->x = pv->x / norm;
+        pout->y = pv->y / norm;
     }
-    *pout=out;
+
     return pout;
 }
 
@@ -1729,7 +1778,6 @@ D3DXVECTOR3* WINAPI D3DXVec3Hermite(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv1, C
 
 D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv)
 {
-    D3DXVECTOR3 out;
     FLOAT norm;
 
     TRACE("(%p, %p)\n", pout, pv);
@@ -1737,17 +1785,17 @@ D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv)
     norm = D3DXVec3Length(pv);
     if ( !norm )
     {
-     out.x = 0.0f;
-     out.y = 0.0f;
-     out.z = 0.0f;
+        pout->x = 0.0f;
+        pout->y = 0.0f;
+        pout->z = 0.0f;
     }
     else
     {
-     out.x = pv->x / norm;
-     out.y = pv->y / norm;
-     out.z = pv->z / norm;
+        pout->x = pv->x / norm;
+        pout->y = pv->y / norm;
+        pout->z = pv->z / norm;
     }
-    *pout = out;
+
     return pout;
 }
 
@@ -1965,19 +2013,17 @@ D3DXVECTOR4* WINAPI D3DXVec4Hermite(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv1, C
 
 D3DXVECTOR4* WINAPI D3DXVec4Normalize(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv)
 {
-    D3DXVECTOR4 out;
     FLOAT norm;
 
     TRACE("(%p, %p)\n", pout, pv);
 
     norm = D3DXVec4Length(pv);
 
-    out.x = pv->x / norm;
-    out.y = pv->y / norm;
-    out.z = pv->z / norm;
-    out.w = pv->w / norm;
+    pout->x = pv->x / norm;
+    pout->y = pv->y / norm;
+    pout->z = pv->z / norm;
+    pout->w = pv->w / norm;
 
-    *pout = out;
     return pout;
 }
 
@@ -2231,16 +2277,45 @@ FLOAT* WINAPI D3DXSHEvalDirection(FLOAT *out, UINT order, CONST D3DXVECTOR3 *dir
     return out;
 }
 
-FLOAT* WINAPI D3DXSHMultiply2(FLOAT *out, CONST FLOAT *a, CONST FLOAT *b)
+HRESULT WINAPI D3DXSHEvalDirectionalLight(UINT order, CONST D3DXVECTOR3 *dir, FLOAT Rintensity, FLOAT Gintensity, FLOAT Bintensity, FLOAT *Rout, FLOAT *Gout, FLOAT *Bout)
+{
+    FLOAT s, temp;
+    UINT j;
+
+    TRACE("Order %u, Vector %p, Red %f, Green %f, Blue %f, Rout %p, Gout %p, Bout %p\n", order, dir, Rintensity, Gintensity, Bintensity, Rout, Gout, Bout);
+
+    s = 0.75f;
+    if ( order > 2 )
+        s += 5.0f / 16.0f;
+    if ( order > 4 )
+        s -= 3.0f / 32.0f;
+    s /= D3DX_PI;
+
+    D3DXSHEvalDirection(Rout, order, dir);
+    for (j = 0; j < order * order; j++)
+    {
+        temp = Rout[j] / s;
+
+        Rout[j] = Rintensity * temp;
+        if ( Gout )
+            Gout[j] = Gintensity * temp;
+        if ( Bout )
+            Bout[j] = Bintensity * temp;
+    }
+
+    return D3D_OK;
+}
+
+FLOAT * WINAPI D3DXSHMultiply2(FLOAT *out, const FLOAT *a, const FLOAT *b)
 {
     FLOAT ta, tb;
 
-    TRACE("(%p, %p, %p)\n", out, a, b);
+    TRACE("out %p, a %p, b %p\n", out, a, b);
 
     ta = 0.28209479f * a[0];
     tb = 0.28209479f * b[0];
 
-    out[0]= 0.28209479f * D3DXSHDot(2, a, b);
+    out[0] = 0.28209479f * D3DXSHDot(2, a, b);
     out[1] = ta * b[1] + tb * a[1];
     out[2] = ta * b[2] + tb * a[2];
     out[3] = ta * b[3] + tb * a[3];
@@ -2248,13 +2323,13 @@ FLOAT* WINAPI D3DXSHMultiply2(FLOAT *out, CONST FLOAT *a, CONST FLOAT *b)
     return out;
 }
 
-FLOAT* WINAPI D3DXSHMultiply3(FLOAT *out, CONST FLOAT *a, CONST FLOAT *b)
+FLOAT * WINAPI D3DXSHMultiply3(FLOAT *out, const FLOAT *a, const FLOAT *b)
 {
     FLOAT t, ta, tb;
 
-    TRACE("(%p, %p, %p)\n", out, a, b);
+    TRACE("out %p, a %p, b %p\n", out, a, b);
 
-    out[0]= 0.28209479f * a[0] * b[0];
+    out[0] = 0.28209479f * a[0] * b[0];
 
     ta = 0.28209479f * a[0] - 0.12615662f * a[6] - 0.21850968f * a[8];
     tb = 0.28209479f * b[0] - 0.12615662f * b[6] - 0.21850968f * b[8];
@@ -2347,38 +2422,127 @@ FLOAT* WINAPI D3DXSHMultiply3(FLOAT *out, CONST FLOAT *a, CONST FLOAT *b)
     return out;
 }
 
-FLOAT* WINAPI D3DXSHRotateZ(FLOAT *out, UINT order, FLOAT angle, CONST FLOAT *in)
+static void rotate_X(FLOAT *out, UINT order, FLOAT a, FLOAT *in)
+{
+    out[0] = in[0];
+    if ( order < 2 )
+        return;
+
+    out[1] = a * in[2];
+    out[2] = -a * in[1];
+    out[3] = in[3];
+    if ( order == 2 )
+        return;
+
+    out[4] = a * in[7];
+    out[5] = -in[5];
+    out[6] = -0.5f * in[6] - 0.8660253882f * in[8];
+    out[7] = -a * in[4];
+    out[8] = -0.8660253882f * in[6] + 0.5f * in[8];
+    out[9] = -a * 0.7905694842f * in[12] + a * 0.6123724580f * in[14];
+    if ( order == 3 )
+        return;
+
+    out[10] = -in[10];
+    out[11] = -a * 0.6123724580f * in[12] - a * 0.7905694842f * in[14];
+    out[12] = a * 0.7905694842f * in[9] + a * 0.6123724580f * in[11];
+    out[13] = -0.25f * in[13] - 0.9682458639f * in[15];
+    out[14] = -a * 0.6123724580f * in[9] + a * 0.7905694842f * in[11];
+    out[15] = -0.9682458639f * in[13] + 0.25f * in[15];
+    if ( order == 4 )
+        return;
+
+    out[16] = -a * 0.9354143739f * in[21] + a * 0.3535533845f * in[23];
+    out[17] = -0.75f * in[17] + 0.6614378095f * in[19];
+    out[18] = -a * 0.3535533845f * in[21] - a * 0.9354143739f * in[23];
+    out[19] = 0.6614378095f * in[17] + 0.75f * in[19];
+    out[20] = 0.375f * in[20] + 0.5590170026f * in[22] + 0.7395099998f * in[24];
+    out[21] = a * 0.9354143739f * in[16] + a * 0.3535533845f * in[18];
+    out[22] = 0.5590170026f * in[20] + 0.5f * in[22] - 0.6614378691f * in[24];
+    out[23] = -a * 0.3535533845f * in[16] + a * 0.9354143739f * in[18];
+    out[24] = 0.7395099998f * in[20] - 0.6614378691f * in[22] + 0.125f * in[24];
+    if ( order == 5 )
+        return;
+
+    out[25] = a * 0.7015607357f * in[30] - a * 0.6846531630f * in[32] + a * 0.1976423711f * in[34];
+    out[26] = -0.5f * in[26] + 0.8660253882f * in[28];
+    out[27] = a * 0.5229125023f * in[30] + a * 0.3061861992f * in[32] - a * 0.7954951525 * in[34];
+    out[28] = 0.8660253882f * in[26] + 0.5f * in[28];
+    out[29] = a * 0.4841229022f * in[30] + a * 0.6614378691f * in[32] + a * 0.5728219748f * in[34];
+    out[30] = -a * 0.7015607357f * in[25] - a * 0.5229125023f * in[27] - a * 0.4841229022f * in[29];
+    out[31] = 0.125f * in[31] + 0.4050463140f * in[33] + 0.9057110548f * in[35];
+    out[32] = a * 0.6846531630f * in[25] - a * 0.3061861992f * in[27] - a * 0.6614378691f * in[29];
+    out[33] = 0.4050463140f * in[31] + 0.8125f * in[33] - 0.4192627370f * in[35];
+    out[34] = -a * 0.1976423711f * in[25] + a * 0.7954951525f * in[27] - a * 0.5728219748f * in[29];
+    out[35] = 0.9057110548f * in[31] - 0.4192627370f * in[33] + 0.0624999329f * in[35];
+
+}
+
+FLOAT* WINAPI D3DXSHRotate(FLOAT *out, UINT order, CONST D3DXMATRIX *matrix, CONST FLOAT *in)
+{
+    FLOAT alpha, beta, gamma, sinb, temp[36];
+
+    TRACE("out %p, order %u, matrix %p, in %p\n", out, order, matrix, in);
+
+    out[0] = in[0];
+
+    if ( ( order > D3DXSH_MAXORDER ) || ( order < D3DXSH_MINORDER ) )
+        return out;
+
+    /* TODO: Implement handy computations for order <= 3. They are faster than the general algorithm. */
+    if ( order < 4 )
+        WARN("Using general algorithm for order = %u\n", order);
+
+    if ( fabsf( matrix->u.m[2][2] ) != 1.0f )
+    {
+        sinb = sqrtf( 1.0f - matrix->u.m[2][2] * matrix->u.m[2][2] );
+        alpha = atan2f(matrix->u.m[2][1] / sinb, matrix->u.m[2][0] / sinb );
+        beta = atan2f( sinb, matrix->u.m[2][2] );
+        gamma = atan2f( matrix->u.m[1][2] / sinb, -matrix->u.m[0][2] / sinb );
+    }
+    else
+    {
+        alpha = atan2f( matrix->u.m[0][1], matrix->u.m[0][0] );
+        beta = 0.0f;
+        gamma = 0.0f;
+    }
+
+    D3DXSHRotateZ(out, order, gamma, in);
+    rotate_X(temp, order, 1.0f, out);
+    D3DXSHRotateZ(out, order, beta, temp);
+    rotate_X(temp, order, -1.0f, out);
+    D3DXSHRotateZ(out, order, alpha, temp);
+
+    return out;
+}
+
+FLOAT * WINAPI D3DXSHRotateZ(FLOAT *out, UINT order, FLOAT angle, CONST FLOAT *in)
 {
     FLOAT c1a, c2a, c3a, c4a, c5a, s1a, s2a, s3a, s4a, s5a;
 
-    TRACE("%p, %u, %f, %p)\n", out, order, angle, in);
+    TRACE("out %p, order %u, angle %f, in %p\n", out, order, angle, in);
 
-    c1a = cos( angle );
-    c2a = cos( 2.0f * angle );
-    c3a = cos( 3.0f * angle );
-    c4a = cos( 4.0f * angle );
-    c5a = cos( 5.0f * angle );
-    s1a = sin( angle );
-    s2a = sin( 2.0f * angle );
-    s3a = sin( 3.0f * angle );
-    s4a = sin( 4.0f * angle );
-    s5a = sin( 5.0f * angle );
-
+    c1a = cosf(angle);
+    s1a = sinf(angle);
     out[0] = in[0];
     out[1] = c1a * in[1] + s1a * in[3];
     out[2] = in[2];
-    out[3] =  c1a * in[3] - s1a * in[1];
-    if ( order <= D3DXSH_MINORDER )
+    out[3] = c1a * in[3] - s1a * in[1];
+    if (order <= D3DXSH_MINORDER)
         return out;
 
+    c2a = cosf(2.0f * angle);
+    s2a = sinf(2.0f * angle);
     out[4] = c2a * in[4] + s2a * in[8];
     out[5] = c1a * in[5] + s1a * in[7];
     out[6] = in[6];
     out[7] = c1a * in[7] - s1a * in[5];
     out[8] = c2a * in[8] - s2a * in[4];
-    if ( order == 3 )
+    if (order == 3)
         return out;
 
+    c3a = cosf(3.0f * angle);
+    s3a = sinf(3.0f * angle);
     out[9] = c3a * in[9] + s3a * in[15];
     out[10] = c2a * in[10] + s2a * in[14];
     out[11] = c1a * in[11] + s1a * in[13];
@@ -2386,9 +2550,11 @@ FLOAT* WINAPI D3DXSHRotateZ(FLOAT *out, UINT order, FLOAT angle, CONST FLOAT *in
     out[13] = c1a * in[13] - s1a * in[11];
     out[14] = c2a * in[14] - s2a * in[10];
     out[15] = c3a * in[15] - s3a * in[9];
-    if ( order == 4 )
+    if (order == 4)
         return out;
 
+    c4a = cosf(4.0f * angle);
+    s4a = sinf(4.0f * angle);
     out[16] = c4a * in[16] + s4a * in[24];
     out[17] = c3a * in[17] + s3a * in[23];
     out[18] = c2a * in[18] + s2a * in[22];
@@ -2398,9 +2564,11 @@ FLOAT* WINAPI D3DXSHRotateZ(FLOAT *out, UINT order, FLOAT angle, CONST FLOAT *in
     out[22] = c2a * in[22] - s2a * in[18];
     out[23] = c3a * in[23] - s3a * in[17];
     out[24] = c4a * in[24] - s4a * in[16];
-    if ( order == 5 )
+    if (order == 5)
         return out;
 
+    c5a = cosf(5.0f * angle);
+    s5a = sinf(5.0f * angle);
     out[25] = c5a * in[25] + s5a * in[35];
     out[26] = c4a * in[26] + s4a * in[34];
     out[27] = c3a * in[27] + s3a * in[33];
