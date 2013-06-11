@@ -4070,10 +4070,10 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
       SLTG_TypeInfoTail *pTITail;
       SLTG_MemberHeader *pMemHeader;
 
-      if(strcmp(pBlkEntry[order].index_string + (char*)pMagic,
-		pOtherTypeInfoBlks[i].index_name)) {
-	FIXME_(typelib)("Index strings don't match\n");
-	return NULL;
+      if(strcmp(pBlkEntry[order].index_string + (char*)pMagic, pOtherTypeInfoBlks[i].index_name)) {
+        FIXME_(typelib)("Index strings don't match\n");
+        heap_free(pOtherTypeInfoBlks);
+        return NULL;
       }
 
       pTIHeader = pBlk;
@@ -4092,9 +4092,6 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 					     pOtherTypeInfoBlks[i].name_offs +
 					     pNameTable);
       (*ppTypeInfoImpl)->dwHelpContext = pOtherTypeInfoBlks[i].helpcontext;
-      (*ppTypeInfoImpl)->DocString = TLB_MultiByteToBSTR(
-                                            pOtherTypeInfoBlks[i].helpcontext +
-                                            pNameTable);
       (*ppTypeInfoImpl)->TypeAttr.guid = pOtherTypeInfoBlks[i].uuid;
       (*ppTypeInfoImpl)->TypeAttr.typekind = pTIHeader->typekind;
       (*ppTypeInfoImpl)->TypeAttr.wMajorVerNum = pTIHeader->major_version;
@@ -4189,6 +4186,7 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 
     if(i != pTypeLibImpl->TypeInfoCount) {
       FIXME("Somehow processed %d TypeInfos\n", i);
+      heap_free(pOtherTypeInfoBlks);
       return NULL;
     }
 
@@ -6499,6 +6497,7 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                             if (hres != S_OK)
                             {
                                 ERR("SafeArrayAccessData failed with %x\n", hres);
+                                SafeArrayDestroy(a);
                                 break;
                             }
                             for (j = 0; j < bound.cElements; j++)
@@ -6507,6 +6506,7 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                             if (hres != S_OK)
                             {
                                 ERR("SafeArrayUnaccessData failed with %x\n", hres);
+                                SafeArrayDestroy(a);
                                 break;
                             }
                             V_ARRAY(&rgvarg[i]) = a;

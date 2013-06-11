@@ -58,6 +58,7 @@ extern GpStatus METAFILE_GetGraphicsContext(GpMetafile* metafile, GpGraphics **r
 extern GpStatus METAFILE_GetDC(GpMetafile* metafile, HDC *hdc) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_ReleaseDC(GpMetafile* metafile, HDC hdc) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_GraphicsDeleted(GpMetafile* metafile) DECLSPEC_HIDDEN;
+extern MetafileType METAFILE_GetEmfType(HENHMETAFILE hemf) DECLSPEC_HIDDEN;
 
 extern void calc_curve_bezier(CONST GpPointF *pts, REAL tension, REAL *x1,
     REAL *y1, REAL *x2, REAL *y2) DECLSPEC_HIDDEN;
@@ -124,6 +125,10 @@ extern GpStatus convert_pixels(INT width, INT height,
     INT dst_stride, BYTE *dst_bits, PixelFormat dst_format,
     INT src_stride, const BYTE *src_bits, PixelFormat src_format, ColorPalette *palette) DECLSPEC_HIDDEN;
 
+struct GpMatrix{
+    REAL matrix[6];
+};
+
 struct GpPen{
     UINT style;
     GpUnit unit;
@@ -157,7 +162,7 @@ struct GpGraphics{
     GpUnit unit;    /* page unit */
     REAL scale;     /* page scale */
     REAL xres, yres;
-    GpMatrix * worldtrans; /* world transform */
+    GpMatrix worldtrans; /* world transform */
     BOOL busy;      /* hdc handle obtained by GdipGetDC */
     GpRegion *clip;
     UINT textcontrast; /* not used yet. get/set only */
@@ -204,7 +209,7 @@ struct GpPathGradient{
     ARGB* pblendcolor; /* preset blend colors */
     REAL* pblendpos; /* preset blend positions */
     INT pblendcount;
-    GpMatrix *transform;
+    GpMatrix transform;
 };
 
 struct GpLineGradient{
@@ -226,7 +231,7 @@ struct GpLineGradient{
 
 struct GpTexture{
     GpBrush brush;
-    GpMatrix *transform;
+    GpMatrix transform;
     GpImage *image;
     GpImageAttributes *imageattributes;
     BYTE *bitmap_bits; /* image bits converted to ARGB and run through imageattributes */
@@ -237,10 +242,6 @@ struct GpPath{
     GpPathData pathdata;
     BOOL newfigure; /* whether the next drawing action starts a new figure */
     INT datalen; /* size of the arrays in pathdata */
-};
-
-struct GpMatrix{
-    REAL matrix[6];
 };
 
 struct GpPathIterator{
@@ -280,6 +281,7 @@ struct GpMetafile{
     GpUnit unit;
     MetafileType metafile_type;
     HENHMETAFILE hemf;
+    int preserve_hemf; /* if true, hemf belongs to the app and should not be deleted */
 
     /* recording */
     HDC record_dc;

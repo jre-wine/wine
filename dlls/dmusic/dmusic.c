@@ -129,9 +129,6 @@ static HRESULT WINAPI IDirectMusic8Impl_CreatePort(LPDIRECTMUSIC8 iface, REFCLSI
 
     TRACE("(%p)->(%s, %p, %p, %p)\n", This, debugstr_dmguid(rclsid_port), port_params, port, unkouter);
 
-    if (TRACE_ON(dmusic))
-        dump_DMUS_PORTPARAMS(port_params);
-
     if (!rclsid_port)
         return E_POINTER;
     if (!port_params)
@@ -392,6 +389,7 @@ static void create_system_ports_list(IDirectMusic8Impl* object)
     hr = CoCreateInstance(&CLSID_DirectMusicSynth, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusicSynth8, (void**)&synth);
     if (SUCCEEDED(hr))
     {
+        port->caps.dwSize = sizeof(port->caps);
         hr = IDirectMusicSynth8_GetPortCaps(synth, &port->caps);
         IDirectMusicSynth8_Release(synth);
     }

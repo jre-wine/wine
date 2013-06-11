@@ -33,16 +33,11 @@
 #include "winbase.h"
 #include "winnls.h"
 #include "winternl.h"
+#include "winreg.h"
 #include "gdi_private.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
-
-#ifdef WORDS_BIGENDIAN
-#define get_be_word(x) (x)
-#else
-#define get_be_word(x) RtlUshortByteSwap(x)
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(font);
 
@@ -265,91 +260,54 @@ static void FONT_NewTextMetricExWToA(const NEWTEXTMETRICEXW *ptmW, NEWTEXTMETRIC
     memcpy(&ptmA->ntmFontSig, &ptmW->ntmFontSig, sizeof(FONTSIGNATURE));
 }
 
-static DWORD get_font_ppem( HDC hdc )
+static DWORD get_key_value( HKEY key, const WCHAR *name, DWORD *value )
 {
-    TEXTMETRICW tm;
-    DWORD ppem;
-    DC *dc = get_dc_ptr( hdc );
+    WCHAR buf[12];
+    DWORD count = sizeof(buf), type, err;
 
-    if (!dc) return GDI_ERROR;
-
-    GetTextMetricsW( hdc, &tm );
-    ppem = abs( INTERNAL_YWSTODS( dc, tm.tmAscent + tm.tmDescent - tm.tmInternalLeading ) );
-    release_dc_ptr( dc );
-    return ppem;
+    err = RegQueryValueExW( key, name, NULL, &type, (BYTE *)buf, &count );
+    if (!err)
+    {
+        if (type == REG_DWORD) memcpy( value, buf, sizeof(*value) );
+        else *value = atoiW( buf );
+    }
+    return err;
 }
 
-#define GASP_GRIDFIT 0x01
-#define GASP_DOGRAY  0x02
-
-static BOOL get_gasp_flags( HDC hdc, WORD *flags )
+static UINT get_subpixel_orientation( HKEY key )
 {
-    DWORD size, gasp_tag = 0x70736167;
-    WORD buf[16]; /* Enough for seven ranges before we need to alloc */
-    WORD *alloced = NULL, *ptr = buf;
-    WORD num_recs, version;
-    DWORD ppem = get_font_ppem( hdc );
-    BOOL ret = FALSE;
+    static const WCHAR smoothing_orientation[] = {'F','o','n','t','S','m','o','o','t','h','i','n','g',
+                                                  'O','r','i','e','n','t','a','t','i','o','n',0};
+    DWORD orient;
 
-    *flags = 0;
-    if (ppem == GDI_ERROR) return FALSE;
+    /* FIXME: handle vertical orientations even though Windows doesn't */
+    if (get_key_value( key, smoothing_orientation, &orient )) return GGO_GRAY4_BITMAP;
 
-    size = GetFontData( hdc, gasp_tag,  0, NULL, 0 );
-    if (size == GDI_ERROR) return FALSE;
-    if (size < 4 * sizeof(WORD)) return FALSE;
-    if (size > sizeof(buf))
+    switch (orient)
     {
-        ptr = alloced = HeapAlloc( GetProcessHeap(), 0, size );
-        if (!ptr) return FALSE;
+    case 0: /* FE_FONTSMOOTHINGORIENTATIONBGR */
+        return WINE_GGO_HBGR_BITMAP;
+    case 1: /* FE_FONTSMOOTHINGORIENTATIONRGB */
+        return WINE_GGO_HRGB_BITMAP;
     }
-
-    GetFontData( hdc, gasp_tag, 0, ptr, size );
-
-    version  = get_be_word( *ptr++ );
-    num_recs = get_be_word( *ptr++ );
-
-    if (version > 1 || size < (num_recs * 2 + 2) * sizeof(WORD))
-    {
-        FIXME( "Unsupported gasp table: ver %d size %d recs %d\n", version, size, num_recs );
-        goto done;
-    }
-
-    while (num_recs--)
-    {
-        *flags = get_be_word( *(ptr + 1) );
-        if (ppem <= get_be_word( *ptr )) break;
-        ptr += 2;
-    }
-    TRACE( "got flags %04x for ppem %d\n", *flags, ppem );
-    ret = TRUE;
-
-done:
-    HeapFree( GetProcessHeap(), 0, alloced );
-    return ret;
-}
-
-UINT get_font_aa_flags( HDC hdc )
-{
-    LOGFONTW lf;
-    WORD gasp_flags;
-
-    if (GetObjectType( hdc ) == OBJ_MEMDC)
-    {
-        BITMAP bm;
-        GetObjectW( GetCurrentObject( hdc, OBJ_BITMAP ), sizeof(bm), &bm );
-        if (bm.bmBitsPixel <= 8) return GGO_BITMAP;
-    }
-    else if (GetDeviceCaps( hdc, BITSPIXEL ) <= 8) return GGO_BITMAP;
-
-    GetObjectW( GetCurrentObject( hdc, OBJ_FONT ), sizeof(lf), &lf );
-    if (lf.lfQuality == NONANTIALIASED_QUALITY) return GGO_BITMAP;
-
-    if (get_gasp_flags( hdc, &gasp_flags ) && !(gasp_flags & GASP_DOGRAY))
-        return GGO_BITMAP;
-
-    /* FIXME, check user prefs */
     return GGO_GRAY4_BITMAP;
 }
+
+static UINT get_default_smoothing( HKEY key )
+{
+    static const WCHAR smoothing[] = {'F','o','n','t','S','m','o','o','t','h','i','n','g',0};
+    static const WCHAR smoothing_type[] = {'F','o','n','t','S','m','o','o','t','h','i','n','g','T','y','p','e',0};
+    DWORD enabled, type;
+
+    if (get_key_value( key, smoothing, &enabled )) return 0;
+    if (!enabled) return GGO_BITMAP;
+
+    if (!get_key_value( key, smoothing_type, &type ) && type == 2 /* FE_FONTSMOOTHINGCLEARTYPE */)
+        return get_subpixel_orientation( key );
+
+    return GGO_GRAY4_BITMAP;
+}
+
 
 /***********************************************************************
  *           GdiGetCodePage   (GDI32.@)
@@ -614,6 +572,7 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
     HGDIOBJ ret = 0;
     DC *dc = get_dc_ptr( hdc );
     PHYSDEV physdev;
+    UINT aa_flags = 0;
 
     if (!dc) return 0;
 
@@ -624,10 +583,11 @@ static HGDIOBJ FONT_SelectObject( HGDIOBJ handle, HDC hdc )
     }
 
     physdev = GET_DC_PHYSDEV( dc, pSelectFont );
-    if (physdev->funcs->pSelectFont( physdev, handle ))
+    if (physdev->funcs->pSelectFont( physdev, handle, &aa_flags ))
     {
         ret = dc->hFont;
         dc->hFont = handle;
+        dc->aa_flags = aa_flags ? aa_flags : GGO_BITMAP;
         update_font_code_page( dc );
         GDI_dec_ref_count( ret );
     }
@@ -688,6 +648,43 @@ static BOOL FONT_DeleteObject( HGDIOBJ handle )
 
     if (!(obj = free_gdi_handle( handle ))) return FALSE;
     return HeapFree( GetProcessHeap(), 0, obj );
+}
+
+
+/***********************************************************************
+ *           nulldrv_SelectFont
+ */
+HFONT nulldrv_SelectFont( PHYSDEV dev, HFONT font, UINT *aa_flags )
+{
+    static const WCHAR desktopW[] = { 'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
+                                      'D','e','s','k','t','o','p',0 };
+    LOGFONTW lf;
+    HKEY key;
+
+    if (*aa_flags) return 0;
+
+    GetObjectW( font, sizeof(lf), &lf );
+    switch (lf.lfQuality)
+    {
+    case NONANTIALIASED_QUALITY:
+        *aa_flags = GGO_BITMAP;
+        break;
+    case ANTIALIASED_QUALITY:
+        *aa_flags = GGO_GRAY4_BITMAP;
+        break;
+    case CLEARTYPE_QUALITY:
+    case CLEARTYPE_NATURAL_QUALITY:
+        if (RegOpenKeyW( HKEY_CURRENT_USER, desktopW, &key )) break;
+        *aa_flags = get_subpixel_orientation( key );
+        RegCloseKey( key );
+        break;
+    default:
+        if (RegOpenKeyW( HKEY_CURRENT_USER, desktopW, &key )) break;
+        *aa_flags = get_default_smoothing( key );
+        RegCloseKey( key );
+        break;
+    }
+    return 0;
 }
 
 
@@ -1845,7 +1842,7 @@ BOOL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect
                          LPCWSTR str, UINT count, const INT *dx )
 {
     DC *dc = get_nulldrv_dc( dev );
-    UINT aa_flags, i;
+    UINT i;
     DWORD err;
     HGDIOBJ orig;
     HPEN pen;
@@ -1867,15 +1864,15 @@ BOOL nulldrv_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags, const RECT *rect
 
     if (!count) return TRUE;
 
-    aa_flags = get_font_aa_flags( dev->hdc );
-
-    if (aa_flags != GGO_BITMAP)
+    if (dc->aa_flags != GGO_BITMAP)
     {
         char buffer[FIELD_OFFSET( BITMAPINFO, bmiColors[256] )];
         BITMAPINFO *info = (BITMAPINFO *)buffer;
         struct gdi_image_bits bits;
         struct bitblt_coords src, dst;
         PHYSDEV dst_dev;
+        /* FIXME Subpixel modes */
+        UINT aa_flags = GGO_GRAY4_BITMAP;
 
         dst_dev = GET_DC_PHYSDEV( dc, pPutImage );
         src.visrect = get_total_extents( dev->hdc, x, y, flags, aa_flags, str, count, dx );

@@ -182,6 +182,9 @@ static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
     case WINHTTP_OPTION_RECEIVE_TIMEOUT:
         session->recv_timeout = *(DWORD *)buffer;
         return TRUE;
+    case WINHTTP_OPTION_CONFIGURE_PASSPORT_AUTH:
+        FIXME("WINHTTP_OPTION_CONFIGURE_PASSPORT_AUTH: 0x%x\n", *(DWORD *)buffer);
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -2024,10 +2027,8 @@ BOOL WINAPI WinHttpGetProxyForUrl( HINTERNET hsession, LPCWSTR url, WINHTTP_AUTO
     }
     if (options->dwFlags & WINHTTP_AUTOPROXY_AUTO_DETECT &&
         !WinHttpDetectAutoProxyConfigUrl( options->dwAutoDetectFlags, &detected_pac_url ))
-    {
-        set_last_error( ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR );
         goto done;
-    }
+
     if (options->dwFlags & WINHTTP_AUTOPROXY_CONFIG_URL) pac_url = options->lpszAutoConfigUrl;
     else pac_url = detected_pac_url;
 

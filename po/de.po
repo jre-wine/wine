@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-08-27 01:14+0200\n"
+"PO-Revision-Date: 2012-11-05 11:27+0100\n"
 "Last-Translator: Julian Rüger\n"
 "Language-Team: none\n"
 "Language: German\n"
@@ -8273,6 +8273,43 @@ msgctxt "time unit: seconds"
 msgid " sec"
 msgstr " Sek"
 
+#: urlmon.rc:29 wininet.rc:74
+msgid "Security Warning"
+msgstr "Sicherheitswarnung"
+
+#: urlmon.rc:32
+msgid "Do you want to install this software?"
+msgstr "Möchten Sie diese Software installieren?"
+
+#: urlmon.rc:34 explorer.rc:29
+msgid "Location:"
+msgstr "Ort:"
+
+#: urlmon.rc:36
+msgid "Don't install"
+msgstr "Nicht installieren"
+
+#: urlmon.rc:40
+msgid ""
+"When installed, ActiveX has full access to your computer.Do not click "
+"install unless you have absolute trust in the above source."
+msgstr ""
+"Wenn ActiveX installiert ist, hat es Vollzugriff auf ihren Computer. Klicken "
+"Sie nicht auf Installieren, wenn Sie der obigen Quelle nicht absolut "
+"vertrauen."
+
+#: urlmon.rc:47
+msgid "Installation of component failed: %08x"
+msgstr "Installation der Komponente fehlgeschlagen: %08x"
+
+#: urlmon.rc:48
+msgid "Install (%d)"
+msgstr "Installieren (%d)"
+
+#: urlmon.rc:49
+msgid "Install"
+msgstr "Installieren"
+
 #: user32.rc:27 user32.rc:40 taskmgr.rc:138
 msgctxt "window"
 msgid "&Restore"
@@ -8357,10 +8394,6 @@ msgstr "Benutzeranmeldung"
 #: wininet.rc:58
 msgid "Server"
 msgstr "Server"
-
-#: wininet.rc:74
-msgid "Security Warning"
-msgstr "Sicherheitswarnung"
 
 #: wininet.rc:77
 msgid "There is a problem with the certificate for this site."
@@ -10154,6 +10187,8 @@ msgstr " (Ja|Nein|Alle)"
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
 msgstr ""
+"'%1' konnte nicht als interner oder externer Befehl, oder als Batchscript\n"
+"erkannt werden.\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10166,10 +10201,6 @@ msgstr "Aufruf: dxdiag [/whql:off | /whql:on] [/t Dateiname | /x Dateiname]"
 #: explorer.rc:28
 msgid "Wine Explorer"
 msgstr "Wine Explorer"
-
-#: explorer.rc:29
-msgid "Location:"
-msgstr "Ort:"
 
 #: hostname.rc:27
 msgid "Usage: hostname\n"

@@ -637,7 +637,8 @@ static void shader_arb_vs_local_constants(const struct arb_vs_compiled_shader *g
     checkGLcall("Load vs int consts");
 }
 
-static void shader_arb_select(const struct wined3d_context *context, BOOL usePS, BOOL useVS);
+static void shader_arb_select(const struct wined3d_context *context, enum wined3d_shader_mode vertex_mode,
+        enum wined3d_shader_mode fragment_mode);
 
 /**
  * Loads the app-supplied constants into the currently set ARB_[vertex/fragment]_programs.
@@ -665,7 +666,9 @@ static void shader_arb_load_constants_internal(const struct wined3d_context *con
                 & vshader->reg_maps.integer_constants & ~vshader->reg_maps.local_int_consts))))
         {
             TRACE("bool/integer vertex shader constants potentially modified, forcing shader reselection.\n");
-            shader_arb_select(context, usePixelShader, useVertexShader);
+            shader_arb_select(context,
+                    useVertexShader ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP,
+                    usePixelShader ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP);
         }
         else if (pshader
                 && (stateblock->changed.pixelShaderConstantsB & pshader->reg_maps.boolean_constants
@@ -674,7 +677,9 @@ static void shader_arb_load_constants_internal(const struct wined3d_context *con
                 & pshader->reg_maps.integer_constants & ~pshader->reg_maps.local_int_consts))))
         {
             TRACE("bool/integer pixel shader constants potentially modified, forcing shader reselection.\n");
-            shader_arb_select(context, usePixelShader, useVertexShader);
+            shader_arb_select(context,
+                    useVertexShader ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP,
+                    usePixelShader ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP);
         }
     }
 
@@ -4644,7 +4649,8 @@ static void find_arb_vs_compile_args(const struct wined3d_state *state,
 }
 
 /* GL locking is done by the caller */
-static void shader_arb_select(const struct wined3d_context *context, BOOL usePS, BOOL useVS)
+static void shader_arb_select(const struct wined3d_context *context, enum wined3d_shader_mode vertex_mode,
+        enum wined3d_shader_mode fragment_mode)
 {
     struct wined3d_device *device = context->swapchain->device;
     struct shader_arb_priv *priv = device->shader_priv;
@@ -4653,7 +4659,7 @@ static void shader_arb_select(const struct wined3d_context *context, BOOL usePS,
     int i;
 
     /* Deal with pixel shaders first so the vertex shader arg function has the input signature ready */
-    if (usePS)
+    if (fragment_mode == WINED3D_SHADER_MODE_SHADER)
     {
         struct wined3d_shader *ps = state->pixel_shader;
         struct arb_ps_compile_args compile_args;
@@ -4670,11 +4676,12 @@ static void shader_arb_select(const struct wined3d_context *context, BOOL usePS,
         checkGLcall("glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, priv->current_fprogram_id);");
 
         if (!priv->use_arbfp_fixed_func)
-        {
-            /* Enable OpenGL fragment programs. */
-            gl_info->gl_ops.gl.p_glEnable(GL_FRAGMENT_PROGRAM_ARB);
-            checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB);");
-        }
+            priv->fragment_pipe->enable_extension(gl_info, FALSE);
+
+        /* Enable OpenGL fragment programs. */
+        gl_info->gl_ops.gl.p_glEnable(GL_FRAGMENT_PROGRAM_ARB);
+        checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB);");
+
         TRACE("(%p) : Bound fragment program %u and enabled GL_FRAGMENT_PROGRAM_ARB\n",
                 device, priv->current_fprogram_id);
 
@@ -4702,18 +4709,22 @@ static void shader_arb_select(const struct wined3d_context *context, BOOL usePS,
         if (compiled->np2fixup_info.super.active)
             shader_arb_load_np2fixup_constants(priv, gl_info, state);
     }
-    else if (gl_info->supported[ARB_FRAGMENT_PROGRAM] && !priv->use_arbfp_fixed_func)
+    else
     {
-        /* Disable only if we're not using arbfp fixed function fragment processing. If this is used,
-        * keep GL_FRAGMENT_PROGRAM_ARB enabled, and the fixed function pipeline will bind the fixed function
-        * replacement shader
-        */
-        gl_info->gl_ops.gl.p_glDisable(GL_FRAGMENT_PROGRAM_ARB);
-        checkGLcall("glDisable(GL_FRAGMENT_PROGRAM_ARB)");
-        priv->current_fprogram_id = 0;
+        if (gl_info->supported[ARB_FRAGMENT_PROGRAM] && !priv->use_arbfp_fixed_func)
+        {
+            /* Disable only if we're not using arbfp fixed function fragment
+             * processing. If this is used, keep GL_FRAGMENT_PROGRAM_ARB
+             * enabled, and the fixed function pipeline will bind the fixed
+             * function replacement shader. */
+            gl_info->gl_ops.gl.p_glDisable(GL_FRAGMENT_PROGRAM_ARB);
+            checkGLcall("glDisable(GL_FRAGMENT_PROGRAM_ARB)");
+            priv->current_fprogram_id = 0;
+        }
+        priv->fragment_pipe->enable_extension(gl_info, fragment_mode == WINED3D_SHADER_MODE_FFP);
     }
 
-    if (useVS)
+    if (vertex_mode == WINED3D_SHADER_MODE_SHADER)
     {
         struct wined3d_shader *vs = state->vertex_shader;
         struct arb_vs_compile_args compile_args;
@@ -4881,13 +4892,13 @@ static const struct wine_rb_functions sig_tree_functions =
 static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
 {
     struct shader_arb_priv *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv));
-    HRESULT hr;
+    void *fragment_priv;
 
-    if (FAILED(hr = fragment_pipe->alloc_private(device)))
+    if (!(fragment_priv = fragment_pipe->alloc_private(&arb_program_shader_backend, priv)))
     {
-        ERR("Failed to initialize fragment pipe, hr %#x.\n", hr);
+        ERR("Failed to initialize fragment pipe.\n");
         HeapFree(GetProcessHeap(), 0, priv);
-        return hr;
+        return E_FAIL;
     }
 
     priv->vshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
@@ -4909,6 +4920,7 @@ static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct frag
         ERR("RB tree init failed\n");
         goto fail;
     }
+    device->fragment_priv = fragment_priv;
     priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
     return WINED3D_OK;
@@ -5383,6 +5395,29 @@ static void free_recorded_instruction(struct list *list)
     }
 }
 
+static void pop_control_frame(const struct wined3d_shader_instruction *ins)
+{
+    struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
+    struct control_frame *control_frame;
+
+    if (ins->handler_idx == WINED3DSIH_ENDLOOP || ins->handler_idx == WINED3DSIH_ENDREP)
+    {
+        struct list *e = list_head(&priv->control_frames);
+        control_frame = LIST_ENTRY(e, struct control_frame, entry);
+        list_remove(&control_frame->entry);
+        HeapFree(GetProcessHeap(), 0, control_frame);
+        priv->loop_depth--;
+    }
+    else if (ins->handler_idx == WINED3DSIH_ENDIF)
+    {
+        /* Non-ifc ENDIFs were already handled previously. */
+        struct list *e = list_head(&priv->control_frames);
+        control_frame = LIST_ENTRY(e, struct control_frame, entry);
+        list_remove(&control_frame->entry);
+        HeapFree(GetProcessHeap(), 0, control_frame);
+    }
+}
+
 static void shader_arb_handle_instruction(const struct wined3d_shader_instruction *ins) {
     SHADER_HANDLER hw_fct;
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
@@ -5552,6 +5587,8 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
             return; /* Instruction is handled. */
         }
         /* In case of an ifc, generate a HW shader instruction */
+        if (control_frame->type != IFC)
+            ERR("Control frame does not match.\n");
     }
     else if(ins->handler_idx == WINED3DSIH_ENDIF)
     {
@@ -5566,9 +5603,16 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
             HeapFree(GetProcessHeap(), 0, control_frame);
             return; /* Instruction is handled */
         }
+        /* In case of an ifc, generate a HW shader instruction */
+        if (control_frame->type != IFC)
+            ERR("Control frame does not match.\n");
     }
 
-    if(priv->muted) return;
+    if(priv->muted)
+    {
+        pop_control_frame(ins);
+        return;
+    }
 
     /* Select handler */
     hw_fct = shader_arb_instruction_handler_table[ins->handler_idx];
@@ -5581,33 +5625,9 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
     }
     hw_fct(ins);
 
-    if(ins->handler_idx == WINED3DSIH_ENDLOOP || ins->handler_idx == WINED3DSIH_ENDREP)
-    {
-        struct list *e = list_head(&priv->control_frames);
-        control_frame = LIST_ENTRY(e, struct control_frame, entry);
-        list_remove(&control_frame->entry);
-        HeapFree(GetProcessHeap(), 0, control_frame);
-        priv->loop_depth--;
-    }
-    else if(ins->handler_idx == WINED3DSIH_ENDIF)
-    {
-        /* Non-ifc ENDIFs don't reach that place because of the return in the if block above */
-        struct list *e = list_head(&priv->control_frames);
-        control_frame = LIST_ENTRY(e, struct control_frame, entry);
-        list_remove(&control_frame->entry);
-        HeapFree(GetProcessHeap(), 0, control_frame);
-    }
-
+    pop_control_frame(ins);
 
     shader_arb_add_instruction_modifiers(ins);
-}
-
-static void shader_arb_enable_fragment_pipe(void *shader_priv,
-        const struct wined3d_gl_info *gl_info, BOOL enable)
-{
-    struct shader_arb_priv *priv = shader_priv;
-
-    priv->fragment_pipe->enable_extension(gl_info, enable);
 }
 
 static BOOL shader_arb_has_ffp_proj_control(void *shader_priv)
@@ -5633,7 +5653,6 @@ const struct wined3d_shader_backend_ops arb_program_shader_backend =
     shader_arb_context_destroyed,
     shader_arb_get_caps,
     shader_arb_color_fixup_supported,
-    shader_arb_enable_fragment_pipe,
     shader_arb_has_ffp_proj_control,
 };
 
@@ -5665,31 +5684,29 @@ static void arbfp_enable(const struct wined3d_gl_info *gl_info, BOOL enable)
     }
 }
 
-static HRESULT arbfp_alloc(struct wined3d_device *device)
+static void *arbfp_alloc(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv)
 {
     struct shader_arb_priv *priv;
-    /* Share private data between the shader backend and the pipeline replacement, if both
-     * are the arb implementation. This is needed to figure out whether ARBfp should be disabled
-     * if no pixel shader is bound or not
-     */
-    if (device->shader_backend == &arb_program_shader_backend)
-    {
-        device->fragment_priv = device->shader_priv;
-    }
-    else
-    {
-        device->fragment_priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct shader_arb_priv));
-        if (!device->fragment_priv) return E_OUTOFMEMORY;
-    }
-    priv = device->fragment_priv;
+
+    /* Share private data between the shader backend and the pipeline
+     * replacement, if both are the arb implementation. This is needed to
+     * figure out whether ARBfp should be disabled if no pixel shader is bound
+     * or not. */
+    if (shader_backend == &arb_program_shader_backend)
+        priv = shader_priv;
+    else if (!(priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv))))
+        return NULL;
+
     if (wine_rb_init(&priv->fragment_shaders, &wined3d_ffp_frag_program_rb_functions) == -1)
     {
         ERR("Failed to initialize rbtree.\n");
-        HeapFree(GetProcessHeap(), 0, device->fragment_priv);
-        return E_OUTOFMEMORY;
+        if (priv != shader_priv)
+            HeapFree(GetProcessHeap(), 0, priv);
+        return NULL;
     }
     priv->use_arbfp_fixed_func = TRUE;
-    return WINED3D_OK;
+
+    return priv;
 }
 
 /* Context activation is done by the caller. */
@@ -5822,14 +5839,10 @@ static void set_bumpmat_arbfp(struct wined3d_context *context, const struct wine
 
     if (use_ps(state))
     {
+        /* The pixel shader has to know the bump env matrix. Do a constants
+         * update. */
         if (stage && (state->pixel_shader->reg_maps.bumpmat & (1 << stage)))
-        {
-            /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
-             * anyway
-             */
-            if (!isStateDirty(context, STATE_PIXELSHADERCONSTANT))
-                context_apply_state(context, state, STATE_PIXELSHADERCONSTANT);
-        }
+            context->load_constants = 1;
 
         if(device->shader_backend == &arb_program_shader_backend) {
             /* Exit now, don't set the bumpmat below, otherwise we may overwrite pixel shader constants */
@@ -5862,14 +5875,10 @@ static void tex_bumpenvlum_arbfp(struct wined3d_context *context,
 
     if (use_ps(state))
     {
+        /* The pixel shader has to know the luminance offset. Do a constants
+         * update. */
         if (stage && (state->pixel_shader->reg_maps.luminanceparams & (1 << stage)))
-        {
-            /* The pixel shader has to know the luminance offset. Do a constants update if it
-             * isn't scheduled anyway
-             */
-            if (!isStateDirty(context, STATE_PIXELSHADERCONSTANT))
-                context_apply_state(context, state, STATE_PIXELSHADERCONSTANT);
-        }
+            context->load_constants = 1;
 
         if(device->shader_backend == &arb_program_shader_backend) {
             /* Exit now, don't set the bumpmat below, otherwise we may overwrite pixel shader constants */
@@ -6392,7 +6401,6 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
     const struct wined3d_device *device = context->swapchain->device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct shader_arb_priv *priv = device->fragment_priv;
-    BOOL use_vshader = use_vs(state);
     BOOL use_pshader = use_ps(state);
     struct ffp_frag_settings settings;
     const struct arbfp_ffp_desc *desc;
@@ -6413,9 +6421,9 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
             state_texfactor_arbfp(context, state, STATE_RENDER(WINED3D_RS_TEXTUREFACTOR));
             state_arb_specularenable(context, state, STATE_RENDER(WINED3D_RS_SPECULARENABLE));
         }
-        else if (use_pshader && !isStateDirty(context, context->state_table[STATE_VSHADER].representative))
+        else if (use_pshader)
         {
-            device->shader_backend->shader_select(context, use_pshader, use_vshader);
+            context->select_shader = 1;
         }
         return;
     }
@@ -6465,24 +6473,8 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
         context->last_was_pshader = TRUE;
     }
 
-    /* Finally, select the shader. If a pixel shader is used, it will be set and enabled by the shader backend.
-     * If this shader backend is arbfp(most likely), then it will simply overwrite the last fixed function
-     * replacement shader. If the shader backend is not ARB, it currently is important that the opengl implementation
-     * type overwrites GL_ARB_fragment_program. This is currently the case with GLSL. If we really want to use
-     * atifs or nvrc pixel shaders with arb fragment programs we'd have to disable GL_FRAGMENT_PROGRAM_ARB here
-     *
-     * Don't call shader_select if the vertex shader is dirty, because it will be called later on by the vertex
-     * shader handler.
-     */
-    if (!isStateDirty(context, context->state_table[STATE_VSHADER].representative))
-    {
-        device->shader_backend->shader_select(context, use_pshader, use_vshader);
-
-        if (!isStateDirty(context, STATE_VERTEXSHADERCONSTANT) && (use_vshader || use_pshader))
-            context_apply_state(context, state, STATE_VERTEXSHADERCONSTANT);
-    }
-    if (use_pshader)
-        context_apply_state(context, state, STATE_PIXELSHADERCONSTANT);
+    context->select_shader = 1;
+    context->load_constants = 1;
 }
 
 /* We can't link the fog states to the fragment state directly since the

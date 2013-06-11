@@ -8248,6 +8248,42 @@ msgctxt "time unit: seconds"
 msgid " sec"
 msgstr " s"
 
+#: urlmon.rc:29 wininet.rc:74
+msgid "Security Warning"
+msgstr "Turvallisuusvaroitus"
+
+#: urlmon.rc:32
+msgid "Do you want to install this software?"
+msgstr "Haluatko asentaa tämän ohjelmiston?"
+
+#: urlmon.rc:34 explorer.rc:29
+msgid "Location:"
+msgstr "Sijainti:"
+
+#: urlmon.rc:36
+msgid "Don't install"
+msgstr "Älä asenna"
+
+#: urlmon.rc:40
+msgid ""
+"When installed, ActiveX has full access to your computer.Do not click "
+"install unless you have absolute trust in the above source."
+msgstr ""
+"Asennuksen jälkeen ActiveX voi täysin hallita tietokonettasi. Asenna vain, "
+"jos luotat yllä mainittuun lähteeseen täysin."
+
+#: urlmon.rc:47
+msgid "Installation of component failed: %08x"
+msgstr "Komponentin asennus epäonnistui: %08x"
+
+#: urlmon.rc:48
+msgid "Install (%d)"
+msgstr "Asenna (%d)"
+
+#: urlmon.rc:49
+msgid "Install"
+msgstr "Asenna"
+
 #: user32.rc:27 user32.rc:40 taskmgr.rc:138
 msgctxt "window"
 msgid "&Restore"
@@ -8332,10 +8368,6 @@ msgstr "Vaaditaan tunnistautuminen"
 #: wininet.rc:58
 msgid "Server"
 msgstr "Palvelin"
-
-#: wininet.rc:74
-msgid "Security Warning"
-msgstr "Turvallisuusvaroitus"
 
 #: wininet.rc:77
 msgid "There is a problem with the certificate for this site."
@@ -10062,7 +10094,7 @@ msgstr " (Kyllä|Ei|kAikki)"
 #: cmd.rc:356
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
-msgstr ""
+msgstr "'%1' ei ole sisäinen eikä ulkoinen komento eikä komentojono.\n"
 
 #: dxdiag.rc:27
 msgid "DirectX Diagnostic Tool"
@@ -10075,10 +10107,6 @@ msgstr "Käyttö: dxdiag [/whql:off | /whql:on] [/t tiedosto | /x tiedosto]"
 #: explorer.rc:28
 msgid "Wine Explorer"
 msgstr "Winen Explorer"
-
-#: explorer.rc:29
-msgid "Location:"
-msgstr "Sijainti:"
 
 #: hostname.rc:27
 msgid "Usage: hostname\n"

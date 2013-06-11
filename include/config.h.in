@@ -179,6 +179,9 @@
 /* Define to 1 if the system has the type `FT_TrueTypeEngineType'. */
 #undef HAVE_FT_TRUETYPEENGINETYPE
 
+/* Define to 1 if you have the `futimens' function. */
+#undef HAVE_FUTIMENS
+
 /* Define to 1 if you have the `futimes' function. */
 #undef HAVE_FUTIMES
 
@@ -203,8 +206,8 @@
 /* Define to 1 if you have the <getopt.h> header file. */
 #undef HAVE_GETOPT_H
 
-/* Define to 1 if you have the `getopt_long' function. */
-#undef HAVE_GETOPT_LONG
+/* Define to 1 if you have the `getopt_long_only' function. */
+#undef HAVE_GETOPT_LONG_ONLY
 
 /* Define to 1 if you have the `getpagesize' function. */
 #undef HAVE_GETPAGESIZE
@@ -229,18 +232,6 @@
 
 /* Define to 1 if you have the `getuid' function. */
 #undef HAVE_GETUID
-
-/* Define to 1 if you have the <GL/glu.h> header file. */
-#undef HAVE_GL_GLU_H
-
-/* Define to 1 if you have the <GL/glx.h> header file. */
-#undef HAVE_GL_GLX_H
-
-/* Define to 1 if you have the <GL/gl.h> header file. */
-#undef HAVE_GL_GL_H
-
-/* Define to 1 if you have the <GL/osmesa.h> header file. */
-#undef HAVE_GL_OSMESA_H
 
 /* Define if we have libgphoto2 development environment */
 #undef HAVE_GPHOTO2
@@ -580,9 +571,6 @@
 
 /* Define to 1 if you have the <OpenCL/opencl.h> header file. */
 #undef HAVE_OPENCL_OPENCL_H
-
-/* Define if OpenGL is present on the system */
-#undef HAVE_OPENGL
 
 /* Define to 1 if you have the <openssl/err.h> header file. */
 #undef HAVE_OPENSSL_ERR_H
@@ -1243,9 +1231,6 @@
 
 /* Define to the soname of the libGL library. */
 #undef SONAME_LIBGL
-
-/* Define to the soname of the libGLU library. */
-#undef SONAME_LIBGLU
 
 /* Define to the soname of the libgnutls library. */
 #undef SONAME_LIBGNUTLS

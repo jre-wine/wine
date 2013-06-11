@@ -273,7 +273,7 @@ static HRESULT ensure_prop_name(jsdisp_t *This, const WCHAR *name, BOOL search_p
     else
         hres = find_prop_name(This, string_hash(name), name, &prop);
     if(SUCCEEDED(hres) && (!prop || prop->type == PROP_DELETED)) {
-        TRACE("creating prop %s\n", debugstr_w(name));
+        TRACE("creating prop %s flags %x\n", debugstr_w(name), create_flags);
 
         if(prop) {
             prop->type = PROP_JSVAL;
@@ -901,8 +901,10 @@ HRESULT create_dispex(script_ctx_t *ctx, const builtin_info_t *builtin_info, jsd
         return E_OUTOFMEMORY;
 
     hres = init_dispex(ret, ctx, builtin_info ? builtin_info : &dispex_info, prototype);
-    if(FAILED(hres))
+    if(FAILED(hres)) {
+        heap_free(ret);
         return hres;
+    }
 
     *dispex = ret;
     return S_OK;
@@ -1253,7 +1255,7 @@ HRESULT jsdisp_propput_const(jsdisp_t *obj, const WCHAR *name, jsval_t val)
     dispex_prop_t *prop;
     HRESULT hres;
 
-    hres = ensure_prop_name(obj, name, FALSE, PROPF_ENUM|PROPF_CONST, &prop);
+    hres = ensure_prop_name(obj, name, FALSE, PROPF_CONST, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -1269,7 +1271,7 @@ HRESULT jsdisp_propput_dontenum(jsdisp_t *obj, const WCHAR *name, jsval_t val)
     if(FAILED(hres))
         return hres;
 
-    return jsval_copy(val, &prop->u.val);
+    return prop_put(obj, prop, val, NULL);
 }
 
 HRESULT jsdisp_propput_idx(jsdisp_t *obj, DWORD idx, jsval_t val)
@@ -1411,7 +1413,9 @@ HRESULT disp_propget(script_ctx_t *ctx, IDispatch *disp, DISPID id, jsval_t *val
     if(FAILED(hres))
         return hres;
 
-    return variant_to_jsval(&var, val);
+    hres = variant_to_jsval(&var, val);
+    VariantClear(&var);
+    return hres;
 }
 
 HRESULT jsdisp_delete_idx(jsdisp_t *obj, DWORD idx)
@@ -1440,5 +1444,18 @@ HRESULT jsdisp_is_own_prop(jsdisp_t *obj, const WCHAR *name, BOOL *ret)
         return hres;
 
     *ret = prop && (prop->type == PROP_JSVAL || prop->type == PROP_BUILTIN);
+    return S_OK;
+}
+
+HRESULT jsdisp_is_enumerable(jsdisp_t *obj, const WCHAR *name, BOOL *ret)
+{
+    dispex_prop_t *prop;
+    HRESULT hres;
+
+    hres = find_prop_name(obj, string_hash(name), name, &prop);
+    if(FAILED(hres))
+        return hres;
+
+    *ret = prop && (prop->flags & PROPF_ENUM) && prop->type != PROP_PROTREF;
     return S_OK;
 }

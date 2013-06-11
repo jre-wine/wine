@@ -627,6 +627,7 @@ static int XCOPY_DoCopy(WCHAR *srcstem, WCHAR *srcspec,
             /* Find next one */
             findres = FindNextFileW(h, finddata);
         }
+        FindClose(h);
     }
 
 cleanup:
@@ -820,7 +821,8 @@ static int XCOPY_ParseCommandLine(WCHAR *suppliedsource,
                       break;
 
             case '-': if (toupper(word[2])=='Y')
-                          flags &= ~OPT_NOPROMPT; break;
+                          flags &= ~OPT_NOPROMPT;
+                      break;
             case '?': XCOPY_wprintf(XCOPY_LoadMessage(STRING_HELP));
                       rc = RC_HELP;
                       goto out;

@@ -771,7 +771,7 @@ static BOOL context_set_gl_context(struct wined3d_context *ctx)
         backup = TRUE;
     }
 
-    if (backup || !pwglMakeCurrent(ctx->hdc, ctx->glCtx))
+    if (backup || !wglMakeCurrent(ctx->hdc, ctx->glCtx))
     {
         HDC dc;
 
@@ -805,7 +805,7 @@ static BOOL context_set_gl_context(struct wined3d_context *ctx)
             return FALSE;
         }
 
-        if (!pwglMakeCurrent(dc, ctx->glCtx))
+        if (!wglMakeCurrent(dc, ctx->glCtx))
         {
             ERR("Fallback to backup window (dc %p) failed too, last error %#x.\n",
                     dc, GetLastError());
@@ -825,7 +825,7 @@ static void context_restore_gl_context(const struct wined3d_gl_info *gl_info, HD
         return;
     }
 
-    if (!pwglMakeCurrent(dc, gl_ctx))
+    if (!wglMakeCurrent(dc, gl_ctx))
     {
         ERR("Failed to restore GL context %p on device context %p, last error %#x.\n",
                 gl_ctx, dc, GetLastError());
@@ -897,8 +897,8 @@ static void context_destroy_gl_resources(struct wined3d_context *context)
     unsigned int i;
     int restore_pf;
 
-    restore_ctx = pwglGetCurrentContext();
-    restore_dc = pwglGetCurrentDC();
+    restore_ctx = wglGetCurrentContext();
+    restore_dc = wglGetCurrentDC();
     restore_pf = GetPixelFormat(restore_dc);
 
     if (context->valid && restore_ctx != context->glCtx)
@@ -984,14 +984,14 @@ static void context_destroy_gl_resources(struct wined3d_context *context)
     {
         context_restore_gl_context(gl_info, restore_dc, restore_ctx, restore_pf);
     }
-    else if (pwglGetCurrentContext() && !pwglMakeCurrent(NULL, NULL))
+    else if (wglGetCurrentContext() && !wglMakeCurrent(NULL, NULL))
     {
         ERR("Failed to disable GL context.\n");
     }
 
     ReleaseDC(context->win_handle, context->hdc);
 
-    if (!pwglDeleteContext(context->glCtx))
+    if (!wglDeleteContext(context->glCtx))
     {
         DWORD err = GetLastError();
         ERR("wglDeleteContext(%p) failed, last error %#x.\n", context->glCtx, err);
@@ -1052,10 +1052,10 @@ BOOL context_set_current(struct wined3d_context *ctx)
             return FALSE;
         ctx->current = 1;
     }
-    else if(pwglGetCurrentContext())
+    else if(wglGetCurrentContext())
     {
         TRACE("Clearing current D3D context.\n");
-        if (!pwglMakeCurrent(NULL, NULL))
+        if (!wglMakeCurrent(NULL, NULL))
         {
             DWORD err = GetLastError();
             ERR("Failed to clear current GL context, last error %#x.\n", err);
@@ -1095,14 +1095,14 @@ static void context_enter(struct wined3d_context *context)
     if (!context->level++)
     {
         const struct wined3d_context *current_context = context_get_current();
-        HGLRC current_gl = pwglGetCurrentContext();
+        HGLRC current_gl = wglGetCurrentContext();
 
         if (current_gl && (!current_context || current_context->glCtx != current_gl))
         {
             TRACE("Another GL context (%p on device context %p) is already current.\n",
-                    current_gl, pwglGetCurrentDC());
+                    current_gl, wglGetCurrentDC());
             context->restore_ctx = current_gl;
-            context->restore_dc = pwglGetCurrentDC();
+            context->restore_dc = wglGetCurrentDC();
             context->restore_pf = GetPixelFormat(context->restore_dc);
         }
     }
@@ -1380,7 +1380,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         goto out;
     }
 
-    if (!(ctx = pwglCreateContext(hdc)))
+    if (!(ctx = wglCreateContext(hdc)))
     {
         ERR("Failed to create a WGL context.\n");
         context_release(ret);
@@ -1389,12 +1389,12 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
 
     if (device->context_count)
     {
-        if (!pwglShareLists(device->contexts[0]->glCtx, ctx))
+        if (!wglShareLists(device->contexts[0]->glCtx, ctx))
         {
             ERR("wglShareLists(%p, %p) failed, last error %#x.\n",
                     device->contexts[0]->glCtx, ctx, GetLastError());
             context_release(ret);
-            if (!pwglDeleteContext(ctx))
+            if (!wglDeleteContext(ctx))
                 ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx, GetLastError());
             goto out;
         }
@@ -1404,7 +1404,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     {
         ERR("Failed to add the newly created context to the context list\n");
         context_release(ret);
-        if (!pwglDeleteContext(ctx))
+        if (!wglDeleteContext(ctx))
             ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx, GetLastError());
         goto out;
     }
@@ -1439,7 +1439,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         ERR("Cannot activate context to set up defaults.\n");
         device_context_remove(device, ret);
         context_release(ret);
-        if (!pwglDeleteContext(ctx))
+        if (!wglDeleteContext(ctx))
             ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx, GetLastError());
         goto out;
     }
@@ -1569,7 +1569,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     {
         GL_EXTCALL(glProvokingVertexEXT(GL_FIRST_VERTEX_CONVENTION_EXT));
     }
-    device->shader_backend->shader_enable_fragment_pipe(device->shader_priv, gl_info, TRUE);
+    ret->select_shader = 1;
 
     /* If this happens to be the first context for the device, dummy textures
      * are not created yet. In that case, they will be created (and bound) by
@@ -1707,14 +1707,6 @@ static void SetupForBlit(const struct wined3d_device *device, struct wined3d_con
     context->last_was_blit = TRUE;
 
     /* TODO: Use a display list */
-
-    /* Disable shaders */
-    ENTER_GL();
-    device->shader_backend->shader_select(context, FALSE, FALSE);
-    LEAVE_GL();
-
-    context_invalidate_state(context, STATE_VSHADER);
-    context_invalidate_state(context, STATE_PIXELSHADER);
 
     /* Call ENTER_GL() once for all gl calls below. In theory we should not call
      * helper functions in between gl calls. This function is full of context_invalidate_state
@@ -1865,7 +1857,11 @@ static void SetupForBlit(const struct wined3d_device *device, struct wined3d_con
     context_invalidate_state(context, STATE_RENDER(WINED3D_RS_CLIPPING));
 
     set_blit_dimension(gl_info, rt_size.cx, rt_size.cy);
-    device->shader_backend->shader_enable_fragment_pipe(device->shader_priv, gl_info, FALSE);
+
+    /* Disable shaders */
+    device->shader_backend->shader_select(context, WINED3D_SHADER_MODE_NONE, WINED3D_SHADER_MODE_NONE);
+    context->select_shader = 1;
+    context->load_constants = 1;
 
     LEAVE_GL();
 
@@ -2224,10 +2220,7 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
     }
 
     if (context->last_was_blit)
-    {
-        device->shader_backend->shader_enable_fragment_pipe(device->shader_priv, gl_info, TRUE);
         context->last_was_blit = FALSE;
-    }
 
     /* Blending and clearing should be orthogonal, but tests on the nvidia
      * driver show that disabling blending when clearing improves the clearing
@@ -2353,8 +2346,6 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
     }
 
     ENTER_GL();
-    if (context->last_was_blit)
-        device->shader_backend->shader_enable_fragment_pipe(device->shader_priv, context->gl_info, TRUE);
 
     for (i = 0; i < context->numDirtyEntries; ++i)
     {
@@ -2363,6 +2354,20 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
         BYTE shift = rep & ((sizeof(*context->isStateDirty) * CHAR_BIT) - 1);
         context->isStateDirty[idx] &= ~(1 << shift);
         state_table[rep].apply(context, state, rep);
+    }
+
+    if (context->select_shader)
+    {
+        device->shader_backend->shader_select(context,
+                use_vs(state) ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP,
+                use_ps(state) ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP);
+        context->select_shader = 0;
+    }
+
+    if (context->load_constants)
+    {
+        device->shader_backend->shader_load_constants(context, use_ps(state), use_vs(state));
+        context->load_constants = 0;
     }
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
@@ -2488,16 +2493,7 @@ struct wined3d_context *context_acquire(const struct wined3d_device *device, str
     if (context != current_context)
     {
         if (!context_set_current(context))
-        {
             ERR("Failed to activate the new context.\n");
-        }
-        else
-        {
-            ENTER_GL();
-            device->shader_backend->shader_enable_fragment_pipe(device->shader_priv,
-                    context->gl_info, !context->last_was_blit);
-            LEAVE_GL();
-        }
     }
     else if (context->restore_ctx)
     {
