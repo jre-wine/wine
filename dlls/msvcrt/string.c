@@ -1551,9 +1551,64 @@ int CDECL MSVCRT_I10_OUTPUT(MSVCRT__LDOUBLE ld80, int prec, int flag, struct _I1
 #undef I10_OUTPUT_MAX_PREC
 
 /*********************************************************************
- *                  memcpy   (NTDLL.@)
+ *                  memcpy   (MSVCRT.@)
  */
 void * __cdecl MSVCRT_memcpy( void *dst, const void *src, size_t n )
 {
     return memmove( dst, src, n );
+}
+
+/*********************************************************************
+ *                  _strnicmp_l   (MSVCRT.@)
+ */
+int __cdecl MSVCRT__strnicmp_l(const char *s1, const char *s2,
+        MSVCRT_size_t count, MSVCRT__locale_t locale)
+{
+    MSVCRT_pthreadlocinfo locinfo;
+    char c1, c2;
+
+    if(!MSVCRT_CHECK_PMT(s1!=NULL && s2!=NULL))
+        return MSVCRT__NLSCMPERROR;
+
+    if(!count)
+        return 0;
+
+    if(!locale)
+        locinfo = get_locinfo();
+    else
+        locinfo = locale->locinfo;
+
+    if(!locinfo->lc_handle[MSVCRT_LC_CTYPE])
+        return strncasecmp(s1, s2, count);
+
+    do {
+        c1 = MSVCRT__tolower_l(*s1++, locale);
+        c2 = MSVCRT__tolower_l(*s2++, locale);
+    }while(--count && c1 && c1==c2);
+
+    return c1-c2;
+}
+
+/*********************************************************************
+ *                  _stricmp_l   (MSVCRT.@)
+ */
+int __cdecl MSVCRT__stricmp_l(const char *s1, const char *s2, MSVCRT__locale_t locale)
+{
+    return MSVCRT__strnicmp_l(s1, s2, -1, locale);
+}
+
+/*********************************************************************
+ *                  _strnicmp   (MSVCRT.@)
+ */
+int __cdecl MSVCRT__strnicmp(const char *s1, const char *s2, MSVCRT_size_t count)
+{
+    return MSVCRT__strnicmp_l(s1, s2, count, NULL);
+}
+
+/*********************************************************************
+ *                  _stricmp   (MSVCRT.@)
+ */
+int __cdecl MSVCRT__stricmp(const char *s1, const char *s2)
+{
+    return MSVCRT__strnicmp_l(s1, s2, -1, NULL);
 }

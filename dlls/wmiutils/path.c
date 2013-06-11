@@ -28,7 +28,6 @@
 #include "wmiutils.h"
 
 #include "wine/debug.h"
-#include "wine/unicode.h"
 #include "wmiutils_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wmiutils);
@@ -36,10 +35,40 @@ WINE_DEFAULT_DEBUG_CHANNEL(wmiutils);
 struct path
 {
     IWbemPath IWbemPath_iface;
-    LONG refs;
-    WCHAR *text;
-    int len;
+    LONG    refs;
+    WCHAR  *text;
+    int     len_text;
+    WCHAR  *server;
+    int     len_server;
+    WCHAR **namespaces;
+    int    *len_namespaces;
+    int     num_namespaces;
+    WCHAR  *class;
+    int     len_class;
 };
+
+static void init_path( struct path *path )
+{
+    path->text           = NULL;
+    path->len_text       = 0;
+    path->server         = NULL;
+    path->len_server     = 0;
+    path->namespaces     = NULL;
+    path->len_namespaces = NULL;
+    path->num_namespaces = 0;
+    path->class          = NULL;
+    path->len_class      = 0;
+}
+
+static void clear_path( struct path *path )
+{
+    heap_free( path->text );
+    heap_free( path->server );
+    heap_free( path->namespaces );
+    heap_free( path->len_namespaces );
+    heap_free( path->class );
+    init_path( path );
+}
 
 static inline struct path *impl_from_IWbemPath( IWbemPath *iface )
 {
@@ -61,8 +90,8 @@ static ULONG WINAPI path_Release(
     if (!refs)
     {
         TRACE("destroying %p\n", path);
-        HeapFree( GetProcessHeap(), 0, path->text );
-        HeapFree( GetProcessHeap(), 0, path );
+        clear_path( path );
+        heap_free( path );
     }
     return refs;
 }
@@ -90,25 +119,252 @@ static HRESULT WINAPI path_QueryInterface(
     return S_OK;
 }
 
+static HRESULT parse_text( struct path *path, ULONG mode, const WCHAR *text )
+{
+    HRESULT hr = E_OUTOFMEMORY;
+    const WCHAR *p, *q;
+    unsigned int i, len;
+
+    p = q = text;
+    if ((p[0] == '\\' && p[1] == '\\') || (p[0] == '/' && p[1] == '/'))
+    {
+        p += 2;
+        q = p;
+        while (*q && *q != '\\' && *q != '/') q++;
+        len = q - p;
+        if (!(path->server = heap_alloc( (len + 1) * sizeof(WCHAR) ))) goto done;
+        memcpy( path->server, p, len * sizeof(WCHAR) );
+        path->server[len] = 0;
+        path->len_server = len;
+    }
+    p = q;
+    while (*q && *q != ':')
+    {
+        if (*q == '\\' || *q == '/') path->num_namespaces++;
+        q++;
+    }
+    if (path->num_namespaces)
+    {
+        if (!(path->namespaces = heap_alloc( path->num_namespaces * sizeof(WCHAR *) ))) goto done;
+        if (!(path->len_namespaces = heap_alloc( path->num_namespaces * sizeof(int) ))) goto done;
+
+        i = 0;
+        q = p;
+        while (*q && *q != ':')
+        {
+            if (*q == '\\' || *q == '/')
+            {
+                p = q + 1;
+                while (*p && *p != '\\' && *p != '/' && *p != ':') p++;
+                len = p - q - 1;
+                if (!(path->namespaces[i] = heap_alloc( (len + 1) * sizeof(WCHAR) ))) goto done;
+                memcpy( path->namespaces[i], q + 1, len * sizeof(WCHAR) );
+                path->namespaces[i][len] = 0;
+                path->len_namespaces[i] = len;
+                i++;
+            }
+            q++;
+        }
+    }
+    if (*q == ':') q++;
+    p = q;
+    while (*q && *q != '.') q++;
+    len = q - p;
+    if (!(path->class = heap_alloc( (len + 1) * sizeof(WCHAR) ))) goto done;
+    memcpy( path->class, p, len * sizeof(WCHAR) );
+    path->class[len] = 0;
+    path->len_class = len;
+
+    if (*q == '.') FIXME("handle key list\n");
+    hr = S_OK;
+
+done:
+    if (hr != S_OK) clear_path( path );
+    return hr;
+}
+
 static HRESULT WINAPI path_SetText(
     IWbemPath *iface,
     ULONG uMode,
     LPCWSTR pszPath)
 {
     struct path *path = impl_from_IWbemPath( iface );
+    HRESULT hr;
     int len;
 
     TRACE("%p, %u, %s\n", iface, uMode, debugstr_w(pszPath));
 
-    if (uMode) FIXME("igoring mode %u\n", uMode);
+    if (!uMode || !pszPath) return WBEM_E_INVALID_PARAMETER;
+
+    clear_path( path );
+    if ((hr = parse_text( path, uMode, pszPath )) != S_OK) return hr;
 
     len = strlenW( pszPath );
-    if (!(path->text = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+    if (!(path->text = heap_alloc( (len + 1) * sizeof(WCHAR) )))
+    {
+        clear_path( path );
         return E_OUTOFMEMORY;
-
+    }
     strcpyW( path->text, pszPath );
-    path->len = len;
+    path->len_text = len;
     return S_OK;
+}
+
+static WCHAR *build_namespace( struct path *path, int *len, BOOL leading_slash )
+{
+    WCHAR *ret, *p;
+    int i;
+
+    *len = 0;
+    for (i = 0; i < path->num_namespaces; i++)
+    {
+        if (i > 0 || leading_slash) *len += 1;
+        *len += path->len_namespaces[i];
+    }
+    if (!(p = ret = heap_alloc( (*len + 1) * sizeof(WCHAR) ))) return NULL;
+    for (i = 0; i < path->num_namespaces; i++)
+    {
+        if (i > 0 || leading_slash) *p++ = '\\';
+        memcpy( p, path->namespaces[i], path->len_namespaces[i] * sizeof(WCHAR) );
+        p += path->len_namespaces[i];
+    }
+    *p = 0;
+    return ret;
+}
+
+static WCHAR *build_server( struct path *path, int *len )
+{
+    WCHAR *ret, *p;
+
+    *len = 0;
+    if (path->len_server) *len += 2 + path->len_server;
+    else *len += 3;
+    if (!(p = ret = heap_alloc( (*len + 1) * sizeof(WCHAR) ))) return NULL;
+    if (path->len_server)
+    {
+        p[0] = p[1] = '\\';
+        strcpyW( p + 2, path->server );
+    }
+    else
+    {
+        p[0] = p[1] = '\\';
+        p[2] = '.';
+    }
+    return ret;
+}
+
+static WCHAR *build_path( struct path *path, LONG flags, int *len )
+{
+    switch (flags)
+    {
+    case 0:
+    {
+        int len_namespace;
+        WCHAR *ret, *namespace = build_namespace( path, &len_namespace, FALSE );
+
+        if (!namespace) return NULL;
+
+        *len = len_namespace;
+        if (path->len_class) *len += 1 + path->len_class;
+        if (!(ret = heap_alloc( (*len + 1) * sizeof(WCHAR) )))
+        {
+            heap_free( namespace );
+            return NULL;
+        }
+        strcpyW( ret, namespace );
+        if (path->len_class)
+        {
+            ret[len_namespace] = ':';
+            strcpyW( ret + len_namespace + 1, path->class );
+        }
+        heap_free( namespace );
+        return ret;
+
+    }
+    case WBEMPATH_GET_RELATIVE_ONLY:
+        if (!path->len_class)
+        {
+            *len = 0;
+            return NULL;
+        }
+        *len = path->len_class;
+        return strdupW( path->class );
+
+    case WBEMPATH_GET_SERVER_TOO:
+    {
+        int len_namespace, len_server;
+        WCHAR *p, *ret, *namespace = build_namespace( path, &len_namespace, TRUE );
+        WCHAR *server = build_server( path, &len_server );
+
+        if (!namespace || !server)
+        {
+            heap_free( namespace );
+            heap_free( server );
+            return NULL;
+        }
+        *len = len_namespace + len_server;
+        if (path->len_class) *len += 1 + path->len_class;
+        if (!(p = ret = heap_alloc( (*len + 1) * sizeof(WCHAR) )))
+        {
+            heap_free( namespace );
+            heap_free( server );
+            return NULL;
+        }
+        strcpyW( p, server );
+        p += len_server;
+        strcpyW( p, namespace );
+        p += len_namespace;
+        if (path->len_class)
+        {
+            *p = ':';
+            strcpyW( p + 1, path->class );
+        }
+        heap_free( namespace );
+        heap_free( server );
+        return ret;
+    }
+    case WBEMPATH_GET_SERVER_AND_NAMESPACE_ONLY:
+    {
+        int len_namespace, len_server;
+        WCHAR *p, *ret, *namespace = build_namespace( path, &len_namespace, TRUE );
+        WCHAR *server = build_server( path, &len_server );
+
+        if (!namespace || !server)
+        {
+            heap_free( namespace );
+            heap_free( server );
+            return NULL;
+        }
+        *len = len_namespace + len_server;
+        if (!(p = ret = heap_alloc( (*len + 1) * sizeof(WCHAR) )))
+        {
+            heap_free( namespace );
+            heap_free( server );
+            return NULL;
+        }
+        strcpyW( p, server );
+        p += len_server;
+        strcpyW( p, namespace );
+        heap_free( namespace );
+        heap_free( server );
+        return ret;
+    }
+    case WBEMPATH_GET_NAMESPACE_ONLY:
+        return build_namespace( path, len, FALSE );
+
+    case WBEMPATH_GET_ORIGINAL:
+        if (!path->len_text)
+        {
+            *len = 0;
+            return NULL;
+        }
+        *len = path->len_text;
+        return strdupW( path->text );
+
+    default:
+        ERR("unhandled flags 0x%x\n", flags);
+        return NULL;
+    }
 }
 
 static HRESULT WINAPI path_GetText(
@@ -118,21 +374,31 @@ static HRESULT WINAPI path_GetText(
     LPWSTR pszText)
 {
     struct path *path = impl_from_IWbemPath( iface );
+    WCHAR *str;
+    int len;
 
     TRACE("%p, 0x%x, %p, %p\n", iface, lFlags, puBufferLength, pszText);
 
-    if (lFlags != WBEMPATH_GET_ORIGINAL)
+    if (!puBufferLength) return WBEM_E_INVALID_PARAMETER;
+
+    str = build_path( path, lFlags, &len );
+
+    if (*puBufferLength < len + 1)
     {
-        FIXME("flags 0x%x not supported\n", lFlags);
-        return WBEM_E_INVALID_PARAMETER;
-    }
-    if (*puBufferLength < path->len + 1)
-    {
-        *puBufferLength = path->len + 1;
+        *puBufferLength = len + 1;
         return S_OK;
     }
-    if (pszText) strcpyW( pszText, path->text );
-    *puBufferLength = path->len + 1;
+    if (!pszText)
+    {
+        heap_free( str );
+        return WBEM_E_INVALID_PARAMETER;
+    }
+    if (str) strcpyW( pszText, str );
+    else pszText[0] = 0;
+    *puBufferLength = len + 1;
+
+    TRACE("<-- %s\n", debugstr_w(pszText));
+    heap_free( str );
     return S_OK;
 }
 
@@ -166,8 +432,13 @@ static HRESULT WINAPI path_GetNamespaceCount(
     IWbemPath *iface,
     ULONG *puCount)
 {
-    FIXME("%p, %p\n", iface, puCount);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %p\n", iface, puCount);
+
+    if (!puCount) return WBEM_E_INVALID_PARAMETER;
+    *puCount = path->num_namespaces;
+    return S_OK;
 }
 
 static HRESULT WINAPI path_SetNamespaceAt(
@@ -382,10 +653,11 @@ HRESULT WbemPath_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     TRACE("%p, %p\n", pUnkOuter, ppObj);
 
-    if (!(path = HeapAlloc( GetProcessHeap(), 0, sizeof(*path) ))) return E_OUTOFMEMORY;
+    if (!(path = heap_alloc( sizeof(*path) ))) return E_OUTOFMEMORY;
 
     path->IWbemPath_iface.lpVtbl = &path_vtbl;
     path->refs = 1;
+    init_path( path );
 
     *ppObj = &path->IWbemPath_iface;
 

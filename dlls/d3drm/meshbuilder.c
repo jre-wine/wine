@@ -325,7 +325,7 @@ static inline IDirect3DRMMeshBuilderImpl *impl_from_IDirect3DRMMeshBuilder3(IDir
 
 static void clean_mesh_builder_data(IDirect3DRMMeshBuilderImpl *mesh_builder)
 {
-    int i;
+    DWORD i;
 
     HeapFree(GetProcessHeap(), 0, mesh_builder->name);
     mesh_builder->name = NULL;
@@ -1563,7 +1563,6 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
     LPDIRECTXFILE pDXFile = NULL;
     LPDIRECTXFILEENUMOBJECT pEnumObject = NULL;
     LPDIRECTXFILEDATA pData = NULL;
-    LPDIRECTXFILEDATA pData2 = NULL;
     const GUID* pGuid;
     DWORD size;
     Header* pHeader;
@@ -1659,8 +1658,6 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Load(IDirect3DRMMeshBuilder3* 
 
 end:
 
-    if (pData2)
-        IDirectXFileData_Release(pData2);
     if (pData)
         IDirectXFileData_Release(pData);
     if (pEnumObject)
@@ -1689,7 +1686,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_Scale(IDirect3DRMMeshBuilder3*
                                                         D3DVALUE sx, D3DVALUE sy, D3DVALUE sz)
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-    int i;
+    DWORD i;
 
     TRACE("(%p)->(%f,%f,%f)\n", This, sx, sy, sz);
 
@@ -2108,7 +2105,8 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuil
     /* If there is mesh data, create a group and put data inside */
     if (This->nb_vertices)
     {
-        int i, j, k;
+        DWORD i, j;
+        int k;
         D3DRMVERTEX* vertices;
 
         vertices = HeapAlloc(GetProcessHeap(), 0, This->nb_vertices * sizeof(D3DRMVERTEX));
@@ -2143,6 +2141,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuil
             face_data = HeapAlloc(GetProcessHeap(), 0, This->face_data_size * sizeof(*face_data));
             if (!face_data)
             {
+                HeapFree(GetProcessHeap(), 0, used_vertices);
                 IDirect3DRMMesh_Release(*mesh);
                 return E_OUTOFMEMORY;
             }
@@ -2587,7 +2586,7 @@ static ULONG WINAPI IDirect3DRMMeshImpl_Release(IDirect3DRMMesh* iface)
 
     if (!ref)
     {
-        int i;
+        DWORD i;
 
         for (i = 0; i < This->nb_groups; i++)
         {
@@ -2775,7 +2774,7 @@ static HRESULT WINAPI IDirect3DRMMeshImpl_AddGroup(IDirect3DRMMesh* iface,
     }
     else
     {
-        int i;
+        unsigned i;
         unsigned nb_indices;
         unsigned* face_data_ptr = face_data;
         group->face_data_size = 0;

@@ -181,9 +181,11 @@ void device_stream_info_from_declaration(struct wined3d_device *device, struct w
     struct wined3d_vertex_declaration *declaration = state->vertex_declaration;
     BOOL use_vshader;
     unsigned int i;
+    WORD map;
 
     stream_info->use_map = 0;
     stream_info->swizzle_map = 0;
+    stream_info->all_vbo = 1;
 
     /* Check for transformed vertices, disable vertex shader if present. */
     stream_info->position_transformed = declaration->position_transformed;
@@ -205,37 +207,25 @@ void device_stream_info_from_declaration(struct wined3d_device *device, struct w
 
         if (!buffer) continue;
 
-        data.buffer_object = 0;
-        data.addr = NULL;
-
         stride = stream->stride;
-        if (state->user_stream)
-        {
-            TRACE("Stream %u is UP, %p\n", element->input_slot, buffer);
-            data.buffer_object = 0;
-            data.addr = (BYTE *)buffer;
-        }
-        else
-        {
-            TRACE("Stream %u isn't UP, %p\n", element->input_slot, buffer);
-            buffer_get_memory(buffer, &device->adapter->gl_info, &data);
 
-            /* Can't use vbo's if the base vertex index is negative. OpenGL doesn't accept negative offsets
-             * (or rather offsets bigger than the vbo, because the pointer is unsigned), so use system memory
-             * sources. In most sane cases the pointer - offset will still be > 0, otherwise it will wrap
-             * around to some big value. Hope that with the indices, the driver wraps it back internally. If
-             * not, drawStridedSlow is needed, including a vertex buffer path. */
-            if (state->load_base_vertex_index < 0)
-            {
-                WARN("load_base_vertex_index is < 0 (%d), not using VBOs.\n",
-                        state->load_base_vertex_index);
-                data.buffer_object = 0;
-                data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info);
-                if ((UINT_PTR)data.addr < -state->load_base_vertex_index * stride)
-                {
-                    FIXME("System memory vertex data load offset is negative!\n");
-                }
-            }
+        TRACE("Stream %u, buffer %p.\n", element->input_slot, buffer);
+        buffer_get_memory(buffer, &device->adapter->gl_info, &data);
+
+        /* We can't use VBOs if the base vertex index is negative. OpenGL
+         * doesn't accept negative offsets (or rather offsets bigger than the
+         * VBO, because the pointer is unsigned), so use system memory
+         * sources. In most sane cases the pointer - offset will still be > 0,
+         * otherwise it will wrap around to some big value. Hope that with the
+         * indices, the driver wraps it back internally. If not,
+         * drawStridedSlow() is needed, including a vertex buffer path. */
+        if (state->load_base_vertex_index < 0)
+        {
+            WARN("load_base_vertex_index is < 0 (%d), not using VBOs.\n", state->load_base_vertex_index);
+            data.buffer_object = 0;
+            data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info);
+            if ((UINT_PTR)data.addr < -state->load_base_vertex_index * stride)
+                FIXME("System memory vertex data load offset is negative!\n");
         }
         data.addr += element->offset;
 
@@ -295,42 +285,32 @@ void device_stream_info_from_declaration(struct wined3d_device *device, struct w
         }
     }
 
+    /* Preload the vertex buffers. */
     device->num_buffer_queries = 0;
-    if (!state->user_stream)
+    for (i = 0, map = stream_info->use_map; map; map >>= 1, ++i)
     {
-        WORD map = stream_info->use_map;
-        stream_info->all_vbo = 1;
+        struct wined3d_stream_info_element *element;
+        struct wined3d_buffer *buffer;
 
-        /* PreLoad all the vertex buffers. */
-        for (i = 0; map; map >>= 1, ++i)
+        if (!(map & 1))
+            continue;
+
+        element = &stream_info->elements[i];
+        buffer = state->streams[element->stream_idx].buffer;
+        wined3d_buffer_preload(buffer);
+
+        /* If the preload dropped the buffer object, update the stream info. */
+        if (buffer->buffer_object != element->data.buffer_object)
         {
-            struct wined3d_stream_info_element *element;
-            struct wined3d_buffer *buffer;
-
-            if (!(map & 1)) continue;
-
-            element = &stream_info->elements[i];
-            buffer = state->streams[element->stream_idx].buffer;
-            wined3d_buffer_preload(buffer);
-
-            /* If the preload dropped the buffer object, update the stream info. */
-            if (buffer->buffer_object != element->data.buffer_object)
-            {
-                element->data.buffer_object = 0;
-                element->data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info)
-                        + (ptrdiff_t)element->data.addr;
-            }
-
-            if (!buffer->buffer_object)
-                stream_info->all_vbo = 0;
-
-            if (buffer->query)
-                device->buffer_queries[device->num_buffer_queries++] = buffer->query;
+            element->data.buffer_object = 0;
+            element->data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info) + (ptrdiff_t)element->data.addr;
         }
-    }
-    else
-    {
-        stream_info->all_vbo = 0;
+
+        if (!buffer->buffer_object)
+            stream_info->all_vbo = 0;
+
+        if (buffer->query)
+            device->buffer_queries[device->num_buffer_queries++] = buffer->query;
     }
 }
 
@@ -3595,7 +3575,6 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     struct wined3d_state *state = &device->stateBlock->state;
     struct wined3d_stream_info stream_info;
     const struct wined3d_gl_info *gl_info;
-    BOOL streamWasUP = state->user_stream;
     struct wined3d_context *context;
     struct wined3d_shader *vs;
     unsigned int i;
@@ -3613,14 +3592,9 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
     context = context_acquire(device, NULL);
     gl_info = context->gl_info;
 
-    /* ProcessVertices reads from vertex buffers, which have to be assigned.
-     * DrawPrimitive and DrawPrimitiveUP control the streamIsUP flag, thus
-     * restore it afterwards. */
     vs = state->vertex_shader;
     state->vertex_shader = NULL;
-    state->user_stream = FALSE;
     device_stream_info_from_declaration(device, &stream_info);
-    state->user_stream = streamWasUP;
     state->vertex_shader = vs;
 
     /* We can't convert FROM a VBO, and vertex buffers used to source into
@@ -4093,13 +4067,6 @@ HRESULT CDECL wined3d_device_draw_primitive(struct wined3d_device *device, UINT 
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* The index buffer is not needed here, but restore it, otherwise it is hell to keep track of */
-    if (device->stateBlock->state.user_stream)
-    {
-        device_invalidate_state(device, STATE_INDEXBUFFER);
-        device->stateBlock->state.user_stream = FALSE;
-    }
-
     if (device->stateBlock->state.load_base_vertex_index)
     {
         device->stateBlock->state.load_base_vertex_index = 0;
@@ -4132,12 +4099,6 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
     {
         WARN("Called without a valid vertex declaration set.\n");
         return WINED3DERR_INVALIDCALL;
-    }
-
-    if (device->stateBlock->state.user_stream)
-    {
-        device_invalidate_state(device, STATE_INDEXBUFFER);
-        device->stateBlock->state.user_stream = FALSE;
     }
 
     if (!gl_info->supported[ARB_DRAW_ELEMENTS_BASE_VERTEX] &&
@@ -4206,6 +4167,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive_strided(struct wined3d_devic
     device->up_strided = strided_data;
     draw_primitive(device, 0, index_count, 0, 0, TRUE, index_data);
     device->up_strided = NULL;
+    device->stateBlock->state.user_stream = FALSE;
     device->stateBlock->state.index_format = prev_idx_format;
 
     device_invalidate_state(device, STATE_VDECL);

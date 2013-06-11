@@ -1,5 +1,6 @@
 /*
  * Copyright 2012 Stefan Leichter
+ * Copyright 2012 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,16 +22,45 @@
 #include "atlbase.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(atl100);
+
+static inline void *heap_alloc(size_t len)
+{
+    return HeapAlloc(GetProcessHeap(), 0, len);
+}
+
+static inline BOOL heap_free(void *mem)
+{
+    return HeapFree(GetProcessHeap(), 0, mem);
+}
+
+static ICatRegister *catreg;
 
 /***********************************************************************
  *           AtlAdvise         [atl100.@]
  */
-HRESULT WINAPI AtlAdvise(IUnknown *pUnkCP, IUnknown *pUnk, const IID *iid, LPDWORD pdw)
+HRESULT WINAPI AtlAdvise(IUnknown *pUnkCP, IUnknown *pUnk, const IID *iid, DWORD *pdw)
 {
-    FIXME("%p %p %p %p\n", pUnkCP, pUnk, iid, pdw);
-    return E_FAIL;
+    IConnectionPointContainer *container;
+    IConnectionPoint *cp;
+    HRESULT hres;
+
+    TRACE("%p %p %p %p\n", pUnkCP, pUnk, iid, pdw);
+
+    hres = IUnknown_QueryInterface(pUnkCP, &IID_IConnectionPointContainer, (void**)&container);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IConnectionPointContainer_FindConnectionPoint(container, iid, &cp);
+    IConnectionPointContainer_Release(container);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IConnectionPoint_Advise(cp, pUnk, pdw);
+    IConnectionPoint_Release(cp);
+    return hres;
 }
 
 /***********************************************************************
@@ -38,8 +68,24 @@ HRESULT WINAPI AtlAdvise(IUnknown *pUnkCP, IUnknown *pUnk, const IID *iid, LPDWO
  */
 HRESULT WINAPI AtlUnadvise(IUnknown *pUnkCP, const IID *iid, DWORD dw)
 {
-    FIXME("%p %p %d\n", pUnkCP, iid, dw);
-    return S_OK;
+    IConnectionPointContainer *container;
+    IConnectionPoint *cp;
+    HRESULT hres;
+
+    TRACE("%p %p %d\n", pUnkCP, iid, dw);
+
+    hres = IUnknown_QueryInterface(pUnkCP, &IID_IConnectionPointContainer, (void**)&container);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IConnectionPointContainer_FindConnectionPoint(container, iid, &cp);
+    IConnectionPointContainer_Release(container);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IConnectionPoint_Unadvise(cp, dw);
+    IConnectionPoint_Release(cp);
+    return hres;
 }
 
 /***********************************************************************
@@ -265,25 +311,56 @@ void WINAPI AtlCallTermFunc(_ATL_MODULE *pM)
 }
 
 /***********************************************************************
- *           AtlLoadTypeLib             [atl100.@]
+ *           AtlLoadTypeLib             [atl100.56]
  */
 HRESULT WINAPI AtlLoadTypeLib(HINSTANCE inst, LPCOLESTR lpszIndex,
         BSTR *pbstrPath, ITypeLib **ppTypeLib)
 {
-    OLECHAR path[MAX_PATH+8]; /* leave some space for index */
+    size_t path_len, index_len;
+    ITypeLib *typelib = NULL;
+    WCHAR *path;
     HRESULT hres;
+
+    static const WCHAR tlb_extW[] = {'.','t','l','b',0};
 
     TRACE("(%p %s %p %p)\n", inst, debugstr_w(lpszIndex), pbstrPath, ppTypeLib);
 
-    GetModuleFileNameW(inst, path, MAX_PATH);
-    if(lpszIndex)
-        lstrcatW(path, lpszIndex);
+    index_len = lpszIndex ? strlenW(lpszIndex) : 0;
+    path = heap_alloc((MAX_PATH+index_len)*sizeof(WCHAR) + sizeof(tlb_extW));
+    if(!path)
+        return E_OUTOFMEMORY;
 
-    hres = LoadTypeLib(path, ppTypeLib);
+    path_len = GetModuleFileNameW(inst, path, MAX_PATH);
+    if(!path_len)
+        return HRESULT_FROM_WIN32(GetLastError());
+
+    if(index_len)
+        memcpy(path+path_len, lpszIndex, (index_len+1)*sizeof(WCHAR));
+
+    hres = LoadTypeLib(path, &typelib);
+    if(FAILED(hres)) {
+        WCHAR *ptr;
+
+        for(ptr = path+path_len-1; ptr > path && *ptr != '\\' && *ptr != '.'; ptr--);
+        if(*ptr != '.')
+            ptr = path+path_len;
+        memcpy(ptr, tlb_extW, sizeof(tlb_extW));
+        hres = LoadTypeLib(path, &typelib);
+    }
+
+    if(SUCCEEDED(hres)) {
+        *pbstrPath = SysAllocString(path);
+        if(!*pbstrPath) {
+            ITypeLib_Release(typelib);
+            hres = E_OUTOFMEMORY;
+        }
+    }
+
+    heap_free(path);
     if(FAILED(hres))
         return hres;
 
-    *pbstrPath = SysAllocString(path);
+    *ppTypeLib = typelib;
     return S_OK;
 }
 
@@ -379,8 +456,63 @@ HRESULT WINAPI AtlComModuleGetClassObject(_ATL_COM_MODULE *pm, REFCLSID rclsid, 
  */
 HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid, const struct _ATL_CATMAP_ENTRY *catmap, BOOL reg)
 {
-    FIXME("(%s %p %x)\n", debugstr_guid(clsid), catmap, reg);
-    return E_NOTIMPL;
+    const struct _ATL_CATMAP_ENTRY *iter;
+    HRESULT hres;
+
+    TRACE("(%s %p %x)\n", debugstr_guid(clsid), catmap, reg);
+
+    if(!catmap)
+        return S_OK;
+
+    if(!catreg) {
+        ICatRegister *new_catreg;
+
+        hres = CoCreateInstance(&CLSID_StdComponentCategoriesMgr, NULL, CLSCTX_INPROC_SERVER,
+                &IID_ICatRegister, (void**)&new_catreg);
+        if(FAILED(hres))
+            return hres;
+
+        if(InterlockedCompareExchangePointer((void**)&catreg, new_catreg, NULL))
+            ICatRegister_Release(new_catreg);
+    }
+
+    for(iter = catmap; iter->iType != _ATL_CATMAP_ENTRY_END; iter++) {
+        CATID catid = *iter->pcatid; /* For stupid lack of const in ICatRegister declaration. */
+
+        if(iter->iType == _ATL_CATMAP_ENTRY_IMPLEMENTED) {
+            if(reg)
+                hres = ICatRegister_RegisterClassImplCategories(catreg, clsid, 1, &catid);
+            else
+                hres = ICatRegister_UnRegisterClassImplCategories(catreg, clsid, 1, &catid);
+        }else {
+            if(reg)
+                hres = ICatRegister_RegisterClassReqCategories(catreg, clsid, 1, &catid);
+            else
+                hres = ICatRegister_UnRegisterClassReqCategories(catreg, clsid, 1, &catid);
+        }
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(!reg) {
+        WCHAR reg_path[256] = {'C','L','S','I','D','\\'}, *ptr = reg_path+6;
+
+        static const WCHAR implemented_catW[] =
+            {'I','m','p','l','e','m','e','n','t','e','d',' ','C','a','t','e','g','o','r','i','e','s',0};
+        static const WCHAR required_catW[] =
+            {'R','e','q','u','i','r','e','d',' ','C','a','t','e','g','o','r','i','e','s',0};
+
+        ptr += StringFromGUID2(clsid, ptr, 64)-1;
+        *ptr++ = '\\';
+
+        memcpy(ptr, implemented_catW, sizeof(implemented_catW));
+        RegDeleteKeyW(HKEY_CLASSES_ROOT, reg_path);
+
+        memcpy(ptr, required_catW, sizeof(required_catW));
+        RegDeleteKeyW(HKEY_CLASSES_ROOT, reg_path);
+    }
+
+    return S_OK;
 }
 
 /***********************************************************************
@@ -389,4 +521,20 @@ HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid, const struct _AT
 DWORD WINAPI AtlGetVersion(void *pReserved)
 {
    return _ATL_VER;
+}
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+{
+    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+
+    switch(fdwReason) {
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hinstDLL);
+        break;
+    case DLL_PROCESS_DETACH:
+        if(catreg)
+            ICatRegister_Release(catreg);
+    }
+
+    return TRUE;
 }
