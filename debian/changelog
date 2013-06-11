@@ -1,8 +1,14 @@
-wine-unstable (1.5.17-1) UNRELEASED; urgency=low
+wine-unstable (1.5.17-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.17, released Nov 9, 2012.
+    - Sub-pixel font anti-aliasing in the DIB engine.
+    - Support for automatic installation of ActiveX controls.
+    - Automatic fallback to TLS 1.0 for secure connections.
+    - Beginnings of the DirectWrite text analyzer.
+    - Better handling of font outlines in OpenGL.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 02:16:19 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 02:16:25 +0000
 
 wine-unstable (1.5.16-1) unstable; urgency=low
 
