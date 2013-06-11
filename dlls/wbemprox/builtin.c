@@ -27,11 +27,12 @@
 #define WIN32_NO_STATUS
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "wbemcli.h"
+#include "wbemprov.h"
 #include "winsock2.h"
 #include "iphlpapi.h"
 #include "tlhelp32.h"
-#include "initguid.h"
 #include "d3d10.h"
 #include "winternl.h"
 #include "winioctl.h"
@@ -99,6 +100,8 @@ static const WCHAR prop_directionW[] =
     {'D','i','r','e','c','t','i','o','n',0};
 static const WCHAR prop_displaynameW[] =
     {'D','i','s','p','l','a','y','N','a','m','e',0};
+static const WCHAR prop_domainW[] =
+    {'D','o','m','a','i','n',0};
 static const WCHAR prop_domainroleW[] =
     {'D','o','m','a','i','n','R','o','l','e',0};
 static const WCHAR prop_drivetypeW[] =
@@ -111,6 +114,8 @@ static const WCHAR prop_handleW[] =
     {'H','a','n','d','l','e',0};
 static const WCHAR prop_interfaceindexW[] =
     {'I','n','t','e','r','f','a','c','e','I','n','d','e','x',0};
+static const WCHAR prop_lastbootuptimeW[] =
+    {'L','a','s','t','B','o','o','t','U','p','T','i','m','e',0};
 static const WCHAR prop_macaddressW[] =
     {'M','A','C','A','d','d','r','e','s','s',0};
 static const WCHAR prop_manufacturerW[] =
@@ -169,6 +174,8 @@ static const WCHAR prop_totalphysicalmemoryW[] =
     {'T','o','t','a','l','P','h','y','s','i','c','a','l','M','e','m','o','r','y',0};
 static const WCHAR prop_typeW[] =
     {'T','y','p','e',0};
+static const WCHAR prop_versionW[] =
+    {'V','e','r','s','i','o','n',0};
 
 static const WCHAR method_enumkeyW[] =
     {'E','n','u','m','K','e','y',0};
@@ -198,11 +205,13 @@ static const struct column col_bios[] =
     { prop_descriptionW,  CIM_STRING },
     { prop_manufacturerW, CIM_STRING },
     { prop_releasedateW,  CIM_DATETIME },
-    { prop_serialnumberW, CIM_STRING }
+    { prop_serialnumberW, CIM_STRING },
+    { prop_versionW,      CIM_STRING|COL_FLAG_KEY }
 };
 static const struct column col_compsys[] =
 {
     { prop_descriptionW,          CIM_STRING },
+    { prop_domainW,               CIM_STRING },
     { prop_domainroleW,           CIM_UINT16 },
     { prop_manufacturerW,         CIM_STRING },
     { prop_modelW,                CIM_STRING },
@@ -231,9 +240,10 @@ static const struct column col_os[] =
 {
     { prop_captionW,         CIM_STRING },
     { prop_csdversionW,      CIM_STRING },
+    { prop_lastbootuptimeW,  CIM_DATETIME|COL_FLAG_DYNAMIC },
     { prop_osarchitectureW,  CIM_STRING },
     { prop_oslanguageW,      CIM_UINT32, VT_I4 },
-    { prop_systemdirectoryW, CIM_STRING }
+    { prop_systemdirectoryW, CIM_STRING|COL_FLAG_DYNAMIC }
 };
 static const struct column col_params[] =
 {
@@ -259,7 +269,7 @@ static const struct column col_processor[] =
     { prop_cpustatusW,            CIM_UINT16 },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
     { prop_manufacturerW,         CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_maxclockspeedW,        CIM_UINT32 },
+    { prop_maxclockspeedW,        CIM_UINT32, VT_I4 },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_numlogicalprocessorsW, CIM_UINT32, VT_I4 },
     { prop_processoridW,          CIM_STRING|COL_FLAG_DYNAMIC }
@@ -287,6 +297,7 @@ static const struct column col_videocontroller[] =
     { prop_currentbitsperpixelW,  CIM_UINT32 },
     { prop_currenthorizontalresW, CIM_UINT32 },
     { prop_currentverticalresW,   CIM_UINT32 },
+    { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_KEY },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC }
 };
@@ -305,8 +316,12 @@ static const WCHAR bios_releasedateW[] =
     {'2','0','1','2','0','6','0','8','0','0','0','0','0','0','.','0','0','0','0','0','0','+','0','0','0',0};
 static const WCHAR bios_serialnumberW[] =
     {'0',0};
+static const WCHAR bios_versionW[] =
+    {'W','I','N','E',' ',' ',' ','-',' ','1',0};
 static const WCHAR compsys_descriptionW[] =
     {'A','T','/','A','T',' ','C','O','M','P','A','T','I','B','L','E',0};
+static const WCHAR compsys_domainW[] =
+    {'W','O','R','K','G','R','O','U','P',0};
 static const WCHAR compsys_manufacturerW[] =
     {'T','h','e',' ','W','i','n','e',' ','P','r','o','j','e','c','t',0};
 static const WCHAR compsys_modelW[] =
@@ -340,10 +355,12 @@ struct record_bios
     const WCHAR *manufacturer;
     const WCHAR *releasedate;
     const WCHAR *serialnumber;
+    const WCHAR *version;
 };
 struct record_computersystem
 {
     const WCHAR *description;
+    const WCHAR *domain;
     UINT16       domainrole;
     const WCHAR *manufacturer;
     const WCHAR *model;
@@ -372,6 +389,7 @@ struct record_operatingsystem
 {
     const WCHAR *caption;
     const WCHAR *csdversion;
+    const WCHAR *lastbootuptime;
     const WCHAR *osarchitecture;
     UINT32       oslanguage;
     const WCHAR *systemdirectory;
@@ -428,6 +446,7 @@ struct record_videocontroller
     UINT32       current_bitsperpixel;
     UINT32       current_horizontalres;
     UINT32       current_verticalres;
+    const WCHAR *description;
     const WCHAR *device_id;
     const WCHAR *name;
 };
@@ -450,7 +469,7 @@ static const struct record_baseboard data_baseboard[] =
 };
 static const struct record_bios data_bios[] =
 {
-    { bios_descriptionW, bios_manufacturerW, bios_releasedateW, bios_serialnumberW }
+    { bios_descriptionW, bios_manufacturerW, bios_releasedateW, bios_serialnumberW, bios_versionW }
 };
 static const struct record_params data_params[] =
 {
@@ -520,6 +539,7 @@ static void fill_compsys( struct table *table )
 
     rec = (struct record_computersystem *)table->data;
     rec->description            = compsys_descriptionW;
+    rec->domain                 = compsys_domainW;
     rec->domainrole             = 0; /* standalone workstation */
     rec->manufacturer           = compsys_manufacturerW;
     rec->model                  = compsys_modelW;
@@ -782,9 +802,17 @@ static void get_processor_name( WCHAR *name )
 }
 static UINT get_processor_maxclockspeed( void )
 {
-    PROCESSOR_POWER_INFORMATION info;
-    if (!NtPowerInformation( ProcessorInformation, NULL, 0, &info, sizeof(info) )) return info.MaxMhz;
-    return 1000000;
+    PROCESSOR_POWER_INFORMATION *info;
+    UINT ret = 1000, size = get_processor_count() * sizeof(PROCESSOR_POWER_INFORMATION);
+    NTSTATUS status;
+
+    if ((info = heap_alloc( size )))
+    {
+        status = NtPowerInformation( ProcessorInformation, NULL, 0, info, size );
+        if (!status) ret = info[0].MaxMhz;
+        heap_free( info );
+    }
+    return ret;
 }
 
 static void fill_processor( struct table *table )
@@ -821,31 +849,60 @@ static void fill_processor( struct table *table )
     table->num_rows = count;
 }
 
+static WCHAR *get_lastbootuptime(void)
+{
+    static const WCHAR fmtW[] =
+        {'%','0','4','u','%','0','2','u','%','0','2','u','%','0','2','u','%','0','2','u','%','0','2','u',
+         '.','%','0','6','u','+','0','0','0',0};
+    SYSTEMTIME st;
+    FILETIME ft;
+    ULARGE_INTEGER ticks;
+    WCHAR *ret;
+
+    if (!(ret = heap_alloc( 26 * sizeof(WCHAR) ))) return NULL;
+    GetSystemTime( &st );
+    SystemTimeToFileTime( &st, &ft );
+    ticks.u.LowPart  = ft.dwLowDateTime;
+    ticks.u.HighPart = ft.dwHighDateTime;
+    ticks.QuadPart -= GetTickCount64() * 10000;
+    ft.dwLowDateTime  = ticks.u.LowPart;
+    ft.dwHighDateTime = ticks.u.HighPart;
+    FileTimeToSystemTime( &ft, &st );
+    sprintfW( ret, fmtW, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds * 1000 );
+    return ret;
+}
+static const WCHAR *get_osarchitecture(void)
+{
+    SYSTEM_INFO info;
+    GetNativeSystemInfo( &info );
+    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) return os_64bitW;
+    return os_32bitW;
+}
+static WCHAR *get_systemdirectory(void)
+{
+    void *redir;
+    WCHAR *ret;
+
+    if (!(ret = heap_alloc( MAX_PATH * sizeof(WCHAR) ))) return NULL;
+    Wow64DisableWow64FsRedirection( &redir );
+    GetSystemDirectoryW( ret, MAX_PATH );
+    Wow64RevertWow64FsRedirection( redir );
+    return ret;
+}
+
 static void fill_os( struct table *table )
 {
     struct record_operatingsystem *rec;
-    WCHAR path[MAX_PATH];
-    SYSTEM_INFO info;
-    void *redir;
 
     if (!(table->data = heap_alloc( sizeof(*rec) ))) return;
 
     rec = (struct record_operatingsystem *)table->data;
-    rec->caption    = os_captionW;
-    rec->csdversion = os_csdversionW;
-
-    GetNativeSystemInfo( &info );
-    if (info.u.s.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
-        rec->osarchitecture = os_64bitW;
-    else
-        rec->osarchitecture = os_32bitW;
-
-    rec->oslanguage = MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US );
-
-    Wow64DisableWow64FsRedirection( &redir );
-    GetSystemDirectoryW( path, MAX_PATH );
-    Wow64RevertWow64FsRedirection( redir );
-    rec->systemdirectory = heap_strdupW( path );
+    rec->caption         = os_captionW;
+    rec->csdversion      = os_csdversionW;
+    rec->lastbootuptime  = get_lastbootuptime();
+    rec->osarchitecture  = get_osarchitecture();
+    rec->oslanguage      = MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US );
+    rec->systemdirectory = get_systemdirectory();
 
     TRACE("created 1 row\n");
     table->num_rows = 1;
@@ -1042,6 +1099,7 @@ done:
     rec->current_bitsperpixel  = get_bits_per_pixel( &hres, &vres );
     rec->current_horizontalres = hres;
     rec->current_verticalres   = vres;
+    rec->description           = heap_strdupW( name );
     rec->device_id             = videocontroller_deviceidW;
     rec->name                  = heap_strdupW( name );
 

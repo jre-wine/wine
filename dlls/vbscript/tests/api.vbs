@@ -124,6 +124,15 @@ Call ok(isNull(x), "InStr returned " & x)
 x = InStr(2, null, "abcd")
 Call ok(isNull(x), "InStr returned " & x)
 
+x = InStr(1.3, "abcd", "bc")
+Call ok(x = 2, "InStr returned " & x)
+
+x = InStr(2.3, "abcd", "bc")
+Call ok(x = 2, "InStr returned " & x)
+
+x = InStr(2.6, "abcd", "bc")
+Call ok(x = 0, "InStr returned " & x)
+
 Sub TestMid(str, start, len, ex)
     x = Mid(str, start, len)
     Call ok(x = ex, "Mid(" & str & ", " & start & ", " & len & ") = " & x & " expected " & ex)
@@ -172,5 +181,66 @@ if isEnglishLang then TestLCase true, "true"
 TestLCase 0.123, doubleAsString(0.123)
 TestLCase Empty, ""
 Call ok(getVT(LCase(Null)) = "VT_NULL", "getVT(LCase(Null)) = " & getVT(LCase(Null)))
+
+Call ok(Len("abc") = 3, "Len(abc) = " & Len("abc"))
+Call ok(Len("") = 0, "Len() = " & Len(""))
+Call ok(Len(1) = 1, "Len(1) = " & Len(1))
+Call ok(isNull(Len(null)), "Len(null) = " & Len(null))
+Call ok(Len(empty) = 0, "Len(empty) = " & Len(empty))
+
+Call ok(Space(1) = " ", "Space(1) = " & Space(1) & """")
+Call ok(Space(0) = "", "Space(0) = " & Space(0) & """")
+Call ok(Space(false) = "", "Space(false) = " & Space(false) & """")
+Call ok(Space(5) = "     ", "Space(5) = " & Space(5) & """")
+Call ok(Space(5.2) = "     ", "Space(5.2) = " & Space(5.2) & """")
+Call ok(Space(5.8) = "      ", "Space(5.8) = " & Space(5.8) & """")
+Call ok(Space(5.5) = "      ", "Space(5.5) = " & Space(5.5) & """")
+
+Sub TestStrReverse(str, ex)
+    Call ok(StrReverse(str) = ex, "StrReverse(" & str & ") = " & StrReverse(str))
+End Sub
+
+TestStrReverse "test", "tset"
+TestStrReverse "", ""
+TestStrReverse 123, "321"
+if isEnglishLang then TestStrReverse true, "eurT"
+
+Sub TestRound(val, exval, vt)
+    Call ok(Round(val) = exval, "Round(" & val & ") = " & Round(val))
+    Call ok(getVT(Round(val)) = vt, "getVT(Round(" & val & ")) = " & getVT(Round(val)))
+End Sub
+
+TestRound 3, 3, "VT_I2"
+TestRound 3.3, 3, "VT_R8"
+TestRound 3.8, 4, "VT_R8"
+TestRound 3.5, 4, "VT_R8"
+TestRound -3.3, -3, "VT_R8"
+TestRound -3.5, -4, "VT_R8"
+TestRound "2", 2, "VT_R8"
+TestRound true, true, "VT_BOOL"
+TestRound false, false, "VT_BOOL"
+
+if isEnglishLang then
+    Call ok(WeekDayName(1) = "Sunday", "WeekDayName(1) = " & WeekDayName(1))
+    Call ok(WeekDayName(3) = "Tuesday", "WeekDayName(3) = " & WeekDayName(3))
+    Call ok(WeekDayName(7) = "Saturday", "WeekDayName(7) = " & WeekDayName(7))
+    Call ok(WeekDayName(1.1) = "Sunday", "WeekDayName(1.1) = " & WeekDayName(1.1))
+    Call ok(WeekDayName(1, false) = "Sunday", "WeekDayName(1, false) = " & WeekDayName(1, false))
+    Call ok(WeekDayName(1, true) = "Sun", "WeekDayName(1, true) = " & WeekDayName(1, true))
+    Call ok(WeekDayName(1, 10) = "Sun", "WeekDayName(1, 10) = " & WeekDayName(1, 10))
+    Call ok(WeekDayName(1, true, 0) = "Sun", "WeekDayName(1, true, 0) = " & WeekDayName(1, true, 0))
+    Call ok(WeekDayName(1, true, 2) = "Mon", "WeekDayName(1, true, 2) = " & WeekDayName(1, true, 2))
+    Call ok(WeekDayName(1, true, 7) = "Sat", "WeekDayName(1, true, 7) = " & WeekDayName(1, true, 7))
+    Call ok(WeekDayName(1, true, 7.1) = "Sat", "WeekDayName(1, true, 7.1) = " & WeekDayName(1, true, 7.1))
+
+    Call ok(MonthName(1) = "January", "MonthName(1) = " & MonthName(1))
+    Call ok(MonthName(12) = "December", "MonthName(12) = " & MonthName(12))
+    Call ok(MonthName(1, 0) = "January", "MonthName(1, 0) = " & MonthName(1, 0))
+    Call ok(MonthName(12, false) = "December", "MonthName(12, false) = " & MonthName(12, false))
+    Call ok(MonthName(1, 10) = "Jan", "MonthName(1, 10) = " & MonthName(1, 10))
+    Call ok(MonthName(12, true) = "Dec", "MonthName(12, true) = " & MonthName(12, true))
+end if
+
+Call ok(getVT(Now()) = "VT_DATE", "getVT(Now()) = " & getVT(Now()))
 
 Call reportSuccess()

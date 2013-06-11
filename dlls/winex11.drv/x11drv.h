@@ -243,9 +243,7 @@ extern Display *gdi_display DECLSPEC_HIDDEN;  /* display to use for all GDI func
 #define X11DRV_PALETTE_VIRTUAL  0x0002 /* no mapping needed - pixel == pixel color */
 
 #define X11DRV_PALETTE_PRIVATE  0x1000 /* private colormap, identity mapping */
-#define X11DRV_PALETTE_WHITESET 0x2000
 
-extern Colormap X11DRV_PALETTE_PaletteXColormap DECLSPEC_HIDDEN;
 extern UINT16 X11DRV_PALETTE_PaletteFlags DECLSPEC_HIDDEN;
 
 extern int *X11DRV_PALETTE_PaletteToXPixel DECLSPEC_HIDDEN;
@@ -260,7 +258,6 @@ extern BOOL X11DRV_IsSolidColor(COLORREF color) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel) DECLSPEC_HIDDEN;
 extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color) DECLSPEC_HIDDEN;
 extern COLORREF X11DRV_PALETTE_GetColor( X11DRV_PDEVICE *physDev, COLORREF color ) DECLSPEC_HIDDEN;
-extern int X11DRV_PALETTE_LookupPixel(ColorShifts *shifts, COLORREF color) DECLSPEC_HIDDEN;
 extern void X11DRV_PALETTE_ComputeColorShifts(ColorShifts *shifts, unsigned long redMask, unsigned long greenMask, unsigned long blueMask) DECLSPEC_HIDDEN;
 
 /* GDI escapes */
@@ -347,14 +344,14 @@ static inline size_t get_property_size( int format, unsigned long count )
     return count * (format / 8);
 }
 
-extern Visual *visual DECLSPEC_HIDDEN;
+extern XVisualInfo default_visual DECLSPEC_HIDDEN;
+extern Colormap default_colormap DECLSPEC_HIDDEN;
 extern XPixmapFormatValues **pixmap_formats DECLSPEC_HIDDEN;
 extern Window root_window DECLSPEC_HIDDEN;
 extern int clipping_cursor DECLSPEC_HIDDEN;
 extern unsigned int screen_width DECLSPEC_HIDDEN;
 extern unsigned int screen_height DECLSPEC_HIDDEN;
 extern unsigned int screen_bpp DECLSPEC_HIDDEN;
-extern unsigned int screen_depth DECLSPEC_HIDDEN;
 extern RECT virtual_screen_rect DECLSPEC_HIDDEN;
 extern int use_xkb DECLSPEC_HIDDEN;
 extern int usexrandr DECLSPEC_HIDDEN;
@@ -532,13 +529,13 @@ enum x11drv_net_wm_state
 /* x11drv private window data */
 struct x11drv_win_data
 {
+    Display    *display;        /* display connection for the thread owning the window */
     HWND        hwnd;           /* hwnd that this private data belongs to */
     Window      whole_window;   /* X window for the complete window */
     RECT        window_rect;    /* USER window rectangle relative to parent */
     RECT        whole_rect;     /* X window rectangle for the whole window relative to parent */
     RECT        client_rect;    /* client area relative to parent */
     XIC         xic;            /* X input context */
-    XWMHints   *wm_hints;       /* window manager hints */
     BOOL        managed : 1;    /* is window managed? */
     BOOL        mapped : 1;     /* is window mapped? (in either normal or iconic state) */
     BOOL        iconic : 1;     /* is window in iconic state? */
@@ -549,11 +546,14 @@ struct x11drv_win_data
     Window      embedder;       /* window id of embedder */
     unsigned long configure_serial; /* serial number of last configure request */
     struct window_surface *surface;
-    Pixmap      icon_pixmap;
-    Pixmap      icon_mask;
+    Pixmap         icon_pixmap;
+    Pixmap         icon_mask;
+    unsigned long *icon_bits;
+    unsigned int   icon_size;
 };
 
-extern struct x11drv_win_data *X11DRV_get_win_data( HWND hwnd ) DECLSPEC_HIDDEN;
+extern struct x11drv_win_data *get_win_data( HWND hwnd ) DECLSPEC_HIDDEN;
+extern void release_win_data( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
 extern Window X11DRV_get_whole_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern XIC X11DRV_get_ic( HWND hwnd ) DECLSPEC_HIDDEN;
 
@@ -562,11 +562,11 @@ extern BOOL has_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void sync_gl_drawable( HWND hwnd, const RECT *visible_rect, const RECT *client_rect ) DECLSPEC_HIDDEN;
 extern void destroy_gl_drawable( HWND hwnd ) DECLSPEC_HIDDEN;
 
-extern void wait_for_withdrawn_state( Display *display, struct x11drv_win_data *data, BOOL set ) DECLSPEC_HIDDEN;
+extern void wait_for_withdrawn_state( HWND hwnd, BOOL set ) DECLSPEC_HIDDEN;
 extern Window init_clip_window(void) DECLSPEC_HIDDEN;
 extern void update_user_time( Time time ) DECLSPEC_HIDDEN;
-extern void update_net_wm_states( Display *display, struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
-extern void make_window_embedded( Display *display, struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
+extern void update_net_wm_states( struct x11drv_win_data *data ) DECLSPEC_HIDDEN;
+extern void make_window_embedded( HWND hwnd ) DECLSPEC_HIDDEN;
 extern void change_systray_owner( Display *display, Window systray_window ) DECLSPEC_HIDDEN;
 extern void update_systray_balloon_position(void) DECLSPEC_HIDDEN;
 extern HWND create_foreign_window( Display *display, Window window ) DECLSPEC_HIDDEN;
@@ -610,7 +610,7 @@ extern LRESULT clip_cursor_notify( HWND hwnd, HWND new_clip_hwnd ) DECLSPEC_HIDD
 extern void ungrab_clipping_window(void) DECLSPEC_HIDDEN;
 extern void reset_clipping_window(void) DECLSPEC_HIDDEN;
 extern BOOL clip_fullscreen_window( HWND hwnd, BOOL reset ) DECLSPEC_HIDDEN;
-extern void move_resize_window( Display *display, struct x11drv_win_data *data, int dir ) DECLSPEC_HIDDEN;
+extern void move_resize_window( HWND hwnd, int dir ) DECLSPEC_HIDDEN;
 extern void X11DRV_InitKeyboard( Display *display ) DECLSPEC_HIDDEN;
 extern DWORD CDECL X11DRV_MsgWaitForMultipleObjectsEx( DWORD count, const HANDLE *handles, DWORD timeout,
                                                        DWORD mask, DWORD flags ) DECLSPEC_HIDDEN;

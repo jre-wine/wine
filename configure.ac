@@ -2046,9 +2046,7 @@ AC_CHECK_FUNCS(\
 	thr_kill2 \
 	timegm \
 	usleep \
-	vsnprintf \
-	wait4 \
-	waitpid \
+	vsnprintf
 )
 CFLAGS="$ac_save_CFLAGS"
 
@@ -2866,6 +2864,7 @@ WINE_CONFIG_DLL(objsel)
 WINE_CONFIG_DLL(odbc32,,[implib])
 WINE_CONFIG_DLL(odbccp32,,[implib])
 WINE_CONFIG_TEST(dlls/odbccp32/tests)
+WINE_CONFIG_DLL(odbccu32)
 WINE_CONFIG_DLL(ole2.dll16,enable_win16)
 WINE_CONFIG_DLL(ole2conv.dll16,enable_win16)
 WINE_CONFIG_DLL(ole2disp.dll16,enable_win16)
@@ -3004,6 +3003,7 @@ WINE_CONFIG_DLL(vbscript)
 WINE_CONFIG_TEST(dlls/vbscript/tests)
 WINE_CONFIG_DLL(vcomp)
 WINE_CONFIG_DLL(vcomp100)
+WINE_CONFIG_DLL(vcomp90)
 WINE_CONFIG_DLL(vdhcp.vxd,enable_win16)
 WINE_CONFIG_DLL(vdmdbg,,[implib])
 WINE_CONFIG_DLL(ver.dll16,enable_win16)
