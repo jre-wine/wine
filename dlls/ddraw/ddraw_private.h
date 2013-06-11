@@ -275,10 +275,15 @@ struct d3d_device
     IUnknown *outer_unknown;
     struct wined3d_device *wined3d_device;
     struct ddraw *ddraw;
-    struct wined3d_buffer *indexbuffer;
-    UINT indexbuffer_size;
-    UINT indexbuffer_pos;
     struct ddraw_surface *target;
+
+    struct wined3d_buffer *index_buffer;
+    UINT index_buffer_size;
+    UINT index_buffer_pos;
+
+    struct wined3d_buffer *vertex_buffer;
+    UINT vertex_buffer_size;
+    UINT vertex_buffer_pos;
 
     /* Viewport management */
     struct list viewport_list;
@@ -299,7 +304,7 @@ struct d3d_device
     DWORD vertex_type;
     DWORD render_flags;
     DWORD nb_vertices;
-    LPBYTE vertex_buffer;
+    LPBYTE sysmem_vertex_buffer;
     DWORD vertex_size;
     DWORD buffer_size;
 
@@ -494,7 +499,8 @@ struct d3d_execute_buffer
     /* This buffer will store the transformed vertices */
     void                 *vertex_data;
     WORD                 *indices;
-    int                  nb_indices;
+    unsigned int         nb_indices;
+    unsigned int         nb_vertices;
 
     /* This flags is set to TRUE if we allocated ourselves the
      * data buffer

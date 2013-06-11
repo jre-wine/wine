@@ -183,6 +183,13 @@ typedef struct
     WORD                        WinDuplex; /* eg DMDUP_SIMPLEX */
 } DUPLEX;
 
+typedef struct
+{
+    struct list entry;
+    int    resx, resy;
+    char   *InvocationString;
+} RESOLUTION;
+
 /* Many Mac OS X based ppd files don't include a *ColorDevice line, so
    we use a tristate here rather than a boolean.  Code that
    cares is expected to treat these as if they were colour. */
@@ -196,6 +203,7 @@ typedef struct {
     char		*NickName;
     int			LanguageLevel;
     COLORDEVICE	        ColorDevice;
+    struct list         Resolutions;
     int			DefaultResolution;
     signed int		LandscapeOrientation;
     char		*JCLBegin;
@@ -425,8 +433,7 @@ extern BOOL PSDRV_ExtTextOut( PHYSDEV dev, INT x, INT y, UINT flags,
                               const RECT *lprect, LPCWSTR str, UINT count, const INT *lpDx ) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_FillPath( PHYSDEV dev ) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_GetCharWidth(PHYSDEV dev, UINT firstChar, UINT lastChar, LPINT buffer) DECLSPEC_HIDDEN;
-extern BOOL PSDRV_GetTextExtentExPoint(PHYSDEV dev, LPCWSTR str, INT count,
-                                       INT maxExt, LPINT lpnFit, LPINT alpDx, LPSIZE size) DECLSPEC_HIDDEN;
+extern BOOL PSDRV_GetTextExtentExPoint(PHYSDEV dev, LPCWSTR str, INT count, LPINT alpDx) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_GetTextMetrics(PHYSDEV dev, TEXTMETRICW *metrics) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_LineTo(PHYSDEV dev, INT x, INT y) DECLSPEC_HIDDEN;
 extern BOOL PSDRV_PaintRgn( PHYSDEV dev, HRGN hrgn ) DECLSPEC_HIDDEN;

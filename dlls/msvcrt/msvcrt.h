@@ -218,7 +218,7 @@ typedef struct __thread_data thread_data_t;
 
 extern thread_data_t *msvcrt_get_thread_data(void) DECLSPEC_HIDDEN;
 
-LCID MSVCRT_locale_to_LCID(const char *) DECLSPEC_HIDDEN;
+LCID MSVCRT_locale_to_LCID(const char*, unsigned short*) DECLSPEC_HIDDEN;
 extern MSVCRT__locale_t MSVCRT_locale DECLSPEC_HIDDEN;
 extern unsigned int MSVCRT___lc_codepage;
 extern int MSVCRT___lc_collate_cp;
@@ -952,6 +952,8 @@ void __cdecl MSVCRT__invalid_parameter(const MSVCRT_wchar_t *expr, const MSVCRT_
                                        const MSVCRT_wchar_t *file, unsigned int line, MSVCRT_uintptr_t arg);
 int __cdecl      MSVCRT__toupper_l(int,MSVCRT__locale_t);
 int __cdecl      MSVCRT__tolower_l(int,MSVCRT__locale_t);
+int __cdecl      MSVCRT__strnicoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
+int __cdecl      MSVCRT_strncoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 
 /* Maybe one day we'll enable the invalid parameter handlers with the full set of information (msvcrXXd)
  *      #define MSVCRT_INVALID_PMT(x) MSVCRT_call_invalid_parameter_handler(x, __FUNCTION__, __FILE__, __LINE__, 0)
@@ -984,6 +986,7 @@ int pf_printf_w(puts_clbk_w, void*, const MSVCRT_wchar_t*, MSVCRT__locale_t,
 printf_arg arg_clbk_valist(void*, int, int, __ms_va_list*) DECLSPEC_HIDDEN;
 
 #define MSVCRT_FLT_MIN 1.175494351e-38F
+#define MSVCRT_DBL_MIN 2.2250738585072014e-308
 #define MSVCRT__OVERFLOW  3
 #define MSVCRT__UNDERFLOW 4
 
@@ -991,5 +994,10 @@ typedef struct
 {
     float f;
 } MSVCRT__CRT_FLOAT;
+
+typedef struct
+{
+    double x;
+} MSVCRT__CRT_DOUBLE;
 
 #endif /* __WINE_MSVCRT_H */

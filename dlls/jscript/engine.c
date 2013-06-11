@@ -291,6 +291,7 @@ HRESULT create_exec_ctx(script_ctx_t *script_ctx, IDispatch *this_obj, jsdisp_t 
 
     ctx->ref = 1;
     ctx->is_global = is_global;
+    ctx->ret = jsval_undefined();
 
     /* ECMA-262 3rd Edition    11.2.3.7 */
     if(this_obj) {
@@ -340,6 +341,7 @@ void exec_release(exec_ctx_t *ctx)
         IDispatch_Release(ctx->this_obj);
     if(ctx->script)
         script_release(ctx->script);
+    jsval_release(ctx->ret);
     heap_free(ctx->stack);
     heap_free(ctx);
 }
@@ -592,12 +594,9 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
     IDispatchEx *dispex;
     DISPID id, var_id;
     BSTR name = NULL;
-    jsval_t val;
     HRESULT hres;
 
     TRACE("\n");
-
-    val = stack_pop(ctx);
 
     assert(is_number(stack_top(ctx)));
     id = get_number(stack_top(ctx));
@@ -605,7 +604,6 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
     var_obj = stack_topn_objid(ctx, 1, &var_id);
     if(!var_obj) {
         FIXME("invalid ref\n");
-        jsval_release(val);
         return E_FAIL;
     }
 
@@ -619,10 +617,8 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
             if(hres == S_OK)
                 hres = IDispatchEx_GetMemberName(dispex, id, &name);
             IDispatchEx_Release(dispex);
-            if(FAILED(hres)) {
-                jsval_release(val);
+            if(FAILED(hres))
                 return hres;
-            }
         }else {
             TRACE("No IDispatchEx\n");
         }
@@ -636,7 +632,6 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
         if(!str)
             return E_OUTOFMEMORY;
 
-        jsval_release(val);
         stack_pop(ctx);
         stack_push(ctx, jsval_number(id)); /* safe, just after pop() */
 
@@ -649,7 +644,6 @@ static HRESULT interp_forin(exec_ctx_t *ctx)
     }else {
         stack_popn(ctx, 4);
         ctx->ip = arg;
-        return stack_push(ctx, val);
     }
     return S_OK;
 }
@@ -795,8 +789,6 @@ static HRESULT interp_end_finally(exec_ctx_t *ctx)
 
     TRACE("\n");
 
-    v = stack_pop(ctx);
-
     assert(is_bool(stack_top(ctx)));
     if(!get_bool(stack_top(ctx))) {
         TRACE("passing exception\n");
@@ -809,7 +801,7 @@ static HRESULT interp_end_finally(exec_ctx_t *ctx)
     }
 
     stack_popn(ctx, 2);
-    return stack_push(ctx, v);
+    return S_OK;
 }
 
 /* ECMA-262 3rd Edition    13 */
@@ -1455,22 +1447,13 @@ static HRESULT add_eval(script_ctx_t *ctx, jsval_t lval, jsval_t rval, jsval_t *
             hres = to_string(ctx, r, &rstr);
 
         if(SUCCEEDED(hres)) {
-            unsigned len1, len2;
             jsstr_t *ret_str;
 
-            len1 = jsstr_length(lstr);
-            len2 = jsstr_length(rstr);
-
-            ret_str = jsstr_alloc_buf(len1+len2);
-            if(ret_str) {
-                if(len1)
-                    memcpy(ret_str->str, lstr->str, len1*sizeof(WCHAR));
-                if(len2)
-                    memcpy(ret_str->str+len1, rstr->str, len2*sizeof(WCHAR));
+            ret_str = jsstr_concat(lstr, rstr);
+            if(ret_str)
                 *ret = jsval_string(ret_str);
-            }else {
+            else
                 hres = E_OUTOFMEMORY;
-            }
         }
 
         jsstr_release(lstr);
@@ -1639,16 +1622,22 @@ static HRESULT interp_delete_ident(exec_ctx_t *ctx)
     if(FAILED(hres))
         return hres;
 
-    if(exprval.type != EXPRVAL_IDREF) {
+    switch(exprval.type) {
+    case EXPRVAL_IDREF:
+        hres = disp_delete(exprval.u.idref.disp, exprval.u.idref.id, &ret);
+        IDispatch_Release(exprval.u.idref.disp);
+        if(FAILED(hres))
+            return ret;
+        break;
+    case EXPRVAL_INVALID:
+        ret = TRUE;
+        break;
+    default:
         FIXME("Unsupported exprval\n");
         exprval_release(&exprval);
         return E_NOTIMPL;
     }
 
-    hres = disp_delete(exprval.u.idref.disp, exprval.u.idref.id, &ret);
-    IDispatch_Release(exprval.u.idref.disp);
-    if(FAILED(hres))
-        return ret;
 
     return stack_push(ctx, jsval_bool(ret));
 }
@@ -2347,9 +2336,11 @@ static HRESULT interp_jmp_z(exec_ctx_t *ctx)
 
 static HRESULT interp_pop(exec_ctx_t *ctx)
 {
-    TRACE("\n");
+    const unsigned arg = get_op_uint(ctx, 0);
 
-    stack_popn(ctx, 1);
+    TRACE("%u\n", arg);
+
+    stack_popn(ctx, arg);
     return S_OK;
 }
 
@@ -2358,6 +2349,15 @@ static HRESULT interp_ret(exec_ctx_t *ctx)
     TRACE("\n");
 
     ctx->ip = -1;
+    return S_OK;
+}
+
+static HRESULT interp_setret(exec_ctx_t *ctx)
+{
+    TRACE("\n");
+
+    jsval_release(ctx->ret);
+    ctx->ret = stack_pop(ctx);
     return S_OK;
 }
 
@@ -2421,10 +2421,6 @@ static HRESULT unwind_exception(exec_ctx_t *ctx)
             return hres;
 
         hres = stack_push(ctx, jsval_bool(FALSE));
-        if(FAILED(hres))
-            return hres;
-
-        hres = stack_push(ctx, jsval_undefined());
     }
 
     return hres;
@@ -2485,11 +2481,10 @@ static HRESULT enter_bytecode(script_ctx_t *ctx, bytecode_t *code, function_code
 
     assert(exec_ctx->top == prev_top+1 || exec_ctx->top == prev_top);
     assert(exec_ctx->scope_chain == prev_scope);
+    assert(exec_ctx->top == prev_top);
 
-    if(exec_ctx->top == prev_top)
-        *ret = jsval_undefined();
-    else
-        *ret = stack_pop(exec_ctx);
+    *ret = exec_ctx->ret;
+    exec_ctx->ret = jsval_undefined();
     return S_OK;
 }
 

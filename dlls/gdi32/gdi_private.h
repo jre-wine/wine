@@ -290,7 +290,6 @@ typedef struct
 extern INT WineEngAddFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
 extern HANDLE WineEngAddFontMemResourceEx(PVOID, DWORD, PVOID, LPDWORD) DECLSPEC_HIDDEN;
 extern BOOL WineEngCreateScalableFontResource(DWORD, LPCWSTR, LPCWSTR, LPCWSTR) DECLSPEC_HIDDEN;
-extern BOOL WineEngDestroyFontInstance(HFONT handle) DECLSPEC_HIDDEN;
 extern BOOL WineEngInit(void) DECLSPEC_HIDDEN;
 extern BOOL WineEngRemoveFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
 
@@ -438,6 +437,22 @@ static inline void offset_rect( RECT *rect, int offset_x, int offset_y )
     rect->top    += offset_y;
     rect->right  += offset_x;
     rect->bottom += offset_y;
+}
+
+static inline void order_rect( RECT *rect )
+{
+    if (rect->left > rect->right)
+    {
+        int tmp = rect->left;
+        rect->left = rect->right;
+        rect->right = tmp;
+    }
+    if (rect->top > rect->bottom)
+    {
+        int tmp = rect->top;
+        rect->top = rect->bottom;
+        rect->bottom = tmp;
+    }
 }
 
 static inline void get_bounding_rect( RECT *rect, int x, int y, int width, int height )

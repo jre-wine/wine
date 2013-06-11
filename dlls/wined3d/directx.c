@@ -412,8 +412,8 @@ ULONG CDECL wined3d_decref(struct wined3d *wined3d)
     return refcount;
 }
 
-/* GL locking is done by the caller */
-static inline BOOL test_arb_vs_offset_limit(const struct wined3d_gl_info *gl_info)
+/* Context activation is done by the caller. */
+static BOOL test_arb_vs_offset_limit(const struct wined3d_gl_info *gl_info)
 {
     GLuint prog;
     BOOL ret = FALSE;
@@ -523,8 +523,6 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     /* No PBO -> No point in testing them. */
     if (!gl_info->supported[ARB_PIXEL_BUFFER_OBJECT]) return;
 
-    ENTER_GL();
-
     while (gl_info->gl_ops.gl.p_glGetError());
     gl_info->gl_ops.gl.p_glGenTextures(1, &texture);
     gl_info->gl_ops.gl.p_glBindTexture(GL_TEXTURE_2D, texture);
@@ -542,20 +540,16 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     checkGLcall("Loading the PBO test texture");
 
     GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-    LEAVE_GL();
 
     gl_info->gl_ops.gl.p_glFinish(); /* just to be sure */
 
     memset(check, 0, sizeof(check));
-    ENTER_GL();
     gl_info->gl_ops.gl.p_glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, check);
     checkGLcall("Reading back the PBO test texture");
 
     gl_info->gl_ops.gl.p_glDeleteTextures(1, &texture);
     GL_EXTCALL(glDeleteBuffersARB(1, &pbo));
     checkGLcall("PBO test cleanup");
-
-    LEAVE_GL();
 
     if (memcmp(check, pattern, sizeof(check)))
     {
@@ -613,11 +607,9 @@ static BOOL match_allows_spec_alpha(const struct wined3d_gl_info *gl_info, const
     if (!gl_info->supported[EXT_SECONDARY_COLOR])
         return FALSE;
 
-    ENTER_GL();
     while (gl_info->gl_ops.gl.p_glGetError());
     GL_EXTCALL(glSecondaryColorPointerEXT)(4, GL_UNSIGNED_BYTE, 4, data);
     error = gl_info->gl_ops.gl.p_glGetError();
-    LEAVE_GL();
 
     if (error == GL_NO_ERROR)
     {
@@ -648,14 +640,12 @@ static BOOL match_broken_nv_clip(const struct wined3d_gl_info *gl_info, const ch
 
     if (!gl_info->supported[NV_VERTEX_PROGRAM2_OPTION]) return FALSE;
 
-    ENTER_GL();
     while (gl_info->gl_ops.gl.p_glGetError());
 
     GL_EXTCALL(glGenProgramsARB(1, &prog));
     if(!prog)
     {
         ERR("Failed to create the NVvp clip test program\n");
-        LEAVE_GL();
         return FALSE;
     }
     GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, prog));
@@ -675,7 +665,6 @@ static BOOL match_broken_nv_clip(const struct wined3d_gl_info *gl_info, const ch
     GL_EXTCALL(glDeleteProgramsARB(1, &prog));
     checkGLcall("GL_NV_vertex_program2_option result.clip[] test cleanup");
 
-    LEAVE_GL();
     return ret;
 }
 
@@ -690,8 +679,6 @@ static BOOL match_fbo_tex_update(const struct wined3d_gl_info *gl_info, const ch
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) return FALSE;
 
     memset(data, 0xcc, sizeof(data));
-
-    ENTER_GL();
 
     gl_info->gl_ops.gl.p_glGenTextures(1, &tex);
     gl_info->gl_ops.gl.p_glBindTexture(GL_TEXTURE_2D, tex);
@@ -729,8 +716,6 @@ static BOOL match_fbo_tex_update(const struct wined3d_gl_info *gl_info, const ch
     gl_info->gl_ops.gl.p_glDeleteTextures(1, &tex);
     checkGLcall("glDeleteTextures");
 
-    LEAVE_GL();
-
     return *(DWORD *)data == 0x11111111;
 }
 
@@ -742,8 +727,6 @@ static BOOL match_broken_rgba16(const struct wined3d_gl_info *gl_info, const cha
      * This leads to graphical bugs in Half Life 2 and Unreal engine games. */
     GLuint tex;
     GLint size;
-
-    ENTER_GL();
 
     gl_info->gl_ops.gl.p_glGenTextures(1, &tex);
     gl_info->gl_ops.gl.p_glBindTexture(GL_TEXTURE_2D, tex);
@@ -758,8 +741,6 @@ static BOOL match_broken_rgba16(const struct wined3d_gl_info *gl_info, const cha
     checkGLcall("glBindTexture");
     gl_info->gl_ops.gl.p_glDeleteTextures(1, &tex);
     checkGLcall("glDeleteTextures");
-
-    LEAVE_GL();
 
     return size < 16;
 }
@@ -1104,6 +1085,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX465,     "NVIDIA GeForce GTX 465",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX470,     "NVIDIA GeForce GTX 470",           DRIVER_NVIDIA_GEFORCE6,  1280},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX480,     "NVIDIA GeForce GTX 480",           DRIVER_NVIDIA_GEFORCE6,  1536},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT520,      "NVIDIA GeForce GT 520",            DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT540M,     "NVIDIA GeForce GT 540M",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX550,     "NVIDIA GeForce GTX 550 Ti",        DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT555M,     "NVIDIA GeForce GT 555M",           DRIVER_NVIDIA_GEFORCE6,  1024},
@@ -1111,9 +1093,14 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX560,     "NVIDIA GeForce GTX 560",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX570,     "NVIDIA GeForce GTX 570",           DRIVER_NVIDIA_GEFORCE6,  1280},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX580,     "NVIDIA GeForce GTX 580",           DRIVER_NVIDIA_GEFORCE6,  1536},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT610,      "NVIDIA GeForce GT 610",            DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT630M,     "NVIDIA GeForce GT 630M",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT640M,     "NVIDIA GeForce GT 640M",           DRIVER_NVIDIA_GEFORCE6,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT650M,     "NVIDIA GeForce GT 650M",           DRIVER_NVIDIA_GEFORCE6,  2048},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX650,     "NVIDIA GeForce GTX 650",           DRIVER_NVIDIA_GEFORCE6,  1024},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX650TI,   "NVIDIA GeForce GTX 650 Ti",        DRIVER_NVIDIA_GEFORCE6,  1024},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX660,     "NVIDIA GeForce GTX 660",           DRIVER_NVIDIA_GEFORCE6,  2048},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX660TI,   "NVIDIA GeForce GTX 660 Ti",        DRIVER_NVIDIA_GEFORCE6,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX670,     "NVIDIA GeForce GTX 670",           DRIVER_NVIDIA_GEFORCE6,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX680,     "NVIDIA GeForce GTX 680",           DRIVER_NVIDIA_GEFORCE6,  2048},
 
@@ -1514,9 +1501,14 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
         {
             {"GTX 680",     CARD_NVIDIA_GEFORCE_GTX680},    /* Geforce 600 - highend */
             {"GTX 670",     CARD_NVIDIA_GEFORCE_GTX670},    /* Geforce 600 - midend high */
+            {"GTX 660 Ti",  CARD_NVIDIA_GEFORCE_GTX660TI},  /* Geforce 600 - midend high */
+            {"GTX 660",     CARD_NVIDIA_GEFORCE_GTX660},    /* Geforce 600 - midend high */
+            {"GTX 650 Ti",  CARD_NVIDIA_GEFORCE_GTX650TI},  /* Geforce 600 - lowend */
+            {"GTX 650",     CARD_NVIDIA_GEFORCE_GTX650},    /* Geforce 600 - lowend */
             {"GT 650M",     CARD_NVIDIA_GEFORCE_GT650M},    /* Geforce 600 - midend mobile */
             {"GT 640M",     CARD_NVIDIA_GEFORCE_GT640M},    /* Geforce 600 - midend mobile */
             {"GT 630M",     CARD_NVIDIA_GEFORCE_GT630M},    /* Geforce 600 - midend mobile */
+            {"GT 610",      CARD_NVIDIA_GEFORCE_GT610},     /* Geforce 600 - lowend */
             {"GTX 580",     CARD_NVIDIA_GEFORCE_GTX580},    /* Geforce 500 - highend */
             {"GTX 570",     CARD_NVIDIA_GEFORCE_GTX570},    /* Geforce 500 - midend high */
             {"GTX 560 Ti",  CARD_NVIDIA_GEFORCE_GTX560TI},  /* Geforce 500 - midend */
@@ -1524,6 +1516,7 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
             {"GT 555M",     CARD_NVIDIA_GEFORCE_GT555M},    /* Geforce 500 - midend mobile */
             {"GTX 550 Ti",  CARD_NVIDIA_GEFORCE_GTX550},    /* Geforce 500 - midend */
             {"GT 540M",     CARD_NVIDIA_GEFORCE_GT540M},    /* Geforce 500 - midend mobile */
+            {"GT 520",      CARD_NVIDIA_GEFORCE_GT520},     /* Geforce 500 - lowend */
             {"GTX 480",     CARD_NVIDIA_GEFORCE_GTX480},    /* Geforce 400 - highend */
             {"GTX 470",     CARD_NVIDIA_GEFORCE_GTX470},    /* Geforce 400 - midend high */
             {"GTX 465",     CARD_NVIDIA_GEFORCE_GTX465},    /* Geforce 400 - midend */
@@ -2038,6 +2031,7 @@ static enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_i
         /* Kepler */
         {"NVE4",    CARD_NVIDIA_GEFORCE_GTX680},
         /* Fermi */
+        {"NVD9",    CARD_NVIDIA_GEFORCE_GT520},
         {"NVCF",    CARD_NVIDIA_GEFORCE_GTX550},
         {"NVCE",    CARD_NVIDIA_GEFORCE_GTX560},
         {"NVC8",    CARD_NVIDIA_GEFORCE_GTX570},
@@ -2608,13 +2602,10 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
 
     TRACE("adapter %p.\n", adapter);
 
-    ENTER_GL();
-
     gl_renderer_str = (const char *)gl_info->gl_ops.gl.p_glGetString(GL_RENDERER);
     TRACE("GL_RENDERER: %s.\n", debugstr_a(gl_renderer_str));
     if (!gl_renderer_str)
     {
-        LEAVE_GL();
         ERR("Received a NULL GL_RENDERER.\n");
         return FALSE;
     }
@@ -2623,7 +2614,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     TRACE("GL_VENDOR: %s.\n", debugstr_a(gl_vendor_str));
     if (!gl_vendor_str)
     {
-        LEAVE_GL();
         ERR("Received a NULL GL_VENDOR.\n");
         return FALSE;
     }
@@ -2633,7 +2623,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     TRACE("GL_VERSION: %s.\n", debugstr_a(gl_version_str));
     if (!gl_version_str)
     {
-        LEAVE_GL();
         ERR("Received a NULL GL_VERSION.\n");
         return FALSE;
     }
@@ -2643,12 +2632,9 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     GL_Extensions = (const char *)gl_info->gl_ops.gl.p_glGetString(GL_EXTENSIONS);
     if (!GL_Extensions)
     {
-        LEAVE_GL();
         ERR("Received a NULL GL_EXTENSIONS.\n");
         return FALSE;
     }
-
-    LEAVE_GL();
 
     memset(gl_info->supported, 0, sizeof(gl_info->supported));
     gl_info->supported[WINED3D_GL_EXT_NONE] = TRUE;
@@ -2792,8 +2778,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         gl_info->supported[ARB_FRAMEBUFFER_SRGB] = FALSE;
     }
 
-    ENTER_GL();
-
     wined3d_adapter_init_limits(gl_info);
 
     if (gl_info->supported[ARB_VERTEX_PROGRAM] && test_arb_vs_offset_limit(gl_info))
@@ -2812,8 +2796,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     }
 
     checkGLcall("extension detection");
-
-    LEAVE_GL();
 
     adapter->fragment_pipe = select_fragment_implementation(gl_info);
     adapter->shader_backend = select_shader_backend(gl_info);

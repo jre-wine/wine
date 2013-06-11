@@ -915,9 +915,9 @@ static BOOL get_font_entry( union sysparam_all_entry *entry, UINT int_param, voi
         switch (load_entry( &entry->hdr, &font, sizeof(font) ))
         {
         case sizeof(font):
-            entry->font.val = font;
             if (font.lfHeight > 0) /* positive height value means points ( inch/72 ) */
                 font.lfHeight = -MulDiv( font.lfHeight, get_display_dpi(), 72 );
+            entry->font.val = font;
             break;
         case sizeof(LOGFONT16): /* win9x-winME format */
             SYSPARAMS_LogFont16To32W( (LOGFONT16 *)&font, &entry->font.val );
@@ -1126,8 +1126,8 @@ static BOOL set_entry( void *ptr, UINT int_param, void *ptr_param, UINT flags )
                                                     name ##_VALNAME }, data, sizeof(data) }
 
 #define PATH_ENTRY(name) \
-    struct sysparam_binary_entry entry_##name = { { get_path_entry, set_path_entry, init_path_entry, \
-                                                    name ##_VALNAME } }
+    struct sysparam_path_entry entry_##name = { { get_path_entry, set_path_entry, init_path_entry, \
+                                                  name ##_VALNAME } }
 
 #define FONT_ENTRY(name,weight) \
     struct sysparam_font_entry entry_##name = { { get_font_entry, set_font_entry, init_font_entry, \

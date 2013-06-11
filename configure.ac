@@ -796,12 +796,20 @@ case $host_os in
     else
         WINE_NOTICE([QuickTime ${notice_platform}development files not found, video decoding won't be supported.])
     fi
-    dnl Enable quartz driver on Mac OS X
     if test "$ac_cv_header_Carbon_Carbon_h" = "yes"
     then
         AC_SUBST(CARBONLIB,"-framework Carbon")
-        enable_winequartz_drv=${enable_winequartz_drv:-yes}
     fi
+
+    dnl Enable Mac driver on Mac OS X 10.6 or later
+    if test "$ac_cv_header_ApplicationServices_ApplicationServices_h" = "yes"
+    then
+        ac_save_LIBS="$LIBS"
+        LIBS="$LIBS $APPLICATIONSERVICESLIB"
+        AC_CHECK_FUNC(CGDisplayModeGetWidth,enable_winemac_drv=${enable_winemac_drv:-yes})
+        LIBS="$ac_save_LIBS"
+    fi
+
     dnl Check for Xcode 3.x broken 16-bit support
     if test "x$enable_win16" = "xyes"
     then
@@ -899,7 +907,7 @@ case $host_os in
 esac
 
 enable_wineqtdecoder=${enable_wineqtdecoder:-no}
-enable_winequartz_drv=${enable_winequartz_drv:-no}
+enable_winemac_drv=${enable_winemac_drv:-no}
 
 if test "$LIBEXT" = "a"; then
   AC_MSG_ERROR(
@@ -2529,12 +2537,24 @@ WINE_CONFIG_DLL(advpack,,[implib])
 WINE_CONFIG_TEST(dlls/advpack/tests)
 WINE_CONFIG_DLL(amstream)
 WINE_CONFIG_TEST(dlls/amstream/tests)
+WINE_CONFIG_DLL(api-ms-win-core-winrt-error-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-winrt-string-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-advapi32-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-advapi32-l2-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-normaliz-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-ole32-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-shell32-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-shlwapi-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-shlwapi-l2-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-user32-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-downlevel-version-l1-1-0)
 WINE_CONFIG_DLL(apphelp)
 WINE_CONFIG_TEST(dlls/apphelp/tests)
 WINE_CONFIG_DLL(appwiz.cpl,,[po])
 WINE_CONFIG_DLL(atl,,[implib])
 WINE_CONFIG_TEST(dlls/atl/tests)
 WINE_CONFIG_DLL(atl100,,[implib])
+WINE_CONFIG_TEST(dlls/atl100/tests)
 WINE_CONFIG_DLL(atl80)
 WINE_CONFIG_DLL(authz)
 WINE_CONFIG_DLL(avicap32,,[implib])
@@ -2580,6 +2600,7 @@ WINE_CONFIG_DLL(d3d10,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10/tests)
 WINE_CONFIG_DLL(d3d10core,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10core/tests)
+WINE_CONFIG_DLL(d3d11)
 WINE_CONFIG_DLL(d3d8,,[implib])
 WINE_CONFIG_TEST(dlls/d3d8/tests)
 WINE_CONFIG_DLL(d3d9,,[implib])
@@ -3044,13 +3065,13 @@ WINE_CONFIG_LIB(winecrt0)
 WINE_CONFIG_DLL(wined3d,,[implib])
 WINE_CONFIG_DLL(winegstreamer)
 WINE_CONFIG_DLL(winejoystick.drv)
+WINE_CONFIG_DLL(winemac.drv)
 WINE_CONFIG_DLL(winemapi)
 WINE_CONFIG_DLL(winemp3.acm)
 WINE_CONFIG_DLL(wineoss.drv)
 WINE_CONFIG_DLL(wineps.drv,,[install-lib,po])
 WINE_CONFIG_DLL(wineps16.drv16,enable_win16)
 WINE_CONFIG_DLL(wineqtdecoder)
-WINE_CONFIG_DLL(winequartz.drv)
 WINE_CONFIG_DLL(winex11.drv)
 WINE_CONFIG_DLL(wing.dll16,enable_win16)
 WINE_CONFIG_DLL(wing32)
