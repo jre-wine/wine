@@ -1,8 +1,14 @@
-wine-unstable (1.5.20-1) UNRELEASED; urgency=low
+wine-unstable (1.5.20-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.20, released Dec 21, 2012.
+    - A bunch of dlls with ugly names for API sets support.
+    - More ATL functions implemented.
+    - Still more C++ runtime functions.
+    - Several text rendering fixes.
+    - PostScript driver improvements.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 04:37:23 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 04:37:30 +0000
 
 wine-unstable (1.5.19-1) unstable; urgency=low
 
