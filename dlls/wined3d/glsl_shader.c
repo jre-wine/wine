@@ -2878,7 +2878,7 @@ static void shader_glsl_conditional_move(const struct wined3d_shader_instruction
             break;
     }
 
-    if (shader_is_scalar(&ins->src[0].reg))
+    if (shader_is_scalar(&ins->dst[0].reg) || shader_is_scalar(&ins->src[0].reg))
     {
         write_mask = shader_glsl_append_dst(ins->ctx->buffer, ins);
         shader_glsl_add_src_param(ins, &ins->src[0], write_mask, &src0_param);
@@ -5126,8 +5126,10 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct wined3d_shader_buf
         {
             case WINED3D_TOP_BUMPENVMAP_LUMINANCE:
                 lum_map |= 1 << stage;
+                /* fall through */
             case WINED3D_TOP_BUMPENVMAP:
                 bump_map |= 1 << stage;
+                /* fall through */
             case WINED3D_TOP_BLEND_TEXTURE_ALPHA:
             case WINED3D_TOP_BLEND_TEXTURE_ALPHA_PM:
                 tex_map |= 1 << stage;
@@ -6195,7 +6197,8 @@ static void shader_glsl_get_caps(const struct wined3d_gl_info *gl_info, struct s
     UINT shader_model;
 
     if (gl_info->supported[EXT_GPU_SHADER4] && gl_info->supported[ARB_SHADER_BIT_ENCODING]
-            && gl_info->supported[ARB_GEOMETRY_SHADER4] && gl_info->glsl_version >= MAKEDWORD_VERSION(1, 50))
+            && gl_info->supported[ARB_GEOMETRY_SHADER4] && gl_info->glsl_version >= MAKEDWORD_VERSION(1, 50)
+            && gl_info->supported[ARB_DRAW_ELEMENTS_BASE_VERTEX] && gl_info->supported[ARB_DRAW_INSTANCED])
         shader_model = 4;
     /* ARB_shader_texture_lod or EXT_gpu_shader4 is required for the SM3
      * texldd and texldl instructions. */

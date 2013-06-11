@@ -3406,7 +3406,7 @@ static HRESULT WINAPI ID3DXEffectImpl_SetArrayRange(ID3DXEffect *iface, D3DXHAND
 }
 
 /*** ID3DXEffect methods ***/
-static HRESULT WINAPI ID3DXEffectImpl_GetPool(ID3DXEffect *iface, LPD3DXEFFECTPOOL *pool)
+static HRESULT WINAPI ID3DXEffectImpl_GetPool(ID3DXEffect *iface, ID3DXEffectPool **pool)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
 
@@ -3609,7 +3609,7 @@ static HRESULT WINAPI ID3DXEffectImpl_OnResetDevice(ID3DXEffect* iface)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_SetStateManager(ID3DXEffect *iface, LPD3DXEFFECTSTATEMANAGER manager)
+static HRESULT WINAPI ID3DXEffectImpl_SetStateManager(ID3DXEffect *iface, ID3DXEffectStateManager *manager)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
 
@@ -3623,7 +3623,7 @@ static HRESULT WINAPI ID3DXEffectImpl_SetStateManager(ID3DXEffect *iface, LPD3DX
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_GetStateManager(ID3DXEffect *iface, LPD3DXEFFECTSTATEMANAGER *manager)
+static HRESULT WINAPI ID3DXEffectImpl_GetStateManager(ID3DXEffect *iface, ID3DXEffectStateManager **manager)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
 
@@ -4395,7 +4395,7 @@ static HRESULT WINAPI ID3DXEffectCompilerImpl_GetLiteral(ID3DXEffectCompiler *if
 }
 
 static HRESULT WINAPI ID3DXEffectCompilerImpl_CompileEffect(ID3DXEffectCompiler *iface, DWORD flags,
-        LPD3DXBUFFER *effect, LPD3DXBUFFER *error_msgs)
+        ID3DXBuffer **effect, ID3DXBuffer **error_msgs)
 {
     struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
 
@@ -5871,13 +5871,8 @@ err_out:
     return hr;
 }
 
-HRESULT WINAPI D3DXCreateEffectCompiler(LPCSTR srcdata,
-                                        UINT srcdatalen,
-                                        CONST D3DXMACRO *defines,
-                                        LPD3DXINCLUDE include,
-                                        DWORD flags,
-                                        LPD3DXEFFECTCOMPILER *compiler,
-                                        LPD3DXBUFFER *parse_errors)
+HRESULT WINAPI D3DXCreateEffectCompiler(const char *srcdata, UINT srcdatalen, const D3DXMACRO *defines,
+        ID3DXInclude *include, DWORD flags, ID3DXEffectCompiler **compiler, ID3DXBuffer **parse_errors)
 {
     struct ID3DXEffectCompilerImpl *object;
     HRESULT hr;
@@ -5974,7 +5969,7 @@ static const struct ID3DXEffectPoolVtbl ID3DXEffectPool_Vtbl =
     ID3DXEffectPoolImpl_Release
 };
 
-HRESULT WINAPI D3DXCreateEffectPool(LPD3DXEFFECTPOOL *pool)
+HRESULT WINAPI D3DXCreateEffectPool(ID3DXEffectPool **pool)
 {
     struct ID3DXEffectPoolImpl *object;
 
@@ -6137,8 +6132,8 @@ HRESULT WINAPI D3DXCreateEffectFromResourceA(struct IDirect3DDevice9 *device, HM
     return D3DXCreateEffectFromResourceExA(device, srcmodule, srcresource, defines, include, NULL, flags, pool, effect, compilationerrors);
 }
 
-HRESULT WINAPI D3DXCreateEffectCompilerFromFileW(LPCWSTR srcfile, const D3DXMACRO *defines, LPD3DXINCLUDE include,
-    DWORD flags, LPD3DXEFFECTCOMPILER *effectcompiler, LPD3DXBUFFER *parseerrors)
+HRESULT WINAPI D3DXCreateEffectCompilerFromFileW(const WCHAR *srcfile, const D3DXMACRO *defines,
+        ID3DXInclude *include, DWORD flags, ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
     LPVOID buffer;
     HRESULT ret;
@@ -6160,8 +6155,8 @@ HRESULT WINAPI D3DXCreateEffectCompilerFromFileW(LPCWSTR srcfile, const D3DXMACR
     return ret;
 }
 
-HRESULT WINAPI D3DXCreateEffectCompilerFromFileA(LPCSTR srcfile, const D3DXMACRO *defines, LPD3DXINCLUDE include,
-    DWORD flags, LPD3DXEFFECTCOMPILER *effectcompiler, LPD3DXBUFFER *parseerrors)
+HRESULT WINAPI D3DXCreateEffectCompilerFromFileA(const char *srcfile, const D3DXMACRO *defines,
+        ID3DXInclude *include, DWORD flags, ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
     LPWSTR srcfileW;
     HRESULT ret;
@@ -6182,8 +6177,9 @@ HRESULT WINAPI D3DXCreateEffectCompilerFromFileA(LPCSTR srcfile, const D3DXMACRO
     return ret;
 }
 
-HRESULT WINAPI D3DXCreateEffectCompilerFromResourceA(HMODULE srcmodule, LPCSTR srcresource, const D3DXMACRO *defines,
-    LPD3DXINCLUDE include, DWORD flags, LPD3DXEFFECTCOMPILER *effectcompiler, LPD3DXBUFFER *parseerrors)
+HRESULT WINAPI D3DXCreateEffectCompilerFromResourceA(HMODULE srcmodule, const char *srcresource,
+        const D3DXMACRO *defines, ID3DXInclude *include, DWORD flags,
+        ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
     HRSRC resinfo;
 
@@ -6208,8 +6204,9 @@ HRESULT WINAPI D3DXCreateEffectCompilerFromResourceA(HMODULE srcmodule, LPCSTR s
     return D3DXERR_INVALIDDATA;
 }
 
-HRESULT WINAPI D3DXCreateEffectCompilerFromResourceW(HMODULE srcmodule, LPCWSTR srcresource, const D3DXMACRO *defines,
-    LPD3DXINCLUDE include, DWORD flags, LPD3DXEFFECTCOMPILER *effectcompiler, LPD3DXBUFFER *parseerrors)
+HRESULT WINAPI D3DXCreateEffectCompilerFromResourceW(HMODULE srcmodule, const WCHAR *srcresource,
+        const D3DXMACRO *defines, ID3DXInclude *include, DWORD flags,
+        ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
     HRSRC resinfo;
 

@@ -42,7 +42,7 @@ char* __cdecl _Getmonths(void);
 void* __cdecl _Gettnames(void);
 unsigned int __cdecl ___lc_codepage_func(void);
 LCID* __cdecl ___lc_handle_func(void);
-static const locale_facet* locale__Getfacet(const locale*, MSVCP_size_t);
+const locale_facet* __thiscall locale__Getfacet(const locale*, MSVCP_size_t, MSVCP_bool);
 
 typedef int category;
 
@@ -98,8 +98,11 @@ typedef struct {
 /* ?_Id_cnt@id@locale@std@@0HA */
 int locale_id__Id_cnt = 0;
 
-static locale__Locimp *global_locale;
 static locale classic_locale;
+
+/* ?_Global@_Locimp@locale@std@@0PAV123@A */
+/* ?_Global@_Locimp@locale@std@@0PEAV123@EA */
+locale__Locimp *global_locale = NULL;
 
 /* ?_Clocptr@_Locimp@locale@std@@0PAV123@A */
 /* ?_Clocptr@_Locimp@locale@std@@0PEAV123@EA */
@@ -693,9 +696,10 @@ collate* __thiscall collate_char_ctor_refs(collate *this, MSVCP_size_t refs)
     return collate_char_ctor_name(this, "C", refs);
 }
 
-/* ??1?$collate@D@std@@MAE@XZ */
-/* ??1?$collate@D@std@@MEAA@XZ */
-static void collate_char_dtor(collate *this)
+/* ??1?$collate@D@std@@UAE@XZ */
+/* ??1?$collate@D@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(collate_char_dtor, 4)
+void __thiscall collate_char_dtor(collate *this)
 {
     TRACE("(%p)\n", this);
 }
@@ -888,11 +892,10 @@ collate* __thiscall collate_short_ctor_refs(collate *this, MSVCP_size_t refs)
     return ret;
 }
 
-/* ??1?$collate@_W@std@@MAE@XZ */
-/* ??1?$collate@_W@std@@MEAA@XZ */
-/* ??1?$collate@G@std@@MAE@XZ */
-/* ??1?$collate@G@std@@MEAA@XZ */
-static void collate_wchar_dtor(collate *this)
+/* ??1?$collate@G@std@@UAE@XZ */
+/* ??1?$collate@G@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(collate_wchar_dtor, 4)
+void __thiscall collate_wchar_dtor(collate *this)
 {
     TRACE("(%p)\n", this);
 }
@@ -1166,9 +1169,10 @@ ctype_char* __thiscall ctype_char_ctor(ctype_char *this)
     return ctype_char_ctor_table(this, NULL, FALSE, 0);
 }
 
-/* ??1?$ctype@D@std@@MAE@XZ */
-/* ??1?$ctype@D@std@@MEAA@XZ */
-static void ctype_char_dtor(ctype_char *this)
+/* ??1?$ctype@D@std@@UAE@XZ */
+/* ??1?$ctype@D@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(ctype_char_dtor, 4)
+void __thiscall ctype_char_dtor(ctype_char *this)
 {
     TRACE("(%p)\n", this);
     ctype_char__Tidy(this);
@@ -1314,7 +1318,7 @@ ctype_char* ctype_char_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_char_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_char_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (ctype_char*)fac;
@@ -1650,11 +1654,10 @@ ctype_wchar* __thiscall ctype_short_ctor(ctype_wchar *this)
     return ret;
 }
 
-/* ??1?$ctype@_W@std@@MAE@XZ */
-/* ??1?$ctype@_W@std@@MEAA@XZ */
-/* ??1?$ctype@G@std@@MAE@XZ */
-/* ??1?$ctype@G@std@@MEAA@XZ */
-static void ctype_wchar_dtor(ctype_wchar *this)
+/* ??1?$ctype@G@std@@UAE@XZ */
+/* ??1?$ctype@G@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(ctype_wchar_dtor, 4)
+void __thiscall ctype_wchar_dtor(ctype_wchar *this)
 {
     TRACE("(%p)\n", this);
     if(this->ctype.delfl)
@@ -1962,7 +1965,7 @@ ctype_wchar* ctype_wchar_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_wchar_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_wchar_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (ctype_wchar*)fac;
@@ -1990,7 +1993,7 @@ ctype_wchar* ctype_short_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_short_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&ctype_short_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (ctype_wchar*)fac;
@@ -2401,9 +2404,10 @@ codecvt_char* __thiscall codecvt_char_ctor(codecvt_char *this)
     return codecvt_char_ctor_locinfo(this, NULL, 0);
 }
 
-/* ??1?$codecvt@DDH@std@@MAE@XZ */
-/* ??1?$codecvt@DDH@std@@MEAA@XZ */
-static void codecvt_char_dtor(codecvt_char *this)
+/* ??1?$codecvt@DDH@std@@UAE@XZ */
+/* ??1?$codecvt@DDH@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(codecvt_char_dtor, 4)
+void __thiscall codecvt_char_dtor(codecvt_char *this)
 {
     TRACE("(%p)\n", this);
     codecvt_base_dtor(&this->base);
@@ -2456,7 +2460,7 @@ codecvt_char* codecvt_char_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_char_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_char_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (codecvt_char*)fac;
@@ -2633,11 +2637,10 @@ codecvt_wchar* __thiscall codecvt_short_ctor(codecvt_wchar *this)
     return codecvt_short_ctor_refs(this, 0);
 }
 
-/* ??1?$codecvt@GDH@std@@MAE@XZ */
-/* ??1?$codecvt@GDH@std@@MEAA@XZ */
-/* ??1?$codecvt@_WDH@std@@MAE@XZ */
-/* ??1?$codecvt@_WDH@std@@MEAA@XZ */
-static void codecvt_wchar_dtor(codecvt_wchar *this)
+/* ??1?$codecvt@GDH@std@@UAE@XZ */
+/* ??1?$codecvt@GDH@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(codecvt_wchar_dtor, 4)
+void __thiscall codecvt_wchar_dtor(codecvt_wchar *this)
 {
     TRACE("(%p)\n", this);
     codecvt_base_dtor(&this->base);
@@ -2695,7 +2698,7 @@ static codecvt_wchar* codecvt_wchar_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_wchar_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_wchar_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (codecvt_wchar*)fac;
@@ -2747,7 +2750,7 @@ codecvt_wchar* codecvt_short_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_short_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&codecvt_short_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (codecvt_wchar*)fac;
@@ -3060,9 +3063,10 @@ numpunct_char* __thiscall numpunct_char_ctor(numpunct_char *this)
     return numpunct_char_ctor_refs(this, 0);
 }
 
-/* ??1?$numpunct@D@std@@MAE@XZ */
-/* ??1?$numpunct@D@std@@MEAA@XZ */
-static void numpunct_char_dtor(numpunct_char *this)
+/* ??1?$numpunct@D@std@@UAE@XZ */
+/* ??1?$numpunct@D@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(numpunct_char_dtor, 4)
+void __thiscall numpunct_char_dtor(numpunct_char *this)
 {
     TRACE("(%p)\n", this);
     numpunct_char__Tidy(this);
@@ -3116,7 +3120,7 @@ static numpunct_char* numpunct_char_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_char_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_char_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (numpunct_char*)fac;
@@ -3395,11 +3399,10 @@ numpunct_wchar* __thiscall numpunct_short_ctor(numpunct_wchar *this)
     return numpunct_short_ctor_refs(this, 0);
 }
 
-/* ??1?$numpunct@_W@std@@MAE@XZ */
-/* ??1?$numpunct@_W@std@@MEAA@XZ */
-/* ??1?$numpunct@G@std@@MAE@XZ */
-/* ??1?$numpunct@G@std@@MEAA@XZ */
-static void numpunct_wchar_dtor(numpunct_wchar *this)
+/* ??1?$numpunct@G@std@@UAE@XZ */
+/* ??1?$numpunct@G@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(numpunct_wchar_dtor, 4)
+void __thiscall numpunct_wchar_dtor(numpunct_wchar *this)
 {
     TRACE("(%p)\n", this);
     numpunct_wchar__Tidy(this);
@@ -3453,7 +3456,7 @@ static numpunct_wchar* numpunct_wchar_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_wchar_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_wchar_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (numpunct_wchar*)fac;
@@ -3501,7 +3504,7 @@ static numpunct_wchar* numpunct_short_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_short_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&numpunct_short_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (numpunct_wchar*)fac;
@@ -3802,11 +3805,10 @@ num_get* __thiscall num_get_short_ctor(num_get *this)
     return num_get_short_ctor_refs(this, 0);
 }
 
-/* ??1?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MEAA@XZ */
-/* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEAA@XZ */
-static void num_get_wchar_dtor(num_get *this)
+/* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@UAE@XZ */
+/* ??1?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(num_get_wchar_dtor, 4)
+void __thiscall num_get_wchar_dtor(num_get *this)
 {
     TRACE("(%p)\n", this);
     locale_facet_dtor(&this->facet);
@@ -3864,7 +3866,7 @@ static num_get* num_get_wchar_use_facet(const locale *loc)
         const locale_facet *fac;
 
         _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-        fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_wchar_id));
+        fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_wchar_id), TRUE);
         if(fac) {
             _Lockit_dtor(&lock);
             return (num_get*)fac;
@@ -3904,7 +3906,7 @@ num_get* num_get_short_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_short_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_short_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (num_get*)fac;
@@ -4815,9 +4817,10 @@ num_get* __thiscall num_get_char_ctor(num_get *this)
     return num_get_char_ctor_refs(this, 0);
 }
 
-/* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEAA@XZ */
-static void num_get_char_dtor(num_get *this)
+/* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@UAE@XZ */
+/* ??1?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(num_get_char_dtor, 4)
+void __thiscall num_get_char_dtor(num_get *this)
 {
     TRACE("(%p)\n", this);
     locale_facet_dtor(&this->facet);
@@ -4875,7 +4878,7 @@ num_get* num_get_char_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_char_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_get_char_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (num_get*)fac;
@@ -5568,9 +5571,10 @@ num_put* __thiscall num_put_char_ctor(num_put *this)
     return num_put_char_ctor_refs(this, 0);
 }
 
-/* ??1?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@MEAA@XZ */
-static void num_put_char_dtor(num_put *this)
+/* ??1?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@UAE@XZ */
+/* ??1?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(num_put_char_dtor, 4)
+void __thiscall num_put_char_dtor(num_put *this)
 {
     TRACE("(%p)\n", this);
     locale_facet_dtor(&this->facet);
@@ -5628,7 +5632,7 @@ num_put* num_put_char_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_char_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_char_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (num_put*)fac;
@@ -6153,11 +6157,10 @@ num_put* __thiscall num_put_short_ctor(num_put *this)
     return num_put_short_ctor_refs(this, 0);
 }
 
-/* ??1?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@MEAA@XZ */
-/* ??1?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MAE@XZ */
-/* ??1?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@MEAA@XZ */
-static void num_put_wchar_dtor(num_put *this)
+/* ??1?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@UAE@XZ */
+/* ??1?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(num_put_wchar_dtor, 4)
+void __thiscall num_put_wchar_dtor(num_put *this)
 {
     TRACE("(%p)\n", this);
     locale_facet_dtor(&this->facet);
@@ -6239,7 +6242,7 @@ static num_put* num_put_wchar_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_wchar_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_wchar_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (num_put*)fac;
@@ -6267,7 +6270,7 @@ num_put* num_put_short_use_facet(const locale *loc)
     const locale_facet *fac;
 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
-    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_short_id));
+    fac = locale__Getfacet(loc, locale_id_operator_size_t(&num_put_short_id), TRUE);
     if(fac) {
         _Lockit_dtor(&lock);
         return (num_put*)fac;
@@ -7393,6 +7396,15 @@ locale__Locimp* __cdecl locale__Init(void)
     return global_locale;
 }
 
+/* ?_Iscloc@locale@std@@QBE_NXZ */
+/* ?_Iscloc@locale@std@@QEBA_NXZ */
+DEFINE_THISCALL_WRAPPER(locale__Iscloc, 4)
+MSVCP_bool __thiscall locale__Iscloc(const locale *this)
+{
+    TRACE("(%p)\n", this);
+    return this->ptr == locale__Locimp__Clocptr;
+}
+
 /* ??0locale@std@@QAE@ABV01@0H@Z */
 /* ??0locale@std@@QEAA@AEBV01@0H@Z */
 DEFINE_THISCALL_WRAPPER(locale_ctor_locale_locale, 16)
@@ -7556,16 +7568,18 @@ locale* __thiscall locale__Addfac(locale *this, locale_facet *facet, MSVCP_size_
     return this;
 }
 
-/* ?_Getfacet@locale@std@@QBEPBVfacet@12@I@Z */
-/* ?_Getfacet@locale@std@@QEBAPEBVfacet@12@_K@Z */
-static const locale_facet* locale__Getfacet(const locale *this, MSVCP_size_t id)
+/* ?_Getfacet@locale@std@@QBEPBVfacet@12@I_N@Z */
+/* ?_Getfacet@locale@std@@QEBAPEBVfacet@12@_K_N@Z */
+DEFINE_THISCALL_WRAPPER(locale__Getfacet, 12)
+const locale_facet* __thiscall locale__Getfacet(const locale *this,
+        MSVCP_size_t id, MSVCP_bool allow_transparent)
 {
     locale_facet *fac;
 
     TRACE("(%p %lu)\n", this, id);
 
     fac = id < this->ptr->facet_cnt ? this->ptr->facetvec[id] : NULL;
-    if(fac || !this->ptr->transparent)
+    if(fac || !this->ptr->transparent || !allow_transparent)
         return fac;
 
     return id < global_locale->facet_cnt ? global_locale->facetvec[id] : NULL;
@@ -7654,27 +7668,27 @@ wint_t __cdecl towctrans(wint_t c, wctrans_t category)
     return towlower(c);
 }
 
-DEFINE_RTTI_DATA0(locale_facet, 0, ".?AVfacet@locale@std@@");
-DEFINE_RTTI_DATA1(collate_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@D@std@@");
-DEFINE_RTTI_DATA1(collate_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@_W@std@@");
-DEFINE_RTTI_DATA1(collate_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@G@std@@");
-DEFINE_RTTI_DATA1(ctype_base, 0, &locale_facet_rtti_base_descriptor, ".?AUctype_base@std@@");
-DEFINE_RTTI_DATA2(ctype_char, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@D@std@@");
-DEFINE_RTTI_DATA2(ctype_wchar, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@_W@std@@");
-DEFINE_RTTI_DATA2(ctype_short, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@G@std@@");
-DEFINE_RTTI_DATA1(codecvt_base, 0, &locale_facet_rtti_base_descriptor, ".?AVcodecvt_base@std@@");
-DEFINE_RTTI_DATA2(codecvt_char, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@DDH@std@@");
-DEFINE_RTTI_DATA2(codecvt_wchar, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@_WDH@std@@");
-DEFINE_RTTI_DATA2(codecvt_short, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@GDH@std@@");
-DEFINE_RTTI_DATA1(numpunct_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@D@std@@");
-DEFINE_RTTI_DATA1(numpunct_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@_W@std@@");
-DEFINE_RTTI_DATA1(numpunct_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@G@std@@");
-DEFINE_RTTI_DATA1(num_get_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@");
-DEFINE_RTTI_DATA1(num_get_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@");
-DEFINE_RTTI_DATA1(num_get_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@");
-DEFINE_RTTI_DATA1(num_put_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@");
-DEFINE_RTTI_DATA1(num_put_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@");
-DEFINE_RTTI_DATA1(num_put_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@");
+DEFINE_RTTI_DATA0(locale_facet, 0, ".?AVfacet@locale@std@@")
+DEFINE_RTTI_DATA1(collate_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@D@std@@")
+DEFINE_RTTI_DATA1(collate_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@_W@std@@")
+DEFINE_RTTI_DATA1(collate_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@G@std@@")
+DEFINE_RTTI_DATA1(ctype_base, 0, &locale_facet_rtti_base_descriptor, ".?AUctype_base@std@@")
+DEFINE_RTTI_DATA2(ctype_char, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@D@std@@")
+DEFINE_RTTI_DATA2(ctype_wchar, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@_W@std@@")
+DEFINE_RTTI_DATA2(ctype_short, 0, &ctype_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$ctype@G@std@@")
+DEFINE_RTTI_DATA1(codecvt_base, 0, &locale_facet_rtti_base_descriptor, ".?AVcodecvt_base@std@@")
+DEFINE_RTTI_DATA2(codecvt_char, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@DDH@std@@")
+DEFINE_RTTI_DATA2(codecvt_wchar, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@_WDH@std@@")
+DEFINE_RTTI_DATA2(codecvt_short, 0, &codecvt_base_rtti_base_descriptor, &locale_facet_rtti_base_descriptor, ".?AV?$codecvt@GDH@std@@")
+DEFINE_RTTI_DATA1(numpunct_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@D@std@@")
+DEFINE_RTTI_DATA1(numpunct_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@_W@std@@")
+DEFINE_RTTI_DATA1(numpunct_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$numpunct@G@std@@")
+DEFINE_RTTI_DATA1(num_get_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@DV?$istreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@")
+DEFINE_RTTI_DATA1(num_get_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@_WV?$istreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@")
+DEFINE_RTTI_DATA1(num_get_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_get@GV?$istreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@")
+DEFINE_RTTI_DATA1(num_put_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@")
+DEFINE_RTTI_DATA1(num_put_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@_WV?$ostreambuf_iterator@_WU?$char_traits@_W@std@@@std@@@std@@")
+DEFINE_RTTI_DATA1(num_put_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$num_put@GV?$ostreambuf_iterator@GU?$char_traits@G@std@@@std@@@std@@")
 
 #ifndef __GNUC__
 void __asm_dummy_vtables(void) {

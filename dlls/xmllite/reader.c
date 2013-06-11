@@ -1,7 +1,7 @@
 /*
  * IXmlReader implementation
  *
- * Copyright 2010 Nikolay Sivov
+ * Copyright 2010, 2012 Nikolay Sivov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,7 @@
 #include "xmllite_private.h"
 
 #include "wine/debug.h"
+#include "wine/list.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(xmllite);
@@ -46,9 +47,12 @@ typedef enum
 static const WCHAR utf16W[] = {'U','T','F','-','1','6',0};
 static const WCHAR utf8W[] = {'U','T','F','-','8',0};
 
+static const WCHAR dblquoteW[] = {'\"',0};
+static const WCHAR quoteW[] = {'\'',0};
+
 struct xml_encoding_data
 {
-    const WCHAR *encoding;
+    const WCHAR *name;
     xml_encoding enc;
     UINT cp;
 };
@@ -61,6 +65,7 @@ static const struct xml_encoding_data xml_encoding_map[] = {
 typedef struct
 {
     char *data;
+    char *cur;
     unsigned int allocated;
     unsigned int written;
 } encoded_buffer;
@@ -84,6 +89,19 @@ typedef struct _xmlreaderinput
     input_buffer *buffer;
 } xmlreaderinput;
 
+typedef struct
+{
+    const WCHAR *str;
+    UINT len;
+} strval;
+
+struct attribute
+{
+    struct list entry;
+    strval localname;
+    strval value;
+};
+
 typedef struct _xmlreader
 {
     IXmlReader IXmlReader_iface;
@@ -94,6 +112,9 @@ typedef struct _xmlreader
     XmlNodeType nodetype;
     DtdProcessing dtdmode;
     UINT line, pos;           /* reader position in XML stream */
+    struct list attrs; /* attributes list for current node */
+    struct attribute *attr; /* current attribute */
+    UINT attr_count;
 } xmlreader;
 
 struct input_buffer
@@ -146,7 +167,7 @@ static inline void *reader_alloc(xmlreader *reader, size_t len)
 
 static inline void reader_free(xmlreader *reader, void *mem)
 {
-    return m_free(reader->imalloc, mem);
+    m_free(reader->imalloc, mem);
 }
 
 /* reader input memory allocation functions */
@@ -162,7 +183,7 @@ static inline void *readerinput_realloc(xmlreaderinput *input, void *mem, size_t
 
 static inline void readerinput_free(xmlreaderinput *input, void *mem)
 {
-    return m_free(input->imalloc, mem);
+    m_free(input->imalloc, mem);
 }
 
 static inline WCHAR *readerinput_strdupW(xmlreaderinput *input, const WCHAR *str)
@@ -180,6 +201,34 @@ static inline WCHAR *readerinput_strdupW(xmlreaderinput *input, const WCHAR *str
     return ret;
 }
 
+static void reader_clear_attrs(xmlreader *reader)
+{
+    struct attribute *attr, *attr2;
+    LIST_FOR_EACH_ENTRY_SAFE(attr, attr2, &reader->attrs, struct attribute, entry)
+    {
+        reader_free(reader, attr);
+    }
+    list_init(&reader->attrs);
+    reader->attr_count = 0;
+}
+
+/* attribute data holds pointers to buffer data, so buffer shrink is not possible
+   while we are on a node with attributes */
+static HRESULT reader_add_attr(xmlreader *reader, strval *localname, strval *value)
+{
+    struct attribute *attr;
+
+    attr = reader_alloc(reader, sizeof(*attr));
+    if (!attr) return E_OUTOFMEMORY;
+
+    attr->localname = *localname;
+    attr->value = *value;
+    list_add_tail(&reader->attrs, &attr->entry);
+    reader->attr_count++;
+
+    return S_OK;
+}
+
 static HRESULT init_encoded_buffer(xmlreaderinput *input, encoded_buffer *buffer)
 {
     const int initial_len = 0x2000;
@@ -187,6 +236,7 @@ static HRESULT init_encoded_buffer(xmlreaderinput *input, encoded_buffer *buffer
     if (!buffer->data) return E_OUTOFMEMORY;
 
     memset(buffer->data, 0, 4);
+    buffer->cur = buffer->data;
     buffer->allocated = initial_len;
     buffer->written = 0;
 
@@ -198,27 +248,24 @@ static void free_encoded_buffer(xmlreaderinput *input, encoded_buffer *buffer)
     readerinput_free(input, buffer->data);
 }
 
-static HRESULT get_code_page(xml_encoding encoding, xmlreaderinput *input)
+static HRESULT get_code_page(xml_encoding encoding, UINT *cp)
 {
-    const struct xml_encoding_data *data;
-
     if (encoding == XmlEncoding_Unknown)
     {
         FIXME("unsupported encoding %d\n", encoding);
         return E_NOTIMPL;
     }
 
-    data = &xml_encoding_map[encoding];
-    input->buffer->code_page = data->cp;
+    *cp = xml_encoding_map[encoding].cp;
 
     return S_OK;
 }
 
-static xml_encoding parse_encoding_name(const WCHAR *encoding)
+static xml_encoding parse_encoding_name(const WCHAR *name, int len)
 {
     int min, max, n, c;
 
-    if (!encoding) return XmlEncoding_Unknown;
+    if (!name) return XmlEncoding_Unknown;
 
     min = 0;
     max = sizeof(xml_encoding_map)/sizeof(struct xml_encoding_data) - 1;
@@ -227,7 +274,10 @@ static xml_encoding parse_encoding_name(const WCHAR *encoding)
     {
         n = (min+max)/2;
 
-        c = strcmpiW(xml_encoding_map[n].encoding, encoding);
+        if (len != -1)
+            c = strncmpiW(xml_encoding_map[n].name, name, len);
+        else
+            c = strcmpiW(xml_encoding_map[n].name, name);
         if (!c)
             return xml_encoding_map[n].enc;
 
@@ -324,31 +374,386 @@ static HRESULT readerinput_growraw(xmlreaderinput *readerinput)
     return hr;
 }
 
-static xml_encoding readerinput_detectencoding(xmlreaderinput *readerinput)
+/* grows UTF-16 buffer so it has at least 'length' bytes free on return */
+static void readerinput_grow(xmlreaderinput *readerinput, int length)
+{
+    encoded_buffer *buffer = &readerinput->buffer->utf16;
+
+    /* grow if needed, plus 4 bytes to be sure null terminator will fit in */
+    if (buffer->allocated < buffer->written + length + 4)
+    {
+        int grown_size = max(2*buffer->allocated, buffer->allocated + length);
+        buffer->data = readerinput_realloc(readerinput, buffer->data, grown_size);
+        buffer->allocated = grown_size;
+    }
+}
+
+static HRESULT readerinput_detectencoding(xmlreaderinput *readerinput, xml_encoding *enc)
 {
     encoded_buffer *buffer = &readerinput->buffer->encoded;
+    static char startA[] = {'<','?','x','m'};
+    static WCHAR startW[] = {'<','?'};
+    static char utf8bom[] = {0xef,0xbb,0xbf};
+    static char utf16lebom[] = {0xff,0xfe};
+
+    *enc = XmlEncoding_Unknown;
+
+    if (buffer->written <= 3) return MX_E_INPUTEND;
 
     /* try start symbols if we have enough data to do that, input buffer should contain
        first chunk already */
-    if (buffer->written >= 4)
-    {
-        static char startA[] = {'<','?','x','m'};
-        static WCHAR startW[] = {'<','?'};
-
-        if (!memcmp(buffer->data, startA, sizeof(startA))) return XmlEncoding_UTF8;
-        if (!memcmp(buffer->data, startW, sizeof(startW))) return XmlEncoding_UTF16;
-    }
-
+    if (!memcmp(buffer->data, startA, sizeof(startA)))
+        *enc = XmlEncoding_UTF8;
+    else if (!memcmp(buffer->data, startW, sizeof(startW)))
+        *enc = XmlEncoding_UTF16;
     /* try with BOM now */
-    if (buffer->written >= 3)
+    else if (!memcmp(buffer->data, utf8bom, sizeof(utf8bom)))
     {
-        static char utf8bom[] = {0xef,0xbb,0xbf};
-        static char utf16lebom[] = {0xff,0xfe};
-        if (!memcmp(buffer->data, utf8bom, sizeof(utf8bom))) return XmlEncoding_UTF8;
-        if (!memcmp(buffer->data, utf16lebom, sizeof(utf16lebom))) return XmlEncoding_UTF16;
+        buffer->cur += sizeof(utf8bom);
+        *enc = XmlEncoding_UTF8;
+    }
+    else if (!memcmp(buffer->data, utf16lebom, sizeof(utf16lebom)))
+    {
+        buffer->cur += sizeof(utf16lebom);
+        *enc = XmlEncoding_UTF16;
     }
 
-    return XmlEncoding_Unknown;
+    return S_OK;
+}
+
+static int readerinput_get_utf8_convlen(xmlreaderinput *readerinput)
+{
+    encoded_buffer *buffer = &readerinput->buffer->encoded;
+    int len = buffer->written;
+
+    /* complete single byte char */
+    if (!(buffer->data[len-1] & 0x80)) return len;
+
+    /* find start byte of multibyte char */
+    while (--len && !(buffer->data[len] & 0xc0))
+        ;
+
+    return len;
+}
+
+/* returns byte length of complete char sequence for specified code page, */
+static int readerinput_get_convlen(xmlreaderinput *readerinput, UINT cp)
+{
+    encoded_buffer *buffer = &readerinput->buffer->encoded;
+    int len = buffer->written;
+
+    if (cp == CP_UTF8)
+        len = readerinput_get_utf8_convlen(readerinput);
+    else
+        len = buffer->written;
+
+    return len - (buffer->cur - buffer->data);
+}
+
+/* note that raw buffer content is kept */
+static void readerinput_switchencoding(xmlreaderinput *readerinput, xml_encoding enc)
+{
+    encoded_buffer *src = &readerinput->buffer->encoded;
+    encoded_buffer *dest = &readerinput->buffer->utf16;
+    int len, dest_len;
+    HRESULT hr;
+    UINT cp;
+
+    hr = get_code_page(enc, &cp);
+    if (FAILED(hr)) return;
+
+    len = readerinput_get_convlen(readerinput, cp);
+
+    TRACE("switching to cp %d\n", cp);
+
+    /* just copy in this case */
+    if (enc == XmlEncoding_UTF16)
+    {
+        readerinput_grow(readerinput, len);
+        memcpy(dest->data, src->cur, len);
+        readerinput->buffer->code_page = cp;
+        return;
+    }
+
+    dest_len = MultiByteToWideChar(cp, 0, src->cur, len, NULL, 0);
+    readerinput_grow(readerinput, dest_len);
+    MultiByteToWideChar(cp, 0, src->cur, len, (WCHAR*)dest->data, dest_len);
+    dest->data[dest_len] = 0;
+    readerinput->buffer->code_page = cp;
+}
+
+static inline const WCHAR *reader_get_cur(xmlreader *reader)
+{
+    return (WCHAR*)reader->input->buffer->utf16.cur;
+}
+
+static int reader_cmp(xmlreader *reader, const WCHAR *str)
+{
+    const WCHAR *ptr = reader_get_cur(reader);
+    int i = 0;
+
+    return strncmpW(str, ptr, strlenW(str));
+
+    while (str[i]) {
+        if (ptr[i] != str[i]) return 0;
+        i++;
+    }
+
+    return 1;
+}
+
+/* moves cursor n WCHARs forward */
+static void reader_skipn(xmlreader *reader, int n)
+{
+    encoded_buffer *buffer = &reader->input->buffer->utf16;
+    const WCHAR *ptr = reader_get_cur(reader);
+
+    while (*ptr++ && n--)
+    {
+        buffer->cur += sizeof(WCHAR);
+        reader->pos++;
+    }
+}
+
+/* [3] S ::= (#x20 | #x9 | #xD | #xA)+ */
+static int reader_skipspaces(xmlreader *reader)
+{
+    encoded_buffer *buffer = &reader->input->buffer->utf16;
+    const WCHAR *ptr = reader_get_cur(reader), *start = ptr;
+
+    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\r' || *ptr == '\n')
+    {
+        buffer->cur += sizeof(WCHAR);
+        if (*ptr == '\r')
+            reader->pos = 0;
+        else if (*ptr == '\n')
+        {
+            reader->line++;
+            reader->pos = 0;
+        }
+        else
+            reader->pos++;
+        ptr++;
+    }
+
+    return ptr - start;
+}
+
+/* [26] VersionNum ::= '1.' [0-9]+ */
+static HRESULT reader_parse_versionnum(xmlreader *reader, strval *val)
+{
+    const WCHAR *ptr, *ptr2, *start = reader_get_cur(reader);
+    static const WCHAR onedotW[] = {'1','.',0};
+
+    if (reader_cmp(reader, onedotW)) return WC_E_XMLDECL;
+    /* skip "1." */
+    reader_skipn(reader, 2);
+
+    ptr2 = ptr = reader_get_cur(reader);
+    while (*ptr >= '0' && *ptr <= '9')
+        ptr++;
+
+    if (ptr2 == ptr) return WC_E_DIGIT;
+    TRACE("version=%s\n", debugstr_wn(start, ptr-start));
+    val->str = start;
+    val->len = ptr-start;
+    reader_skipn(reader, ptr-ptr2);
+    return S_OK;
+}
+
+/* [25] Eq ::= S? '=' S? */
+static HRESULT reader_parse_eq(xmlreader *reader)
+{
+    static const WCHAR eqW[] = {'=',0};
+    reader_skipspaces(reader);
+    if (reader_cmp(reader, eqW)) return WC_E_EQUAL;
+    /* skip '=' */
+    reader_skipn(reader, 1);
+    reader_skipspaces(reader);
+    return S_OK;
+}
+
+/* [24] VersionInfo ::= S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"') */
+static HRESULT reader_parse_versioninfo(xmlreader *reader)
+{
+    static const WCHAR versionW[] = {'v','e','r','s','i','o','n',0};
+    strval val, name;
+    HRESULT hr;
+
+    if (!reader_skipspaces(reader)) return WC_E_WHITESPACE;
+
+    if (reader_cmp(reader, versionW)) return WC_E_XMLDECL;
+    name.str = reader_get_cur(reader);
+    name.len = 7;
+    /* skip 'version' */
+    reader_skipn(reader, 7);
+
+    hr = reader_parse_eq(reader);
+    if (FAILED(hr)) return hr;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    hr = reader_parse_versionnum(reader, &val);
+    if (FAILED(hr)) return hr;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    return reader_add_attr(reader, &name, &val);
+}
+
+/* ([A-Za-z0-9._] | '-') */
+static inline int is_wchar_encname(WCHAR ch)
+{
+    return ((ch >= 'A' && ch <= 'Z') ||
+            (ch >= 'a' && ch <= 'z') ||
+            (ch >= '0' && ch <= '9') ||
+            (ch == '.') || (ch == '_') ||
+            (ch == '-'));
+}
+
+/* [81] EncName ::= [A-Za-z] ([A-Za-z0-9._] | '-')* */
+static HRESULT reader_parse_encname(xmlreader *reader, strval *val)
+{
+    const WCHAR *start = reader_get_cur(reader), *ptr;
+    xml_encoding enc;
+    int len;
+
+    if ((*start < 'A' || *start > 'Z') && (*start < 'a' || *start > 'z'))
+        return WC_E_ENCNAME;
+
+    ptr = start;
+    while (is_wchar_encname(*++ptr))
+        ;
+
+    len = ptr - start;
+    enc = parse_encoding_name(start, len);
+    TRACE("encoding name %s\n", debugstr_wn(start, len));
+    val->str = start;
+    val->len = len;
+
+    if (enc == XmlEncoding_Unknown)
+        return WC_E_ENCNAME;
+
+    /* skip encoding name */
+    reader_skipn(reader, len);
+    return S_OK;
+}
+
+/* [80] EncodingDecl ::= S 'encoding' Eq ('"' EncName '"' | "'" EncName "'" ) */
+static HRESULT reader_parse_encdecl(xmlreader *reader)
+{
+    static const WCHAR encodingW[] = {'e','n','c','o','d','i','n','g',0};
+    strval name, val;
+    HRESULT hr;
+
+    if (!reader_skipspaces(reader)) return WC_E_WHITESPACE;
+
+    if (reader_cmp(reader, encodingW)) return S_FALSE;
+    name.str = reader_get_cur(reader);
+    name.len = 8;
+    /* skip 'encoding' */
+    reader_skipn(reader, 8);
+
+    hr = reader_parse_eq(reader);
+    if (FAILED(hr)) return hr;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    hr = reader_parse_encname(reader, &val);
+    if (FAILED(hr)) return hr;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    return reader_add_attr(reader, &name, &val);
+}
+
+/* [32] SDDecl ::= S 'standalone' Eq (("'" ('yes' | 'no') "'") | ('"' ('yes' | 'no') '"')) */
+static HRESULT reader_parse_sddecl(xmlreader *reader)
+{
+    static const WCHAR standaloneW[] = {'s','t','a','n','d','a','l','o','n','e',0};
+    static const WCHAR yesW[] = {'y','e','s',0};
+    static const WCHAR noW[] = {'n','o',0};
+    const WCHAR *start, *ptr;
+    strval name, val;
+    HRESULT hr;
+
+    if (!reader_skipspaces(reader)) return WC_E_WHITESPACE;
+
+    if (reader_cmp(reader, standaloneW)) return S_FALSE;
+    name.str = reader_get_cur(reader);
+    name.len = 10;
+    /* skip 'standalone' */
+    reader_skipn(reader, 10);
+
+    hr = reader_parse_eq(reader);
+    if (FAILED(hr)) return hr;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    if (reader_cmp(reader, yesW) && reader_cmp(reader, noW))
+        return WC_E_XMLDECL;
+
+    start = reader_get_cur(reader);
+    /* skip 'yes'|'no' */
+    reader_skipn(reader, reader_cmp(reader, yesW) ? 2 : 3);
+    ptr = reader_get_cur(reader);
+    TRACE("standalone=%s\n", debugstr_wn(start, ptr-start));
+    val.str = start;
+    val.len = ptr-start;
+
+    if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))
+        return WC_E_QUOTE;
+    /* skip "'"|'"' */
+    reader_skipn(reader, 1);
+
+    return reader_add_attr(reader, &name, &val);
+}
+
+/* [23] XMLDecl ::= '<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>' */
+static HRESULT reader_parse_xmldecl(xmlreader *reader)
+{
+    static const WCHAR xmldeclW[] = {'<','?','x','m','l',0};
+    static const WCHAR declcloseW[] = {'?','>',0};
+    HRESULT hr;
+
+    /* check if we have "<?xml" */
+    if (reader_cmp(reader, xmldeclW)) return S_FALSE;
+
+    reader_skipn(reader, 5);
+    hr = reader_parse_versioninfo(reader);
+    if (FAILED(hr))
+        return hr;
+
+    hr = reader_parse_encdecl(reader);
+    if (FAILED(hr))
+        return hr;
+
+    hr = reader_parse_sddecl(reader);
+    if (FAILED(hr))
+        return hr;
+
+    reader_skipspaces(reader);
+    if (reader_cmp(reader, declcloseW)) return WC_E_XMLDECL;
+    reader_skipn(reader, 2);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlreader_QueryInterface(IXmlReader *iface, REFIID riid, void** ppvObject)
@@ -392,6 +797,7 @@ static ULONG WINAPI xmlreader_Release(IXmlReader *iface)
     {
         IMalloc *imalloc = This->imalloc;
         if (This->input) IUnknown_Release(&This->input->IXmlReaderInput_iface);
+        reader_clear_attrs(This);
         reader_free(This, This);
         if (imalloc) IMalloc_Release(imalloc);
     }
@@ -505,9 +911,23 @@ static HRESULT WINAPI xmlreader_Read(IXmlReader* iface, XmlNodeType *node_type)
         if (FAILED(hr)) return hr;
 
         /* try to detect encoding by BOM or data and set input code page */
-        enc = readerinput_detectencoding(This->input);
-        TRACE("detected encoding %d\n", enc);
-        get_code_page(enc, This->input);
+        hr = readerinput_detectencoding(This->input, &enc);
+        TRACE("detected encoding %s, 0x%08x\n", debugstr_w(xml_encoding_map[enc].name), hr);
+        if (FAILED(hr)) return hr;
+
+        /* always switch first time cause we have to put something in */
+        readerinput_switchencoding(This->input, enc);
+
+        /* parse xml declaration */
+        hr = reader_parse_xmldecl(This);
+        if (FAILED(hr)) return hr;
+
+        if (hr == S_OK)
+        {
+            This->state = XmlReadState_Interactive;
+            This->nodetype = *node_type = XmlNodeType_XmlDeclaration;
+            return S_OK;
+        }
     }
 
     return E_NOTIMPL;
@@ -517,20 +937,42 @@ static HRESULT WINAPI xmlreader_GetNodeType(IXmlReader* iface, XmlNodeType *node
 {
     xmlreader *This = impl_from_IXmlReader(iface);
     TRACE("(%p)->(%p)\n", This, node_type);
-    *node_type = This->nodetype;
+
+    /* When we're on attribute always return attribute type, container node type is kept.
+       Note that container is not necessarily an element, and attribute doesn't mean it's
+       an attribute in XML spec terms. */
+    *node_type = This->attr ? XmlNodeType_Attribute : This->nodetype;
     return This->state == XmlReadState_Closed ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI xmlreader_MoveToFirstAttribute(IXmlReader* iface)
 {
-    FIXME("(%p): stub\n", iface);
-    return E_NOTIMPL;
+    xmlreader *This = impl_from_IXmlReader(iface);
+
+    TRACE("(%p)\n", This);
+
+    if (!This->attr_count) return S_FALSE;
+    This->attr = LIST_ENTRY(list_head(&This->attrs), struct attribute, entry);
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlreader_MoveToNextAttribute(IXmlReader* iface)
 {
-    FIXME("(%p): stub\n", iface);
-    return E_NOTIMPL;
+    xmlreader *This = impl_from_IXmlReader(iface);
+    const struct list *next;
+
+    TRACE("(%p)\n", This);
+
+    if (!This->attr_count) return S_FALSE;
+
+    if (!This->attr)
+        return IXmlReader_MoveToFirstAttribute(iface);
+
+    next = list_next(&This->attrs, &This->attr->entry);
+    if (next)
+        This->attr = LIST_ENTRY(next, struct attribute, entry);
+
+    return next ? S_OK : S_FALSE;
 }
 
 static HRESULT WINAPI xmlreader_MoveToAttributeByName(IXmlReader* iface,
@@ -543,8 +985,13 @@ static HRESULT WINAPI xmlreader_MoveToAttributeByName(IXmlReader* iface,
 
 static HRESULT WINAPI xmlreader_MoveToElement(IXmlReader* iface)
 {
-    FIXME("(%p): stub\n", iface);
-    return E_NOTIMPL;
+    xmlreader *This = impl_from_IXmlReader(iface);
+
+    TRACE("(%p)\n", This);
+
+    if (!This->attr_count) return S_FALSE;
+    This->attr = NULL;
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlreader_GetQualifiedName(IXmlReader* iface, LPCWSTR *qualifiedName,
@@ -641,10 +1088,16 @@ static HRESULT WINAPI xmlreader_GetLinePosition(IXmlReader* iface, UINT *linePos
     return S_OK;
 }
 
-static HRESULT WINAPI xmlreader_GetAttributeCount(IXmlReader* iface, UINT *attributeCount)
+static HRESULT WINAPI xmlreader_GetAttributeCount(IXmlReader* iface, UINT *count)
 {
-    FIXME("(%p %p): stub\n", iface, attributeCount);
-    return E_NOTIMPL;
+    xmlreader *This = impl_from_IXmlReader(iface);
+
+    TRACE("(%p)->(%p)\n", This, count);
+
+    if (!count) return E_INVALIDARG;
+
+    *count = This->attr_count;
+    return S_OK;
 }
 
 static HRESULT WINAPI xmlreader_GetDepth(IXmlReader* iface, UINT *depth)
@@ -775,6 +1228,9 @@ HRESULT WINAPI CreateXmlReader(REFIID riid, void **obj, IMalloc *imalloc)
     reader->imalloc = imalloc;
     if (imalloc) IMalloc_AddRef(imalloc);
     reader->nodetype = XmlNodeType_None;
+    list_init(&reader->attrs);
+    reader->attr_count = 0;
+    reader->attr = NULL;
 
     *obj = &reader->IXmlReader_iface;
 
@@ -809,7 +1265,7 @@ HRESULT WINAPI CreateXmlReaderInputWithEncodingName(IUnknown *stream,
     readerinput->imalloc = imalloc;
     readerinput->stream = NULL;
     if (imalloc) IMalloc_AddRef(imalloc);
-    readerinput->encoding = parse_encoding_name(encoding);
+    readerinput->encoding = parse_encoding_name(encoding, -1);
     readerinput->hint = hint;
     readerinput->baseuri = readerinput_strdupW(readerinput, base_uri);
 
