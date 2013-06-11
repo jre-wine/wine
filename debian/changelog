@@ -1,8 +1,15 @@
-wine-unstable (1.5.15-1) UNRELEASED; urgency=low
+wine-unstable (1.5.15-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.15, released Oct 12, 2012.
+    - Full support for layered windows.
+    - New version of the Gecko engine based on Firefox 16.
+    - Support for broadcast sockets used by networked games.
+    - Downloaded add-ons installers are now cached.
+    - Support for persistent Internet cookies.
+    - String optimizations in JavaScript.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 01:15:02 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 01:15:10 +0000
 
 wine-unstable (1.5.14-1) unstable; urgency=low
 
