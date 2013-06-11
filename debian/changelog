@@ -1,8 +1,14 @@
-wine-unstable (1.5.18-1) UNRELEASED; urgency=low
+wine-unstable (1.5.18-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.18, released Nov 23, 2012.
+    - Various Windows Codecs improvements.
+    - Fixes for OLE database support.
+    - Improvements to system parameters management.
+    - Some fixes to the built-in Web browser.
+    - Fixes for XML support.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 02:57:12 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 02:57:23 +0000
 
 wine-unstable (1.5.17-1) unstable; urgency=low
 
