@@ -68,7 +68,8 @@ struct ddraw
 
     struct wined3d *wined3d;
     struct wined3d_device *wined3d_device;
-    BOOL                    d3d_initialized;
+    BOOL d3d_initialized;
+    BOOL restore_mode;
 
     struct ddraw_surface *primary;
     RECT primary_lock;
@@ -78,9 +79,6 @@ struct ddraw
 
     /* DirectDraw things, which are not handled by WineD3D */
     DWORD                   cooperative_level;
-
-    DWORD                   orig_width, orig_height;
-    DWORD                   orig_bpp;
 
     /* D3D things */
     HWND                    d3d_window;
@@ -187,7 +185,7 @@ struct ddraw_surface
 
 HRESULT ddraw_surface_create_texture(struct ddraw_surface *surface) DECLSPEC_HIDDEN;
 HRESULT ddraw_surface_init(struct ddraw_surface *surface, struct ddraw *ddraw,
-        DDSURFACEDESC2 *desc, UINT mip_level, UINT version) DECLSPEC_HIDDEN;
+        DDSURFACEDESC2 *desc, UINT version) DECLSPEC_HIDDEN;
 ULONG ddraw_surface_release_iface(struct ddraw_surface *This) DECLSPEC_HIDDEN;
 
 static inline struct ddraw_surface *impl_from_IDirect3DTexture(IDirect3DTexture *iface)

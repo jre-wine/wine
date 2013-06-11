@@ -2646,7 +2646,8 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_GetString(ID3DXBaseEffect *iface, D3DX
     return D3DERR_INVALIDCALL;
 }
 
-static HRESULT WINAPI ID3DXBaseEffectImpl_SetTexture(ID3DXBaseEffect *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 texture)
+static HRESULT WINAPI ID3DXBaseEffectImpl_SetTexture(struct ID3DXBaseEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 *texture)
 {
     struct ID3DXBaseEffectImpl *This = impl_from_ID3DXBaseEffect(iface);
     struct d3dx_parameter *param = get_valid_parameter(This, parameter);
@@ -2658,12 +2659,12 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_SetTexture(ID3DXBaseEffect *iface, D3D
             || param->type == D3DXPT_TEXTURE2D || param->type ==  D3DXPT_TEXTURE3D
             || param->type == D3DXPT_TEXTURECUBE))
     {
-        LPDIRECT3DBASETEXTURE9 oltexture = *(LPDIRECT3DBASETEXTURE9 *)param->data;
+        struct IDirect3DBaseTexture9 *oltexture = *(struct IDirect3DBaseTexture9 **)param->data;
 
         if (texture) IDirect3DBaseTexture9_AddRef(texture);
         if (oltexture) IDirect3DBaseTexture9_Release(oltexture);
 
-        *(LPDIRECT3DBASETEXTURE9 *)param->data = texture;
+        *(struct IDirect3DBaseTexture9 **)param->data = texture;
 
         return D3D_OK;
     }
@@ -2673,7 +2674,8 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_SetTexture(ID3DXBaseEffect *iface, D3D
     return D3DERR_INVALIDCALL;
 }
 
-static HRESULT WINAPI ID3DXBaseEffectImpl_GetTexture(ID3DXBaseEffect *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 *texture)
+static HRESULT WINAPI ID3DXBaseEffectImpl_GetTexture(struct ID3DXBaseEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 **texture)
 {
     struct ID3DXBaseEffectImpl *This = impl_from_ID3DXBaseEffect(iface);
     struct d3dx_parameter *param = get_valid_parameter(This, parameter);
@@ -2685,7 +2687,7 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_GetTexture(ID3DXBaseEffect *iface, D3D
             || param->type == D3DXPT_TEXTURE2D || param->type ==  D3DXPT_TEXTURE3D
             || param->type == D3DXPT_TEXTURECUBE))
     {
-        *texture = *(LPDIRECT3DBASETEXTURE9 *)param->data;
+        *texture = *(struct IDirect3DBaseTexture9 **)param->data;
         if (*texture) IDirect3DBaseTexture9_AddRef(*texture);
         TRACE("Returning %p\n", *texture);
         return D3D_OK;
@@ -2696,18 +2698,19 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_GetTexture(ID3DXBaseEffect *iface, D3D
     return D3DERR_INVALIDCALL;
 }
 
-static HRESULT WINAPI ID3DXBaseEffectImpl_GetPixelShader(ID3DXBaseEffect *iface, D3DXHANDLE parameter, LPDIRECT3DPIXELSHADER9 *pshader)
+static HRESULT WINAPI ID3DXBaseEffectImpl_GetPixelShader(ID3DXBaseEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DPixelShader9 **shader)
 {
     struct ID3DXBaseEffectImpl *This = impl_from_ID3DXBaseEffect(iface);
     struct d3dx_parameter *param = get_valid_parameter(This, parameter);
 
-    TRACE("iface %p, parameter %p, pshader %p\n", This, parameter, pshader);
+    TRACE("iface %p, parameter %p, shader %p.\n", This, parameter, shader);
 
-    if (pshader && param && !param->element_count && param->type == D3DXPT_PIXELSHADER)
+    if (shader && param && !param->element_count && param->type == D3DXPT_PIXELSHADER)
     {
-        *pshader = *(LPDIRECT3DPIXELSHADER9 *)param->data;
-        if (*pshader) IDirect3DPixelShader9_AddRef(*pshader);
-        TRACE("Returning %p\n", *pshader);
+        if ((*shader = *(struct IDirect3DPixelShader9 **)param->data))
+            IDirect3DPixelShader9_AddRef(*shader);
+        TRACE("Returning %p.\n", *shader);
         return D3D_OK;
     }
 
@@ -2716,18 +2719,19 @@ static HRESULT WINAPI ID3DXBaseEffectImpl_GetPixelShader(ID3DXBaseEffect *iface,
     return D3DERR_INVALIDCALL;
 }
 
-static HRESULT WINAPI ID3DXBaseEffectImpl_GetVertexShader(ID3DXBaseEffect *iface, D3DXHANDLE parameter, LPDIRECT3DVERTEXSHADER9 *vshader)
+static HRESULT WINAPI ID3DXBaseEffectImpl_GetVertexShader(struct ID3DXBaseEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DVertexShader9 **shader)
 {
     struct ID3DXBaseEffectImpl *This = impl_from_ID3DXBaseEffect(iface);
     struct d3dx_parameter *param = get_valid_parameter(This, parameter);
 
-    TRACE("iface %p, parameter %p, vshader %p\n", This, parameter, vshader);
+    TRACE("iface %p, parameter %p, shader %p.\n", This, parameter, shader);
 
-    if (vshader && param && !param->element_count && param->type == D3DXPT_VERTEXSHADER)
+    if (shader && param && !param->element_count && param->type == D3DXPT_VERTEXSHADER)
     {
-        *vshader = *(LPDIRECT3DVERTEXSHADER9 *)param->data;
-        if (*vshader) IDirect3DVertexShader9_AddRef(*vshader);
-        TRACE("Returning %p\n", *vshader);
+        if ((*shader = *(struct IDirect3DVertexShader9 **)param->data))
+            IDirect3DVertexShader9_AddRef(*shader);
+        TRACE("Returning %p.\n", *shader);
         return D3D_OK;
     }
 
@@ -3347,7 +3351,8 @@ static HRESULT WINAPI ID3DXEffectImpl_GetString(ID3DXEffect *iface, D3DXHANDLE p
     return ID3DXBaseEffectImpl_GetString(base, parameter, string);
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_SetTexture(ID3DXEffect *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 texture)
+static HRESULT WINAPI ID3DXEffectImpl_SetTexture(struct ID3DXEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 *texture)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
     ID3DXBaseEffect *base = This->base_effect;
@@ -3357,7 +3362,8 @@ static HRESULT WINAPI ID3DXEffectImpl_SetTexture(ID3DXEffect *iface, D3DXHANDLE 
     return ID3DXBaseEffectImpl_SetTexture(base, parameter, texture);
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_GetTexture(ID3DXEffect *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 *texture)
+static HRESULT WINAPI ID3DXEffectImpl_GetTexture(struct ID3DXEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 **texture)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
     ID3DXBaseEffect *base = This->base_effect;
@@ -3367,24 +3373,26 @@ static HRESULT WINAPI ID3DXEffectImpl_GetTexture(ID3DXEffect *iface, D3DXHANDLE 
     return ID3DXBaseEffectImpl_GetTexture(base, parameter, texture);
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_GetPixelShader(ID3DXEffect *iface, D3DXHANDLE parameter, LPDIRECT3DPIXELSHADER9 *pshader)
+static HRESULT WINAPI ID3DXEffectImpl_GetPixelShader(ID3DXEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DPixelShader9 **shader)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
     ID3DXBaseEffect *base = This->base_effect;
 
     TRACE("Forward iface %p, base %p\n", This, base);
 
-    return ID3DXBaseEffectImpl_GetPixelShader(base, parameter, pshader);
+    return ID3DXBaseEffectImpl_GetPixelShader(base, parameter, shader);
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_GetVertexShader(ID3DXEffect *iface, D3DXHANDLE parameter, LPDIRECT3DVERTEXSHADER9 *vshader)
+static HRESULT WINAPI ID3DXEffectImpl_GetVertexShader(struct ID3DXEffect *iface,
+        D3DXHANDLE parameter, struct IDirect3DVertexShader9 **shader)
 {
     struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
     ID3DXBaseEffect *base = This->base_effect;
 
     TRACE("Forward iface %p, base %p\n", This, base);
 
-    return ID3DXBaseEffectImpl_GetVertexShader(base, parameter, vshader);
+    return ID3DXBaseEffectImpl_GetVertexShader(base, parameter, shader);
 }
 
 static HRESULT WINAPI ID3DXEffectImpl_SetArrayRange(ID3DXEffect *iface, D3DXHANDLE parameter, UINT start, UINT end)
@@ -4312,7 +4320,8 @@ static HRESULT WINAPI ID3DXEffectCompilerImpl_GetString(ID3DXEffectCompiler *ifa
     return ID3DXBaseEffectImpl_GetString(base, parameter, string);
 }
 
-static HRESULT WINAPI ID3DXEffectCompilerImpl_SetTexture(ID3DXEffectCompiler *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 texture)
+static HRESULT WINAPI ID3DXEffectCompilerImpl_SetTexture(struct ID3DXEffectCompiler *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 *texture)
 {
     struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
     ID3DXBaseEffect *base = This->base_effect;
@@ -4322,7 +4331,8 @@ static HRESULT WINAPI ID3DXEffectCompilerImpl_SetTexture(ID3DXEffectCompiler *if
     return ID3DXBaseEffectImpl_SetTexture(base, parameter, texture);
 }
 
-static HRESULT WINAPI ID3DXEffectCompilerImpl_GetTexture(ID3DXEffectCompiler *iface, D3DXHANDLE parameter, LPDIRECT3DBASETEXTURE9 *texture)
+static HRESULT WINAPI ID3DXEffectCompilerImpl_GetTexture(struct ID3DXEffectCompiler *iface,
+        D3DXHANDLE parameter, struct IDirect3DBaseTexture9 **texture)
 {
     struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
     ID3DXBaseEffect *base = This->base_effect;
@@ -4332,24 +4342,26 @@ static HRESULT WINAPI ID3DXEffectCompilerImpl_GetTexture(ID3DXEffectCompiler *if
     return ID3DXBaseEffectImpl_GetTexture(base, parameter, texture);
 }
 
-static HRESULT WINAPI ID3DXEffectCompilerImpl_GetPixelShader(ID3DXEffectCompiler *iface, D3DXHANDLE parameter, LPDIRECT3DPIXELSHADER9 *pshader)
+static HRESULT WINAPI ID3DXEffectCompilerImpl_GetPixelShader(ID3DXEffectCompiler *iface,
+        D3DXHANDLE parameter, struct IDirect3DPixelShader9 **shader)
 {
     struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
     ID3DXBaseEffect *base = This->base_effect;
 
     TRACE("Forward iface %p, base %p\n", This, base);
 
-    return ID3DXBaseEffectImpl_GetPixelShader(base, parameter, pshader);
+    return ID3DXBaseEffectImpl_GetPixelShader(base, parameter, shader);
 }
 
-static HRESULT WINAPI ID3DXEffectCompilerImpl_GetVertexShader(ID3DXEffectCompiler *iface, D3DXHANDLE parameter, LPDIRECT3DVERTEXSHADER9 *vshader)
+static HRESULT WINAPI ID3DXEffectCompilerImpl_GetVertexShader(struct ID3DXEffectCompiler *iface,
+        D3DXHANDLE parameter, struct IDirect3DVertexShader9 **shader)
 {
     struct ID3DXEffectCompilerImpl *This = impl_from_ID3DXEffectCompiler(iface);
     ID3DXBaseEffect *base = This->base_effect;
 
     TRACE("Forward iface %p, base %p\n", This, base);
 
-    return ID3DXBaseEffectImpl_GetVertexShader(base, parameter, vshader);
+    return ID3DXBaseEffectImpl_GetVertexShader(base, parameter, shader);
 }
 
 static HRESULT WINAPI ID3DXEffectCompilerImpl_SetArrayRange(ID3DXEffectCompiler *iface, D3DXHANDLE parameter, UINT start, UINT end)
@@ -4734,8 +4746,7 @@ static HRESULT d3dx9_parse_data(struct d3dx_parameter *param, const char **ptr, 
             break;
 
         case D3DXPT_VERTEXSHADER:
-            hr = IDirect3DDevice9_CreateVertexShader(device, (DWORD *)*ptr, (LPDIRECT3DVERTEXSHADER9 *)param->data);
-            if (hr != D3D_OK)
+            if (FAILED(hr = IDirect3DDevice9_CreateVertexShader(device, (DWORD *)*ptr, param->data)))
             {
                 WARN("Failed to create vertex shader\n");
                 return hr;
@@ -4743,8 +4754,7 @@ static HRESULT d3dx9_parse_data(struct d3dx_parameter *param, const char **ptr, 
             break;
 
         case D3DXPT_PIXELSHADER:
-            hr = IDirect3DDevice9_CreatePixelShader(device, (DWORD *)*ptr, (LPDIRECT3DPIXELSHADER9 *)param->data);
-            if (hr != D3D_OK)
+            if (FAILED(hr = IDirect3DDevice9_CreatePixelShader(device, (DWORD *)*ptr, param->data)))
             {
                 WARN("Failed to create pixel shader\n");
                 return hr;
@@ -4836,23 +4846,14 @@ static HRESULT d3dx9_parse_effect_typedef(struct d3dx_parameter *param, const ch
                 switch (param->type)
                 {
                     case D3DXPT_STRING:
-                        param->bytes = sizeof(LPCSTR);
-                        break;
-
                     case D3DXPT_PIXELSHADER:
-                        param->bytes = sizeof(LPDIRECT3DPIXELSHADER9);
-                        break;
-
                     case D3DXPT_VERTEXSHADER:
-                        param->bytes = sizeof(LPDIRECT3DVERTEXSHADER9);
-                        break;
-
                     case D3DXPT_TEXTURE:
                     case D3DXPT_TEXTURE1D:
                     case D3DXPT_TEXTURE2D:
                     case D3DXPT_TEXTURE3D:
                     case D3DXPT_TEXTURECUBE:
-                        param->bytes = sizeof(LPDIRECT3DBASETEXTURE9);
+                        param->bytes = sizeof(void *);
                         break;
 
                     case D3DXPT_SAMPLER:

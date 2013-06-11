@@ -45,6 +45,7 @@ static const WCHAR headW[]     = {'H','E','A','D',0};
 static const WCHAR iframeW[]   = {'I','F','R','A','M','E',0};
 static const WCHAR imgW[]      = {'I','M','G',0};
 static const WCHAR inputW[]    = {'I','N','P','U','T',0};
+static const WCHAR linkW[]     = {'L','I','N','K',0};
 static const WCHAR metaW[]     = {'M','E','T','A',0};
 static const WCHAR objectW[]   = {'O','B','J','E','C','T',0};
 static const WCHAR optionW[]   = {'O','P','T','I','O','N',0};
@@ -72,6 +73,7 @@ static const tag_desc_t tag_descs[] = {
     {iframeW,    HTMLIFrame_Create},
     {imgW,       HTMLImgElement_Create},
     {inputW,     HTMLInputElement_Create},
+    {linkW,      HTMLLinkElement_Create},
     {metaW,      HTMLMetaElement_Create},
     {objectW,    HTMLObjectElement_Create},
     {optionW,    HTMLOptionElement_Create},
@@ -1662,7 +1664,7 @@ HRESULT HTMLElement_handle_event(HTMLDOMNode *iface, DWORD eid, nsIDOMEvent *eve
             switch(code) {
             case VK_F1: /* DOM_VK_F1 */
                 TRACE("F1 pressed\n");
-                fire_event(This->node.doc, EVENTID_HELP, TRUE, This->node.nsnode, NULL);
+                fire_event(This->node.doc, EVENTID_HELP, TRUE, This->node.nsnode, NULL, NULL);
                 *prevent_default = TRUE;
             }
 
@@ -2252,7 +2254,6 @@ static inline HRESULT get_domattr(HTMLAttributeCollection *This, DISPID id, LONG
             return E_UNEXPECTED;
         }
 
-        pos++;
         hres = HTMLDOMAttribute_Create(This->elem, id, attr);
         if(FAILED(hres))
             return hres;
@@ -2594,20 +2595,22 @@ static HRESULT HTMLAttributeCollection_invoke(DispatchEx *dispex, DISPID id, LCI
     switch(flags) {
     case DISPATCH_PROPERTYGET: {
         HTMLDOMAttribute *iter;
+        DWORD pos;
 
-        id = id-MSHTML_DISPID_CUSTOM_MIN+1;
+        pos = id-MSHTML_DISPID_CUSTOM_MIN;
 
         LIST_FOR_EACH_ENTRY(iter, &This->attrs, HTMLDOMAttribute, entry) {
-            if(!(--id))
-                break;
+            if(!pos) {
+                IHTMLDOMAttribute_AddRef(&iter->IHTMLDOMAttribute_iface);
+                V_VT(res) = VT_DISPATCH;
+                V_DISPATCH(res) = (IDispatch*)&iter->IHTMLDOMAttribute_iface;
+                return S_OK;
+            }
+            pos--;
         }
-        if(id)
-            return E_INVALIDARG;
 
-        IHTMLDOMAttribute_AddRef(&iter->IHTMLDOMAttribute_iface);
-        V_VT(res) = VT_DISPATCH;
-        V_DISPATCH(res) = (IDispatch*)&iter->IHTMLDOMAttribute_iface;
-        return S_OK;
+        WARN("invalid arg\n");
+        return E_INVALIDARG;
     }
 
     default:

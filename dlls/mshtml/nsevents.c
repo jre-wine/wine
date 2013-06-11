@@ -32,6 +32,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "htmlscript.h"
 #include "htmlevent.h"
 #include "resource.h"
 
@@ -268,7 +269,7 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
 
     nsIDOMHTMLDocument_GetBody(doc->nsdoc, &nsbody);
     if(nsbody) {
-        fire_event(doc, EVENTID_LOAD, TRUE, (nsIDOMNode*)nsbody, event);
+        fire_event(doc, EVENTID_LOAD, TRUE, (nsIDOMNode*)nsbody, event, (IDispatch*)&doc->window->base.IDispatchEx_iface);
         nsIDOMHTMLElement_Release(nsbody);
     }
 
@@ -312,7 +313,7 @@ static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *
         return NS_OK;
     }
 
-    fire_event(doc, eid, TRUE, nsnode, event);
+    fire_event(doc, eid, TRUE, nsnode, event, NULL);
 
     nsIDOMNode_Release(nsnode);
 

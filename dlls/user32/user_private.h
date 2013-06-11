@@ -35,6 +35,9 @@
 #define WM_SYSTIMER	    0x0118
 #define WM_POPUPSYSTEMMENU  0x0313
 
+#define WINE_MOUSE_HANDLE       ((HANDLE)1)
+#define WINE_KEYBOARD_HANDLE    ((HANDLE)2)
+
 struct window_surface;
 
 /* internal messages codes */
@@ -267,7 +270,6 @@ extern const char *SPY_GetVKeyName(WPARAM wParam) DECLSPEC_HIDDEN;
 extern void SPY_EnterMessage( INT iFlag, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern void SPY_ExitMessage( INT iFlag, HWND hwnd, UINT msg,
                              LRESULT lReturn, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
-extern int SPY_Init(void) DECLSPEC_HIDDEN;
 
 #include "pshpack1.h"
 

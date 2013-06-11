@@ -303,13 +303,14 @@ N
 @todo_wine@'@drive@@shortpath@R S'@or_broken@''
 @todo_wine@'@drive@@shortpath@T'@or_broken@''
 @todo_wine@'@drive@@shortpath@ABCDEFGHIJK.LMNOP'@or_broken@''
-@todo_wine@''@or_broken@'%~ai'
-@todo_wine@''@or_broken@'%~ai'
-@todo_wine@'--a------'@or_broken@'%~ai'
-@todo_wine@''@or_broken@'%~ti'
-@todo_wine@''@or_broken@'%~ti'
-@todo_wine@''@or_broken@'%~zi'
-@todo_wine@''@or_broken@'%~zi'
+''@or_broken@'%~ai'
+''@or_broken@'%~ai'
+'--a------'@or_broken@'%~ai'
+'5'@or_broken@'%~zi'
+''@or_broken@'%~ti'
+''@or_broken@'%~ti'
+''@or_broken@'%~zi'
+''@or_broken@'%~zi'
 @drive@@path@
 @drive@@path@
 @drive@
@@ -416,20 +417,20 @@ bar
 NUL
 @todo_wine@foo created
 ------------ Testing if/else ------------
-if/else should work with blocks
+--- if/else should work with blocks
 if seems to work
 else seems to work
 if seems not to detect /c as parameter
-Testing case sensitivity with and without /i option
+--- case sensitivity with and without /i option
 if seems to default to case sensitivity
 if /i seems to work
 if /I seems to work
-Testing string comparisons
+--- string comparisons
 equal
 non equal
 non equal
 equal
-Testing tabs handling
+--- tabs handling
 doom
 doom
 doom
@@ -437,6 +438,177 @@ lol
 quake
 quake
 quake
+--- comparison operators
+------ for strings
+LSS string can be used as operand for LSS comparison
+floats are handled as strings
+numbers in quotes are handled as strings
+negative numbers as well@or_broken@NT4
+if /i seems to work for LSS
+A LSS B
+AB LSS B
+AA LSS B
+A LSS AB
+AA LSS AB
+A LSS BA
+B LSS BA
+AB LSS BA
+AA LSS BA
+A LSS AA
+b LSS B@or_broken@NT4
+a LSS B@or_broken@NT4
+a LSS B insensitive
+A LSS b
+A LSS b insensitive
+A LEQ A
+A LEQ B
+B LEQ B
+AB LEQ B
+AA LEQ B
+A LEQ AB
+AB LEQ AB
+AA LEQ AB
+A LEQ BA
+B LEQ BA
+AB LEQ BA
+BA LEQ BA
+AA LEQ BA
+A LEQ AA
+AA LEQ AA
+b LEQ B@or_broken@NT4
+b LEQ B insensitive
+a LEQ B@or_broken@NT4
+a LEQ B insensitive
+A LEQ b
+A LEQ b insensitive
+A EQU A
+B EQU B
+AB EQU AB
+BA EQU BA
+AA EQU AA
+A EQU a insensitive
+B NEQ A
+AB NEQ A
+BA NEQ A
+AA NEQ A
+A NEQ B
+AB NEQ B
+BA NEQ B
+AA NEQ B
+A NEQ AB
+B NEQ AB
+BA NEQ AB
+AA NEQ AB
+A NEQ BA
+B NEQ BA
+AB NEQ BA
+AA NEQ BA
+A NEQ AA
+B NEQ AA
+AB NEQ AA
+BA NEQ AA
+A GEQ A
+B GEQ A
+AB GEQ A
+BA GEQ A
+AA GEQ A
+B GEQ B
+BA GEQ B
+B GEQ AB
+AB GEQ AB
+BA GEQ AB
+BA GEQ BA
+B GEQ AA
+AB GEQ AA
+BA GEQ AA
+AA GEQ AA
+B GTR A
+AB GTR A
+BA GTR A
+AA GTR A
+BA GTR B
+B GTR AB
+BA GTR AB
+B GTR AA
+AB GTR AA
+BA GTR AA
+------ for numbers
+negative numbers handled
+negative numbers handled
+octal handled
+also in negative form
+hexa handled
+also in negative form
+11 LSS 101
+0 LSS 1
+0 LSS 10
+1 LSS 10
+9 LSS 10
+0 LSS 9
+1 LSS 9
+0 LEQ 0
+0 LEQ 1
+1 LEQ 1
+0 LEQ 10
+1 LEQ 10
+10 LEQ 10
+9 LEQ 10
+0 LEQ 9
+1 LEQ 9
+9 LEQ 9
+0 EQU 0
+1 EQU 1
+10 EQU 10
+9 EQU 9
+octal ok
+hexa ok
+string/hexa compare ok
+string/hexa compare ok
+1 NEQ 0
+10 NEQ 0
+9 NEQ 0
+0 NEQ 1
+10 NEQ 1
+9 NEQ 1
+0 NEQ 10
+1 NEQ 10
+9 NEQ 10
+0 NEQ 9
+1 NEQ 9
+10 NEQ 9
+0 GEQ 0
+1 GEQ 0
+10 GEQ 0
+9 GEQ 0
+1 GEQ 1
+10 GEQ 1
+9 GEQ 1
+10 GEQ 10
+10 GEQ 9
+9 GEQ 9
+1 GTR 0
+10 GTR 0
+9 GTR 0
+10 GTR 1
+9 GTR 1
+10 GTR 9
+------ for numbers and stringified numbers
+strings and integers not equal
+strings and integers not equal
+foo
+"10" GEQ "1"
+'1' GEQ 1@or_broken@NT4
+1 GEQ "1"
+"1" GEQ "1"
+'1' GEQ "1"
+"10" GEQ "1"
+non NT4@or_broken@1 GEQ '1'
+'1' GEQ '1'
+foo
+1 GEQ "10"
+foo
+'1' GEQ "10"
+"10" GEQ "10"
 ------------ Testing for ------------
 --- plain FOR
 A
@@ -609,11 +781,16 @@ ErrorLevel 0
 
 --- for /F
 ------ string argument
-@todo_wine@a
-@todo_wine@a
 a
-@todo_wine@a
-@todo_wine@a
+a@or_broken@no output
+a
+a@or_broken@no output
+a
+a@or_broken@no output
+a
+a@or_broken@no output
+a
+a@or_broken@no output
 ------ fileset argument
 --------- basic blank handling
 a
@@ -637,24 +814,34 @@ kkk
 a
 b
 c
+------ command argument
+Passed1@or_broken@Missing functionality - Broken1
+Passed2@or_broken@Missing functionality - Broken2
+Passed3@or_broken@Missing functionality - Broken3
 ------ eol option
-@todo_wine@ad
-@todo_wine@z@y
+and@or_broken@Broken NT4 functionality1
+Line@or_broken@Broken NT4 functionality2
+Line@or_broken@Broken NT4 functionality3
+ad
+z@y
 a|d
-@todo_wine@no output
-@todo_wine@no output
+no output
+no output
 ------ delims option
-@todo_wine@a
-@todo_wine@a@space@
-@todo_wine@a d
-@todo_wine@a
-@todo_wine@C r
+a
+a@space@
+a d
+a
+C r
 foo bar baz
 @todo_wine@c:\
 ------ skip option
-@todo_wine@c
-@todo_wine@no output
-@todo_wine@no output
+c
+no output
+no output
+c
+c
+no output
 ------------ Testing del /a ------------
 not-r.test not found after delete, good
 r.test found before delete, good
@@ -823,14 +1010,19 @@ foo ""
 foo ''
 '' bar
 --- with builtins
-@todo_wine@0
-@todo_wine@foo created
-@todo_wine@Should expand foobaz
-@todo_wine@batfile
-@todo_wine@robinfile
-@todo_wine@1
-@todo_wine@1
+0
+foo created
+Should expand foobaz
+batfile
+robinfile
+1
+1
 non-builtin dir
+Line one
+Line two
+Get if
+... and else!
+passed
 ------------ Testing SHIFT ------------
 'p1' 'p2' 'p3' 'p4' 'p5'
 'p2' 'p3' 'p4' 'p5' ''
@@ -843,6 +1035,64 @@ non-builtin dir
 file correctly deleted
 --- a batch file can alter itself
 @todo_wine@bar
+---------- Testing copy
+Passed: Found expected dummy.file
+Passed: Found expected dir1\file1
+Passed: Found expected dir1\file1
+Passed: Found expected dir1\file99
+Passed: Found expected file1
+Passed: Did not find dir2
+Passed: Did not find dir2\file1
+Passed: Found expected dir1\file1
+Passed: Found expected dir1\file2
+Passed: Found expected dir1\file3
+Passed: Found expected dir1\file1
+Passed: Found expected dir1\file2
+Passed: Found expected dir1\file3
+Passed: Found expected file1
+Passed: Found expected file2
+Passed: Found expected file3
+Passed: Did not find dir2
+Passed: Did not find dir2\file1
+Passed: Did not find dir2\file2
+Passed: Did not find dir2\file3
+Passed: Found expected testfile
+Passed: Found expected testfile
+Passed: Found expected testfile
+Passed: Found expected testfile
+Passed: Found expected testfile
+Passed: Found expected dir1\fred
+Passed: Found expected dir1\fred
+Passed: Found expected fred
+Passed: Found expected fred
+Passed: file size check on file1 [5]@or_broken@Skipping file size check on NT4
+Passed: file size check on file2 [8]@or_broken@Skipping file size check on NT4
+Passed: file size check on file3 [11]@or_broken@Skipping file size check on NT4
+Passed: file size check on file1_default [5]@or_broken@Skipping file size check on NT4
+Passed: file size check on file1_default2 [5]@or_broken@Skipping file size check on NT4
+Passed: file size check on file1_plus_eof [6]@or_broken@Skipping file size check on NT4
+Passed: file size check on file2_plus_eof [9]@or_broken@Skipping file size check on NT4
+Passed: file size check on file3_plus_eof [12]@or_broken@Skipping file size check on NT4
+Passed: file size check on file12_plus_eof [14]@or_broken@Skipping file size check on NT4
+Passed: file size check on file12_no_eof [13]@or_broken@Skipping file size check on NT4
+Passed: file size check on file12_eof2 [14]@or_broken@Skipping file size check on NT4
+Passed: file size check on file1_binary_srccopy [6]@or_broken@Skipping file size check on NT4
+Passed: file size check on file1_ascii_srccopy [5]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_default_copy [25]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_ascii_copy [25]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_binary_copy [27]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy1 [26]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy2 [27]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy3 [26]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy4 [25]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy5 [28]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy6 [19]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy7 [6]@or_broken@Skipping file size check on NT4
+Passed: file size check on file123_mixed_copy8 [7]@or_broken@Skipping file size check on NT4
+Passed: errorlevel invalid check 1
+Passed: Did not find dir1\file1
+Passed: errorlevel invalid check 2
+Passed: errorlevel invalid check 3
 ------------ Testing setlocal/endlocal ------------
 --- enable/disable extensions
 @todo_wine@ErrLev:@space@
