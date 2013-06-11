@@ -200,8 +200,8 @@ static HRESULT WINAPI IcoFrameDecode_GetColorContexts(IWICBitmapFrameDecode *ifa
 static HRESULT WINAPI IcoFrameDecode_GetThumbnail(IWICBitmapFrameDecode *iface,
     IWICBitmapSource **ppIThumbnail)
 {
-    TRACE("(%p,%p)\n", iface, ppIThumbnail);
-    return WINCODEC_ERR_CODECNOTHUMBNAIL;
+    FIXME("(%p,%p)\n", iface, ppIThumbnail);
+    return E_NOTIMPL;
 }
 
 static const IWICBitmapFrameDecodeVtbl IcoFrameDecode_Vtbl = {
@@ -631,7 +631,7 @@ static HRESULT WINAPI IcoDecoder_GetFrame(IWICBitmapDecoder *iface,
 
     if (!This->initialized)
     {
-        hr = WINCODEC_ERR_NOTINITIALIZED;
+        hr = WINCODEC_ERR_FRAMEMISSING;
         goto fail;
     }
 

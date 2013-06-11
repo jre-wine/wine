@@ -80,15 +80,6 @@ static void notify_travellog_update(HTMLDocumentObj *doc)
     if(!doc->is_webbrowser)
         return;
 
-    /* Don't notify if we were in about: page */
-    if(doc->basedoc.window->uri) {
-        DWORD scheme;
-
-        hres = IUri_GetScheme(doc->basedoc.window->uri, &scheme);
-        if(SUCCEEDED(hres) && scheme == URL_SCHEME_ABOUT)
-            return;
-    }
-
     hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&cmdtrg);
     if(SUCCEEDED(hres)) {
         VARIANT vin;
@@ -132,19 +123,20 @@ void set_current_uri(HTMLOuterWindow *window, IUri *uri)
     IUri_GetDisplayUri(uri, &window->url);
 }
 
-void set_current_mon(HTMLOuterWindow *This, IMoniker *mon)
+void set_current_mon(HTMLOuterWindow *This, IMoniker *mon, DWORD flags)
 {
     IUriContainer *uri_container;
     IUri *uri = NULL;
     HRESULT hres;
 
     if(This->mon) {
-        if(This->doc_obj)
+        if(This->doc_obj && !(flags & (BINDING_REPLACE|BINDING_REFRESH)))
             notify_travellog_update(This->doc_obj);
         IMoniker_Release(This->mon);
         This->mon = NULL;
     }
 
+    This->load_flags = flags;
     if(!mon)
         return;
 
@@ -323,7 +315,7 @@ void prepare_for_binding(HTMLDocument *This, IMoniker *mon, DWORD flags)
         update_doc(This, UPDATE_TITLE|UPDATE_UI);
     }else {
         update_doc(This, UPDATE_TITLE);
-        set_current_mon(This->window, mon);
+        set_current_mon(This->window, mon, flags);
     }
 
     if(This->doc_obj->client) {

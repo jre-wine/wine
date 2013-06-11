@@ -58,9 +58,14 @@ extern HMODULE WININET_hModule DECLSPEC_HIDDEN;
 typedef struct {
     WCHAR *name;
     INTERNET_PORT port;
+    BOOL is_https;
     struct sockaddr_storage addr;
     socklen_t addr_len;
     char addr_str[INET6_ADDRSTRLEN];
+
+    WCHAR *scheme_host_port;
+    const WCHAR *host_port;
+    const WCHAR *canon_host_port;
 
     LONG ref;
 
@@ -228,8 +233,7 @@ typedef struct {
     DWORD (*QueryOption)(object_header_t*,DWORD,void*,DWORD*,BOOL);
     DWORD (*SetOption)(object_header_t*,DWORD,void*,DWORD);
     DWORD (*ReadFile)(object_header_t*,void*,DWORD,DWORD*);
-    DWORD (*ReadFileExA)(object_header_t*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
-    DWORD (*ReadFileExW)(object_header_t*,INTERNET_BUFFERSW*,DWORD,DWORD_PTR);
+    DWORD (*ReadFileEx)(object_header_t*,void*,DWORD,DWORD*,DWORD,DWORD_PTR);
     DWORD (*WriteFile)(object_header_t*,const void*,DWORD,DWORD*);
     DWORD (*QueryDataAvailable)(object_header_t*,DWORD*,DWORD,DWORD_PTR);
     DWORD (*FindNextFileW)(object_header_t*,void*);
@@ -314,6 +318,7 @@ typedef struct
     object_header_t hdr;
     http_session_t *session;
     server_t *server;
+    server_t *proxy;
     LPWSTR path;
     LPWSTR verb;
     LPWSTR rawHeaders;
@@ -456,14 +461,11 @@ struct WORKREQ_INTERNETOPENURLW
     DWORD_PTR dwContext;
 };
 
-struct WORKREQ_INTERNETREADFILEEXA
+struct WORKREQ_HTTPREADFILEEX
 {
-    LPINTERNET_BUFFERSA lpBuffersOut;
-};
-
-struct WORKREQ_INTERNETREADFILEEXW
-{
-    LPINTERNET_BUFFERSW lpBuffersOut;
+    void *buf;
+    DWORD size;
+    DWORD *ret_read;
 };
 
 typedef struct WORKREQ
@@ -487,8 +489,7 @@ typedef struct WORKREQ
         struct WORKREQ_HTTPENDREQUESTW          HttpEndRequestW;
         struct WORKREQ_SENDCALLBACK             SendCallback;
         struct WORKREQ_INTERNETOPENURLW         InternetOpenUrlW;
-        struct WORKREQ_INTERNETREADFILEEXA      InternetReadFileExA;
-        struct WORKREQ_INTERNETREADFILEEXW      InternetReadFileExW;
+        struct WORKREQ_HTTPREADFILEEX           HttpReadFileEx;
     } u;
 
 } WORKREQUEST, *LPWORKREQUEST;
@@ -537,7 +538,7 @@ BOOL INTERNET_FindProxyForProtocol(LPCWSTR szProxy, LPCWSTR proto, WCHAR *foundP
 DWORD create_netconn(BOOL,server_t*,DWORD,BOOL,DWORD,netconn_t**) DECLSPEC_HIDDEN;
 void free_netconn(netconn_t*) DECLSPEC_HIDDEN;
 void NETCON_unload(void) DECLSPEC_HIDDEN;
-DWORD NETCON_secure_connect(netconn_t *connection) DECLSPEC_HIDDEN;
+DWORD NETCON_secure_connect(netconn_t*,server_t*) DECLSPEC_HIDDEN;
 DWORD NETCON_send(netconn_t *connection, const void *msg, size_t len, int flags,
 		int *sent /* out */) DECLSPEC_HIDDEN;
 DWORD NETCON_recv(netconn_t *connection, void *buf, size_t len, int flags,
@@ -549,7 +550,7 @@ int NETCON_GetCipherStrength(netconn_t*) DECLSPEC_HIDDEN;
 DWORD NETCON_set_timeout(netconn_t *connection, BOOL send, DWORD value) DECLSPEC_HIDDEN;
 int sock_get_error(int) DECLSPEC_HIDDEN;
 
-server_t *get_server(const WCHAR*,INTERNET_PORT,BOOL);
+server_t *get_server(const WCHAR*,INTERNET_PORT,BOOL,BOOL);
 
 BOOL init_urlcache(void) DECLSPEC_HIDDEN;
 void free_urlcache(void) DECLSPEC_HIDDEN;
