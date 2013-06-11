@@ -1,8 +1,14 @@
-wine-unstable (1.5.16-1) UNRELEASED; urgency=low
+wine-unstable (1.5.16-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.16, released Oct 26, 2012.
+    - New version of the Mono package.
+    - Many improvements to the CMD command-line parser.
+    - More stream classes in the C++ runtime.
+    - Support for managing services in WMI.
+    - Improved CPU detection.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 01:43:06 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 01:43:13 +0000
 
 wine-unstable (1.5.15-1) unstable; urgency=low
 
