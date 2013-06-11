@@ -1,8 +1,12 @@
-wine-unstable (1.5.19-1) UNRELEASED; urgency=low
+wine-unstable (1.5.19-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.19, released Dec 7, 2012.
+    - Performance improvements in the DIB engine.
+    - More fleshed out XML-lite implementation.
+    - Some more C++ runtime functions.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 03:31:43 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 03:31:50 +0000
 
 wine-unstable (1.5.18-1) unstable; urgency=low
 
