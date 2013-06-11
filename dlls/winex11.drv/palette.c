@@ -54,7 +54,6 @@ static PALETTEENTRY *COLOR_sysPal; /* current system palette */
 
 static int COLOR_gapStart = 256;
 static int COLOR_gapEnd = -1;
-static int COLOR_gapFilled = 0;
 
 UINT16   X11DRV_PALETTE_PaletteFlags     = 0;
 
@@ -146,6 +145,7 @@ int X11DRV_PALETTE_Init(void)
     {
     case DirectColor:
 	X11DRV_PALETTE_PaletteFlags |= X11DRV_PALETTE_VIRTUAL;
+        /* fall through */
     case GrayScale:
     case PseudoColor:
 	if (private_color_map)
@@ -175,6 +175,7 @@ int X11DRV_PALETTE_Init(void)
 
     case TrueColor:
 	X11DRV_PALETTE_PaletteFlags |= X11DRV_PALETTE_VIRTUAL;
+        /* fall through */
     case StaticColor:
         X11DRV_PALETTE_PaletteFlags |= X11DRV_PALETTE_FIXED;
         X11DRV_PALETTE_ComputeColorShifts(&X11DRV_PALETTE_default_shifts, default_visual.red_mask, default_visual.green_mask, default_visual.blue_mask);
@@ -668,7 +669,6 @@ static void X11DRV_PALETTE_FillDefaultColors( const PALETTEENTRY *sys_pal_templa
 	     if( --max <= 0 ) break;
 	  }
 	}
-    COLOR_gapFilled = idx - COLOR_gapStart;
   }
 }
 

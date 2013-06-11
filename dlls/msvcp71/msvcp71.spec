@@ -3246,12 +3246,12 @@
 @ cdecl -arch=win64 ?endl@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@AEAV21@@Z(ptr) basic_ostream_wchar_endl
 @ cdecl -arch=win32 ?endl@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AAV21@@Z(ptr) basic_ostream_wchar_endl
 @ cdecl -arch=win64 ?endl@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AEAV21@@Z(ptr) basic_ostream_wchar_endl
-@ stub -arch=win32 ?ends@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@AAV21@@Z
-@ stub -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@AEAV21@@Z
-@ stub -arch=win32 ?ends@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@1@AAV21@@Z
-@ stub -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@AEAV21@@Z
-@ stub -arch=win32 ?ends@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AAV21@@Z
-@ stub -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AEAV21@@Z
+@ cdecl -arch=win32 ?ends@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@AAV21@@Z(ptr) basic_ostream_char_ends
+@ cdecl -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@DU?$char_traits@D@std@@@1@AEAV21@@Z(ptr) basic_ostream_char_ends
+@ cdecl -arch=win32 ?ends@std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@1@AAV21@@Z(ptr) basic_ostream_wchar_ends
+@ cdecl -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@GU?$char_traits@G@std@@@1@AEAV21@@Z(ptr) basic_ostream_wchar_ends
+@ cdecl -arch=win32 ?ends@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AAV21@@Z(ptr) basic_ostream_wchar_ends
+@ cdecl -arch=win64 ?ends@std@@YAAEAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AEAV21@@Z(ptr) basic_ostream_wchar_ends
 @ cdecl ?eof@?$char_traits@D@std@@SAHXZ() MSVCP_char_traits_char_eof
 @ cdecl ?eof@?$char_traits@G@std@@SAGXZ() MSVCP_char_traits_short_eof
 @ cdecl ?eof@?$char_traits@_W@std@@SAGXZ() MSVCP_char_traits_wchar_eof
@@ -5158,11 +5158,11 @@
 # extern _Zero
 @ stub __Wcrtomb_lk
 @ cdecl btowc(long) msvcrt.btowc
-@ stub mbrlen
-@ stub mbrtowc
-@ stub mbsrtowcs
+@ cdecl mbrlen(ptr long ptr) msvcrt.mbrlen
+@ cdecl mbrtowc(ptr str long ptr) msvcrt.mbrtowc
+@ cdecl mbsrtowcs(ptr ptr long ptr) msvcrt.mbsrtowcs
 @ cdecl towctrans(long long)
-@ stub wcrtomb
+@ cdecl wcrtomb(ptr long ptr) msvcrt.wcrtomb
 @ cdecl wcsrtombs(ptr ptr long ptr) msvcrt.wcsrtombs
 @ cdecl wctob(long) msvcrt.wctob
 @ cdecl wctrans(str)

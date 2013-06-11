@@ -409,7 +409,6 @@ INT nulldrv_SaveDC( PHYSDEV dev )
     newdc->vportExtY        = dc->vportExtY;
     newdc->virtual_res      = dc->virtual_res;
     newdc->virtual_size     = dc->virtual_size;
-    newdc->gdiFont          = dc->gdiFont;
 
     /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
 
@@ -815,21 +814,7 @@ BOOL WINAPI DeleteDC( HDC hdc )
         release_dc_ptr( dc );
         return TRUE;
     }
-
-    while (dc->saveLevel)
-    {
-        DC *dcs = dc->saved_dc;
-        dc->saved_dc = dcs->saved_dc;
-        dc->saveLevel--;
-        free_dc_state( dcs );
-    }
-
-    AbortPath( hdc );
-    SelectObject( hdc, GetStockObject(BLACK_PEN) );
-    SelectObject( hdc, GetStockObject(WHITE_BRUSH) );
-    SelectObject( hdc, GetStockObject(SYSTEM_FONT) );
-    SelectObject( hdc, GetStockObject(DEFAULT_BITMAP) );
-
+    reset_dc_state( hdc );
     free_dc_ptr( dc );
     return TRUE;
 }
