@@ -1,8 +1,13 @@
-wine-unstable (1.5.14-1) UNRELEASED; urgency=low
+wine-unstable (1.5.14-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.14, released Sep 28, 2012.
+    - Much better behavior of the URL cache.
+    - Improved GIF image support.
+    - More parser features in the shader compiler.
+    - Optimizations in JavaScript.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 00:48:14 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 11 Jun 2013 00:48:21 +0000
 
 wine-unstable (1.5.13-1) unstable; urgency=low
 
