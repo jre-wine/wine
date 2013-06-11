@@ -27,7 +27,6 @@
 #include "winbase.h"
 #include "winreg.h"
 #include "x11drv.h"
-#include "ddrawi.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -311,8 +310,6 @@ static INT X11DRV_ExtEscape( PHYSDEV dev, INT escape, INT in_count, LPCVOID in_d
         {
             switch (*(const INT *)in_data)
             {
-            case DCICOMMAND:
-                return DD_HAL_VERSION;
             case X11DRV_ESCAPE:
                 return TRUE;
             }

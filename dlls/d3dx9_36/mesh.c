@@ -771,7 +771,8 @@ error:
     return hr;
 }
 
-static HRESULT WINAPI ID3DXMeshImpl_GetVertexBuffer(ID3DXMesh *iface, LPDIRECT3DVERTEXBUFFER9 *vertex_buffer)
+static HRESULT WINAPI ID3DXMeshImpl_GetVertexBuffer(struct ID3DXMesh *iface,
+        struct IDirect3DVertexBuffer9 **vertex_buffer)
 {
     ID3DXMeshImpl *This = impl_from_ID3DXMesh(iface);
 
@@ -784,7 +785,8 @@ static HRESULT WINAPI ID3DXMeshImpl_GetVertexBuffer(ID3DXMesh *iface, LPDIRECT3D
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMeshImpl_GetIndexBuffer(ID3DXMesh *iface, LPDIRECT3DINDEXBUFFER9 *index_buffer)
+static HRESULT WINAPI ID3DXMeshImpl_GetIndexBuffer(struct ID3DXMesh *iface,
+        struct IDirect3DIndexBuffer9 **index_buffer)
 {
     ID3DXMeshImpl *This = impl_from_ID3DXMesh(iface);
 
@@ -2557,6 +2559,7 @@ HRESULT WINAPI D3DXCreateMesh(DWORD numfaces, DWORD numvertices, DWORD options, 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ID3DXMeshImpl));
     if (object == NULL || attrib_buffer == NULL)
     {
+        HeapFree(GetProcessHeap(), 0, object);
         HeapFree(GetProcessHeap(), 0, attrib_buffer);
         IDirect3DIndexBuffer9_Release(index_buffer);
         IDirect3DVertexBuffer9_Release(vertex_buffer);
@@ -3590,7 +3593,7 @@ static HRESULT filedata_get_name(IDirectXFileData *filedata, char **name)
 
     hr = IDirectXFileObject_GetName(filedata, *name, &name_len);
     if (FAILED(hr))
-        HeapFree(GetProcessHeap(), 0, name);
+        HeapFree(GetProcessHeap(), 0, *name);
     if (!name_len)
         (*name)[0] = 0;
 

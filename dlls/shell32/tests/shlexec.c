@@ -93,15 +93,15 @@ static int _todo_wait = 0;
 
 static char shell_call[2048]="";
 static int bad_shellexecute = 0;
-static INT_PTR shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, LPCSTR directory)
+static INT_PTR shell_execute(LPCSTR verb, LPCSTR file, LPCSTR parameters, LPCSTR directory)
 {
     INT_PTR rc, rcEmpty = 0;
 
-    if(!operation)
+    if(!verb)
         rcEmpty = shell_execute("", file, parameters, directory);
 
     strcpy(shell_call, "ShellExecute(");
-    strcat_param(shell_call, "verb", operation);
+    strcat_param(shell_call, "verb", verb);
     strcat_param(shell_call, "file", file);
     strcat_param(shell_call, "params", parameters);
     strcat_param(shell_call, "dir", directory);
@@ -116,7 +116,7 @@ static INT_PTR shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, L
      * association it displays the 'Open With' dialog and I could not find
      * a flag to prevent this.
      */
-    rc=(INT_PTR)ShellExecute(NULL, operation, file, parameters, directory, SW_SHOWNORMAL);
+    rc=(INT_PTR)ShellExecute(NULL, verb, file, parameters, directory, SW_SHOWNORMAL);
 
     if (rc > 32)
     {
@@ -145,7 +145,7 @@ static INT_PTR shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, L
     if (rc > 32)
         dump_child();
 
-    if(!operation)
+    if(!verb)
     {
         if (rc != rcEmpty && rcEmpty == SE_ERR_NOASSOC) /* NT4 */
             bad_shellexecute = 1;
@@ -156,7 +156,7 @@ static INT_PTR shell_execute(LPCSTR operation, LPCSTR file, LPCSTR parameters, L
     return rc;
 }
 
-static INT_PTR shell_execute_ex(DWORD mask, LPCSTR operation, LPCSTR file,
+static INT_PTR shell_execute_ex(DWORD mask, LPCSTR verb, LPCSTR file,
                                 LPCSTR parameters, LPCSTR directory,
                                 LPCSTR class)
 {
@@ -171,7 +171,7 @@ static INT_PTR shell_execute_ex(DWORD mask, LPCSTR operation, LPCSTR file,
         sprintf(smask, "0x%x", mask);
         strcat_param(shell_call, "mask", smask);
     }
-    strcat_param(shell_call, "verb", operation);
+    strcat_param(shell_call, "verb", verb);
     strcat_param(shell_call, "file", file);
     strcat_param(shell_call, "params", parameters);
     strcat_param(shell_call, "dir", directory);
@@ -183,7 +183,7 @@ static INT_PTR shell_execute_ex(DWORD mask, LPCSTR operation, LPCSTR file,
     sei.cbSize=sizeof(sei);
     sei.fMask=SEE_MASK_NOCLOSEPROCESS | mask;
     sei.hwnd=NULL;
-    sei.lpVerb=operation;
+    sei.lpVerb=verb;
     sei.lpFile=file;
     sei.lpParameters=parameters;
     sei.lpDirectory=directory;
@@ -704,7 +704,7 @@ static int StrCmpPath(const char* s1, const char* s2)
     return 0;
 }
 
-static void _okChildString(const char* file, int line, const char* key, const char* expected)
+static void _okChildString(const char* file, int line, const char* key, const char* expected, const char* bad)
 {
     char* result;
     result=getChildString("Arguments", key);
@@ -713,7 +713,8 @@ static void _okChildString(const char* file, int line, const char* key, const ch
         ok_(file, line)(FALSE, "%s expected '%s', but key not found or empty\n", key, expected);
         return;
     }
-    ok_(file, line)(lstrcmpiA(result, expected) == 0,
+    ok_(file, line)(lstrcmpiA(result, expected) == 0 ||
+                    broken(lstrcmpiA(result, bad) == 0),
                     "%s expected '%s', got '%s'\n", key, expected, result);
 }
 
@@ -738,7 +739,8 @@ static void _okChildInt(const char* file, int line, const char* key, int expecte
                     "%s expected %d, but got %d\n", key, expected, result);
 }
 
-#define okChildString(key, expected) _okChildString(__FILE__, __LINE__, (key), (expected))
+#define okChildString(key, expected) _okChildString(__FILE__, __LINE__, (key), (expected), (expected))
+#define okChildStringBroken(key, expected, broken) _okChildString(__FILE__, __LINE__, (key), (expected), (broken))
 #define okChildPath(key, expected) _okChildPath(__FILE__, __LINE__, (key), (expected))
 #define okChildInt(key, expected)    _okChildInt(__FILE__, __LINE__, (key), (expected))
 
@@ -1219,6 +1221,7 @@ typedef struct
     const char* params;
     int todo;
     cmdline_tests_t cmd;
+    cmdline_tests_t broken;
 } argify_tests_t;
 
 static const argify_tests_t argify_tests[] =
@@ -1324,7 +1327,9 @@ static const argify_tests_t argify_tests[] =
     /* An unclosed quoted string gets lost! */
     {"Params23456", "p2 \"p3\" \"p4 is lost", 0x1c3,
      {" \"p2\" \"p3\" \"\" \"\" \"\"",
-      {"", "p2", "p3", "", "", "", NULL}, 0}},
+      {"", "p2", "p3", "", "", "", NULL}, 0},
+     {" \"p2\" \"p3\" \"p3\" \"\" \"\"",
+       {"", "p2", "p3", "p3", "", "", NULL}, 0}},
 
     /* Backslashes have no special meaning even when preceding quotes. All
      * they do is start an unquoted string.
@@ -1376,6 +1381,7 @@ static void test_argify(void)
     char fileA[MAX_PATH], params[2*MAX_PATH+12];
     INT_PTR rc;
     const argify_tests_t* test;
+    const cmdline_tests_t *bad;
     const char* cmd;
     unsigned i, count;
 
@@ -1392,6 +1398,8 @@ static void test_argify(void)
     test = argify_tests;
     while (test->params)
     {
+        bad = test->broken.cmd ? &test->broken : &test->cmd;
+
         /* trace("***** verb='%s' params='%s'\n", test->verb, test->params); */
         rc = shell_execute_ex(SEE_MASK_DOENVSUBST, test->verb, fileA, test->params, NULL, NULL);
         ok(rc > 32, "%s failed: rc=%lu\n", shell_call, rc);
@@ -1415,18 +1423,20 @@ static void test_argify(void)
         if (cmd) cmd += strlen(test->verb);
         if (!cmd) cmd = "(null)";
         if ((test->todo & 0x2) == 0)
-            ok(!strcmp(cmd, test->cmd.cmd), "%s: the cmdline is '%s' instead of '%s'\n", shell_call, cmd, test->cmd.cmd);
+            ok(!strcmp(cmd, test->cmd.cmd) || broken(!strcmp(cmd, bad->cmd)),
+               "%s: the cmdline is '%s' instead of '%s'\n", shell_call, cmd, test->cmd.cmd);
         else todo_wine
-            ok(!strcmp(cmd, test->cmd.cmd), "%s: the cmdline is '%s' instead of '%s'\n", shell_call, cmd, test->cmd.cmd);
+            ok(!strcmp(cmd, test->cmd.cmd) || broken(!strcmp(cmd, bad->cmd)),
+               "%s: the cmdline is '%s' instead of '%s'\n", shell_call, cmd, test->cmd.cmd);
 
         for (i = 0; i < count - 1; i++)
         {
             char argname[18];
             sprintf(argname, "argvA%d", 4 + i);
             if ((test->todo & (1 << (i+4))) == 0)
-                okChildString(argname, test->cmd.args[i+1]);
+                okChildStringBroken(argname, test->cmd.args[i+1], bad->args[i+1]);
             else todo_wine
-                okChildString(argname, test->cmd.args[i+1]);
+                okChildStringBroken(argname, test->cmd.args[i+1], bad->args[i+1]);
         }
 
         if (has_cl2a)

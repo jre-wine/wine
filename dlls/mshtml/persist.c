@@ -38,6 +38,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "htmlscript.h"
 #include "htmlevent.h"
 #include "binding.h"
 #include "resource.h"
@@ -387,16 +388,18 @@ HRESULT set_moniker(HTMLDocument *This, IMoniker *mon, IBindCtx *pibc, nsChannel
 
         task = heap_alloc(sizeof(docobj_task_t));
         task->doc = This->doc_obj;
-        push_task(&task->header, set_progress_proc, NULL, This->doc_obj->basedoc.task_magic);
+        hres = push_task(&task->header, set_progress_proc, NULL, This->doc_obj->basedoc.task_magic);
+        if(FAILED(hres)) {
+            CoTaskMemFree(url);
+            return hres;
+        }
     }
 
     download_task = heap_alloc(sizeof(download_proc_task_t));
     download_task->doc = This->doc_obj;
     download_task->set_download = set_download;
     download_task->url = url;
-    push_task(&download_task->header, set_downloading_proc, set_downloading_task_destr, This->doc_obj->basedoc.task_magic);
-
-    return S_OK;
+    return push_task(&download_task->header, set_downloading_proc, set_downloading_task_destr, This->doc_obj->basedoc.task_magic);
 }
 
 void set_ready_state(HTMLOuterWindow *window, READYSTATE readystate)
@@ -406,11 +409,12 @@ void set_ready_state(HTMLOuterWindow *window, READYSTATE readystate)
     if(window->doc_obj && window->doc_obj->basedoc.window == window)
         call_property_onchanged(&window->doc_obj->basedoc.cp_propnotif, DISPID_READYSTATE);
 
-    fire_event(window->base.inner_window->doc, EVENTID_READYSTATECHANGE, FALSE, window->base.inner_window->doc->node.nsnode, NULL);
+    fire_event(window->base.inner_window->doc, EVENTID_READYSTATECHANGE, FALSE,
+            window->base.inner_window->doc->node.nsnode, NULL, NULL);
 
     if(window->frame_element)
         fire_event(window->frame_element->element.node.doc, EVENTID_READYSTATECHANGE,
-                   TRUE, window->frame_element->element.node.nsnode, NULL);
+                   TRUE, window->frame_element->element.node.nsnode, NULL, NULL);
 }
 
 static HRESULT get_doc_string(HTMLDocumentNode *This, char **str)
@@ -517,8 +521,8 @@ static HRESULT WINAPI PersistMoniker_Load(IPersistMoniker *iface, BOOL fFullyAva
          * "_EnumFORMATETC_"
          */
 
-        IBindCtx_GetObjectParam(pibc, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM, &unk);
-        if(unk) {
+        hres = IBindCtx_GetObjectParam(pibc, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM, &unk);
+        if(SUCCEEDED(hres) && unk) {
             IOleClientSite *client = NULL;
 
             hres = IUnknown_QueryInterface(unk, &IID_IOleClientSite, (void**)&client);

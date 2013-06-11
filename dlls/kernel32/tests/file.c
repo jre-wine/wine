@@ -3354,13 +3354,13 @@ static void test_OpenFileById(void)
     ret2 = GetTempPathA(sizeof(tempPath), tempPath);
     ok(ret2, "OpenFileById: GetTempPath failed, got error %u.\n", GetLastError());
 
-    /* ensure the existance of a file in the temp folder */
+    /* ensure the existence of a file in the temp folder */
     ret2 = GetTempFileNameA(tempPath, "abc", 0, tempFileName);
     ok(ret2, "OpenFileById: GetTempFileNameA failed, got error %u.\n", GetLastError());
     ok(GetFileAttributesA(tempFileName) != INVALID_FILE_ATTRIBUTES,
         "OpenFileById: GetFileAttributesA failed to find the temp file, got error %u\n", GetLastError());
 
-    ret2 = MultiByteToWideChar(CP_ACP, 0, tempFileName + strlen(tempPath), -1, tempFileNameW, sizeof(tempFileNameW));
+    ret2 = MultiByteToWideChar(CP_ACP, 0, tempFileName + strlen(tempPath), -1, tempFileNameW, sizeof(tempFileNameW)/sizeof(tempFileNameW[0]));
     ok(ret2, "OpenFileById: MultiByteToWideChar failed to convert tempFileName, got error %u.\n", GetLastError());
     tempFileNameLen = ret2 - 1;
 

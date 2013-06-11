@@ -53,7 +53,7 @@ rem - Try cmd.exe /k as well
 cmd.exe /k "copy file1 file2 >nul && exit"
 echo No prompts or I would not get here2
 
-rem Non existing variable expansion is as per command line, i.e. left as-is
+rem Nonexistent variable expansion is as per command line, i.e. left as-is
 cmd.exe /c echo %%hello1%%
 cmd.exe /c echo %%hello2
 cmd.exe /c echo %%hello3^:h=t%%
@@ -251,6 +251,16 @@ call tell;1;;2
 if errorlevel 2 echo error %ErrorLevel%
 call tell "p "1 p" "2
 call tell p"1 p";2
+
+echo --------- Testing delimiters and parameter passing  --------------
+echo @echo 0:%%0,1:%%1,2:%%2,All:'%%*'> tell.bat
+call;tell 1 2
+call   tell 1 2
+==call==tell==1==2
+call tell(1234)
+call tell(12(34)
+call tell(12;34)
+echo --------- Finished  --------------
 del tell.bat say*.*
 exit
 :setError

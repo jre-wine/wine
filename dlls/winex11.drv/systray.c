@@ -432,6 +432,7 @@ static void repaint_tray_icon( struct tray_icon *icon )
 
     UpdateLayeredWindow( icon->window, 0, NULL, NULL, hdc, NULL, 0, &blend, ULW_ALPHA );
 done:
+    HeapFree (GetProcessHeap(), 0, info);
     if (hdc) DeleteDC( hdc );
     if (dib) DeleteObject( dib );
 }
@@ -461,6 +462,7 @@ static LRESULT WINAPI tray_icon_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
         break;
 
     case WM_PAINT:
+        if (!icon->layered)
         {
             PAINTSTRUCT ps;
             RECT rc;
@@ -476,6 +478,7 @@ static LRESULT WINAPI tray_icon_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
             EndPaint(hwnd, &ps);
             return 0;
         }
+        break;
 
     case WM_MOUSEMOVE:
     case WM_LBUTTONDOWN:

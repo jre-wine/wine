@@ -3754,16 +3754,20 @@ MSVCRT_FILE* CDECL MSVCRT_tmpfile(void)
   MSVCRT_FILE* file = NULL;
 
   LOCK_FILES();
-  fd = MSVCRT__open(filename, MSVCRT__O_CREAT | MSVCRT__O_BINARY | MSVCRT__O_RDWR | MSVCRT__O_TEMPORARY);
+  fd = MSVCRT__open(filename, MSVCRT__O_CREAT | MSVCRT__O_BINARY | MSVCRT__O_RDWR | MSVCRT__O_TEMPORARY,
+          MSVCRT__S_IREAD | MSVCRT__S_IWRITE);
   if (fd != -1 && (file = msvcrt_alloc_fp()))
   {
-    if (msvcrt_init_fp(file, fd, MSVCRT__O_RDWR) == -1)
+    if (msvcrt_init_fp(file, fd, MSVCRT__IORW) == -1)
     {
         file->_flag = 0;
         file = NULL;
     }
     else file->_tmpfname = MSVCRT__strdup(filename);
   }
+
+  if(fd != -1 && !file)
+      MSVCRT__close(fd);
   UNLOCK_FILES();
   return file;
 }
@@ -3991,8 +3995,11 @@ int CDECL MSVCRT_ungetc(int c, MSVCRT_FILE * file)
 MSVCRT_wint_t CDECL MSVCRT_ungetwc(MSVCRT_wint_t wc, MSVCRT_FILE * file)
 {
     MSVCRT_wchar_t mwc = wc;
-    char * pp = (char *)&mwc;
+    unsigned char * pp = (unsigned char *)&mwc;
     int i;
+
+    if (wc == MSVCRT_WEOF)
+        return MSVCRT_WEOF;
 
     MSVCRT__lock_file(file);
     for(i=sizeof(MSVCRT_wchar_t)-1;i>=0;i--) {

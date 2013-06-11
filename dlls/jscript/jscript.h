@@ -223,17 +223,34 @@ static inline IDispatch *to_disp(jsdisp_t *jsdisp)
 
 jsdisp_t *as_jsdisp(IDispatch*) DECLSPEC_HIDDEN;
 jsdisp_t *to_jsdisp(IDispatch*) DECLSPEC_HIDDEN;
+void jsdisp_free(jsdisp_t*) DECLSPEC_HIDDEN;
 
+#ifndef TRACE_REFCNT
+
+/*
+ * We do a lot of refcount calls during script execution, so having an inline
+ * version is a nice perf win. Define TRACE_REFCNT macro when debugging
+ * refcount bugs to have traces. Also, since jsdisp_t is not thread safe anyways,
+ * there is no point in using atomic operations.
+ */
 static inline jsdisp_t *jsdisp_addref(jsdisp_t *jsdisp)
 {
-    IDispatchEx_AddRef(&jsdisp->IDispatchEx_iface);
+    jsdisp->ref++;
     return jsdisp;
 }
 
 static inline void jsdisp_release(jsdisp_t *jsdisp)
 {
-    IDispatchEx_Release(&jsdisp->IDispatchEx_iface);
+    if(!--jsdisp->ref)
+        jsdisp_free(jsdisp);
 }
+
+#else
+
+jsdisp_t *jsdisp_addref(jsdisp_t*) DECLSPEC_HIDDEN;
+void jsdisp_release(jsdisp_t*) DECLSPEC_HIDDEN;
+
+#endif
 
 HRESULT create_dispex(script_ctx_t*,const builtin_info_t*,jsdisp_t*,jsdisp_t**) DECLSPEC_HIDDEN;
 HRESULT init_dispex(jsdisp_t*,script_ctx_t*,const builtin_info_t*,jsdisp_t*) DECLSPEC_HIDDEN;
@@ -416,7 +433,7 @@ HRESULT create_jscaller(script_ctx_t*) DECLSPEC_HIDDEN;
 #define REM_CHECK_GLOBAL   0x0001
 #define REM_RESET_INDEX    0x0002
 #define REM_NO_CTX_UPDATE  0x0004
-HRESULT regexp_match_next(script_ctx_t*,jsdisp_t*,DWORD,const WCHAR*,DWORD,const WCHAR**,match_result_t**,
+HRESULT regexp_match_next(script_ctx_t*,jsdisp_t*,DWORD,jsstr_t*,const WCHAR**,match_result_t**,
         DWORD*,DWORD*,match_result_t*) DECLSPEC_HIDDEN;
 HRESULT parse_regexp_flags(const WCHAR*,DWORD,DWORD*) DECLSPEC_HIDDEN;
 HRESULT regexp_string_match(script_ctx_t*,jsdisp_t*,jsstr_t*,jsval_t*) DECLSPEC_HIDDEN;

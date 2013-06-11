@@ -55,41 +55,36 @@ static inline DC *get_dc_obj( HDC hdc )
     DC *dc = GDI_GetObjPtr( hdc, 0 );
     if (!dc) return NULL;
 
-    if ((dc->header.type != OBJ_DC) &&
-        (dc->header.type != OBJ_MEMDC) &&
-        (dc->header.type != OBJ_METADC) &&
-        (dc->header.type != OBJ_ENHMETADC))
+    switch (GetObjectType( hdc ))
     {
+    case OBJ_DC:
+    case OBJ_MEMDC:
+    case OBJ_METADC:
+    case OBJ_ENHMETADC:
+        return dc;
+    default:
         GDI_ReleaseObj( hdc );
         SetLastError( ERROR_INVALID_HANDLE );
-        dc = NULL;
+        return NULL;
     }
-    return dc;
 }
 
 
 /***********************************************************************
- *           alloc_dc_ptr
+ *           set_initial_dc_state
  */
-DC *alloc_dc_ptr( WORD magic )
+static void set_initial_dc_state( DC *dc )
 {
-    DC *dc;
-
-    if (!(dc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc) ))) return NULL;
-
-    dc->nulldrv.funcs       = &null_driver;
-    dc->physDev             = &dc->nulldrv;
-    dc->thread              = GetCurrentThreadId();
-    dc->refcount            = 1;
+    dc->wndOrgX             = 0;
+    dc->wndOrgY             = 0;
     dc->wndExtX             = 1;
     dc->wndExtY             = 1;
+    dc->vportOrgX           = 0;
+    dc->vportOrgY           = 0;
     dc->vportExtX           = 1;
     dc->vportExtY           = 1;
     dc->miterLimit          = 10.0f; /* 10.0 is the default, from MSDN */
-    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
-    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
-    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
-    dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
+    dc->layout              = 0;
     dc->font_code_page      = CP_ACP;
     dc->ROPmode             = R2_COPYPEN;
     dc->polyFillMode        = ALTERNATE;
@@ -100,9 +95,17 @@ DC *alloc_dc_ptr( WORD magic )
     dc->dcBrushColor        = RGB( 255, 255, 255 );
     dc->dcPenColor          = RGB( 0, 0, 0 );
     dc->textColor           = RGB( 0, 0, 0 );
+    dc->brushOrgX           = 0;
+    dc->brushOrgY           = 0;
+    dc->mapperFlags         = 0;
     dc->textAlign           = TA_LEFT | TA_TOP | TA_NOUPDATECP;
+    dc->charExtra           = 0;
+    dc->breakExtra          = 0;
+    dc->breakRem            = 0;
     dc->MapMode             = MM_TEXT;
     dc->GraphicsMode        = GM_COMPATIBLE;
+    dc->CursPosX            = 0;
+    dc->CursPosY            = 0;
     dc->ArcDirection        = AD_COUNTERCLOCKWISE;
     dc->xformWorld2Wnd.eM11 = 1.0f;
     dc->xformWorld2Wnd.eM12 = 0.0f;
@@ -115,8 +118,30 @@ DC *alloc_dc_ptr( WORD magic )
     dc->vport2WorldValid    = TRUE;
 
     reset_bounds( &dc->bounds );
+}
 
-    if (!(dc->hSelf = alloc_gdi_handle( &dc->header, magic, &dc_funcs )))
+/***********************************************************************
+ *           alloc_dc_ptr
+ */
+DC *alloc_dc_ptr( WORD magic )
+{
+    DC *dc;
+
+    if (!(dc = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dc) ))) return NULL;
+
+    dc->nulldrv.funcs       = &null_driver;
+    dc->physDev             = &dc->nulldrv;
+    dc->module              = gdi32_module;
+    dc->thread              = GetCurrentThreadId();
+    dc->refcount            = 1;
+    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
+    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
+    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
+    dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
+
+    set_initial_dc_state( dc );
+
+    if (!(dc->hSelf = alloc_gdi_handle( dc, magic, &dc_funcs )))
     {
         HeapFree( GetProcessHeap(), 0, dc );
         return NULL;
@@ -160,6 +185,10 @@ void free_dc_ptr( DC *dc )
         dc->physDev = physdev->next;
         physdev->funcs->pDeleteDC( physdev );
     }
+    GDI_dec_ref_count( dc->hPen );
+    GDI_dec_ref_count( dc->hBrush );
+    GDI_dec_ref_count( dc->hFont );
+    if (dc->hBitmap) GDI_dec_ref_count( dc->hBitmap );
     free_gdi_handle( dc->hSelf );
     free_dc_state( dc );
 }
@@ -344,7 +373,6 @@ INT nulldrv_SaveDC( PHYSDEV dev )
     newdc->hBrush           = dc->hBrush;
     newdc->hFont            = dc->hFont;
     newdc->hBitmap          = dc->hBitmap;
-    newdc->hDevice          = dc->hDevice;
     newdc->hPalette         = dc->hPalette;
     newdc->ROPmode          = dc->ROPmode;
     newdc->polyFillMode     = dc->polyFillMode;
@@ -410,7 +438,7 @@ INT nulldrv_SaveDC( PHYSDEV dev )
 
 
 /***********************************************************************
- *           restore_dc_state
+ *           nulldrv_RestoreDC
  */
 BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level )
 {
@@ -430,7 +458,6 @@ BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level )
     if (!PATH_RestorePath( dc, dcs )) return FALSE;
 
     dc->layout           = dcs->layout;
-    dc->hDevice          = dcs->hDevice;
     dc->ROPmode          = dcs->ROPmode;
     dc->polyFillMode     = dcs->polyFillMode;
     dc->stretchBltMode   = dcs->stretchBltMode;
@@ -515,6 +542,44 @@ BOOL nulldrv_RestoreDC( PHYSDEV dev, INT level )
 
 
 /***********************************************************************
+ *           reset_dc_state
+ */
+static BOOL reset_dc_state( HDC hdc )
+{
+    DC *dc, *dcs, *next;
+
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+
+    set_initial_dc_state( dc );
+    SetBkColor( hdc, RGB( 255, 255, 255 ));
+    SetTextColor( hdc, RGB( 0, 0, 0 ));
+    SelectObject( hdc, GetStockObject( WHITE_BRUSH ));
+    SelectObject( hdc, GetStockObject( SYSTEM_FONT ));
+    SelectObject( hdc, GetStockObject( BLACK_PEN ));
+    SetVirtualResolution( hdc, 0, 0, 0, 0 );
+    GDISelectPalette( hdc, GetStockObject( DEFAULT_PALETTE ), FALSE );
+    SetBoundsRect( hdc, NULL, DCB_DISABLE );
+    AbortPath( hdc );
+
+    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
+    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
+    dc->hClipRgn = 0;
+    dc->hMetaRgn = 0;
+    update_dc_clipping( dc );
+
+    for (dcs = dc->saved_dc; dcs; dcs = next)
+    {
+        next = dcs->saved_dc;
+        free_dc_state( dcs );
+    }
+    dc->saved_dc = NULL;
+    dc->saveLevel = 0;
+    release_dc_ptr( dc );
+    return TRUE;
+}
+
+
+/***********************************************************************
  *           SaveDC    (GDI32.@)
  */
 INT WINAPI SaveDC( HDC hdc )
@@ -562,6 +627,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
     HDC hdc;
     DC * dc;
     const struct gdi_dc_funcs *funcs;
+    HMODULE module;
     WCHAR buf[300];
 
     GDI_CheckNotLock();
@@ -576,7 +642,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         strcpyW(buf, driver);
     }
 
-    if (!(funcs = DRIVER_load_driver( buf )))
+    if (!(funcs = DRIVER_load_driver( buf, &module )))
     {
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
@@ -584,6 +650,7 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
     if (!(dc = alloc_dc_ptr( OBJ_DC ))) return 0;
     hdc = dc->hSelf;
 
+    dc->module  = module;
     dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
 
     TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
@@ -1210,8 +1277,6 @@ WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
 
     if (!dc) return 0;
 
-    /* "Undocumented Windows" info is slightly confusing. */
-
     TRACE("hDC %p, flags %04x\n",hdc,flags);
 
     if (flags & DCHF_INVALIDATEVISRGN)
@@ -1220,6 +1285,8 @@ WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
         ret = InterlockedExchange( &dc->dirty, 0 );
 
     GDI_ReleaseObj( hdc );
+
+    if (flags & DCHF_RESETDC) ret = reset_dc_state( hdc );
     return ret;
 }
 

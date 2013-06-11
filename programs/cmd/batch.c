@@ -89,7 +89,10 @@ void WCMD_batch (WCHAR *file, WCHAR *command, BOOL called, WCHAR *startLabel, HA
       CMD_LIST *toExecute = NULL;         /* Commands left to be executed */
       if (!WCMD_ReadAndParseLine(NULL, &toExecute, h))
         break;
-      WCMD_process_commands(toExecute, FALSE, NULL, NULL);
+      /* Note: although this batch program itself may be called, we are not retrying
+         the command as a result of a call failing to find a program, hence the
+         retryCall parameter below is FALSE                                           */
+      WCMD_process_commands(toExecute, FALSE, NULL, NULL, FALSE);
       WCMD_free_commands(toExecute);
       toExecute = NULL;
   }
@@ -110,6 +113,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, BOOL called, WCHAR *startLabel, HA
   HeapFree(GetProcessHeap(), 0, context->batchfileW);
   LocalFree (context);
   if ((prev_context != NULL) && (!called)) {
+    WINE_TRACE("Batch completed, but was not 'called' so skipping outer batch too\n");
     prev_context -> skip_rest = TRUE;
     context = prev_context;
   }
@@ -117,47 +121,48 @@ void WCMD_batch (WCHAR *file, WCHAR *command, BOOL called, WCHAR *startLabel, HA
 }
 
 /*******************************************************************
- * WCMD_parameter
+ * WCMD_parameter_with_delims
  *
- * Extracts a delimited parameter from an input string
+ * Extracts a delimited parameter from an input string, providing
+ * the delimiters characters to use
  *
  * PARAMS
  *  s     [I] input string, non NULL
  *  n     [I] # of the parameter to return, counted from 0
  *  start [O] Optional. Pointer to the first char of param n in s
- *  end   [O] Optional. Pointer to the last char of param n in s
- *  raw   [I] True to return the parameter in raw format (quotes maintained)
- *            False returns the parameter with quotes stripped
+ *  raw   [I] TRUE to return the parameter in raw format (quotes maintained)
+ *            FALSE to return the parameter with quotes stripped (including internal ones)
+ *  wholecmdline [I] TRUE to indicate this routine is being used to parse the
+ *                   command line, and special logic for arg0->1 transition
+ *                   needs to be applied.
+ *  delims[I] The delimiter characters to use
  *
  * RETURNS
  *  Success: The nth delimited parameter found in s
- *           if start != NULL, *start points to the start of the param
- *           if end != NULL, *end points to the end of the param
+ *           if start != NULL, *start points to the start of the param (quotes maintained)
  *  Failure: An empty string if the param is not found.
- *           *start == *end == NULL
+ *           *start == NULL
  *
  * NOTES
  *  Return value is stored in static storage (i.e. overwritten after each call).
- *  Specify 'start' and/or 'end' to include delimiting double quotes as well, if any.
  *  By default, the parameter is returned with quotes removed, ready for use with
  *  other API calls, e.g. c:\"a b"\c is returned as c:\a b\c. However, some commands
  *  need to preserve the exact syntax (echo, for, etc) hence the raw option.
  */
-WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, WCHAR **end, BOOL raw)
+WCHAR *WCMD_parameter_with_delims (WCHAR *s, int n, WCHAR **start,
+                                   BOOL raw, BOOL wholecmdline, const WCHAR *delims)
 {
-    static const WCHAR defaultDelims[] = { ' ', '\t', ',', '=', ';', '\0' };
     int curParamNb = 0;
     static WCHAR param[MAX_PATH];
     WCHAR *p = s, *begin;
 
     if (start != NULL) *start = NULL;
-    if (end != NULL) *end = NULL;
     param[0] = '\0';
 
     while (TRUE) {
 
         /* Absorb repeated word delimiters until we get to the next token (or the end!) */
-        while (*p && (strchrW(defaultDelims, *p) != NULL))
+        while (*p && (strchrW(delims, *p) != NULL))
             p++;
         if (*p == '\0') return param;
 
@@ -171,7 +176,13 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, WCHAR **end, BOOL raw)
         /* Loop character by character, but just need to special case quotes */
         while (*p) {
             /* Once we have found a delimiter, break */
-            if (strchrW(defaultDelims, *p) != NULL) break;
+            if (strchrW(delims, *p) != NULL) break;
+
+            /* Very odd special case - Seems as if a ( acts as a delimiter which is
+               not swallowed but is effective only when it comes between the program
+               name and the parameters. Need to avoid this triggering when used
+               to walk parameters generally.                                         */
+            if (wholecmdline && curParamNb == 0 && *p=='(') break;
 
             /* If we find a quote, copy until we get the end quote */
             if (*p == '"') {
@@ -197,11 +208,24 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, WCHAR **end, BOOL raw)
                 }
                 param[i] = '\0';
             }
-            if (end) *end = p - 1;
             return param;
         }
         curParamNb++;
     }
+}
+
+/*******************************************************************
+ * WCMD_parameter
+ *
+ * Extracts a delimited parameter from an input string, using a
+ * default set of delimiter characters. For parameters, see the main
+ * function above.
+ */
+WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **start, BOOL raw,
+                       BOOL wholecmdline)
+{
+  static const WCHAR defaultDelims[] = { ' ', '\t', ',', '=', ';', '\0' };
+  return WCMD_parameter_with_delims (s, n, start, raw, wholecmdline, defaultDelims);
 }
 
 /****************************************************************************
@@ -221,31 +245,53 @@ WCHAR *WCMD_fgets(WCHAR *buf, DWORD noChars, HANDLE h)
 {
   DWORD charsRead;
   BOOL status;
-  LARGE_INTEGER filepos;
   DWORD i;
 
   /* We can't use the native f* functions because of the filename syntax differences
      between DOS and Unix. Also need to lose the LF (or CRLF) from the line. */
 
   if (!WCMD_is_console_handle(h)) {
-    /* Save current file position */
-    filepos.QuadPart = 0;
-    SetFilePointerEx(h, filepos, &filepos, FILE_CURRENT);
+      LARGE_INTEGER filepos;
+      char *bufA;
+      UINT cp;
+      const char *p;
+
+      cp = GetConsoleCP();
+      bufA = HeapAlloc(GetProcessHeap(), 0, noChars);
+      if (!bufA) return NULL;
+
+      /* Save current file position */
+      filepos.QuadPart = 0;
+      SetFilePointerEx(h, filepos, &filepos, FILE_CURRENT);
+
+      status = ReadFile(h, bufA, noChars, &charsRead, NULL);
+      if (!status || charsRead == 0) {
+          HeapFree(GetProcessHeap(), 0, bufA);
+          return NULL;
+      }
+
+      /* Find first EOL */
+      for (p = bufA; p < (bufA + charsRead); p = CharNextExA(cp, p, 0)) {
+          if (*p == '\n' || *p == '\r')
+              break;
+      }
+
+      /* Sets file pointer to the start of the next line, if any */
+      filepos.QuadPart += p - bufA + 1 + (*p == '\r' ? 1 : 0);
+      SetFilePointerEx(h, filepos, NULL, FILE_BEGIN);
+
+      i = MultiByteToWideChar(cp, 0, bufA, p - bufA, buf, noChars);
+      HeapFree(GetProcessHeap(), 0, bufA);
   }
+  else {
+      status = WCMD_ReadFile(h, buf, noChars, &charsRead);
+      if (!status || charsRead == 0) return NULL;
 
-  status = WCMD_ReadFile(h, buf, noChars, &charsRead);
-  if (!status || charsRead == 0) return NULL;
-
-  /* Find first EOL */
-  for (i = 0; i < charsRead; i++) {
-    if (buf[i] == '\n' || buf[i] == '\r')
-      break;
-  }
-
-  if (!WCMD_is_console_handle(h) && i != charsRead) {
-    /* Sets file pointer to the start of the next line, if any */
-    filepos.QuadPart += i + 1 + (buf[i] == '\r' ? 1 : 0);
-    SetFilePointerEx(h, filepos, NULL, FILE_BEGIN);
+      /* Find first EOL */
+      for (i = 0; i < charsRead; i++) {
+          if (buf[i] == '\n' || buf[i] == '\r')
+              break;
+      }
   }
 
   /* Truncate at EOL (or end of buffer) */
@@ -418,8 +464,9 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
     strcpyW(outputparam, context->batchfileW);
   } else if ((*lastModifier >= '1' && *lastModifier <= '9')) {
     strcpyW(outputparam,
-            WCMD_parameter (context -> command, *lastModifier-'0' + context -> shift_count[*lastModifier-'0'],
-                            NULL, NULL, FALSE));
+            WCMD_parameter (context -> command,
+                            *lastModifier-'0' + context -> shift_count[*lastModifier-'0'],
+                            NULL, FALSE, TRUE));
   } else {
     strcpyW(outputparam, forValue);
   }
@@ -429,11 +476,6 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
      in a specific order, remembering there could be duplicates           */
   modifierLen = lastModifier - firstModifier;
   finaloutput[0] = 0x00;
-
-  /* Useful for debugging purposes: */
-  /*printf("Modifier string '%*.*s' and variable is %c\n Param starts as '%s'\n",
-             (modifierLen), (modifierLen), firstModifier, *lastModifier,
-             outputparam);*/
 
   /* 1. Handle '~' : Strip surrounding quotes */
   if (outputparam[0]=='"' &&
@@ -477,64 +519,69 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
     exists = GetFileAttributesExW(fullfilename, GetFileExInfoStandard,
                                   &fileInfo);
 
-    /* 2. Handle 'a' : Output attributes */
-    if (exists &&
-        memchrW(firstModifier, 'a', modifierLen) != NULL) {
+    /* 2. Handle 'a' : Output attributes (File doesn't have to exist) */
+    if (memchrW(firstModifier, 'a', modifierLen) != NULL) {
 
       WCHAR defaults[] = {'-','-','-','-','-','-','-','-','-','\0'};
       doneModifier = TRUE;
-      strcpyW(thisoutput, defaults);
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-        thisoutput[0]='d';
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
-        thisoutput[1]='r';
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE)
-        thisoutput[2]='a';
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)
-        thisoutput[3]='h';
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM)
-        thisoutput[4]='s';
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED)
-        thisoutput[5]='c';
-      /* FIXME: What are 6 and 7? */
-      if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-        thisoutput[8]='l';
-      strcatW(finaloutput, thisoutput);
+
+      if (exists) {
+        strcpyW(thisoutput, defaults);
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+          thisoutput[0]='d';
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+          thisoutput[1]='r';
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE)
+          thisoutput[2]='a';
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN)
+          thisoutput[3]='h';
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM)
+          thisoutput[4]='s';
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED)
+          thisoutput[5]='c';
+        /* FIXME: What are 6 and 7? */
+        if (fileInfo.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+          thisoutput[8]='l';
+        strcatW(finaloutput, thisoutput);
+      }
     }
 
-    /* 3. Handle 't' : Date+time */
-    if (exists &&
-        memchrW(firstModifier, 't', modifierLen) != NULL) {
+    /* 3. Handle 't' : Date+time (File doesn't have to exist) */
+    if (memchrW(firstModifier, 't', modifierLen) != NULL) {
 
       SYSTEMTIME systime;
       int datelen;
 
       doneModifier = TRUE;
-      if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
 
-      /* Format the time */
-      FileTimeToSystemTime(&fileInfo.ftLastWriteTime, &systime);
-      GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &systime,
-                        NULL, thisoutput, MAX_PATH);
-      strcatW(thisoutput, spaceW);
-      datelen = strlenW(thisoutput);
-      GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &systime,
-                        NULL, (thisoutput+datelen), MAX_PATH-datelen);
-      strcatW(finaloutput, thisoutput);
+      if (exists) {
+        if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
+
+        /* Format the time */
+        FileTimeToSystemTime(&fileInfo.ftLastWriteTime, &systime);
+        GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &systime,
+                          NULL, thisoutput, MAX_PATH);
+        strcatW(thisoutput, spaceW);
+        datelen = strlenW(thisoutput);
+        GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &systime,
+                          NULL, (thisoutput+datelen), MAX_PATH-datelen);
+        strcatW(finaloutput, thisoutput);
+      }
     }
 
-    /* 4. Handle 'z' : File length */
-    if (exists &&
-        memchrW(firstModifier, 'z', modifierLen) != NULL) {
+    /* 4. Handle 'z' : File length (File doesn't have to exist) */
+    if (memchrW(firstModifier, 'z', modifierLen) != NULL) {
       /* FIXME: Output full 64 bit size (sprintf does not support I64 here) */
       ULONG/*64*/ fullsize = /*(fileInfo.nFileSizeHigh << 32) +*/
                                   fileInfo.nFileSizeLow;
       static const WCHAR fmt[] = {'%','u','\0'};
 
       doneModifier = TRUE;
-      if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
-      wsprintfW(thisoutput, fmt, fullsize);
-      strcatW(finaloutput, thisoutput);
+      if (exists) {
+        if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
+        wsprintfW(thisoutput, fmt, fullsize);
+        strcatW(finaloutput, thisoutput);
+      }
     }
 
     /* 4. Handle 's' : Use short paths (File doesn't have to exist) */
@@ -557,14 +604,18 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
       WCHAR fname[MAX_PATH];
       WCHAR ext[MAX_PATH];
       BOOL doneFileModifier = FALSE;
-
-      if (finaloutput[0] != 0x00) strcatW(finaloutput, spaceW);
+      BOOL addSpace = (finaloutput[0] != 0x00);
 
       /* Split into components */
       WCMD_splitpath(fullfilename, drive, dir, fname, ext);
 
       /* 5. Handle 'd' : Drive Letter */
       if (memchrW(firstModifier, 'd', modifierLen) != NULL) {
+        if (addSpace) {
+          strcatW(finaloutput, spaceW);
+          addSpace = FALSE;
+        }
+
         strcatW(finaloutput, drive);
         doneModifier = TRUE;
         doneFileModifier = TRUE;
@@ -572,6 +623,11 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
 
       /* 6. Handle 'p' : Path */
       if (memchrW(firstModifier, 'p', modifierLen) != NULL) {
+        if (addSpace) {
+          strcatW(finaloutput, spaceW);
+          addSpace = FALSE;
+        }
+
         strcatW(finaloutput, dir);
         doneModifier = TRUE;
         doneFileModifier = TRUE;
@@ -579,6 +635,11 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
 
       /* 7. Handle 'n' : Name */
       if (memchrW(firstModifier, 'n', modifierLen) != NULL) {
+        if (addSpace) {
+          strcatW(finaloutput, spaceW);
+          addSpace = FALSE;
+        }
+
         strcatW(finaloutput, fname);
         doneModifier = TRUE;
         doneFileModifier = TRUE;
@@ -586,6 +647,11 @@ void WCMD_HandleTildaModifiers(WCHAR **start, const WCHAR *forVariable,
 
       /* 8. Handle 'x' : Ext */
       if (memchrW(firstModifier, 'x', modifierLen) != NULL) {
+        if (addSpace) {
+          strcatW(finaloutput, spaceW);
+          addSpace = FALSE;
+        }
+
         strcatW(finaloutput, ext);
         doneModifier = TRUE;
         doneFileModifier = TRUE;
@@ -619,6 +685,8 @@ void WCMD_call (WCHAR *command) {
   /* Run other program if no leading ':' */
   if (*command != ':') {
     WCMD_run_program(command, TRUE);
+    /* If the thing we try to run does not exist, call returns 1 */
+    if (errorlevel) errorlevel=1;
   } else {
 
     WCHAR gotoLabel[MAX_PATH];

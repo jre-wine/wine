@@ -1024,8 +1024,8 @@ static BOOL add_font_subst(struct list *subst_list, FontSubst *subst, INT flags)
     if(from_exist && (flags & ADD_FONT_SUBST_FORCE))
     {
         list_remove(&from_exist->entry);
-        HeapFree(GetProcessHeap(), 0, &from_exist->from.name);
-        HeapFree(GetProcessHeap(), 0, &from_exist->to.name);
+        HeapFree(GetProcessHeap(), 0, from_exist->from.name);
+        HeapFree(GetProcessHeap(), 0, from_exist->to.name);
         HeapFree(GetProcessHeap(), 0, from_exist);
         from_exist = NULL;
     }
@@ -4408,6 +4408,21 @@ static BOOL freetype_DeleteDC( PHYSDEV dev )
     return TRUE;
 }
 
+static FT_Encoding pick_charmap( FT_Face face, int charset )
+{
+    static const FT_Encoding regular_order[] = { FT_ENCODING_UNICODE, FT_ENCODING_APPLE_ROMAN, FT_ENCODING_MS_SYMBOL, 0 };
+    static const FT_Encoding symbol_order[]  = { FT_ENCODING_MS_SYMBOL, FT_ENCODING_UNICODE, FT_ENCODING_APPLE_ROMAN, 0 };
+    const FT_Encoding *encs = regular_order;
+
+    if (charset == SYMBOL_CHARSET) encs = symbol_order;
+
+    while (*encs != 0)
+    {
+        if (select_charmap( face, *encs )) break;
+        encs++;
+    }
+    return *encs;
+}
 
 /*************************************************************
  * freetype_SelectFont
@@ -4824,16 +4839,7 @@ found_face:
 
     ret->ntmFlags = face->ntmFlags;
 
-    if (ret->charset == SYMBOL_CHARSET && 
-        select_charmap(ret->ft_face, FT_ENCODING_MS_SYMBOL)) {
-        /* No ops */
-    }
-    else if (select_charmap(ret->ft_face, FT_ENCODING_UNICODE)) {
-        /* No ops */
-    }
-    else {
-        select_charmap(ret->ft_face, FT_ENCODING_APPLE_ROMAN);
-    }
+    pick_charmap( ret->ft_face, ret->charset );
 
     ret->orientation = FT_IS_SCALABLE(ret->ft_face) ? lf.lfOrientation : 0;
     ret->name = psub ? strdupW(psub->from.name) : strdupW(family->FamilyName);
@@ -5580,7 +5586,12 @@ static FT_UInt get_glyph_index(const GdiFont *font, UINT glyph)
         if (codepage_sets_default_used(font->codepage))
             default_used_pointer = &default_used;
         if(!WideCharToMultiByte(font->codepage, 0, &wc, 1, &buf, sizeof(buf), NULL, default_used_pointer) || default_used)
-            ret = 0;
+        {
+            if (font->codepage == CP_SYMBOL && wc < 0x100)
+                ret = pFT_Get_Char_Index(font->ft_face, (unsigned char)wc);
+            else
+                ret = 0;
+        }
         else
             ret = pFT_Get_Char_Index(font->ft_face, (unsigned char)buf);
         TRACE("%04x (%02x) -> ret %d def_used %d\n", glyph, buf, ret, default_used);

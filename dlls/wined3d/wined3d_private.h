@@ -320,6 +320,7 @@ enum wined3d_shader_register_type
     WINED3DSPR_PREDICATE = 19,
     WINED3DSPR_IMMCONST,
     WINED3DSPR_CONSTBUFFER,
+    WINED3DSPR_PRIMID,
     WINED3DSPR_NULL,
     WINED3DSPR_RESOURCE,
 };
@@ -625,14 +626,17 @@ struct wined3d_shader_context
     void *backend_data;
 };
 
+struct wined3d_shader_register_index
+{
+    const struct wined3d_shader_src_param *rel_addr;
+    unsigned int offset;
+};
+
 struct wined3d_shader_register
 {
     enum wined3d_shader_register_type type;
     enum wined3d_data_type data_type;
-    UINT idx;
-    UINT array_idx;
-    const struct wined3d_shader_src_param *rel_addr;
-    const struct wined3d_shader_src_param *array_rel_addr;
+    struct wined3d_shader_register_index idx[2];
     enum wined3d_immconst_type immconst_type;
     DWORD immconst_data[4];
 };
@@ -699,7 +703,6 @@ struct wined3d_shader_frontend
     void (*shader_free)(void *data);
     void (*shader_read_header)(void *data, const DWORD **ptr, struct wined3d_shader_version *shader_version);
     void (*shader_read_instruction)(void *data, const DWORD **ptr, struct wined3d_shader_instruction *ins);
-    void (*shader_read_comment)(const DWORD **ptr, const char **comment, UINT *comment_size);
     BOOL (*shader_is_end)(void *data, const DWORD **ptr);
 };
 
@@ -781,6 +784,7 @@ struct vs_compile_args {
 
 struct wined3d_context;
 struct wined3d_state;
+struct fragment_pipeline;
 
 struct wined3d_shader_backend_ops
 {
@@ -795,11 +799,13 @@ struct wined3d_shader_backend_ops
     void (*shader_load_np2fixup_constants)(void *shader_priv, const struct wined3d_gl_info *gl_info,
             const struct wined3d_state *state);
     void (*shader_destroy)(struct wined3d_shader *shader);
-    HRESULT (*shader_alloc_private)(struct wined3d_device *device);
+    HRESULT (*shader_alloc_private)(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe);
     void (*shader_free_private)(struct wined3d_device *device);
     void (*shader_context_destroyed)(void *shader_priv, const struct wined3d_context *context);
     void (*shader_get_caps)(const struct wined3d_gl_info *gl_info, struct shader_caps *caps);
     BOOL (*shader_color_fixup_supported)(struct color_fixup_desc fixup);
+    void (*shader_enable_fragment_pipe)(void *shader_priv, const struct wined3d_gl_info *gl_info, BOOL enable);
+    BOOL (*shader_has_ffp_proj_control)(void *shader_priv);
 };
 
 extern const struct wined3d_shader_backend_ops glsl_shader_backend DECLSPEC_HIDDEN;
@@ -1701,7 +1707,6 @@ struct wined3d_device
     struct StateEntry StateTable[STATE_HIGHEST + 1];
     /* Array of functions for states which are handled by more than one pipeline part */
     APPLYSTATEFUNC *multistate_funcs[STATE_HIGHEST + 1];
-    const struct fragment_pipeline *frag_pipe;
     const struct blit_shader *blitter;
 
     unsigned int max_ffp_textures;
@@ -2118,7 +2123,7 @@ void surface_set_compatible_renderbuffer(struct wined3d_surface *surface,
 void surface_set_container(struct wined3d_surface *surface,
         enum wined3d_container_type type, void *container) DECLSPEC_HIDDEN;
 void surface_set_texture_name(struct wined3d_surface *surface, GLuint name, BOOL srgb_name) DECLSPEC_HIDDEN;
-void surface_set_texture_target(struct wined3d_surface *surface, GLenum target) DECLSPEC_HIDDEN;
+void surface_set_texture_target(struct wined3d_surface *surface, GLenum target, GLint level) DECLSPEC_HIDDEN;
 void surface_translate_drawable_coords(const struct wined3d_surface *surface, HWND window, RECT *rect) DECLSPEC_HIDDEN;
 void surface_update_draw_binding(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const POINT *dst_point,
@@ -2651,23 +2656,14 @@ void shader_generate_main(const struct wined3d_shader *shader, struct wined3d_sh
         const struct wined3d_shader_reg_maps *reg_maps, const DWORD *byte_code, void *backend_ctx) DECLSPEC_HIDDEN;
 BOOL shader_match_semantic(const char *semantic_name, enum wined3d_decl_usage usage) DECLSPEC_HIDDEN;
 
-static inline BOOL shader_is_pshader_version(enum wined3d_shader_type type)
-{
-    return type == WINED3D_SHADER_TYPE_PIXEL;
-}
-
-static inline BOOL shader_is_vshader_version(enum wined3d_shader_type type)
-{
-    return type == WINED3D_SHADER_TYPE_VERTEX;
-}
-
 static inline BOOL shader_is_scalar(const struct wined3d_shader_register *reg)
 {
     switch (reg->type)
     {
         case WINED3DSPR_RASTOUT:
             /* oFog & oPts */
-            if (reg->idx) return TRUE;
+            if (reg->idx[0].offset)
+                return TRUE;
             /* oPos */
             return FALSE;
 
@@ -2675,10 +2671,11 @@ static inline BOOL shader_is_scalar(const struct wined3d_shader_register *reg)
         case WINED3DSPR_CONSTBOOL:  /* b# */
         case WINED3DSPR_LOOP:       /* aL */
         case WINED3DSPR_PREDICATE:  /* p0 */
+        case WINED3DSPR_PRIMID:     /* primID */
             return TRUE;
 
         case WINED3DSPR_MISCTYPE:
-            switch(reg->idx)
+            switch (reg->idx[0].offset)
             {
                 case 0: /* vPos */
                     return FALSE;

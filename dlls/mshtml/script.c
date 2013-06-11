@@ -33,6 +33,7 @@
 #include "wine/debug.h"
 
 #include "mshtml_private.h"
+#include "htmlscript.h"
 #include "pluginhost.h"
 #include "htmlevent.h"
 #include "binding.h"
@@ -665,6 +666,9 @@ static ScriptHost *create_script_host(HTMLInnerWindow *window, const GUID *guid)
     HRESULT hres;
 
     ret = heap_alloc_zero(sizeof(*ret));
+    if(!ret)
+        return NULL;
+
     ret->IActiveScriptSite_iface.lpVtbl = &ActiveScriptSiteVtbl;
     ret->IActiveScriptSiteInterruptPoll_iface.lpVtbl = &ActiveScriptSiteInterruptPollVtbl;
     ret->IActiveScriptSiteWindow_iface.lpVtbl = &ActiveScriptSiteWindowVtbl;
@@ -914,6 +918,9 @@ void doc_insert_script(HTMLInnerWindow *window, HTMLScriptElement *script_elem)
 {
     ScriptHost *script_host;
 
+    if(script_elem->parsed)
+        return;
+
     script_host = get_elem_script_host(window, script_elem);
     if(!script_host)
         return;
@@ -940,6 +947,9 @@ IDispatch *script_parse_event(HTMLInnerWindow *window, LPCWSTR text)
         BOOL b;
 
         language = heap_alloc((ptr-text+1)*sizeof(WCHAR));
+        if(!language)
+            return NULL;
+
         memcpy(language, text, (ptr-text)*sizeof(WCHAR));
         language[ptr-text] = 0;
 
@@ -1203,9 +1213,10 @@ void bind_event_scripts(HTMLDocumentNode *doc)
         if(event_disp) {
             event_target = find_event_target(doc, script_elem);
             if(event_target) {
-                IHTMLElement_QueryInterface(&event_target->IHTMLElement_iface, &IID_HTMLPluginContainer, (void**)&plugin_container);
+                hres = IHTMLElement_QueryInterface(&event_target->IHTMLElement_iface, &IID_HTMLPluginContainer,
+                        (void**)&plugin_container);
 
-                if(plugin_container)
+                if(SUCCEEDED(hres))
                     bind_activex_event(doc, plugin_container, event, event_disp);
                 else
                     bind_elem_event(doc, event_target, event, event_disp);
@@ -1308,7 +1319,16 @@ void set_script_mode(HTMLOuterWindow *window, SCRIPTMODE mode)
 
 void release_script_hosts(HTMLInnerWindow *window)
 {
+    script_queue_entry_t *queue_iter;
     ScriptHost *iter;
+
+    while(!list_empty(&window->script_queue)) {
+        queue_iter = LIST_ENTRY(list_head(&window->script_queue), script_queue_entry_t, entry);
+
+        list_remove(&queue_iter->entry);
+        IHTMLScriptElement_Release(&queue_iter->script->IHTMLScriptElement_iface);
+        heap_free(queue_iter);
+    }
 
     while(!list_empty(&window->script_hosts)) {
         iter = LIST_ENTRY(list_head(&window->script_hosts), ScriptHost, entry);

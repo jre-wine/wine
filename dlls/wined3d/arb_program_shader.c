@@ -39,6 +39,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_constants);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
+static BOOL shader_is_pshader_version(enum wined3d_shader_type type)
+{
+    return type == WINED3D_SHADER_TYPE_PIXEL;
+}
+
+static BOOL shader_is_vshader_version(enum wined3d_shader_type type)
+{
+    return type == WINED3D_SHADER_TYPE_VERTEX;
+}
+
 /* Extract a line. Note that this modifies the source string. */
 static char *get_line(char **ptr)
 {
@@ -316,6 +326,8 @@ struct shader_arb_priv
     unsigned int highest_dirty_ps_const, highest_dirty_vs_const;
     char *vshader_const_dirty, *pshader_const_dirty;
     const struct wined3d_context *last_context;
+
+    const struct fragment_pipeline *fragment_pipe;
 };
 
 /* GL locking for state handlers is done by the caller. */
@@ -1006,7 +1018,7 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
     switch (reg->type)
     {
         case WINED3DSPR_TEMP:
-            sprintf(register_name, "R%u", reg->idx);
+            sprintf(register_name, "R%u", reg->idx[0].offset);
             break;
 
         case WINED3DSPR_INPUT:
@@ -1014,19 +1026,21 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
             {
                 if (reg_maps->shader_version.major < 3)
                 {
-                    if (!reg->idx) strcpy(register_name, "fragment.color.primary");
-                    else strcpy(register_name, "fragment.color.secondary");
+                    if (!reg->idx[0].offset)
+                        strcpy(register_name, "fragment.color.primary");
+                    else
+                        strcpy(register_name, "fragment.color.secondary");
                 }
                 else
                 {
-                    if(reg->rel_addr)
+                    if (reg->idx[0].rel_addr)
                     {
                         char rel_reg[50];
-                        shader_arb_get_src_param(ins, reg->rel_addr, 0, rel_reg);
+                        shader_arb_get_src_param(ins, reg->idx[0].rel_addr, 0, rel_reg);
 
                         if (!strcmp(rel_reg, "**aL_emul**"))
                         {
-                            DWORD idx = ctx->aL + reg->idx;
+                            DWORD idx = ctx->aL + reg->idx[0].offset;
                             if(idx < MAX_REG_INPUT)
                             {
                                 strcpy(register_name, ctx->ps_input[idx]);
@@ -1052,7 +1066,7 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
                             FIXME("Relative input register addressing with more than 8 registers\n");
 
                             /* This is better than nothing for now */
-                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx);
+                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx[0].offset);
                         }
                         else if(ctx->cur_ps_args->super.vp_mode != vertexshader)
                         {
@@ -1064,39 +1078,40 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
                              * For now use the texcoords and hope for the best
                              */
                             FIXME("Non-vertex shader varying input with indirect addressing\n");
-                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx);
+                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx[0].offset);
                         }
                         else
                         {
                             /* D3D supports indirect addressing only with aL in loop registers. The loop instruction
                              * pulls GL_NV_fragment_program2 in
                              */
-                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx);
+                            sprintf(register_name, "fragment.texcoord[%s + %u]", rel_reg, reg->idx[0].offset);
                         }
                     }
                     else
                     {
-                        if(reg->idx < MAX_REG_INPUT)
+                        if (reg->idx[0].offset < MAX_REG_INPUT)
                         {
-                            strcpy(register_name, ctx->ps_input[reg->idx]);
+                            strcpy(register_name, ctx->ps_input[reg->idx[0].offset]);
                         }
                         else
                         {
-                            ERR("Pixel shader input register out of bounds: %u\n", reg->idx);
-                            sprintf(register_name, "out_of_bounds_%u", reg->idx);
+                            ERR("Pixel shader input register out of bounds: %u\n", reg->idx[0].offset);
+                            sprintf(register_name, "out_of_bounds_%u", reg->idx[0].offset);
                         }
                     }
                 }
             }
             else
             {
-                if (ctx->cur_vs_args->super.swizzle_map & (1 << reg->idx)) *is_color = TRUE;
-                sprintf(register_name, "vertex.attrib[%u]", reg->idx);
+                if (ctx->cur_vs_args->super.swizzle_map & (1 << reg->idx[0].offset))
+                    *is_color = TRUE;
+                sprintf(register_name, "vertex.attrib[%u]", reg->idx[0].offset);
             }
             break;
 
         case WINED3DSPR_CONST:
-            if (!pshader && reg->rel_addr)
+            if (!pshader && reg->idx[0].rel_addr)
             {
                 const struct arb_vshader_private *shader_data = shader->backend_data;
                 UINT rel_offset = shader_data->rel_offset;
@@ -1105,9 +1120,12 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
                 if (reg_maps->shader_version.major < 2)
                 {
                     sprintf(rel_reg, "A0.x");
-                } else {
-                    shader_arb_get_src_param(ins, reg->rel_addr, 0, rel_reg);
-                    if(ctx->target_version == ARB) {
+                }
+                else
+                {
+                    shader_arb_get_src_param(ins, reg->idx[0].rel_addr, 0, rel_reg);
+                    if (ctx->target_version == ARB)
+                    {
                         if (!strcmp(rel_reg, "**aL_emul**"))
                         {
                             aL = TRUE;
@@ -1117,19 +1135,19 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
                         }
                     }
                 }
-                if(aL)
-                    sprintf(register_name, "C[%u]", ctx->aL + reg->idx);
-                else if (reg->idx >= rel_offset)
-                    sprintf(register_name, "C[%s + %u]", rel_reg, reg->idx - rel_offset);
+                if (aL)
+                    sprintf(register_name, "C[%u]", ctx->aL + reg->idx[0].offset);
+                else if (reg->idx[0].offset >= rel_offset)
+                    sprintf(register_name, "C[%s + %u]", rel_reg, reg->idx[0].offset - rel_offset);
                 else
-                    sprintf(register_name, "C[%s - %u]", rel_reg, rel_offset - reg->idx);
+                    sprintf(register_name, "C[%s - %u]", rel_reg, rel_offset - reg->idx[0].offset);
             }
             else
             {
                 if (reg_maps->usesrelconstF)
-                    sprintf(register_name, "C[%u]", reg->idx);
+                    sprintf(register_name, "C[%u]", reg->idx[0].offset);
                 else
-                    sprintf(register_name, "C%u", reg->idx);
+                    sprintf(register_name, "C%u", reg->idx[0].offset);
             }
             break;
 
@@ -1138,52 +1156,45 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
             {
                 if (reg_maps->shader_version.major == 1
                         && reg_maps->shader_version.minor <= 3)
-                {
-                    /* In ps <= 1.3, Tx is a temporary register as destination to all instructions,
-                     * and as source to most instructions. For some instructions it is the texcoord
-                     * input. Those instructions know about the special use
-                     */
-                    sprintf(register_name, "T%u", reg->idx);
-                } else {
-                    /* in ps 1.4 and 2.x Tx is always a (read-only) varying */
-                    sprintf(register_name, "fragment.texcoord[%u]", reg->idx);
-                }
+                    /* In ps <= 1.3, Tx is a temporary register as destination
+                     * to all instructions, and as source to most instructions.
+                     * For some instructions it is the texcoord input. Those
+                     * instructions know about the special use. */
+                    sprintf(register_name, "T%u", reg->idx[0].offset);
+                else
+                    /* In ps 1.4 and 2.x Tx is always a (read-only) varying. */
+                    sprintf(register_name, "fragment.texcoord[%u]", reg->idx[0].offset);
             }
             else
             {
                 if (reg_maps->shader_version.major == 1 || ctx->target_version >= NV2)
-                {
-                    sprintf(register_name, "A%u", reg->idx);
-                }
+                    sprintf(register_name, "A%u", reg->idx[0].offset);
                 else
-                {
-                    sprintf(register_name, "A%u_SHADOW", reg->idx);
-                }
+                    sprintf(register_name, "A%u_SHADOW", reg->idx[0].offset);
             }
             break;
 
         case WINED3DSPR_COLOROUT:
-            if (ctx->cur_ps_args->super.srgb_correction && !reg->idx)
+            if (ctx->cur_ps_args->super.srgb_correction && !reg->idx[0].offset)
             {
                 strcpy(register_name, "TMP_COLOR");
             }
             else
             {
-                if(ctx->cur_ps_args->super.srgb_correction) FIXME("sRGB correction on higher render targets\n");
+                if (ctx->cur_ps_args->super.srgb_correction)
+                    FIXME("sRGB correction on higher render targets.\n");
                 if (reg_maps->rt_mask > 1)
-                {
-                    sprintf(register_name, "result.color[%u]", reg->idx);
-                }
+                    sprintf(register_name, "result.color[%u]", reg->idx[0].offset);
                 else
-                {
                     strcpy(register_name, "result.color");
-                }
             }
             break;
 
         case WINED3DSPR_RASTOUT:
-            if(reg->idx == 1) sprintf(register_name, "%s", ctx->fog_output);
-            else sprintf(register_name, "%s", rastout_reg_names[reg->idx]);
+            if (reg->idx[0].offset == 1)
+                sprintf(register_name, "%s", ctx->fog_output);
+            else
+                sprintf(register_name, "%s", rastout_reg_names[reg->idx[0].offset]);
             break;
 
         case WINED3DSPR_DEPTHOUT:
@@ -1192,26 +1203,19 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
 
         case WINED3DSPR_ATTROUT:
         /* case WINED3DSPR_OUTPUT: */
-            if (pshader) sprintf(register_name, "oD[%u]", reg->idx);
-            else strcpy(register_name, ctx->color_output[reg->idx]);
+            if (pshader)
+                sprintf(register_name, "oD[%u]", reg->idx[0].offset);
+            else
+                strcpy(register_name, ctx->color_output[reg->idx[0].offset]);
             break;
 
         case WINED3DSPR_TEXCRDOUT:
             if (pshader)
-            {
-                sprintf(register_name, "oT[%u]", reg->idx);
-            }
+                sprintf(register_name, "oT[%u]", reg->idx[0].offset);
+            else if (reg_maps->shader_version.major < 3)
+                strcpy(register_name, ctx->texcrd_output[reg->idx[0].offset]);
             else
-            {
-                if (reg_maps->shader_version.major < 3)
-                {
-                    strcpy(register_name, ctx->texcrd_output[reg->idx]);
-                }
-                else
-                {
-                    strcpy(register_name, ctx->vs_output[reg->idx]);
-                }
-            }
+                strcpy(register_name, ctx->vs_output[reg->idx[0].offset]);
             break;
 
         case WINED3DSPR_LOOP:
@@ -1235,27 +1239,21 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
             break;
 
         case WINED3DSPR_CONSTINT:
-            sprintf(register_name, "I%u", reg->idx);
+            sprintf(register_name, "I%u", reg->idx[0].offset);
             break;
 
         case WINED3DSPR_MISCTYPE:
-            if (!reg->idx)
-            {
+            if (!reg->idx[0].offset)
                 sprintf(register_name, "vpos");
-            }
-            else if(reg->idx == 1)
-            {
+            else if (reg->idx[0].offset == 1)
                 sprintf(register_name, "fragment.facing.x");
-            }
             else
-            {
-                FIXME("Unknown MISCTYPE register index %u\n", reg->idx);
-            }
+                FIXME("Unknown MISCTYPE register index %u.\n", reg->idx[0].offset);
             break;
 
         default:
-            FIXME("Unhandled register type %#x[%u]\n", reg->type, reg->idx);
-            sprintf(register_name, "unrecognized_register[%u]", reg->idx);
+            FIXME("Unhandled register type %#x[%u].\n", reg->type, reg->idx[0].offset);
+            sprintf(register_name, "unrecognized_register[%u]", reg->idx[0].offset);
             break;
     }
 }
@@ -1587,9 +1585,9 @@ static void pshader_hw_bem(const struct wined3d_shader_instruction *ins)
 {
     const struct wined3d_shader_dst_param *dst = &ins->dst[0];
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
+    DWORD sampler_code = dst->reg.idx[0].offset;
     char dst_name[50];
     char src_name[2][50];
-    DWORD sampler_code = dst->reg.idx;
 
     shader_arb_get_dst_param(ins, dst, dst_name);
 
@@ -1863,7 +1861,7 @@ static void shader_hw_mov(const struct wined3d_shader_instruction *ins)
             shader_addline(buffer, "ARL A0.x, %s;\n", src0_param);
         }
     }
-    else if (ins->dst[0].reg.type == WINED3DSPR_COLOROUT && !ins->dst[0].reg.idx && pshader)
+    else if (ins->dst[0].reg.type == WINED3DSPR_COLOROUT && !ins->dst[0].reg.idx[0].offset && pshader)
     {
         if (ctx->cur_ps_args->super.srgb_correction && shader->u.ps.color0_mov)
         {
@@ -1913,18 +1911,19 @@ static void pshader_hw_texkill(const struct wined3d_shader_instruction *ins)
             shader_addline(buffer, "SWZ TA, %s, %c, %c, %c, %c;\n", reg_dest, x, y, z, w);
         }
         shader_addline(buffer, "KIL %s;\n", kilsrc);
-    } else {
+    }
+    else
+    {
         /* ARB fp doesn't like swizzles on the parameter of the KIL instruction. To mask the 4th component,
          * copy the register into our general purpose TMP variable, overwrite .w and pass TMP to KIL
          *
          * ps_1_3 shaders use the texcoord incarnation of the Tx register. ps_1_4 shaders can use the same,
          * or pass in any temporary register(in shader phase 2)
          */
-        if(ins->ctx->reg_maps->shader_version.minor <= 3) {
-            sprintf(reg_dest, "fragment.texcoord[%u]", dst->reg.idx);
-        } else {
+        if (ins->ctx->reg_maps->shader_version.minor <= 3)
+            sprintf(reg_dest, "fragment.texcoord[%u]", dst->reg.idx[0].offset);
+        else
             shader_arb_get_dst_param(ins, dst, reg_dest);
-        }
         shader_addline(buffer, "SWZ TA, %s, x, y, z, 1;\n", reg_dest);
         shader_addline(buffer, "KIL TA;\n");
     }
@@ -1950,9 +1949,9 @@ static void pshader_hw_tex(const struct wined3d_shader_instruction *ins)
     /* 1.0-1.4: Use destination register number as texture code.
        2.0+: Use provided sampler number as texure code. */
     if (shader_version < WINED3D_SHADER_VERSION(2,0))
-        reg_sampler_code = dst->reg.idx;
+        reg_sampler_code = dst->reg.idx[0].offset;
     else
-        reg_sampler_code = ins->src[1].reg.idx;
+        reg_sampler_code = ins->src[1].reg.idx[0].offset;
 
     /* 1.0-1.3: Use the texcoord varying.
        1.4+: Use provided coordinate source register. */
@@ -2019,7 +2018,7 @@ static void pshader_hw_texcoord(const struct wined3d_shader_instruction *ins)
 
     if (shader_version < WINED3D_SHADER_VERSION(1,4))
     {
-        DWORD reg = dst->reg.idx;
+        DWORD reg = dst->reg.idx[0].offset;
 
         shader_arb_get_dst_param(ins, &ins->dst[0], dst_str);
         shader_addline(buffer, "MOV_SAT %s, fragment.texcoord[%u];\n", dst_str, reg);
@@ -2037,7 +2036,7 @@ static void pshader_hw_texreg2ar(const struct wined3d_shader_instruction *ins)
      struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
      DWORD flags = 0;
 
-     DWORD reg1 = ins->dst[0].reg.idx;
+     DWORD reg1 = ins->dst[0].reg.idx[0].offset;
      char dst_str[50];
      char src_str[50];
 
@@ -2059,7 +2058,7 @@ static void pshader_hw_texreg2gb(const struct wined3d_shader_instruction *ins)
 {
      struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
 
-     DWORD reg1 = ins->dst[0].reg.idx;
+     DWORD reg1 = ins->dst[0].reg.idx[0].offset;
      char dst_str[50];
      char src_str[50];
 
@@ -2073,7 +2072,7 @@ static void pshader_hw_texreg2gb(const struct wined3d_shader_instruction *ins)
 
 static void pshader_hw_texreg2rgb(const struct wined3d_shader_instruction *ins)
 {
-    DWORD reg1 = ins->dst[0].reg.idx;
+    DWORD reg1 = ins->dst[0].reg.idx[0].offset;
     char dst_str[50];
     char src_str[50];
 
@@ -2094,7 +2093,7 @@ static void pshader_hw_texbem(const struct wined3d_shader_instruction *ins)
     /* All versions have a destination register. The Tx where the texture coordinates come
      * from is the varying incarnation of the texture register
      */
-    reg_dest_code = dst->reg.idx;
+    reg_dest_code = dst->reg.idx[0].offset;
     shader_arb_get_dst_param(ins, &ins->dst[0], dst_reg);
     shader_arb_get_src_param(ins, &ins->src[0], 0, src_reg);
     sprintf(reg_coord, "fragment.texcoord[%u]", reg_dest_code);
@@ -2140,7 +2139,7 @@ static void pshader_hw_texbem(const struct wined3d_shader_instruction *ins)
 
 static void pshader_hw_texm3x2pad(const struct wined3d_shader_instruction *ins)
 {
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char src0_name[50], dst_name[50];
     BOOL is_color;
@@ -2150,7 +2149,7 @@ static void pshader_hw_texm3x2pad(const struct wined3d_shader_instruction *ins)
     /* The next instruction will be a texm3x2tex or texm3x2depth that writes to the uninitialized
      * T<reg+1> register. Use this register to store the calculated vector
      */
-    tmp_reg.idx = reg + 1;
+    tmp_reg.idx[0].offset = reg + 1;
     shader_arb_get_register_name(ins, &tmp_reg, dst_name, &is_color);
     shader_addline(buffer, "DP3 %s.x, fragment.texcoord[%u], %s;\n", dst_name, reg, src0_name);
 }
@@ -2159,7 +2158,7 @@ static void pshader_hw_texm3x2tex(const struct wined3d_shader_instruction *ins)
 {
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
     DWORD flags;
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char dst_str[50];
     char src0_name[50];
@@ -2179,7 +2178,7 @@ static void pshader_hw_texm3x2tex(const struct wined3d_shader_instruction *ins)
 static void pshader_hw_texm3x3pad(const struct wined3d_shader_instruction *ins)
 {
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char src0_name[50], dst_name[50];
     struct wined3d_shader_register tmp_reg = ins->dst[0].reg;
@@ -2189,7 +2188,7 @@ static void pshader_hw_texm3x3pad(const struct wined3d_shader_instruction *ins)
      * incrementing ins->dst[0].register_idx numbers. So the pad instruction already knows the final destination
      * register, and this register is uninitialized(otherwise the assembler complains that it is 'redeclared')
      */
-    tmp_reg.idx = reg + 2 - tex_mx->current_row;
+    tmp_reg.idx[0].offset = reg + 2 - tex_mx->current_row;
     shader_arb_get_register_name(ins, &tmp_reg, dst_name, &is_color);
 
     shader_arb_get_src_param(ins, &ins->src[0], 0, src0_name);
@@ -2203,7 +2202,7 @@ static void pshader_hw_texm3x3tex(const struct wined3d_shader_instruction *ins)
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     DWORD flags;
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char dst_str[50];
     char src0_name[50], dst_name[50];
@@ -2225,7 +2224,7 @@ static void pshader_hw_texm3x3vspec(const struct wined3d_shader_instruction *ins
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     DWORD flags;
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char dst_str[50];
     char src0_name[50];
@@ -2266,7 +2265,7 @@ static void pshader_hw_texm3x3spec(const struct wined3d_shader_instruction *ins)
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
     struct wined3d_shader_tex_mx *tex_mx = ins->ctx->tex_mx;
     DWORD flags;
-    DWORD reg = ins->dst[0].reg.idx;
+    DWORD reg = ins->dst[0].reg.idx[0].offset;
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     char dst_str[50];
     char src0_name[50];
@@ -2338,7 +2337,7 @@ static void pshader_hw_texdepth(const struct wined3d_shader_instruction *ins)
 static void pshader_hw_texdp3tex(const struct wined3d_shader_instruction *ins)
 {
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
-    DWORD sampler_idx = ins->dst[0].reg.idx;
+    DWORD sampler_idx = ins->dst[0].reg.idx[0].offset;
     char src0[50];
     char dst_str[50];
 
@@ -2362,7 +2361,7 @@ static void pshader_hw_texdp3(const struct wined3d_shader_instruction *ins)
     /* Handle output register */
     shader_arb_get_dst_param(ins, dst, dst_str);
     shader_arb_get_src_param(ins, &ins->src[0], 0, src0);
-    shader_addline(buffer, "DP3 %s, fragment.texcoord[%u], %s;\n", dst_str, dst->reg.idx, src0);
+    shader_addline(buffer, "DP3 %s, fragment.texcoord[%u], %s;\n", dst_str, dst->reg.idx[0].offset, src0);
 }
 
 /** Process the WINED3DSIO_TEXM3X3 instruction in ARB
@@ -2378,7 +2377,7 @@ static void pshader_hw_texm3x3(const struct wined3d_shader_instruction *ins)
     shader_arb_get_dst_param(ins, dst, dst_str);
     shader_arb_get_src_param(ins, &ins->src[0], 0, src0);
     shader_arb_get_register_name(ins, &ins->dst[0].reg, dst_name, &is_color);
-    shader_addline(buffer, "DP3 %s.z, fragment.texcoord[%u], %s;\n", dst_name, dst->reg.idx, src0);
+    shader_addline(buffer, "DP3 %s.z, fragment.texcoord[%u], %s;\n", dst_name, dst->reg.idx[0].offset, src0);
     shader_addline(buffer, "MOV %s, %s;\n", dst_str, dst_name);
 }
 
@@ -2398,7 +2397,7 @@ static void pshader_hw_texm3x2depth(const struct wined3d_shader_instruction *ins
 
     shader_arb_get_src_param(ins, &ins->src[0], 0, src0);
     shader_arb_get_register_name(ins, &ins->dst[0].reg, dst_name, &is_color);
-    shader_addline(buffer, "DP3 %s.y, fragment.texcoord[%u], %s;\n", dst_name, dst->reg.idx, src0);
+    shader_addline(buffer, "DP3 %s.y, fragment.texcoord[%u], %s;\n", dst_name, dst->reg.idx[0].offset, src0);
 
     /* How to deal with the special case dst_name.g == 0? if r != 0, then
      * the r * (1 / 0) will give infinity, which is clamped to 1.0, the correct
@@ -2459,10 +2458,11 @@ static void shader_hw_mnxn(const struct wined3d_shader_instruction *ins)
     tmp_dst = ins->dst[0];
     tmp_src[0] = ins->src[0];
     tmp_src[1] = ins->src[1];
-    for (i = 0; i < nComponents; i++) {
+    for (i = 0; i < nComponents; ++i)
+    {
         tmp_dst.write_mask = WINED3DSP_WRITEMASK_0 << i;
         shader_hw_map2gl(&tmp_ins);
-        ++tmp_src[1].reg.idx;
+        ++tmp_src[1].reg.idx[0].offset;
     }
 }
 
@@ -3119,7 +3119,7 @@ static void shader_hw_endif(const struct wined3d_shader_instruction *ins)
 
 static void shader_hw_texldd(const struct wined3d_shader_instruction *ins)
 {
-    DWORD sampler_idx = ins->src[1].reg.idx;
+    DWORD sampler_idx = ins->src[1].reg.idx[0].offset;
     char reg_dest[40];
     char reg_src[3][40];
     WORD flags = TEX_DERIV;
@@ -3137,7 +3137,7 @@ static void shader_hw_texldd(const struct wined3d_shader_instruction *ins)
 
 static void shader_hw_texldl(const struct wined3d_shader_instruction *ins)
 {
-    DWORD sampler_idx = ins->src[1].reg.idx;
+    DWORD sampler_idx = ins->src[1].reg.idx[0].offset;
     char reg_dest[40];
     char reg_coord[40];
     WORD flags = TEX_LOD;
@@ -3162,7 +3162,7 @@ static void shader_hw_label(const struct wined3d_shader_instruction *ins)
      */
     if(priv->target_version == ARB) return;
 
-    shader_addline(buffer, "l%u:\n", ins->src[0].reg.idx);
+    shader_addline(buffer, "l%u:\n", ins->src[0].reg.idx[0].offset);
 }
 
 static void vshader_add_footer(struct shader_arb_ctx_priv *priv_ctx,
@@ -3294,7 +3294,7 @@ static void shader_hw_ret(const struct wined3d_shader_instruction *ins)
 static void shader_hw_call(const struct wined3d_shader_instruction *ins)
 {
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
-    shader_addline(buffer, "CAL l%u;\n", ins->src[0].reg.idx);
+    shader_addline(buffer, "CAL l%u;\n", ins->src[0].reg.idx[0].offset);
 }
 
 /* GL locking is done by the caller */
@@ -4168,6 +4168,7 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
 {
     const struct arb_vshader_private *shader_data = shader->backend_data;
     const struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
+    struct shader_arb_priv *priv = shader->device->shader_priv;
     const struct wined3d_shader_lconst *lconst;
     const DWORD *function = shader->function;
     GLuint ret;
@@ -4260,11 +4261,10 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
      */
     if (!gl_info->supported[NV_VERTEX_PROGRAM])
     {
-        struct wined3d_device *device = shader->device;
         const char *color_init = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_0001);
         shader_addline(buffer, "MOV result.color.secondary, %s;\n", color_init);
 
-        if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W && !device->frag_pipe->ffp_proj_control)
+        if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W && !priv->fragment_pipe->ffp_proj_control)
         {
             int i;
             const char *one = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_ONE);
@@ -4878,9 +4878,17 @@ static const struct wine_rb_functions sig_tree_functions =
     sig_tree_compare
 };
 
-static HRESULT shader_arb_alloc(struct wined3d_device *device)
+static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
 {
     struct shader_arb_priv *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv));
+    HRESULT hr;
+
+    if (FAILED(hr = fragment_pipe->alloc_private(device)))
+    {
+        ERR("Failed to initialize fragment pipe, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, priv);
+        return hr;
+    }
 
     priv->vshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
             sizeof(*priv->vshader_const_dirty) * device->d3d_vshader_constantF);
@@ -4901,12 +4909,14 @@ static HRESULT shader_arb_alloc(struct wined3d_device *device)
         ERR("RB tree init failed\n");
         goto fail;
     }
+    priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
     return WINED3D_OK;
 
 fail:
     HeapFree(GetProcessHeap(), 0, priv->pshader_const_dirty);
     HeapFree(GetProcessHeap(), 0, priv->vshader_const_dirty);
+    fragment_pipe->free_private(device);
     HeapFree(GetProcessHeap(), 0, priv);
     return E_OUTOFMEMORY;
 }
@@ -4950,6 +4960,7 @@ static void shader_arb_free(struct wined3d_device *device)
     wine_rb_destroy(&priv->signature_tree, release_signature, NULL);
     HeapFree(GetProcessHeap(), 0, priv->pshader_const_dirty);
     HeapFree(GetProcessHeap(), 0, priv->vshader_const_dirty);
+    priv->fragment_pipe->free_private(device);
     HeapFree(GetProcessHeap(), 0, device->shader_priv);
 }
 
@@ -5300,26 +5311,29 @@ static void record_instruction(struct list *list, const struct wined3d_shader_in
     dst_param = HeapAlloc(GetProcessHeap(), 0, sizeof(*dst_param));
     if(!dst_param) goto free;
     *dst_param = *ins->dst;
-    if(ins->dst->reg.rel_addr)
+    if (ins->dst->reg.idx[0].rel_addr)
     {
-        rel_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(*dst_param->reg.rel_addr));
-        if(!rel_addr) goto free;
-        *rel_addr = *ins->dst->reg.rel_addr;
-        dst_param->reg.rel_addr = rel_addr;
+        rel_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(*rel_addr));
+        if (!rel_addr)
+            goto free;
+        *rel_addr = *ins->dst->reg.idx[0].rel_addr;
+        dst_param->reg.idx[0].rel_addr = rel_addr;
     }
     rec->ins.dst = dst_param;
 
     src_param = HeapAlloc(GetProcessHeap(), 0, sizeof(*src_param) * ins->src_count);
-    if(!src_param) goto free;
-    for(i = 0; i < ins->src_count; i++)
+    if (!src_param)
+        goto free;
+    for (i = 0; i < ins->src_count; ++i)
     {
         src_param[i] = ins->src[i];
-        if(ins->src[i].reg.rel_addr)
+        if (ins->src[i].reg.idx[0].rel_addr)
         {
             rel_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(*rel_addr));
-            if(!rel_addr) goto free;
-            *rel_addr = *ins->src[i].reg.rel_addr;
-            src_param[i].reg.rel_addr = rel_addr;
+            if (!rel_addr)
+                goto free;
+            *rel_addr = *ins->src[i].reg.idx[0].rel_addr;
+            src_param[i].reg.idx[0].rel_addr = rel_addr;
         }
     }
     rec->ins.src = src_param;
@@ -5330,14 +5344,14 @@ free:
     ERR("Out of memory\n");
     if(dst_param)
     {
-        HeapFree(GetProcessHeap(), 0, (void *) dst_param->reg.rel_addr);
+        HeapFree(GetProcessHeap(), 0, (void *)dst_param->reg.idx[0].rel_addr);
         HeapFree(GetProcessHeap(), 0, dst_param);
     }
     if(src_param)
     {
         for(i = 0; i < ins->src_count; i++)
         {
-            HeapFree(GetProcessHeap(), 0, (void *) src_param[i].reg.rel_addr);
+            HeapFree(GetProcessHeap(), 0, (void *)src_param[i].reg.idx[0].rel_addr);
         }
         HeapFree(GetProcessHeap(), 0, src_param);
     }
@@ -5352,18 +5366,18 @@ static void free_recorded_instruction(struct list *list)
     LIST_FOR_EACH_ENTRY_SAFE(rec_ins, entry2, list, struct recorded_instruction, entry)
     {
         list_remove(&rec_ins->entry);
-        if(rec_ins->ins.dst)
+        if (rec_ins->ins.dst)
         {
-            HeapFree(GetProcessHeap(), 0, (void *) rec_ins->ins.dst->reg.rel_addr);
-            HeapFree(GetProcessHeap(), 0, (void *) rec_ins->ins.dst);
+            HeapFree(GetProcessHeap(), 0, (void *)rec_ins->ins.dst->reg.idx[0].rel_addr);
+            HeapFree(GetProcessHeap(), 0, (void *)rec_ins->ins.dst);
         }
-        if(rec_ins->ins.src)
+        if (rec_ins->ins.src)
         {
-            for(i = 0; i < rec_ins->ins.src_count; i++)
+            for (i = 0; i < rec_ins->ins.src_count; ++i)
             {
-                HeapFree(GetProcessHeap(), 0, (void *) rec_ins->ins.src[i].reg.rel_addr);
+                HeapFree(GetProcessHeap(), 0, (void *)rec_ins->ins.src[i].reg.idx[0].rel_addr);
             }
-            HeapFree(GetProcessHeap(), 0, (void *) rec_ins->ins.src);
+            HeapFree(GetProcessHeap(), 0, (void *)rec_ins->ins.src);
         }
         HeapFree(GetProcessHeap(), 0, rec_ins);
     }
@@ -5403,7 +5417,7 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
                 list_init(&priv->record);
                 priv->recording = TRUE;
                 control_frame->outer_loop = TRUE;
-                get_loop_control_const(ins, shader, ins->src[0].reg.idx, &control_frame->loop_control);
+                get_loop_control_const(ins, shader, ins->src[0].reg.idx[0].offset, &control_frame->loop_control);
                 return; /* Instruction is handled */
             }
             /* Record this loop in the outer loop's recording */
@@ -5500,8 +5514,9 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
         list_add_head(&priv->control_frames, &control_frame->entry);
         control_frame->type = IF;
 
-        bool_const = get_bool_const(ins, shader, ins->src[0].reg.idx);
-        if(ins->src[0].modifiers == WINED3DSPSM_NOT) bool_const = !bool_const;
+        bool_const = get_bool_const(ins, shader, ins->src[0].reg.idx[0].offset);
+        if (ins->src[0].modifiers == WINED3DSPSM_NOT)
+            bool_const = !bool_const;
         if (!priv->muted && !bool_const)
         {
             shader_addline(buffer, "#if(FALSE){\n");
@@ -5587,6 +5602,21 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
     shader_arb_add_instruction_modifiers(ins);
 }
 
+static void shader_arb_enable_fragment_pipe(void *shader_priv,
+        const struct wined3d_gl_info *gl_info, BOOL enable)
+{
+    struct shader_arb_priv *priv = shader_priv;
+
+    priv->fragment_pipe->enable_extension(gl_info, enable);
+}
+
+static BOOL shader_arb_has_ffp_proj_control(void *shader_priv)
+{
+    struct shader_arb_priv *priv = shader_priv;
+
+    return priv->fragment_pipe->ffp_proj_control;
+}
+
 const struct wined3d_shader_backend_ops arb_program_shader_backend =
 {
     shader_arb_handle_instruction,
@@ -5603,6 +5633,8 @@ const struct wined3d_shader_backend_ops arb_program_shader_backend =
     shader_arb_context_destroyed,
     shader_arb_get_caps,
     shader_arb_color_fixup_supported,
+    shader_arb_enable_fragment_pipe,
+    shader_arb_has_ffp_proj_control,
 };
 
 /* ARB_fragment_program fixed function pipeline replacement definitions */
@@ -5616,7 +5648,6 @@ struct arbfp_ffp_desc
 {
     struct ffp_frag_desc parent;
     GLuint shader;
-    unsigned int num_textures_used;
 };
 
 /* Context activation and GL locking are done by the caller. */
@@ -5938,7 +5969,6 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
 {
     const char *dstmask, *dstreg, *arg0, *arg1, *arg2;
     unsigned int mul = 1;
-    BOOL mul_final_dest = FALSE;
 
     if(color && alpha) dstmask = "";
     else if(color) dstmask = ".xyz";
@@ -5970,11 +6000,6 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
             /* FALLTHROUGH */
         case WINED3D_TOP_MODULATE_2X:
             mul *= 2;
-            if (!strcmp(dstreg, "result.color"))
-            {
-                dstreg = "ret";
-                mul_final_dest = TRUE;
-            }
             /* FALLTHROUGH */
         case WINED3D_TOP_MODULATE:
             shader_addline(buffer, "MUL %s%s, %s, %s;\n", dstreg, dstmask, arg1, arg2);
@@ -5982,11 +6007,6 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
 
         case WINED3D_TOP_ADD_SIGNED_2X:
             mul = 2;
-            if (!strcmp(dstreg, "result.color"))
-            {
-                dstreg = "ret";
-                mul_final_dest = TRUE;
-            }
             /* FALLTHROUGH */
         case WINED3D_TOP_ADD_SIGNED:
             shader_addline(buffer, "SUB arg2, %s, const.w;\n", arg2);
@@ -6047,11 +6067,6 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
 
         case WINED3D_TOP_DOTPRODUCT3:
             mul = 4;
-            if (!strcmp(dstreg, "result.color"))
-            {
-                dstreg = "ret";
-                mul_final_dest = TRUE;
-            }
             shader_addline(buffer, "SUB arg1, %s, const.w;\n", arg1);
             shader_addline(buffer, "SUB arg2, %s, const.w;\n", arg2);
             shader_addline(buffer, "DP3_SAT %s%s, arg1, arg2;\n", dstreg, dstmask);
@@ -6075,11 +6090,10 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
             FIXME("Unhandled texture op %08x\n", op);
     }
 
-    if(mul == 2) {
-        shader_addline(buffer, "MUL_SAT %s%s, %s, const.y;\n", mul_final_dest ? "result.color" : dstreg, dstmask, dstreg);
-    } else if(mul == 4) {
-        shader_addline(buffer, "MUL_SAT %s%s, %s, const.z;\n", mul_final_dest ? "result.color" : dstreg, dstmask, dstreg);
-    }
+    if (mul == 2)
+        shader_addline(buffer, "MUL_SAT %s%s, %s, const.y;\n", dstreg, dstmask, dstreg);
+    else if (mul == 4)
+        shader_addline(buffer, "MUL_SAT %s%s, %s, const.z;\n", dstreg, dstmask, dstreg);
 }
 
 static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, const struct wined3d_gl_info *gl_info)
@@ -6418,13 +6432,6 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
             {
                 ERR("Out of memory\n");
                 return;
-            }
-            new_desc->num_textures_used = 0;
-            for (i = 0; i < gl_info->limits.texture_stages; ++i)
-            {
-                if (settings.op[i].cop == WINED3D_TOP_DISABLE)
-                    break;
-                new_desc->num_textures_used = i;
             }
 
             memcpy(&new_desc->parent.settings, &settings, sizeof(settings));
