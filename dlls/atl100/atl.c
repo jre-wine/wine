@@ -331,8 +331,10 @@ HRESULT WINAPI AtlLoadTypeLib(HINSTANCE inst, LPCOLESTR lpszIndex,
         return E_OUTOFMEMORY;
 
     path_len = GetModuleFileNameW(inst, path, MAX_PATH);
-    if(!path_len)
+    if(!path_len) {
+        heap_free(path);
         return HRESULT_FROM_WIN32(GetLastError());
+    }
 
     if(index_len)
         memcpy(path+path_len, lpszIndex, (index_len+1)*sizeof(WCHAR));
@@ -452,6 +454,58 @@ HRESULT WINAPI AtlComModuleGetClassObject(_ATL_COM_MODULE *pm, REFCLSID rclsid, 
 }
 
 /***********************************************************************
+ *           AtlComModuleUnregisterServer       [atl100.22]
+ */
+HRESULT WINAPI AtlComModuleUnregisterServer(_ATL_COM_MODULE *mod, BOOL bRegTypeLib, const CLSID *clsid)
+{
+    const struct _ATL_CATMAP_ENTRY *catmap;
+    _ATL_OBJMAP_ENTRY **iter;
+    HRESULT hres;
+
+    TRACE("(%p %x %s)\n", mod, bRegTypeLib, debugstr_guid(clsid));
+
+    for(iter = mod->m_ppAutoObjMapFirst; iter < mod->m_ppAutoObjMapLast; iter++) {
+        if(!*iter || (clsid && !IsEqualCLSID((*iter)->pclsid, clsid)))
+            continue;
+
+        TRACE("Unregistering clsid %s\n", debugstr_guid((*iter)->pclsid));
+
+        catmap = (*iter)->pfnGetCategoryMap();
+        if(catmap) {
+            hres = AtlRegisterClassCategoriesHelper((*iter)->pclsid, catmap, FALSE);
+            if(FAILED(hres))
+                return hres;
+        }
+
+        hres = (*iter)->pfnUpdateRegistry(FALSE);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    if(bRegTypeLib) {
+        ITypeLib *typelib;
+        TLIBATTR *attr;
+        BSTR path;
+
+        hres = AtlLoadTypeLib(mod->m_hInstTypeLib, NULL, &path, &typelib);
+        if(FAILED(hres))
+            return hres;
+
+        SysFreeString(path);
+        hres = ITypeLib_GetLibAttr(typelib, &attr);
+        if(SUCCEEDED(hres)) {
+            hres = UnRegisterTypeLib(&attr->guid, attr->wMajorVerNum, attr->wMinorVerNum, attr->lcid, attr->syskind);
+            ITypeLib_ReleaseTLibAttr(typelib, attr);
+        }
+        ITypeLib_Release(typelib);
+        if(FAILED(hres))
+            return hres;
+    }
+
+    return S_OK;
+}
+
+/***********************************************************************
  *           AtlRegisterClassCategoriesHelper          [atl100.49]
  */
 HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid, const struct _ATL_CATMAP_ENTRY *catmap, BOOL reg)
@@ -513,6 +567,145 @@ HRESULT WINAPI AtlRegisterClassCategoriesHelper(REFCLSID clsid, const struct _AT
     }
 
     return S_OK;
+}
+
+/***********************************************************************
+ *           AtlWaitWithMessageLoop     [atl100.24]
+ */
+BOOL WINAPI AtlWaitWithMessageLoop(HANDLE handle)
+{
+    MSG msg;
+    DWORD res;
+
+    TRACE("(%p)\n", handle);
+
+    while(1) {
+        res = MsgWaitForMultipleObjects(1, &handle, FALSE, INFINITE, QS_ALLINPUT);
+        switch(res) {
+        case WAIT_OBJECT_0:
+            return TRUE;
+        case WAIT_OBJECT_0+1:
+            if(GetMessageW(&msg, NULL, 0, 0) < 0)
+                return FALSE;
+
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+            break;
+        default:
+            return FALSE;
+        }
+    }
+}
+
+static HRESULT get_default_source(ITypeLib *typelib, const CLSID *clsid, IID *iid)
+{
+    ITypeInfo *typeinfo, *src_typeinfo = NULL;
+    TYPEATTR *attr;
+    int type_flags;
+    unsigned i;
+    HRESULT hres;
+
+    hres = ITypeLib_GetTypeInfoOfGuid(typelib, clsid, &typeinfo);
+    if(FAILED(hres))
+        return hres;
+
+    hres = ITypeInfo_GetTypeAttr(typeinfo, &attr);
+    if(FAILED(hres)) {
+        ITypeInfo_Release(typeinfo);
+        return hres;
+    }
+
+    for(i=0; i < attr->cImplTypes; i++) {
+        hres = ITypeInfo_GetImplTypeFlags(typeinfo, i, &type_flags);
+        if(SUCCEEDED(hres) && type_flags == (IMPLTYPEFLAG_FSOURCE|IMPLTYPEFLAG_FDEFAULT)) {
+            HREFTYPE ref;
+
+            hres = ITypeInfo_GetRefTypeOfImplType(typeinfo, i, &ref);
+            if(SUCCEEDED(hres))
+                hres = ITypeInfo_GetRefTypeInfo(typeinfo, ref, &src_typeinfo);
+            break;
+        }
+    }
+
+    ITypeInfo_ReleaseTypeAttr(typeinfo, attr);
+    ITypeInfo_Release(typeinfo);
+    if(FAILED(hres))
+        return hres;
+
+    if(!src_typeinfo) {
+        *iid = IID_NULL;
+        return S_OK;
+    }
+
+    hres = ITypeInfo_GetTypeAttr(src_typeinfo, &attr);
+    if(SUCCEEDED(hres)) {
+        *iid = attr->guid;
+        ITypeInfo_ReleaseTypeAttr(src_typeinfo, attr);
+    }
+    ITypeInfo_Release(src_typeinfo);
+    return hres;
+}
+
+/***********************************************************************
+ *           AtlGetObjectSourceInterface    [atl100.54]
+ */
+HRESULT WINAPI AtlGetObjectSourceInterface(IUnknown *unk, GUID *libid, IID *iid, unsigned short *major, unsigned short *minor)
+{
+    IProvideClassInfo2 *classinfo;
+    ITypeInfo *typeinfo;
+    ITypeLib *typelib;
+    IPersist *persist;
+    IDispatch *disp;
+    HRESULT hres;
+
+    TRACE("(%p %p %p %p %p)\n", unk, libid, iid, major, minor);
+
+    hres = IUnknown_QueryInterface(unk, &IID_IDispatch, (void**)&disp);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IDispatch_GetTypeInfo(disp, 0, 0, &typeinfo);
+    IDispatch_Release(disp);
+    if(FAILED(hres))
+        return hres;
+
+    hres = ITypeInfo_GetContainingTypeLib(typeinfo, &typelib, 0);
+    ITypeInfo_Release(typeinfo);
+    if(SUCCEEDED(hres)) {
+        TLIBATTR *attr;
+
+        hres = ITypeLib_GetLibAttr(typelib, &attr);
+        if(SUCCEEDED(hres)) {
+            *libid = attr->guid;
+            *major = attr->wMajorVerNum;
+            *minor = attr->wMinorVerNum;
+            ITypeLib_ReleaseTLibAttr(typelib, attr);
+        }else {
+            ITypeLib_Release(typelib);
+        }
+    }
+    if(FAILED(hres))
+        return hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IProvideClassInfo2, (void**)&classinfo);
+    if(SUCCEEDED(hres)) {
+        hres = IProvideClassInfo2_GetGUID(classinfo, GUIDKIND_DEFAULT_SOURCE_DISP_IID, iid);
+        IProvideClassInfo2_Release(classinfo);
+        ITypeLib_Release(typelib);
+        return hres;
+    }
+
+    hres = IUnknown_QueryInterface(unk, &IID_IPersist, (void**)&persist);
+    if(SUCCEEDED(hres)) {
+        CLSID clsid;
+
+        hres = IPersist_GetClassID(persist, &clsid);
+        if(SUCCEEDED(hres))
+            hres = get_default_source(typelib, &clsid, iid);
+        IPersist_Release(persist);
+    }
+
+    return hres;
 }
 
 /***********************************************************************

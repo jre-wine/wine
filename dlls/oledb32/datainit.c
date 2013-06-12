@@ -293,11 +293,10 @@ static HRESULT set_dbpropset(BSTR name, BSTR value, DBPROPSET **propset)
 {
     static const WCHAR datasourceW[] = {'D','a','t','a',' ','S','o','u','r','c','e',0};
 
-    *propset = CoTaskMemAlloc(sizeof(DBPROPSET));
-    (*propset)->rgProperties = CoTaskMemAlloc(sizeof(DBPROP));
-
     if (!strcmpW(datasourceW, name))
     {
+        *propset = CoTaskMemAlloc(sizeof(DBPROPSET));
+        (*propset)->rgProperties = CoTaskMemAlloc(sizeof(DBPROP));
         (*propset)->cProperties = 1;
         (*propset)->guidPropertySet = DBPROPSET_DBINIT;
         (*propset)->rgProperties[0].dwPropertyID = DBPROP_INIT_DATASOURCE;
@@ -310,6 +309,7 @@ static HRESULT set_dbpropset(BSTR name, BSTR value, DBPROPSET **propset)
     }
     else
     {
+        *propset = NULL;
         FIXME("unsupported property %s\n", debugstr_w(name));
         return E_FAIL;
     }
@@ -414,8 +414,6 @@ static HRESULT WINAPI datainit_GetDataSource(IDataInitialize *iface, IUnknown *o
     /* now set properties */
     if (initstring)
     {
-        static const WCHAR scolW[] = {';',0};
-        static const WCHAR eqW[] = {'=',0};
         WCHAR *eq, *start;
 
         hr = IUnknown_QueryInterface(*datasource, &IID_IDBProperties, (void**)&dbprops);
@@ -426,10 +424,10 @@ static HRESULT WINAPI datainit_GetDataSource(IDataInitialize *iface, IUnknown *o
         }
 
         start = initstring;
-        while ((eq = strstrW(start, eqW)))
+        while (start && (eq = strchrW(start, '=')))
         {
             static const WCHAR providerW[] = {'P','r','o','v','i','d','e','r',0};
-            WCHAR *scol = strstrW(eq+1, scolW);
+            WCHAR *scol = strchrW(eq+1, ';');
             BSTR value, name;
 
             name = SysAllocStringLen(start, eq - start);

@@ -7093,7 +7093,7 @@ msgstr "시계"
 msgid "split button"
 msgstr "나누기 단추"
 
-#: oleacc.rc:90 ipconfig.rc:33
+#: oleacc.rc:90
 msgid "IP address"
 msgstr "IP 주소"
 
@@ -8257,22 +8257,26 @@ msgid "Don't install"
 msgstr "설치 안  함"
 
 #: urlmon.rc:40
+#, fuzzy
+#| msgid ""
+#| "When installed, ActiveX has full access to your computer.Do not click "
+#| "install unless you have absolute trust in the above source."
 msgid ""
-"When installed, ActiveX has full access to your computer.Do not click "
-"install unless you have absolute trust in the above source."
+"When installed, an ActiveX component has full access to your computer. Do "
+"not click install unless you have absolute trust in the above source."
 msgstr ""
 "설치할 때,ActiveX는 당신의 컴퓨터에 완전한 접근권한을 가질 것입니다. 당신이"
 "이 원본을 완전히 신뢰하지 않는다면 설치를 클릭하지 마십시오."
 
-#: urlmon.rc:47
+#: urlmon.rc:48
 msgid "Installation of component failed: %08x"
 msgstr "구성요소 설치가 실패함: %08x"
 
-#: urlmon.rc:48
+#: urlmon.rc:49
 msgid "Install (%d)"
 msgstr "설치 (%d)"
 
-#: urlmon.rc:49
+#: urlmon.rc:50
 msgid "Install"
 msgstr "설치"
 
@@ -10151,6 +10155,12 @@ msgstr "이더넷"
 msgid "Connection-specific DNS suffix"
 msgstr "연결에 지정된 DNS 접미사"
 
+#: ipconfig.rc:33
+#, fuzzy
+#| msgid "IP address"
+msgid "IPv4 address"
+msgstr "IP 주소"
+
 #: ipconfig.rc:34
 msgid "Hostname"
 msgstr "호스트이름"
@@ -10190,6 +10200,12 @@ msgstr "DHCP 가능"
 #: ipconfig.rc:46
 msgid "Default gateway"
 msgstr "기본 게이트웨이"
+
+#: ipconfig.rc:47
+#, fuzzy
+#| msgid "IP address"
+msgid "IPv6 address"
+msgstr "IP 주소"
 
 #: net.rc:27
 msgid ""
@@ -10322,72 +10338,70 @@ msgid "The following services are running:\n"
 msgstr "다음 서비스가 실행중임:\n"
 
 #: netstat.rc:27
-msgid "CLOSED"
-msgstr "CLOSED"
-
-#: netstat.rc:28
-msgid "LISTENING"
-msgstr "LISTENING"
-
-#: netstat.rc:29
-msgid "SYN_SENT"
-msgstr "SYN_SENT"
-
-#: netstat.rc:30
-msgid "SYN_RCVD"
-msgstr "SYN_RCVD"
-
-#: netstat.rc:31
-msgid "ESTABLISHED"
-msgstr "ESTABLISHED"
-
-#: netstat.rc:32
-msgid "FIN_WAIT1"
-msgstr "FIN_WAIT1"
-
-#: netstat.rc:33
-msgid "FIN_WAIT2"
-msgstr "FIN_WAIT2"
-
-#: netstat.rc:34
-msgid "CLOSE_WAIT"
-msgstr "CLOSE_WAIT"
-
-#: netstat.rc:35
-msgid "CLOSING"
-msgstr "CLOSING"
-
-#: netstat.rc:36
-msgid "LAST_ACK"
-msgstr "LAST_ACK"
-
-#: netstat.rc:37
-msgid "TIME_WAIT"
-msgstr "TIME_WAIT"
-
-#: netstat.rc:38
-msgid "DELETE_TCB"
-msgstr "DELETE_TCB"
-
-#: netstat.rc:40
 msgid "Active Connections"
 msgstr "활성화된 연결"
 
-#: netstat.rc:41
+#: netstat.rc:28
 msgid "Proto"
 msgstr "프로토콜"
 
-#: netstat.rc:42
+#: netstat.rc:29
 msgid "Local Address"
 msgstr "지역 주소"
 
-#: netstat.rc:43
+#: netstat.rc:30
 msgid "Foreign Address"
 msgstr "외부 주소"
 
-#: netstat.rc:44
+#: netstat.rc:31
 msgid "State"
 msgstr "상태"
+
+#: netstat.rc:32
+#, fuzzy
+#| msgid "Interfaces"
+msgid "Interface Statistics"
+msgstr "인터페이스"
+
+#: netstat.rc:33
+msgid "Sent"
+msgstr ""
+
+#: netstat.rc:34
+msgid "Received"
+msgstr ""
+
+#: netstat.rc:35
+#, fuzzy
+#| msgid "bytes"
+msgid "Bytes"
+msgstr "바이트"
+
+#: netstat.rc:36
+msgid "Unicast packets"
+msgstr ""
+
+#: netstat.rc:37
+msgid "Non-unicast packets"
+msgstr ""
+
+#: netstat.rc:38
+#, fuzzy
+#| msgid "Disclaimer"
+msgid "Discards"
+msgstr "거부"
+
+#: netstat.rc:39
+#, fuzzy
+#| msgid "Error"
+msgid "Errors"
+msgstr "오류"
+
+#: netstat.rc:40
+#, fuzzy
+#| msgid "Unknown port.\n"
+msgid "Unknown protocols"
+msgstr "알 수 없는 포트.\n"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

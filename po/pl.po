@@ -7126,7 +7126,7 @@ msgstr "zegar"
 msgid "split button"
 msgstr "przycisk podziału"
 
-#: oleacc.rc:90 ipconfig.rc:33
+#: oleacc.rc:90
 msgid "IP address"
 msgstr "adres IP"
 
@@ -8307,23 +8307,23 @@ msgstr "Zainstaluj/Odinstaluj"
 
 #: urlmon.rc:40
 msgid ""
-"When installed, ActiveX has full access to your computer.Do not click "
-"install unless you have absolute trust in the above source."
+"When installed, an ActiveX component has full access to your computer. Do "
+"not click install unless you have absolute trust in the above source."
 msgstr ""
 
-#: urlmon.rc:47
+#: urlmon.rc:48
 #, fuzzy
 #| msgid "Installation transform failed to apply.\n"
 msgid "Installation of component failed: %08x"
 msgstr "Nieudane zastosowanie transformacji instalacji.\n"
 
-#: urlmon.rc:48
+#: urlmon.rc:49
 #, fuzzy
 #| msgid "&Install"
 msgid "Install (%d)"
 msgstr "&Zainstaluj"
 
-#: urlmon.rc:49
+#: urlmon.rc:50
 #, fuzzy
 #| msgid "&Install"
 msgid "Install"
@@ -10253,6 +10253,12 @@ msgstr "Ethernet"
 msgid "Connection-specific DNS suffix"
 msgstr "Sufiks DNS konkretnego połączenia"
 
+#: ipconfig.rc:33
+#, fuzzy
+#| msgid "IP address"
+msgid "IPv4 address"
+msgstr "adres IP"
+
 #: ipconfig.rc:34
 msgid "Hostname"
 msgstr "Nazwa hosta"
@@ -10292,6 +10298,12 @@ msgstr "DHCP włączone"
 #: ipconfig.rc:46
 msgid "Default gateway"
 msgstr "Brama domyślna"
+
+#: ipconfig.rc:47
+#, fuzzy
+#| msgid "IP address"
+msgid "IPv6 address"
+msgstr "adres IP"
 
 #: net.rc:27
 msgid ""
@@ -10424,80 +10436,78 @@ msgid "The following services are running:\n"
 msgstr "Uruchomione są następujące usługi:\n"
 
 #: netstat.rc:27
-msgid "CLOSED"
-msgstr ""
-
-#: netstat.rc:28
-msgid "LISTENING"
-msgstr ""
-
-#: netstat.rc:29
-msgid "SYN_SENT"
-msgstr ""
-
-#: netstat.rc:30
-msgid "SYN_RCVD"
-msgstr ""
-
-#: netstat.rc:31
-msgid "ESTABLISHED"
-msgstr ""
-
-#: netstat.rc:32
-msgid "FIN_WAIT1"
-msgstr ""
-
-#: netstat.rc:33
-msgid "FIN_WAIT2"
-msgstr ""
-
-#: netstat.rc:34
-msgid "CLOSE_WAIT"
-msgstr ""
-
-#: netstat.rc:35
-msgid "CLOSING"
-msgstr ""
-
-#: netstat.rc:36
-msgid "LAST_ACK"
-msgstr ""
-
-#: netstat.rc:37
-msgid "TIME_WAIT"
-msgstr ""
-
-#: netstat.rc:38
-msgid "DELETE_TCB"
-msgstr ""
-
-#: netstat.rc:40
 #, fuzzy
 #| msgid "LAN Connection"
 msgid "Active Connections"
 msgstr "Połączenie LAN"
 
-#: netstat.rc:41
+#: netstat.rc:28
 msgid "Proto"
 msgstr ""
 
-#: netstat.rc:42
+#: netstat.rc:29
 #, fuzzy
 #| msgid "Email Address"
 msgid "Local Address"
 msgstr "Adres e-mail"
 
-#: netstat.rc:43
+#: netstat.rc:30
 #, fuzzy
 #| msgid "Street Address"
 msgid "Foreign Address"
 msgstr "Ulica"
 
-#: netstat.rc:44
+#: netstat.rc:31
 #, fuzzy
 #| msgid "Status"
 msgid "State"
 msgstr "Stan"
+
+#: netstat.rc:32
+#, fuzzy
+#| msgid "Interfaces"
+msgid "Interface Statistics"
+msgstr "Interfejsy"
+
+#: netstat.rc:33
+msgid "Sent"
+msgstr ""
+
+#: netstat.rc:34
+msgid "Received"
+msgstr ""
+
+#: netstat.rc:35
+#, fuzzy
+#| msgid "bytes"
+msgid "Bytes"
+msgstr "bajty(ów)"
+
+#: netstat.rc:36
+msgid "Unicast packets"
+msgstr ""
+
+#: netstat.rc:37
+msgid "Non-unicast packets"
+msgstr ""
+
+#: netstat.rc:38
+#, fuzzy
+#| msgid "Disclaimer"
+msgid "Discards"
+msgstr "Zrzeczenie"
+
+#: netstat.rc:39
+#, fuzzy
+#| msgid "Error"
+msgid "Errors"
+msgstr "Błąd"
+
+#: netstat.rc:40
+#, fuzzy
+#| msgid "Unknown port.\n"
+msgid "Unknown protocols"
+msgstr "Nieznany port.\n"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

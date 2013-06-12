@@ -1,11 +1,11 @@
 # Lithuanian translations for Wine
-# Aurimas Fišeras <aurimas@members.fsf.org>, 2011, 2012.
+# Aurimas Fišeras <aurimas@members.fsf.org>, 2011, 2012, 2013.
 msgid ""
 msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2012-12-29 09:34+0300\n"
+"PO-Revision-Date: 2013-01-08 22:47+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: komp_lt@konf.lt\n"
 "Language: Lithuanian\n"
@@ -7111,7 +7111,7 @@ msgstr "laikrodis"
 msgid "split button"
 msgstr "išskleidimo mygtukas"
 
-#: oleacc.rc:90 ipconfig.rc:33
+#: oleacc.rc:90
 msgid "IP address"
 msgstr "IP adresas"
 
@@ -8281,21 +8281,21 @@ msgstr "Nediegti"
 
 #: urlmon.rc:40
 msgid ""
-"When installed, ActiveX has full access to your computer.Do not click "
-"install unless you have absolute trust in the above source."
+"When installed, an ActiveX component has full access to your computer. Do "
+"not click install unless you have absolute trust in the above source."
 msgstr ""
-"Kai įdiegta, ActiveX turi visišką prieigą prie kompiuterio. Nespauskite "
-"„Įdiegti“, nebent visiškai pasitikite šaltiniu aukščiau."
+"Kai įdiegtas, ActiveX komponentas turi visišką prieigą prie kompiuterio. "
+"Nespauskite „Įdiegti“, nebent visiškai pasitikite šaltiniu aukščiau."
 
-#: urlmon.rc:47
+#: urlmon.rc:48
 msgid "Installation of component failed: %08x"
 msgstr "Nepavyko įdiegti komponento: %08x"
 
-#: urlmon.rc:48
+#: urlmon.rc:49
 msgid "Install (%d)"
 msgstr "Įdiegti (%d)"
 
-#: urlmon.rc:49
+#: urlmon.rc:50
 msgid "Install"
 msgstr "Įdiegti"
 
@@ -10199,6 +10199,10 @@ msgstr "Eterneto"
 msgid "Connection-specific DNS suffix"
 msgstr "Ryšiui būdingas DNS sufiksas"
 
+#: ipconfig.rc:33
+msgid "IPv4 address"
+msgstr "IPv4 adresas"
+
 #: ipconfig.rc:34
 msgid "Hostname"
 msgstr "Kompiuterio vardas"
@@ -10238,6 +10242,10 @@ msgstr "DHCP įjungta"
 #: ipconfig.rc:46
 msgid "Default gateway"
 msgstr "Numatytasis šliuzas"
+
+#: ipconfig.rc:47
+msgid "IPv6 address"
+msgstr "IPv6 adresas"
 
 #: net.rc:27
 msgid ""
@@ -10370,72 +10378,60 @@ msgid "The following services are running:\n"
 msgstr "Šios tarnybos vykdomos:\n"
 
 #: netstat.rc:27
-msgid "CLOSED"
-msgstr "NUTRAUKTAS"
-
-#: netstat.rc:28
-msgid "LISTENING"
-msgstr "KLAUSOMASI"
-
-#: netstat.rc:29
-msgid "SYN_SENT"
-msgstr "SYN_IŠSIŲSTAS"
-
-#: netstat.rc:30
-msgid "SYN_RCVD"
-msgstr "SYN_GAUTAS"
-
-#: netstat.rc:31
-msgid "ESTABLISHED"
-msgstr "UŽMEGZTAS"
-
-#: netstat.rc:32
-msgid "FIN_WAIT1"
-msgstr "FIN_LAUKIMAS1"
-
-#: netstat.rc:33
-msgid "FIN_WAIT2"
-msgstr "FIN_LAUKIMAS2"
-
-#: netstat.rc:34
-msgid "CLOSE_WAIT"
-msgstr "NUTRAUKIMO_LAUKIMAS"
-
-#: netstat.rc:35
-msgid "CLOSING"
-msgstr "NUTRAUKIAMA"
-
-#: netstat.rc:36
-msgid "LAST_ACK"
-msgstr "PASKUTINIS_ACK"
-
-#: netstat.rc:37
-msgid "TIME_WAIT"
-msgstr "PERIODO_LAUKIMAS"
-
-#: netstat.rc:38
-msgid "DELETE_TCB"
-msgstr "TCB_PAŠALINTAS"
-
-#: netstat.rc:40
 msgid "Active Connections"
 msgstr "Aktyvūs ryšiai"
 
-#: netstat.rc:41
+#: netstat.rc:28
 msgid "Proto"
 msgstr "Prot."
 
-#: netstat.rc:42
+#: netstat.rc:29
 msgid "Local Address"
 msgstr "Vietinis adresas"
 
-#: netstat.rc:43
+#: netstat.rc:30
 msgid "Foreign Address"
 msgstr "Svetimas adresas"
 
-#: netstat.rc:44
+#: netstat.rc:31
 msgid "State"
 msgstr "Būsena"
+
+#: netstat.rc:32
+msgid "Interface Statistics"
+msgstr "Sąsajos statistika"
+
+#: netstat.rc:33
+msgid "Sent"
+msgstr "Išsiųsta"
+
+#: netstat.rc:34
+msgid "Received"
+msgstr "Gauta"
+
+#: netstat.rc:35
+msgid "Bytes"
+msgstr "Baitų"
+
+#: netstat.rc:36
+msgid "Unicast packets"
+msgstr "„Unicast“ paketų"
+
+#: netstat.rc:37
+msgid "Non-unicast packets"
+msgstr "Ne „unicast“ paketų"
+
+#: netstat.rc:38
+msgid "Discards"
+msgstr "Atmetimai"
+
+#: netstat.rc:39
+msgid "Errors"
+msgstr "Klaidos"
+
+#: netstat.rc:40
+msgid "Unknown protocols"
+msgstr "Nežinomi protokolai"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

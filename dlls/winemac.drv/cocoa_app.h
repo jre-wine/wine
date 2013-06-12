@@ -1,7 +1,7 @@
 /*
- * getpagesize function
+ * MACDRV Cocoa application class declaration
  *
- * Copyright 1996 Alexandre Julliard
+ * Copyright 2011, 2012, 2013 Ken Thomases for CodeWeavers Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,22 +18,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-#include "wine/port.h"
+#import <AppKit/AppKit.h>
 
-#ifdef HAVE_UNISTD_H
-# include <unistd.h>
-#endif
+#include "macdrv_cocoa.h"
 
-#ifndef HAVE_GETPAGESIZE
-size_t getpagesize(void)
-{
-# ifdef __svr4__
-    return sysconf(_SC_PAGESIZE);
-# elif defined(__i386__) || defined(__x86_64__)
-    return 4096;
-# else
-#  error Cannot get the page size on this platform
-# endif
-}
-#endif  /* HAVE_GETPAGESIZE */
+
+@interface WineApplication : NSApplication <NSApplicationDelegate>
+
+    - (void) transformProcessToForeground;
+
+@end
+
+void OnMainThread(dispatch_block_t block);
+void OnMainThreadAsync(dispatch_block_t block);

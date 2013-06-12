@@ -1193,6 +1193,7 @@ struct fragment_pipeline
 
 extern const struct StateEntryTemplate misc_state_template[] DECLSPEC_HIDDEN;
 extern const struct StateEntryTemplate ffp_vertexstate_template[] DECLSPEC_HIDDEN;
+extern const struct fragment_pipeline none_fragment_pipe DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline ffp_fragment_pipeline DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline atifs_fragment_pipeline DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline arbfp_fragment_pipeline DECLSPEC_HIDDEN;
@@ -1568,8 +1569,6 @@ struct wined3d_driver_info
 struct wined3d_adapter
 {
     UINT ordinal;
-    BOOL                    opengl;
-
     POINT monitorPoint;
     enum wined3d_format_id screen_format;
 
@@ -1706,9 +1705,6 @@ struct wined3d_device
     /* X and GL Information */
     GLenum                  offscreenBuffer;
 
-    /* Selected capabilities */
-    int vs_selected_mode;
-    int ps_selected_mode;
     const struct wined3d_shader_backend_ops *shader_backend;
     void *shader_priv;
     void *fragment_priv;
@@ -2052,7 +2048,6 @@ struct wined3d_surface
 
     DWORD flags;
 
-    enum wined3d_surface_type surface_type;
     UINT                      pow2Width;
     UINT                      pow2Height;
 
@@ -2296,7 +2291,6 @@ struct wined3d_state
     struct wined3d_vertex_declaration *vertex_declaration;
     struct wined3d_stream_output stream_output[MAX_STREAM_OUT];
     struct wined3d_stream_state streams[MAX_STREAMS + 1 /* tesselated pseudo-stream */];
-    BOOL user_stream;
     struct wined3d_buffer *index_buffer;
     enum wined3d_format_id index_format;
     INT base_vertex_index;

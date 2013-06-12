@@ -3850,10 +3850,9 @@ static BOOL CheckTextureCapability(const struct wined3d_adapter *adapter, const 
 
 static BOOL CheckSurfaceCapability(const struct wined3d_adapter *adapter,
         const struct wined3d_format *adapter_format,
-        const struct wined3d_format *check_format,
-        enum wined3d_surface_type surface_type)
+        const struct wined3d_format *check_format, BOOL no3d)
 {
-    if (surface_type == WINED3D_SURFACE_TYPE_GDI)
+    if (no3d)
     {
         switch (check_format->id)
         {
@@ -3924,8 +3923,7 @@ static BOOL CheckVertexTextureCapability(const struct wined3d_adapter *adapter,
 
 HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT adapter_idx,
         enum wined3d_device_type device_type, enum wined3d_format_id adapter_format_id, DWORD usage,
-        enum wined3d_resource_type resource_type, enum wined3d_format_id check_format_id,
-        enum wined3d_surface_type surface_type)
+        enum wined3d_resource_type resource_type, enum wined3d_format_id check_format_id)
 {
     const struct wined3d_adapter *adapter = &wined3d->adapters[adapter_idx];
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
@@ -3934,10 +3932,10 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
     DWORD usage_caps = 0;
 
     TRACE("wined3d %p, adapter_idx %u, device_type %s, adapter_format %s, usage %s, %s,\n"
-            "resource_type %s, check_format %s, surface_type %#x.\n",
+            "resource_type %s, check_format %s.\n",
             wined3d, adapter_idx, debug_d3ddevicetype(device_type), debug_d3dformat(adapter_format_id),
             debug_d3dusage(usage), debug_d3dusagequery(usage), debug_d3dresourcetype(resource_type),
-            debug_d3dformat(check_format_id), surface_type);
+            debug_d3dformat(check_format_id));
 
     if (adapter_idx >= wined3d->adapter_count)
         return WINED3DERR_INVALIDCALL;
@@ -3954,7 +3952,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
              *      - WINED3DUSAGE_SOFTWAREPROCESSING
              *      - WINED3DUSAGE_QUERY_WRAPANDMIP
              */
-            if (surface_type != WINED3D_SURFACE_TYPE_OPENGL)
+            if (wined3d->flags & WINED3D_NO3D)
             {
                 TRACE("[FAILED]\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -4067,7 +4065,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
              *      - WINED3DUSAGE_NONSECURE (d3d9ex)
              *      - WINED3DUSAGE_RENDERTARGET
              */
-            if (!CheckSurfaceCapability(adapter, adapter_format, format, surface_type))
+            if (!CheckSurfaceCapability(adapter, adapter_format, format, wined3d->flags & WINED3D_NO3D))
             {
                 TRACE("[FAILED] - Not supported for plain surfaces.\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -4116,7 +4114,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
              *      - WINED3DUSAGE_TEXTAPI (d3d9ex)
              *      - WINED3DUSAGE_QUERY_WRAPANDMIP
              */
-            if (surface_type != WINED3D_SURFACE_TYPE_OPENGL)
+            if (wined3d->flags & WINED3D_NO3D)
             {
                 TRACE("[FAILED]\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -4254,7 +4252,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
              *      - D3DUSAGE_SOFTWAREPROCESSING
              *      - D3DUSAGE_QUERY_WRAPANDMIP
              */
-            if (surface_type != WINED3D_SURFACE_TYPE_OPENGL)
+            if (wined3d->flags & WINED3D_NO3D)
             {
                 TRACE("[FAILED]\n");
                 return WINED3DERR_NOTAVAILABLE;
@@ -4517,7 +4515,7 @@ HRESULT CDECL wined3d_check_device_type(const struct wined3d *wined3d, UINT adap
 
     /* Use CheckDeviceFormat to see if the backbuffer_format is usable with the given display_format */
     hr = wined3d_check_device_format(wined3d, adapter_idx, device_type, display_format,
-            WINED3DUSAGE_RENDERTARGET, WINED3D_RTYPE_SURFACE, backbuffer_format, WINED3D_SURFACE_TYPE_OPENGL);
+            WINED3DUSAGE_RENDERTARGET, WINED3D_RTYPE_SURFACE, backbuffer_format);
     if (FAILED(hr))
         TRACE("Unsupported display/backbuffer format combination %s / %s.\n",
                 debug_d3dformat(display_format), debug_d3dformat(backbuffer_format));
@@ -5139,8 +5137,7 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
                                         WINEDDSCAPS_VISIBLE;
     caps->ddraw_caps.stride_align = DDRAW_PITCH_ALIGNMENT;
 
-    /* Set D3D caps if OpenGL is available. */
-    if (adapter->opengl)
+    if (!(wined3d->flags & WINED3D_NO3D))
     {
         caps->ddraw_caps.dds_caps |=    WINEDDSCAPS_3DDEVICE                |
                                         WINEDDSCAPS_MIPMAP                  |
@@ -5377,19 +5374,145 @@ static void fillGLAttribFuncs(const struct wined3d_gl_info *gl_info)
     }
 }
 
-/* Do not call while under the GL lock. */
-static BOOL InitAdapters(struct wined3d *wined3d)
+static void wined3d_adapter_init_fb_cfgs(struct wined3d_adapter *adapter, HDC dc)
 {
-    struct wined3d_adapter *adapter = &wined3d->adapters[0];
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    unsigned int i;
+
+    if (gl_info->supported[WGL_ARB_PIXEL_FORMAT])
+    {
+        UINT attrib_count = 0;
+        GLint cfg_count;
+        int attribs[11];
+        int values[11];
+        int attribute;
+
+        attribute = WGL_NUMBER_PIXEL_FORMATS_ARB;
+        GL_EXTCALL(wglGetPixelFormatAttribivARB(dc, 0, 0, 1, &attribute, &cfg_count));
+
+        adapter->cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cfg_count * sizeof(*adapter->cfgs));
+        attribs[attrib_count++] = WGL_RED_BITS_ARB;
+        attribs[attrib_count++] = WGL_GREEN_BITS_ARB;
+        attribs[attrib_count++] = WGL_BLUE_BITS_ARB;
+        attribs[attrib_count++] = WGL_ALPHA_BITS_ARB;
+        attribs[attrib_count++] = WGL_COLOR_BITS_ARB;
+        attribs[attrib_count++] = WGL_DEPTH_BITS_ARB;
+        attribs[attrib_count++] = WGL_STENCIL_BITS_ARB;
+        attribs[attrib_count++] = WGL_DRAW_TO_WINDOW_ARB;
+        attribs[attrib_count++] = WGL_PIXEL_TYPE_ARB;
+        attribs[attrib_count++] = WGL_DOUBLE_BUFFER_ARB;
+        attribs[attrib_count++] = WGL_AUX_BUFFERS_ARB;
+
+        for (i = 0, adapter->cfg_count = 0; i < cfg_count; ++i)
+        {
+            struct wined3d_pixel_format *cfg = &adapter->cfgs[adapter->cfg_count];
+            int format_id = i + 1;
+
+            if (!GL_EXTCALL(wglGetPixelFormatAttribivARB(dc, format_id, 0, attrib_count, attribs, values)))
+                continue;
+
+            cfg->iPixelFormat = format_id;
+            cfg->redSize = values[0];
+            cfg->greenSize = values[1];
+            cfg->blueSize = values[2];
+            cfg->alphaSize = values[3];
+            cfg->colorSize = values[4];
+            cfg->depthSize = values[5];
+            cfg->stencilSize = values[6];
+            cfg->windowDrawable = values[7];
+            cfg->iPixelType = values[8];
+            cfg->doubleBuffer = values[9];
+            cfg->auxBuffers = values[10];
+
+            cfg->numSamples = 0;
+            /* Check multisample support. */
+            if (gl_info->supported[ARB_MULTISAMPLE])
+            {
+                int attribs[2] = {WGL_SAMPLE_BUFFERS_ARB, WGL_SAMPLES_ARB};
+                int values[2];
+
+                if (GL_EXTCALL(wglGetPixelFormatAttribivARB(dc, format_id, 0, 2, attribs, values)))
+                {
+                    /* values[0] = WGL_SAMPLE_BUFFERS_ARB which tells whether
+                     * multisampling is supported. values[1] = number of
+                     * multisample buffers. */
+                    if (values[0])
+                        cfg->numSamples = values[1];
+                }
+            }
+
+            TRACE("iPixelFormat=%d, iPixelType=%#x, doubleBuffer=%d, RGBA=%d/%d/%d/%d, "
+                    "depth=%d, stencil=%d, samples=%d, windowDrawable=%d\n",
+                    cfg->iPixelFormat, cfg->iPixelType, cfg->doubleBuffer,
+                    cfg->redSize, cfg->greenSize, cfg->blueSize, cfg->alphaSize,
+                    cfg->depthSize, cfg->stencilSize, cfg->numSamples, cfg->windowDrawable);
+
+            ++adapter->cfg_count;
+        }
+    }
+    else
+    {
+        int cfg_count;
+
+        cfg_count = DescribePixelFormat(dc, 0, 0, 0);
+        adapter->cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cfg_count * sizeof(*adapter->cfgs));
+
+        for (i = 0, adapter->cfg_count = 0; i < cfg_count; ++i)
+        {
+            struct wined3d_pixel_format *cfg = &adapter->cfgs[adapter->cfg_count];
+            PIXELFORMATDESCRIPTOR pfd;
+            int format_id = i + 1;
+
+            if (!DescribePixelFormat(dc, format_id, sizeof(pfd), &pfd))
+                continue;
+
+            /* We only want HW acceleration using an OpenGL ICD driver.
+             * PFD_GENERIC_FORMAT = slow opengl 1.1 gdi software rendering.
+             * PFD_GENERIC_ACCELERATED = partial hw acceleration using a MCD
+             * driver (e.g. 3dfx minigl). */
+            if (pfd.dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED))
+            {
+                TRACE("Skipping format %d because it isn't ICD accelerated.\n", format_id);
+                continue;
+            }
+
+            cfg->iPixelFormat = format_id;
+            cfg->redSize = pfd.cRedBits;
+            cfg->greenSize = pfd.cGreenBits;
+            cfg->blueSize = pfd.cBlueBits;
+            cfg->alphaSize = pfd.cAlphaBits;
+            cfg->colorSize = pfd.cColorBits;
+            cfg->depthSize = pfd.cDepthBits;
+            cfg->stencilSize = pfd.cStencilBits;
+            cfg->windowDrawable = (pfd.dwFlags & PFD_DRAW_TO_WINDOW) ? 1 : 0;
+            cfg->iPixelType = (pfd.iPixelType == PFD_TYPE_RGBA) ? WGL_TYPE_RGBA_ARB : WGL_TYPE_COLORINDEX_ARB;
+            cfg->doubleBuffer = (pfd.dwFlags & PFD_DOUBLEBUFFER) ? 1 : 0;
+            cfg->auxBuffers = pfd.cAuxBuffers;
+            cfg->numSamples = 0;
+
+            TRACE("iPixelFormat=%d, iPixelType=%#x, doubleBuffer=%d, RGBA=%d/%d/%d/%d, "
+                    "depth=%d, stencil=%d, windowDrawable=%d\n",
+                    cfg->iPixelFormat, cfg->iPixelType, cfg->doubleBuffer,
+                    cfg->redSize, cfg->greenSize, cfg->blueSize, cfg->alphaSize,
+                    cfg->depthSize, cfg->stencilSize, cfg->windowDrawable);
+
+            ++adapter->cfg_count;
+        }
+    }
+}
+
+/* Do not call while under the GL lock. */
+static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
+{
     struct wined3d_gl_info *gl_info = &adapter->gl_info;
-    BOOL ret;
-    int ps_selected_mode, vs_selected_mode;
+    struct wined3d_fake_gl_ctx fake_gl_ctx = {0};
+    DISPLAY_DEVICEW display_device;
 
-    /* No need to hold any lock. The calling library makes sure only one thread calls
-     * wined3d simultaneously
-     */
+    TRACE("adapter %p, ordinal %u.\n", adapter, ordinal);
 
-    TRACE("Initializing adapters\n");
+    adapter->ordinal = ordinal;
+    adapter->monitorPoint.x = -1;
+    adapter->monitorPoint.y = -1;
 
 /* Dynamically load all GL core functions */
 #ifdef USE_WIN32_OPENGL
@@ -5406,7 +5529,7 @@ static BOOL InitAdapters(struct wined3d *wined3d)
         HDC hdc = GetDC( 0 );
         const struct opengl_funcs *wgl_driver = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
         ReleaseDC( 0, hdc );
-        if (!wgl_driver || wgl_driver == (void *)-1) goto nogl_adapter;
+        if (!wgl_driver || wgl_driver == (void *)-1) return FALSE;
         gl_info->gl_ops.wgl = wgl_driver->wgl;
         gl_info->gl_ops.gl = wgl_driver->gl;
     }
@@ -5415,220 +5538,81 @@ static BOOL InitAdapters(struct wined3d *wined3d)
     glEnableWINE = gl_info->gl_ops.gl.p_glEnable;
     glDisableWINE = gl_info->gl_ops.gl.p_glDisable;
 
-    /* For now only one default adapter */
+    if (!AllocateLocallyUniqueId(&adapter->luid))
     {
-        struct wined3d_fake_gl_ctx fake_gl_ctx = {0};
-        struct wined3d_pixel_format *cfgs;
-        int iPixelFormat;
-        int res;
-        DISPLAY_DEVICEW DisplayDevice;
-        HDC hdc;
-
-        TRACE("Initializing default adapter\n");
-        adapter->ordinal = 0;
-        adapter->monitorPoint.x = -1;
-        adapter->monitorPoint.y = -1;
-
-        if (!AllocateLocallyUniqueId(&adapter->luid))
-        {
-            DWORD err = GetLastError();
-            ERR("Failed to set adapter LUID (%#x).\n", err);
-            goto nogl_adapter;
-        }
-        TRACE("Allocated LUID %08x:%08x for adapter.\n",
-                adapter->luid.HighPart, adapter->luid.LowPart);
-
-        if (!WineD3D_CreateFakeGLContext(&fake_gl_ctx))
-        {
-            ERR("Failed to get a gl context for default adapter\n");
-            goto nogl_adapter;
-        }
-
-        ret = wined3d_adapter_init_gl_caps(adapter);
-        if(!ret) {
-            ERR("Failed to initialize gl caps for default adapter\n");
-            WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
-            goto nogl_adapter;
-        }
-        ret = initPixelFormats(&adapter->gl_info, adapter->driver_info.vendor);
-        if(!ret) {
-            ERR("Failed to init gl formats\n");
-            WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
-            goto nogl_adapter;
-        }
-
-        hdc = fake_gl_ctx.dc;
-
-        adapter->TextureRam = adapter->driver_info.vidmem;
-        adapter->UsedTextureRam = 0;
-        TRACE("Emulating %dMB of texture ram\n", adapter->TextureRam/(1024*1024));
-
-        /* Initialize the Adapter's DeviceName which is required for ChangeDisplaySettings and friends */
-        DisplayDevice.cb = sizeof(DisplayDevice);
-        EnumDisplayDevicesW(NULL, 0 /* Adapter 0 = iDevNum 0 */, &DisplayDevice, 0);
-        TRACE("DeviceName: %s\n", debugstr_w(DisplayDevice.DeviceName));
-        strcpyW(adapter->DeviceName, DisplayDevice.DeviceName);
-
-        if (gl_info->supported[WGL_ARB_PIXEL_FORMAT])
-        {
-            GLint cfg_count;
-            int attribute;
-            int attribs[11];
-            int values[11];
-            int nAttribs = 0;
-
-            attribute = WGL_NUMBER_PIXEL_FORMATS_ARB;
-            GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, 0, 0, 1, &attribute, &cfg_count));
-            adapter->cfg_count = cfg_count;
-
-            adapter->cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, adapter->cfg_count * sizeof(*adapter->cfgs));
-            cfgs = adapter->cfgs;
-            attribs[nAttribs++] = WGL_RED_BITS_ARB;
-            attribs[nAttribs++] = WGL_GREEN_BITS_ARB;
-            attribs[nAttribs++] = WGL_BLUE_BITS_ARB;
-            attribs[nAttribs++] = WGL_ALPHA_BITS_ARB;
-            attribs[nAttribs++] = WGL_COLOR_BITS_ARB;
-            attribs[nAttribs++] = WGL_DEPTH_BITS_ARB;
-            attribs[nAttribs++] = WGL_STENCIL_BITS_ARB;
-            attribs[nAttribs++] = WGL_DRAW_TO_WINDOW_ARB;
-            attribs[nAttribs++] = WGL_PIXEL_TYPE_ARB;
-            attribs[nAttribs++] = WGL_DOUBLE_BUFFER_ARB;
-            attribs[nAttribs++] = WGL_AUX_BUFFERS_ARB;
-
-            for (iPixelFormat=1; iPixelFormat <= adapter->cfg_count; ++iPixelFormat)
-            {
-                res = GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, nAttribs, attribs, values));
-
-                if(!res)
-                    continue;
-
-                /* Cache the pixel format */
-                cfgs->iPixelFormat = iPixelFormat;
-                cfgs->redSize = values[0];
-                cfgs->greenSize = values[1];
-                cfgs->blueSize = values[2];
-                cfgs->alphaSize = values[3];
-                cfgs->colorSize = values[4];
-                cfgs->depthSize = values[5];
-                cfgs->stencilSize = values[6];
-                cfgs->windowDrawable = values[7];
-                cfgs->iPixelType = values[8];
-                cfgs->doubleBuffer = values[9];
-                cfgs->auxBuffers = values[10];
-
-                cfgs->numSamples = 0;
-                /* Check multisample support */
-                if (gl_info->supported[ARB_MULTISAMPLE])
-                {
-                    int attrib[2] = {WGL_SAMPLE_BUFFERS_ARB, WGL_SAMPLES_ARB};
-                    int value[2];
-                    if(GL_EXTCALL(wglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0, 2, attrib, value))) {
-                        /* value[0] = WGL_SAMPLE_BUFFERS_ARB which tells whether multisampling is supported.
-                        * value[1] = number of multi sample buffers*/
-                        if(value[0])
-                            cfgs->numSamples = value[1];
-                    }
-                }
-
-                TRACE("iPixelFormat=%d, iPixelType=%#x, doubleBuffer=%d, RGBA=%d/%d/%d/%d, "
-                        "depth=%d, stencil=%d, samples=%d, windowDrawable=%d\n",
-                        cfgs->iPixelFormat, cfgs->iPixelType, cfgs->doubleBuffer,
-                        cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize,
-                        cfgs->depthSize, cfgs->stencilSize, cfgs->numSamples, cfgs->windowDrawable);
-                cfgs++;
-            }
-        }
-        else
-        {
-            int nCfgs = DescribePixelFormat(hdc, 0, 0, 0);
-            adapter->cfgs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nCfgs * sizeof(*adapter->cfgs));
-            adapter->cfg_count = 0; /* We won't accept all formats e.g. software accelerated ones will be skipped */
-
-            cfgs = adapter->cfgs;
-            for(iPixelFormat=1; iPixelFormat<=nCfgs; iPixelFormat++)
-            {
-                PIXELFORMATDESCRIPTOR ppfd;
-
-                res = DescribePixelFormat(hdc, iPixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &ppfd);
-                if(!res)
-                    continue;
-
-                /* We only want HW acceleration using an OpenGL ICD driver.
-                 * PFD_GENERIC_FORMAT = slow opengl 1.1 gdi software rendering
-                 * PFD_GENERIC_ACCELERATED = partial hw acceleration using a MCD driver (e.g. 3dfx minigl)
-                 */
-                if(ppfd.dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED))
-                {
-                    TRACE("Skipping iPixelFormat=%d because it isn't ICD accelerated\n", iPixelFormat);
-                    continue;
-                }
-
-                cfgs->iPixelFormat = iPixelFormat;
-                cfgs->redSize = ppfd.cRedBits;
-                cfgs->greenSize = ppfd.cGreenBits;
-                cfgs->blueSize = ppfd.cBlueBits;
-                cfgs->alphaSize = ppfd.cAlphaBits;
-                cfgs->colorSize = ppfd.cColorBits;
-                cfgs->depthSize = ppfd.cDepthBits;
-                cfgs->stencilSize = ppfd.cStencilBits;
-                cfgs->windowDrawable = (ppfd.dwFlags & PFD_DRAW_TO_WINDOW) ? 1 : 0;
-                cfgs->iPixelType = (ppfd.iPixelType == PFD_TYPE_RGBA) ? WGL_TYPE_RGBA_ARB : WGL_TYPE_COLORINDEX_ARB;
-                cfgs->doubleBuffer = (ppfd.dwFlags & PFD_DOUBLEBUFFER) ? 1 : 0;
-                cfgs->auxBuffers = ppfd.cAuxBuffers;
-                cfgs->numSamples = 0;
-
-                TRACE("iPixelFormat=%d, iPixelType=%#x, doubleBuffer=%d, RGBA=%d/%d/%d/%d, "
-                        "depth=%d, stencil=%d, windowDrawable=%d\n",
-                        cfgs->iPixelFormat, cfgs->iPixelType, cfgs->doubleBuffer,
-                        cfgs->redSize, cfgs->greenSize, cfgs->blueSize, cfgs->alphaSize,
-                        cfgs->depthSize, cfgs->stencilSize, cfgs->windowDrawable);
-                cfgs++;
-                adapter->cfg_count++;
-            }
-
-            /* We haven't found any suitable formats. This should only happen
-             * in case of GDI software rendering, which is pretty useless
-             * anyway. */
-            if (!adapter->cfg_count)
-            {
-                ERR("Disabling Direct3D because no hardware accelerated pixel formats have been found!\n");
-
-                WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
-                HeapFree(GetProcessHeap(), 0, adapter->cfgs);
-                goto nogl_adapter;
-            }
-        }
-
-        WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
-
-        select_shader_mode(&adapter->gl_info, &ps_selected_mode, &vs_selected_mode);
-        fillGLAttribFuncs(&adapter->gl_info);
-        adapter->opengl = TRUE;
+        ERR("Failed to set adapter LUID (%#x).\n", GetLastError());
+        return FALSE;
     }
-    wined3d->adapter_count = 1;
-    TRACE("%u adapters successfully initialized.\n", wined3d->adapter_count);
+    TRACE("Allocated LUID %08x:%08x for adapter %p.\n",
+            adapter->luid.HighPart, adapter->luid.LowPart, adapter);
+
+    if (!WineD3D_CreateFakeGLContext(&fake_gl_ctx))
+    {
+        ERR("Failed to get a GL context for adapter %p.\n", adapter);
+        return FALSE;
+    }
+
+    if (!wined3d_adapter_init_gl_caps(adapter))
+    {
+        ERR("Failed to initialize GL caps for adapter %p.\n", adapter);
+        WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
+        return FALSE;
+    }
+
+    wined3d_adapter_init_fb_cfgs(adapter, fake_gl_ctx.dc);
+    /* We haven't found any suitable formats. This should only happen in
+     * case of GDI software rendering, which is pretty useless anyway. */
+    if (!adapter->cfg_count)
+    {
+        WARN("No suitable pixel formats found.\n");
+        WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
+        HeapFree(GetProcessHeap(), 0, adapter->cfgs);
+        return FALSE;
+    }
+
+    if (!initPixelFormats(&adapter->gl_info, adapter->driver_info.vendor))
+    {
+        ERR("Failed to initialize GL format info.\n");
+        WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
+        HeapFree(GetProcessHeap(), 0, adapter->cfgs);
+        return FALSE;
+    }
+
+    adapter->TextureRam = adapter->driver_info.vidmem;
+    adapter->UsedTextureRam = 0;
+    TRACE("Emulating %u MB of texture ram.\n", adapter->TextureRam / (1024 * 1024));
+
+    display_device.cb = sizeof(display_device);
+    EnumDisplayDevicesW(NULL, ordinal, &display_device, 0);
+    TRACE("DeviceName: %s\n", debugstr_w(display_device.DeviceName));
+    strcpyW(adapter->DeviceName, display_device.DeviceName);
+
+    WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);
+
+    fillGLAttribFuncs(&adapter->gl_info);
 
     return TRUE;
+}
 
-nogl_adapter:
-    /* Initialize an adapter for ddraw-only memory counting */
-    memset(wined3d->adapters, 0, sizeof(wined3d->adapters));
-    wined3d->adapters[0].ordinal = 0;
-    wined3d->adapters[0].opengl = FALSE;
-    wined3d->adapters[0].monitorPoint.x = -1;
-    wined3d->adapters[0].monitorPoint.y = -1;
+static void wined3d_adapter_init_nogl(struct wined3d_adapter *adapter, UINT ordinal)
+{
+    memset(adapter, 0, sizeof(*adapter));
+    adapter->ordinal = ordinal;
+    adapter->monitorPoint.x = -1;
+    adapter->monitorPoint.y = -1;
 
-    wined3d->adapters[0].driver_info.name = "Display";
-    wined3d->adapters[0].driver_info.description = "WineD3D DirectDraw Emulation";
+    adapter->driver_info.name = "Display";
+    adapter->driver_info.description = "WineD3D DirectDraw Emulation";
     if (wined3d_settings.emulated_textureram)
-        wined3d->adapters[0].TextureRam = wined3d_settings.emulated_textureram;
+        adapter->TextureRam = wined3d_settings.emulated_textureram;
     else
-        wined3d->adapters[0].TextureRam = 8 * 1024 * 1024; /* This is plenty for a DDraw-only card */
+        adapter->TextureRam = 128 * 1024 * 1024;
 
-    initPixelFormatsNoGL(&wined3d->adapters[0].gl_info);
+    initPixelFormatsNoGL(&adapter->gl_info);
 
-    wined3d->adapter_count = 1;
-    return FALSE;
+    adapter->fragment_pipe = &none_fragment_pipe;
+    adapter->shader_backend = &none_shader_backend;
+    adapter->blitter = &cpu_blit;
 }
 
 static void STDMETHODCALLTYPE wined3d_null_wined3d_object_destroyed(void *parent) {}
@@ -5645,15 +5629,21 @@ HRESULT wined3d_init(struct wined3d *wined3d, UINT version, DWORD flags)
     wined3d->ref = 1;
     wined3d->flags = flags;
 
-    if (!InitAdapters(wined3d))
+    TRACE("Initializing adapters.\n");
+
+    if (flags & WINED3D_NO3D)
     {
-        WARN("Failed to initialize adapters.\n");
-        if (version > 7)
-        {
-            MESSAGE("Direct3D%u is not available without OpenGL.\n", version);
-            return E_FAIL;
-        }
+        wined3d_adapter_init_nogl(&wined3d->adapters[0], 0);
+        wined3d->adapter_count = 1;
+        return WINED3D_OK;
     }
+
+    if (!wined3d_adapter_init(&wined3d->adapters[0], 0))
+    {
+        WARN("Failed to initialize adapter.\n");
+        return E_FAIL;
+    }
+    wined3d->adapter_count = 1;
 
     return WINED3D_OK;
 }

@@ -37,7 +37,14 @@
 #include "wine/list.h"
 #include "wine/wined3d.h"
 
+enum ddraw_surface_type
+{
+    DDRAW_SURFACE_TYPE_OPENGL,
+    DDRAW_SURFACE_TYPE_GDI,
+};
+
 extern const struct wined3d_parent_ops ddraw_null_wined3d_parent_ops DECLSPEC_HIDDEN;
+extern enum ddraw_surface_type DefaultSurfaceType DECLSPEC_HIDDEN;
 extern DWORD force_refresh_rate DECLSPEC_HIDDEN;
 
 /*****************************************************************************
@@ -118,13 +125,6 @@ static inline void ddraw_set_swapchain_window(struct ddraw *ddraw, HWND window)
 void DDRAW_Convert_DDSCAPS_1_To_2(const DDSCAPS *pIn, DDSCAPS2 *pOut) DECLSPEC_HIDDEN;
 void DDRAW_Convert_DDDEVICEIDENTIFIER_2_To_1(const DDDEVICEIDENTIFIER2 *pIn, DDDEVICEIDENTIFIER *pOut) DECLSPEC_HIDDEN;
 struct wined3d_vertex_declaration *ddraw_find_decl(struct ddraw *ddraw, DWORD fvf) DECLSPEC_HIDDEN;
-
-/* The default surface type */
-extern enum wined3d_surface_type DefaultSurfaceType DECLSPEC_HIDDEN;
-
-/*****************************************************************************
- * IDirectDrawSurface implementation structure
- *****************************************************************************/
 
 struct ddraw_surface
 {
@@ -535,6 +535,8 @@ struct d3d_vertex_buffer
     DWORD                fvf;
     DWORD                size;
     BOOL                 dynamic;
+
+    BOOL                 read_since_last_map;
 };
 
 HRESULT d3d_vertex_buffer_create(struct d3d_vertex_buffer **buffer, struct ddraw *ddraw,

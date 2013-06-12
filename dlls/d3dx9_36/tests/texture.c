@@ -106,24 +106,6 @@ static inline void expect_vec4_(unsigned int line, const D3DXVECTOR4 *expected, 
         got->x, got->y, got->z, got->w);
 }
 
-static inline float float_16_to_32(unsigned short in)
-{
-    unsigned short s = (in & 0x8000);
-    unsigned short e = (in & 0x7C00) >> 10;
-    unsigned short m = in & 0x3FF;
-    float sgn = (s ? -1.0f : 1.0f);
-
-    if (e == 0)
-    {
-        if (m == 0) return sgn * 0.0f; /* +0.0 or -0.0 */
-        else return sgn * powf(2, -14.0f) * (m / 1024.0f);
-    }
-    else
-    {
-        return sgn * powf(2, e - 15.0f) * (1.0f + (m / 1024.0f));
-    }
-}
-
 static BOOL is_autogenmipmap_supported(IDirect3DDevice9 *device, D3DRESOURCETYPE resource_type)
 {
     HRESULT hr;
@@ -1058,7 +1040,7 @@ static void test_D3DXFillTexture(IDirect3DDevice9 *device)
     if (SUCCEEDED(hr))
     {
         hr = D3DXFillTexture(tex, fillfunc, NULL);
-        todo_wine ok(hr == D3D_OK, "D3DXFillTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(hr == D3D_OK, "D3DXFillTexture returned %#x, expected %#x\n", hr, D3D_OK);
 
         hr = IDirect3DTexture9_LockRect(tex, 0, &lock_rect, NULL, D3DLOCK_READONLY);
         if (SUCCEEDED(hr))
@@ -1071,17 +1053,15 @@ static void test_D3DXFillTexture(IDirect3DDevice9 *device)
                 {
                     D3DXVECTOR4 got, expected;
 
-                    got.x = float_16_to_32(*ptr++);
-                    got.y = float_16_to_32(*ptr++);
-                    got.z = float_16_to_32(*ptr++);
-                    got.w = float_16_to_32(*ptr++);
+                    D3DXFloat16To32Array((FLOAT *)&got, (D3DXFLOAT16 *)ptr, 4);
+                    ptr += 4;
 
                     expected.x = (x + 0.5f) / 4.0f;
                     expected.y = (y + 0.5f) / 4.0f;
                     expected.z = 1.0f / 4.0f;
                     expected.w = 1.0f;
 
-                    todo_wine expect_vec4(&expected, &got);
+                    expect_vec4(&expected, &got);
                 }
             }
 
@@ -1101,7 +1081,7 @@ static void test_D3DXFillTexture(IDirect3DDevice9 *device)
     if (SUCCEEDED(hr))
     {
         hr = D3DXFillTexture(tex, fillfunc, NULL);
-        todo_wine ok(hr == D3D_OK, "D3DXFillTexture returned %#x, expected %#x\n", hr, D3D_OK);
+        ok(hr == D3D_OK, "D3DXFillTexture returned %#x, expected %#x\n", hr, D3D_OK);
 
         hr = IDirect3DTexture9_LockRect(tex, 0, &lock_rect, NULL, D3DLOCK_READONLY);
         if (SUCCEEDED(hr))
@@ -1124,7 +1104,7 @@ static void test_D3DXFillTexture(IDirect3DDevice9 *device)
                     expected.z = 1.0f / 4.0f;
                     expected.w = 1.0f;
 
-                    todo_wine expect_vec4(&expected, &got);
+                    expect_vec4(&expected, &got);
                 }
             }
 
@@ -1591,7 +1571,7 @@ static void test_D3DXCreateVolumeTextureFromFileInMemory(IDirect3DDevice9 *devic
         ok(levelcount == 3, "GetLevelCount returned %u, expected 3\n", levelcount);
 
         hr = IDirect3DVolumeTexture9_GetLevelDesc(volume_texture, 0, &volume_desc);
-        ok(hr == D3D_OK, "GetLevelDesc returend %#x, expected %#x\n", hr, D3D_OK);
+        ok(hr == D3D_OK, "GetLevelDesc returned %#x, expected %#x\n", hr, D3D_OK);
         ok(volume_desc.Width == 4, "Got width %u, expected 4\n", volume_desc.Width);
         ok(volume_desc.Height == 4, "Got height %u, expected 4\n", volume_desc.Height);
         ok(volume_desc.Depth == 2, "Got depth %u, expected 2\n", volume_desc.Depth);

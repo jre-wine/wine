@@ -324,7 +324,7 @@ static BOOL PSDRV_CreateDC( PHYSDEV *pdev, LPCWSTR driver, LPCWSTR device,
     if (output && *output) physDev->job.output = strdupW( output );
 
     if(initData)
-        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODE *)initData, pi);
+        PSDRV_MergeDevmodes(physDev->Devmode, (const PSDRV_DEVMODE *)initData, pi);
 
     PSDRV_UpdateDevCaps(physDev);
     SelectObject( (*pdev)->hdc, PSDRV_DefaultFont );
@@ -379,7 +379,7 @@ static HDC PSDRV_ResetDC( PHYSDEV dev, const DEVMODEW *lpInitData )
 
     if (lpInitData)
     {
-        PSDRV_MergeDevmodes(physDev->Devmode, (PSDRV_DEVMODE *)lpInitData, physDev->pi);
+        PSDRV_MergeDevmodes(physDev->Devmode, (const PSDRV_DEVMODE *)lpInitData, physDev->pi);
         PSDRV_UpdateDevCaps(physDev);
     }
     return dev->hdc;
@@ -612,7 +612,6 @@ static struct list printer_list = LIST_INIT( printer_list );
  */
 PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
 {
-    DWORD needed, res, dwPaperSize;
     PRINTERINFO *pi;
     FONTNAME *font;
     const AFM *afm;
@@ -676,22 +675,6 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCWSTR name)
         dm.dmPublic.dmFields = DM_PAPERSIZE;
         dm.dmPublic.u1.s1.dmPaperSize = pi->ppd->DefaultPageSize->WinPage;
         PSDRV_MergeDevmodes(pi->Devmode, &dm, pi);
-    }
-
-    /*
-     *	This is a hack.  The default paper size should be read in as part of
-     *	the Devmode structure, but Wine doesn't currently provide a convenient
-     *	way to configure printers.
-     */
-    res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "Paper Size", NULL,
-                            (LPBYTE)&dwPaperSize, sizeof(DWORD), &needed);
-    if (res == ERROR_SUCCESS)
-	pi->Devmode->dmPublic.u1.s1.dmPaperSize = (SHORT) dwPaperSize;
-    else if (res == ERROR_FILE_NOT_FOUND)
-	TRACE ("No 'Paper Size' for printer '%s'\n", debugstr_w(name));
-    else {
-	ERR ("GetPrinterDataA returned %i\n", res);
-	goto fail;
     }
 
     /* Duplex is indicated by the setting of the DM_DUPLEX bit in dmFields.

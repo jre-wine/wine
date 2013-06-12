@@ -107,7 +107,7 @@ typedef struct _WINMM_Device {
     BOOL stopped;
     DWORD loop_counter;
     UINT32 bytes_per_frame, samples_per_sec, ofs_bytes, played_frames;
-    UINT32 remainder_frames; /* header chunk frames already played when a device switch occured */
+    UINT32 remainder_frames; /* header chunk frames already played when a device switch occurred */
 
     /* stored in frames of sample rate, *not* AC::GetFrequency */
     UINT64 last_clock_pos;
@@ -757,12 +757,14 @@ static HRESULT reroute_mapper_device(WINMM_Device *device, BOOL is_out)
     hr = IAudioClock_GetFrequency(device->clock, &clock_freq);
     if(FAILED(hr)){
         WARN("GetFrequency failed: %08x\n", hr);
+        LeaveCriticalSection(&device->lock);
         return hr;
     }
 
     hr = IAudioClock_GetPosition(device->clock, &clock_pos, NULL);
     if(FAILED(hr)){
         WARN("GetPosition failed: %08x\n", hr);
+        LeaveCriticalSection(&device->lock);
         return hr;
     }
 
