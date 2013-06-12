@@ -36,12 +36,16 @@ typedef struct {
     DWORD block_cnt;
     DWORD last_block;
     DWORD offset;
+    BOOL mark;
     struct list custom_blocks;
 } heap_pool_t;
 
 void heap_pool_init(heap_pool_t*) DECLSPEC_HIDDEN;
 void *heap_pool_alloc(heap_pool_t*,size_t) __WINE_ALLOC_SIZE(2) DECLSPEC_HIDDEN;
+void *heap_pool_grow(heap_pool_t*,void*,DWORD,DWORD) DECLSPEC_HIDDEN;
+void heap_pool_clear(heap_pool_t*) DECLSPEC_HIDDEN;
 void heap_pool_free(heap_pool_t*) DECLSPEC_HIDDEN;
+heap_pool_t *heap_pool_mark(heap_pool_t*) DECLSPEC_HIDDEN;
 
 typedef struct _function_t function_t;
 typedef struct _vbscode_t vbscode_t;
@@ -82,7 +86,7 @@ typedef struct {
     HRESULT (*proc)(vbdisp_t*,VARIANT*,unsigned,VARIANT*);
     DWORD flags;
     unsigned min_args;
-    unsigned max_args;
+    UINT_PTR max_args;
 } builtin_prop_t;
 
 typedef struct _class_desc_t {
@@ -329,6 +333,11 @@ void release_vbscode(vbscode_t*) DECLSPEC_HIDDEN;
 HRESULT compile_script(script_ctx_t*,const WCHAR*,const WCHAR*,vbscode_t**) DECLSPEC_HIDDEN;
 HRESULT exec_script(script_ctx_t*,function_t*,IDispatch*,DISPPARAMS*,VARIANT*) DECLSPEC_HIDDEN;
 void release_dynamic_vars(dynamic_var_t*) DECLSPEC_HIDDEN;
+
+typedef struct {
+    UINT16 len;
+    WCHAR buf[7];
+} string_constant_t;
 
 #define TID_LIST \
     XDIID(ErrObj) \

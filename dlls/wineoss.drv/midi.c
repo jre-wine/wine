@@ -563,9 +563,9 @@ static void midReceiveChar(WORD wDevID, unsigned char value, DWORD dwTime)
 	}
 	if (sbfb && lpMidiHdr != NULL) {
 	    lpMidiHdr = MidiInDev[wDevID].lpQueueHdr;
+	    MidiInDev[wDevID].lpQueueHdr = lpMidiHdr->lpNext;
 	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
 	    lpMidiHdr->dwFlags |= MHDR_DONE;
-	    MidiInDev[wDevID].lpQueueHdr = lpMidiHdr->lpNext;
 	    MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD_PTR)lpMidiHdr, dwTime);
 	}
 	LeaveCriticalSection(&crit_sect);
@@ -906,12 +906,11 @@ static DWORD midReset(WORD wDevID)
 
     EnterCriticalSection(&crit_sect);
     while (MidiInDev[wDevID].lpQueueHdr) {
-	MidiInDev[wDevID].lpQueueHdr->dwFlags &= ~MHDR_INQUEUE;
-	MidiInDev[wDevID].lpQueueHdr->dwFlags |= MHDR_DONE;
-	/* FIXME: when called from 16 bit, lpQueueHdr needs to be a segmented ptr */
-	MIDI_NotifyClient(wDevID, MIM_LONGDATA,
-			  (DWORD_PTR)MidiInDev[wDevID].lpQueueHdr, dwTime);
-	MidiInDev[wDevID].lpQueueHdr = MidiInDev[wDevID].lpQueueHdr->lpNext;
+	LPMIDIHDR lpMidiHdr = MidiInDev[wDevID].lpQueueHdr;
+	MidiInDev[wDevID].lpQueueHdr = lpMidiHdr->lpNext;
+	lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
+	lpMidiHdr->dwFlags |= MHDR_DONE;
+	MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD_PTR)lpMidiHdr, dwTime);
     }
     LeaveCriticalSection(&crit_sect);
 
@@ -1101,10 +1100,6 @@ static DWORD modOpen(WORD wDevID, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
     if ((dwFlags & ~CALLBACK_TYPEMASK) != 0) {
 	WARN("bad dwFlags\n");
 	return MMSYSERR_INVALFLAG;
-    }
-    if (!MidiOutDev[wDevID].bEnabled) {
-	TRACE("disabled wDevID\n");
-	return MMSYSERR_NOTENABLED;
     }
 
     MidiOutDev[wDevID].lpExtra = 0;
@@ -1445,7 +1440,6 @@ static DWORD modData(WORD wDevID, DWORD dwParam)
 		switch (evt & 0x0F) {
 		case 0x00:	/* System Exclusive, don't do it on modData,
 				 * should require modLongData*/
-		case 0x01:	/* Undefined */
 		case 0x04:	/* Undefined. */
 		case 0x05:	/* Undefined. */
 		case 0x07:	/* End of Exclusive. */
@@ -1470,6 +1464,7 @@ static DWORD modData(WORD wDevID, DWORD dwParam)
 		    SEQ_MIDIOUT(dev, 0x01);
 		    SEQ_MIDIOUT(dev, 0xf7);
 		    break;
+		case 0x01:	/* MTC Quarter frame */
 		case 0x03:	/* Song Select. */
 		    SEQ_MIDIOUT(dev, evt);
 		    SEQ_MIDIOUT(dev, d1);

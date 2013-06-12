@@ -8046,10 +8046,15 @@ static void test_put_nodeTypedValue(void)
 static void test_get_xml(void)
 {
     static const char xmlA[] = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<a>test</a>\r\n";
+    static const char attrA[] = "attr=\"&quot;a &amp; b&quot;\"";
+    static const char attr2A[] = "\"a & b\"";
+    static const char attr3A[] = "attr=\"&amp;quot;a\"";
+    static const char attr4A[] = "&quot;a";
     static const char fooA[] = "<foo/>";
     IXMLDOMProcessingInstruction *pi;
     IXMLDOMNode *first;
     IXMLDOMElement *elem = NULL;
+    IXMLDOMAttribute *attr;
     IXMLDOMDocument *doc;
     VARIANT_BOOL b;
     VARIANT v;
@@ -8105,6 +8110,51 @@ static void test_get_xml(void)
     SysFreeString(xml);
 
     IXMLDOMElement_Release(elem);
+
+    /* attribute node */
+    hr = IXMLDOMDocument_createAttribute(doc, _bstr_("attr"), &attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = _bstr_("\"a & b\"");
+    hr = IXMLDOMAttribute_put_value(attr, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    xml = NULL;
+    hr = IXMLDOMAttribute_get_xml(attr, &xml);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!memcmp(xml, _bstr_(attrA), (sizeof(attrA)-1)*sizeof(WCHAR)), "got %s\n", wine_dbgstr_w(xml));
+    SysFreeString(xml);
+
+    VariantInit(&v);
+    hr = IXMLDOMAttribute_get_value(attr, &v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&v) == VT_BSTR, "got type %d\n", V_VT(&v));
+    ok(!memcmp(V_BSTR(&v), _bstr_(attr2A), (sizeof(attr2A)-1)*sizeof(WCHAR)),
+        "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = _bstr_("&quot;a");
+    hr = IXMLDOMAttribute_put_value(attr, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    xml = NULL;
+    hr = IXMLDOMAttribute_get_xml(attr, &xml);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!memcmp(xml, _bstr_(attr3A), (sizeof(attr3A)-1)*sizeof(WCHAR)), "got %s\n", wine_dbgstr_w(xml));
+    SysFreeString(xml);
+
+    VariantInit(&v);
+    hr = IXMLDOMAttribute_get_value(attr, &v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&v) == VT_BSTR, "got type %d\n", V_VT(&v));
+    ok(!memcmp(V_BSTR(&v), _bstr_(attr4A), (sizeof(attr4A)-1)*sizeof(WCHAR)),
+        "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
+    IXMLDOMAttribute_Release(attr);
+
     IXMLDOMDocument_Release(doc);
 
     free_bstrs();
@@ -8270,15 +8320,30 @@ todo_wine {
 
 static void test_insertBefore(void)
 {
-    IXMLDOMDocument *doc, *doc2;
+    IXMLDOMDocument *doc, *doc2, *doc3;
     IXMLDOMAttribute *attr;
     IXMLDOMElement *elem1, *elem2, *elem3, *elem4, *elem5;
-    IXMLDOMNode *node, *newnode;
+    IXMLDOMNode *node, *newnode, *cdata;
     HRESULT hr;
     VARIANT v;
     BSTR p;
 
     doc = create_document(&IID_IXMLDOMDocument);
+    doc3 = create_document(&IID_IXMLDOMDocument);
+
+    /* document to document */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_insertBefore(doc, (IXMLDOMNode*)doc3, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+
+    /* document to itself */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_insertBefore(doc, (IXMLDOMNode*)doc, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
 
     /* insertBefore behaviour for attribute node */
     V_VT(&v) = VT_I4;
@@ -8288,6 +8353,31 @@ static void test_insertBefore(void)
     hr = IXMLDOMDocument_createNode(doc, v, _bstr_("attr"), NULL, (IXMLDOMNode**)&attr);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(attr != NULL, "got %p\n", attr);
+
+    /* attribute to document */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_insertBefore(doc3, (IXMLDOMNode*)attr, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+
+    /* cdata to document */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_CDATA_SECTION;
+
+    cdata = NULL;
+    hr = IXMLDOMDocument_createNode(doc3, v, _bstr_("cdata"), NULL, &cdata);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cdata != NULL, "got %p\n", cdata);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_insertBefore(doc3, cdata, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+
+    IXMLDOMNode_Release(cdata);
+    IXMLDOMDocument_Release(doc3);
 
     /* attribute to attribute */
     V_VT(&v) = VT_I4;

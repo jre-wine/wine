@@ -48,8 +48,9 @@
 
     NSUInteger lastModifierFlags;
 
-    BOOL forceNextMouseMoveAbsolute;
     double mouseMoveDeltaX, mouseMoveDeltaY;
+
+    NSInteger levelWhenActive;
 
     BOOL causing_becomeKeyWindow;
     BOOL ignore_windowMiniaturize;
@@ -57,5 +58,11 @@
 }
 
 @property (retain, readonly, nonatomic) WineEventQueue* queue;
+@property (readonly, nonatomic) BOOL floating;
+@property (readonly, nonatomic) NSInteger levelWhenActive;
+
+    - (void) adjustWindowLevel;
+
+    - (void) postMouseMovedEvent:(NSEvent *)theEvent absolute:(BOOL)absolute;
 
 @end

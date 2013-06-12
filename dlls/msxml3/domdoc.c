@@ -553,19 +553,28 @@ void xmldoc_init(xmlDocPtr doc, MSXML_VERSION version)
     priv_from_xmlDocPtr(doc)->properties = create_properties(version);
 }
 
-LONG xmldoc_add_ref(xmlDocPtr doc)
+LONG xmldoc_add_refs(xmlDocPtr doc, LONG refs)
 {
-    LONG ref = InterlockedIncrement(&priv_from_xmlDocPtr(doc)->refs);
+    LONG ref = InterlockedExchangeAdd(&priv_from_xmlDocPtr(doc)->refs, refs) + refs;
     TRACE("(%p)->(%d)\n", doc, ref);
     return ref;
 }
 
-LONG xmldoc_release(xmlDocPtr doc)
+LONG xmldoc_add_ref(xmlDocPtr doc)
+{
+    return xmldoc_add_refs(doc, 1);
+}
+
+LONG xmldoc_release_refs(xmlDocPtr doc, LONG refs)
 {
     xmldoc_priv *priv = priv_from_xmlDocPtr(doc);
-    LONG ref = InterlockedDecrement(&priv->refs);
+    LONG ref = InterlockedExchangeAdd(&priv->refs, -refs) - refs;
     TRACE("(%p)->(%d)\n", doc, ref);
-    if(ref == 0)
+
+    if (ref < 0)
+        WARN("negative refcount, expect troubles\n");
+
+    if (ref == 0)
     {
         orphan_entry *orphan, *orphan2;
         TRACE("freeing docptr %p\n", doc);
@@ -582,6 +591,11 @@ LONG xmldoc_release(xmlDocPtr doc)
     }
 
     return ref;
+}
+
+LONG xmldoc_release(xmlDocPtr doc)
+{
+    return xmldoc_release_refs(doc, 1);
 }
 
 HRESULT xmldoc_add_orphan(xmlDocPtr doc, xmlNodePtr node)
@@ -618,7 +632,7 @@ HRESULT xmldoc_remove_orphan(xmlDocPtr doc, xmlNodePtr node)
 
 static inline xmlDocPtr get_doc( domdoc *This )
 {
-    return (xmlDocPtr)This->node.node;
+    return This->node.node->doc;
 }
 
 static HRESULT attach_xmldoc(domdoc *This, xmlDocPtr xml )
@@ -1115,12 +1129,26 @@ static HRESULT WINAPI domdoc_insertBefore(
     IXMLDOMNode** outNewChild )
 {
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
+    DOMNodeType type;
+    HRESULT hr;
 
     TRACE("(%p)->(%p %s %p)\n", This, newChild, debugstr_variant(&refChild), outNewChild);
 
-    return node_insert_before(&This->node, newChild, &refChild, outNewChild);
-}
+    hr = IXMLDOMNode_get_nodeType(newChild, &type);
+    if (hr != S_OK) return hr;
 
+    TRACE("new node type %d\n", type);
+    switch (type)
+    {
+        case NODE_ATTRIBUTE:
+        case NODE_DOCUMENT:
+        case NODE_CDATA_SECTION:
+            if (outNewChild) *outNewChild = NULL;
+            return E_FAIL;
+        default:
+            return node_insert_before(&This->node, newChild, &refChild, outNewChild);
+    }
+}
 
 static HRESULT WINAPI domdoc_replaceChild(
     IXMLDOMDocument3 *iface,
@@ -1510,7 +1538,9 @@ static HRESULT WINAPI domdoc_put_documentElement(
     domdoc *This = impl_from_IXMLDOMDocument3( iface );
     IXMLDOMNode *elementNode;
     xmlNodePtr oldRoot;
+    xmlDocPtr old_doc;
     xmlnode *xmlNode;
+    int refcount = 0;
     HRESULT hr;
 
     TRACE("(%p)->(%p)\n", This, DOMElement);
@@ -1526,7 +1556,14 @@ static HRESULT WINAPI domdoc_put_documentElement(
         if(xmldoc_remove_orphan(xmlNode->node->doc, xmlNode->node) != S_OK)
             WARN("%p is not an orphan of %p\n", xmlNode->node->doc, xmlNode->node);
 
+    old_doc = xmlNode->node->doc;
+    if (old_doc != get_doc(This))
+        refcount = xmlnode_get_inst_cnt(xmlNode);
+
+    /* old root is still orphaned by its document, update refcount from new root */
+    if (refcount) xmldoc_add_refs(get_doc(This), refcount);
     oldRoot = xmlDocSetRootElement( get_doc(This), xmlNode->node);
+    if (refcount) xmldoc_release_refs(old_doc, refcount);
     IXMLDOMNode_Release( elementNode );
 
     if(oldRoot)
@@ -3245,7 +3282,7 @@ static HRESULT WINAPI ConnectionPoint_Advise(IConnectionPoint *iface, IUnknown *
     ConnectionPoint *This = impl_from_IConnectionPoint(iface);
     IUnknown *sink;
     HRESULT hr;
-    int i;
+    DWORD i;
 
     TRACE("(%p)->(%p %p)\n", This, unk_sink, cookie);
 
