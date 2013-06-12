@@ -61,6 +61,11 @@ static const WCHAR class_osW[] =
     {'W','i','n','3','2','_','O','p','e','r','a','t','i','n','g','S','y','s','t','e','m',0};
 static const WCHAR class_paramsW[] =
     {'_','_','P','A','R','A','M','E','T','E','R','S',0};
+static const WCHAR class_qualifiersW[] =
+    {'_','_','Q','U','A','L','I','F','I','E','R','S',0};
+static const WCHAR class_process_getowner_outW[] =
+    {'_','_','W','I','N','3','2','_','P','R','O','C','E','S','S','_','G','E','T','O','W',
+     'N','E','R','_','O','U','T',0};
 static const WCHAR class_processorW[] =
     {'W','i','n','3','2','_','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR class_sounddeviceW[] =
@@ -110,12 +115,18 @@ static const WCHAR prop_drivetypeW[] =
     {'D','r','i','v','e','T','y','p','e',0};
 static const WCHAR prop_filesystemW[] =
     {'F','i','l','e','S','y','s','t','e','m',0};
+static const WCHAR prop_flavorW[] =
+    {'F','l','a','v','o','r',0};
 static const WCHAR prop_freespaceW[] =
     {'F','r','e','e','S','p','a','c','e',0};
 static const WCHAR prop_handleW[] =
     {'H','a','n','d','l','e',0};
+static const WCHAR prop_idW[] =
+    {'I','D',0};
 static const WCHAR prop_interfaceindexW[] =
     {'I','n','t','e','r','f','a','c','e','I','n','d','e','x',0};
+static const WCHAR prop_intvalueW[] =
+    {'I','n','t','e','g','e','r','V','a','l','u','e',0};
 static const WCHAR prop_lastbootuptimeW[] =
     {'L','a','s','t','B','o','o','t','U','p','T','i','m','e',0};
 static const WCHAR prop_macaddressW[] =
@@ -124,6 +135,8 @@ static const WCHAR prop_manufacturerW[] =
     {'M','a','n','u','f','a','c','t','u','r','e','r',0};
 static const WCHAR prop_maxclockspeedW[] =
     {'M','a','x','C','l','o','c','k','S','p','e','e','d',0};
+static const WCHAR prop_memberW[] =
+    {'M','e','m','b','e','r',0};
 static const WCHAR prop_methodW[] =
     {'M','e','t','h','o','d',0};
 static const WCHAR prop_modelW[] =
@@ -164,6 +177,8 @@ static const WCHAR prop_speedW[] =
     {'S','p','e','e','d',0};
 static const WCHAR prop_stateW[] =
     {'S','t','a','t','e',0};
+static const WCHAR prop_strvalueW[] =
+    {'S','t','r','i','n','g','V','a','l','u','e',0};
 static const WCHAR prop_systemdirectoryW[] =
     {'S','y','s','t','e','m','D','i','r','e','c','t','o','r','y',0};
 static const WCHAR prop_systemnameW[] =
@@ -215,6 +230,7 @@ static const struct column col_compsys[] =
 };
 static const struct column col_diskdrive[] =
 {
+    { prop_deviceidW,     CIM_STRING|COL_FLAG_KEY },
     { prop_manufacturerW, CIM_STRING },
     { prop_modelW,        CIM_STRING },
     { prop_serialnumberW, CIM_STRING }
@@ -248,7 +264,7 @@ static const struct column col_os[] =
     { prop_oslanguageW,      CIM_UINT32, VT_I4 },
     { prop_systemdirectoryW, CIM_STRING|COL_FLAG_DYNAMIC }
 };
-static const struct column col_params[] =
+static const struct column col_param[] =
 {
     { prop_classW,        CIM_STRING },
     { prop_methodW,       CIM_STRING },
@@ -280,6 +296,16 @@ static const struct column col_processor[] =
     { prop_numlogicalprocessorsW, CIM_UINT32, VT_I4 },
     { prop_processoridW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_uniqueidW,             CIM_STRING }
+};
+static const struct column col_qualifier[] =
+{
+    { prop_classW,    CIM_STRING },
+    { prop_memberW,   CIM_STRING },
+    { prop_typeW,     CIM_UINT32 },
+    { prop_flavorW,   CIM_SINT32 },
+    { prop_nameW,     CIM_STRING },
+    { prop_intvalueW, CIM_SINT32 },
+    { prop_strvalueW, CIM_STRING }
 };
 static const struct column col_service[] =
 {
@@ -316,7 +342,8 @@ static const struct column col_videocontroller[] =
     { prop_currentverticalresW,   CIM_UINT32 },
     { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_KEY },
-    { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC }
+    { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_pnpdeviceidW,          CIM_STRING|COL_FLAG_DYNAMIC }
 };
 
 static const WCHAR baseboard_manufacturerW[] =
@@ -345,6 +372,8 @@ static const WCHAR compsys_manufacturerW[] =
     {'T','h','e',' ','W','i','n','e',' ','P','r','o','j','e','c','t',0};
 static const WCHAR compsys_modelW[] =
     {'W','i','n','e',0};
+static const WCHAR diskdrive_deviceidW[] =
+    {'\\','\\','\\','\\','.','\\','\\','P','H','Y','S','I','C','A','L','D','R','I','V','E','0',0};
 static const WCHAR diskdrive_modelW[] =
     {'W','i','n','e',' ','D','i','s','k',' ','D','r','i','v','e',0};
 static const WCHAR diskdrive_manufacturerW[] =
@@ -399,6 +428,7 @@ struct record_computersystem
 };
 struct record_diskdrive
 {
+    const WCHAR *device_id;
     const WCHAR *manufacturer;
     const WCHAR *name;
     const WCHAR *serialnumber;
@@ -432,7 +462,7 @@ struct record_operatingsystem
     UINT32       oslanguage;
     const WCHAR *systemdirectory;
 };
-struct record_params
+struct record_param
 {
     const WCHAR *class;
     const WCHAR *method;
@@ -464,6 +494,16 @@ struct record_processor
     UINT32       num_logical_processors;
     const WCHAR *processor_id;
     const WCHAR *unique_id;
+};
+struct record_qualifier
+{
+    const WCHAR *class;
+    const WCHAR *member;
+    UINT32       type;
+    INT32        flavor;
+    const WCHAR *name;
+    INT32        intvalue;
+    const WCHAR *strvalue;
 };
 struct record_service
 {
@@ -501,6 +541,7 @@ struct record_videocontroller
     const WCHAR *description;
     const WCHAR *device_id;
     const WCHAR *name;
+    const WCHAR *pnpdevice_id;
 };
 #include "poppack.h"
 
@@ -518,9 +559,9 @@ static const struct record_cdromdrive data_cdromdrive[] =
 };
 static const struct record_diskdrive data_diskdrive[] =
 {
-    { diskdrive_manufacturerW, diskdrive_modelW }
+    { diskdrive_deviceidW, diskdrive_manufacturerW, diskdrive_modelW }
 };
-static const struct record_params data_params[] =
+static const struct record_param data_param[] =
 {
     { class_processW, method_getownerW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
     { class_processW, method_getownerW, -1, param_userW, CIM_STRING },
@@ -543,6 +584,15 @@ static const struct record_params data_params[] =
     { class_stdregprovW, method_getstringvalueW, 1, param_valuenameW, CIM_STRING },
     { class_stdregprovW, method_getstringvalueW, -1, param_returnvalueW, CIM_UINT32, VT_I4 },
     { class_stdregprovW, method_getstringvalueW, -1, param_valueW, CIM_STRING }
+};
+
+#define FLAVOR_ID (WBEM_FLAVOR_FLAG_PROPAGATE_TO_INSTANCE | WBEM_FLAVOR_NOT_OVERRIDABLE |\
+                   WBEM_FLAVOR_ORIGIN_PROPAGATED)
+
+static const struct record_qualifier data_qualifier[] =
+{
+    { class_process_getowner_outW, param_userW, CIM_SINT32, FLAVOR_ID, prop_idW, 0 },
+    { class_process_getowner_outW, param_domainW, CIM_SINT32, FLAVOR_ID, prop_idW, 1 }
 };
 static const struct record_sounddevice data_sounddevice[] =
 {
@@ -941,21 +991,15 @@ static WCHAR *get_lastbootuptime(void)
     static const WCHAR fmtW[] =
         {'%','0','4','u','%','0','2','u','%','0','2','u','%','0','2','u','%','0','2','u','%','0','2','u',
          '.','%','0','6','u','+','0','0','0',0};
-    SYSTEMTIME st;
-    FILETIME ft;
-    ULARGE_INTEGER ticks;
+    SYSTEM_TIMEOFDAY_INFORMATION ti;
+    TIME_FIELDS tf;
     WCHAR *ret;
 
     if (!(ret = heap_alloc( 26 * sizeof(WCHAR) ))) return NULL;
-    GetSystemTime( &st );
-    SystemTimeToFileTime( &st, &ft );
-    ticks.u.LowPart  = ft.dwLowDateTime;
-    ticks.u.HighPart = ft.dwHighDateTime;
-    ticks.QuadPart -= GetTickCount64() * 10000;
-    ft.dwLowDateTime  = ticks.u.LowPart;
-    ft.dwHighDateTime = ticks.u.HighPart;
-    FileTimeToSystemTime( &ft, &st );
-    sprintfW( ret, fmtW, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, st.wMilliseconds * 1000 );
+
+    NtQuerySystemInformation( SystemTimeOfDayInformation, &ti, sizeof(ti), NULL );
+    RtlTimeToTimeFields( &ti.liKeBootTime, &tf );
+    sprintfW( ret, fmtW, tf.Year, tf.Month, tf.Day, tf.Hour, tf.Minute, tf.Second, tf.Milliseconds * 1000 );
     return ret;
 }
 static const WCHAR *get_osarchitecture(void)
@@ -1158,6 +1202,19 @@ static UINT32 get_bits_per_pixel( UINT *hres, UINT *vres )
     return ret;
 }
 
+static WCHAR *get_pnpdeviceid( DXGI_ADAPTER_DESC *desc )
+{
+    static const WCHAR fmtW[] =
+        {'P','C','I','\\','V','E','N','_','%','0','4','X','&','D','E','V','_','%','0','4','X',
+         '&','S','U','B','S','Y','S','_','%','0','8','X','&','R','E','V','_','%','0','2','X','\\',
+         '0','&','D','E','A','D','B','E','E','F','&','0','&','D','E','A','D',0};
+    WCHAR *ret;
+
+    if (!(ret = heap_alloc( sizeof(fmtW) + 2 * sizeof(WCHAR) ))) return NULL;
+    sprintfW( ret, fmtW, desc->VendorId, desc->DeviceId, desc->SubSysId, desc->Revision );
+    return ret;
+}
+
 static void fill_videocontroller( struct table *table )
 {
 
@@ -1193,6 +1250,7 @@ done:
     rec->description           = heap_strdupW( name );
     rec->device_id             = videocontroller_deviceidW;
     rec->name                  = heap_strdupW( name );
+    rec->pnpdevice_id          = get_pnpdeviceid( &desc );
 
     TRACE("created 1 row\n");
     table->num_rows = 1;
@@ -1211,9 +1269,10 @@ static struct table builtin_classes[] =
     { class_logicaldiskW, SIZEOF(col_logicaldisk), col_logicaldisk, 0, NULL, fill_logicaldisk },
     { class_networkadapterW, SIZEOF(col_networkadapter), col_networkadapter, 0, NULL, fill_networkadapter },
     { class_osW, SIZEOF(col_os), col_os, 0, NULL, fill_os },
-    { class_paramsW, SIZEOF(col_params), col_params, SIZEOF(data_params), (BYTE *)data_params },
+    { class_paramsW, SIZEOF(col_param), col_param, SIZEOF(data_param), (BYTE *)data_param },
     { class_processW, SIZEOF(col_process), col_process, 0, NULL, fill_process },
     { class_processorW, SIZEOF(col_processor), col_processor, 0, NULL, fill_processor },
+    { class_qualifiersW, SIZEOF(col_qualifier), col_qualifier, SIZEOF(data_qualifier), (BYTE *)data_qualifier },
     { class_serviceW, SIZEOF(col_service), col_service, 0, NULL, fill_service },
     { class_sounddeviceW, SIZEOF(col_sounddevice), col_sounddevice, SIZEOF(data_sounddevice), (BYTE *)data_sounddevice },
     { class_stdregprovW, SIZEOF(col_stdregprov), col_stdregprov, SIZEOF(data_stdregprov), (BYTE *)data_stdregprov },

@@ -1,5 +1,6 @@
 /*
  * Copyright 2011-2012 Henri Verbeet for CodeWeavers
+ * Copyright 2012-2013 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -1178,21 +1179,32 @@ static ULONG get_refcount(IUnknown *test_iface)
     return IUnknown_Release(test_iface);
 }
 
-static void test_viewport_interfaces(void)
+static void test_viewport(void)
 {
     IDirectDraw2 *ddraw;
     IDirect3D2 *d3d;
     HRESULT hr;
     ULONG ref, old_d3d_ref;
     IDirect3DViewport *viewport;
-    IDirect3DViewport2 *viewport2;
+    IDirect3DViewport2 *viewport2, *another_vp, *test_vp;
     IDirect3DViewport3 *viewport3;
     IDirectDrawGammaControl *gamma;
     IUnknown *unknown;
+    IDirect3DDevice2 *device;
+    HWND window;
 
     if (!(ddraw = create_ddraw()))
     {
         skip("Failed to create ddraw object, skipping test.\n");
+        return;
+    }
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw_Release(ddraw);
+        DestroyWindow(window);
         return;
     }
 
@@ -1254,8 +1266,100 @@ static void test_viewport_interfaces(void)
         IUnknown_Release(unknown);
     }
 
+    /* AddViewport(NULL): Segfault */
+    hr = IDirect3DDevice2_DeleteViewport(device, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice2_GetCurrentViewport(device, NULL);
+    ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3D2_CreateViewport(d3d, &another_vp, NULL);
+    ok(SUCCEEDED(hr), "Failed to create viewport, hr %#x.\n", hr);
+
+    /* Setting a viewport not in the viewport list fails */
+    hr = IDirect3DDevice2_SetCurrentViewport(device, another_vp);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice2_AddViewport(device, viewport2);
+    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) viewport2);
+    ok(ref == 2, "viewport2 refcount is %d\n", ref);
+    hr = IDirect3DDevice2_AddViewport(device, another_vp);
+    ok(SUCCEEDED(hr), "Failed to add viewport to device, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) another_vp);
+    ok(ref == 2, "another_vp refcount is %d\n", ref);
+
+    test_vp = (IDirect3DViewport2 *) 0xbaadc0de;
+    hr = IDirect3DDevice2_GetCurrentViewport(device, &test_vp);
+    ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == (IDirect3DViewport2 *) 0xbaadc0de, "Got unexpected pointer %p\n", test_vp);
+
+    hr = IDirect3DDevice2_SetCurrentViewport(device, viewport2);
+    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) viewport2);
+    ok(ref == 3, "viewport2 refcount is %d\n", ref);
+    ref = get_refcount((IUnknown *) device);
+    ok(ref == 1, "device refcount is %d\n", ref);
+
+    test_vp = NULL;
+    hr = IDirect3DDevice2_GetCurrentViewport(device, &test_vp);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == viewport2, "Got unexpected viewport %p\n", test_vp);
+    ref = get_refcount((IUnknown *) viewport2);
+    ok(ref == 4, "viewport2 refcount is %d\n", ref);
+    if(test_vp) IDirect3DViewport2_Release(test_vp);
+
+    /* GetCurrentViewport with a viewport set and NULL input param: Segfault */
+
+    /* Cannot set the viewport to NULL */
+    hr = IDirect3DDevice2_SetCurrentViewport(device, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Failed to set viewport to NULL, hr %#x.\n", hr);
+    test_vp = NULL;
+    hr = IDirect3DDevice2_GetCurrentViewport(device, &test_vp);
+    ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == viewport2, "Got unexpected viewport %p\n", test_vp);
+    if(test_vp) IDirect3DViewport2_Release(test_vp);
+
+    /* SetCurrentViewport properly releases the old viewport's reference */
+    hr = IDirect3DDevice2_SetCurrentViewport(device, another_vp);
+    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) viewport2);
+    ok(ref == 2, "viewport2 refcount is %d\n", ref);
+    ref = get_refcount((IUnknown *) another_vp);
+    ok(ref == 3, "another_vp refcount is %d\n", ref);
+
+    /* Deleting the viewport removes the reference added by AddViewport, but not
+     * the one added by SetCurrentViewport. */
+    hr = IDirect3DDevice2_DeleteViewport(device, another_vp);
+    ok(SUCCEEDED(hr), "Failed to delete viewport from device, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) another_vp);
+    todo_wine ok(ref == 2, "IDirect3DViewport2 refcount is %d\n", ref);
+
+    /* GetCurrentViewport fails though */
+    test_vp = NULL;
+    hr = IDirect3DDevice2_GetCurrentViewport(device, &test_vp);
+    ok(hr == D3DERR_NOCURRENTVIEWPORT, "Got unexpected hr %#x.\n", hr);
+    ok(test_vp == NULL, "Got unexpected viewport %p\n", test_vp);
+    if(test_vp) IDirect3DViewport2_Release(test_vp);
+
+    /* Setting a different viewport does not free the leaked reference. How
+     * do I get rid of it? Leak the viewport for now. */
+    hr = IDirect3DDevice2_SetCurrentViewport(device, viewport2);
+    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+    ref = get_refcount((IUnknown *) viewport2);
+    ok(ref == 3, "viewport2 refcount is %d\n", ref);
+    ref = get_refcount((IUnknown *) another_vp);
+    todo_wine ok(ref == 2, "another_vp refcount is %d\n", ref);
+
+    /* Destroying the device removes the viewport, but does not free the reference
+     * added by SetCurrentViewport. */
+    IDirect3DDevice2_Release(device);
+    ref = get_refcount((IUnknown *) viewport2);
+    todo_wine ok(ref == 2, "viewport2 refcount is %d\n", ref);
+
+    IDirect3DViewport2_Release(another_vp);
     IDirect3DViewport2_Release(viewport2);
     IDirect3D2_Release(d3d);
+    DestroyWindow(window);
     IDirectDraw2_Release(ddraw);
 }
 
@@ -2778,6 +2882,73 @@ static void test_coop_level_multi_window(void)
     DestroyWindow(window1);
 }
 
+static void test_clear_rect_count(void)
+{
+    static D3DRECT clear_rect = {{0}, {0}, {640}, {480}};
+    IDirect3DMaterial2 *white, *red, *green, *blue;
+    IDirect3DViewport2 *viewport;
+    IDirect3DDevice2 *device;
+    IDirectDrawSurface *rt;
+    IDirectDraw2 *ddraw;
+    D3DCOLOR color;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create ddraw object, skipping test.\n");
+        DestroyWindow(window);
+        return;
+    }
+    if (!(device = create_device(ddraw, window, DDSCL_NORMAL)))
+    {
+        skip("Failed to create D3D device, skipping test.\n");
+        IDirectDraw2_Release(ddraw);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3DDevice2_GetRenderTarget(device, &rt);
+    ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
+
+    white = create_diffuse_material(device, 1.0f, 1.0f, 1.0f, 1.0f);
+    red   = create_diffuse_material(device, 1.0f, 0.0f, 0.0f, 1.0f);
+    green = create_diffuse_material(device, 0.0f, 1.0f, 0.0f, 1.0f);
+    blue  = create_diffuse_material(device, 0.0f, 0.0f, 1.0f, 1.0f);
+
+    viewport = create_viewport(device, 0, 0, 640, 480);
+    hr = IDirect3DDevice2_SetCurrentViewport(device, viewport);
+    ok(SUCCEEDED(hr), "Failed to set current viewport, hr %#x.\n", hr);
+
+    viewport_set_background(device, viewport, white);
+    hr = IDirect3DViewport2_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    viewport_set_background(device, viewport, red);
+    hr = IDirect3DViewport2_Clear(viewport, 0, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    viewport_set_background(device, viewport, green);
+    hr = IDirect3DViewport2_Clear(viewport, 0, NULL, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+    viewport_set_background(device, viewport, blue);
+    hr = IDirect3DViewport2_Clear(viewport, 0, &clear_rect, D3DCLEAR_TARGET);
+    ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
+
+    color = get_surface_color(rt, 320, 240);
+    ok(compare_color(color, 0x00ffffff, 1), "Got unexpected color 0x%08x.\n", color);
+
+    IDirectDrawSurface_Release(rt);
+    destroy_viewport(device, viewport);
+    destroy_material(white);
+    destroy_material(red);
+    destroy_material(green);
+    destroy_material(blue);
+    IDirect3DDevice2_Release(device);
+    IDirectDraw2_Release(ddraw);
+    DestroyWindow(window);
+}
+
 START_TEST(ddraw2)
 {
     test_coop_level_create_device_window();
@@ -2787,7 +2958,7 @@ START_TEST(ddraw2)
     test_coop_level_threaded();
     test_depth_blit();
     test_texture_load_ckey();
-    test_viewport_interfaces();
+    test_viewport();
     test_zenable();
     test_ck_rgba();
     test_ck_default();
@@ -2801,4 +2972,5 @@ START_TEST(ddraw2)
     test_initialize();
     test_coop_level_surf_create();
     test_coop_level_multi_window();
+    test_clear_rect_count();
 }

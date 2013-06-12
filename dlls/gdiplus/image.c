@@ -370,7 +370,7 @@ static inline UINT get_palette_index(BYTE r, BYTE g, BYTE b, BYTE a, ColorPalett
     BYTE index = 0;
     int best_distance = 0x7fff;
     int distance;
-    int i;
+    UINT i;
 
     if (!palette) return 0;
     /* This algorithm scans entire palette,
@@ -1821,7 +1821,6 @@ static GpStatus get_screen_resolution(REAL *xres, REAL *yres)
 GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
     PixelFormat format, BYTE* scan0, GpBitmap** bitmap)
 {
-    BITMAPINFO* pbmi;
     HBITMAP hbitmap=NULL;
     INT row_size, dib_stride;
     BYTE *bits=NULL, *own_bits=NULL;
@@ -1851,9 +1850,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
 
     if (format & PixelFormatGDI && !(format & (PixelFormatAlpha|PixelFormatIndexed)) && !scan0)
     {
-        pbmi = GdipAlloc(sizeof(BITMAPINFOHEADER) + 256 * sizeof(RGBQUAD));
-        if (!pbmi)
-            return OutOfMemory;
+        char bmibuf[FIELD_OFFSET(BITMAPINFO, bmiColors[256])];
+        BITMAPINFO *pbmi = (BITMAPINFO *)bmibuf;
 
         pbmi->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         pbmi->bmiHeader.biWidth = width;
@@ -1869,8 +1867,6 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT width, INT height, INT stride,
         pbmi->bmiHeader.biClrImportant = 0;
 
         hbitmap = CreateDIBSection(0, pbmi, DIB_RGB_COLORS, (void**)&bits, NULL, 0);
-
-        GdipFree(pbmi);
 
         if (!hbitmap) return GenericError;
 
@@ -3793,7 +3789,8 @@ static GpStatus get_decoder_info(IStream* stream, const struct image_codec **res
     LARGE_INTEGER seek;
     HRESULT hr;
     UINT bytesread;
-    int i, j, sig;
+    int i;
+    DWORD j, sig;
 
     /* seek to the start of the stream */
     seek.QuadPart = 0;

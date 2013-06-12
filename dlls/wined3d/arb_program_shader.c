@@ -328,6 +328,7 @@ struct shader_arb_priv
     const struct wined3d_context *last_context;
 
     const struct fragment_pipeline *fragment_pipe;
+    BOOL ffp_proj_control;
 };
 
 /* Context activation for state handlers is done by the caller. */
@@ -4270,7 +4271,7 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
         const char *color_init = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_0001);
         shader_addline(buffer, "MOV result.color.secondary, %s;\n", color_init);
 
-        if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W && !priv->fragment_pipe->ffp_proj_control)
+        if (gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W && !priv->ffp_proj_control)
         {
             int i;
             const char *one = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_ONE);
@@ -4889,6 +4890,7 @@ static const struct wine_rb_functions sig_tree_functions =
 static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
 {
     struct shader_arb_priv *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv));
+    struct fragment_caps fragment_caps;
     void *fragment_priv;
 
     if (!(fragment_priv = fragment_pipe->alloc_private(&arb_program_shader_backend, priv)))
@@ -4917,6 +4919,9 @@ static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct frag
         ERR("RB tree init failed\n");
         goto fail;
     }
+
+    fragment_pipe->get_caps(&device->adapter->gl_info, &fragment_caps);
+    priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
     device->fragment_priv = fragment_priv;
     priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
@@ -4984,6 +4989,7 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
     if (gl_info->supported[ARB_VERTEX_PROGRAM])
     {
         DWORD vs_consts;
+        UINT vs_version;
 
         /* 96 is the minimum allowed value of MAX_PROGRAM_ENV_PARAMETERS_ARB
          * for vertex programs. If the native limit is less than that it's
@@ -4996,20 +5002,21 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
 
         if (gl_info->supported[NV_VERTEX_PROGRAM3])
         {
-            caps->vs_version = 3;
+            vs_version = 3;
             TRACE("Hardware vertex shader version 3.0 enabled (NV_VERTEX_PROGRAM3)\n");
         }
         else if (vs_consts >= 256)
         {
             /* Shader Model 2.0 requires at least 256 vertex shader constants */
-            caps->vs_version = 2;
+            vs_version = 2;
             TRACE("Hardware vertex shader version 2.0 enabled (ARB_PROGRAM)\n");
         }
         else
         {
-            caps->vs_version = 1;
+            vs_version = 1;
             TRACE("Hardware vertex shader version 1.1 enabled (ARB_PROGRAM)\n");
         }
+        caps->vs_version = min(wined3d_settings.max_sm_vs, vs_version);
         caps->vs_uniform_count = vs_consts;
     }
     else
@@ -5023,6 +5030,7 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
     if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
     {
         DWORD ps_consts;
+        UINT ps_version;
 
         /* Similar as above for vertex programs, but the minimum for fragment
          * programs is 24. */
@@ -5033,20 +5041,21 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
 
         if (gl_info->supported[NV_FRAGMENT_PROGRAM2])
         {
-            caps->ps_version = 3;
+            ps_version = 3;
             TRACE("Hardware pixel shader version 3.0 enabled (NV_FRAGMENT_PROGRAM2)\n");
         }
         else if (ps_consts >= 32)
         {
             /* Shader Model 2.0 requires at least 32 pixel shader constants */
-            caps->ps_version = 2;
+            ps_version = 2;
             TRACE("Hardware pixel shader version 2.0 enabled (ARB_PROGRAM)\n");
         }
         else
         {
-            caps->ps_version = 1;
+            ps_version = 1;
             TRACE("Hardware pixel shader version 1.4 enabled (ARB_PROGRAM)\n");
         }
+        caps->ps_version = min(wined3d_settings.max_sm_ps, ps_version);
         caps->ps_uniform_count = ps_consts;
         caps->ps_1x_max_value = 8.0f;
     }
@@ -5057,7 +5066,9 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
         caps->ps_1x_max_value = 0.0f;
     }
 
-    caps->vs_clipping = use_nv_clip(gl_info);
+    caps->wined3d_caps = WINED3D_SHADER_CAP_SRGB_WRITE;
+    if (use_nv_clip(gl_info))
+        caps->wined3d_caps |= WINED3D_SHADER_CAP_VS_CLIPPING;
 }
 
 static BOOL shader_arb_color_fixup_supported(struct color_fixup_desc fixup)
@@ -5629,7 +5640,7 @@ static BOOL shader_arb_has_ffp_proj_control(void *shader_priv)
 {
     struct shader_arb_priv *priv = shader_priv;
 
-    return priv->fragment_pipe->ffp_proj_control;
+    return priv->ffp_proj_control;
 }
 
 const struct wined3d_shader_backend_ops arb_program_shader_backend =
@@ -5731,6 +5742,8 @@ static void arbfp_free(struct wined3d_device *device)
 
 static void arbfp_get_caps(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps)
 {
+    caps->wined3d_caps = WINED3D_FRAGMENT_CAP_PROJ_CONTROL
+            | WINED3D_FRAGMENT_CAP_SRGB_WRITE;
     caps->PrimitiveMiscCaps = WINED3DPMISCCAPS_TSSARGTEMP;
     caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
                            WINED3DTEXOPCAPS_SELECTARG1                  |
@@ -6435,7 +6448,7 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
                 return;
             }
 
-            memcpy(&new_desc->parent.settings, &settings, sizeof(settings));
+            new_desc->parent.settings = settings;
             new_desc->shader = gen_arbfp_ffp_shader(&settings, gl_info);
             add_ffp_frag_shader(&priv->fragment_shaders, &new_desc->parent);
             TRACE("Allocated fixed function replacement shader descriptor %p\n", new_desc);
@@ -6673,7 +6686,6 @@ const struct fragment_pipeline arbfp_fragment_pipeline = {
     arbfp_free,
     shader_arb_color_fixup_supported,
     arbfp_fragmentstate_template,
-    TRUE /* We can disable projected textures */
 };
 
 struct arbfp_blit_priv {

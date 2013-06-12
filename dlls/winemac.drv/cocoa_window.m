@@ -22,6 +22,7 @@
 
 #include "macdrv_cocoa.h"
 #import "cocoa_app.h"
+#import "cocoa_event.h"
 
 
 static NSUInteger style_mask_for_features(const struct macdrv_window_features* wf)
@@ -64,6 +65,9 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
 @property (nonatomic) BOOL noActivate;
 @property (nonatomic) BOOL floating;
 @property (retain, nonatomic) NSWindow* latentParentWindow;
+
+@property (nonatomic) void* hwnd;
+@property (retain, readwrite, nonatomic) WineEventQueue* queue;
 
 @property (nonatomic) void* surface;
 @property (nonatomic) pthread_mutex_t* surface_mutex;
@@ -154,12 +158,19 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
         }
     }
 
+    /* By default, NSView will swallow right-clicks in an attempt to support contextual
+       menus.  We need to bypass that and allow the event to make it to the window. */
+    - (void) rightMouseDown:(NSEvent*)theEvent
+    {
+        [[self window] rightMouseDown:theEvent];
+    }
+
 @end
 
 
 @implementation WineWindow
 
-    @synthesize disabled, noActivate, floating, latentParentWindow;
+    @synthesize disabled, noActivate, floating, latentParentWindow, hwnd, queue;
     @synthesize surface, surface_mutex;
     @synthesize shape, shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
@@ -167,6 +178,8 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
+                                        hwnd:(void*)hwnd
+                                       queue:(WineEventQueue*)queue
     {
         WineWindow* window;
         WineContentView* contentView;
@@ -191,6 +204,8 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
         [window setHasShadow:wf->shadow];
         [window setColorSpace:[NSColorSpace genericRGBColorSpace]];
         [window setDelegate:window];
+        window.hwnd = hwnd;
+        window.queue = queue;
 
         contentView = [[[WineContentView alloc] initWithFrame:NSZeroRect] autorelease];
         if (!contentView)
@@ -199,11 +214,16 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
 
         [window setContentView:contentView];
 
+        /* In case Cocoa adjusted the frame we tried to set, generate a frame-changed
+           event.  The back end will ignore it if nothing actually changed. */
+        [window windowDidResize:nil];
+
         return window;
     }
 
     - (void) dealloc
     {
+        [queue release];
         [latentParentWindow release];
         [shape release];
         [super dealloc];
@@ -288,6 +308,11 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
                 self.latentParentWindow = nil;
             }
 
+            /* Cocoa may adjust the frame when the window is ordered onto the screen.
+               Generate a frame-changed event just in case.  The back end will ignore
+               it if nothing actually changed. */
+            [self windowDidResize:nil];
+
             if (![self isExcludedFromWindowsMenu])
                 [NSApp addWindowsItem:self title:[self title] filename:NO];
         }
@@ -331,6 +356,10 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
             else
                 [self setFrame:frame display:YES];
         }
+
+        /* In case Cocoa adjusted the frame we tried to set, generate a frame-changed
+           event.  The back end will ignore it if nothing actually changed. */
+        [self windowDidResize:nil];
 
         return on_screen;
     }
@@ -395,14 +424,68 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
         [self checkTransparency];
     }
 
+    - (void) postMouseButtonEvent:(NSEvent *)theEvent pressed:(int)pressed
+    {
+        CGPoint pt = CGEventGetLocation([theEvent CGEvent]);
+        macdrv_event event;
+
+        event.type = MOUSE_BUTTON;
+        event.window = (macdrv_window)[self retain];
+        event.mouse_button.button = [theEvent buttonNumber];
+        event.mouse_button.pressed = pressed;
+        event.mouse_button.x = pt.x;
+        event.mouse_button.y = pt.y;
+        event.mouse_button.time_ms = [NSApp ticksForEventTime:[theEvent timestamp]];
+
+        [queue postEvent:&event];
+    }
+
+    - (void) makeFocused
+    {
+        NSArray* screens;
+
+        [NSApp transformProcessToForeground];
+
+        /* If a borderless window is offscreen, orderFront: won't move
+           it onscreen like it would for a titled window.  Do that ourselves. */
+        screens = [NSScreen screens];
+        if (!([self styleMask] & NSTitledWindowMask) && ![self isVisible] &&
+            !frame_intersects_screens([self frame], screens))
+        {
+            NSScreen* primaryScreen = [screens objectAtIndex:0];
+            NSRect frame = [primaryScreen frame];
+            [self setFrameTopLeftPoint:NSMakePoint(NSMinX(frame), NSMaxY(frame))];
+            frame = [self constrainFrameRect:[self frame] toScreen:primaryScreen];
+            [self setFrame:frame display:YES];
+        }
+
+        [self orderFront:nil];
+        causing_becomeKeyWindow = TRUE;
+        [self makeKeyWindow];
+        causing_becomeKeyWindow = FALSE;
+        if (latentParentWindow)
+        {
+            [latentParentWindow addChildWindow:self ordered:NSWindowAbove];
+            self.latentParentWindow = nil;
+        }
+        if (![self isExcludedFromWindowsMenu])
+            [NSApp addWindowsItem:self title:[self title] filename:NO];
+
+        /* Cocoa may adjust the frame when the window is ordered onto the screen.
+           Generate a frame-changed event just in case.  The back end will ignore
+           it if nothing actually changed. */
+        [self windowDidResize:nil];
+    }
+
 
     /*
      * ---------- NSWindow method overrides ----------
      */
     - (BOOL) canBecomeKeyWindow
     {
+        if (causing_becomeKeyWindow) return YES;
         if (self.disabled || self.noActivate) return NO;
-        return YES;
+        return [self isKeyWindow];
     }
 
     - (BOOL) canBecomeMainWindow
@@ -422,12 +505,91 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
         return [super validateMenuItem:menuItem];
     }
 
+    /* We don't call this.  It's the action method of the items in the Window menu. */
+    - (void) makeKeyAndOrderFront:(id)sender
+    {
+        if (![self isKeyWindow] && !self.disabled && !self.noActivate)
+            [NSApp windowGotFocus:self];
+    }
+
+    - (void) sendEvent:(NSEvent*)event
+    {
+        if ([event type] == NSLeftMouseDown)
+        {
+            /* Since our windows generally claim they can't be made key, clicks
+               in their title bars are swallowed by the theme frame stuff.  So,
+               we hook directly into the event stream and assume that any click
+               in the window will activate it, if Wine and the Win32 program
+               accept. */
+            if (![self isKeyWindow] && !self.disabled && !self.noActivate)
+                [NSApp windowGotFocus:self];
+        }
+
+        [super sendEvent:event];
+    }
+
+
+    /*
+     * ---------- NSResponder method overrides ----------
+     */
+    - (void) mouseDown:(NSEvent *)theEvent { [self postMouseButtonEvent:theEvent pressed:1]; }
+    - (void) rightMouseDown:(NSEvent *)theEvent { [self mouseDown:theEvent]; }
+    - (void) otherMouseDown:(NSEvent *)theEvent { [self mouseDown:theEvent]; }
+
+    - (void) mouseUp:(NSEvent *)theEvent { [self postMouseButtonEvent:theEvent pressed:0]; }
+    - (void) rightMouseUp:(NSEvent *)theEvent { [self mouseUp:theEvent]; }
+    - (void) otherMouseUp:(NSEvent *)theEvent { [self mouseUp:theEvent]; }
+
 
     /*
      * ---------- NSWindowDelegate methods ----------
      */
+    - (void)windowDidBecomeKey:(NSNotification *)notification
+    {
+        if (causing_becomeKeyWindow) return;
+
+        [NSApp windowGotFocus:self];
+    }
+
+    - (void)windowDidMove:(NSNotification *)notification
+    {
+        [self windowDidResize:notification];
+    }
+
+    - (void)windowDidResignKey:(NSNotification *)notification
+    {
+        macdrv_event event;
+
+        if (causing_becomeKeyWindow) return;
+
+        event.type = WINDOW_LOST_FOCUS;
+        event.window = (macdrv_window)[self retain];
+        [queue postEvent:&event];
+    }
+
+    - (void)windowDidResize:(NSNotification *)notification
+    {
+        macdrv_event event;
+        NSRect frame = [self contentRectForFrameRect:[self frame]];
+
+        [[self class] flipRect:&frame];
+
+        /* Coalesce events by discarding any previous ones still in the queue. */
+        [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_FRAME_CHANGED)
+                               forWindow:self];
+
+        event.type = WINDOW_FRAME_CHANGED;
+        event.window = (macdrv_window)[self retain];
+        event.window_frame_changed.frame = NSRectToCGRect(frame);
+        [queue postEvent:&event];
+    }
+
     - (BOOL)windowShouldClose:(id)sender
     {
+        macdrv_event event;
+        event.type = WINDOW_CLOSE_REQUESTED;
+        event.window = (macdrv_window)[self retain];
+        [queue postEvent:&event];
         return NO;
     }
 
@@ -441,13 +603,15 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
  * title bar, close box, etc.).
  */
 macdrv_window macdrv_create_cocoa_window(const struct macdrv_window_features* wf,
-        CGRect frame)
+        CGRect frame, void* hwnd, macdrv_event_queue queue)
 {
     __block WineWindow* window;
 
     OnMainThread(^{
         window = [[WineWindow createWindowWithFeatures:wf
-                                           windowFrame:NSRectFromCGRect(frame)] retain];
+                                           windowFrame:NSRectFromCGRect(frame)
+                                                  hwnd:hwnd
+                                                 queue:(WineEventQueue*)queue] retain];
     });
 
     return (macdrv_window)window;
@@ -463,10 +627,22 @@ void macdrv_destroy_cocoa_window(macdrv_window w)
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineWindow* window = (WineWindow*)w;
 
+    [window.queue discardEventsMatchingMask:-1 forWindow:window];
     [window close];
     [window release];
 
     [pool release];
+}
+
+/***********************************************************************
+ *              macdrv_get_window_hwnd
+ *
+ * Get the hwnd that was set for the window at creation.
+ */
+void* macdrv_get_window_hwnd(macdrv_window w)
+{
+    WineWindow* window = (WineWindow*)w;
+    return window.hwnd;
 }
 
 /***********************************************************************
@@ -582,6 +758,24 @@ int macdrv_set_cocoa_window_frame(macdrv_window w, const CGRect* new_frame)
     });
 
     return on_screen;
+}
+
+/***********************************************************************
+ *              macdrv_get_cocoa_window_frame
+ *
+ * Gets the frame of a Cocoa window.
+ */
+void macdrv_get_cocoa_window_frame(macdrv_window w, CGRect* out_frame)
+{
+    WineWindow* window = (WineWindow*)w;
+
+    OnMainThread(^{
+        NSRect frame;
+
+        frame = [window contentRectForFrameRect:[window frame]];
+        [[window class] flipRect:&frame];
+        *out_frame = NSRectToCGRect(frame);
+    });
 }
 
 /***********************************************************************
@@ -725,4 +919,20 @@ void macdrv_window_use_per_pixel_alpha(macdrv_window w, int use_per_pixel_alpha)
     });
 
     [pool release];
+}
+
+/***********************************************************************
+ *              macdrv_give_cocoa_window_focus
+ *
+ * Makes the Cocoa window "key" (gives it keyboard focus).  This also
+ * orders it front and, if its frame was not within the desktop bounds,
+ * Cocoa will typically move it on-screen.
+ */
+void macdrv_give_cocoa_window_focus(macdrv_window w)
+{
+    WineWindow* window = (WineWindow*)w;
+
+    OnMainThread(^{
+        [window makeFocused];
+    });
 }

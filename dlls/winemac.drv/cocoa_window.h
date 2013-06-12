@@ -21,6 +21,9 @@
 #import <AppKit/AppKit.h>
 
 
+@class WineEventQueue;
+
+
 @interface WineWindow : NSPanel <NSWindowDelegate>
 {
     NSUInteger normalStyleMask;
@@ -28,6 +31,9 @@
     BOOL noActivate;
     BOOL floating;
     WineWindow* latentParentWindow;
+
+    void* hwnd;
+    WineEventQueue* queue;
 
     void* surface;
     pthread_mutex_t* surface_mutex;
@@ -39,6 +45,10 @@
     CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
 
     BOOL usePerPixelAlpha;
+
+    BOOL causing_becomeKeyWindow;
 }
+
+@property (retain, readonly, nonatomic) WineEventQueue* queue;
 
 @end

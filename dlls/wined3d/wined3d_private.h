@@ -237,25 +237,8 @@ static inline float float_24_to_32(DWORD in)
     }
 }
 
-/**
- * Settings
- */
-#define VS_NONE    0
-#define VS_HW      1
-
-#define PS_NONE    0
-#define PS_HW      1
-
-#define VBO_NONE   0
-#define VBO_HW     1
-
 #define ORM_BACKBUFFER  0
 #define ORM_FBO         1
-
-#define SHADER_ARB  1
-#define SHADER_GLSL 2
-#define SHADER_ATI  3
-#define SHADER_NONE 4
 
 #define RTL_READDRAW   1
 #define RTL_READTEX    2
@@ -267,9 +250,6 @@ static inline float float_24_to_32(DWORD in)
  * values in wined3d_main.c as well. */
 struct wined3d_settings
 {
-    /* vertex and pixel shader modes */
-    int vs_mode;
-    int ps_mode;
     /* Ideally, we don't want the user to have to request GLSL. If the
      * hardware supports GLSL, we should use it. However, until it's fully
      * implemented, we'll leave it as a registry setting for developers. */
@@ -284,6 +264,9 @@ struct wined3d_settings
     int allow_multisampling;
     BOOL strict_draw_ordering;
     BOOL always_offscreen;
+    unsigned int max_sm_vs;
+    unsigned int max_sm_gs;
+    unsigned int max_sm_ps;
 };
 
 extern struct wined3d_settings wined3d_settings DECLSPEC_HIDDEN;
@@ -714,6 +697,9 @@ extern const struct wined3d_shader_frontend sm4_shader_frontend DECLSPEC_HIDDEN;
 
 typedef void (*SHADER_HANDLER)(const struct wined3d_shader_instruction *);
 
+#define WINED3D_SHADER_CAP_VS_CLIPPING      0x00000001
+#define WINED3D_SHADER_CAP_SRGB_WRITE       0x00000002
+
 struct shader_caps
 {
     UINT vs_version;
@@ -724,7 +710,7 @@ struct shader_caps
     DWORD ps_uniform_count;
     float ps_1x_max_value;
 
-    BOOL vs_clipping;
+    DWORD wined3d_caps;
 };
 
 enum tex_types
@@ -1172,8 +1158,12 @@ struct StateEntryTemplate
     enum wined3d_gl_extension extension;
 };
 
+#define WINED3D_FRAGMENT_CAP_PROJ_CONTROL   0x00000001
+#define WINED3D_FRAGMENT_CAP_SRGB_WRITE     0x00000002
+
 struct fragment_caps
 {
+    DWORD wined3d_caps;
     DWORD PrimitiveMiscCaps;
     DWORD TextureOpCaps;
     DWORD MaxTextureBlendStages;
@@ -1188,7 +1178,6 @@ struct fragment_pipeline
     void (*free_private)(struct wined3d_device *device);
     BOOL (*color_fixup_supported)(struct color_fixup_desc fixup);
     const struct StateEntryTemplate *states;
-    BOOL ffp_proj_control;
 };
 
 extern const struct StateEntryTemplate misc_state_template[] DECLSPEC_HIDDEN;
@@ -1586,27 +1575,11 @@ struct wined3d_adapter
     const struct blit_shader *blitter;
 };
 
+BOOL wined3d_adapter_init_format_info(struct wined3d_adapter *adapter) DECLSPEC_HIDDEN;
 unsigned int adapter_adjust_memory(struct wined3d_adapter *adapter, int amount) DECLSPEC_HIDDEN;
 
-BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor) DECLSPEC_HIDDEN;
 BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 extern void add_gl_compat_wrappers(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
-
-/*****************************************************************************
- * High order patch management
- */
-struct wined3d_rect_patch
-{
-    UINT                            Handle;
-    float                          *mem;
-    struct wined3d_strided_data strided;
-    struct wined3d_rect_patch_info rect_patch_info;
-    float                           numSegs[4];
-    char                            has_normals, has_texcoords;
-    struct list                     entry;
-};
-
-HRESULT tesselate_rectpatch(struct wined3d_device *device, struct wined3d_rect_patch *patch) DECLSPEC_HIDDEN;
 
 enum projection_types
 {
@@ -1785,18 +1758,12 @@ struct wined3d_device
 
     /* Stream source management */
     struct wined3d_stream_info strided_streams;
-    const struct wined3d_strided_data *up_strided;
     struct wined3d_event_query *buffer_queries[MAX_ATTRIBS];
     unsigned int num_buffer_queries;
 
     /* Context management */
     struct wined3d_context **contexts;
     UINT context_count;
-
-    /* High level patch management */
-#define PATCHMAP_SIZE 43
-#define PATCHMAP_HASHFUNC(x) ((x) % PATCHMAP_SIZE) /* Primitive and simple function */
-    struct list             patches[PATCHMAP_SIZE];
 };
 
 void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
@@ -1812,8 +1779,6 @@ LRESULT device_process_message(struct wined3d_device *device, HWND window, BOOL 
         UINT message, WPARAM wparam, LPARAM lparam, WNDPROC proc) DECLSPEC_HIDDEN;
 void device_resource_add(struct wined3d_device *device, struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 void device_resource_released(struct wined3d_device *device, struct wined3d_resource *resource) DECLSPEC_HIDDEN;
-void device_stream_info_from_declaration(struct wined3d_device *device,
-        struct wined3d_stream_info *stream_info) DECLSPEC_HIDDEN;
 void device_switch_onscreen_ds(struct wined3d_device *device, struct wined3d_context *context,
         struct wined3d_surface *depth_stencil) DECLSPEC_HIDDEN;
 void device_update_stream_info(struct wined3d_device *device, const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
@@ -2530,8 +2495,6 @@ const char *debug_d3dtstype(enum wined3d_transform_state tstype) DECLSPEC_HIDDEN
 const char *debug_d3dpool(enum wined3d_pool pool) DECLSPEC_HIDDEN;
 const char *debug_fbostatus(GLenum status) DECLSPEC_HIDDEN;
 const char *debug_glerror(GLenum error) DECLSPEC_HIDDEN;
-const char *debug_d3dbasis(enum wined3d_basis_type basis) DECLSPEC_HIDDEN;
-const char *debug_d3ddegree(enum wined3d_degree_type order) DECLSPEC_HIDDEN;
 const char *debug_d3dtop(enum wined3d_texture_op d3dtop) DECLSPEC_HIDDEN;
 void dump_color_fixup_desc(struct color_fixup_desc fixup) DECLSPEC_HIDDEN;
 const char *debug_surflocation(DWORD flag) DECLSPEC_HIDDEN;
@@ -2574,8 +2537,6 @@ void multiply_matrix(struct wined3d_matrix *dest, const struct wined3d_matrix *s
         const struct wined3d_matrix *src2) DECLSPEC_HIDDEN;
 UINT wined3d_log2i(UINT32 x) DECLSPEC_HIDDEN;
 unsigned int count_bits(unsigned int mask) DECLSPEC_HIDDEN;
-
-void select_shader_mode(const struct wined3d_gl_info *gl_info, int *ps_selected, int *vs_selected) DECLSPEC_HIDDEN;
 
 struct wined3d_shader_lconst
 {
@@ -2825,6 +2786,7 @@ extern enum wined3d_format_id pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN
 #define WINED3DFMT_FLAG_BROKEN_PITCH                0x00010000
 #define WINED3DFMT_FLAG_BLOCKS                      0x00020000
 #define WINED3DFMT_FLAG_HEIGHT_SCALE                0x00040000
+#define WINED3DFMT_FLAG_TEXTURE                     0x00080000
 
 struct wined3d_rational
 {

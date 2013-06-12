@@ -4,14 +4,17 @@ EXTRALIBS = -framework AppKit
 
 C_SRCS = \
 	display.c \
+	event.c \
 	gdi.c \
 	macdrv_main.c \
+	mouse.c \
 	surface.c \
 	window.c
 
 OBJC_SRCS = \
 	cocoa_app.m \
 	cocoa_display.m \
+	cocoa_event.m \
 	cocoa_main.m \
 	cocoa_window.m
 
