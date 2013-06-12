@@ -7102,7 +7102,7 @@ msgstr "clock"
 msgid "split button"
 msgstr "split button"
 
-#: oleacc.rc:90 ipconfig.rc:33
+#: oleacc.rc:90
 msgid "IP address"
 msgstr "IP address"
 
@@ -8273,21 +8273,21 @@ msgstr "Don't install"
 
 #: urlmon.rc:40
 msgid ""
-"When installed, ActiveX has full access to your computer.Do not click "
-"install unless you have absolute trust in the above source."
+"When installed, an ActiveX component has full access to your computer. Do "
+"not click install unless you have absolute trust in the above source."
 msgstr ""
-"When installed, ActiveX has full access to your computer.Do not click "
-"install unless you have absolute trust in the above source."
+"When installed, an ActiveX component has full access to your computer. Do "
+"not click install unless you have absolute trust in the above source."
 
-#: urlmon.rc:47
+#: urlmon.rc:48
 msgid "Installation of component failed: %08x"
 msgstr "Installation of component failed: %08x"
 
-#: urlmon.rc:48
+#: urlmon.rc:49
 msgid "Install (%d)"
 msgstr "Install (%d)"
 
-#: urlmon.rc:49
+#: urlmon.rc:50
 msgid "Install"
 msgstr "Install"
 
@@ -10186,6 +10186,10 @@ msgstr "Ethernet"
 msgid "Connection-specific DNS suffix"
 msgstr "Connection-specific DNS suffix"
 
+#: ipconfig.rc:33
+msgid "IPv4 address"
+msgstr "IPv4 address"
+
 #: ipconfig.rc:34
 msgid "Hostname"
 msgstr "Hostname"
@@ -10225,6 +10229,10 @@ msgstr "DHCP enabled"
 #: ipconfig.rc:46
 msgid "Default gateway"
 msgstr "Default gateway"
+
+#: ipconfig.rc:47
+msgid "IPv6 address"
+msgstr "IPv6 address"
 
 #: net.rc:27
 msgid ""
@@ -10357,72 +10365,60 @@ msgid "The following services are running:\n"
 msgstr "The following services are running:\n"
 
 #: netstat.rc:27
-msgid "CLOSED"
-msgstr "CLOSED"
-
-#: netstat.rc:28
-msgid "LISTENING"
-msgstr "LISTENING"
-
-#: netstat.rc:29
-msgid "SYN_SENT"
-msgstr "SYN_SENT"
-
-#: netstat.rc:30
-msgid "SYN_RCVD"
-msgstr "SYN_RCVD"
-
-#: netstat.rc:31
-msgid "ESTABLISHED"
-msgstr "ESTABLISHED"
-
-#: netstat.rc:32
-msgid "FIN_WAIT1"
-msgstr "FIN_WAIT1"
-
-#: netstat.rc:33
-msgid "FIN_WAIT2"
-msgstr "FIN_WAIT2"
-
-#: netstat.rc:34
-msgid "CLOSE_WAIT"
-msgstr "CLOSE_WAIT"
-
-#: netstat.rc:35
-msgid "CLOSING"
-msgstr "CLOSING"
-
-#: netstat.rc:36
-msgid "LAST_ACK"
-msgstr "LAST_ACK"
-
-#: netstat.rc:37
-msgid "TIME_WAIT"
-msgstr "TIME_WAIT"
-
-#: netstat.rc:38
-msgid "DELETE_TCB"
-msgstr "DELETE_TCB"
-
-#: netstat.rc:40
 msgid "Active Connections"
 msgstr "Active Connections"
 
-#: netstat.rc:41
+#: netstat.rc:28
 msgid "Proto"
 msgstr "Proto"
 
-#: netstat.rc:42
+#: netstat.rc:29
 msgid "Local Address"
 msgstr "Local Address"
 
-#: netstat.rc:43
+#: netstat.rc:30
 msgid "Foreign Address"
 msgstr "Foreign Address"
 
-#: netstat.rc:44
+#: netstat.rc:31
 msgid "State"
 msgstr "State"
+
+#: netstat.rc:32
+msgid "Interface Statistics"
+msgstr "Interface Statistics"
+
+#: netstat.rc:33
+msgid "Sent"
+msgstr "Sent"
+
+#: netstat.rc:34
+msgid "Received"
+msgstr "Received"
+
+#: netstat.rc:35
+msgid "Bytes"
+msgstr "Bytes"
+
+#: netstat.rc:36
+msgid "Unicast packets"
+msgstr "Unicast packets"
+
+#: netstat.rc:37
+msgid "Non-unicast packets"
+msgstr "Non-unicast packets"
+
+#: netstat.rc:38
+msgid "Discards"
+msgstr "Discards"
+
+#: netstat.rc:39
+msgid "Errors"
+msgstr "Errors"
+
+#: netstat.rc:40
+msgid "Unknown protocols"
+msgstr "Unknown protocols"
 
 #: notepad.rc:27
 msgid "&New\tCtrl+N"

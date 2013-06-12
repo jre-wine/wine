@@ -4451,7 +4451,6 @@ static void test_CreateScalableFontResource(void)
     ok(ret, "DeleteFile() error %d\n", GetLastError());
 
     ret = pRemoveFontResourceExA(fot_name, 0, 0);
-todo_wine
     ok(!ret, "RemoveFontResourceEx() should fail\n");
 
     /* test public font resource */
@@ -4472,7 +4471,6 @@ todo_wine
     test_GetGlyphOutline_empty_contour();
 
     ret = pRemoveFontResourceExA(fot_name, FR_PRIVATE, 0);
-todo_wine
     ok(!ret, "RemoveFontResourceEx() with not matching flags should fail\n");
 
     SetLastError(0xdeadbeef);
@@ -4480,17 +4478,7 @@ todo_wine
     ok(ret, "RemoveFontResourceEx() error %d\n", GetLastError());
 
     ret = is_truetype_font_installed("wine_test");
-todo_wine
     ok(!ret, "font wine_test should not be enumerated\n");
-
-    /* FIXME: since RemoveFontResource is a stub correct testing is impossible */
-    if (ret)
-    {
-        /* remove once RemoveFontResource is implemented */
-        DeleteFile(fot_name);
-        DeleteFile(ttf_name);
-        return;
-    }
 
     ret = pRemoveFontResourceExA(fot_name, 0, 0);
     ok(!ret, "RemoveFontResourceEx() should fail\n");
@@ -4510,6 +4498,7 @@ todo_wine
     ok(ret, "AddFontResourceEx() error %d\n", GetLastError());
 
     ret = is_truetype_font_installed("wine_test");
+    todo_wine
     ok(!ret, "font wine_test should not be enumerated\n");
 
     /* XP allows removing a private font added with 0 flags */

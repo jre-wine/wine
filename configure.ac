@@ -483,7 +483,6 @@ AC_CHECK_HEADERS(\
 	scsi/sg.h \
 	stdbool.h \
 	stdint.h \
-	strings.h \
 	stropts.h \
 	sys/asoundlib.h \
 	sys/attr.h \
@@ -522,7 +521,6 @@ AC_CHECK_HEADERS(\
 	sys/timeout.h \
 	sys/times.h \
 	sys/uio.h \
-	sys/un.h \
 	sys/utsname.h \
 	sys/vm86.h \
 	sys/wait.h \
@@ -559,6 +557,7 @@ AC_CHECK_HEADERS(\
 	netinet/ip_var.h \
 	netinet/udp.h \
 	netipx/ipx.h \
+	sys/un.h \
 ,,,[#include <sys/types.h>
      #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
@@ -668,7 +667,7 @@ AC_CHECK_HEADERS([pthread_np.h],,,
 #include <pthread.h>
 #endif])
 
-AC_CHECK_HEADERS([linux/videodev.h linux/videodev2.h],,,
+AC_CHECK_HEADERS([linux/videodev.h linux/videodev2.h libv4l1.h],,,
 [#ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -691,7 +690,7 @@ AC_SUBST(IMPLIBEXT,"def")
 AC_SUBST(LDRPATH_INSTALL,"")
 AC_SUBST(LDRPATH_LOCAL,"")
 STATIC_IMPLIBEXT="def.a"
-WINE_PATH_LDD
+WINE_PATH_SONAME_TOOLS
 
 case $host_os in
   cygwin*|mingw32*)
@@ -724,7 +723,8 @@ case $host_os in
     LDDLLFLAGS="-bundle -multiply_defined suppress"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
     LDSHARED="\$(CC) -dynamiclib"
-    LDRPATH_LOCAL="&& install_name_tool -change @executable_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`/libwine.1.dylib @executable_path/\$(top_builddir)/libs/wine/libwine.1.dylib \$@ || \$(RM) \$@"
+    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+    LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
@@ -732,9 +732,9 @@ case $host_os in
     AC_SUBST(CORESERVICESLIB,"-framework CoreServices")
     case $host_os in
       darwin11*)
-        AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-macosx_version_min,10.6,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000"]) ;;
+        AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-macosx_version_min,10.6,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000,-sectcreate,__TEXT,__info_plist,wine_info.plist"]) ;;
       *)
-        AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000"]) ;;
+        AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000,-sectcreate,__TEXT,__info_plist,wine_info.plist"]) ;;
     esac
     if test "$ac_cv_header_DiskArbitration_DiskArbitration_h" = "yes"
     then
@@ -954,9 +954,10 @@ dnl **** Check for pthread ****
 
 if test "$ac_cv_header_pthread_h" = "yes"
 then
-    AC_CHECK_LIB(pthread,pthread_create,[AC_SUBST(LIBPTHREAD,"-lpthread")])
+    AC_CHECK_FUNC(pthread_create,,[AC_CHECK_LIB(pthread,pthread_create,[AC_SUBST(LIBPTHREAD,"-lpthread")])])
 fi
-WINE_ERROR_WITH(pthread,[test "x$LIBPTHREAD" = "x"],[pthread ${notice_platform}development files not found.
+WINE_ERROR_WITH(pthread,[test "x$ac_cv_func_pthread_create" != xyes -a "x$LIBPTHREAD" = x],
+[pthread ${notice_platform}development files not found.
 Wine cannot support threads without libpthread.])
 
 dnl **** Check for X11 ****
@@ -1998,7 +1999,6 @@ AC_CHECK_FUNCS(\
 	getattrlist \
 	getdirentries \
 	getopt_long_only \
-	getpagesize \
 	getpwuid \
 	gettimeofday \
 	getuid \

@@ -5,9 +5,14 @@ EXTRALIBS = -framework AppKit
 C_SRCS = \
 	display.c \
 	gdi.c \
-	macdrv_main.c
+	macdrv_main.c \
+	surface.c \
+	window.c
 
 OBJC_SRCS = \
-	cocoa_display.m
+	cocoa_app.m \
+	cocoa_display.m \
+	cocoa_main.m \
+	cocoa_window.m
 
 @MAKE_DLL_RULES@

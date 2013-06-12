@@ -1,7 +1,7 @@
 /*
- * fusion main
+ * MACDRV Cocoa window declarations
  *
- * Copyright 2008 James Hawkins
+ * Copyright 2011, 2012, 2013 Ken Thomases for CodeWeavers Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,38 +18,27 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
+#import <AppKit/AppKit.h>
 
-#include <stdarg.h>
 
-#include "windef.h"
-#include "winbase.h"
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(fusion);
-
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+@interface WineWindow : NSPanel <NSWindowDelegate>
 {
-    TRACE("(0x%p, %d, %p)\n", hinstDLL, fdwReason, lpvReserved);
+    NSUInteger normalStyleMask;
+    BOOL disabled;
+    BOOL noActivate;
+    BOOL floating;
+    WineWindow* latentParentWindow;
 
-    switch (fdwReason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;    /* prefer native version */
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hinstDLL);
-            break;
-        case DLL_PROCESS_DETACH:
-            break;
-        default:
-            break;
-    }
+    void* surface;
+    pthread_mutex_t* surface_mutex;
 
-    return TRUE;
+    NSBezierPath* shape;
+    BOOL shapeChangedSinceLastDraw;
+
+    BOOL colorKeyed;
+    CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
+
+    BOOL usePerPixelAlpha;
 }
 
-HRESULT WINAPI InitializeFusion(void)
-{
-    FIXME("\n");
-    return E_NOTIMPL;
-}
+@end

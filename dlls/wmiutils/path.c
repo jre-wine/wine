@@ -34,17 +34,19 @@ WINE_DEFAULT_DEBUG_CHANNEL(wmiutils);
 
 struct path
 {
-    IWbemPath IWbemPath_iface;
-    LONG    refs;
-    WCHAR  *text;
-    int     len_text;
-    WCHAR  *server;
-    int     len_server;
-    WCHAR **namespaces;
-    int    *len_namespaces;
-    int     num_namespaces;
-    WCHAR  *class;
-    int     len_class;
+    IWbemPath        IWbemPath_iface;
+    LONG             refs;
+    CRITICAL_SECTION cs;
+    WCHAR           *text;
+    int              len_text;
+    WCHAR           *server;
+    int              len_server;
+    WCHAR          **namespaces;
+    int             *len_namespaces;
+    int              num_namespaces;
+    WCHAR           *class;
+    int              len_class;
+    ULONGLONG        flags;
 };
 
 static void init_path( struct path *path )
@@ -58,6 +60,7 @@ static void init_path( struct path *path )
     path->num_namespaces = 0;
     path->class          = NULL;
     path->len_class      = 0;
+    path->flags          = 0;
 }
 
 static void clear_path( struct path *path )
@@ -91,6 +94,8 @@ static ULONG WINAPI path_Release(
     {
         TRACE("destroying %p\n", path);
         clear_path( path );
+        path->cs.DebugInfo->Spare[0] = 0;
+        DeleteCriticalSection( &path->cs );
         heap_free( path );
     }
     return refs;
@@ -136,6 +141,7 @@ static HRESULT parse_text( struct path *path, ULONG mode, const WCHAR *text )
         memcpy( path->server, p, len * sizeof(WCHAR) );
         path->server[len] = 0;
         path->len_server = len;
+        path->flags |= WBEMPATH_INFO_PATH_HAD_SERVER;
     }
     p = q;
     while (*q && *q != ':')
@@ -180,6 +186,7 @@ static HRESULT parse_text( struct path *path, ULONG mode, const WCHAR *text )
 
 done:
     if (hr != S_OK) clear_path( path );
+    else path->flags |= WBEMPATH_INFO_CIM_COMPLIANT | WBEMPATH_INFO_V2_COMPLIANT;
     return hr;
 }
 
@@ -189,25 +196,32 @@ static HRESULT WINAPI path_SetText(
     LPCWSTR pszPath)
 {
     struct path *path = impl_from_IWbemPath( iface );
-    HRESULT hr;
+    HRESULT hr = S_OK;
     int len;
 
     TRACE("%p, %u, %s\n", iface, uMode, debugstr_w(pszPath));
 
     if (!uMode || !pszPath) return WBEM_E_INVALID_PARAMETER;
 
+    EnterCriticalSection( &path->cs );
+
     clear_path( path );
-    if ((hr = parse_text( path, uMode, pszPath )) != S_OK) return hr;
+    if (!pszPath[0]) goto done;
+    if ((hr = parse_text( path, uMode, pszPath )) != S_OK) goto done;
 
     len = strlenW( pszPath );
     if (!(path->text = heap_alloc( (len + 1) * sizeof(WCHAR) )))
     {
         clear_path( path );
-        return E_OUTOFMEMORY;
+        hr = E_OUTOFMEMORY;
+        goto done;
     }
     strcpyW( path->text, pszPath );
     path->len_text = len;
-    return S_OK;
+
+done:
+    LeaveCriticalSection( &path->cs );
+    return hr;
 }
 
 static WCHAR *build_namespace( struct path *path, int *len, BOOL leading_slash )
@@ -374,6 +388,7 @@ static HRESULT WINAPI path_GetText(
     LPWSTR pszText)
 {
     struct path *path = impl_from_IWbemPath( iface );
+    HRESULT hr = S_OK;
     WCHAR *str;
     int len;
 
@@ -381,51 +396,128 @@ static HRESULT WINAPI path_GetText(
 
     if (!puBufferLength) return WBEM_E_INVALID_PARAMETER;
 
-    str = build_path( path, lFlags, &len );
+    EnterCriticalSection( &path->cs );
 
+    str = build_path( path, lFlags, &len );
     if (*puBufferLength < len + 1)
     {
         *puBufferLength = len + 1;
-        return S_OK;
+        goto done;
     }
     if (!pszText)
     {
-        heap_free( str );
-        return WBEM_E_INVALID_PARAMETER;
+        hr = WBEM_E_INVALID_PARAMETER;
+        goto done;
     }
     if (str) strcpyW( pszText, str );
     else pszText[0] = 0;
     *puBufferLength = len + 1;
 
-    TRACE("<-- %s\n", debugstr_w(pszText));
+    TRACE("returning %s\n", debugstr_w(pszText));
+
+done:
     heap_free( str );
-    return S_OK;
+    LeaveCriticalSection( &path->cs );
+    return hr;
 }
 
 static HRESULT WINAPI path_GetInfo(
     IWbemPath *iface,
-    ULONG uRequestedInfo,
-    ULONGLONG *puResponse)
+    ULONG info,
+    ULONGLONG *response)
 {
-    FIXME("%p, %d, %p\n", iface, uRequestedInfo, puResponse);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %u, %p\n", iface, info, response);
+
+    if (info || !response) return WBEM_E_INVALID_PARAMETER;
+
+    FIXME("some flags are not implemented\n");
+
+    EnterCriticalSection( &path->cs );
+
+    *response = path->flags;
+    if (!path->server || (path->len_server == 1 && path->server[0] == '.'))
+        *response |= WBEMPATH_INFO_ANON_LOCAL_MACHINE;
+    else
+        *response |= WBEMPATH_INFO_HAS_MACHINE_NAME;
+
+    if (!path->class)
+        *response |= WBEMPATH_INFO_SERVER_NAMESPACE_ONLY;
+    else
+    {
+        *response |= WBEMPATH_INFO_HAS_SUBSCOPES;
+        if (path->text && strchrW( path->text, '=' )) /* FIXME */
+            *response |= WBEMPATH_INFO_IS_INST_REF;
+        else
+            *response |= WBEMPATH_INFO_IS_CLASS_REF;
+    }
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_SetServer(
     IWbemPath *iface,
-    LPCWSTR Name)
+    LPCWSTR name)
 {
-    FIXME("%p, %s\n", iface, debugstr_w(Name));
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+    static const ULONGLONG flags =
+        WBEMPATH_INFO_PATH_HAD_SERVER | WBEMPATH_INFO_V1_COMPLIANT |
+        WBEMPATH_INFO_V2_COMPLIANT | WBEMPATH_INFO_CIM_COMPLIANT;
+    WCHAR *server;
+
+    TRACE("%p, %s\n", iface, debugstr_w(name));
+
+    EnterCriticalSection( &path->cs );
+
+    if (name)
+    {
+        if (!(server = strdupW( name )))
+        {
+            LeaveCriticalSection( &path->cs );
+            return WBEM_E_OUT_OF_MEMORY;
+        }
+        heap_free( path->server );
+        path->server = server;
+        path->len_server = strlenW( path->server );
+        path->flags |= flags;
+    }
+    else
+    {
+        heap_free( path->server );
+        path->server = NULL;
+        path->len_server = 0;
+        path->flags &= ~flags;
+    }
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetServer(
     IWbemPath *iface,
-    ULONG *puNameBufLength,
-    LPWSTR pName)
+    ULONG *len,
+    LPWSTR name)
 {
-    FIXME("%p, %p, %p\n", iface, puNameBufLength, pName);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %p, %p\n", iface, len, name);
+
+    if (!len || (*len && !name)) return WBEM_E_INVALID_PARAMETER;
+
+    EnterCriticalSection( &path->cs );
+
+    if (!path->server)
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_NOT_AVAILABLE;
+    }
+    if (*len > path->len_server) strcpyW( name, path->server );
+    *len = path->len_server + 1;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetNamespaceCount(
@@ -437,47 +529,150 @@ static HRESULT WINAPI path_GetNamespaceCount(
     TRACE("%p, %p\n", iface, puCount);
 
     if (!puCount) return WBEM_E_INVALID_PARAMETER;
+
+    EnterCriticalSection( &path->cs );
     *puCount = path->num_namespaces;
+    LeaveCriticalSection( &path->cs );
     return S_OK;
 }
 
 static HRESULT WINAPI path_SetNamespaceAt(
     IWbemPath *iface,
-    ULONG uIndex,
-    LPCWSTR pszName)
+    ULONG idx,
+    LPCWSTR name)
 {
-    FIXME("%p, %u, %s\n", iface, uIndex, debugstr_w(pszName));
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+    static const ULONGLONG flags =
+        WBEMPATH_INFO_V1_COMPLIANT | WBEMPATH_INFO_V2_COMPLIANT |
+        WBEMPATH_INFO_CIM_COMPLIANT;
+    int i, *tmp_len;
+    WCHAR **tmp, *new;
+    DWORD size;
+
+    TRACE("%p, %u, %s\n", iface, idx, debugstr_w(name));
+
+    EnterCriticalSection( &path->cs );
+
+    if (idx > path->num_namespaces || !name)
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_INVALID_PARAMETER;
+    }
+    if (!(new = strdupW( name )))
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_OUT_OF_MEMORY;
+    }
+    size = (path->num_namespaces + 1) * sizeof(WCHAR *);
+    if (path->namespaces) tmp = heap_realloc( path->namespaces, size );
+    else tmp = heap_alloc( size );
+    if (!tmp)
+    {
+        heap_free( new );
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_OUT_OF_MEMORY;
+    }
+    path->namespaces = tmp;
+    size = (path->num_namespaces + 1) * sizeof(int);
+    if (path->len_namespaces) tmp_len = heap_realloc( path->len_namespaces, size );
+    else tmp_len = heap_alloc( size );
+    if (!tmp_len)
+    {
+        heap_free( new );
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_OUT_OF_MEMORY;
+    }
+    path->len_namespaces = tmp_len;
+    for (i = idx; i < path->num_namespaces; i++)
+    {
+        path->namespaces[i + 1] = path->namespaces[i];
+        path->len_namespaces[i + 1] = path->len_namespaces[i];
+    }
+    path->namespaces[idx] = new;
+    path->len_namespaces[idx] = strlenW( new );
+    path->num_namespaces++;
+    path->flags |= flags;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetNamespaceAt(
     IWbemPath *iface,
-    ULONG uIndex,
-    ULONG *puNameBufLength,
-    LPWSTR pName)
+    ULONG idx,
+    ULONG *len,
+    LPWSTR name)
 {
-    FIXME("%p, %u, %p, %p\n", iface, uIndex, puNameBufLength, pName);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %u, %p, %p\n", iface, idx, len, name);
+
+    EnterCriticalSection( &path->cs );
+
+    if (!len || (*len && !name) || idx >= path->num_namespaces)
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_INVALID_PARAMETER;
+    }
+    if (*len > path->len_namespaces[idx]) strcpyW( name, path->namespaces[idx] );
+    *len = path->len_namespaces[idx] + 1;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_RemoveNamespaceAt(
     IWbemPath *iface,
-    ULONG uIndex)
+    ULONG idx)
 {
-    FIXME("%p, %u\n", iface, uIndex);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %u\n", iface, idx);
+
+    EnterCriticalSection( &path->cs );
+
+    if (idx >= path->num_namespaces)
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_INVALID_PARAMETER;
+    }
+    heap_free( path->namespaces[idx] );
+    while (idx < path->num_namespaces - 1)
+    {
+        path->namespaces[idx] = path->namespaces[idx + 1];
+        path->len_namespaces[idx] = path->len_namespaces[idx + 1];
+        idx++;
+    }
+    path->num_namespaces--;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_RemoveAllNamespaces(
-        IWbemPath *iface)
+    IWbemPath *iface)
 {
-    FIXME("%p\n", iface);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+    int i;
+
+    TRACE("%p\n", iface);
+
+    EnterCriticalSection( &path->cs );
+
+    for (i = 0; i < path->num_namespaces; i++) heap_free( path->namespaces[i] );
+    path->num_namespaces = 0;
+    heap_free( path->namespaces );
+    path->namespaces = NULL;
+    heap_free( path->len_namespaces );
+    path->len_namespaces = NULL;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetScopeCount(
-        IWbemPath *iface,
-        ULONG *puCount)
+    IWbemPath *iface,
+    ULONG *puCount)
 {
     FIXME("%p, %p\n", iface, puCount);
     return E_NOTIMPL;
@@ -539,19 +734,50 @@ static HRESULT WINAPI path_RemoveAllScopes(
 
 static HRESULT WINAPI path_SetClassName(
     IWbemPath *iface,
-    LPCWSTR Name)
+    LPCWSTR name)
 {
-    FIXME("%p, %s\n", iface, debugstr_w(Name));
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+    WCHAR *class;
+
+    TRACE("%p, %s\n", iface, debugstr_w(name));
+
+    if (!name) return WBEM_E_INVALID_PARAMETER;
+    if (!(class = strdupW( name ))) return WBEM_E_OUT_OF_MEMORY;
+
+    EnterCriticalSection( &path->cs );
+
+    heap_free( path->class );
+    path->class = class;
+    path->len_class = strlenW( path->class );
+    path->flags |= WBEMPATH_INFO_V2_COMPLIANT | WBEMPATH_INFO_CIM_COMPLIANT;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetClassName(
     IWbemPath *iface,
-    ULONG *puBufferLength,
-    LPWSTR pszName)
+    ULONG *len,
+    LPWSTR name)
 {
-    FIXME("%p,%p, %p\n", iface, puBufferLength, pszName);
-    return E_NOTIMPL;
+    struct path *path = impl_from_IWbemPath( iface );
+
+    TRACE("%p, %p, %p\n", iface, len, name);
+
+    if (!len || (*len && !name)) return WBEM_E_INVALID_PARAMETER;
+
+    EnterCriticalSection( &path->cs );
+
+    if (!path->class)
+    {
+        LeaveCriticalSection( &path->cs );
+        return WBEM_E_INVALID_OBJECT_PATH;
+    }
+    if (*len > path->len_class) strcpyW( name, path->class );
+    *len = path->len_class + 1;
+
+    LeaveCriticalSection( &path->cs );
+    return S_OK;
 }
 
 static HRESULT WINAPI path_GetKeyList(
@@ -657,6 +883,8 @@ HRESULT WbemPath_create( IUnknown *pUnkOuter, LPVOID *ppObj )
 
     path->IWbemPath_iface.lpVtbl = &path_vtbl;
     path->refs = 1;
+    InitializeCriticalSection( &path->cs );
+    path->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": wmiutils_path.cs");
     init_path( path );
 
     *ppObj = &path->IWbemPath_iface;
