@@ -338,6 +338,7 @@ typedef struct msi_dialog_tag msi_dialog;
 
 enum platform
 {
+    PLATFORM_UNKNOWN,
     PLATFORM_INTEL,
     PLATFORM_INTEL64,
     PLATFORM_X64,
@@ -1041,6 +1042,7 @@ extern BOOL msi_init_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
 extern void msi_destroy_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
 extern WCHAR *msi_font_version_from_file(const WCHAR *) DECLSPEC_HIDDEN;
 extern WCHAR **msi_split_string(const WCHAR *, WCHAR) DECLSPEC_HIDDEN;
+extern UINT msi_set_original_database_property(MSIDATABASE *, const WCHAR *) DECLSPEC_HIDDEN;
 
 /* media */
 

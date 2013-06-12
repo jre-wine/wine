@@ -755,9 +755,8 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_GetParent(IDirect3DRMFrame2* iface,
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetPosition(IDirect3DRMFrame2* iface,
-                                                        LPDIRECT3DRMFRAME reference,
-                                                        LPD3DVECTOR return_position)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetPosition(IDirect3DRMFrame2 *iface,
+        IDirect3DRMFrame *reference, D3DVECTOR *return_position)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -766,9 +765,8 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_GetPosition(IDirect3DRMFrame2* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetRotation(IDirect3DRMFrame2* iface,
-                                                        LPDIRECT3DRMFRAME reference,
-                                                        LPD3DVECTOR axis, LPD3DVALUE return_theta)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetRotation(IDirect3DRMFrame2 *iface,
+        IDirect3DRMFrame *reference, D3DVECTOR *axis, D3DVALUE *return_theta)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -818,10 +816,8 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_GetTransform(IDirect3DRMFrame2* ifac
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetVelocity(IDirect3DRMFrame2* iface,
-                                                        LPDIRECT3DRMFRAME reference,
-                                                        LPD3DVECTOR return_velocity,
-                                                        BOOL with_rotation)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetVelocity(IDirect3DRMFrame2 *iface,
+        IDirect3DRMFrame *reference, D3DVECTOR *return_velocity, BOOL with_rotation)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -830,9 +826,8 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_GetVelocity(IDirect3DRMFrame2* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetOrientation(IDirect3DRMFrame2* iface,
-                                                           LPDIRECT3DRMFRAME reference,
-                                                           LPD3DVECTOR dir, LPD3DVECTOR up)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetOrientation(IDirect3DRMFrame2 *iface,
+        IDirect3DRMFrame *reference, D3DVECTOR *dir, D3DVECTOR *up)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -1265,7 +1260,7 @@ static HRESULT WINAPI IDirect3DRMFrame2Impl_AddMoveCallback2(IDirect3DRMFrame2* 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetBox(IDirect3DRMFrame2* iface, LPD3DRMBOX box)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetBox(IDirect3DRMFrame2 *iface, D3DRMBOX *box)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -1283,8 +1278,8 @@ static BOOL WINAPI IDirect3DRMFrame2Impl_GetBoxEnable(IDirect3DRMFrame2* iface)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetAxes(IDirect3DRMFrame2* iface,
-                                                    LPD3DVECTOR dir, LPD3DVECTOR up)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetAxes(IDirect3DRMFrame2 *iface,
+        D3DVECTOR *dir, D3DVECTOR *up)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -1312,8 +1307,7 @@ static BOOL WINAPI IDirect3DRMFrame2Impl_GetInheritAxes(IDirect3DRMFrame2* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame2Impl_GetHierarchyBox(IDirect3DRMFrame2* iface,
-                                                            LPD3DRMBOX box)
+static HRESULT WINAPI IDirect3DRMFrame2Impl_GetHierarchyBox(IDirect3DRMFrame2 *iface, D3DRMBOX *box)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame2(iface);
 
@@ -1843,9 +1837,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetParent(IDirect3DRMFrame3* iface,
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetPosition(IDirect3DRMFrame3* iface,
-                                                        LPDIRECT3DRMFRAME3 reference,
-                                                        LPD3DVECTOR return_position)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetPosition(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, D3DVECTOR *return_position)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -1854,9 +1847,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetPosition(IDirect3DRMFrame3* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetRotation(IDirect3DRMFrame3* iface,
-                                                        LPDIRECT3DRMFRAME3 reference,
-                                                        LPD3DVECTOR axis, LPD3DVALUE return_theta)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetRotation(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, D3DVECTOR *axis, D3DVALUE *return_theta)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -1910,10 +1902,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetTransform(IDirect3DRMFrame3* ifac
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetVelocity(IDirect3DRMFrame3* iface,
-                                                        LPDIRECT3DRMFRAME3 reference,
-                                                        LPD3DVECTOR return_velocity,
-                                                        BOOL with_rotation)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetVelocity(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, D3DVECTOR *return_velocity, BOOL with_rotation)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -1922,9 +1912,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetVelocity(IDirect3DRMFrame3* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetOrientation(IDirect3DRMFrame3* iface,
-                                                           LPDIRECT3DRMFRAME3 reference,
-                                                           LPD3DVECTOR dir, LPD3DVECTOR up)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetOrientation(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, D3DVECTOR *dir, D3DVECTOR *up)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2346,7 +2335,7 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_Transform(IDirect3DRMFrame3* iface, 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetBox(IDirect3DRMFrame3* iface, LPD3DRMBOX box)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetBox(IDirect3DRMFrame3 *iface, D3DRMBOX *box)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2364,8 +2353,7 @@ static BOOL WINAPI IDirect3DRMFrame3Impl_GetBoxEnable(IDirect3DRMFrame3* iface)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetAxes(IDirect3DRMFrame3* iface,
-                                                    LPD3DVECTOR dir, LPD3DVECTOR up)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetAxes(IDirect3DRMFrame3 *iface, D3DVECTOR *dir, D3DVECTOR *up)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2393,8 +2381,7 @@ static BOOL WINAPI IDirect3DRMFrame3Impl_GetInheritAxes(IDirect3DRMFrame3* iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetHierarchyBox(IDirect3DRMFrame3* iface,
-                                                            LPD3DRMBOX box)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetHierarchyBox(IDirect3DRMFrame3* iface, D3DRMBOX *box)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2403,7 +2390,7 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetHierarchyBox(IDirect3DRMFrame3* i
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_SetBox(IDirect3DRMFrame3* iface, LPD3DRMBOX box)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_SetBox(IDirect3DRMFrame3 *iface, D3DRMBOX *box)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2463,10 +2450,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_SetQuaternion(IDirect3DRMFrame3* ifa
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_RayPick(IDirect3DRMFrame3* iface,
-                                                    LPDIRECT3DRMFRAME3 reference, LPD3DRMRAY ray,
-                                                    DWORD flags,
-                                                    LPDIRECT3DRMPICKED2ARRAY *return_visuals)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_RayPick(IDirect3DRMFrame3 *iface, IDirect3DRMFrame3 *reference,
+        D3DRMRAY *ray, DWORD flags, IDirect3DRMPicked2Array **return_visuals)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2486,10 +2471,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_Save(IDirect3DRMFrame3* iface, LPCST
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_TransformVectors(IDirect3DRMFrame3* iface,
-                                                             LPDIRECT3DRMFRAME3 reference,
-                                                             DWORD num, LPD3DVECTOR dst,
-                                                             LPD3DVECTOR src)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_TransformVectors(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, DWORD num, D3DVECTOR *dst, D3DVECTOR *src)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2498,10 +2481,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_TransformVectors(IDirect3DRMFrame3* 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_InverseTransformVectors(IDirect3DRMFrame3* iface,
-                                                                    LPDIRECT3DRMFRAME3 reference,
-                                                                    DWORD num, LPD3DVECTOR dst,
-                                                                    LPD3DVECTOR src)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_InverseTransformVectors(IDirect3DRMFrame3 *iface,
+        IDirect3DRMFrame3 *reference, DWORD num, D3DVECTOR *dst, D3DVECTOR *src)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2550,8 +2531,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_GetSceneFogMethod(IDirect3DRMFrame3*
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_SetMaterialOverride(IDirect3DRMFrame3* iface,
-                                                                LPD3DRMMATERIALOVERRIDE override)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_SetMaterialOverride(IDirect3DRMFrame3 *iface,
+        D3DRMMATERIALOVERRIDE *override)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 
@@ -2560,8 +2541,8 @@ static HRESULT WINAPI IDirect3DRMFrame3Impl_SetMaterialOverride(IDirect3DRMFrame
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMFrame3Impl_GetMaterialOverride(IDirect3DRMFrame3* iface,
-                                                                LPD3DRMMATERIALOVERRIDE override)
+static HRESULT WINAPI IDirect3DRMFrame3Impl_GetMaterialOverride(IDirect3DRMFrame3 *iface,
+        D3DRMMATERIALOVERRIDE *override)
 {
     IDirect3DRMFrameImpl *This = impl_from_IDirect3DRMFrame3(iface);
 

@@ -861,7 +861,7 @@ static void set_tex_op_atifs(struct wined3d_context *context, const struct wined
             new_desc->num_textures_used = i + 1;
         }
 
-        memcpy(&new_desc->parent.settings, &settings, sizeof(settings));
+        new_desc->parent.settings = settings;
         new_desc->shader = gen_ati_shader(settings.op, gl_info);
         add_ffp_frag_shader(&priv->fragment_shaders, &new_desc->parent);
         TRACE("Allocated fixed function replacement shader descriptor %p\n", new_desc);
@@ -1102,6 +1102,7 @@ static void atifs_enable(const struct wined3d_gl_info *gl_info, BOOL enable)
 
 static void atifs_get_caps(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps)
 {
+    caps->wined3d_caps = WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
     caps->PrimitiveMiscCaps = WINED3DPMISCCAPS_TSSARGTEMP;
     caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
                            WINED3DTEXOPCAPS_SELECTARG1                  |
@@ -1217,5 +1218,4 @@ const struct fragment_pipeline atifs_fragment_pipeline = {
     atifs_free,
     atifs_color_fixup_supported,
     atifs_fragmentstate_template,
-    TRUE /* We can disable projected textures */
 };

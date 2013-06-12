@@ -32,7 +32,6 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
-WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
 static const char * const shader_opcode_names[] =
 {
@@ -1479,6 +1478,7 @@ static void shader_cleanup(struct wined3d_shader *shader)
 struct shader_none_priv
 {
     const struct fragment_pipeline *fragment_pipe;
+    BOOL ffp_proj_control;
 };
 
 static void shader_none_handle_instruction(const struct wined3d_shader_instruction *ins) {}
@@ -1505,6 +1505,7 @@ static void shader_none_select(const struct wined3d_context *context, enum wined
 
 static HRESULT shader_none_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
 {
+    struct fragment_caps fragment_caps;
     struct shader_none_priv *priv;
     void *fragment_priv;
 
@@ -1521,6 +1522,8 @@ static HRESULT shader_none_alloc(struct wined3d_device *device, const struct fra
         return E_FAIL;
     }
 
+    fragment_pipe->get_caps(&device->adapter->gl_info, &fragment_caps);
+    priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
     device->fragment_priv = fragment_priv;
     priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
@@ -1545,33 +1548,21 @@ static void shader_none_get_caps(const struct wined3d_gl_info *gl_info, struct s
     caps->vs_uniform_count = 0;
     caps->ps_uniform_count = 0;
     caps->ps_1x_max_value = 0.0f;
-    caps->vs_clipping = FALSE;
+    caps->wined3d_caps = 0;
 }
 
 static BOOL shader_none_color_fixup_supported(struct color_fixup_desc fixup)
 {
-    if (TRACE_ON(d3d_shader) && TRACE_ON(d3d))
-    {
-        TRACE("Checking support for fixup:\n");
-        dump_color_fixup_desc(fixup);
-    }
-
-    /* Faked to make some apps happy. */
-    if (!is_complex_fixup(fixup))
-    {
-        TRACE("[OK]\n");
-        return TRUE;
-    }
-
-    TRACE("[FAILED]\n");
-    return FALSE;
+    /* We "support" every possible fixup, since we don't support any shader
+     * model, and will never have to actually sample a texture. */
+    return TRUE;
 }
 
 static BOOL shader_none_has_ffp_proj_control(void *shader_priv)
 {
     struct shader_none_priv *priv = shader_priv;
 
-    return priv->fragment_pipe->ffp_proj_control;
+    return priv->ffp_proj_control;
 }
 
 const struct wined3d_shader_backend_ops none_shader_backend =

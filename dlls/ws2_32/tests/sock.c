@@ -2725,7 +2725,7 @@ static void test_getsockname(void)
         return;
     }
 
-    memcpy(&sa_get, &sa_set, sizeof(sa_set));
+    sa_get = sa_set;
     if (getsockname(sock, (struct sockaddr*) &sa_get, &sa_get_len) == 0)
         ok(0, "getsockname on unbound socket should fail\n");
     else {
@@ -4786,7 +4786,7 @@ static void test_AcceptEx(void)
     iret = getsockname( connector, (struct sockaddr *)&peerAddress, &remoteSize);
     ok( !iret, "getsockname failed.\n");
 
-    /* Check if the buffer from AcceptEx is decoded correclty */
+    /* Check if the buffer from AcceptEx is decoded correctly */
     pGetAcceptExSockaddrs(buffer, 2, sizeof(struct sockaddr_in) + 16, sizeof(struct sockaddr_in) + 16,
                           (struct sockaddr **)&readBindAddress, &localSize,
                           (struct sockaddr **)&readRemoteAddress, &remoteSize);

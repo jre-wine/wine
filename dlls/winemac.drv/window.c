@@ -43,6 +43,9 @@ static CRITICAL_SECTION win_data_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 static CFMutableDictionaryRef win_datas;
 
 
+void CDECL macdrv_SetFocus(HWND hwnd);
+
+
 /***********************************************************************
  *              get_cocoa_window_features
  */
@@ -154,6 +157,12 @@ static void show_window(struct macdrv_win_data *data)
     TRACE("win %p/%p\n", data->hwnd, data->cocoa_window);
 
     data->on_screen = macdrv_order_cocoa_window(data->cocoa_window, NULL, NULL);
+    if (data->on_screen)
+    {
+        HWND hwndFocus = GetFocus();
+        if (hwndFocus && (data->hwnd == hwndFocus || IsChild(data->hwnd, hwndFocus)))
+            macdrv_SetFocus(hwndFocus);
+    }
 }
 
 
@@ -478,6 +487,7 @@ static void sync_window_opacity(struct macdrv_win_data *data, COLORREF key, BYTE
  */
 static void create_cocoa_window(struct macdrv_win_data *data)
 {
+    struct macdrv_thread_data *thread_data = macdrv_init_thread_data();
     WCHAR text[1024];
     struct macdrv_window_features wf;
     CGRect frame;
@@ -510,7 +520,7 @@ static void create_cocoa_window(struct macdrv_win_data *data)
     TRACE("creating %p window %s whole %s client %s\n", data->hwnd, wine_dbgstr_rect(&data->window_rect),
           wine_dbgstr_rect(&data->whole_rect), wine_dbgstr_rect(&data->client_rect));
 
-    data->cocoa_window = macdrv_create_cocoa_window(&wf, frame);
+    data->cocoa_window = macdrv_create_cocoa_window(&wf, frame, data->hwnd, thread_data->queue);
     if (!data->cocoa_window) goto done;
 
     set_cocoa_window_properties(data);
@@ -565,7 +575,10 @@ static struct macdrv_win_data *macdrv_create_win_data(HWND hwnd, const RECT *win
     if (GetWindowThreadProcessId(hwnd, NULL) != GetCurrentThreadId()) return NULL;
 
     if (!(parent = GetAncestor(hwnd, GA_PARENT)))  /* desktop */
+    {
+        macdrv_init_thread_data();
         return NULL;
+    }
 
     /* don't create win data for HWND_MESSAGE windows */
     if (parent != GetDesktopWindow() && !GetAncestor(parent, GA_PARENT)) return NULL;
@@ -816,6 +829,31 @@ void CDECL macdrv_DestroyWindow(HWND hwnd)
 }
 
 
+/*****************************************************************
+ *              SetFocus   (MACDRV.@)
+ *
+ * Set the Mac focus.
+ */
+void CDECL macdrv_SetFocus(HWND hwnd)
+{
+    struct macdrv_win_data *data;
+
+    TRACE("%p\n", hwnd);
+
+    if (!(hwnd = GetAncestor(hwnd, GA_ROOT))) return;
+    if (!(data = get_win_data(hwnd))) return;
+
+    if (data->cocoa_window)
+    {
+        /* Set Mac focus */
+        macdrv_give_cocoa_window_focus(data->cocoa_window);
+        data->on_screen = TRUE;
+    }
+
+    release_win_data(data);
+}
+
+
 /***********************************************************************
  *              SetLayeredWindowAttributes  (MACDRV.@)
  *
@@ -942,6 +980,51 @@ void CDECL macdrv_SetWindowText(HWND hwnd, LPCWSTR text)
 
     if ((win = macdrv_get_cocoa_window(hwnd)))
         macdrv_set_cocoa_window_title(win, text, strlenW(text));
+}
+
+
+/***********************************************************************
+ *              ShowWindow   (MACDRV.@)
+ */
+UINT CDECL macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
+{
+    struct macdrv_thread_data *thread_data = macdrv_thread_data();
+    struct macdrv_win_data *data = get_win_data(hwnd);
+    CGRect frame;
+
+    if (!data || !data->cocoa_window) goto done;
+    if (IsRectEmpty(rect)) goto done;
+    if (GetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZE)
+    {
+        if (rect->left != -32000 || rect->top != -32000)
+        {
+            OffsetRect(rect, -32000 - rect->left, -32000 - rect->top);
+            swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE);
+        }
+        goto done;
+    }
+    if (!data->on_screen) goto done;
+
+    /* only fetch the new rectangle if the ShowWindow was a result of an external event */
+
+    if (!thread_data->current_event || thread_data->current_event->window != data->cocoa_window)
+        goto done;
+
+    if (thread_data->current_event->type != WINDOW_FRAME_CHANGED)
+        goto done;
+
+    TRACE("win %p/%p cmd %d at %s flags %08x\n",
+          hwnd, data->cocoa_window, cmd, wine_dbgstr_rect(rect), swp);
+
+    macdrv_get_cocoa_window_frame(data->cocoa_window, &frame);
+    *rect = rect_from_cgrect(frame);
+    macdrv_mac_to_window_rect(data, rect);
+    TRACE("rect %s -> %s\n", wine_dbgstr_cgrect(frame), wine_dbgstr_rect(rect));
+    swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE | SWP_NOSIZE | SWP_NOCLIENTSIZE);
+
+done:
+    release_win_data(data);
+    return swp;
 }
 
 
@@ -1144,11 +1227,14 @@ void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
                                    const RECT *visible_rect, const RECT *valid_rects,
                                    struct window_surface *surface)
 {
+    struct macdrv_thread_data *thread_data;
     struct macdrv_win_data *data;
     DWORD new_style = GetWindowLongW(hwnd, GWL_STYLE);
     RECT old_window_rect, old_whole_rect, old_client_rect;
 
     if (!(data = get_win_data(hwnd))) return;
+
+    thread_data = macdrv_thread_data();
 
     old_window_rect = data->window_rect;
     old_whole_rect  = data->whole_rect;
@@ -1220,9 +1306,181 @@ void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
             show_window(data);
     }
 
-    sync_window_position(data, swp_flags);
-    set_cocoa_window_properties(data);
+    /* check if we are currently processing an event relevant to this window */
+    if (!thread_data || !thread_data->current_event ||
+        thread_data->current_event->window != data->cocoa_window ||
+        thread_data->current_event->type != WINDOW_FRAME_CHANGED)
+    {
+        sync_window_position(data, swp_flags);
+        set_cocoa_window_properties(data);
+    }
 
 done:
     release_win_data(data);
+}
+
+
+/***********************************************************************
+ *              macdrv_window_close_requested
+ *
+ * Handler for WINDOW_CLOSE_REQUESTED events.
+ */
+void macdrv_window_close_requested(HWND hwnd)
+{
+    /* Ignore the delete window request if the window has been disabled. This
+     * is to disallow applications from being closed while in a modal state.
+     */
+    if (IsWindowEnabled(hwnd))
+    {
+        HMENU hSysMenu;
+
+        if (GetClassLongW(hwnd, GCL_STYLE) & CS_NOCLOSE) return;
+        hSysMenu = GetSystemMenu(hwnd, FALSE);
+        if (hSysMenu)
+        {
+            UINT state = GetMenuState(hSysMenu, SC_CLOSE, MF_BYCOMMAND);
+            if (state == 0xFFFFFFFF || (state & (MF_DISABLED | MF_GRAYED)))
+                return;
+        }
+        if (GetActiveWindow() != hwnd)
+        {
+            LRESULT ma = SendMessageW(hwnd, WM_MOUSEACTIVATE,
+                                      (WPARAM)GetAncestor(hwnd, GA_ROOT),
+                                      MAKELPARAM(HTCLOSE, WM_NCLBUTTONDOWN));
+            switch(ma)
+            {
+                case MA_NOACTIVATEANDEAT:
+                case MA_ACTIVATEANDEAT:
+                    return;
+                case MA_NOACTIVATE:
+                    break;
+                case MA_ACTIVATE:
+                case 0:
+                    SetActiveWindow(hwnd);
+                    break;
+                default:
+                    WARN("unknown WM_MOUSEACTIVATE code %d\n", (int) ma);
+                    break;
+            }
+        }
+
+        PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+    }
+}
+
+
+/***********************************************************************
+ *              macdrv_window_frame_changed
+ *
+ * Handler for WINDOW_FRAME_CHANGED events.
+ */
+void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
+{
+    struct macdrv_win_data *data;
+    RECT rect;
+    HWND parent;
+    UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
+    int width, height;
+
+    if (!hwnd) return;
+    if (!(data = get_win_data(hwnd))) return;
+    if (!data->on_screen) goto done;
+
+    /* Get geometry */
+
+    parent = GetAncestor(hwnd, GA_PARENT);
+
+    TRACE("win %p/%p new Cocoa frame %s\n", hwnd, data->cocoa_window, wine_dbgstr_cgrect(frame));
+
+    rect = rect_from_cgrect(frame);
+    macdrv_mac_to_window_rect(data, &rect);
+    MapWindowPoints(0, parent, (POINT *)&rect, 2);
+
+    width = rect.right - rect.left;
+    height = rect.bottom - rect.top;
+
+    if (data->window_rect.left == rect.left && data->window_rect.top == rect.top)
+        flags |= SWP_NOMOVE;
+    else
+        TRACE("%p moving from (%d,%d) to (%d,%d)\n", hwnd, data->window_rect.left,
+              data->window_rect.top, rect.left, rect.top);
+
+    if ((data->window_rect.right - data->window_rect.left == width &&
+         data->window_rect.bottom - data->window_rect.top == height) ||
+        (IsRectEmpty(&data->window_rect) && width <= 0 && height <= 0))
+        flags |= SWP_NOSIZE;
+    else
+        TRACE("%p resizing from (%dx%d) to (%dx%d)\n", hwnd, data->window_rect.right - data->window_rect.left,
+              data->window_rect.bottom - data->window_rect.top, width, height);
+
+done:
+    release_win_data(data);
+
+    if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
+        SetWindowPos(hwnd, 0, rect.left, rect.top, width, height, flags);
+}
+
+
+/***********************************************************************
+ *              macdrv_window_got_focus
+ *
+ * Handler for WINDOW_GOT_FOCUS events.
+ */
+void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
+{
+    if (!hwnd) return;
+
+    TRACE("win %p/%p serial %lu enabled %d visible %d style %08x focus %p active %p fg %p\n",
+          hwnd, event->window, event->window_got_focus.serial, IsWindowEnabled(hwnd),
+          IsWindowVisible(hwnd), GetWindowLongW(hwnd, GWL_STYLE), GetFocus(),
+          GetActiveWindow(), GetForegroundWindow());
+
+    if (can_activate_window(hwnd))
+    {
+        /* simulate a mouse click on the caption to find out
+         * whether the window wants to be activated */
+        LRESULT ma = SendMessageW(hwnd, WM_MOUSEACTIVATE,
+                                  (WPARAM)GetAncestor(hwnd, GA_ROOT),
+                                  MAKELONG(HTCAPTION,WM_LBUTTONDOWN));
+        if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+        {
+            TRACE("setting foreground window to %p\n", hwnd);
+            SetForegroundWindow(hwnd);
+            return;
+        }
+    }
+
+    TRACE("win %p/%p rejecting focus\n", hwnd, event->window);
+    macdrv_window_rejected_focus(event);
+}
+
+
+/***********************************************************************
+ *              macdrv_window_lost_focus
+ *
+ * Handler for WINDOW_LOST_FOCUS events.
+ */
+void macdrv_window_lost_focus(HWND hwnd, const macdrv_event *event)
+{
+    if (!hwnd) return;
+
+    TRACE("win %p/%p fg %p\n", hwnd, event->window, GetForegroundWindow());
+
+    if (hwnd == GetForegroundWindow())
+        SendMessageW(hwnd, WM_CANCELMODE, 0, 0);
+}
+
+
+/***********************************************************************
+ *              macdrv_app_deactivated
+ *
+ * Handler for APP_DEACTIVATED events.
+ */
+void macdrv_app_deactivated(void)
+{
+    if (GetActiveWindow() == GetForegroundWindow())
+    {
+        TRACE("setting fg to desktop\n");
+        SetForegroundWindow(GetDesktopWindow());
+    }
 }

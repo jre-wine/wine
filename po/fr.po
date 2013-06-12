@@ -10545,6 +10545,62 @@ msgstr "Erreurs"
 msgid "Unknown protocols"
 msgstr "Protocoles inconnus"
 
+#: netstat.rc:41
+msgid "TCP Statistics for IPv4"
+msgstr "Statistiques TCP pour IPv4"
+
+#: netstat.rc:42
+msgid "Active Opens"
+msgstr "Ouvertures actives"
+
+#: netstat.rc:43
+msgid "Passive Opens"
+msgstr "Ouvertures passives"
+
+#: netstat.rc:44
+msgid "Failed Connection Attempts"
+msgstr "Tentatives de connexion ratées"
+
+#: netstat.rc:45
+msgid "Reset Connections"
+msgstr "Connexions réinitialisées"
+
+#: netstat.rc:46
+msgid "Current Connections"
+msgstr "Connexions en cours"
+
+#: netstat.rc:47
+msgid "Segments Received"
+msgstr "Segments reçus"
+
+#: netstat.rc:48
+msgid "Segments Sent"
+msgstr "Segments envoyés"
+
+#: netstat.rc:49
+msgid "Segments Retransmitted"
+msgstr "Segments retransmis"
+
+#: netstat.rc:50
+msgid "UDP Statistics for IPv4"
+msgstr "Statistiques UDP pour IPv4"
+
+#: netstat.rc:51
+msgid "Datagrams Received"
+msgstr "Datagrammes reçus"
+
+#: netstat.rc:52
+msgid "No Ports"
+msgstr "Aucun port"
+
+#: netstat.rc:53
+msgid "Receive Errors"
+msgstr "Erreurs de réception"
+
+#: netstat.rc:54
+msgid "Datagrams Sent"
+msgstr "Datagrammes envoyés"
+
 #: notepad.rc:27
 msgid "&New\tCtrl+N"
 msgstr "&Nouveau\tCtrl+N"
