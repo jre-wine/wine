@@ -463,7 +463,6 @@ static long get_tls_option(void) {
 #endif
     return tls_option;
 }
-#endif /* SONAME_LIBSSL */
 
 static CRITICAL_SECTION init_ssl_cs;
 static CRITICAL_SECTION_DEBUG init_ssl_cs_debug =
@@ -477,7 +476,7 @@ static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
 
 static DWORD init_openssl(void)
 {
-#if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
+#ifdef SONAME_LIBCRYPTO
     int i;
 
     if(OpenSSL_ssl_handle)
@@ -600,49 +599,50 @@ static DWORD init_openssl(void)
 
     return ERROR_SUCCESS;
 #else
-    FIXME("can't use SSL, not compiled in.\n");
+    FIXME("can't use SSL, libcrypto not compiled in.\n");
     return ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
 #endif
 }
+#endif /* SONAME_LIBSSL */
 
 static DWORD create_netconn_socket(server_t *server, netconn_t *netconn, DWORD timeout)
 {
     int result, flag;
 
     assert(server->addr_len);
-    result = netconn->socketFD = socket(server->addr.ss_family, SOCK_STREAM, 0);
+    result = netconn->socket = socket(server->addr.ss_family, SOCK_STREAM, 0);
     if(result != -1) {
         flag = 1;
-        ioctlsocket(netconn->socketFD, FIONBIO, &flag);
-        result = connect(netconn->socketFD, (struct sockaddr*)&server->addr, server->addr_len);
+        ioctlsocket(netconn->socket, FIONBIO, &flag);
+        result = connect(netconn->socket, (struct sockaddr*)&server->addr, server->addr_len);
         if(result == -1)
         {
             if (sock_get_error(errno) == WSAEINPROGRESS) {
                 struct pollfd pfd;
                 int res;
 
-                pfd.fd = netconn->socketFD;
+                pfd.fd = netconn->socket;
                 pfd.events = POLLOUT;
                 res = poll(&pfd, 1, timeout);
                 if (!res)
                 {
-                    closesocket(netconn->socketFD);
+                    closesocket(netconn->socket);
                     return ERROR_INTERNET_CANNOT_CONNECT;
                 }
                 else if (res > 0)
                 {
                     int err;
                     socklen_t len = sizeof(err);
-                    if (!getsockopt(netconn->socketFD, SOL_SOCKET, SO_ERROR, &err, &len) && !err)
+                    if (!getsockopt(netconn->socket, SOL_SOCKET, SO_ERROR, &err, &len) && !err)
                         result = 0;
                 }
             }
         }
         if(result == -1)
-            closesocket(netconn->socketFD);
+            closesocket(netconn->socket);
         else {
             flag = 0;
-            ioctlsocket(netconn->socketFD, FIONBIO, &flag);
+            ioctlsocket(netconn->socket, FIONBIO, &flag);
         }
     }
     if(result == -1)
@@ -650,7 +650,7 @@ static DWORD create_netconn_socket(server_t *server, netconn_t *netconn, DWORD t
 
 #ifdef TCP_NODELAY
     flag = 1;
-    result = setsockopt(netconn->socketFD, IPPROTO_TCP, TCP_NODELAY, (void*)&flag, sizeof(flag));
+    result = setsockopt(netconn->socket, IPPROTO_TCP, TCP_NODELAY, (void*)&flag, sizeof(flag));
     if(result < 0)
         WARN("setsockopt(TCP_NODELAY) failed\n");
 #endif
@@ -663,6 +663,7 @@ DWORD create_netconn(BOOL useSSL, server_t *server, DWORD security_flags, BOOL m
     netconn_t *netconn;
     int result;
 
+#ifdef SONAME_LIBSSL
     if(useSSL) {
         DWORD res;
 
@@ -674,12 +675,13 @@ DWORD create_netconn(BOOL useSSL, server_t *server, DWORD security_flags, BOOL m
         if(res != ERROR_SUCCESS)
             return res;
     }
+#endif
 
     netconn = heap_alloc_zero(sizeof(*netconn));
     if(!netconn)
         return ERROR_OUTOFMEMORY;
 
-    netconn->socketFD = -1;
+    netconn->socket = -1;
     netconn->security_flags = security_flags | server->security_flags;
     netconn->mask_errors = mask_errors;
     list_init(&netconn->pool_entry);
@@ -707,7 +709,7 @@ void free_netconn(netconn_t *netconn)
     }
 #endif
 
-    closesocket(netconn->socketFD);
+    closesocket(netconn->socket);
     heap_free(netconn);
 }
 
@@ -821,7 +823,7 @@ static DWORD netcon_secure_connect_setup(netconn_t *connection, long tls_option)
     }
 
     pSSL_set_options(ssl_s, tls_option);
-    if (!pSSL_set_fd(ssl_s, connection->socketFD))
+    if (!pSSL_set_fd(ssl_s, connection->socket))
     {
         ERR("SSL_set_fd failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
@@ -846,6 +848,7 @@ static DWORD netcon_secure_connect_setup(netconn_t *connection, long tls_option)
     }
 
     connection->ssl_s = ssl_s;
+    connection->secure = TRUE;
 
     bits = NETCON_GetCipherStrength(connection);
     if (bits >= 128)
@@ -877,21 +880,20 @@ fail:
 DWORD NETCON_secure_connect(netconn_t *connection, server_t *server)
 {
     DWORD res = ERROR_NOT_SUPPORTED;
-#ifdef SONAME_LIBSSL
+
     /* can't connect if we are already connected */
-    if (connection->ssl_s)
-    {
+    if(connection->secure) {
         ERR("already connected\n");
         return ERROR_INTERNET_CANNOT_CONNECT;
     }
 
-    connection->useSSL = TRUE;
     if(server != connection->server) {
         server_release(connection->server);
         server_addref(server);
         connection->server = server;
     }
 
+#ifdef SONAME_LIBSSL
     /* connect with given TLS options */
     res = netcon_secure_connect_setup(connection, get_tls_option());
     if (res == ERROR_SUCCESS)
@@ -902,7 +904,7 @@ DWORD NETCON_secure_connect(netconn_t *connection, server_t *server)
     /* fallback to connect without TLSv1.1/TLSv1.2        */
     if (res == ERROR_INTERNET_SECURITY_CHANNEL_ERROR)
     {
-        closesocket(connection->socketFD);
+        closesocket(connection->socket);
         pSSL_CTX_set_options(ctx,SSL_OP_NO_TLSv1_1|SSL_OP_NO_TLSv1_2);
         res = create_netconn_socket(connection->server, connection, 500);
         if (res != ERROR_SUCCESS)
@@ -910,6 +912,8 @@ DWORD NETCON_secure_connect(netconn_t *connection, server_t *server)
         res = netcon_secure_connect_setup(connection, get_tls_option()|SSL_OP_NO_TLSv1_1|SSL_OP_NO_TLSv1_2);
     }
 #endif
+#else
+    FIXME("Cannot connect, OpenSSL not available.\n");
 #endif
     return res;
 }
@@ -922,9 +926,9 @@ DWORD NETCON_secure_connect(netconn_t *connection, server_t *server)
 DWORD NETCON_send(netconn_t *connection, const void *msg, size_t len, int flags,
 		int *sent /* out */)
 {
-    if (!connection->useSSL)
+    if(!connection->secure)
     {
-	*sent = send(connection->socketFD, msg, len, flags);
+	*sent = send(connection->socket, msg, len, flags);
 	if (*sent == -1)
 	    return sock_get_error(errno);
         return ERROR_SUCCESS;
@@ -943,6 +947,7 @@ DWORD NETCON_send(netconn_t *connection, const void *msg, size_t len, int flags,
 	    return ERROR_INTERNET_CONNECTION_ABORTED;
         return ERROR_SUCCESS;
 #else
+        FIXME("not supported on this platform\n");
 	return ERROR_NOT_SUPPORTED;
 #endif
     }
@@ -953,15 +958,15 @@ DWORD NETCON_send(netconn_t *connection, const void *msg, size_t len, int flags,
  * Basically calls 'recv()' unless we should use SSL
  * number of chars received is put in *recvd
  */
-DWORD NETCON_recv(netconn_t *connection, void *buf, size_t len, int flags,
-		int *recvd /* out */)
+DWORD NETCON_recv(netconn_t *connection, void *buf, size_t len, int flags, int *recvd)
 {
     *recvd = 0;
     if (!len)
         return ERROR_SUCCESS;
-    if (!connection->useSSL)
+
+    if (!connection->secure)
     {
-	*recvd = recv(connection->socketFD, buf, len, flags);
+	*recvd = recv(connection->socket, buf, len, flags);
 	return *recvd == -1 ? sock_get_error(errno) :  ERROR_SUCCESS;
     }
     else
@@ -980,6 +985,7 @@ DWORD NETCON_recv(netconn_t *connection, void *buf, size_t len, int flags,
 
         return *recvd > 0 ? ERROR_SUCCESS : ERROR_INTERNET_CONNECTION_ABORTED;
 #else
+        FIXME("not supported on this platform\n");
 	return ERROR_NOT_SUPPORTED;
 #endif
     }
@@ -994,11 +1000,11 @@ BOOL NETCON_query_data_available(netconn_t *connection, DWORD *available)
 {
     *available = 0;
 
-    if (!connection->useSSL)
+    if(!connection->secure)
     {
 #ifdef FIONREAD
         int unread;
-        int retval = ioctlsocket(connection->socketFD, FIONREAD, &unread);
+        int retval = ioctlsocket(connection->socket, FIONREAD, &unread);
         if (!retval)
         {
             TRACE("%d bytes of queued, but unread data\n", unread);
@@ -1010,6 +1016,9 @@ BOOL NETCON_query_data_available(netconn_t *connection, DWORD *available)
     {
 #ifdef SONAME_LIBSSL
         *available = connection->ssl_s ? pSSL_pending(connection->ssl_s) : 0;
+#else
+        FIXME("not supported on this platform\n");
+        return FALSE;
 #endif
     }
     return TRUE;
@@ -1021,7 +1030,7 @@ BOOL NETCON_is_alive(netconn_t *netconn)
     ssize_t len;
     BYTE b;
 
-    len = recv(netconn->socketFD, &b, 1, MSG_PEEK|MSG_DONTWAIT);
+    len = recv(netconn->socket, &b, 1, MSG_PEEK|MSG_DONTWAIT);
     return len == 1 || (len == -1 && errno == EWOULDBLOCK);
 #elif defined(__MINGW32__) || defined(_MSC_VER)
     ULONG mode;
@@ -1029,13 +1038,13 @@ BOOL NETCON_is_alive(netconn_t *netconn)
     char b;
 
     mode = 1;
-    if(!ioctlsocket(netconn->socketFD, FIONBIO, &mode))
+    if(!ioctlsocket(netconn->socket, FIONBIO, &mode))
         return FALSE;
 
-    len = recv(netconn->socketFD, &b, 1, MSG_PEEK);
+    len = recv(netconn->socket, &b, 1, MSG_PEEK);
 
     mode = 0;
-    if(!ioctlsocket(netconn->socketFD, FIONBIO, &mode))
+    if(!ioctlsocket(netconn->socket, FIONBIO, &mode))
         return FALSE;
 
     return len == 1 || (len == -1 && errno == WSAEWOULDBLOCK);
@@ -1058,6 +1067,7 @@ LPCVOID NETCON_GetCert(netconn_t *connection)
     r = X509_to_cert_context(cert);
     return r;
 #else
+    FIXME("not supported on this platform\n");
     return NULL;
 #endif
 }
@@ -1080,6 +1090,7 @@ int NETCON_GetCipherStrength(netconn_t *connection)
     pSSL_CIPHER_get_bits(cipher, &bits);
     return bits;
 #else
+    FIXME("not supported on this platform\n");
     return 0;
 #endif
 }
@@ -1100,7 +1111,7 @@ DWORD NETCON_set_timeout(netconn_t *connection, BOOL send, DWORD value)
         tv.tv_sec = value / 1000;
         tv.tv_usec = (value % 1000) * 1000;
     }
-    result = setsockopt(connection->socketFD, SOL_SOCKET,
+    result = setsockopt(connection->socket, SOL_SOCKET,
                         send ? SO_SNDTIMEO : SO_RCVTIMEO, (void*)&tv,
                         sizeof(tv));
     if (result == -1)

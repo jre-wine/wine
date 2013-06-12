@@ -48,6 +48,11 @@ Sub TestConstantI4(name, val, exval)
     Call ok(getVT(val) = "VT_I4*", "getVT(" & name & ") = " & getVT(val))
 End Sub
 
+Sub TestConstantBSTR(name, val, exval)
+    Call ok(val = exval, name & " =  " & val & " expected " & exval)
+    Call ok(getVT(val) = "VT_BSTR*", "getVT(" & name & ") = " & getVT(val))
+End Sub
+
 TestConstant "vbEmpty", vbEmpty, 0
 TestConstant "vbNull", vbNull, 1
 TestConstant "vbLong", vbLong, 3
@@ -85,6 +90,33 @@ TestConstantI4 "vbMsgBoxHelpButton", vbMsgBoxHelpButton, 16384
 TestConstantI4 "vbMsgBoxSetForeground", vbMsgBoxSetForeground, 65536
 TestConstantI4 "vbMsgBoxRight", vbMsgBoxRight, 524288
 TestConstantI4 "vbMsgBoxRtlReading", vbMsgBoxRtlReading, 1048576
+TestConstant "vbUseDefault", vbUseDefault, -2
+TestConstant "vbBinaryCompare", vbBinaryCompare, 0
+TestConstant "vbTextCompare", vbTextCompare, 1
+TestConstant "vbDatabaseCompare", vbDatabaseCompare, 2
+TestConstant "vbGeneralDate", vbGeneralDate, 0
+TestConstant "vbLongDate", vbLongDate, 1
+TestConstant "vbShortDate", vbShortDate, 2
+TestConstant "vbLongTime", vbLongTime, 3
+TestConstant "vbShortTime", vbShortTime, 4
+TestConstantI4 "vbObjectError", vbObjectError, &h80040000&
+TestConstantI4 "vbBlack", vbBlack, 0
+TestConstantI4 "vbBlue", vbBlue, &hff0000&
+TestConstantI4 "vbCyan", vbCyan, &hffff00&
+TestConstantI4 "vbGreen", vbGreen, &h00ff00&
+TestConstantI4 "vbMagenta", vbMagenta, &hff00ff&
+TestConstantI4 "vbRed", vbRed, &h0000ff&
+TestConstantI4 "vbWhite", vbWhite, &hffffff&
+TestConstantI4 "vbYellow", vbYellow, &h00ffff&
+TestConstantBSTR "vbCr", vbCr, Chr(13)
+TestConstantBSTR "vbCrLf", vbCrLf, Chr(13)&Chr(10)
+TestConstantBSTR "vbNewLine", vbNewLine, Chr(13)&Chr(10)
+TestConstantBSTR "vbFormFeed", vbFormFeed, Chr(12)
+TestConstantBSTR "vbLf", vbLf, Chr(10)
+TestConstantBSTR "vbNullChar", vbNullChar, Chr(0)
+TestConstantBSTR "vbNullString", vbNullString, ""
+TestConstantBSTR "vbTab", vbTab, chr(9)
+TestConstantBSTR "vbVerticalTab", vbVerticalTab, chr(11)
 
 Sub TestCStr(arg, exval)
     dim x
@@ -101,6 +133,7 @@ if isEnglishLang then TestCStr true, "True"
 Call ok(getVT(Chr(120)) = "VT_BSTR", "getVT(Chr(120)) = " & getVT(Chr(120)))
 Call ok(getVT(Chr(255)) = "VT_BSTR", "getVT(Chr(255)) = " & getVT(Chr(255)))
 Call ok(Chr(120) = "x", "Chr(120) = " & Chr(120))
+Call ok(Chr(0) <> "", "Chr(0) = """"")
 
 Call ok(isObject(new EmptyClass), "isObject(new EmptyClass) is not true?")
 Set x = new EmptyClass

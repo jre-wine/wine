@@ -138,6 +138,8 @@ static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
     char mono_lib_path_a[MAX_PATH], mono_etc_path_a[MAX_PATH];
     int trace_size;
     char trace_setting[256];
+    int verbose_size;
+    char verbose_setting[256];
 
     if (This->mono_abi_version <= 0 || This->mono_abi_version > NUM_ABI_VERSIONS)
     {
@@ -204,6 +206,7 @@ static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
         LOAD_MONO_FUNCTION(mono_runtime_object_init);
         LOAD_MONO_FUNCTION(mono_runtime_quit);
         LOAD_MONO_FUNCTION(mono_set_dirs);
+        LOAD_MONO_FUNCTION(mono_set_verbose_level);
         LOAD_MONO_FUNCTION(mono_stringify_assembly_name);
         LOAD_MONO_FUNCTION(mono_string_new);
         LOAD_MONO_FUNCTION(mono_thread_attach);
@@ -254,6 +257,13 @@ static HRESULT load_mono(CLRRuntimeInfo *This, loaded_mono **result)
         {
             (*result)->mono_jit_set_trace_options(trace_setting);
         }
+
+        verbose_size = GetEnvironmentVariableA("WINE_MONO_VERBOSE", verbose_setting, sizeof(verbose_setting));
+
+        if (verbose_size)
+        {
+            (*result)->mono_set_verbose_level(verbose_setting[0] - '0');
+        }
     }
 
     return S_OK;
@@ -303,6 +313,12 @@ static HRESULT CLRRuntimeInfo_GetRuntimeHost(CLRRuntimeInfo *This, RuntimeHost *
 void unload_all_runtimes(void)
 {
     int i;
+    HMODULE handle;
+
+    /* If the only references to mscoree are through dll's that were loaded by
+     * Mono, shutting down the Mono runtime will free mscoree, so take a
+     * reference to prevent that from happening. */
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (const WCHAR *)&unload_all_runtimes, &handle);
 
     for (i=0; i<NUM_ABI_VERSIONS; i++)
     {

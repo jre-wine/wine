@@ -89,8 +89,8 @@ BOOL collect_connections(collect_type_t) DECLSPEC_HIDDEN;
 /* used for netconnection.c stuff */
 typedef struct
 {
-    BOOL useSSL;
-    int socketFD;
+    int socket;
+    BOOL secure;
     void *ssl_s;
     server_t *server;
     DWORD security_flags;

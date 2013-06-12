@@ -51,6 +51,7 @@ static const char elem_test_str[] =
     "<link id=\"linkid\"></head>"
     "<body onload=\"Testing()\">text test<!-- a comment -->"
     "<a id=\"a\" href=\"http://test\" name=\"x\">link</a>"
+    "<label for=\"in\" id=\"labelid\">Label:</label>"
     "<input id=\"in\" class=\"testclass\" tabIndex=\"2\" title=\"test title\" />"
     "<select id=\"s\"><option id=\"x\" value=\"val1\">opt1</option><option id=\"y\">opt2</option></select>"
     "<textarea id=\"X\">text text</textarea>"
@@ -126,7 +127,8 @@ typedef enum {
     ET_DIV,
     ET_META,
     ET_NOSCRIPT,
-    ET_LINK
+    ET_LINK,
+    ET_LABEL
 } elem_type_t;
 
 static const IID * const none_iids[] = {
@@ -201,6 +203,13 @@ static const IID * const input_iids[] = {
     ELEM_IFACES,
     &IID_IHTMLInputElement,
     &IID_IHTMLInputTextElement,
+    &IID_IConnectionPointContainer,
+    NULL
+};
+
+static const IID * const label_iids[] = {
+    ELEM_IFACES,
+    &IID_IHTMLLabelElement,
     &IID_IConnectionPointContainer,
     NULL
 };
@@ -447,7 +456,8 @@ static const elem_type_info_t elem_type_infos[] = {
     {"DIV",       elem_iids,        NULL},
     {"META",      meta_iids,        &DIID_DispHTMLMetaElement},
     {"NOSCRIPT",  elem_iids,        NULL /*&DIID_DispHTMLNoShowElement*/},
-    {"LINK",      link_iids,        &DIID_DispHTMLLinkElement}
+    {"LINK",      link_iids,        &DIID_DispHTMLLinkElement},
+    {"LABEL",     label_iids,       &DIID_DispHTMLLabelElement}
 };
 
 static const char *dbgstr_guid(REFIID riid)
@@ -1370,6 +1380,21 @@ static void _test_anchor_put_name(unsigned line, IUnknown *unk, const char *name
     _test_anchor_name(line, unk, name);
 }
 
+#define test_anchor_hostname(a,h) _test_anchor_hostname(__LINE__,a,h)
+static void _test_anchor_hostname(unsigned line, IUnknown *unk, const char *hostname)
+{
+    IHTMLAnchorElement *anchor = _get_anchor_iface(line, unk);
+    BSTR str;
+    HRESULT hres;
+
+    hres = IHTMLAnchorElement_get_hostname(anchor, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08x\n", hres);
+    if(hostname)
+        ok_(__FILE__,line)(!strcmp_wa(str, hostname), "hostname = %s, expected %s\n", wine_dbgstr_w(str), hostname);
+    else
+        ok_(__FILE__,line)(str == NULL, "hostname = %s, expected NULL\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+}
 
 #define test_option_text(o,t) _test_option_text(__LINE__,o,t)
 static void _test_option_text(unsigned line, IHTMLOptionElement *option, const char *text)
@@ -2609,6 +2634,18 @@ static void test_dynamic_properties(IHTMLElement *elem)
     SysFreeString(attr1);
 }
 
+#define test_attr_node_name(a,b) _test_attr_node_name(__LINE__,a,b)
+static void _test_attr_node_name(unsigned line, IHTMLDOMAttribute *attr, const char *exname)
+{
+    BSTR str;
+    HRESULT hres;
+
+    hres = IHTMLDOMAttribute_get_nodeName(attr, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_nodeName failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(str, exname), "node name is %s, expected %s\n", wine_dbgstr_w(str), exname);
+    SysFreeString(str);
+}
+
 static void test_attr_collection_disp(IDispatch *disp)
 {
     IDispatchEx *dispex;
@@ -2647,10 +2684,9 @@ static void test_attr_collection_disp(IDispatch *disp)
     ok(V_DISPATCH(&var) != NULL, "V_DISPATCH(var) == NULL\n");
     hres = IDispatch_QueryInterface(V_DISPATCH(&var), &IID_IHTMLDOMAttribute, (void**)&attr);
     ok(hres == S_OK, "QueryInterface failed: %08x\n", hres);
-    hres = IHTMLDOMAttribute_get_nodeName(attr, &bstr);
-    ok(hres == S_OK, "get_nodeName failed: %08x\n", hres);
-    ok(!strcmp_wa(bstr, "attr1"), "node name is %s, expected attr1\n", wine_dbgstr_w(bstr));
-    SysFreeString(bstr);
+
+    test_attr_node_name(attr, "attr1");
+
     IHTMLDOMAttribute_Release(attr);
     VariantClear(&var);
 
@@ -4141,6 +4177,48 @@ static void test_create_img_elem(IHTMLDocument2 *doc)
 
         IHTMLImgElement_Release(img);
     }
+}
+
+#define insert_adjacent_elem(a,b,c) _insert_adjacent_elem(__LINE__,a,b,c)
+static void _insert_adjacent_elem(unsigned line, IHTMLElement *parent, const char *where, IHTMLElement *elem)
+{
+    IHTMLElement2 *elem2 = _get_elem2_iface(line, (IUnknown*)parent);
+    IHTMLElement *ret_elem = NULL;
+    BSTR str = a2bstr(where);
+    HRESULT hres;
+
+    hres = IHTMLElement2_insertAdjacentElement(elem2, str, elem, &ret_elem);
+    IHTMLElement2_Release(elem2);
+    SysFreeString(str);
+    ok_(__FILE__,line)(hres == S_OK, "insertAdjacentElement failed: %08x\n", hres);
+    ok_(__FILE__,line)(ret_elem == elem, "ret_elem != elem\n");
+    IHTMLElement_Release(ret_elem);
+}
+
+void test_insert_adjacent_elems(IHTMLDocument2 *doc, IHTMLElement *parent)
+{
+    IHTMLElement *elem, *elem2;
+
+    static const elem_type_t br_br[] = {ET_BR, ET_BR};
+    static const elem_type_t br_div_br[] = {ET_BR, ET_DIV, ET_BR};
+
+    elem = test_create_elem(doc, "BR");
+    insert_adjacent_elem(parent, "BeforeEnd", elem);
+    IHTMLElement_Release(elem);
+
+    test_elem_all((IUnknown*)parent, br_br, 1);
+
+    elem = test_create_elem(doc, "BR");
+    insert_adjacent_elem(parent, "beforeend", elem);
+
+    test_elem_all((IUnknown*)parent, br_br, 2);
+
+    elem2 = test_create_elem(doc, "DIV");
+    insert_adjacent_elem(elem, "beforebegin", elem2);
+    IHTMLElement_Release(elem2);
+    IHTMLElement_Release(elem);
+
+    test_elem_all((IUnknown*)parent, br_div_br, 3);
 }
 
 static IHTMLTxtRange *test_create_body_range(IHTMLDocument2 *doc)
@@ -5688,6 +5766,7 @@ static void test_elems(IHTMLDocument2 *doc)
         ET_BODY,
         ET_COMMENT,
         ET_A,
+        ET_LABEL,
         ET_INPUT,
         ET_SELECT,
         ET_OPTION,
@@ -6024,10 +6103,12 @@ static void test_elems(IHTMLDocument2 *doc)
         /* Change the href */
         test_anchor_put_href((IUnknown*)elem, "http://test1/");
         test_anchor_href((IUnknown*)elem, "http://test1/");
+        test_anchor_hostname((IUnknown*)elem, "test1");
 
         /* Restore the href */
         test_anchor_put_href((IUnknown*)elem, "http://test/");
         test_anchor_href((IUnknown*)elem, "http://test/");
+        test_anchor_hostname((IUnknown*)elem, "test");
 
         /* target */
         test_anchor_get_target((IUnknown*)elem, NULL);
@@ -6366,6 +6447,9 @@ static void test_elems2(IHTMLDocument2 *doc)
         IHTMLElement_Release(elem);
     }
 
+    test_elem_set_innerhtml((IUnknown*)div, "");
+    test_insert_adjacent_elems(doc, div);
+
     test_elem_set_innerhtml((IUnknown*)div,
             "<form id=\"form\"><input type=\"button\" /><div><input type=\"text\" /></div></textarea>");
     elem = get_elem_by_id(doc, "form", TRUE);
@@ -6399,6 +6483,7 @@ static void test_create_elems(IHTMLDocument2 *doc)
 {
     IHTMLElement *elem, *body, *elem2;
     IHTMLDOMNode *node, *node2, *node3, *comment;
+    IHTMLDOMAttribute *attr;
     IHTMLDocument5 *doc5;
     IDispatch *disp;
     VARIANT var;
@@ -6488,6 +6573,20 @@ static void test_create_elems(IHTMLDocument2 *doc)
             test_comment_attrs((IUnknown*)comment);
 
             IHTMLDOMNode_Release(comment);
+        }
+
+        str = a2bstr("Test");
+        hres = IHTMLDocument5_createAttribute(doc5, str, &attr);
+        ok(hres == S_OK, "createAttribute dailed: %08x\n", hres);
+        SysFreeString(str);
+        if(SUCCEEDED(hres)) {
+            test_disp((IUnknown*)attr, &DIID_DispHTMLDOMAttribute, "[object]");
+            test_ifaces((IUnknown*)attr, attr_iids);
+            test_no_iface((IUnknown*)attr, &IID_IHTMLDOMNode);
+
+            test_attr_node_name(attr, "Test");
+
+            IHTMLDOMAttribute_Release(attr);
         }
 
         IHTMLDocument5_Release(doc5);

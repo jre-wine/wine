@@ -118,14 +118,24 @@ extern void macdrv_window_rejected_focus(const struct macdrv_event *event) DECLS
 extern void macdrv_beep(void) DECLSPEC_HIDDEN;
 
 
+/* cursor */
+extern void macdrv_set_cursor(CFStringRef name, CFArrayRef frames) DECLSPEC_HIDDEN;
+extern int macdrv_get_cursor_position(CGPoint *pos) DECLSPEC_HIDDEN;
+extern int macdrv_set_cursor_position(CGPoint pos) DECLSPEC_HIDDEN;
+extern int macdrv_clip_cursor(CGRect rect) DECLSPEC_HIDDEN;
+
+
 /* display */
 extern int macdrv_get_displays(struct macdrv_display** displays, int* count) DECLSPEC_HIDDEN;
 extern void macdrv_free_displays(struct macdrv_display* displays) DECLSPEC_HIDDEN;
+extern int macdrv_set_display_mode(const struct macdrv_display* display,
+                                   CGDisplayModeRef display_mode) DECLSPEC_HIDDEN;
 
 
 /* event */
 enum {
     APP_DEACTIVATED,
+    DISPLAYS_CHANGED,
     KEY_PRESS,
     KEY_RELEASE,
     KEYBOARD_CHANGED,
@@ -148,6 +158,9 @@ typedef struct macdrv_event {
     int                 type;
     macdrv_window       window;
     union {
+        struct {
+            int activating;
+        }                                           displays_changed;
         struct {
             CGKeyCode                   keycode;
             CGEventFlags                modifiers;

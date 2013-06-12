@@ -63,6 +63,17 @@ static BOOL frame_intersects_screens(NSRect frame, NSArray* screens)
 }
 
 
+static NSScreen* screen_covered_by_rect(NSRect rect, NSArray* screens)
+{
+    for (NSScreen* screen in screens)
+    {
+        if (NSContainsRect(rect, [screen frame]))
+            return screen;
+    }
+    return nil;
+}
+
+
 /* We rely on the supposedly device-dependent modifier flags to distinguish the
    keys on the left side of the keyboard from those on the right.  Some event
    sources don't set those device-depdendent flags.  If we see a device-independent
@@ -114,7 +125,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
 @property (nonatomic) BOOL disabled;
 @property (nonatomic) BOOL noActivate;
-@property (nonatomic) BOOL floating;
+@property (readwrite, nonatomic) BOOL floating;
 @property (retain, nonatomic) NSWindow* latentParentWindow;
 
 @property (nonatomic) void* hwnd;
@@ -131,7 +142,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 @property (nonatomic) CGFloat colorKeyRed, colorKeyGreen, colorKeyBlue;
 @property (nonatomic) BOOL usePerPixelAlpha;
 
-    + (void) flipRect:(NSRect*)rect;
+@property (readwrite, nonatomic) NSInteger levelWhenActive;
 
 @end
 
@@ -231,6 +242,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     @synthesize shape, shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
+    @synthesize levelWhenActive;
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
@@ -241,7 +253,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         WineContentView* contentView;
         NSTrackingArea* trackingArea;
 
-        [self flipRect:&window_frame];
+        [NSApp flipRect:&window_frame];
 
         window = [[[self alloc] initWithContentRect:window_frame
                                           styleMask:style_mask_for_features(wf)
@@ -250,7 +262,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
         if (!window) return nil;
         window->normalStyleMask = [window styleMask];
-        window->forceNextMouseMoveAbsolute = TRUE;
 
         /* Standardize windows to eliminate differences between titled and
            borderless windows and between NSWindow and NSPanel. */
@@ -260,6 +271,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [window disableCursorRects];
         [window setShowsResizeIndicator:NO];
         [window setHasShadow:wf->shadow];
+        [window setAcceptsMouseMovedEvents:YES];
         [window setColorSpace:[NSColorSpace genericRGBColorSpace]];
         [window setDelegate:window];
         window.hwnd = hwnd;
@@ -270,9 +282,10 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             return nil;
         [contentView setAutoresizesSubviews:NO];
 
+        /* We use tracking areas in addition to setAcceptsMouseMovedEvents:YES
+           because they give us mouse moves in the background. */
         trackingArea = [[[NSTrackingArea alloc] initWithRect:[contentView bounds]
-                                                     options:(NSTrackingMouseEnteredAndExited |
-                                                              NSTrackingMouseMoved |
+                                                     options:(NSTrackingMouseMoved |
                                                               NSTrackingActiveAlways |
                                                               NSTrackingInVisibleRect)
                                                        owner:window
@@ -292,11 +305,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [latentParentWindow release];
         [shape release];
         [super dealloc];
-    }
-
-    + (void) flipRect:(NSRect*)rect
-    {
-        rect->origin.y = NSMaxY([[[NSScreen screens] objectAtIndex:0] frame]) - NSMaxY(*rect);
     }
 
     - (void) adjustFeaturesForState
@@ -321,18 +329,77 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [self setHasShadow:wf->shadow];
     }
 
-    - (void) setMacDrvState:(const struct macdrv_window_state*)state
+    - (void) adjustWindowLevel
     {
         NSInteger level;
+        BOOL fullscreen, captured;
+        NSScreen* screen;
+        NSUInteger index;
+        WineWindow* other = nil;
+
+        screen = screen_covered_by_rect([self frame], [NSScreen screens]);
+        fullscreen = (screen != nil);
+        captured = (screen || [self screen]) && [NSApp areDisplaysCaptured];
+
+        if (captured || fullscreen)
+        {
+            if (captured)
+                level = CGShieldingWindowLevel() + 1; /* Need +1 or we don't get mouse moves */
+            else
+                level = NSMainMenuWindowLevel + 1;
+
+            if (self.floating)
+                level++;
+        }
+        else if (self.floating)
+            level = NSFloatingWindowLevel;
+        else
+            level = NSNormalWindowLevel;
+
+        index = [[NSApp orderedWineWindows] indexOfObjectIdenticalTo:self];
+        if (index != NSNotFound && index + 1 < [[NSApp orderedWineWindows] count])
+        {
+            other = [[NSApp orderedWineWindows] objectAtIndex:index + 1];
+            if (level < [other level])
+                level = [other level];
+        }
+
+        if (level != [self level])
+        {
+            [self setLevelWhenActive:level];
+
+            /* Setting the window level above has moved this window to the front
+               of all other windows at the same level.  We need to move it
+               back into its proper place among other windows of that level.
+               Also, any windows which are supposed to be in front of it had
+               better have the same or higher window level.  If not, bump them
+               up. */
+            if (index != NSNotFound)
+            {
+                for (; index > 0; index--)
+                {
+                    other = [[NSApp orderedWineWindows] objectAtIndex:index - 1];
+                    if ([other level] < level)
+                        [other setLevelWhenActive:level];
+                    else
+                    {
+                        [self orderWindow:NSWindowBelow relativeTo:[other windowNumber]];
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    - (void) setMacDrvState:(const struct macdrv_window_state*)state
+    {
         NSWindowCollectionBehavior behavior;
 
         self.disabled = state->disabled;
         self.noActivate = state->no_activate;
 
         self.floating = state->floating;
-        level = state->floating ? NSFloatingWindowLevel : NSNormalWindowLevel;
-        if (level != [self level])
-            [self setLevel:level];
+        [self adjustWindowLevel];
 
         behavior = NSWindowCollectionBehaviorDefault;
         if (state->excluded_by_expose)
@@ -380,12 +447,42 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             [NSApp transformProcessToForeground];
 
             if (prev)
+            {
+                /* Make sure that windows that should be above this one really are.
+                   This is necessary since a full-screen window gets a boost to its
+                   window level to be in front of the menu bar and Dock and that moves
+                   it out of the z-order that Win32 would otherwise establish. */
+                if ([prev level] < [self level])
+                {
+                    NSUInteger index = [[NSApp orderedWineWindows] indexOfObjectIdenticalTo:prev];
+                    if (index != NSNotFound)
+                    {
+                        [prev setLevelWhenActive:[self level]];
+                        for (; index > 0; index--)
+                        {
+                            WineWindow* other = [[NSApp orderedWineWindows] objectAtIndex:index - 1];
+                            if ([other level] < [self level])
+                                [other setLevelWhenActive:[self level]];
+                        }
+                    }
+                }
                 [self orderWindow:NSWindowBelow relativeTo:[prev windowNumber]];
+                [NSApp wineWindow:self ordered:NSWindowBelow relativeTo:prev];
+            }
             else
+            {
+                /* Similarly, make sure this window is really above what it should be. */
+                if (next && [next level] > [self level])
+                    [self setLevelWhenActive:[next level]];
                 [self orderWindow:NSWindowAbove relativeTo:[next windowNumber]];
+                [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:next];
+            }
             if (latentParentWindow)
             {
+                if ([latentParentWindow level] > [self level])
+                    [self setLevelWhenActive:[latentParentWindow level]];
                 [latentParentWindow addChildWindow:self ordered:NSWindowAbove];
+                [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:latentParentWindow];
                 self.latentParentWindow = nil;
             }
 
@@ -405,8 +502,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     {
         self.latentParentWindow = [self parentWindow];
         [latentParentWindow removeChildWindow:self];
-        forceNextMouseMoveAbsolute = TRUE;
         [self orderOut:nil];
+        [NSApp wineWindow:self ordered:NSWindowOut relativeTo:nil];
         [NSApp removeWindowsItem:self];
     }
 
@@ -420,7 +517,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
         /* Origin is (left, top) in a top-down space.  Need to convert it to
            (left, bottom) in a bottom-up space. */
-        [[self class] flipRect:&contentRect];
+        [NSApp flipRect:&contentRect];
 
         if (on_screen)
         {
@@ -429,21 +526,34 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                 [self doOrderOut];
         }
 
-        oldFrame = [self frame];
-        frame = [self frameRectForContentRect:contentRect];
-        if (!NSEqualRects(frame, oldFrame))
+        if (!NSIsEmptyRect(contentRect))
         {
-            if (NSEqualSizes(frame.size, oldFrame.size))
-                [self setFrameOrigin:frame.origin];
-            else
-                [self setFrame:frame display:YES];
+            oldFrame = [self frame];
+            frame = [self frameRectForContentRect:contentRect];
+            if (!NSEqualRects(frame, oldFrame))
+            {
+                if (NSEqualSizes(frame.size, oldFrame.size))
+                    [self setFrameOrigin:frame.origin];
+                else
+                    [self setFrame:frame display:YES];
+            }
         }
 
         if (on_screen)
         {
+            [self adjustWindowLevel];
+
             /* In case Cocoa adjusted the frame we tried to set, generate a frame-changed
                event.  The back end will ignore it if nothing actually changed. */
             [self windowDidResize:nil];
+        }
+        else
+        {
+            /* The back end is establishing a new window size and position.  It's
+               not interested in any stale events regarding those that may be sitting
+               in the queue. */
+            [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_FRAME_CHANGED)
+                                   forWindow:self];
         }
 
         return on_screen;
@@ -456,7 +566,12 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             [[self parentWindow] removeChildWindow:self];
             self.latentParentWindow = nil;
             if ([self isVisible] && parent)
+            {
+                if ([parent level] > [self level])
+                    [self setLevelWhenActive:[parent level]];
                 [parent addChildWindow:self ordered:NSWindowAbove];
+                [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:parent];
+            }
             else
                 self.latentParentWindow = parent;
         }
@@ -544,13 +659,30 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             [self setFrame:frame display:YES];
         }
 
+        if ([[NSApp orderedWineWindows] count])
+        {
+            WineWindow* front;
+            if (self.floating)
+                front = [[NSApp orderedWineWindows] objectAtIndex:0];
+            else
+            {
+                for (front in [NSApp orderedWineWindows])
+                    if (!front.floating) break;
+            }
+            if (front && [front levelWhenActive] > [self levelWhenActive])
+                [self setLevelWhenActive:[front levelWhenActive]];
+        }
         [self orderFront:nil];
+        [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:nil];
         causing_becomeKeyWindow = TRUE;
         [self makeKeyWindow];
         causing_becomeKeyWindow = FALSE;
         if (latentParentWindow)
         {
+            if ([latentParentWindow level] > [self level])
+                [self setLevelWhenActive:[latentParentWindow level]];
             [latentParentWindow addChildWindow:self ordered:NSWindowAbove];
+            [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:latentParentWindow];
             self.latentParentWindow = nil;
         }
         if (![self isExcludedFromWindowsMenu])
@@ -600,11 +732,11 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                 event:theEvent];
     }
 
-    - (void) postMouseMovedEvent:(NSEvent *)theEvent
+    - (void) postMouseMovedEvent:(NSEvent *)theEvent absolute:(BOOL)absolute
     {
         macdrv_event event;
 
-        if (forceNextMouseMoveAbsolute)
+        if (absolute)
         {
             CGPoint point = CGEventGetLocation([theEvent CGEvent]);
 
@@ -614,8 +746,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
             mouseMoveDeltaX = 0;
             mouseMoveDeltaY = 0;
-
-            forceNextMouseMoveAbsolute = FALSE;
         }
         else
         {
@@ -642,6 +772,14 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         }
     }
 
+    - (void) setLevelWhenActive:(NSInteger)level
+    {
+        levelWhenActive = level;
+        if (([NSApp isActive] || level <= NSFloatingWindowLevel) &&
+            level != [self level])
+            [self setLevel:level];
+    }
+
 
     /*
      * ---------- NSWindow method overrides ----------
@@ -656,6 +794,17 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     - (BOOL) canBecomeMainWindow
     {
         return [self canBecomeKeyWindow];
+    }
+
+    - (NSRect) constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen
+    {
+        // If a window is sized to completely cover a screen, then it's in
+        // full-screen mode.  In that case, we don't allow NSWindow to constrain
+        // it.
+        NSRect contentRect = [self contentRectForFrameRect:frameRect];
+        if (!screen_covered_by_rect(contentRect, [NSScreen screens]))
+            frameRect = [super constrainFrameRect:frameRect toScreen:screen];
+        return frameRect;
     }
 
     - (BOOL) isExcludedFromWindowsMenu
@@ -689,6 +838,9 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         {
             if ([event type] == NSLeftMouseDown)
             {
+                NSWindowButton windowButton;
+                BOOL broughtWindowForward = TRUE;
+
                 /* Since our windows generally claim they can't be made key, clicks
                    in their title bars are swallowed by the theme frame stuff.  So,
                    we hook directly into the event stream and assume that any click
@@ -696,6 +848,27 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                    accept. */
                 if (![self isKeyWindow] && !self.disabled && !self.noActivate)
                     [NSApp windowGotFocus:self];
+
+                /* Any left-click on our window anyplace other than the close or
+                   minimize buttons will bring it forward. */
+                for (windowButton = NSWindowCloseButton;
+                     windowButton <= NSWindowMiniaturizeButton;
+                     windowButton++)
+                {
+                    NSButton* button = [[event window] standardWindowButton:windowButton];
+                    if (button)
+                    {
+                        NSPoint point = [button convertPoint:[event locationInWindow] fromView:nil];
+                        if ([button mouse:point inRect:[button bounds]])
+                        {
+                            broughtWindowForward = FALSE;
+                            break;
+                        }
+                    }
+                }
+
+                if (broughtWindowForward)
+                    [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:nil];
             }
 
             [super sendEvent:event];
@@ -778,14 +951,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             }
         }
     }
-
-    - (void) mouseEntered:(NSEvent *)theEvent { forceNextMouseMoveAbsolute = TRUE; }
-    - (void) mouseExited:(NSEvent *)theEvent  { forceNextMouseMoveAbsolute = TRUE; }
-
-    - (void) mouseMoved:(NSEvent *)theEvent         { [self postMouseMovedEvent:theEvent]; }
-    - (void) mouseDragged:(NSEvent *)theEvent       { [self postMouseMovedEvent:theEvent]; }
-    - (void) rightMouseDragged:(NSEvent *)theEvent  { [self postMouseMovedEvent:theEvent]; }
-    - (void) otherMouseDragged:(NSEvent *)theEvent  { [self postMouseMovedEvent:theEvent]; }
 
     - (void) scrollWheel:(NSEvent *)theEvent
     {
@@ -897,6 +1062,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         }
 
         ignore_windowDeminiaturize = FALSE;
+
+        [NSApp wineWindow:self ordered:NSWindowAbove relativeTo:nil];
     }
 
     - (void)windowDidMove:(NSNotification *)notification
@@ -920,7 +1087,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         macdrv_event event;
         NSRect frame = [self contentRectForFrameRect:[self frame]];
 
-        [[self class] flipRect:&frame];
+        [NSApp flipRect:&frame];
 
         /* Coalesce events by discarding any previous ones still in the queue. */
         [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_FRAME_CHANGED)
@@ -1140,7 +1307,7 @@ void macdrv_get_cocoa_window_frame(macdrv_window w, CGRect* out_frame)
         NSRect frame;
 
         frame = [window contentRectForFrameRect:[window frame]];
-        [[window class] flipRect:&frame];
+        [NSApp flipRect:&frame];
         *out_frame = NSRectToCGRect(frame);
     });
 }

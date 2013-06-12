@@ -66,7 +66,6 @@
 #include "sspi.h"
 #include "wincrypt.h"
 #include "winuser.h"
-#include "cryptuiapi.h"
 
 #include "internet.h"
 #include "wine/debug.h"
@@ -1969,7 +1968,7 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             info->Flags |= IDSI_FLAG_KEEP_ALIVE;
         if (req->proxy)
             info->Flags |= IDSI_FLAG_PROXY;
-        if (req->netconn->useSSL)
+        if (req->netconn->secure)
             info->Flags |= IDSI_FLAG_SECURE;
 
         return ERROR_SUCCESS;
@@ -2774,10 +2773,8 @@ static void HTTP_ReceiveRequestData(http_request_t *req, BOOL first_notif, DWORD
 
     mode = first_notif && req->read_size ? READMODE_NOBLOCK : READMODE_ASYNC;
     res = refill_read_buffer(req, mode, &read);
-    if(res == ERROR_SUCCESS && !first_notif)
+    if(res == ERROR_SUCCESS)
         avail = get_avail_data(req);
-    if(ret_size)
-        *ret_size = get_avail_data(req);
 
     LeaveCriticalSection( &req->read_section );
 
@@ -2786,10 +2783,17 @@ static void HTTP_ReceiveRequestData(http_request_t *req, BOOL first_notif, DWORD
         http_release_netconn(req, FALSE);
     }
 
-    if(res == ERROR_SUCCESS)
-        send_request_complete(req, req->session->hdr.dwInternalFlags & INET_OPENURL ? (DWORD_PTR)req->hdr.hInternet : 1, avail);
-    else
+    if(res != ERROR_SUCCESS) {
         send_request_complete(req, 0, res);
+        return;
+    }
+
+    if(ret_size)
+        *ret_size = avail;
+    if(first_notif)
+        avail = 0;
+
+    send_request_complete(req, req->session->hdr.dwInternalFlags & INET_OPENURL ? (DWORD_PTR)req->hdr.hInternet : 1, avail);
 }
 
 /* read data from the http connection (the read section must be held) */
@@ -6106,49 +6110,4 @@ BOOL WINAPI IsHostInProxyBypassList(DWORD flags, LPCSTR szHost, DWORD length)
 {
    FIXME("STUB: flags=%d host=%s length=%d\n",flags,szHost,length);
    return FALSE;
-}
-
-/***********************************************************************
- *           InternetShowSecurityInfoByURLA (@)
- */
-BOOL WINAPI InternetShowSecurityInfoByURLA(LPCSTR url, HWND window)
-{
-   FIXME("stub: %s %p\n", url, window);
-   return FALSE;
-}
-
-/***********************************************************************
- *           InternetShowSecurityInfoByURLW (@)
- */
-BOOL WINAPI InternetShowSecurityInfoByURLW(LPCWSTR url, HWND window)
-{
-   FIXME("stub: %s %p\n", debugstr_w(url), window);
-   return FALSE;
-}
-
-/***********************************************************************
- *           ShowX509EncodedCertificate (@)
- */
-DWORD WINAPI ShowX509EncodedCertificate(HWND parent, LPBYTE cert, DWORD len)
-{
-    PCCERT_CONTEXT certContext = CertCreateCertificateContext(X509_ASN_ENCODING,
-        cert, len);
-    DWORD ret;
-
-    if (certContext)
-    {
-        CRYPTUI_VIEWCERTIFICATE_STRUCTW view;
-
-        memset(&view, 0, sizeof(view));
-        view.hwndParent = parent;
-        view.pCertContext = certContext;
-        if (CryptUIDlgViewCertificateW(&view, NULL))
-            ret = ERROR_SUCCESS;
-        else
-            ret = GetLastError();
-        CertFreeCertificateContext(certContext);
-    }
-    else
-        ret = GetLastError();
-    return ret;
 }
