@@ -1,8 +1,13 @@
-wine-unstable (1.5.23-1) UNRELEASED; urgency=low
+wine-unstable (1.5.23-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.23, released Feb 1, 2013.
+    - HTTPS support no longer dependent on OpenSSL.
+    - Support for event handling in the Mac driver.
+    - A functional Netstat built-in application.
+    - A bunch of C++ runtime math functions.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Wed, 12 Jun 2013 00:49:56 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 12 Jun 2013 00:50:03 +0000
 
 wine-unstable (1.5.22-1) unstable; urgency=low
 
