@@ -52,6 +52,7 @@ static const WCHAR headW[]   = {'H','E','A','D',0};
 static const WCHAR slashW[]  = {'/',0};
 static const WCHAR http1_0[] = {'H','T','T','P','/','1','.','0',0};
 static const WCHAR http1_1[] = {'H','T','T','P','/','1','.','1',0};
+static const WCHAR chunkedW[] = {'c','h','u','n','k','e','d',0};
 
 typedef struct _object_header_t object_header_t;
 
@@ -163,6 +164,10 @@ typedef struct
     LPWSTR status_text;
     DWORD content_length; /* total number of bytes to be read (per chunk) */
     DWORD content_read;   /* bytes read so far */
+    BOOL  read_chunked;   /* are we reading in chunked mode? */
+    DWORD read_pos;       /* current read position in read_buf */
+    DWORD read_size;      /* valid data size in read_buf */
+    char  read_buf[4096]; /* buffer for already read but not returned data */
     header_t *headers;
     DWORD num_headers;
     WCHAR **accept_types;
@@ -230,7 +235,6 @@ BOOL netconn_close( netconn_t * ) DECLSPEC_HIDDEN;
 BOOL netconn_connect( netconn_t *, const struct sockaddr *, unsigned int, int ) DECLSPEC_HIDDEN;
 BOOL netconn_connected( netconn_t * ) DECLSPEC_HIDDEN;
 BOOL netconn_create( netconn_t *, int, int, int ) DECLSPEC_HIDDEN;
-BOOL netconn_get_next_line( netconn_t *, char *, DWORD * ) DECLSPEC_HIDDEN;
 BOOL netconn_init( netconn_t * ) DECLSPEC_HIDDEN;
 void netconn_unload( void ) DECLSPEC_HIDDEN;
 BOOL netconn_query_data_available( netconn_t *, DWORD * ) DECLSPEC_HIDDEN;

@@ -667,17 +667,7 @@ BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd
         SIZE_T size, cread;
         BOOL res, eof;
 
-        if (flags & ~(MSG_PEEK | MSG_WAITALL))
-            FIXME("SSL_read does not support the following flags: %08x\n", flags);
-
-        if (flags & MSG_PEEK && conn->peek_msg)
-        {
-            if (len < conn->peek_len) FIXME("buffer isn't big enough, should we wrap?\n");
-            *recvd = min( len, conn->peek_len );
-            memcpy( buf, conn->peek_msg, *recvd );
-            return TRUE;
-        }
-        else if (conn->peek_msg)
+        if (conn->peek_msg)
         {
             *recvd = min( len, conn->peek_len );
             memcpy( buf, conn->peek_msg, *recvd );
@@ -691,7 +681,7 @@ BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd
                 conn->peek_msg = NULL;
             }
             /* check if we have enough data from the peek buffer */
-            if (!(flags & MSG_WAITALL) || (*recvd == len)) return TRUE;
+            if (!(flags & MSG_WAITALL) || *recvd == len) return TRUE;
         }
         size = *recvd;
 
@@ -711,14 +701,6 @@ BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd
 
             size += cread;
         }while(!size || ((flags & MSG_WAITALL) && size < len));
-
-        if(size && (flags & MSG_PEEK)) {
-            conn->peek_msg_mem = conn->peek_msg = heap_alloc(size);
-            if(!conn->peek_msg)
-                return FALSE;
-
-            memcpy(conn->peek_msg, buf, size);
-        }
 
         TRACE("received %ld bytes\n", size);
         *recvd = size;
@@ -750,81 +732,6 @@ BOOL netconn_query_data_available( netconn_t *conn, DWORD *available )
     if (!(ret = ioctlsocket( conn->socket, FIONREAD, &unread ))) *available = unread;
 #endif
     return TRUE;
-}
-
-BOOL netconn_get_next_line( netconn_t *conn, char *buffer, DWORD *buflen )
-{
-    struct pollfd pfd;
-    BOOL ret = FALSE;
-    DWORD recvd = 0;
-
-    if (!netconn_connected( conn )) return FALSE;
-
-    if (conn->secure)
-    {
-        while (recvd < *buflen)
-        {
-            int dummy;
-            if (!netconn_recv( conn, &buffer[recvd], 1, 0, &dummy ))
-            {
-                set_last_error( ERROR_CONNECTION_ABORTED );
-                break;
-            }
-            if (buffer[recvd] == '\n')
-            {
-                ret = TRUE;
-                break;
-            }
-            if (buffer[recvd] != '\r') recvd++;
-        }
-        if (ret)
-        {
-            buffer[recvd++] = 0;
-            *buflen = recvd;
-            TRACE("received line %s\n", debugstr_a(buffer));
-        }
-        return ret;
-    }
-
-    pfd.fd = conn->socket;
-    pfd.events = POLLIN;
-    while (recvd < *buflen)
-    {
-        int timeout, res;
-        struct timeval tv;
-        socklen_t len = sizeof(tv);
-
-        if ((res = getsockopt( conn->socket, SOL_SOCKET, SO_RCVTIMEO, (void*)&tv, &len ) != -1))
-            timeout = tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        else
-            timeout = -1;
-        if (poll( &pfd, 1, timeout ) > 0)
-        {
-            if ((res = recv( conn->socket, &buffer[recvd], 1, 0 )) <= 0)
-            {
-                if (res == -1) set_last_error( sock_get_error( errno ) );
-                break;
-            }
-            if (buffer[recvd] == '\n')
-            {
-                ret = TRUE;
-                break;
-            }
-            if (buffer[recvd] != '\r') recvd++;
-        }
-        else
-        {
-            set_last_error( ERROR_WINHTTP_TIMEOUT );
-            break;
-        }
-    }
-    if (ret)
-    {
-        buffer[recvd++] = 0;
-        *buflen = recvd;
-        TRACE("received line %s\n", debugstr_a(buffer));
-    }
-    return ret;
 }
 
 DWORD netconn_set_timeout( netconn_t *netconn, BOOL send, int value )

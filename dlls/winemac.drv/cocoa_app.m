@@ -58,6 +58,7 @@ int macdrv_err_on;
 @property (readwrite, copy, nonatomic) NSEvent* lastFlagsChanged;
 @property (copy, nonatomic) NSArray* cursorFrames;
 @property (retain, nonatomic) NSTimer* cursorTimer;
+@property (retain, nonatomic) NSImage* applicationIcon;
 
     static void PerformRequest(void *info);
 
@@ -67,7 +68,7 @@ int macdrv_err_on;
 @implementation WineApplication
 
     @synthesize keyboardType, lastFlagsChanged;
-    @synthesize orderedWineWindows;
+    @synthesize orderedWineWindows, applicationIcon;
     @synthesize cursorFrames, cursorTimer;
 
     - (id) init
@@ -111,6 +112,7 @@ int macdrv_err_on;
 
     - (void) dealloc
     {
+        [applicationIcon release];
         [warpRecords release];
         [cursorTimer release];
         [cursorFrames release];
@@ -169,6 +171,8 @@ int macdrv_err_on;
 
             [self setMainMenu:mainMenu];
             [self setWindowsMenu:submenu];
+
+            [self setApplicationIconImage:self.applicationIcon];
         }
     }
 
@@ -631,6 +635,86 @@ int macdrv_err_on;
         }
     }
 
+    - (void) setApplicationIconFromCGImageArray:(NSArray*)images
+    {
+        NSImage* nsimage = nil;
+
+        if ([images count])
+        {
+            NSSize bestSize = NSZeroSize;
+            id image;
+
+            nsimage = [[[NSImage alloc] initWithSize:NSZeroSize] autorelease];
+
+            for (image in images)
+            {
+                CGImageRef cgimage = (CGImageRef)image;
+                NSBitmapImageRep* imageRep = [[NSBitmapImageRep alloc] initWithCGImage:cgimage];
+                if (imageRep)
+                {
+                    NSSize size = [imageRep size];
+
+                    [nsimage addRepresentation:imageRep];
+                    [imageRep release];
+
+                    if (MIN(size.width, size.height) > MIN(bestSize.width, bestSize.height))
+                        bestSize = size;
+                }
+            }
+
+            if ([[nsimage representations] count] && bestSize.width && bestSize.height)
+                [nsimage setSize:bestSize];
+            else
+                nsimage = nil;
+        }
+
+        self.applicationIcon = nsimage;
+        [self setApplicationIconImage:nsimage];
+    }
+
+    - (void) handleCommandTab
+    {
+        if ([self isActive])
+        {
+            NSRunningApplication* thisApp = [NSRunningApplication currentApplication];
+            NSRunningApplication* app;
+            NSRunningApplication* otherValidApp = nil;
+
+            if ([originalDisplayModes count])
+            {
+                CGRestorePermanentDisplayConfiguration();
+                CGReleaseAllDisplays();
+                [originalDisplayModes removeAllObjects];
+            }
+
+            for (app in [[NSWorkspace sharedWorkspace] runningApplications])
+            {
+                if (![app isEqual:thisApp] && !app.terminated &&
+                    app.activationPolicy == NSApplicationActivationPolicyRegular)
+                {
+                    if (!app.hidden)
+                    {
+                        // There's another visible app.  Just hide ourselves and let
+                        // the system activate the other app.
+                        [self hide:self];
+                        return;
+                    }
+
+                    if (!otherValidApp)
+                        otherValidApp = app;
+                }
+            }
+
+            // Didn't find a visible GUI app.  Try the Finder or, if that's not
+            // running, the first hidden GUI app.  If even that doesn't work, we
+            // just fail to switch and remain the active app.
+            app = [[NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.finder"] lastObject];
+            if (!app) app = otherValidApp;
+            [app unhide];
+            [app activateWithOptions:0];
+        }
+    }
+
     /*
      * ---------- Cursor clipping methods ----------
      *
@@ -1043,6 +1127,19 @@ int macdrv_err_on;
             // Make sure next mouse move event starts over from an absolute baseline.
             forceNextMouseMoveAbsolute = TRUE;
         }
+        else if (type == NSKeyDown && ![anEvent isARepeat] && [anEvent keyCode] == kVK_Tab)
+        {
+            NSUInteger modifiers = [anEvent modifierFlags];
+            if ((modifiers & NSCommandKeyMask) &&
+                !(modifiers & (NSControlKeyMask | NSAlternateKeyMask)))
+            {
+                // Command-Tab and Command-Shift-Tab would normally be intercepted
+                // by the system to switch applications.  If we're seeing it, it's
+                // presumably because we've captured the displays, preventing
+                // normal application switching.  Do it manually.
+                [self handleCommandTab];
+            }
+        }
     }
 
 
@@ -1421,4 +1518,21 @@ int macdrv_clip_cursor(CGRect rect)
     });
 
     return ret;
+}
+
+/***********************************************************************
+ *              macdrv_set_application_icon
+ *
+ * Set the application icon.  The images array contains CGImages.  If
+ * there are more than one, then they represent different sizes or
+ * color depths from the icon resource.  If images is NULL or empty,
+ * restores the default application image.
+ */
+void macdrv_set_application_icon(CFArrayRef images)
+{
+    NSArray* imageArray = (NSArray*)images;
+
+    OnMainThreadAsync(^{
+        [NSApp setApplicationIconFromCGImageArray:imageArray];
+    });
 }

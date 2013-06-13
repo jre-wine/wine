@@ -1708,6 +1708,10 @@ typedef struct _CONTEXT {
 	ULONG Cpsr;
 } CONTEXT;
 
+BOOLEAN CDECL            RtlAddFunctionTable(RUNTIME_FUNCTION*,DWORD,DWORD);
+BOOLEAN CDECL            RtlDeleteFunctionTable(RUNTIME_FUNCTION*);
+PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry(ULONG_PTR,DWORD*,UNWIND_HISTORY_TABLE*);
+
 #endif /* __arm__ */
 
 #ifdef __aarch64__
@@ -3436,6 +3440,7 @@ typedef struct _IMAGE_DEBUG_DIRECTORY {
 #define IMAGE_DEBUG_TYPE_OMAP_FROM_SRC  8
 #define IMAGE_DEBUG_TYPE_BORLAND        9
 #define IMAGE_DEBUG_TYPE_RESERVED10    10
+#define IMAGE_DEBUG_TYPE_CLSID         11
 
 typedef enum ReplacesCorHdrNumericDefines
 {

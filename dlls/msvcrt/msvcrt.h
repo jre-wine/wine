@@ -42,11 +42,17 @@
 #include "winbase.h"
 
 #define MSVCRT_LONG_MAX    0x7fffffffL
+#define MSVCRT_LONG_MIN    (-MSVCRT_LONG_MAX-1)
 #define MSVCRT_ULONG_MAX   0xffffffffUL
 #define MSVCRT_I64_MAX    (((__int64)0x7fffffff << 32) | 0xffffffff)
 #define MSVCRT_I64_MIN    (-MSVCRT_I64_MAX-1)
 #define MSVCRT_UI64_MAX   (((unsigned __int64)0xffffffff << 32) | 0xffffffff)
 #define MSVCRT_MB_LEN_MAX 2
+#ifdef _WIN64
+#define MSVCRT_SIZE_MAX MSVCRT_UI64_MAX
+#else
+#define MSVCRT_SIZE_MAX MSVCRT_ULONG_MAX
+#endif
 
 #define MSVCRT__MAX_DRIVE  3
 #define MSVCRT__MAX_DIR    256
@@ -945,6 +951,7 @@ int            __cdecl _getch(void);
 int            __cdecl _ismbblead(unsigned int);
 int            __cdecl _ismbclegal(unsigned int c);
 int            __cdecl _ismbstrail(const unsigned char* start, const unsigned char* str);
+int            __cdecl MSVCRT_mbtowc(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 MSVCRT_size_t  __cdecl MSVCRT_mbstowcs(MSVCRT_wchar_t*,const char*,MSVCRT_size_t);
 MSVCRT_intptr_t __cdecl MSVCRT__spawnve(int,const char*,const char* const *,const char* const *);
 MSVCRT_intptr_t __cdecl MSVRT__spawnvpe(int,const char*,const char* const *,const char* const *);
@@ -981,6 +988,7 @@ int __cdecl      MSVCRT__toupper_l(int,MSVCRT__locale_t);
 int __cdecl      MSVCRT__tolower_l(int,MSVCRT__locale_t);
 int __cdecl      MSVCRT__strnicoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
 int __cdecl      MSVCRT_strncoll_l(const char*, const char*, MSVCRT_size_t, MSVCRT__locale_t);
+unsigned int __cdecl _get_output_format(void);
 
 /* Maybe one day we'll enable the invalid parameter handlers with the full set of information (msvcrXXd)
  *      #define MSVCRT_INVALID_PMT(x) MSVCRT_call_invalid_parameter_handler(x, __FUNCTION__, __FILE__, __LINE__, 0)

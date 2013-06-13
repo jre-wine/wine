@@ -502,16 +502,15 @@ static int hex_to_int(WCHAR c)
 /* ECMA-262 3rd Edition    9.3.1 */
 static HRESULT str_to_number(jsstr_t *str, double *ret)
 {
-    const WCHAR *ptr = str->str;
+    const WCHAR *ptr;
     BOOL neg = FALSE;
     DOUBLE d = 0.0;
 
     static const WCHAR infinityW[] = {'I','n','f','i','n','i','t','y'};
 
-    if(!ptr) {
-        *ret = 0;
-        return S_OK;
-    }
+    ptr = jsstr_flatten(str);
+    if(!ptr)
+        return E_OUTOFMEMORY;
 
     while(isspaceW(*ptr))
         ptr++;
@@ -775,6 +774,23 @@ HRESULT to_string(script_ctx_t *ctx, jsval_t val, jsstr_t **str)
     }
 
     return *str ? S_OK : E_OUTOFMEMORY;
+}
+
+HRESULT to_flat_string(script_ctx_t *ctx, jsval_t val, jsstr_t **str, const WCHAR **ret_str)
+{
+    HRESULT hres;
+
+    hres = to_string(ctx, val, str);
+    if(FAILED(hres))
+        return hres;
+
+    *ret_str = jsstr_flatten(*str);
+    if(!*ret_str) {
+        jsstr_release(*str);
+        return E_OUTOFMEMORY;
+    }
+
+    return S_OK;
 }
 
 /* ECMA-262 3rd Edition    9.9 */
