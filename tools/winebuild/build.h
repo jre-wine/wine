@@ -140,7 +140,7 @@ typedef struct
 
 enum target_cpu
 {
-    CPU_x86, CPU_x86_64, CPU_SPARC, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
+    CPU_x86, CPU_x86_64, CPU_POWERPC, CPU_ARM, CPU_ARM64, CPU_LAST = CPU_ARM64
 };
 
 enum target_platform
@@ -250,6 +250,7 @@ extern char *find_tool( const char *name, const char * const *names );
 extern struct strarray *get_as_command(void);
 extern struct strarray *get_ld_command(void);
 extern const char *get_nm_command(void);
+extern void cleanup_tmp_files(void);
 extern char *get_temp_file_name( const char *prefix, const char *suffix );
 extern void output_standard_file_header(void);
 extern FILE *open_input_file( const char *srcdir, const char *name );
@@ -271,7 +272,6 @@ extern const char *func_declaration( const char *func );
 extern const char *asm_globl( const char *func );
 extern const char *get_asm_ptr_keyword(void);
 extern const char *get_asm_string_keyword(void);
-extern const char *get_asm_short_keyword(void);
 extern const char *get_asm_rodata_section(void);
 extern const char *get_asm_string_section(void);
 extern void output_function_size( const char *name );
@@ -347,7 +347,6 @@ extern int nb_errors;
 extern int display_warnings;
 extern int kill_at;
 extern int verbose;
-extern int save_temps;
 extern int link_ext_symbols;
 extern int force_pointer_size;
 extern int unwind_tables;

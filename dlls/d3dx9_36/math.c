@@ -2303,62 +2303,145 @@ FLOAT WINAPI D3DXSHDot(UINT order, const FLOAT *a, const FLOAT *b)
     return s;
 }
 
+static void weightedcapintegrale(FLOAT *out, FLOAT order, FLOAT angle)
+{
+    FLOAT coeff[3];
+
+    coeff[0] = cosf(angle);
+
+    out[0] = 2.0f * D3DX_PI * (1.0f - coeff[0]);
+    out[1] = D3DX_PI * sinf(angle) * sinf(angle);
+    if (order <= 2)
+        return;
+
+    out[2] = coeff[0] * out[1];
+    if (order == 3)
+        return;
+
+    coeff[1] = coeff[0] * coeff[0];
+    coeff[2] = coeff[1] * coeff[1];
+
+    out[3] = D3DX_PI * (-1.25f * coeff[2] + 1.5f * coeff[1] - 0.25f);
+    if (order == 4)
+        return;
+
+    out[4] = -0.25f * D3DX_PI * coeff[0] * (7.0f * coeff[2] - 10.0f * coeff[1] + 3.0f);
+    if (order == 5)
+        return;
+
+    out[5] = D3DX_PI * (-2.625f * coeff[2] * coeff[1] + 4.375f * coeff[2] - 1.875f * coeff[1] + 0.125f);
+}
+
+HRESULT WINAPI D3DXSHEvalConeLight(UINT order, const D3DXVECTOR3 *dir, FLOAT radius,
+    FLOAT Rintensity, FLOAT Gintensity, FLOAT Bintensity, FLOAT *rout, FLOAT *gout, FLOAT *bout)
+{
+    FLOAT cap[6], clamped_angle, norm, scale, temp;
+    UINT i, index, j;
+
+    TRACE("order %u, dir %p, radius %f, red %f, green %f, blue %f, rout %p, gout %p, bout %p\n",
+        order, dir, radius, Rintensity, Gintensity, Bintensity, rout, gout, bout);
+
+    if (radius <= 0.0f)
+        return D3DXSHEvalDirectionalLight(order, dir, Rintensity, Gintensity, Bintensity, rout, gout, bout);
+
+    clamped_angle = (radius > D3DX_PI / 2.0f) ? (D3DX_PI / 2.0f) : radius;
+    norm = sinf(clamped_angle) * sinf(clamped_angle);
+
+    if (order > D3DXSH_MAXORDER)
+    {
+        WARN("Order clamped at D3DXSH_MAXORDER\n");
+        order = D3DXSH_MAXORDER;
+    }
+
+    weightedcapintegrale(cap, order, radius);
+    D3DXSHEvalDirection(rout, order, dir);
+
+    for (i = 0; i < order; i++)
+    {
+        scale = cap[i] / norm;
+
+        for (j = 0; j < 2 * i + 1; j++)
+        {
+            index = i * i + j;
+            temp = rout[index] * scale;
+
+            rout[index] = temp * Rintensity;
+            if (gout)
+                gout[index] = temp * Gintensity;
+            if (bout)
+                bout[index] = temp * Bintensity;
+        }
+    }
+
+    return D3D_OK;
+}
+
 FLOAT* WINAPI D3DXSHEvalDirection(FLOAT *out, UINT order, const D3DXVECTOR3 *dir)
 {
+    const FLOAT dirxx = dir->x * dir->x;
+    const FLOAT dirxy = dir->x * dir->y;
+    const FLOAT dirxz = dir->x * dir->z;
+    const FLOAT diryy = dir->y * dir->y;
+    const FLOAT diryz = dir->y * dir->z;
+    const FLOAT dirzz = dir->z * dir->z;
+    const FLOAT dirxxxx = dirxx * dirxx;
+    const FLOAT diryyyy = diryy * diryy;
+    const FLOAT dirzzzz = dirzz * dirzz;
+    const FLOAT dirxyxy = dirxy * dirxy;
 
     TRACE("out %p, order %u, dir %p\n", out, order, dir);
 
-    if ( (order < D3DXSH_MINORDER) || (order > D3DXSH_MAXORDER) )
+    if ((order < D3DXSH_MINORDER) || (order > D3DXSH_MAXORDER))
         return out;
 
     out[0] = 0.5f / sqrt(D3DX_PI);
     out[1] = -0.5f / sqrt(D3DX_PI / 3.0f) * dir->y;
     out[2] = 0.5f / sqrt(D3DX_PI / 3.0f) * dir->z;
     out[3] = -0.5f / sqrt(D3DX_PI / 3.0f) * dir->x;
-    if ( order == 2 )
+    if (order == 2)
         return out;
 
-    out[4] = 0.5f / sqrt(D3DX_PI / 15.0f) * dir->x * dir->y;
-    out[5] = -0.5f / sqrt(D3DX_PI / 15.0f) * dir->y * dir->z;
-    out[6] = 0.25f / sqrt(D3DX_PI / 5.0f) * ( 3.0f * dir->z * dir->z - 1.0f );
-    out[7] = -0.5f / sqrt(D3DX_PI / 15.0f) * dir->x * dir->z;
-    out[8] = 0.25f / sqrt(D3DX_PI / 15.0f) * ( dir->x * dir->x - dir->y * dir->y );
-    if ( order == 3 )
+    out[4] = 0.5f / sqrt(D3DX_PI / 15.0f) * dirxy;
+    out[5] = -0.5f / sqrt(D3DX_PI / 15.0f) * diryz;
+    out[6] = 0.25f / sqrt(D3DX_PI / 5.0f) * (3.0f * dirzz - 1.0f);
+    out[7] = -0.5f / sqrt(D3DX_PI / 15.0f) * dirxz;
+    out[8] = 0.25f / sqrt(D3DX_PI / 15.0f) * (dirxx - diryy);
+    if (order == 3)
         return out;
 
-    out[9] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->y * (3.0f * dir->x * dir->x - dir->y * dir->y );
-    out[10] = sqrt(105.0f / D3DX_PI) / 2.0f * dir->x * dir->y * dir->z;
-    out[11] = -sqrt(42.0 / D3DX_PI) / 8.0f * dir->y * ( -1.0f + 5.0f * dir->z * dir->z );
-    out[12] = sqrt(7.0f / D3DX_PI) / 4.0f * dir->z * ( 5.0f * dir->z * dir->z - 3.0f );
-    out[13] = sqrt(42.0 / D3DX_PI) / 8.0f * dir->x * ( 1.0f - 5.0f * dir->z * dir->z );
-    out[14] = sqrt(105.0f / D3DX_PI) / 4.0f * dir->z * ( dir->x * dir->x - dir->y * dir->y );
-    out[15] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->x * ( dir->x * dir->x - 3.0f * dir->y * dir->y );
-    if ( order == 4 )
+    out[9] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->y * (3.0f * dirxx - diryy);
+    out[10] = sqrt(105.0f / D3DX_PI) / 2.0f * dirxy * dir->z;
+    out[11] = -sqrt(42.0 / D3DX_PI) / 8.0f * dir->y * (-1.0f + 5.0f * dirzz);
+    out[12] = sqrt(7.0f / D3DX_PI) / 4.0f * dir->z * (5.0f * dirzz - 3.0f);
+    out[13] = sqrt(42.0 / D3DX_PI) / 8.0f * dir->x * (1.0f - 5.0f * dirzz);
+    out[14] = sqrt(105.0f / D3DX_PI) / 4.0f * dir->z * (dirxx - diryy);
+    out[15] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->x * (dirxx - 3.0f * diryy);
+    if (order == 4)
         return out;
 
-    out[16] = 0.75f * sqrt(35.0f / D3DX_PI) * dir->x * dir->y * (dir->x * dir->x - dir->y * dir->y );
+    out[16] = 0.75f * sqrt(35.0f / D3DX_PI) * dirxy * (dirxx - diryy);
     out[17] = 3.0f * dir->z * out[9];
-    out[18] = 0.75f * sqrt(5.0f / D3DX_PI) * dir->x * dir->y * ( 7.0f * dir->z * dir->z - 1.0f );
-    out[19] = 0.375f * sqrt(10.0f / D3DX_PI) * dir->y * dir->z * ( 3.0f - 7.0f * dir->z * dir->z );
-    out[20] = 3.0f / ( 16.0f * sqrt(D3DX_PI) ) * ( 35.0f * dir->z * dir->z * dir->z * dir->z - 30.f * dir->z * dir->z + 3.0f );
-    out[21] = 0.375f * sqrt(10.0f / D3DX_PI) * dir->x * dir->z * ( 3.0f - 7.0f * dir->z * dir->z );
-    out[22] = 0.375f * sqrt(5.0f / D3DX_PI) * ( dir->x * dir->x - dir->y * dir->y ) * ( 7.0f * dir->z * dir->z - 1.0f);
+    out[18] = 0.75f * sqrt(5.0f / D3DX_PI) * dirxy * (7.0f * dirzz - 1.0f);
+    out[19] = 0.375f * sqrt(10.0f / D3DX_PI) * diryz * (3.0f - 7.0f * dirzz);
+    out[20] = 3.0f / (16.0f * sqrt(D3DX_PI)) * (35.0f * dirzzzz - 30.f * dirzz + 3.0f);
+    out[21] = 0.375f * sqrt(10.0f / D3DX_PI) * dirxz * (3.0f - 7.0f * dirzz);
+    out[22] = 0.375f * sqrt(5.0f / D3DX_PI) * (dirxx - diryy) * (7.0f * dirzz - 1.0f);
     out[23] = 3.0 * dir->z * out[15];
-    out[24] = 3.0f / 16.0f * sqrt(35.0f / D3DX_PI) * ( dir->x * dir->x * dir->x * dir->x- 6.0f * dir->x * dir->x * dir->y * dir->y + dir->y * dir->y * dir->y * dir->y );
-    if ( order == 5 )
+    out[24] = 3.0f / 16.0f * sqrt(35.0f / D3DX_PI) * (dirxxxx - 6.0f * dirxyxy + diryyyy);
+    if (order == 5)
         return out;
 
-    out[25] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->y * ( 5.0f * dir->x * dir->x * dir->x * dir->x - 10.0f * dir->x * dir->x * dir->y * dir->y + dir->y * dir->y * dir->y * dir->y );
-    out[26] = 0.75f * sqrt(385.0f / D3DX_PI) * dir->x * dir->y * dir->z * ( dir->x * dir->x - dir->y * dir->y );
-    out[27] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->y * ( 3.0f * dir->x * dir->x - dir->y * dir->y ) * ( 1.0f - 9.0f * dir->z * dir->z );
-    out[28] = sqrt(1155.0f / D3DX_PI) / 4.0f * dir->x * dir->y * dir->z * ( 3.0f * dir->z * dir->z - 1.0f);
-    out[29] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->y * ( 14.0f * dir->z * dir->z - 21.0f * dir->z * dir->z * dir->z * dir->z - 1.0f );
-    out[30] = sqrt(11.0f / D3DX_PI) / 16.0f * dir->z * ( 63.0f * dir->z * dir->z * dir->z * dir->z - 70.0f * dir->z * dir->z + 15.0f );
-    out[31] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->x * ( 14.0f * dir->z * dir->z - 21.0f * dir->z * dir->z * dir->z * dir->z - 1.0f );
-    out[32] = sqrt(1155.0f / D3DX_PI) / 8.0f * dir->z * ( dir->x * dir->x - dir->y * dir->y ) * ( 3.0f * dir->z * dir->z - 1.0f );
-    out[33] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->x * ( dir->x * dir->x - 3.0f * dir->y * dir->y ) * ( 1.0f - 9.0f * dir->z * dir->z );
-    out[34] = 3.0f / 16.0f * sqrt(385.0f / D3DX_PI) * dir->z * ( dir->x * dir->x * dir->x * dir->x - 6.0 * dir->x * dir->x * dir->y * dir->y + dir->y * dir->y * dir->y * dir->y );
-    out[35] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->x * ( dir->x * dir->x * dir->x * dir->x - 10.0f * dir->x * dir->x * dir->y * dir->y + 5.0f * dir->y * dir->y * dir->y * dir->y );
+    out[25] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->y * (5.0f * dirxxxx - 10.0f * dirxyxy + diryyyy);
+    out[26] = 0.75f * sqrt(385.0f / D3DX_PI) * dirxy * dir->z * (dirxx - diryy);
+    out[27] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->y * (3.0f * dirxx - diryy) * (1.0f - 9.0f * dirzz);
+    out[28] = sqrt(1155.0f / D3DX_PI) / 4.0f * dirxy * dir->z * (3.0f * dirzz - 1.0f);
+    out[29] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->y * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
+    out[30] = sqrt(11.0f / D3DX_PI) / 16.0f * dir->z * (63.0f * dirzzzz - 70.0f * dirzz + 15.0f);
+    out[31] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->x * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
+    out[32] = sqrt(1155.0f / D3DX_PI) / 8.0f * dir->z * (dirxx - diryy) * (3.0f * dirzz - 1.0f);
+    out[33] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->x * (dirxx - 3.0f * diryy) * (1.0f - 9.0f * dirzz);
+    out[34] = 3.0f / 16.0f * sqrt(385.0f / D3DX_PI) * dir->z * (dirxxxx - 6.0 * dirxyxy + diryyyy);
+    out[35] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->x * (dirxxxx - 10.0f * dirxyxy + 5.0f * diryyyy);
 
     return out;
 }

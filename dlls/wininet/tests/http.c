@@ -397,7 +397,7 @@ static VOID WINAPI callback(
             trace("%04x:Callback %p 0x%lx INTERNET_STATUS_HANDLE_CLOSING %p %d\n",
                 GetCurrentThreadId(), hInternet, dwContext,
                 *(HINTERNET *)lpvStatusInformation, dwStatusInformationLength);
-            if(!--close_handle_cnt)
+            if(!InterlockedDecrement(&close_handle_cnt))
                 SetEvent(hCompleteEvent);
             break;
         case INTERNET_STATUS_REQUEST_COMPLETE:
@@ -411,7 +411,8 @@ static VOID WINAPI callback(
                 GetCurrentThreadId(), hInternet, dwContext,
                 iar->dwResult,iar->dwError,dwStatusInformationLength);
             req_error = iar->dwError;
-            SetEvent(hCompleteEvent);
+            if(!close_handle_cnt)
+                SetEvent(hCompleteEvent);
             break;
         }
         case INTERNET_STATUS_REDIRECT:
@@ -445,7 +446,6 @@ static void close_async_handle(HINTERNET handle, HANDLE complete_event, int hand
     ok(res, "InternetCloseHandle failed: %u\n", GetLastError());
     WaitForSingleObject(hCompleteEvent, INFINITE);
     CHECK_NOTIFIED2(INTERNET_STATUS_HANDLE_CLOSING, handle_cnt);
-    SET_EXPECT2(INTERNET_STATUS_HANDLE_CLOSING, handle_cnt);
 }
 
 static void InternetReadFile_test(int flags, const test_data_t *test)
@@ -1072,6 +1072,10 @@ static void InternetOpenUrlA_test(void)
   DWORD size, readbytes, totalbytes=0;
   BOOL ret;
 
+  ret = DeleteUrlCacheEntry(TEST_URL);
+  ok(ret || GetLastError() == ERROR_FILE_NOT_FOUND,
+          "DeleteUrlCacheEntry returned %x, GetLastError() = %d\n", ret, GetLastError());
+
   myhinternet = InternetOpen("Winetest",0,NULL,NULL,INTERNET_FLAG_NO_CACHE_WRITE);
   ok((myhinternet != 0), "InternetOpen failed, error %u\n",GetLastError());
   size = 0x400;
@@ -1093,6 +1097,9 @@ static void InternetOpenUrlA_test(void)
 
   InternetCloseHandle(myhttp);
   InternetCloseHandle(myhinternet);
+
+  ret = DeleteUrlCacheEntry(TEST_URL);
+  ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND, "INTERNET_FLAG_NO_CACHE_WRITE flag doesn't work\n");
 }
 
 static void HttpSendRequestEx_test(void)
@@ -1219,6 +1226,108 @@ done:
     ok(InternetCloseHandle(session), "Close session handle failed\n");
 }
 
+static void test_cache_read(void)
+{
+    HINTERNET session, connection, req;
+    FILETIME now, tomorrow, yesterday;
+    BYTE content[1000], buf[2000];
+    char file_path[MAX_PATH];
+    ULARGE_INTEGER li;
+    HANDLE file;
+    DWORD size;
+    unsigned i;
+    BOOL res;
+
+    static const char cache_only_url[] = "http://test.winehq.org/tests/cache-only";
+    BYTE cache_headers[] = "HTTP/1.1 200 OK\r\n\r\n";
+
+    trace("Testing cache read...\n");
+
+    hCompleteEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+
+    for(i = 0; i < sizeof(content); i++)
+        content[i] = '0' + (i%10);
+
+    GetSystemTimeAsFileTime(&now);
+    li.u.HighPart = now.dwHighDateTime;
+    li.u.LowPart = now.dwLowDateTime;
+    li.QuadPart += (LONGLONG)10000000 * 3600 * 24;
+    tomorrow.dwHighDateTime = li.u.HighPart;
+    tomorrow.dwLowDateTime = li.u.LowPart;
+    li.QuadPart -= (LONGLONG)10000000 * 3600 * 24 * 2;
+    yesterday.dwHighDateTime = li.u.HighPart;
+    yesterday.dwLowDateTime = li.u.LowPart;
+
+    res = CreateUrlCacheEntryA(cache_only_url, sizeof(content), "", file_path, 0);
+    ok(res, "CreateUrlCacheEntryA failed: %u\n", GetLastError());
+
+    file = CreateFileA(file_path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateFile failed\n");
+
+    WriteFile(file, content, sizeof(content), &size, NULL);
+    CloseHandle(file);
+
+    res = CommitUrlCacheEntryA(cache_only_url, file_path, tomorrow, yesterday, NORMAL_CACHE_ENTRY,
+                               cache_headers, sizeof(cache_headers)-1, "", 0);
+    ok(res, "CommitUrlCacheEntryA failed: %u\n", GetLastError());
+
+    session = InternetOpenA("", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, INTERNET_FLAG_ASYNC);
+    ok(session != NULL,"InternetOpen failed with error %u\n", GetLastError());
+
+    pInternetSetStatusCallbackA(session, callback);
+
+    SET_EXPECT(INTERNET_STATUS_HANDLE_CREATED);
+    connection = InternetConnectA(session, "test.winehq.org", INTERNET_DEFAULT_HTTP_PORT,
+            NULL, NULL, INTERNET_SERVICE_HTTP, 0x0, 0xdeadbeef);
+    ok(connection != NULL,"InternetConnect failed with error %u\n", GetLastError());
+    CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
+
+    SET_EXPECT(INTERNET_STATUS_HANDLE_CREATED);
+    req = HttpOpenRequestA(connection, "GET", "/tests/cache-only", NULL, NULL, NULL, 0, 0xdeadbead);
+    ok(req != NULL, "HttpOpenRequest failed: %u\n", GetLastError());
+    CHECK_NOTIFIED(INTERNET_STATUS_HANDLE_CREATED);
+
+    SET_WINE_ALLOW(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    SET_WINE_ALLOW(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    SET_WINE_ALLOW(INTERNET_STATUS_SENDING_REQUEST);
+    SET_WINE_ALLOW(INTERNET_STATUS_REQUEST_SENT);
+    SET_WINE_ALLOW(INTERNET_STATUS_RECEIVING_RESPONSE);
+    SET_WINE_ALLOW(INTERNET_STATUS_RESPONSE_RECEIVED);
+    SET_WINE_ALLOW(INTERNET_STATUS_REQUEST_COMPLETE);
+
+    res = HttpSendRequestA(req, NULL, -1, NULL, 0);
+    todo_wine
+    ok(res, "HttpSendRequest failed: %u\n", GetLastError());
+
+    if(res) {
+        size = 0;
+        res = InternetQueryDataAvailable(req, &size, 0, 0);
+        ok(res, "InternetQueryDataAvailable failed: %u\n", GetLastError());
+        ok(size  == sizeof(content), "size = %u\n", size);
+
+        size = sizeof(buf);
+        res = InternetReadFile(req, buf, sizeof(buf), &size);
+        ok(res, "InternetReadFile failed: %u\n", GetLastError());
+        ok(size == sizeof(content), "size = %u\n", size);
+        ok(!memcmp(content, buf, sizeof(content)), "unexpected content\n");
+    }
+
+    close_async_handle(session, hCompleteEvent, 2);
+
+    CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTING_TO_SERVER);
+    CLEAR_NOTIFIED(INTERNET_STATUS_CONNECTED_TO_SERVER);
+    CLEAR_NOTIFIED(INTERNET_STATUS_SENDING_REQUEST);
+    CLEAR_NOTIFIED(INTERNET_STATUS_REQUEST_SENT);
+    CLEAR_NOTIFIED(INTERNET_STATUS_RECEIVING_RESPONSE);
+    CLEAR_NOTIFIED(INTERNET_STATUS_RESPONSE_RECEIVED);
+    CLEAR_NOTIFIED(INTERNET_STATUS_REQUEST_COMPLETE);
+
+    res = DeleteUrlCacheEntryA(cache_only_url);
+    ok(res, "DeleteUrlCacheEntryA failed: %u\n", GetLastError());
+
+    CloseHandle(hCompleteEvent);
+}
+
 static void test_http_cache(void)
 {
     HINTERNET session, connect, request;
@@ -1333,6 +1442,8 @@ static void test_http_cache(void)
     ok(InternetCloseHandle(request), "Close request handle failed\n");
     ok(InternetCloseHandle(connect), "Close connect handle failed\n");
     ok(InternetCloseHandle(session), "Close session handle failed\n");
+
+    test_cache_read();
 }
 
 static void HttpHeaders_test(void)
@@ -1904,6 +2015,16 @@ static DWORD CALLBACK server_thread(LPVOID param)
             WaitForSingleObject(conn_close_event, INFINITE);
             trace("closing connection\n");
         }
+        if (strstr(buffer, "GET /test_cache_control_no_cache"))
+        {
+            static const char no_cache_response[] = "HTTP/1.1 200 OK\r\nCache-Control: no-cache\r\n\r\nsome content";
+            send(c, no_cache_response, sizeof(no_cache_response)-1, 0);
+        }
+        if (strstr(buffer, "GET /test_cache_control_no_store"))
+        {
+            static const char no_cache_response[] = "HTTP/1.1 200 OK\r\nCache-Control: No-StOrE\r\n\r\nsome content";
+            send(c, no_cache_response, sizeof(no_cache_response)-1, 0);
+        }
 
         shutdown(c, 2);
         closesocket(c);
@@ -2361,6 +2482,63 @@ static void test_conn_close(int port)
 
     close_async_handle(session, hCompleteEvent, 2);
     CloseHandle(hCompleteEvent);
+}
+
+static void test_no_cache(int port)
+{
+    static const char cache_control_no_cache[] = "/test_cache_control_no_cache";
+    static const char cache_control_no_store[] = "/test_cache_control_no_store";
+    static const char cache_url_fmt[] = "http://localhost:%d%s";
+
+    char cache_url[256], buf[256];
+    HINTERNET ses, con, req;
+    DWORD read, size;
+    BOOL ret;
+
+    trace("Testing no-cache header\n");
+
+    ses = InternetOpen("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(ses != NULL,"InternetOpen failed with error %u\n", GetLastError());
+
+    con = InternetConnect(ses, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(con != NULL, "InternetConnect failed with error %u\n", GetLastError());
+
+    req = HttpOpenRequest(con, NULL, cache_control_no_cache, NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    sprintf(cache_url, cache_url_fmt, port, cache_control_no_cache);
+    DeleteUrlCacheEntry(cache_url);
+
+    ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed with error %u\n", GetLastError());
+    size = 0;
+    while(InternetReadFile(req, buf, sizeof(buf), &read) && read)
+        size += read;
+    ok(size == 12, "read %d bytes of data\n", size);
+    InternetCloseHandle(req);
+
+    ret = DeleteUrlCacheEntry(cache_url);
+    ok(!ret && GetLastError()==ERROR_FILE_NOT_FOUND, "cache entry should not exist\n");
+
+    req = HttpOpenRequest(con, NULL, cache_control_no_store, NULL, NULL, NULL, 0, 0);
+    ok(req != NULL, "HttpOpenRequest failed\n");
+
+    sprintf(cache_url, cache_url_fmt, port, cache_control_no_store);
+    DeleteUrlCacheEntry(cache_url);
+
+    ret = HttpSendRequest(req, NULL, 0, NULL, 0);
+    ok(ret, "HttpSendRequest failed with error %u\n", GetLastError());
+    size = 0;
+    while(InternetReadFile(req, buf, sizeof(buf), &read) && read)
+        size += read;
+    ok(size == 12, "read %d bytes of data\n", size);
+    InternetCloseHandle(req);
+
+    ret = DeleteUrlCacheEntry(cache_url);
+    ok(!ret && GetLastError()==ERROR_FILE_NOT_FOUND, "cache entry should not exist\n");
+
+    InternetCloseHandle(con);
+    InternetCloseHandle(ses);
 }
 
 static void test_HttpSendRequestW(int port)
@@ -2840,6 +3018,7 @@ static void test_http_connection(void)
     test_options(si.port);
     test_no_content(si.port);
     test_conn_close(si.port);
+    test_no_cache(si.port);
 
     /* send the basic request again to shutdown the server thread */
     test_basic_request(si.port, "GET", "/quit");
@@ -3558,6 +3737,16 @@ static void test_open_url_async(void)
     ret = InternetSetOptionA(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
     ok(ret, "InternetSetOption(INTERNET_OPTION_END_BROWSER_SESSION) failed: %u\n", GetLastError());
 
+    /*
+     * Some versions of IE6 fail those tests. They pass some notification data as UNICODE string, while
+     * other versions never do. They also hang of following tests. We disable it for everything older
+     * than IE7.
+     */
+    if(!pInternetGetSecurityInfoByURLA) {
+        win_skip("Skipping async open on too old wininet version.\n");
+        return;
+    }
+
     ctx.req = NULL;
     ctx.event = CreateEvent(NULL, TRUE, FALSE, "Z:_home_hans_jaman-installer.exe_ev1");
 
@@ -4013,6 +4202,34 @@ static void test_connection_failure(void)
     InternetCloseHandle(session);
 }
 
+static void test_default_service_port(void)
+{
+    HINTERNET session, connect, request;
+    DWORD error;
+    BOOL ret;
+
+    session = InternetOpen("winetest", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(session != NULL, "InternetOpen failed\n");
+
+    connect = InternetConnect(session, "test.winehq.org", INTERNET_INVALID_PORT_NUMBER, NULL, NULL,
+                              INTERNET_SERVICE_HTTP, 0, 0);
+    ok(connect != NULL, "InternetConnect failed\n");
+
+    request = HttpOpenRequest(connect, NULL, "/", NULL, NULL, NULL, INTERNET_FLAG_SECURE, 0);
+    ok(request != NULL, "HttpOpenRequest failed\n");
+
+    SetLastError(0xdeadbeef);
+    ret = HttpSendRequest(request, NULL, 0, NULL, 0);
+    error = GetLastError();
+    ok(!ret, "HttpSendRequest succeeded\n");
+    ok(error == ERROR_INTERNET_SECURITY_CHANNEL_ERROR || error == ERROR_INTERNET_CANNOT_CONNECT,
+       "got %u\n", error);
+
+    InternetCloseHandle(request);
+    InternetCloseHandle(connect);
+    InternetCloseHandle(session);
+}
+
 static void init_status_tests(void)
 {
     memset(expect, 0, sizeof(expect));
@@ -4091,4 +4308,5 @@ START_TEST(http)
     HttpSendRequestEx_test();
     InternetReadFile_test(INTERNET_FLAG_ASYNC, &test_data[3]);
     test_connection_failure();
+    test_default_service_port();
 }

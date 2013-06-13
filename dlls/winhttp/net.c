@@ -331,7 +331,8 @@ BOOL netconn_close( netconn_t *conn )
 BOOL netconn_connect( netconn_t *conn, const struct sockaddr *sockaddr, unsigned int addr_len, int timeout )
 {
     BOOL ret = FALSE;
-    int res = 0, state;
+    int res = 0;
+    ULONG state;
 
     if (timeout > 0)
     {
@@ -568,7 +569,7 @@ static BOOL read_ssl_chunk(netconn_t *conn, void *buf, SIZE_T buf_size, SIZE_T *
     SecBuffer bufs[4];
     SecBufferDesc buf_desc = {SECBUFFER_VERSION, sizeof(bufs)/sizeof(*bufs), bufs};
     SSIZE_T size, buf_len;
-    int i;
+    unsigned int i;
     SECURITY_STATUS res;
 
     assert(conn->extra_len < ssl_buf_size);
@@ -734,7 +735,8 @@ BOOL netconn_recv( netconn_t *conn, void *buf, size_t len, int flags, int *recvd
 BOOL netconn_query_data_available( netconn_t *conn, DWORD *available )
 {
 #ifdef FIONREAD
-    int ret, unread;
+    int ret;
+    ULONG unread;
 #endif
     *available = 0;
     if (!netconn_connected( conn )) return FALSE;
@@ -841,7 +843,7 @@ DWORD netconn_set_timeout( netconn_t *netconn, BOOL send, int value )
     return ERROR_SUCCESS;
 }
 
-static DWORD resolve_hostname( WCHAR *hostnameW, INTERNET_PORT port, struct sockaddr *sa, socklen_t *sa_len )
+static DWORD resolve_hostname( const WCHAR *hostnameW, INTERNET_PORT port, struct sockaddr *sa, socklen_t *sa_len )
 {
     char *hostname;
 #ifdef HAVE_GETADDRINFO
@@ -926,7 +928,7 @@ static DWORD resolve_hostname( WCHAR *hostnameW, INTERNET_PORT port, struct sock
 
 struct resolve_args
 {
-    WCHAR           *hostname;
+    const WCHAR     *hostname;
     INTERNET_PORT    port;
     struct sockaddr *sa;
     socklen_t       *sa_len;

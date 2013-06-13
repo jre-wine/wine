@@ -337,42 +337,6 @@ static struct cpu_register cpu_register_map[] = {
     REG(SegFs, 4),
     REG(SegGs, 4),
 };
-#elif defined(__sparc__)
-static const char target_xml[] = "";
-static struct cpu_register cpu_register_map[] = {
-    REG(g0, 4),
-    REG(g1, 4),
-    REG(g2, 4),
-    REG(g3, 4),
-    REG(g4, 4),
-    REG(g5, 4),
-    REG(g6, 4),
-    REG(g7, 4),
-    REG(o0, 4),
-    REG(o1, 4),
-    REG(o2, 4),
-    REG(o3, 4),
-    REG(o4, 4),
-    REG(o5, 4),
-    REG(o6, 4),
-    REG(o7, 4),
-    REG(l0, 4),
-    REG(l1, 4),
-    REG(l2, 4),
-    REG(l3, 4),
-    REG(l4, 4),
-    REG(l5, 4),
-    REG(l6, 4),
-    REG(l7, 4),
-    REG(i0, 4),
-    REG(i1, 4),
-    REG(i2, 4),
-    REG(i3, 4),
-    REG(i4, 4),
-    REG(i5, 4),
-    REG(i6, 4),
-    REG(i7, 4),
-};
 #elif defined(__arm__)
 static const char target_xml[] =
     "l <target><architecture>arm</architecture>\n"
@@ -476,6 +440,7 @@ static inline DWORD64   cpu_register(CONTEXT* ctx, unsigned idx)
     default:
         fprintf(stderr, "got unexpected size: %u\n", (unsigned)cpu_register_map[idx].ctx_length);
         assert(0);
+        return 0;
     }
 }
 
@@ -2363,7 +2328,7 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, DEBUG_EVENT* de, unsigned fl
 {
     int                 sock;
     struct sockaddr_in  s_addrs;
-    unsigned int        s_len = sizeof(s_addrs);
+    socklen_t           s_len = sizeof(s_addrs);
     struct pollfd       pollfd;
     IMAGEHLP_MODULE64   imh_mod;
     BOOL                ret = FALSE;

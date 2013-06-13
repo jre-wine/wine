@@ -354,8 +354,10 @@ HRESULT jsval_to_variant(jsval_t val, VARIANT *retv)
         if(str->length_flags & JSSTR_FLAG_NULLBSTR) {
             V_BSTR(retv) = NULL;
         }else {
-            V_BSTR(retv) = SysAllocStringLen(str->str, jsstr_length(str));
-            if(!V_BSTR(retv))
+            V_BSTR(retv) = SysAllocStringLen(NULL, jsstr_length(str));
+            if(V_BSTR(retv))
+                jsstr_flush(str, V_BSTR(retv));
+            else
                 return E_OUTOFMEMORY;
         }
         return S_OK;
@@ -736,15 +738,14 @@ HRESULT double_to_string(double n, jsstr_t **str)
 /* ECMA-262 3rd Edition    9.8 */
 HRESULT to_string(script_ctx_t *ctx, jsval_t val, jsstr_t **str)
 {
-    const WCHAR undefinedW[] = {'u','n','d','e','f','i','n','e','d',0};
     const WCHAR nullW[] = {'n','u','l','l',0};
     const WCHAR trueW[] = {'t','r','u','e',0};
     const WCHAR falseW[] = {'f','a','l','s','e',0};
 
     switch(jsval_type(val)) {
     case JSV_UNDEFINED:
-        *str = jsstr_alloc(undefinedW);
-        break;
+        *str = jsstr_undefined();
+        return S_OK;
     case JSV_NULL:
         *str = jsstr_alloc(nullW);
         break;
@@ -901,8 +902,10 @@ HRESULT variant_change_type(script_ctx_t *ctx, VARIANT *dst, VARIANT *src, VARTY
             break;
         }
 
-        V_BSTR(dst) = SysAllocStringLen(str->str, jsstr_length(str));
-        if(!V_BSTR(dst))
+        V_BSTR(dst) = SysAllocStringLen(NULL, jsstr_length(str));
+        if(V_BSTR(dst))
+            jsstr_flush(str, V_BSTR(dst));
+        else
             hres = E_OUTOFMEMORY;
         break;
     }

@@ -21,6 +21,8 @@
  */
 #include "config.h"
 
+#include <Security/AuthSession.h>
+
 #include "macdrv.h"
 #include "wine/server.h"
 
@@ -69,7 +71,14 @@ const char* debugstr_cf(CFTypeRef t)
  */
 static BOOL process_attach(void)
 {
+    SessionAttributeBits attributes;
+    OSStatus status;
+
     assert(NUM_EVENT_TYPES <= sizeof(macdrv_event_mask) * 8);
+
+    status = SessionGetInfo(callerSecuritySession, NULL, &attributes);
+    if (status != noErr || !(attributes & sessionHasGraphicAccess))
+        return FALSE;
 
     if ((thread_data_tls_index = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
 
@@ -79,6 +88,8 @@ static BOOL process_attach(void)
         ERR("Failed to start Cocoa app main loop\n");
         return FALSE;
     }
+
+    macdrv_clipboard_process_attach();
 
     return TRUE;
 }
@@ -146,7 +157,7 @@ struct macdrv_thread_data *macdrv_init_thread_data(void)
         ExitProcess(1);
     }
 
-    if (!(data->queue = macdrv_create_event_queue()))
+    if (!(data->queue = macdrv_create_event_queue(macdrv_handle_event)))
     {
         ERR("macdrv: Can't create event queue.\n");
         ExitProcess(1);

@@ -534,7 +534,8 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
     XVisualInfo vis = default_visual;
     struct gdi_image_bits bits;
     Pixmap color_pixmap = 0, mask_pixmap = 0;
-    int i, lines;
+    int lines;
+    unsigned int i;
 
     bits.ptr = NULL;
     bits.free = NULL;
@@ -1384,16 +1385,17 @@ Window create_client_window( struct x11drv_win_data *data, const XVisualInfo *vi
     attr.win_gravity = NorthWestGravity;
     attr.backing_store = NotUseful;
     attr.event_mask = ExposureMask;
+    attr.border_pixel = 0;
 
     data->client_window = XCreateWindow( data->display, data->whole_window, x, y, cx, cy,
                                          0, default_visual.depth, InputOutput, visual->visual,
                                          CWBitGravity | CWWinGravity | CWBackingStore |
-                                         CWColormap | CWEventMask, &attr );
+                                         CWColormap | CWEventMask | CWBorderPixel, &attr );
     if (!data->client_window) return 0;
 
     XSaveContext( data->display, data->client_window, winContext, (char *)data->hwnd );
     XMapWindow( data->display, data->client_window );
-    XFlush( data->display );
+    XSync( data->display, False );
     return data->client_window;
 }
 

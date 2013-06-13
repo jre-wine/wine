@@ -44,7 +44,6 @@ int nb_errors = 0;
 int display_warnings = 0;
 int kill_at = 0;
 int verbose = 0;
-int save_temps = 0;
 int link_ext_symbols = 0;
 int force_pointer_size = 0;
 int unwind_tables = 0;
@@ -53,8 +52,6 @@ int unwind_tables = 0;
 enum target_cpu target_cpu = CPU_x86;
 #elif defined(__x86_64__)
 enum target_cpu target_cpu = CPU_x86_64;
-#elif defined(__sparc__)
-enum target_cpu target_cpu = CPU_SPARC;
 #elif defined(__powerpc__)
 enum target_cpu target_cpu = CPU_POWERPC;
 #elif defined(__arm__)
@@ -358,6 +355,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
 {
     char *p;
     int optc;
+    int save_temps = 0;
 
     while ((optc = getopt_long( argc, argv, short_options, long_options, NULL )) != -1)
     {
@@ -514,6 +512,8 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             break;
         }
     }
+
+    if (!save_temps) atexit( cleanup_tmp_files );
 
     if (spec->file_name && !strchr( spec->file_name, '.' ))
         strcat( spec->file_name, exec_mode == MODE_EXE ? ".exe" : ".dll" );

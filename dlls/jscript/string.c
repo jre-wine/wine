@@ -144,40 +144,51 @@ static HRESULT String_valueOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, un
 
 static HRESULT do_attributeless_tag_format(script_ctx_t *ctx, vdisp_t *jsthis, jsval_t *r, const WCHAR *tagname)
 {
-    jsstr_t *str;
+    unsigned tagname_len;
+    jsstr_t *str, *ret;
+    WCHAR *ptr;
     HRESULT hres;
-
-    static const WCHAR tagfmt[] = {'<','%','s','>','%','s','<','/','%','s','>',0};
 
     hres = get_string_val(ctx, jsthis, &str);
     if(FAILED(hres))
         return hres;
 
-    if(r) {
-        jsstr_t *ret = jsstr_alloc_buf(jsstr_length(str) + 2*strlenW(tagname) + 5);
-        if(!ret) {
-            jsstr_release(str);
-            return E_OUTOFMEMORY;
-        }
-
-        sprintfW(ret->str, tagfmt, tagname, str->str, tagname);
-        *r = jsval_string(ret);
+    if(!r) {
+        jsstr_release(str);
+        return S_OK;
     }
 
+    tagname_len = strlenW(tagname);
+
+    ret = jsstr_alloc_buf(jsstr_length(str) + 2*tagname_len + 5);
+    if(!ret) {
+        jsstr_release(str);
+        return E_OUTOFMEMORY;
+    }
+
+    ptr = ret->str;
+    *ptr++ = '<';
+    memcpy(ptr, tagname, tagname_len*sizeof(WCHAR));
+    ptr += tagname_len;
+    *ptr++ = '>';
+
+    ptr += jsstr_flush(str, ptr);
     jsstr_release(str);
+
+    *ptr++ = '<';
+    *ptr++ = '/';
+    memcpy(ptr, tagname, tagname_len*sizeof(WCHAR));
+    ptr += tagname_len;
+    *ptr = '>';
+
+    *r = jsval_string(ret);
     return S_OK;
 }
 
 static HRESULT do_attribute_tag_format(script_ctx_t *ctx, vdisp_t *jsthis, unsigned argc, jsval_t *argv, jsval_t *r,
-        const WCHAR *tagname, const WCHAR *attr)
+        const WCHAR *tagname, const WCHAR *attrname)
 {
-    static const WCHAR tagfmtW[]
-        = {'<','%','s',' ','%','s','=','\"','%','s','\"','>','%','s','<','/','%','s','>',0};
-    static const WCHAR undefinedW[] = {'u','n','d','e','f','i','n','e','d',0};
-
     jsstr_t *str, *attr_value = NULL;
-    const WCHAR *attr_str;
-    unsigned attr_len;
     HRESULT hres;
 
     hres = get_string_val(ctx, jsthis, &str);
@@ -190,27 +201,45 @@ static HRESULT do_attribute_tag_format(script_ctx_t *ctx, vdisp_t *jsthis, unsig
             jsstr_release(str);
             return hres;
         }
-        attr_str = attr_value->str;
-        attr_len = jsstr_length(attr_value);
     }else {
-        attr_str = undefinedW;
-        attr_len = sizeof(undefinedW)/sizeof(WCHAR)-1;
+        attr_value = jsstr_undefined();
     }
 
     if(r) {
+        unsigned attrname_len = strlenW(attrname);
+        unsigned tagname_len = strlenW(tagname);
         jsstr_t *ret;
 
-        ret = jsstr_alloc_buf(2*strlenW(tagname) + strlenW(attr) + attr_len + jsstr_length(str) + 9);
+        ret = jsstr_alloc_buf(2*tagname_len + attrname_len + jsstr_length(attr_value) + jsstr_length(str) + 9);
         if(ret) {
-            sprintfW(ret->str, tagfmtW, tagname, attr, attr_str, str->str, tagname);
+            WCHAR *ptr = ret->str;
+
+            *ptr++ = '<';
+            memcpy(ptr, tagname, tagname_len*sizeof(WCHAR));
+            ptr += tagname_len;
+            *ptr++ = ' ';
+            memcpy(ptr, attrname, attrname_len*sizeof(WCHAR));
+            ptr += attrname_len;
+            *ptr++ = '=';
+            *ptr++ = '"';
+            ptr += jsstr_flush(attr_value, ptr);
+            *ptr++ = '"';
+            *ptr++ = '>';
+            ptr += jsstr_flush(str, ptr);
+
+            *ptr++ = '<';
+            *ptr++ = '/';
+            memcpy(ptr, tagname, tagname_len*sizeof(WCHAR));
+            ptr += tagname_len;
+            *ptr = '>';
+
             *r = jsval_string(ret);
         }else {
             hres = E_OUTOFMEMORY;
         }
     }
 
-    if(attr_value)
-        jsstr_release(attr_value);
+    jsstr_release(attr_value);
     jsstr_release(str);
     return hres;
 }
@@ -276,7 +305,7 @@ static HRESULT String_charAt(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, uns
     }
 
     if(0 <= pos && pos < jsstr_length(str)) {
-        ret = jsstr_alloc_len(str->str+pos, 1);
+        ret = jsstr_substr(str, pos, 1);
         if(!ret)
             return E_OUTOFMEMORY;
     }else {
@@ -331,8 +360,8 @@ static HRESULT String_charCodeAt(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
 static HRESULT String_concat(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsigned argc, jsval_t *argv,
         jsval_t *r)
 {
+    unsigned len = 0, i, str_cnt;
     jsstr_t **strs, *ret = NULL;
-    DWORD len = 0, i, l, str_cnt;
     WCHAR *ptr;
     HRESULT hres;
 
@@ -364,11 +393,8 @@ static HRESULT String_concat(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, uns
         ret = jsstr_alloc_buf(len);
         if(ret) {
             ptr = ret->str;
-            for(i=0; i < str_cnt; i++) {
-                l = jsstr_length(strs[i]);
-                memcpy(ptr, strs[i]->str, l*sizeof(WCHAR));
-                ptr += l;
-            }
+            for(i=0; i < str_cnt; i++)
+                ptr += jsstr_flush(strs[i], ptr);
         }else {
             hres = E_OUTOFMEMORY;
         }
@@ -649,10 +675,10 @@ static HRESULT rep_call(script_ctx_t *ctx, jsdisp_t *func,
 
     if(SUCCEEDED(hres)) {
         for(i=0; i < match->paren_count; i++) {
-            if(match->parens[i].index == -1)
-                tmp_str = jsstr_empty();
+            if(match->parens[i].index != -1)
+                tmp_str = jsstr_substr(str, match->parens[i].index, match->parens[i].length);
             else
-                tmp_str = jsstr_alloc_len(str->str+match->parens[i].index, match->parens[i].length);
+                tmp_str = jsstr_empty();
             if(!tmp_str) {
                hres = E_OUTOFMEMORY;
                break;
@@ -1016,7 +1042,7 @@ static HRESULT String_slice(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, unsi
         end = start;
 
     if(r) {
-        jsstr_t *retstr = jsstr_alloc_len(str->str+start, end-start);
+        jsstr_t *retstr = jsstr_substr(str, start, end-start);
         if(!retstr) {
             jsstr_release(str);
             return E_OUTOFMEMORY;
@@ -1225,15 +1251,14 @@ static HRESULT String_substring(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     }
 
     if(r) {
-        jsstr_t *ret = jsstr_alloc_len(str->str+start, end-start);
-        if(!ret) {
-            jsstr_release(str);
-            return E_OUTOFMEMORY;
-        }
-        *r = jsval_string(ret);
+        jsstr_t *ret = jsstr_substr(str, start, end-start);
+        if(ret)
+            *r = jsval_string(ret);
+        else
+            hres = E_OUTOFMEMORY;
     }
     jsstr_release(str);
-    return S_OK;
+    return hres;
 }
 
 /* ECMA-262 3rd Edition    B.2.3 */
@@ -1280,7 +1305,7 @@ static HRESULT String_substr(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, uns
 
     hres = S_OK;
     if(r) {
-        jsstr_t *ret = jsstr_alloc_len(str->str+start, len);
+        jsstr_t *ret = jsstr_substr(str, start, len);
         if(ret)
             *r = jsval_string(ret);
         else
@@ -1313,12 +1338,13 @@ static HRESULT String_toLowerCase(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     if(r) {
         jsstr_t *ret;
 
-        ret = jsstr_alloc_len(str->str, jsstr_length(str));
+        ret = jsstr_alloc_buf(jsstr_length(str));
         if(!ret) {
             jsstr_release(str);
             return E_OUTOFMEMORY;
         }
 
+        jsstr_flush(str, ret->str);
         strlwrW(ret->str);
         *r = jsval_string(ret);
     }
@@ -1341,12 +1367,13 @@ static HRESULT String_toUpperCase(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     if(r) {
         jsstr_t *ret;
 
-        ret = jsstr_alloc_len(str->str, jsstr_length(str));
+        ret = jsstr_alloc_buf(jsstr_length(str));
         if(!ret) {
             jsstr_release(str);
             return E_OUTOFMEMORY;
         }
 
+        jsstr_flush(str, ret->str);
         struprW(ret->str);
         *r = jsval_string(ret);
     }
@@ -1424,11 +1451,11 @@ static HRESULT String_idx_get(jsdisp_t *jsdisp, unsigned idx, jsval_t *r)
     StringInstance *string = (StringInstance*)jsdisp;
     jsstr_t *ret;
 
-    TRACE("%p[%u] = %s\n", string, idx, debugstr_wn(string->str->str+idx, 1));
-
-    ret = jsstr_alloc_len(string->str->str+idx, 1);
+    ret = jsstr_substr(string->str, idx, 1);
     if(!ret)
         return E_OUTOFMEMORY;
+
+    TRACE("%p[%u] = %s\n", string, idx, debugstr_jsstr(ret));
 
     *r = jsval_string(ret);
     return S_OK;

@@ -35,6 +35,7 @@
 # include <unistd.h>
 #endif
 #include <sys/types.h>
+#include <limits.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -251,46 +252,43 @@ static HANDLE msvcrt_fdtoh(int fd)
 /* INTERNAL: free a file entry fd */
 static void msvcrt_free_fd(int fd)
 {
-  HANDLE old_handle;
   ioinfo *fdinfo;
 
   LOCK_FILES();
   fdinfo = msvcrt_get_ioinfo(fd);
-  old_handle = fdinfo->handle;
   if(fdinfo != &MSVCRT___badioinfo)
   {
     fdinfo->handle = INVALID_HANDLE_VALUE;
     fdinfo->wxflag = 0;
   }
   TRACE(":fd (%d) freed\n",fd);
-  if (fd < 3) /* don't use 0,1,2 for user files */
+
+  if (fd < 3)
   {
     switch (fd)
     {
     case 0:
-        if (GetStdHandle(STD_INPUT_HANDLE) == old_handle) SetStdHandle(STD_INPUT_HANDLE, 0);
+        SetStdHandle(STD_INPUT_HANDLE, 0);
         break;
     case 1:
-        if (GetStdHandle(STD_OUTPUT_HANDLE) == old_handle) SetStdHandle(STD_OUTPUT_HANDLE, 0);
+        SetStdHandle(STD_OUTPUT_HANDLE, 0);
         break;
     case 2:
-        if (GetStdHandle(STD_ERROR_HANDLE) == old_handle) SetStdHandle(STD_ERROR_HANDLE, 0);
+        SetStdHandle(STD_ERROR_HANDLE, 0);
         break;
     }
   }
-  else
-  {
-    if (fd == MSVCRT_fdend - 1)
-      MSVCRT_fdend--;
-    if (fd < MSVCRT_fdstart)
-      MSVCRT_fdstart = fd;
-  }
+
+  if (fd == MSVCRT_fdend - 1)
+    MSVCRT_fdend--;
+  if (fd < MSVCRT_fdstart)
+    MSVCRT_fdstart = fd;
   UNLOCK_FILES();
 }
 
 /* INTERNAL: Allocate an fd slot from a Win32 HANDLE, starting from fd */
 /* caller must hold the files lock */
-static int msvcrt_alloc_fd_from(HANDLE hand, int flag, int fd)
+static int msvcrt_set_fd(HANDLE hand, int flag, int fd)
 {
   ioinfo *fdinfo;
 
@@ -354,7 +352,7 @@ static int msvcrt_alloc_fd(HANDLE hand, int flag)
 
   LOCK_FILES();
   TRACE(":handle (%p) allocating fd (%d)\n",hand,MSVCRT_fdstart);
-  ret = msvcrt_alloc_fd_from(hand, flag, MSVCRT_fdstart);
+  ret = msvcrt_set_fd(hand, flag, MSVCRT_fdstart);
   UNLOCK_FILES();
   return ret;
 }
@@ -477,7 +475,7 @@ void msvcrt_init_io(void)
     for (i = 0; i < count; i++)
     {
       if ((*wxflag_ptr & WX_OPEN) && *handle_ptr != INVALID_HANDLE_VALUE)
-        msvcrt_alloc_fd_from(*handle_ptr, *wxflag_ptr, i);
+        msvcrt_set_fd(*handle_ptr, *wxflag_ptr, i);
 
       wxflag_ptr++; handle_ptr++;
     }
@@ -486,53 +484,21 @@ void msvcrt_init_io(void)
         if (msvcrt_get_ioinfo(MSVCRT_fdstart)->handle == INVALID_HANDLE_VALUE) break;
   }
 
-  if(!MSVCRT___pioinfo[0])
-      msvcrt_alloc_fd_from(INVALID_HANDLE_VALUE, 0, 3);
-
-  fdinfo = msvcrt_get_ioinfo(0);
+  fdinfo = msvcrt_get_ioinfo(MSVCRT_STDIN_FILENO);
   if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
-  {
-      HANDLE std = GetStdHandle(STD_INPUT_HANDLE);
-      if (std != INVALID_HANDLE_VALUE && DuplicateHandle(GetCurrentProcess(), std,
-                                                         GetCurrentProcess(), &fdinfo->handle,
-                                                         0, TRUE, DUPLICATE_SAME_ACCESS))
-          fdinfo->wxflag = WX_OPEN | WX_TEXT;
-      fdinfo->lookahead[0] = '\n';
-      fdinfo->lookahead[1] = '\n';
-      fdinfo->lookahead[2] = '\n';
-      fdinfo->exflag = 0;
-  }
+    msvcrt_set_fd(GetStdHandle(STD_INPUT_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDIN_FILENO);
 
-  fdinfo = msvcrt_get_ioinfo(1);
+  fdinfo = msvcrt_get_ioinfo(MSVCRT_STDOUT_FILENO);
   if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
-  {
-      HANDLE std = GetStdHandle(STD_OUTPUT_HANDLE);
-      if (std != INVALID_HANDLE_VALUE && DuplicateHandle(GetCurrentProcess(), std,
-                                                         GetCurrentProcess(), &fdinfo->handle,
-                                                         0, TRUE, DUPLICATE_SAME_ACCESS))
-          fdinfo->wxflag = WX_OPEN | WX_TEXT;
-      fdinfo->lookahead[0] = '\n';
-      fdinfo->lookahead[1] = '\n';
-      fdinfo->lookahead[2] = '\n';
-      fdinfo->exflag = 0;
-  }
+    msvcrt_set_fd(GetStdHandle(STD_OUTPUT_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDOUT_FILENO);
 
-  fdinfo = msvcrt_get_ioinfo(2);
+  fdinfo = msvcrt_get_ioinfo(MSVCRT_STDERR_FILENO);
   if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
-  {
-      HANDLE std = GetStdHandle(STD_ERROR_HANDLE);
-      if (std != INVALID_HANDLE_VALUE && DuplicateHandle(GetCurrentProcess(), std,
-                                                         GetCurrentProcess(), &fdinfo->handle,
-                                                         0, TRUE, DUPLICATE_SAME_ACCESS))
-          fdinfo->wxflag = WX_OPEN | WX_TEXT;
-      fdinfo->lookahead[0] = '\n';
-      fdinfo->lookahead[1] = '\n';
-      fdinfo->lookahead[2] = '\n';
-      fdinfo->exflag = 0;
-  }
+    msvcrt_set_fd(GetStdHandle(STD_ERROR_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDERR_FILENO);
 
-  TRACE(":handles (%p)(%p)(%p)\n", msvcrt_get_ioinfo(0)->handle,
-	msvcrt_get_ioinfo(1)->handle, msvcrt_get_ioinfo(2)->handle);
+  TRACE(":handles (%p)(%p)(%p)\n", msvcrt_get_ioinfo(MSVCRT_STDIN_FILENO)->handle,
+        msvcrt_get_ioinfo(MSVCRT_STDOUT_FILENO)->handle,
+        msvcrt_get_ioinfo(MSVCRT_STDERR_FILENO)->handle);
 
   memset(MSVCRT__iob,0,3*sizeof(MSVCRT_FILE));
   for (i = 0; i < 3; i++)
@@ -948,7 +914,7 @@ int CDECL MSVCRT__dup2(int od, int nd)
 
       if (msvcrt_is_valid_fd(nd))
         MSVCRT__close(nd);
-      ret = msvcrt_alloc_fd_from(handle, wxflag, nd);
+      ret = msvcrt_set_fd(handle, wxflag, nd);
       if (ret == -1)
       {
         CloseHandle(handle);
@@ -3687,10 +3653,7 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
   while(rcnt>0)
   {
     int i;
-    /* Fill the buffer on small reads.
-     * TODO: Use a better buffering strategy.
-     */
-    if (!file->_cnt && size*nmemb <= MSVCRT_BUFSIZ/2 && !(file->_flag & MSVCRT__IONBF)
+    if (!file->_cnt && rcnt<MSVCRT_BUFSIZ && !(file->_flag & MSVCRT__IONBF)
             && (file->_bufsiz != 0 || msvcrt_alloc_buffer(file))) {
       file->_cnt = MSVCRT__read(file->_file, file->_base, file->_bufsiz);
       file->_ptr = file->_base;
@@ -3705,8 +3668,12 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
         file->_cnt -= i;
         file->_ptr += i;
       }
+    } else if (rcnt > UINT_MAX) {
+      i = MSVCRT__read(file->_file, ptr, UINT_MAX);
+    } else if (rcnt < MSVCRT_BUFSIZ) {
+      i = MSVCRT__read(file->_file, ptr, rcnt);
     } else {
-      i = MSVCRT__read(file->_file,ptr, rcnt);
+      i = MSVCRT__read(file->_file, ptr, rcnt - MSVCRT_BUFSIZ/2);
     }
     pread += i;
     rcnt -= i;

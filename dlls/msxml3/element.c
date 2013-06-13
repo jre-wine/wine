@@ -301,13 +301,29 @@ static HRESULT WINAPI domelem_get_attributes(
 static HRESULT WINAPI domelem_insertBefore(
     IXMLDOMElement *iface,
     IXMLDOMNode* newNode, VARIANT refChild,
-    IXMLDOMNode** outOldNode)
+    IXMLDOMNode** old_node)
 {
     domelem *This = impl_from_IXMLDOMElement( iface );
+    DOMNodeType type;
+    HRESULT hr;
 
-    TRACE("(%p)->(%p %s %p)\n", This, newNode, debugstr_variant(&refChild), outOldNode);
+    TRACE("(%p)->(%p %s %p)\n", This, newNode, debugstr_variant(&refChild), old_node);
 
-    return node_insert_before(&This->node, newNode, &refChild, outOldNode);
+    hr = IXMLDOMNode_get_nodeType(newNode, &type);
+    if (hr != S_OK) return hr;
+
+    TRACE("new node type %d\n", type);
+    switch (type)
+    {
+        case NODE_DOCUMENT:
+        case NODE_DOCUMENT_TYPE:
+        case NODE_ENTITY:
+        case NODE_NOTATION:
+            if (old_node) *old_node = NULL;
+            return E_FAIL;
+        default:
+            return node_insert_before(&This->node, newNode, &refChild, old_node);
+    }
 }
 
 static HRESULT WINAPI domelem_replaceChild(
@@ -1227,7 +1243,7 @@ static HRESULT WINAPI domelem_setAttribute(
     domelem *This = impl_from_IXMLDOMElement( iface );
     xmlChar *xml_name, *xml_value, *local, *prefix;
     xmlNodePtr element;
-    HRESULT hr;
+    HRESULT hr = S_OK;
 
     TRACE("(%p)->(%s %s)\n", This, debugstr_w(name), debugstr_variant(&value));
 
