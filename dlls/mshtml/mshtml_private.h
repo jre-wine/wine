@@ -77,6 +77,7 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLAnchorElement) \
     XDIID(DispHTMLAttributeCollection) \
     XDIID(DispHTMLBody) \
+    XDIID(DispHTMLButtonElement) \
     XDIID(DispHTMLCommentElement) \
     XDIID(DispHTMLCurrentStyle) \
     XDIID(DispHTMLDocument) \
@@ -113,12 +114,14 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLUnknownElement) \
     XDIID(DispHTMLWindow2) \
     XDIID(HTMLDocumentEvents) \
+    XDIID(HTMLElementEvents2) \
     XIID(IHTMLAnchorElement) \
     XIID(IHTMLAttributeCollection) \
     XIID(IHTMLAttributeCollection2) \
     XIID(IHTMLAttributeCollection3) \
     XIID(IHTMLBodyElement) \
     XIID(IHTMLBodyElement2) \
+    XIID(IHTMLButtonElement) \
     XIID(IHTMLCommentElement) \
     XIID(IHTMLCurrentStyle) \
     XIID(IHTMLCurrentStyle2) \
@@ -428,19 +431,26 @@ typedef enum {
 typedef struct _cp_static_data_t {
     tid_t tid;
     void (*on_advise)(IUnknown*,struct _cp_static_data_t*);
+    BOOL pass_event_arg;
     DWORD id_cnt;
     DISPID *ids;
 } cp_static_data_t;
 
+typedef struct {
+    const IID *riid;
+    cp_static_data_t *desc;
+} cpc_entry_t;
+
 typedef struct ConnectionPointContainer {
     IConnectionPointContainer IConnectionPointContainer_iface;
 
-    ConnectionPoint *cp_list;
+    ConnectionPoint *cps;
+    const cpc_entry_t *cp_entries;
     IUnknown *outer;
     struct ConnectionPointContainer *forward_container;
 } ConnectionPointContainer;
 
-struct ConnectionPoint {
+struct  ConnectionPoint {
     IConnectionPoint IConnectionPoint_iface;
 
     ConnectionPointContainer *container;
@@ -454,8 +464,6 @@ struct ConnectionPoint {
 
     const IID *iid;
     cp_static_data_t *data;
-
-    ConnectionPoint *next;
 };
 
 struct HTMLDocument {
@@ -497,11 +505,6 @@ struct HTMLDocument {
     LONG task_magic;
 
     ConnectionPointContainer cp_container;
-    ConnectionPoint cp_htmldocevents;
-    ConnectionPoint cp_htmldocevents2;
-    ConnectionPoint cp_propnotif;
-    ConnectionPoint cp_dispatch;
-
     IOleAdviseHolder *advise_holder;
 };
 
@@ -600,6 +603,7 @@ struct NSContainer {
 typedef struct {
     HRESULT (*qi)(HTMLDOMNode*,REFIID,void**);
     void (*destructor)(HTMLDOMNode*);
+    const cpc_entry_t *cpc_entries;
     HRESULT (*clone)(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
     HRESULT (*handle_event)(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*);
     HRESULT (*get_attr_col)(HTMLDOMNode*,HTMLAttributeCollection**);
@@ -664,12 +668,14 @@ typedef struct {
     IHTMLElement3_tid,      \
     IHTMLElement4_tid
 
+extern cp_static_data_t HTMLElementEvents2_data;
+#define HTMLELEMENT_CPC {&DIID_HTMLElementEvents2, &HTMLElementEvents2_data}
+extern const cpc_entry_t HTMLElement_cpc[];
+
 typedef struct {
     HTMLElement element;
 
     IHTMLTextContainer IHTMLTextContainer_iface;
-
-    ConnectionPoint cp;
 } HTMLTextContainer;
 
 struct HTMLFrameBase {
@@ -753,8 +759,7 @@ void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*) DECLSPEC_HIDDEN;
 
 HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**) DECLSPEC_HIDDEN;
 
-void ConnectionPoint_Init(ConnectionPoint*,ConnectionPointContainer*,REFIID,cp_static_data_t*) DECLSPEC_HIDDEN;
-void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*) DECLSPEC_HIDDEN;
+void ConnectionPointContainer_Init(ConnectionPointContainer*,IUnknown*,const cpc_entry_t*) DECLSPEC_HIDDEN;
 void ConnectionPointContainer_Destroy(ConnectionPointContainer*) DECLSPEC_HIDDEN;
 
 HRESULT create_nscontainer(HTMLDocumentObj*,NSContainer**) DECLSPEC_HIDDEN;
@@ -787,7 +792,7 @@ HRESULT nsuri_to_url(LPCWSTR,BOOL,BSTR*) DECLSPEC_HIDDEN;
 
 HRESULT set_frame_doc(HTMLFrameBase*,nsIDOMDocument*) DECLSPEC_HIDDEN;
 
-void call_property_onchanged(ConnectionPoint*,DISPID) DECLSPEC_HIDDEN;
+void call_property_onchanged(ConnectionPointContainer*,DISPID) DECLSPEC_HIDDEN;
 HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*) DECLSPEC_HIDDEN;
 
 void *nsalloc(size_t) __WINE_ALLOC_SIZE(1) DECLSPEC_HIDDEN;
@@ -869,6 +874,7 @@ HRESULT HTMLElement_Create(HTMLDocumentNode*,nsIDOMNode*,BOOL,HTMLElement**) DEC
 HRESULT HTMLCommentElement_Create(HTMLDocumentNode*,nsIDOMNode*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLAnchorElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLBodyElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
+HRESULT HTMLButtonElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLEmbedElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLFormElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;
 HRESULT HTMLFrameElement_Create(HTMLDocumentNode*,nsIDOMHTMLElement*,HTMLElement**) DECLSPEC_HIDDEN;

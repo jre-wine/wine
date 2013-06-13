@@ -56,7 +56,6 @@ static const struct
     { "i786",    CPU_x86 },
     { "amd64",   CPU_x86_64 },
     { "x86_64",  CPU_x86_64 },
-    { "sparc",   CPU_SPARC },
     { "powerpc", CPU_POWERPC },
     { "arm",     CPU_ARM },
     { "arm64",   CPU_ARM64 },
@@ -64,7 +63,7 @@ static const struct
 };
 
 /* atexit handler to clean tmp files */
-static void cleanup_tmp_files(void)
+void cleanup_tmp_files(void)
 {
     unsigned int i;
     for (i = 0; i < nb_tmp_files; i++) if (tmp_files[i]) unlink( tmp_files[i] );
@@ -460,8 +459,6 @@ char *get_temp_file_name( const char *prefix, const char *suffix )
     char *name;
     const char *ext, *basename;
     int fd;
-
-    if (!nb_tmp_files && !save_temps) atexit( cleanup_tmp_files );
 
     if (!prefix || !prefix[0]) prefix = "winebuild";
     if (!suffix) suffix = "";
@@ -894,7 +891,6 @@ unsigned int get_alignment(unsigned int align)
     {
     case CPU_x86:
     case CPU_x86_64:
-    case CPU_SPARC:
         if (target_platform != PLATFORM_APPLE) return align;
         /* fall through */
     case CPU_POWERPC:
@@ -919,7 +915,6 @@ unsigned int get_page_size(void)
     case CPU_POWERPC: return 4096;
     case CPU_ARM:     return 4096;
     case CPU_ARM64:   return 4096;
-    case CPU_SPARC:   return 8192;
     }
     /* unreached */
     assert(0);
@@ -933,7 +928,6 @@ unsigned int get_ptr_size(void)
     {
     case CPU_x86:
     case CPU_POWERPC:
-    case CPU_SPARC:
     case CPU_ARM:
         return 4;
     case CPU_x86_64:
@@ -1112,14 +1106,6 @@ const char *get_asm_string_keyword(void)
         return ".asciz";
     default:
         return ".string";
-    }
-}
-
-const char *get_asm_short_keyword(void)
-{
-    switch (target_platform)
-    {
-    default:            return ".short";
     }
 }
 

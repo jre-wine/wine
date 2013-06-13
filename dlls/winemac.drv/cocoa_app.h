@@ -26,12 +26,21 @@
 #define ERR(...) do { if (macdrv_err_on) LogError(__func__, __VA_ARGS__); } while (false)
 
 
+enum {
+    WineApplicationEventWakeQuery,
+};
+
+
 @class WineEventQueue;
 @class WineWindow;
 
 
 @interface WineApplication : NSApplication <NSApplicationDelegate>
 {
+    CFRunLoopSourceRef requestSource;
+    NSMutableArray* requests;
+    dispatch_queue_t requestsManipQueue;
+
     NSMutableArray* eventQueues;
     NSLock*         eventQueuesLock;
 
@@ -83,6 +92,8 @@
 
     - (void) windowGotFocus:(WineWindow*)window;
 
+    - (BOOL) waitUntilQueryDone:(int*)done timeout:(NSDate*)timeout processEvents:(BOOL)processEvents;
+
     - (void) keyboardSelectionDidChange;
 
     - (void) flipRect:(NSRect*)rect;
@@ -93,7 +104,6 @@
 
 @end
 
-void OnMainThread(dispatch_block_t block);
 void OnMainThreadAsync(dispatch_block_t block);
 
 void LogError(const char* func, NSString* format, ...);

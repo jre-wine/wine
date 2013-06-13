@@ -985,9 +985,8 @@ static char *strdup_lower(const char *str)
 
 static inline int sock_error_p(int s)
 {
-    unsigned int optval, optlen;
-
-    optlen = sizeof(optval);
+    unsigned int optval;
+    socklen_t optlen = sizeof(optval);
     getsockopt(s, SOL_SOCKET, SO_ERROR, (void *) &optval, &optlen);
     if (optval) WARN("\t[%i] error: %d\n", s, optval);
     return optval != 0;
@@ -999,7 +998,7 @@ static inline int sock_error_p(int s)
 static inline int get_rcvsnd_timeo( int fd, int optname)
 {
   struct timeval tv;
-  unsigned int len = sizeof(tv);
+  socklen_t len = sizeof(tv);
   int ret = getsockopt(fd, SOL_SOCKET, optname, &tv, &len);
   if( ret >= 0)
       ret = tv.tv_sec * 1000 + tv.tv_usec / 1000;
@@ -1777,7 +1776,7 @@ static int WS2_send( int fd, struct ws2_async *wsa )
         {
             struct sockaddr_ipx* uipx = (struct sockaddr_ipx*)hdr.msg_name;
             int val=0;
-            unsigned int len=sizeof(int);
+            socklen_t len = sizeof(int);
 
             /* The packet type is stored at the ipx socket level; At least the linux kernel seems
              *  to do something with it in case hdr.msg_name is NULL. Nonetheless can we use it to store
@@ -2148,7 +2147,8 @@ static int WINAPI WS2_WSARecvMsg( SOCKET s, LPWSAMSG msg, LPDWORD lpNumberOfByte
 static BOOL interface_bind( SOCKET s, int fd, struct sockaddr *addr )
 {
     struct sockaddr_in *in_sock = (struct sockaddr_in *) addr;
-    unsigned int sock_type = 0, optlen = sizeof(sock_type);
+    unsigned int sock_type = 0;
+    socklen_t optlen = sizeof(sock_type);
     in_addr_t bind_addr = in_sock->sin_addr.s_addr;
     PIP_ADAPTER_INFO adapters = NULL, adapter;
     BOOL ret = FALSE;
@@ -2523,7 +2523,7 @@ int WINAPI WS_getpeername(SOCKET s, struct WS_sockaddr *name, int *namelen)
     if (fd != -1)
     {
         union generic_unix_sockaddr uaddr;
-        unsigned int uaddrlen = sizeof(uaddr);
+        socklen_t uaddrlen = sizeof(uaddr);
 
         if (getpeername(fd, &uaddr.addr, &uaddrlen) == 0)
         {
@@ -2565,7 +2565,7 @@ int WINAPI WS_getsockname(SOCKET s, struct WS_sockaddr *name, int *namelen)
     if (fd != -1)
     {
         union generic_unix_sockaddr uaddr;
-        unsigned int uaddrlen = sizeof(uaddr);
+        socklen_t uaddrlen = sizeof(uaddr);
 
         if (getsockname(fd, &uaddr.addr, &uaddrlen) != 0)
         {
@@ -2622,7 +2622,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (socklen_t *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -2633,7 +2633,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         case WS_SO_DONTLINGER:
         {
             struct linger lingval;
-            unsigned int len = sizeof(struct linger);
+            socklen_t len = sizeof(struct linger);
 
             if (!optlen || *optlen < sizeof(BOOL)|| !optval)
             {
@@ -2695,7 +2695,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         {
             struct linger lingval;
             int so_type;
-            unsigned int len = sizeof(struct linger), slen = sizeof(int);
+            socklen_t len = sizeof(struct linger), slen = sizeof(int);
 
             /* struct linger and LINGER have different sizes */
             if (!optlen || *optlen < sizeof(LINGER) || !optval)
@@ -2759,7 +2759,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 #if defined(SO_RCVTIMEO) || defined(SO_SNDTIMEO)
         {
             struct timeval tv;
-            unsigned int len = sizeof(struct timeval);
+            socklen_t len = sizeof(struct timeval);
 
             if (!optlen || *optlen < sizeof(int)|| !optval)
             {
@@ -2802,7 +2802,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         case IPX_PTYPE:
             if ((fd = get_sock_fd( s, 0, NULL )) == -1) return SOCKET_ERROR;
 #ifdef SOL_IPX
-            if(getsockopt(fd, SOL_IPX, IPX_TYPE, optval, (unsigned int*)optlen) == -1)
+            if(getsockopt(fd, SOL_IPX, IPX_TYPE, optval, (socklen_t *)optlen) == -1)
             {
                 ret = SOCKET_ERROR;
             }
@@ -2881,7 +2881,8 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             {
                 struct irda_device_list *src = (struct irda_device_list *)buf;
                 DEVICELIST *dst = (DEVICELIST *)optval;
-                INT needed = sizeof(DEVICELIST), i;
+                INT needed = sizeof(DEVICELIST);
+                unsigned int i;
 
                 if (src->len > 0)
                     needed += (src->len - 1) * sizeof(IRDA_DEVICE_INFO);
@@ -2931,7 +2932,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (socklen_t *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -2965,7 +2966,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (socklen_t *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -3000,7 +3001,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
                 return SOCKET_ERROR;
             convert_sockopt(&level, &optname);
-            if (getsockopt(fd, level, optname, optval, (unsigned int *)optlen) != 0 )
+            if (getsockopt(fd, level, optname, optval, (socklen_t *)optlen) != 0 )
             {
                 SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
                 ret = SOCKET_ERROR;
@@ -3245,7 +3246,8 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
 
     case WS_SIOCATMARK:
     {
-        unsigned int oob = 0, oobsize = sizeof(int), atmark = 0;
+        unsigned int oob = 0, atmark = 0;
+        socklen_t oobsize = sizeof(int);
         if (out_size != sizeof(WS_u_long) || IS_INTRESOURCE(out_buff))
         {
             WSASetLastError(WSAEFAULT);
@@ -4604,6 +4606,7 @@ struct WS_hostent* WINAPI WS_gethostbyaddr(const char *addr, int len, int type)
 static struct WS_hostent* WS_get_local_ips( char *hostname )
 {
     int last_metric, numroutes = 0, i, j;
+    DWORD n;
     PIP_ADAPTER_INFO adapters = NULL, k;
     struct WS_hostent *hostlist = NULL;
     PMIB_IPFORWARDTABLE routes = NULL;
@@ -4626,15 +4629,15 @@ static struct WS_hostent* WS_get_local_ips( char *hostname )
     if (GetIpForwardTable(routes, &route_size, FALSE) != NO_ERROR)
         goto cleanup;
     /* Store the interface associated with each route */
-    for (i = 0; i < routes->dwNumEntries; i++)
+    for (n = 0; n < routes->dwNumEntries; n++)
     {
         IF_INDEX ifindex;
         DWORD ifmetric, exists = FALSE;
 
-        if (routes->table[i].u1.ForwardType != MIB_IPROUTE_TYPE_DIRECT)
+        if (routes->table[n].u1.ForwardType != MIB_IPROUTE_TYPE_DIRECT)
             continue;
-        ifindex = routes->table[i].dwForwardIfIndex;
-        ifmetric = routes->table[i].dwForwardMetric1;
+        ifindex = routes->table[n].dwForwardIfIndex;
+        ifmetric = routes->table[n].dwForwardMetric1;
         /* Only store the lowest valued metric for an interface */
         for (j = 0; j < numroutes; j++)
         {

@@ -38,6 +38,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 static const WCHAR aW[]        = {'A',0};
 static const WCHAR bodyW[]     = {'B','O','D','Y',0};
+static const WCHAR buttonW[]   = {'B','U','T','T','O','N',0};
 static const WCHAR embedW[]    = {'E','M','B','E','D',0};
 static const WCHAR formW[]     = {'F','O','R','M',0};
 static const WCHAR frameW[]    = {'F','R','A','M','E',0};
@@ -67,6 +68,7 @@ typedef struct {
 static const tag_desc_t tag_descs[] = {
     {aW,         HTMLAnchorElement_Create},
     {bodyW,      HTMLBodyElement_Create},
+    {buttonW,    HTMLButtonElement_Create},
     {embedW,     HTMLEmbedElement_Create},
     {formW,      HTMLFormElement_Create},
     {frameW,     HTMLFrameElement_Create},
@@ -1677,9 +1679,17 @@ HRESULT HTMLElement_handle_event(HTMLDOMNode *iface, DWORD eid, nsIDOMEvent *eve
     return S_OK;
 }
 
+cp_static_data_t HTMLElementEvents2_data = { HTMLElementEvents2_tid, NULL /* FIXME */, TRUE };
+
+const cpc_entry_t HTMLElement_cpc[] = {
+    HTMLELEMENT_CPC,
+    {NULL}
+};
+
 static const NodeImplVtbl HTMLElementImplVtbl = {
     HTMLElement_QI,
     HTMLElement_destructor,
+    HTMLElement_cpc,
     HTMLElement_clone,
     HTMLElement_handle_event,
     HTMLElement_get_attr_col
@@ -1836,7 +1846,8 @@ void HTMLElement_Init(HTMLElement *This, HTMLDocumentNode *doc, nsIDOMHTMLElemen
         This->nselem = nselem;
     }
 
-    ConnectionPointContainer_Init(&This->cp_container, (IUnknown*)&This->IHTMLElement_iface);
+    This->node.cp_container = &This->cp_container;
+    ConnectionPointContainer_Init(&This->cp_container, (IUnknown*)&This->IHTMLElement_iface, This->node.vtbl->cpc_entries);
 }
 
 HRESULT HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL use_generic, HTMLElement **ret)
@@ -1866,8 +1877,8 @@ HRESULT HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL use_g
     }else {
         elem = heap_alloc_zero(sizeof(HTMLElement));
         if(elem) {
-            HTMLElement_Init(elem, doc, nselem, &HTMLElement_dispex);
             elem->node.vtbl = &HTMLElementImplVtbl;
+            HTMLElement_Init(elem, doc, nselem, &HTMLElement_dispex);
             hres = S_OK;
         }else {
             hres = E_OUTOFMEMORY;

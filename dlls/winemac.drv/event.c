@@ -41,6 +41,7 @@ static const char *dbgstr_event(int type)
         "MOUSE_MOVED",
         "MOUSE_MOVED_ABSOLUTE",
         "MOUSE_SCROLL",
+        "QUERY_EVENT",
         "WINDOW_CLOSE_REQUESTED",
         "WINDOW_DID_MINIMIZE",
         "WINDOW_DID_UNMINIMIZE",
@@ -94,7 +95,51 @@ static macdrv_event_mask get_event_mask(DWORD mask)
         event_mask |= event_mask_for_type(WINDOW_LOST_FOCUS);
     }
 
+    if (mask & QS_SENDMESSAGE)
+    {
+        event_mask |= event_mask_for_type(QUERY_EVENT);
+    }
+
     return event_mask;
+}
+
+
+/***********************************************************************
+ *              macdrv_query_event
+ *
+ * Handler for QUERY_EVENT queries.
+ */
+static void macdrv_query_event(HWND hwnd, macdrv_event *event)
+{
+    BOOL success = FALSE;
+    macdrv_query *query = event->query_event.query;
+
+    switch (query->type)
+    {
+        case QUERY_DRAG_DROP:
+            TRACE("QUERY_DRAG_DROP\n");
+            success = query_drag_drop(query);
+            break;
+        case QUERY_DRAG_EXITED:
+            TRACE("QUERY_DRAG_EXITED\n");
+            success = query_drag_exited(query);
+            break;
+        case QUERY_DRAG_OPERATION:
+            TRACE("QUERY_DRAG_OPERATION\n");
+            success = query_drag_operation(query);
+            break;
+        case QUERY_PASTEBOARD_DATA:
+            TRACE("QUERY_PASTEBOARD_DATA\n");
+            success = query_pasteboard_data(hwnd, query->pasteboard_data.type);
+            break;
+        default:
+            FIXME("unrecognized query type %d\n", query->type);
+            break;
+    }
+
+    TRACE("success %d\n", success);
+    query->status = success;
+    macdrv_set_query_done(query);
 }
 
 
@@ -137,6 +182,9 @@ void macdrv_handle_event(macdrv_event *event)
         break;
     case MOUSE_SCROLL:
         macdrv_mouse_scroll(hwnd, event);
+        break;
+    case QUERY_EVENT:
+        macdrv_query_event(hwnd, event);
         break;
     case WINDOW_CLOSE_REQUESTED:
         macdrv_window_close_requested(hwnd);
@@ -204,7 +252,8 @@ DWORD CDECL macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handle
                                         timeout, flags & MWMO_ALERTABLE);
     }
 
-    if (data->current_event) event_mask = 0;  /* don't process nested events */
+    if (data->current_event && data->current_event->type != QUERY_EVENT)
+        event_mask = 0;  /* don't process nested events */
 
     if (process_events(data->queue, event_mask)) ret = count - 1;
     else if (count || timeout)

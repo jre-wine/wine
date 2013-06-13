@@ -477,7 +477,7 @@ static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
 static DWORD init_openssl(void)
 {
 #ifdef SONAME_LIBCRYPTO
-    int i;
+    unsigned int i;
 
     if(OpenSSL_ssl_handle)
         return ERROR_SUCCESS;
@@ -607,7 +607,8 @@ static DWORD init_openssl(void)
 
 static DWORD create_netconn_socket(server_t *server, netconn_t *netconn, DWORD timeout)
 {
-    int result, flag;
+    int result;
+    ULONG flag;
 
     assert(server->addr_len);
     result = netconn->socket = socket(server->addr.ss_family, SOCK_STREAM, 0);
@@ -633,7 +634,7 @@ static DWORD create_netconn_socket(server_t *server, netconn_t *netconn, DWORD t
                 {
                     int err;
                     socklen_t len = sizeof(err);
-                    if (!getsockopt(netconn->socket, SOL_SOCKET, SO_ERROR, &err, &len) && !err)
+                    if (!getsockopt(netconn->socket, SOL_SOCKET, SO_ERROR, (void *)&err, &len) && !err)
                         result = 0;
                 }
             }
@@ -702,12 +703,12 @@ void free_netconn(netconn_t *netconn)
 {
     server_release(netconn->server);
 
+    if (netconn->secure) {
 #ifdef SONAME_LIBSSL
-    if (netconn->ssl_s) {
         pSSL_shutdown(netconn->ssl_s);
         pSSL_free(netconn->ssl_s);
-    }
 #endif
+    }
 
     closesocket(netconn->socket);
     heap_free(netconn);
@@ -729,7 +730,7 @@ void NETCON_unload(void)
     }
     if (ssl_locks)
     {
-        int i;
+        unsigned int i;
         for (i = 0; i < num_ssl_locks; i++)
         {
             ssl_locks[i].DebugInfo->Spare[0] = 0;
@@ -936,7 +937,7 @@ DWORD NETCON_send(netconn_t *connection, const void *msg, size_t len, int flags,
     else
     {
 #ifdef SONAME_LIBSSL
-        if(!connection->ssl_s) {
+        if(!connection->secure) {
             FIXME("not connected\n");
             return ERROR_NOT_SUPPORTED;
         }
@@ -972,7 +973,7 @@ DWORD NETCON_recv(netconn_t *connection, void *buf, size_t len, int flags, int *
     else
     {
 #ifdef SONAME_LIBSSL
-        if(!connection->ssl_s) {
+        if(!connection->secure) {
             FIXME("not connected\n");
             return ERROR_NOT_SUPPORTED;
         }
@@ -1003,7 +1004,7 @@ BOOL NETCON_query_data_available(netconn_t *connection, DWORD *available)
     if(!connection->secure)
     {
 #ifdef FIONREAD
-        int unread;
+        ULONG unread;
         int retval = ioctlsocket(connection->socket, FIONREAD, &unread);
         if (!retval)
         {
@@ -1015,7 +1016,7 @@ BOOL NETCON_query_data_available(netconn_t *connection, DWORD *available)
     else
     {
 #ifdef SONAME_LIBSSL
-        *available = connection->ssl_s ? pSSL_pending(connection->ssl_s) : 0;
+        *available = pSSL_pending(connection->ssl_s);
 #else
         FIXME("not supported on this platform\n");
         return FALSE;
@@ -1060,7 +1061,7 @@ LPCVOID NETCON_GetCert(netconn_t *connection)
     X509* cert;
     LPCVOID r = NULL;
 
-    if (!connection->ssl_s)
+    if (!connection->secure)
         return NULL;
 
     cert = pSSL_get_peer_certificate(connection->ssl_s);
@@ -1082,7 +1083,7 @@ int NETCON_GetCipherStrength(netconn_t *connection)
 #endif
     int bits = 0;
 
-    if (!connection->ssl_s)
+    if (!connection->secure)
         return 0;
     cipher = pSSL_get_current_cipher(connection->ssl_s);
     if (!cipher)
