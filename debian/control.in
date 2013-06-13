@@ -56,7 +56,7 @@ Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
 Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
 
 Package: wine
-Architecture: any
+Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  wine-bin (>= ${source:Version}) | wine64-bin,
@@ -73,7 +73,7 @@ Description: Windows API implementation - standard suite
  This is a virtual package that depends on the standard Wine components.
 
 Package: wine-bin
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
@@ -99,7 +99,7 @@ Description: Windows API implementation - binary loader
  executables.
 
 Package: libwine-dbg
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Section: debug
 Priority: extra
@@ -114,7 +114,7 @@ Description: Windows API implementation - debugging symbols
  This package provides debugging symbols.
 
 Package: libwine-dev
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Section: libdevel
 Depends:
  ${misc:Depends},
@@ -134,7 +134,7 @@ Description: Windows API implementation - development files
 
 Package: libwine
 Section: libs
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -177,7 +177,7 @@ Description: Windows API implementation - library
 Package: libwine-alsa
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -190,7 +190,7 @@ Description: Windows API implementation - ALSA sound module
 Package: libwine-bin
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -203,7 +203,7 @@ Description: Windows API implementation - system services
 Package: libwine-capi
 Section: oldlibs
 Priority: extra
-Architecture: i386 powerpc sparc
+Architecture: i386 powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -217,7 +217,7 @@ Description: Windows API implementation - ISDN module
 Package: libwine-cms
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -231,7 +231,7 @@ Description: Windows API implementation - color management module
 Package: libwine-gl
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -245,7 +245,7 @@ Description: Windows API implementation - OpenGL module
 Package: libwine-gphoto2
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -258,7 +258,7 @@ Description: Windows API implementation - camera module
 Package: libwine-ldap
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -272,7 +272,7 @@ Description: Windows API implementation - LDAP module
 Package: libwine-openal
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -286,7 +286,7 @@ Description: Windows API implementation - OpenAL module
 Package: libwine-oss
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -300,7 +300,7 @@ Description: Windows API implementation - OSS sound module
 Package: libwine-print
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -314,7 +314,7 @@ Description: Windows API implementation - printing module
 Package: libwine-sane
 Section: oldlibs
 Priority: extra
-Architecture: any-i386 any-powerpc any-sparc
+Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
  ${misc:Depends},
