@@ -3205,60 +3205,50 @@ char * CDECL MSVCRT_fgets(char *s, int size, MSVCRT_FILE* file)
 
 /*********************************************************************
  *		fgetwc (MSVCRT.@)
- *
- * In MSVCRT__O_TEXT mode, multibyte characters are read from the file, dropping
- * the CR from CR/LF combinations
  */
 MSVCRT_wint_t CDECL MSVCRT_fgetwc(MSVCRT_FILE* file)
 {
-  int c;
+    MSVCRT_wint_t ret;
+    int ch;
 
-  MSVCRT__lock_file(file);
-  if (!(msvcrt_get_ioinfo(file->_file)->wxflag & WX_TEXT))
-    {
-      MSVCRT_wchar_t wc;
-      unsigned int i;
-      int j;
-      char *chp, *wcp;
-      wcp = (char *)&wc;
-      for(i=0; i<sizeof(wc); i++)
-      {
-        if (file->_cnt>0) 
-        {
-          file->_cnt--;
-          chp = file->_ptr++;
-          wcp[i] = *chp;
-        } 
-        else
-        {
-          j = MSVCRT__filbuf(file);
-          if(file->_cnt<=0)
-          {
-            file->_flag |= (file->_cnt == 0) ? MSVCRT__IOEOF : MSVCRT__IOERR;
-            file->_cnt = 0;
+    MSVCRT__lock_file(file);
 
-            MSVCRT__unlock_file(file);
-            return MSVCRT_WEOF;
-          }
-          wcp[i] = j;
+    if((msvcrt_get_ioinfo(file->_file)->exflag & (EF_UTF8 | EF_UTF16))
+            || !(msvcrt_get_ioinfo(file->_file)->wxflag & WX_TEXT)) {
+        char *p;
+
+        for(p=(char*)&ret; (MSVCRT_wint_t*)p<&ret+1; p++) {
+            ch = MSVCRT_fgetc(file);
+            if(ch == MSVCRT_EOF) {
+                ret = MSVCRT_WEOF;
+                break;
+            }
+            *p = (char)ch;
         }
-      }
+    }else {
+        char mbs[MSVCRT_MB_LEN_MAX];
+        int len = 0;
 
-      MSVCRT__unlock_file(file);
-      return wc;
-    }
-    
-  c = MSVCRT_fgetc(file);
-  if ((get_locinfo()->mb_cur_max > 1) && MSVCRT_isleadbyte(c))
-    {
-      FIXME("Treat Multibyte characters\n");
+        ch = MSVCRT_fgetc(file);
+        if(ch != MSVCRT_EOF) {
+            mbs[0] = (char)ch;
+            if(MSVCRT_isleadbyte((unsigned char)mbs[0])) {
+                ch = MSVCRT_fgetc(file);
+                if(ch != MSVCRT_EOF) {
+                    mbs[1] = (char)ch;
+                    len = 2;
+                }
+            }else {
+                len = 1;
+            }
+        }
+
+        if(!len || MSVCRT_mbtowc(&ret, mbs, len)==-1)
+            ret = MSVCRT_WEOF;
     }
 
-  MSVCRT__unlock_file(file);
-  if (c == MSVCRT_EOF)
-    return MSVCRT_WEOF;
-  else
-    return (MSVCRT_wint_t)c;
+    MSVCRT__unlock_file(file);
+    return ret;
 }
 
 /*********************************************************************
@@ -3315,7 +3305,7 @@ MSVCRT_wint_t CDECL MSVCRT_getwchar(void)
  */
 MSVCRT_wchar_t * CDECL MSVCRT_fgetws(MSVCRT_wchar_t *s, int size, MSVCRT_FILE* file)
 {
-  int    cc = MSVCRT_WEOF;
+  MSVCRT_wint_t cc = MSVCRT_WEOF;
   MSVCRT_wchar_t * buf_start = s;
 
   TRACE(":file(%p) fd (%d) str (%p) len (%d)\n",
@@ -3325,7 +3315,7 @@ MSVCRT_wchar_t * CDECL MSVCRT_fgetws(MSVCRT_wchar_t *s, int size, MSVCRT_FILE* f
 
   while ((size >1) && (cc = MSVCRT_fgetwc(file)) != MSVCRT_WEOF && cc != '\n')
     {
-      *s++ = (char)cc;
+      *s++ = cc;
       size --;
     }
   if ((cc == MSVCRT_WEOF) && (s == buf_start)) /* If nothing read, return 0*/
@@ -3694,6 +3684,57 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
   read+=pread;
   MSVCRT__unlock_file(file);
   return read / size;
+}
+
+
+/* fread_s - not exported in native msvcrt */
+MSVCRT_size_t CDECL fread_s(void *buf, MSVCRT_size_t buf_size, MSVCRT_size_t elem_size,
+        MSVCRT_size_t count, MSVCRT_FILE *stream)
+{
+    size_t bytes_left, buf_pos;
+
+    TRACE("(%p %lu %lu %lu %p\n", buf, buf_size, elem_size, count, stream);
+
+    if(!MSVCRT_CHECK_PMT(stream != NULL)) {
+        if(buf && buf_size)
+            memset(buf, 0, buf_size);
+        return 0;
+    }
+    if(!elem_size || !count) return 0;
+    if(!MSVCRT_CHECK_PMT(buf != NULL)) return 0;
+    if(!MSVCRT_CHECK_PMT(MSVCRT_SIZE_MAX/count >= elem_size)) return 0;
+
+    bytes_left = elem_size*count;
+    buf_pos = 0;
+    while(bytes_left) {
+        if(stream->_cnt > 0) {
+            size_t size = bytes_left<stream->_cnt ? bytes_left : stream->_cnt;
+
+            if(!MSVCRT_CHECK_PMT_ERR(size <= buf_size-buf_pos, MSVCRT_ERANGE)) {
+                memset(buf, 0, buf_size);
+                return 0;
+            }
+
+            MSVCRT_fread((char*)buf+buf_pos, 1, size, stream);
+            buf_pos += size;
+            bytes_left -= size;
+        }else {
+            int c = MSVCRT__filbuf(stream);
+
+            if(c == EOF)
+                break;
+
+            if(!MSVCRT_CHECK_PMT_ERR(buf_size-buf_pos > 0, MSVCRT_ERANGE)) {
+                memset(buf, 0, buf_size);
+                return 0;
+            }
+
+            ((char*)buf)[buf_pos++] = c;
+            bytes_left--;
+        }
+    }
+
+    return buf_pos/elem_size;
 }
 
 /*********************************************************************

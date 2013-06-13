@@ -106,12 +106,17 @@ static ssize_t schan_push_adapter(gnutls_transport_ptr_t transport,
     return buff_len;
 }
 
-BOOL schan_imp_create_session(schan_imp_session *session, BOOL is_server,
-                              schan_imp_certificate_credentials cred)
+DWORD schan_imp_enabled_protocols(void)
+{
+    /* NOTE: No support for SSL 2.0 */
+    return SP_PROT_SSL3_CLIENT | SP_PROT_TLS1_0_CLIENT | SP_PROT_TLS1_1_CLIENT | SP_PROT_TLS1_2_CLIENT;
+}
+
+BOOL schan_imp_create_session(schan_imp_session *session, schan_credentials *cred)
 {
     gnutls_session_t *s = (gnutls_session_t*)session;
 
-    int err = pgnutls_init(s, is_server ? GNUTLS_SERVER : GNUTLS_CLIENT);
+    int err = pgnutls_init(s, cred->credential_use == SECPKG_CRED_INBOUND ? GNUTLS_SERVER : GNUTLS_CLIENT);
     if (err != GNUTLS_E_SUCCESS)
     {
         pgnutls_perror(err);
@@ -129,7 +134,7 @@ BOOL schan_imp_create_session(schan_imp_session *session, BOOL is_server,
     }
 
     err = pgnutls_credentials_set(*s, GNUTLS_CRD_CERTIFICATE,
-                                  (gnutls_certificate_credentials_t)cred);
+                                  (gnutls_certificate_credentials_t)cred->credentials);
     if (err != GNUTLS_E_SUCCESS)
     {
         pgnutls_perror(err);
@@ -405,17 +410,17 @@ again:
     return SEC_E_OK;
 }
 
-BOOL schan_imp_allocate_certificate_credentials(schan_imp_certificate_credentials *c)
+BOOL schan_imp_allocate_certificate_credentials(schan_credentials *c)
 {
-    int ret = pgnutls_certificate_allocate_credentials((gnutls_certificate_credentials*)c);
+    int ret = pgnutls_certificate_allocate_credentials((gnutls_certificate_credentials*)&c->credentials);
     if (ret != GNUTLS_E_SUCCESS)
         pgnutls_perror(ret);
     return (ret == GNUTLS_E_SUCCESS);
 }
 
-void schan_imp_free_certificate_credentials(schan_imp_certificate_credentials c)
+void schan_imp_free_certificate_credentials(schan_credentials *c)
 {
-    pgnutls_certificate_free_credentials((gnutls_certificate_credentials_t)c);
+    pgnutls_certificate_free_credentials(c->credentials);
 }
 
 static void schan_gnutls_log(int level, const char *msg)

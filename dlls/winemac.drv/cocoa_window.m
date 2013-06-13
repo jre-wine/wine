@@ -189,59 +189,57 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             const CGRect* rects;
             int count;
 
-            if (!get_surface_region_rects(window.surface, &rects, &count) || count)
+            if (get_surface_blit_rects(window.surface, &rects, &count) && count)
             {
-                CGRect imageRect;
-                CGImageRef image;
+                CGContextRef context;
+                int i;
 
-                imageRect = NSRectToCGRect(rect);
-                image = create_surface_image(window.surface, &imageRect, FALSE);
+                [window.shape addClip];
 
-                if (image)
+                context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
+                CGContextSetBlendMode(context, kCGBlendModeCopy);
+
+                for (i = 0; i < count; i++)
                 {
-                    CGContextRef context;
+                    CGRect imageRect;
+                    CGImageRef image;
 
-                    if (rects && count)
+                    imageRect = CGRectIntersection(rects[i], NSRectToCGRect(rect));
+                    image = create_surface_image(window.surface, &imageRect, FALSE);
+
+                    if (image)
                     {
-                        NSBezierPath* surfaceClip = [NSBezierPath bezierPath];
-                        int i;
-                        for (i = 0; i < count; i++)
-                            [surfaceClip appendBezierPathWithRect:NSRectFromCGRect(rects[i])];
-                        [surfaceClip addClip];
-                    }
-
-                    [window.shape addClip];
-
-                    if (window.colorKeyed)
-                    {
-                        CGImageRef maskedImage;
-                        CGFloat components[] = { window.colorKeyRed - 0.5, window.colorKeyRed + 0.5,
-                                                 window.colorKeyGreen - 0.5, window.colorKeyGreen + 0.5,
-                                                 window.colorKeyBlue - 0.5, window.colorKeyBlue + 0.5 };
-                        maskedImage = CGImageCreateWithMaskingColors(image, components);
-                        if (maskedImage)
+                        if (window.colorKeyed)
                         {
-                            CGImageRelease(image);
-                            image = maskedImage;
+                            CGImageRef maskedImage;
+                            CGFloat components[] = { window.colorKeyRed - 0.5, window.colorKeyRed + 0.5,
+                                                     window.colorKeyGreen - 0.5, window.colorKeyGreen + 0.5,
+                                                     window.colorKeyBlue - 0.5, window.colorKeyBlue + 0.5 };
+                            maskedImage = CGImageCreateWithMaskingColors(image, components);
+                            if (maskedImage)
+                            {
+                                CGImageRelease(image);
+                                image = maskedImage;
+                            }
                         }
-                    }
 
-                    context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
-                    CGContextSetBlendMode(context, kCGBlendModeCopy);
-                    CGContextDrawImage(context, imageRect, image);
+                        CGContextDrawImage(context, imageRect, image);
 
-                    CGImageRelease(image);
-
-                    if (window.shapeChangedSinceLastDraw || window.colorKeyed ||
-                        window.usePerPixelAlpha)
-                    {
-                        window.shapeChangedSinceLastDraw = FALSE;
-                        [window invalidateShadow];
+                        CGImageRelease(image);
                     }
                 }
             }
 
             pthread_mutex_unlock(window.surface_mutex);
+        }
+
+        // If the window may be transparent, then we have to invalidate the
+        // shadow every time we draw.  Also, if this is the first time we've
+        // drawn since changing from transparent to opaque.
+        if (![window isOpaque] || window.shapeChangedSinceLastDraw)
+        {
+            window.shapeChangedSinceLastDraw = FALSE;
+            [window invalidateShadow];
         }
     }
 

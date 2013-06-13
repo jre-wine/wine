@@ -71,6 +71,8 @@ static inline const char *wine_dbgstr_cgrect(CGRect cgrect)
 
 extern CGRect macdrv_get_desktop_rect(void) DECLSPEC_HIDDEN;
 extern void macdrv_reset_device_metrics(void) DECLSPEC_HIDDEN;
+extern BOOL macdrv_GetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp) DECLSPEC_HIDDEN;
+extern BOOL macdrv_SetDeviceGammaRamp(PHYSDEV dev, LPVOID ramp) DECLSPEC_HIDDEN;
 
 
 /**************************************************************************
@@ -125,6 +127,7 @@ struct macdrv_win_data
     BOOL                on_screen : 1;          /* is window ordered in? (minimized or not) */
     BOOL                shaped : 1;             /* is window using a custom region shape? */
     BOOL                layered : 1;            /* is window layered and with valid attributes? */
+    BOOL                ulw_layered : 1;        /* has UpdateLayeredWindow() been called for window? */
     BOOL                per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
     BOOL                minimized : 1;          /* is window minimized? */
     struct window_surface *surface;
@@ -134,7 +137,8 @@ extern struct macdrv_win_data *get_win_data(HWND hwnd) DECLSPEC_HIDDEN;
 extern void release_win_data(struct macdrv_win_data *data) DECLSPEC_HIDDEN;
 extern macdrv_window macdrv_get_cocoa_window(HWND hwnd, BOOL require_on_screen) DECLSPEC_HIDDEN;
 extern RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp) DECLSPEC_HIDDEN;
-extern struct window_surface *create_surface(macdrv_window window, const RECT *rect, BOOL use_alpha) DECLSPEC_HIDDEN;
+extern struct window_surface *create_surface(macdrv_window window, const RECT *rect,
+                                             struct window_surface *old_surface, BOOL use_alpha) DECLSPEC_HIDDEN;
 extern void set_window_surface(macdrv_window window, struct window_surface *window_surface) DECLSPEC_HIDDEN;
 extern void set_surface_use_alpha(struct window_surface *window_surface, BOOL use_alpha) DECLSPEC_HIDDEN;
 
@@ -172,5 +176,14 @@ extern BOOL query_drag_drop(macdrv_query* query) DECLSPEC_HIDDEN;
 extern struct opengl_funcs *macdrv_wine_get_wgl_driver(PHYSDEV dev, UINT version) DECLSPEC_HIDDEN;
 extern void sync_gl_view(struct macdrv_win_data *data) DECLSPEC_HIDDEN;
 extern void set_gl_view_parent(HWND hwnd, HWND parent) DECLSPEC_HIDDEN;
+
+extern CGImageRef create_cgimage_from_icon_bitmaps(HDC hdc, HANDLE icon, HBITMAP hbmColor,
+                                                   unsigned char *color_bits, int color_size, HBITMAP hbmMask,
+                                                   unsigned char *mask_bits, int mask_size, int width,
+                                                   int height, int istep) DECLSPEC_HIDDEN;
+extern CGImageRef create_cgimage_from_icon(HANDLE icon, int width, int height) DECLSPEC_HIDDEN;
+extern CFArrayRef create_app_icon_images(void) DECLSPEC_HIDDEN;
+
+extern void macdrv_status_item_clicked(const macdrv_event *event) DECLSPEC_HIDDEN;
 
 #endif  /* __WINE_MACDRV_H */

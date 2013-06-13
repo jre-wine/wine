@@ -409,7 +409,7 @@
 # @ stub RtlAddAuditAccessObjectAce
 # @ stub RtlAddCompoundAce
 # @ stub RtlAddRange
-@ cdecl -arch=x86_64 RtlAddFunctionTable(ptr long long)
+@ cdecl -arch=arm,x86_64 RtlAddFunctionTable(ptr long long)
 @ stdcall RtlAddRefActivationContext(ptr)
 # @ stub RtlAddRefMemoryStream
 @ stdcall RtlAddVectoredExceptionHandler(long ptr)
@@ -463,7 +463,7 @@
 # @ stub RtlConvertPropertyToVariant
 @ stub RtlConvertSharedToExclusive
 @ stdcall RtlConvertSidToUnicodeString(ptr ptr long)
-# @ stub RtlConvertToAutoInheritSecurityObject
+@ stdcall RtlConvertToAutoInheritSecurityObject(ptr ptr ptr ptr long ptr)
 @ stub RtlConvertUiListToApiList
 @ stdcall -arch=win32 -ret64 RtlConvertUlongToLargeInteger(long)
 # @ stub RtlConvertVariantToProperty
@@ -515,7 +515,7 @@
 @ stdcall RtlDeleteCriticalSection(ptr)
 @ stub RtlDeleteElementGenericTable
 @ stub RtlDeleteElementGenericTableAvl
-@ cdecl -arch=x86_64 RtlDeleteFunctionTable(ptr)
+@ cdecl -arch=arm,x86_64 RtlDeleteFunctionTable(ptr)
 @ stub RtlDeleteNoSplay
 @ stub RtlDeleteOwnersRanges
 @ stub RtlDeleteRange
@@ -738,7 +738,7 @@
 @ stdcall RtlLookupAtomInAtomTable(ptr wstr ptr)
 @ stub RtlLookupElementGenericTable
 # @ stub RtlLookupElementGenericTableAvl
-@ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr)
+@ stdcall -arch=arm,x86_64 RtlLookupFunctionEntry(long ptr ptr)
 @ stdcall RtlMakeSelfRelativeSD(ptr ptr ptr)
 @ stdcall RtlMapGenericMask(long ptr)
 # @ stub RtlMapSecurityErrorToNtStatus

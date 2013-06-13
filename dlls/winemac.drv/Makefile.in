@@ -1,7 +1,7 @@
 MODULE    = winemac.drv
 IMPORTS   = uuid user32 gdi32 advapi32
 DELAYIMPORTS = ole32 shell32
-EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL
+EXTRALIBS = -framework AppKit -framework Carbon -framework Security -framework OpenGL -framework IOKit
 
 C_SRCS = \
 	clipboard.c \
@@ -9,12 +9,14 @@ C_SRCS = \
 	dragdrop.c \
 	event.c \
 	gdi.c \
+	image.c \
 	keyboard.c \
 	macdrv_main.c \
 	mouse.c \
 	opengl.c \
 	scroll.c \
 	surface.c \
+	systray.c \
 	window.c
 
 OBJC_SRCS = \
@@ -24,6 +26,7 @@ OBJC_SRCS = \
 	cocoa_event.m \
 	cocoa_main.m \
 	cocoa_opengl.m \
+	cocoa_status_item.m \
 	cocoa_window.m
 
 @MAKE_DLL_RULES@
