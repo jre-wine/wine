@@ -1,8 +1,12 @@
-wine-unstable (1.5.26-1) UNRELEASED; urgency=low
+wine-unstable (1.5.26-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.26, released Mar 15, 2013.
+    - Improvements to the URL cache.
+    - Some fixes for ARM binaries.
+    - SPARC platform no longer supported.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 13 Jun 2013 00:37:31 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 13 Jun 2013 00:37:40 +0000
 
 wine-unstable (1.5.25-1) unstable; urgency=low
 
