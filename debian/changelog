@@ -1,8 +1,13 @@
-wine-unstable (1.5.28-1) UNRELEASED; urgency=low
+wine-unstable (1.5.28-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.28, released Apr 12, 2013.
+    - GnuTLS used for all secure connections, OpenSSL is no longer needed.
+    - Built-in FixedSys fonts.
+    - New icon for the joystick control panel.
+    - Postscript driver improvements.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 22:49:58 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 22:50:05 +0000
 
 wine-unstable (1.5.27-1) unstable; urgency=low
 
