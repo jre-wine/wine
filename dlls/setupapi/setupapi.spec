@@ -156,8 +156,8 @@
 @ stub CM_Query_Arbitrator_Free_Size_Ex
 @ stub CM_Query_Remove_SubTree
 @ stub CM_Query_Remove_SubTree_Ex
-@ stub CM_Reenumerate_DevNode
-@ stub CM_Reenumerate_DevNode_Ex
+@ stdcall CM_Reenumerate_DevNode(ptr long)
+@ stdcall CM_Reenumerate_DevNode_Ex(ptr long ptr)
 @ stub CM_Register_Device_Driver
 @ stub CM_Register_Device_Driver_Ex
 @ stub CM_Register_Device_InterfaceA
@@ -385,7 +385,7 @@
 @ stub SetupDiSelectOEMDrv
 @ stdcall SetupDiSetClassInstallParamsA(ptr ptr ptr long)
 @ stub SetupDiSetClassInstallParamsW
-@ stub SetupDiSetDeviceInstallParamsA
+@ stdcall SetupDiSetDeviceInstallParamsA(ptr ptr ptr)
 @ stub SetupDiSetDeviceInstallParamsW
 @ stdcall SetupDiSetDeviceRegistryPropertyA(ptr ptr long ptr ptr)
 @ stdcall SetupDiSetDeviceRegistryPropertyW(ptr ptr long ptr ptr)

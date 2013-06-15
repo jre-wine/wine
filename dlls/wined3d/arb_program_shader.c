@@ -327,6 +327,7 @@ struct shader_arb_priv
     char *vshader_const_dirty, *pshader_const_dirty;
     const struct wined3d_context *last_context;
 
+    const struct wined3d_vertex_pipe_ops *vertex_pipe;
     const struct fragment_pipeline *fragment_pipe;
     BOOL ffp_proj_control;
 };
@@ -656,6 +657,7 @@ static void shader_arb_load_constants_internal(const struct wined3d_context *con
     const struct wined3d_stateblock *stateblock = device->stateBlock;
     const struct wined3d_state *state = &stateblock->state;
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_d3d_info *d3d_info = context->d3d_info;
     struct shader_arb_priv *priv = device->shader_priv;
 
     if (!from_shader_select)
@@ -688,12 +690,12 @@ static void shader_arb_load_constants_internal(const struct wined3d_context *con
     if (context != priv->last_context)
     {
         memset(priv->vshader_const_dirty, 1,
-                sizeof(*priv->vshader_const_dirty) * device->d3d_vshader_constantF);
-        priv->highest_dirty_vs_const = device->d3d_vshader_constantF;
+                sizeof(*priv->vshader_const_dirty) * d3d_info->limits.vs_uniform_count);
+        priv->highest_dirty_vs_const = d3d_info->limits.vs_uniform_count;
 
         memset(priv->pshader_const_dirty, 1,
-                sizeof(*priv->pshader_const_dirty) * device->d3d_pshader_constantF);
-        priv->highest_dirty_ps_const = device->d3d_pshader_constantF;
+                sizeof(*priv->pshader_const_dirty) * d3d_info->limits.ps_uniform_count);
+        priv->highest_dirty_ps_const = d3d_info->limits.ps_uniform_count;
 
         priv->last_context = context;
     }
@@ -1368,14 +1370,14 @@ static void shader_hw_sample(const struct wined3d_shader_instruction *ins, DWORD
 {
     struct wined3d_shader_buffer *buffer = ins->ctx->buffer;
     DWORD sampler_type = ins->ctx->reg_maps->sampler_type[sampler_idx];
-    const struct wined3d_shader *shader = ins->ctx->shader;
-    const struct wined3d_texture *texture;
     const char *tex_type;
     BOOL np2_fixup = FALSE;
-    struct wined3d_device *device = shader->device;
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
     const char *mod;
     BOOL pshader = shader_is_pshader_version(ins->ctx->reg_maps->shader_version.type);
+    const struct wined3d_shader *shader;
+    const struct wined3d_device *device;
+    const struct wined3d_gl_info *gl_info;
 
     /* D3D vertex shader sampler IDs are vertex samplers(0-3), not global d3d samplers */
     if(!pshader) sampler_idx += MAX_FRAGMENT_SAMPLERS;
@@ -1386,13 +1388,15 @@ static void shader_hw_sample(const struct wined3d_shader_instruction *ins, DWORD
             break;
 
         case WINED3DSTT_2D:
-            texture = device->stateBlock->state.textures[sampler_idx];
-            if (texture && texture->target == GL_TEXTURE_RECTANGLE_ARB)
-            {
+            shader = ins->ctx->shader;
+            device = shader->device;
+            gl_info = &device->adapter->gl_info;
+
+            if (pshader && priv->cur_ps_args->super.np2_fixup & (1 << sampler_idx)
+                    && gl_info->supported[ARB_TEXTURE_RECTANGLE])
                 tex_type = "RECT";
-            } else {
+            else
                 tex_type = "2D";
-            }
             if (shader_is_pshader_version(ins->ctx->reg_maps->shader_version.type))
             {
                 if (priv->cur_np2fixup_info->super.active & (1 << sampler_idx))
@@ -4290,6 +4294,7 @@ static struct arb_ps_compiled_shader *find_arb_pshader(struct wined3d_shader *sh
 {
     struct wined3d_device *device = shader->device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_d3d_info *d3d_info = &device->adapter->d3d_info;
     UINT i;
     DWORD new_size;
     struct arb_ps_compiled_shader *new_array;
@@ -4312,9 +4317,9 @@ static struct arb_ps_compiled_shader *find_arb_pshader(struct wined3d_shader *sh
 
         TRACE("Shader got assigned input signature index %u\n", shader_data->input_signature_idx);
 
-        if (!device->vs_clipping)
+        if (!d3d_info->vs_clipping)
             shader_data->clipplane_emulation = shader_find_free_input_register(&shader->reg_maps,
-                    gl_info->limits.texture_stages - 1);
+                    d3d_info->limits.ffp_blend_stages - 1);
         else
             shader_data->clipplane_emulation = ~0U;
     }
@@ -4352,7 +4357,7 @@ static struct arb_ps_compiled_shader *find_arb_pshader(struct wined3d_shader *sh
 
     shader_data->gl_shaders[shader_data->num_gl_shaders].args = *args;
 
-    pixelshader_update_samplers(&shader->reg_maps, device->stateBlock->state.textures);
+    pixelshader_update_samplers(shader, args->super.tex_types);
 
     if (!shader_buffer_init(&buffer))
     {
@@ -4386,7 +4391,7 @@ static struct arb_vs_compiled_shader *find_arb_vshader(struct wined3d_shader *sh
 {
     struct wined3d_device *device = shader->device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
-    DWORD use_map = device->strided_streams.use_map;
+    DWORD use_map = device->stream_info.use_map;
     UINT i;
     DWORD new_size;
     struct arb_vs_compiled_shader *new_array;
@@ -4468,10 +4473,11 @@ static struct arb_vs_compiled_shader *find_arb_vshader(struct wined3d_shader *sh
 }
 
 static void find_arb_ps_compile_args(const struct wined3d_state *state,
-        const struct wined3d_shader *shader, struct arb_ps_compile_args *args)
+        const struct wined3d_context *context, const struct wined3d_shader *shader,
+        struct arb_ps_compile_args *args)
 {
-    struct wined3d_device *device = shader->device;
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_d3d_info *d3d_info = context->d3d_info;
     int i;
     WORD int_skip;
 
@@ -4490,7 +4496,7 @@ static void find_arb_ps_compile_args(const struct wined3d_state *state,
      * is quite expensive because it forces the driver to disable early Z discards. It is cheaper to
      * duplicate the shader than have a no-op KIL instruction in every shader
      */
-    if (!device->vs_clipping && use_vs(state)
+    if (!d3d_info->vs_clipping && use_vs(state)
             && state->render_states[WINED3D_RS_CLIPPING]
             && state->render_states[WINED3D_RS_CLIPPLANEENABLE])
         args->clip = 1;
@@ -4523,10 +4529,13 @@ static void find_arb_ps_compile_args(const struct wined3d_state *state,
 }
 
 static void find_arb_vs_compile_args(const struct wined3d_state *state,
-        const struct wined3d_shader *shader, struct arb_vs_compile_args *args)
+        const struct wined3d_context *context, const struct wined3d_shader *shader,
+        struct arb_vs_compile_args *args)
 {
     struct wined3d_device *device = shader->device;
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    const struct wined3d_adapter *adapter = device->adapter;
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_d3d_info *d3d_info = context->d3d_info;
     int i;
     WORD int_skip;
 
@@ -4544,9 +4553,9 @@ static void find_arb_vs_compile_args(const struct wined3d_state *state,
     else
     {
         args->ps_signature = ~0;
-        if (!device->vs_clipping && device->adapter->fragment_pipe == &arbfp_fragment_pipeline)
+        if (!d3d_info->vs_clipping && adapter->fragment_pipe == &arbfp_fragment_pipeline)
         {
-            args->clip.boolclip.clip_texcoord = ffp_clip_emul(state) ? gl_info->limits.texture_stages : 0;
+            args->clip.boolclip.clip_texcoord = ffp_clip_emul(state) ? d3d_info->limits.ffp_blend_stages : 0;
         }
         /* Otherwise: Setting boolclip_compare set clip_texcoord to 0 */
     }
@@ -4616,7 +4625,7 @@ static void shader_arb_select(const struct wined3d_context *context, enum wined3
         struct arb_ps_compiled_shader *compiled;
 
         TRACE("Using pixel shader %p.\n", ps);
-        find_arb_ps_compile_args(state, ps, &compile_args);
+        find_arb_ps_compile_args(state, context, ps, &compile_args);
         compiled = find_arb_pshader(ps, &compile_args);
         priv->current_fprogram_id = compiled->prgId;
         priv->compiled_fprog = compiled;
@@ -4681,7 +4690,7 @@ static void shader_arb_select(const struct wined3d_context *context, enum wined3
         struct arb_vs_compiled_shader *compiled;
 
         TRACE("Using vertex shader %p\n", vs);
-        find_arb_vs_compile_args(state, vs, &compile_args);
+        find_arb_vs_compile_args(state, context, vs, &compile_args);
         compiled = find_arb_vshader(vs, &compile_args);
         priv->current_vprogram_id = compiled->prgId;
         priv->compiled_vprog = compiled;
@@ -4714,6 +4723,7 @@ static void shader_arb_select(const struct wined3d_context *context, enum wined3
         gl_info->gl_ops.gl.p_glDisable(GL_VERTEX_PROGRAM_ARB);
         checkGLcall("glDisable(GL_VERTEX_PROGRAM_ARB)");
     }
+    priv->vertex_pipe->vp_enable(gl_info, vertex_mode == WINED3D_SHADER_MODE_FFP);
 }
 
 /* Context activation is done by the caller. */
@@ -4835,32 +4845,42 @@ static const struct wine_rb_functions sig_tree_functions =
     sig_tree_compare
 };
 
-static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
+static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct wined3d_vertex_pipe_ops *vertex_pipe,
+        const struct fragment_pipeline *fragment_pipe)
 {
     struct shader_arb_priv *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*priv));
     struct fragment_caps fragment_caps;
-    void *fragment_priv;
+    void *vertex_priv, *fragment_priv;
+    const struct wined3d_d3d_info *d3d_info = &device->adapter->d3d_info;
+
+    if (!(vertex_priv = vertex_pipe->vp_alloc(&arb_program_shader_backend, priv)))
+    {
+        ERR("Failed to initialize vertex pipe.\n");
+        HeapFree(GetProcessHeap(), 0, priv);
+        return E_FAIL;
+    }
 
     if (!(fragment_priv = fragment_pipe->alloc_private(&arb_program_shader_backend, priv)))
     {
         ERR("Failed to initialize fragment pipe.\n");
+        vertex_pipe->vp_free(device);
         HeapFree(GetProcessHeap(), 0, priv);
         return E_FAIL;
     }
 
     priv->vshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
-            sizeof(*priv->vshader_const_dirty) * device->d3d_vshader_constantF);
+            sizeof(*priv->vshader_const_dirty) * d3d_info->limits.vs_uniform_count);
     if (!priv->vshader_const_dirty)
         goto fail;
     memset(priv->vshader_const_dirty, 1,
-           sizeof(*priv->vshader_const_dirty) * device->d3d_vshader_constantF);
+           sizeof(*priv->vshader_const_dirty) * d3d_info->limits.vs_uniform_count);
 
     priv->pshader_const_dirty = HeapAlloc(GetProcessHeap(), 0,
-            sizeof(*priv->pshader_const_dirty) * device->d3d_pshader_constantF);
+            sizeof(*priv->pshader_const_dirty) * d3d_info->limits.ps_uniform_count);
     if (!priv->pshader_const_dirty)
         goto fail;
     memset(priv->pshader_const_dirty, 1,
-            sizeof(*priv->pshader_const_dirty) * device->d3d_pshader_constantF);
+            sizeof(*priv->pshader_const_dirty) * d3d_info->limits.ps_uniform_count);
 
     if(wine_rb_init(&priv->signature_tree, &sig_tree_functions) == -1)
     {
@@ -4868,17 +4888,22 @@ static HRESULT shader_arb_alloc(struct wined3d_device *device, const struct frag
         goto fail;
     }
 
+    priv->vertex_pipe = vertex_pipe;
+    priv->fragment_pipe = fragment_pipe;
     fragment_pipe->get_caps(&device->adapter->gl_info, &fragment_caps);
     priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
+
+    device->vertex_priv = vertex_priv;
     device->fragment_priv = fragment_priv;
-    priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
+
     return WINED3D_OK;
 
 fail:
     HeapFree(GetProcessHeap(), 0, priv->pshader_const_dirty);
     HeapFree(GetProcessHeap(), 0, priv->vshader_const_dirty);
     fragment_pipe->free_private(device);
+    vertex_pipe->vp_free(device);
     HeapFree(GetProcessHeap(), 0, priv);
     return E_OUTOFMEMORY;
 }
@@ -4921,6 +4946,7 @@ static void shader_arb_free(struct wined3d_device *device)
     HeapFree(GetProcessHeap(), 0, priv->pshader_const_dirty);
     HeapFree(GetProcessHeap(), 0, priv->vshader_const_dirty);
     priv->fragment_pipe->free_private(device);
+    priv->vertex_pipe->vp_free(device);
     HeapFree(GetProcessHeap(), 0, device->shader_priv);
 }
 
@@ -6386,7 +6412,7 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
     {
         /* Find or create a shader implementing the fixed function pipeline
          * settings, then activate it. */
-        gen_ffp_frag_op(device, state, &settings, FALSE);
+        gen_ffp_frag_op(context, state, &settings, FALSE);
         desc = (const struct arbfp_ffp_desc *)find_ffp_frag_shader(&priv->fragment_shaders, &settings);
         if(!desc) {
             struct arbfp_ffp_desc *new_desc = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_desc));

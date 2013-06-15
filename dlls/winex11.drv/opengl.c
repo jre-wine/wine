@@ -1925,6 +1925,7 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
 {
     struct wgl_context *ret = NULL;
     struct gl_drawable *gl;
+    int err = 0;
 
     TRACE("(%p %p %p)\n", hdc, hShareContext, attribList);
 
@@ -1981,12 +1982,12 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
         }
 
         X11DRV_expect_error(gdi_display, GLXErrorHandler, NULL);
-        ret->ctx = create_glxcontext(gdi_display, ret, NULL);
+        ret->ctx = create_glxcontext(gdi_display, ret, hShareContext ? hShareContext->ctx : NULL);
         XSync(gdi_display, False);
-        if (X11DRV_check_error() || !ret->ctx)
+        if ((err = X11DRV_check_error()) || !ret->ctx)
         {
             /* In the future we should convert the GLX error to a win32 one here if needed */
-            ERR("Context creation failed\n");
+            ERR("Context creation failed (error %x)\n", err);
             HeapFree( GetProcessHeap(), 0, ret );
             ret = NULL;
         }

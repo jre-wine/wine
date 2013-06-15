@@ -869,14 +869,14 @@ static VOID set_installer_properties(MSIPACKAGE *package)
             break;
         case VER_PLATFORM_WIN32_NT:
             msi_set_property( package->db, szVersionNT, verstr, len );
-            len = sprintfW( verstr, szFormat,OSVersion.wProductType );
-            msi_set_property( package->db, szMsiNTProductType, verstr, len );
+            len = sprintfW( bufstr, szFormat,OSVersion.wProductType );
+            msi_set_property( package->db, szMsiNTProductType, bufstr, len );
             break;
     }
-    len = sprintfW( verstr, szFormat, OSVersion.dwBuildNumber );
-    msi_set_property( package->db, szWindowsBuild, verstr, len );
-    len = sprintfW( verstr, szFormat, OSVersion.wServicePackMajor );
-    msi_set_property( package->db, szServicePackLevel, verstr, len );
+    len = sprintfW( bufstr, szFormat, OSVersion.dwBuildNumber );
+    msi_set_property( package->db, szWindowsBuild, bufstr, len );
+    len = sprintfW( bufstr, szFormat, OSVersion.wServicePackMajor );
+    msi_set_property( package->db, szServicePackLevel, bufstr, len );
 
     len = sprintfW( bufstr, szFormat2, MSI_MAJORVERSION, MSI_MINORVERSION );
     msi_set_property( package->db, szVersionMsi, bufstr, len );

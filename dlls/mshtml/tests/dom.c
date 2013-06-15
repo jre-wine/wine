@@ -2432,6 +2432,33 @@ static void _test_text_length(unsigned line, IUnknown *unk, LONG l)
     IHTMLDOMTextNode_Release(text);
 }
 
+#define test_text_data(a,b) _test_text_data(__LINE__,a,b)
+static void _test_text_data(unsigned line, IUnknown *unk, const char *exdata)
+{
+    IHTMLDOMTextNode *text = _get_text_iface(line, unk);
+    BSTR str;
+    HRESULT hres;
+
+    hres = IHTMLDOMTextNode_get_data(text, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_data failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(str, exdata), "data = %s, expected %s\n", wine_dbgstr_w(str), exdata);
+    IHTMLDOMTextNode_Release(text);
+    SysFreeString(str);
+}
+
+#define set_text_data(a,b) _set_text_data(__LINE__,a,b)
+static void _set_text_data(unsigned line, IUnknown *unk, const char *data)
+{
+    IHTMLDOMTextNode *text = _get_text_iface(line, unk);
+    BSTR str = a2bstr(data);
+    HRESULT hres;
+
+    hres = IHTMLDOMTextNode_put_data(text, str);
+    ok_(__FILE__,line)(hres == S_OK, "get_data failed: %08x\n", hres);
+    IHTMLDOMTextNode_Release(text);
+    SysFreeString(str);
+}
+
 #define test_select_set_disabled(i,b) _test_select_set_disabled(__LINE__,i,b)
 static void _test_select_set_disabled(unsigned line, IHTMLSelectElement *select, VARIANT_BOOL b)
 {
@@ -5466,6 +5493,7 @@ static void test_table_elem(IHTMLElement *elem)
 
     static const elem_type_t row_types[] = {ET_TR,ET_TR};
     static const elem_type_t all_types[] = {ET_TBODY,ET_TR,ET_TR,ET_TD,ET_TD};
+    static const elem_type_t tbodies_types[] = {ET_TBODY};
 
     hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLTable, (void**)&table);
     ok(hres == S_OK, "Could not get IHTMLTable iface: %08x\n", hres);
@@ -5475,7 +5503,7 @@ static void test_table_elem(IHTMLElement *elem)
     col = NULL;
     hres = IHTMLTable_get_rows(table, &col);
     ok(hres == S_OK, "get_rows failed: %08x\n", hres);
-    ok(col != NULL, "get_ros returned NULL\n");
+    ok(col != NULL, "get_rows returned NULL\n");
 
     test_elem_collection((IUnknown*)col, row_types, sizeof(row_types)/sizeof(*row_types));
     IHTMLElementCollection_Release(col);
@@ -5491,6 +5519,14 @@ static void test_table_elem(IHTMLElement *elem)
     test_elem_tag((IUnknown*)node, "TABLE");
     test_elem_all((IUnknown*)node, NULL, 0);
     IHTMLDOMNode_Release(node);
+
+    col = NULL;
+    hres = IHTMLTable_get_tBodies(table, &col);
+    ok(hres == S_OK, "get_tBodies failed: %08x\n", hres);
+    ok(col != NULL, "get_tBodies returned NULL\n");
+
+    test_elem_collection((IUnknown*)col, tbodies_types, sizeof(tbodies_types)/sizeof(*tbodies_types));
+    IHTMLElementCollection_Release(col);
 
     IHTMLTable_Release(table);
 }
@@ -6631,10 +6667,13 @@ static void test_create_elems(IHTMLDocument2 *doc)
     IHTMLElement_Release(elem);
     IHTMLDOMNode_Release(node);
 
-    node = test_create_text(doc, "test");
+    node = test_create_text(doc, "abc");
     test_ifaces((IUnknown*)node, text_iids);
     test_disp((IUnknown*)node, &DIID_DispHTMLDOMTextNode, "[object]");
-    test_text_length((IUnknown*)node, 4);
+    test_text_length((IUnknown*)node, 3);
+    test_text_data((IUnknown*)node, "abc");
+    set_text_data((IUnknown*)node, "test");
+    test_text_data((IUnknown*)node, "test");
 
     V_VT(&var) = VT_NULL;
     node2 = test_node_insertbefore((IUnknown*)body, node, &var);
@@ -6927,12 +6966,37 @@ static void test_cond_comment(IHTMLDocument2 *doc)
     IHTMLElementCollection_Release(col);
 }
 
+static HRESULT WINAPI Unknown_QueryInterface(IUnknown *iface, REFIID riid, void **ppv)
+{
+    ok(IsEqualGUID(riid, &IID_IServiceProvider), "riid = %s\n", dbgstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI Unknown_AddRef(IUnknown *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI Unknown_Release(IUnknown *iface)
+{
+    return 1;
+}
+
+static const IUnknownVtbl UnknownVtbl = {
+    Unknown_QueryInterface,
+    Unknown_AddRef,
+    Unknown_Release,
+};
+static IUnknown obj_ident_test = { &UnknownVtbl };
+
 static void test_frame(IDispatch *disp, const char *exp_id)
 {
     IHTMLWindow2 *frame2, *parent, *top;
     IHTMLDocument2 *parent_doc, *top_doc;
     IHTMLWindow4 *frame;
     IHTMLFrameBase *frame_elem;
+    IObjectIdentity *obj_ident;
+    ITravelLogClient *tlc;
     HRESULT hres;
 
     hres = IDispatch_QueryInterface(disp, &IID_IHTMLWindow4, (void**)&frame);
@@ -6962,6 +7026,29 @@ static void test_frame(IDispatch *disp, const char *exp_id)
         IHTMLWindow2_Release(frame2);
         return;
     }
+
+    hres = IHTMLWindow2_QueryInterface(frame2, &IID_IObjectIdentity, (void**)&obj_ident);
+    ok(hres == S_OK, "Could not get IObjectIdentity interface: %08x\n", hres);
+    hres = IHTMLWindow2_QueryInterface(frame2, &IID_ITravelLogClient, (void**)&tlc);
+    if(hres == E_NOINTERFACE) {
+        win_skip("IID_ITravelLogClient not available\n");
+        tlc = NULL;
+    }else {
+        ok(hres == S_OK, "Could not get ITravelLogClient interface: %08x\n", hres);
+
+        hres = IObjectIdentity_IsEqualObject(obj_ident, (IUnknown*)tlc);
+        ok(hres == S_OK, "IsEqualObject returned: 0x%08x\n", hres);
+        ITravelLogClient_Release(tlc);
+    }
+
+    hres = IObjectIdentity_IsEqualObject(obj_ident, (IUnknown*)obj_ident);
+    ok(hres == S_OK, "IsEqualObject returned: 0x%08x\n", hres);
+    hres = IObjectIdentity_IsEqualObject(obj_ident, (IUnknown*)parent);
+    ok(hres == S_FALSE, "IsEqualObject returned: 0x%08x\n", hres);
+    hres = IObjectIdentity_IsEqualObject(obj_ident, &obj_ident_test);
+    ok(hres == E_NOINTERFACE, "IsEqualObject returned: 0x%08x\n", hres);
+
+    IObjectIdentity_Release(obj_ident);
 
     hres = IHTMLWindow2_get_document(parent, &parent_doc);
     ok(hres == S_OK, "IHTMLWindow2_get_document failed: 0x%08x\n", hres);

@@ -30,6 +30,8 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_synchronous);
 
 static DWORD wined3d_context_tls_idx;
 
@@ -422,10 +424,17 @@ static void context_apply_fbo_entry(struct wined3d_context *context, GLenum targ
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     unsigned int i;
+    GLuint read_binding, draw_binding;
 
-    context_bind_fbo(context, target, &entry->id);
+    if (entry->attached)
+    {
+        context_bind_fbo(context, target, &entry->id);
+        return;
+    }
 
-    if (entry->attached) return;
+    read_binding = context->fbo_read_binding;
+    draw_binding = context->fbo_draw_binding;
+    context_bind_fbo(context, GL_FRAMEBUFFER, &entry->id);
 
     /* Apply render targets */
     for (i = 0; i < gl_info->limits.buffers; ++i)
@@ -437,6 +446,18 @@ static void context_apply_fbo_entry(struct wined3d_context *context, GLenum targ
     if (entry->depth_stencil)
         surface_set_compatible_renderbuffer(entry->depth_stencil, entry->render_targets[0]);
     context_attach_depth_stencil_fbo(context, target, entry->depth_stencil, entry->location);
+
+    /* Set valid read and draw buffer bindings to satisfy pedantic pre-ES2_compatibility
+     * GL contexts requirements. */
+    glReadBuffer(GL_NONE);
+    context_set_draw_buffer(context, GL_NONE);
+    if (target != GL_FRAMEBUFFER)
+    {
+        if (target == GL_READ_FRAMEBUFFER)
+            context_bind_fbo(context, GL_DRAW_FRAMEBUFFER, draw_binding ? &draw_binding : NULL);
+        else
+            context_bind_fbo(context, GL_READ_FRAMEBUFFER, read_binding ? &read_binding : NULL);
+    }
 
     entry->attached = TRUE;
 }
@@ -1257,6 +1278,37 @@ static void bind_dummy_textures(const struct wined3d_device *device, const struc
     }
 }
 
+BOOL context_debug_output_enabled(const struct wined3d_gl_info *gl_info)
+{
+    return gl_info->supported[ARB_DEBUG_OUTPUT]
+            && (ERR_ON(d3d) || FIXME_ON(d3d) || WARN_ON(d3d_perf));
+}
+
+static void WINE_GLAPI wined3d_debug_callback(GLenum source, GLenum type, GLuint id,
+        GLenum severity, GLsizei length, const char *message, void *ctx)
+{
+    switch (type)
+    {
+        case GL_DEBUG_TYPE_ERROR_ARB:
+            ERR("%p: %s.\n", ctx, debugstr_an(message, length));
+            break;
+
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR_ARB:
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_ARB:
+        case GL_DEBUG_TYPE_PORTABILITY_ARB:
+            FIXME("%p: %s.\n", ctx, debugstr_an(message, length));
+            break;
+
+        case GL_DEBUG_TYPE_PERFORMANCE_ARB:
+            WARN_(d3d_perf)("%p: %s.\n", ctx, debugstr_an(message, length));
+            break;
+
+        default:
+            FIXME("ctx %p, type %#x: %s.\n", ctx, type, debugstr_an(message, length));
+            break;
+    }
+}
+
 /* Do not call while under the GL lock. */
 struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         struct wined3d_surface *target, const struct wined3d_format *ds_format)
@@ -1266,11 +1318,11 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     const struct wined3d_format *color_format;
     struct wined3d_context *ret;
     BOOL auxBuffers = FALSE;
+    HGLRC ctx, share_ctx;
     int pixel_format;
     unsigned int s;
     int swap_interval;
     DWORD state;
-    HGLRC ctx;
     HDC hdc;
 
     TRACE("swapchain %p, target %p, window %p.\n", swapchain, target, swapchain->win_handle);
@@ -1367,19 +1419,38 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         goto out;
     }
 
-    if (!(ctx = wglCreateContext(hdc)))
+    share_ctx = device->context_count ? device->contexts[0]->glCtx : NULL;
+    if (gl_info->p_wglCreateContextAttribsARB)
     {
-        ERR("Failed to create a WGL context.\n");
-        context_release(ret);
-        goto out;
-    }
+        unsigned int ctx_attrib_idx = 0;
+        GLint ctx_attribs[3];
 
-    if (device->context_count)
-    {
-        if (!wglShareLists(device->contexts[0]->glCtx, ctx))
+        if (context_debug_output_enabled(gl_info))
         {
-            ERR("wglShareLists(%p, %p) failed, last error %#x.\n",
-                    device->contexts[0]->glCtx, ctx, GetLastError());
+            ctx_attribs[ctx_attrib_idx++] = WGL_CONTEXT_FLAGS_ARB;
+            ctx_attribs[ctx_attrib_idx++] = WGL_CONTEXT_DEBUG_BIT_ARB;
+        }
+        ctx_attribs[ctx_attrib_idx] = 0;
+
+        if (!(ctx = gl_info->p_wglCreateContextAttribsARB(hdc, share_ctx, ctx_attribs)))
+        {
+            ERR("Failed to create a WGL context.\n");
+            context_release(ret);
+            goto out;
+        }
+    }
+    else
+    {
+        if (!(ctx = wglCreateContext(hdc)))
+        {
+            ERR("Failed to create a WGL context.\n");
+            context_release(ret);
+            goto out;
+        }
+
+        if (share_ctx && !wglShareLists(share_ctx, ctx))
+        {
+            ERR("wglShareLists(%p, %p) failed, last error %#x.\n", share_ctx, ctx, GetLastError());
             context_release(ret);
             if (!wglDeleteContext(ctx))
                 ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx, GetLastError());
@@ -1397,6 +1468,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     }
 
     ret->gl_info = gl_info;
+    ret->d3d_info = &device->adapter->d3d_info;
     ret->state_table = device->StateTable;
 
     /* Mark all states dirty to force a proper initialization of the states
@@ -1429,6 +1501,33 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         if (!wglDeleteContext(ctx))
             ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx, GetLastError());
         goto out;
+    }
+
+    if (context_debug_output_enabled(gl_info))
+    {
+        GL_EXTCALL(glDebugMessageCallbackARB(wined3d_debug_callback, ret));
+        if (TRACE_ON(d3d_synchronous))
+            gl_info->gl_ops.gl.p_glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
+        GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_FALSE));
+        if (ERR_ON(d3d))
+        {
+            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR_ARB,
+                    GL_DONT_CARE, 0, NULL, GL_TRUE));
+        }
+        if (FIXME_ON(d3d))
+        {
+            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR_ARB,
+                    GL_DONT_CARE, 0, NULL, GL_TRUE));
+            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_ARB,
+                    GL_DONT_CARE, 0, NULL, GL_TRUE));
+            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_PORTABILITY_ARB,
+                    GL_DONT_CARE, 0, NULL, GL_TRUE));
+        }
+        if (WARN_ON(d3d_perf))
+        {
+            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_PERFORMANCE_ARB,
+                    GL_DONT_CARE, 0, NULL, GL_TRUE));
+        }
     }
 
     switch (swapchain->desc.swap_interval)
@@ -2127,8 +2226,6 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
                 }
                 context_apply_fbo_state(context, GL_FRAMEBUFFER, context->blit_targets, fb->depth_stencil,
                         rt_count ? rts[0]->draw_binding : SFLAG_INTEXTURE);
-                gl_info->gl_ops.gl.p_glReadBuffer(GL_NONE);
-                checkGLcall("glReadBuffer");
             }
             else
             {
@@ -2202,7 +2299,7 @@ static DWORD find_draw_buffers_mask(const struct wined3d_context *context, const
     else if (!context->render_offscreen) return context_generate_rt_mask_from_surface(rts[0]);
 
     rt_mask = ps ? ps->reg_maps.rt_mask : 1;
-    rt_mask &= device->valid_rt_mask;
+    rt_mask &= context->d3d_info->valid_rt_mask;
     rt_mask_bits = rt_mask;
     i = 0;
     while (rt_mask_bits)
@@ -2221,7 +2318,6 @@ static DWORD find_draw_buffers_mask(const struct wined3d_context *context, const
 void context_state_fb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_device *device = context->swapchain->device;
-    const struct wined3d_gl_info *gl_info = context->gl_info;
     const struct wined3d_fb_state *fb = state->fb;
     DWORD rt_mask = find_draw_buffers_mask(context, device);
     DWORD *cur_mask;
@@ -2236,8 +2332,6 @@ void context_state_fb(struct wined3d_context *context, const struct wined3d_stat
         {
             context_apply_fbo_state(context, GL_FRAMEBUFFER, fb->render_targets, fb->depth_stencil,
                     fb->render_targets[0]->draw_binding);
-            gl_info->gl_ops.gl.p_glReadBuffer(GL_NONE);
-            checkGLcall("glReadBuffer");
         }
     }
 
@@ -2292,7 +2386,7 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
         device_update_stream_info(device, context->gl_info);
     if (state->index_buffer)
     {
-        if (device->strided_streams.all_vbo)
+        if (device->stream_info.all_vbo)
             wined3d_buffer_preload(state->index_buffer);
         else
             buffer_get_sysmem(state->index_buffer, context->gl_info);

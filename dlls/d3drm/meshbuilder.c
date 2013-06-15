@@ -583,42 +583,31 @@ static D3DRMCOLORSOURCE WINAPI IDirect3DRMMeshBuilder2Impl_GetColorSource(IDirec
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddMesh(IDirect3DRMMeshBuilder2* iface,
-                                                          LPDIRECT3DRMMESH pMesh)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddMesh(IDirect3DRMMeshBuilder2 *iface, IDirect3DRMMesh *mesh)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, pMesh);
+    FIXME("iface %p, mesh %p stub!\n", iface, mesh);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddMeshBuilder(IDirect3DRMMeshBuilder2* iface,
-                                                                 LPDIRECT3DRMMESHBUILDER pMeshBuilder)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddMeshBuilder(IDirect3DRMMeshBuilder2 *iface,
+        IDirect3DRMMeshBuilder *mesh_builder)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, pMeshBuilder);
+    FIXME("iface %p, mesh_builder %p stub!\n", iface, mesh_builder);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddFrame(IDirect3DRMMeshBuilder2* iface,
-                                                           LPDIRECT3DRMFRAME pFrame)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddFrame(IDirect3DRMMeshBuilder2 *iface, IDirect3DRMFrame *frame)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, pFrame);
+    FIXME("iface %p, frame %p stub!\n", iface, frame);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddFace(IDirect3DRMMeshBuilder2* iface,
-                                                          LPDIRECT3DRMFACE pFace)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_AddFace(IDirect3DRMMeshBuilder2 *iface, IDirect3DRMFace *face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, pFace);
+    FIXME("iface %p, face %p stub!\n", iface, face);
 
     return E_NOTIMPL;
 }
@@ -857,12 +846,9 @@ static int WINAPI IDirect3DRMMeshBuilder2Impl_AddNormal(IDirect3DRMMeshBuilder2*
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_CreateFace(IDirect3DRMMeshBuilder2* iface,
-                                                             LPDIRECT3DRMFACE* ppFace)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_CreateFace(IDirect3DRMMeshBuilder2 *iface, IDirect3DRMFace **face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, ppFace);
+    FIXME("iface %p, face %p stub!\n", iface, face);
 
     return E_NOTIMPL;
 }
@@ -913,14 +899,13 @@ static D3DCOLOR WINAPI IDirect3DRMMeshBuilder2Impl_GetVertexColor(IDirect3DRMMes
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_CreateMesh(IDirect3DRMMeshBuilder2* iface,
-                                                             LPDIRECT3DRMMESH* mesh)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_CreateMesh(IDirect3DRMMeshBuilder2 *iface, IDirect3DRMMesh **mesh)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
+    IDirect3DRMMeshBuilderImpl *mesh_builder = impl_from_IDirect3DRMMeshBuilder2(iface);
 
-    TRACE("(%p)->(%p)\n", This, mesh);
+    TRACE("iface %p, mesh %p.\n", iface, mesh);
 
-    return IDirect3DRMMeshBuilder3_CreateMesh(&This->IDirect3DRMMeshBuilder3_iface, mesh);
+    return IDirect3DRMMeshBuilder3_CreateMesh(&mesh_builder->IDirect3DRMMeshBuilder3_iface, mesh);
 }
 
 static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GenerateNormals2(IDirect3DRMMeshBuilder2* iface,
@@ -933,12 +918,10 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GenerateNormals2(IDirect3DRMMe
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GetFace(IDirect3DRMMeshBuilder2* iface,
-                                                          DWORD index, LPDIRECT3DRMFACE* ppFace)
+static HRESULT WINAPI IDirect3DRMMeshBuilder2Impl_GetFace(IDirect3DRMMeshBuilder2 *iface,
+        DWORD index, IDirect3DRMFace **face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder2(iface);
-
-    FIXME("(%p)->(%u,%p): stub\n", This, index, ppFace);
+    FIXME("iface %p, index %u, face %p stub!\n", iface, index, face);
 
     return E_NOTIMPL;
 }
@@ -1337,8 +1320,8 @@ HRESULT load_mesh_data(IDirect3DRMMeshBuilder3 *iface, IDirectXFileData *pData, 
 
                 values = (float*)ptr;
 
-                This->materials[i].color = D3DCOLOR_ARGB((BYTE)(values[3] * 255.0f), (BYTE)(values[0] * 255.0f),
-                                                         (BYTE)(values[1] * 255.0f), (BYTE)(values[2] * 255.0f));
+                This->materials[i].color = RGBA_MAKE((BYTE)(values[0] * 255.0f), (BYTE)(values[1] * 255.0f),
+                        (BYTE)(values[2] * 255.0f), (BYTE)(values[3] * 255.0f));
 
                 IDirect3DRMMaterial2_SetAmbient(This->materials[i].material, values[0], values [1], values[2]); /* Alpha ignored */
                 IDirect3DRMMaterial2_SetPower(This->materials[i].material, values[4]);
@@ -1752,43 +1735,31 @@ static D3DRMCOLORSOURCE WINAPI IDirect3DRMMeshBuilder3Impl_GetColorSource(IDirec
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddMesh(IDirect3DRMMeshBuilder3* iface,
-                                                          LPDIRECT3DRMMESH Mesh)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddMesh(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMMesh *mesh)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, Mesh);
+    FIXME("iface %p, mesh %p stub!\n", iface, mesh);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddMeshBuilder(IDirect3DRMMeshBuilder3* iface,
-                                                                 LPDIRECT3DRMMESHBUILDER3 MeshBuilder,
-                                                                 DWORD flags)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddMeshBuilder(IDirect3DRMMeshBuilder3 *iface,
+        IDirect3DRMMeshBuilder3 *mesh_builder, DWORD flags)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p,%u): stub\n", This, MeshBuilder, flags);
+    FIXME("iface %p, mesh_builder %p, flags %#x stub!\n", iface, mesh_builder, flags);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddFrame(IDirect3DRMMeshBuilder3* iface,
-                                                           LPDIRECT3DRMFRAME3 Frame)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddFrame(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMFrame3 *frame)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, Frame);
+    FIXME("iface %p, frame %p stub!\n", iface, frame);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddFace(IDirect3DRMMeshBuilder3* iface,
-                                                          LPDIRECT3DRMFACE2 Face)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_AddFace(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMFace2 *face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, Face);
+    FIXME("iface %p, face %p stub!\n", iface, face);
 
     return E_NOTIMPL;
 }
@@ -1827,9 +1798,7 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_SetColorRGB(IDirect3DRMMeshBui
 
     TRACE("(%p)->(%f,%f,%f)\n", This, red, green, blue);
 
-    This->color = D3DCOLOR_ARGB(0xff, (BYTE)(red   * 255.0f),
-                                      (BYTE)(green * 255.0f),
-                                      (BYTE)(blue  * 255.0f));
+    This->color = RGBA_MAKE((BYTE)(red * 255.0f), (BYTE)(green * 255.0f), (BYTE)(blue * 255.0f), 0xff);
 
     return D3DRM_OK;
 }
@@ -2031,12 +2000,9 @@ static int WINAPI IDirect3DRMMeshBuilder3Impl_AddNormal(IDirect3DRMMeshBuilder3*
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateFace(IDirect3DRMMeshBuilder3* iface,
-                                                             LPDIRECT3DRMFACE2* Face)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateFace(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMFace2 **face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, Face);
+    FIXME("iface %p, face %p stub!\n", iface, face);
 
     return E_NOTIMPL;
 }
@@ -2087,8 +2053,7 @@ static D3DCOLOR WINAPI IDirect3DRMMeshBuilder3Impl_GetVertexColor(IDirect3DRMMes
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuilder3* iface,
-                                                             LPDIRECT3DRMMESH* mesh)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMMesh **mesh)
 {
     IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
     HRESULT hr;
@@ -2221,12 +2186,10 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_CreateMesh(IDirect3DRMMeshBuil
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_GetFace(IDirect3DRMMeshBuilder3* iface,
-                                                          DWORD index, LPDIRECT3DRMFACE2* Face)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_GetFace(IDirect3DRMMeshBuilder3 *iface,
+        DWORD index, IDirect3DRMFace2 **face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%u,%p): stub\n", This, index, Face);
+    FIXME("iface %p, index %u, face %p stub!\n", iface, index, face);
 
     return E_NOTIMPL;
 }
@@ -2271,12 +2234,9 @@ static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_DeleteNormals(IDirect3DRMMeshB
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_DeleteFace(IDirect3DRMMeshBuilder3* iface,
-                                                             LPDIRECT3DRMFACE2 Face)
+static HRESULT WINAPI IDirect3DRMMeshBuilder3Impl_DeleteFace(IDirect3DRMMeshBuilder3 *iface, IDirect3DRMFace2 *face)
 {
-    IDirect3DRMMeshBuilderImpl *This = impl_from_IDirect3DRMMeshBuilder3(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, Face);
+    FIXME("iface %p, face %p stub!\n", iface, face);
 
     return E_NOTIMPL;
 }
@@ -2845,9 +2805,7 @@ static HRESULT WINAPI IDirect3DRMMeshImpl_SetGroupColorRGB(IDirect3DRMMesh* ifac
     if (id >= This->nb_groups)
         return D3DRMERR_BADVALUE;
 
-    This->groups[id].color = D3DCOLOR_ARGB(0xff, (BYTE)(red   * 255.0f),
-                                                 (BYTE)(green * 255.0f),
-                                                 (BYTE)(blue  * 255.0f));
+    This->groups[id].color = RGBA_MAKE((BYTE)(red * 255.0f), (BYTE)(green * 255.0f), (BYTE)(blue * 255.0f), 0xff);
 
     return D3DRM_OK;
 }

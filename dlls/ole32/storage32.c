@@ -71,6 +71,11 @@ static inline StorageBaseImpl *impl_from_IStorage( IStorage *iface )
     return CONTAINING_RECORD(iface, StorageBaseImpl, IStorage_iface);
 }
 
+static inline StorageBaseImpl *impl_from_IDirectWriterLock( IDirectWriterLock *iface )
+{
+    return CONTAINING_RECORD(iface, StorageBaseImpl, IDirectWriterLock_iface);
+}
+
 /****************************************************************************
  * Storage32InternalImpl definitions.
  *
@@ -379,6 +384,11 @@ static HRESULT WINAPI StorageBaseImpl_QueryInterface(
   else if (IsEqualGUID(&IID_IPropertySetStorage, riid))
   {
     *ppvObject = &This->IPropertySetStorage_iface;
+  }
+  /* locking interface is reported for writer only */
+  else if (IsEqualGUID(&IID_IDirectWriterLock, riid) && This->lockingrole == SWMR_Writer)
+  {
+    *ppvObject = &This->IDirectWriterLock_iface;
   }
   else
     return E_NOINTERFACE;
@@ -722,9 +732,6 @@ static HRESULT WINAPI StorageBaseImpl_EnumElements(
   if (newEnum)
   {
     *ppenum = &newEnum->IEnumSTATSTG_iface;
-
-    IEnumSTATSTG_AddRef(*ppenum);
-
     return S_OK;
   }
 
@@ -2605,9 +2612,7 @@ static HRESULT StorageImpl_StreamWriteAt(StorageBaseImpl *base, DirRef index,
     stream = *StorageImpl_GetCachedBlockChainStream(This, index);
     if (!stream) return E_OUTOFMEMORY;
 
-    hr = BlockChainStream_WriteAt(stream, offset, size, buffer, bytesWritten);
-
-    return hr;
+    return BlockChainStream_WriteAt(stream, offset, size, buffer, bytesWritten);
   }
 }
 
@@ -2647,6 +2652,55 @@ static HRESULT StorageImpl_GetFilename(StorageBaseImpl* iface, LPWSTR *result)
 
   return hr;
 }
+
+static HRESULT WINAPI directwriterlock_QueryInterface(IDirectWriterLock *iface, REFIID riid, void **obj)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  return IStorage_QueryInterface(&This->IStorage_iface, riid, obj);
+}
+
+static ULONG WINAPI directwriterlock_AddRef(IDirectWriterLock *iface)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  return IStorage_AddRef(&This->IStorage_iface);
+}
+
+static ULONG WINAPI directwriterlock_Release(IDirectWriterLock *iface)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  return IStorage_Release(&This->IStorage_iface);
+}
+
+static HRESULT WINAPI directwriterlock_WaitForWriteAccess(IDirectWriterLock *iface, DWORD timeout)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  FIXME("(%p)->(%d): stub\n", This, timeout);
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI directwriterlock_ReleaseWriteAccess(IDirectWriterLock *iface)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  FIXME("(%p): stub\n", This);
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI directwriterlock_HaveWriteAccess(IDirectWriterLock *iface)
+{
+  StorageBaseImpl *This = impl_from_IDirectWriterLock(iface);
+  FIXME("(%p): stub\n", This);
+  return E_NOTIMPL;
+}
+
+static const IDirectWriterLockVtbl DirectWriterLockVtbl =
+{
+  directwriterlock_QueryInterface,
+  directwriterlock_AddRef,
+  directwriterlock_Release,
+  directwriterlock_WaitForWriteAccess,
+  directwriterlock_ReleaseWriteAccess,
+  directwriterlock_HaveWriteAccess
+};
 
 /*
  * Virtual function table for the IStorage32Impl class.
@@ -2719,10 +2773,18 @@ static HRESULT StorageImpl_Construct(
 
   This->base.IStorage_iface.lpVtbl = &Storage32Impl_Vtbl;
   This->base.IPropertySetStorage_iface.lpVtbl = &IPropertySetStorage_Vtbl;
+  This->base.IDirectWriterLock_iface.lpVtbl = &DirectWriterLockVtbl;
   This->base.baseVtbl = &StorageImpl_BaseVtbl;
   This->base.openFlags = (openFlags & ~STGM_CREATE);
   This->base.ref = 1;
   This->base.create = create;
+
+  if (openFlags == (STGM_DIRECT_SWMR|STGM_READWRITE|STGM_SHARE_DENY_WRITE))
+    This->base.lockingrole = SWMR_Writer;
+  else if (openFlags == (STGM_DIRECT_SWMR|STGM_READ|STGM_SHARE_DENY_NONE))
+    This->base.lockingrole = SWMR_Reader;
+  else
+    This->base.lockingrole = SWMR_None;
 
   This->base.reverted = 0;
 
@@ -2941,7 +3003,7 @@ end:
   }
   else
   {
-    StorageImpl_Flush((StorageBaseImpl*)This);
+    StorageImpl_Flush(&This->base);
     *result = This;
   }
 
@@ -2981,9 +3043,9 @@ static void StorageImpl_Destroy(StorageBaseImpl* iface)
   HeapFree(GetProcessHeap(), 0, This);
 }
 
-static HRESULT StorageImpl_Flush(StorageBaseImpl* iface)
+static HRESULT StorageImpl_Flush(StorageBaseImpl *storage)
 {
-  StorageImpl *This = (StorageImpl*) iface;
+  StorageImpl *This = (StorageImpl*)storage;
   int i;
   HRESULT hr;
   TRACE("(%p)\n", This);
@@ -3784,20 +3846,17 @@ HRESULT StorageImpl_ReadRawDirEntry(StorageImpl *This, ULONG index, BYTE *buffer
 HRESULT StorageImpl_WriteRawDirEntry(StorageImpl *This, ULONG index, const BYTE *buffer)
 {
   ULARGE_INTEGER offset;
-  HRESULT hr;
   ULONG bytesRead;
 
   offset.u.HighPart = 0;
   offset.u.LowPart  = index * RAW_DIRENTRY_SIZE;
 
-  hr = BlockChainStream_WriteAt(
+  return BlockChainStream_WriteAt(
                     This->rootBlockChain,
                     offset,
                     RAW_DIRENTRY_SIZE,
                     buffer,
                     &bytesRead);
-
-  return hr;
 }
 
 /******************************************************************************
@@ -3969,13 +4028,11 @@ HRESULT StorageImpl_WriteDirEntry(
   DirRef                index,
   const DirEntry*       buffer)
 {
-  BYTE           currentEntry[RAW_DIRENTRY_SIZE];
-  HRESULT        writeRes;
+  BYTE currentEntry[RAW_DIRENTRY_SIZE];
 
   UpdateRawDirEntry(currentEntry, buffer);
 
-  writeRes = StorageImpl_WriteRawDirEntry(This, index, currentEntry);
-  return writeRes;
+  return StorageImpl_WriteRawDirEntry(This, index, currentEntry);
 }
 
 static BOOL StorageImpl_ReadBigBlock(
@@ -5120,7 +5177,7 @@ static HRESULT TransactedSnapshotImpl_Construct(StorageBaseImpl *parentStorage,
             /* parentStorage already has 1 reference, which we take over here. */
             (*result)->transactedParent = parentStorage;
 
-            parentStorage->transactedChild = (StorageBaseImpl*)*result;
+            parentStorage->transactedChild = &(*result)->base;
 
             (*result)->base.storageDirEntry = TransactedSnapshotImpl_CreateStubEntry(*result, parentStorage->storageDirEntry);
         }
@@ -5132,7 +5189,7 @@ static HRESULT TransactedSnapshotImpl_Construct(StorageBaseImpl *parentStorage,
         }
     }
 
-    if (FAILED(hr)) HeapFree(GetProcessHeap(), 0, (*result));
+    if (FAILED(hr)) HeapFree(GetProcessHeap(), 0, *result);
 
     return hr;
   }
@@ -5539,35 +5596,29 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Clone(
   IEnumSTATSTG**    ppenum)
 {
   IEnumSTATSTGImpl* const This = impl_from_IEnumSTATSTG(iface);
-
   IEnumSTATSTGImpl* newClone;
 
   if (This->parentStorage->reverted)
     return STG_E_REVERTED;
 
-  /*
-   * Perform a sanity check on the parameters.
-   */
   if (ppenum==0)
     return E_INVALIDARG;
 
   newClone = IEnumSTATSTGImpl_Construct(This->parentStorage,
                This->storageDirEntry);
-
+  if (!newClone)
+  {
+    *ppenum = NULL;
+    return E_OUTOFMEMORY;
+  }
 
   /*
    * The new clone enumeration must point to the same current node as
-   * the ole one.
+   * the old one.
    */
   memcpy(newClone->name, This->name, sizeof(newClone->name));
 
   *ppenum = &newClone->IEnumSTATSTG_iface;
-
-  /*
-   * Don't forget to nail down a reference to the clone before
-   * returning it.
-   */
-  IEnumSTATSTGImpl_AddRef(*ppenum);
 
   return S_OK;
 }
@@ -5598,13 +5649,11 @@ static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(
 
   newEnumeration = HeapAlloc(GetProcessHeap(), 0, sizeof(IEnumSTATSTGImpl));
 
-  if (newEnumeration!=0)
+  if (newEnumeration)
   {
-    /*
-     * Set-up the virtual function table and reference count.
-     */
     newEnumeration->IEnumSTATSTG_iface.lpVtbl = &IEnumSTATSTGImpl_Vtbl;
-    newEnumeration->ref       = 0;
+    newEnumeration->ref = 1;
+    newEnumeration->name[0] = 0;
 
     /*
      * We want to nail-down the reference to the storage in case the
@@ -5613,12 +5662,7 @@ static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(
     newEnumeration->parentStorage = parentStorage;
     IStorage_AddRef(&newEnumeration->parentStorage->IStorage_iface);
 
-    newEnumeration->storageDirEntry   = storageDirEntry;
-
-    /*
-     * Make sure the current node of the iterator is the first one.
-     */
-    IEnumSTATSTGImpl_Reset(&newEnumeration->IEnumSTATSTG_iface);
+    newEnumeration->storageDirEntry = storageDirEntry;
   }
 
   return newEnumeration;
@@ -7604,7 +7648,16 @@ HRESULT WINAPI StgOpenStorage(
   /*
    * Validate the sharing mode
    */
-  if (!(grfMode & (STGM_TRANSACTED|STGM_PRIORITY)))
+  if (grfMode & STGM_DIRECT_SWMR)
+  {
+    if ((STGM_SHARE_MODE(grfMode) != STGM_SHARE_DENY_WRITE) &&
+        (STGM_SHARE_MODE(grfMode) != STGM_SHARE_DENY_NONE))
+    {
+      hr = STG_E_INVALIDFLAG;
+      goto end;
+    }
+  }
+  else if (!(grfMode & (STGM_TRANSACTED|STGM_PRIORITY)))
     switch(STGM_SHARE_MODE(grfMode))
     {
       case STGM_SHARE_EXCLUSIVE:
@@ -7622,10 +7675,10 @@ HRESULT WINAPI StgOpenStorage(
     goto end;
   }
 
-  /* shared reading requires transacted mode */
+  /* shared reading requires transacted or single writer mode */
   if( STGM_SHARE_MODE(grfMode) == STGM_SHARE_DENY_WRITE &&
       STGM_ACCESS_MODE(grfMode) == STGM_READWRITE &&
-     !(grfMode&STGM_TRANSACTED) )
+     !(grfMode & STGM_TRANSACTED) && !(grfMode & STGM_DIRECT_SWMR))
   {
     hr = STG_E_INVALIDFLAG;
     goto end;
