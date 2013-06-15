@@ -141,14 +141,16 @@ extern struct window_surface *create_surface(macdrv_window window, const RECT *r
                                              struct window_surface *old_surface, BOOL use_alpha) DECLSPEC_HIDDEN;
 extern void set_window_surface(macdrv_window window, struct window_surface *window_surface) DECLSPEC_HIDDEN;
 extern void set_surface_use_alpha(struct window_surface *window_surface, BOOL use_alpha) DECLSPEC_HIDDEN;
+extern void surface_clip_to_visible_rect(struct window_surface *window_surface, const RECT *visible_rect) DECLSPEC_HIDDEN;
 
-extern void macdrv_handle_event(macdrv_event *event) DECLSPEC_HIDDEN;
+extern void macdrv_handle_event(const macdrv_event *event) DECLSPEC_HIDDEN;
 
 extern void macdrv_window_close_requested(HWND hwnd) DECLSPEC_HIDDEN;
 extern void macdrv_window_frame_changed(HWND hwnd, CGRect frame) DECLSPEC_HIDDEN;
 extern void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_window_lost_focus(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_app_deactivated(void) DECLSPEC_HIDDEN;
+extern void macdrv_app_quit_requested(const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_window_did_minimize(HWND hwnd) DECLSPEC_HIDDEN;
 extern void macdrv_window_did_unminimize(HWND hwnd) DECLSPEC_HIDDEN;
 

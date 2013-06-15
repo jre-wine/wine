@@ -23,6 +23,7 @@
 #include <shellapi.h>
 #include <setupapi.h>
 #include <shlwapi.h>
+#include <shlobj.h>
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -30,6 +31,21 @@
 WINE_DEFAULT_DEBUG_CHANNEL(extrac32);
 
 static BOOL force_mode;
+
+static void create_target_directory(LPWSTR Target)
+{
+    WCHAR dir[MAX_PATH];
+    int res;
+
+    strcpyW(dir, Target);
+    *PathFindFileNameW(dir) = 0; /* Truncate file name */
+    if(!PathIsDirectoryW(dir))
+    {
+        res = SHCreateDirectoryExW(NULL, dir, NULL);
+        if(res != ERROR_SUCCESS && res != ERROR_ALREADY_EXISTS)
+            WINE_ERR("Can't create directory: %s\n", wine_dbgstr_w(dir));
+    }
+}
 
 static UINT WINAPI ExtCabCallback(PVOID Context, UINT Notification, UINT_PTR Param1, UINT_PTR Param2)
 {
@@ -42,6 +58,9 @@ static UINT WINAPI ExtCabCallback(PVOID Context, UINT Notification, UINT_PTR Par
             pInfo = (FILE_IN_CABINET_INFO_W*)Param1;
             lstrcpyW(pInfo->FullTargetName, (LPCWSTR)Context);
             lstrcatW(pInfo->FullTargetName, pInfo->NameInCabinet);
+            /* SetupIterateCabinet() doesn't create full path to target by itself,
+               so we should do it manually */
+            create_target_directory(pInfo->FullTargetName);
             return FILEOP_DOIT;
         case SPFILENOTIFY_FILEEXTRACTED:
             pFilePaths = (FILEPATHS_W*)Param1;
@@ -82,6 +101,98 @@ static void copy_file(LPCWSTR source, LPCWSTR destination)
     CopyFileW(source, destination, FALSE);
 }
 
+static LPWSTR *get_extrac_args(LPWSTR cmdline, int *pargc)
+{
+    enum {OUTSIDE_ARG, INSIDE_ARG, INSIDE_QUOTED_ARG} state;
+    LPWSTR str;
+    int argc;
+    LPWSTR *argv;
+    int max_argc = 16;
+    BOOL new_arg;
+
+    WINE_TRACE("cmdline: %s\n", wine_dbgstr_w(cmdline));
+    str = HeapAlloc(GetProcessHeap(), 0, (strlenW(cmdline) + 1) * sizeof(WCHAR));
+    if(!str) return NULL;
+    strcpyW(str, cmdline);
+    argv = HeapAlloc(GetProcessHeap(), 0, (max_argc + 1) * sizeof(LPWSTR));
+    if(!argv)
+    {
+        HeapFree(GetProcessHeap(), 0, str);
+        return NULL;
+    }
+
+    /* Split command line to separate arg-strings and fill argv */
+    state = OUTSIDE_ARG;
+    argc = 0;
+    while(*str)
+    {
+        new_arg = FALSE;
+        /* Check character */
+        if(isspaceW(*str))          /* white space */
+        {
+            if(state == INSIDE_ARG)
+            {
+                state = OUTSIDE_ARG;
+                *str = 0;
+            }
+        }
+        else if(*str == '"')        /* double quote */
+            switch(state)
+            {
+                case INSIDE_QUOTED_ARG:
+                    state = OUTSIDE_ARG;
+                    *str = 0;
+                    break;
+                case INSIDE_ARG:
+                    *str = 0;
+                    /* Fall through */
+                case OUTSIDE_ARG:
+                    if(!*++str) continue;
+                    state = INSIDE_QUOTED_ARG;
+                    new_arg = TRUE;
+                    break;
+            }
+        else                        /* regular character */
+            if(state == OUTSIDE_ARG)
+            {
+                state = INSIDE_ARG;
+                new_arg = TRUE;
+            }
+
+        /* Add new argv entry, if need */
+        if(new_arg)
+        {
+            if(argc >= max_argc - 1)
+            {
+                /* Realloc argv here because there always should be
+                   at least one reserved cell for terminating NULL */
+                max_argc *= 2;
+                argv = HeapReAlloc(GetProcessHeap(), 0, argv,
+                        (max_argc + 1) * sizeof(LPWSTR));
+                if(!argv)
+                {
+                    HeapFree(GetProcessHeap(), 0, str);
+                    return NULL;
+                }
+            }
+            argv[argc++] = str;
+        }
+
+        str++;
+    }
+
+    argv[argc] = NULL;
+    *pargc = argc;
+
+    if(TRACE_ON(extrac32))
+    {
+        int i;
+        for(i = 0; i < argc; i++)
+            WINE_TRACE("arg %d: %s\n", i, wine_dbgstr_w(argv[i]));
+    }
+    return argv;
+}
+
 int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int show)
 {
     LPWSTR *argv;
@@ -89,15 +200,20 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
     int i;
     WCHAR check, cmd = 0;
     WCHAR path[MAX_PATH];
-    WCHAR backslash[] = {'\\',0};
     LPCWSTR cabfile = NULL;
 
     path[0] = 0;
-    argv = CommandLineToArgvW(cmdline, &argc);
+
+    /* Do not use CommandLineToArgvW() or __wgetmainargs() to parse
+     * command line for this program. It should treat each quote as argument
+     * delimiter. This doesn't match with behavior of mentioned functions.
+     * Do not use args provided by wmain() for the same reason.
+     */
+    argv = get_extrac_args(cmdline, &argc);
 
     if(!argv)
     {
-        WINE_ERR("Bad command line arguments\n");
+        WINE_ERR("Command line parsing failed\n");
         return 0;
     }
 
@@ -105,7 +221,7 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
     for(i = 0; i < argc; i++)
     {
         /* Get cabfile */
-        if (argv[i][0] != '/')
+        if (argv[i][0] != '/' && argv[i][0] != '-')
         {
             if (!cabfile)
             {
@@ -130,9 +246,6 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
                     return 0;
                 break;
             case 'C':
-                if (cmd) return 0;
-                cmd = check;
-                break;
             case 'E':
             case 'D':
                 if (cmd) return 0;
@@ -152,11 +265,14 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
         if (!GetFullPathNameW(argv[i], MAX_PATH, path, NULL))
             return 0;
     }
+    else if (!cmd)
+        /* Use extraction by default if names of required files presents */
+        cmd = i < argc ? 'E' : 'D';
 
-    if (!path[0])
+    if (cmd == 'E' && !path[0])
         GetCurrentDirectoryW(MAX_PATH, path);
 
-    lstrcatW(path, backslash);
+    PathAddBackslashW(path);
 
     /* Execute the specified command */
     switch(cmd)
@@ -169,7 +285,6 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
             /* Extract CAB archive */
             extract(cabfile, path);
             break;
-        case 0:
         case 'D':
             /* Display CAB archive */
             WINE_FIXME("/D not implemented\n");

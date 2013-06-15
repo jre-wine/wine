@@ -1,5 +1,7 @@
 /*
- * Copyright 1999, 2000 Peter Hunnisett
+ * msvcp110 specific functions
+ *
+ * Copyright 2013 Stefan Leichter
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,22 +18,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_DPINIT_H
-#define __WINE_DPINIT_H
-
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
-#include "wtypes.h"
-#include "dplay_global.h"
 
-extern HRESULT DP_CreateInterface( REFIID riid, LPVOID* ppvObj ) DECLSPEC_HIDDEN;
-extern HRESULT DPL_CreateInterface( REFIID riid, LPVOID* ppvObj ) DECLSPEC_HIDDEN;
-extern HRESULT DPSP_CreateInterface( REFIID riid, LPVOID* ppvObj,
-                                     IDirectPlay2Impl* dp ) DECLSPEC_HIDDEN;
-extern HRESULT DPLSP_CreateInterface( REFIID riid, LPVOID* ppvObj,
-                                      IDirectPlay2Impl* dp ) DECLSPEC_HIDDEN;
+BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
+{
+    switch (reason)
+    {
+        case DLL_WINE_PREATTACH:
+            return FALSE;  /* prefer native version */
 
-
-#endif
+        case DLL_PROCESS_ATTACH:
+            DisableThreadLibraryCalls(hdll);
+    }
+    return TRUE;
+}

@@ -236,6 +236,7 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     DWORD *colors;
     pthread_mutexattr_t attr;
     int err;
+    DWORD window_background;
 
     surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                         FIELD_OFFSET(struct macdrv_window_surface, info.bmiColors[3]));
@@ -286,8 +287,10 @@ struct window_surface *create_surface(macdrv_window window, const RECT *rect,
     }
     update_blit_data(surface);
     surface->use_alpha = use_alpha;
-    surface->bits = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, surface->info.bmiHeader.biSizeImage);
+    surface->bits = HeapAlloc(GetProcessHeap(), 0, surface->info.bmiHeader.biSizeImage);
     if (!surface->bits) goto failed;
+    window_background = macdrv_window_background_color();
+    memset_pattern4(surface->bits, &window_background, surface->info.bmiHeader.biSizeImage);
 
     TRACE("created %p for %p %s bits %p-%p\n", surface, window, wine_dbgstr_rect(rect),
           surface->bits, surface->bits + surface->info.bmiHeader.biSizeImage);
@@ -406,4 +409,36 @@ CGImageRef create_surface_image(void *window_surface, CGRect *rect, int copy_dat
     }
 
     return cgimage;
+}
+
+/***********************************************************************
+ *              surface_clip_to_visible_rect
+ *
+ * Intersect the accumulated drawn region with a new visible rect,
+ * effectively discarding stale drawing in the surface slack area.
+ */
+void surface_clip_to_visible_rect(struct window_surface *window_surface, const RECT *visible_rect)
+{
+    struct macdrv_window_surface *surface = get_mac_surface(window_surface);
+
+    window_surface->funcs->lock(window_surface);
+
+    if (surface->drawn)
+    {
+        RECT rect;
+        HRGN region;
+
+        rect = *visible_rect;
+        OffsetRect(&rect, -rect.left, -rect.top);
+
+        if ((region = CreateRectRgnIndirect(&rect)))
+        {
+            CombineRgn(surface->drawn, surface->drawn, region, RGN_AND);
+            DeleteObject(region);
+
+            update_blit_data(surface);
+        }
+    }
+
+    window_surface->funcs->unlock(window_surface);
 }

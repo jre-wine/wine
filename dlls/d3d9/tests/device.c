@@ -1110,8 +1110,8 @@ static void test_reset(void)
     {
         ok(vp.X == 0, "D3DVIEWPORT->X = %d\n", vp.X);
         ok(vp.Y == 0, "D3DVIEWPORT->Y = %d\n", vp.Y);
-        todo_wine ok(vp.Width == 200, "D3DVIEWPORT->Width = %d\n", vp.Width);
-        todo_wine ok(vp.Height == 150, "D3DVIEWPORT->Height = %d\n", vp.Height);
+        ok(vp.Width == 200, "D3DVIEWPORT->Width = %d\n", vp.Width);
+        ok(vp.Height == 150, "D3DVIEWPORT->Height = %d\n", vp.Height);
         ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %f\n", vp.MinZ);
         ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %f\n", vp.MaxZ);
     }
@@ -1125,8 +1125,8 @@ static void test_reset(void)
         ok(hr == D3D_OK, "IDirect3DSwapChain9_GetPresentParameters returned %08x\n", hr);
         if(SUCCEEDED(hr))
         {
-            todo_wine ok(d3dpp.BackBufferWidth == 200, "Back buffer width is %d\n", d3dpp.BackBufferWidth);
-            todo_wine ok(d3dpp.BackBufferHeight == 150, "Back buffer height is %d\n", d3dpp.BackBufferHeight);
+            ok(d3dpp.BackBufferWidth == 200, "Back buffer width is %d\n", d3dpp.BackBufferWidth);
+            ok(d3dpp.BackBufferHeight == 150, "Back buffer height is %d\n", d3dpp.BackBufferHeight);
         }
         IDirect3DSwapChain9_Release(pSwapchain);
     }
@@ -1288,6 +1288,16 @@ static void test_reset(void)
     d3dpp.BackBufferHeight = 600;
     hr = IDirect3DDevice9_Reset(device1, &d3dpp);
     ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset to w=801, h=600, windowed=FALSE failed with %08x\n", hr);
+    hr = IDirect3DDevice9_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
+
+    ZeroMemory( &d3dpp, sizeof(d3dpp) );
+    d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed         = FALSE;
+    d3dpp.BackBufferWidth  = 0;
+    d3dpp.BackBufferHeight = 0;
+    hr = IDirect3DDevice9_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_Reset to w=0, h=0, windowed=FALSE failed with %08x\n", hr);
     hr = IDirect3DDevice9_TestCooperativeLevel(device1);
     ok(hr == D3DERR_DEVICENOTRESET, "IDirect3DDevice9_TestCooperativeLevel after a failed reset returned %#x\n", hr);
 
@@ -3130,6 +3140,7 @@ static void test_window_style(void)
     LONG style, expected_style;
     IDirect3DDevice9 *device;
     IDirect3D9 *d3d9;
+    HRESULT hr;
     ULONG ref;
 
 
@@ -3185,6 +3196,25 @@ static void test_window_style(void)
     ok(EqualRect(&r, &focus_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
             focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
             r.left, r.top, r.right, r.bottom);
+
+    hr = reset_device(device, device_window, TRUE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    style = GetWindowLongA(device_window, GWL_STYLE);
+    expected_style = device_style | WS_VISIBLE;
+    ok(style == expected_style, "Expected device window style %#x, got %#x.\n",
+            expected_style, style);
+    style = GetWindowLongA(device_window, GWL_EXSTYLE);
+    expected_style = device_exstyle | WS_EX_TOPMOST;
+    ok(style == expected_style, "Expected device window extended style %#x, got %#x.\n",
+            expected_style, style);
+
+    style = GetWindowLongA(focus_window, GWL_STYLE);
+    ok(style == focus_style, "Expected focus window style %#x, got %#x.\n",
+            focus_style, style);
+    style = GetWindowLongA(focus_window, GWL_EXSTYLE);
+    ok(style == focus_exstyle, "Expected focus window extended style %#x, got %#x.\n",
+            focus_exstyle, style);
 
     ref = IDirect3DDevice9_Release(device);
     ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);

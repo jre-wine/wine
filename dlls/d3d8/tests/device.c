@@ -1265,8 +1265,8 @@ static void test_reset(void)
     {
         ok(vp.X == 0, "D3DVIEWPORT->X = %u, expected 0.\n", vp.X);
         ok(vp.Y == 0, "D3DVIEWPORT->Y = %u, expected 0.\n", vp.Y);
-        todo_wine ok(vp.Width == 200, "D3DVIEWPORT->Width = %u, expected 200.\n", vp.Width);
-        todo_wine ok(vp.Height == 150, "D3DVIEWPORT->Height = %u, expected 150.\n", vp.Height);
+        ok(vp.Width == 200, "D3DVIEWPORT->Width = %u, expected 200.\n", vp.Width);
+        ok(vp.Height == 150, "D3DVIEWPORT->Height = %u, expected 150.\n", vp.Height);
         ok(vp.MinZ == 0, "D3DVIEWPORT->MinZ = %.8e, expected 0.\n", vp.MinZ);
         ok(vp.MaxZ == 1, "D3DVIEWPORT->MaxZ = %.8e, expected 1.\n", vp.MaxZ);
     }
@@ -1275,10 +1275,8 @@ static void test_reset(void)
     ok(SUCCEEDED(hr), "GetRenderTarget failed, hr %#x.\n", hr);
     hr = IDirect3DSurface8_GetDesc(surface, &surface_desc);
     ok(hr == D3D_OK, "GetDesc failed, hr %#x.\n", hr);
-    todo_wine ok(surface_desc.Width == 200, "Back buffer width is %u, expected 200.\n",
-                 surface_desc.Width);
-    todo_wine ok(surface_desc.Height == 150, "Back buffer height is %u, expected 150.\n",
-                 surface_desc.Height);
+    ok(surface_desc.Width == 200, "Back buffer width is %u, expected 200.\n", surface_desc.Width);
+    ok(surface_desc.Height == 150, "Back buffer height is %u, expected 150.\n", surface_desc.Height);
     IDirect3DSurface8_Release(surface);
 
     memset(&d3dpp, 0, sizeof(d3dpp));
@@ -1437,6 +1435,17 @@ static void test_reset(void)
     d3dpp.Windowed = FALSE;
     d3dpp.BackBufferWidth = 801;
     d3dpp.BackBufferHeight = 600;
+    d3dpp.BackBufferFormat = d3ddm.Format;
+    hr = IDirect3DDevice8_Reset(device1, &d3dpp);
+    ok(hr == D3DERR_INVALIDCALL, "Reset returned %#x, expected %#x.\n", hr, D3DERR_INVALIDCALL);
+    hr = IDirect3DDevice8_TestCooperativeLevel(device1);
+    ok(hr == D3DERR_DEVICENOTRESET, "TestCooperativeLevel returned %#x, expected %#x.\n", hr, D3DERR_DEVICENOTRESET);
+
+    memset(&d3dpp, 0, sizeof(d3dpp));
+    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    d3dpp.Windowed = FALSE;
+    d3dpp.BackBufferWidth = 0;
+    d3dpp.BackBufferHeight = 0;
     d3dpp.BackBufferFormat = d3ddm.Format;
     hr = IDirect3DDevice8_Reset(device1, &d3dpp);
     ok(hr == D3DERR_INVALIDCALL, "Reset returned %#x, expected %#x.\n", hr, D3DERR_INVALIDCALL);
@@ -2829,6 +2838,7 @@ static void test_window_style(void)
     LONG style, expected_style;
     IDirect3DDevice8 *device;
     IDirect3D8 *d3d8;
+    HRESULT hr;
     ULONG ref;
 
 
@@ -2884,6 +2894,26 @@ static void test_window_style(void)
     ok(EqualRect(&r, &focus_rect), "Expected {%d, %d, %d, %d}, got {%d, %d, %d, %d}.\n",
             focus_rect.left, focus_rect.top, focus_rect.right, focus_rect.bottom,
             r.left, r.top, r.right, r.bottom);
+
+    hr = reset_device(device, device_window, TRUE);
+    ok(SUCCEEDED(hr), "Failed to reset device, hr %#x.\n", hr);
+
+    style = GetWindowLongA(device_window, GWL_STYLE);
+    expected_style = device_style | WS_VISIBLE;
+    ok(style == expected_style, "Expected device window style %#x, got %#x.\n",
+            expected_style, style);
+    style = GetWindowLongA(device_window, GWL_EXSTYLE);
+    expected_style = device_exstyle | WS_EX_TOPMOST;
+    ok(style == expected_style, "Expected device window extended style %#x, got %#x.\n",
+            expected_style, style);
+
+    style = GetWindowLongA(focus_window, GWL_STYLE);
+    ok(style == focus_style, "Expected focus window style %#x, got %#x.\n",
+            focus_style, style);
+    style = GetWindowLongA(focus_window, GWL_EXSTYLE);
+    ok(style == focus_exstyle, "Expected focus window extended style %#x, got %#x.\n",
+            focus_exstyle, style);
+
 
     ref = IDirect3DDevice8_Release(device);
     ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);

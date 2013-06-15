@@ -1282,14 +1282,19 @@ static void init_driver_info(struct wined3d_driver_info *driver_info,
                     driver_os_version = 7;
                     driver_model = DRIVER_MODEL_NT6X;
                 }
+                else if (os_version.dwMinorVersion == 1)
+                {
+                    driver_os_version = 8;
+                    driver_model = DRIVER_MODEL_NT6X;
+                }
                 else
                 {
-                    if (os_version.dwMinorVersion > 1)
+                    if (os_version.dwMinorVersion > 2)
                     {
-                        FIXME("Unhandled OS version %u.%u, reporting Win 7.\n",
+                        FIXME("Unhandled OS version %u.%u, reporting Win 8.\n",
                                 os_version.dwMajorVersion, os_version.dwMinorVersion);
                     }
-                    driver_os_version = 8;
+                    driver_os_version = 9;
                     driver_model = DRIVER_MODEL_NT6X;
                 }
                 break;
@@ -5237,6 +5242,8 @@ static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
 
 static void wined3d_adapter_init_nogl(struct wined3d_adapter *adapter, UINT ordinal)
 {
+    DISPLAY_DEVICEW display_device;
+
     memset(adapter, 0, sizeof(*adapter));
     adapter->ordinal = ordinal;
     adapter->monitorPoint.x = -1;
@@ -5254,6 +5261,11 @@ static void wined3d_adapter_init_nogl(struct wined3d_adapter *adapter, UINT ordi
     adapter->fragment_pipe = &none_fragment_pipe;
     adapter->shader_backend = &none_shader_backend;
     adapter->blitter = &cpu_blit;
+
+    display_device.cb = sizeof(display_device);
+    EnumDisplayDevicesW(NULL, ordinal, &display_device, 0);
+    TRACE("DeviceName: %s\n", debugstr_w(display_device.DeviceName));
+    strcpyW(adapter->DeviceName, display_device.DeviceName);
 }
 
 static void STDMETHODCALLTYPE wined3d_null_wined3d_object_destroyed(void *parent) {}
