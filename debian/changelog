@@ -1,8 +1,10 @@
-wine-unstable (1.5.29-1) UNRELEASED; urgency=low
+wine-unstable (1.5.29-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.29, released Apr 26, 2013.
+    - JavaScript performance improvements.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 22:52:11 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 22:52:15 +0000
 
 wine-unstable (1.5.28-1) unstable; urgency=low
 
