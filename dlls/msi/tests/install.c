@@ -158,6 +158,7 @@ static const CHAR property_dat[] = "Property\tValue\n"
                                    "InstallMode\tTypical\n"
                                    "Manufacturer\tWine\n"
                                    "PIDTemplate\t12345<###-%%%%%%%>@@@@@\n"
+                                   "PRIMARYFOLDER\tTARGETDIR\n"
                                    "ProductCode\t{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}\n"
                                    "ProductID\tnone\n"
                                    "ProductLanguage\t1033\n"
@@ -391,6 +392,13 @@ static const CHAR cc_media_dat[] = "DiskId\tLastSequence\tDiskPrompt\tCabinet\tV
                                    "1\t10\t\ttest1.cab\tDISK1\t\n"
                                    "2\t2\t\ttest2.cab\tDISK2\t\n"
                                    "3\t12\t\ttest3.cab\tDISK3\t\n";
+
+static const CHAR cc3_media_dat[] = "DiskId\tLastSequence\tDiskPrompt\tCabinet\tVolumeLabel\tSource\n"
+                                    "i2\ti4\tL64\tS255\tS32\tS72\n"
+                                    "Media\tDiskId\n"
+                                    "1\t10\t\ttest1.cab\tDISK1\t\n"
+                                    "2\t2\t\ttest2_.cab\tDISK2\t\n"
+                                    "3\t12\t\ttest3.cab\tDISK3\t\n";
 
 static const CHAR co_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
                                   "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
@@ -1281,6 +1289,65 @@ static const char mixed_install_exec_seq_dat[] =
     "PublishProduct\t\t1300\n"
     "InstallFinalize\t\t1400\n";
 
+static const char vp_file_dat[] =
+    "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+    "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+    "File\tFile\n"
+    "volumeprop\tcomp\tvolumeprop.txt\t1000\t\t\t8192\t1\n";
+
+static const char vp_feature_dat[] =
+    "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+    "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+    "Feature\tFeature\n"
+    "feature\t\t\t\t1\t2\tMSITESTDIR\t0\n";
+
+static const char vp_feature_comp_dat[] =
+    "Feature_\tComponent_\n"
+    "s38\ts72\n"
+    "FeatureComponents\tFeature_\tComponent_\n"
+    "feature\tcomp\n";
+
+static const char vp_component_dat[] =
+    "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+    "s72\tS38\ts72\ti2\tS255\tS72\n"
+    "Component\tComponent\n"
+    "comp\t{24364AE7-5B7F-496C-AF5A-54893639C567}\tMSITESTDIR\t0\t\tvolumeprop\n";
+
+static const char vp_custom_action_dat[] =
+    "Action\tType\tSource\tTarget\tISComments\n"
+    "s72\ti2\tS64\tS0\tS255\n"
+    "CustomAction\tAction\n"
+    "TestPrimaryVolumePath0\t19\t\tPrimaryVolumePath set before CostFinalize\t\n"
+    "TestPrimaryVolumeSpaceAvailable0\t19\t\tPrimaryVolumeSpaceAvailable set before CostFinalize\t\n"
+    "TestPrimaryVolumePath1\t19\t\tPrimaryVolumePath set before InstallValidate\t\n"
+    "TestPrimaryVolumeSpaceAvailable1\t19\t\tPrimaryVolumeSpaceAvailable not set before InstallValidate\t\n"
+    "TestPrimaryVolumePath2\t19\t\tPrimaryVolumePath not set after InstallValidate\t\n"
+    "TestPrimaryVolumeSpaceAvailable2\t19\t\tPrimaryVolumeSpaceAvailable not set after InstallValidate\t\n";
+
+static const char vp_install_exec_seq_dat[] =
+    "Action\tCondition\tSequence\n"
+    "s72\tS255\tI2\n"
+    "InstallExecuteSequence\tAction\n"
+    "LaunchConditions\t\t100\n"
+    "CostInitialize\t\t200\n"
+    "FileCost\t\t300\n"
+    "TestPrimaryVolumePath0\tPrimaryVolumePath AND NOT REMOVE\t400\n"
+    "TestPrimaryVolumeSpaceAvailable0\tPrimaryVolumeSpaceAvailable AND NOT REMOVE\t500\n"
+    "CostFinalize\t\t600\n"
+    "TestPrimaryVolumePath1\tPrimaryVolumePath AND NOT REMOVE\t600\n"
+    "TestPrimaryVolumeSpaceAvailable1\tNOT PrimaryVolumeSpaceAvailable AND NOT REMOVE\t800\n"
+    "InstallValidate\t\t900\n"
+    "TestPrimaryVolumePath2\tNOT PrimaryVolumePath AND NOT REMOVE\t1000\n"
+    "TestPrimaryVolumeSpaceAvailable2\tNOT PrimaryVolumeSpaceAvailable AND NOT REMOVE\t1100\n"
+    "InstallInitialize\t\t1200\n"
+    "ProcessComponents\t\t1300\n"
+    "RemoveFiles\t\t1400\n"
+    "InstallFiles\t\t1500\n"
+    "RegisterProduct\t\t1600\n"
+    "PublishFeatures\t\t1700\n"
+    "PublishProduct\t\t1800\n"
+    "InstallFinalize\t\t1900\n";
+
 typedef struct _msi_table
 {
     const CHAR *filename;
@@ -1457,6 +1524,18 @@ static const msi_table cc2_tables[] =
     ADD_TABLE(cc2_file),
     ADD_TABLE(install_exec_seq),
     ADD_TABLE(cc_media),
+    ADD_TABLE(property),
+};
+
+static const msi_table cc3_tables[] =
+{
+    ADD_TABLE(cc_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(cc_feature),
+    ADD_TABLE(cc_feature_comp),
+    ADD_TABLE(cc_file),
+    ADD_TABLE(install_exec_seq),
+    ADD_TABLE(cc3_media),
     ADD_TABLE(property),
 };
 
@@ -1972,6 +2051,19 @@ static const msi_table mixed_tables[] =
     ADD_TABLE(property)
 };
 
+static const msi_table vp_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(vp_file),
+    ADD_TABLE(vp_component),
+    ADD_TABLE(vp_feature),
+    ADD_TABLE(vp_feature_comp),
+    ADD_TABLE(vp_custom_action),
+    ADD_TABLE(vp_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
 /* cabinet definitions */
 
 /* make the max size large so there is only one cab file */
@@ -2013,7 +2105,7 @@ static INT_PTR CDECL fci_open(char *pszFile, int oflag, int pmode, int *err, voi
     DWORD dwAccess = 0;
     DWORD dwShareMode = 0;
     DWORD dwCreateDisposition = OPEN_EXISTING;
-    
+
     dwAccess = GENERIC_READ | GENERIC_WRITE;
     /* FILE_SHARE_DELETE is not supported by Windows Me/98/95 */
     dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
@@ -2036,7 +2128,7 @@ static UINT CDECL fci_read(INT_PTR hf, void *memory, UINT cb, int *err, void *pv
     HANDLE handle = (HANDLE)hf;
     DWORD dwRead;
     BOOL res;
-    
+
     res = ReadFile(handle, memory, cb, &dwRead, NULL);
     ok(res, "Failed to ReadFile\n");
 
@@ -2175,7 +2267,7 @@ static INT_PTR CDECL get_open_info(char *pszName, USHORT *pdate, USHORT *ptime,
 
     res = GetFileInformationByHandle(handle, &finfo);
     ok(res, "Expected GetFileInformationByHandle to succeed\n");
-   
+
     FileTimeToLocalFileTime(&finfo.ftLastWriteTime, &filetime);
     FileTimeToDosDateTime(&filetime, pdate, ptime);
 
@@ -3025,11 +3117,18 @@ static void test_continuouscabs(void)
     MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
 
     r = MsiInstallProductA(msifile, NULL);
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\caesar", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
-    ok(delete_pf("msitest", FALSE), "Directory not created\n");
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+    }
+    else
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\caesar", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest", FALSE), "Directory not created\n");
+    }
 
     delete_cab_files();
     DeleteFile(msifile);
@@ -3043,16 +3142,66 @@ static void test_continuouscabs(void)
     if (r == ERROR_INSTALL_PACKAGE_REJECTED)
     {
         skip("Not enough rights to perform tests\n");
-        goto error;
     }
-    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
-    ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
-    ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
-    ok(delete_pf("msitest\\tiberius", TRUE), "File not installed\n");
-    ok(delete_pf("msitest\\caesar", TRUE), "File not installed\n");
-    ok(delete_pf("msitest", FALSE), "Directory not created\n");
+    else
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
+        ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+        ok(delete_pf("msitest\\tiberius", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\caesar", TRUE), "File not installed\n");
+        ok(delete_pf("msitest", FALSE), "Directory not created\n");
+    }
 
-error:
+    delete_cab_files();
+    DeleteFile(msifile);
+
+    /* Tests to show that only msi cab filename is taken in case of mismatch with the one given by previous cab */
+
+    /* Filename from cab is right and the one from msi is wrong */
+    create_cc_test_files();
+    create_database(msifile, cc3_tables, sizeof(cc3_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+    }
+    else
+    {
+        ok(r == ERROR_INSTALL_FAILURE, "Expected ERROR_INSTALL_FAIRE, got %u\n", r);
+        todo_wine ok(!delete_pf("msitest\\augustus", TRUE), "File installed\n");
+        ok(!delete_pf("msitest\\caesar", TRUE), "File installed\n");
+        todo_wine ok(!delete_pf("msitest\\maximus", TRUE), "File installed\n");
+        todo_wine ok(!delete_pf("msitest", FALSE), "Directory created\n");
+    }
+
+    delete_cab_files();
+    DeleteFile(msifile);
+
+    /* Filename from msi is right and the one from cab is wrong */
+    create_cc_test_files();
+    ok(MoveFile("test2.cab", "test2_.cab"), "Cannot rename test2.cab to test2_.cab\n");
+    create_database(msifile, cc3_tables, sizeof(cc3_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    if (r == ERROR_INSTALL_PACKAGE_REJECTED)
+    {
+        skip("Not enough rights to perform tests\n");
+    }
+    else
+    {
+        ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+        ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\caesar", TRUE), "File not installed\n");
+        ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
+        ok(delete_pf("msitest", FALSE), "Directory not created\n");
+    }
+
     delete_cab_files();
     DeleteFile(msifile);
 }
@@ -6217,7 +6366,32 @@ static void test_mixed_package(void)
 
 error:
     DeleteFileA( msifile );
-    return;
+}
+
+static void test_volume_props(void)
+{
+    UINT r;
+
+    if (is_process_limited())
+    {
+        skip("process is limited\n");
+        return;
+    }
+    CreateDirectoryA("msitest", NULL);
+    create_file("msitest\\volumeprop.txt", 1000);
+    create_database(msifile, vp_tables, sizeof(vp_tables)/sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "got %u\n", r);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "got %u\n", r);
+
+    DeleteFileA("msitest\\volumeprop.txt");
+    RemoveDirectoryA("msitest");
+    DeleteFile(msifile);
 }
 
 START_TEST(install)
@@ -6308,6 +6482,7 @@ START_TEST(install)
     test_command_line_parsing();
     test_upgrade_code();
     test_mixed_package();
+    test_volume_props();
 
     DeleteFileA(log_file);
 

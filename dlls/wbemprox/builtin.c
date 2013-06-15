@@ -123,6 +123,8 @@ static const WCHAR prop_driveW[] =
     {'D','r','i','v','e',0};
 static const WCHAR prop_drivetypeW[] =
     {'D','r','i','v','e','T','y','p','e',0};
+static const WCHAR prop_familyW[] =
+    {'F','a','m','i','l','y',0};
 static const WCHAR prop_filesystemW[] =
     {'F','i','l','e','S','y','s','t','e','m',0};
 static const WCHAR prop_flavorW[] =
@@ -163,6 +165,10 @@ static const WCHAR prop_osarchitectureW[] =
     {'O','S','A','r','c','h','i','t','e','c','t','u','r','e',0};
 static const WCHAR prop_oslanguageW[] =
     {'O','S','L','a','n','g','u','a','g','e',0};
+static const WCHAR prop_osproductsuiteW[] =
+    {'O','S','P','r','o','d','u','c','t','S','u','i','t','e',0};
+static const WCHAR prop_ostypeW[] =
+    {'O','S','T','y','p','e',0};
 static const WCHAR prop_parameterW[] =
     {'P','a','r','a','m','e','t','e','r',0};
 static const WCHAR prop_pnpdeviceidW[] =
@@ -179,6 +185,8 @@ static const WCHAR prop_releasedateW[] =
     {'R','e','l','e','a','s','e','D','a','t','e',0};
 static const WCHAR prop_serialnumberW[] =
     {'S','e','r','i','a','l','N','u','m','b','e','r',0};
+static const WCHAR prop_servicepackmajorW[] =
+    {'S','e','r','v','i','c','e','P','a','c','k','M','a','j','o','r','V','e','r','s','i','o','n',0};
 static const WCHAR prop_servicetypeW[] =
     {'S','e','r','v','i','c','e','T','y','p','e',0};
 static const WCHAR prop_startmodeW[] =
@@ -193,6 +201,8 @@ static const WCHAR prop_stateW[] =
     {'S','t','a','t','e',0};
 static const WCHAR prop_strvalueW[] =
     {'S','t','r','i','n','g','V','a','l','u','e',0};
+static const WCHAR prop_suitemaskW[] =
+    {'S','u','i','t','e','M','a','s','k',0};
 static const WCHAR prop_systemdirectoryW[] =
     {'S','y','s','t','e','m','D','i','r','e','c','t','o','r','y',0};
 static const WCHAR prop_systemnameW[] =
@@ -288,12 +298,17 @@ static const struct column col_networkadapter[] =
 };
 static const struct column col_os[] =
 {
-    { prop_captionW,         CIM_STRING },
-    { prop_csdversionW,      CIM_STRING },
-    { prop_lastbootuptimeW,  CIM_DATETIME|COL_FLAG_DYNAMIC },
-    { prop_osarchitectureW,  CIM_STRING },
-    { prop_oslanguageW,      CIM_UINT32, VT_I4 },
-    { prop_systemdirectoryW, CIM_STRING|COL_FLAG_DYNAMIC }
+    { prop_captionW,          CIM_STRING },
+    { prop_csdversionW,       CIM_STRING },
+    { prop_lastbootuptimeW,   CIM_DATETIME|COL_FLAG_DYNAMIC },
+    { prop_osarchitectureW,   CIM_STRING },
+    { prop_oslanguageW,       CIM_UINT32, VT_I4 },
+    { prop_osproductsuiteW,   CIM_UINT32, VT_I4 },
+    { prop_ostypeW,           CIM_UINT16, VT_I4 },
+    { prop_servicepackmajorW, CIM_UINT16, VT_I4 },
+    { prop_suitemaskW,        CIM_UINT32, VT_I4 },
+    { prop_systemdirectoryW,  CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_versionW,          CIM_STRING }
 };
 static const struct column col_param[] =
 {
@@ -321,6 +336,7 @@ static const struct column col_processor[] =
 {
     { prop_cpustatusW,            CIM_UINT16 },
     { prop_deviceidW,             CIM_STRING|COL_FLAG_DYNAMIC|COL_FLAG_KEY },
+    { prop_familyW,               CIM_UINT16, VT_I4 },
     { prop_manufacturerW,         CIM_STRING|COL_FLAG_DYNAMIC },
     { prop_maxclockspeedW,        CIM_UINT32, VT_I4 },
     { prop_nameW,                 CIM_STRING|COL_FLAG_DYNAMIC },
@@ -429,6 +445,8 @@ static const WCHAR os_32bitW[] =
     {'3','2','-','b','i','t',0};
 static const WCHAR os_64bitW[] =
     {'6','4','-','b','i','t',0};
+static const WCHAR os_versionW[] =
+    {'5','.','1','.','2','6','0','0',0};
 static const WCHAR sounddevice_productnameW[] =
     {'W','i','n','e',' ','A','u','d','i','o',' ','D','e','v','i','c','e',0};
 static const WCHAR videocontroller_deviceidW[] =
@@ -515,7 +533,12 @@ struct record_operatingsystem
     const WCHAR *lastbootuptime;
     const WCHAR *osarchitecture;
     UINT32       oslanguage;
+    UINT32       osproductsuite;
+    UINT16       ostype;
+    UINT16       servicepackmajor;
+    UINT32       suitemask;
     const WCHAR *systemdirectory;
+    const WCHAR *version;
 };
 struct record_param
 {
@@ -543,6 +566,7 @@ struct record_processor
 {
     UINT16       cpu_status;
     const WCHAR *device_id;
+    UINT16       family;
     const WCHAR *manufacturer;
     UINT32       maxclockspeed;
     const WCHAR *name;
@@ -1123,6 +1147,7 @@ static void fill_processor( struct table *table )
         rec->cpu_status             = 1; /* CPU Enabled */
         sprintfW( device_id, fmtW, i );
         rec->device_id              = heap_strdupW( device_id );
+        rec->family                 = 2; /* Unknown */
         rec->manufacturer           = heap_strdupW( manufacturer );
         rec->maxclockspeed          = maxclockspeed;
         rec->name                   = heap_strdupW( name );
@@ -1178,12 +1203,17 @@ static void fill_os( struct table *table )
     if (!(table->data = heap_alloc( sizeof(*rec) ))) return;
 
     rec = (struct record_operatingsystem *)table->data;
-    rec->caption         = os_captionW;
-    rec->csdversion      = os_csdversionW;
-    rec->lastbootuptime  = get_lastbootuptime();
-    rec->osarchitecture  = get_osarchitecture();
-    rec->oslanguage      = MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US );
-    rec->systemdirectory = get_systemdirectory();
+    rec->caption          = os_captionW;
+    rec->csdversion       = os_csdversionW;
+    rec->lastbootuptime   = get_lastbootuptime();
+    rec->osarchitecture   = get_osarchitecture();
+    rec->oslanguage       = MAKELANGID( LANG_ENGLISH, SUBLANG_ENGLISH_US );
+    rec->osproductsuite   = 2461140; /* Windows XP Professional  */
+    rec->ostype           = 18;      /* WINNT */
+    rec->servicepackmajor = 3;
+    rec->suitemask        = 272;     /* Single User + Terminal */
+    rec->systemdirectory  = get_systemdirectory();
+    rec->version          = os_versionW;
 
     TRACE("created 1 row\n");
     table->num_rows = 1;
@@ -1377,7 +1407,7 @@ static void fill_videocontroller( struct table *table )
     const WCHAR *name = videocontroller_deviceidW;
 
     if (!(table->data = heap_alloc( sizeof(*rec) ))) return;
-
+    memset (&desc, 0, sizeof(desc));
     hr = CreateDXGIFactory( &IID_IDXGIFactory, (void **)&factory );
     if (FAILED(hr)) goto done;
 

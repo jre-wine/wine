@@ -82,6 +82,7 @@ int macdrv_err_on;
 @property (retain, nonatomic) NSTimer* cursorTimer;
 @property (retain, nonatomic) NSImage* applicationIcon;
 @property (readonly, nonatomic) BOOL inputSourceIsInputMethod;
+@property (retain, nonatomic) WineWindow* mouseCaptureWindow;
 
     - (void) setupObservations;
     - (void) applicationDidBecomeActive:(NSNotification *)notification;
@@ -96,6 +97,7 @@ int macdrv_err_on;
     @synthesize keyboardType, lastFlagsChanged;
     @synthesize orderedWineWindows, applicationIcon;
     @synthesize cursorFrames, cursorTimer;
+    @synthesize mouseCaptureWindow;
 
     + (void) initialize
     {
@@ -170,6 +172,7 @@ int macdrv_err_on;
 
     - (void) dealloc
     {
+        [screenFrameCGRects release];
         [applicationIcon release];
         [warpRecords release];
         [cursorTimer release];
@@ -377,10 +380,29 @@ int macdrv_err_on;
         if (!primaryScreenHeightValid)
         {
             NSArray* screens = [NSScreen screens];
-            if ([screens count])
+            NSUInteger count = [screens count];
+            if (count)
             {
+                NSUInteger size;
+                CGRect* rect;
+                NSScreen* screen;
+
                 primaryScreenHeight = NSHeight([[screens objectAtIndex:0] frame]);
                 primaryScreenHeightValid = TRUE;
+
+                size = count * sizeof(CGRect);
+                if (!screenFrameCGRects)
+                    screenFrameCGRects = [[NSMutableData alloc] initWithLength:size];
+                else
+                    [screenFrameCGRects setLength:size];
+
+                rect = [screenFrameCGRects mutableBytes];
+                for (screen in screens)
+                {
+                    CGRect temp = NSRectToCGRect([screen frame]);
+                    temp.origin.y = primaryScreenHeight - CGRectGetMaxY(temp);
+                    *rect++ = temp;
+                }
             }
             else
                 return 1280; /* arbitrary value */
@@ -1134,81 +1156,388 @@ int macdrv_err_on;
         return TRUE;
     }
 
+    - (void) handleMouseMove:(NSEvent*)anEvent
+    {
+        WineWindow* targetWindow;
+        BOOL drag = [anEvent type] != NSMouseMoved;
+
+        if (mouseCaptureWindow)
+            targetWindow = mouseCaptureWindow;
+        else if (drag)
+            targetWindow = (WineWindow*)[anEvent window];
+        else
+        {
+            /* Because of the way -[NSWindow setAcceptsMouseMovedEvents:] works, the
+               event indicates its window is the main window, even if the cursor is
+               over a different window.  Find the actual WineWindow that is under the
+               cursor and post the event as being for that window. */
+            CGPoint cgpoint = CGEventGetLocation([anEvent CGEvent]);
+            NSPoint point = [self flippedMouseLocation:NSPointFromCGPoint(cgpoint)];
+            NSInteger windowUnderNumber;
+
+            windowUnderNumber = [NSWindow windowNumberAtPoint:point
+                                  belowWindowWithWindowNumber:0];
+            targetWindow = (WineWindow*)[NSApp windowWithWindowNumber:windowUnderNumber];
+        }
+
+        if ([targetWindow isKindOfClass:[WineWindow class]])
+        {
+            CGPoint point = CGEventGetLocation([anEvent CGEvent]);
+            macdrv_event* event;
+            BOOL absolute;
+
+            // If we recently warped the cursor (other than in our cursor-clipping
+            // event tap), discard mouse move events until we see an event which is
+            // later than that time.
+            if (lastSetCursorPositionTime)
+            {
+                if ([anEvent timestamp] <= lastSetCursorPositionTime)
+                    return;
+
+                lastSetCursorPositionTime = 0;
+                forceNextMouseMoveAbsolute = TRUE;
+            }
+
+            if (forceNextMouseMoveAbsolute || targetWindow != lastTargetWindow)
+            {
+                absolute = TRUE;
+                forceNextMouseMoveAbsolute = FALSE;
+            }
+            else
+            {
+                // Send absolute move events if the cursor is in the interior of
+                // its range.  Only send relative moves if the cursor is pinned to
+                // the boundaries of where it can go.  We compute the position
+                // that's one additional point in the direction of movement.  If
+                // that is outside of the clipping rect or desktop region (the
+                // union of the screen frames), then we figure the cursor would
+                // have moved outside if it could but it was pinned.
+                CGPoint computedPoint = point;
+                CGFloat deltaX = [anEvent deltaX];
+                CGFloat deltaY = [anEvent deltaY];
+
+                if (deltaX > 0.001)
+                    computedPoint.x++;
+                else if (deltaX < -0.001)
+                    computedPoint.x--;
+
+                if (deltaY > 0.001)
+                    computedPoint.y++;
+                else if (deltaY < -0.001)
+                    computedPoint.y--;
+
+                // Assume cursor is pinned for now
+                absolute = FALSE;
+                if (!clippingCursor || CGRectContainsPoint(cursorClipRect, computedPoint))
+                {
+                    const CGRect* rects;
+                    NSUInteger count, i;
+
+                    // Caches screenFrameCGRects if necessary
+                    [self primaryScreenHeight];
+
+                    rects = [screenFrameCGRects bytes];
+                    count = [screenFrameCGRects length] / sizeof(rects[0]);
+
+                    for (i = 0; i < count; i++)
+                    {
+                        if (CGRectContainsPoint(rects[i], computedPoint))
+                        {
+                            absolute = TRUE;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (absolute)
+            {
+                if (clippingCursor)
+                    [self clipCursorLocation:&point];
+
+                event = macdrv_create_event(MOUSE_MOVED_ABSOLUTE, targetWindow);
+                event->mouse_moved.x = point.x;
+                event->mouse_moved.y = point.y;
+
+                mouseMoveDeltaX = 0;
+                mouseMoveDeltaY = 0;
+            }
+            else
+            {
+                /* Add event delta to accumulated delta error */
+                /* deltaY is already flipped */
+                mouseMoveDeltaX += [anEvent deltaX];
+                mouseMoveDeltaY += [anEvent deltaY];
+
+                event = macdrv_create_event(MOUSE_MOVED, targetWindow);
+                event->mouse_moved.x = mouseMoveDeltaX;
+                event->mouse_moved.y = mouseMoveDeltaY;
+
+                /* Keep the remainder after integer truncation. */
+                mouseMoveDeltaX -= event->mouse_moved.x;
+                mouseMoveDeltaY -= event->mouse_moved.y;
+            }
+
+            if (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y)
+            {
+                event->mouse_moved.time_ms = [self ticksForEventTime:[anEvent timestamp]];
+                event->mouse_moved.drag = drag;
+
+                [targetWindow.queue postEvent:event];
+            }
+
+            macdrv_release_event(event);
+
+            lastTargetWindow = targetWindow;
+        }
+        else if (lastTargetWindow)
+        {
+            [[NSCursor arrowCursor] set];
+            [self unhideCursor];
+            lastTargetWindow = nil;
+        }
+    }
+
+    - (void) handleMouseButton:(NSEvent*)theEvent
+    {
+        WineWindow* window;
+
+        if (mouseCaptureWindow)
+            window = mouseCaptureWindow;
+        else
+            window = (WineWindow*)[theEvent window];
+
+        if ([window isKindOfClass:[WineWindow class]])
+        {
+            NSEventType type = [theEvent type];
+            BOOL pressed = (type == NSLeftMouseDown || type == NSRightMouseDown || type == NSOtherMouseDown);
+            CGPoint pt = CGEventGetLocation([theEvent CGEvent]);
+            BOOL process;
+
+            if (clippingCursor)
+                [self clipCursorLocation:&pt];
+
+            if (pressed)
+            {
+                if (mouseCaptureWindow)
+                    process = TRUE;
+                else
+                {
+                    // Test if the click was in the window's content area.
+                    NSPoint nspoint = [self flippedMouseLocation:NSPointFromCGPoint(pt)];
+                    NSRect contentRect = [window contentRectForFrameRect:[window frame]];
+                    process = NSPointInRect(nspoint, contentRect);
+                    if (process && [window styleMask] & NSResizableWindowMask)
+                    {
+                        // Ignore clicks in the grow box (resize widget).
+                        HIPoint origin = { 0, 0 };
+                        HIThemeGrowBoxDrawInfo info = { 0 };
+                        HIRect bounds;
+                        OSStatus status;
+
+                        info.kind = kHIThemeGrowBoxKindNormal;
+                        info.direction = kThemeGrowRight | kThemeGrowDown;
+                        if ([window styleMask] & NSUtilityWindowMask)
+                            info.size = kHIThemeGrowBoxSizeSmall;
+                        else
+                            info.size = kHIThemeGrowBoxSizeNormal;
+
+                        status = HIThemeGetGrowBoxBounds(&origin, &info, &bounds);
+                        if (status == noErr)
+                        {
+                            NSRect growBox = NSMakeRect(NSMaxX(contentRect) - bounds.size.width,
+                                                        NSMinY(contentRect),
+                                                        bounds.size.width,
+                                                        bounds.size.height);
+                            process = !NSPointInRect(nspoint, growBox);
+                        }
+                    }
+                }
+                if (process)
+                    unmatchedMouseDowns |= NSEventMaskFromType(type);
+            }
+            else
+            {
+                NSEventType downType = type - 1;
+                NSUInteger downMask = NSEventMaskFromType(downType);
+                process = (unmatchedMouseDowns & downMask) != 0;
+                unmatchedMouseDowns &= ~downMask;
+            }
+
+            if (process)
+            {
+                macdrv_event* event;
+
+                event = macdrv_create_event(MOUSE_BUTTON, window);
+                event->mouse_button.button = [theEvent buttonNumber];
+                event->mouse_button.pressed = pressed;
+                event->mouse_button.x = pt.x;
+                event->mouse_button.y = pt.y;
+                event->mouse_button.time_ms = [self ticksForEventTime:[theEvent timestamp]];
+
+                [window.queue postEvent:event];
+
+                macdrv_release_event(event);
+            }
+        }
+
+        // Since mouse button events deliver absolute cursor position, the
+        // accumulating delta from move events is invalidated.  Make sure
+        // next mouse move event starts over from an absolute baseline.
+        // Also, it's at least possible that the title bar widgets (e.g. close
+        // button, etc.) could enter an internal event loop on a mouse down that
+        // wouldn't exit until a mouse up.  In that case, we'd miss any mouse
+        // dragged events and, after that, any notion of the cursor position
+        // computed from accumulating deltas would be wrong.
+        forceNextMouseMoveAbsolute = TRUE;
+    }
+
+    - (void) handleScrollWheel:(NSEvent*)theEvent
+    {
+        WineWindow* window;
+
+        if (mouseCaptureWindow)
+            window = mouseCaptureWindow;
+        else
+            window = (WineWindow*)[theEvent window];
+
+        if ([window isKindOfClass:[WineWindow class]])
+        {
+            CGEventRef cgevent = [theEvent CGEvent];
+            CGPoint pt = CGEventGetLocation(cgevent);
+            BOOL process;
+
+            if (clippingCursor)
+                [self clipCursorLocation:&pt];
+
+            if (mouseCaptureWindow)
+                process = TRUE;
+            else
+            {
+                // Only process the event if it was in the window's content area.
+                NSPoint nspoint = [self flippedMouseLocation:NSPointFromCGPoint(pt)];
+                NSRect contentRect = [window contentRectForFrameRect:[window frame]];
+                process = NSPointInRect(nspoint, contentRect);
+            }
+
+            if (process)
+            {
+                macdrv_event* event;
+                CGFloat x, y;
+                BOOL continuous = FALSE;
+
+                event = macdrv_create_event(MOUSE_SCROLL, window);
+                event->mouse_scroll.x = pt.x;
+                event->mouse_scroll.y = pt.y;
+                event->mouse_scroll.time_ms = [self ticksForEventTime:[theEvent timestamp]];
+
+                if (CGEventGetIntegerValueField(cgevent, kCGScrollWheelEventIsContinuous))
+                {
+                    continuous = TRUE;
+
+                    /* Continuous scroll wheel events come from high-precision scrolling
+                       hardware like Apple's Magic Mouse, Mighty Mouse, and trackpads.
+                       For these, we can get more precise data from the CGEvent API. */
+                    /* Axis 1 is vertical, axis 2 is horizontal. */
+                    x = CGEventGetDoubleValueField(cgevent, kCGScrollWheelEventPointDeltaAxis2);
+                    y = CGEventGetDoubleValueField(cgevent, kCGScrollWheelEventPointDeltaAxis1);
+                }
+                else
+                {
+                    double pixelsPerLine = 10;
+                    CGEventSourceRef source;
+
+                    /* The non-continuous values are in units of "lines", not pixels. */
+                    if ((source = CGEventCreateSourceFromEvent(cgevent)))
+                    {
+                        pixelsPerLine = CGEventSourceGetPixelsPerLine(source);
+                        CFRelease(source);
+                    }
+
+                    x = pixelsPerLine * [theEvent deltaX];
+                    y = pixelsPerLine * [theEvent deltaY];
+                }
+
+                /* Mac: negative is right or down, positive is left or up.
+                   Win32: negative is left or down, positive is right or up.
+                   So, negate the X scroll value to translate. */
+                x = -x;
+
+                /* The x,y values so far are in pixels.  Win32 expects to receive some
+                   fraction of WHEEL_DELTA == 120.  By my estimation, that's roughly
+                   6 times the pixel value. */
+                event->mouse_scroll.x_scroll = 6 * x;
+                event->mouse_scroll.y_scroll = 6 * y;
+
+                if (!continuous)
+                {
+                    /* For non-continuous "clicky" wheels, if there was any motion, make
+                       sure there was at least WHEEL_DELTA motion.  This is so, at slow
+                       speeds where the system's acceleration curve is actually reducing the
+                       scroll distance, the user is sure to get some action out of each click.
+                       For example, this is important for rotating though weapons in a
+                       first-person shooter. */
+                    if (0 < event->mouse_scroll.x_scroll && event->mouse_scroll.x_scroll < 120)
+                        event->mouse_scroll.x_scroll = 120;
+                    else if (-120 < event->mouse_scroll.x_scroll && event->mouse_scroll.x_scroll < 0)
+                        event->mouse_scroll.x_scroll = -120;
+
+                    if (0 < event->mouse_scroll.y_scroll && event->mouse_scroll.y_scroll < 120)
+                        event->mouse_scroll.y_scroll = 120;
+                    else if (-120 < event->mouse_scroll.y_scroll && event->mouse_scroll.y_scroll < 0)
+                        event->mouse_scroll.y_scroll = -120;
+                }
+
+                if (event->mouse_scroll.x_scroll || event->mouse_scroll.y_scroll)
+                    [window.queue postEvent:event];
+
+                macdrv_release_event(event);
+
+                // Since scroll wheel events deliver absolute cursor position, the
+                // accumulating delta from move events is invalidated.  Make sure next
+                // mouse move event starts over from an absolute baseline.
+                forceNextMouseMoveAbsolute = TRUE;
+            }
+        }
+    }
 
     // Returns TRUE if the event was handled and caller should do nothing more
     // with it.  Returns FALSE if the caller should process it as normal and
     // then call -didSendEvent:.
     - (BOOL) handleEvent:(NSEvent*)anEvent
     {
-        if ([anEvent type] == NSFlagsChanged)
+        BOOL ret = FALSE;
+        NSEventType type = [anEvent type];
+
+        if (type == NSFlagsChanged)
             self.lastFlagsChanged = anEvent;
-        return FALSE;
+        else if (type == NSMouseMoved || type == NSLeftMouseDragged ||
+                 type == NSRightMouseDragged || type == NSOtherMouseDragged)
+        {
+            [self handleMouseMove:anEvent];
+            ret = mouseCaptureWindow != nil;
+        }
+        else if (type == NSLeftMouseDown || type == NSLeftMouseUp ||
+                 type == NSRightMouseDown || type == NSRightMouseUp ||
+                 type == NSOtherMouseDown || type == NSOtherMouseUp)
+        {
+            [self handleMouseButton:anEvent];
+            ret = mouseCaptureWindow != nil;
+        }
+        else if (type == NSScrollWheel)
+        {
+            [self handleScrollWheel:anEvent];
+            ret = mouseCaptureWindow != nil;
+        }
+
+        return ret;
     }
 
     - (void) didSendEvent:(NSEvent*)anEvent
     {
         NSEventType type = [anEvent type];
 
-        if (type == NSMouseMoved || type == NSLeftMouseDragged ||
-            type == NSRightMouseDragged || type == NSOtherMouseDragged)
-        {
-            WineWindow* targetWindow;
-
-            /* Because of the way -[NSWindow setAcceptsMouseMovedEvents:] works, the
-               event indicates its window is the main window, even if the cursor is
-               over a different window.  Find the actual WineWindow that is under the
-               cursor and post the event as being for that window. */
-            if (type == NSMouseMoved)
-            {
-                CGPoint cgpoint = CGEventGetLocation([anEvent CGEvent]);
-                NSPoint point = [self flippedMouseLocation:NSPointFromCGPoint(cgpoint)];
-                NSInteger windowUnderNumber;
-
-                windowUnderNumber = [NSWindow windowNumberAtPoint:point
-                                      belowWindowWithWindowNumber:0];
-                targetWindow = (WineWindow*)[NSApp windowWithWindowNumber:windowUnderNumber];
-            }
-            else
-                targetWindow = (WineWindow*)[anEvent window];
-
-            if ([targetWindow isKindOfClass:[WineWindow class]])
-            {
-                BOOL absolute = forceNextMouseMoveAbsolute || (targetWindow != lastTargetWindow);
-                forceNextMouseMoveAbsolute = FALSE;
-
-                // If we recently warped the cursor (other than in our cursor-clipping
-                // event tap), discard mouse move events until we see an event which is
-                // later than that time.
-                if (lastSetCursorPositionTime)
-                {
-                    if ([anEvent timestamp] <= lastSetCursorPositionTime)
-                        return;
-
-                    lastSetCursorPositionTime = 0;
-                    absolute = TRUE;
-                }
-
-                [targetWindow postMouseMovedEvent:anEvent absolute:absolute];
-                lastTargetWindow = targetWindow;
-            }
-            else if (lastTargetWindow)
-            {
-                [[NSCursor arrowCursor] set];
-                [self unhideCursor];
-                lastTargetWindow = nil;
-            }
-        }
-        else if (type == NSLeftMouseDown || type == NSLeftMouseUp ||
-                 type == NSRightMouseDown || type == NSRightMouseUp ||
-                 type == NSOtherMouseDown || type == NSOtherMouseUp ||
-                 type == NSScrollWheel)
-        {
-            // Since mouse button and scroll wheel events deliver absolute cursor
-            // position, the accumulating delta from move events is invalidated.
-            // Make sure next mouse move event starts over from an absolute baseline.
-            forceNextMouseMoveAbsolute = TRUE;
-        }
-        else if (type == NSKeyDown && ![anEvent isARepeat] && [anEvent keyCode] == kVK_Tab)
+        if (type == NSKeyDown && ![anEvent isARepeat] && [anEvent keyCode] == kVK_Tab)
         {
             NSUInteger modifiers = [anEvent modifierFlags];
             if ((modifiers & NSCommandKeyMask) &&
@@ -1245,6 +1574,8 @@ int macdrv_err_on;
             [orderedWineWindows removeObjectIdenticalTo:window];
             if (window == lastTargetWindow)
                 lastTargetWindow = nil;
+            if (window == self.mouseCaptureWindow)
+                self.mouseCaptureWindow = nil;
         }];
 
         [nc addObserver:self
@@ -1282,6 +1613,10 @@ int macdrv_err_on;
      */
     - (void)applicationDidBecomeActive:(NSNotification *)notification
     {
+        WineWindow* window;
+        WineWindow* firstMinimized;
+        BOOL anyShowing;
+
         [self activateCursorClipping];
 
         [orderedWineWindows enumerateObjectsWithOptions:NSEnumerationReverse usingBlock:^(id obj, NSUInteger idx, BOOL *stop){
@@ -1289,6 +1624,24 @@ int macdrv_err_on;
             if ([window levelWhenActive] != [window level])
                 [window setLevel:[window levelWhenActive]];
         }];
+
+        firstMinimized = nil;
+        anyShowing = FALSE;
+        for (window in orderedWineWindows)
+        {
+            if ([window isMiniaturized])
+            {
+                if (!firstMinimized)
+                    firstMinimized = window;
+            }
+            else if ([window isVisible])
+            {
+                anyShowing = TRUE;
+                break;
+            }
+        }
+        if (!anyShowing && firstMinimized)
+            [firstMinimized deminiaturize:self];
 
         // If a Wine process terminates abruptly while it has the display captured
         // and switched to a different resolution, Mac OS X will uncapture the
@@ -1708,4 +2061,16 @@ int macdrv_using_input_method(void)
     });
 
     return ret;
+}
+
+/***********************************************************************
+ *              macdrv_set_mouse_capture_window
+ */
+void macdrv_set_mouse_capture_window(macdrv_window window)
+{
+    WineWindow* w = (WineWindow*)window;
+
+    OnMainThread(^{
+        [[WineApplicationController sharedController] setMouseCaptureWindow:w];
+    });
 }

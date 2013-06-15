@@ -1158,8 +1158,8 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
             PM128A Xmm13;
             PM128A Xmm14;
             PM128A Xmm15;
-        } DUMMYSTRUCTNAME1;
-    } DUMMYUNIONNAME1;
+        } DUMMYSTRUCTNAME;
+    } DUMMYUNIONNAME;
 
     union
     {
@@ -1182,7 +1182,7 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
             PULONG64 R13;
             PULONG64 R14;
             PULONG64 R15;
-        } DUMMYSTRUCTNAME2;
+        } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME2;
 } KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
 
@@ -3343,18 +3343,16 @@ typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY {
 			unsigned NameOffset:31;
 			unsigned NameIsString:1;
 #endif
-		} DUMMYSTRUCTNAME1;
+		} DUMMYSTRUCTNAME;
 		DWORD   Name;
-                struct {
 #ifdef WORDS_BIGENDIAN
-			WORD    __pad;
-			WORD    Id;
+		WORD    __pad;
+		WORD    Id;
 #else
-			WORD    Id;
-			WORD    __pad;
+		WORD    Id;
+		WORD    __pad;
 #endif
-		} DUMMYSTRUCTNAME2;
-	} DUMMYUNIONNAME1;
+	} DUMMYUNIONNAME;
 	union {
 		DWORD   OffsetToData;
 		struct {
@@ -3365,7 +3363,7 @@ typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY {
 			unsigned OffsetToDirectory:31;
 			unsigned DataIsDirectory:1;
 #endif
-		} DUMMYSTRUCTNAME3;
+		} DUMMYSTRUCTNAME2;
 	} DUMMYUNIONNAME2;
 } IMAGE_RESOURCE_DIRECTORY_ENTRY,*PIMAGE_RESOURCE_DIRECTORY_ENTRY;
 

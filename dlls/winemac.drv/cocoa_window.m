@@ -250,13 +250,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         }
     }
 
-    /* By default, NSView will swallow right-clicks in an attempt to support contextual
-       menus.  We need to bypass that and allow the event to make it to the window. */
-    - (void) rightMouseDown:(NSEvent*)theEvent
-    {
-        [[self window] rightMouseDown:theEvent];
-    }
-
     - (void) addGLContext:(WineOpenGLContext*)context
     {
         if (!glContexts)
@@ -839,23 +832,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [self checkTransparency];
     }
 
-    - (void) postMouseButtonEvent:(NSEvent *)theEvent pressed:(int)pressed
-    {
-        CGPoint pt = CGEventGetLocation([theEvent CGEvent]);
-        macdrv_event* event;
-
-        event = macdrv_create_event(MOUSE_BUTTON, self);
-        event->mouse_button.button = [theEvent buttonNumber];
-        event->mouse_button.pressed = pressed;
-        event->mouse_button.x = pt.x;
-        event->mouse_button.y = pt.y;
-        event->mouse_button.time_ms = [[WineApplicationController sharedController] ticksForEventTime:[theEvent timestamp]];
-
-        [queue postEvent:event];
-
-        macdrv_release_event(event);
-    }
-
     - (void) makeFocused:(BOOL)activate
     {
         WineApplicationController* controller = [WineApplicationController sharedController];
@@ -950,47 +926,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
               pressed:[theEvent type] == NSKeyDown
             modifiers:[theEvent modifierFlags]
                 event:theEvent];
-    }
-
-    - (void) postMouseMovedEvent:(NSEvent *)theEvent absolute:(BOOL)absolute
-    {
-        macdrv_event* event;
-
-        if (absolute)
-        {
-            CGPoint point = CGEventGetLocation([theEvent CGEvent]);
-
-            event = macdrv_create_event(MOUSE_MOVED_ABSOLUTE, self);
-            event->mouse_moved.x = point.x;
-            event->mouse_moved.y = point.y;
-
-            mouseMoveDeltaX = 0;
-            mouseMoveDeltaY = 0;
-        }
-        else
-        {
-            /* Add event delta to accumulated delta error */
-            /* deltaY is already flipped */
-            mouseMoveDeltaX += [theEvent deltaX];
-            mouseMoveDeltaY += [theEvent deltaY];
-
-            event = macdrv_create_event(MOUSE_MOVED, self);
-            event->mouse_moved.x = mouseMoveDeltaX;
-            event->mouse_moved.y = mouseMoveDeltaY;
-
-            /* Keep the remainder after integer truncation. */
-            mouseMoveDeltaX -= event->mouse_moved.x;
-            mouseMoveDeltaY -= event->mouse_moved.y;
-        }
-
-        if (event->type == MOUSE_MOVED_ABSOLUTE || event->mouse_moved.x || event->mouse_moved.y)
-        {
-            event->mouse_moved.time_ms = [[WineApplicationController sharedController] ticksForEventTime:[theEvent timestamp]];
-
-            [queue postEvent:event];
-        }
-
-        macdrv_release_event(event);
     }
 
     - (void) setLevelWhenActive:(NSInteger)level
@@ -1102,14 +1037,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     /*
      * ---------- NSResponder method overrides ----------
      */
-    - (void) mouseDown:(NSEvent *)theEvent { [self postMouseButtonEvent:theEvent pressed:1]; }
-    - (void) rightMouseDown:(NSEvent *)theEvent { [self mouseDown:theEvent]; }
-    - (void) otherMouseDown:(NSEvent *)theEvent { [self mouseDown:theEvent]; }
-
-    - (void) mouseUp:(NSEvent *)theEvent { [self postMouseButtonEvent:theEvent pressed:0]; }
-    - (void) rightMouseUp:(NSEvent *)theEvent { [self mouseUp:theEvent]; }
-    - (void) otherMouseUp:(NSEvent *)theEvent { [self mouseUp:theEvent]; }
-
     - (void) keyDown:(NSEvent *)theEvent { [self postKeyEvent:theEvent]; }
     - (void) keyUp:(NSEvent *)theEvent   { [self postKeyEvent:theEvent]; }
 
@@ -1173,85 +1100,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                         event:(NSEvent*)theEvent];
             }
         }
-    }
-
-    - (void) scrollWheel:(NSEvent *)theEvent
-    {
-        CGPoint pt;
-        macdrv_event* event;
-        CGEventRef cgevent;
-        CGFloat x, y;
-        BOOL continuous = FALSE;
-
-        cgevent = [theEvent CGEvent];
-        pt = CGEventGetLocation(cgevent);
-
-        event = macdrv_create_event(MOUSE_SCROLL, self);
-        event->mouse_scroll.x = pt.x;
-        event->mouse_scroll.y = pt.y;
-        event->mouse_scroll.time_ms = [[WineApplicationController sharedController] ticksForEventTime:[theEvent timestamp]];
-
-        if (CGEventGetIntegerValueField(cgevent, kCGScrollWheelEventIsContinuous))
-        {
-            continuous = TRUE;
-
-            /* Continuous scroll wheel events come from high-precision scrolling
-               hardware like Apple's Magic Mouse, Mighty Mouse, and trackpads.
-               For these, we can get more precise data from the CGEvent API. */
-            /* Axis 1 is vertical, axis 2 is horizontal. */
-            x = CGEventGetDoubleValueField(cgevent, kCGScrollWheelEventPointDeltaAxis2);
-            y = CGEventGetDoubleValueField(cgevent, kCGScrollWheelEventPointDeltaAxis1);
-        }
-        else
-        {
-            double pixelsPerLine = 10;
-            CGEventSourceRef source;
-
-            /* The non-continuous values are in units of "lines", not pixels. */
-            if ((source = CGEventCreateSourceFromEvent(cgevent)))
-            {
-                pixelsPerLine = CGEventSourceGetPixelsPerLine(source);
-                CFRelease(source);
-            }
-
-            x = pixelsPerLine * [theEvent deltaX];
-            y = pixelsPerLine * [theEvent deltaY];
-        }
-
-        /* Mac: negative is right or down, positive is left or up.
-           Win32: negative is left or down, positive is right or up.
-           So, negate the X scroll value to translate. */
-        x = -x;
-
-        /* The x,y values so far are in pixels.  Win32 expects to receive some
-           fraction of WHEEL_DELTA == 120.  By my estimation, that's roughly
-           6 times the pixel value. */
-        event->mouse_scroll.x_scroll = 6 * x;
-        event->mouse_scroll.y_scroll = 6 * y;
-
-        if (!continuous)
-        {
-            /* For non-continuous "clicky" wheels, if there was any motion, make
-               sure there was at least WHEEL_DELTA motion.  This is so, at slow
-               speeds where the system's acceleration curve is actually reducing the
-               scroll distance, the user is sure to get some action out of each click.
-               For example, this is important for rotating though weapons in a
-               first-person shooter. */
-            if (0 < event->mouse_scroll.x_scroll && event->mouse_scroll.x_scroll < 120)
-                event->mouse_scroll.x_scroll = 120;
-            else if (-120 < event->mouse_scroll.x_scroll && event->mouse_scroll.x_scroll < 0)
-                event->mouse_scroll.x_scroll = -120;
-
-            if (0 < event->mouse_scroll.y_scroll && event->mouse_scroll.y_scroll < 120)
-                event->mouse_scroll.y_scroll = 120;
-            else if (-120 < event->mouse_scroll.y_scroll && event->mouse_scroll.y_scroll < 0)
-                event->mouse_scroll.y_scroll = -120;
-        }
-
-        if (event->mouse_scroll.x_scroll || event->mouse_scroll.y_scroll)
-            [queue postEvent:event];
-
-        macdrv_release_event(event);
     }
 
 

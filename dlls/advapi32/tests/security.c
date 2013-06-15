@@ -3012,12 +3012,12 @@ static void test_GetNamedSecurityInfoA(void)
     PSID system_sid = (PSID) system_ptr, user_sid;
     DWORD sid_size = sizeof(admin_ptr), user_size;
     char invalid_path[] = "/an invalid file path";
+    int users_ace_id = -1, admins_ace_id = -1, i;
     char software_key[] = "MACHINE\\Software";
     char sd[SECURITY_DESCRIPTOR_MIN_LENGTH];
     SECURITY_DESCRIPTOR_CONTROL control;
     ACL_SIZE_INFORMATION acl_size;
     CHAR windows_dir[MAX_PATH];
-    int users_ace_id = -1, i;
     PSECURITY_DESCRIPTOR pSD;
     ACCESS_ALLOWED_ACE *ace;
     BOOL bret = TRUE, isNT4;
@@ -3030,6 +3030,7 @@ static void test_GetNamedSecurityInfoA(void)
     PSID owner, group;
     BOOL dacl_present;
     PACL pDacl;
+    BYTE flags;
 
     if (!pSetNamedSecurityInfoA || !pGetNamedSecurityInfoA || !pCreateWellKnownSid)
     {
@@ -3228,19 +3229,35 @@ static void test_GetNamedSecurityInfoA(void)
         ok(bret, "Failed to get ACE %d.\n", i);
         bret = EqualSid(&ace->SidStart, users_sid);
         if (bret) users_ace_id = i;
+        bret = EqualSid(&ace->SidStart, admin_sid);
+        if (bret) admins_ace_id = i;
     }
-    ok(users_ace_id != -1, "Bultin Users ACE not found.\n");
+    ok(users_ace_id != -1 || broken(users_ace_id == -1) /* win2k */,
+       "Bultin Users ACE not found.\n");
     if (users_ace_id != -1)
     {
         bret = pGetAce(pDacl, users_ace_id, (VOID **)&ace);
         ok(bret, "Failed to get Builtin Users ACE.\n");
-        ok(((ACE_HEADER *)ace)->AceFlags == (INHERIT_ONLY_ACE|CONTAINER_INHERIT_ACE),
-           "Builtin Users ACE has unexpected flags (0x%x != 0x%x)\n", ((ACE_HEADER *)ace)->AceFlags,
+        flags = ((ACE_HEADER *)ace)->AceFlags;
+        ok(flags == (INHERIT_ONLY_ACE|CONTAINER_INHERIT_ACE)
+           || broken(flags == (INHERIT_ONLY_ACE|CONTAINER_INHERIT_ACE|INHERITED_ACE)) /* w2k8 */,
+           "Builtin Users ACE has unexpected flags (0x%x != 0x%x)\n", flags,
            INHERIT_ONLY_ACE|CONTAINER_INHERIT_ACE);
         ok(ace->Mask == GENERIC_READ, "Builtin Users ACE has unexpected mask (0x%x != 0x%x)\n",
                                       ace->Mask, GENERIC_READ);
     }
-
+    ok(admins_ace_id != -1, "Bultin Admins ACE not found.\n");
+    if (admins_ace_id != -1)
+    {
+        bret = pGetAce(pDacl, admins_ace_id, (VOID **)&ace);
+        ok(bret, "Failed to get Builtin Admins ACE.\n");
+        flags = ((ACE_HEADER *)ace)->AceFlags;
+        ok(flags == 0x0
+           || broken(flags == (INHERIT_ONLY_ACE|CONTAINER_INHERIT_ACE|INHERITED_ACE)) /* w2k8 */,
+           "Builtin Admins ACE has unexpected flags (0x%x != 0x0)\n", flags);
+        ok(ace->Mask == KEY_ALL_ACCESS || broken(ace->Mask == GENERIC_ALL) /* w2k8 */,
+           "Builtin Admins ACE has unexpected mask (0x%x != 0x%x)\n", ace->Mask, KEY_ALL_ACCESS);
+    }
     LocalFree(pSD);
 }
 

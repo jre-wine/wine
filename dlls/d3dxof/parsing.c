@@ -45,6 +45,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
 #define XOFFILE_FORMAT_FLOAT_BITS_32 MAKEFOUR('0','0','3','2')
 #define XOFFILE_FORMAT_FLOAT_BITS_64 MAKEFOUR('0','0','6','4')
 
+#define TOKEN_ERROR   0xffff
+#define TOKEN_NONE         0
 #define TOKEN_NAME         1
 #define TOKEN_STRING       2
 #define TOKEN_INTEGER      3
@@ -644,7 +646,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
     {
       char c;
       if (!read_bytes(buf, &c, 1))
-        return 0;
+        return TOKEN_NONE;
       /*TRACE("char = '%c'\n", is_space(c) ? ' ' : c);*/
       if ((c == '#') || (c == '/'))
       {
@@ -652,15 +654,15 @@ static WORD parse_TOKEN(parse_buffer * buf)
         if (c == '/')
         {
           if (!read_bytes(buf, &c, 1))
-            return 0;
+            return TOKEN_ERROR;
           if (c != '/')
-            return 0;
+            return TOKEN_ERROR;
         }
         c = 0;
         while (c != 0x0A)
         {
           if (!read_bytes(buf, &c, 1))
-            return 0;
+            return TOKEN_NONE;
         }
         continue;
       }
@@ -710,7 +712,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
         }
 
         FIXME("Unrecognize element\n");
-        return 0;
+        return TOKEN_ERROR;
       }
     }
   }
@@ -722,13 +724,13 @@ static WORD parse_TOKEN(parse_buffer * buf)
     if (!nb_elem)
     {
       if (!read_bytes(buf, &token, 2))
-        return 0;
+        return TOKEN_NONE;
 
       /* Convert integer and float list into separate elements */
       if (token == TOKEN_INTEGER_LIST)
       {
         if (!read_bytes(buf, &nb_elem, 4))
-          return 0;
+          return TOKEN_ERROR;
         token = TOKEN_INTEGER;
         is_float = FALSE;
         TRACE("Integer list (TOKEN_INTEGER_LIST) of size %d\n", nb_elem);
@@ -736,7 +738,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
       else if (token == TOKEN_FLOAT_LIST)
       {
         if (!read_bytes(buf, &nb_elem, 4))
-          return 0;
+          return TOKEN_ERROR;
         token = TOKEN_FLOAT;
         is_float = TRUE;
         TRACE("Float list (TOKEN_FLOAT_LIST) of size %d\n", nb_elem);
@@ -751,7 +753,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
           DWORD integer;
 
           if (!read_bytes(buf, &integer, 4))
-            return 0;
+            return TOKEN_ERROR;
 
           *(DWORD*)buf->value = integer;
         }
@@ -767,9 +769,9 @@ static WORD parse_TOKEN(parse_buffer * buf)
           char strname[100];
 
           if (!read_bytes(buf, &count, 4))
-            return 0;
+            return TOKEN_ERROR;
           if (!read_bytes(buf, strname, count))
-            return 0;
+            return TOKEN_ERROR;
           strname[count] = 0;
           /*TRACE("name = %s\n", strname);*/
 
@@ -781,7 +783,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
           DWORD integer;
 
           if (!read_bytes(buf, &integer, 4))
-            return 0;
+            return TOKEN_ERROR;
           /*TRACE("integer = %ld\n", integer);*/
 
           *(DWORD*)buf->value = integer;
@@ -793,7 +795,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
           GUID class_id;
 
           if (!read_bytes(buf, &class_id, 16))
-            return 0;
+            return TOKEN_ERROR;
           sprintf(strguid, CLSIDFMT, class_id.Data1, class_id.Data2, class_id.Data3, class_id.Data4[0],
             class_id.Data4[1], class_id.Data4[2], class_id.Data4[3], class_id.Data4[4], class_id.Data4[5],
             class_id.Data4[6], class_id.Data4[7]);
@@ -808,12 +810,12 @@ static WORD parse_TOKEN(parse_buffer * buf)
           WORD tmp_token;
           char strname[100];
           if (!read_bytes(buf, &count, 4))
-            return 0;
+            return TOKEN_ERROR;
           if (!read_bytes(buf, strname, count))
-            return 0;
+            return TOKEN_ERROR;
           strname[count] = 0;
           if (!read_bytes(buf, &tmp_token, 2))
-            return 0;
+            return TOKEN_ERROR;
           if ((tmp_token != TOKEN_COMMA) && (tmp_token != TOKEN_SEMICOLON))
             ERR("No comma or semicolon (got %d)\n", tmp_token);
           /*TRACE("name = %s\n", strname);*/
@@ -849,7 +851,7 @@ static WORD parse_TOKEN(parse_buffer * buf)
       case TOKEN_ARRAY:
         break;
       default:
-        return 0;
+        return TOKEN_ERROR;
     }
   }
 
@@ -880,11 +882,6 @@ static WORD check_TOKEN(parse_buffer * buf)
   buf->token_present = TRUE;
 
   return buf->current_token;
-}
-
-static BOOL is_template_available(parse_buffer * buf)
-{
-  return check_TOKEN(buf) == TOKEN_TEMPLATE;
 }
 
 static inline BOOL is_primitive_type(WORD token)
@@ -1068,39 +1065,6 @@ static BOOL parse_template_parts(parse_buffer * buf)
   return TRUE;
 }
 
-static void go_to_next_definition(parse_buffer * buf)
-{
-  char c;
-  while (buf->rem_bytes)
-  {
-    if (!read_bytes(buf, &c, 1))
-      return;
-    if ((c == '#') || (c == '/'))
-    {
-      /* Handle comment (# or //) */
-      if (c == '/')
-      {
-        if (!read_bytes(buf, &c, 1))
-          return;
-        if (c != '/')
-          return;
-      }
-      c = 0;
-      while (c != 0x0A)
-      {
-        if (!read_bytes(buf, &c, 1))
-          return;
-      }
-      continue;
-    }
-    else if (!is_space(c))
-    {
-      rewind_bytes(buf, 1);
-      break;
-    }
-  }
-}
-
 static BOOL parse_template(parse_buffer * buf)
 {
   if (get_TOKEN(buf) != TOKEN_TEMPLATE)
@@ -1117,11 +1081,6 @@ static BOOL parse_template(parse_buffer * buf)
     return FALSE;
   if (get_TOKEN(buf) != TOKEN_CBRACE)
     return FALSE;
-  if (buf->txt)
-  {
-    /* Go to the next template */
-    go_to_next_definition(buf);
-  }
 
   TRACE("%d - %s - %s\n", buf->pdxf->nb_xtemplates, buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].name, debugstr_guid(&buf->pdxf->xtemplates[buf->pdxf->nb_xtemplates].class_id));
   buf->pdxf->nb_xtemplates++;
@@ -1129,10 +1088,12 @@ static BOOL parse_template(parse_buffer * buf)
   return TRUE;
 }
 
-BOOL parse_templates(parse_buffer * buf)
+BOOL parse_templates(parse_buffer * buf, BOOL templates_only)
 {
-  while (buf->rem_bytes && is_template_available(buf))
+  while (check_TOKEN(buf) != TOKEN_NONE)
   {
+    if (templates_only && (check_TOKEN(buf) != TOKEN_TEMPLATE))
+      return TRUE;
     if (!parse_template(buf))
     {
       WARN("Template is not correct\n");
@@ -1472,11 +1433,8 @@ BOOL parse_object(parse_buffer * buf)
   if (get_TOKEN(buf) != TOKEN_CBRACE)
     return FALSE;
 
-  if (buf->txt)
-  {
-    /* Go to the next object */
-    go_to_next_definition(buf);
-  }
+  /* For seeking to a possibly eof to avoid parsing another object next time */
+  check_TOKEN(buf);
 
   return TRUE;
 }

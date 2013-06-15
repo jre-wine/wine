@@ -560,7 +560,7 @@ static struct d3dx_parameter *get_valid_parameter(struct ID3DXBaseEffectImpl *ba
 
             for (m = 0; m < pass->annotation_count; ++m)
             {
-                if (pass->annotation_handles[i] == parameter)
+                if (pass->annotation_handles[m] == parameter)
                 {
                     return get_parameter_struct(parameter);
                 }
@@ -6193,6 +6193,13 @@ HRESULT WINAPI D3DXCreateEffectCompilerFromResourceW(HMODULE srcmodule, const WC
 
         return D3DXCreateEffectCompiler(buffer, size, defines, include, flags, effectcompiler, parseerrors);
     }
+
+    return D3DXERR_INVALIDDATA;
+}
+
+HRESULT WINAPI D3DXDisassembleEffect(ID3DXEffect *effect, BOOL enable_color_code, ID3DXBuffer **disassembly)
+{
+    FIXME("(%p, %u, %p): stub\n", effect, enable_color_code, disassembly);
 
     return D3DXERR_INVALIDDATA;
 }
