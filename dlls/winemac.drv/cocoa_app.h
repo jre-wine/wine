@@ -57,9 +57,13 @@ enum {
 
     CGFloat primaryScreenHeight;
     BOOL primaryScreenHeightValid;
+    NSMutableData* screenFrameCGRects;
 
     WineWindow* lastTargetWindow;
+    WineWindow* mouseCaptureWindow;
     BOOL forceNextMouseMoveAbsolute;
+    double mouseMoveDeltaX, mouseMoveDeltaY;
+    NSUInteger unmatchedMouseDowns;
 
     NSMutableArray* orderedWineWindows;
 

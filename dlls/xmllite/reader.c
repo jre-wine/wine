@@ -379,12 +379,18 @@ static HRESULT reader_push_element(xmlreader *reader, strval *qname)
     if (!elem) return E_OUTOFMEMORY;
 
     hr = reader_strvaldup(reader, qname, &elem->qname);
-    if (FAILED(hr)) return hr;
+    if (FAILED(hr)) {
+        reader_free(reader, elem);
+        return hr;
+    }
 
     if (!list_empty(&reader->elements))
     {
         hr = reader_inc_depth(reader);
-        if (FAILED(hr)) return hr;
+        if (FAILED(hr)) {
+             reader_free(reader, elem);
+             return hr;
+        }
     }
 
     list_add_head(&reader->elements, &elem->entry);
@@ -1030,7 +1036,7 @@ static HRESULT reader_parse_sddecl(xmlreader *reader)
     reader_skipn(reader, reader_cmp(reader, yesW) ? 2 : 3);
     ptr = reader_get_cur(reader);
     TRACE("standalone=%s\n", debugstr_wn(start, ptr-start));
-    val.str = start;
+    val.str = val.start = start;
     val.len = ptr-start;
 
     if (reader_cmp(reader, quoteW) && reader_cmp(reader, dblquoteW))

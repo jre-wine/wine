@@ -585,61 +585,9 @@ static DWORD init_gzip_stream(http_request_t *req)
 #endif
 
 /***********************************************************************
- *           HTTP_Tokenize (internal)
- *
- *  Tokenize a string, allocating memory for the tokens.
- */
-static LPWSTR * HTTP_Tokenize(LPCWSTR string, LPCWSTR token_string)
-{
-    LPWSTR * token_array;
-    int tokens = 0;
-    int i;
-    LPCWSTR next_token;
-
-    if (string)
-    {
-        /* empty string has no tokens */
-        if (*string)
-            tokens++;
-        /* count tokens */
-        for (i = 0; string[i]; i++)
-        {
-            if (!strncmpW(string+i, token_string, strlenW(token_string)))
-            {
-                DWORD j;
-                tokens++;
-                /* we want to skip over separators, but not the null terminator */
-                for (j = 0; j < strlenW(token_string) - 1; j++)
-                    if (!string[i+j])
-                        break;
-                i += j;
-            }
-        }
-    }
-
-    /* add 1 for terminating NULL */
-    token_array = heap_alloc((tokens+1) * sizeof(*token_array));
-    token_array[tokens] = NULL;
-    if (!tokens)
-        return token_array;
-    for (i = 0; i < tokens; i++)
-    {
-        int len;
-        next_token = strstrW(string, token_string);
-        if (!next_token) next_token = string+strlenW(string);
-        len = next_token - string;
-        token_array[i] = heap_alloc((len+1)*sizeof(WCHAR));
-        memcpy(token_array[i], string, len*sizeof(WCHAR));
-        token_array[i][len] = '\0';
-        string = next_token+strlenW(token_string);
-    }
-    return token_array;
-}
-
-/***********************************************************************
  *           HTTP_FreeTokens (internal)
  *
- *  Frees memory returned from HTTP_Tokenize.
+ *  Frees table of pointers.
  */
 static void HTTP_FreeTokens(LPWSTR * token_array)
 {
@@ -683,20 +631,21 @@ static void HTTP_FixURL(http_request_t *request)
     }
 }
 
-static LPWSTR HTTP_BuildHeaderRequestString( http_request_t *request, LPCWSTR verb, LPCWSTR path, LPCWSTR version )
+static WCHAR* build_request_header(http_request_t *request, const WCHAR *verb,
+        const WCHAR *path, const WCHAR *version, BOOL use_cr)
 {
     LPWSTR requestString;
     DWORD len, n;
     LPCWSTR *req;
     UINT i;
-    LPWSTR p;
 
     static const WCHAR szSpace[] = { ' ',0 };
     static const WCHAR szColon[] = { ':',' ',0 };
-    static const WCHAR sztwocrlf[] = {'\r','\n','\r','\n', 0};
+    static const WCHAR szCr[] = { '\r',0 };
+    static const WCHAR szLf[] = { '\n',0 };
 
     /* allocate space for an array of all the string pointers to be added */
-    len = (request->nCustHeaders)*4 + 10;
+    len = (request->nCustHeaders)*5 + 10;
     req = heap_alloc(len*sizeof(LPCWSTR));
 
     /* add the verb, path and HTTP version string */
@@ -706,40 +655,88 @@ static LPWSTR HTTP_BuildHeaderRequestString( http_request_t *request, LPCWSTR ve
     req[n++] = path;
     req[n++] = szSpace;
     req[n++] = version;
+    if (use_cr)
+        req[n++] = szCr;
+    req[n++] = szLf;
 
     /* Append custom request headers */
     for (i = 0; i < request->nCustHeaders; i++)
     {
         if (request->custHeaders[i].wFlags & HDR_ISREQUEST)
         {
-            req[n++] = szCrLf;
             req[n++] = request->custHeaders[i].lpszField;
             req[n++] = szColon;
             req[n++] = request->custHeaders[i].lpszValue;
+            if (use_cr)
+                req[n++] = szCr;
+            req[n++] = szLf;
 
             TRACE("Adding custom header %s (%s)\n",
                    debugstr_w(request->custHeaders[i].lpszField),
                    debugstr_w(request->custHeaders[i].lpszValue));
         }
     }
-
-    if( n >= len )
-        ERR("oops. buffer overrun\n");
-
+    if (use_cr)
+        req[n++] = szCr;
+    req[n++] = szLf;
     req[n] = NULL;
+
     requestString = HTTP_build_req( req, 4 );
     heap_free( req );
-
-    /*
-     * Set (header) termination string for request
-     * Make sure there's exactly two new lines at the end of the request
-     */
-    p = &requestString[strlenW(requestString)-1];
-    while ( (*p == '\n') || (*p == '\r') )
-       p--;
-    strcpyW( p+1, sztwocrlf );
-    
     return requestString;
+}
+
+static WCHAR* build_response_header(http_request_t *request, BOOL use_cr)
+{
+    static const WCHAR colonW[] = { ':',' ',0 };
+    static const WCHAR crW[] = { '\r',0 };
+    static const WCHAR lfW[] = { '\n',0 };
+    static const WCHAR status_fmt[] = { ' ','%','u',' ',0 };
+
+    const WCHAR **req;
+    WCHAR *ret, buf[14];
+    DWORD i, n = 0;
+
+    req = heap_alloc((request->nCustHeaders*5+8)*sizeof(WCHAR*));
+    if(!req)
+        return NULL;
+
+    if (request->status_code)
+    {
+        req[n++] = request->version;
+        sprintfW(buf, status_fmt, request->status_code);
+        req[n++] = buf;
+        req[n++] = request->statusText;
+        if (use_cr)
+            req[n++] = crW;
+        req[n++] = lfW;
+    }
+
+    for(i = 0; i < request->nCustHeaders; i++)
+    {
+        if(!(request->custHeaders[i].wFlags & HDR_ISREQUEST)
+                && strcmpW(request->custHeaders[i].lpszField, szStatus))
+        {
+            req[n++] = request->custHeaders[i].lpszField;
+            req[n++] = colonW;
+            req[n++] = request->custHeaders[i].lpszValue;
+            if(use_cr)
+                req[n++] = crW;
+            req[n++] = lfW;
+
+            TRACE("Adding custom header %s (%s)\n",
+                    debugstr_w(request->custHeaders[i].lpszField),
+                    debugstr_w(request->custHeaders[i].lpszValue));
+        }
+    }
+    if(use_cr)
+        req[n++] = crW;
+    req[n++] = lfW;
+    req[n] = NULL;
+
+    ret = HTTP_build_req(req, 0);
+    heap_free(req);
+    return ret;
 }
 
 static void HTTP_ProcessCookies( http_request_t *request )
@@ -1701,6 +1698,88 @@ static WCHAR *build_proxy_path_url(http_request_t *req)
     return url;
 }
 
+static BOOL HTTP_DomainMatches(LPCWSTR server, LPCWSTR domain)
+{
+    static const WCHAR localW[] = { '<','l','o','c','a','l','>',0 };
+    BOOL ret = FALSE;
+
+    if (!strcmpiW( domain, localW ) && !strchrW( server, '.' ))
+        ret = TRUE;
+    else if (*domain == '*')
+    {
+        if (domain[1] == '.')
+        {
+            LPCWSTR dot;
+
+            /* For a hostname to match a wildcard, the last domain must match
+             * the wildcard exactly.  E.g. if the wildcard is *.a.b, and the
+             * hostname is www.foo.a.b, it matches, but a.b does not.
+             */
+            dot = strchrW( server, '.' );
+            if (dot)
+            {
+                int len = strlenW( dot + 1 );
+
+                if (len > strlenW( domain + 2 ))
+                {
+                    LPCWSTR ptr;
+
+                    /* The server's domain is longer than the wildcard, so it
+                     * could be a subdomain.  Compare the last portion of the
+                     * server's domain.
+                     */
+                    ptr = dot + len + 1 - strlenW( domain + 2 );
+                    if (!strcmpiW( ptr, domain + 2 ))
+                    {
+                        /* This is only a match if the preceding character is
+                         * a '.', i.e. that it is a matching domain.  E.g.
+                         * if domain is '*.b.c' and server is 'www.ab.c' they
+                         * do not match.
+                         */
+                        ret = *(ptr - 1) == '.';
+                    }
+                }
+                else
+                    ret = !strcmpiW( dot + 1, domain + 2 );
+            }
+        }
+    }
+    else
+        ret = !strcmpiW( server, domain );
+    return ret;
+}
+
+static BOOL HTTP_ShouldBypassProxy(appinfo_t *lpwai, LPCWSTR server)
+{
+    LPCWSTR ptr;
+    BOOL ret = FALSE;
+
+    if (!lpwai->proxyBypass) return FALSE;
+    ptr = lpwai->proxyBypass;
+    do {
+        LPCWSTR tmp = ptr;
+
+        ptr = strchrW( ptr, ';' );
+        if (!ptr)
+            ptr = strchrW( tmp, ' ' );
+        if (ptr)
+        {
+            if (ptr - tmp < INTERNET_MAX_HOST_NAME_LENGTH)
+            {
+                WCHAR domain[INTERNET_MAX_HOST_NAME_LENGTH];
+
+                memcpy( domain, tmp, (ptr - tmp) * sizeof(WCHAR) );
+                domain[ptr - tmp] = 0;
+                ret = HTTP_DomainMatches( server, domain );
+            }
+            ptr += 1;
+        }
+        else if (*tmp)
+            ret = HTTP_DomainMatches( server, tmp );
+    } while (ptr && !ret);
+    return ret;
+}
+
 /***********************************************************************
  *           HTTP_DealWithProxy
  */
@@ -1850,7 +1929,6 @@ static void HTTPREQ_Destroy(object_header_t *hdr)
 
     heap_free(request->path);
     heap_free(request->verb);
-    heap_free(request->rawHeaders);
     heap_free(request->version);
     heap_free(request->statusText);
 
@@ -2001,7 +2079,7 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
             info->Flags |= IDSI_FLAG_KEEP_ALIVE;
         if (req->proxy)
             info->Flags |= IDSI_FLAG_PROXY;
-        if (req->netconn->secure)
+        if (req->netconn && req->netconn->secure)
             info->Flags |= IDSI_FLAG_SECURE;
 
         return ERROR_SUCCESS;
@@ -2129,6 +2207,9 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
     case INTERNET_OPTION_SECURITY_CERTIFICATE_STRUCT: {
         PCCERT_CONTEXT context;
 
+        if(!req->netconn)
+            return ERROR_INTERNET_INVALID_OPERATION;
+
         if(*size < sizeof(INTERNET_CERTIFICATE_INFOA)) {
             *size = sizeof(INTERNET_CERTIFICATE_INFOA);
             return ERROR_INSUFFICIENT_BUFFER;
@@ -2182,7 +2263,7 @@ static DWORD HTTPREQ_QueryOption(object_header_t *hdr, DWORD option, void *buffe
 
         if(req->proxy)
             flags |= INTERNET_REQFLAG_VIA_PROXY;
-        if(!req->rawHeaders)
+        if(!req->status_code)
             flags |= INTERNET_REQFLAG_NO_HEADERS;
 
         TRACE("INTERNET_OPTION_REQUEST_FLAGS returning %x\n", flags);
@@ -2279,12 +2360,15 @@ static void commit_cache_entry(http_request_t *req)
     req->hCacheFile = NULL;
 
     if(HTTP_GetRequestURL(req, url)) {
-        DWORD headersLen;
+        WCHAR *header;
+        DWORD header_len;
 
-        headersLen = req->rawHeaders ? strlenW(req->rawHeaders) : 0;
+        header = build_response_header(req, TRUE);
+        header_len = (header ? strlenW(header) : 0);
         CommitUrlCacheEntryW(url, req->cacheFile, req->expires,
                 req->last_modified, NORMAL_CACHE_ENTRY,
-                req->rawHeaders, headersLen, NULL, 0);
+                header, header_len, NULL, 0);
+        heap_free(header);
     }
 }
 
@@ -2825,8 +2909,10 @@ static DWORD set_content_length(http_request_t *request)
         static const WCHAR gzipW[] = {'g','z','i','p',0};
 
         encoding_idx = HTTP_GetCustomHeaderIndex(request, szContent_Encoding, 0, FALSE);
-        if(encoding_idx != -1 && !strcmpiW(request->custHeaders[encoding_idx].lpszValue, gzipW))
+        if(encoding_idx != -1 && !strcmpiW(request->custHeaders[encoding_idx].lpszValue, gzipW)) {
+            HTTP_DeleteCustomHeader(request, encoding_idx);
             return init_gzip_stream(request);
+        }
     }
 
     return ERROR_SUCCESS;
@@ -3243,7 +3329,7 @@ static DWORD HTTP_HttpOpenRequestW(http_session_t *session,
     if (session->hostPort == INTERNET_INVALID_PORT_NUMBER)
         session->hostPort = INTERNET_DEFAULT_HTTP_PORT;
 
-    if (hIC->proxy && hIC->proxy[0])
+    if (hIC->proxy && hIC->proxy[0] && !HTTP_ShouldBypassProxy(hIC, session->hostName))
         HTTP_DealWithProxy( hIC, session, request );
 
     INTERNET_SendCallback(&session->hdr, dwContext,
@@ -3420,13 +3506,13 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
             DWORD res = ERROR_INVALID_PARAMETER;
 
             if (request_only)
-                headers = HTTP_BuildHeaderRequestString(request, request->verb, request->path, request->version);
+                headers = build_request_header(request, request->verb, request->path, request->version, TRUE);
             else
-                headers = request->rawHeaders;
+                headers = build_response_header(request, TRUE);
+            if (!headers)
+                return ERROR_OUTOFMEMORY;
 
-            if (headers)
-                len = strlenW(headers) * sizeof(WCHAR);
-
+            len = strlenW(headers) * sizeof(WCHAR);
             if (len + sizeof(WCHAR) > *lpdwBufferLength)
             {
                 len += sizeof(WCHAR);
@@ -3434,50 +3520,51 @@ static DWORD HTTP_HttpQueryInfoW(http_request_t *request, DWORD dwInfoLevel,
             }
             else if (lpBuffer)
             {
-                if (headers)
-                    memcpy(lpBuffer, headers, len + sizeof(WCHAR));
-                else
-                {
-                    len = strlenW(szCrLf) * sizeof(WCHAR);
-                    memcpy(lpBuffer, szCrLf, sizeof(szCrLf));
-                }
+                memcpy(lpBuffer, headers, len + sizeof(WCHAR));
                 TRACE("returning data: %s\n", debugstr_wn(lpBuffer, len / sizeof(WCHAR)));
                 res = ERROR_SUCCESS;
             }
             *lpdwBufferLength = len;
 
-            if (request_only) heap_free(headers);
+            heap_free(headers);
             return res;
         }
     case HTTP_QUERY_RAW_HEADERS:
         {
-            LPWSTR * ppszRawHeaderLines = HTTP_Tokenize(request->rawHeaders, szCrLf);
-            DWORD i, size = 0;
-            LPWSTR pszString = lpBuffer;
+            LPWSTR headers;
+            DWORD len;
 
-            for (i = 0; ppszRawHeaderLines[i]; i++)
-                size += strlenW(ppszRawHeaderLines[i]) + 1;
+            if (request_only)
+                headers = build_request_header(request, request->verb, request->path, request->version, FALSE);
+            else
+                headers = build_response_header(request, FALSE);
+            if (!headers)
+                return ERROR_OUTOFMEMORY;
 
-            if (size + 1 > *lpdwBufferLength/sizeof(WCHAR))
+            len = strlenW(headers) * sizeof(WCHAR);
+            if (len > *lpdwBufferLength)
             {
-                HTTP_FreeTokens(ppszRawHeaderLines);
-                *lpdwBufferLength = (size + 1) * sizeof(WCHAR);
+                *lpdwBufferLength = len;
+                heap_free(headers);
                 return ERROR_INSUFFICIENT_BUFFER;
             }
-            if (pszString)
-            {
-                for (i = 0; ppszRawHeaderLines[i]; i++)
-                {
-                    DWORD len = strlenW(ppszRawHeaderLines[i]);
-                    memcpy(pszString, ppszRawHeaderLines[i], (len+1)*sizeof(WCHAR));
-                    pszString += len+1;
-                }
-                *pszString = '\0';
-                TRACE("returning data: %s\n", debugstr_wn(lpBuffer, size));
-            }
-            *lpdwBufferLength = size * sizeof(WCHAR);
-            HTTP_FreeTokens(ppszRawHeaderLines);
 
+            if (lpBuffer)
+            {
+                DWORD i;
+
+                TRACE("returning data: %s\n", debugstr_wn(headers, len / sizeof(WCHAR)));
+
+                for (i=0; i<len; i++)
+                {
+                    if (headers[i] == '\n')
+                        headers[i] = 0;
+                }
+                memcpy(lpBuffer, headers, len + sizeof(WCHAR));
+            }
+            *lpdwBufferLength = len - sizeof(WCHAR);
+
+            heap_free(headers);
             return ERROR_SUCCESS;
         }
     case HTTP_QUERY_STATUS_TEXT:
@@ -4065,7 +4152,7 @@ static DWORD HTTP_SecureProxyConnect(http_request_t *request)
 
     TRACE("\n");
 
-    requestString = HTTP_BuildHeaderRequestString( request, connectW, server->host_port, g_szHttp1_1 );
+    requestString = build_request_header( request, connectW, server->host_port, g_szHttp1_1, TRUE );
 
     len = WideCharToMultiByte( CP_ACP, 0, requestString, -1,
                                 NULL, 0, NULL, NULL );
@@ -4824,11 +4911,11 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *request, LPCWSTR lpszHeaders,
         if (request->proxy)
         {
             WCHAR *url = build_proxy_path_url(request);
-            requestString = HTTP_BuildHeaderRequestString(request, request->verb, url, request->version);
+            requestString = build_request_header(request, request->verb, url, request->version, TRUE);
             heap_free(url);
         }
         else
-            requestString = HTTP_BuildHeaderRequestString(request, request->verb, request->path, request->version);
+            requestString = build_request_header(request, request->verb, request->path, request->version, TRUE);
 
  
         TRACE("Request header -> %s\n", debugstr_w(requestString) );
@@ -5666,10 +5753,6 @@ DWORD HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     session->appInfo = hIC;
     list_add_head( &hIC->hdr.children, &session->hdr.entry );
 
-    if(hIC->proxy && hIC->accessType == INTERNET_OPEN_TYPE_PROXY) {
-        if(hIC->proxyBypass)
-            FIXME("Proxy bypass is ignored.\n");
-    }
     session->hostName = heap_strdupW(lpszServerName);
     if (lpszUserName && lpszUserName[0])
         session->userName = heap_strdupW(lpszUserName);
@@ -5739,10 +5822,7 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
     INT  rc = 0;
     char bufferA[MAX_REPLY_LEN];
     LPWSTR status_code = NULL, status_text = NULL;
-    DWORD res = ERROR_HTTP_INVALID_SERVER_RESPONSE, cchMaxRawHeaders = 1024;
-    LPWSTR lpszRawHeaders = NULL;
-    LPWSTR temp;
-    DWORD cchRawHeaders = 0;
+    DWORD res = ERROR_HTTP_INVALID_SERVER_RESPONSE;
     BOOL codeHundred = FALSE;
 
     TRACE("-->\n");
@@ -5799,9 +5879,6 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
             request->version = heap_strdupW(g_szHttp1_0);
             request->statusText = heap_strdupW(szOK);
 
-            heap_free(request->rawHeaders);
-            request->rawHeaders = heap_strdupW(szDefaultHeader);
-
             goto lend;
         }
     } while (codeHundred);
@@ -5820,25 +5897,10 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
     *(status_code-1) = ' ';
     *(status_text-1) = ' ';
 
-    /* regenerate raw headers */
-    lpszRawHeaders = heap_alloc((cchMaxRawHeaders + 1) * sizeof(WCHAR));
-    if (!lpszRawHeaders) goto lend;
-
-    while (cchRawHeaders + buflen + strlenW(szCrLf) > cchMaxRawHeaders)
-        cchMaxRawHeaders *= 2;
-    temp = heap_realloc(lpszRawHeaders, (cchMaxRawHeaders+1)*sizeof(WCHAR));
-    if (temp == NULL) goto lend;
-    lpszRawHeaders = temp;
-    memcpy(lpszRawHeaders+cchRawHeaders, buffer, (buflen-1)*sizeof(WCHAR));
-    cchRawHeaders += (buflen-1);
-    memcpy(lpszRawHeaders+cchRawHeaders, szCrLf, sizeof(szCrLf));
-    cchRawHeaders += sizeof(szCrLf)/sizeof(szCrLf[0])-1;
-    lpszRawHeaders[cchRawHeaders] = '\0';
-
     /* Parse each response line */
     do
     {
-	buflen = MAX_REPLY_LEN;
+        buflen = MAX_REPLY_LEN;
         if (!read_line(request, bufferA, &buflen) && buflen)
         {
             LPWSTR * pFieldAndValue;
@@ -5851,52 +5913,23 @@ static DWORD HTTP_GetResponseHeaders(http_request_t *request, INT *len)
             pFieldAndValue = HTTP_InterpretHttpHeader(buffer);
             if (pFieldAndValue)
             {
-                while (cchRawHeaders + buflen + strlenW(szCrLf) > cchMaxRawHeaders)
-                    cchMaxRawHeaders *= 2;
-                temp = heap_realloc(lpszRawHeaders, (cchMaxRawHeaders+1)*sizeof(WCHAR));
-                if (temp == NULL) goto lend;
-                lpszRawHeaders = temp;
-                memcpy(lpszRawHeaders+cchRawHeaders, buffer, (buflen-1)*sizeof(WCHAR));
-                cchRawHeaders += (buflen-1);
-                memcpy(lpszRawHeaders+cchRawHeaders, szCrLf, sizeof(szCrLf));
-                cchRawHeaders += sizeof(szCrLf)/sizeof(szCrLf[0])-1;
-                lpszRawHeaders[cchRawHeaders] = '\0';
-
                 HTTP_ProcessHeader(request, pFieldAndValue[0], pFieldAndValue[1],
                                    HTTP_ADDREQ_FLAG_ADD );
-
                 HTTP_FreeTokens(pFieldAndValue);
             }
         }
-	else
-	{
-	    cbreaks++;
-	    if (cbreaks >= 2)
-	       break;
-	}
+        else
+        {
+            cbreaks++;
+            if (cbreaks >= 2)
+                break;
+        }
     }while(1);
 
-    /* make sure the response header is terminated with an empty line.  Some apps really
-       truly care about that empty line being there for some reason.  Just add it to the
-       header. */
-    if (cchRawHeaders + strlenW(szCrLf) > cchMaxRawHeaders)
-    {
-        cchMaxRawHeaders = cchRawHeaders + strlenW(szCrLf);
-        temp = heap_realloc(lpszRawHeaders, (cchMaxRawHeaders + 1) * sizeof(WCHAR));
-        if (temp == NULL) goto lend;
-        lpszRawHeaders = temp;
-    }
-
-    memcpy(&lpszRawHeaders[cchRawHeaders], szCrLf, sizeof(szCrLf));
-
-    heap_free(request->rawHeaders);
-    request->rawHeaders = lpszRawHeaders;
-    TRACE("raw headers: %s\n", debugstr_w(lpszRawHeaders));
     res = ERROR_SUCCESS;
 
 lend:
 
-    if (res) heap_free(lpszRawHeaders);
     *len = rc;
     TRACE("<--\n");
     return res;

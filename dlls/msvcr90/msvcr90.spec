@@ -489,10 +489,10 @@
 @ cdecl _fseeki64(ptr int64 long) msvcrt._fseeki64
 @ stub _fseeki64_nolock
 @ cdecl _fsopen(str str long) msvcrt._fsopen
-@ cdecl _fstat32(long ptr) msvcr100._fstat32
+@ cdecl _fstat32(long ptr) msvcrt._fstat32
 @ stub _fstat32i64
 @ cdecl _fstat64(long ptr) msvcrt._fstat64
-@ cdecl _fstat64i32(long ptr) msvcr100._fstat64i32
+@ cdecl _fstat64i32(long ptr) msvcrt._fstat64i32
 @ stub _ftell_nolock
 @ cdecl -ret64 _ftelli64(ptr) msvcrt._ftelli64
 @ stub _ftelli64_nolock
@@ -832,9 +832,9 @@
 @ cdecl _mbsstr(str str) msvcrt._mbsstr
 @ stub _mbsstr_l
 @ cdecl _mbstok(str str) msvcrt._mbstok
-@ stub _mbstok_l
-@ stub _mbstok_s
-@ stub _mbstok_s_l
+@ cdecl _mbstok_l(str str ptr) msvcrt._mbstok_l
+@ cdecl _mbstok_s(str str ptr) msvcrt._mbstok_s
+@ cdecl _mbstok_s_l(str str ptr ptr) msvcrt._mbstok_s_l
 @ cdecl _mbstowcs_l(ptr str long ptr) msvcrt._mbstowcs_l
 @ cdecl _mbstowcs_s_l(ptr ptr long str long ptr) msvcrt._mbstowcs_s_l
 @ cdecl _mbstrlen(str) msvcrt._mbstrlen
@@ -1096,7 +1096,7 @@
 @ stub _vscprintf_p_l
 @ cdecl _vscwprintf(wstr ptr) msvcrt._vscwprintf
 @ cdecl _vscwprintf_l(wstr ptr ptr) msvcrt._vscwprintf_l
-@ stub _vscwprintf_p
+@ cdecl _vscwprintf_p(wstr ptr) msvcr100._vscwprintf_p
 @ cdecl _vscwprintf_p_l(wstr ptr ptr) msvcrt._vscwprintf_p_l
 @ cdecl _vsnprintf(ptr long str ptr) msvcrt._vsnprintf
 @ cdecl _vsnprintf_c(ptr long str ptr) msvcrt._vsnprintf_c

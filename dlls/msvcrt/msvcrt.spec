@@ -808,9 +808,9 @@
 @ cdecl _mbsstr(str str)
 # stub _mbsstr_l(str str ptr)
 @ cdecl _mbstok(str str)
-# stub _mbstok_l(str str ptr)
-# stub _mbstok_s(str str ptr)
-# stub _mbstok_s_l(str str ptr ptr)
+@ cdecl _mbstok_l(str str ptr)
+@ cdecl _mbstok_s(str str ptr)
+@ cdecl _mbstok_s_l(str str ptr ptr)
 @ cdecl _mbstowcs_l(ptr str long ptr) MSVCRT__mbstowcs_l
 @ cdecl _mbstowcs_s_l(ptr ptr long str long ptr) MSVCRT__mbstowcs_s_l
 @ cdecl _mbstrlen(str)
@@ -963,8 +963,8 @@
 @ cdecl _strlwr_l(str ptr)
 @ cdecl _strlwr_s(ptr long)
 @ cdecl _strlwr_s_l(ptr long ptr)
-@ cdecl _strncoll(str str long) MSVCRT_strncoll_l
-@ cdecl _strncoll_l(str str long ptr) MSVCRT_strncoll
+@ cdecl _strncoll(str str long) MSVCRT__strncoll
+@ cdecl _strncoll_l(str str long ptr) MSVCRT__strncoll_l
 @ cdecl _strnicmp(str str long) MSVCRT__strnicmp
 @ cdecl _strnicmp_l(str str long ptr) MSVCRT__strnicmp_l
 @ cdecl _strnicoll(str str long) MSVCRT__strnicoll
@@ -1532,3 +1532,5 @@
 @ cdecl _set_printf_count_output(long) MSVCRT__set_printf_count_output
 @ cdecl _getptd()
 @ cdecl fread_s(ptr long long long ptr)
+@ cdecl _fstat32(long ptr)
+@ cdecl _fstat64i32(long ptr)

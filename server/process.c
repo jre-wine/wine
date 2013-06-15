@@ -323,6 +323,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->suspend         = 0;
     process->is_system       = 0;
     process->debug_children  = 0;
+    process->is_terminating  = 0;
     process->console         = NULL;
     process->startup_state   = STARTUP_IN_PROGRESS;
     process->startup_info    = NULL;
@@ -570,6 +571,8 @@ static void terminate_process( struct process *process, struct thread *skip, int
     struct thread *thread;
 
     grab_object( process );  /* make sure it doesn't get freed when threads die */
+    process->is_terminating = 1;
+
 restart:
     LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
     {
@@ -1118,6 +1121,12 @@ DECL_HANDLER(get_process_info)
 static void set_process_affinity( struct process *process, affinity_t affinity )
 {
     struct thread *thread;
+
+    if (!process->running_threads)
+    {
+        set_error( STATUS_PROCESS_IS_TERMINATING );
+        return;
+    }
 
     process->affinity = affinity;
 

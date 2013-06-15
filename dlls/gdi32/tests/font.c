@@ -4561,6 +4561,46 @@ static void test_GetGlyphOutline_empty_contour(void)
     ReleaseDC(NULL, hdc);
 }
 
+static void test_GetGlyphOutline_metric_clipping(void)
+{
+    HDC hdc;
+    LOGFONTA lf;
+    HFONT hfont, hfont_prev;
+    GLYPHMETRICS gm;
+    TEXTMETRICA tm;
+    DWORD ret;
+
+    memset(&lf, 0, sizeof(lf));
+    lf.lfHeight = 72;
+    lstrcpyA(lf.lfFaceName, "wine_test");
+
+    SetLastError(0xdeadbeef);
+    hfont = CreateFontIndirectA(&lf);
+    ok(hfont != 0, "CreateFontIndirectA error %u\n", GetLastError());
+
+    hdc = GetDC(NULL);
+
+    hfont_prev = SelectObject(hdc, hfont);
+    ok(hfont_prev != NULL, "SelectObject failed\n");
+
+    SetLastError(0xdeadbeef);
+    ret = GetTextMetrics(hdc, &tm);
+    ok(ret, "GetTextMetrics error %u\n", GetLastError());
+
+    GetGlyphOutlineA(hdc, 'A', GGO_METRICS, &gm, 0, NULL, &mat);
+    ok(gm.gmptGlyphOrigin.y <= tm.tmAscent,
+        "Glyph top(%d) exceeds ascent(%d)\n",
+        gm.gmptGlyphOrigin.y, tm.tmAscent);
+    GetGlyphOutlineA(hdc, 'D', GGO_METRICS, &gm, 0, NULL, &mat);
+    ok(gm.gmptGlyphOrigin.y - gm.gmBlackBoxY >= -tm.tmDescent,
+        "Glyph bottom(%d) exceeds descent(%d)\n",
+        gm.gmptGlyphOrigin.y - gm.gmBlackBoxY, -tm.tmDescent);
+
+    SelectObject(hdc, hfont_prev);
+    DeleteObject(hfont);
+    ReleaseDC(NULL, hdc);
+}
+
 static void test_CreateScalableFontResource(void)
 {
     char ttf_name[MAX_PATH];
@@ -4643,6 +4683,7 @@ static void test_CreateScalableFontResource(void)
     ok(ret, "font wine_test should be enumerated\n");
 
     test_GetGlyphOutline_empty_contour();
+    test_GetGlyphOutline_metric_clipping();
 
     ret = pRemoveFontResourceExA(fot_name, FR_PRIVATE, 0);
     ok(!ret, "RemoveFontResourceEx() with not matching flags should fail\n");
@@ -4987,6 +5028,64 @@ static void test_stock_fonts(void)
     }
 }
 
+static void test_max_height(void)
+{
+    HDC hdc;
+    LOGFONT lf;
+    HFONT hfont, hfont_old;
+    TEXTMETRICA tm1, tm;
+    BOOL r;
+    LONG invalid_height[] = { -65536, -123456, 123456 };
+    size_t i;
+
+    memset(&tm1, 0, sizeof(tm1));
+    memset(&lf, 0, sizeof(lf));
+    strcpy(lf.lfFaceName, "Tahoma");
+    lf.lfHeight = -1;
+
+    hdc = GetDC(NULL);
+
+    /* get 1 ppem value */
+    hfont = CreateFontIndirect(&lf);
+    hfont_old = SelectObject(hdc, hfont);
+    r = GetTextMetrics(hdc, &tm1);
+    ok(r, "GetTextMetrics failed\n");
+    ok(tm1.tmHeight > 0, "expected a positive value, got %d\n", tm1.tmHeight);
+    ok(tm1.tmAveCharWidth > 0, "expected a positive value, got %d\n", tm1.tmHeight);
+    DeleteObject(SelectObject(hdc, hfont_old));
+
+    /* test the largest value */
+    lf.lfHeight = -((1 << 16) - 1);
+    hfont = CreateFontIndirect(&lf);
+    hfont_old = SelectObject(hdc, hfont);
+    memset(&tm, 0, sizeof(tm));
+    r = GetTextMetrics(hdc, &tm);
+    ok(r, "GetTextMetrics failed\n");
+    ok(tm.tmHeight > tm1.tmHeight,
+       "expected greater than 1 ppem value (%d), got %d\n", tm1.tmHeight, tm.tmHeight);
+    ok(tm.tmAveCharWidth > tm1.tmAveCharWidth,
+       "expected greater than 1 ppem value (%d), got %d\n", tm1.tmAveCharWidth, tm.tmAveCharWidth);
+    DeleteObject(SelectObject(hdc, hfont_old));
+
+    /* test an invalid value */
+    for (i = 0; i < sizeof(invalid_height)/sizeof(invalid_height[0]); i++) {
+        lf.lfHeight = invalid_height[i];
+        hfont = CreateFontIndirect(&lf);
+        hfont_old = SelectObject(hdc, hfont);
+        memset(&tm, 0, sizeof(tm));
+        r = GetTextMetrics(hdc, &tm);
+        ok(r, "GetTextMetrics failed\n");
+        ok(tm.tmHeight == tm1.tmHeight,
+           "expected 1 ppem value (%d), got %d\n", tm1.tmHeight, tm.tmHeight);
+        ok(tm.tmAveCharWidth == tm1.tmAveCharWidth,
+           "expected 1 ppem value (%d), got %d\n", tm1.tmAveCharWidth, tm.tmAveCharWidth);
+        DeleteObject(SelectObject(hdc, hfont_old));
+    }
+
+    ReleaseDC(NULL, hdc);
+    return;
+}
+
 START_TEST(font)
 {
     init();
@@ -5043,6 +5142,7 @@ START_TEST(font)
     test_fullname();
     test_fullname2();
     test_east_asian_font_selection();
+    test_max_height();
 
     /* These tests should be last test until RemoveFontResource
      * is properly implemented.

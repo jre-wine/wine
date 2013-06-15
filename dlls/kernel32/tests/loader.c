@@ -53,6 +53,10 @@ static void (WINAPI *pLdrShutdownProcess)(void);
 static BOOLEAN (WINAPI *pRtlDllShutdownInProgress)(void);
 static NTSTATUS (WINAPI *pNtAllocateVirtualMemory)(HANDLE, PVOID *, ULONG, SIZE_T *, ULONG, ULONG);
 static NTSTATUS (WINAPI *pNtFreeVirtualMemory)(HANDLE, PVOID *, SIZE_T *, ULONG);
+static NTSTATUS (WINAPI *pLdrLockLoaderLock)(ULONG, ULONG *, ULONG *);
+static NTSTATUS (WINAPI *pLdrUnlockLoaderLock)(ULONG, ULONG);
+static void (WINAPI *pRtlAcquirePebLock)(void);
+static void (WINAPI *pRtlReleasePebLock)(void);
 
 static PVOID RVAToAddr(DWORD_PTR rva, HMODULE module)
 {
@@ -1054,12 +1058,14 @@ nt4_is_broken:
 }
 
 #define MAX_COUNT 10
-static HANDLE attached_thread[MAX_COUNT], stop_event, event, mutex, semaphore;
+static HANDLE attached_thread[MAX_COUNT];
 static DWORD attached_thread_count;
-static int test_dll_phase;
+HANDLE stop_event, event, mutex, semaphore, loader_lock_event, peb_lock_event, ack_event;
+static int test_dll_phase, inside_loader_lock, inside_peb_lock;
 
 static DWORD WINAPI mutex_thread_proc(void *param)
 {
+    HANDLE wait_list[3];
     DWORD ret;
 
     ret = WaitForSingleObject(mutex, 0);
@@ -1067,10 +1073,31 @@ static DWORD WINAPI mutex_thread_proc(void *param)
 
     SetEvent(param);
 
+    wait_list[0] = stop_event;
+    wait_list[1] = loader_lock_event;
+    wait_list[2] = peb_lock_event;
+
     while (1)
     {
         trace("%04u: mutex_thread_proc: still alive\n", GetCurrentThreadId());
-        if (WaitForSingleObject(stop_event, 50) != WAIT_TIMEOUT) break;
+        ret = WaitForMultipleObjects(3, wait_list, FALSE, 50);
+        if (ret == WAIT_OBJECT_0) break;
+        else if (ret == WAIT_OBJECT_0 + 1)
+        {
+            ULONG loader_lock_magic;
+            trace("%04u: mutex_thread_proc: Entering loader lock\n", GetCurrentThreadId());
+            ret = pLdrLockLoaderLock(0, NULL, &loader_lock_magic);
+            ok(!ret, "LdrLockLoaderLock error %#x\n", ret);
+            inside_loader_lock++;
+            SetEvent(ack_event);
+        }
+        else if (ret == WAIT_OBJECT_0 + 2)
+        {
+            trace("%04u: mutex_thread_proc: Entering PEB lock\n", GetCurrentThreadId());
+            pRtlAcquirePebLock();
+            inside_peb_lock++;
+            SetEvent(ack_event);
+        }
     }
 
     trace("%04u: mutex_thread_proc: exiting\n", GetCurrentThreadId());
@@ -1113,6 +1140,9 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
     static LONG noop_thread_started;
     DWORD ret;
 
+    ok(!inside_loader_lock, "inside_loader_lock should not be set\n");
+    ok(!inside_peb_lock, "inside_peb_lock should not be set\n");
+
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
@@ -1133,12 +1163,18 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
 
         trace("dll: %p, DLL_PROCESS_DETACH, %p\n", hinst, param);
 
-        if (test_dll_phase == 0 || test_dll_phase == 3)
+        if (test_dll_phase == 4 || test_dll_phase == 5)
+        {
+            ok(0, "dll_entry_point(DLL_PROCESS_DETACH) should not be called\n");
+            break;
+        }
+
+        if (test_dll_phase == 0 || test_dll_phase == 1 || test_dll_phase == 3)
             ok(param != NULL, "dll: param %p\n", param);
         else
             ok(!param, "dll: param %p\n", param);
 
-        if (test_dll_phase == 0) expected_code = 195;
+        if (test_dll_phase == 0 || test_dll_phase == 1) expected_code = 195;
         else if (test_dll_phase == 3) expected_code = 196;
         else expected_code = STILL_ACTIVE;
 
@@ -1163,9 +1199,25 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
 
         for (i = 0; i < attached_thread_count; i++)
         {
+            /* Calling GetExitCodeThread() without waiting for thread termination
+             * leads to different results due to a race condition.
+             */
+            if (expected_code != STILL_ACTIVE)
+            {
+                ret = WaitForSingleObject(attached_thread[i], 1000);
+                /* FIXME: remove once Wine is fixed */
+                if (test_dll_phase == 1) todo_wine
+                ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+                else
+                ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            }
             ret = GetExitCodeThread(attached_thread[i], &code);
             trace("dll: GetExitCodeThread(%u) => %d,%u\n", i, ret, code);
             ok(ret == 1, "GetExitCodeThread returned %d, expected 1\n", ret);
+            /* FIXME: remove once Wine is fixed */
+            if (test_dll_phase == 1) todo_wine
+            ok(code == expected_code, "expected thread exit code %u, got %u\n", expected_code, code);
+            else
             ok(code == expected_code, "expected thread exit code %u, got %u\n", expected_code, code);
         }
 
@@ -1176,7 +1228,13 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
         if (expected_code == STILL_ACTIVE)
             ok(ret == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %#x\n", ret);
         else
+        {
+            /* FIXME: remove once Wine is fixed */
+            if (test_dll_phase == 1) todo_wine
             ok(ret == WAIT_ABANDONED, "expected WAIT_ABANDONED, got %#x\n", ret);
+            else
+            ok(ret == WAIT_ABANDONED, "expected WAIT_ABANDONED, got %#x\n", ret);
+        }
 
         /* semaphore is not abandoned on thread termination */
         ret = WaitForSingleObject(semaphore, 0);
@@ -1192,8 +1250,16 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
         else
         {
             ret = WaitForSingleObject(attached_thread[0], 0);
+            /* FIXME: remove once Wine is fixed */
+            if (test_dll_phase == 1) todo_wine
+            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            else
             ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
             ret = WaitForSingleObject(attached_thread[1], 0);
+            /* FIXME: remove once Wine is fixed */
+            if (test_dll_phase == 1) todo_wine
+            ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
+            else
             ok(ret == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %#x\n", ret);
         }
 
@@ -1369,6 +1435,18 @@ static void child_process(const char *dll_name, DWORD target_offset)
     event = CreateEvent(NULL, TRUE, FALSE, NULL);
     ok(event != 0, "CreateEvent error %d\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
+    loader_lock_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    ok(loader_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    peb_lock_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    ok(peb_lock_event != 0, "CreateEvent error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ack_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    ok(ack_event != 0, "CreateEvent error %d\n", GetLastError());
+
     file = CreateFile(dll_name, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0);
     if (file == INVALID_HANDLE_VALUE)
     {
@@ -1472,7 +1550,6 @@ static void child_process(const char *dll_name, DWORD target_offset)
 
         SetLastError(0xdeadbeef);
         thread = CreateThread(NULL, 0, noop_thread_proc, &dummy, 0, &ret);
-todo_wine
         ok(!thread || broken(thread != 0) /* before win7 */, "CreateThread should fail\n");
         if (!thread)
             ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
@@ -1501,7 +1578,11 @@ todo_wine
         ok(!ret, "NtSetInformationProcess error %#x\n", ret);
         break;
 
-    case 1:
+    case 1: /* normal ExitProcess */
+        ret = pRtlDllShutdownInProgress();
+        ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
+        break;
+
     case 2: /* ExitProcess will be called by the PROCESS_DETACH handler */
         ret = pRtlDllShutdownInProgress();
         ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
@@ -1527,6 +1608,42 @@ todo_wine
         CloseHandle(stop_event);
         break;
 
+    case 4:
+        trace("setting loader_lock_event\n");
+        SetEvent(loader_lock_event);
+        WaitForSingleObject(ack_event, 1000);
+        ok(inside_loader_lock != 0, "inside_loader_lock is not set\n");
+
+        /* calling NtTerminateProcess should not cause a deadlock */
+        trace("call NtTerminateProcess(0, 198)\n");
+        ret = pNtTerminateProcess(0, 198);
+        ok(!ret, "NtTerminateProcess error %#x\n", ret);
+
+        *child_failures = winetest_get_failures();
+
+        /* Windows fails to release loader lock acquired from another thread,
+         * so the LdrUnlockLoaderLock call fails here and ExitProcess deadlocks
+         * later on, so NtTerminateProcess is used instead.
+         */
+        trace("call NtTerminateProcess(GetCurrentProcess(), 198)\n");
+        pNtTerminateProcess(GetCurrentProcess(), 198);
+        ok(0, "NtTerminateProcess should not return\n");
+        break;
+
+    case 5:
+        trace("setting peb_lock_event\n");
+        SetEvent(peb_lock_event);
+        WaitForSingleObject(ack_event, 1000);
+        ok(inside_peb_lock != 0, "inside_peb_lock is not set\n");
+
+        *child_failures = winetest_get_failures();
+
+        /* calling ExitProcess should cause a deadlock */
+        trace("call ExitProcess(198)\n");
+        ExitProcess(198);
+        ok(0, "ExitProcess should not return\n");
+        break;
+
     default:
         assert(0);
         break;
@@ -1534,6 +1651,7 @@ todo_wine
 
     if (test_dll_phase == 0) expected_code = 195;
     else if (test_dll_phase == 3) expected_code = 196;
+    else if (test_dll_phase == 4) expected_code = 198;
     else expected_code = STILL_ACTIVE;
 
     if (expected_code == STILL_ACTIVE)
@@ -1561,7 +1679,7 @@ todo_wine
 
     *child_failures = winetest_get_failures();
 
-    trace("call ExitProcess()\n");
+    trace("call ExitProcess(195)\n");
     ExitProcess(195);
 }
 
@@ -1586,7 +1704,7 @@ static void test_ExitProcess(void)
 #include "poppack.h"
     static const char filler[0x1000];
     DWORD dummy, file_align;
-    HANDLE file, thread, hmap;
+    HANDLE file, thread, process, hmap, hmap_dup;
     char temp_path[MAX_PATH], dll_name[MAX_PATH], cmdline[MAX_PATH * 2];
     DWORD ret, target_offset, old_prot;
     char **argv, buf[256];
@@ -1594,6 +1712,7 @@ static void test_ExitProcess(void)
     STARTUPINFO si = { sizeof(si) };
     CONTEXT ctx;
     struct PROCESS_BASIC_INFORMATION_PRIVATE pbi;
+    MEMORY_BASIC_INFORMATION mbi;
     DWORD_PTR affinity;
     void *addr;
     LARGE_INTEGER offset;
@@ -1685,8 +1804,9 @@ static void test_ExitProcess(void)
     sprintf(cmdline, "\"%s\" loader %s %u 0", argv[0], dll_name, target_offset);
     ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
-    ret = WaitForSingleObject(pi.hProcess, 30000);
+    ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+    if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
     ok(ret == 195, "expected exit code 195, got %u\n", ret);
     if (*child_failures)
@@ -1702,8 +1822,9 @@ static void test_ExitProcess(void)
     sprintf(cmdline, "\"%s\" loader %s %u 1", argv[0], dll_name, target_offset);
     ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
-    ret = WaitForSingleObject(pi.hProcess, 30000);
+    ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+    if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
     ok(ret == 195, "expected exit code 195, got %u\n", ret);
     if (*child_failures)
@@ -1719,8 +1840,9 @@ static void test_ExitProcess(void)
     sprintf(cmdline, "\"%s\" loader %s %u 2", argv[0], dll_name, target_offset);
     ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
-    ret = WaitForSingleObject(pi.hProcess, 30000);
+    ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+    if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
     ok(ret == 197, "expected exit code 197, got %u\n", ret);
     if (*child_failures)
@@ -1736,8 +1858,9 @@ static void test_ExitProcess(void)
     sprintf(cmdline, "\"%s\" loader %s %u 3", argv[0], dll_name, target_offset);
     ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
-    ret = WaitForSingleObject(pi.hProcess, 30000);
+    ret = WaitForSingleObject(pi.hProcess, 10000);
     ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+    if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
     GetExitCodeProcess(pi.hProcess, &ret);
     ok(ret == 195, "expected exit code 195, got %u\n", ret);
     if (*child_failures)
@@ -1747,6 +1870,58 @@ static void test_ExitProcess(void)
     }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+
+    /* phase 4 */
+    if (pLdrLockLoaderLock && pLdrUnlockLoaderLock)
+    {
+        *child_failures = -1;
+        sprintf(cmdline, "\"%s\" loader %s %u 4", argv[0], dll_name, target_offset);
+        ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+        ret = WaitForSingleObject(pi.hProcess, 10000);
+        ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+        if (ret != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 0);
+        GetExitCodeProcess(pi.hProcess, &ret);
+        ok(ret == 198, "expected exit code 198, got %u\n", ret);
+        if (*child_failures)
+        {
+            trace("%d failures in child process\n", *child_failures);
+            winetest_add_failures(*child_failures);
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    else
+        win_skip("LdrLockLoaderLock/LdrUnlockLoaderLock are not available on this platform\n");
+
+    /* phase 5 */
+    if (pRtlAcquirePebLock && pRtlReleasePebLock)
+    {
+        *child_failures = -1;
+        sprintf(cmdline, "\"%s\" loader %s %u 5", argv[0], dll_name, target_offset);
+        ret = CreateProcess(argv[0], cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+        ok(ret, "CreateProcess(%s) error %d\n", cmdline, GetLastError());
+        ret = WaitForSingleObject(pi.hProcess, 5000);
+        ok(ret == WAIT_TIMEOUT, "child process should fail to terminate\n");
+        if (ret != WAIT_OBJECT_0)
+        {
+            trace("terminating child process\n");
+            TerminateProcess(pi.hProcess, 199);
+        }
+        ret = WaitForSingleObject(pi.hProcess, 1000);
+        ok(ret == WAIT_OBJECT_0, "child process failed to terminate\n");
+        GetExitCodeProcess(pi.hProcess, &ret);
+        ok(ret == 199, "expected exit code 199, got %u\n", ret);
+        if (*child_failures)
+        {
+            trace("%d failures in child process\n", *child_failures);
+            winetest_add_failures(*child_failures);
+        }
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    else
+        win_skip("RtlAcquirePebLock/RtlReleasePebLock are not available on this platform\n");
 
     /* test remote process termination */
     SetLastError(0xdeadbeef);
@@ -1761,6 +1936,10 @@ static void test_ExitProcess(void)
     ok(ret, "VirtualProtectEx error %d\n", GetLastError());
     ok(old_prot == PAGE_READWRITE, "expected PAGE_READWRITE, got %#x\n", old_prot);
     SetLastError(0xdeadbeef);
+    size = VirtualQueryEx(pi.hProcess, NULL, &mbi, sizeof(mbi));
+    ok(size == sizeof(mbi), "VirtualQueryEx error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
     ret = ReadProcessMemory(pi.hProcess, addr, buf, 4, &size);
     ok(ret, "ReadProcessMemory error %d\n", GetLastError());
     ok(size == 4, "expected 4, got %lu\n", size);
@@ -1768,6 +1947,11 @@ static void test_ExitProcess(void)
     SetLastError(0xdeadbeef);
     hmap = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096, NULL);
     ok(hmap != 0, "CreateFileMapping error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(GetCurrentProcess(), hmap, pi.hProcess, &hmap_dup,
+                          0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(ret, "DuplicateHandle error %d\n", GetLastError());
 
     offset.u.LowPart = 0;
     offset.u.HighPart = 0;
@@ -1800,7 +1984,7 @@ static void test_ExitProcess(void)
     /* Calling GetExitCodeThread() without waiting for thread termination
      * leads to different results due to a race condition.
      */
-    ret = WaitForSingleObject(thread, 100);
+    ret = WaitForSingleObject(thread, 1000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
     GetExitCodeThread(thread, &ret);
     ok(ret == 199, "expected exit code 199, got %u\n", ret);
@@ -1811,8 +1995,13 @@ static void test_ExitProcess(void)
     /* Checking process state without waiting for process termination
      * leads to different results due to a race condition.
      */
-    ret = WaitForSingleObject(pi.hProcess, 100);
+    ret = WaitForSingleObject(pi.hProcess, 1000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
+
+    SetLastError(0xdeadbeef);
+    process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pi.dwProcessId);
+    ok(process != NULL, "OpenProcess error %d\n", GetLastError());
+    CloseHandle(process);
 
     memset(&pbi, 0, sizeof(pbi));
     ret = pNtQueryInformationProcess(pi.hProcess, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
@@ -1820,7 +2009,6 @@ static void test_ExitProcess(void)
     ok(pbi.ExitStatus == 198, "expected 198, got %lu\n", pbi.ExitStatus);
     affinity = 1;
     ret = pNtSetInformationProcess(pi.hProcess, ProcessAffinityMask, &affinity, sizeof(affinity));
-todo_wine
     ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#x\n", ret);
 
     SetLastError(0xdeadbeef);
@@ -1883,6 +2071,26 @@ todo_wine
     addr = VirtualAllocEx(pi.hProcess, NULL, 4096, MEM_COMMIT, PAGE_READWRITE);
     ok(!addr, "VirtualAllocEx should fail\n");
     ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    size = VirtualQueryEx(pi.hProcess, NULL, &mbi, sizeof(mbi));
+    ok(!size, "VirtualQueryEx should fail\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+
+    /* CloseHandle() call below leads to premature process termination
+     * under some Windows versions.
+     */
+if (0)
+{
+    SetLastError(0xdeadbeef);
+    ret = CloseHandle(hmap_dup);
+    ok(ret, "CloseHandle should not fail\n");
+}
+
+    SetLastError(0xdeadbeef);
+    ret = DuplicateHandle(GetCurrentProcess(), hmap, pi.hProcess, &hmap_dup,
+                          0, FALSE, DUPLICATE_SAME_ACCESS);
+    ok(!ret, "DuplicateHandle should fail\n");
+    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
 
     offset.u.LowPart = 0;
     offset.u.HighPart = 0;
@@ -1890,7 +2098,6 @@ todo_wine
     size = 0;
     ret = pNtMapViewOfSection(hmap, pi.hProcess, &addr, 0, 0, &offset,
                               &size, 1 /* ViewShare */, 0, PAGE_READONLY);
-todo_wine
     ok(ret == STATUS_PROCESS_IS_TERMINATING, "expected STATUS_PROCESS_IS_TERMINATING, got %#x\n", ret);
 
     SetLastError(0xdeadbeef);
@@ -1929,6 +2136,10 @@ START_TEST(loader)
     pRtlDllShutdownInProgress = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "RtlDllShutdownInProgress");
     pNtAllocateVirtualMemory = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtAllocateVirtualMemory");
     pNtFreeVirtualMemory = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "NtFreeVirtualMemory");
+    pLdrLockLoaderLock = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "LdrLockLoaderLock");
+    pLdrUnlockLoaderLock = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "LdrUnlockLoaderLock");
+    pRtlAcquirePebLock = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "RtlAcquirePebLock");
+    pRtlReleasePebLock = (void *)GetProcAddress(GetModuleHandle("ntdll.dll"), "RtlReleasePebLock");
 
     mapping = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, 4096, "winetest_loader");
     ok(mapping != 0, "CreateFileMapping failed\n");

@@ -538,6 +538,7 @@ static BOOL use_default_fallback = FALSE;
 
 static BOOL get_glyph_index_linked(GdiFont *font, UINT c, GdiFont **linked_font, FT_UInt *glyph);
 static BOOL get_outline_text_metrics(GdiFont *font);
+static BOOL get_bitmap_text_metrics(GdiFont *font);
 static BOOL get_text_metrics(GdiFont *font, LPTEXTMETRICW ptm);
 static void remove_face_from_cache( Face *face );
 
@@ -3982,6 +3983,7 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
     TT_HoriHeader *pHori;
 
     LONG ppem;
+    const LONG MAX_PPEM = (1 << 16) - 1;
 
     pOS2 = pFT_Get_Sfnt_Table(ft_face, ft_sfnt_os2);
     pHori = pFT_Get_Sfnt_Table(ft_face, ft_sfnt_hhea);
@@ -4009,9 +4011,17 @@ static LONG calc_ppem_for_height(FT_Face ft_face, LONG height)
         else
             ppem = MulDiv(ft_face->units_per_EM, height,
                           pOS2->usWinAscent + pOS2->usWinDescent);
+        if(ppem > MAX_PPEM) {
+            WARN("Ignoring too large height %d, ppem %d\n", height, ppem);
+            ppem = 1;
+        }
     }
-    else
+    else if(height >= -MAX_PPEM)
         ppem = -height;
+    else {
+        WARN("Ignoring too large height %d\n", height);
+        ppem = 1;
+    }
 
     return ppem;
 }
@@ -5868,6 +5878,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     static const FT_Matrix identityMat = {(1 << 16), 0, 0, (1 << 16)};
     FT_Face ft_face = incoming_font->ft_face;
     GdiFont *font = incoming_font;
+    FT_Glyph_Metrics metrics;
     FT_UInt glyph_index;
     DWORD width, height, pitch, needed = 0;
     FT_Bitmap ft_bitmap;
@@ -6019,6 +6030,22 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         return GDI_ERROR;
     }
 
+    /* Some poorly-created fonts contain glyphs that exceed the boundaries set
+     * by the text metrics. The proper behavior is to clip the glyph metrics to
+     * fit within the maximums specified in the text metrics. */
+    metrics = ft_face->glyph->metrics;
+    if(incoming_font->potm || get_outline_text_metrics(incoming_font) ||
+        get_bitmap_text_metrics(incoming_font)) {
+        TEXTMETRICW *ptm = &incoming_font->potm->otmTextMetrics;
+        top = min( metrics.horiBearingY, ptm->tmAscent << 6 );
+        bottom = max( metrics.horiBearingY - metrics.height, -(ptm->tmDescent << 6) );
+        metrics.horiBearingY = top;
+        metrics.height = top - bottom;
+
+        /* TODO: Are we supposed to clip the width as well...? */
+        /* metrics.width = min( metrics.width, ptm->tmMaxCharWidth << 6 ); */
+    }
+
     if(FT_IS_SCALABLE(incoming_font->ft_face)) {
         TEXTMETRICW tm;
         if (get_text_metrics(incoming_font, &tm) &&
@@ -6026,7 +6053,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             em_scale = MulDiv(incoming_font->ppem, 1 << 16, incoming_font->ft_face->units_per_EM);
             avgAdvance = pFT_MulFix(incoming_font->ntmAvgWidth, em_scale);
             if (avgAdvance &&
-                (ft_face->glyph->metrics.horiAdvance+63) >> 6 == pFT_MulFix(incoming_font->ntmAvgWidth*2, em_scale))
+                (metrics.horiAdvance+63) >> 6 == pFT_MulFix(incoming_font->ntmAvgWidth*2, em_scale))
                 TRACE("Fixed-pitch full-width character detected\n");
             else
                 avgAdvance = 0; /* cancel this feature */
@@ -6034,16 +6061,15 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 
     if(!needsTransform) {
-        left = (INT)(ft_face->glyph->metrics.horiBearingX) & -64;
-        right = (INT)((ft_face->glyph->metrics.horiBearingX + ft_face->glyph->metrics.width) + 63) & -64;
+        left = (INT)(metrics.horiBearingX) & -64;
+        right = (INT)((metrics.horiBearingX + metrics.width) + 63) & -64;
         if (!avgAdvance)
-            adv = (INT)(ft_face->glyph->metrics.horiAdvance + 63) >> 6;
+            adv = (INT)(metrics.horiAdvance + 63) >> 6;
         else
             adv = (INT)avgAdvance * 2;
 
-	top = (ft_face->glyph->metrics.horiBearingY + 63) & -64;
-	bottom = (ft_face->glyph->metrics.horiBearingY -
-		  ft_face->glyph->metrics.height) & -64;
+	top = (metrics.horiBearingY + 63) & -64;
+	bottom = (metrics.horiBearingY - metrics.height) & -64;
 	lpgm->gmCellIncX = adv;
 	lpgm->gmCellIncY = 0;
     } else {
@@ -6054,10 +6080,8 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 
 	for(xc = 0; xc < 2; xc++) {
 	    for(yc = 0; yc < 2; yc++) {
-	        vec.x = (ft_face->glyph->metrics.horiBearingX +
-		  xc * ft_face->glyph->metrics.width);
-		vec.y = ft_face->glyph->metrics.horiBearingY -
-		  yc * ft_face->glyph->metrics.height;
+	        vec.x = metrics.horiBearingX + xc * metrics.width;
+		vec.y = metrics.horiBearingY - yc * metrics.height;
 		TRACE("Vec %ld,%ld\n", vec.x, vec.y);
 		pFT_Vector_Transform(&vec, &transMat);
 		if(xc == 0 && yc == 0) {
@@ -6077,7 +6101,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 	top = (top + 63) & -64;
 
 	TRACE("transformed box: (%d,%d - %d,%d)\n", left, top, right, bottom);
-	vec.x = ft_face->glyph->metrics.horiAdvance;
+	vec.x = metrics.horiAdvance;
 	vec.y = 0;
 	pFT_Vector_Transform(&vec, &transMat);
 	lpgm->gmCellIncY = -((vec.y+63) >> 6);
@@ -6090,7 +6114,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 	    lpgm->gmCellIncX = pFT_MulFix(vec.x, em_scale) * 2;
 	}
 
-        vec.x = ft_face->glyph->metrics.horiAdvance;
+        vec.x = metrics.horiAdvance;
         vec.y = 0;
         pFT_Vector_Transform(&vec, &transMatUnrotated);
         if (!avgAdvance || vec.y)
@@ -6352,19 +6376,35 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             }
 
             x_shift = ft_face->glyph->bitmap_left - lpgm->gmptGlyphOrigin.x;
-            if ( x_shift < 0 ) x_shift = 0;
-            if ( x_shift + (src_width / hmul) > width )
-                x_shift = width - (src_width / hmul);
+            if ( x_shift < 0 )
+            {
+                src += hmul * -x_shift;
+                src_width -= hmul * -x_shift;
+            }
+            else if ( x_shift > 0 )
+            {
+                dst += x_shift;
+                width -= x_shift;
+            }
 
             y_shift = lpgm->gmptGlyphOrigin.y - ft_face->glyph->bitmap_top;
-            if ( y_shift < 0 ) y_shift = 0;
-            if ( y_shift + (src_height / vmul) > height )
-                y_shift = height - (src_height / vmul);
-
-            dst += x_shift + y_shift * ( pitch / 4 );
-            while ( src_height )
+            if ( y_shift < 0 )
             {
-                for ( x = 0; x < src_width / hmul; x++ )
+                src += src_pitch * vmul * -y_shift;
+                src_height -= vmul * -y_shift;
+            }
+            else if ( y_shift > 0 )
+            {
+                dst += y_shift * ( pitch / sizeof(*dst) );
+                height -= y_shift;
+            }
+
+            width = min( width, src_width / hmul );
+            height = min( height, src_height / vmul );
+
+            while ( height-- )
+            {
+                for ( x = 0; x < width; x++ )
                 {
                     if ( rgb )
                     {
@@ -6382,8 +6422,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
                     }
                 }
                 src += src_pitch * vmul;
-                dst += pitch / 4;
-                src_height -= vmul;
+                dst += pitch / sizeof(*dst);
             }
 
             break;
