@@ -582,10 +582,10 @@ static void convert_s8_uint_d24_float(const BYTE *src, BYTE *dst, UINT pitch, UI
  *     WINED3DFMT_NVHS */
 static const struct wined3d_format_texture_info format_texture_info[] =
 {
-    /* format id                        internal                          srgbInternal                       rtInternal
-            format                      type
+    /* format id                        gl_internal                       gl_srgb_internal                      gl_rt_internal
+            gl_format                   gl_type                           conv_byte_count
             flags
-            extension */
+            extension                   convert */
     /* FourCC formats */
     /* GL_APPLE_ycbcr_422 claims that its '2YUV' format, which is supported via the UNSIGNED_SHORT_8_8_REV_APPLE type
      * is equivalent to 'UYVY' format on Windows, and the 'YUVS' via UNSIGNED_SHORT_8_8_APPLE equates to 'YUY2'. The
@@ -925,7 +925,7 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
             ARB_FRAMEBUFFER_OBJECT,     NULL},
-    {WINED3DFMT_NULL,                   GL_RGBA8,                         GL_RGBA8,                               0,
+    {WINED3DFMT_NULL,                   0,                                0,                                      0,
             GL_RGBA,                    GL_UNSIGNED_INT_8_8_8_8_REV,      0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_RENDERTARGET,
             ARB_FRAMEBUFFER_OBJECT,     NULL},
@@ -1724,7 +1724,7 @@ static void apply_format_fixups(struct wined3d_adapter *adapter, struct wined3d_
 
     for (i = 0; i < sizeof(formats) / sizeof(*formats); ++i)
     {
-        struct wined3d_format *format = &gl_info->formats[idx];
+        struct wined3d_format *format = &gl_info->formats[i];
 
         if (!(format->flags & WINED3DFMT_FLAG_TEXTURE))
             continue;

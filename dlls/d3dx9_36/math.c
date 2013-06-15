@@ -2394,54 +2394,54 @@ FLOAT* WINAPI D3DXSHEvalDirection(FLOAT *out, UINT order, const D3DXVECTOR3 *dir
     if ((order < D3DXSH_MINORDER) || (order > D3DXSH_MAXORDER))
         return out;
 
-    out[0] = 0.5f / sqrt(D3DX_PI);
-    out[1] = -0.5f / sqrt(D3DX_PI / 3.0f) * dir->y;
-    out[2] = 0.5f / sqrt(D3DX_PI / 3.0f) * dir->z;
-    out[3] = -0.5f / sqrt(D3DX_PI / 3.0f) * dir->x;
+    out[0] = 0.5f / sqrtf(D3DX_PI);
+    out[1] = -0.5f / sqrtf(D3DX_PI / 3.0f) * dir->y;
+    out[2] = 0.5f / sqrtf(D3DX_PI / 3.0f) * dir->z;
+    out[3] = -0.5f / sqrtf(D3DX_PI / 3.0f) * dir->x;
     if (order == 2)
         return out;
 
-    out[4] = 0.5f / sqrt(D3DX_PI / 15.0f) * dirxy;
-    out[5] = -0.5f / sqrt(D3DX_PI / 15.0f) * diryz;
-    out[6] = 0.25f / sqrt(D3DX_PI / 5.0f) * (3.0f * dirzz - 1.0f);
-    out[7] = -0.5f / sqrt(D3DX_PI / 15.0f) * dirxz;
-    out[8] = 0.25f / sqrt(D3DX_PI / 15.0f) * (dirxx - diryy);
+    out[4] = 0.5f / sqrtf(D3DX_PI / 15.0f) * dirxy;
+    out[5] = -0.5f / sqrtf(D3DX_PI / 15.0f) * diryz;
+    out[6] = 0.25f / sqrtf(D3DX_PI / 5.0f) * (3.0f * dirzz - 1.0f);
+    out[7] = -0.5f / sqrtf(D3DX_PI / 15.0f) * dirxz;
+    out[8] = 0.25f / sqrtf(D3DX_PI / 15.0f) * (dirxx - diryy);
     if (order == 3)
         return out;
 
-    out[9] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->y * (3.0f * dirxx - diryy);
-    out[10] = sqrt(105.0f / D3DX_PI) / 2.0f * dirxy * dir->z;
-    out[11] = -sqrt(42.0 / D3DX_PI) / 8.0f * dir->y * (-1.0f + 5.0f * dirzz);
-    out[12] = sqrt(7.0f / D3DX_PI) / 4.0f * dir->z * (5.0f * dirzz - 3.0f);
-    out[13] = sqrt(42.0 / D3DX_PI) / 8.0f * dir->x * (1.0f - 5.0f * dirzz);
-    out[14] = sqrt(105.0f / D3DX_PI) / 4.0f * dir->z * (dirxx - diryy);
-    out[15] = -sqrt(70.0f / D3DX_PI) / 8.0f * dir->x * (dirxx - 3.0f * diryy);
+    out[9] = -sqrtf(70.0f / D3DX_PI) / 8.0f * dir->y * (3.0f * dirxx - diryy);
+    out[10] = sqrtf(105.0f / D3DX_PI) / 2.0f * dirxy * dir->z;
+    out[11] = -sqrtf(42.0 / D3DX_PI) / 8.0f * dir->y * (-1.0f + 5.0f * dirzz);
+    out[12] = sqrtf(7.0f / D3DX_PI) / 4.0f * dir->z * (5.0f * dirzz - 3.0f);
+    out[13] = sqrtf(42.0 / D3DX_PI) / 8.0f * dir->x * (1.0f - 5.0f * dirzz);
+    out[14] = sqrtf(105.0f / D3DX_PI) / 4.0f * dir->z * (dirxx - diryy);
+    out[15] = -sqrtf(70.0f / D3DX_PI) / 8.0f * dir->x * (dirxx - 3.0f * diryy);
     if (order == 4)
         return out;
 
-    out[16] = 0.75f * sqrt(35.0f / D3DX_PI) * dirxy * (dirxx - diryy);
+    out[16] = 0.75f * sqrtf(35.0f / D3DX_PI) * dirxy * (dirxx - diryy);
     out[17] = 3.0f * dir->z * out[9];
-    out[18] = 0.75f * sqrt(5.0f / D3DX_PI) * dirxy * (7.0f * dirzz - 1.0f);
-    out[19] = 0.375f * sqrt(10.0f / D3DX_PI) * diryz * (3.0f - 7.0f * dirzz);
-    out[20] = 3.0f / (16.0f * sqrt(D3DX_PI)) * (35.0f * dirzzzz - 30.f * dirzz + 3.0f);
-    out[21] = 0.375f * sqrt(10.0f / D3DX_PI) * dirxz * (3.0f - 7.0f * dirzz);
-    out[22] = 0.375f * sqrt(5.0f / D3DX_PI) * (dirxx - diryy) * (7.0f * dirzz - 1.0f);
+    out[18] = 0.75f * sqrtf(5.0f / D3DX_PI) * dirxy * (7.0f * dirzz - 1.0f);
+    out[19] = 0.375f * sqrtf(10.0f / D3DX_PI) * diryz * (3.0f - 7.0f * dirzz);
+    out[20] = 3.0f / (16.0f * sqrtf(D3DX_PI)) * (35.0f * dirzzzz - 30.f * dirzz + 3.0f);
+    out[21] = 0.375f * sqrtf(10.0f / D3DX_PI) * dirxz * (3.0f - 7.0f * dirzz);
+    out[22] = 0.375f * sqrtf(5.0f / D3DX_PI) * (dirxx - diryy) * (7.0f * dirzz - 1.0f);
     out[23] = 3.0 * dir->z * out[15];
-    out[24] = 3.0f / 16.0f * sqrt(35.0f / D3DX_PI) * (dirxxxx - 6.0f * dirxyxy + diryyyy);
+    out[24] = 3.0f / 16.0f * sqrtf(35.0f / D3DX_PI) * (dirxxxx - 6.0f * dirxyxy + diryyyy);
     if (order == 5)
         return out;
 
-    out[25] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->y * (5.0f * dirxxxx - 10.0f * dirxyxy + diryyyy);
-    out[26] = 0.75f * sqrt(385.0f / D3DX_PI) * dirxy * dir->z * (dirxx - diryy);
-    out[27] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->y * (3.0f * dirxx - diryy) * (1.0f - 9.0f * dirzz);
-    out[28] = sqrt(1155.0f / D3DX_PI) / 4.0f * dirxy * dir->z * (3.0f * dirzz - 1.0f);
-    out[29] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->y * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
-    out[30] = sqrt(11.0f / D3DX_PI) / 16.0f * dir->z * (63.0f * dirzzzz - 70.0f * dirzz + 15.0f);
-    out[31] = sqrt(165.0f / D3DX_PI) / 16.0f * dir->x * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
-    out[32] = sqrt(1155.0f / D3DX_PI) / 8.0f * dir->z * (dirxx - diryy) * (3.0f * dirzz - 1.0f);
-    out[33] = sqrt(770.0f / D3DX_PI) / 32.0f * dir->x * (dirxx - 3.0f * diryy) * (1.0f - 9.0f * dirzz);
-    out[34] = 3.0f / 16.0f * sqrt(385.0f / D3DX_PI) * dir->z * (dirxxxx - 6.0 * dirxyxy + diryyyy);
-    out[35] = -3.0f/ 32.0f * sqrt(154.0f / D3DX_PI) * dir->x * (dirxxxx - 10.0f * dirxyxy + 5.0f * diryyyy);
+    out[25] = -3.0f/ 32.0f * sqrtf(154.0f / D3DX_PI) * dir->y * (5.0f * dirxxxx - 10.0f * dirxyxy + diryyyy);
+    out[26] = 0.75f * sqrtf(385.0f / D3DX_PI) * dirxy * dir->z * (dirxx - diryy);
+    out[27] = sqrtf(770.0f / D3DX_PI) / 32.0f * dir->y * (3.0f * dirxx - diryy) * (1.0f - 9.0f * dirzz);
+    out[28] = sqrtf(1155.0f / D3DX_PI) / 4.0f * dirxy * dir->z * (3.0f * dirzz - 1.0f);
+    out[29] = sqrtf(165.0f / D3DX_PI) / 16.0f * dir->y * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
+    out[30] = sqrtf(11.0f / D3DX_PI) / 16.0f * dir->z * (63.0f * dirzzzz - 70.0f * dirzz + 15.0f);
+    out[31] = sqrtf(165.0f / D3DX_PI) / 16.0f * dir->x * (14.0f * dirzz - 21.0f * dirzzzz - 1.0f);
+    out[32] = sqrtf(1155.0f / D3DX_PI) / 8.0f * dir->z * (dirxx - diryy) * (3.0f * dirzz - 1.0f);
+    out[33] = sqrtf(770.0f / D3DX_PI) / 32.0f * dir->x * (dirxx - 3.0f * diryy) * (1.0f - 9.0f * dirzz);
+    out[34] = 3.0f / 16.0f * sqrtf(385.0f / D3DX_PI) * dir->z * (dirxxxx - 6.0 * dirxyxy + diryyyy);
+    out[35] = -3.0f/ 32.0f * sqrtf(154.0f / D3DX_PI) * dir->x * (dirxxxx - 10.0f * dirxyxy + 5.0f * diryyyy);
 
     return out;
 }
@@ -2471,6 +2471,94 @@ HRESULT WINAPI D3DXSHEvalDirectionalLight(UINT order, const D3DXVECTOR3 *dir, FL
         if ( Bout )
             Bout[j] = Bintensity * temp;
     }
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXSHEvalHemisphereLight(UINT order, const D3DXVECTOR3 *dir, D3DXCOLOR top, D3DXCOLOR bottom,
+    FLOAT *rout, FLOAT *gout, FLOAT *bout)
+{
+    FLOAT a[2], temp[4];
+    UINT i, j;
+
+    TRACE("order %u, dir %p, rout %p, gout %p, bout %p\n", order, dir, rout, gout, bout);
+
+    D3DXSHEvalDirection(temp, 2, dir);
+
+    a[0] = (top.r + bottom.r) * 3.0f * D3DX_PI;
+    a[1] = (top.r - bottom.r) * D3DX_PI;
+    for (i = 0; i < order; i++)
+        for (j = 0; j < 2 * i + 1; j++)
+            if (i < 2)
+                rout[i * i + j] = temp[i * i + j] * a[i];
+            else
+                rout[i * i + j] = 0.0f;
+
+    if (gout)
+    {
+        a[0] = (top.g + bottom.g) * 3.0f * D3DX_PI;
+        a[1] = (top.g - bottom.g) * D3DX_PI;
+        for (i = 0; i < order; i++)
+            for (j = 0; j < 2 * i + 1; j++)
+                if (i < 2)
+                    gout[i * i + j] = temp[i * i + j] * a[i];
+                else
+                    gout[i * i + j] = 0.0f;
+    }
+
+    if (bout)
+    {
+        a[0] = (top.b + bottom.b) * 3.0f * D3DX_PI;
+        a[1] = (top.b - bottom.b) * D3DX_PI;
+        for (i = 0; i < order; i++)
+            for (j = 0; j < 2 * i + 1; j++)
+                if (i < 2)
+                    bout[i * i + j] = temp[i * i + j] * a[i];
+                else
+                    bout[i * i + j] = 0.0f;
+    }
+
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXSHEvalSphericalLight(UINT order, const D3DXVECTOR3 *dir, FLOAT radius,
+    FLOAT Rintensity, FLOAT Gintensity, FLOAT Bintensity, FLOAT *rout, FLOAT *gout, FLOAT *bout)
+{
+    D3DXVECTOR3 normal;
+    FLOAT cap[6], clamped_angle, dist, temp;
+    UINT i, index, j;
+
+    TRACE("order %u, dir %p, radius %f, red %f, green %f, blue %f, rout %p, gout %p, bout %p\n",
+        order, dir, radius, Rintensity, Gintensity, Bintensity, rout, gout, bout);
+
+    if (order > D3DXSH_MAXORDER)
+    {
+        WARN("Order clamped at D3DXSH_MAXORDER\n");
+        order = D3DXSH_MAXORDER;
+    }
+
+    if (radius < 0.0f)
+        radius = -radius;
+
+    dist = D3DXVec3Length(dir);
+    clamped_angle = (dist <= radius) ? D3DX_PI / 2.0f : asinf(radius / dist);
+
+    weightedcapintegrale(cap, order, clamped_angle);
+    D3DXVec3Normalize(&normal, dir);
+    D3DXSHEvalDirection(rout, order, &normal);
+
+    for (i = 0; i < order; i++)
+        for (j = 0; j < 2 * i + 1; j++)
+        {
+            index = i * i + j;
+            temp = rout[index] * cap[i];
+
+            rout[index] = temp * Rintensity;
+            if (gout)
+                gout[index] = temp * Gintensity;
+            if (bout)
+                bout[index] = temp * Bintensity;
+        }
 
     return D3D_OK;
 }

@@ -5881,7 +5881,8 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     BOOL needsTransform = FALSE;
     BOOL tategaki = (font->GSUB_Table != NULL);
     UINT original_index;
-    FT_Fixed avgAdvance = 0;
+    LONG avgAdvance = 0;
+    FT_Fixed em_scale;
 
     TRACE("%p, %04x, %08x, %p, %08x, %p, %p\n", font, glyph, format, lpgm,
 	  buflen, buf, lpmat);
@@ -6022,9 +6023,10 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         TEXTMETRICW tm;
         if (get_text_metrics(incoming_font, &tm) &&
             !(tm.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
-            avgAdvance = pFT_MulFix(incoming_font->ntmAvgWidth,
-                                    incoming_font->ft_face->size->metrics.x_scale);
-            if (avgAdvance && (ft_face->glyph->metrics.horiAdvance+63) >> 6 == (avgAdvance*2+63) >> 6)
+            em_scale = MulDiv(incoming_font->ppem, 1 << 16, incoming_font->ft_face->units_per_EM);
+            avgAdvance = pFT_MulFix(incoming_font->ntmAvgWidth, em_scale);
+            if (avgAdvance &&
+                (ft_face->glyph->metrics.horiAdvance+63) >> 6 == pFT_MulFix(incoming_font->ntmAvgWidth*2, em_scale))
                 TRACE("Fixed-pitch full-width character detected\n");
             else
                 avgAdvance = 0; /* cancel this feature */
@@ -6037,7 +6039,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         if (!avgAdvance)
             adv = (INT)(ft_face->glyph->metrics.horiAdvance + 63) >> 6;
         else
-            adv = (INT)((avgAdvance + 32) >> 6) * 2;
+            adv = (INT)avgAdvance * 2;
 
 	top = (ft_face->glyph->metrics.horiBearingY + 63) & -64;
 	bottom = (ft_face->glyph->metrics.horiBearingY -
@@ -6082,10 +6084,10 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 	if (!avgAdvance || vec.y)
 	    lpgm->gmCellIncX = (vec.x+63) >> 6;
 	else {
-	    vec.x = avgAdvance;
+	    vec.x = incoming_font->ntmAvgWidth;
 	    vec.y = 0;
 	    pFT_Vector_Transform(&vec, &transMat);
-	    lpgm->gmCellIncX = ((vec.x+32) >> 6) * 2;
+	    lpgm->gmCellIncX = pFT_MulFix(vec.x, em_scale) * 2;
 	}
 
         vec.x = ft_face->glyph->metrics.horiAdvance;
@@ -6094,10 +6096,10 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         if (!avgAdvance || vec.y)
             adv = (vec.x+63) >> 6;
         else {
-            vec.x = avgAdvance;
+            vec.x = incoming_font->ntmAvgWidth;
             vec.y = 0;
             pFT_Vector_Transform(&vec, &transMatUnrotated);
-            adv = ((vec.x+32) >> 6) * 2;
+            adv = pFT_MulFix(vec.x, em_scale) * 2;
         }
     }
 
@@ -6775,7 +6777,7 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     TT_OS2 *pOS2;
     TT_HoriHeader *pHori;
     TT_Postscript *pPost;
-    FT_Fixed x_scale, y_scale;
+    FT_Fixed em_scale;
     WCHAR *family_nameW, *style_nameW, *face_nameW, *full_nameW;
     char *cp;
     INT ascent, descent;
@@ -6837,8 +6839,7 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     needed += lenfull;
 
 
-    x_scale = ft_face->size->metrics.x_scale;
-    y_scale = ft_face->size->metrics.y_scale;
+    em_scale = (FT_Fixed)MulDiv(font->ppem, 1 << 16, ft_face->units_per_EM);
 
     pOS2 = pFT_Get_Sfnt_Table(ft_face, ft_sfnt_os2);
     if(!pOS2) {
@@ -6878,15 +6879,17 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     font->ntmCellHeight = ascent + descent;
     font->ntmAvgWidth = pOS2->xAvgCharWidth;
 
+#define SCALE_X(x) (pFT_MulFix(x, em_scale))
+#define SCALE_Y(y) (pFT_MulFix(y, em_scale))
+
     if(font->yMax) {
 	TM.tmAscent = font->yMax;
 	TM.tmDescent = -font->yMin;
 	TM.tmInternalLeading = (TM.tmAscent + TM.tmDescent) - ft_face->size->metrics.y_ppem;
     } else {
-	TM.tmAscent = (pFT_MulFix(ascent, y_scale) + 32) >> 6;
-	TM.tmDescent = (pFT_MulFix(descent, y_scale) + 32) >> 6;
-	TM.tmInternalLeading = (pFT_MulFix(ascent + descent
-					    - ft_face->units_per_EM, y_scale) + 32) >> 6;
+	TM.tmAscent = SCALE_Y(ascent);
+	TM.tmDescent = SCALE_Y(descent);
+	TM.tmInternalLeading = SCALE_Y(ascent + descent - ft_face->units_per_EM);
     }
 
     TM.tmHeight = TM.tmAscent + TM.tmDescent;
@@ -6894,15 +6897,15 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     /* MSDN says:
      el = MAX(0, LineGap - ((WinAscent + WinDescent) - (Ascender - Descender)))
     */
-    TM.tmExternalLeading = max(0, (pFT_MulFix(pHori->Line_Gap -
-       		 ((ascent + descent) -
-		  (pHori->Ascender - pHori->Descender)), y_scale) + 32) >> 6);
+    TM.tmExternalLeading = max(0, SCALE_Y(pHori->Line_Gap -
+                                          ((ascent + descent) -
+                                           (pHori->Ascender - pHori->Descender))));
 
-    TM.tmAveCharWidth = (pFT_MulFix(pOS2->xAvgCharWidth, x_scale) + 32) >> 6;
+    TM.tmAveCharWidth = SCALE_X(pOS2->xAvgCharWidth);
     if (TM.tmAveCharWidth == 0) {
         TM.tmAveCharWidth = 1; 
     }
-    TM.tmMaxCharWidth = (pFT_MulFix(ft_face->bbox.xMax - ft_face->bbox.xMin, x_scale) + 32) >> 6;
+    TM.tmMaxCharWidth = SCALE_X(ft_face->bbox.xMax - ft_face->bbox.xMin);
     TM.tmWeight = FW_REGULAR;
     if (font->fake_bold)
         TM.tmWeight = FW_BOLD;
@@ -7036,36 +7039,38 @@ static BOOL get_outline_text_metrics(GdiFont *font)
     font->potm->otmsCharSlopeRun = pHori->caret_Slope_Run;
     font->potm->otmItalicAngle = 0; /* POST table */
     font->potm->otmEMSquare = ft_face->units_per_EM;
-    font->potm->otmAscent = (pFT_MulFix(pOS2->sTypoAscender, y_scale) + 32) >> 6;
-    font->potm->otmDescent = (pFT_MulFix(pOS2->sTypoDescender, y_scale) + 32) >> 6;
-    font->potm->otmLineGap = (pFT_MulFix(pOS2->sTypoLineGap, y_scale) + 32) >> 6;
-    font->potm->otmsCapEmHeight = (pFT_MulFix(pOS2->sCapHeight, y_scale) + 32) >> 6;
-    font->potm->otmsXHeight = (pFT_MulFix(pOS2->sxHeight, y_scale) + 32) >> 6;
-    font->potm->otmrcFontBox.left = (pFT_MulFix(ft_face->bbox.xMin, x_scale) + 32) >> 6;
-    font->potm->otmrcFontBox.right = (pFT_MulFix(ft_face->bbox.xMax, x_scale) + 32) >> 6;
-    font->potm->otmrcFontBox.top = (pFT_MulFix(ft_face->bbox.yMax, y_scale) + 32) >> 6;
-    font->potm->otmrcFontBox.bottom = (pFT_MulFix(ft_face->bbox.yMin, y_scale) + 32) >> 6;
+    font->potm->otmAscent = SCALE_Y(pOS2->sTypoAscender);
+    font->potm->otmDescent = SCALE_Y(pOS2->sTypoDescender);
+    font->potm->otmLineGap = SCALE_Y(pOS2->sTypoLineGap);
+    font->potm->otmsCapEmHeight = SCALE_Y(pOS2->sCapHeight);
+    font->potm->otmsXHeight = SCALE_Y(pOS2->sxHeight);
+    font->potm->otmrcFontBox.left = SCALE_X(ft_face->bbox.xMin);
+    font->potm->otmrcFontBox.right = SCALE_X(ft_face->bbox.xMax);
+    font->potm->otmrcFontBox.top = SCALE_Y(ft_face->bbox.yMax);
+    font->potm->otmrcFontBox.bottom = SCALE_Y(ft_face->bbox.yMin);
     font->potm->otmMacAscent = TM.tmAscent;
     font->potm->otmMacDescent = -TM.tmDescent;
     font->potm->otmMacLineGap = font->potm->otmLineGap;
     font->potm->otmusMinimumPPEM = 0; /* TT Header */
-    font->potm->otmptSubscriptSize.x = (pFT_MulFix(pOS2->ySubscriptXSize, x_scale) + 32) >> 6;
-    font->potm->otmptSubscriptSize.y = (pFT_MulFix(pOS2->ySubscriptYSize, y_scale) + 32) >> 6;
-    font->potm->otmptSubscriptOffset.x = (pFT_MulFix(pOS2->ySubscriptXOffset, x_scale) + 32) >> 6;
-    font->potm->otmptSubscriptOffset.y = (pFT_MulFix(pOS2->ySubscriptYOffset, y_scale) + 32) >> 6;
-    font->potm->otmptSuperscriptSize.x = (pFT_MulFix(pOS2->ySuperscriptXSize, x_scale) + 32) >> 6;
-    font->potm->otmptSuperscriptSize.y = (pFT_MulFix(pOS2->ySuperscriptYSize, y_scale) + 32) >> 6;
-    font->potm->otmptSuperscriptOffset.x = (pFT_MulFix(pOS2->ySuperscriptXOffset, x_scale) + 32) >> 6;
-    font->potm->otmptSuperscriptOffset.y = (pFT_MulFix(pOS2->ySuperscriptYOffset, y_scale) + 32) >> 6;
-    font->potm->otmsStrikeoutSize = (pFT_MulFix(pOS2->yStrikeoutSize, y_scale) + 32) >> 6;
-    font->potm->otmsStrikeoutPosition = (pFT_MulFix(pOS2->yStrikeoutPosition, y_scale) + 32) >> 6;
+    font->potm->otmptSubscriptSize.x = SCALE_X(pOS2->ySubscriptXSize);
+    font->potm->otmptSubscriptSize.y = SCALE_Y(pOS2->ySubscriptYSize);
+    font->potm->otmptSubscriptOffset.x = SCALE_X(pOS2->ySubscriptXOffset);
+    font->potm->otmptSubscriptOffset.y = SCALE_Y(pOS2->ySubscriptYOffset);
+    font->potm->otmptSuperscriptSize.x = SCALE_X(pOS2->ySuperscriptXSize);
+    font->potm->otmptSuperscriptSize.y = SCALE_Y(pOS2->ySuperscriptYSize);
+    font->potm->otmptSuperscriptOffset.x = SCALE_X(pOS2->ySuperscriptXOffset);
+    font->potm->otmptSuperscriptOffset.y = SCALE_Y(pOS2->ySuperscriptYOffset);
+    font->potm->otmsStrikeoutSize = SCALE_Y(pOS2->yStrikeoutSize);
+    font->potm->otmsStrikeoutPosition = SCALE_Y(pOS2->yStrikeoutPosition);
     if(!pPost) {
         font->potm->otmsUnderscoreSize = 0;
 	font->potm->otmsUnderscorePosition = 0;
     } else {
-        font->potm->otmsUnderscoreSize = (pFT_MulFix(pPost->underlineThickness, y_scale) + 32) >> 6;
-	font->potm->otmsUnderscorePosition = (pFT_MulFix(pPost->underlinePosition, y_scale) + 32) >> 6;
+        font->potm->otmsUnderscoreSize = SCALE_Y(pPost->underlineThickness);
+	font->potm->otmsUnderscorePosition = SCALE_Y(pPost->underlinePosition);
     }
+#undef SCALE_X
+#undef SCALE_Y
 #undef TM
 
     /* otmp* members should clearly have type ptrdiff_t, but M$ knows best */

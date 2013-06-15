@@ -501,6 +501,14 @@ static void prepare_ds_clear(struct wined3d_surface *ds, struct wined3d_context 
 {
     RECT current_rect, r;
 
+    if (ds->flags & SFLAG_DISCARDED)
+    {
+        /* Depth buffer was discarded, make it entirely current in its new location since
+         * there is no other place where we would get data anyway. */
+        SetRect(out_rect, 0, 0, ds->resource.width, ds->resource.height);
+        return;
+    }
+
     if (ds->flags & location)
         SetRect(&current_rect, 0, 0,
                 ds->ds_current_size.cx,
@@ -982,10 +990,10 @@ static void destroy_dummy_textures(struct wined3d_device *device, const struct w
     gl_info->gl_ops.gl.p_glDeleteTextures(count, device->dummy_texture_2d);
     checkGLcall("glDeleteTextures(count, device->dummy_texture_2d)");
 
-    memset(device->dummy_texture_cube, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_cube));
-    memset(device->dummy_texture_3d, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_3d));
-    memset(device->dummy_texture_rect, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_rect));
-    memset(device->dummy_texture_2d, 0, gl_info->limits.textures * sizeof(*device->dummy_texture_2d));
+    memset(device->dummy_texture_cube, 0, count * sizeof(*device->dummy_texture_cube));
+    memset(device->dummy_texture_3d, 0, count * sizeof(*device->dummy_texture_3d));
+    memset(device->dummy_texture_rect, 0, count * sizeof(*device->dummy_texture_rect));
+    memset(device->dummy_texture_2d, 0, count * sizeof(*device->dummy_texture_2d));
 }
 
 static LONG fullscreen_style(LONG style)
@@ -1032,7 +1040,7 @@ void CDECL wined3d_device_setup_fullscreen_window(struct wined3d_device *device,
 
     SetWindowLongW(window, GWL_STYLE, style);
     SetWindowLongW(window, GWL_EXSTYLE, exstyle);
-    SetWindowPos(window, HWND_TOP, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    SetWindowPos(window, HWND_TOPMOST, 0, 0, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
 
     device->filter_messages = filter_messages;
 }
@@ -1044,11 +1052,20 @@ void CDECL wined3d_device_restore_fullscreen_window(struct wined3d_device *devic
 
     if (!device->style && !device->exStyle) return;
 
-    TRACE("Restoring window style of window %p to %08x, %08x.\n",
-            window, device->style, device->exStyle);
-
     style = GetWindowLongW(window, GWL_STYLE);
     exstyle = GetWindowLongW(window, GWL_EXSTYLE);
+
+    /* These flags are set by wined3d_device_setup_fullscreen_window, not the
+     * application, and we want to ignore them in the test below, since it's
+     * not the application's fault that they changed. Additionally, we want to
+     * preserve the current status of these flags (i.e. don't restore them) to
+     * more closely emulate the behavior of Direct3D, which leaves these flags
+     * alone when returning to windowed mode. */
+    device->style ^= (device->style ^ style) & WS_VISIBLE;
+    device->exStyle ^= (device->exStyle ^ exstyle) & WS_EX_TOPMOST;
+
+    TRACE("Restoring window style of window %p to %08x, %08x.\n",
+            window, device->style, device->exStyle);
 
     filter_messages = device->filter_messages;
     device->filter_messages = TRUE;
@@ -4010,7 +4027,7 @@ HRESULT CDECL wined3d_device_draw_primitive(struct wined3d_device *device, UINT 
 
     /* Account for the loading offset due to index buffers. Instead of
      * reloading all sources correct it with the startvertex parameter. */
-    draw_primitive(device, start_vertex, vertex_count, 0, 0, FALSE, NULL);
+    draw_primitive(device, start_vertex, vertex_count, 0, 0, FALSE);
     return WINED3D_OK;
 }
 
@@ -4043,7 +4060,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
         device_invalidate_state(device, STATE_BASEVERTEXINDEX);
     }
 
-    draw_primitive(device, start_idx, index_count, 0, 0, TRUE, NULL);
+    draw_primitive(device, start_idx, index_count, 0, 0, TRUE);
 
     return WINED3D_OK;
 }
@@ -4053,7 +4070,7 @@ void CDECL wined3d_device_draw_indexed_primitive_instanced(struct wined3d_device
 {
     TRACE("device %p, start_idx %u, index_count %u.\n", device, start_idx, index_count);
 
-    draw_primitive(device, start_idx, index_count, start_instance, instance_count, TRUE, NULL);
+    draw_primitive(device, start_idx, index_count, start_instance, instance_count, TRUE);
 }
 
 /* This is a helper function for UpdateTexture, there is no UpdateVolume method in D3D. */
@@ -4887,6 +4904,8 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     struct wined3d_display_mode m;
     BOOL DisplayModeChanged = FALSE;
     BOOL update_desc = FALSE;
+    UINT backbuffer_width = swapchain_desc->backbuffer_width;
+    UINT backbuffer_height = swapchain_desc->backbuffer_height;
     HRESULT hr = WINED3D_OK;
     unsigned int i;
 
@@ -5017,16 +5036,38 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         m.scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
     }
 
-    /* Should Width == 800 && Height == 0 set 800x600? */
-    if (swapchain_desc->backbuffer_width && swapchain_desc->backbuffer_height
-            && (swapchain_desc->backbuffer_width != swapchain->desc.backbuffer_width
-            || swapchain_desc->backbuffer_height != swapchain->desc.backbuffer_height))
+    if (!backbuffer_width || !backbuffer_height)
+    {
+        /* The application is requesting that either the swapchain width or
+         * height be set to the corresponding dimension in the window's
+         * client rect. */
+
+        RECT client_rect;
+
+        if (!swapchain_desc->windowed)
+            return WINED3DERR_INVALIDCALL;
+
+        if (!GetClientRect(swapchain->device_window, &client_rect))
+        {
+            ERR("Failed to get client rect, last error %#x.\n", GetLastError());
+            return WINED3DERR_INVALIDCALL;
+        }
+
+        if (!backbuffer_width)
+            backbuffer_width = client_rect.right;
+
+        if (!backbuffer_height)
+            backbuffer_height = client_rect.bottom;
+    }
+
+    if (backbuffer_width != swapchain->desc.backbuffer_width
+            || backbuffer_height != swapchain->desc.backbuffer_height)
     {
         if (!swapchain_desc->windowed)
             DisplayModeChanged = TRUE;
 
-        swapchain->desc.backbuffer_width = swapchain_desc->backbuffer_width;
-        swapchain->desc.backbuffer_height = swapchain_desc->backbuffer_height;
+        swapchain->desc.backbuffer_width = backbuffer_width;
+        swapchain->desc.backbuffer_height = backbuffer_height;
         update_desc = TRUE;
     }
 

@@ -276,7 +276,8 @@
 @ cdecl __p__wenviron() msvcrt.__p__wenviron
 @ cdecl __p__wpgmptr() msvcrt.__p__wpgmptr
 @ cdecl __pctype_func() msvcrt.__pctype_func
-### extern __pioinfo #don't forward to msvcrt.__pioinfo, it has different size
+#FIXME: add correct __pioinfo implementation
+@ extern __pioinfo msvcrt.__pioinfo
 @ stub __pwctype_func
 @ cdecl __pxcptinfoptrs() msvcrt.__pxcptinfoptrs
 @ stub __report_gsfailure
@@ -1131,7 +1132,7 @@
 @ cdecl _wchmod(wstr long) msvcrt._wchmod
 @ extern _wcmdln msvcrt._wcmdln
 @ cdecl _wcreat(wstr long) msvcrt._wcreat
-@ stub _wcscoll_l
+@ cdecl _wcscoll_l(wstr wstr ptr) msvcrt._wcscoll_l
 @ cdecl _wcsdup(wstr) msvcrt._wcsdup
 @ cdecl _wcserror(long) msvcrt._wcserror
 @ cdecl _wcserror_s(ptr long long) msvcrt._wcserror_s
@@ -1139,7 +1140,7 @@
 @ cdecl _wcsicmp(wstr wstr) msvcrt._wcsicmp
 @ stub _wcsicmp_l
 @ cdecl _wcsicoll(wstr wstr) msvcrt._wcsicoll
-@ stub _wcsicoll_l
+@ cdecl _wcsicoll_l(wstr wstr ptr) msvcrt._wcsicoll_l
 @ cdecl _wcslwr(wstr) msvcrt._wcslwr
 @ stub _wcslwr_l
 @ cdecl _wcslwr_s(wstr long) msvcrt._wcslwr_s
@@ -1149,7 +1150,7 @@
 @ cdecl _wcsnicmp(wstr wstr long) msvcrt._wcsnicmp
 @ stub _wcsnicmp_l
 @ cdecl _wcsnicoll(wstr wstr long) msvcrt._wcsnicoll
-@ stub _wcsnicoll_l
+@ cdecl _wcsnicoll_l(wstr wstr long ptr) msvcrt._wcsnicoll_l
 @ cdecl _wcsnset(wstr long long) msvcrt._wcsnset
 @ stub _wcsnset_s
 @ cdecl _wcsrev(wstr) msvcrt._wcsrev

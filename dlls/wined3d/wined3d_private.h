@@ -925,7 +925,7 @@ struct wined3d_stream_info
 };
 
 void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_count,
-        UINT start_instance, UINT instance_count, BOOL indexed, const void *idx_data) DECLSPEC_HIDDEN;
+        UINT start_instance, UINT instance_count, BOOL indexed) DECLSPEC_HIDDEN;
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) DECLSPEC_HIDDEN;
 
 typedef void (WINE_GLAPI *glAttribFunc)(const void *data);
@@ -2618,6 +2618,7 @@ struct wined3d_shader
     struct list constantsF;
     struct list constantsI;
     struct wined3d_shader_reg_maps reg_maps;
+    BOOL lconst_inf_or_nan;
 
     struct wined3d_shader_signature_element input_signature[max(MAX_ATTRIBS, MAX_REG_INPUT)];
     struct wined3d_shader_signature_element output_signature[MAX_REG_OUTPUT];

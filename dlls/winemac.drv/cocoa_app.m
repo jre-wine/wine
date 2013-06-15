@@ -243,18 +243,18 @@ int macdrv_err_on;
 
     - (void) windowGotFocus:(WineWindow*)window
     {
-        macdrv_event event;
+        macdrv_event* event;
 
         [NSApp invalidateGotFocusEvents];
 
-        event.type = WINDOW_GOT_FOCUS;
-        event.window = (macdrv_window)[window retain];
-        event.window_got_focus.serial = windowFocusSerial;
+        event = macdrv_create_event(WINDOW_GOT_FOCUS, window);
+        event->window_got_focus.serial = windowFocusSerial;
         if (triedWindows)
-            event.window_got_focus.tried_windows = [triedWindows retain];
+            event->window_got_focus.tried_windows = [triedWindows retain];
         else
-            event.window_got_focus.tried_windows = [[NSMutableSet alloc] init];
-        [window.queue postEvent:&event];
+            event->window_got_focus.tried_windows = [[NSMutableSet alloc] init];
+        [window.queue postEvent:event];
+        macdrv_release_event(event);
     }
 
     - (void) windowRejectedFocusEvent:(const macdrv_event*)event
@@ -287,29 +287,25 @@ int macdrv_err_on;
                     kTISPropertyUnicodeKeyLayoutData);
             if (uchr)
             {
-                macdrv_event event;
+                macdrv_event* event;
                 WineEventQueue* queue;
 
-                event.type = KEYBOARD_CHANGED;
-                event.window = NULL;
-                event.keyboard_changed.keyboard_type = self.keyboardType;
-                event.keyboard_changed.iso_keyboard = (KBGetLayoutType(self.keyboardType) == kKeyboardISO);
-                event.keyboard_changed.uchr = CFDataCreateCopy(NULL, uchr);
+                event = macdrv_create_event(KEYBOARD_CHANGED, nil);
+                event->keyboard_changed.keyboard_type = self.keyboardType;
+                event->keyboard_changed.iso_keyboard = (KBGetLayoutType(self.keyboardType) == kKeyboardISO);
+                event->keyboard_changed.uchr = CFDataCreateCopy(NULL, uchr);
 
-                if (event.keyboard_changed.uchr)
+                if (event->keyboard_changed.uchr)
                 {
                     [eventQueuesLock lock];
 
                     for (queue in eventQueues)
-                    {
-                        CFRetain(event.keyboard_changed.uchr);
-                        [queue postEvent:&event];
-                    }
+                        [queue postEvent:event];
 
                     [eventQueuesLock unlock];
-
-                    CFRelease(event.keyboard_changed.uchr);
                 }
+
+                macdrv_release_event(event);
             }
 
             CFRelease(inputSource);
@@ -410,17 +406,25 @@ int macdrv_err_on;
 
     - (void) sendDisplaysChanged:(BOOL)activating
     {
-        macdrv_event event;
+        macdrv_event* event;
         WineEventQueue* queue;
 
-        event.type = DISPLAYS_CHANGED;
-        event.window = NULL;
-        event.displays_changed.activating = activating;
+        event = macdrv_create_event(DISPLAYS_CHANGED, nil);
+        event->displays_changed.activating = activating;
 
         [eventQueuesLock lock];
+
+        // If we're activating, then we just need one of our threads to get the
+        // event, so it can send it directly to the desktop window.  Otherwise,
+        // we need all of the threads to get it because we don't know which owns
+        // the desktop window and only that one will do anything with it.
+        if (activating) event->deliver = 1;
+
         for (queue in eventQueues)
-            [queue postEvent:&event];
+            [queue postEvent:event];
         [eventQueuesLock unlock];
+
+        macdrv_release_event(event);
     }
 
     // We can compare two modes directly using CFEqual, but that may require that
@@ -1187,18 +1191,62 @@ int macdrv_err_on;
 
     - (void)applicationDidResignActive:(NSNotification *)notification
     {
-        macdrv_event event;
+        macdrv_event* event;
         WineEventQueue* queue;
 
         [self invalidateGotFocusEvents];
 
-        event.type = APP_DEACTIVATED;
-        event.window = NULL;
+        event = macdrv_create_event(APP_DEACTIVATED, nil);
 
         [eventQueuesLock lock];
         for (queue in eventQueues)
-            [queue postEvent:&event];
+            [queue postEvent:event];
         [eventQueuesLock unlock];
+
+        macdrv_release_event(event);
+    }
+
+    - (NSApplicationTerminateReply) applicationShouldTerminate:(NSApplication *)sender
+    {
+        NSApplicationTerminateReply ret = NSTerminateNow;
+        NSAppleEventManager* m = [NSAppleEventManager sharedAppleEventManager];
+        NSAppleEventDescriptor* desc = [m currentAppleEvent];
+        macdrv_event* event;
+        WineEventQueue* queue;
+
+        event = macdrv_create_event(APP_QUIT_REQUESTED, nil);
+        event->deliver = 1;
+        switch ([[desc attributeDescriptorForKeyword:kAEQuitReason] int32Value])
+        {
+            case kAELogOut:
+            case kAEReallyLogOut:
+                event->app_quit_requested.reason = QUIT_REASON_LOGOUT;
+                break;
+            case kAEShowRestartDialog:
+                event->app_quit_requested.reason = QUIT_REASON_RESTART;
+                break;
+            case kAEShowShutdownDialog:
+                event->app_quit_requested.reason = QUIT_REASON_SHUTDOWN;
+                break;
+            default:
+                event->app_quit_requested.reason = QUIT_REASON_NONE;
+                break;
+        }
+
+        [eventQueuesLock lock];
+
+        if ([eventQueues count])
+        {
+            for (queue in eventQueues)
+                [queue postEvent:event];
+            ret = NSTerminateLater;
+        }
+
+        [eventQueuesLock unlock];
+
+        macdrv_release_event(event);
+
+        return ret;
     }
 
     - (void)applicationWillFinishLaunching:(NSNotification *)notification
@@ -1534,5 +1582,15 @@ void macdrv_set_application_icon(CFArrayRef images)
 
     OnMainThreadAsync(^{
         [NSApp setApplicationIconFromCGImageArray:imageArray];
+    });
+}
+
+/***********************************************************************
+ *              macdrv_quit_reply
+ */
+void macdrv_quit_reply(int reply)
+{
+    OnMainThread(^{
+        [NSApp replyToApplicationShouldTerminate:reply];
     });
 }

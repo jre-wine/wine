@@ -1095,7 +1095,7 @@
 @ cdecl _wchmod(wstr long) MSVCRT__wchmod
 @ extern _wcmdln MSVCRT__wcmdln
 @ cdecl _wcreat(wstr long) MSVCRT__wcreat
-# stub _wcscoll_l(wstr wstr ptr)
+@ cdecl _wcscoll_l(wstr wstr ptr) MSVCRT__wcscoll_l
 @ cdecl _wcsdup(wstr) MSVCRT__wcsdup
 # stub _wcsdup_dbg(wstr long str long)
 @ cdecl _wcserror(long) MSVCRT__wcserror
@@ -1104,7 +1104,7 @@
 @ cdecl _wcsicmp(wstr wstr) MSVCRT__wcsicmp
 # stub _wcsicmp_l(wstr wstr ptr)
 @ cdecl _wcsicoll(wstr wstr) MSVCRT__wcsicoll
-# stub _wcsicoll_l(wstr wstr ptr)
+@ cdecl _wcsicoll_l(wstr wstr ptr) MSVCRT__wcsicoll_l
 @ cdecl _wcslwr(wstr) ntdll._wcslwr
 # stub _wcslwr_l(wstr ptr)
 @ cdecl _wcslwr_s(wstr long) MSVCRT__wcslwr_s
@@ -1114,7 +1114,7 @@
 @ cdecl _wcsnicmp(wstr wstr long) ntdll._wcsnicmp
 # stub _wcsnicmp_l(wstr wstr long ptr)
 @ cdecl _wcsnicoll(wstr wstr long) MSVCRT__wcsnicoll
-# stub _wcsnicoll_l(wstr wstr long ptr)
+@ cdecl _wcsnicoll_l(wstr wstr long ptr) MSVCRT__wcsnicoll_l
 @ cdecl _wcsnset(wstr long long) MSVCRT__wcsnset
 # stub _wcsnset_s(wstr long long)
 @ cdecl _wcsrev(wstr) MSVCRT__wcsrev

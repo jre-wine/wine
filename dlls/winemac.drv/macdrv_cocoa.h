@@ -134,6 +134,7 @@ extern int macdrv_start_cocoa_app(unsigned long long tickcount) DECLSPEC_HIDDEN;
 extern void macdrv_window_rejected_focus(const struct macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_beep(void) DECLSPEC_HIDDEN;
 extern void macdrv_set_application_icon(CFArrayRef images) DECLSPEC_HIDDEN;
+extern void macdrv_quit_reply(int reply) DECLSPEC_HIDDEN;
 
 
 /* cursor */
@@ -153,6 +154,7 @@ extern int macdrv_set_display_mode(const struct macdrv_display* display,
 /* event */
 enum {
     APP_DEACTIVATED,
+    APP_QUIT_REQUESTED,
     DISPLAYS_CHANGED,
     KEY_PRESS,
     KEY_RELEASE,
@@ -172,12 +174,24 @@ enum {
     NUM_EVENT_TYPES
 };
 
+enum {
+    QUIT_REASON_NONE,
+    QUIT_REASON_LOGOUT,
+    QUIT_REASON_RESTART,
+    QUIT_REASON_SHUTDOWN,
+};
+
 typedef uint32_t macdrv_event_mask;
 
 typedef struct macdrv_event {
+    int                 refs;
+    int                 deliver;
     int                 type;
     macdrv_window       window;
     union {
+        struct {
+            int reason;
+        }                                           app_quit_requested;
         struct {
             int activating;
         }                                           displays_changed;
@@ -266,15 +280,15 @@ static inline macdrv_event_mask event_mask_for_type(int type)
     return ((macdrv_event_mask)1 << type);
 }
 
-typedef void (*macdrv_event_handler)(macdrv_event *event);
+typedef void (*macdrv_event_handler)(const macdrv_event *event);
 
 extern macdrv_event_queue macdrv_create_event_queue(macdrv_event_handler handler) DECLSPEC_HIDDEN;
 extern void macdrv_destroy_event_queue(macdrv_event_queue queue) DECLSPEC_HIDDEN;
 extern int macdrv_get_event_queue_fd(macdrv_event_queue queue) DECLSPEC_HIDDEN;
 
-extern int macdrv_get_event_from_queue(macdrv_event_queue queue,
-        macdrv_event_mask mask, macdrv_event *event) DECLSPEC_HIDDEN;
-extern void macdrv_cleanup_event(macdrv_event *event) DECLSPEC_HIDDEN;
+extern int macdrv_copy_event_from_queue(macdrv_event_queue queue,
+        macdrv_event_mask mask, macdrv_event **event) DECLSPEC_HIDDEN;
+extern void macdrv_release_event(macdrv_event *event) DECLSPEC_HIDDEN;
 
 extern macdrv_query* macdrv_create_query(void) DECLSPEC_HIDDEN;
 extern macdrv_query* macdrv_retain_query(macdrv_query *query) DECLSPEC_HIDDEN;
@@ -333,6 +347,7 @@ extern void macdrv_dispose_view(macdrv_view v) DECLSPEC_HIDDEN;
 extern void macdrv_set_view_window_and_frame(macdrv_view v, macdrv_window w, CGRect rect) DECLSPEC_HIDDEN;
 extern void macdrv_add_view_opengl_context(macdrv_view v, macdrv_opengl_context c) DECLSPEC_HIDDEN;
 extern void macdrv_remove_view_opengl_context(macdrv_view v, macdrv_opengl_context c) DECLSPEC_HIDDEN;
+extern uint32_t macdrv_window_background_color(void) DECLSPEC_HIDDEN;
 
 
 /* keyboard */

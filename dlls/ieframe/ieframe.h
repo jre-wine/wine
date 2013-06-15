@@ -96,6 +96,7 @@ typedef struct {
 
 typedef struct {
     WCHAR *url;
+    IStream *stream;
 } travellog_entry_t;
 
 typedef struct _IDocHostContainerVtbl
@@ -153,10 +154,13 @@ struct DocHost {
     ShellBrowser *browser_service;
     IShellUIHelper2 *shell_ui_helper;
 
-    travellog_entry_t *travellog;
-    unsigned travellog_size;
-    unsigned travellog_length;
-    unsigned travellog_position;
+    struct {
+        travellog_entry_t *log;
+        unsigned size;
+        unsigned length;
+        unsigned position;
+        int loading_pos;
+    } travellog;
 
     ConnectionPointContainer cps;
     IEHTMLWindow html_window;
@@ -265,6 +269,7 @@ void call_sink(ConnectionPoint*,DISPID,DISPPARAMS*) DECLSPEC_HIDDEN;
 HRESULT navigate_url(DocHost*,LPCWSTR,const VARIANT*,const VARIANT*,VARIANT*,VARIANT*) DECLSPEC_HIDDEN;
 HRESULT go_home(DocHost*) DECLSPEC_HIDDEN;
 HRESULT go_back(DocHost*) DECLSPEC_HIDDEN;
+HRESULT go_forward(DocHost*) DECLSPEC_HIDDEN;
 HRESULT refresh_document(DocHost*) DECLSPEC_HIDDEN;
 HRESULT get_location_url(DocHost*,BSTR*) DECLSPEC_HIDDEN;
 HRESULT set_dochost_url(DocHost*,const WCHAR*) DECLSPEC_HIDDEN;

@@ -1464,14 +1464,6 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     gl_info->gl_ops.gl.p_glGetIntegerv(GL_AUX_BUFFERS, &ret->aux_buffers);
 
     TRACE("Setting up the screen\n");
-    /* Clear the screen */
-    gl_info->gl_ops.gl.p_glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
-    checkGLcall("glClearColor");
-    gl_info->gl_ops.gl.p_glClearIndex(0);
-    gl_info->gl_ops.gl.p_glClearDepth(1);
-    gl_info->gl_ops.gl.p_glClearStencil(0xffff);
-
-    checkGLcall("glClear");
 
     gl_info->gl_ops.gl.p_glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
     checkGLcall("glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);");
@@ -1905,13 +1897,16 @@ static void context_apply_draw_buffers(struct wined3d_context *context, DWORD rt
 void context_set_draw_buffer(struct wined3d_context *context, GLenum buffer)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    DWORD *current_mask = context->current_fbo ? &context->current_fbo->rt_mask : &context->draw_buffers_mask;
+    DWORD new_mask = context_generate_rt_mask(buffer);
+
+    if (new_mask == *current_mask)
+        return;
 
     gl_info->gl_ops.gl.p_glDrawBuffer(buffer);
     checkGLcall("glDrawBuffer()");
-    if (context->current_fbo)
-        context->current_fbo->rt_mask = context_generate_rt_mask(buffer);
-    else
-        context->draw_buffers_mask = context_generate_rt_mask(buffer);
+
+    *current_mask = new_mask;
 }
 
 /* Context activation is done by the caller. */

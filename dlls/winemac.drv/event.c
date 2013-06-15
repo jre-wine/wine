@@ -33,6 +33,7 @@ static const char *dbgstr_event(int type)
 {
     static const char * const event_names[] = {
         "APP_DEACTIVATED",
+        "APP_QUIT_REQUESTED",
         "DISPLAYS_CHANGED",
         "KEY_PRESS",
         "KEY_RELEASE",
@@ -87,6 +88,7 @@ static macdrv_event_mask get_event_mask(DWORD mask)
     if (mask & QS_POSTMESSAGE)
     {
         event_mask |= event_mask_for_type(APP_DEACTIVATED);
+        event_mask |= event_mask_for_type(APP_QUIT_REQUESTED);
         event_mask |= event_mask_for_type(DISPLAYS_CHANGED);
         event_mask |= event_mask_for_type(STATUS_ITEM_CLICKED);
         event_mask |= event_mask_for_type(WINDOW_CLOSE_REQUESTED);
@@ -111,7 +113,7 @@ static macdrv_event_mask get_event_mask(DWORD mask)
  *
  * Handler for QUERY_EVENT queries.
  */
-static void macdrv_query_event(HWND hwnd, macdrv_event *event)
+static void macdrv_query_event(HWND hwnd, const macdrv_event *event)
 {
     BOOL success = FALSE;
     macdrv_query *query = event->query_event.query;
@@ -148,7 +150,7 @@ static void macdrv_query_event(HWND hwnd, macdrv_event *event)
 /***********************************************************************
  *              macdrv_handle_event
  */
-void macdrv_handle_event(macdrv_event *event)
+void macdrv_handle_event(const macdrv_event *event)
 {
     HWND hwnd = macdrv_get_window_hwnd(event->window);
     const macdrv_event *prev;
@@ -164,6 +166,9 @@ void macdrv_handle_event(macdrv_event *event)
     {
     case APP_DEACTIVATED:
         macdrv_app_deactivated();
+        break;
+    case APP_QUIT_REQUESTED:
+        macdrv_app_quit_requested(event);
         break;
     case DISPLAYS_CHANGED:
         macdrv_displays_changed(event);
@@ -223,14 +228,14 @@ void macdrv_handle_event(macdrv_event *event)
  */
 static int process_events(macdrv_event_queue queue, macdrv_event_mask mask)
 {
-    macdrv_event event;
+    macdrv_event *event;
     int count = 0;
 
-    while (macdrv_get_event_from_queue(queue, mask, &event))
+    while (macdrv_copy_event_from_queue(queue, mask, &event))
     {
         count++;
-        macdrv_handle_event(&event);
-        macdrv_cleanup_event(&event);
+        macdrv_handle_event(event);
+        macdrv_release_event(event);
     }
     if (count) TRACE("processed %d events\n", count);
     return count;
@@ -257,7 +262,8 @@ DWORD CDECL macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handle
                                         timeout, flags & MWMO_ALERTABLE);
     }
 
-    if (data->current_event && data->current_event->type != QUERY_EVENT)
+    if (data->current_event && data->current_event->type != QUERY_EVENT &&
+        data->current_event->type != APP_QUIT_REQUESTED)
         event_mask = 0;  /* don't process nested events */
 
     if (process_events(data->queue, event_mask)) ret = count - 1;

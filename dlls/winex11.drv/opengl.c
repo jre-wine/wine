@@ -1953,27 +1953,30 @@ static struct wgl_context *X11DRV_wglCreateContextAttribsARB( HDC hdc, struct wg
                 case WGL_CONTEXT_MAJOR_VERSION_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_MAJOR_VERSION_ARB;
                     pContextAttribList[1] = attribList[1];
+                    pContextAttribList += 2;
                     break;
                 case WGL_CONTEXT_MINOR_VERSION_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_MINOR_VERSION_ARB;
                     pContextAttribList[1] = attribList[1];
+                    pContextAttribList += 2;
                     break;
                 case WGL_CONTEXT_LAYER_PLANE_ARB:
                     break;
                 case WGL_CONTEXT_FLAGS_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_FLAGS_ARB;
                     pContextAttribList[1] = attribList[1];
+                    pContextAttribList += 2;
                     break;
                 case WGL_CONTEXT_PROFILE_MASK_ARB:
                     pContextAttribList[0] = GLX_CONTEXT_PROFILE_MASK_ARB;
                     pContextAttribList[1] = attribList[1];
+                    pContextAttribList += 2;
                     break;
                 default:
                     ERR("Unhandled attribList pair: %#x %#x\n", attribList[0], attribList[1]);
                 }
                 ret->numAttribs++;
                 attribList += 2;
-                pContextAttribList += 2;
             }
         }
 
@@ -3005,10 +3008,7 @@ static void X11DRV_WineGL_LoadExtensions(void)
 
     if (has_extension( WineGLInfo.glxExtensions, "GLX_ARB_multisample")) register_extension( "WGL_ARB_multisample" );
 
-    /* In general pbuffer functionality requires support in the X-server. The functionality is
-     * available either when the GLX_SGIX_pbuffer is present or when the GLX server version is 1.3.
-     */
-    if ( glxRequireVersion(3) && has_extension( WineGLInfo.glxExtensions, "GLX_SGIX_pbuffer") )
+    if (glxRequireVersion(3))
     {
         register_extension( "WGL_ARB_pbuffer" );
         opengl_funcs.ext.p_wglCreatePbufferARB    = X11DRV_wglCreatePbufferARB;
@@ -3026,7 +3026,7 @@ static void X11DRV_WineGL_LoadExtensions(void)
 
     /* Support WGL_ARB_render_texture when there's support or pbuffer based emulation */
     if (has_extension( WineGLInfo.glxExtensions, "GLX_ARB_render_texture") ||
-        (glxRequireVersion(3) && has_extension( WineGLInfo.glxExtensions, "GLX_SGIX_pbuffer") && use_render_texture_emulation))
+        (glxRequireVersion(3) && use_render_texture_emulation))
     {
         register_extension( "WGL_ARB_render_texture" );
         opengl_funcs.ext.p_wglBindTexImageARB    = X11DRV_wglBindTexImageARB;
