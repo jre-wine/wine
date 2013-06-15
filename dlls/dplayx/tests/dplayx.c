@@ -652,7 +652,7 @@ static void init_TCPIP_provider( IDirectPlay4 *pDP, LPCSTR strIPAddressString, W
     DPCOMPOUNDADDRESSELEMENT addressElements[3];
     LPVOID pAddress = NULL;
     DWORD dwAddressSize = 0;
-    LPDIRECTPLAYLOBBY3 pDPL;
+    IDirectPlayLobby3 *pDPL;
     HRESULT hr;
 
     hr = CoCreateInstance( &CLSID_DirectPlayLobby, NULL, CLSCTX_ALL,
@@ -799,7 +799,7 @@ static BOOL CALLBACK EnumConnections_cb( LPCGUID lpguidSP,
 {
 
     lpCallbackData callbackData = lpContext;
-    LPDIRECTPLAYLOBBY pDPL;
+    IDirectPlayLobby *pDPL;
     HRESULT hr;
 
 
@@ -2877,7 +2877,7 @@ static void test_GetPlayerAddress(void)
 {
 
     IDirectPlay4 *pDP[2];
-    LPDIRECTPLAYLOBBY3 pDPL;
+    IDirectPlayLobby3 *pDPL;
     DPSESSIONDESC2 dpsd;
     DPID dpid[2];
     CallbackData callbackData;
@@ -6487,38 +6487,38 @@ static void test_COM_dplobby(void)
     hr = IDirectPlayLobby_QueryInterface(dpl, &IID_IDirectPlayLobbyA, (void**)&dplA);
     ok(hr == S_OK, "QueryInterface for IID_IDirectPlayLobbyA failed: %08x\n", hr);
     refcount = IDirectPlayLobby_AddRef(dplA);
-    todo_wine ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
     IDirectPlayLobby_Release(dplA);
 
     hr = IDirectPlayLobby_QueryInterface(dpl, &IID_IDirectPlayLobby2, (void**)&dpl2);
     ok(hr == S_OK, "QueryInterface for IID_IDirectPlayLobby2 failed: %08x\n", hr);
     refcount = IDirectPlayLobby_AddRef(dpl2);
-    todo_wine ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
     IDirectPlayLobby_Release(dpl2);
 
     hr = IDirectPlayLobby_QueryInterface(dpl, &IID_IDirectPlayLobby2A, (void**)&dpl2A);
     ok(hr == S_OK, "QueryInterface for IID_IDirectPlayLobby2A failed: %08x\n", hr);
     refcount = IDirectPlayLobby_AddRef(dpl2A);
-    todo_wine ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
     IDirectPlayLobby_Release(dpl2A);
 
     hr = IDirectPlayLobby_QueryInterface(dpl, &IID_IDirectPlayLobby3, (void**)&dpl3);
     ok(hr == S_OK, "QueryInterface for IID_IDirectPlayLobby3 failed: %08x\n", hr);
     refcount = IDirectPlayLobby_AddRef(dpl3);
-    todo_wine ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
     IDirectPlayLobby_Release(dpl3);
 
     hr = IDirectPlayLobby_QueryInterface(dpl, &IID_IDirectPlayLobby3A, (void**)&dpl3A);
     ok(hr == S_OK, "QueryInterface for IID_IDirectPlayLobby3A failed: %08x\n", hr);
     refcount = IDirectPlayLobby_AddRef(dpl3A);
-    todo_wine ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
+    ok(refcount == 2, "refcount == %u, expected 2\n", refcount);
     IDirectPlayLobby_Release(dpl3A);
 
     /* IDirectPlayLobby and IUnknown share a refcount */
     hr = IDirectPlayX_QueryInterface(dpl, &IID_IUnknown, (void**)&unk);
     ok(hr == S_OK, "QueryInterface for IID_IUnknown failed: %08x\n", hr);
-    refcount = IDirectPlayLobby_AddRef(unk);
-    todo_wine ok(refcount == 4, "refcount == %u, expected 4\n", refcount);
+    refcount = IUnknown_AddRef(unk);
+    ok(refcount == 4, "refcount == %u, expected 4\n", refcount);
     IDirectPlayLobby_Release(unk);
 
     IUnknown_Release(unk);

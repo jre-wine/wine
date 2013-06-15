@@ -269,13 +269,38 @@ static NSString* const WineEventQueueThreadDictionaryKey = @"WineEventQueueThrea
 
         [self postEvent:event];
         macdrv_release_event(event);
-        timedout = ![NSApp waitUntilQueryDone:&query->done timeout:timeoutDate processEvents:processEvents];
+        timedout = ![[WineApplicationController sharedController] waitUntilQueryDone:&query->done
+                                                                             timeout:timeoutDate
+                                                                       processEvents:processEvents];
         return !timedout && query->status;
     }
 
     - (BOOL) query:(macdrv_query*)query timeout:(NSTimeInterval)timeout
     {
         return [self query:query timeout:timeout processEvents:FALSE];
+    }
+
+    - (void) resetMouseEventPositions:(CGPoint)pos
+    {
+        MacDrvEvent* event;
+
+        [eventsLock lock];
+
+        for (event in events)
+        {
+            if (event->event->type == MOUSE_BUTTON)
+            {
+                event->event->mouse_button.x = pos.x;
+                event->event->mouse_button.y = pos.y;
+            }
+            else if (event->event->type == MOUSE_SCROLL)
+            {
+                event->event->mouse_scroll.x = pos.x;
+                event->event->mouse_scroll.y = pos.y;
+            }
+        }
+
+        [eventsLock unlock];
     }
 
 
@@ -347,7 +372,7 @@ macdrv_event_queue macdrv_create_event_queue(macdrv_event_handler handler)
         queue = [[[WineEventQueue alloc] initWithEventHandler:handler] autorelease];
         if (queue)
         {
-            if ([NSApp registerEventQueue:queue])
+            if ([[WineApplicationController sharedController] registerEventQueue:queue])
                 [threadDict setObject:queue forKey:WineEventQueueThreadDictionaryKey];
             else
                 queue = nil;
@@ -370,7 +395,7 @@ void macdrv_destroy_event_queue(macdrv_event_queue queue)
     WineEventQueue* q = (WineEventQueue*)queue;
     NSMutableDictionary* threadDict = [[NSThread currentThread] threadDictionary];
 
-    [NSApp unregisterEventQueue:q];
+    [[WineApplicationController sharedController] unregisterEventQueue:q];
     [threadDict removeObjectForKey:WineEventQueueThreadDictionaryKey];
 
     [pool release];
@@ -451,6 +476,10 @@ void macdrv_release_event(macdrv_event *event)
 
         switch (event->type)
         {
+            case IM_SET_TEXT:
+                if (event->im_set_text.text)
+                    CFRelease(event->im_set_text.text);
+                break;
             case KEYBOARD_CHANGED:
                 CFRelease(event->keyboard_changed.uchr);
                 break;

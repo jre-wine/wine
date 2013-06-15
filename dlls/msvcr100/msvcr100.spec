@@ -866,7 +866,7 @@
 @ cdecl _gcvt(double long str) msvcrt._gcvt
 @ cdecl _gcvt_s(ptr long  double long) msvcrt._gcvt_s
 @ cdecl _get_current_locale() msvcrt._get_current_locale
-@ stub _get_daylight
+@ cdecl _get_daylight(ptr)
 @ cdecl _get_doserrno(ptr) msvcrt._get_doserrno
 @ stub _get_dstbias
 @ cdecl _get_errno(ptr) msvcrt._get_errno
@@ -1534,7 +1534,7 @@
 @ cdecl _wexecvp(wstr ptr) msvcrt._wexecvp
 @ cdecl _wexecvpe(wstr ptr ptr) msvcrt._wexecvpe
 @ cdecl _wfdopen(long wstr) msvcrt._wfdopen
-@ stub _wfindfirst32
+@ cdecl _wfindfirst32(wstr ptr) msvcrt._wfindfirst32
 @ stub _wfindfirst32i64
 @ cdecl _wfindfirst64(wstr ptr) msvcrt._wfindfirst64
 @ cdecl _wfindfirst64i32(wstr ptr) msvcrt._wfindfirst64i32

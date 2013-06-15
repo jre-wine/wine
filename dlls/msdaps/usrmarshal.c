@@ -235,14 +235,29 @@ HRESULT __RPC_STUB IDBInitialize_Initialize_Stub(IDBInitialize* This, IErrorInfo
 
 HRESULT CALLBACK IDBInitialize_Uninitialize_Proxy(IDBInitialize* This)
 {
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    IErrorInfo *error;
+    HRESULT hr;
+
+    TRACE("(%p)\n", This);
+    hr = IDBInitialize_RemoteUninitialize_Proxy(This, &error);
+    if(error)
+    {
+        SetErrorInfo(0, error);
+        IErrorInfo_Release(error);
+    }
+    return hr;
 }
 
-HRESULT __RPC_STUB IDBInitialize_Uninitialize_Stub(IDBInitialize* This, IErrorInfo **ppErrorInfoRem)
+HRESULT __RPC_STUB IDBInitialize_Uninitialize_Stub(IDBInitialize* This, IErrorInfo **error)
 {
-    FIXME("(%p, %p): stub\n", This, ppErrorInfoRem);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", This, error);
+    *error = NULL;
+    hr = IDBInitialize_Uninitialize(This);
+    if(FAILED(hr)) GetErrorInfo(0, error);
+
+    return hr;
 }
 
 HRESULT CALLBACK IDBDataSourceAdmin_CreateDataSource_Proxy(IDBDataSourceAdmin* This, ULONG cPropertySets,
@@ -306,14 +321,29 @@ HRESULT __RPC_STUB IDBDataSourceAdmin_CreateDataSource_Stub(IDBDataSourceAdmin* 
 
 HRESULT CALLBACK IDBDataSourceAdmin_DestroyDataSource_Proxy(IDBDataSourceAdmin* This)
 {
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    IErrorInfo *error;
+    HRESULT hr;
+
+    TRACE("(%p)\n", This);
+    hr = IDBDataSourceAdmin_RemoteDestroyDataSource_Proxy(This, &error);
+    if(error)
+    {
+        SetErrorInfo(0, error);
+        IErrorInfo_Release(error);
+    }
+    return hr;
 }
 
-HRESULT __RPC_STUB IDBDataSourceAdmin_DestroyDataSource_Stub(IDBDataSourceAdmin* This, IErrorInfo **ppErrorInfoRem)
+HRESULT __RPC_STUB IDBDataSourceAdmin_DestroyDataSource_Stub(IDBDataSourceAdmin* This, IErrorInfo **error)
 {
-    FIXME("(%p, %p): stub\n", This, ppErrorInfoRem);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p, %p)\n", This, error);
+    *error = NULL;
+    hr = IDBDataSourceAdmin_DestroyDataSource(This);
+    if(FAILED(hr)) GetErrorInfo(0, error);
+
+    return hr;
 }
 
 HRESULT CALLBACK IDBDataSourceAdmin_GetCreationProperties_Proxy(IDBDataSourceAdmin* This, ULONG cPropertyIDSets,
@@ -329,24 +359,47 @@ HRESULT __RPC_STUB IDBDataSourceAdmin_GetCreationProperties_Stub(IDBDataSourceAd
                                                                  const DBPROPIDSET *rgPropertyIDSets, ULONG *pcPropertyInfoSets,
                                                                  DBPROPINFOSET **prgPropertyInfoSets, DBCOUNTITEM *pcOffsets,
                                                                  DBBYTEOFFSET **prgDescOffsets, ULONG *pcbDescBuffer,
-                                                                 OLECHAR **ppDescBuffer, IErrorInfo **ppErrorInfoRem)
+                                                                 OLECHAR **ppDescBuffer, IErrorInfo **error)
 {
-    FIXME("(%p, %d, %p, %p, %p, %p, %p, %p, %p, %p): stub\n", This, cPropertyIDSets, rgPropertyIDSets, pcPropertyInfoSets,
-          prgPropertyInfoSets, pcOffsets, prgDescOffsets, pcbDescBuffer, ppDescBuffer, ppErrorInfoRem);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p, %d, %p, %p, %p, %p, %p, %p, %p, %p)\n", This, cPropertyIDSets, rgPropertyIDSets, pcPropertyInfoSets,
+          prgPropertyInfoSets, pcOffsets, prgDescOffsets, pcbDescBuffer, ppDescBuffer, error);
+    *error = NULL;
+    hr = IDBDataSourceAdmin_GetCreationProperties(This, cPropertyIDSets, rgPropertyIDSets, pcPropertyInfoSets,
+        prgPropertyInfoSets, ppDescBuffer);
+    if(FAILED(hr)) GetErrorInfo(0, error);
+
+    return hr;
 }
 
 HRESULT CALLBACK IDBDataSourceAdmin_ModifyDataSource_Proxy(IDBDataSourceAdmin* This, ULONG cPropertySets, DBPROPSET rgPropertySets[])
 {
-    FIXME("(%p, %d, %p): stub\n", This, cPropertySets, rgPropertySets);
-    return E_NOTIMPL;
+    IErrorInfo *error;
+    HRESULT hr;
+
+    TRACE("(%p, %d, %p)\n", This, cPropertySets, rgPropertySets);
+    hr = IDBDataSourceAdmin_RemoteModifyDataSource_Proxy(This, cPropertySets, rgPropertySets, &error);
+    if(error)
+    {
+        SetErrorInfo(0, error);
+        IErrorInfo_Release(error);
+    }
+
+    return hr;
 }
 
 HRESULT __RPC_STUB IDBDataSourceAdmin_ModifyDataSource_Stub(IDBDataSourceAdmin* This, ULONG cPropertySets,
-                                                            DBPROPSET *rgPropertySets, IErrorInfo **ppErrorInfoRem)
+                                                            DBPROPSET *rgPropertySets, IErrorInfo **error)
 {
-    FIXME("(%p, %d, %p, %p): stub\n", This, cPropertySets, rgPropertySets, ppErrorInfoRem);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p, %d, %p, %p)\n", This, cPropertySets, rgPropertySets, error);
+    *error = NULL;
+    hr = IDBDataSourceAdmin_ModifyDataSource(This, cPropertySets, rgPropertySets);
+    if(FAILED(hr)) GetErrorInfo(0, error);
+
+    return hr;
 }
 
 HRESULT CALLBACK ISessionProperties_GetProperties_Proxy(ISessionProperties* This, ULONG cPropertyIDSets,
@@ -806,7 +859,7 @@ HRESULT __RPC_STUB ICommand_Execute_Stub(ICommand* This, IUnknown *pUnkOuter, RE
     IUnknown *obj = NULL;
     HRESULT hr;
 
-    TRACE("(%p)->(%p, %s, %08lx, %ld, %p, %d, %p, %p, %ld, %p, %p, %p, %p): stub\n", This, pUnkOuter, debugstr_guid(riid),
+    TRACE("(%p)->(%p, %s, %08lx, %ld, %p, %d, %p, %p, %ld, %p, %p, %p, %p)\n", This, pUnkOuter, debugstr_guid(riid),
           hAccessor, cParamSets, pGuid, ulGuidOffset, pInputParams, pOutputParams, cBindings, rgBindings, rgStatus,
           pcRowsAffected, ppRowset);
 

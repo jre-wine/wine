@@ -1498,6 +1498,7 @@ static void shader_cleanup(struct wined3d_shader *shader)
 
 struct shader_none_priv
 {
+    const struct wined3d_vertex_pipe_ops *vertex_pipe;
     const struct fragment_pipeline *fragment_pipe;
     BOOL ffp_proj_control;
 };
@@ -1521,29 +1522,42 @@ static void shader_none_select(const struct wined3d_context *context, enum wined
     struct wined3d_device *device = context->swapchain->device;
     struct shader_none_priv *priv = device->shader_priv;
 
+    priv->vertex_pipe->vp_enable(gl_info, vertex_mode == WINED3D_SHADER_MODE_FFP);
     priv->fragment_pipe->enable_extension(gl_info, fragment_mode == WINED3D_SHADER_MODE_FFP);
 }
 
-static HRESULT shader_none_alloc(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe)
+static HRESULT shader_none_alloc(struct wined3d_device *device, const struct wined3d_vertex_pipe_ops *vertex_pipe,
+        const struct fragment_pipeline *fragment_pipe)
 {
     struct fragment_caps fragment_caps;
+    void *vertex_priv, *fragment_priv;
     struct shader_none_priv *priv;
-    void *fragment_priv;
 
     if (!(priv = HeapAlloc(GetProcessHeap(), 0, sizeof(*priv))))
         return E_OUTOFMEMORY;
 
-    if (!(fragment_priv = fragment_pipe->alloc_private(&none_shader_backend, priv)))
+    if (!(vertex_priv = vertex_pipe->vp_alloc(&none_shader_backend, priv)))
     {
-        ERR("Failed to initialize fragment pipe.\n");
+        ERR("Failed to initialize vertex pipe.\n");
         HeapFree(GetProcessHeap(), 0, priv);
         return E_FAIL;
     }
 
+    if (!(fragment_priv = fragment_pipe->alloc_private(&none_shader_backend, priv)))
+    {
+        ERR("Failed to initialize fragment pipe.\n");
+        vertex_pipe->vp_free(device);
+        HeapFree(GetProcessHeap(), 0, priv);
+        return E_FAIL;
+    }
+
+    priv->vertex_pipe = vertex_pipe;
+    priv->fragment_pipe = fragment_pipe;
     fragment_pipe->get_caps(&device->adapter->gl_info, &fragment_caps);
     priv->ffp_proj_control = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_PROJ_CONTROL;
+
+    device->vertex_priv = vertex_priv;
     device->fragment_priv = fragment_priv;
-    priv->fragment_pipe = fragment_pipe;
     device->shader_priv = priv;
 
     return WINED3D_OK;
@@ -1554,6 +1568,7 @@ static void shader_none_free(struct wined3d_device *device)
     struct shader_none_priv *priv = device->shader_priv;
 
     priv->fragment_pipe->free_private(device);
+    priv->vertex_pipe->vp_free(device);
     HeapFree(GetProcessHeap(), 0, priv);
 }
 
@@ -1610,6 +1625,7 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const DWORD *b
     const struct wined3d_shader_frontend *fe;
     HRESULT hr;
     unsigned int backend_version;
+    const struct wined3d_d3d_info *d3d_info = &shader->device->adapter->d3d_info;
 
     TRACE("shader %p, byte_code %p, output_signature %p, float_const_count %u.\n",
             shader, byte_code, output_signature, float_const_count);
@@ -1657,13 +1673,13 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const DWORD *b
     switch (type)
     {
         case WINED3D_SHADER_TYPE_VERTEX:
-            backend_version = shader->device->vs_version;
+            backend_version = d3d_info->limits.vs_version;
             break;
         case WINED3D_SHADER_TYPE_GEOMETRY:
-            backend_version = shader->device->gs_version;
+            backend_version = d3d_info->limits.gs_version;
             break;
         case WINED3D_SHADER_TYPE_PIXEL:
-            backend_version = shader->device->ps_version;
+            backend_version = d3d_info->limits.ps_version;
             break;
         default:
             FIXME("No backend version-checking for this shader type\n");
@@ -1786,7 +1802,7 @@ void find_vs_compile_args(const struct wined3d_state *state,
             == WINED3D_FOG_NONE ? VS_FOG_COORD : VS_FOG_Z;
     args->clip_enabled = state->render_states[WINED3D_RS_CLIPPING]
             && state->render_states[WINED3D_RS_CLIPPLANEENABLE];
-    args->swizzle_map = shader->device->strided_streams.swizzle_map;
+    args->swizzle_map = shader->device->stream_info.swizzle_map;
 }
 
 static BOOL match_usage(BYTE usage1, BYTE usage_idx1, BYTE usage2, BYTE usage_idx2)
@@ -1828,6 +1844,7 @@ static void vertexshader_set_limits(struct wined3d_shader *shader)
     DWORD shader_version = WINED3D_SHADER_VERSION(shader->reg_maps.shader_version.major,
             shader->reg_maps.shader_version.minor);
     struct wined3d_device *device = shader->device;
+    const DWORD vs_uniform_count = device->adapter->d3d_info.limits.vs_uniform_count;
 
     shader->limits.packed_input = 0;
 
@@ -1842,7 +1859,7 @@ static void vertexshader_set_limits(struct wined3d_shader *shader)
             /* TODO: vs_1_1 has a minimum of 96 constants. What happens when
              * a vs_1_1 shader is used on a vs_3_0 capable card that has 256
              * constants? */
-            shader->limits.constant_float = min(256, device->d3d_vshader_constantF);
+            shader->limits.constant_float = min(256, vs_uniform_count);
             break;
 
         case WINED3D_SHADER_VERSION(2, 0):
@@ -1851,7 +1868,7 @@ static void vertexshader_set_limits(struct wined3d_shader *shader)
             shader->limits.constant_int = 16;
             shader->limits.packed_output = 12;
             shader->limits.sampler = 0;
-            shader->limits.constant_float = min(256, device->d3d_vshader_constantF);
+            shader->limits.constant_float = min(256, vs_uniform_count);
             break;
 
         case WINED3D_SHADER_VERSION(3, 0):
@@ -1864,7 +1881,7 @@ static void vertexshader_set_limits(struct wined3d_shader *shader)
              * drivers advertise 1024). d3d9.dll and d3d8.dll clamp the
              * wined3d-advertised maximum. Clamp the constant limit for <= 3.0
              * shaders to 256. */
-            shader->limits.constant_float = min(256, device->d3d_vshader_constantF);
+            shader->limits.constant_float = min(256, vs_uniform_count);
             break;
 
         case WINED3D_SHADER_VERSION(4, 0):
@@ -1881,7 +1898,7 @@ static void vertexshader_set_limits(struct wined3d_shader *shader)
             shader->limits.constant_int = 16;
             shader->limits.packed_output = 12;
             shader->limits.sampler = 0;
-            shader->limits.constant_float = min(256, device->d3d_vshader_constantF);
+            shader->limits.constant_float = min(256, vs_uniform_count);
             FIXME("Unrecognized vertex shader version \"%u.%u\".\n",
                     shader->reg_maps.shader_version.major,
                     shader->reg_maps.shader_version.minor);
@@ -1896,11 +1913,12 @@ static HRESULT vertexshader_init(struct wined3d_shader *shader, struct wined3d_d
     unsigned int i;
     HRESULT hr;
     WORD map;
+    const DWORD vs_uniform_count = device->adapter->d3d_info.limits.vs_uniform_count;
 
     if (!byte_code) return WINED3DERR_INVALIDCALL;
 
     shader_init(shader, device, parent, parent_ops);
-    hr = shader_set_function(shader, byte_code, output_signature, device->d3d_vshader_constantF,
+    hr = shader_set_function(shader, byte_code, output_signature, vs_uniform_count,
             WINED3D_SHADER_TYPE_VERTEX, max_version);
     if (FAILED(hr))
     {
@@ -2011,7 +2029,7 @@ void find_ps_compile_args(const struct wined3d_state *state,
     if (shader->reg_maps.shader_version.major == 1
             && shader->reg_maps.shader_version.minor <= 3)
     {
-        for (i = 0; i < 4; ++i)
+        for (i = 0; i < shader->limits.sampler; ++i)
         {
             DWORD flags = state->texture_states[i][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS];
 
@@ -2062,6 +2080,39 @@ void find_ps_compile_args(const struct wined3d_state *state,
             }
         }
     }
+    if (shader->reg_maps.shader_version.major == 1
+            && shader->reg_maps.shader_version.minor <= 4)
+    {
+        for (i = 0; i < shader->limits.sampler; ++i)
+        {
+            const struct wined3d_texture *texture = state->textures[i];
+
+            if (!shader->reg_maps.sampler_type[i])
+                continue;
+
+            /* Treat unbound textures as 2D. The dummy texture will provide
+             * the proper sample value. The tex_types bitmap defaults to
+             * 2D because of the memset. */
+            if (!texture)
+                continue;
+
+            switch (texture->target)
+            {
+                /* RECT textures are distinguished from 2D textures via np2_fixup */
+                case GL_TEXTURE_RECTANGLE_ARB:
+                case GL_TEXTURE_2D:
+                    break;
+
+                case GL_TEXTURE_3D:
+                    args->tex_types |= WINED3D_SHADER_TEX_3D << i * WINED3D_PSARGS_TEXTYPE_SHIFT;
+                    break;
+
+                case GL_TEXTURE_CUBE_MAP_ARB:
+                    args->tex_types |= WINED3D_SHADER_TEX_CUBE << i * WINED3D_PSARGS_TEXTYPE_SHIFT;
+                    break;
+            }
+        }
+    }
 
     for (i = 0; i < MAX_FRAGMENT_SAMPLERS; ++i)
     {
@@ -2085,18 +2136,12 @@ void find_ps_compile_args(const struct wined3d_state *state,
     }
     if (shader->reg_maps.shader_version.major >= 3)
     {
-        if (device->strided_streams.position_transformed)
-        {
+        if (device->stream_info.position_transformed)
             args->vp_mode = pretransformed;
-        }
         else if (use_vs(state))
-        {
             args->vp_mode = vertexshader;
-        }
         else
-        {
             args->vp_mode = fixedfunction;
-        }
         args->fog = FOG_OFF;
     }
     else
@@ -2107,7 +2152,7 @@ void find_ps_compile_args(const struct wined3d_state *state,
             switch (state->render_states[WINED3D_RS_FOGTABLEMODE])
             {
                 case WINED3D_FOG_NONE:
-                    if (device->strided_streams.position_transformed || use_vs(state))
+                    if (device->stream_info.position_transformed || use_vs(state))
                     {
                         args->fog = FOG_LINEAR;
                         break;
@@ -2214,11 +2259,12 @@ static HRESULT pixelshader_init(struct wined3d_shader *shader, struct wined3d_de
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     unsigned int i, highest_reg_used = 0, num_regs_used = 0;
     HRESULT hr;
+    const DWORD ps_uniform_count = device->adapter->d3d_info.limits.ps_uniform_count;
 
     if (!byte_code) return WINED3DERR_INVALIDCALL;
 
     shader_init(shader, device, parent, parent_ops);
-    hr = shader_set_function(shader, byte_code, output_signature, device->d3d_pshader_constantF,
+    hr = shader_set_function(shader, byte_code, output_signature, ps_uniform_count,
             WINED3D_SHADER_TYPE_PIXEL, max_version);
     if (FAILED(hr))
     {
@@ -2274,46 +2320,32 @@ static HRESULT pixelshader_init(struct wined3d_shader *shader, struct wined3d_de
     return WINED3D_OK;
 }
 
-void pixelshader_update_samplers(struct wined3d_shader_reg_maps *reg_maps, struct wined3d_texture * const *textures)
+void pixelshader_update_samplers(struct wined3d_shader *shader, WORD tex_types)
 {
+    struct wined3d_shader_reg_maps *reg_maps = &shader->reg_maps;
     enum wined3d_sampler_texture_type *sampler_type = reg_maps->sampler_type;
     unsigned int i;
 
     if (reg_maps->shader_version.major != 1) return;
 
-    for (i = 0; i < max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS); ++i)
+    for (i = 0; i < shader->limits.sampler; ++i)
     {
         /* We don't sample from this sampler. */
         if (!sampler_type[i]) continue;
 
-        if (!textures[i])
+        switch ((tex_types >> i * WINED3D_PSARGS_TEXTYPE_SHIFT) & WINED3D_PSARGS_TEXTYPE_MASK)
         {
-            WARN("No texture bound to sampler %u, using 2D.\n", i);
-            sampler_type[i] = WINED3DSTT_2D;
-            continue;
-        }
-
-        switch (textures[i]->target)
-        {
-            case GL_TEXTURE_RECTANGLE_ARB:
-            case GL_TEXTURE_2D:
-                /* We have to select between texture rectangles and 2D
-                 * textures later because 2.0 and 3.0 shaders only have
-                 * WINED3DSTT_2D as well. */
+            case WINED3D_SHADER_TEX_2D:
                 sampler_type[i] = WINED3DSTT_2D;
                 break;
 
-            case GL_TEXTURE_3D:
+            case WINED3D_SHADER_TEX_3D:
                 sampler_type[i] = WINED3DSTT_VOLUME;
                 break;
 
-            case GL_TEXTURE_CUBE_MAP_ARB:
+            case WINED3D_SHADER_TEX_CUBE:
                 sampler_type[i] = WINED3DSTT_CUBE;
                 break;
-
-            default:
-                FIXME("Unrecognized texture type %#x, using 2D.\n", textures[i]->target);
-                sampler_type[i] = WINED3DSTT_2D;
         }
     }
 }

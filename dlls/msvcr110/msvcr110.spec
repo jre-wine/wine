@@ -928,7 +928,7 @@
 @ stub -arch=i386,win64 __crtLCMapStringEx
 @ cdecl __crtLCMapStringW(long long wstr long ptr long long long) msvcrt.__crtLCMapStringW
 @ stub -arch=i386,win64 __crtSetThreadStackGuarantee
-@ stub __crtSetUnhandledExceptionFilter
+@ cdecl __crtSetUnhandledExceptionFilter(ptr) MSVCR110__crtSetUnhandledExceptionFilter
 @ stub -arch=i386,win64 __crtTerminateProcess
 @ stub -arch=i386,win64 __crtUnhandledException
 @ cdecl __daylight() msvcrt.__daylight
@@ -1218,7 +1218,7 @@
 @ cdecl _gcvt(double long str) msvcrt._gcvt
 @ cdecl _gcvt_s(ptr long  double long) msvcrt._gcvt_s
 @ cdecl _get_current_locale() msvcrt._get_current_locale
-@ stub _get_daylight
+@ cdecl _get_daylight(ptr) msvcr100._get_daylight
 @ cdecl _get_doserrno(ptr) msvcrt._get_doserrno
 @ stub _get_dstbias
 @ cdecl _get_errno(ptr) msvcrt._get_errno
@@ -1897,7 +1897,7 @@
 @ cdecl _wexecvp(wstr ptr) msvcrt._wexecvp
 @ cdecl _wexecvpe(wstr ptr ptr) msvcrt._wexecvpe
 @ cdecl _wfdopen(long wstr) msvcrt._wfdopen
-@ stub _wfindfirst32
+@ cdecl _wfindfirst32(wstr ptr) msvcrt._wfindfirst32
 @ stub _wfindfirst32i64
 @ cdecl _wfindfirst64(wstr ptr) msvcrt._wfindfirst64
 @ cdecl _wfindfirst64i32(wstr ptr) msvcrt._wfindfirst64i32

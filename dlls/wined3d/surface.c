@@ -31,6 +31,7 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
+WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
 static HRESULT surface_cpu_blt(struct wined3d_surface *dst_surface, const RECT *dst_rect,
@@ -893,6 +894,9 @@ static void surface_map(struct wined3d_surface *surface, const RECT *rect, DWORD
     }
     else
     {
+        if (surface->resource.usage & WINED3DUSAGE_DYNAMIC)
+            WARN_(d3d_perf)("Mapping a dynamic surface without WINED3D_MAP_DISCARD.\n");
+
         /* surface_load_location() does not check if the rectangle specifies
          * the full surface. Most callers don't need that, so do it here. */
         if (rect && !rect->top && !rect->left
@@ -1096,8 +1100,6 @@ static void surface_depth_blt_fbo(const struct wined3d_device *device,
     gl_info = context->gl_info;
 
     context_apply_fbo_state_blit(context, GL_READ_FRAMEBUFFER, NULL, src_surface, src_location);
-    gl_info->gl_ops.gl.p_glReadBuffer(GL_NONE);
-    checkGLcall("glReadBuffer()");
     context_check_fbo_status(context, GL_READ_FRAMEBUFFER);
 
     context_apply_fbo_state_blit(context, GL_DRAW_FRAMEBUFFER, NULL, dst_surface, dst_location);
@@ -1551,13 +1553,13 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
      * locking them. */
     if (dst_surface->flags & SFLAG_CONVERTED)
     {
-        WARN("Converted surface, using CPU blit.\n");
+        WARN_(d3d_perf)("Converted surface, using CPU blit.\n");
         return surface_cpu_blt(dst_surface, &dst_rect, src_surface, &src_rect, flags, fx, filter);
     }
 
     if (flags & ~simple_blit)
     {
-        WARN("Using fallback for complex blit (%#x).\n", flags);
+        WARN_(d3d_perf)("Using fallback for complex blit (%#x).\n", flags);
         goto fallback;
     }
 
@@ -5738,7 +5740,6 @@ void surface_load_ds_location(struct wined3d_surface *surface, struct wined3d_co
         context_apply_fbo_state_blit(context, GL_FRAMEBUFFER,
                 NULL, surface, SFLAG_INTEXTURE);
         context_set_draw_buffer(context, GL_NONE);
-        gl_info->gl_ops.gl.p_glReadBuffer(GL_NONE);
 
         /* Do the actual blit */
         surface_depth_blt(surface, context, device->depth_blt_texture, 0, 0, w, h, bind_target);

@@ -746,13 +746,25 @@ enum fogmode {
 #define WINED3D_PSARGS_PROJECTED (1 << 3)
 #define WINED3D_PSARGS_TEXTRANSFORM_SHIFT 4
 #define WINED3D_PSARGS_TEXTRANSFORM_MASK 0xf
+#define WINED3D_PSARGS_TEXTYPE_SHIFT 2
+#define WINED3D_PSARGS_TEXTYPE_MASK 0x3
+
+/* Similar to tex_types, except that it doesn't have 1d textures
+ * (can't be bound), rect textures (handled via np2_fixup) and
+ * none / unknown (treated as 2d and handled via dummy textures). */
+enum wined3d_shader_tex_types
+{
+    WINED3D_SHADER_TEX_2D   = 0,
+    WINED3D_SHADER_TEX_3D   = 1,
+    WINED3D_SHADER_TEX_CUBE = 2,
+};
 
 struct ps_compile_args {
     struct color_fixup_desc     color_fixup[MAX_FRAGMENT_SAMPLERS];
     enum vertexprocessing_mode  vp_mode;
     enum fogmode                fog;
     WORD                        tex_transform; /* ps 1.0-1.3, 4 textures */
-    /* Texture types(2D, Cube, 3D) in ps 1.x */
+    WORD                        tex_types; /* ps 1.0 - 1.4, 6 textures */
     WORD                        srgb_correction;
     WORD                        np2_fixup;
     /* Bitmap for NP2 texcoord fixups (16 samplers max currently).
@@ -782,6 +794,7 @@ enum wined3d_shader_mode
 struct wined3d_context;
 struct wined3d_state;
 struct fragment_pipeline;
+struct wined3d_vertex_pipe_ops;
 
 struct wined3d_shader_backend_ops
 {
@@ -797,7 +810,8 @@ struct wined3d_shader_backend_ops
     void (*shader_load_np2fixup_constants)(void *shader_priv, const struct wined3d_gl_info *gl_info,
             const struct wined3d_state *state);
     void (*shader_destroy)(struct wined3d_shader *shader);
-    HRESULT (*shader_alloc_private)(struct wined3d_device *device, const struct fragment_pipeline *fragment_pipe);
+    HRESULT (*shader_alloc_private)(struct wined3d_device *device, const struct wined3d_vertex_pipe_ops *vertex_pipe,
+            const struct fragment_pipeline *fragment_pipe);
     void (*shader_free_private)(struct wined3d_device *device);
     void (*shader_context_destroyed)(void *shader_priv, const struct wined3d_context *context);
     void (*shader_get_caps)(const struct wined3d_gl_info *gl_info, struct shader_caps *caps);
@@ -850,15 +864,6 @@ do {                                                                \
 #else
 #define checkGLcall(A) do {} while(0)
 #endif
-
-/* Trace vector and strided data information */
-#define TRACE_STRIDED(si, name) do { if (si->use_map & (1 << name)) \
-        TRACE( #name " = (data {%#x:%p}, stride %d, format %s, stream %u)\n", \
-        si->elements[name].data.buffer_object, si->elements[name].data.addr, si->elements[name].stride, \
-        debug_d3dformat(si->elements[name].format->id), si->elements[name].stream_idx); } while(0)
-
-/* Global variables */
-extern const struct wined3d_matrix identity DECLSPEC_HIDDEN;
 
 enum wined3d_ffp_idx
 {
@@ -1054,6 +1059,7 @@ BOOL wined3d_event_query_supported(const struct wined3d_gl_info *gl_info) DECLSP
 struct wined3d_context
 {
     const struct wined3d_gl_info *gl_info;
+    const struct wined3d_d3d_info *d3d_info;
     const struct StateEntry *state_table;
     /* State dirtification
      * dirtyArray is an array that contains markers for dirty states. numDirtyEntries states are dirty, their numbers are in indices
@@ -1181,8 +1187,27 @@ struct fragment_pipeline
     const struct StateEntryTemplate *states;
 };
 
+struct wined3d_vertex_caps
+{
+    DWORD max_active_lights;
+    DWORD max_vertex_blend_matrices;
+    DWORD max_vertex_blend_matrix_index;
+    DWORD vertex_processing_caps;
+    DWORD fvf_caps;
+    DWORD max_user_clip_planes;
+    DWORD raster_caps;
+};
+
+struct wined3d_vertex_pipe_ops
+{
+    void (*vp_enable)(const struct wined3d_gl_info *gl_info, BOOL enable);
+    void (*vp_get_caps)(const struct wined3d_gl_info *gl_info, struct wined3d_vertex_caps *caps);
+    void *(*vp_alloc)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
+    void (*vp_free)(struct wined3d_device *device);
+    const struct StateEntryTemplate *vp_states;
+};
+
 extern const struct StateEntryTemplate misc_state_template[] DECLSPEC_HIDDEN;
-extern const struct StateEntryTemplate ffp_vertexstate_template[] DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline none_fragment_pipe DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline ffp_fragment_pipeline DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline atifs_fragment_pipeline DECLSPEC_HIDDEN;
@@ -1191,10 +1216,14 @@ extern const struct fragment_pipeline nvts_fragment_pipeline DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline nvrc_fragment_pipeline DECLSPEC_HIDDEN;
 extern const struct fragment_pipeline glsl_fragment_pipe DECLSPEC_HIDDEN;
 
+extern const struct wined3d_vertex_pipe_ops none_vertex_pipe DECLSPEC_HIDDEN;
+extern const struct wined3d_vertex_pipe_ops ffp_vertex_pipe DECLSPEC_HIDDEN;
+
 /* "Base" state table */
 HRESULT compile_state_table(struct StateEntry *StateTable, APPLYSTATEFUNC **dev_multistate_funcs,
-        const struct wined3d_gl_info *gl_info, const struct StateEntryTemplate *vertex,
-        const struct fragment_pipeline *fragment, const struct StateEntryTemplate *misc) DECLSPEC_HIDDEN;
+        const struct wined3d_gl_info *gl_info, const struct wined3d_d3d_info *d3d_info,
+        const struct wined3d_vertex_pipe_ops *vertex, const struct fragment_pipeline *fragment,
+        const struct StateEntryTemplate *misc) DECLSPEC_HIDDEN;
 
 enum wined3d_blit_op
 {
@@ -1253,6 +1282,7 @@ void context_bind_texture(struct wined3d_context *context, GLenum target, GLuint
 void context_check_fbo_status(const struct wined3d_context *context, GLenum target) DECLSPEC_HIDDEN;
 struct wined3d_context *context_create(struct wined3d_swapchain *swapchain, struct wined3d_surface *target,
         const struct wined3d_format *ds_format) DECLSPEC_HIDDEN;
+BOOL context_debug_output_enabled(const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 void context_destroy(struct wined3d_device *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void context_free_event_query(struct wined3d_event_query *query) DECLSPEC_HIDDEN;
 void context_free_occlusion_query(struct wined3d_occlusion_query *query) DECLSPEC_HIDDEN;
@@ -1499,7 +1529,6 @@ struct wined3d_gl_limits
     UINT buffers;
     UINT lights;
     UINT textures;
-    UINT texture_stages;
     UINT texture_coords;
     UINT fragment_samplers;
     UINT vertex_samplers;
@@ -1540,6 +1569,7 @@ struct wined3d_gl_info
     BOOL supported[WINED3D_GL_EXT_COUNT];
     GLint wrap_lookup[WINED3D_TADDRESS_MIRROR_ONCE - WINED3D_TADDRESS_WRAP + 1];
 
+    HGLRC (WINAPI *p_wglCreateContextAttribsARB)(HDC dc, HGLRC share, const GLint *attribs);
     struct opengl_funcs gl_ops;
     struct wined3d_fbo_ops fbo_ops;
 
@@ -1557,6 +1587,22 @@ struct wined3d_driver_info
     DWORD version_low;
 };
 
+struct wined3d_d3d_limits
+{
+    UINT vs_version, gs_version, ps_version;
+    DWORD vs_uniform_count;
+    DWORD ps_uniform_count;
+    UINT ffp_textures;
+    UINT ffp_blend_stages;
+};
+
+struct wined3d_d3d_info
+{
+    struct wined3d_d3d_limits limits;
+    BOOL vs_clipping;
+    DWORD valid_rt_mask;
+};
+
 /* The adapter structure */
 struct wined3d_adapter
 {
@@ -1565,6 +1611,7 @@ struct wined3d_adapter
     enum wined3d_format_id screen_format;
 
     struct wined3d_gl_info  gl_info;
+    struct wined3d_d3d_info d3d_info;
     struct wined3d_driver_info driver_info;
     WCHAR                   DeviceName[CCHDEVICENAME]; /* DeviceName for use with e.g. ChangeDisplaySettings */
     unsigned int cfg_count;
@@ -1573,6 +1620,7 @@ struct wined3d_adapter
     unsigned int            UsedTextureRam;
     LUID luid;
 
+    const struct wined3d_vertex_pipe_ops *vertex_pipe;
     const struct fragment_pipeline *fragment_pipe;
     const struct wined3d_shader_backend_ops *shader_backend;
     const struct blit_shader *blitter;
@@ -1637,7 +1685,7 @@ struct ffp_frag_desc
 extern const struct wine_rb_functions wined3d_ffp_frag_program_rb_functions DECLSPEC_HIDDEN;
 extern const struct wined3d_parent_ops wined3d_null_parent_ops DECLSPEC_HIDDEN;
 
-void gen_ffp_frag_op(const struct wined3d_device *device, const struct wined3d_state *state,
+void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d_state *state,
         struct ffp_frag_settings *settings, BOOL ignore_textype) DECLSPEC_HIDDEN;
 const struct ffp_frag_desc *find_ffp_frag_shader(const struct wine_rb_tree *fragment_shaders,
         const struct ffp_frag_settings *settings) DECLSPEC_HIDDEN;
@@ -1684,19 +1732,15 @@ struct wined3d_device
     const struct wined3d_shader_backend_ops *shader_backend;
     void *shader_priv;
     void *fragment_priv;
+    void *vertex_priv;
     void *blit_priv;
     struct StateEntry StateTable[STATE_HIGHEST + 1];
     /* Array of functions for states which are handled by more than one pipeline part */
     APPLYSTATEFUNC *multistate_funcs[STATE_HIGHEST + 1];
     const struct blit_shader *blitter;
 
-    unsigned int max_ffp_textures;
-    UINT vs_version, gs_version, ps_version;
-    DWORD d3d_vshader_constantF, d3d_pshader_constantF; /* Advertised d3d caps, not GL ones */
-    DWORD vs_clipping;
     UINT instance_count;
 
-    WORD view_ident : 1;                /* true iff view matrix is identity */
     WORD vertexBlendUsed : 1;           /* To avoid needless setting of the blend matrices */
     WORD isRecordingState : 1;
     WORD isInDraw : 1;
@@ -1706,7 +1750,7 @@ struct wined3d_device
     WORD softwareVertexProcessing : 1;  /* process vertex shaders using software or hardware */
     WORD useDrawStridedSlow : 1;
     WORD filter_messages : 1;
-    WORD padding : 6;
+    WORD padding : 7;
 
     BYTE fixed_function_usage_map;      /* MAX_TEXTURES, 8 */
 
@@ -1729,7 +1773,6 @@ struct wined3d_device
     struct list             shaders;   /* a linked list to track shaders (pixel and vertex)      */
 
     /* Render Target Support */
-    DWORD valid_rt_mask;
     struct wined3d_fb_state fb;
     struct wined3d_surface *onscreen_depth_stencil;
     struct wined3d_surface *auto_depth_stencil;
@@ -1760,7 +1803,7 @@ struct wined3d_device
     DWORD                     rev_tex_unit_map[MAX_COMBINED_SAMPLERS];
 
     /* Stream source management */
-    struct wined3d_stream_info strided_streams;
+    struct wined3d_stream_info stream_info;
     struct wined3d_event_query *buffer_queries[MAX_ATTRIBS];
     unsigned int num_buffer_queries;
 
@@ -2635,8 +2678,7 @@ struct wined3d_shader
     } u;
 };
 
-void pixelshader_update_samplers(struct wined3d_shader_reg_maps *reg_maps,
-        struct wined3d_texture * const *textures) DECLSPEC_HIDDEN;
+void pixelshader_update_samplers(struct wined3d_shader *shader, WORD tex_types) DECLSPEC_HIDDEN;
 void find_ps_compile_args(const struct wined3d_state *state,
         const struct wined3d_shader *shader, struct ps_compile_args *args) DECLSPEC_HIDDEN;
 
@@ -2776,7 +2818,6 @@ extern enum wined3d_format_id pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN
 #define WINED3DFMT_FLAG_DEPTH                       0x00000004
 #define WINED3DFMT_FLAG_STENCIL                     0x00000008
 #define WINED3DFMT_FLAG_RENDERTARGET                0x00000010
-#define WINED3DFMT_FLAG_FOURCC                      0x00000020
 #define WINED3DFMT_FLAG_FBO_ATTACHABLE              0x00000040
 #define WINED3DFMT_FLAG_FBO_ATTACHABLE_SRGB         0x00000080
 #define WINED3DFMT_FLAG_GETDC                       0x00000100
