@@ -1,8 +1,11 @@
-wine-unstable (1.5.27-1) UNRELEASED; urgency=low
+wine-unstable (1.5.27-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.27, released Mar 29, 2013.
+    - Various C runtime improvements.
+    - Large icons for built-in applications.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Fri, 14 Jun 2013 01:25:57 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 22:20:21 +0000
 
 wine-unstable (1.5.26-1) unstable; urgency=low
 
