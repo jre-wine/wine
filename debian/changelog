@@ -1,8 +1,11 @@
-wine-unstable (1.5.30-1) UNRELEASED; urgency=low
+wine-unstable (1.5.30-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.30, released May 10, 2013.
+    - NTLM and Negotiate authentication in WinHTTP.
+    - Support for proxy bypass in WinInet.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Jun 2013 23:28:09 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 26 Jun 2013 00:42:48 +0000
 
 wine-unstable (1.5.29-1) unstable; urgency=low
 
