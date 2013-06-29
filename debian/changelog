@@ -1,8 +1,10 @@
-wine-unstable (1.5.31-1) UNRELEASED; urgency=low
+wine-unstable (1.5.31-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.5.31, released May 24, 2013.
+    - New version of the Gecko engine based on Firefox 21.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Jun 2013 21:01:33 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Jun 2013 21:01:53 +0000
 
 wine-unstable (1.5.30-2) unstable; urgency=low
 
