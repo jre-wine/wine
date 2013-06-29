@@ -1,7 +1,7 @@
 /*
  * Context and render target management in wined3d
  *
- * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2011, 2013 Stefan Dösinger for CodeWeavers
  * Copyright 2009-2011 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -1922,7 +1922,7 @@ static void SetupForBlit(const struct wined3d_device *device, struct wined3d_con
     set_blit_dimension(gl_info, rt_size.cx, rt_size.cy);
 
     /* Disable shaders */
-    device->shader_backend->shader_select(context, WINED3D_SHADER_MODE_NONE, WINED3D_SHADER_MODE_NONE);
+    device->shader_backend->shader_disable(device->shader_priv, context);
     context->select_shader = 1;
     context->load_constants = 1;
 
@@ -2403,15 +2403,14 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
 
     if (context->select_shader)
     {
-        device->shader_backend->shader_select(context,
-                use_vs(state) ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP,
-                use_ps(state) ? WINED3D_SHADER_MODE_SHADER : WINED3D_SHADER_MODE_FFP);
+        device->shader_backend->shader_select(device->shader_priv, context, state);
         context->select_shader = 0;
     }
 
     if (context->load_constants)
     {
-        device->shader_backend->shader_load_constants(context, use_ps(state), use_vs(state));
+        device->shader_backend->shader_load_constants(device->shader_priv,
+                context, state);
         context->load_constants = 0;
     }
 

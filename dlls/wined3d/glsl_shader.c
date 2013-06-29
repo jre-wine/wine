@@ -3,7 +3,7 @@
  *
  * Copyright 2006 Jason Green
  * Copyright 2006-2007 Henri Verbeet
- * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
+ * Copyright 2007-2009, 2013 Stefan Dösinger for CodeWeavers
  * Copyright 2009-2011 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -725,14 +725,11 @@ static void shader_glsl_load_np2fixup_constants(void *shader_priv,
 }
 
 /* Context activation is done by the caller (state handler). */
-static void shader_glsl_load_constants(const struct wined3d_context *context,
-        BOOL usePixelShader, BOOL useVertexShader)
+static void shader_glsl_load_constants(void *shader_priv, const struct wined3d_context *context,
+        const struct wined3d_state *state)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    struct wined3d_device *device = context->swapchain->device;
-    struct wined3d_stateblock *stateBlock = device->stateBlock;
-    const struct wined3d_state *state = &stateBlock->state;
-    struct shader_glsl_priv *priv = device->shader_priv;
+    struct shader_glsl_priv *priv = shader_priv;
     float position_fixup[4];
 
     GLhandleARB programId;
@@ -747,7 +744,7 @@ static void shader_glsl_load_constants(const struct wined3d_context *context,
     programId = prog->programId;
     constant_version = prog->constant_version;
 
-    if (useVertexShader)
+    if (use_vs(state))
     {
         const struct wined3d_shader *vshader = state->vertex_shader;
 
@@ -757,11 +754,11 @@ static void shader_glsl_load_constants(const struct wined3d_context *context,
 
         /* Load DirectX 9 integer constants/uniforms for vertex shader */
         shader_glsl_load_constantsI(vshader, gl_info, prog->vs.uniform_i_locations, state->vs_consts_i,
-                stateBlock->changed.vertexShaderConstantsI & vshader->reg_maps.integer_constants);
+                vshader->reg_maps.integer_constants);
 
         /* Load DirectX 9 boolean constants/uniforms for vertex shader */
         shader_glsl_load_constantsB(vshader, gl_info, programId, state->vs_consts_b,
-                stateBlock->changed.vertexShaderConstantsB & vshader->reg_maps.boolean_constants);
+                vshader->reg_maps.boolean_constants);
 
         /* Upload the position fixup params */
         shader_get_position_fixup(context, state, position_fixup);
@@ -769,7 +766,7 @@ static void shader_glsl_load_constants(const struct wined3d_context *context,
         checkGLcall("glUniform4fvARB");
     }
 
-    if (usePixelShader)
+    if (use_ps(state))
     {
         const struct wined3d_shader *pshader = state->pixel_shader;
 
@@ -779,11 +776,11 @@ static void shader_glsl_load_constants(const struct wined3d_context *context,
 
         /* Load DirectX 9 integer constants/uniforms for pixel shader */
         shader_glsl_load_constantsI(pshader, gl_info, prog->ps.uniform_i_locations, state->ps_consts_i,
-                stateBlock->changed.pixelShaderConstantsI & pshader->reg_maps.integer_constants);
+                pshader->reg_maps.integer_constants);
 
         /* Load DirectX 9 boolean constants/uniforms for pixel shader */
         shader_glsl_load_constantsB(pshader, gl_info, programId, state->ps_consts_b,
-                stateBlock->changed.pixelShaderConstantsB & pshader->reg_maps.boolean_constants);
+                pshader->reg_maps.boolean_constants);
 
         /* Upload the environment bump map matrix if needed. The needsbumpmat
          * member specifies the texture stage to load the matrix from. It
@@ -5483,13 +5480,11 @@ static void shader_glsl_init_ps_uniform_locations(const struct wined3d_gl_info *
 }
 
 /* Context activation is done by the caller. */
-static void set_glsl_shader_program(const struct wined3d_context *context, struct wined3d_device *device,
-        enum wined3d_shader_mode vertex_mode, enum wined3d_shader_mode fragment_mode)
+static void set_glsl_shader_program(const struct wined3d_context *context, const struct wined3d_state *state,
+        struct shader_glsl_priv *priv)
 {
-    const struct wined3d_state *state = &device->stateBlock->state;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     const struct ps_np2fixup_info *np2fixup_info = NULL;
-    struct shader_glsl_priv *priv = device->shader_priv;
     struct glsl_shader_prog_link *entry = NULL;
     struct wined3d_shader *vshader = NULL;
     struct wined3d_shader *gshader = NULL;
@@ -5501,8 +5496,9 @@ static void set_glsl_shader_program(const struct wined3d_context *context, struc
     struct vs_compile_args vs_compile_args;
     GLhandleARB vs_id, gs_id, ps_id;
     struct list *ps_list;
+    struct wined3d_device *device = context->swapchain->device;
 
-    if (vertex_mode == WINED3D_SHADER_MODE_SHADER)
+    if (use_vs(state))
     {
         vshader = state->vertex_shader;
         find_vs_compile_args(state, vshader, &vs_compile_args);
@@ -5519,7 +5515,7 @@ static void set_glsl_shader_program(const struct wined3d_context *context, struc
         gs_id = 0;
     }
 
-    if (fragment_mode == WINED3D_SHADER_MODE_SHADER)
+    if (use_ps(state))
     {
         pshader = state->pixel_shader;
         find_ps_compile_args(state, pshader, &ps_compile_args);
@@ -5527,7 +5523,7 @@ static void set_glsl_shader_program(const struct wined3d_context *context, struc
                 pshader, &ps_compile_args, &np2fixup_info);
         ps_list = &pshader->linked_programs;
     }
-    else if (fragment_mode == WINED3D_SHADER_MODE_FFP && priv->fragment_pipe == &glsl_fragment_pipe)
+    else if (priv->fragment_pipe == &glsl_fragment_pipe)
     {
         struct glsl_ffp_fragment_shader *ffp_shader;
         struct ffp_frag_settings settings;
@@ -5784,20 +5780,19 @@ static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info,
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_select(const struct wined3d_context *context, enum wined3d_shader_mode vertex_mode,
-        enum wined3d_shader_mode fragment_mode)
+static void shader_glsl_select(void *shader_priv, const struct wined3d_context *context,
+        const struct wined3d_state *state)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    struct wined3d_device *device = context->swapchain->device;
-    struct shader_glsl_priv *priv = device->shader_priv;
+    struct shader_glsl_priv *priv = shader_priv;
     GLhandleARB program_id = 0;
     GLenum old_vertex_color_clamp, current_vertex_color_clamp;
 
-    priv->vertex_pipe->vp_enable(gl_info, vertex_mode == WINED3D_SHADER_MODE_FFP);
-    priv->fragment_pipe->enable_extension(gl_info, fragment_mode == WINED3D_SHADER_MODE_FFP);
+    priv->vertex_pipe->vp_enable(gl_info, !use_vs(state));
+    priv->fragment_pipe->enable_extension(gl_info, !use_ps(state));
 
     old_vertex_color_clamp = priv->glsl_program ? priv->glsl_program->vs.vertex_color_clamp : GL_FIXED_ONLY_ARB;
-    set_glsl_shader_program(context, device, vertex_mode, fragment_mode);
+    set_glsl_shader_program(context, state, priv);
     current_vertex_color_clamp = priv->glsl_program ? priv->glsl_program->vs.vertex_color_clamp : GL_FIXED_ONLY_ARB;
     if (old_vertex_color_clamp != current_vertex_color_clamp)
     {
@@ -5822,7 +5817,27 @@ static void shader_glsl_select(const struct wined3d_context *context, enum wined
      * called between selecting the shader and using it, which results in wrong fixup for some frames. */
     if (priv->glsl_program && priv->glsl_program->ps.np2_fixup_info)
     {
-        shader_glsl_load_np2fixup_constants(priv, gl_info, &device->stateBlock->state);
+        shader_glsl_load_np2fixup_constants(priv, gl_info, state);
+    }
+}
+
+/* Context activation is done by the caller. */
+static void shader_glsl_disable(void *shader_priv, const struct wined3d_context *context)
+{
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct shader_glsl_priv *priv = shader_priv;
+
+    priv->glsl_program = NULL;
+    GL_EXTCALL(glUseProgramObjectARB(0));
+    checkGLcall("glUseProgramObjectARB");
+
+    priv->vertex_pipe->vp_enable(gl_info, FALSE);
+    priv->fragment_pipe->enable_extension(gl_info, FALSE);
+
+    if (gl_info->supported[ARB_COLOR_BUFFER_FLOAT])
+    {
+        GL_EXTCALL(glClampColorARB(GL_CLAMP_VERTEX_COLOR_ARB, GL_FIXED_ONLY_ARB));
+        checkGLcall("glClampColorARB");
     }
 }
 
@@ -5910,7 +5925,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                 {
                     TRACE("Deleting pixel shader %u.\n", gl_shaders[i].prgId);
                     if (priv->glsl_program && priv->glsl_program->ps.id == gl_shaders[i].prgId)
-                        shader_glsl_select(context, WINED3D_SHADER_MODE_NONE, WINED3D_SHADER_MODE_NONE);
+                        shader_glsl_disable(priv, context);
                     GL_EXTCALL(glDeleteObjectARB(gl_shaders[i].prgId));
                     checkGLcall("glDeleteObjectARB");
                 }
@@ -5933,7 +5948,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                 {
                     TRACE("Deleting vertex shader %u.\n", gl_shaders[i].prgId);
                     if (priv->glsl_program && priv->glsl_program->vs.id == gl_shaders[i].prgId)
-                        shader_glsl_select(context, WINED3D_SHADER_MODE_NONE, WINED3D_SHADER_MODE_NONE);
+                        shader_glsl_disable(priv, context);
                     GL_EXTCALL(glDeleteObjectARB(gl_shaders[i].prgId));
                     checkGLcall("glDeleteObjectARB");
                 }
@@ -5956,7 +5971,7 @@ static void shader_glsl_destroy(struct wined3d_shader *shader)
                 {
                     TRACE("Deleting geometry shader %u.\n", gl_shaders[i].id);
                     if (priv->glsl_program && priv->glsl_program->gs.id == gl_shaders[i].id)
-                        shader_glsl_select(context, WINED3D_SHADER_MODE_NONE, WINED3D_SHADER_MODE_NONE);
+                        shader_glsl_disable(priv, context);
                     GL_EXTCALL(glDeleteObjectARB(gl_shaders[i].id));
                     checkGLcall("glDeleteObjectARB");
                 }
@@ -6345,6 +6360,7 @@ const struct wined3d_shader_backend_ops glsl_shader_backend =
 {
     shader_glsl_handle_instruction,
     shader_glsl_select,
+    shader_glsl_disable,
     shader_glsl_select_depth_blt,
     shader_glsl_deselect_depth_blt,
     shader_glsl_update_float_vertex_constants,
