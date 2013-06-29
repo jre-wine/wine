@@ -5,6 +5,7 @@
  * Copyright 2002-2003 Raphael Junqueira
  * Copyright 2002-2003, 2004 Jason Edmeades
  * Copyright 2005 Oliver Stieber
+ * Copyright 2006-2011, 2013 Stefan Dösinger for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -784,13 +785,6 @@ struct vs_compile_args {
     WORD                        swizzle_map;   /* MAX_ATTRIBS, 16 */
 };
 
-enum wined3d_shader_mode
-{
-    WINED3D_SHADER_MODE_NONE,
-    WINED3D_SHADER_MODE_FFP,
-    WINED3D_SHADER_MODE_SHADER,
-};
-
 struct wined3d_context;
 struct wined3d_state;
 struct fragment_pipeline;
@@ -799,14 +793,16 @@ struct wined3d_vertex_pipe_ops;
 struct wined3d_shader_backend_ops
 {
     void (*shader_handle_instruction)(const struct wined3d_shader_instruction *);
-    void (*shader_select)(const struct wined3d_context *context, enum wined3d_shader_mode vertex_mode,
-            enum wined3d_shader_mode fragment_mode);
+    void (*shader_select)(void *shader_priv, const struct wined3d_context *context,
+            const struct wined3d_state *state);
+    void (*shader_disable)(void *shader_priv, const struct wined3d_context *context);
     void (*shader_select_depth_blt)(void *shader_priv, const struct wined3d_gl_info *gl_info,
             enum tex_types tex_type, const SIZE *ds_mask_size);
     void (*shader_deselect_depth_blt)(void *shader_priv, const struct wined3d_gl_info *gl_info);
     void (*shader_update_float_vertex_constants)(struct wined3d_device *device, UINT start, UINT count);
     void (*shader_update_float_pixel_constants)(struct wined3d_device *device, UINT start, UINT count);
-    void (*shader_load_constants)(const struct wined3d_context *context, BOOL usePS, BOOL useVS);
+    void (*shader_load_constants)(void *shader_priv, const struct wined3d_context *context,
+            const struct wined3d_state *state);
     void (*shader_load_np2fixup_constants)(void *shader_priv, const struct wined3d_gl_info *gl_info,
             const struct wined3d_state *state);
     void (*shader_destroy)(struct wined3d_shader *shader);

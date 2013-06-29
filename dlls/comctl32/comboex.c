@@ -75,7 +75,7 @@ typedef struct
     INT          nb_items;         /* Number of items */
     BOOL         unicode;          /* TRUE if this window is Unicode   */
     BOOL         NtfUnicode;       /* TRUE if parent wants notify in Unicode */
-    CBE_ITEMDATA *edit;            /* item data for edit item */
+    CBE_ITEMDATA edit;             /* item data for edit item */
     CBE_ITEMDATA *items;           /* Array of items */
 } COMBOEX_INFO;
 
@@ -273,9 +273,9 @@ static void COMBOEX_NotifyDragBegin(const COMBOEX_INFO *infoPtr, LPCWSTR wstr)
 static void COMBOEX_FreeText (CBE_ITEMDATA *item)
 {
     if (is_textW(item->pszText)) Free(item->pszText);
-    item->pszText = 0;
+    item->pszText = NULL;
     Free(item->pszTemp);
-    item->pszTemp = 0;
+    item->pszTemp = NULL;
 }
 
 
@@ -455,15 +455,15 @@ static void COMBOEX_SetEditText (const COMBOEX_INFO *infoPtr, CBE_ITEMDATA *item
 }
 
 
-static CBE_ITEMDATA * COMBOEX_FindItem(const COMBOEX_INFO *infoPtr, INT_PTR index)
+static CBE_ITEMDATA *COMBOEX_FindItem(COMBOEX_INFO *infoPtr, INT_PTR index)
 {
     CBE_ITEMDATA *item;
     INT i;
 
     if ((index >= infoPtr->nb_items) || (index < -1))
-	return 0;
+	return NULL;
     if (index == -1)
-	return infoPtr->edit;
+	return &infoPtr->edit;
     item = infoPtr->items;
     i = infoPtr->nb_items - 1;
 
@@ -481,7 +481,7 @@ static CBE_ITEMDATA * COMBOEX_FindItem(const COMBOEX_INFO *infoPtr, INT_PTR inde
 
 /* ***  CBEM_xxx message support  *** */
 
-static UINT COMBOEX_GetListboxText(const COMBOEX_INFO *infoPtr, INT_PTR n, LPWSTR buf)
+static UINT COMBOEX_GetListboxText(COMBOEX_INFO *infoPtr, INT_PTR n, LPWSTR buf)
 {
     CBE_ITEMDATA *item;
     LPCWSTR str;
@@ -519,7 +519,7 @@ static UINT COMBOEX_GetListboxText(const COMBOEX_INFO *infoPtr, INT_PTR n, LPWST
 }
 
 
-static INT COMBOEX_DeleteItem (const COMBOEX_INFO *infoPtr, INT_PTR index)
+static INT COMBOEX_DeleteItem (COMBOEX_INFO *infoPtr, INT_PTR index)
 {
     TRACE("(index=%ld)\n", index);
 
@@ -534,7 +534,7 @@ static INT COMBOEX_DeleteItem (const COMBOEX_INFO *infoPtr, INT_PTR index)
 }
 
 
-static BOOL COMBOEX_GetItemW (const COMBOEX_INFO *infoPtr, COMBOBOXEXITEMW *cit)
+static BOOL COMBOEX_GetItemW (COMBOEX_INFO *infoPtr, COMBOBOXEXITEMW *cit)
 {
     INT_PTR index = cit->iItem;
     CBE_ITEMDATA *item;
@@ -555,7 +555,7 @@ static BOOL COMBOEX_GetItemW (const COMBOEX_INFO *infoPtr, COMBOBOXEXITEMW *cit)
 }
 
 
-static BOOL COMBOEX_GetItemA (const COMBOEX_INFO *infoPtr, COMBOBOXEXITEMA *cit)
+static BOOL COMBOEX_GetItemA (COMBOEX_INFO *infoPtr, COMBOBOXEXITEMA *cit)
 {
     COMBOBOXEXITEMW tmpcit;
 
@@ -754,7 +754,7 @@ static HIMAGELIST COMBOEX_SetImageList (COMBOEX_INFO *infoPtr, HIMAGELIST himl)
     return himlTemp;
 }
 
-static BOOL COMBOEX_SetItemW (const COMBOEX_INFO *infoPtr, const COMBOBOXEXITEMW *cit)
+static BOOL COMBOEX_SetItemW (COMBOEX_INFO *infoPtr, const COMBOBOXEXITEMW *cit)
 {
     INT_PTR index = cit->iItem;
     CBE_ITEMDATA *item;
@@ -805,7 +805,7 @@ static BOOL COMBOEX_SetItemW (const COMBOEX_INFO *infoPtr, const COMBOBOXEXITEMW
     return TRUE;
 }
 
-static BOOL COMBOEX_SetItemA (const COMBOEX_INFO *infoPtr, COMBOBOXEXITEMA const *cit)
+static BOOL COMBOEX_SetItemA (COMBOEX_INFO *infoPtr, COMBOBOXEXITEMA const *cit)
 {
     COMBOBOXEXITEMW citW;
     LPWSTR wstr = NULL;
@@ -863,7 +863,7 @@ COMBOEX_FindStringExact (const COMBOEX_INFO *infoPtr, INT start, LPCWSTR str)
 }
 
 
-static DWORD_PTR COMBOEX_GetItemData (const COMBOEX_INFO *infoPtr, INT_PTR index)
+static DWORD_PTR COMBOEX_GetItemData (COMBOEX_INFO *infoPtr, INT_PTR index)
 {
     CBE_ITEMDATA const *item1;
     CBE_ITEMDATA const *item2;
@@ -903,7 +903,7 @@ static INT COMBOEX_SetCursel (COMBOEX_INFO *infoPtr, INT_PTR index)
 }
 
 
-static DWORD_PTR COMBOEX_SetItemData (const COMBOEX_INFO *infoPtr, INT_PTR index, DWORD_PTR data)
+static DWORD_PTR COMBOEX_SetItemData (COMBOEX_INFO *infoPtr, INT_PTR index, DWORD_PTR data)
 {
     CBE_ITEMDATA *item1;
     CBE_ITEMDATA const *item2;
@@ -1089,16 +1089,6 @@ static LRESULT COMBOEX_Create (HWND hwnd, CREATESTRUCTA const *cs)
 		 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOMOVE);
 
     COMBOEX_AdjustEditPos (infoPtr);
-
-    /*
-     * Create an item structure to represent the data in the
-     * EDIT control. It is allocated zero-filled.
-     */
-    infoPtr->edit = Alloc (sizeof (CBE_ITEMDATA));
-    if (!infoPtr->edit) {
-	COMBOEX_Destroy(infoPtr);
-	return -1;
-    }
 
     return 0;
 }
@@ -1316,17 +1306,17 @@ static BOOL COMBOEX_WM_DeleteItem (COMBOEX_INFO *infoPtr, DELETEITEMSTRUCT const
 }
 
 
-static LRESULT COMBOEX_DrawItem (const COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT const *dis)
+static LRESULT COMBOEX_DrawItem (COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT const *dis)
 {
     static const WCHAR nil[] = { 0 };
-    CBE_ITEMDATA *item = 0;
+    CBE_ITEMDATA *item = NULL;
     SIZE txtsize;
     RECT rect;
     LPCWSTR str = nil;
     UINT xbase, x, y;
     INT len;
     COLORREF nbkc, ntxc, bkc, txc;
-    int drawimage, drawstate, xioff;
+    int drawimage, drawstate, xioff, selected;
 
     TRACE("DRAWITEMSTRUCT: CtlType=0x%08x CtlID=0x%08x\n",
 	  dis->CtlType, dis->CtlID);
@@ -1378,7 +1368,7 @@ static LRESULT COMBOEX_DrawItem (const COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT con
 
     /* If draw item is -1 (edit control) setup the item pointer */
     if (dis->itemID == 0xffffffff) {
-	item = infoPtr->edit;
+        item = &infoPtr->edit;
 
 	if (infoPtr->hwndEdit) {
 	    /* free previous text of edit item */
@@ -1427,36 +1417,30 @@ static LRESULT COMBOEX_DrawItem (const COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT con
 
     drawimage = -2;
     drawstate = ILD_NORMAL;
+    selected = infoPtr->selected == dis->itemID;
+
     if (item->mask & CBEIF_IMAGE)
 	drawimage = item->iImage;
+    if (item->mask & CBEIF_SELECTEDIMAGE && selected)
+        drawimage = item->iSelectedImage;
     if (dis->itemState & ODS_COMBOEXLBOX) {
 	/* drawing listbox entry */
-	if (dis->itemState & ODS_SELECTED) {
-	    if (item->mask & CBEIF_SELECTEDIMAGE)
-	        drawimage = item->iSelectedImage;
+	if (dis->itemState & ODS_SELECTED)
 	    drawstate = ILD_SELECTED;
-	}
     } else {
 	/* drawing combo/edit entry */
 	if (IsWindowVisible(infoPtr->hwndEdit)) {
 	    /* if we have an edit control, the slave the
              * selection state to the Edit focus state
 	     */
-	    if (infoPtr->flags & WCBE_EDITFOCUSED) {
-	        if (item->mask & CBEIF_SELECTEDIMAGE)
-		    drawimage = item->iSelectedImage;
+	    if (infoPtr->flags & WCBE_EDITFOCUSED)
 		drawstate = ILD_SELECTED;
-	    }
-	} else {
+	} else
 	    /* if we don't have an edit control, use
 	     * the requested state.
 	     */
-	    if (dis->itemState & ODS_SELECTED) {
-		if (item->mask & CBEIF_SELECTEDIMAGE)
-		    drawimage = item->iSelectedImage;
+	    if (dis->itemState & ODS_SELECTED)
 		drawstate = ILD_SELECTED;
-	    }
-	}
     }
 
     if (infoPtr->himl && !(infoPtr->dwExtStyle & CBES_EX_NOEDITIMAGEINDENT)) {
@@ -1479,17 +1463,17 @@ static LRESULT COMBOEX_DrawItem (const COMBOEX_INFO *infoPtr, DRAWITEMSTRUCT con
     	if (drawimage == I_IMAGECALLBACK) {
 	    NMCOMBOBOXEXW nmce;
 	    ZeroMemory(&nmce, sizeof(nmce));
-	    nmce.ceItem.mask = (drawstate == ILD_NORMAL) ? CBEIF_IMAGE : CBEIF_SELECTEDIMAGE;
+	    nmce.ceItem.mask = selected ? CBEIF_SELECTEDIMAGE : CBEIF_IMAGE;
 	    nmce.ceItem.lParam = item->lParam;
 	    nmce.ceItem.iItem = dis->itemID;
 	    COMBOEX_NotifyItem(infoPtr, CBEN_GETDISPINFOW, &nmce);
-	    if (drawstate == ILD_NORMAL) {
+	    if (!selected) {
 	    	if (nmce.ceItem.mask & CBEIF_DI_SETITEM) item->iImage = nmce.ceItem.iImage;
 	    	drawimage = nmce.ceItem.iImage;
-	    } else if (drawstate == ILD_SELECTED) {
+	    } else {
 	        if (nmce.ceItem.mask & CBEIF_DI_SETITEM) item->iSelectedImage = nmce.ceItem.iSelectedImage;
-	        drawimage =  nmce.ceItem.iSelectedImage;
-	    } else ERR("Bad draw state = %d\n", drawstate);
+                drawimage = nmce.ceItem.iSelectedImage;
+	    }
         }
 
 	if (overlay == I_IMAGECALLBACK) {
@@ -1576,10 +1560,7 @@ static LRESULT COMBOEX_Destroy (COMBOEX_INFO *infoPtr)
     if (infoPtr->hwndEdit)
         RemoveWindowSubclass(infoPtr->hwndEdit, COMBOEX_EditWndProc, EDIT_SUBCLASSID);
 
-    COMBOEX_FreeText (infoPtr->edit);
-    Free (infoPtr->edit);
-    infoPtr->edit = 0;
-
+    COMBOEX_FreeText (&infoPtr->edit);
     COMBOEX_ResetContent (infoPtr);
 
     if (infoPtr->defaultFont)
@@ -1850,7 +1831,7 @@ COMBOEX_EditWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 		if (COMBOEX_NotifyEndEdit (infoPtr, &cbeend, edit_text)) {
 		    /* abort the change, restore previous */
 		    TRACE("Notify requested abort of change\n");
-		    COMBOEX_SetEditText (infoPtr, infoPtr->edit);
+                    COMBOEX_SetEditText (infoPtr, &infoPtr->edit);
 		    RedrawWindow (infoPtr->hwndCombo, 0, 0, RDW_ERASE |
 				  RDW_INVALIDATE);
 		    return 0;
@@ -2084,7 +2065,7 @@ COMBOEX_ComboWndProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 
 		GetWindowTextW (infoPtr->hwndEdit, edit_text, 260);
 		if (selected == -1) {
-		    lastwrk = infoPtr->edit->pszText;
+                    lastwrk = infoPtr->edit.pszText;
 		}
 		else {
 		    CBE_ITEMDATA *item = COMBOEX_FindItem (infoPtr, selected);

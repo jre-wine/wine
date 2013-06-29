@@ -354,6 +354,7 @@ struct tagGdiFont {
     FONTSIGNATURE fs;
     GdiFont *base_font;
     VOID *GSUB_Table;
+    const VOID *vert_feature;
     DWORD cache_num;
 };
 
@@ -4692,6 +4693,137 @@ done:
     return ret;
 }
 
+static const GSUB_Script* GSUB_get_script_table( const GSUB_Header* header, const char* tag)
+{
+    const GSUB_ScriptList *script;
+    const GSUB_Script *deflt = NULL;
+    int i;
+    script = (const GSUB_ScriptList*)((const BYTE*)header + GET_BE_WORD(header->ScriptList));
+
+    TRACE("%i scripts in this font\n",GET_BE_WORD(script->ScriptCount));
+    for (i = 0; i < GET_BE_WORD(script->ScriptCount); i++)
+    {
+        const GSUB_Script *scr;
+        int offset;
+
+        offset = GET_BE_WORD(script->ScriptRecord[i].Script);
+        scr = (const GSUB_Script*)((const BYTE*)script + offset);
+
+        if (strncmp(script->ScriptRecord[i].ScriptTag, tag,4)==0)
+            return scr;
+        if (strncmp(script->ScriptRecord[i].ScriptTag, "dflt",4)==0)
+            deflt = scr;
+    }
+    return deflt;
+}
+
+static const GSUB_LangSys* GSUB_get_lang_table( const GSUB_Script* script, const char* tag)
+{
+    int i;
+    int offset;
+    const GSUB_LangSys *Lang;
+
+    TRACE("Deflang %x, LangCount %i\n",GET_BE_WORD(script->DefaultLangSys), GET_BE_WORD(script->LangSysCount));
+
+    for (i = 0; i < GET_BE_WORD(script->LangSysCount) ; i++)
+    {
+        offset = GET_BE_WORD(script->LangSysRecord[i].LangSys);
+        Lang = (const GSUB_LangSys*)((const BYTE*)script + offset);
+
+        if ( strncmp(script->LangSysRecord[i].LangSysTag,tag,4)==0)
+            return Lang;
+    }
+    offset = GET_BE_WORD(script->DefaultLangSys);
+    if (offset)
+    {
+        Lang = (const GSUB_LangSys*)((const BYTE*)script + offset);
+        return Lang;
+    }
+    return NULL;
+}
+
+static const GSUB_Feature * GSUB_get_feature(const GSUB_Header *header, const GSUB_LangSys *lang, const char* tag)
+{
+    int i;
+    const GSUB_FeatureList *feature;
+    feature = (const GSUB_FeatureList*)((const BYTE*)header + GET_BE_WORD(header->FeatureList));
+
+    TRACE("%i features\n",GET_BE_WORD(lang->FeatureCount));
+    for (i = 0; i < GET_BE_WORD(lang->FeatureCount); i++)
+    {
+        int index = GET_BE_WORD(lang->FeatureIndex[i]);
+        if (strncmp(feature->FeatureRecord[index].FeatureTag,tag,4)==0)
+        {
+            const GSUB_Feature *feat;
+            feat = (const GSUB_Feature*)((const BYTE*)feature + GET_BE_WORD(feature->FeatureRecord[index].Feature));
+            return feat;
+        }
+    }
+    return NULL;
+}
+
+static const char* get_opentype_script(const GdiFont *font)
+{
+    /*
+     * I am not sure if this is the correct way to generate our script tag
+     */
+
+    switch (font->charset)
+    {
+        case ANSI_CHARSET: return "latn";
+        case BALTIC_CHARSET: return "latn"; /* ?? */
+        case CHINESEBIG5_CHARSET: return "hani";
+        case EASTEUROPE_CHARSET: return "latn"; /* ?? */
+        case GB2312_CHARSET: return "hani";
+        case GREEK_CHARSET: return "grek";
+        case HANGUL_CHARSET: return "hang";
+        case RUSSIAN_CHARSET: return "cyrl";
+        case SHIFTJIS_CHARSET: return "kana";
+        case TURKISH_CHARSET: return "latn"; /* ?? */
+        case VIETNAMESE_CHARSET: return "latn";
+        case JOHAB_CHARSET: return "latn"; /* ?? */
+        case ARABIC_CHARSET: return "arab";
+        case HEBREW_CHARSET: return "hebr";
+        case THAI_CHARSET: return "thai";
+        default: return "latn";
+    }
+}
+
+static const VOID * get_GSUB_vert_feature(const GdiFont *font)
+{
+    const GSUB_Header *header;
+    const GSUB_Script *script;
+    const GSUB_LangSys *language;
+    const GSUB_Feature *feature;
+
+    if (!font->GSUB_Table)
+        return NULL;
+
+    header = font->GSUB_Table;
+
+    script = GSUB_get_script_table(header, get_opentype_script(font));
+    if (!script)
+    {
+        TRACE("Script not found\n");
+        return NULL;
+    }
+    language = GSUB_get_lang_table(script, "xxxx"); /* Need to get Lang tag */
+    if (!language)
+    {
+        TRACE("Language not found\n");
+        return NULL;
+    }
+    feature  =  GSUB_get_feature(header, language, "vrt2");
+    if (!feature)
+        feature  =  GSUB_get_feature(header, language, "vert");
+    if (!feature)
+    {
+        TRACE("vrt2/vert feature not found\n");
+        return NULL;
+    }
+    return feature;
+}
+
 /*************************************************************
  * freetype_SelectFont
  */
@@ -5104,6 +5236,13 @@ found_face:
             ret->GSUB_Table = HeapAlloc(GetProcessHeap(),0,length);
             get_font_data(ret, GSUB_TAG , 0, ret->GSUB_Table, length);
             TRACE("Loaded GSUB table of %i bytes\n",length);
+            ret->vert_feature = get_GSUB_vert_feature(ret);
+            if (!ret->vert_feature)
+            {
+                TRACE("Vertical feature not found\n");
+                HeapFree(GetProcessHeap(), 0, ret->GSUB_Table);
+                ret->GSUB_Table = NULL;
+            }
         }
     }
     ret->aa_flags = HIWORD( face->flags );
@@ -5563,75 +5702,6 @@ static INT GSUB_is_glyph_covered(LPCVOID table , UINT glyph)
     return -1;
 }
 
-static const GSUB_Script* GSUB_get_script_table( const GSUB_Header* header, const char* tag)
-{
-    const GSUB_ScriptList *script;
-    const GSUB_Script *deflt = NULL;
-    int i;
-    script = (const GSUB_ScriptList*)((const BYTE*)header + GET_BE_WORD(header->ScriptList));
-
-    TRACE("%i scripts in this font\n",GET_BE_WORD(script->ScriptCount));
-    for (i = 0; i < GET_BE_WORD(script->ScriptCount); i++)
-    {
-        const GSUB_Script *scr;
-        int offset;
-
-        offset = GET_BE_WORD(script->ScriptRecord[i].Script);
-        scr = (const GSUB_Script*)((const BYTE*)script + offset);
-
-        if (strncmp(script->ScriptRecord[i].ScriptTag, tag,4)==0)
-            return scr;
-        if (strncmp(script->ScriptRecord[i].ScriptTag, "dflt",4)==0)
-            deflt = scr;
-    }
-    return deflt;
-}
-
-static const GSUB_LangSys* GSUB_get_lang_table( const GSUB_Script* script, const char* tag)
-{
-    int i;
-    int offset;
-    const GSUB_LangSys *Lang;
-
-    TRACE("Deflang %x, LangCount %i\n",GET_BE_WORD(script->DefaultLangSys), GET_BE_WORD(script->LangSysCount));
-
-    for (i = 0; i < GET_BE_WORD(script->LangSysCount) ; i++)
-    {
-        offset = GET_BE_WORD(script->LangSysRecord[i].LangSys);
-        Lang = (const GSUB_LangSys*)((const BYTE*)script + offset);
-
-        if ( strncmp(script->LangSysRecord[i].LangSysTag,tag,4)==0)
-            return Lang;
-    }
-    offset = GET_BE_WORD(script->DefaultLangSys);
-    if (offset)
-    {
-        Lang = (const GSUB_LangSys*)((const BYTE*)script + offset);
-        return Lang;
-    }
-    return NULL;
-}
-
-static const GSUB_Feature * GSUB_get_feature(const GSUB_Header *header, const GSUB_LangSys *lang, const char* tag)
-{
-    int i;
-    const GSUB_FeatureList *feature;
-    feature = (const GSUB_FeatureList*)((const BYTE*)header + GET_BE_WORD(header->FeatureList));
-
-    TRACE("%i features\n",GET_BE_WORD(lang->FeatureCount));
-    for (i = 0; i < GET_BE_WORD(lang->FeatureCount); i++)
-    {
-        int index = GET_BE_WORD(lang->FeatureIndex[i]);
-        if (strncmp(feature->FeatureRecord[index].FeatureTag,tag,4)==0)
-        {
-            const GSUB_Feature *feat;
-            feat = (const GSUB_Feature*)((const BYTE*)feature + GET_BE_WORD(feature->FeatureRecord[index].Feature));
-            return feat;
-        }
-    }
-    return NULL;
-}
-
 static FT_UInt GSUB_apply_feature(const GSUB_Header * header, const GSUB_Feature* feature, UINT glyph)
 {
     int i;
@@ -5692,65 +5762,18 @@ static FT_UInt GSUB_apply_feature(const GSUB_Header * header, const GSUB_Feature
     return glyph;
 }
 
-static const char* get_opentype_script(const GdiFont *font)
-{
-    /*
-     * I am not sure if this is the correct way to generate our script tag
-     */
-
-    switch (font->charset)
-    {
-        case ANSI_CHARSET: return "latn";
-        case BALTIC_CHARSET: return "latn"; /* ?? */
-        case CHINESEBIG5_CHARSET: return "hani";
-        case EASTEUROPE_CHARSET: return "latn"; /* ?? */
-        case GB2312_CHARSET: return "hani";
-        case GREEK_CHARSET: return "grek";
-        case HANGUL_CHARSET: return "hang";
-        case RUSSIAN_CHARSET: return "cyrl";
-        case SHIFTJIS_CHARSET: return "kana";
-        case TURKISH_CHARSET: return "latn"; /* ?? */
-        case VIETNAMESE_CHARSET: return "latn";
-        case JOHAB_CHARSET: return "latn"; /* ?? */
-        case ARABIC_CHARSET: return "arab";
-        case HEBREW_CHARSET: return "hebr";
-        case THAI_CHARSET: return "thai";
-        default: return "latn";
-    }
-}
 
 static FT_UInt get_GSUB_vert_glyph(const GdiFont *font, UINT glyph)
 {
     const GSUB_Header *header;
-    const GSUB_Script *script;
-    const GSUB_LangSys *language;
     const GSUB_Feature *feature;
 
     if (!font->GSUB_Table)
         return glyph;
 
     header = font->GSUB_Table;
+    feature = font->vert_feature;
 
-    script = GSUB_get_script_table(header, get_opentype_script(font));
-    if (!script)
-    {
-        TRACE("Script not found\n");
-        return glyph;
-    }
-    language = GSUB_get_lang_table(script, "xxxx"); /* Need to get Lang tag */
-    if (!language)
-    {
-        TRACE("Language not found\n");
-        return glyph;
-    }
-    feature  =  GSUB_get_feature(header, language, "vrt2");
-    if (!feature)
-        feature  =  GSUB_get_feature(header, language, "vert");
-    if (!feature)
-    {
-        TRACE("vrt2/vert feature not found\n");
-        return glyph;
-    }
     return GSUB_apply_feature(header, feature, glyph);
 }
 
@@ -5794,6 +5817,25 @@ static FT_UInt get_glyph_index(const GdiFont *font, UINT glyph)
     return glyphId;
 }
 
+static FT_UInt get_default_char_index(GdiFont *font)
+{
+    FT_UInt default_char;
+
+    if (FT_IS_SFNT(font->ft_face))
+    {
+        TT_OS2 *pOS2 = pFT_Get_Sfnt_Table(font->ft_face, ft_sfnt_os2);
+        default_char = (pOS2->usDefaultChar ? get_glyph_index(font, pOS2->usDefaultChar) : 0);
+    }
+    else
+    {
+        TEXTMETRICW textm;
+        get_text_metrics(font, &textm);
+        default_char = textm.tmDefaultChar;
+    }
+
+    return default_char;
+}
+
 /*************************************************************
  * freetype_GetGlyphIndices
  */
@@ -5826,21 +5868,13 @@ static DWORD freetype_GetGlyphIndices( PHYSDEV dev, LPCWSTR lpstr, INT count, LP
         {
             if (!got_default)
             {
-                if (FT_IS_SFNT(physdev->font->ft_face))
-                {
-                    TT_OS2 *pOS2 = pFT_Get_Sfnt_Table(physdev->font->ft_face, ft_sfnt_os2);
-                    default_char = (pOS2->usDefaultChar ? get_glyph_index(physdev->font, pOS2->usDefaultChar) : 0);
-                }
-                else
-                {
-                    TEXTMETRICW textm;
-                    get_text_metrics(physdev->font, &textm);
-                    default_char = textm.tmDefaultChar;
-                }
+                default_char = get_default_char_index(physdev->font);
                 got_default = TRUE;
             }
             pgi[i] = default_char;
         }
+        else
+            pgi[i] = get_GSUB_vert_glyph(physdev->font, pgi[i]);
     }
     LeaveCriticalSection( &freetype_cs );
     return count;
@@ -5890,7 +5924,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     FT_Matrix transMat = identityMat;
     FT_Matrix transMatUnrotated;
     BOOL needsTransform = FALSE;
-    BOOL tategaki = (font->GSUB_Table != NULL);
+    BOOL tategaki = (font->name[0] == '@');
     UINT original_index;
     LONG avgAdvance = 0;
     FT_Fixed em_scale;
@@ -5903,7 +5937,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
           font->font_desc.matrix.eM21, font->font_desc.matrix.eM22);
 
     if(format & GGO_GLYPH_INDEX) {
-        glyph_index = get_GSUB_vert_glyph(incoming_font,glyph);
+        glyph_index = glyph;
         original_index = glyph;
 	format &= ~GGO_GLYPH_INDEX;
     } else {
@@ -7267,6 +7301,7 @@ static BOOL get_glyph_index_linked(GdiFont *font, UINT c, GdiFont **linked_font,
             return TRUE;
         }
     }
+    *glyph = get_default_char_index(font);
     return FALSE;
 }
 

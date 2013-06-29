@@ -5291,6 +5291,7 @@ static HRESULT TLB_CopyElemDesc( const ELEMDESC *src, ELEMDESC *dest, char **buf
         PARAMDESCEX *pparamdescex_dest = dest->u.paramdesc.pparamdescex = (PARAMDESCEX *)*buffer;
         *buffer += sizeof(PARAMDESCEX);
         *pparamdescex_dest = *pparamdescex_src;
+        pparamdescex_dest->cBytes = sizeof(PARAMDESCEX);
         VariantInit(&pparamdescex_dest->varDefaultValue);
         return VariantCopy(&pparamdescex_dest->varDefaultValue, 
                            (VARIANTARG *)&pparamdescex_src->varDefaultValue);
@@ -5330,9 +5331,12 @@ static HRESULT TLB_AllocAndInitFuncDesc( const FUNCDESC *src, FUNCDESC **dest_pt
         dest->funckind = FUNC_DISPATCH;
     buffer = (char *)(dest + 1);
 
-    dest->lprgscode = (SCODE *)buffer;
-    memcpy(dest->lprgscode, src->lprgscode, sizeof(*src->lprgscode) * src->cScodes);
-    buffer += sizeof(*src->lprgscode) * src->cScodes;
+    if (dest->cScodes) {
+        dest->lprgscode = (SCODE *)buffer;
+        memcpy(dest->lprgscode, src->lprgscode, sizeof(*src->lprgscode) * src->cScodes);
+        buffer += sizeof(*src->lprgscode) * src->cScodes;
+    } else
+        dest->lprgscode = NULL;
 
     hr = TLB_CopyElemDesc(&src->elemdescFunc, &dest->elemdescFunc, &buffer);
     if (FAILED(hr))
@@ -5341,23 +5345,26 @@ static HRESULT TLB_AllocAndInitFuncDesc( const FUNCDESC *src, FUNCDESC **dest_pt
         return hr;
     }
 
-    dest->lprgelemdescParam = (ELEMDESC *)buffer;
-    buffer += sizeof(ELEMDESC) * src->cParams;
-    for (i = 0; i < src->cParams; i++)
-    {
-        hr = TLB_CopyElemDesc(&src->lprgelemdescParam[i], &dest->lprgelemdescParam[i], &buffer);
+    if (dest->cParams) {
+        dest->lprgelemdescParam = (ELEMDESC *)buffer;
+        buffer += sizeof(ELEMDESC) * src->cParams;
+        for (i = 0; i < src->cParams; i++)
+        {
+            hr = TLB_CopyElemDesc(&src->lprgelemdescParam[i], &dest->lprgelemdescParam[i], &buffer);
+            if (FAILED(hr))
+                break;
+        }
         if (FAILED(hr))
-            break;
-    }
-    if (FAILED(hr))
-    {
-        /* undo the above actions */
-        for (i = i - 1; i >= 0; i--)
-            TLB_FreeElemDesc(&dest->lprgelemdescParam[i]);
-        TLB_FreeElemDesc(&dest->elemdescFunc);
-        SysFreeString((BSTR)dest);
-        return hr;
-    }
+        {
+            /* undo the above actions */
+            for (i = i - 1; i >= 0; i--)
+                TLB_FreeElemDesc(&dest->lprgelemdescParam[i]);
+            TLB_FreeElemDesc(&dest->elemdescFunc);
+            SysFreeString((BSTR)dest);
+            return hr;
+        }
+    } else
+        dest->lprgelemdescParam = NULL;
 
     /* special treatment for dispinterfaces: this makes functions appear
      * to return their [retval] value when it is really returning an
@@ -5497,6 +5504,9 @@ static HRESULT WINAPI ITypeInfo_fnGetFuncDesc( ITypeInfo2 *iface, UINT index,
     UINT hrefoffset = 0;
 
     TRACE("(%p) index %d\n", This, index);
+
+    if (!ppFuncDesc)
+        return E_INVALIDARG;
 
     if (This->TypeAttr.typekind == TKIND_DISPATCH)
         hr = ITypeInfoImpl_GetInternalDispatchFuncDesc((ITypeInfo *)iface, index,
@@ -5728,6 +5738,9 @@ static HRESULT WINAPI ITypeInfo_fnGetImplTypeFlags( ITypeInfo2 *iface,
     ITypeInfoImpl *This = impl_from_ITypeInfo2(iface);
 
     TRACE("(%p) index %d\n", This, index);
+
+    if(!pImplTypeFlags)
+        return E_INVALIDARG;
 
     if(This->TypeAttr.typekind == TKIND_DISPATCH && index == 0){
         *pImplTypeFlags = 0;
@@ -6892,7 +6905,7 @@ static HRESULT WINAPI ITypeInfo_fnGetDocumentation( ITypeInfo2 *iface,
         if(pdwHelpContext)
             *pdwHelpContext=This->dwHelpContext;
         if(pBstrHelpFile)
-            *pBstrHelpFile=SysAllocString(This->DocString);/* FIXME */
+            *pBstrHelpFile=SysAllocString(This->pTypeLib->HelpFile);
         return S_OK;
     }else {/* for a member */
         pFDesc = TLB_get_funcdesc_by_memberid(This->funcdescs, This->TypeAttr.cFuncs, memid);
@@ -6913,6 +6926,8 @@ static HRESULT WINAPI ITypeInfo_fnGetDocumentation( ITypeInfo2 *iface,
               *pBstrDocString=SysAllocString(pVDesc->HelpString);
             if(pdwHelpContext)
               *pdwHelpContext=pVDesc->HelpContext;
+            if(pBstrHelpFile)
+              *pBstrHelpFile = SysAllocString(This->pTypeLib->HelpFile);
             return S_OK;
         }
     }
@@ -7027,6 +7042,9 @@ static HRESULT WINAPI ITypeInfo_fnGetRefTypeInfo(
     ITypeInfoImpl *This = impl_from_ITypeInfo2(iface);
     HRESULT result = E_FAIL;
 
+    if(!ppTInfo)
+        return E_INVALIDARG;
+
     if ((This->hreftype != -1) && (This->hreftype == hRefType))
     {
         *ppTInfo = (ITypeInfo *)&This->ITypeInfo2_iface;
@@ -7071,6 +7089,19 @@ static HRESULT WINAPI ITypeInfo_fnGetRefTypeInfo(
         result = ITypeInfoImpl_GetDispatchRefTypeInfo((ITypeInfo *)iface, &href_dispatch, ppTInfo);
     } else {
         TLBRefType *ref_type;
+        UINT i;
+
+        for(i = 0; i < This->pTypeLib->TypeInfoCount; ++i)
+        {
+            if (This->pTypeLib->typeinfos[i]->hreftype == hRefType)
+            {
+                result = S_OK;
+                *ppTInfo = (ITypeInfo*)This->pTypeLib->typeinfos[i];
+                ITypeInfo_AddRef(*ppTInfo);
+                goto end;
+            }
+        }
+
         LIST_FOR_EACH_ENTRY(ref_type, &This->pTypeLib->ref_list, TLBRefType, entry)
         {
             if(ref_type->reference == hRefType)
@@ -7423,6 +7454,9 @@ static HRESULT WINAPI ITypeInfo2_fnGetCustData(
     TLBCustData *pCData;
 
     TRACE("%p %s %p\n", This, debugstr_guid(guid), pVarVal);
+
+    if(!guid || !pVarVal)
+        return E_INVALIDARG;
 
     pCData = TLB_get_custdata_by_guid(&This->custdata_list, guid);
 

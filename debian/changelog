@@ -1,3 +1,9 @@
+wine-unstable (1.5.31-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Jun 2013 21:01:33 +0000
+
 wine-unstable (1.5.30-2) unstable; urgency=low
 
   * Fix wineserver installation path (closes: #714366).
