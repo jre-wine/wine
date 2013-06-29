@@ -1,0 +1,22 @@
+description: make winegcc use -unstable suffix
+author: Michael Gilbert <mgilbert@debian.org>
+--- wine-unstable-1.5.30.orig/tools/winegcc/winegcc.c
++++ wine-unstable-1.5.30/tools/winegcc/winegcc.c
+@@ -850,7 +850,7 @@ static void build(struct options* opts)
+             add_library(opts, lib_dirs, files, "kernel32");
+             add_library(opts, lib_dirs, files, "ntdll");
+         }
+-        if (opts->shared && !opts->nostdlib) add_library(opts, lib_dirs, files, "wine");
++        if (opts->shared && !opts->nostdlib) add_library(opts, lib_dirs, files, "wine-unstable");
+         if (!opts->shared && opts->use_msvcrt && opts->target_platform == PLATFORM_CYGWIN)
+             add_library(opts, lib_dirs, files, "msvcrt");
+ 
+@@ -936,7 +936,7 @@ static void build(struct options* opts)
+         add_library(opts, lib_dirs, files, "kernel32");
+         add_library(opts, lib_dirs, files, "ntdll");
+     }
+-    if (!opts->nostdlib) add_library(opts, lib_dirs, files, "wine");
++    if (!opts->nostdlib) add_library(opts, lib_dirs, files, "wine-unstable");
+ 
+     /* run winebuild to generate the .spec.o file */
+     spec_args = get_winebuild_args( opts );

@@ -1,7 +1,9 @@
 description: wineserver location info
---- wine-unstable-1.5.10.orig/loader/wine.man.in
-+++ wine-unstable-1.5.10/loader/wine.man.in
-@@ -87,7 +87,7 @@ processes.
+Index: wine/loader/wine.man.in
+===================================================================
+--- wine.orig/loader/wine.man.in	2013-06-29 19:15:58.204719295 +0000
++++ wine/loader/wine.man.in	2013-06-29 19:15:58.196719296 +0000
+@@ -87,7 +87,7 @@
  Specifies the path and name of the
  .B wineserver
  binary. If not set, Wine will try to load
@@ -10,7 +12,7 @@ description: wineserver location info
  and if this doesn't exist it will then look for a file named
  "wineserver" in the path and in a few other likely locations.
  .TP
-@@ -246,7 +246,7 @@ The
+@@ -246,7 +246,7 @@
  .B wine 
  program loader for CUI (console) applications.
  .TP
@@ -19,3 +21,19 @@ description: wineserver location info
  The 
  .B wine 
  server 
+Index: wine/libs/wine/Makefile.in
+===================================================================
+--- wine.orig/libs/wine/Makefile.in	2013-06-29 19:15:55.720719386 +0000
++++ wine/libs/wine/Makefile.in	2013-06-29 19:16:31.320718085 +0000
+@@ -95,9 +95,9 @@
+ # Special defines needed for config.c
+ 
+ CONFIGDIRS = \
+-	-DBINDIR='"$(bindir)"' \
++	-DBINDIR='"$(dlldir)"' \
+ 	-DDLLDIR='"$(dlldir)"' \
+-	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(bindir)`\" \
++	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
+ 	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
+ 	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(bindir) $(dlldir)`\" \
+ 	-DBIN_TO_DATADIR=\"`$(RELPATH) $(bindir) $(datadir)/wine$(DATASUFFIX)`\"

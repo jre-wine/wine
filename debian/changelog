@@ -1,3 +1,10 @@
+wine-unstable (1.5.30-2) unstable; urgency=low
+
+  * Fix wineserver installation path (closes: #714366).
+  * Restore wine64-bin.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Jun 2013 20:05:21 +0000
+
 wine-unstable (1.5.30-1) unstable; urgency=low
 
   * New upstream release 1.5.30, released May 10, 2013.
