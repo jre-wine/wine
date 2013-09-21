@@ -1,0 +1,34 @@
+#!/bin/sh
+set -e
+
+priority="$1"
+libdir="$2"
+input="$3"
+postinst="$(echo $input | sed s/\\.install/\\.postinst/)"
+prerm="$(echo $input | sed s/\\.install/\\.prerm/)"
+
+binaries="$(grep bin $input | rev | cut -d\/ -f1 | rev)"
+manpages="$(grep man1 $input | grep -v UTF-8 | rev | cut -d\/ -f1 | rev)"
+linkgroup="$(echo "$binaries" | head -1)"
+
+# create postinst
+echo "#!/bin/sh" > $postinst
+echo "set -e" >> $postinst
+echo "" >> $postinst
+echo "update-alternatives --install /usr/bin/$linkgroup $linkgroup $libdir/bin/$linkgroup $priority \\" >> $postinst
+for file in $(echo "$binaries" | tail -n +2); do
+    echo "  --slave /usr/bin/$file $file $libdir/bin/$file \\" >> $postinst
+done
+for file in $(echo "$manpages"); do
+    echo "  --slave /usr/share/man/man1/$file $file $libdir/man/man1/$file \\" >> $postinst
+done
+echo "" >> $postinst
+echo "#DEBHELPER#" >> $postinst
+
+# create prerm
+echo "#!/bin/sh" > $prerm
+echo "set -e" >> $prerm
+echo "" >> $prerm
+echo "update-alternatives --remove-all $linkgroup" >> $prerm
+echo "" >> $prerm
+echo "#DEBHELPER#" >> $prerm

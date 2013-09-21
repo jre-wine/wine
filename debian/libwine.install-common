@@ -1,8 +1,5 @@
-debian/tmp/usr/lib/wine/libwine*.so.*
-debian/tmp/usr/lib/wine/wine/wineserver
-debian/tmp/usr/lib/wine/wine/*.so
-debian/tmp/usr/lib/wine/wine/fakedlls
-debian/tmp/usr/share/wine/generic.ppd
-debian/tmp/usr/share/wine/fonts
-debian/tmp/usr/share/man/man1/wineserver.1
-debian/tmp/usr/share/man/*/man1/wineserver.1
+debian/tmp/usr/lib/*/*/libwine.so.*
+debian/tmp/usr/lib/*/*/bin/wineserver
+debian/tmp/usr/lib/*/*/wine/*.so
+debian/tmp/usr/lib/*/*/wine/fakedlls
+debian/tmp/usr/share/*/wine/*

@@ -4,7 +4,8 @@ wine for Debian
 Wine is now split up into the following packages:
 
 wine            (metapackage, depends on everything you probably need)
-wine-bin        (core binaries and configuration)
+wine32-bin      (core 32-bit binaries and configuration)
+wine64-bin      (core 64-bit binaries and configuration)
 libwine         (core libraries)
 libwine-dev     (Winelib development headers and tools)
 libwine-dbg     (debugging symbols)

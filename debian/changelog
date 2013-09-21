@@ -1,10 +1,20 @@
 wine-unstable (1.5.31-1) unstable; urgency=low
 
   * New upstream release 1.5.31, released May 24, 2013.
-    - New version of the Gecko engine based on Firefox 21.
     - Various bug fixes.
+  * Eliminate all debian-specific patches.
+  * Support wine/wine-unstable co-installability (closes: #677416).
+  * Add x11-utils dependency for wine64-bin (closes: #717783).
+  * Install files correctly to wine64-bin (closes: #722319).
+  * Set datarootdir appropriately (closes: #714556).
+  * Fix wineserver installation (closes: #718143).
+  * Fix manpage alternatives (closes: #671935).
+  * Recommend libxcursor1 (closes: #719439).
+  * Drop kfreebsd-amd64 (closes: #715330).
+  * Fix wine.inf issue (closes: #714556).
+  * Use debhelper 9.
 
- -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Jun 2013 21:01:53 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 21 Sep 2013 17:35:48 +0000
 
 wine-unstable (1.5.30-2) unstable; urgency=low
 
