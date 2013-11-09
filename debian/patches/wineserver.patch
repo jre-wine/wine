@@ -1,8 +1,8 @@
 description: wineserver location info
 Index: wine/loader/wine.man.in
 ===================================================================
---- wine.orig/loader/wine.man.in	2013-06-29 19:15:58.204719295 +0000
-+++ wine/loader/wine.man.in	2013-06-29 19:15:58.196719296 +0000
+--- wine.orig/loader/wine.man.in	2013-09-01 23:21:31.636150548 +0000
++++ wine/loader/wine.man.in	2013-09-01 23:21:31.632150548 +0000
 @@ -87,7 +87,7 @@
  Specifies the path and name of the
  .B wineserver
@@ -23,9 +23,9 @@ Index: wine/loader/wine.man.in
  server 
 Index: wine/libs/wine/Makefile.in
 ===================================================================
---- wine.orig/libs/wine/Makefile.in	2013-06-29 19:15:55.720719386 +0000
-+++ wine/libs/wine/Makefile.in	2013-06-29 19:16:31.320718085 +0000
-@@ -95,9 +95,9 @@
+--- wine.orig/libs/wine/Makefile.in	2013-09-01 23:21:31.636150548 +0000
++++ wine/libs/wine/Makefile.in	2013-09-01 23:22:32.604148320 +0000
+@@ -95,12 +95,12 @@
  # Special defines needed for config.c
  
  CONFIGDIRS = \
@@ -35,5 +35,10 @@ Index: wine/libs/wine/Makefile.in
 -	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(bindir)`\" \
 +	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
  	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
- 	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(bindir) $(dlldir)`\" \
- 	-DBIN_TO_DATADIR=\"`$(RELPATH) $(bindir) $(datadir)/wine$(DATASUFFIX)`\"
+-	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(bindir) $(dlldir)`\" \
+-	-DBIN_TO_DATADIR=\"`$(RELPATH) $(bindir) $(datadir)/wine`\"
++	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(dlldir) $(dlldir)`\" \
++	-DBIN_TO_DATADIR=\"`$(RELPATH) $(dlldir) $(datadir)/wine$(DATASUFFIX)`\"
+ 
+ config.o: config.c $(RELPATH)
+ 	$(CC) -c $(ALLCFLAGS) -o $@ $(srcdir)/config.c $(CONFIGDIRS)

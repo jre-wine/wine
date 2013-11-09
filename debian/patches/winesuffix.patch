@@ -1,8 +1,8 @@
 description: add wine suffix to paths
 Index: wine/Make.vars.in
 ===================================================================
---- wine.orig/Make.vars.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/Make.vars.in	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/Make.vars.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/Make.vars.in	2013-07-07 22:10:56.965184095 +0000
 @@ -8,7 +8,7 @@
  datadir         = @datadir@
  infodir         = @infodir@
@@ -23,8 +23,8 @@ Index: wine/Make.vars.in
  LDPATH          = @LDPATH@
 Index: wine/tools/Makefile.in
 ===================================================================
---- wine.orig/tools/Makefile.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/tools/Makefile.in	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/tools/Makefile.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/tools/Makefile.in	2013-07-07 22:10:56.965184095 +0000
 @@ -30,7 +30,7 @@
  INSTALLDIRS = \
  	$(DESTDIR)$(bindir) \
@@ -58,8 +58,8 @@ Index: wine/tools/Makefile.in
  		$(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/winemaker.$(prog_manext) \
 Index: wine/tools/winedump/search.c
 ===================================================================
---- wine.orig/tools/winedump/search.c	2013-06-16 19:43:48.000000000 +0000
-+++ wine/tools/winedump/search.c	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/tools/winedump/search.c	2013-07-07 22:10:56.969184095 +0000
++++ wine/tools/winedump/search.c	2013-07-07 22:10:56.965184095 +0000
 @@ -98,7 +98,7 @@
        if (VERBOSE)
          puts (grep_buff);
@@ -71,8 +71,8 @@ Index: wine/tools/winedump/search.c
        if (VERBOSE)
 Index: wine/tools/winedump/Makefile.in
 ===================================================================
---- wine.orig/tools/winedump/Makefile.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/tools/winedump/Makefile.in	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/tools/winedump/Makefile.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/tools/winedump/Makefile.in	2013-07-07 22:10:56.965184095 +0000
 @@ -27,6 +27,8 @@
  
  INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
@@ -92,8 +92,8 @@ Index: wine/tools/winedump/Makefile.in
  
 Index: wine/dlls/Makedll.rules.in
 ===================================================================
---- wine.orig/dlls/Makedll.rules.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/dlls/Makedll.rules.in	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/dlls/Makedll.rules.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/dlls/Makedll.rules.in	2013-07-07 22:10:56.965184095 +0000
 @@ -17,7 +17,7 @@
  IMPLIBFLAGS = $(TARGETFLAGS) $(EXTRAIMPLIBFLAGS)
  IMPORTLIBFILE = $(IMPORTLIB:%=lib%.@IMPLIBEXT@)
@@ -105,8 +105,8 @@ Index: wine/dlls/Makedll.rules.in
  
 Index: wine/dlls/wineps.drv/Makefile.in
 ===================================================================
---- wine.orig/dlls/wineps.drv/Makefile.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/dlls/wineps.drv/Makefile.in	2013-06-16 19:44:02.000000000 +0000
+--- wine.orig/dlls/wineps.drv/Makefile.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/dlls/wineps.drv/Makefile.in	2013-07-07 22:10:56.965184095 +0000
 @@ -68,12 +68,12 @@
  
  @MAKE_DLL_RULES@
@@ -125,9 +125,9 @@ Index: wine/dlls/wineps.drv/Makefile.in
 +	$(RM) $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/generic.ppd
 Index: wine/configure
 ===================================================================
---- wine.orig/configure	2013-06-16 19:43:48.000000000 +0000
-+++ wine/configure	2013-06-16 19:44:02.000000000 +0000
-@@ -6974,19 +6974,19 @@
+--- wine.orig/configure	2013-07-07 22:10:56.969184095 +0000
++++ wine/configure	2013-07-07 22:10:56.969184095 +0000
+@@ -6981,19 +6981,19 @@
      esac
  
      LIBWINE_RULES="
@@ -153,7 +153,7 @@ Index: wine/configure
  "
  
      ;;
-@@ -7043,7 +7043,7 @@
+@@ -7050,7 +7050,7 @@
  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__fPIC__shared__Wl__soname_confest_so_1" >&5
  $as_echo "$ac_cv_cflags__fPIC__shared__Wl__soname_confest_so_1" >&6; }
  if test $ac_cv_cflags__fPIC__shared__Wl__soname_confest_so_1 = yes; then :
@@ -162,7 +162,7 @@ Index: wine/configure
  else
    { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether the compiler supports -fPIC -shared -Wl,-h,confest.so.1" >&5
  $as_echo_n "checking whether the compiler supports -fPIC -shared -Wl,-h,confest.so.1... " >&6; }
-@@ -7068,7 +7068,7 @@
+@@ -7075,7 +7075,7 @@
  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_cflags__fPIC__shared__Wl__h_confest_so_1" >&5
  $as_echo "$ac_cv_cflags__fPIC__shared__Wl__h_confest_so_1" >&6; }
  if test $ac_cv_cflags__fPIC__shared__Wl__h_confest_so_1 = yes; then :
@@ -171,7 +171,7 @@ Index: wine/configure
  fi
  fi
  
-@@ -7367,34 +7367,34 @@
+@@ -7374,34 +7374,34 @@
  $as_echo "$ac_cv_c_dll_unixware" >&6; }
        if test "$ac_cv_c_dll_unixware" = "yes"
        then
@@ -219,23 +219,10 @@ Index: wine/configure
  "
  
      ;;
-Index: wine/libs/wine/Makefile.in
-===================================================================
---- wine.orig/libs/wine/Makefile.in	2013-06-16 19:43:48.000000000 +0000
-+++ wine/libs/wine/Makefile.in	2013-06-16 19:44:02.000000000 +0000
-@@ -100,7 +100,7 @@
- 	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(bindir)`\" \
- 	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
- 	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(bindir) $(dlldir)`\" \
--	-DBIN_TO_DATADIR=\"`$(RELPATH) $(bindir) $(datadir)/wine`\"
-+	-DBIN_TO_DATADIR=\"`$(RELPATH) $(bindir) $(datadir)/wine$(DATASUFFIX)`\"
- 
- config.o: config.c $(RELPATH)
- 	$(CC) -c $(ALLCFLAGS) -o $@ $(srcdir)/config.c $(CONFIGDIRS)
 Index: wine/programs/Makeprog.rules.in
 ===================================================================
---- wine.orig/programs/Makeprog.rules.in	2013-06-16 19:57:59.000000000 +0000
-+++ wine/programs/Makeprog.rules.in	2013-06-16 19:58:18.473665901 +0000
+--- wine.orig/programs/Makeprog.rules.in	2013-07-07 22:10:56.969184095 +0000
++++ wine/programs/Makeprog.rules.in	2013-07-07 22:10:56.969184095 +0000
 @@ -11,7 +11,7 @@
  
  DLLFLAGS    = @DLLFLAGS@

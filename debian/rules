@@ -1,39 +1,39 @@
 #!/usr/bin/make -f
 export DH_VERBOSE=1
 
-LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+DATADIR=/usr/share/wine$(VERSUFFIX)
 
 # configure options
-CONFIGURE=--without-hal \
-          --libdir=/$(LIBDIR)/wine-unstable \
-          LDFLAGS=-Wl,-rpath,/$(LIBDIR)/wine-unstable \
+CONFLAGS=--without-hal \
+	 --prefix=$(DATADIR) \
+         --datarootdir=$(DATADIR) \
+	 --includedir=/usr/include \
+	 --exec-prefix=/$(LIBDIR) \
+         --mandir=/$(LIBDIR)/man \
+         --libdir=/$(LIBDIR) \
+         LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
+
+INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
+INSTALLS+=$(shell ls debian/wine*.install-common | sed s/\\.install-common/$(VERSUFFIX)\\.postinst/)
+INSTALLS+=debian/substvars
 
 # 32-bit parameters
-BIT=32
 ifeq (,$(VERSUFFIX))
-ALTPRIO := 100
+PRIORITY := 100
 else
-ALTPRIO := 50
+PRIORITY := 50
 endif 
 
 # 64-bit parameters
 ifeq ($(DEB_BUILD_ARCH), amd64)
-BIT=64
-CONFIGURE+=--enable-win64 # enable wine64 on amd64
+CONFLAGS+=--enable-win64 # enable wine64 on amd64
 ifeq (,$(VERSUFFIX))
-ALTPRIO := 125
+PRIORITY := 125
 else
-ALTPRIO := 75
+PRIORITY := 75
 endif
-endif
-
-# add in version suffix
-MAKEFLAGS+=DATASUFFIX="$(VERSUFFIX)"
-
-# handle parallel build options
-ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
-MAKEFLAGS+=-j$(patsubst parallel=%,%,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 endif
 
 debian/control: debian/control.in
@@ -41,26 +41,49 @@ debian/control: debian/control.in
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
 	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
 	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
-	    -e 's/wine64-bin$(VERSUFFIX)/wine64-bin/g' \
 	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
 	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
+
+debian/%$(VERSUFFIX).docs: debian/%.docs-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).mime: debian/%.mime-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).links: debian/%.links-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).install: debian/%.install-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
+	cp $< $@
+
+debian/%.postinst  debian/%.prerm: debian/%.install
+	sh debian/generate-alternatives $(PRIORITY) /$(LIBDIR) $<
+
+debian/substvars:
+	echo "dev:Conflicts=libwine-dev-unstable" | sed s/$(VERSUFFIX)// > $@
+
 %:
-	dh $@
+	dh $@ --parallel
 
 override_dh_auto_configure:
 	ln -s /usr/share/misc/config.sub tools/config.sub
 	ln -s /usr/share/misc/config.guess tools/config.guess
-	dh_auto_configure -- $(CONFIGURE)
+	dh_auto_configure -- $(CONFLAGS)
 
-override_dh_auto_build:
-	test "$(BIT)" != "32" || $(MAKE)
-
-override_dh_install:
-	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIR)"
-	bash debian/gen-alternatives.sh "$(VERSUFFIX)" $(BIT) $(ALTPRIO)
-	cp server/wineserver debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)/wine
-	# temporary fix since this isn't being done automatically
-	cp libs/wine/libwine$(VERSUFFIX).so* debian/tmp/$(LIBDIR)/wine$(VERSUFFIX)
+override_dh_install: $(INSTALLS)
+	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || true
+	mv debian/tmp/$(LIBDIR)/bin/wine debian/tmp/$(LIBDIR)/bin/wine32 || true
+	cd debian/tmp/usr/lib/*/*/bin && ln -s wine?? wine
+	mkdir -p debian/tmp/usr/share/applications
+	#cp debian/uninstaller.desktop debian/tmp/usr/share/applications/uninstaller$(VERSUFFIX).desktop || true
+	#cp debian/winecfg.desktop debian/tmp/usr/share/applications/winecfg$(VERSUFFIX).desktop || true
+	#mv debian/tmp/usr/share/applications/wine$(VERSUFFIX)/wine.desktop debian/tmp/usr/share/applications/wine$(VERSUFFIX).desktop || true
 	cp tools/winedump/README debian/README.winedump
 	dh_install
 
@@ -75,4 +98,4 @@ override_dh_auto_clean: debian/control
 	test ! -e Makefile || $(MAKE) distclean
 	rm -f debian/README.winedump tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
-	bash debian/clean-install.sh "$(VERSUFFIX)"
+	rm -f $(INSTALLS)

@@ -1,0 +1,19 @@
+debian/tmp/usr/lib/*/*/bin/winecpp
+debian/tmp/usr/lib/*/*/bin/winegcc
+debian/tmp/usr/lib/*/*/bin/wineg++
+debian/tmp/usr/lib/*/*/bin/widl
+debian/tmp/usr/lib/*/*/bin/winebuild
+debian/tmp/usr/lib/*/*/bin/winedump
+debian/tmp/usr/lib/*/*/bin/winemaker
+debian/tmp/usr/lib/*/*/bin/wmc
+debian/tmp/usr/lib/*/*/bin/wrc
+debian/tmp/usr/lib/*/*/man/man1/widl.1
+debian/tmp/usr/lib/*/*/man/man1/winebuild.1
+debian/tmp/usr/lib/*/*/man/man1/winecpp.1
+debian/tmp/usr/lib/*/*/man/man1/winedump.1
+debian/tmp/usr/lib/*/*/man/man1/wineg++.1
+debian/tmp/usr/lib/*/*/man/man1/winegcc.1
+debian/tmp/usr/lib/*/*/man/man1/winemaker.1
+debian/tmp/usr/lib/*/*/man/man1/wmc.1
+debian/tmp/usr/lib/*/*/man/man1/wrc.1
+debian/README.winedump usr/share/doc/libwine-dev
