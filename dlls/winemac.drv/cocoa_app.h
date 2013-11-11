@@ -54,6 +54,7 @@ enum {
     NSEvent* lastFlagsChanged;
     BOOL inputSourceIsInputMethod;
     BOOL inputSourceIsInputMethodValid;
+    uint32_t pressedKeyCodes[128 / 32];
 
     CGFloat primaryScreenHeight;
     BOOL primaryScreenHeightValid;
@@ -66,6 +67,7 @@ enum {
     NSUInteger unmatchedMouseDowns;
 
     NSMutableDictionary* originalDisplayModes;
+    BOOL displaysCapturedForFullscreen;
 
     NSArray*    cursorFrames;
     int         cursorFrame;
@@ -81,6 +83,8 @@ enum {
     NSTimeInterval lastEventTapEventTime;
 
     NSImage* applicationIcon;
+
+    BOOL beenActive;
 }
 
 @property (nonatomic) CGEventSourceKeyboardType keyboardType;
@@ -102,11 +106,13 @@ enum {
     - (BOOL) waitUntilQueryDone:(int*)done timeout:(NSDate*)timeout processEvents:(BOOL)processEvents;
 
     - (void) keyboardSelectionDidChange;
+    - (void) noteKey:(uint16_t)keyCode pressed:(BOOL)pressed;
 
     - (void) flipRect:(NSRect*)rect;
 
     - (WineWindow*) frontWineWindow;
     - (void) adjustWindowLevels;
+    - (void) updateFullscreenWindows;
 
     - (BOOL) handleEvent:(NSEvent*)anEvent;
     - (void) didSendEvent:(NSEvent*)anEvent;

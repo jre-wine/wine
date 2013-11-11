@@ -1,15 +1,19 @@
-The Wine development release 1.5.31 is now available.
+The Wine team is proud to announce that the stable release Wine 1.6
+is now available.
 
-What's new in this release (see below for details):
-  - New version of the Gecko engine based on Firefox 21.
-  - Joystick force feedback support on Mac OS X.
-  - Window management fixes in the Mac driver.
-  - Various bug fixes.
+This release represents 16 months of development effort and around
+10,000 individual changes. The main highlights are the new Mac driver,
+the full support for window transparency, and the new Mono package for
+.NET applications support.
+
+It also contains a lot of improvements across the board, as well as
+support for many new applications and games. See the release notes
+below for a summary of the major changes.
 
 The source is available from the following locations:
 
-  http://prdownloads.sourceforge.net/wine/wine-1.5.31.tar.bz2
-  http://mirrors.ibiblio.org/wine/source/1.5/wine-1.5.31.tar.bz2
+  http://prdownloads.sourceforge.net/wine/wine-1.6.tar.bz2
+  http://mirrors.ibiblio.org/wine/source/1.6/wine-1.6.tar.bz2
 
 Binary packages for various distributions will be available from:
 
@@ -25,354 +29,419 @@ AUTHORS in the distribution for the complete list.
 
 ----------------------------------------------------------------
 
-Bugs fixed in 1.5.31 (total 54):
+What's new in Wine 1.6
+======================
 
-   4742  Message handling in dlls/user/edit.c may crash programs
-   7338  powdercell: Rotated fonts only displayed in dot size
-   7905  Tool bar icons not all filled in with switcher cad III
-  11004  Firefox 2 doesn't bold text, makes gmail harder to use
-  12595  Autodesk Revit Architecture 2008 install fails while unpacking AccuRenderRedist
-  13013  ProntoEdit NG 2.1.8 tree control shows all labels as ZZZ
-  15804  Multiple .NET applications fail to start, reporting exception "Culture name 'ga-ie' is not supported." (support for alternate calendar types needed)
-  17383  Chessmaster 10th edition fails to install
-  17388  Chessmaster 10th edition crashes after game analyze
-  17393  MansionPoker: Closing a poker table or exiting the program makes the application crash with a runtime error
-  17739  Cannot start IMatch again after exiting for a while
-  18001  Mass Effect Xlib: unexpected async reply
-  18252  Error writing file in UnReal World installer
-  18746  Starting Everquest 2 in any resolution other than 1024x768 causes a crash
-  19836  Hardwar: The screen often goes black in Direct3D mode.
-  20060  PDF Factory Pro fails to install
-  21148  No$Zoomer crashes when it is started
-  23565  FXCM FX Trading Station installer incurs assertion failure
-  23755  Everquest 2 demo/Pirates of the Burning Sea installer crashes
-  23796  cant' install hwsoliii.exe
-  24326  Everquest 2 Extended crashes in DSOUND_PrimaryOpen
-  24451  Saira: screen resolution problem
-  24630  Everquest 2 Extended - lots of black artifacting
-  24843  Explorer++ doesn't show text in the right-click menu for toolbars
-  25580  pcad2002 (pcb.exe) fail to start
-  26024  Alien Hallway demo: updater crashes during install
-  26583  Assassin's Creed Brotherhood: crash after "parse_ctab_constant_type Struct not supported yet"
-  26751  configure improperly detects Wunused-but-set-parameter as supported on Clang
-  27515  explorer http://www.google.com does not work.
-  27639  please also implement GPOS feature in indic shaping engine
-  27999  ComboBoxEX item images aren't drawn correctly
-  28849  LabVIEW 2010: Some DLLs aren't installed at all
-  29556  Tiny slider indicators in Audacity
-  29625  TreeView item label truncated when made bold
-  30029  (FEAR 3 - F3AR)F.E.A.R. 3 Crashes When Setting Full Screen Option...
-  30162  Microsoft .NET 2.0 Framework: "mscorsvw" compile worker hangs sometimes while generating native images from assemblies in GAC (loader section block reported)
-  30196  Battlezone animation video's cause game not to load
-  30992  msxml3 incorrectly ignores whitespaces (needed for Civilization IV)
-  31330  +relay corrupts returns values on win64?
-  31683  Adobe Photoshop CS4 installer doesn't do anything
-  32753  Wallace & Gromit crashes in the launcher (Gecko 1.9)
-  32899  Batman: Arkham Asylum (non-steam) Demo - missing text in launcher
-  32951  Warlords III demo crashes on exit
-  33016  Wine recognizes Geforce GT 630 as Geforce 8800 GTX
-  33115  Microsoft SQL Server Management Studio Express 2008 installer fails
-  33328  Copy-Paste bug in TAB_SetupScrolling
-  33331  When DLL receives PROCESS_DETACH notification when a process is exiting all the threads should be already terminated
-  33499  Kingsoft WPS Spreadsheet OK, Write and Presentation failed
-  33550  Treeview: redrawing problem when selected item is also focused (TVS_EDITLABELS with blocked edits affected the most)
-  33560  libwine doesn't get installed
-  33572  Windows Download Integrator 3.x needs IWbemServices::ExecNotificationQueryAsync
-  33607  Microsoft SQL Server Management Studio Express 2005: cannot restart SQL server (wbemprox returns stale service status)
-  33618  wmi query should support querying Process Name (inside wbemprox)
-  33619  [UWIN] UWIN installer fails with cannot seek to data offset
 
-----------------------------------------------------------------
+*** User interface
 
-Changes since 1.5.30:
+- Window transparency is supported, including both color keying and
+  alpha blending transparency.
 
-Akihiro Sagawa (5):
-      fonts: Fix default character index of Japanese Fixedsys.
-      gdi32: Add a helper to get the default character index.
-      gdi32: Use the default character when the glyph is missing.
-      fonts: Add default glpyh to Japanese System font.
-      fonts: Add default glyph to Japanese Fixedsys.
+- All window rendering is done on the client-side using the DIB engine
+  (except for OpenGL rendering). This means that rendering to windows
+  or bitmaps gives identical results.
 
-Alexandre Julliard (71):
-      configure: Add explicit install targets in libs/wine for make_makefiles.
-      comctl32: Don't bother to unregister classes at process exit.
-      ddraw: Don't bother to unregister classes at process exit.
-      ieframe: Don't bother to unregister classes at process exit.
-      imm32: Don't bother to unregister classes at process exit.
-      inetcomm: Don't bother to unregister classes at process exit.
-      msi: Don't bother to unregister classes at process exit.
-      riched20: Don't bother to unregister classes at process exit.
-      riched32: Don't bother to unregister classes at process exit.
-      ole32: Don't bother to unregister classes at process exit.
-      wintab32: Don't bother to unregister classes at process exit.
-      wined3d: Don't bother to unregister classes at process exit.
-      credui: Don't bother to free memory at process exit.
-      crypt32: Don't bother to free memory at process exit.
-      dwrite: Don't bother to free memory at process exit.
-      dxgi: Don't bother to free memory at process exit.
-      gdiplus: Don't bother to free memory at process exit.
-      inetmib1: Don't bother to free memory at process exit.
-      jscript: Don't bother to free memory at process exit.
-      mpr: Don't bother to free memory at process exit.
-      mscms: Don't bother to free memory at process exit.
-      rsaenh: Don't bother to free memory at process exit.
-      scrrun: Don't bother to free memory at process exit.
-      secur32: Don't bother to free memory at process exit.
-      shell32: Don't bother to free memory at process exit.
-      spoolss: Don't bother to free memory at process exit.
-      urlmon: Don't bother to free memory at process exit.
-      vbscript: Don't bother to free memory at process exit.
-      wineoss.drv: Don't bother to free memory at process exit.
-      wininet: Don't bother to free memory at process exit.
-      ws2_32: Don't bother to free memory at process exit.
-      wshom.ocx: Don't bother to free memory at process exit.
-      msisys.ocx: Remove ununsed DllMain function.
-      atl100: Don't bother to free memory at process exit.
-      comdlg32: Don't bother to free thread local storage at process exit.
-      mlang: Don't bother to free thread local storage at process exit.
-      msctf: Don't bother to free thread local storage at process exit.
-      shlwapi: Don't bother to free thread local storage at process exit.
-      dinput: Don't bother to delete critical sections at process exit.
-      dsound: Don't bother to delete critical sections at process exit.
-      openal32: Don't bother to delete critical sections at process exit.
-      pdh: Don't bother to delete critical sections at process exit.
-      winealsa.drv: Don't bother to delete critical sections at process exit.
-      winecoreaudio.drv: Don't bother to delete critical sections at process exit.
-      winspool: Don't bother to delete critical sections at process exit.
-      wnaspi32: Don't bother to delete critical sections at process exit.
-      configure: Add a pkg-config check for libpng.
-      powrprof: Don't bother to close handles at process exit.
-      winscard: Don't bother to close handles at process exit.
-      mapi32: Don't bother to free libraries at process exit.
-      setupapi: Don't bother to free libraries at process exit.
-      shdocvw: Don't bother to free libraries at process exit.
-      imagehlp: Don't bother to free memory at process exit.
-      wineps.drv: Don't bother to free memory at process exit.
-      mshtml: Don't bother to clean up at process exit.
-      netapi32: Don't bother to clean up at process exit.
-      winhttp: Don't bother to clean up at process exit.
-      msacm32: Don't bother to free memory at process exit.
-      ntoskrnl.exe: Don't bother to remove exception handler at process exit.
-      msvcrt: Don't bother to clean up at process exit.
-      msvcp60: Don't bother to clean up at process exit.
-      msvcp71: Don't bother to clean up at process exit.
-      msvcp90: Don't bother to clean up at process exit.
-      msvcp100: Don't bother to clean up at process exit.
-      setupapi: Don't set the DLL flag when creating a fake dll that ends in .exe.
-      configure: Workaround for clang not reporting an error on unknown options.
-      ole32/tests: Fix array indices in a trace.
-      ntdll: Make the entire relay entry point routine CPU-specific.
-      ntdll: Reimplement the i386 relay entry point in assembler.
-      ntdll: Reimplement the x86_64 relay entry point in assembler.
-      wininet/tests: Use test.winehq.org for all certificate tests.
+- Common dialogs correctly scale with the screen DPI resolution.
 
-Alistair Leslie-Hughes (17):
-      oledb32: Implement GetConversionSize DBTYPE_VARIANT->DBTYPE_WSTR.
-      oledb32: Implement DataConvert DBTYPE_BYTES->DBTYPE_BYTES.
-      oledb32: Implement DataConvert DBTYPE_BYTES->VARIANT.
-      oledb32: Implement DataConvert DBTYPE_DBTIMESTAMP->DBTYPE_VARIANT.
-      include: Add oledb types DBDATE, DBTIME and move DBTIMESTAMP to the correct idl.
-      oledb32: Implement DataConvert DBTYPE_DBDATE->DBTYPE_DBDATE.
-      oledb32: Implement DataConvert DBTYPE_DBDATE->DBTYPE_VARIANT.
-      oledb32: Support VT_NULL when converting to DBTYPE_BSTR.
-      oledb32: Implement DataConvert DBTYPE_VARIANT(VT_DATE) to, DBTYPE_DBTIMESTAMP.
-      oledb32: Support DBSTATUS_S_ISNULL when converting to VARIANT.
-      oledb32: Implement DataConvert DBTYPE_VARIANT(V_DATE)->DBTYPE_DBDATE.
-      oledb32: Source status DBSTATUS_S_ISNULL applies to all conversions.
-      include: Add DB_E_CONCURRENCYVIOLATION define.
-      oledb32: Implement DataConvert DBTYPE_VARIANT->DBTYPE_DATE.
-      oledb32: Implement DataConvert DBTYPE_BYTES->DBTYPE_BYTES | DBTYPE_BYREF.
-      oledb32: DataConvert only variant length types can have a null dst.
-      oledb32: Implemented DataConvert DBTYPE_BSTR->DBTYPE_DBTIMESTAMP.
+- In virtual desktop mode, shortcuts placed in the Desktop folder are
+  displayed on the desktop, and can be used to launch applications.
 
-Andrew Eikum (16):
-      oleaut32: Sanity check some arguments.
-      oleaut32: Use containing TypeLib's HelpFile in ITypeInfo::GetDocumentation.
-      oleaut32: Don't return bogus pointers if no data is available.
-      dsound: Don't overrun capture buffer.
-      oleaut32: Always initialize PARAMDESCEX's cBytes field.
-      oleaut32: Also search local typeinfos in ITypeInfo::GetRefTypeInfo.
-      dinput: Enumerate devices past the first non-matching device.
-      dinput: Determine if OSX devices support force feedback.
-      dinput: Implement force feedback functions for OSX joysticks.
-      gdiplus: Implement GdipResetImageAttributes.
-      dinput: Translate OSX errors to win32 errors.
-      dinput: Debug print DIEFFECT structure.
-      dinput: Support SendForceFeedbackCommand for OSX joysticks.
-      dinput: Report axes that support FF for OSX joysticks.
-      dinput: Support DIPROP_AUTOCENTER for OSX joysticks.
-      dinput: Support DIPROP_FFGAIN for OSX joysticks.
+- The HTML Help control has better support for non-ASCII characters,
+  and for multiple help windows.
 
-André Hentschel (9):
-      d3drm: Implement IDirect3DRMMeshBuilder3_GetNormalCount.
-      d3drm: Implement IDirect3DRMMeshBuilder3_GetNormals.
-      d3drm/tests: Add more face tests.
-      po: Fix typo in German translation.
-      inetcpl.cpl: Add stub for LaunchConnectionDialog.
-      difxapi: Add stub dll.
-      po: Improve German translation.
-      advapi32/tests: Fix copy&paste typo.
-      clusapi: Add stub for GetClusterInformation.
+- Custom painting and images are better supported in listview
+  controls.
 
-Aric Stewart (6):
-      user32: Points for IMR_QUERYCHARPOSITION need to be in screen coordinates.
-      gdi32/tests: Update the vertical font to be a proper windows vertical font.
-      gdi32: GetGlyphIndices does substitute glyph.
-      gdi32: Vertical glyph replacements are not applied in GetGlyphOutline if glyph is specified by index.
-      gdi32: Load the vertical feature when loading the GSUB table.
-      gdi32: Vertical glyphs can be written tategaki even without a vertical GSUB feature.
+- Input validation is improved in the date and calendar controls.
 
-C John Klehm (1):
-      winex11.drv: Add pen to tablet stylus detection whitelist.
 
-Christian Costa (11):
-      d3dcompiler: Add a LUT to find compilation targets info.
-      d3dcompiler: Add trace to D3DPreprocess.
-      d3dx9_36: Report D3DFMT_P8 for image with indexed colors in D3DGetImageInfoFromFileInMemory.
-      d3dx9_36: Fix D3DXCheckTextureRequirements to return D3DFMT_A8R8G8B8 when d3d doesn't support D3DFMT_P8 + tests.
-      d3dx9_36: Fix ID3DXFileDataImpl_GetName + add some tests.
-      d3dxof: Fix IDirectXFileDataImpl_GetName and IDirectXFileDataReferenceImpl_GetName + tests.
-      d3dxof: Group and simplify templates and objects in a cleaner manner.
-      d3dxof: Add some syntax tests and remove some useless ref count checks.
-      d3dxof: Add object separators tests for binary format.
-      d3dxof: Cleanup separators handling and allow multi-semicolons + single comma separator.
-      d3dx9_36: Add support for D3DFMT_P8 and conversion to other ARGB formats + tests.
+*** Mac driver
 
-Daniel Jelinski (6):
-      wbemprox: Return success if only one result requested from enum.
-      wbemprox: Add CIM_LogicalDisk class, forward to Win32_LogicalDisk.
-      msi: Remove trailing spaces from command line property name.
-      kernel32: Implement CAL_RETURN_NUMBER in EnumCalendarInfo*.
-      kernel32: Implement CAL_ICALINTVALUE in GetCalendarInfo.
-      kernel32: Improved stub for GetCalendarInfo's CAL_SCALNAME.
+- A native Mac OS X driver is implemented, for better integration with
+  the Mac desktop environment. The full range of driver features are
+  supported, including OpenGL, window management, clipboard, drag &
+  drop, system tray, etc.
 
-Detlef Riekenberg (4):
-      user32: The app owns the text buffer memory after an EM_GETHANDLE.
-      user32/tests: Add tests for EM_GETHANDLE.
-      user32: The flag EF_APP_HAS_HANDLE is now obsolete.
-      include: Add missing InitOnce / RtlRunOnce prototypes.
+- X11 is no longer needed on Mac OS X, but the X11 driver is still
+  supported, e.g. when running remotely.
 
-Dmitry Timoshkov (6):
-      server: Set appropriate status for a terminated thread.
-      kernel32: Add a test for holding process heap lock before calling ExitProcess.
-      kernel32: Terminate threads before unloading DLLs on process exit.
-      ntdll: Thread creation control is now taken care by server.
-      msi: Fix memory leak.
-      kernel32: Add a test to show that a process with a not closed handle to an already terminated thread fails to terminate cleanly.
+Note: the Mac driver requires Mac OS X 10.6 or later, it cannot be
+      built or used on 10.5.
 
-Francois Gouget (2):
-      comdlg32/tests: Fix compilation on systems that don't support nameless structs or unions.
-      d3drm/tests: Fix compilation on systems that don't support nameless unions.
+- FontConfig is no longer needed on Mac OS X and is disabled by
+  default, system fonts are enumerated using the Core Text API
+  instead.
 
-Frédéric Delanoy (1):
-      vbscript: Fix typo.
 
-Hans Leidekker (9):
-      winhttp: Fix a memory leak.
-      wmiutils: Accept namespaces without a leading slash.
-      wbemprox: Add stub implementations of IWbemServices::ExecNotificationQueryAsync and IWbemServices::CancelAsyncCall.
-      wbemprox: Add support for asynchronous queries.
-      wbemprox: Implement Win32_Process.Name.
-      wbemprox: Fill tables at latest possible moment.
-      wbemprox: Refill tables with dynamic content before each query.
-      wbemprox: Return a status from table fillers and add an optional condition parameter.
-      wbemprox: Avoid storing rows that don't match the query condition.
+*** X11 driver
 
-Huw Davies (3):
-      user32/tests: Add tests to show that WM_CHAR W<->A mapping uses the codepage associated with the current keyboard layout.
-      user32: Move back to using WC<->MB in order to specify an alternative codepage.
-      user32: Use the codepage associated with the input locale for WM_CHAR-type conversions.
+- X11 server-side font rendering is no longer supported. All fonts are
+  rendered client-side using FreeType.
 
-Jacek Caban (15):
-      ole32: Error handling clean up in local_server_thread.
-      ieframe: Keep reference to ShellObject while calling DocumentComplete event.
-      mshtml: Keep reference to document node in onload event handler.
-      vbscript: Round half to even in to_int.
-      mshtml: Wine Gecko 2.21 release.
-      mshtml: Added more parser compatMode tests.
-      mshtml: Added parsing custom tag name tests.
-      mshtml: Added whitespace parser tests.
-      ieframe: Use IOleObject::DoVerb if IHlink interface is not available.
-      ieframe: Fixed handling documents that don't report their ready state.
-      ole32: Use a separated object to expose local servers instead of marshaling them in CoRegisterClassObject.
-      ole32: Added IExternalConnection support.
-      oleaut32: Added IExternalConnection tests.
-      ieframe: Keep track of InternetExplore external references and use that to release document.
-      ieframe: Get rid of no longer needed IEDocHost.
+- The big lock around all X11 calls has been removed, we rely on the X
+  libraries internal locking for thread safety.
 
-Ken Thomases (14):
-      winemac: Fix disabling of resizable windows.
-      winemac: Improve positioning of input method candidate window.
-      winemac: Always call super in -validateMenuItem:; fixes check mark in Windows menu.
-      winemac: Implement simpler way to find front Wine window.
-      winemac: Consider minimized windows as "on screen" for our purposes.
-      winemac: Use window server's window list to find next window to offer focus to.
-      winemac: Set up window's latent parent-child relationship before ordering the window.
-      winemac: Centralize adjusting of window levels using the window server's z-order.
-      winemac: In -setFrameIfOnScreen:, avoid some work if the frame didn't change.
-      winemac: In -setFrameIfOnScreen:, don't adjust window levels if fullscreen-ness didn't change.
-      winemac: Don't reorder windows if they're already ordered as requested.
-      winemac: Order front in -makeKeyAndOrderFront:; we only override to control key status.
-      user32: Allow sent WM_CANCELMODE to end menu tracking in a window's menu bar.
-      user32/tests: Test that sending WM_CANCELMODE cancels tracking in window's menu bar.
+- XRandR versions 1.2 and 1.3 are supported.
 
-Maarten Lankhorst (1):
-      devenum: Set FriendlyName and wave*ID for devices.
 
-Marcus Meissner (1):
-      dinput: GetKeyNameW takes chars not bytes (Coverity).
+*** Graphics
 
-Nikolay Sivov (15):
-      comctl32: Update thumb size on WM_SIZE if it's not fixed, invalidate after resize.
-      comctl32: Properly invalidate after setting thumb length.
-      comctl32: Properly paint thumb using DrawEdge() for diagonal edges too.
-      comctl32: Fix tics rectangle width/height.
-      comctl32: Remove unused defines.
-      comdlg32: Add controls codes defines for color choosing dialog.
-      comdlg32: Return combined color from HSL -> RGB transform.
-      comdlg32: Pass full colorref to RGB -> HSL conversion function.
-      comdlg32: Simplify some internal helpers.
-      comctl32: Allocate edit data with control info.
-      comctl32: Use selected image for listbox/editbox for selected item only.
-      comdlg32: Simplify more internal helpers.
-      msxml3: Fix ignorable whitespace detection in case of formatting text nodes.
-      comctl32: Remove duplicated code for scroll control size calculation.
-      comctl32: Forward WM_MEASUREITEM to Rebar notification window.
+- There are significant performance improvements in the DIB engine,
+  particularly for text rendering, bitmap stretching, alpha blending,
+  and gradients.
 
-Piotr Caban (1):
-      user32: Use SendNotifyMessage to send WM_DRAWCLIPBOARD.
+- Bounds tracking is supported for all graphics primitives, to enable
+  copying only the modified portions of a bitmap.
 
-Qian Hong (1):
-      user32: Make CreateWindowExA and CreateWindowExW hotpatchable.
+- OpenGL rendering is supported in device-independent bitmaps using libOSMesa.
 
-Roderick Colenbrander (1):
-      winex11: Store opengl swap interval with gl_drawable.
+- Brush dithering is implemented in the DIB engine.
 
-Sam Edwards (2):
-      winex11: Cache XRandR 1.0 display mode.
-      winex11: Cache XRandR 1.2 display mode.
+- Path gradients are implemented in GdiPlus.
 
-Sergey Guralnik (1):
-      explorer: Use comma as argument delimiter.
+- More image codecs features are implemented, including JPEG encoding,
+  palette formats, and meta-data support for various image types.
 
-Stefan Dösinger (13):
-      wined3d: Fix a ~0U assignment.
-      wined3d: Pass the pixel shader input signature to shader_arb_generate_vshader.
-      wined3d: Don't access the stateblock from shader_arb_load_constants_internal.
-      wined3d: Explicitly pass the state to shader_load_constants.
-      wined3d: Add a separate function for disabling shaders.
-      wined3d: Pass the state and private data to shader_select.
-      wined3d: Disable the fixed function vertex pipeline when ARB vertex programs are used.
-      wined3d: Don't log the device pointer in shader_arb_select.
-      wined3d: Initialize the gl_info pointer from the context.
-      wined3d: Don't pass the device to atifs_free_ffpshader.
-      d3d: d3d9ex does not do video memory accounting for D3DPOOL_DEFAULT resources.
-      wined3d: Correct an ERR/FIXME.
-      d3d9/tests: d3d9ex video memory accounting tests.
 
-Zhan Jianyu (2):
-      vbscript: Implemented builtin function CInt.
-      vbscript: Implemented builtin function CBool.
+*** Text and fonts
+
+- Sub-pixel font anti-aliasing is supported in the DIB engine, using
+  the system anti-aliasing configuration from FontConfig.
+
+- Dynamic loading of scalable font resources is supported.
+
+- Text layout in Uniscribe supports character-specific position
+  adjustments. Right-to-left text handling is also improved.
+
+- There is an initial implementation of the DirectWrite text layout
+  engine.
+
+- Built-in fonts are more complete, with the addition of FixedSys and
+  Wingdings fonts, more high-resolution pixel fonts, and a wider range
+  of glyphs in the existing fonts, notably Arabic glyphs in Tahoma.
+
+- Bi-directional text support is improved in the RichEdit control.
+
+
+*** Input devices
+
+- The raw input API is supported for keyboard and mouse input.
+
+- There is a joystick applet in the control panel, to allow
+  configuring joysticks and testing their behavior.
+
+- Force feedback is supported for Mac OS X joysticks.
+
+
+*** Kernel
+
+- DOSBox is tried first when running a DOS application. The Wine DOS
+  support is only used as a fallback when DOSBox cannot be found, and
+  will be removed in a future release.
+
+- A monotonic time counter is used on platforms that support it, to
+  make timers more robust against system time changes.
+
+- File times are reported with nanosecond resolution.
+
+- Wine can be configured to report the Windows version as 'Windows 8'.
+
+
+*** .NET support
+
+- The Mono runtime is packaged as an MSI file, and its installation
+  can be managed from the "Add/Remove Programs" control panel. It is
+  automatically installed on Wine prefix updates.
+
+- .NET mixed mode assemblies are supported.
+
+- The Microsoft .NET 4.0 runtime can be installed for cases where Mono
+  is not good enough yet.
+
+
+*** OLE / COM
+
+- The typelib writer is reimplemented for better compatibility.
+
+- OLE DB supports more data types and conversions.
+
+- OLE automation manages a cache of string allocations for better
+  performance and compatibility.
+
+
+*** Internet and networking
+
+- HTTPS connections use GnuTLS (or Secure Transport on Mac OS X).
+  OpenSSL is no longer used.
+
+- The TLS 1.1 and TLS 1.2 protocols are enabled by default, with
+  automatic fallback to TLS 1.0. The SSL2 protocol is disabled by
+  default.
+
+- Security certificate validation errors are handled better.
+
+- NTLM and Negotiate authentication protocols are supported.
+
+- ActiveX controls can be downloaded and installed automatically.
+
+- Internet proxy bypass is supported, and can be enabled either
+  through the registry or with the no_proxy environment variable.
+
+- Broadcast packets can be received on interface-bound sockets, which
+  is needed for some networked multi-player games.
+
+- The Server Name Indication TLS extension is supported.
+
+- Persistent cookies are supported, and URL cache files are managed
+  better. The Internet control panel allows clearing saved cookies and
+  cache files.
+
+- Punycode encoding for Internationalized Domain Names is supported.
+
+- JavaScript performance is improved. The built-in JavaScript engine
+  is preferred over the Gecko one in most cases.
+
+- Many more built-in functions of VBScript are implemented. Regular
+  expressions are also supported.
+
+- The Gecko engine is updated to the version from Firefox 21.
+
+- The Gecko and Mono installers are cached upon download, to allow
+  installation in multiple Wine prefixes without additional downloads.
+
+
+*** Direct3D
+
+- The Direct3D 9Ex implementation is more complete. In particular:
+  - IDirect3DDevice9Ex::PresentEx is implemented.
+  - IDirect3DDevice9Ex::ResetEx is implemented.
+  - Various Direct3D 9Ex display mode handling functions are implemented.
+  - Direct3D 9Ex style video memory accounting is implemented.
+
+- Like the X11 driver, WineD3D no longer uses the big X11 lock when
+  making GL calls.
+
+- The WineD3D graphics card database is updated to recognize more
+  graphics cards.
+
+- The fallback card detection code for unrecognized graphics cards is
+  improved. This results in a more reasonable card being reported when
+  the graphics card is not already in the WineD3D database.
+
+- WineD3D has GLSL based implementations of Direct3D fixed-function
+  vertex and fragment processing. In some cases this allows
+  functionality that's not present in fixed-function OpenGL to be
+  implemented, in other cases it allows functionality to be
+  implemented in a more efficient way.
+
+- On drivers that support it, GL_ARB_debug_output is used to get more
+  detailed debugging output from the OpenGL driver.
+
+- On drivers that support it, GL_ARB_framebuffer_sRGB is used for
+  rendering to frame buffers in the sRGB color space.
+
+- On drivers that support it, GL_ARB_instanced_arrays is used for more
+  efficient instanced drawing.
+
+- On drivers that support it, and return useful information,
+  GL_ARB_internalformat_query2 is used for more accurate reporting of
+  surface / texture format capabilities.
+
+- There is an initial implementation of a HLSL compiler.
+
+- Improvements to various parts of the D3DX9 implementation, including:
+  - The surface and texture handling functions. This includes code for
+    loading, saving, filling, and rendering to surfaces and textures.
+  - The effects framework.
+  - The constant table implementation.
+  - A number of spherical harmonics functions have been implemented.
+  - Support for .x files.
+
+- Improvements to the Direct3D 10 implementation, including:
+  - Support for more shader model 4 opcodes and register types.
+  - Support for shader model 4 indirect addressing.
+  - Initial geometry shader support.
+  - Improved binary effect parsing.
+  - Support for Direct3D 10 style instanced draws, using
+    GL_ARB_draw_instanced.
+
+
+*** DirectDraw
+
+- Vertex buffers are created with WINED3DUSAGE_DYNAMIC when locked with
+  DDLOCK_DISCARDCONTENTS, resulting in improved performance in some cases.
+
+- The 2D-only fallback in WineD3D for using DirectDraw without a
+  working OpenGL implementation is more robust. Note that this still
+  isn't a recommended configuration.
+
+
+*** Audio and video
+
+- DirectSound has a better resampler.
+
+- Audio device enumeration is improved, and multi-channel devices are
+  better supported.
+
+- VMR-9 video rendering is implemented.
+
+
+*** Printer support
+
+- The PPD files of already installed printers are automatically
+  refreshed when needed.
+
+- Printing resolution can be configured from the print dialog.
+
+- Simulated italic fonts can be printed.
+
+- On Mac OS X, the default paper size is retrieved from the system
+  configuration.
+
+
+*** Internationalization
+
+- Japanese vertical text is correctly supported.
+
+- Translated font names are used when there is a match for the current
+  language.
+
+- Wine is translated to French, German, Spanish, Italian, Dutch,
+  Swedish, Finnish, Portuguese, Catalan, Hungarian, Polish, Danish,
+  Russian, Slovenian, Lithuanian, Chinese, Japanese, Korean, and
+  Arabic. It has partial translations for another fifteen languages.
+
+- Various additional Mac OS code pages are supported, namely Japanese,
+  Traditional Chinese, Korean, Simplified Chinese, Romanian,
+  Ukrainian, Thai, and Croatian code pages. This improves support for
+  loading translated font names from Mac OS font files.
+
+
+*** Built-in applications
+
+- The new 'netstat' application displays information about active
+  network connections.
+
+- The 'cabarc' application supports multi-cabinet archives.
+
+- The 'attrib' application supports recursing in sub-directories.
+
+- The 'ipconfig' application can display IPv6 addresses.
+
+- The 'start' application allows setting process priority and affinity.
+
+- The 'cmd' application support arithmetic variable expansion,
+  comparison operators, and various extra features in 'for' loops.
+
+- All graphical built-in applications have a 256x256 icon for use with
+  the Mac driver.
+
+
+*** Build environment
+
+- The configure script uses pkg-config when possible to find library
+  dependencies. Compiler and linker flags can be passed explicitly for
+  each dependency to override pkg-config where necessary.
+
+- The IDL compiler supports nameless structs and unions and generates
+  portable C code for them.
+
+- The IDL compiler generates the same header guards as the Microsoft
+  one for better header compatibility.
+
+- Generated assembler files are built by invoking the C compiler when
+  possible, for better compatibility with the Clang tool chain.
+
+- The Winedump tool can display the contents of typelib files.
+
+- The Fnt2bdf tool has been removed since X11 server-side fonts are no
+  longer used.
+
+
+*** Platform-specific changes
+
+- On Linux, dynamic device management supports the UDisks2 service.
+
+- On Mac OS X, the Recycle Bin is mapped to the Mac OS Trash.
+
+- Debugging support for ARM platforms is improved, including the
+  ability to display ARM assembly in the Wine debugger, and support
+  for relay tracing.
+
+- Building Wine for the ARM64 platform is supported.
+
+- There is preliminary support for building Wine for Android using the
+  Android NDK.
+
+- The DragonFly FreeBSD variant is supported.
+
+- The Alpha and Sparc platforms are no longer supported.
+
+
+*** Miscellaneous
+
+- XML namespaces are better supported. XML parsing is also implemented
+  in the XMLLite library.
+
+- Windows Management Instrumentation (WMI) is implemented, with a wide
+  range of WBEM system classes.
+
+- A number of forwarding libraries are added to support the API Sets
+  feature added in Windows 8.
+
+- More of the latest functions of the C runtime are implemented,
+  particularly the locale functions. Exception handling and RTTI are
+  supported on 64-bit.
+
+- The standard C++ class libraries are more complete, particularly the
+  math functions and the stream classes.
+
+
+*** New external dependencies
+
+- LibOSMesa is used for OpenGL rendering to device-independent bitmaps.
+
+
+*** Useful configuration options
+
+Note: More details about these and other configuration options can be
+      found at http://wiki.winehq.org/UsefulRegistryKeys
+
+- Client-side window rendering can be disabled if necessary by setting
+  "ClientSideGraphics" to "N" under HKCU\Software\Wine\X11 Driver.
+
+- On Mac OS X, in case an application doesn't work properly with the
+  Mac driver, it is possible to go back to the X11 driver by setting
+  "Graphics" to "x11" under HKCU\Software\Wine\Drivers.
+
+- Some X11 compositors do not cope properly with transparent windows
+  that use non-rectangular shapes. In that case, window shaping can be
+  disabled by setting "ShapeLayeredWindows" to "N" under
+  HKCU\Software\Wine\X11 Driver.
+
+- The "VertexShaderMode" and "PixelShaderMode" settings under
+  HKCU\Software\Wine\Direct3D have been replaced by the "MaxShaderModelVS",
+  "MaxShaderModelGS" and "MaxShaderModelPS" (DWORD) settings. These allow
+  limiting the maximum supported shader model version. Setting these to 0
+  disables support for the corresponding shader type, like "VertexShaderMode"
+  and "PixelShaderMode" did.
+
+- The default value for the "AlwaysOffscreen" setting under
+  HKCU\Software\Wine\Direct3D is "enabled". It can still be disabled
+  by setting it to "disabled".
+
+
+*** Known issues
+
+- The addition of DirectWrite causes Steam to be unable to display
+  text. This can be fixed either by setting dwrite.dll to disabled for
+  steam.exe using Winecfg, or by running Steam with the -no-dwrite
+  option.
+
+- The removal of the big X11 lock can reveal locking bugs in old Xlib
+  versions, notably on RHEL 5. The only solution is to upgrade the X
+  libraries.
 
 --
 Alexandre Julliard

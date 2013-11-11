@@ -136,8 +136,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
 @interface WineWindow ()
 
-@property (nonatomic) BOOL disabled;
-@property (nonatomic) BOOL noActivate;
+@property (readwrite, nonatomic) BOOL disabled;
+@property (readwrite, nonatomic) BOOL noActivate;
 @property (readwrite, nonatomic) BOOL floating;
 @property (retain, nonatomic) NSWindow* latentParentWindow;
 
@@ -157,6 +157,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
 @property (assign, nonatomic) void* imeData;
 @property (nonatomic) BOOL commandDone;
+
+    - (void) updateColorSpace;
 
 @end
 
@@ -256,18 +258,25 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             pendingGlContexts = [[NSMutableArray alloc] init];
         [pendingGlContexts addObject:context];
         [self setNeedsDisplay:YES];
+        [(WineWindow*)[self window] updateColorSpace];
     }
 
     - (void) removeGLContext:(WineOpenGLContext*)context
     {
         [glContexts removeObjectIdenticalTo:context];
         [pendingGlContexts removeObjectIdenticalTo:context];
+        [(WineWindow*)[self window] updateColorSpace];
     }
 
     - (void) updateGLContexts
     {
         for (WineOpenGLContext* context in glContexts)
             context.needsUpdate = TRUE;
+    }
+
+    - (BOOL) hasGLContext
+    {
+        return [glContexts count] || [pendingGlContexts count];
     }
 
     - (BOOL) acceptsFirstMouse:(NSEvent*)theEvent
@@ -356,14 +365,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             event->im_set_text.data = [window imeData];
             event->im_set_text.text = (CFStringRef)[[markedText string] copy];
             event->im_set_text.complete = FALSE;
-
-            [[window queue] postEvent:event];
-
-            macdrv_release_event(event);
-
-            event = macdrv_create_event(IM_SET_CURSOR_POS, window);
-            event->im_set_cursor_pos.data = [window imeData];
-            event->im_set_cursor_pos.pos = markedTextSelection.location;
+            event->im_set_text.cursor_pos = markedTextSelection.location;
 
             [[window queue] postEvent:event];
 
@@ -457,7 +459,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
 @implementation WineWindow
 
-    @synthesize disabled, noActivate, floating, latentParentWindow, hwnd, queue;
+    @synthesize disabled, noActivate, floating, fullscreen, latentParentWindow, hwnd, queue;
     @synthesize surface, surface_mutex;
     @synthesize shape, shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
@@ -520,11 +522,18 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [window setContentView:contentView];
         [window setInitialFirstResponder:contentView];
 
+        [[NSNotificationCenter defaultCenter] addObserver:window
+                                                 selector:@selector(updateFullscreen)
+                                                     name:NSApplicationDidChangeScreenParametersNotification
+                                                   object:NSApp];
+        [window updateFullscreen];
+
         return window;
     }
 
     - (void) dealloc
     {
+        [[NSNotificationCenter defaultCenter] removeObserver:self];
         [liveResizeDisplayTimer invalidate];
         [liveResizeDisplayTimer release];
         [queue release];
@@ -579,19 +588,17 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     {
         NSInteger level;
 
-        if (self.floating)
+        if (self.floating && (active || topmost_float_inactive == TOPMOST_FLOAT_INACTIVE_ALL ||
+                              (topmost_float_inactive == TOPMOST_FLOAT_INACTIVE_NONFULLSCREEN && !fullscreen)))
             level = NSFloatingWindowLevel;
         else
             level = NSNormalWindowLevel;
 
         if (active)
         {
-            BOOL fullscreen, captured;
-            NSScreen* screen;
+            BOOL captured;
 
-            screen = screen_covered_by_rect([self frame], [NSScreen screens]);
-            fullscreen = (screen != nil);
-            captured = (screen || [self screen]) && [[WineApplicationController sharedController] areDisplaysCaptured];
+            captured = (fullscreen || [self screen]) && [[WineApplicationController sharedController] areDisplaysCaptured];
 
             if (captured || fullscreen)
             {
@@ -640,10 +647,16 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         }
         [self setCollectionBehavior:behavior];
 
+        pendingMinimize = FALSE;
         if (state->minimized && ![self isMiniaturized])
         {
-            ignore_windowMiniaturize = TRUE;
-            [self miniaturize:nil];
+            if ([self isVisible])
+            {
+                ignore_windowMiniaturize = TRUE;
+                [self miniaturize:nil];
+            }
+            else
+                pendingMinimize = TRUE;
         }
         else if (!state->minimized && [self isMiniaturized])
         {
@@ -706,17 +719,70 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         return TRUE;
     }
 
+    - (void) order:(NSWindowOrderingMode)mode childWindow:(WineWindow*)child relativeTo:(WineWindow*)other
+    {
+        NSMutableArray* windowNumbers;
+        NSNumber* childWindowNumber;
+        NSUInteger otherIndex;
+        NSMutableArray* children;
+
+        // Get the z-order from the window server and modify it to reflect the
+        // requested window ordering.
+        windowNumbers = [[[[self class] windowNumbersWithOptions:NSWindowNumberListAllSpaces] mutableCopy] autorelease];
+        childWindowNumber = [NSNumber numberWithInteger:[child windowNumber]];
+        [windowNumbers removeObject:childWindowNumber];
+        otherIndex = [windowNumbers indexOfObject:[NSNumber numberWithInteger:[other windowNumber]]];
+        [windowNumbers insertObject:childWindowNumber atIndex:otherIndex + (mode == NSWindowAbove ? 0 : 1)];
+
+        // Get our child windows and sort them in the reverse of the desired
+        // z-order (back-to-front).
+        children = [[[self childWindows] mutableCopy] autorelease];
+        [children sortWithOptions:NSSortStable
+                  usingComparator:^NSComparisonResult(id obj1, id obj2){
+            NSNumber* window1Number = [NSNumber numberWithInteger:[obj1 windowNumber]];
+            NSNumber* window2Number = [NSNumber numberWithInteger:[obj2 windowNumber]];
+            NSUInteger index1 = [windowNumbers indexOfObject:window1Number];
+            NSUInteger index2 = [windowNumbers indexOfObject:window2Number];
+            if (index1 == NSNotFound)
+            {
+                if (index2 == NSNotFound)
+                    return NSOrderedSame;
+                else
+                    return NSOrderedAscending;
+            }
+            else if (index2 == NSNotFound)
+                return NSOrderedDescending;
+            else if (index1 < index2)
+                return NSOrderedDescending;
+            else if (index2 < index1)
+                return NSOrderedAscending;
+
+            return NSOrderedSame;
+        }];
+
+        // Remove all of the child windows and re-add them back-to-front so they
+        // are in the desired order.
+        for (other in children)
+            [self removeChildWindow:other];
+        for (other in children)
+            [self addChildWindow:other ordered:NSWindowAbove];
+    }
+
     /* Returns whether or not the window was ordered in, which depends on if
        its frame intersects any screen. */
-    - (BOOL) orderBelow:(WineWindow*)prev orAbove:(WineWindow*)next
+    - (BOOL) orderBelow:(WineWindow*)prev orAbove:(WineWindow*)next activate:(BOOL)activate
     {
         WineApplicationController* controller = [WineApplicationController sharedController];
         BOOL on_screen = frame_intersects_screens([self frame], [NSScreen screens]);
-        if (on_screen)
+        if (on_screen && ![self isMiniaturized])
         {
             BOOL needAdjustWindowLevels = FALSE;
+            BOOL wasVisible = [self isVisible];
 
             [controller transformProcessToForeground];
+
+            if (activate)
+                [NSApp activateIgnoringOtherApps:YES];
 
             NSDisableScreenUpdates();
 
@@ -735,6 +801,9 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
                 if (![self isOrdered:orderingMode relativeTo:other])
                 {
+                    WineWindow* parent = (WineWindow*)[self parentWindow];
+                    WineWindow* otherParent = (WineWindow*)[other parentWindow];
+
                     // This window level may not be right for this window based
                     // on floating-ness, fullscreen-ness, etc.  But we set it
                     // temporarily to allow us to order the windows properly.
@@ -742,6 +811,13 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                     if ([self level] != [other level])
                         [self setLevel:[other level]];
                     [self orderWindow:orderingMode relativeTo:[other windowNumber]];
+
+                    // The above call to -[NSWindow orderWindow:relativeTo:] won't
+                    // reorder windows which are both children of the same parent
+                    // relative to each other, so do that separately.
+                    if (parent && parent == otherParent)
+                        [parent order:orderingMode childWindow:self relativeTo:other];
+
                     needAdjustWindowLevels = TRUE;
                 }
             }
@@ -756,7 +832,18 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                 needAdjustWindowLevels = TRUE;
             }
             if (needAdjustWindowLevels)
+            {
+                if (!wasVisible && fullscreen && [self isOnActiveSpace])
+                    [controller updateFullscreenWindows];
                 [controller adjustWindowLevels];
+            }
+
+            if (pendingMinimize)
+            {
+                ignore_windowMiniaturize = TRUE;
+                [self miniaturize:nil];
+                pendingMinimize = FALSE;
+            }
 
             NSEnableScreenUpdates();
 
@@ -774,11 +861,36 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
     - (void) doOrderOut
     {
+        WineApplicationController* controller = [WineApplicationController sharedController];
+        BOOL wasVisible = [self isVisible];
+        BOOL wasOnActiveSpace = [self isOnActiveSpace];
+
+        if ([self isMiniaturized])
+            pendingMinimize = TRUE;
         self.latentParentWindow = [self parentWindow];
         [latentParentWindow removeChildWindow:self];
         [self orderOut:nil];
-        [[WineApplicationController sharedController] adjustWindowLevels];
+        if (wasVisible && wasOnActiveSpace && fullscreen)
+            [controller updateFullscreenWindows];
+        [controller adjustWindowLevels];
         [NSApp removeWindowsItem:self];
+    }
+
+    - (void) updateFullscreen
+    {
+        NSRect contentRect = [self contentRectForFrameRect:[self frame]];
+        BOOL nowFullscreen = (screen_covered_by_rect(contentRect, [NSScreen screens]) != nil);
+
+        if (nowFullscreen != fullscreen)
+        {
+            WineApplicationController* controller = [WineApplicationController sharedController];
+
+            fullscreen = nowFullscreen;
+            if ([self isVisible] && [self isOnActiveSpace])
+                [controller updateFullscreenWindows];
+
+            [controller adjustWindowLevels];
+        }
     }
 
     - (BOOL) setFrameIfOnScreen:(NSRect)contentRect
@@ -816,16 +928,15 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
                 if (NSEqualSizes(frame.size, oldFrame.size))
                     [self setFrameOrigin:frame.origin];
                 else
+                {
                     [self setFrame:frame display:YES];
+                    [self updateColorSpace];
+                }
+
+                [self updateFullscreen];
 
                 if (on_screen)
                 {
-                    BOOL fullscreen = (screen_covered_by_rect(frame, screens) != nil);
-                    BOOL oldFullscreen = (screen_covered_by_rect(oldFrame, screens) != nil);
-
-                    if (fullscreen != oldFullscreen)
-                        [[WineApplicationController sharedController] adjustWindowLevels];
-
                     /* In case Cocoa adjusted the frame we tried to set, generate a frame-changed
                        event.  The back end will ignore it if nothing actually changed. */
                     [self windowDidResize:nil];
@@ -918,6 +1029,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         WineApplicationController* controller = [WineApplicationController sharedController];
         NSArray* screens;
         WineWindow* front;
+        BOOL wasVisible = [self isVisible];
 
         [controller transformProcessToForeground];
 
@@ -932,6 +1044,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
             [self setFrameTopLeftPoint:NSMakePoint(NSMinX(frame), NSMaxY(frame))];
             frame = [self constrainFrameRect:[self frame] toScreen:primaryScreen];
             [self setFrame:frame display:YES];
+            [self updateColorSpace];
         }
 
         if (activate)
@@ -950,7 +1063,16 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         if (front && [self level] < [front level])
             [self setLevel:[front level]];
         [self orderFront:nil];
+        if (!wasVisible && fullscreen && [self isOnActiveSpace])
+            [controller updateFullscreenWindows];
         [controller adjustWindowLevels];
+
+        if (pendingMinimize)
+        {
+            ignore_windowMiniaturize = TRUE;
+            [self miniaturize:nil];
+            pendingMinimize = FALSE;
+        }
 
         NSEnableScreenUpdates();
 
@@ -995,6 +1117,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [queue postEvent:event];
 
         macdrv_release_event(event);
+
+        [controller noteKey:keyCode pressed:pressed];
     }
 
     - (void) postKeyEvent:(NSEvent *)theEvent
@@ -1053,6 +1177,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
     {
         WineApplicationController* controller = [WineApplicationController sharedController];
         WineWindow* front = [controller frontWineWindow];
+        BOOL wasVisible = [self isVisible];
 
         if (![self isKeyWindow] && !self.disabled && !self.noActivate)
             [controller windowGotFocus:self];
@@ -1060,13 +1185,20 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         if (front && [self level] < [front level])
             [self setLevel:[front level]];
         [self orderFront:nil];
+        if (!wasVisible && fullscreen && [self isOnActiveSpace])
+            [controller updateFullscreenWindows];
         [controller adjustWindowLevels];
+
+        if (pendingMinimize)
+        {
+            ignore_windowMiniaturize = TRUE;
+            [self miniaturize:nil];
+            pendingMinimize = FALSE;
+        }
     }
 
     - (void) sendEvent:(NSEvent*)event
     {
-        WineApplicationController* controller = [WineApplicationController sharedController];
-
         /* NSWindow consumes certain key-down events as part of Cocoa's keyboard
            interface control.  For example, Control-Tab switches focus among
            views.  We want to bypass that feature, so directly route key-down
@@ -1074,20 +1206,38 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         if ([event type] == NSKeyDown)
             [[self firstResponder] keyDown:event];
         else
-        {
-            if ([event type] == NSLeftMouseDown)
-            {
-                /* Since our windows generally claim they can't be made key, clicks
-                   in their title bars are swallowed by the theme frame stuff.  So,
-                   we hook directly into the event stream and assume that any click
-                   in the window will activate it, if Wine and the Win32 program
-                   accept. */
-                if (![self isKeyWindow] && !self.disabled && !self.noActivate)
-                    [controller windowGotFocus:self];
-            }
-
             [super sendEvent:event];
+    }
+
+    // We normally use the generic/calibrated RGB color space for the window,
+    // rather than the device color space, to avoid expensive color conversion
+    // which slows down drawing.  However, for windows displaying OpenGL, having
+    // a different color space than the screen greatly reduces frame rates, often
+    // limiting it to the display refresh rate.
+    //
+    // To avoid this, we switch back to the screen color space whenever the
+    // window is covered by a view with an attached OpenGL context.
+    - (void) updateColorSpace
+    {
+        NSRect contentRect = [[self contentView] frame];
+        BOOL coveredByGLView = FALSE;
+        for (WineContentView* view in [[self contentView] subviews])
+        {
+            if ([view hasGLContext])
+            {
+                NSRect frame = [view convertRect:[view bounds] toView:nil];
+                if (NSContainsRect(frame, contentRect))
+                {
+                    coveredByGLView = TRUE;
+                    break;
+                }
+            }
         }
+
+        if (coveredByGLView)
+            [self setColorSpace:nil];
+        else
+            [self setColorSpace:[NSColorSpace genericRGBColorSpace]];
     }
 
 
@@ -1095,7 +1245,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
      * ---------- NSResponder method overrides ----------
      */
     - (void) keyDown:(NSEvent *)theEvent { [self postKeyEvent:theEvent]; }
-    - (void) keyUp:(NSEvent *)theEvent   { [self postKeyEvent:theEvent]; }
 
     - (void) flagsChanged:(NSEvent *)theEvent
     {
@@ -1177,6 +1326,8 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
     - (void)windowDidDeminiaturize:(NSNotification *)notification
     {
+        WineApplicationController* controller = [WineApplicationController sharedController];
+
         if (!ignore_windowDeminiaturize)
         {
             macdrv_event* event;
@@ -1193,7 +1344,19 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
 
         ignore_windowDeminiaturize = FALSE;
 
-        [[WineApplicationController sharedController] adjustWindowLevels];
+        if (fullscreen && [self isOnActiveSpace])
+            [controller updateFullscreenWindows];
+        [controller adjustWindowLevels];
+
+        if (!self.disabled && !self.noActivate)
+        {
+            causing_becomeKeyWindow = TRUE;
+            [self makeKeyWindow];
+            causing_becomeKeyWindow = FALSE;
+            [controller windowGotFocus:self];
+        }
+
+        [self windowDidResize:notification];
     }
 
     - (void) windowDidEndLiveResize:(NSNotification *)notification
@@ -1201,6 +1364,12 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         [liveResizeDisplayTimer invalidate];
         [liveResizeDisplayTimer release];
         liveResizeDisplayTimer = nil;
+    }
+
+    - (void)windowDidMiniaturize:(NSNotification *)notification
+    {
+        if (fullscreen && [self isOnActiveSpace])
+            [[WineApplicationController sharedController] updateFullscreenWindows];
     }
 
     - (void)windowDidMove:(NSNotification *)notification
@@ -1244,6 +1413,7 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         macdrv_release_event(event);
 
         [[[self contentView] inputContext] invalidateCharacterCoordinates];
+        [self updateFullscreen];
     }
 
     - (BOOL)windowShouldClose:(id)sender
@@ -1505,14 +1675,15 @@ void macdrv_set_cocoa_window_title(macdrv_window w, const unsigned short* title,
  * (i.e. if its frame intersects with a screen).  Otherwise, false.
  */
 int macdrv_order_cocoa_window(macdrv_window w, macdrv_window prev,
-        macdrv_window next)
+        macdrv_window next, int activate)
 {
     WineWindow* window = (WineWindow*)w;
     __block BOOL on_screen;
 
     OnMainThread(^{
         on_screen = [window orderBelow:(WineWindow*)prev
-                               orAbove:(WineWindow*)next];
+                               orAbove:(WineWindow*)next
+                              activate:activate];
     });
 
     return on_screen;
@@ -1759,6 +1930,7 @@ macdrv_view macdrv_create_view(macdrv_window w, CGRect rect)
                    name:NSApplicationDidChangeScreenParametersNotification
                  object:NSApp];
         [[window contentView] addSubview:view];
+        [window updateColorSpace];
     });
 
     [pool release];
@@ -1777,6 +1949,7 @@ void macdrv_dispose_view(macdrv_view v)
 
     OnMainThread(^{
         NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+        WineWindow* window = (WineWindow*)[view window];
 
         [nc removeObserver:view
                       name:NSViewGlobalFrameDidChangeNotification
@@ -1786,6 +1959,7 @@ void macdrv_dispose_view(macdrv_view v)
                     object:NSApp];
         [view removeFromSuperview];
         [view release];
+        [window updateColorSpace];
     });
 
     [pool release];
@@ -1810,11 +1984,15 @@ void macdrv_set_view_window_and_frame(macdrv_view v, macdrv_window w, CGRect rec
         BOOL changedWindow = (window && window != [view window]);
         NSRect newFrame = NSRectFromCGRect(rect);
         NSRect oldFrame = [view frame];
+        BOOL needUpdateWindowColorSpace = FALSE;
 
         if (changedWindow)
         {
+            WineWindow* oldWindow = (WineWindow*)[view window];
             [view removeFromSuperview];
+            [oldWindow updateColorSpace];
             [[window contentView] addSubview:view];
+            needUpdateWindowColorSpace = TRUE;
         }
 
         if (!NSEqualRects(oldFrame, newFrame))
@@ -1828,7 +2006,11 @@ void macdrv_set_view_window_and_frame(macdrv_view v, macdrv_window w, CGRect rec
             else
                 [view setFrame:newFrame];
             [view setNeedsDisplay:YES];
+            needUpdateWindowColorSpace = TRUE;
         }
+
+        if (needUpdateWindowColorSpace)
+            [(WineWindow*)[view window] updateColorSpace];
     });
 
     [pool release];

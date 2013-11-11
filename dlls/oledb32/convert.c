@@ -121,7 +121,7 @@ static int get_length(DBTYPE type)
     case DBTYPE_UI2:
         return 2;
     case DBTYPE_BOOL:
-	return sizeof(VARIANT_BOOL);
+        return sizeof(VARIANT_BOOL);
     case DBTYPE_I4:
     case DBTYPE_UI4:
     case DBTYPE_R4:
@@ -143,6 +143,7 @@ static int get_length(DBTYPE type)
         return sizeof(FILETIME);
     case DBTYPE_GUID:
         return sizeof(GUID);
+    case DBTYPE_BYTES:
     case DBTYPE_WSTR:
     case DBTYPE_STR:
     case DBTYPE_BYREF | DBTYPE_WSTR:
@@ -179,16 +180,16 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
 
     *dst_status = DBSTATUS_E_BADACCESSOR;
 
-    if(IDataConvert_CanConvert(iface, src_type, dst_type) != S_OK)
-    {
-        return DB_E_UNSUPPORTEDCONVERSION;
-    }
-
     if(src_status == DBSTATUS_S_ISNULL)
     {
         *dst_status = DBSTATUS_S_ISNULL;
         *dst_len = 0;
         return S_OK;
+    }
+
+    if(IDataConvert_CanConvert(iface, src_type, dst_type) != S_OK)
+    {
+        return DB_E_UNSUPPORTEDCONVERSION;
     }
 
     if(dst == NULL && get_length(dst_type) != 0)
@@ -787,7 +788,8 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         hr = IDataConvert_DataConvert(iface, src_type, DBTYPE_BSTR, src_len, &bstr_len,
                                       src, &b, sizeof(BSTR), src_status, dst_status,
                                       precision, scale, flags);
-        if(hr != S_OK) return hr;
+        if(hr != S_OK || *dst_status == DBSTATUS_S_ISNULL)
+            return hr;
         bstr_len = SysStringLen(b);
         *dst_len = bstr_len * sizeof(WCHAR); /* Doesn't include size for '\0' */
         *dst_status = DBSTATUS_S_OK;
@@ -882,6 +884,11 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
             V_VT(v) = VT_DECIMAL;
             hr = VarDecFromI8( *(LONGLONG*)src,  &V_DECIMAL(v));
             break;
+        case DBTYPE_R4:
+            V_VT(v) = VT_R4;
+            V_R4(v) = *(FLOAT*)src;
+            hr = S_OK;
+            break;
         case DBTYPE_R8:
             V_VT(v) = VT_R8;
             V_R8(v) = *(double*)src;
@@ -943,22 +950,21 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_BYTES:
         {
             LONG i;
-            LONG size;
             SAFEARRAY *psa = NULL;
             SAFEARRAYBOUND rgsabound[1];
             unsigned char *p = src;
 
-            size = min(src_len, dst_max_len);
-
             rgsabound[0].lLbound = 0;
-            rgsabound[0].cElements = size;
+            rgsabound[0].cElements = src_len;
 
             psa = SafeArrayCreate(VT_UI1,1,rgsabound);
-            for(i =0; i < size; i++,p++)
+            for(i =0; i < src_len; i++,p++)
             {
-                hr = SafeArrayPutElement(psa, &i, &p);
-                if(FAILED(hr))
+                hr = SafeArrayPutElement(psa, &i, p);
+                if(FAILED(hr)) {
+                   SafeArrayDestroy (psa);
                    return hr;
+                }
             }
 
             V_VT(v) = VT_ARRAY|VT_UI1;
@@ -986,6 +992,49 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
             memcpy(d, src, min(src_len, dst_max_len));
 
             return S_OK;
+        case DBTYPE_VARIANT:
+        {
+            if(V_VT((VARIANT*)src) == VT_NULL)
+            {
+                *dst_status = DBSTATUS_S_ISNULL;
+                *dst_len = 0;
+                return S_OK;
+            }
+            else
+            {
+                switch(V_VT((VARIANT*)src))
+                {
+                case VT_UI1 | VT_ARRAY:
+                {
+                    LONG l;
+                    BYTE *data = NULL;
+
+                    hr = SafeArrayGetUBound(V_ARRAY((VARIANT*)src), 1, &l);
+                    if(FAILED(hr))
+                        return hr;
+
+                    hr = SafeArrayAccessData(V_ARRAY((VARIANT*)src), (VOID**)&data);
+                    if(FAILED(hr))
+                    {
+                        ERR("SafeArrayAccessData Failed = 0x%08x\n", hr);
+                        return hr;
+                    }
+
+                    *dst_len = l+1;
+                    *dst_status = DBSTATUS_S_OK;
+                    memcpy(d, data, *dst_len);
+
+                    SafeArrayUnaccessData(V_ARRAY((VARIANT*)src));
+                    return S_OK;
+                }
+                break;
+                default:
+                    FIXME("Unimplemented variant type %d -> BYTES\n", V_VT((VARIANT*)src));
+                    return E_NOTIMPL;
+                }
+            }
+        }
+        break;
         default: FIXME("Unimplemented conversion %04x -> DBTYPE_BYTES\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -1301,7 +1350,6 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
     switch (dst_type)
     {
     case DBTYPE_STR:
-    {
         switch (src_type)
         {
         case DBTYPE_VARIANT:
@@ -1322,26 +1370,16 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
             FIXME("unimplemented for %04x -> DBTYPE_STR\n", src_type);
             return E_NOTIMPL;
         }
-    }
-    break;
+        break;
     case DBTYPE_WSTR:
-    {
         switch (src_type)
         {
         case DBTYPE_VARIANT:
-        {
-            VARIANT v;
-
-            VariantInit(&v);
-            if ((hr = VariantChangeType(&v, (VARIANT*)src, 0, VT_BSTR)) == S_OK)
-            {
-                *dst_len = (SysStringLen(V_BSTR(&v)) + 1) * sizeof(WCHAR);
-                VariantClear(&v);
-            }
+            if(V_VT((VARIANT*)src) == VT_BSTR)
+                *dst_len = (SysStringLen(V_BSTR((VARIANT*)src))+1) * sizeof(WCHAR);
             else
-                return hr;
-        }
-        break;
+                WARN("DBTYPE_VARIANT(%d)->DBTYPE_WSTR unimplemented\n", V_VT((VARIANT*)src));
+            break;
         case DBTYPE_STR:
             if(src_len)
                 *dst_len = (*src_len + 1) * sizeof(WCHAR);
@@ -1358,8 +1396,38 @@ static HRESULT WINAPI convert_GetConversionSize(IDataConvert* iface,
             FIXME("unimplemented for %04x -> DBTYPE_WSTR\n", src_type);
             return E_NOTIMPL;
         }
-    }
-    break;
+        break;
+    case DBTYPE_BYTES:
+        switch (src_type)
+        {
+        case DBTYPE_VARIANT:
+            if(V_VT((VARIANT*)src) == VT_BSTR)
+                *dst_len = (SysStringLen(V_BSTR((VARIANT*)src))) / sizeof(WCHAR);
+            else
+            {
+                switch(V_VT((VARIANT*)src))
+                {
+                case VT_UI1 | VT_ARRAY:
+                {
+                    LONG l;
+
+                    hr = SafeArrayGetUBound(V_ARRAY((VARIANT*)src), 1, &l);
+                    if(FAILED(hr))
+                        return hr;
+                    *dst_len = l+1;
+
+                    break;
+                }
+                default:
+                    WARN("DBTYPE_VARIANT(%d)->DBTYPE_BYTES unimplemented\n", V_VT((VARIANT*)src));
+                }
+            }
+            break;
+        default:
+            FIXME("unimplemented for %04x -> DBTYPE_BYTES\n", src_type);
+            return E_NOTIMPL;
+        }
+        break;
     default:
         FIXME("unimplemented for conversion %d->%d\n", src_type, dst_type);
         return E_NOTIMPL;

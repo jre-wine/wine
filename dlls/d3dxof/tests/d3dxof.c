@@ -24,11 +24,13 @@
 #include "wine/test.h"
 #include "initguid.h"
 #include "dxfile.h"
+#include "rmxftmpl.h"
 
 #define I2(x) x,0
 #define I4(x) x,0,0,0
 
 #define TOKEN_NAME         I2(1)
+#define TOKEN_STRING       I2(2)
 #define TOKEN_INTEGER      I2(3)
 #define TOKEN_INTEGER_LIST I2(6)
 #define TOKEN_OBRACE       I2(10)
@@ -325,6 +327,71 @@ static char object_syntax_string_with_separator[] =
 "Filename\n"
 "{\n"
 "\"foo;bar\";\n"
+"}\n";
+
+static char object_syntax_string_bin[] = {
+'x','o','f',' ','0','3','0','2','b','i','n',' ','0','0','6','4',
+TOKEN_NAME, /* size */ I4(8), /* name */ 'F','i','l','e','n','a','m','e', TOKEN_OBRACE,
+TOKEN_STRING, /* size */ I4(6), /* string */ 'f','o','o','b','a','r', TOKEN_SEMICOLON,
+TOKEN_CBRACE
+};
+
+static char templates_complex_object[] =
+"xof 0302txt 0064\n"
+"template Vector\n"
+"{\n"
+"<3D82AB5E-62DA-11CF-AB39-0020AF71E433>\n"
+"FLOAT x;\n"
+"FLOAT y;\n"
+"FLOAT z;\n"
+"}\n"
+"template MeshFace\n"
+"{\n"
+"<3D82AB5F-62DA-11CF-AB39-0020AF71E433>\n"
+"DWORD nFaceVertexIndices;\n"
+"array DWORD faceVertexIndices[nFaceVertexIndices];\n"
+"}\n"
+"template Mesh\n"
+"{\n"
+"<3D82AB44-62DA-11CF-AB39-0020AF71E433>\n"
+"DWORD nVertices;\n"
+"array Vector vertices[nVertices];\n"
+"DWORD nFaces;\n"
+"array MeshFace faces[nFaces];\n"
+"[...]\n"
+"}\n";
+
+static char object_complex[] =
+"xof 0302txt 0064\n"
+"Mesh Object\n"
+"{\n"
+"4;;;,\n"
+"1.0;;;, 0.0;;;, 0.0;;;,\n"
+"0.0;;;, 1.0;;;, 0.0;;;,\n"
+"0.0;;;, 0.0;;;, 1.0;;;,\n"
+"1.0;;;, 1.0;;;, 1.0;;;,\n"
+"3;;;,\n"
+"3;;;, 0;;;, 1;;;, 2;;;,\n"
+"3;;;, 1;;;, 2;;;, 3;;;,\n"
+"3;;;, 3;;;, 1;;;, 2;;;,\n"
+"}\n";
+
+static char template_using_index_color_lower[] =
+"xof 0302txt 0064\n"
+"template MeshVertexColors\n"
+"{\n"
+"<1630B821-7842-11cf-8F52-0040333594A3>\n"
+"DWORD nVertexColors;\n"
+"array indexColor vertexColors[nVertexColors];\n"
+"}\n";
+
+static char template_using_index_color_upper[] =
+"xof 0302txt 0064\n"
+"template MeshVertexColors\n"
+"{\n"
+"<1630B821-7842-11cf-8F52-0040333594A3>\n"
+"DWORD nVertexColors;\n"
+"array IndexColor vertexColors[nVertexColors];\n"
 "}\n";
 
 static void init_function_pointers(void)
@@ -809,6 +876,21 @@ static void test_syntax(void)
         IDirectXFileData_Release(lpdxfd);
     IDirectXFileEnumObject_Release(lpdxfeo);
 
+    /* Test string in binary mode */
+    dxflm.lpMemory = &object_syntax_string_bin;
+    dxflm.dSize = sizeof(object_syntax_string_bin);
+    hr = IDirectXFile_CreateEnumObject(lpDirectXFile, &dxflm, DXFILELOAD_FROMMEMORY, &lpdxfeo);
+    ok(hr == DXFILE_OK, "IDirectXFile_CreateEnumObject: %x\n", hr);
+    hr = IDirectXFileEnumObject_GetNextDataObject(lpdxfeo, &lpdxfd);
+    ok(hr == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject: %x\n", hr);
+    hr = IDirectXFileData_GetData(lpdxfd, NULL, &size, (void**)&string);
+    ok(hr == DXFILE_OK, "IDirectXFileData_GetData: %x\n", hr);
+    ok(size == sizeof(char*), "Got wrong data size %d\n", size);
+    ok(!strcmp(*string, "foobar"), "Got string %s, expected foobar\n", *string);
+    if (hr == DXFILE_OK)
+        IDirectXFileData_Release(lpdxfd);
+    IDirectXFileEnumObject_Release(lpdxfeo);
+
     IDirectXFile_Release(lpDirectXFile);
 }
 
@@ -921,11 +1003,11 @@ static void test_syntax_semicolon_comma(void)
 
     /* Test object with a single integer list in binary mode */
     ret = test_buffer_object(dxfile, object_syntax_full_integer_list_bin, sizeof(object_syntax_full_integer_list_bin));
-    todo_wine ok(ret == DXFILE_OK, "test_buffer_object failed with %#x\n", ret);
+    ok(ret == DXFILE_OK, "test_buffer_object failed with %#x\n", ret);
 
     /* Test object with mixed integer list and integers + single comma separators in binary mode */
     ret = test_buffer_object(dxfile, object_syntax_mixed_integer_list_bin, sizeof(object_syntax_mixed_integer_list_bin));
-    todo_wine ok(ret == DXFILE_OK, "test_buffer_object failed with %#x\n", ret);
+    ok(ret == DXFILE_OK, "test_buffer_object failed with %#x\n", ret);
 
     /* Test integer list followed by a semicolon in binary mode */
     ret = test_buffer_object(dxfile, object_syntax_integer_list_semicolon_bin, sizeof(object_syntax_integer_list_semicolon_bin));
@@ -934,6 +1016,96 @@ static void test_syntax_semicolon_comma(void)
     /* Test integer list followed by a comma in binary mode */
     ret = test_buffer_object(dxfile, object_syntax_integer_list_comma_bin, sizeof(object_syntax_integer_list_comma_bin));
     ok(ret == DXFILEERR_PARSEERROR, "test_buffer_object returned %#x, expected %#x\n", ret, DXFILEERR_PARSEERROR);
+
+    IDirectXFile_Release(dxfile);
+}
+
+static void test_complex_object(void)
+{
+    HRESULT ret;
+    IDirectXFile *dxfile = NULL;
+    IDirectXFileEnumObject *enum_object;
+    IDirectXFileData *file_data;
+    DXFILELOADMEMORY load_info;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        return;
+    }
+
+    ret = pDirectXFileCreate(&dxfile);
+    ok(ret == DXFILE_OK, "DirectXFileCreate failed with %#x\n", ret);
+    if (!dxfile)
+    {
+        skip("Couldn't create DirectXFile interface\n");
+        return;
+    }
+
+    ret = IDirectXFile_RegisterTemplates(dxfile, templates_complex_object, sizeof(templates_complex_object) - 1);
+    ok(ret == DXFILE_OK, "IDirectXFileImpl_RegisterTemplates failed with %#x\n", ret);
+
+    load_info.lpMemory = object_complex;
+    load_info.dSize = sizeof(object_complex) - 1;
+    ret = IDirectXFile_CreateEnumObject(dxfile, &load_info, DXFILELOAD_FROMMEMORY, &enum_object);
+    ok(ret == DXFILE_OK, "IDirectXFile_CreateEnumObject failed with %#x\n", ret);
+    ret = IDirectXFileEnumObject_GetNextDataObject(enum_object, &file_data);
+    ok(ret == DXFILE_OK, "IDirectXFileEnumObject_GetNextDataObject failed with %#x\n", ret);
+
+    IDirectXFileData_Release(file_data);
+    IDirectXFileEnumObject_Release(enum_object);
+    IDirectXFile_Release(dxfile);
+}
+
+static void test_standard_templates(void)
+{
+    HRESULT ret;
+    IDirectXFile *dxfile = NULL;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        return;
+    }
+
+    ret = pDirectXFileCreate(&dxfile);
+    ok(ret == DXFILE_OK, "DirectXFileCreate failed with %#x\n", ret);
+    if (!dxfile)
+    {
+        skip("Couldn't create DirectXFile interface\n");
+        return;
+    }
+
+    ret = IDirectXFile_RegisterTemplates(dxfile, D3DRM_XTEMPLATES, D3DRM_XTEMPLATE_BYTES);
+    ok(ret == DXFILE_OK, "IDirectXFileImpl_RegisterTemplates failed with %#x\n", ret);
+
+    IDirectXFile_Release(dxfile);
+}
+
+static void test_type_index_color(void)
+{
+    HRESULT ret;
+    IDirectXFile *dxfile = NULL;
+
+    if (!pDirectXFileCreate)
+    {
+        win_skip("DirectXFileCreate is not available\n");
+        return;
+    }
+
+    ret = pDirectXFileCreate(&dxfile);
+    ok(ret == DXFILE_OK, "DirectXFileCreate failed with %#x\n", ret);
+    if (!dxfile)
+    {
+        skip("Couldn't create DirectXFile interface\n");
+        return;
+    }
+
+    /* Test that 'indexColor' can be used (same as IndexedColor in standard templates) and is case sensitive */
+    ret = IDirectXFile_RegisterTemplates(dxfile, template_using_index_color_lower, sizeof(template_using_index_color_lower) - 1);
+    ok(ret == DXFILE_OK, "IDirectXFileImpl_RegisterTemplates failed with %#x\n", ret);
+    ret = IDirectXFile_RegisterTemplates(dxfile, template_using_index_color_upper, sizeof(template_using_index_color_upper) - 1);
+    ok(ret == DXFILEERR_PARSEERROR, "IDirectXFileImpl_RegisterTemplates returned %#x instead of %#x\n", ret, DXFILEERR_PARSEERROR);
 
     IDirectXFile_Release(dxfile);
 }
@@ -1122,6 +1294,9 @@ START_TEST(d3dxof)
     test_getname();
     test_syntax();
     test_syntax_semicolon_comma();
+    test_complex_object();
+    test_standard_templates();
+    test_type_index_color();
     test_dump();
 
     FreeLibrary(hd3dxof);

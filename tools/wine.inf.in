@@ -894,6 +894,7 @@ HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000047e",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000048f",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000490",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000491",,"1"
+HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000492",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000494",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000801",,"d"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000804",,"a"
@@ -908,9 +909,9 @@ HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000816",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000081a",,"2"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000081d",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000082c",,"5"
+HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000083c",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"0000083e",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000843",,"5"
-HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000894",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c01",,"d"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c04",,"9"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c07",,"1"
@@ -918,7 +919,6 @@ HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c09",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c0a",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c0c",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c1a",,"5"
-HKLM,System\CurrentControlSet\Control\Nls\Locale,"00000c94",,"1"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00001001",,"d"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00001004",,"a"
 HKLM,System\CurrentControlSet\Control\Nls\Locale,"00001007",,"1"
@@ -2478,6 +2478,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,mui,
 11,gecko\plugin,npmshtml.dll
 11,wbem,mofcomp.exe
+10,syswow64,stdole2.tlb
 11,,iexplore.exe
 11,,winetest.exe,-
 12,,mountmgr.sys,-
@@ -2534,7 +2535,12 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,shdocvw.dll
 11,gecko\plugin,npmshtml.dll
 11,wbem,mofcomp.exe
+11,wbem,wbemprox.dll
+11,wbem,wmic.exe
+11,wbem,wmiutils.dll
 16422,Internet Explorer,iexplore.exe
+16427,System\OLE DB,oledb32.dll
+16427,System\OLE DB,msdaps.dll
 11,,*
 
 [SystemIni]
@@ -3005,8 +3011,9 @@ HKR,Parameters,"ServiceDll",,"%11%\srvsvc.dll"
 
 [Services]
 HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
-HKLM,"System\CurrentControlSet\Services\VxD\MSTCP",,16
+HKLM,"System\CurrentControlSet\Services\Eventlog\Application",,16
 HKLM,"System\CurrentControlSet\Services\Tcpip\Parameters",,16
+HKLM,"System\CurrentControlSet\Services\VxD\MSTCP",,16
 HKLM,"System\CurrentControlSet\Services\Winsock\Parameters",,16
 HKLM,"System\CurrentControlSet\Services\Winsock2\Parameters\Protocol_Catalog9\Catalog_Entries",,16
 

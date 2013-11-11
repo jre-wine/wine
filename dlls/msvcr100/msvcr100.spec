@@ -1182,7 +1182,7 @@
 @ stub _mbsspnp_l
 @ cdecl _mbsstr(str str) msvcrt._mbsstr
 @ stub _mbsstr_l
-@ cdecl _mbstok(str str) msvcrt._mbstok
+@ cdecl _mbstok(str str) MSVCR100__mbstok
 @ cdecl _mbstok_l(str str ptr) msvcrt._mbstok_l
 @ cdecl _mbstok_s(str str ptr) msvcrt._mbstok_s
 @ cdecl _mbstok_s_l(str str ptr ptr) msvcrt._mbstok_s_l
@@ -1484,7 +1484,7 @@
 @ cdecl _wcserror_s(ptr long long) msvcrt._wcserror_s
 @ stub _wcsftime_l
 @ cdecl _wcsicmp(wstr wstr) msvcrt._wcsicmp
-@ stub _wcsicmp_l
+@ cdecl _wcsicmp_l(wstr wstr ptr) msvcrt._wcsicmp_l
 @ cdecl _wcsicoll(wstr wstr) msvcrt._wcsicoll
 @ cdecl _wcsicoll_l(wstr wstr ptr) msvcrt._wcsicoll_l
 @ cdecl _wcslwr(wstr) msvcrt._wcslwr
@@ -1629,7 +1629,7 @@
 @ cdecl -arch=arm,x86_64 atan2f(float float) msvcrt.atan2f
 @ cdecl atexit(ptr) msvcrt.atexit
 @ cdecl atof(str) msvcrt.atof
-@ cdecl atoi(str) msvcrt.atoi
+@ cdecl atoi(str) MSVCR100_atoi
 @ cdecl atol(str) msvcrt.atol
 @ cdecl bsearch(ptr ptr long long ptr) msvcrt.bsearch
 @ cdecl bsearch_s(ptr ptr long long ptr ptr) msvcrt.bsearch_s

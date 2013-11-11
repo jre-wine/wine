@@ -1,20 +1,19 @@
 # Turkish translations for Wine
 #
-# zeugma, 2012.
-# Volkan Gezer <volkangezer@gmail.com>, 2013.
 msgid ""
 msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2013-04-28 11:33+0000\n"
-"Last-Translator: volkangezer <volkangezer@gmail.com>\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2013-07-13 04:49+0200\n"
+"Last-Translator: Volkan Gezer <volkangezer@gmail.com>\n"
+"Language-Team: Turkish <kde-l10n-tr@kde.org>\n"
 "Language: Turkish\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"X-Generator: Lokalize 1.5\n"
 
 #: appwiz.rc:55
 msgid "Install/Uninstall"
@@ -720,7 +719,7 @@ msgstr "&Seçim"
 
 #: comdlg32.rc:383
 msgid "&from:"
-msgstr "&Başlangıç:"
+msgstr "&başlangıç:"
 
 #: comdlg32.rc:384
 msgid "&to:"
@@ -2033,7 +2032,7 @@ msgstr "Sertifika İlkeleri"
 
 #: cryptdlg.rc:28
 msgid "Policy Identifier: "
-msgstr "Politika Tanımlayıcı:"
+msgstr "Politika Tanımlayıcı: "
 
 #: cryptdlg.rc:29
 msgid "Policy Qualifier Info"
@@ -2355,11 +2354,11 @@ msgstr "Kullanmak biçimi seçin:"
 
 #: cryptui.rc:405
 msgid "&DER-encoded X.509 (*.cer)"
-msgstr "&DER-encoded X.509 (*.cer)"
+msgstr "&DER-Kodlu X.509 (*.cer)"
 
 #: cryptui.rc:407
 msgid "Ba&se64-encoded X.509 (*.cer):"
-msgstr "Ba&se64-encoded X.509 (*.cer):"
+msgstr "Ba&se64-Kodlu X.509 (*.cer):"
 
 #: cryptui.rc:409
 msgid "&Cryptographic Message Syntax Standard/PKCS #7 Message (*.p7b)"
@@ -2435,19 +2434,19 @@ msgstr "Bu sertifika aşağıdaki isteklerde amaçlanıyor:"
 
 #: cryptui.rc:35
 msgid "Issued to: "
-msgstr "Verilen:"
+msgstr "Verilen: "
 
 #: cryptui.rc:36
 msgid "Issued by: "
-msgstr "Veren:"
+msgstr "Veren: "
 
 #: cryptui.rc:37
 msgid "Valid from "
-msgstr "Geçerlilik başlangıcı:"
+msgstr "Geçerlilik başlangıcı "
 
 #: cryptui.rc:38
 msgid " to "
-msgstr "bitişi:"
+msgstr " bitişi: "
 
 #: cryptui.rc:39
 msgid "This certificate has an invalid signature."
@@ -2459,7 +2458,7 @@ msgstr "Bu sertifikanın süresi dolmuş veya henüz geçerli değil."
 
 #: cryptui.rc:41
 msgid "This certificate's validity period exceeds that of its issuer."
-msgstr "Bu sertifikanın geçerlilik peryodu dağıtıcısını aşmakta."
+msgstr "Bu sertifikanın geçerlilik süresi dağıtıcısını aşmakta."
 
 #: cryptui.rc:42
 msgid "This certificate was revoked by its issuer."
@@ -2899,7 +2898,7 @@ msgid ""
 "certificate."
 msgstr ""
 "Bu sertifika, sertifika ile birlikte dışa aktarılabilecek özel bir anahtar "
-"içeriyor"
+"içeriyor."
 
 #: cryptui.rc:169
 msgid "Enter Password"
@@ -3349,7 +3348,7 @@ msgid ""
 "List of websites you have accessed."
 msgstr ""
 "Geçmiş\n"
-"Eriştiğiniz websitelerini listeler"
+"Eriştiğiniz web sitelerini listeler."
 
 #: inetcpl.rc:74
 msgid ""
@@ -3357,7 +3356,7 @@ msgid ""
 "Usernames and other information you have entered into forms."
 msgstr ""
 "Form verileri\n"
-"Formlara girdiğiniz kullanıcı adı ve diğer bilgiler"
+"Formlara girdiğiniz kullanıcı adı ve diğer bilgiler."
 
 #: inetcpl.rc:76
 msgid ""
@@ -3365,7 +3364,7 @@ msgid ""
 "Saved passwords you have entered into forms."
 msgstr ""
 "Şifreler\n"
-"Formlara girdiğiniz şifreler"
+"Formlara girdiğiniz kayıtlı şifreler."
 
 #: inetcpl.rc:79 progman.rc:64
 msgid "Delete"
@@ -4413,11 +4412,11 @@ msgstr ""
 
 #: winerror.mc:1011
 msgid "No access to memory location.\n"
-msgstr ""
+msgstr "Bellek konumuna erişim yok.\n"
 
 #: winerror.mc:1016
 msgid "Swap error.\n"
-msgstr ""
+msgstr "Takas hatası.\n"
 
 #: winerror.mc:1021
 msgid "Stack overflow.\n"
@@ -4433,11 +4432,11 @@ msgstr ""
 
 #: winerror.mc:1036
 msgid "Invalid flags.\n"
-msgstr ""
+msgstr "Geçersiz bayraklar.\n"
 
 #: winerror.mc:1041
 msgid "Unrecognized volume.\n"
-msgstr ""
+msgstr "Bilinmeyen disk bölümü.\n"
 
 #: winerror.mc:1046
 msgid "File invalid.\n"
@@ -4445,7 +4444,7 @@ msgstr "Dosya geçersiz.\n"
 
 #: winerror.mc:1051
 msgid "Cannot run full-screen.\n"
-msgstr ""
+msgstr "Tam ekran çalışamıyor.\n"
 
 #: winerror.mc:1056
 msgid "Nonexistent token.\n"
@@ -4461,19 +4460,19 @@ msgstr ""
 
 #: winerror.mc:1071
 msgid "Can't open registry key.\n"
-msgstr ""
+msgstr "Kayıt anahtarı açılamıyor.\n"
 
 #: winerror.mc:1076
 msgid "Can't read registry key.\n"
-msgstr ""
+msgstr "Kayıt anahtarı okunamıyor.\n"
 
 #: winerror.mc:1081
 msgid "Can't write registry key.\n"
-msgstr ""
+msgstr "Kayıt anahtarı yazılamıyor.\n"
 
 #: winerror.mc:1086
 msgid "Registry has been recovered.\n"
-msgstr ""
+msgstr "Kayıt kurtarıldı.\n"
 
 #: winerror.mc:1091
 msgid "Registry is corrupt.\n"
@@ -4805,7 +4804,7 @@ msgstr "Geçersiz DLL.\n"
 
 #: winerror.mc:1501
 msgid "No associated application.\n"
-msgstr ""
+msgstr "İlişkili uygulama yok.\n"
 
 #: winerror.mc:1506
 msgid "DDE failure.\n"
@@ -6129,7 +6128,7 @@ msgstr ""
 
 #: winerror.mc:3171
 msgid "Invalid entry.\n"
-msgstr "Geçersiz giriş.\n"
+msgstr "Geçersiz girdi.\n"
 
 #: winerror.mc:3176
 msgid "Can't perform operation.\n"
@@ -6348,7 +6347,7 @@ msgid "No more bindings.\n"
 msgstr ""
 
 #: winerror.mc:3446
-msgid "Can't logon with interdomain trust account.\n"
+msgid "Can't logon with inter-domain trust account.\n"
 msgstr ""
 
 #: winerror.mc:3451
@@ -7927,7 +7926,7 @@ msgstr "Sık Kullanılanlar"
 
 #: shell32.rc:203
 msgid "StartUp"
-msgstr "Başlangı"
+msgstr "Başlangıç"
 
 #: shell32.rc:204
 msgid "Start Menu"
@@ -8212,7 +8211,7 @@ msgstr ""
 "Wine ücretsiz bir yazılım olup; Free Software Foundation tarafından "
 "dağıtılan GNU Lesser Genel Kamu Lisansı'nın 2.1 veya (seçimi size bağlı) "
 "herhangi sonraki sürümü altında şartlara bağlı kalarak tekrar dağıtabilir ve/"
-"veya düzenleyebilirsiniz.\n"
+"veya düzenlenebilir.\n"
 "\n"
 "Wine, yararlı olabileceği umularak dağıtılmaktadır, fakat hiçbir GARANTİSİ "
 "YOKTUR; hatta BU FERAGATNAMEDE BELİRTİLDİĞİ GİBİ TİCARÎ veya HERHANGİ BAŞKA "
@@ -8394,7 +8393,7 @@ msgstr "LAN Bağlantısı"
 #: wininet.rc:26
 msgid "The certificate is issued by an unknown or untrusted publisher."
 msgstr ""
-"Sertifika bilinmeyen veya güvenilmeyen bir dağıtıcı tarafından sağlanmış"
+"Sertifika bilinmeyen veya güvenilmeyen bir dağıtıcı tarafından sağlanmış."
 
 #: wininet.rc:27
 msgid "The date on the certificate is invalid."
@@ -9254,7 +9253,7 @@ msgstr "Başvuruları işlerken dön"
 msgid "Referral hop limit exceeded"
 msgstr "Paketin gönderildiği yönlendirici sınırı aşıldı"
 
-#: attrib.rc:27 cmd.rc:325
+#: attrib.rc:27 cmd.rc:322
 msgid ""
 "Not Yet Implemented\n"
 "\n"
@@ -9262,7 +9261,7 @@ msgstr ""
 "Henüz Geliştirilmedi\n"
 "\n"
 
-#: attrib.rc:28 cmd.rc:328
+#: attrib.rc:28 cmd.rc:325
 msgid "%1: File Not Found\n"
 msgstr "%1: Dosya Bulunamadı\n"
 
@@ -9420,24 +9419,18 @@ msgstr ""
 msgid "ERASE <filename> deletes a file or set of files.\n"
 msgstr "ERASE <dosyaadı> bir veya birçok dosyayı siler.\n"
 
-#: cmd.rc:69
+#: cmd.rc:66
 msgid ""
 "The FOR command is used to execute a command for each of a set of files.\n"
 "\n"
 "Syntax: FOR %variable IN (set) DO command\n"
-"\n"
-"The requirement to double the % sign when using FOR in a batch file does\n"
-"not exist in wine's cmd.\n"
 msgstr ""
 "FOR komutu bir dosya kümesinin her öğesi için bir komut çalıştırmada\n"
 "kullanılır.\n"
 "\n"
 "Sözdizim: FOR %değişken IN (küme) DO komut\n"
-"\n"
-"FOR kullanımı için toplu işlem dosyasında % işaretini çift kullanma\n"
-"gereksinimi cmd'de yoktur.\n"
 
-#: cmd.rc:81
+#: cmd.rc:78
 msgid ""
 "The GOTO command transfers execution to another statement within a\n"
 "batch file.\n"
@@ -9461,7 +9454,7 @@ msgstr ""
 "\n"
 "GOTO komutunun etkileşimli olarak kullanımının bir etkisi yoktur.\n"
 
-#: cmd.rc:84
+#: cmd.rc:81
 msgid ""
 "HELP <command> shows brief help details on a topic.\n"
 "HELP without an argument shows all CMD built-in commands.\n"
@@ -9469,7 +9462,7 @@ msgstr ""
 "HELP <komut> bir konuda özet yardımı gösterir.\n"
 "Bir argüman kullanılmayan HELP, tüm dahili CMD komutlarını gösterir.\n"
 
-#: cmd.rc:94
+#: cmd.rc:91
 msgid ""
 "IF is used to conditionally execute a command.\n"
 "\n"
@@ -9489,7 +9482,7 @@ msgstr ""
 "İkinci biçimde dize1 ve dize2 çift tırnak içerisinde olmalıdır.\n"
 "Karşılaştırma BÜYÜK/küçük harf duyarlı değildir.\n"
 
-#: cmd.rc:100
+#: cmd.rc:97
 msgid ""
 "LABEL is used to set a disk volume label.\n"
 "\n"
@@ -9503,15 +9496,15 @@ msgstr ""
 "Komut sizden verilen sürücü için yeni bir etiket girmenizi bekleyecektir.\n"
 "Disk bölüm etiketini VOL komutu ile gösterebilirsiniz.\n"
 
-#: cmd.rc:103
+#: cmd.rc:100
 msgid "MD <name> is the short version of MKDIR. It creates a subdirectory.\n"
 msgstr "MD <isim> MKDIR komutunun kısa sürümüdür. Bir alt dizin oluşturur.\n"
 
-#: cmd.rc:104
+#: cmd.rc:101
 msgid "MKDIR <name> creates a subdirectory.\n"
 msgstr "MKDIR <isim> bir alt dizin oluşturur.\n"
 
-#: cmd.rc:111
+#: cmd.rc:108
 msgid ""
 "MOVE relocates a file or directory to a new point within the file system.\n"
 "\n"
@@ -9529,7 +9522,7 @@ msgstr ""
 "Eğer eski ve yeni konumlar farklı DOS sürücüleri üzerindeyse MOVE hata\n"
 "verecektir.\n"
 
-#: cmd.rc:122
+#: cmd.rc:119
 msgid ""
 "PATH displays or changes the cmd search path.\n"
 "\n"
@@ -9551,7 +9544,7 @@ msgstr ""
 "kullanabilirsiniz, örneğin:\n"
 "PATH %PATH%;c:\\temp\n"
 
-#: cmd.rc:128
+#: cmd.rc:125
 msgid ""
 "PAUSE displays a message on the screen asking the user to press a key.\n"
 "\n"
@@ -9563,7 +9556,7 @@ msgstr ""
 "Çoğunlukla toplu işlem dosyalarında kullanıcıya önceki komutun çıktısını\n"
 "ekrandan çıkmadan önce okumak için kullanılır.\n"
 
-#: cmd.rc:149
+#: cmd.rc:146
 msgid ""
 "PROMPT sets the command-line prompt.\n"
 "\n"
@@ -9606,7 +9599,7 @@ msgstr ""
 "belirlenebilir.\n"
 "Yani 'SET PROMPT=metin' ile 'PROMPT metin' aynı işi görür.\n"
 
-#: cmd.rc:153
+#: cmd.rc:150
 msgid ""
 "A command line beginning with REM (followed by a space) performs no\n"
 "action, and can therefore be used as a comment in a batch file.\n"
@@ -9615,27 +9608,25 @@ msgstr ""
 "hiçbir işlevi yoktur; dolayısıyla toplu işlem dosyalarında\n"
 "açıklama olarak kullanılabilir.\n"
 
-#: cmd.rc:156
+#: cmd.rc:153
 msgid "REN <filename> is the short version of RENAME. It renames a file.\n"
 msgstr ""
 "REN <dosyaadı> RENAME komutunun kısa sürümüdür. Bir dosyayı yeniden "
 "adlandırır.\n"
 
-#: cmd.rc:157
+#: cmd.rc:154
 msgid "RENAME <filename> renames a file.\n"
-msgstr ""
-"RENAME <dosyaadı> bir dosyayı yeniden adlandırır.\n"
-"\n"
+msgstr "RENAME <dosyaadı> bir dosyayı yeniden adlandırır.\n"
 
-#: cmd.rc:159
+#: cmd.rc:156
 msgid "RD <dir> is the short version of RMDIR. It deletes a subdirectory.\n"
 msgstr ""
 
-#: cmd.rc:160
+#: cmd.rc:157
 msgid "RMDIR <dir> deletes a subdirectory.\n"
 msgstr ""
 
-#: cmd.rc:204
+#: cmd.rc:201
 msgid ""
 "SET displays or changes the cmd environment variables.\n"
 "\n"
@@ -9670,7 +9661,7 @@ msgstr ""
 "değer bulunacaktır. cmd altında işletim sistemi çevresini değiştirmek\n"
 "mümkün değildir.\n"
 
-#: cmd.rc:209
+#: cmd.rc:206
 msgid ""
 "SHIFT is used in a batch file to remove one parameter from the head of\n"
 "the list, so parameter 2 becomes parameter 1 and so on. It has no effect\n"
@@ -9680,7 +9671,7 @@ msgstr ""
 "siler. Böylece 2. parametre 1. parametre olacaktır. Komut satırında\n"
 "çağrıldığında bir etkisi yoktur.\n"
 
-#: cmd.rc:186 start.rc:50
+#: cmd.rc:183 start.rc:50
 msgid ""
 "Start a program, or open a document in the program normally used for files "
 "with that suffix.\n"
@@ -9737,16 +9728,15 @@ msgstr ""
 "/ProgIDOpen  Belirtilen program kimliği kullanarak bir belge aç.\n"
 "/?           Bu yardımı görüntüle ve çık.\n"
 
-#: cmd.rc:211
+#: cmd.rc:208
 msgid "TIME sets or shows the current system time.\n"
 msgstr ""
 
-#: cmd.rc:213
+#: cmd.rc:210
 msgid "TITLE <string> sets the window title for the cmd window.\n"
-msgstr ""
-"cmd penceresi için pencere başlığını değiştirir. Sözdizimi: TITLE [dize]\n"
+msgstr "TIELE <dizge> cmd penceresi için pencere başlığını ayarlar.\n"
 
-#: cmd.rc:217
+#: cmd.rc:214
 msgid ""
 "TYPE <filename> copies <filename> to the console device (or elsewhere\n"
 "if redirected). No check is made that the file is readable text.\n"
@@ -9754,7 +9744,7 @@ msgstr ""
 "TYPE <dosyaadı> komutu <dosyaadı>'nı konsol aygıtına kopyalar (eğer\n"
 "yönlendirilmişse başka yere). Dosyanın okunabilirliği denetlenmez.\n"
 
-#: cmd.rc:226
+#: cmd.rc:223
 msgid ""
 "VERIFY is used to set, clear or test the verify flag. Valid forms are:\n"
 "\n"
@@ -9772,21 +9762,21 @@ msgstr ""
 "\n"
 "Doğrulama bayrağının Wine'da bir işlevi yoktur.\n"
 
-#: cmd.rc:229
+#: cmd.rc:226
 msgid "VER displays the version of cmd you are running.\n"
 msgstr ""
 
-#: cmd.rc:231
+#: cmd.rc:228
 msgid "VOL shows the volume label of a disk device.\n"
 msgstr ""
 
-#: cmd.rc:235
+#: cmd.rc:232
 msgid ""
 "ENDLOCAL ends localization of environment changes in a batch file\n"
 "which were introduced by a preceding SETLOCAL.\n"
 msgstr ""
 
-#: cmd.rc:243
+#: cmd.rc:240
 msgid ""
 "SETLOCAL starts localization of environment changes in a batch file.\n"
 "\n"
@@ -9796,17 +9786,17 @@ msgid ""
 "settings are restored.\n"
 msgstr ""
 
-#: cmd.rc:246
+#: cmd.rc:243
 msgid ""
 "PUSHD <directoryname> saves the current directory onto a\n"
 "stack, and then changes the current directory to the supplied one.\n"
 msgstr ""
 
-#: cmd.rc:248
+#: cmd.rc:245
 msgid "POPD changes current directory to the last one saved with PUSHD.\n"
 msgstr ""
 
-#: cmd.rc:256
+#: cmd.rc:253
 msgid ""
 "ASSOC shows or modifies file extension associations.\n"
 "\n"
@@ -9818,7 +9808,7 @@ msgid ""
 "association, if any.\n"
 msgstr ""
 
-#: cmd.rc:267
+#: cmd.rc:264
 msgid ""
 "FTYPE shows or modifies open commands associated with file types.\n"
 "\n"
@@ -9832,11 +9822,11 @@ msgid ""
 "associated to the specified file type.\n"
 msgstr ""
 
-#: cmd.rc:269
+#: cmd.rc:266
 msgid "MORE displays output of files or piped input in pages.\n"
 msgstr ""
 
-#: cmd.rc:273
+#: cmd.rc:270
 msgid ""
 "CHOICE displays a text and waits, until the User\n"
 "presses an allowed Key from a selectable list.\n"
@@ -9844,11 +9834,9 @@ msgid ""
 msgstr ""
 "CHOICE bir metin görüntüler ve Kullanıcı seçilebilir listeden\n"
 "izin verilen bir tuşa basıncaya kadar bekler.\n"
-"CHOICE çoğu zaman bir toplu dosyada menü seçimi inşası için\n"
-"kullanılır.\n"
-"\n"
+"CHOICE çoğu zaman bir toplu dosyada menü seçimi inşası için kullanılır.\n"
 
-#: cmd.rc:277
+#: cmd.rc:274
 msgid ""
 "EXIT terminates the current command session and returns\n"
 "to the operating system or shell from which you invoked cmd.\n"
@@ -9856,7 +9844,7 @@ msgstr ""
 "EXIT geçerli komut oturumunu sonlandırır ve cmd'yi çağırdığınız\n"
 "yerden işletim sistemine döner.\n"
 
-#: cmd.rc:315
+#: cmd.rc:312
 msgid ""
 "CMD built-in commands are:\n"
 "ASSOC\t\tShow or modify file extension associations\n"
@@ -9938,181 +9926,183 @@ msgstr ""
 "\n"
 "Yukarıdaki komutlar hakkında daha fazla bilgi için HELP <komut> girin.\n"
 
-#: cmd.rc:317
+#: cmd.rc:314
 msgid "Are you sure?"
 msgstr "Emin misin?"
 
-#: cmd.rc:318 xcopy.rc:40
+#: cmd.rc:315 xcopy.rc:40
 msgctxt "Yes key"
 msgid "Y"
 msgstr "E"
 
-#: cmd.rc:319 xcopy.rc:41
+#: cmd.rc:316 xcopy.rc:41
 msgctxt "No key"
 msgid "N"
 msgstr "H"
 
-#: cmd.rc:320
+#: cmd.rc:317
 msgid "File association missing for extension %1\n"
-msgstr ""
+msgstr "%1 uzantısı için dosya ilişkilendirmesi eksik\n"
+
+#: cmd.rc:318
+msgid "No open command associated with file type '%1'\n"
+msgstr "'%1' dosya türü için ilişkilendirilmiş bir aç komutu yok\n"
+
+#: cmd.rc:319
+msgid "Overwrite %1?"
+msgstr "%1 Üzerine Yaz?"
+
+#: cmd.rc:320
+msgid "More..."
+msgstr "Daha Fazla..."
 
 #: cmd.rc:321
-msgid "No open command associated with file type '%1'\n"
-msgstr ""
-
-#: cmd.rc:322
-msgid "Overwrite %1?"
-msgstr ""
-
-#: cmd.rc:323
-msgid "More..."
-msgstr ""
-
-#: cmd.rc:324
 msgid "Line in Batch processing possibly truncated. Using:\n"
 msgstr ""
 
-#: cmd.rc:326
+#: cmd.rc:323
 msgid "Argument missing\n"
-msgstr ""
+msgstr "Eksik argüman\n"
+
+#: cmd.rc:324
+msgid "Syntax error\n"
+msgstr "Sözdizimi hatası\n"
+
+#: cmd.rc:326
+msgid "No help available for %1\n"
+msgstr "%1 için yardım kullanılabilir bir yardım yok\n"
 
 #: cmd.rc:327
-msgid "Syntax error\n"
-msgstr ""
+msgid "Target to GOTO not found\n"
+msgstr "GOTO'ya hedef bulunamadı\n"
+
+#: cmd.rc:328
+msgid "Current Date is %1\n"
+msgstr "Şimdiki Tarih %1\n"
 
 #: cmd.rc:329
-msgid "No help available for %1\n"
-msgstr ""
+msgid "Current Time is %1\n"
+msgstr "Şimdiki Saat %1\n"
 
 #: cmd.rc:330
-msgid "Target to GOTO not found\n"
-msgstr ""
-
-#: cmd.rc:331
-msgid "Current Date is %1\n"
-msgstr ""
-
-#: cmd.rc:332
-msgid "Current Time is %1\n"
-msgstr ""
-
-#: cmd.rc:333
 msgid "Enter new date: "
 msgstr "Yeni tarih gir: "
 
-#: cmd.rc:334
+#: cmd.rc:331
 msgid "Enter new time: "
 msgstr "Yeni zaman gir: "
 
-#: cmd.rc:335
+#: cmd.rc:332
 msgid "Environment variable %1 not defined\n"
-msgstr ""
+msgstr "%1 ortam değişkeni tanımlı değil\n"
 
-#: cmd.rc:336 xcopy.rc:38
+#: cmd.rc:333 xcopy.rc:38
 msgid "Failed to open '%1'\n"
-msgstr ""
+msgstr "'%1' açılamadı\n"
 
-#: cmd.rc:337
+#: cmd.rc:334
 msgid "Cannot call batch label outside of a batch script\n"
 msgstr ""
 
-#: cmd.rc:338 xcopy.rc:42
+#: cmd.rc:335 xcopy.rc:42
 msgctxt "All key"
 msgid "A"
 msgstr "T"
 
-#: cmd.rc:339
+#: cmd.rc:336
 msgid "Delete %1?"
 msgstr "%1 sil ?"
 
-#: cmd.rc:340
+#: cmd.rc:337
 msgid "Echo is %1\n"
-msgstr ""
+msgstr "Çıktı %1\n"
 
-#: cmd.rc:341
+#: cmd.rc:338
 msgid "Verify is %1\n"
-msgstr ""
+msgstr "Doğrulama %1\n"
 
-#: cmd.rc:342
+#: cmd.rc:339
 msgid "Verify must be ON or OFF\n"
 msgstr ""
 
-#: cmd.rc:343
+#: cmd.rc:340
 msgid "Parameter error\n"
-msgstr ""
+msgstr "Parametre hatası\n"
 
-#: cmd.rc:344
+#: cmd.rc:341
 msgid ""
 "Volume Serial Number is %1!04x!-%2!04x!\n"
 "\n"
 msgstr ""
+"Birim Seri Numarası %1!04x!-%2!04x!\n"
+"\n"
+
+#: cmd.rc:342
+msgid "Volume label (11 characters, <Enter> for none)?"
+msgstr "Birim etiketi (11 karakter, <Enter> hiçbir şey)?"
+
+#: cmd.rc:343
+msgid "PATH not found\n"
+msgstr "PATH bulunamadı\n"
+
+#: cmd.rc:344
+msgid "Press any key to continue... "
+msgstr "Devam etmek için bir tuşa basın... "
 
 #: cmd.rc:345
-msgid "Volume label (11 characters, <Enter> for none)?"
-msgstr ""
+msgid "Wine Command Prompt"
+msgstr "Wine Komut İstemi"
 
 #: cmd.rc:346
-msgid "PATH not found\n"
-msgstr ""
+msgid "Wine CMD Version %1!S!\n"
+msgstr "Wine CMD Sürüm %1!S!\n"
 
 #: cmd.rc:347
-msgid "Press any key to continue... "
-msgstr ""
+msgid "More? "
+msgstr "Daha Fazla? "
 
 #: cmd.rc:348
-msgid "Wine Command Prompt"
-msgstr ""
+msgid "The input line is too long.\n"
+msgstr "Girdi satırı çok uzun.\n"
 
 #: cmd.rc:349
-msgid "Wine CMD Version %1!S!\n"
-msgstr ""
+msgid "Volume in drive %1!c! is %2\n"
+msgstr "%1!c! sürücüsündeki birim %2\n"
 
 #: cmd.rc:350
-msgid "More? "
-msgstr ""
+msgid "Volume in drive %1!c! has no label.\n"
+msgstr "%1!c! sürücüsündeki birimin etiketi yok.\n"
 
 #: cmd.rc:351
-msgid "The input line is too long.\n"
-msgstr ""
-
-#: cmd.rc:352
-msgid "Volume in drive %1!c! is %2\n"
-msgstr ""
-
-#: cmd.rc:353
-msgid "Volume in drive %1!c! has no label.\n"
-msgstr ""
-
-#: cmd.rc:354
 msgid " (Yes|No)"
 msgstr " (Evet|Hayır)"
 
-#: cmd.rc:355
+#: cmd.rc:352
 msgid " (Yes|No|All)"
 msgstr " (Evet|Hayır|Tümü)"
 
-#: cmd.rc:356
+#: cmd.rc:353
 msgid ""
 "Can't recognize '%1' as an internal or external command, or batch script.\n"
 msgstr ""
 
-#: cmd.rc:357
+#: cmd.rc:354
 msgid "Division by zero error.\n"
-msgstr ""
+msgstr "Sıfır ile bölme hatası.\n"
+
+#: cmd.rc:355
+msgid "Expected an operand.\n"
+msgstr "Bir terim bekleniyor.\n"
+
+#: cmd.rc:356
+msgid "Expected an operator.\n"
+msgstr "Bir işleç bekleniyor.\n"
+
+#: cmd.rc:357
+msgid "Mismatch in parentheses.\n"
+msgstr "Dengelenmemiş parantez.\n"
 
 #: cmd.rc:358
-msgid "Expected an operand.\n"
-msgstr ""
-
-#: cmd.rc:359
-msgid "Expected an operator.\n"
-msgstr ""
-
-#: cmd.rc:360
-msgid "Mismatch in parentheses.\n"
-msgstr ""
-
-#: cmd.rc:361
 msgid ""
 "Badly formed number - must be one of decimal (12),\n"
 " hexadecimal (0x34) or octal (056).\n"
@@ -10124,7 +10114,7 @@ msgstr "DirectX Tanı Aracı"
 
 #: dxdiag.rc:28
 msgid "Usage: dxdiag [/whql:off | /whql:on] [/t filename | /x filename]"
-msgstr ""
+msgstr "Kullanım: dxdiag [/whql:off | /whql:on] [/t dosyaadı | /x dosyaadı]"
 
 #: explorer.rc:28
 msgid "Wine Explorer"
@@ -10132,7 +10122,7 @@ msgstr "Wine Gezgin"
 
 #: hostname.rc:27
 msgid "Usage: hostname\n"
-msgstr ""
+msgstr "Kullanım: hostname\n"
 
 #: hostname.rc:28
 msgid "Error: Invalid option '%c'.\n"
@@ -10146,7 +10136,7 @@ msgstr ""
 
 #: ipconfig.rc:27
 msgid "Usage: ipconfig [ /? | /all ]\n"
-msgstr ""
+msgstr "Kullanım: ipconfig [ /? | /all ]\n"
 
 #: ipconfig.rc:28
 msgid "Error: Unknown or invalid command line parameters specified\n"
@@ -10154,11 +10144,11 @@ msgstr ""
 
 #: ipconfig.rc:29
 msgid "%1 adapter %2\n"
-msgstr ""
+msgstr "%1 bağdaştırıcı %2\n"
 
 #: ipconfig.rc:30
 msgid "Ethernet"
-msgstr ""
+msgstr "Ethernet"
 
 #: ipconfig.rc:32
 msgid "Connection-specific DNS suffix"
@@ -10170,27 +10160,27 @@ msgstr "IPv4 adresi"
 
 #: ipconfig.rc:34
 msgid "Hostname"
-msgstr ""
+msgstr "Makine adı"
 
 #: ipconfig.rc:35
 msgid "Node type"
-msgstr ""
+msgstr "Düğüm türü"
 
 #: ipconfig.rc:36
 msgid "Broadcast"
-msgstr ""
+msgstr "Yayın"
 
 #: ipconfig.rc:37
 msgid "Peer-to-peer"
-msgstr ""
+msgstr "Paylaşımcı"
 
 #: ipconfig.rc:38
 msgid "Mixed"
-msgstr ""
+msgstr "Karışık"
 
 #: ipconfig.rc:39
 msgid "Hybrid"
-msgstr ""
+msgstr "Karma"
 
 #: ipconfig.rc:40
 msgid "IP routing enabled"
@@ -10198,15 +10188,15 @@ msgstr ""
 
 #: ipconfig.rc:42
 msgid "Physical address"
-msgstr ""
+msgstr "Fiziksel adres"
 
 #: ipconfig.rc:43
 msgid "DHCP enabled"
-msgstr ""
+msgstr "DHCP etkin"
 
 #: ipconfig.rc:46
 msgid "Default gateway"
-msgstr ""
+msgstr "Öntanımlı ağ geçidi"
 
 #: ipconfig.rc:47
 msgid "IPv6 address"
@@ -10251,11 +10241,11 @@ msgstr ""
 
 #: net.rc:30
 msgid "Stopping dependent service: %1\n"
-msgstr ""
+msgstr "Bağımlı hizmet durduruluyor: %1\n"
 
 #: net.rc:31
 msgid "Could not stop service %1\n"
-msgstr ""
+msgstr "%1 hizmeti durdurulamadı\n"
 
 #: net.rc:32
 msgid "Could not get handle to service control manager.\n"
@@ -10267,7 +10257,7 @@ msgstr ""
 
 #: net.rc:34
 msgid "The %1 service is starting.\n"
-msgstr ""
+msgstr "%1 hizmeti başlatılıyor.\n"
 
 #: net.rc:35
 msgid "The %1 service was started successfully.\n"
@@ -10299,10 +10289,13 @@ msgid ""
 "Status  Local   Remote\n"
 "---------------------------------------------------------------\n"
 msgstr ""
+"\n"
+"Durum  Yerel   Uzak\n"
+"---------------------------------------------------------------\n"
 
 #: net.rc:43
 msgid "%1      %2      %3      Open resources: %4!u!\n"
-msgstr ""
+msgstr "%1      %2      %3      Açık kaynaklar: %4!u!\n"
 
 #: net.rc:45
 msgid "Paused"
@@ -10310,23 +10303,23 @@ msgstr "Duraklatıldı"
 
 #: net.rc:46
 msgid "Disconnected"
-msgstr ""
+msgstr "Bağlantı kesildi"
 
 #: net.rc:47
 msgid "A network error occurred"
-msgstr ""
+msgstr "Bir ağ hatası oluştu"
 
 #: net.rc:48
 msgid "Connection is being made"
-msgstr ""
+msgstr "Bağlantı kuruluyor"
 
 #: net.rc:49
 msgid "Reconnecting"
-msgstr ""
+msgstr "Tekrar bağlanılıyor"
 
 #: net.rc:40
 msgid "The following services are running:\n"
-msgstr ""
+msgstr "Aşağıdaki hizmetler çalışıyor:\n"
 
 #: netstat.rc:27
 msgid "Active Connections"
@@ -10334,7 +10327,7 @@ msgstr "Etkin Bağlantılar"
 
 #: netstat.rc:28
 msgid "Proto"
-msgstr ""
+msgstr "Proto"
 
 #: netstat.rc:29
 msgid "Local Address"
@@ -10354,11 +10347,11 @@ msgstr "Arayüz Ayarları"
 
 #: netstat.rc:33
 msgid "Sent"
-msgstr ""
+msgstr "Gönderilen"
 
 #: netstat.rc:34
 msgid "Received"
-msgstr ""
+msgstr "Alınan"
 
 #: netstat.rc:35
 msgid "Bytes"
@@ -10511,11 +10504,11 @@ msgstr "&Sonrakini bul\tF3"
 
 #: notepad.rc:55 wordpad.rc:52
 msgid "&Replace...\tCtrl+H"
-msgstr ""
+msgstr "&Değiştir...\tCtrl+H"
 
 #: notepad.rc:58 progman.rc:53 regedit.rc:78 winefile.rc:80
 msgid "&Contents\tF1"
-msgstr ""
+msgstr "&İçerikler\tF1"
 
 #: notepad.rc:59
 msgid "&About Notepad"
@@ -10535,7 +10528,7 @@ msgstr "&Sayfa Sonu:"
 
 #: notepad.rc:104
 msgid "Margins (millimeters)"
-msgstr ""
+msgstr "Boşluklar (milimetre)"
 
 #: notepad.rc:105
 msgid "&Left:"
@@ -10547,7 +10540,7 @@ msgstr "&Üst:"
 
 #: notepad.rc:123
 msgid "Encoding:"
-msgstr ""
+msgstr "Kodlama:"
 
 #: notepad.rc:129 wordpad.rc:278
 msgctxt "accelerator Select All"
@@ -10654,7 +10647,7 @@ msgstr "Unicode (UTF-16)"
 
 #: notepad.rc:83
 msgid "Unicode (UTF-16 big-endian)"
-msgstr ""
+msgstr "Unicode (UTF-16 big-endian)"
 
 #: notepad.rc:84
 msgid "Unicode (UTF-8)"
@@ -10669,14 +10662,20 @@ msgid ""
 "one of the Unicode options in the Encoding drop down list.\n"
 "Continue?"
 msgstr ""
+"%1\n"
+"Bu dosya, %2 kodlaması ile kaydettiğinizde kaybedilecek Unikode\n"
+"karakterler içeriyor.\n"
+"Bu karakterleri korumak için İptal tıklayın ve ardından Kodlama açılır\n"
+"listesinden Unicode seçeneklerinden birini seçin.\n"
+"Devam edilsin mi?"
 
 #: oleview.rc:29
 msgid "&Bind to file..."
-msgstr ""
+msgstr "&Dosyaya ata..."
 
 #: oleview.rc:30
 msgid "&View TypeLib..."
-msgstr ""
+msgstr "&TypeLib'i Göster..."
 
 #: oleview.rc:32
 msgid "&System Configuration"
@@ -10684,19 +10683,19 @@ msgstr "&Sistem Yapılandırma"
 
 #: oleview.rc:33
 msgid "&Run the Registry Editor"
-msgstr ""
+msgstr "&Kayıt Düzenleyicisini Çalıştır"
 
 #: oleview.rc:37
 msgid "&Object"
-msgstr ""
+msgstr "&Nesne"
 
 #: oleview.rc:39
 msgid "&CoCreateInstance Flag"
-msgstr ""
+msgstr "&CoCreateInstance Bayrağı"
 
 #: oleview.rc:41
 msgid "&In-process server"
-msgstr ""
+msgstr "&Süreç içi sunucu"
 
 #: oleview.rc:42
 msgid "In-process &handler"
@@ -10712,19 +10711,19 @@ msgstr "&Uzak sunucu"
 
 #: oleview.rc:47
 msgid "View &Type information"
-msgstr ""
+msgstr "&Tür bilgisini görüntüle"
 
 #: oleview.rc:49
 msgid "Create &Instance"
-msgstr ""
+msgstr "Örnek &Oluştur"
 
 #: oleview.rc:50
 msgid "Create Instance &On..."
-msgstr ""
+msgstr "&Şunun Üzerinde Örnek Oluştur..."
 
 #: oleview.rc:51
 msgid "&Release Instance"
-msgstr ""
+msgstr "&Örneği Bırak"
 
 #: oleview.rc:53
 msgid "Copy C&LSID to clipboard"
@@ -10795,10 +10794,12 @@ msgid ""
 "These settings change only registry values.\n"
 "They have no effect on Wine performance."
 msgstr ""
+"Bu ayarlar sadece kayıt değerlerini değiştirir.\n"
+"Wine performansında bir etkileri yoktur."
 
 #: oleview.rc:178
 msgid "Default Interface Viewer"
-msgstr ""
+msgstr "Öntanımlı Arayüz Gösterici"
 
 #: oleview.rc:181
 msgid "Interface"
@@ -10806,11 +10807,11 @@ msgstr "Arayüz"
 
 #: oleview.rc:183
 msgid "IID:"
-msgstr ""
+msgstr "IID:"
 
 #: oleview.rc:186
 msgid "&View Type Info"
-msgstr ""
+msgstr "&Tür Bilgisini Göster"
 
 #: oleview.rc:191
 msgid "IPersist Interface Viewer"
@@ -10818,11 +10819,11 @@ msgstr ""
 
 #: oleview.rc:194 oleview.rc:206
 msgid "Class Name:"
-msgstr ""
+msgstr "Sınıf Adı:"
 
 #: oleview.rc:196 oleview.rc:208
 msgid "CLSID:"
-msgstr ""
+msgstr "CLSID:"
 
 #: oleview.rc:203
 msgid "IPersistStream Interface Viewer"
@@ -10987,7 +10988,7 @@ msgstr "Bilinmeyen hata"
 
 #: oleview.rc:146
 msgid "bytes"
-msgstr ""
+msgstr "bayt"
 
 #: oleview.rc:148
 msgid "LoadTypeLib( %1 ) failed ($%2!x!)"
@@ -12334,11 +12335,11 @@ msgstr "Bel Kullanımı: %1!u!kB / %2!u!kB"
 
 #: taskmgr.rc:272
 msgid "Image Name"
-msgstr ""
+msgstr "Görüntü Adı"
 
 #: taskmgr.rc:273
 msgid "PID"
-msgstr ""
+msgstr "PID"
 
 #: taskmgr.rc:274
 msgid "CPU"
@@ -12346,15 +12347,15 @@ msgstr "CPU"
 
 #: taskmgr.rc:275
 msgid "CPU Time"
-msgstr ""
+msgstr "CPU Zamanı"
 
 #: taskmgr.rc:276
 msgid "Mem Usage"
-msgstr ""
+msgstr "Bell. Kull."
 
 #: taskmgr.rc:277
 msgid "Mem Delta"
-msgstr ""
+msgstr "Bell. Delta"
 
 #: taskmgr.rc:278
 msgid "Peak Mem Usage"
@@ -12398,7 +12399,7 @@ msgstr ""
 
 #: taskmgr.rc:301
 msgid "Task Manager Warning"
-msgstr ""
+msgstr "Görev Yönetici Uyarısı"
 
 #: taskmgr.rc:304
 msgid ""
@@ -12406,10 +12407,13 @@ msgid ""
 "cause undesired results including system instability. Are you\n"
 "sure you want to change the priority class?"
 msgstr ""
+"UYARI: Bu sürecin öncelik sınıfını değiştirmek sistem kararsızlığı da\n"
+"dahil, istenmeyen sonuçlar doğurabilir. Öncelik sınıfını değiştirmek\n"
+"istediğinizden emin misiniz?"
 
 #: taskmgr.rc:305
 msgid "Unable to Change Priority"
-msgstr ""
+msgstr "Görev Önceliği Değiştirilemiyor"
 
 #: taskmgr.rc:310
 msgid ""
@@ -12419,20 +12423,26 @@ msgid ""
 "data before it is terminated. Are you sure you want to\n"
 "terminate the process?"
 msgstr ""
+"UYARI: Bir süreci sonlandırmak, veri kaynı ve sistem kararsızlığı\n"
+"gibi istenmeyen sonuçlar doğurabilir. Sürece, sonlandırılmadan\n"
+"önce durumunu veya verilerini kaydetme şansı verilmeyecek.\n"
+"Süreci sonlandırmak istediğinizden emin misiniz?"
 
 #: taskmgr.rc:311
 msgid "Unable to Terminate Process"
-msgstr ""
+msgstr "Süreç Sonlandırma Başarısız"
 
 #: taskmgr.rc:313
 msgid ""
 "WARNING: Debugging this process may result in loss of data.\n"
 "Are you sure you wish to attach the debugger?"
 msgstr ""
+"UYARI: Bu süreçte hata ayıklaması yapmak veri kaybı ile sonuçlanabilir.\n"
+"Hata ayıklayıcıya iliştirmek istiyor musunuz?"
 
 #: taskmgr.rc:314
 msgid "Unable to Debug Process"
-msgstr ""
+msgstr "Süreç Hata Ayıklama Başarısız"
 
 #: taskmgr.rc:315
 msgid "The process must have affinity with at least one processor"
@@ -12452,11 +12462,11 @@ msgstr ""
 
 #: taskmgr.rc:323
 msgid "Not Responding"
-msgstr ""
+msgstr "Yanıt Vermiyor"
 
 #: taskmgr.rc:324
 msgid "Running"
-msgstr ""
+msgstr "Çalışıyor"
 
 #: taskmgr.rc:325
 msgid "Task"
@@ -12513,7 +12523,7 @@ msgstr ""
 "Benzetilmiş bir oturumu veya bilgisayarı kapatma yapılıyor ancak bu program "
 "yanıt vermiyor.\n"
 "\n"
-"Eğer R"
+"Eğer işlemi sonlandırırsanız, tüm kaydedilmemiş verileri kaybedebilirsiniz."
 
 #: wineboot.rc:39
 msgid "Wine"
@@ -12533,7 +12543,7 @@ msgstr ""
 "Bu program ücretsiz bir yazılım olup; Free Software Foundation tarafından "
 "dağıtılan GNU Lesser Genel Kamu Lisansı'nın 2.1 veya (seçimi size bağlı) "
 "herhangi sonraki sürümü altında şartlara bağlı kalarak tekrar dağıtabilir ve/"
-"veya düzenleyebilirsiniz."
+"veya düzenlenebilir."
 
 #: winecfg.rc:134
 msgid "Windows registration information"
@@ -12672,6 +12682,7 @@ msgid ""
 "Failed to connect to the mount manager, the drive configuration cannot be "
 "edited."
 msgstr ""
+"Bağlama yöneticisine bağlanılamadı, sürücü yapılandırması düzenlenemez."
 
 #: winecfg.rc:227
 msgid "&Add..."
@@ -12775,7 +12786,7 @@ msgstr "Sürücüler"
 
 #: winecfg.rc:33
 msgid "Select the Unix target directory, please."
-msgstr ""
+msgstr "Lütfen Unix hedef dizinini seçin."
 
 #: winecfg.rc:34
 msgid "Hide &Advanced"
@@ -12940,7 +12951,7 @@ msgstr ""
 #: winecfg.rc:74
 msgctxt "Drive letter"
 msgid "Letter"
-msgstr ""
+msgstr "Zarf"
 
 #: winecfg.rc:75
 msgid "Drive Mapping"
@@ -12958,47 +12969,47 @@ msgstr ""
 
 #: winecfg.rc:90
 msgid "Controls Background"
-msgstr ""
+msgstr "Arkaplanı Denetler"
 
 #: winecfg.rc:91
 msgid "Controls Text"
-msgstr ""
+msgstr "Metni Denetler"
 
 #: winecfg.rc:93
 msgid "Menu Background"
-msgstr ""
+msgstr "Menü Arkaplanı"
 
 #: winecfg.rc:94
 msgid "Menu Text"
-msgstr ""
+msgstr "Menü Metni"
 
 #: winecfg.rc:95
 msgid "Scrollbar"
-msgstr ""
+msgstr "Kaydırma Çubuğu"
 
 #: winecfg.rc:96
 msgid "Selection Background"
-msgstr ""
+msgstr "Seçim Arkaplanı"
 
 #: winecfg.rc:97
 msgid "Selection Text"
-msgstr ""
+msgstr "Seçim Metni"
 
 #: winecfg.rc:98
 msgid "Tooltip Background"
-msgstr ""
+msgstr "İpucu Arkaplanı"
 
 #: winecfg.rc:99
 msgid "Tooltip Text"
-msgstr ""
+msgstr "İpucu Metni"
 
 #: winecfg.rc:100
 msgid "Window Background"
-msgstr ""
+msgstr "Pencere Arkaplanı"
 
 #: winecfg.rc:101
 msgid "Window Text"
-msgstr ""
+msgstr "Pencere Metni"
 
 #: winecfg.rc:102
 msgid "Active Title Bar"
@@ -13238,7 +13249,7 @@ msgstr "Bu bir sınamadır"
 
 #: wineconsole.rc:41
 msgid "wineconsole: Couldn't parse event id\n"
-msgstr ""
+msgstr "wineconsole: Olay kimliği ayıklanamadı\n"
 
 #: wineconsole.rc:42
 msgid "wineconsole: Invalid backend\n"
@@ -13257,6 +13268,8 @@ msgid ""
 "wineconsole: Starting program %s failed.\n"
 "The command is invalid.\n"
 msgstr ""
+"wineconsole: %s programını başlatma başarısız.\n"
+"Komut geçersiz.\n"
 
 #: wineconsole.rc:47
 msgid ""
@@ -13266,6 +13279,11 @@ msgid ""
 "\n"
 "Options:\n"
 msgstr ""
+"\n"
+"Kullanım:\n"
+"  wineconsole [seçenekler] <komut>\n"
+"\n"
+"Seçenekler:\n"
 
 #: wineconsole.rc:49
 msgid ""
@@ -13278,6 +13296,7 @@ msgstr ""
 #: wineconsole.rc:50
 msgid "  <command>                The Wine program to launch in the console.\n"
 msgstr ""
+"  <komut>                Konsole içerisinde çalıştırılacak Wine programı.\n"
 
 #: wineconsole.rc:51
 msgid ""
@@ -13287,6 +13306,11 @@ msgid ""
 "Starts the Wine command prompt in a Wine console.\n"
 "\n"
 msgstr ""
+"\n"
+"Örnek:\n"
+"  wineconsole cmd\n"
+"Wine konsolunda Wine komut istemini başlatır.\n"
+"\n"
 
 #: winedbg.rc:46
 msgid "Program Error"
@@ -13297,6 +13321,8 @@ msgid ""
 "The program %s has encountered a serious problem and needs to close. We are "
 "sorry for the inconvenience."
 msgstr ""
+"%s programı ciddi bir problemle karşılaştı ve kapatılacak. Bu durumdan "
+"dolayı özür dileriz."
 
 #: winedbg.rc:55
 msgid ""
@@ -13538,16 +13564,22 @@ msgid "Not yet implemented"
 msgstr "Henüz tamamlanmadı"
 
 #: winefile.rc:106
-msgid "CDate"
-msgstr "OTarihi"
+#, fuzzy
+#| msgid "Expiration Date"
+msgid "Creation date"
+msgstr "Son Kullanma Tarihi"
 
 #: winefile.rc:107
-msgid "ADate"
-msgstr "ETarihi"
+#, fuzzy
+#| msgid "Access denied.\n"
+msgid "Access date"
+msgstr "Erişim engellendi.\n"
 
 #: winefile.rc:108
-msgid "MDate"
-msgstr "DTarihi"
+#, fuzzy
+#| msgid "Certification Path"
+msgid "Modification date"
+msgstr "Sertifika Yolu"
 
 #: winefile.rc:109
 msgid "Index/Inode"
@@ -13766,7 +13798,7 @@ msgstr "Hata: Sahte isim bulunamadı\n"
 
 #: wmic.rc:27
 msgid "Error: Invalid query\n"
-msgstr "Hata: Geçersiz giriş.\n"
+msgstr "Hata: Geçersiz sorgu\n"
 
 #: wordpad.rc:28
 msgid "&New...\tCtrl+N"
