@@ -5631,7 +5631,7 @@ static HRESULT d3dx9_parse_effect(struct ID3DXBaseEffectImpl *base, const char *
         hr = d3dx9_parse_resource(base, data, &ptr);
         if (hr != D3D_OK)
         {
-            WARN("Failed to parse data\n");
+            WARN("Failed to parse resource\n");
             goto err_out;
         }
     }
@@ -5767,6 +5767,9 @@ HRESULT WINAPI D3DXCreateEffectEx(struct IDirect3DDevice9 *device, const void *s
 
     FIXME("(%p, %p, %u, %p, %p, %p, %#x, %p, %p, %p): semi-stub\n", device, srcdata, srcdatalen, defines, include,
         skip_constants, flags, pool, effect, compilation_errors);
+
+    if (compilation_errors)
+        *compilation_errors = NULL;
 
     if (!device || !srcdata)
         return D3DERR_INVALIDCALL;

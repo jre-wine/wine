@@ -349,7 +349,7 @@ static void gdi_alpha_blend(GpGraphics *graphics, INT dst_x, INT dst_y, INT dst_
 
 static GpStatus get_clip_hrgn(GpGraphics *graphics, HRGN *hrgn)
 {
-    return GdipGetRegionHRgn(graphics->clip, NULL, hrgn);
+    return GdipGetRegionHRgn(graphics->clip, graphics, hrgn);
 }
 
 /* Draw non-premultiplied ARGB data to the given graphics object */
@@ -2099,7 +2099,7 @@ static void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font,
                       (pt[2].X-pt[0].X)*(pt[2].X-pt[0].X));
 
     get_log_fontW(font, graphics, &lfw);
-    lfw.lfHeight = gdip_round(font_height * rel_height);
+    lfw.lfHeight = -gdip_round(font_height * rel_height);
     unscaled_font = CreateFontIndirectW(&lfw);
 
     SelectObject(hdc, unscaled_font);

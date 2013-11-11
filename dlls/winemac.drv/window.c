@@ -93,7 +93,6 @@ static inline BOOL can_activate_window(HWND hwnd)
 
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
-    if (style & WS_MINIMIZE) return FALSE;
     if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
     if (GetWindowRect(hwnd, &rect) && IsRectEmpty(&rect)) return FALSE;
@@ -535,6 +534,8 @@ static void destroy_cocoa_window(struct macdrv_win_data *data)
     data->color_key = CLR_INVALID;
     if (data->surface) window_surface_release(data->surface);
     data->surface = NULL;
+    if (data->unminimized_surface) window_surface_release(data->unminimized_surface);
+    data->unminimized_surface = NULL;
 }
 
 
@@ -586,6 +587,7 @@ static void show_window(struct macdrv_win_data *data)
     HWND next = NULL;
     macdrv_window prev_window = NULL;
     macdrv_window next_window = NULL;
+    BOOL activate = FALSE;
 
     /* find window that this one must be after */
     prev = GetWindow(data->hwnd, GW_HWNDPREV);
@@ -604,12 +606,16 @@ static void show_window(struct macdrv_win_data *data)
     TRACE("win %p/%p below %p/%p above %p/%p\n",
           data->hwnd, data->cocoa_window, prev, prev_window, next, next_window);
 
-    data->on_screen = macdrv_order_cocoa_window(data->cocoa_window, prev_window, next_window);
+    if (!prev_window)
+        activate = activate_on_focus_time && (GetTickCount() - activate_on_focus_time < 2000);
+    data->on_screen = macdrv_order_cocoa_window(data->cocoa_window, prev_window, next_window, activate);
     if (data->on_screen)
     {
         HWND hwndFocus = GetFocus();
         if (hwndFocus && (data->hwnd == hwndFocus || IsChild(data->hwnd, hwndFocus)))
             macdrv_SetFocus(hwndFocus);
+        if (activate)
+            activate_on_focus_time = 0;
     }
 }
 
@@ -860,6 +866,7 @@ void CDECL macdrv_SetFocus(HWND hwnd)
         BOOL activate = activate_on_focus_time && (GetTickCount() - activate_on_focus_time < 2000);
         /* Set Mac focus */
         macdrv_give_cocoa_window_focus(data->cocoa_window, activate);
+        activate_on_focus_time = 0;
     }
 
     release_win_data(data);
@@ -960,7 +967,7 @@ void CDECL macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
 {
     struct macdrv_win_data *data;
 
-    TRACE("%p, %d, %p\n", hwnd, offset, style);
+    TRACE("hwnd %p offset %d styleOld 0x%08x styleNew 0x%08x\n", hwnd, offset, style->styleOld, style->styleNew);
 
     if (hwnd == GetDesktopWindow()) return;
     if (!(data = get_win_data(hwnd))) return;
@@ -1108,6 +1115,11 @@ BOOL CDECL macdrv_UpdateLayeredWindow(HWND hwnd, const UPDATELAYEREDWINDOWINFO *
         set_window_surface(data->cocoa_window, data->surface);
         if (surface) window_surface_release(surface);
         surface = data->surface;
+        if (data->unminimized_surface)
+        {
+            window_surface_release(data->unminimized_surface);
+            data->unminimized_surface = NULL;
+        }
     }
     else set_surface_use_alpha(surface, TRUE);
 
@@ -1233,7 +1245,7 @@ LRESULT CDECL macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         activate_on_focus_time = GetTickCount();
         if (!activate_on_focus_time) activate_on_focus_time = 1;
         TRACE("WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS time %u\n", activate_on_focus_time);
-        break;
+        return 0;
     }
 
     FIXME("unrecognized window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, wp, lp);
@@ -1333,7 +1345,23 @@ void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     if (!data->ulw_layered)
     {
         if (surface) window_surface_add_ref(surface);
-        set_window_surface(data->cocoa_window, surface);
+        if (new_style & WS_MINIMIZE)
+        {
+            if (!data->unminimized_surface && data->surface)
+            {
+                data->unminimized_surface = data->surface;
+                window_surface_add_ref(data->unminimized_surface);
+            }
+        }
+        else
+        {
+            set_window_surface(data->cocoa_window, surface);
+            if (data->unminimized_surface)
+            {
+                window_surface_release(data->unminimized_surface);
+                data->unminimized_surface = NULL;
+            }
+        }
         if (data->surface) window_surface_release(data->surface);
         data->surface = surface;
     }
@@ -1478,7 +1506,7 @@ void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
 
     if (!hwnd) return;
     if (!(data = get_win_data(hwnd))) return;
-    if (!data->on_screen)
+    if (!data->on_screen || data->minimized)
     {
         release_win_data(data);
         return;
@@ -1525,14 +1553,15 @@ void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
  */
 void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event)
 {
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+
     if (!hwnd) return;
 
     TRACE("win %p/%p serial %lu enabled %d visible %d style %08x focus %p active %p fg %p\n",
           hwnd, event->window, event->window_got_focus.serial, IsWindowEnabled(hwnd),
-          IsWindowVisible(hwnd), GetWindowLongW(hwnd, GWL_STYLE), GetFocus(),
-          GetActiveWindow(), GetForegroundWindow());
+          IsWindowVisible(hwnd), style, GetFocus(), GetActiveWindow(), GetForegroundWindow());
 
-    if (can_activate_window(hwnd))
+    if (can_activate_window(hwnd) && !(style & WS_MINIMIZE))
     {
         /* simulate a mouse click on the caption to find out
          * whether the window wants to be activated */
@@ -1564,7 +1593,11 @@ void macdrv_window_lost_focus(HWND hwnd, const macdrv_event *event)
     TRACE("win %p/%p fg %p\n", hwnd, event->window, GetForegroundWindow());
 
     if (hwnd == GetForegroundWindow())
+    {
         SendMessageW(hwnd, WM_CANCELMODE, 0, 0);
+        if (hwnd == GetForegroundWindow())
+            SetForegroundWindow(GetDesktopWindow());
+    }
 }
 
 

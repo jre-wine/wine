@@ -66,6 +66,7 @@ struct wgl_context
     struct wgl_pbuffer     *read_pbuffer;
     BOOL                    has_been_current;
     BOOL                    sharing;
+    DWORD                   last_flush_time;
 };
 
 
@@ -101,6 +102,8 @@ static const char *opengl_func_names[] = { ALL_WGL_FUNCS };
 static void (*pglCopyColorTable)(GLenum target, GLenum internalformat, GLint x, GLint y,
                                  GLsizei width);
 static void (*pglCopyPixels)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum type);
+static void (*pglFlush)(void);
+static void (*pglFlushRenderAPPLE)(void);
 static void (*pglReadPixels)(GLint x, GLint y, GLsizei width, GLsizei height,
                              GLenum format, GLenum type, void *pixels);
 static void (*pglViewport)(GLint x, GLint y, GLsizei width, GLsizei height);
@@ -1490,6 +1493,28 @@ static void macdrv_glCopyPixels(GLint x, GLint y, GLsizei width, GLsizei height,
 }
 
 
+static void macdrv_glFlush(void)
+{
+    struct wgl_context *context = NtCurrentTeb()->glContext;
+    const pixel_format *pf = &pixel_formats[context->format - 1];
+    DWORD now = GetTickCount();
+
+    TRACE("double buffer %d last flush time %d now %d\n", (int)pf->double_buffer,
+          context->last_flush_time, now);
+    if (pglFlushRenderAPPLE && !pf->double_buffer && (now - context->last_flush_time) < 17)
+    {
+        TRACE("calling glFlushRenderAPPLE()\n");
+        pglFlushRenderAPPLE();
+    }
+    else
+    {
+        TRACE("calling glFlush()\n");
+        pglFlush();
+        context->last_flush_time = now;
+    }
+}
+
+
 /**********************************************************************
  *              macdrv_glReadPixels
  *
@@ -1555,7 +1580,7 @@ static BOOL macdrv_wglBindTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffer)
     switch (iBuffer)
     {
         case WGL_FRONT_LEFT_ARB:
-            if (pixel_formats[pbuffer->format].stereo)
+            if (pixel_formats[pbuffer->format - 1].stereo)
                 source = GL_FRONT_LEFT;
             else
                 source = GL_FRONT;
@@ -1564,7 +1589,7 @@ static BOOL macdrv_wglBindTexImageARB(struct wgl_pbuffer *pbuffer, int iBuffer)
             source = GL_FRONT_RIGHT;
             break;
         case WGL_BACK_LEFT_ARB:
-            if (pixel_formats[pbuffer->format].stereo)
+            if (pixel_formats[pbuffer->format - 1].stereo)
                 source = GL_BACK_LEFT;
             else
                 source = GL_BACK;
@@ -1943,7 +1968,7 @@ static struct wgl_pbuffer *macdrv_wglCreatePbufferARB(HDC hdc, int iPixelFormat,
     TRACE("hdc %p iPixelFormat %d iWidth %d iHeight %d piAttribList %p\n",
           hdc, iPixelFormat, iWidth, iHeight, piAttribList);
 
-    if (!is_valid_pixel_format(iPixelFormat) || !pixel_formats[iPixelFormat].pbuffer)
+    if (!is_valid_pixel_format(iPixelFormat) || !pixel_formats[iPixelFormat - 1].pbuffer)
     {
         WARN("invalid pixel format %d\n", iPixelFormat);
         SetLastError(ERROR_INVALID_PIXEL_FORMAT);
@@ -2876,7 +2901,9 @@ static BOOL macdrv_wglSwapIntervalEXT(int interval)
         return FALSE;
     }
 
-    if (interval > 1)
+    if (!pixel_formats[context->format - 1].double_buffer)
+        interval = 0;
+    else if (interval > 1)
         interval = 1;
 
     value = interval;
@@ -2961,9 +2988,12 @@ static void load_extensions(void)
     register_extension("WGL_EXT_extensions_string");
     opengl_funcs.ext.p_wglGetExtensionsStringEXT = macdrv_wglGetExtensionsStringEXT;
 
-    register_extension("WGL_EXT_swap_control");
-    opengl_funcs.ext.p_wglSwapIntervalEXT = macdrv_wglSwapIntervalEXT;
-    opengl_funcs.ext.p_wglGetSwapIntervalEXT = macdrv_wglGetSwapIntervalEXT;
+    if (allow_vsync)
+    {
+        register_extension("WGL_EXT_swap_control");
+        opengl_funcs.ext.p_wglSwapIntervalEXT = macdrv_wglSwapIntervalEXT;
+        opengl_funcs.ext.p_wglGetSwapIntervalEXT = macdrv_wglGetSwapIntervalEXT;
+    }
 
     /* Presumably identical to [W]GL_ARB_framebuffer_sRGB, above, but clients may
        check for either, so register them separately. */
@@ -3026,6 +3056,8 @@ static BOOL init_opengl(void)
     REDIRECT(glCopyPixels);
     REDIRECT(glReadPixels);
     REDIRECT(glViewport);
+    if (skip_single_buffer_flushes)
+        REDIRECT(glFlush);
 #undef REDIRECT
 
     /* redirect some OpenGL extension functions */
@@ -3036,6 +3068,9 @@ static BOOL init_opengl(void)
 
     if (!init_gl_info())
         goto failed;
+
+    if (gluCheckExtension((GLubyte*)"GL_APPLE_flush_render", (GLubyte*)gl_info.glExtensions))
+        pglFlushRenderAPPLE = wine_dlsym(opengl_handle, "glFlushRenderAPPLE", NULL, 0);
 
     load_extensions();
     if (!init_pixel_formats())
@@ -3209,8 +3244,14 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share)
     }
 
     /* According to the WGL_EXT_swap_control docs, the default swap interval for
-       a context is 1.  CGL contexts default to 0, so we need to set it. */
-    swap_interval = 1;
+       a context is 1.  CGL contexts default to 0, so we need to set it.  This
+       only make sense for double-buffered contexts, though.  In theory, for
+       single-buffered contexts, there's no such thing as a swap.  But OS X
+       will synchronize flushes of single-buffered contexts if this is set. */
+    if (pf->double_buffer && allow_vsync)
+        swap_interval = 1;
+    else
+        swap_interval = 0;
     err = CGLSetParameter(context->cglcontext, kCGLCPSwapInterval, (GLint*)&swap_interval);
     if (err != kCGLNoError)
         WARN("CGLSetParameter(kCGLCPSwapInterval) failed with error %d %s; leaving un-vsynced\n", err, CGLErrorString(err));

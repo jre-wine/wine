@@ -463,7 +463,7 @@
 @ cdecl _mbsspn(str str) msvcrt._mbsspn
 @ cdecl _mbsspnp(str str) msvcrt._mbsspnp
 @ cdecl _mbsstr(str str) msvcrt._mbsstr
-@ cdecl _mbstok(str str) msvcrt._mbstok
+@ cdecl _mbstok(str str) msvcr100._mbstok #don't forward to msvcrt
 @ cdecl _mbstrlen(str) msvcrt._mbstrlen
 @ cdecl _mbsupr(str) msvcrt._mbsupr
 @ cdecl _memccpy(ptr ptr long long) msvcrt._memccpy
@@ -684,7 +684,7 @@
 @ cdecl atan2(double double) msvcrt.atan2
 @ cdecl atexit(ptr) msvcrt.atexit
 @ cdecl atof(str) msvcrt.atof
-@ cdecl atoi(str) msvcrt.atoi
+@ cdecl atoi(str) msvcr100.atoi #don't forward to msvcrt
 @ cdecl atol(str) msvcrt.atol
 @ cdecl bsearch(ptr ptr long long ptr) msvcrt.bsearch
 @ cdecl calloc(long long) msvcrt.calloc

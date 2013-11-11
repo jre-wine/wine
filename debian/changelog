@@ -1,3 +1,9 @@
+wine-unstable (1.6-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 11 Nov 2013 17:48:12 +0000
+
 wine-unstable (1.5.31-1) unstable; urgency=low
 
   * New upstream release 1.5.31, released May 24, 2013.

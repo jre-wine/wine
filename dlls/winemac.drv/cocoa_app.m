@@ -205,8 +205,23 @@ int macdrv_err_on;
 
             mainMenu = [[[NSMenu alloc] init] autorelease];
 
+            // Application menu
             submenu = [[[NSMenu alloc] initWithTitle:@"Wine"] autorelease];
             bundleName = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString*)kCFBundleNameKey];
+
+            if ([bundleName length])
+                title = [NSString stringWithFormat:@"Hide %@", bundleName];
+            else
+                title = @"Hide";
+            item = [submenu addItemWithTitle:title action:@selector(hide:) keyEquivalent:@""];
+
+            item = [submenu addItemWithTitle:@"Hide Others" action:@selector(hideOtherApplications:) keyEquivalent:@"h"];
+            [item setKeyEquivalentModifierMask:NSCommandKeyMask | NSAlternateKeyMask];
+
+            item = [submenu addItemWithTitle:@"Show All" action:@selector(unhideAllApplications:) keyEquivalent:@""];
+
+            [submenu addItem:[NSMenuItem separatorItem]];
+
             if ([bundleName length])
                 title = [NSString stringWithFormat:@"Quit %@", bundleName];
             else
@@ -218,6 +233,7 @@ int macdrv_err_on;
             [item setSubmenu:submenu];
             [mainMenu addItem:item];
 
+            // Window menu
             submenu = [[[NSMenu alloc] initWithTitle:@"Window"] autorelease];
             [submenu addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@""];
             [submenu addItemWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""];
@@ -559,6 +575,41 @@ int macdrv_err_on;
         [self adjustWindowLevels:[NSApp isActive]];
     }
 
+    - (void) updateFullscreenWindows
+    {
+        if (capture_displays_for_fullscreen && [NSApp isActive])
+        {
+            BOOL anyFullscreen = FALSE;
+            NSNumber* windowNumber;
+            for (windowNumber in [NSWindow windowNumbersWithOptions:0])
+            {
+                WineWindow* window = (WineWindow*)[NSApp windowWithWindowNumber:[windowNumber integerValue]];
+                if ([window isKindOfClass:[WineWindow class]] && window.fullscreen)
+                {
+                    anyFullscreen = TRUE;
+                    break;
+                }
+            }
+
+            if (anyFullscreen)
+            {
+                if ([self areDisplaysCaptured] || CGCaptureAllDisplays() == CGDisplayNoErr)
+                    displaysCapturedForFullscreen = TRUE;
+            }
+            else if (displaysCapturedForFullscreen)
+            {
+                if ([originalDisplayModes count] || CGReleaseAllDisplays() == CGDisplayNoErr)
+                    displaysCapturedForFullscreen = FALSE;
+            }
+        }
+    }
+
+    - (void) activeSpaceDidChange
+    {
+        [self updateFullscreenWindows];
+        [self adjustWindowLevels];
+    }
+
     - (void) sendDisplaysChanged:(BOOL)activating
     {
         macdrv_event* event;
@@ -664,7 +715,8 @@ int macdrv_err_on;
             if ([originalDisplayModes count] == 1) // If this is the last changed display, do a blanket reset
             {
                 CGRestorePermanentDisplayConfiguration();
-                CGReleaseAllDisplays();
+                if (!displaysCapturedForFullscreen)
+                    CGReleaseAllDisplays();
                 [originalDisplayModes removeAllObjects];
                 ret = TRUE;
             }
@@ -679,7 +731,8 @@ int macdrv_err_on;
         }
         else
         {
-            if ([originalDisplayModes count] || CGCaptureAllDisplays() == CGDisplayNoErr)
+            if ([originalDisplayModes count] || displaysCapturedForFullscreen ||
+                CGCaptureAllDisplays() == CGDisplayNoErr)
             {
                 if (CGDisplaySetDisplayMode(displayID, mode, NULL) == CGDisplayNoErr)
                 {
@@ -689,7 +742,8 @@ int macdrv_err_on;
                 else if (![originalDisplayModes count])
                 {
                     CGRestorePermanentDisplayConfiguration();
-                    CGReleaseAllDisplays();
+                    if (!displaysCapturedForFullscreen)
+                        CGReleaseAllDisplays();
                 }
             }
         }
@@ -704,7 +758,7 @@ int macdrv_err_on;
 
     - (BOOL) areDisplaysCaptured
     {
-        return ([originalDisplayModes count] > 0);
+        return ([originalDisplayModes count] > 0 || displaysCapturedForFullscreen);
     }
 
     - (void) hideCursor
@@ -835,11 +889,12 @@ int macdrv_err_on;
             NSRunningApplication* app;
             NSRunningApplication* otherValidApp = nil;
 
-            if ([originalDisplayModes count])
+            if ([originalDisplayModes count] || displaysCapturedForFullscreen)
             {
                 CGRestorePermanentDisplayConfiguration();
                 CGReleaseAllDisplays();
                 [originalDisplayModes removeAllObjects];
+                displaysCapturedForFullscreen = FALSE;
             }
 
             for (app in [[NSWorkspace sharedWorkspace] runningApplications])
@@ -1225,6 +1280,25 @@ int macdrv_err_on;
         return TRUE;
     }
 
+    - (BOOL) isKeyPressed:(uint16_t)keyCode
+    {
+        int bits = sizeof(pressedKeyCodes[0]) * 8;
+        int index = keyCode / bits;
+        uint32_t mask = 1 << (keyCode % bits);
+        return (pressedKeyCodes[index] & mask) != 0;
+    }
+
+    - (void) noteKey:(uint16_t)keyCode pressed:(BOOL)pressed
+    {
+        int bits = sizeof(pressedKeyCodes[0]) * 8;
+        int index = keyCode / bits;
+        uint32_t mask = 1 << (keyCode % bits);
+        if (pressed)
+            pressedKeyCodes[index] |= mask;
+        else
+            pressedKeyCodes[index] &= ~mask;
+    }
+
     - (void) handleMouseMove:(NSEvent*)anEvent
     {
         WineWindow* targetWindow;
@@ -1369,16 +1443,53 @@ int macdrv_err_on;
 
     - (void) handleMouseButton:(NSEvent*)theEvent
     {
-        WineWindow* window;
+        WineWindow* window = (WineWindow*)[theEvent window];
+        NSEventType type = [theEvent type];
+        BOOL broughtWindowForward = FALSE;
+
+        if ([window isKindOfClass:[WineWindow class]] &&
+            !window.disabled && !window.noActivate &&
+            type == NSLeftMouseDown &&
+            (([theEvent modifierFlags] & (NSShiftKeyMask | NSControlKeyMask| NSAlternateKeyMask | NSCommandKeyMask)) != NSCommandKeyMask))
+        {
+            NSWindowButton windowButton;
+
+            broughtWindowForward = TRUE;
+
+            /* Any left-click on our window anyplace other than the close or
+               minimize buttons will bring it forward. */
+            for (windowButton = NSWindowCloseButton;
+                 windowButton <= NSWindowMiniaturizeButton;
+                 windowButton++)
+            {
+                NSButton* button = [window standardWindowButton:windowButton];
+                if (button)
+                {
+                    NSPoint point = [button convertPoint:[theEvent locationInWindow] fromView:nil];
+                    if ([button mouse:point inRect:[button bounds]])
+                    {
+                        broughtWindowForward = FALSE;
+                        break;
+                    }
+                }
+            }
+
+            if (broughtWindowForward)
+            {
+                // Clicking on a child window does not normally reorder it with
+                // respect to its siblings, but we want it to.  We have to do it
+                // manually.
+                NSWindow* parent = [window parentWindow];
+                [parent removeChildWindow:window];
+                [parent addChildWindow:window ordered:NSWindowAbove];
+            }
+        }
 
         if (mouseCaptureWindow)
             window = mouseCaptureWindow;
-        else
-            window = (WineWindow*)[theEvent window];
 
         if ([window isKindOfClass:[WineWindow class]])
         {
-            NSEventType type = [theEvent type];
             BOOL pressed = (type == NSLeftMouseDown || type == NSRightMouseDown || type == NSOtherMouseDown);
             CGPoint pt = CGEventGetLocation([theEvent CGEvent]);
             BOOL process;
@@ -1448,6 +1559,8 @@ int macdrv_err_on;
 
                 macdrv_release_event(event);
             }
+            else if (broughtWindowForward && ![window isKeyWindow])
+                [self windowGotFocus:window];
         }
 
         // Since mouse button events deliver absolute cursor position, the
@@ -1598,6 +1711,17 @@ int macdrv_err_on;
             [self handleScrollWheel:anEvent];
             ret = mouseCaptureWindow != nil;
         }
+        else if (type == NSKeyUp)
+        {
+            uint16_t keyCode = [anEvent keyCode];
+            if ([self isKeyPressed:keyCode])
+            {
+                WineWindow* window = (WineWindow*)[anEvent window];
+                [self noteKey:keyCode pressed:FALSE];
+                if ([window isKindOfClass:[WineWindow class]])
+                    [window postKeyEvent:anEvent];
+            }
+        }
 
         return ret;
     }
@@ -1625,6 +1749,7 @@ int macdrv_err_on;
     {
         NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
         NSNotificationCenter* wsnc = [[NSWorkspace sharedWorkspace] notificationCenter];
+        NSDistributedNotificationCenter* dnc = [NSDistributedNotificationCenter defaultCenter];
 
         [nc addObserverForName:NSWindowDidBecomeKeyNotification
                         object:nil
@@ -1645,6 +1770,12 @@ int macdrv_err_on;
                 lastTargetWindow = nil;
             if (window == self.mouseCaptureWindow)
                 self.mouseCaptureWindow = nil;
+            if ([window isKindOfClass:[WineWindow class]] && [(WineWindow*)window isFullscreen])
+            {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0), dispatch_get_main_queue(), ^{
+                    [self updateFullscreenWindows];
+                });
+            }
         }];
 
         [nc addObserver:self
@@ -1657,9 +1788,20 @@ int macdrv_err_on;
         [NSTextInputContext self];
 
         [wsnc addObserver:self
-                 selector:@selector(adjustWindowLevels)
+                 selector:@selector(activeSpaceDidChange)
                      name:NSWorkspaceActiveSpaceDidChangeNotification
                    object:nil];
+
+        [nc addObserver:self
+               selector:@selector(releaseMouseCapture)
+                   name:NSMenuDidBeginTrackingNotification
+                 object:nil];
+
+        [dnc        addObserver:self
+                       selector:@selector(releaseMouseCapture)
+                           name:@"com.apple.HIToolbox.beginMenuTrackingNotification"
+                         object:nil
+             suspensionBehavior:NSNotificationSuspensionBehaviorDrop];
     }
 
     - (BOOL) inputSourceIsInputMethod
@@ -1681,6 +1823,26 @@ int macdrv_err_on;
         return inputSourceIsInputMethod;
     }
 
+    - (void) releaseMouseCapture
+    {
+        // This might be invoked on a background thread by the distributed
+        // notification center.  Shunt it to the main thread.
+        if (![NSThread isMainThread])
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{ [self releaseMouseCapture]; });
+            return;
+        }
+
+        if (mouseCaptureWindow)
+        {
+            macdrv_event* event;
+
+            event = macdrv_create_event(RELEASE_CAPTURE, mouseCaptureWindow);
+            [mouseCaptureWindow.queue postEvent:event];
+            macdrv_release_event(event);
+        }
+    }
+
 
     /*
      * ---------- NSApplicationDelegate methods ----------
@@ -1689,9 +1851,10 @@ int macdrv_err_on;
     {
         [self activateCursorClipping];
 
+        [self updateFullscreenWindows];
         [self adjustWindowLevels:YES];
 
-        if (![self frontWineWindow])
+        if (beenActive && ![self frontWineWindow])
         {
             for (WineWindow* window in [NSApp windows])
             {
@@ -1702,6 +1865,7 @@ int macdrv_err_on;
                 }
             }
         }
+        beenActive = TRUE;
 
         // If a Wine process terminates abruptly while it has the display captured
         // and switched to a different resolution, Mac OS X will uncapture the
@@ -1748,6 +1912,8 @@ int macdrv_err_on;
         [eventQueuesLock unlock];
 
         macdrv_release_event(event);
+
+        [self releaseMouseCapture];
     }
 
     - (NSApplicationTerminateReply) applicationShouldTerminate:(NSApplication *)sender

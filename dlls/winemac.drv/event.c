@@ -35,7 +35,6 @@ static const char *dbgstr_event(int type)
         "APP_DEACTIVATED",
         "APP_QUIT_REQUESTED",
         "DISPLAYS_CHANGED",
-        "IM_SET_CURSOR_POS",
         "IM_SET_TEXT",
         "KEY_PRESS",
         "KEY_RELEASE",
@@ -45,6 +44,7 @@ static const char *dbgstr_event(int type)
         "MOUSE_MOVED_ABSOLUTE",
         "MOUSE_SCROLL",
         "QUERY_EVENT",
+        "RELEASE_CAPTURE",
         "STATUS_ITEM_CLICKED",
         "WINDOW_CLOSE_REQUESTED",
         "WINDOW_DID_MINIMIZE",
@@ -92,7 +92,6 @@ static macdrv_event_mask get_event_mask(DWORD mask)
         event_mask |= event_mask_for_type(APP_DEACTIVATED);
         event_mask |= event_mask_for_type(APP_QUIT_REQUESTED);
         event_mask |= event_mask_for_type(DISPLAYS_CHANGED);
-        event_mask |= event_mask_for_type(IM_SET_CURSOR_POS);
         event_mask |= event_mask_for_type(IM_SET_TEXT);
         event_mask |= event_mask_for_type(STATUS_ITEM_CLICKED);
         event_mask |= event_mask_for_type(WINDOW_CLOSE_REQUESTED);
@@ -106,6 +105,7 @@ static macdrv_event_mask get_event_mask(DWORD mask)
     if (mask & QS_SENDMESSAGE)
     {
         event_mask |= event_mask_for_type(QUERY_EVENT);
+        event_mask |= event_mask_for_type(RELEASE_CAPTURE);
     }
 
     return event_mask;
@@ -181,9 +181,6 @@ void macdrv_handle_event(const macdrv_event *event)
     case DISPLAYS_CHANGED:
         macdrv_displays_changed(event);
         break;
-    case IM_SET_CURSOR_POS:
-        macdrv_im_set_cursor_pos(event);
-        break;
     case IM_SET_TEXT:
         macdrv_im_set_text(event);
         break;
@@ -206,6 +203,9 @@ void macdrv_handle_event(const macdrv_event *event)
         break;
     case QUERY_EVENT:
         macdrv_query_event(hwnd, event);
+        break;
+    case RELEASE_CAPTURE:
+        macdrv_release_capture(hwnd, event);
         break;
     case STATUS_ITEM_CLICKED:
         macdrv_status_item_clicked(event);
