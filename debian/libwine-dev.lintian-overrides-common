@@ -1,1 +1,2 @@
-libwine-dev binary: binary-or-shlib-defines-rpath
+# rpath is used intentionally
+binary-or-shlib-defines-rpath

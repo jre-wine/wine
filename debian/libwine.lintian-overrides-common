@@ -1,13 +1,11 @@
 # the preloader is a self-contained binary on purpose
-libwine binary: statically-linked-binary usr/lib/wine/wine-preloader
-# specially linked binaries, leaving them unstripped for now,
-# as dh_strip is currently unable to handle them properly
-libwine binary: unstripped-binary-or-object usr/lib/wine/wine-preloader
-libwine binary: unstripped-binary-or-object usr/lib/wine/wine-kthread
-libwine binary: unstripped-binary-or-object usr/lib/wine/wine-pthread
-libwine binary: unstripped-binary-or-object usr/lib/wine/wine.bin
+statically-linked-binary usr/lib/wine/wine-preloader
+unstripped-binary-or-object usr/lib/wine/wine-preloader
+unstripped-binary-or-object usr/lib/wine/wine-kthread
+unstripped-binary-or-object usr/lib/wine/wine-pthread
+unstripped-binary-or-object usr/lib/wine/wine.bin
 # debhelper bug causes these
-libwine binary: postinst-has-useless-call-to-ldconfig
-libwine binary: postrm-has-useless-call-to-ldconfig
-# rpath is used
-libwine binary: binary-or-shlib-defines-rpath
+postinst-has-useless-call-to-ldconfig
+postrm-has-useless-call-to-ldconfig
+# rpath is used intentionally
+binary-or-shlib-defines-rpath

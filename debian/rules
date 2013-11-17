@@ -62,11 +62,11 @@ debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
 debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
 	cp $< $@
 
-debian/%.postinst  debian/%.prerm: debian/%.install
+debian/%.postinst debian/%.prerm: debian/%.install
 	sh debian/generate-alternatives $(PRIORITY) /$(LIBDIR) $<
 
 debian/substvars:
-	echo "dev:Conflicts=libwine-dev-unstable" | sed s/$(VERSUFFIX)// > $@
+	echo "dev:Conflicts=libwine-dev-unstable" > $@
 
 %:
 	dh $@ --parallel
@@ -96,6 +96,6 @@ override_dh_strip:
 
 override_dh_auto_clean: debian/control
 	test ! -e Makefile || $(MAKE) distclean
-	rm -f debian/README.winedump tools/config.sub tools/config.guess
+	rm -f debian/*.prerm debian/README.winedump tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
 	rm -f $(INSTALLS)

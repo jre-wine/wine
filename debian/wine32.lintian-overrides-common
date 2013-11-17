@@ -1,1 +1,3 @@
-wine32-bin binary: binary-or-shlib-defines-rpath
+# rpath is used intentionally
+binary-or-shlib-defines-rpath
+statically-linked-binary usr/lib/i386-linux-gnu/wine/bin/wine32-preloader

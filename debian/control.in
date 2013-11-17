@@ -102,7 +102,7 @@ Description: Windows API implementation - 64-bit binary loader
  .
  This package provides the binary loader for 32-bit Windows applications.
 
-Package: wine32-dev
+Package: wine32-dev-tools
 Architecture: any-i386 any-powerpc
 Section: libdevel
 Multi-Arch: foreign
@@ -120,7 +120,7 @@ Description: Windows API implementation - 32-bit developer tools
  .
  This package provides wine's 32-bit developer tools.
 
-Package: wine64-dev
+Package: wine64-dev-tools
 Architecture: amd64
 Section: libdevel
 Depends:
@@ -149,7 +149,7 @@ Depends:
 Conflicts:
  ${dev:Conflicts},
 Recommends:
- wine32-dev | wine64-dev,
+ wine32-dev-tools | wine64-dev-tools,
 Suggests:
  wine-doc,
 Description: Windows API implementation - development files

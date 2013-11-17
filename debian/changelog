@@ -1,7 +1,6 @@
-wine-unstable (1.6.1-1) UNRELEASED; urgency=low
+wine (1.6.1-1) unstable; urgency=low
 
-  * UNRELEASED
-  * UNRELEASED
+  * New upstream stable release.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sun, 17 Nov 2013 04:19:03 +0000
 
