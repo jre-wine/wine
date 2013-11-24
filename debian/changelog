@@ -1,6 +1,14 @@
+wine (1.6.1-2) unstable; urgency=low
+
+  * Improve clean rule.
+  * Fix postinst syntax.
+  * Eliminate some lintian warnings.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 23 Nov 2013 23:45:36 +0000
+
 wine (1.6.1-1) unstable; urgency=low
 
-  * New upstream stable release.
+  * New upstream stable release (closes: #717971).
 
  -- Michael Gilbert <mgilbert@debian.org>  Sun, 17 Nov 2013 04:19:03 +0000
 

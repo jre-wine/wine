@@ -8,26 +8,28 @@ Uploaders:
  Michael Gilbert <mgilbert@debian.org>,
 Build-Depends:
  debhelper (>= 9),
- libx11-dev | xlibs-dev (<< 4.3), libxext-dev | xlibs-dev (<< 4.3),
- libxi-dev | xlibs-dev (<< 4.3), libxrandr-dev | xlibs-dev (<< 4.3),
- libxrender-dev | xlibs-dev (<< 4.3), libxt-dev | xlibs-dev (<< 4.3),
- libxkbfile-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
- libxxf86dga-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
- libxxf86vm-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
- libxinerama-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
- libxcomposite-dev | xlibs-static-dev (<< 6) | xlibs-dev (<< 4.3),
- libgl1-mesa-dev | xlibmesa-gl-dev | xlibmesa-dev (<< 4.3) | libgl-dev,
- libglu1-mesa-dev | libglu1-xorg-dev | xlibmesa-glu-dev | xlibmesa-dev (<= 4.2.1-4) | libglu-dev,
- freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
- libxcursor-dev | xlibs-dev (<< 4.3),
- libcups2-dev | libcupsys2-dev,
- libdbus-1-dev | dbus-1-dev,
- dctrl-tools | grep-dctrl,
+ libxi-dev,
+ libxt-dev,
+ libxmu-dev,
+ libx11-dev,
+ libxext-dev,
+ libxrandr-dev,
+ libxcursor-dev,
+ libxrender-dev,
+ libxkbfile-dev,
+ libxxf86vm-dev,
+ libxxf86dga-dev,
+ libxinerama-dev,
+ libgl1-mesa-dev,
+ libglu1-mesa-dev,
+ libxcomposite-dev,
  lzma,
  flex,
  bison,
  oss4-dev,
  sharutils,
+ dctrl-tools,
+ freeglut3-dev,
  libpng-dev,
  libssl-dev,
  libxml2-dev,
@@ -38,9 +40,11 @@ Build-Depends:
  libldap2-dev,
  libxslt1-dev,
  unixodbc-dev,
+ libcups2-dev,
  libgnutls-dev,
  libopenal-dev,
  libmpg123-dev,
+ libdbus-1-dev,
  autotools-dev,
  libasound2-dev,
  libncurses5-dev,
@@ -51,8 +55,8 @@ Build-Depends:
  prelink [linux-any],
 Standards-Version: 3.9.4
 Homepage: http://www.winehq.org/
-Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
-Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
+Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wine
 Architecture: any-i386 any-powerpc
@@ -100,7 +104,7 @@ Description: Windows API implementation - 64-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides the binary loader for 32-bit Windows applications.
+ This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32-dev-tools
 Architecture: any-i386 any-powerpc
@@ -219,21 +223,17 @@ Description: Windows API implementation - library
  This package provides the library that implements the Windows API.
 
 Package: wine-bin
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  wine32 (>= ${binary:Version}),
-Description: Windows API implementation - ALSA sound module
+Description: Windows API implementation - binaries
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
  This is a transitional package and can be safely removed.
 
 Package: libwine-alsa
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -245,8 +245,6 @@ Description: Windows API implementation - ALSA sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-bin
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -258,8 +256,6 @@ Description: Windows API implementation - system services
  This is a transitional package and can be safely removed.
 
 Package: libwine-capi
-Section: oldlibs
-Priority: extra
 Architecture: i386 powerpc
 Multi-Arch: same
 Depends:
@@ -272,8 +268,6 @@ Description: Windows API implementation - ISDN module
  This is a transitional package and can be safely removed.
 
 Package: libwine-cms
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -286,8 +280,6 @@ Description: Windows API implementation - color management module
  This is a transitional package and can be safely removed.
 
 Package: libwine-gl
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -300,8 +292,6 @@ Description: Windows API implementation - OpenGL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-gphoto2
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -313,8 +303,6 @@ Description: Windows API implementation - camera module
  This is a transitional package and can be safely removed.
 
 Package: libwine-ldap
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -327,8 +315,6 @@ Description: Windows API implementation - LDAP module
  This is a transitional package and can be safely removed.
 
 Package: libwine-openal
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -341,8 +327,6 @@ Description: Windows API implementation - OpenAL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-oss
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -355,8 +339,6 @@ Description: Windows API implementation - OSS sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-print
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -369,8 +351,6 @@ Description: Windows API implementation - printing module
  This is a transitional package and can be safely removed.
 
 Package: libwine-sane
-Section: oldlibs
-Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:

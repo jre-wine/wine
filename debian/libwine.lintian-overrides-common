@@ -1,11 +1,6 @@
-# the preloader is a self-contained binary on purpose
-statically-linked-binary usr/lib/wine/wine-preloader
-unstripped-binary-or-object usr/lib/wine/wine-preloader
-unstripped-binary-or-object usr/lib/wine/wine-kthread
-unstripped-binary-or-object usr/lib/wine/wine-pthread
-unstripped-binary-or-object usr/lib/wine/wine.bin
 # debhelper bug causes these
 postinst-has-useless-call-to-ldconfig
 postrm-has-useless-call-to-ldconfig
-# rpath is used intentionally
-binary-or-shlib-defines-rpath
+# unfortunately wine doesn't doesn't do relro or fortify hardening
+hardening-no-relro
+hardening-no-fortify-functions

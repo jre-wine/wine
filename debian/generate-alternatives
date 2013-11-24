@@ -15,13 +15,17 @@ linkgroup="$(echo "$binaries" | head -1)"
 echo "#!/bin/sh" > $postinst
 echo "set -e" >> $postinst
 echo "" >> $postinst
-echo "update-alternatives --install /usr/bin/$linkgroup $linkgroup $libdir/bin/$linkgroup $priority \\" >> $postinst
+echo "if [ \"\$1\" = \"configure\" ]; then" >> $postinst
+echo "" >> $postinst
+echo "  update-alternatives --install /usr/bin/$linkgroup $linkgroup $libdir/bin/$linkgroup $priority \\" >> $postinst
 for file in $(echo "$binaries" | tail -n +2); do
     echo "  --slave /usr/bin/$file $file $libdir/bin/$file \\" >> $postinst
 done
 for file in $(echo "$manpages"); do
     echo "  --slave /usr/share/man/man1/$file $file $libdir/man/man1/$file \\" >> $postinst
 done
+echo "" >> $postinst
+echo "fi" >> $postinst
 echo "" >> $postinst
 echo "#DEBHELPER#" >> $postinst
 

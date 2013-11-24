@@ -1,5 +1,9 @@
 #!/usr/bin/make -f
+
 export DH_VERBOSE=1
+
+# unfortunately wine fails to build with these flags enabled
+export DEB_BUILD_MAINT_OPTIONS=hardening=-relro,-pie,-bindnow
 
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
@@ -94,8 +98,11 @@ override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
-override_dh_auto_clean: debian/control
-	test ! -e Makefile || $(MAKE) distclean
-	rm -f debian/*.prerm debian/README.winedump tools/config.sub tools/config.guess
+override_dh_clean: debian/control
+	#test ! -e Makefile || $(MAKE) distclean
+	dh_clean
+	rm -rf debian/libwine-dbg$(VERSUFFIX)
+	rm -f debian/*.prerm debian/README.winedump
+	rm -f tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
 	rm -f $(INSTALLS)
