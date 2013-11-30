@@ -36,7 +36,7 @@ Build-Depends:
  libsane-dev,
  libgsm1-dev,
  libjpeg-dev,
- liblcms1-dev,
+ liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,
  unixodbc-dev,

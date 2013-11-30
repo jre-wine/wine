@@ -73,7 +73,7 @@ debian/substvars:
 	echo "dev:Conflicts=libwine-dev-unstable" > $@
 
 %:
-	dh $@ --parallel
+	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
 	ln -s /usr/share/misc/config.sub tools/config.sub
@@ -99,10 +99,9 @@ override_dh_strip:
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
 override_dh_clean: debian/control
-	#test ! -e Makefile || $(MAKE) distclean
 	dh_clean
 	rm -rf debian/libwine-dbg$(VERSUFFIX)
 	rm -f debian/*.prerm debian/README.winedump
-	rm -f tools/config.sub tools/config.guess
+	rm -f config.log configure tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
 	rm -f $(INSTALLS)
