@@ -81,7 +81,7 @@ override_dh_auto_configure:
 	dh_auto_configure -- $(CONFLAGS)
 
 override_dh_install: $(INSTALLS)
-	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || true
+	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || cp debian/tmp/$(LIBDIR)/bin/wine debian/$(LIBDIR)/bin/wine32-preloader || true
 	mv debian/tmp/$(LIBDIR)/bin/wine debian/tmp/$(LIBDIR)/bin/wine32 || true
 	cd debian/tmp/usr/lib/*/*/bin && ln -s wine?? wine
 	mkdir -p debian/tmp/usr/share/applications
