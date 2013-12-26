@@ -28,10 +28,10 @@ ifeq (,$(VERSUFFIX))
 PRIORITY := 100
 else
 PRIORITY := 50
-endif 
+endif
 
 # 64-bit parameters
-ifeq ($(DEB_BUILD_ARCH), amd64)
+ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
 CONFLAGS+=--enable-win64 # enable wine64 on amd64
 ifeq (,$(VERSUFFIX))
 PRIORITY := 125
@@ -78,12 +78,20 @@ debian/substvars:
 override_dh_auto_configure:
 	ln -s /usr/share/misc/config.sub tools/config.sub
 	ln -s /usr/share/misc/config.guess tools/config.guess
+ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	dh_auto_configure -- $(CONFLAGS)
+endif
 
 override_dh_install: $(INSTALLS)
-	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || cp debian/tmp/$(LIBDIR)/bin/wine debian/$(LIBDIR)/bin/wine32-preloader || true
+ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
+	echo "#!/bin/sh" > debian/tmp/$(LIBDIR)/bin/wine32-preloader
+	echo "echo wine-preloader is not supported on this architecture" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
+	echo "exit 1" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
+	chmod +x debian/tmp/$(LIBDIR)/bin/wine32-preloader
+	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || true
 	mv debian/tmp/$(LIBDIR)/bin/wine debian/tmp/$(LIBDIR)/bin/wine32 || true
 	cd debian/tmp/usr/lib/*/*/bin && ln -s wine?? wine
+endif
 	mkdir -p debian/tmp/usr/share/applications
 	#cp debian/uninstaller.desktop debian/tmp/usr/share/applications/uninstaller$(VERSUFFIX).desktop || true
 	#cp debian/winecfg.desktop debian/tmp/usr/share/applications/winecfg$(VERSUFFIX).desktop || true

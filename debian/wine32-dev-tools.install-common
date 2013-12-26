@@ -16,4 +16,4 @@ debian/tmp/usr/lib/*/*/man/man1/winegcc.1
 debian/tmp/usr/lib/*/*/man/man1/winemaker.1
 debian/tmp/usr/lib/*/*/man/man1/wmc.1
 debian/tmp/usr/lib/*/*/man/man1/wrc.1
-debian/README.winedump usr/share/doc/libwine-dev
+debian/README.winedump usr/share/doc/wine32-dev-tools

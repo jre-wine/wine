@@ -1,3 +1,13 @@
+wine (1.6.1-6) unstable; urgency=low
+
+  * Fix some lintian warnings.
+  * Re-enable support for kfreebsd-amd64.
+  * Version the dependency on freetype (closes: #730812).
+  * Simplify and reduce build dependencies (closes: #672541).
+  * Add libwine dependencies to wine32 and wine64 (closes: #731369).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 15 Dec 2013 05:43:28 +0000
+
 wine (1.6.1-5) unstable; urgency=low
 
   * Better handling for wine-preloader on architectures that don't use prelink.
