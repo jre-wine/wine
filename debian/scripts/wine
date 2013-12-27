@@ -1,0 +1,21 @@
+#!/bin/sh
+
+set -e
+
+file=$(file -b $1)
+kind=$(echo $file | cut -d\  -f1)
+if [ "$kind" = "PE32" ]; then
+    wine=/usr/lib/i386-linux-gnu/wine/bin/wine32
+elif [ "$kind" = "PE32+" ]; then
+    wine=/usr/lib/x86_64-linux-gnu/wine/bin/wine64
+else
+    echo "$1 not supported by wine: $file"
+    exit 1
+fi
+
+if [ -f $wine ]; then
+    $wine $@
+else
+    echo "error: the $(basename $wine) package probably needs to be installed."
+    exit 1
+fi

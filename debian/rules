@@ -15,13 +15,11 @@ CONFLAGS=--without-hal \
          --datarootdir=$(DATADIR) \
 	 --includedir=/usr/include \
 	 --exec-prefix=/$(LIBDIR) \
-         --mandir=/$(LIBDIR)/man \
+	 --mandir=/usr/share/man \
          --libdir=/$(LIBDIR) \
          LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
 
 INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
-INSTALLS+=$(shell ls debian/wine*.install-common | sed s/\\.install-common/$(VERSUFFIX)\\.postinst/)
-INSTALLS+=debian/substvars
 
 # 32-bit parameters
 ifeq (,$(VERSUFFIX))
@@ -65,9 +63,6 @@ debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
 
 debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
 	cp $< $@
-
-debian/%.postinst debian/%.prerm: debian/%.install
-	sh debian/generate-alternatives $(PRIORITY) /$(LIBDIR) $<
 
 debian/substvars:
 	echo "dev:Conflicts=libwine-dev-unstable" > $@

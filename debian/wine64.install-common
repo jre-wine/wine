@@ -1,4 +1,3 @@
-debian/tmp/usr/lib/*/*/bin/wine
 debian/tmp/usr/lib/*/*/bin/wine64
 debian/tmp/usr/lib/*/*/bin/wine64-preloader
 debian/tmp/usr/lib/*/*/bin/msiexec
@@ -9,17 +8,3 @@ debian/tmp/usr/lib/*/*/bin/winecfg
 debian/tmp/usr/lib/*/*/bin/winedbg
 debian/tmp/usr/lib/*/*/bin/winefile
 debian/tmp/usr/lib/*/*/bin/winepath
-debian/tmp/usr/lib/*/*/man/man1/winedbg.1
-debian/tmp/usr/lib/*/*/man/man1/wine.1
-debian/tmp/usr/lib/*/*/man/man1/wineconsole.1
-debian/tmp/usr/lib/*/*/man/man1/msiexec.1
-debian/tmp/usr/lib/*/*/man/man1/winepath.1
-debian/tmp/usr/lib/*/*/man/man1/winecfg.1
-debian/tmp/usr/lib/*/*/man/man1/regedit.1
-debian/tmp/usr/lib/*/*/man/man1/wineboot.1
-debian/tmp/usr/lib/*/*/man/man1/wineserver.1
-debian/tmp/usr/lib/*/*/man/man1/regsvr32.1
-debian/tmp/usr/lib/*/*/man/man1/winefile.1
-debian/tmp/usr/lib/*/*/man/pl.UTF-8/*
-debian/tmp/usr/lib/*/*/man/de.UTF-8/*
-debian/tmp/usr/lib/*/*/man/fr.UTF-8/*

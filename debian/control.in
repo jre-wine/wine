@@ -50,7 +50,7 @@ Build-Depends:
  libasound2-dev,
  libncurses5-dev,
  libgphoto2-2-dev,
- libfreetype6-dev (>= 2.5.1-1),
+ libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
  kfreebsd-kernel-headers [kfreebsd-any],
  libcapi20-dev (>= 1:3.3.0.20041024-2) [linux-any],
@@ -64,13 +64,17 @@ Package: wine
 Architecture: any-amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
- wine32 (>= ${source:Version}) | wine64 (>= ${source:Version}),
+ file,
+ wine32 (>= ${source:Version}) | wine64 (>= ${source:Version}) | wine64-bin (>= ${source:Version}),
 Suggests:
  wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
  winbind,
  avscan | klamav | clamav
+Replaces:
+ wine32 (<< 1.6.1-7),
+ wine64 (<< 1.6.1-7),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -162,7 +166,7 @@ Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides the C header files.
+ This package provides wine's C header files and development libraries.
 
 Package: libwine-dbg
 Architecture: any-i386 any-powerpc
@@ -222,7 +226,7 @@ Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides the library that implements the Windows API.
+ This package provides the wine library.
 
 Package: wine-bin
 Section: libs
@@ -237,7 +241,7 @@ Description: Windows API implementation - binaries
  This is a transitional package and can be safely removed.
 
 Package: wine64-bin
-Architecture: amd64
+Architecture: any-amd64
 Depends:
  ${misc:Depends},
  wine64 (>= ${binary:Version}),

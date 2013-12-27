@@ -1,3 +1,4 @@
 version=3
-http://ibiblio.org/pub/linux/system/emulators/wine/wine-([\d].*)\.tar\.bz2 \
+http://www.winehq.org/ \
+  (?:|.*/)wine(?:[_\-]v?|)(\d*.*[02468].\d*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz)
   debian debian/maint/import

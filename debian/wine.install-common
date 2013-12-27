@@ -1,0 +1,2 @@
+debian/scripts/wine usr/bin
+debian/tmp/usr/share/man/man1/wine.1
