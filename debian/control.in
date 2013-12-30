@@ -65,7 +65,8 @@ Architecture: any-amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  file,
- wine32 (>= ${source:Version}) | wine64 (>= ${source:Version}) | wine64-bin (>= ${source:Version}),
+ wine32 (>= ${source:Version}),
+ wine64 (>= ${source:Version}) [any-amd64],
 Suggests:
  wine-doc,
  binfmt-support,
@@ -73,8 +74,8 @@ Suggests:
  winbind,
  avscan | klamav | clamav
 Replaces:
- wine32 (<< 1.6.1-7),
- wine64 (<< 1.6.1-7),
+ wine32 (<< 1.6.1-8),
+ wine64 (<< 1.6.1-8),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -100,7 +101,7 @@ Description: Windows API implementation - 32-bit binary loader
  This package provides the binary loader for 32-bit Windows applications.
 
 Package: wine64
-Architecture: amd64
+Architecture: any-amd64
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},

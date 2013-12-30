@@ -1,10 +1,2 @@
 debian/tmp/usr/lib/*/*/bin/wine64
 debian/tmp/usr/lib/*/*/bin/wine64-preloader
-debian/tmp/usr/lib/*/*/bin/msiexec
-debian/tmp/usr/lib/*/*/bin/regedit
-debian/tmp/usr/lib/*/*/bin/regsvr32
-debian/tmp/usr/lib/*/*/bin/wineboot
-debian/tmp/usr/lib/*/*/bin/winecfg
-debian/tmp/usr/lib/*/*/bin/winedbg
-debian/tmp/usr/lib/*/*/bin/winefile
-debian/tmp/usr/lib/*/*/bin/winepath

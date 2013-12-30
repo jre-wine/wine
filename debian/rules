@@ -5,38 +5,28 @@ export DH_VERBOSE=1
 # unfortunately wine fails to build with these flags enabled
 export DEB_BUILD_MAINT_OPTIONS=hardening=-relro,-pie,-bindnow
 
-LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+
 DATADIR=/usr/share/wine$(VERSUFFIX)
+LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 
 # configure options
 CONFLAGS=--without-hal \
 	 --prefix=$(DATADIR) \
-         --datarootdir=$(DATADIR) \
-	 --includedir=/usr/include \
-	 --exec-prefix=/$(LIBDIR) \
+	 --libdir=/$(LIBDIR) \
 	 --mandir=/usr/share/man \
-         --libdir=/$(LIBDIR) \
-         LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
+	 --datarootdir=$(DATADIR) \
+	 --exec-prefix=/$(LIBDIR) \
+	 --includedir=/usr/include \
+	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
 
-INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
-
-# 32-bit parameters
-ifeq (,$(VERSUFFIX))
-PRIORITY := 100
-else
-PRIORITY := 50
-endif
-
-# 64-bit parameters
+# enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
-CONFLAGS+=--enable-win64 # enable wine64 on amd64
-ifeq (,$(VERSUFFIX))
-PRIORITY := 125
-else
-PRIORITY := 75
+CONFLAGS+=--enable-win64
 endif
-endif
+
+# additional files to generate
+INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
 
 debian/control: debian/control.in
 	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
@@ -47,9 +37,6 @@ debian/control: debian/control.in
 	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
 
 debian/%$(VERSUFFIX).docs: debian/%.docs-common
-	cp $< $@
-
-debian/%$(VERSUFFIX).mime: debian/%.mime-common
 	cp $< $@
 
 debian/%$(VERSUFFIX).links: debian/%.links-common
@@ -64,9 +51,6 @@ debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
 debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
 	cp $< $@
 
-debian/substvars:
-	echo "dev:Conflicts=libwine-dev-unstable" > $@
-
 %:
 	dh $@ --parallel --with autoreconf
 
@@ -78,21 +62,16 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 endif
 
 override_dh_install: $(INSTALLS)
-ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	echo "#!/bin/sh" > debian/tmp/$(LIBDIR)/bin/wine32-preloader
 	echo "echo wine-preloader is not supported on this architecture" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
 	echo "exit 1" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
-	chmod +x debian/tmp/$(LIBDIR)/bin/wine32-preloader
 	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || true
 	mv debian/tmp/$(LIBDIR)/bin/wine debian/tmp/$(LIBDIR)/bin/wine32 || true
-	cd debian/tmp/usr/lib/*/*/bin && ln -s wine?? wine
-endif
-	mkdir -p debian/tmp/usr/share/applications
-	#cp debian/uninstaller.desktop debian/tmp/usr/share/applications/uninstaller$(VERSUFFIX).desktop || true
-	#cp debian/winecfg.desktop debian/tmp/usr/share/applications/winecfg$(VERSUFFIX).desktop || true
-	#mv debian/tmp/usr/share/applications/wine$(VERSUFFIX)/wine.desktop debian/tmp/usr/share/applications/wine$(VERSUFFIX).desktop || true
+	mv debian/tmp/$(LIBDIR)/bin/winecfg debian/tmp/$(LIBDIR)/bin/wine-wrapper || true
 	cp tools/winedump/README debian/README.winedump
+ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	dh_install
+endif
 
 override_dh_auto_test:
 	# disable upstream's automated testing due to various brokenness

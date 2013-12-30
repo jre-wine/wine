@@ -1,0 +1,4 @@
+usr/lib/*/*/bin/wine64 usr/bin/wine64
+usr/lib/*/*/bin/wine64-preloader usr/bin/wine64-preloader
+
+usr/share/wine-gecko/wine_gecko-1.4-x86_64.msi usr/share/wine/gecko/wine_gecko-1.5-x86_64.msi
