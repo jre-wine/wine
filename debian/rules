@@ -68,7 +68,7 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	mv debian/tmp/$(LIBDIR)/bin/wine64-preloader debian/tmp/$(LIBDIR)/bin/wine-preloader || true
 	mv debian/tmp/$(LIBDIR)/bin/winecfg debian/tmp/$(LIBDIR)/bin/wine-wrapper || true
 	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/$(LIDBIR)/bin
+	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
 	echo "$(LIBDIR)/bin/wine usr/bin/wine32$(VERSUFFIX)" >> debian/wine32$(VERSUFFIX).links
 	echo "$(LIBDIR)/bin/wine usr/bin/wine64$(VERSUFFIX)" >> debian/wine64$(VERSUFFIX).links
 	echo "$(LIBDIR)/bin/wine-preloader usr/bin/wine32$(VERSUFFIX)-preloader" >> debian/wine32$(VERSUFFIX).links
