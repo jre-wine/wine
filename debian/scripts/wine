@@ -2,9 +2,9 @@
 
 set -e
 
-wine=/usr/lib/i386-linux-gnu/wine/bin/wine32
+wine=/usr/bin/wine32
 if [ "$(file -b -L "$1" | cut -d\  -f1)" = "PE32+" ]; then
-    wine=/usr/lib/x86_64-linux-gnu/wine/bin/wine64
+    wine=/usr/bin/wine64
 fi
 
 if [ -f $wine ]; then

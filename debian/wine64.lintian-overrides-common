@@ -1,7 +1,7 @@
 # rpath is used intentionally
 binary-or-shlib-defines-rpath
 # static linking intentionally
-statically-linked-binary usr/lib/x86_64-linux-gnu/wine/bin/wine64-preloader
+statically-linked-binary usr/lib/x86_64-linux-gnu/wine/bin/wine-preloader
 # unfortunately wine doesn't doesn't do relro or fortify hardening
 hardening-no-relro
 hardening-no-fortify-functions

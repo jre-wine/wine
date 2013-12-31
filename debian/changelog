@@ -1,3 +1,11 @@
+wine (1.6.1-9) unstable; urgency=medium
+
+  * Fix symlinks (closes: #733655).
+  * Fix build failure on kfreebsd-amd64.
+  * Recommend wine32 on amd64 instead of depending on it.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 30 Dec 2013 19:06:33 +0000
+
 wine (1.6.1-8) unstable; urgency=medium
 
   * Don't register mime types (closes: #327262).

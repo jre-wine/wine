@@ -62,14 +62,19 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 endif
 
 override_dh_install: $(INSTALLS)
-	echo "#!/bin/sh" > debian/tmp/$(LIBDIR)/bin/wine32-preloader
-	echo "echo wine-preloader is not supported on this architecture" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
-	echo "exit 1" >> debian/tmp/$(LIBDIR)/bin/wine32-preloader
-	mv debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/$(LIBDIR)/bin/wine32-preloader || true
-	mv debian/tmp/$(LIBDIR)/bin/wine debian/tmp/$(LIBDIR)/bin/wine32 || true
-	mv debian/tmp/$(LIBDIR)/bin/winecfg debian/tmp/$(LIBDIR)/bin/wine-wrapper || true
-	cp tools/winedump/README debian/README.winedump
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
+	cp tools/winedump/README debian/README.winedump
+	mv debian/tmp/$(LIBDIR)/bin/wine64 debian/tmp/$(LIBDIR)/bin/wine || true
+	mv debian/tmp/$(LIBDIR)/bin/wine64-preloader debian/tmp/$(LIBDIR)/bin/wine-preloader || true
+	mv debian/tmp/$(LIBDIR)/bin/winecfg debian/tmp/$(LIBDIR)/bin/wine-wrapper || true
+	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/$(LIDBIR)/bin
+	echo "$(LIBDIR)/bin/wine usr/bin/wine32$(VERSUFFIX)" >> debian/wine32$(VERSUFFIX).links
+	echo "$(LIBDIR)/bin/wine usr/bin/wine64$(VERSUFFIX)" >> debian/wine64$(VERSUFFIX).links
+	echo "$(LIBDIR)/bin/wine-preloader usr/bin/wine32$(VERSUFFIX)-preloader" >> debian/wine32$(VERSUFFIX).links
+	echo "$(LIBDIR)/bin/wine-preloader usr/bin/wine64$(VERSUFFIX)-preloader" >> debian/wine64$(VERSUFFIX).links
+	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine32.1
+	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
 	dh_install
 endif
 

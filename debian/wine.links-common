@@ -5,9 +5,3 @@ usr/bin/wine-wrapper usr/bin/wineboot
 usr/bin/wine-wrapper usr/bin/winepath
 usr/bin/wine-wrapper usr/bin/winefile
 usr/bin/wine-wrapper usr/bin/regsvr32
-
-usr/share/man/man1/wine.1.gz usr/share/man/man1/wine32.1.gz
-usr/share/man/man1/wine.1.gz usr/share/man/man1/wine64.1.gz
-
-usr/share/man/man1/wine.1.gz usr/share/man/man1/wine32-preloader.1.gz
-usr/share/man/man1/wine.1.gz usr/share/man/man1/wine64-preloader.1.gz
