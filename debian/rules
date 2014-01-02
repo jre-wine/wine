@@ -63,18 +63,19 @@ endif
 
 override_dh_install: $(INSTALLS)
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
-	cp tools/winedump/README debian/README.winedump
-	mv debian/tmp/$(LIBDIR)/bin/wine64 debian/tmp/$(LIBDIR)/bin/wine || true
-	mv debian/tmp/$(LIBDIR)/bin/wine64-preloader debian/tmp/$(LIBDIR)/bin/wine-preloader || true
+	sh debian/scripts/genlauncher /$(LIBDIR)/bin/wine32
+	sh debian/scripts/genlauncher /$(LIBDIR)/bin/wine64
+	cd debian/tmp/$(LIBDIR)/bin && mv wine64 wine || true
+	cd debian/tmp/$(LIBDIR)/bin && mv wine64-preloader wine-preloader || true
+	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine32 || true
+	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine64 || true
+	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine32-preloader || true
+	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine64-preloader || true
 	mv debian/tmp/$(LIBDIR)/bin/winecfg debian/tmp/$(LIBDIR)/bin/wine-wrapper || true
-	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
-	echo "$(LIBDIR)/bin/wine usr/bin/wine32$(VERSUFFIX)" >> debian/wine32$(VERSUFFIX).links
-	echo "$(LIBDIR)/bin/wine usr/bin/wine64$(VERSUFFIX)" >> debian/wine64$(VERSUFFIX).links
-	echo "$(LIBDIR)/bin/wine-preloader usr/bin/wine32$(VERSUFFIX)-preloader" >> debian/wine32$(VERSUFFIX).links
-	echo "$(LIBDIR)/bin/wine-preloader usr/bin/wine64$(VERSUFFIX)-preloader" >> debian/wine64$(VERSUFFIX).links
 	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine32.1
 	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
+	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
 	dh_install
 endif
 
@@ -88,7 +89,7 @@ override_dh_strip:
 override_dh_clean: debian/control
 	dh_clean
 	rm -rf debian/libwine-dbg$(VERSUFFIX)
-	rm -f debian/*.prerm debian/README.winedump
+	rm -f debian/scripts/wine32 debian/scripts/wine64
 	rm -f config.log configure tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
 	rm -f $(INSTALLS)

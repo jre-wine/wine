@@ -3,7 +3,7 @@
 set -e
 
 wine=/usr/bin/wine32
-if [ "$(file -b -L "$1" | cut -d\  -f1)" = "PE32+" ]; then
+if [ "$(file -b -L "$1" | cut -d\  -f1)" = "PE32+" -o "$WINEARCH" = "win64" ]; then
     wine=/usr/bin/wine64
 fi
 

@@ -1,3 +1,13 @@
+wine (1.6.1-11) unstable; urgency=medium
+
+  * Replace libwine-bin (closes: #733681).
+  * Install .a files to libwine-dev (closes: #733687).
+  * Add wine32 and wine64 symlinks in /usr/lib (closes: #733727).
+  * Set WINEPREFIX default to  ~/.wine32 for wine32 and ~/.wine64 for wine64
+    (closes: #733648).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 01 Jan 2014 18:38:58 +0000
+
 wine (1.6.1-10) unstable; urgency=medium
 
   * Fix typo that caused build failures.

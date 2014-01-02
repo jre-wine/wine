@@ -1,3 +1,4 @@
 debian/tmp/usr/lib/*/*/libwine.so
+debian/tmp/usr/lib/*/*/wine/*.a
 debian/tmp/usr/lib/*/*/wine/*.def
 debian/tmp/usr/include

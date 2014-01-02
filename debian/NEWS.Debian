@@ -1,0 +1,7 @@
+wine (1.6.1-11) unstable; urgency=medium
+
+  The default WINEPREFIX is now ~/.wine32 instead of ~/.wine.  In order to
+  continue using previously installed wine applications, please either copy
+  or symlink ~/.wine to ~/.wine32 (WINEPREFIX can also still be set manually).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 01 Jan 2014 18:38:58 +0000

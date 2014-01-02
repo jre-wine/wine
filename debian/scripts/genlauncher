@@ -1,0 +1,7 @@
+#!/bin/sh
+
+wine=$(basename $1)
+echo "#!/bin/sh" > debian/scripts/$wine
+echo "" >> debian/scripts/$wine
+echo "test -z \$WINEPREFIX && export WINEPREFIX=\$HOME/.$wine" >> debian/scripts/$wine
+echo "$1 \"\$@\"" >> debian/scripts/$wine

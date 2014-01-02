@@ -1,4 +1,9 @@
+debian/scripts/wine64 usr/bin
+
 usr/lib/*/*/bin/wine
-/usr/lib/*/*/bin/wine-preloader
+usr/lib/*/*/bin/wine-preloader
+
+usr/lib/*/*/bin/wine64
+usr/lib/*/*/bin/wine64-preloader
 
 usr/share/man/man1/wine64.1
