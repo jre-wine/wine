@@ -86,10 +86,11 @@ override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
-override_dh_clean: debian/control
+override_dh_clean:
 	dh_clean
 	rm -rf debian/libwine-dbg$(VERSUFFIX)
-	rm -f debian/scripts/wine32 debian/scripts/wine64
+	rm -f debian/scripts/wine32 debian/scripts/wine64 debian/control
 	rm -f config.log configure tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
 	rm -f $(INSTALLS)
+	make -f debian/rules debian/control
