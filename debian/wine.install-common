@@ -1,8 +1,7 @@
 debian/scripts/wine usr/bin
 
-usr/lib/*/*/bin/wine-wrapper usr/bin
-
-debian/wine-wrapper.1 usr/share/man/man1
+debian/scripts/wine-wrapper usr/bin
+debian/scripts/wine-wrapper.1 usr/share/man/man1
 
 programs/winedbg/README usr/share/doc/wine/README.winedbg
 

@@ -1,4 +1,4 @@
-debian/scripts/wine64 usr/bin
+usr/bin/wine64
 
 usr/lib/*/*/bin/wine
 usr/lib/*/*/bin/wine-preloader
