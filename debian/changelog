@@ -1,3 +1,11 @@
+wine (1.6.2-1) unstable; urgency=medium
+
+  * New upstream stable release.
+  * Remove pristine tar handling.
+  * Indicate that wine replaces wine64-bin (closes: #734921).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 11 Jan 2014 20:27:41 +0000
+
 wine (1.6.1-14) unstable; urgency=medium
 
   * Remove old wine alternatives (closes: #734603).

@@ -41,9 +41,6 @@ winehq="git://source.winehq.org/git/wine.git"
 git checkout upstream
 git pull --no-edit $winehq tag "$upstream_tag" 
 
-# load original .tar.bz2 and .tar.gz into pristine-tar
-pristine-tar -v commit "$filename" "$upstream_tag"
-
 # merge from upstream into master branch
 git checkout master
 git merge upstream
