@@ -22,8 +22,11 @@
 
 appname=`basename "$0" .exe`.exe
 
-test ! -z $WINEPREFIX || WINEPREFIX="$HOME/.wine"
-    
-wine=$(cat $WINEPREFIX/system.reg | grep ^\#arch= | cut -d= -f2 | sed s/win/wine/)
+if test -z $WINEARCH; then
+    test ! -z $WINEPREFIX || WINEPREFIX="$HOME/.wine"
+    wine=$(cat $WINEPREFIX/system.reg | grep ^\#arch= | cut -d= -f2 | sed s/win/wine/)
+else
+    wine=$(echo $WINEARCH | sed s/win/wine/)
+fi
 
 exec $wine "$appname" "$@"

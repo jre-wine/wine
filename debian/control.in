@@ -75,6 +75,7 @@ Suggests:
 Replaces:
  wine32 (<< 1.6.1-8),
  wine64 (<< 1.6.1-8),
+ libwine-bin (<< 1.6.1-1),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.

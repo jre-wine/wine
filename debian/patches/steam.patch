@@ -1,0 +1,15 @@
+description: ntdll: Allow NULL return length argument in NtAdjustPrivilegesToken().
+bug-debian: http://bugs.debian.org/734627
+origin: http://source.winehq.org/git/wine.git/blobdiff/e810a58494bd43e2344b5dfb65a0f47cf3ca2613..fd65b0a1c3f5f981cc110ca9e6a0edb6323e1296:/dlls/ntdll/nt.c
+
+--- a/dlls/ntdll/nt.c
++++ b/dlls/ntdll/nt.c
+@@ -223,7 +223,7 @@ NTSTATUS WINAPI NtAdjustPrivilegesToken(
+         ret = wine_server_call( req );
+         if (PreviousState)
+         {
+-            *ReturnLength = reply->len + FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges );
++            if (ReturnLength) *ReturnLength = reply->len + FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges );
+             PreviousState->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
+         }
+     }
