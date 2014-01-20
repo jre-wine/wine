@@ -1,3 +1,10 @@
+wine (1.6.2-2) unstable; urgency=medium
+
+  * Indicate that wine replaces files in libwine and wine-bin
+    (closes: #735151).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 15 Jan 2014 02:13:44 +0000
+
 wine (1.6.2-1) unstable; urgency=medium
 
   * New upstream stable release.
