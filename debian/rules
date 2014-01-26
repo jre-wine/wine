@@ -2,8 +2,8 @@
 
 export DH_VERBOSE=1
 
-# unfortunately wine fails to build with these flags enabled
-export DEB_BUILD_MAINT_OPTIONS=hardening=-relro,-pie,-bindnow
+# unfortunately wine fails to build with pie enabled
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
@@ -89,8 +89,7 @@ override_dh_strip:
 override_dh_clean:
 	dh_clean
 	rm -rf debian/libwine-dbg$(VERSUFFIX)
-	rm -f debian/scripts/wine32 debian/scripts/wine64 debian/control
 	rm -f config.log configure tools/config.sub tools/config.guess
 	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
-	rm -f $(INSTALLS)
+	rm -f $(INSTALLS) debian/control
 	make -f debian/rules debian/control

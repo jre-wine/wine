@@ -79,6 +79,7 @@ Replaces:
  wine64-bin (<< 1.6.1-1),
  libwine (<< 1.6.1-1),
  libwine-bin (<< 1.6.1-1),
+ libwine-dev (<< 1.6.1-1),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -196,9 +197,10 @@ Depends:
  ${shlibs:Depends},
 Recommends:
  ${shlibs:Recommends},
- ttf-liberation,
+ fonts-liberation,
  libxcursor1,
 Suggests:
+ cups-bsd,
  wine-doc,
 Pre-Depends:
  multiarch-support,
@@ -235,6 +237,7 @@ Description: Windows API implementation - library
 Package: wine-bin
 Section: libs
 Architecture: any-i386 any-powerpc
+Pre-Depends: dpkg (>= 1.17.5)
 Depends:
  ${misc:Depends},
  wine32 (>= ${binary:Version}),
@@ -271,6 +274,7 @@ Description: Windows API implementation - ALSA sound module
 
 Package: libwine-bin
 Architecture: any-i386 any-powerpc
+Pre-Depends: dpkg (>= 1.17.5)
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})

@@ -4,3 +4,5 @@ postrm-has-useless-call-to-ldconfig
 # unfortunately wine doesn't doesn't do relro or fortify hardening
 hardening-no-relro
 hardening-no-fortify-functions
+# incorrectly flagged
+spelling-error-in-binary

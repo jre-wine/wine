@@ -1,3 +1,14 @@
+wine (1.6.2-3) unstable; urgency=medium
+
+  * Suggest cups-bsd (closes: #735525).
+  * Fix lintian warnings for manpage issues.
+  * Fix unhandled symlinks during upgrades (closes: #736296).
+  * Set the default printer resolution to 600dpi (closes: #687168).
+  * Indicate that wine replaces files in libwine-dev (closes: #736142).
+  * Recommend fonts-liberation instead of ttf-liberation (closes: #735533).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 26 Jan 2014 01:54:04 +0000
+
 wine (1.6.2-2) unstable; urgency=medium
 
   * Indicate that wine replaces files in libwine and wine-bin

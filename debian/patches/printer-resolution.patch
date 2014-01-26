@@ -1,0 +1,13 @@
+description: set default printer resolution to 600dpi
+
+--- wine-1.6.2.orig/dlls/wineps.drv/generic.ppd
++++ wine-1.6.2/dlls/wineps.drv/generic.ppd
+@@ -101,7 +101,7 @@
+ 
+ *OpenUI *Resolution/Output Resolution: PickOne
+ *OrderDependency: 20 AnySetup *Resolution
+-*DefaultResolution: 300dpi
++*DefaultResolution: 600dpi
+ *Resolution 150dpi/150 DPI: "<</HWResolution[150 150]>>setpagedevice"
+ *Resolution 300dpi/300 DPI: "<</HWResolution[300 300]>>setpagedevice"
+ *Resolution 600dpi/600 DPI: "<</HWResolution[600 600]>>setpagedevice"
