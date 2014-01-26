@@ -1,3 +1,9 @@
+wine (1.6.2-4) unstable; urgency=medium
+
+  * Fix calls to dpkg-maintscript-helper (closes: #736713).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 26 Jan 2014 14:44:54 +0000
+
 wine (1.6.2-3) unstable; urgency=medium
 
   * Suggest cups-bsd (closes: #735525).

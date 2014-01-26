@@ -2,12 +2,12 @@
 
 set -e
 
-dpkg-maintainer-helper symlink_to_dir \
+dpkg-maintscript-helper symlink_to_dir \
     /usr/share/doc/wine-bin/changelog.Debian.gz \
     /usr/share/doc/libwine/changelog.Debian.gz \
     1.4.1-4 -- "$@"
 
-dpkg-maintainer-helper symlink_to_dir \
+dpkg-maintscript-helper symlink_to_dir \
     /usr/share/doc/wine-bin/copyright \
     /usr/share/doc/libwine/copyright \
     1.4.1-4 -- "$@"
