@@ -3,8 +3,6 @@ Section: otherosfs
 Priority: optional
 Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
 Uploaders:
- Ove Kaaven <ovek@arcticnet.no>,
- Arthur Loiret <arthur.loiret@gmail.com>,
  Michael Gilbert <mgilbert@debian.org>,
  Stephen Kitt <skitt@debian.org>
 Build-Depends:
