@@ -1,6 +1,6 @@
 #!/bin/sh -e
 
-update-alternatives --remove-all wine || true
-update-alternatives --remove-all wineserver || true
+update-alternatives --remove-all wine 2>/dev/null || true
+update-alternatives --remove-all wineserver 2>/dev/null || true
 
 #DEBHELPER#

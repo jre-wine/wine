@@ -1,3 +1,10 @@
+wine (1.6.2-5) unstable; urgency=medium
+
+  * Call dpkg-maintscript-helper in the right place.
+  * Ignore update-alternatives error messages (closes: #736776).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 26 Jan 2014 19:01:48 +0000
+
 wine (1.6.2-4) unstable; urgency=medium
 
   * Fix calls to dpkg-maintscript-helper (closes: #736713).
