@@ -94,7 +94,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
- libwine-gecko-1.4
+ libwine-gecko-2.21
 Replaces:
  wine (<< 1.6.1-9),
  wine-bin (<< 1.5.31-1),
@@ -111,7 +111,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
- libwine-gecko-1.4,
+ libwine-gecko-2.21
 Replaces:
  wine (<< 1.6.1-9),
 Recommends:

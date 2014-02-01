@@ -1,6 +1,7 @@
 wine (1.6.2-6) UNRELEASED; urgency=medium
 
   * Add myself to uploaders.
+  * Use wine-gecko 2.21 (closes: #737089, #737203).
 
  -- Stephen Kitt <skitt@debian.org>  Fri, 31 Jan 2014 06:43:18 +0100
 
