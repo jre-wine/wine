@@ -6,6 +6,7 @@ Uploaders:
  Ove Kaaven <ovek@arcticnet.no>,
  Arthur Loiret <arthur.loiret@gmail.com>,
  Michael Gilbert <mgilbert@debian.org>,
+ Stephen Kitt <skitt@debian.org>
 Build-Depends:
  debhelper (>= 9),
  libxi-dev,

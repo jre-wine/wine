@@ -1,3 +1,9 @@
+wine (1.6.2-6) UNRELEASED; urgency=medium
+
+  * Add myself to uploaders.
+
+ -- Stephen Kitt <skitt@debian.org>  Fri, 31 Jan 2014 06:43:18 +0100
+
 wine (1.6.2-5) unstable; urgency=medium
 
   * Call dpkg-maintscript-helper in the right place.
