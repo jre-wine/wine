@@ -1,11 +1,11 @@
-wine (1.6.2-6) UNRELEASED; urgency=medium
+wine (1.6.2-6) unstable; urgency=medium
 
   * Add myself to uploaders.
   * Remove Ove and Arthur from uploaders; thanks for all your work back in
     the day!
   * Use wine-gecko 2.21 (closes: #737089, #737203).
 
- -- Stephen Kitt <skitt@debian.org>  Fri, 31 Jan 2014 06:43:18 +0100
+ -- Stephen Kitt <skitt@debian.org>  Sat, 01 Feb 2014 14:33:39 +0100
 
 wine (1.6.2-5) unstable; urgency=medium
 
