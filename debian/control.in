@@ -1,4 +1,4 @@
-Source: wine-unstable
+Source: wine
 Section: otherosfs
 Priority: optional
 Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
