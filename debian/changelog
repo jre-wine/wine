@@ -1,3 +1,9 @@
+wine-unstable (1.7.0-1) unstable; urgency=medium
+
+  * Switch to the wine-unstable branch.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Feb 2014 23:55:59 +0000
+
 wine (1.6.2-7) unstable; urgency=medium
 
   * Fix escaping in wine-wrapper (closes: #736986).
