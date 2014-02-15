@@ -11,5 +11,9 @@ if test -f $wine; then
     $wine "$@"
 else
     echo "unable to find wine executable: the $(basename $wine) package probably needs to be installed."
+    if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures)" != "i386" ]; then
+        echo "and it looks like multiarch needs to be enabled as well.  as root, please"
+        echo "execute \"dpkg --add-architecture i386 && apt-get install wine32\""
+    fi
     exit 1
 fi

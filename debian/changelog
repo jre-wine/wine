@@ -1,3 +1,10 @@
+wine (1.6.2-7) unstable; urgency=medium
+
+  * Fix escaping in wine-wrapper (closes: #736986).
+  * Clarify helper text for multi-arch configurations.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Feb 2014 22:09:57 +0000
+
 wine (1.6.2-6) unstable; urgency=medium
 
   * Add myself to uploaders.
