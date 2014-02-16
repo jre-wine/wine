@@ -1448,7 +1448,14 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
     /* Create the window structure */
 
     if (!(wndPtr = create_window_handle( parent, owner, className, module, unicode )))
-        return 0;
+    {
+        WNDCLASSW wc;
+        /* if it's a comctl32 class, GetClassInfo will load it, then we can retry */
+        if (GetLastError() != ERROR_INVALID_HANDLE ||
+            !GetClassInfoW( 0, className, &wc ) ||
+            !(wndPtr = create_window_handle( parent, owner, className, module, unicode )))
+            return 0;
+    }
     hwnd = wndPtr->obj.handle;
 
     /* Fill the window structure */
@@ -3471,7 +3478,7 @@ BOOL WINAPI SetWindowContextHelpId( HWND hwnd, DWORD id )
     if (wnd == WND_OTHER_PROCESS)
     {
         if (IsWindow( hwnd )) FIXME( "not supported on other process window %p\n", hwnd );
-        return 0;
+        return FALSE;
     }
     wnd->helpContext = id;
     WIN_ReleasePtr( wnd );
@@ -3504,7 +3511,7 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
             if( msg.message == WM_LBUTTONUP )
             {
                 ReleaseCapture();
-                return 0;
+                return FALSE;
             }
             if( msg.message == WM_MOUSEMOVE )
             {
@@ -3514,13 +3521,13 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
                 if( !PtInRect( &rect, tmp ))
                 {
                     ReleaseCapture();
-                    return 1;
+                    return TRUE;
                 }
             }
         }
         WaitMessage();
     }
-    return 0;
+    return FALSE;
 }
 
 /******************************************************************************

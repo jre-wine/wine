@@ -441,9 +441,6 @@ BOOL WINAPI GetMonitorInfoW(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
  */
 BOOL WINAPI EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
 {
-    /* make sure the desktop window exists */
-    GetDesktopWindow();
-
     return USER_Driver->pEnumDisplayMonitors( hdc, rect, proc, lp );
 }
 
@@ -461,7 +458,7 @@ void WINAPI RegisterSystemThread(DWORD flags, DWORD reserved)
 BOOL WINAPI RegisterShellHookWindow ( HWND hWnd )
 {
     FIXME("(%p): stub\n", hWnd);
-    return 0;
+    return FALSE;
 }
 
 

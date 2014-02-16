@@ -1618,7 +1618,7 @@ static BOOL parse_ipv6address(const WCHAR **ptr, parse_data *data, DWORD flags) 
                 /* An IPv6 address can have no more than 8 h16 components. */
                 if(ip.h16_count >= 8) {
                     *ptr = start;
-                    TRACE("(%p %p %x): Not a IPv6 address, to many h16 components.\n",
+                    TRACE("(%p %p %x): Not a IPv6 address, too many h16 components.\n",
                         ptr, data, flags);
                     return FALSE;
                 }
@@ -1904,7 +1904,7 @@ static BOOL parse_path_hierarchical(const WCHAR **ptr, parse_data *data, DWORD f
     return TRUE;
 }
 
-/* Parses the path of an opaque URI (much less strict then the parser
+/* Parses the path of an opaque URI (much less strict than the parser
  * for a hierarchical URI).
  *
  * NOTE:

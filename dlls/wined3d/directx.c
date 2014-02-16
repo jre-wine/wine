@@ -134,6 +134,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_texture_env_dot3",             ARB_TEXTURE_ENV_DOT3          },
     {"GL_ARB_texture_float",                ARB_TEXTURE_FLOAT             },
     {"GL_ARB_texture_mirrored_repeat",      ARB_TEXTURE_MIRRORED_REPEAT   },
+    {"GL_ARB_texture_mirror_clamp_to_edge", ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE},
     {"GL_ARB_texture_non_power_of_two",     ARB_TEXTURE_NON_POWER_OF_TWO  },
     {"GL_ARB_texture_rectangle",            ARB_TEXTURE_RECTANGLE         },
     {"GL_ARB_texture_rg",                   ARB_TEXTURE_RG                },
@@ -178,6 +179,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_EXT_texture_env_dot3",             EXT_TEXTURE_ENV_DOT3          },
     {"GL_EXT_texture_filter_anisotropic",   EXT_TEXTURE_FILTER_ANISOTROPIC},
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS          },
+    {"GL_EXT_texture_mirror_clamp",         EXT_TEXTURE_MIRROR_CLAMP      },
     {"GL_EXT_texture_sRGB",                 EXT_TEXTURE_SRGB              },
     {"GL_EXT_texture_sRGB_decode",          EXT_TEXTURE_SRGB_DECODE       },
     {"GL_EXT_vertex_array_bgra",            EXT_VERTEX_ARRAY_BGRA         },
@@ -277,7 +279,7 @@ static void wined3d_caps_gl_ctx_destroy(const struct wined3d_caps_gl_ctx *ctx)
         ERR("wglDeleteContext(%p) failed, last error %#x.\n", ctx->gl_ctx, err);
     }
 
-    ReleaseDC(ctx->wnd, ctx->dc);
+    wined3d_release_dc(ctx->wnd, ctx->dc);
     DestroyWindow(ctx->wnd);
 
     if (ctx->restore_gl_ctx && !wglMakeCurrent(ctx->restore_dc, ctx->restore_gl_ctx))
@@ -2932,6 +2934,16 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         if (!counter_bits)
             gl_info->supported[ARB_OCCLUSION_QUERY] = FALSE;
     }
+    if (!gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] && gl_info->supported[EXT_TEXTURE_MIRROR_CLAMP])
+    {
+        TRACE(" IMPLIED: ATI_texture_mirror_once support (by EXT_texture_mirror_clamp).\n");
+        gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] = TRUE;
+    }
+    if (!gl_info->supported[ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE] && gl_info->supported[ATI_TEXTURE_MIRROR_ONCE])
+    {
+        TRACE(" IMPLIED: ARB_texture_mirror_clamp_to_edge support (by ATI_texture_mirror_once).\n");
+        gl_info->supported[ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE] = TRUE;
+    }
 
     wined3d_adapter_init_limits(gl_info);
 
@@ -3049,7 +3061,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     gl_info->wrap_lookup[WINED3D_TADDRESS_BORDER - WINED3D_TADDRESS_WRAP] =
             gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
     gl_info->wrap_lookup[WINED3D_TADDRESS_MIRROR_ONCE - WINED3D_TADDRESS_WRAP] =
-            gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
+            gl_info->supported[ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE] ? GL_MIRROR_CLAMP_TO_EDGE : GL_REPEAT;
 
     adapter->d3d_info.valid_rt_mask = 0;
     for (i = 0; i < gl_info->limits.buffers; ++i)
@@ -4349,7 +4361,7 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
     {
         caps->TextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRROR;
     }
-    if (gl_info->supported[ATI_TEXTURE_MIRROR_ONCE])
+    if (gl_info->supported[ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE])
     {
         caps->TextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRRORONCE;
     }
@@ -4367,7 +4379,7 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
         {
             caps->VolumeTextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRROR;
         }
-        if (gl_info->supported[ATI_TEXTURE_MIRROR_ONCE])
+        if (gl_info->supported[ARB_TEXTURE_MIRROR_CLAMP_TO_EDGE])
         {
             caps->VolumeTextureAddressCaps |= WINED3DPTADDRESSCAPS_MIRRORONCE;
         }
