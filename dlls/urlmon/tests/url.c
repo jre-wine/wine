@@ -189,6 +189,7 @@ static BOOL abort_start = FALSE;
 static BOOL abort_progress = FALSE;
 static BOOL async_switch = FALSE;
 static BOOL strict_bsc_qi;
+static DWORD bindtest_flags;
 static const char *test_file;
 
 static WCHAR file_url[INTERNET_MAX_URL_LENGTH], current_url[INTERNET_MAX_URL_LENGTH];
@@ -210,18 +211,6 @@ static enum {
     DOWNLOADING,
     END_DOWNLOAD
 } download_state;
-
-static const char *debugstr_guid(REFIID riid)
-{
-    static char buf[50];
-
-    sprintf(buf, "{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-            riid->Data1, riid->Data2, riid->Data3, riid->Data4[0],
-            riid->Data4[1], riid->Data4[2], riid->Data4[3], riid->Data4[4],
-            riid->Data4[5], riid->Data4[6], riid->Data4[7]);
-
-    return buf;
-}
 
 static BOOL proxy_active(void)
 {
@@ -397,11 +386,11 @@ static HRESULT WINAPI Protocol_QueryInterface(IInternetProtocol *iface, REFIID r
         return E_NOINTERFACE; /* TODO */
 
     if(IsEqualGUID(&IID_undocumentedIE10, riid)) {
-        trace("QI(%s)\n", debugstr_guid(riid));
+        trace("QI(%s)\n", wine_dbgstr_guid(riid));
         return E_NOINTERFACE; /* TODO */
     }
 
-    ok(0, "unexpected call %s\n", debugstr_guid(riid));
+    ok(0, "unexpected call %s\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -1363,7 +1352,7 @@ static HRESULT WINAPI HttpSecurity_GetWindow(IHttpSecurity *iface, REFGUID rguid
     else if(IsEqualGUID(rguidReason, &IID_ICodeInstall))
         CHECK_EXPECT(GetWindow_ICodeInstall);
     else
-        ok(0, "Unexpected rguidReason: %s\n", debugstr_guid(rguidReason));
+        ok(0, "Unexpected rguidReason: %s\n", wine_dbgstr_guid(rguidReason));
 
     *phwnd = NULL;
     return S_OK;
@@ -1448,7 +1437,7 @@ static HRESULT WINAPI ServiceProvider_QueryService(IServiceProvider *iface,
         return E_NOINTERFACE;
     }
 
-    ok(0, "unexpected service %s\n", debugstr_guid(guidService));
+    ok(0, "unexpected service %s\n", wine_dbgstr_guid(guidService));
     return E_NOINTERFACE;
 }
 
@@ -1570,7 +1559,7 @@ static HRESULT WINAPI statusclb_QueryInterface(IBindStatusCallbackEx *iface, REF
         *ppv = NULL;
         return E_NOINTERFACE;
     }else {
-        ok(0, "unexpected interface %s\n", debugstr_guid(riid));
+        ok(0, "unexpected interface %s\n", wine_dbgstr_guid(riid));
     }
 
     return E_NOINTERFACE;
@@ -1632,7 +1621,7 @@ static HRESULT WINAPI statusclb_OnStartBinding(IBindStatusCallbackEx *iface, DWO
 
     hres = IBinding_GetBindResult(pib, &clsid, &res, &res_str, NULL);
     ok(hres == S_OK, "GetBindResult failed: %08x, expected S_OK\n", hres);
-    ok(IsEqualCLSID(&clsid, &CLSID_NULL), "incorrect clsid: %s\n", debugstr_guid(&clsid));
+    ok(IsEqualCLSID(&clsid, &CLSID_NULL), "incorrect clsid: %s\n", wine_dbgstr_guid(&clsid));
     ok(!res, "incorrect res: %x\n", res);
     ok(!res_str, "incorrect res_str: %s\n", wine_dbgstr_w(res_str));
 
@@ -1666,6 +1655,8 @@ static HRESULT WINAPI statusclb_OnProgress(IBindStatusCallbackEx *iface, ULONG u
         if(iface == &objbsc)
             CHECK_EXPECT(Obj_OnProgress_FINDINGRESOURCE);
         else if(test_protocol == FTP_TEST)
+            todo_wine CHECK_EXPECT(OnProgress_FINDINGRESOURCE);
+        else if(test_protocol == HTTPS_TEST && !bindtest_flags)
             todo_wine CHECK_EXPECT(OnProgress_FINDINGRESOURCE);
         else
             CHECK_EXPECT(OnProgress_FINDINGRESOURCE);
@@ -1802,7 +1793,7 @@ static HRESULT WINAPI statusclb_OnProgress(IBindStatusCallbackEx *iface, ULONG u
         hr = CLSIDFromString((LPCOLESTR)szStatusText, &clsid);
         ok(hr == S_OK, "CLSIDFromString failed with error 0x%08x\n", hr);
         ok(IsEqualCLSID(&clsid, &CLSID_HTMLDocument),
-            "Expected clsid to be CLSID_HTMLDocument instead of %s\n", debugstr_guid(&clsid));
+            "Expected clsid to be CLSID_HTMLDocument instead of %s\n", wine_dbgstr_guid(&clsid));
         break;
     }
     case BINDSTATUS_BEGINSYNCOPERATION:
@@ -1894,31 +1885,31 @@ static HRESULT WINAPI statusclb_OnStopBinding(IBindStatusCallbackEx *iface, HRES
         if(hresult==S_OK || (abort_start && hresult!=S_FALSE) || hresult == REGDB_E_CLASSNOTREG) {
             ok(IsEqualCLSID(&clsid, &CLSID_NULL),
                     "incorrect protocol CLSID: %s, expected CLSID_NULL\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(emulate_protocol) {
             todo_wine ok(IsEqualCLSID(&clsid, &CLSID_FtpProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_FtpProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(test_protocol == FTP_TEST) {
             ok(IsEqualCLSID(&clsid, &CLSID_FtpProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_FtpProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(test_protocol == FILE_TEST) {
             ok(IsEqualCLSID(&clsid, &CLSID_FileProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_FileProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(test_protocol == HTTP_TEST) {
             ok(IsEqualCLSID(&clsid, &CLSID_HttpProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_HttpProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(test_protocol == HTTPS_TEST) {
             ok(IsEqualCLSID(&clsid, &CLSID_HttpSProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_HttpSProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else if(test_protocol == ABOUT_TEST) {
             ok(IsEqualCLSID(&clsid, &CLSID_AboutProtocol),
                     "incorrect protocol CLSID: %s, expected CLSID_AboutProtocol\n",
-                    debugstr_guid(&clsid));
+                    wine_dbgstr_guid(&clsid));
         }else {
             ok(0, "unexpected (%d)\n", test_protocol);
         }
@@ -2073,7 +2064,7 @@ static HRESULT WINAPI statusclb_OnObjectAvailable(IBindStatusCallbackEx *iface, 
     if(iface != &objbsc)
         ok(0, "unexpected call\n");
 
-    ok(IsEqualGUID(&IID_IUnknown, riid), "riid = %s\n", debugstr_guid(riid));
+    ok(IsEqualGUID(&IID_IUnknown, riid), "riid = %s\n", wine_dbgstr_guid(riid));
     ok(punk != NULL, "punk == NULL\n");
 
     return S_OK;
@@ -2114,7 +2105,7 @@ static IBindStatusCallbackEx objbsc = { &BindStatusCallbackVtbl };
 static HRESULT WINAPI MonikerProp_QueryInterface(IMonikerProp *iface, REFIID riid, void **ppv)
 {
     *ppv = NULL;
-    ok(0, "unexpected riid %s\n", debugstr_guid(riid));
+    ok(0, "unexpected riid %s\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -2166,7 +2157,7 @@ static HRESULT WINAPI PersistMoniker_QueryInterface(IPersistMoniker *iface, REFI
     if(*ppv)
         return S_OK;
 
-    ok(0, "unexpected riid %s\n", debugstr_guid(riid));
+    ok(0, "unexpected riid %s\n", wine_dbgstr_guid(riid));
     return E_NOINTERFACE;
 }
 
@@ -2314,7 +2305,7 @@ static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID r
     if(IsEqualGUID(&CLSID_IdentityUnmarshal, riid))
         return E_NOINTERFACE;
 
-    ok(0, "unexpected riid %s\n", debugstr_guid(riid));
+    ok(0, "unexpected riid %s\n", wine_dbgstr_guid(riid));
     return E_NOTIMPL;
 }
 
@@ -2332,7 +2323,7 @@ static HRESULT WINAPI ClassFactory_CreateInstance(IClassFactory *iface, IUnknown
 {
     CHECK_EXPECT(CreateInstance);
     ok(!outer, "outer = %p\n", outer);
-    ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", debugstr_guid(riid));
+    ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
     *ppv = &PersistMoniker;
     return S_OK;
 }
@@ -2365,7 +2356,7 @@ static HRESULT WINAPI ProtocolCF_QueryInterface(IClassFactory *iface, REFIID rii
     if(IsEqualGUID(&IID_IInternetProtocolInfo, riid))
         return E_NOINTERFACE;
 
-    ok(0, "unexpected riid %s\n", debugstr_guid(riid));
+    ok(0, "unexpected riid %s\n", wine_dbgstr_guid(riid));
     return E_NOTIMPL;
 }
 
@@ -2375,7 +2366,7 @@ static HRESULT WINAPI ProtocolCF_CreateInstance(IClassFactory *iface, IUnknown *
         return E_NOINTERFACE;
 
     todo_wine ok(outer != NULL, "outer == NULL\n");
-    todo_wine ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", debugstr_guid(riid));
+    todo_wine ok(IsEqualGUID(&IID_IUnknown, riid), "unexpected riid %s\n", wine_dbgstr_guid(riid));
     *ppv = &Protocol;
     return S_OK;
 }
@@ -2818,6 +2809,7 @@ static void init_bind_test(int protocol, DWORD flags, DWORD t)
     const char *url_a = NULL;
 
     test_protocol = protocol;
+    bindtest_flags = flags;
     emulate_protocol = (flags & BINDTEST_EMULATE) != 0;
     download_state = BEFORE_DOWNLOAD;
     stopped_binding = FALSE;
@@ -2850,7 +2842,7 @@ static void init_bind_test(int protocol, DWORD flags, DWORD t)
         url_a = "its:test.chm::/blank.html";
         break;
     case HTTPS_TEST:
-        url_a = (flags & BINDTEST_INVALID_CN) ? "https://209.46.25.132/test.html" : "https://www.codeweavers.com/test.html";
+        url_a = (flags & BINDTEST_INVALID_CN) ? "https://209.46.25.134/favicon.ico" : "https://test.winehq.org/tests/hello.html";
         break;
     case FTP_TEST:
         url_a = "ftp://ftp.winehq.org/pub/other/winelogo.xcf.tar.bz2";
@@ -3991,7 +3983,6 @@ START_TEST(url)
         test_BindToStorage(WINETEST_TEST, BINDTEST_EMULATE|BINDTEST_NO_CALLBACK|BINDTEST_USE_CACHE, TYMED_ISTREAM);
 
         trace("asynchronous https test...\n");
-        http_is_first = TRUE;
         test_BindToStorage(HTTPS_TEST, 0, TYMED_ISTREAM);
 
         trace("emulated https test...\n");

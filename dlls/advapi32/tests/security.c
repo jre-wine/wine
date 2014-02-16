@@ -4539,14 +4539,14 @@ static void test_mutex_security(HANDLE token)
                                 STANDARD_RIGHTS_ALL | MUTEX_ALL_ACCESS };
     static const struct
     {
-        int todo, generic, mapped;
+        int generic, mapped;
     } map[] =
     {
-        { 0, 0, 0 },
-        { 1, GENERIC_READ, STANDARD_RIGHTS_READ | MUTANT_QUERY_STATE },
-        { 0, GENERIC_WRITE, STANDARD_RIGHTS_WRITE },
-        { 0, GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
-        { 0, GENERIC_ALL, STANDARD_RIGHTS_ALL | MUTANT_QUERY_STATE }
+        { 0, 0 },
+        { GENERIC_READ, STANDARD_RIGHTS_READ | MUTANT_QUERY_STATE },
+        { GENERIC_WRITE, STANDARD_RIGHTS_WRITE },
+        { GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
+        { GENERIC_ALL, STANDARD_RIGHTS_ALL | MUTANT_QUERY_STATE }
     };
 
     SetLastError(0xdeadbeef);
@@ -4569,10 +4569,6 @@ static void test_mutex_security(HANDLE token)
         ok(ret, "DuplicateHandle error %d\n", GetLastError());
 
         access = get_obj_access(dup);
-        if (map[i].todo)
-todo_wine
-        ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
-        else
         ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
 
         CloseHandle(dup);
@@ -4600,14 +4596,14 @@ static void test_event_security(HANDLE token)
                                 STANDARD_RIGHTS_ALL | EVENT_ALL_ACCESS };
     static const struct
     {
-        int todo, generic, mapped;
+        int generic, mapped;
     } map[] =
     {
-        { 0, 0, 0 },
-        { 1, GENERIC_READ, STANDARD_RIGHTS_READ | EVENT_QUERY_STATE },
-        { 1, GENERIC_WRITE, STANDARD_RIGHTS_WRITE | EVENT_MODIFY_STATE },
-        { 1, GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
-        { 0, GENERIC_ALL, STANDARD_RIGHTS_ALL | EVENT_QUERY_STATE | EVENT_MODIFY_STATE }
+        { 0, 0 },
+        { GENERIC_READ, STANDARD_RIGHTS_READ | EVENT_QUERY_STATE },
+        { GENERIC_WRITE, STANDARD_RIGHTS_WRITE | EVENT_MODIFY_STATE },
+        { GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
+        { GENERIC_ALL, STANDARD_RIGHTS_ALL | EVENT_QUERY_STATE | EVENT_MODIFY_STATE }
     };
 
     SetLastError(0xdeadbeef);
@@ -4630,10 +4626,6 @@ static void test_event_security(HANDLE token)
         ok(ret, "DuplicateHandle error %d\n", GetLastError());
 
         access = get_obj_access(dup);
-        if (map[i].todo)
-todo_wine
-        ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
-        else
         ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
 
         CloseHandle(dup);
@@ -4661,14 +4653,14 @@ static void test_semaphore_security(HANDLE token)
                                 STANDARD_RIGHTS_ALL | SEMAPHORE_ALL_ACCESS };
     static const struct
     {
-        int todo, generic, mapped;
+        int generic, mapped;
     } map[] =
     {
-        { 0, 0, 0 },
-        { 1, GENERIC_READ, STANDARD_RIGHTS_READ | SEMAPHORE_QUERY_STATE },
-        { 0, GENERIC_WRITE, STANDARD_RIGHTS_WRITE | SEMAPHORE_MODIFY_STATE },
-        { 1, GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
-        { 0, GENERIC_ALL, STANDARD_RIGHTS_ALL | SEMAPHORE_QUERY_STATE | SEMAPHORE_MODIFY_STATE }
+        { 0, 0 },
+        { GENERIC_READ, STANDARD_RIGHTS_READ | SEMAPHORE_QUERY_STATE },
+        { GENERIC_WRITE, STANDARD_RIGHTS_WRITE | SEMAPHORE_MODIFY_STATE },
+        { GENERIC_EXECUTE, STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE },
+        { GENERIC_ALL, STANDARD_RIGHTS_ALL | SEMAPHORE_QUERY_STATE | SEMAPHORE_MODIFY_STATE }
     };
 
     SetLastError(0xdeadbeef);
@@ -4691,10 +4683,6 @@ static void test_semaphore_security(HANDLE token)
         ok(ret, "DuplicateHandle error %d\n", GetLastError());
 
         access = get_obj_access(dup);
-        if (map[i].todo)
-todo_wine
-        ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
-        else
         ok(access == map[i].mapped, "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
 
         CloseHandle(dup);
@@ -4997,18 +4985,13 @@ static void test_thread_security(void)
         switch (map[i].generic)
         {
         case GENERIC_READ:
-todo_wine
+        case GENERIC_EXECUTE:
             ok(access == map[i].mapped || access == (map[i].mapped | THREAD_QUERY_LIMITED_INFORMATION) /* Vista+ */,
                "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             break;
         case GENERIC_WRITE:
 todo_wine
             ok(access == map[i].mapped || access == (map[i].mapped | THREAD_SET_LIMITED_INFORMATION) /* Vista+ */,
-               "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
-            break;
-        case GENERIC_EXECUTE:
-todo_wine
-            ok(access == map[i].mapped || access == (map[i].mapped | THREAD_QUERY_LIMITED_INFORMATION) /* Vista+ */,
                "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             break;
         case GENERIC_ALL:
@@ -5070,17 +5053,14 @@ static void test_process_access(void)
         switch (map[i].generic)
         {
         case GENERIC_READ:
-todo_wine
             ok(access == map[i].mapped || access == (map[i].mapped | PROCESS_QUERY_LIMITED_INFORMATION) /* Vista+ */,
                "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             break;
         case GENERIC_WRITE:
-todo_wine
             ok(access == map[i].mapped || access == (map[i].mapped | PROCESS_TERMINATE) /* before Vista */,
                "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             break;
         case GENERIC_EXECUTE:
-todo_wine
             ok(access == map[i].mapped || access == (map[i].mapped | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE) /* Vista+ */,
                "%d: expected %#x, got %#x\n", i, map[i].mapped, access);
             break;

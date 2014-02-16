@@ -25,6 +25,11 @@
 #include "oleauto.h"
 #include <math.h>
 #include <stdio.h>
+#include "test_tlb.h"
+
+#include "initguid.h"
+
+DEFINE_GUID(UUID_test_struct, 0x4029f190, 0xca4a, 0x4611, 0xae,0xb9,0x67,0x39,0x83,0xcb,0x96,0xdd);
 
 /* Some Visual C++ versions choke on __uint64 to float conversions.
  * To fix this you need either VC++ 6.0 plus the processor pack
@@ -510,18 +515,6 @@ static HRESULT (WINAPI *pVarBstrCat)(BSTR,BSTR,BSTR*);
 static INT (WINAPI *pSystemTimeToVariantTime)(LPSYSTEMTIME,double*);
 static void (WINAPI *pClearCustData)(LPCUSTDATA);
 
-static const char *debugstr_guid(REFIID riid)
-{
-    static char buf[50];
-
-    sprintf(buf, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-            riid->Data1, riid->Data2, riid->Data3, riid->Data4[0],
-            riid->Data4[1], riid->Data4[2], riid->Data4[3], riid->Data4[4],
-            riid->Data4[5], riid->Data4[6], riid->Data4[7]);
-
-    return buf;
-}
-
 /* Internal representation of a BSTR */
 typedef struct tagINTERNAL_BSTR
 {
@@ -536,8 +529,6 @@ typedef struct
   VARTYPE vt;
   BOOL bFailInvoke;
 } DummyDispatch;
-
-static DummyDispatch dispatch;
 
 static inline DummyDispatch *impl_from_IDispatch(IDispatch *iface)
 {
@@ -599,10 +590,12 @@ static HRESULT WINAPI DummyDispatch_Invoke(IDispatch *iface,
                                            EXCEPINFO *ei,
                                            UINT *arg_err)
 {
+  DummyDispatch *This = impl_from_IDispatch(iface);
+
   CHECK_EXPECT(dispatch_invoke);
 
   ok(dispid == DISPID_VALUE, "got dispid %d\n", dispid);
-  ok(IsEqualIID(riid, &IID_NULL), "go riid %s\n", debugstr_guid(riid));
+  ok(IsEqualIID(riid, &IID_NULL), "go riid %s\n", wine_dbgstr_guid(riid));
   ok(wFlags == DISPATCH_PROPERTYGET, "Flags wrong\n");
 
   ok(params->rgvarg == NULL, "got %p\n", params->rgvarg);
@@ -614,11 +607,11 @@ static HRESULT WINAPI DummyDispatch_Invoke(IDispatch *iface,
   ok(ei == NULL, "got %p\n", ei);
   ok(arg_err == NULL, "got %p\n", arg_err);
 
-  if (dispatch.bFailInvoke)
+  if (This->bFailInvoke)
     return E_OUTOFMEMORY;
 
-  V_VT(res) = dispatch.vt;
-  if (dispatch.vt == VT_UI1)
+  V_VT(res) = This->vt;
+  if (This->vt == VT_UI1)
       V_UI1(res) = 1;
   else
       memset(res, 0, sizeof(*res));
@@ -637,7 +630,13 @@ static const IDispatchVtbl DummyDispatch_VTable =
   DummyDispatch_Invoke
 };
 
-static DummyDispatch dispatch = { { &DummyDispatch_VTable }, 1, 0, 0 };
+static void init_test_dispatch(LONG ref, VARTYPE vt, DummyDispatch *dispatch)
+{
+    dispatch->IDispatch_iface.lpVtbl = &DummyDispatch_VTable;
+    dispatch->ref = ref;
+    dispatch->vt = vt;
+    dispatch->bFailInvoke = FALSE;
+}
 
 /*
  * VT_I1/VT_UI1
@@ -1111,6 +1110,7 @@ static void test_VarUI1FromStr(void)
 
 static void test_VarUI1FromDisp(void)
 {
+  DummyDispatch dispatch;
   CONVVARS(LCID);
   VARIANTARG vSrc, vDst;
 
@@ -1133,10 +1133,9 @@ static void test_VarUI1FromDisp(void)
   VariantInit(&vSrc);
   VariantInit(&vDst);
 
+  init_test_dispatch(1, VT_UI1, &dispatch);
   V_VT(&vSrc) = VT_DISPATCH;
   V_DISPATCH(&vSrc) = &dispatch.IDispatch_iface;
-  dispatch.vt = VT_UI1;
-  dispatch.bFailInvoke = FALSE;
 
   SET_EXPECT(dispatch_invoke);
   out = 10;
@@ -5693,8 +5692,11 @@ static void test_IUnknownClear(void)
 {
   HRESULT hres;
   VARIANTARG v;
-  DummyDispatch u = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IUnknown* pu = (IUnknown*)&u.IDispatch_iface;
+  DummyDispatch u;
+  IUnknown* pu;
+
+  init_test_dispatch(1, VT_UI1, &u);
+  pu = (IUnknown*)&u.IDispatch_iface;
 
   /* Test that IUnknown_Release is called on by-value */
   V_VT(&v) = VT_UNKNOWN;
@@ -5718,8 +5720,11 @@ static void test_IUnknownCopy(void)
 {
   HRESULT hres;
   VARIANTARG vSrc, vDst;
-  DummyDispatch u = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IUnknown* pu = (IUnknown*)&u.IDispatch_iface;
+  DummyDispatch u;
+  IUnknown* pu;
+
+  init_test_dispatch(1, VT_UI1, &u);
+  pu = (IUnknown*)&u.IDispatch_iface;
 
   /* AddRef is called on by-value copy */
   VariantInit(&vDst);
@@ -5766,8 +5771,11 @@ static void test_IUnknownChangeTypeEx(void)
   VARIANTARG vSrc, vDst;
   LCID lcid;
   VARTYPE vt;
-  DummyDispatch u = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IUnknown* pu = (IUnknown*)&u.IDispatch_iface;
+  DummyDispatch u;
+  IUnknown* pu;
+
+  init_test_dispatch(1, VT_UI1, &u);
+  pu = (IUnknown*)&u.IDispatch_iface;
 
   lcid = MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT);
 
@@ -5831,8 +5839,11 @@ static void test_IDispatchClear(void)
 {
   HRESULT hres;
   VARIANTARG v;
-  DummyDispatch d = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IDispatch* pd = &d.IDispatch_iface;
+  DummyDispatch d;
+  IDispatch* pd;
+
+  init_test_dispatch(1, VT_UI1, &d);
+  pd = &d.IDispatch_iface;
 
   /* As per IUnknown */
 
@@ -5856,8 +5867,11 @@ static void test_IDispatchCopy(void)
 {
   HRESULT hres;
   VARIANTARG vSrc, vDst;
-  DummyDispatch d = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IDispatch* pd = &d.IDispatch_iface;
+  DummyDispatch d;
+  IDispatch* pd;
+
+  init_test_dispatch(1, VT_UI1, &d);
+  pd = &d.IDispatch_iface;
 
   /* As per IUnknown */
 
@@ -5901,8 +5915,11 @@ static void test_IDispatchChangeTypeEx(void)
   HRESULT hres;
   VARIANTARG vSrc, vDst;
   LCID lcid;
-  DummyDispatch d = { { &DummyDispatch_VTable }, 1, VT_UI1, FALSE };
-  IDispatch* pd = &d.IDispatch_iface;
+  DummyDispatch d;
+  IDispatch* pd;
+
+  init_test_dispatch(1, VT_UI1, &d);
+  pd = &d.IDispatch_iface;
 
   lcid = MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT);
 
@@ -6253,6 +6270,129 @@ static void test_bstr_cache(void)
     SysFreeString(str2);
 }
 
+static void write_typelib(int res_no, const char *filename)
+{
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+
+    file = CreateFileA( filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "file creation failed\n" );
+    if (file == INVALID_HANDLE_VALUE) return;
+    res = FindResourceA( GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(res_no), "TYPELIB" );
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
+    WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+}
+
+static const char *create_test_typelib(int res_no)
+{
+    static char filename[MAX_PATH];
+
+    GetTempFileNameA( ".", "tlb", 0, filename );
+    write_typelib(res_no, filename);
+    return filename;
+}
+
+static void test_recinfo(void)
+{
+    static const WCHAR testW[] = {'t','e','s','t',0};
+    static WCHAR teststructW[] = {'t','e','s','t','_','s','t','r','u','c','t',0};
+    struct test_struct teststruct, testcopy;
+    WCHAR filenameW[MAX_PATH];
+    const char *filename;
+    IRecordInfo *recinfo;
+    ITypeInfo *typeinfo;
+    DummyDispatch dispatch;
+    ITypeLib *typelib;
+    TYPEATTR *attr;
+    MEMBERID memid;
+    UINT16 found;
+    HRESULT hr;
+    ULONG size;
+
+    filename = create_test_typelib(2);
+    MultiByteToWideChar(CP_ACP, 0, filename, -1, filenameW, MAX_PATH);
+    hr = LoadTypeLibEx(filenameW, REGKIND_NONE, &typelib);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    typeinfo = NULL;
+    found = 1;
+    hr = ITypeLib_FindName(typelib, teststructW, 0, &typeinfo, &memid, &found);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(typeinfo != NULL, "got %p\n", typeinfo);
+    hr = ITypeInfo_GetTypeAttr(typeinfo, &attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(IsEqualGUID(&attr->guid, &UUID_test_struct), "got %s\n", wine_dbgstr_guid(&attr->guid));
+    ok(attr->typekind == TKIND_RECORD, "got %d\n", attr->typekind);
+
+    hr = GetRecordInfoFromTypeInfo(typeinfo, &recinfo);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    size = 0;
+    hr = IRecordInfo_GetSize(recinfo, &size);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(size == sizeof(struct test_struct), "got size %d\n", size);
+    ok(attr->cbSizeInstance == sizeof(struct test_struct), "got instance size %d\n", attr->cbSizeInstance);
+    ITypeInfo_ReleaseTypeAttr(typeinfo, attr);
+
+    /* RecordInit() */
+    teststruct.hr = E_FAIL;
+    teststruct.b = 0x1;
+    teststruct.disp = (void*)0xdeadbeef;
+    teststruct.bstr = (void*)0xdeadbeef;
+
+    hr = IRecordInfo_RecordInit(recinfo, &teststruct);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(teststruct.hr == 0, "got 0x%08x\n", teststruct.hr);
+    ok(teststruct.b == 0, "got 0x%08x\n", teststruct.b);
+    ok(teststruct.disp == NULL, "got %p\n", teststruct.disp);
+    ok(teststruct.bstr == NULL, "got %p\n", teststruct.bstr);
+
+    init_test_dispatch(10, VT_UI1, &dispatch);
+
+    /* RecordCopy(), interface field reference increased */
+    teststruct.hr = S_FALSE;
+    teststruct.b = VARIANT_TRUE;
+    teststruct.disp = &dispatch.IDispatch_iface;
+    teststruct.bstr = SysAllocString(testW);
+    memset(&testcopy, 0, sizeof(testcopy));
+    hr = IRecordInfo_RecordCopy(recinfo, &teststruct, &testcopy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(testcopy.hr == S_FALSE, "got 0x%08x\n", testcopy.hr);
+    ok(testcopy.b == VARIANT_TRUE, "got %d\n", testcopy.b);
+    ok(testcopy.disp == teststruct.disp, "got %p\n", testcopy.disp);
+    ok(dispatch.ref == 11, "got %d\n", dispatch.ref);
+    ok(testcopy.bstr != teststruct.bstr, "got %p\n", testcopy.bstr);
+    ok(!lstrcmpW(testcopy.bstr, teststruct.bstr), "got %s, %s\n", wine_dbgstr_w(testcopy.bstr), wine_dbgstr_w(teststruct.bstr));
+
+    /* RecordClear() */
+    hr = IRecordInfo_RecordClear(recinfo, &teststruct);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(teststruct.bstr == NULL, "got %p\n", teststruct.bstr);
+    hr = IRecordInfo_RecordClear(recinfo, &testcopy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(testcopy.bstr == NULL, "got %p\n", testcopy.bstr);
+
+    /* now destination contains inteface pointer */
+    memset(&testcopy, 0, sizeof(testcopy));
+    testcopy.disp = &dispatch.IDispatch_iface;
+    dispatch.ref = 10;
+
+    hr = IRecordInfo_RecordCopy(recinfo, &teststruct, &testcopy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(dispatch.ref == 9, "got %d\n", dispatch.ref);
+
+    IRecordInfo_Release(recinfo);
+
+    ITypeInfo_Release(typeinfo);
+    ITypeLib_Release(typelib);
+    DeleteFileA(filename);
+}
+
 START_TEST(vartype)
 {
   hOleaut32 = GetModuleHandleA("oleaut32.dll");
@@ -6554,4 +6694,6 @@ START_TEST(vartype)
 
   test_NullByRef();
   test_ChangeType_keep_dst();
+
+  test_recinfo();
 }

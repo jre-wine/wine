@@ -1,7 +1,5 @@
 /*
- * msvcp70 specific functions
- *
- * Copyright 2010 Piotr Caban for CodeWeavers
+ * Copyright 2014 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,20 +16,36 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdarg.h>
+import "oaidl.idl";
+import "ocidl.idl";
 
-#include "windef.h"
-#include "winbase.h"
+#ifndef __WIDL__
+#define threading(model)
+#define progid(str)
+#define vi_progid(str)
+#endif
 
-BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
-{
-    switch (reason)
-    {
-        case DLL_WINE_PREATTACH:
-            return FALSE;  /* prefer native version */
+[
+    helpstring("Windows Media Player"),
+    version(1.0),
+    uuid(6bf52a50-394a-11d3-b153-00c04f79Faa6)
+]
+library WMPLib {
+    importlib("stdole2.tlb");
 
-        case DLL_PROCESS_ATTACH:
-            DisableThreadLibraryCalls(hdll);
-    }
-    return TRUE;
+    [
+        hidden,
+        uuid(6bf52a51-394a-11d3-b153-00c04f79faa6)
+    ]
+    interface _WMPOCXEvents : IDispatch
+    {}
+
+    [
+        helpstring("Windows Media Player"),
+        threading(apartment),
+        progid("WMPlayer.OCX"),
+        uuid(6bf52a52-394a-11d3-b153-00c04f79faa6)
+     ]
+     coclass WindowsMediaPlayer
+     {}
 }
