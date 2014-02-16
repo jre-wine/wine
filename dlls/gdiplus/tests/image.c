@@ -26,7 +26,7 @@
 #include <stdio.h>
 
 #include "initguid.h"
-#include "windows.h"
+#include "objbase.h"
 #include "gdiplus.h"
 #include "wine/test.h"
 
@@ -3809,7 +3809,7 @@ static void test_image_format(void)
         else
         {
             expect(Ok, status);
-            ret = GetObject(hbitmap, sizeof(bm), &bm);
+            ret = GetObjectW(hbitmap, sizeof(bm), &bm);
             expect(sizeof(bm), ret);
             expect(0, bm.bmType);
             expect(1, bm.bmWidth);
@@ -4240,6 +4240,32 @@ static void test_ARGB_conversion(void)
     GdipDisposeImage((GpImage *)bitmap);
 }
 
+
+static void test_CloneBitmapArea(void)
+{
+    GpStatus status;
+    GpBitmap *bitmap, *copy;
+    BitmapData data, data2;
+
+    status = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat24bppRGB, NULL, &bitmap);
+    expect(Ok, status);
+
+    status = GdipBitmapLockBits(bitmap, NULL, ImageLockModeRead | ImageLockModeWrite, PixelFormat24bppRGB, &data);
+    expect(Ok, status);
+
+    status = GdipBitmapLockBits(bitmap, NULL, ImageLockModeRead, PixelFormat24bppRGB, &data2);
+    expect(WrongState, status);
+
+    status = GdipCloneBitmapAreaI(0, 0, 1, 1, PixelFormat24bppRGB, bitmap, &copy);
+    expect(Ok, status);
+
+    status = GdipBitmapUnlockBits(bitmap, &data);
+    expect(Ok, status);
+
+    GdipDisposeImage((GpImage *)copy);
+    GdipDisposeImage((GpImage *)bitmap);
+}
+
 START_TEST(image)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -4252,6 +4278,7 @@ START_TEST(image)
 
     GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
 
+    test_CloneBitmapArea();
     test_ARGB_conversion();
     test_DrawImage_scale();
     test_image_format();

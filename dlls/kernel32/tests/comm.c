@@ -646,7 +646,7 @@ static void test_BuildCommDCB(void)
 		COMMCONFIG commconfig;
 		DWORD size = sizeof(COMMCONFIG);
 
-		if(GetDefaultCommConfig(port_name, &commconfig, &size))
+		if(GetDefaultCommConfigA(port_name, &commconfig, &size))
 		{
 			port = port_name[3];
 			break;
@@ -697,7 +697,7 @@ static HANDLE test_OpenComm(BOOL doOverlap)
     /* Try to find a port */
     for(port_name[3] = '1'; port_name[3] <= '9'; port_name[3]++)
     {
-	hcom = CreateFile( port_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+	hcom = CreateFileA( port_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
 			   (doOverlap)?FILE_FLAG_OVERLAPPED:0, NULL );
 	if (hcom != INVALID_HANDLE_VALUE)
 	    break;
@@ -835,29 +835,27 @@ static void test_waittxempty(void)
 
     S(U(ovl_write)).Offset = 0;
     S(U(ovl_write)).OffsetHigh = 0;
-    ovl_write.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ovl_write.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     before = GetTickCount();
     SetLastError(0xdeadbeef);
     res = WriteFile(hcom, tbuf, sizeof(tbuf), &bytes, &ovl_write);
     after = GetTickCount();
-todo_wine
-    ok(!res && GetLastError() == ERROR_IO_PENDING, "WriteFile returned %d, error %d\n", res, GetLastError());
-todo_wine
-    ok(!bytes, "expected 0, got %u\n", bytes);
+    ok((!res && GetLastError() == ERROR_IO_PENDING) || (res && bytes == sizeof(tbuf)),
+       "WriteFile returned %d, written %u bytes, error %d\n", res, bytes, GetLastError());
+    if (!res) ok(!bytes, "expected 0, got %u\n", bytes);
     ok(after - before < 30, "WriteFile took %d ms to write %d Bytes at %d Baud\n",
        after - before, bytes, baud);
     /* don't wait for WriteFile completion */
 
     S(U(ovl_wait)).Offset = 0;
     S(U(ovl_wait)).OffsetHigh = 0;
-    ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ovl_wait.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     evtmask = 0;
     before = GetTickCount();
     SetLastError(0xdeadbeef);
     res = WaitCommEvent(hcom, &evtmask, &ovl_wait);
     ok(!res && GetLastError() == ERROR_IO_PENDING, "WaitCommEvent error %d\n", GetLastError());
-    res = WaitForSingleObject(ovl_wait.hEvent, TIMEOUT);
-todo_wine
+    res = WaitForSingleObject(ovl_wait.hEvent, 1500);
     ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
     if (res == WAIT_OBJECT_0)
     {
@@ -879,16 +877,13 @@ todo_wine
         res = FALSE;
     }
     after = GetTickCount();
-todo_wine
     ok(res, "WaitCommEvent error %d\n", GetLastError());
-todo_wine
     ok(evtmask & EV_TXEMPTY, "WaitCommEvent: expected EV_TXEMPTY, got %#x\n", evtmask);
     CloseHandle(ovl_wait.hEvent);
 
     timediff = after - before;
     trace("WaitCommEvent for EV_TXEMPTY took %d ms (timeout %d)\n", timediff, TIMEOUT);
-todo_wine
-    ok(timediff < 900, "WaitCommEvent used %d ms for waiting\n", timediff);
+    ok(timediff < 1200, "WaitCommEvent used %d ms for waiting\n", timediff);
 
     res = WaitForSingleObject(ovl_write.hEvent, 0);
     ok(res == WAIT_OBJECT_0, "WriteFile failed with a timeout\n");
@@ -911,14 +906,13 @@ todo_wine
         {
             S(U(ovl_write)).Offset = 0;
             S(U(ovl_write)).OffsetHigh = 0;
-            ovl_write.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+            ovl_write.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
             before = GetTickCount();
             SetLastError(0xdeadbeef);
             res = WriteFile(hcom, tbuf, sizeof(tbuf), &bytes, &ovl_write);
-todo_wine
-            ok(!res && GetLastError() == ERROR_IO_PENDING, "WriteFile returned %d, error %d\n", res, GetLastError());
-todo_wine
-            ok(!bytes, "expected 0, got %u\n", bytes);
+            ok((!res && GetLastError() == ERROR_IO_PENDING) || (res && bytes == sizeof(tbuf)),
+               "WriteFile returned %d, written %u bytes, error %d\n", res, bytes, GetLastError());
+            if (!res) ok(!bytes, "expected 0, got %u\n", bytes);
 
             ClearCommError(hcom, &errors, &stat);
             ok(stat.cbInQue == 0, "InQueue should be empty, got %d bytes\n", stat.cbInQue);
@@ -941,15 +935,14 @@ todo_wine
 
         S(U(ovl_wait)).Offset = 0;
         S(U(ovl_wait)).OffsetHigh = 0;
-        ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        ovl_wait.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
         evtmask = 0;
         SetLastError(0xdeadbeef);
         res = WaitCommEvent(hcom, &evtmask, &ovl_wait);
-        ok(!res && GetLastError() == ERROR_IO_PENDING, "%d: WaitCommEvent error %d\n", i, GetLastError());
+        ok((!res && GetLastError() == ERROR_IO_PENDING) || res /* busy system */, "%d: WaitCommEvent error %d\n", i, GetLastError());
 
         res = WaitForSingleObject(ovl_wait.hEvent, TIMEOUT);
         if (i == 0)
-todo_wine
             ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
         else
             ok(res == WAIT_TIMEOUT, "WaitCommEvent should fail with a timeout\n");
@@ -967,7 +960,7 @@ todo_wine
 
             S(U(ovl_wait2)).Offset = 0;
             S(U(ovl_wait2)).OffsetHigh = 0;
-            ovl_wait2.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+            ovl_wait2.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
             SetLastError(0xdeadbeef);
             res = WaitCommEvent(hcom, &evtmask, &ovl_wait2);
             ok(!res, "WaitCommEvent should fail if there is a pending wait\n");
@@ -1344,12 +1337,12 @@ static void test_WaitRx(void)
     if (hcom == INVALID_HANDLE_VALUE) return;
 
     ok(SetCommMask(hcom, EV_RXCHAR), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     ZeroMemory( &overlapped, sizeof(overlapped));
     overlapped.hEvent = hComPortEvent;
 
-    hComWriteEvent = CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComWriteEvent = CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComWriteEvent != NULL, "CreateEvent res %d\n", GetLastError());
     ZeroMemory( &overlapped_w, sizeof(overlapped_w));
     overlapped_w.hEvent = hComWriteEvent;
@@ -1464,7 +1457,7 @@ static void test_WaitCts(void)
     trace("test_WaitCts timeout %ld clt 0x%08lx handle %p\n",args[0], args[1], hcom);
 
     ok(SetCommMask(hcom, EV_CTS), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     args[3] = (DWORD_PTR)hComPortEvent;
     alarmThread = CreateThread(NULL, 0, toggle_ctlLine, args, 0, &alarmThreadId);
@@ -1558,7 +1551,7 @@ static void test_AbortWaitCts(void)
     trace("test_AbortWaitCts timeout %ld handle %p\n",args[0], hcom);
 
     ok(SetCommMask(hcom, EV_CTS), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     alarmThread = CreateThread(NULL, 0, reset_CommMask, args, 0, &alarmThreadId);
     /* Wait a minimum to let the thread start up */
@@ -1630,7 +1623,7 @@ static void test_WaitDsr(void)
     trace("test_WaitDsr timeout %ld clt 0x%08lx handle %p\n",args[0], args[1], hcom);
 
     ok(SetCommMask(hcom, EV_DSR), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     alarmThread = CreateThread(NULL, 0, toggle_ctlLine, args, 0, &alarmThreadId);
     ok(alarmThread !=0 , "CreateThread Failed\n");
@@ -1716,7 +1709,7 @@ static void test_WaitRing(void)
     trace("test_WaitRing timeout %ld clt 0x%08lx handle %p\n",args[0], args[1], hcom);
 
     ok(SetCommMask(hcom, EV_RING), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     alarmThread = CreateThread(NULL, 0, toggle_ctlLine, args, 0, &alarmThreadId);
     ok(alarmThread !=0 , "CreateThread Failed\n");
@@ -1795,7 +1788,7 @@ static void test_WaitDcd(void)
     trace("test_WaitDcd timeout %ld clt 0x%08lx handle %p\n",args[0], args[1], hcom);
 
     ok(SetCommMask(hcom, EV_RLSD), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
     alarmThread = CreateThread(NULL, 0, toggle_ctlLine, args, 0, &alarmThreadId);
     ok(alarmThread !=0 , "CreateThread Failed\n");
@@ -1874,7 +1867,7 @@ static void test_WaitBreak(void)
     if (hcom == INVALID_HANDLE_VALUE) return;
 
     ok(SetCommMask(hcom, EV_BREAK), "SetCommMask failed\n");
-    hComPortEvent =  CreateEvent( NULL, TRUE, FALSE, NULL );
+    hComPortEvent =  CreateEventW( NULL, TRUE, FALSE, NULL );
     ok(hComPortEvent != 0, "CreateEvent failed\n");
 
     trace("test_WaitBreak\n");
@@ -1947,7 +1940,7 @@ static void test_WaitCommEvent(void)
 
     S(U(ovl_wait)).Offset = 0;
     S(U(ovl_wait)).OffsetHigh = 0;
-    ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ovl_wait.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     trace("waiting 10 secs for com port events (turn on/off the device)...\n");
     last_event_time = 0;
@@ -2089,8 +2082,7 @@ static void test_read_write(void)
     iob.Information = -1;
     offset.QuadPart = 0;
     status = pNtWriteFile(hcom, 0, NULL, NULL, &iob, atz, sizeof(atz), &offset, NULL);
-todo_wine
-    ok(status == STATUS_PENDING, "expected STATUS_PENDING, got %#x\n", status);
+    ok(status == STATUS_PENDING || status == STATUS_SUCCESS, "expected STATUS_PENDING or STATUS_SUCCESS, got %#x\n", status);
     /* Under Windows checking IO_STATUS_BLOCK right after the call leads
      * to races, iob.Status is either -1 or STATUS_SUCCESS, which means
      * that it's set only when the operation completes.
@@ -2111,7 +2103,7 @@ todo_wine
 
     S(U(ovl_wait)).Offset = 0;
     S(U(ovl_wait)).OffsetHigh = 0;
-    ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    ovl_wait.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
 
     trace("waiting 3 secs for modem response...\n");
     last_event_time = 0;
@@ -2198,7 +2190,7 @@ done:
 
 START_TEST(comm)
 {
-    HMODULE ntdll = GetModuleHandle("ntdll.dll");
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     if (ntdll)
     {
         pNtReadFile = (void *)GetProcAddress(ntdll, "NtReadFile");
