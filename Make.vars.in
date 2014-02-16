@@ -50,7 +50,6 @@ CROSSTARGET     = @CROSSTARGET@
 LINGUAS         = @LINGUAS@
 RUNTESTFLAGS    = -q -P wine
 MAKEDEP         = $(TOOLSDIR)/tools/makedep$(TOOLSEXT)
-SFNT2FNT        = $(TOOLSDIR)/tools/sfnt2fnt$(TOOLSEXT)
 WINEBUILD       = $(TOOLSDIR)/tools/winebuild/winebuild$(TOOLSEXT)
 WRC             = $(TOOLSDIR)/tools/wrc/wrc$(TOOLSEXT)
 LIBPORT         = $(top_builddir)/libs/port/libwine_port.a
@@ -66,6 +65,7 @@ INSTALL_DATA    = $(top_srcdir)/tools/install-sh -m 644 $(INSTALL_DATA_FLAGS)
 prog_manext     = 1
 api_manext      = 3w
 conf_manext     = 5
+@ALL_VARS_RULES@
 @SET_MAKE@
 
 all:

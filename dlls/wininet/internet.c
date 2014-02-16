@@ -1219,7 +1219,7 @@ BOOL WINAPI InternetGetConnectedStateExW(LPDWORD lpdwStatus, LPWSTR lpszConnecti
         WARN("always returning LAN connection.\n");
         *lpdwStatus = INTERNET_CONNECTION_LAN;
     }
-    return LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen);
+    return LoadStringW(WININET_hModule, IDS_LANCONNECTION, lpszConnectionName, dwNameLen) > 0;
 }
 
 
@@ -1765,7 +1765,7 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
 
     if(!found_colon){
         SetLastError(ERROR_INTERNET_UNRECOGNIZED_SCHEME);
-        return 0;
+        return FALSE;
     }
 
     lpUC->nScheme = INTERNET_SCHEME_UNKNOWN;

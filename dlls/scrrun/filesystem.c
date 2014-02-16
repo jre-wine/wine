@@ -467,6 +467,36 @@ static ULONG WINAPI foldercoll_enumvariant_Release(IEnumVARIANT *iface)
     return ref;
 }
 
+static HANDLE start_enumeration(const WCHAR *path, WIN32_FIND_DATAW *data)
+{
+    static const WCHAR allW[] = {'*',0};
+    WCHAR pathW[MAX_PATH];
+    int len;
+    HANDLE handle;
+
+    strcpyW(pathW, path);
+    len = strlenW(pathW);
+    if (pathW[len-1] != '\\')
+        strcatW(pathW, bsW);
+    strcatW(pathW, allW);
+    handle = FindFirstFileW(pathW, data);
+    if (handle == INVALID_HANDLE_VALUE) return 0;
+
+    /* find first dir */
+    while (1)
+    {
+        if (is_dir_data(data))
+            break;
+
+        if (!FindNextFileW(handle, data))
+        {
+            FindClose(handle);
+            return 0;
+        }
+    }
+    return handle;
+}
+
 static HRESULT WINAPI foldercoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *var, ULONG *fetched)
 {
     struct enumvariant *This = impl_from_IEnumVARIANT(iface);
@@ -479,44 +509,23 @@ static HRESULT WINAPI foldercoll_enumvariant_Next(IEnumVARIANT *iface, ULONG cel
     if (fetched)
         *fetched = 0;
 
+    if (!celt) return S_OK;
+
     if (!handle)
     {
-        static const WCHAR allW[] = {'*',0};
-        WCHAR pathW[MAX_PATH];
-        BSTR parent = This->data.u.foldercoll.coll->path;
-        int len;
-
-        strcpyW(pathW, parent);
-        len = SysStringLen(parent);
-        if (parent[len-1] != '\\')
-            strcatW(pathW, bsW);
-        strcatW(pathW, allW);
-        handle = FindFirstFileW(pathW, &data);
-        if (handle == INVALID_HANDLE_VALUE)
-            return S_FALSE;
-
-        /* find first dir */
-        while (1)
-        {
-            if (is_dir_data(&data))
-                break;
-            else
-                if (!FindNextFileW(handle, &data))
-                {
-                    FindClose(handle);
-                    return S_FALSE;
-                }
-        }
+        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data);
+        if (!handle) return S_FALSE;
 
         This->data.u.foldercoll.find = handle;
     }
-    else if (celt)
-        FindNextFileW(handle, &data);
+    else
+    {
+        if (!FindNextFileW(handle, &data))
+            return S_FALSE;
+    }
 
     do
     {
-        if (count >= celt) break;
-
         if (is_dir_data(&data))
         {
             IFolder *folder;
@@ -532,15 +541,15 @@ static HRESULT WINAPI foldercoll_enumvariant_Next(IEnumVARIANT *iface, ULONG cel
             V_DISPATCH(&var[count]) = (IDispatch*)folder;
             count++;
         }
-    } while (FindNextFileW(handle, &data));
 
-    if (count < celt)
-        return S_FALSE;
+        if (count >= celt) break;
+
+    } while (FindNextFileW(handle, &data));
 
     if (fetched)
         *fetched = count;
 
-    return S_OK;
+    return (count < celt) ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI foldercoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG celt)
@@ -551,9 +560,28 @@ static HRESULT WINAPI foldercoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG cel
 
     TRACE("(%p)->(%d)\n", This, celt);
 
-    while (FindNextFileW(handle, &data) && celt)
+    if (!celt) return S_OK;
+
+    if (!handle)
+    {
+        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data);
+        if (!handle) return S_FALSE;
+
+        This->data.u.foldercoll.find = handle;
+    }
+    else
+    {
+        if (!FindNextFileW(handle, &data))
+            return S_FALSE;
+    }
+
+    do
+    {
         if (is_dir_data(&data))
             --celt;
+
+        if (!celt) break;
+    } while (FindNextFileW(handle, &data));
 
     return celt ? S_FALSE : S_OK;
 }
@@ -587,7 +615,7 @@ static const IEnumVARIANTVtbl foldercollenumvariantvtbl = {
     foldercoll_enumvariant_Clone
 };
 
-HRESULT create_foldercoll_enum(struct foldercollection *collection, IUnknown **newenum)
+static HRESULT create_foldercoll_enum(struct foldercollection *collection, IUnknown **newenum)
 {
     struct enumvariant *This;
 
@@ -742,7 +770,7 @@ static const IEnumVARIANTVtbl filecollenumvariantvtbl = {
     filecoll_enumvariant_Clone
 };
 
-HRESULT create_filecoll_enum(struct filecollection *collection, IUnknown **newenum)
+static HRESULT create_filecoll_enum(struct filecollection *collection, IUnknown **newenum)
 {
     struct enumvariant *This;
 
@@ -913,7 +941,7 @@ static HRESULT WINAPI foldercoll_get_Count(IFolderCollection *iface, LONG *count
 
     do
     {
-        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        if (is_dir_data(&data))
             *count += 1;
     } while (FindNextFileW(handle, &data));
     FindClose(handle);
@@ -1494,7 +1522,10 @@ static ULONG WINAPI file_Release(IFile *iface)
     TRACE("(%p) ref=%d\n", This, ref);
 
     if(!ref)
+    {
         heap_free(This->path);
+        heap_free(This);
+    }
 
     return ref;
 }

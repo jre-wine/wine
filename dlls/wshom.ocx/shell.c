@@ -394,15 +394,31 @@ static HRESULT WINAPI WshShortcut_get_FullName(IWshShortcut *iface, BSTR *name)
 static HRESULT WINAPI WshShortcut_get_Arguments(IWshShortcut *iface, BSTR *Arguments)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
-    FIXME("(%p)->(%p): stub\n", This, Arguments);
-    return E_NOTIMPL;
+    WCHAR buffW[INFOTIPSIZE];
+    HRESULT hr;
+
+    TRACE("(%p)->(%p)\n", This, Arguments);
+
+    if (!Arguments)
+        return E_POINTER;
+
+    *Arguments = NULL;
+
+    hr = IShellLinkW_GetArguments(This->link, buffW, sizeof(buffW)/sizeof(WCHAR));
+    if (FAILED(hr))
+        return hr;
+
+    *Arguments = SysAllocString(buffW);
+    return *Arguments ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT WINAPI WshShortcut_put_Arguments(IWshShortcut *iface, BSTR Arguments)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
-    FIXME("(%p)->(%s): stub\n", This, debugstr_w(Arguments));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(Arguments));
+
+    return IShellLinkW_SetArguments(This->link, Arguments);
 }
 
 static HRESULT WINAPI WshShortcut_get_Description(IWshShortcut *iface, BSTR *Description)
@@ -485,14 +501,26 @@ static HRESULT WINAPI WshShortcut_put_WindowStyle(IWshShortcut *iface, int ShowC
 static HRESULT WINAPI WshShortcut_get_WorkingDirectory(IWshShortcut *iface, BSTR *WorkingDirectory)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
-    FIXME("(%p)->(%p): stub\n", This, WorkingDirectory);
-    return E_NOTIMPL;
+    WCHAR buffW[MAX_PATH];
+    HRESULT hr;
+
+    TRACE("(%p)->(%p)\n", This, WorkingDirectory);
+
+    if (!WorkingDirectory)
+        return E_POINTER;
+
+    *WorkingDirectory = NULL;
+    hr = IShellLinkW_GetWorkingDirectory(This->link, buffW, sizeof(buffW)/sizeof(WCHAR));
+    if (FAILED(hr)) return hr;
+
+    *WorkingDirectory = SysAllocString(buffW);
+    return *WorkingDirectory ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT WINAPI WshShortcut_put_WorkingDirectory(IWshShortcut *iface, BSTR WorkingDirectory)
 {
     WshShortcut *This = impl_from_IWshShortcut(iface);
-    TRACE("(%p)->(%s): stub\n", This, debugstr_w(WorkingDirectory));
+    TRACE("(%p)->(%s)\n", This, debugstr_w(WorkingDirectory));
     return IShellLinkW_SetWorkingDirectory(This->link, WorkingDirectory);
 }
 
@@ -568,6 +596,13 @@ static HRESULT WshShortcut_Create(const WCHAR *path, IDispatch **shortcut)
     }
 
     This->path_link = SysAllocString(path);
+    if (!This->path_link)
+    {
+        IShellLinkW_Release(This->link);
+        HeapFree(GetProcessHeap(), 0, This);
+        return E_OUTOFMEMORY;
+    }
+
     *shortcut = (IDispatch*)&This->IWshShortcut_iface;
 
     return S_OK;

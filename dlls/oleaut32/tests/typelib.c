@@ -28,17 +28,20 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "objbase.h"
 #include "oleauto.h"
 #include "ocidl.h"
 #include "shlwapi.h"
 #include "tmarshal.h"
 
 #include "test_reg.h"
+#include "test_tlb.h"
 
 #define expect_eq(expr, value, type, format) { type _ret = (expr); ok((value) == _ret, #expr " expected " format " got " format "\n", value, _ret); }
 #define expect_int(expr, value) expect_eq(expr, (int)(value), int, "%d")
 #define expect_hex(expr, value) expect_eq(expr, (int)(value), int, "0x%x")
 #define expect_null(expr) expect_eq(expr, NULL, const void *, "%p")
+#define expect_guid(expected, guid) { ok(IsEqualGUID(expected, guid), "got wrong guid\n"); }
 
 #define expect_wstr_acpval(expr, value) \
     { \
@@ -651,7 +654,7 @@ static const char *create_test_typelib(int res_no)
 static void test_TypeInfo(void)
 {
     ITypeLib *pTypeLib;
-    ITypeInfo *pTypeInfo;
+    ITypeInfo *pTypeInfo, *ti;
     ITypeInfo2 *pTypeInfo2;
     HRESULT hr;
     static WCHAR wszBogus[] = { 'b','o','g','u','s',0 };
@@ -668,6 +671,7 @@ static void test_TypeInfo(void)
     TYPEKIND kind;
     const char *filenameA;
     WCHAR filename[MAX_PATH];
+    TYPEATTR *attr;
 
     hr = LoadTypeLib(wszStdOle2, &pTypeLib);
     ok_ole_success(hr, LoadTypeLib);
@@ -765,8 +769,6 @@ static void test_TypeInfo(void)
 
     ITypeInfo_Release(pTypeInfo);
 
-
-
     hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &IID_IDispatch, &pTypeInfo);
     ok_ole_success(hr, ITypeLib_GetTypeInfoOfGuid); 
 
@@ -791,6 +793,23 @@ static void test_TypeInfo(void)
 
         VariantClear(&var);
     }
+
+    /* Check instance size for IDispatch, typelib is loaded using system SYS_WIN* kind so it always matches
+       system bitness. */
+    hr = ITypeInfo_GetTypeAttr(pTypeInfo, &attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(attr->cbSizeInstance == sizeof(void*), "got size %d\n", attr->cbSizeInstance);
+    ok(attr->typekind == TKIND_INTERFACE, "got typekind %d\n", attr->typekind);
+    ITypeInfo_ReleaseTypeAttr(pTypeInfo, attr);
+
+    /* same size check with some general interface */
+    hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &IID_IEnumVARIANT, &ti);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = ITypeInfo_GetTypeAttr(ti, &attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(attr->cbSizeInstance == sizeof(void*), "got size %d\n", attr->cbSizeInstance);
+    ITypeInfo_ReleaseTypeAttr(ti, attr);
+    ITypeInfo_Release(ti);
 
             /* test invoking a method with a [restricted] keyword  */
 
@@ -1554,8 +1573,10 @@ static void test_CreateTypeLib(SYSKIND sys) {
     ICreateTypeInfo2 *createti2;
     ITypeLib *tl, *stdole;
     ITypeInfo *interface1, *interface2, *dual, *unknown, *dispatch, *ti;
+    ITypeInfo *tinfos[2];
     ITypeInfo2 *ti2;
     ITypeComp *tcomp;
+    MEMBERID memids[2];
     FUNCDESC funcdesc, *pfuncdesc;
     ELEMDESC elemdesc[5], *edesc;
     PARAMDESCEX paramdescex;
@@ -1567,6 +1588,7 @@ static void test_CreateTypeLib(SYSKIND sys) {
     DWORD helpcontext, ptr_size, alignment;
     int impltypeflags;
     unsigned int cnames;
+    USHORT found;
     VARIANT cust_data;
     HRESULT hres;
     TYPEKIND kind;
@@ -2665,6 +2687,46 @@ static void test_CreateTypeLib(SYSKIND sys) {
     ok(libattr->wLibFlags == LIBFLAG_FHASDISKIMAGE, "wLibFlags = %d\n", libattr->wLibFlags);
     ITypeLib_ReleaseTLibAttr(tl, libattr);
 
+    found = 2;
+    memset(tinfos, 0, sizeof(tinfos));
+    memids[0] = 0xdeadbeef;
+    memids[1] = 0xdeadbeef;
+    hres = ITypeLib_FindName(tl, param1W, 0, tinfos, memids, &found);
+    ok(hres == S_OK, "got: %08x\n", hres);
+    ok(found == 0, "got wrong count: %u\n", found);
+    ok(tinfos[0] == NULL, "got invalid typeinfo[0]\n");
+    ok(tinfos[1] == NULL, "got invalid typeinfo[1]\n");
+    ok(memids[0] == 0xdeadbeef, "got invalid memid[0]\n");
+    ok(memids[1] == 0xdeadbeef, "got invalid memid[1]\n");
+
+    found = 2;
+    memset(tinfos, 0, sizeof(tinfos));
+    memids[0] = 0xdeadbeef;
+    memids[1] = 0xdeadbeef;
+    hres = ITypeLib_FindName(tl, func1W, 0, tinfos, memids, &found);
+    ok(hres == S_OK, "got: %08x\n", hres);
+    ok(found == 1, "got wrong count: %u\n", found);
+    ok(tinfos[0] != NULL, "got invalid typeinfo[0]\n");
+    ok(tinfos[1] == NULL, "got invalid typeinfo[1]\n");
+    ok(memids[0] == 0, "got invalid memid[0]\n");
+    ok(memids[1] == 0xdeadbeef, "got invalid memid[1]\n");
+    if(tinfos[0])
+        ITypeInfo_Release(tinfos[0]);
+
+    found = 2;
+    memset(tinfos, 0, sizeof(tinfos));
+    memids[0] = 0xdeadbeef;
+    memids[1] = 0xdeadbeef;
+    hres = ITypeLib_FindName(tl, interface1W, 0, tinfos, memids, &found);
+    ok(hres == S_OK, "got: %08x\n", hres);
+    ok(found == 1, "got wrong count: %u\n", found);
+    ok(tinfos[0] != NULL, "got invalid typeinfo[0]\n");
+    ok(tinfos[1] == NULL, "got invalid typeinfo[1]\n");
+    ok(memids[0] == MEMBERID_NIL, "got invalid memid[0]: %x\n", memids[0]);
+    ok(memids[1] == 0xdeadbeef, "got invalid memid[1]\n");
+    if(tinfos[0])
+        ITypeInfo_Release(tinfos[0]);
+
     hres = ITypeLib_GetDocumentation(tl, -1, &name, &docstring, &helpcontext, &helpfile);
     ok(hres == S_OK, "got %08x\n", hres);
     ok(memcmp(typelibW, name, sizeof(typelibW)) == 0, "got wrong typelib name: %s\n",
@@ -3698,9 +3760,10 @@ typedef struct _function_info
     LPCSTR names[15];
 } function_info;
 
-typedef struct _interface_info
+typedef struct _type_info
 {
     LPCSTR name;
+    LPCSTR uuid;
     TYPEKIND type;
     WORD wTypeFlags;
     USHORT cbAlignment;
@@ -3708,17 +3771,17 @@ typedef struct _interface_info
     USHORT cbSizeVft;
     USHORT cFuncs;
     function_info funcs[20];
-} interface_info;
+} type_info;
 
-static const interface_info info[] = {
-/* interfaces count: 2 */
+static const type_info info[] = {
 {
   "IDualIface",
-  /*kind*/ TKIND_DISPATCH, /*flags*/ 0x1040, /*align*/ 4, /*size*/ 4,
+  "{b14b6bb5-904e-4ff9-b247-bd361f7aaedd}",
+  /*kind*/ TKIND_DISPATCH, /*flags*/ TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL, /*align*/ 4, /*size*/ sizeof(void*),
   /*#vtbl*/ 7, /*#func*/ 8,
   {
     {
-      0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60000000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 2, /*#opt*/ 0, /*vtbl*/ 0, /*#scodes*/ 0, /*flags*/ 0x1,
       {24, 0}, /* ret */
       { /* params */
@@ -3734,7 +3797,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60000001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 1, /*#scodes*/ 0, /*flags*/ 0x1,
       {19, 0}, /* ret */
       { /* params */
@@ -3746,7 +3809,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60000002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 2, /*#scodes*/ 0, /*flags*/ 0x1,
       {19, 0}, /* ret */
       { /* params */
@@ -3758,7 +3821,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60010000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 1, /*#opt*/ 0, /*vtbl*/ 3, /*#scodes*/ 0, /*flags*/ 0x1,
       {24, 0}, /* ret */
       { /* params */
@@ -3772,7 +3835,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60010001, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 3, /*#opt*/ 0, /*vtbl*/ 4, /*#scodes*/ 0, /*flags*/ 0x1,
       {24, 0}, /* ret */
       { /* params */
@@ -3790,7 +3853,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60010002, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 5, /*#opt*/ 0, /*vtbl*/ 5, /*#scodes*/ 0, /*flags*/ 0x1,
       {24, 0}, /* ret */
       { /* params */
@@ -3812,7 +3875,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60010003, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 8, /*#opt*/ 0, /*vtbl*/ 6, /*#scodes*/ 0, /*flags*/ 0x1,
       {24, 0}, /* ret */
       { /* params */
@@ -3840,7 +3903,7 @@ static const interface_info info[] = {
       },
     },
     {
-      0x60020000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60020000, /*func*/ FUNC_DISPATCH, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0x0,
       {24, 0}, /* ret */
       { /* params */
@@ -3855,11 +3918,12 @@ static const interface_info info[] = {
 },
 {
   "ISimpleIface",
-  /*kind*/ TKIND_INTERFACE, /*flags*/ 0x1000, /*align*/ 4, /*size*/ 4,
+  "{ec5dfcd6-eeb0-4cd6-b51e-8030e1dac009}",
+  /*kind*/ TKIND_INTERFACE, /*flags*/ TYPEFLAG_FDISPATCHABLE, /*align*/ 4, /*size*/ sizeof(void*),
   /*#vtbl*/ 8, /*#func*/ 1,
   {
     {
-      0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ 0x4,
+      0x60020000, /*func*/ FUNC_PUREVIRTUAL, /*inv*/ INVOKE_FUNC, /*call*/ CC_STDCALL,
       /*#param*/ 0, /*#opt*/ 0, /*vtbl*/ 7, /*#scodes*/ 0, /*flags*/ 0x0,
       {25, 0}, /* ret */
       { /* params */
@@ -3872,6 +3936,11 @@ static const interface_info info[] = {
     },
   }
 },
+{
+  "test_struct",
+  "{4029f190-ca4a-4611-aeb9-673983cb96dd}",
+  /* kind */ TKIND_RECORD, /*flags*/ 0, /*align*/ 4, /*size*/ sizeof(struct test_struct)
+}
 };
 
 #define check_type(elem, info) { \
@@ -3883,36 +3952,55 @@ static void test_dump_typelib(const char *name)
 {
     WCHAR wszName[MAX_PATH];
     ITypeLib *typelib;
-    int ifcount = sizeof(info)/sizeof(info[0]);
+    int ticount = sizeof(info)/sizeof(info[0]);
     int iface, func;
 
     MultiByteToWideChar(CP_ACP, 0, name, -1, wszName, MAX_PATH);
     ole_check(LoadTypeLibEx(wszName, REGKIND_NONE, &typelib));
-    expect_eq(ITypeLib_GetTypeInfoCount(typelib), ifcount, UINT, "%d");
-    for (iface = 0; iface < ifcount; iface++)
+    expect_eq(ITypeLib_GetTypeInfoCount(typelib), ticount, UINT, "%d");
+    for (iface = 0; iface < ticount; iface++)
     {
-        const interface_info *if_info = &info[iface];
+        const type_info *ti = &info[iface];
         ITypeInfo *typeinfo;
         TYPEATTR *typeattr;
         BSTR bstrIfName;
 
-        trace("Interface %s\n", if_info->name);
+        trace("Interface %s\n", ti->name);
         ole_check(ITypeLib_GetTypeInfo(typelib, iface, &typeinfo));
         ole_check(ITypeLib_GetDocumentation(typelib, iface, &bstrIfName, NULL, NULL, NULL));
-        expect_wstr_acpval(bstrIfName, if_info->name);
+        expect_wstr_acpval(bstrIfName, ti->name);
         SysFreeString(bstrIfName);
 
         ole_check(ITypeInfo_GetTypeAttr(typeinfo, &typeattr));
-        expect_int(typeattr->typekind, if_info->type);
-        expect_hex(typeattr->wTypeFlags, if_info->wTypeFlags);
-        expect_int(typeattr->cbAlignment, if_info->cbAlignment);
-        expect_int(typeattr->cbSizeInstance, if_info->cbSizeInstance);
-        expect_int(typeattr->cbSizeVft, if_info->cbSizeVft * sizeof(void*));
-        expect_int(typeattr->cFuncs, if_info->cFuncs);
+        expect_int(typeattr->typekind, ti->type);
+        expect_hex(typeattr->wTypeFlags, ti->wTypeFlags);
+        expect_int(typeattr->cbAlignment, ti->cbAlignment);
+        expect_int(typeattr->cbSizeInstance, ti->cbSizeInstance);
+        expect_int(typeattr->cbSizeVft, ti->cbSizeVft * sizeof(void*));
+        expect_int(typeattr->cFuncs, ti->cFuncs);
+
+        /* compare type uuid */
+        if (ti->uuid && *ti->uuid)
+        {
+            WCHAR guidW[39] = {0};
+            ITypeInfo *typeinfo2;
+            HRESULT hr;
+            GUID guid;
+
+            MultiByteToWideChar(CP_ACP, 0, ti->uuid, -1, guidW, 40);
+            IIDFromString(guidW, &guid);
+            expect_guid(&guid, &typeattr->guid);
+
+            /* check that it's possible to search using this uuid */
+            typeinfo2 = NULL;
+            hr = ITypeLib_GetTypeInfoOfGuid(typelib, &guid, &typeinfo2);
+            ok(hr == S_OK, "got 0x%08x\n", hr);
+            ITypeInfo_Release(typeinfo2);
+        }
 
         for (func = 0; func < typeattr->cFuncs; func++)
         {
-            function_info *fn_info = (function_info *)&if_info->funcs[func];
+            function_info *fn_info = (function_info *)&ti->funcs[func];
             FUNCDESC *desc;
             BSTR namesTab[256];
             UINT cNames;
@@ -4272,6 +4360,7 @@ static void test_SetVarHelpContext(void)
 static void test_SetFuncAndParamNames(void)
 {
     static OLECHAR nameW[] = {'n','a','m','e',0};
+    static OLECHAR name2W[] = {'n','a','m','e','2',0};
     static OLECHAR prop[] = {'p','r','o','p',0};
     static OLECHAR *propW[] = {prop};
     static OLECHAR func[] = {'f','u','n','c',0};
@@ -4280,9 +4369,13 @@ static void test_SetFuncAndParamNames(void)
     WCHAR filenameW[MAX_PATH];
     ICreateTypeLib2 *ctl;
     ICreateTypeInfo *cti;
+    ITypeLib *tl;
+    ITypeInfo *infos[3];
+    MEMBERID memids[3];
     FUNCDESC funcdesc;
     ELEMDESC edesc;
     HRESULT hr;
+    USHORT found;
 
     GetTempFileNameA(".", "tlb", 0, filenameA);
     MultiByteToWideChar(CP_ACP, 0, filenameA, -1, filenameW, MAX_PATH);
@@ -4352,6 +4445,50 @@ static void test_SetFuncAndParamNames(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     ICreateTypeInfo_Release(cti);
+
+    hr = ICreateTypeLib2_CreateTypeInfo(ctl, name2W, TKIND_INTERFACE, &cti);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    funcdesc.funckind = FUNC_PUREVIRTUAL;
+    funcdesc.invkind = INVOKE_FUNC;
+    funcdesc.cParams = 0;
+    funcdesc.lprgelemdescParam = NULL;
+    hr = ICreateTypeInfo_AddFuncDesc(cti, 0, &funcdesc);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = ICreateTypeInfo_SetFuncAndParamNames(cti, 0, funcW, 1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    ICreateTypeInfo_Release(cti);
+
+    hr = ICreateTypeLib2_QueryInterface(ctl, &IID_ITypeLib, (void**)&tl);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    found = 1;
+    memset(infos, 0, sizeof(infos));
+    memids[0] = 0xdeadbeef;
+    memids[1] = 0xdeadbeef;
+    memids[2] = 0xdeadbeef;
+    hr = ITypeLib_FindName(tl, func, 0, infos, memids, &found);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(found == 1, "got wrong count: %u\n", found);
+    ok(infos[0] && !infos[1] && !infos[2], "got wrong typeinfo\n");
+    ok(memids[0] == 0, "got wrong memid[0]\n");
+    ok(memids[1] == 0xdeadbeef && memids[2] == 0xdeadbeef, "got wrong memids\n");
+
+    found = 3;
+    memset(infos, 0, sizeof(infos));
+    memids[0] = 0xdeadbeef;
+    memids[1] = 0xdeadbeef;
+    memids[2] = 0xdeadbeef;
+    hr = ITypeLib_FindName(tl, func, 0, infos, memids, &found);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(found == 2, "got wrong count: %u\n", found);
+    ok(infos[0] && infos[1] && infos[0] != infos[1], "got same typeinfo\n");
+    ok(memids[0] == 0, "got wrong memid[0]\n");
+    ok(memids[1] == 0, "got wrong memid[1]\n");
+
+    ITypeLib_Release(tl);
     ICreateTypeLib2_Release(ctl);
     DeleteFileA(filenameA);
 }
@@ -4543,8 +4680,7 @@ static void test_FindName(void)
     ti = (void*)0xdeadbeef;
     hr = ITypeLib_FindName(tl, buffW, 0, &ti, &memid, &c);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
-    ok(memid == -1, "got %d\n", memid);
+    ok(memid == MEMBERID_NIL, "got %d\n", memid);
     ok(!lstrcmpW(buffW, wszGUID), "got %s\n", wine_dbgstr_w(buffW));
     ok(c == 1, "got %d\n", c);
     ITypeInfo_Release(ti);
@@ -4556,7 +4692,7 @@ todo_wine
     hr = ITypeLib_FindName(tl, buffW, 0, &ti, &memid, &c);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 todo_wine {
-    ok(memid == -1, "got %d\n", memid);
+    ok(memid == MEMBERID_NIL, "got %d\n", memid);
     ok(!lstrcmpW(buffW, wszGUID), "got %s\n", wine_dbgstr_w(buffW));
     ok(c == 1, "got %d\n", c);
 }
@@ -4569,7 +4705,7 @@ todo_wine {
     ti = (void*)0xdeadbeef;
     hr = ITypeLib_FindName(tl, buffW, 0, &ti, &memid, &c);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(memid == -1, "got %d\n", memid);
+    ok(memid == MEMBERID_NIL, "got %d\n", memid);
     ok(!lstrcmpW(buffW, invalidW), "got %s\n", wine_dbgstr_w(buffW));
     ok(c == 0, "got %d\n", c);
     ok(ti == (void*)0xdeadbeef, "got %p\n", ti);

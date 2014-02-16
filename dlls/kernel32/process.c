@@ -3544,7 +3544,7 @@ BOOL WINAPI QueryFullProcessImageNameW(HANDLE hProcess, DWORD dwFlags, LPWSTR lp
         if (ntlen + 1 > *pdwSize)
         {
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
-            return 0;
+            return FALSE;
         }
         *pdwSize = ntlen;
 
@@ -3849,7 +3849,8 @@ HRESULT WINAPI RegisterApplicationRestart(PCWSTR pwzCommandLine, DWORD dwFlags)
  */
 DWORD WINAPI WTSGetActiveConsoleSessionId(void)
 {
-    FIXME("stub\n");
+    static int once;
+    if (!once++) FIXME("stub\n");
     return 0;
 }
 

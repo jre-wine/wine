@@ -30,6 +30,9 @@
 #include "wine/test.h"
 #include "delayloadhandler.h"
 
+/* PROCESS_ALL_ACCESS in Vista+ PSDKs is incompatible with older Windows versions */
+#define PROCESS_ALL_ACCESS_NT4 (PROCESS_ALL_ACCESS & ~0xf000)
+
 #define ALIGN_SIZE(size, alignment) (((size) + (alignment - 1)) & ~((alignment - 1)))
 
 struct PROCESS_BASIC_INFORMATION_PRIVATE
@@ -42,7 +45,6 @@ struct PROCESS_BASIC_INFORMATION_PRIVATE
     ULONG_PTR InheritedFromUniqueProcessId;
 };
 
-static BOOL is_child;
 static LONG *child_failures;
 static WORD cb_count;
 static DWORD page_size;
@@ -1437,7 +1439,7 @@ static BOOL WINAPI dll_entry_point(HINSTANCE hinst, DWORD reason, LPVOID param)
         }
 
         SetLastError(0xdeadbeef);
-        process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+        process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, GetCurrentProcessId());
         ok(process != NULL, "OpenProcess error %d\n", GetLastError());
 
         noop_thread_started = 0;
@@ -1660,7 +1662,7 @@ static void child_process(const char *dll_name, DWORD target_offset)
     ok(!ret, "RtlDllShutdownInProgress returned %d\n", ret);
 
     SetLastError(0xdeadbeef);
-    process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId());
+    process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, GetCurrentProcessId());
     ok(process != NULL, "OpenProcess error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -2187,7 +2189,7 @@ static void test_ExitProcess(void)
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject failed: %x\n", ret);
 
     SetLastError(0xdeadbeef);
-    process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pi.dwProcessId);
+    process = OpenProcess(PROCESS_ALL_ACCESS_NT4, FALSE, pi.dwProcessId);
     ok(process != NULL, "OpenProcess error %d\n", GetLastError());
     CloseHandle(process);
 
@@ -2649,7 +2651,6 @@ START_TEST(loader)
     child_failures = MapViewOfFile(mapping, FILE_MAP_READ|FILE_MAP_WRITE, 0, 0, 4096);
     if (*child_failures == -1)
     {
-        is_child = 1;
         *child_failures = 0;
     }
     else

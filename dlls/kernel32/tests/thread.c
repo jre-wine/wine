@@ -19,7 +19,7 @@
  */
 
 /* Define _WIN32_WINNT to get SetThreadIdealProcessor on Windows */
-#define _WIN32_WINNT 0x0500
+#define _WIN32_WINNT 0x0600
 
 #include <assert.h>
 #include <stdarg.h>
@@ -34,6 +34,9 @@
 #include <winerror.h>
 #include <winnls.h>
 #include "wine/test.h"
+
+/* THREAD_ALL_ACCESS in Vista+ PSDKs is incompatible with older Windows versions */
+#define THREAD_ALL_ACCESS_NT4 (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x3ff)
 
 /* Specify the number of simultaneous threads to test */
 #define NUM_THREADS 4
@@ -82,6 +85,11 @@ static HANDLE (WINAPI *pCreateActCtxW)(PCACTCTXW);
 static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
 static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
 static void   (WINAPI *pReleaseActCtx)(HANDLE);
+static PTP_POOL (WINAPI *pCreateThreadpool)(PVOID);
+static PTP_WORK (WINAPI *pCreateThreadpoolWork)(PTP_WORK_CALLBACK,PVOID,PTP_CALLBACK_ENVIRON);
+static void (WINAPI *pSubmitThreadpoolWork)(PTP_WORK);
+static void (WINAPI *pWaitForThreadpoolWorkCallbacks)(PTP_WORK,BOOL);
+static void (WINAPI *pCloseThreadpoolWork)(PTP_WORK);
 
 static HANDLE create_target_process(const char *arg)
 {
@@ -560,7 +568,7 @@ static VOID test_SuspendThread(void)
   ok(error==1,"SuspendThread did not work\n");
 /* check that access restrictions are obeyed */
   if (pOpenThread) {
-    access_thread=pOpenThread(THREAD_ALL_ACCESS & (~THREAD_SUSPEND_RESUME),
+    access_thread=pOpenThread(THREAD_ALL_ACCESS_NT4 & (~THREAD_SUSPEND_RESUME),
                            0,threadId);
     ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
     if (access_thread!=NULL) {
@@ -605,7 +613,7 @@ static VOID test_TerminateThread(void)
      "TerminateThread didn't work\n");
 /* check that access restrictions are obeyed */
   if (pOpenThread) {
-    access_thread=pOpenThread(THREAD_ALL_ACCESS & (~THREAD_TERMINATE),
+    access_thread=pOpenThread(THREAD_ALL_ACCESS_NT4 & (~THREAD_TERMINATE),
                              0,threadId);
     ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
     if (access_thread!=NULL) {
@@ -674,7 +682,7 @@ static VOID test_thread_priority(void)
 
    if (pOpenThread) {
 /* check that access control is obeyed */
-     access_thread=pOpenThread(THREAD_ALL_ACCESS &
+     access_thread=pOpenThread(THREAD_ALL_ACCESS_NT4 &
                        (~THREAD_QUERY_INFORMATION) & (~THREAD_SET_INFORMATION),
                        0,curthreadId);
      ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
@@ -746,7 +754,7 @@ static VOID test_thread_priority(void)
 
    if (pOpenThread) {
 /* check that access control is obeyed */
-     access_thread=pOpenThread(THREAD_ALL_ACCESS &
+     access_thread=pOpenThread(THREAD_ALL_ACCESS_NT4 &
                        (~THREAD_QUERY_INFORMATION) & (~THREAD_SET_INFORMATION),
                        0,curthreadId);
      ok(access_thread!=NULL,"OpenThread returned an invalid handle\n");
@@ -786,7 +794,7 @@ static VOID test_GetThreadTimes(void)
      ok(thread!=NULL,"Create Thread failed\n");
 /* check that access control is obeyed */
      if (pOpenThread) {
-       access_thread=pOpenThread(THREAD_ALL_ACCESS &
+       access_thread=pOpenThread(THREAD_ALL_ACCESS_NT4 &
                                    (~THREAD_QUERY_INFORMATION), 0,threadId);
        ok(access_thread!=NULL,
           "OpenThread returned an invalid handle\n");
@@ -1599,6 +1607,37 @@ static void test_thread_actctx(void)
     pReleaseActCtx(context);
 }
 
+
+static void WINAPI threadpool_workcallback(PTP_CALLBACK_INSTANCE instance, void *context, PTP_WORK work) {
+    int *foo = (int*)context;
+
+    (*foo)++;
+}
+
+
+static void test_threadpool(void)
+{
+    PTP_POOL pool;
+    PTP_WORK work;
+    int workcalled = 0;
+
+    if (!pCreateThreadpool) {
+        todo_wine win_skip("thread pool apis not supported.\n");
+	return;
+    }
+
+    work = pCreateThreadpoolWork(threadpool_workcallback, &workcalled, NULL);
+    ok (work != NULL, "Error %d in CreateThreadpoolWork\n", GetLastError());
+    pSubmitThreadpoolWork(work);
+    pWaitForThreadpoolWorkCallbacks(work, FALSE);
+    pCloseThreadpoolWork(work);
+
+    ok (workcalled == 1, "expected work to be called once, got %d\n", workcalled);
+
+    pool = pCreateThreadpool(NULL);
+    todo_wine ok (pool != NULL, "CreateThreadpool failed\n");
+}
+
 static void init_funcs(void)
 {
     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
@@ -1622,6 +1661,12 @@ static void init_funcs(void)
     X(DeactivateActCtx);
     X(GetCurrentActCtx);
     X(ReleaseActCtx);
+
+    X(CreateThreadpool);
+    X(CreateThreadpoolWork);
+    X(SubmitThreadpoolWork);
+    X(WaitForThreadpoolWorkCallbacks);
+    X(CloseThreadpoolWork);
 #undef X
 }
 
@@ -1687,4 +1732,6 @@ START_TEST(thread)
    test_thread_fpu_cw();
 #endif
    test_thread_actctx();
+
+   test_threadpool();
 }
