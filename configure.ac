@@ -1206,14 +1206,14 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 		     $X_LIBS $XLIB -lm $X_EXTRA_LIBS)
         if test "x$with_glu" != "xno"
         then
-            AC_CHECK_LIB(GLU,gluLookAt,[:],,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB -lm $X_EXTRA_LIBS])
+            AC_CHECK_LIB(GLU,gluLookAt,[:],,[$OPENGL_LIBS $X_LIBS $XLIB -lm $X_EXTRA_LIBS])
             WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_GLU_gluLookAt" != xyes],
                              [libGLU ${notice_platform}development files not found, GLU won't be supported.])
         fi
 
         if test "x$with_osmesa" != "xno"
         then
-            WINE_CHECK_SONAME(OSMesa,glAccum,,,[$X_LIBS $X_PRE_LIBS $XLIB -lm $X_EXTRA_LIBS])
+            WINE_CHECK_SONAME(OSMesa,glAccum,,,[$X_LIBS $XLIB -lm $X_EXTRA_LIBS])
             WINE_NOTICE_WITH(osmesa,[test "x$ac_cv_lib_soname_OSMesa" = "x"],
                              [libOSMesa ${notice_platform}development files not found (or too old), OpenGL rendering in bitmaps won't be supported.])
         fi
@@ -2041,6 +2041,7 @@ AC_CHECK_FUNCS(\
 	port_create \
 	prctl \
 	pread \
+	proc_pidinfo \
 	pwrite \
 	readdir \
 	readlink \
@@ -2062,7 +2063,7 @@ AC_CHECK_FUNCS(\
 	strtoll \
 	strtoull \
 	symlink \
-	tcgetattr \
+	tcdrain \
 	thr_kill2 \
 	timegm \
 	usleep \
@@ -2343,6 +2344,12 @@ AC_CHECK_MEMBERS([struct sockaddr_in6.sin6_scope_id],,,
 #include <netinet/in.h>
 #endif])
 
+dnl Check for _u._ext.nscount6
+AC_CHECK_MEMBERS([struct __res_state._u._ext.nscount6],,,
+[#ifdef HAVE_RESOLV_H
+#include <resolv.h>
+#endif])
+
 dnl Check for ns_msg ptr member
 AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 [#ifdef HAVE_SYS_TYPES_H
@@ -2595,6 +2602,7 @@ WINE_CONFIG_DLL(atl,,[implib])
 WINE_CONFIG_TEST(dlls/atl/tests)
 WINE_CONFIG_DLL(atl100,,[implib])
 WINE_CONFIG_TEST(dlls/atl100/tests)
+WINE_CONFIG_DLL(atl110)
 WINE_CONFIG_DLL(atl80,,[implib])
 WINE_CONFIG_TEST(dlls/atl80/tests)
 WINE_CONFIG_DLL(authz)
@@ -2673,6 +2681,8 @@ WINE_CONFIG_DLL(d3dx10_40)
 WINE_CONFIG_DLL(d3dx10_41)
 WINE_CONFIG_DLL(d3dx10_42)
 WINE_CONFIG_DLL(d3dx10_43)
+WINE_CONFIG_DLL(d3dx11_42)
+WINE_CONFIG_DLL(d3dx11_43)
 WINE_CONFIG_DLL(d3dx9_24)
 WINE_CONFIG_DLL(d3dx9_25)
 WINE_CONFIG_DLL(d3dx9_26)
@@ -2925,6 +2935,7 @@ WINE_CONFIG_DLL(msxml6)
 WINE_CONFIG_DLL(nddeapi,,[implib])
 WINE_CONFIG_DLL(netapi32,,[implib])
 WINE_CONFIG_TEST(dlls/netapi32/tests)
+WINE_CONFIG_DLL(netcfgx)
 WINE_CONFIG_DLL(newdev,,[implib])
 WINE_CONFIG_DLL(normaliz,,[implib])
 WINE_CONFIG_DLL(npmshtml)
@@ -3166,6 +3177,7 @@ WINE_CONFIG_DLL(xinput1_1)
 WINE_CONFIG_DLL(xinput1_2)
 WINE_CONFIG_DLL(xinput1_3,,[implib],[xinput])
 WINE_CONFIG_TEST(dlls/xinput1_3/tests)
+WINE_CONFIG_DLL(xinput1_4)
 WINE_CONFIG_DLL(xinput9_1_0)
 WINE_CONFIG_DLL(xmllite)
 WINE_CONFIG_TEST(dlls/xmllite/tests)

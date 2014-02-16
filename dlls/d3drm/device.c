@@ -127,24 +127,18 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_Clone(IDirect3DRMDevice2 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_AddDestroyCallback(IDirect3DRMDevice2* iface,
-                                                                     D3DRMOBJECTCALLBACK cb,
-                                                                     LPVOID argument)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_AddDestroyCallback(IDirect3DRMDevice2 *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_DeleteDestroyCallback(IDirect3DRMDevice2* iface,
-                                                                        D3DRMOBJECTCALLBACK cb,
-                                                                        LPVOID argument)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_DeleteDestroyCallback(IDirect3DRMDevice2 *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -168,33 +162,27 @@ static DWORD WINAPI IDirect3DRMDevice2Impl_GetAppData(IDirect3DRMDevice2* iface)
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_SetName(IDirect3DRMDevice2* iface, LPCSTR name)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_SetName(IDirect3DRMDevice2 *iface, const char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, name);
+    FIXME("iface %p, name %s stub!\n", iface, debugstr_a(name));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_GetName(IDirect3DRMDevice2* iface,
-                                                          LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_GetName(IDirect3DRMDevice2 *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, size, name);
+    FIXME("iface %p, size %p, name %p stub!\n", iface, size, name);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_GetClassName(IDirect3DRMDevice2* iface,
-                                                          LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_GetClassName(IDirect3DRMDevice2 *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
+    IDirect3DRMDeviceImpl *device = impl_from_IDirect3DRMDevice2(iface);
 
-    TRACE("(%p/%p)->(%p, %p)\n", iface, This, size, name);
+    TRACE("iface %p, size %p, name %p.\n", iface, size, name);
 
-    return IDirect3DRMDevice3_GetClassName(&This->IDirect3DRMDevice3_iface, size, name);
+    return IDirect3DRMDevice3_GetClassName(&device->IDirect3DRMDevice3_iface, size, name);
 }
 
 /*** IDirect3DRMDevice methods ***/
@@ -239,23 +227,18 @@ static HRESULT WINAPI IDirect3DRMDevice2Impl_Update(IDirect3DRMDevice2* iface)
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_AddUpdateCallback(IDirect3DRMDevice2* iface,
-                                                               D3DRMUPDATECALLBACK cb, LPVOID arg)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_AddUpdateCallback(IDirect3DRMDevice2 *iface,
+        D3DRMUPDATECALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, arg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice2Impl_DeleteUpdateCallback(IDirect3DRMDevice2* iface,
-                                                                  D3DRMUPDATECALLBACK cb,
-                                                                  LPVOID arg)
+static HRESULT WINAPI IDirect3DRMDevice2Impl_DeleteUpdateCallback(IDirect3DRMDevice2 *iface,
+        D3DRMUPDATECALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice2(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, arg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -539,24 +522,18 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_Clone(IDirect3DRMDevice3 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_AddDestroyCallback(IDirect3DRMDevice3* iface,
-                                                                     D3DRMOBJECTCALLBACK cb,
-                                                                     LPVOID argument)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_AddDestroyCallback(IDirect3DRMDevice3 *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_DeleteDestroyCallback(IDirect3DRMDevice3* iface,
-                                                                        D3DRMOBJECTCALLBACK cb,
-                                                                        LPVOID argument)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_DeleteDestroyCallback(IDirect3DRMDevice3 *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -580,31 +557,23 @@ static DWORD WINAPI IDirect3DRMDevice3Impl_GetAppData(IDirect3DRMDevice3* iface)
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_SetName(IDirect3DRMDevice3* iface, LPCSTR name)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_SetName(IDirect3DRMDevice3 *iface, const char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, name);
+    FIXME("iface %p, name %s stub!\n", iface, debugstr_a(name));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_GetName(IDirect3DRMDevice3* iface,
-                                                          LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_GetName(IDirect3DRMDevice3 *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, size, name);
+    FIXME("iface %p, size %p, name %p stub!\n", iface, size, name);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_GetClassName(IDirect3DRMDevice3* iface,
-                                                          LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_GetClassName(IDirect3DRMDevice3 *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    TRACE("(%p/%p)->(%p, %p)\n", iface, This, size, name);
+    TRACE("iface %p, size %p, name %p.\n", iface, size, name);
 
     if (!size || *size < strlen("Device") || !name)
         return E_INVALIDARG;
@@ -661,23 +630,18 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_Update(IDirect3DRMDevice3* iface)
     return D3DRM_OK;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_AddUpdateCallback(IDirect3DRMDevice3* iface,
-                                                               D3DRMUPDATECALLBACK cb, LPVOID arg)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_AddUpdateCallback(IDirect3DRMDevice3 *iface,
+        D3DRMUPDATECALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, arg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_DeleteUpdateCallback(IDirect3DRMDevice3* iface,
-                                                                  D3DRMUPDATECALLBACK cb,
-                                                                  LPVOID arg)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_DeleteUpdateCallback(IDirect3DRMDevice3 *iface,
+        D3DRMUPDATECALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, arg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -924,13 +888,11 @@ static HRESULT WINAPI IDirect3DRMDevice3Impl_LightStateChange(IDirect3DRMDevice3
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMDevice3Impl_GetStateChangeOptions(IDirect3DRMDevice3* iface,
-                                                                   DWORD stateclass, DWORD statenum,
-                                                                   LPDWORD flags)
+static HRESULT WINAPI IDirect3DRMDevice3Impl_GetStateChangeOptions(IDirect3DRMDevice3 *iface,
+        DWORD state_class, DWORD state_idx, DWORD *flags)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMDevice3(iface);
-
-    FIXME("(%p/%p)->(%u, %u, %p): stub\n", iface, This, stateclass, statenum, flags);
+    FIXME("iface %p, state_class %#x, state_idx %#x, flags %p stub!\n",
+            iface, state_class, state_idx, flags);
 
     return E_NOTIMPL;
 }
@@ -1029,24 +991,18 @@ static HRESULT WINAPI IDirect3DRMWinDeviceImpl_Clone(IDirect3DRMWinDevice *iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMWinDeviceImpl_AddDestroyCallback(IDirect3DRMWinDevice* iface,
-                                                                     D3DRMOBJECTCALLBACK cb,
-                                                                     LPVOID argument)
+static HRESULT WINAPI IDirect3DRMWinDeviceImpl_AddDestroyCallback(IDirect3DRMWinDevice *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMWinDevice(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMWinDeviceImpl_DeleteDestroyCallback(IDirect3DRMWinDevice* iface,
-                                                                        D3DRMOBJECTCALLBACK cb,
-                                                                        LPVOID argument)
+static HRESULT WINAPI IDirect3DRMWinDeviceImpl_DeleteDestroyCallback(IDirect3DRMWinDevice *iface,
+        D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMWinDevice(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, cb, argument);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -1070,33 +1026,27 @@ static DWORD WINAPI IDirect3DRMWinDeviceImpl_GetAppData(IDirect3DRMWinDevice* if
     return 0;
 }
 
-static HRESULT WINAPI IDirect3DRMWinDeviceImpl_SetName(IDirect3DRMWinDevice* iface, LPCSTR name)
+static HRESULT WINAPI IDirect3DRMWinDeviceImpl_SetName(IDirect3DRMWinDevice *iface, const char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMWinDevice(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, name);
+    FIXME("iface %p, name %s stub!\n", iface, debugstr_a(name));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMWinDeviceImpl_GetName(IDirect3DRMWinDevice* iface,
-                                                          LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMWinDeviceImpl_GetName(IDirect3DRMWinDevice *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMWinDevice(iface);
-
-    FIXME("(%p/%p)->(%p, %p): stub\n", iface, This, size, name);
+    FIXME("iface %p, size %p, name %p stub!\n", iface, size, name);
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMWinDeviceImpl_GetClassName(IDirect3DRMWinDevice* iface,
-                                                            LPDWORD size, LPSTR name)
+static HRESULT WINAPI IDirect3DRMWinDeviceImpl_GetClassName(IDirect3DRMWinDevice *iface, DWORD *size, char *name)
 {
-    IDirect3DRMDeviceImpl *This = impl_from_IDirect3DRMWinDevice(iface);
+    IDirect3DRMDeviceImpl *device = impl_from_IDirect3DRMWinDevice(iface);
 
-    TRACE("(%p/%p)->(%p, %p)\n", iface, This, size, name);
+    TRACE("iface %p, size %p, name %p.\n", iface, size, name);
 
-    return IDirect3DRMDevice3_GetClassName(&This->IDirect3DRMDevice3_iface, size, name);
+    return IDirect3DRMDevice3_GetClassName(&device->IDirect3DRMDevice3_iface, size, name);
 }
 
 /*** IDirect3DRMWinDevice methods ***/

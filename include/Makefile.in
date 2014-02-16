@@ -247,6 +247,7 @@ SRCDIR_INCLUDES = \
 	ddraw.h \
 	ddrawgdi.h \
 	ddrawi.h \
+	delayloadhandler.h \
 	devenum.idl \
 	devguid.h \
 	devpkey.h \
@@ -301,6 +302,7 @@ SRCDIR_INCLUDES = \
 	exdispid.h \
 	fci.h \
 	fdi.h \
+	fileapi.h \
 	fltdefs.h \
 	gdiplus.h \
 	gdipluscolor.h \

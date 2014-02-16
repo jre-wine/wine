@@ -604,7 +604,7 @@ static void free_parameter_state(struct d3dx_parameter *param, BOOL element, BOO
         switch (param->type)
         {
             case D3DXPT_STRING:
-                HeapFree(GetProcessHeap(), 0, *(LPSTR *)param->data);
+                HeapFree(GetProcessHeap(), 0, *(char **)param->data);
                 if (!child) HeapFree(GetProcessHeap(), 0, param->data);
                 break;
 
@@ -621,7 +621,7 @@ static void free_parameter_state(struct d3dx_parameter *param, BOOL element, BOO
                 }
                 else
                 {
-                    HeapFree(GetProcessHeap(), 0, *(LPSTR *)param->data);
+                    HeapFree(GetProcessHeap(), 0, *(char **)param->data);
                 }
                 if (!child) HeapFree(GetProcessHeap(), 0, param->data);
                 break;
@@ -637,7 +637,7 @@ static void free_parameter_state(struct d3dx_parameter *param, BOOL element, BOO
                 }
                 else
                 {
-                    HeapFree(GetProcessHeap(), 0, *(LPSTR *)param->data);
+                    HeapFree(GetProcessHeap(), 0, *(char **)param->data);
                 }
                 /* samplers have always own data, so free that */
                 HeapFree(GetProcessHeap(), 0, param->data);
@@ -654,7 +654,7 @@ static void free_parameter_state(struct d3dx_parameter *param, BOOL element, BOO
         {
             if (st != ST_CONSTANT)
             {
-                HeapFree(GetProcessHeap(), 0, *(LPSTR *)param->data);
+                HeapFree(GetProcessHeap(), 0, *(char **)param->data);
             }
             HeapFree(GetProcessHeap(), 0, param->data);
         }
@@ -2398,8 +2398,8 @@ static HRESULT d3dx9_base_effect_get_string(struct d3dx9_base_effect *base,
 
     if (string && param && !param->element_count && param->type == D3DXPT_STRING)
     {
-        *string = *(LPCSTR *)param->data;
-        TRACE("Returning %s\n", debugstr_a(*string));
+        *string = *(const char **)param->data;
+        TRACE("Returning %s.\n", debugstr_a(*string));
         return D3D_OK;
     }
 
@@ -3368,11 +3368,11 @@ static HRESULT WINAPI ID3DXEffectImpl_CloneEffect(ID3DXEffect *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI ID3DXEffectImpl_SetRawValue(ID3DXEffect* iface, D3DXHANDLE parameter, LPCVOID data, UINT byte_offset, UINT bytes)
+static HRESULT WINAPI ID3DXEffectImpl_SetRawValue(ID3DXEffect *iface,
+        D3DXHANDLE parameter, const void *data, UINT byte_offset, UINT bytes)
 {
-    struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
-
-    FIXME("(%p)->(%p, %p, %u, %u): stub\n", This, parameter, data, byte_offset, bytes);
+    FIXME("iface %p, parameter %p, data %p, byte_offset %u, bytes %u stub!\n",
+            iface, parameter, data, byte_offset, bytes);
 
     return E_NOTIMPL;
 }
@@ -4417,7 +4417,7 @@ static HRESULT d3dx9_parse_data(struct d3dx_parameter *param, const char **ptr, 
     {
         case D3DXPT_STRING:
             /* re-read with size (sizeof(DWORD) = 4) */
-            hr = d3dx9_parse_name((LPSTR *)param->data, *ptr - 4);
+            hr = d3dx9_parse_name((char **)param->data, *ptr - 4);
             if (hr != D3D_OK)
             {
                 WARN("Failed to parse string data\n");
@@ -5507,11 +5507,14 @@ HRESULT WINAPI D3DXCreateEffectFromFileExW(struct IDirect3DDevice9 *device, cons
         const D3DXMACRO *defines, struct ID3DXInclude *include, const char *skipconstants, DWORD flags,
         struct ID3DXEffectPool *pool, struct ID3DXEffect **effect, struct ID3DXBuffer **compilationerrors)
 {
-    LPVOID buffer;
+    void *buffer;
     HRESULT ret;
     DWORD size;
 
-    TRACE("(%s): relay\n", debugstr_w(srcfile));
+    TRACE("device %p, srcfile %s, defines %p, include %p, skipconstants %s, "
+            "flags %#x, pool %p, effect %p, compilationerrors %p.\n",
+            device, debugstr_w(srcfile), defines, include, debugstr_a(skipconstants),
+            flags, pool, effect, compilationerrors);
 
     if (!device || !srcfile)
         return D3DERR_INVALIDCALL;
@@ -5531,11 +5534,14 @@ HRESULT WINAPI D3DXCreateEffectFromFileExA(struct IDirect3DDevice9 *device, cons
         const D3DXMACRO *defines, struct ID3DXInclude *include, const char *skipconstants, DWORD flags,
         struct ID3DXEffectPool *pool, struct ID3DXEffect **effect, struct ID3DXBuffer **compilationerrors)
 {
-    LPWSTR srcfileW;
+    WCHAR *srcfileW;
     HRESULT ret;
     DWORD len;
 
-    TRACE("(void): relay\n");
+    TRACE("device %p, srcfile %s, defines %p, include %p, skipconstants %s, "
+            "flags %#x, pool %p, effect %p, compilationerrors %p.\n",
+            device, debugstr_a(srcfile), defines, include, debugstr_a(skipconstants),
+            flags, pool, effect, compilationerrors);
 
     if (!srcfile)
         return D3DERR_INVALIDCALL;
@@ -5637,11 +5643,12 @@ HRESULT WINAPI D3DXCreateEffectFromResourceA(struct IDirect3DDevice9 *device, HM
 HRESULT WINAPI D3DXCreateEffectCompilerFromFileW(const WCHAR *srcfile, const D3DXMACRO *defines,
         ID3DXInclude *include, DWORD flags, ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
-    LPVOID buffer;
+    void *buffer;
     HRESULT ret;
     DWORD size;
 
-    TRACE("(%s): relay\n", debugstr_w(srcfile));
+    TRACE("srcfile %s, defines %p, include %p, flags %#x, effectcompiler %p, parseerrors %p.\n",
+            debugstr_w(srcfile), defines, include, flags, effectcompiler, parseerrors);
 
     if (!srcfile)
         return D3DERR_INVALIDCALL;
@@ -5660,11 +5667,12 @@ HRESULT WINAPI D3DXCreateEffectCompilerFromFileW(const WCHAR *srcfile, const D3D
 HRESULT WINAPI D3DXCreateEffectCompilerFromFileA(const char *srcfile, const D3DXMACRO *defines,
         ID3DXInclude *include, DWORD flags, ID3DXEffectCompiler **effectcompiler, ID3DXBuffer **parseerrors)
 {
-    LPWSTR srcfileW;
+    WCHAR *srcfileW;
     HRESULT ret;
     DWORD len;
 
-    TRACE("(void): relay\n");
+    TRACE("srcfile %s, defines %p, include %p, flags %#x, effectcompiler %p, parseerrors %p.\n",
+            debugstr_a(srcfile), defines, include, flags, effectcompiler, parseerrors);
 
     if (!srcfile)
         return D3DERR_INVALIDCALL;

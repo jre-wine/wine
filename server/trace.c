@@ -1712,6 +1712,18 @@ static void dump_get_socket_event_reply( const struct get_socket_event_reply *re
     dump_varargs_ints( ", errors=", cur_size );
 }
 
+static void dump_get_socket_info_request( const struct get_socket_info_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_get_socket_info_reply( const struct get_socket_info_reply *req )
+{
+    fprintf( stderr, " family=%d", req->family );
+    fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", protocol=%d", req->protocol );
+}
+
 static void dump_enable_socket_event_request( const struct enable_socket_event_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
@@ -2675,6 +2687,7 @@ static void dump_get_serial_info_reply( const struct get_serial_info_reply *req 
     fprintf( stderr, ", writeconst=%08x", req->writeconst );
     fprintf( stderr, ", writemult=%08x", req->writemult );
     fprintf( stderr, ", eventmask=%08x", req->eventmask );
+    fprintf( stderr, ", cookie=%08x", req->cookie );
 }
 
 static void dump_set_serial_info_request( const struct set_serial_info_request *req )
@@ -4107,6 +4120,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_accept_into_socket_request,
     (dump_func)dump_set_socket_event_request,
     (dump_func)dump_get_socket_event_request,
+    (dump_func)dump_get_socket_info_request,
     (dump_func)dump_enable_socket_event_request,
     (dump_func)dump_set_socket_deferred_request,
     (dump_func)dump_alloc_console_request,
@@ -4362,6 +4376,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     (dump_func)dump_get_socket_event_reply,
+    (dump_func)dump_get_socket_info_reply,
     NULL,
     NULL,
     (dump_func)dump_alloc_console_reply,
@@ -4617,6 +4632,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "accept_into_socket",
     "set_socket_event",
     "get_socket_event",
+    "get_socket_info",
     "enable_socket_event",
     "set_socket_deferred",
     "alloc_console",

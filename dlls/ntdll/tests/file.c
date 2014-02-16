@@ -1921,13 +1921,14 @@ static void test_NtCreateFile(void)
 
 static void test_read_write(void)
 {
-    static const char contents[] = "1234567890abcd";
+    static const char contents[14] = "1234567890abcd";
     char buf[256];
     HANDLE hfile;
     OVERLAPPED ovl;
     IO_STATUS_BLOCK iob;
-    DWORD ret, bytes, status;
+    DWORD ret, bytes, status, off;
     LARGE_INTEGER offset;
+    LONG i;
 
     iob.Status = -1;
     iob.Information = -1;
@@ -1964,10 +1965,23 @@ static void test_read_write(void)
 
     iob.Status = -1;
     iob.Information = -1;
-    status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), NULL, NULL);
+    status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, 7, NULL, NULL);
     ok(status == STATUS_SUCCESS, "NtWriteFile error %#x\n", status);
     ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
-    ok(iob.Information == sizeof(contents), "expected sizeof(contents), got %lu\n", iob.Information);
+    ok(iob.Information == 7, "expected 7, got %lu\n", iob.Information);
+
+    SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
+
+    iob.Status = -1;
+    iob.Information = -1;
+    offset.QuadPart = (LONGLONG)-1 /* FILE_WRITE_TO_END_OF_FILE */;
+    status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents + 7, sizeof(contents) - 7, &offset, NULL);
+    ok(status == STATUS_SUCCESS, "NtWriteFile error %#x\n", status);
+    ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
+    ok(iob.Information == sizeof(contents) - 7, "expected sizeof(contents)-7, got %lu\n", iob.Information);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
 
     bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -1985,6 +1999,19 @@ static void test_read_write(void)
     ok(bytes == sizeof(contents), "bytes %u\n", bytes);
     ok(!memcmp(contents, buf, sizeof(contents)), "file contents mismatch\n");
 
+    for (i = -20; i < -1; i++)
+    {
+        if (i == -2) continue;
+
+        iob.Status = -1;
+        iob.Information = -1;
+        offset.QuadPart = (LONGLONG)i;
+        status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), &offset, NULL);
+        ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+        ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+        ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    }
+
     SetFilePointer(hfile, sizeof(contents) - 4, NULL, FILE_BEGIN);
 
     iob.Status = -1;
@@ -1995,6 +2022,18 @@ static void test_read_write(void)
     ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
     ok(iob.Information == 4, "expected 4, got %lu\n", iob.Information);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
+    iob.Status = -1;
+    iob.Information = -1;
+    status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), NULL, NULL);
+    ok(status == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#x\n", status);
+todo_wine
+    ok(iob.Status == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#x\n", iob.Status);
+todo_wine
+    ok(iob.Information == 0, "expected 0, got %lu\n", iob.Information);
+
     SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
 
     bytes = 0;
@@ -2005,6 +2044,9 @@ static void test_read_write(void)
     ok(!memcmp(contents, buf, sizeof(contents) - 4), "file contents mismatch\n");
     ok(!memcmp(buf + sizeof(contents) - 4, "DCBA", 4), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
     SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
 
     bytes = 0;
@@ -2012,6 +2054,9 @@ static void test_read_write(void)
     ret = WriteFile(hfile, contents, sizeof(contents), &bytes, NULL);
     ok(ret, "WriteFile error %d\n", GetLastError());
     ok(bytes == sizeof(contents), "bytes %u\n", bytes);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
 
     iob.Status = -1;
     iob.Information = -1;
@@ -2021,6 +2066,19 @@ todo_wine
     ok(iob.Status == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#x\n", iob.Status);
 todo_wine
     ok(iob.Information == 0, "expected 0, got %lu\n", iob.Information);
+
+    for (i = -20; i < 0; i++)
+    {
+        if (i == -2) continue;
+
+        iob.Status = -1;
+        iob.Information = -1;
+        offset.QuadPart = (LONGLONG)i;
+        status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), &offset, NULL);
+        ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+        ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+        ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    }
 
     iob.Status = -1;
     iob.Information = -1;
@@ -2041,6 +2099,9 @@ todo_wine
     ok(bytes == sizeof(contents), "bytes %u\n", bytes);
     ok(!memcmp(contents, buf, sizeof(contents)), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
     iob.Status = -1;
     iob.Information = -1;
     status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), NULL, NULL);
@@ -2059,6 +2120,9 @@ todo_wine
     ok(iob.Information == sizeof(contents), "expected sizeof(contents), got %lu\n", iob.Information);
     ok(!memcmp(contents, buf, sizeof(contents)), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
     iob.Status = -1;
     iob.Information = -1;
     offset.QuadPart = sizeof(contents) - 4;
@@ -2066,6 +2130,9 @@ todo_wine
     ok(status == STATUS_SUCCESS, "NtWriteFile error %#x\n", status);
     ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
     ok(iob.Information == 4, "expected 4, got %lu\n", iob.Information);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
 
     iob.Status = -1;
     iob.Information = -1;
@@ -2077,6 +2144,9 @@ todo_wine
     ok(!memcmp(contents, buf, sizeof(contents) - 4), "file contents mismatch\n");
     ok(!memcmp(buf + sizeof(contents) - 4, "DCBA", 4), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
     S(U(ovl)).Offset = sizeof(contents) - 4;
     S(U(ovl)).OffsetHigh = 0;
     ovl.hEvent = 0;
@@ -2085,6 +2155,9 @@ todo_wine
     ret = WriteFile(hfile, "ABCD", 4, &bytes, &ovl);
     ok(ret, "WriteFile error %d\n", GetLastError());
     ok(bytes == 4, "bytes %u\n", bytes);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
 
     S(U(ovl)).Offset = 0;
     S(U(ovl)).OffsetHigh = 0;
@@ -2101,6 +2174,9 @@ todo_wine
     ok(!memcmp(contents, buf, sizeof(contents) - 4), "file contents mismatch\n");
     ok(!memcmp(buf + sizeof(contents) - 4, "ABCD", 4), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == sizeof(contents), "expected sizeof(contents), got %u\n", off);
+
     CloseHandle(hfile);
 
     hfile = create_temp_file(FILE_FLAG_OVERLAPPED);
@@ -2109,33 +2185,27 @@ todo_wine
     bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = WriteFile(hfile, contents, sizeof(contents), &bytes, NULL);
-todo_wine
     ok(!ret, "WriteFile should fail\n");
-todo_wine
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
-todo_wine
     ok(bytes == 0, "bytes %u\n", bytes);
 
     iob.Status = -1;
     iob.Information = -1;
     status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), NULL, NULL);
-todo_wine
     ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#x\n", status);
-todo_wine
     ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
-todo_wine
     ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
 
-    iob.Status = -1;
-    iob.Information = -1;
-    offset.QuadPart = (LONGLONG)-2 /* FILE_USE_FILE_POINTER_POSITION */;
-    status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), &offset, NULL);
-todo_wine
-    ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#x\n", status);
-todo_wine
-    ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
-todo_wine
-    ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    for (i = -20; i < -1; i++)
+    {
+        iob.Status = -1;
+        iob.Information = -1;
+        offset.QuadPart = (LONGLONG)i;
+        status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, contents, sizeof(contents), &offset, NULL);
+        ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+        ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+        ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    }
 
     iob.Status = -1;
     iob.Information = -1;
@@ -2161,6 +2231,9 @@ todo_wine
     ret = WaitForSingleObject(hfile, 3000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = ReadFile(hfile, buf, sizeof(buf), &bytes, NULL);
@@ -2175,13 +2248,16 @@ todo_wine
     ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
     ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
 
-    iob.Status = -1;
-    iob.Information = -1;
-    offset.QuadPart = (LONGLONG)-2 /* FILE_USE_FILE_POINTER_POSITION */;
-    status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), &offset, NULL);
-    ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#x\n", status);
-    ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
-    ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    for (i = -20; i < 0; i++)
+    {
+        iob.Status = -1;
+        iob.Information = -1;
+        offset.QuadPart = (LONGLONG)i;
+        status = pNtReadFile(hfile, 0, NULL, NULL, &iob, buf, sizeof(buf), &offset, NULL);
+        ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+        ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+        ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+    }
 
     offset.QuadPart = sizeof(contents);
     S(U(ovl)).Offset = offset.u.LowPart;
@@ -2209,6 +2285,9 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == 0, "expected 0, got %lu\n", ovl.InternalHigh);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     bytes = 0xdeadbeef;
     ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
     ok(!ret, "GetOverlappedResult should report FALSE\n");
@@ -2217,6 +2296,9 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == 0, "expected 0, got %lu\n", ovl.InternalHigh);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     iob.Status = -1;
     iob.Information = -1;
     offset.QuadPart = sizeof(contents);
@@ -2224,6 +2306,9 @@ todo_wine
     ok(status == STATUS_PENDING, "expected STATUS_PENDING, got %#x\n", status);
     ok(iob.Status == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#x\n", iob.Status);
     ok(iob.Information == 0, "expected 0, got %lu\n", iob.Information);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     S(U(ovl)).Offset = offset.u.LowPart;
     S(U(ovl)).OffsetHigh = offset.u.HighPart;
@@ -2238,7 +2323,8 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_END_OF_FILE, "expected STATUS_END_OF_FILE, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == 0, "expected 0, got %lu\n", ovl.InternalHigh);
 
-    SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     S(U(ovl)).Offset = 0;
     S(U(ovl)).OffsetHigh = 0;
@@ -2254,6 +2340,9 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == sizeof(contents), "expected sizeof(contents), got %lu\n", ovl.InternalHigh);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     bytes = 0xdeadbeef;
     ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
     ok(ret, "GetOverlappedResult error %d\n", GetLastError());
@@ -2262,16 +2351,29 @@ todo_wine
     ok(ovl.InternalHigh == sizeof(contents), "expected sizeof(contents), got %lu\n", ovl.InternalHigh);
     ok(!memcmp(contents, buf, sizeof(contents)), "file contents mismatch\n");
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
+    SetFilePointer(hfile, sizeof(contents) - 4, NULL, FILE_BEGIN);
+    SetEndOfFile(hfile);
+    SetFilePointer(hfile, 0, NULL, FILE_BEGIN);
+
     iob.Status = -1;
     iob.Information = -1;
-    offset.QuadPart = sizeof(contents) - 4;
+    offset.QuadPart = (LONGLONG)-1 /* FILE_WRITE_TO_END_OF_FILE */;
     status = pNtWriteFile(hfile, 0, NULL, NULL, &iob, "DCBA", 4, &offset, NULL);
     ok(status == STATUS_PENDING || broken(status == STATUS_SUCCESS) /* before Vista */, "expected STATUS_PENDING, got %#x\n", status);
     ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
     ok(iob.Information == 4, "expected 4, got %lu\n", iob.Information);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     ret = WaitForSingleObject(hfile, 3000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     iob.Status = -1;
     iob.Information = -1;
@@ -2281,10 +2383,16 @@ todo_wine
     ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
     ok(iob.Information == sizeof(contents), "expected sizeof(contents), got %lu\n", iob.Information);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     ret = WaitForSingleObject(hfile, 3000);
     ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
     ok(!memcmp(contents, buf, sizeof(contents) - 4), "file contents mismatch\n");
     ok(!memcmp(buf + sizeof(contents) - 4, "DCBA", 4), "file contents mismatch\n");
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     S(U(ovl)).Offset = sizeof(contents) - 4;
     S(U(ovl)).OffsetHigh = 0;
@@ -2300,12 +2408,18 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == 4, "expected 4, got %lu\n", ovl.InternalHigh);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     bytes = 0xdeadbeef;
     ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
     ok(ret, "GetOverlappedResult error %d\n", GetLastError());
     ok(bytes == 4, "bytes %u\n", bytes);
     ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == 4, "expected 4, got %lu\n", ovl.InternalHigh);
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     S(U(ovl)).Offset = 0;
     S(U(ovl)).OffsetHigh = 0;
@@ -2321,6 +2435,9 @@ todo_wine
     ok((NTSTATUS)ovl.Internal == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#lx\n", ovl.Internal);
     ok(ovl.InternalHigh == sizeof(contents), "expected sizeof(contents), got %lu\n", ovl.InternalHigh);
 
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
+
     bytes = 0xdeadbeef;
     ret = GetOverlappedResult(hfile, &ovl, &bytes, TRUE);
     ok(ret, "GetOverlappedResult error %d\n", GetLastError());
@@ -2329,6 +2446,9 @@ todo_wine
     ok(ovl.InternalHigh == sizeof(contents), "expected sizeof(contents), got %lu\n", ovl.InternalHigh);
     ok(!memcmp(contents, buf, sizeof(contents) - 4), "file contents mismatch\n");
     ok(!memcmp(buf + sizeof(contents) - 4, "ABCD", 4), "file contents mismatch\n");
+
+    off = SetFilePointer(hfile, 0, NULL, FILE_CURRENT);
+    ok(off == 0, "expected 0, got %u\n", off);
 
     CloseHandle(hfile);
 }

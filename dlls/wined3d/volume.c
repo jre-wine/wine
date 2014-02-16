@@ -456,7 +456,6 @@ ULONG CDECL wined3d_volume_incref(struct wined3d_volume *volume)
     return refcount;
 }
 
-/* Do not call while under the GL lock. */
 ULONG CDECL wined3d_volume_decref(struct wined3d_volume *volume)
 {
     ULONG refcount;
@@ -501,7 +500,6 @@ DWORD CDECL wined3d_volume_get_priority(const struct wined3d_volume *volume)
     return resource_get_priority(&volume->resource);
 }
 
-/* Do not call while under the GL lock. */
 void CDECL wined3d_volume_preload(struct wined3d_volume *volume)
 {
     FIXME("volume %p stub!\n", volume);
@@ -607,7 +605,7 @@ HRESULT CDECL wined3d_volume_map(struct wined3d_volume *volume,
 
     if (!(flags & (WINED3D_MAP_NO_DIRTY_UPDATE | WINED3D_MAP_READONLY)))
     {
-        wined3d_texture_set_dirty(volume->container, TRUE);
+        wined3d_texture_set_dirty(volume->container);
 
         if (volume->flags & WINED3D_VFLAG_PBO)
             wined3d_volume_invalidate_location(volume, ~WINED3D_LOCATION_BUFFER);

@@ -20,7 +20,10 @@
 
 #include <stdio.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "wine/test.h"
+#include "winternl.h"
 #include "winbase.h"
 #include "winnls.h"
 
@@ -47,6 +50,16 @@ static BOOL loopback_rts_cts  = LOOPBACK_CTS_RTS;
 static BOOL loopback_dtr_dsr  = LOOPBACK_DTR_DSR;
 static BOOL loopback_dtr_ring = LOOPBACK_DTR_RING;
 static BOOL loopback_dtr_dcd  = LOOPBACK_DTR_DCD;
+
+static NTSTATUS (WINAPI *pNtReadFile)(HANDLE hFile, HANDLE hEvent,
+                                      PIO_APC_ROUTINE apc, void* apc_user,
+                                      PIO_STATUS_BLOCK io_status, void* buffer, ULONG length,
+                                      PLARGE_INTEGER offset, PULONG key);
+static NTSTATUS (WINAPI *pNtWriteFile)(HANDLE hFile, HANDLE hEvent,
+                                       PIO_APC_ROUTINE apc, void* apc_user,
+                                       PIO_STATUS_BLOCK io_status,
+                                       const void* buffer, ULONG length,
+                                       PLARGE_INTEGER offset, PULONG key);
 
 typedef struct
 {
@@ -780,10 +793,11 @@ static void test_waittxempty(void)
     DCB dcb;
     COMMTIMEOUTS timeouts;
     char tbuf[]="test_waittxempty";
-    DWORD before, after, bytes, timediff, evtmask;
+    DWORD before, after, bytes, timediff, evtmask, errors, i;
     BOOL res;
     DWORD baud = SLOWBAUD;
-    OVERLAPPED ovl_write, ovl_wait;
+    OVERLAPPED ovl_write, ovl_wait, ovl_wait2;
+    COMSTAT stat;
 
     hcom = test_OpenComm(TRUE);
     if (hcom == INVALID_HANDLE_VALUE) return;
@@ -855,7 +869,18 @@ todo_wine
         ok(bytes == sizeof(evtmask), "expected %u, written %u\n", (UINT)sizeof(evtmask), bytes);
         res = TRUE;
     }
-    else res = FALSE;
+    else
+    {
+        /* unblock pending wait */
+        trace("recovering after WAIT_TIMEOUT...\n");
+        res = SetCommMask(hcom, EV_TXEMPTY);
+        ok(res, "SetCommMask error %d\n", GetLastError());
+
+        res = WaitForSingleObject(ovl_wait.hEvent, TIMEOUT);
+        ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
+
+        res = FALSE;
+    }
     after = GetTickCount();
 todo_wine
     ok(res, "WaitCommEvent error %d\n", GetLastError());
@@ -876,6 +901,95 @@ todo_wine
     CloseHandle(ovl_write.hEvent);
 
     CloseHandle(hcom);
+
+    for (i = 0; i < 2; i++)
+    {
+        hcom = test_OpenComm(TRUE);
+        if (hcom == INVALID_HANDLE_VALUE) return;
+
+        res = SetCommMask(hcom, EV_TXEMPTY);
+        ok(res, "SetCommMask error %d\n", GetLastError());
+
+        if (i == 0)
+        {
+            S(U(ovl_write)).Offset = 0;
+            S(U(ovl_write)).OffsetHigh = 0;
+            ovl_write.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+            before = GetTickCount();
+            SetLastError(0xdeadbeef);
+            res = WriteFile(hcom, tbuf, sizeof(tbuf), &bytes, &ovl_write);
+todo_wine
+            ok(!res && GetLastError() == ERROR_IO_PENDING, "WriteFile returned %d, error %d\n", res, GetLastError());
+todo_wine
+            ok(!bytes, "expected 0, got %u\n", bytes);
+
+            ClearCommError(hcom, &errors, &stat);
+            ok(stat.cbInQue == 0, "InQueue should be empty, got %d bytes\n", stat.cbInQue);
+            ok(stat.cbOutQue != 0 || broken(stat.cbOutQue == 0) /* VM */, "OutQueue should not be empty\n");
+            ok(errors == 0, "ClearCommErrors: Unexpected error 0x%08x\n", errors);
+
+            res = GetOverlappedResult(hcom, &ovl_write, &bytes, TRUE);
+            ok(res, "GetOverlappedResult reported error %d\n", GetLastError());
+            ok(bytes == sizeof(tbuf), "expected %u, written %u\n", (UINT)sizeof(tbuf), bytes);
+            CloseHandle(ovl_write.hEvent);
+
+            res = FlushFileBuffers(hcom);
+            ok(res, "FlushFileBuffers error %d\n", GetLastError());
+        }
+
+        ClearCommError(hcom, &errors, &stat);
+        ok(stat.cbInQue == 0, "InQueue should be empty, got %d bytes\n", stat.cbInQue);
+        ok(stat.cbOutQue == 0, "OutQueue should be empty, got %d bytes\n", stat.cbOutQue);
+        ok(errors == 0, "ClearCommErrors: Unexpected error 0x%08x\n", errors);
+
+        S(U(ovl_wait)).Offset = 0;
+        S(U(ovl_wait)).OffsetHigh = 0;
+        ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        evtmask = 0;
+        SetLastError(0xdeadbeef);
+        res = WaitCommEvent(hcom, &evtmask, &ovl_wait);
+        ok(!res && GetLastError() == ERROR_IO_PENDING, "%d: WaitCommEvent error %d\n", i, GetLastError());
+
+        res = WaitForSingleObject(ovl_wait.hEvent, TIMEOUT);
+        if (i == 0)
+todo_wine
+            ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
+        else
+            ok(res == WAIT_TIMEOUT, "WaitCommEvent should fail with a timeout\n");
+        if (res == WAIT_OBJECT_0)
+        {
+            res = GetOverlappedResult(hcom, &ovl_wait, &bytes, FALSE);
+            ok(res, "GetOverlappedResult reported error %d\n", GetLastError());
+            ok(bytes == sizeof(evtmask), "expected %u, written %u\n", (UINT)sizeof(evtmask), bytes);
+            ok(res, "WaitCommEvent error %d\n", GetLastError());
+            ok(evtmask & EV_TXEMPTY, "WaitCommEvent: expected EV_TXEMPTY, got %#x\n", evtmask);
+        }
+        else
+        {
+            ok(!evtmask, "WaitCommEvent: expected 0, got %#x\n", evtmask);
+
+            S(U(ovl_wait2)).Offset = 0;
+            S(U(ovl_wait2)).OffsetHigh = 0;
+            ovl_wait2.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+            SetLastError(0xdeadbeef);
+            res = WaitCommEvent(hcom, &evtmask, &ovl_wait2);
+            ok(!res, "WaitCommEvent should fail if there is a pending wait\n");
+todo_wine
+            ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+            CloseHandle(ovl_wait2.hEvent);
+
+            /* unblock pending wait */
+            trace("recovering after WAIT_TIMEOUT...\n");
+            res = SetCommMask(hcom, EV_TXEMPTY);
+            ok(res, "SetCommMask error %d\n", GetLastError());
+
+            res = WaitForSingleObject(ovl_wait.hEvent, TIMEOUT);
+            ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
+            CloseHandle(ovl_wait.hEvent);
+        }
+
+        CloseHandle(hcom);
+    }
 }
 
 /* A new open handle should not return error or have bytes in the Queues */
@@ -1036,7 +1150,7 @@ static void test_LoopbackCtsRts(void)
     if (dcb.fRtsControl == RTS_CONTROL_HANDSHAKE)
     {
 	trace("RTS_CONTROL_HANDSHAKE is set, so don't manipulate RTS\n");
-        CloseHandle(hcom);
+	CloseHandle(hcom);
 	return;
     }
     ok(GetCommModemStatus(hcom, &defaultStat), "GetCommModemStatus failed\n");
@@ -1180,6 +1294,7 @@ static void test_LoopbackDtrRing(void)
     if (dcb.fDtrControl == DTR_CONTROL_HANDSHAKE)
     {
 	trace("DTR_CONTROL_HANDSHAKE is set, so don't manipulate DTR\n");
+	CloseHandle(hcom);
 	return;
     }
     ok(GetCommModemStatus(hcom, &defaultStat), "GetCommModemStatus failed\n");
@@ -1592,6 +1707,7 @@ static void test_WaitRing(void)
     ok((ret = GetCommModemStatus(hcom, &defaultStat)), "GetCommModemStatus failed\n");
     if (!ret) {
 	skip("modem status failed -> skip.\n");
+	CloseHandle(hcom);
 	return;
     }
     if(defaultStat & MS_RING_ON)
@@ -1668,7 +1784,7 @@ static void test_WaitDcd(void)
     if (dcb.fDtrControl == DTR_CONTROL_DISABLE)
     {
 	trace("DTR_CONTROL_HANDSHAKE is set, so don't manipulate DTR\n");
-        CloseHandle(hcom);
+	CloseHandle(hcom);
 	return;
     }
     args[0]= TIMEOUT >>1;
@@ -1897,8 +2013,220 @@ static void test_FlushFileBuffers(void)
     CloseHandle(hcom);
 }
 
+static void test_read_write(void)
+{
+    static const char atz[]="ATZ\r\n";
+    char buf[256];
+    HANDLE hcom;
+    DCB dcb;
+    COMMTIMEOUTS timeouts;
+    DWORD ret, bytes, status, evtmask, before, after, last_event_time;
+    OVERLAPPED ovl_wait;
+    IO_STATUS_BLOCK iob;
+    LARGE_INTEGER offset;
+    LONG i;
+
+    if (!pNtReadFile || !pNtWriteFile)
+    {
+        win_skip("not running on NT, skipping test\n");
+        return;
+    }
+
+    hcom = test_OpenComm(TRUE);
+    if (hcom == INVALID_HANDLE_VALUE) return;
+
+    ret = GetCommState(hcom, &dcb);
+    ok(ret, "GetCommState error %d\n", GetLastError());
+    dcb.BaudRate = 9600;
+    dcb.ByteSize = 8;
+    dcb.Parity = NOPARITY;
+    dcb.fRtsControl = RTS_CONTROL_ENABLE;
+    dcb.fDtrControl = DTR_CONTROL_ENABLE;
+    dcb.StopBits = ONESTOPBIT;
+    ret = SetCommState(hcom, &dcb);
+    ok(ret, "SetCommState error %d\n", GetLastError());
+
+    memset(&timeouts, 0, sizeof(timeouts));
+    timeouts.ReadTotalTimeoutConstant = TIMEOUT;
+    ret = SetCommTimeouts(hcom, &timeouts);
+    ok(ret,"SetCommTimeouts error %d\n", GetLastError());
+
+    ret = SetupComm(hcom, 1024, 1024);
+    ok(ret, "SetUpComm error %d\n", GetLastError());
+
+    bytes = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = WriteFile(hcom, atz, 0, &bytes, NULL);
+todo_wine
+    ok(!ret, "WriteFile should fail\n");
+todo_wine
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    ok(bytes == 0, "bytes %u\n", bytes);
+
+    iob.Status = -1;
+    iob.Information = -1;
+    status = pNtWriteFile(hcom, 0, NULL, NULL, &iob, atz, 0, NULL, NULL);
+todo_wine
+    ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#x\n", status);
+todo_wine
+    ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+todo_wine
+    ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+
+    for (i = -20; i < 20; i++)
+    {
+        iob.Status = -1;
+        iob.Information = -1;
+        offset.QuadPart = (LONGLONG)i;
+        status = pNtWriteFile(hcom, 0, NULL, NULL, &iob, atz, 0, &offset, NULL);
+        if (i >= 0 || i == -1)
+        {
+            ok(status == STATUS_SUCCESS, "%d: expected STATUS_SUCCESS, got %#x\n", i, status);
+            ok(iob.Status == STATUS_SUCCESS, "%d: expected STATUS_SUCCESS, got %#x\n", i, iob.Status);
+            ok(iob.Information == 0, "%d: expected 0, got %lu\n", i, iob.Information);
+        }
+        else
+        {
+todo_wine
+            ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+todo_wine
+            ok(iob.Status == -1, "%d: expected -1, got %#x\n", i, iob.Status);
+todo_wine
+            ok(iob.Information == -1, "%d: expected -1, got %ld\n", i, iob.Information);
+        }
+    }
+
+    iob.Status = -1;
+    iob.Information = -1;
+    offset.QuadPart = 0;
+    status = pNtWriteFile(hcom, 0, NULL, NULL, &iob, atz, sizeof(atz), &offset, NULL);
+todo_wine
+    ok(status == STATUS_PENDING, "expected STATUS_PENDING, got %#x\n", status);
+    /* Under Windows checking IO_STATUS_BLOCK right after the call leads
+     * to races, iob.Status is either -1 or STATUS_SUCCESS, which means
+     * that it's set only when the operation completes.
+     */
+    ret = WaitForSingleObject(hcom, TIMEOUT);
+    if (ret == WAIT_TIMEOUT)
+    {
+        skip("Probably modem is not connected.\n");
+        CloseHandle(hcom);
+        return;
+    }
+    ok(ret == WAIT_OBJECT_0, "WaitForSingleObject error %d\n", ret);
+    ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
+    ok(iob.Information == sizeof(atz), "expected sizeof(atz), got %lu\n", iob.Information);
+
+    ret = SetCommMask(hcom, EV_RXCHAR);
+    ok(ret, "SetCommMask error %d\n", GetLastError());
+
+    S(U(ovl_wait)).Offset = 0;
+    S(U(ovl_wait)).OffsetHigh = 0;
+    ovl_wait.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+    trace("waiting 3 secs for modem response...\n");
+    last_event_time = 0;
+    before = GetTickCount();
+    do
+    {
+        evtmask = 0;
+        SetLastError(0xdeadbeef);
+        ret = WaitCommEvent(hcom, &evtmask, &ovl_wait);
+        ok(!ret && GetLastError() == ERROR_IO_PENDING, "WaitCommEvent returned %d, error %d\n", ret, GetLastError());
+        if (GetLastError() != ERROR_IO_PENDING) goto done; /* no point in further testing */
+        for (;;)
+        {
+            ret = WaitForSingleObject(ovl_wait.hEvent, 100);
+            after = GetTickCount();
+            if (ret == WAIT_OBJECT_0)
+            {
+                trace("got modem response.\n");
+
+                last_event_time = after;
+                ret = GetOverlappedResult(hcom, &ovl_wait, &bytes, FALSE);
+                ok(ret, "GetOverlappedResult reported error %d\n", GetLastError());
+todo_wine
+                ok(bytes == sizeof(evtmask), "expected sizeof(evtmask), got %u\n", bytes);
+                ok(evtmask & EV_RXCHAR, "EV_RXCHAR should be set\n");
+
+                bytes = 0xdeadbeef;
+                SetLastError(0xdeadbeef);
+                ret = ReadFile(hcom, buf, 0, &bytes, NULL);
+todo_wine
+                ok(!ret, "ReadFile should fail\n");
+todo_wine
+                ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+                ok(bytes == 0, "bytes %u\n", bytes);
+
+                iob.Status = -1;
+                iob.Information = -1;
+                status = pNtReadFile(hcom, 0, NULL, NULL, &iob, buf, 0, NULL, NULL);
+todo_wine
+                ok(status == STATUS_INVALID_PARAMETER, "expected STATUS_INVALID_PARAMETER, got %#x\n", status);
+                /* FIXME: Remove once Wine is fixed */
+                if (status == STATUS_PENDING) WaitForSingleObject(hcom, TIMEOUT);
+todo_wine
+                ok(iob.Status == -1, "expected -1, got %#x\n", iob.Status);
+todo_wine
+                ok(iob.Information == -1, "expected -1, got %ld\n", iob.Information);
+
+                for (i = -20; i < 20; i++)
+                {
+                    iob.Status = -1;
+                    iob.Information = -1;
+                    offset.QuadPart = (LONGLONG)i;
+                    status = pNtReadFile(hcom, 0, NULL, NULL, &iob, buf, 0, &offset, NULL);
+                    /* FIXME: Remove once Wine is fixed */
+                    if (status == STATUS_PENDING) WaitForSingleObject(hcom, TIMEOUT);
+                    if (i >= 0)
+                    {
+todo_wine
+                        ok(status == STATUS_SUCCESS, "%d: expected STATUS_SUCCESS, got %#x\n", i, status);
+todo_wine
+                        ok(iob.Status == STATUS_SUCCESS, "%d: expected STATUS_SUCCESS, got %#x\n", i, iob.Status);
+                        ok(iob.Information == 0, "%d: expected 0, got %lu\n", i, iob.Information);
+                    }
+                    else
+                    {
+todo_wine
+                        ok(status == STATUS_INVALID_PARAMETER, "%d: expected STATUS_INVALID_PARAMETER, got %#x\n", i, status);
+todo_wine
+                        ok(iob.Status == -1, "%d: expected -1, got %#x\n", i, iob.Status);
+todo_wine
+                        ok(iob.Information == -1, "%d: expected -1, got %ld\n", i, iob.Information);
+                    }
+                }
+
+                iob.Status = -1;
+                iob.Information = -1;
+                offset.QuadPart = 0;
+                status = pNtReadFile(hcom, 0, NULL, NULL, &iob, buf, 1, &offset, NULL);
+                ok(status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", status);
+                ok(iob.Status == STATUS_SUCCESS, "expected STATUS_SUCCESS, got %#x\n", iob.Status);
+                ok(iob.Information == 1, "expected 1, got %lu\n", iob.Information);
+                goto done;
+            }
+            else
+            {
+                if (last_event_time || after - before >= 3000) goto done;
+            }
+        }
+    } while (after - before < 3000);
+
+done:
+    CloseHandle(ovl_wait.hEvent);
+    CloseHandle(hcom);
+}
+
 START_TEST(comm)
 {
+    HMODULE ntdll = GetModuleHandle("ntdll.dll");
+    if (ntdll)
+    {
+        pNtReadFile = (void *)GetProcAddress(ntdll, "NtReadFile");
+        pNtWriteFile = (void *)GetProcAddress(ntdll, "NtWriteFile");
+    }
+
     test_ClearCommError(); /* keep it the very first test */
     test_FlushFileBuffers();
     test_BuildCommDCB();
@@ -1918,6 +2246,7 @@ START_TEST(comm)
     test_WaitDcd();
     test_WaitBreak();
     test_stdio();
+    test_read_write();
 
     if (!winetest_interactive)
     {

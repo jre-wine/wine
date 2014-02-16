@@ -1889,6 +1889,9 @@ static TLBString *TLB_append_str(struct list *string_list, BSTR new_str)
 {
     TLBString *str;
 
+    if(!new_str)
+        return NULL;
+
     LIST_FOR_EACH_ENTRY(str, string_list, TLBString, entry) {
         if (strcmpW(str->str, new_str) == 0)
             return str;
@@ -2258,24 +2261,17 @@ static void MSFT_ReadValue( VARIANT * pVar, int offset, TLBContext *pcx )
         case VT_BSTR    :{
             char * ptr;
             MSFT_ReadLEDWords(&size, sizeof(INT), pcx, DO_NOT_SEEK );
-	    if(size < 0) {
-                char next;
-                DWORD origPos = MSFT_Tell(pcx), nullPos;
-
-                do {
-                    MSFT_Read(&next, 1, pcx, DO_NOT_SEEK);
-                } while (next);
-                nullPos = MSFT_Tell(pcx);
-                size = nullPos - origPos;
-                MSFT_Seek(pcx, origPos);
-	    }
-            ptr = heap_alloc_zero(size);/* allocate temp buffer */
-            MSFT_Read(ptr, size, pcx, DO_NOT_SEEK);/* read string (ANSI) */
-            V_BSTR(pVar)=SysAllocStringLen(NULL,size);
-            /* FIXME: do we need a AtoW conversion here? */
-            V_UNION(pVar, bstrVal[size])='\0';
-            while(size--) V_UNION(pVar, bstrVal[size])=ptr[size];
-            heap_free(ptr);
+            if(size == -1){
+                V_BSTR(pVar) = NULL;
+            }else{
+                ptr = heap_alloc_zero(size);
+                MSFT_Read(ptr, size, pcx, DO_NOT_SEEK);
+                V_BSTR(pVar)=SysAllocStringLen(NULL,size);
+                /* FIXME: do we need a AtoW conversion here? */
+                V_UNION(pVar, bstrVal[size])='\0';
+                while(size--) V_UNION(pVar, bstrVal[size])=ptr[size];
+                heap_free(ptr);
+            }
 	}
 	size=-4; break;
     /* FIXME: this will not work AT ALL when the variant contains a pointer */
@@ -5080,8 +5076,8 @@ static HRESULT WINAPI ITypeLib2_fnIsName(
     *pfName=FALSE;
 
 ITypeLib2_fnIsName_exit:
-    TRACE("(%p)slow! search for %s: %s found!\n", This,
-          debugstr_w(szNameBuf), *pfName?"NOT":"");
+    TRACE("(%p)slow! search for %s: %sfound!\n", This,
+          debugstr_w(szNameBuf), *pfName ? "" : "NOT ");
 
     return S_OK;
 }
@@ -5364,7 +5360,7 @@ static HRESULT WINAPI ITypeLibComp_fnBind(
     ITypeLibImpl *This = impl_from_ITypeComp(iface);
     int typemismatch=0, i;
 
-    TRACE("(%s, 0x%x, 0x%x, %p, %p, %p)\n", debugstr_w(szName), lHash, wFlags, ppTInfo, pDescKind, pBindPtr);
+    TRACE("(%p)->(%s, 0x%x, 0x%x, %p, %p, %p)\n", This, debugstr_w(szName), lHash, wFlags, ppTInfo, pDescKind, pBindPtr);
 
     *pDescKind = DESCKIND_NONE;
     pBindPtr->lptcomp = NULL;
@@ -8475,7 +8471,7 @@ static HRESULT WINAPI ITypeComp_fnBind(
 
     for(fdc = 0; fdc < This->cFuncs; ++fdc){
         pFDesc = &This->funcdescs[fdc];
-        if (!strcmpiW(TLB_get_bstr(pFDesc->Name), szName)) {
+        if (!lstrcmpiW(TLB_get_bstr(pFDesc->Name), szName)) {
             if (!wFlags || (pFDesc->funcdesc.invkind & wFlags))
                 break;
             else
@@ -8508,7 +8504,7 @@ static HRESULT WINAPI ITypeComp_fnBind(
             return S_OK;
         }
     }
-    /* FIXME: search each inherited interface, not just the first */
+
     if (hr == DISP_E_MEMBERNOTFOUND && This->impltypes) {
         /* recursive search */
         ITypeInfo *pTInfo;
@@ -8524,6 +8520,13 @@ static HRESULT WINAPI ITypeComp_fnBind(
         {
             hr = ITypeComp_Bind(pTComp, szName, lHash, wFlags, ppTInfo, pDescKind, pBindPtr);
             ITypeComp_Release(pTComp);
+            if (SUCCEEDED(hr) && *pDescKind == DESCKIND_FUNCDESC &&
+                    This->typekind == TKIND_DISPATCH)
+            {
+                FUNCDESC *tmp = pBindPtr->lpfuncdesc;
+                hr = TLB_AllocAndInitFuncDesc(tmp, &pBindPtr->lpfuncdesc, TRUE);
+                SysFreeString((BSTR)tmp);
+            }
             return hr;
         }
         WARN("Could not search inherited interface!\n");
@@ -9142,41 +9145,6 @@ static DWORD WMSFT_append_typedesc(TYPEDESC *desc, WMSFT_TLBFile *file, DWORD *o
         out_size = &junk2;
 
     vt = desc->vt & VT_TYPEMASK;
-    switch(vt){
-    case VT_INT:
-        subtype = VT_I4;
-        break;
-    case VT_UINT:
-        subtype = VT_UI4;
-        break;
-    case VT_VOID:
-        subtype = VT_EMPTY;
-        break;
-    default:
-        subtype = vt;
-        break;
-    }
-
-    switch(vt){
-    case VT_INT:
-    case VT_UINT:
-    case VT_I1:
-    case VT_UI1:
-    case VT_I2:
-    case VT_UI2:
-    case VT_I4:
-    case VT_UI4:
-    case VT_BOOL:
-    case VT_R4:
-    case VT_ERROR:
-    case VT_BSTR:
-    case VT_HRESULT:
-    case VT_CY:
-    case VT_VOID:
-    case VT_VARIANT:
-        *out_mix = subtype;
-        return 0x80000000 | (subtype << 16) | desc->vt;
-    }
 
     if(vt == VT_PTR || vt == VT_SAFEARRAY){
         DWORD mix;
@@ -9193,9 +9161,25 @@ static DWORD WMSFT_append_typedesc(TYPEDESC *desc, WMSFT_TLBFile *file, DWORD *o
         encoded[1] = desc->u.hreftype;
         *out_mix = 0x7FFF; /* FIXME: Should get TYPEKIND of the hreftype, e.g. TKIND_ENUM => VT_I4 */
     }else{
-        FIXME("Don't know what to do! VT: 0x%x\n", desc->vt);
-        *out_mix = desc->vt;
-        return 0x80000000 | (desc->vt << 16) | desc->vt;
+        TRACE("Mixing in-place, VT: 0x%x\n", desc->vt);
+
+        switch(vt){
+        case VT_INT:
+            subtype = VT_I4;
+            break;
+        case VT_UINT:
+            subtype = VT_UI4;
+            break;
+        case VT_VOID:
+            subtype = VT_EMPTY;
+            break;
+        default:
+            subtype = vt;
+            break;
+        }
+
+        *out_mix = subtype;
+        return 0x80000000 | (subtype << 16) | desc->vt;
     }
 
     data = file->typdesc_seg.data;
@@ -10688,8 +10672,17 @@ static HRESULT WINAPI ICreateTypeInfo2_fnSetVarName(ICreateTypeInfo2 *iface,
         UINT index, LPOLESTR name)
 {
     ITypeInfoImpl *This = info_impl_from_ICreateTypeInfo2(iface);
-    FIXME("%p %u %s - stub\n", This, index, wine_dbgstr_w(name));
-    return E_NOTIMPL;
+
+    TRACE("%p %u %s\n", This, index, wine_dbgstr_w(name));
+
+    if(!name)
+        return E_INVALIDARG;
+
+    if(index >= This->cVars)
+        return TYPE_E_ELEMENTNOTFOUND;
+
+    This->vardescs[index].Name = TLB_append_str(&This->pTypeLib->name_list, name);
+    return S_OK;
 }
 
 static HRESULT WINAPI ICreateTypeInfo2_fnSetTypeDescAlias(ICreateTypeInfo2 *iface,

@@ -354,14 +354,16 @@ typedef DWORD D3DRMLOADOPTIONS;
 
 #define D3DRMLOAD_ASYNCHRONOUS         __MSABI_LONG(0x400)
 
-typedef struct _D3DRMLOADRESOURCE {
+typedef struct _D3DRMLOADRESOURCE
+{
     HMODULE hModule;
-    LPCSTR /*LPCTSTR*/ lpName;
-    LPCSTR /*LPCTSTR*/ lpType;
+    const char *lpName;
+    const char *lpType;
 } D3DRMLOADRESOURCE, *LPD3DRMLOADRESOURCE;
 
-typedef struct _D3DRMLOADMEMORY {
-    LPVOID lpMemory;
+typedef struct _D3DRMLOADMEMORY
+{
+    void *lpMemory;
     DWORD dSize;
 } D3DRMLOADMEMORY, *LPD3DRMLOADMEMORY;
 

@@ -68,7 +68,7 @@ struct pixel_format_desc {
 };
 
 HRESULT map_view_of_file(const WCHAR *filename, void **buffer, DWORD *length) DECLSPEC_HIDDEN;
-HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, LPVOID *buffer, DWORD *length) DECLSPEC_HIDDEN;
+HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, void **buffer, DWORD *length) DECLSPEC_HIDDEN;
 
 HRESULT write_buffer_to_file(const WCHAR *filename, ID3DXBuffer *buffer) DECLSPEC_HIDDEN;
 
@@ -105,6 +105,7 @@ const char *debug_d3dxparameter_type(D3DXPARAMETER_TYPE t) DECLSPEC_HIDDEN;
 const char *debug_d3dxparameter_registerset(D3DXREGISTER_SET r) DECLSPEC_HIDDEN;
 
 /* parameter type conversion helpers */
-void set_number(LPVOID outdata, D3DXPARAMETER_TYPE outtype, LPCVOID indata, D3DXPARAMETER_TYPE intype) DECLSPEC_HIDDEN;
+void set_number(void *outdata, D3DXPARAMETER_TYPE outtype,
+        const void *indata, D3DXPARAMETER_TYPE intype) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_D3DX9_36_PRIVATE_H */

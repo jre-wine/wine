@@ -27,7 +27,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
-/* Do not call while under the GL lock. */
 static void swapchain_cleanup(struct wined3d_swapchain *swapchain)
 {
     HRESULT hr;
@@ -98,7 +97,6 @@ ULONG CDECL wined3d_swapchain_incref(struct wined3d_swapchain *swapchain)
     return refcount;
 }
 
-/* Do not call while under the GL lock. */
 ULONG CDECL wined3d_swapchain_decref(struct wined3d_swapchain *swapchain)
 {
     ULONG refcount = InterlockedDecrement(&swapchain->ref);
@@ -523,7 +521,7 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain, const RECT
     if (!swapchain->render_to_fbo && render_to_fbo && wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
         surface_load_location(back_buffer, SFLAG_INTEXTURE, NULL);
-        surface_modify_location(back_buffer, SFLAG_INDRAWABLE, FALSE);
+        surface_invalidate_location(back_buffer, SFLAG_INDRAWABLE);
         swapchain->render_to_fbo = TRUE;
         swapchain_update_draw_bindings(swapchain);
     }
@@ -604,32 +602,35 @@ static void swapchain_gl_present(struct wined3d_swapchain *swapchain, const RECT
 
         if (front->resource.size == back_buffer->resource.size)
         {
-            DWORD fbflags;
             flip_surface(front, back_buffer);
 
             /* Tell the front buffer surface that is has been modified. However,
              * the other locations were preserved during that, so keep the flags.
              * This serves to update the emulated overlay, if any. */
-            fbflags = front->flags;
-            surface_modify_location(front, SFLAG_INDRAWABLE, TRUE);
-            front->flags = fbflags;
+            surface_validate_location(front, SFLAG_INDRAWABLE);
         }
         else
         {
-            surface_modify_location(front, SFLAG_INDRAWABLE, TRUE);
-            surface_modify_location(back_buffer, SFLAG_INDRAWABLE, TRUE);
+            surface_validate_location(front, SFLAG_INDRAWABLE);
+            surface_invalidate_location(front, ~SFLAG_INDRAWABLE);
+            surface_validate_location(back_buffer, SFLAG_INDRAWABLE);
+            surface_invalidate_location(back_buffer, ~SFLAG_INDRAWABLE);
         }
     }
     else
     {
-        surface_modify_location(swapchain->front_buffer, SFLAG_INDRAWABLE, TRUE);
+        surface_validate_location(swapchain->front_buffer, SFLAG_INDRAWABLE);
+        surface_invalidate_location(swapchain->front_buffer, ~SFLAG_INDRAWABLE);
         /* If the swapeffect is DISCARD, the back buffer is undefined. That means the SYSMEM
          * and INTEXTURE copies can keep their old content if they have any defined content.
          * If the swapeffect is COPY, the content remains the same. If it is FLIP however,
          * the texture / sysmem copy needs to be reloaded from the drawable
          */
         if (swapchain->desc.swap_effect == WINED3D_SWAP_EFFECT_FLIP)
-            surface_modify_location(back_buffer, back_buffer->draw_binding, TRUE);
+        {
+            surface_validate_location(back_buffer, back_buffer->draw_binding);
+            surface_invalidate_location(back_buffer, ~back_buffer->draw_binding);
+        }
     }
 
     if (fb->depth_stencil)
@@ -806,7 +807,6 @@ void swapchain_update_render_to_fbo(struct wined3d_swapchain *swapchain)
     swapchain->render_to_fbo = TRUE;
 }
 
-/* Do not call while under the GL lock. */
 static HRESULT swapchain_init(struct wined3d_swapchain *swapchain, struct wined3d_device *device,
         struct wined3d_swapchain_desc *desc, void *parent, const struct wined3d_parent_ops *parent_ops)
 {
@@ -885,7 +885,7 @@ static HRESULT swapchain_init(struct wined3d_swapchain *swapchain, struct wined3
     surface_desc.format = swapchain->desc.backbuffer_format;
     surface_desc.multisample_type = swapchain->desc.multisample_type;
     surface_desc.multisample_quality = swapchain->desc.multisample_quality;
-    surface_desc.usage = WINED3DUSAGE_RENDERTARGET;
+    surface_desc.usage = 0;
     surface_desc.pool = WINED3D_POOL_DEFAULT;
     surface_desc.width = swapchain->desc.backbuffer_width;
     surface_desc.height = swapchain->desc.backbuffer_height;
@@ -901,7 +901,10 @@ static HRESULT swapchain_init(struct wined3d_swapchain *swapchain, struct wined3
 
     surface_set_swapchain(swapchain->front_buffer, swapchain);
     if (!(device->wined3d->flags & WINED3D_NO3D))
-        surface_modify_location(swapchain->front_buffer, SFLAG_INDRAWABLE, TRUE);
+    {
+        surface_validate_location(swapchain->front_buffer, SFLAG_INDRAWABLE);
+        surface_invalidate_location(swapchain->front_buffer, ~SFLAG_INDRAWABLE);
+    }
 
     /* MSDN says we're only allowed a single fullscreen swapchain per device,
      * so we should really check to see if there is a fullscreen swapchain
@@ -995,6 +998,7 @@ static HRESULT swapchain_init(struct wined3d_swapchain *swapchain, struct wined3
             goto err;
         }
 
+        surface_desc.usage |= WINED3DUSAGE_RENDERTARGET;
         for (i = 0; i < swapchain->desc.backbuffer_count; ++i)
         {
             TRACE("Creating back buffer %u.\n", i);
@@ -1072,7 +1076,6 @@ err:
     return hr;
 }
 
-/* Do not call while under the GL lock. */
 HRESULT CDECL wined3d_swapchain_create(struct wined3d_device *device, struct wined3d_swapchain_desc *desc,
         void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_swapchain **swapchain)
 {
@@ -1100,7 +1103,6 @@ HRESULT CDECL wined3d_swapchain_create(struct wined3d_device *device, struct win
     return WINED3D_OK;
 }
 
-/* Do not call while under the GL lock. */
 static struct wined3d_context *swapchain_create_context(struct wined3d_swapchain *swapchain)
 {
     struct wined3d_context **newArray;

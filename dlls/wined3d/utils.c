@@ -27,6 +27,8 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <stdio.h>
+
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -189,18 +191,19 @@ struct wined3d_format_block_info
     UINT block_width;
     UINT block_height;
     UINT block_byte_count;
+    BOOL verify;
 };
 
 static const struct wined3d_format_block_info format_block_info[] =
 {
-    {WINED3DFMT_DXT1,   4,  4,  8},
-    {WINED3DFMT_DXT2,   4,  4,  16},
-    {WINED3DFMT_DXT3,   4,  4,  16},
-    {WINED3DFMT_DXT4,   4,  4,  16},
-    {WINED3DFMT_DXT5,   4,  4,  16},
-    {WINED3DFMT_ATI2N,  4,  4,  16},
-    {WINED3DFMT_YUY2,   2,  1,  4},
-    {WINED3DFMT_UYVY,   2,  1,  4},
+    {WINED3DFMT_DXT1,   4,  4,  8,  TRUE},
+    {WINED3DFMT_DXT2,   4,  4,  16, TRUE},
+    {WINED3DFMT_DXT3,   4,  4,  16, TRUE},
+    {WINED3DFMT_DXT4,   4,  4,  16, TRUE},
+    {WINED3DFMT_DXT5,   4,  4,  16, TRUE},
+    {WINED3DFMT_ATI2N,  4,  4,  16, FALSE},
+    {WINED3DFMT_YUY2,   2,  1,  4,  FALSE},
+    {WINED3DFMT_UYVY,   2,  1,  4,  FALSE},
 };
 
 struct wined3d_format_vertex_info
@@ -1021,6 +1024,8 @@ static BOOL init_format_block_info(struct wined3d_gl_info *gl_info)
         format->block_height = format_block_info[i].block_height;
         format->block_byte_count = format_block_info[i].block_byte_count;
         format->flags |= WINED3DFMT_FLAG_BLOCKS;
+        if (!format_block_info[i].verify)
+            format->flags |= WINED3DFMT_FLAG_BLOCKS_NO_VERIFY;
     }
 
     return TRUE;
@@ -3723,4 +3728,51 @@ const char *wined3d_debug_location(DWORD location)
     if (location) FIXME("Unrecognized location flag(s) %#x.\n", location);
 
     return buf[0] ? wine_dbg_sprintf("%s", &buf[3]) : "0";
+}
+
+/* This should be equivalent to using the %.8e format specifier, but always
+ * using '.' as decimal separator. This doesn't handle +/-INF or NAN, since
+ * the GLSL and ARB parsers wouldn't be able to handle those anyway. */
+void wined3d_ftoa(float value, char *s)
+{
+    int x, frac, exponent;
+    const char *sign = "";
+    double d;
+
+    d = value;
+    if (copysignf(1.0f, value) < 0.0f)
+    {
+        d = -d;
+        sign = "-";
+    }
+
+    if (d == 0.0f)
+    {
+        x = 0;
+        frac = 0;
+        exponent = 0;
+    }
+    else
+    {
+        double t, diff;
+
+        exponent = floorf(log10f(d));
+        d /= pow(10.0, exponent);
+
+        x = d;
+        t = (d - x) * 100000000;
+        frac = t;
+        diff = t - frac;
+
+        if ((diff > 0.5) || (diff == 0.5 && (frac & 1)))
+        {
+            if (++frac >= 100000000)
+            {
+                frac = 0;
+                ++x;
+            }
+        }
+    }
+
+    sprintf(s, "%s%d.%08de%+03d", sign, x, frac, exponent);
 }

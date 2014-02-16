@@ -329,29 +329,23 @@ static HRESULT WINAPI IDirect3DRMImpl_LoadTextureFromResource(IDirect3DRM *iface
     return Direct3DRMTexture_create(&IID_IDirect3DRMTexture, (IUnknown **)texture);
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_SetSearchPath(IDirect3DRM* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRMImpl_SetSearchPath(IDirect3DRM *iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_AddSearchPath(IDirect3DRM* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRMImpl_AddSearchPath(IDirect3DRM *iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_GetSearchPath(IDirect3DRM* iface, DWORD *size_return, LPSTR path_return)
+static HRESULT WINAPI IDirect3DRMImpl_GetSearchPath(IDirect3DRM *iface, DWORD *size, char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
-
-    FIXME("(%p/%p)->(%p,%s): stub\n", iface, This, size_return, path_return);
+    FIXME("iface %p, size %p, path %p stub!\n", iface, size, path);
 
     return E_NOTIMPL;
 }
@@ -389,11 +383,9 @@ static HRESULT WINAPI IDirect3DRMImpl_GetNamedObject(IDirect3DRM *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMImpl_EnumerateObjects(IDirect3DRM* iface, D3DRMOBJECTCALLBACK cb, LPVOID pArg)
+static HRESULT WINAPI IDirect3DRMImpl_EnumerateObjects(IDirect3DRM *iface, D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
-
-    FIXME("(%p/%p)->(%p,%p): stub\n", iface, This, cb, pArg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -696,30 +688,23 @@ static HRESULT WINAPI IDirect3DRM2Impl_LoadTextureFromResource(IDirect3DRM2 *ifa
     return Direct3DRMTexture_create(&IID_IDirect3DRMTexture2, (IUnknown **)texture);
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_SetSearchPath(IDirect3DRM2* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRM2Impl_SetSearchPath(IDirect3DRM2 *iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_AddSearchPath(IDirect3DRM2* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRM2Impl_AddSearchPath(IDirect3DRM2 *iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_GetSearchPath(IDirect3DRM2* iface, DWORD *size_return,
-                                                     LPSTR path_return)
+static HRESULT WINAPI IDirect3DRM2Impl_GetSearchPath(IDirect3DRM2 *iface, DWORD *size, char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%p,%s): stub\n", iface, This, size_return, path_return);
+    FIXME("iface %p, size %p, path %p stub!\n", iface, size, path);
 
     return E_NOTIMPL;
 }
@@ -757,12 +742,9 @@ static HRESULT WINAPI IDirect3DRM2Impl_GetNamedObject(IDirect3DRM2 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_EnumerateObjects(IDirect3DRM2* iface, D3DRMOBJECTCALLBACK cb,
-                                                        LPVOID pArg)
+static HRESULT WINAPI IDirect3DRM2Impl_EnumerateObjects(IDirect3DRM2 *iface, D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%p,%p): stub\n", iface, This, cb, pArg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -1082,30 +1064,23 @@ static HRESULT WINAPI IDirect3DRM3Impl_LoadTextureFromResource(IDirect3DRM3 *ifa
     return Direct3DRMTexture_create(&IID_IDirect3DRMTexture3, (IUnknown **)texture);
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_SetSearchPath(IDirect3DRM3* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRM3Impl_SetSearchPath(IDirect3DRM3 *iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_AddSearchPath(IDirect3DRM3* iface, LPCSTR path)
+static HRESULT WINAPI IDirect3DRM3Impl_AddSearchPath(IDirect3DRM3* iface, const char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%s): stub\n", iface, This, path);
+    FIXME("iface %p, path %s stub!\n", iface, debugstr_a(path));
 
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_GetSearchPath(IDirect3DRM3* iface, DWORD* size_return,
-                                                     LPSTR path_return)
+static HRESULT WINAPI IDirect3DRM3Impl_GetSearchPath(IDirect3DRM3 *iface, DWORD *size, char *path)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%p,%s): stub\n", iface, This, size_return, path_return);
+    FIXME("iface %p, size %p, path %p stub!\n", iface, size, path);
 
     return E_NOTIMPL;
 }
@@ -1143,12 +1118,9 @@ static HRESULT WINAPI IDirect3DRM3Impl_GetNamedObject(IDirect3DRM3 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_EnumerateObjects(IDirect3DRM3* iface, D3DRMOBJECTCALLBACK cb,
-                                                        LPVOID arg)
+static HRESULT WINAPI IDirect3DRM3Impl_EnumerateObjects(IDirect3DRM3 *iface, D3DRMOBJECTCALLBACK cb, void *ctx)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%p,%p): stub\n", iface, This, cb, arg);
+    FIXME("iface %p, cb %p, ctx %p stub!\n", iface, cb, ctx);
 
     return E_NOTIMPL;
 }
@@ -1477,12 +1449,9 @@ static HRESULT WINAPI IDirect3DRM3Impl_CreateProgressiveMesh(IDirect3DRM3 *iface
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_RegisterClient(IDirect3DRM3* iface, REFGUID rguid,
-                                                      LPDWORD id)
+static HRESULT WINAPI IDirect3DRM3Impl_RegisterClient(IDirect3DRM3 *iface, REFGUID guid, DWORD *id)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%s, %p): stub\n", iface, This, debugstr_guid(rguid), id);
+    FIXME("iface %p, guid %s, id %p stub!\n", iface, debugstr_guid(guid), id);
 
     return E_NOTIMPL;
 }
@@ -1513,11 +1482,9 @@ static HRESULT WINAPI IDirect3DRM3Impl_SetOptions(IDirect3DRM3* iface, DWORD opt
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_GetOptions(IDirect3DRM3* iface, LPDWORD opt)
+static HRESULT WINAPI IDirect3DRM3Impl_GetOptions(IDirect3DRM3 *iface, DWORD *flags)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%p): stub\n", iface, This, opt);
+    FIXME("iface %p, flags %p stub!\n", iface, flags);
 
     return E_NOTIMPL;
 }
