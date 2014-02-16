@@ -1,3 +1,13 @@
+wine-unstable (1.7.3-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Preparation work for the Direct3D command stream.
+    - Window management fixes in the Mac driver.
+    - Support for IPHLPAPI functions on Android.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:01:27 +0000
+
 wine-unstable (1.7.2-1) unstable; urgency=medium
 
   * New upstream release:
