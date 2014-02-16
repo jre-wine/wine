@@ -1,3 +1,13 @@
+wine-unstable (1.7.8-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Updated version of the Mono package.
+    - Improvements in the BITS service implementation.
+    - Better data tables for Japanese vertical fonts support.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:22:02 +0000
+
 wine-unstable (1.7.7-1) unstable; urgency=medium
 
   * New upstream release:
