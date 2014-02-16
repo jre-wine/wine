@@ -1,3 +1,15 @@
+wine-unstable (1.7.2-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Right-to-left text layout improvements.
+    - NTLM and Negotiate authentication for RPC over HTTP.
+    - More glyphs in the built-in Wingdings font.
+    - Better system tray support in the Mac driver.
+    - Activation context improvements.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 00:58:42 +0000
+
 wine-unstable (1.7.1-1) unstable; urgency=medium
 
   * New upstream release:
@@ -8,6 +20,8 @@ wine-unstable (1.7.1-1) unstable; urgency=medium
     - Various Mac driver fixes.
     - Some fixes for serial port devices.
     - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Feb 2014 23:59:47 +0000
 
 wine-unstable (1.7.0-1) unstable; urgency=medium
 
