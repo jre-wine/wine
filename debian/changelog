@@ -1,3 +1,13 @@
+wine-unstable (1.7.7-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Support for configuring remote shares using Samba's NetAPI library.
+    - Improved embedding support through XEMBED.
+    - Support for arrays in VBScript.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:09:20 +0000
+
 wine-unstable (1.7.6-1) unstable; urgency=medium
 
   * New upstream release:
