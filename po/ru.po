@@ -10084,7 +10084,7 @@ msgstr "Приглашение командной строки Wine"
 
 #: cmd.rc:351
 msgid "Microsoft Windows %1!S!\n"
-msgstr ""
+msgstr "Microsoft Windows %1!S!\n"
 
 #: cmd.rc:352
 msgid "More? "
@@ -10151,6 +10151,14 @@ msgstr "Использование: dxdiag [/whql:off | /whql:on] [/t файл |
 #: explorer.rc:31
 msgid "Wine Explorer"
 msgstr "Проводник Wine"
+
+#: explorer.rc:33
+msgid "Start"
+msgstr "Пуск"
+
+#: explorer.rc:34 winefile.rc:36
+msgid "&Run..."
+msgstr "&Запустить..."
 
 #: hostname.rc:30
 msgid "Usage: hostname\n"
@@ -12732,10 +12740,8 @@ msgid "Select Drive Letter"
 msgstr "Выберите букву диска"
 
 #: winecfg.rc:226
-#, fuzzy
-#| msgid "Wine configuration"
 msgid "Drive configuration"
-msgstr "Настройка Wine"
+msgstr "Настройка дисков"
 
 #: winecfg.rc:227
 msgid ""
@@ -13014,10 +13020,8 @@ msgid "Letter"
 msgstr "Диск"
 
 #: winecfg.rc:78
-#, fuzzy
-#| msgid "New Folder"
 msgid "Target folder"
-msgstr "Новая папка"
+msgstr "Путь"
 
 #: winecfg.rc:79
 msgid ""
@@ -13450,10 +13454,6 @@ msgstr "Переименовать..."
 #: winefile.rc:34
 msgid "Propert&ies\tAlt+Enter"
 msgstr "&Свойства\tAlt+Enter"
-
-#: winefile.rc:36
-msgid "&Run..."
-msgstr "&Запустить..."
 
 #: winefile.rc:38
 msgid "Cr&eate Directory..."

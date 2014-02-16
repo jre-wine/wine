@@ -1610,17 +1610,22 @@ static int attrib_entry_compare(const DWORD **a, const DWORD **b)
 
 /* Create face_remap, a new attribute buffer for attribute sort optimization. */
 static HRESULT remap_faces_for_attrsort(struct d3dx9_mesh *This, const DWORD *indices,
-        const DWORD *attrib_buffer, DWORD **sorted_attrib_buffer, DWORD **face_remap)
+        DWORD *attrib_buffer, DWORD **sorted_attrib_buffer, DWORD **face_remap)
 {
-    const DWORD **sorted_attrib_ptr_buffer = NULL;
+    DWORD **sorted_attrib_ptr_buffer = NULL;
     DWORD i;
 
-    *face_remap = HeapAlloc(GetProcessHeap(), 0, This->numfaces * sizeof(**face_remap));
     sorted_attrib_ptr_buffer = HeapAlloc(GetProcessHeap(), 0, This->numfaces * sizeof(*sorted_attrib_ptr_buffer));
-    if (!*face_remap || !sorted_attrib_ptr_buffer) {
+    if (!sorted_attrib_ptr_buffer)
+        return E_OUTOFMEMORY;
+
+    *face_remap = HeapAlloc(GetProcessHeap(), 0, This->numfaces * sizeof(**face_remap));
+    if (!*face_remap)
+    {
         HeapFree(GetProcessHeap(), 0, sorted_attrib_ptr_buffer);
         return E_OUTOFMEMORY;
     }
+
     for (i = 0; i < This->numfaces; i++)
         sorted_attrib_ptr_buffer[i] = &attrib_buffer[i];
     qsort(sorted_attrib_ptr_buffer, This->numfaces, sizeof(*sorted_attrib_ptr_buffer),
@@ -5123,7 +5128,7 @@ static HRESULT add_vertex_index(struct word_array *array, WORD vertex_index)
 C_ASSERT(sizeof(FIXED) == sizeof(float));
 C_ASSERT(sizeof(POINTFX) == sizeof(D3DXVECTOR2));
 
-static inline D3DXVECTOR2 *convert_fixed_to_float(POINTFX *pt, int count, float emsquare)
+static inline D3DXVECTOR2 *convert_fixed_to_float(POINTFX *pt, int count, unsigned int emsquare)
 {
     D3DXVECTOR2 *ret = (D3DXVECTOR2*)pt;
     while (count--) {
@@ -5228,7 +5233,8 @@ static BOOL attempt_line_merge(struct outline *outline,
 }
 
 static HRESULT create_outline(struct glyphinfo *glyph, void *raw_outline, int datasize,
-                              float max_deviation_sq, float emsquare, const struct cos_table *cos_table)
+                              float max_deviation_sq, unsigned int emsquare,
+                              const struct cos_table *cos_table)
 {
     TTPOLYGONHEADER *header = (TTPOLYGONHEADER *)raw_outline;
 

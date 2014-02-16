@@ -1,12 +1,3 @@
-EXTRADEFS = \
-	-DINCLUDEDIR="\"$(includedir)\"" \
-	-DDLLDIR="\"$(dlldir)\"" \
-	-DLIBDIR="\"$(libdir)\"" \
-	-DCC="\"$(CC)\"" \
-	-DCPP="\"@CPPBIN@\"" \
-	-DCXX="\"@CXX@\"" \
-	-DPRELINK="\"$(PRELINK)\""
-
 PROGRAMS = \
 	winecpp$(EXEEXT) \
 	winegcc$(EXEEXT) \
@@ -18,13 +9,22 @@ C_SRCS = \
 	utils.c \
 	winegcc.c
 
-@MAKE_RULES@
+winegcc_EXTRADEFS = \
+	-DINCLUDEDIR="\"${includedir}\"" \
+	-DDLLDIR="\"${dlldir}\"" \
+	-DLIBDIR="\"${libdir}\"" \
+	-DCC="\"$(CC)\"" \
+	-DCPP="\"@CPPBIN@\"" \
+	-DCXX="\"@CXX@\"" \
+	-DPRELINK="\"$(PRELINK)\""
 
 winegcc$(EXEEXT): winegcc.o utils.o
 	$(CC) $(CFLAGS) -o $@ winegcc.o utils.o $(LIBPORT) $(LDFLAGS)
 
 winecpp$(EXEEXT) wineg++$(EXEEXT): winegcc$(EXEEXT)
 	$(RM) $@ && $(LN_S) winegcc$(EXEEXT) $@
+
+.PHONY: install install-dev uninstall
 
 install install-dev:: $(PROGRAMS) install-man-pages
 	$(INSTALL_PROGRAM) winegcc$(EXEEXT) $(DESTDIR)$(bindir)/winegcc$(EXEEXT)

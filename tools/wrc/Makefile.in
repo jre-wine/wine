@@ -1,4 +1,3 @@
-EXTRADEFS = -DINCLUDEDIR="\"$(includedir)\""
 PROGRAMS = wrc$(EXEEXT)
 MANPAGES = wrc.man.in
 ALL_LIBS = @LIBGETTEXTPO@ $(LIBWPP) $(LIBWINE_STATIC) $(LIBPORT)
@@ -17,10 +16,14 @@ C_SRCS = \
 LEX_SRCS   = parser.l
 BISON_SRCS = parser.y
 
-@MAKE_RULES@
+wrc_EXTRADEFS = -DINCLUDEDIR="\"${includedir}\""
+
+OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o)
 
 wrc$(EXEEXT): $(OBJS) $(LIBWPP)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(ALL_LIBS) $(LDFLAGS)
+
+.PHONY: install install-dev uninstall
 
 install install-dev:: wrc$(EXEEXT) install-man-pages
 	$(INSTALL_PROGRAM) wrc$(EXEEXT) $(DESTDIR)$(bindir)/wrc$(EXEEXT)

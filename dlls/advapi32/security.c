@@ -4988,7 +4988,7 @@ BOOL WINAPI ConvertSecurityDescriptorToStringSecurityDescriptorW(PSECURITY_DESCR
 
     if (SDRevision != SDDL_REVISION_1)
     {
-        ERR("Pogram requested unknown SDDL revision %d\n", SDRevision);
+        ERR("Program requested unknown SDDL revision %d\n", SDRevision);
         SetLastError(ERROR_UNKNOWN_REVISION);
         return FALSE;
     }
@@ -5302,7 +5302,7 @@ BOOL WINAPI CreateProcessAsUserW(
         LPSTARTUPINFOW lpStartupInfo,
         LPPROCESS_INFORMATION lpProcessInformation )
 {
-    FIXME("%p %s %s %p %p %d 0x%08x %p %s %p %p - semi- stub\n", hToken, 
+    FIXME("%p %s %s %p %p %d 0x%08x %p %s %p %p - semi-stub\n", hToken,
           debugstr_w(lpApplicationName), debugstr_w(lpCommandLine), lpProcessAttributes,
           lpThreadAttributes, bInheritHandles, dwCreationFlags, lpEnvironment, 
           debugstr_w(lpCurrentDirectory), lpStartupInfo, lpProcessInformation);
@@ -5801,7 +5801,7 @@ DWORD WINAPI TreeResetNamedSecurityInfoW( LPWSTR pObjectName,
                 BOOL KeepExplicit, FN_PROGRESS fnProgress,
                 PROG_INVOKE_SETTING ProgressInvokeSetting, PVOID Args)
 {
-    FIXME("(%s, %i, %i, %p, %p, %p, %p, %i, %p, %i, %p  Stub\n",
+    FIXME("(%s, %i, %i, %p, %p, %p, %p, %i, %p, %i, %p) stub\n",
         debugstr_w(pObjectName), ObjectType, SecurityInfo, pOwner, pGroup,
         pDacl, pSacl, KeepExplicit, fnProgress, ProgressInvokeSetting, Args);
 

@@ -2794,19 +2794,6 @@ void dump_color_fixup_desc(struct color_fixup_desc fixup)
     TRACE("\tW: %s%s\n", debug_fixup_channel_source(fixup.w_source), fixup.w_sign_fixup ? ", SIGN_FIXUP" : "");
 }
 
-const char *debug_surflocation(DWORD flag) {
-    char buf[128];
-
-    buf[0] = 0;
-    if (flag & SFLAG_INSYSMEM) strcat(buf, " | SFLAG_INSYSMEM");                    /* 17 */
-    if (flag & SFLAG_INDRAWABLE) strcat(buf, " | SFLAG_INDRAWABLE");                /* 19 */
-    if (flag & SFLAG_INTEXTURE) strcat(buf, " | SFLAG_INTEXTURE");                  /* 18 */
-    if (flag & SFLAG_INSRGBTEX) strcat(buf, " | SFLAG_INSRGBTEX");                  /* 18 */
-    if (flag & SFLAG_INRB_MULTISAMPLE) strcat(buf, " | SFLAG_INRB_MULTISAMPLE");    /* 25 */
-    if (flag & SFLAG_INRB_RESOLVED) strcat(buf, " | SFLAG_INRB_RESOLVED");          /* 22 */
-    return wine_dbg_sprintf("%s", buf[0] ? buf + 3 : "0");
-}
-
 BOOL is_invalid_op(const struct wined3d_state *state, int stage,
         enum wined3d_texture_op op, DWORD arg1, DWORD arg2, DWORD arg3)
 {
@@ -3324,9 +3311,7 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
 
             if (texture_dimensions == GL_TEXTURE_2D || texture_dimensions == GL_TEXTURE_RECTANGLE_ARB)
             {
-                struct wined3d_surface *surf = surface_from_resource(texture->sub_resources[0]);
-
-                if (surf->CKeyFlags & WINEDDSD_CKSRCBLT && !surf->resource.format->alpha_size)
+                if (texture->color_key_flags & WINEDDSD_CKSRCBLT && !texture->resource.format->alpha_size)
                 {
                     if (aop == WINED3D_TOP_DISABLE)
                     {
@@ -3791,15 +3776,20 @@ void wined3d_get_draw_rect(const struct wined3d_state *state, RECT *rect)
 
 const char *wined3d_debug_location(DWORD location)
 {
-    char buf[200];
+    char buf[294];
 
     buf[0] = '\0';
 #define LOCATION_TO_STR(u) if (location & u) { strcat(buf, " | "#u); location &= ~u; }
     LOCATION_TO_STR(WINED3D_LOCATION_DISCARDED);
     LOCATION_TO_STR(WINED3D_LOCATION_SYSMEM);
+    LOCATION_TO_STR(WINED3D_LOCATION_USER_MEMORY);
+    LOCATION_TO_STR(WINED3D_LOCATION_DIB);
     LOCATION_TO_STR(WINED3D_LOCATION_BUFFER);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_RGB);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_SRGB);
+    LOCATION_TO_STR(WINED3D_LOCATION_DRAWABLE);
+    LOCATION_TO_STR(WINED3D_LOCATION_RB_MULTISAMPLE);
+    LOCATION_TO_STR(WINED3D_LOCATION_RB_RESOLVED);
 #undef LOCATION_TO_STR
     if (location) FIXME("Unrecognized location flag(s) %#x.\n", location);
 
@@ -3815,6 +3805,9 @@ void wined3d_ftoa(float value, char *s)
     if (copysignf(1.0f, value) < 0.0f)
         ++idx;
 
+    /* Be sure to allocate a buffer of at least 17 characters for the result
+       as sprintf may return a 3 digit exponent when using the MSVC runtime
+       instead of a 2 digit exponent. */
     sprintf(s, "%.8e", value);
     if (isfinite(value))
         s[idx] = '.';

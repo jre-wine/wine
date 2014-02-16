@@ -123,10 +123,15 @@ typedef enum {
 } codecvt_base_result;
 
 typedef struct {
+#if _MSVCP_VER < 110
     LCID handle;
+#endif
     unsigned page;
     const short *table;
     int delfl;
+#if _MSVCP_VER >= 110
+    wchar_t *name;
+#endif
 } _Ctypevec;
 
 /* class codecvt_base */
@@ -328,7 +333,9 @@ typedef struct _ios_base {
 /* class basic_streambuf<char> */
 typedef struct {
     const vtable_ptr *vtable;
+#if _MSVCP_VER <= 100
     mutex lock;
+#endif
     char *rbuf;
     char *wbuf;
     char **prbuf;
@@ -365,7 +372,9 @@ int __thiscall basic_streambuf_char_sputc(basic_streambuf_char*, char);
 /* class basic_streambuf<wchar> */
 typedef struct {
     const vtable_ptr *vtable;
+#if _MSVCP_VER <= 100
     mutex lock;
+#endif
     wchar_t *rbuf;
     wchar_t *wbuf;
     wchar_t **prbuf;
@@ -515,3 +524,10 @@ typedef struct {
     double real;
     double imag;
 } complex_double;
+
+#if _MSVCP_VER < 80
+#define memcpy_s( dst, size, src, count ) (memcpy( (dst), (src), (count) ), 0)
+#define memmove_s( dst, size, src, count ) (memmove( (dst), (src), (count) ), 0)
+#define mbstowcs_s( ret, wcs, size, mbs, count ) (mbstowcs( (wcs), (mbs), (count) ))
+#define hypotf( x, y ) ((float)hypot( (double)(x), (double)(y) ))
+#endif

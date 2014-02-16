@@ -2409,6 +2409,12 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
     }
 
     GdipDeleteRegion(graphics->clip);
+
+    /* Native returns ObjectBusy on the second free, instead of crashing as we'd
+     * do otherwise, but we can't have that in the test suite because it means
+     * accessing freed memory. */
+    graphics->busy = TRUE;
+
     GdipFree(graphics);
 
     return Ok;
@@ -5268,6 +5274,8 @@ GpStatus WINGDIPAPI GdipSetInterpolationMode(GpGraphics *graphics,
 
 GpStatus WINGDIPAPI GdipSetPageScale(GpGraphics *graphics, REAL scale)
 {
+    GpStatus stat;
+
     TRACE("(%p, %.2f)\n", graphics, scale);
 
     if(!graphics || (scale <= 0.0))
@@ -5276,6 +5284,13 @@ GpStatus WINGDIPAPI GdipSetPageScale(GpGraphics *graphics, REAL scale)
     if(graphics->busy)
         return ObjectBusy;
 
+    if (graphics->image && graphics->image->type == ImageTypeMetafile)
+    {
+        stat = METAFILE_SetPageTransform((GpMetafile*)graphics->image, graphics->unit, scale);
+        if (stat != Ok)
+            return stat;
+    }
+
     graphics->scale = scale;
 
     return Ok;
@@ -5283,6 +5298,8 @@ GpStatus WINGDIPAPI GdipSetPageScale(GpGraphics *graphics, REAL scale)
 
 GpStatus WINGDIPAPI GdipSetPageUnit(GpGraphics *graphics, GpUnit unit)
 {
+    GpStatus stat;
+
     TRACE("(%p, %d)\n", graphics, unit);
 
     if(!graphics)
@@ -5293,6 +5310,13 @@ GpStatus WINGDIPAPI GdipSetPageUnit(GpGraphics *graphics, GpUnit unit)
 
     if(unit == UnitWorld)
         return InvalidParameter;
+
+    if (graphics->image && graphics->image->type == ImageTypeMetafile)
+    {
+        stat = METAFILE_SetPageTransform((GpMetafile*)graphics->image, unit, graphics->scale);
+        if (stat != Ok)
+            return stat;
+    }
 
     graphics->unit = unit;
 

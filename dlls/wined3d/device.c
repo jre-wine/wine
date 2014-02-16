@@ -201,9 +201,9 @@ void device_switch_onscreen_ds(struct wined3d_device *device,
 {
     if (device->onscreen_depth_stencil)
     {
-        surface_load_ds_location(device->onscreen_depth_stencil, context, SFLAG_INTEXTURE);
+        surface_load_ds_location(device->onscreen_depth_stencil, context, WINED3D_LOCATION_TEXTURE_RGB);
 
-        surface_modify_ds_location(device->onscreen_depth_stencil, SFLAG_INTEXTURE,
+        surface_modify_ds_location(device->onscreen_depth_stencil, WINED3D_LOCATION_TEXTURE_RGB,
                 device->onscreen_depth_stencil->ds_current_size.cx,
                 device->onscreen_depth_stencil->ds_current_size.cy);
         wined3d_surface_decref(device->onscreen_depth_stencil);
@@ -234,7 +234,7 @@ static void prepare_ds_clear(struct wined3d_surface *ds, struct wined3d_context 
 {
     RECT current_rect, r;
 
-    if (ds->flags & SFLAG_DISCARDED)
+    if (ds->locations & WINED3D_LOCATION_DISCARDED)
     {
         /* Depth buffer was discarded, make it entirely current in its new location since
          * there is no other place where we would get data anyway. */
@@ -242,7 +242,7 @@ static void prepare_ds_clear(struct wined3d_surface *ds, struct wined3d_context 
         return;
     }
 
-    if (ds->flags & location)
+    if (ds->locations & location)
         SetRect(&current_rect, 0, 0,
                 ds->ds_current_size.cx,
                 ds->ds_current_size.cy);
@@ -337,7 +337,7 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
 
     if (flags & WINED3DCLEAR_ZBUFFER)
     {
-        DWORD location = render_offscreen ? fb->depth_stencil->draw_binding : SFLAG_INDRAWABLE;
+        DWORD location = render_offscreen ? fb->depth_stencil->draw_binding : WINED3D_LOCATION_DRAWABLE;
 
         if (!render_offscreen && fb->depth_stencil != device->onscreen_depth_stencil)
             device_switch_onscreen_ds(device, context, fb->depth_stencil);
@@ -369,7 +369,7 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
 
     if (flags & WINED3DCLEAR_ZBUFFER)
     {
-        DWORD location = render_offscreen ? fb->depth_stencil->draw_binding : SFLAG_INDRAWABLE;
+        DWORD location = render_offscreen ? fb->depth_stencil->draw_binding : WINED3D_LOCATION_DRAWABLE;
 
         surface_modify_ds_location(fb->depth_stencil, location, ds_rect.right, ds_rect.bottom);
 
@@ -580,8 +580,8 @@ static void device_load_logo(struct wined3d_device *device, const char *filename
     desc.format = WINED3DFMT_B5G6R5_UNORM;
     desc.multisample_type = WINED3D_MULTISAMPLE_NONE;
     desc.multisample_quality = 0;
-    desc.usage = 0;
-    desc.pool = WINED3D_POOL_SYSTEM_MEM;
+    desc.usage = WINED3DUSAGE_DYNAMIC;
+    desc.pool = WINED3D_POOL_DEFAULT;
     desc.width = bm.bmWidth;
     desc.height = bm.bmHeight;
     desc.depth = 1;
@@ -603,7 +603,7 @@ static void device_load_logo(struct wined3d_device *device, const char *filename
 
         color_key.color_space_low_value = 0;
         color_key.color_space_high_value = 0;
-        wined3d_surface_set_color_key(surface, WINEDDCKEY_SRCBLT, &color_key);
+        wined3d_texture_set_color_key(device->logo_texture, WINEDDCKEY_SRCBLT, &color_key);
     }
     else
     {
@@ -3809,8 +3809,8 @@ static struct wined3d_texture *wined3d_device_create_cursor_texture(struct wined
     desc.format = WINED3DFMT_B8G8R8A8_UNORM;
     desc.multisample_type = WINED3D_MULTISAMPLE_NONE;
     desc.multisample_quality = 0;
-    desc.usage = 0;
-    desc.pool = WINED3D_POOL_SYSTEM_MEM;
+    desc.usage = WINED3DUSAGE_DYNAMIC;
+    desc.pool = WINED3D_POOL_DEFAULT;
     desc.width = cursor_image->resource.width;
     desc.height = cursor_image->resource.height;
     desc.depth = 1;
@@ -3825,7 +3825,7 @@ static struct wined3d_texture *wined3d_device_create_cursor_texture(struct wined
     }
 
     surface = surface_from_resource(wined3d_texture_get_sub_resource(texture, 0));
-    if (FAILED(wined3d_surface_map(surface, &map_desc, NULL, 0)))
+    if (FAILED(wined3d_surface_map(surface, &map_desc, NULL, WINED3D_MAP_DISCARD)))
     {
         ERR("Failed to map destination surface.\n");
         wined3d_texture_decref(texture);
@@ -4318,21 +4318,21 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
 
         if (FAILED(hr = wined3d_surface_update_desc(swapchain->front_buffer, swapchain->desc.backbuffer_width,
                 swapchain->desc.backbuffer_height, swapchain->desc.backbuffer_format,
-                swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
+                swapchain->desc.multisample_type, swapchain->desc.multisample_quality, NULL, 0)))
             return hr;
 
         for (i = 0; i < swapchain->desc.backbuffer_count; ++i)
         {
             if (FAILED(hr = wined3d_surface_update_desc(swapchain->back_buffers[i], swapchain->desc.backbuffer_width,
                     swapchain->desc.backbuffer_height, swapchain->desc.backbuffer_format,
-                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
+                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality, NULL, 0)))
                 return hr;
         }
         if (device->auto_depth_stencil)
         {
             if (FAILED(hr = wined3d_surface_update_desc(device->auto_depth_stencil, swapchain->desc.backbuffer_width,
                     swapchain->desc.backbuffer_height, device->auto_depth_stencil->resource.format->id,
-                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality)))
+                    swapchain->desc.multisample_type, swapchain->desc.multisample_quality, NULL, 0)))
                 return hr;
         }
     }
@@ -4406,6 +4406,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
             wined3d_stateblock_decref(device->recording);
             device->recording = NULL;
         }
+        wined3d_cs_emit_reset_state(device->cs);
         state_cleanup(&device->state);
 
         if (device->d3d_initialized)
