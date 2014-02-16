@@ -35,7 +35,6 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 
 /* Define the default light parameters as specified by MSDN. */
 const struct wined3d_light WINED3D_default_light =
@@ -133,214 +132,6 @@ static enum wined3d_primitive_type d3d_primitive_type_from_gl(GLenum primitive_t
             FIXME("Unhandled primitive type %s\n", debug_d3dprimitivetype(primitive_type));
             return WINED3D_PT_UNDEFINED;
     }
-}
-
-static BOOL fixed_get_input(BYTE usage, BYTE usage_idx, unsigned int *regnum)
-{
-    if ((usage == WINED3D_DECL_USAGE_POSITION || usage == WINED3D_DECL_USAGE_POSITIONT) && !usage_idx)
-        *regnum = WINED3D_FFP_POSITION;
-    else if (usage == WINED3D_DECL_USAGE_BLEND_WEIGHT && !usage_idx)
-        *regnum = WINED3D_FFP_BLENDWEIGHT;
-    else if (usage == WINED3D_DECL_USAGE_BLEND_INDICES && !usage_idx)
-        *regnum = WINED3D_FFP_BLENDINDICES;
-    else if (usage == WINED3D_DECL_USAGE_NORMAL && !usage_idx)
-        *regnum = WINED3D_FFP_NORMAL;
-    else if (usage == WINED3D_DECL_USAGE_PSIZE && !usage_idx)
-        *regnum = WINED3D_FFP_PSIZE;
-    else if (usage == WINED3D_DECL_USAGE_COLOR && !usage_idx)
-        *regnum = WINED3D_FFP_DIFFUSE;
-    else if (usage == WINED3D_DECL_USAGE_COLOR && usage_idx == 1)
-        *regnum = WINED3D_FFP_SPECULAR;
-    else if (usage == WINED3D_DECL_USAGE_TEXCOORD && usage_idx < WINED3DDP_MAXTEXCOORD)
-        *regnum = WINED3D_FFP_TEXCOORD0 + usage_idx;
-    else
-    {
-        FIXME("Unsupported input stream [usage=%s, usage_idx=%u]\n", debug_d3ddeclusage(usage), usage_idx);
-        *regnum = ~0U;
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-/* Context activation is done by the caller. */
-static void device_stream_info_from_declaration(struct wined3d_device *device, struct wined3d_stream_info *stream_info)
-{
-    const struct wined3d_state *state = &device->state;
-    /* We need to deal with frequency data! */
-    struct wined3d_vertex_declaration *declaration = state->vertex_declaration;
-    BOOL use_vshader;
-    unsigned int i;
-    WORD map;
-
-    stream_info->use_map = 0;
-    stream_info->swizzle_map = 0;
-    stream_info->all_vbo = 1;
-
-    /* Check for transformed vertices, disable vertex shader if present. */
-    stream_info->position_transformed = declaration->position_transformed;
-    use_vshader = state->vertex_shader && !declaration->position_transformed;
-
-    /* Translate the declaration into strided data. */
-    for (i = 0; i < declaration->element_count; ++i)
-    {
-        const struct wined3d_vertex_declaration_element *element = &declaration->elements[i];
-        const struct wined3d_stream_state *stream = &state->streams[element->input_slot];
-        struct wined3d_buffer *buffer = stream->buffer;
-        struct wined3d_bo_address data;
-        BOOL stride_used;
-        unsigned int idx;
-        DWORD stride;
-
-        TRACE("%p Element %p (%u of %u)\n", declaration->elements,
-                element, i + 1, declaration->element_count);
-
-        if (!buffer) continue;
-
-        stride = stream->stride;
-
-        TRACE("Stream %u, buffer %p.\n", element->input_slot, buffer);
-        buffer_get_memory(buffer, &device->adapter->gl_info, &data);
-
-        /* We can't use VBOs if the base vertex index is negative. OpenGL
-         * doesn't accept negative offsets (or rather offsets bigger than the
-         * VBO, because the pointer is unsigned), so use system memory
-         * sources. In most sane cases the pointer - offset will still be > 0,
-         * otherwise it will wrap around to some big value. Hope that with the
-         * indices, the driver wraps it back internally. If not,
-         * drawStridedSlow() is needed, including a vertex buffer path. */
-        if (state->load_base_vertex_index < 0)
-        {
-            WARN_(d3d_perf)("load_base_vertex_index is < 0 (%d), not using VBOs.\n", state->load_base_vertex_index);
-            data.buffer_object = 0;
-            data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info);
-            if ((UINT_PTR)data.addr < -state->load_base_vertex_index * stride)
-                FIXME("System memory vertex data load offset is negative!\n");
-        }
-        data.addr += element->offset;
-
-        TRACE("offset %u input_slot %u usage_idx %d\n", element->offset, element->input_slot, element->usage_idx);
-
-        if (use_vshader)
-        {
-            if (element->output_slot == ~0U)
-            {
-                /* TODO: Assuming vertexdeclarations are usually used with the
-                 * same or a similar shader, it might be worth it to store the
-                 * last used output slot and try that one first. */
-                stride_used = vshader_get_input(state->vertex_shader,
-                        element->usage, element->usage_idx, &idx);
-            }
-            else
-            {
-                idx = element->output_slot;
-                stride_used = TRUE;
-            }
-        }
-        else
-        {
-            if (!element->ffp_valid)
-            {
-                WARN("Skipping unsupported fixed function element of format %s and usage %s\n",
-                        debug_d3dformat(element->format->id), debug_d3ddeclusage(element->usage));
-                stride_used = FALSE;
-            }
-            else
-            {
-                stride_used = fixed_get_input(element->usage, element->usage_idx, &idx);
-            }
-        }
-
-        if (stride_used)
-        {
-            TRACE("Load %s array %u [usage %s, usage_idx %u, "
-                    "input_slot %u, offset %u, stride %u, format %s, buffer_object %u]\n",
-                    use_vshader ? "shader": "fixed function", idx,
-                    debug_d3ddeclusage(element->usage), element->usage_idx, element->input_slot,
-                    element->offset, stride, debug_d3dformat(element->format->id), data.buffer_object);
-
-            data.addr += stream->offset;
-
-            stream_info->elements[idx].format = element->format;
-            stream_info->elements[idx].data = data;
-            stream_info->elements[idx].stride = stride;
-            stream_info->elements[idx].stream_idx = element->input_slot;
-
-            if (!device->adapter->gl_info.supported[ARB_VERTEX_ARRAY_BGRA]
-                    && element->format->id == WINED3DFMT_B8G8R8A8_UNORM)
-            {
-                stream_info->swizzle_map |= 1 << idx;
-            }
-            stream_info->use_map |= 1 << idx;
-        }
-    }
-
-    /* Preload the vertex buffers. */
-    device->num_buffer_queries = 0;
-    for (i = 0, map = stream_info->use_map; map; map >>= 1, ++i)
-    {
-        struct wined3d_stream_info_element *element;
-        struct wined3d_buffer *buffer;
-
-        if (!(map & 1))
-            continue;
-
-        element = &stream_info->elements[i];
-        buffer = state->streams[element->stream_idx].buffer;
-        wined3d_buffer_preload(buffer);
-
-        /* If the preload dropped the buffer object, update the stream info. */
-        if (buffer->buffer_object != element->data.buffer_object)
-        {
-            element->data.buffer_object = 0;
-            element->data.addr = buffer_get_sysmem(buffer, &device->adapter->gl_info) + (ptrdiff_t)element->data.addr;
-        }
-
-        if (!buffer->buffer_object)
-            stream_info->all_vbo = 0;
-
-        if (buffer->query)
-            device->buffer_queries[device->num_buffer_queries++] = buffer->query;
-    }
-}
-
-/* Context activation is done by the caller. */
-void device_update_stream_info(struct wined3d_device *device, const struct wined3d_gl_info *gl_info)
-{
-    struct wined3d_stream_info *stream_info = &device->stream_info;
-    const struct wined3d_state *state = &device->state;
-    DWORD prev_all_vbo = stream_info->all_vbo;
-
-    TRACE("============================= Vertex Declaration =============================\n");
-    device_stream_info_from_declaration(device, stream_info);
-
-    if (state->vertex_shader && !stream_info->position_transformed)
-    {
-        if (state->vertex_declaration->half_float_conv_needed && !stream_info->all_vbo)
-        {
-            TRACE("Using drawStridedSlow with vertex shaders for FLOAT16 conversion.\n");
-            device->useDrawStridedSlow = TRUE;
-        }
-        else
-        {
-            device->useDrawStridedSlow = FALSE;
-        }
-    }
-    else
-    {
-        WORD slow_mask = (1 << WINED3D_FFP_PSIZE);
-        slow_mask |= -!gl_info->supported[ARB_VERTEX_ARRAY_BGRA]
-                & ((1 << WINED3D_FFP_DIFFUSE) | (1 << WINED3D_FFP_SPECULAR));
-
-        if (((stream_info->position_transformed && !device->adapter->d3d_info.xyzrhw)
-                || (stream_info->use_map & slow_mask)) && !stream_info->all_vbo)
-            device->useDrawStridedSlow = TRUE;
-        else
-            device->useDrawStridedSlow = FALSE;
-    }
-
-    if (prev_all_vbo != stream_info->all_vbo)
-        device_invalidate_state(device, STATE_INDEXBUFFER);
 }
 
 static void device_preload_texture(const struct wined3d_state *state, unsigned int idx)
@@ -449,7 +240,6 @@ void device_context_remove(struct wined3d_device *device, struct wined3d_context
     device->contexts = new_array;
 }
 
-/* Do not call while under the GL lock. */
 void device_switch_onscreen_ds(struct wined3d_device *device,
         struct wined3d_context *context, struct wined3d_surface *depth_stencil)
 {
@@ -536,7 +326,6 @@ static void prepare_ds_clear(struct wined3d_surface *ds, struct wined3d_context 
     SetRect(out_rect, 0, 0, ds->ds_current_size.cx, ds->ds_current_size.cy);
 }
 
-/* Do not call while under the GL lock. */
 void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, const struct wined3d_fb_state *fb,
         UINT rect_count, const RECT *rects, const RECT *draw_rect, DWORD flags, const struct wined3d_color *color,
         float depth, DWORD stencil)
@@ -642,7 +431,10 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
             struct wined3d_surface *rt = fb->render_targets[i];
 
             if (rt)
-                surface_modify_location(rt, rt->draw_binding, TRUE);
+            {
+                surface_validate_location(rt, rt->draw_binding);
+                surface_invalidate_location(rt, ~rt->draw_binding);
+            }
         }
 
         gl_info->gl_ops.gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1086,6 +878,7 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     struct wined3d_swapchain *swapchain = NULL;
     struct wined3d_context *context;
+    DWORD clear_flags = 0;
     HRESULT hr;
     DWORD state;
 
@@ -1149,13 +942,9 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     {
         TRACE("Setting rendertarget to %p.\n", swapchain->back_buffers);
         device->fb.render_targets[0] = swapchain->back_buffers[0];
+        wined3d_surface_incref(device->fb.render_targets[0]);
+        clear_flags |= WINED3DCLEAR_TARGET;
     }
-    else
-    {
-        TRACE("Setting rendertarget to %p.\n", swapchain->front_buffer);
-        device->fb.render_targets[0] = swapchain->front_buffer;
-    }
-    wined3d_surface_incref(device->fb.render_targets[0]);
 
     /* Depth Stencil support */
     device->fb.depth_stencil = device->auto_depth_stencil;
@@ -1199,9 +988,10 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     context_release(context);
 
     /* Clear the screen */
-    wined3d_device_clear(device, 0, NULL, WINED3DCLEAR_TARGET
-            | (swapchain_desc->enable_auto_depth_stencil ? WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL : 0),
-            &black, 1.0f, 0);
+    if (swapchain_desc->enable_auto_depth_stencil)
+        clear_flags |= WINED3DCLEAR_ZBUFFER | WINED3DCLEAR_STENCIL;
+    if (clear_flags)
+        wined3d_device_clear(device, 0, NULL, clear_flags, &black, 1.0f, 0);
 
     device->d3d_initialized = TRUE;
 
@@ -1338,16 +1128,10 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
             FIXME("Something's still holding the auto depth stencil buffer (%p).\n", surface);
     }
 
-    for (i = 1; i < gl_info->limits.buffers; ++i)
+    for (i = 0; i < gl_info->limits.buffers; ++i)
     {
         wined3d_device_set_render_target(device, i, NULL, FALSE);
     }
-
-    surface = device->fb.render_targets[0];
-    TRACE("Setting rendertarget 0 to NULL\n");
-    device->fb.render_targets[0] = NULL;
-    TRACE("Releasing the render target at %p\n", surface);
-    wined3d_surface_decref(surface);
 
     context_release(context);
 
@@ -3245,7 +3029,6 @@ struct wined3d_sampler * CDECL wined3d_device_get_gs_sampler(const struct wined3
 }
 
 /* Context activation is done by the caller. */
-/* Do not call while under the GL lock. */
 #define copy_and_next(dest, src, size) memcpy(dest, src, size); dest += (size)
 static HRESULT process_vertices_strided(const struct wined3d_device *device, DWORD dwDestIndex, DWORD dwCount,
         const struct wined3d_stream_info *stream_info, struct wined3d_buffer *dest, DWORD flags,
@@ -3512,7 +3295,6 @@ static HRESULT process_vertices_strided(const struct wined3d_device *device, DWO
 }
 #undef copy_and_next
 
-/* Do not call while under the GL lock. */
 HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
         UINT src_start_idx, UINT dst_idx, UINT vertex_count, struct wined3d_buffer *dst_buffer,
         const struct wined3d_vertex_declaration *declaration, DWORD flags, DWORD dst_fvf)
@@ -3539,7 +3321,7 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
 
     vs = state->vertex_shader;
     state->vertex_shader = NULL;
-    device_stream_info_from_declaration(device, &stream_info);
+    context_stream_info_from_declaration(context, state, &stream_info);
     state->vertex_shader = vs;
 
     /* We can't convert FROM a VBO, and vertex buffers used to source into
@@ -3559,7 +3341,7 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
         {
             struct wined3d_buffer *vb = state->streams[e->stream_idx].buffer;
             e->data.buffer_object = 0;
-            e->data.addr = (BYTE *)((ULONG_PTR)e->data.addr + (ULONG_PTR)buffer_get_sysmem(vb, gl_info));
+            e->data.addr = (BYTE *)((ULONG_PTR)e->data.addr + (ULONG_PTR)buffer_get_sysmem(vb, context));
             GL_EXTCALL(glDeleteBuffersARB(1, &vb->buffer_object));
             vb->buffer_object = 0;
         }
@@ -3946,7 +3728,6 @@ HRESULT CDECL wined3d_device_present(const struct wined3d_device *device, const 
     return WINED3D_OK;
 }
 
-/* Do not call while under the GL lock. */
 HRESULT CDECL wined3d_device_clear(struct wined3d_device *device, DWORD rect_count,
         const RECT *rects, DWORD flags, const struct wined3d_color *color, float depth, DWORD stencil)
 {
@@ -4404,7 +4185,6 @@ HRESULT CDECL wined3d_device_update_surface(struct wined3d_device *device,
     return surface_upload_from_surface(dst_surface, dst_point, src_surface, src_rect);
 }
 
-/* Do not call while under the GL lock. */
 HRESULT CDECL wined3d_device_color_fill(struct wined3d_device *device,
         struct wined3d_surface *surface, const RECT *rect, const struct wined3d_color *color)
 {
@@ -4429,7 +4209,6 @@ HRESULT CDECL wined3d_device_color_fill(struct wined3d_device *device,
     return surface_color_fill(surface, rect, color);
 }
 
-/* Do not call while under the GL lock. */
 void CDECL wined3d_device_clear_rendertarget_view(struct wined3d_device *device,
         struct wined3d_rendertarget_view *rendertarget_view, const struct wined3d_color *color)
 {
@@ -4481,13 +4260,6 @@ HRESULT CDECL wined3d_device_set_render_target(struct wined3d_device *device,
     if (render_target_idx >= device->adapter->gl_info.limits.buffers)
     {
         WARN("Only %u render targets are supported.\n", device->adapter->gl_info.limits.buffers);
-        return WINED3DERR_INVALIDCALL;
-    }
-
-    /* Render target 0 can't be set to NULL. */
-    if (!render_target && !render_target_idx)
-    {
-        WARN("Trying to set render target 0 to NULL.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
@@ -4807,7 +4579,6 @@ void CDECL wined3d_device_evict_managed_resources(struct wined3d_device *device)
     device_invalidate_state(device, STATE_STREAMSRC);
 }
 
-/* Do not call while under the GL lock. */
 static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d_swapchain *swapchain)
 {
     struct wined3d_resource *resource, *cursor;
@@ -4856,7 +4627,6 @@ static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d
     swapchain->context = NULL;
 }
 
-/* Do not call while under the GL lock. */
 static HRESULT create_primary_opengl_context(struct wined3d_device *device, struct wined3d_swapchain *swapchain)
 {
     struct wined3d_context *context;
@@ -4905,7 +4675,6 @@ static HRESULT create_primary_opengl_context(struct wined3d_device *device, stru
     return WINED3D_OK;
 }
 
-/* Do not call while under the GL lock. */
 HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         const struct wined3d_swapchain_desc *swapchain_desc, const struct wined3d_display_mode *mode,
         wined3d_device_reset_cb callback, BOOL reset_state)
@@ -4933,14 +4702,12 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
 
     if (device->fb.render_targets)
     {
-        if (swapchain->back_buffers && swapchain->back_buffers[0])
-            wined3d_device_set_render_target(device, 0, swapchain->back_buffers[0], FALSE);
-        else
-            wined3d_device_set_render_target(device, 0, swapchain->front_buffer, FALSE);
-        for (i = 1; i < device->adapter->gl_info.limits.buffers; ++i)
+        for (i = 0; i < device->adapter->gl_info.limits.buffers; ++i)
         {
             wined3d_device_set_render_target(device, i, NULL, FALSE);
         }
+        if (swapchain->back_buffers && swapchain->back_buffers[0])
+            wined3d_device_set_render_target(device, 0, swapchain->back_buffers[0], FALSE);
     }
     wined3d_device_set_depth_stencil(device, NULL);
 

@@ -70,7 +70,8 @@ static void resource_check_usage(DWORD usage)
             | WINED3DUSAGE_DYNAMIC
             | WINED3DUSAGE_AUTOGENMIPMAP
             | WINED3DUSAGE_STATICDECL
-            | WINED3DUSAGE_OVERLAY;
+            | WINED3DUSAGE_OVERLAY
+            | WINED3DUSAGE_TEXTURE;
 
     if (usage & ~handled)
         FIXME("Unhandled usage flags %#x.\n", usage & ~handled);
@@ -84,6 +85,17 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
         const struct wined3d_resource_ops *resource_ops)
 {
     const struct wined3d *d3d = device->wined3d;
+
+    resource_check_usage(usage);
+    if (pool != WINED3D_POOL_SCRATCH)
+    {
+        if ((usage & WINED3DUSAGE_RENDERTARGET) && !(format->flags & WINED3DFMT_FLAG_RENDERTARGET))
+            return WINED3DERR_INVALIDCALL;
+        if ((usage & WINED3DUSAGE_DEPTHSTENCIL) && !(format->flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+            return WINED3DERR_INVALIDCALL;
+        if ((usage & WINED3DUSAGE_TEXTURE) && !(format->flags & WINED3DFMT_FLAG_TEXTURE))
+            return WINED3DERR_INVALIDCALL;
+    }
 
     resource->ref = 1;
     resource->device = device;
@@ -105,8 +117,6 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     resource->parent_ops = parent_ops;
     resource->resource_ops = resource_ops;
     list_init(&resource->privateData);
-
-    resource_check_usage(usage);
 
     if (size)
     {

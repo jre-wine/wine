@@ -1363,7 +1363,7 @@ typedef struct _SYSTEM_PROCESS_INFORMATION {
     HANDLE UniqueProcessId;            /* 44/50 */
     HANDLE ParentProcessId;            /* 48/58 */
     ULONG HandleCount;                 /* 4c/60 */
-    DWORD dwUnknown3;                  /* 50/64 */
+    ULONG SessionId;                   /* 50/64 */
     DWORD dwUnknown4;                  /* 54/68 */
     VM_COUNTERS vmCounters;            /* 58/70 */
     IO_COUNTERS ioCounters;            /* 88/d0 */
@@ -2256,6 +2256,8 @@ NTSYSAPI NTSTATUS  WINAPI NtYieldExecution(void);
 NTSYSAPI void      WINAPI RtlAcquirePebLock(void);
 NTSYSAPI BYTE      WINAPI RtlAcquireResourceExclusive(LPRTL_RWLOCK,BYTE);
 NTSYSAPI BYTE      WINAPI RtlAcquireResourceShared(LPRTL_RWLOCK,BYTE);
+NTSYSAPI void      WINAPI RtlAcquireSRWLockExclusive(RTL_SRWLOCK*);
+NTSYSAPI void      WINAPI RtlAcquireSRWLockShared(RTL_SRWLOCK*);
 NTSYSAPI NTSTATUS  WINAPI RtlActivateActivationContext(DWORD,HANDLE,ULONG_PTR*);
 NTSYSAPI NTSTATUS  WINAPI RtlAddAce(PACL,DWORD,DWORD,PACE_HEADER,DWORD);
 NTSYSAPI NTSTATUS  WINAPI RtlAddAccessAllowedAce(PACL,DWORD,DWORD,PSID);
@@ -2419,6 +2421,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlInitializeCriticalSectionEx(RTL_CRITICAL_SECTION *,
 NTSYSAPI void      WINAPI RtlInitializeBitMap(PRTL_BITMAP,PULONG,ULONG);
 NTSYSAPI void      WINAPI RtlInitializeHandleTable(ULONG,ULONG,RTL_HANDLE_TABLE *);
 NTSYSAPI void      WINAPI RtlInitializeResource(LPRTL_RWLOCK);
+NTSYSAPI void      WINAPI RtlInitializeSRWLock(RTL_SRWLOCK*);
 NTSYSAPI BOOL      WINAPI RtlInitializeSid(PSID,PSID_IDENTIFIER_AUTHORITY,BYTE);
 NTSYSAPI NTSTATUS  WINAPI RtlInt64ToUnicodeString(ULONGLONG,ULONG,UNICODE_STRING *);
 NTSYSAPI NTSTATUS  WINAPI RtlIntegerToChar(ULONG,ULONG,ULONG,PCHAR);
@@ -2471,6 +2474,8 @@ NTSYSAPI NTSTATUS  WINAPI RtlRegisterWait(PHANDLE,HANDLE,RTL_WAITORTIMERCALLBACK
 NTSYSAPI void      WINAPI RtlReleaseActivationContext(HANDLE);
 NTSYSAPI void      WINAPI RtlReleasePebLock(void);
 NTSYSAPI void      WINAPI RtlReleaseResource(LPRTL_RWLOCK);
+NTSYSAPI void      WINAPI RtlReleaseSRWLockExclusive(RTL_SRWLOCK*);
+NTSYSAPI void      WINAPI RtlReleaseSRWLockShared(RTL_SRWLOCK*);
 NTSYSAPI ULONG     WINAPI RtlRemoveVectoredExceptionHandler(PVOID);
 NTSYSAPI void      WINAPI RtlRestoreLastWin32Error(DWORD);
 NTSYSAPI void      WINAPI RtlSecondsSince1970ToTime(DWORD,LARGE_INTEGER *);
@@ -2540,6 +2545,7 @@ NTSYSAPI NTSTATUS  WINAPI RtlWalkHeap(HANDLE,PVOID);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64EnableFsRedirection(BOOLEAN);
 NTSYSAPI NTSTATUS  WINAPI RtlWow64EnableFsRedirectionEx(ULONG,ULONG*);
 NTSYSAPI NTSTATUS  WINAPI RtlWriteRegistryValue(ULONG,PCWSTR,PCWSTR,ULONG,PVOID,ULONG);
+NTSYSAPI NTSTATUS  WINAPI RtlZombifyActivationContext(HANDLE);
 NTSYSAPI NTSTATUS  WINAPI RtlpNtCreateKey(PHANDLE,ACCESS_MASK,const OBJECT_ATTRIBUTES*,ULONG,const UNICODE_STRING*,ULONG,PULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlpNtEnumerateSubKey(HANDLE,UNICODE_STRING *, ULONG);
 NTSYSAPI NTSTATUS  WINAPI RtlpWaitForCriticalSection(RTL_CRITICAL_SECTION *);
