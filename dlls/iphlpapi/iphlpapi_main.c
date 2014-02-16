@@ -63,14 +63,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(iphlpapi);
 #define INADDR_NONE ~0UL
 #endif
 
-/* call res_init() just once because of a bug in Mac OS X 10.4 */
-/* Call once per thread on systems that have per-thread _res. */
-static void initialise_resolver(void)
-{
-    if ((_res.options & RES_INIT) == 0)
-        res_init();
-}
-
 /******************************************************************
  *    AddIPAddress (IPHLPAPI.@)
  *
@@ -471,7 +463,7 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
   if (!pOutBufLen)
     ret = ERROR_INVALID_PARAMETER;
   else {
-    DWORD numNonLoopbackInterfaces = getNumNonLoopbackInterfaces();
+    DWORD numNonLoopbackInterfaces = get_interface_indices( TRUE, NULL );
 
     if (numNonLoopbackInterfaces > 0) {
       DWORD numIPAddresses = getNumIPAddresses();
@@ -497,7 +489,7 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
         if (!ret)
           ret = AllocateAndGetIpForwardTableFromStack(&routeTable, FALSE, GetProcessHeap(), 0);
         if (!ret)
-          table = getNonLoopbackInterfaceIndexTable();
+          get_interface_indices( TRUE, &table );
         if (table) {
           size = sizeof(IP_ADAPTER_INFO) * table->numIndexes;
           size += ipAddrTable->dwNumEntries * sizeof(IP_ADDR_STRING); 
@@ -933,6 +925,39 @@ static ULONG adapterAddressesFromIndex(ULONG family, ULONG flags, IF_INDEX index
     return ERROR_SUCCESS;
 }
 
+static void sockaddr_in_to_WS_storage( SOCKADDR_STORAGE *dst, const struct sockaddr_in *src )
+{
+    SOCKADDR_IN *s = (SOCKADDR_IN *)dst;
+
+    s->sin_family = WS_AF_INET;
+    s->sin_port = src->sin_port;
+    memcpy( &s->sin_addr, &src->sin_addr, sizeof(IN_ADDR) );
+    memset( (char *)s + FIELD_OFFSET( SOCKADDR_IN, sin_zero ), 0,
+            sizeof(SOCKADDR_STORAGE) - FIELD_OFFSET( SOCKADDR_IN, sin_zero) );
+}
+
+static void sockaddr_in6_to_WS_storage( SOCKADDR_STORAGE *dst, const struct sockaddr_in6 *src )
+{
+    SOCKADDR_IN6 *s = (SOCKADDR_IN6 *)dst;
+
+    s->sin6_family = WS_AF_INET6;
+    s->sin6_port = src->sin6_port;
+    s->sin6_flowinfo = src->sin6_flowinfo;
+    memcpy( &s->sin6_addr, &src->sin6_addr, sizeof(IN6_ADDR) );
+    s->sin6_scope_id = src->sin6_scope_id;
+    memset( (char *)s + sizeof(SOCKADDR_IN6), 0,
+                    sizeof(SOCKADDR_STORAGE) - sizeof(SOCKADDR_IN6) );
+}
+
+#ifdef HAVE_STRUCT___RES_STATE
+/* call res_init() just once because of a bug in Mac OS X 10.4 */
+/* Call once per thread on systems that have per-thread _res. */
+static void initialise_resolver(void)
+{
+    if ((_res.options & RES_INIT) == 0)
+        res_init();
+}
+
 static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
 {
     int i, ip6_count = 0;
@@ -956,27 +981,64 @@ static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
 #ifdef HAVE_STRUCT___RES_STATE__U__EXT_NSCOUNT6
         if (_res._u._ext.nsaddrs[i])
         {
-            SOCKADDR_IN6 *s = (SOCKADDR_IN6 *)addr;
             if (ip4_only) continue;
-            s->sin6_family = WS_AF_INET6;
-            s->sin6_port = _res._u._ext.nsaddrs[i]->sin6_port;
-            s->sin6_flowinfo = _res._u._ext.nsaddrs[i]->sin6_flowinfo;
-            memcpy( &s->sin6_addr, &_res._u._ext.nsaddrs[i]->sin6_addr, sizeof(IN6_ADDR) );
-            s->sin6_scope_id = _res._u._ext.nsaddrs[i]->sin6_scope_id;
-            memset( (char *)s + sizeof(SOCKADDR_IN6), 0,
-                    sizeof(SOCKADDR_STORAGE) - sizeof(SOCKADDR_IN6) );
+            sockaddr_in6_to_WS_storage( addr, _res._u._ext.nsaddrs[i] );
         }
         else
 #endif
         {
-            *(struct sockaddr_in *)addr = _res.nsaddr_list[i];
-            memset( (char *)addr + sizeof(struct sockaddr_in), 0,
-                    sizeof(SOCKADDR_STORAGE) - sizeof(struct sockaddr_in) );
+            sockaddr_in_to_WS_storage( addr, _res.nsaddr_list + i );
         }
         addr++;
     }
     return addr - servers;
 }
+#elif defined(HAVE___RES_GET_STATE) && defined(HAVE___RES_GETSERVERS)
+
+static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
+{
+    extern struct res_state *__res_get_state( void );
+    extern int __res_getservers( struct res_state *, struct sockaddr_storage *, int );
+    struct res_state *state = __res_get_state();
+    int i, found = 0, total = __res_getservers( state, NULL, 0 );
+    SOCKADDR_STORAGE *addr = servers;
+    struct sockaddr_storage *buf;
+
+    if ((!servers || !num) && !ip4_only) return total;
+
+    buf = HeapAlloc( GetProcessHeap(), 0, total * sizeof(struct sockaddr_storage) );
+    total = __res_getservers( state, buf, total );
+
+    for (i = 0; i < total; i++)
+    {
+        if (buf[i].ss_family == AF_INET6 && ip4_only) continue;
+        if (buf[i].ss_family != AF_INET && buf[i].ss_family != AF_INET6) continue;
+
+        found++;
+        if (!servers || !num) continue;
+
+        if (buf[i].ss_family == AF_INET6)
+        {
+            sockaddr_in6_to_WS_storage( addr, (struct sockaddr_in6 *)(buf + i) );
+        }
+        else
+        {
+            sockaddr_in_to_WS_storage( addr, (struct sockaddr_in *)(buf + i) );
+        }
+        if (++addr >= servers + num) break;
+    }
+
+    HeapFree( GetProcessHeap(), 0, buf );
+    return found;
+}
+#else
+
+static int get_dns_servers( SOCKADDR_STORAGE *servers, int num, BOOL ip4_only )
+{
+    FIXME("Unimplemented on this system\n");
+    return 0;
+}
+#endif
 
 static ULONG get_dns_server_addresses(PIP_ADAPTER_DNS_SERVER_ADDRESS address, ULONG *len)
 {
@@ -1015,6 +1077,7 @@ static ULONG get_dns_server_addresses(PIP_ADAPTER_DNS_SERVER_ADDRESS address, UL
     return ERROR_SUCCESS;
 }
 
+#ifdef HAVE_STRUCT___RES_STATE
 static BOOL is_ip_address_string(const char *str)
 {
     struct in_addr in;
@@ -1023,40 +1086,36 @@ static BOOL is_ip_address_string(const char *str)
     ret = inet_aton(str, &in);
     return ret != 0;
 }
+#endif
 
 static ULONG get_dns_suffix(WCHAR *suffix, ULONG *len)
 {
-    ULONG size, i;
-    char *found_suffix = NULL;
-
-    initialise_resolver();
+    ULONG size;
+    const char *found_suffix = "";
     /* Always return a NULL-terminated string, even if it's empty. */
-    size = sizeof(WCHAR);
-    for (i = 0, found_suffix = NULL;
-         !found_suffix && i < MAXDNSRCH + 1 && _res.dnsrch[i]; i++)
+
+#ifdef HAVE_STRUCT___RES_STATE
     {
-        /* This uses a heuristic to select a DNS suffix:
-         * the first, non-IP address string is selected.
-         */
-        if (!is_ip_address_string(_res.dnsrch[i]))
-            found_suffix = _res.dnsrch[i];
+        ULONG i;
+        initialise_resolver();
+        for (i = 0; !*found_suffix && i < MAXDNSRCH + 1 && _res.dnsrch[i]; i++)
+        {
+            /* This uses a heuristic to select a DNS suffix:
+             * the first, non-IP address string is selected.
+             */
+            if (!is_ip_address_string(_res.dnsrch[i]))
+                found_suffix = _res.dnsrch[i];
+        }
     }
-    if (found_suffix)
-        size += strlen(found_suffix) * sizeof(WCHAR);
+#endif
+
+    size = MultiByteToWideChar( CP_UNIXCP, 0, found_suffix, -1, NULL, 0 ) * sizeof(WCHAR);
     if (!suffix || *len < size)
     {
         *len = size;
         return ERROR_BUFFER_OVERFLOW;
     }
-    *len = size;
-    if (found_suffix)
-    {
-        char *p;
-
-        for (p = found_suffix; *p; p++)
-            *suffix++ = *p;
-    }
-    *suffix = 0;
+    *len = MultiByteToWideChar( CP_UNIXCP, 0, found_suffix, -1, suffix, *len / sizeof(WCHAR) ) * sizeof(WCHAR);
     return ERROR_SUCCESS;
 }
 
@@ -1070,7 +1129,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses(ULONG family, ULONG flags, P
 
     if (!buflen) return ERROR_INVALID_PARAMETER;
 
-    table = getInterfaceIndexTable();
+    get_interface_indices( FALSE, &table );
     if (!table || !table->numIndexes)
     {
         HeapFree(GetProcessHeap(), 0, table);
@@ -1139,7 +1198,7 @@ ULONG WINAPI DECLSPEC_HOTPATCH GetAdaptersAddresses(ULONG family, ULONG flags, P
             if (aa->IfType != IF_TYPE_SOFTWARE_LOOPBACK && aa->OperStatus == IfOperStatusUp)
                 aa->DnsSuffix = dnsSuffix;
             else
-                aa->DnsSuffix = (WCHAR *)((BYTE*)dnsSuffix + dns_suffix_size - 2);
+                aa->DnsSuffix = dnsSuffix + dns_suffix_size / sizeof(WCHAR) - 1;
         }
         ret = ERROR_SUCCESS;
     }
@@ -1372,7 +1431,7 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
   if (!pdwSize)
     ret = ERROR_INVALID_PARAMETER;
   else {
-    DWORD numInterfaces = getNumInterfaces();
+    DWORD numInterfaces = get_interface_indices( FALSE, NULL );
     ULONG size = sizeof(MIB_IFTABLE);
 
     if (numInterfaces > 1)
@@ -1382,7 +1441,8 @@ DWORD WINAPI GetIfTable(PMIB_IFTABLE pIfTable, PULONG pdwSize, BOOL bOrder)
       ret = ERROR_INSUFFICIENT_BUFFER;
     }
     else {
-      InterfaceIndexTable *table = getInterfaceIndexTable();
+      InterfaceIndexTable *table;
+      get_interface_indices( FALSE, &table );
 
       if (table) {
         size = sizeof(MIB_IFTABLE);
@@ -1442,7 +1502,7 @@ DWORD WINAPI GetInterfaceInfo(PIP_INTERFACE_INFO pIfTable, PULONG dwOutBufLen)
   if (!dwOutBufLen)
     ret = ERROR_INVALID_PARAMETER;
   else {
-    DWORD numInterfaces = getNumInterfaces();
+    DWORD numInterfaces = get_interface_indices( FALSE, NULL );
     ULONG size = sizeof(IP_INTERFACE_INFO);
 
     if (numInterfaces > 1)
@@ -1452,7 +1512,8 @@ DWORD WINAPI GetInterfaceInfo(PIP_INTERFACE_INFO pIfTable, PULONG dwOutBufLen)
       ret = ERROR_INSUFFICIENT_BUFFER;
     }
     else {
-      InterfaceIndexTable *table = getInterfaceIndexTable();
+      InterfaceIndexTable *table;
+      get_interface_indices( FALSE, &table );
 
       if (table) {
         size = sizeof(IP_INTERFACE_INFO);
@@ -1778,7 +1839,7 @@ DWORD WINAPI GetNumberOfInterfaces(PDWORD pdwNumIf)
   if (!pdwNumIf)
     ret = ERROR_INVALID_PARAMETER;
   else {
-    *pdwNumIf = getNumInterfaces();
+    *pdwNumIf = get_interface_indices( FALSE, NULL );
     ret = NO_ERROR;
   }
   TRACE("returning %d\n", ret);

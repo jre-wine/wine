@@ -464,6 +464,129 @@ static void sync_window_opacity(struct macdrv_win_data *data, COLORREF key, BYTE
 }
 
 
+/***********************************************************************
+ *              sync_window_min_max_info
+ */
+static void sync_window_min_max_info(HWND hwnd)
+{
+    LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+    LONG exstyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    RECT win_rect, primary_monitor_rect;
+    MINMAXINFO minmax;
+    LONG adjustedStyle;
+    INT xinc, yinc;
+    WINDOWPLACEMENT wpl;
+    HMONITOR monitor;
+    struct macdrv_win_data *data;
+    RECT min_rect, max_rect;
+    CGSize min_size, max_size;
+
+    TRACE("win %p\n", hwnd);
+
+    if (!macdrv_get_cocoa_window(hwnd, FALSE)) return;
+
+    GetWindowRect(hwnd, &win_rect);
+    minmax.ptReserved.x = win_rect.left;
+    minmax.ptReserved.y = win_rect.top;
+
+    if ((style & WS_CAPTION) == WS_CAPTION)
+        adjustedStyle = style & ~WS_BORDER; /* WS_CAPTION = WS_DLGFRAME | WS_BORDER */
+    else
+        adjustedStyle = style;
+
+    primary_monitor_rect.left = primary_monitor_rect.top = 0;
+    primary_monitor_rect.right = GetSystemMetrics(SM_CXSCREEN);
+    primary_monitor_rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+    AdjustWindowRectEx(&primary_monitor_rect, adjustedStyle, ((style & WS_POPUP) && GetMenu(hwnd)), exstyle);
+
+    xinc = -primary_monitor_rect.left;
+    yinc = -primary_monitor_rect.top;
+
+    minmax.ptMaxSize.x = primary_monitor_rect.right - primary_monitor_rect.left;
+    minmax.ptMaxSize.y = primary_monitor_rect.bottom - primary_monitor_rect.top;
+    minmax.ptMaxPosition.x = -xinc;
+    minmax.ptMaxPosition.y = -yinc;
+    if (style & (WS_DLGFRAME | WS_BORDER))
+    {
+        minmax.ptMinTrackSize.x = GetSystemMetrics(SM_CXMINTRACK);
+        minmax.ptMinTrackSize.y = GetSystemMetrics(SM_CYMINTRACK);
+    }
+    else
+    {
+        minmax.ptMinTrackSize.x = 2 * xinc;
+        minmax.ptMinTrackSize.y = 2 * yinc;
+    }
+    minmax.ptMaxTrackSize.x = GetSystemMetrics(SM_CXMAXTRACK);
+    minmax.ptMaxTrackSize.y = GetSystemMetrics(SM_CYMAXTRACK);
+
+    wpl.length = sizeof(wpl);
+    if (GetWindowPlacement(hwnd, &wpl) && (wpl.ptMaxPosition.x != -1 || wpl.ptMaxPosition.y != -1))
+    {
+        minmax.ptMaxPosition = wpl.ptMaxPosition;
+
+        /* Convert from GetWindowPlacement's workspace coordinates to screen coordinates. */
+        minmax.ptMaxPosition.x -= wpl.rcNormalPosition.left - win_rect.left;
+        minmax.ptMaxPosition.y -= wpl.rcNormalPosition.top - win_rect.top;
+    }
+
+    TRACE("initial ptMaxSize %s ptMaxPosition %s ptMinTrackSize %s ptMaxTrackSize %s\n", wine_dbgstr_point(&minmax.ptMaxSize),
+          wine_dbgstr_point(&minmax.ptMaxPosition), wine_dbgstr_point(&minmax.ptMinTrackSize), wine_dbgstr_point(&minmax.ptMaxTrackSize));
+
+    SendMessageW(hwnd, WM_GETMINMAXINFO, 0, (LPARAM)&minmax);
+
+    TRACE("app's ptMaxSize %s ptMaxPosition %s ptMinTrackSize %s ptMaxTrackSize %s\n", wine_dbgstr_point(&minmax.ptMaxSize),
+          wine_dbgstr_point(&minmax.ptMaxPosition), wine_dbgstr_point(&minmax.ptMinTrackSize), wine_dbgstr_point(&minmax.ptMaxTrackSize));
+
+    /* if the app didn't change the values, adapt them for the window's monitor */
+    if ((monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY)))
+    {
+        MONITORINFO mon_info;
+        RECT monitor_rect;
+
+        mon_info.cbSize = sizeof(mon_info);
+        GetMonitorInfoW(monitor, &mon_info);
+
+        if ((style & WS_MAXIMIZEBOX) && ((style & WS_CAPTION) == WS_CAPTION || !(style & WS_POPUP)))
+            monitor_rect = mon_info.rcWork;
+        else
+            monitor_rect = mon_info.rcMonitor;
+
+        if (minmax.ptMaxSize.x == primary_monitor_rect.right - primary_monitor_rect.left &&
+            minmax.ptMaxSize.y == primary_monitor_rect.bottom - primary_monitor_rect.top)
+        {
+            minmax.ptMaxSize.x = (monitor_rect.right - monitor_rect.left) + 2 * xinc;
+            minmax.ptMaxSize.y = (monitor_rect.bottom - monitor_rect.top) + 2 * yinc;
+        }
+        if (minmax.ptMaxPosition.x == -xinc && minmax.ptMaxPosition.y == -yinc)
+        {
+            minmax.ptMaxPosition.x = monitor_rect.left - xinc;
+            minmax.ptMaxPosition.y = monitor_rect.top - yinc;
+        }
+    }
+
+    minmax.ptMaxTrackSize.x = max(minmax.ptMaxTrackSize.x, minmax.ptMinTrackSize.x);
+    minmax.ptMaxTrackSize.y = max(minmax.ptMaxTrackSize.y, minmax.ptMinTrackSize.y);
+
+    TRACE("adjusted ptMaxSize %s ptMaxPosition %s ptMinTrackSize %s ptMaxTrackSize %s\n", wine_dbgstr_point(&minmax.ptMaxSize),
+          wine_dbgstr_point(&minmax.ptMaxPosition), wine_dbgstr_point(&minmax.ptMinTrackSize), wine_dbgstr_point(&minmax.ptMaxTrackSize));
+
+    if ((data = get_win_data(hwnd)) && data->cocoa_window)
+    {
+        SetRect(&min_rect, 0, 0, minmax.ptMinTrackSize.x, minmax.ptMinTrackSize.y);
+        SetRect(&max_rect, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
+        macdrv_window_to_mac_rect(data, style, &min_rect);
+        macdrv_window_to_mac_rect(data, style, &max_rect);
+        min_size = CGSizeMake(min_rect.right - min_rect.left, min_rect.bottom - min_rect.top);
+        max_size = CGSizeMake(max_rect.right - max_rect.left, max_rect.bottom - max_rect.top);
+
+        TRACE("min_size (%g,%g) max_size (%g,%g)\n", min_size.width, min_size.height, max_size.width, max_size.height);
+        macdrv_set_window_min_max_sizes(data->cocoa_window, min_size, max_size);
+    }
+
+    release_win_data(data);
+}
+
+
 /**********************************************************************
  *              create_cocoa_window
  *
@@ -713,7 +836,8 @@ RGNDATA *get_region_data(HRGN hrgn, HDC hdc_lptodp)
  *
  * Synchronize the Mac window position with the Windows one
  */
-static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, const RECT *old_window_rect)
+static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, const RECT *old_window_rect,
+                                 const RECT *old_whole_rect)
 {
     CGRect frame;
 
@@ -725,7 +849,10 @@ static void sync_window_position(struct macdrv_win_data *data, UINT swp_flags, c
         frame.size.width = frame.size.height = 1;
 
     data->on_screen = macdrv_set_cocoa_window_frame(data->cocoa_window, &frame);
-    if (old_window_rect && IsRectEmpty(old_window_rect) != IsRectEmpty(&data->window_rect))
+    if (old_window_rect && old_whole_rect &&
+        (IsRectEmpty(old_window_rect) != IsRectEmpty(&data->window_rect) ||
+         old_window_rect->left - old_whole_rect->left != data->window_rect.left - data->whole_rect.left ||
+         old_window_rect->top - old_whole_rect->top != data->window_rect.top - data->whole_rect.top))
         sync_window_region(data, (HRGN)1);
 
     TRACE("win %p/%p whole_rect %s frame %s\n", data->hwnd, data->cocoa_window,
@@ -780,6 +907,16 @@ static void move_window_bits(HWND hwnd, macdrv_window window, const RECT *old_re
 
     ReleaseDC(hwnd, hdc_dst);
     if (hdc_src != hdc_dst) ReleaseDC(parent, hdc_src);
+}
+
+
+/**********************************************************************
+ *              activate_on_following_focus
+ */
+void activate_on_following_focus(void)
+{
+    activate_on_focus_time = GetTickCount();
+    if (!activate_on_focus_time) activate_on_focus_time = 1;
 }
 
 
@@ -997,6 +1134,9 @@ void CDECL macdrv_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
             sync_window_opacity(data, 0, 0, FALSE, 0);
             if (data->surface) set_surface_use_alpha(data->surface, FALSE);
         }
+
+        if (offset == GWL_EXSTYLE && (changed & WS_EX_LAYOUTRTL))
+            sync_window_region(data, (HRGN)1);
     }
 
     release_win_data(data);
@@ -1248,14 +1388,13 @@ LRESULT CDECL macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if ((data = get_win_data(hwnd)))
         {
             if (data->cocoa_window && data->on_screen)
-                sync_window_position(data, SWP_NOZORDER | SWP_NOACTIVATE, NULL);
+                sync_window_position(data, SWP_NOZORDER | SWP_NOACTIVATE, NULL, NULL);
             release_win_data(data);
         }
         SendMessageW(hwnd, WM_DISPLAYCHANGE, wp, lp);
         return 0;
     case WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS:
-        activate_on_focus_time = GetTickCount();
-        if (!activate_on_focus_time) activate_on_focus_time = 1;
+        activate_on_following_focus();
         TRACE("WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS time %u\n", activate_on_focus_time);
         return 0;
     }
@@ -1434,7 +1573,7 @@ void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
          thread_data->current_event->type != WINDOW_DID_MINIMIZE &&
          thread_data->current_event->type != WINDOW_DID_UNMINIMIZE))
     {
-        sync_window_position(data, swp_flags, &old_window_rect);
+        sync_window_position(data, swp_flags, &old_window_rect, &old_whole_rect);
         set_cocoa_window_properties(data);
     }
 
@@ -1857,4 +1996,33 @@ fail:
         HeapFree(GetProcessHeap(), 0, qi);
     }
     macdrv_quit_reply(FALSE);
+}
+
+
+/***********************************************************************
+ *              query_resize_start
+ *
+ * Handler for QUERY_RESIZE_START query.
+ */
+BOOL query_resize_start(HWND hwnd)
+{
+    TRACE("hwnd %p\n", hwnd);
+
+    sync_window_min_max_info(hwnd);
+    SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);
+
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *              query_resize_end
+ *
+ * Handler for QUERY_RESIZE_END query.
+ */
+BOOL query_resize_end(HWND hwnd)
+{
+    TRACE("hwnd %p\n", hwnd);
+    SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+    return TRUE;
 }

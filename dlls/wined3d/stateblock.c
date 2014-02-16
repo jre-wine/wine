@@ -598,9 +598,12 @@ void state_cleanup(struct wined3d_state *state)
     HeapFree(GetProcessHeap(), 0, state->ps_consts_f);
 }
 
-HRESULT state_init(struct wined3d_state *state, const struct wined3d_d3d_info *d3d_info)
+HRESULT state_init(struct wined3d_state *state, struct wined3d_fb_state *fb,
+        const struct wined3d_d3d_info *d3d_info)
 {
     unsigned int i;
+
+    state->fb = fb;
 
     for (i = 0; i < LIGHTMAP_SIZE; i++)
     {
@@ -1168,9 +1171,8 @@ void CDECL wined3d_stateblock_apply(const struct wined3d_stateblock *stateblock)
     TRACE("Applied stateblock %p.\n", stateblock);
 }
 
-void state_init_default(struct wined3d_state *state, struct wined3d_device *device)
+void state_init_default(struct wined3d_state *state, const struct wined3d_gl_info *gl_info)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     union
     {
         struct wined3d_line_pattern lp;
@@ -1181,8 +1183,6 @@ void state_init_default(struct wined3d_state *state, struct wined3d_device *devi
         DWORD d;
     } tmpfloat;
     unsigned int i;
-    struct wined3d_swapchain *swapchain;
-    struct wined3d_surface *backbuffer;
     static const struct wined3d_matrix identity =
     {{{
         1.0f, 0.0f, 0.0f, 0.0f,
@@ -1191,7 +1191,7 @@ void state_init_default(struct wined3d_state *state, struct wined3d_device *devi
         0.0f, 0.0f, 0.0f, 1.0f,
     }}};
 
-    TRACE("state %p, device %p.\n", state, device);
+    TRACE("state %p, gl_info %p.\n", state, gl_info);
 
     /* Set some of the defaults for lights, transforms etc */
     state->transforms[WINED3D_TS_PROJECTION] = identity;
@@ -1201,14 +1201,9 @@ void state_init_default(struct wined3d_state *state, struct wined3d_device *devi
         state->transforms[WINED3D_TS_WORLD_MATRIX(i)] = identity;
     }
 
-    state->fb = &device->fb;
-
     TRACE("Render states\n");
     /* Render states: */
-    if (device->auto_depth_stencil)
-       state->render_states[WINED3D_RS_ZENABLE] = WINED3D_ZB_TRUE;
-    else
-       state->render_states[WINED3D_RS_ZENABLE] = WINED3D_ZB_FALSE;
+    state->render_states[WINED3D_RS_ZENABLE] = WINED3D_ZB_TRUE;
     state->render_states[WINED3D_RS_FILLMODE] = WINED3D_FILL_SOLID;
     state->render_states[WINED3D_RS_SHADEMODE] = WINED3D_SHADE_GOURAUD;
     lp.lp.repeat_factor = 0;
@@ -1380,38 +1375,6 @@ void state_init_default(struct wined3d_state *state, struct wined3d_device *devi
         /* TODO: Vertex offset in the presampled displacement map. */
         state->sampler_states[i][WINED3D_SAMP_DMAP_OFFSET] = 0;
     }
-
-    for (i = 0; i < gl_info->limits.textures; ++i)
-    {
-        state->textures[i] = NULL;
-    }
-
-    /* check the return values, because the GetBackBuffer call isn't valid for ddraw */
-    if ((swapchain = wined3d_device_get_swapchain(device, 0)))
-    {
-        if ((backbuffer = wined3d_swapchain_get_back_buffer(swapchain, 0, WINED3D_BACKBUFFER_TYPE_MONO)))
-        {
-            struct wined3d_resource_desc desc;
-
-            wined3d_resource_get_desc(&backbuffer->resource, &desc);
-
-            /* Set the default scissor rect values */
-            state->scissor_rect.left = 0;
-            state->scissor_rect.right = desc.width;
-            state->scissor_rect.top = 0;
-            state->scissor_rect.bottom = desc.height;
-        }
-
-        /* Set the default viewport */
-        state->viewport.x = 0;
-        state->viewport.y = 0;
-        state->viewport.width = swapchain->desc.backbuffer_width;
-        state->viewport.height = swapchain->desc.backbuffer_height;
-        state->viewport.min_z = 0.0f;
-        state->viewport.max_z = 1.0f;
-    }
-
-    TRACE("Done.\n");
 }
 
 static HRESULT stateblock_init(struct wined3d_stateblock *stateblock,
@@ -1423,7 +1386,7 @@ static HRESULT stateblock_init(struct wined3d_stateblock *stateblock,
     stateblock->ref = 1;
     stateblock->device = device;
 
-    if (FAILED(hr = state_init(&stateblock->state, d3d_info)))
+    if (FAILED(hr = state_init(&stateblock->state, NULL, d3d_info)))
         return hr;
 
     if (FAILED(hr = stateblock_allocate_shader_constants(stateblock)))
