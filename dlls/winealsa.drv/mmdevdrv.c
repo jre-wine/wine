@@ -100,6 +100,7 @@ struct ACImpl {
     snd_pcm_format_t alsa_format;
 
     IMMDevice *parent;
+    IUnknown *pUnkFTMarshal;
 
     EDataFlow dataflow;
     WAVEFORMATEX *fmt;
@@ -772,6 +773,7 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     static int handle_underrun = 1;
     char alsa_name[256];
     EDataFlow dataflow;
+    HRESULT hr;
 
     TRACE("%s %p %p\n", debugstr_guid(guid), dev, out);
 
@@ -796,6 +798,13 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     else{
         HeapFree(GetProcessHeap(), 0, This);
         return E_UNEXPECTED;
+    }
+
+    hr = CoCreateFreeThreadedMarshaler((IUnknown *)&This->IAudioClient_iface,
+        (IUnknown **)&This->pUnkFTMarshal);
+    if (FAILED(hr)) {
+        HeapFree(GetProcessHeap(), 0, This);
+        return hr;
     }
 
     This->dataflow = dataflow;
@@ -848,6 +857,7 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
 static HRESULT WINAPI AudioClient_QueryInterface(IAudioClient *iface,
         REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -855,6 +865,9 @@ static HRESULT WINAPI AudioClient_QueryInterface(IAudioClient *iface,
     *ppv = NULL;
     if(IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IAudioClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;
@@ -881,6 +894,7 @@ static ULONG WINAPI AudioClient_Release(IAudioClient *iface)
     if(!ref){
         IAudioClient_Stop(iface);
         IMMDevice_Release(This->parent);
+        IUnknown_Release(This->pUnkFTMarshal);
         This->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&This->lock);
         snd_pcm_drop(This->pcm_handle);
@@ -2418,6 +2432,7 @@ static const IAudioClientVtbl AudioClient_Vtbl =
 static HRESULT WINAPI AudioRenderClient_QueryInterface(
         IAudioRenderClient *iface, REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioRenderClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -2427,6 +2442,9 @@ static HRESULT WINAPI AudioRenderClient_QueryInterface(
     if(IsEqualIID(riid, &IID_IUnknown) ||
             IsEqualIID(riid, &IID_IAudioRenderClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;
@@ -2446,18 +2464,6 @@ static ULONG WINAPI AudioRenderClient_Release(IAudioRenderClient *iface)
 {
     ACImpl *This = impl_from_IAudioRenderClient(iface);
     return AudioClient_Release(&This->IAudioClient_iface);
-}
-
-static void silence_buffer(ACImpl *This, BYTE *buffer, UINT32 frames)
-{
-    WAVEFORMATEXTENSIBLE *fmtex = (WAVEFORMATEXTENSIBLE*)This->fmt;
-    if((This->fmt->wFormatTag == WAVE_FORMAT_PCM ||
-            (This->fmt->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-             IsEqualGUID(&fmtex->SubFormat, &KSDATAFORMAT_SUBTYPE_PCM))) &&
-            This->fmt->wBitsPerSample == 8)
-        memset(buffer, 128, frames * This->fmt->nBlockAlign);
-    else
-        memset(buffer, 0, frames * This->fmt->nBlockAlign);
 }
 
 static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
@@ -2508,8 +2514,6 @@ static HRESULT WINAPI AudioRenderClient_GetBuffer(IAudioRenderClient *iface,
         *data = This->local_buffer + write_pos * This->fmt->nBlockAlign;
         This->getbuf_last = frames;
     }
-
-    silence_buffer(This, *data, frames);
 
     LeaveCriticalSection(&This->lock);
 
@@ -2564,8 +2568,12 @@ static HRESULT WINAPI AudioRenderClient_ReleaseBuffer(
     else
         buffer = This->tmp_buffer;
 
-    if(flags & AUDCLNT_BUFFERFLAGS_SILENT)
-        silence_buffer(This, buffer, written_frames);
+    if(flags & AUDCLNT_BUFFERFLAGS_SILENT){
+        if(This->fmt->wBitsPerSample == 8)
+            memset(buffer, 128, written_frames * This->fmt->nBlockAlign);
+        else
+            memset(buffer, 0, written_frames * This->fmt->nBlockAlign);
+    }
 
     if(This->getbuf_last < 0)
         alsa_wrap_buffer(This, buffer, written_frames);
@@ -2592,6 +2600,7 @@ static const IAudioRenderClientVtbl AudioRenderClient_Vtbl = {
 static HRESULT WINAPI AudioCaptureClient_QueryInterface(
         IAudioCaptureClient *iface, REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioCaptureClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -2601,6 +2610,9 @@ static HRESULT WINAPI AudioCaptureClient_QueryInterface(
     if(IsEqualIID(riid, &IID_IUnknown) ||
             IsEqualIID(riid, &IID_IAudioCaptureClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;

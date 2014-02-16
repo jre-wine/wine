@@ -49,7 +49,6 @@ void print_help(void)
             "subset of the commands that gdb accepts.",
             "The commands currently are:",
             "  help                                   quit",
-            "  attach <wpid>                          detach",
             "  break [*<addr>]                        watch | rwatch *<addr>",
             "  delete break bpnum                     disable bpnum",
             "  enable bpnum                           condition <bpnum> [<expr>]",

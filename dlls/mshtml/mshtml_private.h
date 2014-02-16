@@ -106,7 +106,6 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLSelectElement) \
     XDIID(DispHTMLStyle) \
     XDIID(DispHTMLStyleElement) \
-    XDIID(DispHTMLStyleSheet) \
     XDIID(DispHTMLStyleSheetsCollection) \
     XDIID(DispHTMLTable) \
     XDIID(DispHTMLTableCell) \
@@ -179,7 +178,6 @@ typedef struct event_target_t event_target_t;
     XIID(IHTMLStyle5) \
     XIID(IHTMLStyle6) \
     XIID(IHTMLStyleElement) \
-    XIID(IHTMLStyleSheet) \
     XIID(IHTMLStyleSheetsCollection) \
     XIID(IHTMLTable) \
     XIID(IHTMLTable2) \

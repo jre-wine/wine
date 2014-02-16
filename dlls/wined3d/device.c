@@ -4252,18 +4252,18 @@ HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device
 
         if (state->sampler_states[i][WINED3D_SAMP_MAG_FILTER] != WINED3D_TEXF_POINT)
         {
-            WARN("Non-filterable texture and mag filter enabled on samper %u, returning E_FAIL\n", i);
+            WARN("Non-filterable texture and mag filter enabled on sampler %u, returning E_FAIL\n", i);
             return E_FAIL;
         }
         if (state->sampler_states[i][WINED3D_SAMP_MIN_FILTER] != WINED3D_TEXF_POINT)
         {
-            WARN("Non-filterable texture and min filter enabled on samper %u, returning E_FAIL\n", i);
+            WARN("Non-filterable texture and min filter enabled on sampler %u, returning E_FAIL\n", i);
             return E_FAIL;
         }
         if (state->sampler_states[i][WINED3D_SAMP_MIP_FILTER] != WINED3D_TEXF_NONE
                 && state->sampler_states[i][WINED3D_SAMP_MIP_FILTER] != WINED3D_TEXF_POINT)
         {
-            WARN("Non-filterable texture and mip filter enabled on samper %u, returning E_FAIL\n", i);
+            WARN("Non-filterable texture and mip filter enabled on sampler %u, returning E_FAIL\n", i);
             return E_FAIL;
         }
     }
@@ -5034,7 +5034,11 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     }
     else if (swapchain_desc->windowed)
     {
-        m = swapchain->original_mode;
+        m.width = swapchain->orig_width;
+        m.height = swapchain->orig_height;
+        m.refresh_rate = 0;
+        m.format_id = swapchain->desc.backbuffer_format;
+        m.scanline_ordering = WINED3D_SCANLINE_ORDERING_UNKNOWN;
     }
     else
     {

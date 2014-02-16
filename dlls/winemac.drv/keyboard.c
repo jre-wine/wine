@@ -843,8 +843,6 @@ void macdrv_keyboard_changed(const macdrv_event *event)
     thread_data->dead_key_state = 0;
 
     macdrv_compute_keyboard_layout(thread_data);
-
-    SendMessageW(GetActiveWindow(), WM_CANCELMODE, 0, 0);
 }
 
 
@@ -1396,10 +1394,7 @@ INT CDECL macdrv_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
     }
     if (!is_menu)
     {
-        if (keyAction != kUCKeyActionUp && len > 0 && deadKeyState == thread_data->dead_key_state)
-            thread_data->dead_key_state = 0;
-        else
-            thread_data->dead_key_state = deadKeyState;
+        thread_data->dead_key_state = deadKeyState;
 
         if (keyAction == kUCKeyActionUp)
             goto done;

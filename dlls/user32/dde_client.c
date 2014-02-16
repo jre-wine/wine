@@ -1017,20 +1017,22 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
  */
 static HDDEDATA WDML_SyncWaitTransactionReply(HCONV hConv, DWORD dwTimeout, const WDML_XACT* pXAct, DWORD *ack)
 {
-    DWORD	start, elapsed;
+    DWORD	dwTime;
     DWORD	err;
     WDML_CONV*	pConv;
 
     TRACE("Starting wait for a timeout of %d ms\n", dwTimeout);
 
-    start = GetTickCount();
-    while ((elapsed = GetTickCount() - start) < dwTimeout)
+    /* FIXME: time 32 bit wrap around */
+    dwTimeout += GetCurrentTime();
+
+    while ((dwTime = GetCurrentTime()) < dwTimeout)
     {
 	/* we cannot be in the crit sect all the time because when client and server run in a
 	 * single process they need to share the access to the internal data
 	 */
 	if (MsgWaitForMultipleObjects(0, NULL, FALSE,
-				      dwTimeout - elapsed, QS_POSTMESSAGE) == WAIT_OBJECT_0)
+				      dwTimeout - dwTime, QS_POSTMESSAGE) == WAIT_OBJECT_0)
 	{
 	    MSG		msg;
 

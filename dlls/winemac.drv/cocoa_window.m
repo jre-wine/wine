@@ -28,20 +28,6 @@
 #import "cocoa_opengl.h"
 
 
-#if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-enum {
-    NSWindowCollectionBehaviorFullScreenPrimary = 1 << 7,
-    NSWindowCollectionBehaviorFullScreenAuxiliary = 1 << 8,
-    NSWindowFullScreenButton = 7,
-    NSFullScreenWindowMask = 1 << 14,
-};
-
-@interface NSWindow (WineFullScreenExtensions)
-    - (void) toggleFullScreen:(id)sender;
-@end
-#endif
-
-
 /* Additional Mac virtual keycode, to complement those in Carbon's <HIToolbox/Events.h>. */
 enum {
     kVK_RightCommand              = 0x36, /* Invented for Wine; was unused */
@@ -131,24 +117,6 @@ static inline void fix_generic_modifiers_by_device(NSUInteger* modifiers)
         *modifiers &= ~NX_ALTERNATEMASK;
 }
 
-static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modifiers)
-{
-    fix_device_modifiers_by_generic(&modifiers);
-    if (left_option_is_alt && (modifiers & NX_DEVICELALTKEYMASK))
-    {
-        modifiers |= NX_DEVICELCMDKEYMASK;
-        modifiers &= ~NX_DEVICELALTKEYMASK;
-    }
-    if (right_option_is_alt && (modifiers & NX_DEVICERALTKEYMASK))
-    {
-        modifiers |= NX_DEVICERCMDKEYMASK;
-        modifiers &= ~NX_DEVICERALTKEYMASK;
-    }
-    fix_generic_modifiers_by_device(&modifiers);
-
-    return modifiers;
-}
-
 
 @interface WineContentView : NSView <NSTextInputClient>
 {
@@ -190,12 +158,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 @property (assign, nonatomic) void* imeData;
 @property (nonatomic) BOOL commandDone;
 
-@property (retain, nonatomic) NSTimer* liveResizeDisplayTimer;
-
     - (void) updateColorSpace;
-
-    - (BOOL) becameEligibleParentOrChild;
-    - (void) becameIneligibleChild;
 
 @end
 
@@ -357,11 +320,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [[self inputContext] discardMarkedText];
     }
 
-    - (NSFocusRingType) focusRingType
-    {
-        return NSFocusRingTypeNone;
-    }
-
     /*
      * ---------- NSTextInputClient methods ----------
      */
@@ -501,15 +459,12 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
 @implementation WineWindow
 
-    static WineWindow* causing_becomeKeyWindow;
-
     @synthesize disabled, noActivate, floating, fullscreen, latentParentWindow, hwnd, queue;
     @synthesize surface, surface_mutex;
     @synthesize shape, shapeChangedSinceLastDraw;
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
     @synthesize imeData, commandDone;
-    @synthesize liveResizeDisplayTimer;
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
@@ -542,8 +497,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [window setDelegate:window];
         window.hwnd = hwnd;
         window.queue = queue;
-        window->savedContentMinSize = NSZeroSize;
-        window->savedContentMaxSize = NSMakeSize(FLT_MAX, FLT_MAX);
 
         [window registerForDraggedTypes:[NSArray arrayWithObjects:(NSString*)kUTTypeData,
                                                                   (NSString*)kUTTypeContent,
@@ -584,7 +537,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [liveResizeDisplayTimer invalidate];
         [liveResizeDisplayTimer release];
         [queue release];
-        [latentChildWindows release];
         [latentParentWindow release];
         [shape release];
         [super dealloc];
@@ -600,51 +552,15 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             [[self standardWindowButton:NSWindowMiniaturizeButton] setEnabled:!self.disabled];
         if (style & NSResizableWindowMask)
             [[self standardWindowButton:NSWindowZoomButton] setEnabled:!self.disabled];
-        if ([self respondsToSelector:@selector(toggleFullScreen:)])
-        {
-            if ([self collectionBehavior] & NSWindowCollectionBehaviorFullScreenPrimary)
-                [[self standardWindowButton:NSWindowFullScreenButton] setEnabled:!self.disabled];
-        }
-    }
-
-    - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
-    {
-        if ([self respondsToSelector:@selector(toggleFullScreen:)])
-        {
-            NSUInteger style = [self styleMask];
-
-            if (behavior & NSWindowCollectionBehaviorParticipatesInCycle &&
-                style & NSResizableWindowMask && !(style & NSUtilityWindowMask))
-            {
-                behavior |= NSWindowCollectionBehaviorFullScreenPrimary;
-                behavior &= ~NSWindowCollectionBehaviorFullScreenAuxiliary;
-            }
-            else
-            {
-                behavior &= ~NSWindowCollectionBehaviorFullScreenPrimary;
-                behavior |= NSWindowCollectionBehaviorFullScreenAuxiliary;
-                if (style & NSFullScreenWindowMask)
-                    [self toggleFullScreen:nil];
-            }
-        }
-
-        if (behavior != [self collectionBehavior])
-        {
-            [self setCollectionBehavior:behavior];
-            [self adjustFeaturesForState];
-        }
     }
 
     - (void) setWindowFeatures:(const struct macdrv_window_features*)wf
     {
-        static const NSUInteger usedStyles = NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask |
-                                             NSResizableWindowMask | NSUtilityWindowMask | NSBorderlessWindowMask;
         NSUInteger currentStyle = [self styleMask];
-        NSUInteger newStyle = style_mask_for_features(wf) | (currentStyle & ~usedStyles);
+        NSUInteger newStyle = style_mask_for_features(wf);
 
         if (newStyle != currentStyle)
         {
-            NSString* title = [[[self title] copy] autorelease];
             BOOL showingButtons = (currentStyle & (NSClosableWindowMask | NSMiniaturizableWindowMask | NSResizableWindowMask)) != 0;
             BOOL shouldShowButtons = (newStyle & (NSClosableWindowMask | NSMiniaturizableWindowMask | NSResizableWindowMask)) != 0;
             if (shouldShowButtons != showingButtons && !((newStyle ^ currentStyle) & NSClosableWindowMask))
@@ -657,10 +573,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                 [self setStyleMask:newStyle ^ NSClosableWindowMask];
             }
             [self setStyleMask:newStyle];
-            [self adjustFullScreenBehavior:[self collectionBehavior]];
-
-            if ([[self title] length] == 0 && [title length] > 0)
-                [self setTitle:title];
         }
 
         [self adjustFeaturesForState];
@@ -703,19 +615,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         return level;
     }
 
-    - (void) postDidUnminimizeEvent
-    {
-        macdrv_event* event;
-
-        /* Coalesce events by discarding any previous ones still in the queue. */
-        [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_DID_UNMINIMIZE)
-                               forWindow:self];
-
-        event = macdrv_create_event(WINDOW_DID_UNMINIMIZE, self);
-        [queue postEvent:event];
-        macdrv_release_event(event);
-    }
-
     - (void) setMacDrvState:(const struct macdrv_window_state*)state
     {
         NSWindowCollectionBehavior behavior;
@@ -726,31 +625,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         if (self.floating != state->floating)
         {
             self.floating = state->floating;
-            if (state->floating)
-            {
-                // Became floating.  If child of non-floating window, make that
-                // relationship latent.
-                WineWindow* parent = (WineWindow*)[self parentWindow];
-                if (parent && !parent.floating)
-                    [self becameIneligibleChild];
-            }
-            else
-            {
-                // Became non-floating.  If parent of floating children, make that
-                // relationship latent.
-                WineWindow* child;
-                for (child in [[[self childWindows] copy] autorelease])
-                {
-                    if (child.floating)
-                        [child becameIneligibleChild];
-                }
-            }
-
-            // Check our latent relationships.  If floating status was the only
-            // reason they were latent, then make them active.
-            if ([self isVisible])
-                [self becameEligibleParentOrChild];
-
             [[WineApplicationController sharedController] adjustWindowLevels];
         }
 
@@ -771,164 +645,29 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             if ([self isOrderedIn])
                 [NSApp addWindowsItem:self title:[self title] filename:NO];
         }
-        [self adjustFullScreenBehavior:behavior];
+        [self setCollectionBehavior:behavior];
 
-        if (state->minimized_valid)
+        pendingMinimize = FALSE;
+        if (state->minimized && ![self isMiniaturized])
         {
-            BOOL discardUnminimize = TRUE;
-
-            pendingMinimize = FALSE;
-            if (state->minimized && ![self isMiniaturized])
+            if ([self isVisible])
             {
-                if ([self isVisible])
-                {
-                    if ([self styleMask] & NSFullScreenWindowMask)
-                    {
-                        [self postDidUnminimizeEvent];
-                        discardUnminimize = FALSE;
-                    }
-                    else
-                        [super miniaturize:nil];
-                }
-                else
-                    pendingMinimize = TRUE;
+                ignore_windowMiniaturize = TRUE;
+                [self miniaturize:nil];
             }
-            else if (!state->minimized && [self isMiniaturized])
-            {
-                ignore_windowDeminiaturize = TRUE;
-                [self deminiaturize:nil];
-            }
-
-            if (discardUnminimize)
-            {
-                /* Whatever events regarding minimization might have been in the queue are now stale. */
-                [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_DID_UNMINIMIZE)
-                                       forWindow:self];
-            }
-        }
-    }
-
-    - (BOOL) addChildWineWindow:(WineWindow*)child assumeVisible:(BOOL)assumeVisible
-    {
-        BOOL reordered = FALSE;
-
-        if ([self isVisible] && (assumeVisible || [child isVisible]) && (self.floating || !child.floating))
-        {
-            if ([self level] > [child level])
-                [child setLevel:[self level]];
-            [self addChildWindow:child ordered:NSWindowAbove];
-            [latentChildWindows removeObjectIdenticalTo:child];
-            child.latentParentWindow = nil;
-            reordered = TRUE;
-        }
-        else
-        {
-            if (!latentChildWindows)
-                latentChildWindows = [[NSMutableArray alloc] init];
-            if (![latentChildWindows containsObject:child])
-                [latentChildWindows addObject:child];
-            child.latentParentWindow = self;
-        }
-
-        return reordered;
-    }
-
-    - (BOOL) addChildWineWindow:(WineWindow*)child
-    {
-        return [self addChildWineWindow:child assumeVisible:FALSE];
-    }
-
-    - (void) removeChildWineWindow:(WineWindow*)child
-    {
-        [self removeChildWindow:child];
-        if (child.latentParentWindow == self)
-            child.latentParentWindow = nil;
-        [latentChildWindows removeObjectIdenticalTo:child];
-    }
-
-    - (BOOL) becameEligibleParentOrChild
-    {
-        BOOL reordered = FALSE;
-        NSUInteger count;
-
-        if (latentParentWindow.floating || !self.floating)
-        {
-            // If we aren't visible currently, we assume that we should be and soon
-            // will be.  So, if the latent parent is visible that's enough to assume
-            // we can establish the parent-child relationship in Cocoa.  That will
-            // actually make us visible, which is fine.
-            if ([latentParentWindow addChildWineWindow:self assumeVisible:TRUE])
-                reordered = TRUE;
-        }
-
-        // Here, though, we may not actually be visible yet and adding a child
-        // won't make us visible.  The caller will have to call this method
-        // again after actually making us visible.
-        if ([self isVisible] && (count = [latentChildWindows count]))
-        {
-            NSMutableIndexSet* indexesToRemove = [NSMutableIndexSet indexSet];
-            NSUInteger i;
-
-            for (i = 0; i < count; i++)
-            {
-                WineWindow* child = [latentChildWindows objectAtIndex:i];
-                if ([child isVisible] && (self.floating || !child.floating))
-                {
-                    if (child.latentParentWindow == self)
-                    {
-                        if ([self level] > [child level])
-                            [child setLevel:[self level]];
-                        [self addChildWindow:child ordered:NSWindowAbove];
-                        child.latentParentWindow = nil;
-                        reordered = TRUE;
-                    }
-                    else
-                        ERR(@"shouldn't happen: %@ thinks %@ is a latent child, but it doesn't agree\n", self, child);
-                    [indexesToRemove addIndex:i];
-                }
-            }
-
-            [latentChildWindows removeObjectsAtIndexes:indexesToRemove];
-        }
-
-        return reordered;
-    }
-
-    - (void) becameIneligibleChild
-    {
-        WineWindow* parent = (WineWindow*)[self parentWindow];
-        if (parent)
-        {
-            if (!parent->latentChildWindows)
-                parent->latentChildWindows = [[NSMutableArray alloc] init];
-            [parent->latentChildWindows insertObject:self atIndex:0];
-            self.latentParentWindow = parent;
-            [parent removeChildWindow:self];
-        }
-    }
-
-    - (void) becameIneligibleParentOrChild
-    {
-        NSArray* childWindows = [self childWindows];
-
-        [self becameIneligibleChild];
-
-        if ([childWindows count])
-        {
-            WineWindow* child;
-
-            childWindows = [[childWindows copy] autorelease];
-            for (child in childWindows)
-            {
-                child.latentParentWindow = self;
-                [self removeChildWindow:child];
-            }
-
-            if (latentChildWindows)
-                [latentChildWindows replaceObjectsInRange:NSMakeRange(0, 0) withObjectsFromArray:childWindows];
             else
-                latentChildWindows = [childWindows mutableCopy];
+                pendingMinimize = TRUE;
         }
+        else if (!state->minimized && [self isMiniaturized])
+        {
+            ignore_windowDeminiaturize = TRUE;
+            [self deminiaturize:nil];
+        }
+
+        /* Whatever events regarding minimization might have been in the queue are now stale. */
+        [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_DID_MINIMIZE) |
+                                         event_mask_for_type(WINDOW_DID_UNMINIMIZE)
+                               forWindow:self];
     }
 
     // Determine if, among Wine windows, this window is directly above or below
@@ -984,8 +723,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     {
         NSMutableArray* windowNumbers;
         NSNumber* childWindowNumber;
-        NSUInteger otherIndex, limit;
-        NSArray* origChildren;
+        NSUInteger otherIndex;
         NSMutableArray* children;
 
         // Get the z-order from the window server and modify it to reflect the
@@ -998,8 +736,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         // Get our child windows and sort them in the reverse of the desired
         // z-order (back-to-front).
-        origChildren = [self childWindows];
-        children = [[origChildren mutableCopy] autorelease];
+        children = [[[self childWindows] mutableCopy] autorelease];
         [children sortWithOptions:NSSortStable
                   usingComparator:^NSComparisonResult(id obj1, id obj2){
             NSNumber* window1Number = [NSNumber numberWithInteger:[obj1 windowNumber]];
@@ -1022,16 +759,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
             return NSOrderedSame;
         }];
-
-        // If the current and desired children arrays match up to a point, leave
-        // those matching children alone.
-        limit = MIN([origChildren count], [children count]);
-        for (otherIndex = 0; otherIndex < limit; otherIndex++)
-        {
-            if ([origChildren objectAtIndex:otherIndex] != [children objectAtIndex:otherIndex])
-                break;
-        }
-        [children removeObjectsInRange:NSMakeRange(0, otherIndex)];
 
         // Remove all of the child windows and re-add them back-to-front so they
         // are in the desired order.
@@ -1059,9 +786,14 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
             NSDisableScreenUpdates();
 
-            if ([self becameEligibleParentOrChild])
+            if (latentParentWindow)
+            {
+                if ([latentParentWindow level] > [self level])
+                    [self setLevel:[latentParentWindow level]];
+                [latentParentWindow addChildWindow:self ordered:NSWindowAbove];
+                self.latentParentWindow = nil;
                 needAdjustWindowLevels = TRUE;
-
+            }
             if (prev || next)
             {
                 WineWindow* other = [prev isVisible] ? prev : next;
@@ -1099,10 +831,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                 [self orderFront:nil];
                 needAdjustWindowLevels = TRUE;
             }
-
-            if ([self becameEligibleParentOrChild])
-                needAdjustWindowLevels = TRUE;
-
             if (needAdjustWindowLevels)
             {
                 if (!wasVisible && fullscreen && [self isOnActiveSpace])
@@ -1112,7 +840,8 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
             if (pendingMinimize)
             {
-                [super miniaturize:nil];
+                ignore_windowMiniaturize = TRUE;
+                [self miniaturize:nil];
                 pendingMinimize = FALSE;
             }
 
@@ -1138,8 +867,8 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         if ([self isMiniaturized])
             pendingMinimize = TRUE;
-
-        [self becameIneligibleParentOrChild];
+        self.latentParentWindow = [self parentWindow];
+        [latentParentWindow removeChildWindow:self];
         [self orderOut:nil];
         if (wasVisible && wasOnActiveSpace && fullscreen)
             [controller updateFullscreenWindows];
@@ -1150,7 +879,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     - (void) updateFullscreen
     {
         NSRect contentRect = [self contentRectForFrameRect:[self frame]];
-        BOOL nowFullscreen = !([self styleMask] & NSFullScreenWindowMask) && screen_covered_by_rect(contentRect, [NSScreen screens]);
+        BOOL nowFullscreen = (screen_covered_by_rect(contentRect, [NSScreen screens]) != nil);
 
         if (nowFullscreen != fullscreen)
         {
@@ -1204,10 +933,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                     [self updateColorSpace];
                 }
 
-                if (!enteringFullScreen &&
-                    [[NSProcessInfo processInfo] systemUptime] - enteredFullScreenTime > 1.0)
-                    nonFullscreenFrame = frame;
-
                 [self updateFullscreen];
 
                 if (on_screen)
@@ -1224,13 +949,19 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (void) setMacDrvParentWindow:(WineWindow*)parent
     {
-        WineWindow* oldParent = (WineWindow*)[self parentWindow];
-        if ((oldParent && oldParent != parent) || (!oldParent && latentParentWindow != parent))
+        if ([self parentWindow] != parent)
         {
-            [oldParent removeChildWineWindow:self];
-            [latentParentWindow removeChildWineWindow:self];
-            if ([parent addChildWineWindow:self])
+            [[self parentWindow] removeChildWindow:self];
+            self.latentParentWindow = nil;
+            if ([self isVisible] && parent)
+            {
+                if ([parent level] > [self level])
+                    [self setLevel:[parent level]];
+                [parent addChildWindow:self ordered:NSWindowAbove];
                 [[WineApplicationController sharedController] adjustWindowLevels];
+            }
+            else
+                self.latentParentWindow = parent;
         }
     }
 
@@ -1243,14 +974,14 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
             if (disabled)
             {
-                NSSize size = [self contentRectForFrameRect:[self frame]].size;
-                [self setContentMinSize:size];
-                [self setContentMaxSize:size];
+                NSSize size = [self frame].size;
+                [self setMinSize:size];
+                [self setMaxSize:size];
             }
             else
             {
-                [self setContentMaxSize:savedContentMaxSize];
-                [self setContentMinSize:savedContentMinSize];
+                [self setMaxSize:NSMakeSize(FLT_MAX, FLT_MAX)];
+                [self setMinSize:NSZeroSize];
             }
         }
     }
@@ -1293,23 +1024,69 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [self checkTransparency];
     }
 
-    - (void) setLiveResizeDisplayTimer:(NSTimer*)newTimer
-    {
-        if (newTimer != liveResizeDisplayTimer)
-        {
-            [liveResizeDisplayTimer invalidate];
-            [liveResizeDisplayTimer release];
-            liveResizeDisplayTimer = [newTimer retain];
-        }
-    }
-
     - (void) makeFocused:(BOOL)activate
     {
-        [self orderBelow:nil orAbove:nil activate:activate];
+        WineApplicationController* controller = [WineApplicationController sharedController];
+        NSArray* screens;
+        WineWindow* front;
+        BOOL wasVisible = [self isVisible];
 
-        causing_becomeKeyWindow = self;
+        [controller transformProcessToForeground];
+
+        /* If a borderless window is offscreen, orderFront: won't move
+           it onscreen like it would for a titled window.  Do that ourselves. */
+        screens = [NSScreen screens];
+        if (!([self styleMask] & NSTitledWindowMask) && ![self isOrderedIn] &&
+            !frame_intersects_screens([self frame], screens))
+        {
+            NSScreen* primaryScreen = [screens objectAtIndex:0];
+            NSRect frame = [primaryScreen frame];
+            [self setFrameTopLeftPoint:NSMakePoint(NSMinX(frame), NSMaxY(frame))];
+            frame = [self constrainFrameRect:[self frame] toScreen:primaryScreen];
+            [self setFrame:frame display:YES];
+            [self updateColorSpace];
+        }
+
+        if (activate)
+            [NSApp activateIgnoringOtherApps:YES];
+
+        NSDisableScreenUpdates();
+
+        if (latentParentWindow)
+        {
+            if ([latentParentWindow level] > [self level])
+                [self setLevel:[latentParentWindow level]];
+            [latentParentWindow addChildWindow:self ordered:NSWindowAbove];
+            self.latentParentWindow = nil;
+        }
+        front = [controller frontWineWindow];
+        if (front && [self level] < [front level])
+            [self setLevel:[front level]];
+        [self orderFront:nil];
+        if (!wasVisible && fullscreen && [self isOnActiveSpace])
+            [controller updateFullscreenWindows];
+        [controller adjustWindowLevels];
+
+        if (pendingMinimize)
+        {
+            ignore_windowMiniaturize = TRUE;
+            [self miniaturize:nil];
+            pendingMinimize = FALSE;
+        }
+
+        NSEnableScreenUpdates();
+
+        causing_becomeKeyWindow = TRUE;
         [self makeKeyWindow];
-        causing_becomeKeyWindow = nil;
+        causing_becomeKeyWindow = FALSE;
+
+        if (![self isExcludedFromWindowsMenu])
+            [NSApp addWindowsItem:self title:[self title] filename:NO];
+
+        /* Cocoa may adjust the frame when the window is ordered onto the screen.
+           Generate a frame-changed event just in case.  The back end will ignore
+           it if nothing actually changed. */
+        [self windowDidResize:nil];
     }
 
     - (void) postKey:(uint16_t)keyCode
@@ -1349,40 +1126,8 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [self flagsChanged:theEvent];
         [self postKey:[theEvent keyCode]
               pressed:[theEvent type] == NSKeyDown
-            modifiers:adjusted_modifiers_for_option_behavior([theEvent modifierFlags])
+            modifiers:[theEvent modifierFlags]
                 event:theEvent];
-    }
-
-    - (void) setWineMinSize:(NSSize)minSize maxSize:(NSSize)maxSize
-    {
-        savedContentMinSize = minSize;
-        savedContentMaxSize = maxSize;
-        if (!self.disabled)
-        {
-            [self setContentMinSize:minSize];
-            [self setContentMaxSize:maxSize];
-        }
-    }
-
-    - (WineWindow*) ancestorWineWindow
-    {
-        WineWindow* ancestor = self;
-        for (;;)
-        {
-            WineWindow* parent = (WineWindow*)[ancestor parentWindow];
-            if ([parent isKindOfClass:[WineWindow class]])
-                ancestor = parent;
-            else
-                break;
-        }
-        return ancestor;
-    }
-
-    - (void) postBroughtForwardEvent
-    {
-        macdrv_event* event = macdrv_create_event(WINDOW_BROUGHT_FORWARD, self);
-        [queue postEvent:event];
-        macdrv_release_event(event);
     }
 
 
@@ -1391,7 +1136,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
      */
     - (BOOL) canBecomeKeyWindow
     {
-        if (causing_becomeKeyWindow == self) return YES;
+        if (causing_becomeKeyWindow) return YES;
         if (self.disabled || self.noActivate) return NO;
         return [self isKeyWindow];
     }
@@ -1423,8 +1168,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         if ([menuItem action] == @selector(makeKeyAndOrderFront:))
             ret = [self isKeyWindow] || (!self.disabled && !self.noActivate);
-        if ([menuItem action] == @selector(toggleFullScreen:) && self.disabled)
-            ret = NO;
 
         return ret;
     }
@@ -1432,13 +1175,26 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     /* We don't call this.  It's the action method of the items in the Window menu. */
     - (void) makeKeyAndOrderFront:(id)sender
     {
-        if ([self isMiniaturized])
-            [self deminiaturize:nil];
-        [self orderBelow:nil orAbove:nil activate:NO];
-        [[self ancestorWineWindow] postBroughtForwardEvent];
+        WineApplicationController* controller = [WineApplicationController sharedController];
+        WineWindow* front = [controller frontWineWindow];
+        BOOL wasVisible = [self isVisible];
 
         if (![self isKeyWindow] && !self.disabled && !self.noActivate)
-            [[WineApplicationController sharedController] windowGotFocus:self];
+            [controller windowGotFocus:self];
+
+        if (front && [self level] < [front level])
+            [self setLevel:[front level]];
+        [self orderFront:nil];
+        if (!wasVisible && fullscreen && [self isOnActiveSpace])
+            [controller updateFullscreenWindows];
+        [controller adjustWindowLevels];
+
+        if (pendingMinimize)
+        {
+            ignore_windowMiniaturize = TRUE;
+            [self miniaturize:nil];
+            pendingMinimize = FALSE;
+        }
     }
 
     - (void) sendEvent:(NSEvent*)event
@@ -1451,19 +1207,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             [[self firstResponder] keyDown:event];
         else
             [super sendEvent:event];
-    }
-
-    - (void) miniaturize:(id)sender
-    {
-        macdrv_event* event = macdrv_create_event(WINDOW_MINIMIZE_REQUESTED, self);
-        [queue postEvent:event];
-        macdrv_release_event(event);
-    }
-
-    - (void) toggleFullScreen:(id)sender
-    {
-        if (!self.disabled)
-            [super toggleFullScreen:sender];
     }
 
     // We normally use the generic/calibrated RGB color space for the window,
@@ -1520,7 +1263,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             { NX_DEVICERCMDKEYMASK,     kVK_RightCommand },
         };
 
-        NSUInteger modifierFlags = adjusted_modifiers_for_option_behavior([theEvent modifierFlags]);
+        NSUInteger modifierFlags = [theEvent modifierFlags];
         NSUInteger changed;
         int i, last_changed;
 
@@ -1569,25 +1312,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     /*
      * ---------- NSWindowDelegate methods ----------
      */
-    - (NSSize) window:(NSWindow*)window willUseFullScreenContentSize:(NSSize)proposedSize
-    {
-        macdrv_query* query;
-        NSSize size;
-
-        query = macdrv_create_query();
-        query->type = QUERY_MIN_MAX_INFO;
-        query->window = (macdrv_window)[self retain];
-        [self.queue query:query timeout:0.5];
-        macdrv_release_query(query);
-
-        size = [self contentMaxSize];
-        if (proposedSize.width < size.width)
-            size.width = proposedSize.width;
-        if (proposedSize.height < size.height)
-            size.height = proposedSize.height;
-        return size;
-    }
-
     - (void)windowDidBecomeKey:(NSNotification *)notification
     {
         WineApplicationController* controller = [WineApplicationController sharedController];
@@ -1595,7 +1319,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         if (event)
             [self flagsChanged:event];
 
-        if (causing_becomeKeyWindow == self) return;
+        if (causing_becomeKeyWindow) return;
 
         [controller windowGotFocus:self];
     }
@@ -1605,23 +1329,30 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         WineApplicationController* controller = [WineApplicationController sharedController];
 
         if (!ignore_windowDeminiaturize)
-            [self postDidUnminimizeEvent];
-        ignore_windowDeminiaturize = FALSE;
+        {
+            macdrv_event* event;
 
-        [self becameEligibleParentOrChild];
+            /* Coalesce events by discarding any previous ones still in the queue. */
+            [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_DID_MINIMIZE) |
+                                             event_mask_for_type(WINDOW_DID_UNMINIMIZE)
+                                   forWindow:self];
+
+            event = macdrv_create_event(WINDOW_DID_UNMINIMIZE, self);
+            [queue postEvent:event];
+            macdrv_release_event(event);
+        }
+
+        ignore_windowDeminiaturize = FALSE;
 
         if (fullscreen && [self isOnActiveSpace])
             [controller updateFullscreenWindows];
         [controller adjustWindowLevels];
 
-        if (![self parentWindow])
-            [self postBroughtForwardEvent];
-
         if (!self.disabled && !self.noActivate)
         {
-            causing_becomeKeyWindow = self;
+            causing_becomeKeyWindow = TRUE;
             [self makeKeyWindow];
-            causing_becomeKeyWindow = nil;
+            causing_becomeKeyWindow = FALSE;
             [controller windowGotFocus:self];
         }
 
@@ -1630,36 +1361,9 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (void) windowDidEndLiveResize:(NSNotification *)notification
     {
-        macdrv_event* event = macdrv_create_event(WINDOW_RESIZE_ENDED, self);
-        [queue postEvent:event];
-        macdrv_release_event(event);
-
-        self.liveResizeDisplayTimer = nil;
-    }
-
-    - (void) windowDidEnterFullScreen:(NSNotification*)notification
-    {
-        enteringFullScreen = FALSE;
-        enteredFullScreenTime = [[NSProcessInfo processInfo] systemUptime];
-    }
-
-    - (void) windowDidExitFullScreen:(NSNotification*)notification
-    {
-        exitingFullScreen = FALSE;
-        [self setFrame:nonFullscreenFrame display:YES animate:NO];
-        [self windowDidResize:nil];
-    }
-
-    - (void) windowDidFailToEnterFullScreen:(NSWindow*)window
-    {
-        enteringFullScreen = FALSE;
-        enteredFullScreenTime = 0;
-    }
-
-    - (void) windowDidFailToExitFullScreen:(NSWindow*)window
-    {
-        exitingFullScreen = FALSE;
-        [self windowDidResize:nil];
+        [liveResizeDisplayTimer invalidate];
+        [liveResizeDisplayTimer release];
+        liveResizeDisplayTimer = nil;
     }
 
     - (void)windowDidMiniaturize:(NSNotification *)notification
@@ -1687,16 +1391,16 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     - (void)windowDidResize:(NSNotification *)notification
     {
         macdrv_event* event;
-        NSRect frame = [self contentRectForFrameRect:[self frame]];
-
-        if (exitingFullScreen) return;
+        NSRect frame = [self frame];
 
         if (self.disabled)
         {
-            [self setContentMinSize:frame.size];
-            [self setContentMaxSize:frame.size];
+            NSSize size = frame.size;
+            [self setMinSize:size];
+            [self setMaxSize:size];
         }
 
+        frame = [self contentRectForFrameRect:frame];
         [[WineApplicationController sharedController] flipRect:&frame];
 
         /* Coalesce events by discarding any previous ones still in the queue. */
@@ -1705,8 +1409,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         event = macdrv_create_event(WINDOW_FRAME_CHANGED, self);
         event->window_frame_changed.frame = NSRectToCGRect(frame);
-        event->window_frame_changed.fullscreen = ([self styleMask] & NSFullScreenWindowMask) != 0;
-        event->window_frame_changed.in_resize = [self inLiveResize];
         [queue postEvent:event];
         macdrv_release_event(event);
 
@@ -1722,49 +1424,27 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         return NO;
     }
 
-    - (void) windowWillClose:(NSNotification*)notification
-    {
-        WineWindow* child;
-
-        if (latentParentWindow)
-        {
-            [latentParentWindow->latentChildWindows removeObjectIdenticalTo:self];
-            self.latentParentWindow = nil;
-        }
-
-        for (child in latentChildWindows)
-        {
-            if (child.latentParentWindow == self)
-                child.latentParentWindow = nil;
-        }
-        [latentChildWindows removeAllObjects];
-    }
-
-    - (void) windowWillEnterFullScreen:(NSNotification*)notification
-    {
-        enteringFullScreen = TRUE;
-        nonFullscreenFrame = [self frame];
-    }
-
-    - (void) windowWillExitFullScreen:(NSNotification*)notification
-    {
-        exitingFullScreen = TRUE;
-    }
-
     - (void)windowWillMiniaturize:(NSNotification *)notification
     {
-        [self becameIneligibleParentOrChild];
+        if (!ignore_windowMiniaturize)
+        {
+            macdrv_event* event;
+
+            /* Coalesce events by discarding any previous ones still in the queue. */
+            [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_DID_MINIMIZE) |
+                                             event_mask_for_type(WINDOW_DID_UNMINIMIZE)
+                                   forWindow:self];
+
+            event = macdrv_create_event(WINDOW_DID_MINIMIZE, self);
+            [queue postEvent:event];
+            macdrv_release_event(event);
+        }
+
+        ignore_windowMiniaturize = FALSE;
     }
 
     - (void) windowWillStartLiveResize:(NSNotification *)notification
     {
-        macdrv_query* query = macdrv_create_query();
-        query->type = QUERY_RESIZE_START;
-        query->window = (macdrv_window)[self retain];
-
-        [self.queue query:query timeout:0.3];
-        macdrv_release_query(query);
-
         // There's a strange restriction in window redrawing during Cocoa-
         // managed window resizing.  Only calls to -[NSView setNeedsDisplay...]
         // that happen synchronously when Cocoa tells us that our window size
@@ -1780,54 +1460,15 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         //
         // We address this by "manually" asking our windows to check if they need
         // redrawing every so often (during live resize only).
-        self.liveResizeDisplayTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
-                                                                       target:self
-                                                                     selector:@selector(displayIfNeeded)
-                                                                     userInfo:nil
-                                                                      repeats:YES];
+        [self windowDidEndLiveResize:nil];
+        liveResizeDisplayTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
+                                                                  target:self
+                                                                selector:@selector(displayIfNeeded)
+                                                                userInfo:nil
+                                                                 repeats:YES];
+        [liveResizeDisplayTimer retain];
         [[NSRunLoop currentRunLoop] addTimer:liveResizeDisplayTimer
                                      forMode:NSRunLoopCommonModes];
-    }
-
-    - (NSRect) windowWillUseStandardFrame:(NSWindow*)window defaultFrame:(NSRect)proposedFrame
-    {
-        macdrv_query* query;
-        NSRect currentContentRect, proposedContentRect, newContentRect, screenRect;
-        NSSize maxSize;
-
-        query = macdrv_create_query();
-        query->type = QUERY_MIN_MAX_INFO;
-        query->window = (macdrv_window)[self retain];
-        [self.queue query:query timeout:0.5];
-        macdrv_release_query(query);
-
-        currentContentRect = [self contentRectForFrameRect:[self frame]];
-        proposedContentRect = [self contentRectForFrameRect:proposedFrame];
-
-        maxSize = [self contentMaxSize];
-        newContentRect.size.width = MIN(NSWidth(proposedContentRect), maxSize.width);
-        newContentRect.size.height = MIN(NSHeight(proposedContentRect), maxSize.height);
-
-        // Try to keep the top-left corner where it is.
-        newContentRect.origin.x = NSMinX(currentContentRect);
-        newContentRect.origin.y = NSMaxY(currentContentRect) - NSHeight(newContentRect);
-
-        // If that pushes the bottom or right off the screen, pull it up and to the left.
-        screenRect = [self contentRectForFrameRect:[[self screen] visibleFrame]];
-        if (NSMaxX(newContentRect) > NSMaxX(screenRect))
-            newContentRect.origin.x = NSMaxX(screenRect) - NSWidth(newContentRect);
-        if (NSMinY(newContentRect) < NSMinY(screenRect))
-            newContentRect.origin.y = NSMinY(screenRect);
-
-        // If that pushes the top or left off the screen, push it down and the right
-        // again.  Do this last because the top-left corner is more important than the
-        // bottom-right.
-        if (NSMinX(newContentRect) < NSMinX(screenRect))
-            newContentRect.origin.x = NSMinX(screenRect);
-        if (NSMaxY(newContentRect) > NSMaxY(screenRect))
-            newContentRect.origin.y = NSMaxY(screenRect) - NSHeight(newContentRect);
-
-        return [self frameRectForContentRect:newContentRect];
     }
 
 
@@ -1949,11 +1590,8 @@ void macdrv_destroy_cocoa_window(macdrv_window w)
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     WineWindow* window = (WineWindow*)w;
 
-    OnMainThread(^{
-        [window doOrderOut];
-        [window close];
-    });
     [window.queue discardEventsMatchingMask:-1 forWindow:window];
+    [window close];
     [window release];
 
     [pool release];
@@ -2260,20 +1898,6 @@ void macdrv_give_cocoa_window_focus(macdrv_window w, int activate)
 
     OnMainThread(^{
         [window makeFocused:activate];
-    });
-}
-
-/***********************************************************************
- *              macdrv_set_window_min_max_sizes
- *
- * Sets the window's minimum and maximum content sizes.
- */
-void macdrv_set_window_min_max_sizes(macdrv_window w, CGSize min_size, CGSize max_size)
-{
-    WineWindow* window = (WineWindow*)w;
-
-    OnMainThread(^{
-        [window setWineMinSize:NSSizeFromCGSize(min_size) maxSize:NSSizeFromCGSize(max_size)];
     });
 }
 

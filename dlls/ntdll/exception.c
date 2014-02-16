@@ -81,7 +81,7 @@ void wait_suspend( CONTEXT *context )
 
     /* wait with 0 timeout, will only return once the thread is no longer suspended */
     timeout.QuadPart = 0;
-    server_select( NULL, 0, SELECT_INTERRUPTIBLE, &timeout );
+    NTDLL_wait_for_multiple_objects( 0, NULL, SELECT_INTERRUPTIBLE, &timeout, 0 );
 
     /* retrieve the new context */
     SERVER_START_REQ( get_suspend_context )
@@ -105,10 +105,9 @@ NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTEXT *con
 {
     NTSTATUS ret;
     DWORD i;
-    obj_handle_t handle = 0;
+    HANDLE handle = 0;
     client_ptr_t params[EXCEPTION_MAXIMUM_PARAMETERS];
     context_t server_context;
-    select_op_t select_op;
 
     if (!NtCurrentTeb()->Peb->BeingDebugged) return 0;  /* no debugger present */
 
@@ -127,18 +126,16 @@ NTSTATUS send_debug_event( EXCEPTION_RECORD *rec, int first_chance, CONTEXT *con
         req->len     = i * sizeof(params[0]);
         wine_server_add_data( req, params, req->len );
         wine_server_add_data( req, &server_context, sizeof(server_context) );
-        if (!wine_server_call( req )) handle = reply->handle;
+        if (!wine_server_call( req )) handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     if (!handle) return 0;
 
-    select_op.wait.op = SELECT_WAIT;
-    select_op.wait.handles[0] = handle;
-    server_select( &select_op, offsetof( select_op_t, wait.handles[1] ), SELECT_INTERRUPTIBLE, NULL );
+    NTDLL_wait_for_multiple_objects( 1, &handle, SELECT_INTERRUPTIBLE, NULL, 0 );
 
     SERVER_START_REQ( get_exception_status )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         wine_server_set_reply( req, &server_context, sizeof(server_context) );
         ret = wine_server_call( req );
     }

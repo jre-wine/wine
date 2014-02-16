@@ -74,10 +74,3 @@ BOOL WINAPI ApphelpCheckShellObject( REFCLSID clsid, BOOL shim, ULONGLONG *flags
     if (flags) *flags = 0;
     return TRUE;
 }
-
-BOOL WINAPI ShimFlushCache( HWND hwnd, HINSTANCE instance, LPCSTR cmdline, int cmd )
-{
-    FIXME("stub: %p %p %s %u\n", hwnd, instance, debugstr_a(cmdline), cmd);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return TRUE;
-}

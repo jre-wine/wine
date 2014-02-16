@@ -738,9 +738,9 @@
 @ cdecl -arch=win64 ?_wopen@@YAHPEB_WHH@Z(wstr long long) msvcrt._wopen
 @ cdecl -arch=win32 ?_wsopen@@YAHPB_WHHH@Z(wstr long long long) msvcrt._wsopen
 @ cdecl -arch=win64 ?_wsopen@@YAHPEB_WHHH@Z(wstr long long long) msvcrt._wsopen
-@ cdecl -arch=arm ?before@type_info@@QBA_NABV1@@Z(ptr ptr) msvcrt.?before@type_info@@QBA_NABV1@@Z
-@ thiscall -arch=i386 ?before@type_info@@QBE_NABV1@@Z(ptr ptr) msvcrt.?before@type_info@@QBEHABV1@@Z
-@ cdecl -arch=win64 ?before@type_info@@QEBA_NAEBV1@@Z(ptr ptr) msvcrt.?before@type_info@@QEBAHAEBV1@@Z
+@ stub -arch=arm ?before@type_info@@QBA_NABV1@@Z
+@ stub -arch=i386 ?before@type_info@@QBE_NABV1@@Z
+@ stub -arch=win64 ?before@type_info@@QEBA_NAEBV1@@Z
 @ stub ?current@location@Concurrency@@SA?AV12@XZ
 @ stub ?from_numa_node@location@Concurrency@@SA?AV12@G@Z
 @ stub -arch=arm ?get_error_code@scheduler_resource_allocation_error@Concurrency@@QBAJXZ
@@ -1073,7 +1073,7 @@
 @ cdecl -arch=i386 -norelay _chkesp() msvcrt._chkesp
 @ cdecl _chmod(str long) msvcrt._chmod
 @ cdecl _chsize(long long) msvcrt._chsize
-@ cdecl _chsize_s(long int64) msvcrt._chsize_s
+@ stub _chsize_s
 @ cdecl _clearfp() msvcrt._clearfp
 @ cdecl _close(long) msvcrt._close
 @ cdecl _commit(long) msvcrt._commit
@@ -1385,17 +1385,17 @@
 @ cdecl _kbhit() msvcrt._kbhit
 @ cdecl _lfind(ptr ptr ptr long ptr) msvcrt._lfind
 @ stub _lfind_s
-@ cdecl -arch=i386  _libm_sse2_acos_precise() msvcrt.__libm_sse2_acos
-@ cdecl -arch=i386  _libm_sse2_asin_precise() msvcrt.__libm_sse2_asin
-@ cdecl -arch=i386  _libm_sse2_atan_precise() msvcrt.__libm_sse2_atan
-@ cdecl -arch=i386  _libm_sse2_cos_precise() msvcrt.__libm_sse2_cos
-@ cdecl -arch=i386  _libm_sse2_exp_precise() msvcrt.__libm_sse2_exp
-@ cdecl -arch=i386  _libm_sse2_log10_precise() msvcrt.__libm_sse2_log10
-@ cdecl -arch=i386  _libm_sse2_log_precise() msvcrt.__libm_sse2_log
-@ cdecl -arch=i386  _libm_sse2_pow_precise() msvcrt.__libm_sse2_pow
-@ cdecl -arch=i386  _libm_sse2_sin_precise() msvcrt.__libm_sse2_sin
+@ stub -arch=i386  _libm_sse2_acos_precise
+@ stub -arch=i386  _libm_sse2_asin_precise
+@ stub -arch=i386  _libm_sse2_atan_precise
+@ stub -arch=i386  _libm_sse2_cos_precise
+@ stub -arch=i386  _libm_sse2_exp_precise
+@ stub -arch=i386  _libm_sse2_log10_precise
+@ stub -arch=i386  _libm_sse2_log_precise
+@ stub -arch=i386  _libm_sse2_pow_precise
+@ stub -arch=i386  _libm_sse2_sin_precise
 @ stub -arch=i386  _libm_sse2_sqrt_precise
-@ cdecl -arch=i386  _libm_sse2_tan_precise() msvcrt.__libm_sse2_tan
+@ stub -arch=i386  _libm_sse2_tan_precise
 @ cdecl _loaddll(str) msvcrt._loaddll
 @ cdecl -arch=x86_64 _local_unwind(ptr ptr) msvcrt._local_unwind
 @ cdecl -arch=i386 _local_unwind2(ptr long) msvcrt._local_unwind2
@@ -1658,7 +1658,7 @@
 @ varargs _snwprintf(ptr long wstr) msvcrt._snwprintf
 @ varargs _snwprintf_l(ptr long wstr ptr) msvcrt._snwprintf_l
 @ varargs _snwprintf_s(ptr long long wstr) msvcrt._snwprintf_s
-@ varargs _snwprintf_s_l(ptr long long wstr ptr) msvcrt._snwprintf_s_l
+@ stub _snwprintf_s_l
 @ varargs _snwscanf(wstr long wstr) msvcrt._snwscanf
 @ varargs _snwscanf_l(wstr long wstr ptr) msvcrt._snwscanf_l
 @ varargs _snwscanf_s(wstr long wstr) msvcrt._snwscanf_s
@@ -2011,7 +2011,7 @@
 @ cdecl exp(double) msvcrt.exp
 @ cdecl -arch=arm,x86_64 expf(float) msvcrt.expf
 @ cdecl fabs(double) msvcrt.fabs
-@ cdecl -arch=arm,x86_64 fabsf(float) msvcrt.fabsf
+@ stub -arch=arm fabsf
 @ cdecl fclose(ptr) msvcrt.fclose
 @ cdecl feof(ptr) msvcrt.feof
 @ cdecl ferror(ptr) msvcrt.ferror

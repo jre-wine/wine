@@ -106,7 +106,6 @@ static const addon_info_t *addon;
 
 static HWND install_dialog = NULL;
 static LPWSTR url = NULL;
-static IBinding *dwl_binding;
 
 static WCHAR * (CDECL *p_wine_get_dos_file_name)(const char*);
 static const WCHAR kernel32_dllW[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
@@ -185,8 +184,6 @@ enum install_res {
 static enum install_res install_file(const WCHAR *file_name)
 {
     ULONG res;
-
-    EnableWindow(GetDlgItem(install_dialog, IDCANCEL), 0);
 
     res = MsiInstallProductW(file_name, NULL);
     if(res != ERROR_SUCCESS) {
@@ -440,10 +437,6 @@ static HRESULT WINAPI InstallCallback_OnStartBinding(IBindStatusCallback *iface,
         DWORD dwReserved, IBinding *pib)
 {
     set_status(IDS_DOWNLOADING);
-
-    IBinding_AddRef(pib);
-    dwl_binding = pib;
-
     return S_OK;
 }
 
@@ -475,16 +468,8 @@ static HRESULT WINAPI InstallCallback_OnProgress(IBindStatusCallback *iface, ULO
 static HRESULT WINAPI InstallCallback_OnStopBinding(IBindStatusCallback *iface,
         HRESULT hresult, LPCWSTR szError)
 {
-    if(dwl_binding) {
-        IBinding_Release(dwl_binding);
-        dwl_binding = NULL;
-    }
-
     if(FAILED(hresult)) {
-        if(hresult == E_ABORT)
-            TRACE("Binding aborted\n");
-        else
-            ERR("Binding failed %08x\n", hresult);
+        ERR("Binding failed %08x\n", hresult);
         return S_OK;
     }
 
@@ -675,14 +660,13 @@ static INT_PTR CALLBACK installer_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     case WM_COMMAND:
         switch(wParam) {
         case IDCANCEL:
-            if(dwl_binding)
-                IBinding_Abort(dwl_binding);
             EndDialog(hwnd, 0);
             return FALSE;
 
         case ID_DWL_INSTALL:
             ShowWindow(GetDlgItem(hwnd, ID_DWL_PROGRESS), SW_SHOW);
             EnableWindow(GetDlgItem(hwnd, ID_DWL_INSTALL), 0);
+            EnableWindow(GetDlgItem(hwnd, IDCANCEL), 0); /* FIXME */
             CloseHandle( CreateThread(NULL, 0, download_proc, NULL, 0, NULL));
             return FALSE;
         }

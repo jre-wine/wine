@@ -129,7 +129,7 @@
 @ stdcall NtCreateJobObject(ptr long ptr)
 # @ stub NtCreateJobSet
 @ stdcall NtCreateKey(ptr long ptr long ptr long long)
-@ stdcall NtCreateKeyedEvent(ptr long ptr long)
+# @ stub NtCreateKeyedEvent
 @ stdcall NtCreateMailslotFile(long long long long long long long long)
 @ stdcall NtCreateMutant(ptr long ptr long)
 @ stdcall NtCreateNamedPipeFile(ptr long ptr ptr long long long long long long long long long ptr)
@@ -212,7 +212,7 @@
 @ stdcall NtOpenIoCompletion(ptr long ptr)
 @ stdcall NtOpenJobObject(ptr long ptr)
 @ stdcall NtOpenKey(ptr long ptr)
-@ stdcall NtOpenKeyedEvent(ptr long ptr)
+# @ stub NtOpenKeyedEvent
 @ stdcall NtOpenMutant(ptr long ptr)
 @ stub NtOpenObjectAuditAlarm
 @ stdcall NtOpenProcess(ptr long ptr ptr)
@@ -283,7 +283,7 @@
 @ stdcall NtReadVirtualMemory(long ptr ptr long ptr)
 @ stub NtRegisterNewDevice
 @ stdcall NtRegisterThreadTerminatePort(ptr)
-@ stdcall NtReleaseKeyedEvent(long ptr long ptr)
+# @ stub NtReleaseKeyedEvent
 @ stdcall NtReleaseMutant(long ptr)
 @ stub NtReleaseProcessMutant
 @ stdcall NtReleaseSemaphore(long long ptr)
@@ -370,7 +370,7 @@
 @ stub NtVdmControl
 @ stub NtW32Call
 # @ stub NtWaitForDebugEvent
-@ stdcall NtWaitForKeyedEvent(long ptr long ptr)
+# @ stub NtWaitForKeyedEvent
 @ stdcall NtWaitForMultipleObjects(long ptr long long ptr)
 @ stub NtWaitForProcessMutant
 @ stdcall NtWaitForSingleObject(long long long)
@@ -568,6 +568,7 @@
 @ stdcall RtlEqualString(ptr ptr long)
 @ stdcall RtlEqualUnicodeString(ptr ptr long)
 @ stdcall RtlEraseUnicodeString(ptr)
+@ stdcall RtlExitUserProcess(long)
 @ stdcall RtlExitUserThread(long)
 @ stdcall RtlExpandEnvironmentStrings_U(ptr ptr ptr ptr)
 @ stub RtlExtendHeap
@@ -577,7 +578,7 @@
 @ stdcall RtlFillMemory(ptr long long)
 @ stdcall RtlFillMemoryUlong(ptr long long)
 @ stub RtlFinalReleaseOutOfProcessMemoryStream
-@ stub RtlFindActivationContextSectionGuid
+@ stdcall RtlFindActivationContextSectionGuid(long ptr long ptr ptr)
 @ stdcall RtlFindActivationContextSectionString(long ptr long ptr ptr)
 @ stdcall RtlFindCharInUnicodeString(long ptr ptr ptr)
 @ stdcall RtlFindClearBits(ptr long long)
@@ -650,7 +651,7 @@
 @ stub RtlGetUserInfoHeap
 @ stdcall RtlGetVersion(ptr)
 @ stub RtlGuidToPropertySetName
-# @ stub RtlHashUnicodeString
+@ stdcall RtlHashUnicodeString(ptr long long ptr)
 @ stdcall RtlIdentifierAuthoritySid(ptr)
 @ stdcall RtlImageDirectoryEntryToData(long long long ptr)
 @ stdcall RtlImageNtHeader(long)
@@ -815,9 +816,6 @@
 @ stub RtlRevertMemoryStream
 @ stub RtlRunDecodeUnicodeString
 @ stub RtlRunEncodeUnicodeString
-@ stdcall RtlRunOnceBeginInitialize(ptr long ptr)
-@ stdcall RtlRunOnceComplete(ptr long ptr)
-@ stdcall RtlRunOnceExecuteOnce(ptr ptr ptr ptr)
 @ stdcall RtlRunOnceInitialize(ptr)
 @ stdcall RtlSecondsSince1970ToTime(long ptr)
 @ stdcall RtlSecondsSince1980ToTime(long ptr)
@@ -941,7 +939,7 @@
 @ stdcall RtlpNtEnumerateSubKey(ptr ptr long)
 @ stdcall RtlpNtMakeTemporaryKey(ptr)
 @ stdcall RtlpNtOpenKey(ptr long ptr)
-@ stdcall RtlpNtQueryValueKey(long ptr ptr ptr ptr)
+@ stdcall RtlpNtQueryValueKey(long ptr ptr ptr)
 @ stdcall RtlpNtSetValueKey(ptr long ptr long)
 @ stdcall RtlpUnWaitCriticalSection(ptr)
 @ stdcall RtlpWaitForCriticalSection(ptr)
@@ -993,7 +991,7 @@
 @ stdcall ZwCreateJobObject(ptr long ptr) NtCreateJobObject
 # @ stub ZwCreateJobSet
 @ stdcall ZwCreateKey(ptr long ptr long ptr long long) NtCreateKey
-@ stdcall ZwCreateKeyedEvent(ptr long ptr long) NtCreateKeyedEvent
+# @ stub ZwCreateKeyedEvent
 @ stdcall ZwCreateMailslotFile(long long long long long long long long) NtCreateMailslotFile
 @ stdcall ZwCreateMutant(ptr long ptr long) NtCreateMutant
 @ stdcall ZwCreateNamedPipeFile(ptr long ptr ptr long long long long long long long long long ptr) NtCreateNamedPipeFile
@@ -1074,7 +1072,7 @@
 @ stdcall ZwOpenIoCompletion(ptr long ptr) NtOpenIoCompletion
 @ stdcall ZwOpenJobObject(ptr long ptr) NtOpenJobObject
 @ stdcall ZwOpenKey(ptr long ptr) NtOpenKey
-@ stdcall ZwOpenKeyedEvent(ptr long ptr) NtOpenKeyedEvent
+# @ stub ZwOpenKeyedEvent
 @ stdcall ZwOpenMutant(ptr long ptr) NtOpenMutant
 @ stub ZwOpenObjectAuditAlarm
 @ stdcall ZwOpenProcess(ptr long ptr ptr) NtOpenProcess
@@ -1145,7 +1143,7 @@
 @ stdcall ZwReadVirtualMemory(long ptr ptr long ptr) NtReadVirtualMemory
 @ stub ZwRegisterNewDevice
 @ stdcall ZwRegisterThreadTerminatePort(ptr) NtRegisterThreadTerminatePort
-@ stdcall ZwReleaseKeyedEvent(long ptr long ptr) NtReleaseKeyedEvent
+# @ stub ZwReleaseKeyedEvent
 @ stdcall ZwReleaseMutant(long ptr) NtReleaseMutant
 @ stub ZwReleaseProcessMutant
 @ stdcall ZwReleaseSemaphore(long long ptr) NtReleaseSemaphore
@@ -1232,7 +1230,7 @@
 @ stub ZwVdmControl
 @ stub ZwW32Call
 # @ stub ZwWaitForDebugEvent
-@ stdcall ZwWaitForKeyedEvent(long ptr long ptr) NtWaitForKeyedEvent
+# @ stub ZwWaitForKeyedEvent
 @ stdcall ZwWaitForMultipleObjects(long ptr long long ptr) NtWaitForMultipleObjects
 @ stub ZwWaitForProcessMutant
 @ stdcall ZwWaitForSingleObject(long long long) NtWaitForSingleObject
