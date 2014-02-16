@@ -9,8 +9,6 @@ PROGRAMS = \
 	wine \
 	wine-installed \
 	wine-preloader \
-	wine.inf \
-	wine_info.plist \
 	wine64 \
 	wine64-preloader
 
@@ -19,6 +17,10 @@ MANPAGES = \
 	wine.fr.UTF-8.man.in \
 	wine.man.in \
 	wine.pl.UTF-8.man.in
+
+IN_SRCS = \
+	wine.inf.in \
+	wine_info.plist.in
 
 INSTALLDIRS = \
 	$(DESTDIR)$(bindir) \
