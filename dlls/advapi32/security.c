@@ -611,9 +611,8 @@ AdjustTokenPrivileges( HANDLE TokenHandle, BOOL DisableAllPrivileges,
 {
     NTSTATUS status;
 
-    TRACE("(%p %d %p %d %p %p)\n", TokenHandle, DisableAllPrivileges, NewState, BufferLength,
-        PreviousState, ReturnLength);
-
+    TRACE("\n");
+    
     status = NtAdjustPrivilegesToken(TokenHandle, DisableAllPrivileges,
                                                      NewState, BufferLength, PreviousState,
                                                      ReturnLength);

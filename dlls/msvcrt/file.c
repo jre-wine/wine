@@ -65,7 +65,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #define WX_PIPE           0x08
 #define WX_DONTINHERIT    0x10
 #define WX_APPEND         0x20
-#define WX_NOSEEK         0x40
 #define WX_TEXT           0x80
 
 /* values for exflag - it's used differently in msvcr90.dll*/
@@ -348,7 +347,7 @@ static int msvcrt_set_fd(HANDLE hand, int flag, int fd)
   }
 
   fdinfo->handle = hand;
-  fdinfo->wxflag = WX_OPEN | (flag & (WX_DONTINHERIT | WX_APPEND | WX_TEXT | WX_PIPE | WX_NOSEEK));
+  fdinfo->wxflag = WX_OPEN | (flag & (WX_DONTINHERIT | WX_APPEND | WX_TEXT | WX_PIPE));
   fdinfo->lookahead[0] = '\n';
   fdinfo->lookahead[1] = '\n';
   fdinfo->lookahead[2] = '\n';
@@ -516,31 +515,16 @@ void msvcrt_init_io(void)
   }
 
   fdinfo = msvcrt_get_ioinfo(MSVCRT_STDIN_FILENO);
-  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE) {
-    HANDLE h = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD type = GetFileType(h);
-
-    msvcrt_set_fd(h, WX_OPEN|WX_TEXT|((type&0xf)==FILE_TYPE_CHAR ? WX_NOSEEK : 0)
-            |((type&0xf)==FILE_TYPE_PIPE ? WX_PIPE : 0), MSVCRT_STDIN_FILENO);
-  }
+  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
+    msvcrt_set_fd(GetStdHandle(STD_INPUT_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDIN_FILENO);
 
   fdinfo = msvcrt_get_ioinfo(MSVCRT_STDOUT_FILENO);
-  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE) {
-    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD type = GetFileType(h);
-
-    msvcrt_set_fd(h, WX_OPEN|WX_TEXT|((type&0xf)==FILE_TYPE_CHAR ? WX_NOSEEK : 0)
-            |((type&0xf)==FILE_TYPE_PIPE ? WX_PIPE : 0), MSVCRT_STDOUT_FILENO);
-  }
+  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
+    msvcrt_set_fd(GetStdHandle(STD_OUTPUT_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDOUT_FILENO);
 
   fdinfo = msvcrt_get_ioinfo(MSVCRT_STDERR_FILENO);
-  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE) {
-    HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
-    DWORD type = GetFileType(h);
-
-    msvcrt_set_fd(h, WX_OPEN|WX_TEXT|((type&0xf)==FILE_TYPE_CHAR ? WX_NOSEEK : 0)
-            |((type&0xf)==FILE_TYPE_PIPE ? WX_PIPE : 0), MSVCRT_STDERR_FILENO);
-  }
+  if (!(fdinfo->wxflag & WX_OPEN) || fdinfo->handle == INVALID_HANDLE_VALUE)
+    msvcrt_set_fd(GetStdHandle(STD_ERROR_HANDLE), WX_OPEN|WX_TEXT, MSVCRT_STDERR_FILENO);
 
   TRACE(":handles (%p)(%p)(%p)\n", msvcrt_get_ioinfo(MSVCRT_STDIN_FILENO)->handle,
         msvcrt_get_ioinfo(MSVCRT_STDOUT_FILENO)->handle,
@@ -715,12 +699,10 @@ int CDECL MSVCRT__access(const char *filename, int mode)
  */
 int CDECL _access_s(const char *filename, int mode)
 {
-  if (!MSVCRT_CHECK_PMT(filename != NULL)) return *MSVCRT__errno();
-  if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return *MSVCRT__errno();
+  if (!MSVCRT_CHECK_PMT(filename != NULL)) return -1;
+  if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return -1;
 
-  if (MSVCRT__access(filename, mode) == -1)
-    return *MSVCRT__errno();
-  return 0;
+  return MSVCRT__access(filename, mode);
 }
 
 /*********************************************************************
@@ -750,12 +732,10 @@ int CDECL MSVCRT__waccess(const MSVCRT_wchar_t *filename, int mode)
  */
 int CDECL _waccess_s(const MSVCRT_wchar_t *filename, int mode)
 {
-  if (!MSVCRT_CHECK_PMT(filename != NULL)) return *MSVCRT__errno();
-  if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return *MSVCRT__errno();
+  if (!MSVCRT_CHECK_PMT(filename != NULL)) return -1;
+  if (!MSVCRT_CHECK_PMT((mode & ~(MSVCRT_R_OK | MSVCRT_W_OK)) == 0)) return -1;
 
-  if (MSVCRT__waccess(filename, mode) == -1)
-    return *MSVCRT__errno();
-  return 0;
+  return MSVCRT__waccess(filename, mode);
 }
 
 /*********************************************************************
@@ -1259,17 +1239,15 @@ int CDECL MSVCRT_fseek(MSVCRT_FILE* file, MSVCRT_long offset, int whence)
 }
 
 /*********************************************************************
- *		_chsize_s (MSVCRT.@)
+ *		_chsize (MSVCRT.@)
  */
-int CDECL MSVCRT__chsize_s(int fd, __int64 size)
+int CDECL MSVCRT__chsize(int fd, MSVCRT_long size)
 {
-    __int64 cur, pos;
+    LONG cur, pos;
     HANDLE handle;
     BOOL ret = FALSE;
 
-    TRACE("(fd=%d, size=%s)\n", fd, wine_dbgstr_longlong(size));
-
-    if (!MSVCRT_CHECK_PMT(size >= 0)) return MSVCRT_EINVAL;
+    TRACE("(fd=%d, size=%d)\n", fd, size);
 
     LOCK_FILES();
 
@@ -1277,10 +1255,10 @@ int CDECL MSVCRT__chsize_s(int fd, __int64 size)
     if (handle != INVALID_HANDLE_VALUE)
     {
         /* save the current file pointer */
-        cur = MSVCRT__lseeki64(fd, 0, SEEK_CUR);
+        cur = MSVCRT__lseek(fd, 0, SEEK_CUR);
         if (cur >= 0)
         {
-            pos = MSVCRT__lseeki64(fd, size, SEEK_SET);
+            pos = MSVCRT__lseek(fd, size, SEEK_SET);
             if (pos >= 0)
             {
                 ret = SetEndOfFile(handle);
@@ -1288,21 +1266,12 @@ int CDECL MSVCRT__chsize_s(int fd, __int64 size)
             }
 
             /* restore the file pointer */
-            MSVCRT__lseeki64(fd, cur, SEEK_SET);
+            MSVCRT__lseek(fd, cur, SEEK_SET);
         }
     }
 
     UNLOCK_FILES();
-    return ret ? 0 : *MSVCRT__errno();
-}
-
-/*********************************************************************
- *		_chsize (MSVCRT.@)
- */
-int CDECL MSVCRT__chsize(int fd, MSVCRT_long size)
-{
-    /* _chsize_s returns errno on failure but _chsize should return -1 */
-    return MSVCRT__chsize_s( fd, size ) == 0 ? 0 : -1;
+    return ret ? 0 : -1;
 }
 
 /*********************************************************************
@@ -1395,8 +1364,8 @@ static int msvcrt_get_flags(const MSVCRT_wchar_t* mode, int *open_flags, int* st
       FIXME("ignoring cache optimization flag: %c\n", mode[-1]);
       break;
     default:
-      ERR("incorrect mode flag: %c\n", mode[-1]);
-      break;
+      MSVCRT_INVALID_PMT(0, MSVCRT_EINVAL);
+      return -1;
     }
 
   if(*mode == ',')
@@ -2374,7 +2343,7 @@ static int read_utf8(int fd, MSVCRT_wchar_t *buf, unsigned int count)
                 buf[0] = '\n';
             else {
                 buf[0] = '\r';
-                if(fdinfo->wxflag & (WX_PIPE | WX_NOSEEK))
+                if(fdinfo->wxflag & WX_PIPE)
                     fdinfo->lookahead[0] = lookahead;
                 else
                     SetFilePointer(fdinfo->handle, -1, NULL, FILE_CURRENT);
@@ -2422,7 +2391,7 @@ static int read_utf8(int fd, MSVCRT_wchar_t *buf, unsigned int count)
     if(char_len+i <= pos)
         i += char_len;
 
-    if(fdinfo->wxflag & (WX_PIPE | WX_NOSEEK)) {
+    if(fdinfo->wxflag & WX_PIPE) {
         if(i < pos)
             fdinfo->lookahead[0] = readbuf[i];
         if(i+1 < pos)
@@ -2450,7 +2419,7 @@ static int read_utf8(int fd, MSVCRT_wchar_t *buf, unsigned int count)
                 if(lookahead != '\n')
                     readbuf[j++] = '\r';
 
-                if(fdinfo->wxflag & (WX_PIPE | WX_NOSEEK))
+                if(fdinfo->wxflag & WX_PIPE)
                     fdinfo->lookahead[0] = lookahead;
                 else
                     SetFilePointer(fdinfo->handle, -1, NULL, FILE_CURRENT);
@@ -2584,18 +2553,10 @@ static int read_i(int fd, void *buf, unsigned int count)
                                 if(utf16) bufstart[j++] = 0;
                             }
 
-                            if (fdinfo->wxflag & (WX_PIPE | WX_NOSEEK))
+                            if (fdinfo->wxflag & WX_PIPE)
                             {
-                                if (lookahead[0]=='\n' && (!utf16 || !lookahead[1]))
-                                {
-                                    bufstart[j++] = '\n';
-                                    if (utf16) bufstart[j++] = 0;
-                                }
-                                else
-                                {
-                                    fdinfo->lookahead[0] = lookahead[0];
-                                    fdinfo->lookahead[1] = lookahead[1];
-                                }
+                                fdinfo->lookahead[0] = lookahead[0];
+                                fdinfo->lookahead[1] = lookahead[1];
                             }
                             else
                                 SetFilePointer(fdinfo->handle, -1-utf16, NULL, FILE_CURRENT);
@@ -2695,8 +2656,7 @@ int CDECL MSVCRT_stat64(const char* path, struct MSVCRT__stat64 * buf)
   while (plen && path[plen-1]==' ')
     plen--;
 
-  if (plen && (plen<2 || path[plen-2]!=':') &&
-          (path[plen-1]==':' || path[plen-1]=='\\' || path[plen-1]=='/'))
+  if (plen && (path[plen-1]=='\\' || path[plen-1]=='/'))
   {
     *MSVCRT__errno() = MSVCRT_ENOENT;
     return -1;
@@ -2796,8 +2756,7 @@ int CDECL MSVCRT__wstat64(const MSVCRT_wchar_t* path, struct MSVCRT__stat64 * bu
   while (plen && path[plen-1]==' ')
     plen--;
 
-  if(plen && (plen<2 || path[plen-2]!=':') &&
-          (path[plen-1]==':' || path[plen-1]=='\\' || path[plen-1]=='/'))
+  if(plen && (path[plen-1]=='\\' || path[plen-1]=='/'))
   {
     *MSVCRT__errno() = MSVCRT_ENOENT;
     return -1;

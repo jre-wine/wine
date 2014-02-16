@@ -680,7 +680,7 @@ ME_StreamOutRTFCharProps(ME_OutStream *pStream, CHARFORMAT2W *fmt)
           break;
         case CFU_UNDERLINENONE:
         default:
-          strcat(props, "\\ulnone");
+          strcat(props, "\\ul0");
           break;
       }
     else if (fmt->dwEffects & CFE_UNDERLINE)

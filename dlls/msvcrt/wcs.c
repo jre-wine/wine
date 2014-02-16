@@ -86,14 +86,6 @@ INT CDECL MSVCRT__wcsicmp( const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* str
 }
 
 /*********************************************************************
- *              _wcsnicmp (MSVCRT.@)
- */
-INT CDECL MSVCRT__wcsnicmp(const MSVCRT_wchar_t *str1, const MSVCRT_wchar_t *str2, INT n)
-{
-    return strncmpiW(str1, str2, n);
-}
-
-/*********************************************************************
  *              _wcsicoll_l (MSVCRT.@)
  */
 int CDECL MSVCRT__wcsicoll_l(const MSVCRT_wchar_t* str1, const MSVCRT_wchar_t* str2, MSVCRT__locale_t locale)
@@ -407,10 +399,8 @@ static MSVCRT_size_t CDECL MSVCRT_wcsrtombs_l(char *mbstr, const MSVCRT_wchar_t 
     if(!mbstr) {
         tmp = WideCharToMultiByte(locinfo->lc_codepage, WC_NO_BEST_FIT_CHARS,
                 *wcstr, -1, NULL, 0, NULL, &used_default)-1;
-        if(!tmp || used_default) {
-            *MSVCRT__errno() = MSVCRT_EILSEQ;
+        if(used_default)
             return -1;
-        }
         return tmp;
     }
 
@@ -420,10 +410,8 @@ static MSVCRT_size_t CDECL MSVCRT_wcsrtombs_l(char *mbstr, const MSVCRT_wchar_t 
 
         size = WideCharToMultiByte(locinfo->lc_codepage, WC_NO_BEST_FIT_CHARS,
                 *wcstr, 1, buf, 3, NULL, &used_default);
-        if(!size || used_default) {
-            *MSVCRT__errno() = MSVCRT_EILSEQ;
+        if(used_default)
             return -1;
-        }
         if(tmp+size > count)
             return tmp;
 
@@ -480,8 +468,6 @@ static int MSVCRT_wcsrtombs_s_l(MSVCRT_size_t *ret, char *mbstr,
 
     if(!mbstr && !size && wcstr) {
         conv = MSVCRT_wcsrtombs_l(NULL, wcstr, 0, locale);
-        if(conv == -1)
-            return *MSVCRT__errno();
         if(ret)
             *ret = conv+1;
         return 0;
@@ -498,11 +484,7 @@ static int MSVCRT_wcsrtombs_s_l(MSVCRT_size_t *ret, char *mbstr,
         conv = count;
 
     conv = MSVCRT_wcsrtombs_l(mbstr, wcstr, conv, locale);
-    if(conv == -1) {
-        if(size)
-            mbstr[0] = '\0';
-        return *MSVCRT__errno();
-    }else if(conv < size)
+    if(conv<size)
         mbstr[conv++] = '\0';
     else if(conv==size && (count==MSVCRT__TRUNCATE || mbstr[conv-1]=='\0'))
         mbstr[conv-1] = '\0';
@@ -888,20 +870,6 @@ int CDECL MSVCRT__snwprintf_s( MSVCRT_wchar_t *str, unsigned int len, unsigned i
     __ms_va_list valist;
     __ms_va_start(valist, format);
     retval = MSVCRT_vsnwprintf_s_l(str, len, count, format, NULL, valist);
-    __ms_va_end(valist);
-    return retval;
-}
-
-/*********************************************************************
- *              _snwprintf_s_l (MSVCRT.@)
- */
-int CDECL MSVCRT__snwprintf_s_l( MSVCRT_wchar_t *str, unsigned int len, unsigned int count,
-        const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, ... )
-{
-    int retval;
-    __ms_va_list valist;
-    __ms_va_start(valist, locale);
-    retval = MSVCRT_vsnwprintf_s_l(str, len, count, format, locale, valist);
     __ms_va_end(valist);
     return retval;
 }

@@ -2126,24 +2126,6 @@ static void WINAPI WS2_GetAcceptExSockaddrs(PVOID buffer, DWORD data_size, DWORD
 }
 
 /***********************************************************************
- *     WSASendMsg
- */
-int WINAPI WSASendMsg( SOCKET s, LPWSAMSG msg, DWORD dwFlags, LPDWORD lpNumberOfBytesSent,
-                       LPWSAOVERLAPPED lpOverlapped,
-                       LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
-{
-    if (!msg)
-    {
-        SetLastError( WSAEFAULT );
-        return SOCKET_ERROR;
-    }
-
-    return WS2_sendto( s, msg->lpBuffers, msg->dwBufferCount, lpNumberOfBytesSent,
-                       dwFlags, msg->name, msg->namelen,
-                       lpOverlapped, lpCompletionRoutine );
-}
-
-/***********************************************************************
  *     WSARecvMsg
  *
  * Perform a receive operation that is capable of returning message
@@ -3558,8 +3540,7 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
         }
         else if ( IsEqualGUID(&wsasendmsg_guid, in_buff) )
         {
-            *(LPFN_WSASENDMSG *)out_buff = WSASendMsg;
-            break;
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented WSASendMsg\n");
         }
         else
             FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER %s: stub\n", debugstr_guid(in_buff));
@@ -3714,23 +3695,36 @@ int WINAPI WS_ioctlsocket(SOCKET s, LONG cmd, WS_u_long *argp)
  */
 int WINAPI WS_listen(SOCKET s, int backlog)
 {
-    int fd = get_sock_fd( s, FILE_READ_DATA, NULL );
+    int fd = get_sock_fd( s, FILE_READ_DATA, NULL ), ret = SOCKET_ERROR;
 
     TRACE("socket %04lx, backlog %d\n", s, backlog);
     if (fd != -1)
     {
-	if (listen(fd, backlog) == 0)
-	{
-            release_sock_fd( s, fd );
-	    _enable_event(SOCKET2HANDLE(s), FD_ACCEPT,
-			  FD_WINE_LISTENING,
-			  FD_CONNECT|FD_WINE_CONNECTED);
-	    return 0;
-	}
-	SetLastError(wsaErrno());
+        union generic_unix_sockaddr uaddr;
+        socklen_t uaddrlen = sizeof(uaddr);
+
+        if (getsockname(fd, &uaddr.addr, &uaddrlen) != 0)
+        {
+            SetLastError(wsaErrno());
+        }
+        else if (!is_sockaddr_bound(&uaddr.addr, uaddrlen))
+        {
+            SetLastError(WSAEINVAL);
+        }
+        else if (listen(fd, backlog) == 0)
+        {
+            _enable_event(SOCKET2HANDLE(s), FD_ACCEPT,
+                          FD_WINE_LISTENING,
+                          FD_CONNECT|FD_WINE_CONNECTED);
+            ret = 0;
+        }
+        else
+            SetLastError(wsaErrno());
         release_sock_fd( s, fd );
     }
-    return SOCKET_ERROR;
+    else
+        SetLastError(WSAENOTSOCK);
+    return ret;
 }
 
 /***********************************************************************
@@ -5556,9 +5550,6 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
 
    TRACE("af=%d type=%d protocol=%d protocol_info=%p group=%d flags=0x%x\n",
          af, type, protocol, lpProtocolInfo, g, dwFlags );
-
-    if (!num_startup)
-        return WSANOTINITIALISED;
 
     /* hack for WSADuplicateSocket */
     if (lpProtocolInfo && lpProtocolInfo->dwServiceFlags4 == 0xff00ff00) {

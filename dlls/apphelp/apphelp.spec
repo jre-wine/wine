@@ -164,4 +164,4 @@
 @ stub SetPermLayers
 @ stub ShimDbgPrint
 @ stub ShimDumpCache
-@ stdcall ShimFlushCache(ptr ptr str long)
+@ stub ShimFlushCache

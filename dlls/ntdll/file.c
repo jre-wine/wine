@@ -66,9 +66,6 @@
 #ifdef HAVE_SYS_STATFS_H
 # include <sys/statfs.h>
 #endif
-#ifdef HAVE_TERMIOS_H
-#include <termios.h>
-#endif
 #ifdef HAVE_VALGRIND_MEMCHECK_H
 # include <valgrind/memcheck.h>
 #endif
@@ -1491,7 +1488,6 @@ NTSTATUS WINAPI NtFsControlFile(HANDLE handle, HANDLE event, PIO_APC_ROUTINE apc
         status = RtlImpersonateSelf( SecurityImpersonation );
         break;
 
-    case FSCTL_IS_VOLUME_MOUNTED:
     case FSCTL_LOCK_VOLUME:
     case FSCTL_UNLOCK_VOLUME:
         FIXME("stub! return success - Unsupported fsctl %x (device=%x access=%x func=%x method=%x)\n",
@@ -2753,32 +2749,19 @@ NTSTATUS WINAPI NtFlushBuffersFile( HANDLE hFile, IO_STATUS_BLOCK* IoStatusBlock
 {
     NTSTATUS ret;
     HANDLE hEvent = NULL;
-    enum server_fd_type type;
-    int fd, needs_close;
 
-    ret = server_get_unix_fd( hFile, FILE_WRITE_DATA, &fd, &needs_close, &type, NULL );
-
-    if (!ret && type == FD_TYPE_SERIAL)
+    SERVER_START_REQ( flush_file )
     {
-        ret = COMM_FlushBuffersFile( fd );
+        req->handle = wine_server_obj_handle( hFile );
+        ret = wine_server_call( req );
+        hEvent = wine_server_ptr_handle( reply->event );
     }
-    else
+    SERVER_END_REQ;
+    if (!ret && hEvent)
     {
-        SERVER_START_REQ( flush_file )
-        {
-            req->handle = wine_server_obj_handle( hFile );
-            ret = wine_server_call( req );
-            hEvent = wine_server_ptr_handle( reply->event );
-        }
-        SERVER_END_REQ;
-        if (!ret && hEvent)
-        {
-            ret = NtWaitForSingleObject( hEvent, FALSE, NULL );
-            NtClose( hEvent );
-        }
+        ret = NtWaitForSingleObject( hEvent, FALSE, NULL );
+        NtClose( hEvent );
     }
-
-    if (needs_close) close( fd );
     return ret;
 }
 

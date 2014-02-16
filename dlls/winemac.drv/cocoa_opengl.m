@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <OpenGL/gl.h>
 #import "cocoa_opengl.h"
 
 #include "macdrv_cocoa.h"
@@ -124,15 +123,14 @@ void macdrv_make_context_current(macdrv_opengl_context c, macdrv_view v)
         context.needsUpdate = FALSE;
         if (view)
         {
-            __block BOOL viewIsValidDrawable;
+            __block BOOL windowHasDevice;
 
             macdrv_add_view_opengl_context(v, c);
 
             OnMainThread(^{
-                viewIsValidDrawable = [[view window] windowNumber] > 0 &&
-                                      !NSIsEmptyRect([view visibleRect]);
+                windowHasDevice = [[view window] windowNumber] > 0;
             });
-            if (viewIsValidDrawable)
+            if (windowHasDevice)
             {
                 [context setView:view];
                 [context setLatentView:nil];

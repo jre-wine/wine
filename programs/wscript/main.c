@@ -361,7 +361,7 @@ static BOOL set_host_properties(const WCHAR *prop)
 
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cmdshow)
 {
-    WCHAR *ext, *filepart, *filename = NULL;
+    const WCHAR *ext, *filename = NULL;
     IActiveScriptParse *parser;
     IActiveScript *script;
     WCHAR **argv;
@@ -391,12 +391,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPWSTR cmdline, int cm
         WINE_FIXME("No file name specified\n");
         return 1;
     }
-    res = GetFullPathNameW(filename, sizeof(scriptFullName)/sizeof(WCHAR), scriptFullName, &filepart);
+    res = GetFullPathNameW(filename, sizeof(scriptFullName)/sizeof(WCHAR), scriptFullName, NULL);
     if(!res || res > sizeof(scriptFullName)/sizeof(WCHAR))
         return 1;
 
-    ext = strrchrW(filepart, '.');
-    if(!ext || !get_engine_clsid(ext, &clsid)) {
+    ext = strchrW(filename, '.');
+    if(!ext)
+        ext = filename;
+    if(!get_engine_clsid(ext, &clsid)) {
         WINE_FIXME("Could not find engine for %s\n", wine_dbgstr_w(ext));
         return 1;
     }

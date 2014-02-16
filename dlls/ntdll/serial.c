@@ -804,7 +804,7 @@ typedef struct async_commio
  */
 static NTSTATUS get_irq_info(int fd, serial_irq_info *irq_info)
 {
-#ifdef TIOCGICOUNT
+#if defined (HAVE_LINUX_SERIAL_H) && defined (TIOCGICOUNT)
     struct serial_icounter_struct einfo;
     if (!ioctl(fd, TIOCGICOUNT, &einfo))
     {
@@ -1337,30 +1337,4 @@ NTSTATUS COMM_DeviceIoControl(HANDLE hDevice,
                              lpOutBuffer, nOutBufferSize);
 done:
     return status;
-}
-
-NTSTATUS COMM_FlushBuffersFile( int fd )
-{
-#ifdef HAVE_TCDRAIN
-    while (tcdrain( fd ) == -1)
-    {
-        if (errno != EINTR) return FILE_GetNtStatus();
-    }
-    return STATUS_SUCCESS;
-#elif defined(TIOCDRAIN)
-    while (ioctl( fd, TIOCDRAIN ) == -1)
-    {
-        if (errno != EINTR) return FILE_GetNtStatus();
-    }
-    return STATUS_SUCCESS;
-#elif defined(TCSBRK)
-    while (ioctl( fd, TCSBRK, 1 ) == -1)
-    {
-        if (errno != EINTR) return FILE_GetNtStatus();
-    }
-    return STATUS_SUCCESS;
-#else
-    ERR( "not supported\n" );
-    return STATUS_NOT_IMPLEMENTED;
-#endif
 }
