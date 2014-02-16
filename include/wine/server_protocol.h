@@ -667,9 +667,11 @@ struct new_process_request
     unsigned int process_attr;
     unsigned int thread_access;
     unsigned int thread_attr;
+    cpu_type_t   cpu;
     data_size_t  info_size;
     /* VARARG(info,startup_info,info_size); */
     /* VARARG(env,unicode_str); */
+    char __pad_52[4];
 };
 struct new_process_reply
 {
@@ -3083,6 +3085,7 @@ struct set_serial_info_reply
 #define SERIALINFO_SET_TIMEOUTS  0x01
 #define SERIALINFO_SET_MASK      0x02
 #define SERIALINFO_PENDING_WRITE 0x04
+#define SERIALINFO_PENDING_WAIT  0x08
 
 
 
@@ -5845,6 +5848,6 @@ union generic_reply
     struct set_suspend_context_reply set_suspend_context_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 451
+#define SERVER_PROTOCOL_VERSION 453
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

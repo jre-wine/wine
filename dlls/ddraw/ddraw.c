@@ -1474,9 +1474,18 @@ static HRESULT WINAPI ddraw7_GetCaps(IDirectDraw7 *iface, DDCAPS *DriverCaps, DD
     }
 
     hr = IDirectDraw7_GetAvailableVidMem(iface, &ddscaps, &caps.dwVidMemTotal, &caps.dwVidMemFree);
-    wined3d_mutex_unlock();
-    if(FAILED(hr)) {
+    if (FAILED(hr))
+    {
         WARN("IDirectDraw7::GetAvailableVidMem failed\n");
+        wined3d_mutex_unlock();
+        return hr;
+    }
+
+    hr = IDirectDraw7_GetFourCCCodes(iface, &caps.dwNumFourCCCodes, NULL);
+    wined3d_mutex_unlock();
+    if (FAILED(hr))
+    {
+        WARN("IDirectDraw7::GetFourCCCodes failed\n");
         return hr;
     }
 
@@ -2723,67 +2732,6 @@ static HRESULT WINAPI ddraw7_StartModeTest(IDirectDraw7 *iface, SIZE *Modes, DWO
 }
 
 /*****************************************************************************
- * ddraw_create_surface
- *
- * A helper function for IDirectDraw7::CreateSurface. It creates a new surface
- * with the passed parameters.
- *
- * Params:
- *  DDSD: Description of the surface to create
- *  Surf: Address to store the interface pointer at
- *
- * Returns:
- *  DD_OK on success
- *
- *****************************************************************************/
-static HRESULT ddraw_create_surface(struct ddraw *ddraw, DDSURFACEDESC2 *desc,
-        DWORD flags, struct ddraw_surface **surface, UINT version)
-{
-    HRESULT hr;
-
-    TRACE("ddraw %p, desc %p, flags %#x, surface %p.\n", ddraw, desc, flags, surface);
-
-    if (TRACE_ON(ddraw))
-    {
-        TRACE("Requesting surface desc:\n");
-        DDRAW_dump_surface_desc(desc);
-    }
-
-    if ((desc->ddsCaps.dwCaps & DDSCAPS_3DDEVICE) && (ddraw->flags & DDRAW_NO3D))
-    {
-        WARN("The application requests a 3D capable surface, but the ddraw object was created without 3D support.\n");
-        /* Do not fail surface creation, only fail 3D device creation. */
-    }
-
-    /* Create the Surface object */
-    *surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(**surface));
-    if (!*surface)
-    {
-        ERR("Failed to allocate surface memory.\n");
-        return DDERR_OUTOFVIDEOMEMORY;
-    }
-
-    if (FAILED(hr = ddraw_surface_init(*surface, ddraw, desc, flags, version)))
-    {
-        WARN("Failed to initialize surface, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, *surface);
-        return hr;
-    }
-
-    /* Increase the surface counter, and attach the surface */
-    list_add_head(&ddraw->surface_list, &(*surface)->surface_list_entry);
-
-    TRACE("Created surface %p.\n", *surface);
-
-    return DD_OK;
-}
-
-static HRESULT CDECL ddraw_reset_enum_callback(struct wined3d_resource *resource)
-{
-    return DD_OK;
-}
-
-/*****************************************************************************
  * IDirectDraw7::CreateSurface
  *
  * Creates a new IDirectDrawSurface object and returns its interface.
@@ -2864,16 +2812,9 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
         struct ddraw_surface **surface, IUnknown *UnkOuter, UINT version)
 {
     struct ddraw_surface *object = NULL;
-    struct wined3d_display_mode mode;
     HRESULT hr;
     DDSURFACEDESC2 desc2;
     const DWORD sysvidmem = DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY;
-    /* Some applications assume surfaces will always be mapped at the same
-     * address. Some of those also assume that this address is valid even when
-     * the surface isn't mapped, and that updates done this way will be
-     * visible on the screen. The game Nox is such an application,
-     * Commandos: Behind Enemy Lines is another. */
-    const DWORD flags = WINED3D_SURFACE_PIN_SYSMEM;
 
     TRACE("ddraw %p, surface_desc %p, surface %p, outer_unknown %p.\n", ddraw, DDSD, surface, UnkOuter);
 
@@ -2985,141 +2926,15 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
     copy_to_surfacedesc2(&desc2, DDSD);
     desc2.u4.ddpfPixelFormat.dwSize=sizeof(DDPIXELFORMAT); /* Just to be sure */
 
-    if (FAILED(hr = wined3d_get_adapter_display_mode(ddraw->wined3d, WINED3DADAPTER_DEFAULT, &mode, NULL)))
-    {
-        ERR("Failed to get display mode, hr %#x.\n", hr);
-        return hr;
-    }
-
-    /* No pixelformat given? Use the current screen format */
-    if(!(desc2.dwFlags & DDSD_PIXELFORMAT))
-    {
-        desc2.dwFlags |= DDSD_PIXELFORMAT;
-        desc2.u4.ddpfPixelFormat.dwSize=sizeof(DDPIXELFORMAT);
-
-        ddrawformat_from_wined3dformat(&desc2.u4.ddpfPixelFormat, mode.format_id);
-    }
-
-    if (!(desc2.ddsCaps.dwCaps & (DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY))
-            && !(desc2.ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE)))
-    {
-        enum wined3d_format_id format = wined3dformat_from_ddrawformat(&desc2.u4.ddpfPixelFormat);
-        enum wined3d_resource_type rtype;
-        DWORD usage = 0;
-
-        if (desc2.ddsCaps.dwCaps & DDSCAPS_TEXTURE)
-            rtype = WINED3D_RTYPE_TEXTURE;
-        else if (desc2.ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP)
-            rtype = WINED3D_RTYPE_CUBE_TEXTURE;
-        else
-            rtype = WINED3D_RTYPE_SURFACE;
-
-        if (desc2.ddsCaps.dwCaps & DDSCAPS_ZBUFFER)
-            usage = WINED3DUSAGE_DEPTHSTENCIL;
-        else if (desc2.ddsCaps.dwCaps & DDSCAPS_3DDEVICE)
-            usage = WINED3DUSAGE_RENDERTARGET;
-
-        hr = wined3d_check_device_format(ddraw->wined3d, WINED3DADAPTER_DEFAULT, WINED3D_DEVICE_TYPE_HAL,
-                mode.format_id, usage, rtype, format);
-        if (SUCCEEDED(hr))
-            desc2.ddsCaps.dwCaps |= DDSCAPS_VIDEOMEMORY;
-        else
-            desc2.ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
-    }
-
-    /* No Width or no Height? Use the original screen size
-     */
-    if(!(desc2.dwFlags & DDSD_WIDTH) ||
-       !(desc2.dwFlags & DDSD_HEIGHT) )
-    {
-        /* Invalid for non-render targets */
-        if(!(desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE))
-        {
-            WARN("Creating a non-Primary surface without Width or Height info, returning DDERR_INVALIDPARAMS\n");
-            *surface = NULL;
-            return DDERR_INVALIDPARAMS;
-        }
-
-        desc2.dwFlags |= DDSD_WIDTH | DDSD_HEIGHT;
-        desc2.dwWidth = mode.width;
-        desc2.dwHeight = mode.height;
-    }
-
-    if (!desc2.dwWidth || !desc2.dwHeight)
-        return DDERR_INVALIDPARAMS;
-
-    /* Mipmap count fixes */
-    if(desc2.ddsCaps.dwCaps & DDSCAPS_MIPMAP)
-    {
-        if(desc2.ddsCaps.dwCaps & DDSCAPS_COMPLEX)
-        {
-            if(desc2.dwFlags & DDSD_MIPMAPCOUNT)
-            {
-                /* Mipmap count is given, should not be 0 */
-                if( desc2.u2.dwMipMapCount == 0 )
-                    return DDERR_INVALIDPARAMS;
-            }
-            else
-            {
-                /* Undocumented feature: Create sublevels until
-                 * either the width or the height is 1
-                 */
-                DWORD min = desc2.dwWidth < desc2.dwHeight ?
-                            desc2.dwWidth : desc2.dwHeight;
-                desc2.u2.dwMipMapCount = 0;
-                while( min )
-                {
-                    desc2.u2.dwMipMapCount += 1;
-                    min >>= 1;
-                }
-            }
-        }
-        else
-        {
-            /* Not-complex mipmap -> Mipmapcount = 1 */
-            desc2.u2.dwMipMapCount = 1;
-        }
-
-        /* There's a mipmap count in the created surface in any case */
-        desc2.dwFlags |= DDSD_MIPMAPCOUNT;
-    }
-    /* If no mipmap is given, the texture has only one level */
-
     /* The first surface is a front buffer, the back buffer is created afterwards */
     if( (desc2.dwFlags & DDSD_CAPS) && (desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) )
     {
         desc2.ddsCaps.dwCaps |= DDSCAPS_FRONTBUFFER;
     }
 
-    /* The root surface in a cube map is positive x */
-    if(desc2.ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP)
+    if (FAILED(hr = ddraw_surface_create_texture(ddraw, &desc2, version, &object)))
     {
-        desc2.ddsCaps.dwCaps2 &= ~DDSCAPS2_CUBEMAP_ALLFACES;
-        desc2.ddsCaps.dwCaps2 |=  DDSCAPS2_CUBEMAP_POSITIVEX;
-    }
-
-    if ((desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) && (ddraw->cooperative_level & DDSCL_EXCLUSIVE))
-    {
-        struct wined3d_swapchain_desc swapchain_desc;
-
-        wined3d_swapchain_get_desc(ddraw->wined3d_swapchain, &swapchain_desc);
-        swapchain_desc.backbuffer_width = mode.width;
-        swapchain_desc.backbuffer_height = mode.height;
-        swapchain_desc.backbuffer_format = mode.format_id;
-
-        hr = wined3d_device_reset(ddraw->wined3d_device,
-                &swapchain_desc, NULL, ddraw_reset_enum_callback, TRUE);
-        if (FAILED(hr))
-        {
-            ERR("Failed to reset device.\n");
-            return hr;
-        }
-    }
-
-    /* Create the first surface */
-    if (FAILED(hr = ddraw_create_surface(ddraw, &desc2, flags, &object, version)))
-    {
-        WARN("ddraw_create_surface failed, hr %#x.\n", hr);
+        WARN("Failed to create texture, hr %#x.\n", hr);
         return hr;
     }
     object->is_complex_root = TRUE;
@@ -3144,7 +2959,7 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
         {
             struct ddraw_surface *object2 = NULL;
 
-            if (FAILED(hr = ddraw_create_surface(ddraw, &desc2, flags, &object2, version)))
+            if (FAILED(hr = ddraw_surface_create_texture(ddraw, &desc2, version, &object2)))
             {
                 if (version == 7)
                     IDirectDrawSurface7_Release(&object->IDirectDrawSurface7_iface);
@@ -3165,22 +2980,6 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
              * back buffer, one is a front buffer, the others are just primary
              * surfaces. */
             desc2.ddsCaps.dwCaps &= ~DDSCAPS_BACKBUFFER;
-        }
-    }
-
-    if (desc2.ddsCaps.dwCaps & DDSCAPS_TEXTURE)
-    {
-        hr = ddraw_surface_create_texture(object, flags);
-        if (FAILED(hr))
-        {
-            if (version == 7)
-                IDirectDrawSurface7_Release(&object->IDirectDrawSurface7_iface);
-            else if (version == 4)
-                IDirectDrawSurface4_Release(&object->IDirectDrawSurface4_iface);
-            else
-                IDirectDrawSurface_Release(&object->IDirectDrawSurface_iface);
-
-            return hr;
         }
     }
 
@@ -5147,36 +4946,43 @@ static void CDECL device_parent_mode_changed(struct wined3d_device_parent *devic
         ERR("Failed to resize window.\n");
 }
 
-static HRESULT CDECL device_parent_create_texture_surface(struct wined3d_device_parent *device_parent,
-        void *container_parent, const struct wined3d_resource_desc *wined3d_desc, UINT sub_resource_idx,
-        DWORD flags, struct wined3d_surface **surface)
+static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent *device_parent,
+        void *container_parent, struct wined3d_surface *surface,
+        void **parent, const struct wined3d_parent_ops **parent_ops)
 {
     struct ddraw *ddraw = ddraw_from_device_parent(device_parent);
-    struct ddraw_surface *tex_root = container_parent;
-    DDSURFACEDESC2 desc = tex_root->surface_desc;
     struct ddraw_surface *ddraw_surface;
     HRESULT hr;
 
-    TRACE("device_parent %p, container_parent %p, wined3d_desc %p, sub_resource_idx %u, flags %#x, surface %p.\n",
-            device_parent, container_parent, wined3d_desc, sub_resource_idx, flags, surface);
+    TRACE("device_parent %p, container_parent %p, surface %p, parent %p, parent_ops %p.\n",
+            device_parent, container_parent, surface, parent, parent_ops);
 
-    /* The ddraw root surface is created before the wined3d texture. */
-    if (!sub_resource_idx)
+    /* We have a swapchain texture. */
+    if (container_parent == ddraw)
     {
-        ddraw_surface = tex_root;
-        goto done;
+        *parent = NULL;
+        *parent_ops = &ddraw_null_wined3d_parent_ops;
+
+        return DD_OK;
     }
 
-    desc.dwWidth = wined3d_desc->width;
-    desc.dwHeight = wined3d_desc->height;
+    if (!(ddraw_surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ddraw_surface))))
+    {
+        ERR("Failed to allocate surface memory.\n");
+        return DDERR_OUTOFVIDEOMEMORY;
+    }
 
-    /* FIXME: Validate that format, usage, pool, etc. really make sense. */
-    if (FAILED(hr = ddraw_create_surface(ddraw, &desc, flags, &ddraw_surface, tex_root->version)))
+    if (FAILED(hr = ddraw_surface_init(ddraw_surface, ddraw, container_parent, surface, parent_ops)))
+    {
+        WARN("Failed to initialize surface, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, ddraw_surface);
         return hr;
+    }
 
-done:
-    *surface = ddraw_surface->wined3d_surface;
-    wined3d_surface_incref(*surface);
+    *parent = ddraw_surface;
+    list_add_head(&ddraw->surface_list, &ddraw_surface->surface_list_entry);
+
+    TRACE("Created ddraw surface %p.\n", ddraw_surface);
 
     return DD_OK;
 }
@@ -5196,6 +5002,8 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
         void *container_parent, const struct wined3d_resource_desc *desc, struct wined3d_surface **surface)
 {
     struct ddraw *ddraw = ddraw_from_device_parent(device_parent);
+    struct wined3d_resource_desc texture_desc;
+    struct wined3d_texture *texture;
     HRESULT hr;
 
     TRACE("device_parent %p, container_parent %p, desc %p, surface %p.\n",
@@ -5207,10 +5015,19 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
         return E_FAIL;
     }
 
-    if (SUCCEEDED(hr = wined3d_surface_create(ddraw->wined3d_device, desc->width, desc->height, desc->format,
-            desc->usage, desc->pool, desc->multisample_type, desc->multisample_quality, WINED3D_SURFACE_MAPPABLE,
-            ddraw, &ddraw_frontbuffer_parent_ops, surface)))
-        ddraw->wined3d_frontbuffer = *surface;
+    texture_desc = *desc;
+    texture_desc.resource_type = WINED3D_RTYPE_TEXTURE;
+    if (FAILED(hr = wined3d_texture_create_2d(ddraw->wined3d_device, &texture_desc, 1,
+            WINED3D_SURFACE_MAPPABLE, ddraw, &ddraw_frontbuffer_parent_ops, &texture)))
+    {
+        WARN("Failed to create texture, hr %#x.\n", hr);
+        return hr;
+    }
+
+    *surface = wined3d_surface_from_resource(wined3d_texture_get_sub_resource(texture, 0));
+    ddraw->wined3d_frontbuffer = *surface;
+    wined3d_surface_incref(*surface);
+    wined3d_texture_decref(texture);
 
     return hr;
 }
@@ -5255,8 +5072,8 @@ static const struct wined3d_device_parent_ops ddraw_wined3d_device_parent_ops =
 {
     device_parent_wined3d_device_created,
     device_parent_mode_changed,
+    device_parent_surface_created,
     device_parent_create_swapchain_surface,
-    device_parent_create_texture_surface,
     device_parent_create_volume,
     device_parent_create_swapchain,
 };

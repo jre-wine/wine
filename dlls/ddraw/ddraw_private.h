@@ -185,9 +185,18 @@ struct ddraw_surface
     DWORD                   Handle;
 };
 
-HRESULT ddraw_surface_create_texture(struct ddraw_surface *surface, DWORD surface_flags) DECLSPEC_HIDDEN;
-HRESULT ddraw_surface_init(struct ddraw_surface *surface, struct ddraw *ddraw,
-        DDSURFACEDESC2 *desc, DWORD flags, UINT version) DECLSPEC_HIDDEN;
+struct ddraw_texture
+{
+    unsigned int version;
+    DDSURFACEDESC2 surface_desc;
+
+    struct ddraw_surface *root;
+};
+
+HRESULT ddraw_surface_create_texture(struct ddraw *ddraw, DDSURFACEDESC2 *desc,
+        unsigned int version, struct ddraw_surface **surface) DECLSPEC_HIDDEN;
+HRESULT ddraw_surface_init(struct ddraw_surface *surface, struct ddraw *ddraw, struct ddraw_texture *texture,
+        struct wined3d_surface *wined3d_surface, const struct wined3d_parent_ops **parent_ops) DECLSPEC_HIDDEN;
 ULONG ddraw_surface_release_iface(struct ddraw_surface *This) DECLSPEC_HIDDEN;
 
 static inline struct ddraw_surface *impl_from_IDirect3DTexture(IDirect3DTexture *iface)

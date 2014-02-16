@@ -59,7 +59,6 @@ RUNTEST         = $(top_srcdir)/tools/runtest
 MAKECTESTS      = $(TOOLSDIR)/tools/make_ctests$(TOOLSEXT)
 MAKEXFTMPL      = $(TOOLSDIR)/tools/make_xftmpl$(TOOLSEXT)
 MAKEDEP         = $(TOOLSDIR)/tools/makedep$(TOOLSEXT)
-RELPATH         = $(TOOLSDIR)/tools/relpath$(TOOLSEXT)
 SFNT2FNT        = $(TOOLSDIR)/tools/sfnt2fnt$(TOOLSEXT)
 WIDL            = $(TOOLSDIR)/tools/widl/widl$(TOOLSEXT)
 WINEBUILD       = $(TOOLSDIR)/tools/winebuild/winebuild$(TOOLSEXT)
@@ -71,6 +70,7 @@ LIBWINE         = -L$(top_builddir)/libs/wine -lwine
 LIBWINE_STATIC  = $(top_builddir)/libs/wine/libwine_static.a
 WINEGCC         = $(TOOLSDIR)/tools/winegcc/winegcc $(TARGETFLAGS) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(top_builddir) @UNWINDFLAGS@
 CROSSWINEGCC    = $(TOOLSDIR)/tools/winegcc/winegcc $(CROSSTARGET:%=-b %) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(top_builddir) --lib-suffix=.cross.a
+SED_CMD         = LC_ALL=C sed -e 's,@bindir\@,$(bindir),g' -e 's,@dlldir\@,$(dlldir),g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g'
 LDRPATH_INSTALL = @LDRPATH_INSTALL@
 LDRPATH_LOCAL   = @LDRPATH_LOCAL@
 INSTALL         = @INSTALL@ $(INSTALL_FLAGS)

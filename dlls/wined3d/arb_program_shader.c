@@ -7302,12 +7302,7 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
     struct arbfp_blit_priv *priv = blit_priv;
     enum complex_fixup fixup;
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    GLenum textype;
-
-    if (surface->container)
-        textype = surface->container->target;
-    else
-        textype = surface->texture_target;
+    GLenum textype = surface->container->target;
 
     if (surface->flags & SFLAG_CONVERTED)
     {
@@ -7474,7 +7469,7 @@ HRESULT arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
         src_rect.bottom = src_surface->resource.height - src_rect.bottom;
     }
     else
-        surface_internal_preload(src_surface, context, SRGB_RGB);
+        wined3d_texture_load(src_surface->container, context, FALSE);
 
     context_apply_blit_state(context, device);
 

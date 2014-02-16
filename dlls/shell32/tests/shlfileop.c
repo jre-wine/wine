@@ -646,6 +646,36 @@ static void test_delete(void)
     else
         skip("Test would show a dialog box\n");
 
+    /* delete an existent file and a nonexistent file */
+    init_shfo_tests();
+    shfo.pFrom = "test1.txt\0nonexistent.txt\0test2.txt\0";
+    shfo.wFunc = FO_DELETE;
+    ret = SHFileOperationA(&shfo);
+    todo_wine
+    ok(ret == 1026 ||
+       ret == ERROR_FILE_NOT_FOUND || /* Vista */
+       broken(ret == ERROR_SUCCESS), /* NT4 */
+       "Expected 1026 or ERROR_FILE_NOT_FOUND, got %d\n", ret);
+    todo_wine
+    ok(file_exists("test1.txt"), "Expected test1.txt to exist\n");
+    ok(file_exists("test2.txt"), "Expected test2.txt to exist\n");
+
+    /* delete a nonexistent file in an existent dir or a nonexistent dir */
+    init_shfo_tests();
+    shfo.pFrom = "testdir2\\nonexistent.txt\0";
+    ret = SHFileOperationA(&shfo);
+    todo_wine
+    ok(ret == ERROR_FILE_NOT_FOUND || /* Vista */
+       broken(ret == 0x402) || /* XP */
+       broken(ret == ERROR_SUCCESS), /* NT4 */
+       "Expected 0x402 or ERROR_FILE_NOT_FOUND, got %x\n", ret);
+    shfo.pFrom = "nonexistent\\one.txt\0";
+    ret = SHFileOperationA(&shfo);
+    todo_wine
+    ok(ret == DE_INVALIDFILES || /* Vista or later */
+       broken(ret == 0x402), /* XP */
+       "Expected 0x402 or DE_INVALIDFILES, got %x\n", ret);
+
     /* try the FOF_NORECURSION flag, continues deleting subdirs */
     init_shfo_tests();
     shfo.pFrom = "testdir2\0";
