@@ -379,7 +379,7 @@ static void test_process_vertices(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create a ddraw object, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -546,7 +546,7 @@ static void test_coop_level_create_device_window(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create a 3D device, skipping test.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         DestroyWindow(focus_window);
         return;
     }
@@ -840,7 +840,7 @@ static void test_coop_level_d3d_state(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -932,10 +932,9 @@ static void test_surface_interface_mismatch(void)
     hr = IDirectDrawSurface7_QueryInterface(surface, &IID_IDirectDrawSurface3, (void **)&surface3);
     ok(SUCCEEDED(hr), "Failed to QI IDirectDrawSurface3, hr %#x.\n", hr);
 
-    hr = IDirectDraw7_QueryInterface(ddraw, &IID_IDirect3D7, (void **)&d3d);
-    if (FAILED(hr))
+    if (FAILED(hr = IDirectDraw7_QueryInterface(ddraw, &IID_IDirect3D7, (void **)&d3d)))
     {
-        skip("Failed to get the IDirect3D7 interface, skipping test.\n");
+        skip("D3D interface is not available, skipping test.\n");
         goto cleanup;
     }
 
@@ -1045,7 +1044,7 @@ static void test_depth_blit(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1191,7 +1190,7 @@ static void test_texture_load_ckey(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1260,6 +1259,7 @@ static void test_texture_load_ckey(void)
     IDirectDrawSurface7_Release(src);
     IDirectDraw7_Release(ddraw);
     IDirect3DDevice7_Release(device);
+    DestroyWindow(window);
 }
 
 static void test_zenable(void)
@@ -1288,7 +1288,7 @@ static void test_zenable(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1378,7 +1378,7 @@ static void test_ck_rgba(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1506,7 +1506,7 @@ static void test_ck_default(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1692,7 +1692,7 @@ static void test_surface_qi(void)
      * doesn't support e.g. the IDirect3DTexture interfaces. */
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1777,7 +1777,7 @@ static void test_device_qi(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -1811,7 +1811,7 @@ static void test_wndproc(void)
     /* DDSCL_EXCLUSIVE replaces the window's window proc. */
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create IDirectDraw7 object, skipping tests.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         return;
     }
 
@@ -2846,7 +2846,7 @@ static void test_vb_discard(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -2960,7 +2960,7 @@ static void test_draw_strided(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -3008,7 +3008,7 @@ static void test_clear_rect_count(void)
             0, 0, 640, 480, 0, 0, 0, 0);
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -3218,7 +3218,7 @@ static void test_fog_special(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -3413,7 +3413,7 @@ static void test_lighting_interface_versions(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -3467,6 +3467,7 @@ static void test_lighting_interface_versions(void)
     IDirectDrawSurface7_Release(rt);
     ref = IDirect3DDevice7_Release(device);
     ok(ref == 0, "Device not properly released, refcount %u.\n", ref);
+    DestroyWindow(window);
 }
 
 static struct
@@ -3507,7 +3508,7 @@ static void test_coop_level_activateapp(void)
 
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create IDirectDraw7 object, skipping tests.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         return;
     }
 
@@ -3661,7 +3662,7 @@ static void test_texturemanage(void)
 
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create IDirectDraw7 object, skipping tests.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         return;
     }
 
@@ -3827,7 +3828,7 @@ static void test_block_formats_creation(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -3992,7 +3993,7 @@ static void test_unsupported_formats(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create D3D device, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -4252,7 +4253,7 @@ static void test_rt_caps(void)
 
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create ddraw object, skipping tests.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         return;
     }
 
@@ -4389,6 +4390,162 @@ done:
     DestroyWindow(window);
 }
 
+static void test_primary_caps(void)
+{
+    const DWORD placement = DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY;
+    IDirectDrawSurface7 *surface;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    unsigned int i;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+
+    static const struct
+    {
+        DWORD coop_level;
+        DWORD caps_in;
+        DWORD back_buffer_count;
+        HRESULT hr;
+        DWORD caps_out;
+    }
+    test_data[] =
+    {
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE,
+            ~0u,
+            DD_OK,
+            DDSCAPS_VISIBLE | DDSCAPS_PRIMARYSURFACE,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_TEXTURE,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_FRONTBUFFER,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_BACKBUFFER,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_FLIP,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP,
+            ~0u,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP,
+            0,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_NORMAL,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP,
+            1,
+            DDERR_NOEXCLUSIVEMODE,
+            ~0u,
+        },
+        {
+            DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP,
+            0,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP,
+            1,
+            DD_OK,
+            DDSCAPS_VISIBLE | DDSCAPS_PRIMARYSURFACE | DDSCAPS_FRONTBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX,
+        },
+        {
+            DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER,
+            1,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+        {
+            DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN,
+            DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP | DDSCAPS_BACKBUFFER,
+            1,
+            DDERR_INVALIDCAPS,
+            ~0u,
+        },
+    };
+
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create a ddraw object, skipping test.\n");
+        return;
+    }
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+
+    for (i = 0; i < sizeof(test_data) / sizeof(*test_data); ++i)
+    {
+        hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, test_data[i].coop_level);
+        ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        surface_desc.dwFlags = DDSD_CAPS;
+        if (test_data[i].back_buffer_count != ~0u)
+            surface_desc.dwFlags |= DDSD_BACKBUFFERCOUNT;
+        surface_desc.ddsCaps.dwCaps = test_data[i].caps_in;
+        surface_desc.dwBackBufferCount = test_data[i].back_buffer_count;
+        hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+        ok(hr == test_data[i].hr, "Test %u: Got unexpected hr %#x, expected %#x.\n", i, hr, test_data[i].hr);
+        if (FAILED(hr))
+            continue;
+
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &surface_desc);
+        ok(SUCCEEDED(hr), "Test %u: Failed to get surface desc, hr %#x.\n", i, hr);
+        ok((surface_desc.ddsCaps.dwCaps & ~placement) == test_data[i].caps_out,
+                "Test %u: Got unexpected caps %#x, expected %#x.\n",
+                i, surface_desc.ddsCaps.dwCaps, test_data[i].caps_out);
+
+        IDirectDrawSurface7_Release(surface);
+    }
+
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(refcount == 0, "The ddraw object was not properly freed, refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
 static void test_surface_lock(void)
 {
     IDirectDraw7 *ddraw;
@@ -4512,7 +4669,7 @@ static void test_surface_lock(void)
 
     if (!(ddraw = create_ddraw()))
     {
-        skip("Failed to create ddraw object, skipping tests.\n");
+        skip("Failed to create a ddraw object, skipping test.\n");
         return;
     }
 
@@ -4637,7 +4794,7 @@ static void test_surface_discard(void)
 
     if (!(device = create_device(window, DDSCL_NORMAL)))
     {
-        skip("Failed to create a ddraw object, skipping test.\n");
+        skip("Failed to create a 3D device, skipping test.\n");
         DestroyWindow(window);
         return;
     }
@@ -4703,6 +4860,498 @@ static void test_surface_discard(void)
     DestroyWindow(window);
 }
 
+static void test_flip(void)
+{
+    const DWORD placement = DDSCAPS_LOCALVIDMEM | DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY;
+    IDirectDrawSurface7 *primary, *backbuffer1, *backbuffer2, *backbuffer3, *surface;
+    DDSCAPS2 caps = {DDSCAPS_FLIP, 0, 0, 0};
+    DDSURFACEDESC2 surface_desc;
+    BOOL sysmem_primary;
+    IDirectDraw7 *ddraw;
+    D3DCOLOR color;
+    ULONG refcount;
+    HWND window;
+    DDBLTFX fx;
+    HRESULT hr;
+
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create a ddraw object, skipping test.\n");
+        return;
+    }
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+
+    hr = IDirectDraw7_SetDisplayMode(ddraw, 640, 480, 32, 0, 0);
+    ok(SUCCEEDED(hr), "Failed to set display mode, hr %#x.\n", hr);
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_BACKBUFFERCOUNT;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_COMPLEX | DDSCAPS_FLIP;
+    surface_desc.dwBackBufferCount = 3;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &primary, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(primary, &surface_desc);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok((surface_desc.ddsCaps.dwCaps & ~placement)
+            == (DDSCAPS_VISIBLE | DDSCAPS_PRIMARYSURFACE | DDSCAPS_FRONTBUFFER | DDSCAPS_FLIP | DDSCAPS_COMPLEX),
+            "Got unexpected caps %#x.\n", surface_desc.ddsCaps.dwCaps);
+    sysmem_primary = surface_desc.ddsCaps.dwCaps & DDSCAPS_SYSTEMMEMORY;
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(primary, &caps, &backbuffer1);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(backbuffer1, &surface_desc);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok((surface_desc.ddsCaps.dwCaps & ~placement) == (DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_BACKBUFFER),
+            "Got unexpected caps %#x.\n", surface_desc.ddsCaps.dwCaps);
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(backbuffer1, &caps, &backbuffer2);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(backbuffer2, &surface_desc);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok((surface_desc.ddsCaps.dwCaps & ~placement) == (DDSCAPS_FLIP | DDSCAPS_COMPLEX),
+            "Got unexpected caps %#x.\n", surface_desc.ddsCaps.dwCaps);
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(backbuffer2, &caps, &backbuffer3);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(backbuffer3, &surface_desc);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok((surface_desc.ddsCaps.dwCaps & ~placement) == (DDSCAPS_FLIP | DDSCAPS_COMPLEX),
+            "Got unexpected caps %#x.\n", surface_desc.ddsCaps.dwCaps);
+
+    hr = IDirectDrawSurface7_GetAttachedSurface(backbuffer3, &caps, &surface);
+    ok(SUCCEEDED(hr), "Failed to get attached surface, hr %#x.\n", hr);
+    ok(surface == primary, "Got unexpected surface %p, expected %p.\n", surface, primary);
+    IDirectDrawSurface7_Release(surface);
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    surface_desc.ddsCaps.dwCaps = 0;
+    surface_desc.dwWidth = 640;
+    surface_desc.dwHeight = 480;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_Flip(primary, surface, DDFLIP_WAIT);
+    ok(hr == DDERR_NOTFLIPPABLE, "Got unexpected hr %#x.\n", hr);
+    IDirectDrawSurface7_Release(surface);
+
+    hr = IDirectDrawSurface7_Flip(primary, primary, DDFLIP_WAIT);
+    ok(hr == DDERR_NOTFLIPPABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_Flip(backbuffer1, NULL, DDFLIP_WAIT);
+    ok(hr == DDERR_NOTFLIPPABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_Flip(backbuffer2, NULL, DDFLIP_WAIT);
+    ok(hr == DDERR_NOTFLIPPABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_Flip(backbuffer3, NULL, DDFLIP_WAIT);
+    ok(hr == DDERR_NOTFLIPPABLE, "Got unexpected hr %#x.\n", hr);
+
+    memset(&fx, 0, sizeof(fx));
+    fx.dwSize = sizeof(fx);
+    U5(fx).dwFillColor = 0xffff0000;
+    hr = IDirectDrawSurface7_Blt(backbuffer1, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+    U5(fx).dwFillColor = 0xff00ff00;
+    hr = IDirectDrawSurface7_Blt(backbuffer2, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+    U5(fx).dwFillColor = 0xff0000ff;
+    hr = IDirectDrawSurface7_Blt(backbuffer3, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, NULL, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer1, 320, 240);
+    /* The testbot seems to just copy the contents of one surface to all the
+     * others, instead of properly flipping. */
+    ok(compare_color(color, 0x0000ff00, 1) || broken(sysmem_primary && compare_color(color, 0x000000ff, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer2, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+    U5(fx).dwFillColor = 0xffff0000;
+    hr = IDirectDrawSurface7_Blt(backbuffer3, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, NULL, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer1, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1) || broken(sysmem_primary && compare_color(color, 0x00ff0000, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer2, 320, 240);
+    ok(compare_color(color, 0x00ff0000, 1), "Got unexpected color 0x%08x.\n", color);
+    U5(fx).dwFillColor = 0xff00ff00;
+    hr = IDirectDrawSurface7_Blt(backbuffer3, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, NULL, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer1, 320, 240);
+    ok(compare_color(color, 0x00ff0000, 1) || broken(sysmem_primary && compare_color(color, 0x0000ff00, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer2, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+    U5(fx).dwFillColor = 0xff0000ff;
+    hr = IDirectDrawSurface7_Blt(backbuffer3, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, backbuffer1, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer2, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1) || broken(sysmem_primary && compare_color(color, 0x000000ff, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer3, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1), "Got unexpected color 0x%08x.\n", color);
+    U5(fx).dwFillColor = 0xffff0000;
+    hr = IDirectDrawSurface7_Blt(backbuffer1, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, backbuffer2, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer1, 320, 240);
+    ok(compare_color(color, 0x00ff0000, 1), "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer3, 320, 240);
+    ok(compare_color(color, 0x000000ff, 1) || broken(sysmem_primary && compare_color(color, 0x00ff0000, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    U5(fx).dwFillColor = 0xff00ff00;
+    hr = IDirectDrawSurface7_Blt(backbuffer2, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
+    ok(SUCCEEDED(hr), "Failed to fill surface, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_Flip(primary, backbuffer3, DDFLIP_WAIT);
+    ok(SUCCEEDED(hr), "Failed to flip, hr %#x.\n", hr);
+    color = get_surface_color(backbuffer1, 320, 240);
+    ok(compare_color(color, 0x00ff0000, 1) || broken(sysmem_primary && compare_color(color, 0x0000ff00, 1)),
+            "Got unexpected color 0x%08x.\n", color);
+    color = get_surface_color(backbuffer2, 320, 240);
+    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+
+    IDirectDrawSurface7_Release(backbuffer3);
+    IDirectDrawSurface7_Release(backbuffer2);
+    IDirectDrawSurface7_Release(backbuffer1);
+    IDirectDrawSurface7_Release(primary);
+    refcount = IDirectDraw7_Release(ddraw);
+    ok(refcount == 0, "The ddraw object was not properly freed, refcount %u.\n", refcount);
+    DestroyWindow(window);
+}
+
+static void reset_ddsd(DDSURFACEDESC2 *ddsd)
+{
+    memset(ddsd, 0, sizeof(*ddsd));
+    ddsd->dwSize = sizeof(*ddsd);
+}
+
+static void test_set_surface_desc(void)
+{
+    IDirectDraw7 *ddraw;
+    HWND window;
+    HRESULT hr;
+    DDSURFACEDESC2 ddsd;
+    IDirectDrawSurface7 *surface;
+    BYTE data[16*16*4];
+    ULONG ref;
+    unsigned int i;
+    static const struct
+    {
+        DWORD caps, caps2;
+        BOOL supported;
+        const char *name;
+    }
+    invalid_caps_tests[] =
+    {
+        {DDSCAPS_VIDEOMEMORY, 0, FALSE, "videomemory plain"},
+        {DDSCAPS_TEXTURE | DDSCAPS_SYSTEMMEMORY, 0, TRUE, "systemmemory texture"},
+        {DDSCAPS_TEXTURE, DDSCAPS2_D3DTEXTUREMANAGE, FALSE, "managed texture"},
+        {DDSCAPS_TEXTURE, DDSCAPS2_TEXTUREMANAGE, FALSE, "managed texture"},
+    };
+
+    if (!(ddraw = create_ddraw()))
+    {
+        skip("Failed to create a ddraw object, skipping test.\n");
+        return;
+    }
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+
+    hr = IDirectDraw2_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_CAPS | DDSD_PIXELFORMAT;
+    ddsd.dwWidth = 8;
+    ddsd.dwHeight = 8;
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY;
+
+    hr = IDirectDraw7_CreateSurface(ddraw, &ddsd, &surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_LPSURFACE;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    /* Redundantly setting the same lpSurface is not an error. */
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &ddsd);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(!(ddsd.dwFlags & DDSD_LPSURFACE), "DDSD_LPSURFACE is set.\n");
+    ok(ddsd.lpSurface == NULL, "lpSurface is %p, expected NULL.\n", ddsd.lpSurface);
+
+    hr = IDirectDrawSurface7_Lock(surface, NULL, &ddsd, 0, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+    ok(!(ddsd.dwFlags & DDSD_LPSURFACE), "DDSD_LPSURFACE is set.\n");
+    ok(ddsd.lpSurface == data, "lpSurface is %p, expected %p.\n", data, data);
+    hr = IDirectDrawSurface7_Unlock(surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to unlock surface, hr %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_LPSURFACE;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 1);
+    ok(hr == DDERR_INVALIDPARAMS, "SetSurfaceDesc with flags=1 returned %#x.\n", hr);
+
+    ddsd.lpSurface = NULL;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting lpSurface=NULL returned %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, NULL, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "SetSurfaceDesc with NULL desc returned %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &ddsd);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(ddsd.ddsCaps.dwCaps == DDSCAPS_SYSTEMMEMORY, "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
+    ok(ddsd.ddsCaps.dwCaps2 == 0, "Got unexpected caps2 %#x.\n", 0);
+
+    /* Setting the caps is an error. This also means the original description cannot be reapplied. */
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting the original desc returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_CAPS;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting DDSD_CAPS returned %#x.\n", hr);
+
+    /* dwCaps = 0 is allowed, but ignored. Caps2 can be anything and is ignored too. */
+    ddsd.dwFlags = DDSD_CAPS | DDSD_LPSURFACE;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDCAPS, "Setting DDSD_CAPS returned %#x.\n", hr);
+    ddsd.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDCAPS, "Setting DDSD_CAPS returned %#x.\n", hr);
+    ddsd.ddsCaps.dwCaps = 0;
+    ddsd.ddsCaps.dwCaps2 = 0xdeadbeef;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &ddsd);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(ddsd.ddsCaps.dwCaps == DDSCAPS_SYSTEMMEMORY, "Got unexpected caps %#x.\n", ddsd.ddsCaps.dwCaps);
+    ok(ddsd.ddsCaps.dwCaps2 == 0, "Got unexpected caps2 %#x.\n", 0);
+
+    /* Setting the height is allowed, but it cannot be set to 0, and only if LPSURFACE is set too. */
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_HEIGHT;
+    ddsd.dwHeight = 16;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting height without lpSurface returned %#x.\n", hr);
+
+    ddsd.lpSurface = data;
+    ddsd.dwFlags = DDSD_HEIGHT | DDSD_LPSURFACE;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    ddsd.dwHeight = 0;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting height=0 returned %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &ddsd);
+    ok(SUCCEEDED(hr), "GetSurfaceDesc failed, hr %#x.\n", hr);
+    ok(ddsd.dwWidth == 8, "SetSurfaceDesc: Expected width 8, got %u.\n", ddsd.dwWidth);
+    ok(ddsd.dwHeight == 16, "SetSurfaceDesc: Expected height 16, got %u.\n", ddsd.dwHeight);
+
+    /* Pitch and width can be set, but only together, and only with LPSURFACE. They must not be 0. */
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_PITCH;
+    U1(ddsd).lPitch = 8 * 4;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting pitch without lpSurface or width returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_WIDTH;
+    ddsd.dwWidth = 16;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting width without lpSurface or pitch returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_PITCH | DDSD_LPSURFACE;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting pitch and lpSurface without width returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_LPSURFACE;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting width and lpSurface without pitch returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_PITCH | DDSD_LPSURFACE;
+    U1(ddsd).lPitch = 16 * 4;
+    ddsd.dwWidth = 16;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    hr = IDirectDrawSurface7_GetSurfaceDesc(surface, &ddsd);
+    ok(SUCCEEDED(hr), "Failed to get surface desc, hr %#x.\n", hr);
+    ok(ddsd.dwWidth == 16, "SetSurfaceDesc: Expected width 8, got %u.\n", ddsd.dwWidth);
+    ok(ddsd.dwHeight == 16, "SetSurfaceDesc: Expected height 16, got %u.\n", ddsd.dwHeight);
+    ok(U1(ddsd).lPitch == 16 * 4, "SetSurfaceDesc: Expected pitch 64, got %u.\n", U1(ddsd).lPitch);
+
+    /* The pitch must be 32 bit aligned and > 0, but is not verified for sanity otherwise.
+     *
+     * VMware rejects those calls, but all real drivers accept it. Mark the VMware behavior broken. */
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_PITCH | DDSD_LPSURFACE;
+    U1(ddsd).lPitch = 4 * 4;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr) || broken(hr == DDERR_INVALIDPARAMS), "Failed to set surface desc, hr %#x.\n", hr);
+
+    U1(ddsd).lPitch = 4;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr) || broken(hr == DDERR_INVALIDPARAMS), "Failed to set surface desc, hr %#x.\n", hr);
+
+    U1(ddsd).lPitch = 16 * 4 + 1;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting misaligned pitch returned %#x.\n", hr);
+
+    U1(ddsd).lPitch = 16 * 4 + 3;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting misaligned pitch returned %#x.\n", hr);
+
+    U1(ddsd).lPitch = -4;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting negative pitch returned %#x.\n", hr);
+
+    U1(ddsd).lPitch = 16 * 4;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_PITCH | DDSD_LPSURFACE;
+    U1(ddsd).lPitch = 0;
+    ddsd.dwWidth = 16;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting zero pitch returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_WIDTH | DDSD_PITCH | DDSD_LPSURFACE;
+    U1(ddsd).lPitch = 16 * 4;
+    ddsd.dwWidth = 0;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting zero width returned %#x.\n", hr);
+
+    /* Setting the pixelformat without LPSURFACE is an error, but with LPSURFACE it works. */
+    ddsd.dwFlags = DDSD_PIXELFORMAT;
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+    U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+    U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting the pixel format returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_PIXELFORMAT | DDSD_LPSURFACE;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+
+    /* Can't set color keys. */
+    reset_ddsd(&ddsd);
+    ddsd.dwFlags = DDSD_CKSRCBLT;
+    ddsd.ddckCKSrcBlt.dwColorSpaceLowValue = 0x00ff0000;
+    ddsd.ddckCKSrcBlt.dwColorSpaceHighValue = 0x00ff0000;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting ddckCKSrcBlt returned %#x.\n", hr);
+
+    ddsd.dwFlags = DDSD_CKSRCBLT | DDSD_LPSURFACE;
+    ddsd.lpSurface = data;
+    hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+    ok(hr == DDERR_INVALIDPARAMS, "Setting ddckCKSrcBlt returned %#x.\n", hr);
+
+    IDirectDrawSurface7_Release(surface);
+
+    /* SetSurfaceDesc needs systemmemory surfaces.
+     *
+     * As a sidenote, fourcc surfaces aren't allowed in sysmem, thus testing DDSD_LINEARSIZE is moot. */
+    for (i = 0; i < sizeof(invalid_caps_tests) / sizeof(*invalid_caps_tests); i++)
+    {
+        reset_ddsd(&ddsd);
+        ddsd.dwFlags = DDSD_WIDTH | DDSD_HEIGHT | DDSD_CAPS | DDSD_PIXELFORMAT;
+        ddsd.dwWidth = 8;
+        ddsd.dwHeight = 8;
+        U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+        U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+        U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+        U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00ff0000;
+        U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000ff00;
+        U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000ff;
+        ddsd.ddsCaps.dwCaps = invalid_caps_tests[i].caps;
+        ddsd.ddsCaps.dwCaps2 = invalid_caps_tests[i].caps2;
+
+        hr = IDirectDraw7_CreateSurface(ddraw, &ddsd, &surface, NULL);
+        ok(SUCCEEDED(hr) || hr == DDERR_NODIRECTDRAWHW, "Failed to create surface, hr %#x.\n", hr);
+        if (FAILED(hr))
+        {
+            skip("Cannot create a %s surface, skipping vidmem SetSurfaceDesc test.\n",
+                    invalid_caps_tests[i].name);
+            goto done;
+        }
+
+        reset_ddsd(&ddsd);
+        ddsd.dwFlags = DDSD_LPSURFACE;
+        ddsd.lpSurface = data;
+        hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+        if (invalid_caps_tests[i].supported)
+        {
+            ok(SUCCEEDED(hr), "Failed to set surface desc, hr %#x.\n", hr);
+        }
+        else
+        {
+            ok(hr == DDERR_INVALIDSURFACETYPE, "SetSurfaceDesc on a %s surface returned %#x.\n",
+                    invalid_caps_tests[i].name, hr);
+
+            /* Check priority of error conditions. */
+            ddsd.dwFlags = DDSD_WIDTH;
+            hr = IDirectDrawSurface7_SetSurfaceDesc(surface, &ddsd, 0);
+            ok(hr == DDERR_INVALIDSURFACETYPE, "SetSurfaceDesc on a %s surface returned %#x.\n",
+                    invalid_caps_tests[i].name, hr);
+        }
+
+        IDirectDrawSurface7_Release(surface);
+    }
+
+done:
+    ref = IDirectDraw7_Release(ddraw);
+    ok(ref == 0, "Ddraw object not properly released, refcount %u.\n", ref);
+    DestroyWindow(window);
+}
+
 START_TEST(ddraw7)
 {
     HMODULE module = GetModuleHandleA("ddraw.dll");
@@ -4745,6 +5394,9 @@ START_TEST(ddraw7)
     test_block_formats_creation();
     test_unsupported_formats();
     test_rt_caps();
+    test_primary_caps();
     test_surface_lock();
     test_surface_discard();
+    test_flip();
+    test_set_surface_desc();
 }

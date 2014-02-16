@@ -12,8 +12,10 @@ PUBLIC_IDL_H_SRCS = \
 	audioclient.idl \
 	audiopolicy.idl \
 	austream.idl \
+	bdaiface.idl \
 	bits.idl \
 	bits1_5.idl \
+	bits3_0.idl \
 	comcat.idl \
 	commoncontrols.idl \
 	control.idl \
@@ -160,6 +162,8 @@ SRCDIR_INCLUDES = \
 	basetsd.h \
 	basetyps.h \
 	bcrypt.h \
+	bdaiface_enums.h \
+	bdatypes.h \
 	binres.idl \
 	bitsmsg.h \
 	cderr.h \

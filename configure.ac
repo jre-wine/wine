@@ -725,7 +725,7 @@ all: libwine.dll libwine.a
 libwine.a: wine.def
 	\$(DLLTOOL) -l \$@ -d \$(srcdir)/wine.def
 
-libwine.dll: \$(OBJS) wine.def Makefile.in
+libwine.dll: \$(OBJS) wine.def
 	\$(CC) -shared \$(srcdir)/wine.def -o \$@ \$(OBJS) $crtlibs \$(EXTRALIBS)
 
 install install-lib:: libwine.dll \$(DESTDIR)\$(libdir) dummy
@@ -849,7 +849,7 @@ clean::
     AC_SUBST(LIBWINE_RULES,["
 all: libwine.dylib
 
-libwine.\$(VERSION).dylib: \$(OBJS) Makefile.in
+libwine.\$(VERSION).dylib: \$(OBJS)
 	\$(CC) -dynamiclib -install_name @rpath/libwine.\$(SOVERSION).dylib -Wl,-rpath,@loader_path/ -compatibility_version \$(SOVERSION) -current_version \$(VERSION) \$(OBJS) \$(EXTRALIBS) \$(LDFLAGS) \$(LIBS) -o \$@
 
 libwine.\$(SOVERSION).dylib: libwine.\$(VERSION).dylib
@@ -873,10 +873,10 @@ clean::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o Makefile.in wine_info.plist
+$wine_binary: main.o wine_info.plist
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
 
-wine-installed: main.o Makefile.in wine_info.plist
+wine-installed: main.o wine_info.plist
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
 
 wine_info.plist: wine_info.plist.in \$(top_builddir)/include/config.h
@@ -911,7 +911,7 @@ wine_info.plist: wine_info.plist.in \$(top_builddir)/include/config.h
     AC_SUBST(LIBWINE_RULES,["
 all: libwine.so
 
-libwine.so: \$(OBJS) Makefile.in
+libwine.so: \$(OBJS)
 	\$(CC) -shared \$(OBJS) \$(EXTRALIBS) \$(LDFLAGS) \$(LIBS) -o \$@
 
 install install-lib:: libwine.so \$(DESTDIR)\$(libdir) dummy
@@ -925,10 +925,10 @@ clean::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o Makefile.in
+$wine_binary: main.o
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
 
-wine-installed: main.o Makefile.in
+wine-installed: main.o
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
 "])
     ;;
@@ -993,7 +993,7 @@ wine-installed: main.o Makefile.in
     AC_SUBST(LIBWINE_RULES,["
 all: libwine.so
 
-libwine.so.\$(VERSION): \$(OBJS) wine.map Makefile.in
+libwine.so.\$(VERSION): \$(OBJS) wine.map
 	$LDSHARED \$(OBJS) \$(EXTRALIBS) \$(LDFLAGS) \$(LIBS) -o \$@
 
 libwine.so.\$(SOVERSION): libwine.so.\$(VERSION)
@@ -1017,10 +1017,10 @@ clean::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o Makefile.in
+$wine_binary: main.o
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
 
-wine-installed: main.o Makefile.in
+wine-installed: main.o
 	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
 "])
     ;;
@@ -1463,42 +1463,22 @@ then
     WINE_PACKAGE_FLAGS(FREETYPE,[freetype2],[-lfreetype],
                        [`(freetype-config --cflags || freetype2-config --cflags) 2>/dev/null`],
                        [`(freetype-config --libs || freetype2-config --libs) 2>/dev/null`],
-        [WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$FREETYPE_LIBS])
-        if test "$ft_lib" = "yes"
+        [AC_CHECK_HEADERS([ft2build.h])
+        if test "$ac_cv_header_ft2build_h" = "yes"
         then
-    	AC_CHECK_HEADERS(ft2build.h \
-                             freetype/freetype.h \
-                             freetype/ftglyph.h \
-                             freetype/fttypes.h \
-                             freetype/tttables.h \
-                             freetype/ftsnames.h \
-                             freetype/ttnameid.h \
-                             freetype/ftoutln.h \
-                             freetype/ftwinfnt.h \
-                             freetype/ftmodapi.h \
-                             freetype/ftlcdfil.h,,,
-                             [#ifdef HAVE_FT2BUILD_H
-# include <ft2build.h>
-#endif])
-    	AC_PREPROC_IFELSE([AC_LANG_SOURCE([[#include <ft2build.h>
-#include <freetype/fttrigon.h>]])],[AC_DEFINE(HAVE_FREETYPE_FTTRIGON_H, 1,
-              [Define if you have the <freetype/fttrigon.h> header file.])
-                        wine_cv_fttrigon=yes],[wine_cv_fttrigon=no])
-            AC_CHECK_TYPES(FT_TrueTypeEngineType,,,[#include <freetype/ftmodapi.h>])
-    	dnl Check that we have at least freetype/freetype.h
-    	if test "$ac_cv_header_freetype_freetype_h" = "yes" -a "$wine_cv_fttrigon" = "yes"
-    	then
-    	    AC_DEFINE(HAVE_FREETYPE, 1, [Define if FreeType 2 is installed])
-            else
-                FREETYPE_LIBS=""
-    	fi
+            WINE_CHECK_SONAME(freetype,FT_Init_FreeType,
+                [AC_DEFINE(HAVE_FREETYPE, 1, [Define if FreeType 2 is installed])
+                 AC_CHECK_TYPES(FT_TrueTypeEngineType,,,[#include <ft2build.h>
+#include FT_MODULE_H])],
+                [FREETYPE_LIBS=""],[$FREETYPE_LIBS])
         else
+            FREETYPE_CFLAGS=""
             FREETYPE_LIBS=""
         fi])
 fi
-WINE_ERROR_WITH(freetype,[test "x$ac_cv_header_freetype_freetype_h" != xyes -o "x$wine_cv_fttrigon" != xyes],
+WINE_ERROR_WITH(freetype,[test "x$ac_cv_lib_soname_freetype" = x],
                 [FreeType ${notice_platform}development files not found. Fonts will not be built.])
-test "x$ac_cv_header_freetype_freetype_h" = xyes -a "x$wine_cv_fttrigon" = xyes || enable_fonts=${enable_fonts:-no}
+test "x$ac_cv_lib_soname_freetype" = x && enable_fonts=${enable_fonts:-no}
 
 dnl **** Check for parport (currently Linux only) ****
 AC_CACHE_CHECK([for parport header/ppdev.h], ac_cv_c_ppdev,
@@ -2013,7 +1993,7 @@ case $host_os in
         AS_VAR_APPEND([LOADER_RULES],["
 all: $wine_binary-preloader
 
-$wine_binary-preloader: preloader.o Makefile.in
+$wine_binary-preloader: preloader.o
 	\$(CC) -o \$@ -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000 preloader.o \$(LIBPORT) \$(LDFLAGS)
 
 install install-lib:: $wine_binary-preloader \$(DESTDIR)\$(bindir)
@@ -2050,7 +2030,6 @@ AC_CHECK_FUNCS(\
 	dlopen \
 	epoll_create \
 	ffs \
-	finite \
 	fnmatch \
 	fork \
 	fpclass \
@@ -2551,6 +2530,17 @@ then
     AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
 fi
 
+dnl Check for isfinite
+ac_save_LIBS="$LIBS"
+LIBS="$LIBS -lm"
+AC_CACHE_CHECK([for isfinite], ac_cv_have_isfinite,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#define _GNU_SOURCE
+#include <math.h>]], [[float f = 0.0; return isfinite(f)]])],[ac_cv_have_isfinite="yes"],[ac_cv_have_isfinite="no"]))
+if test "$ac_cv_have_isfinite" = "yes"
+then
+    AC_DEFINE(HAVE_ISFINITE, 1, [Define to 1 if you have the `isfinite' function.])
+fi
+
 dnl Check for isinf
 ac_save_LIBS="$LIBS"
 LIBS="$LIBS -lm"
@@ -2680,7 +2670,6 @@ all: Makefile
 Makefile: Makefile.in Make.vars.in Make.rules config.status
 	@./config.status Make.tmp Makefile])
 
-WINE_CONFIG_SYMLINK(dlls/shell32,,[AUTHORS])
 WINE_CONFIG_SYMLINK(fonts,fonts,[marlett.ttf,symbol.ttf,tahoma.ttf,tahomabd.ttf],enable_fonts)
 WINE_CONFIG_SYMLINK(loader,loader,[l_intl.nls])
 WINE_CONFIG_SYMLINK(po,po,[LINGUAS])
@@ -3320,6 +3309,7 @@ WINE_CONFIG_MAKEFILE([libs/port])
 WINE_CONFIG_MAKEFILE([libs/wine],,[clean,install-dev,install-lib])
 WINE_CONFIG_MAKEFILE([libs/wpp])
 WINE_CONFIG_MAKEFILE([loader],,[clean,install-lib,manpage])
+WINE_CONFIG_PROGRAM(arp,,[install])
 WINE_CONFIG_PROGRAM(aspnet_regiis,,[install])
 WINE_CONFIG_PROGRAM(attrib,,[install,po])
 WINE_CONFIG_PROGRAM(cabarc,,[install])
@@ -3404,6 +3394,7 @@ WINE_CONFIG_PROGRAM(wscript,,[clean,install])
 WINE_CONFIG_TEST(programs/wscript/tests)
 WINE_CONFIG_PROGRAM(wusa,,[install])
 WINE_CONFIG_PROGRAM(xcopy,,[install,po])
+WINE_CONFIG_TEST(programs/xcopy/tests)
 WINE_CONFIG_MAKEFILE([server],,[clean,install-lib,manpage])
 WINE_CONFIG_TOOL(tools,[clean,install-dev,install-lib,manpage])
 WINE_CONFIG_TOOL(tools/widl,[clean,install-dev,manpage])
@@ -3525,6 +3516,10 @@ then
 	\$(CC) -Iinclude -I$srcdir/include \$(ALLCFLAGS) -o \$@ $srcdir/tools/makedep.c \$(LDFLAGS)
 clean:: __clean__
 	\$(RM) tools/makedep$ac_exeext])
+else
+    WINE_APPEND_RULE(
+[\$(MAKEDEP):
+	@echo \"You need to run make in $TOOLSDIR first\" && false])
 fi
 
 if test -n "$with_wine64"
