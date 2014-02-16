@@ -1550,7 +1550,7 @@ int macdrv_err_on;
                     // Test if the click was in the window's content area.
                     NSPoint nspoint = [self flippedMouseLocation:NSPointFromCGPoint(pt)];
                     NSRect contentRect = [window contentRectForFrameRect:[window frame]];
-                    process = NSPointInRect(nspoint, contentRect);
+                    process = NSMouseInRect(nspoint, contentRect, NO);
                     if (process && [window styleMask] & NSResizableWindowMask)
                     {
                         // Ignore clicks in the grow box (resize widget).
@@ -1573,7 +1573,7 @@ int macdrv_err_on;
                                                         NSMinY(contentRect),
                                                         bounds.size.width,
                                                         bounds.size.height);
-                            process = !NSPointInRect(nspoint, growBox);
+                            process = !NSMouseInRect(nspoint, growBox, NO);
                         }
                     }
                 }
@@ -1643,7 +1643,7 @@ int macdrv_err_on;
                 // Only process the event if it was in the window's content area.
                 NSPoint nspoint = [self flippedMouseLocation:NSPointFromCGPoint(pt)];
                 NSRect contentRect = [window contentRectForFrameRect:[window frame]];
-                process = NSPointInRect(nspoint, contentRect);
+                process = NSMouseInRect(nspoint, contentRect, NO);
             }
 
             if (process)
@@ -1809,6 +1809,8 @@ int macdrv_err_on;
                          queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *note){
             NSWindow* window = [note object];
+            if ([window isKindOfClass:[WineWindow class]] && [(WineWindow*)window isFakingClose])
+                return;
             [keyWindows removeObjectIdenticalTo:window];
             if (window == lastTargetWindow)
                 lastTargetWindow = nil;
