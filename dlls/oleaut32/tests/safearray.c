@@ -39,6 +39,10 @@
 #include "wtypes.h"
 #include "oleauto.h"
 
+#ifndef FADF_CREATEVECTOR
+  const USHORT FADF_CREATEVECTOR = 0x2000;
+#endif
+
 static HMODULE hOleaut32;
 
 static HRESULT (WINAPI *pSafeArrayAllocDescriptorEx)(VARTYPE,UINT,SAFEARRAY**);
@@ -57,6 +61,14 @@ static BOOL has_i8;
 /* Has INT_PTR/UINT_PTR type? */
 static BOOL has_int_ptr;
 
+static const USHORT ignored_copy_features[] =
+    {
+        FADF_AUTO,
+        FADF_STATIC,
+        FADF_EMBEDDED,
+        FADF_FIXEDSIZE
+    };
+
 #define START_REF_COUNT 1
 #define RECORD_SIZE 64
 #define RECORD_SIZE_FAIL 17
@@ -71,32 +83,33 @@ typedef struct IRecordInfoImpl
   DWORD clearCalled;
 } IRecordInfoImpl;
 
-static const IRecordInfoVtbl IRecordInfoImpl_VTable;
-
 static inline IRecordInfoImpl *impl_from_IRecordInfo(IRecordInfo *iface)
 {
   return CONTAINING_RECORD(iface, IRecordInfoImpl, IRecordInfo_iface);
 }
 
-static IRecordInfoImpl *IRecordInfoImpl_Construct(void)
+static HRESULT WINAPI RecordInfo_QueryInterface(IRecordInfo *iface, REFIID riid, void **obj)
 {
-  IRecordInfoImpl *rec;
+  *obj = NULL;
 
-  rec = HeapAlloc(GetProcessHeap(), 0, sizeof(IRecordInfoImpl));
-  rec->IRecordInfo_iface.lpVtbl = &IRecordInfoImpl_VTable;
-  rec->ref = START_REF_COUNT;
-  rec->clearCalled = 0;
-  rec->sizeCalled = 0;
-  return rec;
+  if (IsEqualIID(riid, &IID_IUnknown) ||
+      IsEqualIID(riid, &IID_IRecordInfo))
+  {
+      *obj = iface;
+      IRecordInfo_AddRef(iface);
+      return S_OK;
+  }
+
+  return E_NOINTERFACE;
 }
 
-static ULONG CALLBACK IRecordInfoImpl_AddRef(IRecordInfo *iface)
+static ULONG WINAPI RecordInfo_AddRef(IRecordInfo *iface)
 {
   IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
   return InterlockedIncrement(&This->ref);
 }
 
-static ULONG CALLBACK IRecordInfoImpl_Release(IRecordInfo *iface)
+static ULONG WINAPI RecordInfo_Release(IRecordInfo *iface)
 {
   IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
   ULONG ref = InterlockedDecrement(&This->ref);
@@ -107,16 +120,40 @@ static ULONG CALLBACK IRecordInfoImpl_Release(IRecordInfo *iface)
   return ref;
 }
 
+static HRESULT WINAPI RecordInfo_RecordInit(IRecordInfo *iface, PVOID pvNew)
+{
+  ok(0, "enexpected call\n");
+  return E_NOTIMPL;
+}
+
 static BOOL fail_GetSize; /* Whether to fail the GetSize call */
 
-static HRESULT CALLBACK IRecordInfoImpl_RecordClear(IRecordInfo *iface, PVOID pvExisting)
+static HRESULT WINAPI RecordInfo_RecordClear(IRecordInfo *iface, PVOID pvExisting)
 {
   IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
   This->clearCalled++;
   return S_OK;
 }
 
-static HRESULT CALLBACK IRecordInfoImpl_GetSize(IRecordInfo *iface, ULONG* size)
+static HRESULT WINAPI RecordInfo_RecordCopy(IRecordInfo *iface, PVOID pvExisting, PVOID pvNew)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetGuid(IRecordInfo *iface, GUID *pguid)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetName(IRecordInfo *iface, BSTR *pbstrName)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetSize(IRecordInfo *iface, ULONG* size)
 {
   IRecordInfoImpl* This = impl_from_IRecordInfo(iface);
   This->sizeCalled++;
@@ -129,36 +166,106 @@ static HRESULT CALLBACK IRecordInfoImpl_GetSize(IRecordInfo *iface, ULONG* size)
   return S_OK;
 }
 
-static HRESULT CALLBACK IRecordInfoImpl_Dummy(IRecordInfo *iface)
+static HRESULT WINAPI RecordInfo_GetTypeInfo(IRecordInfo *iface, ITypeInfo **ppTypeInfo)
 {
-  trace("Called an unexpected IRecordInfo method - please report!\n");
-  /* Quit because we'll just crash anyway */
-  fflush(NULL);
-  exit(255);
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
 }
 
-static const IRecordInfoVtbl IRecordInfoImpl_VTable =
+static HRESULT WINAPI RecordInfo_GetField(IRecordInfo *iface, PVOID pvData,
+                                                LPCOLESTR szFieldName, VARIANT *pvarField)
 {
-  (PVOID)IRecordInfoImpl_Dummy,
-  IRecordInfoImpl_AddRef,
-  IRecordInfoImpl_Release,
-  (PVOID)IRecordInfoImpl_Dummy,
-  IRecordInfoImpl_RecordClear,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  IRecordInfoImpl_GetSize,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_Dummy
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetFieldNoCopy(IRecordInfo *iface, PVOID pvData,
+                            LPCOLESTR szFieldName, VARIANT *pvarField, PVOID *ppvDataCArray)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_PutField(IRecordInfo *iface, ULONG wFlags, PVOID pvData,
+                                            LPCOLESTR szFieldName, VARIANT *pvarField)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_PutFieldNoCopy(IRecordInfo *iface, ULONG wFlags,
+                PVOID pvData, LPCOLESTR szFieldName, VARIANT *pvarField)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_GetFieldNames(IRecordInfo *iface, ULONG *pcNames,
+                                                BSTR *rgBstrNames)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static BOOL WINAPI RecordInfo_IsMatchingType(IRecordInfo *iface, IRecordInfo *info2)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static PVOID WINAPI RecordInfo_RecordCreate(IRecordInfo *iface)
+{
+  ok(0, "unexpected call\n");
+  return NULL;
+}
+
+static HRESULT WINAPI RecordInfo_RecordCreateCopy(IRecordInfo *iface, PVOID pvSource,
+                                                    PVOID *ppvDest)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static HRESULT WINAPI RecordInfo_RecordDestroy(IRecordInfo *iface, PVOID pvRecord)
+{
+  ok(0, "unexpected call\n");
+  return E_NOTIMPL;
+}
+
+static const IRecordInfoVtbl RecordInfoVtbl =
+{
+  RecordInfo_QueryInterface,
+  RecordInfo_AddRef,
+  RecordInfo_Release,
+  RecordInfo_RecordInit,
+  RecordInfo_RecordClear,
+  RecordInfo_RecordCopy,
+  RecordInfo_GetGuid,
+  RecordInfo_GetName,
+  RecordInfo_GetSize,
+  RecordInfo_GetTypeInfo,
+  RecordInfo_GetField,
+  RecordInfo_GetFieldNoCopy,
+  RecordInfo_PutField,
+  RecordInfo_PutFieldNoCopy,
+  RecordInfo_GetFieldNames,
+  RecordInfo_IsMatchingType,
+  RecordInfo_RecordCreate,
+  RecordInfo_RecordCreateCopy,
+  RecordInfo_RecordDestroy
 };
+
+static IRecordInfoImpl *IRecordInfoImpl_Construct(void)
+{
+  IRecordInfoImpl *rec;
+
+  rec = HeapAlloc(GetProcessHeap(), 0, sizeof(IRecordInfoImpl));
+  rec->IRecordInfo_iface.lpVtbl = &RecordInfoVtbl;
+  rec->ref = START_REF_COUNT;
+  rec->clearCalled = 0;
+  rec->sizeCalled = 0;
+  return rec;
+}
 
 static DWORD SAFEARRAY_GetVTSize(VARTYPE vt)
 {
@@ -1250,14 +1357,13 @@ static void test_SafeArrayGetPutElement_VARIANT(void)
   ok(hres == S_OK, "got 0x%08x\n", hres);
 }
 
-
 static void test_SafeArrayCopyData(void)
 {
   SAFEARRAYBOUND sab[4];
   SAFEARRAY *sa;
   SAFEARRAY *sacopy;
   HRESULT hres;
-  int dimension,size=1;
+  int dimension, size = 1, i;
 
   if (!pSafeArrayCopyData)
   {
@@ -1330,17 +1436,58 @@ static void test_SafeArrayCopyData(void)
 
   hres = SafeArrayCopy(sa, &sacopy);
   ok(hres == S_OK, "copy failed hres 0x%x\n", hres);
-  if (hres == S_OK)
+  ok(SafeArrayGetElemsize(sa) == SafeArrayGetElemsize(sacopy),"elemsize wrong\n");
+  ok(SafeArrayGetDim(sa) == SafeArrayGetDim(sacopy),"dimensions wrong\n");
+  ok(!memcmp(sa->pvData, sacopy->pvData, size * sizeof(int)), "compared different\n");
+  hres = SafeArrayDestroy(sacopy);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+
+  sacopy = SafeArrayCreate(VT_INT, NUM_DIMENSIONS, sab);
+  ok(sacopy != NULL, "Copy test couldn't create copy array\n");
+  ok(sacopy->fFeatures == FADF_HAVEVARTYPE, "0x%04x\n", sacopy->fFeatures);
+
+  for (i = 0; i < sizeof(ignored_copy_features)/sizeof(USHORT); i++)
   {
-    ok(SafeArrayGetElemsize(sa) == SafeArrayGetElemsize(sacopy),"elemsize wrong\n");
-    ok(SafeArrayGetDim(sa) == SafeArrayGetDim(sacopy),"dimensions wrong\n");
-    ok(!memcmp(sa->pvData, sacopy->pvData, size * sizeof(int)), "compared different\n");
-    hres = SafeArrayDestroy(sacopy);
-    ok(hres == S_OK, "got 0x%08x\n", hres);
+      USHORT feature = ignored_copy_features[i];
+      USHORT orig = sacopy->fFeatures;
+
+      sa->fFeatures |= feature;
+      hres = SafeArrayCopyData(sa, sacopy);
+      ok(hres == S_OK, "got 0x%08x\n", hres);
+      ok(sacopy->fFeatures == orig && orig == FADF_HAVEVARTYPE, "got features 0x%04x\n", sacopy->fFeatures);
+      sa->fFeatures &= ~feature;
   }
 
+  hres = SafeArrayDestroy(sacopy);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = SafeArrayDestroy(sa);
   ok(hres == S_OK, "got 0x%08x\n", hres);
+
+  /* copy data from a vector */
+  sa = SafeArrayCreateVector(VT_UI1, 0, 2);
+
+  sacopy = SafeArrayCreateVector(VT_UI1, 0, 2);
+  ok(sa->fFeatures == (FADF_HAVEVARTYPE|FADF_CREATEVECTOR) ||
+     broken(sa->fFeatures == FADF_CREATEVECTOR /* W2k */),
+     "got 0x%08x\n", sa->fFeatures);
+  ok(sacopy->fFeatures == (FADF_HAVEVARTYPE|FADF_CREATEVECTOR) ||
+     broken(sacopy->fFeatures == FADF_CREATEVECTOR /* W2k */),
+     "got 0x%08x\n", sacopy->fFeatures);
+  hres = SafeArrayCopyData(sa, sacopy);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(sacopy->fFeatures == (FADF_HAVEVARTYPE|FADF_CREATEVECTOR) ||
+     broken(sacopy->fFeatures == FADF_CREATEVECTOR /* W2k */),
+     "got 0x%04x\n", sacopy->fFeatures);
+  SafeArrayDestroy(sacopy);
+
+  sacopy = SafeArrayCreate(VT_UI1, NUM_DIMENSIONS, sab);
+  ok(sacopy != NULL, "Copy test couldn't create copy array\n");
+  ok(sacopy->fFeatures == FADF_HAVEVARTYPE, "0x%04x\n", sacopy->fFeatures);
+  hres = SafeArrayCopyData(sa, sacopy);
+  ok(hres == E_INVALIDARG, "got 0x%08x\n", hres);
+  SafeArrayDestroy(sacopy);
+
+  SafeArrayDestroy(sa);
 }
 
 static void test_SafeArrayCreateEx(void)
@@ -1541,6 +1688,7 @@ static void test_SafeArrayCopy(void)
   SAFEARRAY *sa, *sa2;
   VARIANTARG vSrc, vDst;
   HRESULT hres;
+  int i;
 
   sab.lLbound = 0;
   sab.cElements = 10;
@@ -1605,6 +1753,41 @@ static void test_SafeArrayCopy(void)
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = SafeArrayDestroy(sa);
   ok(hres == S_OK, "got 0x%08x\n", hres);
+
+  /* test feature copy */
+  hres = SafeArrayAllocDescriptor(1, &sa);
+  ok(hres == S_OK, "SafeArrayAllocDescriptor failed with error 0x%08x\n", hres);
+  ok(sa->fFeatures == 0, "got src features 0x%04x\n", sa->fFeatures);
+  sa->cbElements = 16;
+
+  for (i = 0; i < sizeof(ignored_copy_features)/sizeof(USHORT); i++)
+  {
+      USHORT feature = ignored_copy_features[i];
+
+      sa->fFeatures |= feature;
+      hres = SafeArrayCopy(sa, &sa2);
+      ok(hres == S_OK, "got 0x%08x\n", hres);
+      ok(sa2->fFeatures == 0, "got features 0x%04x\n", sa2->fFeatures);
+      hres = SafeArrayDestroy(sa2);
+      ok(hres == S_OK, "got 0x%08x\n", hres);
+      sa->fFeatures &= ~feature;
+  }
+
+  SafeArrayDestroy(sa);
+
+  /* copy from a vector */
+  sa = SafeArrayCreateVector(VT_UI1, 0, 2);
+  ok(sa->fFeatures == (FADF_HAVEVARTYPE|FADF_CREATEVECTOR) ||
+     broken(sa->fFeatures == FADF_CREATEVECTOR /* W2k */),
+     "got 0x%08x\n", sa->fFeatures);
+  hres = SafeArrayCopy(sa, &sa2);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(sa2->fFeatures == FADF_HAVEVARTYPE ||
+     broken(!sa2->fFeatures /* W2k */), "got 0x%04x\n",
+     sa2->fFeatures);
+
+  SafeArrayDestroy(sa2);
+  SafeArrayDestroy(sa);
 }
 
 #define MKARRAY(low,num,typ) sab.lLbound = low; sab.cElements = num; \

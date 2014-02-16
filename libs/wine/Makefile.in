@@ -1,12 +1,5 @@
 EXTRALIBS = $(LIBPORT) @LIBDL@ @COREFOUNDATIONLIB@ @CORESERVICESLIB@
-EXTRADEFS = -DWINE_UNICODE_API="" \
-	-DBINDIR='"$(bindir)"' \
-	-DDLLDIR='"$(dlldir)"' \
-	-DDLLPREFIX='"$(DLLPREFIX)"' \
-	-DLIB_TO_BINDIR=\"`$(MAKEDEP) -R $(libdir) $(bindir)`\" \
-	-DLIB_TO_DLLDIR=\"`$(MAKEDEP) -R $(libdir) $(dlldir)`\" \
-	-DBIN_TO_DLLDIR=\"`$(MAKEDEP) -R $(bindir) $(dlldir)`\" \
-	-DBIN_TO_DATADIR=\"`$(MAKEDEP) -R $(bindir) $(datadir)/wine`\"
+EXTRADEFS = -DWINE_UNICODE_API=""
 STATICLIB = libwine_static.a
 
 C_SRCS = \
@@ -102,12 +95,20 @@ C_SRCS = \
 
 EXTRA_OBJS = version.o
 
-@MAKE_RULES@
+config_EXTRADEFS = \
+	-DBINDIR='"${bindir}"' \
+	-DDLLDIR='"${dlldir}"' \
+	-DDLLPREFIX='"$(DLLPREFIX)"' \
+	-DLIB_TO_BINDIR=\"`$(MAKEDEP) -R ${libdir} ${bindir}`\" \
+	-DLIB_TO_DLLDIR=\"`$(MAKEDEP) -R ${libdir} ${dlldir}`\" \
+	-DBIN_TO_DLLDIR=\"`$(MAKEDEP) -R ${bindir} ${dlldir}`\" \
+	-DBIN_TO_DATADIR=\"`$(MAKEDEP) -R ${bindir} ${datadir}/wine`\"
 
 version.c: dummy
 	version=`(GIT_DIR=$(top_srcdir)/.git git describe HEAD 2>/dev/null || echo "wine-@PACKAGE_VERSION@") | sed -n -e '$$s/\(.*\)/const char wine_build[] = "\1";/p'` && (echo $$version | cmp -s - $@) || echo $$version >$@ || ($(RM) $@ && exit 1)
 
 # Make sure that make_makefiles sees the generated rules
+.PHONY: install install-lib install-dev uninstall
 install install-lib::
 install install-dev::
 clean::

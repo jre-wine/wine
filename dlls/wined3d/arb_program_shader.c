@@ -767,7 +767,7 @@ static void shader_arb_update_float_pixel_constants(struct wined3d_device *devic
 
 static void shader_arb_append_imm_vec4(struct wined3d_shader_buffer *buffer, const float *values)
 {
-    char str[4][16];
+    char str[4][17];
 
     wined3d_ftoa(values[0], str[0]);
     wined3d_ftoa(values[1], str[1]);
@@ -1119,7 +1119,7 @@ static void shader_arb_get_register_name(const struct wined3d_shader_instruction
             if (!pshader && reg->idx[0].rel_addr)
             {
                 const struct arb_vshader_private *shader_data = shader->backend_data;
-                UINT rel_offset = shader_data->rel_offset;
+                UINT rel_offset = ctx->target_version == ARB ? shader_data->rel_offset : 0;
                 BOOL aL = FALSE;
                 char rel_reg[50];
                 if (reg_maps->shader_version.major < 2)
@@ -1849,7 +1849,7 @@ static void shader_hw_mov(const struct wined3d_shader_instruction *ins)
         const struct arb_vshader_private *shader_data = shader->backend_data;
         src0_param[0] = '\0';
 
-        if (shader_data->rel_offset)
+        if (shader_data->rel_offset && ctx->target_version == ARB)
         {
             const char *offset = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_VS_REL_OFFSET);
             shader_arb_get_src_param(ins, &ins->src[0], 0, src0_param);
@@ -3605,7 +3605,7 @@ static GLuint shader_arb_generate_pshader(const struct wined3d_shader *shader,
     BOOL custom_linear_fog = FALSE;
 
     char srgbtmp[4][4];
-    char ftoa_tmp[16];
+    char ftoa_tmp[17];
     unsigned int i, found = 0;
 
     for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
@@ -4220,7 +4220,7 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
         shader_addline(buffer, "TEMP TMP_FOGCOORD;\n");
     if (need_helper_const(shader_data, reg_maps, gl_info))
     {
-        char ftoa_tmp[16];
+        char ftoa_tmp[17];
         wined3d_ftoa(eps, ftoa_tmp);
         shader_addline(buffer, "PARAM helper_const = { 0.0, 1.0, 2.0, %s};\n", ftoa_tmp);
     }
@@ -7116,7 +7116,7 @@ static void upload_palette(const struct wined3d_surface *surface, struct wined3d
     struct wined3d_device *device = surface->resource.device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct arbfp_blit_priv *priv = device->blit_priv;
-    BOOL colorkey = (surface->CKeyFlags & WINEDDSD_CKSRCBLT) != 0;
+    BOOL colorkey = !!(surface->container->color_key_flags & WINEDDSD_CKSRCBLT);
 
     d3dfmt_p8_init_palette(surface, table, colorkey);
 
@@ -7454,7 +7454,8 @@ HRESULT arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
 
     /* Now load the surface */
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO
-            && (src_surface->flags & (SFLAG_INTEXTURE | SFLAG_INDRAWABLE)) == SFLAG_INDRAWABLE
+            && (src_surface->locations & (WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_DRAWABLE))
+            == WINED3D_LOCATION_DRAWABLE
             && !surface_is_offscreen(src_surface))
     {
         /* Without FBO blits transferring from the drawable to the texture is

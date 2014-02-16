@@ -95,7 +95,6 @@ ME_DisplayItem *ME_FindItemBackOrHere(ME_DisplayItem *di, ME_DIType nTypeOrClass
 ME_DisplayItem *ME_MakeDI(ME_DIType type) DECLSPEC_HIDDEN;
 void ME_DestroyDisplayItem(ME_DisplayItem *item) DECLSPEC_HIDDEN;
 void ME_DumpDocument(ME_TextBuffer *buffer) DECLSPEC_HIDDEN;
-const char *ME_GetDITypeName(ME_DIType type) DECLSPEC_HIDDEN;
 
 /* string.c */
 ME_String *ME_MakeStringN(LPCWSTR szText, int nMaxChars) DECLSPEC_HIDDEN;
@@ -107,6 +106,8 @@ int ME_FindNonWhitespaceV(const ME_String *s, int nVChar) DECLSPEC_HIDDEN;
 int ME_CallWordBreakProc(ME_TextEditor *editor, WCHAR *str, INT len, INT start, INT code) DECLSPEC_HIDDEN;
 void ME_StrDeleteV(ME_String *s, int nVChar, int nChars) DECLSPEC_HIDDEN;
 BOOL ME_InsertString(ME_String *s, int ofs, const WCHAR *insert, int len) DECLSPEC_HIDDEN;
+
+#define CP_UNICODE 1200
 
 /* smart helpers for A<->W conversions, they reserve/free memory and call MultiByte<->WideChar functions */
 LPWSTR ME_ToUnicode(BOOL unicode, LPVOID psz, INT *len) DECLSPEC_HIDDEN;

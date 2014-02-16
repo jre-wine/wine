@@ -1083,7 +1083,8 @@ struct wined3d_context
     DWORD lastWasPow2Texture : 8;       /* MAX_TEXTURES, 8 */
     DWORD fixed_function_usage_map : 8; /* MAX_TEXTURES, 8 */
     DWORD lowest_disabled_stage : 4;    /* Max MAX_TEXTURES, 8 */
-    DWORD padding : 20;
+    DWORD rebind_fbo : 1;
+    DWORD padding : 19;
     DWORD shader_update_mask;
     DWORD constant_update_mask;
     DWORD                   numbered_array_mask;
@@ -1116,7 +1117,6 @@ struct wined3d_context
     struct fbo_entry        *current_fbo;
     GLuint                  fbo_read_binding;
     GLuint                  fbo_draw_binding;
-    BOOL rebind_fbo;
     struct wined3d_surface **blit_targets;
     GLenum *draw_buffers;
     DWORD draw_buffers_mask; /* Enabled draw buffers, 31 max. */
@@ -1999,7 +1999,6 @@ struct wined3d_resource
     UINT depth;
     UINT size;
     DWORD priority;
-    BYTE *allocatedMemory; /* Pointer to the real data location */
     void *heap_memory;
     struct list privateData;
     struct list resource_list_entry;
@@ -2082,6 +2081,13 @@ struct wined3d_texture
     const struct min_lookup *min_mip_lookup;
     const GLenum *mag_lookup;
     GLenum target;
+
+    /* Color keys for DDraw */
+    struct wined3d_color_key dst_blt_color_key;
+    struct wined3d_color_key src_blt_color_key;
+    struct wined3d_color_key dst_overlay_color_key;
+    struct wined3d_color_key src_overlay_color_key;
+    DWORD color_key_flags;
 };
 
 static inline struct wined3d_texture *wined3d_texture_from_resource(struct wined3d_resource *resource)
@@ -2113,9 +2119,14 @@ void wined3d_texture_set_dirty(struct wined3d_texture *texture) DECLSPEC_HIDDEN;
 
 #define WINED3D_LOCATION_DISCARDED      0x00000001
 #define WINED3D_LOCATION_SYSMEM         0x00000002
-#define WINED3D_LOCATION_BUFFER         0x00000004
-#define WINED3D_LOCATION_TEXTURE_RGB    0x00000008
-#define WINED3D_LOCATION_TEXTURE_SRGB   0x00000010
+#define WINED3D_LOCATION_USER_MEMORY    0x00000004
+#define WINED3D_LOCATION_DIB            0x00000008
+#define WINED3D_LOCATION_BUFFER         0x00000010
+#define WINED3D_LOCATION_TEXTURE_RGB    0x00000020
+#define WINED3D_LOCATION_TEXTURE_SRGB   0x00000040
+#define WINED3D_LOCATION_DRAWABLE       0x00000080
+#define WINED3D_LOCATION_RB_MULTISAMPLE 0x00000100
+#define WINED3D_LOCATION_RB_RESOLVED    0x00000200
 
 const char *wined3d_debug_location(DWORD location) DECLSPEC_HIDDEN;
 
@@ -2174,7 +2185,6 @@ struct wined3d_surface_ops
 {
     HRESULT (*surface_private_setup)(struct wined3d_surface *surface);
     void (*surface_realize_palette)(struct wined3d_surface *surface);
-    BYTE *(*surface_map)(struct wined3d_surface *surface, const RECT *rect, DWORD flags);
     void (*surface_unmap)(struct wined3d_surface *surface);
 };
 
@@ -2185,8 +2195,9 @@ struct wined3d_surface
     struct wined3d_texture *container;
     struct wined3d_swapchain *swapchain;
     struct wined3d_palette *palette; /* D3D7 style palette handling */
-    DWORD draw_binding;
+    DWORD draw_binding, map_binding;
     void *user_memory;
+    DWORD locations;
 
     DWORD flags;
 
@@ -2210,14 +2221,6 @@ struct wined3d_surface
     /* For GetDC */
     struct wined3d_surface_dib dib;
     HDC                       hDC;
-    void                      *getdc_map_mem;
-
-    /* Color keys for DDraw */
-    struct wined3d_color_key dst_blt_color_key;
-    struct wined3d_color_key src_blt_color_key;
-    struct wined3d_color_key dst_overlay_color_key;
-    struct wined3d_color_key src_overlay_color_key;
-    DWORD                     CKeyFlags;
 
     struct wined3d_color_key gl_color_key;
 
@@ -2273,6 +2276,7 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
 void surface_validate_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
 HRESULT CDECL wined3d_surface_create(struct wined3d_texture *container,
         const struct wined3d_resource_desc *desc, DWORD flags, struct wined3d_surface **surface) DECLSPEC_HIDDEN;
+void surface_prepare_map_memory(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 
 void get_drawable_size_swapchain(const struct wined3d_context *context, UINT *width, UINT *height) DECLSPEC_HIDDEN;
 void get_drawable_size_backbuffer(const struct wined3d_context *context, UINT *width, UINT *height) DECLSPEC_HIDDEN;
@@ -2294,39 +2298,18 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 #define SFLAG_GLCKEY            0x00000100 /* The GL texture was created with a color key. */
 #define SFLAG_CLIENT            0x00000200 /* GL_APPLE_client_storage is used with this surface. */
 #define SFLAG_DIBSECTION        0x00000400 /* Has a DIB section attached for GetDC. */
-#define SFLAG_USERPTR           0x00000800 /* The application allocated the memory for this surface. */
-#define SFLAG_ALLOCATED         0x00001000 /* A GL texture is allocated for this surface. */
-#define SFLAG_SRGBALLOCATED     0x00002000 /* A sRGB GL texture is allocated for this surface. */
-#define SFLAG_PBO               0x00004000 /* The surface has a PBO. */
-#define SFLAG_INSYSMEM          0x00008000 /* The system memory copy is current. */
-#define SFLAG_INTEXTURE         0x00010000 /* The GL texture is current. */
-#define SFLAG_INSRGBTEX         0x00020000 /* The GL sRGB texture is current. */
-#define SFLAG_INDRAWABLE        0x00040000 /* The GL drawable is current. */
-#define SFLAG_INRB_MULTISAMPLE  0x00080000 /* The multisample renderbuffer is current. */
-#define SFLAG_INRB_RESOLVED     0x00100000 /* The resolved renderbuffer is current. */
-#define SFLAG_DISCARDED         0x00200000 /* Surface was discarded, allocating new location is enough. */
+#define SFLAG_ALLOCATED         0x00000800 /* A GL texture is allocated for this surface. */
+#define SFLAG_SRGBALLOCATED     0x00001000 /* A sRGB GL texture is allocated for this surface. */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_CONVERTED: Converting the data back would take too long
- * SFLAG_DIBSECTION: The dib code manages the memory
  * SFLAG_DYNLOCK: Avoid freeing the data for performance
- * SFLAG_PBO: PBOs don't use 'normal' memory. It is either allocated by the driver or must be NULL.
  * SFLAG_CLIENT: OpenGL uses our memory as backup
  */
 #define SFLAG_DONOTFREE     (SFLAG_CONVERTED        | \
                              SFLAG_DYNLOCK          | \
                              SFLAG_CLIENT           | \
-                             SFLAG_DIBSECTION       | \
-                             SFLAG_USERPTR          | \
-                             SFLAG_PBO              | \
                              SFLAG_PIN_SYSMEM)
-
-#define SFLAG_LOCATIONS     (SFLAG_INSYSMEM         | \
-                             SFLAG_INTEXTURE        | \
-                             SFLAG_INSRGBTEX        | \
-                             SFLAG_INDRAWABLE       | \
-                             SFLAG_INRB_MULTISAMPLE | \
-                             SFLAG_INRB_RESOLVED)
 
 enum wined3d_conversion_type
 {
@@ -2473,6 +2456,7 @@ void wined3d_cs_emit_draw(struct wined3d_cs *cs, UINT start_idx, UINT index_coun
 void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *swapchain,
         const RECT *src_rect, const RECT *dst_rect, HWND dst_window_override,
         const RGNDATA *dirty_region, DWORD flags) DECLSPEC_HIDDEN;
+void wined3d_cs_emit_reset_state(struct wined3d_cs *cs) DECLSPEC_HIDDEN;
 void wined3d_cs_emit_set_clip_plane(struct wined3d_cs *cs, UINT plane_idx,
         const struct wined3d_vec4 *plane) DECLSPEC_HIDDEN;
 void wined3d_cs_emit_set_constant_buffer(struct wined3d_cs *cs, enum wined3d_shader_type type,
@@ -2559,6 +2543,7 @@ struct wined3d_buffer
     GLenum buffer_object_usage;
     GLenum buffer_type_hint;
     DWORD flags;
+    void *map_ptr;
 
     struct wined3d_map_range *maps;
     ULONG maps_size, modified_areas;
@@ -2662,7 +2647,6 @@ const char *debug_fbostatus(GLenum status) DECLSPEC_HIDDEN;
 const char *debug_glerror(GLenum error) DECLSPEC_HIDDEN;
 const char *debug_d3dtop(enum wined3d_texture_op d3dtop) DECLSPEC_HIDDEN;
 void dump_color_fixup_desc(struct color_fixup_desc fixup) DECLSPEC_HIDDEN;
-const char *debug_surflocation(DWORD flag) DECLSPEC_HIDDEN;
 
 BOOL is_invalid_op(const struct wined3d_state *state, int stage,
         enum wined3d_texture_op op, DWORD arg1, DWORD arg2, DWORD arg3) DECLSPEC_HIDDEN;
@@ -2951,8 +2935,6 @@ struct wined3d_palette
     WORD                       palVersion;     /*|               */
     WORD                       palNumEntries;  /*|  LOGPALETTE   */
     PALETTEENTRY               palents[256];   /*|               */
-    /* This is to store the palette in 'screen format' */
-    int                        screen_palents[256];
     DWORD flags;
 };
 

@@ -1715,7 +1715,7 @@ static void test_effect_parameter_value(IDirect3DDevice9 *device)
             /* check size */
             ok(EFFECT_PARAMETER_VALUE_ARRAY_SIZE >= res_desc->Bytes / 4 +
                     (res_desc->Elements ? res_desc->Bytes / 4 / res_desc->Elements : 0),
-                    "%u - %s: Warning: Array size to small\n", i, res_full_name);
+                    "%u - %s: Warning: Array size too small\n", i, res_full_name);
 
             test_effect_parameter_value_GetTestGroup(&res[k], effect, &blob[res_value_offset], parameter, i);
             test_effect_parameter_value_ResetValue(&res[k], effect, &blob[res_value_offset], parameter, i);
@@ -2691,7 +2691,8 @@ START_TEST(effect)
     HRESULT hr;
     ULONG count;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL)))
+    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
+            640, 480, NULL, NULL, NULL, NULL)))
     {
         skip("Couldn't create application window\n");
         return;

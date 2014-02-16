@@ -10149,7 +10149,7 @@ msgstr "Wine Befehlsprozessor"
 
 #: cmd.rc:351
 msgid "Microsoft Windows %1!S!\n"
-msgstr ""
+msgstr "Microsoft Windows %1!S!\n"
 
 #: cmd.rc:352
 msgid "More? "
@@ -10217,6 +10217,14 @@ msgstr "Aufruf: dxdiag [/whql:off | /whql:on] [/t Dateiname | /x Dateiname]"
 #: explorer.rc:31
 msgid "Wine Explorer"
 msgstr "Wine Explorer"
+
+#: explorer.rc:33
+msgid "Start"
+msgstr "Start"
+
+#: explorer.rc:34 winefile.rc:36
+msgid "&Run..."
+msgstr "&Ausführen..."
 
 #: hostname.rc:30
 msgid "Usage: hostname\n"
@@ -13530,10 +13538,6 @@ msgstr "&Umbenennen..."
 #: winefile.rc:34
 msgid "Propert&ies\tAlt+Enter"
 msgstr "&Eigenschaften\tAlt+Eingabetaste"
-
-#: winefile.rc:36
-msgid "&Run..."
-msgstr "&Ausführen..."
 
 #: winefile.rc:38
 msgid "Cr&eate Directory..."
