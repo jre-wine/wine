@@ -7,64 +7,40 @@
 # EXTRA_OBJS   : extra object files
 # IMPORTS      : dlls to import
 # DELAYIMPORTS : dlls to import in delayed mode
-# EXTRASUBDIRS : subdirectories that do not contain a Makefile
 # MODCFLAGS    : extra CFLAGS for this module
 
 # First some useful definitions
 
-INCLUDES     = -I$(srcdir) -I. -I$(top_srcdir)/include -I$(top_builddir)/include $(EXTRAINCL)
 DEFS         = -D__WINESRC__ $(EXTRADEFS)
-ALLCFLAGS    = $(INCLUDES) $(DEFS) $(DLLFLAGS) $(EXTRACFLAGS) $(CPPFLAGS) $(CFLAGS) $(MODCFLAGS)
-IDLFLAGS     = $(INCLUDES) $(DEFS) $(EXTRAIDLFLAGS)
-RCFLAGS      = --nostdinc $(PORCFLAGS) $(TARGETFLAGS) $(INCLUDES) $(DEFS) $(EXTRARCFLAGS)
+ALLCFLAGS    = $(DEFS) $(DLLFLAGS) $(EXTRACFLAGS) $(CPPFLAGS) $(CFLAGS) $(MODCFLAGS)
+IDLFLAGS     = $(DEFS) $(EXTRAIDLFLAGS)
+RCFLAGS      = --nostdinc $(PORCFLAGS) $(TARGETFLAGS) $(DEFS) $(EXTRARCFLAGS)
 
 IDL_GEN_C_SRCS  = $(IDL_C_SRCS:.idl=_c.c) $(IDL_I_SRCS:.idl=_i.c) \
                   $(IDL_P_SRCS:.idl=_p.c) $(IDL_S_SRCS:.idl=_s.c)
-IDL_GEN_HEADERS = $(IDL_H_SRCS:.idl=.h) $(IDL_C_SRCS:.idl=.h) $(IDL_I_SRCS:.idl=.h) \
-                  $(IDL_P_SRCS:.idl=.h) $(IDL_S_SRCS:.idl=.h)
 
-CLEAN_FILES   = *.o *.a *.so *.mo *.res *.fake *.ok *.tab.[ch] *.yy.c
-CLEAN_TARGETS = $(MODULE) $(IMPORTLIB:%=lib%.@IMPLIBEXT@) $(IDL_GEN_C_SRCS) $(IDL_GEN_HEADERS) \
-                $(IDL_TLB_SRCS:.idl=.tlb) $(IDL_P_SRCS:.idl=_p.c dlldata.c) \
-                $(PO_SRCS:.rc=.res rsrc.pot) $(MC_SRCS:.mc=.res msg.pot) $(XTEMPLATE_SRCS:.x=.h) \
-                $(TESTMODULE:%=% testlist.c) $(CROSSTESTMODULE)
+CLEAN_FILES   = *.o *.a *.so *.res *.fake *.ok *.tab.[ch] *.yy.c
+CLEAN_TARGETS = $(MODULE) $(IMPORTLIB:%=lib%.@IMPLIBEXT@) $(XTEMPLATE_SRCS:.x=.h) \
+                $(TESTMODULE) $(TESTMODULE_STRIPPED) $(CROSSTESTMODULE)
 
 OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o) $(IDL_GEN_C_SRCS:.c=.o) $(OBJC_SRCS:.m=.o) \
        $(IDL_R_SRCS:.idl=_r.res) $(IDL_TLB_RES) $(RC_SRCS:.rc=.res) $(MC_SRCS:.mc=.res) $(EXTRA_OBJS)
 
 CROSSOBJS = $(OBJS:.o=.cross.o)
-ALLCROSSCFLAGS = $(INCLUDES) $(DEFS) -DWINE_CROSSTEST $(CPPFLAGS) $(CFLAGS)
+ALLCROSSCFLAGS = $(DEFS) -DWINE_CROSSTEST $(CPPFLAGS) $(CFLAGS)
 
 # Implicit rules
 
-.SUFFIXES: .ok .man.in .man .cross.o .po .mo @MAINTAINER_MODE@ .sfd .ttf .svg .ico .bmp
-
-.c.o:
-	$(CC) -c $(ALLCFLAGS) -o $@ $<
-
-.m.o:
-	$(CC) -c $(ALLCFLAGS) -o $@ $<
-
-.c.cross.o:
-	$(CROSSCC) -c $(INCLUDES) $(DEFS) -DWINE_CROSSTEST $(CPPFLAGS) $(CFLAGS) -o $@ $<
-
-.c.ok:
-	$(RUNTEST) $(RUNTESTFLAGS) $< && touch $@
+@MAINTAINER_MODE@.SUFFIXES: .sfd .ttf .svg .ico .bmp
 
 .sfd.ttf:
 	$(FONTFORGE) -script $(top_srcdir)/fonts/genttf.ff $< $@
-
-.man.in.man:
-	LC_ALL=C sed -e 's,@bindir\@,$(bindir),g' -e 's,@dlldir\@,$(dlldir),g' -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' $< >$@ || ($(RM) $@ && false)
 
 .svg.ico:
 	CONVERT="$(CONVERT)" ICOTOOL="$(ICOTOOL)" RSVG="$(RSVG)" $(BUILDIMAGE) $< $@
 
 .svg.bmp:
 	CONVERT="$(CONVERT)" ICOTOOL="$(ICOTOOL)" RSVG="$(RSVG)" $(BUILDIMAGE) $< $@
-
-.po.mo:
-	$(MSGFMT) -o $@ $<
 
 # Rules for main module
 
@@ -102,10 +78,10 @@ $(IMPORTLIB:%=lib%.cross.a): $(MAINSPEC) $(IMPLIB_SRCS:.c=.cross.o)
 
 DEPEND_SRCS = $(C_SRCS) $(OBJC_SRCS) $(RC_SRCS) $(MC_SRCS) \
               $(IDL_H_SRCS) $(IDL_C_SRCS) $(IDL_I_SRCS) $(IDL_P_SRCS) $(IDL_S_SRCS) $(IDL_R_SRCS) $(IDL_TLB_SRCS) \
-              $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_OBJS)
+              $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_OBJS) $(MANPAGES)
 
 depend: dummy
-	$(MAKEDEP) $(MAKEDEPFLAGS) -C$(srcdir) -S$(top_srcdir) -T$(top_builddir) $(EXTRAINCL) $(DEPEND_SRCS)
+	$(MAKEDEP) $(MAKEDEPFLAGS) -C$(srcdir) -S$(top_srcdir) -T$(top_builddir) $(PARENTSRC:%=-P%) $(EXTRAINCL) $(DEPEND_SRCS)
 
 .PHONY: depend
 
@@ -123,48 +99,18 @@ $(CROSSTESTMODULE): $(CROSSOBJS) Makefile.in
 $(WINETEST_RES): $(TESTMODULE_STRIPPED)
 	echo "$(TESTMODULE) TESTRES \"$(TESTMODULE_STRIPPED)\"" | $(WRC) $(RCFLAGS) -o $@
 
-testclean::
-	$(RM) *.ok
-
-.PHONY: check test testclean
-
 # Rules for man pages
 
-MANPAGES = $(MANPAGE) $(EXTRA_MANPAGES)
+all: $(MANPAGES:.man.in=.man)
 
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGE) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) $(MANPAGE) $(DESTDIR)$(mandir)/man$(prog_manext)/$(MANPAGE:.man=).$(prog_manext)
-
-uninstall-man-pages::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/$(MANPAGE:.man=).$(prog_manext)
-
-.PHONY: install-man-pages uninstall-man-pages
-
-# Rules for auto documentation
-
-manpages:: $(C_SRCS) dummy
-	$(C2MAN) -o $(top_builddir)/documentation/man$(api_manext) -R$(top_builddir) -C$(srcdir) $(INCLUDES) -S$(api_manext) $(MAINSPEC:%=-w %) $(C_SRCS)
-
-htmlpages:: $(C_SRCS) dummy
-	$(C2MAN) -o $(top_builddir)/documentation/html -R$(top_builddir) -C$(srcdir) $(INCLUDES) -Th $(MAINSPEC:%=-w %) $(C_SRCS)
-
-sgmlpages:: $(C_SRCS) dummy
-	$(C2MAN) -o $(top_builddir)/documentation/api-guide -R$(top_builddir) -C$(srcdir) $(INCLUDES) -Ts $(MAINSPEC:%=-w %) $(C_SRCS)
-
-xmlpages:: $(C_SRCS) dummy
-	$(C2MAN) -o $(top_builddir)/documentation/api-guide-xml -R$(top_builddir) -C$(srcdir) $(INCLUDES) -Tx $(MAINSPEC:%=-w %) $(C_SRCS)
+.PHONY: install-man-pages
 
 # Rules for cleaning
 
-$(EXTRASUBDIRS:%=%/clean): dummy
-	-cd `dirname $@` && $(RM) $(CLEAN_FILES)
+clean::
+	$(RM) $(CLEAN_FILES) $(CLEAN_TARGETS) $(PROGRAMS)
 
-clean:: $(EXTRASUBDIRS:%=%/clean)
-	$(RM) $(CLEAN_FILES) $(CLEAN_TARGETS) $(PROGRAMS) $(MANPAGES)
-
-.PHONY: clean $(EXTRASUBDIRS:%=%/clean)
+.PHONY: clean
 
 # Rules for installing
 

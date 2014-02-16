@@ -1921,11 +1921,11 @@ struct wined3d_device
     UINT                    xScreenSpace;
     UINT                    yScreenSpace;
     UINT                    cursorWidth, cursorHeight;
-    GLuint                  cursorTexture;
+    struct wined3d_texture *cursor_texture;
     HCURSOR                 hardwareCursor;
 
-    /* The Wine logo surface */
-    struct wined3d_surface *logo_surface;
+    /* The Wine logo texture */
+    struct wined3d_texture *logo_texture;
 
     /* Textures for when no other textures are mapped */
     UINT dummy_texture_2d[MAX_COMBINED_SAMPLERS];
@@ -2043,13 +2043,6 @@ enum wined3d_texture_state
     MAX_WINETEXTURESTATES        = 11,
 };
 
-enum WINED3DSRGB
-{
-    SRGB_ANY                                = 0,    /* Uses the cached value(e.g. external calls) */
-    SRGB_RGB                                = 1,    /* Loads the rgb texture */
-    SRGB_SRGB                               = 2,    /* Loads the srgb texture */
-};
-
 struct gl_texture
 {
     DWORD                   states[MAX_WINETEXTURESTATES];
@@ -2058,10 +2051,8 @@ struct gl_texture
 
 struct wined3d_texture_ops
 {
-    HRESULT (*texture_bind)(struct wined3d_texture *texture,
+    void (*texture_sub_resource_load)(struct wined3d_resource *sub_resource,
             struct wined3d_context *context, BOOL srgb);
-    void (*texture_preload)(struct wined3d_texture *texture, struct wined3d_context *context,
-            enum WINED3DSRGB srgb);
     void (*texture_sub_resource_add_dirty_region)(struct wined3d_resource *sub_resource,
             const struct wined3d_box *dirty_region);
     void (*texture_sub_resource_cleanup)(struct wined3d_resource *sub_resource);
@@ -2105,6 +2096,12 @@ static inline struct gl_texture *wined3d_texture_get_gl_texture(struct wined3d_t
 void wined3d_texture_apply_state_changes(struct wined3d_texture *texture,
         const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1],
         const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+void wined3d_texture_bind(struct wined3d_texture *texture,
+        struct wined3d_context *context, BOOL srgb) DECLSPEC_HIDDEN;
+void wined3d_texture_bind_and_dirtify(struct wined3d_texture *texture,
+        struct wined3d_context *context, BOOL srgb) DECLSPEC_HIDDEN;
+void wined3d_texture_load(struct wined3d_texture *texture,
+        struct wined3d_context *context, BOOL srgb) DECLSPEC_HIDDEN;
 void wined3d_texture_set_dirty(struct wined3d_texture *texture) DECLSPEC_HIDDEN;
 
 #define WINED3D_VFLAG_ALLOCATED         0x00000001
@@ -2198,13 +2195,10 @@ struct wined3d_surface
     GLuint                    pbo;
     GLuint rb_multisample;
     GLuint rb_resolved;
-    GLuint texture_name;
-    GLuint texture_name_srgb;
     GLint texture_level;
     GLenum texture_target;
 
     RECT                      lockedRect;
-    RECT                      dirtyRect;
     int                       lockCount;
 
     /* For GetDC */
@@ -2241,22 +2235,20 @@ static inline GLuint surface_get_texture_name(const struct wined3d_surface *surf
         const struct wined3d_gl_info *gl_info, BOOL srgb)
 {
     return srgb && !gl_info->supported[EXT_TEXTURE_SRGB_DECODE]
-            ? surface->texture_name_srgb : surface->texture_name;
+            ? surface->container->texture_srgb.name : surface->container->texture_rgb.name;
 }
 
-void surface_add_dirty_rect(struct wined3d_surface *surface, const struct wined3d_box *dirty_rect) DECLSPEC_HIDDEN;
+void surface_set_dirty(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 HRESULT surface_color_fill(struct wined3d_surface *s,
         const RECT *rect, const struct wined3d_color *color) DECLSPEC_HIDDEN;
 GLenum surface_get_gl_buffer(const struct wined3d_surface *surface) DECLSPEC_HIDDEN;
-void surface_internal_preload(struct wined3d_surface *surface,
-        struct wined3d_context *context, enum WINED3DSRGB srgb) DECLSPEC_HIDDEN;
 void surface_invalidate_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
 BOOL surface_is_offscreen(const struct wined3d_surface *surface) DECLSPEC_HIDDEN;
-HRESULT surface_load(struct wined3d_surface *surface, BOOL srgb) DECLSPEC_HIDDEN;
+void surface_load(struct wined3d_surface *surface, BOOL srgb) DECLSPEC_HIDDEN;
 void surface_load_ds_location(struct wined3d_surface *surface,
         struct wined3d_context *context, DWORD location) DECLSPEC_HIDDEN;
 void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb) DECLSPEC_HIDDEN;
-HRESULT surface_load_location(struct wined3d_surface *surface, DWORD location, const RECT *rect) DECLSPEC_HIDDEN;
+HRESULT surface_load_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
 void surface_modify_ds_location(struct wined3d_surface *surface, DWORD location, UINT w, UINT h) DECLSPEC_HIDDEN;
 void surface_prepare_rb(struct wined3d_surface *surface,
         const struct wined3d_gl_info *gl_info, BOOL multisample) DECLSPEC_HIDDEN;
@@ -2266,13 +2258,14 @@ void surface_set_compatible_renderbuffer(struct wined3d_surface *surface,
         const struct wined3d_surface *rt) DECLSPEC_HIDDEN;
 void surface_set_container(struct wined3d_surface *surface, struct wined3d_texture *container) DECLSPEC_HIDDEN;
 void surface_set_swapchain(struct wined3d_surface *surface, struct wined3d_swapchain *swapchain) DECLSPEC_HIDDEN;
-void surface_set_texture_name(struct wined3d_surface *surface, GLuint name, BOOL srgb_name) DECLSPEC_HIDDEN;
 void surface_set_texture_target(struct wined3d_surface *surface, GLenum target, GLint level) DECLSPEC_HIDDEN;
 void surface_translate_drawable_coords(const struct wined3d_surface *surface, HWND window, RECT *rect) DECLSPEC_HIDDEN;
 void surface_update_draw_binding(struct wined3d_surface *surface) DECLSPEC_HIDDEN;
 HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const POINT *dst_point,
         struct wined3d_surface *src_surface, const RECT *src_rect) DECLSPEC_HIDDEN;
 void surface_validate_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
+HRESULT CDECL wined3d_surface_create(struct wined3d_texture *container,
+        const struct wined3d_resource_desc *desc, DWORD flags, struct wined3d_surface **surface) DECLSPEC_HIDDEN;
 
 void get_drawable_size_swapchain(const struct wined3d_context *context, UINT *width, UINT *height) DECLSPEC_HIDDEN;
 void get_drawable_size_backbuffer(const struct wined3d_context *context, UINT *width, UINT *height) DECLSPEC_HIDDEN;
@@ -2293,19 +2286,18 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 #define SFLAG_LOST              0x00000080 /* Surface lost flag for ddraw. */
 #define SFLAG_GLCKEY            0x00000100 /* The GL texture was created with a color key. */
 #define SFLAG_CLIENT            0x00000200 /* GL_APPLE_client_storage is used with this surface. */
-#define SFLAG_INOVERLAYDRAW     0x00000400 /* Overlay drawing is in progress. Recursion prevention. */
-#define SFLAG_DIBSECTION        0x00000800 /* Has a DIB section attached for GetDC. */
-#define SFLAG_USERPTR           0x00001000 /* The application allocated the memory for this surface. */
-#define SFLAG_ALLOCATED         0x00002000 /* A GL texture is allocated for this surface. */
-#define SFLAG_SRGBALLOCATED     0x00004000 /* A sRGB GL texture is allocated for this surface. */
-#define SFLAG_PBO               0x00008000 /* The surface has a PBO. */
-#define SFLAG_INSYSMEM          0x00010000 /* The system memory copy is current. */
-#define SFLAG_INTEXTURE         0x00020000 /* The GL texture is current. */
-#define SFLAG_INSRGBTEX         0x00040000 /* The GL sRGB texture is current. */
-#define SFLAG_INDRAWABLE        0x00080000 /* The GL drawable is current. */
-#define SFLAG_INRB_MULTISAMPLE  0x00100000 /* The multisample renderbuffer is current. */
-#define SFLAG_INRB_RESOLVED     0x00200000 /* The resolved renderbuffer is current. */
-#define SFLAG_DISCARDED         0x00400000 /* Surface was discarded, allocating new location is enough. */
+#define SFLAG_DIBSECTION        0x00000400 /* Has a DIB section attached for GetDC. */
+#define SFLAG_USERPTR           0x00000800 /* The application allocated the memory for this surface. */
+#define SFLAG_ALLOCATED         0x00001000 /* A GL texture is allocated for this surface. */
+#define SFLAG_SRGBALLOCATED     0x00002000 /* A sRGB GL texture is allocated for this surface. */
+#define SFLAG_PBO               0x00004000 /* The surface has a PBO. */
+#define SFLAG_INSYSMEM          0x00008000 /* The system memory copy is current. */
+#define SFLAG_INTEXTURE         0x00010000 /* The GL texture is current. */
+#define SFLAG_INSRGBTEX         0x00020000 /* The GL sRGB texture is current. */
+#define SFLAG_INDRAWABLE        0x00040000 /* The GL drawable is current. */
+#define SFLAG_INRB_MULTISAMPLE  0x00080000 /* The multisample renderbuffer is current. */
+#define SFLAG_INRB_RESOLVED     0x00100000 /* The resolved renderbuffer is current. */
+#define SFLAG_DISCARDED         0x00200000 /* Surface was discarded, allocating new location is enough. */
 
 /* In some conditions the surface memory must not be freed:
  * SFLAG_CONVERTED: Converting the data back would take too long

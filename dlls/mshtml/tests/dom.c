@@ -759,6 +759,18 @@ static IHTMLElement4 *_get_elem4_iface(unsigned line, IUnknown *unk)
     return elem;
 }
 
+#define get_doc3_iface(u) _get_doc3_iface(__LINE__,u)
+static IHTMLDocument3 *_get_doc3_iface(unsigned line, IHTMLDocument2 *doc)
+{
+    IHTMLDocument3 *doc3;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLDocument3 interface: %08x\n", hres);
+
+    return doc3;
+}
+
 #define get_node_iface(u) _get_node_iface(__LINE__,u)
 static IHTMLDOMNode *_get_node_iface(unsigned line, IUnknown *unk)
 {
@@ -1941,6 +1953,28 @@ static void _test_select_type(unsigned line, IHTMLSelectElement *select, const c
     ok_(__FILE__,line) (hres == S_OK, "get_type failed: %08x\n", hres);
     ok_(__FILE__,line) (!strcmp_wa(type, extype), "type=%s, expected %s\n", wine_dbgstr_w(type), extype);
     SysFreeString(type);
+}
+
+#define test_select_multiple(s,t) _test_select_multiple(__LINE__,s,t)
+static void _test_select_multiple(unsigned line, IHTMLSelectElement *select, VARIANT_BOOL exmultiple)
+{
+    VARIANT_BOOL b = 100;
+    HRESULT hres;
+
+    hres = IHTMLSelectElement_get_multiple(select, &b);
+    ok_(__FILE__,line) (hres == S_OK, "get_multiple failed: %08x\n", hres);
+    ok_(__FILE__,line) (b == exmultiple, "multiple=%x, expected %x\n", b, exmultiple);
+}
+
+#define test_select_set_multiple(s,v) _test_select_set_multiple(__LINE__,s,v)
+static void _test_select_set_multiple(unsigned line, IHTMLSelectElement *select, VARIANT_BOOL val)
+{
+    HRESULT hres;
+
+    hres = IHTMLSelectElement_put_multiple(select, val);
+    ok_(__FILE__,line) (hres == S_OK, "put_multiple failed: %08x\n", hres);
+
+    _test_select_multiple(line, select, val);
 }
 
 #define test_range_text(r,t) _test_range_text(__LINE__,r,t)
@@ -4212,6 +4246,9 @@ static void test_select_elem(IHTMLSelectElement *select)
     ok(iface_cmp((IUnknown*)disp, (IUnknown*)disp2), "disp != disp2\n");
     IDispatch_Release(disp2);
     IDispatch_Release(disp);
+
+    test_select_multiple(select, VARIANT_FALSE);
+    test_select_set_multiple(select, VARIANT_TRUE);
 }
 
 static void test_form_item(IHTMLElement *elem)
@@ -5171,6 +5208,31 @@ static void test_default_body(IHTMLBodyElement *body)
     VariantClear(&v);
 }
 
+#define test_body_scroll(a,b) _test_body_scroll(__LINE__,a,b)
+static void _test_body_scroll(unsigned line, IHTMLBodyElement *body, const char *ex)
+{
+    BSTR str;
+    HRESULT hres;
+
+    hres = IHTMLBodyElement_get_scroll(body, &str);
+    ok_(__FILE__,line)(hres == S_OK, "get_scroll failed: %08x\n", hres);
+    ok_(__FILE__,line)(ex ? !strcmp_wa(str, ex) : !str, "scroll = %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+}
+
+#define set_body_scroll(a,b) _set_body_scroll(__LINE__,a,b)
+static void _set_body_scroll(unsigned line, IHTMLBodyElement *body, const char *val)
+{
+    BSTR str = a2bstr(val);
+    HRESULT hres;
+
+    hres = IHTMLBodyElement_put_scroll(body, str);
+    ok_(__FILE__,line)(hres == S_OK, "put_scroll failed: %08x\n", hres);
+    SysFreeString(str);
+
+    _test_body_scroll(line, body, val);
+}
+
 static void test_body_funs(IHTMLBodyElement *body)
 {
     VARIANT vbg, vDefaultbg;
@@ -5197,6 +5259,11 @@ static void test_body_funs(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_put_bgColor(body, vDefaultbg);
     ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
     VariantClear(&vDefaultbg);
+
+    test_body_scroll(body, NULL);
+    set_body_scroll(body, "yes");
+    set_body_scroll(body, "no");
+    set_body_scroll(body, "auto");
 }
 
 static void test_history(IHTMLWindow2 *window)
@@ -6682,6 +6749,54 @@ static void test_blocked(IHTMLDocument2 *doc, IHTMLElement *outer_elem)
     }
 }
 
+#define doc_get_elems_by_name(a,b) _doc_get_elems_by_name(__LINE__,a,b)
+static IHTMLElementCollection *_doc_get_elems_by_name(unsigned line, IHTMLDocument2 *doc, const char *name)
+{
+    IHTMLDocument3 *doc3 = _get_doc3_iface(line, doc);
+    IHTMLElementCollection *col;
+    BSTR str = a2bstr(name);
+    HRESULT hres;
+
+    hres = IHTMLDocument3_getElementsByName(doc3, str, &col);
+    ok_(__FILE__,line)(hres == S_OK, "getElementsByName failed: %08x\n", hres);
+    ok_(__FILE__,line)(col != NULL, "col = NULL\n");
+
+    IHTMLDocument3_Release(doc3);
+    SysFreeString(str);
+    return col;
+}
+
+static void test_elem_names(IHTMLDocument2 *doc)
+{
+    IHTMLElementCollection *col;
+    IHTMLElement *body;
+    LONG len;
+    HRESULT hres;
+
+    static const elem_type_t test1_types[] = {ET_INPUT, ET_A, ET_DIV};
+
+    body = doc_get_body(doc);
+
+    test_elem_set_innerhtml((IUnknown*)body,
+            "<input name=\"test\"><a name=\"test\"></a><a name=\"xxx\"></a><div id=\"test\"></div>");
+    col = doc_get_elems_by_name(doc, "test");
+    test_elem_collection((IUnknown*)col, test1_types, sizeof(test1_types)/sizeof(*test1_types));
+    IHTMLElementCollection_Release(col);
+
+    col = doc_get_elems_by_name(doc, "yyy");
+    test_elem_collection((IUnknown*)col, NULL, 0);
+    IHTMLElementCollection_Release(col);
+
+    /* case insensivity test */
+    col = doc_get_elems_by_name(doc, "Xxx");
+    hres = IHTMLElementCollection_get_length(col, &len);
+    ok(hres == S_OK, "get_length failed: %08x\n", hres);
+    todo_wine ok(len == 1, "len = %d\n", len);
+    IHTMLElementCollection_Release(col);
+
+    IHTMLElement_Release(body);
+}
+
 static void test_elems2(IHTMLDocument2 *doc)
 {
     IHTMLElement *elem, *elem2, *div;
@@ -6770,6 +6885,7 @@ static void test_elems2(IHTMLDocument2 *doc)
 
     test_attr(div);
     test_blocked(doc, div);
+    test_elem_names(doc);
 
     IHTMLElement_Release(div);
 }

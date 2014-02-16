@@ -57,6 +57,7 @@ AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]))
 AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
             [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
 AC_ARG_WITH(mpg123,    AS_HELP_STRING([--without-mpg123],[do not use the mpg123 library]))
+AC_ARG_WITH(netapi,    AS_HELP_STRING([--without-netapi],[do not use the Samba NetAPI library]))
 AC_ARG_WITH(openal,    AS_HELP_STRING([--without-openal],[do not use OpenAL]),
             [if test "x$withval" = "xno"; then ac_cv_header_AL_al_h=no; ac_cv_header_OpenAL_al_h=no; fi])
 AC_ARG_WITH(opencl,    AS_HELP_STRING([--without-opencl],[do not use OpenCL]),
@@ -745,7 +746,7 @@ clean::
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
-    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
     LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
@@ -848,7 +849,7 @@ clean::
     AC_SUBST(LIBWINE_RULES,["
 all: libwine.dylib
 
-libwine.\$(VERSION).dylib: \$(OBJS) \$(RELPATH) Makefile.in
+libwine.\$(VERSION).dylib: \$(OBJS) Makefile.in
 	\$(CC) -dynamiclib -install_name @rpath/libwine.\$(SOVERSION).dylib -Wl,-rpath,@loader_path/ -compatibility_version \$(SOVERSION) -current_version \$(VERSION) \$(OBJS) \$(EXTRALIBS) \$(LDFLAGS) \$(LIBS) -o \$@
 
 libwine.\$(SOVERSION).dylib: libwine.\$(VERSION).dylib
@@ -891,10 +892,10 @@ wine_info.plist: wine_info.plist.in \$(top_builddir)/include/config.h
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [LDEXECFLAGS="-Wl,--export-dynamic"])
     WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                    [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                    [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
                      LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
         [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                         [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                         [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
                           LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
     WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
@@ -955,10 +956,10 @@ wine-installed: main.o Makefile.in
                       [LDEXECFLAGS="-Wl,--export-dynamic"])
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
                        LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
           [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
                             LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
       WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
@@ -1755,6 +1756,12 @@ fi
 
 dnl **** Check for libodbc ****
 WINE_CHECK_SONAME(odbc,SQLConnect,,[AC_DEFINE_UNQUOTED(SONAME_LIBODBC,["libodbc.$LIBEXT"])])
+
+dnl **** Check for libnetapi ****
+if test "x$with_netapi" != "xno"
+then
+    WINE_CHECK_SONAME(netapi,libnetapi_init,,[AC_DEFINE_UNQUOTED(SONAME_LIBNETAPI,["libnetapi.$LIBEXT"])])
+fi
 
 dnl **** Disable unsupported winmm drivers ****
 test -n "$ALSALIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
@@ -2618,6 +2625,16 @@ IDL_TLB_RES = \$(IDL_TLB_SRCS:.idl=_t.res)
 MODULEFLAGS = -shared \$(srcdir)/\$(MAINSPEC) \$(EXTRADLLFLAGS)
 
 all: $deps
+
+manpages:: dummy
+	\$(C2MAN) -o \$(top_builddir)/documentation/man\$(api_manext) -R\$(top_builddir) -C\$(srcdir) \$(PARENTSRC:%=-P%) -I\$(top_srcdir)/include \$(MAINSPEC:%=-w %) \$(C_SRCS)
+htmlpages:: dummy
+	\$(C2MAN) -o \$(top_builddir)/documentation/html -R\$(top_builddir) -C\$(srcdir) \$(PARENTSRC:%=-P%) -I\$(top_srcdir)/include -Th \$(MAINSPEC:%=-w %) \$(C_SRCS)
+sgmlpages:: dummy
+	\$(C2MAN) -o \$(top_builddir)/documentation/api-guide -R\$(top_builddir) -C\$(srcdir) \$(PARENTSRC:%=-P%) -I\$(top_srcdir)/include -Ts \$(MAINSPEC:%=-w %) \$(C_SRCS)
+xmlpages:: dummy
+	\$(C2MAN) -o \$(top_builddir)/documentation/api-guide-xml -R\$(top_builddir) -C\$(srcdir) \$(PARENTSRC:%=-P%) -I\$(top_srcdir)/include -Tx \$(MAINSPEC:%=-w %) \$(C_SRCS)
+.PHONY: manpages htmlpages sgmlpages xmlpages
 ")
 
 AC_SUBST(MAKE_PROG_RULES,"
@@ -2640,9 +2657,7 @@ all: \$(TESTMODULE)$DLLEXT \$(WINETEST_RES)
 
 \$(C_SRCS:.c=.ok): \$(TESTMODULE)$DLLEXT \$(TESTDLL:%=../%$DLLEXT)
 
-check test: \$(C_SRCS:.c=.ok)
-
-.PHONY: check test crosstest
+.PHONY: check test testclean crosstest
 ")
 if test -n "$CROSSTARGET"
 then
@@ -2891,7 +2906,7 @@ WINE_CONFIG_DLL(fwpuclnt)
 WINE_CONFIG_DLL(gameux,,[clean])
 WINE_CONFIG_TEST(dlls/gameux/tests)
 WINE_CONFIG_DLL(gdi.exe16,enable_win16)
-WINE_CONFIG_DLL(gdi32,,[implib,po])
+WINE_CONFIG_DLL(gdi32,,[clean,implib,po])
 WINE_CONFIG_TEST(dlls/gdi32/tests)
 WINE_CONFIG_DLL(gdiplus,,[implib])
 WINE_CONFIG_TEST(dlls/gdiplus/tests)
@@ -2934,7 +2949,7 @@ WINE_CONFIG_TEST(dlls/itss/tests)
 WINE_CONFIG_DLL(joy.cpl,,[po])
 WINE_CONFIG_DLL(jscript,,[clean,po])
 WINE_CONFIG_TEST(dlls/jscript/tests)
-WINE_CONFIG_DLL(kernel32,,[implib,mc])
+WINE_CONFIG_DLL(kernel32,,[clean,implib,mc])
 WINE_CONFIG_TEST(dlls/kernel32/tests)
 WINE_CONFIG_DLL(keyboard.drv16,enable_win16)
 WINE_CONFIG_DLL(krnl386.exe16,enable_win16,[implib],[kernel])
@@ -3191,7 +3206,7 @@ WINE_CONFIG_DLL(urlmon,,[clean,implib,po])
 WINE_CONFIG_TEST(dlls/urlmon/tests)
 WINE_CONFIG_DLL(usbd.sys,,[implib])
 WINE_CONFIG_DLL(user.exe16,enable_win16)
-WINE_CONFIG_DLL(user32,,[implib,po])
+WINE_CONFIG_DLL(user32,,[clean,implib,po])
 WINE_CONFIG_TEST(dlls/user32/tests)
 WINE_CONFIG_DLL(userenv,,[implib])
 WINE_CONFIG_TEST(dlls/userenv/tests)
@@ -3243,7 +3258,7 @@ WINE_CONFIG_DLL(winemac.drv)
 WINE_CONFIG_DLL(winemapi)
 WINE_CONFIG_DLL(winemp3.acm)
 WINE_CONFIG_DLL(wineoss.drv)
-WINE_CONFIG_DLL(wineps.drv,,[po])
+WINE_CONFIG_DLL(wineps.drv,,[clean,po])
 WINE_CONFIG_DLL(wineps16.drv16,enable_win16)
 WINE_CONFIG_DLL(wineqtdecoder)
 WINE_CONFIG_DLL(winex11.drv)
@@ -3485,7 +3500,19 @@ fi
 if test "$MSGFMT" != false
 then
     AC_SUBST([PORCFLAGS],["--po-dir=\$(top_builddir)/po"])
-    WINE_APPEND_RULE([__builddeps__: \$(ALL_MO_FILES)])
+    WINE_APPEND_RULE(
+[__builddeps__: \$(ALL_MO_FILES)
+clean::
+	\$(RM) \$(ALL_MO_FILES)])
+
+    posrc="po"
+    test "$srcdir" = . || posrc="$srcdir/po"
+    for i in $LINGUAS
+    do
+        WINE_APPEND_RULE(
+[po/$i.mo: $posrc/$i.po
+	\$(MSGFMT) -o \$@ $posrc/$i.po])
+    done
 else
     LINGUAS=
 fi
@@ -3495,7 +3522,7 @@ then
     AC_CONFIG_COMMANDS([tools],[AS_MKDIR_P(tools)])
     WINE_APPEND_RULE(
 [tools/makedep$ac_exeext: tools/makedep.c include/config.h
-	\$(CC) \$(ALLCFLAGS) -o \$@ $srcdir/tools/makedep.c \$(LDFLAGS)
+	\$(CC) -Iinclude -I$srcdir/include \$(ALLCFLAGS) -o \$@ $srcdir/tools/makedep.c \$(LDFLAGS)
 clean:: __clean__
 	\$(RM) tools/makedep$ac_exeext])
 fi

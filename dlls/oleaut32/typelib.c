@@ -3137,7 +3137,7 @@ static BOOL find_ne_resource( HFILE lzfd, LPCSTR typeid, LPCSTR resid,
 
     /* Read in NE header */
     nehdoffset = LZSeek( lzfd, 0, SEEK_CUR );
-    if ( sizeof(nehd) != LZRead( lzfd, (LPSTR)&nehd, sizeof(nehd) ) ) return 0;
+    if ( sizeof(nehd) != LZRead( lzfd, (LPSTR)&nehd, sizeof(nehd) ) ) return FALSE;
 
     resTabSize = nehd.ne_restab - nehd.ne_rsrctab;
     if ( !resTabSize )
@@ -3585,7 +3585,7 @@ static ITypeLib2* ITypeLib2_Constructor_MSFT(LPVOID pLib, DWORD dwTLBLength)
     pTypeLibImpl->ptr_size = get_ptr_size(pTypeLibImpl->syskind);
     pTypeLibImpl->ver_major = LOWORD(tlbHeader.version);
     pTypeLibImpl->ver_minor = HIWORD(tlbHeader.version);
-    pTypeLibImpl->libflags = (WORD) tlbHeader.flags & 0xffff;/* check mask */
+    pTypeLibImpl->libflags = ((WORD) tlbHeader.flags & 0xffff) /* check mask */ | LIBFLAG_FHASDISKIMAGE;
 
     pTypeLibImpl->set_lcid = tlbHeader.lcid2;
     pTypeLibImpl->lcid = tlbHeader.lcid;
@@ -4541,7 +4541,7 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
 
     len = SLTG_ReadLibBlk(pLibBlk, pTypeLibImpl);
 
-    /* Now there's 0x40 bytes of 0xffff with the numbers 0 to TypeInfoCount
+    /* Now there are 0x40 bytes of 0xffff with the numbers 0 to TypeInfoCount
        interspersed */
 
     len += 0x40;
