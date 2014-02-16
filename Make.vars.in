@@ -29,22 +29,19 @@ LIBS            = @LIBS@
 BISON           = @BISON@
 FLEX            = @FLEX@
 EXEEXT          = @EXEEXT@
-OBJEXT          = @OBJEXT@
-DLLEXT          = @DLLEXT@
 DLLPREFIX       = @DLLPREFIX@
-FAKEEXT         = $(DLLEXT:.so=.fake)
 TOOLSEXT        = @TOOLSEXT@
 IMPLIBEXT       = @IMPLIBEXT@
 DLLTOOL         = @DLLTOOL@
 AR              = @AR@
 ARFLAGS         = @ARFLAGS@
 RANLIB          = @RANLIB@
+STRIP           = @STRIP@
 LN_S            = @LN_S@
+MKDIR_P         = @MKDIR_P@
 TOOLSDIR        = @TOOLSDIR@
 LDFLAGS         = @LDFLAGS@
 PRELINK         = @PRELINK@
-LINT            = @LINT@
-LINTFLAGS       = @LINTFLAGS@
 FONTFORGE       = @FONTFORGE@
 RSVG            = @RSVG@
 CONVERT         = @CONVERT@
@@ -56,8 +53,6 @@ ALL_MO_FILES    = $(LINGUAS:%=@top_builddir@/po/%.mo)
 PORCFLAGS       = @PORCFLAGS@
 CROSSAR         = $(CROSSTARGET)-ar
 CROSSRANLIB     = $(CROSSTARGET)-ranlib
-MKINSTALLDIRS   = $(top_srcdir)/tools/mkinstalldirs -m 755
-WINAPI_CHECK    = $(top_srcdir)/tools/winapi/winapi_check
 BUILDIMAGE      = $(top_srcdir)/tools/buildimage
 C2MAN           = $(top_srcdir)/tools/c2man.pl
 RUNTEST         = $(top_srcdir)/tools/runtest
@@ -73,9 +68,9 @@ WRC             = $(TOOLSDIR)/tools/wrc/wrc$(TOOLSEXT)
 LIBPORT         = $(top_builddir)/libs/port/libwine_port.a
 LIBWPP          = $(top_builddir)/libs/wpp/libwpp.a
 LIBWINE         = -L$(top_builddir)/libs/wine -lwine
+LIBWINE_STATIC  = $(top_builddir)/libs/wine/libwine_static.a
 WINEGCC         = $(TOOLSDIR)/tools/winegcc/winegcc $(TARGETFLAGS) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(top_builddir) @UNWINDFLAGS@
 CROSSWINEGCC    = $(TOOLSDIR)/tools/winegcc/winegcc $(CROSSTARGET:%=-b %) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(top_builddir) --lib-suffix=.cross.a
-LDPATH          = @LDPATH@
 LDRPATH_INSTALL = @LDRPATH_INSTALL@
 LDRPATH_LOCAL   = @LDRPATH_LOCAL@
 INSTALL         = @INSTALL@ $(INSTALL_FLAGS)
@@ -88,5 +83,7 @@ conf_manext     = 5
 @SET_MAKE@
 
 all:
+dummy:
+.PHONY: all dummy
 
 # End of common header

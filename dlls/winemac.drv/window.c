@@ -89,13 +89,11 @@ static void get_cocoa_window_features(struct macdrv_win_data *data,
 static inline BOOL can_activate_window(HWND hwnd)
 {
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
-    RECT rect;
 
     if (!(style & WS_VISIBLE)) return FALSE;
     if ((style & (WS_POPUP|WS_CHILD)) == WS_CHILD) return FALSE;
     if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_NOACTIVATE) return FALSE;
     if (hwnd == GetDesktopWindow()) return FALSE;
-    if (GetWindowRect(hwnd, &rect) && IsRectEmpty(&rect)) return FALSE;
     return !(style & WS_DISABLED);
 }
 
@@ -112,10 +110,12 @@ static void get_cocoa_window_state(struct macdrv_win_data *data,
     state->no_activate = !can_activate_window(data->hwnd);
     state->floating = (ex_style & WS_EX_TOPMOST) != 0;
     state->excluded_by_expose = state->excluded_by_cycle =
-        IsRectEmpty(&data->window_rect) ||
         (!(ex_style & WS_EX_APPWINDOW) &&
          (GetWindow(data->hwnd, GW_OWNER) || (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))));
+    if (IsRectEmpty(&data->window_rect))
+        state->excluded_by_expose = TRUE;
     state->minimized = (style & WS_MINIMIZE) != 0;
+    state->minimized_valid = state->minimized != data->minimized;
 }
 
 
@@ -313,7 +313,8 @@ static void set_cocoa_window_properties(struct macdrv_win_data *data)
 
     get_cocoa_window_state(data, style, ex_style, &state);
     macdrv_set_cocoa_window_state(data->cocoa_window, &state);
-    data->minimized = state.minimized;
+    if (state.minimized_valid)
+        data->minimized = state.minimized;
 }
 
 
@@ -478,8 +479,6 @@ static void sync_window_min_max_info(HWND hwnd)
     WINDOWPLACEMENT wpl;
     HMONITOR monitor;
     struct macdrv_win_data *data;
-    RECT min_rect, max_rect;
-    CGSize min_size, max_size;
 
     TRACE("win %p\n", hwnd);
 
@@ -572,12 +571,22 @@ static void sync_window_min_max_info(HWND hwnd)
 
     if ((data = get_win_data(hwnd)) && data->cocoa_window)
     {
+        RECT min_rect, max_rect;
+        CGSize min_size, max_size;
+
         SetRect(&min_rect, 0, 0, minmax.ptMinTrackSize.x, minmax.ptMinTrackSize.y);
-        SetRect(&max_rect, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
         macdrv_window_to_mac_rect(data, style, &min_rect);
-        macdrv_window_to_mac_rect(data, style, &max_rect);
         min_size = CGSizeMake(min_rect.right - min_rect.left, min_rect.bottom - min_rect.top);
-        max_size = CGSizeMake(max_rect.right - max_rect.left, max_rect.bottom - max_rect.top);
+
+        if (minmax.ptMaxTrackSize.x == GetSystemMetrics(SM_CXMAXTRACK) &&
+            minmax.ptMaxTrackSize.y == GetSystemMetrics(SM_CYMAXTRACK))
+            max_size = CGSizeMake(CGFLOAT_MAX, CGFLOAT_MAX);
+        else
+        {
+            SetRect(&max_rect, 0, 0, minmax.ptMaxTrackSize.x, minmax.ptMaxTrackSize.y);
+            macdrv_window_to_mac_rect(data, style, &max_rect);
+            max_size = CGSizeMake(max_rect.right - max_rect.left, max_rect.bottom - max_rect.top);
+        }
 
         TRACE("min_size (%g,%g) max_size (%g,%g)\n", min_size.width, min_size.height, max_size.width, max_size.height);
         macdrv_set_window_min_max_sizes(data->cocoa_window, min_size, max_size);
@@ -1188,7 +1197,6 @@ UINT CDECL macdrv_ShowWindow(HWND hwnd, INT cmd, RECT *rect, UINT swp)
         goto done;
 
     if (thread_data->current_event->type != WINDOW_FRAME_CHANGED &&
-        thread_data->current_event->type != WINDOW_DID_MINIMIZE &&
         thread_data->current_event->type != WINDOW_DID_UNMINIMIZE)
         goto done;
 
@@ -1570,7 +1578,6 @@ void CDECL macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, UINT swp_flags,
     if (!thread_data || !thread_data->current_event ||
         thread_data->current_event->window != data->cocoa_window ||
         (thread_data->current_event->type != WINDOW_FRAME_CHANGED &&
-         thread_data->current_event->type != WINDOW_DID_MINIMIZE &&
          thread_data->current_event->type != WINDOW_DID_UNMINIMIZE))
     {
         sync_window_position(data, swp_flags, &old_window_rect, &old_whole_rect);
@@ -1647,7 +1654,7 @@ void macdrv_window_close_requested(HWND hwnd)
  *
  * Handler for WINDOW_FRAME_CHANGED events.
  */
-void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
+void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event)
 {
     struct macdrv_win_data *data;
     RECT rect;
@@ -1667,9 +1674,10 @@ void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
 
     parent = GetAncestor(hwnd, GA_PARENT);
 
-    TRACE("win %p/%p new Cocoa frame %s\n", hwnd, data->cocoa_window, wine_dbgstr_cgrect(frame));
+    TRACE("win %p/%p new Cocoa frame %s\n", hwnd, data->cocoa_window,
+          wine_dbgstr_cgrect(event->window_frame_changed.frame));
 
-    rect = rect_from_cgrect(frame);
+    rect = rect_from_cgrect(event->window_frame_changed.frame);
     macdrv_mac_to_window_rect(data, &rect);
     MapWindowPoints(0, parent, (POINT *)&rect, 2);
 
@@ -1692,6 +1700,8 @@ void macdrv_window_frame_changed(HWND hwnd, CGRect frame)
 
     release_win_data(data);
 
+    if (event->window_frame_changed.fullscreen)
+        flags |= SWP_NOSENDCHANGING;
     if (!(flags & SWP_NOSIZE) || !(flags & SWP_NOMOVE))
         SetWindowPos(hwnd, 0, rect.left, rect.top, width, height, flags);
 }
@@ -1768,34 +1778,57 @@ void macdrv_app_deactivated(void)
 
 
 /***********************************************************************
- *              macdrv_window_did_minimize
+ *              macdrv_window_minimize_requested
  *
- * Handler for WINDOW_DID_MINIMIZE events.
+ * Handler for WINDOW_MINIMIZE_REQUESTED events.
  */
-void macdrv_window_did_minimize(HWND hwnd)
+void macdrv_window_minimize_requested(HWND hwnd)
 {
-    struct macdrv_win_data *data;
     DWORD style;
-
-    TRACE("win %p\n", hwnd);
-
-    if (!(data = get_win_data(hwnd))) return;
-    if (data->minimized) goto done;
+    HMENU hSysMenu;
 
     style = GetWindowLongW(hwnd, GWL_STYLE);
-
-    data->minimized = TRUE;
-    if ((style & WS_MINIMIZEBOX) && !(style & WS_DISABLED))
+    if (!(style & WS_MINIMIZEBOX) || (style & (WS_DISABLED | WS_MINIMIZE)))
     {
-        TRACE("minimizing win %p/%p\n", hwnd, data->cocoa_window);
-        release_win_data(data);
-        SendMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+        TRACE("not minimizing win %p style 0x%08x\n", hwnd, style);
         return;
     }
-    TRACE("not minimizing win %p/%p style %08x\n", hwnd, data->cocoa_window, style);
 
-done:
-    release_win_data(data);
+    hSysMenu = GetSystemMenu(hwnd, FALSE);
+    if (hSysMenu)
+    {
+        UINT state = GetMenuState(hSysMenu, SC_MINIMIZE, MF_BYCOMMAND);
+        if (state == 0xFFFFFFFF || (state & (MF_DISABLED | MF_GRAYED)))
+        {
+            TRACE("not minimizing win %p menu state 0x%08x\n", hwnd, state);
+            return;
+        }
+    }
+
+    if (GetActiveWindow() != hwnd)
+    {
+        LRESULT ma = SendMessageW(hwnd, WM_MOUSEACTIVATE, (WPARAM)GetAncestor(hwnd, GA_ROOT),
+                                  MAKELPARAM(HTMINBUTTON, WM_NCLBUTTONDOWN));
+        switch (ma)
+        {
+            case MA_NOACTIVATEANDEAT:
+            case MA_ACTIVATEANDEAT:
+                TRACE("not minimizing win %p mouse-activate result %ld\n", hwnd, ma);
+                return;
+            case MA_NOACTIVATE:
+                break;
+            case MA_ACTIVATE:
+            case 0:
+                SetActiveWindow(hwnd);
+                break;
+            default:
+                WARN("unknown WM_MOUSEACTIVATE code %ld\n", ma);
+                break;
+        }
+    }
+
+    TRACE("minimizing win %p\n", hwnd);
+    SendMessageW(hwnd, WM_SYSCOMMAND, SC_MINIMIZE, 0);
 }
 
 
@@ -1829,6 +1862,18 @@ void macdrv_window_did_unminimize(HWND hwnd)
 
 done:
     release_win_data(data);
+}
+
+
+/***********************************************************************
+ *              macdrv_window_brought_forward
+ *
+ * Handler for WINDOW_BROUGHT_FORWARD events.
+ */
+void macdrv_window_brought_forward(HWND hwnd)
+{
+    TRACE("win %p\n", hwnd);
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 
@@ -2024,5 +2069,18 @@ BOOL query_resize_end(HWND hwnd)
 {
     TRACE("hwnd %p\n", hwnd);
     SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *              query_min_max_info
+ *
+ * Handler for QUERY_MIN_MAX_INFO query.
+ */
+BOOL query_min_max_info(HWND hwnd)
+{
+    TRACE("hwnd %p\n", hwnd);
+    sync_window_min_max_info(hwnd);
     return TRUE;
 }

@@ -1298,13 +1298,24 @@ static void test_GetCharABCWidths(void)
         DeleteObject(hfont);
     }
 
-    ReleaseDC(NULL, hdc);
-
     memset(&lf, 0, sizeof(lf));
     strcpy(lf.lfFaceName, "Tahoma");
     lf.lfHeight = 20;
+    hfont = CreateFontIndirectA(&lf);
 
-    trace("ABC sign test for a varity of transforms:\n");
+    /* test empty glyph's metrics */
+    hfont = SelectObject(hdc, hfont);
+    ret = pGetCharABCWidthsFloatW(hdc, ' ', ' ', abcf);
+    ok(ret, "GetCharABCWidthsFloatW should have succeeded\n");
+    ok(abcf[0].abcfB == 1.0, "got %f\n", abcf[0].abcfB);
+    ret = pGetCharABCWidthsW(hdc, ' ', ' ', abcw);
+    ok(ret, "GetCharABCWidthsW should have succeeded\n");
+    ok(abcw[0].abcB == 1, "got %u\n", abcw[0].abcB);
+
+    DeleteObject(SelectObject(hdc, hfont));
+    ReleaseDC(NULL, hdc);
+
+    trace("ABC sign test for a variety of transforms:\n");
     hfont = CreateFontIndirectA(&lf);
     hwnd = CreateWindowEx(0, "static", "", WS_POPUP, 0,0,100,100,
                            0, 0, 0, NULL);
@@ -1318,7 +1329,7 @@ static void test_GetCharABCWidths(void)
     ret = pGetCharABCWidthsI(hdc, 0, 1, glyphs, abc);
     ok(ret, "GetCharABCWidthsI should have succeeded\n");
     ret = pGetCharABCWidthsW(hdc, 'i', 'i', abcw);
-    ok(ret, "GetCharABCWidthsI should have succeeded\n");
+    ok(ret, "GetCharABCWidthsW should have succeeded\n");
     ret = pGetCharABCWidthsFloatW(hdc, 'i', 'i', abcf);
     ok(ret, "GetCharABCWidthsFloatW should have succeeded\n");
 
@@ -3998,6 +4009,7 @@ static int CALLBACK create_fixed_pitch_font_proc(const LOGFONT *lpelfe,
     CHARSETINFO csi;
     LOGFONT lf = *lpelfe;
     HFONT hfont;
+    DWORD found_subset;
 
     /* skip bitmap, proportional or vertical font */
     if ((FontType & TRUETYPE_FONTTYPE) == 0 ||
@@ -4008,6 +4020,25 @@ static int CALLBACK create_fixed_pitch_font_proc(const LOGFONT *lpelfe,
     /* skip linked font */
     if (!TranslateCharsetInfo((DWORD*)(INT_PTR)lpelfe->lfCharSet, &csi, TCI_SRCCHARSET) ||
         (lpntmex->ntmFontSig.fsCsb[0] & csi.fs.fsCsb[0]) == 0)
+        return 1;
+
+    /* skip linked font, like SimSun-ExtB */
+    switch (lpelfe->lfCharSet) {
+    case SHIFTJIS_CHARSET:
+        found_subset = lpntmex->ntmFontSig.fsUsb[1] & (1 << 17); /* Hiragana */
+        break;
+    case GB2312_CHARSET:
+    case CHINESEBIG5_CHARSET:
+        found_subset = lpntmex->ntmFontSig.fsUsb[1] & (1 << 16); /* CJK Symbols And Punctuation */
+        break;
+    case HANGEUL_CHARSET:
+        found_subset = lpntmex->ntmFontSig.fsUsb[1] & (1 << 24); /* Hangul Syllables */
+        break;
+    default:
+        found_subset = lpntmex->ntmFontSig.fsUsb[0] & (1 <<  0); /* Basic Latin */
+        break;
+    }
+    if (!found_subset)
         return 1;
 
     /* test with an odd height */
@@ -4120,10 +4151,8 @@ static void test_GetGlyphOutline(void)
                 ok(ret != GDI_ERROR, "%2d:GetGlyphOutlineW should succeed, got %d\n", fmt[i], ret);
             else
                 ok(ret == 0, "%2d:GetGlyphOutlineW should return 0, got %d\n", fmt[i], ret);
-            todo_wine {
-                ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-                ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-            }
+            ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
+            ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxY);
         }
 
         memset(&gm, 0xab, sizeof(gm));
@@ -4135,10 +4164,8 @@ static void test_GetGlyphOutline(void)
                 ok(ret != GDI_ERROR, "%2d:GetGlyphOutlineW should succeed, got %d\n", fmt[i], ret);
             else
                 ok(ret == 0, "%2d:GetGlyphOutlineW should return 0, got %d\n", fmt[i], ret);
-            todo_wine {
-                ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-                ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-            }
+            ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
+            ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxY);
         }
 
         memset(&gm, 0xab, sizeof(gm));
@@ -4150,10 +4177,8 @@ static void test_GetGlyphOutline(void)
                 ok(ret != GDI_ERROR, "%2d:GetGlyphOutlineW should succeed, got %d\n", fmt[i], ret);
             else
                 ok(ret == 0, "%2d:GetGlyphOutlineW should return 0, got %d\n", fmt[i], ret);
-            todo_wine {
-                ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-                ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-            }
+            ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
+            ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxY);
         }
 
         memset(&gm, 0xab, sizeof(gm));
@@ -4163,13 +4188,16 @@ static void test_GetGlyphOutline(void)
         {
             if (fmt[i] == GGO_METRICS) {
                 ok(ret != GDI_ERROR, "%2d:GetGlyphOutlineW should succeed, got %d\n", fmt[i], ret);
-                todo_wine {
-                    ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-                    ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
-                }
+                ok(gm.gmBlackBoxX == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxX);
+                ok(gm.gmBlackBoxY == 1, "%2d:expected 1, got %u\n", fmt[i], gm.gmBlackBoxY);
             }
             else
+            {
                 ok(ret == GDI_ERROR, "%2d:GetGlyphOutlineW should return GDI_ERROR, got %d\n", fmt[i], ret);
+                memset(&gm2, 0xab, sizeof(gm2));
+                ok(memcmp(&gm, &gm2, sizeof(GLYPHMETRICS)) == 0,
+                   "%2d:GLYPHMETRICS shouldn't be touched on error\n", fmt[i]);
+            }
         }
     }
 

@@ -131,12 +131,12 @@ struct macdrv_win_data
     macdrv_view         gl_view;                /* view for GL */
     RECT                gl_rect;                /* GL view rectangle relative to whole_rect */
     COLORREF            color_key;              /* color key for layered window; CLR_INVALID is not color keyed */
-    BOOL                on_screen : 1;          /* is window ordered in? (minimized or not) */
-    BOOL                shaped : 1;             /* is window using a custom region shape? */
-    BOOL                layered : 1;            /* is window layered and with valid attributes? */
-    BOOL                ulw_layered : 1;        /* has UpdateLayeredWindow() been called for window? */
-    BOOL                per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
-    BOOL                minimized : 1;          /* is window minimized? */
+    unsigned int        on_screen : 1;          /* is window ordered in? (minimized or not) */
+    unsigned int        shaped : 1;             /* is window using a custom region shape? */
+    unsigned int        layered : 1;            /* is window layered and with valid attributes? */
+    unsigned int        ulw_layered : 1;        /* has UpdateLayeredWindow() been called for window? */
+    unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
+    unsigned int        minimized : 1;          /* is window minimized? */
     struct window_surface *surface;
     struct window_surface *unminimized_surface;
 };
@@ -155,15 +155,17 @@ extern void surface_clip_to_visible_rect(struct window_surface *window_surface, 
 extern void macdrv_handle_event(const macdrv_event *event) DECLSPEC_HIDDEN;
 
 extern void macdrv_window_close_requested(HWND hwnd) DECLSPEC_HIDDEN;
-extern void macdrv_window_frame_changed(HWND hwnd, CGRect frame) DECLSPEC_HIDDEN;
+extern void macdrv_window_frame_changed(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_window_got_focus(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_window_lost_focus(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_app_deactivated(void) DECLSPEC_HIDDEN;
 extern void macdrv_app_quit_requested(const macdrv_event *event) DECLSPEC_HIDDEN;
-extern void macdrv_window_did_minimize(HWND hwnd) DECLSPEC_HIDDEN;
+extern void macdrv_window_minimize_requested(HWND hwnd) DECLSPEC_HIDDEN;
 extern void macdrv_window_did_unminimize(HWND hwnd) DECLSPEC_HIDDEN;
+extern void macdrv_window_brought_forward(HWND hwnd) DECLSPEC_HIDDEN;
 extern BOOL query_resize_end(HWND hwnd) DECLSPEC_HIDDEN;
 extern BOOL query_resize_start(HWND hwnd) DECLSPEC_HIDDEN;
+extern BOOL query_min_max_info(HWND hwnd) DECLSPEC_HIDDEN;
 
 extern void macdrv_mouse_button(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;
 extern void macdrv_mouse_moved(HWND hwnd, const macdrv_event *event) DECLSPEC_HIDDEN;

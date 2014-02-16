@@ -3151,7 +3151,7 @@ static void tex_colorop(struct wined3d_context *context, const struct wined3d_st
         context_active_texture(context, gl_info, mapped_stage);
     }
 
-    if (stage >= state->lowest_disabled_stage)
+    if (stage >= context->lowest_disabled_stage)
     {
         TRACE("Stage disabled\n");
         if (mapped_stage != WINED3D_UNMAPPED_STAGE)
@@ -3655,7 +3655,7 @@ static void sampler(struct wined3d_context *context, const struct wined3d_state 
             checkGLcall("glTexEnvf(GL_TEXTURE_LOD_BIAS_EXT, ...)");
         }
 
-        if (!use_ps(state) && sampler < state->lowest_disabled_stage)
+        if (!use_ps(state) && sampler < context->lowest_disabled_stage)
         {
             if (state->render_states[WINED3D_RS_COLORKEYENABLE] && !sampler)
             {
@@ -3671,7 +3671,7 @@ static void sampler(struct wined3d_context *context, const struct wined3d_state 
     }
     else
     {
-        if (sampler < state->lowest_disabled_stage)
+        if (sampler < context->lowest_disabled_stage)
         {
             /* TODO: What should I do with pixel shaders here ??? */
             if (state->render_states[WINED3D_RS_COLORKEYENABLE] && !sampler)
@@ -4075,7 +4075,7 @@ static void load_numbered_arrays(struct wined3d_context *context,
         {
             if (context->numbered_array_mask & (1 << i))
                 unload_numbered_array(context, i);
-            if (state->vertex_shader->reg_maps.input_registers & (1 << i))
+            if (state->shader[WINED3D_SHADER_TYPE_VERTEX]->reg_maps.input_registers & (1 << i))
                 GL_EXTCALL(glVertexAttrib4fARB(i, 0.0f, 0.0f, 0.0f, 0.0f));
             continue;
         }
@@ -4632,8 +4632,8 @@ void vertexdeclaration(struct wined3d_context *context, const struct wined3d_sta
                 transform_texture(context, state, STATE_TEXTURESTAGE(i, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS));
         }
 
-        if (use_ps(state) && state->pixel_shader->reg_maps.shader_version.major == 1
-                && state->pixel_shader->reg_maps.shader_version.minor <= 3)
+        if (use_ps(state) && state->shader[WINED3D_SHADER_TYPE_PIXEL]->reg_maps.shader_version.major == 1
+                && state->shader[WINED3D_SHADER_TYPE_PIXEL]->reg_maps.shader_version.minor <= 3)
             context->shader_update_mask |= 1 << WINED3D_SHADER_TYPE_PIXEL;
     }
 
@@ -5092,15 +5092,15 @@ const struct StateEntryTemplate misc_state_template[] = {
     { STATE_BASEVERTEXINDEX,                              { STATE_BASEVERTEXINDEX,                              state_nop,          }, ARB_DRAW_ELEMENTS_BASE_VERTEX   },
     { STATE_BASEVERTEXINDEX,                              { STATE_STREAMSRC,                                    NULL,               }, WINED3D_GL_EXT_NONE             },
     { STATE_FRAMEBUFFER,                                  { STATE_FRAMEBUFFER,                                  context_state_fb    }, WINED3D_GL_EXT_NONE             },
-    { STATE_PIXELSHADER,                                  { STATE_PIXELSHADER,                                  context_state_drawbuf},WINED3D_GL_EXT_NONE             },
-    { STATE_GEOMETRY_SHADER,                              { STATE_GEOMETRY_SHADER,                              state_geometry_shader}, WINED3D_GL_EXT_NONE             },
+    { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            context_state_drawbuf},WINED3D_GL_EXT_NONE             },
+    { STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),         { STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),         state_geometry_shader}, WINED3D_GL_EXT_NONE             },
     {0 /* Terminate */,                                   { 0,                                                  0                   }, WINED3D_GL_EXT_NONE             },
 };
 
 const struct StateEntryTemplate vp_ffp_states[] =
 {
     { STATE_VDECL,                                        { STATE_VDECL,                                        vertexdeclaration   }, WINED3D_GL_EXT_NONE             },
-    { STATE_VSHADER,                                      { STATE_VDECL,                                        NULL                }, WINED3D_GL_EXT_NONE             },
+    { STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),           { STATE_VDECL,                                        NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_MATERIAL,                                     { STATE_RENDER(WINED3D_RS_SPECULARENABLE),            NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_SPECULARENABLE),            { STATE_RENDER(WINED3D_RS_SPECULARENABLE),            state_specularenable}, WINED3D_GL_EXT_NONE             },
       /* Clip planes */
@@ -5578,8 +5578,8 @@ static const struct StateEntryTemplate ffp_fragmentstate_template[] = {
     { STATE_TEXTURESTAGE(7, WINED3D_TSS_ALPHA_ARG0),      { STATE_TEXTURESTAGE(7, WINED3D_TSS_ALPHA_OP),        NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_TEXTURESTAGE(7, WINED3D_TSS_RESULT_ARG),      { STATE_TEXTURESTAGE(7, WINED3D_TSS_COLOR_OP),        NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_TEXTURESTAGE(7, WINED3D_TSS_CONSTANT),        { 0 /* As long as we don't support D3DTA_CONSTANT */, NULL                }, WINED3D_GL_EXT_NONE             },
-    { STATE_PIXELSHADER,                                  { STATE_PIXELSHADER,                                  apply_pixelshader   }, WINED3D_GL_EXT_NONE             },
-    { STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE),           { STATE_PIXELSHADER,                                  NULL                }, WINED3D_GL_EXT_NONE             },
+    { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            apply_pixelshader   }, WINED3D_GL_EXT_NONE             },
+    { STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE),           { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            NULL                }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),             { STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),             state_texfactor     }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_FOGCOLOR),                  { STATE_RENDER(WINED3D_RS_FOGCOLOR),                  state_fogcolor      }, WINED3D_GL_EXT_NONE             },
     { STATE_RENDER(WINED3D_RS_FOGDENSITY),                { STATE_RENDER(WINED3D_RS_FOGDENSITY),                state_fogdensity    }, WINED3D_GL_EXT_NONE             },
@@ -5828,9 +5828,9 @@ static void validate_state_table(struct StateEntry *state_table)
         STATE_VDECL,
         STATE_STREAMSRC,
         STATE_INDEXBUFFER,
-        STATE_VSHADER,
-        STATE_GEOMETRY_SHADER,
-        STATE_PIXELSHADER,
+        STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),
+        STATE_SHADER(WINED3D_SHADER_TYPE_GEOMETRY),
+        STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),
         STATE_VIEWPORT,
         STATE_LIGHT_TYPE,
         STATE_SCISSORRECT,
