@@ -428,6 +428,7 @@ AC_CHECK_HEADERS(\
 	kstat.h \
 	lber.h \
 	ldap.h \
+	libproc.h \
 	link.h \
 	linux/cdrom.h \
 	linux/compiler.h \
@@ -490,6 +491,7 @@ AC_CHECK_HEADERS(\
 	sys/prctl.h \
 	sys/protosw.h \
 	sys/ptrace.h \
+	sys/queue.h \
 	sys/resource.h \
 	sys/scsiio.h \
 	sys/shm.h \
@@ -505,6 +507,7 @@ AC_CHECK_HEADERS(\
 	sys/timeout.h \
 	sys/times.h \
 	sys/uio.h \
+	sys/user.h \
 	sys/utsname.h \
 	sys/vm86.h \
 	sys/wait.h \
@@ -659,11 +662,21 @@ AC_CHECK_HEADERS([linux/videodev.h linux/videodev2.h libv4l1.h],,,
 #include <asm/types.h>
 #endif])
 
+AC_CHECK_HEADERS([libprocstat.h],,,
+[#ifdef HAVE_SYS_PARAM_H
+#include <sys/param.h>
+#endif
+#ifdef HAVE_SYS_QUEUE_H
+#include <sys/queue.h>
+#endif
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif])
+
 dnl **** Check for working dll ****
 
 AC_SUBST(DLLEXT,"")
 AC_SUBST(DLLFLAGS,"-D_REENTRANT")
-AC_SUBST(LDDLLFLAGS,"")
 AC_SUBST(IMPLIBEXT,"def")
 AC_SUBST(LDRPATH_INSTALL,"")
 AC_SUBST(LDRPATH_LOCAL,"")
@@ -724,7 +737,6 @@ clean::
     DLLEXT=".so"
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
-    LDDLLFLAGS="-bundle -multiply_defined suppress"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
     LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(RELPATH) \$(bindir) \$(libdir)\`"
     LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
@@ -734,6 +746,7 @@ clean::
     AC_SUBST(FORCEFEEDBACKLIB,"-framework ForceFeedback -framework CoreFoundation")
     AC_SUBST(APPLICATIONSERVICESLIB,"-framework ApplicationServices")
     AC_SUBST(CORESERVICESLIB,"-framework CoreServices")
+    AC_SUBST(APPKITLIB,"-framework AppKit")
     case $host_os in
       darwin11*)
         AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-macosx_version_min,10.6,-segaddr,WINE_DOS,0x00001000,-segaddr,WINE_SHAREDHEAP,0x7f000000,-sectcreate,__TEXT,__info_plist,wine_info.plist"]) ;;
@@ -788,11 +801,6 @@ clean::
         AC_CHECK_FUNCS(IOHIDManagerCreate)
         LIBS="$ac_save_LIBS"
     fi
-    case $host_cpu in
-      *powerpc*)
-        LDDLLFLAGS="$LDDLLFLAGS -read_only_relocs warning"  dnl FIXME
-        ;;
-    esac
     if test "$ac_cv_header_QuickTime_ImageCompression_h" = "yes"
     then
         AC_SUBST(QUICKTIMELIB,"-framework QuickTime -framework ApplicationServices -framework CoreVideo")
@@ -862,11 +870,6 @@ clean::
   linux-android*)
     DLLFLAGS="$DLLFLAGS -fPIC"
     DLLEXT=".so"
-    LDDLLFLAGS="-shared -Wl,-Bsymbolic"
-    WINE_TRY_CFLAGS([-fPIC -shared -Wl,-Bsymbolic,-z,defs],
-                    [LDDLLFLAGS="$LDDLLFLAGS,-z,defs"])
-    WINE_TRY_CFLAGS([-fPIC -shared -Wl,-Bsymbolic,-init,__wine_spec_init,-fini,__wine_spec_fini],
-                    [LDDLLFLAGS="$LDDLLFLAGS,-init,__wine_spec_init,-fini,__wine_spec_fini"])
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [AC_SUBST(LDEXECFLAGS,["-Wl,--export-dynamic"])])
     WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
@@ -912,16 +915,10 @@ clean::
     if test "$ac_cv_c_dll_gnuelf" = "yes"
     then
       LDSHARED="\$(CC) -shared"
-      LDDLLFLAGS="-shared -Wl,-Bsymbolic"
       WINE_TRY_CFLAGS([-fPIC -shared -Wl,-soname,confest.so.1],
                       [LDSHARED="\$(CC) -shared -Wl,-soname,libwine.so.\$(SOVERSION)"],
                       [WINE_TRY_CFLAGS([-fPIC -shared -Wl,-h,confest.so.1],
                                        [LDSHARED="\$(CC) -shared -Wl,-h,libwine.so.\$(SOVERSION)"])])
-
-      WINE_TRY_CFLAGS([-fPIC -shared -Wl,-Bsymbolic,-z,defs], [LDDLLFLAGS="$LDDLLFLAGS,-z,defs"])
-
-      WINE_TRY_CFLAGS([-fPIC -shared -Wl,-Bsymbolic,-init,__wine_spec_init,-fini,__wine_spec_fini],
-                      [LDDLLFLAGS="$LDDLLFLAGS,-init,__wine_spec_init,-fini,__wine_spec_fini"])
 
       echo '{ global: *; };' >conftest.map
       WINE_TRY_CFLAGS([-fPIC -shared -Wl,--version-script=conftest.map],
@@ -964,7 +961,6 @@ clean::
       if test "$ac_cv_c_dll_unixware" = "yes"
       then
         LDSHARED="\$(CC) -Wl,-G,-h,libwine.so.\$(SOVERSION)"
-        LDDLLFLAGS="-Wl,-G,-B,symbolic"
       fi
     fi
     AC_SUBST(LIBWINE_RULES,["
@@ -1719,6 +1715,14 @@ then
     AC_CHECK_LIB(kstat,kstat_open,
                  [AC_DEFINE(HAVE_LIBKSTAT, 1, [Define to 1 if you have the `kstat' library (-lkstat).])
                   AC_SUBST(LIBKSTAT,"-lkstat")])
+fi
+
+dnl **** Check for libprocstat ****
+if test "$ac_cv_header_libprocstat_h" = "yes"
+then
+    AC_CHECK_LIB(procstat,procstat_open_sysctl,
+                 [AC_DEFINE(HAVE_LIBPROCSTAT, 1, [Define to 1 if you have the `procstat' library (-lprocstat).])
+                  AC_SUBST(LIBPROCSTAT,"-lprocstat")])
 fi
 
 dnl **** Check for libodbc ****
@@ -2526,9 +2530,11 @@ esac
 
 dnl **** Generate output files ****
 
-AH_TOP([#ifndef WINE_CROSSTEST
-#define __WINE_CONFIG_H])
-AH_BOTTOM([#endif /* WINE_CROSSTEST */])
+AH_TOP([#ifndef __WINE_CONFIG_H
+#define __WINE_CONFIG_H
+#ifndef WINE_CROSSTEST])
+AH_BOTTOM([#endif /* WINE_CROSSTEST */
+#endif /* __WINE_CONFIG_H */])
 
 AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 
@@ -2616,6 +2622,7 @@ WINE_CONFIG_DLL(comm.drv16,enable_win16)
 WINE_CONFIG_DLL(commdlg.dll16,enable_win16)
 WINE_CONFIG_DLL(compobj.dll16,enable_win16)
 WINE_CONFIG_DLL(compstui,,[implib])
+WINE_CONFIG_DLL(comsvcs,,[implib])
 WINE_CONFIG_DLL(credui,,[implib,po])
 WINE_CONFIG_TEST(dlls/credui/tests)
 WINE_CONFIG_DLL(crtdll,,[implib])
@@ -3086,6 +3093,7 @@ WINE_CONFIG_DLL(vtdapi.vxd,enable_win16)
 WINE_CONFIG_DLL(vwin32.vxd,enable_win16)
 WINE_CONFIG_DLL(w32skrnl,enable_win16)
 WINE_CONFIG_DLL(w32sys.dll16,enable_win16)
+WINE_CONFIG_DLL(wbemdisp)
 WINE_CONFIG_DLL(wbemprox)
 WINE_CONFIG_TEST(dlls/wbemprox/tests)
 WINE_CONFIG_DLL(webservices,,[implib])
@@ -3225,6 +3233,7 @@ WINE_CONFIG_PROGRAM(spoolsv,,[install])
 WINE_CONFIG_PROGRAM(start,,[install,po])
 WINE_CONFIG_PROGRAM(svchost,,[install])
 WINE_CONFIG_PROGRAM(taskkill,,[install,po])
+WINE_CONFIG_PROGRAM(tasklist,,[install])
 WINE_CONFIG_PROGRAM(taskmgr,,[install,po])
 WINE_CONFIG_PROGRAM(termsv,,[install])
 WINE_CONFIG_PROGRAM(uninstaller,,[install,po])

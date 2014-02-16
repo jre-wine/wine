@@ -49,6 +49,7 @@ PUBLIC_IDL_H_SRCS = \
 	imnact.idl \
 	imnxport.idl \
 	indexsrv.idl \
+	inputscope.idl \
 	mediaobj.idl \
 	metahost.idl \
 	mimeinfo.idl \
@@ -108,6 +109,7 @@ PUBLIC_IDL_H_SRCS = \
 	urlmon.idl \
 	vmr9.idl \
 	wbemcli.idl \
+	wbemdisp.idl \
 	wbemprov.idl \
 	wia_lh.idl \
 	wia_xp.idl \
@@ -162,6 +164,7 @@ SRCDIR_INCLUDES = \
 	cderr.h \
 	cfgmgr32.h \
 	cguid.h \
+	chprst.idl \
 	cierror.h \
 	clusapi.h \
 	cmdbas.idl \

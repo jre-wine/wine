@@ -105,13 +105,10 @@ static ULONG WINAPI IDirect3DRMViewportImpl_Release(IDirect3DRMViewport* iface)
 }
 
 /*** IDirect3DRMObject methods ***/
-static HRESULT WINAPI IDirect3DRMViewportImpl_Clone(IDirect3DRMViewport* iface,
-                                                        LPUNKNOWN unkwn, REFIID riid,
-                                                        LPVOID* object)
+static HRESULT WINAPI IDirect3DRMViewportImpl_Clone(IDirect3DRMViewport *iface,
+        IUnknown *outer, REFIID iid, void **out)
 {
-    IDirect3DRMViewportImpl *This = impl_from_IDirect3DRMViewport(iface);
-
-    FIXME("(%p/%p)->(%p, %s, %p): stub\n", iface, This, unkwn, debugstr_guid(riid), object);
+    FIXME("iface %p, outer %p, iid %s, out %p stub!\n", iface, outer, debugstr_guid(iid), out);
 
     return E_NOTIMPL;
 }
@@ -341,12 +338,10 @@ static HRESULT WINAPI IDirect3DRMViewportImpl_GetPlane(IDirect3DRMViewport* ifac
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMViewportImpl_Pick(IDirect3DRMViewport* iface, LONG x, LONG y,
-                                                   LPDIRECT3DRMPICKEDARRAY *return_visuals)
+static HRESULT WINAPI IDirect3DRMViewportImpl_Pick(IDirect3DRMViewport *iface,
+        LONG x, LONG y, IDirect3DRMPickedArray **visuals)
 {
-    IDirect3DRMViewportImpl *This = impl_from_IDirect3DRMViewport(iface);
-
-    FIXME("(%p/%p)->(%u, %u, %p): stub\n", iface, This, x, y, return_visuals);
+    FIXME("iface %p, x %d, y %d, visuals %p stub!\n", iface, x, y, visuals);
 
     return E_NOTIMPL;
 }
@@ -510,13 +505,10 @@ static ULONG WINAPI IDirect3DRMViewport2Impl_Release(IDirect3DRMViewport2* iface
 }
 
 /*** IDirect3DRMObject methods ***/
-static HRESULT WINAPI IDirect3DRMViewport2Impl_Clone(IDirect3DRMViewport2* iface,
-                                                        LPUNKNOWN unkwn, REFIID riid,
-                                                        LPVOID* object)
+static HRESULT WINAPI IDirect3DRMViewport2Impl_Clone(IDirect3DRMViewport2 *iface,
+        IUnknown *outer, REFIID iid, void **out)
 {
-    IDirect3DRMViewportImpl *This = impl_from_IDirect3DRMViewport2(iface);
-
-    FIXME("(%p/%p)->(%p, %s, %p): stub\n", iface, This, unkwn, debugstr_guid(riid), object);
+    FIXME("iface %p, outer %p, iid %s, out %p stub!\n", iface, outer, debugstr_guid(iid), out);
 
     return E_NOTIMPL;
 }
@@ -760,12 +752,10 @@ static HRESULT WINAPI IDirect3DRMViewport2Impl_GetPlane(IDirect3DRMViewport2* if
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRMViewport2Impl_Pick(IDirect3DRMViewport2* iface, LONG x, LONG y,
-                                                   LPDIRECT3DRMPICKEDARRAY *return_visuals)
+static HRESULT WINAPI IDirect3DRMViewport2Impl_Pick(IDirect3DRMViewport2 *iface,
+        LONG x, LONG y, IDirect3DRMPickedArray **visuals)
 {
-    IDirect3DRMViewportImpl *This = impl_from_IDirect3DRMViewport2(iface);
-
-    FIXME("(%p/%p)->(%u, %u, %p): stub\n", iface, This, x, y, return_visuals);
+    FIXME("iface %p, x %d, y %d, visuals %p stub!\n", iface, x, y, visuals);
 
     return E_NOTIMPL;
 }

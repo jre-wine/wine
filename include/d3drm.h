@@ -57,7 +57,7 @@ DECLARE_INTERFACE_(IDirect3DRM,IUnknown)
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
     /*** IDirect3DRM methods ***/
-    STDMETHOD(CreateObject)(THIS_ REFCLSID rclsid, LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObj) PURE;
+    STDMETHOD(CreateObject)(THIS_ REFCLSID clsid, IUnknown *outer, REFIID iid, void **out) PURE;
     STDMETHOD(CreateFrame)(THIS_ IDirect3DRMFrame *parent, IDirect3DRMFrame **frame) PURE;
     STDMETHOD(CreateMesh)(THIS_ IDirect3DRMMesh **mesh) PURE;
     STDMETHOD(CreateMeshBuilder)(THIS_ IDirect3DRMMeshBuilder **mesh_builder) PURE;
@@ -196,7 +196,7 @@ DECLARE_INTERFACE_(IDirect3DRM2,IUnknown)
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
     /*** IDirect3DRM2 methods ***/
-    STDMETHOD(CreateObject)(THIS_ REFCLSID rclsid, LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObj) PURE;
+    STDMETHOD(CreateObject)(THIS_ REFCLSID clsid, IUnknown *outer, REFIID iid, void **out) PURE;
     STDMETHOD(CreateFrame)(THIS_ IDirect3DRMFrame *parent, IDirect3DRMFrame2 **frame) PURE;
     STDMETHOD(CreateMesh)(THIS_ IDirect3DRMMesh **mesh) PURE;
     STDMETHOD(CreateMeshBuilder)(THIS_ IDirect3DRMMeshBuilder2 **mesh_builder) PURE;
@@ -241,7 +241,7 @@ DECLARE_INTERFACE_(IDirect3DRM2,IUnknown)
             D3DRMLOADCALLBACK load_cb, void *load_ctx, D3DRMLOADTEXTURECALLBACK load_tex_cb, void *load_tex_ctx,
             IDirect3DRMFrame *parent_frame) PURE;
     STDMETHOD(Tick)(THIS_ D3DVALUE) PURE;
-    STDMETHOD(CreateProgressiveMesh)(THIS_ LPDIRECT3DRMPROGRESSIVEMESH *) PURE;
+    STDMETHOD(CreateProgressiveMesh)(THIS_ IDirect3DRMProgressiveMesh **mesh) PURE;
 };
 #undef INTERFACE
 
@@ -339,7 +339,7 @@ DECLARE_INTERFACE_(IDirect3DRM3,IUnknown)
     STDMETHOD_(ULONG,AddRef)(THIS) PURE;
     STDMETHOD_(ULONG,Release)(THIS) PURE;
     /*** IDirect3DRM2 methods ***/
-    STDMETHOD(CreateObject)(THIS_ REFCLSID rclsid, LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObj) PURE;
+    STDMETHOD(CreateObject)(THIS_ REFCLSID clsid, IUnknown *outer, REFIID iid, void **out) PURE;
     STDMETHOD(CreateFrame)(THIS_ IDirect3DRMFrame3 *parent, IDirect3DRMFrame3 **frame) PURE;
     STDMETHOD(CreateMesh)(THIS_ IDirect3DRMMesh **mesh) PURE;
     STDMETHOD(CreateMeshBuilder)(THIS_ IDirect3DRMMeshBuilder3 **mesh_builder) PURE;
@@ -384,7 +384,7 @@ DECLARE_INTERFACE_(IDirect3DRM3,IUnknown)
             D3DRMLOADCALLBACK load_cb, void *load_ctx, D3DRMLOADTEXTURECALLBACK load_tex_cb, void *load_tex_ctx,
             IDirect3DRMFrame3 *parent_frame) PURE;
     STDMETHOD(Tick)(THIS_ D3DVALUE) PURE;
-    STDMETHOD(CreateProgressiveMesh)(THIS_ LPDIRECT3DRMPROGRESSIVEMESH) PURE;
+    STDMETHOD(CreateProgressiveMesh)(THIS_ IDirect3DRMProgressiveMesh **mesh) PURE;
     STDMETHOD(RegisterClient)(THIS_ REFGUID rguid, LPDWORD lpdwID) PURE;
     STDMETHOD(UnregisterClient)(THIS_ REFGUID rguid) PURE;
     STDMETHOD(CreateClippedVisual)(THIS_ IDirect3DRMVisual *visual, IDirect3DRMClippedVisual **clipped_visual) PURE;

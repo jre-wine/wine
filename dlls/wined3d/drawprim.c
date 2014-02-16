@@ -91,7 +91,7 @@ static void drawStridedSlow(const struct wined3d_device *device, const struct wi
     const WORD                *pIdxBufS     = NULL;
     const DWORD               *pIdxBufL     = NULL;
     UINT vx_index;
-    const struct wined3d_state *state = &device->stateBlock->state;
+    const struct wined3d_state *state = &device->state;
     LONG SkipnStrides = startIdx;
     BOOL pixelShader = use_ps(state);
     BOOL specular_fog = FALSE;
@@ -99,6 +99,7 @@ static void drawStridedSlow(const struct wined3d_device *device, const struct wi
     const BYTE *diffuse = NULL, *specular = NULL, *normal = NULL, *position = NULL;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     const struct wined3d_d3d_info *d3d_info = context->d3d_info;
+    const struct wined3d_ffp_attrib_ops *ops = &d3d_info->ffp_attrib_ops;
     UINT texture_stages = d3d_info->limits.ffp_blend_stages;
     const struct wined3d_stream_info_element *element;
     UINT num_untracked_materials;
@@ -266,15 +267,16 @@ static void drawStridedSlow(const struct wined3d_device *device, const struct wi
             ptr = texCoords[coord_idx] + (SkipnStrides * si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].stride);
 
             texture_idx = device->texUnitMap[texture];
-            multi_texcoord_funcs[si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format->emit_idx](
+            ops->texcoord[si->elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format->emit_idx](
                     GL_TEXTURE0_ARB + texture_idx, ptr);
         }
 
         /* Diffuse -------------------------------- */
-        if (diffuse) {
+        if (diffuse)
+        {
             const void *ptrToCoords = diffuse + SkipnStrides * si->elements[WINED3D_FFP_DIFFUSE].stride;
+            ops->diffuse[si->elements[WINED3D_FFP_DIFFUSE].format->emit_idx](ptrToCoords);
 
-            diffuse_funcs[si->elements[WINED3D_FFP_DIFFUSE].format->emit_idx](ptrToCoords);
             if (num_untracked_materials)
             {
                 DWORD diffuseColor = ((const DWORD *)ptrToCoords)[0];
@@ -294,10 +296,10 @@ static void drawStridedSlow(const struct wined3d_device *device, const struct wi
         }
 
         /* Specular ------------------------------- */
-        if (specular) {
+        if (specular)
+        {
             const void *ptrToCoords = specular + SkipnStrides * si->elements[WINED3D_FFP_SPECULAR].stride;
-
-            specular_funcs[si->elements[WINED3D_FFP_SPECULAR].format->emit_idx](ptrToCoords);
+            ops->specular[si->elements[WINED3D_FFP_SPECULAR].format->emit_idx](ptrToCoords);
 
             if (specular_fog)
             {
@@ -310,13 +312,14 @@ static void drawStridedSlow(const struct wined3d_device *device, const struct wi
         if (normal)
         {
             const void *ptrToCoords = normal + SkipnStrides * si->elements[WINED3D_FFP_NORMAL].stride;
-            normal_funcs[si->elements[WINED3D_FFP_NORMAL].format->emit_idx](ptrToCoords);
+            ops->normal[si->elements[WINED3D_FFP_NORMAL].format->emit_idx](ptrToCoords);
         }
 
         /* Position -------------------------------- */
-        if (position) {
+        if (position)
+        {
             const void *ptrToCoords = position + SkipnStrides * si->elements[WINED3D_FFP_POSITION].stride;
-            position_funcs[si->elements[WINED3D_FFP_POSITION].format->emit_idx](ptrToCoords);
+            ops->position[si->elements[WINED3D_FFP_POSITION].format->emit_idx](ptrToCoords);
         }
 
         /* For non indexed mode, step onto next parts */
@@ -581,7 +584,7 @@ static void remove_vbos(const struct wined3d_gl_info *gl_info,
 void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_count,
         UINT start_instance, UINT instance_count, BOOL indexed)
 {
-    const struct wined3d_state *state = &device->stateBlock->state;
+    const struct wined3d_state *state = &device->state;
     const struct wined3d_stream_info *stream_info;
     struct wined3d_event_query *ib_query = NULL;
     struct wined3d_stream_info si_emulated;
