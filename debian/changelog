@@ -1,6 +1,17 @@
 wine-unstable (1.7.0-1) unstable; urgency=medium
 
   * Switch to the wine-unstable branch.
+  * Track the unstable branch in debian/watch.
+  * Incorporate changes from the stable branch
+    (closes: #724703, #729339, #724710, #728884).
+  * New upstream release:
+    - Support for vertical text in the Postscript driver.
+    - Version 2 of liblcms used now instead of version 1.
+    - Unicode data updated to Unicode 6.2.0.
+    - Hyperlink controls supported in installers.
+    - Improved support for XML attributes.
+    - Various bug fixes.
+    - Respect LC_MESSAGES (closes: #504992).
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Feb 2014 23:59:47 +0000
 
