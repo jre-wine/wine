@@ -618,11 +618,6 @@ static void enum_renderer_pixel_formats(renderer_properties renderer, CFMutableA
         attribs[n++] = kCGLPFAAccelerated;
         attribs[n++] = kCGLPFANoRecovery;
     }
-    else if (!allow_software_rendering)
-    {
-        TRACE("ignoring software renderer because AllowSoftwareRendering is off\n");
-        return;
-    }
 
     n_stack[++n_stack_idx] = n;
     for (double_buffer = 0; double_buffer <= 1; double_buffer++)
@@ -2120,12 +2115,12 @@ static BOOL macdrv_wglDestroyPbufferARB(struct wgl_pbuffer *pbuffer)
  *
  * WGL_ARB_extensions_string: wglGetExtensionsStringARB
  */
-static const char *macdrv_wglGetExtensionsStringARB(HDC hdc)
+static const GLubyte *macdrv_wglGetExtensionsStringARB(HDC hdc)
 {
     /* FIXME: Since we're given an HDC, this should be device-specific.  I.e.
               this can be specific to the CGL renderer like we're supposed to do. */
     TRACE("returning \"%s\"\n", gl_info.wglExtensions);
-    return gl_info.wglExtensions;
+    return (const GLubyte*)gl_info.wglExtensions;
 }
 
 
@@ -2134,10 +2129,10 @@ static const char *macdrv_wglGetExtensionsStringARB(HDC hdc)
  *
  * WGL_EXT_extensions_string: wglGetExtensionsStringEXT
  */
-static const char *macdrv_wglGetExtensionsStringEXT(void)
+static const GLubyte *macdrv_wglGetExtensionsStringEXT(void)
 {
     TRACE("returning \"%s\"\n", gl_info.wglExtensions);
-    return gl_info.wglExtensions;
+    return (const GLubyte*)gl_info.wglExtensions;
 }
 
 
@@ -3280,16 +3275,16 @@ static BOOL create_context(struct wgl_context *context, CGLContextObj share)
  */
 int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRIPTOR *descr)
 {
+    int ret = nb_formats;
     const pixel_format *pf;
     const struct color_mode *mode;
 
     TRACE("hdc %p fmt %d size %u descr %p\n", hdc, fmt, size, descr);
 
-    if (!descr) return nb_displayable_formats;
+    if (fmt <= 0 || fmt > ret || !descr) return ret;
     if (size < sizeof(*descr)) return 0;
 
-    if (!(pf = get_pixel_format(fmt, FALSE)))
-        return 0;
+    pf = &pixel_formats[fmt - 1];
 
     memset(descr, 0, sizeof(*descr));
     descr->nSize            = sizeof(*descr);
@@ -3336,9 +3331,7 @@ int macdrv_wglDescribePixelFormat(HDC hdc, int fmt, UINT size, PIXELFORMATDESCRI
     descr->cStencilBits     = pf->stencil_bits;
     descr->cAuxBuffers      = pf->aux_buffers;
     descr->iLayerType       = PFD_MAIN_PLANE;
-
-    TRACE("%s\n", debugstr_pf(pf));
-    return nb_displayable_formats;
+    return ret;
 }
 
 /***********************************************************************

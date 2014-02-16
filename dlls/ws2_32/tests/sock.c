@@ -1665,17 +1665,65 @@ static void test_WSASocket(void)
 {
     SOCKET sock = INVALID_SOCKET;
     WSAPROTOCOL_INFOA *pi;
-    int providers[] = {6, 0};
-    int ret, err;
+    int wsaproviders[] = {IPPROTO_TCP, IPPROTO_IP};
+    int autoprotocols[] = {IPPROTO_TCP, IPPROTO_UDP};
+    int items, err, size, socktype, i, j;
     UINT pi_size;
+
+    SetLastError(0xdeadbeef);
+    ok(WSASocketA(0, 0, 0, NULL, 0, 0) == INVALID_SOCKET, "WSASocketA should have failed\n");
+    err = WSAGetLastError();
+todo_wine
+    ok(err == WSAEINVAL, "Expected 10022, received %d\n", err);
+
+    sock = WSASocketA(AF_INET, 0, 0, NULL, 0, 0);
+todo_wine
+    ok(sock != INVALID_SOCKET, "WSASocketA should have succeeded\n");
+    closesocket(sock);
+
+    sock = WSASocketA(AF_INET, SOCK_STREAM, 0, NULL, 0, 0);
+    ok(sock != INVALID_SOCKET, "WSASocketA should have succeeded\n");
+    closesocket(sock);
+
+    sock = WSASocketA(AF_INET, 0, IPPROTO_TCP, NULL, 0, 0);
+todo_wine
+    ok(sock != INVALID_SOCKET, "WSASocketA should have succeeded\n");
+    closesocket(sock);
+
+    SetLastError(0xdeadbeef);
+    ok(WSASocketA(0, SOCK_STREAM, 0, NULL, 0, 0) == INVALID_SOCKET, "WSASocketA should have failed\n");
+    err = WSAGetLastError();
+todo_wine
+    ok(err == WSAEINVAL, "Expected 10022, received %d\n", err);
+
+    sock = WSASocketA(0, 0, IPPROTO_TCP, NULL, 0, 0);
+todo_wine
+    ok(sock != INVALID_SOCKET, "WSASocketA should have succeeded\n");
+    closesocket(sock);
+
+    /* SOCK_STREAM does not support IPPROTO_UDP */
+    SetLastError(0xdeadbeef);
+    ok(WSASocketA(AF_INET, SOCK_STREAM, IPPROTO_UDP, NULL, 0, 0) == INVALID_SOCKET,
+       "WSASocketA should have failed\n");
+    err = WSAGetLastError();
+todo_wine
+    ok(err == WSAEPROTONOSUPPORT, "Expected 10043, received %d\n", err);
+
+    /* SOCK_DGRAM does not support IPPROTO_TCP */
+    SetLastError(0xdeadbeef);
+    ok(WSASocketA(AF_INET, SOCK_DGRAM, IPPROTO_TCP, NULL, 0, 0) == INVALID_SOCKET,
+       "WSASocketA should have failed\n");
+    err = WSAGetLastError();
+todo_wine
+    ok(err == WSAEPROTONOSUPPORT, "Expected 10043, received %d\n", err);
 
     /* Set pi_size explicitly to a value below 2*sizeof(WSAPROTOCOL_INFOA)
      * to avoid a crash on win98.
      */
     pi_size = 0;
-    ret = WSAEnumProtocolsA(providers, NULL, &pi_size);
-    ok(ret == SOCKET_ERROR, "WSAEnumProtocolsA({6,0}, NULL, 0) returned %d\n",
-            ret);
+    items = WSAEnumProtocolsA(wsaproviders, NULL, &pi_size);
+    ok(items == SOCKET_ERROR, "WSAEnumProtocolsA({6,0}, NULL, 0) returned %d\n",
+            items);
     err = WSAGetLastError();
     ok(err == WSAENOBUFS, "WSAEnumProtocolsA error is %d, not WSAENOBUFS(%d)\n",
             err, WSAENOBUFS);
@@ -1687,11 +1735,11 @@ static void test_WSASocket(void)
         return;
     }
 
-    ret = WSAEnumProtocolsA(providers, pi, &pi_size);
-    ok(ret != SOCKET_ERROR, "WSAEnumProtocolsA failed, last error is %d\n",
+    items = WSAEnumProtocolsA(wsaproviders, pi, &pi_size);
+    ok(items != SOCKET_ERROR, "WSAEnumProtocolsA failed, last error is %d\n",
             WSAGetLastError());
 
-    if (ret == 0) {
+    if (items == 0) {
         skip("No protocols enumerated.\n");
         HeapFree(GetProcessHeap(), 0, pi);
         return;
@@ -1701,8 +1749,116 @@ static void test_WSASocket(void)
                       FROM_PROTOCOL_INFO, &pi[0], 0, 0);
     ok(sock != INVALID_SOCKET, "Failed to create socket: %d\n",
             WSAGetLastError());
-
     closesocket(sock);
+
+    /* find what parameters are used first: plain parameters or protocol info struct */
+    pi[0].iProtocol = IPPROTO_UDP;
+    pi[0].iSocketType = SOCK_DGRAM;
+    pi[0].iAddressFamily = AF_INET;
+    sock = WSASocketA(0, 0, 0, &pi[0], 0, 0);
+todo_wine {
+    ok(sock != INVALID_SOCKET, "Failed to create socket: %d\n",
+            WSAGetLastError());
+    size = sizeof(socktype);
+    socktype = 0xdead;
+    err = getsockopt(sock, SOL_SOCKET, SO_TYPE, (char *) &socktype, &size);
+    ok(!err,"getsockopt failed with %d\n", WSAGetLastError());
+    ok(socktype == SOCK_DGRAM, "Wrong socket type, expected %d received %d\n",
+       SOCK_DGRAM, socktype);
+    closesocket(sock);
+}
+    sock = WSASocketA(AF_INET, SOCK_STREAM, IPPROTO_TCP, &pi[0], 0, 0);
+    ok(sock != INVALID_SOCKET, "Failed to create socket: %d\n",
+            WSAGetLastError());
+    size = sizeof(socktype);
+    socktype = 0xdead;
+    err = getsockopt(sock, SOL_SOCKET, SO_TYPE, (char *) &socktype, &size);
+    ok(!err,"getsockopt failed with %d\n", WSAGetLastError());
+    ok(socktype == SOCK_STREAM, "Wrong socket type, expected %d received %d\n",
+       SOCK_STREAM, socktype);
+    closesocket(sock);
+
+    HeapFree(GetProcessHeap(), 0, pi);
+
+    pi_size = 0;
+    items = WSAEnumProtocolsA(NULL, NULL, &pi_size);
+    ok(items == SOCKET_ERROR, "WSAEnumProtocolsA(NULL, NULL, 0) returned %d\n",
+            items);
+    err = WSAGetLastError();
+    ok(err == WSAENOBUFS, "WSAEnumProtocolsA error is %d, not WSAENOBUFS(%d)\n",
+            err, WSAENOBUFS);
+
+    pi = HeapAlloc(GetProcessHeap(), 0, pi_size);
+    ok(pi != NULL, "Failed to allocate memory\n");
+    if (pi == NULL) {
+        skip("Can't continue without memory.\n");
+        return;
+    }
+
+    items = WSAEnumProtocolsA(NULL, pi, &pi_size);
+    ok(items != SOCKET_ERROR, "WSAEnumProtocolsA failed, last error is %d\n",
+            WSAGetLastError());
+
+    /* when no protocol and socket type are specified the first entry
+     * from WSAEnumProtocols that has the flag PFL_MATCHES_PROTOCOL_ZERO
+     * is returned */
+    sock = WSASocketA(AF_INET, 0, 0, NULL, 0, 0);
+todo_wine
+    ok(sock != INVALID_SOCKET, "Failed to create socket: %d\n",
+            WSAGetLastError());
+
+todo_wine {
+    size = sizeof(socktype);
+    socktype = 0xdead;
+    err = getsockopt(sock, SOL_SOCKET, SO_TYPE, (char *) &socktype, &size);
+    ok(!err, "getsockopt failed with %d\n", WSAGetLastError());
+    for(i = 0; i < items; i++)
+    {
+        if(pi[i].dwProviderFlags & PFL_MATCHES_PROTOCOL_ZERO)
+        {
+            ok(socktype == pi[i].iSocketType, "Wrong socket type, expected %d received %d\n",
+               pi[i].iSocketType, socktype);
+             break;
+        }
+    }
+    ok(i != items, "Creating a socket without protocol and socket type didn't work\n");
+}
+    closesocket(sock);
+
+    /* when no socket type is specified the first entry from WSAEnumProtocols
+     * that matches the protocol is returned */
+    for (i = 0; i < sizeof(autoprotocols) / sizeof(autoprotocols[0]); i++)
+    {
+        sock = WSASocketA(0, 0, autoprotocols[i], NULL, 0, 0);
+todo_wine
+        ok(sock != INVALID_SOCKET, "Failed to create socket for protocol %d, received %d\n",
+                autoprotocols[i], WSAGetLastError());
+
+        size = sizeof(socktype);
+        socktype = 0xdead;
+        err = getsockopt(sock, SOL_SOCKET, SO_TYPE, (char *) &socktype, &size);
+todo_wine
+        ok(!err, "getsockopt failed with %d\n", WSAGetLastError());
+
+        for (err = 1, j = 0; j < items; j++)
+        {
+            if (pi[j].iProtocol == autoprotocols[i])
+            {
+                if (socktype == pi[j].iSocketType)
+                    err = 0;
+                else
+todo_wine
+                    ok(0, "Wrong socket type, expected %d received %d\n",
+                       pi[j].iSocketType, socktype);
+                break;
+            }
+        }
+todo_wine
+        ok(!err, "Protocol %d not found in WSAEnumProtocols\n", autoprotocols[i]);
+
+        closesocket(sock);
+    }
+
     HeapFree(GetProcessHeap(), 0, pi);
 }
 
@@ -2357,6 +2513,91 @@ static void test_errors(void)
     ok ( (ret == 0), "closesocket failed unexpectedly: %d\n", WSAGetLastError());
 }
 
+static void test_listen(void)
+{
+    SOCKET fdA, fdB;
+    int ret, acceptc, olen = sizeof(acceptc);
+    struct sockaddr_in address;
+
+    memset(&address, 0, sizeof(address));
+    address.sin_addr.s_addr = inet_addr("127.0.0.1");
+    address.sin_family = AF_INET;
+    address.sin_port = htons(SERVERPORT);
+
+    /* invalid socket tests */
+    SetLastError(0xdeadbeef);
+    ok ((listen(0, 0) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAENOTSOCK, "expected 10038, received %d\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ok ((listen(0xdeadbeef, 0) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAENOTSOCK, "expected 10038, received %d\n", ret);
+
+    /* tcp tests */
+    fdA = socket(AF_INET, SOCK_STREAM, 0);
+    ok ((fdA != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
+
+    fdB = socket(AF_INET, SOCK_STREAM, 0);
+    ok ((fdB != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
+
+    SetLastError(0xdeadbeef);
+    ok ((listen(fdA, -2) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAEINVAL, "expected 10022, received %d\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ok ((listen(fdA, 1) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAEINVAL, "expected 10022, received %d\n", ret);
+
+    SetLastError(0xdeadbeef);
+    ok ((listen(fdA, SOMAXCONN) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAEINVAL, "expected 10022, received %d\n", ret);
+
+    ok (!bind(fdA, (struct sockaddr*) &address, sizeof(address)), "bind failed\n");
+
+    SetLastError(0xdeadbeef);
+    ok (bind(fdB, (struct sockaddr*) &address, sizeof(address)), "bind should have failed\n");
+    ok (ret == WSAEINVAL, "expected 10022, received %d\n", ret);
+
+    acceptc = 0xdead;
+    ret = getsockopt(fdA, SOL_SOCKET, SO_ACCEPTCONN, (char*)&acceptc, &olen);
+    ok (!ret, "getsockopt failed\n");
+    ok (acceptc == 0, "SO_ACCEPTCONN should be 0, received %d\n", acceptc);
+
+    ok (!listen(fdA, 0), "listen failed\n");
+    ok (!listen(fdA, SOMAXCONN), "double listen failed\n");
+
+    acceptc = 0xdead;
+    ret = getsockopt(fdA, SOL_SOCKET, SO_ACCEPTCONN, (char*)&acceptc, &olen);
+    ok (!ret, "getsockopt failed\n");
+    ok (acceptc == 1, "SO_ACCEPTCONN should be 1, received %d\n", acceptc);
+
+    SetLastError(0xdeadbeef);
+    ok ((listen(fdB, SOMAXCONN) == SOCKET_ERROR), "listen did not fail\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAEINVAL, "expected 10022, received %d\n", ret);
+
+    ret = closesocket(fdB);
+    ok (ret == 0, "closesocket failed unexpectedly: %d\n", ret);
+
+    fdB = socket(AF_INET, SOCK_STREAM, 0);
+    ok ((fdB != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
+
+    SetLastError(0xdeadbeef);
+    ok (bind(fdB, (struct sockaddr*) &address, sizeof(address)), "bind should have failed\n");
+    ret = WSAGetLastError();
+    ok (ret == WSAEADDRINUSE, "expected 10048, received %d\n", ret);
+
+    ret = closesocket(fdA);
+    ok (ret == 0, "closesocket failed unexpectedly: %d\n", ret);
+    ret = closesocket(fdB);
+    ok (ret == 0, "closesocket failed unexpectedly: %d\n", ret);
+}
+
 static void test_select(void)
 {
     SOCKET fdRead, fdWrite;
@@ -2398,9 +2639,7 @@ static void test_select(void)
     ok ( !FD_ISSET(fdRead, &exceptfds), "FD should not be set\n");
     ok ( !FD_ISSET(fdWrite, &exceptfds), "FD should not be set\n");
  
-    todo_wine {
     ok ((listen(fdWrite, SOMAXCONN) == SOCKET_ERROR), "listen did not fail\n");
-    }
     ret = closesocket(fdWrite);
     ok ( (ret == 0), "closesocket failed unexpectedly: %d\n", ret);
 
@@ -6098,6 +6337,7 @@ START_TEST( sock )
     test_WSAStringToAddressW();
 
     test_errors();
+    test_listen();
     test_select();
     test_accept();
     test_getpeername();
