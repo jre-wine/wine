@@ -143,6 +143,8 @@ struct macdrv_display {
 extern int macdrv_err_on;
 extern int topmost_float_inactive DECLSPEC_HIDDEN;
 extern int capture_displays_for_fullscreen DECLSPEC_HIDDEN;
+extern int left_option_is_alt DECLSPEC_HIDDEN;
+extern int right_option_is_alt DECLSPEC_HIDDEN;
 
 extern int macdrv_start_cocoa_app(unsigned long long tickcount) DECLSPEC_HIDDEN;
 extern void macdrv_window_rejected_focus(const struct macdrv_event *event) DECLSPEC_HIDDEN;
@@ -185,12 +187,13 @@ enum {
     RELEASE_CAPTURE,
     STATUS_ITEM_MOUSE_BUTTON,
     STATUS_ITEM_MOUSE_MOVE,
+    WINDOW_BROUGHT_FORWARD,
     WINDOW_CLOSE_REQUESTED,
-    WINDOW_DID_MINIMIZE,
     WINDOW_DID_UNMINIMIZE,
     WINDOW_FRAME_CHANGED,
     WINDOW_GOT_FOCUS,
     WINDOW_LOST_FOCUS,
+    WINDOW_MINIMIZE_REQUESTED,
     NUM_EVENT_TYPES
 };
 
@@ -270,7 +273,8 @@ typedef struct macdrv_event {
             macdrv_status_item  item;
         }                                           status_item_mouse_move;
         struct {
-            CGRect frame;
+            CGRect  frame;
+            int     fullscreen;
         }                                           window_frame_changed;
         struct {
             unsigned long   serial;
@@ -287,6 +291,7 @@ enum {
     QUERY_PASTEBOARD_DATA,
     QUERY_RESIZE_END,
     QUERY_RESIZE_START,
+    QUERY_MIN_MAX_INFO,
     NUM_QUERY_TYPES
 };
 
@@ -362,6 +367,7 @@ struct macdrv_window_state {
     unsigned int    excluded_by_expose:1;
     unsigned int    excluded_by_cycle:1;
     unsigned int    minimized:1;
+    unsigned int    minimized_valid:1;
 };
 
 extern macdrv_window macdrv_create_cocoa_window(const struct macdrv_window_features* wf,

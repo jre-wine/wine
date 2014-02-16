@@ -58,7 +58,11 @@
     NSSize savedContentMinSize;
     NSSize savedContentMaxSize;
 
-    BOOL ignore_windowMiniaturize;
+    BOOL enteringFullScreen;
+    BOOL exitingFullScreen;
+    NSRect nonFullscreenFrame;
+    NSTimeInterval enteredFullScreenTime;
+
     BOOL ignore_windowDeminiaturize;
     BOOL fakingClose;
 }
@@ -74,5 +78,8 @@
     - (void) updateFullscreen;
 
     - (void) postKeyEvent:(NSEvent *)theEvent;
+    - (void) postBroughtForwardEvent;
+
+    - (WineWindow*) ancestorWineWindow;
 
 @end
