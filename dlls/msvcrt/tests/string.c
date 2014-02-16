@@ -432,9 +432,7 @@ static void test_mbcp(void)
     expect_eq(_ismbblead(0x84), 1, int, "%d");
     expect_eq(_ismbblead(0xd3), 1, int, "%d");
     expect_eq(_ismbblead(0xd7), 0, int, "%d");
-    todo_wine {
-      expect_eq(_ismbblead(0xd8), 1, int, "%d");
-    }
+    expect_eq(_ismbblead(0xd8), 1, int, "%d");
     expect_eq(_ismbblead(0xd9), 1, int, "%d");
 
     expect_eq(_ismbbtrail(0x30), 0, int, "%d");
@@ -2358,7 +2356,7 @@ static void test_wctomb(void)
 
     ret = p_wcrtomb((char*)dst, 0xffff, NULL);
     ok(ret == -1, "wcrtomb did not return -1\n");
-    ok(dst[0] == 0x3f, "dst[0] = %x, expected 0x20\n", dst[0]);
+    ok(dst[0] == 0x3f, "dst[0] = %x, expected 0x3f\n", dst[0]);
 
     setlocale(LC_ALL, "C");
 }

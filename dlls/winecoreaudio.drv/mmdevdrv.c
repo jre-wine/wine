@@ -120,6 +120,7 @@ struct ACImpl {
     LONG ref;
 
     IMMDevice *parent;
+    IUnknown *pUnkFTMarshal;
 
     WAVEFORMATEX *fmt;
 
@@ -599,6 +600,7 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     ACImpl *This;
     AudioDeviceID adevid;
     EDataFlow dataflow;
+    HRESULT hr;
 
     TRACE("%s %p %p\n", debugstr_guid(guid), dev, out);
 
@@ -628,6 +630,13 @@ HRESULT WINAPI AUDDRV_GetAudioEndpoint(GUID *guid, IMMDevice *dev, IAudioClient 
     }
 
     This->lock = 0;
+
+    hr = CoCreateFreeThreadedMarshaler((IUnknown *)&This->IAudioClient_iface,
+        (IUnknown **)&This->pUnkFTMarshal);
+    if (FAILED(hr)) {
+        HeapFree(GetProcessHeap(), 0, This);
+        return hr;
+    }
 
     This->parent = dev;
     IMMDevice_AddRef(This->parent);
@@ -746,6 +755,7 @@ static void avail_update(ACImpl *This)
 static HRESULT WINAPI AudioClient_QueryInterface(IAudioClient *iface,
         REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -753,6 +763,9 @@ static HRESULT WINAPI AudioClient_QueryInterface(IAudioClient *iface,
     *ppv = NULL;
     if(IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IAudioClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;
@@ -810,6 +823,7 @@ static ULONG WINAPI AudioClient_Release(IAudioClient *iface)
         HeapFree(GetProcessHeap(), 0, This->vols);
         CoTaskMemFree(This->fmt);
         IMMDevice_Release(This->parent);
+        IUnknown_Release(This->pUnkFTMarshal);
         HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
@@ -1938,6 +1952,7 @@ static const IAudioClientVtbl AudioClient_Vtbl =
 static HRESULT WINAPI AudioRenderClient_QueryInterface(
         IAudioRenderClient *iface, REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioRenderClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -1947,6 +1962,9 @@ static HRESULT WINAPI AudioRenderClient_QueryInterface(
     if(IsEqualIID(riid, &IID_IUnknown) ||
             IsEqualIID(riid, &IID_IAudioRenderClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;
@@ -2158,6 +2176,7 @@ static const IAudioRenderClientVtbl AudioRenderClient_Vtbl = {
 static HRESULT WINAPI AudioCaptureClient_QueryInterface(
         IAudioCaptureClient *iface, REFIID riid, void **ppv)
 {
+    ACImpl *This = impl_from_IAudioCaptureClient(iface);
     TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppv);
 
     if(!ppv)
@@ -2167,6 +2186,9 @@ static HRESULT WINAPI AudioCaptureClient_QueryInterface(
     if(IsEqualIID(riid, &IID_IUnknown) ||
             IsEqualIID(riid, &IID_IAudioCaptureClient))
         *ppv = iface;
+    else if(IsEqualIID(riid, &IID_IMarshal))
+        return IUnknown_QueryInterface(This->pUnkFTMarshal, riid, ppv);
+
     if(*ppv){
         IUnknown_AddRef((IUnknown*)*ppv);
         return S_OK;

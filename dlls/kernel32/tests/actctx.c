@@ -101,6 +101,39 @@ static const char manifest3[] =
 "</file>"
 "</assembly>";
 
+static const char manifest_wndcls1[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.2.3.4\"  name=\"testdep1\" type=\"win32\" processorArchitecture=\"" ARCH "\"/>"
+"<file name=\"testlib1.dll\">"
+"<windowClass>wndClass1</windowClass>"
+"<windowClass>wndClass2</windowClass>"
+"</file>"
+"</assembly>";
+
+static const char manifest_wndcls2[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"4.3.2.1\"  name=\"testdep2\" type=\"win32\" processorArchitecture=\"" ARCH "\" />"
+"<file name=\"testlib2.dll\">"
+"<windowClass>wndClass3</windowClass>"
+"<windowClass>wndClass4</windowClass>"
+"</file>"
+"</assembly>";
+
+static const char manifest_wndcls_main[] =
+"<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
+"<assemblyIdentity version=\"1.2.3.4\" name=\"Wine.Test\" type=\"win32\" />"
+"<dependency>"
+" <dependentAssembly>"
+"  <assemblyIdentity type=\"win32\" name=\"testdep1\" version=\"1.2.3.4\" processorArchitecture=\"" ARCH "\" />"
+" </dependentAssembly>"
+"</dependency>"
+"<dependency>"
+" <dependentAssembly>"
+"  <assemblyIdentity type=\"win32\" name=\"testdep2\" version=\"4.3.2.1\" processorArchitecture=\"" ARCH "\" />"
+" </dependentAssembly>"
+"</dependency>"
+"</assembly>";
+
 static const char manifest4[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
 "<assemblyIdentity version=\"1.2.3.4\" name=\"Wine.Test\" type=\"win32\">"
@@ -191,8 +224,12 @@ static const WCHAR testlib2_dll[] =
     {'t','e','s','t','l','i','b','2','.','d','l','l',0};
 static const WCHAR wndClassW[] =
     {'w','n','d','C','l','a','s','s',0};
+static const WCHAR wndClass1W[] =
+    {'w','n','d','C','l','a','s','s','1',0};
 static const WCHAR wndClass2W[] =
     {'w','n','d','C','l','a','s','s','2',0};
+static const WCHAR wndClass3W[] =
+    {'w','n','d','C','l','a','s','s','3',0};
 static const WCHAR acr_manifest[] =
     {'a','c','r','.','m','a','n','i','f','e','s','t',0};
 
@@ -600,7 +637,7 @@ static void test_file_info(HANDLE handle, ULONG assid, ULONG fileid, LPCWSTR fil
     HeapFree(GetProcessHeap(), 0, info);
 }
 
-static HANDLE test_create(const char *file, const char *manifest)
+static HANDLE test_create(const char *file)
 {
     ACTCTXW actctx;
     HANDLE handle;
@@ -802,20 +839,39 @@ if (dlldata->size == data.ulLength)
     pReleaseActCtx(handle);
 }
 
-struct wndclass_keyed_data
+struct wndclass_header
 {
-    DWORD size;
-    DWORD reserved;
-    DWORD classname_len;
-    DWORD classname_offset;
-    DWORD modulename_len;
-    DWORD modulename_offset; /* offset relative to section base */
-    WCHAR strdata[1];
+    DWORD magic;
+    DWORD unk1[4];
+    ULONG count;
+    ULONG index_offset;
+    DWORD unk2[4];
+};
+
+struct wndclass_index
+{
+    ULONG hash;
+    ULONG name_offset;
+    ULONG name_len;
+    ULONG data_offset;
+    ULONG data_len;
+    ULONG rosterindex;
+};
+
+struct wndclass_redirect_data
+{
+    ULONG size;
+    DWORD res;
+    ULONG name_len;
+    ULONG name_offset;  /* versioned name offset */
+    ULONG module_len;
+    ULONG module_offset;/* container name offset */
 };
 
 static void test_find_window_class(HANDLE handle, LPCWSTR clsname, ULONG exid, int line)
 {
-    struct wndclass_keyed_data *wnddata;
+    struct wndclass_redirect_data *wnddata;
+    struct wndclass_header *header;
     ACTCTX_SECTION_KEYED_DATA data;
     BOOL ret;
 
@@ -825,51 +881,50 @@ static void test_find_window_class(HANDLE handle, LPCWSTR clsname, ULONG exid, i
     ret = pFindActCtxSectionStringW(0, NULL,
                                     ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION,
                                     clsname, &data);
-    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
-    if(!ret)
-    {
-        skip("couldn't find\n");
-        return;
-    }
+    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u, class %s\n", GetLastError(),
+        wine_dbgstr_w(clsname));
+    if (!ret) return;
 
-    wnddata = (struct wndclass_keyed_data*)data.lpData;
+    header = (struct wndclass_header*)data.lpSectionBase;
+    wnddata = (struct wndclass_redirect_data*)data.lpData;
 
+    ok_(__FILE__, line)(header->magic == 0x64487353, "got wrong magic 0x%08x\n", header->magic);
+    ok_(__FILE__, line)(header->count > 0, "got count %d\n", header->count);
     ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
     ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
     ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-todo_wine
-    ok_(__FILE__, line)(wnddata->size == FIELD_OFFSET(struct wndclass_keyed_data, strdata), "got %d for header size\n", wnddata->size);
-    if (data.lpData && wnddata->size == FIELD_OFFSET(struct wndclass_keyed_data, strdata))
+    ok_(__FILE__, line)(wnddata->size == sizeof(*wnddata), "got %d for header size\n", wnddata->size);
+    if (data.lpData && wnddata->size == sizeof(*wnddata))
     {
         static const WCHAR verW[] = {'6','.','5','.','4','.','3','!',0};
         WCHAR buff[50];
         WCHAR *ptr;
         ULONG len;
 
-        ok_(__FILE__, line)(wnddata->reserved == 0, "got reserved as %d\n", wnddata->reserved);
+        ok_(__FILE__, line)(wnddata->res == 0, "got reserved as %d\n", wnddata->res);
         /* redirect class name (versioned or not) is stored just after header data */
-        ok_(__FILE__, line)(wnddata->classname_offset == wnddata->size, "got name offset as %d\n", wnddata->classname_offset);
-        ok_(__FILE__, line)(wnddata->modulename_len > 0, "got module name length as %d\n", wnddata->modulename_len);
+        ok_(__FILE__, line)(wnddata->name_offset == wnddata->size, "got name offset as %d\n", wnddata->name_offset);
+        ok_(__FILE__, line)(wnddata->module_len > 0, "got module name length as %d\n", wnddata->module_len);
 
         /* expected versioned name */
         lstrcpyW(buff, verW);
         lstrcatW(buff, clsname);
-        ptr = (WCHAR*)((BYTE*)wnddata + wnddata->size);
+        ptr = (WCHAR*)((BYTE*)wnddata + wnddata->name_offset);
         ok_(__FILE__, line)(!lstrcmpW(ptr, buff), "got wrong class name %s, expected %s\n", wine_dbgstr_w(ptr), wine_dbgstr_w(buff));
-        ok_(__FILE__, line)(lstrlenW(ptr)*sizeof(WCHAR) == wnddata->classname_len,
-            "got wrong class name length %d, expected %d\n", wnddata->classname_len, lstrlenW(ptr));
+        ok_(__FILE__, line)(lstrlenW(ptr)*sizeof(WCHAR) == wnddata->name_len,
+            "got wrong class name length %d, expected %d\n", wnddata->name_len, lstrlenW(ptr));
 
         /* data length is simply header length + string data length including nulls */
-        len = wnddata->size + wnddata->classname_len + wnddata->modulename_len + 2*sizeof(WCHAR);
+        len = wnddata->size + wnddata->name_len + wnddata->module_len + 2*sizeof(WCHAR);
         ok_(__FILE__, line)(data.ulLength == len, "got wrong data length %d, expected %d\n", data.ulLength, len);
 
-        if (data.ulSectionTotalLength > wnddata->modulename_offset)
+        if (data.ulSectionTotalLength > wnddata->module_offset)
         {
             WCHAR *modulename, *sectionptr;
 
             /* just compare pointers */
-            modulename = (WCHAR*)((BYTE*)wnddata + wnddata->size + wnddata->classname_len + sizeof(WCHAR));
-            sectionptr = (WCHAR*)((BYTE*)data.lpSectionBase + wnddata->modulename_offset);
+            modulename = (WCHAR*)((BYTE*)wnddata + wnddata->size + wnddata->name_len + sizeof(WCHAR));
+            sectionptr = (WCHAR*)((BYTE*)data.lpSectionBase + wnddata->module_offset);
             ok_(__FILE__, line)(modulename == sectionptr, "got wrong name offset %p, expected %p\n", sectionptr, modulename);
         }
     }
@@ -878,7 +933,6 @@ todo_wine
     ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
        data.ulSectionGlobalDataLength);
     ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
-todo_wine
     ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%u\n",
        data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
@@ -891,23 +945,19 @@ todo_wine
     ret = pFindActCtxSectionStringW(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
                                     ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION,
                                     clsname, &data);
-    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
-    if(!ret)
-    {
-        skip("couldn't find\n");
-        return;
-    }
+    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u, class %s\n", GetLastError(),
+        wine_dbgstr_w(clsname));
+    if (!ret) return;
 
     ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
     ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
     ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-    /* ok_(__FILE__, line)(data.ulLength == ??, "data.ulLength=%u\n", data.ulLength); FIXME */
+    ok_(__FILE__, line)(data.ulLength > 0, "data.ulLength=%u\n", data.ulLength);
     ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
     ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
        data.ulSectionGlobalDataLength);
     ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
-    /* ok_(__FILE__, line)(data.ulSectionTotalLength == 0, "data.ulSectionTotalLength=%u\n",
-       data.ulSectionTotalLength); FIXME */
+    ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%u\n", data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.hActCtx == handle, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
        data.ulAssemblyRosterIndex, exid);
@@ -1088,6 +1138,52 @@ todo_wine
        data.ulAssemblyRosterIndex, exid);
 }
 
+static void test_wndclass_section(void)
+{
+    ACTCTX_SECTION_KEYED_DATA data, data2;
+    ULONG_PTR cookie;
+    HANDLE handle;
+    BOOL ret;
+
+    /* use two dependent manifests, each defines 2 window class redirects */
+    create_manifest_file("testdep1.manifest", manifest_wndcls1, -1, NULL, NULL);
+    create_manifest_file("testdep2.manifest", manifest_wndcls2, -1, NULL, NULL);
+    create_manifest_file("main_wndcls.manifest", manifest_wndcls_main, -1, NULL, NULL);
+
+    handle = test_create("main_wndcls.manifest");
+    DeleteFileA("testdep1.manifest");
+    DeleteFileA("testdep2.manifest");
+    DeleteFileA("main_wndcls.manifest");
+
+    ret = pActivateActCtx(handle, &cookie);
+    ok(ret, "ActivateActCtx failed: %u\n", GetLastError());
+
+    memset(&data, 0, sizeof(data));
+    memset(&data2, 0, sizeof(data2));
+    data.cbSize = sizeof(data);
+    data2.cbSize = sizeof(data2);
+
+    /* get data for two classes from different assemblies */
+    ret = pFindActCtxSectionStringW(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION,
+                                    wndClass1W, &data);
+    ok(ret, "got %d\n", ret);
+    ret = pFindActCtxSectionStringW(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_WINDOW_CLASS_REDIRECTION,
+                                    wndClass3W, &data2);
+    ok(ret, "got %d\n", ret);
+
+    /* For both string same section is returned, meaning it's one wndclass section per context */
+    ok(data.lpSectionBase == data2.lpSectionBase, "got %p, %p\n", data.lpSectionBase, data2.lpSectionBase);
+    ok(data.ulSectionTotalLength == data2.ulSectionTotalLength, "got %u, %u\n", data.ulSectionTotalLength,
+        data2.ulSectionTotalLength);
+
+    ret = pDeactivateActCtx(0, cookie);
+    ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
+
+    pReleaseActCtx(handle);
+}
+
 static void test_actctx(void)
 {
     ULONG_PTR cookie;
@@ -1114,7 +1210,7 @@ static void test_actctx(void)
 
     trace("manifest1\n");
 
-    handle = test_create("test1.manifest", manifest1);
+    handle = test_create("test1.manifest");
     DeleteFileA("test1.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
         test_basic_info(handle, __LINE__);
@@ -1139,7 +1235,7 @@ static void test_actctx(void)
 
     trace("manifest2 depmanifest1\n");
 
-    handle = test_create("test2.manifest", manifest2);
+    handle = test_create("test2.manifest");
     DeleteFileA("test2.manifest");
     DeleteFileA("testdep.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
@@ -1157,7 +1253,7 @@ static void test_actctx(void)
 
     trace("manifest2 depmanifest2\n");
 
-    handle = test_create("test2-2.manifest", manifest2);
+    handle = test_create("test2-2.manifest");
     DeleteFileA("test2-2.manifest");
     DeleteFileA("testdep.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
@@ -1185,7 +1281,7 @@ static void test_actctx(void)
         return;
     }
 
-    handle = test_create("test2-3.manifest", manifest2);
+    handle = test_create("test2-3.manifest");
     DeleteFileA("test2-3.manifest");
     DeleteFileA("testdep.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
@@ -1215,7 +1311,7 @@ static void test_actctx(void)
         return;
     }
 
-    handle = test_create("test3.manifest", manifest3);
+    handle = test_create("test3.manifest");
     DeleteFileA("test3.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
         test_basic_info(handle, __LINE__);
@@ -1242,7 +1338,7 @@ static void test_actctx(void)
         return;
     }
 
-    handle = test_create("test4.manifest", manifest4);
+    handle = test_create("test4.manifest");
     DeleteFileA("test4.manifest");
     DeleteFileA("testdep.manifest");
     if(handle != INVALID_HANDLE_VALUE) {
@@ -1262,7 +1358,7 @@ static void test_actctx(void)
             skip("Could not create manifest file\n");
             return;
         }
-        handle = test_create("..\\test1.manifest", manifest1);
+        handle = test_create("..\\test1.manifest");
         DeleteFileA("..\\test1.manifest");
         if(handle != INVALID_HANDLE_VALUE) {
             test_basic_info(handle, __LINE__);
@@ -1282,7 +1378,7 @@ static void test_actctx(void)
         return;
     }
 
-    handle = test_create("test1.manifest", manifest1);
+    handle = test_create("test1.manifest");
     DeleteFileA("test1.manifest");
     if (handle != INVALID_HANDLE_VALUE) {
         test_basic_info(handle, __LINE__);
@@ -1297,7 +1393,7 @@ static void test_actctx(void)
         return;
     }
 
-    handle = test_create("test1.manifest", manifest1);
+    handle = test_create("test1.manifest");
     DeleteFileA("test1.manifest");
     if (handle != INVALID_HANDLE_VALUE) {
         test_basic_info(handle, __LINE__);
@@ -1306,6 +1402,7 @@ static void test_actctx(void)
         pReleaseActCtx(handle);
     }
 
+    test_wndclass_section();
 }
 
 static void test_app_manifest(void)
