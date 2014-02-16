@@ -1,3 +1,15 @@
+wine-unstable (1.7.12-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Initial support for Window Media Player interfaces.
+    - Some more Task Scheduler support.
+    - Various C++ runtime fixes.
+    - More dlls with ugly names for Windows 8 API set support.
+    - Various bug fixes.
+  * Support freetype >= 2.5.1 (closes: #730814).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:28:55 +0000
+
 wine-unstable (1.7.11-1) unstable; urgency=medium
 
   * New upstream release:
@@ -117,8 +129,7 @@ wine-unstable (1.7.0-1) unstable; urgency=medium
 
   * Switch to the wine-unstable branch.
   * Track the unstable branch in debian/watch.
-  * Incorporate changes from the stable branch
-    (closes: #724703, #729339, #724710, #728884).
+  * Incorporate changes from the stable branch (closes: #724710, #728884).
   * New upstream release:
     - Support for vertical text in the Postscript driver.
     - Version 2 of liblcms used now instead of version 1.

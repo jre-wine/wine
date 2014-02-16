@@ -66,11 +66,11 @@ Depends:
  file,
  wine64 (>= ${source:Version}) | wine32 (>= ${source:Version}),
 Suggests:
+ winbind,
  wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
- winbind,
- avscan | klamav | clamav
+ avscan | klamav | clamav,
 Replaces:
  wine32 (<< 1.6.1-8),
  wine64 (<< 1.6.1-8),
