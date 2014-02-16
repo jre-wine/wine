@@ -1,3 +1,12 @@
+wine-unstable (1.7.9-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Some DirectDraw palette fixes.
+    - Reduced code duplication between C++ runtime versions.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:23:40 +0000
+
 wine-unstable (1.7.8-1) unstable; urgency=medium
 
   * New upstream release:
