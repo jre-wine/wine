@@ -658,7 +658,6 @@ HRESULT CDECL wined3d_texture_add_dirty_region(struct wined3d_texture *texture,
         return WINED3DERR_INVALIDCALL;
     }
 
-    wined3d_texture_set_dirty(texture);
     texture->texture_ops->texture_sub_resource_add_dirty_region(sub_resource, dirty_region);
 
     return WINED3D_OK;
@@ -673,7 +672,10 @@ static void texture2d_sub_resource_load(struct wined3d_resource *sub_resource,
 static void texture2d_sub_resource_add_dirty_region(struct wined3d_resource *sub_resource,
         const struct wined3d_box *dirty_region)
 {
-    surface_set_dirty(surface_from_resource(sub_resource));
+    struct wined3d_surface *surface = surface_from_resource(sub_resource);
+
+    surface_load_location(surface, SFLAG_INSYSMEM);
+    surface_invalidate_location(surface, ~SFLAG_INSYSMEM);
 }
 
 static void texture2d_sub_resource_cleanup(struct wined3d_resource *sub_resource)
@@ -996,6 +998,7 @@ static void texture3d_sub_resource_load(struct wined3d_resource *sub_resource,
 static void texture3d_sub_resource_add_dirty_region(struct wined3d_resource *sub_resource,
         const struct wined3d_box *dirty_region)
 {
+    wined3d_texture_set_dirty(volume_from_resource(sub_resource)->container);
 }
 
 static void texture3d_sub_resource_cleanup(struct wined3d_resource *sub_resource)
@@ -1018,7 +1021,7 @@ static HRESULT volumetexture_init(struct wined3d_texture *texture, const struct 
         UINT levels, struct wined3d_device *device, void *parent, const struct wined3d_parent_ops *parent_ops)
 {
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
-    UINT tmp_w, tmp_h, tmp_d;
+    struct wined3d_resource_desc volume_desc;
     unsigned int i;
     HRESULT hr;
 
@@ -1101,38 +1104,31 @@ static HRESULT volumetexture_init(struct wined3d_texture *texture, const struct 
     texture->target = GL_TEXTURE_3D;
 
     /* Generate all the surfaces. */
-    tmp_w = desc->width;
-    tmp_h = desc->height;
-    tmp_d = desc->depth;
-
+    volume_desc = *desc;
+    volume_desc.resource_type = WINED3D_RTYPE_VOLUME;
     for (i = 0; i < texture->level_count; ++i)
     {
         struct wined3d_volume *volume;
 
-        /* Create the volume. */
-        hr = device->device_parent->ops->create_volume(device->device_parent, parent,
-                tmp_w, tmp_h, tmp_d, i, desc->format, desc->pool, desc->usage, &volume);
-        if (FAILED(hr))
+        if (FAILED(hr = wined3d_volume_create(texture, &volume_desc, i, &volume)))
         {
             ERR("Creating a volume for the volume texture failed, hr %#x.\n", hr);
             wined3d_texture_cleanup(texture);
             return hr;
         }
 
-        /* Set its container to this texture. */
-        volume_set_container(volume, texture);
         texture->sub_resources[i] = &volume->resource;
 
         /* Calculate the next mipmap level. */
-        tmp_w = max(1, tmp_w >> 1);
-        tmp_h = max(1, tmp_h >> 1);
-        tmp_d = max(1, tmp_d >> 1);
+        volume_desc.width = max(1, volume_desc.width >> 1);
+        volume_desc.height = max(1, volume_desc.height >> 1);
+        volume_desc.depth = max(1, volume_desc.depth >> 1);
     }
 
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_texture_create_2d(struct wined3d_device *device, const struct wined3d_resource_desc *desc,
+HRESULT CDECL wined3d_texture_create(struct wined3d_device *device, const struct wined3d_resource_desc *desc,
         UINT level_count, DWORD surface_flags, void *parent, const struct wined3d_parent_ops *parent_ops,
         struct wined3d_texture **texture)
 {
@@ -1142,79 +1138,33 @@ HRESULT CDECL wined3d_texture_create_2d(struct wined3d_device *device, const str
     TRACE("device %p, desc %p, level_count %u, surface_flags %#x, parent %p, parent_ops %p, texture %p.\n",
             device, desc, level_count, surface_flags, parent, parent_ops, texture);
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
+    if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    switch (desc->resource_type)
     {
-        *texture = NULL;
-        return WINED3DERR_OUTOFVIDEOMEMORY;
+        case WINED3D_RTYPE_TEXTURE:
+            hr = texture_init(object, desc, level_count, surface_flags, device, parent, parent_ops);
+            break;
+
+        case WINED3D_RTYPE_VOLUME_TEXTURE:
+            hr = volumetexture_init(object, desc, level_count, device, parent, parent_ops);
+            break;
+
+        case WINED3D_RTYPE_CUBE_TEXTURE:
+            hr = cubetexture_init(object, desc, level_count, surface_flags, device, parent, parent_ops);
+            break;
+
+        default:
+            ERR("Invalid resource type %s.\n", debug_d3dresourcetype(desc->resource_type));
+            hr = WINED3DERR_INVALIDCALL;
+            break;
     }
 
-    if (FAILED(hr = texture_init(object, desc, level_count, surface_flags, device, parent, parent_ops)))
+    if (FAILED(hr))
     {
         WARN("Failed to initialize texture, returning %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
-        *texture = NULL;
-        return hr;
-    }
-
-    TRACE("Created texture %p.\n", object);
-    *texture = object;
-
-    return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_texture_create_3d(struct wined3d_device *device, const struct wined3d_resource_desc *desc,
-        UINT level_count, void *parent, const struct wined3d_parent_ops *parent_ops, struct wined3d_texture **texture)
-{
-    struct wined3d_texture *object;
-    HRESULT hr;
-
-    TRACE("device %p, desc %p, level_count %u, parent %p, parent_ops %p, texture %p.\n",
-            device, desc, level_count, parent, parent_ops, texture);
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        *texture = NULL;
-        return WINED3DERR_OUTOFVIDEOMEMORY;
-    }
-
-    if (FAILED(hr = volumetexture_init(object, desc, level_count, device, parent, parent_ops)))
-    {
-        WARN("Failed to initialize volumetexture, returning %#x\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        *texture = NULL;
-        return hr;
-    }
-
-    TRACE("Created texture %p.\n", object);
-    *texture = object;
-
-    return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_texture_create_cube(struct wined3d_device *device, const struct wined3d_resource_desc *desc,
-        UINT level_count, DWORD surface_flags, void *parent, const struct wined3d_parent_ops *parent_ops,
-        struct wined3d_texture **texture)
-{
-    struct wined3d_texture *object;
-    HRESULT hr;
-
-    TRACE("device %p, desc %p, level_count %u, surface_flags %#x, parent %p, parent_ops %p, texture %p.\n",
-            device, desc, level_count, surface_flags, parent, parent_ops, texture);
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        *texture = NULL;
-        return WINED3DERR_OUTOFVIDEOMEMORY;
-    }
-
-    if (FAILED(hr = cubetexture_init(object, desc, level_count, surface_flags, device, parent, parent_ops)))
-    {
-        WARN("Failed to initialize cubetexture, returning %#x\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        *texture = NULL;
         return hr;
     }
 

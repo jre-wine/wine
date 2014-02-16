@@ -938,7 +938,7 @@ static HRESULT d3d9_device_create_surface(struct d3d9_device *device, UINT width
 
     wined3d_mutex_lock();
 
-    if (FAILED(hr = wined3d_texture_create_2d(device->wined3d_device, &desc,
+    if (FAILED(hr = wined3d_texture_create(device->wined3d_device, &desc,
             1, flags, NULL, &d3d9_null_wined3d_parent_ops, &texture)))
     {
         wined3d_mutex_unlock();
@@ -3337,6 +3337,30 @@ static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent 
     return D3D_OK;
 }
 
+static HRESULT CDECL device_parent_volume_created(struct wined3d_device_parent *device_parent,
+        void *container_parent, struct wined3d_volume *volume, void **parent,
+        const struct wined3d_parent_ops **parent_ops)
+{
+    struct d3d9_volume *d3d_volume;
+
+    TRACE("device_parent %p, container_parent %p, volume %p, parent %p, parent_ops %p.\n",
+            device_parent, container_parent, volume, parent, parent_ops);
+
+    if (!(d3d_volume = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d3d_volume))))
+        return E_OUTOFMEMORY;
+
+    volume_init(d3d_volume, volume, parent_ops);
+    *parent = d3d_volume;
+    TRACE("Created volume %p.\n", d3d_volume);
+
+    d3d_volume->container = container_parent;
+
+    IDirect3DVolume9_Release(&d3d_volume->IDirect3DVolume9_iface);
+    d3d_volume->forwardReference = container_parent;
+
+    return D3D_OK;
+}
+
 static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_device_parent *device_parent,
         void *container_parent, const struct wined3d_resource_desc *desc, struct wined3d_surface **surface)
 {
@@ -3354,7 +3378,7 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
 
     texture_desc = *desc;
     texture_desc.resource_type = WINED3D_RTYPE_TEXTURE;
-    if (FAILED(hr = wined3d_texture_create_2d(device->wined3d_device, &texture_desc, 1,
+    if (FAILED(hr = wined3d_texture_create(device->wined3d_device, &texture_desc, 1,
             WINED3D_SURFACE_MAPPABLE, container_parent, &d3d9_null_wined3d_parent_ops, &texture)))
     {
         WARN("Failed to create texture, hr %#x.\n", hr);
@@ -3368,48 +3392,6 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
     d3d_surface = wined3d_surface_get_parent(*surface);
     d3d_surface->forwardReference = NULL;
     d3d_surface->parent_device = &device->IDirect3DDevice9Ex_iface;
-
-    return hr;
-}
-
-static HRESULT CDECL device_parent_create_volume(struct wined3d_device_parent *device_parent,
-        void *container_parent, UINT width, UINT height, UINT depth, UINT level,
-        enum wined3d_format_id format, enum wined3d_pool pool, DWORD usage, struct wined3d_volume **volume)
-{
-    struct d3d9_device *device = device_from_device_parent(device_parent);
-    struct d3d9_volume *object;
-    HRESULT hr;
-
-    TRACE("device_parent %p, container_parent %p, width %u, height %u, depth %u, "
-            "format %#x, pool %#x, usage %#x, volume %p\n",
-            device_parent, container_parent, width, height, depth,
-            format, pool, usage, volume);
-
-    /* Allocate the storage for the device */
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
-    if (!object)
-    {
-        FIXME("Allocation of memory failed\n");
-        *volume = NULL;
-        return D3DERR_OUTOFVIDEOMEMORY;
-    }
-
-    hr = volume_init(object, device, width, height, depth, level, usage, format, pool);
-    if (FAILED(hr))
-    {
-        WARN("Failed to initialize volume, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
-
-    *volume = object->wined3d_volume;
-    wined3d_volume_incref(*volume);
-    IDirect3DVolume9_Release(&object->IDirect3DVolume9_iface);
-
-    object->container = container_parent;
-    object->forwardReference = container_parent;
-
-    TRACE("Created volume %p.\n", object);
 
     return hr;
 }
@@ -3443,8 +3425,8 @@ static const struct wined3d_device_parent_ops d3d9_wined3d_device_parent_ops =
     device_parent_wined3d_device_created,
     device_parent_mode_changed,
     device_parent_surface_created,
+    device_parent_volume_created,
     device_parent_create_swapchain_surface,
-    device_parent_create_volume,
     device_parent_create_swapchain,
 };
 

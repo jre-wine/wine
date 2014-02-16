@@ -30,7 +30,7 @@
 #endif
 
 #ifndef _GNU_SOURCE
-# define _GNU_SOURCE  /* for pread/pwrite */
+# define _GNU_SOURCE  /* for pread/pwrite, isfinite */
 #endif
 #include <fcntl.h>
 #include <math.h>
@@ -258,6 +258,10 @@ extern int getopt_long_only (int ___argc, char *const *___argv,
 
 #ifndef HAVE_FFS
 int ffs( int x );
+#endif
+
+#ifndef HAVE_ISFINITE
+int isfinite(double x);
 #endif
 
 #ifndef HAVE_ISINF

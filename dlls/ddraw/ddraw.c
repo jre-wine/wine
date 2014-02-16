@@ -2731,264 +2731,6 @@ static HRESULT WINAPI ddraw7_StartModeTest(IDirectDraw7 *iface, SIZE *Modes, DWO
     return DD_OK;
 }
 
-/*****************************************************************************
- * IDirectDraw7::CreateSurface
- *
- * Creates a new IDirectDrawSurface object and returns its interface.
- *
- * The surface connections with wined3d are a bit tricky. Basically it works
- * like this:
- *
- * |------------------------|               |-----------------|
- * | DDraw surface          |               | WineD3DSurface  |
- * |                        |               |                 |
- * |        WineD3DSurface  |-------------->|                 |
- * |        Child           |<------------->| Parent          |
- * |------------------------|               |-----------------|
- *
- * The DDraw surface is the parent of the wined3d surface, and it releases
- * the WineD3DSurface when the ddraw surface is destroyed.
- *
- * However, for all surfaces which can be in a container in WineD3D,
- * we have to do this. These surfaces are usually complex surfaces,
- * so this concerns primary surfaces with a front and a back buffer,
- * and textures.
- *
- * |------------------------|               |-----------------|
- * | DDraw surface          |               | Container       |
- * |                        |               |                 |
- * |                  Child |<------------->| Parent          |
- * |                Texture |<------------->|                 |
- * |         WineD3DSurface |<----|         |          Levels |<--|
- * | Complex connection     |     |         |                 |   |
- * |------------------------|     |         |-----------------|   |
- *  ^                             |                               |
- *  |                             |                               |
- *  |                             |                               |
- *  |    |------------------|     |         |-----------------|   |
- *  |    | IParent          |     |-------->| WineD3DSurface  |   |
- *  |    |                  |               |                 |   |
- *  |    |            Child |<------------->| Parent          |   |
- *  |    |                  |               |       Container |<--|
- *  |    |------------------|               |-----------------|   |
- *  |                                                             |
- *  |   |----------------------|                                  |
- *  |   | DDraw surface 2      |                                  |
- *  |   |                      |                                  |
- *  |<->| Complex root   Child |                                  |
- *  |   |              Texture |                                  |
- *  |   |       WineD3DSurface |<----|                            |
- *  |   |----------------------|     |                            |
- *  |                                |                            |
- *  |    |---------------------|     |      |-----------------|   |
- *  |    | IParent             |     |----->| WineD3DSurface  |   |
- *  |    |                     |            |                 |   |
- *  |    |               Child |<---------->| Parent          |   |
- *  |    |---------------------|            |       Container |<--|
- *  |                                       |-----------------|   |
- *  |                                                             |
- *  |             ---More surfaces can follow---                  |
- *
- * The reason is that the IWineD3DSwapchain(render target container)
- * and the IWineD3DTexure(Texture container) release the parents
- * of their surface's children, but by releasing the complex root
- * the surfaces which are complexly attached to it are destroyed
- * too. See IDirectDrawSurface::Release for a more detailed
- * explanation.
- *
- * Params:
- *  DDSD: Description of the surface to create
- *  Surf: Address to store the interface pointer at
- *  UnkOuter: Basically for aggregation support, but ddraw doesn't support
- *            aggregation, so it has to be NULL
- *
- * Returns:
- *  DD_OK on success
- *  CLASS_E_NOAGGREGATION if UnkOuter != NULL
- *  DDERR_* if an error occurs
- *
- *****************************************************************************/
-static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
-        struct ddraw_surface **surface, IUnknown *UnkOuter, UINT version)
-{
-    struct ddraw_surface *object = NULL;
-    HRESULT hr;
-    DDSURFACEDESC2 desc2;
-    const DWORD sysvidmem = DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY;
-
-    TRACE("ddraw %p, surface_desc %p, surface %p, outer_unknown %p.\n", ddraw, DDSD, surface, UnkOuter);
-
-    /* Some checks before we start */
-    if (TRACE_ON(ddraw))
-    {
-        TRACE(" (%p) Requesting surface desc :\n", ddraw);
-        DDRAW_dump_surface_desc(DDSD);
-    }
-
-    if (UnkOuter != NULL)
-    {
-        FIXME("(%p) : outer != NULL?\n", ddraw);
-        return CLASS_E_NOAGGREGATION; /* unchecked */
-    }
-
-    if (!surface)
-    {
-        FIXME("(%p) You want to get back a surface? Don't give NULL ptrs!\n", ddraw);
-        return E_POINTER; /* unchecked */
-    }
-
-    if (!(DDSD->dwFlags & DDSD_CAPS))
-    {
-        /* DVIDEO.DLL does forget the DDSD_CAPS flag ... *sigh* */
-        DDSD->dwFlags |= DDSD_CAPS;
-    }
-
-    if (DDSD->ddsCaps.dwCaps & DDSCAPS_ALLOCONLOAD)
-    {
-        /* If the surface is of the 'alloconload' type, ignore the LPSURFACE field */
-        DDSD->dwFlags &= ~DDSD_LPSURFACE;
-    }
-
-    if ((DDSD->dwFlags & DDSD_LPSURFACE) && (DDSD->lpSurface == NULL))
-    {
-        /* Frank Herbert's Dune specifies a null pointer for the surface, ignore the LPSURFACE field */
-        WARN("(%p) Null surface pointer specified, ignore it!\n", ddraw);
-        DDSD->dwFlags &= ~DDSD_LPSURFACE;
-    }
-
-    if((DDSD->ddsCaps.dwCaps & (DDSCAPS_FLIP | DDSCAPS_PRIMARYSURFACE)) == (DDSCAPS_FLIP | DDSCAPS_PRIMARYSURFACE) &&
-       !(ddraw->cooperative_level & DDSCL_EXCLUSIVE))
-    {
-        TRACE("(%p): Attempt to create a flipable primary surface without DDSCL_EXCLUSIVE set\n",
-                ddraw);
-        *surface = NULL;
-        return DDERR_NOEXCLUSIVEMODE;
-    }
-
-    if((DDSD->ddsCaps.dwCaps & (DDSCAPS_BACKBUFFER | DDSCAPS_PRIMARYSURFACE)) == (DDSCAPS_BACKBUFFER | DDSCAPS_PRIMARYSURFACE))
-    {
-        WARN("Application wanted to create back buffer primary surface\n");
-        return DDERR_INVALIDCAPS;
-    }
-
-    if((DDSD->ddsCaps.dwCaps & sysvidmem) == sysvidmem)
-    {
-        /* This is a special switch in ddrawex.dll, but not allowed in ddraw.dll */
-        WARN("Application tries to put the surface in both system and video memory\n");
-        *surface = NULL;
-        return DDERR_INVALIDCAPS;
-    }
-
-    /* Check cube maps but only if the size includes them */
-    if (DDSD->dwSize >= sizeof(DDSURFACEDESC2))
-    {
-        if(DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP_ALLFACES &&
-           !(DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP))
-        {
-            WARN("Cube map faces requested without cube map flag\n");
-            return DDERR_INVALIDCAPS;
-        }
-        if(DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP &&
-           (DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP_ALLFACES) == 0)
-        {
-            WARN("Cube map without faces requested\n");
-            return DDERR_INVALIDPARAMS;
-        }
-
-        /* Quick tests confirm those can be created, but we don't do that yet */
-        if(DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP &&
-           (DDSD->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP_ALLFACES) != DDSCAPS2_CUBEMAP_ALLFACES)
-        {
-            FIXME("Partial cube maps not supported yet\n");
-        }
-    }
-
-    if (DDSD->ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE))
-    {
-        if (!(DDSD->ddsCaps.dwCaps & DDSCAPS_TEXTURE))
-        {
-            WARN("DDSCAPS2_TEXTUREMANAGE used without DDSCAPS_TEXTURE, returning DDERR_INVALIDCAPS.\n");
-            return DDERR_INVALIDCAPS;
-        }
-        if (DDSD->ddsCaps.dwCaps & (DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY))
-        {
-            WARN("DDSCAPS2_TEXTUREMANAGE used width DDSCAPS_VIDEOMEMORY "
-                    "or DDSCAPS_SYSTEMMEMORY, returning DDERR_INVALIDCAPS.\n");
-            return DDERR_INVALIDCAPS;
-        }
-    }
-
-    /* According to the msdn this flag is ignored by CreateSurface */
-    if (DDSD->dwSize >= sizeof(DDSURFACEDESC2))
-        DDSD->ddsCaps.dwCaps2 &= ~DDSCAPS2_MIPMAPSUBLEVEL;
-
-    /* Modify some flags */
-    copy_to_surfacedesc2(&desc2, DDSD);
-    desc2.u4.ddpfPixelFormat.dwSize=sizeof(DDPIXELFORMAT); /* Just to be sure */
-
-    /* The first surface is a front buffer, the back buffer is created afterwards */
-    if( (desc2.dwFlags & DDSD_CAPS) && (desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) )
-    {
-        desc2.ddsCaps.dwCaps |= DDSCAPS_FRONTBUFFER;
-    }
-
-    if (FAILED(hr = ddraw_surface_create_texture(ddraw, &desc2, version, &object)))
-    {
-        WARN("Failed to create texture, hr %#x.\n", hr);
-        return hr;
-    }
-    object->is_complex_root = TRUE;
-
-    *surface = object;
-
-    /* Create Additional surfaces if necessary
-     * This applies to Primary surfaces which have a back buffer count
-     * set, but not to mipmap textures. In case of Mipmap textures,
-     * wineD3D takes care of the creation of additional surfaces
-     */
-    if(DDSD->dwFlags & DDSD_BACKBUFFERCOUNT)
-    {
-        struct ddraw_surface *last = object;
-        UINT i;
-
-        desc2.ddsCaps.dwCaps &= ~DDSCAPS_FRONTBUFFER; /* It's not a front buffer */
-        desc2.ddsCaps.dwCaps |= DDSCAPS_BACKBUFFER;
-        desc2.dwBackBufferCount = 0;
-
-        for (i = 0; i < DDSD->dwBackBufferCount; ++i)
-        {
-            struct ddraw_surface *object2 = NULL;
-
-            if (FAILED(hr = ddraw_surface_create_texture(ddraw, &desc2, version, &object2)))
-            {
-                if (version == 7)
-                    IDirectDrawSurface7_Release(&object->IDirectDrawSurface7_iface);
-                else if (version == 4)
-                    IDirectDrawSurface4_Release(&object->IDirectDrawSurface4_iface);
-                else
-                    IDirectDrawSurface_Release(&object->IDirectDrawSurface_iface);
-
-                return hr;
-            }
-
-            /* Add the new surface to the complex attachment array. */
-            last->complex_array[0] = object2;
-            last = object2;
-
-            /* Remove the (possible) back buffer cap from the new surface
-             * description, because only one surface in the flipping chain is a
-             * back buffer, one is a front buffer, the others are just primary
-             * surfaces. */
-            desc2.ddsCaps.dwCaps &= ~DDSCAPS_BACKBUFFER;
-        }
-    }
-
-    if (desc2.ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
-        ddraw->primary = object;
-
-    return hr;
-}
-
 static HRESULT WINAPI ddraw7_CreateSurface(IDirectDraw7 *iface, DDSURFACEDESC2 *surface_desc,
         IDirectDrawSurface7 **surface, IUnknown *outer_unknown)
 {
@@ -3028,7 +2770,7 @@ static HRESULT WINAPI ddraw7_CreateSurface(IDirectDraw7 *iface, DDSURFACEDESC2 *
         return DDERR_INVALIDCAPS;
     }
 
-    hr = CreateSurface(ddraw, surface_desc, &impl, outer_unknown, 7);
+    hr = ddraw_surface_create(ddraw, surface_desc, &impl, outer_unknown, 7);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {
@@ -3082,7 +2824,7 @@ static HRESULT WINAPI ddraw4_CreateSurface(IDirectDraw4 *iface,
         return DDERR_INVALIDCAPS;
     }
 
-    hr = CreateSurface(ddraw, surface_desc, &impl, outer_unknown, 4);
+    hr = ddraw_surface_create(ddraw, surface_desc, &impl, outer_unknown, 4);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {
@@ -3138,7 +2880,7 @@ static HRESULT WINAPI ddraw2_CreateSurface(IDirectDraw2 *iface,
         return DDERR_INVALIDCAPS;
     }
 
-    hr = CreateSurface(ddraw, &surface_desc2, &impl, outer_unknown, 2);
+    hr = ddraw_surface_create(ddraw, &surface_desc2, &impl, outer_unknown, 2);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {
@@ -3179,11 +2921,18 @@ static HRESULT WINAPI ddraw1_CreateSurface(IDirectDraw *iface,
         return DDERR_INVALIDPARAMS;
     }
 
-    /* Remove front buffer flag, this causes failure in v7, and its added to normal
-     * primaries anyway. */
-    surface_desc->ddsCaps.dwCaps &= ~DDSCAPS_FRONTBUFFER;
+    if ((surface_desc->ddsCaps.dwCaps & (DDSCAPS_PRIMARYSURFACE | DDSCAPS_BACKBUFFER))
+            == (DDSCAPS_PRIMARYSURFACE | DDSCAPS_BACKBUFFER)
+            || (surface_desc->ddsCaps.dwCaps & (DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER))
+            == ((DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER)))
+    {
+        WARN("Application tried to create an explicit front or back buffer.\n");
+        wined3d_mutex_unlock();
+        return DDERR_INVALIDCAPS;
+    }
+
     DDSD_to_DDSD2(surface_desc, &surface_desc2);
-    hr = CreateSurface(ddraw, &surface_desc2, &impl, outer_unknown, 1);
+    hr = ddraw_surface_create(ddraw, &surface_desc2, &impl, outer_unknown, 1);
     wined3d_mutex_unlock();
     if (FAILED(hr))
     {
@@ -4987,6 +4736,19 @@ static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent 
     return DD_OK;
 }
 
+static HRESULT CDECL device_parent_volume_created(struct wined3d_device_parent *device_parent,
+        void *container_parent, struct wined3d_volume *volume,
+        void **parent, const struct wined3d_parent_ops **parent_ops)
+{
+    TRACE("device_parent %p, container_parent %p, volume %p, parent %p, parent_ops %p.\n",
+            device_parent, container_parent, volume, parent, parent_ops);
+
+    *parent = NULL;
+    *parent_ops = &ddraw_null_wined3d_parent_ops;
+
+    return DD_OK;
+}
+
 static void STDMETHODCALLTYPE ddraw_frontbuffer_destroyed(void *parent)
 {
     struct ddraw *ddraw = parent;
@@ -5017,7 +4779,7 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
 
     texture_desc = *desc;
     texture_desc.resource_type = WINED3D_RTYPE_TEXTURE;
-    if (FAILED(hr = wined3d_texture_create_2d(ddraw->wined3d_device, &texture_desc, 1,
+    if (FAILED(hr = wined3d_texture_create(ddraw->wined3d_device, &texture_desc, 1,
             WINED3D_SURFACE_MAPPABLE, ddraw, &ddraw_frontbuffer_parent_ops, &texture)))
     {
         WARN("Failed to create texture, hr %#x.\n", hr);
@@ -5030,21 +4792,6 @@ static HRESULT CDECL device_parent_create_swapchain_surface(struct wined3d_devic
     wined3d_texture_decref(texture);
 
     return hr;
-}
-
-static HRESULT CDECL device_parent_create_volume(struct wined3d_device_parent *device_parent,
-        void *container_parent, UINT width, UINT height, UINT depth, UINT level,
-        enum wined3d_format_id format, enum wined3d_pool pool, DWORD usage,
-        struct wined3d_volume **volume)
-{
-    TRACE("device_parent %p, container_parent %p, width %u, height %u, depth %u, "
-            "format %#x, pool %#x, usage %#x, volume %p.\n",
-            device_parent, container_parent, width, height, depth,
-            format, pool, usage, volume);
-
-    ERR("Not implemented!\n");
-
-    return E_NOTIMPL;
 }
 
 static HRESULT CDECL device_parent_create_swapchain(struct wined3d_device_parent *device_parent,
@@ -5073,8 +4820,8 @@ static const struct wined3d_device_parent_ops ddraw_wined3d_device_parent_ops =
     device_parent_wined3d_device_created,
     device_parent_mode_changed,
     device_parent_surface_created,
+    device_parent_volume_created,
     device_parent_create_swapchain_surface,
-    device_parent_create_volume,
     device_parent_create_swapchain,
 };
 

@@ -30,7 +30,7 @@
 
 #include "windows.h"
 
-#include "xmldom.h"
+#include "msxml.h"
 #include "msxml2.h"
 #include "msxml2did.h"
 #include "ole2.h"
@@ -6624,7 +6624,7 @@ static void test_TransformWithLoadingLocalFile(void)
     WriteFile(file, szBasicTransformXML, strlen(szBasicTransformXML), &dwWritten, NULL);
     CloseHandle(file);
 
-    /* Correct path to not include a escape character. */
+    /* Correct path to not include an escape character. */
     for(i=0; i < strlen(lpPathBuffer); i++)
     {
         if(lpPathBuffer[i] == '\\')
