@@ -60,10 +60,7 @@ XVisualInfo default_visual = { 0 };
 XVisualInfo argb_visual = { 0 };
 Colormap default_colormap = None;
 XPixmapFormatValues **pixmap_formats;
-unsigned int screen_width;
-unsigned int screen_height;
 unsigned int screen_bpp;
-RECT virtual_screen_rect;
 Window root_window;
 int usexvidmode = 1;
 int usexrandr = 1;
@@ -612,6 +609,8 @@ static void thread_detach(void)
         if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
         HeapFree( GetProcessHeap(), 0, data );
+        /* clear data in case we get re-entered from user32 before the thread is truly dead */
+        TlsSetValue( thread_data_tls_index, NULL );
     }
 }
 

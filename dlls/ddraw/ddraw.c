@@ -2873,7 +2873,7 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
      * the surface isn't mapped, and that updates done this way will be
      * visible on the screen. The game Nox is such an application,
      * Commandos: Behind Enemy Lines is another. */
-    const DWORD flags = WINED3D_SURFACE_MAPPABLE | WINED3D_SURFACE_PIN_SYSMEM;
+    const DWORD flags = WINED3D_SURFACE_PIN_SYSMEM;
 
     TRACE("ddraw %p, surface_desc %p, surface %p, outer_unknown %p.\n", ddraw, DDSD, surface, UnkOuter);
 
@@ -2962,7 +2962,7 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
         }
     }
 
-    if (DDSD->ddsCaps.dwCaps2 & DDSCAPS2_TEXTUREMANAGE)
+    if (DDSD->ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE))
     {
         if (!(DDSD->ddsCaps.dwCaps & DDSCAPS_TEXTURE))
         {
@@ -3001,7 +3001,7 @@ static HRESULT CreateSurface(struct ddraw *ddraw, DDSURFACEDESC2 *DDSD,
     }
 
     if (!(desc2.ddsCaps.dwCaps & (DDSCAPS_VIDEOMEMORY | DDSCAPS_SYSTEMMEMORY))
-            && !(desc2.ddsCaps.dwCaps2 & DDSCAPS2_TEXTUREMANAGE))
+            && !(desc2.ddsCaps.dwCaps2 & (DDSCAPS2_TEXTUREMANAGE | DDSCAPS2_D3DTEXTUREMANAGE)))
     {
         enum wined3d_format_id format = wined3dformat_from_ddrawformat(&desc2.u4.ddpfPixelFormat);
         enum wined3d_resource_type rtype;

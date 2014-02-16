@@ -565,6 +565,57 @@ static const WCHAR HELPDIRW[] = {'H','E','L','P','D','I','R',0};
 static const WCHAR ProxyStubClsidW[] = {'P','r','o','x','y','S','t','u','b','C','l','s','i','d',0};
 static const WCHAR ProxyStubClsid32W[] = {'P','r','o','x','y','S','t','u','b','C','l','s','i','d','3','2',0};
 
+static void TLB_register_interface(TLIBATTR *libattr, LPOLESTR name, TYPEATTR *tattr, DWORD flag)
+{
+    WCHAR keyName[60];
+    HKEY key, subKey;
+
+    static const WCHAR PSOA[] = {'{','0','0','0','2','0','4','2','4','-',
+                                 '0','0','0','0','-','0','0','0','0','-','C','0','0','0','-',
+                                 '0','0','0','0','0','0','0','0','0','0','4','6','}',0};
+
+    get_interface_key( &tattr->guid, keyName );
+    if (RegCreateKeyExW(HKEY_CLASSES_ROOT, keyName, 0, NULL, 0,
+                        KEY_WRITE | flag, NULL, &key, NULL) == ERROR_SUCCESS)
+    {
+        if (name)
+            RegSetValueExW(key, NULL, 0, REG_SZ,
+                           (BYTE *)name, (strlenW(name)+1) * sizeof(OLECHAR));
+
+        if (RegCreateKeyExW(key, ProxyStubClsidW, 0, NULL, 0,
+            KEY_WRITE | flag, NULL, &subKey, NULL) == ERROR_SUCCESS) {
+            RegSetValueExW(subKey, NULL, 0, REG_SZ,
+                           (const BYTE *)PSOA, sizeof PSOA);
+            RegCloseKey(subKey);
+        }
+
+        if (RegCreateKeyExW(key, ProxyStubClsid32W, 0, NULL, 0,
+            KEY_WRITE | flag, NULL, &subKey, NULL) == ERROR_SUCCESS) {
+            RegSetValueExW(subKey, NULL, 0, REG_SZ,
+                           (const BYTE *)PSOA, sizeof PSOA);
+            RegCloseKey(subKey);
+        }
+
+        if (RegCreateKeyExW(key, TypeLibW, 0, NULL, 0,
+            KEY_WRITE | flag, NULL, &subKey, NULL) == ERROR_SUCCESS)
+        {
+            WCHAR buffer[40];
+            static const WCHAR fmtver[] = {'%','x','.','%','x',0 };
+            static const WCHAR VersionW[] = {'V','e','r','s','i','o','n',0};
+
+            StringFromGUID2(&libattr->guid, buffer, 40);
+            RegSetValueExW(subKey, NULL, 0, REG_SZ,
+                           (BYTE *)buffer, (strlenW(buffer)+1) * sizeof(WCHAR));
+            sprintfW(buffer, fmtver, libattr->wMajorVerNum, libattr->wMinorVerNum);
+            RegSetValueExW(subKey, VersionW, 0, REG_SZ,
+                           (BYTE*)buffer, (strlenW(buffer)+1) * sizeof(WCHAR));
+            RegCloseKey(subKey);
+        }
+
+        RegCloseKey(key);
+    }
+}
+
 /******************************************************************************
  *		RegisterTypeLib	[OLEAUT32.163]
  * Adds information about a type library to the System Registry
@@ -583,9 +634,6 @@ HRESULT WINAPI RegisterTypeLib(
      OLECHAR * szHelpDir)  /* [in] dir to the helpfile for the library,
 							 may be NULL*/
 {
-    static const WCHAR PSOA[] = {'{','0','0','0','2','0','4','2','4','-',
-                                 '0','0','0','0','-','0','0','0','0','-','C','0','0','0','-',
-                                 '0','0','0','0','0','0','0','0','0','0','4','6','}',0};
     HRESULT res;
     TLIBATTR *attr;
     WCHAR keyName[60];
@@ -758,47 +806,16 @@ HRESULT WINAPI RegisterTypeLib(
 		    if ((kind == TKIND_INTERFACE && (tattr->wTypeFlags & TYPEFLAG_FOLEAUTOMATION)) ||
                         kind == TKIND_DISPATCH)
 		    {
-			/* register interface<->typelib coupling */
-			get_interface_key( &tattr->guid, keyName );
-			if (RegCreateKeyExW(HKEY_CLASSES_ROOT, keyName, 0, NULL, 0,
-					    KEY_WRITE, NULL, &key, NULL) == ERROR_SUCCESS)
-			{
-			    if (name)
-				RegSetValueExW(key, NULL, 0, REG_SZ,
-					       (BYTE *)name, (strlenW(name)+1) * sizeof(OLECHAR));
+                        BOOL is_wow64;
+                        DWORD opposite = (sizeof(void*) == 8 ? KEY_WOW64_32KEY : KEY_WOW64_64KEY);
 
-			    if (RegCreateKeyExW(key, ProxyStubClsidW, 0, NULL, 0,
-				KEY_WRITE, NULL, &subKey, NULL) == ERROR_SUCCESS) {
-				RegSetValueExW(subKey, NULL, 0, REG_SZ,
-					       (const BYTE *)PSOA, sizeof PSOA);
-				RegCloseKey(subKey);
-			    }
+                        /* register interface<->typelib coupling */
+                        TLB_register_interface(attr, name, tattr, 0);
 
-			    if (RegCreateKeyExW(key, ProxyStubClsid32W, 0, NULL, 0,
-				KEY_WRITE, NULL, &subKey, NULL) == ERROR_SUCCESS) {
-				RegSetValueExW(subKey, NULL, 0, REG_SZ,
-					       (const BYTE *)PSOA, sizeof PSOA);
-				RegCloseKey(subKey);
-			    }
-
-			    if (RegCreateKeyExW(key, TypeLibW, 0, NULL, 0,
-				KEY_WRITE, NULL, &subKey, NULL) == ERROR_SUCCESS)
-			    {
-				WCHAR buffer[40];
-				static const WCHAR fmtver[] = {'%','x','.','%','x',0 };
-				static const WCHAR VersionW[] = {'V','e','r','s','i','o','n',0};
-
-				StringFromGUID2(&attr->guid, buffer, 40);
-				RegSetValueExW(subKey, NULL, 0, REG_SZ,
-					       (BYTE *)buffer, (strlenW(buffer)+1) * sizeof(WCHAR));
-				sprintfW(buffer, fmtver, attr->wMajorVerNum, attr->wMinorVerNum);
-				RegSetValueExW(subKey, VersionW, 0, REG_SZ,
-					       (BYTE*)buffer, (strlenW(buffer)+1) * sizeof(WCHAR));
-				RegCloseKey(subKey);
-			    }
-
-			    RegCloseKey(key);
-			}
+                        /* register TLBs into the opposite registry view, too */
+                        if(opposite == KEY_WOW64_32KEY ||
+                                 (IsWow64Process(GetCurrentProcess(), &is_wow64) && is_wow64))
+                            TLB_register_interface(attr, name, tattr, opposite);
 		    }
 
 		    ITypeInfo_ReleaseTypeAttr(tinfo, tattr);
@@ -2390,7 +2407,7 @@ static void MSFT_GetTdesc(TLBContext *pcx, INT type, TYPEDESC *pTd)
     TRACE_(typelib)("vt type = %X\n", pTd->vt);
 }
 
-static int TLB_is_propgetput(INVOKEKIND invkind)
+static BOOL TLB_is_propgetput(INVOKEKIND invkind)
 {
     return (invkind == INVOKE_PROPERTYGET ||
         invkind == INVOKE_PROPERTYPUT ||
@@ -5411,7 +5428,8 @@ static HRESULT WINAPI ITypeLibComp_fnBind(
     BINDPTR * pBindPtr)
 {
     ITypeLibImpl *This = impl_from_ITypeComp(iface);
-    int typemismatch=0, i;
+    BOOL typemismatch = FALSE;
+    int i;
 
     TRACE("(%p)->(%s, 0x%x, 0x%x, %p, %p, %p)\n", This, debugstr_w(szName), lHash, wFlags, ppTInfo, pDescKind, pBindPtr);
 
@@ -5452,7 +5470,7 @@ static HRESULT WINAPI ITypeLibComp_fnBind(
                 return S_OK;
             }
             else if (hr == TYPE_E_TYPEMISMATCH)
-                typemismatch = 1;
+                typemismatch = TRUE;
         }
 
         if ((pTypeInfo->typekind == TKIND_COCLASS) &&
@@ -5523,7 +5541,7 @@ static HRESULT WINAPI ITypeLibComp_fnBind(
                 return S_OK;
             }
             else if (hr == TYPE_E_TYPEMISMATCH)
-                typemismatch = 1;
+                typemismatch = TRUE;
         }
     }
 

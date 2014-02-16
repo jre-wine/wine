@@ -1424,6 +1424,7 @@ HWND WIN_CreateWindowEx( CREATESTRUCTW *cs, LPCWSTR className, HINSTANCE module,
             SetLastError(ERROR_TLW_WITH_WSCHILD);
             return 0;  /* WS_CHILD needs a parent, but WS_POPUP doesn't */
         }
+
         /* are we creating the desktop or HWND_MESSAGE parent itself? */
         if (className != (LPCWSTR)DESKTOP_CLASS_ATOM &&
             (IS_INTRESOURCE(className) || strcmpiW( className, messageW )))

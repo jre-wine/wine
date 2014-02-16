@@ -40,7 +40,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 #define DESKTOP_CLASS_ATOM ((LPCWSTR)MAKEINTATOM(32769))
 #define DESKTOP_ALL_ACCESS 0x01ff
 
-static HMODULE graphics_driver;
 static BOOL using_root;
 
 struct launcher
@@ -89,8 +88,10 @@ static RECT get_title_rect( unsigned int index )
 static const struct launcher *launcher_from_point( int x, int y )
 {
     RECT icon, title;
-    unsigned int index = x / launcher_size + (y / launcher_size) * launchers_per_row;
+    unsigned int index;
 
+    if (!nb_launchers) return NULL;
+    index = x / launcher_size + (y / launcher_size) * launchers_per_row;
     if (index >= nb_launchers) return NULL;
 
     icon = get_icon_rect( index );
@@ -524,6 +525,7 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
         return 0;
 
     case WM_LBUTTONDBLCLK:
+        if (!using_root)
         {
             const struct launcher *launcher = launcher_from_point( (short)LOWORD(lp), (short)HIWORD(lp) );
             if (launcher) do_launch( launcher );
@@ -549,26 +551,18 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
 }
 
 /* create the desktop and the associated driver window, and make it the current desktop */
-static BOOL create_desktop( const WCHAR *name, unsigned int width, unsigned int height )
+static BOOL create_desktop( HMODULE driver, const WCHAR *name, unsigned int width, unsigned int height )
 {
     static const WCHAR rootW[] = {'r','o','o','t',0};
-    HDESK desktop;
     BOOL ret = FALSE;
     BOOL (CDECL *create_desktop_func)(unsigned int, unsigned int);
 
-    desktop = CreateDesktopW( name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
-    if (!desktop)
-    {
-        WINE_ERR( "failed to create desktop %s error %d\n", wine_dbgstr_w(name), GetLastError() );
-        ExitProcess( 1 );
-    }
     /* magic: desktop "root" means use the root window */
-    if (graphics_driver && strcmpiW( name, rootW ))
+    if (driver && strcmpiW( name, rootW ))
     {
-        create_desktop_func = (void *)GetProcAddress( graphics_driver, "wine_create_desktop" );
+        create_desktop_func = (void *)GetProcAddress( driver, "wine_create_desktop" );
         if (create_desktop_func) ret = create_desktop_func( width, height );
     }
-    SetThreadDesktop( desktop );
     return ret;
 }
 
@@ -639,24 +633,39 @@ static BOOL get_default_desktop_size( const WCHAR *name, unsigned int *width, un
     return found;
 }
 
-static void initialize_display_settings( HWND desktop )
+static void set_desktop_guid( HWND desktop, GUID *guid, HMODULE driver )
 {
-    static const WCHAR display_device_guid_propW[] = {
-        '_','_','w','i','n','e','_','d','i','s','p','l','a','y','_',
-        'd','e','v','i','c','e','_','g','u','i','d',0 };
-    GUID guid;
-    RPC_CSTR guid_str;
-    ATOM guid_atom;
+    static const WCHAR device_keyW[] = {
+        'S','y','s','t','e','m','\\',
+        'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+        'C','o','n','t','r','o','l','\\',
+        'V','i','d','e','o','\\',
+        '{','%','s','}','\\','0','0','0','0',0};
+    static const WCHAR driverW[] = {'G','r','a','p','h','i','c','s','D','r','i','v','e','r',0};
+
+    RPC_WSTR guid_str;
+    HKEY hkey;
+    WCHAR key[sizeof(device_keyW)/sizeof(WCHAR) + 39];
+
+    UuidToStringW( guid, &guid_str );
+    sprintfW( key, device_keyW, guid_str );
+    RpcStringFreeW( &guid_str );
+
+    if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, key, 0, NULL,
+                          REG_OPTION_VOLATILE, KEY_SET_VALUE, NULL, &hkey, NULL  ))
+    {
+        WCHAR path[MAX_PATH];
+
+        GetModuleFileNameW( driver, path, MAX_PATH );
+        RegSetValueExW( hkey, driverW, 0, REG_SZ, (BYTE *)path, (strlenW(path) + 1) * sizeof(WCHAR) );
+        RegCloseKey( hkey );
+    }
+    else ERR( "failed to create %s\n", debugstr_w(key) );
+}
+
+static void initialize_display_settings(void)
+{
     DEVMODEW dmW;
-
-    UuidCreate( &guid );
-    UuidToStringA( &guid, &guid_str );
-    WINE_TRACE( "display guid %s\n", guid_str );
-
-    guid_atom = GlobalAddAtomA( (LPCSTR)guid_str );
-    SetPropW( desktop, display_device_guid_propW, ULongToHandle(guid_atom) );
-
-    RpcStringFreeA( &guid_str );
 
     /* Store current display mode in the registry */
     if (EnumDisplaySettingsExW( NULL, ENUM_CURRENT_SETTINGS, &dmW, 0 ))
@@ -703,8 +712,9 @@ static void set_desktop_window_title( HWND hwnd, const WCHAR *name )
 /* main desktop management function */
 void manage_desktop( WCHAR *arg )
 {
-    static const WCHAR displayW[] = {'D','I','S','P','L','A','Y',0};
     static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
+    HDESK desktop = 0;
+    GUID guid;
     MSG msg;
     HDC hdc;
     HWND hwnd, msg_hwnd;
@@ -737,36 +747,47 @@ void manage_desktop( WCHAR *arg )
         if (!get_default_desktop_size( name, &width, &height )) width = height = 0;
     }
 
-    hdc = CreateDCW( displayW, NULL, NULL, NULL );
-    graphics_driver = __wine_get_driver_module( hdc );
+    if (name && width && height)
+    {
+        if (!(desktop = CreateDesktopW( name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL )))
+        {
+            WINE_ERR( "failed to create desktop %s error %d\n", wine_dbgstr_w(name), GetLastError() );
+            ExitProcess( 1 );
+        }
+        SetThreadDesktop( desktop );
+    }
 
-    if (name && width && height) using_root = !create_desktop( name, width, height );
+    UuidCreate( &guid );
+    TRACE( "display guid %s\n", debugstr_guid(&guid) );
 
     /* create the desktop window */
     hwnd = CreateWindowExW( 0, DESKTOP_CLASS_ATOM, NULL,
-                            WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-                            GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
-                            GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
-                            0, 0, 0, NULL );
+                            WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, 0, 0, 0, 0, 0, &guid );
 
     /* create the HWND_MESSAGE parent */
     msg_hwnd = CreateWindowExW( 0, messageW, NULL, WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
                                 0, 0, 100, 100, 0, 0, 0, NULL );
 
-    DeleteDC( hdc );
-
     if (hwnd == GetDesktopWindow())
     {
-        HMODULE shell32;
+        HMODULE shell32, graphics_driver;
         void (WINAPI *pShellDDEInit)( BOOL );
 
+        hdc = GetDC( hwnd );
+        graphics_driver = __wine_get_driver_module( hdc );
+        using_root = !desktop || !create_desktop( graphics_driver, name, width, height );
+        ReleaseDC( hwnd, hdc );
+
         SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)desktop_wnd_proc );
+        set_desktop_guid( hwnd, &guid, graphics_driver );
         SendMessageW( hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW( 0, MAKEINTRESOURCEW(OIC_WINLOGO)));
         if (name) set_desktop_window_title( hwnd, name );
-        ShowWindow( hwnd, SW_SHOW );
+        SetWindowPos( hwnd, 0, GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
+                      GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW );
         SystemParametersInfoW( SPI_SETDESKWALLPAPER, 0, NULL, FALSE );
         ClipCursor( NULL );
-        initialize_display_settings( hwnd );
+        initialize_display_settings();
         initialize_appbar();
         initialize_systray( graphics_driver, using_root );
         if (!using_root) initialize_launchers( hwnd );

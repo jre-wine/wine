@@ -290,7 +290,7 @@ const struct builtin_class_descr MESSAGE_builtin_class =
     0,                    /* style */
     WINPROC_MESSAGE,      /* proc */
     0,                    /* extra */
-    IDC_ARROW,            /* cursor */
+    0,                    /* cursor */
     0                     /* brush */
 };
 
@@ -1999,6 +1999,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
     HGLOBAL     hunlock = 0;
     int         i;
     DWORD       res;
+    ULONGLONG   hpack;
 
     if (!UnpackDDElParam( info->msg, info->lparam, &uiLo, &uiHi ))
         return FALSE;
@@ -2019,7 +2020,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
             HGLOBAL h = dde_get_pair( (HANDLE)uiHi );
             if (h)
             {
-                ULONGLONG hpack = pack_ptr( h );
+                hpack = pack_ptr( h );
                 /* send back the value of h on the other side */
                 push_data( data, &hpack, sizeof(hpack) );
                 lp = uiLo;

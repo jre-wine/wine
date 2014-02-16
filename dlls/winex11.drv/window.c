@@ -1218,8 +1218,9 @@ static void sync_window_position( struct x11drv_win_data *data,
     /* only the size is allowed to change for the desktop window */
     if (data->whole_window != root_window)
     {
-        changes.x = data->whole_rect.left - virtual_screen_rect.left;
-        changes.y = data->whole_rect.top - virtual_screen_rect.top;
+        POINT pt = virtual_screen_to_root( data->whole_rect.left, data->whole_rect.top );
+        changes.x = pt.x;
+        changes.y = pt.y;
         mask |= CWX | CWY;
     }
 
@@ -1415,6 +1416,7 @@ static void create_whole_window( struct x11drv_win_data *data )
     BYTE alpha;
     DWORD layered_flags;
     HRGN win_rgn;
+    POINT pos;
 
     if (!data->managed && is_window_managed( data->hwnd, SWP_NOACTIVATE, &data->window_rect ))
     {
@@ -1441,9 +1443,8 @@ static void create_whole_window( struct x11drv_win_data *data )
     if (!(cy = data->whole_rect.bottom - data->whole_rect.top)) cy = 1;
     else if (cy > 65535) cy = 65535;
 
-    data->whole_window = XCreateWindow( data->display, root_window,
-                                        data->whole_rect.left - virtual_screen_rect.left,
-                                        data->whole_rect.top - virtual_screen_rect.top,
+    pos = virtual_screen_to_root( data->whole_rect.left, data->whole_rect.top );
+    data->whole_window = XCreateWindow( data->display, root_window, pos.y, pos.y,
                                         cx, cy, 0, data->vis.depth, InputOutput,
                                         data->vis.visual, mask, &attr );
     if (!data->whole_window) goto done;
@@ -1650,16 +1651,19 @@ static struct x11drv_win_data *alloc_win_data( Display *display, HWND hwnd )
 
 
 /* initialize the desktop window id in the desktop manager process */
-static BOOL create_desktop_win_data( Display *display, HWND hwnd )
+BOOL create_desktop_win_data( Window win )
 {
+    struct x11drv_thread_data *thread_data = x11drv_thread_data();
+    Display *display = thread_data->display;
     struct x11drv_win_data *data;
 
-    if (!(data = alloc_win_data( display, hwnd ))) return FALSE;
-    data->whole_window = root_window;
+    if (!(data = alloc_win_data( display, GetDesktopWindow() ))) return FALSE;
+    data->whole_window = win;
     data->managed = TRUE;
-    SetPropA( data->hwnd, whole_window_prop, (HANDLE)root_window );
-    set_initial_wm_hints( display, root_window );
+    SetPropA( data->hwnd, whole_window_prop, (HANDLE)win );
+    set_initial_wm_hints( display, win );
     release_win_data( data );
+    if (thread_data->clip_window) XReparentWindow( display, thread_data->clip_window, win, 0, 0 );
     return TRUE;
 }
 
@@ -1683,15 +1687,17 @@ BOOL CDECL X11DRV_CreateDesktopWindow( HWND hwnd )
 
     if (!width && !height)  /* not initialized yet */
     {
+        RECT rect = get_virtual_screen_rect();
+
         SERVER_START_REQ( set_window_pos )
         {
             req->handle        = wine_server_user_handle( hwnd );
             req->previous      = 0;
             req->swp_flags     = SWP_NOZORDER;
-            req->window.left   = virtual_screen_rect.left;
-            req->window.top    = virtual_screen_rect.top;
-            req->window.right  = virtual_screen_rect.right;
-            req->window.bottom = virtual_screen_rect.bottom;
+            req->window.left   = rect.left;
+            req->window.top    = rect.top;
+            req->window.right  = rect.right;
+            req->window.bottom = rect.bottom;
             req->client        = req->window;
             wine_server_call( req );
         }
@@ -1715,12 +1721,6 @@ BOOL CDECL X11DRV_CreateWindow( HWND hwnd )
     {
         struct x11drv_thread_data *data = x11drv_init_thread_data();
         XSetWindowAttributes attr;
-
-        if (root_window != DefaultRootWindow( gdi_display ))
-        {
-            /* the desktop win data can't be created lazily */
-            if (!create_desktop_win_data( data->display, hwnd )) return FALSE;
-        }
 
         /* create the cursor clipping window */
         attr.override_redirect = TRUE;
@@ -1835,6 +1835,7 @@ HWND create_foreign_window( Display *display, Window xwin )
     static BOOL class_registered;
     struct x11drv_win_data *data;
     HWND hwnd, parent;
+    POINT pos;
     Window xparent, xroot;
     Window *xchildren;
     unsigned int nchildren;
@@ -1873,16 +1874,17 @@ HWND create_foreign_window( Display *display, Window xwin )
     {
         parent = GetDesktopWindow();
         style |= WS_POPUP;
-        attr.x += virtual_screen_rect.left;
-        attr.y += virtual_screen_rect.top;
+        pos = root_to_virtual_screen( attr.x, attr.y );
     }
     else
     {
         parent = create_foreign_window( display, xparent );
         style |= WS_CHILD;
+        pos.x = attr.x;
+        pos.y = attr.y;
     }
 
-    hwnd = CreateWindowW( classW, NULL, style, attr.x, attr.y, attr.width, attr.height,
+    hwnd = CreateWindowW( classW, NULL, style, pos.x, pos.y, attr.width, attr.height,
                           parent, 0, 0, NULL );
 
     if (!(data = alloc_win_data( display, hwnd )))
@@ -1890,7 +1892,7 @@ HWND create_foreign_window( Display *display, Window xwin )
         DestroyWindow( hwnd );
         return 0;
     }
-    SetRect( &data->window_rect, attr.x, attr.y, attr.x + attr.width, attr.y + attr.height );
+    SetRect( &data->window_rect, pos.x, pos.y, pos.x + attr.width, pos.y + attr.height );
     data->whole_rect = data->client_rect = data->window_rect;
     data->whole_window = data->client_window = 0;
     data->embedded = TRUE;
@@ -2013,9 +2015,8 @@ void CDECL X11DRV_ReleaseDC( HWND hwnd, HDC hdc )
     escape.hwnd = GetDesktopWindow();
     escape.drawable = root_window;
     escape.mode = IncludeInferiors;
-    SetRect( &escape.dc_rect, 0, 0, virtual_screen_rect.right - virtual_screen_rect.left,
-             virtual_screen_rect.bottom - virtual_screen_rect.top );
-    OffsetRect( &escape.dc_rect, -virtual_screen_rect.left, -virtual_screen_rect.top );
+    escape.dc_rect = get_virtual_screen_rect();
+    OffsetRect( &escape.dc_rect, -2 * escape.dc_rect.left, -2 * escape.dc_rect.top );
     escape.fbconfig_id = 0;
     ExtEscape( hdc, X11DRV_ESCAPE, sizeof(escape), (LPSTR)&escape, 0, NULL );
 }
@@ -2120,9 +2121,9 @@ done:
 
 static inline RECT get_surface_rect( const RECT *visible_rect )
 {
-    RECT rect;
+    RECT rect = get_virtual_screen_rect();
 
-    IntersectRect( &rect, visible_rect, &virtual_screen_rect );
+    IntersectRect( &rect, &rect, visible_rect );
     OffsetRect( &rect, -visible_rect->left, -visible_rect->top );
     rect.left &= ~31;
     rect.top  &= ~31;
@@ -2355,6 +2356,7 @@ UINT CDECL X11DRV_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
     int x, y;
     unsigned int width, height, border, depth;
     Window root, top;
+    POINT pos;
     DWORD style = GetWindowLongW( hwnd, GWL_STYLE );
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
     struct x11drv_win_data *data = get_win_data( hwnd );
@@ -2387,11 +2389,11 @@ UINT CDECL X11DRV_ShowWindow( HWND hwnd, INT cmd, RECT *rect, UINT swp )
     XGetGeometry( thread_data->display, data->whole_window,
                   &root, &x, &y, &width, &height, &border, &depth );
     XTranslateCoordinates( thread_data->display, data->whole_window, root, 0, 0, &x, &y, &top );
-    rect->left   = x;
-    rect->top    = y;
-    rect->right  = x + width;
-    rect->bottom = y + height;
-    OffsetRect( rect, virtual_screen_rect.left, virtual_screen_rect.top );
+    pos = root_to_virtual_screen( x, y );
+    rect->left   = pos.x;
+    rect->top    = pos.y;
+    rect->right  = pos.x + width;
+    rect->bottom = pos.y + height;
     X11DRV_X_to_window_rect( data, rect );
     swp &= ~(SWP_NOMOVE | SWP_NOCLIENTMOVE | SWP_NOSIZE | SWP_NOCLIENTSIZE);
 
