@@ -31,11 +31,6 @@
 #include "winerror.h"
 #include "aclapi.h"
 
-#undef SE_BACKUP_NAME
-#undef SE_RESTORE_NAME
-#define SE_BACKUP_NAME "SeBackupPrivilege"
-#define SE_RESTORE_NAME "SeRestorePrivilege"
-
 #define IS_HKCR(hk) ((UINT_PTR)hk > 0 && ((UINT_PTR)hk & 3) == 2)
 
 static HKEY hkey_main;
@@ -2110,7 +2105,7 @@ static void test_redirection(void)
     err = RegOpenKeyExA(HKEY_CLASSES_ROOT, "Interface", 0, KEY_ALL_ACCESS, &native);
     ok(err == ERROR_SUCCESS, "got %i\n", err);
 
-    RegDeleteKeyExA(native, "AWineTest", 0, 0);
+    pRegDeleteKeyExA(native, "AWineTest", 0, 0);
 
     /* write subkey in opposite bit mode */
     err = RegOpenKeyExA(HKEY_CLASSES_ROOT, "Interface", 0, KEY_ALL_ACCESS | opposite, &op_key);
@@ -2133,7 +2128,7 @@ static void test_redirection(void)
             broken(err == ERROR_SUCCESS), /* before Win7, HKCR is reflected instead of redirected */
             "got %i\n", err);
 
-    err = RegDeleteKeyExA(op_key, "AWineTest", opposite, 0);
+    err = pRegDeleteKeyExA(op_key, "AWineTest", opposite, 0);
     ok(err == ERROR_SUCCESS, "got %i\n", err);
 
     RegCloseKey(op_key);

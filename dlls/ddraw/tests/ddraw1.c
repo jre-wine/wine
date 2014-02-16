@@ -56,8 +56,8 @@ static DWORD WINAPI create_window_thread_proc(void *param)
     {
         MSG msg;
 
-        while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE))
-            DispatchMessage(&msg);
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
+            DispatchMessageA(&msg);
         res = WaitForSingleObject(p->destroy_window, 100);
         if (res == WAIT_OBJECT_0)
             break;
@@ -77,9 +77,9 @@ static void create_window_thread(struct create_window_thread_param *p)
 {
     DWORD res, tid;
 
-    p->window_created = CreateEvent(NULL, FALSE, FALSE, NULL);
+    p->window_created = CreateEventA(NULL, FALSE, FALSE, NULL);
     ok(!!p->window_created, "CreateEvent failed, last error %#x.\n", GetLastError());
-    p->destroy_window = CreateEvent(NULL, FALSE, FALSE, NULL);
+    p->destroy_window = CreateEventA(NULL, FALSE, FALSE, NULL);
     ok(!!p->destroy_window, "CreateEvent failed, last error %#x.\n", GetLastError());
     p->thread = CreateThread(NULL, 0, create_window_thread_proc, p, 0, &tid);
     ok(!!p->thread, "Failed to create thread, last error %#x.\n", GetLastError());
@@ -3078,6 +3078,7 @@ static void test_rt_caps(void)
         DWORD caps_in;
         DWORD caps_out;
         HRESULT create_device_hr;
+        BOOL create_may_fail;
     }
     test_data[] =
     {
@@ -3086,120 +3087,140 @@ static void test_rt_caps(void)
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             D3D_OK,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             D3D_OK,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_OFFSCREENPLAIN,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             D3DERR_SURFACENOTINVIDMEM,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             D3D_OK,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_3DDEVICE,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             D3D_OK,
+            FALSE,
         },
         {
             NULL,
             0,
             DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             D3DERR_SURFACENOTINVIDMEM,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_SYSTEMMEMORY,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             &p8_fmt,
             0,
             DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE,
-            DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
+            ~0U /* AMD r200 */ ,
             DDERR_NOPALETTEATTACHED,
+            FALSE,
         },
         {
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE,
             DDERR_NOPALETTEATTACHED,
+            FALSE,
         },
         {
             &p8_fmt,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER,
             DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
             DDERR_INVALIDCAPS,
+            TRUE /* AMD Evergreen */,
         },
         {
             NULL,
             DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
-            DDSCAPS_3DDEVICE | DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
+            ~0U /* AMD Evergreen */,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_ZBUFFER,
-            DDSCAPS_VIDEOMEMORY | DDSCAPS_ZBUFFER | DDSCAPS_LOCALVIDMEM,
+            ~0U /* AMD Evergreen */,
             DDERR_INVALIDCAPS,
+            FALSE,
         },
         {
             NULL,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_3DDEVICE | DDSCAPS_ZBUFFER,
             DDERR_INVALIDCAPS,
+            TRUE /* Nvidia Kepler */,
         },
         {
             NULL,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_ZBUFFER,
             DDSCAPS_SYSTEMMEMORY | DDSCAPS_ZBUFFER,
             DDERR_INVALIDCAPS,
+            TRUE /* Nvidia Kepler */,
         },
     };
 
@@ -3255,14 +3276,17 @@ static void test_rt_caps(void)
         surface_desc.dwWidth = 640;
         surface_desc.dwHeight = 480;
         hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &surface, NULL);
-        ok(SUCCEEDED(hr), "Test %u: Failed to create surface with caps %#x, hr %#x.\n",
+        ok(SUCCEEDED(hr) || broken(test_data[i].create_may_fail),
+                "Test %u: Failed to create surface with caps %#x, hr %#x.\n",
                 i, test_data[i].caps_in, hr);
+        if (FAILED(hr))
+            continue;
 
         memset(&surface_desc, 0, sizeof(surface_desc));
         surface_desc.dwSize = sizeof(surface_desc);
         hr = IDirectDrawSurface_GetSurfaceDesc(surface, &surface_desc);
         ok(SUCCEEDED(hr), "Test %u: Failed to get surface desc, hr %#x.\n", i, hr);
-        ok(surface_desc.ddsCaps.dwCaps == test_data[i].caps_out,
+        ok(test_data[i].caps_out == ~0U || surface_desc.ddsCaps.dwCaps == test_data[i].caps_out,
                 "Test %u: Got unexpected caps %#x, expected %#x.\n",
                 i, surface_desc.ddsCaps.dwCaps, test_data[i].caps_out);
 
@@ -3274,7 +3298,10 @@ static void test_rt_caps(void)
             hr = IDirectDrawSurface_SetPalette(surface, palette);
             ok(SUCCEEDED(hr), "Test %u: Failed to set palette, hr %#x.\n", i, hr);
             hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirect3DHALDevice, (void **)&device);
-            ok(hr == D3DERR_SURFACENOTINVIDMEM, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            if (surface_desc.ddsCaps.dwCaps & DDSCAPS_VIDEOMEMORY)
+                ok(hr == DDERR_INVALIDPIXELFORMAT, "Test %u: Got unexpected hr %#x.\n", i, hr);
+            else
+                ok(hr == D3DERR_SURFACENOTINVIDMEM, "Test %u: Got unexpected hr %#x.\n", i, hr);
         }
         if (SUCCEEDED(hr))
         {
@@ -3381,7 +3408,7 @@ static void test_surface_lock(void)
         if (tests[i].caps & DDSCAPS_ZBUFFER)
         {
             ddsd.dwFlags |= DDSD_ZBUFFERBITDEPTH;
-            ddsd.dwZBufferBitDepth = z_depth;
+            U2(ddsd).dwZBufferBitDepth = z_depth;
         }
         ddsd.ddsCaps.dwCaps = tests[i].caps;
 

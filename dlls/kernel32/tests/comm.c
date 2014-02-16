@@ -855,6 +855,8 @@ static void test_waittxempty(void)
     SetLastError(0xdeadbeef);
     res = WaitCommEvent(hcom, &evtmask, &ovl_wait);
     ok(!res && GetLastError() == ERROR_IO_PENDING, "WaitCommEvent error %d\n", GetLastError());
+    after = GetTickCount();
+    ok(after - before < 30, "WaitCommEvent should have returned immediately, took %d ms\n", after - before);
     res = WaitForSingleObject(ovl_wait.hEvent, 1500);
     ok(res == WAIT_OBJECT_0, "WaitCommEvent failed with a timeout\n");
     if (res == WAIT_OBJECT_0)
@@ -882,7 +884,7 @@ static void test_waittxempty(void)
     CloseHandle(ovl_wait.hEvent);
 
     timediff = after - before;
-    trace("WaitCommEvent for EV_TXEMPTY took %d ms (timeout %d)\n", timediff, TIMEOUT);
+    trace("WaitCommEvent for EV_TXEMPTY took %d ms (timeout 1500)\n", timediff);
     ok(timediff < 1200, "WaitCommEvent used %d ms for waiting\n", timediff);
 
     res = WaitForSingleObject(ovl_write.hEvent, 0);
@@ -1068,7 +1070,7 @@ static void test_LoopbackRead(void)
     ok(read == sizeof(tbuf),"ReadFile read %d bytes, expected \"%s\"\n", read,rbuf);
 
     /* Now do the same with a slower Baud rate.
-       As we request more characters then written, we will hit the timeout
+       As we request more characters than written, we will hit the timeout
     */
 
     ok(GetCommState(hcom, &dcb), "GetCommState failed\n");

@@ -232,10 +232,13 @@ static void test_ParseDisplayName(void)
     /* Tests crash on W2K and below (SHCreateShellItem available as of XP) */
     if (pSHCreateShellItem)
     {
-        /* null name and pidl */
-        hr = IShellFolder_ParseDisplayName(IDesktopFolder,
-            NULL, NULL, NULL, NULL, NULL, 0);
-        ok(hr == E_INVALIDARG, "returned %08x, expected E_INVALIDARG\n", hr);
+        if (0)
+        {
+            /* null name and pidl, also crashes on Windows 8 */
+            hr = IShellFolder_ParseDisplayName(IDesktopFolder, NULL, NULL,
+                                               NULL, NULL, NULL, 0);
+            ok(hr == E_INVALIDARG, "returned %08x, expected E_INVALIDARG\n", hr);
+        }
 
         /* null name */
         newPIDL = (ITEMIDLIST*)0xdeadbeef;
@@ -2063,7 +2066,7 @@ static void test_SHGetFolderPathAndSubDirA(void)
         "expected %s to start with %s\n", testpath, appdata);
     ok(!lstrcmpA(&testpath[1 + strlen(appdata)], winetemp),
         "expected %s to end with %s\n", testpath, winetemp);
-    dwret = GetFileAttributes(testpath);
+    dwret = GetFileAttributesA(testpath);
     ok(FILE_ATTRIBUTE_DIRECTORY | dwret, "expected %x to contain FILE_ATTRIBUTE_DIRECTORY\n", dwret);
 
     /* cleanup */
@@ -4417,7 +4420,7 @@ static LRESULT CALLBACK testwindow_wndproc(HWND hwnd, UINT msg, WPARAM wparam, L
             ok(0, "Didn't expect a WM_USER_NOTIFY message (event: %x)\n", signal);
         return 0;
     }
-    return DefWindowProc(hwnd, msg, wparam, lparam);
+    return DefWindowProcA(hwnd, msg, wparam, lparam);
 }
 
 static void register_testwindow_class(void)
