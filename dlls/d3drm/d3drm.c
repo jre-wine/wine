@@ -128,11 +128,11 @@ static ULONG WINAPI IDirect3DRMImpl_Release(IDirect3DRM* iface)
 }
 
 /*** IDirect3DRM methods ***/
-static HRESULT WINAPI IDirect3DRMImpl_CreateObject(IDirect3DRM* iface, REFCLSID rclsid, LPUNKNOWN pUnkOuter, REFIID riid, LPVOID *ppvObj)
+static HRESULT WINAPI IDirect3DRMImpl_CreateObject(IDirect3DRM *iface,
+        REFCLSID clsid, IUnknown *outer, REFIID iid, void **out)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM(iface);
-
-    FIXME("(%p/%p)->(%s,%p,%s,%p): stub\n", iface, This, debugstr_guid(rclsid), pUnkOuter, debugstr_guid(riid), ppvObj);
+    FIXME("iface %p, clsid %s, outer %p, iid %s, out %p stub!\n",
+            iface, debugstr_guid(clsid), outer, debugstr_guid(iid), out);
 
     return E_NOTIMPL;
 }
@@ -492,14 +492,11 @@ static ULONG WINAPI IDirect3DRM2Impl_Release(IDirect3DRM2* iface)
 }
 
 /*** IDirect3DRM2 methods ***/
-static HRESULT WINAPI IDirect3DRM2Impl_CreateObject(IDirect3DRM2* iface, REFCLSID rclsid,
-                                                    LPUNKNOWN pUnkOuter, REFIID riid,
-                                                    LPVOID *ppvObj)
+static HRESULT WINAPI IDirect3DRM2Impl_CreateObject(IDirect3DRM2 *iface,
+        REFCLSID clsid, IUnknown *outer, REFIID iid, void **out)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%s,%p,%s,%p): stub\n", iface, This, debugstr_guid(rclsid), pUnkOuter,
-                                            debugstr_guid(riid), ppvObj);
+    FIXME("iface %p, clsid %s, outer %p, iid %s, out %p stub!\n",
+            iface, debugstr_guid(clsid), outer, debugstr_guid(iid), out);
 
     return E_NOTIMPL;
 }
@@ -803,12 +800,9 @@ static HRESULT WINAPI IDirect3DRM2Impl_Tick(IDirect3DRM2* iface, D3DVALUE tick)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM2Impl_CreateProgressiveMesh(IDirect3DRM2* iface,
-                                                             LPDIRECT3DRMPROGRESSIVEMESH * ppMesh)
+static HRESULT WINAPI IDirect3DRM2Impl_CreateProgressiveMesh(IDirect3DRM2 *iface, IDirect3DRMProgressiveMesh **mesh)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM2(iface);
-
-    FIXME("(%p/%p)->(%p): stub\n", iface, This, ppMesh);
+    FIXME("iface %p, mesh %p stub!\n", iface, mesh);
 
     return E_NOTIMPL;
 }
@@ -875,13 +869,11 @@ static ULONG WINAPI IDirect3DRM3Impl_Release(IDirect3DRM3* iface)
 }
 
 /*** IDirect3DRM3 methods ***/
-static HRESULT WINAPI IDirect3DRM3Impl_CreateObject(IDirect3DRM3* iface, REFCLSID rclsid,
-                                                    LPUNKNOWN unkwn, REFIID riid, LPVOID* object)
+static HRESULT WINAPI IDirect3DRM3Impl_CreateObject(IDirect3DRM3 *iface,
+        REFCLSID clsid, IUnknown *outer, REFIID iid, void **out)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%s,%p,%s,%p): stub\n", iface, This, debugstr_guid(rclsid), unkwn,
-          debugstr_guid(riid), object);
+    FIXME("iface %p, clsid %s, outer %p, iid %s, out %p stub!\n",
+            iface, debugstr_guid(clsid), outer, debugstr_guid(iid), out);
 
     return E_NOTIMPL;
 }
@@ -1356,9 +1348,9 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3 *iface, void *source, v
         D3DRMLOADTEXTURECALLBACK load_tex_cb, void *load_tex_ctx, IDirect3DRMFrame3 *parent_frame)
 {
     DXFILELOADOPTIONS load_options;
-    LPDIRECTXFILE pDXFile = NULL;
-    LPDIRECTXFILEENUMOBJECT pEnumObject = NULL;
-    LPDIRECTXFILEDATA pData = NULL;
+    IDirectXFile *file = NULL;
+    IDirectXFileEnumObject *enum_object = NULL;
+    IDirectXFileData *data = NULL;
     HRESULT hr;
     const GUID* pGuid;
     DWORD size;
@@ -1390,23 +1382,23 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3 *iface, void *source, v
         return E_NOTIMPL;
     }
 
-    hr = DirectXFileCreate(&pDXFile);
+    hr = DirectXFileCreate(&file);
     if (hr != DXFILE_OK)
         goto end;
 
-    hr = IDirectXFile_RegisterTemplates(pDXFile, templates, strlen(templates));
+    hr = IDirectXFile_RegisterTemplates(file, templates, strlen(templates));
     if (hr != DXFILE_OK)
         goto end;
 
-    hr = IDirectXFile_CreateEnumObject(pDXFile, source, load_options, &pEnumObject);
+    hr = IDirectXFile_CreateEnumObject(file, source, load_options, &enum_object);
     if (hr != DXFILE_OK)
         goto end;
 
-    hr = IDirectXFileEnumObject_GetNextDataObject(pEnumObject, &pData);
+    hr = IDirectXFileEnumObject_GetNextDataObject(enum_object, &data);
     if (hr != DXFILE_OK)
         goto end;
 
-    hr = IDirectXFileData_GetType(pData, &pGuid);
+    hr = IDirectXFileData_GetType(data, &pGuid);
     if (hr != DXFILE_OK)
         goto end;
 
@@ -1418,7 +1410,7 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3 *iface, void *source, v
         goto end;
     }
 
-    hr = IDirectXFileData_GetData(pData, NULL, &size, (void**)&pHeader);
+    hr = IDirectXFileData_GetData(data, NULL, &size, (void **)&pHeader);
     if ((hr != DXFILE_OK) || (size != sizeof(Header)))
         goto end;
 
@@ -1431,12 +1423,12 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3 *iface, void *source, v
         goto end;
     }
 
-    IDirectXFileData_Release(pData);
-    pData = NULL;
+    IDirectXFileData_Release(data);
+    data = NULL;
 
     while (1)
     {
-        hr = IDirectXFileEnumObject_GetNextDataObject(pEnumObject, &pData);
+        hr = IDirectXFileEnumObject_GetNextDataObject(enum_object, &data);
         if (hr == DXFILEERR_NOMOREOBJECTS)
         {
             TRACE("No more object\n");
@@ -1448,23 +1440,23 @@ static HRESULT WINAPI IDirect3DRM3Impl_Load(IDirect3DRM3 *iface, void *source, v
             goto end;
         }
 
-        ret = load_data(iface, pData, iids, iid_count, load_cb, load_ctx, load_tex_cb, load_tex_ctx, parent_frame);
+        ret = load_data(iface, data, iids, iid_count, load_cb, load_ctx, load_tex_cb, load_tex_ctx, parent_frame);
         if (ret != D3DRM_OK)
             goto end;
 
-        IDirectXFileData_Release(pData);
-        pData = NULL;
+        IDirectXFileData_Release(data);
+        data = NULL;
     }
 
     ret = D3DRM_OK;
 
 end:
-    if (pData)
-        IDirectXFileData_Release(pData);
-    if (pEnumObject)
-        IDirectXFileEnumObject_Release(pEnumObject);
-    if (pDXFile)
-        IDirectXFile_Release(pDXFile);
+    if (data)
+        IDirectXFileData_Release(data);
+    if (enum_object)
+        IDirectXFileEnumObject_Release(enum_object);
+    if (file)
+        IDirectXFile_Release(file);
 
     return ret;
 }
@@ -1478,12 +1470,9 @@ static HRESULT WINAPI IDirect3DRM3Impl_Tick(IDirect3DRM3* iface, D3DVALUE tick)
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IDirect3DRM3Impl_CreateProgressiveMesh(IDirect3DRM3* iface,
-                                                             LPDIRECT3DRMPROGRESSIVEMESH Mesh)
+static HRESULT WINAPI IDirect3DRM3Impl_CreateProgressiveMesh(IDirect3DRM3 *iface, IDirect3DRMProgressiveMesh **mesh)
 {
-    IDirect3DRMImpl *This = impl_from_IDirect3DRM3(iface);
-
-    FIXME("(%p/%p)->(%p): stub\n", iface, This, Mesh);
+    FIXME("iface %p, mesh %p stub!\n", iface, mesh);
 
     return E_NOTIMPL;
 }

@@ -688,10 +688,6 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             GL_ALPHA,                   GL_UNSIGNED_BYTE,                 0,
             0,
             ARB_FRAGMENT_PROGRAM,       NULL},
-    {WINED3DFMT_P8_UINT,                GL_COLOR_INDEX8_EXT,              GL_COLOR_INDEX8_EXT,                    0,
-            GL_COLOR_INDEX,             GL_UNSIGNED_BYTE,                 0,
-            0,
-            EXT_PALETTED_TEXTURE,       NULL},
     /* Standard ARGB formats */
     {WINED3DFMT_B8G8R8_UNORM,           GL_RGB8,                          GL_RGB8,                                0,
             GL_BGR,                     GL_UNSIGNED_BYTE,                 0,
@@ -1767,7 +1763,7 @@ static void apply_format_fixups(struct wined3d_adapter *adapter, struct wined3d_
     gl_info->formats[idx].height_scale.denominator = 2;
     gl_info->formats[idx].color_fixup = create_complex_fixup_desc(COMPLEX_FIXUP_YV12);
 
-    if (gl_info->supported[EXT_PALETTED_TEXTURE] || gl_info->supported[ARB_FRAGMENT_PROGRAM])
+    if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
     {
         idx = getFmtIdx(WINED3DFMT_P8_UINT);
         gl_info->formats[idx].color_fixup = create_complex_fixup_desc(COMPLEX_FIXUP_P8);
@@ -1942,7 +1938,8 @@ const struct wined3d_format *wined3d_get_format(const struct wined3d_gl_info *gl
     return &gl_info->formats[idx];
 }
 
-UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT alignment, UINT width, UINT height)
+UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT alignment,
+        UINT width, UINT height, UINT depth)
 {
     UINT size;
 
@@ -1967,6 +1964,8 @@ UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT ali
         size *= format->height_scale.numerator;
         size /= format->height_scale.denominator;
     }
+
+    size *= depth;
 
     return size;
 }
@@ -2586,10 +2585,6 @@ const char *debug_d3dstate(DWORD state)
         return "STATE_GEOMETRY_SHADER";
     if (STATE_IS_VIEWPORT(state))
         return "STATE_VIEWPORT";
-    if (STATE_IS_VERTEXSHADERCONSTANT(state))
-        return "STATE_VERTEXSHADERCONSTANT";
-    if (STATE_IS_PIXELSHADERCONSTANT(state))
-        return "STATE_PIXELSHADERCONSTANT";
     if (STATE_IS_LIGHT_TYPE(state))
         return "STATE_LIGHT_TYPE";
     if (STATE_IS_ACTIVELIGHT(state))
@@ -3711,4 +3706,21 @@ void wined3d_get_draw_rect(const struct wined3d_state *state, RECT *rect)
 
     if (state->render_states[WINED3D_RS_SCISSORTESTENABLE])
         IntersectRect(rect, rect, &state->scissor_rect);
+}
+
+const char *wined3d_debug_location(DWORD location)
+{
+    char buf[200];
+
+    buf[0] = '\0';
+#define LOCATION_TO_STR(u) if (location & u) { strcat(buf, " | "#u); location &= ~u; }
+    LOCATION_TO_STR(WINED3D_LOCATION_DISCARDED);
+    LOCATION_TO_STR(WINED3D_LOCATION_SYSMEM);
+    LOCATION_TO_STR(WINED3D_LOCATION_BUFFER);
+    LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_RGB);
+    LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_SRGB);
+#undef LOCATION_TO_STR
+    if (location) FIXME("Unrecognized location flag(s) %#x.\n", location);
+
+    return buf[0] ? wine_dbg_sprintf("%s", &buf[3]) : "0";
 }

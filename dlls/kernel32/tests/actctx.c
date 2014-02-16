@@ -24,6 +24,7 @@
 #include <winnls.h>
 #include <stdio.h>
 
+#include "oaidl.h"
 #include "initguid.h"
 
 static BOOL   (WINAPI *pActivateActCtx)(HANDLE,ULONG_PTR*);
@@ -85,6 +86,9 @@ static const char manifest2[] =
 
 DEFINE_GUID(IID_CoTest, 0x12345678, 0x1234, 0x5678, 0x12, 0x34, 0x11, 0x11, 0x22, 0x22, 0x33, 0x33);
 DEFINE_GUID(IID_TlibTest, 0x99999999, 0x8888, 0x7777, 0x66, 0x66, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55);
+DEFINE_GUID(IID_TlibTest2, 0x99999999, 0x8888, 0x7777, 0x66, 0x66, 0x55, 0x55, 0x55, 0x55, 0x55, 0x56);
+DEFINE_GUID(IID_TlibTest3, 0x99999999, 0x8888, 0x7777, 0x66, 0x66, 0x55, 0x55, 0x55, 0x55, 0x55, 0x57);
+DEFINE_GUID(IID_TlibTest4, 0x99999999, 0x8888, 0x7777, 0x66, 0x66, 0x55, 0x55, 0x55, 0x55, 0x55, 0x58);
 
 static const char manifest3[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
@@ -97,6 +101,11 @@ static const char manifest3[] =
 "              tlbid=\"{99999999-8888-7777-6666-555555555555}\""
 "              threadingModel=\"Neutral\""
 "              progid=\"ProgId.ProgId\""
+"              miscStatus=\"cantlinkinside\""
+"              miscStatusIcon=\"recomposeonresize\""
+"              miscStatusContent=\"insideout\""
+"              miscStatusThumbnail=\"alignable\""
+"              miscStatusDocPrint=\"simpleframe,setclientsitefirst\""
 "    />"
 "</file>"
 "</assembly>";
@@ -105,18 +114,25 @@ static const char manifest_wndcls1[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
 "<assemblyIdentity version=\"1.2.3.4\"  name=\"testdep1\" type=\"win32\" processorArchitecture=\"" ARCH "\"/>"
 "<file name=\"testlib1.dll\">"
-"<windowClass>wndClass1</windowClass>"
+"<windowClass versioned=\"yes\">wndClass1</windowClass>"
 "<windowClass>wndClass2</windowClass>"
+" <typelib tlbid=\"{99999999-8888-7777-6666-555555555558}\" version=\"1.0\" helpdir=\"\" />"
 "</file>"
+"<file name=\"testlib1_2.dll\" />"
 "</assembly>";
 
 static const char manifest_wndcls2[] =
 "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">"
 "<assemblyIdentity version=\"4.3.2.1\"  name=\"testdep2\" type=\"win32\" processorArchitecture=\"" ARCH "\" />"
 "<file name=\"testlib2.dll\">"
-"<windowClass>wndClass3</windowClass>"
-"<windowClass>wndClass4</windowClass>"
+" <windowClass versioned=\"no\">wndClass3</windowClass>"
+" <windowClass>wndClass4</windowClass>"
+" <typelib tlbid=\"{99999999-8888-7777-6666-555555555555}\" version=\"1.0\" helpdir=\"help\" resourceid=\"409\""
+"          flags=\"HIDDEN,CONTROL,RESTRICTED\" />"
+" <typelib tlbid=\"{99999999-8888-7777-6666-555555555556}\" version=\"1.0\" helpdir=\"help1\" resourceid=\"409\" />"
+" <typelib tlbid=\"{99999999-8888-7777-6666-555555555557}\" version=\"1.0\" helpdir=\"\" />"
 "</file>"
+"<file name=\"testlib2_2.dll\" />"
 "</assembly>";
 
 static const char manifest_wndcls_main[] =
@@ -754,105 +770,41 @@ static void test_create_fail(void)
     test_create_and_fail(manifest2, wrong_depmanifest1, 0 );
 }
 
-struct dllredirect_keyed_data
-{
-    ULONG size;
-    ULONG unk;
-    DWORD res[3];
-};
-
-static void test_find_dll_redirection(HANDLE handle, LPCWSTR libname, ULONG exid, int line)
-{
-    ACTCTX_SECTION_KEYED_DATA data;
-    BOOL ret;
-
-    memset(&data, 0xfe, sizeof(data));
-    data.cbSize = sizeof(data);
-
-    ret = pFindActCtxSectionStringW(0, NULL,
-                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-                                    libname, &data);
-    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
-    if(!ret)
-    {
-        skip("couldn't find %s\n",strw(libname));
-        return;
-    }
-
-    ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
-    ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
-    ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-    ok_(__FILE__, line)(data.ulLength == 20, "data.ulLength=%u\n", data.ulLength);
-
-    if (data.lpData)
-    {
-        struct dllredirect_keyed_data *dlldata = (struct dllredirect_keyed_data*)data.lpData;
-todo_wine
-        ok_(__FILE__, line)(dlldata->size == data.ulLength, "got wrong size %d\n", dlldata->size);
-
-if (dlldata->size == data.ulLength)
-{
-        ok_(__FILE__, line)(dlldata->unk == 2, "got wrong field value %d\n", dlldata->unk);
-        ok_(__FILE__, line)(dlldata->res[0] == 0, "got wrong res[0] value %d\n", dlldata->res[0]);
-        ok_(__FILE__, line)(dlldata->res[1] == 0, "got wrong res[1] value %d\n", dlldata->res[1]);
-        ok_(__FILE__, line)(dlldata->res[2] == 0, "got wrong res[2] value %d\n", dlldata->res[2]);
-}
-    }
-
-    ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
-    ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
-       data.ulSectionGlobalDataLength);
-    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
-    /* ok_(__FILE__, line)(data.ulSectionTotalLength == ??, "data.ulSectionTotalLength=%u\n",
-       data.ulSectionTotalLength); */
-    ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
-    ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
-       data.ulAssemblyRosterIndex, exid);
-
-    memset(&data, 0xfe, sizeof(data));
-    data.cbSize = sizeof(data);
-
-    ret = pFindActCtxSectionStringW(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
-                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
-                                    libname, &data);
-    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
-    if(!ret)
-    {
-        skip("couldn't find\n");
-        return;
-    }
-
-    ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
-    ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
-    ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-    ok_(__FILE__, line)(data.ulLength == 20, "data.ulLength=%u\n", data.ulLength);
-    ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
-    ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
-       data.ulSectionGlobalDataLength);
-    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
-    /* ok_(__FILE__, line)(data.ulSectionTotalLength == ?? , "data.ulSectionTotalLength=%u\n",
-       data.ulSectionTotalLength); */
-    ok_(__FILE__, line)(data.hActCtx == handle, "data.hActCtx=%p\n", data.hActCtx);
-    ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
-       data.ulAssemblyRosterIndex, exid);
-
-    pReleaseActCtx(handle);
-}
-
-struct wndclass_header
+struct strsection_header
 {
     DWORD magic;
-    DWORD unk1[4];
+    ULONG size;
+    DWORD unk1[3];
     ULONG count;
     ULONG index_offset;
     DWORD unk2[4];
 };
 
-struct wndclass_index
+struct string_index
 {
     ULONG hash;
     ULONG name_offset;
     ULONG name_len;
+    ULONG data_offset;
+    ULONG data_len;
+    ULONG rosterindex;
+};
+
+struct guidsection_header
+{
+    DWORD magic;
+    ULONG size;
+    DWORD unk[3];
+    ULONG count;
+    ULONG index_offset;
+    DWORD unk2;
+    ULONG names_offset;
+    ULONG names_len;
+};
+
+struct guid_index
+{
+    GUID  guid;
     ULONG data_offset;
     ULONG data_len;
     ULONG rosterindex;
@@ -868,10 +820,96 @@ struct wndclass_redirect_data
     ULONG module_offset;/* container name offset */
 };
 
+struct dllredirect_data
+{
+    ULONG size;
+    ULONG unk;
+    DWORD res[3];
+};
+
+struct tlibredirect_data
+{
+    ULONG  size;
+    DWORD  res;
+    ULONG  name_len;
+    ULONG  name_offset;
+    LANGID langid;
+    WORD   flags;
+    ULONG  help_len;
+    ULONG  help_offset;
+    WORD   major_version;
+    WORD   minor_version;
+};
+
+static void test_find_dll_redirection(HANDLE handle, LPCWSTR libname, ULONG exid, int line)
+{
+    ACTCTX_SECTION_KEYED_DATA data;
+    BOOL ret;
+
+    memset(&data, 0xfe, sizeof(data));
+    data.cbSize = sizeof(data);
+
+    ret = pFindActCtxSectionStringW(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
+                                    libname, &data);
+    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
+    if (!ret) return;
+
+    ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
+    ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
+    ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
+    ok_(__FILE__, line)(data.ulLength == 20, "data.ulLength=%u\n", data.ulLength);
+
+    if (data.lpData)
+    {
+        struct dllredirect_data *dlldata = (struct dllredirect_data*)data.lpData;
+        ok_(__FILE__, line)(dlldata->size == data.ulLength, "got wrong size %d\n", dlldata->size);
+        ok_(__FILE__, line)(dlldata->unk == 2, "got wrong field value %d\n", dlldata->unk);
+        ok_(__FILE__, line)(dlldata->res[0] == 0, "got wrong res[0] value %d\n", dlldata->res[0]);
+        ok_(__FILE__, line)(dlldata->res[1] == 0, "got wrong res[1] value %d\n", dlldata->res[1]);
+        ok_(__FILE__, line)(dlldata->res[2] == 0, "got wrong res[2] value %d\n", dlldata->res[2]);
+    }
+
+    ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
+    ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
+       data.ulSectionGlobalDataLength);
+    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
+    ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%u\n",
+       data.ulSectionTotalLength);
+    ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
+    ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
+       data.ulAssemblyRosterIndex, exid);
+
+    memset(&data, 0xfe, sizeof(data));
+    data.cbSize = sizeof(data);
+
+    ret = pFindActCtxSectionStringW(FIND_ACTCTX_SECTION_KEY_RETURN_HACTCTX, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
+                                    libname, &data);
+    ok_(__FILE__, line)(ret, "FindActCtxSectionStringW failed: %u\n", GetLastError());
+    if (!ret) return;
+
+    ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
+    ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
+    ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
+    ok_(__FILE__, line)(data.ulLength == 20, "data.ulLength=%u\n", data.ulLength);
+    ok_(__FILE__, line)(data.lpSectionGlobalData == NULL, "data.lpSectionGlobalData != NULL\n");
+    ok_(__FILE__, line)(data.ulSectionGlobalDataLength == 0, "data.ulSectionGlobalDataLength=%u\n",
+       data.ulSectionGlobalDataLength);
+    ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
+    ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%u\n",
+       data.ulSectionTotalLength);
+    ok_(__FILE__, line)(data.hActCtx == handle, "data.hActCtx=%p\n", data.hActCtx);
+    ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
+       data.ulAssemblyRosterIndex, exid);
+
+    pReleaseActCtx(handle);
+}
+
 static void test_find_window_class(HANDLE handle, LPCWSTR clsname, ULONG exid, int line)
 {
     struct wndclass_redirect_data *wnddata;
-    struct wndclass_header *header;
+    struct strsection_header *header;
     ACTCTX_SECTION_KEYED_DATA data;
     BOOL ret;
 
@@ -885,7 +923,7 @@ static void test_find_window_class(HANDLE handle, LPCWSTR clsname, ULONG exid, i
         wine_dbgstr_w(clsname));
     if (!ret) return;
 
-    header = (struct wndclass_header*)data.lpSectionBase;
+    header = (struct strsection_header*)data.lpSectionBase;
     wnddata = (struct wndclass_redirect_data*)data.lpData;
 
     ok_(__FILE__, line)(header->magic == 0x64487353, "got wrong magic 0x%08x\n", header->magic);
@@ -1042,39 +1080,45 @@ static void test_basic_info(HANDLE handle, int line)
 enum comclass_threadingmodel {
     ThreadingModel_Apartment = 1,
     ThreadingModel_Free      = 2,
+    ThreadingModel_No        = 3,
     ThreadingModel_Both      = 4,
     ThreadingModel_Neutral   = 5
 };
 
 enum comclass_miscfields {
-    MiscStatus          = 0x1,
-    MiscStatusIcon      = 0x2,
-    MiscStatusContent   = 0x4,
-    MiscStatusThumbnail = 0x8
+    MiscStatus          = 1,
+    MiscStatusIcon      = 2,
+    MiscStatusContent   = 4,
+    MiscStatusThumbnail = 8,
+    MiscStatusDocPrint  = 16
 };
 
-struct comclass_keyed_data {
-    DWORD size;
-    BYTE reserved;
-    BYTE miscmask;
-    BYTE unk[2];
+struct comclassredirect_data {
+    ULONG size;
+    BYTE  res;
+    BYTE  miscmask;
+    BYTE  res1[2];
     DWORD model;
-    GUID clsid;
-    GUID unkguid;
-    GUID clsid2;
-    GUID tlid;
-    DWORD modulename_len;
-    DWORD modulename_offset;
-    DWORD progid_len;
-    DWORD progid_offset;
-    DWORD res2[7];
-    WCHAR strdata[1];
+    GUID  clsid;
+    GUID  alias;
+    GUID  clsid2;
+    GUID  tlid;
+    ULONG name_len;
+    ULONG name_offset;
+    ULONG progid_len;
+    ULONG progid_offset;
+    DWORD res2[2];
+    DWORD miscstatus;
+    DWORD miscstatuscontent;
+    DWORD miscstatusthumbnail;
+    DWORD miscstatusicon;
+    DWORD miscstatusdocprint;
 };
 
 static void test_find_com_redirection(HANDLE handle, const GUID *clsid, const GUID *tlid, ULONG exid, int line)
 {
-    struct comclass_keyed_data *comclass;
-    ACTCTX_SECTION_KEYED_DATA data;
+    struct comclassredirect_data *comclass, *comclass2;
+    ACTCTX_SECTION_KEYED_DATA data, data2;
     BOOL ret;
 
     memset(&data, 0xfe, sizeof(data));
@@ -1083,35 +1127,28 @@ static void test_find_com_redirection(HANDLE handle, const GUID *clsid, const GU
     ret = pFindActCtxSectionGuid(0, NULL,
                                     ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION,
                                     clsid, &data);
-todo_wine
     ok_(__FILE__, line)(ret, "FindActCtxSectionGuid failed: %u\n", GetLastError());
-    if(!ret)
-    {
-        skip("couldn't find guid %s\n", debugstr_guid(clsid));
-        return;
-    }
 
-    comclass = (struct comclass_keyed_data*)data.lpData;
+    comclass = (struct comclassredirect_data*)data.lpData;
 
     ok_(__FILE__, line)(data.cbSize == sizeof(data), "data.cbSize=%u\n", data.cbSize);
     ok_(__FILE__, line)(data.ulDataFormatVersion == 1, "data.ulDataFormatVersion=%u\n", data.ulDataFormatVersion);
     ok_(__FILE__, line)(data.lpData != NULL, "data.lpData == NULL\n");
-    ok_(__FILE__, line)(comclass->size == FIELD_OFFSET(struct comclass_keyed_data, strdata), "got %d for header size\n", comclass->size);
-    if (data.lpData && comclass->size == FIELD_OFFSET(struct comclass_keyed_data, strdata))
+    ok_(__FILE__, line)(comclass->size == sizeof(*comclass), "got %d for header size\n", comclass->size);
+    if (data.lpData && comclass->size == sizeof(*comclass))
     {
         static const WCHAR progid[] = {'P','r','o','g','I','d','.','P','r','o','g','I','d',0};
         WCHAR *ptr;
         ULONG len;
 
-        ok_(__FILE__, line)(comclass->reserved == 0, "got reserved as %d\n", comclass->reserved);
-        ok_(__FILE__, line)(comclass->miscmask == 0, "got miscmask as %02x\n", comclass->miscmask);
-        ok_(__FILE__, line)(comclass->unk[0] == 0, "got unk[0] as %02x\n", comclass->unk[0]);
-        ok_(__FILE__, line)(comclass->unk[1] == 0, "got unk[1] as %02x\n", comclass->unk[1]);
+        ok_(__FILE__, line)(comclass->res == 0, "got res as %d\n", comclass->res);
+        ok_(__FILE__, line)(comclass->res1[0] == 0, "got res1[0] as %02x\n", comclass->res1[0]);
+        ok_(__FILE__, line)(comclass->res1[1] == 0, "got res1[1] as %02x\n", comclass->res1[1]);
         ok_(__FILE__, line)(comclass->model == ThreadingModel_Neutral, "got model %d\n", comclass->model);
         ok_(__FILE__, line)(IsEqualGUID(&comclass->clsid, clsid), "got wrong clsid %s\n", debugstr_guid(&comclass->clsid));
         ok_(__FILE__, line)(IsEqualGUID(&comclass->clsid2, clsid), "got wrong clsid2 %s\n", debugstr_guid(&comclass->clsid2));
         ok_(__FILE__, line)(IsEqualGUID(&comclass->tlid, tlid), "got wrong tlid %s\n", debugstr_guid(&comclass->tlid));
-        ok_(__FILE__, line)(comclass->modulename_len > 0, "got modulename len %d\n", comclass->modulename_len);
+        ok_(__FILE__, line)(comclass->name_len > 0, "got modulename len %d\n", comclass->name_len);
         ok_(__FILE__, line)(comclass->progid_offset == comclass->size, "got progid offset %d\n", comclass->progid_offset);
 
         ptr = (WCHAR*)((BYTE*)comclass + comclass->size);
@@ -1124,25 +1161,57 @@ todo_wine
         ok_(__FILE__, line)(data.ulLength == len, "got wrong data length %d, expected %d\n", data.ulLength, len);
 
         /* keyed data structure doesn't include module name, it's available from section data */
-        ok_(__FILE__, line)(data.ulSectionTotalLength > comclass->modulename_offset, "got wrong offset %d\n", comclass->modulename_offset);
-    }
+        ok_(__FILE__, line)(data.ulSectionTotalLength > comclass->name_offset, "got wrong offset %d\n", comclass->name_offset);
 
+        /* check misc fields are set */
+        if (comclass->miscmask)
+        {
+            if (comclass->miscmask & MiscStatus)
+                ok_(__FILE__, line)(comclass->miscstatus != 0, "got miscstatus 0x%08x\n", comclass->miscstatus);
+            if (comclass->miscmask & MiscStatusIcon)
+                ok_(__FILE__, line)(comclass->miscstatusicon != 0, "got miscstatusicon 0x%08x\n", comclass->miscstatusicon);
+            if (comclass->miscmask & MiscStatusContent)
+                ok_(__FILE__, line)(comclass->miscstatuscontent != 0, "got miscstatuscontent 0x%08x\n", comclass->miscstatuscontent);
+            if (comclass->miscmask & MiscStatusThumbnail)
+                ok_(__FILE__, line)(comclass->miscstatusthumbnail != 0, "got miscstatusthumbnail 0x%08x\n", comclass->miscstatusthumbnail);
+            if (comclass->miscmask & MiscStatusDocPrint)
+                ok_(__FILE__, line)(comclass->miscstatusdocprint != 0, "got miscstatusdocprint 0x%08x\n", comclass->miscstatusdocprint);
+        }
+    }
+todo_wine {
     ok_(__FILE__, line)(data.lpSectionGlobalData != NULL, "data.lpSectionGlobalData == NULL\n");
     ok_(__FILE__, line)(data.ulSectionGlobalDataLength > 0, "data.ulSectionGlobalDataLength=%u\n",
        data.ulSectionGlobalDataLength);
+}
     ok_(__FILE__, line)(data.lpSectionBase != NULL, "data.lpSectionBase == NULL\n");
     ok_(__FILE__, line)(data.ulSectionTotalLength > 0, "data.ulSectionTotalLength=%u\n",
        data.ulSectionTotalLength);
     ok_(__FILE__, line)(data.hActCtx == NULL, "data.hActCtx=%p\n", data.hActCtx);
     ok_(__FILE__, line)(data.ulAssemblyRosterIndex == exid, "data.ulAssemblyRosterIndex=%u, expected %u\n",
        data.ulAssemblyRosterIndex, exid);
+
+    /* generated guid for this class works as key guid in search */
+    memset(&data2, 0xfe, sizeof(data2));
+    data2.cbSize = sizeof(data2);
+    ret = pFindActCtxSectionGuid(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_COM_SERVER_REDIRECTION,
+                                    &comclass->alias, &data2);
+    ok_(__FILE__, line)(ret, "FindActCtxSectionGuid failed: %u\n", GetLastError());
+
+    comclass2 = (struct comclassredirect_data*)data2.lpData;
+    ok_(__FILE__, line)(comclass->size == comclass2->size, "got wrong data length %d, expected %d\n", comclass2->size, comclass->size);
+    ok_(__FILE__, line)(!memcmp(comclass, comclass2, comclass->size), "got wrong data\n");
 }
 
 static void test_wndclass_section(void)
 {
+    static const WCHAR cls1W[] = {'1','.','2','.','3','.','4','!','w','n','d','C','l','a','s','s','1',0};
     ACTCTX_SECTION_KEYED_DATA data, data2;
+    struct wndclass_redirect_data *classdata;
+    struct strsection_header *section;
     ULONG_PTR cookie;
     HANDLE handle;
+    WCHAR *ptrW;
     BOOL ret;
 
     /* use two dependent manifests, each defines 2 window class redirects */
@@ -1173,10 +1242,139 @@ static void test_wndclass_section(void)
                                     wndClass3W, &data2);
     ok(ret, "got %d\n", ret);
 
+    section = (struct strsection_header*)data.lpSectionBase;
+    ok(section->count == 4, "got %d\n", section->count);
+    ok(section->size == sizeof(*section), "got %d\n", section->size);
+
     /* For both string same section is returned, meaning it's one wndclass section per context */
     ok(data.lpSectionBase == data2.lpSectionBase, "got %p, %p\n", data.lpSectionBase, data2.lpSectionBase);
     ok(data.ulSectionTotalLength == data2.ulSectionTotalLength, "got %u, %u\n", data.ulSectionTotalLength,
         data2.ulSectionTotalLength);
+
+    /* wndClass1 is versioned, wndClass3 is not */
+    classdata = (struct wndclass_redirect_data*)data.lpData;
+    ptrW = (WCHAR*)((BYTE*)data.lpData + classdata->name_offset);
+    ok(!lstrcmpW(ptrW, cls1W), "got %s\n", wine_dbgstr_w(ptrW));
+
+    classdata = (struct wndclass_redirect_data*)data2.lpData;
+    ptrW = (WCHAR*)((BYTE*)data2.lpData + classdata->name_offset);
+    ok(!lstrcmpW(ptrW, wndClass3W), "got %s\n", wine_dbgstr_w(ptrW));
+
+    ret = pDeactivateActCtx(0, cookie);
+    ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
+
+    pReleaseActCtx(handle);
+}
+
+static void test_dllredirect_section(void)
+{
+    static const WCHAR testlib1W[] = {'t','e','s','t','l','i','b','1','.','d','l','l',0};
+    static const WCHAR testlib2W[] = {'t','e','s','t','l','i','b','2','.','d','l','l',0};
+    ACTCTX_SECTION_KEYED_DATA data, data2;
+    struct strsection_header *section;
+    ULONG_PTR cookie;
+    HANDLE handle;
+    BOOL ret;
+
+    /* use two dependent manifests, 4 'files' total */
+    create_manifest_file("testdep1.manifest", manifest_wndcls1, -1, NULL, NULL);
+    create_manifest_file("testdep2.manifest", manifest_wndcls2, -1, NULL, NULL);
+    create_manifest_file("main_wndcls.manifest", manifest_wndcls_main, -1, NULL, NULL);
+
+    handle = test_create("main_wndcls.manifest");
+    DeleteFileA("testdep1.manifest");
+    DeleteFileA("testdep2.manifest");
+    DeleteFileA("main_wndcls.manifest");
+
+    ret = pActivateActCtx(handle, &cookie);
+    ok(ret, "ActivateActCtx failed: %u\n", GetLastError());
+
+    memset(&data, 0, sizeof(data));
+    memset(&data2, 0, sizeof(data2));
+    data.cbSize = sizeof(data);
+    data2.cbSize = sizeof(data2);
+
+    /* get data for two files from different assemblies */
+    ret = pFindActCtxSectionStringW(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
+                                    testlib1W, &data);
+    ok(ret, "got %d\n", ret);
+    ret = pFindActCtxSectionStringW(0, NULL,
+                                    ACTIVATION_CONTEXT_SECTION_DLL_REDIRECTION,
+                                    testlib2W, &data2);
+    ok(ret, "got %d\n", ret);
+
+    section = (struct strsection_header*)data.lpSectionBase;
+    ok(section->count == 4, "got %d\n", section->count);
+    ok(section->size == sizeof(*section), "got %d\n", section->size);
+
+    /* For both string same section is returned, meaning it's one dll redirect section per context */
+    ok(data.lpSectionBase == data2.lpSectionBase, "got %p, %p\n", data.lpSectionBase, data2.lpSectionBase);
+    ok(data.ulSectionTotalLength == data2.ulSectionTotalLength, "got %u, %u\n", data.ulSectionTotalLength,
+        data2.ulSectionTotalLength);
+
+    ret = pDeactivateActCtx(0, cookie);
+    ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
+
+    pReleaseActCtx(handle);
+}
+
+static void test_typelib_section(void)
+{
+    static const WCHAR helpW[] = {'h','e','l','p'};
+    ACTCTX_SECTION_KEYED_DATA data, data2;
+    struct guidsection_header *section;
+    struct tlibredirect_data *tlib;
+    ULONG_PTR cookie;
+    HANDLE handle;
+    BOOL ret;
+
+    /* use two dependent manifests, 4 'files' total */
+    create_manifest_file("testdep1.manifest", manifest_wndcls1, -1, NULL, NULL);
+    create_manifest_file("testdep2.manifest", manifest_wndcls2, -1, NULL, NULL);
+    create_manifest_file("main_wndcls.manifest", manifest_wndcls_main, -1, NULL, NULL);
+
+    handle = test_create("main_wndcls.manifest");
+    DeleteFileA("testdep1.manifest");
+    DeleteFileA("testdep2.manifest");
+    DeleteFileA("main_wndcls.manifest");
+
+    ret = pActivateActCtx(handle, &cookie);
+    ok(ret, "ActivateActCtx failed: %u\n", GetLastError());
+
+    memset(&data, 0, sizeof(data));
+    memset(&data2, 0, sizeof(data2));
+    data.cbSize = sizeof(data);
+    data2.cbSize = sizeof(data2);
+
+    /* get data for two typelibs from different assemblies */
+    ret = pFindActCtxSectionGuid(0, NULL,
+                                 ACTIVATION_CONTEXT_SECTION_COM_TYPE_LIBRARY_REDIRECTION,
+                                 &IID_TlibTest, &data);
+    ok(ret, "got %d\n", ret);
+
+    ret = pFindActCtxSectionGuid(0, NULL,
+                                 ACTIVATION_CONTEXT_SECTION_COM_TYPE_LIBRARY_REDIRECTION,
+                                 &IID_TlibTest4, &data2);
+    ok(ret, "got %d\n", ret);
+
+    section = (struct guidsection_header*)data.lpSectionBase;
+    ok(section->count == 4, "got %d\n", section->count);
+    ok(section->size == sizeof(*section), "got %d\n", section->size);
+
+    /* For both GUIDs same section is returned */
+    ok(data.lpSectionBase == data2.lpSectionBase, "got %p, %p\n", data.lpSectionBase, data2.lpSectionBase);
+    ok(data.ulSectionTotalLength == data2.ulSectionTotalLength, "got %u, %u\n", data.ulSectionTotalLength,
+        data2.ulSectionTotalLength);
+
+    /* test some actual data */
+    tlib = (struct tlibredirect_data*)data.lpData;
+    ok(tlib->size == sizeof(*tlib), "got %d\n", tlib->size);
+    ok(tlib->major_version == 1, "got %d\n", tlib->major_version);
+    ok(tlib->minor_version == 0, "got %d\n", tlib->minor_version);
+    ok(tlib->help_offset > 0, "got %d\n", tlib->help_offset);
+    ok(tlib->help_len == sizeof(helpW), "got %d\n", tlib->help_len);
+    ok(tlib->flags == (LIBFLAG_FHIDDEN|LIBFLAG_FCONTROL|LIBFLAG_FRESTRICTED), "got %x\n", tlib->flags);
 
     ret = pDeactivateActCtx(0, cookie);
     ok(ret, "DeactivateActCtx failed: %u\n", GetLastError());
@@ -1403,6 +1601,8 @@ static void test_actctx(void)
     }
 
     test_wndclass_section();
+    test_dllredirect_section();
+    test_typelib_section();
 }
 
 static void test_app_manifest(void)

@@ -962,10 +962,7 @@ static HRESULT texture_init(struct wined3d_texture *texture, const struct wined3
         return hr;
     }
 
-    /* Precalculated scaling for 'faked' non power of two texture coords.
-     * Second also don't use ARB_TEXTURE_RECTANGLE in case the surface format is P8 and EXT_PALETTED_TEXTURE
-     * is used in combination with texture uploads (RTL_READTEX). The reason is that EXT_PALETTED_TEXTURE
-     * doesn't work in combination with ARB_TEXTURE_RECTANGLE. */
+    /* Precalculated scaling for 'faked' non power of two texture coords. */
     if (gl_info->supported[WINED3D_GL_NORMALIZED_TEXRECT]
             && (desc->width != pow2_width || desc->height != pow2_height))
     {
@@ -977,9 +974,8 @@ static HRESULT texture_init(struct wined3d_texture *texture, const struct wined3
         texture->flags |= WINED3D_TEXTURE_COND_NP2;
         texture->min_mip_lookup = minMipLookup_noFilter;
     }
-    else if (gl_info->supported[ARB_TEXTURE_RECTANGLE] && (desc->width != pow2_width || desc->height != pow2_height)
-            && !(desc->format == WINED3DFMT_P8_UINT && gl_info->supported[EXT_PALETTED_TEXTURE]
-            && wined3d_settings.rendertargetlock_mode == RTL_READTEX))
+    else if (gl_info->supported[ARB_TEXTURE_RECTANGLE]
+            && (desc->width != pow2_width || desc->height != pow2_height))
     {
         texture->pow2_matrix[0] = (float)desc->width;
         texture->pow2_matrix[5] = (float)desc->height;
@@ -1056,64 +1052,44 @@ static HRESULT texture3d_bind(struct wined3d_texture *texture,
 /* Do not call while under the GL lock. */
 static void texture3d_preload(struct wined3d_texture *texture, enum WINED3DSRGB srgb)
 {
+    UINT sub_count = texture->level_count * texture->layer_count;
     struct wined3d_device *device = texture->resource.device;
-    struct wined3d_context *context;
-    BOOL srgb_was_toggled = FALSE;
-    unsigned int i;
+    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    struct wined3d_context *context = NULL;
+    struct gl_texture *gl_tex;
+    BOOL srgb_mode;
+    UINT i;
 
     TRACE("texture %p, srgb %#x.\n", texture, srgb);
 
-    /* TODO: Use already acquired context when possible. */
-    context = context_acquire(device, NULL);
-    if (texture->resource.bind_count > 0)
-    {
-        BOOL texture_srgb = texture->flags & WINED3D_TEXTURE_IS_SRGB;
-        BOOL sampler_srgb = texture_srgb_mode(texture, srgb);
-        srgb_was_toggled = !texture_srgb != !sampler_srgb;
+    srgb_mode = texture_srgb_mode(texture, srgb);
+    gl_tex = wined3d_texture_get_gl_texture(texture, gl_info, srgb_mode);
 
-        if (srgb_was_toggled)
-        {
-            if (sampler_srgb)
-                texture->flags |= WINED3D_TEXTURE_IS_SRGB;
-            else
-                texture->flags &= ~WINED3D_TEXTURE_IS_SRGB;
-        }
-    }
+    if (gl_tex->dirty)
+    {
+        context = context_acquire(device, NULL);
 
-    /* If the texture is marked dirty or the sRGB sampler setting has changed
-     * since the last load then reload the volumes. */
-    if (texture->texture_rgb.dirty)
-    {
-        for (i = 0; i < texture->level_count; ++i)
+        /* Reload the surfaces if the texture is marked dirty. */
+        for (i = 0; i < sub_count; ++i)
         {
-            volume_load(volume_from_resource(texture->sub_resources[i]), context, i,
-                    texture->flags & WINED3D_TEXTURE_IS_SRGB);
+            wined3d_volume_load(volume_from_resource(texture->sub_resources[i]), context,
+                    srgb_mode);
         }
-    }
-    else if (srgb_was_toggled)
-    {
-        for (i = 0; i < texture->level_count; ++i)
-        {
-            struct wined3d_volume *volume = volume_from_resource(texture->sub_resources[i]);
-            volume_add_dirty_box(volume, NULL);
-            volume_load(volume, context, i, texture->flags & WINED3D_TEXTURE_IS_SRGB);
-        }
+
+        context_release(context);
     }
     else
     {
         TRACE("Texture %p not dirty, nothing to do.\n", texture);
     }
 
-    context_release(context);
-
-    /* No longer dirty */
-    texture->texture_rgb.dirty = FALSE;
+    /* No longer dirty. */
+    gl_tex->dirty = FALSE;
 }
 
 static void texture3d_sub_resource_add_dirty_region(struct wined3d_resource *sub_resource,
         const struct wined3d_box *dirty_region)
 {
-    volume_add_dirty_box(volume_from_resource(sub_resource), dirty_region);
 }
 
 static void texture3d_sub_resource_cleanup(struct wined3d_resource *sub_resource)
@@ -1252,7 +1228,7 @@ static HRESULT volumetexture_init(struct wined3d_texture *texture, const struct 
 
         /* Create the volume. */
         hr = device->device_parent->ops->create_volume(device->device_parent, parent,
-                tmp_w, tmp_h, tmp_d, desc->format, desc->pool, desc->usage, &volume);
+                tmp_w, tmp_h, tmp_d, i, desc->format, desc->pool, desc->usage, &volume);
         if (FAILED(hr))
         {
             ERR("Creating a volume for the volume texture failed, hr %#x.\n", hr);

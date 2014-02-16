@@ -21,6 +21,7 @@
 
 #include "windef.h"
 #include "ole2.h"
+#include "olectl.h"
 
 #include "oledb.h"
 #include "oledberr.h"
@@ -35,6 +36,8 @@ typedef struct
 {
     IConnectionPoint IConnectionPoint_iface;
     rowpos *container;
+    IRowPositionChange **sinks;
+    DWORD sinks_size;
 } rowpos_cp;
 
 struct rowpos
@@ -44,8 +47,15 @@ struct rowpos
     LONG ref;
 
     IRowset *rowset;
+    IChapteredRowset *chrst;
+    HROW row;
+    HCHAPTER chapter;
+    DBPOSITIONFLAGS flags;
+    BOOL cleared;
     rowpos_cp cp;
 };
+
+static void rowposchange_cp_destroy(rowpos_cp*);
 
 static inline rowpos *impl_from_IRowPosition(IRowPosition *iface)
 {
@@ -60,6 +70,38 @@ static inline rowpos *impl_from_IConnectionPointContainer(IConnectionPointContai
 static inline rowpos_cp *impl_from_IConnectionPoint(IConnectionPoint *iface)
 {
     return CONTAINING_RECORD(iface, rowpos_cp, IConnectionPoint_iface);
+}
+
+static HRESULT rowpos_fireevent(rowpos *rp, DBREASON reason, DBEVENTPHASE phase)
+{
+    BOOL cant_deny = phase == DBEVENTPHASE_FAILEDTODO || phase == DBEVENTPHASE_SYNCHAFTER;
+    HRESULT hr = S_OK;
+    DWORD i;
+
+    for (i = 0; i < rp->cp.sinks_size; i++)
+        if (rp->cp.sinks[i])
+        {
+            hr = IRowPositionChange_OnRowPositionChange(rp->cp.sinks[i], reason, phase, cant_deny);
+            if (phase == DBEVENTPHASE_FAILEDTODO) return DB_E_CANCELED;
+            if (hr != S_OK) return hr;
+        }
+
+    return hr;
+}
+
+static void rowpos_clearposition(rowpos *rp)
+{
+    if (!rp->cleared)
+    {
+        if (rp->rowset)
+            IRowset_ReleaseRows(rp->rowset, 1, &rp->row, NULL, NULL, NULL);
+        if (rp->chrst)
+            IChapteredRowset_ReleaseChapter(rp->chrst, rp->chapter, NULL);
+    }
+
+    rp->row = DB_NULL_HROW;
+    rp->chapter = DB_NULL_HCHAPTER;
+    rp->flags = DBPOSITION_NOROW;
 }
 
 static HRESULT WINAPI rowpos_QueryInterface(IRowPosition* iface, REFIID riid, void **obj)
@@ -107,6 +149,8 @@ static ULONG WINAPI rowpos_Release(IRowPosition* iface)
     if (ref == 0)
     {
         if (This->rowset) IRowset_Release(This->rowset);
+        if (This->chrst) IChapteredRowset_Release(This->chrst);
+        rowposchange_cp_destroy(&This->cp);
         heap_free(This);
     }
 
@@ -116,42 +160,111 @@ static ULONG WINAPI rowpos_Release(IRowPosition* iface)
 static HRESULT WINAPI rowpos_ClearRowPosition(IRowPosition* iface)
 {
     rowpos *This = impl_from_IRowPosition(iface);
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p)\n", This);
+
+    if (!This->rowset) return E_UNEXPECTED;
+
+    hr = rowpos_fireevent(This, DBREASON_ROWPOSITION_CLEARED, DBEVENTPHASE_OKTODO);
+    if (hr != S_OK)
+        return rowpos_fireevent(This, DBREASON_ROWPOSITION_CLEARED, DBEVENTPHASE_FAILEDTODO);
+
+    hr = rowpos_fireevent(This, DBREASON_ROWPOSITION_CLEARED, DBEVENTPHASE_ABOUTTODO);
+    if (hr != S_OK)
+        return rowpos_fireevent(This, DBREASON_ROWPOSITION_CLEARED, DBEVENTPHASE_FAILEDTODO);
+
+    rowpos_clearposition(This);
+    This->cleared = TRUE;
+    return S_OK;
 }
 
 static HRESULT WINAPI rowpos_GetRowPosition(IRowPosition *iface, HCHAPTER *chapter,
     HROW *row, DBPOSITIONFLAGS *flags)
 {
     rowpos *This = impl_from_IRowPosition(iface);
-    FIXME("(%p)->(%p %p %p): stub\n", This, chapter, row, flags);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p %p %p)\n", This, chapter, row, flags);
+
+    *chapter = This->chapter;
+    *row = This->row;
+    *flags = This->flags;
+
+    if (!This->rowset) return E_UNEXPECTED;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI rowpos_GetRowset(IRowPosition *iface, REFIID riid, IUnknown **rowset)
 {
     rowpos *This = impl_from_IRowPosition(iface);
-    FIXME("(%p)->(%s %p): stub\n", This, debugstr_guid(riid), rowset);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), rowset);
+
+    if (!This->rowset) return E_UNEXPECTED;
+    return IRowset_QueryInterface(This->rowset, riid, (void**)rowset);
 }
 
 static HRESULT WINAPI rowpos_Initialize(IRowPosition *iface, IUnknown *rowset)
 {
     rowpos *This = impl_from_IRowPosition(iface);
+    HRESULT hr;
 
     TRACE("(%p)->(%p)\n", This, rowset);
 
     if (This->rowset) return DB_E_ALREADYINITIALIZED;
 
-    return IUnknown_QueryInterface(rowset, &IID_IRowset, (void**)&This->rowset);
+    hr = IUnknown_QueryInterface(rowset, &IID_IRowset, (void**)&This->rowset);
+    if (FAILED(hr)) return hr;
+
+    /* this one is optional */
+    IUnknown_QueryInterface(rowset, &IID_IChapteredRowset, (void**)&This->chrst);
+    return S_OK;
 }
 
 static HRESULT WINAPI rowpos_SetRowPosition(IRowPosition *iface, HCHAPTER chapter,
     HROW row, DBPOSITIONFLAGS flags)
 {
     rowpos *This = impl_from_IRowPosition(iface);
-    FIXME("(%p)->(%lx %lx %d): stub\n", This, chapter, row, flags);
-    return E_NOTIMPL;
+    DBREASON reason;
+    HRESULT hr;
+
+    TRACE("(%p)->(%lx %lx %d)\n", This, chapter, row, flags);
+
+    if (!This->cleared) return E_UNEXPECTED;
+
+    hr = IRowset_AddRefRows(This->rowset, 1, &row, NULL, NULL);
+    if (FAILED(hr)) return hr;
+
+    if (This->chrst)
+    {
+        hr = IChapteredRowset_AddRefChapter(This->chrst, chapter, NULL);
+        if (FAILED(hr))
+        {
+            IRowset_ReleaseRows(This->rowset, 1, &row, NULL, NULL, NULL);
+            return hr;
+        }
+    }
+
+    reason = This->chrst ? DBREASON_ROWPOSITION_CHAPTERCHANGED : DBREASON_ROWPOSITION_CHANGED;
+    hr = rowpos_fireevent(This, reason, DBEVENTPHASE_SYNCHAFTER);
+    if (hr != S_OK)
+    {
+        IRowset_ReleaseRows(This->rowset, 1, &row, NULL, NULL, NULL);
+        if (This->chrst)
+            IChapteredRowset_ReleaseChapter(This->chrst, chapter, NULL);
+        return rowpos_fireevent(This, reason, DBEVENTPHASE_FAILEDTODO);
+    }
+    else
+        rowpos_fireevent(This, reason, DBEVENTPHASE_DIDEVENT);
+
+    /* previously set chapter and row are released with ClearRowPosition() */
+    This->chapter = chapter;
+    This->row = row;
+    This->flags = flags;
+    This->cleared = FALSE;
+
+    return S_OK;
 }
 
 static const struct IRowPositionVtbl rowpos_vtbl =
@@ -194,8 +307,20 @@ static HRESULT WINAPI cpc_EnumConnectionPoints(IConnectionPointContainer *iface,
 static HRESULT WINAPI cpc_FindConnectionPoint(IConnectionPointContainer *iface, REFIID riid, IConnectionPoint **point)
 {
     rowpos *This = impl_from_IConnectionPointContainer(iface);
-    FIXME("(%p)->(%s %p): stub\n", This, debugstr_guid(riid), point);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), point);
+
+    if (IsEqualIID(riid, &IID_IRowPositionChange))
+    {
+        *point = &This->cp.IConnectionPoint_iface;
+        IConnectionPoint_AddRef(*point);
+        return S_OK;
+    }
+    else
+    {
+        FIXME("unsupported riid %s\n", debugstr_guid(riid));
+        return CONNECT_E_NOCONNECTION;
+    }
 }
 
 static const struct IConnectionPointContainerVtbl rowpos_cpc_vtbl =
@@ -250,18 +375,64 @@ static HRESULT WINAPI rowpos_cp_GetConnectionPointContainer(IConnectionPoint *if
     return S_OK;
 }
 
-static HRESULT WINAPI rowpos_cp_Advise(IConnectionPoint *iface, IUnknown *sink, DWORD *cookie)
+static HRESULT WINAPI rowpos_cp_Advise(IConnectionPoint *iface, IUnknown *unksink, DWORD *cookie)
 {
     rowpos_cp *This = impl_from_IConnectionPoint(iface);
-    FIXME("(%p)->(%p %p): stub\n", This, sink, cookie);
-    return E_NOTIMPL;
+    IRowPositionChange *sink;
+    HRESULT hr;
+    DWORD i;
+
+    TRACE("(%p)->(%p %p)\n", This, unksink, cookie);
+
+    if (!cookie) return E_POINTER;
+
+    hr = IUnknown_QueryInterface(unksink, &IID_IRowPositionChange, (void**)&sink);
+    if (FAILED(hr))
+    {
+        FIXME("sink doesn't support IRowPositionChange\n");
+        return CONNECT_E_CANNOTCONNECT;
+    }
+
+    if (This->sinks)
+    {
+        for (i = 0; i < This->sinks_size; i++)
+        {
+            if (!This->sinks[i])
+                break;
+        }
+
+        if (i == This->sinks_size)
+        {
+            This->sinks_size *= 2;
+            This->sinks = heap_realloc_zero(This->sinks, This->sinks_size*sizeof(*This->sinks));
+        }
+    }
+    else
+    {
+        This->sinks_size = 10;
+        This->sinks = heap_alloc_zero(This->sinks_size*sizeof(*This->sinks));
+        i = 0;
+    }
+
+    This->sinks[i] = sink;
+    if (cookie) *cookie = i + 1;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI rowpos_cp_Unadvise(IConnectionPoint *iface, DWORD cookie)
 {
     rowpos_cp *This = impl_from_IConnectionPoint(iface);
-    FIXME("(%p)->(%d): stub\n", This, cookie);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d)\n", This, cookie);
+
+    if (!cookie || cookie > This->sinks_size || !This->sinks[cookie-1])
+        return CONNECT_E_NOCONNECTION;
+
+    IRowPositionChange_Release(This->sinks[cookie-1]);
+    This->sinks[cookie-1] = NULL;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI rowpos_cp_EnumConnections(IConnectionPoint *iface, IEnumConnections **enum_c)
@@ -287,6 +458,19 @@ static void rowposchange_cp_init(rowpos_cp *cp, rowpos *container)
 {
     cp->IConnectionPoint_iface.lpVtbl = &rowpos_cp_vtbl;
     cp->container = container;
+    cp->sinks = NULL;
+    cp->sinks_size = 0;
+}
+
+void rowposchange_cp_destroy(rowpos_cp *cp)
+{
+    DWORD i;
+    for (i = 0; i < cp->sinks_size; i++)
+    {
+        if (cp->sinks[i])
+            IRowPositionChange_Release(cp->sinks[i]);
+    }
+    heap_free(cp->sinks);
 }
 
 HRESULT create_oledb_rowpos(IUnknown *outer, void **obj)
@@ -306,6 +490,9 @@ HRESULT create_oledb_rowpos(IUnknown *outer, void **obj)
     This->IConnectionPointContainer_iface.lpVtbl = &rowpos_cpc_vtbl;
     This->ref = 1;
     This->rowset = NULL;
+    This->chrst = NULL;
+    This->cleared = FALSE;
+    rowpos_clearposition(This);
     rowposchange_cp_init(&This->cp, This);
 
     *obj = &This->IRowPosition_iface;
