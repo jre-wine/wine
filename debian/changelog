@@ -1,3 +1,15 @@
+wine-unstable (1.7.11-1) unstable; urgency=medium
+
+  * New upstream release:
+    - Uniscribe support in the RichEdit control.
+    - Support for condition variables and Slim Reader/Writer locks.
+    - More D3D command stream preparation work.
+    - Optional Start Menu in desktop mode.
+    - Improved support for vertical fonts metrics.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 16 Feb 2014 01:27:05 +0000
+
 wine-unstable (1.7.10-1) unstable; urgency=medium
 
   * New upstream release:
