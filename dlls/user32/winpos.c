@@ -2625,6 +2625,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     BOOL    moved = FALSE;
     DWORD     dwPoint = GetMessagePos ();
     BOOL DragFullWindows = TRUE;
+    HMONITOR mon = 0;
 
     if (IsZoomed(hwnd) || !IsWindowVisible(hwnd)) return;
 
@@ -2673,6 +2674,7 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
     {
         parent = 0;
         mouseRect = get_virtual_screen_rect();
+        mon = MonitorFromPoint( pt, MONITOR_DEFAULTTONEAREST );
     }
 
     if (ON_LEFT_BORDER(hittest))
@@ -2745,9 +2747,27 @@ void WINPOS_SysCommandSizeMove( HWND hwnd, WPARAM wParam )
         }
 
         pt.x = max( pt.x, mouseRect.left );
-        pt.x = min( pt.x, mouseRect.right );
+        pt.x = min( pt.x, mouseRect.right - 1 );
         pt.y = max( pt.y, mouseRect.top );
-        pt.y = min( pt.y, mouseRect.bottom );
+        pt.y = min( pt.y, mouseRect.bottom - 1 );
+
+        if (!parent)
+        {
+            HMONITOR newmon;
+            MONITORINFO info;
+
+            if ((newmon = MonitorFromPoint( pt, MONITOR_DEFAULTTONULL )))
+                mon = newmon;
+
+            info.cbSize = sizeof(info);
+            if (mon && GetMonitorInfoW( mon, &info ))
+            {
+                pt.x = max( pt.x, info.rcWork.left );
+                pt.x = min( pt.x, info.rcWork.right - 1 );
+                pt.y = max( pt.y, info.rcWork.top );
+                pt.y = min( pt.y, info.rcWork.bottom - 1 );
+            }
+        }
 
         dx = pt.x - capturePoint.x;
         dy = pt.y - capturePoint.y;

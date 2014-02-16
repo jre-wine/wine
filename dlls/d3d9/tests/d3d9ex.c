@@ -535,15 +535,21 @@ out:
     IDirect3D9Ex_Release(d3d9ex);
 }
 
-static void test_texture_sysmem_create(void)
+static void test_user_memory(void)
 {
     IDirect3DDevice9Ex *device;
     IDirect3DTexture9 *texture;
+    IDirect3DCubeTexture9 *cube_texture;
+    IDirect3DVolumeTexture9 *volume_texture;
+    IDirect3DVertexBuffer9 *vertex_buffer;
+    IDirect3DIndexBuffer9 *index_buffer;
+    IDirect3DSurface9 *surface;
     D3DLOCKED_RECT locked_rect;
     UINT refcount;
     HWND window;
     HRESULT hr;
     void *mem;
+    D3DCAPS9 caps;
 
     window = create_window();
     if (!(device = create_device(window, window, TRUE)))
@@ -551,6 +557,9 @@ static void test_texture_sysmem_create(void)
         skip("Failed to create a D3D device, skipping tests.\n");
         goto done;
     }
+
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
 
     mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 128 * 128 * 4);
     hr = IDirect3DDevice9Ex_CreateTexture(device, 128, 128, 0, 0, D3DFMT_A8R8G8B8,
@@ -561,6 +570,9 @@ static void test_texture_sysmem_create(void)
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
     hr = IDirect3DDevice9Ex_CreateTexture(device, 128, 128, 2, 0, D3DFMT_A8R8G8B8,
             D3DPOOL_SYSTEMMEM, &texture, &mem);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreateTexture(device, 128, 128, 1, 0, D3DFMT_A8R8G8B8,
+            D3DPOOL_SCRATCH, &texture, &mem);
     ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
 
     hr = IDirect3DDevice9Ex_CreateTexture(device, 128, 128, 1, 0, D3DFMT_A8R8G8B8,
@@ -573,8 +585,58 @@ static void test_texture_sysmem_create(void)
     hr = IDirect3DTexture9_UnlockRect(texture, 0);
     ok(SUCCEEDED(hr), "Failed to unlock texture, hr %#x.\n", hr);
     IDirect3DTexture9_Release(texture);
-    HeapFree(GetProcessHeap(), 0, mem);
 
+    if (caps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP)
+    {
+        hr = IDirect3DDevice9Ex_CreateCubeTexture(device, 2, 1, 0, D3DFMT_A8R8G8B8,
+                D3DPOOL_SYSTEMMEM, &cube_texture, &mem);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+    if (caps.TextureCaps & D3DPTEXTURECAPS_VOLUMEMAP)
+    {
+        hr = IDirect3DDevice9Ex_CreateVolumeTexture(device, 2, 2, 2, 1, 0, D3DFMT_A8R8G8B8,
+                D3DPOOL_SYSTEMMEM, &volume_texture, &mem);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+
+    hr = IDirect3DDevice9Ex_CreateIndexBuffer(device, 16, 0, D3DFMT_INDEX32, D3DPOOL_SYSTEMMEM,
+            &index_buffer, &mem);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreateVertexBuffer(device, 16, 0, 0, D3DPOOL_SYSTEMMEM,
+            &vertex_buffer, &mem);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurface(device, 128, 128, D3DFMT_A8R8G8B8,
+            D3DPOOL_SYSTEMMEM, &surface, &mem);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, 0);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+    ok(locked_rect.Pitch == 128 * 4, "Got unexpected pitch %d.\n", locked_rect.Pitch);
+    ok(locked_rect.pBits == mem, "Got unexpected pBits %p, expected %p.\n", locked_rect.pBits, mem);
+    hr = IDirect3DSurface9_UnlockRect(surface);
+    IDirect3DSurface9_Release(surface);
+
+    hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurfaceEx(device, 128, 128, D3DFMT_A8R8G8B8,
+            D3DPOOL_SYSTEMMEM, &surface, &mem, 0);
+    todo_wine ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IDirect3DSurface9_LockRect(surface, &locked_rect, NULL, 0);
+        ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+        ok(locked_rect.Pitch == 128 * 4, "Got unexpected pitch %d.\n", locked_rect.Pitch);
+        ok(locked_rect.pBits == mem, "Got unexpected pBits %p, expected %p.\n", locked_rect.pBits, mem);
+        hr = IDirect3DSurface9_UnlockRect(surface);
+        IDirect3DSurface9_Release(surface);
+    }
+
+    hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurface(device, 128, 128, D3DFMT_A8R8G8B8,
+            D3DPOOL_SCRATCH, &surface, &mem);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurfaceEx(device, 128, 128, D3DFMT_A8R8G8B8,
+            D3DPOOL_SCRATCH, &surface, &mem, 0);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    HeapFree(GetProcessHeap(), 0, mem);
     refcount = IDirect3DDevice9Ex_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
 
@@ -1089,6 +1151,50 @@ done:
     DestroyWindow(window);
 }
 
+static void test_user_memory_getdc(void)
+{
+    IDirect3DDevice9Ex *device;
+    HWND window;
+    HRESULT hr;
+    ULONG ref;
+    IDirect3DSurface9 *surface;
+    DWORD *data;
+    HDC dc;
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    if (!(device = create_device(window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    data = HeapAlloc(GetProcessHeap(), 0, sizeof(*data) * 16 * 16);
+    memset(data, 0xaa, sizeof(*data) * 16 * 16);
+    hr = IDirect3DDevice9Ex_CreateOffscreenPlainSurface(device, 16, 16,
+            D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surface, (HANDLE *)&data);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
+
+    hr = IDirect3DSurface9_GetDC(surface, &dc);
+    ok(SUCCEEDED(hr), "Failed to get dc, hr %#x.\n", hr);
+    BitBlt(dc, 0, 0, 16, 8, NULL, 0, 0, WHITENESS);
+    BitBlt(dc, 0, 8, 16, 8, NULL, 0, 0, BLACKNESS);
+    hr = IDirect3DSurface9_ReleaseDC(surface, dc);
+    ok(SUCCEEDED(hr), "Failed to release dc, hr %#x.\n", hr);
+
+    ok(data[0] == 0xffffffff, "Expected color 0xffffffff, got %#x.\n", data[0]);
+    ok(data[8 * 16] == 0x00000000, "Expected color 0x00000000, got %#x.\n", data[8 * 16]);
+
+    IDirect3DSurface9_Release(surface);
+    HeapFree(GetProcessHeap(), 0, data);
+
+    ref = IDirect3DDevice9_Release(device);
+    ok(ref == 0, "The device was not properly freed: refcount %u.\n", ref);
+
+done:
+    DestroyWindow(window);
+}
+
 START_TEST(d3d9ex)
 {
     d3d9_handle = LoadLibraryA("d3d9.dll");
@@ -1114,8 +1220,9 @@ START_TEST(d3d9ex)
     test_swapchain_get_displaymode_ex();
     test_get_adapter_luid();
     test_get_adapter_displaymode_ex();
-    test_texture_sysmem_create();
+    test_user_memory();
     test_reset();
     test_reset_resources();
     test_vidmem_accounting();
+    test_user_memory_getdc();
 }
