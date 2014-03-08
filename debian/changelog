@@ -1,3 +1,11 @@
+wine (1.6.2-8) UNRELEASED; urgency=medium
+
+  * Use a .maintscript file to handle symlink-to-folder transitions in
+    full, and specify 1.6.2-8~ as the version to update from (closes:
+    #736296); thanks to Andreas Beckmann for explaining everything.
+
+ -- Stephen Kitt <skitt@debian.org>  Mon, 03 Mar 2014 08:34:33 +0100
+
 wine (1.6.2-7) unstable; urgency=medium
 
   * Fix escaping in wine-wrapper (closes: #736986).
