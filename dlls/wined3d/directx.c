@@ -52,6 +52,7 @@ enum wined3d_display_driver
     DRIVER_NVIDIA_GEFORCE2MX,
     DRIVER_NVIDIA_GEFORCEFX,
     DRIVER_NVIDIA_GEFORCE6,
+    DRIVER_VMWARE,
     DRIVER_UNKNOWN
 };
 
@@ -68,7 +69,6 @@ enum wined3d_gl_vendor
     GL_VENDOR_UNKNOWN,
     GL_VENDOR_APPLE,
     GL_VENDOR_FGLRX,
-    GL_VENDOR_INTEL,
     GL_VENDOR_MESA,
     GL_VENDOR_NVIDIA,
 };
@@ -1168,6 +1168,9 @@ static const struct driver_version_information driver_version_table[] =
     {DRIVER_NVIDIA_GEFORCEFX,   DRIVER_MODEL_NT5X,  "nv4_disp.dll", 14, 11, 7516},
     {DRIVER_NVIDIA_GEFORCE6,    DRIVER_MODEL_NT5X,  "nv4_disp.dll", 15, 12, 6658},
     {DRIVER_NVIDIA_GEFORCE6,    DRIVER_MODEL_NT6X,  "nvd3dum.dll",  15, 12, 6658},
+
+    /* VMware */
+    {DRIVER_VMWARE,             DRIVER_MODEL_NT5X,  "vm3dum.dll",   14, 1,  1134},
 };
 
 struct gpu_description
@@ -1296,6 +1299,10 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD7700,         "AMD Radeon HD 7700 Series",        DRIVER_AMD_R600,         1024},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD7800,         "AMD Radeon HD 7800 Series",        DRIVER_AMD_R600,         2048},
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD7900,         "AMD Radeon HD 7900 Series",        DRIVER_AMD_R600,         2048},
+
+    /* VMware */
+    {HW_VENDOR_VMWARE,     CARD_VMWARE_SVGA3D,             "VMware SVGA 3D (Microsoft Corporation - WDDM)",             DRIVER_VMWARE,        1024},
+
     /* Intel cards */
     {HW_VENDOR_INTEL,      CARD_INTEL_830M,                "Intel(R) 82830M Graphics Controller",                       DRIVER_INTEL_GMA800,  32 },
     {HW_VENDOR_INTEL,      CARD_INTEL_855GM,               "Intel(R) 82852/82855 GM/GME Graphics Controller",           DRIVER_INTEL_GMA800,  32 },
@@ -1569,20 +1576,16 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(const struct wined3d_gl_in
     if (strstr(gl_vendor_string, "ATI"))
         return GL_VENDOR_FGLRX;
 
-    if (strstr(gl_vendor_string, "Intel(R)")
-            /* Intel switched from Intel(R) to Intel® recently, so just match Intel. */
-            || strstr(gl_renderer, "Intel")
-            || strstr(gl_vendor_string, "Intel Inc."))
-        return GL_VENDOR_INTEL;
-
     if (strstr(gl_vendor_string, "Mesa")
             || strstr(gl_vendor_string, "X.Org")
             || strstr(gl_vendor_string, "Advanced Micro Devices, Inc.")
             || strstr(gl_vendor_string, "DRI R300 Project")
             || strstr(gl_vendor_string, "Tungsten Graphics, Inc")
             || strstr(gl_vendor_string, "VMware, Inc.")
+            || strstr(gl_vendor_string, "Intel")
             || strstr(gl_renderer, "Mesa")
-            || strstr(gl_renderer, "Gallium"))
+            || strstr(gl_renderer, "Gallium")
+            || strstr(gl_renderer, "Intel"))
         return GL_VENDOR_MESA;
 
     FIXME("Received unrecognized GL_VENDOR %s. Returning GL_VENDOR_UNKNOWN.\n",
@@ -1615,6 +1618,9 @@ static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_s
             || strstr(gl_renderer, "i915")
             || strstr(gl_vendor_string, "Intel Inc."))
         return HW_VENDOR_INTEL;
+
+    if (strstr(gl_renderer, "SVGA3D"))
+        return HW_VENDOR_VMWARE;
 
     if (strstr(gl_vendor_string, "Mesa")
             || strstr(gl_vendor_string, "Brian Paul")
@@ -2238,29 +2244,40 @@ static enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_i
     return PCI_DEVICE_NONE;
 }
 
+static enum wined3d_pci_device select_card_vmware(const struct wined3d_gl_info *gl_info, const char *gl_renderer)
+{
+    if (strstr(gl_renderer, "SVGA3D"))
+        return CARD_VMWARE_SVGA3D;
+
+    return PCI_DEVICE_NONE;
+}
+
 static const struct gl_vendor_selection
 {
     enum wined3d_gl_vendor gl_vendor;
     const char *description;        /* Description of the card selector i.e. Apple OS/X Intel */
     enum wined3d_pci_device (*select_card)(const struct wined3d_gl_info *gl_info, const char *gl_renderer);
 }
-nvidia_gl_vendor_table[] =
-{
-    {GL_VENDOR_NVIDIA, "Nvidia binary driver", select_card_nvidia_binary},
-    {GL_VENDOR_APPLE, "Apple OSX NVidia binary driver", select_card_nvidia_binary},
-    {GL_VENDOR_MESA, "Mesa Nouveau driver", select_card_nvidia_mesa},
-},
 amd_gl_vendor_table[] =
 {
-    {GL_VENDOR_APPLE, "Apple OSX AMD/ATI binary driver", select_card_amd_binary},
-    {GL_VENDOR_FGLRX, "AMD/ATI binary driver", select_card_amd_binary},
-    {GL_VENDOR_MESA, "Mesa AMD/ATI driver", select_card_amd_mesa},
+    {GL_VENDOR_APPLE,   "Apple OSX AMD/ATI binary driver",  select_card_amd_binary},
+    {GL_VENDOR_FGLRX,   "AMD/ATI binary driver",            select_card_amd_binary},
+    {GL_VENDOR_MESA,    "Mesa AMD/ATI driver",              select_card_amd_mesa},
+},
+nvidia_gl_vendor_table[] =
+{
+    {GL_VENDOR_APPLE,   "Apple OSX NVidia binary driver",   select_card_nvidia_binary},
+    {GL_VENDOR_MESA,    "Mesa Nouveau driver",              select_card_nvidia_mesa},
+    {GL_VENDOR_NVIDIA,  "Nvidia binary driver",             select_card_nvidia_binary},
+},
+vmware_gl_vendor_table[] =
+{
+    {GL_VENDOR_MESA,    "VMware driver",                    select_card_vmware},
 },
 intel_gl_vendor_table[] =
 {
-    {GL_VENDOR_APPLE, "Apple OSX Intel binary driver", select_card_intel},
-    {GL_VENDOR_INTEL, "Mesa Intel driver", select_card_intel},
-    {GL_VENDOR_MESA, "Mesa Intel driver", select_card_intel},
+    {GL_VENDOR_APPLE,   "Apple OSX Intel binary driver",    select_card_intel},
+    {GL_VENDOR_MESA,    "Mesa Intel driver",                select_card_intel},
 };
 
 static enum wined3d_pci_device select_card_fallback_nvidia(const struct wined3d_gl_info *gl_info)
@@ -2333,14 +2350,17 @@ static const struct
 }
 card_vendor_table[] =
 {
-    {HW_VENDOR_NVIDIA,  "Nvidia",  nvidia_gl_vendor_table,
-            sizeof(nvidia_gl_vendor_table) / sizeof(nvidia_gl_vendor_table[0]),
-            select_card_fallback_nvidia},
-    {HW_VENDOR_AMD,     "AMD",     amd_gl_vendor_table,
-            sizeof(amd_gl_vendor_table) / sizeof(amd_gl_vendor_table[0]),
+    {HW_VENDOR_AMD,         "AMD",      amd_gl_vendor_table,
+            sizeof(amd_gl_vendor_table) / sizeof(*amd_gl_vendor_table),
             select_card_fallback_amd},
-    {HW_VENDOR_INTEL,   "Intel",   intel_gl_vendor_table,
-            sizeof(intel_gl_vendor_table) / sizeof(intel_gl_vendor_table[0]),
+    {HW_VENDOR_NVIDIA,      "Nvidia",   nvidia_gl_vendor_table,
+            sizeof(nvidia_gl_vendor_table) / sizeof(*nvidia_gl_vendor_table),
+            select_card_fallback_nvidia},
+    {HW_VENDOR_VMWARE,      "VMware",   vmware_gl_vendor_table,
+            sizeof(vmware_gl_vendor_table) / sizeof(*vmware_gl_vendor_table),
+            select_card_fallback_amd},
+    {HW_VENDOR_INTEL,       "Intel",    intel_gl_vendor_table,
+            sizeof(intel_gl_vendor_table) / sizeof(*intel_gl_vendor_table),
             select_card_fallback_intel},
 };
 

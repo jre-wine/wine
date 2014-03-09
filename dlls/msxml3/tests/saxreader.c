@@ -1092,6 +1092,7 @@ static HRESULT WINAPI contentHandler_putDocumentLocator(
         ISAXLocator *pLocator)
 {
     struct call_entry call;
+    IUnknown *unk;
     HRESULT hr;
 
     locator = pLocator;
@@ -1099,6 +1100,9 @@ static HRESULT WINAPI contentHandler_putDocumentLocator(
     init_call_entry(locator, &call);
     call.id = CH_PUTDOCUMENTLOCATOR;
     add_call(sequences, CONTENT_HANDLER_INDEX, &call);
+
+    hr = ISAXLocator_QueryInterface(pLocator, &IID_IVBSAXLocator, (void**)&unk);
+    EXPECT_HR(hr, E_NOINTERFACE);
 
     if (msxml_version >= 6) {
         ISAXAttributes *attr, *attr1;
@@ -1112,6 +1116,12 @@ static HRESULT WINAPI contentHandler_putDocumentLocator(
         EXPECT_HR(hr, S_OK);
         EXPECT_REF(pLocator, 3);
         ok(attr == attr1, "got %p, %p\n", attr, attr1);
+
+        hr = ISAXAttributes_QueryInterface(attr, &IID_IVBSAXAttributes, (void**)&unk);
+        EXPECT_HR(hr, E_NOINTERFACE);
+
+        hr = ISAXLocator_QueryInterface(pLocator, &IID_IVBSAXAttributes, (void**)&unk);
+        EXPECT_HR(hr, E_NOINTERFACE);
 
         hr = ISAXAttributes_QueryInterface(attr, &IID_IMXAttributes, (void**)&mxattr);
         EXPECT_HR(hr, E_NOINTERFACE);
@@ -2512,6 +2522,7 @@ static void test_saxreader_properties(void)
     ISAXXMLReader *reader;
     HRESULT hr;
     VARIANT v;
+    BSTR str;
 
     hr = CoCreateInstance(&CLSID_SAXXMLReader, NULL, CLSCTX_INPROC_SERVER,
             &IID_ISAXXMLReader, (void**)&reader);
@@ -2522,6 +2533,7 @@ static void test_saxreader_properties(void)
 
     while (ptr->prop_name)
     {
+        VARIANT varref;
         LONG ref;
 
         init_saxlexicalhandler(&lexicalhandler, S_OK);
@@ -2534,12 +2546,43 @@ static void test_saxreader_properties(void)
         ok(V_VT(&v) == VT_UNKNOWN, "got %d\n", V_VT(&v));
         ok(V_UNKNOWN(&v) == NULL, "got %p\n", V_UNKNOWN(&v));
 
+        /* VT_UNKNOWN */
         V_VT(&v) = VT_UNKNOWN;
         V_UNKNOWN(&v) = ptr->iface;
         ref = get_refcount(ptr->iface);
         hr = ISAXXMLReader_putProperty(reader, _bstr_(ptr->prop_name), v);
         EXPECT_HR(hr, S_OK);
         ok(ref < get_refcount(ptr->iface), "expected inreased refcount\n");
+
+        /* VT_DISPATCH */
+        V_VT(&v) = VT_DISPATCH;
+        V_UNKNOWN(&v) = ptr->iface;
+        ref = get_refcount(ptr->iface);
+        hr = ISAXXMLReader_putProperty(reader, _bstr_(ptr->prop_name), v);
+        EXPECT_HR(hr, S_OK);
+        ok(ref == get_refcount(ptr->iface), "got wrong refcount %d, expected %d\n", get_refcount(ptr->iface), ref);
+
+        /* VT_VARIANT|VT_BYREF with VT_UNKNOWN in referenced variant */
+        V_VT(&varref) = VT_UNKNOWN;
+        V_UNKNOWN(&varref) = ptr->iface;
+
+        V_VT(&v) = VT_VARIANT|VT_BYREF;
+        V_VARIANTREF(&v) = &varref;
+        ref = get_refcount(ptr->iface);
+        hr = ISAXXMLReader_putProperty(reader, _bstr_(ptr->prop_name), v);
+        EXPECT_HR(hr, S_OK);
+        ok(ref == get_refcount(ptr->iface), "got wrong refcount %d, expected %d\n", get_refcount(ptr->iface), ref);
+
+        /* VT_VARIANT|VT_BYREF with VT_DISPATCH in referenced variant */
+        V_VT(&varref) = VT_DISPATCH;
+        V_UNKNOWN(&varref) = ptr->iface;
+
+        V_VT(&v) = VT_VARIANT|VT_BYREF;
+        V_VARIANTREF(&v) = &varref;
+        ref = get_refcount(ptr->iface);
+        hr = ISAXXMLReader_putProperty(reader, _bstr_(ptr->prop_name), v);
+        EXPECT_HR(hr, S_OK);
+        ok(ref == get_refcount(ptr->iface), "got wrong refcount %d, expected %d\n", get_refcount(ptr->iface), ref);
 
         V_VT(&v) = VT_EMPTY;
         V_UNKNOWN(&v) = (IUnknown*)0xdeadbeef;
@@ -2656,6 +2699,13 @@ static void test_saxreader_properties(void)
     /* stream with declaration */
     V_VT(&v) = VT_BSTR;
     V_BSTR(&v) = _bstr_("<?xml version=\"1.0\"?><element></element>");
+    hr = ISAXXMLReader_parse(reader, v);
+    EXPECT_HR(hr, S_OK);
+
+    /* VT_BSTR|VT_BYREF input type */
+    str = _bstr_("<?xml version=\"1.0\"?><element></element>");
+    V_VT(&v) = VT_BSTR|VT_BYREF;
+    V_BSTRREF(&v) = &str;
     hr = ISAXXMLReader_parse(reader, v);
     EXPECT_HR(hr, S_OK);
 
@@ -2822,11 +2872,23 @@ static void test_saxreader_encoding(void)
 
 static void test_mxwriter_handlers(void)
 {
-    ISAXContentHandler *handler;
-    IMXWriter *writer, *writer2;
-    ISAXDeclHandler *decl;
-    ISAXLexicalHandler *lh;
+    IMXWriter *writer;
     HRESULT hr;
+    int i;
+
+    static const REFIID riids[] =
+    {
+        &IID_ISAXContentHandler,
+        &IID_ISAXLexicalHandler,
+        &IID_ISAXDeclHandler,
+        &IID_ISAXDTDHandler,
+        &IID_ISAXErrorHandler,
+        &IID_IVBSAXDeclHandler,
+        &IID_IVBSAXLexicalHandler,
+        &IID_IVBSAXContentHandler,
+        &IID_IVBSAXDTDHandler,
+        &IID_IVBSAXErrorHandler
+    };
 
     hr = CoCreateInstance(&CLSID_MXXMLWriter, NULL, CLSCTX_INPROC_SERVER,
             &IID_IMXWriter, (void**)&writer);
@@ -2834,51 +2896,29 @@ static void test_mxwriter_handlers(void)
 
     EXPECT_REF(writer, 1);
 
-    /* ISAXContentHandler */
-    hr = IMXWriter_QueryInterface(writer, &IID_ISAXContentHandler, (void**)&handler);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    EXPECT_REF(writer, 2);
-    EXPECT_REF(handler, 2);
+    for (i = 0; i < sizeof(riids)/sizeof(REFIID); i++)
+    {
+        IUnknown *handler;
+        IMXWriter *writer2;
 
-    hr = ISAXContentHandler_QueryInterface(handler, &IID_IMXWriter, (void**)&writer2);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(writer2 == writer, "got %p, expected %p\n", writer2, writer);
-    EXPECT_REF(writer, 3);
-    EXPECT_REF(writer2, 3);
-    IMXWriter_Release(writer2);
-    ISAXContentHandler_Release(handler);
+        /* handler from IMXWriter */
+        hr = IMXWriter_QueryInterface(writer, riids[i], (void**)&handler);
+        ok(hr == S_OK, "%s, expected S_OK, got %08x\n", wine_dbgstr_guid(riids[i]), hr);
+        EXPECT_REF(writer, 2);
+        EXPECT_REF(handler, 2);
 
-    /* ISAXLexicalHandler */
-    hr = IMXWriter_QueryInterface(writer, &IID_ISAXLexicalHandler, (void**)&lh);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    EXPECT_REF(writer, 2);
-    EXPECT_REF(lh, 2);
-
-    hr = ISAXLexicalHandler_QueryInterface(lh, &IID_IMXWriter, (void**)&writer2);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(writer2 == writer, "got %p, expected %p\n", writer2, writer);
-    EXPECT_REF(writer, 3);
-    EXPECT_REF(writer2, 3);
-    IMXWriter_Release(writer2);
-    ISAXLexicalHandler_Release(lh);
-
-    /* ISAXDeclHandler */
-    hr = IMXWriter_QueryInterface(writer, &IID_ISAXDeclHandler, (void**)&decl);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    EXPECT_REF(writer, 2);
-    EXPECT_REF(lh, 2);
-
-    hr = ISAXDeclHandler_QueryInterface(decl, &IID_IMXWriter, (void**)&writer2);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-    ok(writer2 == writer, "got %p, expected %p\n", writer2, writer);
-    EXPECT_REF(writer, 3);
-    EXPECT_REF(writer2, 3);
-    IMXWriter_Release(writer2);
-    ISAXDeclHandler_Release(decl);
+        /* IMXWriter from a handler */
+        hr = IUnknown_QueryInterface(handler, &IID_IMXWriter, (void**)&writer2);
+        ok(hr == S_OK, "%s, expected S_OK, got %08x\n", wine_dbgstr_guid(riids[i]), hr);
+        ok(writer2 == writer, "got %p, expected %p\n", writer2, writer);
+        EXPECT_REF(writer, 3);
+        EXPECT_REF(writer2, 3);
+        IMXWriter_Release(writer2);
+        IUnknown_Release(handler);
+    }
 
     IMXWriter_Release(writer);
 }
-
 
 static struct msxmlsupported_data_t mxwriter_support_data[] =
 {
@@ -4392,31 +4432,67 @@ static void test_obj_dispex(IUnknown *obj)
     IDispatchEx_Release(dispex);
 }
 
-static void test_dispex(void)
+static void test_saxreader_dispex(void)
 {
-     IVBSAXXMLReader *vbreader;
-     ISAXXMLReader *reader;
-     IUnknown *unk;
-     HRESULT hr;
+    IVBSAXXMLReader *vbreader;
+    ISAXXMLReader *reader;
+    DISPPARAMS dispparams;
+    DISPID dispid;
+    IUnknown *unk;
+    VARIANT arg;
+    HRESULT hr;
 
-     hr = CoCreateInstance(&CLSID_SAXXMLReader, NULL, CLSCTX_INPROC_SERVER,
+    hr = CoCreateInstance(&CLSID_SAXXMLReader, NULL, CLSCTX_INPROC_SERVER,
                 &IID_ISAXXMLReader, (void**)&reader);
-     EXPECT_HR(hr, S_OK);
+    EXPECT_HR(hr, S_OK);
 
-     hr = ISAXXMLReader_QueryInterface(reader, &IID_IUnknown, (void**)&unk);
-     EXPECT_HR(hr, S_OK);
-     test_obj_dispex(unk);
-     IUnknown_Release(unk);
+    hr = ISAXXMLReader_QueryInterface(reader, &IID_IUnknown, (void**)&unk);
+    EXPECT_HR(hr, S_OK);
+    test_obj_dispex(unk);
+    IUnknown_Release(unk);
 
-     hr = ISAXXMLReader_QueryInterface(reader, &IID_IVBSAXXMLReader, (void**)&vbreader);
-     EXPECT_HR(hr, S_OK);
-     hr = IVBSAXXMLReader_QueryInterface(vbreader, &IID_IUnknown, (void**)&unk);
-     EXPECT_HR(hr, S_OK);
-     test_obj_dispex(unk);
-     IUnknown_Release(unk);
-     IVBSAXXMLReader_Release(vbreader);
+    hr = ISAXXMLReader_QueryInterface(reader, &IID_IVBSAXXMLReader, (void**)&vbreader);
+    EXPECT_HR(hr, S_OK);
+    hr = IVBSAXXMLReader_QueryInterface(vbreader, &IID_IUnknown, (void**)&unk);
+    EXPECT_HR(hr, S_OK);
+    test_obj_dispex(unk);
+    IUnknown_Release(unk);
 
-     ISAXXMLReader_Release(reader);
+    dispid = DISPID_PROPERTYPUT;
+    dispparams.cArgs = 1;
+    dispparams.cNamedArgs = 1;
+    dispparams.rgdispidNamedArgs = &dispid;
+    dispparams.rgvarg = &arg;
+
+    V_VT(&arg) = VT_DISPATCH;
+    V_DISPATCH(&arg) = NULL;
+
+    /* propputref is callable as PROPERTYPUT and PROPERTYPUTREF */
+    hr = IVBSAXXMLReader_Invoke(vbreader,
+        DISPID_SAX_XMLREADER_CONTENTHANDLER,
+       &IID_NULL,
+        0,
+        DISPATCH_PROPERTYPUT,
+       &dispparams,
+        NULL,
+        NULL,
+        NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IVBSAXXMLReader_Invoke(vbreader,
+        DISPID_SAX_XMLREADER_CONTENTHANDLER,
+       &IID_NULL,
+        0,
+        DISPATCH_PROPERTYPUTREF,
+       &dispparams,
+        NULL,
+        NULL,
+        NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    IVBSAXXMLReader_Release(vbreader);
+
+    ISAXXMLReader_Release(reader);
 }
 
 static void test_mxwriter_dispex(void)
@@ -4443,6 +4519,7 @@ static void test_mxwriter_dispex(void)
 static void test_mxwriter_comment(void)
 {
     static const WCHAR commentW[] = {'c','o','m','m','e','n','t',0};
+    IVBSAXLexicalHandler *vblexical;
     ISAXContentHandler *content;
     ISAXLexicalHandler *lexical;
     IMXWriter *writer;
@@ -4459,6 +4536,9 @@ static void test_mxwriter_comment(void)
     hr = IMXWriter_QueryInterface(writer, &IID_ISAXLexicalHandler, (void**)&lexical);
     EXPECT_HR(hr, S_OK);
 
+    hr = IMXWriter_QueryInterface(writer, &IID_IVBSAXLexicalHandler, (void**)&vblexical);
+    EXPECT_HR(hr, S_OK);
+
     hr = IMXWriter_put_omitXMLDeclaration(writer, VARIANT_TRUE);
     EXPECT_HR(hr, S_OK);
 
@@ -4467,6 +4547,9 @@ static void test_mxwriter_comment(void)
 
     hr = ISAXLexicalHandler_comment(lexical, NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
+
+    hr = IVBSAXLexicalHandler_comment(vblexical, NULL);
+    EXPECT_HR(hr, E_POINTER);
 
     hr = ISAXLexicalHandler_comment(lexical, commentW, 0);
     EXPECT_HR(hr, S_OK);
@@ -4490,12 +4573,14 @@ static void test_mxwriter_comment(void)
 
     ISAXContentHandler_Release(content);
     ISAXLexicalHandler_Release(lexical);
+    IVBSAXLexicalHandler_Release(vblexical);
     IMXWriter_Release(writer);
     free_bstrs();
 }
 
 static void test_mxwriter_cdata(void)
 {
+    IVBSAXLexicalHandler *vblexical;
     ISAXContentHandler *content;
     ISAXLexicalHandler *lexical;
     IMXWriter *writer;
@@ -4510,6 +4595,9 @@ static void test_mxwriter_cdata(void)
     EXPECT_HR(hr, S_OK);
 
     hr = IMXWriter_QueryInterface(writer, &IID_ISAXLexicalHandler, (void**)&lexical);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXWriter_QueryInterface(writer, &IID_IVBSAXLexicalHandler, (void**)&vblexical);
     EXPECT_HR(hr, S_OK);
 
     hr = IMXWriter_put_omitXMLDeclaration(writer, VARIANT_TRUE);
@@ -4528,7 +4616,7 @@ static void test_mxwriter_cdata(void)
     ok(!lstrcmpW(_bstr_("<![CDATA["), V_BSTR(&dest)), "got wrong content %s\n", wine_dbgstr_w(V_BSTR(&dest)));
     VariantClear(&dest);
 
-    hr = ISAXLexicalHandler_startCDATA(lexical);
+    hr = IVBSAXLexicalHandler_startCDATA(vblexical);
     EXPECT_HR(hr, S_OK);
 
     /* all these are escaped for text nodes */
@@ -4547,6 +4635,7 @@ static void test_mxwriter_cdata(void)
 
     ISAXContentHandler_Release(content);
     ISAXLexicalHandler_Release(lexical);
+    IVBSAXLexicalHandler_Release(vblexical);
     IMXWriter_Release(writer);
     free_bstrs();
 }
@@ -4656,8 +4745,10 @@ static void test_mxwriter_dtd(void)
     static const WCHAR nameW[] = {'n','a','m','e'};
     static const WCHAR pubW[] = {'p','u','b'};
     static const WCHAR sysW[] = {'s','y','s'};
+    IVBSAXLexicalHandler *vblexical;
     ISAXContentHandler *content;
     ISAXLexicalHandler *lexical;
+    IVBSAXDeclHandler *vbdecl;
     ISAXDeclHandler *decl;
     IMXWriter *writer;
     VARIANT dest;
@@ -4676,6 +4767,12 @@ static void test_mxwriter_dtd(void)
     hr = IMXWriter_QueryInterface(writer, &IID_ISAXDeclHandler, (void**)&decl);
     EXPECT_HR(hr, S_OK);
 
+    hr = IMXWriter_QueryInterface(writer, &IID_IVBSAXDeclHandler, (void**)&vbdecl);
+    EXPECT_HR(hr, S_OK);
+
+    hr = IMXWriter_QueryInterface(writer, &IID_IVBSAXLexicalHandler, (void**)&vblexical);
+    EXPECT_HR(hr, S_OK);
+
     hr = IMXWriter_put_omitXMLDeclaration(writer, VARIANT_TRUE);
     EXPECT_HR(hr, S_OK);
 
@@ -4684,6 +4781,9 @@ static void test_mxwriter_dtd(void)
 
     hr = ISAXLexicalHandler_startDTD(lexical, NULL, 0, NULL, 0, NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
+
+    hr = IVBSAXLexicalHandler_startDTD(vblexical, NULL, NULL, NULL);
+    EXPECT_HR(hr, E_POINTER);
 
     hr = ISAXLexicalHandler_startDTD(lexical, NULL, 0, pubW, sizeof(pubW)/sizeof(WCHAR), NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
@@ -4723,7 +4823,7 @@ static void test_mxwriter_dtd(void)
     hr = ISAXLexicalHandler_endDTD(lexical);
     EXPECT_HR(hr, S_OK);
 
-    hr = ISAXLexicalHandler_endDTD(lexical);
+    hr = IVBSAXLexicalHandler_endDTD(vblexical);
     EXPECT_HR(hr, S_OK);
 
     V_VT(&dest) = VT_EMPTY;
@@ -4742,6 +4842,9 @@ static void test_mxwriter_dtd(void)
 
     hr = ISAXDeclHandler_elementDecl(decl, NULL, 0, NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
+
+    hr = IVBSAXDeclHandler_elementDecl(vbdecl, NULL, NULL);
+    EXPECT_HR(hr, E_POINTER);
 
     hr = ISAXDeclHandler_elementDecl(decl, nameW, sizeof(nameW)/sizeof(WCHAR), NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
@@ -4818,6 +4921,9 @@ static void test_mxwriter_dtd(void)
     hr = ISAXDeclHandler_internalEntityDecl(decl, NULL, 0, NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
 
+    hr = IVBSAXDeclHandler_internalEntityDecl(vbdecl, NULL, NULL);
+    EXPECT_HR(hr, E_POINTER);
+
     hr = ISAXDeclHandler_internalEntityDecl(decl, _bstr_("name"), -1, NULL, 0);
     EXPECT_HR(hr, E_INVALIDARG);
 
@@ -4839,6 +4945,9 @@ static void test_mxwriter_dtd(void)
     hr = ISAXDeclHandler_externalEntityDecl(decl, NULL, 0, NULL, 0, NULL, 0);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 
+    hr = IVBSAXDeclHandler_externalEntityDecl(vbdecl, NULL, NULL, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
     hr = ISAXDeclHandler_externalEntityDecl(decl, _bstr_("name"), -1, NULL, 0, NULL, 0);
     ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
 
@@ -4855,6 +4964,8 @@ static void test_mxwriter_dtd(void)
 
     ISAXContentHandler_Release(content);
     ISAXLexicalHandler_Release(lexical);
+    IVBSAXLexicalHandler_Release(vblexical);
+    IVBSAXDeclHandler_Release(vbdecl);
     ISAXDeclHandler_Release(decl);
     IMXWriter_Release(writer);
     free_bstrs();
@@ -5443,7 +5554,7 @@ START_TEST(saxreader)
     test_saxreader_properties();
     test_saxreader_features();
     test_saxreader_encoding();
-    test_dispex();
+    test_saxreader_dispex();
 
     /* MXXMLWriter tests */
     get_class_support_data(mxwriter_support_data, &IID_IMXWriter);
