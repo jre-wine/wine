@@ -521,6 +521,9 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
     {
         DWORD c;
 
+        TRACE( "code=%x flags=%x addr=%p pc=%08x tid=%04x\n",
+               rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
+               context->Pc, GetCurrentThreadId() );
         for (c = 0; c < rec->NumberParameters; c++)
             TRACE( " info[%d]=%08lx\n", c, rec->ExceptionInformation[c] );
         if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
@@ -536,12 +539,12 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         }
         else
         {
-            TRACE(" Pc:%04x Sp:%04x Lr:%04x Cpsr:%04x r0:%04x r1:%04x r2:%04x r3:%04x\n",
-                  context->Pc, context->Sp, context->Lr, context->Cpsr,
-                  context->R0, context->R1, context->R2, context->R3);
-            TRACE(" r4:%04x r5:%04x  r6:%04x  r7:%04x r8:%04x r9:%04x r10:%04x Fp:%04x Ip:%04x\n",
-                  context->R4, context->R5, context->R6, context->R7, context->R8,
-                  context->R9, context->R10, context->Fp, context->Ip );
+            TRACE( " r0=%08x r1=%08x r2=%08x r3=%08x r4=%08x r5=%08x\n",
+                   context->R0, context->R1, context->R2, context->R3, context->R4, context->R5 );
+            TRACE( " r6=%08x r7=%08x r8=%08x r9=%08x r10=%08x fp=%08x\n",
+                   context->R6, context->R7, context->R8, context->R9, context->R10, context->Fp );
+            TRACE( " ip=%08x sp=%08x lr=%08x pc=%08x cpsr=%08x\n",
+                   context->Ip, context->Sp, context->Lr, context->Pc, context->Cpsr );
         }
 
         status = send_debug_event( rec, TRUE, context );

@@ -525,6 +525,9 @@ static const int ws_aiflag_map[][2] =
     MAP_OPTION( AI_PASSIVE ),
     MAP_OPTION( AI_CANONNAME ),
     MAP_OPTION( AI_NUMERICHOST ),
+#ifdef AI_NUMERICSERV
+    MAP_OPTION( AI_NUMERICSERV ),
+#endif
     MAP_OPTION( AI_V4MAPPED ),
     MAP_OPTION( AI_ADDRCONFIG ),
 };
@@ -5463,6 +5466,9 @@ int WINAPI WS_getaddrinfo(LPCSTR nodename, LPCSTR servname, const struct WS_addr
     else
         node = nodename;
 
+    /* servname tweak required by OSX and BSD kernels */
+    if (servname && !servname[0]) servname = "0";
+
     if (hints) {
         punixhints = &unixhints;
 
@@ -5606,13 +5612,13 @@ static struct WS_addrinfoW *addrinfo_AtoW(const struct WS_addrinfo *ai)
     }
     if (ai->ai_addr)
     {
-        if (!(ret->ai_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(struct WS_sockaddr))))
+        if (!(ret->ai_addr = HeapAlloc(GetProcessHeap(), 0, ai->ai_addrlen)))
         {
             HeapFree(GetProcessHeap(), 0, ret->ai_canonname);
             HeapFree(GetProcessHeap(), 0, ret);
             return NULL;
         }
-        memcpy(ret->ai_addr, ai->ai_addr, sizeof(struct WS_sockaddr));
+        memcpy(ret->ai_addr, ai->ai_addr, ai->ai_addrlen);
     }
     return ret;
 }

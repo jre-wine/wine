@@ -172,6 +172,7 @@ case $host in
                       [AC_MSG_RESULT([no])
                        AC_MSG_ERROR([You need a target with Thumb support to build Wine for ARM.])])
     CFLAGS="$CFLAGS -marm"
+    AC_SUBST(TARGETFLAGS,"-marm")
     ;;
   *-mingw32*|*-cygwin*)
     enable_win16=${enable_win16:-no}
@@ -1345,7 +1346,7 @@ then
                 [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS])])],
             [GNUTLS_CFLAGS=""])])
 fi
-WINE_NOTICE_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
+WINE_WARNING_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
                  [libgnutls ${notice_platform}development files not found, no schannel support.])
 
 dnl **** Check which curses lib to use ***
@@ -2724,8 +2725,10 @@ WINE_CONFIG_DLL(ctapi32)
 WINE_CONFIG_DLL(ctl3d.dll16,enable_win16)
 WINE_CONFIG_DLL(ctl3d32,,[implib])
 WINE_CONFIG_DLL(ctl3dv2.dll16,enable_win16)
+WINE_CONFIG_DLL(d2d1,,[implib])
 WINE_CONFIG_DLL(d3d10,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10/tests)
+WINE_CONFIG_DLL(d3d10_1,,[implib])
 WINE_CONFIG_DLL(d3d10core,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10core/tests)
 WINE_CONFIG_DLL(d3d11)
@@ -3267,7 +3270,7 @@ WINE_CONFIG_DLL(xinput1_3,,[implib],[xinput])
 WINE_CONFIG_TEST(dlls/xinput1_3/tests)
 WINE_CONFIG_DLL(xinput1_4)
 WINE_CONFIG_DLL(xinput9_1_0)
-WINE_CONFIG_DLL(xmllite)
+WINE_CONFIG_DLL(xmllite,,[implib])
 WINE_CONFIG_TEST(dlls/xmllite/tests)
 WINE_CONFIG_DLL(xolehlp)
 WINE_CONFIG_DLL(xpsprint)
@@ -3290,6 +3293,7 @@ WINE_CONFIG_TEST(programs/cmd/tests)
 WINE_CONFIG_PROGRAM(conhost,,[install])
 WINE_CONFIG_PROGRAM(control,,[install])
 WINE_CONFIG_PROGRAM(cscript,,[install])
+WINE_CONFIG_PROGRAM(dpnsvr,,[install])
 WINE_CONFIG_PROGRAM(dxdiag,,[install,po])
 WINE_CONFIG_PROGRAM(eject,,[install])
 WINE_CONFIG_PROGRAM(expand,,[install])

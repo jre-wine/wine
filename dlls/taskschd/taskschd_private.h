@@ -16,15 +16,26 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#ifndef __WINE_TASKSCHD_PRIVATE_H__
+#define __WINE_TASKSCHD_PRIVATE_H__
+
 #include "wine/unicode.h"
 
 HRESULT TaskService_create(void **obj) DECLSPEC_HIDDEN;
+HRESULT TaskDefinition_create(ITaskDefinition **obj) DECLSPEC_HIDDEN;
 HRESULT TaskFolder_create(const WCHAR *parent, const WCHAR *path, ITaskFolder **obj, BOOL create) DECLSPEC_HIDDEN;
 HRESULT TaskFolderCollection_create(const WCHAR *path, ITaskFolderCollection **obj) DECLSPEC_HIDDEN;
-HRESULT RegisteredTask_create(const WCHAR *path, IRegisteredTask **obj) DECLSPEC_HIDDEN;
+HRESULT RegisteredTask_create(const WCHAR *path, const WCHAR *name, ITaskDefinition *definition, TASK_LOGON_TYPE logon,
+                              IRegisteredTask **obj, BOOL create) DECLSPEC_HIDDEN;
 HRESULT RegisteredTaskCollection_create(const WCHAR *path, IRegisteredTaskCollection **obj) DECLSPEC_HIDDEN;
 
 const char *debugstr_variant(const VARIANT *v) DECLSPEC_HIDDEN;
+
+static void *heap_alloc_zero(SIZE_T size) __WINE_ALLOC_SIZE(1);
+static inline void *heap_alloc_zero(SIZE_T size)
+{
+    return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
+}
 
 static void *heap_alloc(SIZE_T size) __WINE_ALLOC_SIZE(1);
 static inline void *heap_alloc(SIZE_T size)
@@ -52,3 +63,5 @@ static inline WCHAR *heap_strdupW(const WCHAR *src)
     if ((dst = heap_alloc(len))) memcpy(dst, src, len);
     return dst;
 }
+
+#endif /* __WINE_TASKSCHD_PRIVATE_H__ */
