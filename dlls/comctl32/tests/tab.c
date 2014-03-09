@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <assert.h>
 #include <windows.h>
 #include <commctrl.h>
 #include <stdio.h>
@@ -300,8 +299,7 @@ create_tabcontrol (DWORD style, DWORD mask)
     handle = CreateWindowA(WC_TABCONTROLA, "TestTab",
             WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_FOCUSNEVER | style, 10, 10, 300, 100, NULL,
             NULL, NULL, 0);
-
-    assert (handle);
+    ok(handle != NULL, "failed to create tab wnd\n");
 
     SetWindowLongA(handle, GWL_STYLE, WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_FOCUSNEVER | style);
     SendMessageA(handle, WM_SETFONT, 0, (LPARAM)hFont);
@@ -438,8 +436,7 @@ static HWND createFilledTabControl(HWND parent_wnd, DWORD style, DWORD mask, INT
     tabHandle = CreateWindowA(WC_TABCONTROLA, "TestTab",
             WS_CLIPSIBLINGS | WS_CLIPCHILDREN | TCS_FOCUSNEVER | style, 0, 0, rect.right,
             rect.bottom, parent_wnd, NULL, NULL, 0);
-
-    assert(tabHandle);
+    ok(tabHandle != NULL, "failed to create tab wnd\n");
 
     oldproc = (WNDPROC)SetWindowLongPtrA(tabHandle, GWLP_WNDPROC, (LONG_PTR)tabSubclassProcess);
     SetWindowLongPtrA(tabHandle, GWLP_USERDATA, (LONG_PTR)oldproc);
@@ -745,6 +742,24 @@ static void test_cursel(void)
     SendMessageA(hTab, TCM_GETITEMA, selectionIndex, (LPARAM)&tcItem);
     ok (tcItem.dwState & TCIS_BUTTONPRESSED || broken(tcItem.dwState == 0), /* older comctl32 */
         "Selected item should have TCIS_BUTTONPRESSED\n");
+
+    /* now deselect all and check previously selected item state */
+    focusIndex = SendMessageA(hTab, TCM_GETCURFOCUS, 0, 0);
+    ok(focusIndex == 1, "got %d\n", focusIndex);
+
+    selectionIndex = SendMessageA(hTab, TCM_SETCURSEL, -1, 0);
+    ok(selectionIndex == 1, "got %d\n", selectionIndex);
+
+    memset(&tcItem, 0, sizeof(TCITEMA));
+
+    /* focus is reset too */
+    focusIndex = SendMessageA(hTab, TCM_GETCURFOCUS, 0, 0);
+    ok(focusIndex == -1, "got %d\n", focusIndex);
+
+    tcItem.mask = TCIF_STATE;
+    tcItem.dwStateMask = TCIS_BUTTONPRESSED;
+    SendMessageA(hTab, TCM_GETITEMA, selectionIndex, (LPARAM)&tcItem);
+    ok(tcItem.dwState == 0, "got state %d\n", tcItem.dwState);
 
     DestroyWindow(hTab);
 }

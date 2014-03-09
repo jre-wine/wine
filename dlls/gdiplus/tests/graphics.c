@@ -20,7 +20,6 @@
  */
 
 #include <math.h>
-#include <assert.h>
 
 #include "objbase.h"
 #include "gdiplus.h"
@@ -60,7 +59,7 @@ static REAL units_to_pixels(REAL units, GpUnit unit, REAL dpi)
     case UnitMillimeter:
         return units * dpi / mm_per_inch;
     default:
-        assert(0);
+        ok(0, "Unsupported unit: %d\n", unit);
         return 0;
     }
 }
@@ -82,7 +81,7 @@ static REAL pixels_to_units(REAL pixels, GpUnit unit, REAL dpi)
     case UnitMillimeter:
         return pixels * mm_per_inch / dpi;
     default:
-        assert(0);
+        ok(0, "Unsupported unit: %d\n", unit);
         return 0;
     }
 }
@@ -5494,6 +5493,52 @@ static void test_clipping_2(void)
     DeleteDC(hdc);
 }
 
+
+static void test_GdipFillRectangles(void)
+{
+    GpStatus status;
+    GpGraphics *graphics = NULL;
+    GpBrush *brush = NULL;
+    HDC hdc = GetDC( hwnd );
+    GpRectF rects[2] = {{0,0,10,10}, {10,10,10,10}};
+
+    ok(hdc != NULL, "Expected HDC to be initialized\n");
+
+    status = GdipCreateFromHDC(hdc, &graphics);
+    expect(Ok, status);
+    ok(graphics != NULL, "Expected graphics to be initialized\n");
+
+    status = GdipCreateSolidFill((ARGB)0xffff00ff, (GpSolidFill**)&brush);
+    expect(Ok, status);
+    ok(brush != NULL, "Expected brush to be initialized\n");
+
+    status = GdipFillRectangles(NULL, brush, rects, 2);
+    expect(InvalidParameter, status);
+
+    status = GdipFillRectangles(graphics, NULL, rects, 2);
+    expect(InvalidParameter, status);
+
+    status = GdipFillRectangles(graphics, brush, NULL, 2);
+    expect(InvalidParameter, status);
+
+    status = GdipFillRectangles(graphics, brush, rects, 0);
+    expect(InvalidParameter, status);
+
+    status = GdipFillRectangles(graphics, brush, rects, -1);
+    expect(InvalidParameter, status);
+
+    status = GdipFillRectangles(graphics, brush, rects, 1);
+    expect(Ok, status);
+
+    status = GdipFillRectangles(graphics, brush, rects, 2);
+    expect(Ok, status);
+
+    GdipDeleteBrush(brush);
+    GdipDeleteGraphics(graphics);
+
+    ReleaseDC(hwnd, hdc);
+}
+
 START_TEST(graphics)
 {
     struct GdiplusStartupInput gdiplusStartupInput;
@@ -5564,6 +5609,7 @@ START_TEST(graphics)
     test_getdc_scaled();
     test_alpha_hdc();
     test_bitmapfromgraphics();
+    test_GdipFillRectangles();
 
     GdiplusShutdown(gdiplusToken);
     DestroyWindow( hwnd );

@@ -41,7 +41,7 @@ struct incl_file
     char              *name;
     char              *filename;
     char              *sourcename;    /* source file name for generated headers */
-    char              *args;          /* custom arguments for makefile rule */
+    void              *args;          /* custom arguments for makefile rule */
     struct incl_file  *included_by;   /* file that included this one */
     int                included_line; /* line where this file was included */
     unsigned int       flags;         /* flags (see below) */
@@ -64,6 +64,7 @@ struct incl_file
 #define FLAG_IDL_HEADER     0x008000  /* generates a header (.h) file */
 #define FLAG_RC_PO          0x010000  /* rc file contains translations */
 #define FLAG_C_IMPLIB       0x020000 /* file is part of an import library */
+#define FLAG_SFD_FONTS      0x040000 /* sfd file generated bitmap fonts */
 
 static const struct
 {
@@ -100,6 +101,7 @@ static struct strarray dllflags;
 static struct strarray imports;
 static struct strarray make_vars;
 static struct strarray cmdline_vars;
+static struct strarray testlist_files;
 
 static const char *base_dir;
 static const char *src_dir;
@@ -113,6 +115,7 @@ static const char *Separator = "### Dependencies";
 static const char *input_file_name;
 static const char *output_file_name;
 static const char *temp_file_name;
+static int use_msvcrt;
 static int relative_dir_mode;
 static int input_line;
 static int output_column;
@@ -671,18 +674,10 @@ static FILE *open_src_file( struct incl_file *pFile )
 {
     FILE *file;
 
-    /* first try name as is */
-    if ((file = open_file( pFile->name )))
-    {
-        pFile->filename = xstrdup( pFile->name );
-        return file;
-    }
-    /* now try in source dir */
-    if (src_dir)
-    {
-        pFile->filename = src_dir_path( pFile->name );
-        file = open_file( pFile->filename );
-    }
+    /* try in source dir */
+    pFile->filename = src_dir_path( pFile->name );
+    file = open_file( pFile->filename );
+
     /* now try parent dir */
     if (!file && parent_dir)
     {
@@ -788,6 +783,18 @@ static FILE *open_include_file( struct incl_file *pFile )
             return file;
         }
         free( filename );
+    }
+
+    /* check in global includes source dir */
+
+    filename = top_dir_path( strmake( "include/%s", pFile->name ));
+    if ((file = open_file( filename ))) goto found;
+
+    /* check in global msvcrt includes */
+    if (use_msvcrt)
+    {
+        filename = top_dir_path( strmake( "include/msvcrt/%s", pFile->name ));
+        if ((file = open_file( filename ))) goto found;
     }
 
     /* now search in include paths */
@@ -897,12 +904,15 @@ static void parse_pragma_directive( struct incl_file *source, char *str )
         {
             if (!strcmp( flag, "font" ))
             {
-                struct incl_file *file;
-                char *obj = strtok( NULL, " \t" );
-                if (!strendswith( obj, ".fon" )) return;
-                file = add_generated_source( obj, NULL );
-                file->sourcename = replace_extension( source->name, ".sfd", ".ttf" );
-                file->args = xstrdup( strtok( NULL, "" ));
+                struct strarray *array = source->args;
+
+                if (!array)
+                {
+                    source->args = array = xmalloc( sizeof(*array) );
+                    *array = empty_strarray;
+                    source->flags |= FLAG_SFD_FONTS;
+                }
+                strarray_add( array, xstrdup( strtok( NULL, "" )));
                 return;
             }
         }
@@ -1444,7 +1454,8 @@ static void output_include( struct incl_file *pFile, struct incl_file *owner )
 static struct strarray output_sources(void)
 {
     struct incl_file *source;
-    int i, is_win16 = 0;
+    unsigned int i;
+    int is_win16 = 0;
     const char *dllext = ".so";
     struct strarray object_files = empty_strarray;
     struct strarray crossobj_files = empty_strarray;
@@ -1453,7 +1464,7 @@ static struct strarray output_sources(void)
     struct strarray po_files = empty_strarray;
     struct strarray mo_files = empty_strarray;
     struct strarray mc_files = empty_strarray;
-    struct strarray test_files = empty_strarray;
+    struct strarray ok_files = empty_strarray;
     struct strarray dlldata_files = empty_strarray;
     struct strarray c2man_files = empty_strarray;
     struct strarray implib_objs = empty_strarray;
@@ -1481,7 +1492,9 @@ static struct strarray output_sources(void)
     strarray_add( &includes, "-I." );
     if (src_dir) strarray_add( &includes, strmake( "-I%s", src_dir ));
     if (parent_dir) strarray_add( &includes, strmake( "-I%s", src_dir_path( parent_dir )));
-    if (top_src_dir && top_obj_dir) strarray_add( &includes, strmake( "-I%s/include", top_obj_dir ));
+    if (top_obj_dir) strarray_add( &includes, strmake( "-I%s/include", top_obj_dir ));
+    if (top_src_dir) strarray_add( &includes, strmake( "-I%s/include", top_src_dir ));
+    if (use_msvcrt) strarray_add( &includes, strmake( "-I%s", top_dir_path( "include/msvcrt" )));
     strarray_addall( &includes, include_args );
 
     LIST_FOR_EACH_ENTRY( source, &sources, struct incl_file, entry )
@@ -1579,7 +1592,6 @@ static struct strarray output_sources(void)
         else if (!strcmp( ext, "idl" ))  /* IDL file */
         {
             struct strarray targets = empty_strarray;
-            unsigned int i;
             char *dest;
 
             if (!source->flags || find_include_file( strmake( "%s.h", obj )))
@@ -1650,22 +1662,27 @@ static struct strarray output_sources(void)
                 output( "uninstall::\n" );
                 output( "\t$(RM) $(DESTDIR)$(fontdir)/%s.ttf\n", obj );
             }
-            continue;  /* no dependencies */
-        }
-        else if (!strcmp( ext, "fon" ))  /* bitmap font file */
-        {
-            strarray_add( &all_targets, source->name );
-            output( "%s.fon: %s %s\n", obj, tools_path( "sfnt2fon" ),
-                    src_dir_path( source->sourcename ));
-            output( "\t%s -o $@ %s %s\n", tools_path( "sfnt2fon" ),
-                    src_dir_path( source->sourcename ), source->args );
-            output( "install install-lib:: %s\n", source->name );
-            output( "\t$(INSTALL_DATA) %s $(DESTDIR)$(fontdir)/%s\n", source->name, source->name );
-            output( "uninstall::\n" );
-            output( "\t$(RM) $(DESTDIR)$(fontdir)/%s\n", source->name );
-            strarray_add_uniq( &phony_targets, "install" );
-            strarray_add_uniq( &phony_targets, "install-lib" );
-            strarray_add_uniq( &phony_targets, "uninstall" );
+            if (source->flags & FLAG_SFD_FONTS)
+            {
+                struct strarray *array = source->args;
+
+                for (i = 0; i < array->count; i++)
+                {
+                    char *font = strtok( xstrdup(array->str[i]), " \t" );
+                    char *args = strtok( NULL, "" );
+
+                    strarray_add( &all_targets, font );
+                    output( "%s: %s %s\n", font, tools_path( "sfnt2fon" ), ttf_file );
+                    output( "\t%s -o $@ %s %s\n", tools_path( "sfnt2fon" ), ttf_file, args );
+                    output( "install install-lib:: %s\n", font );
+                    output( "\t$(INSTALL_DATA) %s $(DESTDIR)$(fontdir)/%s\n", font, font );
+                    output( "uninstall::\n" );
+                    output( "\t$(RM) $(DESTDIR)$(fontdir)/%s\n", font );
+                    strarray_add_uniq( &phony_targets, "install" );
+                    strarray_add_uniq( &phony_targets, "install-lib" );
+                    strarray_add_uniq( &phony_targets, "uninstall" );
+                }
+            }
             continue;  /* no dependencies */
         }
         else if (!strcmp( ext, "svg" ))  /* svg file */
@@ -1693,7 +1710,8 @@ static struct strarray output_sources(void)
         {
             int need_cross = testdll || (source->flags & FLAG_C_IMPLIB) || (module && staticlib);
 
-            if (source->flags & FLAG_GENERATED) strarray_add( &clean_files, source->filename );
+            if ((source->flags & FLAG_GENERATED) && (!testdll || strcmp( source->filename, "testlist.c" )))
+                strarray_add( &clean_files, source->filename );
             if (source->flags & FLAG_C_IMPLIB) strarray_add( &implib_objs, strmake( "%s.o", obj ));
             strarray_add( &object_files, strmake( "%s.o", obj ));
             output( "%s.o: %s\n", obj, source->filename );
@@ -1721,7 +1739,7 @@ static struct strarray output_sources(void)
             }
             if (testdll && !strcmp( ext, "c" ) && !(source->flags & FLAG_GENERATED))
             {
-                strarray_add( &test_files, source->name );
+                strarray_add( &ok_files, strmake( "%s.ok", obj ));
                 output( "%s.ok:\n", obj );
                 output( "\t%s $(RUNTESTFLAGS) -T %s -M %s -p %s%s %s && touch $@\n",
                         top_dir_path( "tools/runtest" ), top_obj_dir,
@@ -1938,7 +1956,6 @@ static struct strarray output_sources(void)
 
     if (testdll)
     {
-        struct strarray ok_files = strarray_replace_extension( &test_files, ".c", ".ok" );
         char *testmodule = replace_extension( testdll, ".dll", "_test.exe" );
         char *stripped = replace_extension( testdll, ".dll", "_test-stripped.exe" );
         struct strarray all_libs = empty_strarray;
@@ -2009,11 +2026,6 @@ static struct strarray output_sources(void)
             strarray_add( &phony_targets, "crosstest" );
         }
 
-        output( "testlist.c: %s%s %s\n",
-                tools_dir_path( "make_ctests" ), tools_ext, src_dir_path( "Makefile.in" ));
-        output( "\t%s%s -o $@", tools_dir_path( "make_ctests" ), tools_ext );
-        output_filenames( test_files );
-        output( "\n" );
         output_filenames( ok_files );
         output( ": %s%s ../%s%s\n", testmodule, dllext, testdll, dllext );
         output( "check test:" );
@@ -2027,6 +2039,7 @@ static struct strarray output_sources(void)
         strarray_add( &phony_targets, "check" );
         strarray_add( &phony_targets, "test" );
         strarray_add( &phony_targets, "testclean" );
+        testlist_files = strarray_replace_extension( &ok_files, ".ok", "" );
     }
 
     if (all_targets.count)
@@ -2116,21 +2129,91 @@ static void rename_temp_file( const char *dest )
 
 
 /*******************************************************************
+ *         are_files_identical
+ */
+static int are_files_identical( FILE *file1, FILE *file2 )
+{
+    for (;;)
+    {
+        char buffer1[8192], buffer2[8192];
+        int size1 = fread( buffer1, 1, sizeof(buffer1), file1 );
+        int size2 = fread( buffer2, 1, sizeof(buffer2), file2 );
+        if (size1 != size2) return 0;
+        if (!size1) return feof( file1 ) && feof( file2 );
+        if (memcmp( buffer1, buffer2, size1 )) return 0;
+    }
+}
+
+
+/*******************************************************************
+ *         rename_temp_file_if_changed
+ */
+static void rename_temp_file_if_changed( const char *dest )
+{
+    FILE *file1, *file2;
+    int do_rename = 1;
+
+    if ((file1 = fopen( dest, "r" )))
+    {
+        if ((file2 = fopen( temp_file_name, "r" )))
+        {
+            do_rename = !are_files_identical( file1, file2 );
+            fclose( file2 );
+        }
+        fclose( file1 );
+    }
+    if (!do_rename)
+    {
+        unlink( temp_file_name );
+        temp_file_name = NULL;
+    }
+    else rename_temp_file( dest );
+}
+
+
+/*******************************************************************
+ *         output_testlist
+ */
+static void output_testlist( const char *dest, struct strarray files )
+{
+    int i;
+
+    output_file = create_temp_file( dest );
+
+    output( "/* Automatically generated by make depend; DO NOT EDIT!! */\n\n" );
+    output( "#define WIN32_LEAN_AND_MEAN\n" );
+    output( "#include <windows.h>\n\n" );
+    output( "#define STANDALONE\n" );
+    output( "#include \"wine/test.h\"\n\n" );
+
+    for (i = 0; i < files.count; i++) output( "extern void func_%s(void);\n", files.str[i] );
+    output( "\n" );
+    output( "const struct test winetest_testlist[] =\n" );
+    output( "{\n" );
+    for (i = 0; i < files.count; i++) output( "    { \"%s\", func_%s },\n", files.str[i], files.str[i] );
+    output( "    { 0, 0 }\n" );
+    output( "};\n" );
+
+    if (fclose( output_file )) fatal_perror( "write" );
+    output_file = NULL;
+    rename_temp_file_if_changed( dest );
+}
+
+
+/*******************************************************************
  *         output_gitignore
  */
-static void output_gitignore( const char *dest, const struct strarray *files )
+static void output_gitignore( const char *dest, struct strarray files )
 {
     int i;
 
     output_file = create_temp_file( dest );
 
     output( "# Automatically generated by make depend; DO NOT EDIT!!\n" );
-    output( "/.gitignore\n" );
-    output( "/Makefile\n" );
-    for (i = 0; i < files->count; i++)
+    for (i = 0; i < files.count; i++)
     {
-        if (!strchr( files->str[i], '/' )) output( "/" );
-        output( "%s\n", files->str[i] );
+        if (!strchr( files.str[i], '/' )) output( "/" );
+        output( "%s\n", files.str[i] );
     }
 
     if (fclose( output_file )) fatal_perror( "write" );
@@ -2144,7 +2227,7 @@ static void output_gitignore( const char *dest, const struct strarray *files )
  */
 static void output_dependencies( const char *path )
 {
-    struct strarray targets = empty_strarray;
+    struct strarray targets, ignore_files = empty_strarray;
 
     if (Separator && ((output_file = fopen( path, "r" ))))
     {
@@ -2167,13 +2250,20 @@ static void output_dependencies( const char *path )
             fatal_perror( "%s", path );
     }
 
+    testlist_files = empty_strarray;
     targets = output_sources();
 
     fclose( output_file );
     output_file = NULL;
     if (temp_file_name) rename_temp_file( path );
 
-    if (!src_dir && base_dir) output_gitignore( base_dir_path( ".gitignore" ), &targets );
+    strarray_add( &ignore_files, ".gitignore" );
+    strarray_add( &ignore_files, "Makefile" );
+    if (testlist_files.count) strarray_add( &ignore_files, "testlist.c" );
+    strarray_addall( &ignore_files, targets );
+
+    if (testlist_files.count) output_testlist( base_dir_path( "testlist.c" ), testlist_files );
+    if (!src_dir && base_dir) output_gitignore( base_dir_path( ".gitignore" ), ignore_files );
 }
 
 
@@ -2200,7 +2290,6 @@ static void update_makefile( const char *path )
     };
     const char **var;
     unsigned int i;
-    int use_msvcrt = 0;
     struct strarray value;
     struct incl_file *file;
 
@@ -2226,6 +2315,7 @@ static void update_makefile( const char *path )
     dllflags = get_expanded_make_var_array( "DLLFLAGS" );
     imports  = get_expanded_make_var_array( "IMPORTS" );
 
+    use_msvcrt = 0;
     for (i = 0; i < appmode.count && !use_msvcrt; i++)
         use_msvcrt = !strcmp( appmode.str[i], "-mno-cygwin" );
     for (i = 0; i < imports.count && !use_msvcrt; i++)
@@ -2234,7 +2324,6 @@ static void update_makefile( const char *path )
     include_args = empty_strarray;
     define_args = empty_strarray;
     strarray_add( &define_args, "-D__WINESRC__" );
-    strarray_add( &include_args, strmake( "-I%s", top_dir_path( "include" )));
 
     if (!tools_ext) tools_ext = "";
 
@@ -2246,11 +2335,7 @@ static void update_makefile( const char *path )
             strarray_add_uniq( &define_args, value.str[i] );
     strarray_addall( &define_args, get_expanded_make_var_array( "EXTRADEFS" ));
 
-    if (use_msvcrt)
-    {
-        strarray_add( &dllflags, get_expanded_make_variable( "MSVCRTFLAGS" ));
-        strarray_add( &include_args, strmake( "-I%s", top_dir_path( "include/msvcrt" )));
-    }
+    if (use_msvcrt) strarray_add( &dllflags, get_expanded_make_variable( "MSVCRTFLAGS" ));
 
     list_init( &sources );
     list_init( &includes );

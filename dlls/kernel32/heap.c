@@ -40,6 +40,9 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#ifdef HAVE_MACH_MACH_H
+#include <mach/mach.h>
+#endif
 
 #ifdef sun
 /* FIXME:  Unfortunately swapctl can't be used with largefile.... */
@@ -1146,14 +1149,21 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     SYSTEM_INFO si;
 #ifdef linux
     FILE *f;
-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
-    unsigned long val;
-    int mib[2];
-    size_t size_sys;
-#elif defined(__APPLE__)
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+    DWORDLONG total;
+#ifdef __APPLE__
     unsigned int val;
+#else
+    unsigned long val;
+#endif
     int mib[2];
     size_t size_sys;
+#ifdef HW_MEMSIZE
+    uint64_t val64;
+#endif
+#ifdef VM_SWAPUSAGE
+    struct xsw_usage swap;
+#endif
 #elif defined(sun)
     unsigned long pagesize,maxpages,freepages,swapspace,swapfree;
     struct anoninfo swapinf;
@@ -1219,18 +1229,78 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
         fclose( f );
     }
 #elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+    total = 0;
+    lpmemex->ullAvailPhys = 0;
+
     mib[0] = CTL_HW;
-    mib[1] = HW_PHYSMEM;
-    size_sys = sizeof(val);
-    sysctl(mib, 2, &val, &size_sys, NULL, 0);
-    if (val) lpmemex->ullTotalPhys = val;
-    mib[1] = HW_USERMEM;
-    size_sys = sizeof(val);
-    sysctl(mib, 2, &val, &size_sys, NULL, 0);
-    if (!val) val = lpmemex->ullTotalPhys;
-    lpmemex->ullAvailPhys = val;
-    lpmemex->ullTotalPageFile = val;
-    lpmemex->ullAvailPageFile = val;
+#ifdef HW_MEMSIZE
+    mib[1] = HW_MEMSIZE;
+    size_sys = sizeof(val64);
+    if (!sysctl(mib, 2, &val64, &size_sys, NULL, 0) && size_sys == sizeof(val64) && val64)
+        total = val64;
+#endif
+
+#ifdef HAVE_MACH_MACH_H
+    {
+        host_name_port_t host = mach_host_self();
+        mach_msg_type_number_t count;
+
+#ifdef HOST_VM_INFO64_COUNT
+        vm_size_t page_size;
+        vm_statistics64_data_t vm_stat;
+
+        count = HOST_VM_INFO64_COUNT;
+        if (host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm_stat, &count) == KERN_SUCCESS &&
+            host_page_size(host, &page_size) == KERN_SUCCESS)
+            lpmemex->ullAvailPhys = (vm_stat.free_count + vm_stat.inactive_count) * (DWORDLONG)page_size;
+#endif
+        if (!total)
+        {
+            host_basic_info_data_t info;
+            count = HOST_BASIC_INFO_COUNT;
+            if (host_info(host, HOST_BASIC_INFO, (host_info_t)&info, &count) == KERN_SUCCESS)
+                total = info.max_mem;
+        }
+
+        mach_port_deallocate(mach_task_self(), host);
+    }
+#endif
+
+    if (!total)
+    {
+        mib[1] = HW_PHYSMEM;
+        size_sys = sizeof(val);
+        if (!sysctl(mib, 2, &val, &size_sys, NULL, 0) && size_sys == sizeof(val) && val)
+            total = val;
+    }
+
+    if (total)
+        lpmemex->ullTotalPhys = total;
+
+    if (!lpmemex->ullAvailPhys)
+    {
+        mib[1] = HW_USERMEM;
+        size_sys = sizeof(val);
+        if (!sysctl(mib, 2, &val, &size_sys, NULL, 0) && size_sys == sizeof(val) && val)
+            lpmemex->ullAvailPhys = val;
+    }
+
+    if (!lpmemex->ullAvailPhys)
+        lpmemex->ullAvailPhys = lpmemex->ullTotalPhys;
+
+    lpmemex->ullTotalPageFile = lpmemex->ullAvailPhys;
+    lpmemex->ullAvailPageFile = lpmemex->ullAvailPhys;
+
+#ifdef VM_SWAPUSAGE
+    mib[0] = CTL_VM;
+    mib[1] = VM_SWAPUSAGE;
+    size_sys = sizeof(swap);
+    if (!sysctl(mib, 2, &swap, &size_sys, NULL, 0) && size_sys == sizeof(swap))
+    {
+        lpmemex->ullTotalPageFile = swap.xsu_total;
+        lpmemex->ullAvailPageFile = swap.xsu_avail;
+    }
+#endif
 #elif defined ( sun )
     pagesize=sysconf(_SC_PAGESIZE);
     maxpages=sysconf(_SC_PHYS_PAGES);

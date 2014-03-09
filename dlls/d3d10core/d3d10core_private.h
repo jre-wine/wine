@@ -29,7 +29,7 @@
 #include "winuser.h"
 #include "objbase.h"
 
-#include "d3d10.h"
+#include "d3d10_1.h"
 #ifdef D3D10CORE_INIT_GUID
 #include "initguid.h"
 #endif
@@ -81,6 +81,7 @@ struct d3d10_texture2d
     IUnknown *dxgi_surface;
     struct wined3d_texture *wined3d_texture;
     D3D10_TEXTURE2D_DESC desc;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_device *device,
@@ -94,6 +95,7 @@ struct d3d10_texture3d
 
     struct wined3d_texture *wined3d_texture;
     D3D10_TEXTURE3D_DESC desc;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_texture3d_init(struct d3d10_texture3d *texture, struct d3d10_device *device,
@@ -106,6 +108,7 @@ struct d3d10_buffer
     LONG refcount;
 
     struct wined3d_buffer *wined3d_buffer;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_buffer_init(struct d3d10_buffer *buffer, struct d3d10_device *device,
@@ -120,9 +123,10 @@ struct d3d10_depthstencil_view
 
     D3D10_DEPTH_STENCIL_VIEW_DESC desc;
     ID3D10Resource *resource;
+    ID3D10Device1 *device;
 };
 
-HRESULT d3d10_depthstencil_view_init(struct d3d10_depthstencil_view *view,
+HRESULT d3d10_depthstencil_view_init(struct d3d10_depthstencil_view *view, struct d3d10_device *device,
         ID3D10Resource *resource, const D3D10_DEPTH_STENCIL_VIEW_DESC *desc) DECLSPEC_HIDDEN;
 
 /* ID3D10RenderTargetView */
@@ -134,9 +138,10 @@ struct d3d10_rendertarget_view
     struct wined3d_rendertarget_view *wined3d_view;
     D3D10_RENDER_TARGET_VIEW_DESC desc;
     ID3D10Resource *resource;
+    ID3D10Device1 *device;
 };
 
-HRESULT d3d10_rendertarget_view_init(struct d3d10_rendertarget_view *view,
+HRESULT d3d10_rendertarget_view_init(struct d3d10_rendertarget_view *view, struct d3d10_device *device,
         ID3D10Resource *resource, const D3D10_RENDER_TARGET_VIEW_DESC *desc) DECLSPEC_HIDDEN;
 struct d3d10_rendertarget_view *unsafe_impl_from_ID3D10RenderTargetView(ID3D10RenderTargetView *iface) DECLSPEC_HIDDEN;
 
@@ -148,9 +153,10 @@ struct d3d10_shader_resource_view
 
     D3D10_SHADER_RESOURCE_VIEW_DESC desc;
     ID3D10Resource *resource;
+    ID3D10Device1 *device;
 };
 
-HRESULT d3d10_shader_resource_view_init(struct d3d10_shader_resource_view *view,
+HRESULT d3d10_shader_resource_view_init(struct d3d10_shader_resource_view *view, struct d3d10_device *device,
         ID3D10Resource *resource, const D3D10_SHADER_RESOURCE_VIEW_DESC *desc) DECLSPEC_HIDDEN;
 
 /* ID3D10InputLayout */
@@ -175,6 +181,7 @@ struct d3d10_vertex_shader
 
     struct wined3d_shader *wined3d_shader;
     struct wined3d_shader_signature output_signature;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_vertex_shader_init(struct d3d10_vertex_shader *shader, struct d3d10_device *device,
@@ -203,6 +210,7 @@ struct d3d10_pixel_shader
 
     struct wined3d_shader *wined3d_shader;
     struct wined3d_shader_signature output_signature;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_pixel_shader_init(struct d3d10_pixel_shader *shader, struct d3d10_device *device,
@@ -218,9 +226,9 @@ struct d3d10_blend_state
     ID3D10BlendState ID3D10BlendState_iface;
     LONG refcount;
 
-    struct d3d10_device *device;
     D3D10_BLEND_DESC desc;
     struct wine_rb_entry entry;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_blend_state_init(struct d3d10_blend_state *state, struct d3d10_device *device,
@@ -233,9 +241,9 @@ struct d3d10_depthstencil_state
     ID3D10DepthStencilState ID3D10DepthStencilState_iface;
     LONG refcount;
 
-    struct d3d10_device *device;
     D3D10_DEPTH_STENCIL_DESC desc;
     struct wine_rb_entry entry;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_depthstencil_state_init(struct d3d10_depthstencil_state *state, struct d3d10_device *device,
@@ -249,9 +257,9 @@ struct d3d10_rasterizer_state
     ID3D10RasterizerState ID3D10RasterizerState_iface;
     LONG refcount;
 
-    struct d3d10_device *device;
     D3D10_RASTERIZER_DESC desc;
     struct wine_rb_entry entry;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_rasterizer_state_init(struct d3d10_rasterizer_state *state, struct d3d10_device *device,
@@ -264,10 +272,10 @@ struct d3d10_sampler_state
     ID3D10SamplerState ID3D10SamplerState_iface;
     LONG refcount;
 
-    struct d3d10_device *device;
     struct wined3d_sampler *wined3d_sampler;
     D3D10_SAMPLER_DESC desc;
     struct wine_rb_entry entry;
+    ID3D10Device1 *device;
 };
 
 HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state, struct d3d10_device *device,
@@ -281,15 +289,17 @@ struct d3d10_query
     LONG refcount;
 
     BOOL predicate;
+    ID3D10Device1 *device;
 };
 
-HRESULT d3d10_query_init(struct d3d10_query *query, BOOL predicate) DECLSPEC_HIDDEN;
+HRESULT d3d10_query_init(struct d3d10_query *query, struct d3d10_device *device, BOOL predicate) DECLSPEC_HIDDEN;
 
-/* IDirect3D10Device */
+/* IDirect3D10Device1 */
 struct d3d10_device
 {
     IUnknown IUnknown_inner;
-    ID3D10Device ID3D10Device_iface;
+    ID3D10Device1 ID3D10Device1_iface;
+    ID3D10Multithread ID3D10Multithread_iface;
     IWineDXGIDeviceParent IWineDXGIDeviceParent_iface;
     IUnknown *outer_unk;
     LONG refcount;
@@ -309,6 +319,11 @@ struct d3d10_device
     UINT stencil_ref;
     struct d3d10_rasterizer_state *rasterizer_state;
 };
+
+static inline struct d3d10_device *impl_from_ID3D10Device(ID3D10Device1 *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d10_device, ID3D10Device1_iface);
+}
 
 HRESULT d3d10_device_init(struct d3d10_device *device, void *outer_unknown) DECLSPEC_HIDDEN;
 
