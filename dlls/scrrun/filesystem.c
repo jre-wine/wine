@@ -50,6 +50,12 @@ struct filecollection {
     BSTR path;
 };
 
+struct drivecollection {
+    IDriveCollection IDriveCollection_iface;
+    LONG ref;
+    DWORD drives;
+};
+
 struct enumdata {
     union
     {
@@ -63,6 +69,11 @@ struct enumdata {
             struct filecollection *coll;
             HANDLE find;
         } filecoll;
+        struct
+        {
+            struct drivecollection *coll;
+            INT cur;
+        } drivecoll;
     } u;
 };
 
@@ -71,6 +82,12 @@ struct enumvariant {
     LONG ref;
 
     struct enumdata data;
+};
+
+struct drive {
+    IDrive IDrive_iface;
+    LONG ref;
+    BSTR root;
 };
 
 struct folder {
@@ -98,6 +115,11 @@ enum iotype {
     IOWrite
 };
 
+static inline struct drive *impl_from_IDrive(IDrive *iface)
+{
+    return CONTAINING_RECORD(iface, struct drive, IDrive_iface);
+}
+
 static inline struct folder *impl_from_IFolder(IFolder *iface)
 {
     return CONTAINING_RECORD(iface, struct folder, IFolder_iface);
@@ -121,6 +143,11 @@ static inline struct foldercollection *impl_from_IFolderCollection(IFolderCollec
 static inline struct filecollection *impl_from_IFileCollection(IFileCollection *iface)
 {
     return CONTAINING_RECORD(iface, struct filecollection, IFileCollection_iface);
+}
+
+static inline struct drivecollection *impl_from_IDriveCollection(IDriveCollection *iface)
+{
+    return CONTAINING_RECORD(iface, struct drivecollection, IDriveCollection_iface);
 }
 
 static inline struct enumvariant *impl_from_IEnumVARIANT(IEnumVARIANT *iface)
@@ -419,6 +446,273 @@ static HRESULT create_textstream(IOMode mode, ITextStream **ret)
     stream->mode = mode;
 
     *ret = &stream->ITextStream_iface;
+    return S_OK;
+}
+
+static HRESULT WINAPI drive_QueryInterface(IDrive *iface, REFIID riid, void **obj)
+{
+    struct drive *This = impl_from_IDrive(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+
+    *obj = NULL;
+
+    if (IsEqualIID( riid, &IID_IDrive ) ||
+        IsEqualIID( riid, &IID_IDispatch ) ||
+        IsEqualIID( riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        IDrive_AddRef(iface);
+    }
+    else
+        return E_NOINTERFACE;
+
+    return S_OK;
+}
+
+static ULONG WINAPI drive_AddRef(IDrive *iface)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI drive_Release(IDrive *iface)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (!ref)
+    {
+        SysFreeString(This->root);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI drive_GetTypeInfoCount(IDrive *iface, UINT *pctinfo)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+    *pctinfo = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI drive_GetTypeInfo(IDrive *iface, UINT iTInfo,
+                                        LCID lcid, ITypeInfo **ppTInfo)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    return get_typeinfo(IDrive_tid, ppTInfo);
+}
+
+static HRESULT WINAPI drive_GetIDsOfNames(IDrive *iface, REFIID riid,
+                                        LPOLESTR *rgszNames, UINT cNames,
+                                        LCID lcid, DISPID *rgDispId)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+
+    hr = get_typeinfo(IDrive_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI drive_Invoke(IDrive *iface, DISPID dispIdMember,
+                                      REFIID riid, LCID lcid, WORD wFlags,
+                                      DISPPARAMS *pDispParams, VARIANT *pVarResult,
+                                      EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IDrive_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI drive_get_Path(IDrive *iface, BSTR *path)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, path);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_DriveLetter(IDrive *iface, BSTR *letter)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, letter);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_ShareName(IDrive *iface, BSTR *share_name)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, share_name);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_DriveType(IDrive *iface, DriveTypeConst *type)
+{
+    struct drive *This = impl_from_IDrive(iface);
+
+    TRACE("(%p)->(%p)\n", This, type);
+
+    switch (GetDriveTypeW(This->root))
+    {
+    case DRIVE_REMOVABLE:
+        *type = Removable;
+        break;
+    case DRIVE_FIXED:
+        *type = Fixed;
+        break;
+    case DRIVE_REMOTE:
+        *type = Remote;
+        break;
+    case DRIVE_CDROM:
+        *type = CDRom;
+        break;
+    case DRIVE_RAMDISK:
+        *type = RamDisk;
+        break;
+    default:
+        *type = UnknownType;
+        break;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI drive_get_RootFolder(IDrive *iface, IFolder **folder)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, folder);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_AvailableSpace(IDrive *iface, VARIANT *avail)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, avail);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_FreeSpace(IDrive *iface, VARIANT *v)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, v);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_TotalSize(IDrive *iface, VARIANT *v)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, v);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_VolumeName(IDrive *iface, BSTR *name)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, name);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_put_VolumeName(IDrive *iface, BSTR name)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%s): stub\n", This, debugstr_w(name));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_FileSystem(IDrive *iface, BSTR *fs)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, fs);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_SerialNumber(IDrive *iface, LONG *serial)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, serial);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drive_get_IsReady(IDrive *iface, VARIANT_BOOL *ready)
+{
+    struct drive *This = impl_from_IDrive(iface);
+    FIXME("(%p)->(%p): stub\n", This, ready);
+    return E_NOTIMPL;
+}
+
+static const IDriveVtbl drivevtbl = {
+    drive_QueryInterface,
+    drive_AddRef,
+    drive_Release,
+    drive_GetTypeInfoCount,
+    drive_GetTypeInfo,
+    drive_GetIDsOfNames,
+    drive_Invoke,
+    drive_get_Path,
+    drive_get_DriveLetter,
+    drive_get_ShareName,
+    drive_get_DriveType,
+    drive_get_RootFolder,
+    drive_get_AvailableSpace,
+    drive_get_FreeSpace,
+    drive_get_TotalSize,
+    drive_get_VolumeName,
+    drive_put_VolumeName,
+    drive_get_FileSystem,
+    drive_get_SerialNumber,
+    drive_get_IsReady
+};
+
+static HRESULT create_drive(WCHAR letter, IDrive **drive)
+{
+    struct drive *This;
+
+    *drive = NULL;
+
+    This = heap_alloc(sizeof(*This));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IDrive_iface.lpVtbl = &drivevtbl;
+    This->ref = 1;
+    This->root = SysAllocStringLen(NULL, 3);
+    if (!This->root)
+    {
+        heap_free(This);
+        return E_OUTOFMEMORY;
+    }
+    This->root[0] = letter;
+    This->root[1] = ':';
+    This->root[2] = '\\';
+    This->root[3] = 0;
+
+    *drive = &This->IDrive_iface;
     return S_OK;
 }
 
@@ -789,6 +1083,125 @@ static HRESULT create_filecoll_enum(struct filecollection *collection, IUnknown 
     return S_OK;
 }
 
+static ULONG WINAPI drivecoll_enumvariant_Release(IEnumVARIANT *iface)
+{
+    struct enumvariant *This = impl_from_IEnumVARIANT(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (!ref)
+    {
+        IDriveCollection_Release(&This->data.u.drivecoll.coll->IDriveCollection_iface);
+        heap_free(This);
+    }
+
+    return ref;
+}
+
+static HRESULT find_next_drive(struct enumvariant *penum)
+{
+    int i = penum->data.u.drivecoll.cur == -1 ? 0 : penum->data.u.drivecoll.cur + 1;
+
+    for (; i < 32; i++)
+        if (penum->data.u.drivecoll.coll->drives & (1 << i))
+        {
+            penum->data.u.drivecoll.cur = i;
+            return S_OK;
+        }
+
+    return S_FALSE;
+}
+
+static HRESULT WINAPI drivecoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt, VARIANT *var, ULONG *fetched)
+{
+    struct enumvariant *This = impl_from_IEnumVARIANT(iface);
+    ULONG count = 0;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %p %p)\n", This, celt, var, fetched);
+
+    if (fetched)
+        *fetched = 0;
+
+    while (find_next_drive(This) == S_OK)
+    {
+        IDrive *drive;
+
+        hr = create_drive('A' + This->data.u.drivecoll.cur, &drive);
+        if (FAILED(hr)) return hr;
+
+        V_VT(&var[count]) = VT_DISPATCH;
+        V_DISPATCH(&var[count]) = (IDispatch*)drive;
+
+        if (++count >= celt) break;
+    }
+
+    if (count < celt)
+        return S_FALSE;
+
+    if (fetched)
+        *fetched = count;
+
+    return S_OK;
+}
+
+static HRESULT WINAPI drivecoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG celt)
+{
+    struct enumvariant *This = impl_from_IEnumVARIANT(iface);
+
+    FIXME("(%p)->(%d): stub\n", This, celt);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drivecoll_enumvariant_Reset(IEnumVARIANT *iface)
+{
+    struct enumvariant *This = impl_from_IEnumVARIANT(iface);
+
+    TRACE("(%p)\n", This);
+
+    This->data.u.drivecoll.cur = -1;
+    return S_OK;
+}
+
+static HRESULT WINAPI drivecoll_enumvariant_Clone(IEnumVARIANT *iface, IEnumVARIANT **pclone)
+{
+    struct enumvariant *This = impl_from_IEnumVARIANT(iface);
+    FIXME("(%p)->(%p): stub\n", This, pclone);
+    return E_NOTIMPL;
+}
+
+static const IEnumVARIANTVtbl drivecollenumvariantvtbl = {
+    enumvariant_QueryInterface,
+    enumvariant_AddRef,
+    drivecoll_enumvariant_Release,
+    drivecoll_enumvariant_Next,
+    drivecoll_enumvariant_Skip,
+    drivecoll_enumvariant_Reset,
+    drivecoll_enumvariant_Clone
+};
+
+static HRESULT create_drivecoll_enum(struct drivecollection *collection, IUnknown **newenum)
+{
+    struct enumvariant *This;
+
+    *newenum = NULL;
+
+    This = heap_alloc(sizeof(*This));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IEnumVARIANT_iface.lpVtbl = &drivecollenumvariantvtbl;
+    This->ref = 1;
+    This->data.u.drivecoll.coll = collection;
+    This->data.u.drivecoll.cur = -1;
+    IDriveCollection_AddRef(&collection->IDriveCollection_iface);
+
+    *newenum = (IUnknown*)&This->IEnumVARIANT_iface;
+
+    return S_OK;
+}
+
 static HRESULT WINAPI foldercoll_QueryInterface(IFolderCollection *iface, REFIID riid, void **obj)
 {
     struct foldercollection *This = impl_from_IFolderCollection(iface);
@@ -1147,6 +1560,162 @@ static HRESULT create_filecoll(BSTR path, IFileCollection **files)
     }
 
     *files = &This->IFileCollection_iface;
+    return S_OK;
+}
+
+static HRESULT WINAPI drivecoll_QueryInterface(IDriveCollection *iface, REFIID riid, void **obj)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+
+    TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
+
+    *obj = NULL;
+
+    if (IsEqualIID( riid, &IID_IDriveCollection ) ||
+        IsEqualIID( riid, &IID_IDispatch ) ||
+        IsEqualIID( riid, &IID_IUnknown ))
+    {
+        *obj = iface;
+        IDriveCollection_AddRef(iface);
+    }
+    else
+        return E_NOINTERFACE;
+
+    return S_OK;
+}
+
+static ULONG WINAPI drivecoll_AddRef(IDriveCollection *iface)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI drivecoll_Release(IDriveCollection *iface)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+    TRACE("(%p)->(%d)\n", This, ref);
+
+    if (!ref)
+        heap_free(This);
+
+    return ref;
+}
+
+static HRESULT WINAPI drivecoll_GetTypeInfoCount(IDriveCollection *iface, UINT *pctinfo)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+    *pctinfo = 1;
+    return S_OK;
+}
+
+static HRESULT WINAPI drivecoll_GetTypeInfo(IDriveCollection *iface, UINT iTInfo,
+                                        LCID lcid, ITypeInfo **ppTInfo)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    TRACE("(%p)->(%u %u %p)\n", This, iTInfo, lcid, ppTInfo);
+    return get_typeinfo(IDriveCollection_tid, ppTInfo);
+}
+
+static HRESULT WINAPI drivecoll_GetIDsOfNames(IDriveCollection *iface, REFIID riid,
+                                        LPOLESTR *rgszNames, UINT cNames,
+                                        LCID lcid, DISPID *rgDispId)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %u %u %p)\n", This, debugstr_guid(riid), rgszNames, cNames, lcid, rgDispId);
+
+    hr = get_typeinfo(IDriveCollection_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI drivecoll_Invoke(IDriveCollection *iface, DISPID dispIdMember,
+                                      REFIID riid, LCID lcid, WORD wFlags,
+                                      DISPPARAMS *pDispParams, VARIANT *pVarResult,
+                                      EXCEPINFO *pExcepInfo, UINT *puArgErr)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %d %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+           lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IDriveCollection_tid, &typeinfo);
+    if(SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
+}
+
+static HRESULT WINAPI drivecoll_get_Item(IDriveCollection *iface, VARIANT key, IDrive **drive)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    FIXME("(%p)->(%p): stub\n", This, drive);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI drivecoll_get__NewEnum(IDriveCollection *iface, IUnknown **ppenum)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+
+    TRACE("(%p)->(%p)\n", This, ppenum);
+
+    if(!ppenum)
+        return E_POINTER;
+
+    return create_drivecoll_enum(This, ppenum);
+}
+
+static HRESULT WINAPI drivecoll_get_Count(IDriveCollection *iface, LONG *count)
+{
+    struct drivecollection *This = impl_from_IDriveCollection(iface);
+    FIXME("(%p)->(%p): stub\n", This, count);
+    return E_NOTIMPL;
+}
+
+static const IDriveCollectionVtbl drivecollectionvtbl = {
+    drivecoll_QueryInterface,
+    drivecoll_AddRef,
+    drivecoll_Release,
+    drivecoll_GetTypeInfoCount,
+    drivecoll_GetTypeInfo,
+    drivecoll_GetIDsOfNames,
+    drivecoll_Invoke,
+    drivecoll_get_Item,
+    drivecoll_get__NewEnum,
+    drivecoll_get_Count
+};
+
+static HRESULT create_drivecoll(IDriveCollection **drives)
+{
+    struct drivecollection *This;
+
+    *drives = NULL;
+
+    This = heap_alloc(sizeof(*This));
+    if (!This) return E_OUTOFMEMORY;
+
+    This->IDriveCollection_iface.lpVtbl = &drivecollectionvtbl;
+    This->ref = 1;
+    This->drives = GetLogicalDrives();
+
+    *drives = &This->IDriveCollection_iface;
     return S_OK;
 }
 
@@ -1944,9 +2513,8 @@ static HRESULT WINAPI filesys_Invoke(IFileSystem3 *iface, DISPID dispIdMember,
 
 static HRESULT WINAPI filesys_get_Drives(IFileSystem3 *iface, IDriveCollection **ppdrives)
 {
-    FIXME("%p %p\n", iface, ppdrives);
-
-    return E_NOTIMPL;
+    TRACE("%p %p\n", iface, ppdrives);
+    return create_drivecoll(ppdrives);
 }
 
 static HRESULT WINAPI filesys_BuildPath(IFileSystem3 *iface, BSTR Path,

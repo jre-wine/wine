@@ -1085,7 +1085,8 @@ struct wined3d_context
     DWORD fixed_function_usage_map : 8; /* MAX_TEXTURES, 8 */
     DWORD lowest_disabled_stage : 4;    /* Max MAX_TEXTURES, 8 */
     DWORD rebind_fbo : 1;
-    DWORD padding : 19;
+    DWORD needs_set : 1;
+    DWORD padding : 18;
     DWORD shader_update_mask;
     DWORD constant_update_mask;
     DWORD                   numbered_array_mask;
@@ -1103,6 +1104,7 @@ struct wined3d_context
     HGLRC restore_ctx;
     HDC restore_dc;
     int restore_pf;
+    HWND restore_pf_win;
     HGLRC                   glCtx;
     HWND                    win_handle;
     HDC                     hdc;
@@ -1348,10 +1350,11 @@ struct wined3d_pixel_format
 
 enum wined3d_pci_vendor
 {
-    HW_VENDOR_SOFTWARE                 = 0x0000,
-    HW_VENDOR_AMD                      = 0x1002,
-    HW_VENDOR_NVIDIA                   = 0x10de,
-    HW_VENDOR_INTEL                    = 0x8086,
+    HW_VENDOR_SOFTWARE              = 0x0000,
+    HW_VENDOR_AMD                   = 0x1002,
+    HW_VENDOR_NVIDIA                = 0x10de,
+    HW_VENDOR_VMWARE                = 0x15ad,
+    HW_VENDOR_INTEL                 = 0x8086,
 };
 
 enum wined3d_pci_device
@@ -1472,6 +1475,8 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX765M     = 0x11e2,
     CARD_NVIDIA_GEFORCE_GTX770M     = 0x11e0,
     CARD_NVIDIA_GEFORCE_GTX770      = 0x1184,
+
+    CARD_VMWARE_SVGA3D              = 0x0405,
 
     CARD_INTEL_830M                 = 0x3577,
     CARD_INTEL_855GM                = 0x3582,
