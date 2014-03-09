@@ -1,6 +1,11 @@
-wine-unstable (1.7.13-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.13-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release:
+    - More Task Scheduler support.
+    - A few more Direct3D 10 interfaces.
+    - More Windows Media Player stubs.
+    - ARM code generation improvements.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sun, 09 Mar 2014 19:02:48 +0000
 
