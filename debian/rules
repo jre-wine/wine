@@ -29,13 +29,23 @@ endif
 # additional files to generate
 INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
 
+# When building the unstable package, conflicts with stable packages end
+# up marked -unstable-unstable, so we drop them; but this is conditioned
+# to avoid running sed with s///g
+ifneq (, $(VERSUFFIX))
+DROPSUFFIX=-e 's/$(VERSUFFIX)$(VERSUFFIX)//g'
+else
+DROPSUFFIX=
+endif
+
 debian/control: debian/control.in
 	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
 	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
 	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
 	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
-	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
+	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' \
+	    $(DROPSUFFIX) $< > $@
 
 debian/%$(VERSUFFIX).docs: debian/%.docs-common
 	cp $< $@
