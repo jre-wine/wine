@@ -1,0 +1,11 @@
+--- a/Make.vars.in
++++ b/Make.vars.in
+@@ -8,7 +8,7 @@
+ datadir         = @datadir@
+ mandir          = @mandir@
+ fontdir         = ${datadir}/wine/fonts
+-includedir      = @includedir@/wine
++includedir      = @includedir@
+ dlldir          = @dlldir@
+ fakedlldir      = ${dlldir}/fakedlls
+ top_srcdir      = @top_srcdir@

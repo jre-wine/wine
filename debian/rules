@@ -9,6 +9,7 @@ VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine
 
 DATADIR=/usr/share/wine$(VERSUFFIX)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
+INCLUDEDIR=/usr/include/wine$(VERSUFFIX)
 
 # configure options
 CONFLAGS=--without-hal \
@@ -17,7 +18,7 @@ CONFLAGS=--without-hal \
 	 --mandir=/usr/share/man \
 	 --datarootdir=$(DATADIR) \
 	 --exec-prefix=/$(LIBDIR) \
-	 --includedir=/usr/include \
+	 --includedir=/$(INCLUDEDIR) \
 	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
 
 # enable wine64 on amd64

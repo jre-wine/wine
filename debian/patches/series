@@ -1,2 +1,3 @@
 manpages.patch
 printer-resolution.patch
+move-include-to-versuffix.patch
