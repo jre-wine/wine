@@ -56,6 +56,7 @@ Build-Depends:
  prelink [linux-any],
  gettext,
  libgettextpo-dev,
+ libosmesa6-dev,
 Standards-Version: 3.9.5
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
