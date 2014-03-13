@@ -4,6 +4,8 @@ wine-unstable (1.7.14-2) UNRELEASED; urgency=medium
   * Until we implement full side-by-side installation with the stable wine
     packages, have wine-unstable conflict with wine and wine64-unstable
     with wine64 (closes: #741224, #741315).
+  * Install README.winedump as a file in the appropriate, suffixed doc
+    directory (closes: #741226).
 
  -- Stephen Kitt <skitt@debian.org>  Thu, 13 Mar 2014 08:03:57 +0100
 
