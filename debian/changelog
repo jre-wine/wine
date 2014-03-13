@@ -9,6 +9,8 @@ wine-unstable (1.7.14-2) UNRELEASED; urgency=medium
   * Build-depend on gettext and libgettextpo-dev to enable PO rebuild
     support in the development tools.
   * Build-depend on libosmesa6-dev to enable offscreen OpenGL rendering.
+  * Build-depend on libgstreamer-plugins-base0.10-dev to enable
+    gstreamer support.
 
  -- Stephen Kitt <skitt@debian.org>  Thu, 13 Mar 2014 08:03:57 +0100
 
