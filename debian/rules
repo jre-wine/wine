@@ -55,8 +55,8 @@ debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
-	ln -s /usr/share/misc/config.sub tools/config.sub
-	ln -s /usr/share/misc/config.guess tools/config.guess
+	ln -sf /usr/share/misc/config.sub tools/config.sub
+	ln -sf /usr/share/misc/config.guess tools/config.guess
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	dh_auto_configure -- $(CONFLAGS)
 endif

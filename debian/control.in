@@ -48,7 +48,7 @@ Build-Depends:
  autotools-dev,
  libasound2-dev,
  libncurses5-dev,
- libgphoto2-2-dev,
+ libgphoto2-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
  kfreebsd-kernel-headers [kfreebsd-any],

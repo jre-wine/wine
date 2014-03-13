@@ -1,6 +1,14 @@
-wine-unstable (1.7.14-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.14-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release:
+    - More Task Scheduler support.
+    - Improvements for AVI encoding support.
+    - More VisualBasic interfaces in MSXML.
+    - Support for deflate content encoding in Wininet.
+    - Some fixes for monochrome printers.
+    - Various bug fixes.
+  * Replace libgphoto2-2-dev build dependency with libgphoto2-dev
+    (closes: #739357)
 
  -- Michael Gilbert <mgilbert@debian.org>  Sun, 09 Mar 2014 19:05:11 +0000
 
