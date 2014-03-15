@@ -1,3 +1,9 @@
+wine-unstable (1.7.14-3) unstable; urgency=medium
+
+  * wine32-unstable also needs to conflict with wine32.
+
+ -- Stephen Kitt <skitt@debian.org>  Sat, 15 Mar 2014 13:55:13 +0100
+
 wine-unstable (1.7.14-2) unstable; urgency=medium
 
   * Install header files in /usr/include/wine-unstable (closes: #739583).
