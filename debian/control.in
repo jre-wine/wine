@@ -75,6 +75,14 @@ Suggests:
  binfmt-support,
  ttf-mscorefonts-installer,
  avscan | klamav | clamav,
+Breaks:
+ wine32 (<< 1.6.1-8),
+ wine64 (<< 1.6.1-8),
+ wine-bin (<< 1.6.1-1),
+ wine64-bin (<< 1.6.1-1),
+ libwine (<< 1.6.1-1),
+ libwine-bin (<< 1.6.1-1),
+ libwine-dev (<< 1.6.1-1),
 Replaces:
  wine32 (<< 1.6.1-8),
  wine64 (<< 1.6.1-8),
@@ -99,6 +107,10 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwine-gecko-2.21
+Breaks:
+ wine (<< 1.6.1-9),
+ wine-bin (<< 1.5.31-1),
+ libwine-bin (<< 1.5.31-1),
 Replaces:
  wine (<< 1.6.1-9),
  wine-bin (<< 1.5.31-1),
@@ -118,6 +130,8 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwine-gecko-2.21
+Breaks:
+ wine (<< 1.6.1-9),
 Replaces:
  wine (<< 1.6.1-9),
 Conflicts:
@@ -138,6 +152,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwine-dev (= ${binary:Version}),
+Breaks:
+ libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
 Description: Windows API implementation - 32-bit developer tools
@@ -153,6 +169,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwine-dev (= ${binary:Version}),
+Breaks:
+ libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
 Description: Windows API implementation - 64-bit developer tools
