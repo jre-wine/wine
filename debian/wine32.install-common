@@ -1,9 +1,2 @@
-usr/bin/wine32
-
-usr/lib/*/*/bin/wine
-usr/lib/*/*/bin/wine-preloader
-
-usr/lib/*/*/bin/wine32
-usr/lib/*/*/bin/wine32-preloader
-
-usr/share/man/man1/wine32.1
+usr/lib/*/wine
+usr/lib/*/wine-preloader

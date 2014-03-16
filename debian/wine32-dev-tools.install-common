@@ -7,5 +7,3 @@ debian/tmp/usr/lib/*/*/bin/winedump
 debian/tmp/usr/lib/*/*/bin/winemaker
 debian/tmp/usr/lib/*/*/bin/wmc
 debian/tmp/usr/lib/*/*/bin/wrc
-
-tools/winedump/README.winedump usr/share/doc/wine32-dev-tools@VERSUFFIX@

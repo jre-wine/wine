@@ -2,18 +2,18 @@
 
 set -e
 
-wine=/usr/bin/wine32
-if test "$(file -b -L "$1" | cut -d\  -f1)" = "PE32+" -o "$WINEARCH" = "win64"; then
-    wine=/usr/bin/wine64
-fi
+wine=/usr/lib/wine-unstable/wine-unstable
+wine64=/usr/lib/wine-unstable/wine64-unstable
 
-if test -f $wine; then
+if test -x $wine; then
     $wine "$@"
-else
-    echo "unable to find wine executable: the $(basename $wine) package probably needs to be installed."
+elif test -x $wine64; then
+    $wine64 "$@"
     if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures)" != "i386" ]; then
-        echo "and it looks like multiarch needs to be enabled as well.  as root, please"
+        echo "it looks like multiarch needs to be enabled.  as root, please"
         echo "execute \"dpkg --add-architecture i386 && apt-get install wine32\""
     fi
+else
+    echo "error: unable to find wine executable.  this shouldn't happen."
     exit 1
 fi

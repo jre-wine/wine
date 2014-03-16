@@ -20,11 +20,15 @@
 # License along with this library; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
 
-appname=`basename "$0" .exe`.exe
+appname=$(basename "$0" .exe).exe
 
 if test -z $WINEARCH; then
     test ! -z "$WINEPREFIX" || WINEPREFIX="$HOME/.wine"
-    wine=$(cat "$WINEPREFIX/system.reg" | grep ^\#arch= | cut -d= -f2 | sed s/win/wine/)
+    if test -e $WINEPREFIX/system.reg; then
+        wine=$(cat "$WINEPREFIX/system.reg" | grep ^\#arch= | cut -d= -f2 | sed s/win/wine/)
+    else
+        wine=/usr/bin/wine
+    fi
 else
     wine=$(echo "$WINEARCH" | sed s/win/wine/)
 fi

@@ -1,3 +1,11 @@
+wine-unstable (1.7.14-4) unstable; urgency=medium
+
+  * Build against gstreamer 1.0.
+  * Install binaries to /usr/lib/wine-unstable.
+  * Check for system.reg in wine-wrapper (closes: #739863).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 15 Mar 2014 21:09:35 +0000
+
 wine-unstable (1.7.14-3) unstable; urgency=medium
 
   * wine32-unstable also needs to conflict with wine32.

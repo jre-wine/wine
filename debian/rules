@@ -7,9 +7,10 @@ export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
-DATADIR=/usr/share/wine$(VERSUFFIX)
-LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
+MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+LIBDIR=usr/lib/$(MULTIARCH)/wine$(VERSUFFIX)
 INCLUDEDIR=/usr/include/wine$(VERSUFFIX)
+DATADIR=/usr/share/wine$(VERSUFFIX)
 
 # configure options
 CONFLAGS=--without-hal \
@@ -51,10 +52,10 @@ debian/%$(VERSUFFIX).docs: debian/%.docs-common
 	cp $< $@
 
 debian/%$(VERSUFFIX).links: debian/%.links-common
-	cp $< $@
+	sed s/VERSION/$(VERSUFFIX)/g $< > $@
 
 debian/%$(VERSUFFIX).install: debian/%.install-common
-	sed 's/@VERSUFFIX@/$(VERSUFFIX)/g' < $< > $@
+	cp $< $@
 
 debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
 	cp $< $@
@@ -74,17 +75,11 @@ endif
 
 override_dh_install: $(INSTALLS)
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
-	mkdir -p debian/tmp/usr/bin
-	ln -s ../../$(LIBDIR)/bin/wine32 debian/tmp/usr/bin/wine32 || true
-	ln -s ../../$(LIBDIR)/bin/wine64 debian/tmp/usr/bin/wine64 || true
-	cd debian/tmp/$(LIBDIR)/bin && mv wine64 wine || true
-	cd debian/tmp/$(LIBDIR)/bin && mv wine64-preloader wine-preloader || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine32 || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine64 || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine32-preloader || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine64-preloader || true
-	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine32.1
-	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
+	mkdir -p debian/tmp/usr/lib/wine$(VERSUFFIX)
+	cp debian/tmp/$(LIBDIR)/bin/wine debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/bin/wine64 debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/bin/wine64-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
 	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
 	cp tools/winedump/README tools/winedump/README.winedump

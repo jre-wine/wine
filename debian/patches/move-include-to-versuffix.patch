@@ -1,3 +1,6 @@
+description: don't alter the given include path
+author: Stephen Kitt
+
 --- a/Make.vars.in
 +++ b/Make.vars.in
 @@ -8,7 +8,7 @@
