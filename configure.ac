@@ -215,13 +215,16 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      fi
    fi
    if test -z "$wine_cv_toolsdir"; then
+     wine_makedep=tools/makedep
      wine_cv_toolsdir="\$(top_builddir)"
    elif test -d "$wine_cv_toolsdir/tools/winebuild"; then
+     wine_makedep=$wine_cv_toolsdir/tools/makedep
      case "$wine_cv_toolsdir" in
        /*) ;;
        *)  wine_cv_toolsdir="\$(top_builddir)/$wine_cv_toolsdir" ;;
      esac
      enable_tools=${enable_tools:-no}
+     test -f "$wine_makedep" || AC_MSG_ERROR([the Wine tools have not yet been built in $wine_cv_toolsdir])
    else
      AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
    fi])
@@ -2593,7 +2596,7 @@ CLEAN_FILES = *.o *.a *.so *.res *.fake *.ok *.tab.[[ch]] *.yy.c
 .MAKEFILEDEPS:
 all: Makefile
 Makefile: $srcdir/Makefile.in $srcdir/Make.vars.in config.status \$(MAKEDEP)
-	@./config.status Make.tmp Makefile && \$(MAKEDEP) .])
+	@./config.status Make.tmp Makefile])
 
 test "$srcdir" = . && WINE_APPEND_RULE(
 [all: .gitignore
@@ -2841,6 +2844,7 @@ WINE_CONFIG_TEST(dlls/dsound/tests)
 WINE_CONFIG_DLL(dssenh)
 WINE_CONFIG_TEST(dlls/dssenh/tests)
 WINE_CONFIG_DLL(dswave,,[clean])
+WINE_CONFIG_TEST(dlls/dswave/tests)
 WINE_CONFIG_DLL(dwmapi,,[implib])
 WINE_CONFIG_DLL(dwrite,,[implib])
 WINE_CONFIG_TEST(dlls/dwrite/tests)
@@ -3023,7 +3027,7 @@ WINE_CONFIG_DLL(msxml6,,[clean])
 WINE_CONFIG_DLL(nddeapi,,[implib])
 WINE_CONFIG_DLL(netapi32,,[implib])
 WINE_CONFIG_TEST(dlls/netapi32/tests)
-WINE_CONFIG_DLL(netcfgx)
+WINE_CONFIG_DLL(netcfgx,,[clean])
 WINE_CONFIG_DLL(newdev,,[implib])
 WINE_CONFIG_DLL(normaliz,,[implib])
 WINE_CONFIG_DLL(npmshtml)
@@ -3108,6 +3112,7 @@ WINE_CONFIG_DLL(scarddlg)
 WINE_CONFIG_DLL(sccbase)
 WINE_CONFIG_DLL(schannel)
 WINE_CONFIG_TEST(dlls/schannel/tests)
+WINE_CONFIG_DLL(schedsvc,,[clean])
 WINE_CONFIG_DLL(scrrun,,[clean])
 WINE_CONFIG_TEST(dlls/scrrun/tests,[clean])
 WINE_CONFIG_DLL(scsiport.sys)
@@ -3461,7 +3466,7 @@ fi
 AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
 [wine_fn_output_makefile ()
 {
-    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && return
+    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && "$wine_makedep" . && return
 `cat $wine_rules_file`
 _WINE_EOF
     AS_ERROR([could not create Makefile])

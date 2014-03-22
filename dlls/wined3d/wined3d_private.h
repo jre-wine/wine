@@ -1785,12 +1785,11 @@ struct wined3d
 {
     LONG ref;
     DWORD flags;
-    UINT dxVersion;
     UINT adapter_count;
     struct wined3d_adapter adapters[1];
 };
 
-HRESULT wined3d_init(struct wined3d *wined3d, UINT version, DWORD flags) DECLSPEC_HIDDEN;
+HRESULT wined3d_init(struct wined3d *wined3d, DWORD flags) DECLSPEC_HIDDEN;
 BOOL wined3d_register_window(HWND window, struct wined3d_device *device) DECLSPEC_HIDDEN;
 void wined3d_unregister_window(HWND window) DECLSPEC_HIDDEN;
 
@@ -2006,8 +2005,8 @@ struct wined3d_resource
     UINT size;
     DWORD priority;
     void *heap_memory;
-    struct list privateData;
     struct list resource_list_entry;
+    struct wined3d_private_store private_store;
 
     void *parent;
     const struct wined3d_parent_ops *parent_ops;

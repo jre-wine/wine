@@ -5576,6 +5576,8 @@ static void test_tr_elem(IHTMLElement *elem)
     IHTMLElementCollection *col;
     IHTMLTableRow *row;
     HRESULT hres;
+    BSTR bstr;
+    LONG lval;
 
     static const elem_type_t cell_types[] = {ET_TD,ET_TD};
 
@@ -5591,6 +5593,40 @@ static void test_tr_elem(IHTMLElement *elem)
 
     test_elem_collection((IUnknown*)col, cell_types, sizeof(cell_types)/sizeof(*cell_types));
     IHTMLElementCollection_Release(col);
+
+    bstr = a2bstr("left");
+    hres = IHTMLTableRow_put_align(row, bstr);
+    ok(hres == S_OK, "set_align failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTableRow_get_align(row, &bstr);
+    ok(hres == S_OK, "get_align failed: %08x\n", hres);
+    ok(bstr != NULL, "get_align returned NULL\n");
+    ok(!strcmp_wa(bstr, "left"), "get_align returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    bstr = a2bstr("top");
+    hres = IHTMLTableRow_put_vAlign(row, bstr);
+    ok(hres == S_OK, "set_valign failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTableRow_get_vAlign(row, &bstr);
+    ok(hres == S_OK, "get_valign failed: %08x\n", hres);
+    ok(bstr != NULL, "get_valign returned NULL\n");
+    ok(!strcmp_wa(bstr, "top"), "get_valign returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
+
+    lval = 0xdeadbeef;
+    hres = IHTMLTableRow_get_rowIndex(row, &lval);
+    ok(hres == S_OK, "get_rowIndex failed: %08x\n", hres);
+    ok(lval == 1, "get_rowIndex returned %d\n", lval);
+
+    lval = 0xdeadbeef;
+    hres = IHTMLTableRow_get_sectionRowIndex(row, &lval);
+    ok(hres == S_OK, "get_sectionRowIndex failed: %08x\n", hres);
+    ok(lval == 1, "get_sectionRowIndex returned %d\n", lval);
 
     IHTMLTableRow_Release(row);
 }
@@ -5657,6 +5693,7 @@ static void test_table_elem(IHTMLElement *elem)
     IHTMLDOMNode *node;
     VARIANT v;
     HRESULT hres;
+    BSTR bstr;
 
     static const elem_type_t row_types[] = {ET_TR,ET_TR};
     static const elem_type_t all_types[] = {ET_TBODY,ET_TR,ET_TR,ET_TD,ET_TD};
@@ -5709,6 +5746,18 @@ static void test_table_elem(IHTMLElement *elem)
     ok(hres == S_OK, "put_cellSpacing = %08x\n", hres);
     test_table_cell_spacing(table, "11");
     VariantClear(&v);
+
+    bstr = a2bstr("left");
+    hres = IHTMLTable_put_align(table, bstr);
+    ok(hres == S_OK, "set_align failed: %08x\n", hres);
+    SysFreeString(bstr);
+
+    bstr = NULL;
+    hres = IHTMLTable_get_align(table, &bstr);
+    ok(hres == S_OK, "get_align failed: %08x\n", hres);
+    ok(bstr != NULL, "get_align returned NULL\n");
+    ok(!strcmp_wa(bstr, "left"), "get_align returned %s\n", wine_dbgstr_w(bstr));
+    SysFreeString(bstr);
 
     IHTMLTable_Release(table);
 }
@@ -6014,7 +6063,6 @@ static void test_stylesheets(IHTMLDocument2 *doc)
     hres = IHTMLStyleSheetsCollection_item(col, &idx, &res);
     ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
     ok(V_VT(&res) == VT_EMPTY, "V_VT(res) = %d\n", V_VT(&res));
-    ok(V_DISPATCH(&res) != NULL, "V_DISPATCH(&res) == NULL\n");
     VariantClear(&res);
 
     IHTMLStyleSheetsCollection_Release(col);
