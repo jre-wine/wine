@@ -54,6 +54,7 @@ struct drivecollection {
     IDriveCollection IDriveCollection_iface;
     LONG ref;
     DWORD drives;
+    LONG count;
 };
 
 struct enumdata {
@@ -108,6 +109,10 @@ struct textstream {
     LONG ref;
 
     IOMode mode;
+    BOOL unicode;
+    BOOL first_write;
+    LARGE_INTEGER size;
+    HANDLE file;
 };
 
 enum iotype {
@@ -207,7 +212,7 @@ static BOOL textstream_check_iomode(struct textstream *This, enum iotype type)
     if (type == IORead)
         return This->mode == ForWriting || This->mode == ForAppending;
     else
-        return TRUE;
+        return This->mode == ForReading;
 }
 
 static HRESULT WINAPI textstream_QueryInterface(ITextStream *iface, REFIID riid, void **obj)
@@ -244,7 +249,10 @@ static ULONG WINAPI textstream_Release(ITextStream *iface)
     TRACE("(%p)->(%d)\n", This, ref);
 
     if (!ref)
+    {
+        CloseHandle(This->file);
         heap_free(This);
+    }
 
     return ref;
 }
@@ -325,8 +333,24 @@ static HRESULT WINAPI textstream_get_Column(ITextStream *iface, LONG *column)
 static HRESULT WINAPI textstream_get_AtEndOfStream(ITextStream *iface, VARIANT_BOOL *eos)
 {
     struct textstream *This = impl_from_ITextStream(iface);
-    FIXME("(%p)->(%p): stub\n", This, eos);
-    return E_NOTIMPL;
+    LARGE_INTEGER pos, dist;
+
+    TRACE("(%p)->(%p)\n", This, eos);
+
+    if (!eos)
+        return E_POINTER;
+
+    if (textstream_check_iomode(This, IORead)) {
+        *eos = VARIANT_TRUE;
+        return CTL_E_BADFILEMODE;
+    }
+
+    dist.QuadPart = 0;
+    if (!SetFilePointerEx(This->file, dist, &pos, FILE_CURRENT))
+        return E_FAIL;
+
+    *eos = This->size.QuadPart == pos.QuadPart ? VARIANT_TRUE : VARIANT_FALSE;
+    return S_OK;
 }
 
 static HRESULT WINAPI textstream_get_AtEndOfLine(ITextStream *iface, VARIANT_BOOL *eol)
@@ -369,18 +393,87 @@ static HRESULT WINAPI textstream_ReadAll(ITextStream *iface, BSTR *text)
     return E_NOTIMPL;
 }
 
+static HRESULT textstream_writestr(struct textstream *stream, BSTR text)
+{
+    DWORD written = 0;
+    BOOL ret;
+
+    if (stream->unicode) {
+        if (stream->first_write) {
+            static const WCHAR utf16bom = 0xfeff;
+            DWORD written = 0;
+            BOOL ret = WriteFile(stream->file, &utf16bom, sizeof(utf16bom), &written, NULL);
+            if (!ret || written != sizeof(utf16bom))
+                return create_error(GetLastError());
+            stream->first_write = FALSE;
+        }
+
+        ret = WriteFile(stream->file, text, SysStringByteLen(text), &written, NULL);
+        return (ret && written == SysStringByteLen(text)) ? S_OK : create_error(GetLastError());
+    } else {
+        DWORD len = WideCharToMultiByte(CP_ACP, 0, text, SysStringLen(text), NULL, 0, NULL, NULL);
+        char *buffA;
+        HRESULT hr;
+
+        buffA = heap_alloc(len);
+        if (!buffA)
+            return E_OUTOFMEMORY;
+
+        WideCharToMultiByte(CP_ACP, 0, text, SysStringLen(text), buffA, len, NULL, NULL);
+        ret = WriteFile(stream->file, buffA, len, &written, NULL);
+        hr = (ret && written == len) ? S_OK : create_error(GetLastError());
+        heap_free(buffA);
+        return hr;
+    }
+}
+
 static HRESULT WINAPI textstream_Write(ITextStream *iface, BSTR text)
 {
     struct textstream *This = impl_from_ITextStream(iface);
-    FIXME("(%p)->(%s): stub\n", This, debugstr_w(text));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(text));
+
+    if (textstream_check_iomode(This, IOWrite))
+        return CTL_E_BADFILEMODE;
+
+    return textstream_writestr(This, text);
+}
+
+static HRESULT textstream_writecrlf(struct textstream *stream)
+{
+    static const WCHAR crlfW[] = {'\r','\n'};
+    static const char crlfA[] = {'\r','\n'};
+    DWORD written = 0, len;
+    const void *ptr;
+    BOOL ret;
+
+    if (stream->unicode) {
+        ptr = crlfW;
+        len = sizeof(crlfW);
+    }
+    else {
+        ptr = crlfA;
+        len = sizeof(crlfA);
+    }
+
+    ret = WriteFile(stream->file, ptr, len, &written, NULL);
+    return (ret && written == len) ? S_OK : create_error(GetLastError());
 }
 
 static HRESULT WINAPI textstream_WriteLine(ITextStream *iface, BSTR text)
 {
     struct textstream *This = impl_from_ITextStream(iface);
-    FIXME("(%p)->(%s): stub\n", This, debugstr_w(text));
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(text));
+
+    if (textstream_check_iomode(This, IOWrite))
+        return CTL_E_BADFILEMODE;
+
+    hr = textstream_writestr(This, text);
+    if (SUCCEEDED(hr))
+        hr = textstream_writecrlf(This);
+    return hr;
 }
 
 static HRESULT WINAPI textstream_WriteBlankLines(ITextStream *iface, LONG lines)
@@ -434,9 +527,26 @@ static const ITextStreamVtbl textstreamvtbl = {
     textstream_Close
 };
 
-static HRESULT create_textstream(IOMode mode, ITextStream **ret)
+static HRESULT create_textstream(const WCHAR *filename, DWORD disposition, IOMode mode, BOOL unicode, ITextStream **ret)
 {
     struct textstream *stream;
+    DWORD access = 0;
+
+    /* map access mode */
+    switch (mode)
+    {
+    case ForReading:
+        access = GENERIC_READ;
+        break;
+    case ForWriting:
+        access = GENERIC_WRITE;
+        break;
+    case ForAppending:
+        access = FILE_APPEND_DATA;
+        break;
+    default:
+        return E_INVALIDARG;
+    }
 
     stream = heap_alloc(sizeof(struct textstream));
     if (!stream) return E_OUTOFMEMORY;
@@ -444,6 +554,21 @@ static HRESULT create_textstream(IOMode mode, ITextStream **ret)
     stream->ITextStream_iface.lpVtbl = &textstreamvtbl;
     stream->ref = 1;
     stream->mode = mode;
+    stream->unicode = unicode;
+    stream->first_write = TRUE;
+
+    stream->file = CreateFileW(filename, access, 0, NULL, disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (stream->file == INVALID_HANDLE_VALUE)
+    {
+        HRESULT hr = create_error(GetLastError());
+        heap_free(stream);
+        return hr;
+    }
+
+    if (mode == ForReading)
+        GetFileSizeEx(stream->file, &stream->size);
+    else
+        stream->size.QuadPart = 0;
 
     *ret = &stream->ITextStream_iface;
     return S_OK;
@@ -761,7 +886,7 @@ static ULONG WINAPI foldercoll_enumvariant_Release(IEnumVARIANT *iface)
     return ref;
 }
 
-static HANDLE start_enumeration(const WCHAR *path, WIN32_FIND_DATAW *data)
+static HANDLE start_enumeration(const WCHAR *path, WIN32_FIND_DATAW *data, BOOL file)
 {
     static const WCHAR allW[] = {'*',0};
     WCHAR pathW[MAX_PATH];
@@ -776,10 +901,10 @@ static HANDLE start_enumeration(const WCHAR *path, WIN32_FIND_DATAW *data)
     handle = FindFirstFileW(pathW, data);
     if (handle == INVALID_HANDLE_VALUE) return 0;
 
-    /* find first dir */
+    /* find first dir/file */
     while (1)
     {
-        if (is_dir_data(data))
+        if (file ? is_file_data(data) : is_dir_data(data))
             break;
 
         if (!FindNextFileW(handle, data))
@@ -807,7 +932,7 @@ static HRESULT WINAPI foldercoll_enumvariant_Next(IEnumVARIANT *iface, ULONG cel
 
     if (!handle)
     {
-        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data);
+        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data, FALSE);
         if (!handle) return S_FALSE;
 
         This->data.u.foldercoll.find = handle;
@@ -857,7 +982,7 @@ static HRESULT WINAPI foldercoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG cel
 
     if (!handle)
     {
-        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data);
+        handle = start_enumeration(This->data.u.foldercoll.coll->path, &data, FALSE);
         if (!handle) return S_FALSE;
 
         This->data.u.foldercoll.find = handle;
@@ -957,43 +1082,19 @@ static HRESULT WINAPI filecoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt,
     if (fetched)
         *fetched = 0;
 
+    if (!celt) return S_OK;
+
     if (!handle)
     {
-        static const WCHAR allW[] = {'*',0};
-        WCHAR pathW[MAX_PATH];
-        BSTR parent = This->data.u.filecoll.coll->path;
-        int len;
-
-        strcpyW(pathW, parent);
-        len = SysStringLen(parent);
-        if (parent[len-1] != '\\')
-            strcatW(pathW, bsW);
-        strcatW(pathW, allW);
-        handle = FindFirstFileW(pathW, &data);
-        if (handle == INVALID_HANDLE_VALUE)
-            return S_FALSE;
-
-        while (1)
-        {
-            if (is_file_data(&data))
-                break;
-            else
-                if (!FindNextFileW(handle, &data))
-                {
-                    FindClose(handle);
-                    return S_FALSE;
-                }
-        }
-
+        handle = start_enumeration(This->data.u.filecoll.coll->path, &data, TRUE);
+        if (!handle) return S_FALSE;
         This->data.u.filecoll.find = handle;
     }
-    else if (celt)
-        FindNextFileW(handle, &data);
+    else if (!FindNextFileW(handle, &data))
+        return S_FALSE;
 
     do
     {
-        if (count >= celt) break;
-
         if (is_file_data(&data))
         {
             IFile *file;
@@ -1007,17 +1108,14 @@ static HRESULT WINAPI filecoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt,
 
             V_VT(&var[count]) = VT_DISPATCH;
             V_DISPATCH(&var[count]) = (IDispatch*)file;
-            count++;
+            if (++count >= celt) break;
         }
     } while (FindNextFileW(handle, &data));
-
-    if (count < celt)
-        return S_FALSE;
 
     if (fetched)
         *fetched = count;
 
-    return S_OK;
+    return (count < celt) ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI filecoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG celt)
@@ -1028,9 +1126,22 @@ static HRESULT WINAPI filecoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG celt)
 
     TRACE("(%p)->(%d)\n", This, celt);
 
-    while (FindNextFileW(handle, &data) && celt)
+    if (!celt) return S_OK;
+
+    if (!handle)
+    {
+        handle = start_enumeration(This->data.u.filecoll.coll->path, &data, TRUE);
+        if (!handle) return S_FALSE;
+        This->data.u.filecoll.find = handle;
+    }
+    else if (!FindNextFileW(handle, &data))
+        return S_FALSE;
+
+    do
+    {
         if (is_file_data(&data))
             --celt;
+    } while (celt && FindNextFileW(handle, &data));
 
     return celt ? S_FALSE : S_OK;
 }
@@ -1075,6 +1186,7 @@ static HRESULT create_filecoll_enum(struct filecollection *collection, IUnknown 
 
     This->IEnumVARIANT_iface.lpVtbl = &filecollenumvariantvtbl;
     This->ref = 1;
+    This->data.u.filecoll.find = NULL;
     This->data.u.filecoll.coll = collection;
     IFileCollection_AddRef(&collection->IFileCollection_iface);
 
@@ -1117,16 +1229,18 @@ static HRESULT WINAPI drivecoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt
 {
     struct enumvariant *This = impl_from_IEnumVARIANT(iface);
     ULONG count = 0;
-    HRESULT hr;
 
     TRACE("(%p)->(%d %p %p)\n", This, celt, var, fetched);
 
     if (fetched)
         *fetched = 0;
 
+    if (!celt) return S_OK;
+
     while (find_next_drive(This) == S_OK)
     {
         IDrive *drive;
+        HRESULT hr;
 
         hr = create_drive('A' + This->data.u.drivecoll.cur, &drive);
         if (FAILED(hr)) return hr;
@@ -1137,22 +1251,24 @@ static HRESULT WINAPI drivecoll_enumvariant_Next(IEnumVARIANT *iface, ULONG celt
         if (++count >= celt) break;
     }
 
-    if (count < celt)
-        return S_FALSE;
-
     if (fetched)
         *fetched = count;
 
-    return S_OK;
+    return (count < celt) ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI drivecoll_enumvariant_Skip(IEnumVARIANT *iface, ULONG celt)
 {
     struct enumvariant *This = impl_from_IEnumVARIANT(iface);
 
-    FIXME("(%p)->(%d): stub\n", This, celt);
+    TRACE("(%p)->(%d)\n", This, celt);
 
-    return E_NOTIMPL;
+    if (!celt) return S_OK;
+
+    while (celt && find_next_drive(This) == S_OK)
+        celt--;
+
+    return celt ? S_FALSE : S_OK;
 }
 
 static HRESULT WINAPI drivecoll_enumvariant_Reset(IEnumVARIANT *iface)
@@ -1685,8 +1801,13 @@ static HRESULT WINAPI drivecoll_get__NewEnum(IDriveCollection *iface, IUnknown *
 static HRESULT WINAPI drivecoll_get_Count(IDriveCollection *iface, LONG *count)
 {
     struct drivecollection *This = impl_from_IDriveCollection(iface);
-    FIXME("(%p)->(%p): stub\n", This, count);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, count);
+
+    if (!count) return E_POINTER;
+
+    *count = This->count;
+    return S_OK;
 }
 
 static const IDriveCollectionVtbl drivecollectionvtbl = {
@@ -1705,6 +1826,7 @@ static const IDriveCollectionVtbl drivecollectionvtbl = {
 static HRESULT create_drivecoll(IDriveCollection **drives)
 {
     struct drivecollection *This;
+    DWORD mask;
 
     *drives = NULL;
 
@@ -1713,7 +1835,10 @@ static HRESULT create_drivecoll(IDriveCollection **drives)
 
     This->IDriveCollection_iface.lpVtbl = &drivecollectionvtbl;
     This->ref = 1;
-    This->drives = GetLogicalDrives();
+    This->drives = mask = GetLogicalDrives();
+    /* count set bits */
+    for (This->count = 0; mask; This->count++)
+        mask &= mask - 1;
 
     *drives = &This->IDriveCollection_iface;
     return S_OK;
@@ -1825,8 +1950,14 @@ static HRESULT WINAPI folder_Invoke(IFolder *iface, DISPID dispIdMember,
 static HRESULT WINAPI folder_get_Path(IFolder *iface, BSTR *path)
 {
     struct folder *This = impl_from_IFolder(iface);
-    FIXME("(%p)->(%p): stub\n", This, path);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, path);
+
+    if(!path)
+        return E_POINTER;
+
+    *path = SysAllocString(This->path);
+    return *path ? S_OK : E_OUTOFMEMORY;
 }
 
 static HRESULT WINAPI folder_get_Name(IFolder *iface, BSTR *name)
@@ -3250,21 +3381,33 @@ static HRESULT WINAPI filesys_CreateFolder(IFileSystem3 *iface, BSTR path,
     return create_folder(path, folder);
 }
 
-static HRESULT WINAPI filesys_CreateTextFile(IFileSystem3 *iface, BSTR FileName,
-                                            VARIANT_BOOL Overwrite, VARIANT_BOOL Unicode,
-                                            ITextStream **ppts)
+static HRESULT WINAPI filesys_CreateTextFile(IFileSystem3 *iface, BSTR filename,
+                                            VARIANT_BOOL overwrite, VARIANT_BOOL unicode,
+                                            ITextStream **stream)
 {
-    FIXME("%p %s %d %d %p\n", iface, debugstr_w(FileName), Overwrite, Unicode, ppts);
+    DWORD disposition;
 
-    return E_NOTIMPL;
+    TRACE("%p %s %d %d %p\n", iface, debugstr_w(filename), overwrite, unicode, stream);
+
+    disposition = overwrite == VARIANT_TRUE ? CREATE_ALWAYS : CREATE_NEW;
+    return create_textstream(filename, disposition, ForWriting, !!unicode, stream);
 }
 
 static HRESULT WINAPI filesys_OpenTextFile(IFileSystem3 *iface, BSTR filename,
                                             IOMode mode, VARIANT_BOOL create,
                                             Tristate format, ITextStream **stream)
 {
-    FIXME("(%p)->(%s %d %d %d %p)\n", iface, debugstr_w(filename), mode, create, format, stream);
-    return create_textstream(mode, stream);
+    DWORD disposition;
+
+    TRACE("(%p)->(%s %d %d %d %p)\n", iface, debugstr_w(filename), mode, create, format, stream);
+    disposition = create == VARIANT_TRUE ? OPEN_ALWAYS : OPEN_EXISTING;
+
+    if (format == TristateUseDefault) {
+        FIXME("default format not handled, defaulting to unicode\n");
+        format = TristateTrue;
+    }
+
+    return create_textstream(filename, disposition, mode, format == TristateTrue, stream);
 }
 
 static HRESULT WINAPI filesys_GetStandardStream(IFileSystem3 *iface,
