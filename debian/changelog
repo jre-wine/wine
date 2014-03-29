@@ -7,6 +7,9 @@ wine (1.6.2-8) UNRELEASED; urgency=medium
   * Correctly break/replace wine-utils << 1.1.25-1 (closes: #739386),
     and mark all the replaced packages as broken too; thanks to Andreas
     Beckmann.
+  * Build-depend on libosmesa6-dev to enable offscreen OpenGL rendering.
+  * Build-depend on libgstreamer-plugins-base0.10-dev to enable
+    gstreamer support.
 
  -- Stephen Kitt <skitt@debian.org>  Mon, 03 Mar 2014 08:34:33 +0100
 
