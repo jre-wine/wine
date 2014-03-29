@@ -4,6 +4,9 @@ wine (1.6.2-8) UNRELEASED; urgency=medium
     full, and specify 1.6.2-8~ as the version to update from (closes:
     #736296); thanks to Andreas Beckmann for explaining everything.
   * Build-depend on libgphoto2-dev (closes: #739356).
+  * Correctly break/replace wine-utils << 1.1.25-1 (closes: #739386),
+    and mark all the replaced packages as broken too; thanks to Andreas
+    Beckmann.
 
  -- Stephen Kitt <skitt@debian.org>  Mon, 03 Mar 2014 08:34:33 +0100
 
