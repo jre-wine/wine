@@ -1,4 +1,4 @@
-wine (1.6.2-8) UNRELEASED; urgency=medium
+wine (1.6.2-8) unstable; urgency=medium
 
   * Use a .maintscript file to handle symlink-to-folder transitions in
     full, and specify 1.6.2-8~ as the version to update from (closes:
@@ -11,7 +11,7 @@ wine (1.6.2-8) UNRELEASED; urgency=medium
   * Build-depend on libgstreamer-plugins-base0.10-dev to enable
     gstreamer support.
 
- -- Stephen Kitt <skitt@debian.org>  Mon, 03 Mar 2014 08:34:33 +0100
+ -- Stephen Kitt <skitt@debian.org>  Sat, 29 Mar 2014 22:39:43 +0100
 
 wine (1.6.2-7) unstable; urgency=medium
 
