@@ -1,0 +1,24 @@
+description: don't append wine to the default path settings
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -666,7 +666,7 @@ AC_CHECK_HEADERS([libprocstat.h],,,
+ 
+ dnl **** Check for working dll ****
+ 
+-AC_SUBST(dlldir,"\${libdir}/wine")
++AC_SUBST(dlldir,"\${libdir}")
+ AC_SUBST(DLLPREFIX,"")
+ AC_SUBST(DLLFLAGS,"-D_REENTRANT")
+ AC_SUBST(LDRPATH_INSTALL,"")
+--- a/Make.vars.in
++++ b/Make.vars.in
+@@ -8,7 +8,7 @@
+ datadir         = @datadir@
+ mandir          = @mandir@
+ fontdir         = ${datadir}/wine/fonts
+-includedir      = @includedir@/wine
++includedir      = @includedir@
+ dlldir          = @dlldir@
+ fakedlldir      = ${dlldir}/fakedlls
+ top_srcdir      = @top_srcdir@

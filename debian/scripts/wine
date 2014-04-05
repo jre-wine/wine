@@ -2,13 +2,15 @@
 
 set -e
 
-wine=/usr/lib/wine-unstable/wine-unstable
-wine64=/usr/lib/wine-unstable/wine64-unstable
+bindir=/usr/lib/$(basename $0)
 
-if test -x $wine; then
-    $wine "$@"
+wine32=$bindir/wine
+wine64=$bindir/wine64
+
+if test -x $wine32; then
+    wine=$wine32
 elif test -x $wine64; then
-    $wine64 "$@"
+    wine=$wine64
     if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures)" != "i386" ]; then
         echo "it looks like multiarch needs to be enabled.  as root, please"
         echo "execute \"dpkg --add-architecture i386 && apt-get install wine32\""
@@ -17,3 +19,11 @@ else
     echo "error: unable to find wine executable.  this shouldn't happen."
     exit 1
 fi
+
+if test -z $WINELOADER; then
+    wineloader=$wine
+else
+    wineloader=$WINELOADER
+fi
+
+WINELOADER=$wineloader $wine "$@"

@@ -1,6 +1,12 @@
-wine-unstable (1.7.15-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.15-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.7.15, released Mar 21, 2014.
+    - New Task Scheduler service.
+    - Many regression test fixes.
+    - Support for exception unwinding in VBScript.
+    - Various bug fixes.
+  * Move /usr/bin/wine to /usr/bin/wine-unstable (closes: #742317).
+  * Fix paths to binaries in helper script (closes: #742021).
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 22 Mar 2014 23:46:57 +0000
 

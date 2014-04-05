@@ -8,17 +8,18 @@ export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
 MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
 LIBDIR=usr/lib/$(MULTIARCH)/wine$(VERSUFFIX)
 INCLUDEDIR=/usr/include/wine$(VERSUFFIX)
 DATADIR=/usr/share/wine$(VERSUFFIX)
 
 # configure options
 CONFLAGS=--without-hal \
-	 --prefix=$(DATADIR) \
+	 --disable-tests \
 	 --libdir=/$(LIBDIR) \
+	 --bindir=/$(LIBDIR) \
 	 --mandir=/usr/share/man \
 	 --datarootdir=$(DATADIR) \
-	 --exec-prefix=/$(LIBDIR) \
 	 --includedir=/$(INCLUDEDIR) \
 	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
 
@@ -76,18 +77,20 @@ endif
 override_dh_install: $(INSTALLS)
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	mkdir -p debian/tmp/usr/lib/wine$(VERSUFFIX)
-	cp debian/tmp/$(LIBDIR)/bin/wine debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/bin/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/bin/wine64 debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/bin/wine64-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
-	cp tools/winedump/README tools/winedump/README.winedump
+	cp debian/tmp/$(LIBDIR)/wine debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/wine64 debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+	cp debian/tmp/$(LIBDIR)/wine64-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
+
+	test -f debian/tmp/usr/lib/wine$(VERSUFFIX)/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX)
+
+	cp debian/scripts/wine debian/tmp/wine$(VERSUFFIX)
+	cp tools/winedump/README debian/tmp/README.winedump
+	cp programs/winedbg/README debian/tmp/README.winedbg
+
 	dh_install
 endif
-
-override_dh_auto_test:
-	# disable upstream's automated testing due to various brokenness
 
 override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)
@@ -95,9 +98,7 @@ override_dh_strip:
 
 override_dh_clean:
 	dh_clean
-	rm -rf debian/libwine-dbg$(VERSUFFIX)
+	rm -f $(INSTALLS)
+	rm -f debian/control
 	rm -f config.log configure tools/config.sub tools/config.guess
-	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
-	rm -f tools/winedump/README.winedump
-	rm -f $(INSTALLS) debian/control
 	make -f debian/rules debian/control
