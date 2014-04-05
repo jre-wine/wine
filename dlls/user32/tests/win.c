@@ -2794,6 +2794,7 @@ static void test_SetForegroundWindow(HWND hwnd)
     BOOL ret;
     HWND hwnd2;
     MSG msg;
+    LONG style;
 
     flush_events( TRUE );
     ShowWindow(hwnd, SW_HIDE);
@@ -2888,6 +2889,19 @@ static void test_SetForegroundWindow(HWND hwnd)
     if (0) check_wnd_state(hwnd2, hwnd2, hwnd2, 0);
     todo_wine ok(GetActiveWindow() == hwnd2, "Expected active window %p, got %p.\n", hwnd2, GetActiveWindow());
     todo_wine ok(GetFocus() == hwnd2, "Expected focus window %p, got %p.\n", hwnd2, GetFocus());
+
+    SetForegroundWindow(hwnd);
+    check_wnd_state(hwnd, hwnd, hwnd, 0);
+    style = GetWindowLongA(hwnd2, GWL_STYLE) | WS_CHILD;
+    ok(SetWindowLongA(hwnd2, GWL_STYLE, style), "SetWindowLong failed\n");
+    ok(SetForegroundWindow(hwnd2), "SetForegroundWindow failed\n");
+    check_wnd_state(hwnd2, hwnd2, hwnd2, 0);
+
+    SetForegroundWindow(hwnd);
+    check_wnd_state(hwnd, hwnd, hwnd, 0);
+    ok(SetWindowLongA(hwnd2, GWL_STYLE, style & (~WS_POPUP)), "SetWindowLong failed\n");
+    ok(!SetForegroundWindow(hwnd2), "SetForegroundWindow failed\n");
+    check_wnd_state(hwnd, hwnd, hwnd, 0);
 
     SetEvent(thread_params.test_finished);
     WaitForSingleObject(thread, INFINITE);
@@ -3720,21 +3734,34 @@ static void test_SetParent(void)
     ret = SetParent(popup, child1);
     ok(ret == desktop, "expected %p, got %p\n", desktop, ret);
     check_parents(popup, child1, child1, 0, 0, parent, popup);
-todo_wine
     check_active_state(popup, 0, popup);
+
+    SetActiveWindow(parent);
+    SetFocus(popup);
+    check_active_state(popup, 0, popup);
+
+    EnableWindow(child1, FALSE);
+    check_active_state(popup, 0, popup);
+    SetFocus(parent);
+    check_active_state(parent, 0, parent);
+    SetFocus(popup);
+    check_active_state(popup, 0, popup);
+    EnableWindow(child1, TRUE);
+
+    ShowWindow(child1, SW_MINIMIZE);
+    SetFocus(parent);
+    check_active_state(parent, 0, parent);
+    SetFocus(popup);
+    check_active_state(popup, 0, popup);
+    ShowWindow(child1, SW_HIDE);
 
     SetActiveWindow(parent);
     SetFocus(parent);
     check_active_state(parent, 0, parent);
 
     bret = SetForegroundWindow(popup);
-todo_wine {
-    ok(bret || broken(!bret), "SetForegroundWindow() failed\n");
-    if (!bret)
-        check_active_state(popup, 0, popup);
-    else
-        check_active_state(popup, popup, popup);
-    }
+    ok(bret, "SetForegroundWindow() failed\n");
+    check_active_state(popup, popup, popup);
 
     ok(DestroyWindow(parent), "DestroyWindow() failed\n");
 
@@ -7483,6 +7510,26 @@ todo_wine
     DestroyWindow(parent);
 }
 
+static void test_window_without_child_style(void)
+{
+    HWND hwnd;
+
+    hwnd = CreateWindowExA(0, "edit", NULL, WS_VISIBLE|WS_CHILD,
+            0, 0, 50, 50, hwndMain, NULL, 0, NULL);
+    ok(hwnd != NULL, "CreateWindow failed\n");
+
+    ok(SetWindowLongA(hwnd, GWL_STYLE, GetWindowLongA(hwnd, GWL_STYLE) & (~WS_CHILD)),
+            "can't remove WS_CHILD style\n");
+
+    SetActiveWindow(hwndMain);
+    PostMessageW(hwnd, WM_LBUTTONUP, 0, 0);
+    SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    check_active_state(hwnd, hwnd, hwnd);
+    flush_events(TRUE);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(win)
 {
     HMODULE user32 = GetModuleHandleA( "user32.dll" );
@@ -7507,6 +7554,32 @@ START_TEST(win)
 
     if (!RegisterWindowClasses()) assert(0);
 
+    hwndMain = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window",
+                               WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+                               WS_MAXIMIZEBOX | WS_POPUP | WS_VISIBLE,
+                               100, 100, 200, 200,
+                               0, 0, GetModuleHandleA(NULL), NULL);
+    assert( hwndMain );
+
+    if(!SetForegroundWindow(hwndMain)) {
+        /* workaround for foreground lock timeout */
+        INPUT input[2];
+        UINT events_no;
+
+        memset(input, 0, sizeof(input));
+        input[0].type = INPUT_MOUSE;
+        U(input[0]).mi.dx = 101;
+        U(input[0]).mi.dy = 101;
+        U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        input[0].type = INPUT_MOUSE;
+        U(input[0]).mi.dx = 101;
+        U(input[0]).mi.dy = 101;
+        U(input[0]).mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        events_no = SendInput(2, input, sizeof(input[0]));
+        ok(events_no == 2, "SendInput returned %d\n", events_no);
+        ok(SetForegroundWindow(hwndMain), "SetForegroundWindow failed\n");
+    }
+
     SetLastError(0xdeafbeef);
     GetWindowLongPtrW(GetDesktopWindow(), GWLP_WNDPROC);
     is_win9x = (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
@@ -7518,17 +7591,11 @@ START_TEST(win)
     test_FindWindowEx();
     test_SetParent();
 
-    hwndMain = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window",
-                               WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
-                               WS_MAXIMIZEBOX | WS_POPUP,
-                               100, 100, 200, 200,
-                               0, 0, GetModuleHandleA(NULL), NULL);
     hwndMain2 = CreateWindowExA(/*WS_EX_TOOLWINDOW*/ 0, "MainWindowClass", "Main window 2",
                                 WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
                                 WS_MAXIMIZEBOX | WS_POPUP,
                                 100, 100, 200, 200,
                                 0, 0, GetModuleHandleA(NULL), NULL);
-    assert( hwndMain );
     assert( hwndMain2 );
 
     our_pid = GetWindowThreadProcessId(hwndMain, NULL);
@@ -7593,6 +7660,7 @@ START_TEST(win)
     test_winregion();
     test_map_points();
     test_update_region();
+    test_window_without_child_style();
 
     /* add the tests above this line */
     if (hhook) UnhookWindowsHookEx(hhook);

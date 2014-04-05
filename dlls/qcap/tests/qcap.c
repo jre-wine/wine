@@ -1055,9 +1055,12 @@ static HRESULT WINAPI MemInputPin_Receive(IMemInputPin *iface, IMediaSample *pSa
     REFERENCE_TIME off, tmp;
     LARGE_INTEGER li;
     BYTE *data;
+    HRESULT hr;
 
-    IMediaSample_GetTime(pSample, &off, &tmp);
-    IMediaSample_GetPointer(pSample, &data);
+    hr = IMediaSample_GetTime(pSample, &off, &tmp);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IMediaSample_GetPointer(pSample, &data);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     li.QuadPart = off;
     IStream_Seek(avi_stream, li, STREAM_SEEK_SET, NULL);
     IStream_Write(avi_stream, data, IMediaSample_GetActualDataLength(pSample), NULL);
@@ -1779,11 +1782,13 @@ static void test_AviMux(char *arg)
     props.cbAlign = 0xdeadbee3;
     props.cbPrefix = 0xdeadbee4;
     hr = IMemInputPin_GetAllocatorRequirements(memin, &props);
-    ok(hr == S_OK, "GetAllocatorRequirments returned %x\n", hr);
-    ok(props.cBuffers == 0xdeadbee1, "cBuffers = %d\n", props.cBuffers);
-    ok(props.cbBuffer == 0xdeadbee2, "cbBuffer = %d\n", props.cbBuffer);
-    ok(props.cbAlign == 1, "cbAlign = %d\n", props.cbAlign);
-    ok(props.cbPrefix == 8, "cbPrefix = %d\n", props.cbPrefix);
+    ok(hr==S_OK || broken(hr==E_INVALIDARG), "GetAllocatorRequirments returned %x\n", hr);
+    if(hr == S_OK) {
+        ok(props.cBuffers == 0xdeadbee1, "cBuffers = %d\n", props.cBuffers);
+        ok(props.cbBuffer == 0xdeadbee2, "cbBuffer = %d\n", props.cbBuffer);
+        ok(props.cbAlign == 1, "cbAlign = %d\n", props.cbAlign);
+        ok(props.cbPrefix == 8, "cbPrefix = %d\n", props.cbPrefix);
+    }
 
     hr = IMemInputPin_GetAllocator(memin, &memalloc);
     ok(hr == S_OK, "GetAllocator returned %x\n", hr);
@@ -1824,13 +1829,13 @@ static void test_AviMux(char *arg)
     ok(memalloc != &MemAllocator, "memalloc == &MemAllocator\n");
     IMemAllocator_Release(memalloc);
 
-    CreateStreamOnHGlobal(NULL, TRUE, &avi_stream);
+    hr = CreateStreamOnHGlobal(NULL, TRUE, &avi_stream);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     SET_EXPECT(MediaSeeking_GetPositions);
     SET_EXPECT(MemInputPin_QueryInterface_IStream);
     hr = IBaseFilter_Run(avimux, 0);
     ok(hr == S_OK, "Run returned %x\n", hr);
     CHECK_CALLED(MediaSeeking_GetPositions);
-    CHECK_CALLED(MemInputPin_QueryInterface_IStream);
 
     hr = IBaseFilter_GetState(avimux, 0, &state);
     ok(hr == S_OK, "GetState returned %x\n", hr);
@@ -1911,6 +1916,7 @@ static void test_AviMux(char *arg)
 
     hr = IBaseFilter_Stop(avimux);
     ok(hr == S_OK, "Stop returned %x\n", hr);
+    CHECK_CALLED(MemInputPin_QueryInterface_IStream);
 
     hr = IBaseFilter_GetState(avimux, 0, &state);
     ok(hr == S_OK, "GetState returned %x\n", hr);
