@@ -940,6 +940,7 @@
 @ stub QueryOldestEventLogRecord
 @ stdcall QueryPerformanceCounter(ptr)
 @ stdcall QueryPerformanceFrequency(ptr)
+@ stdcall QueryUnbiasedInterruptTime(ptr)
 @ stub QueryWin31IniFilesMappedToRegistry
 @ stdcall QueueUserAPC(ptr long long)
 @ stdcall QueueUserWorkItem(ptr ptr long)
@@ -1191,6 +1192,7 @@
 @ stub SetVolumeMountPointA
 @ stub SetVolumeMountPointW
 @ stdcall SetWaitableTimer(long ptr long ptr ptr long)
+@ stdcall SetWaitableTimerEx(long ptr long ptr ptr ptr long)
 @ stdcall SetupComm(long long long)
 @ stub ShowConsoleCursor
 @ stdcall SignalObjectAndWait(long long long long)
