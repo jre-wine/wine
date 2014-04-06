@@ -1,3 +1,6 @@
 manpages.patch
 printer-resolution.patch
-fix-paths.patch
+make-paths.patch
+gecko-path.patch
+wineapploader.patch
+no-download.patch

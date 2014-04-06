@@ -85,6 +85,8 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	test -f debian/tmp/usr/lib/wine$(VERSUFFIX)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX)
 
+	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/usr/lib/wine$(VERSUFFIX)/wine-wrapper || true
+
 	cp debian/scripts/wine debian/tmp/wine$(VERSUFFIX)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg

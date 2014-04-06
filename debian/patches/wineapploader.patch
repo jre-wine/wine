@@ -1,0 +1,11 @@
+description: call wine-unstable instead of wine in wineapploader
+author: Michael Gilbert <mgilbert@debian.org>
+
+--- a/tools/wineapploader.in
++++ b/tools/wineapploader.in
+@@ -49,4 +49,4 @@ esac
+ if [ -x "$appdir/wine" ]; then exec "$appdir/wine" "$appname" "$@"; fi
+ 
+ # finally look in PATH
+-exec wine "$appname" "$@"
++exec wine-unstable "$appname" "$@"

@@ -1,0 +1,14 @@
+description: search /usr/share/wine-gecko instead of /usr/share/wine/gecko
+author: Michael Gilbert <mgilbert@debian.org>
+
+--- a/dlls/appwiz.cpl/addons.c
++++ b/dlls/appwiz.cpl/addons.c
+@@ -327,7 +327,7 @@ static enum install_res install_from_def
+     if (ret == INSTALL_NEXT)
+         ret = install_from_unix_file(INSTALL_DATADIR "/wine/", addon->subdir_name, addon->file_name);
+     if (ret == INSTALL_NEXT && strcmp(INSTALL_DATADIR, "/usr/share"))
+-        ret = install_from_unix_file("/usr/share/wine/", addon->subdir_name, addon->file_name);
++        ret = install_from_unix_file("/usr/share/wine-", addon->subdir_name, addon->file_name);
+     return ret;
+ }
+ 

@@ -1,6 +1,16 @@
-wine-unstable (1.7.16-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.16-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New uptream release 1.7.16, released Apr 4, 2014.
+    - rmxftmpl.h is no longer architecture-dependent (closes: #739723).
+    - More regression test fixes.
+    - String arrays better supported in the IDL compiler.
+    - Initial stubs for DirectX Video Acceleration.
+    - Various bug fixes.
+  * Use /usr/share/wine-gecko as the default search path for wine-gecko files.
+  * Use wine-unstable instead of wine in wine-wrapper (closes: #742423).
+  * Change wine-gecko dependency to a recommendation.
+  * Remove transitional packages.
+  * Disable external downloading.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 05 Apr 2014 04:24:41 +0000
 
