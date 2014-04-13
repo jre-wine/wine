@@ -26,4 +26,10 @@ else
     wineloader=$WINELOADER
 fi
 
-WINELOADER=$wineloader $wine "$@"
+if test -z $WINEDEBUG; then
+    winedebug=-all
+else
+    winedebug=$WINEDEBUG
+fi
+
+WINELOADER=$wineloader WINEDEBUG=$winedebug $wine "$@"

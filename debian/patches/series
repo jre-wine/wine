@@ -1,6 +1,8 @@
+makefile.patch
 manpages.patch
-printer-resolution.patch
-make-paths.patch
-gecko-path.patch
 wineapploader.patch
+
 no-download.patch
+addons-path.patch
+
+printer-resolution.patch

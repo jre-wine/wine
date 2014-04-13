@@ -1,6 +1,6 @@
 debian/tmp/wine* usr/bin
 
-usr/lib/*/wine-wrapper
+usr/lib/*/wineapploader
 
 usr/share/man/man1/wine.1
 usr/share/man/man1/winecfg.1

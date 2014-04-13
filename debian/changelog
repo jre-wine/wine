@@ -1,3 +1,13 @@
+wine-unstable (1.7.16-2) unstable; urgency=medium
+
+  * Use WINEDEBUG=-all by default.
+  * Recommmend libasound2-plugins.
+  * Remove winbind and antivirus suggestions.
+  * Fix addon search paths (closes: #743888).
+  * Fix symlinks to wine-wrapper (closes: #743786).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 13 Apr 2014 17:31:55 +0000
+
 wine-unstable (1.7.16-1) unstable; urgency=medium
 
   * New uptream release 1.7.16, released Apr 4, 2014.

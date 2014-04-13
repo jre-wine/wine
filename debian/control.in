@@ -7,6 +7,7 @@ Uploaders:
  Stephen Kitt <skitt@debian.org>
 Build-Depends:
  debhelper (>= 9),
+ dh-autoreconf,
  libxi-dev,
  libxt-dev,
  libxmu-dev,
@@ -29,7 +30,6 @@ Build-Depends:
  sharutils,
  dctrl-tools,
  freeglut3-dev,
- dh-autoreconf,
  libpng-dev,
  libssl-dev,
  libxml2-dev,
@@ -67,14 +67,11 @@ Package: wine
 Architecture: any-amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
- file,
  wine64 (>= ${source:Version}) | wine32 (>= ${source:Version}),
 Suggests:
- winbind,
  wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
- avscan | klamav | clamav,
 Breaks:
  wine32 (<< 1.6.1-8),
  wine64 (<< 1.6.1-8),
@@ -107,6 +104,7 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
 Recommends:
+ libasound2-plugins,
  libwine-gecko-2.24
 Breaks:
  wine (<< 1.6.1-9),
@@ -127,6 +125,7 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
 Recommends:
+ libasound2-plugins,
  libwine-gecko-2.24,
  wine32 (>= ${source:Version}),
 Breaks:
