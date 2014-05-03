@@ -40,13 +40,17 @@ static BOOL n_format_enabled = TRUE;
 #include "printf.h"
 #undef PRINTF_WIDE
 
-/* _get_printf_count_output - not exported in native msvcrt */
+/*********************************************************************
+ *		_get_printf_count_output (MSVCR80.@)
+ */
 int CDECL MSVCRT__get_printf_count_output( void )
 {
     return n_format_enabled ? 1 : 0;
 }
 
-/* _set_printf_count_output - not exported in native msvcrt */
+/*********************************************************************
+ *		_set_printf_count_output (MSVCR80.@)
+ */
 int CDECL MSVCRT__set_printf_count_output( int enable )
 {
     BOOL old = n_format_enabled;
@@ -219,6 +223,15 @@ int CDECL MSVCRT__wcsupr_s_l( MSVCRT_wchar_t* str, MSVCRT_size_t n,
 INT CDECL MSVCRT__wcsupr_s( MSVCRT_wchar_t* str, MSVCRT_size_t n )
 {
   return MSVCRT__wcsupr_s_l( str, n, NULL );
+}
+
+/******************************************************************
+ *              _wcsupr_l (MSVCRT.@)
+ */
+MSVCRT_wchar_t* CDECL MSVCRT__wcsupr_l( MSVCRT_wchar_t *str, MSVCRT__locale_t locale )
+{
+    MSVCRT__wcsupr_s_l( str, -1, locale);
+    return str;
 }
 
 /******************************************************************
