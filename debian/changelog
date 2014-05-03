@@ -1,6 +1,11 @@
-wine-unstable (1.7.18-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.18-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.7.18, released May 2, 2014.
+    - Improved OLE Accessible Object support.
+    - Fixes for various memory issues found by Valgrind.
+    - A few more MSHTML functions.
+    - Some DirectDraw cleanups.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 03 May 2014 04:50:41 +0000
 
