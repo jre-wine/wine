@@ -1,6 +1,9 @@
-wine-unstable (1.7.17-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.17-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream stable release:
+    - More implementations for the Task Scheduler.
+    - C runtime made more compatible by sharing source files.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 19 Apr 2014 16:57:43 +0000
 
