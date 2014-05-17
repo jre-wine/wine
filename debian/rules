@@ -75,6 +75,7 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 endif
 
 override_dh_install: $(INSTALLS)
+	mkdir -p debian/tmp
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
 ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)

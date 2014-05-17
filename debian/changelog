@@ -1,6 +1,12 @@
-wine-unstable (1.7.19-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.19-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.7.19, released May 16, 2014.
+    - New JSProxy DLL for automatic proxy configuration.
+    - More OLE Accessible Object support.
+    - Improvements to the XML writer.
+    - Fixes for various memory issues found by Valgrind.
+    - Initial headers for Direct2D support.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 17 May 2014 12:26:22 +0000
 
