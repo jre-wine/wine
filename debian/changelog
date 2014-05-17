@@ -1,3 +1,9 @@
+wine-unstable (1.7.19-1) UNRELEASED; urgency=medium
+
+  * UNRELEASED
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 17 May 2014 12:26:22 +0000
+
 wine-unstable (1.7.18-1) unstable; urgency=medium
 
   * New upstream release 1.7.18, released May 2, 2014.
