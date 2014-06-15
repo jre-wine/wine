@@ -1,6 +1,11 @@
-wine-unstable (1.7.20-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.20-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.7.20, released Jun 13, 2014.
+    - X11 drag & drop fixes.
+    - A few more C/C++ runtime functions.
+    - Fixes for various memory issues found by Valgrind.
+    - Some OLE storage fixes.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 14 Jun 2014 20:48:41 +0000
 
