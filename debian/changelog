@@ -1,6 +1,11 @@
-wine-unstable (1.7.21-1) UNRELEASED; urgency=medium
+wine-unstable (1.7.21-1) unstable; urgency=medium
 
-  * UNRELEASED
+  * New upstream release 1.7.21, released Jun 27, 2014.
+    - Support for critical sections in the C runtime.
+    - Unicode data updated to Unicode 7.0.
+    - Support for interlaced PNG encoding.
+    - Initial stub for the Packager library.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Sat, 28 Jun 2014 19:22:28 +0000
 

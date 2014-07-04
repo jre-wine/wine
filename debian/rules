@@ -103,4 +103,5 @@ override_dh_clean:
 	rm -f $(INSTALLS)
 	rm -f debian/control
 	rm -f config.log configure tools/config.sub tools/config.guess
+	rm -f programs/cscript/ihost.h
 	make -f debian/rules debian/control
