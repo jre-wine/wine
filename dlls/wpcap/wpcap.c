@@ -1,5 +1,7 @@
 /*
- * Copyright (C) the Wine project
+ * WPcap.dll Proxy.
+ *
+ * Copyright 2011 André Hentschel
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,21 +18,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_HIDSDI_H
-#define __WINE_HIDSDI_H
+#include <pcap/pcap.h>
+#include "wine/debug.h"
 
-/* FIXME: #include "hidusage.h" */
-/* FIXME: #include "hidpi.h" */
+WINE_DEFAULT_DEBUG_CHANNEL(wpcap);
 
-#ifndef WINE_NTSTATUS_DECLARED
-#define WINE_NTSTATUS_DECLARED
-typedef LONG NTSTATUS;
-#endif
-
-BOOLEAN WINAPI HidD_GetFeature(HANDLE HidDeviceObject, PVOID ReportBuffer, ULONG ReportBufferLength);
-void WINAPI HidD_GetHidGuid(LPGUID guid);
-BOOLEAN WINAPI HidD_GetManufacturerString(HANDLE HidDeviceObject, PVOID Buffer, ULONG BufferLength);
-BOOLEAN WINAPI HidD_GetProductString(HANDLE HidDeviceObject, PVOID Buffer, ULONG BufferLength);
-BOOLEAN WINAPI HidD_SetFeature(HANDLE HidDeviceObject, PVOID ReportBuffer, ULONG ReportBufferLength);
-
-#endif  /* __WINE_HIDSDI_H */
+const char* CDECL wine_pcap_lib_version(void)
+{
+    const char* ret = pcap_lib_version();
+    TRACE("%s\n", debugstr_a(ret));
+    return ret;
+}
