@@ -661,46 +661,94 @@ static HRESULT Global_IsObject(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, 
     return S_OK;
 }
 
-static HRESULT Global_Ant(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
+static HRESULT Global_Atn(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    return return_double(res, atan(d));
 }
 
 static HRESULT Global_Cos(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    return return_double(res, cos(d));
 }
 
 static HRESULT Global_Sin(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    return return_double(res, sin(d));
 }
 
 static HRESULT Global_Tan(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    return return_double(res, tan(d));
 }
 
 static HRESULT Global_Exp(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    return return_double(res, exp(d));
 }
 
 static HRESULT Global_Log(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    if(d <= 0)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+    else
+        return return_double(res, log(d));
 }
 
 static HRESULT Global_Sqr(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    double d;
+
+    hres = to_double(arg, &d);
+    if(FAILED(hres))
+        return hres;
+
+    if(d < 0)
+        return MAKE_VBSERROR(VBSE_ILLEGAL_FUNC_CALL);
+    else
+        return return_double(res, sqrt(d));
 }
 
 static HRESULT Global_Randomize(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1277,14 +1325,44 @@ static HRESULT Global_Abs(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIA
 
 static HRESULT Global_Fix(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    VARIANT dst;
+
+    TRACE("(%s)\n", debugstr_variant(arg));
+
+    assert(args_cnt == 1);
+
+    hres = VarFix(arg, &dst);
+    if(FAILED(hres))
+        return hres;
+
+    if (res)
+        *res = dst;
+    else
+        VariantClear(&dst);
+
+    return S_OK;
 }
 
 static HRESULT Global_Int(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    HRESULT hres;
+    VARIANT dst;
+
+    TRACE("(%s)\n", debugstr_variant(arg));
+
+    assert(args_cnt == 1);
+
+    hres = VarInt(arg, &dst);
+    if(FAILED(hres))
+        return hres;
+
+    if (res)
+        *res = dst;
+    else
+        VariantClear(&dst);
+
+    return S_OK;
 }
 
 static HRESULT Global_Sgn(vbdisp_t *This, VARIANT *arg, unsigned args_cnt, VARIANT *res)
@@ -1970,7 +2048,7 @@ static const builtin_prop_t global_props[] = {
     {DISPID_GLOBAL_ISNUMERIC,                 Global_IsNumeric, 0, 1},
     {DISPID_GLOBAL_ISARRAY,                   Global_IsArray, 0, 1},
     {DISPID_GLOBAL_ISOBJECT,                  Global_IsObject, 0, 1},
-    {DISPID_GLOBAL_ATN,                       Global_Ant, 0, 1},
+    {DISPID_GLOBAL_ATN,                       Global_Atn, 0, 1},
     {DISPID_GLOBAL_COS,                       Global_Cos, 0, 1},
     {DISPID_GLOBAL_SIN,                       Global_Sin, 0, 1},
     {DISPID_GLOBAL_TAN,                       Global_Tan, 0, 1},
