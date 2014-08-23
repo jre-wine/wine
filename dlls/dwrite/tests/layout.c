@@ -551,35 +551,31 @@ static void test_fontweight(void)
         DWRITE_FONT_STRETCH_NORMAL, 10.0, ruW, &format);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 0, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
+    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = IDWriteTextLayout_QueryInterface(layout, &IID_IDWriteTextFormat, (void**)&fmt2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     weight = IDWriteTextFormat_GetFontWeight(fmt2);
-todo_wine
     ok(weight == DWRITE_FONT_WEIGHT_BOLD, "got %u\n", weight);
 
     range.startPosition = 0;
     range.length = 6;
     hr = IDWriteTextLayout_SetFontWeight(layout, DWRITE_FONT_WEIGHT_NORMAL, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     /* IDWriteTextFormat methods output doesn't reflect layout changes */
     weight = IDWriteTextFormat_GetFontWeight(fmt2);
-todo_wine
     ok(weight == DWRITE_FONT_WEIGHT_BOLD, "got %u\n", weight);
 
     range.length = 0;
     weight = DWRITE_FONT_WEIGHT_BOLD;
     hr = layout->lpVtbl->IDWriteTextLayout_GetFontWeight(layout, 0, &weight, &range);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(weight == DWRITE_FONT_WEIGHT_NORMAL, "got %d\n", weight);
     ok(range.length == 6, "got %d\n", range.length);
-}
+
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(fmt2);
     IDWriteTextFormat_Release(format);
@@ -593,14 +589,14 @@ static void test_SetInlineObject(void)
     IDWriteInlineObject *inlineobj, *inlineobj2, *inlinetest;
     IDWriteTextFormat *format;
     IDWriteTextLayout *layout;
-    DWRITE_TEXT_RANGE range;
+    DWRITE_TEXT_RANGE range, r2;
     HRESULT hr;
 
     hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, 10.0, ruW, &format);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 0, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
+    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = IDWriteFactory_CreateEllipsisTrimmingSign(factory, format, &inlineobj);
@@ -611,63 +607,71 @@ static void test_SetInlineObject(void)
 
     inlinetest = (void*)0x1;
     hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, NULL);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(inlinetest == NULL, "got %p\n", inlineobj);
-}
+    ok(inlinetest == NULL, "got %p\n", inlinetest);
+
     range.startPosition = 0;
     range.length = 2;
     hr = IDWriteTextLayout_SetInlineObject(layout, inlineobj, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     inlinetest = (void*)0x1;
     hr = IDWriteTextLayout_GetInlineObject(layout, 2, &inlinetest, NULL);
-todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(inlinetest == NULL, "got %p\n", inlinetest);
-}
+
     inlinetest = NULL;
-    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, NULL);
-todo_wine
+    r2.startPosition = r2.length = 100;
+    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, &r2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
     ok(inlinetest == inlineobj, "got %p\n", inlinetest);
+    ok(r2.startPosition == 0 && r2.length == 2, "got %d, %d\n", r2.startPosition, r2.length);
     IDWriteInlineObject_Release(inlinetest);
-}
+
     range.startPosition = 1;
     range.length = 1;
     hr = IDWriteTextLayout_SetInlineObject(layout, inlineobj2, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     inlinetest = NULL;
-    hr = IDWriteTextLayout_GetInlineObject(layout, 1, &inlinetest, NULL);
-todo_wine
+    r2.startPosition = r2.length = 100;
+    hr = IDWriteTextLayout_GetInlineObject(layout, 1, &inlinetest, &r2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
     ok(inlinetest == inlineobj2, "got %p\n", inlinetest);
+    ok(r2.startPosition == 1 && r2.length == 1, "got %d, %d\n", r2.startPosition, r2.length);
     IDWriteInlineObject_Release(inlinetest);
-}
+
     inlinetest = NULL;
-    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, NULL);
-todo_wine
+    r2.startPosition = r2.length = 100;
+    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, &r2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
     ok(inlinetest == inlineobj, "got %p\n", inlinetest);
+    ok(r2.startPosition == 0 && r2.length == 1, "got %d, %d\n", r2.startPosition, r2.length);
     IDWriteInlineObject_Release(inlinetest);
-}
+
     range.startPosition = 1;
     range.length = 1;
     hr = IDWriteTextLayout_SetInlineObject(layout, inlineobj, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    r2.startPosition = r2.length = 100;
+    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, &r2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(inlinetest == inlineobj, "got %p\n", inlinetest);
+    ok(r2.startPosition == 0 && r2.length == 2, "got %d, %d\n", r2.startPosition, r2.length);
+    IDWriteInlineObject_Release(inlinetest);
 
     range.startPosition = 1;
     range.length = 2;
     hr = IDWriteTextLayout_SetInlineObject(layout, inlineobj, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    r2.startPosition = r2.length = 100;
+    hr = IDWriteTextLayout_GetInlineObject(layout, 0, &inlinetest, &r2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(inlinetest == inlineobj, "got %p\n", inlinetest);
+    ok(r2.startPosition == 0 && r2.length == 3, "got %d, %d\n", r2.startPosition, r2.length);
+    IDWriteInlineObject_Release(inlinetest);
 
     IDWriteTextLayout_Release(layout);
     IDWriteTextFormat_Release(format);
@@ -710,25 +714,21 @@ static void test_draw_sequence(void)
     range.startPosition = 5;
     range.length = 1;
     hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     range.startPosition = 1;
     range.length = 1;
     hr = IDWriteTextLayout_SetInlineObject(layout, inlineobj, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     range.startPosition = 4;
     range.length = 1;
     hr = IDWriteTextLayout_SetDrawingEffect(layout, (IUnknown*)inlineobj, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     range.startPosition = 0;
     range.length = 1;
     hr = IDWriteTextLayout_SetUnderline(layout, TRUE, range);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     flush_sequence(sequences, RENDERER_ID);
