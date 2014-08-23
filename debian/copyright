@@ -1,17 +1,26 @@
-Wine has been 1st debianized by Brian White, first
-taken over by Vincent Renardias, then by Andrew Lenharth.
-This package is maintained by Ove Kaaven.
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0
+Source: http://www.winehq.org
+Files-Excluded:
+ configure
+ config.log
+ tools/config.* 
+ include/config.h.in
 
-The Wine homepage is http://www.winehq.com/
-Download locations are listed in the ANNOUNCE file.
+Files: *
+Copyright:
+ Copyright (c) 1993-2014 Wine project authors (see AUTHORS file)
+License: LGPL-2.1+
+ See /usr/share/common-licenses/LGPL-2.1.
 
-Copyright (c) 1993-2009 the Wine project authors (see the file AUTHORS
-for a complete list)
+Files: debian/*
+Copyright:
+ Copyright (c) 2014 Stephen Kitt <skitt@debian.org>
+ Copyright (c) 2012-2014 Michael Gilbert <mgilbert@debian.org>
+License: LGPL-2.1+
+ See /usr/share/common-licenses/LGPL-2.1.
 
-Wine is free software; you can redistribute it and/or modify it under
-the terms of the GNU Lesser General Public License as published by the
-Free Software Foundation; either version 2.1 of the License, or (at
-your option) any later version. 
-
-On Debian systems, the complete text of the GNU Library General Public
-License can be found in /usr/share/common-licenses/LGPL-2.1 file.
+Files: debian/scripts/import*
+Copyright:
+ Copyright (c) Ove Kåven <ovek@debian.org>
+License: LGPL-2.1+
+ See /usr/share/common-licenses/LGPL-2.1.

@@ -1,3 +1,81 @@
+wine-development (1.7.25-1) unstable; urgency=medium
+
+  * New upstream release 1.7.25, released Aug 22, 2014.
+    - Implementation of the packet capture library.
+    - A few more DirectWrite functions.
+    - Improvements in HTML table support.
+    - More VBScript math functions.
+    - Various bug fixes.
+  * Update the git repository (closes: #758708).
+  * Fix typo in README.debian (closes: #758586).
+  * Simplify wineapploader (closes: #758589).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 23 Aug 2014 21:49:34 +0000
+
+wine-development (1.7.24-5) unstable; urgency=medium
+
+  * Fix wine-preloader installation path.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 18 Aug 2014 04:14:00 +0000
+
+wine-development (1.7.24-4) unstable; urgency=medium
+
+  * Add some information about WINEDEBUG to README.debian (closes: #758173).
+  * Correctly call suffixed wine launcher in wineapploader (closes: #758290).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 17 Aug 2014 20:57:12 +0000
+
+wine-development (1.7.24-3) unstable; urgency=medium
+
+  * Clarify multiarch instructions (closes: #751450).
+  * Append version suffix to wineapploader scripts (closes: #758147).
+  * Add ncurses and freetype dependencies to wine32 (closes: #753523).
+  * Use -development instead of -unstable in wineapploader (closes: #758168).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 15 Aug 2014 19:16:53 +0000
+
+wine-development (1.7.24-2) unstable; urgency=medium
+
+  * Remove wine-gecko recommendation.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 13 Aug 2014 20:59:43 +0000
+
+wine-development (1.7.24-1) unstable; urgency=medium
+
+  * New upstream release 1.7.24, released Aug 8, 2014.
+    - Beginning of some DirectWrite classes implementation.
+    - Initial wrapper dll for the packet capture library.
+    - Some crypto improvements.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 08 Aug 2014 20:36:38 +0000
+
+wine-development (1.7.23-1) unstable; urgency=medium
+
+  * New upstream release 1.7.23, released Jul 25, 2014.
+    - Better support for drag & drop.
+    - Improvements to HTTP cookie management.
+    - Fixes to certificate management.
+    - Various bug fixes.
+  * Link against freebsd-glue on kfreebsd (closes: #754647).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 03 Aug 2014 19:09:36 +0000
+
+wine-development (1.7.22-1) unstable; urgency=medium
+
+  * New upstream release 1.7.22, released Jul 11, 2014.
+    - Support for Unicode bracketing pairs.
+    - Improved Internet cookie support.
+    - Initial support for geographical information.
+    - Various bug fixes.
+  * Update debian/copyright to format 1.0.
+  * Add upstream signing key for uscan download verification.
+  * Disable gstreamer since 1.0 support is not yet available.
+  * Rename source package to better match the upstream naming scheme.
+  * Remove some of the automatically generated files from the upstream tarball.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Wed, 16 Jul 2014 01:56:23 +0000
+
 wine-unstable (1.7.21-1) unstable; urgency=medium
 
   * New upstream release 1.7.21, released Jun 27, 2014.

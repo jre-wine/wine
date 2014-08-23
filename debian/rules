@@ -1,27 +1,39 @@
 #!/usr/bin/make -f
 
+# enable verbose build log
 export DH_VERBOSE=1
 
-# unfortunately wine fails to build with pie enabled
+# wine build fails with pie enabled
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
-VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
-MULTIARCH=$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+DATADIR=/usr/share/wine$(VERSION)
+INCLUDEDIR=/usr/include/wine$(VERSION)
+LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
-LIBDIR=usr/lib/$(MULTIARCH)/wine$(VERSUFFIX)
-INCLUDEDIR=/usr/include/wine$(VERSUFFIX)
-DATADIR=/usr/share/wine$(VERSUFFIX)
+# linker options
+LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
+
+# use freebsd-glue on kfreebsd architectures
+ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
+LDFLAGS+=-lfreebsd-glue
+endif
 
 # configure options
 CONFLAGS=--without-hal \
+	 --without-v4l \
+	 --without-sane \
+	 --without-capi \
+	 --without-gphoto \
+	 --without-gstreamer \
 	 --disable-tests \
 	 --libdir=/$(LIBDIR) \
 	 --bindir=/$(LIBDIR) \
 	 --mandir=/usr/share/man \
 	 --datarootdir=$(DATADIR) \
-	 --includedir=/$(INCLUDEDIR) \
-	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
+	 --includedir=$(INCLUDEDIR) \
+	 LDFLAGS="$(LDFLAGS)" \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
@@ -29,79 +41,48 @@ CONFLAGS+=--enable-win64
 endif
 
 # additional files to generate
-INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
-
-# When building the unstable package, conflicts with stable packages end
-# up marked -unstable-unstable, so we drop them; but this is conditioned
-# to avoid running sed with s///g
-ifneq (, $(VERSUFFIX))
-DROPSUFFIX=-e 's/$(VERSUFFIX)$(VERSUFFIX)//g'
-else
-DROPSUFFIX=
-endif
+INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
 
 debian/control: debian/control.in
-	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
-	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
-	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
-	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
-	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
-	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' \
-	    $(DROPSUFFIX) $< > $@
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).docs: debian/%.docs-common
-	cp $< $@
+debian/wine$(VERSION)%: debian/wineVERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).links: debian/%.links-common
-	sed s/VERSION/$(VERSUFFIX)/g $< > $@
+debian/wine32$(VERSION)%: debian/wine32VERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).install: debian/%.install-common
-	cp $< $@
+debian/wine64$(VERSION)%: debian/wine64VERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
-	cp $< $@
-
-debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
-	cp $< $@
+debian/libwine$(VERSION)%: debian/libwineVERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
 %:
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
-	ln -sf /usr/share/misc/config.sub tools/config.sub
-	ln -sf /usr/share/misc/config.guess tools/config.guess
-ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
+	ln -sf /usr/share/misc/config.sub tools
+	ln -sf /usr/share/misc/config.guess tools
 	dh_auto_configure -- $(CONFLAGS)
-endif
 
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
+	cp debian/scripts/wine debian/tmp/wine$(VERSION)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
-ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
-	mkdir -p debian/tmp/usr/lib/wine$(VERSUFFIX)
-	cp debian/tmp/$(LIBDIR)/wine debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/wine64 debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-	cp debian/tmp/$(LIBDIR)/wine64-preloader debian/tmp/usr/lib/wine$(VERSUFFIX) || true
-
-	cp debian/scripts/wine debian/tmp/wine$(VERSUFFIX)
-	test -f debian/tmp/usr/lib/wine$(VERSUFFIX)/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/usr/lib/wine$(VERSUFFIX)
-
-	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/usr/lib/wine$(VERSUFFIX)/wineapploader || true
-
+	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader
+	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
 	dh_install
-endif
 
 override_dh_strip:
-	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)
-	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
+	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine$(VERSION)-dbg
 
 override_dh_clean:
-	dh_clean
-	rm -f $(INSTALLS)
-	rm -f debian/control
-	rm -f config.log configure tools/config.sub tools/config.guess
-	rm -f programs/cscript/ihost.h
+	dh_clean -- \
+	    $(INSTALLS) \
+	    debian/control \
+	    programs/cscript/ihost.h \
+	    configure config.* tools/config.* include/config.h.in
 	make -f debian/rules debian/control

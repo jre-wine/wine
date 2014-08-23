@@ -1,7 +1,6 @@
-#!/bin/sh
-set -e
-if [ "$#" -lt "1" ]
-then
+#!/bin/sh -e
+
+if [ "$#" -lt "1" ]; then
   echo "Usage: $0 <file name>"
   exit 1
 fi
@@ -10,40 +9,29 @@ fi
 filename="$1"
 test ! -e "$filename" && echo "$filename not found" && exit 1 || true
 
-# figure out which branch we're on
-upstream_version=$(echo "$filename" | cut -d- -f2 | sed s/\.tar\.bz2//)
-case "$upstream_version" in
-  1.0.*|1.2|1.2.*|1.4|1.4.*|1.6|1.6.*)
-    package=wine
-    ;;
-  1.1.*|1.3.*|1.5.*|1.7.*)
-    package=wine-unstable
-    ;;
-  *)
-    echo "Unknown version series: $upstream_version"
-    exit 1
-    ;;
-esac
-
-# if we're not building from a git tree, use regular uupdate
-if [ ! -d ".git" ]
-then
-  exec uupdate --no-symlink "$*"
+# terminate if we're not building from a git tree
+if [ ! -d ".git" ]; then
+  echo "error: importing only supported for git checkouts"
+  exit 1
 fi
 
-# provide orig symlink
-debfilename="$(dirname "$filename")/${package}_${upstream_version}.orig.tar.bz2"
-test -e $debfilename || ln -s $(basename "$filename") $debfilename
-
-# pull from upstream git repository (favoring "their" changes in the merge)
-upstream_tag="wine-$upstream_version"
+# pull from upstream git repository
+version=$(echo "$filename" | cut -d- -f2 | sed s/\.tar\.bz2//)
 winehq="git://source.winehq.org/git/wine.git"
+tag="wine-$version"
 git checkout upstream
-git pull --no-edit $winehq tag "$upstream_tag" 
+git pull --no-edit $winehq tag "$tag" 
 
-# merge from upstream into master branch
+# merge upstream into master (favoring "their" changes)
 git checkout master
-git merge upstream
+git merge --strategy-option=theirs upstream
 
-# amend the merge commit message
-$0-done --upstream-version "$upstream_version"
+# format verbose "New upstream release" messages, including ANNOUNCE file
+tag_time=`git cat-file tag "wine-$version"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
+release_date=`LC_ALL=C date -u -d "@$tag_time" +"%b %-d, %Y"`
+
+# create the changelog entry
+dch -v "$version-1" "New upstream release $version, released $release_date."
+sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE | while read line; do
+  dch $line
+done

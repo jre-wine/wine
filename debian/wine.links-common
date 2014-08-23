@@ -1,7 +1,0 @@
-usr/lib/wineVERSION/wineapploader usr/bin/regedit
-usr/lib/wineVERSION/wineapploader usr/bin/winecfg
-usr/lib/wineVERSION/wineapploader usr/bin/winedbg
-usr/lib/wineVERSION/wineapploader usr/bin/wineboot
-usr/lib/wineVERSION/wineapploader usr/bin/winepath
-usr/lib/wineVERSION/wineapploader usr/bin/winefile
-usr/lib/wineVERSION/wineapploader usr/bin/regsvr32

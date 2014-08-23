@@ -6,3 +6,4 @@ no-download.patch
 addons-path.patch
 
 printer-resolution.patch
+gitignore.patch

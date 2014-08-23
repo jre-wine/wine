@@ -1,0 +1,2 @@
+debian/tmp/wineVERSION usr/bin
+debian/tmp/wineapploader usr/lib/wineVERSION
