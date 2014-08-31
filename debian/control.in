@@ -8,7 +8,6 @@ Uploaders:
 Build-Depends:
  debhelper (>= 9),
  dh-autoreconf,
-#stable# autotools-dev,
  libxi-dev,
  libxt-dev,
  libxmu-dev,
@@ -27,7 +26,7 @@ Build-Depends:
  lzma,
  flex,
  bison,
-#development# gettext,
+ gettext,
  oss4-dev,
  sharutils,
  dctrl-tools,
@@ -37,8 +36,8 @@ Build-Depends:
  libxml2-dev,
  libgsm1-dev,
  libjpeg-dev,
-#development# libtiff-dev,
-#development# libpcap-dev,
+ libtiff-dev,
+ libpcap-dev,
  liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,
@@ -51,13 +50,12 @@ Build-Depends:
  libasound2-dev,
  libosmesa6-dev,
  libncurses5-dev,
-#development# libgettextpo-dev,
+ libgettextpo-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
-#development# freebsd-glue [kfreebsd-any],
-#stable# kfreebsd-kernel-headers [kfreebsd-any],
+ freebsd-glue [kfreebsd-any],
  prelink [linux-any],
-#development# ocl-icd-opencl-dev,
+ ocl-icd-opencl-dev,
 #stable# libcapi20-dev (>= 1:3.3.0.20041024-2) [linux-any],
 #stable# libgphoto2-dev,
 #stable# libgstreamer-plugins-base0.10-dev,
@@ -72,7 +70,6 @@ Package: wineVERSION
 #stable#Architecture: any-amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
-#stable#file,
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
 Suggests:
  wine-doc,
@@ -113,11 +110,11 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
-#development# libncurses5,
-#development# libfreetype6,
+ libncurses5,
+ libfreetype6,
 #stable# libwine-gecko-2.21
-#development#Recommends:
-#development# libasound2-plugins,
+Recommends:
+ libasound2-plugins,
 Suggests:
  wine32VERSION-preloader,
 #stable#Breaks:
@@ -147,7 +144,7 @@ Depends:
 #stable#Replaces:
 #stable# wine (<< 1.6.1-9),
 Recommends:
-#development# libasound2-plugins,
+ libasound2-plugins,
  wine32VERSION (>= ${source:Version}),
 Suggests:
  wine64VERSION-preloader,
