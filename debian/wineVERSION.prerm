@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+  remove|deconfigure)
+    # remove update-alternatives entries
+#development#    update-alternatives --remove wine /usr/bin/wineVERSION
+#stable#    update-alternatives --remove wine /usr/bin/wine-stable
+    ;;
+esac
+
+#DEBHELPER#
+
+exit 0

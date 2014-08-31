@@ -1,2 +1,3 @@
-debian/tmp/wineVERSION usr/bin
+#development#debian/tmp/wineVERSION usr/bin
+#stable#debian/tmp/wine-stable usr/bin
 debian/tmp/wineapploader usr/lib/wineVERSION

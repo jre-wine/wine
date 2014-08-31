@@ -51,7 +51,11 @@ else
 endif
 
 debian/wine$(VERSION)%: debian/wineVERSION%
-	sed s/VERSION/$(VERSION)/g < $< > $@
+ifeq ($(VERSION), -development)
+	(sed "s/VERSION/$(VERSION)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+else
+	(sed "s/VERSION/$(VERSION)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
+endif
 
 debian/wine32$(VERSION)%: debian/wine32VERSION%
 	sed s/VERSION/$(VERSION)/g < $< > $@
@@ -72,7 +76,11 @@ override_dh_auto_configure:
 
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
+ifeq ($(VERSION), -development)
 	cp debian/scripts/wine debian/tmp/wine$(VERSION)
+else
+	cp debian/scripts/wine debian/tmp/wine-stable
+endif
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
 	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader

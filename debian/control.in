@@ -80,6 +80,8 @@ Suggests:
  ttf-mscorefonts-installer,
 #stable# winbind,
 #stable# avscan | klamav | clamav
+Conflicts:
+#development# wine (<< 1.6.2-9)
 #stable#Breaks:
 #stable# wine32 (<< 1.6.1-8),
 #stable# wine64 (<< 1.6.1-8),
