@@ -66,8 +66,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wineVERSION
-#development#Architecture: amd64 any-i386 any-powerpc
-#stable#Architecture: any-amd64 any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -132,8 +131,7 @@ Description: Windows API implementation - 32-bit binary loader
  This package provides the binary loader for 32-bit Windows applications.
 
 Package: wine64VERSION
-#development#Architecture: amd64
-#stable#Architecture: any-amd64
+Architecture: amd64
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
