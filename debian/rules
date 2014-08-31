@@ -43,7 +43,14 @@ endif
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
 
-debian/control: debian/control.in
+debian/control: debian/control.in debian/patches/series
+ifeq ($(VERSION), -development)
+	(sed "s/VERSION/$(VERSION)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+else
+	(sed "s/VERSION/$(VERSION)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
+endif
+
+debian/patches/series: debian/patches/series.in
 ifeq ($(VERSION), -development)
 	(sed "s/VERSION/$(VERSION)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
 else
@@ -95,6 +102,8 @@ override_dh_clean:
 	dh_clean -- \
 	    $(INSTALLS) \
 	    debian/control \
+	    debian/patches/series \
 	    programs/cscript/ihost.h \
 	    configure config.* tools/config.* include/config.h.in
 	make -f debian/rules debian/control
+

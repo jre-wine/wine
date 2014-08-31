@@ -1,8 +1,8 @@
 description: fix various manpage issues
 author: Michael Gilbert <mgilbert@debian.org>
 
---- wine.orig/loader/wine.de.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/loader/wine.de.man.in	2014-01-25 23:56:57.567665161 -0500
+--- wine.orig/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
 @@ -71,7 +71,7 @@
  .IR wineserver .
  genutzt. Alle
@@ -120,8 +120,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .I http://www.winehq.org/forums
  eintragen.
  .SH "SIEHE AUCH"
---- wine.orig/loader/wine.pl.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/loader/wine.pl.man.in	2014-01-25 23:56:57.567665161 -0500
+--- wine.orig/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
 @@ -263,8 +263,8 @@
  Napędy DOS również są określone przez dowiązania symboliczne; Dla przykładu jeżeli napęd D:
  odpowiadałby napędowi CDROM zamontowanemu w /mnt/cdrom, miałbyś dowiązanie symboliczne
@@ -144,8 +144,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .IP \fB--file\ \fIfilename\fR
  \fBwinedbg\fR will execute the list of commands contained in file
  filename as if they were keyed on winedbg command line, and then
---- wine.orig/tools/winemaker.de.uman.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/tools/winemaker.de.man.in	2014-01-25 23:57:06.303665140 -0500
+--- wine.orig/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:57:06.303665140 -0500
 @@ -58,7 +58,7 @@
  Groß-/Kleinschreibweise austauschen.
  .PP
@@ -180,8 +180,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .br
  $ make
  .PP
---- wine.orig/tools/winemaker.fr.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/tools/winemaker.fr.man.in	2014-01-25 23:56:57.567665161 -0500
+--- wine.orig/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
 @@ -211,7 +211,7 @@
  .B winemaker
  :
@@ -200,8 +200,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .br
  $ make
  .PP
---- wine.orig/server/wineserver.de.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/server/wineserver.de.man.in	2014-01-25 23:56:57.567665161 -0500
+--- wine.orig/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
 @@ -62,7 +62,7 @@
  .B wineserver
  seine Daten ablegt (Standardmäßig in \fI$HOME/.wine\fR). Alle
