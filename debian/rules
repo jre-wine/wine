@@ -43,7 +43,7 @@ endif
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
 
-debian/control: debian/control.in debian/patches/series
+debian/control: debian/control.in debian/changelog debian/rules debian/patches/series
 ifeq ($(VERSION), -development)
 	(sed "s/VERSION/$(VERSION)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
 else
