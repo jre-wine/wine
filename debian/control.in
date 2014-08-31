@@ -268,7 +268,7 @@ Suggests:
  cups-bsd,
  wine-doc,
 Pre-Depends:
- multiarch-support,
+ ${misc:Pre-Depends},
 #stable#Breaks:
 #stable# libwine-alsa    (<< 1.5.7-3),
 #stable# libwine-bin     (<< 1.5.7-3),
