@@ -469,7 +469,7 @@ Description: Windows API implementation - library
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
-#stable# wine32-dev-tools (>= ${binary:Version})
+#stable# wine32-tools (>= ${binary:Version})
 #stable#Description: Windows API implementation - transitional package
 #stable# This is a transitional package and can be safely removed.
 #stable#
