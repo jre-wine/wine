@@ -2,8 +2,8 @@ wine-development (1.7.25-1.1) UNRELEASED; urgency=medium
 
   * Non-maintainer upload.
   * Added unified Debian packaging based on wine-development 1.7.25-1.
-    - This allows to use exactly the same debian/ folder for wine-development
-      (wine development branch) and wine (wine stable branch), only the first
+    - This allows one to use exactly the same debian/ folder for
+      wine-development and wine (wine stable branch), only the first
       d/changelog entry has to be adjusted.
     - Necessary differences between the flavors are tagged either #stable#
       or #development# within the files.
@@ -15,10 +15,12 @@ wine-development (1.7.25-1.1) UNRELEASED; urgency=medium
       - Added preloader packages.
       - Replaced architecture any-amd64 with amd64.
   * Added update-alternatives system for /usr/bin/wine and the apploader links
-    (closes: #758291)
+    (closes: #758291).
   * debian/rules: added d/changelog and d/rules as prerequisite of d/control.
-  * control.in: fix lintian warning multiarch-support.
-  * debian/rules: add libwineVERSION-dbg for architecture amd64.
+  * control.in:
+    - Fixed lintian P:pre-depends-directly-on-multiarch-support.
+    - Made transitional packages deborphan compliant.
+  * debian/rules: added libwineVERSION-dbg for architecture amd64.
 
  -- jre <jre.winesim@gmail.com>  Sun, 31 Aug 2014 17:31:02 +0200
 
