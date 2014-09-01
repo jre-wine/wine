@@ -1,3 +1,5 @@
+description: don't append wine to the default path settings
+
 --- a/Make.vars.in
 +++ b/Make.vars.in
 @@ -9,8 +9,8 @@
