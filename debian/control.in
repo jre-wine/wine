@@ -298,15 +298,16 @@ Description: Windows API implementation - library
  This package provides the wine library.
 #stable#
 #stable#Package: wine-bin
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Pre-Depends: dpkg (>= 1.17.5)
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# wine32 (>= ${binary:Version}),
-#stable#Description: Windows API implementation - binaries
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
@@ -317,168 +318,188 @@ Description: Windows API implementation - library
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# wine64 (>= ${binary:Version}),
-#stable#Description: Windows API implementation - 64-bit helper
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-alsa
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - ALSA sound module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-bin
 #stable#Architecture: any-i386 any-powerpc
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Pre-Depends: dpkg (>= 1.17.5)
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - system services
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-capi
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: i386 powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - ISDN module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-cms
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - color management mo
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-gl
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - OpenGL module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-gphoto2
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - camera module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-ldap
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - LDAP module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-openal
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - OpenAL module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-oss
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - OSS sound module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-print
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - printing module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: libwine-sane
-#stable#Section: libs
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Architecture: any-i386 any-powerpc
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# libwine (>= ${binary:Version})
-#stable#Description: Windows API implementation - scanner module
+#stable#Description: Windows API implementation - transitional package
 #stable# Wine is a free MS-Windows API implementation.
-#stable# This is still a work in progress and many applications may s
+#stable# This is still a work in progress and many applications may still not work.
 #stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: wine32-dev-tools
 #stable#Architecture: any-i386 any-powerpc
-#stable#Section: libdevel
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# wine32-tools (>= ${binary:Version})
 #stable#Description: Windows API implementation - transitional package
+#stable# Wine is a free MS-Windows API implementation.
+#stable# This is still a work in progress and many applications may still not work.
+#stable# .
 #stable# This is a transitional package and can be safely removed.
 #stable#
 #stable#Package: wine64-dev-tools
 #stable#Architecture: amd64
-#stable#Section: libdevel
+#stable#Section: oldlibs
+#stable#Priority: extra
 #stable#Multi-Arch: same
 #stable#Depends:
 #stable# ${misc:Depends},
 #stable# wine64-tools (>= ${binary:Version})
 #stable#Description: Windows API implementation - transitional package
+#stable# Wine is a free MS-Windows API implementation.
+#stable# This is still a work in progress and many applications may still not work.
+#stable# .
 #stable# This is a transitional package and can be safely removed.
