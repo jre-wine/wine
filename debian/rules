@@ -7,6 +7,11 @@ export DH_VERBOSE=1
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+ifeq ($(VERSION), -development)
+	VERSION_NOTEMPTY=$(VERSION)
+else
+	VERSION_NOTEMPTY=-stable
+endif
 
 DATADIR=/usr/share/wine$(VERSION)
 INCLUDEDIR=/usr/include/wine$(VERSION)
