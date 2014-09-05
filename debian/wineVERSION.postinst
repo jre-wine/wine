@@ -6,12 +6,11 @@ if [ "$1" = "configure" ] ; then
   # add update-alternatives entries for wine and the wineapploader scripts
   # TODO: manpages
   for app in regedit regsvr32 wineboot winedbg winefile winecfg winepath ; do
-#development#    slaves="$slaves --slave /usr/bin/$app $app /usr/bin/${app}VERSION"
-#stable#    slaves="$slaves --slave /usr/bin/$app $app /usr/bin/${app}-stable"
+    slaves="$slaves --slave /usr/bin/$app $app /usr/bin/${app}DEBSUFFIX"
   done
   update-alternatives \
-#development#    --install /usr/bin/wine wine /usr/bin/wineVERSION 20 \
-#stable#    --install /usr/bin/wine wine /usr/bin/wine-stable 70 \
+#development#    --install /usr/bin/wine wine /usr/bin/wineDEBSUFFIX 20 \
+#stable#    --install /usr/bin/wine wine /usr/bin/wineDEBSUFFIX 70 \
     $slaves
 fi
 
