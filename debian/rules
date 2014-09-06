@@ -16,6 +16,7 @@ endif
 DATADIR=/usr/share/wine$(VERSION)
 INCLUDEDIR=/usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
+MANDIR=usr/share/man
 
 # linker options
 LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
@@ -35,7 +36,7 @@ CONFLAGS=--without-hal \
 	 --disable-tests \
 	 --libdir=/$(LIBDIR) \
 	 --bindir=/$(LIBDIR) \
-	 --mandir=/usr/share/man \
+	 --mandir=/$(MANDIR) \
 	 --datarootdir=$(DATADIR) \
 	 --includedir=$(INCLUDEDIR) \
 	 LDFLAGS="$(LDFLAGS)" \
@@ -61,6 +62,24 @@ ifeq ($(VERSION), -development)
 else
 	(sed "s/VERSION/$(VERSION)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
 endif
+
+# all manpages (as long as they end in .1 as they currently do)
+manpages:
+	# remove links generated upstream, dh_link will regenerate them later.
+	rm -f debian/tmp/$(MANDIR)/man1/wineg++.1
+	rm -f debian/tmp/$(MANDIR)/man1/winecpp.1
+	# main manpages: add DEBSUFFIX.
+	for manpage in $(shell find debian/tmp/$(MANDIR)/man1 -type f) ; do \
+	  mv $$manpage $$(dirname $$manpage)/$$(basename $$manpage .1)$(DEBSUFFIX).1 ; \
+	done
+	# translated manpages: add DEBSUFFIX and rename to contain language ll (name.ll.1).
+	for manpage in $(shell find debian/tmp/$(MANDIR)/*/man1/ -type f) ; do \
+	  mv $$manpage $$(echo $$manpage|sed "s|$(MANDIR)/\(.*\).UTF-8/man1/\(.*\).1|$(MANDIR)/man1/\2$(DEBSUFFIX).\1.1|") ; \
+	done
+	touch manpages
+
+debian/wine$(VERSION)-doc%: debian/wineVERSION-doc% manpages
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
 
 debian/wine$(VERSION)%: debian/wineVERSION%
 	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
@@ -98,6 +117,7 @@ override_dh_strip:
 override_dh_clean:
 	dh_clean -- \
 	    $(INSTALLS) \
+	    manpages \
 	    debian/control \
 	    debian/patches/series \
 	    programs/cscript/ihost.h \

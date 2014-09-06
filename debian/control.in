@@ -70,8 +70,9 @@ Architecture: amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
+Recommends:
+ wineVERSION-doc,
 Suggests:
- wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
 Breaks:
@@ -98,6 +99,22 @@ Description: Windows API implementation - standard suite
  This is still a work in progress and many applications may still not work.
  .
  This is a virtual package that depends on the standard Wine components.
+
+Package: wineVERSION-doc
+Architecture: all
+Multi-Arch: foreign
+Section: doc
+Depends:
+ ${misc:Depends},
+Suggests:
+ wineVERSION,
+Description: Windows API implementation - documentation
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides the documentation, including the man pages.
+#development#Breaks:
+#development# wine (<< 1.6.2-9),
 
 Package: wine32VERSION
 Architecture: any-i386 any-powerpc
