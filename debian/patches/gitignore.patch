@@ -13,3 +13,14 @@ author: Michael Gilbert <mgilbert@debian.org>
  WINE_IGNORE_FILE(".gitignore")
  WINE_IGNORE_FILE("Makefile")
  WINE_IGNORE_FILE("TAGS")
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -36,7 +36,7 @@ include/stamp-h: $(srcdir)/include/confi
+ 
+ clean:: __clean__
+ distclean:: clean
+-	$(RM) config.* configure.lineno TAGS tags include/config.h include/stamp-h Makefile Make.tmp .gitignore
++	$(RM) config.* configure.lineno TAGS tags include/config.h include/stamp-h Makefile Make.tmp
+ 	$(RM) -r autom4te.cache
+ 
+ # Rules for uninstalling

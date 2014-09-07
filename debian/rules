@@ -10,6 +10,8 @@ VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//
 
 DATADIR=/usr/share/wine$(VERSION)
 INCLUDEDIR=/usr/include/wine$(VERSION)
+
+MANDIR=usr/share/man
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
 # linker options
@@ -30,7 +32,7 @@ CONFLAGS=--without-hal \
          --disable-tests \
          --libdir=/$(LIBDIR) \
          --bindir=/$(LIBDIR) \
-         --mandir=/usr/share/man \
+         --mandir=/$(MANDIR) \
          --datarootdir=$(DATADIR) \
          --includedir=$(INCLUDEDIR) \
          LDFLAGS="$(LDFLAGS)" \
@@ -74,6 +76,10 @@ override_dh_install: $(INSTALLS)
 	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
+	for file in $$(find debian/tmp/$(MANDIR) -type f); do \
+	    rename=$$(echo $$file | sed s/\\.1/$(VERSION)\\.1/); \
+	    cp $$file $$rename || true; \
+	    done
 	dh_install
 
 override_dh_strip:

@@ -185,7 +185,7 @@ Description: Windows API implementation - development files
  This package provides wine's C header files and development libraries.
 
 Package: libwineVERSION-dbg
-Architecture: any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc
 Multi-Arch: same
 Section: debug
 Priority: extra

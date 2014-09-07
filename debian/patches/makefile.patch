@@ -1,4 +1,5 @@
 description: don't append wine to the default path settings
+author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/configure.ac
 +++ b/configure.ac

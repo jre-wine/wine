@@ -1,3 +1,11 @@
+wine-development (1.7.26-2) unstable; urgency=medium
+
+  * Install manpages, thanks jre (closes: #760694).
+  * Build debug package on amd64 (closes: #760697).
+  * Call wine-development from desktop launchers (closes: #758176).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 07 Sep 2014 00:49:05 +0000
+
 wine-development (1.7.26-1) unstable; urgency=medium
 
   * New upstream release 1.7.26, released Sep 5, 2014.

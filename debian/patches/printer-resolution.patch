@@ -1,4 +1,5 @@
 description: set default printer resolution to 600dpi
+author: Ralf E-Mail <anonymous272912@gmail.com>
 
 --- a/dlls/winspool.drv/generic.ppd
 +++ b/dlls/winspool.drv/generic.ppd

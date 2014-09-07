@@ -7,5 +7,6 @@ printer-resolution.patch
 winegcc.patch
 wineapploader.patch
 
+winemenubuilder.patch
 no-download.patch
 addons-path.patch
