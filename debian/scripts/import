@@ -1,13 +1,12 @@
 #!/bin/sh -e
+# Copyright: 2013-2014 Michael Gilbert <mgilbert@debian.org>
+# License: LGPL-2.1
 
+# check for version argument
 if [ "$#" -lt "1" ]; then
-  echo "Usage: $0 <file name>"
+  echo "usage: $(basename $0) <upstream version number>"
   exit 1
 fi
-
-# check that the upstream file exists
-filename="$1"
-test ! -e "$filename" && echo "$filename not found" && exit 1 || true
 
 # terminate if we're not building from a git tree
 if [ ! -d ".git" ]; then
@@ -15,22 +14,22 @@ if [ ! -d ".git" ]; then
   exit 1
 fi
 
-# pull from upstream git repository
-version=$(echo "$filename" | cut -d- -f2 | sed s/\.tar\.bz2//)
+# pull specified tag from upstream repository
+version="$1"
 winehq="git://source.winehq.org/git/wine.git"
 tag="wine-$version"
 git checkout upstream
-git pull --no-edit $winehq tag "$tag" 
+git pull --no-edit $winehq tag "$tag" || echo "unable to fetch tag $tag"
 
 # merge upstream into master (favoring "their" changes)
 git checkout master
 git merge --strategy-option=theirs upstream
 
-# format verbose "New upstream release" messages, including ANNOUNCE file
-tag_time=`git cat-file tag "wine-$version"|sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
+# format the "New upstream release" message
+tag_time=`git cat-file tag "$tag" | sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
 release_date=`LC_ALL=C date -u -d "@$tag_time" +"%b %-d, %Y"`
 
-# create the changelog entry
+# create the initial changelog entry
 dch -v "$version-1" "New upstream release $version, released $release_date."
 sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE | while read line; do
   dch $line

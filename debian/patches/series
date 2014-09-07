@@ -1,9 +1,11 @@
 makefile.patch
 manpages.patch
+gitignore.patch
+
+printer-resolution.patch
+
+winegcc.patch
 wineapploader.patch
 
 no-download.patch
 addons-path.patch
-
-printer-resolution.patch
-gitignore.patch

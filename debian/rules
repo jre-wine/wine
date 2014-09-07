@@ -22,18 +22,18 @@ endif
 
 # configure options
 CONFLAGS=--without-hal \
-	 --without-v4l \
-	 --without-sane \
-	 --without-capi \
-	 --without-gphoto \
-	 --without-gstreamer \
-	 --disable-tests \
-	 --libdir=/$(LIBDIR) \
-	 --bindir=/$(LIBDIR) \
-	 --mandir=/usr/share/man \
-	 --datarootdir=$(DATADIR) \
-	 --includedir=$(INCLUDEDIR) \
-	 LDFLAGS="$(LDFLAGS)" \
+         --without-v4l \
+         --without-sane \
+         --without-capi \
+         --without-gphoto \
+         --without-gstreamer \
+         --disable-tests \
+         --libdir=/$(LIBDIR) \
+         --bindir=/$(LIBDIR) \
+         --mandir=/usr/share/man \
+         --datarootdir=$(DATADIR) \
+         --includedir=$(INCLUDEDIR) \
+         LDFLAGS="$(LDFLAGS)" \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)

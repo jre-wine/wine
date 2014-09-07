@@ -3,7 +3,7 @@ Source: http://www.winehq.org
 Files-Excluded:
  configure
  config.log
- tools/config.* 
+ tools/config.*
  include/config.h.in
 
 Files: *

@@ -1,3 +1,14 @@
+wine-development (1.7.26-1) unstable; urgency=medium
+
+  * New upstream release 1.7.26, released Sep 5, 2014.
+    - Still more DirectWrite functions.
+    - Improvements to the common File Dialog.
+    - A number of C runtime improvements.
+    - Various bug fixes.
+  * Call wine-development instead of wine from the winegcc shell script.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 06 Sep 2014 22:59:41 +0000
+
 wine-development (1.7.25-1) unstable; urgency=medium
 
   * New upstream release 1.7.25, released Aug 22, 2014.
