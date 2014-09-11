@@ -1,18 +1,18 @@
-debian/scripts/wine usr/bin
+debian/scripts/wine-stable usr/bin
 
 debian/scripts/wine-wrapper usr/bin
 debian/scripts/wine-wrapper.1 usr/share/man/man1
 
 programs/winedbg/README usr/share/doc/wine/README.winedbg
 
-usr/share/man/man1/wine.1
-usr/share/man/man1/regedit.1
-usr/share/man/man1/winecfg.1
-usr/share/man/man1/winedbg.1
-usr/share/man/man1/wineboot.1
-usr/share/man/man1/winepath.1
-usr/share/man/man1/winefile.1
-usr/share/man/man1/regsvr32.1
+usr/share/man/man1/wine-stable.1
+usr/share/man/man1/regedit-stable.1
+usr/share/man/man1/winecfg-stable.1
+usr/share/man/man1/winedbg-stable.1
+usr/share/man/man1/wineboot-stable.1
+usr/share/man/man1/winepath-stable.1
+usr/share/man/man1/winefile-stable.1
+usr/share/man/man1/regsvr32-stable.1
 
 usr/share/man/de.UTF-8
 usr/share/man/fr.UTF-8

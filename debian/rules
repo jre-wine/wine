@@ -51,6 +51,12 @@ debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
 debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
 	cp $< $@
 
+debian/%$(VERSUFFIX).postinst: debian/%.postinst-common
+	cp $< $@
+
+debian/%$(VERSUFFIX).prerm: debian/%.prerm-common
+	cp $< $@
+
 %:
 	dh $@ --parallel --with autoreconf
 
@@ -74,6 +80,14 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine64-preloader || true
 	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine32.1
 	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
+	mv debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine-stable.1
+	mv debian/tmp/usr/share/man/man1/regedit.1 debian/tmp/usr/share/man/man1/regedit-stable.1
+	mv debian/tmp/usr/share/man/man1/winecfg.1 debian/tmp/usr/share/man/man1/winecfg-stable.1
+	mv debian/tmp/usr/share/man/man1/winedbg.1 debian/tmp/usr/share/man/man1/winedbg-stable.1
+	mv debian/tmp/usr/share/man/man1/wineboot.1 debian/tmp/usr/share/man/man1/wineboot-stable.1
+	mv debian/tmp/usr/share/man/man1/winepath.1 debian/tmp/usr/share/man/man1/winepath-stable.1
+	mv debian/tmp/usr/share/man/man1/winefile.1 debian/tmp/usr/share/man/man1/winefile-stable.1
+	mv debian/tmp/usr/share/man/man1/regsvr32.1 debian/tmp/usr/share/man/man1/regsvr32-stable.1
 	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
 	dh_install

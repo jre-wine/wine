@@ -1,7 +1,7 @@
-usr/bin/wine-wrapper usr/bin/regedit
-usr/bin/wine-wrapper usr/bin/winecfg
-usr/bin/wine-wrapper usr/bin/winedbg
-usr/bin/wine-wrapper usr/bin/wineboot
-usr/bin/wine-wrapper usr/bin/winepath
-usr/bin/wine-wrapper usr/bin/winefile
-usr/bin/wine-wrapper usr/bin/regsvr32
+usr/bin/wine-wrapper usr/bin/regedit-stable
+usr/bin/wine-wrapper usr/bin/winecfg-stable
+usr/bin/wine-wrapper usr/bin/winedbg-stable
+usr/bin/wine-wrapper usr/bin/wineboot-stable
+usr/bin/wine-wrapper usr/bin/winepath-stable
+usr/bin/wine-wrapper usr/bin/winefile-stable
+usr/bin/wine-wrapper usr/bin/regsvr32-stable

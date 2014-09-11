@@ -1,3 +1,9 @@
+wine (1.6.2-9) UNRELEASED; urgency=medium
+
+  * Add alternatives system for wine, the wine-wrapper links and the manpages.
+
+ -- jre <jre.winesim@gmail.com>  Thu, 11 Sep 2014 01:08:30 +0200
+
 wine (1.6.2-8) unstable; urgency=medium
 
   * Use a .maintscript file to handle symlink-to-folder transitions in
