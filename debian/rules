@@ -7,6 +7,11 @@ export DH_VERBOSE=1
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+ifeq ($(VERSION), -development)
+DEBSUFFIX=$(VERSION)
+else
+DEBSUFFIX=-stable
+endif
 
 DATADIR=/usr/share/wine$(VERSION)
 INCLUDEDIR=/usr/include/wine$(VERSION)
@@ -49,7 +54,7 @@ debian/control: debian/control.in
 	sed s/VERSION/$(VERSION)/g < $< > $@
 
 debian/wine$(VERSION)%: debian/wineVERSION%
-	sed s/VERSION/$(VERSION)/g < $< > $@
+	sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g" < $< > $@
 
 debian/wine32$(VERSION)%: debian/wine32VERSION%
 	sed s/VERSION/$(VERSION)/g < $< > $@
@@ -70,14 +75,14 @@ override_dh_auto_configure:
 
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
-	cp debian/scripts/wine debian/tmp/wine$(VERSION)
+	cp debian/scripts/wine debian/tmp/wine$(DEBSUFFIX)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
 	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
 	for file in $$(find debian/tmp/$(MANDIR) -type f); do \
-	    rename=$$(echo $$file | sed s/\\.1/$(VERSION)\\.1/); \
+	    rename=$$(echo $$file | sed s/\\.1/$(DEBSUFFIX)\\.1/); \
 	    cp $$file $$rename || true; \
 	    done
 	dh_install
