@@ -1,0 +1,20 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "configure" ] ; then
+  # add update-alternatives entries
+  for app in regedit regsvr32 wineboot winecfg winedbg winefile winepath ; do
+    slaves="$slaves --slave /usr/bin/$app $app /usr/bin/${app}VERSION \
+      --slave /usr/share/man/man1/${app}.1.gz ${app}.1.gz /usr/share/man/man1/${app}VERSION.1.gz"
+  done
+
+  update-alternatives \
+    --install /usr/bin/wine wine /usr/bin/wineVERSION 20 \
+    --slave /usr/share/man/man1/wine.1.gz wine.1.gz /usr/share/man/man1/wineVERSION.1.gz \
+    $slaves
+fi
+
+#DEBHELPER#
+
+exit 0

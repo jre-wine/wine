@@ -1,3 +1,9 @@
+wine-development (1.7.26-3minimal) UNRELEASED; urgency=medium
+
+  * Add alternatives system for wine, the wineapploader links and the manpages.
+
+ -- jre <jre.winesim@gmail.com>  Thu, 11 Sep 2014 02:15:20 +0200
+
 wine-development (1.7.26-2) unstable; urgency=medium
 
   * Install manpages, thanks jre (closes: #760694).

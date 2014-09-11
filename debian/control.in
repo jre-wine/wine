@@ -70,6 +70,8 @@ Suggests:
  wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
+Breaks:
+ wine (<< 1.6.2-9),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.

@@ -2,7 +2,8 @@
 
 set -e
 
-name=$(basename $0)
+# name results in "wine-development" or "wine"
+name="$(echo $(basename $(readlink -f $0)) | sed s/-stable//)"
 bindir=/usr/lib/$name
 
 wine32=$bindir/wine
