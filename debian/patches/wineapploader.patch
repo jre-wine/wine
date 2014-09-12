@@ -10,7 +10,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 -appname=`basename "$0" .exe`.exe
 +app=$(basename "$0" .exe)
 +name=$(echo $app | cut -d- -f1)
-+suffix=$(echo $app | sed s/$name//)
++suffix=$(basename $(dirname $(readlink -f $(which $0))) | sed s/wine//)
 +appname=$name.exe
  
  # first try explicit WINELOADER
