@@ -7,6 +7,7 @@ export DH_VERBOSE=1
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+
 ifeq ($(VERSION), -development)
 DEBSUFFIX=$(VERSION)
 else
@@ -49,6 +50,13 @@ endif
 
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
+
+# Following are several recipes containing this line:
+# (sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+# This takes the first requisite of the rule, and does depending on the wine version specified in debian/changelog:
+# - Replace VERSION ("-development" or empty) and DEBSUFFIX ("-development" or "-stable").
+# - Remove the tag (#development# or #stable#) of the target version.
+# - Remove lines containing the tag (#development# or #stable#) of the non-target version.
 
 debian/control: debian/control.in debian/changelog debian/rules debian/watch debian/patches/series
 ifeq ($(VERSION), -development)
