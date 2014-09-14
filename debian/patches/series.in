@@ -1,0 +1,13 @@
+makefileVERSION.patch
+manpagesVERSION.patch
+#development#gitignore.patch
+
+printer-resolutionVERSION.patch
+
+winegccVERSION.patch
+wineapploader.patch
+
+winemenubuilder.patch
+no-download.patch
+addons-path.patch
+

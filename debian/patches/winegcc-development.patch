@@ -1,4 +1,4 @@
-description: call wine-stable instead of wine from the winegcc shell script
+description: call wine-development instead of wine from the winegcc shell script
 author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/tools/winegcc/winegcc.c
@@ -8,7 +8,7 @@ author: Michael Gilbert <mgilbert@debian.org>
      "\n"
      "# determine the WINELOADER\n"
 -    "if [ ! -x \"$WINELOADER\" ]; then WINELOADER=\"wine\"; fi\n"
-+    "if [ ! -x \"$WINELOADER\" ]; then WINELOADER=\"wine-stable\"; fi\n"
++    "if [ ! -x \"$WINELOADER\" ]; then WINELOADER=\"wine-development\"; fi\n"
      "\n"
      "# and try to start the app\n"
      "exec \"$WINELOADER\" \"$apppath\" \"$@\"\n"
