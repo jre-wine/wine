@@ -1,24 +1,46 @@
 #!/usr/bin/make -f
 
+# enable verbose build log
 export DH_VERBOSE=1
 
-# unfortunately wine fails to build with pie enabled
+# wine build fails with pie enabled
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
 
-VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+ifeq ($(VERSION), -development)
+DEBSUFFIX=$(VERSION)
+else
+DEBSUFFIX=-stable
+endif
 
-DATADIR=/usr/share/wine$(VERSUFFIX)
-LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
+DATADIR=/usr/share/wine$(VERSION)
+INCLUDEDIR=/usr/include/wine$(VERSION)
+
+MANDIR=usr/share/man
+LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
+
+# linker options
+LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
+
+# use freebsd-glue on kfreebsd architectures
+ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
+LDFLAGS+=-lfreebsd-glue
+endif
 
 # configure options
 CONFLAGS=--without-hal \
-	 --prefix=$(DATADIR) \
-	 --libdir=/$(LIBDIR) \
-	 --mandir=/usr/share/man \
-	 --datarootdir=$(DATADIR) \
-	 --exec-prefix=/$(LIBDIR) \
-	 --includedir=/usr/include \
-	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
+         --without-v4l \
+         --without-sane \
+         --without-capi \
+         --without-gphoto \
+         --without-gstreamer \
+         --disable-tests \
+         --libdir=/$(LIBDIR) \
+         --bindir=/$(LIBDIR) \
+         --mandir=/$(MANDIR) \
+         --datarootdir=$(DATADIR) \
+         --includedir=$(INCLUDEDIR) \
+         LDFLAGS="$(LDFLAGS)" \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
@@ -26,70 +48,64 @@ CONFLAGS+=--enable-win64
 endif
 
 # additional files to generate
-INSTALLS=$(shell ls debian/*-common | sed s/-common// | sed s/\\./$(VERSUFFIX)\\./)
+INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
 
-debian/control: debian/control.in
-	sed -e 's/\(wine[a-z0-9_-]*\)/\1$(VERSUFFIX)/g' \
-	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
-	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
-	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
-	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
-	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
+debian/control: debian/control.in debian/changelog debian/rules debian/patches/series
+ifeq ($(VERSION), -development)
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+else
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
+endif
 
-debian/%$(VERSUFFIX).docs: debian/%.docs-common
-	cp $< $@
+debian/patches/series: debian/patches/series.in debian/changelog debian/rules
+ifeq ($(VERSION), -development)
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+else
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
+endif
 
-debian/%$(VERSUFFIX).links: debian/%.links-common
-	cp $< $@
+debian/wine$(VERSION)%: debian/wineVERSION%
+	sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g" < $< > $@
 
-debian/%$(VERSUFFIX).install: debian/%.install-common
-	cp $< $@
+debian/wine32$(VERSION)%: debian/wine32VERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).manpages: debian/%.manpages-common
-	cp $< $@
+debian/wine64$(VERSION)%: debian/wine64VERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
-debian/%$(VERSUFFIX).lintian-overrides: debian/%.lintian-overrides-common
-	cp $< $@
+debian/libwine$(VERSION)%: debian/libwineVERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
 
 %:
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
-	ln -s /usr/share/misc/config.sub tools/config.sub
-	ln -s /usr/share/misc/config.guess tools/config.guess
-ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
+	ln -sf /usr/share/misc/config.sub tools
+	ln -sf /usr/share/misc/config.guess tools
 	dh_auto_configure -- $(CONFLAGS)
-endif
 
 override_dh_install: $(INSTALLS)
-ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
-	mkdir -p debian/tmp/usr/bin
-	ln -s ../../$(LIBDIR)/bin/wine32 debian/tmp/usr/bin/wine32 || true
-	ln -s ../../$(LIBDIR)/bin/wine64 debian/tmp/usr/bin/wine64 || true
-	cd debian/tmp/$(LIBDIR)/bin && mv wine64 wine || true
-	cd debian/tmp/$(LIBDIR)/bin && mv wine64-preloader wine-preloader || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine32 || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine wine64 || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine32-preloader || true
-	cd debian/tmp/$(LIBDIR)/bin && ln -s wine-preloader wine64-preloader || true
-	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine32.1
-	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
-	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
+	mkdir -p debian/tmp
+	cp debian/scripts/wine debian/tmp/wine$(DEBSUFFIX)
+	cp tools/winedump/README debian/tmp/README.winedump
+	cp programs/winedbg/README debian/tmp/README.winedbg
+	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader
+	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
+	for file in $$(find debian/tmp/$(MANDIR) -type f); do \
+	    rename=$$(echo $$file | sed s/\\.1/$(DEBSUFFIX)\\.1/); \
+	    cp $$file $$rename || true; \
+	    done
 	dh_install
-endif
-
-override_dh_auto_test:
-	# disable upstream's automated testing due to various brokenness
 
 override_dh_strip:
-	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)
-	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
+	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine$(VERSION)-dbg
 
 override_dh_clean:
-	dh_clean
-	rm -rf debian/libwine-dbg$(VERSUFFIX)
-	rm -f config.log configure tools/config.sub tools/config.guess
-	rm -f dlls/*.def tools/makedep loader/wine_info.plist # random uncleaned files
-	rm -f $(INSTALLS) debian/control
+	dh_clean -- \
+	    $(INSTALLS) \
+	    debian/control \
+	    debian/patches/series \
+	    programs/cscript/ihost.h \
+	    configure config.* tools/config.* include/config.h.in
 	make -f debian/rules debian/control

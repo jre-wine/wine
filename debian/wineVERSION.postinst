@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -e
+
+if [ "$1" = "configure" ] ; then
+  # add update-alternatives entries
+  PRIORITY=70
+  [ DEBSUFFIX != -development ] || PRIORITY=20
+
+  for app in regedit regsvr32 wineboot winecfg winedbg winefile winepath ; do
+    slaves="$slaves --slave /usr/bin/$app $app /usr/bin/${app}DEBSUFFIX \
+      --slave /usr/share/man/man1/${app}.1.gz ${app}.1.gz /usr/share/man/man1/${app}DEBSUFFIX.1.gz"
+  done
+
+  update-alternatives \
+    --install /usr/bin/wine wine /usr/bin/wineDEBSUFFIX $PRIORITY \
+    --slave /usr/share/man/man1/wine.1.gz wine.1.gz /usr/share/man/man1/wineDEBSUFFIX.1.gz \
+    $slaves
+fi
+
+#DEBHELPER#
+
+exit 0

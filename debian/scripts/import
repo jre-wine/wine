@@ -1,49 +1,36 @@
-#!/bin/sh
-set -e
-if [ "$#" -lt "1" ]
-then
-  echo "Usage: $0 <file name>"
+#!/bin/sh -e
+# Copyright: 2013-2014 Michael Gilbert <mgilbert@debian.org>
+# License: LGPL-2.1
+
+# check for version argument
+if [ "$#" -lt "1" ]; then
+  echo "usage: $(basename $0) <upstream version number>"
   exit 1
 fi
 
-# check that the upstream file exists
-filename="$1"
-test ! -e "$filename" && echo "$filename not found" && exit 1 || true
-
-# figure out which branch we're on
-upstream_version=$(echo "$filename" | cut -d- -f2 | sed s/\.tar\.bz2//)
-case "$upstream_version" in
-  1.0.*|1.2|1.2.*|1.4|1.4.*|1.6|1.6.*)
-    package=wine
-    ;;
-  1.1.*|1.3.*|1.5.*|1.7.*)
-    package=wine-unstable
-    ;;
-  *)
-    echo "Unknown version series: $upstream_version"
-    exit 1
-    ;;
-esac
-
-# if we're not building from a git tree, use regular uupdate
-if [ ! -d ".git" ]
-then
-  exec uupdate --no-symlink "$*"
+# terminate if we're not building from a git tree
+if [ ! -d ".git" ]; then
+  echo "error: importing only supported for git checkouts"
+  exit 1
 fi
 
-# provide orig symlink
-debfilename="$(dirname "$filename")/${package}_${upstream_version}.orig.tar.bz2"
-test -e $debfilename || ln -s $(basename "$filename") $debfilename
-
-# pull from upstream git repository (favoring "their" changes in the merge)
-upstream_tag="wine-$upstream_version"
+# pull specified tag from upstream repository
+version="$1"
 winehq="git://source.winehq.org/git/wine.git"
+tag="wine-$version"
 git checkout upstream
-git pull --no-edit $winehq tag "$upstream_tag" 
+git pull --no-edit $winehq tag "$tag" || echo "unable to fetch tag $tag"
 
-# merge from upstream into master branch
+# merge upstream into master (favoring "their" changes)
 git checkout master
-git merge upstream
+git merge --strategy-option=theirs upstream
 
-# amend the merge commit message
-$0-done --upstream-version "$upstream_version"
+# format the "New upstream release" message
+tag_time=`git cat-file tag "$tag" | sed -n 's/tagger .*<.*> \([0-9]*\) .*/\1/p'`
+release_date=`LC_ALL=C date -u -d "@$tag_time" +"%b %-d, %Y"`
+
+# create the initial changelog entry
+dch -v "$version-1" "New upstream release $version, released $release_date."
+sed -n 's/^  - \(.*\)/- \1/p' ANNOUNCE | while read line; do
+  dch $line
+done

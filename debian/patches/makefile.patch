@@ -1,0 +1,16 @@
+description: don't append wine to the default path settings
+author: Michael Gilbert <mgilbert@debian.org>
+
+--- a/Make.vars.in
++++ b/Make.vars.in
+@@ -9,8 +9,8 @@
+ infodir         = @infodir@
+ mandir          = @mandir@
+ fontdir         = $(datadir)/wine/fonts
+-includedir      = @includedir@/wine
+-dlldir          = @libdir@/wine
++includedir      = @includedir@/
++dlldir          = @libdir@/
+ fakedlldir      = $(dlldir)/fakedlls
+ top_srcdir      = @top_srcdir@
+ top_builddir    = @top_builddir@

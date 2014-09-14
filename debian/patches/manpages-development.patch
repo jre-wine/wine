@@ -1,0 +1,222 @@
+description: fix various manpage issues
+author: Michael Gilbert <mgilbert@debian.org>
+
+--- wine.orig/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
+@@ -71,7 +71,7 @@
+ .IR wineserver .
+ genutzt. Alle
+ .B wine
+--Prozesse, die den gleichen
++\-Prozesse, die den gleichen
+ .B wineserver
+ nutzen (z.B. Prozesse desselben Nutzers) teilen sich bestimmte Objekte
+ wie die Registry, Arbeitsspeicher und die Konfigurationsdateien.  Mit
+@@ -79,14 +79,14 @@
+ .I WINEPREFIX
+ beim Starten verschiedener
+ .B wine
+--Prozesse ist es möglich, eine Anzahl vollkommen unabhängiger
++\-Prozesse ist es möglich, eine Anzahl vollkommen unabhängiger
+ .B wine
+--Prozesse zu starten.
++\-Prozesse zu starten.
+ .TP
+ .I WINESERVER
+ Gibt den Ort der
+ .B wineserver
+--Anwendung an. Wenn diese Variable nicht gesetzt ist, wird versucht,
++\-Anwendung an. Wenn diese Variable nicht gesetzt ist, wird versucht,
+ .B @bindir@/wineserver
+ zu laden. Wenn auch dies nicht funktioniert, sucht
+ .B wine
+@@ -95,7 +95,7 @@
+ .I WINELOADER
+ Gibt den Ort der
+ .B wine
+--Anwendung an, die genutzt wird, um Windows-Programme zu laden. Wenn
++\-Anwendung an, die genutzt wird, um Windows-Programme zu laden. Wenn
+  diese Variable nicht gesetzt ist, wird versucht,
+ .B @bindir@/wineserver
+ zu laden. Wenn auch dies nicht funktioniert, wird in $PATH und anderen
+@@ -118,7 +118,7 @@
+ nicht angegeben ist, werden alle Debugmeldungen dieses Kanals
+ ausgegeben. Jeder Kanal gibt Meldungen einer bestimmten
+ .BR wine .
+--Komponente aus. Das folgende Zeichen kann entweder + oder - sein, je
++\-Komponente aus. Das folgende Zeichen kann entweder + oder - sein, je
+ nachdem ob der Kanal ein- oder ausgeschaltet werden soll.  Wenn keine
+ .I Klasse
+ angegeben ist, kann das führende + weggelassen werden. In WINEDEBUG
+@@ -143,7 +143,7 @@
+ .TP
+ WINEDEBUG=relay
+ schaltet alle Relay-Nachrichten an. Für mehr Kontrolle über die im
+-Relaytrace angezeigten DLLs und Funktionen siehe den [Debug]-Abschnitt
++Relaytrace angezeigten DLLs und Funktionen siehe den Debug-Abschnitt
+ der Wine-Konfigurationsdatei.
+ .PP
+ Für mehr Informationen zu den Debug-Meldungen siehe den Abschnitt
+@@ -166,7 +166,7 @@
+ .RI ( native ),
+ und
+ .B wine
+--interne DLLs
++\-interne DLLs
+ .RI ( builtin ).
+ Der Typ kann mit dem ersten Buchstaben abgekürzt werden
+ .RI ( n ", " b ).
+@@ -231,22 +231,22 @@
+ .I @bindir@/wine
+ Der
+ .B wine
+--Programmstarter
++\-Programmstarter
+ .TP
+ .I @bindir@/wineconsole
+ Der
+ .B wine
+--Programmstarter für Konsolenapplikationen (CLI)
++\-Programmstarter für Konsolenapplikationen (CLI)
+ .TP
+ .I @bindir@/wineserver
+ Der
+ .B wine
+--Server
++\-Server
+ .TP
+ .I @bindir@/winedbg
+ Der
+ .B wine
+--Debugger
++\-Debugger
+ .TP
+ .I @dlldir@
+ Der Ordner mit den gemeinsamen DLLs von
+@@ -290,7 +290,7 @@
+ .I http://wiki.winehq.org/Bugs
+ im
+ .B wine
+--Quellcode, um zu sehen, welche Informationen benötigt werden.
++\-Quellcode, um zu sehen, welche Informationen benötigt werden.
+ .PP
+ Probleme und Hinweise mit/zu dieser Manpage können auch auf
+ .I http://bugs.winehq.org
+@@ -307,7 +307,7 @@
+ .PP
+ WineHQ, die Hauptseite der
+ .B wine
+--Entwicklung, befindet sich auf
++\-Entwicklung, befindet sich auf
+ .IR http://www.winehq.org .
+ Diese Website bietet viele Informationen und Ressourcen zu
+ .BR wine .
+@@ -316,7 +316,7 @@
+ .B wine
+ können Sie sich als Abonnement bei der
+ .B wine
+--Mailingliste auf
++\-Mailingliste auf
+ .I http://www.winehq.org/forums
+ eintragen.
+ .SH "SIEHE AUCH"
+--- wine.orig/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
+@@ -263,8 +263,8 @@
+ Napędy DOS również są określone przez dowiązania symboliczne; Dla przykładu jeżeli napęd D:
+ odpowiadałby napędowi CDROM zamontowanemu w /mnt/cdrom, miałbyś dowiązanie symboliczne
+ $WINEPREFIX/dosdevices/d: -> /mnt/cdrom. Urządzenia Uniksowe odpowiadające
+-napędom DOS mogą być określone w ten sam sposób, z użyciem '::' zamiast
+-':'. Tak więc dla poprzedniego przykładu, jeżeli urządzenie CDROM byłoby zamontowane
++napędom DOS mogą być określone w ten sam sposób, z użyciem '::' zamiast.
++Tak więc dla poprzedniego przykładu, jeżeli urządzenie CDROM byłoby zamontowane
+ z /dev/hdc, to odpowiadające dowiązanie symboliczne wyglądałoby następująco
+ $WINEPREFIX/dosdevices/d:: -> /dev/hdc.
+ .SH AUTORZY
+--- wine.orig/programs/winedbg/winedbg.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/programs/winedbg/winedbg.man.in	2014-01-25 23:56:57.567665161 -0500
+@@ -60,7 +60,7 @@
+ .IP \fB--command\ \fIstring\fR
+ \fBwinedbg\fR will execute the command \fIstring\fR as if it was keyed on
+ winedbg command line, and then will exit. This can be handy for
+-getting the pid of running processes (winedbg --command "info proc").
++getting the pid of running processes (winedbg \-\-command "info proc").
+ .IP \fB--file\ \fIfilename\fR
+ \fBwinedbg\fR will execute the list of commands contained in file
+ filename as if they were keyed on winedbg command line, and then
+--- wine.orig/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:57:06.303665140 -0500
+@@ -58,7 +58,7 @@
+ Groß-/Kleinschreibweise austauschen.
+ .PP
+ - Winemaker wird ebenso andere, exotischere Probleme wie die Benutzung von
+-'#pragma pack', 'afxres.h' in nicht-MFC-Projekten und mehr untersuchen.
++in nicht-MFC-Projekten und mehr untersuchen.
+ Sollte etwas ungwöhnliches vorkommen, wird Winemaker Sie warnen.
+ .PP
+ - Winemaker kann eine ganze Verzeichnisstruktur auf einmal durchsuchen,
+@@ -193,13 +193,13 @@
+ .PP
+ Ein typischer Winemaker Aufruf:
+ .PP
+-$ winemaker --lower-uppercase -DSTRICT .
++$ winemaker \-\-lower-uppercase \-DSTRICT .
+ .PP
+ Damit scannt Winemaker das aktuelle Verzeichnis und die Unterverzeichnisse nach
+ Quellcodedateien. Jede Datei und jedes Verzeichnis, das ganz in Großbuchstaben
+ geschrieben ist, wird in Kleinbuchstaben umbenannt. Danach werden alle Quellcodedateien
+ an die Kompilierung mit Winelib angepasst und Makefiles erzeugt.
+-'-DSTRICT' gibt an, dass das STRICT-Makro gesetzt sein muss, um diesen Quellcode
++\-DSTRICT gibt an, dass das STRICT-Makro gesetzt sein muss, um diesen Quellcode
+ zu kompilieren. Letztendlich wird Winemaker die globale Makefile erzeugen.
+ .PP
+ Der nächste Schritt wäre dann:
+@@ -212,7 +212,7 @@
+ .PP
+ Bei einem MFC-basierten Projekt sollten Sie stattdessen folgenden Befehl ausführen:
+ .PP
+-$ winemaker --lower-uppercase --mfc .
++$ winemaker \-\-lower-uppercase \-\-mfc .
+ .br
+ $ make
+ .PP
+--- wine.orig/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
+@@ -211,7 +211,7 @@
+ .B winemaker
+ :
+ .PP
+-$ winemaker --lower-uppercase -DSTRICT .
++$ winemaker \-\-lower-uppercase \-DSTRICT .
+ .PP
+ Recherche des fichiers sources dans le répertoire courant et ses
+ sous-répertoires. Quand un fichier ou répertoire a un nom composé
+@@ -232,7 +232,7 @@
+ Pour un projet utilisant les MFC, vous devriez plutôt exécuter les commandes
+ suivantes\ :
+ .PP
+-$ winemaker --lower-uppercase --mfc .
++$ winemaker \-\-lower-uppercase \-\-mfc .
+ .br
+ $ make
+ .PP
+--- wine.orig/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
++++ wine/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
+@@ -62,7 +62,7 @@
+ .B wineserver
+ seine Daten ablegt (Standardmäßig in \fI$HOME/.wine\fR). Alle
+ .B wine
+--Prozesse, die den selben
++\-Prozesse, die den selben
+ .B wineserver
+ verwenden (z.B. vom selben Benutzer), teilen sich u.a. die selbe Registry,
+ gemeinsamen Speicher und Kernelobjekte.
+@@ -74,7 +74,7 @@
+ .I WINESERVER
+ Gibt den Pfad und Namen der
+ .B wineserver
+--Binärdatei an, die automatisch von \fBwine\fR gestartet wird. Ist diese
++\-Binärdatei an, die automatisch von \fBwine\fR gestartet wird. Ist diese
+ Variable nicht gesetzt, wird \fBwine\fR versuchen,
+ .IR @bindir@/wineserver
+ zu laden. Existiert dieser Pfad nicht, wird nach einer Datei namens
