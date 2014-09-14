@@ -1,12 +1,13 @@
-makefile.patch
-manpages.patch
+makefile-development.patch
+manpages-development.patch
 gitignore.patch
 
-printer-resolution.patch
+printer-resolution-development.patch
 
-winegcc.patch
+winegcc-development.patch
 wineapploader.patch
 
 winemenubuilder.patch
 no-download.patch
 addons-path.patch
+
