@@ -1,3 +1,148 @@
+wine (1.6.2-9jre0) UNRELEASED; urgency=medium
+
+  * control.in:
+    - Fix lintian P:pre-depends-directly-on-multiarch-support.
+      Drop dependency on wine-doc.
+      (closes: #761461).
+  * Add merged Debian packaging.
+    - Based on wine-development 1.7.26-2 + 1.7.26-3-DEBSUFFIX-proposal.
+    - The single steps I took can be seen in the branch masterUnifiedPackaging.
+    - This allows one to use exactly the same debian/ folder for
+      wine-development and wine (wine stable branch), only the first
+      d/changelog entry has to be adjusted and debian/rules be run once.
+    - TODO: Track the stable branch in debian/watch.
+    - For a clean solution two different changelogs might be maintained (see
+      below for stable changelog entries).
+    - Care has to be taken to close bugs in the correct version.
+    - VERSION ("-development" or empty) and DEBSUFFIX ("-development" or
+      "-stable") are used to distinguish between stable and development wine.
+    - Necessary differences between the two versions are tagged either #stable#
+      or #development# within the files. d/rules will then enable the correct
+      lines.
+    - Use as much as possible of current wine-development packaging, including
+      removal of old parts from the wine (stable) packaging. Beneath other
+      changes this means for wine stable:
+      - Rename wine32|64-dev-tools to wine32|64-tools, added transitional
+        packages.
+      - Add preloader packages.
+      - Replace architecture any-amd64 with amd64.
+      - Drop build-dependencies:
+        - autotools-dev
+        - kfreebsd-kernel-headers [kfreebsd-any]
+        - file
+      - Add build-dependencies:
+        - gettext
+        - libgettextpo-dev
+        - libtiff-dev
+        - libpcap-dev
+        - freebsd-glue [kfreebsd-any]
+        - ocl-icd-opencl-dev
+    - patches: generate d/patches/series from series.in, use different patches
+      if necessary.
+    - debian/rules: add d/changelog and d/rules as prerequisite of d/control
+      and d/patches/series.
+    - STABLE: make transitional packages deborphan compliant (closes: #760696).
+
+  * Modified changelog since last merge:
+
+  wine-development (1.7.26-3jre0)
+  * Add alternatives system for wine, the wineapploader links and the manpages.
+  * Introduce DEBSUFFIX (either -development or -stable) in d/rules.
+
+  wine-development (1.7.26-2)
+  * Install manpages, thanks jre.
+  * Build debug package on amd64.
+  * Call wine-development from desktop launchers.
+
+  wine-development (1.7.26-1)
+  * Call wine-development instead of wine from the winegcc shell script.
+
+  wine-development (1.7.25-1)
+  * Update the git repository.
+  * Fix typo in README.debian.
+  * Simplify wineapploader.
+
+  wine-development (1.7.24-5)
+  * Fix wine-preloader installation path.
+
+  wine-development (1.7.24-4)
+  * Add some information about WINEDEBUG to README.debian.
+  * Correctly call suffixed wine launcher in wineapploader.
+
+  wine-development (1.7.24-3)
+  * Clarify multiarch instructions.
+  * Append version suffix to wineapploader scripts.
+  * Add ncurses and freetype dependencies to wine32.
+  * Use -development instead of -unstable in wineapploader.
+
+  wine-development (1.7.24-2)
+  * Remove wine-gecko recommendation.
+
+  wine-development (1.7.23-1)
+  * Link against freebsd-glue on kfreebsd.
+
+  wine-development (1.7.22-1)
+  * Update debian/copyright to format 1.0.
+  * Add upstream signing key for uscan download verification.
+  * Disable gstreamer since 1.0 support is not yet available.
+  * Rename source package to better match the upstream naming scheme.
+  * Remove some of the automatically generated files from the upstream tarball.
+
+  wine-unstable (1.7.16-2)
+  * Use WINEDEBUG=-all by default.
+  * Recommmend libasound2-plugins.
+  * Remove winbind and antivirus suggestions.
+  * Fix addon search paths.
+  * Fix symlinks to wine-wrapper.
+
+  wine-unstable (1.7.16-1)
+  * Use /usr/share/wine-gecko as the default search path for wine-gecko files.
+  * Use wine-unstable instead of wine in wine-wrapper.
+  * Change wine-gecko dependency to a recommendation.
+  * Remove transitional packages.
+  * Disable external downloading.
+
+  wine-unstable (1.7.15-1)
+  * Move /usr/bin/wine to /usr/bin/wine-unstable.
+  * Fix paths to binaries in helper script.
+
+  wine-unstable (1.7.14-4)
+  * Build against gstreamer 1.0.
+  * Install binaries to /usr/lib/wine-unstable.
+  * Check for system.reg in wine-wrapper.
+
+  wine-unstable (1.7.14-3)
+  * wine32-unstable also needs to conflict with wine32.
+  * Ensure all replaced packages are marked with "Breaks" relationships
+    too (thanks to Andreas Beckmann for pointing out that this is
+    required, see #739386).
+
+  wine-unstable (1.7.14-2)
+  * Install header files in /usr/include/wine-unstable.
+  * Until we implement full side-by-side installation with the stable wine
+    packages, have wine-unstable conflict with wine and wine64-unstable
+    with wine64.
+  * Install README.winedump as a file in the appropriate, suffixed doc
+    directory.
+  * Build-depend on gettext and libgettextpo-dev to enable PO rebuild
+    support in the development tools.
+  * Build-depend on libosmesa6-dev to enable offscreen OpenGL rendering.
+  * Build-depend on libgstreamer-plugins-base0.10-dev to enable
+    gstreamer support.
+
+  wine-unstable (1.7.14-1)
+  * Replace libgphoto2-2-dev build dependency with libgphoto2-dev
+
+  wine-unstable (1.7.12-1)
+  * Support freetype >= 2.5.1.
+
+  wine-unstable (1.7.0-1)
+  * Switch to the wine-unstable branch.
+  * Track the unstable branch in debian/watch.
+  * Incorporate changes from the stable branch.
+
+ -- jre <jre.winesim@gmail.com>  Sun, 14 Sep 2014 03:50:53 +0200
+
 wine (1.6.2-8) unstable; urgency=medium
 
   * Use a .maintscript file to handle symlink-to-folder transitions in
