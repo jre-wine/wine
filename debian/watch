@@ -1,4 +1,4 @@
 version=3
 opts="pgpsigurlmangle=s/$/.sign/" \
 http://www.winehq.org/ \
-  (?:|.*/)wine(?:[_\-]v?|)(\d*.*.\d*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz)
+  (?:|.*/)wine(?:[_\-]v?|)(\d*.*[02468].\d*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz)

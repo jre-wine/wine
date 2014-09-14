@@ -50,7 +50,14 @@ endif
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/)
 
-debian/control: debian/control.in debian/changelog debian/rules debian/patches/series
+debian/control: debian/control.in debian/changelog debian/rules debian/watch debian/patches/series
+ifeq ($(VERSION), -development)
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
+else
+	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#stable#//g" | grep -v "#development#") < $< > $@
+endif
+
+debian/watch: debian/watch.in debian/changelog debian/rules
 ifeq ($(VERSION), -development)
 	(sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g;s/#development#//g" | grep -v "#stable#") < $< > $@
 else

@@ -1,0 +1,5 @@
+version=3
+opts="pgpsigurlmangle=s/$/.sign/" \
+http://www.winehq.org/ \
+#development#  (?:|.*/)wine(?:[_\-]v?|)(\d*.*[13579].\d*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz)
+#stable#  (?:|.*/)wine(?:[_\-]v?|)(\d*.*[02468].\d*)\.(?:tar\.xz|txz|tar\.bz2|tbz2|tar\.gz|tgz)
