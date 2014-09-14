@@ -67,7 +67,6 @@ Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
 Suggests:
- wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
 Description: Windows API implementation - standard suite
@@ -214,7 +213,7 @@ Suggests:
  cups-bsd,
  wine-doc,
 Pre-Depends:
- multiarch-support,
+ ${misc:Pre-Depends},
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
