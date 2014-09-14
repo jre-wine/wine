@@ -10,7 +10,6 @@ wine (1.6.2-9jre0) UNRELEASED; urgency=medium
     - This allows one to use exactly the same debian/ folder for
       wine-development and wine (wine stable branch), only the first
       d/changelog entry has to be adjusted and debian/rules be run once.
-    - TODO: Track the stable branch in debian/watch.
     - For a clean solution two different changelogs might be maintained (see
       below for stable changelog entries).
     - Care has to be taken to close bugs in the correct version.
@@ -37,13 +36,25 @@ wine (1.6.2-9jre0) UNRELEASED; urgency=medium
         - libpcap-dev
         - freebsd-glue [kfreebsd-any]
         - ocl-icd-opencl-dev
-    - patches: generate d/patches/series from series.in, use different patches
-      if necessary.
-    - debian/rules: add d/changelog and d/rules as prerequisite of d/control
-      and d/patches/series.
-    - STABLE: make transitional packages deborphan compliant (closes: #760696).
+    - Patches:
+      - Build d/patches/series from series.in (as requisite of d/control).
+      - Use different patches if necessary.
+    - d/watch:
+      - Build from watch.in (as requisite of d/control).
+      - Watch for odd versions only in wine development.
+    - debian/rules: Add d/changelog and d/rules as requisites of d/control.
 
-  * Modified changelog since last merge:
+    - TODO:
+      - gitignore: Add d/patches/series and d/watch.
+      - I haven't tested the import script. Of course it might be modified for
+        a new workflow.
+
+
+  The following entries are only for stable wine:
+  ===============================================
+  * Make transitional packages deborphan compliant (closes: #760696).
+
+  * Modified changelog since last merge (for use in wine stable):
 
   wine-development (1.7.26-3jre0)
   * Add alternatives system for wine, the wineapploader links and the manpages.
