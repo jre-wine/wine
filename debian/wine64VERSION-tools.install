@@ -7,3 +7,5 @@ debian/tmp/usr/lib/*/*/winedump
 debian/tmp/usr/lib/*/*/winemaker
 debian/tmp/usr/lib/*/*/wmc
 debian/tmp/usr/lib/*/*/wrc
+
+debian/tmp/winegcc64VERSION usr/bin

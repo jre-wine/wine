@@ -1,3 +1,17 @@
+wine-development (1.7.27-1) unstable; urgency=medium
+
+  * New upstream release 1.7.27, released Sep 19, 2014.
+    - Some more work on Direct2D support.
+    - Various improvements to RichEdit interfaces.
+    - Initial support for ICMP version 6.
+    - Various bug fixes.
+  * Install winegcc scripts to /usr/bin (closes: #753926).
+  * Clean up package dependencies (closes: #761461).
+  * Remove references to wine-doc (closes: #762045).
+  * Avoid unneeded libGL dependency for glu32.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 20 Sep 2014 20:29:51 +0000
+
 wine-development (1.7.26-2) unstable; urgency=medium
 
   * Install manpages, thanks jre (closes: #760694).

@@ -6,3 +6,5 @@ debian/tmp/usr/lib/*/*/wineg++
 debian/tmp/usr/lib/*/*/winedump
 debian/tmp/usr/lib/*/*/winebuild
 debian/tmp/usr/lib/*/*/winemaker
+
+debian/tmp/winegcc32VERSION usr/bin

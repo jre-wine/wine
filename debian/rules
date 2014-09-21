@@ -15,6 +15,7 @@ MANDIR=usr/share/man
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
 # linker options
+LDFLAGS=$(shell dpkg-buildflags --get LDFLAGS)
 LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
 
 # use freebsd-glue on kfreebsd architectures
@@ -71,6 +72,7 @@ override_dh_auto_configure:
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp debian/scripts/wine debian/tmp/wine$(VERSION)
+	sed 's|LIBDIR|$(LIBDIR)|g' < debian/scripts/winegcc > debian/tmp/winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
 	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader

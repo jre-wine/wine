@@ -10,3 +10,5 @@ wineapploader.patch
 winemenubuilder.patch
 no-download.patch
 addons-path.patch
+
+glu32-link.patch
