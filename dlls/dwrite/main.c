@@ -28,6 +28,7 @@
 
 #include "initguid.h"
 #include "dwrite.h"
+#include "dwrite_2.h"
 
 #include "dwrite_private.h"
 #include "wine/debug.h"
@@ -364,7 +365,7 @@ HRESULT clone_localizedstring(IDWriteLocalizedStrings *iface, IDWriteLocalizedSt
     *strings = NULL;
 
     New = heap_alloc(sizeof(struct localizedstrings));
-    if (!This) return E_OUTOFMEMORY;
+    if (!New) return E_OUTOFMEMORY;
 
     New->IDWriteLocalizedStrings_iface.lpVtbl = &localizedstringsvtbl;
     New->ref = 1;
@@ -748,8 +749,8 @@ static HRESULT WINAPI dwritefactory_CreateNumberSubstitution(IDWriteFactory *ifa
     WCHAR const* locale, BOOL ignore_user_override, IDWriteNumberSubstitution **substitution)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
-    FIXME("(%p)->(%d %s %d %p): stub\n", This, method, debugstr_w(locale), ignore_user_override, substitution);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d %s %d %p)\n", This, method, debugstr_w(locale), ignore_user_override, substitution);
+    return create_numbersubstitution(method, locale, ignore_user_override, substitution);
 }
 
 static HRESULT WINAPI dwritefactory_CreateGlyphRunAnalysis(IDWriteFactory *iface, DWRITE_GLYPH_RUN const *glyph_run,

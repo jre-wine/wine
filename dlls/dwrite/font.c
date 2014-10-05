@@ -390,9 +390,9 @@ static HRESULT WINAPI dwritefontface_TryGetFontTable(IDWriteFontFace *iface, UIN
         TRACE("(%p)->(%u %p %p %p %p)\n", This, table_tag, table_data, table_size, context, exists);
 
         table = heap_alloc(sizeof(struct dwrite_fonttable));
-        table->magic = DWRITE_FONTTABLE_MAGIC;
         if (!table)
             return E_OUTOFMEMORY;
+        table->magic = DWRITE_FONTTABLE_MAGIC;
 
         *exists = FALSE;
         for (i = 0; i < This->data->file_count && !(*exists); i++)
@@ -1049,7 +1049,7 @@ static HRESULT create_fontfamily(IDWriteLocalizedStrings *familyname, IDWriteFon
     This = heap_alloc(sizeof(struct dwrite_fontfamily));
     if (!This) return E_OUTOFMEMORY;
     This->data = heap_alloc(sizeof(struct dwrite_fontfamily_data));
-    if (!This)
+    if (!This->data)
     {
         heap_free(This);
         return E_OUTOFMEMORY;
@@ -1346,7 +1346,7 @@ HRESULT font_create_fontface(IDWriteFactory *iface, DWRITE_FONT_FACE_TYPE facety
     This = heap_alloc(sizeof(struct dwrite_fontface));
     if (!This) return E_OUTOFMEMORY;
     This->data = heap_alloc(sizeof(struct dwrite_fontface_data));
-    if (!This)
+    if (!This->data)
     {
         heap_free(This);
         return E_OUTOFMEMORY;

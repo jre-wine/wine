@@ -2320,6 +2320,8 @@ void surface_set_compatible_renderbuffer(struct wined3d_surface *surface,
         const struct wined3d_surface *rt) DECLSPEC_HIDDEN;
 void surface_set_texture_target(struct wined3d_surface *surface, GLenum target, GLint level) DECLSPEC_HIDDEN;
 void surface_translate_drawable_coords(const struct wined3d_surface *surface, HWND window, RECT *rect) DECLSPEC_HIDDEN;
+HRESULT wined3d_surface_update_desc(struct wined3d_surface *surface,
+        const struct wined3d_gl_info *gl_info, void *mem, unsigned int pitch) DECLSPEC_HIDDEN;
 HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const POINT *dst_point,
         struct wined3d_surface *src_surface, const RECT *src_rect) DECLSPEC_HIDDEN;
 void surface_validate_location(struct wined3d_surface *surface, DWORD location) DECLSPEC_HIDDEN;
@@ -2348,25 +2350,15 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 #define SFLAG_ALLOCATED         0x00000800 /* A GL texture is allocated for this surface. */
 #define SFLAG_SRGBALLOCATED     0x00001000 /* A sRGB GL texture is allocated for this surface. */
 
-/* In some conditions the surface memory must not be freed:
- * SFLAG_CONVERTED: Converting the data back would take too long
- * SFLAG_DYNLOCK: Avoid freeing the data for performance
- * SFLAG_CLIENT: OpenGL uses our memory as backup
- */
-#define SFLAG_DONOTFREE     (SFLAG_CONVERTED        | \
-                             SFLAG_DYNLOCK          | \
-                             SFLAG_CLIENT           | \
-                             SFLAG_PIN_SYSMEM)
-
 enum wined3d_conversion_type
 {
     WINED3D_CT_NONE,
-    WINED3D_CT_PALETTED,
-    WINED3D_CT_CK_565,
-    WINED3D_CT_CK_5551,
-    WINED3D_CT_CK_RGB24,
-    WINED3D_CT_RGB32_888,
-    WINED3D_CT_CK_ARGB32,
+    WINED3D_CT_P8,
+    WINED3D_CT_CK_B5G6R5,
+    WINED3D_CT_CK_B5G5R5X1,
+    WINED3D_CT_CK_B8G8R8,
+    WINED3D_CT_CK_B8G8R8X8,
+    WINED3D_CT_CK_B8G8R8A8,
 };
 
 struct wined3d_sampler
