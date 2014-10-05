@@ -46,7 +46,6 @@ Build-Depends:
  libopenal-dev,
  libmpg123-dev,
  libdbus-1-dev,
- libgnutls-dev,
  libasound2-dev,
  libosmesa6-dev,
  libncurses5-dev,

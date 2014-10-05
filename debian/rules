@@ -82,6 +82,8 @@ override_dh_install: $(INSTALLS)
 	    rename=$$(echo $$file | sed s/\\.1/$(VERSION)\\.1/); \
 	    cp $$file $$rename || true; \
 	    done
+	cd debian/tmp/usr/share/man/man1 && \
+	    cp winegcc.1 winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION).1
 	dh_install
 
 override_dh_strip:

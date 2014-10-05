@@ -1,3 +1,14 @@
+wine-development (1.7.28-1) unstable; urgency=medium
+
+  * New upstream release 1.7.28, released Oct 3, 2014.
+    - Support for conditional compilation in JavaScript.
+    - Bidirectional text support in DirectWrite.
+    - Stubs for DirectPlay Voice support.
+    - Various bug fixes.
+  * Better handling for WINEARCH (closes: #742561).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 Oct 2014 04:03:58 +0000
+
 wine-development (1.7.27-1) unstable; urgency=medium
 
   * New upstream release 1.7.27, released Sep 19, 2014.
