@@ -1,3 +1,9 @@
+wine-development (1.7.28-2) unstable; urgency=medium
+
+  * Fix manpage installation path.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 Oct 2014 05:25:16 +0000
+
 wine-development (1.7.28-1) unstable; urgency=medium
 
   * New upstream release 1.7.28, released Oct 3, 2014.
