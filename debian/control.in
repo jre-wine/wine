@@ -48,12 +48,14 @@ Build-Depends:
  autotools-dev,
  libasound2-dev,
  libncurses5-dev,
- libgphoto2-2-dev,
+ libgphoto2-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
  kfreebsd-kernel-headers [kfreebsd-any],
  libcapi20-dev (>= 1:3.3.0.20041024-2) [linux-any],
  prelink [linux-any],
+ libosmesa6-dev,
+ libgstreamer-plugins-base0.10-dev,
 Standards-Version: 3.9.5
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
@@ -71,6 +73,15 @@ Suggests:
  ttf-mscorefonts-installer,
  winbind,
  avscan | klamav | clamav
+Breaks:
+ wine32 (<< 1.6.1-8),
+ wine64 (<< 1.6.1-8),
+ wine-bin (<< 1.6.1-1),
+ wine64-bin (<< 1.6.1-1),
+ libwine (<< 1.6.1-1),
+ libwine-bin (<< 1.6.1-1),
+ libwine-dev (<< 1.6.1-1),
+ wine-utils (<< 1.1.25-1),
 Replaces:
  wine32 (<< 1.6.1-8),
  wine64 (<< 1.6.1-8),
@@ -79,6 +90,7 @@ Replaces:
  libwine (<< 1.6.1-1),
  libwine-bin (<< 1.6.1-1),
  libwine-dev (<< 1.6.1-1),
+ wine-utils (<< 1.1.25-1),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -93,6 +105,10 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwine-gecko-2.21
+Breaks:
+ wine (<< 1.6.1-9),
+ wine-bin (<< 1.5.31-1),
+ libwine-bin (<< 1.5.31-1),
 Replaces:
  wine (<< 1.6.1-9),
  wine-bin (<< 1.5.31-1),
@@ -110,6 +126,8 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwine-gecko-2.21
+Breaks:
+ wine (<< 1.6.1-9),
 Replaces:
  wine (<< 1.6.1-9),
 Recommends:
@@ -128,6 +146,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwine-dev (= ${binary:Version}),
+Breaks:
+ libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
 Description: Windows API implementation - 32-bit developer tools
@@ -143,6 +163,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwine-dev (= ${binary:Version}),
+Breaks:
+ libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
 Description: Windows API implementation - 64-bit developer tools

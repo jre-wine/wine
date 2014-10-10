@@ -1,3 +1,18 @@
+wine (1.6.2-8) unstable; urgency=medium
+
+  * Use a .maintscript file to handle symlink-to-folder transitions in
+    full, and specify 1.6.2-8~ as the version to update from (closes:
+    #736296); thanks to Andreas Beckmann for explaining everything.
+  * Build-depend on libgphoto2-dev (closes: #739356).
+  * Correctly break/replace wine-utils << 1.1.25-1 (closes: #739386),
+    and mark all the replaced packages as broken too; thanks to Andreas
+    Beckmann.
+  * Build-depend on libosmesa6-dev to enable offscreen OpenGL rendering.
+  * Build-depend on libgstreamer-plugins-base0.10-dev to enable
+    gstreamer support.
+
+ -- Stephen Kitt <skitt@debian.org>  Sat, 29 Mar 2014 22:39:43 +0100
+
 wine (1.6.2-7) unstable; urgency=medium
 
   * Fix escaping in wine-wrapper (closes: #736986).
