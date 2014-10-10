@@ -25,6 +25,7 @@ if test -z $WINEPREFIX; then
         wineprefix=$HOME/.wine64
     else
         wineprefix=$HOME/.wine
+    fi
 else
     wineprefix=$WINEPREFIX
 fi

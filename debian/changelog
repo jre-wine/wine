@@ -1,3 +1,9 @@
+wine-development (1.7.28-3) unstable; urgency=medium
+
+  * Fix missing "fi" (closes: #764212).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 10 Oct 2014 02:10:05 +0000
+
 wine-development (1.7.28-2) unstable; urgency=medium
 
   * Fix manpage installation path.
