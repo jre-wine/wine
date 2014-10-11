@@ -1,3 +1,3 @@
 package wine
-interpreter /usr/bin/wine-auto
+interpreter /usr/bin/wine
 magic MZ

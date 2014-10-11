@@ -12,6 +12,11 @@ LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 
 # configure options
 CONFLAGS=--without-hal \
+	 --without-v4l \
+	 --without-sane \
+	 --without-capi \
+	 --without-gphoto \
+	 --disable-tests \
 	 --prefix=$(DATADIR) \
 	 --libdir=/$(LIBDIR) \
 	 --mandir=/usr/share/man \
@@ -33,8 +38,7 @@ debian/control: debian/control.in
 	    -e 's/\(gecko[a-z0-9_-]*\)$(VERSUFFIX)/\1/' \
 	    -e 's/pkg-wine$(VERSUFFIX)\/wine$(VERSUFFIX)\.git/pkg-wine\/wine.git/g' \
 	    -e 's/pkg-wine-party$(VERSUFFIX)/pkg-wine-party/g' \
-	    -e 's/winehq$(VERSUFFIX)/winehq/g' \
-	    -e 's/wine-doc$(VERSUFFIX)/wine-doc/g' $< > $@
+	    -e 's/winehq$(VERSUFFIX)/winehq/g' $< > $@
 
 debian/%$(VERSUFFIX).docs: debian/%.docs-common
 	cp $< $@
@@ -78,9 +82,6 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
 	dh_install
 endif
-
-override_dh_auto_test:
-	# disable upstream's automated testing due to various brokenness
 
 override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine-dbg$(VERSUFFIX)

@@ -1,3 +1,15 @@
+wine (1.6.2-9) unstable; urgency=medium
+
+  * Disable capi, sane, gphoto, and v4l.
+  * Add wine-binfmt package (closes: #733556).
+  * Rename wine-dev-tools packages to wine-tools.
+  * Remove references to wine-doc (closes: #762044).
+  * Include missing multiarch step (closes: #751450).
+  * Remove libgnutls-dev build dependency (closes: #764110).
+  * Move transitional packages to section oldlibs (closes: #760696).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 10 Oct 2014 02:27:11 +0000
+
 wine (1.6.2-8) unstable; urgency=medium
 
   * Use a .maintscript file to handle symlink-to-folder transitions in

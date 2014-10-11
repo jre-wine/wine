@@ -33,22 +33,19 @@ Build-Depends:
  libpng-dev,
  libssl-dev,
  libxml2-dev,
- libsane-dev,
  libgsm1-dev,
- libjpeg-dev,
+ libjpeg8-dev,
  liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,
  unixodbc-dev,
  libcups2-dev,
- libgnutls-dev,
  libopenal-dev,
  libmpg123-dev,
  libdbus-1-dev,
  autotools-dev,
  libasound2-dev,
  libncurses5-dev,
- libgphoto2-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
  kfreebsd-kernel-headers [kfreebsd-any],
@@ -56,7 +53,7 @@ Build-Depends:
  prelink [linux-any],
  libosmesa6-dev,
  libgstreamer-plugins-base0.10-dev,
-Standards-Version: 3.9.5
+Standards-Version: 3.9.6
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
@@ -68,7 +65,6 @@ Depends:
  file,
  wine64 (>= ${source:Version}) | wine32 (>= ${source:Version}),
 Suggests:
- wine-doc,
  binfmt-support,
  ttf-mscorefonts-installer,
  winbind,
@@ -96,6 +92,16 @@ Description: Windows API implementation - standard suite
  This is still a work in progress and many applications may still not work.
  .
  This is a virtual package that depends on the standard Wine components.
+
+Package: wine-binfmt
+Architecture: any-amd64 any-i386 any-powerpc
+Depends:
+ wine,
+Description: Windows API implementation - binfmt support
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides support for launching windows executables directly.
 
 Package: wine32
 Architecture: any-i386 any-powerpc
@@ -140,6 +146,17 @@ Description: Windows API implementation - 64-bit binary loader
 
 Package: wine32-dev-tools
 Architecture: any-i386 any-powerpc
+Section: oldlibs
+Depends:
+ wine32-tools,
+Description: Windows API implementation - 32-bit developer tools
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This is a transitional package and can be safely removed.
+
+Package: wine32-tools
+Architecture: any-i386 any-powerpc
 Section: libdevel
 Multi-Arch: foreign
 Depends:
@@ -157,6 +174,17 @@ Description: Windows API implementation - 32-bit developer tools
  This package provides wine's 32-bit developer tools.
 
 Package: wine64-dev-tools
+Architecture: amd64
+Section: oldlibs
+Depends:
+ wine64-tools,
+Description: Windows API implementation - 64-bit developer tools
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This is a transitional package and can be safely removed.
+
+Package: wine64-tools
 Architecture: amd64
 Section: libdevel
 Depends:
@@ -185,9 +213,7 @@ Depends:
 Conflicts:
  ${dev:Conflicts},
 Recommends:
- wine32-dev-tools | wine64-dev-tools,
-Suggests:
- wine-doc,
+ wine32-tools | wine64-tools,
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -222,7 +248,6 @@ Recommends:
  libxcursor1,
 Suggests:
  cups-bsd,
- wine-doc,
 Pre-Depends:
  multiarch-support,
 Breaks:
@@ -256,7 +281,7 @@ Description: Windows API implementation - library
  This package provides the wine library.
 
 Package: wine-bin
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Pre-Depends: dpkg (>= 1.17.5)
 Depends:
@@ -282,7 +307,7 @@ Description: Windows API implementation - 64-bit helper
  This is a transitional package and can be safely removed.
 
 Package: libwine-alsa
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -294,6 +319,7 @@ Description: Windows API implementation - ALSA sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-bin
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Pre-Depends: dpkg (>= 1.17.5)
 Depends:
@@ -306,7 +332,7 @@ Description: Windows API implementation - system services
  This is a transitional package and can be safely removed.
 
 Package: libwine-capi
-Section: libs
+Section: oldlibs
 Architecture: i386 powerpc
 Multi-Arch: same
 Depends:
@@ -319,7 +345,7 @@ Description: Windows API implementation - ISDN module
  This is a transitional package and can be safely removed.
 
 Package: libwine-cms
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -332,7 +358,7 @@ Description: Windows API implementation - color management module
  This is a transitional package and can be safely removed.
 
 Package: libwine-gl
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -345,7 +371,7 @@ Description: Windows API implementation - OpenGL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-gphoto2
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -357,7 +383,7 @@ Description: Windows API implementation - camera module
  This is a transitional package and can be safely removed.
 
 Package: libwine-ldap
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -370,7 +396,7 @@ Description: Windows API implementation - LDAP module
  This is a transitional package and can be safely removed.
 
 Package: libwine-openal
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -383,7 +409,7 @@ Description: Windows API implementation - OpenAL module
  This is a transitional package and can be safely removed.
 
 Package: libwine-oss
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -396,7 +422,7 @@ Description: Windows API implementation - OSS sound module
  This is a transitional package and can be safely removed.
 
 Package: libwine-print
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -409,7 +435,7 @@ Description: Windows API implementation - printing module
  This is a transitional package and can be safely removed.
 
 Package: libwine-sane
-Section: libs
+Section: oldlibs
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:

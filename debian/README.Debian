@@ -9,7 +9,6 @@ wine64-bin      (core 64-bit binaries and configuration)
 libwine         (core libraries)
 libwine-dev     (Winelib development headers and tools)
 libwine-dbg     (debugging symbols)
-wine-doc        (documentation in HTML and DocBook format)
 
 Also note that Wine for Debian is set up to use a wrapper script,
 where /usr/bin/wine is a shell script that starts the real Wine
