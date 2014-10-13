@@ -1,3 +1,9 @@
+wine (1.6.2-10) unstable; urgency=medium
+
+  * Fix wine-tools installation paths.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 13 Oct 2014 01:06:11 +0000
+
 wine (1.6.2-9) unstable; urgency=medium
 
   * Disable capi, sane, gphoto, and v4l.
