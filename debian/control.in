@@ -48,7 +48,7 @@ Build-Depends:
  libncurses5-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
- kfreebsd-kernel-headers [kfreebsd-any],
+ kfreebsd-glue [kfreebsd-any],
  libcapi20-dev (>= 1:3.3.0.20041024-2) [linux-any],
  prelink [linux-any],
  libosmesa6-dev,

@@ -1,3 +1,9 @@
+wine (1.6.2-11) unstable; urgency=medium
+
+  * Link against freebsd-glue instead of kfreebsd-kernel-headers on kfreebsd.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 16 Oct 2014 02:09:13 +0000
+
 wine (1.6.2-10) unstable; urgency=medium
 
   * Fix wine-tools installation paths.

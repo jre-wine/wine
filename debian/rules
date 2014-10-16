@@ -10,6 +10,14 @@ VERSUFFIX=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine
 DATADIR=/usr/share/wine$(VERSUFFIX)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 
+# linker options
+LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
+
+# use freebsd-glue on kfreebsd architectures
+ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
+LDFLAGS+=-lfreebsd-glue
+endif
+
 # configure options
 CONFLAGS=--without-hal \
 	 --without-v4l \
@@ -23,7 +31,7 @@ CONFLAGS=--without-hal \
 	 --datarootdir=$(DATADIR) \
 	 --exec-prefix=/$(LIBDIR) \
 	 --includedir=/usr/include \
-	 LDFLAGS=-Wl,-rpath,/$(LIBDIR) \
+	 LDFLAGS="$(LDFLAGS)" \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
