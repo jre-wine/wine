@@ -1,4 +1,4 @@
-wine (1.6.2-12) UNRELEASED; urgency=medium
+wine (1.6.2-12) unstable; urgency=medium
 
   * Build-depend on libjpeg-dev instead of libjpeg8-dev (closes:
     #765826).
@@ -8,8 +8,9 @@ wine (1.6.2-12) UNRELEASED; urgency=medium
     again (closes: #765645).
   * Build-depend on libgnutls28-dev to restore SSL support; enforce it at
     configure time and patch aclocal.m4 as required.
+  * Drop obsolete libcapi20-dev build-dependency.
 
- -- Stephen Kitt <skitt@debian.org>  Sat, 18 Oct 2014 20:01:55 +0200
+ -- Stephen Kitt <skitt@debian.org>  Sun, 19 Oct 2014 01:08:06 +0200
 
 wine (1.6.2-11) unstable; urgency=medium
 
