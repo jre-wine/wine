@@ -29,6 +29,7 @@ CONFLAGS=--without-hal \
          --without-capi \
          --without-gphoto \
          --without-gstreamer \
+	 --with-gnutls \
          --disable-tests \
          --libdir=/$(LIBDIR) \
          --bindir=/$(LIBDIR) \

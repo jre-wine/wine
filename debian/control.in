@@ -42,6 +42,7 @@ Build-Depends:
  libxslt1-dev,
  unixodbc-dev,
  libcups2-dev,
+ libgnutls28-dev,
  libopenal-dev,
  libdbus-1-dev,
  freeglut3-dev,
