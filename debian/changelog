@@ -4,6 +4,8 @@ wine (1.6.2-12) UNRELEASED; urgency=medium
     #765826).
   * wine32-tools and wine64-tools replace wine32-dev-tools and wine64-
     dev-tools respectively, to allow upgrading.
+  * Update dlls/msi/table.c from master to allow the installer to work
+    again (closes: #765645).
 
  -- Stephen Kitt <skitt@debian.org>  Sat, 18 Oct 2014 20:01:55 +0200
 
