@@ -167,6 +167,7 @@ Breaks:
  libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
+ wine32-dev-tools (<< 1.6.2-9),
 Description: Windows API implementation - 32-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -195,6 +196,7 @@ Breaks:
  libwine-dev (<< 1.5.31-1),
 Replaces:
  libwine-dev (<< 1.5.31-1),
+ wine-64-dev-tools (<< 1.6.2-9),
 Description: Windows API implementation - 64-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
