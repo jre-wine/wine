@@ -1,3 +1,4 @@
 manpages.patch
 printer-resolution.patch
 msi-table.patch
+debian-gnutls.patch
