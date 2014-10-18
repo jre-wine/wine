@@ -34,7 +34,7 @@ Build-Depends:
  libssl-dev,
  libxml2-dev,
  libgsm1-dev,
- libjpeg8-dev,
+ libjpeg-dev,
  liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,
