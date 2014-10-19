@@ -17,7 +17,7 @@ author: Michael Gilbert <mgilbert@debian.org>
      BOOL ret;
  
 +    /* fetch addons only from /usr/share */
-+    return install_from_unix_file("/usr/share/wine/", addon->subdir_name, addon->file_name);
++    return install_from_unix_file("/usr/share/wine-development/", addon->subdir_name, addon->file_name);
 +
      if((data_dir = wine_get_data_dir())) {
          package_dir = data_dir;

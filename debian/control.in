@@ -84,6 +84,7 @@ Depends:
  x11-utils,
  libncurses5,
  libfreetype6,
+ libwine-gecko-2.24,
 Recommends:
  libasound2-plugins,
 Suggests:
@@ -100,6 +101,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
+ libwine-gecko-2.24,
 Recommends:
  libasound2-plugins,
  wine32VERSION (>= ${source:Version}),
