@@ -1,10 +1,10 @@
-wine-development (1.7.29-2) UNRELEASED; urgency=medium
+wine-development (1.7.29-2) unstable; urgency=medium
 
   * Build-depend on libgnutls28-dev to restore SSL support; enforce it at
     configure time and patch aclocal.m4 as required.
   * Use libwine-gecko-2.24.
 
- -- Stephen Kitt <skitt@debian.org>  Sun, 19 Oct 2014 20:17:33 +0200
+ -- Stephen Kitt <skitt@debian.org>  Sun, 19 Oct 2014 23:22:30 +0200
 
 wine-development (1.7.29-1) unstable; urgency=medium
 
