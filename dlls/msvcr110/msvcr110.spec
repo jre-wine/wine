@@ -1142,7 +1142,7 @@
 @ cdecl _execvpe(str ptr ptr)
 @ cdecl _exit(long) MSVCRT__exit
 @ cdecl _expand(ptr long)
-@ stub _fclose_nolock
+@ cdecl _fclose_nolock(ptr) MSVCRT__fclose_nolock
 @ cdecl _fcloseall() MSVCRT__fcloseall
 @ cdecl _fcvt(double long ptr ptr) MSVCRT__fcvt
 @ cdecl _fcvt_s(ptr long double long ptr ptr) MSVCRT__fcvt_s
@@ -1180,7 +1180,7 @@
 @ cdecl _fputchar(long) MSVCRT__fputchar
 @ stub _fputwc_nolock
 @ cdecl _fputwchar(long) MSVCRT__fputwchar
-@ stub _fread_nolock
+@ cdecl _fread_nolock(ptr long long ptr) MSVCRT__fread_nolock
 @ stub _fread_nolock_s
 @ cdecl _free_locale(ptr) MSVCRT__free_locale
 @ stub _freea
@@ -1188,17 +1188,17 @@
 @ stub _freefls
 @ varargs _fscanf_l(ptr str ptr) MSVCRT__fscanf_l
 @ varargs _fscanf_s_l(ptr str ptr) MSVCRT__fscanf_s_l
-@ stub _fseek_nolock
+@ cdecl _fseek_nolock(ptr long long) MSVCRT__fseek_nolock
 @ cdecl _fseeki64(ptr int64 long) MSVCRT__fseeki64
-@ stub _fseeki64_nolock
+@ cdecl _fseeki64_nolock(ptr int64 long) MSVCRT__fseeki64_nolock
 @ cdecl _fsopen(str str long) MSVCRT__fsopen
 @ cdecl _fstat32(long ptr) MSVCRT__fstat32
 @ stub _fstat32i64
 @ cdecl _fstat64(long ptr) MSVCRT__fstat64
 @ cdecl _fstat64i32(long ptr) MSVCRT__fstat64i32
-@ stub _ftell_nolock
+@ cdecl _ftell_nolock(ptr) MSVCRT__ftell_nolock
 @ cdecl -ret64 _ftelli64(ptr) MSVCRT__ftelli64
-@ stub _ftelli64_nolock
+@ cdecl -ret64 _ftelli64_nolock(ptr) MSVCRT__ftelli64_nolock
 @ cdecl _ftime32(ptr) MSVCRT__ftime32
 @ cdecl _ftime32_s(ptr) MSVCRT__ftime32_s
 @ cdecl _ftime64(ptr) MSVCRT__ftime64
@@ -1211,7 +1211,7 @@
 @ stub _fwprintf_p
 @ stub _fwprintf_p_l
 @ stub _fwprintf_s_l
-@ stub _fwrite_nolock
+@ cdecl _fwrite_nolock(ptr long long ptr) MSVCRT__fwrite_nolock
 @ varargs _fwscanf_l(ptr wstr ptr) MSVCRT__fwscanf_l
 @ varargs _fwscanf_s_l(ptr wstr ptr) MSVCRT__fwscanf_s_l
 @ cdecl _gcvt(double long str) MSVCRT__gcvt

@@ -222,6 +222,12 @@ typedef enum DWRITE_LINE_SPACING_METHOD
     DWRITE_LINE_SPACING_METHOD_UNIFORM
 } DWRITE_LINE_SPACING_METHOD;
 
+cpp_quote("#define DWRITE_MAKE_OPENTYPE_TAG(a,b,c,d) ( \\")
+cpp_quote("    ((UINT32)(UINT8)(d) << 24) | \\")
+cpp_quote("    ((UINT32)(UINT8)(c) << 16) | \\")
+cpp_quote("    ((UINT32)(UINT8)(b) <<  8) | \\")
+cpp_quote("     (UINT32)(UINT8)(a))")
+
 typedef enum DWRITE_FONT_FEATURE_TAG
 {
     DWRITE_FONT_FEATURE_TAG_ALTERNATIVE_FRACTIONS           = 0x63726661, /* 'afrc' */
@@ -376,7 +382,11 @@ typedef struct DWRITE_TRIMMING
     UINT32 delimiterCount;
 } DWRITE_TRIMMING;
 
-typedef struct DWRITE_GLYPH_RUN
+cpp_quote("#ifndef __d2d1_h__")
+typedef struct DWRITE_GLYPH_RUN DWRITE_GLYPH_RUN;
+cpp_quote("#endif /* __d2d1_h__ */")
+
+struct DWRITE_GLYPH_RUN
 {
     IDWriteFontFace* fontFace;
     FLOAT fontEmSize;
@@ -386,7 +396,7 @@ typedef struct DWRITE_GLYPH_RUN
     DWRITE_GLYPH_OFFSET const* glyphOffsets;
     BOOL isSideways;
     UINT32 bidiLevel;
-} DWRITE_GLYPH_RUN;
+};
 
 typedef struct DWRITE_GLYPH_RUN_DESCRIPTION
 {

@@ -1246,16 +1246,29 @@ int CDECL MSVCRT__locking(int fd, int mode, LONG nbytes)
  */
 int CDECL MSVCRT__fseeki64(MSVCRT_FILE* file, __int64 offset, int whence)
 {
+    int ret;
+
+    MSVCRT__lock_file(file);
+    ret = MSVCRT__fseeki64_nolock(file, offset, whence);
+    MSVCRT__unlock_file(file);
+
+    return ret;
+}
+
+/*********************************************************************
+ *		_fseeki64_nolock (MSVCRT.@)
+ */
+int CDECL MSVCRT__fseeki64_nolock(MSVCRT_FILE* file, __int64 offset, int whence)
+{
   int ret;
 
-  MSVCRT__lock_file(file);
   /* Flush output if needed */
   if(file->_flag & MSVCRT__IOWRT)
 	msvcrt_flush_buffer(file);
 
   if(whence == SEEK_CUR && file->_flag & MSVCRT__IOREAD ) {
       whence = SEEK_SET;
-      offset += MSVCRT__ftelli64(file);
+      offset += MSVCRT__ftelli64_nolock(file);
   }
 
   /* Discard buffered input */
@@ -1269,7 +1282,6 @@ int CDECL MSVCRT__fseeki64(MSVCRT_FILE* file, __int64 offset, int whence)
   file->_flag &= ~MSVCRT__IOEOF;
   ret = (MSVCRT__lseeki64(file->_file,offset,whence) == -1)?-1:0;
 
-  MSVCRT__unlock_file(file);
   return ret;
 }
 
@@ -1279,6 +1291,14 @@ int CDECL MSVCRT__fseeki64(MSVCRT_FILE* file, __int64 offset, int whence)
 int CDECL MSVCRT_fseek(MSVCRT_FILE* file, MSVCRT_long offset, int whence)
 {
     return MSVCRT__fseeki64( file, offset, whence );
+}
+
+/*********************************************************************
+ *		_fseek_nolock (MSVCRT.@)
+ */
+int CDECL MSVCRT__fseek_nolock(MSVCRT_FILE* file, MSVCRT_long offset, int whence)
+{
+    return MSVCRT__fseeki64_nolock( file, offset, whence );
 }
 
 /*********************************************************************
@@ -3373,9 +3393,22 @@ int CDECL MSVCRT__putw(int val, MSVCRT_FILE* file)
  */
 int CDECL MSVCRT_fclose(MSVCRT_FILE* file)
 {
-  int r, flag;
+  int ret;
 
   MSVCRT__lock_file(file);
+  ret = MSVCRT__fclose_nolock(file);
+  MSVCRT__unlock_file(file);
+
+  return ret;
+}
+
+/*********************************************************************
+ *		_fclose_nolock (MSVCRT.@)
+ */
+int CDECL MSVCRT__fclose_nolock(MSVCRT_FILE* file)
+{
+  int r, flag;
+
   flag = file->_flag;
   MSVCRT_free(file->_tmpfname);
   file->_tmpfname = NULL;
@@ -3386,9 +3419,7 @@ int CDECL MSVCRT_fclose(MSVCRT_FILE* file)
       MSVCRT_free(file->_base);
 
   r=MSVCRT__close(file->_file);
-
   file->_flag = 0;
-  MSVCRT__unlock_file(file);
 
   return ((r == -1) || (flag & MSVCRT__IOERR) ? MSVCRT_EOF : 0);
 }
@@ -3696,12 +3727,24 @@ int CDECL MSVCRT__flsbuf(int c, MSVCRT_FILE* file)
  */
 MSVCRT_size_t CDECL MSVCRT_fwrite(const void *ptr, MSVCRT_size_t size, MSVCRT_size_t nmemb, MSVCRT_FILE* file)
 {
+    int ret;
+
+    MSVCRT__lock_file(file);
+    ret = MSVCRT__fwrite_nolock(ptr, size, nmemb, file);
+    MSVCRT__unlock_file(file);
+
+    return ret;
+}
+
+/*********************************************************************
+ *		_fwrite_nolock (MSVCRT.@)
+ */
+MSVCRT_size_t CDECL MSVCRT__fwrite_nolock(const void *ptr, MSVCRT_size_t size, MSVCRT_size_t nmemb, MSVCRT_FILE* file)
+{
     MSVCRT_size_t wrcnt=size * nmemb;
     int written = 0;
     if (size == 0)
         return 0;
-
-    MSVCRT__lock_file(file);
 
     while(wrcnt) {
         if(file->_cnt < 0) {
@@ -3750,7 +3793,6 @@ MSVCRT_size_t CDECL MSVCRT_fwrite(const void *ptr, MSVCRT_size_t size, MSVCRT_si
         }
     }
 
-    MSVCRT__unlock_file(file);
     return written / size;
 }
 
@@ -3946,14 +3988,26 @@ int CDECL MSVCRT__fputchar(int c)
  */
 MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nmemb, MSVCRT_FILE* file)
 {
+    int ret;
+
+    MSVCRT__lock_file(file);
+    ret = MSVCRT__fread_nolock(ptr, size, nmemb, file);
+    MSVCRT__unlock_file(file);
+
+    return ret;
+}
+
+/*********************************************************************
+ *		_fread_nolock (MSVCRT.@)
+ */
+MSVCRT_size_t CDECL MSVCRT__fread_nolock(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nmemb, MSVCRT_FILE* file)
+{
   MSVCRT_size_t rcnt=size * nmemb;
   MSVCRT_size_t read=0;
   MSVCRT_size_t pread=0;
 
   if(!rcnt)
 	return 0;
-
-  MSVCRT__lock_file(file);
 
   /* first buffered data */
   if(file->_cnt>0) {
@@ -3968,7 +4022,6 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
 	if(file->_flag & MSVCRT__IORW) {
 		file->_flag |= MSVCRT__IOREAD;
 	} else {
-        MSVCRT__unlock_file(file);
         return 0;
     }
   }
@@ -4017,7 +4070,6 @@ MSVCRT_size_t CDECL MSVCRT_fread(void *ptr, MSVCRT_size_t size, MSVCRT_size_t nm
     if (i < 1) break;
   }
   read+=pread;
-  MSVCRT__unlock_file(file);
   return read / size;
 }
 
@@ -4194,14 +4246,25 @@ int CDECL MSVCRT_fsetpos(MSVCRT_FILE* file, MSVCRT_fpos_t *pos)
  */
 __int64 CDECL MSVCRT__ftelli64(MSVCRT_FILE* file)
 {
-    __int64 pos;
+    __int64 ret;
 
     MSVCRT__lock_file(file);
+    ret = MSVCRT__ftelli64_nolock(file);
+    MSVCRT__unlock_file(file);
+
+    return ret;
+}
+
+/*********************************************************************
+ *		_ftelli64_nolock (MSVCRT.@)
+ */
+__int64 CDECL MSVCRT__ftelli64_nolock(MSVCRT_FILE* file)
+{
+    __int64 pos;
+
     pos = _telli64(file->_file);
-    if(pos == -1) {
-        MSVCRT__unlock_file(file);
+    if(pos == -1)
         return -1;
-    }
     if(file->_flag & (MSVCRT__IOMYBUF | MSVCRT__USERBUF))  {
         if(file->_flag & MSVCRT__IOWRT) {
             pos += file->_ptr - file->_base;
@@ -4226,10 +4289,8 @@ __int64 CDECL MSVCRT__ftelli64(MSVCRT_FILE* file)
         } else {
             char *p;
 
-            if(MSVCRT__lseeki64(file->_file, pos, SEEK_SET) != pos) {
-                MSVCRT__unlock_file(file);
+            if(MSVCRT__lseeki64(file->_file, pos, SEEK_SET) != pos)
                 return -1;
-            }
 
             pos -= file->_bufsiz;
             pos += file->_ptr - file->_base;
@@ -4245,7 +4306,6 @@ __int64 CDECL MSVCRT__ftelli64(MSVCRT_FILE* file)
         }
     }
 
-    MSVCRT__unlock_file(file);
     return pos;
 }
 
@@ -4255,6 +4315,14 @@ __int64 CDECL MSVCRT__ftelli64(MSVCRT_FILE* file)
 LONG CDECL MSVCRT_ftell(MSVCRT_FILE* file)
 {
   return MSVCRT__ftelli64(file);
+}
+
+/*********************************************************************
+ *		_ftell_nolock (MSVCRT.@)
+ */
+LONG CDECL MSVCRT__ftell_nolock(MSVCRT_FILE* file)
+{
+  return MSVCRT__ftelli64_nolock(file);
 }
 
 /*********************************************************************

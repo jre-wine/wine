@@ -218,6 +218,27 @@ HRESULT elem_string_attr_setter(HTMLElement *elem, const WCHAR *name, const WCHA
     return S_OK;
 }
 
+HRESULT get_readystate_string(READYSTATE readystate, BSTR *p)
+{
+    static const WCHAR uninitializedW[] = {'u','n','i','n','i','t','i','a','l','i','z','e','d',0};
+    static const WCHAR loadingW[] = {'l','o','a','d','i','n','g',0};
+    static const WCHAR loadedW[] = {'l','o','a','d','e','d',0};
+    static const WCHAR interactiveW[] = {'i','n','t','e','r','a','c','t','i','v','e',0};
+    static const WCHAR completeW[] = {'c','o','m','p','l','e','t','e',0};
+
+    static const LPCWSTR readystate_strs[] = {
+        uninitializedW,
+        loadingW,
+        loadedW,
+        interactiveW,
+        completeW
+    };
+
+    assert(readystate <= READYSTATE_COMPLETE);
+    *p = SysAllocString(readystate_strs[readystate]);
+    return *p ? S_OK : E_OUTOFMEMORY;
+}
+
 typedef struct
 {
     DispatchEx dispex;
@@ -816,18 +837,24 @@ static HRESULT WINAPI HTMLElement_get_title(IHTMLElement *iface, BSTR *p)
     return return_nsstr(nsres, &title_str, p);
 }
 
+static const WCHAR languageW[] = {'l','a','n','g','u','a','g','e',0};
+
 static HRESULT WINAPI HTMLElement_put_language(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    return elem_string_attr_setter(This, languageW, v);
 }
 
 static HRESULT WINAPI HTMLElement_get_language(IHTMLElement *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return elem_string_attr_getter(This, languageW, TRUE, p);
 }
 
 static HRESULT WINAPI HTMLElement_put_onselectstart(IHTMLElement *iface, VARIANT v)

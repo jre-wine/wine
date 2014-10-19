@@ -48,7 +48,6 @@
 #include "wine/debug.h"
 #include "wine/list.h"
 
-#include "dwrite.h"
 #include "dwrite_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(bidi);
@@ -196,6 +195,12 @@ static void bidi_classify(const WCHAR *string, UINT8 *chartype, UINT32 count)
             break;
         }
     }
+}
+
+WCHAR bidi_get_mirrored_char(WCHAR ch)
+{
+    extern const WCHAR wine_mirror_map[];
+    return ch + wine_mirror_map[wine_mirror_map[ch >> 8] + (ch & 0xff)];
 }
 
 /* RESOLVE EXPLICIT */

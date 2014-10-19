@@ -1633,26 +1633,24 @@ struct atl_thunk
 static BOOL check_atl_thunk( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     const struct atl_thunk *thunk = (const struct atl_thunk *)rec->ExceptionInformation[1];
+    struct atl_thunk thunk_copy;
     BOOL ret = FALSE;
 
-    if (!virtual_is_valid_code_address( thunk, sizeof(*thunk) )) return FALSE;
+    if (virtual_uninterrupted_read_memory( thunk, &thunk_copy, sizeof(*thunk) ) != sizeof(*thunk))
+        return FALSE;
 
-    __TRY
+    if (thunk_copy.movl == 0x042444c7 && thunk_copy.jmp == 0xe9)
     {
-        if (thunk->movl == 0x042444c7 && thunk->jmp == 0xe9)
+        if (virtual_uninterrupted_write_memory( (DWORD *)context->Esp + 1,
+            &thunk_copy.this, sizeof(DWORD) ) == sizeof(DWORD))
         {
-            *((DWORD *)context->Esp + 1) = thunk->this;
-            context->Eip = (DWORD_PTR)(&thunk->func + 1) + thunk->func;
+            context->Eip = (DWORD_PTR)(&thunk->func + 1) + thunk_copy.func;
             TRACE( "emulating ATL thunk at %p, func=%08x arg=%08x\n",
-                   thunk, context->Eip, *((DWORD *)context->Esp + 1) );
+                   thunk, context->Eip, thunk_copy.this );
             ret = TRUE;
         }
     }
-    __EXCEPT_PAGE_FAULT
-    {
-        return FALSE;
-    }
-    __ENDTRY
+
     return ret;
 }
 
@@ -1821,19 +1819,22 @@ static void WINAPI raise_segv_exception( EXCEPTION_RECORD *rec, CONTEXT *context
     case EXCEPTION_ACCESS_VIOLATION:
         if (rec->NumberParameters == 2)
         {
-            if (rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT && check_atl_thunk( rec, context ))
-                goto done;
             if (rec->ExceptionInformation[1] == 0xffffffff && check_invalid_gs( context ))
                 goto done;
             if (!(rec->ExceptionCode = virtual_handle_fault( (void *)rec->ExceptionInformation[1],
                                                              rec->ExceptionInformation[0] )))
                 goto done;
-            /* send EXCEPTION_EXECUTE_FAULT only if data execution prevention is enabled */
-            if (rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT)
+            if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+                rec->ExceptionInformation[0] == EXCEPTION_EXECUTE_FAULT)
             {
                 ULONG flags;
                 NtQueryInformationProcess( GetCurrentProcess(), ProcessExecuteFlags,
                                            &flags, sizeof(flags), NULL );
+
+                if (!(flags & MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION) && check_atl_thunk( rec, context ))
+                    goto done;
+
+                /* send EXCEPTION_EXECUTE_FAULT only if data execution prevention is enabled */
                 if (!(flags & MEM_EXECUTE_OPTION_DISABLE))
                     rec->ExceptionInformation[0] = EXCEPTION_READ_FAULT;
             }
