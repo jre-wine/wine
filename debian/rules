@@ -15,12 +15,11 @@ MANDIR=usr/share/man
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
 # linker options
-LDFLAGS=$(shell dpkg-buildflags --get LDFLAGS)
-LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
+export DEB_LDFLAGS_MAINT_APPEND+=-Wl,-rpath,/$(LIBDIR)
 
 # use freebsd-glue on kfreebsd architectures
 ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
-LDFLAGS+=-lfreebsd-glue
+export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
 endif
 
 # configure options
@@ -36,7 +35,7 @@ CONFLAGS=--without-hal \
          --mandir=/$(MANDIR) \
          --datarootdir=$(DATADIR) \
          --includedir=$(INCLUDEDIR) \
-         LDFLAGS="$(LDFLAGS)" \
+         $(shell dpkg-buildflags --export=configure) \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)

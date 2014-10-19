@@ -1,3 +1,16 @@
+wine-development (1.7.29-1) unstable; urgency=medium
+
+  * New upstream release 1.7.29, released Oct 17, 2014.
+    - Support for shaping and BiDi mirroring in DirectWrite.
+    - Some page fault handling fixes.
+    - A few more C runtime functions.
+    - Various bug fixes.
+  * Increase standards version to 3.9.6.
+  * Simplify build flag handling.
+  * Update debian/watch file.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 19 Oct 2014 18:48:42 +0000
+
 wine-development (1.7.28-3) unstable; urgency=medium
 
   * Fix missing "fi" (closes: #764212).
