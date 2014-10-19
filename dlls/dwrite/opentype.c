@@ -20,14 +20,9 @@
 
 #define COBJMACROS
 
-#include "dwrite.h"
 #include "dwrite_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
-
-#define DWRITE_MAKE_OPENTYPE_TAG(ch0, ch1, ch2, ch3) \
-                    ((DWORD)(BYTE)(ch0) | ((DWORD)(BYTE)(ch1) << 8) | \
-                    ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
 
 #define MS_TTCF_TAG DWRITE_MAKE_OPENTYPE_TAG('t','t','c','f')
 #define MS_OTTO_TAG DWRITE_MAKE_OPENTYPE_TAG('O','T','T','O')
@@ -99,6 +94,12 @@ typedef struct {
     WORD rangeShift;
     WORD endCode[1];
 } CMAP_SegmentMapping_0;
+
+enum OPENTYPE_CMAP_TABLE_FORMAT
+{
+    OPENTYPE_CMAP_TABLE_SEGMENT_MAPPING = 4,
+    OPENTYPE_CMAP_TABLE_SEGMENTED_COVERAGE = 12
+};
 
 /* PANOSE is 10 bytes in size, need to pack the structure properly */
 #include "pshpack2.h"
@@ -184,11 +185,19 @@ typedef struct
 } TT_OS2_V2;
 #include "poppack.h"
 
-HRESULT analyze_opentype_font(const void* font_data, UINT32* font_count, DWRITE_FONT_FILE_TYPE *file_type, DWRITE_FONT_FACE_TYPE *face_type, BOOL *supported)
+HRESULT opentype_analyze_font(IDWriteFontFileStream *stream, UINT32* font_count, DWRITE_FONT_FILE_TYPE *file_type, DWRITE_FONT_FACE_TYPE *face_type, BOOL *supported)
 {
     /* TODO: Do font validation */
-    const char* tag = font_data;
+    const void *font_data;
+    const char* tag;
+    void *context;
+    HRESULT hr;
 
+    hr = IDWriteFontFileStream_ReadFileFragment(stream, &font_data, 0, sizeof(TTC_Header_V1), &context);
+    if (FAILED(hr))
+        return hr;
+
+    tag = font_data;
     *supported = FALSE;
     *file_type = DWRITE_FONT_FILE_TYPE_UNKNOWN;
     if (face_type)
@@ -216,51 +225,40 @@ HRESULT analyze_opentype_font(const void* font_data, UINT32* font_count, DWRITE_
     {
         *file_type = DWRITE_FONT_FILE_TYPE_CFF;
     }
+
+    IDWriteFontFileStream_ReleaseFileFragment(stream, context);
     return S_OK;
 }
 
-HRESULT find_font_table(IDWriteFontFileStream *stream, UINT32 font_index, UINT32 tag, const void** table_data, void** table_context, UINT32 *table_size, BOOL* found)
+HRESULT opentype_get_font_table(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_TYPE type, UINT32 font_index, UINT32 tag,
+    const void **table_data, void **table_context, UINT32 *table_size, BOOL *found)
 {
-    const CHAR *first_data;
-    void *first_context;
     HRESULT hr;
     TTC_SFNT_V1 *font_header = NULL;
     void *sfnt_context;
     TT_TableRecord *table_record = NULL;
     void *table_record_context;
+    int table_count, table_offset = 0;
     int i;
-    int table_count;
-    int table_offset = 0;
 
     *found = FALSE;
 
-    hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&first_data, 0, 4, &first_context);
-    if (SUCCEEDED(hr))
-    {
-        if (DWRITE_MAKE_OPENTYPE_TAG(first_data[0], first_data[1], first_data[2], first_data[3]) == MS_TTCF_TAG)
-        {
-            const TTC_Header_V1 *ttc_header;
-            void * ttc_context;
-            hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&ttc_header, 0, sizeof(*ttc_header), &ttc_context);
-            if (SUCCEEDED(hr))
-            {
-                table_offset = GET_BE_DWORD(ttc_header->OffsetTable[0]);
-                if (font_index >= GET_BE_DWORD(ttc_header->numFonts))
-                    hr = E_INVALIDARG;
-                else
-                    hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&font_header, table_offset, sizeof(*font_header), &sfnt_context);
-                IDWriteFontFileStream_ReleaseFileFragment(stream, ttc_context);
-            }
-        }
-        else
-        {
-            if (font_index > 0)
+    if (type == DWRITE_FONT_FACE_TYPE_TRUETYPE_COLLECTION) {
+        const TTC_Header_V1 *ttc_header;
+        void * ttc_context;
+        hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&ttc_header, 0, sizeof(*ttc_header), &ttc_context);
+        if (SUCCEEDED(hr)) {
+            table_offset = GET_BE_DWORD(ttc_header->OffsetTable[0]);
+            if (font_index >= GET_BE_DWORD(ttc_header->numFonts))
                 hr = E_INVALIDARG;
             else
-                hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&font_header, 0, sizeof(*font_header), &sfnt_context);
+                hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&font_header, table_offset, sizeof(*font_header), &sfnt_context);
+            IDWriteFontFileStream_ReleaseFileFragment(stream, ttc_context);
         }
-        IDWriteFontFileStream_ReleaseFileFragment(stream, first_context);
     }
+    else
+        hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&font_header, 0, sizeof(*font_header), &sfnt_context);
+
     if (FAILED(hr))
         return hr;
 
@@ -308,7 +306,7 @@ static int compare_group(const void *a, const void* b)
     return 0;
 }
 
-static void CMAP4_GetGlyphIndex(CMAP_SegmentMapping_0* format, DWORD utf32c, LPWORD pgi)
+static void CMAP4_GetGlyphIndex(CMAP_SegmentMapping_0* format, UINT32 utf32c, UINT16 *pgi)
 {
     WORD *startCode;
     SHORT *idDelta;
@@ -347,9 +345,9 @@ static void CMAP4_GetGlyphIndex(CMAP_SegmentMapping_0* format, DWORD utf32c, LPW
     }
 }
 
-static void CMAP12_GetGlyphIndex(CMAP_SegmentedCoverage* format, DWORD utf32c, LPWORD pgi)
+static void CMAP12_GetGlyphIndex(CMAP_SegmentedCoverage* format, UINT32 utf32c, UINT16 *pgi)
 {
-    CMAP_SegmentedCoverage_group *group = NULL;
+    CMAP_SegmentedCoverage_group *group;
 
     group = bsearch(&utf32c, format->groups, GET_BE_DWORD(format->nGroups),
                     sizeof(CMAP_SegmentedCoverage_group), compare_group);
@@ -361,17 +359,12 @@ static void CMAP12_GetGlyphIndex(CMAP_SegmentedCoverage* format, DWORD utf32c, L
     }
 }
 
-VOID OpenType_CMAP_GetGlyphIndex(LPVOID data, DWORD utf32c, LPWORD pgi, DWORD flags)
+void opentype_cmap_get_glyphindex(void *data, UINT32 utf32c, UINT16 *pgi)
 {
+    CMAP_Header *CMAP_Table = data;
     int i;
-    CMAP_Header *CMAP_Table = NULL;
 
-    if (flags & GGI_MARK_NONEXISTING_GLYPHS)
-        *pgi = 0xffff;
-    else
-        *pgi = 0;
-
-    CMAP_Table = data;
+    *pgi = 0;
 
     for (i = 0; i < GET_BE_WORD(CMAP_Table->numTables); i++)
     {
@@ -383,20 +376,114 @@ VOID OpenType_CMAP_GetGlyphIndex(LPVOID data, DWORD utf32c, LPWORD pgi, DWORD fl
 
         table = (WORD*)(((BYTE*)CMAP_Table) + GET_BE_DWORD(CMAP_Table->tables[i].offset));
         type = GET_BE_WORD(*table);
-        TRACE("Type %i\n", type);
-        /* Break when we find a handled type */
-        switch(type)
+        TRACE("table type %i\n", type);
+
+        switch (type)
         {
-            case 4:
+            case OPENTYPE_CMAP_TABLE_SEGMENT_MAPPING:
                 CMAP4_GetGlyphIndex((CMAP_SegmentMapping_0*) table, utf32c, pgi);
                 break;
-            case 12:
+            case OPENTYPE_CMAP_TABLE_SEGMENTED_COVERAGE:
                 CMAP12_GetGlyphIndex((CMAP_SegmentedCoverage*) table, utf32c, pgi);
                 break;
             default:
-                TRACE("Type %i unhandled.\n", type);
+                TRACE("table type %i unhandled.\n", type);
+        }
+
+        if (*pgi) return;
+    }
+}
+
+static UINT32 opentype_cmap_get_unicode_ranges_count(const CMAP_Header *CMAP_Table)
+{
+    UINT32 count = 0;
+    int i;
+
+    for (i = 0; i < GET_BE_WORD(CMAP_Table->numTables); i++) {
+        WORD type;
+        WORD *table;
+
+        if (GET_BE_WORD(CMAP_Table->tables[i].platformID) != 3)
+            continue;
+
+        table = (WORD*)(((BYTE*)CMAP_Table) + GET_BE_DWORD(CMAP_Table->tables[i].offset));
+        type = GET_BE_WORD(*table);
+        TRACE("table type %i\n", type);
+
+        switch (type)
+        {
+            case OPENTYPE_CMAP_TABLE_SEGMENT_MAPPING:
+            {
+                CMAP_SegmentMapping_0 *format = (CMAP_SegmentMapping_0*)table;
+                count += GET_BE_WORD(format->segCountX2)/2;
+                break;
+            }
+            case OPENTYPE_CMAP_TABLE_SEGMENTED_COVERAGE:
+            {
+                CMAP_SegmentedCoverage *format = (CMAP_SegmentedCoverage*)table;
+                count += GET_BE_DWORD(format->nGroups);
+                break;
+            }
+            default:
+                FIXME("table type %i unhandled.\n", type);
         }
     }
+
+    return count;
+}
+
+HRESULT opentype_cmap_get_unicode_ranges(void *data, UINT32 max_count, DWRITE_UNICODE_RANGE *ranges, UINT32 *count)
+{
+    CMAP_Header *CMAP_Table = data;
+    int i, k = 0;
+
+    if (!CMAP_Table)
+        return E_FAIL;
+
+    *count = opentype_cmap_get_unicode_ranges_count(CMAP_Table);
+
+    for (i = 0; i < GET_BE_WORD(CMAP_Table->numTables) && k < max_count; i++)
+    {
+        WORD type;
+        WORD *table;
+        int j;
+
+        if (GET_BE_WORD(CMAP_Table->tables[i].platformID) != 3)
+            continue;
+
+        table = (WORD*)(((BYTE*)CMAP_Table) + GET_BE_DWORD(CMAP_Table->tables[i].offset));
+        type = GET_BE_WORD(*table);
+        TRACE("table type %i\n", type);
+
+        switch (type)
+        {
+            case OPENTYPE_CMAP_TABLE_SEGMENT_MAPPING:
+            {
+                CMAP_SegmentMapping_0 *format = (CMAP_SegmentMapping_0*)table;
+                UINT16 segment_count = GET_BE_WORD(format->segCountX2)/2;
+                UINT16 *startCode = (WORD*)((BYTE*)format + sizeof(CMAP_SegmentMapping_0) + (sizeof(WORD) * segment_count));
+
+                for (j = 0; j < segment_count && GET_BE_WORD(format->endCode[j]) < 0xffff && k < max_count; j++, k++) {
+                    ranges[k].first = GET_BE_WORD(startCode[j]);
+                    ranges[k].last  = GET_BE_WORD(format->endCode[j]);
+                }
+                break;
+            }
+            case OPENTYPE_CMAP_TABLE_SEGMENTED_COVERAGE:
+            {
+                CMAP_SegmentedCoverage *format = (CMAP_SegmentedCoverage*)table;
+                for (j = 0; j < GET_BE_DWORD(format->nGroups) && k < max_count; j++, k++) {
+                    ranges[k].first = GET_BE_DWORD(format->groups[j].startCharCode);
+                    ranges[k].last  = GET_BE_DWORD(format->groups[j].endCharCode);
+                }
+                break;
+            }
+            default:
+                FIXME("table type %i unhandled.\n", type);
+        }
+    }
+
+    return *count > max_count ? E_NOT_SUFFICIENT_BUFFER : S_OK;
 }
 
 VOID get_font_properties(LPCVOID os2, LPCVOID head, LPCVOID post, DWRITE_FONT_METRICS *metrics, DWRITE_FONT_STRETCH *stretch, DWRITE_FONT_WEIGHT *weight, DWRITE_FONT_STYLE *style)

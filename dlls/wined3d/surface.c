@@ -588,20 +588,16 @@ void surface_prepare_map_memory(struct wined3d_surface *surface)
 static void surface_evict_sysmem(struct wined3d_surface *surface)
 {
     /* In some conditions the surface memory must not be freed:
-     * SFLAG_CONVERTED: Converting the data back would take too long
-     * SFLAG_DYNLOCK: Avoid freeing the data for performance
+     * WINED3D_TEXTURE_CONVERTED: Converting the data back would take too long
+     * WINED3D_TEXTURE_DYNAMIC_MAP: Avoid freeing the data for performance
      * SFLAG_CLIENT: OpenGL uses our memory as backup */
-    if (surface->resource.map_count || surface->flags & (SFLAG_CONVERTED | SFLAG_DYNLOCK
-            | SFLAG_CLIENT | SFLAG_PIN_SYSMEM))
+    if (surface->resource.map_count || surface->flags & SFLAG_CLIENT
+            || surface->container->flags & (WINED3D_TEXTURE_CONVERTED | WINED3D_TEXTURE_PIN_SYSMEM
+            | WINED3D_TEXTURE_DYNAMIC_MAP))
         return;
 
     wined3d_resource_free_sysmem(&surface->resource);
     surface_invalidate_location(surface, WINED3D_LOCATION_SYSMEM);
-}
-
-static void surface_force_reload(struct wined3d_surface *surface)
-{
-    surface->flags &= ~(SFLAG_ALLOCATED | SFLAG_SRGBALLOCATED);
 }
 
 static void surface_release_client_storage(struct wined3d_surface *surface)
@@ -621,22 +617,22 @@ static void surface_release_client_storage(struct wined3d_surface *surface)
         gl_info->gl_ops.gl.p_glTexImage2D(surface->texture_target, surface->texture_level,
                 GL_RGB, 1, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
     }
+    wined3d_texture_force_reload(surface->container);
 
     context_release(context);
-
-    surface_invalidate_location(surface, WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_TEXTURE_SRGB);
-    surface_force_reload(surface);
 }
 
 static BOOL surface_use_pbo(const struct wined3d_surface *surface)
 {
     const struct wined3d_gl_info *gl_info = &surface->resource.device->adapter->gl_info;
+    struct wined3d_texture *texture = surface->container;
 
-    return surface->resource.pool == WINED3D_POOL_DEFAULT
+    return texture->resource.pool == WINED3D_POOL_DEFAULT
                 && surface->resource.access_flags & WINED3D_RESOURCE_ACCESS_CPU
                 && gl_info->supported[ARB_PIXEL_BUFFER_OBJECT]
-                && !surface->resource.format->convert
-                && !(surface->flags & (SFLAG_NONPOW2 | SFLAG_PIN_SYSMEM));
+                && !texture->resource.format->convert
+                && !(texture->flags & WINED3D_TEXTURE_PIN_SYSMEM)
+                && !(surface->flags & SFLAG_NONPOW2);
 }
 
 static HRESULT surface_private_setup(struct wined3d_surface *surface)
@@ -1211,7 +1207,7 @@ static void surface_unload(struct wined3d_resource *resource)
         surface_load_location(surface, surface->resource.map_binding);
         surface_invalidate_location(surface, ~surface->resource.map_binding);
     }
-    surface->flags &= ~(SFLAG_ALLOCATED | SFLAG_SRGBALLOCATED);
+    wined3d_texture_force_reload(surface->container);
 
     context = context_acquire(device, NULL);
     gl_info = context->gl_info;
@@ -1330,7 +1326,7 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
     struct wined3d_bo_address data;
 
     /* Only support read back of converted P8 surfaces. */
-    if (surface->flags & SFLAG_CONVERTED && format->id != WINED3DFMT_P8_UINT)
+    if (surface->container->flags & WINED3D_TEXTURE_CONVERTED && format->id != WINED3DFMT_P8_UINT)
     {
         ERR("Trying to read back converted surface %p with format %s.\n", surface, debug_d3dformat(format->id));
         return;
@@ -1454,8 +1450,8 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
              * get a boxed texture with width pow2width and not a texture of width resource.width.
              *
              * Performance should not be an issue, because applications normally do not lock the surfaces when
-             * rendering. If an app does, the SFLAG_DYNLOCK flag will kick in and the memory copy won't be released,
-             * and doesn't have to be re-read. */
+             * rendering. If an app does, the WINED3D_TEXTURE_DYNAMIC_MAP flag will kick in and the memory copy
+             * won't be released, and doesn't have to be re-read. */
             src_data = mem;
             dst_data = data.addr;
             TRACE("(%p) : Repacking the surface data from pitch %d to pitch %d\n", surface, src_pitch, dst_pitch);
@@ -1487,8 +1483,8 @@ static void surface_upload_data(struct wined3d_surface *surface, const struct wi
 
     if (surface->resource.map_count)
     {
-        WARN("Uploading a surface that is currently mapped, setting SFLAG_PIN_SYSMEM.\n");
-        surface->flags |= SFLAG_PIN_SYSMEM;
+        WARN("Uploading a surface that is currently mapped, setting WINED3D_TEXTURE_PIN_SYSMEM.\n");
+        surface->container->flags |= WINED3D_TEXTURE_PIN_SYSMEM;
     }
 
     if (format->flags & WINED3DFMT_FLAG_HEIGHT_SCALE)
@@ -1585,78 +1581,6 @@ static void surface_upload_data(struct wined3d_surface *surface, const struct wi
     }
 }
 
-static void d3dfmt_get_conv(const struct wined3d_texture *texture, BOOL need_alpha_ck,
-        struct wined3d_format *format, enum wined3d_conversion_type *conversion_type)
-{
-    BOOL colorkey_active = need_alpha_ck && (texture->color_key_flags & WINEDDSD_CKSRCBLT);
-    const struct wined3d_device *device = texture->resource.device;
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
-    const struct wined3d_format *dst_format;
-    enum wined3d_format_id dst_format_id;
-    unsigned int i;
-
-    static const struct
-    {
-        enum wined3d_format_id src_format;
-        enum wined3d_conversion_type conversion_type;
-        enum wined3d_format_id dst_format;
-    }
-    color_key_info[] =
-    {
-        {WINED3DFMT_B5G6R5_UNORM,   WINED3D_CT_CK_B5G6R5,   WINED3DFMT_B5G5R5A1_UNORM},
-        {WINED3DFMT_B5G5R5X1_UNORM, WINED3D_CT_CK_B5G5R5X1, WINED3DFMT_B5G5R5A1_UNORM},
-        {WINED3DFMT_B8G8R8_UNORM,   WINED3D_CT_CK_B8G8R8,   WINED3DFMT_B8G8R8A8_UNORM},
-        {WINED3DFMT_B8G8R8X8_UNORM, WINED3D_CT_CK_B8G8R8X8, WINED3DFMT_B8G8R8A8_UNORM},
-        {WINED3DFMT_B8G8R8A8_UNORM, WINED3D_CT_CK_B8G8R8A8, WINED3DFMT_B8G8R8A8_UNORM},
-    };
-
-    *format = *texture->resource.format;
-    *conversion_type = WINED3D_CT_NONE;
-    dst_format_id = format->id;
-
-    if (colorkey_active)
-    {
-        for (i = 0; i < sizeof(color_key_info) / sizeof(*color_key_info); ++i)
-        {
-            if (color_key_info[i].src_format != texture->resource.format->id)
-                continue;
-
-            *conversion_type = color_key_info[i].conversion_type;
-            dst_format_id = color_key_info[i].dst_format;
-            break;
-        }
-    }
-
-    if (texture->resource.format->id == WINED3DFMT_P8_UINT)
-    {
-        /* FIXME: This should check if the blitter backend can do P8
-         * conversion, instead of checking for ARB_fragment_program. */
-        if (!((gl_info->supported[ARB_FRAGMENT_PROGRAM] && texture->swapchain
-                && texture == texture->swapchain->front_buffer)) || colorkey_active)
-        {
-            *conversion_type = WINED3D_CT_P8;
-            dst_format_id = WINED3DFMT_B8G8R8A8_UNORM;
-        }
-    }
-    else if (texture->resource.format->id == WINED3DFMT_B2G3R3_UNORM && colorkey_active)
-    {
-        /* This texture format will never be used... So do not care about
-         * color-keying up until the point in time it will be needed. */
-        FIXME("Color-keying not supported with WINED3DFMT_B2G3R3_UNORM.\n");
-    }
-
-    if (*conversion_type != WINED3D_CT_NONE)
-    {
-        dst_format = wined3d_get_format(gl_info, dst_format_id);
-        format->glInternal = dst_format->glInternal;
-        format->glGammaInternal = format->glInternal;
-        format->rtInternal = format->glInternal;
-        format->glFormat = dst_format->glFormat;
-        format->glType = dst_format->glType;
-        format->conv_byte_count = dst_format->byte_count;
-    }
-}
-
 static BOOL surface_check_block_align(struct wined3d_surface *surface, const RECT *rect)
 {
     UINT width_mask, height_mask;
@@ -1684,10 +1608,8 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
     const struct wined3d_format *src_format;
     const struct wined3d_format *dst_format;
     const struct wined3d_gl_info *gl_info;
-    enum wined3d_conversion_type convert;
     struct wined3d_context *context;
     struct wined3d_bo_address data;
-    struct wined3d_format format;
     UINT update_w, update_h;
     UINT dst_w, dst_h;
     RECT r, dst_rect;
@@ -1761,8 +1683,7 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
     }
 
     /* Use wined3d_surface_blt() instead of uploading directly if we need conversion. */
-    d3dfmt_get_conv(dst_surface->container, FALSE, &format, &convert);
-    if (convert != WINED3D_CT_NONE || format.convert)
+    if (dst_format->convert || wined3d_format_get_color_key_conversion(dst_surface->container, FALSE))
         return wined3d_surface_blt(dst_surface, &dst_rect, src_surface, src_rect, 0, NULL, WINED3D_TEXF_POINT);
 
     context = context_acquire(dst_surface->resource.device, NULL);
@@ -1772,7 +1693,7 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
      * the texture wouldn't be the current location, and we'd upload zeroes
      * just to overwrite them again. */
     if (update_w == dst_w && update_h == dst_h)
-        surface_prepare_texture(dst_surface, context, FALSE);
+        wined3d_texture_prepare_texture(dst_surface->container, context, FALSE);
     else
         surface_load_location(dst_surface, WINED3D_LOCATION_TEXTURE_RGB);
     wined3d_texture_bind(dst_surface->container, context, FALSE);
@@ -1790,83 +1711,6 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
     surface_invalidate_location(dst_surface, ~WINED3D_LOCATION_TEXTURE_RGB);
 
     return WINED3D_OK;
-}
-
-/* This call just allocates the texture, the caller is responsible for binding
- * the correct texture. */
-/* Context activation is done by the caller. */
-static void surface_allocate_surface(struct wined3d_surface *surface, const struct wined3d_gl_info *gl_info,
-        const struct wined3d_format *format, BOOL srgb)
-{
-    BOOL disable_client_storage = FALSE;
-    GLsizei width = surface->pow2Width;
-    GLsizei height = surface->pow2Height;
-    const BYTE *mem = NULL;
-    GLenum internal;
-
-    if (srgb)
-        internal = format->glGammaInternal;
-    else if (surface->resource.usage & WINED3DUSAGE_RENDERTARGET
-            && wined3d_resource_is_offscreen(&surface->container->resource))
-        internal = format->rtInternal;
-    else
-        internal = format->glInternal;
-
-    if (!internal)
-        FIXME("No GL internal format for format %s.\n", debug_d3dformat(format->id));
-
-    if (format->flags & WINED3DFMT_FLAG_HEIGHT_SCALE)
-    {
-        height *= format->height_scale.numerator;
-        height /= format->height_scale.denominator;
-    }
-
-    TRACE("(%p) : Creating surface (target %#x)  level %d, d3d format %s, internal format %#x, width %d, height %d, gl format %#x, gl type=%#x\n",
-            surface, surface->texture_target, surface->texture_level, debug_d3dformat(format->id),
-            internal, width, height, format->glFormat, format->glType);
-
-    if (gl_info->supported[APPLE_CLIENT_STORAGE])
-    {
-        if (surface->flags & (SFLAG_NONPOW2 | SFLAG_DIBSECTION | SFLAG_CONVERTED)
-                || !surface->resource.heap_memory)
-        {
-            /* In some cases we want to disable client storage.
-             * SFLAG_NONPOW2 has a bigger opengl texture than the client memory, and different pitches
-             * SFLAG_DIBSECTION: Dibsections may have read / write protections on the memory. Avoid issues...
-             * SFLAG_CONVERTED: The conversion destination memory is freed after loading the surface
-             * heap_memory == NULL: Not defined in the extension. Seems to disable client storage effectively
-             */
-            surface->flags &= ~SFLAG_CLIENT;
-        }
-        else
-        {
-            surface->flags |= SFLAG_CLIENT;
-            mem = surface->resource.heap_memory;
-
-            gl_info->gl_ops.gl.p_glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE);
-            checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_TRUE)");
-            disable_client_storage = TRUE;
-        }
-    }
-
-    if (format->flags & WINED3DFMT_FLAG_COMPRESSED && mem)
-    {
-        GL_EXTCALL(glCompressedTexImage2DARB(surface->texture_target, surface->texture_level,
-                internal, width, height, 0, surface->resource.size, mem));
-        checkGLcall("glCompressedTexImage2DARB");
-    }
-    else
-    {
-        gl_info->gl_ops.gl.p_glTexImage2D(surface->texture_target, surface->texture_level,
-                internal, width, height, 0, format->glFormat, format->glType, mem);
-        checkGLcall("glTexImage2D");
-    }
-
-    if (disable_client_storage)
-    {
-        gl_info->gl_ops.gl.p_glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
-        checkGLcall("glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE)");
-    }
 }
 
 /* In D3D the depth stencil dimensions have to be greater than or equal to the
@@ -1997,7 +1841,7 @@ void surface_load(struct wined3d_surface *surface, BOOL srgb)
         surface_invalidate_location(surface, ~surface->resource.map_binding);
         /* Switching color keying on / off may change the internal format. */
         if (ck_changed)
-            surface_force_reload(surface);
+            wined3d_texture_force_reload(surface->container);
     }
     else if (!(surface->locations & location))
     {
@@ -2773,13 +2617,15 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
     /* Performance optimization: Count how often a surface is mapped, if it is
      * mapped regularly do not throw away the system memory copy. This avoids
      * the need to download the surface from OpenGL all the time. The surface
-     * is still downloaded if the OpenGL texture is changed. */
-    if (!(surface->flags & SFLAG_DYNLOCK) && surface->resource.map_binding == WINED3D_LOCATION_SYSMEM)
+     * is still downloaded if the OpenGL texture is changed. Note that this
+     * only really makes sense for managed textures.*/
+    if (!(surface->container->flags & WINED3D_TEXTURE_DYNAMIC_MAP)
+            && surface->resource.map_binding == WINED3D_LOCATION_SYSMEM)
     {
         if (++surface->lockCount > MAXLOCKCOUNT)
         {
             TRACE("Surface is mapped regularly, not freeing the system memory copy any more.\n");
-            surface->flags |= SFLAG_DYNLOCK;
+            surface->container->flags |= WINED3D_TEXTURE_DYNAMIC_MAP;
         }
     }
 
@@ -2900,7 +2746,7 @@ HRESULT CDECL wined3d_surface_getdc(struct wined3d_surface *surface, HDC *dc)
         if (FAILED(hr))
             return WINED3DERR_INVALIDCALL;
         if (!(surface->resource.map_binding == WINED3D_LOCATION_USER_MEMORY
-                || surface->flags & SFLAG_PIN_SYSMEM
+                || surface->container->flags & WINED3D_TEXTURE_PIN_SYSMEM
                 || surface->pbo))
             surface->resource.map_binding = WINED3D_LOCATION_DIB;
     }
@@ -2934,7 +2780,8 @@ HRESULT CDECL wined3d_surface_releasedc(struct wined3d_surface *surface, HDC dc)
     surface->resource.map_count--;
     surface->flags &= ~SFLAG_DCINUSE;
 
-    if (surface->resource.map_binding == WINED3D_LOCATION_USER_MEMORY || (surface->flags & SFLAG_PIN_SYSMEM
+    if (surface->resource.map_binding == WINED3D_LOCATION_USER_MEMORY
+            || (surface->container->flags & WINED3D_TEXTURE_PIN_SYSMEM
             && surface->resource.map_binding != WINED3D_LOCATION_DIB))
     {
         /* The game Salammbo modifies the surface contents without mapping the surface between
@@ -3066,7 +2913,7 @@ void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb)
     gl_info = context->gl_info;
     device_invalidate_state(device, STATE_FRAMEBUFFER);
 
-    surface_prepare_texture(surface, context, srgb);
+    wined3d_texture_prepare_texture(surface->container, context, srgb);
     wined3d_texture_bind_and_dirtify(surface->container, context, srgb);
 
     TRACE("Reading back offscreen render target %p.\n", surface);
@@ -3082,44 +2929,6 @@ void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb)
     checkGLcall("glCopyTexSubImage2D");
 
     context_release(context);
-}
-
-/* Context activation is done by the caller. */
-static void surface_prepare_texture_internal(struct wined3d_surface *surface,
-        struct wined3d_context *context, BOOL srgb)
-{
-    DWORD alloc_flag = srgb ? SFLAG_SRGBALLOCATED : SFLAG_ALLOCATED;
-    enum wined3d_conversion_type convert;
-    struct wined3d_format format;
-
-    if (surface->flags & alloc_flag) return;
-
-    d3dfmt_get_conv(surface->container, TRUE, &format, &convert);
-    if (convert != WINED3D_CT_NONE || format.convert)
-        surface->flags |= SFLAG_CONVERTED;
-    else surface->flags &= ~SFLAG_CONVERTED;
-
-    wined3d_texture_bind_and_dirtify(surface->container, context, srgb);
-    surface_allocate_surface(surface, context->gl_info, &format, srgb);
-    surface->flags |= alloc_flag;
-}
-
-/* Context activation is done by the caller. */
-void surface_prepare_texture(struct wined3d_surface *surface, struct wined3d_context *context, BOOL srgb)
-{
-    struct wined3d_texture *texture = surface->container;
-    UINT sub_count = texture->level_count * texture->layer_count;
-    UINT i;
-
-    TRACE("surface %p is a subresource of texture %p.\n", surface, texture);
-
-    for (i = 0; i < sub_count; ++i)
-    {
-        struct wined3d_surface *s = surface_from_resource(texture->sub_resources[i]);
-        surface_prepare_texture_internal(s, context, srgb);
-    }
-
-    return;
 }
 
 void surface_prepare_rb(struct wined3d_surface *surface, const struct wined3d_gl_info *gl_info, BOOL multisample)
@@ -3146,212 +2955,6 @@ void surface_prepare_rb(struct wined3d_surface *surface, const struct wined3d_gl
                 surface->pow2Width, surface->pow2Height);
         TRACE("Created resolved rb %u.\n", surface->rb_resolved);
     }
-}
-
-static BOOL color_in_range(const struct wined3d_color_key *color_key, DWORD color)
-{
-    /* FIXME: Is this really how color keys are supposed to work? I think it
-     * makes more sense to compare the individual channels. */
-    return color >= color_key->color_space_low_value
-            && color <= color_key->color_space_high_value;
-}
-
-static void convert_p8_uint_b8g8r8a8_unorm(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_palette *palette, const struct wined3d_color_key *color_key)
-{
-    const BYTE *src_row;
-    unsigned int x, y;
-    DWORD *dst_row;
-
-    if (!palette)
-    {
-        /* FIXME: This should probably use the system palette. */
-        FIXME("P8 surface loaded without a palette.\n");
-
-        for (y = 0; y < height; ++y)
-        {
-            memset(&dst[dst_pitch * y], 0, width * 4);
-        }
-
-        return;
-    }
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = &src[src_pitch * y];
-        dst_row = (DWORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            BYTE src_color = src_row[x];
-            dst_row[x] = 0xff000000
-                    | (palette->colors[src_color].rgbRed << 16)
-                    | (palette->colors[src_color].rgbGreen << 8)
-                    | palette->colors[src_color].rgbBlue;
-        }
-    }
-}
-
-static void convert_b5g6r5_unorm_b5g5r5a1_unorm_color_key(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_color_key *color_key)
-{
-    const WORD *src_row;
-    unsigned int x, y;
-    WORD *dst_row;
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = (WORD *)&src[src_pitch * y];
-        dst_row = (WORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            WORD src_color = src_row[x];
-            if (!color_in_range(color_key, src_color))
-                dst_row[x] = 0x8000 | ((src_color & 0xffc0) >> 1) | (src_color & 0x1f);
-            else
-                dst_row[x] = ((src_color & 0xffc0) >> 1) | (src_color & 0x1f);
-        }
-    }
-}
-
-static void convert_b5g5r5x1_unorm_b5g5r5a1_unorm_color_key(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_color_key *color_key)
-{
-    const WORD *src_row;
-    unsigned int x, y;
-    WORD *dst_row;
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = (WORD *)&src[src_pitch * y];
-        dst_row = (WORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            WORD src_color = src_row[x];
-            if (color_in_range(color_key, src_color))
-                dst_row[x] = src_color & ~0x8000;
-            else
-                dst_row[x] = src_color | 0x8000;
-        }
-    }
-}
-
-static void convert_b8g8r8_unorm_b8g8r8a8_unorm_color_key(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_color_key *color_key)
-{
-    const BYTE *src_row;
-    unsigned int x, y;
-    DWORD *dst_row;
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = &src[src_pitch * y];
-        dst_row = (DWORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            DWORD src_color = (src_row[x * 3 + 2] << 16) | (src_row[x * 3 + 1] << 8) | src_row[x * 3];
-            if (!color_in_range(color_key, src_color))
-                dst_row[x] = src_color | 0xff000000;
-        }
-    }
-}
-
-static void convert_b8g8r8x8_unorm_b8g8r8a8_unorm_color_key(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_color_key *color_key)
-{
-    const DWORD *src_row;
-    unsigned int x, y;
-    DWORD *dst_row;
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = (DWORD *)&src[src_pitch * y];
-        dst_row = (DWORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            DWORD src_color = src_row[x];
-            if (color_in_range(color_key, src_color))
-                dst_row[x] = src_color & ~0xff000000;
-            else
-                dst_row[x] = src_color | 0xff000000;
-        }
-    }
-}
-
-static void convert_b8g8r8a8_unorm_b8g8r8a8_unorm_color_key(const BYTE *src, unsigned int src_pitch,
-        BYTE *dst, unsigned int dst_pitch, unsigned int width, unsigned int height,
-        const struct wined3d_color_key *color_key)
-{
-    const DWORD *src_row;
-    unsigned int x, y;
-    DWORD *dst_row;
-
-    for (y = 0; y < height; ++y)
-    {
-        src_row = (DWORD *)&src[src_pitch * y];
-        dst_row = (DWORD *)&dst[dst_pitch * y];
-        for (x = 0; x < width; ++x)
-        {
-            DWORD src_color = src_row[x];
-            if (color_in_range(color_key, src_color))
-                src_color &= ~0xff000000;
-            dst_row[x] = src_color;
-        }
-    }
-}
-
-static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UINT width, UINT height,
-        UINT outpitch, enum wined3d_conversion_type conversion_type, struct wined3d_surface *surface)
-{
-    struct wined3d_palette *palette = NULL;
-    struct wined3d_texture *texture;
-
-    TRACE("src %p, dst %p, pitch %u, width %u, height %u, outpitch %u, conversion_type %#x, surface %p.\n",
-            src, dst, pitch, width, height, outpitch, conversion_type, surface);
-
-    texture = surface->container;
-    switch (conversion_type)
-    {
-        case WINED3D_CT_P8:
-            if (texture->swapchain && texture->swapchain->palette)
-                palette = texture->swapchain->palette;
-            convert_p8_uint_b8g8r8a8_unorm(src, pitch, dst, outpitch,
-                    width, height, palette, &texture->src_blt_color_key);
-            break;
-
-        case WINED3D_CT_CK_B5G6R5:
-            convert_b5g6r5_unorm_b5g5r5a1_unorm_color_key(src, pitch, dst, outpitch,
-                    width, height, &texture->src_blt_color_key);
-            break;
-
-        case WINED3D_CT_CK_B5G5R5X1:
-            convert_b5g5r5x1_unorm_b5g5r5a1_unorm_color_key(src, pitch, dst, outpitch,
-                    width, height, &texture->src_blt_color_key);
-            break;
-
-        case WINED3D_CT_CK_B8G8R8:
-            convert_b8g8r8_unorm_b8g8r8a8_unorm_color_key(src, pitch, dst, outpitch,
-                    width, height, &texture->src_blt_color_key);
-            break;
-
-        case WINED3D_CT_CK_B8G8R8X8:
-            convert_b8g8r8x8_unorm_b8g8r8a8_unorm_color_key(src, pitch, dst, outpitch,
-                    width, height, &texture->src_blt_color_key);
-            break;
-
-        case WINED3D_CT_CK_B8G8R8A8:
-            convert_b8g8r8a8_unorm_b8g8r8a8_unorm_color_key(src, pitch, dst, outpitch,
-                    width, height, &texture->src_blt_color_key);
-            break;
-
-        default:
-            ERR("Unsupported conversion type %#x.\n", conversion_type);
-    }
-    return WINED3D_OK;
 }
 
 void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back)
@@ -3696,7 +3299,7 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
         bottom = src_surface->resource.height - src_rect->top;
     }
 
-    if (src_surface->flags & SFLAG_NORMCOORD)
+    if (src_surface->container->flags & WINED3D_TEXTURE_NORMALIZED_COORDS)
     {
         left /= src_surface->pow2Width;
         right /= src_surface->pow2Width;
@@ -4229,7 +3832,7 @@ void surface_load_ds_location(struct wined3d_surface *surface, struct wined3d_co
         switch (location)
         {
             case WINED3D_LOCATION_TEXTURE_RGB:
-                surface_prepare_texture(surface, context, FALSE);
+                wined3d_texture_prepare_texture(surface->container, context, FALSE);
                 break;
             case WINED3D_LOCATION_RB_MULTISAMPLE:
                 surface_prepare_rb(surface, gl_info, TRUE);
@@ -4487,7 +4090,8 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
 {
     RECT src_rect = {0, 0, surface->resource.width, surface->resource.height};
     struct wined3d_device *device = surface->resource.device;
-    enum wined3d_conversion_type convert;
+    const struct wined3d_color_key_conversion *conversion;
+    struct wined3d_texture *texture = surface->container;
     struct wined3d_context *context;
     UINT width, src_pitch, dst_pitch;
     struct wined3d_bo_address data;
@@ -4496,7 +4100,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     BYTE *mem = NULL;
 
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO
-            && wined3d_resource_is_offscreen(&surface->container->resource)
+            && wined3d_resource_is_offscreen(&texture->resource)
             && (surface->locations & WINED3D_LOCATION_DRAWABLE))
     {
         surface_load_fb_texture(surface, srgb);
@@ -4539,8 +4143,6 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
 
     /* Upload from system memory */
 
-    d3dfmt_get_conv(surface->container, TRUE /* We need color keying */, &format, &convert);
-
     if (srgb)
     {
         if ((surface->locations & (WINED3D_LOCATION_TEXTURE_RGB | surface->resource.map_binding))
@@ -4575,23 +4177,27 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     /* TODO: Use already acquired context when possible. */
     context = context_acquire(device, NULL);
 
-    surface_prepare_texture(surface, context, srgb);
-    wined3d_texture_bind_and_dirtify(surface->container, context, srgb);
+    wined3d_texture_prepare_texture(texture, context, srgb);
+    wined3d_texture_bind_and_dirtify(texture, context, srgb);
 
-    if (surface->container->color_key_flags & WINEDDSD_CKSRCBLT)
+    if (texture->color_key_flags & WINEDDSD_CKSRCBLT)
     {
         surface->flags |= SFLAG_GLCKEY;
-        surface->gl_color_key = surface->container->src_blt_color_key;
+        surface->gl_color_key = texture->src_blt_color_key;
     }
     else surface->flags &= ~SFLAG_GLCKEY;
 
     width = surface->resource.width;
     src_pitch = wined3d_surface_get_pitch(surface);
 
+    format = *texture->resource.format;
+    if ((conversion = wined3d_format_get_color_key_conversion(texture, TRUE)))
+        format = *wined3d_get_format(gl_info, conversion->dst_format);
+
     /* Don't use PBOs for converted surfaces. During PBO conversion we look at
-     * SFLAG_CONVERTED but it isn't set (yet) in all cases it is getting
-     * called. */
-    if ((convert != WINED3D_CT_NONE || format.convert) && surface->pbo)
+     * WINED3D_TEXTURE_CONVERTED but it isn't set (yet) in all cases it is
+     * getting called. */
+    if ((format.convert || conversion) && surface->pbo)
     {
         TRACE("Removing the pbo attached to surface %p.\n", surface);
 
@@ -4611,8 +4217,8 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
         /* This code is entered for texture formats which need a fixup. */
         UINT height = surface->resource.height;
 
-        /* Stick to the alignment for the converted surface too, makes it easier to load the surface */
-        dst_pitch = width * format.conv_byte_count;
+        format.byte_count = format.conv_byte_count;
+        dst_pitch = wined3d_format_calculate_pitch(&format, width);
         dst_pitch = (dst_pitch + device->surface_alignment - 1) & ~(device->surface_alignment - 1);
 
         if (!(mem = HeapAlloc(GetProcessHeap(), 0, dst_pitch * height)))
@@ -4623,17 +4229,16 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
         }
         format.convert(data.addr, mem, src_pitch, src_pitch * height,
                 dst_pitch, dst_pitch * height, width, height, 1);
-        format.byte_count = format.conv_byte_count;
         src_pitch = dst_pitch;
         data.addr = mem;
     }
-    else if (convert != WINED3D_CT_NONE)
+    else if (conversion)
     {
         /* This code is only entered for color keying fixups */
+        struct wined3d_palette *palette = NULL;
         UINT height = surface->resource.height;
 
-        /* Stick to the alignment for the converted surface too, makes it easier to load the surface */
-        dst_pitch = width * format.conv_byte_count;
+        dst_pitch = wined3d_format_calculate_pitch(&format, width);
         dst_pitch = (dst_pitch + device->surface_alignment - 1) & ~(device->surface_alignment - 1);
 
         if (!(mem = HeapAlloc(GetProcessHeap(), 0, dst_pitch * height)))
@@ -4642,9 +4247,10 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
             context_release(context);
             return E_OUTOFMEMORY;
         }
-        d3dfmt_convert_surface(data.addr, mem, src_pitch,
-                width, height, dst_pitch, convert, surface);
-        format.byte_count = format.conv_byte_count;
+        if (texture->swapchain && texture->swapchain->palette)
+            palette = texture->swapchain->palette;
+        conversion->convert(data.addr, src_pitch, mem, dst_pitch,
+                width, height, palette, &texture->src_blt_color_key);
         src_pitch = dst_pitch;
         data.addr = mem;
     }
@@ -5571,8 +5177,6 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
     DWORD src_ds_flags, dst_ds_flags;
     RECT src_rect, dst_rect;
     BOOL scale, convert;
-    enum wined3d_conversion_type dst_convert_type;
-    struct wined3d_format dst_conv_fmt;
 
     static const DWORD simple_blit = WINEDDBLT_ASYNC
             | WINEDDBLT_COLORFILL
@@ -5687,8 +5291,9 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
     /* We want to avoid invalidating the sysmem location for converted
      * surfaces, since otherwise we'd have to convert the data back when
      * locking them. */
-    d3dfmt_get_conv(dst_surface->container, TRUE, &dst_conv_fmt, &dst_convert_type);
-    if (dst_convert_type != WINED3D_CT_NONE || dst_conv_fmt.convert || dst_surface->flags & SFLAG_CONVERTED)
+    if (dst_surface->container->flags & WINED3D_TEXTURE_CONVERTED
+            || dst_surface->container->resource.format->convert
+            || wined3d_format_get_color_key_conversion(dst_surface->container, TRUE))
     {
         WARN_(d3d_perf)("Converted surface, using CPU blit.\n");
         goto cpu;
@@ -5942,12 +5547,8 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
     list_init(&surface->overlays);
 
     /* Flags */
-    if (target != GL_TEXTURE_RECTANGLE_ARB)
-        surface->flags |= SFLAG_NORMCOORD;
     if (flags & WINED3D_SURFACE_DISCARD)
         surface->flags |= SFLAG_DISCARD;
-    if (flags & WINED3D_SURFACE_PIN_SYSMEM)
-        surface->flags |= SFLAG_PIN_SYSMEM;
     if (lockable || desc->format == WINED3DFMT_D16_LOCKABLE)
         surface->resource.access_flags |= WINED3D_RESOURCE_ACCESS_CPU;
 

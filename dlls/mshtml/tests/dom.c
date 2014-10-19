@@ -381,6 +381,7 @@ static const IID * const form_iids[] = {
     ELEM_IFACES,
     &IID_IHTMLFormElement,
     &IID_IConnectionPointContainer,
+    &DIID_DispHTMLFormElement,
     NULL
 };
 
@@ -1669,6 +1670,20 @@ static void _test_textarea_type(unsigned line, IUnknown *unk)
     ok_(__FILE__,line)(hres == S_OK, "get_type failed: %08x\n", hres);
     ok_(__FILE__,line)(!strcmp_wa(type, "textarea"), "type = %s, expected textarea\n", wine_dbgstr_w(type));
     SysFreeString(type);
+}
+
+#define get_textarea_form(t) _get_textarea_form(__LINE__,t)
+static IHTMLFormElement *_get_textarea_form(unsigned line, IUnknown *unk)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    IHTMLFormElement *form;
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_get_form(textarea, &form);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "get_type failed: %08x\n", hres);
+
+    return form;
 }
 
 #define test_comment_text(c,t) _test_comment_text(__LINE__,c,t)
@@ -3136,6 +3151,36 @@ static void _test_elem_id(unsigned line, IUnknown *unk, const char *exid)
         ok_(__FILE__,line) (!id, "id=%s\n", wine_dbgstr_w(id));
 
     SysFreeString(id);
+}
+
+#define test_elem_language(e,i) _test_elem_language(__LINE__,e,i)
+static void _test_elem_language(unsigned line, IHTMLElement *elem, const char *exlang)
+{
+    BSTR lang = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLElement_get_language(elem, &lang);
+    ok_(__FILE__,line) (hres == S_OK, "get_language failed: %08x\n", hres);
+
+    if(exlang)
+        ok_(__FILE__,line) (!strcmp_wa(lang, exlang), "unexpected language %s\n", wine_dbgstr_w(lang));
+    else
+        ok_(__FILE__,line) (!lang, "language=%s\n", wine_dbgstr_w(lang));
+
+    SysFreeString(lang);
+}
+
+#define set_elem_language(e,i) _set_elem_language(__LINE__,e,i)
+static void _set_elem_language(unsigned line, IHTMLElement *elem, const char *lang)
+{
+    BSTR str = a2bstr(lang);
+    HRESULT hres;
+
+    hres = IHTMLElement_put_language(elem, str);
+    ok_(__FILE__,line) (hres == S_OK, "get_language failed: %08x\n", hres);
+    SysFreeString(str);
+
+    _test_elem_language(line, elem, lang);
 }
 
 #define test_elem_put_id(u,i) _test_elem_put_id(__LINE__,u,i)
@@ -7135,6 +7180,8 @@ static void test_elems(IHTMLDocument2 *doc)
         hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLScriptElement, (void**)&script);
         ok(hres == S_OK, "Could not get IHTMLScriptElement interface: %08x\n", hres);
 
+        test_elem_language(elem, NULL);
+
         if(hres == S_OK)
         {
             VARIANT_BOOL vb;
@@ -7174,6 +7221,9 @@ static void test_elems(IHTMLDocument2 *doc)
         }
 
         IHTMLScriptElement_Release(script);
+
+        set_elem_language(elem, "vbscript");
+        set_elem_language(elem, "xxx");
     }
 
     elem = get_elem_by_id(doc, "in", TRUE);
@@ -7771,12 +7821,35 @@ static void test_elems2(IHTMLDocument2 *doc)
     test_elem_set_innerhtml((IUnknown*)div, "<textarea id=\"ta\"></textarea>");
     elem = get_elem_by_id(doc, "ta", TRUE);
     if(elem) {
+        IHTMLFormElement *form;
+
         test_textarea_value((IUnknown*)elem, NULL);
         test_textarea_put_value((IUnknown*)elem, "test");
         test_textarea_readonly((IUnknown*)elem, VARIANT_FALSE);
         test_textarea_put_readonly((IUnknown*)elem, VARIANT_TRUE);
         test_textarea_put_readonly((IUnknown*)elem, VARIANT_FALSE);
         test_textarea_type((IUnknown*)elem);
+
+        form = get_textarea_form((IUnknown*)elem);
+        ok(!form, "form = %p\n", form);
+
+        IHTMLElement_Release(elem);
+    }
+
+    test_elem_set_innerhtml((IUnknown*)div, "<form id=\"fid\"><textarea id=\"ta\"></textarea></form>");
+    elem = get_elem_by_id(doc, "ta", TRUE);
+    if(elem) {
+        IHTMLFormElement *form;
+
+        elem2 = get_elem_by_id(doc, "fid", TRUE);
+        ok(elem2 != NULL, "elem2 == NULL\n");
+
+        form = get_textarea_form((IUnknown*)elem);
+        ok(form != NULL, "form = NULL\n");
+        ok(iface_cmp((IUnknown*)form, (IUnknown*)elem2), "form != elem2\n");
+
+        IHTMLFormElement_Release(form);
+        IHTMLElement_Release(elem2);
         IHTMLElement_Release(elem);
     }
 
