@@ -49,7 +49,7 @@ Build-Depends:
  libncurses5-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
- kfreebsd-glue [kfreebsd-any],
+ freebsd-glue [kfreebsd-any],
  prelink [linux-any],
  libosmesa6-dev,
  libgstreamer-plugins-base0.10-dev,
@@ -96,6 +96,7 @@ Description: Windows API implementation - standard suite
 Package: wine-binfmt
 Architecture: any-amd64 any-i386 any-powerpc
 Depends:
+ ${misc:Depends},
  wine,
 Description: Windows API implementation - binfmt support
  Wine is a free MS-Windows API implementation.
@@ -147,7 +148,9 @@ Description: Windows API implementation - 64-bit binary loader
 Package: wine32-dev-tools
 Architecture: any-i386 any-powerpc
 Section: oldlibs
+Priority: extra
 Depends:
+ ${misc:Depends},
  wine32-tools,
 Description: Windows API implementation - 32-bit developer tools
  Wine is a free MS-Windows API implementation.
@@ -177,7 +180,9 @@ Description: Windows API implementation - 32-bit developer tools
 Package: wine64-dev-tools
 Architecture: amd64
 Section: oldlibs
+Priority: extra
 Depends:
+ ${misc:Depends},
  wine64-tools,
 Description: Windows API implementation - 64-bit developer tools
  Wine is a free MS-Windows API implementation.
@@ -284,6 +289,7 @@ Description: Windows API implementation - library
 
 Package: wine-bin
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Pre-Depends: dpkg (>= 1.17.5)
 Depends:
@@ -310,6 +316,7 @@ Description: Windows API implementation - 64-bit helper
 
 Package: libwine-alsa
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -322,6 +329,7 @@ Description: Windows API implementation - ALSA sound module
 
 Package: libwine-bin
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Pre-Depends: dpkg (>= 1.17.5)
 Depends:
@@ -335,6 +343,7 @@ Description: Windows API implementation - system services
 
 Package: libwine-capi
 Section: oldlibs
+Priority: extra
 Architecture: i386 powerpc
 Multi-Arch: same
 Depends:
@@ -348,6 +357,7 @@ Description: Windows API implementation - ISDN module
 
 Package: libwine-cms
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -361,6 +371,7 @@ Description: Windows API implementation - color management module
 
 Package: libwine-gl
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -374,6 +385,7 @@ Description: Windows API implementation - OpenGL module
 
 Package: libwine-gphoto2
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Depends:
  ${misc:Depends},
@@ -386,6 +398,7 @@ Description: Windows API implementation - camera module
 
 Package: libwine-ldap
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -399,6 +412,7 @@ Description: Windows API implementation - LDAP module
 
 Package: libwine-openal
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -412,6 +426,7 @@ Description: Windows API implementation - OpenAL module
 
 Package: libwine-oss
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -425,6 +440,7 @@ Description: Windows API implementation - OSS sound module
 
 Package: libwine-print
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:
@@ -438,6 +454,7 @@ Description: Windows API implementation - printing module
 
 Package: libwine-sane
 Section: oldlibs
+Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Depends:

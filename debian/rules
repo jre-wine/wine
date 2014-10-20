@@ -11,11 +11,11 @@ DATADIR=/usr/share/wine$(VERSUFFIX)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSUFFIX)
 
 # linker options
-LDFLAGS+=-Wl,-rpath,/$(LIBDIR)
+export DEB_LDFLAGS_MAINT_APPEND+=-Wl,-rpath,/$(LIBDIR)
 
 # use freebsd-glue on kfreebsd architectures
 ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
-LDFLAGS+=-lfreebsd-glue
+export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
 endif
 
 # configure options
@@ -24,7 +24,6 @@ CONFLAGS=--without-hal \
 	 --without-sane \
 	 --without-capi \
 	 --without-gphoto \
-	 --with-gnutls \
 	 --disable-tests \
 	 --prefix=$(DATADIR) \
 	 --libdir=/$(LIBDIR) \
@@ -32,7 +31,7 @@ CONFLAGS=--without-hal \
 	 --datarootdir=$(DATADIR) \
 	 --exec-prefix=/$(LIBDIR) \
 	 --includedir=/usr/include \
-	 LDFLAGS="$(LDFLAGS)" \
+         $(shell dpkg-buildflags --export=configure) \
 
 # enable wine64 on amd64
 ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
@@ -89,6 +88,7 @@ ifneq ($(DEB_BUILD_ARCH), kfreebsd-amd64)
 	cp debian/tmp/usr/share/man/man1/wine.1 debian/tmp/usr/share/man/man1/wine64.1
 	test -f debian/tmp/$(LIBDIR)/bin/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)/bin
+	sed 's|LIBDIR|$(LIBDIR)|g' < debian/scripts/winegcc > debian/tmp/winegcc$(DEB_BUILD_ARCH_BITS)
 	dh_install
 endif
 

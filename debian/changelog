@@ -1,3 +1,13 @@
+wine (1.6.2-13) unstable; urgency=medium
+
+  * Fix some lintian warnings.
+  * Simplify build flag handling.
+  * Fix typo in freebsd-glue build-dependency.
+  * Install winegcc helper scripts (closes: #746661).
+  * Merge wine launcher script from wine-development (closes: #764641).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 19 Oct 2014 20:49:28 +0000
+
 wine (1.6.2-12) unstable; urgency=medium
 
   * Build-depend on libjpeg-dev instead of libjpeg8-dev (closes:
