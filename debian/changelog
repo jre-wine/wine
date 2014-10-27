@@ -1,3 +1,10 @@
+wine (1.6.2-14) unstable; urgency=medium
+
+  * Fix paths to wine executables (closes: #766030)
+    - Thanks to jre.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 27 Oct 2014 00:59:11 +0000
+
 wine (1.6.2-13) unstable; urgency=medium
 
   * Fix some lintian warnings.

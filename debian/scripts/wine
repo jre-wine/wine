@@ -1,9 +1,9 @@
 #!/bin/sh -e
 
 name=$(basename $0)
-bindir=/usr/lib/$name
+bindir=/usr/bin
 
-wine32=$bindir/wine
+wine32=$bindir/wine32
 wine64=$bindir/wine64
 
 if test -x $wine32 -a "$WINEARCH" != "win64"; then
