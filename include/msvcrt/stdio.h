@@ -130,6 +130,8 @@ int    __cdecl _vsprintf_p_l(char*,size_t,const char*,_locale_t,__ms_va_list);
 size_t __cdecl _fread_nolock(void*,size_t,size_t,FILE*);
 size_t __cdecl _fwrite_nolock(const void*,size_t,size_t,FILE*);
 int    __cdecl _fclose_nolock(FILE*);
+int    __cdecl _fflush_nolock(FILE*);
+int    __cdecl _fgetc_nolock(FILE*);
 int    __cdecl _fseek_nolock(FILE*,__msvcrt_long,int);
 int    __cdecl _fseeki64_nolock(FILE*,__int64,int);
 __msvcrt_long __cdecl _ftell_nolock(FILE*);
@@ -194,6 +196,7 @@ unsigned int __cdecl _set_output_format(void);
 
 #ifndef _WSTDIO_DEFINED
 #define _WSTDIO_DEFINED
+wint_t   __cdecl _fgetwc_nolock(FILE*);
 wint_t   __cdecl _fgetwchar(void);
 wint_t   __cdecl _fputwchar(wint_t);
 wchar_t* __cdecl _getws(wchar_t*);

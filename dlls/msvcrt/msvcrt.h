@@ -916,8 +916,10 @@ int __cdecl      MSVCRT__isleadbyte_l(int, MSVCRT__locale_t);
 void __cdecl     MSVCRT__lock_file(MSVCRT_FILE*);
 void __cdecl     MSVCRT__unlock_file(MSVCRT_FILE*);
 int __cdecl      MSVCRT_fgetc(MSVCRT_FILE*);
+int __cdecl      MSVCRT__fgetc_nolock(MSVCRT_FILE*);
 int __cdecl      MSVCRT_ungetc(int,MSVCRT_FILE*);
 MSVCRT_wint_t __cdecl MSVCRT_fgetwc(MSVCRT_FILE*);
+MSVCRT_wint_t __cdecl MSVCRT__fgetwc_nolock(MSVCRT_FILE*);
 MSVCRT_wint_t __cdecl MSVCRT_ungetwc(MSVCRT_wint_t,MSVCRT_FILE*);
 int __cdecl      MSVCRT__fseeki64_nolock(MSVCRT_FILE*,__int64,int);
 __int64 __cdecl  MSVCRT__ftelli64(MSVCRT_FILE* file);
@@ -931,6 +933,7 @@ MSVCRT_size_t __cdecl MSVCRT__fread_nolock(void*,MSVCRT_size_t,MSVCRT_size_t,MSV
 MSVCRT_size_t __cdecl MSVCRT__fwrite_nolock(const void*,MSVCRT_size_t,MSVCRT_size_t,MSVCRT_FILE*);
 int __cdecl      MSVCRT_fclose(MSVCRT_FILE*);
 int __cdecl      MSVCRT__fclose_nolock(MSVCRT_FILE*);
+int __cdecl      MSVCRT__fflush_nolock(MSVCRT_FILE*);
 void __cdecl     MSVCRT_terminate(void);
 MSVCRT_FILE* __cdecl MSVCRT__iob_func(void);
 MSVCRT_clock_t __cdecl MSVCRT_clock(void);

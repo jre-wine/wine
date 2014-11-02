@@ -185,6 +185,133 @@ typedef struct
 } TT_OS2_V2;
 #include "poppack.h"
 
+typedef struct {
+    WORD platformID;
+    WORD encodingID;
+    WORD languageID;
+    WORD nameID;
+    WORD length;
+    WORD offset;
+} TT_NameRecord;
+
+typedef struct {
+    WORD format;
+    WORD count;
+    WORD stringOffset;
+    TT_NameRecord nameRecord[1];
+} TT_NAME_V0;
+
+enum OPENTYPE_PLATFORM_ID
+{
+    OPENTYPE_PLATFORM_UNICODE = 0,
+    OPENTYPE_PLATFORM_MAC,
+    OPENTYPE_PLATFORM_ISO,
+    OPENTYPE_PLATFORM_WIN,
+    OPENTYPE_PLATFORM_CUSTOM
+};
+
+enum TT_NAME_WINDOWS_ENCODING_ID
+{
+    TT_NAME_WINDOWS_ENCODING_SYMBOL = 0,
+    TT_NAME_WINDOWS_ENCODING_UCS2,
+    TT_NAME_WINDOWS_ENCODING_SJIS,
+    TT_NAME_WINDOWS_ENCODING_PRC,
+    TT_NAME_WINDOWS_ENCODING_BIG5,
+    TT_NAME_WINDOWS_ENCODING_WANSUNG,
+    TT_NAME_WINDOWS_ENCODING_JOHAB,
+    TT_NAME_WINDOWS_ENCODING_RESERVED1,
+    TT_NAME_WINDOWS_ENCODING_RESERVED2,
+    TT_NAME_WINDOWS_ENCODING_RESERVED3,
+    TT_NAME_WINDOWS_ENCODING_UCS4
+};
+
+enum TT_NAME_MAC_ENCODING_ID
+{
+    TT_NAME_MAC_ENCODING_ROMAN = 0,
+    TT_NAME_MAC_ENCODING_JAPANESE,
+    TT_NAME_MAC_ENCODING_TRAD_CHINESE,
+    TT_NAME_MAC_ENCODING_KOREAN,
+    TT_NAME_MAC_ENCODING_ARABIC,
+    TT_NAME_MAC_ENCODING_HEBREW,
+    TT_NAME_MAC_ENCODING_GREEK,
+    TT_NAME_MAC_ENCODING_RUSSIAN,
+    TT_NAME_MAC_ENCODING_RSYMBOL,
+    TT_NAME_MAC_ENCODING_DEVANAGARI,
+    TT_NAME_MAC_ENCODING_GURMUKHI,
+    TT_NAME_MAC_ENCODING_GUJARATI,
+    TT_NAME_MAC_ENCODING_ORIYA,
+    TT_NAME_MAC_ENCODING_BENGALI,
+    TT_NAME_MAC_ENCODING_TAMIL,
+    TT_NAME_MAC_ENCODING_TELUGU,
+    TT_NAME_MAC_ENCODING_KANNADA,
+    TT_NAME_MAC_ENCODING_MALAYALAM,
+    TT_NAME_MAC_ENCODING_SINHALESE,
+    TT_NAME_MAC_ENCODING_BURMESE,
+    TT_NAME_MAC_ENCODING_KHMER,
+    TT_NAME_MAC_ENCODING_THAI,
+    TT_NAME_MAC_ENCODING_LAOTIAN,
+    TT_NAME_MAC_ENCODING_GEORGIAN,
+    TT_NAME_MAC_ENCODING_ARMENIAN,
+    TT_NAME_MAC_ENCODING_SIMPL_CHINESE,
+    TT_NAME_MAC_ENCODING_TIBETAN,
+    TT_NAME_MAC_ENCODING_MONGOLIAN,
+    TT_NAME_MAC_ENCODING_GEEZ,
+    TT_NAME_MAC_ENCODING_SLAVIC,
+    TT_NAME_MAC_ENCODING_VIETNAMESE,
+    TT_NAME_MAC_ENCODING_SINDHI,
+    TT_NAME_MAC_ENCODING_UNINTERPRETED
+};
+
+enum OPENTYPE_STRING_ID
+{
+    OPENTYPE_STRING_COPYRIGHT_NOTICE = 0,
+    OPENTYPE_STRING_FAMILY_NAME,
+    OPENTYPE_STRING_SUBFAMILY_NAME,
+    OPENTYPE_STRING_UNIQUE_IDENTIFIER,
+    OPENTYPE_STRING_FULL_FONTNAME,
+    OPENTYPE_STRING_VERSION_STRING,
+    OPENTYPE_STRING_POSTSCRIPT_FONTNAME,
+    OPENTYPE_STRING_TRADEMARK,
+    OPENTYPE_STRING_MANUFACTURER,
+    OPENTYPE_STRING_DESIGNER,
+    OPENTYPE_STRING_DESCRIPTION,
+    OPENTYPE_STRING_VENDOR_URL,
+    OPENTYPE_STRING_DESIGNER_URL,
+    OPENTYPE_STRING_LICENSE_DESCRIPTION,
+    OPENTYPE_STRING_LICENSE_INFO_URL,
+    OPENTYPE_STRING_RESERVED_ID15,
+    OPENTYPE_STRING_PREFERRED_FAMILY_NAME,
+    OPENTYPE_STRING_PREFERRED_SUBFAMILY_NAME,
+    OPENTYPE_STRING_COMPATIBLE_FULLNAME,
+    OPENTYPE_STRING_SAMPLE_TEXT,
+    OPENTYPE_STRING_POSTSCRIPT_CID_NAME,
+    OPENTYPE_STRING_WWS_FAMILY_NAME,
+    OPENTYPE_STRING_WWS_SUBFAMILY_NAME
+};
+
+static const UINT16 dwriteid_to_opentypeid[DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_CID_NAME+1] =
+{
+    (UINT16)-1, /* DWRITE_INFORMATIONAL_STRING_NONE is not used */
+    OPENTYPE_STRING_COPYRIGHT_NOTICE,
+    OPENTYPE_STRING_VERSION_STRING,
+    OPENTYPE_STRING_TRADEMARK,
+    OPENTYPE_STRING_MANUFACTURER,
+    OPENTYPE_STRING_DESIGNER,
+    OPENTYPE_STRING_DESIGNER_URL,
+    OPENTYPE_STRING_DESCRIPTION,
+    OPENTYPE_STRING_VENDOR_URL,
+    OPENTYPE_STRING_LICENSE_DESCRIPTION,
+    OPENTYPE_STRING_LICENSE_INFO_URL,
+    OPENTYPE_STRING_FAMILY_NAME,
+    OPENTYPE_STRING_SUBFAMILY_NAME,
+    OPENTYPE_STRING_PREFERRED_FAMILY_NAME,
+    OPENTYPE_STRING_PREFERRED_SUBFAMILY_NAME,
+    OPENTYPE_STRING_SAMPLE_TEXT,
+    OPENTYPE_STRING_FULL_FONTNAME,
+    OPENTYPE_STRING_POSTSCRIPT_FONTNAME,
+    OPENTYPE_STRING_POSTSCRIPT_CID_NAME
+};
+
 HRESULT opentype_analyze_font(IDWriteFontFileStream *stream, UINT32* font_count, DWRITE_FONT_FILE_TYPE *file_type, DWRITE_FONT_FACE_TYPE *face_type, BOOL *supported)
 {
     /* TODO: Do font validation */
@@ -241,7 +368,8 @@ HRESULT opentype_get_font_table(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_
     int table_count, table_offset = 0;
     int i;
 
-    *found = FALSE;
+    if (found) *found = FALSE;
+    if (table_size) *table_size = 0;
 
     if (type == DWRITE_FONT_FACE_TYPE_TRUETYPE_COLLECTION) {
         const TTC_Header_V1 *ttc_header;
@@ -282,8 +410,8 @@ HRESULT opentype_get_font_table(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_
         int length = GET_BE_DWORD(table_record->length);
         IDWriteFontFileStream_ReleaseFileFragment(stream, table_record_context);
 
-        *found = TRUE;
-        *table_size = length;
+        if (found) *found = TRUE;
+        if (table_size) *table_size = length;
         hr = IDWriteFontFileStream_ReadFileFragment(stream, table_data, offset, length, table_context);
     }
 
@@ -531,4 +659,173 @@ VOID get_font_properties(LPCVOID os2, LPCVOID head, LPCVOID post, DWRITE_FONT_ME
         metrics->underlinePosition = GET_BE_WORD(tt_post->underlinePosition);
         metrics->underlineThickness = GET_BE_WORD(tt_post->underlineThickness);
     }
+}
+
+static UINT get_name_record_codepage(enum OPENTYPE_PLATFORM_ID platform, USHORT encoding)
+{
+    UINT codepage = 0;
+
+    switch (platform) {
+    case OPENTYPE_PLATFORM_MAC:
+        switch (encoding)
+        {
+            case TT_NAME_MAC_ENCODING_ROMAN:
+                codepage = 10000;
+                break;
+            case TT_NAME_MAC_ENCODING_JAPANESE:
+                codepage = 10001;
+                break;
+            case TT_NAME_MAC_ENCODING_TRAD_CHINESE:
+                codepage = 10002;
+                break;
+            case TT_NAME_MAC_ENCODING_KOREAN:
+                codepage = 10003;
+                break;
+            case TT_NAME_MAC_ENCODING_ARABIC:
+                codepage = 10004;
+                break;
+            case TT_NAME_MAC_ENCODING_HEBREW:
+                codepage = 10005;
+                break;
+            case TT_NAME_MAC_ENCODING_GREEK:
+                codepage = 10006;
+                break;
+            case TT_NAME_MAC_ENCODING_RUSSIAN:
+                codepage = 10007;
+                break;
+            case TT_NAME_MAC_ENCODING_SIMPL_CHINESE:
+                codepage = 10008;
+                break;
+            case TT_NAME_MAC_ENCODING_THAI:
+                codepage = 10021;
+                break;
+            default:
+                FIXME("encoding %u not handled, platform %d.\n", encoding, platform);
+                break;
+        }
+        break;
+    case OPENTYPE_PLATFORM_WIN:
+        switch (encoding)
+        {
+            case TT_NAME_WINDOWS_ENCODING_SYMBOL:
+            case TT_NAME_WINDOWS_ENCODING_UCS2:
+                break;
+            case TT_NAME_WINDOWS_ENCODING_SJIS:
+                codepage = 932;
+                break;
+            case TT_NAME_WINDOWS_ENCODING_PRC:
+                codepage = 936;
+                break;
+            case TT_NAME_WINDOWS_ENCODING_BIG5:
+                codepage = 950;
+                break;
+            case TT_NAME_WINDOWS_ENCODING_WANSUNG:
+                codepage = 20949;
+                break;
+            case TT_NAME_WINDOWS_ENCODING_JOHAB:
+                codepage = 1361;
+                break;
+            default:
+                FIXME("encoding %u not handled, platform %d.\n", encoding, platform);
+                break;
+        }
+        break;
+    default:
+        FIXME("unknown platform %d\n", platform);
+    }
+
+    return codepage;
+}
+
+HRESULT opentype_get_font_strings_from_id(const void *table_data, DWRITE_INFORMATIONAL_STRING_ID id, IDWriteLocalizedStrings **strings)
+{
+    const TT_NAME_V0 *header;
+    BYTE *storage_area = 0;
+    USHORT count = 0;
+    UINT16 name_id;
+    BOOL exists;
+    HRESULT hr;
+    int i;
+
+    if (!table_data)
+        return E_FAIL;
+
+    hr = create_localizedstrings(strings);
+    if (FAILED(hr)) return hr;
+
+    header = table_data;
+    storage_area = (LPBYTE)table_data + GET_BE_WORD(header->stringOffset);
+    count = GET_BE_WORD(header->count);
+
+    name_id = dwriteid_to_opentypeid[id];
+
+    exists = FALSE;
+    for (i = 0; i < count; i++) {
+        const TT_NameRecord *record = &header->nameRecord[i];
+        USHORT lang_id, length, offset, encoding, platform;
+
+        if (GET_BE_WORD(record->nameID) != name_id)
+            continue;
+
+        exists = TRUE;
+
+        /* Right now only accept unicode and windows encoded fonts */
+        platform = GET_BE_WORD(record->platformID);
+        if (platform != OPENTYPE_PLATFORM_UNICODE &&
+            platform != OPENTYPE_PLATFORM_MAC &&
+            platform != OPENTYPE_PLATFORM_WIN)
+        {
+            FIXME("platform %i not supported\n", platform);
+            continue;
+        }
+
+        lang_id = GET_BE_WORD(record->languageID);
+        length = GET_BE_WORD(record->length);
+        offset = GET_BE_WORD(record->offset);
+        encoding = GET_BE_WORD(record->encodingID);
+
+        if (lang_id < 0x8000) {
+            WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+            WCHAR *name_string;
+            UINT codepage;
+
+            codepage = get_name_record_codepage(platform, encoding);
+
+            if (codepage) {
+                DWORD len = MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, NULL, 0);
+                name_string = heap_alloc(sizeof(WCHAR) * (len+1));
+                MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, name_string, len);
+                name_string[len] = 0;
+            }
+            else {
+                int i;
+
+                length /= sizeof(WCHAR);
+                name_string = heap_strdupnW((LPWSTR)(storage_area + offset), length);
+                for (i = 0; i < length; i++)
+                    name_string[i] = GET_BE_WORD(name_string[i]);
+            }
+
+            if (!LCIDToLocaleName(MAKELCID(lang_id, SORT_DEFAULT), locale, sizeof(locale)/sizeof(WCHAR), 0)) {
+                static const WCHAR enusW[] = {'e','n','-','u','s',0};
+                FIXME("failed to get locale name for lcid=0x%08x\n", MAKELCID(lang_id, SORT_DEFAULT));
+                strcpyW(locale, enusW);
+            }
+
+            TRACE("string %s for locale %s found\n", debugstr_w(name_string), debugstr_w(locale));
+            add_localizedstring(*strings, locale, name_string);
+            heap_free(name_string);
+        }
+        else {
+            FIXME("handle NAME format 1");
+            continue;
+        }
+    }
+
+    if (!exists) {
+        IDWriteLocalizedStrings_Release(*strings);
+        *strings = NULL;
+    }
+
+    return hr;
 }
