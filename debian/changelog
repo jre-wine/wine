@@ -1,3 +1,10 @@
+wine-development (1.7.29-3) unstable; urgency=medium
+
+  * Add missing test in wine launcher script (closes: #767011).
+  * Recommend instead of depending wine-gecko (closes: #767717).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 02 Nov 2014 03:41:35 +0000
+
 wine-development (1.7.29-2) unstable; urgency=medium
 
   * Build-depend on libgnutls28-dev to restore SSL support; enforce it at
