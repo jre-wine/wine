@@ -1,3 +1,11 @@
+wine (1.6.2-15) unstable; urgency=medium
+
+  * Add missing test in wine launcher script (closes: #767437).
+  * Indicate that wine64-tools breaks older wine64-dev-tools packages
+    (closes: #767626).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 02 Nov 2014 01:58:12 +0000
+
 wine (1.6.2-14) unstable; urgency=medium
 
   * Fix paths to wine executables (closes: #766030)

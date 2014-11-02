@@ -21,7 +21,7 @@ else
 fi
 
 if test -z $WINEPREFIX; then
-    if "$wine" = "$wine64"; then
+    if test "$wine" = "$wine64"; then
         wineprefix=$HOME/.wine64
     else
         wineprefix=$HOME/.wine

@@ -199,6 +199,7 @@ Depends:
  libwine-dev (= ${binary:Version}),
 Breaks:
  libwine-dev (<< 1.5.31-1),
+ wine-64-dev-tools (<< 1.6.2-9),
 Replaces:
  libwine-dev (<< 1.5.31-1),
  wine-64-dev-tools (<< 1.6.2-9),
