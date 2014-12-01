@@ -1,3 +1,10 @@
+wine (1.6.2-16) unstable; urgency=medium
+
+  * Indicate that wine32-tools breaks older wine32-dev-tools packages
+    (closes: #767751).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 02 Nov 2014 18:33:58 +0000
+
 wine (1.6.2-15) unstable; urgency=medium
 
   * Add missing test in wine launcher script (closes: #767437).
