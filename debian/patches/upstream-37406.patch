@@ -1,0 +1,36 @@
+commit aad1997dff990ceeba90ece0d535c7826044a5cf
+Author: Stefan Dösinger <stefan@codeweavers.com>
+Date:   Wed Oct 22 21:56:38 2014 +0200
+
+    wined3d: Remove texture locations after downloading all subresources.
+
+--- a/dlls/wined3d/surface.c
++++ b/dlls/wined3d/surface.c
+@@ -1207,7 +1207,6 @@ static void surface_unload(struct wined3d_resource *resource)
+         surface_load_location(surface, surface->resource.map_binding);
+         surface_invalidate_location(surface, ~surface->resource.map_binding);
+     }
+-    wined3d_texture_force_reload(surface->container);
+ 
+     context = context_acquire(device, NULL);
+     gl_info = context->gl_info;
+--- a/dlls/wined3d/texture.c
++++ b/dlls/wined3d/texture.c
+@@ -979,6 +979,7 @@ static void wined3d_texture_unload(struct wined3d_resource *resource)
+         sub_resource->resource_ops->resource_unload(sub_resource);
+     }
+ 
++    wined3d_texture_force_reload(texture);
+     wined3d_texture_unload_gl_texture(texture);
+ }
+ 
+--- a/dlls/wined3d/volume.c
++++ b/dlls/wined3d/volume.c
+@@ -451,7 +451,6 @@ static void volume_unload(struct wined3d_resource *resource)
+     }
+ 
+     /* The texture name is managed by the container. */
+-    wined3d_texture_force_reload(volume->container);
+     volume->flags &= ~WINED3D_VFLAG_CLIENT_STORAGE;
+ 
+     resource_unload(resource);

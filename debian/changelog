@@ -1,3 +1,10 @@
+wine-development (1.7.29-4) unstable; urgency=medium
+
+  * Fix upstream texture corruption bug (closes: #770483).
+  * Add libgl1-mesa-dri recommends to wine32 (closes: #771613).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 01 Dec 2014 00:53:30 +0000
+
 wine-development (1.7.29-3) unstable; urgency=medium
 
   * Add missing test in wine launcher script (closes: #767011).

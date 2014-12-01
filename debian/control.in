@@ -85,6 +85,7 @@ Depends:
  libncurses5,
  libfreetype6,
 Recommends:
+ libgl1-mesa-dri,
  libwine-gecko-2.24,
  libasound2-plugins,
 Suggests:
