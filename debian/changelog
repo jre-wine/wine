@@ -1,3 +1,12 @@
+wine (1.6.2-17) unstable; urgency=medium
+
+  * Add libgl1-mesa-dri dependency to wine32 (closes: #766028).
+  * Add ncurses and freetype dependencies to wine32 (closes: #771104).
+  * Add binfmt-support dependency to wine-binfmt and document binfmt setup
+    in README.debian (closes: #769233).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 30 Nov 2014 21:04:09 +0000
+
 wine (1.6.2-16) unstable; urgency=medium
 
   * Indicate that wine32-tools breaks older wine32-dev-tools packages

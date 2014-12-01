@@ -98,6 +98,7 @@ Architecture: any-amd64 any-i386 any-powerpc
 Depends:
  ${misc:Depends},
  wine,
+ binfmt-support,
 Description: Windows API implementation - binfmt support
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -111,6 +112,9 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
+ libncurses5,
+ libfreetype6,
+ libgl1-mesa-dri,
  libwine-gecko-2.21
 Breaks:
  wine (<< 1.6.1-9),

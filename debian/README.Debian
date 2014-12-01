@@ -19,7 +19,7 @@ it might also warns you if you're suffering from some known common
 system misconfiguration that may prevent Wine from working properly.
 
 Other resources
-===============
+---------------
 
 If (i.e. when) you have problems, the Wine Troubleshooting Guide
 can be found at http://www.winehq.com/Trouble/
@@ -45,7 +45,8 @@ Feel free to visit the Debian Wine packaging's homepage for more
 resources, go to http://pkg-wine.alioth.debian.org/
 
 Configuration
-=============
+-------------
+
 The best way to configure Wine is to run winecfg.
 
 (Note that if you see a resolution setting in there and you think
@@ -64,3 +65,20 @@ Or, if you're desperate, you can always completely wipe your Wine setup
 with "rm -rf ~/.wine". This will destroy everything you've installed,
 including their configuration and data files, so if you have anything
 important in there, back it up first. You can then start afresh.
+
+Automatically launching Windows executables
+-------------------------------------------
+
+You can configure wine to automatically launch Windows executables from
+the command line, for example:
+
+$ notepad.exe
+
+To configure backend support for that, you'll need to install the
+wine-binfmt package first and then execute:
+
+$ sudo update-binfmts --import wine
+
+This change increases the risk of inadvertently launching Windows
+malware, so please make sure that you understand the security risks
+before blindly setting this up.
