@@ -31,12 +31,16 @@ struct vec3
     float x, y, z;
 };
 
+#define CREATE_DEVICE_FULLSCREEN        0x01
+#define CREATE_DEVICE_FPU_PRESERVE      0x02
+#define CREATE_DEVICE_SWVP_ONLY         0x04
+
 struct device_desc
 {
     HWND device_window;
     unsigned int width;
     unsigned int height;
-    BOOL windowed;
+    DWORD flags;
 };
 
 #define GET_X_LPARAM(lp) ((int)(short)LOWORD(lp))
@@ -90,6 +94,7 @@ static IDirect3DDevice8 *create_device(IDirect3D8 *d3d8, HWND focus_window, cons
 {
     D3DPRESENT_PARAMETERS present_parameters = {0};
     IDirect3DDevice8 *device;
+    DWORD behavior_flags = D3DCREATE_HARDWARE_VERTEXPROCESSING;
 
     present_parameters.BackBufferWidth = 640;
     present_parameters.BackBufferHeight = 480;
@@ -105,18 +110,29 @@ static IDirect3DDevice8 *create_device(IDirect3D8 *d3d8, HWND focus_window, cons
         present_parameters.BackBufferWidth = desc->width;
         present_parameters.BackBufferHeight = desc->height;
         present_parameters.hDeviceWindow = desc->device_window;
-        present_parameters.Windowed = desc->windowed;
+        present_parameters.Windowed = !(desc->flags & CREATE_DEVICE_FULLSCREEN);
+        if (desc->flags & CREATE_DEVICE_SWVP_ONLY)
+            behavior_flags = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+        if (desc->flags & CREATE_DEVICE_FPU_PRESERVE)
+            behavior_flags |= D3DCREATE_FPU_PRESERVE;
     }
 
     if (SUCCEEDED(IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
-            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device))) return device;
+            behavior_flags, &present_parameters, &device)))
+        return device;
 
     present_parameters.AutoDepthStencilFormat = D3DFMT_D16;
     if (SUCCEEDED(IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
-            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device))) return device;
+            behavior_flags, &present_parameters, &device)))
+        return device;
+
+    if (desc && desc->flags & CREATE_DEVICE_SWVP_ONLY)
+        return NULL;
+    behavior_flags ^= (D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_SOFTWARE_VERTEXPROCESSING);
 
     if (SUCCEEDED(IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, focus_window,
-            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device))) return device;
+            behavior_flags, &present_parameters, &device)))
+        return device;
 
     return NULL;
 }
@@ -2265,7 +2281,7 @@ static void test_wndproc(void)
     device_desc.device_window = device_window;
     device_desc.width = screen_width;
     device_desc.height = screen_height;
-    device_desc.windowed = FALSE;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
@@ -2408,7 +2424,7 @@ static void test_wndproc_windowed(void)
     device_desc.device_window = device_window;
     device_desc.width = 640;
     device_desc.height = 480;
-    device_desc.windowed = TRUE;
+    device_desc.flags = 0;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
@@ -2576,7 +2592,7 @@ static inline WORD get_fpu_cw(void)
 static void test_fpu_setup(void)
 {
 #if defined(D3D8_TEST_SET_FPU_CW) && defined(D3D8_TEST_GET_FPU_CW)
-    D3DPRESENT_PARAMETERS present_parameters;
+    struct device_desc device_desc;
     IDirect3DDevice8 *device;
     D3DDISPLAYMODE d3ddm;
     IDirect3D8 *d3d8;
@@ -2592,21 +2608,18 @@ static void test_fpu_setup(void)
     hr = IDirect3D8_GetAdapterDisplayMode(d3d8, D3DADAPTER_DEFAULT, &d3ddm);
     ok(SUCCEEDED(hr), "GetAdapterDisplayMode failed, hr %#x.\n", hr);
 
-    memset(&present_parameters, 0, sizeof(present_parameters));
-    present_parameters.Windowed = TRUE;
-    present_parameters.hDeviceWindow = window;
-    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    present_parameters.BackBufferFormat = d3ddm.Format;
+    device_desc.device_window = window;
+    device_desc.width = 640;
+    device_desc.height = 480;
+    device_desc.flags = 0;
 
     set_fpu_cw(0xf60);
     cw = get_fpu_cw();
     ok(cw == 0xf60, "cw is %#x, expected 0xf60.\n", cw);
 
-    hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
-            D3DCREATE_HARDWARE_VERTEXPROCESSING, &present_parameters, &device);
-    if (FAILED(hr))
+    if (!(device = create_device(d3d8, window, &device_desc)))
     {
-        skip("Failed to create a device, hr %#x.\n", hr);
+        skip("Failed to create a 3D device, skipping test.\n");
         set_fpu_cw(0x37f);
         goto done;
     }
@@ -2622,9 +2635,9 @@ static void test_fpu_setup(void)
     cw = get_fpu_cw();
     ok(cw == 0xf60, "cw is %#x, expected 0xf60.\n", cw);
 
-    hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
-            D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_FPU_PRESERVE, &present_parameters, &device);
-    ok(SUCCEEDED(hr), "CreateDevice failed, hr %#x.\n", hr);
+    device_desc.flags = CREATE_DEVICE_FPU_PRESERVE;
+    device = create_device(d3d8, window, &device_desc);
+    ok(!!device, "CreateDevice failed.\n");
 
     cw = get_fpu_cw();
     ok(cw == 0xf60, "cw is %#x, expected 0xf60.\n", cw);
@@ -2783,7 +2796,7 @@ static void test_window_style(void)
     device_desc.device_window = device_window;
     device_desc.width = screen_width;
     device_desc.height = screen_height;
-    device_desc.windowed = FALSE;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
@@ -2988,7 +3001,7 @@ static void test_mode_change(void)
     device_desc.device_window = device_window;
     device_desc.width = screen_width;
     device_desc.height = screen_height;
-    device_desc.windowed = FALSE;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
@@ -3086,7 +3099,7 @@ static void test_device_window_reset(void)
     device_desc.device_window = NULL;
     device_desc.width = screen_width;
     device_desc.height = screen_height;
-    device_desc.windowed = FALSE;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(d3d8, focus_window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
@@ -4750,7 +4763,7 @@ static void test_swvp_buffer(void)
     IDirect3DVertexBuffer8 *buffer;
     static const unsigned int bufsize = 1024;
     D3DVERTEXBUFFER_DESC desc;
-    D3DPRESENT_PARAMETERS present_parameters = {0};
+    struct device_desc device_desc;
     struct
     {
         float x, y, z;
@@ -4761,15 +4774,11 @@ static void test_swvp_buffer(void)
     d3d8 = Direct3DCreate8(D3D_SDK_VERSION);
     ok(!!d3d8, "Failed to create a D3D object.\n");
 
-    present_parameters.Windowed = TRUE;
-    present_parameters.hDeviceWindow = window;
-    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    present_parameters.BackBufferWidth = screen_width;
-    present_parameters.BackBufferHeight = screen_height;
-    present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
-    present_parameters.EnableAutoDepthStencil = FALSE;
-    if (FAILED(IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
-            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device)))
+    device_desc.device_window = window;
+    device_desc.width = 640;
+    device_desc.height = 480;
+    device_desc.flags = CREATE_DEVICE_SWVP_ONLY;
+    if (!(device = create_device(d3d8, window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
         IDirect3D8_Release(d3d8);
@@ -6061,6 +6070,7 @@ static void test_resource_type(void)
     ULONG refcount;
     HWND window;
     HRESULT hr;
+    D3DCAPS8 caps;
 
     window = CreateWindowA("static", "d3d8_test", WS_OVERLAPPEDWINDOW,
             0, 0, 640, 480, NULL, NULL, NULL, NULL);
@@ -6073,6 +6083,9 @@ static void test_resource_type(void)
         DestroyWindow(window);
         return;
     }
+
+    hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get device caps, hr %#x.\n", hr);
 
     hr = IDirect3DDevice8_CreateImageSurface(device, 4, 4, D3DFMT_X8R8G8B8, &surface);
     ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n", hr);
@@ -6121,68 +6134,78 @@ static void test_resource_type(void)
     IDirect3DSurface8_Release(surface);
     IDirect3DTexture8_Release(texture);
 
-    hr = IDirect3DDevice8_CreateCubeTexture(device, 1, 1, 0, D3DFMT_X8R8G8B8,
-            D3DPOOL_SYSTEMMEM, &cube_texture);
-    ok(SUCCEEDED(hr), "Failed to create cube texture, hr %#x.\n", hr);
-    type = IDirect3DCubeTexture8_GetType(cube_texture);
-    ok(type == D3DRTYPE_CUBETEXTURE, "Expected type D3DRTYPE_CUBETEXTURE, got %u.\n", type);
+    if (caps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP)
+    {
+        hr = IDirect3DDevice8_CreateCubeTexture(device, 1, 1, 0, D3DFMT_X8R8G8B8,
+                D3DPOOL_SYSTEMMEM, &cube_texture);
+        ok(SUCCEEDED(hr), "Failed to create cube texture, hr %#x.\n", hr);
+        type = IDirect3DCubeTexture8_GetType(cube_texture);
+        ok(type == D3DRTYPE_CUBETEXTURE, "Expected type D3DRTYPE_CUBETEXTURE, got %u.\n", type);
 
-    hr = IDirect3DCubeTexture8_GetCubeMapSurface(cube_texture,
-            D3DCUBEMAP_FACE_NEGATIVE_X, 0, &surface);
-    ok(SUCCEEDED(hr), "Failed to get cube map surface, hr %#x.\n", hr);
-    hr = IDirect3DSurface8_GetDesc(surface, &surface_desc);
-    ok(SUCCEEDED(hr), "Failed to get surface description, hr %#x.\n", hr);
-    ok(surface_desc.Type == D3DRTYPE_SURFACE, "Expected type D3DRTYPE_SURFACE, got %u.\n",
-            surface_desc.Type);
-    hr = IDirect3DCubeTexture8_GetLevelDesc(cube_texture, 0, &surface_desc);
-    ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
-    ok(surface_desc.Type == D3DRTYPE_SURFACE, "Expected type D3DRTYPE_SURFACE, got %u.\n",
-            surface_desc.Type);
-    IDirect3DSurface8_Release(surface);
-    IDirect3DCubeTexture8_Release(cube_texture);
+        hr = IDirect3DCubeTexture8_GetCubeMapSurface(cube_texture,
+                D3DCUBEMAP_FACE_NEGATIVE_X, 0, &surface);
+        ok(SUCCEEDED(hr), "Failed to get cube map surface, hr %#x.\n", hr);
+        hr = IDirect3DSurface8_GetDesc(surface, &surface_desc);
+        ok(SUCCEEDED(hr), "Failed to get surface description, hr %#x.\n", hr);
+        ok(surface_desc.Type == D3DRTYPE_SURFACE, "Expected type D3DRTYPE_SURFACE, got %u.\n",
+                surface_desc.Type);
+        hr = IDirect3DCubeTexture8_GetLevelDesc(cube_texture, 0, &surface_desc);
+        ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
+        ok(surface_desc.Type == D3DRTYPE_SURFACE, "Expected type D3DRTYPE_SURFACE, got %u.\n",
+                surface_desc.Type);
+        IDirect3DSurface8_Release(surface);
+        IDirect3DCubeTexture8_Release(cube_texture);
+    }
+    else
+        skip("Cube maps not supported.\n");
 
-    hr = IDirect3DDevice8_CreateVolumeTexture(device, 2, 4, 8, 4, 0, D3DFMT_X8R8G8B8,
-            D3DPOOL_SYSTEMMEM, &volume_texture);
-    type = IDirect3DVolumeTexture8_GetType(volume_texture);
-    ok(type == D3DRTYPE_VOLUMETEXTURE, "Expected type D3DRTYPE_VOLUMETEXTURE, got %u.\n", type);
+    if (caps.TextureCaps & D3DPTEXTURECAPS_MIPVOLUMEMAP)
+    {
+        hr = IDirect3DDevice8_CreateVolumeTexture(device, 2, 4, 8, 4, 0, D3DFMT_X8R8G8B8,
+                D3DPOOL_SYSTEMMEM, &volume_texture);
+        type = IDirect3DVolumeTexture8_GetType(volume_texture);
+        ok(type == D3DRTYPE_VOLUMETEXTURE, "Expected type D3DRTYPE_VOLUMETEXTURE, got %u.\n", type);
 
-    hr = IDirect3DVolumeTexture8_GetVolumeLevel(volume_texture, 0, &volume);
-    ok(SUCCEEDED(hr), "Failed to get volume level, hr %#x.\n", hr);
-    /* IDirect3DVolume8 is not an IDirect3DResource8 and has no GetType method. */
-    hr = IDirect3DVolume8_GetDesc(volume, &volume_desc);
-    ok(SUCCEEDED(hr), "Failed to get volume description, hr %#x.\n", hr);
-    ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
-            volume_desc.Type);
-    ok(volume_desc.Width == 2, "Expected width 2, got %u.\n", volume_desc.Width);
-    ok(volume_desc.Height == 4, "Expected height 4, got %u.\n", volume_desc.Height);
-    ok(volume_desc.Depth == 8, "Expected depth 8, got %u.\n", volume_desc.Depth);
-    hr = IDirect3DVolumeTexture8_GetLevelDesc(volume_texture, 0, &volume_desc);
-    ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
-    ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
-            volume_desc.Type);
-    ok(volume_desc.Width == 2, "Expected width 2, got %u.\n", volume_desc.Width);
-    ok(volume_desc.Height == 4, "Expected height 4, got %u.\n", volume_desc.Height);
-    ok(volume_desc.Depth == 8, "Expected depth 8, got %u.\n", volume_desc.Depth);
-    IDirect3DVolume8_Release(volume);
+        hr = IDirect3DVolumeTexture8_GetVolumeLevel(volume_texture, 0, &volume);
+        ok(SUCCEEDED(hr), "Failed to get volume level, hr %#x.\n", hr);
+        /* IDirect3DVolume8 is not an IDirect3DResource8 and has no GetType method. */
+        hr = IDirect3DVolume8_GetDesc(volume, &volume_desc);
+        ok(SUCCEEDED(hr), "Failed to get volume description, hr %#x.\n", hr);
+        ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
+                volume_desc.Type);
+        ok(volume_desc.Width == 2, "Expected width 2, got %u.\n", volume_desc.Width);
+        ok(volume_desc.Height == 4, "Expected height 4, got %u.\n", volume_desc.Height);
+        ok(volume_desc.Depth == 8, "Expected depth 8, got %u.\n", volume_desc.Depth);
+        hr = IDirect3DVolumeTexture8_GetLevelDesc(volume_texture, 0, &volume_desc);
+        ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
+        ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
+                volume_desc.Type);
+        ok(volume_desc.Width == 2, "Expected width 2, got %u.\n", volume_desc.Width);
+        ok(volume_desc.Height == 4, "Expected height 4, got %u.\n", volume_desc.Height);
+        ok(volume_desc.Depth == 8, "Expected depth 8, got %u.\n", volume_desc.Depth);
+        IDirect3DVolume8_Release(volume);
 
-    hr = IDirect3DVolumeTexture8_GetVolumeLevel(volume_texture, 2, &volume);
-    ok(SUCCEEDED(hr), "Failed to get volume level, hr %#x.\n", hr);
-    hr = IDirect3DVolume8_GetDesc(volume, &volume_desc);
-    ok(SUCCEEDED(hr), "Failed to get volume description, hr %#x.\n", hr);
-    ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
-            volume_desc.Type);
-    ok(volume_desc.Width == 1, "Expected width 1, got %u.\n", volume_desc.Width);
-    ok(volume_desc.Height == 1, "Expected height 1, got %u.\n", volume_desc.Height);
-    ok(volume_desc.Depth == 2, "Expected depth 2, got %u.\n", volume_desc.Depth);
-    hr = IDirect3DVolumeTexture8_GetLevelDesc(volume_texture, 2, &volume_desc);
-    ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
-    ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
-            volume_desc.Type);
-    ok(volume_desc.Width == 1, "Expected width 1, got %u.\n", volume_desc.Width);
-    ok(volume_desc.Height == 1, "Expected height 1, got %u.\n", volume_desc.Height);
-    ok(volume_desc.Depth == 2, "Expected depth 2, got %u.\n", volume_desc.Depth);
-    IDirect3DVolume8_Release(volume);
-    IDirect3DVolumeTexture8_Release(volume_texture);
+        hr = IDirect3DVolumeTexture8_GetVolumeLevel(volume_texture, 2, &volume);
+        ok(SUCCEEDED(hr), "Failed to get volume level, hr %#x.\n", hr);
+        hr = IDirect3DVolume8_GetDesc(volume, &volume_desc);
+        ok(SUCCEEDED(hr), "Failed to get volume description, hr %#x.\n", hr);
+        ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
+                volume_desc.Type);
+        ok(volume_desc.Width == 1, "Expected width 1, got %u.\n", volume_desc.Width);
+        ok(volume_desc.Height == 1, "Expected height 1, got %u.\n", volume_desc.Height);
+        ok(volume_desc.Depth == 2, "Expected depth 2, got %u.\n", volume_desc.Depth);
+        hr = IDirect3DVolumeTexture8_GetLevelDesc(volume_texture, 2, &volume_desc);
+        ok(SUCCEEDED(hr), "Failed to get level description, hr %#x.\n", hr);
+        ok(volume_desc.Type == D3DRTYPE_VOLUME, "Expected type D3DRTYPE_VOLUME, got %u.\n",
+                volume_desc.Type);
+        ok(volume_desc.Width == 1, "Expected width 1, got %u.\n", volume_desc.Width);
+        ok(volume_desc.Height == 1, "Expected height 1, got %u.\n", volume_desc.Height);
+        ok(volume_desc.Depth == 2, "Expected depth 2, got %u.\n", volume_desc.Depth);
+        IDirect3DVolume8_Release(volume);
+        IDirect3DVolumeTexture8_Release(volume_texture);
+    }
+    else
+        skip("Mipmapped volume maps not supported.\n");
 
     refcount = IDirect3DDevice8_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -6353,7 +6376,7 @@ static void test_lost_device(void)
     device_desc.device_window = window;
     device_desc.width = screen_width;
     device_desc.height = screen_height;
-    device_desc.windowed = FALSE;
+    device_desc.flags = CREATE_DEVICE_FULLSCREEN;
     if (!(device = create_device(d3d, window, &device_desc)))
     {
         skip("Failed to create a D3D device, skipping tests.\n");
