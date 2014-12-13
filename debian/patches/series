@@ -14,5 +14,3 @@ addons-path.patch
 glu32-link.patch
 
 debian-gnutls.patch
-
-upstream-37406.patch
