@@ -497,11 +497,12 @@
 @ stub _fprintf_p
 @ stub _fprintf_p_l
 @ stub _fprintf_s_l
+@ cdecl _fputc_nolock(long ptr) MSVCRT__fputc_nolock
 @ cdecl _fputchar(long) MSVCRT__fputchar
-@ stub _fputwc_nolock
+@ cdecl _fputwc_nolock(long ptr) MSVCRT__fputwc_nolock
 @ cdecl _fputwchar(long) MSVCRT__fputwchar
 @ cdecl _fread_nolock(ptr long long ptr) MSVCRT__fread_nolock
-@ stub _fread_nolock_s
+@ cdecl _fread_nolock_s(ptr long long long ptr) MSVCRT__fread_nolock_s
 @ cdecl _free_locale(ptr) MSVCRT__free_locale
 @ stub _freea
 @ stub _freea_s
@@ -561,6 +562,7 @@
 @ stub _get_winminor
 @ stub _get_winver
 @ cdecl _get_wpgmptr(ptr)
+@ cdecl _getc_nolock(ptr) MSVCRT__fgetc_nolock
 @ cdecl _getch()
 @ stub _getch_nolock
 @ cdecl _getche()
@@ -578,6 +580,7 @@
 @ cdecl _getptd()
 @ stub _getsystime(ptr)
 @ cdecl _getw(ptr) MSVCRT__getw
+@ cdecl _getwc_nolock(ptr) MSVCRT__fgetwc_nolock
 @ stub _getwch
 @ stub _getwch_nolock
 @ stub _getwche
@@ -904,11 +907,13 @@
 @ stub _printf_p_l
 @ stub _printf_s_l
 @ cdecl _purecall()
+@ cdecl _putc_nolock(long ptr) MSVCRT__fputc_nolock
 @ cdecl _putch(long)
 @ stub _putch_nolock
 @ cdecl _putenv(str)
 @ cdecl _putenv_s(str str)
 @ cdecl _putw(long ptr) MSVCRT__putw
+@ cdecl _putwc_nolock(long ptr) MSVCRT__fputwc_nolock
 @ cdecl _putwch(long) MSVCRT__putwch
 @ stub _putwch_nolock
 @ cdecl _putws(wstr) MSVCRT__putws
@@ -1083,10 +1088,10 @@
 @ cdecl _ultow_s(long ptr long long) MSVCRT__ultow_s
 @ cdecl _umask(long) MSVCRT__umask
 @ stub _umask_s
-@ stub _ungetc_nolock
+@ cdecl _ungetc_nolock(long ptr) MSVCRT__ungetc_nolock
 @ cdecl _ungetch(long)
 @ stub _ungetch_nolock
-@ stub _ungetwc_nolock
+@ cdecl _ungetwc_nolock(long ptr) MSVCRT__ungetwc_nolock
 @ stub _ungetwch
 @ stub _ungetwch_nolock
 @ cdecl _unlink(str) MSVCRT__unlink
