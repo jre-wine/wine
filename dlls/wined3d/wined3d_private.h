@@ -547,6 +547,7 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_TEXREG2GB,
     WINED3DSIH_TEXREG2RGB,
     WINED3DSIH_UDIV,
+    WINED3DSIH_UGE,
     WINED3DSIH_USHR,
     WINED3DSIH_UTOF,
     WINED3DSIH_XOR,
@@ -1523,6 +1524,7 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_GTX770      = 0x1184,
     CARD_NVIDIA_GEFORCE_GTX780      = 0x1004,
     CARD_NVIDIA_GEFORCE_GTX780TI    = 0x100a,
+    CARD_NVIDIA_GEFORCE_GTX970      = 0x13c2,
 
     CARD_VMWARE_SVGA3D              = 0x0405,
 
@@ -2682,9 +2684,9 @@ struct wined3d_swapchain
     struct wined3d_texture **back_buffers;
     struct wined3d_texture *front_buffer;
     struct wined3d_swapchain_desc desc;
-    struct wined3d_display_mode original_mode;
+    struct wined3d_display_mode original_mode, d3d_mode;
     struct wined3d_gamma_ramp orig_gamma;
-    BOOL render_to_fbo;
+    BOOL render_to_fbo, reapply_mode;
     const struct wined3d_format *ds_format;
     struct wined3d_palette *palette;
 
@@ -2702,6 +2704,7 @@ struct wined3d_swapchain
 
 void x11_copy_to_screen(const struct wined3d_swapchain *swapchain, const RECT *rect) DECLSPEC_HIDDEN;
 
+void wined3d_swapchain_activate(struct wined3d_swapchain *swapchain, BOOL activate) DECLSPEC_HIDDEN;
 struct wined3d_context *swapchain_get_context(struct wined3d_swapchain *swapchain) DECLSPEC_HIDDEN;
 void swapchain_destroy_contexts(struct wined3d_swapchain *swapchain) DECLSPEC_HIDDEN;
 HDC swapchain_get_backup_dc(struct wined3d_swapchain *swapchain) DECLSPEC_HIDDEN;

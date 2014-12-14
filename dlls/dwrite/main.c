@@ -41,10 +41,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID reserved)
 {
     switch (reason)
     {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( hinstDLL );
+        init_freetype();
         break;
     case DLL_PROCESS_DETACH:
         if (reserved) break;
@@ -686,8 +685,11 @@ static HRESULT WINAPI dwritefactory_UnregisterFontCollectionLoader(IDWriteFactor
 static HRESULT WINAPI dwritefactory_CreateFontFileReference(IDWriteFactory *iface,
     WCHAR const *path, FILETIME const *writetime, IDWriteFontFile **font_file)
 {
-    HRESULT hr;
     struct dwritefactory *This = impl_from_IDWriteFactory(iface);
+    UINT32 key_size;
+    HRESULT hr;
+    void *key;
+
     TRACE("(%p)->(%s %p %p)\n", This, debugstr_w(path), writetime, font_file);
 
     if (!This->localfontfileloader)
@@ -696,7 +698,16 @@ static HRESULT WINAPI dwritefactory_CreateFontFileReference(IDWriteFactory *ifac
         if (FAILED(hr))
             return hr;
     }
-    return create_font_file((IDWriteFontFileLoader*)This->localfontfileloader, path, sizeof(WCHAR) * (strlenW(path)+1), font_file);
+
+    /* get a reference key used by local loader */
+    hr = get_local_refkey(path, writetime, &key, &key_size);
+    if (FAILED(hr))
+        return hr;
+
+    hr = create_font_file((IDWriteFontFileLoader*)This->localfontfileloader, key, key_size, font_file);
+    heap_free(key);
+
+    return hr;
 }
 
 static HRESULT WINAPI dwritefactory_CreateCustomFontFileReference(IDWriteFactory *iface,
@@ -1056,9 +1067,9 @@ static const struct IDWriteFactoryVtbl shareddwritefactoryvtbl = {
     dwritefactory_CreateGlyphRunAnalysis
 };
 
-static void init_dwritefactory(struct dwritefactory *factory, const struct IDWriteFactoryVtbl *vtbl)
+static void init_dwritefactory(struct dwritefactory *factory, DWRITE_FACTORY_TYPE type)
 {
-    factory->IDWriteFactory_iface.lpVtbl = vtbl;
+    factory->IDWriteFactory_iface.lpVtbl = type == DWRITE_FACTORY_TYPE_SHARED ? &shareddwritefactoryvtbl : &dwritefactoryvtbl;
     factory->ref = 1;
     factory->localfontfileloader = NULL;
     factory->system_collection = NULL;
@@ -1088,7 +1099,7 @@ HRESULT WINAPI DWriteCreateFactory(DWRITE_FACTORY_TYPE type, REFIID riid, IUnkno
     factory = heap_alloc(sizeof(struct dwritefactory));
     if (!factory) return E_OUTOFMEMORY;
 
-    init_dwritefactory(factory, type == DWRITE_FACTORY_TYPE_SHARED ? &shareddwritefactoryvtbl : &dwritefactoryvtbl);
+    init_dwritefactory(factory, type);
 
     if (type == DWRITE_FACTORY_TYPE_SHARED)
         if (InterlockedCompareExchangePointer((void**)&shared_factory, factory, NULL)) {

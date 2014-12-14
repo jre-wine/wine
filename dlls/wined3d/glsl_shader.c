@@ -2348,6 +2348,7 @@ static void shader_glsl_relop(const struct wined3d_shader_instruction *ins)
             case WINED3DSIH_EQ:  op = "equal"; break;
             case WINED3DSIH_GE:  op = "greaterThanEqual"; break;
             case WINED3DSIH_IGE: op = "greaterThanEqual"; break;
+            case WINED3DSIH_UGE: op = "greaterThanEqual"; break;
             case WINED3DSIH_LT:  op = "lessThan"; break;
             default:
                 op = "<unhandled operator>";
@@ -2365,6 +2366,7 @@ static void shader_glsl_relop(const struct wined3d_shader_instruction *ins)
             case WINED3DSIH_EQ:  op = "=="; break;
             case WINED3DSIH_GE:  op = ">="; break;
             case WINED3DSIH_IGE: op = ">="; break;
+            case WINED3DSIH_UGE: op = ">="; break;
             case WINED3DSIH_LT:  op = "<"; break;
             default:
                 op = "<unhandled operator>";
@@ -3360,7 +3362,7 @@ static void shader_glsl_if(const struct wined3d_shader_instruction *ins)
     struct glsl_src_param src0_param;
 
     shader_glsl_add_src_param(ins, &ins->src[0], WINED3DSP_WRITEMASK_0, &src0_param);
-    shader_addline(ins->ctx->buffer, "if (%s) {\n", src0_param.param_str);
+    shader_addline(ins->ctx->buffer, "if (bool(%s)) {\n", src0_param.param_str);
 }
 
 static void shader_glsl_ifc(const struct wined3d_shader_instruction *ins)
@@ -5004,8 +5006,10 @@ static GLhandleARB shader_glsl_generate_ffp_vertex_shader(struct wined3d_shader_
             if (settings->ortho_fog)
                 /* Need to undo the [0.0 - 1.0] -> [-1.0 - 1.0] transformation from D3D to GL coordinates. */
                 shader_addline(buffer, "gl_FogFragCoord = gl_Position.z * 0.5 + 0.5;\n");
-            else
+            else if (settings->transformed)
                 shader_addline(buffer, "gl_FogFragCoord = ec_pos.z;\n");
+            else
+                shader_addline(buffer, "gl_FogFragCoord = abs(ec_pos.z);\n");
             break;
 
         default:
@@ -6764,6 +6768,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_TEXREG2GB             */ shader_glsl_texreg2gb,
     /* WINED3DSIH_TEXREG2RGB            */ shader_glsl_texreg2rgb,
     /* WINED3DSIH_UDIV                  */ shader_glsl_udiv,
+    /* WINED3DSIH_UGE                   */ shader_glsl_relop,
     /* WINED3DSIH_USHR                  */ shader_glsl_binop,
     /* WINED3DSIH_UTOF                  */ shader_glsl_to_float,
     /* WINED3DSIH_XOR                   */ shader_glsl_binop,
