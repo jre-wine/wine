@@ -1,3 +1,14 @@
+wine-development (1.7.31-1) experimental; urgency=medium
+
+  * New upstream release 1.7.31, released Nov 14, 2014.
+    - New version of the Gecko engine based on Firefox 34.
+    - Support for the Visual Studio 2013 version of the C/C++ runtimes.
+    - More font metrics support in DirectWrite.
+    - Some more Direct2D work.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 13 Dec 2014 22:48:51 +0000
+
 wine-development (1.7.30-1) experimental; urgency=medium
 
   * New upstream release 1.7.30, released Oct 31, 2014.
