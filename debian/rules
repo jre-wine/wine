@@ -71,6 +71,7 @@ override_dh_auto_configure:
 
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
+	cp ANNOUNCE debian/tmp/changelog
 	cp debian/scripts/wine debian/tmp/wine$(VERSION)
 	sed 's|LIBDIR|$(LIBDIR)|g' < debian/scripts/winegcc > debian/tmp/winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION)
 	cp tools/winedump/README debian/tmp/README.winedump

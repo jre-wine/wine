@@ -1,9 +1,9 @@
 description: fix various manpage issues
 author: Michael Gilbert <mgilbert@debian.org>
 
---- wine.orig/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/loader/wine.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
-@@ -71,7 +71,7 @@
+--- a/loader/wine.de.UTF-8.man.in
++++ b/loader/wine.de.UTF-8.man.in
+@@ -71,7 +71,7 @@ Dieser Ordner wird auch für den UNIX-So
  .IR wineserver .
  genutzt. Alle
  .B wine
@@ -12,7 +12,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .B wineserver
  nutzen (z.B. Prozesse desselben Nutzers) teilen sich bestimmte Objekte
  wie die Registry, Arbeitsspeicher und die Konfigurationsdateien.  Mit
-@@ -79,14 +79,14 @@
+@@ -79,14 +79,14 @@ dem Setzen von
  .I WINEPREFIX
  beim Starten verschiedener
  .B wine
@@ -30,7 +30,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .B @bindir@/wineserver
  zu laden. Wenn auch dies nicht funktioniert, sucht
  .B wine
-@@ -95,7 +95,7 @@
+@@ -95,7 +95,7 @@ in $PATH und anderen Orten nach wineserv
  .I WINELOADER
  Gibt den Ort der
  .B wine
@@ -39,7 +39,7 @@ author: Michael Gilbert <mgilbert@debian.org>
   diese Variable nicht gesetzt ist, wird versucht,
  .B @bindir@/wineserver
  zu laden. Wenn auch dies nicht funktioniert, wird in $PATH und anderen
-@@ -118,7 +118,7 @@
+@@ -118,7 +118,7 @@ Wenn
  nicht angegeben ist, werden alle Debugmeldungen dieses Kanals
  ausgegeben. Jeder Kanal gibt Meldungen einer bestimmten
  .BR wine .
@@ -48,7 +48,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  nachdem ob der Kanal ein- oder ausgeschaltet werden soll.  Wenn keine
  .I Klasse
  angegeben ist, kann das führende + weggelassen werden. In WINEDEBUG
-@@ -143,7 +143,7 @@
+@@ -143,7 +143,7 @@ schaltet alle FIXME-Nachrichten ab, Zeig
  .TP
  WINEDEBUG=relay
  schaltet alle Relay-Nachrichten an. Für mehr Kontrolle über die im
@@ -57,7 +57,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  der Wine-Konfigurationsdatei.
  .PP
  Für mehr Informationen zu den Debug-Meldungen siehe den Abschnitt
-@@ -166,7 +166,7 @@
+@@ -166,7 +166,7 @@ Native Windows-DLLs
  .RI ( native ),
  und
  .B wine
@@ -66,7 +66,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .RI ( builtin ).
  Der Typ kann mit dem ersten Buchstaben abgekürzt werden
  .RI ( n ", " b ).
-@@ -231,22 +231,22 @@
+@@ -231,22 +231,22 @@ MIDI-Sequencergerät festlegen. Standard
  .I @bindir@/wine
  Der
  .B wine
@@ -93,7 +93,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .TP
  .I @dlldir@
  Der Ordner mit den gemeinsamen DLLs von
-@@ -290,7 +290,7 @@
+@@ -290,7 +290,7 @@ bitte vorher
  .I http://wiki.winehq.org/Bugs
  im
  .B wine
@@ -102,7 +102,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .PP
  Probleme und Hinweise mit/zu dieser Manpage können auch auf
  .I http://bugs.winehq.org
-@@ -307,7 +307,7 @@
+@@ -307,7 +307,7 @@ http://www.winehq.org/site/git
  .PP
  WineHQ, die Hauptseite der
  .B wine
@@ -111,7 +111,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .IR http://www.winehq.org .
  Diese Website bietet viele Informationen und Ressourcen zu
  .BR wine .
-@@ -316,7 +316,7 @@
+@@ -316,7 +316,7 @@ Für nähere Informationen zur Entwicklu
  .B wine
  können Sie sich als Abonnement bei der
  .B wine
@@ -120,9 +120,9 @@ author: Michael Gilbert <mgilbert@debian.org>
  .I http://www.winehq.org/forums
  eintragen.
  .SH "SIEHE AUCH"
---- wine.orig/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/loader/wine.pl.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
-@@ -263,8 +263,8 @@
+--- a/loader/wine.pl.UTF-8.man.in
++++ b/loader/wine.pl.UTF-8.man.in
+@@ -263,8 +263,8 @@ symboliczene dowiązanie w formie $WINEP
  Napędy DOS również są określone przez dowiązania symboliczne; Dla przykładu jeżeli napęd D:
  odpowiadałby napędowi CDROM zamontowanemu w /mnt/cdrom, miałbyś dowiązanie symboliczne
  $WINEPREFIX/dosdevices/d: -> /mnt/cdrom. Urządzenia Uniksowe odpowiadające
@@ -133,9 +133,9 @@ author: Michael Gilbert <mgilbert@debian.org>
  z /dev/hdc, to odpowiadające dowiązanie symboliczne wyglądałoby następująco
  $WINEPREFIX/dosdevices/d:: -> /dev/hdc.
  .SH AUTORZY
---- wine.orig/programs/winedbg/winedbg.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/programs/winedbg/winedbg.man.in	2014-01-25 23:56:57.567665161 -0500
-@@ -60,7 +60,7 @@
+--- a/programs/winedbg/winedbg.man.in
++++ b/programs/winedbg/winedbg.man.in
+@@ -60,7 +60,7 @@ When in \fBdefault\fR mode, the followin
  .IP \fB--command\ \fIstring\fR
  \fBwinedbg\fR will execute the command \fIstring\fR as if it was keyed on
  winedbg command line, and then will exit. This can be handy for
@@ -144,9 +144,9 @@ author: Michael Gilbert <mgilbert@debian.org>
  .IP \fB--file\ \fIfilename\fR
  \fBwinedbg\fR will execute the list of commands contained in file
  filename as if they were keyed on winedbg command line, and then
---- wine.orig/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/tools/winemaker.de.UTF-8.man.in	2014-01-25 23:57:06.303665140 -0500
-@@ -58,7 +58,7 @@
+--- a/tools/winemaker.de.UTF-8.man.in
++++ b/tools/winemaker.de.UTF-8.man.in
+@@ -58,7 +58,7 @@ im Includepfad suchen und die entspreche
  Groß-/Kleinschreibweise austauschen.
  .PP
  - Winemaker wird ebenso andere, exotischere Probleme wie die Benutzung von
@@ -155,7 +155,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  Sollte etwas ungwöhnliches vorkommen, wird Winemaker Sie warnen.
  .PP
  - Winemaker kann eine ganze Verzeichnisstruktur auf einmal durchsuchen,
-@@ -193,13 +193,13 @@
+@@ -193,13 +193,13 @@ wow64-Systemen. Ohne diese Option wird d
  .PP
  Ein typischer Winemaker Aufruf:
  .PP
@@ -171,7 +171,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  zu kompilieren. Letztendlich wird Winemaker die globale Makefile erzeugen.
  .PP
  Der nächste Schritt wäre dann:
-@@ -212,7 +212,7 @@
+@@ -212,7 +212,7 @@ ziehen, um Problemlösungen und Tipps zu
  .PP
  Bei einem MFC-basierten Projekt sollten Sie stattdessen folgenden Befehl ausführen:
  .PP
@@ -180,9 +180,9 @@ author: Michael Gilbert <mgilbert@debian.org>
  .br
  $ make
  .PP
---- wine.orig/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/tools/winemaker.fr.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
-@@ -211,7 +211,7 @@
+--- a/tools/winemaker.fr.UTF-8.man.in
++++ b/tools/winemaker.fr.UTF-8.man.in
+@@ -211,7 +211,7 @@ Voici quelques exemples typiques d'utili
  .B winemaker
  :
  .PP
@@ -191,7 +191,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .PP
  Recherche des fichiers sources dans le répertoire courant et ses
  sous-répertoires. Quand un fichier ou répertoire a un nom composé
-@@ -232,7 +232,7 @@
+@@ -232,7 +232,7 @@ le guide de l'utilisateur de Winelib pou
  Pour un projet utilisant les MFC, vous devriez plutôt exécuter les commandes
  suivantes\ :
  .PP
@@ -200,9 +200,9 @@ author: Michael Gilbert <mgilbert@debian.org>
  .br
  $ make
  .PP
---- wine.orig/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.583665161 -0500
-+++ wine/server/wineserver.de.UTF-8.man.in	2014-01-25 23:56:57.567665161 -0500
-@@ -62,7 +62,7 @@
+--- a/server/wineserver.de.UTF-8.man.in
++++ b/server/wineserver.de.UTF-8.man.in
+@@ -62,7 +62,7 @@ Verzeichnis interpretiert, in dem der
  .B wineserver
  seine Daten ablegt (Standardmäßig in \fI$HOME/.wine\fR). Alle
  .B wine
@@ -211,7 +211,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  .B wineserver
  verwenden (z.B. vom selben Benutzer), teilen sich u.a. die selbe Registry,
  gemeinsamen Speicher und Kernelobjekte.
-@@ -74,7 +74,7 @@
+@@ -74,7 +74,7 @@ unabhängiger Sitzungen von Wine zu betr
  .I WINESERVER
  Gibt den Pfad und Namen der
  .B wineserver
@@ -220,3 +220,41 @@ author: Michael Gilbert <mgilbert@debian.org>
  Variable nicht gesetzt, wird \fBwine\fR versuchen,
  .IR @bindir@/wineserver
  zu laden. Existiert dieser Pfad nicht, wird nach einer Datei namens
+--- a/tools/winegcc/winegcc.man.in
++++ b/tools/winegcc/winegcc.man.in
+@@ -40,7 +40,7 @@ Override the underlying type for wchar_t
+ target, instead of using short unsigned int, which is the default 
+ for Win32.
+ .IP \fB-mconsole\fR
+-This option passes '--subsystem console' to winebuild, to build
++This option passes '\-\-subsystem console' to winebuild, to build
+ console applications. It is the default.
+ .IP \fB-mno-cygwin\fR
+ Use Wine implementation of MSVCRT, instead of linking against
+@@ -54,13 +54,13 @@ Makefiles that work under Wine, MinGW+MS
+ Set the default entry point of the application to be the Unicode
+ \fBwmain()\fR instead of the standard \fBmain()\fR.
+ .IP \fB-mwindows\fR
+-This option adds -lgdi32, -lcomdlg32, and -lshell32 to the list of
+-default libraries, and passes '--subsystem windows' to winebuild
++This option adds \-lgdi32, \-lcomdlg32, and \-lshell32 to the list of
++default libraries, and passes '\-\-subsystem windows' to winebuild
+ to build graphical applications.
+ .IP \fB-nodefaultlibs\fR
+ Do not use the standard system libraries when linking. These
+-include at a minimum -lkernel32, -luser32, -ladvapi32, and 
+-any default libraries used by the backend compiler. The -mwindows
++include at a minimum \-lkernel32, \-luser32, \-ladvapi32, and
++any default libraries used by the backend compiler. The \-mwindows
+ option augments the list of default libraries as described above.
+ .IP \fB-nostartfiles\fR
+ Do not add the winecrt0 library when linking.
+@@ -76,7 +76,7 @@ The dllimport/dllexport attributes are n
+ due to lack of support for these features in the ELF version of gcc.
+ .PP
+ Static linking is not currently supported against Wine DLLs. As a
+-result, the -static, --static, and -Wl,-static options will generate
++result, the \-static, \-\-static, and \-Wl,\-static options will generate
+ an error.
+ .PP
+ Bugs can be reported on the

@@ -3,7 +3,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/programs/winemenubuilder/winemenubuilder.c
 +++ b/programs/winemenubuilder/winemenubuilder.c
-@@ -1455,7 +1455,7 @@ static BOOL write_desktop_entry(const ch
+@@ -1457,7 +1457,7 @@ static BOOL write_desktop_entry(const ch
  
      fprintf(file, "[Desktop Entry]\n");
      fprintf(file, "Name=%s\n", linkname);
@@ -12,7 +12,7 @@ author: Michael Gilbert <mgilbert@debian.org>
              wine_get_config_dir(), path, args);
      fprintf(file, "Type=Application\n");
      fprintf(file, "StartupNotify=true\n");
-@@ -2529,7 +2529,7 @@ static BOOL write_freedesktop_associatio
+@@ -2531,7 +2531,7 @@ static BOOL write_freedesktop_associatio
          fprintf(desktop, "Type=Application\n");
          fprintf(desktop, "Name=%s\n", friendlyAppName);
          fprintf(desktop, "MimeType=%s;\n", mimeType);

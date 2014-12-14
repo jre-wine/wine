@@ -2,7 +2,6 @@ Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0
 Source: http://www.winehq.org
 Files-Excluded:
  configure
- config.log
  tools/config.*
  include/config.h.in
 

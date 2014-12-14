@@ -1,5 +1,2 @@
-# rpath is used intentionally
-binary-or-shlib-defines-rpath
-# unfortunately wine doesn't doesn't do relro or fortify hardening
-hardening-no-relro
+# unfortunately wine doesn't doesn't do fortify hardening
 hardening-no-fortify-functions
