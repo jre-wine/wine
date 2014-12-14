@@ -1359,7 +1359,7 @@ then
         [AC_CHECK_HEADER(gnutls/gnutls.h,
             [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>]], [[static typeof(gnutls_mac_get_key_size) *func; if (func) return 0;]])],
-                [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS])])],
+                [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS],[[libgnutls\\(-deb0\\)\\{0,1\\}]])])],
             [GNUTLS_CFLAGS=""])])
 fi
 WINE_WARNING_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
@@ -2741,6 +2741,7 @@ WINE_CONFIG_DLL(crypt32,,[implib,po])
 WINE_CONFIG_TEST(dlls/crypt32/tests)
 WINE_CONFIG_DLL(cryptdlg,,[po])
 WINE_CONFIG_DLL(cryptdll,,[implib])
+WINE_CONFIG_DLL(cryptext)
 WINE_CONFIG_DLL(cryptnet,,[implib])
 WINE_CONFIG_TEST(dlls/cryptnet/tests)
 WINE_CONFIG_DLL(cryptui,,[implib,po])
@@ -3234,6 +3235,7 @@ WINE_CONFIG_TEST(dlls/version/tests)
 WINE_CONFIG_DLL(vmm.vxd,enable_win16)
 WINE_CONFIG_DLL(vnbt.vxd,enable_win16)
 WINE_CONFIG_DLL(vnetbios.vxd,enable_win16)
+WINE_CONFIG_DLL(vssapi)
 WINE_CONFIG_DLL(vtdapi.vxd,enable_win16)
 WINE_CONFIG_DLL(vwin32.vxd,enable_win16)
 WINE_CONFIG_DLL(w32skrnl,enable_win16)
