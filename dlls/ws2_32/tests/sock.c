@@ -1235,7 +1235,7 @@ static const LINGER linger_testvals[] = {
 
 static void test_set_getsockopt(void)
 {
-    SOCKET s;
+    SOCKET s, s2;
     int i, err, lasterr;
     int timeout;
     LINGER lingval;
@@ -1252,6 +1252,11 @@ static void test_set_getsockopt(void)
         {AF_INET6, SOCK_STREAM, IPPROTO_TCP},
         {AF_INET6, SOCK_DGRAM, IPPROTO_UDP}
     };
+    union _csspace
+    {
+        CSADDR_INFO cs;
+        char space[128];
+    } csinfoA, csinfoB;
 
     s = socket(AF_INET, SOCK_STREAM, 0);
     ok(s!=INVALID_SOCKET, "socket() failed error: %d\n", WSAGetLastError());
@@ -1369,6 +1374,23 @@ todo_wine
 
     closesocket(s);
 
+    /* Test WS_IP_MULTICAST_TTL with 8, 16, 24 and 32 bits values */
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+    ok(s != INVALID_SOCKET, "Failed to create socket\n");
+    size = sizeof(i);
+    for (i = 0; i < 4; i++)
+    {
+        int k, j;
+        const int tests[] = {0xffffff0a, 0xffff000b, 0xff00000c, 0x0000000d};
+        err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &tests[i], i + 1);
+        ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
+        err = getsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &k, &size);
+        ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
+        j = i != 3 ? tests[i] & ((1 << (i + 1) * 8) - 1) : tests[i];
+        ok(k == j, "Test [%d] Expected 0x%x, got 0x%x\n", i, j, k);
+    }
+    closesocket(s);
+
     /* test SO_PROTOCOL_INFOA invalid parameters */
     ok(getsockopt(INVALID_SOCKET, SOL_SOCKET, SO_PROTOCOL_INFOA, NULL, NULL),
        "getsockopt should have failed\n");
@@ -1462,6 +1484,116 @@ todo_wine
 
         closesocket(s);
     }
+
+    /* Test SO_BSP_STATE - Present only in >= Win 2008 */
+    s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(s != INVALID_SOCKET, "Failed to create socket\n");
+    s2 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    ok(s2 != INVALID_SOCKET, "Failed to create socket\n");
+
+    SetLastError(0xdeadbeef);
+    size = sizeof(csinfoA);
+    err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+    if (!err)
+    {
+        struct sockaddr_in saddr;
+        memset(&saddr, 0, sizeof(saddr));
+        saddr.sin_family = AF_INET;
+        saddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        /* Socket is not bound, no information provided */
+        ok(!csinfoA.cs.LocalAddr.iSockaddrLength, "Expected 0, got %d\n", csinfoA.cs.LocalAddr.iSockaddrLength);
+        ok(csinfoA.cs.LocalAddr.lpSockaddr == NULL, "Expected NULL, got %p\n", csinfoA.cs.LocalAddr.lpSockaddr);
+        /* Socket is not connected, no information provided */
+        ok(!csinfoA.cs.RemoteAddr.iSockaddrLength, "Expected 0, got %d\n", csinfoA.cs.LocalAddr.iSockaddrLength);
+        ok(csinfoA.cs.RemoteAddr.lpSockaddr == NULL, "Expected NULL, got %p\n", csinfoA.cs.LocalAddr.lpSockaddr);
+
+        err = bind(s, (struct sockaddr*)&saddr, sizeof(saddr));
+        ok(!err, "Expected 0, got %d\n", err);
+        size = sizeof(csinfoA);
+        err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+
+        /* Socket is bound */
+        ok(csinfoA.cs.LocalAddr.iSockaddrLength, "Expected non-zero\n");
+        ok(csinfoA.cs.LocalAddr.lpSockaddr != NULL, "Expected non-null\n");
+        /* Socket is not connected, no information provided */
+        ok(!csinfoA.cs.RemoteAddr.iSockaddrLength, "Expected 0, got %d\n", csinfoA.cs.LocalAddr.iSockaddrLength);
+        ok(csinfoA.cs.RemoteAddr.lpSockaddr == NULL, "Expected NULL, got %p\n", csinfoA.cs.LocalAddr.lpSockaddr);
+
+        err = bind(s2, (struct sockaddr*)&saddr, sizeof(saddr));
+        ok(!err, "Expected 0, got %d\n", err);
+        err = getsockname(s2, (struct sockaddr *)&saddr, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        err = listen(s2, 1);
+        ok(!err, "Expected 0, got %d\n", err);
+        err = connect(s, (struct sockaddr*)&saddr, sizeof(saddr));
+        ok(!err, "Expected 0, got %d\n", err);
+        size = sizeof(saddr);
+        err = accept(s2, (struct sockaddr*)&saddr, &size);
+        ok(err != INVALID_SOCKET, "Failed to accept socket\n");
+        closesocket(s2);
+        s2 = err;
+
+        size = sizeof(csinfoA);
+        err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        err = getsockopt(s2, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoB, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        ok(size == sizeof(csinfoA), "Got %d\n", size);
+        size = sizeof(saddr);
+        ok(size == csinfoA.cs.LocalAddr.iSockaddrLength, "Expected %d, got %d\n", size,
+           csinfoA.cs.LocalAddr.iSockaddrLength);
+        ok(size == csinfoA.cs.RemoteAddr.iSockaddrLength, "Expected %d, got %d\n", size,
+           csinfoA.cs.RemoteAddr.iSockaddrLength);
+        ok(!memcmp(csinfoA.cs.LocalAddr.lpSockaddr, csinfoB.cs.RemoteAddr.lpSockaddr, size),
+           "Expected matching addresses\n");
+        ok(!memcmp(csinfoB.cs.LocalAddr.lpSockaddr, csinfoA.cs.RemoteAddr.lpSockaddr, size),
+           "Expected matching addresses\n");
+        ok(csinfoA.cs.iSocketType == SOCK_STREAM, "Wrong socket type\n");
+        ok(csinfoB.cs.iSocketType == SOCK_STREAM, "Wrong socket type\n");
+        ok(csinfoA.cs.iProtocol == IPPROTO_TCP, "Wrong socket protocol\n");
+        ok(csinfoB.cs.iProtocol == IPPROTO_TCP, "Wrong socket protocol\n");
+
+        err = getpeername(s, (struct sockaddr *)&saddr, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        ok(!memcmp(&saddr, csinfoA.cs.RemoteAddr.lpSockaddr, size), "Expected matching addresses\n");
+        ok(!memcmp(&saddr, csinfoB.cs.LocalAddr.lpSockaddr, size), "Expected matching addresses\n");
+        err = getpeername(s2, (struct sockaddr *)&saddr, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        ok(!memcmp(&saddr, csinfoB.cs.RemoteAddr.lpSockaddr, size), "Expected matching addresses\n");
+        ok(!memcmp(&saddr, csinfoA.cs.LocalAddr.lpSockaddr, size), "Expected matching addresses\n");
+        err = getsockname(s, (struct sockaddr *)&saddr, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        ok(!memcmp(&saddr, csinfoA.cs.LocalAddr.lpSockaddr, size), "Expected matching addresses\n");
+        ok(!memcmp(&saddr, csinfoB.cs.RemoteAddr.lpSockaddr, size), "Expected matching addresses\n");
+        err = getsockname(s2, (struct sockaddr *)&saddr, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        ok(!memcmp(&saddr, csinfoB.cs.LocalAddr.lpSockaddr, size), "Expected matching addresses\n");
+        ok(!memcmp(&saddr, csinfoA.cs.RemoteAddr.lpSockaddr, size), "Expected matching addresses\n");
+
+        SetLastError(0xdeadbeef);
+        size = sizeof(CSADDR_INFO);
+        err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+        ok(err, "Expected non-zero\n");
+        ok(size == sizeof(CSADDR_INFO), "Got %d\n", size);
+        ok(GetLastError() == WSAEFAULT, "Expected 10014, got %d\n", GetLastError());
+
+        /* At least for IPv4 the size is exactly 56 bytes */
+        size = sizeof(*csinfoA.cs.LocalAddr.lpSockaddr) * 2 + sizeof(csinfoA.cs);
+        err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+        ok(!err, "Expected 0, got %d\n", err);
+        size--;
+        SetLastError(0xdeadbeef);
+        err = getsockopt(s, SOL_SOCKET, SO_BSP_STATE, (char *) &csinfoA, &size);
+        ok(err, "Expected non-zero\n");
+        ok(GetLastError() == WSAEFAULT, "Expected 10014, got %d\n", GetLastError());
+    }
+    else
+        ok(GetLastError() == WSAENOPROTOOPT, "Expected 10042, got %d\n", GetLastError());
+
+    closesocket(s);
+    closesocket(s2);
 }
 
 static void test_so_reuseaddr(void)
@@ -3358,14 +3490,14 @@ static void test_select(void)
     ret = select(maxfd+1, &readfds, &readfds, NULL, &select_timeout);
     ok(ret == 2, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &readfds), "fdWrite socket is not in the set\n");
-    ok(FD_ISSET(fdRead, &readfds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
 
     ok(send(fdWrite, "test", 4, 0) == 4, "failed to send data\n");
     FD_ZERO(&readfds);
     FD_SET(fdRead, &readfds);
     ret = select(fdRead+1, &readfds, NULL, NULL, &select_timeout);
     ok(ret == 1, "select returned %d\n", ret);
-    ok(FD_ISSET(fdRead, &readfds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
 
     FD_ZERO(&readfds);
     FD_SET(fdWrite, &readfds);
@@ -3373,7 +3505,7 @@ static void test_select(void)
     ret = select(maxfd+1, &readfds, &readfds, NULL, &select_timeout);
     ok(ret == 2, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &readfds), "fdWrite socket is not in the set\n");
-    ok(FD_ISSET(fdRead, &readfds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
 
     while(1) {
         FD_ZERO(&writefds);
@@ -3388,7 +3520,7 @@ static void test_select(void)
     ret = select(maxfd+1, &readfds, &readfds, NULL, &select_timeout);
     ok(ret == 1, "select returned %d\n", ret);
     ok(!FD_ISSET(fdWrite, &readfds), "fdWrite socket is in the set\n");
-    ok(FD_ISSET(fdRead, &readfds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
 
     ok(send(fdRead, "test", 4, 0) == 4, "failed to send data\n");
     Sleep(100);
@@ -3398,7 +3530,7 @@ static void test_select(void)
     ret = select(maxfd+1, &readfds, &readfds, NULL, &select_timeout);
     ok(ret == 2, "select returned %d\n", ret);
     ok(FD_ISSET(fdWrite, &readfds), "fdWrite socket is not in the set\n");
-    ok(FD_ISSET(fdRead, &readfds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
 
     closesocket(fdRead);
     closesocket(fdWrite);

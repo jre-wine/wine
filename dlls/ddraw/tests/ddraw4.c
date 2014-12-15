@@ -2619,6 +2619,30 @@ static void test_coop_level_mode_set(void)
         {WM_SIZE,               TRUE,   SIZE_RESTORED}, /* DefWindowProc. */
         {0,                     FALSE,  0},
     };
+    static const struct message sc_restore_messages[] =
+    {
+        {WM_SYSCOMMAND,         TRUE,   SC_RESTORE},
+        {WM_WINDOWPOSCHANGING,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   FALSE,  0},
+        {WM_SIZE,               TRUE,   SIZE_RESTORED},
+        {0,                     FALSE,  0},
+    };
+    static const struct message sc_minimize_messages[] =
+    {
+        {WM_SYSCOMMAND,         TRUE,   SC_MINIMIZE},
+        {WM_WINDOWPOSCHANGING,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   FALSE,  0},
+        {WM_SIZE,               TRUE,   SIZE_MINIMIZED},
+        {0,                     FALSE,  0},
+    };
+    static const struct message sc_maximize_messages[] =
+    {
+        {WM_SYSCOMMAND,         TRUE,   SC_MAXIMIZE},
+        {WM_WINDOWPOSCHANGING,  FALSE,  0},
+        {WM_WINDOWPOSCHANGED,   FALSE,  0},
+        {WM_SIZE,               TRUE,   SIZE_MAXIMIZED},
+        {0,                     FALSE,  0},
+    };
 
     static const struct message normal_messages[] =
     {
@@ -2792,6 +2816,24 @@ static void test_coop_level_mode_set(void)
      * GetSurfaceDesc call after the next display mode change to crash on the Windows 8
      * testbot. Another Restore call would presumably avoid the crash, but it also moots
      * the point of the GetSurfaceDesc call. */
+
+    expect_messages = sc_minimize_messages;
+    SendMessageA(window, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    ok(!expect_messages->message, "Expected message %#x, but didn't receive it.\n", expect_messages->message);
+    expect_messages = NULL;
+
+    expect_messages = sc_restore_messages;
+    SendMessageA(window, WM_SYSCOMMAND, SC_RESTORE, 0);
+    ok(!expect_messages->message, "Expected message %#x, but didn't receive it.\n", expect_messages->message);
+    expect_messages = NULL;
+
+    expect_messages = sc_maximize_messages;
+    SendMessageA(window, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    ok(!expect_messages->message, "Expected message %#x, but didn't receive it.\n", expect_messages->message);
+    expect_messages = NULL;
+
+    hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
+    ok(SUCCEEDED(hr), "SetCooperativeLevel failed, hr %#x.\n", hr);
 
     PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
     expect_messages = exclusive_messages;
@@ -4111,7 +4153,7 @@ static void test_coop_level_activateapp(void)
             WS_MAXIMIZE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
 
     /* Exclusive with window already active. */
-    SetActiveWindow(window);
+    SetForegroundWindow(window);
     activateapp_testdata.received = FALSE;
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -4120,7 +4162,7 @@ static void test_coop_level_activateapp(void)
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
     /* Exclusive with window not active. */
-    SetActiveWindow(NULL);
+    SetForegroundWindow(GetDesktopWindow());
     activateapp_testdata.received = FALSE;
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
@@ -4129,30 +4171,26 @@ static void test_coop_level_activateapp(void)
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
     /* Normal with window not active, then exclusive with the same window. */
-    SetActiveWindow(NULL);
+    SetForegroundWindow(GetDesktopWindow());
     activateapp_testdata.received = FALSE;
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
     ok(!activateapp_testdata.received, "Received WM_ACTIVATEAPP when setting DDSCL_NORMAL.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
-    /* Except in the first SetCooperativeLevel call, Windows XP randomly does not send
-     * WM_ACTIVATEAPP. Windows 7 sends the message reliably. Mark the XP behavior broken. */
-    ok(activateapp_testdata.received || broken(!activateapp_testdata.received),
-            "Expected WM_ACTIVATEAPP, but did not receive it.\n");
+    ok(activateapp_testdata.received, "Expected WM_ACTIVATEAPP, but did not receive it.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, NULL, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
     /* Recursive set of DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN. */
-    SetActiveWindow(NULL);
+    SetForegroundWindow(GetDesktopWindow());
     activateapp_testdata.received = FALSE;
     activateapp_testdata.ddraw = ddraw;
     activateapp_testdata.window = window;
     activateapp_testdata.coop_level = DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN;
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
-    ok(activateapp_testdata.received || broken(!activateapp_testdata.received),
-            "Expected WM_ACTIVATEAPP, but did not receive it.\n");
+    ok(activateapp_testdata.received, "Expected WM_ACTIVATEAPP, but did not receive it.\n");
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, NULL, DDSCL_NORMAL);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
@@ -4167,15 +4205,14 @@ static void test_coop_level_activateapp(void)
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
 
     /* Setting DDSCL_NORMAL with recursive invocation. */
-    SetActiveWindow(NULL);
+    SetForegroundWindow(GetDesktopWindow());
     activateapp_testdata.received = FALSE;
     activateapp_testdata.ddraw = ddraw;
     activateapp_testdata.window = window;
     activateapp_testdata.coop_level = DDSCL_NORMAL;
     hr = IDirectDraw4_SetCooperativeLevel(ddraw, window, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN);
     ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
-    ok(activateapp_testdata.received || broken(!activateapp_testdata.received),
-            "Expected WM_ACTIVATEAPP, but did not receive it.\n");
+    ok(activateapp_testdata.received, "Expected WM_ACTIVATEAPP, but did not receive it.\n");
 
     /* DDraw is in exlusive mode now. */
     memset(&ddsd, 0, sizeof(ddsd));
