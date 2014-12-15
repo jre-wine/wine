@@ -66,6 +66,23 @@ static IDWriteFactory *create_factory(void)
     return factory;
 }
 
+static void create_testfontfile(const WCHAR *filename)
+{
+    DWORD written;
+    HANDLE file;
+    HRSRC res;
+    void *ptr;
+    file = CreateFileW(filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
+    ok( file != INVALID_HANDLE_VALUE, "file creation failed\n" );
+
+    res = FindResourceA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(1), (LPCSTR)RT_RCDATA);
+    ok( res != 0, "couldn't find resource\n" );
+    ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
+    WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
+    ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
+    CloseHandle( file );
+}
+
 struct test_fontenumerator
 {
     IDWriteFontFileEnumerator IDWriteFontFileEnumerator_iface;
@@ -441,10 +458,10 @@ if (0)
     ok(weight == DWRITE_FONT_WEIGHT_NORMAL, "got %d\n", weight);
 
     style = IDWriteFont_GetStyle(font);
-todo_wine {
     ok(style == DWRITE_FONT_STYLE_OBLIQUE, "got %d\n", style);
+todo_wine
     ok(otm.otmfsSelection == 1, "got 0x%08x\n", otm.otmfsSelection);
-}
+
     ret = IDWriteFont_IsSymbolFont(font);
     ok(!ret, "got %d\n", ret);
 
@@ -909,11 +926,16 @@ static void test_CreateFontFace(void)
 {
     IDWriteFontFace *fontface, *fontface2;
     IDWriteFontCollection *collection;
+    DWRITE_FONT_FILE_TYPE file_type;
+    DWRITE_FONT_FACE_TYPE face_type;
     IDWriteGdiInterop *interop;
     IDWriteFont *font, *font2;
     IDWriteFontFamily *family;
     IDWriteFactory *factory;
+    IDWriteFontFile *file;
     LOGFONTW logfont;
+    BOOL supported;
+    UINT32 count;
     HRESULT hr;
 
     factory = create_factory();
@@ -1001,7 +1023,53 @@ if (0) /* crashes on native */
     IDWriteFont_Release(font);
     IDWriteFontFamily_Release(family);
     IDWriteFontCollection_Release(collection);
+
+    /* IDWriteFactory::CreateFontFace() */
+    create_testfontfile(test_fontfile);
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateFontFileReference(factory, test_fontfile, NULL, &file);
+    ok(hr == S_OK, "got 0x%08x\n",hr);
+
+    supported = FALSE;
+    file_type = DWRITE_FONT_FILE_TYPE_UNKNOWN;
+    face_type = DWRITE_FONT_FACE_TYPE_CFF;
+    count = 0;
+    hr = IDWriteFontFile_Analyze(file, &supported, &file_type, &face_type, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(supported == TRUE, "got %i\n", supported);
+    ok(file_type == DWRITE_FONT_FILE_TYPE_TRUETYPE, "got %i\n", file_type);
+    ok(face_type == DWRITE_FONT_FACE_TYPE_TRUETYPE, "got %i\n", face_type);
+    ok(count == 1, "got %i\n", count);
+
+    /* try mismatching face type, the one that's not supported */
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_CFF, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+todo_wine
+    ok(hr == DWRITE_E_FILEFORMAT, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_TRUETYPE_COLLECTION, 1, &file, 0,
+        DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_RAW_CFF, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+todo_wine
+    ok(hr == DWRITE_E_UNSUPPORTEDOPERATION || broken(hr == E_INVALIDARG) /* older versions */, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_TYPE1, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_VECTOR, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_BITMAP, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_UNKNOWN, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    IDWriteFontFile_Release(file);
     IDWriteFactory_Release(factory);
+    DeleteFileW(test_fontfile);
 }
 
 static void test_GetMetrics(void)
@@ -1513,7 +1581,7 @@ static void test_CustomFontCollection(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     EXPECT_REF(idfont2, 1);
     EXPECT_REF(idfont, 1);
-    ok(idfont2 != idfont, "Font instances shoudl not match\n");
+    ok(idfont2 != idfont, "Font instances should not match\n");
 
     idfontface2 = NULL;
     hr = IDWriteFont_CreateFontFace(idfont2, &idfontface2);
@@ -1648,6 +1716,7 @@ static void test_CreateCustomFontFileReference(void)
     ok(count == 0, "got %i\n", count);
 
     hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_CFF, 1, &file, 0, 0, &face);
+todo_wine
     ok(hr == 0x8faecafe, "got 0x%08x\n", hr);
     IDWriteFontFile_Release(file);
 
@@ -1718,23 +1787,6 @@ if (face2)
 
     IDWriteFactory_Release(factory2);
     IDWriteFactory_Release(factory);
-}
-
-static void create_testfontfile(const WCHAR *filename)
-{
-    DWORD written;
-    HANDLE file;
-    HRSRC res;
-    void *ptr;
-    file = CreateFileW(filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, 0 );
-    ok( file != INVALID_HANDLE_VALUE, "file creation failed\n" );
-
-    res = FindResourceA(GetModuleHandleA(NULL), (LPCSTR)MAKEINTRESOURCE(1), (LPCSTR)RT_RCDATA);
-    ok( res != 0, "couldn't find resource\n" );
-    ptr = LockResource( LoadResource( GetModuleHandleA(NULL), res ));
-    WriteFile( file, ptr, SizeofResource( GetModuleHandleA(NULL), res ), &written, NULL );
-    ok( written == SizeofResource( GetModuleHandleA(NULL), res ), "couldn't write resource\n" );
-    CloseHandle( file );
 }
 
 static void test_CreateFontFileReference(void)
@@ -2528,6 +2580,166 @@ static void test_ReadFileFragment(void)
     DeleteFileW(test_fontfile);
 }
 
+static void test_GetDesignGlyphMetrics(void)
+{
+    DWRITE_GLYPH_METRICS metrics[2];
+    IDWriteFontFace *fontface;
+    IDWriteFactory *factory;
+    IDWriteFontFile *file;
+    UINT16 indices[2];
+    UINT32 codepoint;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    create_testfontfile(test_fontfile);
+
+    hr = IDWriteFactory_CreateFontFileReference(factory, test_fontfile, NULL, &file);
+    ok(hr == S_OK, "got 0x%08x\n",hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_TRUETYPE, 1, &file,
+        0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == S_OK, "got 0x%08x\n",hr);
+    IDWriteFontFile_Release(file);
+
+    codepoint = 'A';
+    indices[0] = 0;
+    hr = IDWriteFontFace_GetGlyphIndices(fontface, &codepoint, 1, &indices[0]);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(indices[0] > 0, "got %u\n", indices[0]);
+
+    hr = IDWriteFontFace_GetDesignGlyphMetrics(fontface, NULL, 0, metrics, FALSE);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n",hr);
+
+    hr = IDWriteFontFace_GetDesignGlyphMetrics(fontface, NULL, 1, metrics, FALSE);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n",hr);
+
+    hr = IDWriteFontFace_GetDesignGlyphMetrics(fontface, indices, 0, metrics, FALSE);
+    ok(hr == S_OK, "got 0x%08x\n",hr);
+
+    /* missing glyphs are ignored */
+    indices[1] = 1;
+    memset(metrics, 0xcc, sizeof(metrics));
+    hr = IDWriteFontFace_GetDesignGlyphMetrics(fontface, indices, 2, metrics, FALSE);
+    ok(hr == S_OK, "got 0x%08x\n",hr);
+    ok(metrics[0].advanceWidth == 1000, "got %d\n", metrics[0].advanceWidth);
+    ok(metrics[1].advanceWidth == 0, "got %d\n", metrics[1].advanceWidth);
+
+    IDWriteFontFace_Release(fontface);
+    IDWriteFactory_Release(factory);
+    DeleteFileW(test_fontfile);
+}
+
+static void test_IsMonospacedFont(void)
+{
+    static const WCHAR courierW[] = {'C','o','u','r','i','e','r',' ','N','e','w',0};
+    IDWriteFontCollection *collection;
+    IDWriteFactory *factory;
+    UINT32 index;
+    BOOL exists;
+    HRESULT hr;
+
+    factory = create_factory();
+    hr = IDWriteFactory_GetSystemFontCollection(factory, &collection, FALSE);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    exists = FALSE;
+    hr = IDWriteFontCollection_FindFamilyName(collection, courierW, &index, &exists);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (exists) {
+        IDWriteFontFamily *family;
+        IDWriteFont1 *font1;
+        IDWriteFont *font;
+
+        hr = IDWriteFontCollection_GetFontFamily(collection, index, &family);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IDWriteFontFamily_GetFirstMatchingFont(family, DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteFontFamily_Release(family);
+
+        hr = IDWriteFont_QueryInterface(font, &IID_IDWriteFont1, (void**)&font1);
+        if (hr == S_OK) {
+            IDWriteFontFace1 *fontface1;
+            IDWriteFontFace *fontface;
+            BOOL is_monospaced;
+
+            is_monospaced = IDWriteFont1_IsMonospacedFont(font1);
+            ok(is_monospaced, "got %d\n", is_monospaced);
+
+            hr = IDWriteFont1_CreateFontFace(font1, &fontface);
+            ok(hr == S_OK, "got 0x%08x\n", hr);
+            hr = IDWriteFontFace_QueryInterface(fontface, &IID_IDWriteFontFace1, (void**)&fontface1);
+            ok(hr == S_OK, "got 0x%08x\n", hr);
+            is_monospaced = IDWriteFontFace1_IsMonospacedFont(fontface1);
+            ok(is_monospaced, "got %d\n", is_monospaced);
+            IDWriteFontFace1_Release(fontface1);
+
+            IDWriteFontFace_Release(fontface);
+            IDWriteFont1_Release(font1);
+        }
+        else
+            win_skip("IsMonospacedFont() is not supported.\n");
+    }
+    else
+        skip("Courier New font not found.\n");
+
+    IDWriteFontCollection_Release(collection);
+}
+
+static void test_GetDesignGlyphAdvances(void)
+{
+    IDWriteFontFace1 *fontface1;
+    IDWriteFontFace *fontface;
+    IDWriteFactory *factory;
+    IDWriteFontFile *file;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    create_testfontfile(test_fontfile);
+
+    hr = IDWriteFactory_CreateFontFileReference(factory, test_fontfile, NULL, &file);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_TRUETYPE, 1, &file,
+        0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteFontFile_Release(file);
+
+    hr = IDWriteFontFace_QueryInterface(fontface, &IID_IDWriteFontFace1, (void**)&fontface1);
+    if (hr == S_OK) {
+        UINT32 codepoint;
+        UINT16 index;
+        INT32 advance;
+
+        codepoint = 'A';
+        index = 0;
+        hr = IDWriteFontFace1_GetGlyphIndices(fontface1, &codepoint, 1, &index);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(index > 0, "got %u\n", index);
+
+        advance = 0;
+        hr = IDWriteFontFace1_GetDesignGlyphAdvances(fontface1, 1, &index, &advance, FALSE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(advance == 1000, "got %i\n", advance);
+
+        advance = 0;
+        hr = IDWriteFontFace1_GetDesignGlyphAdvances(fontface1, 1, &index, &advance, TRUE);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(advance == 2048, "got %i\n", advance);
+
+        IDWriteFontFace1_Release(fontface1);
+    }
+    else
+        win_skip("GetDesignGlyphAdvances() is not supported.\n");
+
+    IDWriteFontFace_Release(fontface);
+    IDWriteFactory_Release(factory);
+    DeleteFileW(test_fontfile);
+}
+
 START_TEST(font)
 {
     IDWriteFactory *factory;
@@ -2561,6 +2773,9 @@ START_TEST(font)
     test_ConvertFontToLOGFONT();
     test_CreateStreamFromKey();
     test_ReadFileFragment();
+    test_GetDesignGlyphMetrics();
+    test_GetDesignGlyphAdvances();
+    test_IsMonospacedFont();
 
     IDWriteFactory_Release(factory);
 }
