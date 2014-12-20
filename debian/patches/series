@@ -4,11 +4,13 @@ gitignore.patch
 
 printer-resolution.patch
 
+disable/exit-calls.patch
+disable/downloading.patch
+
 winegcc.patch
 wineapploader.patch
-
 winemenubuilder.patch
-no-download.patch
+
 addons-path.patch
 
 glu32-link.patch

@@ -77,6 +77,8 @@ override_dh_install: $(INSTALLS)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp programs/winedbg/README debian/tmp/README.winedbg
 	cp debian/tmp/$(LIBDIR)/winecfg debian/tmp/wineapploader
+	cp debian/tmp/$(LIBDIR)/wineserver debian/tmp/$(LIBDIR)/wineserver.real
+	cp debian/scripts/wineserver debian/tmp/$(LIBDIR)
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
 	for file in $$(find debian/tmp/$(MANDIR) -type f); do \

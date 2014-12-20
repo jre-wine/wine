@@ -142,6 +142,7 @@ Section: libdevel
 Multi-Arch: foreign
 Depends:
  gcc [any-i386 any-powerpc],
+ ${perl:Depends},
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
@@ -156,6 +157,7 @@ Architecture: amd64
 Section: libdevel
 Depends:
  gcc [amd64],
+ ${perl:Depends},
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),

@@ -1,6 +1,5 @@
 debian/tmp/usr/lib/*/*/wmc
 debian/tmp/usr/lib/*/*/wrc
-debian/tmp/usr/lib/*/*/widl
 debian/tmp/usr/lib/*/*/winegcc
 debian/tmp/usr/lib/*/*/wineg++
 debian/tmp/usr/lib/*/*/winedump

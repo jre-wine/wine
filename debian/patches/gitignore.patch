@@ -3,7 +3,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/configure.ac
 +++ b/configure.ac
-@@ -3484,6 +3484,9 @@ dnl End of auto-generated output command
+@@ -3533,6 +3533,9 @@ dnl End of auto-generated output command
  
  dnl Main ignore file
  

@@ -42,4 +42,10 @@ else
     winedebug=$WINEDEBUG
 fi
 
-WINEPREFIX=$wineprefix WINELOADER=$wineloader WINEDEBUG=$winedebug $wine "$@"
+if test -z $PULSE_LATENCY_MSEC; then
+    latency=60
+else
+    latency=$PULSE_LATENCY_MSEC
+fi
+
+WINEPREFIX=$wineprefix WINELOADER=$wineloader WINEDEBUG=$winedebug PULSE_LATENCY_MSEC=$latency $wine "$@"

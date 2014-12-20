@@ -1,0 +1,45 @@
+description: use asserts for shared library failure modes
+author: Michael Gilbert <mgilbert@debian.org>
+
+--- a/libs/wine/mmap.c
++++ b/libs/wine/mmap.c
+@@ -76,7 +76,7 @@ static inline int get_fdzero(void)
+         if ((fd = open( "/dev/zero", O_RDONLY )) == -1)
+         {
+             perror( "/dev/zero: open" );
+-            exit(1);
++            assert(0);
+         }
+     }
+     return fd;
+@@ -128,7 +128,7 @@ static int try_mmap_fixed (void *addr, s
+     if ( (pid = vfork()) == -1 )
+     {
+         perror("try_mmap_fixed: vfork");
+-        exit(1);
++        assert(0);
+     }
+     if ( pid == 0 )
+     {
+@@ -140,18 +140,18 @@ static int try_mmap_fixed (void *addr, s
+            mapped and we must fail. */
+         for ( i = 0; i < len; i += pagesize )
+             if ( mincore( (caddr_t)addr + i, pagesize, &vec ) != -1 )
+-               _exit(1);
++                assert(0);
+ 
+         /* Perform the mapping with MAP_FIXED set.  This is safe
+            now, as none of the pages is currently in use. */
+         result = mmap( addr, len, prot, flags | MAP_FIXED, fildes, off );
+         if ( result == addr )
+-            _exit(0);
++            break;
+ 
+         if ( result != (void *) -1 ) /* This should never happen ... */
+             munmap( result, len );
+ 
+-       _exit(1);
++        assert(0);
+     }
+ 
+     /* reap child */
