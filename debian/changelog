@@ -1,3 +1,16 @@
+wine-development (1.7.34-1) experimental; urgency=medium
+
+  * New upstream release 1.7.34, released Jan 9, 2015.
+    - Support for surround sound in DirectSound.
+    - Better text run support in DirectWrite.
+    - Many HTML engine fixes.
+    - More support for WBEM objects.
+    - A few more C/C++ runtime functions.
+    - Various bug fixes.
+  * Apply proposed upstream patch that implements job objects.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 10 Jan 2015 16:51:49 +0000
+
 wine-development (1.7.33-1) experimental; urgency=medium
 
   * New upstream release 1.7.33, released Dec 12, 2014.
