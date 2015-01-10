@@ -3110,7 +3110,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
                     addr_size = sizeof(struct sockaddr_in6);
                 else
                 {
-                    FIXME("Family %d is unsupported for SO_BSP_STATE", infow.iAddressFamily);
+                    FIXME("Family %d is unsupported for SO_BSP_STATE\n", infow.iAddressFamily);
                     SetLastError(WSAEAFNOSUPPORT);
                     return SOCKET_ERROR;
                 }
@@ -3377,7 +3377,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         int namelen;
         switch(optname)
         {
-        case IPX_PTYPE:
+        case WS_IPX_PTYPE:
             if ((fd = get_sock_fd( s, 0, NULL )) == -1) return SOCKET_ERROR;
 #ifdef SOL_IPX
             if(getsockopt(fd, SOL_IPX, IPX_TYPE, optval, (socklen_t *)optlen) == -1)
@@ -3398,7 +3398,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
             release_sock_fd( s, fd );
             return ret;
 
-        case IPX_ADDRESS:
+        case WS_IPX_ADDRESS:
             /*
             *  On a Win2000 system with one network card there are usually
             *  three ipx devices one with a speed of 28.8kbps, 10Mbps and 100Mbps.
@@ -3423,7 +3423,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
                                        * note 1MB = 1000kB in this case */
             return 0;
 
-        case IPX_MAX_ADAPTER_NUM:
+        case WS_IPX_MAX_ADAPTER_NUM:
             FIXME("IPX_MAX_ADAPTER_NUM\n");
             *(int*)optval = 1; /* As noted under IPX_ADDRESS we have just one card. */
             return 0;
@@ -4984,10 +4984,10 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
     case WS_NSPROTO_IPX:
         switch(optname)
         {
-        case IPX_PTYPE:
+        case WS_IPX_PTYPE:
             return set_ipx_packettype(s, *(int*)optval);
 
-        case IPX_FILTERPTYPE:
+        case WS_IPX_FILTERPTYPE:
             /* Sets the receive filter packet type, at the moment we don't support it */
             FIXME("IPX_FILTERPTYPE: %x\n", *optval);
             /* Returning 0 is better for now than returning a SOCKET_ERROR */
@@ -6359,13 +6359,17 @@ SOCKET WINAPI WSAJoinLeaf(
  */
 int WINAPI __WSAFDIsSet(SOCKET s, WS_fd_set *set)
 {
-  int i = set->fd_count;
-
-  TRACE("(%ld,%p(%i))\n", s, set, i);
+  int i = set->fd_count, ret = 0;
 
   while (i--)
-      if (set->fd_array[i] == s) return 1;
-  return 0;
+      if (set->fd_array[i] == s)
+      {
+          ret = 1;
+          break;
+      }
+
+  TRACE("(socket %04lx, fd_set %p, count %i) <- %d\n", s, set, set->fd_count, ret);
+  return ret;
 }
 
 /***********************************************************************
@@ -7081,6 +7085,12 @@ INT WINAPI WSAStringToAddressA(LPSTR AddressString,
         ptrPort = strchr(workBuffer, ':');
         if(ptrPort)
         {
+            /* User may have entered an IPv6 and asked to parse as IPv4 */
+            if(strchr(ptrPort + 1, ':'))
+            {
+                res = WSAEINVAL;
+                break;
+            }
             ((LPSOCKADDR_IN)lpAddress)->sin_port = htons(atoi(ptrPort+1));
             *ptrPort = '\0';
         }
