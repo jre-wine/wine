@@ -218,6 +218,8 @@ Package: libwine-dev
 Architecture: amd64 any-i386 any-powerpc
 Section: libdevel
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -238,6 +240,8 @@ Architecture: any-i386 any-powerpc
 Multi-Arch: same
 Section: debug
 Priority: extra
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -324,6 +328,8 @@ Package: libwine-alsa
 Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -352,6 +358,8 @@ Section: oldlibs
 Priority: extra
 Architecture: i386 powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -366,6 +374,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -380,6 +390,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -393,6 +405,8 @@ Package: libwine-gphoto2
 Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -407,6 +421,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -421,6 +437,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -435,6 +453,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -449,6 +469,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
@@ -463,6 +485,8 @@ Section: oldlibs
 Priority: extra
 Architecture: any-i386 any-powerpc
 Multi-Arch: same
+Pre-Depends:
+ ${misc:Pre-Depends},
 Depends:
  ${misc:Depends},
  libwine (>= ${binary:Version})
