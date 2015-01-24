@@ -5136,14 +5136,12 @@ static void test_events(int useMessages)
     SetLastError(0xdeadbeef);
     ret = recv(src, buffer, 1, MSG_PEEK);
     ok(ret == 1, "Failed to peek at recv buffer %d err %d\n", ret, GetLastError());
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
     ok_event_seq(src, hEvent, read_seq, NULL, 0);
 
     SetLastError(0xdeadbeef);
     ret = recv(src, buffer, 50, 0);
     ok(ret == 50, "Failed to recv buffer %d err %d\n", ret, GetLastError());
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
     ok_event_seq(src, hEvent, read_seq, NULL, 0);
 
@@ -5171,7 +5169,6 @@ todo_wine
     SetLastError(0xdeadbeef);
     ret = recv(src, buffer, 1, 0);
     ok(ret == 1, "Failed to recv buffer %d err %d\n", ret, GetLastError());
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
     ok_event_seq(src, hEvent, empty_seq, NULL, 0);
 
@@ -5603,7 +5600,6 @@ static void test_WSASendMsg(void)
     ret = recvfrom(dst, buffer, sizeof(buffer), 0, (struct sockaddr *) &sockaddr, &addrlen);
     ok(ret == bytesSent, "got %d, expected %d\n",
        ret, bytesSent);
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
 
     /* A successful call to WSASendMsg must have bound the socket */
@@ -5634,7 +5630,6 @@ todo_wine
     ret = recvfrom(dst, buffer, sizeof(buffer), 0, (struct sockaddr *) &sockaddr, &addrlen);
     ok(ret == bytesSent, "got %d, expected %d\n",
        ret, bytesSent);
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
 
     closesocket(sock);
@@ -5770,14 +5765,12 @@ static void test_WSARecv(void)
     iret = WSARecv(dest, &bufs, 1, &bytesReturned, &flags, NULL, NULL);
     ok(!iret, "Expected 0, got %d\n", iret);
     ok(bytesReturned, "Expected 2, got %d\n", bytesReturned);
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
     SetLastError(0xdeadbeef);
     bytesReturned = 0xdeadbeef;
     iret = WSARecv(dest, &bufs, 1, &bytesReturned, &flags, NULL, NULL);
     ok(!iret, "Expected 0, got %d\n", iret);
     ok(bytesReturned, "Expected 2, got %d\n", bytesReturned);
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
 
     bufs.len = 4;
@@ -5790,7 +5783,6 @@ todo_wine
     iret = WSARecv(dest, &bufs, 1, &bytesReturned, &flags, NULL, NULL);
     ok(!iret, "Expected 0, got %d\n", iret);
     ok(bytesReturned, "Expected 4, got %d\n", bytesReturned);
-todo_wine
     ok(GetLastError() == ERROR_SUCCESS, "Expected 0, got %d\n", GetLastError());
 
     bufs.len = sizeof(buf);
@@ -5888,14 +5880,18 @@ static void test_GetAddrInfoW(void)
     memset(&hint, 0, sizeof(ADDRINFOW));
 
     result = (ADDRINFOW *)0xdeadbeef;
+    WSASetLastError(0xdeadbeef);
     ret = pGetAddrInfoW(NULL, NULL, NULL, &result);
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+    ok(WSAGetLastError() == WSAHOST_NOT_FOUND, "expected 11001, got %d\n", WSAGetLastError());
     ok(result == NULL, "got %p\n", result);
 
     result = NULL;
+    WSASetLastError(0xdeadbeef);
     ret = pGetAddrInfoW(empty, NULL, NULL, &result);
     ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
     ok(result != NULL, "GetAddrInfoW failed\n");
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     pFreeAddrInfoW(result);
 
     result = NULL;
@@ -5914,6 +5910,7 @@ static void test_GetAddrInfoW(void)
     result = NULL;
     ret = pGetAddrInfoW(empty, zero, NULL, &result);
     ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     ok(result != NULL, "GetAddrInfoW failed\n");
 
     result2 = NULL;
@@ -5950,11 +5947,14 @@ static void test_GetAddrInfoW(void)
     pFreeAddrInfoW(result);
 
     result = NULL;
+    SetLastError(0xdeadbeef);
     ret = pGetAddrInfoW(localhost, port, &hint, &result);
     ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     pFreeAddrInfoW(result);
 
     result = (ADDRINFOW *)0xdeadbeef;
+    WSASetLastError(0xdeadbeef);
     ret = pGetAddrInfoW(NULL, NULL, NULL, &result);
     if(ret == 0)
     {
@@ -5962,9 +5962,11 @@ static void test_GetAddrInfoW(void)
         return;
     }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+    ok(WSAGetLastError() == WSAHOST_NOT_FOUND, "expected 11001, got %d\n", WSAGetLastError());
     ok(result == NULL, "got %p\n", result);
 
     result = (ADDRINFOW *)0xdeadbeef;
+    WSASetLastError(0xdeadbeef);
     ret = pGetAddrInfoW(nxdomain, NULL, NULL, &result);
     if(ret == 0)
     {
@@ -5972,6 +5974,7 @@ static void test_GetAddrInfoW(void)
         return;
     }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+    ok(WSAGetLastError() == WSAHOST_NOT_FOUND, "expected 11001, got %d\n", WSAGetLastError());
     ok(result == NULL, "got %p\n", result);
 
     for (i = 0;i < (sizeof(hinttests) / sizeof(hinttests[0]));i++)
@@ -6039,14 +6042,18 @@ static void test_getaddrinfo(void)
     memset(&hint, 0, sizeof(ADDRINFOA));
 
     result = (ADDRINFOA *)0xdeadbeef;
+    WSASetLastError(0xdeadbeef);
     ret = pgetaddrinfo(NULL, NULL, NULL, &result);
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+    ok(WSAGetLastError() == WSAHOST_NOT_FOUND, "expected 11001, got %d\n", WSAGetLastError());
     ok(result == NULL, "got %p\n", result);
 
     result = NULL;
+    WSASetLastError(0xdeadbeef);
     ret = pgetaddrinfo("", NULL, NULL, &result);
     ok(!ret, "getaddrinfo failed with %d\n", WSAGetLastError());
     ok(result != NULL, "getaddrinfo failed\n");
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     pfreeaddrinfo(result);
 
     result = NULL;
@@ -6063,8 +6070,10 @@ static void test_getaddrinfo(void)
     pfreeaddrinfo(result2);
 
     result = NULL;
+    WSASetLastError(0xdeadbeef);
     ret = pgetaddrinfo("", "0", NULL, &result);
     ok(!ret, "getaddrinfo failed with %d\n", WSAGetLastError());
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     ok(result != NULL, "getaddrinfo failed\n");
 
     result2 = NULL;
@@ -6101,11 +6110,14 @@ static void test_getaddrinfo(void)
     pfreeaddrinfo(result);
 
     result = NULL;
+    WSASetLastError(0xdeadbeef);
     ret = pgetaddrinfo("localhost", "80", &hint, &result);
     ok(!ret, "getaddrinfo failed with %d\n", WSAGetLastError());
+    ok(WSAGetLastError() == 0, "expected 0, got %d\n", WSAGetLastError());
     pfreeaddrinfo(result);
 
     result = (ADDRINFOA *)0xdeadbeef;
+    WSASetLastError(0xdeadbeef);
     ret = pgetaddrinfo("nxdomain.codeweavers.com", NULL, NULL, &result);
     if(ret == 0)
     {
@@ -6113,6 +6125,7 @@ static void test_getaddrinfo(void)
         return;
     }
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+    ok(WSAGetLastError() == WSAHOST_NOT_FOUND, "expected 11001, got %d\n", WSAGetLastError());
     ok(result == NULL, "got %p\n", result);
 
     for (i = 0;i < (sizeof(hinttests) / sizeof(hinttests[0]));i++)

@@ -479,6 +479,13 @@ ULONG CDECL wined3d_device_incref(struct wined3d_device *device)
     return refcount;
 }
 
+static void device_leftover_sampler(struct wine_rb_entry *entry, void *context)
+{
+    struct wined3d_sampler *sampler = WINE_RB_ENTRY_VALUE(entry, struct wined3d_sampler, entry);
+
+    ERR("Leftover sampler %p.\n", sampler);
+}
+
 ULONG CDECL wined3d_device_decref(struct wined3d_device *device)
 {
     ULONG refcount = InterlockedDecrement(&device->ref);
@@ -521,6 +528,8 @@ ULONG CDECL wined3d_device_decref(struct wined3d_device *device)
         if (device->hardwareCursor)
             DestroyCursor(device->hardwareCursor);
         device->hardwareCursor = 0;
+
+        wine_rb_destroy(&device->samplers, device_leftover_sampler, NULL);
 
         wined3d_decref(device->wined3d);
         device->wined3d = NULL;
@@ -607,7 +616,7 @@ static void device_load_logo(struct wined3d_device *device, const char *filename
 
         color_key.color_space_low_value = 0;
         color_key.color_space_high_value = 0;
-        wined3d_texture_set_color_key(device->logo_texture, WINEDDCKEY_SRCBLT, &color_key);
+        wined3d_texture_set_color_key(device->logo_texture, WINED3D_CKEY_SRC_BLT, &color_key);
     }
     else
     {
@@ -1020,6 +1029,13 @@ err_out:
     return hr;
 }
 
+static void device_free_sampler(struct wine_rb_entry *entry, void *context)
+{
+    struct wined3d_sampler *sampler = WINE_RB_ENTRY_VALUE(entry, struct wined3d_sampler, entry);
+
+    wined3d_sampler_decref(sampler);
+}
+
 HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
 {
     struct wined3d_resource *resource, *cursor;
@@ -1053,6 +1069,8 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
 
         resource->resource_ops->resource_unload(resource);
     }
+
+    wine_rb_clear(&device->samplers, device_free_sampler, NULL);
 
     /* Destroy the depth blt resources, they will be invalid after the reset. Also free shader
      * private data, it might contain opengl pointers
@@ -3019,7 +3037,7 @@ HRESULT CDECL wined3d_device_process_vertices(struct wined3d_device *device,
         e->data.addr += (ULONG_PTR)buffer_get_sysmem(buffer, context);
         if (buffer->buffer_object)
         {
-            GL_EXTCALL(glDeleteBuffersARB(1, &buffer->buffer_object));
+            GL_EXTCALL(glDeleteBuffers(1, &buffer->buffer_object));
             buffer->buffer_object = 0;
         }
         if (e->data.addr)
@@ -4613,6 +4631,8 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         device->exStyle = exStyle;
     }
 
+    wine_rb_clear(&device->samplers, device_free_sampler, NULL);
+
     if (reset_state)
     {
         TRACE("Resetting stateblock.\n");
@@ -4850,6 +4870,21 @@ struct wined3d_surface * CDECL wined3d_device_get_surface_from_dc(const struct w
     return NULL;
 }
 
+static int wined3d_sampler_compare(const void *key, const struct wine_rb_entry *entry)
+{
+    const struct wined3d_sampler *sampler = WINE_RB_ENTRY_VALUE(entry, struct wined3d_sampler, entry);
+
+    return memcmp(&sampler->desc, key, sizeof(sampler->desc));
+}
+
+static const struct wine_rb_functions wined3d_sampler_rb_functions =
+{
+    wined3d_rb_alloc,
+    wined3d_rb_realloc,
+    wined3d_rb_free,
+    wined3d_sampler_compare,
+};
+
 HRESULT device_init(struct wined3d_device *device, struct wined3d *wined3d,
         UINT adapter_idx, enum wined3d_device_type device_type, HWND focus_window, DWORD flags,
         BYTE surface_alignment, struct wined3d_device_parent *device_parent)
@@ -4881,12 +4916,19 @@ HRESULT device_init(struct wined3d_device *device, struct wined3d *wined3d,
 
     fragment_pipeline = adapter->fragment_pipe;
 
+    if (wine_rb_init(&device->samplers, &wined3d_sampler_rb_functions) == -1)
+    {
+        ERR("Failed to initialize sampler rbtree.\n");
+        return E_OUTOFMEMORY;
+    }
+
     if (vertex_pipeline->vp_states && fragment_pipeline->states
             && FAILED(hr = compile_state_table(device->StateTable, device->multistate_funcs,
             &adapter->gl_info, &adapter->d3d_info, vertex_pipeline,
             fragment_pipeline, misc_state_template)))
     {
         ERR("Failed to compile state table, hr %#x.\n", hr);
+        wine_rb_destroy(&device->samplers, NULL, NULL);
         wined3d_decref(device->wined3d);
         return hr;
     }
@@ -4916,6 +4958,7 @@ err:
     {
         HeapFree(GetProcessHeap(), 0, device->multistate_funcs[i]);
     }
+    wine_rb_destroy(&device->samplers, NULL, NULL);
     wined3d_decref(device->wined3d);
     return hr;
 }

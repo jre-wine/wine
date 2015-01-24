@@ -194,7 +194,7 @@
 @ cdecl wined3d_rendertarget_view_incref(ptr)
 @ cdecl wined3d_rendertarget_view_set_parent(ptr ptr)
 
-@ cdecl wined3d_sampler_create(ptr ptr)
+@ cdecl wined3d_sampler_create(ptr ptr ptr ptr)
 @ cdecl wined3d_sampler_decref(ptr)
 @ cdecl wined3d_sampler_get_parent(ptr)
 @ cdecl wined3d_sampler_incref(ptr)
@@ -258,7 +258,7 @@
 @ cdecl wined3d_swapchain_set_window(ptr ptr)
 
 @ cdecl wined3d_texture_add_dirty_region(ptr long ptr)
-@ cdecl wined3d_texture_create(ptr ptr long long ptr ptr ptr)
+@ cdecl wined3d_texture_create(ptr ptr long long ptr ptr ptr ptr)
 @ cdecl wined3d_texture_decref(ptr)
 @ cdecl wined3d_texture_generate_mipmaps(ptr)
 @ cdecl wined3d_texture_get_autogen_filter_type(ptr)

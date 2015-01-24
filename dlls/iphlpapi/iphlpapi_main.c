@@ -442,6 +442,20 @@ DWORD WINAPI FlushIpNetTable(DWORD dwIfIndex)
   return ERROR_NOT_SUPPORTED;
 }
 
+/******************************************************************
+ *    FreeMibTable (IPHLPAPI.@)
+ *
+ * Free buffer allocated by network functions
+ *
+ * PARAMS
+ *  ptr     [In] pointer to the buffer to free
+ *
+ */
+void WINAPI FreeMibTable(void *ptr)
+{
+  TRACE("(%p)\n", ptr);
+  HeapFree(GetProcessHeap(), 0, ptr);
+}
 
 /******************************************************************
  *    GetAdapterIndex (IPHLPAPI.@)
@@ -589,6 +603,12 @@ DWORD WINAPI GetAdaptersInfo(PIP_ADAPTER_INFO pAdapterInfo, PULONG pOutBufLen)
                     nextIPAddr++;
                   }
                 }
+              }
+              /* If no IP was found it probably means that the interface is not
+               * configured. In this case we have to return a zeroed IP and mask. */
+              if (firstIPAddr) {
+                strcpy(ptr->IpAddressList.IpAddress.String, "0.0.0.0");
+                strcpy(ptr->IpAddressList.IpMask.String, "0.0.0.0");
               }
               /* Find first router through this interface, which we'll assume
                * is the default gateway for this adapter */
