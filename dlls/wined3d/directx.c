@@ -135,6 +135,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_point_parameters",             ARB_POINT_PARAMETERS          },
     {"GL_ARB_point_sprite",                 ARB_POINT_SPRITE              },
     {"GL_ARB_provoking_vertex",             ARB_PROVOKING_VERTEX          },
+    {"GL_ARB_sampler_objects",              ARB_SAMPLER_OBJECTS           },
     {"GL_ARB_shader_bit_encoding",          ARB_SHADER_BIT_ENCODING       },
     {"GL_ARB_shader_objects",               ARB_SHADER_OBJECTS            },
     {"GL_ARB_shader_texture_lod",           ARB_SHADER_TEXTURE_LOD        },
@@ -247,32 +248,10 @@ const struct min_lookup minMipLookup[] =
     {{GL_LINEAR,    GL_LINEAR_MIPMAP_NEAREST,   GL_LINEAR_MIPMAP_LINEAR}},  /* LINEAR */
 };
 
-const struct min_lookup minMipLookup_noFilter[] =
-{
-    /* NONE         POINT                       LINEAR */
-    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* NONE */
-    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* POINT */
-    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* LINEAR */
-};
-
-const struct min_lookup minMipLookup_noMip[] =
-{
-    /* NONE         POINT                       LINEAR */
-    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* NONE */
-    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* POINT */
-    {{GL_LINEAR,    GL_LINEAR,                  GL_LINEAR }},               /* LINEAR */
-};
-
 const GLenum magLookup[] =
 {
     /* NONE     POINT       LINEAR */
     GL_NEAREST, GL_NEAREST, GL_LINEAR,
-};
-
-const GLenum magLookup_noFilter[] =
-{
-    /* NONE     POINT       LINEAR */
-    GL_NEAREST, GL_NEAREST, GL_NEAREST,
 };
 
 struct wined3d_caps_gl_ctx
@@ -570,15 +549,15 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     gl_info->gl_ops.gl.p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 4, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, 0);
     checkGLcall("Specifying the PBO test texture");
 
-    GL_EXTCALL(glGenBuffersARB(1, &pbo));
-    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, pbo));
-    GL_EXTCALL(glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, sizeof(pattern), pattern, GL_STREAM_DRAW_ARB));
+    GL_EXTCALL(glGenBuffers(1, &pbo));
+    GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo));
+    GL_EXTCALL(glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(pattern), pattern, GL_STREAM_DRAW));
     checkGLcall("Specifying the PBO test pbo");
 
     gl_info->gl_ops.gl.p_glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
     checkGLcall("Loading the PBO test texture");
 
-    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+    GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
 
     gl_info->gl_ops.gl.p_glFinish(); /* just to be sure */
 
@@ -587,7 +566,7 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     checkGLcall("Reading back the PBO test texture");
 
     gl_info->gl_ops.gl.p_glDeleteTextures(1, &texture);
-    GL_EXTCALL(glDeleteBuffersARB(1, &pbo));
+    GL_EXTCALL(glDeleteBuffers(1, &pbo));
     checkGLcall("PBO test cleanup");
 
     if (memcmp(check, pattern, sizeof(check)))
@@ -2539,6 +2518,21 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glPointParameterfvARB)
     /* GL_ARB_provoking_vertex */
     USE_GL_FUNC(glProvokingVertex)
+    /* GL_ARB_sampler_objects */
+    USE_GL_FUNC(glGenSamplers)
+    USE_GL_FUNC(glDeleteSamplers)
+    USE_GL_FUNC(glIsSampler)
+    USE_GL_FUNC(glBindSampler)
+    USE_GL_FUNC(glSamplerParameteri)
+    USE_GL_FUNC(glSamplerParameterf)
+    USE_GL_FUNC(glSamplerParameteriv)
+    USE_GL_FUNC(glSamplerParameterfv)
+    USE_GL_FUNC(glSamplerParameterIiv)
+    USE_GL_FUNC(glSamplerParameterIuiv)
+    USE_GL_FUNC(glGetSamplerParameteriv)
+    USE_GL_FUNC(glGetSamplerParameterfv)
+    USE_GL_FUNC(glGetSamplerParameterIiv)
+    USE_GL_FUNC(glGetSamplerParameterIuiv)
     /* GL_ARB_shader_objects */
     USE_GL_FUNC(glAttachObjectARB)
     USE_GL_FUNC(glBindAttribLocationARB)
@@ -2854,9 +2848,7 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glVertexWeighthNV)
     USE_GL_FUNC(glVertexWeighthvNV)
     /* GL_NV_point_sprite */
-    USE_GL_FUNC(glPointParameteri)
     USE_GL_FUNC(glPointParameteriNV)
-    USE_GL_FUNC(glPointParameteriv)
     USE_GL_FUNC(glPointParameterivNV)
     /* GL_NV_register_combiners */
     USE_GL_FUNC(glCombinerInputNV)
@@ -2876,10 +2868,89 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
 
     /* Newer core functions */
     USE_GL_FUNC(glActiveTexture)            /* OpenGL 1.3 */
+    USE_GL_FUNC(glAttachShader)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glBindAttribLocation)       /* OpenGL 2.0 */
+    USE_GL_FUNC(glBindBuffer)               /* OpenGL 1.5 */
     USE_GL_FUNC(glBlendColor)               /* OpenGL 1.4 */
     USE_GL_FUNC(glBlendEquation)            /* OpenGL 1.4 */
     USE_GL_FUNC(glBlendEquationSeparate)    /* OpenGL 2.0 */
     USE_GL_FUNC(glBlendFuncSeparate)        /* OpenGL 1.4 */
+    USE_GL_FUNC(glBufferData)               /* OpenGL 1.5 */
+    USE_GL_FUNC(glBufferSubData)            /* OpenGL 1.5 */
+    USE_GL_FUNC(glColorMaski)               /* OpenGL 3.0 */
+    USE_GL_FUNC(glCompileShader)            /* OpenGL 2.0 */
+    USE_GL_FUNC(glCompressedTexImage2D)     /* OpenGL 1.3 */
+    USE_GL_FUNC(glCompressedTexImage3D)     /* OpenGL 1.3 */
+    USE_GL_FUNC(glCompressedTexSubImage2D)  /* OpenGL 1.3 */
+    USE_GL_FUNC(glCompressedTexSubImage3D)  /* OpenGL 1.3 */
+    USE_GL_FUNC(glCreateProgram)            /* OpenGL 2.0 */
+    USE_GL_FUNC(glCreateShader)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glDeleteBuffers)            /* OpenGL 1.5 */
+    USE_GL_FUNC(glDeleteProgram)            /* OpenGL 2.0 */
+    USE_GL_FUNC(glDeleteShader)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glDetachShader)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glDisableVertexAttribArray) /* OpenGL 2.0 */
+    USE_GL_FUNC(glDrawBuffers)              /* OpenGL 2.0 */
+    USE_GL_FUNC(glDrawElementsInstanced)    /* OpenGL 3.1 */
+    USE_GL_FUNC(glEnableVertexAttribArray)  /* OpenGL 2.0 */
+    USE_GL_FUNC(glGenBuffers)               /* OpenGL 1.5 */
+    USE_GL_FUNC(glGetActiveUniform)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetAttachedShaders)       /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetAttribLocation)        /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetBufferSubData)         /* OpenGL 1.5 */
+    USE_GL_FUNC(glGetCompressedTexImage)    /* OpenGL 1.3 */
+    USE_GL_FUNC(glGetProgramInfoLog)        /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetProgramiv)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetShaderInfoLog)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetShaderiv)              /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetShaderSource)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetUniformfv)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetUniformiv)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetUniformLocation)       /* OpenGL 2.0 */
+    USE_GL_FUNC(glLinkProgram)              /* OpenGL 2.0 */
+    USE_GL_FUNC(glMapBuffer)                /* OpenGL 1.5 */
+    USE_GL_FUNC(glPointParameteri)          /* OpenGL 1.4 */
+    USE_GL_FUNC(glPointParameteriv)         /* OpenGL 1.4 */
+    USE_GL_FUNC(glShaderSource)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glStencilFuncSeparate)      /* OpenGL 2.0 */
+    USE_GL_FUNC(glStencilOpSeparate)        /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform1f)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform1fv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform1i)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform1iv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform2f)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform2fv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform2i)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform2iv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform3f)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform3fv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform3i)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform3iv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform4f)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform4fv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform4i)                /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniform4iv)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniformMatrix2fv)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniformMatrix3fv)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glUniformMatrix4fv)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glUnmapBuffer)              /* OpenGL 1.5 */
+    USE_GL_FUNC(glUseProgram)               /* OpenGL 2.0 */
+    USE_GL_FUNC(glValidateProgram)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib1f)           /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib1fv)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib2f)           /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib2fv)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib3f)           /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib3fv)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4f)           /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4fv)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4Nsv)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4Nubv)        /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4Nusv)        /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4sv)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttrib4ubv)         /* OpenGL 2.0 */
+    USE_GL_FUNC(glVertexAttribDivisor)      /* OpenGL 3.3 */
+    USE_GL_FUNC(glVertexAttribPointer)      /* OpenGL 2.0 */
 #undef USE_GL_FUNC
 
 #ifndef USE_WIN32_OPENGL
@@ -2888,19 +2959,101 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     gl_info->gl_ops.ext = ((struct opengl_funcs *)NtCurrentTeb()->glTable)->ext;
 #endif
 
-#define MAP_GL_FUNCTION(core_func, ext_func) \
+#define MAP_GL_FUNCTION(core_func, ext_func)                                          \
         do                                                                            \
         {                                                                             \
             if (!gl_info->gl_ops.ext.p_##core_func)                                   \
                 gl_info->gl_ops.ext.p_##core_func = gl_info->gl_ops.ext.p_##ext_func; \
         } while (0)
+#define MAP_GL_FUNCTION_CAST(core_func, ext_func)                                             \
+        do                                                                                    \
+        {                                                                                     \
+            if (!gl_info->gl_ops.ext.p_##core_func)                                           \
+                gl_info->gl_ops.ext.p_##core_func = (void *)gl_info->gl_ops.ext.p_##ext_func; \
+        } while (0)
 
     MAP_GL_FUNCTION(glActiveTexture, glActiveTextureARB);
+    MAP_GL_FUNCTION(glAttachShader, glAttachObjectARB);
+    MAP_GL_FUNCTION(glBindAttribLocation, glBindAttribLocationARB);
+    MAP_GL_FUNCTION(glBindBuffer, glBindBufferARB);
     MAP_GL_FUNCTION(glBlendColor, glBlendColorEXT);
     MAP_GL_FUNCTION(glBlendEquation, glBlendEquationEXT);
     MAP_GL_FUNCTION(glBlendEquationSeparate, glBlendEquationSeparateEXT);
     MAP_GL_FUNCTION(glBlendFuncSeparate, glBlendFuncSeparateEXT);
+    MAP_GL_FUNCTION(glBufferData, glBufferDataARB);
+    MAP_GL_FUNCTION(glBufferSubData, glBufferSubDataARB);
+    MAP_GL_FUNCTION(glColorMaski, glColorMaskIndexedEXT);
+    MAP_GL_FUNCTION(glCompileShader, glCompileShaderARB);
+    MAP_GL_FUNCTION(glCompressedTexImage2D, glCompressedTexImage2DARB);
+    MAP_GL_FUNCTION(glCompressedTexImage3D, glCompressedTexImage3DARB);
+    MAP_GL_FUNCTION(glCompressedTexSubImage2D, glCompressedTexSubImage2DARB);
+    MAP_GL_FUNCTION(glCompressedTexSubImage3D, glCompressedTexSubImage3DARB);
+    MAP_GL_FUNCTION(glCreateProgram, glCreateProgramObjectARB);
+    MAP_GL_FUNCTION(glCreateShader, glCreateShaderObjectARB);
+    MAP_GL_FUNCTION(glDeleteBuffers, glDeleteBuffersARB);
+    MAP_GL_FUNCTION(glDeleteProgram, glDeleteObjectARB);
+    MAP_GL_FUNCTION(glDeleteShader, glDeleteObjectARB);
+    MAP_GL_FUNCTION(glDetachShader, glDetachObjectARB);
+    MAP_GL_FUNCTION(glDisableVertexAttribArray, glDisableVertexAttribArrayARB);
+    MAP_GL_FUNCTION(glDrawBuffers, glDrawBuffersARB);
+    MAP_GL_FUNCTION(glDrawElementsInstanced, glDrawElementsInstancedARB);
+    MAP_GL_FUNCTION(glEnableVertexAttribArray, glEnableVertexAttribArrayARB);
+    MAP_GL_FUNCTION(glGenBuffers, glGenBuffersARB);
+    MAP_GL_FUNCTION(glGetActiveUniform, glGetActiveUniformARB);
+    MAP_GL_FUNCTION(glGetAttachedShaders, glGetAttachedObjectsARB);
+    MAP_GL_FUNCTION(glGetAttribLocation, glGetAttribLocationARB);
+    MAP_GL_FUNCTION(glGetBufferSubData, glGetBufferSubDataARB);
+    MAP_GL_FUNCTION(glGetCompressedTexImage, glGetCompressedTexImageARB);
+    MAP_GL_FUNCTION(glGetProgramInfoLog, glGetInfoLogARB);
+    MAP_GL_FUNCTION(glGetProgramiv, glGetObjectParameterivARB);
+    MAP_GL_FUNCTION(glGetShaderInfoLog, glGetInfoLogARB);
+    MAP_GL_FUNCTION(glGetShaderiv, glGetObjectParameterivARB);
+    MAP_GL_FUNCTION(glGetShaderSource, glGetShaderSourceARB);
+    MAP_GL_FUNCTION(glGetUniformfv, glGetUniformfvARB);
+    MAP_GL_FUNCTION(glGetUniformiv, glGetUniformivARB);
+    MAP_GL_FUNCTION(glGetUniformLocation, glGetUniformLocationARB);
+    MAP_GL_FUNCTION(glLinkProgram, glLinkProgramARB);
+    MAP_GL_FUNCTION(glMapBuffer, glMapBufferARB);
+    MAP_GL_FUNCTION_CAST(glShaderSource, glShaderSourceARB);
+    MAP_GL_FUNCTION(glUniform1f, glUniform1fARB);
+    MAP_GL_FUNCTION(glUniform1fv, glUniform1fvARB);
+    MAP_GL_FUNCTION(glUniform1i, glUniform1iARB);
+    MAP_GL_FUNCTION(glUniform1iv, glUniform1ivARB);
+    MAP_GL_FUNCTION(glUniform2f, glUniform2fARB);
+    MAP_GL_FUNCTION(glUniform2fv, glUniform2fvARB);
+    MAP_GL_FUNCTION(glUniform2i, glUniform2iARB);
+    MAP_GL_FUNCTION(glUniform2iv, glUniform2ivARB);
+    MAP_GL_FUNCTION(glUniform3f, glUniform3fARB);
+    MAP_GL_FUNCTION(glUniform3fv, glUniform3fvARB);
+    MAP_GL_FUNCTION(glUniform3i, glUniform3iARB);
+    MAP_GL_FUNCTION(glUniform3iv, glUniform3ivARB);
+    MAP_GL_FUNCTION(glUniform4f, glUniform4fARB);
+    MAP_GL_FUNCTION(glUniform4fv, glUniform4fvARB);
+    MAP_GL_FUNCTION(glUniform4i, glUniform4iARB);
+    MAP_GL_FUNCTION(glUniform4iv, glUniform4ivARB);
+    MAP_GL_FUNCTION(glUniformMatrix2fv, glUniformMatrix2fvARB);
+    MAP_GL_FUNCTION(glUniformMatrix3fv, glUniformMatrix3fvARB);
+    MAP_GL_FUNCTION(glUniformMatrix4fv, glUniformMatrix4fvARB);
+    MAP_GL_FUNCTION(glUnmapBuffer, glUnmapBufferARB);
+    MAP_GL_FUNCTION(glUseProgram, glUseProgramObjectARB);
+    MAP_GL_FUNCTION(glValidateProgram, glValidateProgramARB);
+    MAP_GL_FUNCTION(glVertexAttrib1f, glVertexAttrib1fARB);
+    MAP_GL_FUNCTION(glVertexAttrib1fv, glVertexAttrib1fvARB);
+    MAP_GL_FUNCTION(glVertexAttrib2f, glVertexAttrib2fARB);
+    MAP_GL_FUNCTION(glVertexAttrib2fv, glVertexAttrib2fvARB);
+    MAP_GL_FUNCTION(glVertexAttrib3f, glVertexAttrib3fARB);
+    MAP_GL_FUNCTION(glVertexAttrib3fv, glVertexAttrib3fvARB);
+    MAP_GL_FUNCTION(glVertexAttrib4f, glVertexAttrib4fARB);
+    MAP_GL_FUNCTION(glVertexAttrib4fv, glVertexAttrib4fvARB);
+    MAP_GL_FUNCTION(glVertexAttrib4Nsv, glVertexAttrib4NsvARB);
+    MAP_GL_FUNCTION(glVertexAttrib4Nubv, glVertexAttrib4NubvARB);
+    MAP_GL_FUNCTION(glVertexAttrib4Nusv, glVertexAttrib4NusvARB);
+    MAP_GL_FUNCTION(glVertexAttrib4sv, glVertexAttrib4svARB);
+    MAP_GL_FUNCTION(glVertexAttrib4ubv, glVertexAttrib4ubvARB);
+    MAP_GL_FUNCTION(glVertexAttribDivisor, glVertexAttribDivisorARB);
+    MAP_GL_FUNCTION(glVertexAttribPointer, glVertexAttribPointerARB);
 #undef MAP_GL_FUNCTION
+#undef MAP_GL_FUNCTION_CAST
 }
 
 static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info)
@@ -3227,8 +3380,6 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     if (!gl_info->supported[NV_POINT_SPRITE] && gl_version >= MAKEDWORD_VERSION(1, 4))
     {
         TRACE("GL CORE: GL_NV_point_sprite support.\n");
-        gl_info->gl_ops.ext.p_glPointParameterivNV = gl_info->gl_ops.ext.p_glPointParameteriv;
-        gl_info->gl_ops.ext.p_glPointParameteriNV = gl_info->gl_ops.ext.p_glPointParameteri;
         gl_info->supported[NV_POINT_SPRITE] = TRUE;
     }
 
@@ -4891,7 +5042,8 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
         caps->StencilCaps |= WINED3DSTENCILCAPS_DECR  |
                               WINED3DSTENCILCAPS_INCR;
     }
-    if (gl_info->supported[EXT_STENCIL_TWO_SIDE] || gl_info->supported[ATI_SEPARATE_STENCIL])
+    if (gl_info->supported[WINED3D_GL_VERSION_2_0] || gl_info->supported[EXT_STENCIL_TWO_SIDE]
+            || gl_info->supported[ATI_SEPARATE_STENCIL])
     {
         caps->StencilCaps |= WINED3DSTENCILCAPS_TWOSIDED;
     }

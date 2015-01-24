@@ -59,7 +59,7 @@ static void surface_cleanup(struct wined3d_surface *surface)
         if (surface->pbo)
         {
             TRACE("Deleting PBO %u.\n", surface->pbo);
-            GL_EXTCALL(glDeleteBuffersARB(1, &surface->pbo));
+            GL_EXTCALL(glDeleteBuffers(1, &surface->pbo));
         }
 
         if (surface->rb_multisample)
@@ -310,11 +310,10 @@ void draw_textured_quad(const struct wined3d_surface *src_surface, struct wined3
     context_bind_texture(context, info.bind_target, texture->texture_rgb.name);
 
     /* Filtering for StretchRect */
-    gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_MAG_FILTER,
-            wined3d_gl_mag_filter(magLookup, filter));
+    gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_MAG_FILTER, wined3d_gl_mag_filter(filter));
     checkGLcall("glTexParameteri");
     gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_MIN_FILTER,
-            wined3d_gl_min_mip_filter(minMipLookup, filter, WINED3D_TEXF_NONE));
+            wined3d_gl_min_mip_filter(filter, WINED3D_TEXF_NONE));
     checkGLcall("glTexParameteri");
     gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_WRAP_S, GL_CLAMP);
     gl_info->gl_ops.gl.p_glTexParameteri(info.bind_target, GL_TEXTURE_WRAP_T, GL_CLAMP);
@@ -343,10 +342,10 @@ void draw_textured_quad(const struct wined3d_surface *src_surface, struct wined3
 
     /* We changed the filtering settings on the texture. Inform the
      * container about this to get the filters reset properly next draw. */
-    texture->texture_rgb.states[WINED3DTEXSTA_MAGFILTER] = WINED3D_TEXF_POINT;
-    texture->texture_rgb.states[WINED3DTEXSTA_MINFILTER] = WINED3D_TEXF_POINT;
-    texture->texture_rgb.states[WINED3DTEXSTA_MIPFILTER] = WINED3D_TEXF_NONE;
-    texture->texture_rgb.states[WINED3DTEXSTA_SRGBTEXTURE] = FALSE;
+    texture->texture_rgb.sampler_desc.mag_filter = WINED3D_TEXF_POINT;
+    texture->texture_rgb.sampler_desc.min_filter = WINED3D_TEXF_POINT;
+    texture->texture_rgb.sampler_desc.mip_filter = WINED3D_TEXF_NONE;
+    texture->texture_rgb.sampler_desc.srgb_decode = FALSE;
 }
 
 /* Works correctly only for <= 4 bpp formats. */
@@ -522,22 +521,22 @@ static void surface_prepare_buffer(struct wined3d_surface *surface)
     context = context_acquire(surface->resource.device, NULL);
     gl_info = context->gl_info;
 
-    GL_EXTCALL(glGenBuffersARB(1, &surface->pbo));
+    GL_EXTCALL(glGenBuffers(1, &surface->pbo));
     error = gl_info->gl_ops.gl.p_glGetError();
     if (!surface->pbo || error != GL_NO_ERROR)
         ERR("Failed to create a PBO with error %s (%#x).\n", debug_glerror(error), error);
 
     TRACE("Binding PBO %u.\n", surface->pbo);
 
-    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, surface->pbo));
-    checkGLcall("glBindBufferARB");
+    GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, surface->pbo));
+    checkGLcall("glBindBuffer");
 
-    GL_EXTCALL(glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, surface->resource.size + 4,
-            NULL, GL_STREAM_DRAW_ARB));
-    checkGLcall("glBufferDataARB");
+    GL_EXTCALL(glBufferData(GL_PIXEL_UNPACK_BUFFER, surface->resource.size + 4,
+            NULL, GL_STREAM_DRAW));
+    checkGLcall("glBufferData");
 
-    GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-    checkGLcall("glBindBufferARB");
+    GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
+    checkGLcall("glBindBuffer");
 
     context_release(context);
 }
@@ -733,10 +732,10 @@ static void surface_unmap(struct wined3d_surface *surface)
             context = context_acquire(device, NULL);
             gl_info = context->gl_info;
 
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, surface->pbo));
-            GL_EXTCALL(glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB));
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-            checkGLcall("glUnmapBufferARB");
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, surface->pbo));
+            GL_EXTCALL(glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER));
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
+            checkGLcall("glUnmapBuffer");
             context_release(context);
             break;
 
@@ -1152,8 +1151,8 @@ HRESULT CDECL wined3d_surface_get_render_target_data(struct wined3d_surface *sur
 /* Context activation is done by the caller. */
 static void surface_remove_pbo(struct wined3d_surface *surface, const struct wined3d_gl_info *gl_info)
 {
-    GL_EXTCALL(glDeleteBuffersARB(1, &surface->pbo));
-    checkGLcall("glDeleteBuffersARB(1, &surface->pbo)");
+    GL_EXTCALL(glDeleteBuffers(1, &surface->pbo));
+    checkGLcall("glDeleteBuffers(1, &surface->pbo)");
 
     surface->pbo = 0;
     surface_invalidate_location(surface, WINED3D_LOCATION_BUFFER);
@@ -1335,23 +1334,23 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
 
     if (format->flags & WINED3DFMT_FLAG_COMPRESSED)
     {
-        TRACE("(%p) : Calling glGetCompressedTexImageARB level %d, format %#x, type %#x, data %p.\n",
+        TRACE("(%p) : Calling glGetCompressedTexImage level %d, format %#x, type %#x, data %p.\n",
                 surface, surface->texture_level, format->glFormat, format->glType, data.addr);
 
         if (data.buffer_object)
         {
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, data.buffer_object));
-            checkGLcall("glBindBufferARB");
-            GL_EXTCALL(glGetCompressedTexImageARB(surface->texture_target, surface->texture_level, NULL));
-            checkGLcall("glGetCompressedTexImageARB");
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
-            checkGLcall("glBindBufferARB");
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, data.buffer_object));
+            checkGLcall("glBindBuffer");
+            GL_EXTCALL(glGetCompressedTexImage(surface->texture_target, surface->texture_level, NULL));
+            checkGLcall("glGetCompressedTexImage");
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, 0));
+            checkGLcall("glBindBuffer");
         }
         else
         {
-            GL_EXTCALL(glGetCompressedTexImageARB(surface->texture_target,
+            GL_EXTCALL(glGetCompressedTexImage(surface->texture_target,
                     surface->texture_level, data.addr));
-            checkGLcall("glGetCompressedTexImageARB");
+            checkGLcall("glGetCompressedTexImage");
         }
     }
     else
@@ -1380,15 +1379,15 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
 
         if (data.buffer_object)
         {
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, data.buffer_object));
-            checkGLcall("glBindBufferARB");
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, data.buffer_object));
+            checkGLcall("glBindBuffer");
 
             gl_info->gl_ops.gl.p_glGetTexImage(surface->texture_target, surface->texture_level,
                     gl_format, gl_type, NULL);
             checkGLcall("glGetTexImage");
 
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
-            checkGLcall("glBindBufferARB");
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, 0));
+            checkGLcall("glBindBuffer");
         }
         else
         {
@@ -1494,8 +1493,8 @@ void wined3d_surface_upload_data(struct wined3d_surface *surface, const struct w
 
     if (data->buffer_object)
     {
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, data->buffer_object));
-        checkGLcall("glBindBufferARB");
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, data->buffer_object));
+        checkGLcall("glBindBuffer");
     }
 
     if (format->flags & WINED3DFMT_FLAG_COMPRESSED)
@@ -1516,30 +1515,30 @@ void wined3d_surface_upload_data(struct wined3d_surface *surface, const struct w
         else
             internal = format->glInternal;
 
-        TRACE("glCompressedTexSubImage2DARB, target %#x, level %d, x %d, y %d, w %d, h %d, "
+        TRACE("glCompressedTexSubImage2D, target %#x, level %d, x %d, y %d, w %d, h %d, "
                 "format %#x, image_size %#x, addr %p.\n", surface->texture_target, surface->texture_level,
                 dst_point->x, dst_point->y, update_w, update_h, internal, row_count * row_length, addr);
 
         if (row_length == src_pitch)
         {
-            GL_EXTCALL(glCompressedTexSubImage2DARB(surface->texture_target, surface->texture_level,
+            GL_EXTCALL(glCompressedTexSubImage2D(surface->texture_target, surface->texture_level,
                     dst_point->x, dst_point->y, update_w, update_h, internal, row_count * row_length, addr));
         }
         else
         {
             UINT row, y;
 
-            /* glCompressedTexSubImage2DARB() ignores pixel store state, so we
-             * can't use the unpack row length like below. */
+            /* glCompressedTexSubImage2D() ignores pixel store state, so we
+             * can't use the unpack row length like for glTexSubImage2D. */
             for (row = 0, y = dst_point->y; row < row_count; ++row)
             {
-                GL_EXTCALL(glCompressedTexSubImage2DARB(surface->texture_target, surface->texture_level,
+                GL_EXTCALL(glCompressedTexSubImage2D(surface->texture_target, surface->texture_level,
                         dst_point->x, y, update_w, format->block_height, internal, row_length, addr));
                 y += format->block_height;
                 addr += src_pitch;
             }
         }
-        checkGLcall("glCompressedTexSubImage2DARB");
+        checkGLcall("glCompressedTexSubImage2D");
     }
     else
     {
@@ -1561,8 +1560,8 @@ void wined3d_surface_upload_data(struct wined3d_surface *surface, const struct w
 
     if (data->buffer_object)
     {
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-        checkGLcall("glBindBufferARB");
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
+        checkGLcall("glBindBuffer");
     }
 
     if (wined3d_settings.strict_draw_ordering)
@@ -1822,11 +1821,11 @@ void surface_load(struct wined3d_surface *surface, BOOL srgb)
     if (surface->resource.pool == WINED3D_POOL_SCRATCH)
         ERR("Not supported on scratch surfaces.\n");
 
-    ck_changed = !(surface->flags & SFLAG_GLCKEY) != !(surface->container->color_key_flags & WINEDDSD_CKSRCBLT);
+    ck_changed = !(surface->flags & SFLAG_GLCKEY) != !(surface->container->color_key_flags & WINED3D_CKEY_SRC_BLT);
 
     /* Reload if either the texture and sysmem have different ideas about the
      * color key, or the actual key values changed. */
-    if (ck_changed || ((surface->container->color_key_flags & WINEDDSD_CKSRCBLT)
+    if (ck_changed || ((surface->container->color_key_flags & WINED3D_CKEY_SRC_BLT)
             && (surface->gl_color_key.color_space_low_value
             != surface->container->src_blt_color_key.color_space_low_value
             || surface->gl_color_key.color_space_high_value
@@ -2665,9 +2664,9 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
             context = context_acquire(device, NULL);
             gl_info = context->gl_info;
 
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, surface->pbo));
-            base_memory = GL_EXTCALL(glMapBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, GL_READ_WRITE_ARB));
-            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, surface->pbo));
+            base_memory = GL_EXTCALL(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_READ_WRITE));
+            GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
             checkGLcall("map PBO");
 
             context_release(context);
@@ -2839,8 +2838,8 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
 
     if (data.buffer_object)
     {
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, data.buffer_object));
-        checkGLcall("glBindBufferARB");
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, data.buffer_object));
+        checkGLcall("glBindBuffer");
     }
 
     /* Setup pixel store pack state -- to glReadPixels into the correct place */
@@ -2868,8 +2867,8 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
 
         if (data.buffer_object)
         {
-            mem = GL_EXTCALL(glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB));
-            checkGLcall("glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_WRITE_ARB)");
+            mem = GL_EXTCALL(glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_WRITE));
+            checkGLcall("glMapBuffer");
         }
         else
             mem = data.addr;
@@ -2887,14 +2886,14 @@ static void read_from_framebuffer(struct wined3d_surface *surface, DWORD dst_loc
         HeapFree(GetProcessHeap(), 0, row);
 
         if (data.buffer_object)
-            GL_EXTCALL(glUnmapBufferARB(GL_PIXEL_PACK_BUFFER_ARB));
+            GL_EXTCALL(glUnmapBuffer(GL_PIXEL_PACK_BUFFER));
     }
 
 error:
     if (data.buffer_object)
     {
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
-        checkGLcall("glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0)");
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, 0));
+        checkGLcall("glBindBuffer");
     }
 
     context_release(context);
@@ -3239,11 +3238,10 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
     checkGLcall("glCopyTexSubImage2D");
 
     /* No issue with overriding these - the sampler is dirty due to blit usage */
-    gl_info->gl_ops.gl.p_glTexParameteri(texture_target, GL_TEXTURE_MAG_FILTER,
-            wined3d_gl_mag_filter(magLookup, filter));
+    gl_info->gl_ops.gl.p_glTexParameteri(texture_target, GL_TEXTURE_MAG_FILTER, wined3d_gl_mag_filter(filter));
     checkGLcall("glTexParameteri");
     gl_info->gl_ops.gl.p_glTexParameteri(texture_target, GL_TEXTURE_MIN_FILTER,
-            wined3d_gl_min_mip_filter(minMipLookup, filter, WINED3D_TEXF_NONE));
+            wined3d_gl_min_mip_filter(filter, WINED3D_TEXF_NONE));
     checkGLcall("glTexParameteri");
 
     if (!src_surface->container->swapchain
@@ -3687,12 +3685,12 @@ static HRESULT surface_blt_special(struct wined3d_surface *dst_surface, const RE
         else if (flags & WINEDDBLT_KEYSRCOVERRIDE)
         {
             /* Use color key from DDBltFx */
-            wined3d_texture_set_color_key(src_surface->container, WINEDDSD_CKSRCBLT, &DDBltFx->ddckSrcColorkey);
+            wined3d_texture_set_color_key(src_surface->container, WINED3D_CKEY_SRC_BLT, &DDBltFx->ddckSrcColorkey);
         }
         else
         {
             /* Do not use color key */
-            wined3d_texture_set_color_key(src_surface->container, WINEDDSD_CKSRCBLT, NULL);
+            wined3d_texture_set_color_key(src_surface->container, WINED3D_CKEY_SRC_BLT, NULL);
         }
 
         surface_blt_to_drawable(device, filter,
@@ -3700,8 +3698,8 @@ static HRESULT surface_blt_special(struct wined3d_surface *dst_surface, const RE
                 src_surface, src_rect, dst_surface, dst_rect);
 
         /* Restore the color key parameters */
-        wined3d_texture_set_color_key(src_surface->container, WINEDDSD_CKSRCBLT,
-                (old_color_key_flags & WINEDDSD_CKSRCBLT) ? &old_blt_key : NULL);
+        wined3d_texture_set_color_key(src_surface->container, WINED3D_CKEY_SRC_BLT,
+                (old_color_key_flags & WINED3D_CKEY_SRC_BLT) ? &old_blt_key : NULL);
 
         surface_validate_location(dst_surface, dst_surface->container->resource.draw_binding);
         surface_invalidate_location(dst_surface, ~dst_surface->container->resource.draw_binding);
@@ -4004,9 +4002,9 @@ static void surface_copy_simple_location(struct wined3d_surface *surface, DWORD 
     {
         context = context_acquire(device, NULL);
         gl_info = context->gl_info;
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, dst.buffer_object));
-        GL_EXTCALL(glBufferSubDataARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0, size, src.addr));
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, dst.buffer_object));
+        GL_EXTCALL(glBufferSubData(GL_PIXEL_UNPACK_BUFFER, 0, size, src.addr));
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0));
         checkGLcall("Upload PBO");
         context_release(context);
         return;
@@ -4015,9 +4013,9 @@ static void surface_copy_simple_location(struct wined3d_surface *surface, DWORD 
     {
         context = context_acquire(device, NULL);
         gl_info = context->gl_info;
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, src.buffer_object));
-        GL_EXTCALL(glGetBufferSubDataARB(GL_PIXEL_PACK_BUFFER_ARB, 0, size, dst.addr));
-        GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, src.buffer_object));
+        GL_EXTCALL(glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, size, dst.addr));
+        GL_EXTCALL(glBindBuffer(GL_PIXEL_PACK_BUFFER, 0));
         checkGLcall("Download PBO");
         context_release(context);
         return;
@@ -4180,7 +4178,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     wined3d_texture_prepare_texture(texture, context, srgb);
     wined3d_texture_bind_and_dirtify(texture, context, srgb);
 
-    if (texture->color_key_flags & WINEDDSD_CKSRCBLT)
+    if (texture->color_key_flags & WINED3D_CKEY_SRC_BLT)
     {
         surface->flags |= SFLAG_GLCKEY;
         surface->gl_color_key = texture->src_blt_color_key;

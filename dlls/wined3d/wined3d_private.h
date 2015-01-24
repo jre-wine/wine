@@ -186,20 +186,19 @@ struct min_lookup
 };
 
 extern const struct min_lookup minMipLookup[WINED3D_TEXF_LINEAR + 1] DECLSPEC_HIDDEN;
-extern const struct min_lookup minMipLookup_noFilter[WINED3D_TEXF_LINEAR + 1] DECLSPEC_HIDDEN;
-extern const struct min_lookup minMipLookup_noMip[WINED3D_TEXF_LINEAR + 1] DECLSPEC_HIDDEN;
 extern const GLenum magLookup[WINED3D_TEXF_LINEAR + 1] DECLSPEC_HIDDEN;
-extern const GLenum magLookup_noFilter[WINED3D_TEXF_LINEAR + 1] DECLSPEC_HIDDEN;
 
-static inline GLenum wined3d_gl_mag_filter(const GLenum mag_lookup[], enum wined3d_texture_filter_type mag_filter)
+GLenum wined3d_gl_compare_func(enum wined3d_cmp_func f) DECLSPEC_HIDDEN;
+
+static inline GLenum wined3d_gl_mag_filter(enum wined3d_texture_filter_type mag_filter)
 {
-    return mag_lookup[mag_filter];
+    return magLookup[mag_filter];
 }
 
-static inline GLenum wined3d_gl_min_mip_filter(const struct min_lookup min_mip_lookup[],
-        enum wined3d_texture_filter_type min_filter, enum wined3d_texture_filter_type mip_filter)
+static inline GLenum wined3d_gl_min_mip_filter(enum wined3d_texture_filter_type min_filter,
+        enum wined3d_texture_filter_type mip_filter)
 {
-    return min_mip_lookup[min_filter].mip[mip_filter];
+    return minMipLookup[min_filter].mip[mip_filter];
 }
 
 /* float_16_to_32() and float_32_to_16() (see implementation in
@@ -582,6 +581,20 @@ struct wined3d_shader_resource_info
     enum wined3d_data_type data_type;
 };
 
+struct wined3d_shader_sampler_map_entry
+{
+    unsigned int resource_idx;
+    unsigned int sampler_idx;
+    unsigned int bind_idx;
+};
+
+struct wined3d_shader_sampler_map
+{
+    struct wined3d_shader_sampler_map_entry *entries;
+    size_t size;
+    size_t count;
+};
+
 #define WINED3D_SHADER_VERSION(major, minor) (((major) << 8) | (minor))
 
 struct wined3d_shader_reg_maps
@@ -602,6 +615,7 @@ struct wined3d_shader_reg_maps
     UINT cb_sizes[WINED3D_MAX_CBS];
 
     struct wined3d_shader_resource_info resource_info[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
+    struct wined3d_shader_sampler_map sampler_map;
     BYTE bumpmat;                           /* MAX_TEXTURES, 8 */
     BYTE luminanceparams;                   /* MAX_TEXTURES, 8 */
 
@@ -1003,7 +1017,10 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) DECLSPEC_HIDDEN;
 #define STATE_CONSTANT_BUFFER(a) (STATE_SHADER(WINED3D_SHADER_TYPE_COUNT) + (a))
 #define STATE_IS_CONSTANT_BUFFER(a) ((a) >= STATE_CONSTANT_BUFFER(0) && (a) < STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_COUNT))
 
-#define STATE_TRANSFORM(a) (STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_COUNT) + (a) - 1)
+#define STATE_SHADER_RESOURCE_BINDING (STATE_CONSTANT_BUFFER(WINED3D_SHADER_TYPE_COUNT))
+#define STATE_IS_SHADER_RESOURCE_BINDING(a) ((a) == STATE_SHADER_RESOURCE_BINDING)
+
+#define STATE_TRANSFORM(a) (STATE_SHADER_RESOURCE_BINDING + (a))
 #define STATE_IS_TRANSFORM(a) ((a) >= STATE_TRANSFORM(1) && (a) <= STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255)))
 
 #define STATE_STREAMSRC (STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(255)) + 1)
@@ -1142,7 +1159,8 @@ struct wined3d_context
     DWORD needs_set : 1;
     DWORD hdc_is_private : 1;
     DWORD hdc_has_format : 1;           /* only meaningful if hdc_is_private */
-    DWORD padding : 16;
+    DWORD update_shader_resource_bindings : 1;
+    DWORD padding : 15;
     DWORD shader_update_mask;
     DWORD constant_update_mask;
     DWORD                   numbered_array_mask;
@@ -1995,6 +2013,7 @@ struct wined3d_device
 
     struct list             resources; /* a linked list to track resources created by the device */
     struct list             shaders;   /* a linked list to track shaders (pixel and vertex)      */
+    struct wine_rb_tree samplers;
 
     /* Render Target Support */
     struct wined3d_fb_state fb;
@@ -2127,26 +2146,11 @@ void wined3d_resource_update_draw_binding(struct wined3d_resource *resource) DEC
 /* Tests show that the start address of resources is 32 byte aligned */
 #define RESOURCE_ALIGNMENT 16
 
-enum wined3d_texture_state
-{
-    WINED3DTEXSTA_ADDRESSU       = 0,
-    WINED3DTEXSTA_ADDRESSV       = 1,
-    WINED3DTEXSTA_ADDRESSW       = 2,
-    WINED3DTEXSTA_BORDERCOLOR    = 3,
-    WINED3DTEXSTA_MAGFILTER      = 4,
-    WINED3DTEXSTA_MINFILTER      = 5,
-    WINED3DTEXSTA_MIPFILTER      = 6,
-    WINED3DTEXSTA_MAXMIPLEVEL    = 7,
-    WINED3DTEXSTA_MAXANISOTROPY  = 8,
-    WINED3DTEXSTA_SRGBTEXTURE    = 9,
-    WINED3DTEXSTA_SHADOW         = 10,
-    MAX_WINETEXTURESTATES        = 11,
-};
-
 struct gl_texture
 {
-    DWORD                   states[MAX_WINETEXTURESTATES];
-    GLuint                  name;
+    struct wined3d_sampler_desc sampler_desc;
+    unsigned int base_level;
+    GLuint name;
 };
 
 struct wined3d_texture_ops
@@ -2190,8 +2194,6 @@ struct wined3d_texture
     enum wined3d_texture_filter_type filter_type;
     DWORD sampler;
     DWORD flags;
-    const struct min_lookup *min_mip_lookup;
-    const GLenum *mag_lookup;
     GLenum target;
 
     /* Color keys for DDraw */
@@ -2213,9 +2215,8 @@ static inline struct gl_texture *wined3d_texture_get_gl_texture(struct wined3d_t
     return srgb ? &texture->texture_srgb : &texture->texture_rgb;
 }
 
-void wined3d_texture_apply_state_changes(struct wined3d_texture *texture,
-        const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1],
-        const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+void wined3d_texture_apply_sampler_desc(struct wined3d_texture *texture,
+        const struct wined3d_sampler_desc *sampler_desc, const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 void wined3d_texture_bind(struct wined3d_texture *texture,
         struct wined3d_context *context, BOOL srgb) DECLSPEC_HIDDEN;
 void wined3d_texture_bind_and_dirtify(struct wined3d_texture *texture,
@@ -2407,8 +2408,12 @@ void flip_surface(struct wined3d_surface *front, struct wined3d_surface *back) D
 
 struct wined3d_sampler
 {
+    struct wine_rb_entry entry;
     LONG refcount;
+    struct wined3d_device *device;
     void *parent;
+    struct wined3d_sampler_desc desc;
+    GLuint name;
 };
 
 struct wined3d_vertex_declaration_element

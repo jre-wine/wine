@@ -79,6 +79,55 @@ static DWORD speaker_config_to_channel_mask(DWORD speaker_config)
     return SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
 }
 
+static DWORD DSOUND_FindSpeakerConfig(IMMDevice *mmdevice, int channels)
+{
+    IPropertyStore *store;
+    HRESULT hr;
+    PROPVARIANT pv;
+    ULONG phys_speakers;
+
+    const DWORD def = DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
+
+    hr = IMMDevice_OpenPropertyStore(mmdevice, STGM_READ, &store);
+    if (FAILED(hr)) {
+        WARN("IMMDevice_OpenPropertyStore failed: %08x\n", hr);
+        return def;
+    }
+
+    hr = IPropertyStore_GetValue(store, &PKEY_AudioEndpoint_PhysicalSpeakers, &pv);
+
+    if (FAILED(hr)) {
+        WARN("IPropertyStore_GetValue failed: %08x\n", hr);
+        IPropertyStore_Release(store);
+        return def;
+    }
+
+    if (pv.vt != VT_UI4) {
+        WARN("PKEY_AudioEndpoint_PhysicalSpeakers is not a ULONG: 0x%x\n", pv.vt);
+        PropVariantClear(&pv);
+        IPropertyStore_Release(store);
+        return def;
+    }
+
+    phys_speakers = pv.u.ulVal;
+
+    PropVariantClear(&pv);
+    IPropertyStore_Release(store);
+
+    if ((channels >= 6 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_5POINT1) == KSAUDIO_SPEAKER_5POINT1)
+        return DSSPEAKER_5POINT1_BACK;
+    else if ((channels >= 6 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_5POINT1_SURROUND) == KSAUDIO_SPEAKER_5POINT1_SURROUND)
+        return DSSPEAKER_5POINT1_SURROUND;
+    else if ((channels >= 4 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_QUAD) == KSAUDIO_SPEAKER_QUAD)
+        return DSSPEAKER_QUAD;
+    else if ((channels >= 2 || channels == 0) && (phys_speakers & KSAUDIO_SPEAKER_STEREO) == KSAUDIO_SPEAKER_STEREO)
+        return DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
+    else if ((phys_speakers & KSAUDIO_SPEAKER_MONO) == KSAUDIO_SPEAKER_MONO)
+        return DSSPEAKER_MONO;
+
+    return def;
+}
+
 static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client,
 				 BOOL forcewave, WAVEFORMATEX **wfx)
 {
@@ -93,7 +142,10 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
         if (FAILED(hr))
             return hr;
 
-        if (mixwfe->Format.nChannels > device->num_speakers) {
+        if (mixwfe->Format.nChannels < device->num_speakers) {
+            device->speaker_config = DSOUND_FindSpeakerConfig(device->mmdevice, mixwfe->Format.nChannels);
+            DSOUND_ParseSpeakerConfig(device);
+        } else if (mixwfe->Format.nChannels > device->num_speakers) {
             mixwfe->Format.nChannels = device->num_speakers;
             mixwfe->Format.nBlockAlign = mixwfe->Format.nChannels * mixwfe->Format.wBitsPerSample / 8;
             mixwfe->Format.nAvgBytesPerSec = mixwfe->Format.nSamplesPerSec * mixwfe->Format.nBlockAlign;
@@ -163,55 +215,6 @@ static HRESULT DSOUND_WaveFormat(DirectSoundDevice *device, IAudioClient *client
     return S_OK;
 }
 
-static DWORD DSOUND_FindSpeakerConfig(IMMDevice *mmdevice)
-{
-    IPropertyStore *store;
-    HRESULT hr;
-    PROPVARIANT pv;
-    ULONG phys_speakers;
-
-    const DWORD def = DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
-
-    hr = IMMDevice_OpenPropertyStore(mmdevice, STGM_READ, &store);
-    if (FAILED(hr)) {
-        WARN("IMMDevice_OpenPropertyStore failed: %08x\n", hr);
-        return def;
-    }
-
-    hr = IPropertyStore_GetValue(store, &PKEY_AudioEndpoint_PhysicalSpeakers, &pv);
-
-    if (FAILED(hr)) {
-        WARN("IPropertyStore_GetValue failed: %08x\n", hr);
-        IPropertyStore_Release(store);
-        return def;
-    }
-
-    if (pv.vt != VT_UI4) {
-        WARN("PKEY_AudioEndpoint_PhysicalSpeakers is not a ULONG: 0x%x\n", pv.vt);
-        PropVariantClear(&pv);
-        IPropertyStore_Release(store);
-        return def;
-    }
-
-    phys_speakers = pv.u.ulVal;
-
-    PropVariantClear(&pv);
-    IPropertyStore_Release(store);
-
-    if ((phys_speakers & KSAUDIO_SPEAKER_5POINT1) == KSAUDIO_SPEAKER_5POINT1)
-        return DSSPEAKER_5POINT1_BACK;
-    else if ((phys_speakers & KSAUDIO_SPEAKER_5POINT1_SURROUND) == KSAUDIO_SPEAKER_5POINT1_SURROUND)
-        return DSSPEAKER_5POINT1_SURROUND;
-    else if ((phys_speakers & KSAUDIO_SPEAKER_QUAD) == KSAUDIO_SPEAKER_QUAD)
-        return DSSPEAKER_QUAD;
-    else if ((phys_speakers & KSAUDIO_SPEAKER_STEREO) == KSAUDIO_SPEAKER_STEREO)
-        return DSSPEAKER_COMBINED(DSSPEAKER_STEREO, DSSPEAKER_GEOMETRY_WIDE);
-    else if ((phys_speakers & KSAUDIO_SPEAKER_MONO) == KSAUDIO_SPEAKER_MONO)
-        return DSSPEAKER_MONO;
-
-    return def;
-}
-
 HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
 {
     UINT prebuf_frames;
@@ -247,7 +250,7 @@ HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave)
         return hres;
     }
 
-    device->speaker_config = DSOUND_FindSpeakerConfig(device->mmdevice);
+    device->speaker_config = DSOUND_FindSpeakerConfig(device->mmdevice, 0);
 
     DSOUND_ParseSpeakerConfig(device);
 

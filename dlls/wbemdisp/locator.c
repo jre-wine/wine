@@ -36,6 +36,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wbemdisp);
 
+static HRESULT EnumVARIANT_create( IEnumWbemClassObject *, IEnumVARIANT ** );
+
 enum type_id
 {
     ISWbemLocator_tid,
@@ -91,11 +93,22 @@ static HRESULT get_typeinfo( enum type_id tid, ITypeInfo **ret )
     return S_OK;
 }
 
+#define DISPID_BASE 0x1800000
+
+struct member
+{
+    BSTR name;
+    DISPID dispid;
+};
+
 struct object
 {
     ISWbemObject ISWbemObject_iface;
     LONG refs;
     IWbemClassObject *object;
+    struct member *members;
+    UINT nb_members;
+    DISPID last_dispid;
 };
 
 static inline struct object *impl_from_ISWbemObject(
@@ -118,8 +131,12 @@ static ULONG WINAPI object_Release(
     LONG refs = InterlockedDecrement( &object->refs );
     if (!refs)
     {
+        UINT i;
+
         TRACE( "destroying %p\n", object );
         IWbemClassObject_Release( object->object );
+        for (i = 0; i < object->nb_members; i++) SysFreeString( object->members[i].name );
+        heap_free( object->members );
         heap_free( object );
     }
     return refs;
@@ -167,9 +184,63 @@ static HRESULT WINAPI object_GetTypeInfo(
     ITypeInfo **info )
 {
     struct object *object = impl_from_ISWbemObject( iface );
-    TRACE( "%p, %u, %u, %p\n", object, index, lcid, info );
+    FIXME( "%p, %u, %u, %p\n", object, index, lcid, info );
+    return E_NOTIMPL;
+}
 
-    return get_typeinfo( ISWbemObject_tid, info );
+#define DISPID_BASE 0x1800000
+
+static HRESULT init_members( struct object *object )
+{
+    LONG bound, i;
+    SAFEARRAY *sa;
+    HRESULT hr;
+
+    if (object->members) return S_OK;
+
+    hr = IWbemClassObject_GetNames( object->object, NULL, 0, NULL, &sa );
+    if (FAILED( hr )) return hr;
+    hr = SafeArrayGetUBound( sa, 1, &bound );
+    if (FAILED( hr ))
+    {
+        SafeArrayDestroy( sa );
+        return hr;
+    }
+    if (!(object->members = heap_alloc( sizeof(struct member) * (bound + 1) )))
+    {
+        SafeArrayDestroy( sa );
+        return E_OUTOFMEMORY;
+    }
+    for (i = 0; i <= bound; i++)
+    {
+        hr = SafeArrayGetElement( sa, &i, &object->members[i].name );
+        if (FAILED( hr ))
+        {
+            for (i--; i >= 0; i--) SysFreeString( object->members[i].name );
+            SafeArrayDestroy( sa );
+            heap_free( object->members );
+            object->members = NULL;
+            return E_OUTOFMEMORY;
+        }
+        object->members[i].dispid = 0;
+    }
+    object->nb_members = bound + 1;
+    SafeArrayDestroy( sa );
+    return S_OK;
+}
+
+static DISPID get_member_dispid( struct object *object, const WCHAR *name )
+{
+    UINT i;
+    for (i = 0; i < object->nb_members; i++)
+    {
+        if (!strcmpiW( object->members[i].name, name ))
+        {
+            if (!object->members[i].dispid) object->members[i].dispid = ++object->last_dispid;
+            return object->members[i].dispid;
+        }
+    }
+    return DISPID_UNKNOWN;
 }
 
 static HRESULT WINAPI object_GetIDsOfNames(
@@ -181,20 +252,32 @@ static HRESULT WINAPI object_GetIDsOfNames(
     DISPID *dispid )
 {
     struct object *object = impl_from_ISWbemObject( iface );
-    ITypeInfo *typeinfo;
     HRESULT hr;
+    UINT i;
 
     TRACE( "%p, %s, %p, %u, %u, %p\n", object, debugstr_guid(riid), names, count, lcid, dispid );
 
     if (!names || !count || !dispid) return E_INVALIDARG;
 
-    hr = get_typeinfo( ISWbemObject_tid, &typeinfo );
-    if (SUCCEEDED(hr))
+    hr = init_members( object );
+    if (FAILED( hr )) return hr;
+
+    for (i = 0; i < count; i++)
     {
-        hr = ITypeInfo_GetIDsOfNames( typeinfo, names, count, dispid );
-        ITypeInfo_Release( typeinfo );
+        if ((dispid[i] = get_member_dispid( object, names[i] )) == DISPID_UNKNOWN) break;
     }
-    return hr;
+    if (i != count) return DISP_E_UNKNOWNNAME;
+    return S_OK;
+}
+
+static BSTR get_member_name( struct object *object, DISPID dispid )
+{
+    UINT i;
+    for (i = 0; i < object->nb_members; i++)
+    {
+        if (object->members[i].dispid == dispid) return object->members[i].name;
+    }
+    return NULL;
 }
 
 static HRESULT WINAPI object_Invoke(
@@ -209,20 +292,21 @@ static HRESULT WINAPI object_Invoke(
     UINT *arg_err )
 {
     struct object *object = impl_from_ISWbemObject( iface );
-    ITypeInfo *typeinfo;
-    HRESULT hr;
+    BSTR name;
 
-    TRACE( "%p, %d, %s, %d, %d, %p, %p, %p, %p\n", object, member, debugstr_guid(riid),
+    TRACE( "%p, %x, %s, %u, %x, %p, %p, %p, %p\n", object, member, debugstr_guid(riid),
            lcid, flags, params, result, excep_info, arg_err );
 
-    hr = get_typeinfo( ISWbemObject_tid, &typeinfo );
-    if (SUCCEEDED(hr))
+    if (flags != (DISPATCH_METHOD|DISPATCH_PROPERTYGET))
     {
-        hr = ITypeInfo_Invoke( typeinfo, &object->ISWbemObject_iface, member, flags,
-                               params, result, excep_info, arg_err );
-        ITypeInfo_Release( typeinfo );
+        FIXME( "flags %x not supported\n", flags );
+        return E_NOTIMPL;
     }
-    return hr;
+    if (!(name = get_member_name( object, member )))
+        return DISP_E_MEMBERNOTFOUND;
+
+    memset( params, 0, sizeof(*params) );
+    return IWbemClassObject_Get( object->object, name, 0, result, NULL, NULL );
 }
 
 static HRESULT WINAPI object_Put_(
@@ -258,6 +342,9 @@ static HRESULT SWbemObject_create( IWbemClassObject *wbem_object, ISWbemObject *
     object->refs = 1;
     object->object = wbem_object;
     IWbemClassObject_AddRef( object->object );
+    object->members = NULL;
+    object->nb_members = 0;
+    object->last_dispid = DISPID_BASE;
 
     *obj = &object->ISWbemObject_iface;
     TRACE( "returning iface %p\n", *obj );
@@ -401,8 +488,18 @@ static HRESULT WINAPI objectset_get__NewEnum(
     ISWbemObjectSet *iface,
     IUnknown **pUnk )
 {
-    FIXME( "\n" );
-    return E_NOTIMPL;
+    struct objectset *objectset = impl_from_ISWbemObjectSet( iface );
+    IEnumWbemClassObject *objectenum;
+    HRESULT hr;
+
+    TRACE( "%p, %p\n", objectset, pUnk );
+
+    hr = IEnumWbemClassObject_Clone( objectset->objectenum, &objectenum );
+    if (FAILED( hr )) return hr;
+
+    hr = EnumVARIANT_create( objectenum, (IEnumVARIANT **)pUnk );
+    IEnumWbemClassObject_Release( objectenum );
+    return hr;
 }
 
 static HRESULT WINAPI objectset_Item(
@@ -420,12 +517,20 @@ static HRESULT WINAPI objectset_get_Count(
     LONG *iCount )
 {
     struct objectset *objectset = impl_from_ISWbemObjectSet( iface );
+    LONG count = 0, total = 0;
 
     TRACE( "%p, %p\n", objectset, iCount );
 
-    *iCount = 0;
+    while (IEnumWbemClassObject_Skip( objectset->objectenum, WBEM_INFINITE, 1 ) == S_OK) count++;
+
     IEnumWbemClassObject_Reset( objectset->objectenum );
-    while (!IEnumWbemClassObject_Skip( objectset->objectenum, WBEM_INFINITE, 1 )) (*iCount)++;
+    while (IEnumWbemClassObject_Skip( objectset->objectenum, WBEM_INFINITE, 1 ) == S_OK) total++;
+
+    count = total - count;
+    IEnumWbemClassObject_Reset( objectset->objectenum );
+    while (count--) IEnumWbemClassObject_Skip( objectset->objectenum, WBEM_INFINITE, 1 );
+
+    *iCount = total;
     return S_OK;
 }
 
@@ -475,6 +580,138 @@ static HRESULT SWbemObjectSet_create( IEnumWbemClassObject *wbem_objectenum, ISW
     IEnumWbemClassObject_AddRef( objectset->objectenum );
 
     *obj = &objectset->ISWbemObjectSet_iface;
+    TRACE( "returning iface %p\n", *obj );
+    return S_OK;
+}
+
+struct enumvar
+{
+    IEnumVARIANT IEnumVARIANT_iface;
+    LONG refs;
+    IEnumWbemClassObject *objectenum;
+};
+
+static inline struct enumvar *impl_from_IEnumVARIANT(
+    IEnumVARIANT *iface )
+{
+    return CONTAINING_RECORD( iface, struct enumvar, IEnumVARIANT_iface );
+}
+
+static ULONG WINAPI enumvar_AddRef(
+    IEnumVARIANT *iface )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+    return InterlockedIncrement( &enumvar->refs );
+}
+
+static ULONG WINAPI enumvar_Release(
+    IEnumVARIANT *iface )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+    LONG refs = InterlockedDecrement( &enumvar->refs );
+    if (!refs)
+    {
+        TRACE( "destroying %p\n", enumvar );
+        IEnumWbemClassObject_Release( enumvar->objectenum );
+        heap_free( enumvar );
+    }
+    return refs;
+}
+
+static HRESULT WINAPI enumvar_QueryInterface(
+    IEnumVARIANT *iface,
+    REFIID riid,
+    void **ppvObject )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+
+    TRACE( "%p %s %p\n", enumvar, debugstr_guid(riid), ppvObject );
+
+    if (IsEqualGUID( riid, &IID_IEnumVARIANT ) ||
+        IsEqualGUID( riid, &IID_IUnknown ))
+    {
+        *ppvObject = enumvar;
+    }
+    else
+    {
+        FIXME( "interface %s not implemented\n", debugstr_guid(riid) );
+        return E_NOINTERFACE;
+    }
+    IEnumVARIANT_AddRef( iface );
+    return S_OK;
+}
+
+static HRESULT WINAPI enumvar_Next( IEnumVARIANT *iface, ULONG celt, VARIANT *var, ULONG *fetched )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+    IWbemClassObject *obj;
+    ULONG count = 0;
+
+    TRACE( "%p, %u, %p, %p\n", iface, celt, var, fetched );
+
+    if (celt) IEnumWbemClassObject_Next( enumvar->objectenum, WBEM_INFINITE, 1, &obj, &count );
+    if (count)
+    {
+        ISWbemObject *sobj;
+        HRESULT hr;
+
+        hr = SWbemObject_create( obj, &sobj );
+        IWbemClassObject_Release( obj );
+        if (FAILED( hr )) return hr;
+
+        V_VT( var ) = VT_DISPATCH;
+        V_DISPATCH( var ) = (IDispatch *)sobj;
+    }
+    if (fetched) *fetched = count;
+    return (count < celt) ? S_FALSE : S_OK;
+}
+
+static HRESULT WINAPI enumvar_Skip( IEnumVARIANT *iface, ULONG celt )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+
+    TRACE( "%p, %u\n", iface, celt );
+
+    return IEnumWbemClassObject_Skip( enumvar->objectenum, WBEM_INFINITE, celt );
+}
+
+static HRESULT WINAPI enumvar_Reset( IEnumVARIANT *iface )
+{
+    struct enumvar *enumvar = impl_from_IEnumVARIANT( iface );
+
+    TRACE( "%p\n", iface );
+
+    return IEnumWbemClassObject_Reset( enumvar->objectenum );
+}
+
+static HRESULT WINAPI enumvar_Clone( IEnumVARIANT *iface, IEnumVARIANT **penum )
+{
+    FIXME( "%p, %p\n", iface, penum );
+    return E_NOTIMPL;
+}
+
+static const struct IEnumVARIANTVtbl enumvar_vtbl =
+{
+    enumvar_QueryInterface,
+    enumvar_AddRef,
+    enumvar_Release,
+    enumvar_Next,
+    enumvar_Skip,
+    enumvar_Reset,
+    enumvar_Clone
+};
+
+static HRESULT EnumVARIANT_create( IEnumWbemClassObject *objectenum, IEnumVARIANT **obj )
+{
+    struct enumvar *enumvar;
+
+    if (!(enumvar = heap_alloc( sizeof(*enumvar) ))) return E_OUTOFMEMORY;
+    enumvar->IEnumVARIANT_iface.lpVtbl = &enumvar_vtbl;
+    enumvar->refs = 1;
+    enumvar->objectenum = objectenum;
+    IEnumWbemClassObject_AddRef( enumvar->objectenum );
+
+    *obj = &enumvar->IEnumVARIANT_iface;
     TRACE( "returning iface %p\n", *obj );
     return S_OK;
 }
@@ -671,6 +908,18 @@ static HRESULT WINAPI services_DeleteAsync(
     return E_NOTIMPL;
 }
 
+static BSTR build_query_string( const WCHAR *class )
+{
+    static const WCHAR selectW[] = {'S','E','L','E','C','T',' ','*',' ','F','R','O','M',' ',0};
+    UINT len = strlenW(class) + sizeof(selectW) / sizeof(selectW[0]);
+    BSTR ret;
+
+    if (!(ret = SysAllocStringLen( NULL, len ))) return NULL;
+    strcpyW( ret, selectW );
+    strcatW( ret, class );
+    return ret;
+}
+
 static HRESULT WINAPI services_InstancesOf(
     ISWbemServices *iface,
     BSTR strClass,
@@ -678,8 +927,22 @@ static HRESULT WINAPI services_InstancesOf(
     IDispatch *objWbemNamedValueSet,
     ISWbemObjectSet **objWbemObjectSet )
 {
-    FIXME( "\n" );
-    return E_NOTIMPL;
+    static const WCHAR wqlW[] = {'W','Q','L',0};
+    BSTR query, wql = SysAllocString( wqlW );
+    HRESULT hr;
+
+    TRACE( "%p, %s, %x, %p, %p\n", iface, debugstr_w(strClass), iFlags, objWbemNamedValueSet,
+           objWbemObjectSet );
+
+    if (!(query = build_query_string( strClass )))
+    {
+        SysFreeString( wql );
+        return E_OUTOFMEMORY;
+    }
+    hr = ISWbemServices_ExecQuery( iface, query, wql, iFlags, objWbemNamedValueSet, objWbemObjectSet );
+    SysFreeString( wql );
+    SysFreeString( query );
+    return hr;
 }
 
 static HRESULT WINAPI services_InstancesOfAsync(
