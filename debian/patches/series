@@ -1,6 +1,5 @@
 makefile.patch
 manpages.patch
-gitignore.patch
 
 printer-resolution.patch
 

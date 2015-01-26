@@ -7,14 +7,14 @@ Files-Excluded:
 
 Files: *
 Copyright:
- Copyright (c) 1993-2014 Wine project authors (see AUTHORS file)
+ Copyright (c) 1993-2015 Wine project authors (see AUTHORS file)
 License: LGPL-2.1+
  See /usr/share/common-licenses/LGPL-2.1.
 
 Files: debian/*
 Copyright:
- Copyright (c) 2014 Stephen Kitt <skitt@debian.org>
- Copyright (c) 2012-2014 Michael Gilbert <mgilbert@debian.org>
+ Copyright (c) 2014-2015 Stephen Kitt <skitt@debian.org>
+ Copyright (c) 2012-2015 Michael Gilbert <mgilbert@debian.org>
 License: LGPL-2.1+
  See /usr/share/common-licenses/LGPL-2.1.
 

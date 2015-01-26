@@ -3,8 +3,8 @@
 # enable verbose build log
 export DH_VERBOSE=1
 
-# wine build fails with pie enabled
-export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie
+# wine doesn't support fortify hardening and fails to build with pie
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 

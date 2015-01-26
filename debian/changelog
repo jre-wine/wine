@@ -1,3 +1,16 @@
+wine-development (1.7.35-1) experimental; urgency=medium
+
+  * New upstream release 1.7.35, released Jan 23, 2015.
+    - Beginnings of support for OpenGL core contexts.
+    - Initial support for glyph placement in DirectWrite.
+    - Some more WBEM objects.
+    - Various bug fixes.
+  * Use git's update-index to ignore automatically generated tracked files.
+  * Use abort instead of assert for mmap failure modes.
+  * Update copyright years.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 24 Jan 2015 23:48:10 +0000
+
 wine-development (1.7.34-1) experimental; urgency=medium
 
   * New upstream release 1.7.34, released Jan 9, 2015.

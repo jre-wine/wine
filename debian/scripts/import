@@ -1,5 +1,5 @@
 #!/bin/sh -e
-# Copyright: 2013-2014 Michael Gilbert <mgilbert@debian.org>
+# Copyright: 2013-2015 Michael Gilbert <mgilbert@debian.org>
 # License: LGPL-2.1
 
 # check for version argument
@@ -13,6 +13,9 @@ if [ ! -d ".git" ]; then
   echo "error: importing only supported for git checkouts"
   exit 1
 fi
+
+# ignore changes to files that will be automatically generated
+git update-index --assume-unchanged configure include/config.h.in
 
 # pull specified tag from upstream repository
 version="$1"
