@@ -2,6 +2,7 @@ wine-development (1.7.35-2) UNRELEASED; urgency=medium
 
   * Explicitly retrieve DEB_BUILD_ARCH_... to allow building without
     dpkg-buildpackage.
+  * Build on armhf (Wine supports WinRT binaries in this configuration).
 
  -- Stephen Kitt <skitt@debian.org>  Sat, 31 Jan 2015 13:13:39 +0100
 

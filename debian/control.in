@@ -62,7 +62,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wineVERSION
-Architecture: amd64 any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc armhf
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -76,7 +76,7 @@ Description: Windows API implementation - standard suite
  This is a virtual package that depends on the standard Wine components.
 
 Package: wine32VERSION
-Architecture: any-i386 any-powerpc
+Architecture: any-i386 any-powerpc armhf
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
@@ -86,7 +86,7 @@ Depends:
  libfreetype6,
 Recommends:
  libgl1-mesa-dri,
- libwine-gecko-2.24,
+ libwine-gecko-2.24 [!armhf],
  libasound2-plugins,
 Suggests:
  wine32VERSION-preloader,
@@ -103,7 +103,7 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
 Recommends:
- libwine-gecko-2.24,
+ libwine-gecko-2.24 [!armhf],
  libasound2-plugins,
  wine32VERSION (>= ${source:Version}),
 Suggests:
@@ -115,7 +115,7 @@ Description: Windows API implementation - 64-bit binary loader
  This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32VERSION-preloader
-Architecture: i386 powerpc
+Architecture: i386 powerpc armhf
 Depends:
  ${misc:Depends},
  wine32VERSION,
@@ -137,7 +137,7 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  This package provides the prelinked loader for 64-bit Windows applications.
 
 Package: wine32VERSION-tools
-Architecture: any-i386 any-powerpc
+Architecture: any-i386 any-powerpc armhf
 Section: libdevel
 Multi-Arch: foreign
 Depends:
@@ -168,7 +168,7 @@ Description: Windows API implementation - 64-bit developer tools
  This package provides wine's 64-bit developer tools.
 
 Package: libwineVERSION-dev
-Architecture: amd64 any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc armhf
 Section: libdevel
 Multi-Arch: same
 Depends:
@@ -184,7 +184,7 @@ Description: Windows API implementation - development files
  This package provides wine's C header files and development libraries.
 
 Package: libwineVERSION-dbg
-Architecture: amd64 any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc armhf
 Multi-Arch: same
 Section: debug
 Priority: extra
@@ -199,7 +199,7 @@ Description: Windows API implementation - debugging symbols
 
 Package: libwineVERSION
 Section: libs
-Architecture: amd64 any-i386 any-powerpc
+Architecture: amd64 any-i386 any-powerpc armhf
 Multi-Arch: same
 Depends:
  ${misc:Depends},
