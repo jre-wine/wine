@@ -6,6 +6,10 @@ export DH_VERBOSE=1
 # wine doesn't support fortify hardening and fails to build with pie
 export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
 
+DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
+DEB_BUILD_ARCH_CPU=$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU)
+DEB_BUILD_ARCH_OS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_OS)
+
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
 DATADIR=/usr/share/wine$(VERSION)

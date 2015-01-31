@@ -1,3 +1,10 @@
+wine-development (1.7.35-2) UNRELEASED; urgency=medium
+
+  * Explicitly retrieve DEB_BUILD_ARCH_... to allow building without
+    dpkg-buildpackage.
+
+ -- Stephen Kitt <skitt@debian.org>  Sat, 31 Jan 2015 13:13:39 +0100
+
 wine-development (1.7.35-1) experimental; urgency=medium
 
   * New upstream release 1.7.35, released Jan 23, 2015.
