@@ -1,3 +1,9 @@
+wine-development (1.7.35-3) experimental; urgency=medium
+
+  * Build-depend on libxml2-dev (closes: #777467).
+
+ -- Stephen Kitt <skitt@debian.org>  Sun, 08 Feb 2015 21:25:39 +0100
+
 wine-development (1.7.35-2) experimental; urgency=medium
 
   * Explicitly retrieve DEB_BUILD_ARCH_... to allow building without

@@ -17,6 +17,7 @@ Build-Depends:
  libxcursor-dev,
  libxrender-dev,
  libxkbfile-dev,
+ libxml2-dev,
  libxxf86vm-dev,
  libxxf86dga-dev,
  libxinerama-dev,
