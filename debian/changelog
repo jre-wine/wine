@@ -1,3 +1,10 @@
+wine-development (1.7.35-4) UNRELEASED; urgency=medium
+
+  * Drop duplicate build-dependency on libxml2-dev (thanks to jre for
+    pointing the duplicate out).
+
+ -- Stephen Kitt <skitt@debian.org>  Mon, 09 Feb 2015 07:05:10 +0100
+
 wine-development (1.7.35-3) experimental; urgency=medium
 
   * Build-depend on libxml2-dev (closes: #777467).
