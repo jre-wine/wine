@@ -1,9 +1,16 @@
-wine-development (1.7.35-4) UNRELEASED; urgency=medium
+wine-development (1.7.36-1) experimental; urgency=medium
 
+  [ Michael Gilbert ]
+  * New upstream release 1.7.36, released Feb 7, 2015.
+    - Support for configuring speakers in Winecfg.
+    - Support for typographic features in DirectWrite.
+    - Various bug fixes.
+
+  [ Stephen Kitt ]
   * Drop duplicate build-dependency on libxml2-dev (thanks to jre for
     pointing the duplicate out).
 
- -- Stephen Kitt <skitt@debian.org>  Mon, 09 Feb 2015 07:05:10 +0100
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 13 Feb 2015 03:50:31 +0000
 
 wine-development (1.7.35-3) experimental; urgency=medium
 
