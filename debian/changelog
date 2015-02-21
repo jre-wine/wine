@@ -1,3 +1,14 @@
+wine-development (1.7.37-1) experimental; urgency=medium
+
+  * New upstream release 1.7.37, released Feb 20, 2015.
+    - Interface change notifications.
+    - Support for the UTF-7 encoding.
+    - A number of graphical fixes for themed controls.
+    - Wininet now implemented on top of Win32 sockets.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 21 Feb 2015 00:03:34 +0000
+
 wine-development (1.7.36-1) experimental; urgency=medium
 
   [ Michael Gilbert ]
