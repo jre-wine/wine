@@ -116,6 +116,8 @@ Depends:
  libfreetype6,
  libgl1-mesa-dri,
  libwine-gecko-2.21
+Recommends:
+ libasound2-plugins,
 Breaks:
  wine (<< 1.6.1-9),
  wine-bin (<< 1.5.31-1),
@@ -142,6 +144,7 @@ Breaks:
 Replaces:
  wine (<< 1.6.1-9),
 Recommends:
+ libasound2-plugins,
  wine32 (>= ${source:Version}),
 Description: Windows API implementation - 64-bit binary loader
  Wine is a free MS-Windows API implementation.

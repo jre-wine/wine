@@ -1,3 +1,9 @@
+wine (1.6.2-20) unstable; urgency=medium
+
+  * Recommend libasound2-plugins (closes: #779002).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 23 Feb 2015 06:07:16 +0000
+
 wine (1.6.2-19) unstable; urgency=medium
 
   * Fix typo in libwine-alsa.maintscript (closes: #774861).
