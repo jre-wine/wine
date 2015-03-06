@@ -786,9 +786,9 @@ static GLenum gl_stencil_op(enum wined3d_stencil_op op)
         case WINED3D_STENCIL_OP_INVERT:
             return GL_INVERT;
         case WINED3D_STENCIL_OP_INCR:
-            return GL_INCR_WRAP_EXT;
+            return GL_INCR_WRAP;
         case WINED3D_STENCIL_OP_DECR:
-            return GL_DECR_WRAP_EXT;
+            return GL_DECR_WRAP;
         default:
             FIXME("Unrecognized stencil op %#x.\n", op);
             return GL_KEEP;
@@ -1220,7 +1220,7 @@ void state_fogcolor(struct wined3d_context *context, const struct wined3d_state 
     float col[4];
 
     D3DCOLORTOGLFLOAT4(state->render_states[WINED3D_RS_FOGCOLOR], col);
-    gl_info->gl_ops.gl.p_glFogfv(GL_FOG_COLOR, &col[0]);
+    gl_info->gl_ops.gl.p_glFogfv(GL_FOG_COLOR, col);
     checkGLcall("glFog GL_FOG_COLOR");
 }
 
@@ -4867,11 +4867,10 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
         {
             case WINED3D_LIGHT_POINT:
                 /* Position */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
                 checkGLcall("glLightf");
-                /* Attenuation - Are these right? guessing... */
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,
                         lightInfo->OriginalParms.attenuation0);
                 checkGLcall("glLightf");
@@ -4887,16 +4886,15 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
 
             case WINED3D_LIGHT_SPOT:
                 /* Position */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
                 checkGLcall("glLightfv");
                 /* Direction */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_SPOT_DIRECTION, &lightInfo->lightDirn[0]);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_SPOT_DIRECTION, lightInfo->lightDirn);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_EXPONENT, lightInfo->exponent);
                 checkGLcall("glLightf");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
                 checkGLcall("glLightf");
-                /* Attenuation - Are these right? guessing... */
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_CONSTANT_ATTENUATION,
                         lightInfo->OriginalParms.attenuation0);
                 checkGLcall("glLightf");
@@ -4913,7 +4911,7 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
             case WINED3D_LIGHT_DIRECTIONAL:
                 /* Direction */
                 /* Note GL uses w position of 0 for direction! */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->lightPosn[0]);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
                 checkGLcall("glLightf");

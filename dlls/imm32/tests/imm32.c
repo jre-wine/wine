@@ -416,6 +416,7 @@ typedef struct _igc_threadinfo {
     HWND hwnd;
     HANDLE event;
     HIMC himc;
+    HIMC u_himc;
 } igc_threadinfo;
 
 
@@ -424,16 +425,19 @@ static DWORD WINAPI ImmGetContextThreadFunc( LPVOID lpParam)
     HIMC h1,h2;
     HWND hwnd2;
     COMPOSITIONFORM cf;
+    CANDIDATEFORM cdf;
     POINT pt;
+    MSG msg;
+
     igc_threadinfo *info= (igc_threadinfo*)lpParam;
     info->hwnd = CreateWindowExA(WS_EX_CLIENTEDGE, wndcls, "Wine imm32.dll test",
                                  WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                  240, 120, NULL, NULL, GetModuleHandleW(NULL), NULL);
 
     h1 = ImmGetContext(hwnd);
-    todo_wine ok(info->himc == h1, "hwnd context changed in new thread\n");
+    ok(info->himc == h1, "hwnd context changed in new thread\n");
     h2 = ImmGetContext(info->hwnd);
-    todo_wine ok(h2 != h1, "new hwnd in new thread should have different context\n");
+    ok(h2 != h1, "new hwnd in new thread should have different context\n");
     info->himc = h2;
     ImmReleaseContext(hwnd,h1);
 
@@ -450,9 +454,21 @@ static DWORD WINAPI ImmGetContextThreadFunc( LPVOID lpParam)
     /* priming for later tests */
     ImmSetCompositionWindow(h1, &cf);
     ImmSetStatusWindowPos(h1, &pt);
+    info->u_himc = ImmCreateContext();
+    ImmSetOpenStatus(info->u_himc, TRUE);
+    cdf.dwIndex = 0;
+    cdf.dwStyle = CFS_CANDIDATEPOS;
+    cdf.ptCurrentPos.x = 0;
+    cdf.ptCurrentPos.y = 0;
+    ImmSetCandidateWindow(info->u_himc, &cdf);
 
     SetEvent(info->event);
-    Sleep(INFINITE);
+
+    while(GetMessageW(&msg, 0, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
     return 1;
 }
 
@@ -477,18 +493,26 @@ static void test_ImmThreads(void)
 
     otherHimc = ImmGetContext(threadinfo.hwnd);
 
-    todo_wine ok(himc != otherHimc, "Windows from other threads should have different himc\n");
-    todo_wine ok(otherHimc == threadinfo.himc, "Context from other thread should not change in main thread\n");
+    ok(himc != otherHimc, "Windows from other threads should have different himc\n");
+    ok(otherHimc == threadinfo.himc, "Context from other thread should not change in main thread\n");
 
-    if (0) /* FIXME: Causes wine to hang */
-    {
     h1 = ImmAssociateContext(hwnd,otherHimc);
     ok(h1 == NULL, "Should fail to be able to Associate a default context from a different thread\n");
     h1 = ImmGetContext(hwnd);
     ok(h1 == himc, "Context for window should remain unchanged\n");
     ImmReleaseContext(hwnd,h1);
-    }
 
+    h1 = ImmAssociateContext(hwnd, threadinfo.u_himc);
+    ok (h1 == NULL, "Should fail to associate a context from a different thread\n");
+    h1 = ImmGetContext(hwnd);
+    ok(h1 == himc, "Context for window should remain unchanged\n");
+    ImmReleaseContext(hwnd,h1);
+
+    h1 = ImmAssociateContext(threadinfo.hwnd, threadinfo.u_himc);
+    ok (h1 == NULL, "Should fail to associate a context from a different thread into a window from that thread.\n");
+    h1 = ImmGetContext(threadinfo.hwnd);
+    ok(h1 == threadinfo.himc, "Context for window should remain unchanged\n");
+    ImmReleaseContext(threadinfo.hwnd,h1);
 
     /* OpenStatus */
     rc = ImmSetOpenStatus(himc, TRUE);
@@ -501,11 +525,15 @@ static void test_ImmThreads(void)
     ok(rc == 0, "ImmGetOpenStatus failed\n");
 
     rc = ImmSetOpenStatus(otherHimc, TRUE);
-    todo_wine ok(rc == 0, "ImmSetOpenStatus should fail\n");
+    ok(rc == 0, "ImmSetOpenStatus should fail\n");
+    rc = ImmSetOpenStatus(threadinfo.u_himc, TRUE);
+    ok(rc == 0, "ImmSetOpenStatus should fail\n");
     rc = ImmGetOpenStatus(otherHimc);
-    todo_wine ok(rc == 0, "ImmGetOpenStatus failed\n");
+    ok(rc == 0, "ImmGetOpenStatus failed\n");
+    rc = ImmGetOpenStatus(threadinfo.u_himc);
+    ok (rc == 1 || broken(rc == 0), "ImmGetOpenStatus should return 1\n");
     rc = ImmSetOpenStatus(otherHimc, FALSE);
-    todo_wine ok(rc == 0, "ImmSetOpenStatus should fail\n");
+    ok(rc == 0, "ImmSetOpenStatus should fail\n");
     rc = ImmGetOpenStatus(otherHimc);
     ok(rc == 0, "ImmGetOpenStatus failed\n");
 
@@ -517,8 +545,12 @@ static void test_ImmThreads(void)
 
     rc = ImmGetCompositionFontA(otherHimc, &lf);
     ok(rc != 0 || broken(rc == 0), "ImmGetCompositionFont failed\n");
+    rc = ImmGetCompositionFontA(threadinfo.u_himc, &lf);
+    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionFont user himc failed\n");
     rc = ImmSetCompositionFontA(otherHimc, &lf);
-    todo_wine ok(rc == 0, "ImmSetCompositionFont should fail\n");
+    ok(rc == 0, "ImmSetCompositionFont should fail\n");
+    rc = ImmSetCompositionFontA(threadinfo.u_himc, &lf);
+    ok(rc == 0, "ImmSetCompositionFont should fail\n");
 
     /* CompositionWindow */
     rc = ImmSetCompositionWindow(himc, &cf);
@@ -527,8 +559,12 @@ static void test_ImmThreads(void)
     ok(rc != 0, "ImmGetCompositionWindow failed\n");
 
     rc = ImmSetCompositionWindow(otherHimc, &cf);
-    todo_wine ok(rc == 0, "ImmSetCompositionWindow should fail\n");
+    ok(rc == 0, "ImmSetCompositionWindow should fail\n");
+    rc = ImmSetCompositionWindow(threadinfo.u_himc, &cf);
+    ok(rc == 0, "ImmSetCompositionWindow should fail\n");
     rc = ImmGetCompositionWindow(otherHimc, &cf);
+    ok(rc != 0 || broken(rc == 0), "ImmGetCompositionWindow failed\n");
+    rc = ImmGetCompositionWindow(threadinfo.u_himc, &cf);
     ok(rc != 0 || broken(rc == 0), "ImmGetCompositionWindow failed\n");
 
     /* ConversionStatus */
@@ -539,8 +575,12 @@ static void test_ImmThreads(void)
 
     rc = ImmGetConversionStatus(otherHimc, &status, &sentence);
     ok(rc != 0 || broken(rc == 0), "ImmGetConversionStatus failed\n");
+    rc = ImmGetConversionStatus(threadinfo.u_himc, &status, &sentence);
+    ok(rc != 0 || broken(rc == 0), "ImmGetConversionStatus failed\n");
     rc = ImmSetConversionStatus(otherHimc, status, sentence);
-    todo_wine ok(rc == 0, "ImmSetConversionStatus should fail\n");
+    ok(rc == 0, "ImmSetConversionStatus should fail\n");
+    rc = ImmSetConversionStatus(threadinfo.u_himc, status, sentence);
+    ok(rc == 0, "ImmSetConversionStatus should fail\n");
 
     /* StatusWindowPos */
     rc = ImmSetStatusWindowPos(himc, &pt);
@@ -549,9 +589,25 @@ static void test_ImmThreads(void)
     ok(rc != 0, "ImmGetStatusWindowPos failed\n");
 
     rc = ImmSetStatusWindowPos(otherHimc, &pt);
-    todo_wine ok(rc == 0, "ImmSetStatusWindowPos should fail\n");
+    ok(rc == 0, "ImmSetStatusWindowPos should fail\n");
+    rc = ImmSetStatusWindowPos(threadinfo.u_himc, &pt);
+    ok(rc == 0, "ImmSetStatusWindowPos should fail\n");
     rc = ImmGetStatusWindowPos(otherHimc, &pt);
     ok(rc != 0 || broken(rc == 0), "ImmGetStatusWindowPos failed\n");
+    rc = ImmGetStatusWindowPos(threadinfo.u_himc, &pt);
+    ok(rc != 0 || broken(rc == 0), "ImmGetStatusWindowPos failed\n");
+
+    h1 = ImmAssociateContext(threadinfo.hwnd, NULL);
+    ok (h1 == otherHimc, "ImmAssociateContext cross thread with NULL should work\n");
+    h1 = ImmGetContext(threadinfo.hwnd);
+    ok (h1 == NULL, "CrossThread window context should be NULL\n");
+    h1 = ImmAssociateContext(threadinfo.hwnd, h1);
+    ok (h1 == NULL, "Resetting cross thread context should fail\n");
+    h1 = ImmGetContext(threadinfo.hwnd);
+    ok (h1 == NULL, "CrossThread window context should still be NULL\n");
+
+    rc = ImmDestroyContext(threadinfo.u_himc);
+    ok (rc == 0, "ImmDestroyContext Cross Thread should fail\n");
 
     /* Candidate Window */
     rc = ImmGetCandidateWindow(himc, 0, &cdf);
@@ -566,9 +622,13 @@ static void test_ImmThreads(void)
     ok (rc == 1, "ImmGetCandidateWindow should succeed\n");
 
     rc = ImmGetCandidateWindow(otherHimc, 0, &cdf);
-    todo_wine ok (rc == 0, "ImmGetCandidateWindow should fail\n");
+    ok (rc == 0, "ImmGetCandidateWindow should fail\n");
     rc = ImmSetCandidateWindow(otherHimc, &cdf);
-    todo_wine ok (rc == 0, "ImmSetCandidateWindow should fail\n");
+    ok (rc == 0, "ImmSetCandidateWindow should fail\n");
+    rc = ImmGetCandidateWindow(threadinfo.u_himc, 0, &cdf);
+    ok (rc == 1 || broken( rc == 0), "ImmGetCandidateWindow should succeed\n");
+    rc = ImmSetCandidateWindow(threadinfo.u_himc, &cdf);
+    ok (rc == 0, "ImmSetCandidateWindow should fail\n");
 
     ImmReleaseContext(threadinfo.hwnd,otherHimc);
     ImmReleaseContext(hwnd,himc);
@@ -577,7 +637,7 @@ static void test_ImmThreads(void)
     TerminateThread(hThread, 1);
 
     himc = ImmGetContext(GetDesktopWindow());
-    todo_wine ok(himc == NULL, "Should not be able to get himc from other process window\n");
+    ok(himc == NULL, "Should not be able to get himc from other process window\n");
 }
 
 static void test_ImmIsUIMessage(void)

@@ -2519,6 +2519,175 @@ static void test_texture(void)
     DestroyWindow(window);
 }
 
+static void test_private_data(void)
+{
+    D3D10_TEXTURE2D_DESC texture_desc;
+    ULONG refcount, expected_refcount;
+    ID3D10Device *test_object;
+    ID3D10Texture2D *texture;
+    IDXGIDevice *dxgi_device;
+    IDXGISurface *surface;
+    ID3D10Device *device;
+    IUnknown *ptr;
+    HRESULT hr;
+    UINT size;
+
+    static const GUID test_guid =
+            {0xfdb37466, 0x428f, 0x4edf, {0xa3, 0x7f, 0x9b, 0x1d, 0xf4, 0x88, 0xc5, 0xfc}};
+    static const GUID test_guid2 =
+            {0x2e5afac2, 0x87b5, 0x4c10, {0x9b, 0x4b, 0x89, 0xd7, 0xd1, 0x12, 0xe7, 0x2b}};
+    static const DWORD data[] = {1, 2, 3, 4};
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    test_object = create_device();
+
+    texture_desc.Width = 512;
+    texture_desc.Height = 512;
+    texture_desc.MipLevels = 1;
+    texture_desc.ArraySize = 1;
+    texture_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+    texture_desc.Usage = D3D10_USAGE_DEFAULT;
+    texture_desc.BindFlags = D3D10_BIND_RENDER_TARGET;
+    texture_desc.CPUAccessFlags = 0;
+    texture_desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateTexture2D(device, &texture_desc, NULL, &texture);
+    ok(SUCCEEDED(hr), "Failed to create texture, hr %#x.\n", hr);
+    hr = ID3D10Texture2D_QueryInterface(texture, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get IDXGISurface, hr %#x.\n", hr);
+
+    /* SetPrivateData() with a pointer of NULL has the purpose of
+     * FreePrivateData() in previous D3D versions. A successful clear returns
+     * S_OK. A redundant clear S_FALSE. Setting a NULL interface is not
+     * considered a clear but as setting an interface pointer that happens to
+     * be NULL. */
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, 0, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#x.\n", hr);
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, ~0u, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, ~0u, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#x.\n", hr);
+
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    size = sizeof(ptr) * 2;
+    ptr = (IUnknown *)0xdeadbeef;
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, &size, &ptr);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!ptr, "Got unexpected pointer %p.\n", ptr);
+    ok(size == sizeof(IUnknown *), "Got unexpected size %u.\n", size);
+
+    hr = ID3D10Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
+    ok(SUCCEEDED(hr), "Failed to get DXGI device, hr %#x.\n", hr);
+    size = sizeof(ptr) * 2;
+    ptr = (IUnknown *)0xdeadbeef;
+    hr = IDXGIDevice_GetPrivateData(dxgi_device, &test_guid, &size, &ptr);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(!ptr, "Got unexpected pointer %p.\n", ptr);
+    ok(size == sizeof(IUnknown *), "Got unexpected size %u.\n", size);
+    IDXGIDevice_Release(dxgi_device);
+
+    refcount = get_refcount((IUnknown *)test_object);
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid,
+            (IUnknown *)test_object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    expected_refcount = refcount + 1;
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid,
+            (IUnknown *)test_object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    --expected_refcount;
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid,
+            (IUnknown *)test_object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    size = sizeof(data);
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, size, data);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, 42, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    hr = ID3D10Device_SetPrivateData(device, &test_guid, 42, NULL);
+    ok(hr == S_FALSE, "Got unexpected hr %#x.\n", hr);
+
+    hr = ID3D10Device_SetPrivateDataInterface(device, &test_guid,
+            (IUnknown *)test_object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ++expected_refcount;
+    size = 2 * sizeof(ptr);
+    ptr = NULL;
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, &size, &ptr);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(test_object), "Got unexpected size %u.\n", size);
+    ++expected_refcount;
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+    IUnknown_Release(ptr);
+    --expected_refcount;
+
+    ptr = (IUnknown *)0xdeadbeef;
+    size = 1;
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, &size, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(device), "Got unexpected size %u.\n", size);
+    size = 2 * sizeof(ptr);
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, &size, NULL);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(device), "Got unexpected size %u.\n", size);
+    refcount = get_refcount((IUnknown *)test_object);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+
+    size = 1;
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, &size, &ptr);
+    ok(hr == DXGI_ERROR_MORE_DATA, "Got unexpected hr %#x.\n", hr);
+    ok(size == sizeof(device), "Got unexpected size %u.\n", size);
+    ok(ptr == (IUnknown *)0xdeadbeef, "Got unexpected pointer %p.\n", ptr);
+    hr = ID3D10Device_GetPrivateData(device, &test_guid2, NULL, NULL);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    size = 0xdeadbabe;
+    hr = ID3D10Device_GetPrivateData(device, &test_guid2, &size, &ptr);
+    ok(hr == DXGI_ERROR_NOT_FOUND, "Got unexpected hr %#x.\n", hr);
+    ok(size == 0, "Got unexpected size %u.\n", size);
+    ok(ptr == (IUnknown *)0xdeadbeef, "Got unexpected pointer %p.\n", ptr);
+    hr = ID3D10Device_GetPrivateData(device, &test_guid, NULL, &ptr);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ok(ptr == (IUnknown *)0xdeadbeef, "Got unexpected pointer %p.\n", ptr);
+
+    hr = ID3D10Texture2D_SetPrivateDataInterface(texture, &test_guid, (IUnknown *)test_object);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ptr = NULL;
+    size = sizeof(ptr);
+    hr = IDXGISurface_GetPrivateData(surface, &test_guid, &size, &ptr);
+    ok(hr == S_OK, "Got unexpected hr %#x.\n", hr);
+    ok(ptr == (IUnknown *)test_object, "Got unexpected ptr %p, expected %p.\n", ptr, test_object);
+    IUnknown_Release(ptr);
+
+    IDXGISurface_Release(surface);
+    ID3D10Texture2D_Release(texture);
+    refcount = ID3D10Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    refcount = ID3D10Device_Release(test_object);
+    ok(!refcount, "Test object has %u references left.\n", refcount);
+}
+
 START_TEST(device)
 {
     test_create_texture2d();
@@ -2537,4 +2706,5 @@ START_TEST(device)
     test_clear_state();
     test_blend();
     test_texture();
+    test_private_data();
 }

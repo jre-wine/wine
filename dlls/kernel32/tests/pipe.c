@@ -2079,20 +2079,17 @@ static void test_readfileex_pending(void)
     ok(completion_lpoverlapped == &overlapped, "completion called with wrong overlapped pointer\n");
 
     /* free up some space in the pipe */
-    ret = ReadFile(client, read_buf, sizeof(read_buf), &num_bytes, NULL);
-    ok(ret == TRUE, "ReadFile failed\n");
-
-    ok(completion_called == 0, "completion routine called during ReadFile\n");
-
-    wait = WaitForSingleObjectEx(event, 0, TRUE);
-    ok(wait == WAIT_IO_COMPLETION || wait == WAIT_OBJECT_0, "WaitForSingleObject returned %x\n", wait);
-    if (wait == WAIT_TIMEOUT)
+    for (i=0; i<256; i++)
     {
         ret = ReadFile(client, read_buf, sizeof(read_buf), &num_bytes, NULL);
         ok(ret == TRUE, "ReadFile failed\n");
+
         ok(completion_called == 0, "completion routine called during ReadFile\n");
+
         wait = WaitForSingleObjectEx(event, 0, TRUE);
-        ok(wait == WAIT_IO_COMPLETION || wait == WAIT_OBJECT_0, "WaitForSingleObject returned %x\n", wait);
+        ok(wait == WAIT_IO_COMPLETION || wait == WAIT_OBJECT_0 || wait == WAIT_TIMEOUT,
+           "WaitForSingleObject returned %x\n", wait);
+        if (wait != WAIT_TIMEOUT) break;
     }
 
     ok(completion_called == 1, "completion routine not called\n");
@@ -2114,6 +2111,7 @@ static void test_readfileex_pending(void)
     num_bytes = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     ret = ReadFile(server, read_buf, 0, &num_bytes, &overlapped);
+    ok(!ret, "ReadFile should fail\n");
 todo_wine
     ok(GetLastError() == ERROR_IO_PENDING, "expected ERROR_IO_PENDING, got %d\n", GetLastError());
     ok(num_bytes == 0, "bytes %u\n", num_bytes);

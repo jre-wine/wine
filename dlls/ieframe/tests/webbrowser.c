@@ -2684,9 +2684,11 @@ static void test_Navigate2(IWebBrowser2 *webbrowser, const char *nav_url)
             SET_EXPECT(GetOptionKeyPath);
             SET_EXPECT(GetOverridesKeyPath);
         }
-        if (use_container_olecmd) SET_EXPECT(QueryStatus_SETPROGRESSTEXT);
-        if (use_container_olecmd) SET_EXPECT(Exec_SETPROGRESSMAX);
-        if (use_container_olecmd) SET_EXPECT(Exec_SETPROGRESSPOS);
+        if (use_container_olecmd) {
+            SET_EXPECT(QueryStatus_SETPROGRESSTEXT);
+            SET_EXPECT(Exec_SETPROGRESSMAX);
+            SET_EXPECT(Exec_SETPROGRESSPOS);
+        }
         SET_EXPECT(Invoke_SETSECURELOCKICON);
         SET_EXPECT(Invoke_FILEDOWNLOAD);
         if (use_container_olecmd) SET_EXPECT(Exec_SETDOWNLOADSTATE_0);
@@ -2725,9 +2727,11 @@ static void test_Navigate2(IWebBrowser2 *webbrowser, const char *nav_url)
             CLEAR_CALLED(GetOptionKeyPath);
             CHECK_CALLED(GetOverridesKeyPath);
         }
-        if (use_container_olecmd) todo_wine CHECK_CALLED(QueryStatus_SETPROGRESSTEXT);
-        if (use_container_olecmd) todo_wine CHECK_CALLED(Exec_SETPROGRESSMAX);
-        if (use_container_olecmd) todo_wine CHECK_CALLED(Exec_SETPROGRESSPOS);
+        if (use_container_olecmd) {
+            todo_wine CHECK_CALLED(QueryStatus_SETPROGRESSTEXT);
+            todo_wine CHECK_CALLED(Exec_SETPROGRESSMAX);
+            todo_wine CHECK_CALLED(Exec_SETPROGRESSPOS);
+        }
         todo_wine CHECK_CALLED(Invoke_SETSECURELOCKICON);
         todo_wine CHECK_CALLED(Invoke_FILEDOWNLOAD);
 
@@ -3530,6 +3534,24 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     hres = IOleObject_GetClientSite(oo, &ocs);
     ok(hres == S_OK, "hres = %x\n", hres);
     ok(!ocs, "ocs != NULL\n");
+
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Site_GetWindow);
+    SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+    SET_EXPECT(Invoke_AMBIENT_SILENT);
+    hres = IOleObject_DoVerb(oo, OLEIVERB_HIDE, NULL, (IOleClientSite*)0xdeadbeef,
+            0, (HWND)0xdeadbeef, NULL);
+    ok(hres == S_OK, "DoVerb failed: %08x\n", hres);
+    todo_wine CHECK_CALLED(GetContainer);
+    todo_wine CHECK_CALLED(Site_GetWindow);
+    todo_wine CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+    todo_wine CHECK_CALLED(Invoke_AMBIENT_SILENT);
+
+    hres = IOleObject_GetClientSite(oo, &ocs);
+    ok(hres == S_OK, "hres = %x\n", hres);
+    todo_wine ok(ocs == &ClientSite, "ocs != &ClientSite\n");
+    if(ocs)
+        IOleClientSite_Release(ocs);
 
     hres = IOleObject_Close(oo, OLECLOSE_NOSAVE);
     ok(hres == S_OK, "OleObject_Close failed: %x\n", hres);

@@ -102,27 +102,33 @@ static void STDMETHODCALLTYPE d3d10_buffer_GetDevice(ID3D10Buffer *iface, ID3D10
 static HRESULT STDMETHODCALLTYPE d3d10_buffer_GetPrivateData(ID3D10Buffer *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    struct d3d10_buffer *buffer = impl_from_ID3D10Buffer(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_get_private_data(&buffer->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_buffer_SetPrivateData(ID3D10Buffer *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    FIXME("iface %p, guid %s, data_size %u, data %p stub!\n",
+    struct d3d10_buffer *buffer = impl_from_ID3D10Buffer(iface);
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_set_private_data(&buffer->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_buffer_SetPrivateDataInterface(ID3D10Buffer *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    struct d3d10_buffer *buffer = impl_from_ID3D10Buffer(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d10_set_private_data_interface(&buffer->private_store, guid, data);
 }
 
 /* ID3D10Resource methods */
@@ -206,6 +212,9 @@ struct d3d10_buffer *unsafe_impl_from_ID3D10Buffer(ID3D10Buffer *iface)
 
 static void STDMETHODCALLTYPE d3d10_buffer_wined3d_object_released(void *parent)
 {
+    struct d3d10_buffer *buffer = parent;
+
+    wined3d_private_store_cleanup(&buffer->private_store);
     HeapFree(GetProcessHeap(), 0, parent);
 }
 
@@ -222,6 +231,7 @@ HRESULT d3d10_buffer_init(struct d3d10_buffer *buffer, struct d3d10_device *devi
 
     buffer->ID3D10Buffer_iface.lpVtbl = &d3d10_buffer_vtbl;
     buffer->refcount = 1;
+    wined3d_private_store_init(&buffer->private_store);
 
     FIXME("Implement DXGI<->wined3d usage conversion\n");
 
@@ -237,6 +247,7 @@ HRESULT d3d10_buffer_init(struct d3d10_buffer *buffer, struct d3d10_device *devi
     if (FAILED(hr))
     {
         WARN("Failed to create wined3d buffer, hr %#x.\n", hr);
+        wined3d_private_store_cleanup(&buffer->private_store);
         return hr;
     }
 

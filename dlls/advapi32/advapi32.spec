@@ -269,7 +269,7 @@
 # @ stub EventAccessControl
 # @ stub EventAccessQuery
 # @ stub EventAccessRemove
-# @ stub EventActivityIdControl
+@ stdcall EventActivityIdControl(long ptr)
 @ stdcall EventEnabled(int64 ptr)
 @ stdcall EventProviderEnabled(int64 long int64)
 @ stdcall EventRegister(ptr ptr ptr ptr)
@@ -496,7 +496,7 @@
 @ stdcall NotifyChangeEventLog (long long)
 # @ stub NotifyServiceStatusChange
 # @ stub NotifyServiceStatusChangeA
-# @ stub NotifyServiceStatusChangeW
+@ stdcall NotifyServiceStatusChangeW(ptr long ptr)
 @ stdcall ObjectCloseAuditAlarmA(str ptr long)
 @ stdcall ObjectCloseAuditAlarmW(wstr ptr long)
 # @ stub ObjectDeleteAuditAlarmA

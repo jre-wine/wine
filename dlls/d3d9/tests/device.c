@@ -1081,6 +1081,7 @@ static void test_swapchain(void)
     ok(SUCCEEDED(hr), "Failed to get the implicit swapchain (%08x)\n", hr);
     /* Check if the back buffer count was modified */
     hr = IDirect3DSwapChain9_GetPresentParameters(swapchain0, &d3dpp);
+    ok(SUCCEEDED(hr), "Failed to get present parameters, hr %#x.\n", hr);
     ok(d3dpp.BackBufferCount == 1, "Got unexpected back buffer count %u.\n", d3dpp.BackBufferCount);
     IDirect3DSwapChain9_Release(swapchain0);
 
@@ -4086,6 +4087,46 @@ static inline WORD get_fpu_cw(void)
     return cw;
 }
 
+static WORD callback_cw, callback_set_cw;
+static DWORD callback_tid;
+
+static HRESULT WINAPI dummy_object_QueryInterface(IUnknown *iface, REFIID riid, void **out)
+{
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI dummy_object_AddRef(IUnknown *iface)
+{
+    callback_cw = get_fpu_cw();
+    set_fpu_cw(callback_set_cw);
+    callback_tid = GetCurrentThreadId();
+    return 2;
+}
+
+static ULONG WINAPI dummy_object_Release(IUnknown *iface)
+{
+    callback_cw = get_fpu_cw();
+    set_fpu_cw(callback_set_cw);
+    callback_tid = GetCurrentThreadId();
+    return 1;
+}
+
+static const IUnknownVtbl dummy_object_vtbl =
+{
+    dummy_object_QueryInterface,
+    dummy_object_AddRef,
+    dummy_object_Release,
+};
+
+static const GUID d3d9_private_data_test_guid =
+{
+    0xfdb37466,
+    0x428f,
+    0x4edf,
+    {0xa3,0x7f,0x9b,0x1d,0xf4,0x88,0xc5,0xfc}
+};
+
 static void test_fpu_setup(void)
 {
 #if defined(D3D9_TEST_SET_FPU_CW) && defined(D3D9_TEST_GET_FPU_CW)
@@ -4094,6 +4135,9 @@ static void test_fpu_setup(void)
     HWND window = NULL;
     IDirect3D9 *d3d9;
     WORD cw;
+    IDirect3DSurface9 *surface;
+    HRESULT hr;
+    IUnknown dummy_object = {&dummy_object_vtbl};
 
     window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_CAPTION, 0, 0,
             registry_mode.dmPelsWidth, registry_mode.dmPelsHeight, 0, 0, 0, 0);
@@ -4120,7 +4164,34 @@ static void test_fpu_setup(void)
     cw = get_fpu_cw();
     ok(cw == 0x7f, "cw is %#x, expected 0x7f.\n", cw);
 
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &surface);
+    ok(SUCCEEDED(hr), "Failed to get render target surface, hr %#x.\n", hr);
+
+    callback_set_cw = 0xf60;
+    hr = IDirect3DSurface9_SetPrivateData(surface, &d3d9_private_data_test_guid,
+            &dummy_object, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
+    ok(callback_cw == 0x7f, "Callback cw is %#x, expected 0x7f.\n", callback_cw);
+    ok(callback_tid == GetCurrentThreadId(), "Got unexpected thread id.\n");
+    cw = get_fpu_cw();
+    ok(cw == 0xf60, "cw is %#x, expected 0xf60.\n", cw);
+
+    callback_cw = 0;
+    hr = IDirect3DSurface9_SetPrivateData(surface, &d3d9_private_data_test_guid,
+            &dummy_object, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
+    ok(callback_cw == 0xf60, "Callback cw is %#x, expected 0xf60.\n", callback_cw);
+    ok(callback_tid == GetCurrentThreadId(), "Got unexpected thread id.\n");
+
+    callback_set_cw = 0x7f;
+    set_fpu_cw(0x7f);
+
+    IDirect3DSurface9_Release(surface);
+
+    callback_cw = 0;
     IDirect3DDevice9_Release(device);
+    ok(callback_cw == 0x7f, "Callback cw is %#x, expected 0x7f.\n", callback_cw);
+    ok(callback_tid == GetCurrentThreadId(), "Got unexpected thread id.\n");
 
     cw = get_fpu_cw();
     ok(cw == 0x7f, "cw is %#x, expected 0x7f.\n", cw);
@@ -4134,9 +4205,26 @@ static void test_fpu_setup(void)
 
     cw = get_fpu_cw();
     ok(cw == 0xf60, "cw is %#x, expected 0xf60.\n", cw);
-    set_fpu_cw(0x37f);
 
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &surface);
+    ok(SUCCEEDED(hr), "Failed to get render target surface, hr %#x.\n", hr);
+
+    callback_cw = 0;
+    callback_set_cw = 0x37f;
+    hr = IDirect3DSurface9_SetPrivateData(surface, &d3d9_private_data_test_guid,
+            &dummy_object, sizeof(IUnknown *), D3DSPD_IUNKNOWN);
+    ok(SUCCEEDED(hr), "Failed to set private data, hr %#x.\n", hr);
+    ok(callback_cw == 0xf60, "Callback cw is %#x, expected 0xf60.\n", callback_cw);
+    ok(callback_tid == GetCurrentThreadId(), "Got unexpected thread id.\n");
+    cw = get_fpu_cw();
+    ok(cw == 0x37f, "cw is %#x, expected 0x37f.\n", cw);
+
+    IDirect3DSurface9_Release(surface);
+
+    callback_cw = 0;
     IDirect3DDevice9_Release(device);
+    ok(callback_cw == 0x37f, "Callback cw is %#x, expected 0xf60.\n", callback_cw);
+    ok(callback_tid == GetCurrentThreadId(), "Got unexpected thread id.\n");
 
 done:
     IDirect3D9_Release(d3d9);
@@ -6976,13 +7064,6 @@ static void test_private_data(void)
     HRESULT hr;
     DWORD size;
     DWORD data[4] = {1, 2, 3, 4};
-    static const GUID d3d9_private_data_test_guid =
-    {
-        0xfdb37466,
-        0x428f,
-        0x4edf,
-        {0xa3,0x7f,0x9b,0x1d,0xf4,0x88,0xc5,0xfc}
-    };
     static const GUID d3d9_private_data_test_guid2 =
     {
         0x2e5afac2,
@@ -8741,6 +8822,7 @@ static void test_volume_blocks(void)
         {
             hr = IDirect3DDevice9_CreateVolumeTexture(device, formats[i].block_width, formats[i].block_height,
                     2, 2, 0, formats[i].fmt, D3DPOOL_SCRATCH, &texture, NULL);
+            ok(SUCCEEDED(hr), "Failed to create volume texture, hr %#x.\n", hr);
 
             hr = IDirect3DVolumeTexture9_LockBox(texture, 1, &locked_box, NULL, 0);
             ok(SUCCEEDED(hr), "Failed to lock volume texture mipmap, hr %#x.\n", hr);
@@ -9648,6 +9730,7 @@ static void test_resource_type(void)
     {
         hr = IDirect3DDevice9_CreateVolumeTexture(device, 2, 4, 8, 4, 0, D3DFMT_X8R8G8B8,
                 D3DPOOL_SYSTEMMEM, &volume_texture, NULL);
+        ok(SUCCEEDED(hr), "Failed to create volume texture, hr %#x.\n", hr);
         type = IDirect3DVolumeTexture9_GetType(volume_texture);
         ok(type == D3DRTYPE_VOLUMETEXTURE, "Expected type D3DRTYPE_VOLUMETEXTURE, got %u.\n", type);
 

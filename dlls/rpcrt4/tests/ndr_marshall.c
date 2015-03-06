@@ -34,7 +34,7 @@
 #include "rpc.h"
 #include "rpcdce.h"
 #include "rpcproxy.h"
-
+#include "midles.h"
 
 static int my_alloc_called;
 static int my_free_called;
@@ -2405,6 +2405,64 @@ static void test_NdrGetUserMarshalInfo(void)
         "NdrGetUserMarshalInfo should have failed with RPC_S_INVALID_ARG instead of %d\n", status);
 }
 
+static void test_MesEncodeFixedBufferHandleCreate(void)
+{
+    ULONG encoded_size;
+    RPC_STATUS status;
+    handle_t handle;
+    char *buffer;
+
+    status = MesEncodeFixedBufferHandleCreate(NULL, 0, NULL, NULL);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesEncodeFixedBufferHandleCreate(NULL, 0, NULL, &handle);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesEncodeFixedBufferHandleCreate((char*)0xdeadbeef, 0, NULL, &handle);
+    ok(status == RPC_X_INVALID_BUFFER, "got %d\n", status);
+
+    buffer = (void*)((0xdeadbeef + 7) & ~7);
+    status = MesEncodeFixedBufferHandleCreate(buffer, 0, NULL, &handle);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesEncodeFixedBufferHandleCreate(buffer, 0, &encoded_size, &handle);
+todo_wine
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+if (status == RPC_S_OK)
+    MesHandleFree(handle);
+
+    status = MesEncodeFixedBufferHandleCreate(buffer, 32, NULL, &handle);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesEncodeFixedBufferHandleCreate(buffer, 32, &encoded_size, &handle);
+    ok(status == RPC_S_OK, "got %d\n", status);
+
+    status = MesBufferHandleReset(NULL, MES_DYNAMIC_BUFFER_HANDLE, MES_ENCODE,
+        &buffer, 32, &encoded_size);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    /* convert to dynamic buffer handle */
+    status = MesBufferHandleReset(handle, MES_DYNAMIC_BUFFER_HANDLE, MES_ENCODE,
+        &buffer, 32, &encoded_size);
+    ok(status == RPC_S_OK, "got %d\n", status);
+
+    status = MesBufferHandleReset(handle, MES_DYNAMIC_BUFFER_HANDLE, MES_ENCODE,
+        NULL, 32, &encoded_size);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesBufferHandleReset(handle, MES_DYNAMIC_BUFFER_HANDLE, MES_ENCODE,
+        &buffer, 32, NULL);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    /* invalid handle type */
+    status = MesBufferHandleReset(handle, MES_DYNAMIC_BUFFER_HANDLE+1, MES_ENCODE,
+        &buffer, 32, &encoded_size);
+    ok(status == RPC_S_INVALID_ARG, "got %d\n", status);
+
+    status = MesHandleFree(handle);
+    ok(status == RPC_S_OK, "got %d\n", status);
+}
+
 START_TEST( ndr_marshall )
 {
     determine_pointer_marshalling_style();
@@ -2425,4 +2483,5 @@ START_TEST( ndr_marshall )
     test_ndr_buffer();
     test_NdrMapCommAndFaultStatus();
     test_NdrGetUserMarshalInfo();
+    test_MesEncodeFixedBufferHandleCreate();
 }

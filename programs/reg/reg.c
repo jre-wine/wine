@@ -20,6 +20,34 @@
 #include <wine/unicode.h>
 #include "reg.h"
 
+#define ARRAY_SIZE(A) (sizeof(A)/sizeof(*A))
+
+static const WCHAR type_none[] = {'R','E','G','_','N','O','N','E',0};
+static const WCHAR type_sz[] = {'R','E','G','_','S','Z',0};
+static const WCHAR type_expand_sz[] = {'R','E','G','_','E','X','P','A','N','D','_','S','Z',0};
+static const WCHAR type_binary[] = {'R','E','G','_','B','I','N','A','R','Y',0};
+static const WCHAR type_dword[] = {'R','E','G','_','D','W','O','R','D',0};
+static const WCHAR type_dword_le[] = {'R','E','G','_','D','W','O','R','D','_','L','I','T','T','L','E','_','E','N','D','I','A','N',0};
+static const WCHAR type_dword_be[] = {'R','E','G','_','D','W','O','R','D','_','B','I','G','_','E','N','D','I','A','N',0};
+static const WCHAR type_multi_sz[] = {'R','E','G','_','M','U','L','T','I','_','S','Z',0};
+
+static const struct
+{
+    DWORD type;
+    const WCHAR *name;
+}
+type_rels[] =
+{
+    {REG_NONE, type_none},
+    {REG_SZ, type_sz},
+    {REG_EXPAND_SZ, type_expand_sz},
+    {REG_BINARY, type_binary},
+    {REG_DWORD, type_dword},
+    {REG_DWORD_LITTLE_ENDIAN, type_dword_le},
+    {REG_DWORD_BIG_ENDIAN, type_dword_be},
+    {REG_MULTI_SZ, type_multi_sz},
+};
+
 static int reg_printfW(const WCHAR *msg, ...)
 {
     va_list va_args;
@@ -114,30 +142,20 @@ static HKEY get_rootkey(LPWSTR key)
     else return NULL;
 }
 
-static DWORD get_regtype(LPWSTR type)
+static DWORD wchar_get_type(const WCHAR *type_name)
 {
-    static const WCHAR szREG_SZ[] = {'R','E','G','_','S','Z',0};
-    static const WCHAR szREG_MULTI_SZ[] = {'R','E','G','_','M','U','L','T','I','_','S','Z',0};
-    static const WCHAR szREG_DWORD_BIG_ENDIAN[] = {'R','E','G','_','D','W','O','R','D','_','B','I','G','_','E','N','D','I','A','N',0};
-    static const WCHAR szREG_DWORD[] = {'R','E','G','_','D','W','O','R','D',0};
-    static const WCHAR szREG_BINARY[] = {'R','E','G','_','B','I','N','A','R','Y',0};
-    static const WCHAR szREG_DWORD_LITTLE_ENDIAN[] = {'R','E','G','_','D','W','O','R','D','_','L','I','T','T','L','E','_','E','N','D','I','A','N',0};
-    static const WCHAR szREG_NONE[] = {'R','E','G','_','N','O','N','E',0};
-    static const WCHAR szREG_EXPAND_SZ[] = {'R','E','G','_','E','X','P','A','N','D','_','S','Z',0};
+    DWORD i;
 
-    if (!type)
+    if (!type_name)
         return REG_SZ;
 
-    if (lstrcmpiW(type,szREG_SZ)==0) return REG_SZ;
-    if (lstrcmpiW(type,szREG_DWORD)==0) return REG_DWORD;
-    if (lstrcmpiW(type,szREG_MULTI_SZ)==0) return REG_MULTI_SZ;
-    if (lstrcmpiW(type,szREG_EXPAND_SZ)==0) return REG_EXPAND_SZ;
-    if (lstrcmpiW(type,szREG_DWORD_BIG_ENDIAN)==0) return REG_DWORD_BIG_ENDIAN;
-    if (lstrcmpiW(type,szREG_DWORD_LITTLE_ENDIAN)==0) return REG_DWORD_LITTLE_ENDIAN;
-    if (lstrcmpiW(type,szREG_BINARY)==0) return REG_BINARY;
-    if (lstrcmpiW(type,szREG_NONE)==0) return REG_NONE;
+    for (i = 0; i < ARRAY_SIZE(type_rels); i++)
+    {
+        if (!strcmpiW(type_rels[i].name, type_name))
+            return type_rels[i].type;
+    }
 
-    return -1;
+    return ~0u;
 }
 
 static LPBYTE get_regdata(LPWSTR data, DWORD reg_type, WCHAR separator, DWORD *reg_count)
@@ -179,6 +197,25 @@ static LPBYTE get_regdata(LPWSTR data, DWORD reg_type, WCHAR separator, DWORD *r
     return out_data;
 }
 
+static BOOL sane_path(const WCHAR *key)
+{
+    unsigned int i = strlenW(key);
+
+    if (i < 3 || (key[i - 1] == '\\' && key[i - 2] == '\\'))
+    {
+        reg_message(STRING_INVALID_KEY);
+        return FALSE;
+    }
+
+    if (key[0] == '\\' && key[1] == '\\' && key[2] != '\\')
+    {
+        reg_message(STRING_NO_REMOTE);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 static int reg_add(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
     WCHAR *type, WCHAR separator, WCHAR *data, BOOL force)
 {
@@ -189,11 +226,8 @@ static int reg_add(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
 
     reg_printfW(stubW, key_name, value_name, value_empty, type, data, force);
 
-    if (key_name[0]=='\\' && key_name[1]=='\\')
-    {
-        reg_message(STRING_NO_REMOTE);
+    if (!sane_path(key_name))
         return 1;
-    }
 
     p = strchrW(key_name,'\\');
     if (!p)
@@ -230,11 +264,11 @@ static int reg_add(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
             }
         }
 
-        reg_type = get_regtype(type);
-        if (reg_type == -1)
+        reg_type = wchar_get_type(type);
+        if (reg_type == ~0u)
         {
             RegCloseKey(subkey);
-            reg_message(STRING_INVALID_CMDLINE);
+            reg_message(STRING_UNSUPPORTED_TYPE);
             return 1;
         }
 
@@ -262,11 +296,8 @@ static int reg_delete(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
         ,0};
     reg_printfW(stubW, key_name, value_name, value_empty, value_all, force);
 
-    if (key_name[0]=='\\' && key_name[1]=='\\')
-    {
-        reg_message(STRING_NO_REMOTE);
+    if (!sane_path(key_name))
         return 1;
-    }
 
     p = strchrW(key_name,'\\');
     if (!p)

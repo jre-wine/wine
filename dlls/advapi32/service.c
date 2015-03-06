@@ -28,6 +28,8 @@
 #include <time.h>
 #include <assert.h>
 
+#define NONAMELESSUNION
+
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -150,8 +152,7 @@ static inline DWORD multisz_cb(LPCWSTR wmultisz)
 /******************************************************************************
  * RPC connection with services.exe
  */
-
-DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW MachineName)
+static handle_t rpc_wstr_bind(RPC_WSTR str)
 {
     WCHAR transport[] = SVCCTL_TRANSPORT;
     WCHAR endpoint[] = SVCCTL_ENDPOINT;
@@ -159,7 +160,7 @@ DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW Machine
     RPC_STATUS status;
     handle_t rpc_handle;
 
-    status = RpcStringBindingComposeW(NULL, transport, (RPC_WSTR)MachineName, endpoint, NULL, &binding_str);
+    status = RpcStringBindingComposeW(NULL, transport, str, endpoint, NULL, &binding_str);
     if (status != RPC_S_OK)
     {
         ERR("RpcStringBindingComposeW failed (%d)\n", (DWORD)status);
@@ -178,7 +179,59 @@ DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW Machine
     return rpc_handle;
 }
 
+static handle_t rpc_cstr_bind(RPC_CSTR str)
+{
+    RPC_CSTR transport = (RPC_CSTR)SVCCTL_TRANSPORTA;
+    RPC_CSTR endpoint = (RPC_CSTR)SVCCTL_ENDPOINTA;
+    RPC_CSTR binding_str;
+    RPC_STATUS status;
+    handle_t rpc_handle;
+
+    status = RpcStringBindingComposeA(NULL, transport, str, endpoint, NULL, &binding_str);
+    if (status != RPC_S_OK)
+    {
+        ERR("RpcStringBindingComposeW failed (%d)\n", (DWORD)status);
+        return NULL;
+    }
+
+    status = RpcBindingFromStringBindingA(binding_str, &rpc_handle);
+    RpcStringFreeA(&binding_str);
+
+    if (status != RPC_S_OK)
+    {
+        ERR("Couldn't connect to services.exe: error code %u\n", (DWORD)status);
+        return NULL;
+    }
+
+    return rpc_handle;
+}
+
+DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEA_bind(MACHINE_HANDLEA MachineName)
+{
+    return rpc_cstr_bind((RPC_CSTR)MachineName);
+}
+
+DECLSPEC_HIDDEN void __RPC_USER MACHINE_HANDLEA_unbind(MACHINE_HANDLEA MachineName, handle_t h)
+{
+    RpcBindingFree(&h);
+}
+
+DECLSPEC_HIDDEN handle_t __RPC_USER MACHINE_HANDLEW_bind(MACHINE_HANDLEW MachineName)
+{
+    return rpc_wstr_bind((RPC_WSTR)MachineName);
+}
+
 DECLSPEC_HIDDEN void __RPC_USER MACHINE_HANDLEW_unbind(MACHINE_HANDLEW MachineName, handle_t h)
+{
+    RpcBindingFree(&h);
+}
+
+DECLSPEC_HIDDEN handle_t __RPC_USER SVCCTL_HANDLEW_bind(SVCCTL_HANDLEW MachineName)
+{
+    return rpc_wstr_bind((RPC_WSTR)MachineName);
+}
+
+DECLSPEC_HIDDEN void __RPC_USER SVCCTL_HANDLEW_unbind(SVCCTL_HANDLEW MachineName, handle_t h)
 {
     RpcBindingFree(&h);
 }
@@ -921,7 +974,7 @@ SC_HANDLE WINAPI OpenServiceA( SC_HANDLE hSCManager, LPCSTR lpServiceName,
     LPWSTR lpServiceNameW;
     SC_HANDLE ret;
 
-    TRACE("%p %s %d\n", hSCManager, debugstr_a(lpServiceName), dwDesiredAccess);
+    TRACE("%p %s 0x%08x\n", hSCManager, debugstr_a(lpServiceName), dwDesiredAccess);
 
     lpServiceNameW = SERV_dup(lpServiceName);
     ret = OpenServiceW( hSCManager, lpServiceNameW, dwDesiredAccess);
@@ -940,7 +993,7 @@ DWORD SERV_OpenServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
 {
     DWORD err;
 
-    TRACE("%p %s %d\n", hSCManager, debugstr_w(lpServiceName), dwDesiredAccess);
+    TRACE("%p %s 0x%08x\n", hSCManager, debugstr_w(lpServiceName), dwDesiredAccess);
 
     if (!hSCManager)
         return ERROR_INVALID_HANDLE;
@@ -1006,11 +1059,22 @@ CreateServiceW( SC_HANDLE hSCManager, LPCWSTR lpServiceName,
 
     __TRY
     {
-        err = svcctl_CreateServiceW(hSCManager, lpServiceName,
-                lpDisplayName, dwDesiredAccess, dwServiceType, dwStartType, dwErrorControl,
-                lpBinaryPathName, lpLoadOrderGroup, lpdwTagId, (const BYTE*)lpDependencies,
-                multisz_cb(lpDependencies), lpServiceStartName, (const BYTE*)lpPassword, passwdlen,
-                (SC_RPC_HANDLE *)&handle);
+        BOOL is_wow64;
+
+        IsWow64Process(GetCurrentProcess(), &is_wow64);
+
+        if (is_wow64)
+            err = svcctl_CreateServiceWOW64W(hSCManager, lpServiceName,
+                    lpDisplayName, dwDesiredAccess, dwServiceType, dwStartType, dwErrorControl,
+                    lpBinaryPathName, lpLoadOrderGroup, lpdwTagId, (const BYTE*)lpDependencies,
+                    multisz_cb(lpDependencies), lpServiceStartName, (const BYTE*)lpPassword, passwdlen,
+                    (SC_RPC_HANDLE *)&handle);
+        else
+            err = svcctl_CreateServiceW(hSCManager, lpServiceName,
+                    lpDisplayName, dwDesiredAccess, dwServiceType, dwStartType, dwErrorControl,
+                    lpBinaryPathName, lpLoadOrderGroup, lpdwTagId, (const BYTE*)lpDependencies,
+                    multisz_cb(lpDependencies), lpServiceStartName, (const BYTE*)lpPassword, passwdlen,
+                    (SC_RPC_HANDLE *)&handle);
     }
     __EXCEPT(rpc_filter)
     {
@@ -1387,7 +1451,7 @@ QueryServiceConfigW( SC_HANDLE hService,
 
     __TRY
     {
-        err = svcctl_QueryServiceConfigW(hService, &config);
+        err = svcctl_QueryServiceConfigW(hService, &config, cbBufSize, pcbBytesNeeded);
     }
     __EXCEPT(rpc_filter)
     {
@@ -1619,9 +1683,6 @@ EnumServicesStatusW( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
     TRACE("%p 0x%x 0x%x %p %u %p %p %p\n", hmngr, type, state, services, size, needed,
           returned, resume_handle);
 
-    if (resume_handle)
-        FIXME("resume handle not supported\n");
-
     if (!hmngr)
     {
         SetLastError( ERROR_INVALID_HANDLE );
@@ -1637,7 +1698,7 @@ EnumServicesStatusW( SC_HANDLE hmngr, DWORD type, DWORD state, LPENUM_SERVICE_ST
 
     __TRY
     {
-        err = svcctl_EnumServicesStatusW( hmngr, type, state, (BYTE *)services, size, needed, returned );
+        err = svcctl_EnumServicesStatusW( hmngr, type, state, (BYTE *)services, size, needed, returned, resume_handle );
     }
     __EXCEPT(rpc_filter)
     {
@@ -1748,9 +1809,6 @@ EnumServicesStatusExW( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
     TRACE("%p %u 0x%x 0x%x %p %u %p %p %p %s\n", hmngr, level, type, state, buffer,
           size, needed, returned, resume_handle, debugstr_w(group));
 
-    if (resume_handle)
-        FIXME("resume handle not supported\n");
-
     if (level != SC_ENUM_PROCESS_INFO)
     {
         SetLastError( ERROR_INVALID_LEVEL );
@@ -1771,8 +1829,8 @@ EnumServicesStatusExW( SC_HANDLE hmngr, SC_ENUM_TYPE level, DWORD type, DWORD st
 
     __TRY
     {
-        err = svcctl_EnumServicesStatusExW( hmngr, type, state, buffer, size, needed,
-                                            returned, group );
+        err = svcctl_EnumServicesStatusExW( hmngr, SC_ENUM_PROCESS_INFO, type, state, buffer, size, needed,
+                                            returned, resume_handle, group );
     }
     __EXCEPT(rpc_filter)
     {
@@ -2155,7 +2213,11 @@ BOOL WINAPI ChangeServiceConfig2W( SC_HANDLE hService, DWORD dwInfoLevel,
 
     __TRY
     {
-        err = svcctl_ChangeServiceConfig2W( hService, dwInfoLevel, lpInfo );
+        SC_RPC_CONFIG_INFOW info;
+
+        info.dwInfoLevel = dwInfoLevel;
+        info.u.descr = lpInfo;
+        err = svcctl_ChangeServiceConfig2W( hService, info );
     }
     __EXCEPT(rpc_filter)
     {
@@ -2333,4 +2395,38 @@ BOOL WINAPI EnumDependentServicesW( SC_HANDLE hService, DWORD dwServiceState,
 
     *lpServicesReturned = 0;
     return TRUE;
+}
+
+/******************************************************************************
+ * NotifyServiceStatusChangeW [ADVAPI32.@]
+ */
+DWORD WINAPI NotifyServiceStatusChangeW(SC_HANDLE hService, DWORD dwNotifyMask,
+        SERVICE_NOTIFYW *pNotifyBuffer)
+{
+    DWORD dummy;
+    BOOL ret;
+    SERVICE_STATUS_PROCESS st;
+
+    FIXME("%p 0x%x %p - semi-stub\n", hService, dwNotifyMask, pNotifyBuffer);
+
+    ret = QueryServiceStatusEx(hService, SC_STATUS_PROCESS_INFO, (void*)&st, sizeof(st), &dummy);
+    if (ret)
+    {
+        /* dwNotifyMask is a set of bitflags in same order as SERVICE_ statuses */
+        if (dwNotifyMask & (1 << (st.dwCurrentState - SERVICE_STOPPED)))
+        {
+            pNotifyBuffer->dwNotificationStatus = ERROR_SUCCESS;
+            memcpy(&pNotifyBuffer->ServiceStatus, &st, sizeof(pNotifyBuffer->ServiceStatus));
+            pNotifyBuffer->dwNotificationTriggered = 1 << (st.dwCurrentState - SERVICE_STOPPED);
+            pNotifyBuffer->pszServiceNames = NULL;
+            TRACE("Queueing notification: 0x%x\n", pNotifyBuffer->dwNotificationTriggered);
+            QueueUserAPC((PAPCFUNC)pNotifyBuffer->pfnNotifyCallback,
+                    GetCurrentThread(), (ULONG_PTR)pNotifyBuffer);
+        }
+    }
+
+    /* TODO: If the service is not currently in a matching state, we should
+     * tell `services` to monitor it. */
+
+    return ERROR_SUCCESS;
 }

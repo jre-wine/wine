@@ -74,9 +74,11 @@ typedef struct tagInputContextData
 {
         DWORD           dwLock;
         INPUTCONTEXT    IMC;
+        DWORD           threadID;
 
         ImmHkl          *immKbd;
         UINT            lastVK;
+        BOOL            threadDefault;
         DWORD           magic;
 } InputContextData;
 
@@ -89,12 +91,14 @@ typedef struct _tagTRANSMSG {
 } TRANSMSG, *LPTRANSMSG;
 
 typedef struct _tagIMMThreadData {
+    struct list entry;
+    DWORD threadID;
     HIMC defaultContext;
     HWND hwndDefault;
 } IMMThreadData;
 
-static DWORD tlsIndex = 0;
 static struct list ImmHklList = LIST_INIT(ImmHklList);
+static struct list ImmThreadDataList = LIST_INIT(ImmThreadDataList);
 
 static const WCHAR szwWineIMCProperty[] = {'W','i','n','e','I','m','m','H','I','M','C','P','r','o','p','e','r','t','y',0};
 
@@ -104,10 +108,20 @@ static const WCHAR szImeRegFmt[] = {'S','y','s','t','e','m','\\','C','u','r','r'
 
 static const WCHAR szwIME[] = {'I','M','E',0};
 
+static CRITICAL_SECTION threaddata_cs;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &threaddata_cs,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": threaddata_cs") }
+};
+static CRITICAL_SECTION threaddata_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
+
 #define is_himc_ime_unicode(p)  (p->immKbd->imeInfo.fdwProperty & IME_PROP_UNICODE)
 #define is_kbd_ime_unicode(p)  (p->imeInfo.fdwProperty & IME_PROP_UNICODE)
 
 static BOOL IMM_DestroyContext(HIMC hIMC);
+static InputContextData* get_imc_data(HIMC hIMC);
 
 static inline WCHAR *strdupAtoW( const char *str )
 {
@@ -211,29 +225,58 @@ static DWORD convert_candidatelist_AtoW(
     return ret;
 }
 
-static IMMThreadData* IMM_GetThreadData(void)
+static IMMThreadData *IMM_GetThreadData(HWND hwnd)
 {
-    IMMThreadData* data = TlsGetValue(tlsIndex);
-    if (!data)
+    IMMThreadData *data;
+    DWORD process, thread;
+
+    if (hwnd)
     {
-        data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                         sizeof(IMMThreadData));
-        TlsSetValue(tlsIndex,data);
-        TRACE("Thread Data Created\n");
+        if (!(thread = GetWindowThreadProcessId(hwnd, &process))) return NULL;
+        if (process != GetCurrentProcessId()) return NULL;
     }
+    else thread = GetCurrentThreadId();
+
+    EnterCriticalSection(&threaddata_cs);
+    LIST_FOR_EACH_ENTRY(data, &ImmThreadDataList, IMMThreadData, entry)
+        if (data->threadID == thread) return data;
+
+    data = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data));
+    data->threadID = thread;
+    list_add_head(&ImmThreadDataList,&data->entry);
+    TRACE("Thread Data Created (%x)\n",thread);
     return data;
+}
+
+static BOOL IMM_IsDefaultContext(HIMC imc)
+{
+    InputContextData *data = get_imc_data(imc);
+
+    if (!data)
+        return FALSE;
+
+    return data->threadDefault;
 }
 
 static void IMM_FreeThreadData(void)
 {
-    IMMThreadData* data = TlsGetValue(tlsIndex);
-    if (data)
+    IMMThreadData *data;
+
+    EnterCriticalSection(&threaddata_cs);
+    LIST_FOR_EACH_ENTRY(data, &ImmThreadDataList, IMMThreadData, entry)
     {
-        IMM_DestroyContext(data->defaultContext);
-        DestroyWindow(data->hwndDefault);
-        HeapFree(GetProcessHeap(),0,data);
-        TRACE("Thread Data Destroyed\n");
+        if (data->threadID == GetCurrentThreadId())
+        {
+            list_remove(&data->entry);
+            LeaveCriticalSection(&threaddata_cs);
+            IMM_DestroyContext(data->defaultContext);
+            DestroyWindow(data->hwndDefault);
+            HeapFree(GetProcessHeap(),0,data);
+            TRACE("Thread Data Destroyed\n");
+            return;
+        }
     }
+    LeaveCriticalSection(&threaddata_cs);
 }
 
 static HMODULE load_graphics_driver(void)
@@ -368,12 +411,8 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpReserved)
     switch (fdwReason)
     {
         case DLL_PROCESS_ATTACH:
-            tlsIndex = TlsAlloc();
-            if (tlsIndex == TLS_OUT_OF_INDEXES)
-                return FALSE;
             if (!User32InitializeImmEntryTable(IMM_INIT_MAGIC))
             {
-                TlsFree(tlsIndex);
                 return FALSE;
             }
             break;
@@ -386,7 +425,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpReserved)
             if (lpReserved) break;
             IMM_FreeThreadData();
             IMM_FreeAllImmHkl();
-            TlsFree(tlsIndex);
             break;
     }
     return TRUE;
@@ -442,6 +480,63 @@ static InputContextData* get_imc_data(HIMC hIMC)
     return data;
 }
 
+static HIMC get_default_context( HWND hwnd )
+{
+    HIMC ret;
+    IMMThreadData* thread_data = IMM_GetThreadData( hwnd );
+
+    if (!thread_data) return 0;
+
+    if (thread_data->defaultContext)
+    {
+        ret = thread_data->defaultContext;
+        LeaveCriticalSection(&threaddata_cs);
+        return ret;
+    }
+
+    /* can't create a default context in another thread */
+    if (thread_data->threadID != GetCurrentThreadId())
+    {
+        LeaveCriticalSection(&threaddata_cs);
+        return 0;
+    }
+
+    LeaveCriticalSection(&threaddata_cs);
+
+    ret = ImmCreateContext();
+    if (!ret) return 0;
+    ((InputContextData*)ret)->threadDefault = TRUE;
+
+    /* thread_data is in the current thread so we can assume it's still valid */
+    EnterCriticalSection(&threaddata_cs);
+
+    if (thread_data->defaultContext) /* someone beat us */
+    {
+        IMM_DestroyContext( ret );
+        ret = thread_data->defaultContext;
+    }
+    else thread_data->defaultContext = ret;
+
+    LeaveCriticalSection(&threaddata_cs);
+    return ret;
+}
+
+static BOOL IMM_IsCrossThreadAccess(HWND hWnd,  HIMC hIMC)
+{
+    InputContextData *data;
+
+    if (hWnd)
+    {
+        DWORD thread = GetWindowThreadProcessId(hWnd, NULL);
+        if (thread != GetCurrentThreadId()) return TRUE;
+    }
+    data = get_imc_data(hIMC);
+    if (data && data->threadID != GetCurrentThreadId())
+        return TRUE;
+
+    return FALSE;
+}
+
 /***********************************************************************
  *		ImmAssociateContext (IMM32.@)
  */
@@ -455,25 +550,26 @@ HIMC WINAPI ImmAssociateContext(HWND hWnd, HIMC hIMC)
     if(hIMC && !data)
         return NULL;
 
-    if (!IMM_GetThreadData()->defaultContext)
-        IMM_GetThreadData()->defaultContext = ImmCreateContext();
-
     /*
      * If already associated just return
      */
     if (hIMC && data->IMC.hWnd == hWnd)
         return hIMC;
 
+    if (hIMC && IMM_IsCrossThreadAccess(hWnd, hIMC))
+        return NULL;
+
     if (hWnd)
     {
+        HIMC defaultContext = get_default_context( hWnd );
         old = RemovePropW(hWnd,szwWineIMCProperty);
 
         if (old == NULL)
-            old = IMM_GetThreadData()->defaultContext;
+            old = defaultContext;
         else if (old == (HIMC)-1)
             old = NULL;
 
-        if (hIMC != IMM_GetThreadData()->defaultContext)
+        if (hIMC != defaultContext)
         {
             if (hIMC == NULL) /* Meaning disable imm for that window*/
                 SetPropW(hWnd,szwWineIMCProperty,(HANDLE)-1);
@@ -492,23 +588,9 @@ HIMC WINAPI ImmAssociateContext(HWND hWnd, HIMC hIMC)
     if (!hIMC)
         return old;
 
-    if (IsWindow(data->IMC.hWnd))
-    {
-        /*
-         * Post a message that your context is switching
-         */
-        SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, FALSE, ISC_SHOWUIALL);
-    }
-
+    SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, FALSE, ISC_SHOWUIALL);
     data->IMC.hWnd = hWnd;
-
-    if (IsWindow(data->IMC.hWnd))
-    {
-        /*
-         * Post a message that your context is switching
-         */
-        SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
-    }
+    SendMessageW(data->IMC.hWnd, WM_IME_SETCONTEXT, TRUE, ISC_SHOWUIALL);
 
     return old;
 }
@@ -531,10 +613,8 @@ BOOL WINAPI ImmAssociateContextEx(HWND hWnd, HIMC hIMC, DWORD dwFlags)
 {
     TRACE("(%p, %p, 0x%x):\n", hWnd, hIMC, dwFlags);
 
-    if (!IMM_GetThreadData()->defaultContext)
-        IMM_GetThreadData()->defaultContext = ImmCreateContext();
-
-    if (!hWnd) return FALSE;
+    if (!hWnd)
+        return FALSE;
 
     switch (dwFlags)
     {
@@ -542,8 +622,12 @@ BOOL WINAPI ImmAssociateContextEx(HWND hWnd, HIMC hIMC, DWORD dwFlags)
         ImmAssociateContext(hWnd,hIMC);
         return TRUE;
     case IACE_DEFAULT:
-        ImmAssociateContext(hWnd,IMM_GetThreadData()->defaultContext);
+    {
+        HIMC defaultContext = get_default_context( hWnd );
+        if (!defaultContext) return FALSE;
+        ImmAssociateContext(hWnd,defaultContext);
         return TRUE;
+    }
     case IACE_IGNORENOCONTEXT:
         if (GetPropW(hWnd,szwWineIMCProperty))
             ImmAssociateContext(hWnd,hIMC);
@@ -678,6 +762,7 @@ HIMC WINAPI ImmCreateContext(void)
         IMM_DestroyContext(new_context);
         return 0;
     }
+    new_context->threadID = GetCurrentThreadId();
     SendMessageW(GetFocus(), WM_IME_SELECT, TRUE, (LPARAM)GetKeyboardLayout(0));
 
     new_context->immKbd->uSelected++;
@@ -717,7 +802,7 @@ static BOOL IMM_DestroyContext(HIMC hIMC)
  */
 BOOL WINAPI ImmDestroyContext(HIMC hIMC)
 {
-    if (hIMC != IMM_GetThreadData()->defaultContext)
+    if (!IMM_IsDefaultContext(hIMC) && !IMM_IsCrossThreadAccess(NULL, hIMC))
         return IMM_DestroyContext(hIMC);
     else
         return FALSE;
@@ -1391,20 +1476,19 @@ HIMC WINAPI ImmGetContext(HWND hWnd)
         SetLastError(ERROR_INVALID_WINDOW_HANDLE);
         return NULL;
     }
-    if (!IMM_GetThreadData()->defaultContext)
-        IMM_GetThreadData()->defaultContext = ImmCreateContext();
 
     rc = GetPropW(hWnd,szwWineIMCProperty);
     if (rc == (HIMC)-1)
         rc = NULL;
     else if (rc == NULL)
-        rc = IMM_GetThreadData()->defaultContext;
+        rc = get_default_context( hWnd );
 
     if (rc)
     {
         InputContextData *data = rc;
         data->IMC.hWnd = hWnd;
     }
+
     TRACE("returning %p\n", rc);
 
     return rc;
@@ -1512,11 +1596,35 @@ BOOL WINAPI ImmGetConversionStatus(
  */
 HWND WINAPI ImmGetDefaultIMEWnd(HWND hWnd)
 {
-    if (IMM_GetThreadData()->hwndDefault == NULL)
-        IMM_GetThreadData()->hwndDefault = CreateWindowExW( WS_EX_TOOLWINDOW,
+    HWND ret, new = NULL;
+    IMMThreadData* thread_data = IMM_GetThreadData(hWnd);
+    if (!thread_data)
+        return NULL;
+    if (thread_data->hwndDefault == NULL && thread_data->threadID == GetCurrentThreadId())
+    {
+        /* Do not create the window inside of a critical section */
+        LeaveCriticalSection(&threaddata_cs);
+        new = CreateWindowExW( WS_EX_TOOLWINDOW,
                     szwIME, NULL, WS_POPUP, 0, 0, 1, 1, 0, 0, 0, 0);
-    TRACE("Default is %p\n",IMM_GetThreadData()->hwndDefault);
-    return IMM_GetThreadData()->hwndDefault;
+        /* thread_data is in the current thread so we can assume it's still valid */
+        EnterCriticalSection(&threaddata_cs);
+        /* See if anyone beat us */
+        if (thread_data->hwndDefault == NULL)
+        {
+            thread_data->hwndDefault = new;
+            new = NULL;
+        }
+    }
+    ret = thread_data->hwndDefault;
+    LeaveCriticalSection(&threaddata_cs);
+    TRACE("Default is %p\n",ret);
+    /* Clean up an unused new window outside of the critical section */
+    if (new != NULL)
+    {
+        DestroyWindow(new);
+    }
+    TRACE("Default is %p\n",ret);
+    return ret;
 }
 
 /***********************************************************************
@@ -2063,13 +2171,11 @@ LRESULT WINAPI ImmRequestMessageA(HIMC hIMC, WPARAM wParam, LPARAM lParam)
     InputContextData *data = get_imc_data(hIMC);
 
     TRACE("%p %ld %ld\n", hIMC, wParam, wParam);
-    if (!data)
-        SetLastError(ERROR_INVALID_HANDLE);
 
-    if (data && IsWindow(data->IMC.hWnd))
-        return SendMessageA(data->IMC.hWnd, WM_IME_REQUEST, wParam, lParam);
+    if (data) return SendMessageA(data->IMC.hWnd, WM_IME_REQUEST, wParam, lParam);
 
-     return 0;
+    SetLastError(ERROR_INVALID_HANDLE);
+    return 0;
 }
 
 /***********************************************************************
@@ -2081,13 +2187,10 @@ LRESULT WINAPI ImmRequestMessageW(HIMC hIMC, WPARAM wParam, LPARAM lParam)
 
     TRACE("%p %ld %ld\n", hIMC, wParam, wParam);
 
-    if (!data)
-        SetLastError(ERROR_INVALID_HANDLE);
+    if (data) return SendMessageW(data->IMC.hWnd, WM_IME_REQUEST, wParam, lParam);
 
-    if (data && IsWindow(data->IMC.hWnd))
-        return SendMessageW(data->IMC.hWnd, WM_IME_REQUEST, wParam, lParam);
-
-     return 0;
+    SetLastError(ERROR_INVALID_HANDLE);
+    return 0;
 }
 
 /***********************************************************************
@@ -2101,6 +2204,9 @@ BOOL WINAPI ImmSetCandidateWindow(
     TRACE("(%p, %p)\n", hIMC, lpCandidate);
 
     if (!data || !lpCandidate)
+        return FALSE;
+
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
         return FALSE;
 
     TRACE("\t%x, %x, (%i,%i), (%i,%i - %i,%i)\n",
@@ -2133,6 +2239,9 @@ BOOL WINAPI ImmSetCompositionFontA(HIMC hIMC, LPLOGFONTA lplf)
         return FALSE;
     }
 
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
+
     memcpy(&data->IMC.lfFont.W,lplf,sizeof(LOGFONTA));
     MultiByteToWideChar(CP_ACP, 0, lplf->lfFaceName, -1, data->IMC.lfFont.W.lfFaceName,
                         LF_FACESIZE);
@@ -2155,6 +2264,9 @@ BOOL WINAPI ImmSetCompositionFontW(HIMC hIMC, LPLOGFONTW lplf)
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
+
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
 
     data->IMC.lfFont.W = *lplf;
     ImmNotifyIME(hIMC, NI_CONTEXTUPDATED, 0, IMC_SETCOMPOSITIONFONT);
@@ -2297,6 +2409,9 @@ BOOL WINAPI ImmSetCompositionWindow(
         return FALSE;
     }
 
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
+
     data->IMC.cfCompForm = *lpCompForm;
 
     if (IsWindowVisible(data->immKbd->UIWnd))
@@ -2331,6 +2446,9 @@ BOOL WINAPI ImmSetConversionStatus(
         return FALSE;
     }
 
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
+
     if ( fdwConversion != data->IMC.fdwConversion )
     {
         oldConversion = data->IMC.fdwConversion;
@@ -2363,6 +2481,9 @@ BOOL WINAPI ImmSetOpenStatus(HIMC hIMC, BOOL fOpen)
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
+
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
 
     if (data->immKbd->UIWnd == NULL)
     {
@@ -2399,6 +2520,9 @@ BOOL WINAPI ImmSetStatusWindowPos(HIMC hIMC, LPPOINT lpptPos)
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
+
+    if (IMM_IsCrossThreadAccess(NULL, hIMC))
+        return FALSE;
 
     TRACE("\t(%i,%i)\n", lpptPos->x, lpptPos->y);
 

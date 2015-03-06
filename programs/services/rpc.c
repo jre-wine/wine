@@ -19,6 +19,7 @@
  */
 
 #define WIN32_LEAN_AND_MEAN
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 #include <windows.h>
@@ -463,7 +464,7 @@ static DWORD parse_dependencies(const WCHAR *dependencies, struct service_entry 
     return ERROR_SUCCESS;
 }
 
-DWORD __cdecl svcctl_CreateServiceW(
+static DWORD create_serviceW(
     SC_RPC_HANDLE hSCManager,
     LPCWSTR lpServiceName,
     LPCWSTR lpDisplayName,
@@ -479,7 +480,8 @@ DWORD __cdecl svcctl_CreateServiceW(
     LPCWSTR lpServiceStartName,
     const BYTE *lpPassword,
     DWORD dwPasswordSize,
-    SC_RPC_HANDLE *phService)
+    SC_RPC_HANDLE *phService,
+    BOOL is_wow64)
 {
     struct service_entry *entry, *found;
     struct sc_manager_handle *manager;
@@ -509,6 +511,7 @@ DWORD __cdecl svcctl_CreateServiceW(
     }
 
     entry->ref_count = 1;
+    entry->is_wow64 = is_wow64;
     entry->config.dwServiceType = entry->status.dwServiceType = dwServiceType;
     entry->config.dwStartType = dwStartType;
     entry->config.dwErrorControl = dwErrorControl;
@@ -562,6 +565,30 @@ DWORD __cdecl svcctl_CreateServiceW(
     return create_handle_for_service(entry, dwDesiredAccess, phService);
 }
 
+DWORD __cdecl svcctl_CreateServiceW(
+    SC_RPC_HANDLE hSCManager,
+    LPCWSTR lpServiceName,
+    LPCWSTR lpDisplayName,
+    DWORD dwDesiredAccess,
+    DWORD dwServiceType,
+    DWORD dwStartType,
+    DWORD dwErrorControl,
+    LPCWSTR lpBinaryPathName,
+    LPCWSTR lpLoadOrderGroup,
+    DWORD *lpdwTagId,
+    const BYTE *lpDependencies,
+    DWORD dwDependenciesSize,
+    LPCWSTR lpServiceStartName,
+    const BYTE *lpPassword,
+    DWORD dwPasswordSize,
+    SC_RPC_HANDLE *phService)
+{
+    WINE_TRACE("(%s, %s, 0x%x, %s)\n", wine_dbgstr_w(lpServiceName), wine_dbgstr_w(lpDisplayName), dwDesiredAccess, wine_dbgstr_w(lpBinaryPathName));
+    return create_serviceW(hSCManager, lpServiceName, lpDisplayName, dwDesiredAccess, dwServiceType, dwStartType,
+        dwErrorControl, lpBinaryPathName, lpLoadOrderGroup, lpdwTagId, lpDependencies, dwDependenciesSize, lpServiceStartName,
+        lpPassword, dwPasswordSize, phService, FALSE);
+}
+
 DWORD __cdecl svcctl_DeleteService(
     SC_RPC_HANDLE hService)
 {
@@ -585,7 +612,9 @@ DWORD __cdecl svcctl_DeleteService(
 
 DWORD __cdecl svcctl_QueryServiceConfigW(
         SC_RPC_HANDLE hService,
-        QUERY_SERVICE_CONFIGW *config)
+        QUERY_SERVICE_CONFIGW *config,
+        DWORD buf_size,
+        DWORD *needed_size)
 {
     struct sc_service_handle *service;
     DWORD err;
@@ -755,7 +784,7 @@ DWORD __cdecl svcctl_SetServiceStatus(
     return ERROR_SUCCESS;
 }
 
-DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level, SERVICE_CONFIG2W *config )
+DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, SC_RPC_CONFIG_INFOW config )
 {
     struct sc_service_handle *service;
     DWORD err;
@@ -763,15 +792,15 @@ DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
     if ((err = validate_service_handle(hService, SERVICE_CHANGE_CONFIG, &service)) != 0)
         return err;
 
-    switch (level)
+    switch (config.dwInfoLevel)
     {
     case SERVICE_CONFIG_DESCRIPTION:
         {
             WCHAR *descr = NULL;
 
-            if (config->descr.lpDescription[0])
+            if (config.u.descr->lpDescription[0])
             {
-                if (!(descr = strdupW( config->descr.lpDescription )))
+                if (!(descr = strdupW( config.u.descr->lpDescription )))
                     return ERROR_NOT_ENOUGH_MEMORY;
             }
 
@@ -785,20 +814,20 @@ DWORD __cdecl svcctl_ChangeServiceConfig2W( SC_RPC_HANDLE hService, DWORD level,
         break;
     case SERVICE_CONFIG_FAILURE_ACTIONS:
         WINE_FIXME( "SERVICE_CONFIG_FAILURE_ACTIONS not implemented: period %u msg %s cmd %s\n",
-                    config->actions.dwResetPeriod,
-                    wine_dbgstr_w(config->actions.lpRebootMsg),
-                    wine_dbgstr_w(config->actions.lpCommand) );
+                    config.u.actions->dwResetPeriod,
+                    wine_dbgstr_w(config.u.actions->lpRebootMsg),
+                    wine_dbgstr_w(config.u.actions->lpCommand) );
         break;
     case SERVICE_CONFIG_PRESHUTDOWN_INFO:
         WINE_TRACE( "changing service %p preshutdown timeout to %d\n",
-                service, config->preshutdown.dwPreshutdownTimeout );
+                service, config.u.preshutdown->dwPreshutdownTimeout );
         service_lock_exclusive( service->service_entry );
-        service->service_entry->preshutdown_timeout = config->preshutdown.dwPreshutdownTimeout;
+        service->service_entry->preshutdown_timeout = config.u.preshutdown->dwPreshutdownTimeout;
         save_service_config( service->service_entry );
         service_unlock( service->service_entry );
         break;
     default:
-        WINE_FIXME("level %u not implemented\n", level);
+        WINE_FIXME("level %u not implemented\n", config.dwInfoLevel);
         err = ERROR_INVALID_LEVEL;
         break;
     }
@@ -1276,7 +1305,8 @@ DWORD __cdecl svcctl_EnumServicesStatusW(
     BYTE *buffer,
     DWORD size,
     LPDWORD needed,
-    LPDWORD returned)
+    LPDWORD returned,
+    LPDWORD resume)
 {
     DWORD err, sz, total_size, num_services;
     DWORD_PTR offset;
@@ -1284,13 +1314,16 @@ DWORD __cdecl svcctl_EnumServicesStatusW(
     struct service_entry *service;
     ENUM_SERVICE_STATUSW *s;
 
-    WINE_TRACE("(%p, 0x%x, 0x%x, %p, %u, %p, %p)\n", hmngr, type, state, buffer, size, needed, returned);
+    WINE_TRACE("(%p, 0x%x, 0x%x, %p, %u, %p, %p, %p)\n", hmngr, type, state, buffer, size, needed, returned, resume);
 
     if (!type || !state)
         return ERROR_INVALID_PARAMETER;
 
     if ((err = validate_scm_handle(hmngr, SC_MANAGER_ENUMERATE_SERVICE, &manager)) != ERROR_SUCCESS)
         return err;
+
+    if (resume)
+        WINE_FIXME("resume index not supported\n");
 
     scmdatabase_lock_exclusive(manager->db);
 
@@ -1363,14 +1396,32 @@ static BOOL match_group(const WCHAR *g1, const WCHAR *g2)
     return FALSE;
 }
 
+DWORD __cdecl svcctl_EnumServicesStatusExA(
+    SC_RPC_HANDLE scmanager,
+    SC_ENUM_TYPE info_level,
+    DWORD service_type,
+    DWORD service_state,
+    BYTE *buffer,
+    DWORD buf_size,
+    DWORD *needed_size,
+    DWORD *services_count,
+    DWORD *resume_index,
+    LPCSTR groupname)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
 DWORD __cdecl svcctl_EnumServicesStatusExW(
     SC_RPC_HANDLE hmngr,
+    SC_ENUM_TYPE info_level,
     DWORD type,
     DWORD state,
     BYTE *buffer,
     DWORD size,
     LPDWORD needed,
     LPDWORD returned,
+    DWORD *resume_handle,
     LPCWSTR group)
 {
     DWORD err, sz, total_size, num_services;
@@ -1381,6 +1432,9 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
 
     WINE_TRACE("(%p, 0x%x, 0x%x, %p, %u, %p, %p, %s)\n", hmngr, type, state, buffer, size,
                needed, returned, wine_dbgstr_w(group));
+
+    if (resume_handle)
+        FIXME("resume handle not supported\n");
 
     if (!type || !state)
         return ERROR_INVALID_PARAMETER;
@@ -1448,26 +1502,178 @@ DWORD __cdecl svcctl_EnumServicesStatusExW(
     return ERROR_SUCCESS;
 }
 
-DWORD __cdecl svcctl_QueryServiceObjectSecurity(void)
+DWORD __cdecl svcctl_unknown43(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_SetServiceObjectSecurity(void)
+DWORD __cdecl svcctl_CreateServiceWOW64A(
+    SC_RPC_HANDLE scmanager,
+    LPCSTR servicename,
+    LPCSTR displayname,
+    DWORD accessmask,
+    DWORD service_type,
+    DWORD start_type,
+    DWORD error_control,
+    LPCSTR imagepath,
+    LPCSTR loadordergroup,
+    DWORD *tagid,
+    const BYTE *dependencies,
+    DWORD depend_size,
+    LPCSTR start_name,
+    const BYTE *password,
+    DWORD password_size,
+    SC_RPC_HANDLE *service)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_QueryServiceStatus(void)
+DWORD __cdecl svcctl_CreateServiceWOW64W(
+    SC_RPC_HANDLE scmanager,
+    LPCWSTR servicename,
+    LPCWSTR displayname,
+    DWORD accessmask,
+    DWORD service_type,
+    DWORD start_type,
+    DWORD error_control,
+    LPCWSTR imagepath,
+    LPCWSTR loadordergroup,
+    DWORD *tagid,
+    const BYTE *dependencies,
+    DWORD depend_size,
+    LPCWSTR start_name,
+    const BYTE *password,
+    DWORD password_size,
+    SC_RPC_HANDLE *service)
+{
+    WINE_TRACE("(%s, %s, 0x%x, %s)\n", wine_dbgstr_w(servicename), wine_dbgstr_w(displayname), accessmask, wine_dbgstr_w(imagepath));
+    return create_serviceW(scmanager, servicename, displayname, accessmask, service_type, start_type, error_control, imagepath,
+        loadordergroup, tagid, dependencies, depend_size, start_name, password, password_size, service, TRUE);
+}
+
+DWORD __cdecl svcctl_unknown46(void)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
+DWORD __cdecl svcctl_NotifyServiceStatusChange(
+    SC_RPC_HANDLE service,
+    SC_RPC_NOTIFY_PARAMS params,
+    GUID *clientprocessguid,
+    GUID *scmprocessguid,
+    BOOL *createremotequeue,
+    SC_NOTIFY_RPC_HANDLE *notify)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
 
-DWORD __cdecl svcctl_NotifyBootConfigStatus(void)
+DWORD __cdecl svcctl_GetNotifyResults(
+    SC_NOTIFY_RPC_HANDLE notify,
+    SC_RPC_NOTIFY_PARAMS_LIST **params)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_CloseNotifyHandle(
+    SC_NOTIFY_RPC_HANDLE *notify,
+    BOOL *apc_fired)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_ControlServiceExA(
+    SC_RPC_HANDLE service,
+    DWORD control,
+    DWORD info_level,
+    SC_RPC_SERVICE_CONTROL_IN_PARAMSA *in_params,
+    SC_RPC_SERVICE_CONTROL_OUT_PARAMSA *out_params)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_ControlServiceExW(
+    SC_RPC_HANDLE service,
+    DWORD control,
+    DWORD info_level,
+    SC_RPC_SERVICE_CONTROL_IN_PARAMSW *in_params,
+    SC_RPC_SERVICE_CONTROL_OUT_PARAMSW *out_params)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_unknown52(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_unknown53(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_unknown54(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_unknown55(void)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_QueryServiceConfigEx(
+    SC_RPC_HANDLE service,
+    DWORD info_level,
+    SC_RPC_CONFIG_INFOW *info)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_QueryServiceObjectSecurity(
+    SC_RPC_HANDLE service,
+    SECURITY_INFORMATION info,
+    BYTE *descriptor,
+    DWORD buf_size,
+    DWORD *needed_size)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_SetServiceObjectSecurity(
+    SC_RPC_HANDLE service,
+    SECURITY_INFORMATION info,
+    BYTE *descriptor,
+    DWORD buf_size)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_QueryServiceStatus(
+    SC_RPC_HANDLE service,
+    SERVICE_STATUS *status)
+{
+    WINE_FIXME("\n");
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+DWORD __cdecl svcctl_NotifyBootConfigStatus(
+    SVCCTL_HANDLEW machinename,
+    DWORD boot_acceptable)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
@@ -1479,14 +1685,23 @@ DWORD __cdecl svcctl_SCSetServiceBitsW(void)
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-
-DWORD __cdecl svcctl_EnumDependentServicesW(void)
+DWORD __cdecl svcctl_EnumDependentServicesW(
+    SC_RPC_HANDLE service,
+    DWORD state,
+    BYTE *services,
+    DWORD buf_size,
+    DWORD *needed_size,
+    DWORD *services_ret)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_QueryServiceLockStatusW(void)
+DWORD __cdecl svcctl_QueryServiceLockStatusW(
+    SC_RPC_HANDLE scmanager,
+    QUERY_SERVICE_LOCK_STATUSW *status,
+    DWORD buf_size,
+    DWORD *needed_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
@@ -1498,67 +1713,137 @@ DWORD __cdecl svcctl_SCSetServiceBitsA(void)
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_ChangeServiceConfigA(void)
+DWORD __cdecl svcctl_ChangeServiceConfigA(
+    SC_RPC_HANDLE service,
+    DWORD service_type,
+    DWORD start_type,
+    DWORD error_control,
+    LPSTR binarypath,
+    LPSTR loadordergroup,
+    DWORD *tagid,
+    BYTE *dependencies,
+    DWORD depend_size,
+    LPSTR startname,
+    BYTE *password,
+    DWORD password_size,
+    LPSTR displayname)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_CreateServiceA(void)
+DWORD __cdecl svcctl_CreateServiceA(
+    SC_RPC_HANDLE scmanager,
+    LPCSTR servicename,
+    LPCSTR displayname,
+    DWORD desiredaccess,
+    DWORD service_type,
+    DWORD start_type,
+    DWORD error_control,
+    LPCSTR binarypath,
+    LPCSTR loadordergroup,
+    DWORD *tagid,
+    const BYTE *dependencies,
+    DWORD depend_size,
+    LPCSTR startname,
+    const BYTE *password,
+    DWORD password_size,
+    SC_RPC_HANDLE *service)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_EnumDependentServicesA(void)
+DWORD __cdecl svcctl_EnumDependentServicesA(
+    SC_RPC_HANDLE service,
+    DWORD state,
+    BYTE *services,
+    DWORD buf_size,
+    DWORD *needed_size,
+    DWORD *services_ret)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_EnumServicesStatusA(void)
+DWORD __cdecl svcctl_EnumServicesStatusA(
+    SC_RPC_HANDLE hmngr,
+    DWORD type,
+    DWORD state,
+    BYTE *buffer,
+    DWORD size,
+    DWORD *needed,
+    DWORD *returned,
+    DWORD *resume)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_OpenSCManagerA(void)
+DWORD __cdecl svcctl_OpenSCManagerA(
+    MACHINE_HANDLEA MachineName,
+    LPCSTR DatabaseName,
+    DWORD dwAccessMask,
+    SC_RPC_HANDLE *handle)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_OpenServiceA(void)
+DWORD __cdecl svcctl_OpenServiceA(
+    SC_RPC_HANDLE hSCManager,
+    LPCSTR lpServiceName,
+    DWORD dwDesiredAccess,
+    SC_RPC_HANDLE *phService)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_QueryServiceConfigA(void)
+DWORD __cdecl svcctl_QueryServiceConfigA(
+    SC_RPC_HANDLE hService,
+    QUERY_SERVICE_CONFIGA *config,
+    DWORD buf_size,
+    DWORD *needed_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_QueryServiceLockStatusA(void)
+DWORD __cdecl svcctl_QueryServiceLockStatusA(
+    SC_RPC_HANDLE scmanager,
+    QUERY_SERVICE_LOCK_STATUSA *status,
+    DWORD buf_size,
+    DWORD *needed_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_StartServiceA(void)
+DWORD __cdecl svcctl_StartServiceA(
+    SC_RPC_HANDLE service,
+    DWORD argc,
+    LPCSTR *args)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_GetServiceDisplayNameA(void)
+DWORD __cdecl svcctl_GetServiceDisplayNameA(
+    SC_RPC_HANDLE hSCManager,
+    LPCSTR servicename,
+    CHAR buffer[],
+    DWORD *buf_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_GetServiceKeyNameA(void)
+DWORD __cdecl svcctl_GetServiceKeyNameA(
+    SC_RPC_HANDLE hSCManager,
+    LPCSTR servicename,
+    CHAR buffer[],
+    DWORD *buf_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
@@ -1570,24 +1855,39 @@ DWORD __cdecl svcctl_GetCurrentGroupStateW(void)
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_EnumServiceGroupW(void)
+DWORD __cdecl svcctl_EnumServiceGroupW(
+    SC_RPC_HANDLE scmanager,
+    DWORD service_type,
+    DWORD service_state,
+    BYTE *buffer,
+    DWORD buf_size,
+    DWORD *needed_size,
+    DWORD *returned_size,
+    DWORD *resume_index,
+    LPCWSTR groupname)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_ChangeServiceConfig2A(void)
+DWORD __cdecl svcctl_ChangeServiceConfig2A(
+    SC_RPC_HANDLE service,
+    SC_RPC_CONFIG_INFOA info)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
-DWORD __cdecl svcctl_QueryServiceConfig2A(void)
+DWORD __cdecl svcctl_QueryServiceConfig2A(
+    SC_RPC_HANDLE service,
+    DWORD info_level,
+    BYTE *buffer,
+    DWORD buf_size,
+    DWORD *needed_size)
 {
     WINE_FIXME("\n");
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
-
 
 DWORD RPC_Init(void)
 {
@@ -1619,7 +1919,7 @@ DWORD events_loop(void)
 {
     struct timeout_queue_elem *iter, *iter_safe;
     DWORD err;
-    HANDLE wait_handles[2];
+    HANDLE wait_handles[MAXIMUM_WAIT_OBJECTS];
     DWORD timeout = INFINITE;
 
     wait_handles[0] = __wine_make_process_system();
@@ -1632,13 +1932,29 @@ DWORD events_loop(void)
 
     do
     {
-        err = WaitForMultipleObjects(2, wait_handles, FALSE, timeout);
+        DWORD num_handles = 2;
+
+        /* monitor tracked process handles for process end */
+        EnterCriticalSection(&timeout_queue_cs);
+        LIST_FOR_EACH_ENTRY(iter, &timeout_queue, struct timeout_queue_elem, entry)
+        {
+            if(num_handles == MAXIMUM_WAIT_OBJECTS){
+                WINE_TRACE("Exceeded maximum wait object count\n");
+                break;
+            }
+            wait_handles[num_handles] = iter->service_entry->process;
+            num_handles++;
+        }
+        LeaveCriticalSection(&timeout_queue_cs);
+
+        err = WaitForMultipleObjects(num_handles, wait_handles, FALSE, timeout);
         WINE_TRACE("Wait returned %d\n", err);
 
-        if(err==WAIT_OBJECT_0+1 || err==WAIT_TIMEOUT)
+        if(err > WAIT_OBJECT_0 || err == WAIT_TIMEOUT)
         {
             FILETIME cur_time;
             ULARGE_INTEGER time;
+            DWORD idx = 0;
 
             GetSystemTimeAsFileTime(&cur_time);
             time.u.LowPart = cur_time.dwLowDateTime;
@@ -1648,7 +1964,8 @@ DWORD events_loop(void)
             timeout = INFINITE;
             LIST_FOR_EACH_ENTRY_SAFE(iter, iter_safe, &timeout_queue, struct timeout_queue_elem, entry)
             {
-                if(CompareFileTime(&cur_time, &iter->time) >= 0)
+                if(CompareFileTime(&cur_time, &iter->time) >= 0 ||
+                        (err > WAIT_OBJECT_0 + 1 && idx == err - WAIT_OBJECT_0 - 2))
                 {
                     LeaveCriticalSection(&timeout_queue_cs);
                     iter->func(iter->service_entry);
@@ -1669,6 +1986,7 @@ DWORD events_loop(void)
                     if(time_diff.QuadPart < timeout)
                         timeout = time_diff.QuadPart;
                 }
+                idx++;
             }
             LeaveCriticalSection(&timeout_queue_cs);
 
@@ -1699,6 +2017,10 @@ DWORD events_loop(void)
 void __RPC_USER SC_RPC_HANDLE_rundown(SC_RPC_HANDLE handle)
 {
     SC_RPC_HANDLE_destroy(handle);
+}
+
+void __RPC_USER SC_NOTIFY_RPC_HANDLE_rundown(SC_NOTIFY_RPC_HANDLE handle)
+{
 }
 
 void  __RPC_FAR * __RPC_USER MIDL_user_allocate(SIZE_T len)
