@@ -64,14 +64,6 @@ KSERVICE_TABLE_DESCRIPTOR KeServiceDescriptorTable[4] = { { 0 } };
 typedef void (WINAPI *PCREATE_PROCESS_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
 typedef void (WINAPI *PCREATE_THREAD_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
 
-static struct list Irps = LIST_INIT(Irps);
-
-struct IrpInstance
-{
-    struct list entry;
-    IRP *irp;
-};
-
 /* tid of the thread running client request */
 static DWORD request_thread;
 
@@ -140,76 +132,52 @@ static HANDLE get_device_manager(void)
 static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff, ULONG in_size,
                                void *out_buff, ULONG *out_size )
 {
-    IRP irp;
-    MDL mdl;
-    IO_STACK_LOCATION irpsp;
+    IRP *irp;
+    void *sys_buff = NULL;
     FILE_OBJECT file;
-    PDRIVER_DISPATCH dispatch = device->DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
-    NTSTATUS status;
+    IO_STATUS_BLOCK iosb;
     LARGE_INTEGER count;
 
     TRACE( "ioctl %x device %p in_size %u out_size %u\n", code, device, in_size, *out_size );
 
     /* so we can spot things that we should initialize */
-    memset( &irp, 0x55, sizeof(irp) );
-    memset( &irpsp, 0x66, sizeof(irpsp) );
-    memset( &mdl, 0x77, sizeof(mdl) );
     memset( &file, 0x88, sizeof(file) );
 
-    irp.RequestorMode = UserMode;
     if ((code & 3) == METHOD_BUFFERED)
     {
-        irp.AssociatedIrp.SystemBuffer = HeapAlloc( GetProcessHeap(), 0, max( in_size, *out_size ) );
-        if (!irp.AssociatedIrp.SystemBuffer)
+        if (!(sys_buff = HeapAlloc( GetProcessHeap(), 0, max( in_size, *out_size ) )))
             return STATUS_NO_MEMORY;
-        memcpy( irp.AssociatedIrp.SystemBuffer, in_buff, in_size );
+        memcpy( sys_buff, in_buff, in_size );
     }
-    else
-        irp.AssociatedIrp.SystemBuffer = in_buff;
-    irp.UserBuffer = out_buff;
-    irp.MdlAddress = &mdl;
-    irp.Tail.Overlay.s.u2.CurrentStackLocation = &irpsp;
-    irp.Tail.Overlay.OriginalFileObject = &file;
-    irp.UserIosb = NULL;
 
-    irpsp.MajorFunction = IRP_MJ_DEVICE_CONTROL;
-    irpsp.Parameters.DeviceIoControl.OutputBufferLength = *out_size;
-    irpsp.Parameters.DeviceIoControl.InputBufferLength = in_size;
-    irpsp.Parameters.DeviceIoControl.IoControlCode = code;
-    irpsp.Parameters.DeviceIoControl.Type3InputBuffer = in_buff;
-    irpsp.DeviceObject = device;
-    irpsp.CompletionRoutine = NULL;
-
-    mdl.Next = NULL;
-    mdl.Size = 0;
-    mdl.StartVa = out_buff;
-    mdl.ByteCount = *out_size;
-    mdl.ByteOffset = 0;
+    irp = IoBuildDeviceIoControlRequest( code, device, in_buff, in_size, out_buff, *out_size,
+                                         FALSE, NULL, &iosb );
+    if (!irp)
+    {
+        HeapFree( GetProcessHeap(), 0, sys_buff );
+        return STATUS_NO_MEMORY;
+    }
+    irp->RequestorMode = UserMode;
+    irp->AssociatedIrp.SystemBuffer = ((code & 3) == METHOD_BUFFERED) ? sys_buff : in_buff;
+    irp->UserBuffer = out_buff;
+    irp->Tail.Overlay.OriginalFileObject = &file;
 
     file.FsContext = NULL;
     file.FsContext2 = NULL;
 
-    device->CurrentIrp = &irp;
+    IoAllocateMdl( out_buff, *out_size, FALSE, FALSE, irp );
+
+    device->CurrentIrp = irp;
 
     KeQueryTickCount( &count );  /* update the global KeTickCount */
 
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Call driver dispatch %p (device=%p,irp=%p)\n",
-                 GetCurrentThreadId(), dispatch, device, &irp );
+    IoCallDriver( device, irp );
 
-    status = dispatch( device, &irp );
+    *out_size = (iosb.u.Status >= 0) ? iosb.Information : 0;
+    if (out_buff && (code & 3) == METHOD_BUFFERED) memcpy( out_buff, sys_buff, *out_size );
 
-    if (TRACE_ON(relay))
-        DPRINTF( "%04x:Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
-                 GetCurrentThreadId(), dispatch, device, &irp, status );
-
-    *out_size = (irp.IoStatus.u.Status >= 0) ? irp.IoStatus.Information : 0;
-    if ((code & 3) == METHOD_BUFFERED)
-    {
-        if (out_buff) memcpy( out_buff, irp.AssociatedIrp.SystemBuffer, *out_size );
-        HeapFree( GetProcessHeap(), 0, irp.AssociatedIrp.SystemBuffer );
-    }
-    return irp.IoStatus.u.Status;
+    HeapFree( GetProcessHeap(), 0, sys_buff );
+    return iosb.u.Status;
 }
 
 
@@ -402,7 +370,17 @@ PIRP WINAPI IoAllocateIrp( CCHAR stack_size, BOOLEAN charge_quota )
  */
 void WINAPI IoFreeIrp( IRP *irp )
 {
+    MDL *mdl;
+
     TRACE( "%p\n", irp );
+
+    mdl = irp->MdlAddress;
+    while (mdl)
+    {
+        MDL *next = mdl->Next;
+        IoFreeMdl( mdl );
+        mdl = next;
+    }
 
     ExFreePool( irp );
 }
@@ -421,24 +399,21 @@ PVOID WINAPI IoAllocateErrorLogEntry( PVOID IoObject, UCHAR EntrySize )
 /***********************************************************************
  *           IoAllocateMdl  (NTOSKRNL.EXE.@)
  */
-PMDL WINAPI IoAllocateMdl( PVOID VirtualAddress, ULONG Length, BOOLEAN SecondaryBuffer, BOOLEAN ChargeQuota, PIRP Irp )
+PMDL WINAPI IoAllocateMdl( PVOID va, ULONG length, BOOLEAN secondary, BOOLEAN charge_quota, IRP *irp )
 {
     PMDL mdl;
-    ULONG_PTR address = (ULONG_PTR)VirtualAddress;
+    ULONG_PTR address = (ULONG_PTR)va;
     ULONG_PTR page_address;
     SIZE_T nb_pages, mdl_size;
 
-    TRACE("(%p, %u, %i, %i, %p)\n", VirtualAddress, Length, SecondaryBuffer, ChargeQuota, Irp);
+    TRACE("(%p, %u, %i, %i, %p)\n", va, length, secondary, charge_quota, irp);
 
-    if (Irp)
-        FIXME("Attaching the MDL to an IRP is not yet supported\n");
-
-    if (ChargeQuota)
+    if (charge_quota)
         FIXME("Charge quota is not yet supported\n");
 
     /* FIXME: We suppose that page size is 4096 */
     page_address = address & ~(4096 - 1);
-    nb_pages = (((address + Length - 1) & ~(4096 - 1)) - page_address) / 4096 + 1;
+    nb_pages = (((address + length - 1) & ~(4096 - 1)) - page_address) / 4096 + 1;
 
     mdl_size = sizeof(MDL) + nb_pages * sizeof(PVOID);
 
@@ -447,11 +422,24 @@ PMDL WINAPI IoAllocateMdl( PVOID VirtualAddress, ULONG Length, BOOLEAN Secondary
         return NULL;
 
     mdl->Size = mdl_size;
-    mdl->Process = IoGetCurrentProcess();
+    mdl->Process = NULL; /* FIXME: IoGetCurrentProcess */
     mdl->StartVa = (PVOID)page_address;
-    mdl->ByteCount = Length;
+    mdl->ByteCount = length;
     mdl->ByteOffset = address - page_address;
 
+    if (!irp) return mdl;
+
+    if (secondary)  /* add it at the end */
+    {
+        MDL **pmdl = &irp->MdlAddress;
+        while (*pmdl) pmdl = &(*pmdl)->Next;
+        *pmdl = mdl;
+    }
+    else
+    {
+        mdl->Next = irp->MdlAddress;
+        irp->MdlAddress = mdl;
+    }
     return mdl;
 }
 
@@ -459,10 +447,9 @@ PMDL WINAPI IoAllocateMdl( PVOID VirtualAddress, ULONG Length, BOOLEAN Secondary
 /***********************************************************************
  *           IoFreeMdl  (NTOSKRNL.EXE.@)
  */
-VOID WINAPI IoFreeMdl(PMDL mdl)
+void WINAPI IoFreeMdl(PMDL mdl)
 {
-    FIXME("partial stub: %p\n", mdl);
-
+    TRACE("%p\n", mdl);
     HeapFree(GetProcessHeap(), 0, mdl);
 }
 
@@ -493,48 +480,36 @@ PDEVICE_OBJECT WINAPI IoAttachDeviceToDeviceStack( DEVICE_OBJECT *source,
 /***********************************************************************
  *           IoBuildDeviceIoControlRequest  (NTOSKRNL.EXE.@)
  */
-PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG IoControlCode,
-                                           PDEVICE_OBJECT DeviceObject,
-                                           PVOID InputBuffer,
-                                           ULONG InputBufferLength,
-                                           PVOID OutputBuffer,
-                                           ULONG OutputBufferLength,
-                                           BOOLEAN InternalDeviceIoControl,
-                                           PKEVENT Event,
-                                           PIO_STATUS_BLOCK IoStatusBlock )
+PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG code, PDEVICE_OBJECT device,
+                                           PVOID in_buff, ULONG in_len,
+                                           PVOID out_buff, ULONG out_len,
+                                           BOOLEAN internal, PKEVENT event,
+                                           PIO_STATUS_BLOCK iosb )
 {
     PIRP irp;
     PIO_STACK_LOCATION irpsp;
-    struct IrpInstance *instance;
 
     TRACE( "%x, %p, %p, %u, %p, %u, %u, %p, %p\n",
-           IoControlCode, DeviceObject, InputBuffer, InputBufferLength,
-           OutputBuffer, OutputBufferLength, InternalDeviceIoControl,
-           Event, IoStatusBlock );
+           code, device, in_buff, in_len, out_buff, out_len, internal, event, iosb );
 
-    if (DeviceObject == NULL)
+    if (device == NULL)
         return NULL;
 
-    irp = IoAllocateIrp( DeviceObject->StackSize, FALSE );
+    irp = IoAllocateIrp( device->StackSize, FALSE );
     if (irp == NULL)
         return NULL;
 
-    instance = HeapAlloc( GetProcessHeap(), 0, sizeof(struct IrpInstance) );
-    if (instance == NULL)
-    {
-        IoFreeIrp( irp );
-        return NULL;
-    }
-    instance->irp = irp;
-    list_add_tail( &Irps, &instance->entry );
-
     irpsp = IoGetNextIrpStackLocation( irp );
-    irpsp->MajorFunction = InternalDeviceIoControl ?
-            IRP_MJ_INTERNAL_DEVICE_CONTROL : IRP_MJ_DEVICE_CONTROL;
-    irpsp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;
-    irp->UserIosb = IoStatusBlock;
-    irp->UserEvent = Event;
+    irpsp->MajorFunction = internal ? IRP_MJ_INTERNAL_DEVICE_CONTROL : IRP_MJ_DEVICE_CONTROL;
+    irpsp->Parameters.DeviceIoControl.IoControlCode = code;
+    irpsp->Parameters.DeviceIoControl.InputBufferLength = in_len;
+    irpsp->Parameters.DeviceIoControl.OutputBufferLength = out_len;
+    irpsp->Parameters.DeviceIoControl.Type3InputBuffer = in_buff;
+    irpsp->DeviceObject = device;
+    irpsp->CompletionRoutine = NULL;
 
+    irp->UserIosb = iosb;
+    irp->UserEvent = event;
     return irp;
 }
 
@@ -547,7 +522,6 @@ PIRP WINAPI IoBuildSynchronousFsdRequest(ULONG majorfunc, PDEVICE_OBJECT device,
                                          PKEVENT event, PIO_STATUS_BLOCK iosb)
 {
     PIRP irp;
-    struct IrpInstance *instance;
     PIO_STACK_LOCATION irpsp;
 
     FIXME("(%d %p %p %d %p %p %p) stub\n", majorfunc, device, buffer, length, startoffset, event, iosb);
@@ -555,15 +529,6 @@ PIRP WINAPI IoBuildSynchronousFsdRequest(ULONG majorfunc, PDEVICE_OBJECT device,
     irp = IoAllocateIrp( device->StackSize, FALSE );
     if (irp == NULL)
         return NULL;
-
-    instance = HeapAlloc( GetProcessHeap(), 0, sizeof(struct IrpInstance) );
-    if (instance == NULL)
-    {
-        IoFreeIrp( irp );
-        return NULL;
-    }
-    instance->irp = irp;
-    list_add_tail( &Irps, &instance->entry );
 
     irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->MajorFunction = majorfunc;
@@ -812,12 +777,19 @@ NTSTATUS WINAPI IoCallDriver( DEVICE_OBJECT *device, IRP *irp )
     IO_STACK_LOCATION *irpsp;
     NTSTATUS status;
 
-    TRACE( "%p %p\n", device, irp );
-
     --irp->CurrentLocation;
     irpsp = --irp->Tail.Overlay.s.u2.CurrentStackLocation;
     dispatch = device->DriverObject->MajorFunction[irpsp->MajorFunction];
+
+    if (TRACE_ON(relay))
+        DPRINTF( "%04x:Call driver dispatch %p (device=%p,irp=%p)\n",
+                 GetCurrentThreadId(), dispatch, device, irp );
+
     status = dispatch( device, irp );
+
+    if (TRACE_ON(relay))
+        DPRINTF( "%04x:Ret  driver dispatch %p (device=%p,irp=%p) retval=%08x\n",
+                 GetCurrentThreadId(), dispatch, device, irp, status );
 
     return status;
 }
@@ -987,7 +959,6 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
     IO_STACK_LOCATION *irpsp;
     PIO_COMPLETION_ROUTINE routine;
     IO_STATUS_BLOCK *iosb;
-    struct IrpInstance *instance;
     NTSTATUS status, stat;
     int call_flag = 0;
 
@@ -1020,21 +991,12 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
                 return;
         }
     }
-    if (iosb && STATUS_SUCCESS == status)
+    if (iosb)
     {
         iosb->u.Status = irp->IoStatus.u.Status;
-        iosb->Information = irp->IoStatus.Information;
+        if (iosb->u.Status >= 0) iosb->Information = irp->IoStatus.Information;
     }
-    LIST_FOR_EACH_ENTRY( instance, &Irps, struct IrpInstance, entry )
-    {
-        if (instance->irp == irp)
-        {
-            list_remove( &instance->entry );
-            HeapFree( GetProcessHeap(), 0, instance );
-            IoFreeIrp( irp );
-            break;
-        }
-    }
+    IoFreeIrp( irp );
 }
 
 

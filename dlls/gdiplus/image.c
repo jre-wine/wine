@@ -40,6 +40,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
+HRESULT WINAPI WICCreateImagingFactory_Proxy(UINT, IWICImagingFactory**);
+
 #define PIXELFORMATBPP(x) ((x) ? ((x) >> 8) & 255 : 24)
 
 static const struct
@@ -69,8 +71,7 @@ static ColorPalette *get_palette(IWICBitmapFrameDecode *frame, WICBitmapPaletteT
     IWICPalette *wic_palette;
     ColorPalette *palette = NULL;
 
-    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                          &IID_IWICImagingFactory, (void **)&factory);
+    hr = WICCreateImagingFactory_Proxy(WINCODEC_SDK_VERSION, &factory);
     if (hr != S_OK) return NULL;
 
     hr = IWICImagingFactory_CreatePalette(factory, &wic_palette);
@@ -3179,8 +3180,7 @@ static PropertyItem *get_gif_palette(IWICBitmapDecoder *decoder, IWICMetadataRea
     if (!get_bool_property(reader, &GUID_MetadataFormatLSD, global_flagW))
         return NULL;
 
-    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
-                          &IID_IWICImagingFactory, (void **)&factory);
+    hr = WICCreateImagingFactory_Proxy(WINCODEC_SDK_VERSION, &factory);
     if (hr != S_OK) return NULL;
 
     hr = IWICImagingFactory_CreatePalette(factory, &palette);
@@ -3403,12 +3403,13 @@ static void gif_metadata_reader(GpBitmap *bitmap, IWICBitmapDecoder *decoder, UI
 
 typedef void (*metadata_reader_func)(GpBitmap *bitmap, IWICBitmapDecoder *decoder, UINT frame);
 
-static GpStatus decode_image_wic(IStream *stream, GDIPCONST CLSID *clsid,
+static GpStatus decode_image_wic(IStream *stream, REFGUID container,
     UINT active_frame, metadata_reader_func metadata_reader, GpImage **image)
 {
     GpStatus status=Ok;
     GpBitmap *bitmap;
     HRESULT hr;
+    IWICImagingFactory *factory;
     IWICBitmapDecoder *decoder;
     IWICBitmapFrameDecode *frame;
     IWICBitmapSource *source=NULL;
@@ -3421,14 +3422,13 @@ static GpStatus decode_image_wic(IStream *stream, GDIPCONST CLSID *clsid,
     UINT width, height, frame_count;
     BitmapData lockeddata;
     WICRect wrc;
-    HRESULT initresult;
 
-    TRACE("%p,%s,%u,%p\n", stream, wine_dbgstr_guid(clsid), active_frame, image);
+    TRACE("%p,%s,%u,%p\n", stream, wine_dbgstr_guid(container), active_frame, image);
 
-    initresult = CoInitialize(NULL);
-
-    hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER,
-        &IID_IWICBitmapDecoder, (void**)&decoder);
+    hr = WICCreateImagingFactory_Proxy(WINCODEC_SDK_VERSION, &factory);
+    if (FAILED(hr)) goto end;
+    hr = IWICImagingFactory_CreateDecoder(factory, container, NULL, &decoder);
+    IWICImagingFactory_Release(factory);
     if (FAILED(hr)) goto end;
 
     hr = IWICBitmapDecoder_Initialize(decoder, stream, WICDecodeMetadataCacheOnLoad);
@@ -3540,8 +3540,6 @@ static GpStatus decode_image_wic(IStream *stream, GDIPCONST CLSID *clsid,
     IWICBitmapDecoder_Release(decoder);
 
 end:
-    if (SUCCEEDED(initresult)) CoUninitialize();
-
     if (FAILED(hr) && status == Ok) status = hresult_to_status(hr);
 
     if (status == Ok)
@@ -3571,7 +3569,7 @@ end:
 
 static GpStatus decode_image_icon(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICIcoDecoder, active_frame, NULL, image);
+    return decode_image_wic(stream, &GUID_ContainerFormatIco, active_frame, NULL, image);
 }
 
 static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
@@ -3579,7 +3577,7 @@ static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, UINT active_fr
     GpStatus status;
     GpBitmap* bitmap;
 
-    status = decode_image_wic(stream, &CLSID_WICBmpDecoder, active_frame, NULL, image);
+    status = decode_image_wic(stream, &GUID_ContainerFormatBmp, active_frame, NULL, image);
 
     bitmap = (GpBitmap*)*image;
 
@@ -3594,22 +3592,22 @@ static GpStatus decode_image_bmp(IStream* stream, REFCLSID clsid, UINT active_fr
 
 static GpStatus decode_image_jpeg(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICJpegDecoder, active_frame, NULL, image);
+    return decode_image_wic(stream, &GUID_ContainerFormatJpeg, active_frame, NULL, image);
 }
 
 static GpStatus decode_image_png(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICPngDecoder, active_frame, NULL, image);
+    return decode_image_wic(stream, &GUID_ContainerFormatPng, active_frame, NULL, image);
 }
 
 static GpStatus decode_image_gif(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICGifDecoder, active_frame, gif_metadata_reader, image);
+    return decode_image_wic(stream, &GUID_ContainerFormatGif, active_frame, gif_metadata_reader, image);
 }
 
 static GpStatus decode_image_tiff(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
 {
-    return decode_image_wic(stream, &CLSID_WICTiffDecoder, active_frame, NULL, image);
+    return decode_image_wic(stream, &GUID_ContainerFormatTiff, active_frame, NULL, image);
 }
 
 static GpStatus decode_image_olepicture_metafile(IStream* stream, REFCLSID clsid, UINT active_frame, GpImage **image)
@@ -3877,11 +3875,12 @@ GpStatus WINGDIPAPI GdipSaveImageToFile(GpImage *image, GDIPCONST WCHAR* filenam
  *   These functions encode an image in different image file formats.
  */
 
-static GpStatus encode_image_WIC(GpImage *image, IStream* stream,
-    GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
+static GpStatus encode_image_wic(GpImage *image, IStream* stream,
+    REFGUID container, GDIPCONST EncoderParameters* params)
 {
     GpStatus stat;
     GpBitmap *bitmap;
+    IWICImagingFactory *factory;
     IWICBitmapEncoder *encoder;
     IWICBitmapFrameEncode *frameencode;
     IPropertyBag2 *encoderoptions;
@@ -3892,7 +3891,6 @@ static GpStatus encode_image_WIC(GpImage *image, IStream* stream,
     WICPixelFormatGUID wicformat;
     GpRect rc;
     BitmapData lockeddata;
-    HRESULT initresult;
     UINT i;
 
     if (image->type != ImageTypeBitmap)
@@ -3908,15 +3906,13 @@ static GpStatus encode_image_WIC(GpImage *image, IStream* stream,
     rc.Width = width;
     rc.Height = height;
 
-    initresult = CoInitialize(NULL);
-
-    hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER,
-        &IID_IWICBitmapEncoder, (void**)&encoder);
+    hr = WICCreateImagingFactory_Proxy(WINCODEC_SDK_VERSION, &factory);
     if (FAILED(hr))
-    {
-        if (SUCCEEDED(initresult)) CoUninitialize();
         return hresult_to_status(hr);
-    }
+    hr = IWICImagingFactory_CreateEncoder(factory, container, NULL, &encoder);
+    IWICImagingFactory_Release(factory);
+    if (FAILED(hr))
+        return hresult_to_status(hr);
 
     hr = IWICBitmapEncoder_Initialize(encoder, stream, WICBitmapEncoderNoCache);
 
@@ -4011,34 +4007,31 @@ static GpStatus encode_image_WIC(GpImage *image, IStream* stream,
         hr = IWICBitmapEncoder_Commit(encoder);
 
     IWICBitmapEncoder_Release(encoder);
-
-    if (SUCCEEDED(initresult)) CoUninitialize();
-
     return hresult_to_status(hr);
 }
 
 static GpStatus encode_image_BMP(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
 {
-    return encode_image_WIC(image, stream, &CLSID_WICBmpEncoder, params);
+    return encode_image_wic(image, stream, &GUID_ContainerFormatBmp, params);
 }
 
 static GpStatus encode_image_tiff(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
 {
-    return encode_image_WIC(image, stream, &CLSID_WICTiffEncoder, params);
+    return encode_image_wic(image, stream, &GUID_ContainerFormatTiff, params);
 }
 
 static GpStatus encode_image_png(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
 {
-    return encode_image_WIC(image, stream, &CLSID_WICPngEncoder, params);
+    return encode_image_wic(image, stream, &GUID_ContainerFormatPng, params);
 }
 
 static GpStatus encode_image_jpeg(GpImage *image, IStream* stream,
     GDIPCONST CLSID* clsid, GDIPCONST EncoderParameters* params)
 {
-    return encode_image_WIC(image, stream, &CLSID_WICJpegEncoder, params);
+    return encode_image_wic(image, stream, &GUID_ContainerFormatJpeg, params);
 }
 
 /*****************************************************************************

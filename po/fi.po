@@ -2717,22 +2717,17 @@ msgid ""
 "verify messages signed with it.\n"
 "Are you sure you want to remove this certificate?"
 msgstr ""
-"Jos jatkat, et voi enää salata viestejä tällä varmenteella tai vahvistaa "
+"Jos poistat varmenteen, et voi enää salata sillä viestejä etkä vahvistaa "
 "sillä allekirjoitettujen viestien aitoutta.\n"
-"Haluatko varmasti poistaa varmenteen?"
+"Haluatko varmasti poistaa tämän varmenteen?"
 
 #: cryptui.rc:113
-#, fuzzy
-#| msgid ""
-#| "You will no longer be able to encrypt messages with these certificates, "
-#| "or verify messages signed with it.\n"
-#| "Are you sure you want to remove these certificates?"
 msgid ""
 "You will no longer be able to encrypt messages with these certificates, or "
 "verify messages signed with them.\n"
 "Are you sure you want to remove these certificates?"
 msgstr ""
-"Jos jatkat, et voi enää salata viestejä näillä varmenteilla tai vahvistaa "
+"Jos poistat varmenteita, et voi enää salata niillä viestejä etkä vahvistaa "
 "niillä allekirjoitettujen viestien aitoutta.\n"
 "Haluatko varmasti poistaa nämä varmenteet?"
 
@@ -3103,11 +3098,11 @@ msgstr "Yhdistetään kameraan... odota"
 msgid "S&ync"
 msgstr "S&ynkronoi"
 
-#: hhctrl.rc:60 shdoclc.rc:41 winhlp32.rc:89
+#: hhctrl.rc:60 hhctrl.rc:73 shdoclc.rc:41 winhlp32.rc:89
 msgid "&Back"
 msgstr "&Takaisin"
 
-#: hhctrl.rc:61
+#: hhctrl.rc:61 hhctrl.rc:74
 msgid "&Forward"
 msgstr "&Seuraava"
 
@@ -3120,13 +3115,45 @@ msgstr "&Alkuun"
 msgid "&Stop"
 msgstr "&Pysäytä"
 
-#: hhctrl.rc:64 shdoclc.rc:59
+#: hhctrl.rc:64 hhctrl.rc:81 shdoclc.rc:59
 msgid "&Refresh"
 msgstr "P&äivitä"
 
-#: hhctrl.rc:65 winhlp32.rc:34
+#: hhctrl.rc:65 hhctrl.rc:80 winhlp32.rc:34
 msgid "&Print..."
 msgstr "&Tulosta..."
+
+#: hhctrl.rc:76 hhctrl.rc:90 shdoclc.rc:49 shdoclc.rc:98 shdoclc.rc:120
+#: user32.rc:65
+msgid "Select &All"
+msgstr "&Valitse kaikki"
+
+#: hhctrl.rc:78 shdoclc.rc:54
+msgid "&View Source"
+msgstr "Nä&ytä lähde"
+
+#: hhctrl.rc:83
+msgid "Proper&ties"
+msgstr "&Ominaisuudet"
+
+#: hhctrl.rc:87 shdoclc.rc:79 shdoclc.rc:93 shdoclc.rc:117 shdoclc.rc:159
+#: shdoclc.rc:183 user32.rc:60 wordpad.rc:104
+msgid "Cu&t"
+msgstr "&Leikkaa"
+
+#: hhctrl.rc:88 shdoclc.rc:80 shdoclc.rc:94 shdoclc.rc:118 shdoclc.rc:133
+#: shdoclc.rc:160 shdoclc.rc:184 shell32.rc:102 user32.rc:61 wineconsole.rc:32
+#: winhlp32.rc:40 wordpad.rc:105
+msgid "&Copy"
+msgstr "&Kopioi"
+
+#: hhctrl.rc:89 shdoclc.rc:119 shell32.rc:64
+msgid "Paste"
+msgstr "Liitä"
+
+#: hhctrl.rc:91 shdoclc.rc:121
+msgid "&Print"
+msgstr "&Tulosta"
 
 #: hhctrl.rc:31 taskmgr.rc:89
 msgid "&Contents"
@@ -7599,10 +7626,6 @@ msgstr "&Kopioi tausta"
 msgid "Set as &Desktop Item"
 msgstr "A&seta työpöydälle"
 
-#: shdoclc.rc:49 shdoclc.rc:98 shdoclc.rc:120 user32.rc:65
-msgid "Select &All"
-msgstr "&Valitse kaikki"
-
 #: shdoclc.rc:52
 msgid "Create Shor&tcut"
 msgstr "Luo &pikakuvake"
@@ -7610,10 +7633,6 @@ msgstr "Luo &pikakuvake"
 #: shdoclc.rc:53 shdoclc.rc:84 shdoclc.rc:137 shdoclc.rc:164 shdoclc.rc:188
 msgid "Add to &Favorites..."
 msgstr "Lis&ää suosikkeihin..."
-
-#: shdoclc.rc:54
-msgid "&View Source"
-msgstr "Nä&ytä lähde"
 
 #: shdoclc.rc:56
 msgid "&Encoding"
@@ -7667,17 +7686,6 @@ msgstr "A&seta taustaksi"
 msgid "Set as &Desktop Item..."
 msgstr "Aseta t&yöpöydälle..."
 
-#: shdoclc.rc:79 shdoclc.rc:93 shdoclc.rc:117 shdoclc.rc:159 shdoclc.rc:183
-#: user32.rc:60 wordpad.rc:104
-msgid "Cu&t"
-msgstr "&Leikkaa"
-
-#: shdoclc.rc:80 shdoclc.rc:94 shdoclc.rc:118 shdoclc.rc:133 shdoclc.rc:160
-#: shdoclc.rc:184 shell32.rc:102 user32.rc:61 wineconsole.rc:32 winhlp32.rc:40
-#: wordpad.rc:105
-msgid "&Copy"
-msgstr "&Kopioi"
-
 #: shdoclc.rc:81 shdoclc.rc:134 shdoclc.rc:161 shdoclc.rc:185
 msgid "Copy Shor&tcut"
 msgstr "Kopioi pikakuvak&e"
@@ -7721,14 +7729,6 @@ msgstr "S&olun ominaisuudet"
 #: shdoclc.rc:112
 msgid "&Table Properties"
 msgstr "Ta&ulukon ominaisuudet"
-
-#: shdoclc.rc:119 shell32.rc:64
-msgid "Paste"
-msgstr "Liitä"
-
-#: shdoclc.rc:121
-msgid "&Print"
-msgstr "&Tulosta"
 
 #: shdoclc.rc:128
 msgid "Open in &New Window"
@@ -11486,13 +11486,17 @@ msgid "Error: Invalid command line parameters\n"
 msgstr "Virhe: Viallisia komentoriviparametreja\n"
 
 #: reg.rc:37
-msgid "Error: Unable to add keys to remote machine\n"
-msgstr "Virhe: Etäkoneelle ei voitu lisätä avaimia\n"
+msgid "Error: Unable to access remote machine\n"
+msgstr "Virhe: Ei pääsyä etäkoneelle\n"
 
 #: reg.rc:38
 msgid ""
 "Error: The system was unable to find the specified registry key or value\n"
-msgstr "Virhe: järjestelmä ei löytänyt annettua rekisteriavainta tai -arvoa\n"
+msgstr "Virhe: Järjestelmä ei löytänyt annettua rekisteriavainta tai -arvoa\n"
+
+#: reg.rc:39
+msgid "Error: Unsupported type\n"
+msgstr "Virhe: Tyyppiä ei tueta\n"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11648,19 +11652,19 @@ msgstr "Muokkaa merkkijonoja"
 
 #: regedit.rc:137
 msgid "Contains commands for working with the whole registry"
-msgstr "Sisältää komentoja koko rekisteriä varten"
+msgstr "Sisältää komentoja, joilla voi käsitellä koko rekisteriä"
 
 #: regedit.rc:138
 msgid "Contains commands for editing values or keys"
-msgstr "Sisältää avainten arvojen muokkauskomentoja"
+msgstr "Sisältää komentoja, joilla voi muokata avaimia ja arvoja"
 
 #: regedit.rc:139
 msgid "Contains commands for customizing the registry window"
-msgstr "Sisältää rekisteri-ikkunan mukauttamiskomentoja"
+msgstr "Sisältää komentoja, joilla voi mukauttaa rekisteri-ikkunaa"
 
 #: regedit.rc:140
 msgid "Contains commands for accessing frequently used keys"
-msgstr "Sisältää komentoja usein käytettyihin avaimiin"
+msgstr "Sisältää komentoja, joilla pääsee usein käytettyihin avaimiin"
 
 #: regedit.rc:141
 msgid ""

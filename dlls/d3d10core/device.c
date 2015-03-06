@@ -1275,27 +1275,51 @@ static UINT STDMETHODCALLTYPE d3d10_device_GetExceptionMode(ID3D10Device1 *iface
 static HRESULT STDMETHODCALLTYPE d3d10_device_GetPrivateData(ID3D10Device1 *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    IDXGIDevice *dxgi_device;
+    HRESULT hr;
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    if (FAILED(hr = ID3D10Device1_QueryInterface(iface, &IID_IDXGIDevice, (void **)&dxgi_device)))
+        return hr;
+    hr = IDXGIDevice_GetPrivateData(dxgi_device, guid, data_size, data);
+    IDXGIDevice_Release(dxgi_device);
+
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_SetPrivateData(ID3D10Device1 *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    FIXME("iface %p, guid %s, data_size %u, data %p stub!\n",
+    IDXGIDevice *dxgi_device;
+    HRESULT hr;
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    if (FAILED(hr = ID3D10Device1_QueryInterface(iface, &IID_IDXGIDevice, (void **)&dxgi_device)))
+        return hr;
+    hr = IDXGIDevice_SetPrivateData(dxgi_device, guid, data_size, data);
+    IDXGIDevice_Release(dxgi_device);
+
+    return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_SetPrivateDataInterface(ID3D10Device1 *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    IDXGIDevice *dxgi_device;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    if (FAILED(hr = ID3D10Device1_QueryInterface(iface, &IID_IDXGIDevice, (void **)&dxgi_device)))
+        return hr;
+    hr = IDXGIDevice_SetPrivateDataInterface(dxgi_device, guid, data);
+    IDXGIDevice_Release(dxgi_device);
+
+    return hr;
 }
 
 static void STDMETHODCALLTYPE d3d10_device_ClearState(ID3D10Device1 *iface)

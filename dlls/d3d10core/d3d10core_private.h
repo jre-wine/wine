@@ -66,6 +66,13 @@ DWORD wined3d_usage_from_d3d10core(UINT bind_flags, enum D3D10_USAGE usage) DECL
 struct wined3d_resource *wined3d_resource_from_resource(ID3D10Resource *resource) DECLSPEC_HIDDEN;
 DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type) DECLSPEC_HIDDEN;
 
+HRESULT d3d10_get_private_data(struct wined3d_private_store *store,
+        REFGUID guid, UINT *data_size, void *data) DECLSPEC_HIDDEN;
+HRESULT d3d10_set_private_data(struct wined3d_private_store *store,
+        REFGUID guid, UINT data_size, const void *data) DECLSPEC_HIDDEN;
+HRESULT d3d10_set_private_data_interface(struct wined3d_private_store *store,
+        REFGUID guid, const IUnknown *object) DECLSPEC_HIDDEN;
+
 static inline void read_dword(const char **ptr, DWORD *d)
 {
     memcpy(d, *ptr, sizeof(*d));
@@ -83,6 +90,7 @@ struct d3d10_texture2d
     ID3D10Texture2D ID3D10Texture2D_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     IUnknown *dxgi_surface;
     struct wined3d_texture *wined3d_texture;
     D3D10_TEXTURE2D_DESC desc;
@@ -113,6 +121,7 @@ struct d3d10_buffer
     ID3D10Buffer ID3D10Buffer_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_buffer *wined3d_buffer;
     ID3D10Device1 *device;
 };
@@ -176,6 +185,7 @@ struct d3d10_input_layout
     ID3D10InputLayout ID3D10InputLayout_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_vertex_declaration *wined3d_decl;
 };
 
@@ -190,6 +200,7 @@ struct d3d10_vertex_shader
     ID3D10VertexShader ID3D10VertexShader_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_shader *wined3d_shader;
     ID3D10Device1 *device;
 };
@@ -204,6 +215,7 @@ struct d3d10_geometry_shader
     ID3D10GeometryShader ID3D10GeometryShader_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_shader *wined3d_shader;
 };
 
@@ -217,6 +229,7 @@ struct d3d10_pixel_shader
     ID3D10PixelShader ID3D10PixelShader_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_shader *wined3d_shader;
     ID3D10Device1 *device;
 };
@@ -234,6 +247,7 @@ struct d3d10_blend_state
     ID3D10BlendState ID3D10BlendState_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     D3D10_BLEND_DESC desc;
     struct wine_rb_entry entry;
     ID3D10Device1 *device;
@@ -296,6 +310,7 @@ struct d3d10_query
     ID3D10Query ID3D10Query_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_query *wined3d_query;
     BOOL predicate;
     ID3D10Device1 *device;

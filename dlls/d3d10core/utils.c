@@ -411,6 +411,61 @@ DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type)
     }
 }
 
+HRESULT d3d10_get_private_data(struct wined3d_private_store *store,
+        REFGUID guid, UINT *data_size, void *data)
+{
+    const struct wined3d_private_data *stored_data;
+    DWORD size_in;
+
+    if (!data_size)
+        return E_INVALIDARG;
+
+    if (!(stored_data = wined3d_private_store_get_private_data(store, guid)))
+    {
+        *data_size = 0;
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
+    size_in = *data_size;
+    *data_size = stored_data->size;
+    if (!data)
+        return S_OK;
+    if (size_in < stored_data->size)
+        return DXGI_ERROR_MORE_DATA;
+
+    if (stored_data->flags & WINED3DSPD_IUNKNOWN)
+        IUnknown_AddRef(stored_data->content.object);
+    memcpy(data, stored_data->content.data, stored_data->size);
+
+    return S_OK;
+}
+
+HRESULT d3d10_set_private_data(struct wined3d_private_store *store,
+        REFGUID guid, UINT data_size, const void *data)
+{
+    struct wined3d_private_data *entry;
+
+    if (!data)
+    {
+        if (!(entry = wined3d_private_store_get_private_data(store, guid)))
+            return S_FALSE;
+        wined3d_private_store_free_private_data(store, entry);
+
+        return S_OK;
+    }
+
+    return wined3d_private_store_set_private_data(store, guid, data, data_size, 0);
+}
+
+HRESULT d3d10_set_private_data_interface(struct wined3d_private_store *store,
+        REFGUID guid, const IUnknown *object)
+{
+    if (!object)
+        return d3d10_set_private_data(store, guid, sizeof(object), &object);
+
+    return wined3d_private_store_set_private_data(store,
+            guid, object, sizeof(object), WINED3DSPD_IUNKNOWN);
+}
 void skip_dword_unknown(const char **ptr, unsigned int count)
 {
     unsigned int i;

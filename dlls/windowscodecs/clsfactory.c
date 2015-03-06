@@ -41,7 +41,7 @@ extern HRESULT WINAPI WIC_DllGetClassObject(REFCLSID, REFIID, LPVOID *) DECLSPEC
 
 typedef struct {
     REFCLSID classid;
-    HRESULT (*constructor)(REFIID,void**);
+    class_constructor constructor;
 } classinfo;
 
 static const classinfo wic_classes[] = {
@@ -201,4 +201,15 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
 
     TRACE("<-- %08X\n", ret);
     return ret;
+}
+
+HRESULT create_instance(CLSID *clsid, const IID *iid, void **ppv)
+{
+    int i;
+
+    for (i=0; wic_classes[i].classid; i++)
+        if (IsEqualCLSID(wic_classes[i].classid, clsid))
+            return wic_classes[i].constructor(iid, ppv);
+
+    return CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, iid, ppv);
 }

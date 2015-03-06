@@ -348,13 +348,13 @@ static HRESULT WINAPI IDirectPlay8AddressImpl_GetComponentByName(IDirectPlay8Add
                     memcpy(pvBuffer, &entry->data.guid, sizeof(GUID));
                     break;
                 case DPNA_DATATYPE_STRING:
-                    memcpy(pvBuffer, &entry->data.string, entry->size);
+                    memcpy(pvBuffer, entry->data.string, entry->size);
                     break;
                 case DPNA_DATATYPE_STRING_ANSI:
-                    memcpy(pvBuffer, &entry->data.ansi, entry->size);
+                    memcpy(pvBuffer, entry->data.ansi, entry->size);
                     break;
                 case DPNA_DATATYPE_BINARY:
-                    memcpy(pvBuffer, &entry->data.binary, entry->size);
+                    memcpy(pvBuffer, entry->data.binary, entry->size);
                     break;
             }
 
@@ -382,10 +382,42 @@ static HRESULT WINAPI IDirectPlay8AddressImpl_AddComponent(IDirectPlay8Address *
     struct component *entry;
     BOOL found = FALSE;
 
-    TRACE("(%p, %s, %p, %u, %x): stub\n", This, debugstr_w(pwszName), lpvData, dwDataSize, dwDataType);
+    TRACE("(%p, %s, %p, %u, %x)\n", This, debugstr_w(pwszName), lpvData, dwDataSize, dwDataType);
 
     if (NULL == lpvData)
         return DPNERR_INVALIDPOINTER;
+
+    switch (dwDataType)
+    {
+        case DPNA_DATATYPE_DWORD:
+            if (sizeof(DWORD) != dwDataSize)
+            {
+                WARN("Invalid DWORD size, returning DPNERR_INVALIDPARAM\n");
+                return DPNERR_INVALIDPARAM;
+            }
+            break;
+        case DPNA_DATATYPE_GUID:
+            if (sizeof(GUID) != dwDataSize)
+            {
+                WARN("Invalid GUID size, returning DPNERR_INVALIDPARAM\n");
+                return DPNERR_INVALIDPARAM;
+            }
+            break;
+        case DPNA_DATATYPE_STRING:
+            if (((strlenW((WCHAR*)lpvData)+1)*sizeof(WCHAR)) != dwDataSize)
+            {
+                WARN("Invalid STRING size, returning DPNERR_INVALIDPARAM\n");
+                return DPNERR_INVALIDPARAM;
+            }
+            break;
+        case DPNA_DATATYPE_STRING_ANSI:
+            if ((strlen((const CHAR*)lpvData)+1) != dwDataSize)
+            {
+                WARN("Invalid ASCII size, returning DPNERR_INVALIDPARAM\n");
+                return DPNERR_INVALIDPARAM;
+            }
+            break;
+    }
 
     LIST_FOR_EACH_ENTRY(entry, &This->components, struct component, entry)
     {
@@ -393,6 +425,13 @@ static HRESULT WINAPI IDirectPlay8AddressImpl_AddComponent(IDirectPlay8Address *
         {
             TRACE("Found %s\n", debugstr_w(pwszName));
             found = TRUE;
+
+            if(entry->type == DPNA_DATATYPE_STRING_ANSI)
+               heap_free(entry->data.ansi);
+            else if(entry->type == DPNA_DATATYPE_STRING)
+                heap_free(entry->data.string);
+            else if(entry->type == DPNA_DATATYPE_BINARY)
+                heap_free(entry->data.binary);
 
             break;
         }
@@ -403,7 +442,6 @@ static HRESULT WINAPI IDirectPlay8AddressImpl_AddComponent(IDirectPlay8Address *
         /* Create a new one */
         entry = heap_alloc(sizeof(struct component));
         entry->name = heap_strdupW(pwszName);
-        entry->type = dwDataType;
 
         list_add_tail(&This->components, &entry->entry);
     }
@@ -411,40 +449,29 @@ static HRESULT WINAPI IDirectPlay8AddressImpl_AddComponent(IDirectPlay8Address *
     switch (dwDataType)
     {
         case DPNA_DATATYPE_DWORD:
-            if (sizeof(DWORD) != dwDataSize)
-                return DPNERR_INVALIDPARAM;
-
             entry->data.value = *(DWORD*)lpvData;
             TRACE("(%p, %u): DWORD Type -> %u\n", lpvData, dwDataSize, *(const DWORD*) lpvData);
             break;
         case DPNA_DATATYPE_GUID:
-            if (sizeof(GUID) != dwDataSize)
-                return DPNERR_INVALIDPARAM;
-
             entry->data.guid = *(GUID*)lpvData;
             TRACE("(%p, %u): GUID Type -> %s\n", lpvData, dwDataSize, debugstr_guid(lpvData));
             break;
         case DPNA_DATATYPE_STRING:
-            heap_free(entry->data.string);
-
             entry->data.string = heap_strdupW((WCHAR*)lpvData);
             TRACE("(%p, %u): STRING Type -> %s\n", lpvData, dwDataSize, debugstr_w((WCHAR*)lpvData));
             break;
         case DPNA_DATATYPE_STRING_ANSI:
-            heap_free(entry->data.ansi);
-
             entry->data.ansi = heap_strdupA((CHAR*)lpvData);
             TRACE("(%p, %u): ANSI STRING Type -> %s\n", lpvData, dwDataSize, (const CHAR*) lpvData);
             break;
         case DPNA_DATATYPE_BINARY:
-            heap_free(entry->data.binary);
-
             entry->data.binary = heap_alloc(dwDataSize);
             memcpy(entry->data.binary, lpvData, dwDataSize);
             TRACE("(%p, %u): BINARY Type\n", lpvData, dwDataSize);
             break;
     }
 
+    entry->type = dwDataType;
     entry->size = dwDataSize;
 
     return DPN_OK;

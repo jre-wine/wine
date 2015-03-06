@@ -3702,7 +3702,7 @@ static void test_accept(void)
 
     closesocket(accepted);
     closesocket(connector);
-    accepted = connector = server_socket = INVALID_SOCKET;
+    accepted = connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
     server_socket = setup_server_socket(&address, &socklen);
@@ -4374,6 +4374,7 @@ static void test_ioctlsocket(void)
     ok(ret != SOCKET_ERROR, "setsockopt failed unexpectedly\n");
     arg = 0;
     ret = ioctlsocket(sock, SIOCATMARK, &arg);
+    ok(ret != SOCKET_ERROR, "ioctlsocket failed unexpectedly\n");
     ok(arg, "SIOCATMARK expected a non-zero value\n");
 
     ret = WSAIoctl(sock, SIO_KEEPALIVE_VALS, &arg, 0, NULL, 0, &arg, NULL, NULL);

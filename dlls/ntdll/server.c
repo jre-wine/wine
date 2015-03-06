@@ -391,16 +391,17 @@ static BOOL invoke_apc( const apc_call_t *call, apc_result_t *result )
     }
     case APC_ASYNC_IO:
     {
-        void *apc = NULL;
+        void *apc = NULL, *arg = NULL;
         IO_STATUS_BLOCK *iosb = wine_server_get_ptr( call->async_io.sb );
-        NTSTATUS (*func)(void *, IO_STATUS_BLOCK *, NTSTATUS, void **) = wine_server_get_ptr( call->async_io.func );
+        NTSTATUS (*func)(void *, IO_STATUS_BLOCK *, NTSTATUS, void **, void **) = wine_server_get_ptr( call->async_io.func );
         result->type = call->type;
         result->async_io.status = func( wine_server_get_ptr( call->async_io.user ),
-                                        iosb, call->async_io.status, &apc );
+                                        iosb, call->async_io.status, &apc, &arg );
         if (result->async_io.status != STATUS_PENDING)
         {
             result->async_io.total = iosb->Information;
             result->async_io.apc   = wine_server_client_ptr( apc );
+            result->async_io.arg   = wine_server_client_ptr( arg );
         }
         break;
     }
@@ -820,7 +821,6 @@ static BOOL add_fd_to_cache( HANDLE handle, int fd, enum server_fd_type type,
                             unsigned int access, unsigned int options )
 {
     unsigned int entry, idx = handle_to_index( handle, &entry );
-    int prev_fd;
 
     if (entry >= FD_CACHE_ENTRIES)
     {
@@ -840,11 +840,11 @@ static BOOL add_fd_to_cache( HANDLE handle, int fd, enum server_fd_type type,
         }
     }
     /* store fd+1 so that 0 can be used as the unset value */
-    prev_fd = interlocked_xchg( &fd_cache[entry][idx].fd, fd + 1 ) - 1;
+    fd = interlocked_xchg( &fd_cache[entry][idx].fd, fd + 1 );
     fd_cache[entry][idx].type = type;
     fd_cache[entry][idx].access = access;
     fd_cache[entry][idx].options = options;
-    if (prev_fd != -1) close( prev_fd );
+    assert( !fd );
     return TRUE;
 }
 

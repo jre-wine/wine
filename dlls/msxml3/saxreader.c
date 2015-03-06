@@ -45,9 +45,9 @@
 
 #include "msxml_private.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(msxml);
-
 #ifdef HAVE_LIBXML2
+
+WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 typedef enum
 {
@@ -668,7 +668,7 @@ static void format_error_message_from_id(saxlocator *This, HRESULT hr)
     {
         WCHAR msg[1024];
         if(!FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM,
-                    NULL, hr, 0, msg, sizeof(msg), NULL))
+                    NULL, hr, 0, msg, sizeof(msg)/sizeof(msg[0]), NULL))
         {
             FIXME("MSXML errors not yet supported.\n");
             msg[0] = '\0';

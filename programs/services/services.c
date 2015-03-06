@@ -66,7 +66,7 @@ static const WCHAR SZ_OBJECT_NAME[]       = {'O','b','j','e','c','t','N','a','m'
 static const WCHAR SZ_TAG[]               = {'T','a','g',0};
 static const WCHAR SZ_DESCRIPTION[]       = {'D','e','s','c','r','i','p','t','i','o','n',0};
 static const WCHAR SZ_PRESHUTDOWN[]       = {'P','r','e','s','h','u','t','d','o','w','n','T','i','m','e','o','u','t',0};
-
+static const WCHAR SZ_WOW64[]             = {'W','O','W','6','4',0};
 
 DWORD service_create(LPCWSTR name, struct service_entry **entry)
 {
@@ -108,7 +108,7 @@ void free_service_entry(struct service_entry *entry)
 
 static DWORD load_service_config(HKEY hKey, struct service_entry *entry)
 {
-    DWORD err;
+    DWORD err, value = 0;
     WCHAR *wptr;
 
     if ((err = load_reg_string(hKey, SZ_IMAGE_PATH,   TRUE, &entry->config.lpBinaryPathName)) != 0)
@@ -136,6 +136,9 @@ static DWORD load_service_config(HKEY hKey, struct service_entry *entry)
         return err;
     if ((err = load_reg_dword(hKey, SZ_PRESHUTDOWN, &entry->preshutdown_timeout)) != 0)
         return err;
+
+    if (load_reg_dword(hKey, SZ_WOW64, &value) == 0 && value == 1)
+        entry->is_wow64 = TRUE;
 
     WINE_TRACE("Image path           = %s\n", wine_dbgstr_w(entry->config.lpBinaryPathName) );
     WINE_TRACE("Group                = %s\n", wine_dbgstr_w(entry->config.lpLoadOrderGroup) );
@@ -216,6 +219,14 @@ DWORD save_service_config(struct service_entry *entry)
         goto cleanup;
     if ((err = RegSetValueExW(hKey, SZ_PRESHUTDOWN, 0, REG_DWORD, (LPBYTE)&entry->preshutdown_timeout, sizeof(DWORD))) != 0)
         goto cleanup;
+    if ((err = RegSetValueExW(hKey, SZ_PRESHUTDOWN, 0, REG_DWORD, (LPBYTE)&entry->preshutdown_timeout, sizeof(DWORD))) != 0)
+        goto cleanup;
+    if (entry->is_wow64)
+    {
+        const DWORD is_wow64 = 1;
+        if ((err = RegSetValueExW(hKey, SZ_WOW64, 0, REG_DWORD, (LPBYTE)&is_wow64, sizeof(DWORD))) != 0)
+            goto cleanup;
+    }
 
     if (entry->config.dwTagId)
         err = RegSetValueExW(hKey, SZ_TAG, 0, REG_DWORD, (LPBYTE)&entry->config.dwTagId, sizeof(DWORD));
@@ -610,12 +621,81 @@ static LPWSTR service_get_pipe_name(void)
     return name;
 }
 
+static DWORD get_service_binary_path(const struct service_entry *service_entry, WCHAR **path)
+{
+    DWORD size = ExpandEnvironmentStringsW(service_entry->config.lpBinaryPathName, NULL, 0);
+
+    *path = HeapAlloc(GetProcessHeap(), 0, size*sizeof(WCHAR));
+    if (!*path)
+        return ERROR_NOT_ENOUGH_SERVER_MEMORY;
+
+    ExpandEnvironmentStringsW(service_entry->config.lpBinaryPathName, *path, size);
+
+    if (service_entry->config.dwServiceType == SERVICE_KERNEL_DRIVER)
+    {
+        static const WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',' ',0};
+        WCHAR system_dir[MAX_PATH];
+        DWORD type, len;
+
+        GetSystemDirectoryW( system_dir, MAX_PATH );
+        if (is_win64)
+        {
+            if (!GetBinaryTypeW( *path, &type ))
+            {
+                HeapFree( GetProcessHeap(), 0, *path );
+                return GetLastError();
+            }
+            if (type == SCS_32BIT_BINARY) GetSystemWow64DirectoryW( system_dir, MAX_PATH );
+        }
+
+        len = strlenW( system_dir ) + sizeof(winedeviceW)/sizeof(WCHAR) + strlenW(service_entry->name);
+        HeapFree( GetProcessHeap(), 0, *path );
+        if (!(*path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+            return ERROR_NOT_ENOUGH_SERVER_MEMORY;
+
+        lstrcpyW( *path, system_dir );
+        lstrcatW( *path, winedeviceW );
+        lstrcatW( *path, service_entry->name );
+        return ERROR_SUCCESS;
+    }
+
+    /* if service image is configured to systemdir, redirect it to wow64 systemdir */
+    if (service_entry->is_wow64)
+    {
+        WCHAR system_dir[MAX_PATH], *redirected;
+        DWORD len;
+
+        GetSystemDirectoryW( system_dir, MAX_PATH );
+        len = strlenW( system_dir );
+
+        if (strncmpiW( system_dir, *path, len ))
+            return ERROR_SUCCESS;
+
+        GetSystemWow64DirectoryW( system_dir, MAX_PATH );
+
+        redirected = HeapAlloc( GetProcessHeap(), 0, (strlenW( *path ) + strlenW( system_dir ))*sizeof(WCHAR));
+        if (!redirected)
+        {
+            HeapFree( GetProcessHeap(), 0, *path );
+            return ERROR_NOT_ENOUGH_SERVER_MEMORY;
+        }
+
+        strcpyW( redirected, system_dir );
+        strcatW( redirected, &(*path)[len] );
+        HeapFree( GetProcessHeap(), 0, *path );
+        *path = redirected;
+        TRACE("redirected to %s\n", debugstr_w(redirected));
+    }
+
+    return ERROR_SUCCESS;
+}
+
 static DWORD service_start_process(struct service_entry *service_entry, HANDLE *process)
 {
     PROCESS_INFORMATION pi;
     STARTUPINFOW si;
     LPWSTR path = NULL;
-    DWORD size;
+    DWORD err;
     BOOL r;
 
     service_lock_exclusive(service_entry);
@@ -631,43 +711,10 @@ static DWORD service_start_process(struct service_entry *service_entry, HANDLE *
             WINE_ERR("failed to create services environment\n");
     }
 
-    size = ExpandEnvironmentStringsW(service_entry->config.lpBinaryPathName,NULL,0);
-    path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
-    if (!path)
+    if ((err = get_service_binary_path(service_entry, &path)))
     {
         service_unlock(service_entry);
-        return ERROR_NOT_ENOUGH_SERVER_MEMORY;
-    }
-    ExpandEnvironmentStringsW(service_entry->config.lpBinaryPathName,path,size);
-
-    if (service_entry->config.dwServiceType == SERVICE_KERNEL_DRIVER)
-    {
-        static const WCHAR winedeviceW[] = {'\\','w','i','n','e','d','e','v','i','c','e','.','e','x','e',' ',0};
-        WCHAR system_dir[MAX_PATH];
-        DWORD type, len;
-
-        GetSystemDirectoryW( system_dir, MAX_PATH );
-        if (is_win64)
-        {
-            if (!GetBinaryTypeW( path, &type ))
-            {
-                HeapFree( GetProcessHeap(), 0, path );
-                service_unlock(service_entry);
-                return GetLastError();
-            }
-            if (type == SCS_32BIT_BINARY) GetSystemWow64DirectoryW( system_dir, MAX_PATH );
-        }
-
-        len = strlenW( system_dir ) + sizeof(winedeviceW)/sizeof(WCHAR) + strlenW(service_entry->name);
-        HeapFree( GetProcessHeap(), 0, path );
-        if (!(path = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
-        {
-            service_unlock(service_entry);
-            return ERROR_NOT_ENOUGH_SERVER_MEMORY;
-        }
-        lstrcpyW( path, system_dir );
-        lstrcatW( path, winedeviceW );
-        lstrcatW( path, service_entry->name );
+        return err;
     }
 
     ZeroMemory(&si, sizeof(STARTUPINFOW));
