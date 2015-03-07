@@ -175,7 +175,7 @@ description: implement job objects
  /*
 --- a/include/wine/server_protocol.h
 +++ b/include/wine/server_protocol.h
-@@ -672,6 +672,81 @@ struct new_process_reply
+@@ -673,6 +673,81 @@ struct new_process_reply
      char __pad_28[4];
  };
  
@@ -257,7 +257,7 @@ description: implement job objects
  
  
  struct get_new_process_info_request
-@@ -5069,6 +5144,12 @@ struct set_suspend_context_reply
+@@ -5070,6 +5145,12 @@ struct set_suspend_context_reply
  enum request
  {
      REQ_new_process,
@@ -270,7 +270,7 @@ description: implement job objects
      REQ_get_new_process_info,
      REQ_new_thread,
      REQ_get_startup_info,
-@@ -5331,6 +5412,12 @@ union generic_request
+@@ -5332,6 +5413,12 @@ union generic_request
      struct request_max_size max_size;
      struct request_header request_header;
      struct new_process_request new_process_request;
@@ -283,7 +283,7 @@ description: implement job objects
      struct get_new_process_info_request get_new_process_info_request;
      struct new_thread_request new_thread_request;
      struct get_startup_info_request get_startup_info_request;
-@@ -5591,6 +5678,12 @@ union generic_reply
+@@ -5592,6 +5679,12 @@ union generic_reply
      struct request_max_size max_size;
      struct reply_header reply_header;
      struct new_process_reply new_process_reply;
@@ -686,7 +686,7 @@ description: implement job objects
      struct timeout_user *sigkill_timeout; /* timeout for final SIGKILL */
 --- a/server/protocol.def
 +++ b/server/protocol.def
-@@ -681,6 +681,39 @@ struct rawinput_device
+@@ -682,6 +682,39 @@ struct rawinput_device
      obj_handle_t thandle;        /* thread handle (in the current process) */
  @END
  
@@ -784,7 +784,7 @@ description: implement job objects
  C_ASSERT( FIELD_OFFSET(struct get_new_process_info_reply, success) == 8 );
 --- a/server/trace.c
 +++ b/server/trace.c
-@@ -1114,6 +1114,49 @@ static void dump_new_process_reply( cons
+@@ -1115,6 +1115,49 @@ static void dump_new_process_reply( cons
      fprintf( stderr, ", thandle=%04x", req->thandle );
  }
  
@@ -834,7 +834,7 @@ description: implement job objects
  static void dump_get_new_process_info_request( const struct get_new_process_info_request *req )
  {
      fprintf( stderr, " info=%04x", req->info );
-@@ -4088,6 +4131,12 @@ static void dump_set_suspend_context_req
+@@ -4089,6 +4132,12 @@ static void dump_set_suspend_context_req
  
  static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
      (dump_func)dump_new_process_request,
@@ -847,7 +847,7 @@ description: implement job objects
      (dump_func)dump_get_new_process_info_request,
      (dump_func)dump_new_thread_request,
      (dump_func)dump_get_startup_info_request,
-@@ -4346,6 +4395,12 @@ static const dump_func req_dumpers[REQ_N
+@@ -4347,6 +4396,12 @@ static const dump_func req_dumpers[REQ_N
  
  static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
      (dump_func)dump_new_process_reply,
@@ -860,7 +860,7 @@ description: implement job objects
      (dump_func)dump_get_new_process_info_reply,
      (dump_func)dump_new_thread_reply,
      (dump_func)dump_get_startup_info_reply,
-@@ -4604,6 +4659,12 @@ static const dump_func reply_dumpers[REQ
+@@ -4605,6 +4660,12 @@ static const dump_func reply_dumpers[REQ
  
  static const char * const req_names[REQ_NB_REQUESTS] = {
      "new_process",
@@ -873,7 +873,7 @@ description: implement job objects
      "get_new_process_info",
      "new_thread",
      "get_startup_info",
-@@ -4960,7 +5021,9 @@ static const struct
+@@ -4961,7 +5022,9 @@ static const struct
      { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
      { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
      { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
