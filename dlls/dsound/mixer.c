@@ -27,8 +27,7 @@
 #include <math.h>	/* Insomnia - pow() function */
 
 #define COBJMACROS
-#define NONAMELESSSTRUCT
-#define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "mmsystem.h"
@@ -398,6 +397,8 @@ static inline DWORD DSOUND_BufPtrDiff(DWORD buflen, DWORD ptr1, DWORD ptr2)
 static void DSOUND_MixToTemporary(IDirectSoundBufferImpl *dsb, DWORD frames)
 {
 	UINT size_bytes = frames * sizeof(float) * dsb->device->pwfx->nChannels;
+	HRESULT hr;
+	int i;
 
 	if (dsb->device->tmp_buffer_len < size_bytes || !dsb->device->tmp_buffer)
 	{
@@ -409,6 +410,18 @@ static void DSOUND_MixToTemporary(IDirectSoundBufferImpl *dsb, DWORD frames)
 	}
 
 	cp_fields(dsb, frames, &dsb->freqAccNum);
+
+	if (size_bytes > 0) {
+		for (i = 0; i < dsb->num_filters; i++) {
+			if (dsb->filters[i].inplace) {
+				hr = IMediaObjectInPlace_Process(dsb->filters[i].inplace, size_bytes, (BYTE*)dsb->device->tmp_buffer, 0, DMO_INPLACE_NORMAL);
+
+				if (FAILED(hr))
+					WARN("IMediaObjectInPlace_Process failed for filter %u\n", i);
+			} else
+				WARN("filter %u has no inplace object - unsupported\n", i);
+		}
+	}
 }
 
 static void DSOUND_MixerVol(const IDirectSoundBufferImpl *dsb, INT frames)
@@ -841,7 +854,7 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 		}
 
 		/* if device was stopping, its for sure stopped when all buffers have stopped */
-		else if((all_stopped == TRUE) && (device->state == STATE_STOPPING)){
+		else if (all_stopped && (device->state == STATE_STOPPING)) {
 			TRACE("All buffers have stopped. Stopping primary buffer\n");
 			device->state = STATE_STOPPED;
 
@@ -896,5 +909,6 @@ DWORD CALLBACK DSOUND_mixthread(void *p)
 		DSOUND_PerformMix(dev);
 		RtlReleaseResource(&(dev->buffer_list_lock));
 	}
+	SetEvent(dev->thread_finished);
 	return 0;
 }

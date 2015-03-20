@@ -306,7 +306,8 @@ enum wined3d_shader_resource_type
 #define WINED3D_SHADER_CONST_PS_BUMP_ENV    0x00000080
 #define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000100
 #define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000200
-#define WINED3D_SHADER_CONST_FFP_PS         0x00000400
+#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00000400
+#define WINED3D_SHADER_CONST_FFP_PS         0x00000800
 
 enum wined3d_shader_register_type
 {
@@ -2781,8 +2782,8 @@ BOOL is_invalid_op(const struct wined3d_state *state, int stage,
 void set_tex_op_nvrc(const struct wined3d_gl_info *gl_info, const struct wined3d_state *state,
         BOOL is_alpha, int stage, enum wined3d_texture_op op, DWORD arg1, DWORD arg2, DWORD arg3,
         INT texture_idx, DWORD dst) DECLSPEC_HIDDEN;
-void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat, DWORD flags,
-        BOOL calculatedCoords, BOOL transformed, enum wined3d_format_id coordtype,
+void set_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wined3d_matrix *matrix,
+        DWORD flags, BOOL calculated_coords, BOOL transformed, enum wined3d_format_id format_id,
         BOOL ffp_can_disable_proj) DECLSPEC_HIDDEN;
 void texture_activate_dimensions(const struct wined3d_texture *texture,
         const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
@@ -2807,10 +2808,6 @@ void sampler_texmatrix(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_specularenable(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void transform_world(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void transform_view(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void transform_projection(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void transform_texture(struct wined3d_context *context,
@@ -2822,8 +2819,6 @@ void viewport_vertexpart(struct wined3d_context *context,
 void state_clipping(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void light(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void vertexdeclaration(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void clipplane(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
@@ -2838,6 +2833,10 @@ void state_pointsprite_w(struct wined3d_context *context,
 void state_pointsprite(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_pscale(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
+void state_lighting(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
+void state_normalize(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 
 BOOL getColorBits(const struct wined3d_format *format,
@@ -3036,6 +3035,10 @@ static inline BOOL shader_constant_is_local(const struct wined3d_shader *shader,
 
     return FALSE;
 }
+
+void get_identity_matrix(struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
+void get_modelview_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
+        struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 
 /* Using additional shader constants (uniforms in GLSL / program environment
  * or local parameters in ARB) is costly:

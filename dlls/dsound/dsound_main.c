@@ -35,8 +35,8 @@
 #include <stdarg.h>
 
 #define COBJMACROS
-#define NONAMELESSSTRUCT
 #define NONAMELESSUNION
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
@@ -55,6 +55,7 @@
 #include "unknwn.h"
 #include "oleidl.h"
 #include "shobjidl.h"
+#include "strmif.h"
 
 #include "initguid.h"
 #include "ksmedia.h"
@@ -528,7 +529,7 @@ HRESULT enumerate_mmdevices(EDataFlow flow, GUID *guids,
 
     release_mmdevenum(devenum, init_hr);
 
-    return (keep_going == TRUE) ? S_OK : S_FALSE;
+    return keep_going ? S_OK : S_FALSE;
 }
 
 /***************************************************************************

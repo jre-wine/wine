@@ -33,7 +33,6 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 
 #include "windef.h"
 #include "winbase.h"
@@ -1279,6 +1278,8 @@ HRESULT WINAPI OleLoad(
    * Get the class ID for the object.
    */
   hres = IStorage_Stat(pStg, &storageInfo, STATFLAG_NONAME);
+  if (FAILED(hres))
+    return hres;
 
   /*
    * Now, try and create the handler for the object

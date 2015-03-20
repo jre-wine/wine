@@ -2493,7 +2493,12 @@ static void exec_process( LPCWSTR name )
 
     /* Determine executable type */
 
-    if (binary_info.flags & BINARY_FLAG_DLL) return;
+    if (binary_info.flags & BINARY_FLAG_DLL)
+    {
+        CloseHandle( hFile );
+        return;
+    }
+
     switch (binary_info.type)
     {
     case BINARY_PE:
@@ -3563,8 +3568,8 @@ BOOL WINAPI QueryFullProcessImageNameW(HANDLE hProcess, DWORD dwFlags, LPWSTR lp
         ntlen = devlen + (result->Length/sizeof(WCHAR) - 2);
         if (ntlen + 1 > *pdwSize)
         {
-            SetLastError(ERROR_INSUFFICIENT_BUFFER);
-            return FALSE;
+            status = STATUS_BUFFER_TOO_SMALL;
+            goto cleanup;
         }
         *pdwSize = ntlen;
 

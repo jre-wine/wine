@@ -107,6 +107,7 @@ struct d3d10_texture3d
     ID3D10Texture3D ID3D10Texture3D_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_texture *wined3d_texture;
     D3D10_TEXTURE3D_DESC desc;
     ID3D10Device1 *device;
@@ -136,6 +137,7 @@ struct d3d10_depthstencil_view
     ID3D10DepthStencilView ID3D10DepthStencilView_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_rendertarget_view *wined3d_view;
     D3D10_DEPTH_STENCIL_VIEW_DESC desc;
     ID3D10Resource *resource;
@@ -152,6 +154,7 @@ struct d3d10_rendertarget_view
     ID3D10RenderTargetView ID3D10RenderTargetView_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_rendertarget_view *wined3d_view;
     D3D10_RENDER_TARGET_VIEW_DESC desc;
     ID3D10Resource *resource;
@@ -168,6 +171,7 @@ struct d3d10_shader_resource_view
     ID3D10ShaderResourceView ID3D10ShaderResourceView_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_shader_resource_view *wined3d_view;
     D3D10_SHADER_RESOURCE_VIEW_DESC desc;
     ID3D10Resource *resource;
@@ -263,6 +267,7 @@ struct d3d10_depthstencil_state
     ID3D10DepthStencilState ID3D10DepthStencilState_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     D3D10_DEPTH_STENCIL_DESC desc;
     struct wine_rb_entry entry;
     ID3D10Device1 *device;
@@ -279,6 +284,7 @@ struct d3d10_rasterizer_state
     ID3D10RasterizerState ID3D10RasterizerState_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     D3D10_RASTERIZER_DESC desc;
     struct wine_rb_entry entry;
     ID3D10Device1 *device;
@@ -294,6 +300,7 @@ struct d3d10_sampler_state
     ID3D10SamplerState ID3D10SamplerState_iface;
     LONG refcount;
 
+    struct wined3d_private_store private_store;
     struct wined3d_sampler *wined3d_sampler;
     D3D10_SAMPLER_DESC desc;
     struct wine_rb_entry entry;

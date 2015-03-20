@@ -101,10 +101,12 @@ static void STDMETHODCALLTYPE d3d10_blend_state_GetDevice(ID3D10BlendState *ifac
 static HRESULT STDMETHODCALLTYPE d3d10_blend_state_GetPrivateData(ID3D10BlendState *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    struct d3d10_blend_state *state = impl_from_ID3D10BlendState(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_get_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_blend_state_SetPrivateData(ID3D10BlendState *iface,
@@ -121,9 +123,11 @@ static HRESULT STDMETHODCALLTYPE d3d10_blend_state_SetPrivateData(ID3D10BlendSta
 static HRESULT STDMETHODCALLTYPE d3d10_blend_state_SetPrivateDataInterface(ID3D10BlendState *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    struct d3d10_blend_state *state = impl_from_ID3D10BlendState(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d10_set_private_data_interface(&state->private_store, guid, data);
 }
 
 /* ID3D10BlendState methods */
@@ -232,6 +236,7 @@ static ULONG STDMETHODCALLTYPE d3d10_depthstencil_state_Release(ID3D10DepthStenc
         struct d3d10_device *device = impl_from_ID3D10Device(state->device);
         wine_rb_remove(&device->depthstencil_states, &state->desc);
         ID3D10Device1_Release(state->device);
+        wined3d_private_store_cleanup(&state->private_store);
         HeapFree(GetProcessHeap(), 0, state);
     }
 
@@ -253,27 +258,33 @@ static void STDMETHODCALLTYPE d3d10_depthstencil_state_GetDevice(ID3D10DepthSten
 static HRESULT STDMETHODCALLTYPE d3d10_depthstencil_state_GetPrivateData(ID3D10DepthStencilState *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    struct d3d10_depthstencil_state *state = impl_from_ID3D10DepthStencilState(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_get_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_depthstencil_state_SetPrivateData(ID3D10DepthStencilState *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    FIXME("iface %p, guid %s, data_size %u, data %p stub!\n",
+    struct d3d10_depthstencil_state *state = impl_from_ID3D10DepthStencilState(iface);
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_set_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_depthstencil_state_SetPrivateDataInterface(ID3D10DepthStencilState *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    struct d3d10_depthstencil_state *state = impl_from_ID3D10DepthStencilState(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d10_set_private_data_interface(&state->private_store, guid, data);
 }
 
 /* ID3D10DepthStencilState methods */
@@ -308,11 +319,13 @@ HRESULT d3d10_depthstencil_state_init(struct d3d10_depthstencil_state *state, st
 {
     state->ID3D10DepthStencilState_iface.lpVtbl = &d3d10_depthstencil_state_vtbl;
     state->refcount = 1;
+    wined3d_private_store_init(&state->private_store);
     state->desc = *desc;
 
     if (wine_rb_put(&device->depthstencil_states, desc, &state->entry) == -1)
     {
         ERR("Failed to insert depthstencil state entry.\n");
+        wined3d_private_store_cleanup(&state->private_store);
         return E_FAIL;
     }
 
@@ -380,6 +393,7 @@ static ULONG STDMETHODCALLTYPE d3d10_rasterizer_state_Release(ID3D10RasterizerSt
         struct d3d10_device *device = impl_from_ID3D10Device(state->device);
         wine_rb_remove(&device->rasterizer_states, &state->desc);
         ID3D10Device1_Release(state->device);
+        wined3d_private_store_cleanup(&state->private_store);
         HeapFree(GetProcessHeap(), 0, state);
     }
 
@@ -401,27 +415,33 @@ static void STDMETHODCALLTYPE d3d10_rasterizer_state_GetDevice(ID3D10RasterizerS
 static HRESULT STDMETHODCALLTYPE d3d10_rasterizer_state_GetPrivateData(ID3D10RasterizerState *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    struct d3d10_rasterizer_state *state = impl_from_ID3D10RasterizerState(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_get_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_rasterizer_state_SetPrivateData(ID3D10RasterizerState *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    FIXME("iface %p, guid %s, data_size %u, data %p stub!\n",
+    struct d3d10_rasterizer_state *state = impl_from_ID3D10RasterizerState(iface);
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_set_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_rasterizer_state_SetPrivateDataInterface(ID3D10RasterizerState *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    struct d3d10_rasterizer_state *state = impl_from_ID3D10RasterizerState(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d10_set_private_data_interface(&state->private_store, guid, data);
 }
 
 /* ID3D10RasterizerState methods */
@@ -456,11 +476,13 @@ HRESULT d3d10_rasterizer_state_init(struct d3d10_rasterizer_state *state, struct
 {
     state->ID3D10RasterizerState_iface.lpVtbl = &d3d10_rasterizer_state_vtbl;
     state->refcount = 1;
+    wined3d_private_store_init(&state->private_store);
     state->desc = *desc;
 
     if (wine_rb_put(&device->rasterizer_states, desc, &state->entry) == -1)
     {
         ERR("Failed to insert rasterizer state entry.\n");
+        wined3d_private_store_cleanup(&state->private_store);
         return E_FAIL;
     }
 
@@ -530,6 +552,7 @@ static ULONG STDMETHODCALLTYPE d3d10_sampler_state_Release(ID3D10SamplerState *i
         wined3d_sampler_decref(state->wined3d_sampler);
         wine_rb_remove(&device->sampler_states, &state->desc);
         ID3D10Device1_Release(state->device);
+        wined3d_private_store_cleanup(&state->private_store);
         HeapFree(GetProcessHeap(), 0, state);
     }
 
@@ -551,27 +574,33 @@ static void STDMETHODCALLTYPE d3d10_sampler_state_GetDevice(ID3D10SamplerState *
 static HRESULT STDMETHODCALLTYPE d3d10_sampler_state_GetPrivateData(ID3D10SamplerState *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    FIXME("iface %p, guid %s, data_size %p, data %p stub!\n",
+    struct d3d10_sampler_state *state = impl_from_ID3D10SamplerState(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_get_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_sampler_state_SetPrivateData(ID3D10SamplerState *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    FIXME("iface %p, guid %s, data_size %u, data %p stub!\n",
+    struct d3d10_sampler_state *state = impl_from_ID3D10SamplerState(iface);
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
 
-    return E_NOTIMPL;
+    return d3d10_set_private_data(&state->private_store, guid, data_size, data);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_sampler_state_SetPrivateDataInterface(ID3D10SamplerState *iface,
         REFGUID guid, const IUnknown *data)
 {
-    FIXME("iface %p, guid %s, data %p stub!\n", iface, debugstr_guid(guid), data);
+    struct d3d10_sampler_state *state = impl_from_ID3D10SamplerState(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d10_set_private_data_interface(&state->private_store, guid, data);
 }
 
 /* ID3D10SamplerState methods */
@@ -645,6 +674,7 @@ HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state, struct d3d10
 
     state->ID3D10SamplerState_iface.lpVtbl = &d3d10_sampler_state_vtbl;
     state->refcount = 1;
+    wined3d_private_store_init(&state->private_store);
     state->desc = *desc;
 
     wined3d_desc.address_u = wined3d_texture_address_from_d3d10core(desc->AddressU);
@@ -665,6 +695,7 @@ HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state, struct d3d10
     if (FAILED(hr = wined3d_sampler_create(device->wined3d_device, &wined3d_desc, state, &state->wined3d_sampler)))
     {
         WARN("Failed to create wined3d sampler, hr %#x.\n", hr);
+        wined3d_private_store_cleanup(&state->private_store);
         return hr;
     }
 
@@ -672,6 +703,7 @@ HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state, struct d3d10
     {
         ERR("Failed to insert sampler state entry.\n");
         wined3d_sampler_decref(state->wined3d_sampler);
+        wined3d_private_store_cleanup(&state->private_store);
         return E_FAIL;
     }
 

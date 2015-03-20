@@ -148,7 +148,6 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 
 #include "windef.h"
 #include "winbase.h"
@@ -385,7 +384,7 @@ static inline BOOL UNIXFS_is_pidl_of_type(LPCITEMIDLIST pIDL, SHCONTF fFilter) {
  *
  * RETURNS
  *  Success, TRUE
- *  Failure, FALSE - Path not existent, too long, insufficient rights, too many symlinks
+ *  Failure, FALSE - Nonexistent path, too long, insufficient rights, too many symlinks
  */
 static BOOL UNIXFS_get_unix_path(LPCWSTR pszDosPath, char *pszCanonicalPath)
 {

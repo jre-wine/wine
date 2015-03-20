@@ -2417,6 +2417,27 @@ static void test_fromMemoryBitmap(void)
     GdipDeleteGraphics(graphics);
 
     GdipDisposeImage((GpImage*)bitmap);
+
+    /* If we don't draw to the HDC, the bits are never accessed */
+    status = GdipCreateBitmapFromScan0(4, 4, 12, PixelFormat24bppRGB, (BYTE*)1, &bitmap);
+    expect(Ok, status);
+
+    status = GdipGetImageGraphicsContext((GpImage*)bitmap, &graphics);
+    expect(Ok, status);
+
+    status = GdipGetDC(graphics, &hdc);
+    expect(Ok, status);
+    ok(hdc != NULL, "got NULL hdc\n");
+
+    color = GetPixel(hdc, 0, 0);
+    todo_wine expect(0x0c0b0d, color);
+
+    status = GdipReleaseDC(graphics, hdc);
+    expect(Ok, status);
+
+    GdipDeleteGraphics(graphics);
+
+    GdipDisposeImage((GpImage*)bitmap);
 }
 
 static void test_GdipIsVisiblePoint(void)
@@ -4424,12 +4445,13 @@ static void test_measured_extra_space(void)
 static void test_alpha_hdc(void)
 {
     GpStatus status;
-    HDC hdc;
+    HDC hdc, gp_hdc;
     HBITMAP hbm, old_hbm;
     GpGraphics *graphics;
     ULONG *bits;
     BITMAPINFO bmi;
     GpRectF bounds;
+    COLORREF colorref;
 
     hdc = CreateCompatibleDC(0);
     ok(hdc != NULL, "CreateCompatibleDC failed\n");
@@ -4462,6 +4484,21 @@ static void test_alpha_hdc(void)
     expect(Ok, status);
 
     expect(0xffaaaaaa, bits[0]);
+
+    bits[0] = 0xdeadbeef;
+
+    status = GdipGetDC(graphics, &gp_hdc);
+    expect(Ok, status);
+
+    colorref = GetPixel(gp_hdc, 0, 4);
+    expect(0xefbead, colorref);
+
+    SetPixel(gp_hdc, 0, 4, 0xffffff);
+
+    expect(0xffffff, bits[0]);
+
+    status = GdipReleaseDC(graphics, gp_hdc);
+    expect(Ok, status);
 
     SelectObject(hdc, old_hbm);
 

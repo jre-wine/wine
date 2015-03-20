@@ -124,15 +124,16 @@ static UINT check_transform_applicable( MSIPACKAGE *package, IStorage *transform
         MSITRANSFORM_VALIDATE_PRODUCT  | MSITRANSFORM_VALIDATE_LANGUAGE |
         MSITRANSFORM_VALIDATE_PLATFORM | MSITRANSFORM_VALIDATE_MAJORVERSION |
         MSITRANSFORM_VALIDATE_MINORVERSION | MSITRANSFORM_VALIDATE_UPGRADECODE;
-    MSISUMMARYINFO *si = MSI_GetSummaryInformationW( transform, 0 );
-    UINT valid_flags = 0, wanted_flags = 0;
+    MSISUMMARYINFO *si;
+    UINT r, valid_flags = 0, wanted_flags = 0;
     WCHAR *template, *product, *p;
     struct transform_desc *desc;
 
-    if (!si)
+    r = msi_get_suminfo( transform, 0, &si );
+    if (r != ERROR_SUCCESS)
     {
         WARN("no summary information!\n");
-        return ERROR_FUNCTION_FAILED;
+        return r;
     }
     wanted_flags = msi_suminfo_get_int32( si, PID_CHARCOUNT );
     wanted_flags &= 0xffff; /* mask off error condition flags */
@@ -886,9 +887,9 @@ static UINT msi_apply_patch_package( MSIPACKAGE *package, const WCHAR *file )
     WCHAR localfile[MAX_PATH];
     MSISUMMARYINFO *si;
     MSIPATCHINFO *patch = NULL;
-    UINT r = ERROR_SUCCESS;
+    UINT r;
 
-    TRACE("%p %s\n", package, debugstr_w(file));
+    TRACE("%p, %s\n", package, debugstr_w(file));
 
     r = MSI_OpenDatabaseW( file, MSIDBOPEN_READONLY + MSIDBOPEN_PATCHFILE, &patch_db );
     if (r != ERROR_SUCCESS)
@@ -896,10 +897,11 @@ static UINT msi_apply_patch_package( MSIPACKAGE *package, const WCHAR *file )
         ERR("failed to open patch collection %s\n", debugstr_w( file ) );
         return r;
     }
-    if (!(si = MSI_GetSummaryInformationW( patch_db->storage, 0 )))
+    r = msi_get_suminfo( patch_db->storage, 0, &si );
+    if (r != ERROR_SUCCESS)
     {
         msiobj_release( &patch_db->hdr );
-        return ERROR_FUNCTION_FAILED;
+        return r;
     }
     r = msi_check_patch_applicable( package, si );
     if (r != ERROR_SUCCESS)
@@ -1003,6 +1005,8 @@ UINT msi_apply_registered_patch( MSIPACKAGE *package, LPCWSTR patch_code )
     MSIPATCHINFO *patch_info;
     MSISUMMARYINFO *si;
 
+    TRACE("%p, %s\n", package, debugstr_w(patch_code));
+
     len = sizeof(patch_file) / sizeof(WCHAR);
     r = MsiGetPatchInfoExW( patch_code, package->ProductCode, NULL, package->Context,
                             INSTALLPROPERTY_LOCALPACKAGEW, patch_file, &len );
@@ -1017,11 +1021,11 @@ UINT msi_apply_registered_patch( MSIPACKAGE *package, LPCWSTR patch_code )
         ERR("failed to open patch database %s\n", debugstr_w( patch_file ));
         return r;
     }
-    si = MSI_GetSummaryInformationW( patch_db->storage, 0 );
-    if (!si)
+    r = msi_get_suminfo( patch_db->storage, 0, &si );
+    if (r != ERROR_SUCCESS)
     {
         msiobj_release( &patch_db->hdr );
-        return ERROR_FUNCTION_FAILED;
+        return r;
     }
     r = msi_parse_patch_summary( si, &patch_info );
     msiobj_release( &si->hdr );

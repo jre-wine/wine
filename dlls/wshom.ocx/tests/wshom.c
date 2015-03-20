@@ -39,7 +39,10 @@ static void test_wshshell(void)
     static const WCHAR pathW[] = {'%','P','A','T','H','%',0};
     static const WCHAR sysW[] = {'S','Y','S','T','E','M',0};
     static const WCHAR path2W[] = {'P','A','T','H',0};
+    static const WCHAR dummydirW[] = {'d','e','a','d','p','a','r','r','o','t',0};
+    static const WCHAR emptyW[] = {'e','m','p','t','y',0};
     IWshEnvironment *env;
+    IWshExec *shexec;
     IWshShell3 *sh3;
     IDispatchEx *dispex;
     IWshCollection *coll;
@@ -207,6 +210,41 @@ static void test_wshshell(void)
     ok(hr == DISP_E_TYPEMISMATCH, "got 0x%08x\n", hr);
     ok(retval == 10, "got %u\n", retval);
 
+    SysFreeString(str);
+
+    /* current directory */
+if (0) /* crashes on native */
+    hr = IWshShell3_get_CurrentDirectory(sh3, NULL);
+
+    str = NULL;
+    hr = IWshShell3_get_CurrentDirectory(sh3, &str);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(str && str[0] != 0, "got empty string\n");
+    SysFreeString(str);
+
+    hr = IWshShell3_put_CurrentDirectory(sh3, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    str = SysAllocString(emptyW);
+    hr = IWshShell3_put_CurrentDirectory(sh3, str);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    SysFreeString(str);
+
+    str = SysAllocString(dummydirW);
+    hr = IWshShell3_put_CurrentDirectory(sh3, str);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
+    SysFreeString(str);
+
+    /* Exec */
+    hr = IWshShell3_Exec(sh3, NULL, NULL);
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    hr = IWshShell3_Exec(sh3, NULL, &shexec);
+    ok(hr == DISP_E_EXCEPTION, "got 0x%08x\n", hr);
+
+    str = SysAllocString(emptyW);
+    hr = IWshShell3_Exec(sh3, str, &shexec);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND), "got 0x%08x\n", hr);
     SysFreeString(str);
 
     IWshCollection_Release(coll);

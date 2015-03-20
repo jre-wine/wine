@@ -196,6 +196,9 @@ static int        client_id;
 
 /**************** General utility functions ***************/
 
+static SOCKET setup_server_socket(struct sockaddr_in *addr, int *len);
+static SOCKET setup_connector_socket(struct sockaddr_in *addr, int len, BOOL nonblock);
+
 static int tcp_socketpair(SOCKET *src, SOCKET *dst)
 {
     SOCKET server = INVALID_SOCKET;
@@ -298,32 +301,41 @@ static void read_zero_bytes ( SOCKET s )
     ok ( n <= 0, "garbage data received: %d bytes\n", n );
 }
 
-static int do_synchronous_send ( SOCKET s, char *buf, int buflen, int sendlen, int flags )
+static int do_synchronous_send ( SOCKET s, char *buf, int buflen, int flags, int sendlen )
 {
     char* last = buf + buflen, *p;
     int n = 1;
-    for ( p = buf; n > 0 && p < last; p += n )
+    for ( p = buf; n > 0 && p < last; )
+    {
         n = send ( s, p, min ( sendlen, last - p ), flags );
+        if (n > 0) p += n;
+    }
     wsa_ok ( n, 0 <=, "do_synchronous_send (%x): error %d\n" );
     return p - buf;
 }
 
-static int do_synchronous_recv ( SOCKET s, char *buf, int buflen, int recvlen )
+static int do_synchronous_recv ( SOCKET s, char *buf, int buflen, int flags, int recvlen )
 {
     char* last = buf + buflen, *p;
     int n = 1;
-    for ( p = buf; n > 0 && p < last; p += n )
-        n = recv ( s, p, min ( recvlen, last - p ), 0 );
+    for ( p = buf; n > 0 && p < last; )
+    {
+        n = recv ( s, p, min ( recvlen, last - p ), flags );
+        if (n > 0) p += n;
+    }
     wsa_ok ( n, 0 <=, "do_synchronous_recv (%x): error %d:\n" );
     return p - buf;
 }
 
-static int do_synchronous_recvfrom ( SOCKET s, char *buf, int buflen,int flags,struct sockaddr *from, int *fromlen, int recvlen )
+static int do_synchronous_recvfrom ( SOCKET s, char *buf, int buflen, int flags, struct sockaddr *from, int *fromlen, int recvlen )
 {
     char* last = buf + buflen, *p;
     int n = 1;
-    for ( p = buf; n > 0 && p < last; p += n )
-      n = recvfrom ( s, p, min ( recvlen, last - p ), 0, from, fromlen );
+    for ( p = buf; n > 0 && p < last; )
+    {
+        n = recvfrom ( s, p, min ( recvlen, last - p ), flags, from, fromlen );
+        if (n > 0) p += n;
+    }
     wsa_ok ( n, 0 <=, "do_synchronous_recv (%x): error %d:\n" );
     return p - buf;
 }
@@ -535,14 +547,14 @@ static VOID WINAPI simple_server ( server_params *par )
              "simple_server (%x): strange peer address\n", id );
 
         /* Receive data & check it */
-        n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen );
+        n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, 0, par->buflen );
         ok ( n_recvd == n_expected,
              "simple_server (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
         pos = test_buffer ( mem->sock[0].buf, gen->chunk_size, gen->n_chunks );
         ok ( pos == -1, "simple_server (%x): test pattern error: %d\n", id, pos);
 
         /* Echo data back */
-        n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen, 0 );
+        n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, 0, par->buflen );
         ok ( n_sent == n_expected,
              "simple_server (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -594,23 +606,23 @@ static VOID WINAPI oob_server ( server_params *par )
     ok ( atmark == 1, "oob_server (%x): unexpectedly at the OOB mark: %i\n", id, atmark );
 
     /* Receive normal data */
-    n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen );
+    n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, 0, par->buflen );
     ok ( n_recvd == n_expected,
          "oob_server (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
     pos = test_buffer ( mem->sock[0].buf, gen->chunk_size, gen->n_chunks );
     ok ( pos == -1, "oob_server (%x): test pattern error: %d\n", id, pos);
 
-    /* Echo data back */
-    n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen, 0 );
-    ok ( n_sent == n_expected,
-         "oob_server (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
-
     /* check atmark state */
     ioctlsocket ( mem->sock[0].s, SIOCATMARK, &atmark );
     ok ( atmark == 1, "oob_server (%x): unexpectedly at the OOB mark: %i\n", id, atmark );
 
+    /* Echo data back */
+    n_sent = do_synchronous_send ( mem->sock[0].s, mem->sock[0].buf, n_expected, 0, par->buflen );
+    ok ( n_sent == n_expected,
+         "oob_server (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
+
     /* Receive a part of the out-of-band data and check atmark state */
-    n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, 8, par->buflen );
+    n_recvd = do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, 8, 0, par->buflen );
     ok ( n_recvd == 8,
          "oob_server (%x): received less data than expected: %d of %d\n", id, n_recvd, 8 );
     n_expected -= 8;
@@ -619,7 +631,7 @@ static VOID WINAPI oob_server ( server_params *par )
     todo_wine ok ( atmark == 0, "oob_server (%x): not at the OOB mark: %i\n", id, atmark );
 
     /* Receive the rest of the out-of-band data and check atmark state */
-    do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, par->buflen );
+    do_synchronous_recv ( mem->sock[0].s, mem->sock[0].buf, n_expected, 0, par->buflen );
 
     ioctlsocket ( mem->sock[0].s, SIOCATMARK, &atmark );
     todo_wine ok ( atmark == 0, "oob_server (%x): not at the OOB mark: %i\n", id, atmark );
@@ -792,7 +804,7 @@ static VOID WINAPI simple_client ( client_params *par )
     trace ( "simple_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, 0, par->buflen );
     ok ( n_sent == n_expected,
          "simple_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -800,7 +812,7 @@ static VOID WINAPI simple_client ( client_params *par )
     wsa_ok ( shutdown ( mem->s, SD_SEND ), 0 ==, "simple_client (%x): shutdown failed: %d\n" );
 
     /* Receive data echoed back & check it */
-    n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, par->buflen );
+    n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, 0, par->buflen );
     ok ( n_recvd == n_expected,
          "simple_client (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
 
@@ -842,19 +854,19 @@ static VOID WINAPI oob_client ( client_params *par )
     trace ( "oob_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, 0, par->buflen );
     ok ( n_sent == n_expected,
          "oob_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
     /* Receive data echoed back & check it */
-    n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, par->buflen );
+    n_recvd = do_synchronous_recv ( mem->s, mem->recv_buf, n_expected, 0, par->buflen );
     ok ( n_recvd == n_expected,
          "simple_client (%x): received less data than expected: %d of %d\n", id, n_recvd, n_expected );
     pos = test_buffer ( mem->recv_buf, gen->chunk_size, gen->n_chunks );
     ok ( pos == -1, "simple_client (%x): test pattern error: %d\n", id, pos);
 
     /* send out-of-band data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, MSG_OOB );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, MSG_OOB, par->buflen );
     ok ( n_sent == n_expected,
          "oob_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -897,7 +909,7 @@ static VOID WINAPI simple_mixed_client ( client_params *par )
     trace ( "simple_client (%x) connected\n", id );
 
     /* send data to server */
-    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, par->buflen, 0 );
+    n_sent = do_synchronous_send ( mem->s, mem->send_buf, n_expected, 0, par->buflen );
     ok ( n_sent == n_expected,
          "simple_client (%x): sent less data than expected: %d of %d\n", id, n_sent, n_expected );
 
@@ -1124,7 +1136,14 @@ static void test_WithWSAStartup(void)
     closesocket(src);
     closesocket(dst);
 
-    WSACleanup();
+    res = WSACleanup();
+    ok(res == 0, "expected 0, got %d\n", res);
+    WSASetLastError(0xdeadbeef);
+    res = WSACleanup();
+    error = WSAGetLastError();
+    ok ( (res == SOCKET_ERROR && error ==  WSANOTINITIALISED) ||
+         broken(res == 0),  /* WinME */
+            "WSACleanup returned %d WSAGetLastError is %d\n", res, error);
 }
 
 /**************** Main program utility functions ***************/
@@ -1156,11 +1175,6 @@ static void Exit (void)
     ret = WSACleanup();
     err = WSAGetLastError();
     ok ( ret == 0, "WSACleanup failed ret = %d GetLastError is %d\n", ret, err);
-    ret = WSACleanup();
-    err = WSAGetLastError();
-    ok ( (ret == SOCKET_ERROR && err ==  WSANOTINITIALISED) ||
-         broken(ret == 0),  /* WinME */
-            "WSACleanup returned %d GetLastError is %d\n", ret, err);
 }
 
 static void StartServer (LPTHREAD_START_ROUTINE routine,
@@ -1378,17 +1392,24 @@ todo_wine
     s = socket(AF_INET, SOCK_DGRAM, 0);
     ok(s != INVALID_SOCKET, "Failed to create socket\n");
     size = sizeof(i);
-    for (i = 0; i < 4; i++)
+    i = 0x0000000a;
+    err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &i, size);
+    if (!err)
     {
-        int k, j;
-        const int tests[] = {0xffffff0a, 0xffff000b, 0xff00000c, 0x0000000d};
-        err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &tests[i], i + 1);
-        ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
-        err = getsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &k, &size);
-        ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
-        j = i != 3 ? tests[i] & ((1 << (i + 1) * 8) - 1) : tests[i];
-        ok(k == j, "Test [%d] Expected 0x%x, got 0x%x\n", i, j, k);
+        for (i = 0; i < 4; i++)
+        {
+            int k, j;
+            const int tests[] = {0xffffff0a, 0xffff000b, 0xff00000c, 0x0000000d};
+            err = setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &tests[i], i + 1);
+            ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
+            err = getsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, (char *) &k, &size);
+            ok(!err, "Test [%d] Expected 0, got %d\n", i, err);
+            j = i != 3 ? tests[i] & ((1 << (i + 1) * 8) - 1) : tests[i];
+            ok(k == j, "Test [%d] Expected 0x%x, got 0x%x\n", i, j, k);
+        }
     }
+    else
+        win_skip("IP_MULTICAST_TTL is unsupported\n");
     closesocket(s);
 
     /* test SO_PROTOCOL_INFOA invalid parameters */
@@ -3377,16 +3398,19 @@ static void test_listen(void)
     ok (ret == 0, "closesocket failed unexpectedly: %d\n", ret);
 }
 
+#define FD_ZERO_ALL() { FD_ZERO(&readfds); FD_ZERO(&writefds); FD_ZERO(&exceptfds); }
+#define FD_SET_ALL(s) { FD_SET(s, &readfds); FD_SET(s, &writefds); FD_SET(s, &exceptfds); }
 static void test_select(void)
 {
-    static const char tmp_buf[1024];
+    static char tmp_buf[1024];
 
-    SOCKET fdRead, fdWrite;
+    SOCKET fdListen, fdRead, fdWrite;
     fd_set readfds, writefds, exceptfds;
     unsigned int maxfd;
-    int ret;
+    int ret, len;
     char buffer;
     struct timeval select_timeout;
+    struct sockaddr_in address;
     select_thread_params thread_params;
     HANDLE thread_handle;
     DWORD id;
@@ -3395,14 +3419,10 @@ static void test_select(void)
     ok( (fdRead != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
     fdWrite = socket(AF_INET, SOCK_STREAM, 0);
     ok( (fdWrite != INVALID_SOCKET), "socket failed unexpectedly: %d\n", WSAGetLastError() );
- 
-    FD_ZERO(&readfds);
-    FD_ZERO(&writefds);
-    FD_ZERO(&exceptfds);
-    FD_SET(fdRead, &readfds);
-    FD_SET(fdWrite, &writefds);
-    FD_SET(fdRead, &exceptfds);
-    FD_SET(fdWrite, &exceptfds);
+
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdRead);
+    FD_SET_ALL(fdWrite);
     select_timeout.tv_sec=0;
     select_timeout.tv_usec=500;
 
@@ -3443,9 +3463,7 @@ static void test_select(void)
     ok( (ret == -1), "peek at closed socket expected -1 got %d\n", ret);
 
     /* Test selecting invalid handles */
-    FD_ZERO(&readfds);
-    FD_ZERO(&writefds);
-    FD_ZERO(&exceptfds);
+    FD_ZERO_ALL();
 
     SetLastError(0);
     ret = select(maxfd+1, 0, 0, 0, &select_timeout);
@@ -3552,7 +3570,128 @@ static void test_select(void)
 
     closesocket(fdRead);
     closesocket(fdWrite);
+
+    /* select() works in 3 distinct states:
+     * - to check if a connection attempt ended with success or error;
+     * - to check if a pending connection is waiting for acceptance;
+     * - to check for data to read, avaliability for write and OOB data
+     *
+     * The tests below ensure that all conditions are tested.
+     */
+    memset(&address, 0, sizeof(address));
+    address.sin_addr.s_addr = inet_addr("127.0.0.1");
+    address.sin_family = AF_INET;
+    len = sizeof(address);
+    fdListen = setup_server_socket(&address, &len);
+    select_timeout.tv_sec = 1;
+    select_timeout.tv_usec = 250000;
+
+    /* When a socket is attempting to connect the listening socket receives the read descriptor */
+    fdWrite = setup_connector_socket(&address, len, TRUE);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(FD_ISSET(fdListen, &readfds), "fdListen socket is not in the set\n");
+    len = sizeof(address);
+    fdRead = accept(fdListen, (struct sockaddr*) &address, &len);
+    ok(fdRead != INVALID_SOCKET, "expected a valid socket\n");
+
+    /* The connector is signaled through the write descriptor */
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    FD_SET_ALL(fdRead);
+    FD_SET_ALL(fdWrite);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 2, "expected 2, got %d\n", ret);
+    ok(FD_ISSET(fdWrite, &writefds), "fdWrite socket is not in the set\n");
+    ok(FD_ISSET(fdRead, &writefds), "fdRead socket is not in the set\n");
+
+    /* When data is received the receiver gets the read descriptor */
+    ret = send(fdWrite, "1234", 4, 0);
+    ok(ret == 4, "expected 4, got %d\n", ret);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    FD_SET(fdRead, &readfds);
+    FD_SET(fdRead, &exceptfds);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
+    ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), 0);
+    ok(ret == 4, "expected 4, got %d\n", ret);
+    ok(!strcmp(tmp_buf, "1234"), "data received differs from sent\n");
+
+    /* When OOB data is received the socket is set in the except descriptor */
+    ret = send(fdWrite, "A", 1, MSG_OOB);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    FD_SET(fdRead, &readfds);
+    FD_SET(fdRead, &exceptfds);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+todo_wine
+    ok(ret == 1, "expected 1, got %d\n", ret);
+todo_wine
+    ok(FD_ISSET(fdRead, &exceptfds), "fdRead socket is not in the set\n");
+    tmp_buf[0] = 0xAF;
+    ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), MSG_OOB);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(tmp_buf[0] == 'A', "expected 'A', got 0x%02X\n", tmp_buf[0]);
+
+    /* If the socket is OOBINLINED it will not receive the OOB in except fds */
+    ret = 1;
+    ret = setsockopt(fdRead, SOL_SOCKET, SO_OOBINLINE, (char*) &ret, sizeof(ret));
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    ret = send(fdWrite, "A", 1, MSG_OOB);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    FD_SET(fdRead, &readfds);
+    FD_SET(fdRead, &exceptfds);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(FD_ISSET(fdRead, &readfds), "fdRead socket is not in the set\n");
+    tmp_buf[0] = 0xAF;
+    SetLastError(0xdeadbeef);
+    ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), MSG_OOB);
+    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret); /* can't recv with MSG_OOB if OOBINLINED */
+    ok(GetLastError() == WSAEINVAL, "expected 10022, got %d\n", GetLastError());
+    ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), 0);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(tmp_buf[0] == 'A', "expected 'A', got 0x%02X\n", tmp_buf[0]);
+
+    /* When the connection is closed the socket is set in the read descriptor */
+    ret = closesocket(fdRead);
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    FD_SET(fdWrite, &readfds);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(FD_ISSET(fdWrite, &readfds), "fdWrite socket is not in the set\n");
+    ret = recv(fdWrite, tmp_buf, sizeof(tmp_buf), 0);
+    ok(ret == 0, "expected 0, got %d\n", ret);
+
+    /* When a connection is attempted to a non-listening socket it will get to the except descriptor */
+    ret = closesocket(fdWrite);
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    ret = closesocket(fdListen);
+    ok(ret == 0, "expected 0, got %d\n", ret);
+    fdWrite = setup_connector_socket(&address, len, TRUE);
+    FD_ZERO_ALL();
+    FD_SET(fdWrite, &writefds);
+    FD_SET(fdWrite, &exceptfds);
+    select_timeout.tv_sec = 2; /* requires more time to realize it will not connect */
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+todo_wine
+    ok(ret == 1, "expected 1, got %d\n", ret);
+todo_wine
+    ok(FD_ISSET(fdWrite, &exceptfds), "fdWrite socket is not in the set\n");
+    ok(select_timeout.tv_usec == 250000, "select timeout should not have changed\n");
+    closesocket(fdWrite);
 }
+#undef FD_SET_ALL
+#undef FD_ZERO_ALL
 
 static DWORD WINAPI AcceptKillThread(void *param)
 {
@@ -3623,7 +3762,7 @@ static SOCKET setup_server_socket(struct sockaddr_in *addr, int *len)
     return server_socket;
 }
 
-static SOCKET setup_connector_socket(struct sockaddr_in *addr, int len)
+static SOCKET setup_connector_socket(struct sockaddr_in *addr, int len, BOOL nonblock)
 {
     int ret;
     SOCKET connector;
@@ -3631,8 +3770,18 @@ static SOCKET setup_connector_socket(struct sockaddr_in *addr, int len)
     connector = socket(AF_INET, SOCK_STREAM, 0);
     ok(connector != INVALID_SOCKET, "failed to create connector socket %d\n", WSAGetLastError());
 
+    if (nonblock)
+        set_blocking(connector, !nonblock);
+
     ret = connect(connector, (struct sockaddr *)addr, len);
-    ok(!ret, "connecting to accepting socket failed %d\n", WSAGetLastError());
+    if (!nonblock)
+        ok(!ret, "connecting to accepting socket failed %d\n", WSAGetLastError());
+    else if (ret == SOCKET_ERROR)
+    {
+        DWORD error = WSAGetLastError();
+        ok(error == WSAEWOULDBLOCK || error == WSAEINPROGRESS,
+           "expected 10035 or 10036, got %d\n", error);
+    }
 
     return connector;
 }
@@ -3660,7 +3809,7 @@ static void test_accept(void)
         return;
     }
 
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     trace("Blocking accept next\n");
@@ -3708,7 +3857,7 @@ static void test_accept(void)
     server_socket = setup_server_socket(&address, &socklen);
     if (server_socket == INVALID_SOCKET) goto done;
 
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     socklen = 0;
@@ -3719,7 +3868,7 @@ static void test_accept(void)
     connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     accepted = WSAAccept(server_socket, NULL, NULL, NULL, 0);
@@ -3729,7 +3878,7 @@ static void test_accept(void)
     accepted = connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     socklen = sizeof(ss);
@@ -3743,7 +3892,7 @@ static void test_accept(void)
     accepted = connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     socklen = 0;
@@ -3754,7 +3903,7 @@ static void test_accept(void)
     accepted = connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     accepted = accept(server_socket, NULL, NULL);
@@ -3764,7 +3913,7 @@ static void test_accept(void)
     accepted = connector = INVALID_SOCKET;
 
     socklen = sizeof(address);
-    connector = setup_connector_socket(&address, socklen);
+    connector = setup_connector_socket(&address, socklen, FALSE);
     if (connector == INVALID_SOCKET) goto done;
 
     socklen = sizeof(ss);
@@ -4075,6 +4224,39 @@ static void test_gethostbyname_hack(void)
      * resolve nonexistent host names to addresses of the ISP's spam pages. */
 }
 
+static void test_gethostname(void)
+{
+    struct hostent *he;
+    char name[256];
+    int ret, len;
+
+    WSASetLastError(0xdeadbeef);
+    ret = gethostname(NULL, 256);
+    ok(ret == -1, "gethostname() returned %d\n", ret);
+    ok(WSAGetLastError() == WSAEFAULT, "gethostname with null buffer "
+            "failed with %d, expected %d\n", WSAGetLastError(), WSAEFAULT);
+
+    ret = gethostname(name, sizeof(name));
+    ok(ret == 0, "gethostname() call failed: %d\n", WSAGetLastError());
+    he = gethostbyname(name);
+    ok(he != NULL, "gethostbyname(\"%s\") failed: %d\n", name, WSAGetLastError());
+
+    len = strlen(name);
+    WSASetLastError(0xdeadbeef);
+    strcpy(name, "deadbeef");
+    ret = gethostname(name, len);
+    ok(ret == -1, "gethostname() returned %d\n", ret);
+    ok(!strcmp(name, "deadbeef"), "name changed unexpected!\n");
+    ok(WSAGetLastError() == WSAEFAULT, "gethostname with insufficient length "
+            "failed with %d, expected %d\n", WSAGetLastError(), WSAEFAULT);
+
+    len++;
+    ret = gethostname(name, len);
+    ok(ret == 0, "gethostname() call failed: %d\n", WSAGetLastError());
+    he = gethostbyname(name);
+    ok(he != NULL, "gethostbyname(\"%s\") failed: %d\n", name, WSAGetLastError());
+}
+
 static void test_inet_addr(void)
 {
     u_long addr;
@@ -4332,7 +4514,9 @@ static void test_ioctlsocket(void)
     struct tcp_keepalive kalive;
     int ret, optval;
     static const LONG cmds[] = {FIONBIO, FIONREAD, SIOCATMARK};
-    UINT i;
+    UINT i, bytes_rec;
+    char data;
+    WSABUF bufs;
     u_long arg = 0;
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -4432,6 +4616,38 @@ static void test_ioctlsocket(void)
     ret = WSAIoctl(dst, FIONREAD, NULL, 0, &optval, sizeof(optval), &arg, NULL, NULL);
     ok(ret == 0, "WSAIoctl failed unexpectedly with error %d\n", WSAGetLastError());
     ok(optval == 4, "FIONREAD should have returned 4 bytes, got %d instead\n", optval);
+
+    /* trying to read from an OOB inlined socket with MSG_OOB results in WSAEINVAL */
+    set_blocking(dst, FALSE);
+    i = MSG_OOB;
+    SetLastError(0xdeadbeef);
+    ret = recv(dst, &data, 1, i);
+    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
+    ret = GetLastError();
+todo_wine
+    ok(ret == WSAEWOULDBLOCK, "expected 10035, got %d\n", ret);
+    bufs.len = sizeof(char);
+    bufs.buf = &data;
+    ret = WSARecv(dst, &bufs, 1, &bytes_rec, &i, NULL, NULL);
+    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
+    ret = GetLastError();
+todo_wine
+    ok(ret == WSAEWOULDBLOCK, "expected 10035, got %d\n", ret);
+    optval = 1;
+    ret = setsockopt(dst, SOL_SOCKET, SO_OOBINLINE, (void *)&optval, sizeof(optval));
+    ok(ret != SOCKET_ERROR, "setsockopt failed unexpectedly\n");
+    i = MSG_OOB;
+    SetLastError(0xdeadbeef);
+    ret = recv(dst, &data, 1, i);
+    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
+    ret = GetLastError();
+    ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
+    bufs.len = sizeof(char);
+    bufs.buf = &data;
+    ret = WSARecv(dst, &bufs, 1, &bytes_rec, &i, NULL, NULL);
+    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
+    ret = GetLastError();
+    ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
 
     closesocket(dst);
     optval = 0xdeadbeef;
@@ -7958,6 +8174,12 @@ static void test_address_list_query(void)
     bytes_returned = 0;
     ret = WSAIoctl(s, SIO_ADDRESS_LIST_QUERY, NULL, 0, NULL, 0, &bytes_returned, NULL, NULL);
     ok(ret == SOCKET_ERROR, "Got unexpected ret %d.\n", ret);
+    if(WSAGetLastError() == WSAEINVAL)
+    {
+      win_skip("Windows <= NT4 is not supported in this test\n");
+      closesocket(s);
+      return;
+    }
     ok(WSAGetLastError() == WSAEFAULT, "Got unexpected error %d.\n", WSAGetLastError());
     ok(bytes_returned >= FIELD_OFFSET(SOCKET_ADDRESS_LIST, Address[0]),
             "Got unexpected bytes_returned %u.\n", bytes_returned);
@@ -8257,6 +8479,7 @@ START_TEST( sock )
     test_ioctlsocket();
     test_dns();
     test_gethostbyname_hack();
+    test_gethostname();
 
     test_WSASendMsg();
     test_WSASendTo();

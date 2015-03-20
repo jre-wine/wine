@@ -28,7 +28,6 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 
 #include "windef.h"
 #include "winbase.h"
@@ -1850,6 +1849,7 @@ HRESULT RPC_GetLocalClassObject(REFCLSID rclsid, REFIID iid, LPVOID *ppv)
         bufferlen = 0;
         if (!ReadFile(hPipe,marshalbuffer,sizeof(marshalbuffer),&bufferlen,NULL)) {
             FIXME("Failed to read marshal id from classfactory of %s.\n",debugstr_guid(rclsid));
+            CloseHandle(hPipe);
             Sleep(1000);
             continue;
         }

@@ -1350,7 +1350,6 @@ int CDECL _ismbcpunct(unsigned int ch)
  */
 int CDECL _ismbchira(unsigned int c)
 {
-  /* FIXME: use lc_ctype when supported, not lc_all */
   if(get_mbcinfo()->mbcodepage == 932)
   {
     /* Japanese/Hiragana, CP 932 */
@@ -1364,11 +1363,8 @@ int CDECL _ismbchira(unsigned int c)
  */
 int CDECL _ismbckata(unsigned int c)
 {
-  /* FIXME: use lc_ctype when supported, not lc_all */
   if(get_mbcinfo()->mbcodepage == 932)
   {
-    if(c < 256)
-      return _ismbbkana(c);
     /* Japanese/Katakana, CP 932 */
     return (c >= 0x8340 && c <= 0x8396 && c != 0x837f);
   }
@@ -2279,4 +2275,28 @@ MSVCRT_size_t CDECL MSVCRT_mbsrtowcs(MSVCRT_wchar_t *wcstr,
     }
 
     return ret;
+}
+
+/*********************************************************************
+ *		_mbctohira (MSVCRT.@)
+ *
+ *              Converts a sjis katakana character to hiragana.
+ */
+unsigned int CDECL _mbctohira(unsigned int c)
+{
+    if(_ismbckata(c) && c <= 0x8393)
+        return (c - 0x8340 - (c >= 0x837f ? 1 : 0)) + 0x829f;
+    return c;
+}
+
+/*********************************************************************
+ *		_mbctokata (MSVCRT.@)
+ *
+ *              Converts a sjis hiragana character to katakana.
+ */
+unsigned int CDECL _mbctokata(unsigned int c)
+{
+    if(_ismbchira(c))
+        return (c - 0x829f) + 0x8340 + (c >= 0x82de ? 1 : 0);
+    return c;
 }

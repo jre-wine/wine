@@ -1465,7 +1465,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
 
     if (!(hdc = GetDC(swapchain->win_handle)))
     {
-        WARN("Failed to retireve device context, trying swapchain backup.\n");
+        WARN("Failed to retrieve device context, trying swapchain backup.\n");
 
         if ((hdc = swapchain_get_backup_dc(swapchain)))
             hdc_is_private = TRUE;
@@ -3048,7 +3048,12 @@ BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_de
      * updating a resource location. */
     context_update_tex_unit_map(context, state);
     context_preload_textures(context, state);
-    if (isStateDirty(context, STATE_VDECL) || isStateDirty(context, STATE_STREAMSRC))
+    /* TODO: Right now the dependency on the vertex shader is necessary
+     * since context_stream_info_from_declaration depends on the reg_maps of
+     * the current VS but maybe it's possible to relax the coupling in some
+     * situations at least. */
+    if (isStateDirty(context, STATE_VDECL) || isStateDirty(context, STATE_STREAMSRC)
+            || isStateDirty(context, STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX)))
     {
         context_update_stream_info(context, state);
     }

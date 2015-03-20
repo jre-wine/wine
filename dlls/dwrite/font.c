@@ -392,6 +392,14 @@ static HRESULT WINAPI dwritefontface_GetGlyphIndices(IDWriteFontFace2 *iface, UI
 
     TRACE("(%p)->(%p %u %p)\n", This, codepoints, count, glyph_indices);
 
+    if (!glyph_indices)
+        return E_INVALIDARG;
+
+    if (!codepoints) {
+        memset(glyph_indices, 0, count*sizeof(UINT16));
+        return E_INVALIDARG;
+    }
+
     for (i = 0; i < count; i++)
         glyph_indices[i] = freetype_get_glyphindex(iface, codepoints[i]);
 
@@ -650,19 +658,34 @@ static HRESULT WINAPI dwritefontface1_GetGdiCompatibleGlyphAdvances(IDWriteFontF
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI dwritefontface1_GetKerningPairAdjustments(IDWriteFontFace2 *iface, UINT32 glyph_count,
+static HRESULT WINAPI dwritefontface1_GetKerningPairAdjustments(IDWriteFontFace2 *iface, UINT32 count,
     const UINT16 *indices, INT32 *adjustments)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
-    FIXME("(%p)->(%u %p %p): stub\n", This, glyph_count, indices, adjustments);
-    return E_NOTIMPL;
+    UINT32 i;
+
+    TRACE("(%p)->(%u %p %p)\n", This, count, indices, adjustments);
+
+    if (!(indices || adjustments) || !count)
+        return E_INVALIDARG;
+
+    if (!indices || count == 1) {
+        memset(adjustments, 0, count*sizeof(INT32));
+        return E_INVALIDARG;
+    }
+
+    for (i = 0; i < count-1; i++)
+        adjustments[i] = freetype_get_kerning_pair_adjustment(iface, indices[i], indices[i+1]);
+    adjustments[count-1] = 0;
+
+    return S_OK;
 }
 
 static BOOL WINAPI dwritefontface1_HasKerningPairs(IDWriteFontFace2 *iface)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
-    FIXME("(%p): stub\n", This);
-    return FALSE;
+    TRACE("(%p)\n", This);
+    return freetype_has_kerning_pairs(iface);
 }
 
 static HRESULT WINAPI dwritefontface1_GetRecommendedRenderingMode(IDWriteFontFace2 *iface,
@@ -773,7 +796,7 @@ HRESULT get_family_names_from_stream(IDWriteFontFileStream *stream, UINT32 index
 {
     const void *name_table = NULL;
     void *name_context;
-    HRESULT hr = S_OK;
+    HRESULT hr = E_FAIL;
 
     opentype_get_font_table(stream, facetype, index, MS_NAME_TAG, &name_table, &name_context, NULL, NULL);
     if (name_table) {
@@ -781,7 +804,7 @@ HRESULT get_family_names_from_stream(IDWriteFontFileStream *stream, UINT32 index
         IDWriteFontFileStream_ReleaseFileFragment(stream, name_context);
     }
     else
-        names = NULL;
+        *names = NULL;
 
     return hr;
 }

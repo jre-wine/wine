@@ -254,7 +254,7 @@ struct shader_arb_ctx_priv
     {
         /* plain GL_ARB_vertex_program or GL_ARB_fragment_program */
         ARB,
-        /* GL_NV_vertex_progam2_option or GL_NV_fragment_program_option */
+        /* GL_NV_vertex_program2_option or GL_NV_fragment_program_option */
         NV2,
         /* GL_NV_vertex_program3 or GL_NV_fragment_program2 */
         NV3
@@ -6297,6 +6297,9 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
 
     if (lowest_disabled_stage < 7 && settings->emul_clipplanes)
         shader_addline(&buffer, "KIL fragment.texcoord[7];\n");
+
+    if (tempreg_used || settings->sRGB_write)
+        shader_addline(&buffer, "MOV tempreg, 0.0;\n");
 
     /* Generate texture sampling instructions) */
     for (stage = 0; stage < MAX_TEXTURES && settings->op[stage].cop != WINED3D_TOP_DISABLE; ++stage)

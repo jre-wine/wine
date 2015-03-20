@@ -28,8 +28,6 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 #include "winerror.h"
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -624,8 +622,9 @@ DWORD WINAPI GetTempPathW( DWORD count, LPWSTR path )
     if (count >= ret)
     {
         lstrcpynW(path, tmp_path, count);
-        /* the remaining buffer must be zeroed */
-        memset(path + ret, 0, (count - ret) * sizeof(WCHAR));
+        /* the remaining buffer must be zeroed up to 32766 bytes in XP or 32767
+         * bytes after it, we will assume the > XP behavior for now */
+        memset(path + ret, 0, (min(count, 32767) - ret) * sizeof(WCHAR));
         ret--; /* return length without 0 */
     }
     else if (count)
@@ -933,7 +932,6 @@ DWORD WINAPI SearchPathW( LPCWSTR path, LPCWSTR name, LPCWSTR ext, DWORD buflen,
             if (!search)
             {
                 SetLastError( ERROR_OUTOFMEMORY );
-                HeapFree( GetProcessHeap(), 0, dll_path );
                 return 0;
             }
             strcpyW( search, name );
