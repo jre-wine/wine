@@ -4,7 +4,7 @@ description: implement job objects
 
 --- a/dlls/ntdll/sync.c
 +++ b/dlls/ntdll/sync.c
-@@ -58,6 +58,7 @@
+@@ -56,6 +56,7 @@
  #include "wine/server.h"
  #include "wine/debug.h"
  #include "ntdll_misc.h"
@@ -12,7 +12,7 @@ description: implement job objects
  
  WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
  
-@@ -567,9 +568,36 @@ NTSTATUS WINAPI NtQueryMutant(IN HANDLE
+@@ -565,9 +566,36 @@ NTSTATUS WINAPI NtQueryMutant(IN HANDLE
   */
  NTSTATUS WINAPI NtCreateJobObject( PHANDLE handle, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
  {
@@ -52,7 +52,7 @@ description: implement job objects
  }
  
  /******************************************************************************
-@@ -588,8 +616,19 @@ NTSTATUS WINAPI NtOpenJobObject( PHANDLE
+@@ -586,8 +614,19 @@ NTSTATUS WINAPI NtOpenJobObject( PHANDLE
   */
  NTSTATUS WINAPI NtTerminateJobObject( HANDLE handle, NTSTATUS status )
  {
@@ -74,7 +74,7 @@ description: implement job objects
  }
  
  /******************************************************************************
-@@ -609,8 +648,54 @@ NTSTATUS WINAPI NtQueryInformationJobObj
+@@ -607,8 +646,54 @@ NTSTATUS WINAPI NtQueryInformationJobObj
   */
  NTSTATUS WINAPI NtSetInformationJobObject( HANDLE handle, JOBOBJECTINFOCLASS class, PVOID info, ULONG len )
  {
@@ -131,7 +131,7 @@ description: implement job objects
  }
  
  /******************************************************************************
-@@ -619,8 +704,18 @@ NTSTATUS WINAPI NtSetInformationJobObjec
+@@ -617,8 +702,18 @@ NTSTATUS WINAPI NtSetInformationJobObjec
   */
  NTSTATUS WINAPI NtIsProcessInJob( HANDLE process, HANDLE job )
  {
@@ -152,7 +152,7 @@ description: implement job objects
  }
  
  /******************************************************************************
-@@ -629,8 +724,18 @@ NTSTATUS WINAPI NtIsProcessInJob( HANDLE
+@@ -627,8 +722,18 @@ NTSTATUS WINAPI NtIsProcessInJob( HANDLE
   */
  NTSTATUS WINAPI NtAssignProcessToJobObject( HANDLE job, HANDLE process )
  {
@@ -257,7 +257,7 @@ description: implement job objects
  
  
  struct get_new_process_info_request
-@@ -5070,6 +5145,12 @@ struct set_suspend_context_reply
+@@ -5085,6 +5160,12 @@ struct set_suspend_context_reply
  enum request
  {
      REQ_new_process,
@@ -270,7 +270,7 @@ description: implement job objects
      REQ_get_new_process_info,
      REQ_new_thread,
      REQ_get_startup_info,
-@@ -5332,6 +5413,12 @@ union generic_request
+@@ -5348,6 +5429,12 @@ union generic_request
      struct request_max_size max_size;
      struct request_header request_header;
      struct new_process_request new_process_request;
@@ -283,7 +283,7 @@ description: implement job objects
      struct get_new_process_info_request get_new_process_info_request;
      struct new_thread_request new_thread_request;
      struct get_startup_info_request get_startup_info_request;
-@@ -5592,6 +5679,12 @@ union generic_reply
+@@ -5609,6 +5696,12 @@ union generic_reply
      struct request_max_size max_size;
      struct reply_header reply_header;
      struct new_process_reply new_process_reply;
@@ -741,7 +741,7 @@ description: implement job objects
  DECL_HANDLER(get_new_process_info);
  DECL_HANDLER(new_thread);
  DECL_HANDLER(get_startup_info);
-@@ -368,6 +374,12 @@ typedef void (*req_handler)( const void
+@@ -369,6 +375,12 @@ typedef void (*req_handler)( const void
  static const req_handler req_handlers[REQ_NB_REQUESTS] =
  {
      (req_handler)req_new_process,
@@ -754,7 +754,7 @@ description: implement job objects
      (req_handler)req_get_new_process_info,
      (req_handler)req_new_thread,
      (req_handler)req_get_startup_info,
-@@ -670,6 +682,27 @@ C_ASSERT( FIELD_OFFSET(struct new_proces
+@@ -672,6 +684,27 @@ C_ASSERT( FIELD_OFFSET(struct new_proces
  C_ASSERT( FIELD_OFFSET(struct new_process_reply, tid) == 20 );
  C_ASSERT( FIELD_OFFSET(struct new_process_reply, thandle) == 24 );
  C_ASSERT( sizeof(struct new_process_reply) == 32 );
@@ -834,7 +834,7 @@ description: implement job objects
  static void dump_get_new_process_info_request( const struct get_new_process_info_request *req )
  {
      fprintf( stderr, " info=%04x", req->info );
-@@ -4089,6 +4132,12 @@ static void dump_set_suspend_context_req
+@@ -4097,6 +4140,12 @@ static void dump_set_suspend_context_req
  
  static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
      (dump_func)dump_new_process_request,
@@ -847,7 +847,7 @@ description: implement job objects
      (dump_func)dump_get_new_process_info_request,
      (dump_func)dump_new_thread_request,
      (dump_func)dump_get_startup_info_request,
-@@ -4347,6 +4396,12 @@ static const dump_func req_dumpers[REQ_N
+@@ -4356,6 +4405,12 @@ static const dump_func req_dumpers[REQ_N
  
  static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
      (dump_func)dump_new_process_reply,
@@ -860,7 +860,7 @@ description: implement job objects
      (dump_func)dump_get_new_process_info_reply,
      (dump_func)dump_new_thread_reply,
      (dump_func)dump_get_startup_info_reply,
-@@ -4605,6 +4660,12 @@ static const dump_func reply_dumpers[REQ
+@@ -4615,6 +4670,12 @@ static const dump_func reply_dumpers[REQ
  
  static const char * const req_names[REQ_NB_REQUESTS] = {
      "new_process",
@@ -873,7 +873,7 @@ description: implement job objects
      "get_new_process_info",
      "new_thread",
      "get_startup_info",
-@@ -4961,7 +5022,9 @@ static const struct
+@@ -4972,7 +5033,9 @@ static const struct
      { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
      { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
      { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },

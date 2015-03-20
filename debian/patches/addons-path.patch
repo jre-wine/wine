@@ -3,7 +3,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/dlls/appwiz.cpl/addons.c
 +++ b/dlls/appwiz.cpl/addons.c
-@@ -210,8 +210,6 @@ static enum install_res install_from_uni
+@@ -209,8 +209,6 @@ static enum install_res install_from_uni
          return INSTALL_FAILED;
  
      memcpy(file_path, dir, len);
@@ -12,7 +12,7 @@ author: Michael Gilbert <mgilbert@debian.org>
      if(*subdir) {
          strcpy(file_path+len, subdir);
          len += strlen(subdir);
-@@ -309,6 +307,9 @@ static enum install_res install_from_def
+@@ -308,6 +306,9 @@ static enum install_res install_from_def
      int len;
      enum install_res ret;
  
