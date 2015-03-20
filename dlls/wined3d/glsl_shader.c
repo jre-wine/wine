@@ -116,6 +116,8 @@ struct glsl_vs_program
     GLint uniform_i_locations[MAX_CONST_I];
     GLint uniform_b_locations[MAX_CONST_B];
     GLint pos_fixup_location;
+
+    GLint modelview_matrix_location;
 };
 
 struct glsl_gs_program
@@ -773,6 +775,15 @@ static void shader_glsl_load_constants(void *shader_priv, struct wined3d_context
         shader_get_position_fixup(context, state, position_fixup);
         GL_EXTCALL(glUniform4fv(prog->vs.pos_fixup_location, 1, position_fixup));
         checkGLcall("glUniform4fv");
+    }
+
+    if (update_mask & WINED3D_SHADER_CONST_FFP_MODELVIEW)
+    {
+        struct wined3d_matrix mat;
+
+        get_modelview_matrix(context, state, &mat);
+        GL_EXTCALL(glUniformMatrix4fv(prog->vs.modelview_matrix_location, 1, FALSE, &mat._11));
+        checkGLcall("glUniformMatrix4fv");
     }
 
     if (update_mask & WINED3D_SHADER_CONST_PS_F)
@@ -4976,7 +4987,10 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct wined3d_shader_buffe
 
     shader_addline(buffer, "#version 120\n");
     shader_addline(buffer, "\n");
-    shader_addline(buffer, "void main()\n{\n");
+
+    shader_addline(buffer, "uniform mat4 ffp_modelview_matrix;\n");
+
+    shader_addline(buffer, "\nvoid main()\n{\n");
     shader_addline(buffer, "float m;\n");
     shader_addline(buffer, "vec3 r;\n");
 
@@ -4988,7 +5002,7 @@ static GLuint shader_glsl_generate_ffp_vertex_shader(struct wined3d_shader_buffe
     }
     else
     {
-        shader_addline(buffer, "vec4 ec_pos = gl_ModelViewMatrix * gl_Vertex;\n");
+        shader_addline(buffer, "vec4 ec_pos = ffp_modelview_matrix * gl_Vertex;\n");
         shader_addline(buffer, "gl_Position = gl_ProjectionMatrix * ec_pos;\n");
         if (settings->clipping)
             shader_addline(buffer, "gl_ClipVertex = ec_pos;\n");
@@ -5413,7 +5427,7 @@ static GLuint shader_glsl_generate_ffp_fragment_shader(struct wined3d_shader_buf
     shader_addline(buffer, "vec4 tmp0, tmp1;\n");
     shader_addline(buffer, "vec4 ret;\n");
     if (tempreg_used || settings->sRGB_write)
-        shader_addline(buffer, "vec4 temp_reg;\n");
+        shader_addline(buffer, "vec4 temp_reg = vec4(0.0);\n");
     shader_addline(buffer, "vec4 arg0, arg1, arg2;\n");
 
     for (stage = 0; stage < MAX_TEXTURES; ++stage)
@@ -5755,6 +5769,8 @@ static void shader_glsl_init_vs_uniform_locations(const struct wined3d_gl_info *
     }
 
     vs->pos_fixup_location = GL_EXTCALL(glGetUniformLocation(program_id, "posFixup"));
+
+    vs->modelview_matrix_location = GL_EXTCALL(glGetUniformLocation(program_id, "ffp_modelview_matrix"));
 }
 
 static void shader_glsl_init_ps_uniform_locations(const struct wined3d_gl_info *gl_info,
@@ -6054,6 +6070,10 @@ static void set_glsl_shader_program(const struct wined3d_context *context, const
 
         shader_glsl_init_uniform_block_bindings(gl_info, program_id, &vshader->reg_maps,
                 0, gl_info->limits.vertex_uniform_blocks);
+    }
+    else
+    {
+        entry->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MODELVIEW;
     }
 
     if (gshader)
@@ -6951,6 +6971,117 @@ static void glsl_vertex_pipe_shader(struct wined3d_context *context,
     context->shader_update_mask |= 1 << WINED3D_SHADER_TYPE_VERTEX;
 }
 
+static void glsl_vertex_pipe_vdecl(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id)
+{
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    BOOL transformed = context->stream_info.position_transformed;
+    BOOL wasrhw = context->last_was_rhw;
+    unsigned int i;
+
+    context->last_was_rhw = transformed;
+
+    if (!use_vs(state))
+    {
+        if (context->last_was_vshader)
+        {
+            for (i = 0; i < gl_info->limits.clipplanes; ++i)
+                clipplane(context, state, STATE_CLIPPLANE(i));
+        }
+
+        if (transformed != wasrhw)
+        {
+            if (!isStateDirty(context, STATE_TRANSFORM(WINED3D_TS_PROJECTION))
+                    && !isStateDirty(context, STATE_VIEWPORT))
+                transform_projection(context, state, STATE_TRANSFORM(WINED3D_TS_PROJECTION));
+        }
+
+        for (i = 0; i < MAX_TEXTURES; ++i)
+        {
+            if (!isStateDirty(context, STATE_TRANSFORM(WINED3D_TS_TEXTURE0 + i)))
+                transform_texture(context, state, STATE_TEXTURESTAGE(i, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS));
+        }
+
+        if (!isStateDirty(context, STATE_RENDER(WINED3D_RS_LIGHTING)))
+            state_lighting(context, state, STATE_RENDER(WINED3D_RS_LIGHTING));
+        if (!isStateDirty(context, STATE_RENDER(WINED3D_RS_NORMALIZENORMALS)))
+            state_normalize(context, state, STATE_RENDER(WINED3D_RS_NORMALIZENORMALS));
+
+        /* Because of settings->texcoords, we have to always regenerate the
+         * vertex shader on a vdecl change.
+         * TODO: Just always output all the texcoords when there are enough
+         * varyings available to drop the dependency. */
+        context->shader_update_mask |= 1 << WINED3D_SHADER_TYPE_VERTEX;
+
+        if (use_ps(state)
+                && state->shader[WINED3D_SHADER_TYPE_PIXEL]->reg_maps.shader_version.major == 1
+                && state->shader[WINED3D_SHADER_TYPE_PIXEL]->reg_maps.shader_version.minor <= 3)
+            context->shader_update_mask |= 1 << WINED3D_SHADER_TYPE_PIXEL;
+    }
+    else
+    {
+        if (!context->last_was_vshader)
+        {
+            /* Vertex shader clipping ignores the view matrix. Update all clipplanes. */
+            for (i = 0; i < gl_info->limits.clipplanes; ++i)
+                clipplane(context, state, STATE_CLIPPLANE(i));
+        }
+    }
+
+    if (transformed != wasrhw && !isStateDirty(context, STATE_RENDER(WINED3D_RS_ZENABLE)))
+        context_apply_state(context, state, STATE_RENDER(WINED3D_RS_ZENABLE));
+
+    context->last_was_vshader = use_vs(state);
+}
+
+static void glsl_vertex_pipe_vs(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id)
+{
+    context->shader_update_mask |= 1 << WINED3D_SHADER_TYPE_VERTEX;
+    /* Different vertex shaders potentially require a different vertex attributes setup. */
+    if (!isStateDirty(context, STATE_VDECL))
+        context_apply_state(context, state, STATE_VDECL);
+}
+
+static void glsl_vertex_pipe_world(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id)
+{
+    context->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MODELVIEW;
+}
+
+void glsl_vertex_pipe_view(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+{
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_light_info *light = NULL;
+    unsigned int k;
+
+    context->constant_update_mask |= WINED3D_SHADER_CONST_FFP_MODELVIEW;
+
+    for (k = 0; k < gl_info->limits.lights; ++k)
+    {
+        if (!(light = state->lights[k]))
+            continue;
+        gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_POSITION, light->lightPosn);
+        checkGLcall("glLightfv posn");
+        gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_SPOT_DIRECTION, light->lightDirn);
+        checkGLcall("glLightfv dirn");
+    }
+
+    for (k = 0; k < gl_info->limits.clipplanes; ++k)
+    {
+        if (!isStateDirty(context, STATE_CLIPPLANE(k)))
+            clipplane(context, state, STATE_CLIPPLANE(k));
+    }
+
+    if (context->swapchain->device->vertexBlendUsed)
+    {
+        static int warned;
+
+        if (!warned++)
+            FIXME("Vertex blending emulation.\n");
+    }
+}
+
 static void glsl_vertex_pipe_projection(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
@@ -6963,8 +7094,8 @@ static void glsl_vertex_pipe_projection(struct wined3d_context *context,
 
 static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
 {
-    {STATE_VDECL,                                                {STATE_VDECL,                                                vertexdeclaration      }, WINED3D_GL_EXT_NONE          },
-    {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_VDECL,                                                {STATE_VDECL,                                                glsl_vertex_pipe_vdecl }, WINED3D_GL_EXT_NONE          },
+    {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   glsl_vertex_pipe_vs    }, WINED3D_GL_EXT_NONE          },
     {STATE_MATERIAL,                                             {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    {STATE_RENDER(WINED3D_RS_SPECULARENABLE),                    state_specularenable   }, WINED3D_GL_EXT_NONE          },
     /* Clip planes */
@@ -7013,7 +7144,7 @@ static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
     /* Viewport */
     {STATE_VIEWPORT,                                             {STATE_VIEWPORT,                                             viewport_vertexpart    }, WINED3D_GL_EXT_NONE          },
     /* Transform states */
-    {STATE_TRANSFORM(WINED3D_TS_VIEW),                           {STATE_TRANSFORM(WINED3D_TS_VIEW),                           transform_view         }, WINED3D_GL_EXT_NONE          },
+    {STATE_TRANSFORM(WINED3D_TS_VIEW),                           {STATE_TRANSFORM(WINED3D_TS_VIEW),                           glsl_vertex_pipe_view  }, WINED3D_GL_EXT_NONE          },
     {STATE_TRANSFORM(WINED3D_TS_PROJECTION),                     {STATE_TRANSFORM(WINED3D_TS_PROJECTION),                     glsl_vertex_pipe_projection}, WINED3D_GL_EXT_NONE      },
     {STATE_TRANSFORM(WINED3D_TS_TEXTURE0),                       {STATE_TEXTURESTAGE(0, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_TRANSFORM(WINED3D_TS_TEXTURE1),                       {STATE_TEXTURESTAGE(1, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), NULL                   }, WINED3D_GL_EXT_NONE          },
@@ -7023,7 +7154,7 @@ static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
     {STATE_TRANSFORM(WINED3D_TS_TEXTURE5),                       {STATE_TEXTURESTAGE(5, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_TRANSFORM(WINED3D_TS_TEXTURE6),                       {STATE_TEXTURESTAGE(6, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_TRANSFORM(WINED3D_TS_TEXTURE7),                       {STATE_TEXTURESTAGE(7, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(0)),                {STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(0)),                transform_world        }, WINED3D_GL_EXT_NONE          },
+    {STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(0)),                {STATE_TRANSFORM(WINED3D_TS_WORLD_MATRIX(0)),                glsl_vertex_pipe_world }, WINED3D_GL_EXT_NONE          },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(0, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
     {STATE_TEXTURESTAGE(1, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(1, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
     {STATE_TEXTURESTAGE(2, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(2, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
@@ -7032,14 +7163,14 @@ static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
     {STATE_TEXTURESTAGE(5, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(5, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
     {STATE_TEXTURESTAGE(6, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(6, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
     {STATE_TEXTURESTAGE(7, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), {STATE_TEXTURESTAGE(7, WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS), transform_texture      }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(0, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(1, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(2, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(3, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(4, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(5, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(6, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_TEXTURESTAGE(7, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(0, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(1, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(2, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(3, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(4, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(5, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(6, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_TEXTURESTAGE(7, WINED3D_TSS_TEXCOORD_INDEX),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     /* Fog */
     {STATE_RENDER(WINED3D_RS_FOGENABLE),                         {STATE_RENDER(WINED3D_RS_FOGENABLE),                         glsl_vertex_pipe_shader}, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_FOGTABLEMODE),                      {STATE_RENDER(WINED3D_RS_FOGENABLE),                         NULL                   }, WINED3D_GL_EXT_NONE          },
@@ -7047,16 +7178,16 @@ static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
     {STATE_RENDER(WINED3D_RS_RANGEFOGENABLE),                    {STATE_RENDER(WINED3D_RS_FOGENABLE),                         NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_CLIPPING),                          {STATE_RENDER(WINED3D_RS_CLIPPING),                          state_clipping         }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_CLIPPLANEENABLE),                   {STATE_RENDER(WINED3D_RS_CLIPPING),                          NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_LIGHTING),                          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_LIGHTING),                          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_AMBIENT),                           {STATE_RENDER(WINED3D_RS_AMBIENT),                           state_ambient          }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_COLORVERTEX),                       {STATE_RENDER(WINED3D_RS_COLORVERTEX),                       glsl_vertex_pipe_shader}, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_LOCALVIEWER),                       {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_NORMALIZENORMALS),                  {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_DIFFUSEMATERIALSOURCE),             {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_SPECULARMATERIALSOURCE),            {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_AMBIENTMATERIALSOURCE),             {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_EMISSIVEMATERIALSOURCE),            {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_VERTEXBLEND),                       {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_LOCALVIEWER),                       {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_NORMALIZENORMALS),                  {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_DIFFUSEMATERIALSOURCE),             {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_SPECULARMATERIALSOURCE),            {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_AMBIENTMATERIALSOURCE),             {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_EMISSIVEMATERIALSOURCE),            {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_VERTEXBLEND),                       {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSIZE),                         {STATE_RENDER(WINED3D_RS_POINTSCALEENABLE),                  NULL                   }, WINED3D_GL_EXT_NONE          },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     state_psizemin_arb     }, ARB_POINT_PARAMETERS         },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     state_psizemin_ext     }, EXT_POINT_PARAMETERS         },
@@ -7070,8 +7201,8 @@ static const struct StateEntryTemplate glsl_vertex_pipe_vp_states[] =
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     NULL                   }, ARB_POINT_PARAMETERS         },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     NULL                   }, EXT_POINT_PARAMETERS         },
     {STATE_RENDER(WINED3D_RS_POINTSIZE_MAX),                     {STATE_RENDER(WINED3D_RS_POINTSIZE_MIN),                     NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_TWEENFACTOR),                       {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
-    {STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE),          {STATE_VDECL,                                                NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_TWEENFACTOR),                       {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
+    {STATE_RENDER(WINED3D_RS_INDEXEDVERTEXBLENDENABLE),          {STATE_SHADER(WINED3D_SHADER_TYPE_VERTEX),                   NULL                   }, WINED3D_GL_EXT_NONE          },
     /* Samplers for NP2 texture matrix adjustions. They are not needed if
      * GL_ARB_texture_non_power_of_two is supported, so register a NULL state
      * handler in that case to get the vertex part of sampler() skipped (VTF
@@ -7242,7 +7373,7 @@ static void glsl_fragment_pipe_fog(struct wined3d_context *context,
     {
         if (use_vshader)
             new_source = FOGSOURCE_VS;
-        else if (state->render_states[WINED3D_RS_FOGVERTEXMODE] == WINED3D_FOG_NONE || context->last_was_rhw)
+        else if (state->render_states[WINED3D_RS_FOGVERTEXMODE] == WINED3D_FOG_NONE || context->stream_info.position_transformed)
             new_source = FOGSOURCE_COORD;
         else
             new_source = FOGSOURCE_FFP;
@@ -7259,6 +7390,13 @@ static void glsl_fragment_pipe_fog(struct wined3d_context *context,
     }
 }
 
+static void glsl_fragment_pipe_vdecl(struct wined3d_context *context,
+        const struct wined3d_state *state, DWORD state_id)
+{
+    if (!isStateDirty(context, STATE_RENDER(WINED3D_RS_FOGENABLE)))
+        glsl_fragment_pipe_fog(context, state, state_id);
+}
+
 static void glsl_fragment_pipe_tex_transform(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id)
 {
@@ -7273,6 +7411,7 @@ static void glsl_fragment_pipe_invalidate_constants(struct wined3d_context *cont
 
 static const struct StateEntryTemplate glsl_fragment_pipe_state_template[] =
 {
+    {STATE_VDECL,                                               {STATE_VDECL,                                                glsl_fragment_pipe_vdecl               }, WINED3D_GL_EXT_NONE },
     {STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),                    {STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),                     glsl_fragment_pipe_invalidate_constants}, WINED3D_GL_EXT_NONE },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_COLOR_OP),               {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),                    NULL                                   }, WINED3D_GL_EXT_NONE },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_COLOR_ARG1),             {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),                    NULL                                   }, WINED3D_GL_EXT_NONE },

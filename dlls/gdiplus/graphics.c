@@ -360,13 +360,17 @@ static GpStatus alpha_blend_bmp_pixels(GpGraphics *graphics, INT dst_x, INT dst_
     GpBitmap *dst_bitmap = (GpBitmap*)graphics->image;
     INT x, y;
 
-    for (x=0; x<src_width; x++)
+    for (y=0; y<src_height; y++)
     {
-        for (y=0; y<src_height; y++)
+        for (x=0; x<src_width; x++)
         {
             ARGB dst_color, src_color;
-            GdipBitmapGetPixel(dst_bitmap, x+dst_x, y+dst_y, &dst_color);
             src_color = ((ARGB*)(src + src_stride * y))[x];
+
+            if (!(src_color & 0xff000000))
+                continue;
+
+            GdipBitmapGetPixel(dst_bitmap, x+dst_x, y+dst_y, &dst_color);
             GdipBitmapSetPixel(dst_bitmap, x+dst_x, y+dst_y, color_over(dst_color, src_color));
         }
     }
@@ -5709,7 +5713,7 @@ GpStatus WINGDIPAPI GdipGetDC(GpGraphics *graphics, HDC *hdc)
     {
         stat = METAFILE_GetDC((GpMetafile*)graphics->image, hdc);
     }
-    else if (!graphics->hdc || graphics->alpha_hdc ||
+    else if (!graphics->hdc ||
         (graphics->image && graphics->image->type == ImageTypeBitmap && ((GpBitmap*)graphics->image)->format & PixelFormatAlpha))
     {
         /* Create a fake HDC and fill it with a constant color. */

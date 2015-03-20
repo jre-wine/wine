@@ -386,7 +386,7 @@ static void release_async_io( struct ws2_async_io *io )
     {
         struct ws2_async_io *next = async_io_freelist;
         io->next = next;
-        if (interlocked_cmpxchg_ptr( (void **)&async_io_freelist, io, next ) == next) return;
+        if (InterlockedCompareExchangePointer( (void **)&async_io_freelist, io, next ) == next) return;
     }
 }
 
@@ -394,7 +394,7 @@ static struct ws2_async_io *alloc_async_io( DWORD size )
 {
     /* first free remaining previous fileinfos */
 
-    struct ws2_async_io *io = interlocked_xchg_ptr( (void **)&async_io_freelist, NULL );
+    struct ws2_async_io *io = InterlockedExchangePointer( (void **)&async_io_freelist, NULL );
 
     while (io)
     {
@@ -2078,8 +2078,6 @@ static NTSTATUS WS2_async_accept_recv( void *user, IO_STATUS_BLOCK *iosb,
     if (status == STATUS_PENDING)
         return status;
 
-    if (wsa->user_overlapped->hEvent)
-        NtSetEvent(wsa->user_overlapped->hEvent, NULL);
     if (wsa->cvalue)
         WS_AddCompletion( HANDLE2SOCKET(wsa->listen_socket), wsa->cvalue, iosb->u.Status, iosb->Information );
 
@@ -2146,6 +2144,7 @@ static NTSTATUS WS2_async_accept( void *user, IO_STATUS_BLOCK *iosb,
     {
         req->type           = ASYNC_TYPE_READ;
         req->async.handle   = wine_server_obj_handle( wsa->accept_socket );
+        req->async.event    = wine_server_obj_handle( wsa->user_overlapped->hEvent );
         req->async.callback = wine_server_client_ptr( WS2_async_accept_recv );
         req->async.iosb     = wine_server_client_ptr( iosb );
         req->async.arg      = wine_server_client_ptr( wsa );
@@ -2163,9 +2162,6 @@ static NTSTATUS WS2_async_accept( void *user, IO_STATUS_BLOCK *iosb,
 finish:
     iosb->u.Status = status;
     iosb->Information = 0;
-
-    if (wsa->user_overlapped->hEvent)
-        NtSetEvent(wsa->user_overlapped->hEvent, NULL);
 
     if (wsa->read) release_async_io( &wsa->read->io );
     release_async_io( &wsa->io );
@@ -2344,7 +2340,7 @@ static int WS2_register_async_shutdown( SOCKET s, int type )
     struct ws2_async_shutdown *wsa;
     NTSTATUS status;
 
-    TRACE("s %04lx type %d\n", s, type);
+    TRACE("socket %04lx type %d\n", s, type);
 
     wsa = (struct ws2_async_shutdown *)alloc_async_io( sizeof(*wsa) );
     if ( !wsa )
@@ -2434,9 +2430,8 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
     DWORD status;
     struct ws2_accept_async *wsa;
     int fd;
-    ULONG_PTR cvalue = (overlapped && ((ULONG_PTR)overlapped->hEvent & 1) == 0) ? (ULONG_PTR)overlapped : 0;
 
-    TRACE("(%lx, %lx, %p, %d, %d, %d, %p, %p)\n", listener, acceptor, dest, dest_len, local_addr_len,
+    TRACE("(%04lx, %04lx, %p, %d, %d, %d, %p, %p)\n", listener, acceptor, dest, dest_len, local_addr_len,
                                                   rem_addr_len, received, overlapped);
 
     if (!dest)
@@ -2483,7 +2478,7 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
     wsa->listen_socket   = SOCKET2HANDLE(listener);
     wsa->accept_socket   = SOCKET2HANDLE(acceptor);
     wsa->user_overlapped = overlapped;
-    wsa->cvalue          = cvalue;
+    wsa->cvalue          = !((ULONG_PTR)overlapped->hEvent & 1) ? (ULONG_PTR)overlapped : 0;
     wsa->buf             = dest;
     wsa->data_len        = dest_len;
     wsa->local_len       = local_addr_len;
@@ -2518,11 +2513,11 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
     {
         req->type           = ASYNC_TYPE_READ;
         req->async.handle   = wine_server_obj_handle( SOCKET2HANDLE(listener) );
+        req->async.event    = wine_server_obj_handle( overlapped->hEvent );
         req->async.callback = wine_server_client_ptr( WS2_async_accept );
         req->async.iosb     = wine_server_client_ptr( overlapped );
         req->async.arg      = wine_server_client_ptr( wsa );
-        req->async.cvalue   = cvalue;
-        /* We don't set event since we may also have to read */
+        req->async.cvalue   = wsa->cvalue;
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -3032,7 +3027,7 @@ int WINAPI WS_getpeername(SOCKET s, struct WS_sockaddr *name, int *namelen)
     int fd;
     int res;
 
-    TRACE("socket: %04lx, ptr %p, len %08x\n", s, name, namelen ? *namelen : 0);
+    TRACE("socket %04lx, ptr %p, len %08x\n", s, name, namelen ? *namelen : 0);
 
     fd = get_sock_fd( s, 0, NULL );
     res = SOCKET_ERROR;
@@ -3070,7 +3065,7 @@ int WINAPI WS_getsockname(SOCKET s, struct WS_sockaddr *name, int *namelen)
     int fd;
     int res;
 
-    TRACE("socket: %04lx, ptr %p, len %08x\n", s, name, namelen ? *namelen : 0);
+    TRACE("socket %04lx, ptr %p, len %08x\n", s, name, namelen ? *namelen : 0);
 
     /* Check if what we've received is valid. Should we use IsBadReadPtr? */
     if( (name == NULL) || (namelen == NULL) )
@@ -3119,7 +3114,7 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
     int fd;
     INT ret = 0;
 
-    TRACE("socket: %04lx, level 0x%x, name 0x%x, ptr %p, len %d\n",
+    TRACE("socket %04lx, level 0x%x, name 0x%x, ptr %p, len %d\n",
           s, level, optname, optval, optlen ? *optlen : 0);
 
     switch(level)
@@ -3943,7 +3938,7 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
              * because BSD returns TRUE if it's in the OOB mark
              * while Windows returns TRUE if there are NO OOB bytes.
              */
-            (*(WS_u_long *) out_buff) = oob | !atmark;
+            (*(WS_u_long *) out_buff) = oob || !atmark;
         }
 
         release_sock_fd( s, fd );
@@ -4902,7 +4897,7 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
     struct linger linger;
     struct timeval tval;
 
-    TRACE("socket: %04lx, level 0x%x, name 0x%x, ptr %p, len %d\n",
+    TRACE("socket %04lx, level 0x%x, name 0x%x, ptr %p, len %d\n",
           s, level, optname, optval, optlen);
 
     /* some broken apps pass the value directly instead of a pointer to it */
@@ -6061,16 +6056,35 @@ struct WS_servent* WINAPI WS_getservbyport(int port, const char *proto)
  */
 int WINAPI WS_gethostname(char *name, int namelen)
 {
+    char buf[256];
+    int len;
+
     TRACE("name %p, len %d\n", name, namelen);
 
-    if (gethostname(name, namelen) == 0)
+    if (!name)
     {
-        TRACE("<- '%s'\n", name);
-        return 0;
+        SetLastError(WSAEFAULT);
+        return SOCKET_ERROR;
     }
-    SetLastError((errno == EINVAL) ? WSAEFAULT : wsaErrno());
-    TRACE("<- ERROR !\n");
-    return SOCKET_ERROR;
+
+    if (gethostname(buf, sizeof(buf)) != 0)
+    {
+        SetLastError(wsaErrno());
+        return SOCKET_ERROR;
+    }
+
+    TRACE("<- '%s'\n", buf);
+    len = strlen(buf);
+    if (len > 15)
+        WARN("Windows supports NetBIOS name length up to 15 bytes!\n");
+    if (namelen <= len)
+    {
+        SetLastError(WSAEFAULT);
+        WARN("<- not enough space for hostname, required %d, got %d!\n", len + 1, namelen);
+        return SOCKET_ERROR;
+    }
+    strcpy(name, buf);
+    return 0;
 }
 
 
@@ -6087,7 +6101,7 @@ int WINAPI WSAEnumNetworkEvents(SOCKET s, WSAEVENT hEvent, LPWSANETWORKEVENTS lp
     int i;
     int errors[FD_MAX_EVENTS];
 
-    TRACE("%08lx, hEvent %p, lpEvent %p\n", s, hEvent, lpEvent );
+    TRACE("%04lx, hEvent %p, lpEvent %p\n", s, hEvent, lpEvent );
 
     SERVER_START_REQ( get_socket_event )
     {
@@ -6115,7 +6129,7 @@ int WINAPI WSAEventSelect(SOCKET s, WSAEVENT hEvent, LONG lEvent)
 {
     int ret;
 
-    TRACE("%08lx, hEvent %p, event %08x\n", s, hEvent, lEvent);
+    TRACE("%04lx, hEvent %p, event %08x\n", s, hEvent, lEvent);
 
     SERVER_START_REQ( set_socket_event )
     {
@@ -6184,7 +6198,7 @@ INT WINAPI WSAAsyncSelect(SOCKET s, HWND hWnd, UINT uMsg, LONG lEvent)
 {
     int ret;
 
-    TRACE("%lx, hWnd %p, uMsg %08x, event %08x\n", s, hWnd, uMsg, lEvent);
+    TRACE("%04lx, hWnd %p, uMsg %08x, event %08x\n", s, hWnd, uMsg, lEvent);
 
     SERVER_START_REQ( set_socket_event )
     {
@@ -6372,8 +6386,8 @@ SOCKET WINAPI WSASocketW(int af, int type, int protocol,
         req->type       = unixtype;
         req->protocol   = protocol;
         req->access     = GENERIC_READ|GENERIC_WRITE|SYNCHRONIZE;
-        req->attributes = OBJ_INHERIT;
-        req->flags      = dwFlags;
+        req->attributes = (dwFlags & WSA_FLAG_NO_HANDLE_INHERIT) ? 0 : OBJ_INHERIT;
+        req->flags      = dwFlags & ~WSA_FLAG_NO_HANDLE_INHERIT;
         set_error( wine_server_call( req ) );
         ret = HANDLE2SOCKET( wine_server_ptr_handle( reply->handle ));
     }
@@ -6918,7 +6932,7 @@ SOCKET WINAPI WSAAccept( SOCKET s, struct WS_sockaddr *addr, LPINT addrlen,
        SOCKET cs;
        SOCKADDR src_addr, dst_addr;
 
-       TRACE("Socket %04lx, sockaddr %p, addrlen %p, fnCondition %p, dwCallbackData %ld\n",
+       TRACE("socket %04lx, sockaddr %p, addrlen %p, fnCondition %p, dwCallbackData %ld\n",
                s, addr, addrlen, lpfnCondition, dwCallbackData);
 
        cs = WS_accept(s, addr, addrlen);
@@ -7558,7 +7572,7 @@ INT WINAPI WSALookupServiceNextW( HANDLE lookup, DWORD flags, LPDWORD len, LPWSA
  */
 INT WINAPI WSANtohl( SOCKET s, WS_u_long netlong, WS_u_long* lphostlong )
 {
-    TRACE( "(0x%04lx 0x%08x %p)\n", s, netlong, lphostlong );
+    TRACE( "(%04lx 0x%08x %p)\n", s, netlong, lphostlong );
 
     if (!lphostlong) return WSAEFAULT;
 
@@ -7571,7 +7585,7 @@ INT WINAPI WSANtohl( SOCKET s, WS_u_long netlong, WS_u_long* lphostlong )
  */
 INT WINAPI WSANtohs( SOCKET s, WS_u_short netshort, WS_u_short* lphostshort )
 {
-    TRACE( "(0x%04lx 0x%08x %p)\n", s, netshort, lphostshort );
+    TRACE( "(%04lx 0x%08x %p)\n", s, netshort, lphostshort );
 
     if (!lphostshort) return WSAEFAULT;
 
@@ -7594,7 +7608,7 @@ INT WINAPI WSAProviderConfigChange( LPHANDLE handle, LPWSAOVERLAPPED overlapped,
  */
 INT WINAPI WSARecvDisconnect( SOCKET s, LPWSABUF disconnectdata )
 {
-    TRACE( "(0x%04lx %p)\n", s, disconnectdata );
+    TRACE( "(%04lx %p)\n", s, disconnectdata );
 
     return WS_shutdown( s, SD_RECEIVE );
 }

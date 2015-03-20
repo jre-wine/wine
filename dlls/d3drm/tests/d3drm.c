@@ -1,6 +1,7 @@
 /*
  * Copyright 2010, 2012 Christian Costa
  * Copyright 2012 André Hentschel
+ * Copyright 2011-2014 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,39 +26,12 @@
 
 #include "wine/test.h"
 
-static HMODULE d3drm_handle = 0;
-
-static HRESULT (WINAPI * pDirect3DRMCreate)(IDirect3DRM **d3drm);
-
 #define CHECK_REFCOUNT(obj,rc) \
     { \
         int rc_new = rc; \
         int count = get_refcount( (IUnknown *)obj ); \
         ok(count == rc_new, "Invalid refcount. Expected %d got %d\n", rc_new, count); \
     }
-
-#define D3DRM_GET_PROC(func) \
-    p ## func = (void*)GetProcAddress(d3drm_handle, #func); \
-    if(!p ## func) { \
-      trace("GetProcAddress(%s) failed\n", #func); \
-      FreeLibrary(d3drm_handle); \
-      return FALSE; \
-    }
-
-static BOOL InitFunctionPtrs(void)
-{
-    d3drm_handle = LoadLibraryA("d3drm.dll");
-
-    if(!d3drm_handle)
-    {
-        skip("Could not load d3drm.dll\n");
-        return FALSE;
-    }
-
-    D3DRM_GET_PROC(Direct3DRMCreate)
-
-    return TRUE;
-}
 
 static int get_refcount(IUnknown *object)
 {
@@ -241,7 +215,7 @@ static void test_MeshBuilder(void)
     D3DCOLOR color;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateMeshBuilder(d3drm, &pMeshBuilder);
@@ -537,7 +511,7 @@ static void test_MeshBuilder3(void)
     DWORD size;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     if (FAILED(hr = IDirect3DRM_QueryInterface(d3drm, &IID_IDirect3DRM3, (void **)&d3drm3)))
@@ -643,7 +617,7 @@ static void test_Mesh(void)
     DWORD size;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateMesh(d3drm, &mesh);
@@ -684,7 +658,7 @@ static void test_Face(void)
     CHAR cname[64] = {0};
     int icount;
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateFace(d3drm, &face1);
@@ -924,7 +898,7 @@ static void test_Frame(void)
     DWORD count;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateFrame(d3drm, NULL, &pFrameC);
@@ -1256,7 +1230,7 @@ static void test_Viewport(void)
     window = CreateWindowA("static", "d3drm_test", WS_OVERLAPPEDWINDOW, 0, 0, 300, 200, 0, 0, 0, 0);
     GetClientRect(window, &rc);
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = DirectDrawCreateClipper(0, &pClipper, NULL);
@@ -1307,7 +1281,7 @@ static void test_Light(void)
     DWORD size;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateLightRGB(d3drm, D3DRMLIGHT_SPOT, 0.5, 0.5, 0.5, &light);
@@ -1362,7 +1336,7 @@ static void test_Material2(void)
     DWORD size;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     if (FAILED(hr = IDirect3DRM_QueryInterface(d3drm, &IID_IDirect3DRM3, (void **)&d3drm3)))
@@ -1446,7 +1420,7 @@ static void test_Texture(void)
     DWORD size;
     CHAR cname[64] = {0};
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     initimg.buffer1 = &pixel;
@@ -1487,7 +1461,7 @@ static void test_Device(void)
     window = CreateWindowA("static", "d3drm_test", WS_OVERLAPPEDWINDOW, 0, 0, 300, 200, 0, 0, 0, 0);
     GetClientRect(window, &rc);
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = DirectDrawCreateClipper(0, &pClipper, NULL);
@@ -1550,7 +1524,7 @@ static void test_frame_transform(void)
     IDirect3DRMFrame *frame;
     D3DRMMATRIX4D matrix;
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     hr = IDirect3DRM_CreateFrame(d3drm, NULL, &frame);
@@ -1588,7 +1562,7 @@ static void test_d3drm_load(void)
     D3DRMLOADMEMORY info;
     const GUID* req_refiids[] = { &IID_IDirect3DRMMeshBuilder, &IID_IDirect3DRMFrame, &IID_IDirect3DRMMaterial };
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
 
     info.lpMemory = data_d3drm_load;
@@ -1664,7 +1638,7 @@ static void test_frame_mesh_materials(void)
     IDirect3DRMTexture *texture;
     int i;
 
-    hr = pDirect3DRMCreate(&d3drm);
+    hr = Direct3DRMCreate(&d3drm);
     ok(hr == D3DRM_OK, "Direct3DRMCreate returned %x\n", hr);
 
     info.lpMemory = data_frame_mesh_materials;
@@ -1726,11 +1700,149 @@ static void test_frame_mesh_materials(void)
     IDirect3DRM_Release(d3drm);
 }
 
+struct qi_test
+{
+    REFIID iid;
+    REFIID refcount_iid;
+    HRESULT hr;
+    BOOL refcount_todo;
+};
+
+static void test_qi(const char *test_name, IUnknown *base_iface,
+                    REFIID refcount_iid, const struct qi_test *tests, UINT entry_count)
+{
+    ULONG refcount, expected_refcount;
+    IUnknown *iface1, *iface2;
+    HRESULT hr;
+    UINT i, j;
+
+    for (i = 0; i < entry_count; ++i)
+    {
+        hr = IUnknown_QueryInterface(base_iface, tests[i].iid, (void **)&iface1);
+        ok(hr == tests[i].hr, "Got hr %#x for test \"%s\" %u.\n", hr, test_name, i);
+        if (SUCCEEDED(hr))
+        {
+            for (j = 0; j < entry_count; ++j)
+            {
+                hr = IUnknown_QueryInterface(iface1, tests[j].iid, (void **)&iface2);
+                ok(hr == tests[j].hr, "Got hr %#x for test \"%s\" %u, %u.\n", hr, test_name, i, j);
+                if (SUCCEEDED(hr))
+                {
+                    expected_refcount = 0;
+                    if (IsEqualGUID(refcount_iid, tests[j].refcount_iid))
+                        ++expected_refcount;
+                    if (IsEqualGUID(tests[i].refcount_iid, tests[j].refcount_iid))
+                        ++expected_refcount;
+                    refcount = IUnknown_Release(iface2);
+                    if (tests[i].refcount_todo || tests[j].refcount_todo)
+                        todo_wine ok(refcount == expected_refcount, "Got refcount %u for test \"%s\" %u, %u, expected %u.\n",
+                                     refcount, test_name, i, j, expected_refcount);
+                    else
+                        ok(refcount == expected_refcount, "Got refcount %u for test \"%s\" %u, %u, expected %u.\n",
+                                     refcount, test_name, i, j, expected_refcount);
+                }
+            }
+
+            expected_refcount = 0;
+            if (IsEqualGUID(refcount_iid, tests[i].refcount_iid))
+                ++expected_refcount;
+            refcount = IUnknown_Release(iface1);
+            if (tests[i].refcount_todo)
+                todo_wine ok(refcount == expected_refcount, "Got refcount %u for test \"%s\" %u, expected %u.\n",
+                             refcount, test_name, i, expected_refcount);
+            else
+                ok(refcount == expected_refcount, "Got refcount %u for test \"%s\" %u, expected %u.\n",
+                             refcount, test_name, i, expected_refcount);
+        }
+    }
+}
+
+static void test_d3drm_qi(void)
+{
+    static const struct qi_test tests[] =
+    {
+        { &IID_IDirect3DRM3,               &IID_IDirect3DRM3,      S_OK,                            TRUE  },
+        { &IID_IDirect3DRM2,               &IID_IDirect3DRM2,      S_OK,                            TRUE  },
+        { &IID_IDirect3DRM,                &IID_IDirect3DRM,       S_OK,                            FALSE },
+        { &IID_IDirect3DRMDevice,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMObject,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMObject2,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMDevice2,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMDevice3,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMViewport,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMViewport2,       NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFrame,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFrame2,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFrame3,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMVisual,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMesh,            NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMeshBuilder,     NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMeshBuilder2,    NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMeshBuilder3,    NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFace,            NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFace2,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMLight,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMTexture,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMTexture2,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMTexture3,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMWrap,            NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMaterial,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMMaterial2,       NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMAnimation,       NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMAnimation2,      NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMAnimationSet,    NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMAnimationSet2,   NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMObjectArray,     NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMDeviceArray,     NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMViewportArray,   NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFrameArray,      NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMVisualArray,     NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMLightArray,      NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMPickedArray,     NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMFaceArray,       NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMAnimationArray,  NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMUserVisual,      NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMShadow,          NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMShadow2,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMInterpolator,    NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMProgressiveMesh, NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMPicked2Array,    NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DRMClippedVisual,   NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawClipper,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawSurface7,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawSurface4,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawSurface3,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawSurface2,        NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDrawSurface,         NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DDevice7,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DDevice3,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DDevice2,           NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DDevice,            NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3D7,                 NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3D3,                 NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3D2,                 NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3D,                  NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDraw7,               NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDraw4,               NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDraw3,               NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDraw2,               NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirectDraw,                NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IDirect3DLight,             NULL,                   CLASS_E_CLASSNOTAVAILABLE,       FALSE },
+        { &IID_IUnknown,                   &IID_IDirect3DRM,       S_OK,                            FALSE },
+    };
+    HRESULT hr;
+    IDirect3DRM *d3drm;
+
+    hr = Direct3DRMCreate(&d3drm);
+    ok(hr == D3DRM_OK, "Cannot get IDirect3DRM interface (hr = %x)\n", hr);
+
+    test_qi("d3drm_qi", (IUnknown *)d3drm, &IID_IDirect3DRM, tests, sizeof(tests) / sizeof(*tests));
+
+    IDirect3DRM_Release(d3drm);
+}
+
 START_TEST(d3drm)
 {
-    if (!InitFunctionPtrs())
-        return;
-
     test_MeshBuilder();
     test_MeshBuilder3();
     test_Mesh();
@@ -1744,6 +1856,5 @@ START_TEST(d3drm)
     test_frame_transform();
     test_d3drm_load();
     test_frame_mesh_materials();
-
-    FreeLibrary(d3drm_handle);
+    test_d3drm_qi();
 }

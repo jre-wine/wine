@@ -45,7 +45,6 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
-#define NONAMELESSSTRUCT
 
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
@@ -2219,7 +2218,7 @@ HRESULT WINAPI CLSIDFromString(LPCOLESTR idstr, LPCLSID id )
 /******************************************************************************
  *		IIDFromString   [OLE32.@]
  *
- * Converts a interface identifier from its string representation into
+ * Converts an interface identifier from its string representation to
  * the IID struct.
  *
  * PARAMS

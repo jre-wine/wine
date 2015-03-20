@@ -1779,7 +1779,7 @@ static void test_CreateCustomFontFileReference(void)
     HRESULT hr;
     HRSRC fontrsrc;
     UINT32 codePoints[1] = {0xa8};
-    UINT16 indices[1];
+    UINT16 indices[2];
 
     factory = create_factory();
     factory2 = create_factory();
@@ -1875,6 +1875,27 @@ if (face2)
     ok(face == face2 || broken(face != face2), "got %p, %p\n", face, face2);
     IDWriteFontFace_Release(face2);
     IDWriteFontFile_Release(file2);
+
+    hr = IDWriteFontFace_GetGlyphIndices(face, NULL, 0, NULL);
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFace_GetGlyphIndices(face, codePoints, 0, NULL);
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFace_GetGlyphIndices(face, codePoints, 0, indices);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFace_GetGlyphIndices(face, NULL, 0, indices);
+    ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "got 0x%08x\n", hr);
+
+    indices[0] = indices[1] = 11;
+    hr = IDWriteFontFace_GetGlyphIndices(face, NULL, 1, indices);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(indices[0] == 0, "got index %i\n", indices[0]);
+    ok(indices[1] == 11, "got index %i\n", indices[1]);
+
+if (0) /* crashes on native */
+    hr = IDWriteFontFace_GetGlyphIndices(face, NULL, 1, NULL);
 
     hr = IDWriteFontFace_GetGlyphIndices(face, codePoints, 1, indices);
     ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -3115,6 +3136,51 @@ static void test_GetGlyphCount(void)
     DELETE_FONTFILE(path);
 }
 
+static void test_GetKerningPairAdjustments(void)
+{
+    IDWriteFontFace1 *fontface1;
+    IDWriteFontFace *fontface;
+    IDWriteFactory *factory;
+    IDWriteFontFile *file;
+    WCHAR *path;
+    HRESULT hr;
+
+    path = create_testfontfile(test_fontfile);
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateFontFileReference(factory, path, NULL, &file);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_TRUETYPE, 1, &file, 0, DWRITE_FONT_SIMULATIONS_NONE, &fontface);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteFontFile_Release(file);
+
+    hr = IDWriteFontFace_QueryInterface(fontface, &IID_IDWriteFontFace1, (void**)&fontface1);
+    if (hr == S_OK) {
+        INT32 adjustments[1];
+
+        hr = IDWriteFontFace1_GetKerningPairAdjustments(fontface1, 0, NULL, NULL);
+        ok(hr == E_INVALIDARG || broken(hr == S_OK) /* win8 */, "got 0x%08x\n", hr);
+
+    if (0) /* crashes on native */
+        hr = IDWriteFontFace1_GetKerningPairAdjustments(fontface1, 1, NULL, NULL);
+
+        adjustments[0] = 1;
+        hr = IDWriteFontFace1_GetKerningPairAdjustments(fontface1, 1, NULL, adjustments);
+        ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+        ok(adjustments[0] == 0, "got %d\n", adjustments[0]);
+
+        IDWriteFontFace1_Release(fontface1);
+    }
+    else
+        win_skip("GetKerningPairAdjustments() is not supported.\n");
+
+    IDWriteFontFace_Release(fontface);
+    IDWriteFactory_Release(factory);
+    DELETE_FONTFILE(path);
+}
+
+
 START_TEST(font)
 {
     IDWriteFactory *factory;
@@ -3155,6 +3221,7 @@ START_TEST(font)
     test_GetEudcFontCollection();
     test_GetCaretMetrics();
     test_GetGlyphCount();
+    test_GetKerningPairAdjustments();
 
     IDWriteFactory_Release(factory);
 }

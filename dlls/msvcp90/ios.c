@@ -1026,8 +1026,10 @@ basic_streambuf_char* __thiscall basic_streambuf_char_ctor(basic_streambuf_char 
 #if _MSVCP_VER <= 100
     mutex_ctor(&this->lock);
 #endif
+#if _MSVCP_VER >= 70
     this->loc = MSVCRT_operator_new(sizeof(locale));
-    locale_ctor(this->loc);
+#endif
+    locale_ctor(IOS_LOCALE(this));
     basic_streambuf_char__Init_empty(this);
 
     return this;
@@ -1043,8 +1045,10 @@ void __thiscall basic_streambuf_char_dtor(basic_streambuf_char *this)
 #if _MSVCP_VER <= 100
     mutex_dtor(&this->lock);
 #endif
-    locale_dtor(this->loc);
+    locale_dtor(IOS_LOCALE(this));
+#if _MSVCP_VER >= 70
     MSVCRT_operator_delete(this->loc);
+#endif
 }
 
 DEFINE_THISCALL_WRAPPER(basic_streambuf_char_vector_dtor, 8)
@@ -1319,7 +1323,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_char_getloc, 8)
 locale* __thiscall basic_streambuf_char_getloc(const basic_streambuf_char *this, locale *ret)
 {
     TRACE("(%p)\n", this);
-    return locale_copy_ctor(ret, this->loc);
+    return locale_copy_ctor(ret, IOS_LOCALE(this));
 }
 
 /* ?imbue@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEXABVlocale@2@@Z */
@@ -1399,12 +1403,14 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_char_pubimbue, 12)
 locale* __thiscall basic_streambuf_char_pubimbue(basic_streambuf_char *this, locale *ret, const locale *loc)
 {
     TRACE("(%p %p)\n", this, loc);
-    memcpy(ret, this->loc, sizeof(locale));
+    memcpy(ret, IOS_LOCALE(this), sizeof(locale));
     call_basic_streambuf_char_imbue(this, loc);
-    locale_copy_ctor(this->loc, loc);
+    locale_copy_ctor(IOS_LOCALE(this), loc);
     return ret;
 }
 
+/* ?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 #if STREAMOFF_BITS == 64
@@ -1431,6 +1437,10 @@ fpos_int* __thiscall basic_streambuf_char_seekoff(basic_streambuf_char *this,
 
 /* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@JHH@Z */
 /* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QEAA?AV?$fpos@H@2@_JHH@Z */
+/* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@JFF@Z */
+/* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QEAA?AV?$fpos@H@2@_JFF@Z */
+/* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?pubseekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 #if STREAMOFF_BITS == 64
 DEFINE_THISCALL_WRAPPER(basic_streambuf_char_pubseekoff, 24)
 #else
@@ -1864,8 +1874,10 @@ basic_streambuf_wchar* __thiscall basic_streambuf_wchar_ctor(basic_streambuf_wch
 #if _MSVCP_VER <= 100
     mutex_ctor(&this->lock);
 #endif
+#if _MSVCP_VER >= 70
     this->loc = MSVCRT_operator_new(sizeof(locale));
-    locale_ctor(this->loc);
+#endif
+    locale_ctor(IOS_LOCALE(this));
     basic_streambuf_wchar__Init_empty(this);
 
     return this;
@@ -1894,8 +1906,10 @@ void __thiscall basic_streambuf_wchar_dtor(basic_streambuf_wchar *this)
 #if _MSVCP_VER <= 100
     mutex_dtor(&this->lock);
 #endif
-    locale_dtor(this->loc);
+    locale_dtor(IOS_LOCALE(this));
+#if _MSVCP_VER >= 70
     MSVCRT_operator_delete(this->loc);
+#endif
 }
 
 DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_vector_dtor, 8)
@@ -2198,7 +2212,7 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_getloc, 8)
 locale* __thiscall basic_streambuf_wchar_getloc(const basic_streambuf_wchar *this, locale *ret)
 {
     TRACE("(%p)\n", this);
-    return locale_copy_ctor(ret, this->loc);
+    return locale_copy_ctor(ret, IOS_LOCALE(this));
 }
 
 /* ?imbue@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAEXABVlocale@2@@Z */
@@ -2292,12 +2306,14 @@ DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_pubimbue, 12)
 locale* __thiscall basic_streambuf_wchar_pubimbue(basic_streambuf_wchar *this, locale *ret, const locale *loc)
 {
     TRACE("(%p %p)\n", this, loc);
-    memcpy(ret, this->loc, sizeof(locale));
+    memcpy(ret, IOS_LOCALE(this), sizeof(locale));
     call_basic_streambuf_wchar_imbue(this, loc);
-    locale_copy_ctor(this->loc, loc);
+    locale_copy_ctor(IOS_LOCALE(this), loc);
     return ret;
 }
 
+/* ?seekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 /* ?seekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
@@ -2328,6 +2344,10 @@ fpos_int* __thiscall basic_streambuf_wchar_seekoff(basic_streambuf_wchar *this,
 /* ?pubseekoff@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@QEAA?AV?$fpos@H@2@_JHH@Z */
 /* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QAE?AV?$fpos@H@2@JHH@Z */
 /* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QEAA?AV?$fpos@H@2@_JHH@Z */
+/* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QAE?AV?$fpos@H@2@JFF@Z */
+/* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QEAA?AV?$fpos@H@2@_JFF@Z */
+/* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?pubseekoff@?$basic_streambuf@GU?$char_traits@G@std@@@std@@QEAA?AV?$fpos@H@2@_JW4seekdir@ioos_base@2@H@Z */
 #if STREAMOFF_BITS == 64
 DEFINE_THISCALL_WRAPPER(basic_streambuf_wchar_pubseekoff, 24)
 #else
@@ -2980,7 +3000,7 @@ basic_filebuf_char* __thiscall basic_filebuf_char_open_wchar(basic_filebuf_char 
         return NULL;
 
     basic_filebuf_char__Init(this, f, INITFL_open);
-    basic_filebuf_char__Initcvt(this, codecvt_char_use_facet(this->base.loc));
+    basic_filebuf_char__Initcvt(this, codecvt_char_use_facet(IOS_LOCALE(&this->base)));
     return this;
 }
 
@@ -3174,6 +3194,8 @@ int __thiscall basic_filebuf_char_underflow(basic_filebuf_char *this)
     return ret;
 }
 
+/* ?seekoff@?$basic_filebuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_filebuf@DU?$char_traits@D@std@@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_filebuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_filebuf@DU?$char_traits@D@std@@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 #if STREAMOFF_BITS == 64
@@ -3528,7 +3550,7 @@ basic_filebuf_wchar* __thiscall basic_filebuf_wchar_open_wchar(basic_filebuf_wch
         return NULL;
 
     basic_filebuf_wchar__Init(this, f, INITFL_open);
-    basic_filebuf_wchar__Initcvt(this, codecvt_wchar_use_facet(this->base.loc));
+    basic_filebuf_wchar__Initcvt(this, codecvt_wchar_use_facet(IOS_LOCALE(&this->base)));
     return this;
 }
 
@@ -3550,7 +3572,7 @@ basic_filebuf_wchar* __thiscall basic_filebuf_short_open_wchar(basic_filebuf_wch
         return NULL;
 
     basic_filebuf_short__Init(this, f, INITFL_open);
-    basic_filebuf_wchar__Initcvt(this, codecvt_short_use_facet(this->base.loc));
+    basic_filebuf_wchar__Initcvt(this, codecvt_short_use_facet(IOS_LOCALE(&this->base)));
     return this;
 }
 
@@ -3791,6 +3813,8 @@ unsigned short __thiscall basic_filebuf_wchar_underflow(basic_filebuf_wchar *thi
     return ret;
 }
 
+/* ?seekoff@?$basic_filebuf@GU?$char_traits@G@std@@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_filebuf@GU?$char_traits@G@std@@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_filebuf@_WU?$char_traits@_W@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_filebuf@_WU?$char_traits@_W@std@@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 /* ?seekoff@?$basic_filebuf@GU?$char_traits@G@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z */
@@ -3939,6 +3963,8 @@ void __thiscall basic_filebuf_short_imbue(basic_filebuf_wchar *this, const local
 
 /* ?_Getstate@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AAEHH@Z */
 /* ?_Getstate@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEAAHH@Z */
+/* ?_Mode@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AAEHH@Z */
+/* ?_Mode@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@AEAAHH@Z */
 DEFINE_THISCALL_WRAPPER(basic_stringbuf_char__Getstate, 8)
 int __thiscall basic_stringbuf_char__Getstate(basic_stringbuf_char *this, IOSB_openmode mode)
 {
@@ -4191,6 +4217,8 @@ int __thiscall basic_stringbuf_char_underflow(basic_stringbuf_char *this)
     return EOF;
 }
 
+/* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_stringbuf@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 #if STREAMOFF_BITS == 64
@@ -4310,6 +4338,8 @@ basic_string_char* __thiscall basic_stringbuf_char_str_get(const basic_stringbuf
 /* ?_Getstate@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@AEAAHH@Z */
 /* ?_Getstate@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AAEHH@Z */
 /* ?_Getstate@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AEAAHH@Z */
+/* ?_Mode@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AAEHH@Z */
+/* ?_Mode@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@AEAAHH@Z */
 DEFINE_THISCALL_WRAPPER(basic_stringbuf_wchar__Getstate, 8)
 int __thiscall basic_stringbuf_wchar__Getstate(basic_stringbuf_wchar *this, IOSB_openmode mode)
 {
@@ -4604,6 +4634,8 @@ unsigned short __thiscall basic_stringbuf_wchar_underflow(basic_stringbuf_wchar 
     return WEOF;
 }
 
+/* ?seekoff@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@?$basic_stringbuf@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 /* ?seekoff@?$basic_stringbuf@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@MAE?AV?$fpos@H@2@JHH@Z */
@@ -4763,7 +4795,7 @@ void __thiscall ios_base_Callfns(ios_base *this, IOS_BASE_event event)
 
 /* ?_Tidy@ios_base@std@@AAAXXZ */
 /* ?_Tidy@ios_base@std@@AEAAXXZ */
-void CDECL ios_base_Tidy(ios_base *this)
+void __cdecl ios_base_Tidy(ios_base *this)
 {
     IOS_BASE_iosarray *arr_cur, *arr_next;
     IOS_BASE_fnarray *event_cur, *event_next;
@@ -4787,13 +4819,13 @@ void CDECL ios_base_Tidy(ios_base *this)
 
 /* ?_Ios_base_dtor@ios_base@std@@CAXPAV12@@Z */
 /* ?_Ios_base_dtor@ios_base@std@@CAXPEAV12@@Z */
-void CDECL ios_base_Ios_base_dtor(ios_base *obj)
+void __cdecl ios_base_Ios_base_dtor(ios_base *obj)
 {
     TRACE("(%p)\n", obj);
-    if(obj->loc) {
-        locale_dtor(obj->loc);
-        MSVCRT_operator_delete(obj->loc);
-    }
+    locale_dtor(IOS_LOCALE(obj));
+#if _MSVCP_VER >= 70
+    MSVCRT_operator_delete(obj->loc);
+#endif
     ios_base_Tidy(obj);
 }
 
@@ -4994,7 +5026,7 @@ ios_base* __thiscall ios_base_copyfmt(ios_base *this, const ios_base *rhs)
         this->fmtfl = rhs->fmtfl;
         this->prec = rhs->prec;
         this->wide = rhs->wide;
-        locale_operator_assign(this->loc, rhs->loc);
+        locale_operator_assign(IOS_LOCALE(this), IOS_LOCALE(rhs));
 
         for(event_cur=rhs->calls; event_cur; event_cur=event_cur->next)
             ios_base_register_callback(this, event_cur->event_handler, event_cur->index);
@@ -5060,14 +5092,14 @@ MSVCP_bool __thiscall ios_base_operator_bool(const ios_base *this)
 
 /* ?_Addstd@ios_base@std@@SAXPAV12@@Z */
 /* ?_Addstd@ios_base@std@@SAXPEAV12@@Z */
-void CDECL ios_base_Addstd(ios_base *add)
+void __cdecl ios_base_Addstd(ios_base *add)
 {
     FIXME("(%p) stub\n", add);
 }
 
 /* ?_Index_func@ios_base@std@@CAAAHXZ */
 /* ?_Index_func@ios_base@std@@CAAEAHXZ */
-int* CDECL ios_base_Index_func(void)
+int* __cdecl ios_base_Index_func(void)
 {
     TRACE("\n");
     return &ios_base_Index;
@@ -5087,13 +5119,15 @@ void __thiscall ios_base__Init(ios_base *this)
     this->wide = 0;
     this->arr = NULL;
     this->calls = NULL;
+#if _MSVCP_VER >= 70
     this->loc = MSVCRT_operator_new(sizeof(locale));
-    locale_ctor(this->loc);
+#endif
+    locale_ctor(IOS_LOCALE(this));
 }
 
 /* ?_Sync_func@ios_base@std@@CAAA_NXZ */
 /* ?_Sync_func@ios_base@std@@CAAEA_NXZ */
-MSVCP_bool* CDECL ios_base_Sync_func(void)
+MSVCP_bool* __cdecl ios_base_Sync_func(void)
 {
     TRACE("\n");
     return &ios_base_Sync;
@@ -5145,7 +5179,7 @@ DEFINE_THISCALL_WRAPPER(ios_base_getloc, 8)
 locale* __thiscall ios_base_getloc(const ios_base *this, locale *ret)
 {
     TRACE("(%p)\n", this);
-    return locale_copy_ctor(ret, this->loc);
+    return locale_copy_ctor(ret, IOS_LOCALE(this));
 }
 
 /* ?good@ios_base@std@@QBE_NXZ */
@@ -5163,8 +5197,8 @@ DEFINE_THISCALL_WRAPPER(ios_base_imbue, 12)
 locale* __thiscall ios_base_imbue(ios_base *this, locale *ret, const locale *loc)
 {
     TRACE("(%p %p)\n", this, loc);
-    *ret = *this->loc;
-    locale_copy_ctor(this->loc, loc);
+    *ret = *IOS_LOCALE(this);
+    locale_copy_ctor(IOS_LOCALE(this), loc);
     return ret;
 }
 
@@ -5257,7 +5291,7 @@ void __thiscall ios_base_setstate_unsigned(ios_base *this, unsigned int state)
 }
 
 /* ?sync_with_stdio@ios_base@std@@SA_N_N@Z */
-MSVCP_bool CDECL ios_base_sync_with_stdio(MSVCP_bool sync)
+MSVCP_bool __cdecl ios_base_sync_with_stdio(MSVCP_bool sync)
 {
     _Lockit lock;
     MSVCP_bool ret;
@@ -5307,7 +5341,7 @@ streamsize __thiscall ios_base_width_get(ios_base *this)
 }
 
 /* ?xalloc@ios_base@std@@SAHXZ */
-int CDECL ios_base_xalloc(void)
+int __cdecl ios_base_xalloc(void)
 {
     _Lockit lock;
     int ret;
@@ -5485,7 +5519,7 @@ DEFINE_THISCALL_WRAPPER(basic_ios_char_narrow, 12)
 char __thiscall basic_ios_char_narrow(basic_ios_char *this, char ch, char def)
 {
     TRACE("(%p %c %c)\n", this, ch, def);
-    return ctype_char_narrow_ch(ctype_char_use_facet(this->strbuf->loc), ch, def);
+    return ctype_char_narrow_ch(ctype_char_use_facet(IOS_LOCALE(this->strbuf)), ch, def);
 }
 
 /* ?rdbuf@?$basic_ios@DU?$char_traits@D@std@@@std@@QAEPAV?$basic_streambuf@DU?$char_traits@D@std@@@2@PAV32@@Z */
@@ -5558,7 +5592,7 @@ DEFINE_THISCALL_WRAPPER(basic_ios_char_widen, 8)
 char __thiscall basic_ios_char_widen(basic_ios_char *this, char ch)
 {
     TRACE("(%p %c)\n", this, ch);
-    return ctype_char_widen_ch(ctype_char_use_facet(this->strbuf->loc), ch);
+    return ctype_char_widen_ch(ctype_char_use_facet(IOS_LOCALE(this->strbuf)), ch);
 }
 
 /* ?swap@?$basic_ios@DU?$char_traits@D@std@@@std@@QAEXAAV12@@Z */
@@ -5766,7 +5800,7 @@ DEFINE_THISCALL_WRAPPER(basic_ios_wchar_narrow, 12)
 char __thiscall basic_ios_wchar_narrow(basic_ios_wchar *this, wchar_t ch, char def)
 {
     TRACE("(%p %c %c)\n", this, ch, def);
-    return ctype_wchar_narrow_ch(ctype_wchar_use_facet(this->strbuf->loc), ch, def);
+    return ctype_wchar_narrow_ch(ctype_wchar_use_facet(IOS_LOCALE(this->strbuf)), ch, def);
 }
 
 /* ?rdbuf@?$basic_ios@_WU?$char_traits@_W@std@@@std@@QAEPAV?$basic_streambuf@_WU?$char_traits@_W@std@@@2@PAV32@@Z */
@@ -5853,7 +5887,7 @@ DEFINE_THISCALL_WRAPPER(basic_ios_wchar_widen, 8)
 wchar_t __thiscall basic_ios_wchar_widen(basic_ios_wchar *this, char ch)
 {
     TRACE("(%p %c)\n", this, ch);
-    return ctype_wchar_widen_ch(ctype_wchar_use_facet(this->strbuf->loc), ch);
+    return ctype_wchar_widen_ch(ctype_wchar_use_facet(IOS_LOCALE(this->strbuf)), ch);
 }
 
 /* ?swap@?$basic_ios@GU?$char_traits@G@std@@@std@@QAEXAAV12@@Z */
@@ -6192,7 +6226,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_short(basic_ostream_char
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6219,7 +6253,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_ushort(basic_ostream_cha
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6246,7 +6280,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_int(basic_ostream_char *
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6273,7 +6307,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_uint(basic_ostream_char 
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6298,7 +6332,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_float(basic_ostream_char
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6323,7 +6357,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_double(basic_ostream_cha
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6348,7 +6382,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_ldouble(basic_ostream_ch
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6404,7 +6438,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_ptr(basic_ostream_char *
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6429,7 +6463,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_int64(basic_ostream_char
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6454,7 +6488,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_uint64(basic_ostream_cha
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -6479,7 +6513,7 @@ basic_ostream_char* __thiscall basic_ostream_char_print_bool(basic_ostream_char 
 
     if(basic_ostream_char_sentry_create(this)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_put *numput = num_put_char_use_facet(strbuf->loc);
+        const num_put *numput = num_put_char_use_facet(IOS_LOCALE(strbuf));
         ostreambuf_iterator_char dest;
 
         memset(&dest, 0, sizeof(dest));
@@ -7078,7 +7112,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_short, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_short(basic_ostream_wchar *this, short val)
 {
     return basic_ostream_print_short(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@F@Z */
@@ -7087,7 +7121,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_short, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_short(basic_ostream_wchar *this, short val)
 {
     return basic_ostream_print_short(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_ushort(basic_ostream_wchar *this, unsigned short val, const num_put *numput)
@@ -7117,7 +7151,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ushort, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ushort(basic_ostream_wchar *this, unsigned short val)
 {
     return basic_ostream_print_ushort(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@G@Z */
@@ -7126,7 +7160,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_ushort, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_ushort(basic_ostream_wchar *this, unsigned short val)
 {
     return basic_ostream_print_ushort(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6std@@YAAAV?$basic_ostream@GU?$char_traits@G@std@@@0@AAV10@G@Z */
@@ -7134,7 +7168,7 @@ basic_ostream_wchar* __thiscall basic_ostream_short_print_ushort(basic_ostream_w
 basic_ostream_wchar* __cdecl basic_ostream_short_print_ushort_global(basic_ostream_wchar *ostr, unsigned short val)
 {
     return basic_ostream_print_ushort(ostr, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(ostr))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(ostr)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_int(basic_ostream_wchar *this, int val, const num_put *numput)
@@ -7166,7 +7200,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_int, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_int(basic_ostream_wchar *this, int val)
 {
     return basic_ostream_print_int(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@H@Z */
@@ -7177,7 +7211,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_int, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_int(basic_ostream_wchar *this, int val)
 {
     return basic_ostream_print_int(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_uint(basic_ostream_wchar *this, unsigned int val, const num_put *numput)
@@ -7209,7 +7243,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_uint, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_uint(basic_ostream_wchar *this, unsigned int val)
 {
     return basic_ostream_print_uint(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@I@Z */
@@ -7220,7 +7254,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_uint, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_uint(basic_ostream_wchar *this, unsigned int val)
 {
     return basic_ostream_print_uint(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_float(basic_ostream_wchar *this, float val, const num_put *numput)
@@ -7250,7 +7284,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_float, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_float(basic_ostream_wchar *this, float val)
 {
     return basic_ostream_print_float(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@M@Z */
@@ -7259,7 +7293,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_float, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_float(basic_ostream_wchar *this, float val)
 {
     return basic_ostream_print_float(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_double(basic_ostream_wchar *this, double val, const num_put *numput)
@@ -7289,7 +7323,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_double, 12)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_double(basic_ostream_wchar *this, double val)
 {
     return basic_ostream_print_double(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@N@Z */
@@ -7298,7 +7332,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_double, 12)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_double(basic_ostream_wchar *this, double val)
 {
     return basic_ostream_print_double(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_ldouble(basic_ostream_wchar *this, double val, const num_put *numput)
@@ -7328,7 +7362,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ldouble, 12)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ldouble(basic_ostream_wchar *this, double val)
 {
     return basic_ostream_print_ldouble(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@O@Z */
@@ -7337,7 +7371,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_ldouble, 12)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_ldouble(basic_ostream_wchar *this, double val)
 {
     return basic_ostream_print_ldouble(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@PAV?$basic_streambuf@_WU?$char_traits@_W@std@@@1@@Z */
@@ -7400,7 +7434,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_ptr, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_ptr(basic_ostream_wchar *this, const void *val)
 {
     return basic_ostream_print_ptr(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@PBX@Z */
@@ -7409,7 +7443,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_ptr, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_ptr(basic_ostream_wchar *this, const void *val)
 {
     return basic_ostream_print_ptr(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_int64(basic_ostream_wchar *this, __int64 val, const num_put *numput)
@@ -7439,7 +7473,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_int64, 12)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_int64(basic_ostream_wchar *this, __int64 val)
 {
     return basic_ostream_print_int64(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@_J@Z */
@@ -7448,7 +7482,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_int64, 12)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_int64(basic_ostream_wchar *this, __int64 val)
 {
     return basic_ostream_print_int64(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_uint64(basic_ostream_wchar *this, unsigned __int64 val, const num_put *numput)
@@ -7478,7 +7512,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_uint64, 12)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_uint64(basic_ostream_wchar *this, unsigned __int64 val)
 {
     return basic_ostream_print_uint64(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@_K@Z */
@@ -7487,7 +7521,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_uint64, 12)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_uint64(basic_ostream_wchar *this, unsigned __int64 val)
 {
     return basic_ostream_print_uint64(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 static basic_ostream_wchar* basic_ostream_print_bool(basic_ostream_wchar *this, MSVCP_bool val, const num_put *numput)
@@ -7517,7 +7551,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_wchar_print_bool, 8)
 basic_ostream_wchar* __thiscall basic_ostream_wchar_print_bool(basic_ostream_wchar *this, MSVCP_bool val)
 {
     return basic_ostream_print_bool(this, val, num_put_wchar_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ??6?$basic_ostream@GU?$char_traits@G@std@@@std@@QAEAAV01@_N@Z */
@@ -7526,7 +7560,7 @@ DEFINE_THISCALL_WRAPPER(basic_ostream_short_print_bool, 8)
 basic_ostream_wchar* __thiscall basic_ostream_short_print_bool(basic_ostream_wchar *this, MSVCP_bool val)
 {
     return basic_ostream_print_bool(this, val, num_put_short_use_facet(
-                basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this))->loc));
+                IOS_LOCALE(basic_ios_wchar_rdbuf_get(basic_ostream_wchar_get_basic_ios(this)))));
 }
 
 /* ?ends@std@@YAAAV?$basic_ostream@_WU?$char_traits@_W@std@@@1@AAV21@@Z */
@@ -7881,7 +7915,7 @@ MSVCP_bool __thiscall basic_istream_char__Ipfx(basic_istream_char *this, MSVCP_b
 
         if(!noskip && (ios_base_flags_get(&base->base) & FMTFLAG_skipws)) {
             basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-            const ctype_char *ctype = ctype_char_use_facet(base->strbuf->loc);
+            const ctype_char *ctype = ctype_char_use_facet(IOS_LOCALE(base->strbuf));
             int ch;
 
             for(ch = basic_streambuf_char_sgetc(strbuf); ;
@@ -8199,7 +8233,7 @@ basic_istream_char* __cdecl ws_basic_istream_char(basic_istream_char *istream)
 
     if(basic_istream_char_sentry_create(istream, TRUE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const ctype_char *ctype = ctype_char_use_facet(strbuf->loc);
+        const ctype_char *ctype = ctype_char_use_facet(IOS_LOCALE(strbuf));
 
         for(ch = basic_streambuf_char_sgetc(strbuf); ctype_char_is_ch(ctype, _SPACE, ch);
                 ch = basic_streambuf_char_snextc(strbuf)) {
@@ -8425,6 +8459,8 @@ fpos_int* __thiscall basic_istream_char_tellg(basic_istream_char *this, fpos_int
     return ret;
 }
 
+/* ?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JW4seekdir@ios_base@2@@Z */
+/* ?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QEAAAEAV12@_JW4seekdir@ios_base@2@@Z */
 /* ?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JH@Z */
 /* ?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QEAAAEAV12@_JH@Z */
 #if STREAMOFF_BITS == 64
@@ -8493,7 +8529,7 @@ basic_istream_char* __thiscall basic_istream_char_read_short(basic_istream_char 
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
         LONG tmp;
 
@@ -8523,7 +8559,7 @@ basic_istream_char* __thiscall basic_istream_char_read_ushort(basic_istream_char
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8547,7 +8583,7 @@ basic_istream_char* __thiscall basic_istream_char_read_int(basic_istream_char *t
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8571,7 +8607,7 @@ basic_istream_char* __thiscall basic_istream_char_read_uint(basic_istream_char *
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8595,7 +8631,7 @@ basic_istream_char* __thiscall basic_istream_char_read_long(basic_istream_char *
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8619,7 +8655,7 @@ basic_istream_char* __thiscall basic_istream_char_read_ulong(basic_istream_char 
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8643,7 +8679,7 @@ basic_istream_char* __thiscall basic_istream_char_read_float(basic_istream_char 
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8667,7 +8703,7 @@ basic_istream_char* __thiscall basic_istream_char_read_double(basic_istream_char
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8691,7 +8727,7 @@ basic_istream_char* __thiscall basic_istream_char_read_ldouble(basic_istream_cha
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8715,7 +8751,7 @@ basic_istream_char* __thiscall basic_istream_char_read_ptr(basic_istream_char *t
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8739,7 +8775,7 @@ basic_istream_char* __thiscall basic_istream_char_read_int64(basic_istream_char 
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8763,7 +8799,7 @@ basic_istream_char* __thiscall basic_istream_char_read_uint64(basic_istream_char
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8787,7 +8823,7 @@ basic_istream_char* __thiscall basic_istream_char_read_bool(basic_istream_char *
 
     if(basic_istream_char_sentry_create(this, FALSE)) {
         basic_streambuf_char *strbuf = basic_ios_char_rdbuf_get(base);
-        const num_get *numget = num_get_char_use_facet(strbuf->loc);
+        const num_get *numget = num_get_char_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_char first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -8848,7 +8884,7 @@ basic_istream_char* __cdecl basic_istream_char_read_bstr(
     TRACE("(%p %p)\n", istream, str);
 
     if(basic_istream_char_sentry_create(istream, FALSE)) {
-        const ctype_char *ctype = ctype_char_use_facet(base->strbuf->loc);
+        const ctype_char *ctype = ctype_char_use_facet(IOS_LOCALE(base->strbuf));
         MSVCP_size_t count = ios_base_width_get(&base->base);
 
         if(!count)
@@ -8885,7 +8921,7 @@ basic_istream_char* __cdecl basic_istream_char_read_str(basic_istream_char *istr
     TRACE("(%p %p)\n", istream, str);
 
     if(basic_istream_char_sentry_create(istream, FALSE)) {
-        const ctype_char *ctype = ctype_char_use_facet(base->strbuf->loc);
+        const ctype_char *ctype = ctype_char_use_facet(IOS_LOCALE(base->strbuf));
         MSVCP_size_t count = ios_base_width_get(&base->base)-1;
 
         for(c = basic_streambuf_char_sgetc(basic_ios_char_rdbuf_get(base));
@@ -8987,6 +9023,183 @@ basic_istream_char* __thiscall basic_istream_char_read_func_ios_base(basic_istre
 {
     TRACE("(%p %p)\n", this, pfunc);
     pfunc(&basic_istream_char_get_basic_ios(this)->base);
+    return this;
+}
+
+/* ??$?5MDU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$complex@M@0@@Z */
+/* ??$?5MDU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$complex@M@0@@Z */
+basic_istream_char* __cdecl basic_istream_char_read_complex_float(basic_istream_char *this, complex_float *v)
+{
+    float r;
+    basic_ios_char *base = basic_istream_char_get_basic_ios(this);
+
+    TRACE("(%p %p)\n", this, v);
+
+    ws_basic_istream_char(this);
+    if(basic_istream_char_peek(this) == '(') {
+        char c;
+        basic_istream_char_get(this);
+        basic_istream_char_read_float(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        ws_basic_istream_char(this);
+        c = basic_istream_char_peek(this);
+        if(c == ',') {
+            float i;
+            basic_istream_char_get(this);
+            basic_istream_char_read_float(this, &i);
+
+            if(ios_base_fail(&base->base))
+                return this;
+
+            ws_basic_istream_char(this);
+            c = basic_istream_char_peek(this);
+            if(c == ')') { /* supported format: (real, imag) */
+                basic_istream_char_get(this);
+                v->real = r;
+                v->imag = i;
+            }else {
+                basic_ios_char_setstate(base, IOSTATE_failbit);
+                return this;
+            }
+        }else if(c == ')') { /* supported format: (real) */
+            basic_istream_char_get(this);
+            v->real = r;
+            v->imag = 0;
+        }else {
+            basic_ios_char_setstate(base, IOSTATE_failbit);
+            return this;
+        }
+    }else { /* supported format: real */
+        basic_istream_char_read_float(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        v->real = r;
+        v->imag = 0;
+    }
+
+    return this;
+}
+
+/* ??$?5NDU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$complex@N@0@@Z */
+/* ??$?5DU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$complex@N@0@@Z */
+basic_istream_char* __cdecl basic_istream_char_read_complex_double(basic_istream_char *this, complex_double *v)
+{
+    double r;
+    basic_ios_char *base = basic_istream_char_get_basic_ios(this);
+
+    TRACE("(%p %p)\n", this, v);
+
+    ws_basic_istream_char(this);
+    if(basic_istream_char_peek(this) == '(') {
+        char c;
+        basic_istream_char_get(this);
+        basic_istream_char_read_double(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        ws_basic_istream_char(this);
+        c = basic_istream_char_peek(this);
+        if(c == ',') {
+            double i;
+            basic_istream_char_get(this);
+            basic_istream_char_read_double(this, &i);
+
+            if(ios_base_fail(&base->base))
+                return this;
+
+            ws_basic_istream_char(this);
+            c = basic_istream_char_peek(this);
+            if(c == ')') { /* supported format: (real, imag) */
+                basic_istream_char_get(this);
+                v->real = r;
+                v->imag = i;
+            }else {
+                basic_ios_char_setstate(base, IOSTATE_failbit);
+                return this;
+            }
+        }else if(c == ')') { /* supported format: (real) */
+            basic_istream_char_get(this);
+            v->real = r;
+            v->imag = 0;
+        }else {
+            basic_ios_char_setstate(base, IOSTATE_failbit);
+            return this;
+        }
+    }else { /* supported format: real */
+        basic_istream_char_read_double(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        v->real = r;
+        v->imag = 0;
+    }
+
+    return this;
+}
+
+/* ??$?5ODU?$char_traits@D@std@@@std@@YAAAV?$basic_istream@DU?$char_traits@D@std@@@0@AAV10@AAV?$complex@O@0@@Z */
+/* ??$?5ODU?$char_traits@D@std@@@std@@YAAEAV?$basic_istream@DU?$char_traits@D@std@@@0@AEAV10@AEAV?$complex@O@0@@Z */
+basic_istream_char* __cdecl basic_istream_char_read_complex_ldouble(basic_istream_char *this, complex_double *v)
+{
+    double r;
+    basic_ios_char *base = basic_istream_char_get_basic_ios(this);
+
+    TRACE("(%p %p)\n", this, v);
+
+    ws_basic_istream_char(this);
+    if(basic_istream_char_peek(this) == '(') {
+        char c;
+        basic_istream_char_get(this);
+        basic_istream_char_read_ldouble(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        ws_basic_istream_char(this);
+        c = basic_istream_char_peek(this);
+        if(c == ',') {
+            double i;
+            basic_istream_char_get(this);
+            basic_istream_char_read_ldouble(this, &i);
+
+            if(ios_base_fail(&base->base))
+                return this;
+
+            ws_basic_istream_char(this);
+            c = basic_istream_char_peek(this);
+            if(c == ')') { /* supported format: (real, imag) */
+                basic_istream_char_get(this);
+                v->real = r;
+                v->imag = i;
+            }else {
+                basic_ios_char_setstate(base, IOSTATE_failbit);
+                return this;
+            }
+        }else if(c == ')') { /* supported format: (real) */
+            basic_istream_char_get(this);
+            v->real = r;
+            v->imag = 0;
+        }else {
+            basic_ios_char_setstate(base, IOSTATE_failbit);
+            return this;
+        }
+    }else { /* supported format: real */
+        basic_istream_char_read_ldouble(this, &r);
+
+        if(ios_base_fail(&base->base))
+            return this;
+
+        v->real = r;
+        v->imag = 0;
+    }
+
     return this;
 }
 
@@ -9176,7 +9389,7 @@ MSVCP_bool __thiscall basic_istream_wchar__Ipfx(basic_istream_wchar *this, MSVCP
 
         if(!noskip && (ios_base_flags_get(&base->base) & FMTFLAG_skipws)) {
             basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
-            const ctype_wchar *ctype = ctype_wchar_use_facet(base->strbuf->loc);
+            const ctype_wchar *ctype = ctype_wchar_use_facet(IOS_LOCALE(base->strbuf));
             int ch;
 
             for(ch = basic_streambuf_wchar_sgetc(strbuf); ;
@@ -9521,7 +9734,7 @@ basic_istream_wchar* __cdecl ws_basic_istream_wchar(basic_istream_wchar *istream
 
     if(basic_istream_wchar_sentry_create(istream, TRUE)) {
         basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
-        const ctype_wchar *ctype = ctype_wchar_use_facet(strbuf->loc);
+        const ctype_wchar *ctype = ctype_wchar_use_facet(IOS_LOCALE(strbuf));
 
         for(ch = basic_streambuf_wchar_sgetc(strbuf); ctype_wchar_is_ch(ctype, _SPACE, ch);
                 ch = basic_streambuf_wchar_snextc(strbuf)) {
@@ -9764,6 +9977,8 @@ fpos_int* __thiscall basic_istream_wchar_tellg(basic_istream_wchar *this, fpos_i
     return ret;
 }
 
+/* ?seekg@?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV12@JW4seekdir@ios_base@2@@Z */
+/* ?seekg@?$basic_istream@GU?$char_traits@G@std@@@std@@QEAAAEAV12@_JW4seekdir@ios_base@2@@Z */
 /* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV12@JH@Z */
 /* ?seekg@?$basic_istream@_WU?$char_traits@_W@std@@@std@@QEAAAEAV12@_JH@Z */
 /* ?seekg@?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV12@JH@Z */
@@ -9856,7 +10071,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_short, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_short(basic_istream_wchar *this, short *v)
 {
     return basic_istream_read_short(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAF@Z */
@@ -9865,7 +10080,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_short, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_short(basic_istream_wchar *this, short *v)
 {
     return basic_istream_read_short(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAG@Z */
@@ -9880,7 +10095,7 @@ basic_istream_wchar* __thiscall basic_istream_wchar_read_ushort(basic_istream_wc
 
     if(basic_istream_wchar_sentry_create(this, FALSE)) {
         basic_streambuf_wchar *strbuf = basic_ios_wchar_rdbuf_get(base);
-        const num_get *numget = num_get_wchar_use_facet(strbuf->loc);
+        const num_get *numget = num_get_wchar_use_facet(IOS_LOCALE(strbuf));
         istreambuf_iterator_wchar first={0}, last={0};
 
         first.strbuf = strbuf;
@@ -9918,7 +10133,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_int, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_int(basic_istream_wchar *this, int *v)
 {
     return basic_istream_read_int(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAH@Z */
@@ -9927,7 +10142,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_int, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_int(basic_istream_wchar *this, int *v)
 {
     return basic_istream_read_int(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_uint(basic_istream_wchar *this, unsigned int *v, const num_get *numget)
@@ -9956,7 +10171,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_uint, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_uint(basic_istream_wchar *this, unsigned int *v)
 {
     return basic_istream_read_uint(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAI@Z */
@@ -9965,7 +10180,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_uint, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_uint(basic_istream_wchar *this, unsigned int *v)
 {
     return basic_istream_read_uint(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_long(basic_istream_wchar *this, LONG *v, const num_get *numget)
@@ -9994,7 +10209,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_long, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_long(basic_istream_wchar *this, LONG *v)
 {
     return basic_istream_read_long(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@_WU?$char_traits@_W@std@@@std@@QAEAAV01@AAJ@Z */
@@ -10003,7 +10218,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_long, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_long(basic_istream_wchar *this, LONG *v)
 {
     return basic_istream_read_long(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_ulong(basic_istream_wchar *this, ULONG *v, const num_get *numget)
@@ -10032,7 +10247,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ulong, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_ulong(basic_istream_wchar *this, ULONG *v)
 {
     return basic_istream_read_ulong(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAK@Z */
@@ -10041,7 +10256,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_ulong, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_ulong(basic_istream_wchar *this, ULONG *v)
 {
     return basic_istream_read_ulong(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_float(basic_istream_wchar *this, float *v, const num_get *numget)
@@ -10070,7 +10285,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_float, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_float(basic_istream_wchar *this, float *v)
 {
     return basic_istream_read_float(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAM@Z */
@@ -10079,7 +10294,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_float, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_float(basic_istream_wchar *this, float *v)
 {
     return basic_istream_read_float(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_double(basic_istream_wchar *this, double *v, const num_get *numget)
@@ -10108,7 +10323,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_double, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_double(basic_istream_wchar *this, double *v)
 {
     return basic_istream_read_double(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAN@Z */
@@ -10117,7 +10332,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_double, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_double(basic_istream_wchar *this, double *v)
 {
     return basic_istream_read_double(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_ldouble(basic_istream_wchar *this, double *v, const num_get *numget)
@@ -10146,7 +10361,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ldouble, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_ldouble(basic_istream_wchar *this, double *v)
 {
     return basic_istream_read_ldouble(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAO@Z */
@@ -10155,7 +10370,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_ldouble, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_ldouble(basic_istream_wchar *this, double *v)
 {
     return basic_istream_read_ldouble(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_ptr(basic_istream_wchar *this, void **v, const num_get *numget)
@@ -10184,7 +10399,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_ptr, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_ptr(basic_istream_wchar *this, void **v)
 {
     return basic_istream_read_ptr(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AAPAX@Z */
@@ -10193,7 +10408,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_ptr, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_ptr(basic_istream_wchar *this, void **v)
 {
     return basic_istream_read_ptr(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_int64(basic_istream_wchar *this, __int64 *v, const num_get *numget)
@@ -10222,7 +10437,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_int64, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_int64(basic_istream_wchar *this, __int64 *v)
 {
     return basic_istream_read_int64(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AA_J@Z */
@@ -10231,7 +10446,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_int64, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_int64(basic_istream_wchar *this, __int64 *v)
 {
     return basic_istream_read_int64(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_uint64(basic_istream_wchar *this, unsigned __int64 *v, const num_get *numget)
@@ -10260,7 +10475,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_uint64, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_uint64(basic_istream_wchar *this, unsigned __int64 *v)
 {
     return basic_istream_read_uint64(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AA_K@Z */
@@ -10269,7 +10484,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_uint64, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_uint64(basic_istream_wchar *this, unsigned __int64 *v)
 {
     return basic_istream_read_uint64(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_bool(basic_istream_wchar *this, MSVCP_bool *v, const num_get *numget)
@@ -10298,7 +10513,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_wchar_read_bool, 8)
 basic_istream_wchar* __thiscall basic_istream_wchar_read_bool(basic_istream_wchar *this, MSVCP_bool *v)
 {
     return basic_istream_read_bool(this, v, num_get_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??5?$basic_istream@GU?$char_traits@G@std@@@std@@QAEAAV01@AA_N@Z */
@@ -10307,7 +10522,7 @@ DEFINE_THISCALL_WRAPPER(basic_istream_short_read_bool, 8)
 basic_istream_wchar* __thiscall basic_istream_short_read_bool(basic_istream_wchar *this, MSVCP_bool *v)
 {
     return basic_istream_read_bool(this, v, num_get_short_use_facet(
-                basic_istream_wchar_get_basic_ios(this)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(this)->strbuf)));
 }
 
 /* ??$getline@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AAV?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@0@_W@Z */
@@ -10388,7 +10603,7 @@ basic_istream_wchar* __cdecl basic_istream_wchar_read_bstr(
         basic_istream_wchar *istream, basic_string_wchar *str)
 {
     return basic_istream_read_bstr(istream, str, ctype_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(istream)->strbuf)));
 }
 
 /* ??$?5GU?$char_traits@G@std@@V?$allocator@G@1@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@AAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@0@@Z */
@@ -10397,7 +10612,7 @@ basic_istream_wchar* __cdecl basic_istream_short_read_bstr(
         basic_istream_wchar *istream, basic_string_wchar *str)
 {
     return basic_istream_read_bstr(istream, str, ctype_short_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(istream)->strbuf)));
 }
 
 static basic_istream_wchar* basic_istream_read_str(basic_istream_wchar *istream, wchar_t *str, const ctype_wchar *ctype)
@@ -10431,7 +10646,7 @@ static basic_istream_wchar* basic_istream_read_str(basic_istream_wchar *istream,
 basic_istream_wchar* __cdecl basic_istream_wchar_read_str(basic_istream_wchar *istream, wchar_t *str)
 {
     return basic_istream_read_str(istream, str, ctype_wchar_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(istream)->strbuf)));
 }
 
 /* ??$?5GU?$char_traits@G@std@@@std@@YAAAV?$basic_istream@GU?$char_traits@G@std@@@0@AAV10@PAG@Z */
@@ -10439,7 +10654,7 @@ basic_istream_wchar* __cdecl basic_istream_wchar_read_str(basic_istream_wchar *i
 basic_istream_wchar* __cdecl basic_istream_short_read_str(basic_istream_wchar *istream, wchar_t *str)
 {
     return basic_istream_read_str(istream, str, ctype_short_use_facet(
-                basic_istream_wchar_get_basic_ios(istream)->strbuf->loc));
+                IOS_LOCALE(basic_istream_wchar_get_basic_ios(istream)->strbuf)));
 }
 
 /* ??$?5_WU?$char_traits@_W@std@@@std@@YAAAV?$basic_istream@_WU?$char_traits@_W@std@@@0@AAV10@AA_W@Z */
@@ -13611,6 +13826,8 @@ int __thiscall strstreambuf_pbackfail(strstreambuf *this, int c)
     return (unsigned char)(ptr[0] = c);
 }
 
+/* ?seekoff@strstreambuf@std@@MAE?AV?$fpos@H@2@JW4seekdir@ios_base@2@H@Z */
+/* ?seekoff@strstreambuf@std@@MEAA?AV?$fpos@H@2@_JW4seekdir@ios_base@2@H@Z */
 /* ?seekoff@strstreambuf@std@@MAE?AV?$fpos@H@2@JHH@Z */
 /* ?seekoff@strstreambuf@std@@MEAA?AV?$fpos@H@2@_JHH@Z */
 #if STREAMOFF_BITS == 64
@@ -13837,7 +14054,7 @@ basic_ostream_char* __cdecl basic_ostream_char_print_complex_float(basic_ostream
     ostream_ios_base = &basic_ostream_char_get_basic_ios(ostr)->base;
     TRACE("(%p %p)\n", ostr, val);
 
-    ios_base_imbue(ostringstream_ios_base, &loc, ostream_ios_base->loc);
+    ios_base_imbue(ostringstream_ios_base, &loc, IOS_LOCALE(ostream_ios_base));
     locale_dtor(&loc);
     ios_base_precision_set(ostringstream_ios_base, ios_base_precision_get(ostream_ios_base));
     ios_base_flags_set(ostringstream_ios_base, ios_base_flags_get(ostream_ios_base));
@@ -13871,7 +14088,7 @@ basic_ostream_char* __cdecl basic_ostream_char_print_complex_double(basic_ostrea
     ostream_ios_base = &basic_ostream_char_get_basic_ios(ostr)->base;
     TRACE("(%p %p)\n", ostr, val);
 
-    ios_base_imbue(ostringstream_ios_base, &loc, ostream_ios_base->loc);
+    ios_base_imbue(ostringstream_ios_base, &loc, IOS_LOCALE(ostream_ios_base));
     locale_dtor(&loc);
     ios_base_precision_set(ostringstream_ios_base, ios_base_precision_get(ostream_ios_base));
     ios_base_flags_set(ostringstream_ios_base, ios_base_flags_get(ostream_ios_base));
@@ -13905,7 +14122,7 @@ basic_ostream_char* __cdecl basic_ostream_char_print_complex_ldouble(basic_ostre
     ostream_ios_base = &basic_ostream_char_get_basic_ios(ostr)->base;
     TRACE("(%p %p)\n", ostr, val);
 
-    ios_base_imbue(ostringstream_ios_base, &loc, ostream_ios_base->loc);
+    ios_base_imbue(ostringstream_ios_base, &loc, IOS_LOCALE(ostream_ios_base));
     locale_dtor(&loc);
     ios_base_precision_set(ostringstream_ios_base, ios_base_precision_get(ostream_ios_base));
     ios_base_flags_set(ostringstream_ios_base, ios_base_flags_get(ostream_ios_base));

@@ -294,25 +294,68 @@ static void convert_r5g5_snorm_l6_unorm(const BYTE *src, BYTE *dst, UINT src_row
         UINT dst_row_pitch, UINT dst_slice_pitch, UINT width, UINT height, UINT depth)
 {
     unsigned int x, y, z;
-    const WORD *Source;
+    unsigned char r_in, g_in, l_in;
+    const unsigned short *texel_in;
+    unsigned short *texel_out;
+
+    /* Emulating signed 5 bit values with unsigned 5 bit values has some precision problems by design:
+     * E.g. the signed input value 0 becomes 16. GL normalizes it to 16 / 31 = 0.516. We convert it
+     * back to a signed value by subtracting 0.5 and multiplying by 2.0. The resulting value is
+     * ((16 / 31) - 0.5) * 2.0 = 0.032, which is quite different from the intended result 0.000. */
+    for (z = 0; z < depth; z++)
+    {
+        for (y = 0; y < height; y++)
+        {
+            texel_out = (unsigned short *) (dst + z * dst_slice_pitch + y * dst_row_pitch);
+            texel_in = (const unsigned short *)(src + z * src_slice_pitch + y * src_row_pitch);
+            for (x = 0; x < width; x++ )
+            {
+                l_in = (*texel_in & 0xfc00) >> 10;
+                g_in = (*texel_in & 0x03e0) >> 5;
+                r_in = *texel_in & 0x001f;
+
+                *texel_out = ((r_in + 16) << 11) | (l_in << 5) | (g_in + 16);
+                texel_out++;
+                texel_in++;
+            }
+        }
+    }
+}
+
+static void convert_r5g5_snorm_l6_unorm_ext(const BYTE *src, BYTE *dst, UINT src_row_pitch, UINT src_slice_pitch,
+        UINT dst_row_pitch, UINT dst_slice_pitch, UINT width, UINT height, UINT depth)
+{
+    unsigned int x, y, z;
+    unsigned char *texel_out, r_out, g_out, r_in, g_in, l_in;
+    const unsigned short *texel_in;
 
     for (z = 0; z < depth; z++)
     {
         for (y = 0; y < height; y++)
         {
-            unsigned short *Dest_s = (unsigned short *) (dst + z * dst_slice_pitch + y * dst_row_pitch);
-            Source = (const WORD *)(src + z * src_slice_pitch + y * src_row_pitch);
+            texel_in = (const unsigned short *)(src + z * src_slice_pitch + y * src_row_pitch);
+            texel_out = dst + z * dst_slice_pitch + y * dst_row_pitch;
             for (x = 0; x < width; x++ )
             {
-                short color = (*Source++);
-                unsigned char l = ((color >> 10) & 0xfc);
-                        short v = ((color >>  5) & 0x3e);
-                        short u = ((color      ) & 0x1f);
-                short v_conv = v + 16;
-                short u_conv = u + 16;
+                l_in = (*texel_in & 0xfc00) >> 10;
+                g_in = (*texel_in & 0x03e0) >> 5;
+                r_in = *texel_in & 0x001f;
 
-                *Dest_s = ((v_conv << 11) & 0xf800) | ((l << 5) & 0x7e0) | (u_conv & 0x1f);
-                Dest_s += 1;
+                r_out = r_in << 3;
+                if (!(r_in & 0x10)) /* r > 0 */
+                    r_out |= r_in >> 1;
+
+                g_out = g_in << 3;
+                if (!(g_in & 0x10)) /* g > 0 */
+                    g_out |= g_in >> 1;
+
+                texel_out[0] = r_out;
+                texel_out[1] = g_out;
+                texel_out[2] = l_in << 1 | l_in >> 5;
+                texel_out[3] = 0;
+
+                texel_out += 4;
+                texel_in++;
             }
         }
     }
@@ -322,38 +365,43 @@ static void convert_r5g5_snorm_l6_unorm_nv(const BYTE *src, BYTE *dst, UINT src_
         UINT dst_row_pitch, UINT dst_slice_pitch, UINT width, UINT height, UINT depth)
 {
     unsigned int x, y, z;
-    const WORD *Source;
-    unsigned char *Dest;
+    unsigned char *texel_out, ds_out, dt_out, r_in, g_in, l_in;
+    const unsigned short *texel_in;
 
     /* This makes the gl surface bigger(24 bit instead of 16), but it works with
      * fixed function and shaders without further conversion once the surface is
-     * loaded
-     */
+     * loaded.
+     *
+     * The difference between this function and convert_r5g5_snorm_l6_unorm_ext
+     * is that convert_r5g5_snorm_l6_unorm_ext creates a 32 bit XRGB texture and
+     * this function creates a 24 bit DSDT_MAG texture. Trying to load a DSDT_MAG
+     * internal with a 32 bit DSDT_MAG_INTENSITY or DSDT_MAG_VIB format fails. */
     for (z = 0; z < depth; z++)
     {
         for (y = 0; y < height; y++)
         {
-            Source = (const WORD *)(src + z * src_slice_pitch + y * src_row_pitch);
-            Dest = dst + z * dst_slice_pitch + y * dst_row_pitch;
+            texel_in = (const unsigned short *)(src + z * src_slice_pitch + y * src_row_pitch);
+            texel_out = dst + z * dst_slice_pitch + y * dst_row_pitch;
             for (x = 0; x < width; x++ )
             {
-                short color = (*Source++);
-                unsigned char l = ((color >> 10) & 0xfc);
-                         char v = ((color >>  5) & 0x3e);
-                         char u = ((color      ) & 0x1f);
+                l_in = (*texel_in & 0xfc00) >> 10;
+                g_in = (*texel_in & 0x03e0) >> 5;
+                r_in = *texel_in & 0x001f;
 
-                /* 8 bits destination, 6 bits source, 8th bit is the sign. gl ignores the sign
-                 * and doubles the positive range. Thus shift left only once, gl does the 2nd
-                 * shift. GL reads a signed value and converts it into an unsigned value.
-                 */
-                /* M */ Dest[2] = l << 1;
+                ds_out = r_in << 3;
+                if (!(r_in & 0x10)) /* r > 0 */
+                    ds_out |= r_in >> 1;
 
-                /* Those are read as signed, but kept signed. Just left-shift 3 times to scale
-                 * from 5 bit values to 8 bit values.
-                 */
-                /* V */ Dest[1] = v << 3;
-                /* U */ Dest[0] = u << 3;
-                Dest += 3;
+                dt_out = g_in << 3;
+                if (!(g_in & 0x10)) /* g > 0 */
+                    dt_out |= g_in >> 1;
+
+                texel_out[0] = ds_out;
+                texel_out[1] = dt_out;
+                texel_out[2] = l_in << 1 | l_in >> 5;
+
+                texel_out += 3;
+                texel_in++;
             }
         }
     }
@@ -1060,6 +1108,11 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_BUMPMAP,
             NV_TEXTURE_SHADER,          NULL},
+    {WINED3DFMT_R8G8_SNORM,             GL_RG8_SNORM,                     GL_RG8_SNORM,                           0,
+            GL_RG,                      GL_BYTE,                          0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_BUMPMAP,
+            EXT_TEXTURE_SNORM,          NULL},
     {WINED3DFMT_R5G5_SNORM_L6_UNORM,    GL_RGB5,                          GL_RGB5,                                0,
             GL_RGB,                     GL_UNSIGNED_SHORT_5_6_5,          2,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
@@ -1070,6 +1123,11 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_BUMPMAP,
             NV_TEXTURE_SHADER,          convert_r5g5_snorm_l6_unorm_nv},
+    {WINED3DFMT_R5G5_SNORM_L6_UNORM,    GL_RGB8_SNORM,                    GL_RGB8_SNORM,                          0,
+            GL_RGBA,                    GL_BYTE,                          4,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_BUMPMAP,
+            EXT_TEXTURE_SNORM,          convert_r5g5_snorm_l6_unorm_ext},
     {WINED3DFMT_R8G8_SNORM_L8X8_UNORM,  GL_RGB8,                          GL_RGB8,                                0,
             GL_BGRA,                    GL_UNSIGNED_INT_8_8_8_8_REV,      4,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
@@ -1090,6 +1148,11 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_BUMPMAP,
             NV_TEXTURE_SHADER,          NULL},
+    {WINED3DFMT_R8G8B8A8_SNORM,         GL_RGBA8_SNORM,                   GL_RGBA8_SNORM,                         0,
+            GL_RGBA,                    GL_BYTE,                          0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_BUMPMAP,
+            EXT_TEXTURE_SNORM,          NULL},
     {WINED3DFMT_R16G16_SNORM,           GL_RGB16,                         GL_RGB16,                               0,
             GL_BGR,                     GL_UNSIGNED_SHORT,                6,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
@@ -1100,6 +1163,11 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_BUMPMAP,
             NV_TEXTURE_SHADER,          NULL},
+    {WINED3DFMT_R16G16_SNORM,           GL_RG16_SNORM,                    GL_RG16_SNORM,                          0,
+            GL_RG,                      GL_SHORT,                         0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_BUMPMAP,
+            EXT_TEXTURE_SNORM,          NULL},
     /* Depth stencil formats */
     {WINED3DFMT_D16_LOCKABLE,           GL_DEPTH_COMPONENT,               GL_DEPTH_COMPONENT,                     0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,                0,
@@ -1973,57 +2041,43 @@ static void apply_format_fixups(struct wined3d_adapter *adapter, struct wined3d_
     gl_info->formats[idx].color_fixup = create_color_fixup_desc(
             0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_W);
 
-    /* V8U8 is supported natively by GL_ATI_envmap_bumpmap and GL_NV_texture_shader.
-     * V16U16 is only supported by GL_NV_texture_shader. The formats need fixup if
-     * their extensions are not available. GL_ATI_envmap_bumpmap is not used because
-     * the only driver that implements it(fglrx) has a buggy implementation.
-     *
-     * V8U8 and V16U16 need a fixup of the undefined blue channel. OpenGL
-     * returns 0.0 when sampling from it, DirectX 1.0. So we always have in-shader
-     * conversion for this format.
-     */
-    if (!gl_info->supported[NV_TEXTURE_SHADER])
+    /* GL_ATI_envmap_bumpmap in theory supports R8G8_SNORM but is no longer supported by
+     * any driver. */
+    if (gl_info->supported[NV_TEXTURE_SHADER] || gl_info->supported[EXT_TEXTURE_SNORM])
     {
+        /* R8G8_SNORM and R16G16_SNORM need a fixup of the undefined blue channel. OpenGL
+         * returns 0.0 when sampling from it, DirectX 1.0. So we always have in-shader
+         * conversion for this format. */
         idx = getFmtIdx(WINED3DFMT_R8G8_SNORM);
         gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
+                0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
         idx = getFmtIdx(WINED3DFMT_R16G16_SNORM);
         gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
+                0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
     }
     else
     {
+        /* Emulate using unsigned formats. This requires load-time conversion in addition to the
+         * fixups here. */
         idx = getFmtIdx(WINED3DFMT_R8G8_SNORM);
         gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
-
+                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
         idx = getFmtIdx(WINED3DFMT_R16G16_SNORM);
         gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
-    }
-
-    if (!gl_info->supported[NV_TEXTURE_SHADER])
-    {
-        /* If GL_NV_texture_shader is not supported, those formats are converted, incompatibly
-         * with each other
-         */
-        idx = getFmtIdx(WINED3DFMT_R5G5_SNORM_L6_UNORM);
-        gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Z, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE);
-        idx = getFmtIdx(WINED3DFMT_R8G8_SNORM_L8X8_UNORM);
-        gl_info->formats[idx].color_fixup = create_color_fixup_desc(
-                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_Z, 0, CHANNEL_SOURCE_W);
+                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
         idx = getFmtIdx(WINED3DFMT_R8G8B8A8_SNORM);
         gl_info->formats[idx].color_fixup = create_color_fixup_desc(
                 1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 1, CHANNEL_SOURCE_Z, 1, CHANNEL_SOURCE_W);
+        idx = getFmtIdx(WINED3DFMT_R5G5_SNORM_L6_UNORM);
+        gl_info->formats[idx].color_fixup = create_color_fixup_desc(
+                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Z, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE);
     }
-    else
+
+    if (!gl_info->supported[NV_TEXTURE_SHADER])
     {
-        /* If GL_NV_texture_shader is supported, WINED3DFMT_L6V5U5 and WINED3DFMT_X8L8V8U8
-         * are converted at surface loading time, but they do not need any modification in
-         * the shader, thus they are compatible with all WINED3DFMT_UNKNOWN group formats.
-         * WINED3DFMT_Q8W8V8U8 doesn't even need load-time conversion
-         */
+        idx = getFmtIdx(WINED3DFMT_R8G8_SNORM_L8X8_UNORM);
+        gl_info->formats[idx].color_fixup = create_color_fixup_desc(
+                1, CHANNEL_SOURCE_X, 1, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_Z, 0, CHANNEL_SOURCE_W);
     }
 
     if (gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC])
@@ -3063,12 +3117,33 @@ BOOL is_invalid_op(const struct wined3d_state *state, int stage,
     return FALSE;
 }
 
+void get_identity_matrix(struct wined3d_matrix *mat)
+{
+    static const struct wined3d_matrix identity =
+    {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+
+    *mat = identity;
+}
+
+void get_modelview_matrix(const struct wined3d_context *context, const struct wined3d_state *state, struct wined3d_matrix *mat)
+{
+    if (context->last_was_rhw)
+        get_identity_matrix(mat);
+    else
+        multiply_matrix(mat, &state->transforms[WINED3D_TS_VIEW], &state->transforms[WINED3D_TS_WORLD_MATRIX(0)]);
+}
+
 /* Setup this textures matrix according to the texture flags. */
 /* Context activation is done by the caller (state handler). */
-void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat, DWORD flags,
-        BOOL calculatedCoords, BOOL transformed, enum wined3d_format_id vtx_fmt, BOOL ffp_proj_control)
+void set_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wined3d_matrix *matrix, DWORD flags,
+        BOOL calculated_coords, BOOL transformed, enum wined3d_format_id format_id, BOOL ffp_proj_control)
 {
-    float mat[16];
+    struct wined3d_matrix mat;
 
     gl_info->gl_ops.gl.p_glMatrixMode(GL_TEXTURE);
     checkGLcall("glMatrixMode(GL_TEXTURE)");
@@ -3086,7 +3161,7 @@ void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat
         return;
     }
 
-    memcpy(mat, smat, 16 * sizeof(float));
+    mat = *matrix;
 
     if (flags & WINED3D_TTFF_PROJECTED)
     {
@@ -3095,42 +3170,47 @@ void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat
             switch (flags & ~WINED3D_TTFF_PROJECTED)
             {
                 case WINED3D_TTFF_COUNT2:
-                    mat[ 3] = mat[ 1];
-                    mat[ 7] = mat[ 5];
-                    mat[11] = mat[ 9];
-                    mat[15] = mat[13];
-                    mat[ 1] = mat[ 5] = mat[ 9] = mat[13] = 0.0f;
+                    mat._14 = mat._12;
+                    mat._24 = mat._22;
+                    mat._34 = mat._32;
+                    mat._44 = mat._42;
+                    mat._12 = mat._22 = mat._32 = mat._42 = 0.0f;
                     break;
                 case WINED3D_TTFF_COUNT3:
-                    mat[ 3] = mat[ 2];
-                    mat[ 7] = mat[ 6];
-                    mat[11] = mat[10];
-                    mat[15] = mat[14];
-                    mat[ 2] = mat[ 6] = mat[10] = mat[14] = 0.0f;
+                    mat._14 = mat._13;
+                    mat._24 = mat._23;
+                    mat._34 = mat._33;
+                    mat._44 = mat._43;
+                    mat._13 = mat._23 = mat._33 = mat._43 = 0.0f;
                     break;
             }
         }
-    } else { /* under directx the R/Z coord can be used for translation, under opengl we use the Q coord instead */
-        if(!calculatedCoords) {
-            switch(vtx_fmt)
+    }
+    else
+    {
+        /* Under Direct3D the R/Z coord can be used for translation, under
+         * OpenGL we use the Q coord instead. */
+        if (!calculated_coords)
+        {
+            switch (format_id)
             {
+                /* Direct3D passes the default 1.0 in the 2nd coord, while GL
+                 * passes it in the 4th. Swap 2nd and 4th coord. No need to
+                 * store the value of mat._41 in mat._21 because the input
+                 * value to the transformation will be 0, so the matrix value
+                 * is irrelevant. */
                 case WINED3DFMT_R32_FLOAT:
-                    /* Direct3D passes the default 1.0 in the 2nd coord, while gl passes it in the 4th.
-                     * swap 2nd and 4th coord. No need to store the value of mat[12] in mat[4] because
-                     * the input value to the transformation will be 0, so the matrix value is irrelevant
-                     */
-                    mat[12] = mat[4];
-                    mat[13] = mat[5];
-                    mat[14] = mat[6];
-                    mat[15] = mat[7];
+                    mat._41 = mat._21;
+                    mat._42 = mat._22;
+                    mat._43 = mat._23;
+                    mat._44 = mat._24;
                     break;
+                /* See above, just 3rd and 4th coord. */
                 case WINED3DFMT_R32G32_FLOAT:
-                    /* See above, just 3rd and 4th coord
-                    */
-                    mat[12] = mat[8];
-                    mat[13] = mat[9];
-                    mat[14] = mat[10];
-                    mat[15] = mat[11];
+                    mat._41 = mat._31;
+                    mat._42 = mat._32;
+                    mat._43 = mat._33;
+                    mat._44 = mat._34;
                     break;
                 case WINED3DFMT_R32G32B32_FLOAT: /* Opengl defaults match dx defaults */
                 case WINED3DFMT_R32G32B32A32_FLOAT: /* No defaults apply, all app defined */
@@ -3151,7 +3231,7 @@ void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat
             {
                 /* case WINED3D_TTFF_COUNT1: Won't ever get here. */
                 case WINED3D_TTFF_COUNT2:
-                    mat[2] = mat[6] = mat[10] = mat[14] = 0;
+                    mat._13 = mat._23 = mat._33 = mat._43 = 0.0f;
                 /* OpenGL divides the first 3 vertex coord by the 4th by default,
                 * which is essentially the same as D3DTTFF_PROJECTED. Make sure that
                 * the 4th coord evaluates to 1.0 to eliminate that.
@@ -3165,12 +3245,12 @@ void set_texture_matrix(const struct wined3d_gl_info *gl_info, const float *smat
                 * 4th is != 1.0(opengl default). This would have to be fixed in drawStridedSlow
                 * or a replacement shader. */
                 default:
-                    mat[3] = mat[7] = mat[11] = 0; mat[15] = 1;
+                    mat._14 = mat._24 = mat._34 = 0.0f; mat._44 = 1.0f;
             }
         }
     }
 
-    gl_info->gl_ops.gl.p_glLoadMatrixf(mat);
+    gl_info->gl_ops.gl.p_glLoadMatrixf(&mat._11);
     checkGLcall("glLoadMatrixf(mat)");
 }
 
@@ -3333,35 +3413,33 @@ enum wined3d_format_id pixelformat_for_depth(DWORD depth)
     }
 }
 
-void multiply_matrix(struct wined3d_matrix *dest, const struct wined3d_matrix *src1,
-        const struct wined3d_matrix *src2)
+void multiply_matrix(struct wined3d_matrix *dst, const struct wined3d_matrix *src1, const struct wined3d_matrix *src2)
 {
-    struct wined3d_matrix temp;
+    struct wined3d_matrix tmp;
 
     /* Now do the multiplication 'by hand'.
        I know that all this could be optimised, but this will be done later :-) */
-    temp.u.s._11 = (src1->u.s._11 * src2->u.s._11) + (src1->u.s._21 * src2->u.s._12) + (src1->u.s._31 * src2->u.s._13) + (src1->u.s._41 * src2->u.s._14);
-    temp.u.s._21 = (src1->u.s._11 * src2->u.s._21) + (src1->u.s._21 * src2->u.s._22) + (src1->u.s._31 * src2->u.s._23) + (src1->u.s._41 * src2->u.s._24);
-    temp.u.s._31 = (src1->u.s._11 * src2->u.s._31) + (src1->u.s._21 * src2->u.s._32) + (src1->u.s._31 * src2->u.s._33) + (src1->u.s._41 * src2->u.s._34);
-    temp.u.s._41 = (src1->u.s._11 * src2->u.s._41) + (src1->u.s._21 * src2->u.s._42) + (src1->u.s._31 * src2->u.s._43) + (src1->u.s._41 * src2->u.s._44);
+    tmp._11 = (src1->_11 * src2->_11) + (src1->_21 * src2->_12) + (src1->_31 * src2->_13) + (src1->_41 * src2->_14);
+    tmp._21 = (src1->_11 * src2->_21) + (src1->_21 * src2->_22) + (src1->_31 * src2->_23) + (src1->_41 * src2->_24);
+    tmp._31 = (src1->_11 * src2->_31) + (src1->_21 * src2->_32) + (src1->_31 * src2->_33) + (src1->_41 * src2->_34);
+    tmp._41 = (src1->_11 * src2->_41) + (src1->_21 * src2->_42) + (src1->_31 * src2->_43) + (src1->_41 * src2->_44);
 
-    temp.u.s._12 = (src1->u.s._12 * src2->u.s._11) + (src1->u.s._22 * src2->u.s._12) + (src1->u.s._32 * src2->u.s._13) + (src1->u.s._42 * src2->u.s._14);
-    temp.u.s._22 = (src1->u.s._12 * src2->u.s._21) + (src1->u.s._22 * src2->u.s._22) + (src1->u.s._32 * src2->u.s._23) + (src1->u.s._42 * src2->u.s._24);
-    temp.u.s._32 = (src1->u.s._12 * src2->u.s._31) + (src1->u.s._22 * src2->u.s._32) + (src1->u.s._32 * src2->u.s._33) + (src1->u.s._42 * src2->u.s._34);
-    temp.u.s._42 = (src1->u.s._12 * src2->u.s._41) + (src1->u.s._22 * src2->u.s._42) + (src1->u.s._32 * src2->u.s._43) + (src1->u.s._42 * src2->u.s._44);
+    tmp._12 = (src1->_12 * src2->_11) + (src1->_22 * src2->_12) + (src1->_32 * src2->_13) + (src1->_42 * src2->_14);
+    tmp._22 = (src1->_12 * src2->_21) + (src1->_22 * src2->_22) + (src1->_32 * src2->_23) + (src1->_42 * src2->_24);
+    tmp._32 = (src1->_12 * src2->_31) + (src1->_22 * src2->_32) + (src1->_32 * src2->_33) + (src1->_42 * src2->_34);
+    tmp._42 = (src1->_12 * src2->_41) + (src1->_22 * src2->_42) + (src1->_32 * src2->_43) + (src1->_42 * src2->_44);
 
-    temp.u.s._13 = (src1->u.s._13 * src2->u.s._11) + (src1->u.s._23 * src2->u.s._12) + (src1->u.s._33 * src2->u.s._13) + (src1->u.s._43 * src2->u.s._14);
-    temp.u.s._23 = (src1->u.s._13 * src2->u.s._21) + (src1->u.s._23 * src2->u.s._22) + (src1->u.s._33 * src2->u.s._23) + (src1->u.s._43 * src2->u.s._24);
-    temp.u.s._33 = (src1->u.s._13 * src2->u.s._31) + (src1->u.s._23 * src2->u.s._32) + (src1->u.s._33 * src2->u.s._33) + (src1->u.s._43 * src2->u.s._34);
-    temp.u.s._43 = (src1->u.s._13 * src2->u.s._41) + (src1->u.s._23 * src2->u.s._42) + (src1->u.s._33 * src2->u.s._43) + (src1->u.s._43 * src2->u.s._44);
+    tmp._13 = (src1->_13 * src2->_11) + (src1->_23 * src2->_12) + (src1->_33 * src2->_13) + (src1->_43 * src2->_14);
+    tmp._23 = (src1->_13 * src2->_21) + (src1->_23 * src2->_22) + (src1->_33 * src2->_23) + (src1->_43 * src2->_24);
+    tmp._33 = (src1->_13 * src2->_31) + (src1->_23 * src2->_32) + (src1->_33 * src2->_33) + (src1->_43 * src2->_34);
+    tmp._43 = (src1->_13 * src2->_41) + (src1->_23 * src2->_42) + (src1->_33 * src2->_43) + (src1->_43 * src2->_44);
 
-    temp.u.s._14 = (src1->u.s._14 * src2->u.s._11) + (src1->u.s._24 * src2->u.s._12) + (src1->u.s._34 * src2->u.s._13) + (src1->u.s._44 * src2->u.s._14);
-    temp.u.s._24 = (src1->u.s._14 * src2->u.s._21) + (src1->u.s._24 * src2->u.s._22) + (src1->u.s._34 * src2->u.s._23) + (src1->u.s._44 * src2->u.s._24);
-    temp.u.s._34 = (src1->u.s._14 * src2->u.s._31) + (src1->u.s._24 * src2->u.s._32) + (src1->u.s._34 * src2->u.s._33) + (src1->u.s._44 * src2->u.s._34);
-    temp.u.s._44 = (src1->u.s._14 * src2->u.s._41) + (src1->u.s._24 * src2->u.s._42) + (src1->u.s._34 * src2->u.s._43) + (src1->u.s._44 * src2->u.s._44);
+    tmp._14 = (src1->_14 * src2->_11) + (src1->_24 * src2->_12) + (src1->_34 * src2->_13) + (src1->_44 * src2->_14);
+    tmp._24 = (src1->_14 * src2->_21) + (src1->_24 * src2->_22) + (src1->_34 * src2->_23) + (src1->_44 * src2->_24);
+    tmp._34 = (src1->_14 * src2->_31) + (src1->_24 * src2->_32) + (src1->_34 * src2->_33) + (src1->_44 * src2->_34);
+    tmp._44 = (src1->_14 * src2->_41) + (src1->_24 * src2->_42) + (src1->_34 * src2->_43) + (src1->_44 * src2->_44);
 
-    /* And copy the new matrix in the good storage.. */
-    memcpy(dest, &temp, 16 * sizeof(float));
+    *dst = tmp;
 }
 
 DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) {
@@ -3898,10 +3976,10 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_state *state, const struct
     {
         settings->fog_mode = WINED3D_FFP_VS_FOG_DEPTH;
 
-        if (state->transforms[WINED3D_TS_PROJECTION].u.m[0][3] == 0.0f
-                && state->transforms[WINED3D_TS_PROJECTION].u.m[1][3] == 0.0f
-                && state->transforms[WINED3D_TS_PROJECTION].u.m[2][3] == 0.0f
-                && state->transforms[WINED3D_TS_PROJECTION].u.m[3][3] == 1.0f)
+        if (state->transforms[WINED3D_TS_PROJECTION]._14 == 0.0f
+                && state->transforms[WINED3D_TS_PROJECTION]._24 == 0.0f
+                && state->transforms[WINED3D_TS_PROJECTION]._34 == 0.0f
+                && state->transforms[WINED3D_TS_PROJECTION]._44 == 1.0f)
             settings->ortho_fog = 1;
     }
     else if (state->render_states[WINED3D_RS_FOGVERTEXMODE] == WINED3D_FOG_NONE)
