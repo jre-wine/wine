@@ -1,3 +1,14 @@
+wine-development (1.7.39-1) experimental; urgency=medium
+
+  * New upstream release 1.7.39, released Mar 20, 2015.
+  * - Kerning support in DirectWrite.
+  * - Support for DirectX Media Objects filters.
+  * - Better support for animated GIFs in GdiPlus.
+  * - Improved support for Known Folders in Shell32.
+  * - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 20 Mar 2015 22:41:52 +0000
+
 wine-development (1.7.38-1) experimental; urgency=medium
 
   * New upstream release 1.7.38, released Mar 6, 2015.
