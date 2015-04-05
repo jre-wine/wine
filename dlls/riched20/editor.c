@@ -3308,8 +3308,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case EM_SETSEL:
   {
-    handle_EM_EXSETSEL( editor, wParam, lParam );
-    return 0;
+    return handle_EM_EXSETSEL( editor, wParam, lParam );
   }
   case EM_SETSCROLLPOS:
   {
@@ -3511,8 +3510,12 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       if (editor->mode & TM_PLAINTEXT)
         return 0;
       if (wParam & SCF_WORD) {
-        FIXME("EM_SETCHARFORMAT: word selection not supported\n");
-        return 0;
+        ME_Cursor start;
+        ME_Cursor end = editor->pCursors[0];
+        ME_MoveCursorWords(editor, &end, +1);
+        start = end;
+        ME_MoveCursorWords(editor, &start, -1);
+        ME_SetCharFormat(editor, &start, &end, p);
       }
       bRepaint = ME_IsSelection(editor);
       ME_SetSelectionCharFormat(editor, p);

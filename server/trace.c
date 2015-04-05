@@ -3842,6 +3842,7 @@ static void dump_get_object_info_reply( const struct get_object_info_reply *req 
 {
     fprintf( stderr, " access=%08x", req->access );
     fprintf( stderr, ", ref_count=%08x", req->ref_count );
+    fprintf( stderr, ", handle_count=%08x", req->handle_count );
     fprintf( stderr, ", total=%u", req->total );
     dump_varargs_unicode_str( ", name=", cur_size );
 }
@@ -3951,7 +3952,7 @@ static void dump_create_completion_request( const struct create_completion_reque
     fprintf( stderr, ", attributes=%08x", req->attributes );
     fprintf( stderr, ", concurrent=%08x", req->concurrent );
     fprintf( stderr, ", rootdir=%04x", req->rootdir );
-    dump_varargs_string( ", filename=", cur_size );
+    dump_varargs_unicode_str( ", filename=", cur_size );
 }
 
 static void dump_create_completion_reply( const struct create_completion_reply *req )
@@ -3964,7 +3965,7 @@ static void dump_open_completion_request( const struct open_completion_request *
     fprintf( stderr, " access=%08x", req->access );
     fprintf( stderr, ", attributes=%08x", req->attributes );
     fprintf( stderr, ", rootdir=%04x", req->rootdir );
-    dump_varargs_string( ", filename=", cur_size );
+    dump_varargs_unicode_str( ", filename=", cur_size );
 }
 
 static void dump_open_completion_reply( const struct open_completion_reply *req )
@@ -4093,6 +4094,43 @@ static void dump_get_suspend_context_reply( const struct get_suspend_context_rep
 static void dump_set_suspend_context_request( const struct set_suspend_context_request *req )
 {
     dump_varargs_context( " context=", cur_size );
+}
+
+static void dump_create_job_request( const struct create_job_request *req )
+{
+    fprintf( stderr, " access=%08x", req->access );
+    fprintf( stderr, ", attributes=%08x", req->attributes );
+    dump_varargs_object_attributes( ", objattr=", cur_size );
+}
+
+static void dump_create_job_reply( const struct create_job_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
+static void dump_assign_job_request( const struct assign_job_request *req )
+{
+    fprintf( stderr, " job=%04x", req->job );
+    fprintf( stderr, ", process=%04x", req->process );
+}
+
+static void dump_process_in_job_request( const struct process_in_job_request *req )
+{
+    fprintf( stderr, " job=%04x", req->job );
+    fprintf( stderr, ", process=%04x", req->process );
+}
+
+static void dump_set_job_limits_request( const struct set_job_limits_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", limit_flags=%08x", req->limit_flags );
+}
+
+static void dump_set_job_completion_port_request( const struct set_job_completion_port_request *req )
+{
+    fprintf( stderr, " job=%04x", req->job );
+    fprintf( stderr, ", port=%04x", req->port );
+    dump_uint64( ", key=", &req->key );
 }
 
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
@@ -4352,6 +4390,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_update_rawinput_devices_request,
     (dump_func)dump_get_suspend_context_request,
     (dump_func)dump_set_suspend_context_request,
+    (dump_func)dump_create_job_request,
+    (dump_func)dump_assign_job_request,
+    (dump_func)dump_process_in_job_request,
+    (dump_func)dump_set_job_limits_request,
+    (dump_func)dump_set_job_completion_port_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4610,6 +4653,11 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_cursor_reply,
     NULL,
     (dump_func)dump_get_suspend_context_reply,
+    NULL,
+    (dump_func)dump_create_job_reply,
+    NULL,
+    NULL,
+    NULL,
     NULL,
 };
 
@@ -4870,6 +4918,11 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "update_rawinput_devices",
     "get_suspend_context",
     "set_suspend_context",
+    "create_job",
+    "assign_job",
+    "process_in_job",
+    "set_job_limits",
+    "set_job_completion_port",
 };
 
 static const struct
@@ -4972,6 +5025,7 @@ static const struct
     { "PIPE_LISTENING",              STATUS_PIPE_LISTENING },
     { "PIPE_NOT_AVAILABLE",          STATUS_PIPE_NOT_AVAILABLE },
     { "PRIVILEGE_NOT_HELD",          STATUS_PRIVILEGE_NOT_HELD },
+    { "PROCESS_IN_JOB",              STATUS_PROCESS_IN_JOB },
     { "PROCESS_IS_TERMINATING",      STATUS_PROCESS_IS_TERMINATING },
     { "SECTION_TOO_BIG",             STATUS_SECTION_TOO_BIG },
     { "SEMAPHORE_LIMIT_EXCEEDED",    STATUS_SEMAPHORE_LIMIT_EXCEEDED },

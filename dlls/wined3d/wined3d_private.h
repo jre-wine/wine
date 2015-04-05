@@ -307,7 +307,8 @@ enum wined3d_shader_resource_type
 #define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000100
 #define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000200
 #define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00000400
-#define WINED3D_SHADER_CONST_FFP_PS         0x00000800
+#define WINED3D_SHADER_CONST_FFP_PROJ       0x00000800
+#define WINED3D_SHADER_CONST_FFP_PS         0x00001000
 
 enum wined3d_shader_register_type
 {
@@ -771,14 +772,14 @@ struct shader_caps
     DWORD wined3d_caps;
 };
 
-enum tex_types
+enum wined3d_gl_resource_type
 {
-    tex_1d       = 0,
-    tex_2d       = 1,
-    tex_3d       = 2,
-    tex_cube     = 3,
-    tex_rect     = 4,
-    tex_type_count = 5,
+    WINED3D_GL_RES_TYPE_TEX_1D          = 0,
+    WINED3D_GL_RES_TYPE_TEX_2D          = 1,
+    WINED3D_GL_RES_TYPE_TEX_3D          = 2,
+    WINED3D_GL_RES_TYPE_TEX_CUBE        = 3,
+    WINED3D_GL_RES_TYPE_TEX_RECT        = 4,
+    WINED3D_GL_RES_TYPE_COUNT           = 5,
 };
 
 enum vertexprocessing_mode {
@@ -807,9 +808,8 @@ enum wined3d_ffp_ps_fog_mode
 #define WINED3D_PSARGS_TEXTYPE_SHIFT 2
 #define WINED3D_PSARGS_TEXTYPE_MASK 0x3
 
-/* Similar to tex_types, except that it doesn't have 1d textures
- * (can't be bound), rect textures (handled via np2_fixup) and
- * none / unknown (treated as 2d and handled via dummy textures). */
+/* Used for Shader Model 1 pixel shaders to track the bound texture
+ * type. 2D and RECT textures are separated through NP2 fixup. */
 enum wined3d_shader_tex_types
 {
     WINED3D_SHADER_TEX_2D   = 0,
@@ -854,7 +854,7 @@ struct wined3d_shader_backend_ops
             const struct wined3d_state *state);
     void (*shader_disable)(void *shader_priv, struct wined3d_context *context);
     void (*shader_select_depth_blt)(void *shader_priv, const struct wined3d_gl_info *gl_info,
-            enum tex_types tex_type, const SIZE *ds_mask_size);
+            enum wined3d_gl_resource_type tex_type, const SIZE *ds_mask_size);
     void (*shader_deselect_depth_blt)(void *shader_priv, const struct wined3d_gl_info *gl_info);
     void (*shader_update_float_vertex_constants)(struct wined3d_device *device, UINT start, UINT count);
     void (*shader_update_float_pixel_constants)(struct wined3d_device *device, UINT start, UINT count);
@@ -981,7 +981,8 @@ struct wined3d_stream_info_element
     const struct wined3d_format *format;
     struct wined3d_bo_address data;
     GLsizei stride;
-    UINT stream_idx;
+    unsigned int stream_idx;
+    unsigned int divisor;
 };
 
 struct wined3d_stream_info
@@ -1189,6 +1190,7 @@ struct wined3d_context
     GLint                   aux_buffers;
 
     void *shader_backend_data;
+    void *fragment_pipe_data;
 
     /* FBOs */
     UINT                    fbo_entry_count;
@@ -1272,6 +1274,8 @@ struct fragment_pipeline
     void (*get_caps)(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps);
     void *(*alloc_private)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
     void (*free_private)(struct wined3d_device *device);
+    BOOL (*allocate_context_data)(struct wined3d_context *context);
+    void (*free_context_data)(struct wined3d_context *context);
     BOOL (*color_fixup_supported)(struct color_fixup_desc fixup);
     const struct StateEntryTemplate *states;
 };
@@ -2424,7 +2428,9 @@ struct wined3d_vertex_declaration_element
     BOOL ffp_valid;
     unsigned int input_slot;
     unsigned int offset;
-    UINT output_slot;
+    unsigned int output_slot;
+    enum wined3d_input_classification input_slot_class;
+    unsigned int instance_data_step_rate;
     BYTE method;
     BYTE usage;
     BYTE usage_idx;
@@ -2764,6 +2770,7 @@ const char *debug_d3dusage(DWORD usage) DECLSPEC_HIDDEN;
 const char *debug_d3dusagequery(DWORD usagequery) DECLSPEC_HIDDEN;
 const char *debug_d3ddeclmethod(enum wined3d_decl_method method) DECLSPEC_HIDDEN;
 const char *debug_d3ddeclusage(enum wined3d_decl_usage usage) DECLSPEC_HIDDEN;
+const char *debug_d3dinput_classification(enum wined3d_input_classification classification) DECLSPEC_HIDDEN;
 const char *debug_d3dprimitivetype(enum wined3d_primitive_type primitive_type) DECLSPEC_HIDDEN;
 const char *debug_d3drenderstate(enum wined3d_render_state state) DECLSPEC_HIDDEN;
 const char *debug_d3dsamplerstate(enum wined3d_sampler_state state) DECLSPEC_HIDDEN;
@@ -2782,9 +2789,6 @@ BOOL is_invalid_op(const struct wined3d_state *state, int stage,
 void set_tex_op_nvrc(const struct wined3d_gl_info *gl_info, const struct wined3d_state *state,
         BOOL is_alpha, int stage, enum wined3d_texture_op op, DWORD arg1, DWORD arg2, DWORD arg3,
         INT texture_idx, DWORD dst) DECLSPEC_HIDDEN;
-void set_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wined3d_matrix *matrix,
-        DWORD flags, BOOL calculated_coords, BOOL transformed, enum wined3d_format_id format_id,
-        BOOL ffp_can_disable_proj) DECLSPEC_HIDDEN;
 void texture_activate_dimensions(const struct wined3d_texture *texture,
         const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 void sampler_texdim(struct wined3d_context *context,
@@ -2808,13 +2812,9 @@ void sampler_texmatrix(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_specularenable(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void transform_projection(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void transform_texture(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_ambient(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void viewport_vertexpart(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_clipping(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
@@ -2931,8 +2931,8 @@ struct wined3d_shader
     struct wined3d_shader_reg_maps reg_maps;
     BOOL lconst_inf_or_nan;
 
-    struct wined3d_shader_signature_element input_signature[max(MAX_ATTRIBS, MAX_REG_INPUT)];
-    struct wined3d_shader_signature_element output_signature[MAX_REG_OUTPUT];
+    struct wined3d_shader_signature input_signature;
+    struct wined3d_shader_signature output_signature;
     char *signature_strings;
 
     /* Pointer to the parent device */
@@ -3008,10 +3008,17 @@ static inline BOOL shader_is_scalar(const struct wined3d_shader_register *reg)
 static inline void shader_get_position_fixup(const struct wined3d_context *context,
         const struct wined3d_state *state, float *position_fixup)
 {
+    float center_offset;
+
+    if (context->swapchain->device->wined3d->flags & WINED3D_PIXEL_CENTER_INTEGER)
+        center_offset = 63.0f / 64.0f;
+    else
+        center_offset = -1.0f / 64.0f;
+
     position_fixup[0] = 1.0f;
     position_fixup[1] = 1.0f;
-    position_fixup[2] = (63.0f / 64.0f) / state->viewport.width;
-    position_fixup[3] = -(63.0f / 64.0f) / state->viewport.height;
+    position_fixup[2] = center_offset / state->viewport.width;
+    position_fixup[3] = -center_offset / state->viewport.height;
 
     if (context->render_offscreen)
     {
@@ -3039,6 +3046,10 @@ static inline BOOL shader_constant_is_local(const struct wined3d_shader *shader,
 void get_identity_matrix(struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 void get_modelview_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
         struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
+void get_projection_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
+        struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
+void get_texture_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
+        unsigned int tex, struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 
 /* Using additional shader constants (uniforms in GLSL / program environment
  * or local parameters in ARB) is costly:

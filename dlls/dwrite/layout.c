@@ -1,7 +1,7 @@
 /*
  *    Text format and layout
  *
- * Copyright 2012, 2014 Nikolay Sivov for CodeWeavers
+ * Copyright 2012, 2014-2015 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -121,6 +121,12 @@ struct layout_run {
     DWRITE_GLYPH_OFFSET *offsets;
 };
 
+enum layout_recompute_mask {
+    RECOMPUTE_NOMINAL_RUNS  = 1 << 0,
+    RECOMPUTE_MINIMAL_WIDTH = 1 << 1,
+    RECOMPUTE_EVERYTHING    = 0xffff
+};
+
 struct dwrite_textlayout {
     IDWriteTextLayout2 IDWriteTextLayout2_iface;
     IDWriteTextFormat1 IDWriteTextFormat1_iface;
@@ -135,13 +141,14 @@ struct dwrite_textlayout {
     FLOAT  maxheight;
     struct list ranges;
     struct list runs;
-    BOOL   recompute;
+    USHORT recompute;
 
     DWRITE_LINE_BREAKPOINT *nominal_breakpoints;
     DWRITE_LINE_BREAKPOINT *actual_breakpoints;
 
     DWRITE_CLUSTER_METRICS *clusters;
     UINT32 clusters_count;
+    FLOAT  minwidth;
 
     /* gdi-compatible layout specifics */
     BOOL   gdicompatible;
@@ -355,14 +362,34 @@ static HRESULT layout_update_breakpoints_range(struct dwrite_textlayout *layout,
 
 static struct layout_range *get_layout_range_by_pos(struct dwrite_textlayout *layout, UINT32 pos);
 
-static void init_cluster_metrics(const struct layout_run *run, DWRITE_CLUSTER_METRICS *metrics)
+static inline DWRITE_LINE_BREAKPOINT get_effective_breakpoint(const struct dwrite_textlayout *layout, UINT32 pos)
 {
+    if (layout->actual_breakpoints)
+        return layout->actual_breakpoints[pos];
+    return layout->nominal_breakpoints[pos];
+}
+
+static inline void init_cluster_metrics(const struct dwrite_textlayout *layout, const struct layout_run *run,
+    UINT16 start_glyph, UINT16 stop_glyph, UINT32 stop_position, DWRITE_CLUSTER_METRICS *metrics)
+{
+    UINT8 breakcondition;
+    UINT16 j;
+
     metrics->width = 0.0;
-    metrics->length = 1;
-    metrics->canWrapLineAfter = FALSE;
-    metrics->isWhitespace = FALSE;
-    metrics->isNewline = FALSE;
-    metrics->isSoftHyphen = FALSE;
+    for (j = start_glyph; j < stop_glyph; j++)
+        metrics->width += run->run.glyphAdvances[j];
+    metrics->length = 0;
+
+    if (stop_glyph == run->run.glyphCount)
+        breakcondition = get_effective_breakpoint(layout, stop_position).breakConditionAfter;
+    else
+        breakcondition = get_effective_breakpoint(layout, stop_position).breakConditionBefore;
+
+    metrics->canWrapLineAfter = breakcondition == DWRITE_BREAK_CONDITION_CAN_BREAK ||
+                                breakcondition == DWRITE_BREAK_CONDITION_MUST_BREAK;
+    metrics->isWhitespace = FALSE; /* FIXME */
+    metrics->isNewline = FALSE;    /* FIXME */
+    metrics->isSoftHyphen = FALSE; /* FIXME */
     metrics->isRightToLeft = run->run.bidiLevel & 1;
     metrics->padding = 0;
 }
@@ -371,42 +398,34 @@ static void init_cluster_metrics(const struct layout_run *run, DWRITE_CLUSTER_ME
 
   All clusters in a 'run' will be added to 'layout' data, starting at index pointed to by 'cluster'.
   On return 'cluster' is updated to point to next metrics struct to be filled in on next call.
+  Note that there's no need to reallocate anything at this point as we allocate one cluster per
+  codepoint initially.
 
 */
 static void layout_set_cluster_metrics(struct dwrite_textlayout *layout, const struct layout_run *run, UINT32 *cluster)
 {
     DWRITE_CLUSTER_METRICS *metrics = &layout->clusters[*cluster];
-    UINT16 glyph;
-    UINT32 i;
-
-    glyph = run->descr.clusterMap[0];
-    init_cluster_metrics(run, metrics);
+    UINT32 i, start = 0;
 
     for (i = 0; i < run->descr.stringLength; i++) {
-        BOOL newcluster = glyph != run->descr.clusterMap[i];
+        BOOL end = i == run->descr.stringLength - 1;
 
-        /* add new cluster on starting glyph change or simply when run is over */
-        if (newcluster || i == run->descr.stringLength - 1) {
-            UINT8 breakcondition;
-            UINT16 j;
+        if (run->descr.clusterMap[start] != run->descr.clusterMap[i]) {
+            init_cluster_metrics(layout, run, run->descr.clusterMap[start], run->descr.clusterMap[i], i, metrics);
+            metrics->length = i - start;
 
-            for (j = glyph; j < run->descr.clusterMap[i]; j++)
-                metrics->width += run->run.glyphAdvances[j];
-
-            /* FIXME: also set isWhitespace, isNewline and isSoftHyphen */
-            breakcondition = newcluster ? layout->nominal_breakpoints[i].breakConditionBefore :
-                                          layout->nominal_breakpoints[i].breakConditionAfter;
-            metrics->canWrapLineAfter = breakcondition == DWRITE_BREAK_CONDITION_CAN_BREAK ||
-                                        breakcondition == DWRITE_BREAK_CONDITION_MUST_BREAK;
-
-            /* advance to next cluster */
-            glyph = run->descr.clusterMap[i];
             *cluster += 1;
             metrics++;
-            init_cluster_metrics(run, metrics);
+            start = i;
         }
-        else
-            metrics->length++;
+
+        if (end) {
+            init_cluster_metrics(layout, run, run->descr.clusterMap[start], run->run.glyphCount, i, metrics);
+            metrics->length = i - start + 1;
+
+            *cluster += 1;
+            return;
+        }
     }
 }
 
@@ -500,7 +519,7 @@ static HRESULT layout_compute_runs(struct dwrite_textlayout *layout)
 
         while (1) {
             hr = IDWriteTextAnalyzer_GetGlyphs(analyzer, run->descr.string, run->descr.stringLength,
-                run->run.fontFace, FALSE /* FIXME */, run->run.bidiLevel & 1, &run->sa, run->descr.localeName,
+                run->run.fontFace, run->run.isSideways, run->run.bidiLevel & 1, &run->sa, run->descr.localeName,
                 NULL /* FIXME */, NULL, NULL, 0, max_count, run->clustermap, text_props, run->glyphs, glyph_props,
                 &run->run.glyphCount);
             if (hr == E_NOT_SUFFICIENT_BUFFER) {
@@ -540,12 +559,12 @@ static HRESULT layout_compute_runs(struct dwrite_textlayout *layout)
             hr = IDWriteTextAnalyzer_GetGdiCompatibleGlyphPlacements(analyzer, run->descr.string, run->descr.clusterMap,
                 text_props, run->descr.stringLength, run->run.glyphIndices, glyph_props, run->run.glyphCount,
                 run->run.fontFace, run->run.fontEmSize, layout->pixels_per_dip, &layout->transform, layout->use_gdi_natural,
-                FALSE /* FIXME */, run->run.bidiLevel & 1, &run->sa, run->descr.localeName, NULL, NULL, 0,
+                run->run.isSideways, run->run.bidiLevel & 1, &run->sa, run->descr.localeName, NULL, NULL, 0,
                 run->advances, run->offsets);
         else
             hr = IDWriteTextAnalyzer_GetGlyphPlacements(analyzer, run->descr.string, run->descr.clusterMap, text_props,
                 run->descr.stringLength, run->run.glyphIndices, glyph_props, run->run.glyphCount, run->run.fontFace,
-                run->run.fontEmSize, FALSE /* FIXME */, run->run.bidiLevel & 1, &run->sa, run->descr.localeName,
+                run->run.fontEmSize, run->run.isSideways, run->run.bidiLevel & 1, &run->sa, run->descr.localeName,
                 NULL, NULL, 0, run->advances, run->offsets);
 
         heap_free(text_props);
@@ -576,7 +595,7 @@ static HRESULT layout_compute_runs(struct dwrite_textlayout *layout)
     }
 
     if (hr == S_OK)
-        layout->clusters_count = cluster + 1;
+        layout->clusters_count = cluster;
 
     IDWriteTextAnalyzer_Release(analyzer);
     return hr;
@@ -586,7 +605,7 @@ static HRESULT layout_compute(struct dwrite_textlayout *layout)
 {
     HRESULT hr;
 
-    if (!layout->recompute)
+    if (!(layout->recompute & RECOMPUTE_NOMINAL_RUNS))
         return S_OK;
 
     /* nominal breakpoints are evaluated only once, because string never changes */
@@ -606,6 +625,10 @@ static HRESULT layout_compute(struct dwrite_textlayout *layout)
             0, layout->len, &layout->IDWriteTextAnalysisSink_iface);
         IDWriteTextAnalyzer_Release(analyzer);
     }
+    if (layout->actual_breakpoints) {
+        heap_free(layout->actual_breakpoints);
+        layout->actual_breakpoints = NULL;
+    }
 
     hr = layout_compute_runs(layout);
 
@@ -618,7 +641,7 @@ static HRESULT layout_compute(struct dwrite_textlayout *layout)
         }
     }
 
-    layout->recompute = FALSE;
+    layout->recompute &= ~RECOMPUTE_NOMINAL_RUNS;
     return hr;
 }
 
@@ -998,7 +1021,7 @@ done:
     if (changed) {
         struct list *next, *i;
 
-        layout->recompute = TRUE;
+        layout->recompute = RECOMPUTE_EVERYTHING;
         i = list_head(ranges);
         while ((next = list_next(ranges, i))) {
             struct layout_range *next_range = LIST_ENTRY(next, struct layout_range, entry);
@@ -1705,8 +1728,16 @@ static HRESULT WINAPI dwritetextlayout_GetLineMetrics(IDWriteTextLayout2 *iface,
 static HRESULT WINAPI dwritetextlayout_GetMetrics(IDWriteTextLayout2 *iface, DWRITE_TEXT_METRICS *metrics)
 {
     struct dwrite_textlayout *This = impl_from_IDWriteTextLayout2(iface);
-    FIXME("(%p)->(%p): stub\n", This, metrics);
-    return E_NOTIMPL;
+    DWRITE_TEXT_METRICS1 metrics1;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p)\n", This, metrics);
+
+    hr = IDWriteTextLayout2_GetMetrics(iface, &metrics1);
+    if (hr == S_OK)
+        memcpy(metrics, &metrics1, sizeof(*metrics));
+
+    return hr;
 }
 
 static HRESULT WINAPI dwritetextlayout_GetOverhangMetrics(IDWriteTextLayout2 *iface, DWRITE_OVERHANG_METRICS *overhangs)
@@ -1735,11 +1766,60 @@ static HRESULT WINAPI dwritetextlayout_GetClusterMetrics(IDWriteTextLayout2 *ifa
     return max_count >= This->clusters_count ? S_OK : E_NOT_SUFFICIENT_BUFFER;
 }
 
+/* Only to be used with DetermineMinWidth() to find the longest cluster sequence that we don't want to try
+   too hard to break. */
+static inline BOOL is_terminal_cluster(struct dwrite_textlayout *layout, UINT32 index)
+{
+    if (layout->clusters[index].isWhitespace || layout->clusters[index].isNewline ||
+       (index == layout->clusters_count - 1))
+        return TRUE;
+    /* check next one */
+    return (index < layout->clusters_count - 1) && layout->clusters[index+1].isWhitespace;
+}
+
 static HRESULT WINAPI dwritetextlayout_DetermineMinWidth(IDWriteTextLayout2 *iface, FLOAT* min_width)
 {
     struct dwrite_textlayout *This = impl_from_IDWriteTextLayout2(iface);
-    FIXME("(%p)->(%p): stub\n", This, min_width);
-    return E_NOTIMPL;
+    FLOAT width;
+    HRESULT hr;
+    UINT32 i;
+
+    TRACE("(%p)->(%p)\n", This, min_width);
+
+    if (!min_width)
+        return E_INVALIDARG;
+
+    if (!(This->recompute & RECOMPUTE_MINIMAL_WIDTH))
+        goto width_done;
+
+    *min_width = 0.0;
+    hr = layout_compute(This);
+    if (FAILED(hr))
+        return hr;
+
+    for (i = 0; i < This->clusters_count;) {
+        if (is_terminal_cluster(This, i)) {
+            width = This->clusters[i].width;
+            i++;
+        }
+        else {
+            width = 0.0;
+            while (!is_terminal_cluster(This, i)) {
+                width += This->clusters[i].width;
+                i++;
+            }
+            /* count last one too */
+            width += This->clusters[i].width;
+        }
+
+        if (width > This->minwidth)
+            This->minwidth = width;
+    }
+    This->recompute &= ~RECOMPUTE_MINIMAL_WIDTH;
+
+width_done:
+    *min_width = This->minwidth;
+    return S_OK;
 }
 
 static HRESULT WINAPI dwritetextlayout_HitTestPoint(IDWriteTextLayout2 *iface,
@@ -2571,11 +2651,12 @@ static HRESULT init_textlayout(const WCHAR *str, UINT32 len, IDWriteTextFormat *
     layout->len = len;
     layout->maxwidth = maxwidth;
     layout->maxheight = maxheight;
-    layout->recompute = TRUE;
+    layout->recompute = RECOMPUTE_EVERYTHING;
     layout->nominal_breakpoints = NULL;
     layout->actual_breakpoints = NULL;
     layout->clusters_count = 0;
     layout->clusters = NULL;
+    layout->minwidth = 0.0;
     list_init(&layout->runs);
     list_init(&layout->ranges);
     memset(&layout->format, 0, sizeof(layout->format));

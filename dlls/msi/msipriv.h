@@ -39,7 +39,7 @@
 #include "wine/debug.h"
 
 static const BOOL is_64bit = sizeof(void *) > sizeof(int);
-BOOL is_wow64;
+BOOL is_wow64 DECLSPEC_HIDDEN;
 
 #define MSI_DATASIZEMASK 0x00ff
 #define MSITYPE_VALID    0x0100
@@ -100,6 +100,7 @@ typedef struct tagMSIDATABASE
     UINT bytes_per_strref;
     LPWSTR path;
     LPWSTR deletefile;
+    LPWSTR tempfolder;
     LPCWSTR mode;
     UINT media_transform_offset;
     UINT media_transform_disk_id;
@@ -193,7 +194,6 @@ typedef struct tagMSIPATCHINFO
     MSIPATCHSTATE state;
     BOOL delete_on_close;
     UINT disk_id;
-    UINT last_sequence;
 } MSIPATCHINFO;
 
 typedef struct tagMSIBINARY
@@ -581,12 +581,6 @@ typedef struct tagMSIFILE
     UINT disk_id;
 } MSIFILE;
 
-typedef struct tagMSITEMPFILE
-{
-    struct list entry;
-    LPWSTR Path;
-} MSITEMPFILE;
-
 typedef struct tagMSIFILEPATCH
 {
     struct list entry;
@@ -594,7 +588,9 @@ typedef struct tagMSIFILEPATCH
     INT Sequence;
     INT PatchSize;
     INT Attributes;
-    BOOL IsApplied;
+    BOOL extracted;
+    UINT disk_id;
+    WCHAR *path;
 } MSIFILEPATCH;
 
 typedef struct tagMSIAPPID
@@ -952,11 +948,13 @@ extern UINT msi_spawn_error_dialog( MSIPACKAGE*, LPWSTR, LPWSTR ) DECLSPEC_HIDDE
 
 /* summary information */
 extern UINT msi_get_suminfo( IStorage *stg, UINT uiUpdateCount, MSISUMMARYINFO **si ) DECLSPEC_HIDDEN;
+extern UINT msi_get_db_suminfo( MSIDATABASE *db, UINT uiUpdateCount, MSISUMMARYINFO **si ) DECLSPEC_HIDDEN;
 extern LPWSTR msi_suminfo_dup_string( MSISUMMARYINFO *si, UINT uiProperty ) DECLSPEC_HIDDEN;
 extern INT msi_suminfo_get_int32( MSISUMMARYINFO *si, UINT uiProperty ) DECLSPEC_HIDDEN;
 extern LPWSTR msi_get_suminfo_product( IStorage *stg ) DECLSPEC_HIDDEN;
 extern UINT msi_add_suminfo( MSIDATABASE *db, LPWSTR **records, int num_records, int num_columns ) DECLSPEC_HIDDEN;
 extern enum platform parse_platform( const WCHAR *str ) DECLSPEC_HIDDEN;
+extern UINT msi_load_suminfo_properties( MSIPACKAGE *package ) DECLSPEC_HIDDEN;
 
 /* undocumented functions */
 UINT WINAPI MsiCreateAndVerifyInstallerDirectory( DWORD );
@@ -1022,7 +1020,7 @@ extern MSICOMPONENT *msi_get_loaded_component(MSIPACKAGE *package, const WCHAR *
 extern MSIFEATURE *msi_get_loaded_feature(MSIPACKAGE *package, const WCHAR *Feature) DECLSPEC_HIDDEN;
 extern MSIFILE *msi_get_loaded_file(MSIPACKAGE *package, const WCHAR *file) DECLSPEC_HIDDEN;
 extern MSIFOLDER *msi_get_loaded_folder(MSIPACKAGE *package, const WCHAR *dir) DECLSPEC_HIDDEN;
-extern int msi_track_tempfile(MSIPACKAGE *package, const WCHAR *path) DECLSPEC_HIDDEN;
+extern WCHAR *msi_create_temp_file(MSIDATABASE *db) DECLSPEC_HIDDEN;
 extern void msi_free_action_script(MSIPACKAGE *package, UINT script) DECLSPEC_HIDDEN;
 extern WCHAR *msi_build_icon_path(MSIPACKAGE *, const WCHAR *) DECLSPEC_HIDDEN;
 extern WCHAR *msi_build_directory_name(DWORD , ...) DECLSPEC_HIDDEN;
@@ -1042,6 +1040,7 @@ extern UINT msi_install_assembly(MSIPACKAGE *, MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern UINT msi_uninstall_assembly(MSIPACKAGE *, MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern BOOL msi_init_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
 extern void msi_destroy_assembly_caches(MSIPACKAGE *) DECLSPEC_HIDDEN;
+extern BOOL msi_is_global_assembly(MSICOMPONENT *) DECLSPEC_HIDDEN;
 extern WCHAR *msi_font_version_from_file(const WCHAR *) DECLSPEC_HIDDEN;
 extern WCHAR **msi_split_string(const WCHAR *, WCHAR) DECLSPEC_HIDDEN;
 extern UINT msi_set_original_database_property(MSIDATABASE *, const WCHAR *) DECLSPEC_HIDDEN;

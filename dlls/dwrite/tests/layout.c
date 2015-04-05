@@ -1,7 +1,7 @@
 /*
  *    Text layout/format tests
  *
- * Copyright 2012, 2014 Nikolay Sivov for CodeWeavers
+ * Copyright 2012, 2014-2015 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -993,13 +993,13 @@ static void test_GetClusterMetrics(void)
 {
     static const WCHAR strW[] = {'a','b','c','d',0};
     DWRITE_INLINE_OBJECT_METRICS inline_metrics;
-    DWRITE_CLUSTER_METRICS metrics;
+    DWRITE_CLUSTER_METRICS metrics[4];
     IDWriteInlineObject *trimm;
     IDWriteTextFormat *format;
     IDWriteTextLayout *layout;
     DWRITE_TEXT_RANGE range;
     IDWriteFactory *factory;
-    UINT32 count;
+    UINT32 count, i;
     HRESULT hr;
 
     factory = create_factory();
@@ -1015,6 +1015,16 @@ static void test_GetClusterMetrics(void)
     hr = IDWriteTextLayout_GetClusterMetrics(layout, NULL, 0, &count);
     ok(hr == E_NOT_SUFFICIENT_BUFFER, "got 0x%08x\n", hr);
     ok(count == 4, "got %u\n", count);
+
+    /* check every cluster width */
+    count = 0;
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, sizeof(metrics)/sizeof(metrics[0]), &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 4, "got %u\n", count);
+    for (i = 0; i < count; i++) {
+        ok(metrics[i].width > 0.0, "%u: got width %.2f\n", i, metrics[i].width);
+        ok(metrics[i].length == 1, "%u: got length %u\n", i, metrics[i].length);
+    }
 
     hr = IDWriteFactory_CreateEllipsisTrimmingSign(factory, format, &trimm);
     ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -1033,17 +1043,17 @@ todo_wine
 
     count = 0;
     memset(&metrics, 0, sizeof(metrics));
-    hr = IDWriteTextLayout_GetClusterMetrics(layout, &metrics, 1, &count);
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 1, &count);
     ok(hr == E_NOT_SUFFICIENT_BUFFER, "got 0x%08x\n", hr);
-todo_wine
+todo_wine {
     ok(count == 3, "got %u\n", count);
-    ok(metrics.length == 2, "got %u\n", metrics.length);
-
+    ok(metrics[0].length == 2, "got %u\n", metrics[0].length);
+}
     hr = IDWriteInlineObject_GetMetrics(trimm, &inline_metrics);
 todo_wine {
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(inline_metrics.width == metrics.width, "got %.2f, expected %.2f\n", inline_metrics.width,
-        metrics.width);
+    ok(inline_metrics.width == metrics[0].width, "got %.2f, expected %.2f\n", inline_metrics.width,
+        metrics[0].width);
 }
     IDWriteInlineObject_Release(trimm);
     IDWriteTextLayout_Release(layout);
@@ -1297,6 +1307,36 @@ if (hr == S_OK) {
     IDWriteFactory_Release(factory);
 }
 
+static void test_DetermineMinWidth(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    FLOAT minwidth;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, lstrlenW(strW), format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextLayout_DetermineMinWidth(layout, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    minwidth = 0.0;
+    hr = IDWriteTextLayout_DetermineMinWidth(layout, &minwidth);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(minwidth > 0.0, "got %.2f\n", minwidth);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
 START_TEST(layout)
 {
     IDWriteFactory *factory;
@@ -1323,6 +1363,7 @@ START_TEST(layout)
     test_SetPairKerning();
     test_SetVerticalGlyphOrientation();
     test_fallback();
+    test_DetermineMinWidth();
 
     IDWriteFactory_Release(factory);
 }

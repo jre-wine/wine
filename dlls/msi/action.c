@@ -1278,7 +1278,7 @@ static UINT load_file(MSIRECORD *row, LPVOID param)
     load_file_hash(package, file);
     load_file_disk_id(package, file);
 
-    TRACE("File Loaded (%s)\n",debugstr_w(file->File));  
+    TRACE("File loaded (file %s sequence %u)\n", debugstr_w(file->File), file->Sequence);
 
     list_add_tail( &package->files, &file->entry );
  
@@ -1336,6 +1336,25 @@ static UINT load_all_media( MSIPACKAGE *package )
     return r;
 }
 
+static UINT load_patch_disk_id( MSIPACKAGE *package, MSIFILEPATCH *patch )
+{
+    static const WCHAR query[] =
+        {'S','E','L','E','C','T',' ','`','D','i','s','k','I','d','`',' ', 'F','R','O','M',' ',
+         '`','M','e','d','i','a','`',' ','W','H','E','R','E',' ',
+         '`','L','a','s','t','S','e','q','u','e','n','c','e','`',' ','>','=',' ','%','u',0};
+    MSIRECORD *rec;
+
+    if (!(rec = MSI_QueryGetRecord( package->db, query, patch->Sequence )))
+    {
+        WARN("query failed\n");
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    patch->disk_id = MSI_RecordGetInteger( rec, 1 );
+    msiobj_release( &rec->hdr );
+    return ERROR_SUCCESS;
+}
+
 static UINT load_patch(MSIRECORD *row, LPVOID param)
 {
     MSIPACKAGE *package = param;
@@ -1358,12 +1377,13 @@ static UINT load_patch(MSIRECORD *row, LPVOID param)
     patch->Sequence = MSI_RecordGetInteger( row, 2 );
     patch->PatchSize = MSI_RecordGetInteger( row, 3 );
     patch->Attributes = MSI_RecordGetInteger( row, 4 );
-    patch->IsApplied = FALSE;
 
     /* FIXME:
      * Header field - for patch validation.
      * _StreamRef   - External key into MsiPatchHeaders (instead of the header field)
      */
+
+    load_patch_disk_id( package, patch );
 
     TRACE("Patch loaded (file %s sequence %u)\n", debugstr_w(patch->File->File), patch->Sequence);
 
@@ -2087,18 +2107,38 @@ BOOL msi_file_hash_matches( MSIFILE *file )
     return !memcmp( &hash, &file->hash, sizeof(MSIFILEHASHINFO) );
 }
 
-static WCHAR *get_temp_dir( void )
+static WCHAR *create_temp_dir( MSIDATABASE *db )
 {
     static UINT id;
-    WCHAR tmp[MAX_PATH], dir[MAX_PATH];
+    WCHAR *ret;
 
-    GetTempPathW( MAX_PATH, tmp );
-    for (;;)
+    if (!db->tempfolder)
     {
-        if (!GetTempFileNameW( tmp, szMsi, ++id, dir )) return NULL;
-        if (CreateDirectoryW( dir, NULL )) break;
+        WCHAR tmp[MAX_PATH];
+        UINT len = sizeof(tmp)/sizeof(tmp[0]);
+
+        if (msi_get_property( db, szTempFolder, tmp, &len ) ||
+            GetFileAttributesW( tmp ) != FILE_ATTRIBUTE_DIRECTORY)
+        {
+            GetTempPathW( MAX_PATH, tmp );
+        }
+        if (!(db->tempfolder = strdupW( tmp ))) return NULL;
     }
-    return strdupW( dir );
+
+    if ((ret = msi_alloc( (strlenW( db->tempfolder ) + 20) * sizeof(WCHAR) )))
+    {
+        for (;;)
+        {
+            if (!GetTempFileNameW( db->tempfolder, szMsi, ++id, ret ))
+            {
+                msi_free( ret );
+                return NULL;
+            }
+            if (CreateDirectoryW( ret, NULL )) break;
+        }
+    }
+
+    return ret;
 }
 
 /*
@@ -2149,16 +2189,20 @@ WCHAR *msi_build_directory_name( DWORD count, ... )
     return dir;
 }
 
+BOOL msi_is_global_assembly( MSICOMPONENT *comp )
+{
+    return comp->assembly && !comp->assembly->application;
+}
+
 static void set_target_path( MSIPACKAGE *package, MSIFILE *file )
 {
-    MSIASSEMBLY *assembly = file->Component->assembly;
-
     msi_free( file->TargetPath );
-    if (assembly && !assembly->application)
+    if (msi_is_global_assembly( file->Component ))
     {
-        if (!assembly->tempdir) assembly->tempdir = get_temp_dir();
+        MSIASSEMBLY *assembly = file->Component->assembly;
+
+        if (!assembly->tempdir) assembly->tempdir = create_temp_dir( package->db );
         file->TargetPath = msi_build_directory_name( 2, assembly->tempdir, file->FileName );
-        msi_track_tempfile( package, file->TargetPath );
     }
     else
     {

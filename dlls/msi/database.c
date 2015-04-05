@@ -99,6 +99,7 @@ static VOID MSI_CloseDatabase( MSIOBJECTHDR *arg )
         DeleteFileW( db->deletefile );
         msi_free( db->deletefile );
     }
+    msi_free( db->tempfolder );
 }
 
 static HRESULT db_initialize( IStorage *stg, const GUID *clsid )
@@ -2020,7 +2021,7 @@ HRESULT create_msi_remote_database( IUnknown *pOuter, LPVOID *ppObj )
     This->database = 0;
     This->refs = 1;
 
-    *ppObj = This;
+    *ppObj = &This->IWineMsiRemoteDatabase_iface;
 
     return S_OK;
 }

@@ -17,9 +17,12 @@
  */
 
 #define COBJMACROS
+#include <math.h>
 #include "d2d1.h"
 #include "wincrypt.h"
 #include "wine/test.h"
+#include "initguid.h"
+#include "dwrite.h"
 
 static void set_point(D2D1_POINT_2F *point, float x, float y)
 {
@@ -41,6 +44,45 @@ static void set_color(D2D1_COLOR_F *color, float r, float g, float b, float a)
     color->g = g;
     color->b = b;
     color->a = a;
+}
+
+static void set_matrix_identity(D2D1_MATRIX_3X2_F *matrix)
+{
+    matrix->_11 = 1.0f;
+    matrix->_12 = 0.0f;
+    matrix->_21 = 0.0f;
+    matrix->_22 = 1.0f;
+    matrix->_31 = 0.0f;
+    matrix->_32 = 0.0f;
+}
+
+static void rotate_matrix(D2D1_MATRIX_3X2_F *matrix, float theta)
+{
+    float sin_theta, cos_theta, tmp_11, tmp_12;
+
+    sin_theta = sinf(theta);
+    cos_theta = cosf(theta);
+    tmp_11 = matrix->_11;
+    tmp_12 = matrix->_12;
+
+    matrix->_11 = cos_theta * tmp_11 + sin_theta * matrix->_21;
+    matrix->_12 = cos_theta * tmp_12 + sin_theta * matrix->_22;
+    matrix->_21 = -sin_theta * tmp_11 + cos_theta * matrix->_21;
+    matrix->_22 = -sin_theta * tmp_12 + cos_theta * matrix->_22;
+}
+
+static void scale_matrix(D2D1_MATRIX_3X2_F *matrix, float x, float y)
+{
+    matrix->_11 *= x;
+    matrix->_12 *= x;
+    matrix->_21 *= y;
+    matrix->_22 *= y;
+}
+
+static void translate_matrix(D2D1_MATRIX_3X2_F *matrix, float x, float y)
+{
+    matrix->_31 += x * matrix->_11 + y * matrix->_21;
+    matrix->_32 += x * matrix->_12 + y * matrix->_22;
 }
 
 static BOOL compare_sha1(void *data, unsigned int pitch, unsigned int bpp,
@@ -331,7 +373,321 @@ static void test_clip(void)
     DestroyWindow(window);
 }
 
+static void test_state_block(void)
+{
+    IDWriteRenderingParams *text_rendering_params1, *text_rendering_params2;
+    D2D1_DRAWING_STATE_DESCRIPTION drawing_state;
+    ID2D1DrawingStateBlock *state_block;
+    IDWriteFactory *dwrite_factory;
+    IDXGISwapChain *swapchain;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    ID2D1Factory *factory;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    static const D2D1_MATRIX_3X2_F identity =
+    {
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        0.0f, 0.0f,
+    };
+    static const D2D1_MATRIX_3X2_F transform1 =
+    {
+        1.0f, 2.0f,
+        3.0f, 4.0f,
+        5.0f, 6.0f,
+    };
+    static const D2D1_MATRIX_3X2_F transform2 =
+    {
+        7.0f,  8.0f,
+        9.0f,  10.0f,
+        11.0f, 12.0f,
+    };
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+    ID2D1RenderTarget_GetFactory(rt, &factory);
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown **)&dwrite_factory);
+    ok(SUCCEEDED(hr), "Failed to create dwrite factory, hr %#x.\n", hr);
+    hr = IDWriteFactory_CreateRenderingParams(dwrite_factory, &text_rendering_params1);
+    ok(SUCCEEDED(hr), "Failed to create dwrite rendering params, hr %#x.\n", hr);
+    IDWriteFactory_Release(dwrite_factory);
+
+    drawing_state.antialiasMode = ID2D1RenderTarget_GetAntialiasMode(rt);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    drawing_state.textAntialiasMode = ID2D1RenderTarget_GetTextAntialiasMode(rt);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_DEFAULT,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
+    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
+    ok(!memcmp(&drawing_state.transform, &identity, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1RenderTarget_GetTextRenderingParams(rt, &text_rendering_params2);
+    ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
+
+    hr = ID2D1Factory_CreateDrawingStateBlock(factory, NULL, NULL, &state_block);
+    ok(SUCCEEDED(hr), "Failed to create drawing state block, hr %#x\n", hr);
+    ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_DEFAULT,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ok(!drawing_state.tag1 && !drawing_state.tag2, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!memcmp(&drawing_state.transform, &identity, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1DrawingStateBlock_GetTextRenderingParams(state_block, &text_rendering_params2);
+    ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
+    ID2D1DrawingStateBlock_Release(state_block);
+
+    drawing_state.antialiasMode = D2D1_ANTIALIAS_MODE_ALIASED;
+    drawing_state.textAntialiasMode = D2D1_TEXT_ANTIALIAS_MODE_ALIASED;
+    drawing_state.tag1 = 0xdead;
+    drawing_state.tag2 = 0xbeef;
+    drawing_state.transform = transform1;
+    hr = ID2D1Factory_CreateDrawingStateBlock(factory, &drawing_state, text_rendering_params1, &state_block);
+    ok(SUCCEEDED(hr), "Failed to create drawing state block, hr %#x\n", hr);
+
+    ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_ALIASED,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1DrawingStateBlock_GetTextRenderingParams(state_block, &text_rendering_params2);
+    ok(text_rendering_params2 == text_rendering_params1, "Got unexpected text rendering params %p, expected %p.\n",
+            text_rendering_params2, text_rendering_params1);
+    IDWriteRenderingParams_Release(text_rendering_params2);
+
+    ID2D1RenderTarget_RestoreDrawingState(rt, state_block);
+
+    drawing_state.antialiasMode = ID2D1RenderTarget_GetAntialiasMode(rt);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_ALIASED,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    drawing_state.textAntialiasMode = ID2D1RenderTarget_GetTextAntialiasMode(rt);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
+    ok(drawing_state.tag1 == 0xdead && drawing_state.tag2 == 0xbeef, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
+    ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1RenderTarget_GetTextRenderingParams(rt, &text_rendering_params2);
+    ok(text_rendering_params2 == text_rendering_params1, "Got unexpected text rendering params %p, expected %p.\n",
+            text_rendering_params2, text_rendering_params1);
+    IDWriteRenderingParams_Release(text_rendering_params2);
+
+    ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    ID2D1RenderTarget_SetTextAntialiasMode(rt, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    ID2D1RenderTarget_SetTags(rt, 1, 2);
+    ID2D1RenderTarget_SetTransform(rt, &transform2);
+    ID2D1RenderTarget_SetTextRenderingParams(rt, NULL);
+
+    drawing_state.antialiasMode = ID2D1RenderTarget_GetAntialiasMode(rt);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    drawing_state.textAntialiasMode = ID2D1RenderTarget_GetTextAntialiasMode(rt);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ID2D1RenderTarget_GetTags(rt, &drawing_state.tag1, &drawing_state.tag2);
+    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ID2D1RenderTarget_GetTransform(rt, &drawing_state.transform);
+    ok(!memcmp(&drawing_state.transform, &transform2, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1RenderTarget_GetTextRenderingParams(rt, &text_rendering_params2);
+    ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
+
+    ID2D1RenderTarget_SaveDrawingState(rt, state_block);
+
+    ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ok(drawing_state.tag1 == 1 && drawing_state.tag2 == 2, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!memcmp(&drawing_state.transform, &transform2, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1DrawingStateBlock_GetTextRenderingParams(state_block, &text_rendering_params2);
+    ok(!text_rendering_params2, "Got unexpected text rendering params %p.\n", text_rendering_params2);
+
+    drawing_state.antialiasMode = D2D1_ANTIALIAS_MODE_ALIASED;
+    drawing_state.textAntialiasMode = D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE;
+    drawing_state.tag1 = 3;
+    drawing_state.tag2 = 4;
+    drawing_state.transform = transform1;
+    ID2D1DrawingStateBlock_SetDescription(state_block, &drawing_state);
+    ID2D1DrawingStateBlock_SetTextRenderingParams(state_block, text_rendering_params1);
+
+    ID2D1DrawingStateBlock_GetDescription(state_block, &drawing_state);
+    ok(drawing_state.antialiasMode == D2D1_ANTIALIAS_MODE_ALIASED,
+            "Got unexpected antialias mode %#x.\n", drawing_state.antialiasMode);
+    ok(drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
+            "Got unexpected text antialias mode %#x.\n", drawing_state.textAntialiasMode);
+    ok(drawing_state.tag1 == 3 && drawing_state.tag2 == 4, "Got unexpected tags %08x%08x:%08x%08x.\n",
+            (unsigned int)(drawing_state.tag1 >> 32), (unsigned int)(drawing_state.tag1),
+            (unsigned int)(drawing_state.tag2 >> 32), (unsigned int)(drawing_state.tag2));
+    ok(!memcmp(&drawing_state.transform, &transform1, sizeof(drawing_state.transform)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            drawing_state.transform._11, drawing_state.transform._12, drawing_state.transform._21,
+            drawing_state.transform._22, drawing_state.transform._31, drawing_state.transform._32);
+    ID2D1DrawingStateBlock_GetTextRenderingParams(state_block, &text_rendering_params2);
+    ok(text_rendering_params2 == text_rendering_params1, "Got unexpected text rendering params %p, expected %p.\n",
+            text_rendering_params2, text_rendering_params1);
+    IDWriteRenderingParams_Release(text_rendering_params2);
+
+    ID2D1DrawingStateBlock_Release(state_block);
+
+    refcount = IDWriteRenderingParams_Release(text_rendering_params1);
+    ok(!refcount, "Rendering params %u references left.\n", refcount);
+    ID2D1Factory_Release(factory);
+    ID2D1RenderTarget_Release(rt);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
+static void test_color_brush(void)
+{
+    D2D1_MATRIX_3X2_F matrix, tmp_matrix;
+    D2D1_BRUSH_PROPERTIES brush_desc;
+    D2D1_COLOR_F color, tmp_color;
+    ID2D1SolidColorBrush *brush;
+    IDXGISwapChain *swapchain;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    D2D1_RECT_F rect;
+    float opacity;
+    HWND window;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+
+    ID2D1RenderTarget_SetDpi(rt, 192.0f, 48.0f);
+    ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
+
+    set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    opacity = ID2D1SolidColorBrush_GetOpacity(brush);
+    ok(opacity == 1.0f, "Got unexpected opacity %.8e.\n", opacity);
+    set_matrix_identity(&matrix);
+    ID2D1SolidColorBrush_GetTransform(brush, &tmp_matrix);
+    ok(!memcmp(&tmp_matrix, &matrix, sizeof(matrix)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_matrix._11, tmp_matrix._12, tmp_matrix._21,
+            tmp_matrix._22, tmp_matrix._31, tmp_matrix._32);
+    tmp_color = ID2D1SolidColorBrush_GetColor(brush);
+    ok(!memcmp(&tmp_color, &color, sizeof(color)),
+            "Got unexpected color {%.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_color.r, tmp_color.g, tmp_color.b, tmp_color.a);
+    ID2D1SolidColorBrush_Release(brush);
+
+    set_color(&color, 0.0f, 1.0f, 0.0f, 0.8f);
+    brush_desc.opacity = 0.3f;
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 2.0f, 2.0f);
+    brush_desc.transform = matrix;
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, &brush_desc, &brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    opacity = ID2D1SolidColorBrush_GetOpacity(brush);
+    ok(opacity == 0.3f, "Got unexpected opacity %.8e.\n", opacity);
+    ID2D1SolidColorBrush_GetTransform(brush, &tmp_matrix);
+    ok(!memcmp(&tmp_matrix, &matrix, sizeof(matrix)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_matrix._11, tmp_matrix._12, tmp_matrix._21,
+            tmp_matrix._22, tmp_matrix._31, tmp_matrix._32);
+    tmp_color = ID2D1SolidColorBrush_GetColor(brush);
+    ok(!memcmp(&tmp_color, &color, sizeof(color)),
+            "Got unexpected color {%.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_color.r, tmp_color.g, tmp_color.b, tmp_color.a);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1RenderTarget_Clear(rt, &color);
+
+    ID2D1SolidColorBrush_SetOpacity(brush, 1.0f);
+    set_rect(&rect, 40.0f, 120.0f, 120.0f, 360.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
+
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 0.5f, 2.0f);
+    translate_matrix(&matrix, 320.0f, 240.0f);
+    rotate_matrix(&matrix, M_PI / 4.0f);
+    ID2D1RenderTarget_SetTransform(rt, &matrix);
+    set_color(&color, 1.0f, 0.0f, 0.0f, 0.625f);
+    ID2D1SolidColorBrush_SetColor(brush, &color);
+    ID2D1SolidColorBrush_SetOpacity(brush, 0.75f);
+    set_rect(&rect, -80.0f, -60.0f, 80.0f, 60.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    ok(compare_surface(surface, "6d1218fca5e21fb7e287b3a439d60dbc251f5ceb"), "Surface does not match.\n");
+
+    ID2D1SolidColorBrush_Release(brush);
+    ID2D1RenderTarget_Release(rt);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
 START_TEST(d2d1)
 {
     test_clip();
+    test_state_block();
+    test_color_brush();
 }

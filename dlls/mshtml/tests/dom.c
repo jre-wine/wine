@@ -430,6 +430,15 @@ static const IID * const img_factory_iids[] = {
     NULL
 };
 
+static const IID * const selection_iids[] = {
+    &IID_IUnknown,
+    &IID_IDispatch,
+    &IID_IDispatchEx,
+    &IID_IHTMLSelectionObject,
+    &IID_IHTMLSelectionObject2,
+    NULL
+};
+
 typedef struct {
     const char *tag;
     REFIID *iids;
@@ -5151,6 +5160,7 @@ static void test_txtrange(IHTMLDocument2 *doc)
     ok(hres == S_OK, "IHTMLDocument2_get_selection failed: %08x\n", hres);
 
     test_disp((IUnknown*)selection, &IID_IHTMLSelectionObject, "[object]");
+    test_ifaces((IUnknown*)selection, selection_iids);
 
     hres = IHTMLSelectionObject_createRange(selection, &disp_range);
     ok(hres == S_OK, "IHTMLSelectionObject_createRange failed: %08x\n", hres);
@@ -6813,7 +6823,7 @@ static void test_table_elem(IHTMLElement *elem)
     hres = IHTMLTable_put_width(table, v);
     ok(hres == S_OK, "put_width = %08x\n", hres);
     VariantClear(&v);
-    IHTMLTable_get_width(table, &v);
+    hres = IHTMLTable_get_width(table, &v);
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
@@ -6823,7 +6833,7 @@ static void test_table_elem(IHTMLElement *elem)
     hres = IHTMLTable_put_width(table, v);
     ok(hres == S_OK, "put_width = %08x\n", hres);
     VariantClear(&v);
-    IHTMLTable_get_width(table, &v);
+    hres = IHTMLTable_get_width(table, &v);
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
@@ -6833,7 +6843,7 @@ static void test_table_elem(IHTMLElement *elem)
     hres = IHTMLTable_put_width(table, v);
     ok(hres == S_OK, "put_width = %08x\n", hres);
     VariantClear(&v);
-    IHTMLTable_get_width(table, &v);
+    hres = IHTMLTable_get_width(table, &v);
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "40.2%"), "Expected 40.2%%, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
@@ -6842,7 +6852,7 @@ static void test_table_elem(IHTMLElement *elem)
     V_I4(&v) = 11;
     hres = IHTMLTable_put_width(table, v);
     ok(hres == S_OK, "put_width = %08x\n", hres);
-    IHTMLTable_get_width(table, &v);
+    hres = IHTMLTable_get_width(table, &v);
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
@@ -6851,7 +6861,7 @@ static void test_table_elem(IHTMLElement *elem)
     V_R8(&v) = 11.9;
     hres = IHTMLTable_put_width(table, v);
     ok(hres == S_OK, "put_width = %08x\n", hres);
-    IHTMLTable_get_width(table, &v);
+    hres = IHTMLTable_get_width(table, &v);
     ok(hres == S_OK, "get_width = %08x\n", hres);
     ok(!strcmp_wa(V_BSTR(&v), "11"), "Expected 11, got %s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);

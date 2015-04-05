@@ -2525,6 +2525,7 @@ static HRESULT WINAPI d3d_device3_GetRenderState(IDirect3DDevice3 *iface,
         }
 
         case D3DRENDERSTATE_LIGHTING:
+        case D3DRENDERSTATE_NORMALIZENORMALS:
             *value = 0xffffffff;
             return D3D_OK;
 
@@ -2884,6 +2885,7 @@ static HRESULT WINAPI d3d_device3_SetRenderState(IDirect3DDevice3 *iface,
         }
 
         case D3DRENDERSTATE_LIGHTING:
+        case D3DRENDERSTATE_NORMALIZENORMALS:
             hr = D3D_OK;
             break;
 
@@ -6837,6 +6839,8 @@ static HRESULT d3d_device_init(struct d3d_device *device, struct ddraw *ddraw,
         wined3d_device_set_render_state(ddraw->wined3d_device, WINED3D_RS_COLORKEYENABLE, TRUE);
     else if (version == 2)
         wined3d_device_set_render_state(ddraw->wined3d_device, WINED3D_RS_SPECULARENABLE, TRUE);
+    if (version < 7)
+        wined3d_device_set_render_state(ddraw->wined3d_device, WINED3D_RS_NORMALIZENORMALS, TRUE);
 
     return D3D_OK;
 }

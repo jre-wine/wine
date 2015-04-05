@@ -1447,6 +1447,11 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         ERR("Failed to allocate shader backend context data.\n");
         goto out;
     }
+    if (!device->adapter->fragment_pipe->allocate_context_data(ret))
+    {
+        ERR("Failed to allocate fragment pipeline context data.\n");
+        goto out;
+    }
 
     /* Initialize the texture unit mapping to a 1:1 mapping */
     for (s = 0; s < MAX_COMBINED_SAMPLERS; ++s)
@@ -1764,6 +1769,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
 
 out:
     device->shader_backend->shader_free_context_data(ret);
+    device->adapter->fragment_pipe->free_context_data(ret);
     HeapFree(GetProcessHeap(), 0, ret->free_event_queries);
     HeapFree(GetProcessHeap(), 0, ret->free_occlusion_queries);
     HeapFree(GetProcessHeap(), 0, ret->free_timestamp_queries);
@@ -1797,6 +1803,7 @@ void context_destroy(struct wined3d_device *device, struct wined3d_context *cont
     }
 
     device->shader_backend->shader_free_context_data(context);
+    device->adapter->fragment_pipe->free_context_data(context);
     HeapFree(GetProcessHeap(), 0, context->draw_buffers);
     HeapFree(GetProcessHeap(), 0, context->blit_targets);
     device_context_remove(device, context);
@@ -2771,7 +2778,11 @@ void context_stream_info_from_declaration(struct wined3d_context *context,
 
         if (use_vshader)
         {
-            if (element->output_slot == ~0U)
+            if (element->output_slot == WINED3D_OUTPUT_SLOT_UNUSED)
+            {
+                stride_used = FALSE;
+            }
+            else if (element->output_slot == WINED3D_OUTPUT_SLOT_SEMANTIC)
             {
                 /* TODO: Assuming vertexdeclarations are usually used with the
                  * same or a similar shader, it might be worth it to store the
@@ -2802,16 +2813,31 @@ void context_stream_info_from_declaration(struct wined3d_context *context,
         if (stride_used)
         {
             TRACE("Load %s array %u [usage %s, usage_idx %u, "
-                    "input_slot %u, offset %u, stride %u, format %s].\n",
+                    "input_slot %u, offset %u, stride %u, format %s, class %s, step_rate %u].\n",
                     use_vshader ? "shader": "fixed function", idx,
                     debug_d3ddeclusage(element->usage), element->usage_idx, element->input_slot,
-                    element->offset, stream->stride, debug_d3dformat(element->format->id));
+                    element->offset, stream->stride, debug_d3dformat(element->format->id),
+                    debug_d3dinput_classification(element->input_slot_class), element->instance_data_step_rate);
 
             stream_info->elements[idx].format = element->format;
             stream_info->elements[idx].data.buffer_object = 0;
             stream_info->elements[idx].data.addr = (BYTE *)NULL + stream->offset + element->offset;
             stream_info->elements[idx].stride = stream->stride;
             stream_info->elements[idx].stream_idx = element->input_slot;
+            if (stream->flags & WINED3DSTREAMSOURCE_INSTANCEDATA)
+            {
+                stream_info->elements[idx].divisor = 1;
+            }
+            else if (element->input_slot_class == WINED3D_INPUT_PER_INSTANCE_DATA)
+            {
+                stream_info->elements[idx].divisor = element->instance_data_step_rate;
+                if (!element->instance_data_step_rate)
+                    FIXME("Instance step rate 0 not implemented.\n");
+            }
+            else
+            {
+                stream_info->elements[idx].divisor = 0;
+            }
 
             if (!context->gl_info->supported[ARB_VERTEX_ARRAY_BGRA]
                     && element->format->id == WINED3DFMT_B8G8R8A8_UNORM)

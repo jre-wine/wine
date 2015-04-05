@@ -650,7 +650,17 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     - (BOOL) preventResizing
     {
         BOOL preventForClipping = cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor];
-        return ([self styleMask] & NSResizableWindowMask) && (disabled || !resizable || maximized || preventForClipping);
+        return ([self styleMask] & NSResizableWindowMask) && (disabled || !resizable || preventForClipping);
+    }
+
+    - (BOOL) allowsMovingWithMaximized:(BOOL)inMaximized
+    {
+        if (allow_immovable_windows && (disabled || inMaximized))
+            return NO;
+        else if (cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor])
+            return NO;
+        else
+            return YES;
     }
 
     - (void) adjustFeaturesForState
@@ -682,14 +692,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
 
         if (allow_immovable_windows || cursor_clipping_locks_windows)
-        {
-            if (allow_immovable_windows && (disabled || maximized))
-                [self setMovable:NO];
-            else if (cursor_clipping_locks_windows && [[WineApplicationController sharedController] clippingCursor])
-                [self setMovable:NO];
-            else
-                [self setMovable:YES];
-        }
+            [self setMovable:[self allowsMovingWithMaximized:maximized]];
     }
 
     - (void) adjustFullScreenBehavior:(NSWindowCollectionBehavior)behavior
@@ -814,6 +817,16 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         macdrv_release_event(event);
     }
 
+    - (void) sendResizeStartQuery
+    {
+        macdrv_query* query = macdrv_create_query();
+        query->type = QUERY_RESIZE_START;
+        query->window = (macdrv_window)[self retain];
+
+        [self.queue query:query timeout:0.3];
+        macdrv_release_query(query);
+    }
+
     - (void) setMacDrvState:(const struct macdrv_window_state*)state
     {
         NSWindowCollectionBehavior behavior;
@@ -892,6 +905,9 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         {
             maximized = state->maximized;
             [self adjustFeaturesForState];
+
+            if (!maximized && [self inLiveResize])
+                [self sendResizeStartQuery];
         }
 
         behavior = NSWindowCollectionBehaviorDefault;
@@ -1530,6 +1546,22 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [self adjustFeaturesForState];
     }
 
+    - (void) endWindowDragging
+    {
+        if (draggingPhase)
+        {
+            if (draggingPhase == 3)
+            {
+                macdrv_event* event = macdrv_create_event(WINDOW_DRAG_END, self);
+                [queue postEvent:event];
+                macdrv_release_event(event);
+            }
+
+            draggingPhase = 0;
+            [[WineApplicationController sharedController] window:self isBeingDragged:NO];
+        }
+    }
+
 
     /*
      * ---------- NSWindow method overrides ----------
@@ -1590,14 +1622,104 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (void) sendEvent:(NSEvent*)event
     {
+        NSEventType type = event.type;
+
         /* NSWindow consumes certain key-down events as part of Cocoa's keyboard
            interface control.  For example, Control-Tab switches focus among
            views.  We want to bypass that feature, so directly route key-down
            events to -keyDown:. */
-        if ([event type] == NSKeyDown)
+        if (type == NSKeyDown)
             [[self firstResponder] keyDown:event];
         else
+        {
+            if (!draggingPhase && maximized && ![self isMovable] &&
+                ![self allowsMovingWithMaximized:YES] && [self allowsMovingWithMaximized:NO] &&
+                type == NSLeftMouseDown && (self.styleMask & NSTitledWindowMask))
+            {
+                NSRect titleBar = self.frame;
+                NSRect contentRect = [self contentRectForFrameRect:titleBar];
+                titleBar.size.height = NSMaxY(titleBar) - NSMaxY(contentRect);
+                titleBar.origin.y = NSMaxY(contentRect);
+
+                dragStartPosition = [self convertBaseToScreen:event.locationInWindow];
+
+                if (NSMouseInRect(dragStartPosition, titleBar, NO))
+                {
+                    static const NSWindowButton buttons[] = {
+                        NSWindowCloseButton,
+                        NSWindowMiniaturizeButton,
+                        NSWindowZoomButton,
+                        NSWindowFullScreenButton,
+                    };
+                    BOOL hitButton = NO;
+                    int i;
+
+                    for (i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i++)
+                    {
+                        NSButton* button;
+
+                        if (buttons[i] == NSWindowFullScreenButton && ![self respondsToSelector:@selector(toggleFullScreen:)])
+                            continue;
+
+                        button = [self standardWindowButton:buttons[i]];
+                        if ([button hitTest:[button.superview convertPoint:event.locationInWindow fromView:nil]])
+                        {
+                            hitButton = YES;
+                            break;
+                        }
+                    }
+
+                    if (!hitButton)
+                    {
+                        draggingPhase = 1;
+                        dragWindowStartPosition = NSMakePoint(NSMinX(titleBar), NSMaxY(titleBar));
+                        [[WineApplicationController sharedController] window:self isBeingDragged:YES];
+                    }
+                }
+            }
+            else if (draggingPhase && (type == NSLeftMouseDragged || type == NSLeftMouseUp))
+            {
+                if ([self isMovable])
+                {
+                    NSPoint point = [self convertBaseToScreen:event.locationInWindow];
+                    NSPoint newTopLeft = dragWindowStartPosition;
+
+                    newTopLeft.x += point.x - dragStartPosition.x;
+                    newTopLeft.y += point.y - dragStartPosition.y;
+
+                    if (draggingPhase == 2)
+                    {
+                        macdrv_event* event = macdrv_create_event(WINDOW_DRAG_BEGIN, self);
+                        [queue postEvent:event];
+                        macdrv_release_event(event);
+
+                        draggingPhase = 3;
+                    }
+
+                    [self setFrameTopLeftPoint:newTopLeft];
+                }
+                else if (draggingPhase == 1 && type == NSLeftMouseDragged)
+                {
+                    macdrv_event* event;
+                    NSRect frame = [self contentRectForFrameRect:self.frame];
+
+                    [[WineApplicationController sharedController] flipRect:&frame];
+
+                    event = macdrv_create_event(WINDOW_RESTORE_REQUESTED, self);
+                    event->window_restore_requested.keep_frame = TRUE;
+                    event->window_restore_requested.frame = NSRectToCGRect(frame);
+                    [queue postEvent:event];
+                    macdrv_release_event(event);
+
+                    draggingPhase = 2;
+                }
+
+                if (type == NSLeftMouseUp)
+                    [self endWindowDragging];
+            }
+
             [super sendEvent:event];
+        }
     }
 
     - (void) miniaturize:(id)sender
@@ -1797,9 +1919,12 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (void) windowDidEndLiveResize:(NSNotification *)notification
     {
-        macdrv_event* event = macdrv_create_event(WINDOW_RESIZE_ENDED, self);
-        [queue postEvent:event];
-        macdrv_release_event(event);
+        if (!maximized)
+        {
+            macdrv_event* event = macdrv_create_event(WINDOW_RESIZE_ENDED, self);
+            [queue postEvent:event];
+            macdrv_release_event(event);
+        }
 
         self.liveResizeDisplayTimer = nil;
     }
@@ -1958,6 +2083,9 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     {
         if ([self inLiveResize])
         {
+            if (maximized)
+                return self.frame.size;
+
             NSRect rect;
             macdrv_query* query;
 
@@ -1992,12 +2120,23 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
     - (void) windowWillStartLiveResize:(NSNotification *)notification
     {
-        macdrv_query* query = macdrv_create_query();
-        query->type = QUERY_RESIZE_START;
-        query->window = (macdrv_window)[self retain];
+        [self endWindowDragging];
 
-        [self.queue query:query timeout:0.3];
-        macdrv_release_query(query);
+        if (maximized)
+        {
+            macdrv_event* event;
+            NSRect frame = [self contentRectForFrameRect:self.frame];
+
+            [[WineApplicationController sharedController] flipRect:&frame];
+
+            event = macdrv_create_event(WINDOW_RESTORE_REQUESTED, self);
+            event->window_restore_requested.keep_frame = TRUE;
+            event->window_restore_requested.frame = NSRectToCGRect(frame);
+            [queue postEvent:event];
+            macdrv_release_event(event);
+        }
+        else
+            [self sendResizeStartQuery];
 
         frameAtResizeStart = [self frame];
         resizingFromLeft = resizingFromTop = FALSE;

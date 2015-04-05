@@ -143,7 +143,7 @@ case $host in
     fi
     with_fontconfig=${with_fontconfig:-no}
     ;;
-  x86_64*)
+  x86_64*|amd64*)
     if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
     then
       CC="$CC -m32"
@@ -165,6 +165,7 @@ case $host in
                           [AC_MSG_RESULT([no])
                            AC_MSG_ERROR([You need gcc >= 4.4 to build Wine as 64-bit.])])
       fi
+      host_cpu="x86_64"
       AC_SUBST(TARGETFLAGS,"-m64")
     fi
     ;;
@@ -3073,7 +3074,7 @@ WINE_CONFIG_DLL(msisip)
 WINE_CONFIG_DLL(msisys.ocx)
 WINE_CONFIG_DLL(msls31)
 WINE_CONFIG_DLL(msnet32)
-WINE_CONFIG_DLL(mspatcha)
+WINE_CONFIG_DLL(mspatcha,,[implib])
 WINE_CONFIG_DLL(msrle32,,[po])
 WINE_CONFIG_TEST(dlls/msrle32/tests)
 WINE_CONFIG_DLL(mssign32)

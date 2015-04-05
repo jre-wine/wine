@@ -251,6 +251,7 @@ static INT prepare_dc(GpGraphics *graphics, GpPen *pen)
                      (pt[1].Y - pt[0].Y) * (pt[1].Y - pt[0].Y)) / sqrt(2.0);
 
         width *= units_to_pixels(pen->width, pen->unit == UnitWorld ? graphics->unit : pen->unit, graphics->xres);
+        width *= graphics->scale;
     }
 
     if(pen->dash == DashStyleCustom){
@@ -520,20 +521,22 @@ static GpStatus alpha_blend_pixels(GpGraphics *graphics, INT dst_x, INT dst_y,
 
 static ARGB blend_colors(ARGB start, ARGB end, REAL position)
 {
-    ARGB result=0;
-    ARGB i;
-    INT a1, a2, a3;
+    INT start_a, end_a, final_a;
+    INT pos;
 
-    a1 = (start >> 24) & 0xff;
-    a2 = (end >> 24) & 0xff;
+    pos = gdip_round(position * 0xff);
 
-    a3 = (int)(a1*(1.0f - position)+a2*(position));
+    start_a = ((start >> 24) & 0xff) * (pos ^ 0xff);
+    end_a = ((end >> 24) & 0xff) * pos;
 
-    result |= a3 << 24;
+    final_a = start_a + end_a;
 
-    for (i=0xff; i<=0xff0000; i = i << 8)
-        result |= (int)((start&i)*(1.0f - position)+(end&i)*(position))&i;
-    return result;
+    if (final_a < 0xff) return 0;
+
+    return (final_a / 0xff) << 24 |
+        ((((start >> 16) & 0xff) * start_a + (((end >> 16) & 0xff) * end_a)) / final_a) << 16 |
+        ((((start >> 8) & 0xff) * start_a + (((end >> 8) & 0xff) * end_a)) / final_a) << 8 |
+        (((start & 0xff) * start_a + ((end & 0xff) * end_a)) / final_a);
 }
 
 static ARGB blend_line_gradient(GpLineGradient* brush, REAL position)
@@ -2123,7 +2126,7 @@ static void get_font_hfont(GpGraphics *graphics, GDIPCONST GpFont *font,
     HFONT unscaled_font;
     TEXTMETRICW textmet;
 
-    if (font->unit == UnitPixel)
+    if (font->unit == UnitPixel || font->unit == UnitWorld)
         font_height = font->emSize;
     else
     {
@@ -4737,6 +4740,9 @@ GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
     scaled_rect.Y = layoutRect->Y * args.rel_height;
     scaled_rect.Width = layoutRect->Width * args.rel_width;
     scaled_rect.Height = layoutRect->Height * args.rel_height;
+
+    if (scaled_rect.Width >= 1 << 23) scaled_rect.Width = 1 << 23;
+    if (scaled_rect.Height >= 1 << 23) scaled_rect.Height = 1 << 23;
 
     get_font_hfont(graphics, font, stringFormat, &gdifont, NULL);
     oldfont = SelectObject(hdc, gdifont);

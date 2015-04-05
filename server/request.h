@@ -362,6 +362,11 @@ DECL_HANDLER(set_cursor);
 DECL_HANDLER(update_rawinput_devices);
 DECL_HANDLER(get_suspend_context);
 DECL_HANDLER(set_suspend_context);
+DECL_HANDLER(create_job);
+DECL_HANDLER(assign_job);
+DECL_HANDLER(process_in_job);
+DECL_HANDLER(set_job_limits);
+DECL_HANDLER(set_job_completion_port);
 
 #ifdef WANT_REQUEST_HANDLERS
 
@@ -624,6 +629,11 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_update_rawinput_devices,
     (req_handler)req_get_suspend_context,
     (req_handler)req_set_suspend_context,
+    (req_handler)req_create_job,
+    (req_handler)req_assign_job,
+    (req_handler)req_process_in_job,
+    (req_handler)req_set_job_limits,
+    (req_handler)req_set_job_completion_port,
 };
 
 C_ASSERT( sizeof(affinity_t) == 8 );
@@ -2078,7 +2088,8 @@ C_ASSERT( FIELD_OFFSET(struct get_object_info_request, handle) == 12 );
 C_ASSERT( sizeof(struct get_object_info_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct get_object_info_reply, access) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_object_info_reply, ref_count) == 12 );
-C_ASSERT( FIELD_OFFSET(struct get_object_info_reply, total) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_object_info_reply, handle_count) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_object_info_reply, total) == 20 );
 C_ASSERT( sizeof(struct get_object_info_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct unlink_object_request, handle) == 12 );
 C_ASSERT( sizeof(struct unlink_object_request) == 16 );
@@ -2204,6 +2215,24 @@ C_ASSERT( sizeof(struct update_rawinput_devices_request) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_request) == 16 );
 C_ASSERT( sizeof(struct get_suspend_context_reply) == 8 );
 C_ASSERT( sizeof(struct set_suspend_context_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct create_job_request, access) == 12 );
+C_ASSERT( FIELD_OFFSET(struct create_job_request, attributes) == 16 );
+C_ASSERT( sizeof(struct create_job_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct create_job_reply, handle) == 8 );
+C_ASSERT( sizeof(struct create_job_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct assign_job_request, job) == 12 );
+C_ASSERT( FIELD_OFFSET(struct assign_job_request, process) == 16 );
+C_ASSERT( sizeof(struct assign_job_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct process_in_job_request, job) == 12 );
+C_ASSERT( FIELD_OFFSET(struct process_in_job_request, process) == 16 );
+C_ASSERT( sizeof(struct process_in_job_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct set_job_limits_request, handle) == 12 );
+C_ASSERT( FIELD_OFFSET(struct set_job_limits_request, limit_flags) == 16 );
+C_ASSERT( sizeof(struct set_job_limits_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct set_job_completion_port_request, job) == 12 );
+C_ASSERT( FIELD_OFFSET(struct set_job_completion_port_request, port) == 16 );
+C_ASSERT( FIELD_OFFSET(struct set_job_completion_port_request, key) == 24 );
+C_ASSERT( sizeof(struct set_job_completion_port_request) == 32 );
 
 #endif  /* WANT_REQUEST_HANDLERS */
 

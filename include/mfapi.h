@@ -1,7 +1,5 @@
 /*
- * Shared Resource/DllGetVersion version information
- *
- * Copyright (C) 2004 Robert Shearman
+ * Copyright (C) 2015 Austin English
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,8 +16,25 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-/* please keep in sync with shell32.rc values */
-#define WINE_FILEVERSION_MAJOR         6
-#define WINE_FILEVERSION_MINOR         0
-#define WINE_FILEVERSION_BUILD      2900
-#define WINE_FILEVERSION_PLATFORMID 6242
+#ifndef __WINE_MFAPI_H
+#define __WINE_MFAPI_H
+
+#define MFSTARTUP_NOSOCKET 0x1
+#define MFSTARTUP_LITE     (MFSTARTUP_NOSOCKET)
+#define MFSTARTUP_FULL     0
+
+typedef struct _MFT_REGISTER_TYPE_INFO {
+  GUID major_type;
+  GUID sub_type;
+} MFT_REGISTER_TYPE_INFO;
+
+typedef unsigned __int64 MFWORKITEM_KEY;
+
+HRESULT WINAPI MFCancelWorkItem(MFWORKITEM_KEY key);
+HRESULT WINAPI MFGetTimerPeriodicity(DWORD *periodicity);
+HRESULT WINAPI MFLockPlatform(void);
+HRESULT WINAPI MFShutdown(void);
+HRESULT WINAPI MFStartup(ULONG version, DWORD flags);
+HRESULT WINAPI MFUnlockPlatform(void);
+
+#endif /* __WINE_MFAPI_H */

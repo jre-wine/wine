@@ -65,7 +65,11 @@ static ULONG STDMETHODCALLTYPE d2d_state_block_Release(ID2D1DrawingStateBlock *i
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
+    {
+        if (state_block->text_rendering_params)
+            IDWriteRenderingParams_Release(state_block->text_rendering_params);
         HeapFree(GetProcessHeap(), 0, state_block);
+    }
 
     return refcount;
 }
@@ -80,25 +84,46 @@ static void STDMETHODCALLTYPE d2d_state_block_GetFactory(ID2D1DrawingStateBlock 
 static void STDMETHODCALLTYPE d2d_state_block_GetDescription(ID2D1DrawingStateBlock *iface,
         D2D1_DRAWING_STATE_DESCRIPTION *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d2d_state_block *state_block = impl_from_ID2D1DrawingStateBlock(iface);
+
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    *desc = state_block->drawing_state;
 }
 
 static void STDMETHODCALLTYPE d2d_state_block_SetDescription(ID2D1DrawingStateBlock *iface,
         const D2D1_DRAWING_STATE_DESCRIPTION *desc)
 {
-    FIXME("iface %p, desc %p stub!\n", iface, desc);
+    struct d2d_state_block *state_block = impl_from_ID2D1DrawingStateBlock(iface);
+
+    TRACE("iface %p, desc %p.\n", iface, desc);
+
+    state_block->drawing_state = *desc;
 }
 
 static void STDMETHODCALLTYPE d2d_state_block_SetTextRenderingParams(ID2D1DrawingStateBlock *iface,
         IDWriteRenderingParams *text_rendering_params)
 {
-    FIXME("iface %p, text_rendering_params %p stub!\n", iface, text_rendering_params);
+    struct d2d_state_block *state_block = impl_from_ID2D1DrawingStateBlock(iface);
+
+    TRACE("iface %p, text_rendering_params %p.\n", iface, text_rendering_params);
+
+    if (text_rendering_params)
+        IDWriteRenderingParams_AddRef(text_rendering_params);
+    if (state_block->text_rendering_params)
+        IDWriteRenderingParams_Release(state_block->text_rendering_params);
+    state_block->text_rendering_params = text_rendering_params;
 }
 
 static void STDMETHODCALLTYPE d2d_state_block_GetTextRenderingParams(ID2D1DrawingStateBlock *iface,
         IDWriteRenderingParams **text_rendering_params)
 {
-    FIXME("iface %p, text_rendering_params %p stub!\n", iface, text_rendering_params);
+    struct d2d_state_block *state_block = impl_from_ID2D1DrawingStateBlock(iface);
+
+    TRACE("iface %p, text_rendering_params %p.\n", iface, text_rendering_params);
+
+    if ((*text_rendering_params = state_block->text_rendering_params))
+        IDWriteRenderingParams_AddRef(*text_rendering_params);
 }
 
 static const struct ID2D1DrawingStateBlockVtbl d2d_state_block_vtbl =
@@ -116,8 +141,27 @@ static const struct ID2D1DrawingStateBlockVtbl d2d_state_block_vtbl =
 void d2d_state_block_init(struct d2d_state_block *state_block, const D2D1_DRAWING_STATE_DESCRIPTION *desc,
         IDWriteRenderingParams *text_rendering_params)
 {
-    FIXME("Ignoring state block properties.\n");
+    static const D2D1_MATRIX_3X2_F identity =
+    {
+        1.0f, 0.0f,
+        0.0f, 1.0f,
+        0.0f, 0.0f,
+    };
 
     state_block->ID2D1DrawingStateBlock_iface.lpVtbl = &d2d_state_block_vtbl;
     state_block->refcount = 1;
+    if (desc)
+        state_block->drawing_state = *desc;
+    else
+        state_block->drawing_state.transform = identity;
+    if ((state_block->text_rendering_params = text_rendering_params))
+        IDWriteRenderingParams_AddRef(state_block->text_rendering_params);
+}
+
+struct d2d_state_block *unsafe_impl_from_ID2D1DrawingStateBlock(ID2D1DrawingStateBlock *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d2d_state_block_vtbl);
+    return CONTAINING_RECORD(iface, struct d2d_state_block, ID2D1DrawingStateBlock_iface);
 }

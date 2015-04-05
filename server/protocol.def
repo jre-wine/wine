@@ -3269,6 +3269,7 @@ enum coords_relative
 @REPLY
     unsigned int   access;        /* granted access mask */
     unsigned int   ref_count;     /* object ref count */
+    unsigned int   handle_count;  /* object handle count */
     data_size_t    total;         /* total needed size for name */
     VARARG(name,unicode_str);     /* object name */
 @END
@@ -3366,7 +3367,7 @@ enum coords_relative
     unsigned int attributes;      /* object attributes */
     unsigned int concurrent;      /* max number of concurrent active threads */
     obj_handle_t rootdir;         /* root directory */
-    VARARG(filename,string);      /* port name */
+    VARARG(filename,unicode_str); /* port name */
 @REPLY
     obj_handle_t handle;          /* port handle */
 @END
@@ -3377,7 +3378,7 @@ enum coords_relative
     unsigned int access;          /* desired access to a port */
     unsigned int attributes;      /* object attributes */
     obj_handle_t rootdir;         /* root directory */
-    VARARG(filename,string);      /* port name */
+    VARARG(filename,unicode_str); /* port name */
 @REPLY
     obj_handle_t handle;          /* port handle */
 @END
@@ -3503,4 +3504,43 @@ enum coords_relative
 /* Store the suspend context of a thread */
 @REQ(set_suspend_context)
     VARARG(context,context);   /* thread context */
+@END
+
+
+/* Create a new job object */
+@REQ(create_job)
+    unsigned int access;          /* wanted access rights */
+    unsigned int attributes;      /* object attributes */
+    VARARG(objattr,object_attributes); /* object attributes */
+@REPLY
+    obj_handle_t handle;          /* handle to the job */
+@END
+
+
+/* Assign a job object to a process */
+@REQ(assign_job)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t process;         /* handle to the process */
+@END
+
+
+/* Check if a process is associated with a job */
+@REQ(process_in_job)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t process;         /* handle to the process */
+@END
+
+
+/* Set limit flags on a job */
+@REQ(set_job_limits)
+    obj_handle_t handle;          /* handle to the job */
+    unsigned int limit_flags;     /* new limit flags */
+@END
+
+
+/* Set new completion port for a job */
+@REQ(set_job_completion_port)
+    obj_handle_t job;             /* handle to the job */
+    obj_handle_t port;            /* handle to the completion port */
+    client_ptr_t key;             /* key to send with completion messages */
 @END
