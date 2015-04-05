@@ -2648,6 +2648,98 @@ static void test_WSADuplicateSocket(void)
     closesocket(source);
 }
 
+static void test_WSAEnumNetworkEvents(void)
+{
+    SOCKET s, s2;
+    int sock_type[] = {SOCK_STREAM, SOCK_DGRAM, SOCK_STREAM}, i, j, k, l;
+    struct sockaddr_in address;
+    HANDLE event;
+    WSANETWORKEVENTS net_events;
+    /* Windows 2000 Pro without SP installed (testbot) will crash if
+     * WSAEnumNetworkEvents have a NULL event, so skip this test in <= 2000 */
+    DWORD ver = GetVersion() & 0xFFFF;
+    BOOL supports_null = ((ver & 0xFF) << 8 | (ver >> 8)) > 0x0500;
+
+    memset(&address, 0, sizeof(address));
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_family = AF_INET;
+
+    /* This test follows the steps from bugs 10204 and 24946 */
+    for (l = 0; l < 2; l++)
+    {
+        if (l == 1 && !supports_null && broken(1)) continue;
+
+        for (i = 0; i < sizeof(sock_type) / sizeof(sock_type[0]); i++)
+        {
+            if (i == 2)
+                ok(!tcp_socketpair(&s, &s2), "Test[%d]: creating socket pair failed\n", i);
+            else
+            {
+                s = socket(AF_INET, sock_type[i], 0);
+                ok (s != SOCKET_ERROR, "Test[%d]: failed to create socket\n", i);
+                ok (!bind(s, (struct sockaddr*) &address, sizeof(address)), "Test[%d]: bind failed\n", i);
+            }
+            event = WSACreateEvent();
+            ok (event != NULL, "Test[%d]: failed to create event\n", i);
+            for (j = 0; j < 5; j++) /* Repeat sometimes and the result must be the same */
+            {
+                /* When the TCP socket is not connected NO events will be returned.
+                 * When connected and no data pending it will get the write event.
+                 * UDP sockets don't have connections so as soon as they are bound
+                 * they can read/write data. Since nobody is sendind us data only
+                 * the write event will be returned and ONLY once.
+                 */
+                ok (!WSAEventSelect(s, event, FD_READ | FD_WRITE), "Test[%d]: WSAEventSelect failed\n", i);
+                memset(&net_events, 0xAB, sizeof(net_events));
+                ok (!WSAEnumNetworkEvents(s, l == 0 ? event : NULL, &net_events),
+                    "Test[%d]: WSAEnumNetworkEvents failed\n", i);
+                if (i >= 1 && j == 0) /* FD_WRITE is SET on first try for UDP and connected TCP */
+                {
+                    if (i == 0) /* Remove when fixed */
+                    {
+                        todo_wine
+                        ok (net_events.lNetworkEvents == FD_WRITE, "Test[%d]: expected 2, got %d\n",
+                            i, net_events.lNetworkEvents);
+                    }
+                    else
+                    ok (net_events.lNetworkEvents == FD_WRITE, "Test[%d]: expected 2, got %d\n",
+                        i, net_events.lNetworkEvents);
+                }
+                else
+                {
+                    if (i != 0) /* Remove when fixed */
+                    {
+                        todo_wine
+                        ok (net_events.lNetworkEvents == 0, "Test[%d]: expected 0, got %d\n",
+                            i, net_events.lNetworkEvents);
+                    }
+                    else
+                    ok (net_events.lNetworkEvents == 0, "Test[%d]: expected 0, got %d\n",
+                        i, net_events.lNetworkEvents);
+                }
+                for (k = 0; k < FD_MAX_EVENTS; k++)
+                {
+                    if (i >= 1 && j == 0 && k == 1) /* first UDP and connected TCP test, FD_WRITE bit no error*/
+                    {
+                        ok (net_events.iErrorCode[k] == 0x0, "Test[%d][%d]: expected 0x0, got 0x%x\n",
+                            i, k, net_events.iErrorCode[k]);
+                    }
+                    else
+                    {
+                        /* Bits that are not set in lNetworkEvents MUST not be changed */
+                        todo_wine
+                        ok (net_events.iErrorCode[k] == 0xABABABAB, "Test[%d][%d]: expected 0xABABABAB, got 0x%x\n",
+                            i, k, net_events.iErrorCode[k]);
+                    }
+                }
+            }
+            closesocket(s);
+            WSACloseEvent(event);
+            if (i == 2) closesocket(s2);
+        }
+    }
+}
+
 static void test_WSAAddressToStringA(void)
 {
     SOCKET v6 = INVALID_SOCKET;
@@ -3430,13 +3522,10 @@ static void test_select(void)
     if (fdWrite > maxfd)
         maxfd = fdWrite;
        
-    todo_wine {
     ret = select(maxfd+1, &readfds, &writefds, &exceptfds, &select_timeout);
     ok ( (ret == 0), "select should not return any socket handles\n");
     ok ( !FD_ISSET(fdRead, &readfds), "FD should not be set\n");
-    }
     ok ( !FD_ISSET(fdWrite, &writefds), "FD should not be set\n");
-
     ok ( !FD_ISSET(fdRead, &exceptfds), "FD should not be set\n");
     ok ( !FD_ISSET(fdWrite, &exceptfds), "FD should not be set\n");
  
@@ -3574,7 +3663,7 @@ static void test_select(void)
     /* select() works in 3 distinct states:
      * - to check if a connection attempt ended with success or error;
      * - to check if a pending connection is waiting for acceptance;
-     * - to check for data to read, avaliability for write and OOB data
+     * - to check for data to read, availability for write and OOB data
      *
      * The tests below ensure that all conditions are tested.
      */
@@ -3629,9 +3718,7 @@ static void test_select(void)
     FD_SET(fdRead, &readfds);
     FD_SET(fdRead, &exceptfds);
     ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
-todo_wine
     ok(ret == 1, "expected 1, got %d\n", ret);
-todo_wine
     ok(FD_ISSET(fdRead, &exceptfds), "fdRead socket is not in the set\n");
     tmp_buf[0] = 0xAF;
     ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), MSG_OOB);
@@ -3654,11 +3741,14 @@ todo_wine
     tmp_buf[0] = 0xAF;
     SetLastError(0xdeadbeef);
     ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), MSG_OOB);
-    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret); /* can't recv with MSG_OOB if OOBINLINED */
-    ok(GetLastError() == WSAEINVAL, "expected 10022, got %d\n", GetLastError());
-    ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), 0);
-    ok(ret == 1, "expected 1, got %d\n", ret);
-    ok(tmp_buf[0] == 'A', "expected 'A', got 0x%02X\n", tmp_buf[0]);
+    if (ret == SOCKET_ERROR) /* can't recv with MSG_OOB if OOBINLINED */
+    {
+        ok(GetLastError() == WSAEINVAL, "expected 10022, got %d\n", GetLastError());
+        ret = recv(fdRead, tmp_buf, sizeof(tmp_buf), 0);
+        ok(ret == 1, "expected 1, got %d\n", ret);
+        ok(tmp_buf[0] == 'A', "expected 'A', got 0x%02X\n", tmp_buf[0]);
+    }
+    else ok(broken(ret == 1) /* <= NT4 */, "expected error, got 1\n");
 
     /* When the connection is closed the socket is set in the read descriptor */
     ret = closesocket(fdRead);
@@ -3683,9 +3773,7 @@ todo_wine
     FD_SET(fdWrite, &exceptfds);
     select_timeout.tv_sec = 2; /* requires more time to realize it will not connect */
     ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
-todo_wine
     ok(ret == 1, "expected 1, got %d\n", ret);
-todo_wine
     ok(FD_ISSET(fdWrite, &exceptfds), "fdWrite socket is not in the set\n");
     ok(select_timeout.tv_usec == 250000, "select timeout should not have changed\n");
     closesocket(fdWrite);
@@ -4624,14 +4712,12 @@ static void test_ioctlsocket(void)
     ret = recv(dst, &data, 1, i);
     ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
     ret = GetLastError();
-todo_wine
     ok(ret == WSAEWOULDBLOCK, "expected 10035, got %d\n", ret);
     bufs.len = sizeof(char);
     bufs.buf = &data;
     ret = WSARecv(dst, &bufs, 1, &bytes_rec, &i, NULL, NULL);
     ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
     ret = GetLastError();
-todo_wine
     ok(ret == WSAEWOULDBLOCK, "expected 10035, got %d\n", ret);
     optval = 1;
     ret = setsockopt(dst, SOL_SOCKET, SO_OOBINLINE, (void *)&optval, sizeof(optval));
@@ -4639,15 +4725,18 @@ todo_wine
     i = MSG_OOB;
     SetLastError(0xdeadbeef);
     ret = recv(dst, &data, 1, i);
-    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
-    ret = GetLastError();
-    ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
-    bufs.len = sizeof(char);
-    bufs.buf = &data;
-    ret = WSARecv(dst, &bufs, 1, &bytes_rec, &i, NULL, NULL);
-    ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
-    ret = GetLastError();
-    ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
+    if (ret == SOCKET_ERROR)
+    {
+        ret = GetLastError();
+        ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
+        bufs.len = sizeof(char);
+        bufs.buf = &data;
+        ret = WSARecv(dst, &bufs, 1, &bytes_rec, &i, NULL, NULL);
+        ok(ret == SOCKET_ERROR, "expected -1, got %d\n", ret);
+        ret = GetLastError();
+        ok(ret == WSAEINVAL, "expected 10022, got %d\n", ret);
+    }
+    else ok(broken(ret == 1) /* <= NT4 */, "expected error, got 1\n");
 
     closesocket(dst);
     optval = 0xdeadbeef;
@@ -7327,7 +7416,7 @@ static void test_sioAddressListChange(void)
         goto end;
     }
 
-    /* Wait for address changes, request that the user connect/disconnect an interface */
+    /* Wait for address changes, request that the user connects/disconnects an interface */
     memset(&overlapped, 0, sizeof(overlapped));
     overlapped.hEvent = CreateEventA(NULL, FALSE, FALSE, NULL);
     ret = WSAIoctl(sock, SIO_ADDRESS_LIST_CHANGE, NULL, 0, NULL, 0, &num_bytes, &overlapped, NULL);
@@ -8461,6 +8550,7 @@ START_TEST( sock )
     test_getservbyname();
     test_WSASocket();
     test_WSADuplicateSocket();
+    test_WSAEnumNetworkEvents();
 
     test_WSAAddressToStringA();
     test_WSAAddressToStringW();

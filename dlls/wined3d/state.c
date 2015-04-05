@@ -132,7 +132,7 @@ static void state_zenable(struct wined3d_context *context, const struct wined3d_
     }
 
     if (context->last_was_rhw && !isStateDirty(context, STATE_TRANSFORM(WINED3D_TS_PROJECTION)))
-        transform_projection(context, state, STATE_TRANSFORM(WINED3D_TS_PROJECTION));
+        context_apply_state(context, state, STATE_TRANSFORM(WINED3D_TS_PROJECTION));
 }
 
 static void state_cullmode(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -3278,12 +3278,10 @@ void tex_alphaop(struct wined3d_context *context, const struct wined3d_state *st
 
 void transform_texture(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    DWORD texUnit = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
-    const struct wined3d_device *device = context->swapchain->device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    DWORD mapped_stage = context->tex_unit_map[texUnit];
-    BOOL generated;
-    int coordIdx;
+    unsigned int tex = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
+    unsigned int mapped_stage = context->tex_unit_map[tex];
+    struct wined3d_matrix mat;
 
     /* Ignore this when a vertex shader is used, or if the streams aren't sorted out yet */
     if (use_vs(state) || isStateDirty(context, STATE_VDECL))
@@ -3296,31 +3294,13 @@ void transform_texture(struct wined3d_context *context, const struct wined3d_sta
     if (mapped_stage >= gl_info->limits.textures) return;
 
     context_active_texture(context, gl_info, mapped_stage);
-    generated = (state->texture_states[texUnit][WINED3D_TSS_TEXCOORD_INDEX] & 0xffff0000) != WINED3DTSS_TCI_PASSTHRU;
-    coordIdx = min(state->texture_states[texUnit][WINED3D_TSS_TEXCOORD_INDEX & 0x0000ffff], MAX_TEXTURES - 1);
+    gl_info->gl_ops.gl.p_glMatrixMode(GL_TEXTURE);
+    checkGLcall("glMatrixMode(GL_TEXTURE)");
 
-    set_texture_matrix(gl_info, &state->transforms[WINED3D_TS_TEXTURE0 + texUnit],
-            state->texture_states[texUnit][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS],
-            generated, context->last_was_rhw,
-            context->stream_info.use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coordIdx))
-            ? context->stream_info.elements[WINED3D_FFP_TEXCOORD0 + coordIdx].format->id
-            : WINED3DFMT_UNKNOWN,
-            device->shader_backend->shader_has_ffp_proj_control(device->shader_priv));
+    get_texture_matrix(context, state, mapped_stage, &mat);
 
-    /* The sampler applying function calls us if this changes */
-    if ((context->lastWasPow2Texture & (1 << texUnit)) && state->textures[texUnit])
-    {
-        if(generated) {
-            FIXME("Non-power2 texture being used with generated texture coords\n");
-        }
-        /* NP2 texcoord fixup is implemented for pixelshaders so only enable the
-           fixed-function-pipeline fixup via pow2Matrix when no PS is used. */
-        if (!use_ps(state))
-        {
-            TRACE("Non power two matrix multiply fixup\n");
-            gl_info->gl_ops.gl.p_glMultMatrixf(state->textures[texUnit]->pow2_matrix);
-        }
-    }
+    gl_info->gl_ops.gl.p_glLoadMatrixf(&mat._11);
+    checkGLcall("glLoadMatrixf");
 }
 
 static void unload_tex_coords(const struct wined3d_gl_info *gl_info)
@@ -4049,77 +4029,17 @@ static void transform_view(struct wined3d_context *context, const struct wined3d
     }
 }
 
-void transform_projection(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void transform_projection(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_matrix projection;
 
     gl_info->gl_ops.gl.p_glMatrixMode(GL_PROJECTION);
     checkGLcall("glMatrixMode(GL_PROJECTION)");
 
-    /* There are a couple of additional things we have to take into account
-     * here besides the projection transformation itself:
-     *   - We need to flip along the y-axis in case of offscreen rendering.
-     *   - OpenGL Z range is {-Wc,...,Wc} while D3D Z range is {0,...,Wc}.
-     *   - D3D coordinates refer to pixel centers while GL coordinates refer
-     *     to pixel corners.
-     *   - D3D has a top-left filling convention. We need to maintain this
-     *     even after the y-flip mentioned above.
-     * In order to handle the last two points, we translate by
-     * (63.0 / 128.0) / VPw and (63.0 / 128.0) / VPh. This is equivalent to
-     * translating slightly less than half a pixel. We want the difference to
-     * be large enough that it doesn't get lost due to rounding inside the
-     * driver, but small enough to prevent it from interfering with any
-     * anti-aliasing. */
-
-    if (context->last_was_rhw)
-    {
-        /* Transform D3D RHW coordinates to OpenGL clip coordinates. */
-        double x = state->viewport.x;
-        double y = state->viewport.y;
-        double w = state->viewport.width;
-        double h = state->viewport.height;
-        double x_scale = 2.0 / w;
-        double x_offset = ((63.0 / 64.0) - (2.0 * x) - w) / w;
-        double y_scale = context->render_offscreen ? 2.0 / h : 2.0 / -h;
-        double y_offset = context->render_offscreen
-                ? ((63.0 / 64.0) - (2.0 * y) - h) / h
-                : ((63.0 / 64.0) - (2.0 * y) - h) / -h;
-        enum wined3d_depth_buffer_type zenable = state->fb->depth_stencil ?
-                state->render_states[WINED3D_RS_ZENABLE] : WINED3D_ZB_FALSE;
-        double z_scale = zenable ? 2.0f : 0.0f;
-        double z_offset = zenable ? -1.0f : 0.0f;
-        const GLdouble projection[] =
-        {
-             x_scale,      0.0,  0.0,      0.0,
-                 0.0,  y_scale,  0.0,      0.0,
-                 0.0,      0.0,  z_scale,  0.0,
-            x_offset, y_offset,  z_offset, 1.0,
-        };
-
-        gl_info->gl_ops.gl.p_glLoadMatrixd(projection);
-        checkGLcall("glLoadMatrixd");
-    }
-    else
-    {
-        double y_scale = context->render_offscreen ? -1.0 : 1.0;
-        double x_offset = (63.0 / 64.0) / state->viewport.width;
-        double y_offset = context->render_offscreen
-                ? (63.0 / 64.0) / state->viewport.height
-                : -(63.0 / 64.0) / state->viewport.height;
-        const GLdouble projection[] =
-        {
-                 1.0,      0.0,  0.0, 0.0,
-                 0.0,  y_scale,  0.0, 0.0,
-                 0.0,      0.0,  2.0, 0.0,
-            x_offset, y_offset, -1.0, 1.0,
-        };
-
-        gl_info->gl_ops.gl.p_glLoadMatrixd(projection);
-        checkGLcall("glLoadMatrixd");
-
-        gl_info->gl_ops.gl.p_glMultMatrixf(&state->transforms[WINED3D_TS_PROJECTION]._11);
-        checkGLcall("glLoadMatrixf");
-    }
+    get_projection_matrix(context, state, &projection);
+    gl_info->gl_ops.gl.p_glLoadMatrixf(&projection._11);
+    checkGLcall("glLoadMatrixf");
 }
 
 /* This should match any arrays loaded in load_vertex_data.
@@ -4185,25 +4105,20 @@ static void load_numbered_arrays(struct wined3d_context *context,
 
         stream = &state->streams[stream_info->elements[i].stream_idx];
 
-        if (stream->flags & WINED3DSTREAMSOURCE_INSTANCEDATA)
+        if ((stream->flags & WINED3DSTREAMSOURCE_INSTANCEDATA) && !context->instance_count)
+            context->instance_count = state->streams[0].frequency ? state->streams[0].frequency : 1;
+
+        if (gl_info->supported[ARB_INSTANCED_ARRAYS])
         {
-            if (!context->instance_count)
-                context->instance_count = state->streams[0].frequency ? state->streams[0].frequency : 1;
-
-            if (!gl_info->supported[ARB_INSTANCED_ARRAYS])
-            {
-                /* Unload instanced arrays, they will be loaded using
-                 * immediate mode instead. */
-                if (context->numbered_array_mask & (1 << i))
-                    unload_numbered_array(context, i);
-                continue;
-            }
-
-            GL_EXTCALL(glVertexAttribDivisor(i, 1));
+            GL_EXTCALL(glVertexAttribDivisor(i, stream_info->elements[i].divisor));
         }
-        else if (gl_info->supported[ARB_INSTANCED_ARRAYS])
+        else if (stream_info->elements[i].divisor)
         {
-            GL_EXTCALL(glVertexAttribDivisor(i, 0));
+            /* Unload instanced arrays, they will be loaded using
+             * immediate mode instead. */
+            if (context->numbered_array_mask & (1 << i))
+                unload_numbered_array(context, i);
+            continue;
         }
 
         TRACE_(d3d_shader)("Loading array %u [VBO=%u]\n", i, stream_info->elements[i].data.buffer_object);
@@ -4790,7 +4705,7 @@ static void viewport_miscpart(struct wined3d_context *context, const struct wine
     checkGLcall("glViewport");
 }
 
-void viewport_vertexpart(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void viewport_vertexpart(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     if (!isStateDirty(context, STATE_TRANSFORM(WINED3D_TS_PROJECTION)))
         transform_projection(context, state, STATE_TRANSFORM(WINED3D_TS_PROJECTION));
@@ -5878,11 +5793,22 @@ static BOOL ffp_color_fixup_supported(struct color_fixup_desc fixup)
     return FALSE;
 }
 
+static BOOL ffp_none_context_alloc(struct wined3d_context *context)
+{
+    return TRUE;
+}
+
+static void ffp_none_context_free(struct wined3d_context *context)
+{
+}
+
 const struct fragment_pipeline ffp_fragment_pipeline = {
     ffp_enable,
     ffp_fragment_get_caps,
     ffp_alloc,
     ffp_free,
+    ffp_none_context_alloc,
+    ffp_none_context_free,
     ffp_color_fixup_supported,
     ffp_fragmentstate_template,
 };
@@ -5926,6 +5852,8 @@ const struct fragment_pipeline none_fragment_pipe =
     fp_none_get_caps,
     none_alloc,
     none_free,
+    ffp_none_context_alloc,
+    ffp_none_context_free,
     fp_none_color_fixup_supported,
     NULL,
 };

@@ -43,12 +43,10 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "shlwapi.h"
+#include "patchapi.h"
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msi);
-
-static HMODULE hmspatcha;
-static BOOL (WINAPI *ApplyPatchToFileW)(LPCWSTR, LPCWSTR, LPCWSTR, ULONG);
 
 static void msi_file_update_ui( MSIPACKAGE *package, MSIFILE *f, const WCHAR *action )
 {
@@ -72,12 +70,17 @@ static msi_file_state calculate_install_state( MSIPACKAGE *package, MSIFILE *fil
     DWORD size;
 
     comp->Action = msi_get_component_action( package, comp );
-    if (comp->Action != INSTALLSTATE_LOCAL || (comp->assembly && comp->assembly->installed))
+    if (!comp->Enabled || comp->Action != INSTALLSTATE_LOCAL || (comp->assembly && comp->assembly->installed))
     {
         TRACE("skipping %s (not scheduled for install)\n", debugstr_w(file->File));
         return msifs_skipped;
     }
-    if ((comp->assembly && !comp->assembly->application && !comp->assembly->installed) ||
+    if (!list_empty( &package->patches ) && file->disk_id < MSI_INITIAL_MEDIA_TRANSFORM_DISKID)
+    {
+        TRACE("skipping %s (not part of patch)\n", debugstr_w(file->File));
+        return msifs_skipped;
+    }
+    if ((msi_is_global_assembly( comp ) && !comp->assembly->installed) ||
         GetFileAttributesW( file->TargetPath ) == INVALID_FILE_ATTRIBUTES)
     {
         TRACE("installing %s (missing)\n", debugstr_w(file->File));
@@ -272,33 +275,32 @@ static MSIFILE *find_file( MSIPACKAGE *package, UINT disk_id, const WCHAR *filen
     return NULL;
 }
 
-static BOOL installfiles_cb(MSIPACKAGE *package, LPCWSTR file, DWORD action,
+static BOOL installfiles_cb(MSIPACKAGE *package, LPCWSTR filename, DWORD action,
                             LPWSTR *path, DWORD *attrs, PVOID user)
 {
-    static MSIFILE *f = NULL;
-    UINT_PTR disk_id = (UINT_PTR)user;
+    MSIFILE *file = *(MSIFILE **)user;
 
     if (action == MSICABEXTRACT_BEGINEXTRACT)
     {
-        if (!(f = find_file( package, disk_id, file )))
+        if (!(file = find_file( package, file->disk_id, filename )))
         {
-            TRACE("unknown file in cabinet (%s)\n", debugstr_w(file));
+            TRACE("unknown file in cabinet (%s)\n", debugstr_w(filename));
             return FALSE;
         }
-        if (f->disk_id != disk_id || (f->state != msifs_missing && f->state != msifs_overwrite))
+        if (file->state != msifs_missing && file->state != msifs_overwrite)
             return FALSE;
 
-        if (!f->Component->assembly || f->Component->assembly->application)
+        if (!msi_is_global_assembly( file->Component ))
         {
-            msi_create_directory(package, f->Component->Directory);
+            msi_create_directory( package, file->Component->Directory );
         }
-        *path = strdupW(f->TargetPath);
-        *attrs = f->Attributes;
+        *path = strdupW( file->TargetPath );
+        *attrs = file->Attributes;
+        *(MSIFILE **)user = file;
     }
     else if (action == MSICABEXTRACT_FILEEXTRACTED)
     {
-        f->state = msifs_installed;
-        f = NULL;
+        if (!msi_is_global_assembly( file->Component )) file->state = msifs_installed;
     }
 
     return TRUE;
@@ -335,7 +337,6 @@ WCHAR *msi_resolve_file_source( MSIPACKAGE *package, MSIFILE *file )
 UINT ACTION_InstallFiles(MSIPACKAGE *package)
 {
     MSIMEDIAINFO *mi;
-    MSICOMPONENT *comp;
     UINT rc = ERROR_SUCCESS;
     MSIFILE *file;
 
@@ -353,7 +354,6 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
             rc = ERROR_FUNCTION_FAILED;
             goto done;
         }
-        if (!file->Component->Enabled) continue;
 
         if (file->state != msifs_hashmatch &&
             file->state != msifs_skipped &&
@@ -371,14 +371,14 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
             (file->IsCompressed && !mi->is_extracted))
         {
             MSICABDATA data;
+            MSIFILE *cursor = file;
 
             data.mi = mi;
             data.package = package;
             data.cb = installfiles_cb;
-            data.user = (PVOID)(UINT_PTR)mi->disk_id;
+            data.user = &cursor;
 
-            if (file->IsCompressed &&
-                !msi_cabextract(package, mi, &data))
+            if (file->IsCompressed && !msi_cabextract(package, mi, &data))
             {
                 ERR("Failed to extract cabinet: %s\n", debugstr_w(mi->cabinet));
                 rc = ERROR_INSTALL_FAILURE;
@@ -392,41 +392,43 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
 
             TRACE("copying %s to %s\n", debugstr_w(source), debugstr_w(file->TargetPath));
 
-            if (!file->Component->assembly || file->Component->assembly->application)
+            if (!msi_is_global_assembly( file->Component ))
             {
                 msi_create_directory(package, file->Component->Directory);
             }
             rc = copy_install_file(package, file, source);
             if (rc != ERROR_SUCCESS)
             {
-                ERR("Failed to copy %s to %s (%d)\n", debugstr_w(source),
-                    debugstr_w(file->TargetPath), rc);
+                ERR("Failed to copy %s to %s (%u)\n", debugstr_w(source), debugstr_w(file->TargetPath), rc);
                 rc = ERROR_INSTALL_FAILURE;
                 msi_free(source);
                 goto done;
             }
             msi_free(source);
         }
-        else if (file->state != msifs_installed && !(file->Attributes & msidbFileAttributesPatchAdded))
+        else if (!msi_is_global_assembly( file->Component ) &&
+                 file->state != msifs_installed && !(file->Attributes & msidbFileAttributesPatchAdded))
         {
             ERR("compressed file wasn't installed (%s)\n", debugstr_w(file->File));
             rc = ERROR_INSTALL_FAILURE;
             goto done;
         }
     }
-    LIST_FOR_EACH_ENTRY( comp, &package->components, MSICOMPONENT, entry )
+    LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
     {
-        comp->Action = msi_get_component_action( package, comp );
-        if (comp->Action == INSTALLSTATE_LOCAL && comp->assembly && !comp->assembly->installed)
+        MSICOMPONENT *comp = file->Component;
+
+        if (!msi_is_global_assembly( comp ) || comp->assembly->installed ||
+            (file->state != msifs_missing && file->state != msifs_overwrite)) continue;
+
+        rc = msi_install_assembly( package, comp );
+        if (rc != ERROR_SUCCESS)
         {
-            rc = msi_install_assembly( package, comp );
-            if (rc != ERROR_SUCCESS)
-            {
-                ERR("Failed to install assembly\n");
-                rc = ERROR_INSTALL_FAILURE;
-                break;
-            }
+            ERR("Failed to install assembly\n");
+            rc = ERROR_INSTALL_FAILURE;
+            break;
         }
+        file->state = msifs_installed;
     }
 
 done:
@@ -434,37 +436,14 @@ done:
     return rc;
 }
 
-static BOOL load_mspatcha(void)
-{
-    hmspatcha = LoadLibraryA("mspatcha.dll");
-    if (!hmspatcha)
-    {
-        ERR("Failed to load mspatcha.dll: %d\n", GetLastError());
-        return FALSE;
-    }
-
-    ApplyPatchToFileW = (void*)GetProcAddress(hmspatcha, "ApplyPatchToFileW");
-    if(!ApplyPatchToFileW)
-    {
-        ERR("GetProcAddress(ApplyPatchToFileW) failed: %d.\n", GetLastError());
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-static void unload_mspatch(void)
-{
-    FreeLibrary(hmspatcha);
-}
-
-static MSIFILEPATCH *get_next_filepatch( MSIPACKAGE *package, const WCHAR *key )
+static MSIFILEPATCH *find_filepatch( MSIPACKAGE *package, UINT disk_id, const WCHAR *key )
 {
     MSIFILEPATCH *patch;
 
     LIST_FOR_EACH_ENTRY( patch, &package->filepatches, MSIFILEPATCH, entry )
     {
-        if (!patch->IsApplied && !strcmpW( key, patch->File->File )) return patch;
+        if (!patch->extracted && patch->disk_id == disk_id && !strcmpW( key, patch->File->File ))
+            return patch;
     }
     return NULL;
 }
@@ -472,45 +451,20 @@ static MSIFILEPATCH *get_next_filepatch( MSIPACKAGE *package, const WCHAR *key )
 static BOOL patchfiles_cb(MSIPACKAGE *package, LPCWSTR file, DWORD action,
                           LPWSTR *path, DWORD *attrs, PVOID user)
 {
-    static MSIFILEPATCH *p = NULL;
-    static WCHAR patch_path[MAX_PATH] = {0};
-    static WCHAR temp_folder[MAX_PATH] = {0};
+    MSIFILEPATCH *patch = *(MSIFILEPATCH **)user;
 
     if (action == MSICABEXTRACT_BEGINEXTRACT)
     {
-        if (temp_folder[0] == '\0')
-            GetTempPathW(MAX_PATH, temp_folder);
+        if (!(patch = find_filepatch( package, patch->disk_id, file ))) return FALSE;
 
-        if (!(p = get_next_filepatch(package, file)) || !p->File->Component->Enabled)
-            return FALSE;
-
-        GetTempFileNameW(temp_folder, NULL, 0, patch_path);
-
-        *path = strdupW(patch_path);
-        *attrs = p->File->Attributes;
+        patch->path = msi_create_temp_file( package->db );
+        *path = strdupW( patch->path );
+        *attrs = patch->File->Attributes;
+        *(MSIFILEPATCH **)user = patch;
     }
     else if (action == MSICABEXTRACT_FILEEXTRACTED)
     {
-        WCHAR patched_file[MAX_PATH];
-        BOOL br;
-
-        GetTempFileNameW(temp_folder, NULL, 0, patched_file);
-
-        br = ApplyPatchToFileW(patch_path, p->File->TargetPath, patched_file, 0);
-        if (br)
-        {
-            /* FIXME: baseline cache */
-
-            DeleteFileW( p->File->TargetPath );
-            MoveFileW( patched_file, p->File->TargetPath );
-
-            p->IsApplied = TRUE;
-        }
-        else
-            ERR("Failed patch %s: %d.\n", debugstr_w(p->File->TargetPath), GetLastError());
-
-        DeleteFileW(patch_path);
-        p = NULL;
+        patch->extracted = TRUE;
     }
 
     return TRUE;
@@ -521,11 +475,12 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
     MSIFILEPATCH *patch;
     MSIMEDIAINFO *mi;
     UINT rc = ERROR_SUCCESS;
-    BOOL mspatcha_loaded = FALSE;
 
     TRACE("%p\n", package);
 
     mi = msi_alloc_zero( sizeof(MSIMEDIAINFO) );
+
+    TRACE("extracting files\n");
 
     LIST_FOR_EACH_ENTRY( patch, &package->filepatches, MSIFILEPATCH, entry )
     {
@@ -542,9 +497,10 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
         comp->Action = msi_get_component_action( package, comp );
         if (!comp->Enabled || comp->Action != INSTALLSTATE_LOCAL) continue;
 
-        if (!patch->IsApplied)
+        if (!patch->extracted)
         {
             MSICABDATA data;
+            MSIFILEPATCH *cursor = patch;
 
             rc = ready_media( package, TRUE, mi );
             if (rc != ERROR_SUCCESS)
@@ -552,30 +508,50 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
                 ERR("Failed to ready media for %s\n", debugstr_w(file->File));
                 goto done;
             }
-
-            if (!mspatcha_loaded && !load_mspatcha())
-            {
-                rc = ERROR_FUNCTION_FAILED;
-                goto done;
-            }
-            mspatcha_loaded = TRUE;
-
-            data.mi = mi;
+            data.mi      = mi;
             data.package = package;
-            data.cb = patchfiles_cb;
-            data.user = (PVOID)(UINT_PTR)mi->disk_id;
+            data.cb      = patchfiles_cb;
+            data.user    = &cursor;
 
-            if (!msi_cabextract(package, mi, &data))
+            if (!msi_cabextract( package, mi, &data ))
             {
                 ERR("Failed to extract cabinet: %s\n", debugstr_w(mi->cabinet));
                 rc = ERROR_INSTALL_FAILURE;
                 goto done;
             }
         }
+    }
 
-        if (!patch->IsApplied && !(patch->Attributes & msidbPatchAttributesNonVital))
+    TRACE("applying patches\n");
+
+    LIST_FOR_EACH_ENTRY( patch, &package->filepatches, MSIFILEPATCH, entry )
+    {
+        WCHAR *tmpfile;
+        BOOL ret;
+
+        if (!patch->path) continue;
+
+        if (!(tmpfile = msi_create_temp_file( package->db )))
         {
-            ERR("Failed to apply patch to file: %s\n", debugstr_w(file->File));
+            rc = ERROR_INSTALL_FAILURE;
+            goto done;
+        }
+        ret = ApplyPatchToFileW( patch->path, patch->File->TargetPath, tmpfile, 0 );
+        if (ret)
+        {
+            DeleteFileW( patch->File->TargetPath );
+            MoveFileW( tmpfile, patch->File->TargetPath );
+        }
+        else
+            WARN("failed to patch %s: %08x\n", debugstr_w(patch->File->TargetPath), GetLastError());
+
+        DeleteFileW( patch->path );
+        DeleteFileW( tmpfile );
+        msi_free( tmpfile );
+
+        if (!ret && !(patch->Attributes & msidbPatchAttributesNonVital))
+        {
+            ERR("Failed to apply patch to file: %s\n", debugstr_w(patch->File->File));
             rc = ERROR_INSTALL_FAILURE;
             goto done;
         }
@@ -583,8 +559,6 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
 
 done:
     msi_free_media_info(mi);
-    if (mspatcha_loaded)
-        unload_mspatch();
     return rc;
 }
 

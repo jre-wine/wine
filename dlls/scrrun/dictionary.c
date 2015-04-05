@@ -37,7 +37,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(scrrun);
 
-#define BUCKET_COUNT 509
+#define BUCKET_COUNT  509
+#define DICT_HASH_MOD 1201
 
 /* Implementation details
 
@@ -670,7 +671,7 @@ static HRESULT WINAPI dictionary_Remove(IDictionary *iface, VARIANT *key)
     dictionary *This = impl_from_IDictionary(iface);
     struct keyitem_pair *pair;
 
-    TRACE("(%p)->(%p)\n", This, debugstr_variant(key));
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(key));
 
     if (!(pair = get_keyitem_pair(This, key)))
         return CTL_E_ELEMENT_NOT_FOUND;
@@ -752,12 +753,33 @@ static DWORD get_str_hash(const WCHAR *str, CompareMethod method)
         }
     }
 
-    return hash % 1201;
+    return hash % DICT_HASH_MOD;
 }
 
 static DWORD get_num_hash(FLOAT num)
 {
-    return (*((DWORD*)&num)) % 1201;
+    return (*((DWORD*)&num)) % DICT_HASH_MOD;
+}
+
+static HRESULT get_flt_hash(FLOAT flt, LONG *hash)
+{
+    if (isinf(flt)) {
+        *hash = 0;
+        return S_OK;
+    }
+    else if (!isnan(flt)) {
+        *hash = get_num_hash(flt);
+        return S_OK;
+    }
+
+    /* NaN case */
+    *hash = ~0u;
+    return CTL_E_ILLEGALFUNCTIONCALL;
+}
+
+static DWORD get_ptr_hash(void *ptr)
+{
+    return PtrToUlong(ptr) % DICT_HASH_MOD;
 }
 
 static HRESULT WINAPI dictionary_get_HashVal(IDictionary *iface, VARIANT *key, VARIANT *hash)
@@ -773,32 +795,49 @@ static HRESULT WINAPI dictionary_get_HashVal(IDictionary *iface, VARIANT *key, V
     case VT_BSTR:
         V_I4(hash) = get_str_hash(get_key_strptr(key), This->method);
         break;
+    case VT_UI1|VT_BYREF:
     case VT_UI1:
-        V_I4(hash) = get_num_hash(V_UI1(key));
+        V_I4(hash) = get_num_hash(V_VT(key) & VT_BYREF ? *V_UI1REF(key) : V_UI1(key));
         break;
+    case VT_I2|VT_BYREF:
     case VT_I2:
-        V_I4(hash) = get_num_hash(V_I2(key));
+        V_I4(hash) = get_num_hash(V_VT(key) & VT_BYREF ? *V_I2REF(key) : V_I2(key));
         break;
+    case VT_I4|VT_BYREF:
     case VT_I4:
-        V_I4(hash) = get_num_hash(V_I4(key));
+        V_I4(hash) = get_num_hash(V_VT(key) & VT_BYREF ? *V_I4REF(key) : V_I4(key));
         break;
-    case VT_R4:
-    case VT_R8:
+    case VT_UNKNOWN|VT_BYREF:
+    case VT_DISPATCH|VT_BYREF:
+    case VT_UNKNOWN:
+    case VT_DISPATCH:
     {
-        FLOAT flt = V_VT(key) == VT_R4 ? V_R4(key) : V_R8(key);
+        IUnknown *src = (V_VT(key) & VT_BYREF) ? *V_UNKNOWNREF(key) : V_UNKNOWN(key);
+        IUnknown *unk = NULL;
 
-        if (isinf(flt))
-        {
+        if (!src) {
             V_I4(hash) = 0;
-            break;
+            return S_OK;
         }
-        else if (!isnan(flt))
-        {
-            V_I4(hash) = get_num_hash(flt);
-            break;
+
+        IUnknown_QueryInterface(src, &IID_IUnknown, (void**)&unk);
+        if (!unk) {
+            V_I4(hash) = ~0u;
+            return CTL_E_ILLEGALFUNCTIONCALL;
         }
-        /* fallthrough on NAN */
+        V_I4(hash) = get_ptr_hash(unk);
+        IUnknown_Release(unk);
+        break;
     }
+    case VT_DATE|VT_BYREF:
+    case VT_DATE:
+        return get_flt_hash(V_VT(key) & VT_BYREF ? *V_DATEREF(key) : V_DATE(key), &V_I4(hash));
+    case VT_R4|VT_BYREF:
+    case VT_R4:
+        return get_flt_hash(V_VT(key) & VT_BYREF ? *V_R4REF(key) : V_R4(key), &V_I4(hash));
+    case VT_R8|VT_BYREF:
+    case VT_R8:
+        return get_flt_hash(V_VT(key) & VT_BYREF ? *V_R8REF(key) : V_R8(key), &V_I4(hash));
     case VT_INT:
     case VT_UINT:
     case VT_I1:

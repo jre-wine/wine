@@ -22,7 +22,7 @@
 #define COBJMACROS
 
 #include "windows.h"
-#include "dwrite_1.h"
+#include "dwrite_2.h"
 #include "initguid.h"
 #include "d2d1.h"
 
@@ -1814,15 +1814,14 @@ static void test_CreateCustomFontFileReference(void)
     face_type = DWRITE_FONT_FACE_TYPE_TRUETYPE;
     support = TRUE;
     count = 1;
-    IDWriteFontFile_Analyze(file, &support, &file_type, &face_type, &count);
-    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IDWriteFontFile_Analyze(file, &support, &file_type, &face_type, &count);
+    ok(hr == 0x8faecafe, "got 0x%08x\n", hr);
     ok(support == FALSE, "got %i\n", support);
     ok(file_type == DWRITE_FONT_FILE_TYPE_UNKNOWN, "got %i\n", file_type);
     ok(face_type == DWRITE_FONT_FACE_TYPE_UNKNOWN, "got %i\n", face_type);
     ok(count == 0, "got %i\n", count);
 
     hr = IDWriteFactory_CreateFontFace(factory, DWRITE_FONT_FACE_TYPE_CFF, 1, &file, 0, 0, &face);
-todo_wine
     ok(hr == 0x8faecafe, "got 0x%08x\n", hr);
     IDWriteFontFile_Release(file);
 
@@ -3180,6 +3179,48 @@ static void test_GetKerningPairAdjustments(void)
     DELETE_FONTFILE(path);
 }
 
+static void test_CreateRenderingParams(void)
+{
+    IDWriteRenderingParams2 *params2;
+    IDWriteRenderingParams1 *params1;
+    IDWriteRenderingParams *params;
+    IDWriteFactory *factory;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateCustomRenderingParams(factory, 1.0, 0.0, 0.0, DWRITE_PIXEL_GEOMETRY_FLAT,
+        DWRITE_RENDERING_MODE_DEFAULT, &params);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteRenderingParams_QueryInterface(params, &IID_IDWriteRenderingParams1, (void**)&params1);
+    if (hr == S_OK) {
+        FLOAT enhcontrast;
+
+        /* test what enhanced contrast setting set by default to */
+        enhcontrast = IDWriteRenderingParams1_GetGrayscaleEnhancedContrast(params1);
+        ok(enhcontrast == 1.0, "got %.2f\n", enhcontrast);
+        IDWriteRenderingParams1_Release(params1);
+
+        hr = IDWriteRenderingParams_QueryInterface(params, &IID_IDWriteRenderingParams2, (void**)&params2);
+        if (hr == S_OK) {
+            DWRITE_GRID_FIT_MODE gridfit;
+
+            /* default gridfit mode */
+            gridfit = IDWriteRenderingParams2_GetGridFitMode(params2);
+            ok(gridfit == DWRITE_GRID_FIT_MODE_DEFAULT, "got %d\n", gridfit);
+
+            IDWriteRenderingParams2_Release(params2);
+        }
+        else
+            win_skip("IDWriteRenderingParams2 not supported.\n");
+    }
+    else
+        win_skip("IDWriteRenderingParams1 not supported.\n");
+
+    IDWriteRenderingParams_Release(params);
+    IDWriteFactory_Release(factory);
+}
 
 START_TEST(font)
 {
@@ -3222,6 +3263,7 @@ START_TEST(font)
     test_GetCaretMetrics();
     test_GetGlyphCount();
     test_GetKerningPairAdjustments();
+    test_CreateRenderingParams();
 
     IDWriteFactory_Release(factory);
 }

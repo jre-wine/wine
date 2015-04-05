@@ -224,10 +224,8 @@ static void test_rpc_ncacn_ip_tcp(void)
     ok(status == RPC_S_OK, "return wrong\n");
 
     status = RpcMgmtStopServerListening(NULL);
-todo_wine {
     ok(status == RPC_S_NOT_LISTENING,
        "wrong RpcMgmtStopServerListening error (%u)\n", status);
-}
 
     status = RpcMgmtWaitServerListen();
     ok(status == RPC_S_NOT_LISTENING,
@@ -244,9 +242,7 @@ todo_wine {
     ok(status == RPC_S_OK, "RpcServerRegisterIf failed (%u)\n", status);
 
     status = RpcServerListen(1, 20, TRUE);
-todo_wine {
     ok(status == RPC_S_OK, "RpcServerListen failed (%u)\n", status);
-}
 
     status = RpcServerListen(1, 20, TRUE);
 todo_wine {
@@ -665,7 +661,7 @@ static void test_I_RpcExceptionFilter(void)
 
     if (!pI_RpcExceptionFilter)
     {
-        skip("I_RpcExceptionFilter not exported\n");
+        win_skip("I_RpcExceptionFilter not exported\n");
         return;
     }
 
@@ -684,9 +680,9 @@ static void test_I_RpcExceptionFilter(void)
         case STATUS_ACCESS_VIOLATION:
         case STATUS_ILLEGAL_INSTRUCTION:
         case STATUS_PRIVILEGED_INSTRUCTION:
-        case 0xc00000aa /* STATUS_INSTRUCTION_MISALIGNMENT */:
+        case STATUS_INSTRUCTION_MISALIGNMENT:
         case STATUS_STACK_OVERFLOW:
-        case 0xc0000194 /* STATUS_POSSIBLE_DEADLOCK */:
+        case STATUS_POSSIBLE_DEADLOCK:
             ok(retval == EXCEPTION_CONTINUE_SEARCH, "I_RpcExceptionFilter(0x%x) should have returned %d instead of %d\n",
                exception, EXCEPTION_CONTINUE_SEARCH, retval);
             break;

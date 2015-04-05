@@ -46,8 +46,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 #endif
 #endif
 
+/* FIXME: Does not work with -NAN and -0. */
 #ifndef signbit
-#define signbit(x) 0
+#define signbit(x) ((x) < 0)
 #endif
 
 typedef int (CDECL *MSVCRT_matherr_func)(struct MSVCRT__exception *);
@@ -72,7 +73,7 @@ int CDECL MSVCRT__set_SSE2_enable(int flag)
     return sse2_enabled;
 }
 
-#if defined(__x86_64__) || defined(__arm__)
+#if defined(__x86_64__) || defined(__arm__) || _MSVCR_VER>=120
 
 /*********************************************************************
  *      _chgsignf (MSVCRT.@)
@@ -88,11 +89,13 @@ float CDECL MSVCRT__chgsignf( float num )
  */
 float CDECL MSVCRT__copysignf( float num, float sign )
 {
-    /* FIXME: Behaviour for Nan/Inf? */
-    if (sign < 0.0)
-        return num < 0.0 ? num : -num;
-    return num < 0.0 ? -num : num;
+    if (signbit(sign))
+        return signbit(num) ? num : -num;
+    return signbit(num) ? -num : num;
 }
+
+#endif
+#if defined(__x86_64__) || defined(__arm__)
 
 /*********************************************************************
  *      _finitef (MSVCRT.@)
@@ -363,7 +366,7 @@ double CDECL MSVCRT_asin( double x )
  */
 double CDECL MSVCRT_atan( double x )
 {
-  if (!isfinite(x)) *MSVCRT__errno() = MSVCRT_EDOM;
+  if (isnan(x)) *MSVCRT__errno() = MSVCRT_EDOM;
   return atan(x);
 }
 
@@ -399,7 +402,7 @@ double CDECL MSVCRT_cosh( double x )
  */
 double CDECL MSVCRT_exp( double x )
 {
-  if (!isfinite(x)) *MSVCRT__errno() = MSVCRT_EDOM;
+  if (isnan(x)) *MSVCRT__errno() = MSVCRT_EDOM;
   return exp(x);
 }
 
@@ -484,7 +487,7 @@ double CDECL MSVCRT_tan( double x )
  */
 double CDECL MSVCRT_tanh( double x )
 {
-  if (!isfinite(x)) *MSVCRT__errno() = MSVCRT_EDOM;
+  if (isnan(x)) *MSVCRT__errno() = MSVCRT_EDOM;
   return tanh(x);
 }
 
@@ -1227,10 +1230,9 @@ int CDECL _controlfp_s(unsigned int *cur, unsigned int newval, unsigned int mask
  */
 double CDECL MSVCRT__copysign(double num, double sign)
 {
-  /* FIXME: Behaviour for Nan/Inf? */
-  if (sign < 0.0)
-    return num < 0.0 ? num : -num;
-  return num < 0.0 ? -num : num;
+  if (signbit(sign))
+    return signbit(num) ? num : -num;
+  return signbit(num) ? -num : num;
 }
 
 /*********************************************************************

@@ -2603,6 +2603,20 @@ const char *debug_d3ddeclusage(enum wined3d_decl_usage usage)
     }
 }
 
+const char *debug_d3dinput_classification(enum wined3d_input_classification classification)
+{
+    switch (classification)
+    {
+#define WINED3D_TO_STR(x) case x: return #x
+        WINED3D_TO_STR(WINED3D_INPUT_PER_VERTEX_DATA);
+        WINED3D_TO_STR(WINED3D_INPUT_PER_INSTANCE_DATA);
+#undef WINED3D_TO_STR
+        default:
+            FIXME("Unrecognized input classification %#x.\n", classification);
+            return "unrecognized";
+    }
+}
+
 const char *debug_d3dresourcetype(enum wined3d_resource_type resource_type)
 {
     switch (resource_type)
@@ -3138,20 +3152,87 @@ void get_modelview_matrix(const struct wined3d_context *context, const struct wi
         multiply_matrix(mat, &state->transforms[WINED3D_TS_VIEW], &state->transforms[WINED3D_TS_WORLD_MATRIX(0)]);
 }
 
+void get_projection_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
+        struct wined3d_matrix *mat)
+{
+    float center_offset;
+
+    /* There are a couple of additional things we have to take into account
+     * here besides the projection transformation itself:
+     *   - We need to flip along the y-axis in case of offscreen rendering.
+     *   - OpenGL Z range is {-Wc,...,Wc} while D3D Z range is {0,...,Wc}.
+     *   - D3D coordinates refer to pixel centers while GL coordinates refer
+     *     to pixel corners.
+     *   - D3D has a top-left filling convention. We need to maintain this
+     *     even after the y-flip mentioned above.
+     * In order to handle the last two points, we translate by
+     * (63.0 / 128.0) / VPw and (63.0 / 128.0) / VPh. This is equivalent to
+     * translating slightly less than half a pixel. We want the difference to
+     * be large enough that it doesn't get lost due to rounding inside the
+     * driver, but small enough to prevent it from interfering with any
+     * anti-aliasing. */
+
+    if (context->swapchain->device->wined3d->flags & WINED3D_PIXEL_CENTER_INTEGER)
+        center_offset = 63.0f / 64.0f;
+    else
+        center_offset = -1.0f / 64.0f;
+
+    if (context->last_was_rhw)
+    {
+        /* Transform D3D RHW coordinates to OpenGL clip coordinates. */
+        float x = state->viewport.x;
+        float y = state->viewport.y;
+        float w = state->viewport.width;
+        float h = state->viewport.height;
+        float x_scale = 2.0f / w;
+        float x_offset = (center_offset - (2.0f * x) - w) / w;
+        float y_scale = context->render_offscreen ? 2.0f / h : 2.0f / -h;
+        float y_offset = context->render_offscreen
+                ? (center_offset - (2.0f * y) - h) / h
+                : (center_offset - (2.0f * y) - h) / -h;
+        enum wined3d_depth_buffer_type zenable = state->fb->depth_stencil ?
+                state->render_states[WINED3D_RS_ZENABLE] : WINED3D_ZB_FALSE;
+        float z_scale = zenable ? 2.0f : 0.0f;
+        float z_offset = zenable ? -1.0f : 0.0f;
+        const struct wined3d_matrix projection =
+        {
+             x_scale,     0.0f,      0.0f, 0.0f,
+                0.0f,  y_scale,      0.0f, 0.0f,
+                0.0f,     0.0f,   z_scale, 0.0f,
+            x_offset, y_offset,  z_offset, 1.0f,
+        };
+
+        *mat = projection;
+    }
+    else
+    {
+        float y_scale = context->render_offscreen ? -1.0f : 1.0f;
+        float x_offset = center_offset / state->viewport.width;
+        float y_offset = context->render_offscreen
+                ? center_offset / state->viewport.height
+                : -center_offset / state->viewport.height;
+        const struct wined3d_matrix projection =
+        {
+                1.0f,     0.0f,  0.0f, 0.0f,
+                0.0f,  y_scale,  0.0f, 0.0f,
+                0.0f,     0.0f,  2.0f, 0.0f,
+            x_offset, y_offset, -1.0f, 1.0f,
+        };
+
+        multiply_matrix(mat, &projection, &state->transforms[WINED3D_TS_PROJECTION]);
+    }
+}
+
 /* Setup this textures matrix according to the texture flags. */
-/* Context activation is done by the caller (state handler). */
-void set_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wined3d_matrix *matrix, DWORD flags,
-        BOOL calculated_coords, BOOL transformed, enum wined3d_format_id format_id, BOOL ffp_proj_control)
+static void compute_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wined3d_matrix *matrix,
+        DWORD flags, BOOL calculated_coords, BOOL transformed, enum wined3d_format_id format_id,
+        BOOL ffp_proj_control, struct wined3d_matrix *out_matrix)
 {
     struct wined3d_matrix mat;
 
-    gl_info->gl_ops.gl.p_glMatrixMode(GL_TEXTURE);
-    checkGLcall("glMatrixMode(GL_TEXTURE)");
-
     if (flags == WINED3D_TTFF_DISABLE || flags == WINED3D_TTFF_COUNT1 || transformed)
     {
-        gl_info->gl_ops.gl.p_glLoadIdentity();
-        checkGLcall("glLoadIdentity()");
+        get_identity_matrix(out_matrix);
         return;
     }
 
@@ -3250,8 +3331,39 @@ void set_texture_matrix(const struct wined3d_gl_info *gl_info, const struct wine
         }
     }
 
-    gl_info->gl_ops.gl.p_glLoadMatrixf(&mat._11);
-    checkGLcall("glLoadMatrixf(mat)");
+    *out_matrix = mat;
+}
+
+void get_texture_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
+        unsigned int tex, struct wined3d_matrix *mat)
+{
+    const struct wined3d_device *device = context->swapchain->device;
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    BOOL generated = (state->texture_states[tex][WINED3D_TSS_TEXCOORD_INDEX] & 0xffff0000)
+            != WINED3DTSS_TCI_PASSTHRU;
+    unsigned int coord_idx = min(state->texture_states[tex][WINED3D_TSS_TEXCOORD_INDEX & 0x0000ffff],
+            MAX_TEXTURES - 1);
+
+    compute_texture_matrix(gl_info, &state->transforms[WINED3D_TS_TEXTURE0 + tex],
+            state->texture_states[tex][WINED3D_TSS_TEXTURE_TRANSFORM_FLAGS],
+            generated, context->last_was_rhw,
+            context->stream_info.use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coord_idx))
+            ? context->stream_info.elements[WINED3D_FFP_TEXCOORD0 + coord_idx].format->id
+            : WINED3DFMT_UNKNOWN,
+            device->shader_backend->shader_has_ffp_proj_control(device->shader_priv), mat);
+
+    if ((context->lastWasPow2Texture & (1 << tex)) && state->textures[tex])
+    {
+        if (generated)
+            FIXME("Non-power-of-two texture being used with generated texture coords.\n");
+        /* NP2 texcoord fixup is implemented for pixelshaders so only enable the
+         * fixed-function-pipeline fixup via pow2Matrix when no PS is used. */
+        if (!use_ps(state))
+        {
+            TRACE("Non-power-of-two texture matrix multiply fixup.\n");
+            multiply_matrix(mat, mat, (struct wined3d_matrix *)state->textures[tex]->pow2_matrix);
+        }
+    }
 }
 
 /* This small helper function is used to convert a bitmask into the number of masked bits */
@@ -3525,7 +3637,7 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
             settings->op[i].aarg0 = settings->op[i].aarg1 = settings->op[i].aarg2 = ARG_UNUSED;
             settings->op[i].color_fixup = COLOR_FIXUP_IDENTITY;
             settings->op[i].dst = resultreg;
-            settings->op[i].tex_type = tex_1d;
+            settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
             settings->op[i].projected = proj_none;
             i++;
             break;
@@ -3536,32 +3648,32 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
             settings->op[i].color_fixup = texture->resource.format->color_fixup;
             if (ignore_textype)
             {
-                settings->op[i].tex_type = tex_1d;
+                settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
             }
             else
             {
                 switch (texture->target)
                 {
                     case GL_TEXTURE_1D:
-                        settings->op[i].tex_type = tex_1d;
+                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
                         break;
                     case GL_TEXTURE_2D:
-                        settings->op[i].tex_type = tex_2d;
+                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_2D;
                         break;
                     case GL_TEXTURE_3D:
-                        settings->op[i].tex_type = tex_3d;
+                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_3D;
                         break;
                     case GL_TEXTURE_CUBE_MAP_ARB:
-                        settings->op[i].tex_type = tex_cube;
+                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_CUBE;
                         break;
                     case GL_TEXTURE_RECTANGLE_ARB:
-                        settings->op[i].tex_type = tex_rect;
+                        settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_RECT;
                         break;
                 }
             }
         } else {
             settings->op[i].color_fixup = COLOR_FIXUP_IDENTITY;
-            settings->op[i].tex_type = tex_1d;
+            settings->op[i].tex_type = WINED3D_GL_RES_TYPE_TEX_1D;
         }
 
         cop = state->texture_states[i][WINED3D_TSS_COLOR_OP];

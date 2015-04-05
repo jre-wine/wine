@@ -1100,10 +1100,10 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             while (isspace(*value)) value++;
             if ((s = strchr(value,'\n')))
                 *s='\0';
-            if (!strcasecmp(line, "CPU part"))
+            if (!strcasecmp(line, "CPU architecture"))
             {
                 if (isdigit(value[0]))
-                    info->Level = strtol(value, NULL, 16);
+                    info->Level = atoi(value);
                 continue;
             }
             if (!strcasecmp(line, "CPU revision"))
@@ -1123,6 +1123,19 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
         }
         fclose(f);
     }
+#elif defined(__FreeBSD__)
+    size_t valsize;
+    char buf[8];
+    int value;
+
+    valsize = sizeof(buf);
+    if (!sysctlbyname("hw.machine_arch", &buf, &valsize, NULL, 0) &&
+        sscanf(buf, "armv%i", &value) == 1)
+        info->Level = value;
+
+    valsize = sizeof(value);
+    if (!sysctlbyname("hw.floatingpoint", &value, &valsize, NULL, 0))
+        user_shared_data->ProcessorFeatures[PF_ARM_VFP_32_REGISTERS_AVAILABLE] = value;
 #else
     FIXME("CPU Feature detection not implemented.\n");
 #endif

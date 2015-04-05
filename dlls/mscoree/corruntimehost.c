@@ -71,7 +71,6 @@ struct dll_fixup
 static HRESULT RuntimeHost_AddDomain(RuntimeHost *This, MonoDomain **result)
 {
     struct DomainEntry *entry;
-    char *mscorlib_path;
     HRESULT res=S_OK;
 
     EnterCriticalSection(&This->lock);
@@ -83,17 +82,8 @@ static HRESULT RuntimeHost_AddDomain(RuntimeHost *This, MonoDomain **result)
         goto end;
     }
 
-    mscorlib_path = WtoA(This->version->mscorlib_path);
-    if (!mscorlib_path)
-    {
-        HeapFree(GetProcessHeap(), 0, entry);
-        res = E_OUTOFMEMORY;
-        goto end;
-    }
-
-    entry->domain = mono_jit_init(mscorlib_path);
-
-    HeapFree(GetProcessHeap(), 0, mscorlib_path);
+    /* FIXME: Use exe filename to name the domain? */
+    entry->domain = mono_jit_init_version("mscorlib.dll", "v4.0.30319");
 
     if (!entry->domain)
     {
@@ -1318,7 +1308,7 @@ HRESULT create_monodata(REFIID riid, LPVOID *ppObj )
             goto cleanup;
 
         hr = get_file_from_strongname(assemblyname, filename, MAX_PATH);
-        if (!SUCCEEDED(hr))
+        if (FAILED(hr))
         {
             /*
              * The registry doesn't have a CodeBase entry and it's not in the GAC.
