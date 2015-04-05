@@ -1,3 +1,16 @@
+wine-development (1.7.40-1) experimental; urgency=medium
+
+  * New upstream release 1.7.40, released Apr 3, 2015.
+    - Support for kernel job objects.
+    - Various fixes to the ListView control.
+    - Better support for OOB data in Windows Sockets.
+    - Support for DIB images in the OLE data cache.
+    - Improved support for MSI patches.
+    - Some fixes for ACL file permissions.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 05 Apr 2015 00:05:35 +0000
+
 wine-development (1.7.39-1) experimental; urgency=medium
 
   * New upstream release 1.7.39, released Mar 20, 2015.
