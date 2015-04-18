@@ -914,6 +914,12 @@ static void dump_inline_acl( const char *prefix, const ACL *acl, data_size_t siz
                 fprintf( stderr, "SYSTEM_ALARM_ACE_TYPE,Mask=%x",
                          ((const SYSTEM_ALARM_ACE *)ace)->Mask );
                 break;
+            case SYSTEM_MANDATORY_LABEL_ACE_TYPE:
+                sid = (const SID *)&((const SYSTEM_MANDATORY_LABEL_ACE *)ace)->SidStart;
+                sid_size = ace->AceSize - FIELD_OFFSET(SYSTEM_MANDATORY_LABEL_ACE, SidStart);
+                fprintf( stderr, "SYSTEM_MANDATORY_LABEL_ACE_TYPE,Mask=%x",
+                         ((const SYSTEM_MANDATORY_LABEL_ACE *)ace)->Mask );
+                break;
             default:
                 fprintf( stderr, "unknown<%d>", ace->AceType );
                 break;
@@ -4133,6 +4139,12 @@ static void dump_set_job_completion_port_request( const struct set_job_completio
     dump_uint64( ", key=", &req->key );
 }
 
+static void dump_terminate_job_request( const struct terminate_job_request *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, ", status=%d", req->status );
+}
+
 static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_new_process_request,
     (dump_func)dump_get_new_process_info_request,
@@ -4395,6 +4407,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_process_in_job_request,
     (dump_func)dump_set_job_limits_request,
     (dump_func)dump_set_job_completion_port_request,
+    (dump_func)dump_terminate_job_request,
 };
 
 static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
@@ -4655,6 +4668,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_suspend_context_reply,
     NULL,
     (dump_func)dump_create_job_reply,
+    NULL,
     NULL,
     NULL,
     NULL,
@@ -4923,6 +4937,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "process_in_job",
     "set_job_limits",
     "set_job_completion_port",
+    "terminate_job",
 };
 
 static const struct

@@ -64,6 +64,7 @@ static int process_signaled( struct object *obj, struct wait_queue_entry *entry 
 static unsigned int process_map_access( struct object *obj, unsigned int access );
 static void process_poll_event( struct fd *fd, int event );
 static void process_destroy( struct object *obj );
+static void terminate_process( struct process *process, struct thread *skip, int exit_code );
 
 static const struct object_ops process_ops =
 {
@@ -147,6 +148,8 @@ struct job
     struct list process_list;      /* list of all processes */
     int num_processes;             /* count of running processes */
     unsigned int limit_flags;      /* limit flags */
+    int terminating;               /* job is terminating */
+    int signaled;                  /* job is signaled */
     struct completion *completion_port; /* associated completion port */
     apc_param_t completion_key;    /* key to send with completion messages */
 };
@@ -188,6 +191,8 @@ static struct job *create_job_object( struct directory *root, const struct unico
             list_init( &job->process_list );
             job->num_processes = 0;
             job->limit_flags = 0;
+            job->terminating = 0;
+            job->signaled = 0;
             job->completion_port = NULL;
             job->completion_key = 0;
         }
@@ -251,10 +256,35 @@ static void release_job_process( struct process *process )
     assert( job->num_processes );
     job->num_processes--;
 
-    add_job_completion( job, JOB_OBJECT_MSG_EXIT_PROCESS, get_process_id(process) );
+    if (!job->terminating)
+        add_job_completion( job, JOB_OBJECT_MSG_EXIT_PROCESS, get_process_id(process) );
 
     if (!job->num_processes)
         add_job_completion( job, JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO, 0 );
+}
+
+static void terminate_job( struct job *job, int exit_code )
+{
+    /* don't report completion events for terminated processes */
+    job->terminating = 1;
+
+    for (;;)  /* restart from the beginning of the list every time */
+    {
+        struct process *process;
+
+        /* find the first process associated with this job and still running */
+        LIST_FOR_EACH_ENTRY( process, &job->process_list, struct process, job_entry )
+        {
+            if (process->running_threads) break;
+        }
+        if (&process->job_entry == &job->process_list) break;  /* no process found */
+        assert( process->job == job );
+        terminate_process( process, NULL, exit_code );
+    }
+
+    job->terminating = 0;
+    job->signaled = 1;
+    wake_up( &job->obj, 0 );
 }
 
 static void job_destroy( struct object *obj )
@@ -277,7 +307,8 @@ static void job_dump( struct object *obj, int verbose )
 
 static int job_signaled( struct object *obj, struct wait_queue_entry *entry )
 {
-    return 0;
+    struct job *job = (struct job *)obj;
+    return job->signaled;
 }
 
 struct ptid_entry
@@ -1541,6 +1572,17 @@ DECL_HANDLER(process_in_job)
         release_object( job );
     }
     release_object( process );
+}
+
+/* terminate all processes associated with the job */
+DECL_HANDLER(terminate_job)
+{
+    struct job *job = get_job_obj( current->process, req->handle, JOB_OBJECT_TERMINATE );
+
+    if (!job) return;
+
+    terminate_job( job, req->status );
+    release_object( job );
 }
 
 /* update limits of the job object */

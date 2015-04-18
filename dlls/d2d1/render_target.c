@@ -32,6 +32,18 @@ struct d2d_draw_text_layout_ctx
     D2D1_DRAW_TEXT_OPTIONS options;
 };
 
+static void d2d_matrix_multiply(D2D_MATRIX_3X2_F *a, const D2D_MATRIX_3X2_F *b)
+{
+    D2D_MATRIX_3X2_F tmp = *a;
+
+    a->_11 = tmp._11 * b->_11 + tmp._12 * b->_21;
+    a->_12 = tmp._11 * b->_12 + tmp._12 * b->_22;
+    a->_21 = tmp._21 * b->_11 + tmp._22 * b->_21;
+    a->_22 = tmp._21 * b->_12 + tmp._22 * b->_22;
+    a->_31 = tmp._31 * b->_11 + tmp._32 * b->_21 + b->_31;
+    a->_32 = tmp._31 * b->_12 + tmp._32 * b->_22 + b->_32;
+}
+
 static void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
 {
     dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
@@ -543,7 +555,7 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillRectangle(ID2D1RenderTar
     {
         float _11, _21, _31, pad0;
         float _12, _22, _32, pad1;
-    } transform, transform_inverse;
+    } transform;
 
     TRACE("iface %p, rect %p, brush %p.\n", iface, rect, brush);
 
@@ -598,38 +610,50 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillRectangle(ID2D1RenderTar
     if (brush_impl->type == D2D_BRUSH_TYPE_BITMAP)
     {
         struct d2d_bitmap *bitmap = brush_impl->u.bitmap.bitmap;
-        float rt_scale, rt_bitmap_scale, d;
+        D2D_MATRIX_3X2_F w, b;
+        float dpi_scale, d;
 
         ps = render_target->rect_bitmap_ps;
 
+        /* Scale for dpi. */
+        w = render_target->drawing_state.transform;
+        dpi_scale = render_target->dpi_x / 96.0f;
+        w._11 *= dpi_scale;
+        w._21 *= dpi_scale;
+        w._31 *= dpi_scale;
+        dpi_scale = render_target->dpi_y / 96.0f;
+        w._12 *= dpi_scale;
+        w._22 *= dpi_scale;
+        w._32 *= dpi_scale;
+
         /* Scale for bitmap size and dpi. */
-        rt_scale = render_target->dpi_x / 96.0f;
-        rt_bitmap_scale = bitmap->pixel_size.width * (bitmap->dpi_x / 96.0f) * rt_scale;
-        transform._11 = brush_impl->transform._11 * rt_bitmap_scale;
-        transform._21 = brush_impl->transform._21 * rt_bitmap_scale;
-        transform._31 = brush_impl->transform._31 * rt_scale;
-        rt_scale = render_target->dpi_y / 96.0f;
-        rt_bitmap_scale = bitmap->pixel_size.height * (bitmap->dpi_y / 96.0f) * rt_scale;
-        transform._12 = brush_impl->transform._12 * rt_bitmap_scale;
-        transform._22 = brush_impl->transform._22 * rt_bitmap_scale;
-        transform._32 = brush_impl->transform._32 * rt_scale;
+        b = brush_impl->transform;
+        dpi_scale = bitmap->pixel_size.width * (bitmap->dpi_x / 96.0f);
+        b._11 *= dpi_scale;
+        b._21 *= dpi_scale;
+        dpi_scale = bitmap->pixel_size.height * (bitmap->dpi_y / 96.0f);
+        b._12 *= dpi_scale;
+        b._22 *= dpi_scale;
+
+        d2d_matrix_multiply(&b, &w);
 
         /* Invert the matrix. (Because the matrix is applied to the sampling
          * coordinates. I.e., to scale the bitmap by 2 we need to divide the
          * coordinates by 2.) */
-        d = transform._11 * transform._22 - transform._21 * transform._12;
+        d = b._11 * b._22 - b._21 * b._12;
         if (d != 0.0f)
         {
-            transform_inverse._11 = transform._22 / d;
-            transform_inverse._21 = -transform._21 / d;
-            transform_inverse._31 = (transform._21 * transform._32 - transform._31 * transform._22) / d;
-            transform_inverse._12 = -transform._12 / d;
-            transform_inverse._22 = transform._11 / d;
-            transform_inverse._32 = -(transform._11 * transform._32 - transform._31 * transform._12) / d;
+            transform._11 = b._22 / d;
+            transform._21 = -b._21 / d;
+            transform._31 = (b._21 * b._32 - b._31 * b._22) / d;
+            transform._12 = -b._12 / d;
+            transform._22 = b._11 / d;
+            transform._32 = -(b._11 * b._32 - b._31 * b._12) / d;
         }
+        transform.pad1 = brush_impl->opacity;
 
-        buffer_desc.ByteWidth = sizeof(transform_inverse);
-        buffer_data.pSysMem = &transform_inverse;
+        buffer_desc.ByteWidth = sizeof(transform);
+        buffer_data.pSysMem = &transform;
     }
     else
     {
@@ -1373,27 +1397,39 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
     {
 #if 0
         float3x2 transform;
+        float opacity;
+
         SamplerState s;
         Texture2D t;
 
         float4 main(float4 position : SV_POSITION) : SV_Target
         {
-            return t.Sample(s, mul(float3(position.xy, 1.0), transform));
+            float2 texcoord;
+            float4 ret;
+
+            texcoord.x = position.x * transform._11 + position.y * transform._21 + transform._31;
+            texcoord.y = position.x * transform._12 + position.y * transform._22 + transform._32;
+            ret = t.Sample(s, texcoord);
+            ret.a *= opacity;
+
+            return ret;
         }
 #endif
-        0x43425844, 0x20fce5be, 0x138fa37f, 0x9554f03f, 0x3dbe9c02, 0x00000001, 0x00000184, 0x00000003,
+        0x43425844, 0x9a5f9280, 0xa5351c23, 0x15d6e760, 0xce35bcc3, 0x00000001, 0x000001d0, 0x00000003,
         0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
         0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
         0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x000000e8, 0x00000040,
-        0x0000003a, 0x04000059, 0x00208e46, 0x00000000, 0x00000002, 0x0300005a, 0x00106000, 0x00000000,
+        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000134, 0x00000040,
+        0x0000004d, 0x04000059, 0x00208e46, 0x00000000, 0x00000002, 0x0300005a, 0x00106000, 0x00000000,
         0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
-        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000002, 0x05000036, 0x00100032, 0x00000000,
-        0x00101046, 0x00000000, 0x05000036, 0x00100042, 0x00000000, 0x00004001, 0x3f800000, 0x08000010,
-        0x00100012, 0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000, 0x00000000, 0x08000010,
-        0x00100022, 0x00000001, 0x00100246, 0x00000000, 0x00208246, 0x00000000, 0x00000001, 0x09000045,
-        0x001020f2, 0x00000000, 0x00100046, 0x00000001, 0x00107e46, 0x00000000, 0x00106000, 0x00000000,
-        0x0100003e,
+        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000001, 0x0800000f, 0x00100012, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000000, 0x08000000, 0x00100012, 0x00000000,
+        0x0010000a, 0x00000000, 0x0020802a, 0x00000000, 0x00000000, 0x0800000f, 0x00100042, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000001, 0x08000000, 0x00100022, 0x00000000,
+        0x0010002a, 0x00000000, 0x0020802a, 0x00000000, 0x00000001, 0x09000045, 0x001000f2, 0x00000000,
+        0x00100046, 0x00000000, 0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x08000038, 0x00102082,
+        0x00000000, 0x0010003a, 0x00000000, 0x0020803a, 0x00000000, 0x00000001, 0x05000036, 0x00102072,
+        0x00000000, 0x00100246, 0x00000000, 0x0100003e,
     };
     static const struct
     {

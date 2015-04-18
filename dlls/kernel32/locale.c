@@ -1177,6 +1177,17 @@ static INT get_registry_locale_info( struct registry_value *registry_value, LPWS
 
         status = NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, info, size, &size );
 
+        /* try again with a bigger buffer when we have to return the correct size */
+        if (status == STATUS_BUFFER_OVERFLOW && !buffer && size > info_size)
+        {
+            KEY_VALUE_PARTIAL_INFORMATION *new_info;
+            if ((new_info = HeapReAlloc( GetProcessHeap(), 0, info, size )))
+            {
+                info = new_info;
+                status = NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, info, size, &size );
+            }
+        }
+
         NtClose( hkey );
 
         if (!status)
@@ -1207,8 +1218,6 @@ static INT get_registry_locale_info( struct registry_value *registry_value, LPWS
             if (status == STATUS_BUFFER_OVERFLOW && !buffer)
             {
                 ret = (size - info_size) / sizeof(WCHAR);
-                if (!ret || ((WCHAR *)&info->Data)[ret-1])
-                    ret++;
             }
             else if (status == STATUS_OBJECT_NAME_NOT_FOUND)
             {
@@ -5289,5 +5298,20 @@ INT WINAPI IdnToUnicode(DWORD dwFlags, LPCWSTR lpASCIICharStr, INT cchASCIIChar,
 BOOL WINAPI GetUserPreferredUILanguages(DWORD flags, PULONG numlangs, PZZWSTR langbuffer, PULONG bufferlen)
 {
     FIXME( "stub: %u %p %p %p\n", flags, numlangs, langbuffer, bufferlen );
+    return FALSE;
+}
+
+/******************************************************************************
+ *           GetFileMUIPath (KERNEL32.@)
+ */
+
+BOOL WINAPI GetFileMUIPath(DWORD flags, PCWSTR filepath, PWSTR language, PULONG languagelen,
+                           PWSTR muipath, PULONG muipathlen, PULONGLONG enumerator)
+{
+    FIXME("stub: 0x%x, %s, %s, %p, %p, %p, %p\n", flags, debugstr_w(filepath),
+           debugstr_w(language), languagelen, muipath, muipathlen, enumerator);
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+
     return FALSE;
 }

@@ -52,6 +52,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
 
+INT global_key_state_counter = 0;
 
 /***********************************************************************
  *           get_key_state
@@ -368,7 +369,8 @@ static void check_for_events( UINT flags )
  */
 SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 {
-    struct user_thread_info *thread_info = get_user_thread_info();
+    struct user_key_state_info *key_state_info = get_user_thread_info()->key_state;
+    INT counter = global_key_state_counter;
     SHORT ret;
 
     if (key < 0 || key >= 256) return 0;
@@ -377,24 +379,36 @@ SHORT WINAPI DECLSPEC_HOTPATCH GetAsyncKeyState( INT key )
 
     if ((ret = USER_Driver->pGetAsyncKeyState( key )) == -1)
     {
-        if (thread_info->key_state &&
-            !(thread_info->key_state[key] & 0xc0) &&
-            GetTickCount() - thread_info->key_state_time < 50)
+        if (key_state_info &&
+            !(key_state_info->state[key] & 0xc0) &&
+            key_state_info->counter == counter &&
+            GetTickCount() - key_state_info->time < 50)
+        {
+            /* use cached value */
             return 0;
-
-        if (!thread_info->key_state) thread_info->key_state = HeapAlloc( GetProcessHeap(), 0, 256 );
+        }
+        else if (!key_state_info)
+        {
+            key_state_info = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*key_state_info) );
+            get_user_thread_info()->key_state = key_state_info;
+        }
 
         ret = 0;
         SERVER_START_REQ( get_key_state )
         {
             req->tid = 0;
             req->key = key;
-            if (thread_info->key_state) wine_server_set_reply( req, thread_info->key_state, 256 );
+            if (key_state_info) wine_server_set_reply( req, key_state_info->state,
+                                                       sizeof(key_state_info->state) );
             if (!wine_server_call( req ))
             {
                 if (reply->state & 0x40) ret |= 0x0001;
                 if (reply->state & 0x80) ret |= 0x8000;
-                thread_info->key_state_time = GetTickCount();
+                if (key_state_info)
+                {
+                    key_state_info->time    = GetTickCount();
+                    key_state_info->counter = counter;
+                }
             }
         }
         SERVER_END_REQ;
@@ -1022,6 +1036,7 @@ INT WINAPI ToUnicode(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 INT WINAPI ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 		       LPWSTR lpwStr, int size, UINT flags, HKL hkl)
 {
+    if (!lpKeyState) return 0;
     return USER_Driver->pToUnicodeEx(virtKey, scanCode, lpKeyState, lpwStr, size, flags, hkl);
 }
 

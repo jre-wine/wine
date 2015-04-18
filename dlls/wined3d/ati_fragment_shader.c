@@ -1101,6 +1101,10 @@ static void atifs_srgbwriteenable(struct wined3d_context *context, const struct 
 
 static const struct StateEntryTemplate atifs_fragmentstate_template[] = {
     {STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),              { STATE_RENDER(WINED3D_RS_TEXTUREFACTOR),             atifs_tfactor           }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHAFUNC),                  { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           NULL                    }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHAREF),                   { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           NULL                    }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),            { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           state_alpha_test        }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_COLORKEYENABLE),             { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGCOLOR),                   { STATE_RENDER(WINED3D_RS_FOGCOLOR),                  state_fogcolor          }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGDENSITY),                 { STATE_RENDER(WINED3D_RS_FOGDENSITY),                state_fogdensity        }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGENABLE),                  { STATE_RENDER(WINED3D_RS_FOGENABLE),                 state_fog_fragpart      }, WINED3D_GL_EXT_NONE             },
@@ -1109,6 +1113,7 @@ static const struct StateEntryTemplate atifs_fragmentstate_template[] = {
     {STATE_RENDER(WINED3D_RS_FOGSTART),                   { STATE_RENDER(WINED3D_RS_FOGSTART),                  state_fogstartend       }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGEND),                     { STATE_RENDER(WINED3D_RS_FOGSTART),                  NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE),            { STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE),           atifs_srgbwriteenable   }, WINED3D_GL_EXT_NONE             },
+    {STATE_COLOR_KEY,                                     { STATE_COLOR_KEY,                                    state_nop               }, WINED3D_GL_EXT_NONE             },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_COLOR_OP),         { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_COLOR_ARG1),       { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_TEXTURESTAGE(0, WINED3D_TSS_COLOR_ARG2),       { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            NULL                    }, WINED3D_GL_EXT_NONE             },

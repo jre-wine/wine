@@ -1271,6 +1271,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX780,     "NVIDIA GeForce GTX 780",           DRIVER_NVIDIA_GEFORCE8,  3072},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX780TI,   "NVIDIA GeForce GTX 780 Ti",        DRIVER_NVIDIA_GEFORCE8,  3072},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX970,     "NVIDIA GeForce GTX 970",           DRIVER_NVIDIA_GEFORCE8,  4096},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX970M,    "NVIDIA GeForce GTX 970M",          DRIVER_NVIDIA_GEFORCE8,  3072},
 
     /* AMD cards */
     {HW_VENDOR_AMD,        CARD_AMD_RAGE_128PRO,           "ATI Rage Fury",                    DRIVER_AMD_RAGE_128PRO,  16  },
@@ -1698,6 +1699,7 @@ static const struct wined3d_renderer_table
 cards_nvidia_binary[] =
 {
     /* Direct 3D 11 */
+    {"GTX 970M",                    CARD_NVIDIA_GEFORCE_GTX970M},   /* GeForce 900 - highend mobile*/
     {"GTX 970",                     CARD_NVIDIA_GEFORCE_GTX970},    /* GeForce 900 - highend */
     {"GTX 780 Ti",                  CARD_NVIDIA_GEFORCE_GTX780TI},  /* Geforce 700 - highend */
     {"GTX 780",                     CARD_NVIDIA_GEFORCE_GTX780},    /* Geforce 700 - highend */
@@ -3563,6 +3565,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
     adapter->d3d_info.limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
     adapter->d3d_info.limits.ffp_textures = fragment_caps.MaxSimultaneousTextures;
+    adapter->d3d_info.shader_color_key = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_COLOR_KEY;
     TRACE("Max texture stages: %u.\n", adapter->d3d_info.limits.ffp_blend_stages);
 
     if (gl_info->supported[ARB_FRAMEBUFFER_OBJECT])
@@ -4375,7 +4378,8 @@ static BOOL CheckSurfaceCapability(const struct wined3d_adapter *adapter,
     if (CheckDepthStencilCapability(adapter, adapter_format, check_format)) return TRUE;
 
     /* If opengl can't process the format natively, the blitter may be able to convert it */
-    if (adapter->blitter->blit_supported(&adapter->gl_info, WINED3D_BLIT_OP_COLOR_BLIT,
+    if (adapter->blitter->blit_supported(&adapter->gl_info, &adapter->d3d_info,
+            WINED3D_BLIT_OP_COLOR_BLIT,
             NULL, WINED3D_POOL_DEFAULT, 0, check_format,
             NULL, WINED3D_POOL_DEFAULT, 0, adapter_format))
     {

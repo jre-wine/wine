@@ -2255,13 +2255,11 @@ static void test_TerminateJobObject(void)
     ok(ret, "TerminateJobObject error %u\n", GetLastError());
 
     dwret = WaitForSingleObject(pi.hProcess, 1000);
-    todo_wine
     ok(dwret == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", dwret);
     if (dwret == WAIT_TIMEOUT) TerminateProcess(pi.hProcess, 0);
 
     ret = GetExitCodeProcess(pi.hProcess, &dwret);
     ok(ret, "GetExitCodeProcess error %u\n", GetLastError());
-    todo_wine
     ok(dwret == 123 || broken(dwret == 0) /* randomly fails on Win 2000 / XP */,
        "wrong exitcode %u\n", dwret);
 
@@ -2443,6 +2441,88 @@ static void test_KillOnJobClose(void)
 
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+}
+
+static void test_WaitForJobObject(void)
+{
+    HANDLE job;
+    PROCESS_INFORMATION pi;
+    BOOL ret;
+    DWORD dwret;
+
+    /* test waiting for a job object when the process is killed */
+    job = pCreateJobObjectW(NULL, NULL);
+    ok(job != NULL, "CreateJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", dwret);
+
+    create_process("wait", &pi);
+
+    ret = pAssignProcessToJobObject(job, pi.hProcess);
+    ok(ret, "AssignProcessToJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", dwret);
+
+    ret = pTerminateJobObject(job, 123);
+    ok(ret, "TerminateJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 500);
+    ok(dwret == WAIT_OBJECT_0 || broken(dwret == WAIT_TIMEOUT),
+       "WaitForSingleObject returned %u\n", dwret);
+
+    if (dwret == WAIT_TIMEOUT) /* Win 2000/XP */
+    {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(job);
+        win_skip("TerminateJobObject doesn't signal job, skipping tests\n");
+        return;
+    }
+
+    /* the object is not reset immediately */
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", dwret);
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    /* creating a new process doesn't reset the signalled state */
+    create_process("wait", &pi);
+
+    ret = pAssignProcessToJobObject(job, pi.hProcess);
+    ok(ret, "AssignProcessToJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_OBJECT_0, "WaitForSingleObject returned %u\n", dwret);
+
+    ret = pTerminateJobObject(job, 123);
+    ok(ret, "TerminateJobObject error %u\n", GetLastError());
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    CloseHandle(job);
+
+    /* repeat the test, but this time the process terminates properly */
+    job = pCreateJobObjectW(NULL, NULL);
+    ok(job != NULL, "CreateJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", dwret);
+
+    create_process("exit", &pi);
+
+    ret = pAssignProcessToJobObject(job, pi.hProcess);
+    ok(ret, "AssignProcessToJobObject error %u\n", GetLastError());
+
+    dwret = WaitForSingleObject(job, 100);
+    ok(dwret == WAIT_TIMEOUT, "WaitForSingleObject returned %u\n", dwret);
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    CloseHandle(job);
 }
 
 static HANDLE test_AddSelfToJob(void)
@@ -2627,6 +2707,7 @@ START_TEST(process)
     test_QueryInformationJobObject();
     test_CompletionPort();
     test_KillOnJobClose();
+    test_WaitForJobObject();
     job = test_AddSelfToJob();
     test_jobInheritance(job);
     test_BreakawayOk(job);

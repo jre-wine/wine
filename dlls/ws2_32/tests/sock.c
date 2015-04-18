@@ -1387,6 +1387,16 @@ todo_wine
         err, WSAGetLastError());
 
     closesocket(s);
+    /* Test with the closed socket */
+    SetLastError(0xdeadbeef);
+    size = sizeof(i);
+    i = 1234;
+    err = getsockopt(s, SOL_SOCKET, SO_ERROR, (char *) &i, &size);
+todo_wine
+    ok( (err == SOCKET_ERROR) && (WSAGetLastError() == WSAENOTSOCK),
+        "got %d with %d (expected SOCKET_ERROR with WSAENOTSOCK)\n",
+        err, WSAGetLastError());
+    ok (i == 1234, "expected 1234, got %d\n", i);
 
     /* Test WS_IP_MULTICAST_TTL with 8, 16, 24 and 32 bits values */
     s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -3368,6 +3378,14 @@ static DWORD WINAPI SelectReadThread(void *param)
     return 0;
 }
 
+static DWORD WINAPI SelectCloseThread(void *param)
+{
+    SOCKET s = *(SOCKET*)param;
+    Sleep(500);
+    closesocket(s);
+    return 0;
+}
+
 static void test_errors(void)
 {
     SOCKET sock;
@@ -3675,6 +3693,12 @@ static void test_select(void)
     select_timeout.tv_sec = 1;
     select_timeout.tv_usec = 250000;
 
+    /* When no events are pending select returns 0 with no error */
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdListen);
+    ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
+    ok(ret == 0, "expected 0, got %d\n", ret);
+
     /* When a socket is attempting to connect the listening socket receives the read descriptor */
     fdWrite = setup_connector_socket(&address, len, TRUE);
     FD_ZERO_ALL();
@@ -3695,6 +3719,10 @@ static void test_select(void)
     ok(ret == 2, "expected 2, got %d\n", ret);
     ok(FD_ISSET(fdWrite, &writefds), "fdWrite socket is not in the set\n");
     ok(FD_ISSET(fdRead, &writefds), "fdRead socket is not in the set\n");
+    len = sizeof(id);
+    id = 0xdeadbeef;
+    ok(!getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len), "getsockopt failed with %d\n",WSAGetLastError());
+    ok(id == 0, "expected 0, got %d\n", id);
 
     /* When data is received the receiver gets the read descriptor */
     ret = send(fdWrite, "1234", 4, 0);
@@ -3767,6 +3795,7 @@ static void test_select(void)
     ok(ret == 0, "expected 0, got %d\n", ret);
     ret = closesocket(fdListen);
     ok(ret == 0, "expected 0, got %d\n", ret);
+    len = sizeof(address);
     fdWrite = setup_connector_socket(&address, len, TRUE);
     FD_ZERO_ALL();
     FD_SET(fdWrite, &writefds);
@@ -3774,9 +3803,56 @@ static void test_select(void)
     select_timeout.tv_sec = 2; /* requires more time to realize it will not connect */
     ret = select(0, &readfds, &writefds, &exceptfds, &select_timeout);
     ok(ret == 1, "expected 1, got %d\n", ret);
+    len = sizeof(id);
+    id = 0xdeadbeef;
+    ok(!getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len), "getsockopt failed with %d\n",WSAGetLastError());
+    ok(id == WSAECONNREFUSED, "expected 10061, got %d\n", id);
     ok(FD_ISSET(fdWrite, &exceptfds), "fdWrite socket is not in the set\n");
     ok(select_timeout.tv_usec == 250000, "select timeout should not have changed\n");
     closesocket(fdWrite);
+
+    /* Try select() on a closed socket after connection */
+    ok(!tcp_socketpair(&fdRead, &fdWrite), "creating socket pair failed\n");
+    closesocket(fdRead);
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdWrite);
+    FD_SET_ALL(fdRead);
+    SetLastError(0xdeadbeef);
+    ret = select(0, &readfds, NULL, &exceptfds, &select_timeout);
+    ok(ret == SOCKET_ERROR, "expected 1, got %d\n", ret);
+todo_wine
+    ok(GetLastError() == WSAENOTSOCK, "expected 10038, got %d\n", GetLastError());
+    /* descriptor sets are unchanged */
+    ok(readfds.fd_count == 2, "expected 2, got %d\n", readfds.fd_count);
+    ok(exceptfds.fd_count == 2, "expected 2, got %d\n", exceptfds.fd_count);
+    closesocket(fdWrite);
+
+    /* Close the socket currently being selected in a thread - bug 38399 */
+    ok(!tcp_socketpair(&fdRead, &fdWrite), "creating socket pair failed\n");
+    thread_handle = CreateThread(NULL, 0, SelectCloseThread, &fdWrite, 0, &id);
+    ok(thread_handle != NULL, "CreateThread failed unexpectedly: %d\n", GetLastError());
+    FD_ZERO_ALL();
+    FD_SET_ALL(fdWrite);
+    ret = select(0, &readfds, NULL, &exceptfds, &select_timeout);
+todo_wine
+    ok(ret == 1, "expected 1, got %d\n", ret);
+    ok(FD_ISSET(fdWrite, &readfds), "fdWrite socket is not in the set\n");
+    WaitForSingleObject (thread_handle, 1000);
+    closesocket(fdRead);
+    /* test again with only the except descriptor */
+    ok(!tcp_socketpair(&fdRead, &fdWrite), "creating socket pair failed\n");
+    thread_handle = CreateThread(NULL, 0, SelectCloseThread, &fdWrite, 0, &id);
+    ok(thread_handle != NULL, "CreateThread failed unexpectedly: %d\n", GetLastError());
+    FD_ZERO_ALL();
+    FD_SET(fdWrite, &exceptfds);
+    SetLastError(0xdeadbeef);
+    ret = select(0, NULL, NULL, &exceptfds, &select_timeout);
+todo_wine
+    ok(ret == SOCKET_ERROR, "expected 1, got %d\n", ret);
+todo_wine
+    ok(GetLastError() == WSAENOTSOCK, "expected 10038, got %d\n", GetLastError());
+    WaitForSingleObject (thread_handle, 1000);
+    closesocket(fdRead);
 }
 #undef FD_SET_ALL
 #undef FD_ZERO_ALL
@@ -4150,6 +4226,7 @@ static void test_getsockname(void)
     int sa_get_len = sa_set_len;
     static const unsigned char null_padding[] = {0,0,0,0,0,0,0,0};
     int ret;
+    struct hostent *h;
 
     if(WSAStartup(MAKEWORD(2,0), &wsa)){
         trace("Winsock failed: %d. Aborting test\n", WSAGetLastError());
@@ -4197,6 +4274,38 @@ static void test_getsockname(void)
             "getsockname did not zero the sockaddr_in structure\n");
 
     closesocket(sock);
+
+    h = gethostbyname("");
+    if (h && h->h_length == 4) /* this test is only meaningful in IPv4 */
+    {
+        int i;
+        for (i = 0; h->h_addr_list[i]; i++)
+        {
+            char ipstr[32];
+            struct in_addr ip;
+            ip.s_addr = *(ULONG *) h->h_addr_list[i];
+
+            sock = socket(AF_INET, SOCK_DGRAM, 0);
+            ok(sock != INVALID_SOCKET, "socket failed with %d\n", GetLastError());
+
+            memset(&sa_set, 0, sizeof(sa_set));
+            sa_set.sin_family = AF_INET;
+            sa_set.sin_addr.s_addr = ip.s_addr;
+            /* The same address we bind must be the same address we get */
+            ret = bind(sock, (struct sockaddr*)&sa_set, sizeof(sa_set));
+            ok(ret == 0, "bind failed with %d\n", GetLastError());
+            sa_get_len = sizeof(sa_get);
+            ret = getsockname(sock, (struct sockaddr*)&sa_get, &sa_get_len);
+            ok(ret == 0, "getsockname failed with %d\n", GetLastError());
+            strcpy(ipstr, inet_ntoa(sa_get.sin_addr));
+            trace("testing bind on interface %s\n", ipstr);
+            ok(sa_get.sin_addr.s_addr == sa_set.sin_addr.s_addr,
+               "address does not match: %s != %s", ipstr, inet_ntoa(sa_set.sin_addr));
+
+            closesocket(sock);
+        }
+    }
+
     WSACleanup();
 }
 

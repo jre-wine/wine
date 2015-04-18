@@ -3511,7 +3511,7 @@ static HRESULT device_update_volume(struct wined3d_device *device,
 
     /* Only a prepare, since we're uploading the entire volume. */
     wined3d_texture_prepare_texture(dst_volume->container, context, FALSE);
-    wined3d_texture_bind(dst_volume->container, context, FALSE);
+    wined3d_texture_bind_and_dirtify(dst_volume->container, context, FALSE);
 
     data.buffer_object = 0;
     data.addr = src.data;
@@ -4331,6 +4331,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         const struct wined3d_swapchain_desc *swapchain_desc, const struct wined3d_display_mode *mode,
         wined3d_device_reset_cb callback, BOOL reset_state)
 {
+    enum wined3d_format_id backbuffer_format = swapchain_desc->backbuffer_format;
     struct wined3d_resource *resource, *cursor;
     struct wined3d_swapchain *swapchain;
     struct wined3d_display_mode m;
@@ -4492,10 +4493,16 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         update_desc = TRUE;
     }
 
-    if (swapchain_desc->backbuffer_format != WINED3DFMT_UNKNOWN
-            && swapchain_desc->backbuffer_format != swapchain->desc.backbuffer_format)
+    if (backbuffer_format == WINED3DFMT_UNKNOWN)
     {
-        swapchain->desc.backbuffer_format = swapchain_desc->backbuffer_format;
+        if (!swapchain_desc->windowed)
+            return WINED3DERR_INVALIDCALL;
+        backbuffer_format = swapchain->original_mode.format_id;
+    }
+
+    if (backbuffer_format != swapchain->desc.backbuffer_format)
+    {
+        swapchain->desc.backbuffer_format = backbuffer_format;
         update_desc = TRUE;
     }
 
