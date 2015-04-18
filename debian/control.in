@@ -85,6 +85,7 @@ Depends:
  libncurses5,
  libfreetype6,
 Recommends:
+ wineVERSION,
  libgl1-mesa-dri,
  libwine-gecko-2.24 [!armhf],
  libasound2-plugins,
@@ -103,9 +104,10 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
 Recommends:
+ wineVERSION,
+ wine32VERSION (>= ${source:Version}),
  libwine-gecko-2.24 [!armhf],
  libasound2-plugins,
- wine32VERSION (>= ${source:Version}),
 Suggests:
  wine64VERSION-preloader,
 Description: Windows API implementation - 64-bit binary loader
