@@ -843,7 +843,7 @@ const struct wined3d_color_key_conversion * wined3d_format_get_color_key_convers
         WINED3DFMT_B8G8R8A8_UNORM,  convert_p8_uint_b8g8r8a8_unorm
     };
 
-    if (need_alpha_ck && (texture->flags & WINED3D_TEXTURE_COLOR_KEY))
+    if (need_alpha_ck && (texture->async.flags & WINED3D_TEXTURE_ASYNC_COLOR_KEY))
     {
         for (i = 0; i < sizeof(color_key_info) / sizeof(*color_key_info); ++i)
         {
@@ -3001,6 +3001,8 @@ const char *debug_d3dstate(DWORD state)
         return "STATE_FRAMEBUFFER";
     if (STATE_IS_POINT_SIZE_ENABLE(state))
         return "STATE_POINT_SIZE_ENABLE";
+    if (STATE_IS_COLOR_KEY(state))
+        return "STATE_COLOR_KEY";
 
     return wine_dbg_sprintf("UNKNOWN_STATE(%#x)", state);
 }
@@ -3511,6 +3513,70 @@ DWORD wined3d_format_convert_from_float(const struct wined3d_surface *surface, c
     return 0;
 }
 
+static float color_to_float(DWORD color, DWORD size, DWORD offset)
+{
+    DWORD mask = (1 << size) - 1;
+
+    if (!size)
+        return 1.0f;
+
+    color >>= offset;
+    color &= mask;
+
+    return (float)color / (float)mask;
+}
+
+BOOL wined3d_format_convert_color_to_float(const struct wined3d_format *format,
+        const struct wined3d_palette *palette, DWORD color, struct wined3d_color *float_color)
+{
+    switch (format->id)
+    {
+        case WINED3DFMT_B8G8R8_UNORM:
+        case WINED3DFMT_B8G8R8A8_UNORM:
+        case WINED3DFMT_B8G8R8X8_UNORM:
+        case WINED3DFMT_B5G6R5_UNORM:
+        case WINED3DFMT_B5G5R5X1_UNORM:
+        case WINED3DFMT_B5G5R5A1_UNORM:
+        case WINED3DFMT_B4G4R4A4_UNORM:
+        case WINED3DFMT_B2G3R3_UNORM:
+        case WINED3DFMT_R8_UNORM:
+        case WINED3DFMT_A8_UNORM:
+        case WINED3DFMT_B2G3R3A8_UNORM:
+        case WINED3DFMT_B4G4R4X4_UNORM:
+        case WINED3DFMT_R10G10B10A2_UNORM:
+        case WINED3DFMT_R10G10B10A2_SNORM:
+        case WINED3DFMT_R8G8B8A8_UNORM:
+        case WINED3DFMT_R8G8B8X8_UNORM:
+        case WINED3DFMT_R16G16_UNORM:
+        case WINED3DFMT_B10G10R10A2_UNORM:
+            float_color->r = color_to_float(color, format->red_size, format->red_offset);
+            float_color->g = color_to_float(color, format->green_size, format->green_size);
+            float_color->b = color_to_float(color, format->blue_size, format->blue_offset);
+            float_color->a = color_to_float(color, format->alpha_size, format->alpha_offset);
+            return TRUE;
+
+        case WINED3DFMT_P8_UINT:
+            if (palette)
+            {
+                float_color->r = palette->colors[color].rgbRed / 255.0f;
+                float_color->g = palette->colors[color].rgbGreen / 255.0f;
+                float_color->b = palette->colors[color].rgbBlue / 255.0f;
+            }
+            else
+            {
+                float_color->r = 0.0f;
+                float_color->g = 0.0f;
+                float_color->b = 0.0f;
+            }
+            float_color->a = color / 255.0f;
+            return TRUE;
+
+        default:
+            ERR("Unhandled conversion from %s to floating point.\n", debug_d3dformat(format->id));
+            return FALSE;
+    }
+}
+
 /* DirectDraw stuff */
 enum wined3d_format_id pixelformat_for_depth(DWORD depth)
 {
@@ -3624,6 +3690,8 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
     const struct wined3d_gl_info *gl_info = context->gl_info;
     const struct wined3d_d3d_info *d3d_info = context->d3d_info;
 
+    settings->padding = 0;
+
     for (i = 0; i < d3d_info->limits.ffp_blend_stages; ++i)
     {
         const struct wined3d_texture *texture;
@@ -3717,7 +3785,7 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
 
             if (texture_dimensions == GL_TEXTURE_2D || texture_dimensions == GL_TEXTURE_RECTANGLE_ARB)
             {
-                if (texture->color_key_flags & WINED3D_CKEY_SRC_BLT && !texture->resource.format->alpha_size)
+                if (texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT && !texture->resource.format->alpha_size)
                 {
                     if (aop == WINED3D_TOP_DISABLE)
                     {
@@ -3851,6 +3919,13 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
     } else {
         settings->emul_clipplanes = 1;
     }
+
+    if (state->render_states[WINED3D_RS_COLORKEYENABLE] && state->textures[0]
+            && state->textures[0]->async.color_key_flags & WINED3D_CKEY_SRC_BLT
+            && settings->op[0].cop != WINED3D_TOP_DISABLE)
+        settings->color_key_enabled = 1;
+    else
+        settings->color_key_enabled = 0;
 }
 
 const struct ffp_frag_desc *find_ffp_frag_shader(const struct wine_rb_tree *fragment_shaders,
@@ -4121,7 +4196,8 @@ const struct wine_rb_functions wined3d_ffp_vertex_program_rb_functions =
     wined3d_ffp_vertex_program_key_compare,
 };
 
-const struct blit_shader *wined3d_select_blitter(const struct wined3d_gl_info *gl_info, enum wined3d_blit_op blit_op,
+const struct blit_shader *wined3d_select_blitter(const struct wined3d_gl_info *gl_info,
+        const struct wined3d_d3d_info *d3d_info, enum wined3d_blit_op blit_op,
         const RECT *src_rect, DWORD src_usage, enum wined3d_pool src_pool, const struct wined3d_format *src_format,
         const RECT *dst_rect, DWORD dst_usage, enum wined3d_pool dst_pool, const struct wined3d_format *dst_format)
 {
@@ -4135,7 +4211,7 @@ const struct blit_shader *wined3d_select_blitter(const struct wined3d_gl_info *g
 
     for (i = 0; i < sizeof(blitters) / sizeof(*blitters); ++i)
     {
-        if (blitters[i]->blit_supported(gl_info, blit_op,
+        if (blitters[i]->blit_supported(gl_info, d3d_info, blit_op,
                 src_rect, src_usage, src_pool, src_format,
                 dst_rect, dst_usage, dst_pool, dst_format))
             return blitters[i];

@@ -677,7 +677,7 @@
 @ stdcall GetFileInformationByHandle(long ptr)
 @ stdcall GetFileInformationByHandleEx(long long ptr long)
 # @ stub GetFileMUIInfo
-# @ stub GetFileMUIPath
+@ stdcall GetFileMUIPath(long wstr wstr ptr ptr ptr ptr)
 @ stdcall GetFileSize(long ptr)
 @ stdcall GetFileSizeEx(long ptr)
 @ stdcall GetFileTime(long ptr ptr ptr)
@@ -1134,9 +1134,9 @@
 @ stdcall PeekConsoleInputW(ptr ptr long ptr)
 @ stdcall PeekNamedPipe(long ptr long ptr ptr ptr)
 @ stdcall PostQueuedCompletionStatus(long long ptr ptr)
-# @ stub PowerClearRequest
-# @ stub PowerCreateRequest
-# @ stub PowerSetRequest
+@ stdcall PowerClearRequest(long long)
+@ stdcall PowerCreateRequest(ptr)
+@ stdcall PowerSetRequest(long long)
 @ stdcall PrepareTape(ptr long long)
 @ stub PrivCopyFileExW
 @ stub PrivMoveFileIdentityW

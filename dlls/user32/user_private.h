@@ -184,14 +184,22 @@ struct user_thread_info
     DWORD                         GetMessagePosVal;       /* Value for GetMessagePos */
     ULONG_PTR                     GetMessageExtraInfoVal; /* Value for GetMessageExtraInfo */
     UINT                          active_hooks;           /* Bitmap of active hooks */
-    UINT                          key_state_time;         /* Time of last key state refresh */
-    BYTE                         *key_state;              /* Cache of global key state */
+    struct user_key_state_info   *key_state;              /* Cache of global key state */
     HWND                          top_window;             /* Desktop window */
     HWND                          msg_window;             /* HWND_MESSAGE parent window */
     RAWINPUT                     *rawinput;
 };
 
 C_ASSERT( sizeof(struct user_thread_info) <= sizeof(((TEB *)0)->Win32ClientInfo) );
+
+extern INT global_key_state_counter DECLSPEC_HIDDEN;
+
+struct user_key_state_info
+{
+    UINT                          time;                   /* Time of last key state refresh */
+    INT                           counter;                /* Counter to invalidate the key state */
+    BYTE                          state[256];             /* State for each key */
+};
 
 struct hook_extra_info
 {

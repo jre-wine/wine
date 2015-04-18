@@ -49,6 +49,7 @@ enum wined3d_cs_op
     WINED3D_CS_OP_SET_SAMPLER_STATE,
     WINED3D_CS_OP_SET_TRANSFORM,
     WINED3D_CS_OP_SET_CLIP_PLANE,
+    WINED3D_CS_OP_SET_COLOR_KEY,
     WINED3D_CS_OP_SET_MATERIAL,
     WINED3D_CS_OP_RESET_STATE,
 };
@@ -168,6 +169,15 @@ struct wined3d_cs_set_texture
     enum wined3d_cs_op opcode;
     UINT stage;
     struct wined3d_texture *texture;
+};
+
+struct wined3d_cs_set_color_key
+{
+    enum wined3d_cs_op opcode;
+    struct wined3d_texture *texture;
+    WORD flags;
+    WORD set;
+    struct wined3d_color_key color_key;
 };
 
 struct wined3d_cs_set_shader_resource_view
@@ -630,6 +640,7 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
     const struct wined3d_d3d_info *d3d_info = &cs->device->adapter->d3d_info;
     const struct wined3d_cs_set_texture *op = data;
     struct wined3d_texture *prev;
+    BOOL old_use_color_key = FALSE, new_use_color_key = FALSE;
 
     prev = cs->state.textures[op->stage];
     cs->state.textures[op->stage] = op->texture;
@@ -655,6 +666,9 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
             device_invalidate_state(cs->device, STATE_TEXTURESTAGE(op->stage, WINED3D_TSS_COLOR_OP));
             device_invalidate_state(cs->device, STATE_TEXTURESTAGE(op->stage, WINED3D_TSS_ALPHA_OP));
         }
+
+        if (!op->stage && op->texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT)
+            new_use_color_key = TRUE;
     }
 
     if (prev)
@@ -682,9 +696,18 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
             device_invalidate_state(cs->device, STATE_TEXTURESTAGE(op->stage, WINED3D_TSS_COLOR_OP));
             device_invalidate_state(cs->device, STATE_TEXTURESTAGE(op->stage, WINED3D_TSS_ALPHA_OP));
         }
+
+        if (!op->stage && prev->async.color_key_flags & WINED3D_CKEY_SRC_BLT)
+            old_use_color_key = TRUE;
     }
 
     device_invalidate_state(cs->device, STATE_SAMPLER(op->stage));
+
+    if (new_use_color_key != old_use_color_key)
+        device_invalidate_state(cs->device, STATE_RENDER(WINED3D_RS_COLORKEYENABLE));
+
+    if (new_use_color_key)
+        device_invalidate_state(cs->device, STATE_COLOR_KEY);
 }
 
 void wined3d_cs_emit_set_texture(struct wined3d_cs *cs, UINT stage, struct wined3d_texture *texture)
@@ -870,6 +893,89 @@ void wined3d_cs_emit_set_clip_plane(struct wined3d_cs *cs, UINT plane_idx, const
     cs->ops->submit(cs);
 }
 
+static void wined3d_cs_exec_set_color_key(struct wined3d_cs *cs, const void *data)
+{
+    const struct wined3d_cs_set_color_key *op = data;
+    struct wined3d_texture *texture = op->texture;
+
+    if (op->set)
+    {
+        switch (op->flags & ~WINED3D_CKEY_COLORSPACE)
+        {
+            case WINED3D_CKEY_DST_BLT:
+                texture->async.dst_blt_color_key = op->color_key;
+                texture->async.color_key_flags |= WINED3D_CKEY_DST_BLT;
+                break;
+
+            case WINED3D_CKEY_DST_OVERLAY:
+                texture->async.dst_overlay_color_key = op->color_key;
+                texture->async.color_key_flags |= WINED3D_CKEY_DST_OVERLAY;
+                break;
+
+            case WINED3D_CKEY_SRC_BLT:
+                if (texture == cs->state.textures[0])
+                {
+                    device_invalidate_state(cs->device, STATE_COLOR_KEY);
+                    if (!(texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT))
+                        device_invalidate_state(cs->device, STATE_RENDER(WINED3D_RS_COLORKEYENABLE));
+                }
+
+                texture->async.src_blt_color_key = op->color_key;
+                texture->async.color_key_flags |= WINED3D_CKEY_SRC_BLT;
+                break;
+
+            case WINED3D_CKEY_SRC_OVERLAY:
+                texture->async.src_overlay_color_key = op->color_key;
+                texture->async.color_key_flags |= WINED3D_CKEY_SRC_OVERLAY;
+                break;
+        }
+    }
+    else
+    {
+        switch (op->flags & ~WINED3D_CKEY_COLORSPACE)
+        {
+            case WINED3D_CKEY_DST_BLT:
+                texture->async.color_key_flags &= ~WINED3D_CKEY_DST_BLT;
+                break;
+
+            case WINED3D_CKEY_DST_OVERLAY:
+                texture->async.color_key_flags &= ~WINED3D_CKEY_DST_OVERLAY;
+                break;
+
+            case WINED3D_CKEY_SRC_BLT:
+                if (texture == cs->state.textures[0] && texture->async.color_key_flags & WINED3D_CKEY_SRC_BLT)
+                    device_invalidate_state(cs->device, STATE_RENDER(WINED3D_RS_COLORKEYENABLE));
+
+                texture->async.color_key_flags &= ~WINED3D_CKEY_SRC_BLT;
+                break;
+
+            case WINED3D_CKEY_SRC_OVERLAY:
+                texture->async.color_key_flags &= ~WINED3D_CKEY_SRC_OVERLAY;
+                break;
+        }
+    }
+}
+
+void wined3d_cs_emit_set_color_key(struct wined3d_cs *cs, struct wined3d_texture *texture,
+        WORD flags, const struct wined3d_color_key *color_key)
+{
+    struct wined3d_cs_set_color_key *op;
+
+    op = cs->ops->require_space(cs, sizeof(*op));
+    op->opcode = WINED3D_CS_OP_SET_COLOR_KEY;
+    op->texture = texture;
+    op->flags = flags;
+    if (color_key)
+    {
+        op->color_key = *color_key;
+        op->set = 1;
+    }
+    else
+        op->set = 0;
+
+    cs->ops->submit(cs);
+}
+
 static void wined3d_cs_exec_set_material(struct wined3d_cs *cs, const void *data)
 {
     const struct wined3d_cs_set_material *op = data;
@@ -936,6 +1042,7 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
     /* WINED3D_CS_OP_SET_SAMPLER_STATE          */ wined3d_cs_exec_set_sampler_state,
     /* WINED3D_CS_OP_SET_TRANSFORM              */ wined3d_cs_exec_set_transform,
     /* WINED3D_CS_OP_SET_CLIP_PLANE             */ wined3d_cs_exec_set_clip_plane,
+    /* WINED3D_CS_OP_SET_COLOR_KEY              */ wined3d_cs_exec_set_color_key,
     /* WINED3D_CS_OP_SET_MATERIAL               */ wined3d_cs_exec_set_material,
     /* WINED3D_CS_OP_RESET_STATE                */ wined3d_cs_exec_reset_state,
 };

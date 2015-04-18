@@ -4166,7 +4166,7 @@ static void init_output_registers(const struct wined3d_shader *shader,
 
         for (j = 0; j < ps_input_sig->element_count; ++j)
         {
-            const struct wined3d_shader_signature_element *input = &ps_input_sig->elements[i];
+            const struct wined3d_shader_signature_element *input = &ps_input_sig->elements[j];
 
             if (!input->semantic_name)
                 continue;
@@ -5762,7 +5762,8 @@ const struct wined3d_shader_backend_ops arb_program_shader_backend =
 
 /* ARB_fragment_program fixed function pipeline replacement definitions */
 #define ARB_FFP_CONST_TFACTOR           0
-#define ARB_FFP_CONST_SPECULAR_ENABLE   ((ARB_FFP_CONST_TFACTOR) + 1)
+#define ARB_FFP_CONST_COLOR_KEY         ((ARB_FFP_CONST_TFACTOR) + 1)
+#define ARB_FFP_CONST_SPECULAR_ENABLE   ((ARB_FFP_CONST_COLOR_KEY) + 1)
 #define ARB_FFP_CONST_CONSTANT(i)       ((ARB_FFP_CONST_SPECULAR_ENABLE) + 1 + i)
 #define ARB_FFP_CONST_BUMPMAT(i)        ((ARB_FFP_CONST_CONSTANT(7)) + 1 + i)
 #define ARB_FFP_CONST_LUMINANCE(i)      ((ARB_FFP_CONST_BUMPMAT(7)) + 1 + i)
@@ -5841,7 +5842,8 @@ static void arbfp_free(struct wined3d_device *device)
 static void arbfp_get_caps(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps)
 {
     caps->wined3d_caps = WINED3D_FRAGMENT_CAP_PROJ_CONTROL
-            | WINED3D_FRAGMENT_CAP_SRGB_WRITE;
+            | WINED3D_FRAGMENT_CAP_SRGB_WRITE
+            | WINED3D_FRAGMENT_CAP_COLOR_KEY;
     caps->PrimitiveMiscCaps = WINED3DPMISCCAPS_TSSARGTEMP;
     caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
                            WINED3DTEXOPCAPS_SELECTARG1                  |
@@ -5993,6 +5995,66 @@ static void tex_bumpenvlum_arbfp(struct wined3d_context *context,
 
     GL_EXTCALL(glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_LUMINANCE(stage), param));
     checkGLcall("glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_LUMINANCE(stage), param)");
+}
+
+static void alpha_test_arbfp(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+{
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    int glParm;
+    float ref;
+
+    TRACE("context %p, state %p, state_id %#x.\n", context, state, state_id);
+
+    if (state->render_states[WINED3D_RS_ALPHATESTENABLE])
+    {
+        gl_info->gl_ops.gl.p_glEnable(GL_ALPHA_TEST);
+        checkGLcall("glEnable GL_ALPHA_TEST");
+    }
+    else
+    {
+        gl_info->gl_ops.gl.p_glDisable(GL_ALPHA_TEST);
+        checkGLcall("glDisable GL_ALPHA_TEST");
+        return;
+    }
+
+    ref = ((float)state->render_states[WINED3D_RS_ALPHAREF]) / 255.0f;
+    glParm = wined3d_gl_compare_func(state->render_states[WINED3D_RS_ALPHAFUNC]);
+
+    if (glParm)
+    {
+        gl_info->gl_ops.gl.p_glAlphaFunc(glParm, ref);
+        checkGLcall("glAlphaFunc");
+    }
+}
+
+static void color_key_arbfp(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+{
+    struct wined3d_device *device = context->swapchain->device;
+    const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_color float_key;
+    const struct wined3d_texture *texture = state->textures[0];
+
+    if (!texture)
+        return;
+
+    /* Don't load the parameter if we're using an arbfp pixel shader,
+     * otherwise we'll overwrite application provided constants. */
+    if (device->shader_backend == &arb_program_shader_backend)
+    {
+        struct shader_arb_priv *priv;
+
+        if (use_ps(state))
+            return;
+
+        priv = device->shader_priv;
+        priv->pshader_const_dirty[ARB_FFP_CONST_COLOR_KEY] = 1;
+        priv->highest_dirty_ps_const = max(priv->highest_dirty_ps_const, ARB_FFP_CONST_COLOR_KEY + 1);
+    }
+
+    wined3d_format_convert_color_to_float(texture->resource.format, NULL,
+            texture->async.src_blt_color_key.color_space_high_value, &float_key);
+    GL_EXTCALL(glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_COLOR_KEY, &float_key.r));
+    checkGLcall("glProgramEnvParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARB_FFP_CONST_COLOR_KEY, &float_key.r)");
 }
 
 static const char *get_argreg(struct wined3d_shader_buffer *buffer, DWORD argnum, unsigned int stage, DWORD arg)
@@ -6199,6 +6261,25 @@ static void gen_ffp_instr(struct wined3d_shader_buffer *buffer, unsigned int sta
         shader_addline(buffer, "MUL_SAT %s%s, %s, const.z;\n", dstreg, dstmask, dstreg);
 }
 
+static const char *arbfp_texture_target(enum wined3d_gl_resource_type type)
+{
+    switch(type)
+    {
+        case WINED3D_GL_RES_TYPE_TEX_1D:
+            return "1D";
+        case WINED3D_GL_RES_TYPE_TEX_2D:
+            return "2D";
+        case WINED3D_GL_RES_TYPE_TEX_3D:
+            return "3D";
+        case WINED3D_GL_RES_TYPE_TEX_CUBE:
+            return "CUBE";
+        case WINED3D_GL_RES_TYPE_TEX_RECT:
+            return "RECT";
+        default:
+            return "unexpected_resource_type";
+    }
+}
+
 static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, const struct wined3d_gl_info *gl_info)
 {
     unsigned int stage;
@@ -6217,6 +6298,20 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
     const char *final_combiner_src = "ret";
     GLint pos;
     BOOL custom_linear_fog = FALSE;
+
+    if (!shader_buffer_init(&buffer))
+    {
+        ERR("Failed to initialize shader buffer.\n");
+        return 0;
+    }
+
+    shader_addline(&buffer, "!!ARBfp1.0\n");
+
+    if (settings->color_key_enabled)
+    {
+        shader_addline(&buffer, "PARAM color_key = program.env[%u];\n", ARB_FFP_CONST_COLOR_KEY);
+        tex_read[0] = TRUE;
+    }
 
     /* Find out which textures are read */
     for (stage = 0; stage < MAX_TEXTURES; ++stage)
@@ -6277,15 +6372,6 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
     }
     lowest_disabled_stage = stage;
 
-    /* Shader header */
-    if (!shader_buffer_init(&buffer))
-    {
-        ERR("Failed to initialize shader buffer.\n");
-        return 0;
-    }
-
-    shader_addline(&buffer, "!!ARBfp1.0\n");
-
     switch (settings->fog)
     {
         case WINED3D_FFP_PS_FOG_OFF:                                                         break;
@@ -6345,27 +6431,7 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
         if (!tex_read[stage])
             continue;
 
-        switch(settings->op[stage].tex_type)
-        {
-            case WINED3D_GL_RES_TYPE_TEX_1D:
-                textype = "1D";
-                break;
-            case WINED3D_GL_RES_TYPE_TEX_2D:
-                textype = "2D";
-                break;
-            case WINED3D_GL_RES_TYPE_TEX_3D:
-                textype = "3D";
-                break;
-            case WINED3D_GL_RES_TYPE_TEX_CUBE:
-                textype = "CUBE";
-                break;
-            case WINED3D_GL_RES_TYPE_TEX_RECT:
-                textype = "RECT";
-                break;
-            default:
-                textype = "unexpected_textype";
-                break;
-        }
+        textype = arbfp_texture_target(settings->op[stage].tex_type);
 
         if(settings->op[stage].projected == proj_none) {
             instr = "TEX";
@@ -6422,6 +6488,14 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
         sprintf(colorcor_dst, "tex%u", stage);
         gen_color_correction(&buffer, colorcor_dst, WINED3DSP_WRITEMASK_ALL, "const.x", "const.y",
                 settings->op[stage].color_fixup);
+    }
+
+    if (settings->color_key_enabled)
+    {
+        shader_addline(&buffer, "SUB TMP, tex0, color_key;\n");
+        shader_addline(&buffer, "DP4 TMP.b, TMP, TMP;\n");
+        shader_addline(&buffer, "SGE TMP, -TMP.b, 0.0;\n");
+        shader_addline(&buffer, "KIL -TMP;\n");
     }
 
     /* Generate the main shader */
@@ -6544,6 +6618,7 @@ static void fragment_prog_arbfp(struct wined3d_context *context, const struct wi
             }
             state_texfactor_arbfp(context, state, STATE_RENDER(WINED3D_RS_TEXTUREFACTOR));
             state_arb_specularenable(context, state, STATE_RENDER(WINED3D_RS_SPECULARENABLE));
+            color_key_arbfp(context, state, STATE_COLOR_KEY);
         }
         else if (use_pshader)
         {
@@ -6781,6 +6856,11 @@ static const struct StateEntryTemplate arbfp_fragmentstate_template[] =
     {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),   { STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),  tex_bumpenvlum_arbfp    }, WINED3D_GL_EXT_NONE             },
     {STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LOFFSET),  { STATE_TEXTURESTAGE(7, WINED3D_TSS_BUMPENV_LSCALE),  NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),             { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            fragment_prog_arbfp     }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHAFUNC),                  { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           NULL                    }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHAREF),                   { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           NULL                    }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),            { STATE_RENDER(WINED3D_RS_ALPHATESTENABLE),           alpha_test_arbfp        }, WINED3D_GL_EXT_NONE             },
+    {STATE_RENDER(WINED3D_RS_COLORKEYENABLE),             { STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL),            NULL                    }, WINED3D_GL_EXT_NONE             },
+    {STATE_COLOR_KEY,                                     { STATE_COLOR_KEY,                                    color_key_arbfp         }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGENABLE),                  { STATE_RENDER(WINED3D_RS_FOGENABLE),                 state_arbfp_fog         }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGTABLEMODE),               { STATE_RENDER(WINED3D_RS_FOGENABLE),                 NULL                    }, WINED3D_GL_EXT_NONE             },
     {STATE_RENDER(WINED3D_RS_FOGVERTEXMODE),              { STATE_RENDER(WINED3D_RS_FOGENABLE),                 NULL                    }, WINED3D_GL_EXT_NONE             },
@@ -6826,7 +6906,8 @@ struct arbfp_blit_type
 {
     enum complex_fixup fixup : 4;
     enum wined3d_gl_resource_type res_type : 3;
-    DWORD padding : 25;
+    DWORD use_color_key : 1;
+    DWORD padding : 24;
 };
 
 struct arbfp_blit_desc
@@ -6837,6 +6918,7 @@ struct arbfp_blit_desc
 };
 
 #define ARBFP_BLIT_PARAM_SIZE 0
+#define ARBFP_BLIT_PARAM_COLOR_KEY 1
 
 struct arbfp_blit_priv
 {
@@ -6910,7 +6992,7 @@ static BOOL gen_planar_yuv_read(struct wined3d_shader_buffer *buffer, const stru
         char *luminance)
 {
     char chroma;
-    const char *tex, *texinstr;
+    const char *tex, *texinstr = "TXP";
 
     if (type->fixup == COMPLEX_FIXUP_UYVY)
     {
@@ -6923,25 +7005,9 @@ static BOOL gen_planar_yuv_read(struct wined3d_shader_buffer *buffer, const stru
         *luminance = 'x';
     }
 
-    switch (type->res_type)
-    {
-        case WINED3D_GL_RES_TYPE_TEX_2D:
-            tex = "2D";
-            texinstr = "TXP";
-            break;
-
-        case WINED3D_GL_RES_TYPE_TEX_RECT:
-            tex = "RECT";
-            texinstr = "TEX";
-            break;
-
-        default:
-            /* This is more tricky than just replacing the texture type - we have to navigate
-             * properly in the texture to find the correct chroma values
-             */
-            FIXME("Implement yuv correction for non-2d, non-rect textures\n");
-            return FALSE;
-    }
+    tex = arbfp_texture_target(type->res_type);
+    if (type->res_type == WINED3D_GL_RES_TYPE_TEX_RECT)
+        texinstr = "TEX";
 
     /* First we have to read the chroma values. This means we need at least two pixels(no filtering),
      * or 4 pixels(with filtering). To get the unmodified chromas, we have to rid ourselves of the
@@ -7017,20 +7083,7 @@ static BOOL gen_yv12_read(struct wined3d_shader_buffer *buffer, const struct arb
     static const float yv12_coef[]
             = {2.0f / 3.0f, 1.0f / 6.0f, (2.0f / 3.0f) + (1.0f / 6.0f), 1.0f / 3.0f};
 
-    switch (type->res_type)
-    {
-        case WINED3D_GL_RES_TYPE_TEX_2D:
-            tex = "2D";
-            break;
-
-        case WINED3D_GL_RES_TYPE_TEX_RECT:
-            tex = "RECT";
-            break;
-
-        default:
-            FIXME("Implement yv12 correction for non-2d, non-rect textures\n");
-            return FALSE;
-    }
+    tex = arbfp_texture_target(type->res_type);
 
     /* YV12 surfaces contain a WxH sized luminance plane, followed by a (W/2)x(H/2)
      * V and a (W/2)x(H/2) U plane, each with 8 bit per pixel. So the effective
@@ -7179,18 +7232,7 @@ static BOOL gen_nv12_read(struct wined3d_shader_buffer *buffer, const struct arb
     static const float nv12_coef[]
             = {2.0f / 3.0f, 1.0f / 3.0f, 1.0f, 1.0f};
 
-    switch (type->res_type)
-    {
-        case WINED3D_GL_RES_TYPE_TEX_2D:
-            tex = "2D";
-            break;
-        case WINED3D_GL_RES_TYPE_TEX_RECT:
-            tex = "RECT";
-            break;
-        default:
-            FIXME("Implement nv12 correction for non-2d, non-rect textures\n");
-            return FALSE;
-    }
+    tex = arbfp_texture_target(type->res_type);
 
     /* NV12 surfaces contain a WxH sized luminance plane, followed by a (W/2)x(H/2)
      * sized plane where each component is an UV pair. So the effective
@@ -7326,6 +7368,12 @@ static GLuint gen_p8_shader(struct arbfp_blit_priv *priv,
     GLenum shader;
     struct wined3d_shader_buffer buffer;
     GLint pos;
+    const char *tex_target = arbfp_texture_target(type->res_type);
+
+    /* This should not happen because we only use this conversion for
+     * present blits which don't use color keying. */
+    if (type->use_color_key)
+        FIXME("Implement P8 color keying.\n");
 
     /* Shader header */
     if (!shader_buffer_init(&buffer))
@@ -7349,10 +7397,7 @@ static GLuint gen_p8_shader(struct arbfp_blit_priv *priv,
     shader_addline(&buffer, "PARAM constants = { 0.996, 0.00195, 0, 0 };\n");
 
     /* The alpha-component contains the palette index */
-    if (type->res_type == WINED3D_GL_RES_TYPE_TEX_RECT)
-        shader_addline(&buffer, "TEX index, fragment.texcoord[0], texture[0], RECT;\n");
-    else
-        shader_addline(&buffer, "TEX index, fragment.texcoord[0], texture[0], 2D;\n");
+    shader_addline(&buffer, "TEX index, fragment.texcoord[0], texture[0], %s;\n", tex_target);
 
     /* Scale the index by 255/256 and add a bias of '0.5' in order to sample in the middle */
     shader_addline(&buffer, "MAD index.a, index.a, constants.x, constants.y;\n");
@@ -7424,6 +7469,9 @@ static GLuint gen_yuv_shader(struct arbfp_blit_priv *priv, const struct wined3d_
     struct wined3d_shader_buffer buffer;
     char luminance_component;
     GLint pos;
+
+    if (type->use_color_key)
+        FIXME("Implement YUV color keying.\n");
 
     /* Shader header */
     if (!shader_buffer_init(&buffer))
@@ -7558,7 +7606,70 @@ static GLuint gen_yuv_shader(struct arbfp_blit_priv *priv, const struct wined3d_
 }
 
 /* Context activation is done by the caller. */
-static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, const struct wined3d_surface *surface)
+static GLuint arbfp_gen_plain_shader(struct arbfp_blit_priv *priv,
+        const struct wined3d_gl_info *gl_info, const struct arbfp_blit_type *type)
+{
+    GLenum shader;
+    struct wined3d_shader_buffer buffer;
+    GLint pos;
+    const char *tex_target = arbfp_texture_target(type->res_type);
+
+    /* Shader header */
+    if (!shader_buffer_init(&buffer))
+    {
+        ERR("Failed to initialize shader buffer.\n");
+        return 0;
+    }
+
+    GL_EXTCALL(glGenProgramsARB(1, &shader));
+    if (!shader)
+    {
+        shader_buffer_free(&buffer);
+        return 0;
+    }
+    GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader));
+
+    shader_addline(&buffer, "!!ARBfp1.0\n");
+
+    if (type->use_color_key)
+    {
+        shader_addline(&buffer, "TEMP color;\n");
+        shader_addline(&buffer, "TEMP compare;\n");
+        shader_addline(&buffer, "PARAM color_key = program.local[%u];\n", ARBFP_BLIT_PARAM_COLOR_KEY);
+        shader_addline(&buffer, "TEX color, fragment.texcoord[0], texture[0], %s;\n", tex_target);
+        shader_addline(&buffer, "SUB compare, color, color_key;\n");
+        shader_addline(&buffer, "DP4 compare.r, compare, compare;\n");
+        shader_addline(&buffer, "SGE compare, -compare.r, 0.0;\n");
+        shader_addline(&buffer, "KIL -compare;\n");
+        shader_addline(&buffer, "MOV result.color, color;\n");
+    }
+    else
+    {
+        shader_addline(&buffer, "TEX result.color, fragment.texcoord[0], texture[0], %s;\n", tex_target);
+    }
+
+    shader_addline(&buffer, "END\n");
+
+    GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
+            strlen(buffer.buffer), buffer.buffer));
+    checkGLcall("glProgramStringARB()");
+
+    gl_info->gl_ops.gl.p_glGetIntegerv(GL_PROGRAM_ERROR_POSITION_ARB, &pos);
+    if (pos != -1)
+    {
+        FIXME("Fragment program error at position %d: %s\n\n", pos,
+              debugstr_a((const char *)gl_info->gl_ops.gl.p_glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
+        shader_arb_dump_program_source(buffer.buffer);
+    }
+
+    shader_buffer_free(&buffer);
+
+    return shader;
+}
+
+/* Context activation is done by the caller. */
+static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, const struct wined3d_surface *surface,
+        const struct wined3d_color_key *color_key)
 {
     GLenum shader;
     float size[4] = {(float) surface->pow2Width, (float) surface->pow2Height, 1.0f, 1.0f};
@@ -7569,25 +7680,12 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
     struct wine_rb_entry *entry;
     struct arbfp_blit_type type;
     struct arbfp_blit_desc *desc;
+    struct wined3d_color float_color_key;
 
-    if (surface->container->flags & WINED3D_TEXTURE_CONVERTED)
-    {
-        gl_info->gl_ops.gl.p_glEnable(gl_texture_type);
-        checkGLcall("glEnable(gl_texture_type)");
-        return WINED3D_OK;
-    }
-
-    if (!is_complex_fixup(surface->resource.format->color_fixup))
-    {
-        TRACE("Fixup:\n");
-        dump_color_fixup_desc(surface->resource.format->color_fixup);
-        /* Don't bother setting up a shader for unconverted formats */
-        gl_info->gl_ops.gl.p_glEnable(gl_texture_type);
-        checkGLcall("glEnable(gl_texture_type)");
-        return WINED3D_OK;
-    }
-
-    fixup = get_complex_fixup(surface->resource.format->color_fixup);
+    if (is_complex_fixup(surface->resource.format->color_fixup))
+        fixup = get_complex_fixup(surface->resource.format->color_fixup);
+    else
+        fixup = COMPLEX_FIXUP_NONE;
 
     switch (gl_texture_type)
     {
@@ -7616,7 +7714,7 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
             type.res_type = WINED3D_GL_RES_TYPE_TEX_2D;
     }
     type.fixup = fixup;
-    type.padding = 0;
+    type.use_color_key = !!color_key;
 
     entry = wine_rb_get(&priv->shaders, &type);
     if (entry)
@@ -7628,11 +7726,20 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
     {
         switch (fixup)
         {
+            case COMPLEX_FIXUP_NONE:
+                if (!is_identity_fixup(surface->resource.format->color_fixup))
+                    FIXME("Implement support for sign or swizzle fixups.\n");
+                shader = arbfp_gen_plain_shader(priv, gl_info, &type);
+                break;
+
             case COMPLEX_FIXUP_P8:
                 shader = gen_p8_shader(priv, gl_info, &type);
                 break;
 
-            default:
+            case COMPLEX_FIXUP_YUY2:
+            case COMPLEX_FIXUP_UYVY:
+            case COMPLEX_FIXUP_YV12:
+            case COMPLEX_FIXUP_NV12:
                 shader = gen_yuv_shader(priv, gl_info, &type);
                 break;
         }
@@ -7640,8 +7747,6 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
         if (!shader)
         {
             FIXME("Unsupported complex fixup %#x, not setting a shader\n", fixup);
-            gl_info->gl_ops.gl.p_glEnable(gl_texture_type);
-            checkGLcall("glEnable(gl_texture_type)");
             return E_NOTIMPL;
         }
 
@@ -7673,6 +7778,14 @@ err_out:
     checkGLcall("glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader)");
     GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARBFP_BLIT_PARAM_SIZE, size));
     checkGLcall("glProgramLocalParameter4fvARB");
+    if (type.use_color_key)
+    {
+        wined3d_format_convert_color_to_float(surface->resource.format, NULL,
+                surface->container->async.src_blt_color_key.color_space_high_value, &float_color_key);
+        GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB,
+                ARBFP_BLIT_PARAM_COLOR_KEY, &float_color_key.r));
+        checkGLcall("glProgramLocalParameter4fvARB");
+    }
 
     return WINED3D_OK;
 }
@@ -7682,21 +7795,10 @@ static void arbfp_blit_unset(const struct wined3d_gl_info *gl_info)
 {
     gl_info->gl_ops.gl.p_glDisable(GL_FRAGMENT_PROGRAM_ARB);
     checkGLcall("glDisable(GL_FRAGMENT_PROGRAM_ARB)");
-    gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_2D);
-    checkGLcall("glDisable(GL_TEXTURE_2D)");
-    if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
-    {
-        gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_CUBE_MAP_ARB);
-        checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
-    }
-    if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
-    {
-        gl_info->gl_ops.gl.p_glDisable(GL_TEXTURE_RECTANGLE_ARB);
-        checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
-    }
 }
 
-static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum wined3d_blit_op blit_op,
+static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info,
+        const struct wined3d_d3d_info *d3d_info, enum wined3d_blit_op blit_op,
         const RECT *src_rect, DWORD src_usage, enum wined3d_pool src_pool, const struct wined3d_format *src_format,
         const RECT *dst_rect, DWORD dst_usage, enum wined3d_pool dst_pool, const struct wined3d_format *dst_format)
 {
@@ -7705,10 +7807,21 @@ static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum win
     if (!gl_info->supported[ARB_FRAGMENT_PROGRAM])
         return FALSE;
 
-    if (blit_op != WINED3D_BLIT_OP_COLOR_BLIT)
+    switch (blit_op)
     {
-        TRACE("Unsupported blit_op=%d\n", blit_op);
-        return FALSE;
+        case WINED3D_BLIT_OP_COLOR_BLIT_CKEY:
+            if (!d3d_info->shader_color_key)
+            {
+                /* The conversion modifies the alpha channel so the color key might no longer match. */
+                TRACE("Color keying not supported with converted textures.\n");
+                return FALSE;
+            }
+        case WINED3D_BLIT_OP_COLOR_BLIT:
+            break;
+
+        default:
+            TRACE("Unsupported blit_op=%d\n", blit_op);
+            return FALSE;
     }
 
     if (src_pool == WINED3D_POOL_SYSTEM_MEM || dst_pool == WINED3D_POOL_SYSTEM_MEM)
@@ -7757,9 +7870,10 @@ static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum win
     }
 }
 
-HRESULT arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
+static void arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
         struct wined3d_surface *src_surface, const RECT *src_rect_in,
-        struct wined3d_surface *dst_surface, const RECT *dst_rect_in)
+        struct wined3d_surface *dst_surface, const RECT *dst_rect_in,
+        const struct wined3d_color_key *color_key)
 {
     struct wined3d_context *context;
     RECT src_rect = *src_rect_in;
@@ -7792,7 +7906,7 @@ HRESULT arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
     if (!wined3d_resource_is_offscreen(&dst_surface->container->resource))
         surface_translate_drawable_coords(dst_surface, context->win_handle, &dst_rect);
 
-    arbfp_blit_set(device->blit_priv, context, src_surface);
+    arbfp_blit_set(device->blit_priv, context, src_surface, color_key);
 
     /* Draw a textured quad */
     draw_textured_quad(src_surface, context, &src_rect, &dst_rect, filter);
@@ -7809,8 +7923,6 @@ HRESULT arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
 
     surface_validate_location(dst_surface, dst_surface->container->resource.draw_binding);
     surface_invalidate_location(dst_surface, ~dst_surface->container->resource.draw_binding);
-
-    return WINED3D_OK;
 }
 
 static HRESULT arbfp_blit_color_fill(struct wined3d_device *device, struct wined3d_surface *dst_surface,
@@ -7835,4 +7947,5 @@ const struct blit_shader arbfp_blit = {
     arbfp_blit_supported,
     arbfp_blit_color_fill,
     arbfp_blit_depth_fill,
+    arbfp_blit_surface,
 };

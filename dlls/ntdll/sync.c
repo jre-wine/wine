@@ -613,8 +613,19 @@ NTSTATUS WINAPI NtOpenJobObject( PHANDLE handle, ACCESS_MASK access, const OBJEC
  */
 NTSTATUS WINAPI NtTerminateJobObject( HANDLE handle, NTSTATUS status )
 {
-    FIXME( "stub: %p %x\n", handle, status );
-    return STATUS_SUCCESS;
+    NTSTATUS ret;
+
+    TRACE( "(%p, %d)\n", handle, status );
+
+    SERVER_START_REQ( terminate_job )
+    {
+        req->handle = wine_server_obj_handle( handle );
+        req->status = status;
+        ret = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
 
 /******************************************************************************
@@ -634,7 +645,7 @@ NTSTATUS WINAPI NtQueryInformationJobObject( HANDLE handle, JOBOBJECTINFOCLASS c
  */
 NTSTATUS WINAPI NtSetInformationJobObject( HANDLE handle, JOBOBJECTINFOCLASS class, PVOID info, ULONG len )
 {
-    NTSTATUS status = STATUS_SUCCESS;
+    NTSTATUS status = STATUS_NOT_IMPLEMENTED;
     JOBOBJECT_BASIC_LIMIT_INFORMATION *basic_limit;
     ULONG info_size = sizeof(JOBOBJECT_BASIC_LIMIT_INFORMATION);
     DWORD limit_flags = JOB_OBJECT_BASIC_LIMIT_VALID_FLAGS;
@@ -683,9 +694,11 @@ NTSTATUS WINAPI NtSetInformationJobObject( HANDLE handle, JOBOBJECTINFOCLASS cla
         SERVER_END_REQ;
         break;
 
+    case JobObjectBasicUIRestrictions:
+        status = STATUS_SUCCESS;
+        /* fallthrough */
     default:
         FIXME( "stub: %p %u %p %u\n", handle, class, info, len );
-        return STATUS_NOT_IMPLEMENTED;
     }
 
     return status;

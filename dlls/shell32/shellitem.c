@@ -548,7 +548,6 @@ HRESULT WINAPI IShellItem_Constructor(IUnknown *pUnkOuter, REFIID riid, void **p
 HRESULT WINAPI SHCreateShellItem(LPCITEMIDLIST pidlParent,
     IShellFolder *psfParent, LPCITEMIDLIST pidl, IShellItem **ppsi)
 {
-    ShellItem *This;
     LPITEMIDLIST new_pidl;
     HRESULT ret;
 
@@ -597,16 +596,9 @@ HRESULT WINAPI SHCreateShellItem(LPCITEMIDLIST pidlParent,
             return E_OUTOFMEMORY;
     }
 
-    ret = IShellItem_Constructor(NULL, &IID_IShellItem, (void**)&This);
-    if (This)
-    {
-        *ppsi = (IShellItem*)&This->IShellItem2_iface;
-        This->pidl = new_pidl;
-    }
-    else
-    {
-        ILFree(new_pidl);
-    }
+    ret = SHCreateItemFromIDList(new_pidl, &IID_IShellItem, (void**)ppsi);
+    ILFree(new_pidl);
+
     return ret;
 }
 
@@ -621,37 +613,34 @@ HRESULT WINAPI SHCreateItemFromParsingName(PCWSTR pszPath,
     ret = SHParseDisplayName(pszPath, pbc, &pidl, 0, NULL);
     if(SUCCEEDED(ret))
     {
-        ShellItem *This;
-        ret = IShellItem_Constructor(NULL, riid, (void**)&This);
-
-        if(SUCCEEDED(ret))
-        {
-            This->pidl = pidl;
-            *ppv = (void*)This;
-        }
-        else
-        {
-            ILFree(pidl);
-        }
+        ret = SHCreateItemFromIDList(pidl, riid, ppv);
+        ILFree(pidl);
     }
     return ret;
 }
 
 HRESULT WINAPI SHCreateItemFromIDList(PCIDLIST_ABSOLUTE pidl, REFIID riid, void **ppv)
 {
-    ShellItem *psiimpl;
+    IPersistIDList *persist;
     HRESULT ret;
 
     if(!pidl)
         return E_INVALIDARG;
 
-    ret = IShellItem_Constructor(NULL, riid, ppv);
-    if(SUCCEEDED(ret))
+    *ppv = NULL;
+    ret = IShellItem_Constructor(NULL, &IID_IPersistIDList, (void**)&persist);
+    if(FAILED(ret))
+        return ret;
+
+    ret = IPersistIDList_SetIDList(persist, pidl);
+    if(FAILED(ret))
     {
-        psiimpl = (ShellItem*)*ppv;
-        psiimpl->pidl = ILClone(pidl);
+        IPersistIDList_Release(persist);
+        return ret;
     }
 
+    ret = IPersistIDList_QueryInterface(persist, riid, ppv);
+    IPersistIDList_Release(persist);
     return ret;
 }
 
@@ -1121,12 +1110,8 @@ static HRESULT WINAPI IShellItemArray_fnEnumItems(IShellItemArray *iface,
                                                   IEnumShellItems **ppenumShellItems)
 {
     IShellItemArrayImpl *This = impl_from_IShellItemArray(iface);
-    HRESULT hr;
     TRACE("%p (%p)\n", This, ppenumShellItems);
-
-    hr = IEnumShellItems_Constructor(iface, ppenumShellItems);
-
-    return hr;
+    return IEnumShellItems_Constructor(iface, ppenumShellItems);
 }
 
 static const IShellItemArrayVtbl vt_IShellItemArray = {
@@ -1142,29 +1127,31 @@ static const IShellItemArrayVtbl vt_IShellItemArray = {
     IShellItemArray_fnEnumItems
 };
 
-static HRESULT IShellItemArray_Constructor(IUnknown *pUnkOuter, REFIID riid, void **ppv)
+/* Caller is responsible to AddRef all items */
+static HRESULT create_shellitemarray(IShellItem **items, DWORD count, IShellItemArray **ret)
 {
     IShellItemArrayImpl *This;
-    HRESULT ret;
 
-    TRACE("(%p, %s, %p)\n",pUnkOuter, debugstr_guid(riid), ppv);
-
-    if(pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
+    TRACE("(%p, %d, %p)\n", items, count, ret);
 
     This = HeapAlloc(GetProcessHeap(), 0, sizeof(IShellItemArrayImpl));
     if(!This)
         return E_OUTOFMEMORY;
 
-    This->ref = 1;
     This->IShellItemArray_iface.lpVtbl = &vt_IShellItemArray;
-    This->array = NULL;
-    This->item_count = 0;
+    This->ref = 1;
 
-    ret = IShellItemArray_QueryInterface(&This->IShellItemArray_iface, riid, ppv);
-    IShellItemArray_Release(&This->IShellItemArray_iface);
+    This->array = HeapAlloc(GetProcessHeap(), 0, count*sizeof(IShellItem*));
+    if (!This->array)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+        return E_OUTOFMEMORY;
+    }
+    memcpy(This->array, items, count*sizeof(IShellItem*));
+    This->item_count = count;
 
-    return ret;
+    *ret = &This->IShellItemArray_iface;
+    return S_OK;
 }
 
 HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent,
@@ -1173,12 +1160,13 @@ HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent,
                                       PCUITEMID_CHILD_ARRAY ppidl,
                                       IShellItemArray **ppsiItemArray)
 {
-    IShellItemArrayImpl *This;
     IShellItem **array;
     HRESULT ret = E_FAIL;
     UINT i;
 
     TRACE("%p, %p, %d, %p, %p\n", pidlParent, psf, cidl, ppidl, ppsiItemArray);
+
+    *ppsiItemArray = NULL;
 
     if(!pidlParent && !psf)
         return E_POINTER;
@@ -1198,52 +1186,37 @@ HRESULT WINAPI SHCreateShellItemArray(PCIDLIST_ABSOLUTE pidlParent,
 
     if(SUCCEEDED(ret))
     {
-        ret = IShellItemArray_Constructor(NULL, &IID_IShellItemArray, (void**)&This);
+        ret = create_shellitemarray(array, cidl, ppsiItemArray);
         if(SUCCEEDED(ret))
-        {
-            This->array = array;
-            This->item_count = cidl;
-            *ppsiItemArray = &This->IShellItemArray_iface;
-
             return ret;
-        }
     }
 
     /* Something failed, clean up. */
     for(i = 0; i < cidl; i++)
         if(array[i]) IShellItem_Release(array[i]);
     HeapFree(GetProcessHeap(), 0, array);
-    *ppsiItemArray = NULL;
     return ret;
 }
 
-HRESULT WINAPI SHCreateShellItemArrayFromShellItem(IShellItem *psi, REFIID riid, void **ppv)
+HRESULT WINAPI SHCreateShellItemArrayFromShellItem(IShellItem *item, REFIID riid, void **ppv)
 {
-    IShellItemArrayImpl *This;
-    IShellItem **array;
+    IShellItemArray *array;
     HRESULT ret;
 
-    TRACE("%p, %s, %p\n", psi, shdebugstr_guid(riid), ppv);
+    TRACE("%p, %s, %p\n", item, shdebugstr_guid(riid), ppv);
 
-    array = HeapAlloc(GetProcessHeap(), 0, sizeof(IShellItem*));
-    if(!array)
-        return E_OUTOFMEMORY;
+    *ppv = NULL;
 
-    ret = IShellItemArray_Constructor(NULL, riid, (void**)&This);
-    if(SUCCEEDED(ret))
+    IShellItem_AddRef(item);
+    ret = create_shellitemarray(&item, 1, &array);
+    if(FAILED(ret))
     {
-        array[0] = psi;
-        IShellItem_AddRef(psi);
-        This->array = array;
-        This->item_count = 1;
-        *ppv = This;
-    }
-    else
-    {
-        HeapFree(GetProcessHeap(), 0, array);
-        *ppv = NULL;
+        IShellItem_Release(item);
+        return ret;
     }
 
+    ret = IShellItemArray_QueryInterface(array, riid, ppv);
+    IShellItemArray_Release(array);
     return ret;
 }
 
@@ -1303,7 +1276,6 @@ HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl,
                                                  PCIDLIST_ABSOLUTE_ARRAY pidl_array,
                                                  IShellItemArray **psia)
 {
-    IShellItemArrayImpl *This;
     IShellItem **array;
     HRESULT ret;
     UINT i;
@@ -1314,7 +1286,7 @@ HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl,
     if(cidl == 0)
         return E_INVALIDARG;
 
-    array = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IShellItem*));
+    array = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, cidl*sizeof(IShellItem*));
     if(!array)
         return E_OUTOFMEMORY;
 
@@ -1327,14 +1299,9 @@ HRESULT WINAPI SHCreateShellItemArrayFromIDLists(UINT cidl,
 
     if(SUCCEEDED(ret))
     {
-        ret = IShellItemArray_Constructor(NULL, &IID_IShellItemArray, (void**)psia);
+        ret = create_shellitemarray(array, cidl, psia);
         if(SUCCEEDED(ret))
-        {
-            This = impl_from_IShellItemArray(*psia);
-            This->array = array;
-            This->item_count = cidl;
-            return S_OK;
-        }
+            return ret;
     }
 
     for(i = 0; i < cidl; i++)

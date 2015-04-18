@@ -32,6 +32,8 @@
 
 #include <stdarg.h>
 
+#define COBJMACROS
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -61,6 +63,28 @@ static void msi_file_update_ui( MSIPACKAGE *package, MSIFILE *f, const WCHAR *ac
     msi_ui_progress( package, 2, f->FileSize, 0, 0 );
 }
 
+static BOOL is_registered_patch_media( MSIPACKAGE *package, UINT disk_id )
+{
+    MSIPATCHINFO *patch;
+
+    LIST_FOR_EACH_ENTRY( patch, &package->patches, MSIPATCHINFO, entry )
+    {
+        if (patch->disk_id == disk_id && patch->registered) return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL is_obsoleted_by_patch( MSIPACKAGE *package, MSIFILE *file )
+{
+    if (!list_empty( &package->patches ) && file->disk_id < MSI_INITIAL_MEDIA_TRANSFORM_DISKID)
+    {
+        if (!msi_get_property_int( package->db, szInstalled, 0 )) return FALSE;
+        return TRUE;
+    }
+    if (is_registered_patch_media( package, file->disk_id )) return TRUE;
+    return FALSE;
+}
+
 static msi_file_state calculate_install_state( MSIPACKAGE *package, MSIFILE *file )
 {
     MSICOMPONENT *comp = file->Component;
@@ -75,9 +99,9 @@ static msi_file_state calculate_install_state( MSIPACKAGE *package, MSIFILE *fil
         TRACE("skipping %s (not scheduled for install)\n", debugstr_w(file->File));
         return msifs_skipped;
     }
-    if (!list_empty( &package->patches ) && file->disk_id < MSI_INITIAL_MEDIA_TRANSFORM_DISKID)
+    if (is_obsoleted_by_patch( package, file ))
     {
-        TRACE("skipping %s (not part of patch)\n", debugstr_w(file->File));
+        TRACE("skipping %s (obsoleted by patch)\n", debugstr_w(file->File));
         return msifs_skipped;
     }
     if ((msi_is_global_assembly( comp ) && !comp->assembly->installed) ||
@@ -455,7 +479,19 @@ static BOOL patchfiles_cb(MSIPACKAGE *package, LPCWSTR file, DWORD action,
 
     if (action == MSICABEXTRACT_BEGINEXTRACT)
     {
-        if (!(patch = find_filepatch( package, patch->disk_id, file ))) return FALSE;
+        MSICOMPONENT *comp;
+
+        if (is_registered_patch_media( package, patch->disk_id ) ||
+            !(patch = find_filepatch( package, patch->disk_id, file ))) return FALSE;
+
+        comp = patch->File->Component;
+        comp->Action = msi_get_component_action( package, comp );
+        if (!comp->Enabled || comp->Action != INSTALLSTATE_LOCAL)
+        {
+            TRACE("file %s component %s not installed or disabled\n",
+                  debugstr_w(patch->File->File), debugstr_w(comp->Component));
+            return FALSE;
+        }
 
         patch->path = msi_create_temp_file( package->db );
         *path = strdupW( patch->path );
@@ -468,6 +504,78 @@ static BOOL patchfiles_cb(MSIPACKAGE *package, LPCWSTR file, DWORD action,
     }
 
     return TRUE;
+}
+
+static UINT patch_file( MSIPACKAGE *package, MSIFILEPATCH *patch )
+{
+    UINT r = ERROR_SUCCESS;
+    WCHAR *tmpfile = msi_create_temp_file( package->db );
+
+    if (!tmpfile) return ERROR_INSTALL_FAILURE;
+    if (ApplyPatchToFileW( patch->path, patch->File->TargetPath, tmpfile, 0 ))
+    {
+        DeleteFileW( patch->File->TargetPath );
+        MoveFileW( tmpfile, patch->File->TargetPath );
+    }
+    else
+    {
+        WARN("failed to patch %s: %08x\n", debugstr_w(patch->File->TargetPath), GetLastError());
+        r = ERROR_INSTALL_FAILURE;
+    }
+    DeleteFileW( patch->path );
+    DeleteFileW( tmpfile );
+    msi_free( tmpfile );
+    return r;
+}
+
+static UINT patch_assembly( MSIPACKAGE *package, MSIASSEMBLY *assembly, MSIFILEPATCH *patch )
+{
+    UINT r = ERROR_FUNCTION_FAILED;
+    IAssemblyName *name;
+    IAssemblyEnum *iter;
+
+    if (!(iter = msi_create_assembly_enum( package, assembly->display_name )))
+        return ERROR_FUNCTION_FAILED;
+
+    while ((IAssemblyEnum_GetNextAssembly( iter, NULL, &name, 0 ) == S_OK))
+    {
+        WCHAR *displayname, *path;
+        UINT len = 0;
+        HRESULT hr;
+
+        hr = IAssemblyName_GetDisplayName( name, NULL, &len, 0 );
+        if (hr != E_NOT_SUFFICIENT_BUFFER || !(displayname = msi_alloc( len * sizeof(WCHAR) )))
+            break;
+
+        hr = IAssemblyName_GetDisplayName( name, displayname, &len, 0 );
+        if (FAILED( hr ))
+        {
+            msi_free( displayname );
+            break;
+        }
+
+        if ((path = msi_get_assembly_path( package, displayname )))
+        {
+            if (!CopyFileW( path, patch->File->TargetPath, FALSE ))
+            {
+                ERR("Failed to copy file %s -> %s (%u)\n", debugstr_w(path),
+                    debugstr_w(patch->File->TargetPath), GetLastError() );
+                msi_free( path );
+                msi_free( displayname );
+                IAssemblyName_Release( name );
+                break;
+            }
+            r = patch_file( package, patch );
+            msi_free( path );
+        }
+
+        msi_free( displayname );
+        IAssemblyName_Release( name );
+        if (r == ERROR_SUCCESS) break;
+    }
+
+    IAssemblyEnum_Release( iter );
+    return r;
 }
 
 UINT ACTION_PatchFiles( MSIPACKAGE *package )
@@ -526,34 +634,28 @@ UINT ACTION_PatchFiles( MSIPACKAGE *package )
 
     LIST_FOR_EACH_ENTRY( patch, &package->filepatches, MSIFILEPATCH, entry )
     {
-        WCHAR *tmpfile;
-        BOOL ret;
+        MSICOMPONENT *comp = patch->File->Component;
 
         if (!patch->path) continue;
 
-        if (!(tmpfile = msi_create_temp_file( package->db )))
-        {
-            rc = ERROR_INSTALL_FAILURE;
-            goto done;
-        }
-        ret = ApplyPatchToFileW( patch->path, patch->File->TargetPath, tmpfile, 0 );
-        if (ret)
-        {
-            DeleteFileW( patch->File->TargetPath );
-            MoveFileW( tmpfile, patch->File->TargetPath );
-        }
+        if (msi_is_global_assembly( comp ))
+            rc = patch_assembly( package, comp->assembly, patch );
         else
-            WARN("failed to patch %s: %08x\n", debugstr_w(patch->File->TargetPath), GetLastError());
+            rc = patch_file( package, patch );
 
-        DeleteFileW( patch->path );
-        DeleteFileW( tmpfile );
-        msi_free( tmpfile );
-
-        if (!ret && !(patch->Attributes & msidbPatchAttributesNonVital))
+        if (rc && !(patch->Attributes & msidbPatchAttributesNonVital))
         {
             ERR("Failed to apply patch to file: %s\n", debugstr_w(patch->File->File));
-            rc = ERROR_INSTALL_FAILURE;
-            goto done;
+            break;
+        }
+
+        if (msi_is_global_assembly( comp ))
+        {
+            if ((rc = msi_install_assembly( package, comp )))
+            {
+                ERR("Failed to install patched assembly\n");
+                break;
+            }
         }
     }
 
