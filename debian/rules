@@ -1,14 +1,8 @@
 #!/usr/bin/make -f
 
-# enable verbose build log
-export DH_VERBOSE=1
-
-# wine doesn't support fortify hardening and fails to build with pie
-export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
-
-DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
-DEB_BUILD_ARCH_CPU=$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU)
 DEB_BUILD_ARCH_OS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_OS)
+DEB_BUILD_ARCH_CPU=$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU)
+DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
@@ -17,6 +11,12 @@ INCLUDEDIR=/usr/include/wine$(VERSION)
 
 MANDIR=usr/share/man
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
+
+# enable verbose build log
+export DH_VERBOSE=1
+
+# wine doesn't support fortify hardening and fails to build with pie
+export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
 
 # linker options
 export DEB_LDFLAGS_MAINT_APPEND+=-Wl,-rpath,/$(LIBDIR)
@@ -65,12 +65,15 @@ debian/wine64$(VERSION)%: debian/wine64VERSION%
 debian/libwine$(VERSION)%: debian/libwineVERSION%
 	sed s/VERSION/$(VERSION)/g < $< > $@
 
+debian/fonts-wine$(VERSION)%: debian/fonts-wineVERSION%
+	sed s/VERSION/$(VERSION)/g < $< > $@
+
 %:
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
-	ln -sf /usr/share/misc/config.sub tools
-	ln -sf /usr/share/misc/config.guess tools
+	ln -s /usr/share/misc/config.sub tools
+	ln -s /usr/share/misc/config.guess tools
 	dh_auto_configure -- $(CONFLAGS)
 
 override_dh_install: $(INSTALLS)
@@ -97,9 +100,5 @@ override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine$(VERSION)-dbg
 
 override_dh_clean:
-	dh_clean -- \
-	    $(INSTALLS) \
-	    debian/control \
-	    programs/cscript/ihost.h \
-	    configure config.* tools/config.* include/config.h.in
+	dh_clean -- $(INSTALLS)
 	make -f debian/rules debian/control

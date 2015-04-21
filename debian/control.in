@@ -42,7 +42,6 @@ Build-Depends:
  libxslt1-dev,
  unixodbc-dev,
  libcups2-dev,
- libgnutls28-dev,
  libopenal-dev,
  libdbus-1-dev,
  freeglut3-dev,
@@ -50,6 +49,7 @@ Build-Depends:
  libasound2-dev,
  libosmesa6-dev,
  libncurses5-dev,
+ libgnutls28-dev,
  libgettextpo-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
@@ -63,12 +63,10 @@ Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wineVERSION
 Architecture: amd64 any-i386 any-powerpc armhf
+Multi-Arch: allowed
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
-Suggests:
- binfmt-support,
- ttf-mscorefonts-installer,
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -169,6 +167,42 @@ Description: Windows API implementation - 64-bit developer tools
  .
  This package provides wine's 64-bit developer tools.
 
+Package: fonts-wineVERSION
+Section: fonts
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ ${misc:Depends},
+Replaces:
+ libwineVERSION (<< 1.7.41-2),
+Description: Windows API implementation - fonts
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides the fonts used by wine.
+
+Package: libwineVERSION
+Section: libs
+Architecture: amd64 any-i386 any-powerpc armhf
+Multi-Arch: same
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+Recommends:
+ libxcursor1,
+ fonts-liberation,
+ fonts-wineVERSION,
+Suggests:
+ cups-bsd,
+ ttf-mscorefonts-installer,
+Pre-Depends:
+ ${misc:Pre-Depends},
+Description: Windows API implementation - library
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides the wine library.
+
 Package: libwineVERSION-dev
 Architecture: amd64 any-i386 any-powerpc armhf
 Section: libdevel
@@ -198,23 +232,3 @@ Description: Windows API implementation - debugging symbols
  This is still a work in progress and many applications may still not work.
  .
  This package provides wine's debugging symbols.
-
-Package: libwineVERSION
-Section: libs
-Architecture: amd64 any-i386 any-powerpc armhf
-Multi-Arch: same
-Depends:
- ${misc:Depends},
- ${shlibs:Depends},
-Recommends:
- fonts-liberation,
- libxcursor1,
-Suggests:
- cups-bsd,
-Pre-Depends:
- ${misc:Pre-Depends},
-Description: Windows API implementation - library
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides the wine library.

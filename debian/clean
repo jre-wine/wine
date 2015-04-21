@@ -1,0 +1,6 @@
+config.*
+configure
+tools/config.*
+debian/control
+include/config.h.in
+programs/cscript/ihost.h

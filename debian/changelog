@@ -1,3 +1,10 @@
+wine-development (1.7.41-2) unstable; urgency=medium
+
+  * Mark wine as multi-arch allowed (closes: #782896).
+  * Move fonts into an architecture independent package (closes: 781557).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 19 Apr 2015 21:42:43 +0000
+
 wine-development (1.7.41-1) unstable; urgency=medium
 
   * New upstream release 1.7.41, released Apr 17, 2015.

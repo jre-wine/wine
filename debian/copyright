@@ -16,10 +16,8 @@ Copyright:
  Copyright (c) 2014-2015 Stephen Kitt <skitt@debian.org>
  Copyright (c) 2012-2015 Michael Gilbert <mgilbert@debian.org>
 License: LGPL-2.1+
- See /usr/share/common-licenses/LGPL-2.1.
 
 Files: debian/scripts/import*
 Copyright:
  Copyright (c) Ove Kåven <ovek@debian.org>
 License: LGPL-2.1+
- See /usr/share/common-licenses/LGPL-2.1.
