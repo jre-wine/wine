@@ -245,90 +245,150 @@ static const struct wined3d_shader_frontend *shader_select_frontend(DWORD versio
     }
 }
 
-void shader_buffer_clear(struct wined3d_shader_buffer *buffer)
+void string_buffer_clear(struct wined3d_string_buffer *buffer)
 {
     buffer->buffer[0] = '\0';
     buffer->content_size = 0;
-    buffer->lineNo = 0;
-    buffer->newline = TRUE;
 }
 
-BOOL shader_buffer_init(struct wined3d_shader_buffer *buffer)
+BOOL string_buffer_init(struct wined3d_string_buffer *buffer)
 {
-    buffer->buffer_size = 16384;
+    buffer->buffer_size = 32;
     if (!(buffer->buffer = HeapAlloc(GetProcessHeap(), 0, buffer->buffer_size)))
     {
         ERR("Failed to allocate shader buffer memory.\n");
         return FALSE;
     }
 
-    shader_buffer_clear(buffer);
+    string_buffer_clear(buffer);
     return TRUE;
 }
 
-void shader_buffer_free(struct wined3d_shader_buffer *buffer)
+void string_buffer_free(struct wined3d_string_buffer *buffer)
 {
     HeapFree(GetProcessHeap(), 0, buffer->buffer);
 }
 
-int shader_vaddline(struct wined3d_shader_buffer *buffer, const char *format, va_list args)
+BOOL string_buffer_resize(struct wined3d_string_buffer *buffer, int rc)
 {
-    char *base = buffer->buffer + buffer->content_size;
-    int rc;
     char *new_buffer;
+    unsigned int new_buffer_size = buffer->buffer_size * 2;
 
-    while(1)
+    while (rc > 0 && (unsigned int)rc >= new_buffer_size - buffer->content_size)
+        new_buffer_size *= 2;
+    if (!(new_buffer = HeapReAlloc(GetProcessHeap(), 0, buffer->buffer, new_buffer_size)))
     {
-        rc = vsnprintf(base, buffer->buffer_size - buffer->content_size, format, args);
-        if (rc < 0 /* C89 */ || (unsigned int)rc >= buffer->buffer_size - buffer->content_size /* C99 */)
-        {
-            new_buffer = HeapReAlloc(GetProcessHeap(), 0, buffer->buffer, buffer->buffer_size * 2);
-            if (!new_buffer)
-            {
-                ERR("The buffer allocated for the shader program string is too small at %d bytes.\n", buffer->buffer_size);
-                buffer->content_size = buffer->buffer_size - 1;
-                return -1;
-            }
-            buffer->buffer = new_buffer;
-            buffer->buffer_size = buffer->buffer_size * 2;
-            base = buffer->buffer + buffer->content_size;
-        }
-        else
-        {
-            break;
-        }
+        ERR("Failed to grow buffer.\n");
+        buffer->buffer[buffer->content_size] = '\0';
+        return FALSE;
     }
+    buffer->buffer = new_buffer;
+    buffer->buffer_size = new_buffer_size;
+    return TRUE;
+}
 
-    if (buffer->newline)
-    {
-        TRACE("GL HW (%u, %u) : %s", buffer->lineNo + 1, buffer->content_size, base);
-        buffer->newline = FALSE;
-    }
-    else
-    {
-        TRACE("%s", base);
-    }
+int shader_vaddline(struct wined3d_string_buffer *buffer, const char *format, va_list args)
+{
+    unsigned int rem;
+    int rc;
+
+    rem = buffer->buffer_size - buffer->content_size;
+    rc = vsnprintf(&buffer->buffer[buffer->content_size], rem, format, args);
+    if (rc < 0 /* C89 */ || (unsigned int)rc >= rem /* C99 */)
+        return rc;
 
     buffer->content_size += rc;
-    if (buffer->buffer[buffer->content_size-1] == '\n')
-    {
-        ++buffer->lineNo;
-        buffer->newline = TRUE;
-    }
-
     return 0;
 }
 
-int shader_addline(struct wined3d_shader_buffer *buffer, const char *format, ...)
+int shader_addline(struct wined3d_string_buffer *buffer, const char *format, ...)
 {
     va_list args;
     int ret;
 
-    va_start(args, format);
-    ret = shader_vaddline(buffer, format, args);
-    va_end(args);
+    for (;;)
+    {
+        va_start(args, format);
+        ret = shader_vaddline(buffer, format, args);
+        va_end(args);
+        if (!ret)
+            return ret;
+        if (!string_buffer_resize(buffer, ret))
+            return -1;
+    }
+}
 
-    return ret;
+struct wined3d_string_buffer *string_buffer_get(struct wined3d_string_buffer_list *list)
+{
+    struct wined3d_string_buffer *buffer;
+
+    if (list_empty(&list->list))
+    {
+        buffer = HeapAlloc(GetProcessHeap(), 0, sizeof(*buffer));
+        if (!buffer || !string_buffer_init(buffer))
+        {
+            ERR("Couldn't allocate buffer for temporary string.\n");
+            if (buffer)
+                HeapFree(GetProcessHeap(), 0, buffer);
+            return NULL;
+        }
+    }
+    else
+    {
+        buffer = LIST_ENTRY(list_head(&list->list), struct wined3d_string_buffer, entry);
+        list_remove(&buffer->entry);
+    }
+    string_buffer_clear(buffer);
+    return buffer;
+}
+
+static int string_buffer_vsprintf(struct wined3d_string_buffer *buffer, const char *format, va_list args)
+{
+    if (!buffer)
+        return 0;
+    string_buffer_clear(buffer);
+    return shader_vaddline(buffer, format, args);
+}
+
+void string_buffer_sprintf(struct wined3d_string_buffer *buffer, const char *format, ...)
+{
+    va_list args;
+    int ret;
+
+    for (;;)
+    {
+        va_start(args, format);
+        ret = string_buffer_vsprintf(buffer, format, args);
+        va_end(args);
+        if (!ret)
+            return;
+        if (!string_buffer_resize(buffer, ret))
+            return;
+    }
+}
+
+void string_buffer_release(struct wined3d_string_buffer_list *list, struct wined3d_string_buffer *buffer)
+{
+    if (!buffer)
+        return;
+    list_add_head(&list->list, &buffer->entry);
+}
+
+void string_buffer_list_init(struct wined3d_string_buffer_list *list)
+{
+    list_init(&list->list);
+}
+
+void string_buffer_list_cleanup(struct wined3d_string_buffer_list *list)
+{
+    struct wined3d_string_buffer *buffer, *buffer_next;
+
+    LIST_FOR_EACH_ENTRY_SAFE(buffer, buffer_next, &list->list, struct wined3d_string_buffer, entry)
+    {
+        string_buffer_free(buffer);
+        HeapFree(GetProcessHeap(), 0, buffer);
+    }
+    list_init(&list->list);
 }
 
 /* Convert floating point offset relative to a register file to an absolute
@@ -1555,7 +1615,7 @@ void shader_dump_src_param(const struct wined3d_shader_src_param *param,
 
 /* Shared code in order to generate the bulk of the shader string.
  * NOTE: A description of how to parse tokens can be found on MSDN. */
-void shader_generate_main(const struct wined3d_shader *shader, struct wined3d_shader_buffer *buffer,
+void shader_generate_main(const struct wined3d_shader *shader, struct wined3d_string_buffer *buffer,
         const struct wined3d_shader_reg_maps *reg_maps, const DWORD *byte_code, void *backend_ctx)
 {
     struct wined3d_device *device = shader->device;
@@ -1815,9 +1875,11 @@ static void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe
 static void shader_cleanup(struct wined3d_shader *shader)
 {
     HeapFree(GetProcessHeap(), 0, shader->output_signature.elements);
+    HeapFree(GetProcessHeap(), 0, shader->input_signature.elements);
     HeapFree(GetProcessHeap(), 0, shader->signature_strings);
     shader->device->shader_backend->shader_destroy(shader);
     HeapFree(GetProcessHeap(), 0, shader->reg_maps.constf);
+    HeapFree(GetProcessHeap(), 0, shader->reg_maps.sampler_map.entries);
     HeapFree(GetProcessHeap(), 0, shader->function);
     shader_delete_constant_list(&shader->constantsF);
     shader_delete_constant_list(&shader->constantsB);
@@ -2344,8 +2406,8 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
     memset(args, 0, sizeof(*args)); /* FIXME: Make sure all bits are set. */
     if (!gl_info->supported[ARB_FRAMEBUFFER_SRGB] && state->render_states[WINED3D_RS_SRGBWRITEENABLE])
     {
-        const struct wined3d_format *rt_format = state->fb->render_targets[0]->format;
-        if (rt_format->flags & WINED3DFMT_FLAG_SRGB_WRITE)
+        unsigned int rt_fmt_flags = state->fb->render_targets[0]->format_flags;
+        if (rt_fmt_flags & WINED3DFMT_FLAG_SRGB_WRITE)
         {
             static unsigned int warned = 0;
 
@@ -2459,7 +2521,7 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
         }
         args->color_fixup[i] = texture->resource.format->color_fixup;
 
-        if (texture->resource.format->flags & WINED3DFMT_FLAG_SHADOW)
+        if (texture->resource.format_flags & WINED3DFMT_FLAG_SHADOW)
             args->shadow |= 1 << i;
 
         /* Flag samplers that need NP2 texcoord fixup. */

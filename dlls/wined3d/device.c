@@ -1086,6 +1086,12 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
     device->shader_backend->shader_free_private(device);
     destroy_dummy_textures(device, gl_info);
 
+    /* Release the context again as soon as possible. In particular,
+     * releasing the render target views below may release the last reference
+     * to the swapchain associated with this context, which in turn will
+     * destroy the context. */
+    context_release(context);
+
     /* Release the buffers (with sanity checks)*/
     if (device->onscreen_depth_stencil)
     {
@@ -1122,8 +1128,6 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
         wined3d_rendertarget_view_decref(device->back_buffer_view);
         device->back_buffer_view = NULL;
     }
-
-    context_release(context);
 
     for (i = 0; i < device->swapchain_count; ++i)
     {
@@ -1451,7 +1455,6 @@ HRESULT CDECL wined3d_device_set_light(struct wined3d_device *device,
     {
         case WINED3D_LIGHT_POINT:
         case WINED3D_LIGHT_SPOT:
-        case WINED3D_LIGHT_PARALLELPOINT:
         case WINED3D_LIGHT_GLSPOT:
             /* Incorrect attenuation values can cause the gl driver to crash.
              * Happens with Need for speed most wanted. */
@@ -1463,6 +1466,7 @@ HRESULT CDECL wined3d_device_set_light(struct wined3d_device *device,
             break;
 
         case WINED3D_LIGHT_DIRECTIONAL:
+        case WINED3D_LIGHT_PARALLELPOINT:
             /* Ignores attenuation */
             break;
 
@@ -1517,36 +1521,36 @@ HRESULT CDECL wined3d_device_set_light(struct wined3d_device *device,
     {
         case WINED3D_LIGHT_POINT:
             /* Position */
-            object->lightPosn[0] = light->position.x;
-            object->lightPosn[1] = light->position.y;
-            object->lightPosn[2] = light->position.z;
-            object->lightPosn[3] = 1.0f;
+            object->position.x = light->position.x;
+            object->position.y = light->position.y;
+            object->position.z = light->position.z;
+            object->position.w = 1.0f;
             object->cutoff = 180.0f;
             /* FIXME: Range */
             break;
 
         case WINED3D_LIGHT_DIRECTIONAL:
             /* Direction */
-            object->lightPosn[0] = -light->direction.x;
-            object->lightPosn[1] = -light->direction.y;
-            object->lightPosn[2] = -light->direction.z;
-            object->lightPosn[3] = 0.0f;
+            object->direction.x = -light->direction.x;
+            object->direction.y = -light->direction.y;
+            object->direction.z = -light->direction.z;
+            object->direction.w = 0.0f;
             object->exponent = 0.0f;
             object->cutoff = 180.0f;
             break;
 
         case WINED3D_LIGHT_SPOT:
             /* Position */
-            object->lightPosn[0] = light->position.x;
-            object->lightPosn[1] = light->position.y;
-            object->lightPosn[2] = light->position.z;
-            object->lightPosn[3] = 1.0f;
+            object->position.x = light->position.x;
+            object->position.y = light->position.y;
+            object->position.z = light->position.z;
+            object->position.w = 1.0f;
 
             /* Direction */
-            object->lightDirn[0] = light->direction.x;
-            object->lightDirn[1] = light->direction.y;
-            object->lightDirn[2] = light->direction.z;
-            object->lightDirn[3] = 1.0f;
+            object->direction.x = light->direction.x;
+            object->direction.y = light->direction.y;
+            object->direction.z = light->direction.z;
+            object->direction.w = 0.0f;
 
             /* opengl-ish and d3d-ish spot lights use too different models
              * for the light "intensity" as a function of the angle towards
@@ -1576,6 +1580,13 @@ HRESULT CDECL wined3d_device_set_light(struct wined3d_device *device,
 
             object->cutoff = (float)(light->phi * 90 / M_PI);
             /* FIXME: Range */
+            break;
+
+        case WINED3D_LIGHT_PARALLELPOINT:
+            object->position.x = light->position.x;
+            object->position.y = light->position.y;
+            object->position.z = light->position.z;
+            object->position.w = 1.0f;
             break;
 
         default:
@@ -1925,7 +1936,7 @@ static void resolve_depth_buffer(struct wined3d_state *state)
     struct wined3d_surface *depth_stencil, *surface;
 
     if (!texture || texture->resource.type != WINED3D_RTYPE_TEXTURE
-            || !(texture->resource.format->flags & WINED3DFMT_FLAG_DEPTH))
+            || !(texture->resource.format_flags & WINED3DFMT_FLAG_DEPTH))
         return;
     surface = surface_from_resource(texture->sub_resources[0]);
     if (!(depth_stencil = wined3d_rendertarget_view_get_surface(state->fb->depth_stencil)))
@@ -3529,7 +3540,7 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
         struct wined3d_texture *src_texture, struct wined3d_texture *dst_texture)
 {
     enum wined3d_resource_type type;
-    unsigned int level_count, i;
+    unsigned int level_count, i, j, src_size, dst_size, src_skip_levels = 0;
     HRESULT hr;
     struct wined3d_context *context;
 
@@ -3561,12 +3572,20 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
         return WINED3DERR_INVALIDCALL;
     }
 
-    /* Check that both textures have the identical numbers of levels. */
-    level_count = wined3d_texture_get_level_count(src_texture);
-    if (wined3d_texture_get_level_count(dst_texture) != level_count)
+    level_count = min(wined3d_texture_get_level_count(src_texture),
+            wined3d_texture_get_level_count(dst_texture));
+
+    src_size = max(src_texture->resource.width, src_texture->resource.height);
+    dst_size = max(dst_texture->resource.width, dst_texture->resource.height);
+    if (type == WINED3D_RTYPE_VOLUME)
     {
-        WARN("Source and destination have different level counts, returning WINED3DERR_INVALIDCALL.\n");
-        return WINED3DERR_INVALIDCALL;
+        src_size = max(src_size, src_texture->resource.depth);
+        dst_size = max(dst_size, dst_texture->resource.depth);
+    }
+    while (src_size > dst_size)
+    {
+        src_size >>= 1;
+        ++src_skip_levels;
     }
 
     /* Make sure that the destination texture is loaded. */
@@ -3584,7 +3603,8 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
 
             for (i = 0; i < level_count; ++i)
             {
-                src_surface = surface_from_resource(wined3d_texture_get_sub_resource(src_texture, i));
+                src_surface = surface_from_resource(wined3d_texture_get_sub_resource(src_texture,
+                        i + src_skip_levels));
                 dst_surface = surface_from_resource(wined3d_texture_get_sub_resource(dst_texture, i));
                 hr = wined3d_device_update_surface(device, src_surface, NULL, dst_surface, NULL);
                 if (FAILED(hr))
@@ -3600,16 +3620,23 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
         {
             struct wined3d_surface *src_surface;
             struct wined3d_surface *dst_surface;
+            unsigned int src_levels = wined3d_texture_get_level_count(src_texture);
+            unsigned int dst_levels = wined3d_texture_get_level_count(dst_texture);
 
-            for (i = 0; i < level_count * 6; ++i)
+            for (i = 0; i < 6; ++i)
             {
-                src_surface = surface_from_resource(wined3d_texture_get_sub_resource(src_texture, i));
-                dst_surface = surface_from_resource(wined3d_texture_get_sub_resource(dst_texture, i));
-                hr = wined3d_device_update_surface(device, src_surface, NULL, dst_surface, NULL);
-                if (FAILED(hr))
+                for (j = 0; j < level_count; ++j)
                 {
-                    WARN("Failed to update surface, hr %#x.\n", hr);
-                    return hr;
+                    src_surface = surface_from_resource(wined3d_texture_get_sub_resource(src_texture,
+                            i * src_levels + j + src_skip_levels));
+                    dst_surface = surface_from_resource(wined3d_texture_get_sub_resource(dst_texture,
+                            i * dst_levels + j));
+                    hr = wined3d_device_update_surface(device, src_surface, NULL, dst_surface, NULL);
+                    if (FAILED(hr))
+                    {
+                        WARN("Failed to update surface, hr %#x.\n", hr);
+                        return hr;
+                    }
                 }
             }
             break;
@@ -3620,7 +3647,8 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
             for (i = 0; i < level_count; ++i)
             {
                 hr = device_update_volume(device,
-                        volume_from_resource(wined3d_texture_get_sub_resource(src_texture, i)),
+                        volume_from_resource(wined3d_texture_get_sub_resource(src_texture,
+                                i + src_skip_levels)),
                         volume_from_resource(wined3d_texture_get_sub_resource(dst_texture, i)));
                 if (FAILED(hr))
                 {
@@ -3674,7 +3702,7 @@ HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device
         }
 
         texture = state->textures[i];
-        if (!texture || texture->resource.format->flags & WINED3DFMT_FLAG_FILTERING) continue;
+        if (!texture || texture->resource.format_flags & WINED3DFMT_FLAG_FILTERING) continue;
 
         if (state->sampler_states[i][WINED3D_SAMP_MAG_FILTER] != WINED3D_TEXF_POINT)
         {

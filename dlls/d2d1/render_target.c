@@ -580,12 +580,12 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillRectangle(ID2D1RenderTar
     transform.pad1 = 0.0f;
 
     /* Translate from world space to object space. */
-    tmp_x = rect->left + (rect->right - rect->left) / 2.0f;
-    tmp_y = rect->top + (rect->bottom - rect->top) / 2.0f;
+    tmp_x = min(rect->left, rect->right) + fabsf(rect->right - rect->left) / 2.0f;
+    tmp_y = min(rect->top, rect->bottom) + fabsf(rect->bottom - rect->top) / 2.0f;
     transform._31 += tmp_x * transform._11 + tmp_y * transform._21;
     transform._32 += tmp_x * transform._12 + tmp_y * transform._22;
-    tmp_x = (rect->right - rect->left) / 2.0f;
-    tmp_y = (rect->bottom - rect->top) / 2.0f;
+    tmp_x = fabsf(rect->right - rect->left) / 2.0f;
+    tmp_y = fabsf(rect->bottom - rect->top) / 2.0f;
     transform._11 *= tmp_x;
     transform._12 *= tmp_x;
     transform._21 *= tmp_y;
@@ -777,12 +777,12 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawBitmap(ID2D1RenderTarget
     bitmap_brush_desc.interpolationMode = interpolation_mode;
 
     brush_desc.opacity = opacity;
-    brush_desc.transform._11 = (d.right - d.left) / (s.right - s.left);
+    brush_desc.transform._11 = fabsf((d.right - d.left) / (s.right - s.left));
     brush_desc.transform._21 = 0.0f;
-    brush_desc.transform._31 = d.left - s.left;
+    brush_desc.transform._31 = min(d.left, d.right) - min(s.left, s.right) * brush_desc.transform._11;
     brush_desc.transform._12 = 0.0f;
-    brush_desc.transform._22 = (d.bottom - d.top) / (s.bottom - s.top);
-    brush_desc.transform._32 = d.top - s.top;
+    brush_desc.transform._22 = fabsf((d.bottom - d.top) / (s.bottom - s.top));
+    brush_desc.transform._32 = min(d.top, d.bottom) - min(s.top, s.bottom) * brush_desc.transform._22;
 
     if (FAILED(hr = ID2D1RenderTarget_CreateBitmapBrush(iface, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
     {

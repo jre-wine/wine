@@ -364,6 +364,272 @@ static void test_service(void)
     IShellDispatch2_Release(sd);
 }
 
+static void test_ShellFolderViewDual(void)
+{
+    IShellFolderViewDual *viewdual;
+    IShellFolder *desktop, *tmpdir;
+    IShellView *view, *view2;
+    IDispatch *disp, *disp2;
+    WCHAR pathW[MAX_PATH];
+    LPITEMIDLIST pidl;
+    HRESULT hr;
+
+    /* IShellFolderViewDual is not an IShellView extension */
+    hr = SHGetDesktopFolder(&desktop);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellView_QueryInterface(view, &IID_IShellFolderViewDual, (void**)&viewdual);
+    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IDispatch, (void**)&disp);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IDispatch, (void**)&disp2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(disp2 == disp, "got %p, %p\n", disp2, disp);
+    IDispatch_Release(disp2);
+
+    hr = IDispatch_QueryInterface(disp, &IID_IShellFolderViewDual, (void**)&viewdual);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(disp == (IDispatch*)viewdual, "got %p, expected %p\n", viewdual, disp);
+
+    hr = IShellFolderViewDual_QueryInterface(viewdual, &IID_IShellView, (void**)&view2);
+    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+    IShellFolderViewDual_Release(viewdual);
+    IDispatch_Release(disp);
+
+    disp = (void*)0xdeadbeef;
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IShellFolderViewDual, (void**)&disp);
+    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+    ok(disp == NULL, "got %p\n", disp);
+    IShellView_Release(view);
+
+    /* Try with some other folder, that's not a desktop */
+    GetTempPathW(sizeof(pathW)/sizeof(pathW[0]), pathW);
+    hr = IShellFolder_ParseDisplayName(desktop, NULL, NULL, pathW, NULL, &pidl, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellFolder_BindToObject(desktop, pidl, NULL, &IID_IShellFolder, (void**)&tmpdir);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    CoTaskMemFree(pidl);
+
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellView_QueryInterface(view, &IID_IShellFolderViewDual, (void**)&viewdual);
+    ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IDispatch, (void**)&disp);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDispatch_Release(disp);
+    IShellView_Release(view);
+
+    IShellFolder_Release(tmpdir);
+    IShellFolder_Release(desktop);
+}
+
+static void test_ShellWindows(void)
+{
+    IShellWindows *shellwindows;
+    LONG cookie, cookie2, ret;
+    IDispatch *disp;
+    VARIANT v, v2;
+    HRESULT hr;
+    HWND hwnd;
+
+    hr = CoCreateInstance(&CLSID_ShellWindows, NULL, CLSCTX_LOCAL_SERVER,
+        &IID_IShellWindows, (void**)&shellwindows);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+if (0) /* NULL out argument - currently crashes on Wine */ {
+    hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, NULL);
+    ok(hr == HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER), "got 0x%08x\n", hr);
+}
+    hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, &cookie);
+todo_wine
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    hr = IShellWindows_Register(shellwindows, (IDispatch*)shellwindows, 0, SWC_EXPLORER, &cookie);
+todo_wine
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    hr = IShellWindows_Register(shellwindows, (IDispatch*)shellwindows, 0, SWC_EXPLORER, &cookie);
+todo_wine
+    ok(hr == E_POINTER, "got 0x%08x\n", hr);
+
+    hwnd = CreateWindowExA(0, "button", "test", BS_CHECKBOX | WS_VISIBLE | WS_POPUP,
+                           0, 0, 50, 14, 0, 0, 0, NULL);
+    ok(hwnd != NULL, "got %p, error %d\n", hwnd, GetLastError());
+
+    cookie = 0;
+    hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_EXPLORER, &cookie);
+todo_wine {
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cookie != 0, "got %d\n", cookie);
+}
+    cookie2 = 0;
+    hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_EXPLORER, &cookie2);
+todo_wine {
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cookie2 != 0 && cookie2 != cookie, "got %d\n", cookie2);
+}
+    hr = IShellWindows_Revoke(shellwindows, cookie);
+todo_wine
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IShellWindows_Revoke(shellwindows, cookie2);
+todo_wine
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IShellWindows_Revoke(shellwindows, 0);
+todo_wine
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+
+    /* we can register ourselves as desktop, but FindWindowSW still returns real desktop window */
+    cookie = 0;
+    hr = IShellWindows_Register(shellwindows, NULL, HandleToLong(hwnd), SWC_DESKTOP, &cookie);
+todo_wine {
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(cookie != 0, "got %d\n", cookie);
+}
+    disp = (void*)0xdeadbeef;
+    ret = 0xdead;
+    VariantInit(&v);
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v, SWC_DESKTOP, &ret, SWFO_NEEDDISPATCH, &disp);
+    ok(hr == S_OK || broken(hr == S_FALSE), "got 0x%08x\n", hr);
+    if (hr == S_FALSE) /* winxp and earlier */ {
+        win_skip("SWC_DESKTOP is not supported, some tests will be skipped.\n");
+        /* older versions allowed to regiser SWC_DESKTOP and access it with FindWindowSW */
+        ok(disp == NULL, "got %p\n", disp);
+        ok(ret == 0, "got %d\n", ret);
+    }
+    else {
+        IShellFolderViewDual *view;
+        IShellBrowser *sb, *sb2;
+        IServiceProvider *sp;
+        IDispatch *doc, *app;
+        ITypeInfo *typeinfo;
+        TYPEATTR *typeattr;
+        IWebBrowser2 *wb;
+        IShellView *sv;
+        IUnknown *unk;
+        UINT count;
+
+        ok(disp != NULL, "got %p\n", disp);
+        ok(ret != HandleToUlong(hwnd), "got %d\n", ret);
+
+        /* IDispatch-related tests */
+        count = 10;
+        hr = IDispatch_GetTypeInfoCount(disp, &count);
+todo_wine {
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(count == 1, "got %u\n", count);
+}
+        hr = IDispatch_GetTypeInfo(disp, 0, LOCALE_SYSTEM_DEFAULT, &typeinfo);
+todo_wine
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+if (hr == S_OK) {
+        hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(IsEqualGUID(&typeattr->guid, &IID_IWebBrowser2), "type guid %s\n", wine_dbgstr_guid(&typeattr->guid));
+
+        ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+        ITypeInfo_Release(typeinfo);
+}
+        /* IWebBrowser2 */
+        hr = IDispatch_QueryInterface(disp, &IID_IWebBrowser2, (void**)&wb);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IWebBrowser2_Refresh(wb);
+todo_wine
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IWebBrowser2_get_Application(wb, &app);
+todo_wine {
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(disp == app, "got %p, %p\n", app, disp);
+}
+        if (hr == S_OK) IDispatch_Release(app);
+
+        hr = IWebBrowser2_get_Document(wb, &doc);
+todo_wine
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+if (hr == S_OK) {
+        hr = IDispatch_GetTypeInfo(doc, 0, LOCALE_SYSTEM_DEFAULT, &typeinfo);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(IsEqualGUID(&typeattr->guid, &IID_IShellFolderViewDual3), "type guid %s\n", wine_dbgstr_guid(&typeattr->guid));
+        IDispatch_Release(doc);
+
+        ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+        ITypeInfo_Release(typeinfo);
+}
+        IWebBrowser2_Release(wb);
+
+        /* IServiceProvider */
+        hr = IDispatch_QueryInterface(disp, &IID_IShellFolderViewDual, (void**)&view);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IDispatch_QueryInterface(disp, &IID_IServiceProvider, (void**)&sp);
+todo_wine
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+if (hr == S_OK) {
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IShellBrowser, (void**)&sb);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IShellBrowser, (void**)&sb2);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(sb == sb2, "got %p, %p\n", sb, sb2);
+        IShellBrowser_Release(sb2);
+        IShellBrowser_Release(sb);
+
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IUnknown, (void**)&unk);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IUnknown_QueryInterface(unk, &IID_IShellBrowser, (void**)&sb2);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IShellBrowser_Release(sb2);
+        IUnknown_Release(unk);
+
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IShellView, (void**)&sv);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        IServiceProvider_Release(sp);
+}
+        IDispatch_Release(disp);
+    }
+
+    disp = (void*)0xdeadbeef;
+    ret = 0xdead;
+    VariantInit(&v);
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v, SWC_DESKTOP, &ret, 0, &disp);
+    ok(hr == S_OK || broken(hr == S_FALSE) /* winxp */, "got 0x%08x\n", hr);
+    ok(disp == NULL, "got %p\n", disp);
+    ok(ret != HandleToUlong(hwnd), "got %d\n", ret);
+
+    disp = (void*)0xdeadbeef;
+    ret = 0xdead;
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = cookie;
+    VariantInit(&v2);
+    hr = IShellWindows_FindWindowSW(shellwindows, &v, &v2, SWC_BROWSER, &ret, SWFO_COOKIEPASSED, &disp);
+todo_wine
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(disp == NULL, "got %p\n", disp);
+    ok(ret == 0, "got %d\n", ret);
+
+    hr = IShellWindows_Revoke(shellwindows, cookie);
+todo_wine
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    DestroyWindow(hwnd);
+    IShellWindows_Release(shellwindows);
+}
+
 START_TEST(shelldispatch)
 {
     HRESULT r;
@@ -376,6 +642,8 @@ START_TEST(shelldispatch)
     init_function_pointers();
     test_namespace();
     test_service();
+    test_ShellFolderViewDual();
+    test_ShellWindows();
 
     CoUninitialize();
 }

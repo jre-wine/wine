@@ -748,7 +748,7 @@ static void tbsize_addbutton(tbsize_result_t *tbsr, int left, int top, int right
 
 static tbsize_result_t *tbsize_results;
 
-#define tbsize_results_num 24
+#define tbsize_results_num 28
 
 static void init_tbsize_results(void) {
     int fontheight = system_font_height();
@@ -991,6 +991,18 @@ static void init_tbsize_results(void) {
     tbsize_results[23] = init_tbsize_result(2, 0, 0, 672, 42, 67, 41);
     tbsize_addbutton(&tbsize_results[23],   0,   2, 672,  25 + fontheight);
     tbsize_addbutton(&tbsize_results[23],   0,  25 + fontheight, 672,  48 + 2*fontheight);
+
+    tbsize_results[24] = init_tbsize_result(1, 0, 0, 672, 42, 67, 40);
+    tbsize_addbutton(&tbsize_results[24],   0,   2,  11 + string_width(STRING2),  24);
+
+    tbsize_results[25] = init_tbsize_result(1, 0, 0, 672, 42, 67, 40);
+    tbsize_addbutton(&tbsize_results[25],   0,   2,  40,  24);
+
+    tbsize_results[26] = init_tbsize_result(1, 0, 0, 672, 42, 67, 40);
+    tbsize_addbutton(&tbsize_results[26],   0,   2,  40,  24);
+
+    tbsize_results[27] = init_tbsize_result(1, 0, 0, 672, 42, 67, 40);
+    tbsize_addbutton(&tbsize_results[27],   0,   2,  40,  24);
 }
 
 static void free_tbsize_results(void) {
@@ -1062,12 +1074,18 @@ static TBBUTTON buttons3[] = {
     {0, 32, TBSTATE_ENABLED, BTNS_AUTOSIZE, {0, }, 0, 1},
     {0, 33, TBSTATE_ENABLED, BTNS_AUTOSIZE, {0, }, 0, (UINT_PTR)STRING2}
 };
+static TBBUTTON buttons4[] = {
+    {0, 40, TBSTATE_ENABLED, BTNS_AUTOSIZE, {0, }, 0, (UINT_PTR)STRING2},
+    {0, 41, TBSTATE_ENABLED, 0, {0, }, 0, (UINT_PTR)STRING2},
+    {0, 41, TBSTATE_ENABLED, BTNS_SHOWTEXT, {0, }, 0, (UINT_PTR)STRING2}
+};
 
 static void test_sizes(void)
 {
     HWND hToolbar = NULL;
     HIMAGELIST himl, himl2;
     TBBUTTONINFOA tbinfo;
+    TBBUTTON button;
     int style;
     int i;
     int fontheight = system_font_height();
@@ -1083,9 +1101,13 @@ static void test_sizes(void)
     check_sizes();
     SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0);
     check_sizes();
+    SendMessageA(hToolbar, TB_GETBUTTON, 5, (LPARAM)&button);
+    ok(button.fsState == (TBSTATE_WRAP|TBSTATE_ENABLED), "got %08x\n", button.fsState);
     /* after setting the TBSTYLE_WRAPABLE the TBSTATE_WRAP is ignored */
     SetWindowLongA(hToolbar, GWL_STYLE, style|TBSTYLE_WRAPABLE);
     check_sizes();
+    SendMessageA(hToolbar, TB_GETBUTTON, 5, (LPARAM)&button);
+    ok(button.fsState == TBSTATE_ENABLED, "got %08x\n", button.fsState);
     /* adding new buttons with TBSTYLE_WRAPABLE doesn't add a new row */
     SendMessageA(hToolbar, TB_ADDBUTTONSA, 2, (LPARAM)buttons1);
     check_sizes();
@@ -1094,6 +1116,11 @@ static void test_sizes(void)
     for (i=0; i<15; i++)
         SendMessageA(hToolbar, TB_ADDBUTTONSA, 2, (LPARAM)buttons1);
     check_sizes_todo(0x4);
+    SendMessageA(hToolbar, TB_GETBUTTON, 31, (LPARAM)&button);
+    ok(button.fsState == (TBSTATE_WRAP|TBSTATE_ENABLED), "got %08x\n", button.fsState);
+    SetWindowLongA(hToolbar, GWL_STYLE, style);
+    SendMessageA(hToolbar, TB_GETBUTTON, 31, (LPARAM)&button);
+    ok(button.fsState == TBSTATE_ENABLED, "got %08x\n", button.fsState);
 
     rebuild_toolbar_with_buttons(&hToolbar);
     SendMessageA(hToolbar, TB_ADDBUTTONSA, 2, (LPARAM)buttons1);
@@ -1300,7 +1327,40 @@ static void test_sizes(void)
     {
         tbinfo.dwMask = TBIF_SIZE;
         ok(SendMessageA(hToolbar, TB_SETBUTTONINFOA, 33, (LPARAM)&tbinfo) != 0, "TB_SETBUTTONINFOA failed\n");
+        tbsize_numtests++;
     }
+
+    /* Single BTNS_AUTOSIZE button with string. */
+    rebuild_toolbar(&hToolbar);
+    ok(SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons4[0]) == 1, "TB_ADDBUTTONSA failed\n");
+    ok(SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(40, 20)) == 1, "TB_SETBUTTONSIZE failed\n");
+    SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0 );
+    check_sizes();
+
+    /* Single non-BTNS_AUTOSIZE button with string. */
+    rebuild_toolbar(&hToolbar);
+    ok(SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons4[1]) == 1, "TB_ADDBUTTONSA failed\n");
+    ok(SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(40, 20)) == 1, "TB_SETBUTTONSIZE failed\n");
+    SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0 );
+    check_sizes();
+
+    /* Single non-BTNS_AUTOSIZE button with string with TBSTYLE_EX_MIXEDBUTTONS set. */
+    rebuild_toolbar(&hToolbar);
+    SendMessageA(hToolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_MIXEDBUTTONS);
+    style = SendMessageA(hToolbar, TB_GETSTYLE, 0, 0);
+    ok(SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons4[1]) == 1, "TB_ADDBUTTONSA failed\n");
+    ok(SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(40, 20)) == 1, "TB_SETBUTTONSIZE failed\n");
+    SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0 );
+    check_sizes();
+
+    /* Single non-BTNS_AUTOSIZE, BTNS_SHOWTEXT button with string with TBSTYLE_EX_MIXEDBUTTONS set. */
+    rebuild_toolbar(&hToolbar);
+    SendMessageA(hToolbar, TB_SETEXTENDEDSTYLE, 0, TBSTYLE_EX_MIXEDBUTTONS);
+    style = SendMessageA(hToolbar, TB_GETSTYLE, 0, 0);
+    ok(SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons4[2]) == 1, "TB_ADDBUTTONSA failed\n");
+    ok(SendMessageA(hToolbar, TB_SETBUTTONSIZE, 0, MAKELPARAM(40, 20)) == 1, "TB_SETBUTTONSIZE failed\n");
+    SendMessageA(hToolbar, TB_AUTOSIZE, 0, 0 );
+    check_sizes();
 
     free_tbsize_results();
     DestroyWindow(hToolbar);
@@ -1338,12 +1398,12 @@ static void restore_recalc_state(HWND hToolbar)
     RECT rect;
     /* return to style with a 2px top margin */
     SetWindowLongA(hToolbar, GWL_STYLE,
-        GetWindowLongA(hToolbar, GWL_STYLE) & ~TBSTYLE_FLAT);
+                   SendMessageA(hToolbar, TB_GETSTYLE, 0, 0) & ~TBSTYLE_FLAT);
     /* recalc */
     SendMessageA(hToolbar, TB_ADDBUTTONSA, 1, (LPARAM)&buttons3[3]);
     /* top margin will be 0px if a recalc occurs */
     SetWindowLongA(hToolbar, GWL_STYLE,
-        GetWindowLongA(hToolbar, GWL_STYLE) | TBSTYLE_FLAT);
+                   SendMessageA(hToolbar, TB_GETSTYLE, 0, 0) | TBSTYLE_FLAT);
     /* safety check */
     SendMessageA(hToolbar, TB_GETITEMRECT, 1, (LPARAM)&rect);
     ok(rect.top == 2, "Test will make no sense because initial top is %d instead of 2\n",
@@ -1358,6 +1418,7 @@ static void test_recalc(void)
     const int EX_STYLES_COUNT = 5;
     int i;
     BOOL recalc;
+    DWORD style;
 
     /* Like TB_ADDBUTTONSA tested in test_sized, inserting a button without text
      * results in a relayout, while adding one with text forces a recalc */
@@ -1417,6 +1478,47 @@ static void test_recalc(void)
 
     /* undocumented exstyle 0x2 seems to change the top margin, which
      * interferes with these tests */
+
+    /* Show that a change in TBSTYLE_WRAPABLE causes a recalc */
+    prepare_recalc_test(&hToolbar);
+    style = SendMessageA(hToolbar, TB_GETSTYLE, 0, 0);
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style);
+    recalc = did_recalc(hToolbar);
+    ok(!recalc, "recalc %d\n", recalc);
+
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style | TBSTYLE_TOOLTIPS | TBSTYLE_TRANSPARENT | CCS_BOTTOM);
+    recalc = did_recalc(hToolbar);
+    ok(!recalc, "recalc %d\n", recalc);
+
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style | TBSTYLE_WRAPABLE);
+    recalc = did_recalc(hToolbar);
+    ok(recalc, "recalc %d\n", recalc);
+    restore_recalc_state(hToolbar);
+
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style | TBSTYLE_WRAPABLE);
+    recalc = did_recalc(hToolbar);
+    ok(!recalc, "recalc %d\n", recalc);
+
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style);
+    recalc = did_recalc(hToolbar);
+    ok(recalc, "recalc %d\n", recalc);
+    restore_recalc_state(hToolbar);
+
+    /* Changing CCS_VERT does not recalc */
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style | CCS_VERT);
+    recalc = did_recalc(hToolbar);
+    ok(!recalc, "recalc %d\n", recalc);
+    restore_recalc_state(hToolbar);
+
+    SendMessageA(hToolbar, TB_SETSTYLE, 0, style);
+    recalc = did_recalc(hToolbar);
+    ok(!recalc, "recalc %d\n", recalc);
+    restore_recalc_state(hToolbar);
+
+    /* Setting the window's style directly also causes recalc */
+    SetWindowLongA(hToolbar, GWL_STYLE, style | TBSTYLE_WRAPABLE);
+    recalc = did_recalc(hToolbar);
+    ok(recalc, "recalc %d\n", recalc);
 
     DestroyWindow(hToolbar);
 }

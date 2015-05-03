@@ -81,6 +81,7 @@ static void test_COM_audiopath(void)
 
     hr = IDirectMusicAudioPath_QueryInterface(dmap, &IID_IUnknown, (void**)&unk);
     ok(hr == S_OK, "QueryInterface for IID_IUnknown failed: %08x\n", hr);
+    ok(unk == (IUnknown*)dmap, "got %p, %p\n", unk, dmap);
     refcount = IUnknown_AddRef(unk);
     ok(refcount == 5, "refcount == %u, expected 5\n", refcount);
     refcount = IUnknown_Release(unk);
@@ -421,9 +422,10 @@ static void test_graph(void)
     hr = IDirectMusicGraph_QueryInterface(dmg, &IID_IPersistStream, (void**)&ps);
     ok(hr == S_OK, "QueryInterface for IID_IPersistStream failed: %08x\n", hr);
     hr = IPersistStream_GetClassID(ps, &class);
-    todo_wine ok(hr == S_OK, "IPersistStream_GetClassID failed: %08x\n", hr);
-    todo_wine ok(IsEqualGUID(&class, &CLSID_DirectMusicGraph),
-            "Expected class CLSID_DirectMusicGraph got %s\n", wine_dbgstr_guid(&class));
+    ok(hr == S_OK || broken(hr == E_NOTIMPL) /* win2k */, "IPersistStream_GetClassID failed: %08x\n", hr);
+    if (hr == S_OK)
+        ok(IsEqualGUID(&class, &CLSID_DirectMusicGraph),
+                "Expected class CLSID_DirectMusicGraph got %s\n", wine_dbgstr_guid(&class));
 
     /* Unimplemented IPersistStream methods */
     hr = IPersistStream_IsDirty(ps);
@@ -452,9 +454,10 @@ static void test_segment(void)
     hr = IDirectMusicSegment_QueryInterface(dms, &IID_IPersistStream, (void**)&ps);
     ok(hr == S_OK, "QueryInterface for IID_IPersistStream failed: %08x\n", hr);
     hr = IPersistStream_GetClassID(ps, &class);
-    ok(hr == S_OK, "IPersistStream_GetClassID failed: %08x\n", hr);
-    ok(IsEqualGUID(&class, &CLSID_DirectMusicSegment),
-            "Expected class CLSID_DirectMusicSegment got %s\n", wine_dbgstr_guid(&class));
+    ok(hr == S_OK || broken(hr == E_NOTIMPL) /* win2k */, "IPersistStream_GetClassID failed: %08x\n", hr);
+    if (hr == S_OK)
+        ok(IsEqualGUID(&class, &CLSID_DirectMusicSegment),
+                "Expected class CLSID_DirectMusicSegment got %s\n", wine_dbgstr_guid(&class));
 
     /* Unimplemented IPersistStream methods */
     hr = IPersistStream_IsDirty(ps);

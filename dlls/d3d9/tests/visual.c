@@ -28,6 +28,8 @@
  * causes visible results in games can be tested in a way that does not depend on pixel exactness
  */
 
+#include <math.h>
+
 #define COBJMACROS
 #include <d3d9.h>
 #include "wine/test.h"
@@ -262,6 +264,7 @@ static void lighting_test(void)
     ULONG refcount;
     HWND window;
     HRESULT hr;
+    unsigned int i;
 
     static const D3DMATRIX mat =
     {{{
@@ -275,7 +278,7 @@ static void lighting_test(void)
         1.0f, 0.0f, 1.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
         1.0f, 0.0f, 1.0f, 0.0f,
-        0.0f, 0.0f, 0.0f, 1.0f,
+        0.0f, 0.0f, 0.5f, 1.0f,
     }}},
     mat_transf =
     {{{
@@ -283,6 +286,13 @@ static void lighting_test(void)
          0.0f,  1.0f,  0.0f, 0.0f,
         -1.0f,  0.0f,  0.0f, 0.0f,
          10.f, 10.0f, 10.0f, 1.0f,
+    }}},
+    mat_nonaffine =
+    {{{
+        1.0f,  0.0f,  0.0f,  0.0f,
+        0.0f,  1.0f,  0.0f,  0.0f,
+        0.0f,  0.0f,  1.0f, -1.0f,
+        10.f, 10.0f, 10.0f,  0.0f,
     }}};
     static const struct
     {
@@ -343,8 +353,30 @@ static void lighting_test(void)
         {{-10.0f,  -9.0f, 11.0f}, {-1.0f, 0.0f, 0.0f}, 0xff0000ff},
         {{-10.0f,  -9.0f,  9.0f}, {-1.0f, 0.0f, 0.0f}, 0xff0000ff},
         {{-10.0f, -11.0f,  9.0f}, {-1.0f, 0.0f, 0.0f}, 0xff0000ff},
+    },
+    translatedquad[] =
+    {
+        {{-11.0f, -11.0f, -10.0f}, {0.0f, 0.0f, -1.0f}, 0xff0000ff},
+        {{-11.0f,  -9.0f, -10.0f}, {0.0f, 0.0f, -1.0f}, 0xff0000ff},
+        {{ -9.0f,  -9.0f, -10.0f}, {0.0f, 0.0f, -1.0f}, 0xff0000ff},
+        {{ -9.0f, -11.0f, -10.0f}, {0.0f, 0.0f, -1.0f}, 0xff0000ff},
     };
     static const WORD indices[] = {0, 1, 2, 2, 3, 0};
+    static const struct
+    {
+        const D3DMATRIX *world_matrix;
+        const void *quad;
+        unsigned int size;
+        DWORD expected;
+        const char *message;
+    }
+    tests[] =
+    {
+        {&mat, nquad, sizeof(nquad[0]), 0x000000ff, "Lit quad with light"},
+        {&mat_singular, nquad, sizeof(nquad[0]), 0x000000ff, "Lit quad with singular world matrix"},
+        {&mat_transf, rotatedquad, sizeof(rotatedquad[0]), 0x000000ff, "Lit quad with transformation matrix"},
+        {&mat_nonaffine, translatedquad, sizeof(translatedquad[0]), 0x00000000, "Lit quad with non-affine matrix"},
+    };
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             0, 0, 640, 480, NULL, NULL, NULL, NULL);
@@ -424,66 +456,30 @@ static void lighting_test(void)
 
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
 
-    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LIGHTING, TRUE);
-    ok(SUCCEEDED(hr), "Failed to enable lighting, hr %#x.\n", hr);
     hr = IDirect3DDevice9_LightEnable(device, 0, TRUE);
     ok(SUCCEEDED(hr), "Failed to enable light 0, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
-    ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
+    {
+        hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, tests[i].world_matrix);
+        ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice9_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+        ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4,
-            2, indices, D3DFMT_INDEX16, nquad, sizeof(nquad[0]));
-    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice9_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4,
+                2, indices, D3DFMT_INDEX16, tests[i].quad, tests[i].size);
+        ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
 
-    color = getPixelColor(device, 320, 240);
-    ok(color == 0x000000ff, "Lit quad with light has color 0x%08x.\n", color);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
-    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, &mat_singular);
-    ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
-    ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4,
-            2, indices, D3DFMT_INDEX16, nquad, sizeof(nquad[0]));
-    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
-
-    color = getPixelColor(device, 160, 240);
-    ok(color == 0x00ffffff, "Cleared area has color 0x%08x.\n", color);
-    color = getPixelColor(device, 480, 240);
-    ok(color == 0x000000ff, "Lit quad with singular world matrix has color 0x%08x.\n", color);
-
-    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, &mat_transf);
-    ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
-    ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_BeginScene(device);
-    ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST, 0, 4,
-            2, indices, D3DFMT_INDEX16, rotatedquad, sizeof(rotatedquad[0]));
-    ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
-
-    hr = IDirect3DDevice9_EndScene(device);
-    ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
-
-    color = getPixelColor(device, 320, 240);
-    ok(color == 0x000000ff, "Lit quad with transformation matrix has color 0x%08x.\n", color);
+        color = getPixelColor(device, 320, 240);
+        ok(color == tests[i].expected, "%s has color 0x%08x.\n", tests[i].message, color);
+    }
 
     hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, &mat);
     ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
@@ -541,6 +537,302 @@ static void lighting_test(void)
 done:
     IDirect3D9_Release(d3d);
     DestroyWindow(window);
+}
+
+static void test_specular_lighting(void)
+{
+    static const unsigned int vertices_side = 5;
+    const unsigned int indices_count = (vertices_side - 1) * (vertices_side - 1) * 2 * 3;
+    static const DWORD fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+    static const D3DMATRIX mat =
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}};
+    static const D3DLIGHT9 directional =
+    {
+        D3DLIGHT_DIRECTIONAL,
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {1.0f, 1.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+    },
+    point =
+    {
+        D3DLIGHT_POINT,
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {1.0f, 1.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        100.0f,
+        0.0f,
+        0.0f, 0.0f, 1.0f,
+    },
+    spot =
+    {
+        D3DLIGHT_SPOT,
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {1.0f, 1.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        100.0f,
+        1.0f,
+        0.0f, 0.0f, 1.0f,
+        M_PI / 12.0f, M_PI / 3.0f
+    },
+    /* The chosen range value makes the test fail when using a manhattan
+     * distance metric vs the correct euclidean distance. */
+    point_range =
+    {
+        D3DLIGHT_POINT,
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {1.0f, 1.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        1.2f,
+        0.0f,
+        0.0f, 0.0f, 1.0f,
+    };
+    static const struct expected_color
+    {
+        unsigned int x, y;
+        D3DCOLOR color;
+    }
+    expected_directional[] =
+    {
+        {160, 120, 0x00ffffff},
+        {320, 120, 0x00ffffff},
+        {480, 120, 0x00ffffff},
+        {160, 240, 0x00ffffff},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x00ffffff},
+        {160, 360, 0x00ffffff},
+        {320, 360, 0x00ffffff},
+        {480, 360, 0x00ffffff},
+    },
+    expected_directional_local[] =
+    {
+        {160, 120, 0x003c3c3c},
+        {320, 120, 0x00717171},
+        {480, 120, 0x003c3c3c},
+        {160, 240, 0x00717171},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x00717171},
+        {160, 360, 0x003c3c3c},
+        {320, 360, 0x00717171},
+        {480, 360, 0x003c3c3c},
+    },
+    expected_point[] =
+    {
+        {160, 120, 0x00282828},
+        {320, 120, 0x005a5a5a},
+        {480, 120, 0x00282828},
+        {160, 240, 0x005a5a5a},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x005a5a5a},
+        {160, 360, 0x00282828},
+        {320, 360, 0x005a5a5a},
+        {480, 360, 0x00282828},
+    },
+    expected_point_local[] =
+    {
+        {160, 120, 0x00000000},
+        {320, 120, 0x00070707},
+        {480, 120, 0x00000000},
+        {160, 240, 0x00070707},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x00070707},
+        {160, 360, 0x00000000},
+        {320, 360, 0x00070707},
+        {480, 360, 0x00000000},
+    },
+    expected_spot[] =
+    {
+        {160, 120, 0x00000000},
+        {320, 120, 0x00141414},
+        {480, 120, 0x00000000},
+        {160, 240, 0x00141414},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x00141414},
+        {160, 360, 0x00000000},
+        {320, 360, 0x00141414},
+        {480, 360, 0x00000000},
+    },
+    expected_spot_local[] =
+    {
+        {160, 120, 0x00000000},
+        {320, 120, 0x00020202},
+        {480, 120, 0x00000000},
+        {160, 240, 0x00020202},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x00020202},
+        {160, 360, 0x00000000},
+        {320, 360, 0x00020202},
+        {480, 360, 0x00000000},
+    },
+    expected_point_range[] =
+    {
+        {160, 120, 0x00000000},
+        {320, 120, 0x005a5a5a},
+        {480, 120, 0x00000000},
+        {160, 240, 0x005a5a5a},
+        {320, 240, 0x00ffffff},
+        {480, 240, 0x005a5a5a},
+        {160, 360, 0x00000000},
+        {320, 360, 0x005a5a5a},
+        {480, 360, 0x00000000},
+    };
+    static const struct
+    {
+        const D3DLIGHT9 *light;
+        BOOL local_viewer;
+        const struct expected_color *expected;
+        unsigned int expected_count;
+    }
+    tests[] =
+    {
+        {&directional, FALSE, expected_directional,
+                sizeof(expected_directional) / sizeof(expected_directional[0])},
+        {&directional, TRUE, expected_directional_local,
+                sizeof(expected_directional_local) / sizeof(expected_directional_local[0])},
+        {&point, FALSE, expected_point,
+                sizeof(expected_point) / sizeof(expected_point[0])},
+        {&point, TRUE, expected_point_local,
+                sizeof(expected_point_local) / sizeof(expected_point_local[0])},
+        {&spot, FALSE, expected_spot,
+                sizeof(expected_spot) / sizeof(expected_spot[0])},
+        {&spot, TRUE, expected_spot_local,
+                sizeof(expected_spot_local) / sizeof(expected_spot_local[0])},
+        {&point_range, FALSE, expected_point_range,
+                sizeof(expected_point_range) / sizeof(expected_point_range[0])},
+    };
+    IDirect3DDevice9 *device;
+    D3DMATERIAL9 material;
+    IDirect3D9 *d3d;
+    D3DCOLOR color;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    unsigned int i, j, x, y;
+    struct
+    {
+        struct vec3 position;
+        struct vec3 normal;
+    } *quad;
+    WORD *indices;
+
+    quad = HeapAlloc(GetProcessHeap(), 0, vertices_side * vertices_side * sizeof(*quad));
+    indices = HeapAlloc(GetProcessHeap(), 0, indices_count * sizeof(*indices));
+    for (i = 0, y = 0; y < vertices_side; ++y)
+    {
+        for (x = 0; x < vertices_side; ++x)
+        {
+            quad[i].position.x = x * 2.0f / (vertices_side - 1) - 1.0f;
+            quad[i].position.y = y * 2.0f / (vertices_side - 1) - 1.0f;
+            quad[i].position.z = 1.0f;
+            quad[i].normal.x = 0.0f;
+            quad[i].normal.y = 0.0f;
+            quad[i++].normal.z = -1.0f;
+        }
+    }
+    for (i = 0, y = 0; y < (vertices_side - 1); ++y)
+    {
+        for (x = 0; x < (vertices_side - 1); ++x)
+        {
+            indices[i++] = y * vertices_side + x + 1;
+            indices[i++] = y * vertices_side + x;
+            indices[i++] = (y + 1) * vertices_side + x;
+            indices[i++] = y * vertices_side + x + 1;
+            indices[i++] = (y + 1) * vertices_side + x;
+            indices[i++] = (y + 1) * vertices_side + x + 1;
+        }
+    }
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        goto done;
+    }
+
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, &mat);
+    ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_VIEW, &mat);
+    ok(SUCCEEDED(hr), "Failed to set view transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_PROJECTION, &mat);
+    ok(SUCCEEDED(hr), "Failed to set projection transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_CLIPPING, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable clipping, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable z test, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable fog, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_SetFVF(device, fvf);
+    ok(SUCCEEDED(hr), "Failed to set FVF, hr %#x.\n", hr);
+
+    memset(&material, 0, sizeof(material));
+    material.Specular.r = 1.0f;
+    material.Specular.g = 1.0f;
+    material.Specular.b = 1.0f;
+    material.Specular.a = 1.0f;
+    material.Power = 30.0f;
+    hr = IDirect3DDevice9_SetMaterial(device, &material);
+    ok(SUCCEEDED(hr), "Failed to set material, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_LightEnable(device, 0, TRUE);
+    ok(SUCCEEDED(hr), "Failed to enable light 0, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_SPECULARENABLE, TRUE);
+    ok(SUCCEEDED(hr), "Failed to enable specular lighting, hr %#x.\n", hr);
+
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
+    {
+        hr = IDirect3DDevice9_SetLight(device, 0, tests[i].light);
+        ok(SUCCEEDED(hr), "Failed to set light parameters, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_SetRenderState(device, D3DRS_LOCALVIEWER, tests[i].local_viewer);
+        ok(SUCCEEDED(hr), "Failed to set local viewer state, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xffffffff, 0.0, 0);
+        ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_DrawIndexedPrimitiveUP(device, D3DPT_TRIANGLELIST,
+                0, vertices_side * vertices_side, indices_count / 3, indices,
+                D3DFMT_INDEX16, quad, sizeof(quad[0]));
+        ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+
+        for (j = 0; j < tests[i].expected_count; ++j)
+        {
+            color = getPixelColor(device, tests[i].expected[j].x, tests[i].expected[j].y);
+            ok(color_match(color, tests[i].expected[j].color, 1),
+                    "Expected color 0x%08x at location (%u, %u), got 0x%08x, case %u.\n",
+                    tests[i].expected[j].color, tests[i].expected[j].x,
+                    tests[i].expected[j].y, color, i);
+        }
+    }
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+done:
+    IDirect3D9_Release(d3d);
+    DestroyWindow(window);
+    HeapFree(GetProcessHeap(), 0, indices);
+    HeapFree(GetProcessHeap(), 0, quad);
 }
 
 static void clear_test(void)
@@ -18000,6 +18292,7 @@ START_TEST(visual)
     depth_clamp_test();
     stretchrect_test();
     lighting_test();
+    test_specular_lighting();
     clear_test();
     color_fill_test();
     fog_test();
