@@ -2546,7 +2546,7 @@ static void dump_set_queue_mask_reply( const struct set_queue_mask_reply *req )
 
 static void dump_get_queue_status_request( const struct get_queue_status_request *req )
 {
-    fprintf( stderr, " clear=%d", req->clear );
+    fprintf( stderr, " clear_bits=%08x", req->clear_bits );
 }
 
 static void dump_get_queue_status_reply( const struct get_queue_status_reply *req )
@@ -2618,6 +2618,8 @@ static void dump_get_message_reply( const struct get_message_reply *req )
     dump_uint64( ", wparam=", &req->wparam );
     dump_uint64( ", lparam=", &req->lparam );
     fprintf( stderr, ", type=%d", req->type );
+    fprintf( stderr, ", x=%d", req->x );
+    fprintf( stderr, ", y=%d", req->y );
     fprintf( stderr, ", time=%08x", req->time );
     fprintf( stderr, ", active_hooks=%08x", req->active_hooks );
     fprintf( stderr, ", total=%u", req->total );

@@ -74,7 +74,7 @@ static void state_fillmode(struct wined3d_context *context, const struct wined3d
     }
 }
 
-void state_lighting(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_lighting(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
@@ -257,7 +257,7 @@ static void state_zfunc(struct wined3d_context *context, const struct wined3d_st
     checkGLcall("glDepthFunc");
 }
 
-void state_ambient(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_ambient(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     float col[4];
@@ -368,6 +368,7 @@ static GLenum gl_blend_factor(enum wined3d_blend factor, const struct wined3d_fo
 static void state_blend(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_format *rt_format = state->fb->render_targets[0]->format;
+    unsigned int rt_fmt_flags = state->fb->render_targets[0]->format_flags;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     GLenum srcBlend, dstBlend;
     enum wined3d_blend d3d_blend;
@@ -381,7 +382,7 @@ static void state_blend(struct wined3d_context *context, const struct wined3d_st
         /* Disable blending in all cases even without pixelshaders.
          * With blending on we could face a big performance penalty.
          * The d3d9 visual test confirms the behavior. */
-        if (context->render_offscreen && !(rt_format->flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+        if (context->render_offscreen && !(rt_fmt_flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
         {
             gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
             checkGLcall("glDisable GL_BLEND");
@@ -623,7 +624,7 @@ void state_clipping(struct wined3d_context *context, const struct wined3d_state 
     checkGLcall("clip plane disable");
 }
 
-void state_specularenable(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_specularenable(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     /* Originally this used glLightModeli(GL_LIGHT_MODEL_COLOR_CONTROL,GL_SEPARATE_SPECULAR_COLOR)
@@ -1392,7 +1393,7 @@ static void state_linepattern(struct wined3d_context *context, const struct wine
     }
 }
 
-void state_normalize(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_normalize(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
@@ -3276,7 +3277,7 @@ void tex_alphaop(struct wined3d_context *context, const struct wined3d_state *st
     }
 }
 
-void transform_texture(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void transform_texture(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     unsigned int tex = (state_id - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
@@ -3548,7 +3549,7 @@ static void tex_coordindex(struct wined3d_context *context, const struct wined3d
     }
 }
 
-void sampler_texmatrix(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void sampler_texmatrix(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const DWORD sampler = state_id - STATE_SAMPLER(0);
     const struct wined3d_texture *texture = state->textures[sampler];
@@ -3632,11 +3633,11 @@ static void wined3d_sampler_desc_from_sampler_states(struct wined3d_sampler_desc
                 && sampler_states[WINED3D_SAMP_MIP_FILTER] != WINED3D_TEXF_ANISOTROPIC)
             || (texture->flags & WINED3D_TEXTURE_COND_NP2))
         desc->max_anisotropy = 1;
-    desc->compare = texture->resource.format->flags & WINED3DFMT_FLAG_SHADOW;
+    desc->compare = texture->resource.format_flags & WINED3DFMT_FLAG_SHADOW;
     desc->comparison_func = WINED3D_CMP_LESSEQUAL;
     desc->srgb_decode = sampler_states[WINED3D_SAMP_SRGB_TEXTURE];
 
-    if (!(texture->resource.format->flags & WINED3DFMT_FLAG_FILTERING))
+    if (!(texture->resource.format_flags & WINED3DFMT_FLAG_FILTERING))
     {
         desc->mag_filter = WINED3D_TEXF_POINT;
         desc->min_filter = WINED3D_TEXF_POINT;
@@ -3972,9 +3973,12 @@ static void transform_view(struct wined3d_context *context, const struct wined3d
     {
         if (!(light = state->lights[k]))
             continue;
-        gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_POSITION, light->lightPosn);
+        if (light->OriginalParms.type == WINED3D_LIGHT_DIRECTIONAL)
+            gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_POSITION, &light->direction.x);
+        else
+            gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_POSITION, &light->position.x);
         checkGLcall("glLightfv posn");
-        gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_SPOT_DIRECTION, light->lightDirn);
+        gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + light->glIndex, GL_SPOT_DIRECTION, &light->direction.x);
         checkGLcall("glLightfv dirn");
     }
 
@@ -4696,7 +4700,7 @@ static void viewport_vertexpart(struct wined3d_context *context, const struct wi
     context->constant_update_mask |= WINED3D_SHADER_CONST_VS_POS_FIXUP;
 }
 
-void light(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void light(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     UINT Index = state_id - STATE_ACTIVELIGHT(0);
@@ -4755,7 +4759,7 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
         {
             case WINED3D_LIGHT_POINT:
                 /* Position */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->position.x);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
                 checkGLcall("glLightf");
@@ -4774,10 +4778,10 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
 
             case WINED3D_LIGHT_SPOT:
                 /* Position */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->position.x);
                 checkGLcall("glLightfv");
                 /* Direction */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_SPOT_DIRECTION, lightInfo->lightDirn);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_SPOT_DIRECTION, &lightInfo->direction.x);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_EXPONENT, lightInfo->exponent);
                 checkGLcall("glLightf");
@@ -4799,7 +4803,7 @@ void light(struct wined3d_context *context, const struct wined3d_state *state, D
             case WINED3D_LIGHT_DIRECTIONAL:
                 /* Direction */
                 /* Note GL uses w position of 0 for direction! */
-                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, lightInfo->lightPosn);
+                gl_info->gl_ops.gl.p_glLightfv(GL_LIGHT0 + Index, GL_POSITION, &lightInfo->direction.x);
                 checkGLcall("glLightfv");
                 gl_info->gl_ops.gl.p_glLightf(GL_LIGHT0 + Index, GL_SPOT_CUTOFF, lightInfo->cutoff);
                 checkGLcall("glLightf");
@@ -4899,13 +4903,12 @@ static void psorigin(struct wined3d_context *context, const struct wined3d_state
 
 void state_srgbwrite(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    const struct wined3d_format *rt_format = state->fb->render_targets[0]->format;
+    unsigned int rt_fmt_flags = state->fb->render_targets[0]->format_flags;
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
     TRACE("context %p, state %p, state_id %#x.\n", context, state, state_id);
 
-    if (state->render_states[WINED3D_RS_SRGBWRITEENABLE]
-            && rt_format->flags & WINED3DFMT_FLAG_SRGB_WRITE)
+    if (state->render_states[WINED3D_RS_SRGBWRITEENABLE] && rt_fmt_flags & WINED3DFMT_FLAG_SRGB_WRITE)
         gl_info->gl_ops.gl.p_glEnable(GL_FRAMEBUFFER_SRGB);
     else
         gl_info->gl_ops.gl.p_glDisable(GL_FRAMEBUFFER_SRGB);

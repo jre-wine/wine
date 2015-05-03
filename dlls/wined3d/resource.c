@@ -72,7 +72,7 @@ static void resource_check_usage(DWORD usage)
 }
 
 HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *device,
-        enum wined3d_resource_type type, const struct wined3d_format *format,
+        enum wined3d_resource_type type, enum wined3d_gl_resource_type gl_type, const struct wined3d_format *format,
         enum wined3d_multisample_type multisample_type, UINT multisample_quality,
         DWORD usage, enum wined3d_pool pool, UINT width, UINT height, UINT depth, UINT size,
         void *parent, const struct wined3d_parent_ops *parent_ops,
@@ -81,29 +81,13 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     const struct wined3d *d3d = device->wined3d;
 
     resource_check_usage(usage);
-    if (pool != WINED3D_POOL_SCRATCH && type != WINED3D_RTYPE_BUFFER)
-    {
-        if ((usage & WINED3DUSAGE_RENDERTARGET) && !(format->flags & WINED3DFMT_FLAG_RENDERTARGET))
-        {
-            WARN("Format %s cannot be used for render targets.\n", debug_d3dformat(format->id));
-            return WINED3DERR_INVALIDCALL;
-        }
-        if ((usage & WINED3DUSAGE_DEPTHSTENCIL) && !(format->flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
-        {
-            WARN("Format %s cannot be used for depth/stencil buffers.\n", debug_d3dformat(format->id));
-            return WINED3DERR_INVALIDCALL;
-        }
-        if ((usage & WINED3DUSAGE_TEXTURE) && !(format->flags & WINED3DFMT_FLAG_TEXTURE))
-        {
-            WARN("Format %s cannot be used for texturing.\n", debug_d3dformat(format->id));
-            return WINED3DERR_INVALIDCALL;
-        }
-    }
 
     resource->ref = 1;
     resource->device = device;
     resource->type = type;
+    resource->gl_type = gl_type;
     resource->format = format;
+    resource->format_flags = format->flags[gl_type];
     resource->multisample_type = multisample_type;
     resource->multisample_quality = multisample_quality;
     resource->usage = usage;
@@ -120,6 +104,26 @@ HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *
     resource->parent_ops = parent_ops;
     resource->resource_ops = resource_ops;
     resource->map_binding = WINED3D_LOCATION_SYSMEM;
+
+    if (pool != WINED3D_POOL_SCRATCH && type != WINED3D_RTYPE_BUFFER)
+    {
+        if ((usage & WINED3DUSAGE_RENDERTARGET) && !(resource->format_flags & WINED3DFMT_FLAG_RENDERTARGET))
+        {
+            WARN("Format %s cannot be used for render targets.\n", debug_d3dformat(format->id));
+            return WINED3DERR_INVALIDCALL;
+        }
+        if ((usage & WINED3DUSAGE_DEPTHSTENCIL) &&
+                !(resource->format_flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
+        {
+            WARN("Format %s cannot be used for depth/stencil buffers.\n", debug_d3dformat(format->id));
+            return WINED3DERR_INVALIDCALL;
+        }
+        if ((usage & WINED3DUSAGE_TEXTURE) && !(resource->format_flags & WINED3DFMT_FLAG_TEXTURE))
+        {
+            WARN("Format %s cannot be used for texturing.\n", debug_d3dformat(format->id));
+            return WINED3DERR_INVALIDCALL;
+        }
+    }
 
     if (size)
     {

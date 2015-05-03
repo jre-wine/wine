@@ -499,7 +499,8 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_brush_Release(ID2D1BitmapBrush *iface)
 
     if (!refcount)
     {
-        ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
+        if (brush->u.bitmap.sampler_state)
+            ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
         HeapFree(GetProcessHeap(), 0, brush);
     }
 
@@ -554,18 +555,45 @@ static void STDMETHODCALLTYPE d2d_bitmap_brush_GetTransform(ID2D1BitmapBrush *if
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetExtendModeX(ID2D1BitmapBrush *iface, D2D1_EXTEND_MODE mode)
 {
-    FIXME("iface %p, mode %#x stub!\n", iface, mode);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
+
+    TRACE("iface %p, mode %#x.\n", iface, mode);
+
+    brush->u.bitmap.extend_mode_x = mode;
+    if (brush->u.bitmap.sampler_state)
+    {
+        ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
+        brush->u.bitmap.sampler_state = NULL;
+    }
 }
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetExtendModeY(ID2D1BitmapBrush *iface, D2D1_EXTEND_MODE mode)
 {
-    FIXME("iface %p, mode %#x stub!\n", iface, mode);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
+
+    TRACE("iface %p, mode %#x.\n", iface, mode);
+
+    brush->u.bitmap.extend_mode_y = mode;
+    if (brush->u.bitmap.sampler_state)
+    {
+        ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
+        brush->u.bitmap.sampler_state = NULL;
+    }
 }
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetInterpolationMode(ID2D1BitmapBrush *iface,
         D2D1_BITMAP_INTERPOLATION_MODE mode)
 {
-    FIXME("iface %p, mode %#x stub!\n", iface, mode);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
+
+    TRACE("iface %p, mode %#x.\n", iface, mode);
+
+    brush->u.bitmap.interpolation_mode = mode;
+    if (brush->u.bitmap.sampler_state)
+    {
+        ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
+        brush->u.bitmap.sampler_state = NULL;
+    }
 }
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetBitmap(ID2D1BitmapBrush *iface, ID2D1Bitmap *bitmap)
@@ -575,28 +603,39 @@ static void STDMETHODCALLTYPE d2d_bitmap_brush_SetBitmap(ID2D1BitmapBrush *iface
 
 static D2D1_EXTEND_MODE STDMETHODCALLTYPE d2d_bitmap_brush_GetExtendModeX(ID2D1BitmapBrush *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
 
-    return D2D1_EXTEND_MODE_CLAMP;
+    TRACE("iface %p.\n", iface);
+
+    return brush->u.bitmap.extend_mode_x;
 }
 
 static D2D1_EXTEND_MODE STDMETHODCALLTYPE d2d_bitmap_brush_GetExtendModeY(ID2D1BitmapBrush *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
 
-    return D2D1_EXTEND_MODE_CLAMP;
+    TRACE("iface %p.\n", iface);
+
+    return brush->u.bitmap.extend_mode_y;
 }
 
 static D2D1_BITMAP_INTERPOLATION_MODE STDMETHODCALLTYPE d2d_bitmap_brush_GetInterpolationMode(ID2D1BitmapBrush *iface)
 {
-    FIXME("iface %p stub!\n", iface);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
 
-    return D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+    TRACE("iface %p.\n", iface);
+
+    return brush->u.bitmap.interpolation_mode;
 }
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_GetBitmap(ID2D1BitmapBrush *iface, ID2D1Bitmap **bitmap)
 {
-    FIXME("iface %p, bitmap %p stub!\n", iface, bitmap);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
+
+    TRACE("iface %p, bitmap %p.\n", iface, bitmap);
+
+    if ((*bitmap = &brush->u.bitmap.bitmap->ID2D1Bitmap_iface))
+        ID2D1Bitmap_AddRef(*bitmap);
 }
 
 static const struct ID2D1BitmapBrushVtbl d2d_bitmap_brush_vtbl =
@@ -622,34 +661,23 @@ static const struct ID2D1BitmapBrushVtbl d2d_bitmap_brush_vtbl =
 HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target, ID2D1Bitmap *bitmap,
         const D2D1_BITMAP_BRUSH_PROPERTIES *bitmap_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc)
 {
-    D3D10_SAMPLER_DESC sampler_desc;
-    HRESULT hr;
 
     FIXME("Ignoring brush properties.\n");
 
     d2d_brush_init(brush, &render_target->ID2D1RenderTarget_iface, D2D_BRUSH_TYPE_BITMAP,
             brush_desc, (ID2D1BrushVtbl *)&d2d_bitmap_brush_vtbl);
     brush->u.bitmap.bitmap = unsafe_impl_from_ID2D1Bitmap(bitmap);
-
-    sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_POINT;
-    sampler_desc.AddressU = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.AddressV = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.AddressW = D3D10_TEXTURE_ADDRESS_CLAMP;
-    sampler_desc.MipLODBias = 0.0f;
-    sampler_desc.MaxAnisotropy = 0;
-    sampler_desc.ComparisonFunc = D3D10_COMPARISON_NEVER;
-    sampler_desc.BorderColor[0] = 0.0f;
-    sampler_desc.BorderColor[1] = 0.0f;
-    sampler_desc.BorderColor[2] = 0.0f;
-    sampler_desc.BorderColor[3] = 0.0f;
-    sampler_desc.MinLOD = 0.0f;
-    sampler_desc.MaxLOD = 0.0f;
-
-    if (FAILED(hr = ID3D10Device_CreateSamplerState(render_target->device,
-            &sampler_desc, &brush->u.bitmap.sampler_state)))
+    if (bitmap_brush_desc)
     {
-        ERR("Failed to create sampler state, hr %#x.\n", hr);
-        return hr;
+        brush->u.bitmap.extend_mode_x = bitmap_brush_desc->extendModeX;
+        brush->u.bitmap.extend_mode_y = bitmap_brush_desc->extendModeY;
+        brush->u.bitmap.interpolation_mode = bitmap_brush_desc->interpolationMode;
+    }
+    else
+    {
+        brush->u.bitmap.extend_mode_x = D2D1_EXTEND_MODE_CLAMP;
+        brush->u.bitmap.extend_mode_y = D2D1_EXTEND_MODE_CLAMP;
+        brush->u.bitmap.interpolation_mode = D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
     }
 
     return S_OK;
@@ -665,11 +693,54 @@ struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface)
     return CONTAINING_RECORD(iface, struct d2d_brush, ID2D1Brush_iface);
 }
 
+static D3D10_TEXTURE_ADDRESS_MODE texture_addres_mode_from_extend_mode(D2D1_EXTEND_MODE mode)
+{
+    switch (mode)
+    {
+        case D2D1_EXTEND_MODE_CLAMP:
+            return D3D10_TEXTURE_ADDRESS_CLAMP;
+        case D2D1_EXTEND_MODE_WRAP:
+            return D3D10_TEXTURE_ADDRESS_WRAP;
+        case D2D1_EXTEND_MODE_MIRROR:
+            return D3D10_TEXTURE_ADDRESS_MIRROR;
+        default:
+            FIXME("Unhandled extend mode %#x.\n", mode);
+            return D3D10_TEXTURE_ADDRESS_CLAMP;
+    }
+}
+
 void d2d_brush_bind_resources(struct d2d_brush *brush, ID3D10Device *device)
 {
+    HRESULT hr;
+
     if (brush->type == D2D_BRUSH_TYPE_BITMAP)
     {
         ID3D10Device_PSSetShaderResources(device, 0, 1, &brush->u.bitmap.bitmap->view);
+        if (!brush->u.bitmap.sampler_state)
+        {
+            D3D10_SAMPLER_DESC sampler_desc;
+
+            if (brush->u.bitmap.interpolation_mode == D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR)
+                sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_POINT;
+            else
+                sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_LINEAR;
+            sampler_desc.AddressU = texture_addres_mode_from_extend_mode(brush->u.bitmap.extend_mode_x);
+            sampler_desc.AddressV = texture_addres_mode_from_extend_mode(brush->u.bitmap.extend_mode_y);
+            sampler_desc.AddressW = D3D10_TEXTURE_ADDRESS_CLAMP;
+            sampler_desc.MipLODBias = 0.0f;
+            sampler_desc.MaxAnisotropy = 0;
+            sampler_desc.ComparisonFunc = D3D10_COMPARISON_NEVER;
+            sampler_desc.BorderColor[0] = 0.0f;
+            sampler_desc.BorderColor[1] = 0.0f;
+            sampler_desc.BorderColor[2] = 0.0f;
+            sampler_desc.BorderColor[3] = 0.0f;
+            sampler_desc.MinLOD = 0.0f;
+            sampler_desc.MaxLOD = 0.0f;
+
+            if (FAILED(hr = ID3D10Device_CreateSamplerState(device,
+                    &sampler_desc, &brush->u.bitmap.sampler_state)))
+                ERR("Failed to create sampler state, hr %#x.\n", hr);
+        }
         ID3D10Device_PSSetSamplers(device, 0, 1, &brush->u.bitmap.sampler_state);
     }
 }

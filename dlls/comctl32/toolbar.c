@@ -1689,8 +1689,7 @@ TOOLBAR_LayoutToolbar(TOOLBAR_INFO *infoPtr)
 	{
             if (btnPtr->cx)
               cx = btnPtr->cx;
-            else if ((infoPtr->dwExStyle & TBSTYLE_EX_MIXEDBUTTONS) || 
-                (btnPtr->fsStyle & BTNS_AUTOSIZE))
+            else if (btnPtr->fsStyle & BTNS_AUTOSIZE)
             {
               SIZE sz;
 	      HDC hdc;
@@ -4365,6 +4364,7 @@ static LRESULT
 TOOLBAR_SetButtonSize (TOOLBAR_INFO *infoPtr, LPARAM lParam)
 {
     INT cx = (short)LOWORD(lParam), cy = (short)HIWORD(lParam);
+    int top = default_top_margin(infoPtr);
 
     if ((cx < 0) || (cy < 0))
     {
@@ -4387,15 +4387,20 @@ TOOLBAR_SetButtonSize (TOOLBAR_INFO *infoPtr, LPARAM lParam)
      */
     if (cx == 0) cx = 24;
     if (cy == 0) cy = 22;
-    
+
     cx = max(cx, infoPtr->szPadding.cx + infoPtr->nBitmapWidth);
     cy = max(cy, infoPtr->szPadding.cy + infoPtr->nBitmapHeight);
 
-    infoPtr->nButtonWidth = cx;
-    infoPtr->nButtonHeight = cy;
-    
-    infoPtr->iTopMargin = default_top_margin(infoPtr);
-    TOOLBAR_LayoutToolbar(infoPtr);
+    if (cx != infoPtr->nButtonWidth || cy != infoPtr->nButtonHeight ||
+        top != infoPtr->iTopMargin)
+    {
+        infoPtr->nButtonWidth = cx;
+        infoPtr->nButtonHeight = cy;
+        infoPtr->iTopMargin = top;
+
+        TOOLBAR_LayoutToolbar( infoPtr );
+        InvalidateRect( infoPtr->hwndSelf, NULL, TRUE );
+    }
     return TRUE;
 }
 
@@ -4913,11 +4918,45 @@ TOOLBAR_SetState (TOOLBAR_INFO *infoPtr, INT Id, LPARAM lParam)
     return TRUE;
 }
 
+static inline void unwrap(TOOLBAR_INFO *info)
+{
+    int i;
+
+    for (i = 0; i < info->nNumButtons; i++)
+	info->buttons[i].fsState &= ~TBSTATE_WRAP;
+}
 
 static LRESULT
 TOOLBAR_SetStyle (TOOLBAR_INFO *infoPtr, DWORD style)
 {
+    DWORD dwOldStyle = infoPtr->dwStyle;
+
+    TRACE("new style 0x%08x\n", style);
+
+    if (style & TBSTYLE_LIST)
+        infoPtr->dwDTFlags = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
+    else
+        infoPtr->dwDTFlags = DT_CENTER | DT_END_ELLIPSIS;
+
     infoPtr->dwStyle = style;
+    TOOLBAR_CheckStyle(infoPtr);
+
+    if ((dwOldStyle ^ style) & TBSTYLE_WRAPABLE)
+    {
+        if (dwOldStyle & TBSTYLE_WRAPABLE)
+            unwrap(infoPtr);
+        TOOLBAR_CalcToolbar(infoPtr);
+    }
+    else if ((dwOldStyle ^ style) & CCS_VERT)
+        TOOLBAR_LayoutToolbar(infoPtr);
+
+    /* only resize if one of the CCS_* styles was changed */
+    if ((dwOldStyle ^ style) & COMMON_STYLES)
+    {
+        TOOLBAR_AutoSize(infoPtr);
+        InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
+    }
+
     return 0;
 }
 
@@ -6332,30 +6371,7 @@ static LRESULT
 TOOLBAR_StyleChanged (TOOLBAR_INFO *infoPtr, INT nType, const STYLESTRUCT *lpStyle)
 {
     if (nType == GWL_STYLE)
-    {
-        DWORD dwOldStyle = infoPtr->dwStyle;
-
-        if (lpStyle->styleNew & TBSTYLE_LIST)
-            infoPtr->dwDTFlags = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
-        else
-            infoPtr->dwDTFlags = DT_CENTER | DT_END_ELLIPSIS;
-
-        TRACE("new style 0x%08x\n", lpStyle->styleNew);
-
-        infoPtr->dwStyle = lpStyle->styleNew;
-        TOOLBAR_CheckStyle (infoPtr);
-
-        if ((dwOldStyle ^ lpStyle->styleNew) & (TBSTYLE_WRAPABLE | CCS_VERT))
-            TOOLBAR_LayoutToolbar(infoPtr);
-
-        /* only resize if one of the CCS_* styles was changed */
-        if ((dwOldStyle ^ lpStyle->styleNew) & COMMON_STYLES)
-        {
-            TOOLBAR_AutoSize (infoPtr);
-    
-            InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
-        }
-    }
+        return TOOLBAR_SetStyle(infoPtr, lpStyle->styleNew);
 
     return 0;
 }
