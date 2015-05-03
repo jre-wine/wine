@@ -6,10 +6,9 @@ DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
 
 VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
 
-DATADIR=/usr/share/wine$(VERSION)
-INCLUDEDIR=/usr/include/wine$(VERSION)
-
 MANDIR=usr/share/man
+DATDIR=usr/share/wine$(VERSION)
+INCDIR=usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
 # enable verbose build log
@@ -38,8 +37,8 @@ CONFLAGS=--without-hal \
          --libdir=/$(LIBDIR) \
          --bindir=/$(LIBDIR) \
          --mandir=/$(MANDIR) \
-         --datarootdir=$(DATADIR) \
-         --includedir=$(INCLUDEDIR) \
+         --includedir=/$(INCDIR) \
+         --datarootdir=/$(DATDIR) \
          $(shell dpkg-buildflags --export=configure) \
 
 # enable wine64 on amd64
@@ -72,6 +71,7 @@ debian/fonts-wine$(VERSION)%: debian/fonts-wineVERSION%
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
+	cd dlls/opengl32 && ./make_opengl
 	ln -s /usr/share/misc/config.sub tools
 	ln -s /usr/share/misc/config.guess tools
 	dh_auto_configure -- $(CONFLAGS)
@@ -101,4 +101,6 @@ override_dh_strip:
 
 override_dh_clean:
 	dh_clean -- $(INSTALLS)
+	rm -f include/wine/wgl*
+	rm -f dlls/opengl32/opengl_norm.c dlls/opengl32/opengl_ext.c dlls/opengl32/opengl32.spec
 	make -f debian/rules debian/control

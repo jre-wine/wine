@@ -1,3 +1,12 @@
+wine-development (1.7.41-3) unstable; urgency=medium
+
+  * Update wine-gecko recommends to 2.36.
+  * Rebuild automatically generated opengl files.
+  * Make wine an architecture independent package.
+  * Add some information about wine-gecko to README.debian.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 26 Apr 2015 20:15:38 +0000
+
 wine-development (1.7.41-2) unstable; urgency=medium
 
   * Mark wine as multi-arch allowed (closes: #782896).

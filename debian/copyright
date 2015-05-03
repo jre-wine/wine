@@ -9,7 +9,6 @@ Files: *
 Copyright:
  Copyright (c) 1993-2015 Wine project authors (see AUTHORS file)
 License: LGPL-2.1+
- See /usr/share/common-licenses/LGPL-2.1.
 
 Files: debian/*
 Copyright:
@@ -21,3 +20,6 @@ Files: debian/scripts/import*
 Copyright:
  Copyright (c) Ove Kåven <ovek@debian.org>
 License: LGPL-2.1+
+
+License: LGPL-2.1+
+ See /usr/share/common-licenses/LGPL-2.1.

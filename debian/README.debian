@@ -66,3 +66,18 @@ If something goes horribly wrong, you can always completely wipe your Wine
 setup with "rm -rf ~/.wine". This will destroy everything you've installed,
 including configuration and data files, so if you have anything important,
 please back it up first. You can then start fresh.
+
+Wine Gecko
+==========
+The downloader for Wine Gecko is intentionally disabled in the Debian packages.
+Instead libwine-gecko-* packages are available in the official Debian archives,
+which provide Wine Gecko support.
+
+Information about which Wine Gecko should be associated with any particular
+wine version is available at:
+http://wiki.winehq.org/Gecko
+
+If the right libwine-gecko-*.deb package is not currently available, you can
+manually extract an associated upstream WineGecko tarball to
+/usr/share/wine-development/gecko. Or preferably, please provide help building
+the new Debian libwine-gecko-* package that is needed.

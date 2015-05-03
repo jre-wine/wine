@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
 Uploaders:
  Michael Gilbert <mgilbert@debian.org>,
- Stephen Kitt <skitt@debian.org>
+ Stephen Kitt <skitt@debian.org>,
 Build-Depends:
  debhelper (>= 9),
  dh-autoreconf,
@@ -23,6 +23,7 @@ Build-Depends:
  libgl1-mesa-dev,
  libglu1-mesa-dev,
  libxcomposite-dev,
+ libxml-simple-perl,
  lzma,
  flex,
  bison,
@@ -30,6 +31,7 @@ Build-Depends:
  oss4-dev,
  sharutils,
  dctrl-tools,
+ khronos-api,
  libpng-dev,
  libssl-dev,
  libxml2-dev,
@@ -62,8 +64,7 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wineVERSION
-Architecture: amd64 any-i386 any-powerpc armhf
-Multi-Arch: allowed
+Architecture: all
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -85,7 +86,7 @@ Depends:
 Recommends:
  wineVERSION,
  libgl1-mesa-dri,
- libwine-gecko-2.24 [!armhf],
+ libwine-gecko-2.36 [!armhf],
  libasound2-plugins,
 Suggests:
  wine32VERSION-preloader,
@@ -104,7 +105,7 @@ Depends:
 Recommends:
  wineVERSION,
  wine32VERSION (>= ${source:Version}),
- libwine-gecko-2.24 [!armhf],
+ libwine-gecko-2.36 [!armhf],
  libasound2-plugins,
 Suggests:
  wine64VERSION-preloader,
