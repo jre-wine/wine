@@ -128,43 +128,15 @@ static HANDLE get_device_manager(void)
     return ret;
 }
 
-/* process an ioctl request for a given device */
-static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
-                               ULONG in_size, ULONG out_size, HANDLE ioctl )
+static NTSTATUS dispatch_irp( DEVICE_OBJECT *device, IRP *irp )
 {
-    IRP *irp;
-    void *out_buff = NULL;
-    FILE_OBJECT file;
     LARGE_INTEGER count;
+    FILE_OBJECT file;
 
-    TRACE( "ioctl %x device %p in_size %u out_size %u\n", code, device, in_size, out_size );
-
-    /* so we can spot things that we should initialize */
-    memset( &file, 0x88, sizeof(file) );
-
-    if ((code & 3) == METHOD_BUFFERED) out_size = max( in_size, out_size );
-
-    if (out_size)
-    {
-        if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
-        if ((code & 3) == METHOD_BUFFERED)
-        {
-            memcpy( out_buff, in_buff, in_size );
-            in_buff = out_buff;
-        }
-    }
-
-    /* note: we abuse UserIosb to store the server handle to the ioctl */
-    irp = IoBuildDeviceIoControlRequest( code, device, in_buff, in_size, out_buff, out_size,
-                                         FALSE, NULL, (IO_STATUS_BLOCK *)ioctl );
-    if (!irp)
-    {
-        HeapFree( GetProcessHeap(), 0, out_buff );
-        return STATUS_NO_MEMORY;
-    }
     irp->RequestorMode = UserMode;
     irp->Tail.Overlay.OriginalFileObject = &file;
 
+    memset( &file, 0x88, sizeof(file) );
     file.FsContext = NULL;
     file.FsContext2 = NULL;
 
@@ -179,6 +151,141 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     return STATUS_SUCCESS;
 }
 
+/* process a read request for a given device */
+static NTSTATUS dispatch_read( DEVICE_OBJECT *device, const irp_params_t *params,
+                               void *in_buff, ULONG in_size, ULONG out_size, HANDLE irp_handle )
+{
+    IRP *irp;
+    void *out_buff;
+    LARGE_INTEGER offset;
+    IO_STACK_LOCATION *irpsp;
+
+    TRACE( "device %p size %u\n", device, out_size );
+
+    if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
+
+    offset.QuadPart = params->read.pos;
+
+    /* note: we abuse UserIosb to store the server irp handle */
+    if (!(irp = IoBuildSynchronousFsdRequest( IRP_MJ_READ, device, out_buff, out_size,
+                                              &offset, NULL, irp_handle )))
+    {
+        HeapFree( GetProcessHeap(), 0, out_buff );
+        return STATUS_NO_MEMORY;
+    }
+
+    irpsp = IoGetNextIrpStackLocation( irp );
+    irpsp->Parameters.Read.Key = params->read.key;
+
+    return dispatch_irp( device, irp );
+}
+
+/* process a write request for a given device */
+static NTSTATUS dispatch_write( DEVICE_OBJECT *device, const irp_params_t *params,
+                                void *in_buff, ULONG in_size, ULONG out_size, HANDLE irp_handle )
+{
+    IRP *irp;
+    LARGE_INTEGER offset;
+    IO_STACK_LOCATION *irpsp;
+
+    TRACE( "device %p size %u\n", device, in_size );
+
+    offset.QuadPart = params->write.pos;
+
+    /* note: we abuse UserIosb to store the server irp handle */
+    if (!(irp = IoBuildSynchronousFsdRequest( IRP_MJ_WRITE, device, in_buff, in_size,
+                                              &offset, NULL, irp_handle )))
+        return STATUS_NO_MEMORY;
+
+    irpsp = IoGetNextIrpStackLocation( irp );
+    irpsp->Parameters.Write.Key = params->write.key;
+
+    return dispatch_irp( device, irp );
+}
+
+/* process a flush request for a given device */
+static NTSTATUS dispatch_flush( DEVICE_OBJECT *device, const irp_params_t *params,
+                                void *in_buff, ULONG in_size, ULONG out_size, HANDLE irp_handle )
+{
+    IRP *irp;
+
+    TRACE( "device %p\n", device );
+
+    /* note: we abuse UserIosb to store the server irp handle */
+    if (!(irp = IoBuildSynchronousFsdRequest( IRP_MJ_FLUSH_BUFFERS, device, in_buff, in_size,
+                                              NULL, NULL, irp_handle )))
+        return STATUS_NO_MEMORY;
+
+    return dispatch_irp( device, irp );
+}
+
+/* process an ioctl request for a given device */
+static NTSTATUS dispatch_ioctl( DEVICE_OBJECT *device, const irp_params_t *params,
+                                void *in_buff, ULONG in_size, ULONG out_size, HANDLE irp_handle )
+{
+    IRP *irp;
+    void *out_buff = NULL;
+
+    TRACE( "ioctl %x device %p in_size %u out_size %u\n", params->ioctl.code, device, in_size, out_size );
+
+    if ((params->ioctl.code & 3) == METHOD_BUFFERED) out_size = max( in_size, out_size );
+
+    if (out_size)
+    {
+        if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
+        if ((params->ioctl.code & 3) == METHOD_BUFFERED)
+        {
+            memcpy( out_buff, in_buff, in_size );
+            in_buff = out_buff;
+        }
+    }
+
+    /* note: we abuse UserIosb to store the server handle to the ioctl */
+    irp = IoBuildDeviceIoControlRequest( params->ioctl.code, device, in_buff, in_size, out_buff, out_size,
+                                         FALSE, NULL, irp_handle );
+    if (!irp)
+    {
+        HeapFree( GetProcessHeap(), 0, out_buff );
+        return STATUS_NO_MEMORY;
+    }
+    return dispatch_irp( device, irp );
+}
+
+typedef NTSTATUS (*dispatch_func)( DEVICE_OBJECT *device, const irp_params_t *params,
+                                   void *in_buff, ULONG in_size, ULONG out_size, HANDLE irp_handle );
+
+static const dispatch_func dispatch_funcs[IRP_MJ_MAXIMUM_FUNCTION + 1] =
+{
+    NULL,              /* IRP_MJ_CREATE */
+    NULL,              /* IRP_MJ_CREATE_NAMED_PIPE */
+    NULL,              /* IRP_MJ_CLOSE */
+    dispatch_read,     /* IRP_MJ_READ */
+    dispatch_write,    /* IRP_MJ_WRITE */
+    NULL,              /* IRP_MJ_QUERY_INFORMATION */
+    NULL,              /* IRP_MJ_SET_INFORMATION */
+    NULL,              /* IRP_MJ_QUERY_EA */
+    NULL,              /* IRP_MJ_SET_EA */
+    dispatch_flush,    /* IRP_MJ_FLUSH_BUFFERS */
+    NULL,              /* IRP_MJ_QUERY_VOLUME_INFORMATION */
+    NULL,              /* IRP_MJ_SET_VOLUME_INFORMATION */
+    NULL,              /* IRP_MJ_DIRECTORY_CONTROL */
+    NULL,              /* IRP_MJ_FILE_SYSTEM_CONTROL */
+    dispatch_ioctl,    /* IRP_MJ_DEVICE_CONTROL */
+    NULL,              /* IRP_MJ_INTERNAL_DEVICE_CONTROL */
+    NULL,              /* IRP_MJ_SHUTDOWN */
+    NULL,              /* IRP_MJ_LOCK_CONTROL */
+    NULL,              /* IRP_MJ_CLEANUP */
+    NULL,              /* IRP_MJ_CREATE_MAILSLOT */
+    NULL,              /* IRP_MJ_QUERY_SECURITY */
+    NULL,              /* IRP_MJ_SET_SECURITY */
+    NULL,              /* IRP_MJ_POWER */
+    NULL,              /* IRP_MJ_SYSTEM_CONTROL */
+    NULL,              /* IRP_MJ_DEVICE_CHANGE */
+    NULL,              /* IRP_MJ_QUERY_QUOTA */
+    NULL,              /* IRP_MJ_SET_QUOTA */
+    NULL,              /* IRP_MJ_PNP */
+};
+
 
 /***********************************************************************
  *           wine_ntoskrnl_main_loop   (Not a Windows API)
@@ -186,9 +293,9 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
 NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 {
     HANDLE manager = get_device_manager();
-    HANDLE ioctl = 0;
+    HANDLE irp = 0;
     NTSTATUS status = STATUS_SUCCESS;
-    ULONG code = 0;
+    irp_params_t irp_params;
     void *in_buff;
     DEVICE_OBJECT *device = NULL;
     ULONG in_size = 4096, out_size = 0;
@@ -210,14 +317,14 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
         SERVER_START_REQ( get_next_device_request )
         {
             req->manager = wine_server_obj_handle( manager );
-            req->prev = wine_server_obj_handle( ioctl );
+            req->prev = wine_server_obj_handle( irp );
             req->status = status;
             wine_server_set_reply( req, in_buff, in_size );
             if (!(status = wine_server_call( req )))
             {
-                code       = reply->code;
-                ioctl      = wine_server_ptr_handle( reply->next );
+                irp        = wine_server_ptr_handle( reply->next );
                 device     = wine_server_get_ptr( reply->user_ptr );
+                irp_params = reply->params;
                 client_tid = reply->client_tid;
                 client_pid = reply->client_pid;
                 in_size    = reply->in_size;
@@ -225,7 +332,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
             }
             else
             {
-                ioctl = 0; /* no previous ioctl */
+                irp = 0; /* no previous irp */
                 out_size = 0;
                 in_size = reply->in_size;
             }
@@ -235,8 +342,17 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
         switch(status)
         {
         case STATUS_SUCCESS:
-            status = process_ioctl( device, code, in_buff, in_size, out_size, ioctl );
-            if (status == STATUS_SUCCESS) ioctl = 0;  /* status reported by IoCompleteRequest */
+            if (irp_params.major > IRP_MJ_MAXIMUM_FUNCTION ||
+                !dispatch_funcs[irp_params.major] ||
+                !device->DriverObject->MajorFunction[irp_params.major])
+            {
+                WARN( "unsupported request %u\n", irp_params.major );
+                status = STATUS_NOT_SUPPORTED;
+                break;
+            }
+            status = dispatch_funcs[irp_params.major]( device, &irp_params,
+                                                       in_buff, in_size, out_size, irp );
+            if (status == STATUS_SUCCESS) irp = 0;  /* status reported by IoCompleteRequest */
             break;
         case STATUS_BUFFER_OVERFLOW:
             HeapFree( GetProcessHeap(), 0, in_buff );
@@ -540,16 +656,30 @@ PIRP WINAPI IoBuildSynchronousFsdRequest(ULONG majorfunc, PDEVICE_OBJECT device,
     PIRP irp;
     PIO_STACK_LOCATION irpsp;
 
-    FIXME("(%d %p %p %d %p %p %p) stub\n", majorfunc, device, buffer, length, startoffset, event, iosb);
+    TRACE("(%d %p %p %d %p %p %p)\n", majorfunc, device, buffer, length, startoffset, event, iosb);
 
-    irp = IoAllocateIrp( device->StackSize, FALSE );
-    if (irp == NULL)
-        return NULL;
+    if (!(irp = IoAllocateIrp( device->StackSize, FALSE ))) return NULL;
 
     irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->MajorFunction = majorfunc;
-    /*irpsp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;*/
+    irpsp->DeviceObject = device;
+    irpsp->CompletionRoutine = NULL;
 
+    irp->AssociatedIrp.SystemBuffer = buffer;
+    if (device->Flags & DO_DIRECT_IO) IoAllocateMdl( buffer, length, FALSE, FALSE, irp );
+
+    switch (majorfunc)
+    {
+    case IRP_MJ_READ:
+        irpsp->Parameters.Read.Length = length;
+        irpsp->Parameters.Read.ByteOffset = *startoffset;
+        break;
+    case IRP_MJ_WRITE:
+        irpsp->Parameters.Write.Length = length;
+        irpsp->Parameters.Write.ByteOffset = *startoffset;
+        break;
+    }
+    irp->RequestorMode = KernelMode;
     irp->UserIosb = iosb;
     irp->UserEvent = event;
     irp->UserBuffer = buffer;
@@ -975,7 +1105,7 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
     IO_STACK_LOCATION *irpsp;
     PIO_COMPLETION_ROUTINE routine;
     NTSTATUS status, stat;
-    HANDLE ioctl;
+    HANDLE handle;
     int call_flag = 0;
 
     TRACE( "%p %u\n", irp, priority_boost );
@@ -1007,19 +1137,22 @@ VOID WINAPI IoCompleteRequest( IRP *irp, UCHAR priority_boost )
         }
     }
 
-    ioctl = (HANDLE)irp->UserIosb;
-    if (ioctl)
+    handle = (HANDLE)irp->UserIosb;
+    if (handle)
     {
         HANDLE manager = get_device_manager();
         void *out_buff = irp->UserBuffer;
 
-        SERVER_START_REQ( set_ioctl_result )
+        SERVER_START_REQ( set_irp_result )
         {
             req->manager = wine_server_obj_handle( manager );
-            req->handle  = wine_server_obj_handle( ioctl );
+            req->handle  = wine_server_obj_handle( handle );
             req->status  = irp->IoStatus.u.Status;
-            if (irp->IoStatus.u.Status >= 0 && out_buff)
-                wine_server_add_data( req, out_buff, irp->IoStatus.Information );
+            if (irp->IoStatus.u.Status >= 0)
+            {
+                req->size = irp->IoStatus.Information;
+                if (out_buff) wine_server_add_data( req, out_buff, irp->IoStatus.Information );
+            }
             wine_server_call( req );
         }
         SERVER_END_REQ;

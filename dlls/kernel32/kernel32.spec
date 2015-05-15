@@ -218,8 +218,8 @@
 # @ stub CheckElevation
 # @ stub CheckElevationEnabled
 # @ stub CheckForReadOnlyResource
-# @ stub CheckNameLegalDOS8Dot3A
-# @ stub CheckNameLegalDOS8Dot3W
+@ stdcall CheckNameLegalDOS8Dot3A(str ptr long ptr ptr)
+@ stdcall CheckNameLegalDOS8Dot3W(wstr ptr long ptr ptr)
 @ stdcall CheckRemoteDebuggerPresent(long ptr)
 @ stdcall ClearCommBreak(long)
 @ stdcall ClearCommError(long ptr ptr)
@@ -676,7 +676,7 @@
 # @ stub GetFileBandwidthReservation
 @ stdcall GetFileInformationByHandle(long ptr)
 @ stdcall GetFileInformationByHandleEx(long long ptr long)
-# @ stub GetFileMUIInfo
+@ stdcall GetFileMUIInfo(long wstr ptr ptr)
 @ stdcall GetFileMUIPath(long wstr wstr ptr ptr ptr ptr)
 @ stdcall GetFileSize(long ptr)
 @ stdcall GetFileSizeEx(long ptr)

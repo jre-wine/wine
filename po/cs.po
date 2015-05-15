@@ -7,8 +7,8 @@ msgstr ""
 "POT-Creation-Date: N/A\n"
 "PO-Revision-Date: 2013-06-28 14:55+0100\n"
 "Last-Translator: Pavel Borecki <pavel.borecki@gmail.com>\n"
-"Language-Team: none\n"
-"Language: Czech\n"
+"Language-Team: Czech\n"
+"Language: cs\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -8533,6 +8533,12 @@ msgstr "&Velikost papíru:"
 #: wineps.rc:39
 msgid "Duplex:"
 msgstr "Oboustranně:"
+
+#: wineps.rc:50
+#, fuzzy
+#| msgid "&Setup"
+msgid "Setup"
+msgstr "&Nastavit"
 
 #: wininet.rc:42 wininet.rc:62
 msgid "Realm"

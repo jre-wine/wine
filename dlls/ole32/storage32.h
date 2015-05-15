@@ -363,9 +363,9 @@ void StorageBaseImpl_RemoveStream(StorageBaseImpl * stg, StgStreamImpl * strm) D
 #define BLOCKCHAIN_CACHE_SIZE 4
 
 /****************************************************************************
- * Storage32Impl definitions.
+ * StorageImpl definitions.
  *
- * This implementation of the IStorage32 interface represents a root
+ * This implementation of the IStorage interface represents a root
  * storage. Basically, a document file.
  */
 struct StorageImpl
@@ -415,39 +415,6 @@ struct StorageImpl
 
   ULONG locked_bytes[8];
 };
-
-HRESULT StorageImpl_ReadRawDirEntry(
-            StorageImpl *This,
-            ULONG index,
-            BYTE *buffer) DECLSPEC_HIDDEN;
-
-void UpdateRawDirEntry(
-    BYTE *buffer,
-    const DirEntry *newData) DECLSPEC_HIDDEN;
-
-HRESULT StorageImpl_WriteRawDirEntry(
-            StorageImpl *This,
-            ULONG index,
-            const BYTE *buffer) DECLSPEC_HIDDEN;
-
-HRESULT StorageImpl_ReadDirEntry(
-            StorageImpl*    This,
-            DirRef          index,
-            DirEntry*       buffer) DECLSPEC_HIDDEN;
-
-HRESULT StorageImpl_WriteDirEntry(
-            StorageImpl*        This,
-            DirRef              index,
-            const DirEntry*     buffer) DECLSPEC_HIDDEN;
-
-BlockChainStream* Storage32Impl_SmallBlocksToBigBlocks(
-                      StorageImpl* This,
-                      SmallBlockChainStream** ppsbChain) DECLSPEC_HIDDEN;
-
-SmallBlockChainStream* Storage32Impl_BigBlocksToSmallBlocks(
-                      StorageImpl* This,
-                      BlockChainStream** ppbbChain,
-                      ULARGE_INTEGER newSize) DECLSPEC_HIDDEN;
 
 /****************************************************************************
  * StgStreamImpl definitions.
@@ -587,117 +554,6 @@ void StorageUtl_ReadGUID(const BYTE* buffer, ULONG offset, GUID* value) DECLSPEC
 void StorageUtl_WriteGUID(BYTE* buffer, ULONG offset, const GUID* value) DECLSPEC_HIDDEN;
 void StorageUtl_CopyDirEntryToSTATSTG(StorageBaseImpl *storage,STATSTG* destination,
  const DirEntry* source, int statFlags) DECLSPEC_HIDDEN;
-
-/****************************************************************************
- * BlockChainStream definitions.
- *
- * The BlockChainStream class is a utility class that is used to create an
- * abstraction of the big block chains in the storage file.
- */
-struct BlockChainRun
-{
-  /* This represents a range of blocks that happen reside in consecutive sectors. */
-  ULONG firstSector;
-  ULONG firstOffset;
-  ULONG lastOffset;
-};
-
-typedef struct BlockChainBlock
-{
-  ULONG index;
-  ULONG sector;
-  BOOL  read;
-  BOOL  dirty;
-  BYTE data[MAX_BIG_BLOCK_SIZE];
-} BlockChainBlock;
-
-struct BlockChainStream
-{
-  StorageImpl* parentStorage;
-  ULONG*       headOfStreamPlaceHolder;
-  DirRef       ownerDirEntry;
-  struct BlockChainRun* indexCache;
-  ULONG        indexCacheLen;
-  ULONG        indexCacheSize;
-  BlockChainBlock cachedBlocks[2];
-  ULONG        blockToEvict;
-  ULONG        tailIndex;
-  ULONG        numBlocks;
-};
-
-/*
- * Methods for the BlockChainStream class.
- */
-BlockChainStream* BlockChainStream_Construct(
-		StorageImpl* parentStorage,
-		ULONG*         headOfStreamPlaceHolder,
-		DirRef         dirEntry) DECLSPEC_HIDDEN;
-
-void BlockChainStream_Destroy(
-		BlockChainStream* This) DECLSPEC_HIDDEN;
-
-HRESULT BlockChainStream_ReadAt(
-		BlockChainStream* This,
-		ULARGE_INTEGER offset,
-		ULONG          size,
-		void*          buffer,
-		ULONG*         bytesRead) DECLSPEC_HIDDEN;
-
-HRESULT BlockChainStream_WriteAt(
-		BlockChainStream* This,
-		ULARGE_INTEGER offset,
-		ULONG          size,
-		const void*    buffer,
-		ULONG*         bytesWritten) DECLSPEC_HIDDEN;
-
-BOOL BlockChainStream_SetSize(
-		BlockChainStream* This,
-		ULARGE_INTEGER    newSize) DECLSPEC_HIDDEN;
-
-HRESULT BlockChainStream_Flush(
-                BlockChainStream* This) DECLSPEC_HIDDEN;
-
-/****************************************************************************
- * SmallBlockChainStream definitions.
- *
- * The SmallBlockChainStream class is a utility class that is used to create an
- * abstraction of the small block chains in the storage file.
- */
-struct SmallBlockChainStream
-{
-  StorageImpl* parentStorage;
-  DirRef         ownerDirEntry;
-  ULONG*         headOfStreamPlaceHolder;
-};
-
-/*
- * Methods of the SmallBlockChainStream class.
- */
-SmallBlockChainStream* SmallBlockChainStream_Construct(
-           StorageImpl*   parentStorage,
-           ULONG*         headOfStreamPlaceHolder,
-           DirRef         dirEntry) DECLSPEC_HIDDEN;
-
-void SmallBlockChainStream_Destroy(
-	       SmallBlockChainStream* This) DECLSPEC_HIDDEN;
-
-HRESULT SmallBlockChainStream_ReadAt(
-	       SmallBlockChainStream* This,
-	       ULARGE_INTEGER offset,
-	       ULONG          size,
-	       void*          buffer,
-	       ULONG*         bytesRead) DECLSPEC_HIDDEN;
-
-HRESULT SmallBlockChainStream_WriteAt(
-	       SmallBlockChainStream* This,
-	       ULARGE_INTEGER offset,
-	       ULONG          size,
-	       const void*    buffer,
-	       ULONG*         bytesWritten) DECLSPEC_HIDDEN;
-
-BOOL SmallBlockChainStream_SetSize(
-	       SmallBlockChainStream* This,
-	       ULARGE_INTEGER          newSize) DECLSPEC_HIDDEN;
 
 
 #endif /* __STORAGE32_H__ */

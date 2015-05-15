@@ -230,6 +230,8 @@ typedef struct {
     HRESULT (*get_dispid)(DispatchEx*,BSTR,DWORD,DISPID*);
     HRESULT (*invoke)(DispatchEx*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,EXCEPINFO*,IServiceProvider*);
     HRESULT (*populate_props)(DispatchEx*);
+    /* We abuse this vtbl for EventTarget functions to avoid separated vtbl. */
+    event_target_t **(*get_event_target_ptr)(DispatchEx*);
 } dispex_static_data_vtbl_t;
 
 typedef struct {
@@ -327,6 +329,11 @@ typedef struct {
 
 typedef struct {
     DispatchEx dispex;
+    event_target_t *ptr;
+} EventTarget;
+
+typedef struct {
+    DispatchEx dispex;
     IHTMLOptionElementFactory IHTMLOptionElementFactory_iface;
 
     LONG ref;
@@ -419,7 +426,7 @@ struct HTMLOuterWindow {
 
 struct HTMLInnerWindow {
     HTMLWindow base;
-    DispatchEx dispex;
+    EventTarget event_target;
 
     HTMLDocumentNode *doc;
 
@@ -637,7 +644,7 @@ typedef struct {
     HRESULT (*clone)(HTMLDOMNode*,nsIDOMNode*,HTMLDOMNode**);
     HRESULT (*handle_event)(HTMLDOMNode*,DWORD,nsIDOMEvent*,BOOL*);
     HRESULT (*get_attr_col)(HTMLDOMNode*,HTMLAttributeCollection**);
-    event_target_t **(*get_event_target)(HTMLDOMNode*);
+    event_target_t **(*get_event_target_ptr)(HTMLDOMNode*);
     HRESULT (*fire_event)(HTMLDOMNode*,DWORD,BOOL*);
     HRESULT (*put_disabled)(HTMLDOMNode*,VARIANT_BOOL);
     HRESULT (*get_disabled)(HTMLDOMNode*,VARIANT_BOOL*);
@@ -652,7 +659,7 @@ typedef struct {
 } NodeImplVtbl;
 
 struct HTMLDOMNode {
-    DispatchEx dispex;
+    EventTarget   event_target;
     IHTMLDOMNode  IHTMLDOMNode_iface;
     IHTMLDOMNode2 IHTMLDOMNode2_iface;
     const NodeImplVtbl *vtbl;
@@ -661,7 +668,6 @@ struct HTMLDOMNode {
 
     nsIDOMNode *nsnode;
     HTMLDocumentNode *doc;
-    event_target_t *event_target;
     ConnectionPointContainer *cp_container;
 };
 
@@ -976,6 +982,12 @@ HRESULT wrap_iface(IUnknown*,IUnknown*,IUnknown**) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode*,nsIDOMNodeList*) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocumentNode*,nsIDOMHTMLCollection*) DECLSPEC_HIDDEN;
+
+#define ATTRFLAG_CASESENSITIVE  0x0001
+#define ATTRFLAG_ASSTRING       0x0002
+#define ATTRFLAG_EXPANDURL      0x0004
+
+HRESULT get_elem_attr_value_by_dispid(HTMLElement*,DISPID,DWORD,VARIANT*) DECLSPEC_HIDDEN;
 HRESULT get_elem_source_index(HTMLElement*,LONG*) DECLSPEC_HIDDEN;
 
 nsresult get_elem_attr_value(nsIDOMHTMLElement*,const WCHAR*,nsAString*,const PRUnichar**) DECLSPEC_HIDDEN;

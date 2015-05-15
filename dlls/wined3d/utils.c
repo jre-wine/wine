@@ -3656,7 +3656,7 @@ BOOL wined3d_format_convert_color_to_float(const struct wined3d_format *format,
         case WINED3DFMT_R16G16_UNORM:
         case WINED3DFMT_B10G10R10A2_UNORM:
             float_color->r = color_to_float(color, format->red_size, format->red_offset);
-            float_color->g = color_to_float(color, format->green_size, format->green_size);
+            float_color->g = color_to_float(color, format->green_size, format->green_offset);
             float_color->b = color_to_float(color, format->blue_size, format->blue_offset);
             float_color->a = color_to_float(color, format->alpha_size, format->alpha_offset);
             return TRUE;
@@ -4232,14 +4232,14 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_state *state, const struct
     if (state->render_states[WINED3D_RS_COLORVERTEX] && (si->use_map & (1 << WINED3D_FFP_DIFFUSE)))
     {
         settings->diffuse_source = state->render_states[WINED3D_RS_DIFFUSEMATERIALSOURCE];
-        settings->emission_source = state->render_states[WINED3D_RS_EMISSIVEMATERIALSOURCE];
+        settings->emissive_source = state->render_states[WINED3D_RS_EMISSIVEMATERIALSOURCE];
         settings->ambient_source = state->render_states[WINED3D_RS_AMBIENTMATERIALSOURCE];
         settings->specular_source = state->render_states[WINED3D_RS_SPECULARMATERIALSOURCE];
     }
     else
     {
         settings->diffuse_source = WINED3D_MCS_MATERIAL;
-        settings->emission_source = WINED3D_MCS_MATERIAL;
+        settings->emissive_source = WINED3D_MCS_MATERIAL;
         settings->ambient_source = WINED3D_MCS_MATERIAL;
         settings->specular_source = WINED3D_MCS_MATERIAL;
     }

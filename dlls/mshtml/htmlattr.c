@@ -137,7 +137,7 @@ static HRESULT WINAPI HTMLDOMAttribute_get_nodeName(IHTMLDOMAttribute *iface, BS
         return *p ? S_OK : E_OUTOFMEMORY;
     }
 
-    return IDispatchEx_GetMemberName(&This->elem->node.dispex.IDispatchEx_iface, This->dispid, p);
+    return IDispatchEx_GetMemberName(&This->elem->node.event_target.dispex.IDispatchEx_iface, This->dispid, p);
 }
 
 static HRESULT WINAPI HTMLDOMAttribute_put_nodeValue(IHTMLDOMAttribute *iface, VARIANT v)
@@ -157,15 +157,13 @@ static HRESULT WINAPI HTMLDOMAttribute_put_nodeValue(IHTMLDOMAttribute *iface, V
 
     memset(&ei, 0, sizeof(ei));
 
-    return IDispatchEx_InvokeEx(&This->elem->node.dispex.IDispatchEx_iface, This->dispid, LOCALE_SYSTEM_DEFAULT,
+    return IDispatchEx_InvokeEx(&This->elem->node.event_target.dispex.IDispatchEx_iface, This->dispid, LOCALE_SYSTEM_DEFAULT,
             DISPATCH_PROPERTYPUT, &dp, &ret, &ei, NULL);
 }
 
 static HRESULT WINAPI HTMLDOMAttribute_get_nodeValue(IHTMLDOMAttribute *iface, VARIANT *p)
 {
     HTMLDOMAttribute *This = impl_from_IHTMLDOMAttribute(iface);
-    DISPPARAMS dp = {NULL, NULL, 0, 0};
-    EXCEPINFO ei;
 
     TRACE("(%p)->(%p)\n", This, p);
 
@@ -174,9 +172,7 @@ static HRESULT WINAPI HTMLDOMAttribute_get_nodeValue(IHTMLDOMAttribute *iface, V
         return E_UNEXPECTED;
     }
 
-    memset(&ei, 0, sizeof(ei));
-    return IDispatchEx_InvokeEx(&This->elem->node.dispex.IDispatchEx_iface, This->dispid, LOCALE_SYSTEM_DEFAULT,
-            DISPATCH_PROPERTYGET, &dp, p, &ei, NULL);
+    return get_elem_attr_value_by_dispid(This->elem, This->dispid, 0, p);
 }
 
 static HRESULT WINAPI HTMLDOMAttribute_get_specified(IHTMLDOMAttribute *iface, VARIANT_BOOL *p)
@@ -200,7 +196,7 @@ static HRESULT WINAPI HTMLDOMAttribute_get_specified(IHTMLDOMAttribute *iface, V
         return S_OK;
     }
 
-    hres = IDispatchEx_GetMemberName(&This->elem->node.dispex.IDispatchEx_iface, This->dispid, &name);
+    hres = IDispatchEx_GetMemberName(&This->elem->node.event_target.dispex.IDispatchEx_iface, This->dispid, &name);
     if(FAILED(hres))
         return hres;
 
@@ -307,8 +303,25 @@ static HRESULT WINAPI HTMLDOMAttribute2_put_value(IHTMLDOMAttribute2 *iface, BST
 static HRESULT WINAPI HTMLDOMAttribute2_get_value(IHTMLDOMAttribute2 *iface, BSTR *p)
 {
     HTMLDOMAttribute *This = impl_from_IHTMLDOMAttribute2(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    VARIANT val;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->elem) {
+        FIXME("NULL This->elem\n");
+        return E_UNEXPECTED;
+    }
+
+    hres = get_elem_attr_value_by_dispid(This->elem, This->dispid, ATTRFLAG_ASSTRING, &val);
+    if(FAILED(hres))
+        return hres;
+
+    assert(V_VT(&val) == VT_BSTR);
+    *p = V_BSTR(&val);
+    if(!*p && !(*p = SysAllocStringLen(NULL, 0)))
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDOMAttribute2_get_expando(IHTMLDOMAttribute2 *iface, VARIANT_BOOL *p)

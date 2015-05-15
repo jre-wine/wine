@@ -76,7 +76,6 @@ struct pipe_server
     struct pipe_client  *client;     /* client that this server is connected to */
     struct named_pipe   *pipe;
     struct timeout_user *flush_poll;
-    struct event        *event;
     unsigned int         options;    /* pipe options */
     unsigned int         pipe_flags;
 };
@@ -141,10 +140,10 @@ static const struct object_ops named_pipe_ops =
 static void pipe_server_dump( struct object *obj, int verbose );
 static struct fd *pipe_server_get_fd( struct object *obj );
 static void pipe_server_destroy( struct object *obj);
-static void pipe_server_flush( struct fd *fd, struct event **event );
+static obj_handle_t pipe_server_flush( struct fd *fd, const async_data_t *async, int blocking );
 static enum server_fd_type pipe_server_get_fd_type( struct fd *fd );
 static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                                       int blocking, const void *data, data_size_t size );
+                                       int blocking );
 
 static const struct object_ops pipe_server_ops =
 {
@@ -170,8 +169,10 @@ static const struct fd_ops pipe_server_fd_ops =
 {
     default_fd_get_poll_events,   /* get_poll_events */
     default_poll_event,           /* poll_event */
-    pipe_server_flush,            /* flush */
     pipe_server_get_fd_type,      /* get_fd_type */
+    no_fd_read,                   /* read */
+    no_fd_write,                  /* write */
+    pipe_server_flush,            /* flush */
     pipe_server_ioctl,            /* ioctl */
     default_fd_queue_async,       /* queue_async */
     default_fd_reselect_async,    /* reselect_async */
@@ -183,7 +184,7 @@ static void pipe_client_dump( struct object *obj, int verbose );
 static int pipe_client_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *pipe_client_get_fd( struct object *obj );
 static void pipe_client_destroy( struct object *obj );
-static void pipe_client_flush( struct fd *fd, struct event **event );
+static obj_handle_t pipe_client_flush( struct fd *fd, const async_data_t *async, int blocking );
 static enum server_fd_type pipe_client_get_fd_type( struct fd *fd );
 
 static const struct object_ops pipe_client_ops =
@@ -210,8 +211,10 @@ static const struct fd_ops pipe_client_fd_ops =
 {
     default_fd_get_poll_events,   /* get_poll_events */
     default_poll_event,           /* poll_event */
-    pipe_client_flush,            /* flush */
     pipe_client_get_fd_type,      /* get_fd_type */
+    no_fd_read,                   /* read */
+    no_fd_write,                  /* write */
+    pipe_client_flush,            /* flush */
     default_fd_ioctl,             /* ioctl */
     default_fd_queue_async,       /* queue_async */
     default_fd_reselect_async,    /* reselect_async */
@@ -227,8 +230,8 @@ static struct object *named_pipe_device_open_file( struct object *obj, unsigned 
                                                    unsigned int sharing, unsigned int options );
 static void named_pipe_device_destroy( struct object *obj );
 static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd );
-static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                                             int blocking, const void *data, data_size_t size );
+static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code,
+                                             const async_data_t *async_data, int blocking );
 
 static const struct object_ops named_pipe_device_ops =
 {
@@ -254,8 +257,10 @@ static const struct fd_ops named_pipe_device_fd_ops =
 {
     default_fd_get_poll_events,       /* get_poll_events */
     default_poll_event,               /* poll_event */
-    no_flush,                         /* flush */
     named_pipe_device_get_fd_type,    /* get_fd_type */
+    no_fd_read,                       /* read */
+    no_fd_write,                      /* write */
+    no_fd_flush,                      /* flush */
     named_pipe_device_ioctl,          /* ioctl */
     default_fd_queue_async,           /* queue_async */
     default_fd_reselect_async,        /* reselect_async */
@@ -355,12 +360,9 @@ static void notify_empty( struct pipe_server *server )
     if (!server->flush_poll)
         return;
     assert( server->state == ps_connected_server );
-    assert( server->event );
     remove_timeout_user( server->flush_poll );
     server->flush_poll = NULL;
-    set_event( server->event );
-    release_object( server->event );
-    server->event = NULL;
+    fd_async_wake_up( server->fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
 }
 
 static void do_disconnect( struct pipe_server *server )
@@ -534,45 +536,43 @@ static void check_flushed( void *arg )
 {
     struct pipe_server *server = (struct pipe_server*) arg;
 
-    assert( server->event );
     if (pipe_data_remaining( server ))
     {
         server->flush_poll = add_timeout_user( -TICKS_PER_SEC / 10, check_flushed, server );
     }
     else
     {
-        /* notify_empty( server ); */
         server->flush_poll = NULL;
-        set_event( server->event );
-        release_object( server->event );
-        server->event = NULL;
+        fd_async_wake_up( server->fd, ASYNC_TYPE_WAIT, STATUS_SUCCESS );
     }
 }
 
-static void pipe_server_flush( struct fd *fd, struct event **event )
+static obj_handle_t pipe_server_flush( struct fd *fd, const async_data_t *async_data, int blocking )
 {
     struct pipe_server *server = get_fd_user( fd );
+    obj_handle_t handle = 0;
+    struct async *async;
 
-    if (!server || server->state != ps_connected_server) return;
+    if (!server || server->state != ps_connected_server) return 0;
 
-    /* FIXME: if multiple threads flush the same pipe,
-              maybe should create a list of processes to notify */
-    if (server->flush_poll) return;
+    if (!pipe_data_remaining( server )) return 0;
 
-    if (pipe_data_remaining( server ))
+    if ((async = fd_queue_async( server->fd, async_data, ASYNC_TYPE_WAIT )))
     {
-        /* this kind of sux -
-           there's no unix way to be alerted when a pipe becomes empty */
-        server->event = create_event( NULL, NULL, 0, 0, 0, NULL );
-        if (!server->event) return;
-        server->flush_poll = add_timeout_user( -TICKS_PER_SEC / 10, check_flushed, server );
-        *event = server->event;
+        /* there's no unix way to be alerted when a pipe becomes empty, so resort to polling */
+        if (!server->flush_poll)
+            server->flush_poll = add_timeout_user( -TICKS_PER_SEC / 10, check_flushed, server );
+        if (blocking) handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 );
+        release_object( async );
+        set_error( STATUS_PENDING );
     }
+    return handle;
 }
 
-static void pipe_client_flush( struct fd *fd, struct event **event )
+static obj_handle_t pipe_client_flush( struct fd *fd, const async_data_t *async, int blocking )
 {
     /* FIXME: what do we have to do for this? */
+    return 0;
 }
 
 static inline int is_overlapped( unsigned int options )
@@ -591,7 +591,7 @@ static enum server_fd_type pipe_client_get_fd_type( struct fd *fd )
 }
 
 static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                                       int blocking, const void *data, data_size_t size )
+                                       int blocking )
 {
     struct pipe_server *server = get_fd_user( fd );
     struct async *async;
@@ -604,21 +604,9 @@ static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const a
         {
         case ps_idle_server:
         case ps_wait_connect:
-            if (blocking)
+            if ((async = fd_queue_async( server->ioctl_fd, async_data, ASYNC_TYPE_WAIT )))
             {
-                async_data_t new_data = *async_data;
-                if (!(wait_handle = alloc_wait_event( current->process ))) break;
-                new_data.event = wait_handle;
-                if (!(async = fd_queue_async( server->ioctl_fd, &new_data, ASYNC_TYPE_WAIT )))
-                {
-                    close_handle( current->process, wait_handle );
-                    break;
-                }
-            }
-            else async = fd_queue_async( server->ioctl_fd, async_data, ASYNC_TYPE_WAIT );
-
-            if (async)
-            {
+                if (blocking) wait_handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 );
                 set_server_state( server, ps_wait_open );
                 if (server->pipe->waiters) async_wake_up( server->pipe->waiters, STATUS_SUCCESS );
                 release_object( async );
@@ -672,7 +660,7 @@ static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const a
         return 0;
 
     default:
-        return default_fd_ioctl( fd, code, async_data, blocking, data, size );
+        return default_fd_ioctl( fd, code, async_data, blocking );
     }
 }
 
@@ -868,8 +856,8 @@ static struct object *named_pipe_open_file( struct object *obj, unsigned int acc
     return &client->obj;
 }
 
-static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                                             int blocking, const void *data, data_size_t size )
+static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code,
+                                             const async_data_t *async_data, int blocking )
 {
     struct named_pipe_device *device = get_fd_user( fd );
 
@@ -877,7 +865,8 @@ static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, c
     {
     case FSCTL_PIPE_WAIT:
         {
-            const FILE_PIPE_WAIT_FOR_BUFFER *buffer = data;
+            const FILE_PIPE_WAIT_FOR_BUFFER *buffer = get_req_data();
+            data_size_t size = get_req_data_size();
             obj_handle_t wait_handle = 0;
             struct named_pipe *pipe;
             struct pipe_server *server;
@@ -902,23 +891,11 @@ static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, c
 
                 if (!pipe->waiters && !(pipe->waiters = create_async_queue( NULL ))) goto done;
 
-                if (blocking)
-                {
-                    async_data_t new_data = *async_data;
-                    if (!(wait_handle = alloc_wait_event( current->process ))) goto done;
-                    new_data.event = wait_handle;
-                    if (!(async = create_async( current, pipe->waiters, &new_data )))
-                    {
-                        close_handle( current->process, wait_handle );
-                        wait_handle = 0;
-                    }
-                }
-                else async = create_async( current, pipe->waiters, async_data );
-
-                if (async)
+                if ((async = create_async( current, pipe->waiters, async_data )))
                 {
                     timeout_t when = buffer->TimeoutSpecified ? buffer->Timeout.QuadPart : pipe->timeout;
                     async_set_timeout( async, when, STATUS_IO_TIMEOUT );
+                    if (blocking) wait_handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 );
                     release_object( async );
                     set_error( STATUS_PENDING );
                 }
@@ -931,7 +908,7 @@ static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code, c
         }
 
     default:
-        return default_fd_ioctl( fd, code, async_data, blocking, data, size );
+        return default_fd_ioctl( fd, code, async_data, blocking );
     }
 }
 

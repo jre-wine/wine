@@ -625,7 +625,7 @@ static INT CALLBACK fill_list( LPVOID ptr, LPVOID arg )
 
 static HRESULT ShellView_FillList(IShellViewImpl *This)
 {
-    IShellFolderView *folderview = &This->IShellFolderView_iface;
+    IFolderView2 *folderview = &This->IFolderView2_iface;
     LPENUMIDLIST pEnumIDList;
     LPITEMIDLIST pidl;
     DWORD fetched;
@@ -658,9 +658,9 @@ static HRESULT ShellView_FillList(IShellViewImpl *This)
     /* sort the array */
     DPA_Sort(hdpa, ShellView_CompareItems, (LPARAM)This->pSFParent);
 
-    IShellFolderView_SetRedraw(folderview, FALSE);
+    IFolderView2_SetRedraw(folderview, FALSE);
     DPA_DestroyCallback(hdpa, fill_list, This);
-    IShellFolderView_SetRedraw(folderview, TRUE);
+    IFolderView2_SetRedraw(folderview, TRUE);
 
     IEnumIDList_Release(pEnumIDList);
 
@@ -1923,22 +1923,29 @@ static HRESULT WINAPI IShellView_fnCreateViewWindow(IShellView3 *iface, IShellVi
 
 static HRESULT WINAPI IShellView_fnDestroyViewWindow(IShellView3 *iface)
 {
-	IShellViewImpl *This = impl_from_IShellView3(iface);
+    IShellViewImpl *This = impl_from_IShellView3(iface);
 
-	TRACE("(%p)\n",This);
+    TRACE("(%p)\n", This);
 
-	/*Make absolutely sure all our UI is cleaned up.*/
-	IShellView3_UIActivate(iface, SVUIA_DEACTIVATE);
+    if (!This->hWnd)
+        return S_OK;
 
-	if(This->hMenu)
-	  DestroyMenu(This->hMenu);
+    /* Make absolutely sure all our UI is cleaned up. */
+    IShellView3_UIActivate(iface, SVUIA_DEACTIVATE);
 
-	DestroyWindow(This->hWnd);
-	if(This->pShellBrowser) IShellBrowser_Release(This->pShellBrowser);
-	if(This->pCommDlgBrowser) ICommDlgBrowser_Release(This->pCommDlgBrowser);
+    if (This->hMenu)
+        DestroyMenu(This->hMenu);
 
+    DestroyWindow(This->hWnd);
+    if (This->pShellBrowser) IShellBrowser_Release(This->pShellBrowser);
+    if (This->pCommDlgBrowser) ICommDlgBrowser_Release(This->pCommDlgBrowser);
 
-	return S_OK;
+    This->hMenu = NULL;
+    This->hWnd = NULL;
+    This->pShellBrowser = NULL;
+    This->pCommDlgBrowser = NULL;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IShellView_fnGetCurrentInfo(IShellView3 *iface, LPFOLDERSETTINGS lpfs)
@@ -2068,7 +2075,7 @@ static HRESULT WINAPI IShellView3_fnCreateViewWindow3(IShellView3 *iface, IShell
 
     *hwnd = NULL;
 
-    if (!owner)
+    if (!owner || This->hWnd)
         return E_UNEXPECTED;
 
     if (view_flags != SV3CVW3_DEFAULT)
@@ -2242,19 +2249,20 @@ static HRESULT WINAPI ISVOleCmdTarget_Exec(
 {
 	IShellViewImpl *This = impl_from_IOleCommandTarget(iface);
 
-	FIXME("(%p)->(\n\tTarget GUID:%s Command:0x%08x Opt:0x%08x %p %p)\n",
-              This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, pvaIn, pvaOut);
+	FIXME("(%p)->(%s %d 0x%08x %s %p)\n",
+              This, debugstr_guid(pguidCmdGroup), nCmdID, nCmdexecopt, debugstr_variant(pvaIn), pvaOut);
 
 	if (!pguidCmdGroup)
 	    return OLECMDERR_E_UNKNOWNGROUP;
+
 	if (IsEqualIID(pguidCmdGroup, &CGID_Explorer) &&
-	   (nCmdID == 0x29) &&
+	   (nCmdID == OLECMDID_SHOWMESSAGE) &&
 	   (nCmdexecopt == 4) && pvaOut)
 	   return S_OK;
 	if (IsEqualIID(pguidCmdGroup, &CGID_ShellDocView) &&
-	   (nCmdID == 9) &&
-	   (nCmdexecopt == 0))
-	   return 1;
+	   (nCmdID == OLECMDID_SPELL) &&
+	   (nCmdexecopt == OLECMDEXECOPT_DODEFAULT))
+	   return S_FALSE;
 
 	return OLECMDERR_E_UNKNOWNGROUP;
 }
@@ -3030,8 +3038,9 @@ static HRESULT WINAPI FolderView2_GetGroupSubsetCount(IFolderView2 *iface, UINT 
 static HRESULT WINAPI FolderView2_SetRedraw(IFolderView2 *iface, BOOL redraw)
 {
     IShellViewImpl *This = impl_from_IFolderView2(iface);
-    FIXME("(%p)->(%d), stub\n", This, redraw);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d)\n", This, redraw);
+    SendMessageW(This->hWndList, WM_SETREDRAW, redraw, 0);
+    return S_OK;
 }
 
 static HRESULT WINAPI FolderView2_IsMoveInSameFolder(IFolderView2 *iface)
@@ -3137,8 +3146,8 @@ static HRESULT WINAPI IShellFolderView_fnArrangeGrid(IShellFolderView *iface)
 static HRESULT WINAPI IShellFolderView_fnAutoArrange(IShellFolderView *iface)
 {
     IShellViewImpl *This = impl_from_IShellFolderView(iface);
-    FIXME("(%p) stub\n", This);
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+    return IFolderView2_SetCurrentFolderFlags(&This->IFolderView2_iface, FWF_AUTOARRANGE, FWF_AUTOARRANGE);
 }
 
 static HRESULT WINAPI IShellFolderView_fnGetAutoArrange(IShellFolderView *iface)
@@ -3237,10 +3246,7 @@ static HRESULT WINAPI IShellFolderView_fnSetRedraw(
 {
     IShellViewImpl *This = impl_from_IShellFolderView(iface);
     TRACE("(%p)->(%d)\n", This, redraw);
-
-    SendMessageW(This->hWndList, WM_SETREDRAW, redraw, 0);
-
-    return S_OK;
+    return IFolderView2_SetRedraw(&This->IFolderView2_iface, redraw);
 }
 
 static HRESULT WINAPI IShellFolderView_fnGetSelectedCount(
@@ -3248,8 +3254,19 @@ static HRESULT WINAPI IShellFolderView_fnGetSelectedCount(
     UINT *count)
 {
     IShellViewImpl *This = impl_from_IShellFolderView(iface);
-    FIXME("(%p)->(%p) stub\n", This, count);
-    return E_NOTIMPL;
+    IShellItemArray *selection;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p)\n", This, count);
+
+    *count = 0;
+    hr = IFolderView2_GetSelection(&This->IFolderView2_iface, FALSE, &selection);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IShellItemArray_GetCount(selection, count);
+    IShellItemArray_Release(selection);
+    return hr;
 }
 
 static HRESULT WINAPI IShellFolderView_fnGetSelectedObjects(
@@ -3466,16 +3483,23 @@ static ULONG WINAPI shellfolderviewdual_Release(IShellFolderViewDual3 *iface)
 static HRESULT WINAPI shellfolderviewdual_GetTypeInfoCount(IShellFolderViewDual3 *iface, UINT *pctinfo)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p\n", This);
-    return E_NOTIMPL;
+    TRACE("%p %p\n", This, pctinfo);
+    *pctinfo = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI shellfolderviewdual_GetTypeInfo(IShellFolderViewDual3 *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p\n", This);
-    return E_NOTIMPL;
+    HRESULT hr;
+
+    TRACE("(%p,%u,%d,%p)\n", This, iTInfo, lcid, ppTInfo);
+
+    hr = get_typeinfo(IShellFolderViewDual3_tid, ppTInfo);
+    if (SUCCEEDED(hr))
+        ITypeInfo_AddRef(*ppTInfo);
+    return hr;
 }
 
 static HRESULT WINAPI shellfolderviewdual_GetIDsOfNames(
@@ -3483,8 +3507,16 @@ static HRESULT WINAPI shellfolderviewdual_GetIDsOfNames(
         cNames, LCID lcid, DISPID *rgDispId)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p\n", This);
-    return E_NOTIMPL;
+    ITypeInfo *ti;
+    HRESULT hr;
+
+    TRACE("(%p,%p,%p,%u,%d,%p)\n", This, riid, rgszNames, cNames, lcid,
+            rgDispId);
+
+    hr = get_typeinfo(IShellFolderViewDual3_tid, &ti);
+    if (SUCCEEDED(hr))
+        hr = ITypeInfo_GetIDsOfNames(ti, rgszNames, cNames, rgDispId);
+    return hr;
 }
 
 static HRESULT WINAPI shellfolderviewdual_Invoke(IShellFolderViewDual3 *iface,
@@ -3493,16 +3525,31 @@ static HRESULT WINAPI shellfolderviewdual_Invoke(IShellFolderViewDual3 *iface,
         UINT *puArgErr)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p\n", This);
-    return E_NOTIMPL;
+    ITypeInfo *ti;
+    HRESULT hr;
+
+    TRACE("(%p,%d,%p,%d,%u,%p,%p,%p,%p)\n", This, dispIdMember, riid, lcid,
+            wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IShellFolderViewDual3_tid, &ti);
+    if (SUCCEEDED(hr))
+        hr = ITypeInfo_Invoke(ti, &This->IShellFolderViewDual3_iface, dispIdMember, wFlags, pDispParams,
+            pVarResult, pExcepInfo, puArgErr);
+    return hr;
+
 }
 
 static HRESULT WINAPI shellfolderviewdual_get_Application(IShellFolderViewDual3 *iface,
     IDispatch **disp)
 {
     IShellViewImpl *This = impl_from_IShellFolderViewDual3(iface);
-    FIXME("%p %p\n", This, disp);
-    return E_NOTIMPL;
+
+    TRACE("%p %p\n", This, disp);
+
+    if (!disp)
+        return E_INVALIDARG;
+
+    return IShellDispatch_Constructor(NULL, &IID_IDispatch, (void**)disp);
 }
 
 static HRESULT WINAPI shellfolderviewdual_get_Parent(IShellFolderViewDual3 *iface, IDispatch **disp)

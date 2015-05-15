@@ -226,7 +226,16 @@ static void testGetIpAddrTable(void)
        "GetIpAddrTable(buf, &dwSize, FALSE) returned %d, expected NO_ERROR\n",
        apiReturn);
       if (apiReturn == NO_ERROR && buf->dwNumEntries)
+      {
+        int i;
         testGetIfEntry(buf->table[0].dwIndex);
+        for (i = 0; i < buf->dwNumEntries; i++)
+        {
+          ok (buf->table[i].wType != 0, "Test[%d]: expected wType > 0\n", i);
+          trace("Entry[%d]: addr %s, dwIndex %u, wType 0x%x\n", i,
+                ntoa(buf->table[i].dwAddr), buf->table[i].dwIndex, buf->table[i].wType);
+        }
+      }
       HeapFree(GetProcessHeap(), 0, buf);
     }
   }
@@ -1034,7 +1043,15 @@ todo_wine
     if (ret)
     {
         PICMP_ECHO_REPLY pong = (PICMP_ECHO_REPLY) replydata;
-        trace ("ping roundtrip: %u ms\n", pong->RoundTripTime);
+        trace ("send addr  : %s\n", ntoa(address));
+        trace ("send size  : %u\n", sizeof(senddata));
+        trace ("reply addr : %s\n", ntoa(pong->Address));
+        trace ("reply size : %u\n", replysz);
+        trace ("roundtrip  : %u ms\n", pong->RoundTripTime);
+        trace ("status     : %u\n", pong->Status);
+        trace ("recv size  : %u\n", pong->DataSize);
+        trace ("ttl        : %u\n", pong->Options.Ttl);
+        trace ("flags      : 0x%x\n", pong->Options.Flags);
     }
     else
     {

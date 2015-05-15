@@ -38,6 +38,9 @@
 #include "winternl.h"
 #include "winuser.h"
 #include "winioctl.h"
+#include "ddk/wdm.h"
+#define USE_WS_PREFIX
+#include "winsock2.h"
 #include "file.h"
 #include "request.h"
 #include "unicode.h"
@@ -114,6 +117,7 @@ static void dump_ioctl_code( const char *prefix, const ioctl_code_t *code )
         CASE(FSCTL_PIPE_DISCONNECT);
         CASE(FSCTL_PIPE_LISTEN);
         CASE(FSCTL_PIPE_WAIT);
+        CASE(WS_SIO_ADDRESS_LIST_CHANGE);
         default: fprintf( stderr, "%s%08x", prefix, *code ); break;
 #undef CASE
     }
@@ -306,6 +310,34 @@ static void dump_async_data( const char *prefix, const async_data_t *data )
     dump_uint64( ",arg=", &data->arg );
     dump_uint64( ",cvalue=", &data->cvalue );
     fputc( '}', stderr );
+}
+
+static void dump_irp_params( const char *prefix, const irp_params_t *data )
+{
+    switch (data->major)
+    {
+    case IRP_MJ_READ:
+        fprintf( stderr, "%s{major=READ,key=%08x", prefix, data->read.key );
+        dump_uint64( ",pos=", &data->read.pos );
+        fputc( '}', stderr );
+        break;
+    case IRP_MJ_WRITE:
+        fprintf( stderr, "%s{major=WRITE,key=%08x", prefix, data->write.key );
+        dump_uint64( ",pos=", &data->write.pos );
+        fputc( '}', stderr );
+        break;
+    case IRP_MJ_FLUSH_BUFFERS:
+        fprintf( stderr, "%s{major=FLUSH_BUFFERS}", prefix );
+        break;
+    case IRP_MJ_DEVICE_CONTROL:
+        fprintf( stderr, "%s{major=DEVICE_CONTROL", prefix );
+        dump_ioctl_code( ",code=", &data->ioctl.code );
+        fputc( '}', stderr );
+        break;
+    default:
+        fprintf( stderr, "%s{major=%u}", prefix, data->major );
+        break;
+    }
 }
 
 static void dump_hw_input( const char *prefix, const hw_input_t *input )
@@ -1635,12 +1667,13 @@ static void dump_get_handle_fd_reply( const struct get_handle_fd_reply *req )
     fprintf( stderr, ", options=%08x", req->options );
 }
 
-static void dump_flush_file_request( const struct flush_file_request *req )
+static void dump_flush_request( const struct flush_request *req )
 {
-    fprintf( stderr, " handle=%04x", req->handle );
+    fprintf( stderr, " blocking=%d", req->blocking );
+    dump_async_data( ", async=", &req->async );
 }
 
-static void dump_flush_file_reply( const struct flush_file_reply *req )
+static void dump_flush_reply( const struct flush_reply *req )
 {
     fprintf( stderr, " event=%04x", req->event );
 }
@@ -2725,6 +2758,35 @@ static void dump_cancel_async_request( const struct cancel_async_request *req )
     fprintf( stderr, ", only_thread=%d", req->only_thread );
 }
 
+static void dump_read_request( const struct read_request *req )
+{
+    fprintf( stderr, " blocking=%d", req->blocking );
+    dump_async_data( ", async=", &req->async );
+    dump_uint64( ", pos=", &req->pos );
+}
+
+static void dump_read_reply( const struct read_reply *req )
+{
+    fprintf( stderr, " wait=%04x", req->wait );
+    fprintf( stderr, ", options=%08x", req->options );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_write_request( const struct write_request *req )
+{
+    fprintf( stderr, " blocking=%d", req->blocking );
+    dump_async_data( ", async=", &req->async );
+    dump_uint64( ", pos=", &req->pos );
+    dump_varargs_bytes( ", data=", cur_size );
+}
+
+static void dump_write_reply( const struct write_reply *req )
+{
+    fprintf( stderr, " wait=%04x", req->wait );
+    fprintf( stderr, ", options=%08x", req->options );
+    fprintf( stderr, ", size=%u", req->size );
+}
+
 static void dump_ioctl_request( const struct ioctl_request *req )
 {
     dump_ioctl_code( " code=", &req->code );
@@ -2740,23 +2802,25 @@ static void dump_ioctl_reply( const struct ioctl_reply *req )
     dump_varargs_bytes( ", out_data=", cur_size );
 }
 
-static void dump_set_ioctl_result_request( const struct set_ioctl_result_request *req )
+static void dump_set_irp_result_request( const struct set_irp_result_request *req )
 {
     fprintf( stderr, " manager=%04x", req->manager );
     fprintf( stderr, ", handle=%04x", req->handle );
     fprintf( stderr, ", status=%08x", req->status );
+    fprintf( stderr, ", size=%u", req->size );
     dump_varargs_bytes( ", data=", cur_size );
 }
 
-static void dump_get_ioctl_result_request( const struct get_ioctl_result_request *req )
+static void dump_get_irp_result_request( const struct get_irp_result_request *req )
 {
     fprintf( stderr, " handle=%04x", req->handle );
     dump_uint64( ", user_arg=", &req->user_arg );
 }
 
-static void dump_get_ioctl_result_reply( const struct get_ioctl_result_reply *req )
+static void dump_get_irp_result_reply( const struct get_irp_result_reply *req )
 {
-    dump_varargs_bytes( " out_data=", cur_size );
+    fprintf( stderr, " size=%u", req->size );
+    dump_varargs_bytes( ", out_data=", cur_size );
 }
 
 static void dump_create_named_pipe_request( const struct create_named_pipe_request *req )
@@ -3915,14 +3979,13 @@ static void dump_get_next_device_request_request( const struct get_next_device_r
     fprintf( stderr, " manager=%04x", req->manager );
     fprintf( stderr, ", prev=%04x", req->prev );
     fprintf( stderr, ", status=%08x", req->status );
-    dump_varargs_bytes( ", prev_data=", cur_size );
 }
 
 static void dump_get_next_device_request_reply( const struct get_next_device_request_reply *req )
 {
-    fprintf( stderr, " next=%04x", req->next );
-    dump_ioctl_code( ", code=", &req->code );
-    dump_uint64( ", user_ptr=", &req->user_ptr );
+    dump_uint64( " user_ptr=", &req->user_ptr );
+    dump_irp_params( ", params=", &req->params );
+    fprintf( stderr, ", next=%04x", req->next );
     fprintf( stderr, ", client_pid=%04x", req->client_pid );
     fprintf( stderr, ", client_tid=%04x", req->client_tid );
     fprintf( stderr, ", in_size=%u", req->in_size );
@@ -4191,7 +4254,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_alloc_file_handle_request,
     (dump_func)dump_get_handle_unix_name_request,
     (dump_func)dump_get_handle_fd_request,
-    (dump_func)dump_flush_file_request,
+    (dump_func)dump_flush_request,
     (dump_func)dump_lock_file_request,
     (dump_func)dump_unlock_file_request,
     (dump_func)dump_create_socket_request,
@@ -4289,9 +4352,11 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_set_serial_info_request,
     (dump_func)dump_register_async_request,
     (dump_func)dump_cancel_async_request,
+    (dump_func)dump_read_request,
+    (dump_func)dump_write_request,
     (dump_func)dump_ioctl_request,
-    (dump_func)dump_set_ioctl_result_request,
-    (dump_func)dump_get_ioctl_result_request,
+    (dump_func)dump_set_irp_result_request,
+    (dump_func)dump_get_irp_result_request,
     (dump_func)dump_create_named_pipe_request,
     (dump_func)dump_get_named_pipe_info_request,
     (dump_func)dump_set_named_pipe_info_request,
@@ -4456,7 +4521,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_alloc_file_handle_reply,
     (dump_func)dump_get_handle_unix_name_reply,
     (dump_func)dump_get_handle_fd_reply,
-    (dump_func)dump_flush_file_reply,
+    (dump_func)dump_flush_reply,
     (dump_func)dump_lock_file_reply,
     NULL,
     (dump_func)dump_create_socket_reply,
@@ -4554,9 +4619,11 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     NULL,
     NULL,
     NULL,
+    (dump_func)dump_read_reply,
+    (dump_func)dump_write_reply,
     (dump_func)dump_ioctl_reply,
     NULL,
-    (dump_func)dump_get_ioctl_result_reply,
+    (dump_func)dump_get_irp_result_reply,
     (dump_func)dump_create_named_pipe_reply,
     (dump_func)dump_get_named_pipe_info_reply,
     NULL,
@@ -4721,7 +4788,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "alloc_file_handle",
     "get_handle_unix_name",
     "get_handle_fd",
-    "flush_file",
+    "flush",
     "lock_file",
     "unlock_file",
     "create_socket",
@@ -4819,9 +4886,11 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "set_serial_info",
     "register_async",
     "cancel_async",
+    "read",
+    "write",
     "ioctl",
-    "set_ioctl_result",
-    "get_ioctl_result",
+    "set_irp_result",
+    "get_irp_result",
     "create_named_pipe",
     "get_named_pipe_info",
     "set_named_pipe_info",

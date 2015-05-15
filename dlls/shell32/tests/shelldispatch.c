@@ -364,8 +364,42 @@ static void test_service(void)
     IShellDispatch2_Release(sd);
 }
 
+static void test_dispatch_typeinfo(IDispatch *disp, REFIID *riid)
+{
+    ITypeInfo *typeinfo;
+    TYPEATTR *typeattr;
+    UINT count;
+    HRESULT hr;
+
+    count = 10;
+    hr = IDispatch_GetTypeInfoCount(disp, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 1, "got %u\n", count);
+
+    hr = IDispatch_GetTypeInfo(disp, 0, LOCALE_SYSTEM_DEFAULT, &typeinfo);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    while (!IsEqualGUID(*riid, &IID_NULL)) {
+        if (IsEqualGUID(&typeattr->guid, *riid))
+            break;
+        riid++;
+    }
+    ok(IsEqualGUID(&typeattr->guid, *riid), "unexpected type guid %s\n", wine_dbgstr_guid(&typeattr->guid));
+
+    ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
+    ITypeInfo_Release(typeinfo);
+}
+
 static void test_ShellFolderViewDual(void)
 {
+    static const IID *shelldisp_riids[] = {
+        &IID_IShellDispatch6,
+        &IID_IShellDispatch5,
+        &IID_IShellDispatch4,
+        &IID_NULL
+    };
     IShellFolderViewDual *viewdual;
     IShellFolder *desktop, *tmpdir;
     IShellView *view, *view2;
@@ -398,6 +432,18 @@ static void test_ShellFolderViewDual(void)
 
     hr = IShellFolderViewDual_QueryInterface(viewdual, &IID_IShellView, (void**)&view2);
     ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+    /* get_Application() */
+
+if (0) /* crashes on pre-vista */ {
+    hr = IShellFolderViewDual_get_Application(viewdual, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+}
+    hr = IShellFolderViewDual_get_Application(viewdual, &disp2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(disp2 != (IDispatch*)viewdual, "got %p, %p\n", disp2, viewdual);
+    test_dispatch_typeinfo(disp2, shelldisp_riids);
+    IDispatch_Release(disp2);
 
     IShellFolderViewDual_Release(viewdual);
     IDispatch_Release(disp);
@@ -444,6 +490,9 @@ static void test_ShellWindows(void)
     hr = CoCreateInstance(&CLSID_ShellWindows, NULL, CLSCTX_LOCAL_SERVER,
         &IID_IShellWindows, (void**)&shellwindows);
     ok(hr == S_OK, "got 0x%08x\n", hr);
+    /* TODO: remove when explorer startup with clean prefix is fixed */
+    if (hr != S_OK)
+        return;
 
 if (0) /* NULL out argument - currently crashes on Wine */ {
     hr = IShellWindows_Register(shellwindows, NULL, 0, SWC_EXPLORER, NULL);
@@ -507,38 +556,30 @@ todo_wine {
         ok(ret == 0, "got %d\n", ret);
     }
     else {
+        static const IID *browser_riids[] = {
+            &IID_IWebBrowser2,
+            &IID_NULL
+        };
+
+        static const IID *viewdual_riids[] = {
+            &IID_IShellFolderViewDual3,
+            &IID_NULL
+        };
+
         IShellFolderViewDual *view;
         IShellBrowser *sb, *sb2;
         IServiceProvider *sp;
         IDispatch *doc, *app;
-        ITypeInfo *typeinfo;
-        TYPEATTR *typeattr;
         IWebBrowser2 *wb;
         IShellView *sv;
         IUnknown *unk;
-        UINT count;
 
         ok(disp != NULL, "got %p\n", disp);
         ok(ret != HandleToUlong(hwnd), "got %d\n", ret);
 
         /* IDispatch-related tests */
-        count = 10;
-        hr = IDispatch_GetTypeInfoCount(disp, &count);
-todo_wine {
-        ok(hr == S_OK, "got 0x%08x\n", hr);
-        ok(count == 1, "got %u\n", count);
-}
-        hr = IDispatch_GetTypeInfo(disp, 0, LOCALE_SYSTEM_DEFAULT, &typeinfo);
-todo_wine
-        ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
-        hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
-        ok(IsEqualGUID(&typeattr->guid, &IID_IWebBrowser2), "type guid %s\n", wine_dbgstr_guid(&typeattr->guid));
+        test_dispatch_typeinfo(disp, browser_riids);
 
-        ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
-        ITypeInfo_Release(typeinfo);
-}
         /* IWebBrowser2 */
         hr = IDispatch_QueryInterface(disp, &IID_IWebBrowser2, (void**)&wb);
         ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -548,27 +589,16 @@ todo_wine
         ok(hr == S_OK, "got 0x%08x\n", hr);
 
         hr = IWebBrowser2_get_Application(wb, &app);
-todo_wine {
         ok(hr == S_OK, "got 0x%08x\n", hr);
         ok(disp == app, "got %p, %p\n", app, disp);
-}
-        if (hr == S_OK) IDispatch_Release(app);
+        IDispatch_Release(app);
 
         hr = IWebBrowser2_get_Document(wb, &doc);
 todo_wine
         ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
-        hr = IDispatch_GetTypeInfo(doc, 0, LOCALE_SYSTEM_DEFAULT, &typeinfo);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
+if (hr == S_OK)
+        test_dispatch_typeinfo(doc, viewdual_riids);
 
-        hr = ITypeInfo_GetTypeAttr(typeinfo, &typeattr);
-        ok(hr == S_OK, "got 0x%08x\n", hr);
-        ok(IsEqualGUID(&typeattr->guid, &IID_IShellFolderViewDual3), "type guid %s\n", wine_dbgstr_guid(&typeattr->guid));
-        IDispatch_Release(doc);
-
-        ITypeInfo_ReleaseTypeAttr(typeinfo, typeattr);
-        ITypeInfo_Release(typeinfo);
-}
         IWebBrowser2_Release(wb);
 
         /* IServiceProvider */
@@ -576,15 +606,35 @@ if (hr == S_OK) {
         ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
 
         hr = IDispatch_QueryInterface(disp, &IID_IServiceProvider, (void**)&sp);
-todo_wine
         ok(hr == S_OK, "got 0x%08x\n", hr);
-if (hr == S_OK) {
+
         hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IShellBrowser, (void**)&sb);
         ok(hr == S_OK, "got 0x%08x\n", hr);
 
         hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IShellBrowser, (void**)&sb2);
         ok(hr == S_OK, "got 0x%08x\n", hr);
         ok(sb == sb2, "got %p, %p\n", sb, sb2);
+
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IOleWindow, (void**)&unk);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IUnknown_Release(unk);
+
+        hr = IServiceProvider_QueryService(sp, &SID_STopLevelBrowser, &IID_IExplorerBrowser, (void**)&unk);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IShellBrowser_QueryInterface(sb, &IID_IExplorerBrowser, (void**)&unk);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IShellBrowser_QueryInterface(sb, &IID_IWebBrowser2, (void**)&unk);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IShellBrowser_QueryInterface(sb, &IID_IDispatch, (void**)&unk);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IShellBrowser_QueryActiveShellView(sb, &sv);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IShellView_Release(sv);
+
         IShellBrowser_Release(sb2);
         IShellBrowser_Release(sb);
 
@@ -600,7 +650,6 @@ if (hr == S_OK) {
         ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
 
         IServiceProvider_Release(sp);
-}
         IDispatch_Release(disp);
     }
 
@@ -630,6 +679,153 @@ todo_wine
     IShellWindows_Release(shellwindows);
 }
 
+static void test_ParseName(void)
+{
+    static const WCHAR cadabraW[] = {'c','a','d','a','b','r','a',0};
+    WCHAR pathW[MAX_PATH];
+    IShellDispatch *sd;
+    FolderItem *item;
+    Folder *folder;
+    HRESULT hr;
+    VARIANT v;
+    BSTR str;
+
+    hr = CoCreateInstance(&CLSID_Shell, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IShellDispatch, (void**)&sd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    GetTempPathW(sizeof(pathW)/sizeof(pathW[0]), pathW);
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(pathW);
+    hr = IShellDispatch_NameSpace(sd, v, &folder);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    VariantClear(&v);
+
+    item = (void*)0xdeadbeef;
+    hr = Folder_ParseName(folder, NULL, &item);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(item == NULL, "got %p\n", item);
+
+    /* empty name */
+    str = SysAllocStringLen(NULL, 0);
+    item = (void*)0xdeadbeef;
+    hr = Folder_ParseName(folder, str, &item);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(item == NULL, "got %p\n", item);
+    SysFreeString(str);
+
+    /* path doesn't exist */
+    str = SysAllocString(cadabraW);
+    item = (void*)0xdeadbeef;
+    hr = Folder_ParseName(folder, str, &item);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(item == NULL, "got %p\n", item);
+    SysFreeString(str);
+
+    lstrcatW(pathW, cadabraW);
+    CreateDirectoryW(pathW, NULL);
+
+    str = SysAllocString(cadabraW);
+    item = NULL;
+    hr = Folder_ParseName(folder, str, &item);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(item != NULL, "got %p\n", item);
+    SysFreeString(str);
+
+    hr = FolderItem_get_Path(item, &str);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(str[0] != 0, "path %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    RemoveDirectoryW(pathW);
+    FolderItem_Release(item);
+    Folder_Release(folder);
+    IShellDispatch_Release(sd);
+}
+
+static void test_Verbs(void)
+{
+    FolderItemVerbs *verbs;
+    WCHAR pathW[MAX_PATH];
+    FolderItemVerb *verb;
+    IShellDispatch *sd;
+    FolderItem *item;
+    Folder2 *folder2;
+    Folder *folder;
+    HRESULT hr;
+    LONG count, i;
+    VARIANT v;
+    BSTR str;
+
+    hr = CoCreateInstance(&CLSID_Shell, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IShellDispatch, (void**)&sd);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    GetTempPathW(sizeof(pathW)/sizeof(pathW[0]), pathW);
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = SysAllocString(pathW);
+    hr = IShellDispatch_NameSpace(sd, v, &folder);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    VariantClear(&v);
+
+    hr = Folder_QueryInterface(folder, &IID_Folder2, (void**)&folder2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    Folder_Release(folder);
+
+    hr = Folder2_get_Self(folder2, &item);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    Folder2_Release(folder2);
+
+if (0) { /* crashes on some systems */
+    hr = FolderItem_Verbs(item, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+}
+    hr = FolderItem_Verbs(item, &verbs);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+if (0) { /* crashes on winxp/win2k3 */
+    hr = FolderItemVerbs_get_Count(verbs, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+}
+    count = 0;
+    hr = FolderItemVerbs_get_Count(verbs, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count > 0, "got count %d\n", count);
+
+if (0) { /* crashes on winxp/win2k3 */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 0;
+    hr = FolderItemVerbs_Item(verbs, v, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+}
+    /* there's always one item more, so you can access [0,count],
+       instead of actual [0,count) */
+    for (i = 0; i <= count; i++) {
+        V_VT(&v) = VT_I4;
+        V_I4(&v) = i;
+        hr = FolderItemVerbs_Item(verbs, v, &verb);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        hr = FolderItemVerb_get_Name(verb, &str);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(str != NULL, "%d: name %s\n", i, wine_dbgstr_w(str));
+        if (i == count)
+            ok(str[0] == 0, "%d: got teminating item %s\n", i, wine_dbgstr_w(str));
+
+        SysFreeString(str);
+        FolderItemVerb_Release(verb);
+    }
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = count+1;
+    verb = NULL;
+    hr = FolderItemVerbs_Item(verbs, v, &verb);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(verb == NULL, "got %p\n", verb);
+
+    FolderItem_Release(item);
+    IShellDispatch_Release(sd);
+}
+
 START_TEST(shelldispatch)
 {
     HRESULT r;
@@ -644,6 +840,8 @@ START_TEST(shelldispatch)
     test_service();
     test_ShellFolderViewDual();
     test_ShellWindows();
+    test_ParseName();
+    test_Verbs();
 
     CoUninitialize();
 }

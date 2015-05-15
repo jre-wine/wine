@@ -631,6 +631,28 @@ typedef union
     } create_thread;
 } apc_result_t;
 
+typedef union
+{
+    unsigned int         major;
+    struct
+    {
+        unsigned int     major;
+        unsigned int     key;
+        file_pos_t       pos;
+    } read;
+    struct
+    {
+        unsigned int     major;
+        unsigned int     key;
+        file_pos_t       pos;
+    } write;
+    struct
+    {
+        unsigned int     major;
+        ioctl_code_t     code;
+    } ioctl;
+} irp_params_t;
+
 struct rawinput_device
 {
     unsigned short usage_page;
@@ -1398,12 +1420,13 @@ enum server_fd_type
 
 
 
-struct flush_file_request
+struct flush_request
 {
     struct request_header __header;
-    obj_handle_t handle;
+    int            blocking;
+    async_data_t   async;
 };
-struct flush_file_reply
+struct flush_reply
 {
     struct reply_header __header;
     obj_handle_t event;
@@ -3109,6 +3132,42 @@ struct cancel_async_reply
 
 
 
+struct read_request
+{
+    struct request_header __header;
+    int            blocking;
+    async_data_t   async;
+    file_pos_t     pos;
+};
+struct read_reply
+{
+    struct reply_header __header;
+    obj_handle_t   wait;
+    unsigned int   options;
+    /* VARARG(data,bytes); */
+};
+
+
+
+struct write_request
+{
+    struct request_header __header;
+    int            blocking;
+    async_data_t   async;
+    file_pos_t     pos;
+    /* VARARG(data,bytes); */
+};
+struct write_reply
+{
+    struct reply_header __header;
+    obj_handle_t   wait;
+    unsigned int   options;
+    data_size_t    size;
+    char __pad_20[4];
+};
+
+
+
 struct ioctl_request
 {
     struct request_header __header;
@@ -3128,31 +3187,35 @@ struct ioctl_reply
 
 
 
-struct set_ioctl_result_request
+struct set_irp_result_request
 {
     struct request_header __header;
     obj_handle_t manager;
     obj_handle_t handle;
     unsigned int status;
+    data_size_t  size;
     /* VARARG(data,bytes); */
+    char __pad_28[4];
 };
-struct set_ioctl_result_reply
+struct set_irp_result_reply
 {
     struct reply_header __header;
 };
 
 
 
-struct get_ioctl_result_request
+struct get_irp_result_request
 {
     struct request_header __header;
     obj_handle_t   handle;
     client_ptr_t   user_arg;
 };
-struct get_ioctl_result_reply
+struct get_irp_result_reply
 {
     struct reply_header __header;
+    data_size_t    size;
     /* VARARG(out_data,bytes); */
+    char __pad_12[4];
 };
 
 
@@ -4789,19 +4852,19 @@ struct get_next_device_request_request
     obj_handle_t manager;
     obj_handle_t prev;
     unsigned int status;
-    /* VARARG(prev_data,bytes); */
 };
 struct get_next_device_request_reply
 {
     struct reply_header __header;
-    obj_handle_t next;
-    ioctl_code_t code;
     client_ptr_t user_ptr;
+    irp_params_t params;
+    obj_handle_t next;
     process_id_t client_pid;
     thread_id_t  client_tid;
     data_size_t  in_size;
     data_size_t  out_size;
     /* VARARG(next_data,bytes); */
+    char __pad_52[4];
 };
 
 
@@ -5215,7 +5278,7 @@ enum request
     REQ_alloc_file_handle,
     REQ_get_handle_unix_name,
     REQ_get_handle_fd,
-    REQ_flush_file,
+    REQ_flush,
     REQ_lock_file,
     REQ_unlock_file,
     REQ_create_socket,
@@ -5313,9 +5376,11 @@ enum request
     REQ_set_serial_info,
     REQ_register_async,
     REQ_cancel_async,
+    REQ_read,
+    REQ_write,
     REQ_ioctl,
-    REQ_set_ioctl_result,
-    REQ_get_ioctl_result,
+    REQ_set_irp_result,
+    REQ_get_irp_result,
     REQ_create_named_pipe,
     REQ_get_named_pipe_info,
     REQ_set_named_pipe_info,
@@ -5484,7 +5549,7 @@ union generic_request
     struct alloc_file_handle_request alloc_file_handle_request;
     struct get_handle_unix_name_request get_handle_unix_name_request;
     struct get_handle_fd_request get_handle_fd_request;
-    struct flush_file_request flush_file_request;
+    struct flush_request flush_request;
     struct lock_file_request lock_file_request;
     struct unlock_file_request unlock_file_request;
     struct create_socket_request create_socket_request;
@@ -5582,9 +5647,11 @@ union generic_request
     struct set_serial_info_request set_serial_info_request;
     struct register_async_request register_async_request;
     struct cancel_async_request cancel_async_request;
+    struct read_request read_request;
+    struct write_request write_request;
     struct ioctl_request ioctl_request;
-    struct set_ioctl_result_request set_ioctl_result_request;
-    struct get_ioctl_result_request get_ioctl_result_request;
+    struct set_irp_result_request set_irp_result_request;
+    struct get_irp_result_request get_irp_result_request;
     struct create_named_pipe_request create_named_pipe_request;
     struct get_named_pipe_info_request get_named_pipe_info_request;
     struct set_named_pipe_info_request set_named_pipe_info_request;
@@ -5751,7 +5818,7 @@ union generic_reply
     struct alloc_file_handle_reply alloc_file_handle_reply;
     struct get_handle_unix_name_reply get_handle_unix_name_reply;
     struct get_handle_fd_reply get_handle_fd_reply;
-    struct flush_file_reply flush_file_reply;
+    struct flush_reply flush_reply;
     struct lock_file_reply lock_file_reply;
     struct unlock_file_reply unlock_file_reply;
     struct create_socket_reply create_socket_reply;
@@ -5849,9 +5916,11 @@ union generic_reply
     struct set_serial_info_reply set_serial_info_reply;
     struct register_async_reply register_async_reply;
     struct cancel_async_reply cancel_async_reply;
+    struct read_reply read_reply;
+    struct write_reply write_reply;
     struct ioctl_reply ioctl_reply;
-    struct set_ioctl_result_reply set_ioctl_result_reply;
-    struct get_ioctl_result_reply get_ioctl_result_reply;
+    struct set_irp_result_reply set_irp_result_reply;
+    struct get_irp_result_reply get_irp_result_reply;
     struct create_named_pipe_reply create_named_pipe_reply;
     struct get_named_pipe_info_reply get_named_pipe_info_reply;
     struct set_named_pipe_info_reply set_named_pipe_info_reply;
@@ -5972,6 +6041,6 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 469
+#define SERVER_PROTOCOL_VERSION 474
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
