@@ -1,3 +1,15 @@
+wine-development (1.7.43-1) unstable; urgency=medium
+
+  * New upstream release 1.7.43, released May 15, 2015.
+  * - Improved support for Shell Browser windows.
+  * - Some more API Sets libraries.
+  * - Read/write operations support with built-in devices.
+  * - Major Catalan translation update.
+  * - Support for WoW64 mode on ARM64.
+  * - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 15 May 2015 20:55:05 +0000
+
 wine-development (1.7.42-1) unstable; urgency=medium
 
   * New upstream release 1.7.42, released May 1, 2015.
