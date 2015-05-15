@@ -8,7 +8,7 @@ msgstr ""
 "PO-Revision-Date: 2013-10-30 12:44+0100\n"
 "Last-Translator: Volkan Gezer <volkangezer@gmail.com>\n"
 "Language-Team: Turkish <kde-l10n-tr@kde.org>\n"
-"Language: Turkish\n"
+"Language: tr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -8621,6 +8621,12 @@ msgstr "Kağıt &Boyutu:"
 #: wineps.rc:39
 msgid "Duplex:"
 msgstr "Çift Yönlü:"
+
+#: wineps.rc:50
+#, fuzzy
+#| msgid "&Setup"
+msgid "Setup"
+msgstr "&Ayarla"
 
 #: wininet.rc:42 wininet.rc:62
 msgid "Realm"

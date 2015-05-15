@@ -5,10 +5,10 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2015-02-24 19:18+0300\n"
+"PO-Revision-Date: 2015-05-08 14:01+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
-"Language-Team: komp_lt@konf.lt\n"
-"Language: Lithuanian\n"
+"Language-Team: Lithuanian <komp_lt@konf.lt>\n"
+"Language: lt\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -8564,6 +8564,10 @@ msgstr "Popieriaus &dydis:"
 #: wineps.rc:39
 msgid "Duplex:"
 msgstr "Dvigubas:"
+
+#: wineps.rc:50
+msgid "Setup"
+msgstr "Nuostatos"
 
 #: wininet.rc:42 wininet.rc:62
 msgid "Realm"

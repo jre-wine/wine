@@ -3049,6 +3049,7 @@ connect_success:
     _enable_event(SOCKET2HANDLE(s), FD_CONNECT|FD_READ|FD_WRITE,
                   FD_WINE_CONNECTED|FD_READ|FD_WRITE,
                   FD_CONNECT|FD_WINE_LISTENING);
+    TRACE("\tconnected %04lx\n", s);
     return 0;
 }
 
@@ -4773,7 +4774,18 @@ static void release_poll_fds( const WS_fd_set *readfds, const WS_fd_set *writefd
     if (exceptfds)
     {
         for (i = 0; i < exceptfds->fd_count; i++, j++)
-            if (fds[j].fd != -1) release_sock_fd( exceptfds->fd_array[i], fds[j].fd );
+        {
+            if (fds[j].fd == -1) continue;
+            release_sock_fd( exceptfds->fd_array[i], fds[j].fd );
+            if (fds[j].revents & POLLHUP)
+            {
+                int fd = get_sock_fd( exceptfds->fd_array[i], 0, NULL );
+                if (fd != -1)
+                    release_sock_fd( exceptfds->fd_array[i], fd );
+                else
+                    fds[j].revents = 0;
+            }
+        }
     }
 }
 
@@ -6109,7 +6121,7 @@ static struct WS_addrinfoW *addrinfo_AtoW(const struct WS_addrinfo *ai)
     if (ai->ai_canonname)
     {
         int len = MultiByteToWideChar(CP_ACP, 0, ai->ai_canonname, -1, NULL, 0);
-        if (!(ret->ai_canonname = HeapAlloc(GetProcessHeap(), 0, len)))
+        if (!(ret->ai_canonname = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR))))
         {
             HeapFree(GetProcessHeap(), 0, ret);
             return NULL;

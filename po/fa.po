@@ -7,8 +7,8 @@ msgstr ""
 "POT-Creation-Date: N/A\n"
 "PO-Revision-Date: N/A\n"
 "Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
-"Language: Persian\n"
+"Language-Team: Persian\n"
+"Language: fa\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -8551,6 +8551,11 @@ msgstr ""
 #: wineps.rc:39
 msgid "Duplex:"
 msgstr ""
+
+#: wineps.rc:50
+#, fuzzy
+msgid "Setup"
+msgstr "تنظیمات صفحه"
 
 #: wininet.rc:42 wininet.rc:62
 msgid "Realm"

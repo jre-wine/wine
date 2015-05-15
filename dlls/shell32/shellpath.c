@@ -5024,10 +5024,16 @@ static HRESULT WINAPI knownfolder_QueryInterface(
 
     TRACE("%p %s %p\n", This, debugstr_guid( riid ), ppv );
 
+    *ppv = NULL;
     if ( IsEqualGUID( riid, &IID_IKnownFolder ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppv = iface;
+    }
+    else if ( IsEqualGUID( riid, &IID_IMarshal ) )
+    {
+        TRACE("IID_IMarshal returning NULL.\n");
+        return E_NOINTERFACE;
     }
     else
     {
@@ -5103,12 +5109,13 @@ static HRESULT WINAPI knownfolder_GetCategory(
 
 static HRESULT WINAPI knownfolder_GetShellItem(
     IKnownFolder *iface,
-    DWORD dwFlags,
+    DWORD flags,
     REFIID riid,
     void **ppv)
 {
-    FIXME("0x%08x, %s, %p\n", dwFlags, debugstr_guid(riid), ppv);
-    return E_NOTIMPL;
+    struct knownfolder *knownfolder = impl_from_IKnownFolder(iface);
+    TRACE("(%p, 0x%08x, %s, %p)\n", knownfolder, flags, debugstr_guid(riid), ppv);
+    return SHGetKnownFolderItem(&knownfolder->id, flags, NULL, riid, ppv);
 }
 
 static HRESULT get_known_folder_path(
@@ -5275,11 +5282,12 @@ static HRESULT WINAPI knownfolder_SetPath(
 
 static HRESULT WINAPI knownfolder_GetIDList(
     IKnownFolder *iface,
-    DWORD dwFlags,
+    DWORD flags,
     PIDLIST_ABSOLUTE *ppidl)
 {
-    FIXME("0x%08x, %p\n", dwFlags, ppidl);
-    return E_NOTIMPL;
+    struct knownfolder *knownfolder = impl_from_IKnownFolder( iface );
+    TRACE("(%p, 0x%08x, %p)\n", knownfolder, flags, ppidl);
+    return SHGetKnownFolderIDList(&knownfolder->id, flags, NULL, ppidl);
 }
 
 static HRESULT WINAPI knownfolder_GetFolderType(
@@ -5414,10 +5422,16 @@ static HRESULT WINAPI foldermanager_QueryInterface(
 
     TRACE("%p %s %p\n", This, debugstr_guid( riid ), ppv );
 
+    *ppv = NULL;
     if ( IsEqualGUID( riid, &IID_IKnownFolderManager ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
         *ppv = iface;
+    }
+    else if ( IsEqualGUID( riid, &IID_IMarshal ) )
+    {
+        TRACE("IID_IMarshal returning NULL.\n");
+        return E_NOINTERFACE;
     }
     else
     {
@@ -5713,8 +5727,68 @@ HRESULT WINAPI KnownFolderManager_Constructor( IUnknown *punk, REFIID riid, void
 
 HRESULT WINAPI SHGetKnownFolderIDList(REFKNOWNFOLDERID rfid, DWORD flags, HANDLE token, PIDLIST_ABSOLUTE *pidl)
 {
-        FIXME("%s, 0x%08x, %p, %p\n", debugstr_guid(rfid), flags, token, pidl);
-        return E_NOTIMPL;
+    TRACE("%s, 0x%08x, %p, %p\n", debugstr_guid(rfid), flags, token, pidl);
+
+    if (!pidl)
+        return E_INVALIDARG;
+
+    if (flags)
+        FIXME("unsupported flags: 0x%08x\n", flags);
+
+    if (token)
+        FIXME("user token is not used.\n");
+
+    *pidl = NULL;
+    if (IsEqualIID(rfid, &FOLDERID_Desktop))
+        *pidl = _ILCreateDesktop();
+    else if (IsEqualIID(rfid, &FOLDERID_RecycleBinFolder))
+        *pidl = _ILCreateBitBucket();
+    else if (IsEqualIID(rfid, &FOLDERID_ComputerFolder))
+        *pidl = _ILCreateMyComputer();
+    else if (IsEqualIID(rfid, &FOLDERID_PrintersFolder))
+        *pidl = _ILCreatePrinters();
+    else if (IsEqualIID(rfid, &FOLDERID_ControlPanelFolder))
+        *pidl = _ILCreateControlPanel();
+    else if (IsEqualIID(rfid, &FOLDERID_NetworkFolder))
+        *pidl = _ILCreateNetwork();
+    else if (IsEqualIID(rfid, &FOLDERID_Documents))
+        *pidl = _ILCreateMyDocuments();
+    else
+    {
+        DWORD attributes = 0;
+        WCHAR *pathW;
+        HRESULT hr;
+
+        hr = SHGetKnownFolderPath(rfid, flags, token, &pathW);
+        if (FAILED(hr))
+            return hr;
+
+        hr = SHILCreateFromPathW(pathW, pidl, &attributes);
+        CoTaskMemFree(pathW);
+        return hr;
+    }
+
+    return *pidl ? S_OK : E_FAIL;
+}
+
+HRESULT WINAPI SHGetKnownFolderItem(REFKNOWNFOLDERID rfid, KNOWN_FOLDER_FLAG flags, HANDLE hToken,
+    REFIID riid, void **ppv)
+{
+    PIDLIST_ABSOLUTE pidl;
+    HRESULT hr;
+
+    TRACE("%s, 0x%08x, %p, %s, %p\n", debugstr_guid(rfid), flags, hToken, debugstr_guid(riid), ppv);
+
+    hr = SHGetKnownFolderIDList(rfid, flags, hToken, &pidl);
+    if (FAILED(hr))
+    {
+        *ppv = NULL;
+        return hr;
+    }
+
+    hr = SHCreateItemFromIDList(pidl, riid, ppv);
+    CoTaskMemFree(pidl);
+    return hr;
 }
 
 static void register_system_knownfolders(void)

@@ -65,6 +65,66 @@ static int desktop_width, launcher_size, launchers_per_row;
 static struct launcher **launchers;
 static unsigned int nb_launchers, nb_allocated;
 
+static REFIID tid_ids[] =
+{
+    &IID_IShellWindows,
+    &IID_IWebBrowser2
+};
+
+typedef enum
+{
+    IShellWindows_tid,
+    IWebBrowser2_tid,
+    LAST_tid
+} tid_t;
+
+static ITypeLib *typelib;
+static ITypeInfo *typeinfos[LAST_tid];
+
+static HRESULT load_typelib(void)
+{
+    HRESULT hres;
+    ITypeLib *tl;
+
+    hres = LoadRegTypeLib(&LIBID_SHDocVw, 1, 0, LOCALE_SYSTEM_DEFAULT, &tl);
+    if (FAILED(hres))
+    {
+        ERR("LoadRegTypeLib failed: %08x\n", hres);
+        return hres;
+    }
+
+    if (InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
+        ITypeLib_Release(tl);
+    return hres;
+}
+
+static HRESULT get_typeinfo(tid_t tid, ITypeInfo **typeinfo)
+{
+    HRESULT hres;
+
+    if (!typelib)
+        hres = load_typelib();
+    if (!typelib)
+        return hres;
+
+    if (!typeinfos[tid]) {
+        ITypeInfo *ti;
+
+        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &ti);
+        if (FAILED(hres)) {
+            ERR("GetTypeInfoOfGuid(%s) failed: %08x\n", debugstr_guid(tid_ids[tid]), hres);
+            return hres;
+        }
+
+        if (InterlockedCompareExchangePointer((void**)(typeinfos+tid), ti, NULL))
+            ITypeInfo_Release(ti);
+    }
+
+    *typeinfo = typeinfos[tid];
+    ITypeInfo_AddRef(*typeinfo);
+    return S_OK;
+}
+
 struct shellwindows
 {
     IShellWindows IShellWindows_iface;
@@ -79,6 +139,9 @@ struct shellwindows
 struct shellbrowserwindow
 {
     IWebBrowser2 IWebBrowser2_iface;
+    IServiceProvider IServiceProvider_iface;
+    IShellBrowser IShellBrowser_iface;
+    IShellView *view;
 };
 
 static struct shellwindows shellwindows;
@@ -92,6 +155,16 @@ static inline struct shellwindows *impl_from_IShellWindows(IShellWindows *iface)
 static inline struct shellbrowserwindow *impl_from_IWebBrowser2(IWebBrowser2 *iface)
 {
     return CONTAINING_RECORD(iface, struct shellbrowserwindow, IWebBrowser2_iface);
+}
+
+static inline struct shellbrowserwindow *impl_from_IServiceProvider(IServiceProvider *iface)
+{
+    return CONTAINING_RECORD(iface, struct shellbrowserwindow, IServiceProvider_iface);
+}
+
+static inline struct shellbrowserwindow *impl_from_IShellBrowser(IShellBrowser *iface)
+{
+    return CONTAINING_RECORD(iface, struct shellbrowserwindow, IShellBrowser_iface);
 }
 
 static void shellwindows_init(void);
@@ -999,24 +1072,39 @@ static ULONG WINAPI shellwindows_Release(IShellWindows *iface)
 
 static HRESULT WINAPI shellwindows_GetTypeInfoCount(IShellWindows *iface, UINT *pctinfo)
 {
-    FIXME("%p\n", pctinfo);
-    return E_NOTIMPL;
+    TRACE("%p\n", pctinfo);
+    *pctinfo = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI shellwindows_GetTypeInfo(IShellWindows *iface,
         UINT iTInfo, LCID lcid, ITypeInfo **ppTInfo)
 {
-    FIXME("%u 0x%x %p\n", iTInfo, lcid, ppTInfo);
-    return E_NOTIMPL;
+    TRACE("%d %d %p\n", iTInfo, lcid, ppTInfo);
+    return get_typeinfo(IShellWindows_tid, ppTInfo);
 }
 
 static HRESULT WINAPI shellwindows_GetIDsOfNames(IShellWindows *iface,
         REFIID riid, LPOLESTR *rgszNames, UINT cNames, LCID lcid,
         DISPID *rgDispId)
 {
-    FIXME("%s %p %u 0x%x %p\n", debugstr_guid(riid), rgszNames, cNames,
-            lcid, rgDispId);
-    return E_NOTIMPL;
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("%s %p %d %d %p\n", debugstr_guid(riid), rgszNames, cNames,
+          lcid, rgDispId);
+
+    if (!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IShellWindows_tid, &typeinfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI shellwindows_Invoke(IShellWindows *iface,
@@ -1024,9 +1112,21 @@ static HRESULT WINAPI shellwindows_Invoke(IShellWindows *iface,
         DISPPARAMS *pDispParams, VARIANT *pVarResult,
         EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    FIXME("0x%x %s 0x%x 0x%x %p %p %p %p\n", dispIdMember, debugstr_guid(riid),
-        lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
-    return E_NOTIMPL;
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("%d %s %d %08x %p %p %p %p\n", dispIdMember, debugstr_guid(riid),
+            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IShellWindows_tid, &typeinfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI shellwindows_get_Count(IShellWindows *iface, LONG *count)
@@ -1221,6 +1321,10 @@ static HRESULT WINAPI webbrowser_QueryInterface(IWebBrowser2 *iface, REFIID riid
     {
         *ppv = &This->IWebBrowser2_iface;
     }
+    else if (IsEqualGUID(&IID_IServiceProvider, riid))
+    {
+        *ppv = &This->IServiceProvider_iface;
+    }
 
     if (*ppv)
     {
@@ -1246,19 +1350,17 @@ static ULONG WINAPI webbrowser_Release(IWebBrowser2 *iface)
 static HRESULT WINAPI webbrowser_GetTypeInfoCount(IWebBrowser2 *iface, UINT *pctinfo)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-
-    FIXME("(%p)->(%p): stub\n", This, pctinfo);
-
-    *pctinfo = 0;
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", This, pctinfo);
+    *pctinfo = 1;
+    return S_OK;
 }
 
 static HRESULT WINAPI webbrowser_GetTypeInfo(IWebBrowser2 *iface, UINT iTInfo, LCID lcid,
                                      LPTYPEINFO *ppTInfo)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%d %d %p): stub\n", This, iTInfo, lcid, ppTInfo);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%d %d %p)\n", This, iTInfo, lcid, ppTInfo);
+    return get_typeinfo(IWebBrowser2_tid, ppTInfo);
 }
 
 static HRESULT WINAPI webbrowser_GetIDsOfNames(IWebBrowser2 *iface, REFIID riid,
@@ -1266,20 +1368,46 @@ static HRESULT WINAPI webbrowser_GetIDsOfNames(IWebBrowser2 *iface, REFIID riid,
                                        LCID lcid, DISPID *rgDispId)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%s %p %d %d %p): stub\n", This, debugstr_guid(riid), rgszNames, cNames,
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s %p %d %d %p)\n", This, debugstr_guid(riid), rgszNames, cNames,
           lcid, rgDispId);
-    return E_NOTIMPL;
+
+    if(!rgszNames || cNames == 0 || !rgDispId)
+        return E_INVALIDARG;
+
+    hr = get_typeinfo(IWebBrowser2_tid, &typeinfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_GetIDsOfNames(typeinfo, rgszNames, cNames, rgDispId);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI webbrowser_Invoke(IWebBrowser2 *iface, DISPID dispIdMember,
                                 REFIID riid, LCID lcid, WORD wFlags,
                                 DISPPARAMS *pDispParams, VARIANT *pVarResult,
-                                EXCEPINFO *pExepInfo, UINT *puArgErr)
+                                EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%d %s %d %08x %p %p %p %p): stub\n", This, dispIdMember, debugstr_guid(riid),
-            lcid, wFlags, pDispParams, pVarResult, pExepInfo, puArgErr);
-    return E_NOTIMPL;
+    ITypeInfo *typeinfo;
+    HRESULT hr;
+
+    TRACE("(%p)->(%d %s %d %08x %p %p %p %p)\n", This, dispIdMember, debugstr_guid(riid),
+            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
+
+    hr = get_typeinfo(IWebBrowser2_tid, &typeinfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = ITypeInfo_Invoke(typeinfo, &This->IWebBrowser2_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
+        ITypeInfo_Release(typeinfo);
+    }
+
+    return hr;
 }
 
 /* IWebBrowser methods */
@@ -1346,8 +1474,13 @@ static HRESULT WINAPI webbrowser_Stop(IWebBrowser2 *iface)
 static HRESULT WINAPI webbrowser_get_Application(IWebBrowser2 *iface, IDispatch **ppDisp)
 {
     struct shellbrowserwindow *This = impl_from_IWebBrowser2(iface);
-    FIXME("(%p)->(%p)\n", This, ppDisp);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, ppDisp);
+
+    *ppDisp = (IDispatch*)iface;
+    IDispatch_AddRef(*ppDisp);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI webbrowser_get_Parent(IWebBrowser2 *iface, IDispatch **ppDisp)
@@ -1819,9 +1952,211 @@ static const IWebBrowser2Vtbl webbrowser2vtbl =
     webbrowser_put_Resizable
 };
 
+static HRESULT WINAPI serviceprovider_QueryInterface(IServiceProvider *iface, REFIID riid, void **ppv)
+{
+    struct shellbrowserwindow *This = impl_from_IServiceProvider(iface);
+    return IWebBrowser2_QueryInterface(&This->IWebBrowser2_iface, riid, ppv);
+}
+
+static ULONG WINAPI serviceprovider_AddRef(IServiceProvider *iface)
+{
+    struct shellbrowserwindow *This = impl_from_IServiceProvider(iface);
+    return IWebBrowser2_AddRef(&This->IWebBrowser2_iface);
+}
+
+static ULONG WINAPI serviceprovider_Release(IServiceProvider *iface)
+{
+    struct shellbrowserwindow *This = impl_from_IServiceProvider(iface);
+    return IWebBrowser2_Release(&This->IWebBrowser2_iface);
+}
+
+static HRESULT WINAPI serviceprovider_QueryService(IServiceProvider *iface, REFGUID service,
+    REFIID riid, void **ppv)
+{
+    struct shellbrowserwindow *This = impl_from_IServiceProvider(iface);
+
+    TRACE("%s %s %p\n", debugstr_guid(service), debugstr_guid(riid), ppv);
+
+    if (IsEqualGUID(service, &SID_STopLevelBrowser))
+        return IShellBrowser_QueryInterface(&This->IShellBrowser_iface, riid, ppv);
+
+    WARN("unknown service id %s\n", debugstr_guid(service));
+    return E_NOTIMPL;
+}
+
+static const IServiceProviderVtbl serviceprovidervtbl =
+{
+    serviceprovider_QueryInterface,
+    serviceprovider_AddRef,
+    serviceprovider_Release,
+    serviceprovider_QueryService
+};
+
+/* IShellBrowser */
+static HRESULT WINAPI shellbrowser_QueryInterface(IShellBrowser *iface, REFIID riid, void **ppv)
+{
+    TRACE("%s %p\n", debugstr_guid(riid), ppv);
+
+    *ppv = NULL;
+
+    if (IsEqualGUID(&IID_IShellBrowser, riid) ||
+        IsEqualGUID(&IID_IOleWindow, riid) ||
+        IsEqualGUID(&IID_IUnknown, riid))
+    {
+        *ppv = iface;
+    }
+
+    if (*ppv)
+    {
+        IUnknown_AddRef((IUnknown*)*ppv);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI shellbrowser_AddRef(IShellBrowser *iface)
+{
+    struct shellbrowserwindow *This = impl_from_IShellBrowser(iface);
+    return IWebBrowser2_AddRef(&This->IWebBrowser2_iface);
+}
+
+static ULONG WINAPI shellbrowser_Release(IShellBrowser *iface)
+{
+    struct shellbrowserwindow *This = impl_from_IShellBrowser(iface);
+    return IWebBrowser2_Release(&This->IWebBrowser2_iface);
+}
+
+static HRESULT WINAPI shellbrowser_GetWindow(IShellBrowser *iface, HWND *phwnd)
+{
+    FIXME("%p\n", phwnd);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_ContextSensitiveHelp(IShellBrowser *iface, BOOL mode)
+{
+    FIXME("%d\n", mode);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_InsertMenusSB(IShellBrowser *iface, HMENU hmenuShared,
+    OLEMENUGROUPWIDTHS *menuwidths)
+{
+    FIXME("%p %p\n", hmenuShared, menuwidths);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_SetMenuSB(IShellBrowser *iface, HMENU hmenuShared,
+    HOLEMENU holemenuReserved, HWND hwndActiveObject)
+{
+    FIXME("%p %p %p\n", hmenuShared, holemenuReserved, hwndActiveObject);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_RemoveMenusSB(IShellBrowser *iface, HMENU hmenuShared)
+{
+    FIXME("%p\n", hmenuShared);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_SetStatusTextSB(IShellBrowser *iface, LPCOLESTR text)
+{
+    FIXME("%s\n", debugstr_w(text));
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_EnableModelessSB(IShellBrowser *iface, BOOL enable)
+{
+    FIXME("%d\n", enable);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_TranslateAcceleratorSB(IShellBrowser *iface, MSG *pmsg, WORD wID)
+{
+    FIXME("%p 0x%x\n", pmsg, wID);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_BrowseObject(IShellBrowser *iface, LPCITEMIDLIST pidl, UINT flags)
+{
+    FIXME("%p %x\n", pidl, flags);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_GetViewStateStream(IShellBrowser *iface, DWORD mode, IStream **stream)
+{
+    FIXME("0x%x %p\n", mode, stream);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_GetControlWindow(IShellBrowser *iface, UINT id, HWND *phwnd)
+{
+    FIXME("%d %p\n", id, phwnd);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_SendControlMsg(IShellBrowser *iface, UINT id, UINT uMsg,
+    WPARAM wParam, LPARAM lParam, LRESULT *pret)
+{
+    FIXME("%d %d %lx %lx %p\n", id, uMsg, wParam, lParam, pret);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_QueryActiveShellView(IShellBrowser *iface, IShellView **view)
+{
+    TRACE("%p\n", view);
+
+    *view = desktopshellbrowserwindow.view;
+    IShellView_AddRef(*view);
+    return S_OK;
+}
+
+static HRESULT WINAPI shellbrowser_OnViewWindowActive(IShellBrowser *iface, IShellView *view)
+{
+    FIXME("%p\n", view);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI shellbrowser_SetToolbarItems(IShellBrowser *iface, LPTBBUTTONSB buttons,
+    UINT count, UINT flags)
+{
+    FIXME("%p %d 0x%x\n", buttons, count, flags);
+    return E_NOTIMPL;
+}
+
+static const IShellBrowserVtbl shellbrowservtbl = {
+    shellbrowser_QueryInterface,
+    shellbrowser_AddRef,
+    shellbrowser_Release,
+    shellbrowser_GetWindow,
+    shellbrowser_ContextSensitiveHelp,
+    shellbrowser_InsertMenusSB,
+    shellbrowser_SetMenuSB,
+    shellbrowser_RemoveMenusSB,
+    shellbrowser_SetStatusTextSB,
+    shellbrowser_EnableModelessSB,
+    shellbrowser_TranslateAcceleratorSB,
+    shellbrowser_BrowseObject,
+    shellbrowser_GetViewStateStream,
+    shellbrowser_GetControlWindow,
+    shellbrowser_SendControlMsg,
+    shellbrowser_QueryActiveShellView,
+    shellbrowser_OnViewWindowActive,
+    shellbrowser_SetToolbarItems
+};
+
 static void desktopshellbrowserwindow_init(void)
 {
+    IShellFolder *folder;
+
     desktopshellbrowserwindow.IWebBrowser2_iface.lpVtbl = &webbrowser2vtbl;
+    desktopshellbrowserwindow.IServiceProvider_iface.lpVtbl = &serviceprovidervtbl;
+    desktopshellbrowserwindow.IShellBrowser_iface.lpVtbl = &shellbrowservtbl;
+
+    if (FAILED(SHGetDesktopFolder(&folder)))
+        return;
+
+    IShellFolder_CreateViewObject(folder, NULL, &IID_IShellView, (void**)&desktopshellbrowserwindow.view);
 }
 
 static void shellwindows_init(void)

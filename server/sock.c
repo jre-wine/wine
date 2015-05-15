@@ -120,7 +120,6 @@ struct sock
 };
 
 static void sock_dump( struct object *obj, int verbose );
-static int sock_add_ifchange( struct sock *sock, const async_data_t *async_data );
 static int sock_signaled( struct object *obj, struct wait_queue_entry *entry );
 static struct fd *sock_get_fd( struct object *obj );
 static void sock_destroy( struct object *obj );
@@ -130,11 +129,10 @@ static void sock_destroy_ifchange_q( struct sock *sock );
 static int sock_get_poll_events( struct fd *fd );
 static void sock_poll_event( struct fd *fd, int event );
 static enum server_fd_type sock_get_fd_type( struct fd *fd );
-static obj_handle_t sock_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                                int blocking, const void *data, data_size_t size );
+static obj_handle_t sock_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async, int blocking );
 static void sock_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue );
-static void sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb );
+static int sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb );
 
 static int sock_get_ntstatus( int err );
 static int sock_get_error( int err );
@@ -164,8 +162,10 @@ static const struct fd_ops sock_fd_ops =
 {
     sock_get_poll_events,         /* get_poll_events */
     sock_poll_event,              /* poll_event */
-    no_flush,                     /* flush */
     sock_get_fd_type,             /* get_fd_type */
+    no_fd_read,                   /* read */
+    no_fd_write,                  /* write */
+    no_fd_flush,                  /* flush */
     sock_ioctl,                   /* ioctl */
     sock_queue_async,             /* queue_async */
     sock_reselect_async,          /* reselect_async */
@@ -534,30 +534,23 @@ static enum server_fd_type sock_get_fd_type( struct fd *fd )
     return FD_TYPE_SOCKET;
 }
 
-obj_handle_t sock_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                         int blocking, const void *data, data_size_t size )
+obj_handle_t sock_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data, int blocking )
 {
     struct sock *sock = get_fd_user( fd );
     obj_handle_t wait_handle = 0;
-    async_data_t new_data;
+    struct async_queue *ifchange_q;
+    struct async *async;
 
     assert( sock->obj.ops == &sock_ops );
 
     switch(code)
     {
     case WS_SIO_ADDRESS_LIST_CHANGE:
-        if (blocking)
-        {
-            if (!(wait_handle = alloc_wait_event( current->process ))) return 0;
-            new_data = *async_data;
-            new_data.event = wait_handle;
-            async_data = &new_data;
-        }
-        if (!sock_add_ifchange( sock, async_data ) && wait_handle)
-        {
-            close_handle( current->process, wait_handle );
-            return 0;
-        }
+        if (!(ifchange_q = sock_get_ifchange_q( sock ))) return 0;
+        if (!(async = create_async( current, ifchange_q, async_data ))) return 0;
+        if (blocking) wait_handle = alloc_handle( current->process, async, SYNCHRONIZE, 0 );
+        release_object( async );
+        set_error( STATUS_PENDING );
         return wait_handle;
     default:
         set_error( STATUS_NOT_SUPPORTED );
@@ -609,16 +602,17 @@ static void sock_reselect_async( struct fd *fd, struct async_queue *queue )
     sock_reselect( sock );
 }
 
-static void sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb )
+static int sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb )
 {
     struct sock *sock = get_fd_user( fd );
     int n = 0;
+
     assert( sock->obj.ops == &sock_ops );
 
     n += async_wake_up_by( sock->read_q, process, thread, iosb, STATUS_CANCELLED );
     n += async_wake_up_by( sock->write_q, process, thread, iosb, STATUS_CANCELLED );
-    if (!n && iosb)
-        set_error( STATUS_NOT_FOUND );
+    n += async_wake_up_by( sock->ifchange_q, process, thread, iosb, STATUS_CANCELLED );
+    return n;
 }
 
 static struct fd *sock_get_fd( struct object *obj )
@@ -961,29 +955,6 @@ static void sock_set_error(void)
     set_error( sock_get_ntstatus( errno ) );
 }
 
-/* add interface change notification to a socket */
-static int sock_add_ifchange( struct sock *sock, const async_data_t *async_data )
-{
-    struct async_queue *ifchange_q;
-    struct async *async;
-
-    if (!(ifchange_q = sock_get_ifchange_q( sock )))
-        return 0;
-
-    if (!(async = create_async( current, ifchange_q, async_data )))
-    {
-        if (!async_queued( ifchange_q ))
-            sock_destroy_ifchange_q( sock );
-
-        set_error( STATUS_NO_MEMORY );
-        return 0;
-    }
-
-    release_object( async );
-    set_error( STATUS_PENDING );
-    return 1;
-}
-
 #ifdef HAVE_LINUX_RTNETLINK_H
 
 /* only keep one ifchange object around, all sockets waiting for wakeups will look to it */
@@ -1028,9 +999,11 @@ static const struct fd_ops ifchange_fd_ops =
 {
     ifchange_get_poll_events, /* get_poll_events */
     ifchange_poll_event,      /* poll_event */
-    NULL,                     /* flush */
     NULL,                     /* get_fd_type */
-    NULL,                     /* ioctl */
+    no_fd_read,               /* read */
+    no_fd_write,              /* write */
+    no_fd_flush,              /* flush */
+    no_fd_ioctl,              /* ioctl */
     NULL,                     /* queue_async */
     ifchange_reselect_async,  /* reselect_async */
     NULL                      /* cancel_async */
@@ -1201,7 +1174,7 @@ static struct async_queue *sock_get_ifchange_q( struct sock *sock )
         return NULL;
 
     /* create the ifchange notification queue */
-    fd = ifchange->ops->get_fd( ifchange );
+    fd = get_obj_fd( ifchange );
     sock->ifchange_q = create_async_queue( fd );
     release_object( fd );
     if (!sock->ifchange_q)

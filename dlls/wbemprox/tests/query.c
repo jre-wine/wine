@@ -158,7 +158,7 @@ static void test_Win32_Service( IWbemServices *services )
     if (hr != S_OK)
     {
         win_skip( "Win32_Service not available\n" );
-        return;
+        goto out;
     }
     type = 0xdeadbeef;
     VariantInit( &state );
@@ -232,6 +232,7 @@ static void test_Win32_Service( IWbemServices *services )
     ok( hr == S_OK, "got %08x\n", hr );
     if (service) IWbemClassObject_Release( service );
 
+out:
     SysFreeString( empty );
     SysFreeString( class );
 }
@@ -373,17 +374,17 @@ static void test_Win32_ComputerSystem( IWbemServices *services )
     if (!compname[0] || !username[0])
     {
         skip( "Failed to get user or computer name\n" );
-        return;
+        goto out;
     }
 
     hr = IWbemServices_ExecQuery( services, wql, query, 0, NULL, &result );
     if (hr != S_OK)
     {
         win_skip( "Win32_ComputerSystem not available\n" );
-        return;
+        goto out;
     }
 
-    IEnumWbemClassObject_Next( result, 10000, 1, &service, &count );
+    hr = IEnumWbemClassObject_Next( result, 10000, 1, &service, &count );
     ok( hr == S_OK, "got %08x\n", hr );
 
     type = 0xdeadbeef;
@@ -406,6 +407,7 @@ static void test_Win32_ComputerSystem( IWbemServices *services )
 
     IWbemClassObject_Release( service );
     IEnumWbemClassObject_Release( result );
+out:
     SysFreeString( query );
     SysFreeString( wql );
 }

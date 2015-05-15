@@ -647,6 +647,28 @@ typedef union
     } create_thread;
 } apc_result_t;
 
+typedef union
+{
+    unsigned int         major;     /* irp major function */
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_READ */
+        unsigned int     key;       /* driver key */
+        file_pos_t       pos;       /* file position */
+    } read;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_WRITE */
+        unsigned int     key;       /* driver key */
+        file_pos_t       pos;       /* file position */
+    } write;
+    struct
+    {
+        unsigned int     major;     /* IRP_MJ_DEVICE_CONTROL */
+        ioctl_code_t     code;      /* ioctl code */
+    } ioctl;
+} irp_params_t;
+
 struct rawinput_device
 {
     unsigned short usage_page;
@@ -1149,8 +1171,9 @@ enum server_fd_type
 
 
 /* Flush a file buffers */
-@REQ(flush_file)
-    obj_handle_t handle;        /* handle to the file */
+@REQ(flush)
+    int            blocking;    /* whether it's a blocking flush */
+    async_data_t   async;       /* async I/O parameters */
 @REPLY
     obj_handle_t event;         /* event set when finished */
 @END
@@ -2249,6 +2272,31 @@ enum message_type
 @END
 
 
+/* Perform a read on a file object */
+@REQ(read)
+    int            blocking;      /* whether it's a blocking read */
+    async_data_t   async;         /* async I/O parameters */
+    file_pos_t     pos;           /* read position */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking read */
+    unsigned int   options;       /* device open options */
+    VARARG(data,bytes);           /* read data */
+@END
+
+
+/* Perform a write on a file object */
+@REQ(write)
+    int            blocking;      /* whether it's a blocking write */
+    async_data_t   async;         /* async I/O parameters */
+    file_pos_t     pos;           /* write position */
+    VARARG(data,bytes);           /* write data */
+@REPLY
+    obj_handle_t   wait;          /* handle to wait on for blocking write */
+    unsigned int   options;       /* device open options */
+    data_size_t    size;          /* size written */
+@END
+
+
 /* Perform an ioctl on a file */
 @REQ(ioctl)
     ioctl_code_t   code;          /* ioctl code */
@@ -2262,21 +2310,23 @@ enum message_type
 @END
 
 
-/* Store results of an async ioctl */
-@REQ(set_ioctl_result)
+/* Store results of an async irp */
+@REQ(set_irp_result)
     obj_handle_t manager;         /* handle to the device manager */
-    obj_handle_t handle;          /* handle to the ioctl */
-    unsigned int status;          /* status of the ioctl */
-    VARARG(data,bytes);           /* output data of the ioctl */
+    obj_handle_t handle;          /* handle to the irp */
+    unsigned int status;          /* status of the irp */
+    data_size_t  size;            /* result size (input or output depending on the operation) */
+    VARARG(data,bytes);           /* output data of the irp */
 @END
 
 
-/* Retrieve results of an async ioctl */
-@REQ(get_ioctl_result)
+/* Retrieve results of an async irp */
+@REQ(get_irp_result)
     obj_handle_t   handle;        /* handle to the device */
     client_ptr_t   user_arg;      /* user arg used to identify the request */
 @REPLY
-    VARARG(out_data,bytes);       /* ioctl output data */
+    data_size_t    size;          /* result size (input or output depending on the operation) */
+    VARARG(out_data,bytes);       /* irp output data */
 @END
 
 
@@ -3323,21 +3373,20 @@ enum coords_relative
 @END
 
 
-/* Retrieve the next pending device ioctl request */
+/* Retrieve the next pending device irp request */
 @REQ(get_next_device_request)
     obj_handle_t manager;         /* handle to the device manager */
-    obj_handle_t prev;            /* handle to the previous ioctl */
-    unsigned int status;          /* status of the previous ioctl */
-    VARARG(prev_data,bytes);      /* output data of the previous ioctl */
+    obj_handle_t prev;            /* handle to the previous irp */
+    unsigned int status;          /* status of the previous irp */
 @REPLY
-    obj_handle_t next;            /* handle to the next ioctl */
-    ioctl_code_t code;            /* ioctl code */
     client_ptr_t user_ptr;        /* opaque ptr for the device */
-    process_id_t client_pid;      /* pid of process calling ioctl */
-    thread_id_t  client_tid;      /* tid of thread calling ioctl */
+    irp_params_t params;          /* irp parameters */
+    obj_handle_t next;            /* handle to the next irp */
+    process_id_t client_pid;      /* pid of process calling irp */
+    thread_id_t  client_tid;      /* tid of thread calling irp */
     data_size_t  in_size;         /* total needed input size */
     data_size_t  out_size;        /* needed output size */
-    VARARG(next_data,bytes);      /* input data of the next ioctl */
+    VARARG(next_data,bytes);      /* input data of the next irp */
 @END
 
 
