@@ -30,11 +30,12 @@ Build-Depends:
  dctrl-tools,
  freeglut3-dev,
  dh-autoreconf,
- libpng-dev,
  libssl-dev,
  libxml2-dev,
  libgsm1-dev,
  libjpeg-dev,
+ libpng12-dev,
+ libtiff5-dev,
  liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,
@@ -52,7 +53,6 @@ Build-Depends:
  freebsd-glue [kfreebsd-any],
  prelink [linux-any],
  libosmesa6-dev,
- libgstreamer-plugins-base0.10-dev,
 Standards-Version: 3.9.6
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
@@ -262,6 +262,9 @@ Multi-Arch: same
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
+ libtiff5,
+ libpng12-0,
+ libjpeg62-turbo,
 Recommends:
  ${shlibs:Recommends},
  fonts-liberation,

@@ -1,3 +1,11 @@
+wine (1.6.2-21) unstable; urgency=medium
+
+  * Build without gstreamer (closes: #785889).
+  * Add missing dependencies to libwine (closes: #783812).
+  * Add libtiff5-dev to the build-dependencies (closes: #783814).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 22 May 2015 02:52:50 +0000
+
 wine (1.6.2-20) unstable; urgency=medium
 
   * Recommend libasound2-plugins (closes: #779002).

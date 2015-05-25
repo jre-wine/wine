@@ -24,6 +24,7 @@ CONFLAGS=--without-hal \
 	 --without-sane \
 	 --without-capi \
 	 --without-gphoto \
+	 --without-gstreamer \
 	 --disable-tests \
 	 --prefix=$(DATADIR) \
 	 --libdir=/$(LIBDIR) \
