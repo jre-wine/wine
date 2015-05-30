@@ -1,3 +1,10 @@
+wine (1.6.2-22) unstable; urgency=medium
+
+  * Move fonts into an architecture-independent package (closes: #786519).
+  * Also make the wine package architecture-independent.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 30 May 2015 20:25:10 +0000
+
 wine (1.6.2-21) unstable; urgency=medium
 
   * Build without gstreamer (closes: #785889).

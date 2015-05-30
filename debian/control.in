@@ -59,7 +59,8 @@ Vcs-Browser: http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wine
-Architecture: any-amd64 any-i386 any-powerpc
+Architecture: all
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  file,
@@ -217,6 +218,20 @@ Description: Windows API implementation - 64-bit developer tools
  .
  This package provides wine's 64-bit developer tools.
 
+Package: fonts-wine
+Section: fonts
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ ${misc:Depends},
+Replaces:
+ libwine (<< 1.6.2-21),
+Description: Windows API implementation - fonts
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides the fonts used by wine.
+
 Package: libwine-dev
 Architecture: amd64 any-i386 any-powerpc
 Section: libdevel
@@ -268,6 +283,7 @@ Depends:
 Recommends:
  ${shlibs:Recommends},
  fonts-liberation,
+ fonts-wine,
  libxcursor1,
 Suggests:
  cups-bsd,
